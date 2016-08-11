@@ -1,0 +1,269 @@
+#! /usr/bin/python
+# Copyright (C) 2016 Nicira, Inc.
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at:
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+import argparse
+import ast
+import json
+import os
+import re
+import shlex
+import sys
+import time
+
+import ovs.vlog
+from ovn_k8s.common import kubernetes
+from ovn_k8s.common.util import ovs_vsctl
+from ovn_k8s.common.util import call_popen
+
+vlog = ovs.vlog.Vlog("ovn-k8s-cni-overlay")
+
+LOGFILE = "/var/log/openvswitch/ovn-k8s-cni-overlay.log"
+CNI_VERSION = "0.1.0"
+DEBUG = True
+
+
+class OVNCNIException(Exception):
+
+    def __init__(self, code, message, details=None):
+        super(OVNCNIException, self).__init__("%s - %s" % (code, message))
+        self._code = code
+        self._msg = message
+        self._details = details
+
+    def cni_error(self):
+        error_data = {'cniVersion': CNI_VERSION,
+                      'code': self._code,
+                      'message': self._msg}
+        if self._details:
+            error_data['details'] = self._details
+        return json.dumps(error_data)
+
+
+def setup_interface(pid, container_id, cni_ifname, mac_address,
+                    ip_address, gateway_ip):
+    try:
+        if not os.path.exists("/var/run/netns"):
+            os.makedirs("/var/run/netns")
+    except Exception as e:
+        vlog.warn("failed to create netns directory" % str(e))
+        raise OVNCNIException(100, "failure in creation of netns directory")
+
+    try:
+        vlog.dbg("Creating veth pair for container %s" % container_id)
+        veth_outside = container_id[:15]
+        veth_inside = container_id[:13] + "_c"
+        command = "ip link add %s type veth peer name %s" \
+                  % (veth_outside, veth_inside)
+        call_popen(shlex.split(command))
+    except Exception as e:
+        vlog.warn("failed to create veth pairs")
+        raise OVNCNIException(100, "failed to create veth pair")
+
+    try:
+        # Up the outer interface
+        vlog.dbg("Bringing up veth outer interface %s" % veth_outside)
+        command = "ip link set %s up" % veth_outside
+        call_popen(shlex.split(command))
+
+        # Create a link for the container namespace
+        vlog.dbg("Create a link for container namespace")
+        netns_dst = "/var/run/netns/%s" % pid
+        if not os.path.isfile(netns_dst):
+            netns_src = "/proc/%s/ns/net" % pid
+            command = "ln -s %s %s" % (netns_src, netns_dst)
+            call_popen(shlex.split(command))
+
+        # Move the inner veth inside the container namespace
+        vlog.dbg("Adding veth inner interface to namespace for container %s"
+                 % container_id)
+        command = "ip link set %s netns %s" % (veth_inside, pid)
+        call_popen(shlex.split(command))
+
+        # Change the name of veth_inside to $cni_ifname
+        vlog.dbg("Renaming veth inner interface '%s' to '%s'"
+                 % (veth_inside, cni_ifname))
+        command = "ip netns exec %s ip link set dev %s name %s" \
+                  % (pid, veth_inside, cni_ifname)
+        call_popen(shlex.split(command))
+
+        # Up the inner interface
+        vlog.dbg("Bringing veth inner interface '%s' up" % cni_ifname)
+        command = "ip netns exec %s ip link set %s up" % (pid, cni_ifname)
+        call_popen(shlex.split(command))
+
+        # Set the mtu to handle tunnels
+        vlog.dbg("Adjusting veth interface '%s' MTU for tunneling to %d"
+                 % (cni_ifname, 1440))
+        command = "ip netns exec %s ip link set dev %s mtu %s" \
+                  % (pid, cni_ifname, 1450)
+        call_popen(shlex.split(command))
+
+        # Set the ip address
+        vlog.dbg("Setting IP address for container:%s interface:%s"
+                 % (container_id, cni_ifname))
+        command = "ip netns exec %s ip addr add %s dev %s" \
+                  % (pid, ip_address, cni_ifname)
+        call_popen(shlex.split(command))
+
+        # Set the mac address
+        vlog.dbg("Setting MAC address for container:%s interface:%s"
+                 % (container_id, cni_ifname))
+        command = "ip netns exec %s ip link set dev %s address %s" \
+                  % (pid, cni_ifname, mac_address)
+        call_popen(shlex.split(command))
+
+        # Set the gateway
+        vlog.dbg("Setting gateway_ip %s for container:%s"
+                 % (gateway_ip, container_id))
+        command = "ip netns exec %s ip route add default via %s" \
+                  % (pid, gateway_ip)
+        call_popen(shlex.split(command))
+
+        return veth_outside
+    except Exception as e:
+        vlog.warn("Failed to setup veth pair for pod" % str(e))
+        command = "ip link delete %s" % (veth_outside)
+        call_popen(shlex.split(command))
+        raise OVNCNIException(100, "veth setup failure")
+
+
+def cni_add(cni_ifname, cni_netns, namespace, pod_name, container_id):
+    k8s_api_server = ovs_vsctl("--if-exists", "get", "Open_vSwitch", ".",
+                               "external_ids:k8s-api-server").strip('"')
+    if not k8s_api_server:
+        raise OVNCNIException(100, "failed to get K8S_API_SERVER")
+
+    pid_match = re.match("^/proc/(.\d*)/ns/net$", cni_netns)
+    if not pid_match:
+        raise OVNCNIException(100,
+                              "unable to extract container pid from namespace")
+    pid = pid_match.groups()[0]
+
+    # Get the IP address and MAC address from the API server.
+    # Wait for a maximum of 3 seconds with a retry every 0.1 second.
+    counter = 30
+    ip_address = ""
+    mac_address = ""
+    while counter != 0:
+        try:
+            annotation = kubernetes.get_pod_annotations(k8s_api_server,
+                                                        namespace,
+                                                        pod_name)
+        except Exception as e:
+            vlog.err("failed to get pod annotation: %s" % (str(e)))
+
+        if annotation and annotation.get('ovn'):
+            break
+
+        counter = counter - 1
+        time.sleep(0.1)
+
+    if not annotation:
+        raise OVNCNIException(100, "failed to get pod annotation")
+
+    try:
+        ovn_annotated_dict = ast.literal_eval(annotation['ovn'])
+        ip_address = ovn_annotated_dict['ip_address']
+        mac_address = ovn_annotated_dict['mac_address']
+        gateway_ip = ovn_annotated_dict['gateway_ip']
+    except Exception as e:
+        OVNCNIException(100, "failed in pod annotation key extract")
+
+    veth_outside = setup_interface(pid, container_id, cni_ifname,
+                                   mac_address, ip_address,
+                                   gateway_ip)
+
+    iface_id = "%s_%s" % (namespace, pod_name)
+
+    try:
+        ovs_vsctl('add-port', 'br-int', veth_outside, '--', 'set',
+                  'interface', veth_outside,
+                  'external_ids:attached_mac=%s' % mac_address,
+                  'external_ids:iface-id=%s' % iface_id,
+                  'external_ids:ip_address=%s' % ip_address)
+    except Exception:
+        vlog.err("Unable to plug interface into OVN bridge")
+        raise OVNCNIException(106, "failure in plugging pod interface")
+
+    print(json.dumps({'ip_address': ip_address,
+          'gateway_ip': gateway_ip, 'mac_address': mac_address}))
+
+
+def cni_del(cni_netns, container_id):
+    try:
+        ovs_vsctl("del-port", container_id[:15])
+    except Exception:
+        message = "failed to delete OVS port %s" % container_id[:15]
+        vlog.err(message)
+
+    pid_match = re.match("^/proc/(.\d*)/ns/net$", cni_netns)
+    if not pid_match:
+        raise OVNCNIException(100,
+                              "unable to extract container pid from namespace")
+    pid = pid_match.groups()[0]
+    command = "rm -f /var/run/netns/%s" % pid
+    call_popen(shlex.split(command))
+
+
+def main():
+    parser = argparse.ArgumentParser()
+    ovs.vlog.add_args(parser)
+
+    if DEBUG:
+        args = parser.parse_args(['--log-file', LOGFILE, '-vfile:dbg'])
+    else:
+        args = parser.parse_args(['--log-file', LOGFILE])
+    ovs.vlog.handle_args(args)
+
+    try:
+        cni_command = os.environ['CNI_COMMAND']
+        cni_ifname = os.environ['CNI_IFNAME']
+        cni_netns = os.environ['CNI_NETNS']
+        cni_args = os.environ['CNI_ARGS']
+
+        cni_args_dict = dict(i.split("=") for i in cni_args.split(";"))
+        namespace = cni_args_dict['K8S_POD_NAMESPACE']
+        pod_name = cni_args_dict['K8S_POD_NAME']
+        container_id = cni_args_dict['K8S_POD_INFRA_CONTAINER_ID']
+    except Exception as e:
+        raise OVNCNIException(100, 'required CNI variables missing', str(e))
+
+    vlog.dbg("plugin invoked with "
+             "cni_command = %s "
+             "cni_container_id = %s "
+             "cni_ifname = %s "
+             "cni_netns = %s "
+             "cni_args = %s"
+             % (cni_command, container_id, cni_ifname, cni_netns,
+                cni_args))
+
+    if cni_command == "ADD":
+        cni_add(cni_ifname, cni_netns, namespace, pod_name, container_id)
+    elif cni_command == "DEL":
+        cni_del(cni_netns, container_id)
+
+
+if __name__ == '__main__':
+    try:
+        main()
+    except OVNCNIException as e:
+        print(e.cni_error())
+        sys.exit(1)
+    except Exception as e:
+        error = {'cniVersion': CNI_VERSION, 'code': 100,
+                 'message': str(e)}
+        vlog.emer("Unexpected exception %s" % str(e))
+        print(json.dumps(error))
+        sys.exit(1)
