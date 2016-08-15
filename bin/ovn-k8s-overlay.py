@@ -1,0 +1,427 @@
+#! /usr/bin/python
+# Copyright (C) 2016 Nicira, Inc.
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at:
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+import argparse
+import json
+import netaddr
+import os
+import shlex
+import sys
+
+import ovn_k8s.common.util as util
+from ovn_k8s.common.util import ovs_vsctl
+from ovn_k8s.common.util import ovn_nbctl
+from ovn_k8s.common import variables
+
+CNI_CONF_PATH = "/usr/libexec/kubernetes/kubelet-plugins/net/exec"
+CNI_LINK_PATH = "/opt/cni/bin/"
+CNI_PLUGIN = "/usr/sbin/ovn-k8s-cni-overlay"
+
+
+def fetch_ovn_nb():
+    OVN_NB = ovs_vsctl("--if-exists", "get", "Open_vSwitch", ".",
+                       "external_ids:ovn-nb").strip('"')
+    if not OVN_NB:
+        raise Exception("OVN central database's ip address not set")
+
+    variables.OVN_NB = OVN_NB
+
+
+def get_k8s_cluster_router():
+    k8s_cluster_router = ovn_nbctl("--data=bare", "--no-heading",
+                                   "--columns=_uuid", "find", "logical_router",
+                                   "external_ids:k8s-cluster-router=yes")
+    if not k8s_cluster_router:
+        raise Exception("K8S_CLUSTER_ROUTER not found")
+
+    return k8s_cluster_router
+
+
+def get_local_system_id():
+    system_id = ovs_vsctl("--if-exists", "get", "Open_vSwitch", ".",
+                          "external_ids:system-id").strip('"')
+    if not system_id:
+        raise Exception("no system-id configured in the local host")
+
+    return system_id
+
+
+def get_node_name(args):
+    if not args.node_name:
+        node_name = get_local_system_id()
+    else:
+        node_name = args.node_name
+    return node_name
+
+
+def create_management_port(node_name, local_subnet, cluster_subnet):
+    # Create a logical switch for the node and connect it to
+    # the distributed router.  This switch will start with
+    # one logical port (A OVS internal interface).  This
+    # logical port is via which other nodes and containers access the
+    # k8s master servers and is also used for health checks.
+
+    # Create a router port and provide it the first address in the
+    # 'local_subnet'.
+    ip = netaddr.IPNetwork(local_subnet)
+    ip.value = ip.value + 1
+    router_ip_mask = str(ip)
+    router_ip = str(ip.ip)
+
+    router_mac = ovn_nbctl("--if-exist", "get", "logical_router_port",
+                           "rtos-" + node_name, "mac").strip('"')
+    if not router_mac:
+        router_mac = util.generate_mac()
+        cluster_router = get_k8s_cluster_router()
+        ovn_nbctl("--may-exist", "lrp-add", cluster_router,
+                  "rtos-" + node_name, router_mac, router_ip_mask)
+
+    # Create a logical switch and set its subnet.
+    ovn_nbctl("--", "--may-exist", "ls-add", node_name,
+              "--", "set", "logical_switch", node_name,
+              "other-config:subnet=" + local_subnet,
+              "external-ids:gateway_ip=" + router_ip_mask)
+
+    # Connect the switch to the router.
+    ovn_nbctl("--", "--may-exist", "lsp-add", node_name,
+              "stor-" + node_name, "--", "set", "logical_switch_port",
+              "stor-" + node_name, "type=router",
+              "options:router-port=rtos-" + node_name,
+              "addresses=" + "\"" + router_mac + "\"")
+
+    interface_name = "k8s-%s" % (node_name[:11])
+    # Create a OVS internal interface
+    ovs_vsctl("--", "--may-exist", "add-port", "br-int",
+              interface_name, "--", "set", "interface",
+              interface_name, "type=internal",
+              "external-ids:iface-id=k8s-" + node_name)
+
+    mac_address = ovs_vsctl("--if-exists", "get", "interface",
+                            interface_name, "mac_in_use").strip('"')
+    if not mac_address:
+        raise Exception("failed to get mac address of ovn-k8s-master")
+
+    # Create the OVN logical port.
+    ip.value = ip.value + 1
+    port_ip = str(ip.ip)
+    port_ip_mask = str(ip)
+    ovn_nbctl("--", "--may-exist", "lsp-add", node_name,
+              "k8s-" + node_name, "--", "lsp-set-addresses",
+              "k8s-" + node_name, mac_address + " " + port_ip)
+
+    # Up the interface.
+    command = "ip link set %s up" % (interface_name)
+    util.call_popen(shlex.split(command))
+
+    # Assign IP address to the internal interface.
+    try:
+        command = "ip addr add %s dev %s" % (port_ip_mask, interface_name)
+        util.call_popen(shlex.split(command))
+    except Exception as e:
+        sys.stderr.write("warning: failed to run \"%s\": %s"
+                         % (command, str(e)))
+
+    # Create a route.
+    try:
+        command = "ip route add %s via %s" % (cluster_subnet, router_ip)
+        util.call_popen(shlex.split(command))
+    except Exception as e:
+        sys.stderr.write("warning: failed to run \"%s\": %s"
+                         % (command, str(e)))
+
+    # Add the load_balancer to the switch.
+    k8s_cluster_lb_tcp = ovn_nbctl("--data=bare", "--no-heading",
+                                   "--columns=_uuid", "find", "load_balancer",
+                                   "external_ids:k8s-cluster-lb-tcp=yes")
+    if k8s_cluster_lb_tcp:
+        ovn_nbctl("set", "logical_switch", node_name,
+                  "load_balancer=" + k8s_cluster_lb_tcp)
+
+    # Create a logical switch and set its subnet.
+    ovn_nbctl("--", "--may-exist", "ls-add", node_name,
+              "--", "set", "logical_switch", node_name,
+              "other-config:subnet=" + local_subnet)
+
+
+def master_init(args):
+    fetch_ovn_nb()
+
+    node_name = get_node_name(args)
+
+    # Create a single common distributed router for the cluster.
+    ovn_nbctl("--", "--may-exist", "lr-add", node_name, "--", "set",
+              "logical_router", node_name,
+              "external_ids:k8s-cluster-router=yes")
+
+    # Create 2 load-balancers for east-west traffic.  One handles UDP
+    # and another handles TCP.
+    k8s_cluster_lb_tcp = ovn_nbctl("--data=bare", "--no-heading",
+                                   "--columns=_uuid", "find", "load_balancer",
+                                   "external_ids:k8s-cluster-lb-tcp=yes")
+    if not k8s_cluster_lb_tcp:
+        ovn_nbctl("--", "create", "load_balancer",
+                  "external_ids:k8s-cluster-lb-tcp=yes")
+
+    k8s_cluster_lb_udp = ovn_nbctl("--data=bare", "--no-heading",
+                                   "--columns=_uuid", "find", "load_balancer",
+                                   "external_ids:k8s-cluster-lb-udp=yes")
+    if not k8s_cluster_lb_udp:
+        ovn_nbctl("--", "create", "load_balancer",
+                  "external_ids:k8s-cluster-lb-udp=yes", "protocol=udp")
+
+    # Create 2 load-balancers for north-south traffic.  One handles UDP
+    # and another handles TCP.
+    k8s_ns_lb_tcp = ovn_nbctl("--data=bare", "--no-heading",
+                              "--columns=_uuid", "find", "load_balancer",
+                              "external_ids:k8s-ns-lb-tcp=yes")
+    if not k8s_ns_lb_tcp:
+        ovn_nbctl("--", "create", "load_balancer",
+                  "external_ids:k8s-ns-lb-tcp=yes")
+
+    k8s_ns_lb_udp = ovn_nbctl("--data=bare", "--no-heading",
+                              "--columns=_uuid", "find", "load_balancer",
+                              "external_ids:k8s-ns-lb-udp=yes")
+    if not k8s_ns_lb_udp:
+        ovn_nbctl("--", "create", "load_balancer",
+                  "external_ids:k8s-ns-lb-udp=yes", "protocol=udp")
+
+    # Create a logical switch called "join" that will be used to connect
+    # gateway routers to the distributed router. The "join" will be
+    # allocated IP addresses in the range 100.64.1.0/24
+    ovn_nbctl("--may-exist", "ls-add", "join")
+
+    # Connect the distributed router to "join"
+    router_mac = ovn_nbctl("--if-exist", "get", "logical_router_port",
+                           "rtoj-" + node_name, "mac").strip('"')
+    if not router_mac:
+        router_mac = util.generate_mac()
+        ovn_nbctl("--may-exist", "lrp-add", node_name,
+                  "rtoj-" + node_name, router_mac, "100.64.1.1/24")
+
+    # Connect the switch "join" to the router.
+    ovn_nbctl("--", "--may-exist", "lsp-add", "join",
+              "jtor-" + node_name, "--", "set", "logical_switch_port",
+              "jtor-" + node_name, "type=router",
+              "options:router-port=rtoj-" + node_name,
+              "addresses=" + "\"" + router_mac + "\"")
+
+    create_management_port(node_name, args.master_switch_subnet,
+                           args.cluster_ip_subnet)
+
+
+def minion_init(args):
+    fetch_ovn_nb()
+
+    node_name = get_node_name(args)
+
+    if not os.path.isfile(CNI_PLUGIN):
+        raise Exception("No CNI plugin %s found" % CNI_PLUGIN)
+
+    if not os.path.exists(CNI_LINK_PATH):
+        os.makedirs(CNI_LINK_PATH)
+
+    cni_file = "%s/ovn_cni" % CNI_LINK_PATH
+    if not os.path.isfile(cni_file):
+        command = "ln -s %s %s" % (CNI_PLUGIN, cni_file)
+        util.call_popen(shlex.split(command))
+
+    # Create the CNI config
+    if not os.path.exists(CNI_CONF_PATH):
+        os.makedirs(CNI_CONF_PATH)
+
+    CNI_FILE = "%s/10-net.conf" % CNI_CONF_PATH
+
+    if not os.path.isfile(CNI_FILE):
+        data = {
+                "name": "net",
+                "type": "ovn_cni",
+                "bridge": "br-int",
+                "isGateway": "true",
+                "ipMasq": "false",
+                "ipam": {
+                         "type": "host-local",
+                         "subnet": args.minion_switch_subnet
+                        }
+                }
+        with open(CNI_FILE, 'w') as outfile:
+            json.dump(data, outfile)
+
+    create_management_port(node_name, args.minion_switch_subnet,
+                           args.cluster_ip_subnet)
+
+
+def gateway_init(args):
+    physical_ip = netaddr.IPNetwork(args.physical_ip)
+    if args.default_gw:
+        default_gw = netaddr.IPNetwork(args.default_gw)
+
+    fetch_ovn_nb()
+
+    node_name = get_node_name(args)
+
+    k8s_cluster_router = get_k8s_cluster_router()
+
+    system_id = get_local_system_id()
+
+    # Create a gateway router.
+    gateway_router = "GR_%s" % (node_name)
+    ovn_nbctl("--", "--may-exist", "lr-add", gateway_router, "--", "set",
+              "logical_router", gateway_router, "options:chassis=" + system_id)
+
+    # Connect gateway router to switch "join".
+    # TODO: IP address allocation needs to become general purpose
+    # once we support multiple gateway routers.
+    router_mac = ovn_nbctl("--if-exist", "get", "logical_router_port",
+                           "rtoj-" + gateway_router, "mac").strip('"')
+    if not router_mac:
+        router_mac = util.generate_mac()
+        ovn_nbctl("--may-exist", "lrp-add", gateway_router,
+                  "rtoj-" + gateway_router, router_mac, "100.64.1.2/24")
+
+    # Connect the switch "join" to the router.
+    ovn_nbctl("--", "--may-exist", "lsp-add", "join",
+              "jtor-" + gateway_router, "--", "set", "logical_switch_port",
+              "jtor-" + gateway_router, "type=router",
+              "options:router-port=rtoj-" + gateway_router,
+              "addresses=" + "\"" + router_mac + "\"")
+
+    # Add a static route in GR with distributed router as the nexthop.
+    ovn_nbctl("--may-exist", "lr-route-add", gateway_router,
+              args.cluster_ip_subnet, "100.64.1.1")
+    # Add a static route in GR with physical gateway as the default next hop.
+    if args.default_gw:
+        ovn_nbctl("--may-exist", "lr-route-add", gateway_router,
+                  "0.0.0.0/0", str(default_gw.ip))
+
+    # Add a default route in distributed router with GR as the nexthop.
+    ovn_nbctl("--may-exist", "lr-route-add", k8s_cluster_router,
+              "0.0.0.0/0", "100.64.1.2")
+
+    # Create the external switch for the physical interface to connect to.
+    external_switch = "ext_%s" % (node_name)
+    ovn_nbctl("--may-exist", "ls-add", external_switch)
+
+    # Add north-south load-balancers to that switch.
+    k8s_ns_lb_tcp = ovn_nbctl("--data=bare", "--no-heading",
+                              "--columns=_uuid", "find", "load_balancer",
+                              "external_ids:k8s-ns-lb-tcp=yes")
+    if k8s_ns_lb_tcp:
+        ovn_nbctl("set", "logical_switch", node_name,
+                  "load_balancer=" + k8s_ns_lb_tcp)
+
+    # Connect physical interface to br-int. Get its mac address
+    iface_id = "%s_%s" % (args.physical_interface, node_name)
+    ovs_vsctl("--", "--may-exist", "add-port", "br-int",
+              args.physical_interface, "--", "set", "interface",
+              args.physical_interface, "external-ids:iface-id=" + iface_id)
+
+    mac_address = ovs_vsctl("--if-exists", "get", "interface",
+                            args.physical_interface, "mac_in_use").strip('"')
+
+    # Add physical_interface as a logical port to external_switch. This is
+    # a learning switch port with "unknown" address.  The external world
+    # is accessed via this port.
+    ovn_nbctl("--", "--may-exist", "lsp-add", external_switch,
+              iface_id, "--", "lsp-set-addresses",
+              iface_id, "unknown")
+
+    # Connect GR to external_switch with mac address of physical interface
+    # and that IP address.
+    ovn_nbctl("--", "--may-exist", "lrp-add", gateway_router,
+              "rtoe-" + gateway_router, mac_address, str(physical_ip),
+              "--", "set", "logical_router_port", "rtoe-" + gateway_router,
+              "external-ids:gateway-physical-ip=yes")
+
+    # Connect the external_switch to the router.
+    ovn_nbctl("--", "--may-exist", "lsp-add", external_switch,
+              "etor-" + gateway_router, "--", "set", "logical_switch_port",
+              "etor-" + gateway_router, "type=router",
+              "options:router-port=rtoe-" + gateway_router,
+              "addresses=" + "\"" + mac_address + "\"")
+
+    # Default SNAT rules.
+    ovn_nbctl("--", "--id=@nat", "create", "nat", "type=snat",
+              "logical_ip=" + args.cluster_ip_subnet,
+              "external_ip=" + str(physical_ip.ip),
+              "--", "add", "logical_router", gateway_router, "nat", "@nat")
+
+
+def main():
+    parser = argparse.ArgumentParser()
+    subparsers = parser.add_subparsers(title='Subcommands',
+                                       dest='command_name')
+
+    # Parser for sub-command 'master-init'.
+    parser_master_init = subparsers.add_parser(
+                                           'master-init',
+                                           help="Initialize k8s master node")
+    parser_master_init.add_argument('--cluster-ip-subnet', required=True,
+                                    help="The cluster wide larger subnet of "
+                                    "private ip addresses.")
+    parser_master_init.add_argument('--master-switch-subnet', required=True,
+                                    help="The smaller subnet just for master.")
+    parser_master_init.add_argument('--node-name', help="A unique node name.  "
+                                    "The default value is the system-id of"
+                                    "local OVS.")
+    parser_master_init.set_defaults(func=master_init)
+
+    # Parser for sub-command 'minion-init'.
+    parser_minion_init = subparsers.add_parser(
+                                           'minion-init',
+                                           help="Initialize k8s minion node")
+    parser_minion_init.add_argument('--cluster-ip-subnet', required=True,
+                                    help="The cluster wide larger subnet of "
+                                    "private ip addresses.")
+    parser_minion_init.add_argument('--minion-switch-subnet', required=True,
+                                    help="The smaller subnet just for this "
+                                    "master.")
+    parser_minion_init.add_argument('--node-name', help="A unique node name.  "
+                                    "The default value is the system-id of"
+                                    "local OVS.")
+    parser_minion_init.set_defaults(func=minion_init)
+
+    # Parser for sub-command 'gateway-init'.
+    parser_minion_init = subparsers.add_parser(
+                                           'gateway-init',
+                                           help="Initialize k8s gateway node")
+    parser_minion_init.add_argument('--cluster-ip-subnet', required=True,
+                                    help="The cluster wide larger subnet of "
+                                    "private ip addresses.")
+    parser_minion_init.add_argument('--physical-interface', required=True,
+                                    help="The physical interface via which "
+                                    "external connectivity is provided.")
+    parser_minion_init.add_argument('--physical-ip', required=True,
+                                    help="The ip address of the physical "
+                                    "interface via which external "
+                                    "connectivity is provided.  This should "
+                                    "be of the form IP/MASK.")
+    parser_minion_init.add_argument('--default-gw',
+                                    help="The next hop IP address for your "
+                                    "physical interface.")
+    parser_minion_init.add_argument('--node-name', help="A unique node name.  "
+                                    "The default value is the system-id of"
+                                    "local OVS.")
+    parser_minion_init.set_defaults(func=gateway_init)
+
+    args = parser.parse_args()
+    args.func(args)
+
+
+if __name__ == '__main__':
+    try:
+        main()
+    except Exception as e:
+        sys.stderr.write("Failed operation.\n(%s)" % str(e))
+        sys.exit(1)
