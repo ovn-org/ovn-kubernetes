@@ -154,6 +154,10 @@ def create_management_port(node_name, local_subnet, cluster_subnet):
 def master_init(args):
     fetch_ovn_nb()
 
+    if not args.node_name or not args.master_switch_subnet \
+       or not args.cluster_ip_subnet:
+        raise Exception("Arguments should be non-null")
+
     node_name = args.node_name
 
     # Create a single common distributed router for the cluster.
@@ -220,6 +224,10 @@ def master_init(args):
 def minion_init(args):
     fetch_ovn_nb()
 
+    if not args.node_name or not args.minion_switch_subnet \
+       or not args.cluster_ip_subnet:
+        raise Exception("Arguments should be non-null")
+
     node_name = args.node_name
 
     if not os.path.isfile(CNI_PLUGIN):
@@ -259,6 +267,10 @@ def minion_init(args):
 
 
 def gateway_init(args):
+    if not args.node_name or not args.physical_interface \
+       or not args.cluster_ip_subnet or not args.physical_ip:
+        raise Exception("Arguments should be non-null")
+
     physical_ip = netaddr.IPNetwork(args.physical_ip)
     if args.default_gw:
         default_gw = netaddr.IPNetwork(args.default_gw)
