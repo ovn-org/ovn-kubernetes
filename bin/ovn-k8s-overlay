@@ -129,7 +129,11 @@ def create_management_port(node_name, local_subnet, cluster_subnet):
         sys.stderr.write("warning: failed to run \"%s\": %s"
                          % (command, str(e)))
 
-    # Create a route.
+    # Flush the route for the entire subnet (in case it was added before)
+    command = "ip route flush %s" % (cluster_subnet)
+    util.call_popen(shlex.split(command))
+
+    # Create a route for the entire subnet.
     try:
         command = "ip route add %s via %s" % (cluster_subnet, router_ip)
         util.call_popen(shlex.split(command))
