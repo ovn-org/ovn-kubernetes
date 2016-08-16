@@ -125,6 +125,10 @@ def create_management_port(node_name, local_subnet, cluster_subnet):
     command = "ip link set %s up" % (interface_name)
     util.call_popen(shlex.split(command))
 
+    # The interface may already exist, in which case delete the routes and IP.
+    command = "ip addr flush dev %s" % (interface_name)
+    util.call_popen(shlex.split(command))
+
     # Assign IP address to the internal interface.
     try:
         command = "ip addr add %s dev %s" % (port_ip_mask, interface_name)
