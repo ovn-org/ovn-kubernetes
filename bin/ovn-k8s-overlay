@@ -58,14 +58,6 @@ def get_local_system_id():
     return system_id
 
 
-def get_node_name(args):
-    if not args.node_name:
-        node_name = get_local_system_id()
-    else:
-        node_name = args.node_name
-    return node_name
-
-
 def create_management_port(node_name, local_subnet, cluster_subnet):
     # Create a logical switch for the node and connect it to
     # the distributed router.  This switch will start with
@@ -162,7 +154,7 @@ def create_management_port(node_name, local_subnet, cluster_subnet):
 def master_init(args):
     fetch_ovn_nb()
 
-    node_name = get_node_name(args)
+    node_name = args.node_name
 
     # Create a single common distributed router for the cluster.
     ovn_nbctl("--", "--may-exist", "lr-add", node_name, "--", "set",
@@ -228,7 +220,7 @@ def master_init(args):
 def minion_init(args):
     fetch_ovn_nb()
 
-    node_name = get_node_name(args)
+    node_name = args.node_name
 
     if not os.path.isfile(CNI_PLUGIN):
         raise Exception("No CNI plugin %s found" % CNI_PLUGIN)
@@ -273,7 +265,7 @@ def gateway_init(args):
 
     fetch_ovn_nb()
 
-    node_name = get_node_name(args)
+    node_name = args.node_name
 
     k8s_cluster_router = get_k8s_cluster_router()
 
@@ -376,9 +368,9 @@ def main():
                                     "private ip addresses.")
     parser_master_init.add_argument('--master-switch-subnet', required=True,
                                     help="The smaller subnet just for master.")
-    parser_master_init.add_argument('--node-name', help="A unique node name.  "
-                                    "The default value is the system-id of"
-                                    "local OVS.")
+    parser_master_init.add_argument('--node-name',
+                                    required=True,
+                                    help="A unique node name.")
     parser_master_init.set_defaults(func=master_init)
 
     # Parser for sub-command 'minion-init'.
@@ -391,9 +383,9 @@ def main():
     parser_minion_init.add_argument('--minion-switch-subnet', required=True,
                                     help="The smaller subnet just for this "
                                     "master.")
-    parser_minion_init.add_argument('--node-name', help="A unique node name.  "
-                                    "The default value is the system-id of"
-                                    "local OVS.")
+    parser_minion_init.add_argument('--node-name',
+                                    required=True,
+                                    help="A unique node name.")
     parser_minion_init.set_defaults(func=minion_init)
 
     # Parser for sub-command 'gateway-init'.
@@ -414,9 +406,9 @@ def main():
     parser_minion_init.add_argument('--default-gw',
                                     help="The next hop IP address for your "
                                     "physical interface.")
-    parser_minion_init.add_argument('--node-name', help="A unique node name.  "
-                                    "The default value is the system-id of"
-                                    "local OVS.")
+    parser_minion_init.add_argument('--node-name',
+                                    required=True,
+                                    help="A unique node name.")
     parser_minion_init.set_defaults(func=gateway_init)
 
     args = parser.parse_args()
