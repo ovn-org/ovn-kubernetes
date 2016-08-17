@@ -3,3 +3,4 @@ netaddr>=0.7.18
 requests>=2.9.1
 ovs
 six
+eventlet
