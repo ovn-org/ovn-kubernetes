@@ -197,8 +197,10 @@ def cni_add(cni_ifname, cni_netns, namespace, pod_name, container_id):
         vlog.err("Unable to plug interface into OVN bridge")
         raise OVNCNIException(106, "failure in plugging pod interface")
 
-    print(json.dumps({'ip_address': ip_address,
-          'gateway_ip': gateway_ip, 'mac_address': mac_address}))
+    output = json.dumps({'ip_address': ip_address,
+                        'gateway_ip': gateway_ip, 'mac_address': mac_address})
+    vlog.dbg("output is %s" % output)
+    print(output)
 
 
 def cni_del(cni_netns, container_id):
@@ -259,11 +261,12 @@ if __name__ == '__main__':
     try:
         main()
     except OVNCNIException as e:
+        vlog.err(e.cni_error())
         print(e.cni_error())
         sys.exit(1)
     except Exception as e:
         error = {'cniVersion': CNI_VERSION, 'code': 100,
                  'message': str(e)}
-        vlog.emer("Unexpected exception %s" % str(e))
+        vlog.err("Unexpected exception %s" % str(e))
         print(json.dumps(error))
         sys.exit(1)
