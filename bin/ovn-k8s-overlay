@@ -14,6 +14,7 @@
 # limitations under the License.
 
 import argparse
+import distutils.spawn
 import json
 import netaddr
 import os
@@ -27,7 +28,7 @@ from ovn_k8s.common import variables
 
 CNI_CONF_PATH = "/usr/libexec/kubernetes/kubelet-plugins/net/exec"
 CNI_LINK_PATH = "/opt/cni/bin/"
-CNI_PLUGIN = "/usr/sbin/ovn-k8s-cni-overlay"
+CNI_PLUGIN = "ovn-k8s-cni-overlay"
 
 
 def fetch_ovn_nb():
@@ -234,7 +235,8 @@ def minion_init(args):
 
     node_name = args.node_name
 
-    if not os.path.isfile(CNI_PLUGIN):
+    cni_plugin_path = distutils.spawn.find_executable(CNI_PLUGIN)
+    if not cni_plugin_path:
         raise Exception("No CNI plugin %s found" % CNI_PLUGIN)
 
     if not os.path.exists(CNI_LINK_PATH):
@@ -242,7 +244,7 @@ def minion_init(args):
 
     cni_file = "%s/ovn_cni" % CNI_LINK_PATH
     if not os.path.isfile(cni_file):
-        command = "ln -s %s %s" % (CNI_PLUGIN, cni_file)
+        command = "ln -s %s %s" % (cni_plugin_path, cni_file)
         util.call_popen(shlex.split(command))
 
     # Create the CNI config
