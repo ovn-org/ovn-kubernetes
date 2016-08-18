@@ -176,7 +176,7 @@ $MINION_SWITCH_SUBNET, run:
 
 ```
 ovn-k8s-overlay minion-init --cluster-ip-subnet="$CLUSTER_IP_SUBNET" \
- --master-switch-subnet="$MINION_SWITCH_SUBNET" --node-name="$NODE_NAME"
+ --minion-switch-subnet="$MINION_SWITCH_SUBNET" --node-name="$NODE_NAME"
 ```
 
 An example is:

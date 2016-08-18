@@ -14,6 +14,7 @@
 # limitations under the License.
 
 import argparse
+import distutils.spawn
 import json
 import netaddr
 import os
@@ -27,7 +28,7 @@ from ovn_k8s.common import variables
 
 CNI_CONF_PATH = "/usr/libexec/kubernetes/kubelet-plugins/net/exec"
 CNI_LINK_PATH = "/opt/cni/bin/"
-CNI_PLUGIN = "/usr/sbin/ovn-k8s-cni-overlay"
+CNI_PLUGIN = "ovn-k8s-cni-overlay"
 
 
 def fetch_ovn_nb():
@@ -56,14 +57,6 @@ def get_local_system_id():
         raise Exception("no system-id configured in the local host")
 
     return system_id
-
-
-def get_node_name(args):
-    if not args.node_name:
-        node_name = get_local_system_id()
-    else:
-        node_name = args.node_name
-    return node_name
 
 
 def create_management_port(node_name, local_subnet, cluster_subnet):
@@ -125,6 +118,10 @@ def create_management_port(node_name, local_subnet, cluster_subnet):
     command = "ip link set %s up" % (interface_name)
     util.call_popen(shlex.split(command))
 
+    # The interface may already exist, in which case delete the routes and IP.
+    command = "ip addr flush dev %s" % (interface_name)
+    util.call_popen(shlex.split(command))
+
     # Assign IP address to the internal interface.
     try:
         command = "ip addr add %s dev %s" % (port_ip_mask, interface_name)
@@ -133,7 +130,11 @@ def create_management_port(node_name, local_subnet, cluster_subnet):
         sys.stderr.write("warning: failed to run \"%s\": %s"
                          % (command, str(e)))
 
-    # Create a route.
+    # Flush the route for the entire subnet (in case it was added before)
+    command = "ip route flush %s" % (cluster_subnet)
+    util.call_popen(shlex.split(command))
+
+    # Create a route for the entire subnet.
     try:
         command = "ip route add %s via %s" % (cluster_subnet, router_ip)
         util.call_popen(shlex.split(command))
@@ -158,7 +159,11 @@ def create_management_port(node_name, local_subnet, cluster_subnet):
 def master_init(args):
     fetch_ovn_nb()
 
-    node_name = get_node_name(args)
+    if not args.node_name or not args.master_switch_subnet \
+       or not args.cluster_ip_subnet:
+        raise Exception("Arguments should be non-null")
+
+    node_name = args.node_name
 
     # Create a single common distributed router for the cluster.
     ovn_nbctl("--", "--may-exist", "lr-add", node_name, "--", "set",
@@ -224,9 +229,14 @@ def master_init(args):
 def minion_init(args):
     fetch_ovn_nb()
 
-    node_name = get_node_name(args)
+    if not args.node_name or not args.minion_switch_subnet \
+       or not args.cluster_ip_subnet:
+        raise Exception("Arguments should be non-null")
 
-    if not os.path.isfile(CNI_PLUGIN):
+    node_name = args.node_name
+
+    cni_plugin_path = distutils.spawn.find_executable(CNI_PLUGIN)
+    if not cni_plugin_path:
         raise Exception("No CNI plugin %s found" % CNI_PLUGIN)
 
     if not os.path.exists(CNI_LINK_PATH):
@@ -234,7 +244,7 @@ def minion_init(args):
 
     cni_file = "%s/ovn_cni" % CNI_LINK_PATH
     if not os.path.isfile(cni_file):
-        command = "ln -s %s %s" % (CNI_PLUGIN, cni_file)
+        command = "ln -s %s %s" % (cni_plugin_path, cni_file)
         util.call_popen(shlex.split(command))
 
     # Create the CNI config
@@ -263,13 +273,17 @@ def minion_init(args):
 
 
 def gateway_init(args):
+    if not args.node_name or not args.physical_interface \
+       or not args.cluster_ip_subnet or not args.physical_ip:
+        raise Exception("Arguments should be non-null")
+
     physical_ip = netaddr.IPNetwork(args.physical_ip)
     if args.default_gw:
         default_gw = netaddr.IPNetwork(args.default_gw)
 
     fetch_ovn_nb()
 
-    node_name = get_node_name(args)
+    node_name = args.node_name
 
     k8s_cluster_router = get_k8s_cluster_router()
 
@@ -372,9 +386,9 @@ def main():
                                     "private ip addresses.")
     parser_master_init.add_argument('--master-switch-subnet', required=True,
                                     help="The smaller subnet just for master.")
-    parser_master_init.add_argument('--node-name', help="A unique node name.  "
-                                    "The default value is the system-id of"
-                                    "local OVS.")
+    parser_master_init.add_argument('--node-name',
+                                    required=True,
+                                    help="A unique node name.")
     parser_master_init.set_defaults(func=master_init)
 
     # Parser for sub-command 'minion-init'.
@@ -387,9 +401,9 @@ def main():
     parser_minion_init.add_argument('--minion-switch-subnet', required=True,
                                     help="The smaller subnet just for this "
                                     "master.")
-    parser_minion_init.add_argument('--node-name', help="A unique node name.  "
-                                    "The default value is the system-id of"
-                                    "local OVS.")
+    parser_minion_init.add_argument('--node-name',
+                                    required=True,
+                                    help="A unique node name.")
     parser_minion_init.set_defaults(func=minion_init)
 
     # Parser for sub-command 'gateway-init'.
@@ -410,9 +424,9 @@ def main():
     parser_minion_init.add_argument('--default-gw',
                                     help="The next hop IP address for your "
                                     "physical interface.")
-    parser_minion_init.add_argument('--node-name', help="A unique node name.  "
-                                    "The default value is the system-id of"
-                                    "local OVS.")
+    parser_minion_init.add_argument('--node-name',
+                                    required=True,
+                                    help="A unique node name.")
     parser_minion_init.set_defaults(func=gateway_init)
 
     args = parser.parse_args()
