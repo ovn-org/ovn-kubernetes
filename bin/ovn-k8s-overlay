@@ -332,7 +332,7 @@ def gateway_init(args):
                               "--columns=_uuid", "find", "load_balancer",
                               "external_ids:k8s-ns-lb-tcp=yes")
     if k8s_ns_lb_tcp:
-        ovn_nbctl("set", "logical_switch", node_name,
+        ovn_nbctl("set", "logical_switch", external_switch,
                   "load_balancer=" + k8s_ns_lb_tcp)
 
     # Connect physical interface to br-int. Get its mac address
