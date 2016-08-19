@@ -150,6 +150,13 @@ def create_management_port(node_name, local_subnet, cluster_subnet):
         ovn_nbctl("set", "logical_switch", node_name,
                   "load_balancer=" + k8s_cluster_lb_tcp)
 
+    k8s_cluster_lb_udp = ovn_nbctl("--data=bare", "--no-heading",
+                                   "--columns=_uuid", "find", "load_balancer",
+                                   "external_ids:k8s-cluster-lb-udp=yes")
+    if k8s_cluster_lb_udp:
+        ovn_nbctl("add", "logical_switch", node_name,
+                  "load_balancer", k8s_cluster_lb_udp)
+
     # Create a logical switch and set its subnet.
     ovn_nbctl("--", "--may-exist", "ls-add", node_name,
               "--", "set", "logical_switch", node_name,
@@ -332,8 +339,15 @@ def gateway_init(args):
                               "--columns=_uuid", "find", "load_balancer",
                               "external_ids:k8s-ns-lb-tcp=yes")
     if k8s_ns_lb_tcp:
-        ovn_nbctl("set", "logical_switch", node_name,
+        ovn_nbctl("set", "logical_switch", external_switch,
                   "load_balancer=" + k8s_ns_lb_tcp)
+
+    k8s_ns_lb_udp = ovn_nbctl("--data=bare", "--no-heading",
+                              "--columns=_uuid", "find", "load_balancer",
+                              "external_ids:k8s-ns-lb-udp=yes")
+    if k8s_ns_lb_udp:
+        ovn_nbctl("add", "logical_switch", external_switch,
+                  "load_balancer", k8s_ns_lb_udp)
 
     # Connect physical interface to br-int. Get its mac address
     iface_id = "%s_%s" % (args.physical_interface, node_name)

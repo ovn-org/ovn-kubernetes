@@ -105,9 +105,9 @@ def setup_interface(pid, container_id, cni_ifname, mac_address,
 
         # Set the mtu to handle tunnels
         vlog.dbg("Adjusting veth interface '%s' MTU for tunneling to %d"
-                 % (cni_ifname, 1440))
+                 % (cni_ifname, 1400))
         command = "ip netns exec %s ip link set dev %s mtu %s" \
-                  % (pid, cni_ifname, 1450)
+                  % (pid, cni_ifname, 1400)
         call_popen(shlex.split(command))
 
         # Set the ip address
