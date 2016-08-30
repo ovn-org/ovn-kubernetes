@@ -59,7 +59,11 @@ class OvnNB(object):
 
     def _create_load_balancer_vip(self, service_type, service_ip, ips, port,
                                   target_port, protocol):
-        vlog.dbg("received event to create load_balancer vip")
+        vlog.dbg("received event to create/modify load_balancer vip with "
+                 "service_type=%s, service_ip=%s, ips=%s, port=%s,"
+                 "target_port=%s, protocol=%s"
+                 % (service_type, service_ip, ips, port, target_port,
+                    protocol))
         if not port or not target_port or not protocol or not service_type:
             return
 
@@ -216,9 +220,49 @@ class OvnNB(object):
 
         vlog.dbg("deleted logical port %s" % (logical_port))
 
+    def _update_vip(self, service_data, ips):
+        service_type = service_data['spec'].get('type')
+
+        service_ip = service_data['spec'].get('clusterIP')
+        if not service_ip:
+            return
+
+        service_ports = service_data['spec'].get('ports')
+        if not service_ports:
+            return
+
+        physical_gateway_ips = self._get_physical_gateway_ips()
+
+        for service_port in service_ports:
+            if service_type == "NodePort":
+                port = service_port.get('nodePort')
+            else:
+                port = service_port.get('port')
+
+            if not port:
+                continue
+
+            protocol = service_port.get('protocol')
+            if not protocol:
+                protocol = "TCP"
+
+            target_port = service_port.get('targetPort')
+            if not target_port:
+                target_port = port
+
+            if service_type == "NodePort":
+                for gateway_ip in physical_gateway_ips:
+                    self._create_load_balancer_vip(service_type, gateway_ip,
+                                                   ips, port, target_port,
+                                                   protocol)
+            else:
+                self._create_load_balancer_vip(service_type, service_ip, ips,
+                                               port, target_port, protocol)
+
     def update_vip(self, event):
         service_data = event.metadata
         service_type = service_data['spec'].get('type')
+        vlog.dbg("update_vip: received service data %s" % (service_data))
 
         # We only care about services that are of type 'clusterIP' and
         # 'nodePort'.
@@ -232,6 +276,10 @@ class OvnNB(object):
         cache_key = "%s_%s" % (namespace, service_name)
 
         self._update_service_cache(event_type, cache_key, service_data)
+
+        if event.event_type == "DELETED":
+            vlog.dbg("received service delete event.")
+            self._update_vip(service_data, None)
 
     def add_endpoint(self, event):
         endpoint_data = event.metadata
@@ -272,38 +320,4 @@ class OvnNB(object):
         if service_type != "ClusterIP" and service_type != "NodePort":
             return
 
-        service_ip = service_data['spec'].get('clusterIP')
-        if not service_ip:
-            return
-
-        service_ports = service_data['spec'].get('ports')
-        if not service_ports:
-            return
-
-        physical_gateway_ips = self._get_physical_gateway_ips()
-
-        for service_port in service_ports:
-            if service_type == "NodePort":
-                port = service_port.get('nodePort')
-            else:
-                port = service_port.get('port')
-
-            if not port:
-                continue
-
-            protocol = service_port.get('protocol')
-            if not protocol:
-                protocol = "TCP"
-
-            target_port = service_port.get('targetPort')
-            if not target_port:
-                target_port = port
-
-            if service_type == "NodePort":
-                for gateway_ip in physical_gateway_ips:
-                    self._create_load_balancer_vip(service_type, gateway_ip,
-                                                   ips, port, target_port,
-                                                   protocol)
-            else:
-                self._create_load_balancer_vip(service_type, service_ip, ips,
-                                               port, target_port, protocol)
+        self._update_vip(service_data, ips)
