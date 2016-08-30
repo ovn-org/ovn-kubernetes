@@ -234,7 +234,6 @@ class OvnNB(object):
         self._update_service_cache(event_type, cache_key, service_data)
 
     def add_endpoint(self, event):
-        # TODO: Special handling for nodeport.
         endpoint_data = event.metadata
         service_name = endpoint_data['metadata']['name']
         namespace = endpoint_data['metadata']['namespace']
