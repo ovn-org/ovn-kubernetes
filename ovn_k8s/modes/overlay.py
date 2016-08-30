@@ -241,11 +241,17 @@ class OvnNB(object):
         vlog.dbg("received endpoint data %s" % (endpoint_data))
 
         ips = []
-        for subset in endpoint_data['subsets']:
-            for address in subset['addresses']:
-                ip = address.get('ip')
-                if ip:
-                    ips.append(ip)
+        subsets = endpoint_data.get('subsets')
+        if subsets:
+            for subset in subsets:
+                addresses = subset.get('addresses')
+                if not addresses:
+                    continue
+
+                for address in addresses:
+                    ip = address.get('ip')
+                    if ip:
+                        ips.append(ip)
 
         cache_key = "%s_%s" % (namespace, service_name)
         cached_service = self.service_cache.get(cache_key, {})
