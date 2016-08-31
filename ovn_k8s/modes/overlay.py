@@ -59,7 +59,11 @@ class OvnNB(object):
 
     def _create_load_balancer_vip(self, service_type, service_ip, ips, port,
                                   target_port, protocol):
-        vlog.dbg("received event to create load_balancer vip")
+        vlog.dbg("received event to create/modify load_balancer vip with "
+                 "service_type=%s, service_ip=%s, ips=%s, port=%s,"
+                 "target_port=%s, protocol=%s"
+                 % (service_type, service_ip, ips, port, target_port,
+                    protocol))
         if not port or not target_port or not protocol or not service_type:
             return
 
@@ -216,56 +220,8 @@ class OvnNB(object):
 
         vlog.dbg("deleted logical port %s" % (logical_port))
 
-    def update_vip(self, event):
-        service_data = event.metadata
+    def _update_vip(self, service_data, ips):
         service_type = service_data['spec'].get('type')
-
-        # We only care about services that are of type 'clusterIP' and
-        # 'nodePort'.
-        if service_type != "ClusterIP" and service_type != "NodePort":
-            return
-
-        service_name = service_data['metadata']['name']
-        event_type = event.event_type
-        namespace = service_data['metadata']['namespace']
-
-        cache_key = "%s_%s" % (namespace, service_name)
-
-        self._update_service_cache(event_type, cache_key, service_data)
-
-    def add_endpoint(self, event):
-        # TODO: Special handling for nodeport.
-        endpoint_data = event.metadata
-        service_name = endpoint_data['metadata']['name']
-        namespace = endpoint_data['metadata']['namespace']
-
-        vlog.dbg("received endpoint data %s" % (endpoint_data))
-
-        ips = []
-        for subset in endpoint_data['subsets']:
-            for address in subset['addresses']:
-                ip = address.get('ip')
-                if ip:
-                    ips.append(ip)
-
-        cache_key = "%s_%s" % (namespace, service_name)
-        cached_service = self.service_cache.get(cache_key, {})
-        if cached_service:
-            service_data = cached_service
-        else:
-            try:
-                response_json = kubernetes.get_service(
-                                                   variables.K8S_API_SERVER,
-                                                   namespace, service_name)
-            except Exception as e:
-                vlog.err("add_endpoint: k8s get service (%s)" % (str(e)))
-                return
-
-            service_data = response_json
-
-        service_type = service_data['spec'].get('type')
-        if service_type != "ClusterIP" and service_type != "NodePort":
-            return
 
         service_ip = service_data['spec'].get('clusterIP')
         if not service_ip:
@@ -302,3 +258,66 @@ class OvnNB(object):
             else:
                 self._create_load_balancer_vip(service_type, service_ip, ips,
                                                port, target_port, protocol)
+
+    def update_vip(self, event):
+        service_data = event.metadata
+        service_type = service_data['spec'].get('type')
+        vlog.dbg("update_vip: received service data %s" % (service_data))
+
+        # We only care about services that are of type 'clusterIP' and
+        # 'nodePort'.
+        if service_type != "ClusterIP" and service_type != "NodePort":
+            return
+
+        service_name = service_data['metadata']['name']
+        event_type = event.event_type
+        namespace = service_data['metadata']['namespace']
+
+        cache_key = "%s_%s" % (namespace, service_name)
+
+        self._update_service_cache(event_type, cache_key, service_data)
+
+        if event.event_type == "DELETED":
+            vlog.dbg("received service delete event.")
+            self._update_vip(service_data, None)
+
+    def add_endpoint(self, event):
+        endpoint_data = event.metadata
+        service_name = endpoint_data['metadata']['name']
+        namespace = endpoint_data['metadata']['namespace']
+
+        vlog.dbg("received endpoint data %s" % (endpoint_data))
+
+        ips = []
+        subsets = endpoint_data.get('subsets')
+        if subsets:
+            for subset in subsets:
+                addresses = subset.get('addresses')
+                if not addresses:
+                    continue
+
+                for address in addresses:
+                    ip = address.get('ip')
+                    if ip:
+                        ips.append(ip)
+
+        cache_key = "%s_%s" % (namespace, service_name)
+        cached_service = self.service_cache.get(cache_key, {})
+        if cached_service:
+            service_data = cached_service
+        else:
+            try:
+                response_json = kubernetes.get_service(
+                                                   variables.K8S_API_SERVER,
+                                                   namespace, service_name)
+            except Exception as e:
+                vlog.err("add_endpoint: k8s get service (%s)" % (str(e)))
+                return
+
+            service_data = response_json
+
+        service_type = service_data['spec'].get('type')
+        if service_type != "ClusterIP" and service_type != "NodePort":
+            return
+
+        self._update_vip(service_data, ips)
