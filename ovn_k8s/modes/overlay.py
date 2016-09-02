@@ -16,6 +16,7 @@ import ast
 import time
 
 import ovs.vlog
+from ovn_k8s.common import exceptions
 import ovn_k8s.common.kubernetes as kubernetes
 import ovn_k8s.common.variables as variables
 from ovn_k8s.common.util import ovn_nbctl
@@ -285,21 +286,9 @@ class OvnNB(object):
         endpoint_data = event.metadata
         service_name = endpoint_data['metadata']['name']
         namespace = endpoint_data['metadata']['namespace']
+        ips = endpoint_data.get('custom', {}).get('ips', [])
 
         vlog.dbg("received endpoint data %s" % (endpoint_data))
-
-        ips = []
-        subsets = endpoint_data.get('subsets')
-        if subsets:
-            for subset in subsets:
-                addresses = subset.get('addresses')
-                if not addresses:
-                    continue
-
-                for address in addresses:
-                    ip = address.get('ip')
-                    if ip:
-                        ips.append(ip)
 
         cache_key = "%s_%s" % (namespace, service_name)
         cached_service = self.service_cache.get(cache_key, {})
@@ -310,6 +299,9 @@ class OvnNB(object):
                 response_json = kubernetes.get_service(
                                                    variables.K8S_API_SERVER,
                                                    namespace, service_name)
+            except exceptions.NotFound:
+                vlog.dbg("No service found for endpoint %s " % service_name)
+                return
             except Exception as e:
                 vlog.err("add_endpoint: k8s get service (%s)" % (str(e)))
                 return

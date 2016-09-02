@@ -39,15 +39,41 @@ class EndpointWatcher(object):
         vlog.dbg("obtained endpoint event %s" % json.dumps(event))
         endpoint_data = event['object']
         event_type = event['type']
-
+        endpoint_id = endpoint_data['metadata']['uid']
         endpoint_name = endpoint_data['metadata'].get('name')
         namespace = endpoint_data['metadata'].get('namespace')
+
+        ips = set()
+        subsets = endpoint_data.get('subsets')
+        if subsets:
+            for subset in subsets:
+                addresses = subset.get('addresses')
+                if not addresses:
+                    continue
+                for address in addresses:
+                    ip = address.get('ip')
+                    if ip:
+                        ips.add(ip)
+
         if not endpoint_name or not namespace:
             return
 
-        vlog.dbg("Sending connectivity event for event %s on endpoint %s"
-                 % (event_type, endpoint_name))
-        self._send_connectivity_event(event_type, endpoint_name, endpoint_data)
+        cached_endpoint = self.endpoint_cache.get(endpoint_id)
+        if (not cached_endpoint or
+                cached_endpoint.get('custom', {}).get('ips') != ips):
+            vlog.dbg("Sending connectivity event for event %s on endpoint %s"
+                     % (event_type, endpoint_name))
+            if cached_endpoint:
+                custom_data = cached_endpoint.setdefault('custom', {})
+            else:
+                custom_data = {}
+            custom_data['ips'] = ips
+            endpoint_data['custom'] = custom_data
+            self._send_connectivity_event(event_type,
+                                          endpoint_name,
+                                          endpoint_data)
+            # Update cache
+            self.endpoint_cache[endpoint_id] = endpoint_data
 
     def process(self):
         util.process_stream(self._endpoint_stream,
