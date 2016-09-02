@@ -17,6 +17,8 @@ import requests
 
 import ovs.vlog
 
+from ovn_k8s.common import exceptions
+
 vlog = ovs.vlog.Vlog("kubernetes")
 
 
@@ -89,7 +91,12 @@ def get_service(server, namespace, service):
     url = ("http://%s/api/v1/namespaces/%s/services/%s"
            % (server, namespace, service))
     response = requests.get(url)
-    if not response or response.status_code != 200:
-        raise Exception("Failed to fetch service")
+    if not response:
+        if response.status_code == 404:
+            raise exceptions.NotFound(resource_type='service',
+                                      resource_id=service)
+        else:
+            raise Exception("Failed to fetch service (%d) :%s" % (
+                response.status_code, response.text))
 
     return response.json()
