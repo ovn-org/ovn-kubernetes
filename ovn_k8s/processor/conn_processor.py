@@ -13,7 +13,10 @@
 # limitations under the License.
 
 import ovs.vlog
+
+from ovn_k8s.common import variables
 import ovn_k8s.processor
+
 
 vlog = ovs.vlog.Vlog("connprocessor")
 
@@ -26,7 +29,7 @@ class ConnectivityProcessor(ovn_k8s.processor.BaseProcessor):
             self.mode.delete_logical_port(event)
         else:
             vlog.dbg("Received a pod ADD/MODIFY event %s" % (event.metadata))
-            self.mode.create_logical_port(event)
+            self.mode.create_logical_port(event, variables.K8S_WATCH_POLICIES)
 
     def _process_service_event(self, event):
         if event.event_type == "DELETED":
