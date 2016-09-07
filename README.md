@@ -26,6 +26,13 @@ instances running inside your VMs.
 For both the modes to work, a user has to install and start Open vSwitch in
 each VM/host that he plans to run his containers.
 
+Installing Open vSwitch is out of scope of this documentation.
+You can read [INSTALL.md] for that. That documentation inturn links to
+platform specific installations.  If you use packages to install OVS,
+you should install both OVS and OVN related packages.  You can also read
+the following quick-start quide for Ubuntu that installs OVS and OVN
+from source:  [INSTALL.UBUNTU.md]
+
 The "overlay" mode
 ==================
 
@@ -238,3 +245,6 @@ The "underlay" mode
 ===================
 
 TBA
+
+[INSTALL.md]: https://github.com/openvswitch/ovs/blob/master/INSTALL.md
+[INSTALL.UBUNTU.md]: docs/INSTALL.UBUNTU.md
