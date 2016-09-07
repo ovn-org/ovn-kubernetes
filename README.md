@@ -257,5 +257,14 @@ The "underlay" mode
 
 TBA
 
+Installing Kubernetes
+=====================
+
+Installing k8s is out of scope of this documentation.  You can read
+[README.K8S.md] for that.  This repo does provide a quick start guide
+here: [INSTALL.K8S.md]
+
 [INSTALL.md]: https://github.com/openvswitch/ovs/blob/master/INSTALL.md
 [INSTALL.UBUNTU.md]: docs/INSTALL.UBUNTU.md
+[README.K8S.md]: https://github.com/kubernetes/kubernetes/tree/master/docs
+[INSTALL.K8S.md]: docs/INSTALL.K8S.md
