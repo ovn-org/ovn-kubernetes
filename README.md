@@ -158,7 +158,7 @@ ovn-k8s-overlay master-init --cluster-ip-subnet="192.168.0.0/16" \
 
 The above command will create a cluster wide logical router, a connected
 logical switch for the master node and a logical port and a OVS internal
-interface named "ks-$NODE_NAME" with an IP address via which other nodes
+interface named "k8s-$NODE_NAME" with an IP address via which other nodes
 should be eventually able to reach the daemons running on this node.
 This IP address will be referred in the future as $OVN_CENTRAL_IP.
 
