@@ -131,11 +131,12 @@ initialization scripts (and later daemons) to pick from.
 ovs-vsctl set Open_vSwitch . external_ids:k8s-api-server="0.0.0.0:8080"
 ```
 
-Install the following additional packages for python.
+Clone this repository and install the executables.
 
 ```
-pip install netaddr
-pip install eventlet
+git clone https://github.com/openvswitch/ovn-kubernetes
+cd ovn-kubernetes
+pip install .
 ```
 
 On the master node, with a unique node name of $NODE_NAME, for a cluster wide
@@ -170,10 +171,12 @@ initialization scripts (and later daemons) to pick from.
 ovs-vsctl set Open_vSwitch . external_ids:k8s-api-server="$OVN_CENTRAL_IP:8080"
 ```
 
-Install the following additional packages for python.
+Clone this repository and install the executables.
 
 ```
-pip install netaddr
+git clone https://github.com/openvswitch/ovn-kubernetes
+cd ovn-kubernetes
+pip install .
 ```
 
 On the minion node, with a unique node name of $NODE_NAME, for a cluster wide
@@ -209,6 +212,14 @@ initialization scripts (and later daemons) to pick from.
 
 ```
 ovs-vsctl set Open_vSwitch . external_ids:k8s-api-server="$OVN_CENTRAL_IP:8080"
+```
+
+Clone this repository and install the executables.
+
+```
+git clone https://github.com/openvswitch/ovn-kubernetes
+cd ovn-kubernetes
+pip install .
 ```
 
 If you choose "eth1" as that physical interface, with an IP address of
