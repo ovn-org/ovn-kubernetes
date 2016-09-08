@@ -26,7 +26,7 @@ def ovn_init_overlay():
     variables.OVN_NB = OVN_NB
 
     K8S_API_SERVER = ovs_vsctl("--if-exists", "get", "Open_vSwitch", ".",
-                           "external_ids:k8s-api-server").strip('"')
+                               "external_ids:k8s-api-server").strip('"')
     if not K8S_API_SERVER:
         sys.exit("K8S_API_SERVER not set")
     variables.K8S_API_SERVER = K8S_API_SERVER
