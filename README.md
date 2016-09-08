@@ -26,6 +26,13 @@ instances running inside your VMs.
 For both the modes to work, a user has to install and start Open vSwitch in
 each VM/host that he plans to run his containers.
 
+Installing Open vSwitch is out of scope of this documentation.
+You can read [INSTALL.md] for that. That documentation inturn links to
+platform specific installations.  If you use packages to install OVS,
+you should install both OVS and OVN related packages.  You can also read
+the following quick-start quide for Ubuntu that installs OVS and OVN
+from source:  [INSTALL.UBUNTU.md]
+
 The "overlay" mode
 ==================
 
@@ -124,11 +131,12 @@ initialization scripts (and later daemons) to pick from.
 ovs-vsctl set Open_vSwitch . external_ids:k8s-api-server="0.0.0.0:8080"
 ```
 
-Install the following additional packages for python.
+Clone this repository and install the executables.
 
 ```
-pip install netaddr
-pip install eventlet
+git clone https://github.com/openvswitch/ovn-kubernetes
+cd ovn-kubernetes
+pip install .
 ```
 
 On the master node, with a unique node name of $NODE_NAME, for a cluster wide
@@ -150,7 +158,7 @@ ovn-k8s-overlay master-init --cluster-ip-subnet="192.168.0.0/16" \
 
 The above command will create a cluster wide logical router, a connected
 logical switch for the master node and a logical port and a OVS internal
-interface named "ks-$NODE_NAME" with an IP address via which other nodes
+interface named "k8s-$NODE_NAME" with an IP address via which other nodes
 should be eventually able to reach the daemons running on this node.
 This IP address will be referred in the future as $OVN_CENTRAL_IP.
 
@@ -163,10 +171,12 @@ initialization scripts (and later daemons) to pick from.
 ovs-vsctl set Open_vSwitch . external_ids:k8s-api-server="$OVN_CENTRAL_IP:8080"
 ```
 
-Install the following additional packages for python.
+Clone this repository and install the executables.
 
 ```
-pip install netaddr
+git clone https://github.com/openvswitch/ovn-kubernetes
+cd ovn-kubernetes
+pip install .
 ```
 
 On the minion node, with a unique node name of $NODE_NAME, for a cluster wide
@@ -204,6 +214,14 @@ initialization scripts (and later daemons) to pick from.
 ovs-vsctl set Open_vSwitch . external_ids:k8s-api-server="$OVN_CENTRAL_IP:8080"
 ```
 
+Clone this repository and install the executables.
+
+```
+git clone https://github.com/openvswitch/ovn-kubernetes
+cd ovn-kubernetes
+pip install .
+```
+
 If you choose "eth1" as that physical interface, with an IP address of
 $PHYSICAL_IP and a external gateway of $EXTERNAL_GATEWAY, run the following
 command on the designated gateway node with a unique name of $NODE_NAME.
@@ -238,3 +256,15 @@ The "underlay" mode
 ===================
 
 TBA
+
+Installing Kubernetes
+=====================
+
+Installing k8s is out of scope of this documentation.  You can read
+[README.K8S.md] for that.  This repo does provide a quick start guide
+here: [INSTALL.K8S.md]
+
+[INSTALL.md]: https://github.com/openvswitch/ovs/blob/master/INSTALL.md
+[INSTALL.UBUNTU.md]: docs/INSTALL.UBUNTU.md
+[README.K8S.md]: https://github.com/kubernetes/kubernetes/tree/master/docs
+[INSTALL.K8S.md]: docs/INSTALL.K8S.md
