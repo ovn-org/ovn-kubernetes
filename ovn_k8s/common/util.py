@@ -63,7 +63,7 @@ def generate_mac(prefix="00:00:00"):
 def process_stream(data_stream, event_callback):
     # StopIteration should be caught in the routine that sets up the stream
     # and reconnects it
-    line = data_stream.next()
+    line = next(data_stream)
     if not line:
         return
 
