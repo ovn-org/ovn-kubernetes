@@ -152,9 +152,9 @@ class OvnNB(object):
             return
 
         try:
-            ovn_nbctl("--", "--if-exists", "lsp-del", logical_port,
-                      "--", "lsp-add", logical_switch, logical_port,
-                      "--", "lsp-set-addresses", logical_port, "dynamic")
+            ovn_nbctl("--", "--may-exist", "lsp-add", logical_switch,
+                      logical_port, "--", "lsp-set-addresses",
+                      logical_port, "dynamic")
         except Exception as e:
             vlog.err("_create_logical_port: lsp-add (%s)" % (str(e)))
             return
