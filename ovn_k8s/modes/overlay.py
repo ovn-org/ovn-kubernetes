@@ -115,8 +115,9 @@ class OvnNB(object):
         else:
             try:
                 gateway_ip_mask = ovn_nbctl("--if-exists", "get",
-                                        "logical_switch", logical_switch,
-                                        "external_ids:gateway_ip").strip('"')
+                                            "logical_switch", logical_switch,
+                                            "external_ids:gateway_ip"
+                                            ).strip('"')
             except Exception as e:
                 vlog.err("_get_switch_gateway_ip: failed to get gateway_ip %s"
                          % (str(e)))
