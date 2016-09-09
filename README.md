@@ -21,7 +21,7 @@ hypervisors with containers running inside the VMs.
 
 In the "overlay" mode, OVN can create a logical network amongst containers
 running on multiple hosts.  In this mode, OVN programs the Open vSwitch
-instances running inside your VMs.
+instances running inside your VMs or directly on bare metal hosts.
 
 For both the modes to work, a user has to install and start Open vSwitch in
 each VM/host that he plans to run his containers.
