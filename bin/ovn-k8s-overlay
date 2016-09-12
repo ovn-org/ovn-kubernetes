@@ -359,6 +359,10 @@ def gateway_init(args):
     mac_address = ovs_vsctl("--if-exists", "get", "interface",
                             args.physical_interface, "mac_in_use").strip('"')
 
+    # Flush the IP address of the physical interface.
+    command = "ip addr flush dev %s" % (args.physical_interface)
+    util.call_popen(shlex.split(command))
+
     # Add physical_interface as a logical port to external_switch. This is
     # a learning switch port with "unknown" address.  The external world
     # is accessed via this port.
