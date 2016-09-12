@@ -229,14 +229,15 @@ command on the designated gateway node with a unique name of $NODE_NAME.
 ```
 ovn-k8s-overlay gateway-init --cluster-ip-subnet="$CLUSTER_IP_SUBNET" \
 --physical-interface eth1 --physical-ip "$PHYSICAL_IP" \
---node-name="$NODE_NAME"
+--node-name="$NODE_NAME" --default-gw "$EXTERNAL_GATEWAY"
 ```
 
 An example is:
 
 ```
 ovn-k8s-overlay gateway-init --cluster-ip-subnet="192.168.0.0/16" \
---physical-interface eth1 --physical-ip 20.0.0.1/24 --node-name="kube-minion2"
+--physical-interface eth1 --physical-ip 10.33.74.138/24 \
+--node-name="kube-minion2" --default-gw 10.33.74.253
 ```
 
 
