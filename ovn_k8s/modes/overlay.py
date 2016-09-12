@@ -45,7 +45,7 @@ class OvnNB(object):
             vlog.err("_populate_gateway_ip: find failed %s" % (str(e)))
 
         for physical_gateway_ip_network in physical_gateway_ip_networks:
-            (ip, mask) = physical_gateway_ip_network.split('/')
+            ip, _mask = physical_gateway_ip_network.split('/')
             self.physical_gateway_ips.append(ip)
 
         return self.physical_gateway_ips
@@ -71,14 +71,11 @@ class OvnNB(object):
         load_balancer = ""
         if protocol == "TCP" and service_type == "ClusterIP":
             load_balancer = variables.K8S_CLUSTER_LB_TCP
-
-        if protocol == "UDP" and service_type == "ClusterIP":
+        elif protocol == "UDP" and service_type == "ClusterIP":
             load_balancer = variables.K8S_CLUSTER_LB_UDP
-
-        if protocol == "TCP" and service_type == "NodePort":
+        elif protocol == "TCP" and service_type == "NodePort":
             load_balancer = variables.K8S_NS_LB_TCP
-
-        if protocol == "UDP" and service_type == "NodePort":
+        elif protocol == "UDP" and service_type == "NodePort":
             load_balancer = variables.K8S_NS_LB_UDP
 
         if not load_balancer:
@@ -95,11 +92,9 @@ class OvnNB(object):
             return
 
         # target is of the form "IP1:port, IP2:port, IP3:port"
-        target = ""
-        for ip in ips:
-            target = target + ip + ":" + str(target_port) + ","
-        target = target[:-1]
-        target = "\"" + target + "\""
+        target_endpoints = ",".join(["%s:%s" % (ip, target_port)
+                                     for ip in ips])
+        target = "\"" + target_endpoints + "\""
 
         try:
             ovn_nbctl("set", "load_balancer", load_balancer,
@@ -244,13 +239,8 @@ class OvnNB(object):
             if not port:
                 continue
 
-            protocol = service_port.get('protocol')
-            if not protocol:
-                protocol = "TCP"
-
-            target_port = service_port.get('targetPort')
-            if not target_port:
-                target_port = port
+            protocol = service_port.get('protocol', 'TCP')
+            target_port = service_port.get('targetPort', port)
 
             if service_type == "NodePort":
                 for gateway_ip in physical_gateway_ips:
