@@ -215,7 +215,7 @@ class OvnNB(object):
             vlog.err("_delete_logical_port: lsp-add (%s)" % (str(e)))
             return
 
-        vlog.dbg("deleted logical port %s" % (logical_port))
+        vlog.info("deleted logical port %s" % (logical_port))
 
     def _update_vip(self, service_data, ips):
         service_type = service_data['spec'].get('type')
