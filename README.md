@@ -140,20 +140,20 @@ pip install .
 ```
 
 On the master node, with a unique node name of $NODE_NAME, for a cluster wide
-private address range of $CLUSTER_IP_SUBNET and a smaller
+private address range of $CLUSTER_IP_SUBNET, a smaller
 subnet for the logical switch created in the master node of
-$MASTER_SWITCH_SUBNET, run:
+$MASTER_SWITCH_SUBNET and $KUBERNETES_SERVICES_SUBNET run:
 
 ```
 ovn-k8s-overlay master-init --cluster-ip-subnet=$CLUSTER_IP_SUBNET \
- --master-switch-subnet="$MASTER_SWITCH_SUBNET" --node-name="$NODE_NAME"
+ --master-switch-subnet="$MASTER_SWITCH_SUBNET" --node-name="$NODE_NAME" --service-ip-subnet="$KUBERNETES_SERVICES_SUBNET"
 ```
 
 An example is:
 
 ```
 ovn-k8s-overlay master-init --cluster-ip-subnet="192.168.0.0/16" \
---master-switch-subnet="192.168.1.0/24" --node-name="kube-master"
+--master-switch-subnet="192.168.1.0/24" --node-name="kube-master" --service-ip-subnet="10.3.0.0/16"
 ```
 
 The above command will create a cluster wide logical router, a connected
@@ -180,20 +180,20 @@ pip install .
 ```
 
 On the minion node, with a unique node name of $NODE_NAME, for a cluster wide
-private address range of $CLUSTER_IP_SUBNET and a smaller
+private address range of $CLUSTER_IP_SUBNET, a smaller
 subnet for the logical switch created in the minion node of
-$MINION_SWITCH_SUBNET, run:
+$MINION_SWITCH_SUBNET and $KUBERNETES_SERVICES_SUBNET run:
 
 ```
 ovn-k8s-overlay minion-init --cluster-ip-subnet="$CLUSTER_IP_SUBNET" \
- --minion-switch-subnet="$MINION_SWITCH_SUBNET" --node-name="$NODE_NAME"
+ --minion-switch-subnet="$MINION_SWITCH_SUBNET" --node-name="$NODE_NAME" --service-ip-subnet="$KUBERNETES_SERVICES_SUBNET"
 ```
 
 An example is:
 
 ```
 ovn-k8s-overlay minion-init --cluster-ip-subnet="192.168.0.0/16" \
---minion-switch-subnet="192.168.2.0/24" --node-name="kube-minion1"
+--minion-switch-subnet="192.168.2.0/24" --node-name="kube-minion1" --service-ip-subnet="10.3.0.0/16"
 ```
 
 * k8s gateway node initialization

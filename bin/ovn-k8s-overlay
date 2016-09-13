@@ -59,7 +59,7 @@ def get_local_system_id():
     return system_id
 
 
-def create_management_port(node_name, local_subnet, cluster_subnet):
+def create_management_port(node_name, local_subnet, cluster_subnet, service_subnet):
     # Create a logical switch for the node and connect it to
     # the distributed router.  This switch will start with
     # one logical port (A OVS internal interface).  This
@@ -162,12 +162,16 @@ def create_management_port(node_name, local_subnet, cluster_subnet):
               "--", "set", "logical_switch", node_name,
               "other-config:subnet=" + local_subnet)
 
+    # Create route to kubernetes services
+    ovn_nbctl("--may-exist", "lr-route-add", node_name,
+              service_subnet, port_ip)
+
 
 def master_init(args):
     fetch_ovn_nb()
 
     if not args.node_name or not args.master_switch_subnet \
-       or not args.cluster_ip_subnet:
+       or not args.cluster_ip_subnet or not args.service_ip_subnet:
         raise Exception("Arguments should be non-null")
 
     node_name = args.node_name
@@ -230,14 +234,14 @@ def master_init(args):
               "addresses=" + "\"" + router_mac + "\"")
 
     create_management_port(node_name, args.master_switch_subnet,
-                           args.cluster_ip_subnet)
+                           args.cluster_ip_subnet, args.service_ip_subnet)
 
 
 def minion_init(args):
     fetch_ovn_nb()
 
     if not args.node_name or not args.minion_switch_subnet \
-       or not args.cluster_ip_subnet:
+       or not args.cluster_ip_subnet or not args.service_ip_subnet:
         raise Exception("Arguments should be non-null")
 
     node_name = args.node_name
@@ -276,7 +280,7 @@ def minion_init(args):
             json.dump(data, outfile)
 
     create_management_port(node_name, args.minion_switch_subnet,
-                           args.cluster_ip_subnet)
+                           args.cluster_ip_subnet, args.service_ip_subnet)
 
 
 def gateway_init(args):
@@ -345,7 +349,6 @@ def gateway_init(args):
         ovn_nbctl("add", "logical_router", gateway_router,
                   "load_balancer", k8s_ns_lb_udp)
 
-
     # Create the external switch for the physical interface to connect to.
     external_switch = "ext_%s" % (node_name)
     ovn_nbctl("--may-exist", "ls-add", external_switch)
@@ -401,6 +404,8 @@ def main():
                                     "private ip addresses.")
     parser_master_init.add_argument('--master-switch-subnet', required=True,
                                     help="The smaller subnet just for master.")
+    parser_master_init.add_argument('--service-ip-subnet', required=True,
+                                    help="Subnet for kubernetes services.")
     parser_master_init.add_argument('--node-name',
                                     required=True,
                                     help="A unique node name.")
@@ -416,33 +421,35 @@ def main():
     parser_minion_init.add_argument('--minion-switch-subnet', required=True,
                                     help="The smaller subnet just for this "
                                     "master.")
+    parser_minion_init.add_argument('--service-ip-subnet', required=True,
+                                    help="Subnet for kubernetes services.")
     parser_minion_init.add_argument('--node-name',
                                     required=True,
                                     help="A unique node name.")
     parser_minion_init.set_defaults(func=minion_init)
 
     # Parser for sub-command 'gateway-init'.
-    parser_minion_init = subparsers.add_parser(
+    parser_gateway_init = subparsers.add_parser(
                                            'gateway-init',
                                            help="Initialize k8s gateway node")
-    parser_minion_init.add_argument('--cluster-ip-subnet', required=True,
-                                    help="The cluster wide larger subnet of "
-                                    "private ip addresses.")
-    parser_minion_init.add_argument('--physical-interface', required=True,
-                                    help="The physical interface via which "
-                                    "external connectivity is provided.")
-    parser_minion_init.add_argument('--physical-ip', required=True,
-                                    help="The ip address of the physical "
-                                    "interface via which external "
-                                    "connectivity is provided.  This should "
-                                    "be of the form IP/MASK.")
-    parser_minion_init.add_argument('--default-gw',
-                                    help="The next hop IP address for your "
-                                    "physical interface.")
-    parser_minion_init.add_argument('--node-name',
-                                    required=True,
-                                    help="A unique node name.")
-    parser_minion_init.set_defaults(func=gateway_init)
+    parser_gateway_init.add_argument('--cluster-ip-subnet', required=True,
+                                     help="The cluster wide larger subnet of "
+                                     "private ip addresses.")
+    parser_gateway_init.add_argument('--physical-interface', required=True,
+                                     help="The physical interface via which "
+                                     "external connectivity is provided.")
+    parser_gateway_init.add_argument('--physical-ip', required=True,
+                                     help="The ip address of the physical "
+                                     "interface via which external "
+                                     "connectivity is provided.  This should "
+                                     "be of the form IP/MASK.")
+    parser_gateway_init.add_argument('--default-gw',
+                                     help="The next hop IP address for your "
+                                     "physical interface.")
+    parser_gateway_init.add_argument('--node-name',
+                                     required=True,
+                                     help="A unique node name.")
+    parser_gateway_init.set_defaults(func=gateway_init)
 
     args = parser.parse_args()
     args.func(args)
