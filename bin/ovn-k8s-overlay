@@ -426,27 +426,27 @@ def main():
     parser_minion_init.set_defaults(func=minion_init)
 
     # Parser for sub-command 'gateway-init'.
-    parser_minion_init = subparsers.add_parser(
+    parser_gateway_init = subparsers.add_parser(
                                            'gateway-init',
                                            help="Initialize k8s gateway node")
-    parser_minion_init.add_argument('--cluster-ip-subnet', required=True,
-                                    help="The cluster wide larger subnet of "
-                                    "private ip addresses.")
-    parser_minion_init.add_argument('--physical-interface', required=True,
-                                    help="The physical interface via which "
-                                    "external connectivity is provided.")
-    parser_minion_init.add_argument('--physical-ip', required=True,
-                                    help="The ip address of the physical "
-                                    "interface via which external "
-                                    "connectivity is provided.  This should "
-                                    "be of the form IP/MASK.")
-    parser_minion_init.add_argument('--default-gw',
-                                    help="The next hop IP address for your "
-                                    "physical interface.")
-    parser_minion_init.add_argument('--node-name',
-                                    required=True,
-                                    help="A unique node name.")
-    parser_minion_init.set_defaults(func=gateway_init)
+    parser_gateway_init.add_argument('--cluster-ip-subnet', required=True,
+                                     help="The cluster wide larger subnet of "
+                                     "private ip addresses.")
+    parser_gateway_init.add_argument('--physical-interface', required=True,
+                                     help="The physical interface via which "
+                                     "external connectivity is provided.")
+    parser_gateway_init.add_argument('--physical-ip', required=True,
+                                     help="The ip address of the physical "
+                                     "interface via which external "
+                                     "connectivity is provided.  This should "
+                                     "be of the form IP/MASK.")
+    parser_gateway_init.add_argument('--default-gw',
+                                     help="The next hop IP address for your "
+                                     "physical interface.")
+    parser_gateway_init.add_argument('--node-name',
+                                     required=True,
+                                     help="A unique node name.")
+    parser_gateway_init.set_defaults(func=gateway_init)
 
     args = parser.parse_args()
     args.func(args)
