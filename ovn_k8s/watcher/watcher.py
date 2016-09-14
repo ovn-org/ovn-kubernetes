@@ -13,7 +13,11 @@
 # limitations under the License.
 
 from eventlet import greenpool
+import sys
 
+import ovs
+import ovs.unixctl
+import ovs.unixctl.server
 import ovs.vlog
 from ovn_k8s.common import variables
 from ovn_k8s.common import kubernetes
@@ -23,6 +27,29 @@ from ovn_k8s.watcher import endpoint_watcher
 from ovn_k8s.processor import conn_processor
 
 vlog = ovs.vlog.Vlog("watcher")
+exiting = False
+
+
+def _unixctl_exit(conn, unused_argv, unused_aux):
+    global exiting
+    exiting = True
+    conn.reply(None)
+
+
+def _unixctl_run():
+    ovs.unixctl.command_register("exit", "", 0, 0, _unixctl_exit, None)
+    error, unixctl_server = ovs.unixctl.server.UnixctlServer.create(None)
+    if error:
+        ovs.util.ovs_fatal(error, "could not create unixctl server", vlog)
+
+    while True:
+        unixctl_server.run()
+        if exiting:
+            unixctl_server.close()
+            sys.exit()
+        poller = ovs.poller.Poller()
+        unixctl_server.wait(poller)
+        poller.block()
 
 
 def _process_func(watcher, watcher_recycle_func):
@@ -56,10 +83,12 @@ def _create_k8s_endpoint_watcher():
 
 
 def start_threads():
+    pool = greenpool.GreenPool()
+    pool.spawn(_unixctl_run)
+
     pod_watcher_inst = _create_k8s_pod_watcher()
     service_watcher_inst = _create_k8s_service_watcher()
     endpoint_watcher_inst = _create_k8s_endpoint_watcher()
-    pool = greenpool.GreenPool()
 
     pool.spawn(_process_func, pod_watcher_inst, _create_k8s_pod_watcher)
     pool.spawn(_process_func, service_watcher_inst,
