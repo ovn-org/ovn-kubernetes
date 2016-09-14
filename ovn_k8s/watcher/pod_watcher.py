@@ -37,10 +37,7 @@ class PodWatcher(object):
     def _update_pod_cache(self, event_type, cache_key, pod_data):
         # Remove item from cache if it was deleted
         if event_type == 'DELETED':
-            # Do not take for granted that the pod is in the key, as there are
-            # some corner cases in which a pod could be deleted without ever
-            # making it to local cache
-            self.pod_cache.pop(cache_key, None)
+            del self.pod_cache[cache_key]
         else:
             # Update cache
             self.pod_cache[cache_key] = pod_data
