@@ -250,7 +250,8 @@ You then start a watcher on the master node to listen for Kubernetes events.
 This watcher is responsible to create logical ports and load-balancer entries.
 
 ```
-ovn-k8s-watcher --overlay --detach
+ovn-k8s-watcher --overlay --pidfile --log-file \
+ -vfile:info -vconsole:emer --detach
 ```
 
 The "underlay" mode

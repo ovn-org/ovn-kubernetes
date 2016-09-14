@@ -15,6 +15,7 @@
 
 import argparse
 import eventlet
+import os
 import sys
 
 import ovs.dirs
@@ -49,6 +50,17 @@ def main():
     parser.add_argument('--overlay', action='store_true')
     parser.add_argument('--underlay', action='store_true')
     parser.add_argument('--openstack', action='store_true')
+
+    # Since our instructions asks to do a 'pip install ovs',
+    # for python libraries, we do not know how OVS core
+    # utilities have been installed.  So we try to do a best
+    # guess.
+    if os.path.isfile("/usr/bin/ovs-vsctl"):
+        ovs.dirs.RUNDIR = "/var/run/openvswitch"
+        ovs.dirs.LOGDIR = "/var/log/openvswitch"
+    else:
+        ovs.dirs.RUNDIR = "/usr/local/var/run/openvswitch"
+        ovs.dirs.LOGDIR = "/usr/local/var/log/openvswitch"
 
     # Handle OVS logging and daemonization arguments.
     ovs.vlog.add_args(parser)
