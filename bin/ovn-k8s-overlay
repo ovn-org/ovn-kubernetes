@@ -345,7 +345,6 @@ def gateway_init(args):
         ovn_nbctl("add", "logical_router", gateway_router,
                   "load_balancer", k8s_ns_lb_udp)
 
-
     # Create the external switch for the physical interface to connect to.
     external_switch = "ext_%s" % (node_name)
     ovn_nbctl("--may-exist", "ls-add", external_switch)
