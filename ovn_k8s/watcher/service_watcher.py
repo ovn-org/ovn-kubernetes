@@ -38,7 +38,7 @@ class ServiceWatcher(object):
     def _update_service_cache(self, event_type, cache_key, service_data):
         # Remove item from cache if it was deleted
         if event_type == 'DELETED':
-            service_cache.pop(cache_key, None)
+            del self.service_cache[cache_key]
         else:
             # Update cache
             self.service_cache[cache_key] = service_data
