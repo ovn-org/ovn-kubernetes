@@ -58,8 +58,9 @@ def _process_func(watcher, watcher_recycle_func):
             watcher.process()
         except Exception as e:
             # Recycle watcher
-            vlog.warn("Regenerating watcher because of %s and reconnecting to "
-                      "stream using function %s"
+            vlog.exception("Failure in watcher %s" % type(watcher).__name__)
+            vlog.warn("Regenerating watcher because of \"%s\" and "
+                      "reconnecting to stream using function %s"
                       % (str(e), watcher_recycle_func.__name__))
             watcher = watcher_recycle_func()
 
