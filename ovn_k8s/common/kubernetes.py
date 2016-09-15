@@ -155,9 +155,9 @@ def _get_objects(url, namespace, resource_type, resource_id):
     if api_token:
         headers.update({'Authorization': 'Bearer %s' % api_token})
     if ca_certificate:
-        response = requests.get(url, verify=ca_certificate)
+        response = requests.get(url, headers=headers, verify=ca_certificate)
     else:
-        response = requests.get(url)
+        response = requests.get(url, headers=headers)
 
     if not response:
         if response.status_code == 404:
