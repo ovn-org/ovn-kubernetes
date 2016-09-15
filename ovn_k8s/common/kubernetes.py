@@ -28,7 +28,7 @@ vlog = ovs.vlog.Vlog("kubernetes")
 def _get_api_params():
     k8s_api_server = ovs_vsctl("--if-exists", "get", "Open_vSwitch", ".",
                                "external_ids:k8s-api-server").strip('"')
-    if "https" in k8s_api_server:
+    if k8s_api_server.startswith("https://"):
         k8s_ca_certificate = ovs_vsctl("--if-exists", "get", "Open_vSwitch",
                                        ".", "external_ids:k8s-ca-certificate"
                                        ).strip('"')
@@ -55,7 +55,7 @@ def _stream_api(url):
     ca_certificate, api_token = _get_api_params()
     headers = {}
     if api_token:
-        headers.update({'Authorization': 'Bearer %s' % api_token})
+        headers['Authorization'] = 'Bearer %s' % api_token
 
     if ca_certificate:
         response = requests.get(url, headers=headers,
@@ -93,7 +93,7 @@ def get_pod_annotations(server, namespace, pod):
 
     headers = {}
     if api_token:
-        headers.update({'Authorization': 'Bearer %s' % api_token})
+        headers['Authorization'] = 'Bearer %s' % api_token
 
     if ca_certificate:
         response = requests.get(url, headers=headers, verify=ca_certificate)
@@ -125,7 +125,7 @@ def set_pod_annotation(server, namespace, pod, key, value):
 
     headers = {'Content-Type': 'application/merge-patch+json'}
     if api_token:
-        headers.update({'Authorization': 'Bearer %s' % api_token})
+        headers['Authorization'] = 'Bearer %s' % api_token
     if ca_certificate:
         response = requests.patch(
             url,
@@ -153,7 +153,7 @@ def _get_objects(url, namespace, resource_type, resource_id):
 
     headers = {}
     if api_token:
-        headers.update({'Authorization': 'Bearer %s' % api_token})
+        headers['Authorization'] = 'Bearer %s' % api_token
     if ca_certificate:
         response = requests.get(url, headers=headers, verify=ca_certificate)
     else:

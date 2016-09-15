@@ -160,22 +160,22 @@ The above command will create a cluster wide logical router, a connected
 logical switch for the master node and a logical port and a OVS internal
 interface named "k8s-$NODE_NAME" with an IP address via which other nodes
 should be eventually able to reach the daemons running on this node.
-This IP address will be referred in the future as $OVN_CENTRAL_IP.
+This IP address will be referred in the future as $K8S_API_SERVER_IP.
 
 * k8s minion node initializations.
 
 Set the k8s API server address in the Open vSwitch database for the
 initialization scripts (and later daemons) to pick from.
-For unsecure connections:
+For insecure connections:
 
 ```
-ovs-vsctl set Open_vSwitch . external_ids:k8s-api-server="http://$OVN_CENTRAL_IP:8080"
+ovs-vsctl set Open_vSwitch . external_ids:k8s-api-server="http://$K8S_API_SERVER_IP:8080"
 ```
 
-For secure connections API_TOKEN should be provided. In case of self-signed certificates $PATH_TO_CA_CRT CA should be provided as well:
+For secure connections $API_TOKEN should be provided. In case of self-signed certificates $CA_CRT should be provided as well:
 ```
-ovs-vsctl set Open_vSwitch . external_ids:k8s-api-server="https://$OVN_CENTRAL_IP:8080" \
-external_ids:k8s-ca-certificate="$PATH_TO_CA_CRT" \
+ovs-vsctl set Open_vSwitch . external_ids:k8s-api-server="https://$K8S_API_SERVER_IP:8080" \
+external_ids:k8s-ca-certificate="$CA_CRT" \
 external_ids:k8s-api-token="$API_TOKEN"
 ```
 
@@ -220,7 +220,7 @@ Set the k8s API server address in the Open vSwitch database for the
 initialization scripts (and later daemons) to pick from.
 
 ```
-ovs-vsctl set Open_vSwitch . external_ids:k8s-api-server="$OVN_CENTRAL_IP:8080"
+ovs-vsctl set Open_vSwitch . external_ids:k8s-api-server="$K8S_API_SERVER_IP:8080"
 ```
 
 Clone this repository and install the executables.
