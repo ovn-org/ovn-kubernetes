@@ -128,7 +128,7 @@ Set the k8s API server address in the Open vSwitch database for the
 initialization scripts (and later daemons) to pick from.
 
 ```
-ovs-vsctl set Open_vSwitch . external_ids:k8s-api-server="0.0.0.0:8080"
+ovs-vsctl set Open_vSwitch . external_ids:k8s-api-server="http://127.0.0.1:8080"
 ```
 
 Clone this repository and install the executables.
@@ -166,10 +166,19 @@ This IP address will be referred in the future as $OVN_CENTRAL_IP.
 
 Set the k8s API server address in the Open vSwitch database for the
 initialization scripts (and later daemons) to pick from.
+For unsecure connections:
 
 ```
-ovs-vsctl set Open_vSwitch . external_ids:k8s-api-server="$OVN_CENTRAL_IP:8080"
+ovs-vsctl set Open_vSwitch . external_ids:k8s-api-server="http://$OVN_CENTRAL_IP:8080"
 ```
+
+For secure connections API_TOKEN should be provided. In case of self-signed certificates $PATH_TO_CA_CRT CA should be provided as well:
+```
+ovs-vsctl set Open_vSwitch . external_ids:k8s-api-server="https://$OVN_CENTRAL_IP:8080" \
+external_ids:k8s-ca-certificate="$PATH_TO_CA_CRT" \
+external_ids:k8s-api-token="$API_TOKEN"
+```
+
 
 Clone this repository and install the executables.
 

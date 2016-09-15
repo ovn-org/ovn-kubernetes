@@ -17,14 +17,52 @@ import requests
 
 import ovs.vlog
 
+from os import path
 from ovn_k8s.common import exceptions
+from ovn_k8s.common.util import ovs_vsctl
 
+CA_CERTIFICATE = "/usr/share/openvswitch/k8s-ca.crt"
 vlog = ovs.vlog.Vlog("kubernetes")
 
 
+def _get_api_params():
+    k8s_api_server = ovs_vsctl("--if-exists", "get", "Open_vSwitch", ".",
+                               "external_ids:k8s-api-server").strip('"')
+    if "https" in k8s_api_server:
+        k8s_ca_certificate = ovs_vsctl("--if-exists", "get", "Open_vSwitch",
+                                       ".", "external_ids:k8s-ca-certificate"
+                                       ).strip('"')
+        if k8s_ca_certificate:
+            k8s_ca_certificate = k8s_ca_certificate.replace("\\n", "\n")
+            if not path.isfile(CA_CERTIFICATE):
+                ca_file = open(CA_CERTIFICATE, 'w+')
+                ca_file.write(k8s_ca_certificate)
+            ca_cert = CA_CERTIFICATE
+        else:
+            ca_cert = None
+
+    k8s_api_token = ovs_vsctl("--if-exists", "get", "Open_vSwitch", ".",
+                              "external_ids:k8s-api-token").strip('"')
+    if k8s_api_token:
+        token = k8s_api_token
+    else:
+        token = None
+
+    return ca_cert, token
+
+
 def _stream_api(url):
-    # TODO: HTTPS and authentication
-    response = requests.get(url, stream=True)
+    ca_certificate, api_token = _get_api_params()
+    headers = {}
+    if api_token:
+        headers.update({'Authorization': 'Bearer %s' % api_token})
+
+    if ca_certificate:
+        response = requests.get(url, headers=headers,
+                                verify=ca_certificate, stream=True)
+    else:
+        response = requests.get(url, headers=headers, stream=True)
+
     if response.status_code != 200:
         # TODO: raise here
         return
@@ -32,7 +70,7 @@ def _stream_api(url):
 
 
 def _watch_resource(server, resource):
-    url = "http://%s/api/v1/%s?watch=true" % (server, resource)
+    url = "%s/api/v1/%s?watch=true" % (server, resource)
     return _stream_api(url)
 
 
@@ -49,9 +87,18 @@ def watch_endpoints(server):
 
 
 def get_pod_annotations(server, namespace, pod):
-    url = ("http://%s/api/v1/namespaces/%s/pods/%s" %
+    ca_certificate, api_token = _get_api_params()
+    url = ("%s/api/v1/namespaces/%s/pods/%s" %
            (server, namespace, pod))
-    response = requests.get(url)
+
+    headers = {}
+    if api_token:
+        headers.update({'Authorization': 'Bearer %s' % api_token})
+
+    if ca_certificate:
+        response = requests.get(url, headers=headers, verify=ca_certificate)
+    else:
+        response = requests.get(url, headers=headers)
     if not response or response.status_code != 200:
         # TODO: raise here
         return
@@ -62,8 +109,10 @@ def get_pod_annotations(server, namespace, pod):
 
 
 def set_pod_annotation(server, namespace, pod, key, value):
-    url = ("http://%s/api/v1/namespaces/%s/pods/%s" %
+    ca_certificate, api_token = _get_api_params()
+    url = ("%s/api/v1/namespaces/%s/pods/%s" %
            (server, namespace, pod))
+
     # NOTE: This is not probably compliant with RFC 7386 but appears to work
     # with the kubernetes API server.
     patch = {
@@ -73,10 +122,22 @@ def set_pod_annotation(server, namespace, pod, key, value):
             }
         }
     }
-    response = requests.patch(
-        url,
-        data=json.dumps(patch),
-        headers={'Content-Type': 'application/merge-patch+json'})
+
+    headers = {'Content-Type': 'application/merge-patch+json'}
+    if api_token:
+        headers.update({'Authorization': 'Bearer %s' % api_token})
+    if ca_certificate:
+        response = requests.patch(
+            url,
+            data=json.dumps(patch),
+            headers=headers,
+            verify=ca_certificate)
+    else:
+        response = requests.patch(
+            url,
+            data=json.dumps(patch),
+            headers=headers)
+
     if not response or response.status_code != 200:
         # TODO: Raise appropriate exception
         raise Exception("Something went wrong while annotating pod: %s" %
@@ -88,7 +149,16 @@ def set_pod_annotation(server, namespace, pod, key, value):
 
 
 def _get_objects(url, namespace, resource_type, resource_id):
-    response = requests.get(url)
+    ca_certificate, api_token = _get_api_params()
+
+    headers = {}
+    if api_token:
+        headers.update({'Authorization': 'Bearer %s' % api_token})
+    if ca_certificate:
+        response = requests.get(url, verify=ca_certificate)
+    else:
+        response = requests.get(url)
+
     if not response:
         if response.status_code == 404:
             raise exceptions.NotFound(resource_type=resource_type,
@@ -102,7 +172,7 @@ def _get_objects(url, namespace, resource_type, resource_id):
 
 
 def get_service(server, namespace, service):
-    url = "http://%s/api/v1/namespaces/%s/services/%s" \
+    url = "%s/api/v1/namespaces/%s/services/%s" \
             % (server, namespace, service)
     return _get_objects(url, namespace, 'service', service)
 
