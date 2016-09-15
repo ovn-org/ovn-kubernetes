@@ -28,7 +28,6 @@ class OvnNB(object):
     def __init__(self):
         self.service_cache = {}
         self.logical_switch_cache = {}
-        self.gateway_ip_cache = {}
         self.physical_gateway_ips = []
 
     def _get_physical_gateway_ips(self):
