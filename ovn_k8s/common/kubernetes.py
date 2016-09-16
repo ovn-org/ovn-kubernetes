@@ -87,16 +87,31 @@ def set_pod_annotation(server, namespace, pod, key, value):
     return annotations
 
 
-def get_service(server, namespace, service):
-    url = ("http://%s/api/v1/namespaces/%s/services/%s"
-           % (server, namespace, service))
+def _get_objects(url, namespace, resource_type, resource_id):
     response = requests.get(url)
     if not response:
         if response.status_code == 404:
-            raise exceptions.NotFound(resource_type='service',
-                                      resource_id=service)
+            raise exceptions.NotFound(resource_type=resource_type,
+                                      resource_id=resource_id)
         else:
-            raise Exception("Failed to fetch service (%d) :%s" % (
-                response.status_code, response.text))
+            raise Exception("Failed to fetch %s:%s in namespace %s (%d) :%s"
+                            % (resource_type, resource_id, namespace,
+                               response.status_code, response.text))
 
     return response.json()
+
+
+def get_service(server, namespace, service):
+    url = "http://%s/api/v1/namespaces/%s/services/%s" \
+            % (server, namespace, service)
+    return _get_objects(url, namespace, 'service', service)
+
+
+def get_all_pods(server):
+    url = "http://%s/api/v1/pods" % (server)
+    return _get_objects(url, 'all', 'pod', "all_pods")
+
+
+def get_all_services(server):
+    url = "http://%s/api/v1/services" % (server)
+    return _get_objects(url, 'all', 'service', "all_services")
