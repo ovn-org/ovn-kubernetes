@@ -230,6 +230,8 @@ class OvnNB(object):
         if not service_ports:
             return
 
+        external_ips = service_data['spec'].get('externalIPs')
+
         physical_gateway_ips = self._get_physical_gateway_ips()
 
         for service_port in service_ports:
@@ -249,9 +251,15 @@ class OvnNB(object):
                     self._create_load_balancer_vip(service_type, gateway_ip,
                                                    ips, port, target_port,
                                                    protocol)
-            else:
+            elif service_type == "ClusterIP":
                 self._create_load_balancer_vip(service_type, service_ip, ips,
                                                port, target_port, protocol)
+
+            if external_ips:
+                for external_ip in external_ips:
+                    self._create_load_balancer_vip("NodePort", external_ip,
+                                                   ips, port, target_port,
+                                                   protocol)
 
     def update_vip(self, event):
         service_data = event.metadata
@@ -370,6 +378,8 @@ class OvnNB(object):
             if not service_ports:
                 continue
 
+            external_ips = service['spec'].get('externalIPs')
+
             for service_port in service_ports:
                 if service_type == "NodePort":
                     port = service_port.get('nodePort')
@@ -389,12 +399,20 @@ class OvnNB(object):
                             tcp_nodeport_services.append(key)
                         else:
                             udp_nodeport_services.append(key)
-                else:
+                elif service_type == "ClusterIP":
                     key = "%s:%s" % (service_ip, port)
                     if protocol == "TCP":
                         tcp_services.append(key)
                     else:
                         udp_services.append(key)
+
+                if external_ips:
+                    for external_ip in external_ips:
+                        key = "%s:%s" % (external_ip, port)
+                        if protocol == "TCP":
+                            tcp_nodeport_services.append(key)
+                        else:
+                            udp_nodeport_services.append(key)
 
         # For each of the OVN load-balancer, if the VIP that exists in
         # the load balancer is not seen in current k8s services, we
