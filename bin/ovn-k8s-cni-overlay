@@ -17,7 +17,6 @@ import argparse
 import ast
 import json
 import os
-import re
 import shlex
 import sys
 import time
@@ -51,8 +50,8 @@ class OVNCNIException(Exception):
         return json.dumps(error_data)
 
 
-def setup_interface(pid, container_id, cni_ifname, mac_address,
-                    ip_address, gateway_ip):
+def setup_interface(container_id, cni_netns, cni_ifname,
+                    mac_address, ip_address, gateway_ip):
     try:
         if not os.path.exists("/var/run/netns"):
             os.makedirs("/var/run/netns")
@@ -79,56 +78,56 @@ def setup_interface(pid, container_id, cni_ifname, mac_address,
 
         # Create a link for the container namespace
         vlog.dbg("Create a link for container namespace")
-        netns_dst = "/var/run/netns/%s" % pid
+        netns_dst = "/var/run/netns/%s" % container_id
         if not os.path.isfile(netns_dst):
-            netns_src = "/proc/%s/ns/net" % pid
-            command = "ln -s %s %s" % (netns_src, netns_dst)
+            command = "ln -s %s %s" % (cni_netns, netns_dst)
             call_popen(shlex.split(command))
 
         # Move the inner veth inside the container namespace
         vlog.dbg("Adding veth inner interface to namespace for container %s"
                  % container_id)
-        command = "ip link set %s netns %s" % (veth_inside, pid)
+        command = "ip link set %s netns %s" % (veth_inside, container_id)
         call_popen(shlex.split(command))
 
         # Change the name of veth_inside to $cni_ifname
         vlog.dbg("Renaming veth inner interface '%s' to '%s'"
                  % (veth_inside, cni_ifname))
         command = "ip netns exec %s ip link set dev %s name %s" \
-                  % (pid, veth_inside, cni_ifname)
+                  % (container_id, veth_inside, cni_ifname)
         call_popen(shlex.split(command))
 
         # Up the inner interface
         vlog.dbg("Bringing veth inner interface '%s' up" % cni_ifname)
-        command = "ip netns exec %s ip link set %s up" % (pid, cni_ifname)
+        command = "ip netns exec %s ip link set %s up" % (container_id,
+                                                          cni_ifname)
         call_popen(shlex.split(command))
 
         # Set the mtu to handle tunnels
         vlog.dbg("Adjusting veth interface '%s' MTU for tunneling to %d"
                  % (cni_ifname, 1400))
         command = "ip netns exec %s ip link set dev %s mtu %s" \
-                  % (pid, cni_ifname, 1400)
+                  % (container_id, cni_ifname, 1400)
         call_popen(shlex.split(command))
 
         # Set the ip address
         vlog.dbg("Setting IP address for container:%s interface:%s"
                  % (container_id, cni_ifname))
         command = "ip netns exec %s ip addr add %s dev %s" \
-                  % (pid, ip_address, cni_ifname)
+                  % (container_id, ip_address, cni_ifname)
         call_popen(shlex.split(command))
 
         # Set the mac address
         vlog.dbg("Setting MAC address for container:%s interface:%s"
                  % (container_id, cni_ifname))
         command = "ip netns exec %s ip link set dev %s address %s" \
-                  % (pid, cni_ifname, mac_address)
+                  % (container_id, cni_ifname, mac_address)
         call_popen(shlex.split(command))
 
         # Set the gateway
         vlog.dbg("Setting gateway_ip %s for container:%s"
                  % (gateway_ip, container_id))
         command = "ip netns exec %s ip route add default via %s" \
-                  % (pid, gateway_ip)
+                  % (container_id, gateway_ip)
         call_popen(shlex.split(command))
 
         return veth_outside
@@ -146,12 +145,6 @@ def cni_add(cni_ifname, cni_netns, namespace, pod_name, container_id):
         raise OVNCNIException(100, "failed to get K8S_API_SERVER")
     if not k8s_api_server.startswith("http"):
         k8s_api_server = "http://%s" % k8s_api_server
-
-    pid_match = re.match("^/proc/(.\d*)/ns/net$", cni_netns)
-    if not pid_match:
-        raise OVNCNIException(100,
-                              "unable to extract container pid from namespace")
-    pid = pid_match.groups()[0]
 
     # Get the IP address and MAC address from the API server.
     # Wait for a maximum of 3 seconds with a retry every 0.1 second.
@@ -183,7 +176,7 @@ def cni_add(cni_ifname, cni_netns, namespace, pod_name, container_id):
     except Exception as e:
         OVNCNIException(100, "failed in pod annotation key extract")
 
-    veth_outside = setup_interface(pid, container_id, cni_ifname,
+    veth_outside = setup_interface(container_id, cni_netns, cni_ifname,
                                    mac_address, ip_address,
                                    gateway_ip)
 
@@ -205,19 +198,14 @@ def cni_add(cni_ifname, cni_netns, namespace, pod_name, container_id):
     print(output)
 
 
-def cni_del(cni_netns, container_id):
+def cni_del(container_id):
     try:
         ovs_vsctl("del-port", container_id[:15])
     except Exception:
         message = "failed to delete OVS port %s" % container_id[:15]
         vlog.err(message)
 
-    pid_match = re.match("^/proc/(.\d*)/ns/net$", cni_netns)
-    if not pid_match:
-        raise OVNCNIException(100,
-                              "unable to extract container pid from namespace")
-    pid = pid_match.groups()[0]
-    command = "rm -f /var/run/netns/%s" % pid
+    command = "rm -f /var/run/netns/%s" % container_id
     call_popen(shlex.split(command))
 
 
@@ -256,7 +244,7 @@ def main():
     if cni_command == "ADD":
         cni_add(cni_ifname, cni_netns, namespace, pod_name, container_id)
     elif cni_command == "DEL":
-        cni_del(cni_netns, container_id)
+        cni_del(container_id)
 
 
 if __name__ == '__main__':
