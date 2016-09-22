@@ -22,6 +22,8 @@ import sys
 import time
 
 import ovs.vlog
+import pyroute2
+
 from ovn_k8s.common import kubernetes
 from ovn_k8s.common.util import ovs_vsctl
 from ovn_k8s.common.util import call_popen
@@ -60,82 +62,62 @@ def setup_interface(container_id, cni_netns, cni_ifname,
         raise OVNCNIException(100, "failure in creation of netns directory")
 
     try:
+        ipdb = pyroute2.IPDB(mode='explicit')
         vlog.dbg("Creating veth pair for container %s" % container_id)
         veth_outside = container_id[:15]
         veth_inside = container_id[:13] + "_c"
-        command = "ip link add %s type veth peer name %s" \
-                  % (veth_outside, veth_inside)
-        call_popen(shlex.split(command))
-    except Exception as e:
-        vlog.warn("failed to create veth pairs")
-        raise OVNCNIException(100, "failed to create veth pair")
-
-    try:
-        # Up the outer interface
-        vlog.dbg("Bringing up veth outer interface %s" % veth_outside)
-        command = "ip link set %s up" % veth_outside
-        call_popen(shlex.split(command))
+        ipdb.create(ifname=veth_outside, kind='veth', peer=veth_inside)
+        with ipdb.interfaces[veth_outside] as veth_outside_iface:
+            # Up the outer interface
+            vlog.dbg("Bringing up veth outer interface %s" % veth_outside)
+            veth_outside_iface.up()
+            veth_outside_idx = veth_outside_iface.index
 
         # Create a link for the container namespace
+        # This is necessary also when using pyroute2
+        # See https://github.com/svinota/pyroute2/issues/290
         vlog.dbg("Create a link for container namespace")
         netns_dst = "/var/run/netns/%s" % container_id
         if not os.path.isfile(netns_dst):
             command = "ln -s %s %s" % (cni_netns, netns_dst)
             call_popen(shlex.split(command))
 
-        # Move the inner veth inside the container namespace
-        vlog.dbg("Adding veth inner interface to namespace for container %s"
-                 % container_id)
-        command = "ip link set %s netns %s" % (veth_inside, container_id)
-        call_popen(shlex.split(command))
+        with ipdb.interfaces[veth_inside] as veth_inside_iface:
+            # Move the inner veth inside the container namespace
+            vlog.dbg("Adding veth inner interface to namespace for "
+                     "container %s" % container_id)
+            veth_inside_iface.net_ns_fd = container_id
 
+    except Exception as e:
+        vlog.warn("failed to create veth pairs")
+        raise OVNCNIException(100, "veth pair setup failure")
+
+    try:
         # Change the name of veth_inside to $cni_ifname
-        vlog.dbg("Renaming veth inner interface '%s' to '%s'"
-                 % (veth_inside, cni_ifname))
-        command = "ip netns exec %s ip link set dev %s name %s" \
-                  % (container_id, veth_inside, cni_ifname)
-        call_popen(shlex.split(command))
-
-        # Up the inner interface
-        vlog.dbg("Bringing veth inner interface '%s' up" % cni_ifname)
-        command = "ip netns exec %s ip link set %s up" % (container_id,
-                                                          cni_ifname)
-        call_popen(shlex.split(command))
-
-        # Set the mtu to handle tunnels
-        vlog.dbg("Adjusting veth interface '%s' MTU for tunneling to %d"
-                 % (cni_ifname, 1400))
-        command = "ip netns exec %s ip link set dev %s mtu %s" \
-                  % (container_id, cni_ifname, 1400)
-        call_popen(shlex.split(command))
-
-        # Set the ip address
-        vlog.dbg("Setting IP address for container:%s interface:%s"
-                 % (container_id, cni_ifname))
-        command = "ip netns exec %s ip addr add %s dev %s" \
-                  % (container_id, ip_address, cni_ifname)
-        call_popen(shlex.split(command))
-
-        # Set the mac address
-        vlog.dbg("Setting MAC address for container:%s interface:%s"
-                 % (container_id, cni_ifname))
-        command = "ip netns exec %s ip link set dev %s address %s" \
-                  % (container_id, cni_ifname, mac_address)
-        call_popen(shlex.split(command))
+        ns_ipdb = pyroute2.IPDB(nl=pyroute2.NetNS(container_id),
+                                mode='explicit')
+        # Configure veth_inside: set name, mtu, mac address, ip, and bring up
+        vlog.dbg("Configuring and bringing up veth inner interface %s. "
+                 "New name:'%s',MAC address:'%s', MTU:'%s', IP:%s" %
+                 (veth_inside, cni_ifname, mac_address, 1400, ip_address))
+        with ns_ipdb.interfaces[veth_inside] as veth_inside_iface:
+            veth_inside_iface.ifname = cni_ifname
+            veth_inside_iface.address = mac_address
+            veth_inside_iface.mtu = 1400
+            veth_inside_iface.add_ip(ip_address)
+            veth_inside_iface.up()
 
         # Set the gateway
         vlog.dbg("Setting gateway_ip %s for container:%s"
                  % (gateway_ip, container_id))
-        command = "ip netns exec %s ip route add default via %s" \
-                  % (container_id, gateway_ip)
-        call_popen(shlex.split(command))
+        ns_ipdb.routes.add(dst='default', gateway=gateway_ip).commit()
 
         return veth_outside
     except Exception as e:
         vlog.warn("Failed to setup veth pair for pod: %s" % str(e))
-        command = "ip link delete %s" % (veth_outside)
-        call_popen(shlex.split(command))
-        raise OVNCNIException(100, "veth setup failure")
+        if veth_outside_idx:
+            pyroute2.IPRoute().link('del', index=veth_outside_idx)
+        raise OVNCNIException(100, "container interface setup failure")
 
 
 def cni_add(cni_ifname, cni_netns, namespace, pod_name, container_id):
