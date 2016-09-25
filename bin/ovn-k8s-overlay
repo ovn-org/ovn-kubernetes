@@ -26,7 +26,7 @@ from ovn_k8s.common.util import ovs_vsctl
 from ovn_k8s.common.util import ovn_nbctl
 from ovn_k8s.common import variables
 
-CNI_CONF_PATH = "/usr/libexec/kubernetes/kubelet-plugins/net/exec"
+CNI_CONF_PATH = "/etc/cni/net.d"
 CNI_LINK_PATH = "/opt/cni/bin/"
 CNI_PLUGIN = "ovn-k8s-cni-overlay"
 
