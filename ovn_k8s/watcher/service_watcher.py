@@ -62,6 +62,10 @@ class ServiceWatcher(object):
         cached_service = self.service_cache.get(cache_key, {})
         self._update_service_cache(event_type, cache_key, service_data)
 
+        # TODO: A service can be patched (i.e modified) and its ports
+        # and external_ips can be changed.  We need a way to handle it.
+        # One way would be to send a delete and create connectivity events.
+
         has_conn_event = False
         if not cached_service:
             has_conn_event = True
