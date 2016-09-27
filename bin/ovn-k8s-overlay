@@ -99,6 +99,7 @@ def create_management_port(node_name, local_subnet, cluster_subnet):
     ovs_vsctl("--", "--may-exist", "add-port", "br-int",
               interface_name, "--", "set", "interface",
               interface_name, "type=internal",
+              "mtu_request=1400",
               "external-ids:iface-id=k8s-" + node_name)
 
     mac_address = ovs_vsctl("--if-exists", "get", "interface",
