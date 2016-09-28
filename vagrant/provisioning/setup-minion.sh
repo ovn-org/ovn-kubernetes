@@ -21,9 +21,10 @@ MINION_SUBNET=$5
 # FIXME(mestery): Remove once Vagrant boxes allow apt-get to work again
 sudo rm -rf /var/lib/apt/lists/*
 sudo apt-get update
+sudo apt-get build-dep dkms
 sudo apt-get install -y graphviz autoconf automake bzip2 debhelper dh-autoreconf \
                         libssl-dev libtool openssl procps python-all \
-                        python-twisted-conch python-zopeinterface python-six
+                        python-twisted-conch python-zopeinterface python-six dkms
 
 git clone https://github.com/openvswitch/ovs.git
 pushd ovs/
@@ -31,13 +32,13 @@ sudo DEB_BUILD_OPTIONS='nocheck parallel=2' fakeroot debian/rules binary
 
 # Install OVS/OVN debs
 popd
+sudo dpkg -i openvswitch-datapath-dkms_2.6.90-1_all.deb
 sudo dpkg -i openvswitch-switch_2.6.90-1_amd64.deb openvswitch-common_2.6.90-1_amd64.deb \
              ovn-common_2.6.90-1_amd64.deb python-openvswitch_2.6.90-1_all.deb \
              ovn-docker_2.6.90-1_amd64.deb ovn-host_2.6.90-1_amd64.deb
 
 # Start the daemons
-sudo /etc/init.d/openvswitch-switch stop
-sudo /etc/init.d/openvswitch-switch start
+sudo /etc/init.d/openvswitch-switch force-reload-kmod
 
 sudo ovs-vsctl set Open_vSwitch . external_ids:ovn-remote="tcp:$MASTER_OVERLAY_IP:6642" \
                                   external_ids:ovn-nb="tcp:$MASTER_OVERLAY_IP:6641" \
@@ -50,9 +51,6 @@ sudo /usr/share/openvswitch/scripts/ovn-ctl start_controller
 
 # Set k8s API server IP
 sudo ovs-vsctl set Open_vSwitch . external_ids:k8s-api-server="$MASTER_OVERLAY_IP:8080"
-
-# Create br-int
-sudo ovs-vsctl add-br --may-exist br-int
 
 # Install OVN+K8S Integration
 sudo apt-get install -y python-pip
