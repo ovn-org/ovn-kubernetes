@@ -21,34 +21,34 @@ from os import path
 from ovn_k8s.common import exceptions
 from ovn_k8s.common.util import ovs_vsctl
 
-CA_CERTIFICATE = "/usr/share/openvswitch/k8s-ca.crt"
+CA_CERTIFICATE = "/etc/openvswitch/k8s-ca.crt"
 vlog = ovs.vlog.Vlog("kubernetes")
 
 
 def _get_api_params():
+    ca_certificate = None
+    api_token = None
     k8s_api_server = ovs_vsctl("--if-exists", "get", "Open_vSwitch", ".",
                                "external_ids:k8s-api-server").strip('"')
     if k8s_api_server.startswith("https://"):
-        k8s_ca_certificate = ovs_vsctl("--if-exists", "get", "Open_vSwitch",
-                                       ".", "external_ids:k8s-ca-certificate"
-                                       ).strip('"')
-        if k8s_ca_certificate:
-            k8s_ca_certificate = k8s_ca_certificate.replace("\\n", "\n")
-            if not path.isfile(CA_CERTIFICATE):
+        if not path.isfile(CA_CERTIFICATE):
+            k8s_ca_crt = ovs_vsctl("--if-exists", "get", "Open_vSwitch",
+                                   ".", "external_ids:k8s-ca-certificate"
+                                   ).strip('"')
+            if k8s_ca_crt:
+                k8s_ca_crt = k8s_ca_crt.replace("\\n", "\n")
                 ca_file = open(CA_CERTIFICATE, 'w+')
-                ca_file.write(k8s_ca_certificate)
-            ca_cert = CA_CERTIFICATE
+                ca_file.write(k8s_ca_crt)
+                ca_certificate = CA_CERTIFICATE
         else:
-            ca_cert = None
+            ca_certificate = CA_CERTIFICATE
 
     k8s_api_token = ovs_vsctl("--if-exists", "get", "Open_vSwitch", ".",
                               "external_ids:k8s-api-token").strip('"')
     if k8s_api_token:
-        token = k8s_api_token
-    else:
-        token = None
+        api_token = k8s_api_token
 
-    return ca_cert, token
+    return ca_certificate, api_token
 
 
 def _stream_api(url):
@@ -178,10 +178,10 @@ def get_service(server, namespace, service):
 
 
 def get_all_pods(server):
-    url = "http://%s/api/v1/pods" % (server)
+    url = "%s/api/v1/pods" % (server)
     return _get_objects(url, 'all', 'pod', "all_pods")
 
 
 def get_all_services(server):
-    url = "http://%s/api/v1/services" % (server)
+    url = "%s/api/v1/services" % (server)
     return _get_objects(url, 'all', 'service', "all_services")

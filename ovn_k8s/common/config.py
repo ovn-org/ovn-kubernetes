@@ -29,7 +29,10 @@ def ovn_init_overlay():
                                "external_ids:k8s-api-server").strip('"')
     if not K8S_API_SERVER:
         sys.exit("K8S_API_SERVER not set")
-    variables.K8S_API_SERVER = K8S_API_SERVER
+    if not K8S_API_SERVER.startswith("http"):
+        variables.K8S_API_SERVER = "http://%s" % K8S_API_SERVER
+    else:
+        variables.K8S_API_SERVER = K8S_API_SERVER
 
     K8S_CLUSTER_ROUTER = ovn_nbctl("--data=bare", "--no-heading",
                                    "--columns=_uuid", "find", "logical_router",

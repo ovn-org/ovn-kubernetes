@@ -144,6 +144,8 @@ def cni_add(cni_ifname, cni_netns, namespace, pod_name, container_id):
                                "external_ids:k8s-api-server").strip('"')
     if not k8s_api_server:
         raise OVNCNIException(100, "failed to get K8S_API_SERVER")
+    if not k8s_api_server.startswith("http"):
+        k8s_api_server = "http://%s" % k8s_api_server
 
     pid_match = re.match("^/proc/(.\d*)/ns/net$", cni_netns)
     if not pid_match:
