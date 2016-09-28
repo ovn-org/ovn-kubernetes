@@ -1,0 +1,28 @@
+---
+box: "ubuntu/xenial64"
+public_network: "10.10.0.0/16"
+public_gateway: "10.10.0.1"
+k8smaster:
+  short_name: "k8smaster"
+  host_name: "k8smaster.ovn"
+  overlay-ip: "192.168.33.11"
+  public-ip: "10.10.0.11"
+  master-switch-subnet: "192.168.1.0/24"
+  memory: 2048
+  cpus: 2
+k8sminion1:
+  short_name: "k8sminion1"
+  host_name: "k8sminion1.ovn"
+  overlay-ip: "192.168.33.12"
+  public-ip: "10.10.0.12"
+  minion-switch-subnet: "192.168.2.0/24"
+  memory: 2048
+  cpus: 2
+k8sminion2:
+  short_name: "k8sminion2"
+  host_name: "k8sminion2.ovn"
+  overlay-ip: "192.168.33.13"
+  public-ip: "10.10.0.13"
+  minion-switch-subnet: "192.168.3.0/24"
+  memory: 2048
+  cpus: 2
