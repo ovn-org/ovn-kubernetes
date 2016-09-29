@@ -29,6 +29,7 @@ a north-south service. To try these out, follow these instructions.
 
 * cd ~/k8s/server/kubernetes/server/bin
 * ./kubectl create -f ~/apache-pod.yaml
+* ./kubectl create -f ~/nginx-pod.yaml
 * ./kubectl create -f ~/apache-e-w.yaml
 * ./kubectl create -f ~/apache-n-s.yaml
 
@@ -42,6 +43,9 @@ the Nodeport and the IP 10.10.0.11 (the public-ip for the master found in
 the vagrant/provisioning/virtualbox.conf.yml file).
 
 * curl 10.10.0.11:[nodeport]
+
+You should see OVN doing load-balancing between the pods, which means you will
+both the apache example page and the nginx example page.
 
 Launch a busybox pod:
 
