@@ -20,32 +20,28 @@ Bringup the Vagrant setup
 
 * vagrant up
 
-Create a pod
-------------
+Run some containers
+-------------------
 
-Create apache.yaml as follows:
+The Vagrant will create some sample yaml files for configuring a pod
+running Apache, as well as yaml for creating an east-west service and
+a north-south service. To try these out, follow these instructions.
 
-```
-apiVersion: v1
-kind: Pod
-metadata:
-  name: apache
-  labels:
-    name: apache
-spec:
-  containers:
-  - name: apache
-    image: fedora/apache
-```
+* cd ~/k8s/server/kubernetes/server/bin
+* ./kubectl create -f ~/apache-pod.yaml
+* ./kubectl create -f ~/apache-e-w.yaml
+* ./kubectl create -f ~/apache-n-s.yaml
 
-Run that as follows:
+You can verify the services are up and running now:
 
-* kubectl create -f ~/apache.yaml
+* ./kubectl get pods
+* ./kubectl get svc
 
-Look at this deployment:
+You can now get to the service from the host running Virtualbox by using
+the Nodeport and the IP 10.10.0.11 (the public-ip for the master found in
+the vagrant/provisioning/virtualbox.conf.yml file).
 
-* kubectl get pods,svc
-* kubectl describe pod apache
+* curl 10.10.0.11:[nodeport]
 
 Launch a busybox pod:
 

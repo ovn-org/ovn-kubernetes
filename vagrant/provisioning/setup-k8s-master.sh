@@ -68,5 +68,56 @@ sudo ovn-k8s-overlay gateway-init --cluster-ip-subnet="192.168.0.0/16" --physica
 sleep 5
 popd
 
+# Setup some example yaml files
+cat << APACHEPOD >> ~/apache-pod.yaml
+apiVersion: v1
+kind: Pod
+metadata:
+  name: apachetwin
+  labels:
+    name: apache
+spec:
+  containers:
+  - name: apachetwin
+    image: fedora/apache
+APACHEPOD
+
+cat << APACHEEW >> ~/apache-e-w.yaml
+apiVersion: v1
+kind: Service
+metadata:
+  labels:
+    name: apacheservice
+    role: service
+  name: apacheservice
+spec:
+  ports:
+    - port: 8800
+      targetPort: 80
+      protocol: TCP
+      name: tcp
+  selector:
+    name: apache
+APACHEEW
+
+cat << APACHENS >> ~/apache-n-s.yaml
+apiVersion: v1
+kind: Service
+metadata:
+  labels:
+    name: apacheexternal
+    role: service
+  name: apacheexternal
+spec:
+  ports:
+    - port: 8800
+      targetPort: 80
+      protocol: TCP
+      name: tcp
+  selector:
+    name: apache
+  type: NodePort
+APACHENS
+
 # Restore xtrace
 $XTRACE
