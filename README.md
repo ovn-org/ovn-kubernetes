@@ -177,7 +177,8 @@ ovs-vsctl set Open_vSwitch . \
 
 For secure connections $API_TOKEN should be provided. In case of self-signed
 certificates $CA_CRT should be present in /etc/openvswitch/k8s-ca.crt or
-stored in the OVSDB:
+stored in the OVSDB.
+Please note that: if no protocol is specified in external_ids:k8s-api-server, insecure http connection will be used.
 
 ```
 ovs-vsctl set Open_vSwitch . \

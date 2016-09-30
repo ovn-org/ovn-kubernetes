@@ -20,6 +20,7 @@ import ovs.vlog
 from os import path
 from ovn_k8s.common import exceptions
 from ovn_k8s.common.util import ovs_vsctl
+from ovn_k8s.common import variables
 
 CA_CERTIFICATE = "/etc/openvswitch/k8s-ca.crt"
 vlog = ovs.vlog.Vlog("kubernetes")
@@ -28,10 +29,15 @@ vlog = ovs.vlog.Vlog("kubernetes")
 def _get_api_params():
     ca_certificate = None
     api_token = None
-    k8s_api_server = ovs_vsctl("--if-exists", "get", "Open_vSwitch", ".",
-                               "external_ids:k8s-api-server").strip('"')
+    if not variables.K8S_API_SERVER:
+        k8s_api_server = ovs_vsctl("--if-exists", "get", "Open_vSwitch", ".",
+                                   "external_ids:k8s-api-server").strip('"')
+    else:
+        k8s_api_server = variables.K8S_API_SERVER
+
     if k8s_api_server.startswith("https://"):
         if not path.isfile(CA_CERTIFICATE):
+            vlog.info("Going to look for k8s-ca-certificate in OVSDB")
             k8s_ca_crt = ovs_vsctl("--if-exists", "get", "Open_vSwitch",
                                    ".", "external_ids:k8s-ca-certificate"
                                    ).strip('"')
