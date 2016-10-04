@@ -105,7 +105,7 @@ def get_pod_annotations(server, namespace, pod):
         response = requests.get(url, headers=headers, verify=ca_certificate)
     else:
         response = requests.get(url, headers=headers)
-    if not response or response.status_code != 200:
+    if not response:
         # TODO: raise here
         return
     json_response = response.json()
@@ -144,7 +144,7 @@ def set_pod_annotation(server, namespace, pod, key, value):
             data=json.dumps(patch),
             headers=headers)
 
-    if not response or response.status_code != 200:
+    if not response:
         # TODO: Raise appropriate exception
         raise Exception("Something went wrong while annotating pod: %s" %
                         response.text)
