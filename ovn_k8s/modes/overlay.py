@@ -206,18 +206,18 @@ class OvnNB(object):
         pod_name = data['metadata']['name']
         namespace = data['metadata']['namespace']
         logical_port = "%s_%s" % (namespace, pod_name)
-        if not logical_port:
+        if not pod_name:
             vlog.err("absent pod name in pod %s. "
-                     "Not creating logical port" % (data))
+                     "unable to delete logical port" % data)
             return
 
         try:
             ovn_nbctl("--if-exists", "lsp-del", logical_port)
-        except Exception as e:
-            vlog.err("_delete_logical_port: lsp-add (%s)" % (str(e)))
+        except Exception:
+            vlog.exception("failure in delete_logical_port: lsp-del")
             return
 
-        vlog.info("deleted logical port %s" % (logical_port))
+        vlog.info("deleted logical port %s" % logical_port)
 
     def _update_vip(self, service_data, ips):
         service_type = service_data['spec'].get('type')
