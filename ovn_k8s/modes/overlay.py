@@ -135,7 +135,7 @@ class OvnNB(object):
         pod_name = data['metadata']['name']
         namespace = data['metadata']['namespace']
         logical_port = "%s_%s" % (namespace, pod_name)
-        if not logical_switch or not logical_port:
+        if not logical_switch or not pod_name:
             vlog.err("absent node name or pod name in pod %s. "
                      "Not creating logical port" % (data))
             return
