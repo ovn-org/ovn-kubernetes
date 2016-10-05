@@ -31,6 +31,10 @@ OVS and OVN related packages.  You can also read the following quick-start
 quide for Ubuntu that installs OVS and OVN from source:  [INSTALL.UBUNTU.md]
 
 ## The "overlay" mode
+The "overlay" mode
+==================
+Overlay mode diagram:
+![alt text](https://i.imgur.com/i7sci9O.png "Overlay mode diagram")
 
 Kubernetes networking requirements:
 
