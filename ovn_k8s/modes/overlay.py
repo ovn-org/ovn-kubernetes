@@ -142,8 +142,7 @@ class OvnNB(object):
     def _build_logical_port_name(self, namespace, pod_name):
         return "%s_%s" % (namespace, pod_name)
 
-    def create_logical_port(self, event, create_network_policies=False):
-        data = event.metadata
+    def create_logical_port(self, data, create_network_policies=False):
         logical_switch = data['spec']['nodeName']
         pod_name = data['metadata']['name']
         namespace = data['metadata']['namespace']
@@ -228,8 +227,7 @@ class OvnNB(object):
 
         vlog.info("created logical port %s" % (logical_port))
 
-    def delete_logical_port(self, event, delete_network_policies):
-        data = event.metadata
+    def delete_logical_port(self, data, pod_ip, delete_network_policies):
         pod_id = data['metadata']['uid']
         pod_name = data['metadata']['name']
         namespace = data['metadata']['namespace']
@@ -246,7 +244,7 @@ class OvnNB(object):
                 vlog.dbg("Pod: %s (Namespace: %s) - ACLs for pod removed " %
                          (pod_name, namespace))
                 # Remove references to pod from address sets
-                self.delete_pod_from_address_sets(data)
+                self.delete_pod_from_address_sets(data, pod_ip)
                 vlog.dbg("Pod: %s (Namespace: %s) - Pod IP removed from "
                          "address sets" % (pod_name, namespace))
             except Exception:
@@ -848,7 +846,7 @@ class OvnNB(object):
                 if self._pod_matches_from_clause(pod_data, ns_data, rule):
                     self.add_to_address_set(pod_ip, policy_ns, policy_data)
 
-    def delete_pod_from_address_sets(self, pod_data):
+    def delete_pod_from_address_sets(self, pod_data, pod_ip=None):
         namespace = pod_data['metadata']['namespace']
         policies = kubernetes.get_network_policies(
             variables.K8S_API_SERVER,
@@ -856,8 +854,6 @@ class OvnNB(object):
         # NOTE: Removing the pod IP from every address set is not harmful but
         # cna be optimized by removing it only from the address sets that
         # match the policy rule
+        pod_ip = pod_ip or pod_data['status']['podIP']
         for policy_data in policies:
-            self.remove_from_address_set(
-                pod_data['status']['podIP'],
-                namespace,
-                policy_data)
+            self.remove_from_address_set(pod_ip, namespace, policy_data)
