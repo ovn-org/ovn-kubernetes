@@ -48,6 +48,14 @@ class PodEvent(Event):
     pass
 
 
+class ServiceEvent(Event):
+    pass
+
+
+class EndpointEvent(Event):
+    pass
+
+
 @six.add_metaclass(abc.ABCMeta)
 class BaseProcessor(object):
 

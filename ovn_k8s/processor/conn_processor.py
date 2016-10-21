@@ -50,12 +50,11 @@ class ConnectivityProcessor(ovn_k8s.processor.BaseProcessor):
             data = event.metadata
             if not data:
                 continue
-
-            if data['kind'] == "Pod":
+            if isinstance(event, ovn_k8s.processor.PodEvent):
                 self._process_pod_event(event)
-            elif data['kind'] == "Service":
+            elif isinstance(event, ovn_k8s.processor.ServiceEvent):
                 self._process_service_event(event)
-            elif data['kind'] == "Endpoints":
+            elif isinstance(event, ovn_k8s.processor.EndpointEvent):
                 self._process_endpoint_event(event)
 
 
