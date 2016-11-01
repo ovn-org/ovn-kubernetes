@@ -3,7 +3,7 @@ How to Use Open Virtual Networking With Kubernetes
 
 This document describes how to use Open Virtual Networking with Kubernetes
 1.3.0 or later.  This document assumes that you have installed Open
-vSwitch by following [INSTALL.md] or by using the distribution packages
+vSwitch by following [INSTALL.rst] or by using the distribution packages
 such as .deb or.rpm.
 
 Setup
@@ -27,7 +27,7 @@ For both the modes to work, a user has to install and start Open vSwitch in
 each VM/host that he plans to run his containers.
 
 Installing Open vSwitch is out of scope of this documentation.  You can read
-[INSTALL.md] for that.  That documentation inturn links to platform specific
+[INSTALL.rst] for that.  That documentation inturn links to platform specific
 installations.  If you use packages to install OVS, you should install both
 OVS and OVN related packages.  You can also read the following quick-start
 quide for Ubuntu that installs OVS and OVN from source:  [INSTALL.UBUNTU.md]
@@ -297,7 +297,7 @@ Installing k8s is out of scope of this documentation.  You can read
 [README.K8S.md] for that.  This repo does provide a quick start guide here:
 [INSTALL.K8S.md]
 
-[INSTALL.md]: https://github.com/openvswitch/ovs/blob/master/INSTALL.md
+[INSTALL.rst]: https://github.com/openvswitch/ovs/blob/master/INSTALL.rst
 [INSTALL.UBUNTU.md]: docs/INSTALL.UBUNTU.md
 [README.K8S.md]: https://github.com/kubernetes/kubernetes/tree/master/docs
 [INSTALL.K8S.md]: docs/INSTALL.K8S.md
