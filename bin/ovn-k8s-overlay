@@ -281,9 +281,15 @@ def minion_init(args):
 
 
 def gateway_init(args):
-    if not args.node_name or not args.physical_interface \
-       or not args.cluster_ip_subnet or not args.physical_ip:
+    if not args.node_name or not args.cluster_ip_subnet \
+       or not args.physical_ip:
         raise Exception("Arguments should be non-null")
+
+    # We want either of args.physical_interface or args.bridge_interface
+    # provided. But not both. (XOR)
+    if bool(args.physical_interface) == bool(args.bridge_interface):
+        raise Exception("One of physical-interface or bridge-interface "
+                        "has to be specified")
 
     physical_ip = netaddr.IPNetwork(args.physical_ip)
     if args.default_gw:
@@ -350,27 +356,53 @@ def gateway_init(args):
     external_switch = "ext_%s" % (node_name)
     ovn_nbctl("--may-exist", "ls-add", external_switch)
 
-    # Connect physical interface to br-int. Get its mac address
-    iface_id = "%s_%s" % (args.physical_interface, node_name)
-    ovs_vsctl("--", "--may-exist", "add-port", "br-int",
-              args.physical_interface, "--", "set", "interface",
-              args.physical_interface, "external-ids:iface-id=" + iface_id)
+    if args.physical_interface:
+        # Connect physical interface to br-int. Get its mac address
+        iface_id = "%s_%s" % (args.physical_interface, node_name)
+        ovs_vsctl("--", "--may-exist", "add-port", "br-int",
+                  args.physical_interface, "--", "set", "interface",
+                  args.physical_interface, "external-ids:iface-id=" + iface_id)
 
-    mac_address = ovs_vsctl("--if-exists", "get", "interface",
-                            args.physical_interface, "mac_in_use").strip('"')
+        mac_address = ovs_vsctl("--if-exists", "get", "interface",
+                                args.physical_interface,
+                                "mac_in_use").strip('"')
 
-    # Flush the IP address of the physical interface.
-    command = "ip addr flush dev %s" % (args.physical_interface)
-    util.call_popen(shlex.split(command))
+        # Flush the IP address of the physical interface.
+        command = "ip addr flush dev %s" % (args.physical_interface)
+        util.call_popen(shlex.split(command))
+    else:
+        # A OVS bridge's mac address can change when ports are added to it.
+        # We cannot let that happen, so make the bridge mac address permanent.
+        mac_address = ovs_vsctl("--if-exists", "get", "interface",
+                                args.bridge_interface,
+                                "mac_in_use").strip('"')
+        if not mac_address:
+            raise Exception("No mac_address found for the bridge-interface")
 
-    # Add physical_interface as a logical port to external_switch. This is
+        ovs_vsctl("set", "bridge", args.bridge_interface,
+                  "other-config:hwaddr=" + mac_address)
+
+        iface_id = "%s_%s" % (args.bridge_interface, node_name)
+
+        # Connect bridge interface to br-int via patch ports.
+        patch1 = "k8s-patch-br-int-" + args.bridge_interface
+        patch2 = "k8s-patch-" + args.bridge_interface + "-br-int"
+        ovs_vsctl("--may-exist", "add-port", args.bridge_interface, patch2,
+                  "--", "set", "interface", patch2, "type=patch",
+                  "options:peer=" + patch1)
+        ovs_vsctl("--may-exist", "add-port", "br-int", patch1,
+                  "--", "set", "interface", patch1, "type=patch",
+                  "options:peer=" + patch2,
+                  "external-ids:iface-id=" + iface_id)
+
+    # Add external interface as a logical port to external_switch. This is
     # a learning switch port with "unknown" address.  The external world
     # is accessed via this port.
     ovn_nbctl("--", "--may-exist", "lsp-add", external_switch,
               iface_id, "--", "lsp-set-addresses",
               iface_id, "unknown")
 
-    # Connect GR to external_switch with mac address of physical interface
+    # Connect GR to external_switch with mac address of external interface
     # and that IP address.
     ovn_nbctl("--", "--may-exist", "lrp-add", gateway_router,
               "rtoe-" + gateway_router, mac_address, str(physical_ip),
@@ -432,14 +464,17 @@ def main():
     parser_gateway_init.add_argument('--cluster-ip-subnet', required=True,
                                      help="The cluster wide larger subnet of "
                                      "private ip addresses.")
-    parser_gateway_init.add_argument('--physical-interface', required=True,
+    parser_gateway_init.add_argument('--physical-interface',
                                      help="The physical interface via which "
+                                     "external connectivity is provided.")
+    parser_gateway_init.add_argument('--bridge-interface',
+                                     help="The OVS bridge interface via which "
                                      "external connectivity is provided.")
     parser_gateway_init.add_argument('--physical-ip', required=True,
                                      help="The ip address of the physical "
-                                     "interface via which external "
-                                     "connectivity is provided.  This should "
-                                     "be of the form IP/MASK.")
+                                     "interface or bridge interface via which "
+                                     "external connectivity is provided. This "
+                                     "should be of the form IP/MASK.")
     parser_gateway_init.add_argument('--default-gw',
                                      help="The next hop IP address for your "
                                      "physical interface.")

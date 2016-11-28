@@ -43,6 +43,10 @@ def ovs_vsctl(*args):
     return call_prog("ovs-vsctl", list(args))
 
 
+def ovs_ofctl(*args):
+    return call_prog("ovs-ofctl", list(args))
+
+
 def ovn_nbctl(*args):
     args_list = list(args)
     database_option = "%s=%s" % ("--db", variables.OVN_NB)

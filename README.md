@@ -225,9 +225,6 @@ for multiple gateway nodes, but this documentation only talks about one
 gateway node.
 
 On any minions (or a separate node), you need to initialize the gateway node.
-For the current integration, you need a separate physical interface dedicated
-for North-South connectivity.  This limitation will likely go away in the
-future.
 
 Set the k8s API server address in the Open vSwitch database for the
 initialization scripts (and later daemons) to pick from.
@@ -245,9 +242,15 @@ cd ovn-kubernetes
 pip install .
 ```
 
-If you choose "eth1" as that physical interface, with an IP address of
-$PHYSICAL_IP and a external gateway of $EXTERNAL_GATEWAY, run the following
-command on the designated gateway node with a unique name of $NODE_NAME.
+You have two options with respect to choosing the interface via which
+North-South connectivity happens.
+
+In the first option, you can choose a dedicated physical interface that is only
+used for North-South connectivity for the cluster.  This means that you cannot
+use this interface for any management traffic (like ssh).  If you choose
+"eth1" as that physical interface, with an IP address of $PHYSICAL_IP and a
+external gateway of $EXTERNAL_GATEWAY, run the following command on the
+designated gateway node with a unique name of $NODE_NAME.
 
 ```
 ovn-k8s-overlay gateway-init \
@@ -269,6 +272,41 @@ ovn-k8s-overlay gateway-init \
   --default-gw 10.33.74.253
 ```
 
+The second option is to share a single network interface for both your
+management traffic (e.g ssh) as well as the cluster's North-South traffic.  To
+do this, you need to attach your physical interface to a OVS bridge and move
+its IP address and routes to that bridge.  For e.g., if 'eth0' is your primary
+network interface with IP address of "$PHYSICAL_IP", you create a bridge called
+'breth0', add 'eth0' as a port of that bridge and then move "$PHYSICAL_IP" to
+'breth0'. You also need to move the routing table entries to 'breth0'.  The
+following helper script does the same
+
+```
+ovn-k8s-util nics-to-bridge eth0
+```
+
+After the above move, you will have to restart any dhclient sessions with
+'breth0'.  You can do this on every bootup more natively by following the
+instructions of [README.RHEL.rst] or [openvswitch-switch.README.Debian].
+
+You then run your gateway initialization script with the following options.
+
+```
+ovn-k8s-overlay gateway-init \
+  --cluster-ip-subnet="$CLUSTER_IP_SUBNET" \
+  --bridge-interface breth0 \
+  --physical-ip "$PHYSICAL_IP" \
+  --node-name="$NODE_NAME" \
+  --default-gw "$EXTERNAL_GATEWAY"
+```
+
+Since you share a NIC for both mgmt and North-South connectivity, you will
+have to start a separate daemon to de-multiplex the traffic.
+
+```
+ovn-gateway-helper --physical-bridge=breth0 --physical-interface=eth0 \
+    --pidfile --detach
+```
 
 * Watchers on master node.
 
@@ -304,3 +342,5 @@ Installing k8s is out of scope of this documentation.  You can read
 [INSTALL.UBUNTU.md]: docs/INSTALL.UBUNTU.md
 [README.K8S.md]: https://github.com/kubernetes/kubernetes/tree/master/docs
 [INSTALL.K8S.md]: docs/INSTALL.K8S.md
+[README.RHEL.rst]: https://github.com/openvswitch/ovs/blob/master/rhel/README.RHEL.rst
+[openvswitch-switch.README.Debian]: https://github.com/openvswitch/ovs/blob/master/debian/openvswitch-switch.README.Debian
