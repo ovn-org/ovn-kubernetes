@@ -107,11 +107,14 @@ kernel version of 3.18 for geneve.  There is no stt support in upstream Linux.
 You can verify whether you have the support in your kernel by doing a `lsmod |
 grep $ENCAP_TYPE`.)
 
+$SYSTEM_ID is a unique identifier to identify each Open vSwitch in an OVN 
+deployment.If you start Open vSwitch manually, you should set one.
 ```
 ovs-vsctl set Open_vSwitch . external_ids:ovn-remote="tcp:$CENTRAL_IP:6642" \
   external_ids:ovn-nb="tcp:$CENTRAL_IP:6641" \
   external_ids:ovn-encap-ip=$LOCAL_IP \
-  external_ids:ovn-encap-type="$ENCAP_TYPE"
+  external_ids:ovn-encap-type="$ENCAP_TYPE" \
+  external_ids:system-id=$SYSTEM_ID
 ```
 
 And finally, start the ovn-controller.  (You need to run the below command on
