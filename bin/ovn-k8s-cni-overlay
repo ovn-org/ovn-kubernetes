@@ -133,7 +133,7 @@ def setup_interface(pid, container_id, cni_ifname, mac_address,
 
         return veth_outside
     except Exception as e:
-        vlog.warn("Failed to setup veth pair for pod" % str(e))
+        vlog.warn("Failed to setup veth pair for pod: %s" % str(e))
         command = "ip link delete %s" % (veth_outside)
         call_popen(shlex.split(command))
         raise OVNCNIException(100, "veth setup failure")
