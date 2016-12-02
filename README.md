@@ -321,6 +321,13 @@ ovn-gateway-helper --physical-bridge=breth0 --physical-interface=eth0 \
     --pidfile --detach
 ```
 
+In case of multiple gateways, when the traffic is originated from the
+pods, you can pin the pod subnet traffic to go out of a particular
+gateway.  For e.g., if you want the pods belonging to subnet 192.168.1.0/24
+and 192.168.1.0/24 to go out of gateway1, when you initialize gateway1, you
+can provide --rampout-ip-subnets="192.168.1.0/24,192.168.2.0/24" option to
+the 'gateway-init' command.
+
 * Watchers on master node.
 
 Once the above initializations are done, you can start your Kubernetes daemons

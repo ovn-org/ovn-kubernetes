@@ -355,7 +355,7 @@ def gateway_init(args):
         ovn_nbctl("--may-exist", "lr-route-add", gateway_router,
                   "0.0.0.0/0", str(default_gw.ip))
 
-    # Add a default route in distributed router with GR as the nexthop.
+    # Add a default route in distributed router with first GR as the nexthop.
     ovn_nbctl("--may-exist", "lr-route-add", k8s_cluster_router,
               "0.0.0.0/0", "100.64.1.2")
 
@@ -453,6 +453,26 @@ def gateway_init(args):
         ovn_nbctl("set", "logical_router", gateway_router,
                   "options:lb_force_snat_ip=" + str(ip.ip))
 
+        if args.rampout_ip_subnets:
+            try:
+                rampout_ip_subnets = args.rampout_ip_subnets.split(',')
+                for rampout_ip_subnet in rampout_ip_subnets:
+                    try:
+                        netaddr.IPNetwork(rampout_ip_subnet)
+                    except Exception as e:
+                        sys.stderr.write("warning: %s is not valid subnet (%s)"
+                                         % (rampout_ip_subnet, str(e)))
+                        continue
+
+                    # Add source IP address based routes in distributed router
+                    # for this gateway router.
+                    ovn_nbctl("--may-exist", "--policy=src-ip", "lr-route-add",
+                              k8s_cluster_router, rampout_ip_subnet,
+                              str(ip.ip))
+            except Exception as e:
+                raise Exception("Failed to split args.rampout_ip_subnets %s"
+                                % str(e))
+
 
 def main():
     parser = argparse.ArgumentParser()
@@ -512,6 +532,12 @@ def main():
     parser_gateway_init.add_argument('--node-name',
                                      required=True,
                                      help="A unique node name.")
+    parser_gateway_init.add_argument('--rampout-ip-subnets',
+                                     help="Uses this gateway to rampout "
+                                     "traffic originating from the specified "
+                                     "comma separated ip subnets.  Used to "
+                                     "distribute outgoing traffic via "
+                                     "multiple gateways.")
     parser_gateway_init.set_defaults(func=gateway_init)
 
     args = parser.parse_args()
