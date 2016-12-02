@@ -73,7 +73,8 @@ in the master node.
 System Initialization
 =====================
 
-OVN in "overlay" mode needs a minimum Open vSwitch version of 2.6.
+OVN in "overlay" mode needs a minimum Open vSwitch version of 2.6.  It needs
+Open vSwitch version 2.7 for multi-gateway support.
 
 * Start the central components.
 
@@ -232,11 +233,11 @@ ovn-k8s-overlay minion-init \
 
 * k8s gateway node initialization
 
-Gateway nodes are needed for North-South connectivity.  OVN does have support
-for multiple gateway nodes, but this documentation only talks about one
-gateway node.
+Gateway nodes are needed for North-South connectivity.  OVN has support
+for multiple gateway nodes.
 
-On any minions (or a separate node), you need to initialize the gateway node.
+On any minions (or separate nodes, which would be the case for a DPDK
+based OVN gateway), you need to initialize the gateway node.
 
 Set the k8s API server address in the Open vSwitch database for the
 initialization scripts (and later daemons) to pick from.

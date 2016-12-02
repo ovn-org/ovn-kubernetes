@@ -13,9 +13,11 @@ set -o xtrace
 
 MASTER_OVERLAY_IP=$1
 MINION_OVERLAY_IP=$2
-GW_IP=$3
-MINION_NAME=$4
-MINION_SUBNET=$5
+PUBLIC_IP=$3
+PUBLIC_SUBNET_MASK=$4
+MINION_NAME=$5
+MINION_SUBNET=$6
+GW_IP=$7
 
 # Install OVS and dependencies
 # FIXME(mestery): Remove once Vagrant boxes allow apt-get to work again
@@ -64,6 +66,24 @@ popd
 sudo ovn-k8s-overlay minion-init --cluster-ip-subnet="192.168.0.0/16" \
                                  --minion-switch-subnet="$MINION_SUBNET" \
                                  --node-name="$MINION_NAME"
+
+# Create a OVS physical bridge and move IP address of enp0s9 to br-enp0s9
+echo "Creating physical bridge ..."
+sudo ovs-vsctl add-br br-enp0s9
+sudo ovs-vsctl add-port br-enp0s9 enp0s9
+sudo ip addr flush dev enp0s9
+sudo ifconfig br-enp0s9 $PUBLIC_IP netmask $PUBLIC_SUBNET_MASK up
+
+# Start a gateway
+sudo ovn-k8s-overlay gateway-init --cluster-ip-subnet="192.168.0.0/16" \
+                                 --bridge-interface br-enp0s9 \
+                                 --physical-ip $PUBLIC_IP/$PUBLIC_SUBNET_MASK \
+                                 --node-name="$MINION_NAME" --default-gw $GW_IP
+
+# Start the gateway helper.
+sudo ovn-k8s-gateway-helper --physical-bridge=br-enp0s9 \
+            --physical-interface=enp0s9 --pidfile --detach
+
 
 # Restore xtrace
 $XTRACE

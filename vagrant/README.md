@@ -44,6 +44,12 @@ the vagrant/provisioning/virtualbox.conf.yml file).
 
 * curl 10.10.0.11:[nodeport]
 
+Since the vagrant initializes gateway node on the minions too, you should be
+able to access the same service via the IP addresses of the minion nodes too.
+
+* curl 10.10.0.12:[nodeport]
+* curl 10.10.0.13:[nodeport]
+
 You should see OVN doing load-balancing between the pods, which means you will
 both the apache example page and the nginx example page.
 
