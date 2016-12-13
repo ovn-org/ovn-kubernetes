@@ -300,7 +300,7 @@ Installing k8s is out of scope of this documentation.  You can read
 [README.K8S.md] for that.  This repo does provide a quick start guide here:
 [INSTALL.K8S.md]
 
-[INSTALL.rst]: https://github.com/openvswitch/ovs/blob/master/INSTALL.rst
+[INSTALL.rst]: http://docs.openvswitch.org/en/latest/intro/install
 [INSTALL.UBUNTU.md]: docs/INSTALL.UBUNTU.md
 [README.K8S.md]: https://github.com/kubernetes/kubernetes/tree/master/docs
 [INSTALL.K8S.md]: docs/INSTALL.K8S.md
