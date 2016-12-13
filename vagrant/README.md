@@ -44,6 +44,12 @@ the vagrant/provisioning/virtualbox.conf.yml file).
 
 * curl 10.10.0.11:[nodeport]
 
+Since the vagrant initializes gateway node on the minions too, you should be
+able to access the same service via the IP addresses of the minion nodes too.
+
+* curl 10.10.0.12:[nodeport]
+* curl 10.10.0.13:[nodeport]
+
 You should see OVN doing load-balancing between the pods, which means you will
 both the apache example page and the nginx example page.
 
@@ -57,14 +63,3 @@ Verify this pod:
 * kubectl describe pod <busybox pod name>
 
 You can now login to the busybox pod on the minion host and ping across pods.
-
-[1]: https://hub.docker.com/r/google/nodejs-hello/
-[2]: http://kubernetes.io/docs/hellonode/
-
-References
-----------
-
-https://github.com/openvswitch/ovn-kubernetes
-http://kubernetes.io/docs/hellonode/
-http://kubernetes.io/docs/user-guide/kubectl-cheatsheet/
-https://blog.jetstack.io/blog/k8s-getting-started-part2/
