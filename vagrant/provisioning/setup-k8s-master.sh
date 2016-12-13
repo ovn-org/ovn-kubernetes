@@ -61,10 +61,21 @@ sleep 5
 echo "Starting ovn-k8s-watcher ..."
 sudo ovn-k8s-watcher --overlay --pidfile --log-file -vfile:info -vconsole:emer --detach
 
+# Create a OVS physical bridge and move IP address of enp0s9 to br-enp0s9
+echo "Creating physical bridge ..."
+sudo ovs-vsctl add-br br-enp0s9
+sudo ovs-vsctl add-port br-enp0s9 enp0s9
+sudo ip addr flush dev enp0s9
+sudo ifconfig br-enp0s9 $PUBLIC_IP netmask $PUBLIC_SUBNET_MASK up
+
 # Setup the GW node on the master
-sudo ovn-k8s-overlay gateway-init --cluster-ip-subnet="192.168.0.0/16" --physical-interface enp0s9 \
+sudo ovn-k8s-overlay gateway-init --cluster-ip-subnet="192.168.0.0/16" --bridge-interface br-enp0s9 \
                                   --physical-ip $PUBLIC_IP/$PUBLIC_SUBNET_MASK \
                                   --node-name="kube-gateway-node1" --default-gw $GW_IP
+
+# Start the gateway helper.
+sudo ovn-k8s-gateway-helper --physical-bridge=br-enp0s9 --physical-interface=enp0s9 --pidfile --detach
+
 sleep 5
 popd
 
