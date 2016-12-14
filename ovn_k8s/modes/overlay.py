@@ -28,12 +28,9 @@ class OvnNB(object):
     def __init__(self):
         self.service_cache = {}
         self.logical_switch_cache = {}
-        self.physical_gateway_ips = []
 
     def _get_physical_gateway_ips(self):
-        if self.physical_gateway_ips:
-            return self.physical_gateway_ips
-
+        physical_gateway_ips = []
         try:
             physical_gateway_ip_networks = ovn_nbctl(
                                 "--data=bare", "--no-heading",
@@ -42,12 +39,13 @@ class OvnNB(object):
                                 "external_ids:gateway-physical-ip=yes").split()
         except Exception as e:
             vlog.err("_populate_gateway_ip: find failed %s" % (str(e)))
+            return physical_gateway_ips
 
         for physical_gateway_ip_network in physical_gateway_ip_networks:
             ip, _mask = physical_gateway_ip_network.split('/')
-            self.physical_gateway_ips.append(ip)
+            physical_gateway_ips.append(ip)
 
-        return self.physical_gateway_ips
+        return physical_gateway_ips
 
     def _update_service_cache(self, event_type, cache_key, service_data):
         # Remove item from cache if it was deleted.
