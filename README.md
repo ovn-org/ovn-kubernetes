@@ -1,13 +1,11 @@
-How to Use Open Virtual Networking With Kubernetes
-==================================================
+# How to Use Open Virtual Networking With Kubernetes
 
 This document describes how to use Open Virtual Networking with Kubernetes
 1.3.0 or later.  This document assumes that you have installed Open
 vSwitch by following [INSTALL.rst] or by using the distribution packages
 such as .deb or.rpm.
 
-Setup
-=====
+## Setup
 
 OVN provides network virtualization to containers.  OVN's integration with
 containers currently works in two modes - the "underlay" mode or the "overlay"
@@ -32,8 +30,7 @@ installations.  If you use packages to install OVS, you should install both
 OVS and OVN related packages.  You can also read the following quick-start
 quide for Ubuntu that installs OVS and OVN from source:  [INSTALL.UBUNTU.md]
 
-The "overlay" mode
-==================
+## The "overlay" mode
 
 Kubernetes networking requirements:
 
@@ -70,8 +67,7 @@ in the master node.
   address as the IP address via which the nodes can reach k8s central daemons.
 
 
-System Initialization
-=====================
+### System Initialization
 
 OVN in "overlay" mode needs a minimum Open vSwitch version of 2.6.  It needs
 Open vSwitch version 2.7 for multi-gateway support.
@@ -90,7 +86,7 @@ database.
 /usr/share/openvswitch/scripts/ovn-ctl start_northd
 ```
 
-* One time setup.
+### One time setup.
 
 On each host, you will need to run the following command once.  (You need to
 run it again if your OVS database gets cleared.  It is harmless to run it
@@ -137,7 +133,7 @@ every boot)
 /usr/share/openvswitch/scripts/ovn-ctl start_controller
 ```
 
-* k8s master node initialization.
+### k8s master node initialization.
 
 Set the k8s API server address in the Open vSwitch database for the
 initialization scripts (and later daemons) to pick from.
@@ -180,7 +176,7 @@ interface named "k8s-$NODE_NAME" with an IP address via which other nodes
 should be eventually able to reach the daemons running on this node.  This
 IP address will be referred in the future as $K8S_API_SERVER_IP.
 
-* k8s minion node initializations.
+### k8s minion node initializations.
 
 Set the k8s API server address in the Open vSwitch database for the
 initialization scripts (and later daemons) to pick from. For insecure
@@ -231,7 +227,7 @@ ovn-k8s-overlay minion-init \
   --node-name="kube-minion1"
 ```
 
-* k8s gateway node initialization
+### k8s gateway node initialization
 
 Gateway nodes are needed for North-South connectivity.  OVN has support
 for multiple gateway nodes.
@@ -328,7 +324,7 @@ and 192.168.1.0/24 to go out of gateway1, when you initialize gateway1, you
 can provide --rampout-ip-subnets="192.168.1.0/24,192.168.2.0/24" option to
 the 'gateway-init' command.
 
-* Watchers on master node.
+### Watchers on master node
 
 Once the above initializations are done, you can start your Kubernetes daemons
 on the master node and minions.
@@ -346,13 +342,11 @@ ovn-k8s-watcher \
   --detach
 ```
 
-The "underlay" mode
-===================
+## The "underlay" mode
 
 TBA
 
-Installing Kubernetes
-=====================
+## Installing Kubernetes
 
 Installing k8s is out of scope of this documentation.  You can read
 [README.K8S.md] for that.  This repo does provide a quick start guide here:
