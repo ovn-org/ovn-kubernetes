@@ -4,3 +4,4 @@ requests>=2.9.1
 ovs>=2.6.0
 six
 eventlet
+pyroute2>=0.4.6
