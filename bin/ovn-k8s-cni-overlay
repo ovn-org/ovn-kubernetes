@@ -156,7 +156,7 @@ def cni_add(cni_ifname, cni_netns, namespace, pod_name, container_id):
         mac_address = ovn_annotated_dict['mac_address']
         gateway_ip = ovn_annotated_dict['gateway_ip']
     except Exception as e:
-        OVNCNIException(100, "failed in pod annotation key extract")
+        raise OVNCNIException(100, "failed in pod annotation key extract")
 
     veth_outside = setup_interface(container_id, cni_netns, cni_ifname,
                                    mac_address, ip_address,
