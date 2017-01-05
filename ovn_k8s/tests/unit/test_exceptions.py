@@ -1,4 +1,4 @@
-# Copyright (C) 2016 Nicira, Inc.
+# Copyright (C) 2017 Nicira, Inc.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -12,13 +12,18 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+import unittest
 
-class OvnK8sException(Exception):
-
-    def __init__(self, **kwargs):
-        self.message = self.message % kwargs
-        super(OvnK8sException, self).__init__(self.message)
+from ovn_k8s.common import exceptions
 
 
-class NotFound(OvnK8sException):
-    message = "%(resource_type)s %(resource_id)s not found"
+class TestExceptions(unittest.TestCase):
+
+    def test_notfound(self):
+        try:
+            raise exceptions.NotFound(resource_type='meh_type',
+                                      resource_id='meh_id')
+        except exceptions.NotFound as e:
+            test_str = 'meh_type meh_id not found'
+            self.assertEqual(test_str, e.message)
+            self.assertEqual(test_str, str(e))
