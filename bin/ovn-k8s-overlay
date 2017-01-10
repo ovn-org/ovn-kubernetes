@@ -323,10 +323,22 @@ def gateway_init(args):
 
     system_id = get_local_system_id()
 
+    # Find if gateway routers have been created before.
+    first_gateway = "no"
+    physical_gateways = ovn_nbctl(
+                                "--data=bare", "--no-heading",
+                                "--columns=_uuid", "find",
+                                "logical_router",
+                                "options:chassis!=null").split()
+    if not physical_gateways:
+        first_gateway = "yes"
+
     # Create a gateway router.
     gateway_router = "GR_%s" % (node_name)
     ovn_nbctl("--", "--may-exist", "lr-add", gateway_router, "--", "set",
-              "logical_router", gateway_router, "options:chassis=" + system_id)
+              "logical_router", gateway_router, "options:chassis=" + system_id,
+              "external_ids:physical_ip=" + str(physical_ip.ip),
+              "external_ids:first_gateway=" + first_gateway)
 
     # Connect gateway router to switch "join".
     router_ip = None
