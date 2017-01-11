@@ -194,22 +194,6 @@ def master_init(args):
         ovn_nbctl("--", "create", "load_balancer",
                   "external_ids:k8s-cluster-lb-udp=yes", "protocol=udp")
 
-    # Create 2 load-balancers for north-south traffic.  One handles UDP
-    # and another handles TCP.
-    k8s_ns_lb_tcp = ovn_nbctl("--data=bare", "--no-heading",
-                              "--columns=_uuid", "find", "load_balancer",
-                              "external_ids:k8s-ns-lb-tcp=yes")
-    if not k8s_ns_lb_tcp:
-        ovn_nbctl("--", "create", "load_balancer",
-                  "external_ids:k8s-ns-lb-tcp=yes")
-
-    k8s_ns_lb_udp = ovn_nbctl("--data=bare", "--no-heading",
-                              "--columns=_uuid", "find", "load_balancer",
-                              "external_ids:k8s-ns-lb-udp=yes")
-    if not k8s_ns_lb_udp:
-        ovn_nbctl("--", "create", "load_balancer",
-                  "external_ids:k8s-ns-lb-udp=yes", "protocol=udp")
-
     # Create a logical switch called "join" that will be used to connect
     # gateway routers to the distributed router. The "join" will be
     # allocated IP addresses in the range 100.64.1.0/24
@@ -371,20 +355,31 @@ def gateway_init(args):
     ovn_nbctl("--may-exist", "lr-route-add", k8s_cluster_router,
               "0.0.0.0/0", "100.64.1.2")
 
-    # Add north-south load-balancers to the gateway router.
+    # Create 2 load-balancers for north-south traffic for each gateway
+    # router.  One handles UDP and another handles TCP.
     k8s_ns_lb_tcp = ovn_nbctl("--data=bare", "--no-heading",
                               "--columns=_uuid", "find", "load_balancer",
-                              "external_ids:k8s-ns-lb-tcp=yes")
-    if k8s_ns_lb_tcp:
-        ovn_nbctl("set", "logical_router", gateway_router,
-                  "load_balancer=" + k8s_ns_lb_tcp)
+                              "external_ids:TCP_lb_gateway_router=" +
+                              gateway_router)
+    if not k8s_ns_lb_tcp:
+        k8s_ns_lb_tcp = ovn_nbctl("--", "create", "load_balancer",
+                                  "external_ids:TCP_lb_gateway_router=" +
+                                  gateway_router)
 
     k8s_ns_lb_udp = ovn_nbctl("--data=bare", "--no-heading",
                               "--columns=_uuid", "find", "load_balancer",
-                              "external_ids:k8s-ns-lb-udp=yes")
-    if k8s_ns_lb_udp:
-        ovn_nbctl("add", "logical_router", gateway_router,
-                  "load_balancer", k8s_ns_lb_udp)
+                              "external_ids:UDP_lb_gateway_router=" +
+                              gateway_router)
+    if not k8s_ns_lb_udp:
+        k8s_ns_lb_udp = ovn_nbctl("--", "create", "load_balancer",
+                                  "external_ids:UDP_lb_gateway_router=" +
+                                  gateway_router, "protocol=udp")
+
+    # Add north-south load-balancers to the gateway router.
+    ovn_nbctl("set", "logical_router", gateway_router,
+              "load_balancer=" + k8s_ns_lb_tcp)
+    ovn_nbctl("add", "logical_router", gateway_router,
+              "load_balancer", k8s_ns_lb_udp)
 
     # Create the external switch for the physical interface to connect to.
     external_switch = "ext_%s" % (node_name)

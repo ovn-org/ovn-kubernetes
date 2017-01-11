@@ -29,24 +29,6 @@ class OvnNB(object):
         self.service_cache = {}
         self.logical_switch_cache = {}
 
-    def _get_physical_gateway_ips(self):
-        physical_gateway_ips = []
-        try:
-            physical_gateway_ip_networks = ovn_nbctl(
-                                "--data=bare", "--no-heading",
-                                "--columns=network", "find",
-                                "logical_router_port",
-                                "external_ids:gateway-physical-ip=yes").split()
-        except Exception as e:
-            vlog.err("_populate_gateway_ip: find failed %s" % (str(e)))
-            return physical_gateway_ips
-
-        for physical_gateway_ip_network in physical_gateway_ip_networks:
-            ip, _mask = physical_gateway_ip_network.split('/')
-            physical_gateway_ips.append(ip)
-
-        return physical_gateway_ips
-
     def _update_service_cache(self, event_type, cache_key, service_data):
         # Remove item from cache if it was deleted.
         if event_type == 'DELETED':
@@ -55,27 +37,15 @@ class OvnNB(object):
             # Update cache
             self.service_cache[cache_key] = service_data
 
-    def _create_load_balancer_vip(self, service_type, service_ip, ips, port,
+    def _create_load_balancer_vip(self, load_balancer, service_ip, ips, port,
                                   target_port, protocol):
-        vlog.dbg("received event to create/modify load_balancer vip with "
-                 "service_type=%s, service_ip=%s, ips=%s, port=%s,"
-                 "target_port=%s, protocol=%s"
-                 % (service_type, service_ip, ips, port, target_port,
+        # With service_ip:port as a VIP, create an entry in 'load_balancer'
+
+        vlog.dbg("received event to create/modify load_balancer (%s) vip "
+                 "service_ip=%s, ips=%s, port=%s, target_port=%s, protocol=%s"
+                 % (load_balancer, service_ip, ips, port, target_port,
                     protocol))
-        if not port or not target_port or not protocol or not service_type:
-            return
-
-        load_balancer = ""
-        if protocol == "TCP" and service_type == "ClusterIP":
-            load_balancer = variables.K8S_CLUSTER_LB_TCP
-        elif protocol == "UDP" and service_type == "ClusterIP":
-            load_balancer = variables.K8S_CLUSTER_LB_UDP
-        elif protocol == "TCP" and service_type == "NodePort":
-            load_balancer = variables.K8S_NS_LB_TCP
-        elif protocol == "UDP" and service_type == "NodePort":
-            load_balancer = variables.K8S_NS_LB_UDP
-
-        if not load_balancer:
+        if not port or not target_port or not protocol or not load_balancer:
             return
 
         # key is of the form "IP:port" (with quotes around)
@@ -98,6 +68,129 @@ class OvnNB(object):
                       "vips:" + key + "=" + target)
         except Exception as e:
             vlog.err("_create_load_balancer_vip add: (%s)" % (str(e)))
+
+    def _get_ovn_external_ip_gateway(self):
+        # XXX: In case of K8S 'external_ips', we can only expose it in one
+        # gateway to prevent duplicate ARP responses.  We currently allocate
+        # the first gateway to handle all 'external_ips'.
+        try:
+            physical_gateway = ovn_nbctl(
+                                "--data=bare", "--no-heading",
+                                "--columns=name", "find",
+                                "logical_router",
+                                "external_ids:first_gateway=yes").split()
+            if not physical_gateway:
+                return None
+        except Exception as e:
+            vlog.err("_get_ovn_external_ip_gateway: find failed %s" % (str(e)))
+
+        return physical_gateway[0]
+
+    def _get_ovn_gateways(self):
+        # Return all created gateways.
+        physical_gateways = []
+        try:
+            physical_gateways = ovn_nbctl(
+                                "--data=bare", "--no-heading",
+                                "--columns=name", "find",
+                                "logical_router",
+                                "options:chassis!=null").split()
+        except Exception as e:
+            vlog.err("_get_ovn_gateways: find failed %s" % (str(e)))
+
+        return physical_gateways
+
+    def _create_gateways_vip(self, ips, port, target_port, protocol):
+        # Each gateway has a separate load-balancer for N/S traffic
+
+        physical_gateways = self._get_ovn_gateways()
+        if not physical_gateways:
+            return
+
+        for physical_gateway in physical_gateways:
+            # Go through each gateway to get its physical_ip and load-balancer.
+            try:
+                physical_ip = ovn_nbctl(
+                                    "get", "logical_router", physical_gateway,
+                                    "external_ids:physical_ip").strip('"')
+            except Exception as e:
+                vlog.err("_create_gateways_vip: get failed for"
+                         " %s (%s)" % (physical_gateway, str(e)))
+                continue
+
+            if not physical_ip:
+                vlog.warn("physical gateway %s does not have physical ip"
+                          % (physical_ip))
+                continue
+
+            try:
+                external_id_key = protocol + "_lb_gateway_router"
+                load_balancer = ovn_nbctl(
+                                    "--data=bare", "--no-heading",
+                                    "--columns=_uuid", "find", "load_balancer",
+                                    "external_ids:" + external_id_key + "=" +
+                                    physical_gateway
+                                    ).strip('"')
+            except Exception as e:
+                vlog.err("_create_gateways_vip: find failed for"
+                         " %s (%s)" % (physical_gateway, str(e)))
+                continue
+
+            if not load_balancer:
+                vlog.warn("physical gateway %s does not have load_balancer"
+                          % (physical_gateway))
+                continue
+
+            # With the physical_ip:port as the VIP, add an entry in
+            # 'load_balancer'.
+            self._create_load_balancer_vip(load_balancer, physical_ip, ips,
+                                           port, target_port, protocol)
+
+    def _create_cluster_vip(self, service_ip, ips, port, target_port,
+                            protocol):
+        # Add a VIP in the cluster load-balancer.
+
+        if protocol == "TCP":
+            load_balancer = variables.K8S_CLUSTER_LB_TCP
+        elif protocol == "UDP":
+            load_balancer = variables.K8S_CLUSTER_LB_UDP
+        else:
+            return
+
+        # With service_ip:port as the VIP, add an entry in 'load_balancer'
+        self._create_load_balancer_vip(load_balancer, service_ip, ips, port,
+                                       target_port, protocol)
+
+    def _create_external_vip(self, external_ip, ips,
+                             port, target_port, protocol):
+        # With external_ip:port as the VIP, create an entry in a gateway
+        # load-balancer.
+
+        # Get the gateway where we can add external_ip:port as a VIP.
+        physical_gateway = self._get_ovn_external_ip_gateway()
+        if not physical_gateway:
+            return
+
+        try:
+            # Get the load-balancer instantiated in the gateway.
+            external_id_key = protocol + "_lb_gateway_router"
+            load_balancer = ovn_nbctl("--data=bare", "--no-heading",
+                                      "--columns=_uuid", "find",
+                                      "load_balancer",
+                                      "external_ids:" + external_id_key + "=" +
+                                      physical_gateway).strip('"')
+        except Exception as e:
+            vlog.err("_create_external_vip: get failed for"
+                     " %s (%s)" % (physical_gateway, str(e)))
+            return
+
+            if not load_balancer:
+                vlog.warn("physical gateway %s does not have a load_balancer"
+                          % (physical_gateway))
+
+        # With external_ip:port as VIP, add an entry in 'load_balancer'.
+        self._create_load_balancer_vip(load_balancer, external_ip, ips,
+                                       port, target_port, protocol)
 
     def _get_switch_gateway_ip(self, logical_switch):
         cached_logical_switch = self.logical_switch_cache.get(logical_switch,
@@ -230,8 +323,6 @@ class OvnNB(object):
 
         external_ips = service_data['spec'].get('externalIPs')
 
-        physical_gateway_ips = self._get_physical_gateway_ips()
-
         for service_port in service_ports:
             if service_type == "NodePort":
                 port = service_port.get('nodePort')
@@ -245,19 +336,21 @@ class OvnNB(object):
             target_port = service_port.get('targetPort', port)
 
             if service_type == "NodePort":
-                for gateway_ip in physical_gateway_ips:
-                    self._create_load_balancer_vip(service_type, gateway_ip,
-                                                   ips, port, target_port,
-                                                   protocol)
+                # Add the 'NodePort' to a load-balancer instantiated in
+                # gateways.
+                self._create_gateways_vip(ips, port, target_port, protocol)
             elif service_type == "ClusterIP":
-                self._create_load_balancer_vip(service_type, service_ip, ips,
-                                               port, target_port, protocol)
+                # Add the 'service_ip:port' as a VIP in the cluster
+                # load-balancer.
+                self._create_cluster_vip(service_ip, ips, port,
+                                         target_port, protocol)
 
             if external_ips:
                 for external_ip in external_ips:
-                    self._create_load_balancer_vip("NodePort", external_ip,
-                                                   ips, port, target_port,
-                                                   protocol)
+                    # Add 'external_ip:port' as a VIP in a gateway
+                    # load-balancer.
+                    self._create_external_vip(external_ip, ips, port,
+                                              target_port, protocol)
 
     def update_vip(self, event):
         service_data = event.metadata
@@ -355,13 +448,24 @@ class OvnNB(object):
                      % (load_balancer, str(e)))
             return None
 
+    def _delete_load_balancer_vip(self, load_balancer, vip):
+        # Remove the 'vip' from the 'load_balancer'.
+        try:
+            ovn_nbctl("remove", "load_balancer", load_balancer, "vips", vip)
+            vlog.info("deleted vip %s from %s" % (vip, load_balancer))
+        except Exception as e:
+            vlog.err("_delete_load_balancer_vip: failed to remove vip %s "
+                     " from %s (%s)" % (vip, load_balancer, str(e)))
+
     def sync_services(self, services):
-        # For all the services, we will populate the below lists with
-        # IP:port that act as VIP in the OVN load-balancers.
-        tcp_nodeport_services = []
-        udp_nodeport_services = []
-        tcp_services = []
-        udp_services = []
+        # For all the 'clusterIP' services, we will populate the below lists
+        # (inside dict) with IP:port.
+        cluster_services = {'TCP': [], 'UDP': []}
+
+        # For all the NodePort services, we will populate the below lists with
+        # just nodeport or 'external_ip:port'.
+        nodeport_services = {'TCP': [], 'UDP': []}
+
         services = services.get('items', [])
         for service in services:
             service_type = service['spec'].get('type')
@@ -390,35 +494,31 @@ class OvnNB(object):
                 protocol = service_port.get('protocol', 'TCP')
 
                 if service_type == "NodePort":
-                    physical_gateway_ips = self._get_physical_gateway_ips()
-                    for gateway_ip in physical_gateway_ips:
-                        key = "%s:%s" % (gateway_ip, port)
-                        if protocol == "TCP":
-                            tcp_nodeport_services.append(key)
-                        else:
-                            udp_nodeport_services.append(key)
+                    if protocol == "TCP":
+                        nodeport_services['TCP'].append(str(port))
+                    else:
+                        nodeport_services['UDP'].append(str(port))
                 elif service_type == "ClusterIP":
                     key = "%s:%s" % (service_ip, port)
                     if protocol == "TCP":
-                        tcp_services.append(key)
+                        cluster_services['TCP'].append(key)
                     else:
-                        udp_services.append(key)
+                        cluster_services['UDP'].append(key)
 
                 if external_ips:
                     for external_ip in external_ips:
                         key = "%s:%s" % (external_ip, port)
                         if protocol == "TCP":
-                            tcp_nodeport_services.append(key)
+                            nodeport_services['TCP'].append(key)
                         else:
-                            udp_nodeport_services.append(key)
+                            nodeport_services['UDP'].append(key)
 
-        # For each of the OVN load-balancer, if the VIP that exists in
-        # the load balancer is not seen in current k8s services, we
-        # delete it.
-        load_balancers = {variables.K8S_CLUSTER_LB_TCP: tcp_services,
-                          variables.K8S_CLUSTER_LB_UDP: udp_services,
-                          variables.K8S_NS_LB_TCP: tcp_nodeport_services,
-                          variables.K8S_NS_LB_UDP: udp_nodeport_services}
+        # For OVN cluster load-balancer if the VIP that exists in the
+        # OVN load balancer is not seen in current k8s services, we delete it.
+        load_balancers = {
+                         variables.K8S_CLUSTER_LB_TCP: cluster_services['TCP'],
+                         variables.K8S_CLUSTER_LB_UDP: cluster_services['UDP'],
+                         }
 
         for load_balancer, k8s_services in load_balancers.items():
             vips = self._get_load_balancer_vips(load_balancer)
@@ -428,11 +528,45 @@ class OvnNB(object):
             for vip in vips:
                 if vip not in k8s_services:
                     vip = "\"" + vip + "\""
-                    try:
-                        ovn_nbctl("remove", "load_balancer", load_balancer,
-                                  "vips", vip)
-                        vlog.info("sync_services: deleted vip %s from %s"
-                                  % (vip, load_balancer))
-                    except Exception as e:
-                        vlog.err("sync_services: failed to remove vip %s"
-                                 "from %s (%s)" % (vip, load_balancer, str(e)))
+                    self._delete_load_balancer_vip(load_balancer, vip)
+
+        # For each gateway, remove any VIP that does not exist in
+        # 'nodeport_services'
+        physical_gateways = self._get_ovn_gateways()
+        for physical_gateway in physical_gateways:
+            for protocol, service in nodeport_services.items():
+                try:
+                    external_id_key = protocol + "_lb_gateway_router"
+                    load_balancer = ovn_nbctl(
+                                    "--data=bare", "--no-heading",
+                                    "--columns=_uuid", "find", "load_balancer",
+                                    "external_ids:" + external_id_key + "=" +
+                                    physical_gateway
+                                    ).strip('"')
+                except Exception as e:
+                    vlog.err("sync_services: get failed for"
+                             " %s (%s)" % (physical_gateway, str(e)))
+                    continue
+
+                if not load_balancer:
+                    continue
+
+                # Get the OVN load-balancer VIPs.
+                vips = self._get_load_balancer_vips(load_balancer)
+                if not vips:
+                    continue
+
+                for vip in vips:
+                    vip_and_port = vip.split(":")
+                    if len(vip_and_port) == 1:
+                        # In a OVN load-balancer, we should always have
+                        # vip:port.  In the unlikely event that it is not
+                        # the case, skip it.
+                        continue
+
+                    # An example 'service' is ["3892", "10.1.1.20:8880"]
+                    if vip_and_port[1] in service or vip in service:
+                        continue
+
+                    vip = "\"" + vip + "\""
+                    self._delete_load_balancer_vip(load_balancer, vip)

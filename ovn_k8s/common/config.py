@@ -55,14 +55,4 @@ def ovn_init_overlay():
         sys.exit("K8S_CLUSTER_LB_UDP not set")
     variables.K8S_CLUSTER_LB_UDP = K8S_CLUSTER_LB_UDP
 
-    K8S_NS_LB_TCP = ovn_nbctl("--data=bare", "--no-heading",
-                              "--columns=_uuid", "find", "load_balancer",
-                              "external_ids:k8s-ns-lb-tcp=yes")
-    variables.K8S_NS_LB_TCP = K8S_NS_LB_TCP
-
-    K8S_NS_LB_UDP = ovn_nbctl("--data=bare", "--no-heading",
-                              "--columns=_uuid", "find", "load_balancer",
-                              "external_ids:k8s-ns-lb-udp=yes")
-    variables.K8S_NS_LB_UDP = K8S_NS_LB_UDP
-
     variables.OVN_MODE = "overlay"
