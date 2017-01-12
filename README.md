@@ -86,6 +86,14 @@ database.
 /usr/share/openvswitch/scripts/ovn-ctl start_northd
 ```
 
+In Open vSwitch 2.7, you need to additionally run the following commands
+to open up TCP ports to access the OVN databases.
+
+```
+ovn-nbctl set-connection ptcp:6641
+ovn-sbctl set-connection ptcp:6642
+```
+
 ### One time setup.
 
 On each host, you will need to run the following command once.  (You need to
