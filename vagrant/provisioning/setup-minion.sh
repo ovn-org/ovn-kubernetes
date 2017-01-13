@@ -35,9 +35,9 @@ sudo service docker start
 
 # Install OVS and dependencies
 sudo apt-get build-dep dkms
-sudo apt-get install -y graphviz autoconf automake bzip2 debhelper dh-autoreconf \
-                        libssl-dev libtool openssl procps python-all \
-                        python-twisted-conch python-zopeinterface python-six dkms
+sudo apt-get install -y autoconf automake bzip2 debhelper dh-autoreconf \
+                        libssl-dev libtool openssl procps \
+                        python-six dkms
 
 git clone https://github.com/openvswitch/ovs.git
 pushd ovs/
