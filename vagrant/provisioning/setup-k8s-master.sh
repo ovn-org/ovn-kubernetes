@@ -19,18 +19,6 @@ GW_IP=$3
 sudo docker run --net=host -d gcr.io/google_containers/etcd:2.0.12 /usr/local/bin/etcd \
                 --addr=127.0.0.1:4001 --bind-addr=0.0.0.0:4001 --data-dir=/var/etcd/data
 
-# Download Kubernetes ... yes, it's huge
-#mkdir k8s
-#pushd k8s
-#wget https://github.com/kubernetes/kubernetes/releases/download/v1.3.7/kubernetes.tar.gz
-#tar xvzf kubernetes.tar.gz
-
-# Now untar kubernetes-server-linux-amd64.tar.gz
-#mkdir server
-#cd server
-#tar xvzf ../kubernetes/server/linux/kubernetes-server-linux-amd64.tar.gz
-#popd
-
 # Start k8s daemons
 pushd k8s/server/kubernetes/server/bin
 echo "Starting kube-apiserver ..."
