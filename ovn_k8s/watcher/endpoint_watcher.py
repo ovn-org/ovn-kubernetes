@@ -30,9 +30,9 @@ class EndpointWatcher(object):
 
     def _send_connectivity_event(self, event_type, endpoint_name,
                                  endpoint_data):
-        ev = ovn_k8s.processor.Event(event_type,
-                                     source=endpoint_name,
-                                     metadata=endpoint_data)
+        ev = ovn_k8s.processor.EndpointEvent(event_type,
+                                             source=endpoint_name,
+                                             metadata=endpoint_data)
         conn_processor.get_event_queue().put(ev)
 
     def _process_endpoint_event(self, event):

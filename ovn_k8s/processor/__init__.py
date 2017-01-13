@@ -33,15 +33,38 @@ class Event(object):
         self.metadata = metadata
 
 
+# The classes below create subclasses of the Event type which allow for
+# distinguishing among different types of events using isinstance
+
+class NSEvent(Event):
+    pass
+
+
+class NPEvent(Event):
+    pass
+
+
+class PodEvent(Event):
+    pass
+
+
+class ServiceEvent(Event):
+    pass
+
+
+class EndpointEvent(Event):
+    pass
+
+
 @six.add_metaclass(abc.ABCMeta)
 class BaseProcessor(object):
 
     _instance = None
 
     @classmethod
-    def get_instance(cls):
+    def get_instance(cls, *args):
         if cls._instance is None:
-            cls._instance = cls()
+            cls._instance = cls(*args)
         return cls._instance
 
     def __init__(self):

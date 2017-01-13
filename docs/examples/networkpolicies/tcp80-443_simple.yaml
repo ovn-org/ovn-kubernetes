@@ -1,0 +1,13 @@
+apiVersion: extensions/v1beta1
+kind: NetworkPolicy
+metadata:
+  name: tcp80-443
+spec:
+  ingress:
+  - ports:
+    - port: "80"
+      protocol: TCP
+    - port: "443"
+      protocol: TCP
+  podSelector:
+      matchLabels:

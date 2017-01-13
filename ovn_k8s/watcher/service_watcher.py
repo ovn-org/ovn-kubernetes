@@ -29,9 +29,9 @@ class ServiceWatcher(object):
         self.service_cache = {}
 
     def _send_connectivity_event(self, event_type, service_name, service_data):
-        ev = ovn_k8s.processor.Event(event_type,
-                                     source=service_name,
-                                     metadata=service_data)
+        ev = ovn_k8s.processor.ServiceEvent(event_type,
+                                            source=service_name,
+                                            metadata=service_data)
 
         conn_processor.get_event_queue().put(ev)
 

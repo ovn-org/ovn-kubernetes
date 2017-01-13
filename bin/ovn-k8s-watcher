@@ -23,6 +23,7 @@ import ovs.util
 import ovs.daemon
 import ovs.vlog
 from ovn_k8s.common import config
+from ovn_k8s.common import variables
 from ovn_k8s.watcher import watcher
 
 eventlet.monkey_patch()
@@ -50,6 +51,7 @@ def main():
     parser.add_argument('--overlay', action='store_true')
     parser.add_argument('--underlay', action='store_true')
     parser.add_argument('--openstack', action='store_true')
+    parser.add_argument('--watch-policies', action='store_true')
 
     # Since our instructions asks to do a 'pip install ovs',
     # for python libraries, we do not know how OVS core
@@ -73,6 +75,7 @@ def main():
 
     ovs.daemon.daemonize()
 
+    variables.K8S_WATCH_POLICIES = args.watch_policies
     watcher.start_threads()
 
 

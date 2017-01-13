@@ -24,6 +24,7 @@ from ovn_k8s.common import variables
 
 CA_CERTIFICATE = "/etc/openvswitch/k8s-ca.crt"
 vlog = ovs.vlog.Vlog("kubernetes")
+K8S_ISOLATION_ANN = 'net.beta.kubernetes.io/network-policy'
 
 
 def _get_api_params():
@@ -71,6 +72,8 @@ def _stream_api(url):
 
     if response.status_code != 200:
         # TODO: raise here
+        vlog.err("Failure while invoking stream API (%d): %s" %
+                 (response.status_code, response.text))
         return
     return response.iter_lines(chunk_size=10, delimiter='\n')
 
@@ -90,6 +93,68 @@ def watch_services(server):
 
 def watch_endpoints(server):
     return _watch_resource(server, 'endpoints')
+
+
+def watch_namespaces(server):
+    return _watch_resource(server, 'namespaces')
+
+
+def watch_network_policies(server, namespace):
+    url = ("%s/apis/extensions/v1beta1/namespaces/"
+           "%s/networkpolicies?watch=true") % (server, namespace)
+    return _stream_api(url)
+
+
+def get_pods_by_namespace(server, namespace, pod_selector=None):
+    certificate, api_token = _get_api_params()
+    url = "%s/api/v1/namespaces/%s/pods" % (server, namespace)
+
+    headers = {}
+    if api_token:
+        headers['Authorization'] = 'Bearer %s' % api_token
+
+    query_params = {}
+    if pod_selector:
+        label_selectors = []
+        for name, value in pod_selector.items():
+            label_selectors.append("%s in (%s)" % (
+                name, ",".join([item for item in value])))
+        query_params = {'labelSelector': label_selectors}
+
+    if certificate:
+        response = requests.get(url, headers=headers,
+                                params=query_params, verify=certificate)
+    else:
+        response = requests.get(url, headers=headers, params=query_params)
+    if not response:
+        if response.status_code == 404:
+            raise exceptions.NotFound(resource_type='namespace',
+                                      resource_id=namespace)
+        else:
+            raise Exception("Failed to fetch pods for namespace %s (%d) :%s" %
+                            (namespace, response.status_code, response.text))
+    return response.json()['items']
+
+
+def get_ns_annotations(server, namespace):
+    certificate, api_token = _get_api_params()
+    url = "%s/api/v1/namespaces/%s" % (server, namespace)
+
+    headers = {}
+    if api_token:
+        headers['Authorization'] = 'Bearer %s' % api_token
+
+    if certificate:
+        response = requests.get(url, headers=headers, verify=certificate)
+    else:
+        response = requests.get(url, headers=headers)
+    if not response:
+        # TODO: raise here
+        return
+    json_response = response.json()
+    annotations = json_response['metadata'].get('annotations')
+    vlog.dbg("Annotations for namespace %s: %s" % (namespace, annotations))
+    return annotations
 
 
 def get_pod_annotations(server, namespace, pod):
@@ -191,3 +256,49 @@ def get_all_pods(server):
 def get_all_services(server):
     url = "%s/api/v1/services" % (server)
     return _get_objects(url, 'all', 'service', "all_services")
+
+
+def get_namespace(server, namespace):
+    certificate, api_token = _get_api_params()
+    url = "%s/api/v1/namespaces/%s" % (server, namespace)
+    headers = {}
+    if api_token:
+        headers['Authorization'] = 'Bearer %s' % api_token
+    if certificate:
+        response = requests.get(url, headers=headers, verify=certificate)
+    else:
+        response = requests.get(url, headers=headers)
+    if not response:
+        if response.status_code == 404:
+            raise exceptions.NotFound(resource_type='namespace',
+                                      resource_id=namespace)
+        else:
+            raise Exception("Failed to fetch namespace %s (%s): %s" % (
+                namespace, response.status_code, response.text))
+    return response.json()
+
+
+def get_network_policies(server, namespace):
+    url = ("%s/apis/extensions/v1beta1/namespaces/"
+           "%s/networkpolicies") % (server, namespace)
+    policies = _get_objects(url, namespace,
+                            'networkpolicy', 'all_networkpolicies')['items']
+    # do not return None if no policy is defined
+    if policies is None:
+        policies = []
+    return policies
+
+
+def is_namespace_isolated(server, namespace):
+    annotations = get_ns_annotations(server, namespace)
+    isolation = annotations and annotations.get(K8S_ISOLATION_ANN)
+    # Interpret anythingthat is not "on" as "off" (even garbage)
+    try:
+        isolation_json = json.loads(isolation)
+        ingress = isolation_json.get('ingress', {})
+        if ingress.get('isolation') == 'DefaultDeny':
+            return True
+        return False
+    except (ValueError, TypeError):
+        vlog.dbg("Invalid json data for isolation annotation: %s" % isolation)
+        return False

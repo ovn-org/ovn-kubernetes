@@ -17,6 +17,7 @@ import json
 import ovs.vlog
 import ovn_k8s.processor
 from ovn_k8s.processor import conn_processor
+from ovn_k8s.processor import policy_processor as pp
 from ovn_k8s.common import util
 
 vlog = ovs.vlog.Vlog("pod_watcher")
@@ -27,12 +28,21 @@ class PodWatcher(object):
     def __init__(self, pod_stream):
         self._pod_stream = pod_stream
         self.pod_cache = {}
+        self.pod_ips = {}
 
     def _send_connectivity_event(self, event_type, pod_name, pod_data):
-        ev = ovn_k8s.processor.Event(event_type,
-                                     source=pod_name,
-                                     metadata=pod_data)
+        # If available, add the pod IP to event metadata
+        pod_ip = self.pod_ips.get(pod_data['metadata']['uid'])
+        ev = ovn_k8s.processor.PodEvent(event_type,
+                                        source=pod_name,
+                                        metadata=(pod_data, pod_ip))
         conn_processor.get_event_queue().put(ev)
+
+    def _send_policy_event(self, event_type, pod_name, pod_data):
+        ev = ovn_k8s.processor.PodEvent(event_type,
+                                        source=pod_name,
+                                        metadata=pod_data)
+        pp.get_event_queue().put(ev)
 
     def _update_pod_cache(self, event_type, cache_key, pod_data):
         # Remove item from cache if it was deleted
@@ -61,22 +71,35 @@ class PodWatcher(object):
         if event_type != 'DELETED' and not pod_data['spec'].get('nodeName'):
             return
 
+        # If a pod has an IP, save it
+        if pod_data['metadata']['uid'] not in self.pod_ips:
+            pod_ip = pod_data['status'].get('podIP')
+            if pod_ip:
+                self.pod_ips[pod_data['metadata']['uid']] = pod_ip
+
         cache_key = "%s_%s" % (namespace, pod_name)
         cached_pod = self.pod_cache.get(cache_key, {})
-        self._update_pod_cache(event_type, cache_key, pod_data)
 
         has_conn_event = False
+        label_changes = False
         if not cached_pod:
             has_conn_event = True
         elif event_type == 'DELETED':
             has_conn_event = True
         else:
-            return
+            label_changes = util.has_changes(
+                pod_data['metadata'].get('labels', {}),
+                cached_pod['metadata'].get('labels', {}))
 
+        self._update_pod_cache(event_type, cache_key, pod_data)
         if has_conn_event:
             vlog.dbg("Sending connectivity event for event %s on pod %s"
                      % (event_type, pod_name))
             self._send_connectivity_event(event_type, pod_name, pod_data)
+        if label_changes:
+            vlog.dbg("Sending policy event for event %s on pod %s" %
+                     (event_type, pod_name))
+            self._send_policy_event(event_type, pod_name, pod_data)
 
     def process(self):
         util.process_stream(self._pod_stream,

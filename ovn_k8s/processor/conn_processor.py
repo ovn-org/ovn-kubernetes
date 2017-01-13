@@ -13,7 +13,10 @@
 # limitations under the License.
 
 import ovs.vlog
+
+from ovn_k8s.common import variables
 import ovn_k8s.processor
+
 
 vlog = ovs.vlog.Vlog("connprocessor")
 
@@ -21,12 +24,15 @@ vlog = ovs.vlog.Vlog("connprocessor")
 class ConnectivityProcessor(ovn_k8s.processor.BaseProcessor):
 
     def _process_pod_event(self, event):
+        vlog.dbg("Received a pod %s event %s" % (event.event_type,
+                                                 event.metadata))
+        pod_data, pod_ip = event.metadata
         if event.event_type == "DELETED":
-            vlog.dbg("Received a pod delete event %s" % (event.metadata))
-            self.mode.delete_logical_port(event)
+            self.mode.delete_logical_port(pod_data, pod_ip,
+                                          variables.K8S_WATCH_POLICIES)
         else:
-            vlog.dbg("Received a pod ADD/MODIFY event %s" % (event.metadata))
-            self.mode.create_logical_port(event)
+            self.mode.create_logical_port(pod_data,
+                                          variables.K8S_WATCH_POLICIES)
 
     def _process_service_event(self, event):
         if event.event_type == "DELETED":
@@ -47,12 +53,11 @@ class ConnectivityProcessor(ovn_k8s.processor.BaseProcessor):
             data = event.metadata
             if not data:
                 continue
-
-            if data['kind'] == "Pod":
+            if isinstance(event, ovn_k8s.processor.PodEvent):
                 self._process_pod_event(event)
-            elif data['kind'] == "Service":
+            elif isinstance(event, ovn_k8s.processor.ServiceEvent):
                 self._process_service_event(event)
-            elif data['kind'] == "Endpoints":
+            elif isinstance(event, ovn_k8s.processor.EndpointEvent):
                 self._process_endpoint_event(event)
 
 
