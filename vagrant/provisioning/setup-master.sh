@@ -15,10 +15,21 @@ GW_IP=$2
 MASTER_NAME=$3
 MASTER_SUBNET=$4
 
-# Install OVS and dependencies
 # FIXME(mestery): Remove once Vagrant boxes allow apt-get to work again
 sudo rm -rf /var/lib/apt/lists/*
+
+# First, install docker
 sudo apt-get update
+sudo apt-get install -y apt-transport-https ca-certificates
+sudo apt-key adv --keyserver hkp://p80.pool.sks-keyservers.net:80 --recv-keys 58118E89F3A912897C070ADBF76221572C52609D
+sudo su -c "echo \"deb https://apt.dockerproject.org/repo ubuntu-xenial main\" >> /etc/apt/sources.list.d/docker.list"
+sudo apt-get update
+sudo apt-get purge lxc-docker
+sudo apt-get install -y linux-image-extra-$(uname -r) linux-image-extra-virtual
+sudo apt-get install -y docker-engine
+sudo service docker start
+
+# Install OVS and dependencies
 sudo apt-get build-dep dkms
 sudo apt-get install -y graphviz autoconf automake bzip2 debhelper dh-autoreconf \
                         libssl-dev libtool openssl procps python-all \
