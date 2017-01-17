@@ -60,6 +60,38 @@ def get_local_system_id():
     return system_id
 
 
+def configure_management_port(cluster_subnet, router_ip, interface_name,
+                              interface_ip):
+    # Up the interface.
+    command = "ip link set %s up" % (interface_name)
+    util.call_popen(shlex.split(command))
+
+    # The interface may already exist, in which case delete the routes and IP.
+    command = "ip addr flush dev %s" % (interface_name)
+    util.call_popen(shlex.split(command))
+
+    # Assign IP address to the internal interface.
+    try:
+        command = "ip addr add %s dev %s" % (interface_ip, interface_name)
+        util.call_popen(shlex.split(command))
+    except Exception as e:
+        sys.stderr.write("warning: failed to run \"%s\": %s"
+                         % (command, str(e)))
+
+    # Flush the route for the entire subnet (in case it was added before)
+    command = "ip route flush %s" % (cluster_subnet)
+    util.call_popen(shlex.split(command))
+
+    # Create a route for the entire subnet.
+    try:
+        command = "ip route add %s via %s" % (cluster_subnet, router_ip)
+        util.call_popen(shlex.split(command))
+    except Exception as e:
+        sys.stderr.write("warning: failed to run \"%s\": %s"
+                         % (command, str(e)))
+
+
+
 def create_management_port(node_name, local_subnet, cluster_subnet):
     # Create a logical switch for the node and connect it to
     # the distributed router.  This switch will start with
@@ -114,38 +146,12 @@ def create_management_port(node_name, local_subnet, cluster_subnet):
     # Create the OVN logical port.
     ip.value = ip.value + 1
     port_ip = str(ip.ip)
-    port_ip_mask = str(ip)
     ovn_nbctl("--", "--may-exist", "lsp-add", node_name,
               "k8s-" + node_name, "--", "lsp-set-addresses",
               "k8s-" + node_name, mac_address + " " + port_ip)
 
-    # Up the interface.
-    command = "ip link set %s up" % (interface_name)
-    util.call_popen(shlex.split(command))
-
-    # The interface may already exist, in which case delete the routes and IP.
-    command = "ip addr flush dev %s" % (interface_name)
-    util.call_popen(shlex.split(command))
-
-    # Assign IP address to the internal interface.
-    try:
-        command = "ip addr add %s dev %s" % (port_ip_mask, interface_name)
-        util.call_popen(shlex.split(command))
-    except Exception as e:
-        sys.stderr.write("warning: failed to run \"%s\": %s"
-                         % (command, str(e)))
-
-    # Flush the route for the entire subnet (in case it was added before)
-    command = "ip route flush %s" % (cluster_subnet)
-    util.call_popen(shlex.split(command))
-
-    # Create a route for the entire subnet.
-    try:
-        command = "ip route add %s via %s" % (cluster_subnet, router_ip)
-        util.call_popen(shlex.split(command))
-    except Exception as e:
-        sys.stderr.write("warning: failed to run \"%s\": %s"
-                         % (command, str(e)))
+    configure_management_port(cluster_subnet, router_ip, interface_name,
+                              str(ip))
 
     # Add the load_balancer to the switch.
     k8s_cluster_lb_tcp = ovn_nbctl("--data=bare", "--no-heading",
