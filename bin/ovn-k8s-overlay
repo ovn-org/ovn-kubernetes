@@ -62,9 +62,12 @@ def get_local_system_id():
 def create_management_port(node_name, local_subnet, cluster_subnet):
     # Create a logical switch for the node and connect it to
     # the distributed router.  This switch will start with
-    # one logical port (A OVS internal interface).  This
-    # logical port is via which other nodes and containers access the
-    # k8s master servers and is also used for health checks.
+    # one logical port (A OVS internal interface).
+    # 1.  This logical port is via which a node can access all other nodes and
+    # the containers running inside them using the private IP addresses.
+    # 2.  When this port is created on the master node, the K8s daemons
+    # become reachable from the containers without any NAT.
+    # 3. The nodes can health-check the pod IP addresses.
 
     # Create a router port and provide it the first address in the
     # 'local_subnet'.
