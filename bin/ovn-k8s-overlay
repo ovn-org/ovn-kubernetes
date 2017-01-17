@@ -108,7 +108,7 @@ def create_management_port(node_name, local_subnet, cluster_subnet):
     mac_address = ovs_vsctl("--if-exists", "get", "interface",
                             interface_name, "mac_in_use").strip('"')
     if not mac_address:
-        raise Exception("failed to get mac address of ovn-k8s-master")
+        raise Exception("failed to get mac address of %s" % (interface_name))
 
     # Create the OVN logical port.
     ip.value = ip.value + 1
