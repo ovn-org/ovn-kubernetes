@@ -161,11 +161,6 @@ def create_management_port(node_name, local_subnet, cluster_subnet):
         ovn_nbctl("add", "logical_switch", node_name,
                   "load_balancer", k8s_cluster_lb_udp)
 
-    # Create a logical switch and set its subnet.
-    ovn_nbctl("--", "--may-exist", "ls-add", node_name,
-              "--", "set", "logical_switch", node_name,
-              "other-config:subnet=" + local_subnet)
-
 
 def master_init(args):
     fetch_ovn_nb()
