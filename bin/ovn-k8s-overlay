@@ -20,6 +20,7 @@ import netaddr
 import os
 import shlex
 import sys
+import traceback
 
 import ovn_k8s.common.util as util
 from ovn_k8s.common.util import ovs_vsctl
@@ -553,5 +554,6 @@ if __name__ == '__main__':
     try:
         main()
     except Exception as e:
-        sys.stderr.write("Failed operation.\n(%s)" % str(e))
+        sys.stderr.write("Failed operation.\n(%s)\n at %s"
+                         % (str(e), traceback.format_exc()))
         sys.exit(1)
