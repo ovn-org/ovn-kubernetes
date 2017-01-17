@@ -60,8 +60,129 @@ def get_local_system_id():
     return system_id
 
 
-def configure_management_port(cluster_subnet, router_ip, interface_name,
-                              interface_ip):
+def configure_management_port_debian(node_name, cluster_subnet, router_ip,
+                                     interface_name, interface_ip):
+    bridge_exists = False
+    interface_exists = False
+
+    bridge_context = {"interface_name": interface_name}
+    bridge_template = """
+allow-ovs br-int
+iface br-int inet manual
+    ovs_type OVSBridge
+    ovs_ports {interface_name}
+    ovs_extra set bridge br-int fail_mode=secure
+"""
+
+    ip = netaddr.IPNetwork(interface_ip)
+    cluster_ip = netaddr.IPNetwork(cluster_subnet)
+
+    interface_context = {"interface_name": interface_name,
+                         "address": str(ip.ip),
+                         "netmask": str(ip.netmask),
+                         "iface_id": "k8s-" + node_name,
+                         "cluster_ip": str(cluster_ip.ip),
+                         "cluster_mask": str(cluster_ip.netmask),
+                         "gw_ip": router_ip}
+
+    interface_template = """
+allow-br-int {interface_name}
+iface {interface_name} inet static
+    address {address}
+    netmask {netmask}
+    ovs_type OVSIntPort
+    ovs_bridge br-int
+    ovs_extra set interface $IFACE external-ids:iface-id={iface_id}
+    up route add -net {cluster_ip} netmask {cluster_mask} gw {gw_ip}
+    down route del -net {cluster_ip} netmask {cluster_mask} gw {gw_ip}
+"""
+
+    with open("/etc/network/interfaces") as f:
+        for line in f:
+            # Look for a line of the form "allow-ovs br-int"
+            if "allow-ovs" in line and "br-int" in line:
+                # Config for bridge "br-int" exists.
+                bridge_exists = True
+                break
+
+        for line in f:
+            # Look for a line of the form "allow-br-int $interface_name"
+            if "allow-br-int" in line and interface_name in line:
+                # Config for interface $interface_name exists.
+                interface_exists = True
+                break
+
+    if not bridge_exists:
+        with open("/etc/network/interfaces", "a") as f:
+            f.write(bridge_template.format(**bridge_context))
+
+    if not interface_exists:
+        with open("/etc/network/interfaces", "a") as f:
+            f.write(interface_template.format(**interface_context))
+
+
+def configure_management_port_redhat(node_name, cluster_subnet, router_ip,
+                                     interface_name, interface_ip):
+    bridge_template = """
+DEVICE=br-int
+ONBOOT=yes
+DEVICETYPE=ovs
+TYPE=OVSBridge
+OVS_EXTRA="set bridge br-int fail_mode=secure"
+"""
+
+    with open("/etc/sysconfig/network-scripts/ifcfg-br-int", "w") as f:
+        f.write(bridge_template)
+
+    ip = netaddr.IPNetwork(interface_ip)
+    interface_context = {"interface_name": interface_name,
+                         "address": str(ip.ip),
+                         "netmask": str(ip.netmask),
+                         "iface_id": "k8s-" + node_name}
+
+    interface_template = """
+DEVICE={interface_name}
+DEVICETYPE=ovs
+TYPE=OVSIntPort
+OVS_BRIDGE=br-int
+IP_ADDR={address}
+NETMASK={netmask}
+OVS_EXTRA="set interface $DEVICE external-ids:iface-id={iface_id}
+"""
+
+    filename = "/etc/sysconfig/network-scripts/ifcfg-" + interface_name
+    with open(filename, "w") as f:
+        f.write(interface_template.format(**interface_context))
+
+    cluster_ip = netaddr.IPNetwork(cluster_subnet)
+    route_context = {"cluster_ip": str(cluster_ip.ip),
+                     "cluster_mask": str(cluster_ip.netmask),
+                     "gw_ip": router_ip}
+
+    route_template = """
+ADDRESS0={cluster_ip}
+NETMASK0={cluster_mask}
+GATEWAY0={gw_ip}
+"""
+
+    filename = "/etc/sysconfig/network-scripts/route-" + interface_name
+    with open(filename, "w") as f:
+        f.write(route_template.format(**route_context))
+
+
+def configure_management_port(node_name, cluster_subnet, router_ip,
+                              interface_name, interface_ip):
+    # First, try to configure management ports via platform specific tools.
+
+    # Identify whether the platform is Debian based.
+    if os.path.isfile("/etc/network/interfaces"):
+        configure_management_port_debian(node_name, cluster_subnet, router_ip,
+                                         interface_name, interface_ip)
+
+    if os.path.isfile("/etc/sysconfig/network-scripts/ifup-ovs"):
+        configure_management_port_redhat(node_name, cluster_subnet, router_ip,
+                                         interface_name, interface_ip)
+
     # Up the interface.
     command = "ip link set %s up" % (interface_name)
     util.call_popen(shlex.split(command))
@@ -89,7 +210,6 @@ def configure_management_port(cluster_subnet, router_ip, interface_name,
     except Exception as e:
         sys.stderr.write("warning: failed to run \"%s\": %s"
                          % (command, str(e)))
-
 
 
 def create_management_port(node_name, local_subnet, cluster_subnet):
@@ -150,8 +270,8 @@ def create_management_port(node_name, local_subnet, cluster_subnet):
               "k8s-" + node_name, "--", "lsp-set-addresses",
               "k8s-" + node_name, mac_address + " " + port_ip)
 
-    configure_management_port(cluster_subnet, router_ip, interface_name,
-                              str(ip))
+    configure_management_port(node_name, cluster_subnet, router_ip,
+                              interface_name, str(ip))
 
     # Add the load_balancer to the switch.
     k8s_cluster_lb_tcp = ovn_nbctl("--data=bare", "--no-heading",
