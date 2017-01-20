@@ -49,6 +49,13 @@ def ovs_ofctl(*args):
 
 def ovn_nbctl(*args):
     args_list = list(args)
+    if variables.OVN_NB.startswith("ssl"):
+        private_key = "%s=%s" % ("--private-key", variables.NBCTL_PRIVATE_KEY)
+        args_list.insert(0, private_key)
+        certificate = "%s=%s" % ("--certificate", variables.NBCTL_CERTIFICATE)
+        args_list.insert(0, certificate)
+        cacert = "%s=%s" % ("--bootstrap-ca-cert", variables.NBCTL_CA_CERT)
+        args_list.insert(0, cacert)
     database_option = "%s=%s" % ("--db", variables.OVN_NB)
     args_list.insert(0, database_option)
     return call_prog("ovn-nbctl", args_list)
