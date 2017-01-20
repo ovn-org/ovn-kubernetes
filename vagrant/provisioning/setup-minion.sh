@@ -19,6 +19,9 @@ MINION_NAME=$5
 MINION_SUBNET=$6
 GW_IP=$7
 
+# Comment out the next line if you prefer TCP instead of SSL.
+SSL="true"
+
 # FIXME(mestery): Remove once Vagrant boxes allow apt-get to work again
 sudo rm -rf /var/lib/apt/lists/*
 
@@ -53,14 +56,34 @@ sudo dpkg -i openvswitch-switch_2.6.90-1_amd64.deb openvswitch-common_2.6.90-1_a
 # Start the daemons
 sudo /etc/init.d/openvswitch-switch force-reload-kmod
 
-sudo ovs-vsctl set Open_vSwitch . external_ids:ovn-remote="tcp:$MASTER_OVERLAY_IP:6642" \
-                                  external_ids:ovn-nb="tcp:$MASTER_OVERLAY_IP:6641" \
-                                  external_ids:ovn-encap-ip=$MINION_OVERLAY_IP \
-                                  external_ids:ovn-encap-type=geneve
+if [ -n "$SSL" ]; then
+    # Install certificates
+    pushd /etc/openvswitch
+    sudo ovs-pki req ovncontroller
+    sudo ovs-pki -b -d /vagrant/pki sign ovncontroller switch
+    popd
+
+    sudo ovs-vsctl set Open_vSwitch . \
+                external_ids:ovn-remote="ssl:$MASTER_OVERLAY_IP:6642" \
+                external_ids:ovn-nb="ssl:$MASTER_OVERLAY_IP:6641" \
+                external_ids:ovn-encap-ip=$MINION_OVERLAY_IP \
+                external_ids:ovn-encap-type=geneve
+
+    # Set ovn-controller SSL options in /etc/default/ovn-host
+    sudo bash -c 'cat >> /etc/default/ovn-host <<EOF
+OVN_CTL_OPTS="--ovn-controller-ssl-key=/etc/openvswitch/ovncontroller-privkey.pem  --ovn-controller-ssl-cert=/etc/openvswitch/ovncontroller-cert.pem --ovn-controller-ssl-bootstrap-ca-cert=/etc/openvswitch/ovnsb-ca.cert"
+EOF'
+
+else
+    sudo ovs-vsctl set Open_vSwitch . \
+                external_ids:ovn-remote="tcp:$MASTER_OVERLAY_IP:6642" \
+                external_ids:ovn-nb="tcp:$MASTER_OVERLAY_IP:6641" \
+                external_ids:ovn-encap-ip=$MINION_OVERLAY_IP \
+                external_ids:ovn-encap-type=geneve
+fi
 
 # Re-start OVN controller
-sudo /usr/share/openvswitch/scripts/ovn-ctl stop_controller
-sudo /usr/share/openvswitch/scripts/ovn-ctl start_controller
+sudo /etc/init.d/ovn-host restart
 
 # Set k8s API server IP
 sudo ovs-vsctl set Open_vSwitch . external_ids:k8s-api-server="$MASTER_OVERLAY_IP:8080"
