@@ -94,6 +94,9 @@ ovn-nbctl set-connection ptcp:6641
 ovn-sbctl set-connection ptcp:6642
 ```
 
+If you want to use SSL instead of TCP for OVN databases, please read
+[INSTALL.SSL.md].
+
 ### One time setup.
 
 On each host, you will need to run the following command once.  (You need to
@@ -384,3 +387,4 @@ There is a vagrant available to bring up a simple cluster at [vagrant].
 [openvswitch-switch.README.Debian]: https://github.com/openvswitch/ovs/blob/master/debian/openvswitch-switch.README.Debian
 [debugging.md]: docs/debugging.md
 [vagrant]: vagrant/README.md
+[INSTALL.SSL.md]: docs/INSTALL.SSL.md
