@@ -30,6 +30,9 @@ from ovn_k8s.common import variables
 CNI_CONF_PATH = "/etc/cni/net.d"
 CNI_LINK_PATH = "/opt/cni/bin/"
 CNI_PLUGIN = "ovn-k8s-cni-overlay"
+PRIVATE_KEY = "/etc/openvswitch/ovncontroller-privkey.pem"
+CERTIFICATE = "/etc/openvswitch/ovncontroller-cert.pem"
+CA_CERT = "/etc/openvswitch/ovnnb-ca.cert"
 
 
 def fetch_ovn_nb():
@@ -39,6 +42,29 @@ def fetch_ovn_nb():
         raise Exception("OVN central database's ip address not set")
 
     variables.OVN_NB = OVN_NB
+
+    if OVN_NB.startswith("ssl"):
+        variables.NBCTL_PRIVATE_KEY = PRIVATE_KEY
+        variables.NBCTL_CERTIFICATE = CERTIFICATE
+        variables.NBCTL_CA_CERT = CA_CERT
+
+        if not os.path.isfile(PRIVATE_KEY):
+            raise Exception("No private key %s found" % (PRIVATE_KEY))
+
+        if not os.path.isfile(CERTIFICATE):
+            raise Exception("No certificate %s found" % (CERTIFICATE))
+
+        # We allow bootstrapping to get the CA_CERT.
+        if not os.path.isfile(CA_CERT):
+            # Bootstrap it with a simple transaction.
+            try:
+                print("No CA certificate found. Attempting bootstrapping...")
+                ovn_nbctl("list", "logical_switch")
+            except Exception:
+                # exception is expected. But did we bootstrap?
+                if not os.path.isfile(CA_CERT):
+                    raise Exception("Bootstapping OVN NB's certificate failed")
+                print("Bootstrapping successful. Continuing...")
 
 
 def get_k8s_cluster_router():
@@ -679,6 +705,7 @@ def main():
 if __name__ == '__main__':
     try:
         main()
+        print("Initialization complete.")
     except Exception as e:
         sys.stderr.write("Failed operation.\n(%s)\n at %s"
                          % (str(e), traceback.format_exc()))
