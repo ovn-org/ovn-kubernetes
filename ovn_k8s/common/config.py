@@ -12,17 +12,20 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+import os
 import sys
 from ovn_k8s.common.util import ovs_vsctl
 from ovn_k8s.common.util import ovn_nbctl
 from ovn_k8s.common import variables
 
+UNIX_SOCKET = "/var/run/openvswitch/ovnnb_db.sock"
+
 
 def ovn_init_overlay():
-    OVN_NB = ovs_vsctl("--if-exists", "get", "Open_vSwitch", ".",
-                       "external_ids:ovn-nb").strip('"')
-    if not OVN_NB:
-        sys.exit("OVN central database's ip address not set")
+    if os.path.exists(UNIX_SOCKET):
+        OVN_NB = "unix:%s" % UNIX_SOCKET
+    else:
+        sys.exit("OVN NB database does not have unix socket")
     variables.OVN_NB = OVN_NB
 
     K8S_API_SERVER = ovs_vsctl("--if-exists", "get", "Open_vSwitch", ".",
