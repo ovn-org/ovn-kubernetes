@@ -169,6 +169,10 @@ ovn-k8s-overlay master-init \
   --node-name="$NODE_NAME"
 ```
 
+Note: $NODE_NAME should be the same as the one used by kubelet.
+kubelet by default uses the hostname.  kubelet allows this name to be be
+overridden with --hostname-override.
+
 An example is:
 
 ```
@@ -225,6 +229,10 @@ ovn-k8s-overlay minion-init \
   --minion-switch-subnet="$MINION_SWITCH_SUBNET" \
   --node-name="$NODE_NAME"
 ```
+
+Note: $NODE_NAME should be the same as the one used by kubelet.
+kubelet by default uses the hostname.  kubelet allows this name to be be
+overridden with --hostname-override.
 
 An example is:
 
