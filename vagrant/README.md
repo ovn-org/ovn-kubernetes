@@ -1,10 +1,15 @@
 Kubernetes and OVN
 ==================
 
-This contains a Vagrant setup for Kubernetes and OVN integration.
+This contains a Vagrant setup for Kubernetes and OVN integration.  This needs
+a minimum vagrant version of 1.8.5 and is known to atleast work on Mac,
+Ubuntu 16.04 and Windows 10.
 
 Howto
 -----
+
+From the cloned ovn-kubernetes repo,
+* cd vagrant
 
 Pull down Kubernetes (it's big)
 
