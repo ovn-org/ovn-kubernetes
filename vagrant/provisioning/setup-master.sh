@@ -86,8 +86,8 @@ EOF'
 
 else
     # Plain TCP.
-    sudo ovn-nbctl set-connection tcp:6641
-    sudo ovn-sbctl set-connection tcp:6642
+    sudo ovn-nbctl set-connection ptcp:6641
+    sudo ovn-sbctl set-connection ptcp:6642
 
     sudo ovs-vsctl set Open_vSwitch . external_ids:ovn-remote="tcp:$OVERLAY_IP:6642" \
                                   external_ids:ovn-nb="tcp:$OVERLAY_IP:6641" \
