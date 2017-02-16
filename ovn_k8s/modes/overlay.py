@@ -13,7 +13,6 @@
 # limitations under the License.
 
 import ast
-import time
 
 import ovs.vlog
 from ovn_k8s.common import exceptions
@@ -237,8 +236,8 @@ class OvnNB(object):
             return
 
         try:
-            ovn_nbctl("--", "--may-exist", "lsp-add", logical_switch,
-                      logical_port, "--", "lsp-set-addresses",
+            ovn_nbctl("--wait=sb", "--", "--may-exist", "lsp-add",
+                      logical_switch, logical_port, "--", "lsp-set-addresses",
                       logical_port, "dynamic", "--", "set",
                       "logical_switch_port", logical_port,
                       "external-ids:namespace=" + namespace,
@@ -247,27 +246,16 @@ class OvnNB(object):
             vlog.err("_create_logical_port: lsp-add (%s)" % (str(e)))
             return
 
-        # We wait for a maximum of 3 seconds to get the dynamic addresses in
-        # intervals of 0.1 seconds.
-        addresses = ""
-        counter = 30
-        while counter != 0:
-            try:
-                ret = ovn_nbctl("get", "logical_switch_port", logical_port,
-                                "dynamic_addresses")
-                addresses = ast.literal_eval(ret)
-                if len(addresses):
-                    break
-            except Exception as e:
-                vlog.err("_create_logical_port: get dynamic_addresses (%s)"
-                         % (str(e)))
-
-            time.sleep(0.1)
-            counter = counter - 1
+        try:
+            ret = ovn_nbctl("get", "logical_switch_port", logical_port,
+                            "dynamic_addresses")
+            addresses = ast.literal_eval(ret)
+        except Exception as e:
+            vlog.err("_create_logical_port: get dynamic_addresses (%s)"
+                     % (str(e)))
 
         if not len(addresses):
-            vlog.err("_create_logical_port: failed to get addresses after "
-                     "multiple retries.")
+            vlog.err("_create_logical_port: failed to get dynamic address")
             return
 
         (mac_address, ip_address) = addresses.split()
