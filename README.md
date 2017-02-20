@@ -332,7 +332,7 @@ Since you share a NIC for both mgmt and North-South connectivity, you will
 have to start a separate daemon to de-multiplex the traffic.
 
 ```
-ovn-gateway-helper --physical-bridge=breth0 --physical-interface=eth0 \
+ovn-k8s-gateway-helper --physical-bridge=breth0 --physical-interface=eth0 \
     --pidfile --detach
 ```
 
