@@ -355,14 +355,16 @@ class OvnNB(object):
     def update_vip(self, event):
         service_data = event.metadata
         service_type = service_data['spec'].get('type')
+        service_name = service_data['metadata']['name']
         vlog.dbg("update_vip: received service data %s" % (service_data))
 
         # We only care about services that are of type 'clusterIP' and
         # 'nodePort'.
         if service_type != "ClusterIP" and service_type != "NodePort":
+            vlog.warn("ignoring unsupported service %s of type %s"
+                      % (service_name, service_type))
             return
 
-        service_name = service_data['metadata']['name']
         event_type = event.event_type
         namespace = service_data['metadata']['namespace']
 
