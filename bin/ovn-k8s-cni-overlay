@@ -133,6 +133,7 @@ def cni_add(cni_ifname, cni_netns, namespace, pod_name, container_id):
     counter = 30
     ip_address = ""
     mac_address = ""
+    annotation = {}
     while counter != 0:
         try:
             annotation = kubernetes.get_pod_annotations(k8s_api_server,
