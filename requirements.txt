@@ -1,6 +1,8 @@
 pbr>=1.8
 netaddr>=0.7.18
-requests>=2.9.1
+requests
+urllib3
+ipaddress
 ovs>=2.6.0
 six
 eventlet
