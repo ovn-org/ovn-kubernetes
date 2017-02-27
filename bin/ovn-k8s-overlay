@@ -99,6 +99,10 @@ iface br-int inet manual
     ovs_ports {interface_name}
     ovs_extra set bridge br-int fail_mode=secure
 """
+    mac_address = ovs_vsctl("--if-exists", "get", "interface",
+                            interface_name, "mac_in_use").strip('"')
+    if not mac_address:
+        raise Exception("failed to get mac address of %s" % (interface_name))
 
     ip = netaddr.IPNetwork(interface_ip)
     cluster_ip = netaddr.IPNetwork(cluster_subnet)
@@ -106,6 +110,7 @@ iface br-int inet manual
     interface_context = {"interface_name": interface_name,
                          "address": str(ip.ip),
                          "netmask": str(ip.netmask),
+                         "mac": mac_address,
                          "iface_id": "k8s-" + node_name,
                          "cluster_ip": str(cluster_ip.ip),
                          "cluster_mask": str(cluster_ip.netmask),
@@ -118,7 +123,8 @@ iface {interface_name} inet static
     netmask {netmask}
     ovs_type OVSIntPort
     ovs_bridge br-int
-    ovs_extra set interface $IFACE external-ids:iface-id={iface_id}
+    ovs_extra set interface $IFACE mac=\\"{mac}\\" \
+external-ids:iface-id={iface_id}
     up route add -net {cluster_ip} netmask {cluster_mask} gw {gw_ip}
     down route del -net {cluster_ip} netmask {cluster_mask} gw {gw_ip}
 """
@@ -160,10 +166,16 @@ OVS_EXTRA="set bridge br-int fail_mode=secure"
     with open("/etc/sysconfig/network-scripts/ifcfg-br-int", "w") as f:
         f.write(bridge_template)
 
+    mac_address = ovs_vsctl("--if-exists", "get", "interface",
+                            interface_name, "mac_in_use").strip('"')
+    if not mac_address:
+        raise Exception("failed to get mac address of %s" % (interface_name))
+
     ip = netaddr.IPNetwork(interface_ip)
     interface_context = {"interface_name": interface_name,
                          "address": str(ip.ip),
                          "netmask": str(ip.netmask),
+                         "mac": mac_address,
                          "iface_id": "k8s-" + node_name}
 
     interface_template = """
@@ -173,7 +185,8 @@ TYPE=OVSIntPort
 OVS_BRIDGE=br-int
 IP_ADDR={address}
 NETMASK={netmask}
-OVS_EXTRA="set interface $DEVICE external-ids:iface-id={iface_id}
+OVS_EXTRA="set interface $DEVICE mac=\\"{mac}\\" \
+external-ids:iface-id={iface_id}"
 """
 
     filename = "/etc/sysconfig/network-scripts/ifcfg-" + interface_name
