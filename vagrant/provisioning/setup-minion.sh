@@ -48,10 +48,11 @@ sudo DEB_BUILD_OPTIONS='nocheck parallel=2' fakeroot debian/rules binary
 
 # Install OVS/OVN debs
 popd
-sudo dpkg -i openvswitch-datapath-dkms_2.6.90-1_all.deb
-sudo dpkg -i openvswitch-switch_2.6.90-1_amd64.deb openvswitch-common_2.6.90-1_amd64.deb \
-             ovn-common_2.6.90-1_amd64.deb python-openvswitch_2.6.90-1_all.deb \
-             ovn-docker_2.6.90-1_amd64.deb ovn-host_2.6.90-1_amd64.deb
+sudo dpkg -i openvswitch-datapath-dkms*.deb
+sudo dpkg -i openvswitch-switch*.deb openvswitch-common*.deb \
+             ovn-central*.deb ovn-common*.deb \
+             python-openvswitch*.deb ovn-docker*.deb \
+             ovn-host*.deb
 
 # Start the daemons
 sudo /etc/init.d/openvswitch-switch force-reload-kmod
