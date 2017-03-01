@@ -17,6 +17,7 @@ import random
 import subprocess
 
 import ovs.vlog
+from ovn_k8s.common import exceptions
 from ovn_k8s.common import variables
 
 vlog = ovs.vlog.Vlog("util")
@@ -72,11 +73,12 @@ def generate_mac(prefix="00:00:00"):
 
 
 def process_stream(data_stream, event_callback):
-    # StopIteration should be caught in the routine that sets up the stream
-    # and reconnects it
-    line = next(data_stream)
-    if not line:
-        return
+    try:
+        line = next(data_stream)
+        if not line:
+            return
+    except StopIteration:
+        raise exceptions.APIServerTimeout()
 
     try:
         event_callback(json.loads(line))

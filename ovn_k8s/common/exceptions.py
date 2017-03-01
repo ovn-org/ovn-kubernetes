@@ -22,3 +22,7 @@ class OvnK8sException(Exception):
 
 class NotFound(OvnK8sException):
     message = "%(resource_type)s %(resource_id)s not found"
+
+
+class APIServerTimeout(OvnK8sException):
+    message = "API server stream connection failed"

@@ -20,6 +20,7 @@ import ovs.unixctl
 import ovs.unixctl.server
 import ovs.vlog
 import ovn_k8s
+from ovn_k8s.common import exceptions
 from ovn_k8s.common import variables
 from ovn_k8s.common import kubernetes
 from ovn_k8s.watcher import pod_watcher
@@ -59,7 +60,9 @@ def _process_func(watcher, watcher_recycle_func):
             watcher.process()
         except Exception as e:
             # Recycle watcher
-            vlog.exception("Failure in watcher %s" % type(watcher).__name__)
+            if not isinstance(e, exceptions.APIServerTimeout):
+                vlog.exception("Failure in watcher %s"
+                               % type(watcher).__name__)
             vlog.warn("Regenerating watcher because of \"%s\" and "
                       "reconnecting to stream using function %s"
                       % (str(e), watcher_recycle_func.__name__))
