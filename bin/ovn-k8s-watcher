@@ -53,9 +53,15 @@ def main():
 
     # Since our instructions asks to do a 'pip install ovs',
     # for python libraries, we do not know how OVS core
-    # utilities have been installed.  So we try to do a best
-    # guess.
-    if os.path.isfile("/usr/bin/ovs-vsctl"):
+    # utilities have been installed.
+    # We first try to see if the user set the variables in the config file.
+    # Otherwise we try to do a best guess.
+    rundir = config.get_option('rundir')
+    logdir = config.get_option('logdir')
+    if rundir and logdir:
+        ovs.dirs.RUNDIR = rundir
+        ovs.dirs.LOGDIR = logdir
+    elif os.path.isfile("/usr/bin/ovs-vsctl"):
         ovs.dirs.RUNDIR = "/var/run/openvswitch"
         ovs.dirs.LOGDIR = "/var/log/openvswitch"
     else:

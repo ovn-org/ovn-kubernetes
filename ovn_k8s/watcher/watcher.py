@@ -20,6 +20,7 @@ import ovs.unixctl
 import ovs.unixctl.server
 import ovs.vlog
 import ovn_k8s
+from ovn_k8s.common import config
 from ovn_k8s.common import exceptions
 from ovn_k8s.common import variables
 from ovn_k8s.common import kubernetes
@@ -70,7 +71,7 @@ def _process_func(watcher, watcher_recycle_func):
 
 
 def _sync_k8s_pods():
-    if variables.OVN_MODE == "overlay":
+    if config.get_option('ovn_mode') == "overlay":
         mode = ovn_k8s.modes.overlay.OvnNB()
     else:
         return
@@ -84,7 +85,7 @@ def _sync_k8s_pods():
 
 
 def _sync_k8s_services():
-    if variables.OVN_MODE == "overlay":
+    if config.get_option('ovn_mode') == "overlay":
         mode = ovn_k8s.modes.overlay.OvnNB()
     else:
         return

@@ -26,6 +26,7 @@ import ovs.daemon
 import ovs.unixctl
 import ovs.unixctl.server
 import ovs.vlog
+from ovn_k8s.common import config
 from ovn_k8s.common import kubernetes
 from ovn_k8s.common import util
 from ovn_k8s.common import variables
@@ -42,7 +43,7 @@ node_ports_cache = set()
 physical_bridge = ""
 br_int_ofport = 0
 physical_interface_ofport = 0
-conntrack_zone = 64000
+conntrack_zone = config.get_option('conntrack_zone')
 
 
 def _unixctl_exit(conn, unused_argv, unused_aux):
