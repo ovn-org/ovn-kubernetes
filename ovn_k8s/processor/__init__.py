@@ -18,9 +18,9 @@ import sys
 import time
 from six.moves import queue
 
+from ovn_k8s.common import config
 import ovs.vlog
 import ovn_k8s.modes.overlay
-import ovn_k8s.common.variables as variables
 
 vlog = ovs.vlog.Vlog("baseprocessor")
 
@@ -46,7 +46,7 @@ class BaseProcessor(object):
 
     def __init__(self):
         self.event_queue = queue.PriorityQueue()
-        if variables.OVN_MODE == "overlay":
+        if config.get_option('ovn_mode') == "overlay":
             self.mode = ovn_k8s.modes.overlay.OvnNB()
         else:
             vlog.emer("OVN mode not defined.")

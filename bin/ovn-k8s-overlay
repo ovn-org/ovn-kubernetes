@@ -22,17 +22,18 @@ import shlex
 import sys
 import traceback
 
+from ovn_k8s.common import config
 import ovn_k8s.common.util as util
 from ovn_k8s.common.util import ovs_vsctl
 from ovn_k8s.common.util import ovn_nbctl
 from ovn_k8s.common import variables
 
-CNI_CONF_PATH = "/etc/cni/net.d"
-CNI_LINK_PATH = "/opt/cni/bin/"
-CNI_PLUGIN = "ovn-k8s-cni-overlay"
-PRIVATE_KEY = "/etc/openvswitch/ovncontroller-privkey.pem"
-CERTIFICATE = "/etc/openvswitch/ovncontroller-cert.pem"
-CA_CERT = "/etc/openvswitch/ovnnb-ca.cert"
+CNI_CONF_PATH = config.get_option('cni_conf_path')
+CNI_LINK_PATH = config.get_option('cni_link_path')
+CNI_PLUGIN = config.get_option('cni_plugin')
+PRIVATE_KEY = config.get_option('private_key')
+CERTIFICATE = config.get_option('certificate')
+CA_CERT = config.get_option('ca_cert')
 
 
 def fetch_ovn_nb():
@@ -294,7 +295,7 @@ def create_management_port(node_name, local_subnet, cluster_subnet):
     ovs_vsctl("--", "--may-exist", "add-port", "br-int",
               interface_name, "--", "set", "interface",
               interface_name, "type=internal",
-              "mtu_request=1400",
+              "mtu_request=%s" % config.get_option('mtu'),
               "external-ids:iface-id=k8s-" + node_name)
 
     mac_address = ovs_vsctl("--if-exists", "get", "interface",

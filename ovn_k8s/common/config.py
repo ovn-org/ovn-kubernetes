@@ -12,13 +12,58 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+import ast
+import ConfigParser
 import os
 import sys
+
+import ovn_k8s
 from ovn_k8s.common.util import ovs_vsctl
 from ovn_k8s.common.util import ovn_nbctl
 from ovn_k8s.common import variables
 
-UNIX_SOCKET = "/var/run/openvswitch/ovnnb_db.sock"
+
+raw_config_parser = ConfigParser.RawConfigParser()
+config_path = "/etc/openvswitch"
+config_file = '%s/ovn_k8s.conf' % config_path
+config_read = raw_config_parser.read(config_file)
+if len(config_read) != 1:
+    # raw_config_parser.read returns the list of filenames which were
+    # successfully parsed.
+    # If we reach here it means that it could not read the config file from
+    # "/etc/openvswitch".  Search in default prefix '/usr/local', this is
+    # where pip is installing the config file
+    config_file = '/usr/local%s' % config_file
+    config_read = raw_config_parser.read(config_file)
+    if len(config_read) != 1:
+        # If we reach here it means the config could not be found or read
+        # from the previous locations.  This could happen if we try to run
+        # it from a virtual env.  In this case, we try to read the config
+        # from the current repository
+        absolute_path = os.path.dirname(os.path.abspath(ovn_k8s.__file__))
+        absolute_path = absolute_path[:absolute_path.rfind("/")]
+        config_file = "%s/etc/ovn_k8s.conf" % absolute_path
+        config_read = raw_config_parser.read(config_file)
+        if len(config_read) != 1:
+            # Config could not be found or read
+            sys.exit("Error when reading config file: %s" % config_file)
+
+
+def get_option(option_name, section_name='default'):
+    try:
+        config_string = raw_config_parser.get(section_name, option_name)
+    except Exception:
+        # Return None in case the option_name could not be found
+        return None
+    try:
+        # Try to evaluate the string which may contain a Python expression
+        expr = ast.literal_eval(config_string)
+        return expr
+    except Exception:
+        return config_string
+
+
+UNIX_SOCKET = get_option('unix_socket')
 
 
 def ovn_init_overlay():
@@ -57,5 +102,3 @@ def ovn_init_overlay():
     if not K8S_CLUSTER_LB_UDP:
         sys.exit("K8S_CLUSTER_LB_UDP not set")
     variables.K8S_CLUSTER_LB_UDP = K8S_CLUSTER_LB_UDP
-
-    variables.OVN_MODE = "overlay"

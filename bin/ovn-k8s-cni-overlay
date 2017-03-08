@@ -24,13 +24,14 @@ import time
 import ovs.vlog
 import pyroute2
 
+from ovn_k8s.common import config
 from ovn_k8s.common import kubernetes
 from ovn_k8s.common.util import ovs_vsctl
 from ovn_k8s.common.util import call_popen
 
 vlog = ovs.vlog.Vlog("ovn-k8s-cni-overlay")
 
-LOGFILE = "/var/log/openvswitch/ovn-k8s-cni-overlay.log"
+LOGFILE = config.get_option('log_path')
 CNI_VERSION = "0.1.0"
 DEBUG = True
 
@@ -99,11 +100,12 @@ def setup_interface(container_id, cni_netns, cni_ifname,
         # Configure veth_inside: set name, mtu, mac address, ip, and bring up
         vlog.dbg("Configuring and bringing up veth inner interface %s. "
                  "New name:'%s',MAC address:'%s', MTU:'%s', IP:%s" %
-                 (veth_inside, cni_ifname, mac_address, 1400, ip_address))
+                 (veth_inside, cni_ifname, mac_address,
+                  config.get_option('mtu'), ip_address))
         with ns_ipdb.interfaces[veth_inside] as veth_inside_iface:
             veth_inside_iface.ifname = cni_ifname
             veth_inside_iface.address = mac_address
-            veth_inside_iface.mtu = 1400
+            veth_inside_iface.mtu = config.get_option('mtu')
             veth_inside_iface.add_ip(ip_address)
             veth_inside_iface.up()
 

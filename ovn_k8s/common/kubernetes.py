@@ -18,11 +18,12 @@ import requests
 import ovs.vlog
 
 from os import path
+from ovn_k8s.common import config
 from ovn_k8s.common import exceptions
 from ovn_k8s.common.util import ovs_vsctl
 from ovn_k8s.common import variables
 
-CA_CERTIFICATE = "/etc/openvswitch/k8s-ca.crt"
+CA_CERTIFICATE = config.get_option('k8s_ca_certificate')
 vlog = ovs.vlog.Vlog("kubernetes")
 
 
