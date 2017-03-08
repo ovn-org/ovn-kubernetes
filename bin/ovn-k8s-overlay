@@ -87,6 +87,62 @@ def get_local_system_id():
     return system_id
 
 
+def configure_management_port_windows(node_name, cluster_subnet, router_ip,
+                                      interface_name, interface_ip):
+    # Up the interface.
+    command = "powershell Enable-NetAdapter %s" % (interface_name)
+    util.call_popen(shlex.split(command))
+
+    # The interface may already exist, in which case delete the routes and IP.
+    command = ("powershell Remove-NetIPAddress -InterfaceAlias %s "
+               "-Confirm:$false" % interface_name)
+    util.call_popen(shlex.split(command))
+
+    ip = netaddr.IPNetwork(interface_ip)
+    # Assign IP address to the internal interface.
+    try:
+        command = ("powershell New-NetIPAddress -IPAddress %s -PrefixLength %s"
+                   " -InterfaceAlias %s" %
+                   (str(ip.ip), str(ip.prefixlen), interface_name))
+        util.call_popen(shlex.split(command))
+    except Exception as e:
+        sys.stderr.write("warning: failed to run \"%s\": %s"
+                         % (command, str(e)))
+
+    # Set MTU for the interface
+    try:
+        command = ('netsh interface ipv4 set subinterface '
+                   '"%(nic_name)s" '
+                   'mtu=%(mtu)s store=persistent' %
+                   {'nic_name': interface_name,
+                    'mtu': config.get_option('mtu')})
+        util.call_popen(shlex.split(command))
+    except Exception as e:
+        sys.stderr.write("warning: failed to run \"%s\": %s"
+                         % (command, str(e)))
+
+    # Create a route for the entire subnet.
+    try:
+        command = ("powershell Get-NetAdapter | Where { $_.Name -Match %s } | "
+                   "select ifIndex" % interface_name)
+        cmd = shlex.split(command)
+        # Putting the interface name between quotes
+        cmd[7] = '"%s"' % cmd[7]
+        interface_index = util.call_popen(cmd).split("\n")[-1].strip(" ")
+        netmask = str(netaddr.IPNetwork(cluster_subnet).netmask)
+        subnet_cluster_ip = str(netaddr.IPNetwork(cluster_subnet).ip)
+        command = ("route print -4 %s" % subnet_cluster_ip)
+        output = util.call_popen(shlex.split(command))
+        if output.find(subnet_cluster_ip) < 0:
+            # Create the route only if it was not found
+            command = ("route -p add %s mask %s %s METRIC 2 IF %s" % (
+                       subnet_cluster_ip, netmask, router_ip, interface_index))
+            util.call_popen(shlex.split(command))
+    except Exception as e:
+        sys.stderr.write("warning: failed to run \"%s\": %s"
+                         % (command, str(e)))
+
+
 def configure_management_port_debian(node_name, cluster_subnet, router_ip,
                                      interface_name, interface_ip):
     bridge_exists = False
@@ -214,6 +270,11 @@ def configure_management_port(node_name, cluster_subnet, router_ip,
                               interface_name, interface_ip):
     # First, try to configure management ports via platform specific tools.
 
+    if sys.platform == 'win32':
+        configure_management_port_windows(node_name, cluster_subnet, router_ip,
+                                          interface_name, interface_ip)
+        return
+
     # Identify whether the platform is Debian based.
     if os.path.isfile("/etc/network/interfaces"):
         configure_management_port_debian(node_name, cluster_subnet, router_ip,
@@ -290,6 +351,9 @@ def create_management_port(node_name, local_subnet, cluster_subnet):
               "options:router-port=rtos-" + node_name,
               "addresses=" + "\"" + router_mac + "\"")
 
+    # Make sure br-int is created
+    ovs_vsctl("--", "--may-exist", "add-br", "br-int")
+
     interface_name = "k8s-%s" % (node_name[:11])
     # Create a OVS internal interface
     ovs_vsctl("--", "--may-exist", "add-port", "br-int",
@@ -302,6 +366,17 @@ def create_management_port(node_name, local_subnet, cluster_subnet):
                             interface_name, "mac_in_use").strip('"')
     if not mac_address:
         raise Exception("failed to get mac address of %s" % (interface_name))
+
+    if sys.platform == 'win32' and mac_address == "00:00:00:00:00:00":
+        # The address might not be fetched correctly until the ovs-vswitchd
+        # is restarted, in which case we try fetch the mac address from
+        # Get-NetAdapter powershell command
+        command = ("powershell Get-NetAdapter | Where { $_.Name -Match %s } | "
+                   "select MacAddress" % interface_name)
+        cmd = shlex.split(command)
+        # Putting the interface_name between quotes
+        cmd[7] = '"%s"' % cmd[7]
+        mac_address = util.call_popen(cmd).split("\n")[-1].replace("-", ":")
 
     # Create the OVN logical port.
     ip.value = ip.value + 1
@@ -394,6 +469,14 @@ def minion_init(args):
 
     node_name = args.node_name
 
+    if sys.platform != 'win32':
+        _linux_init(args)
+
+    create_management_port(node_name, args.minion_switch_subnet,
+                           args.cluster_ip_subnet)
+
+
+def _linux_init(args):
     cni_plugin_path = distutils.spawn.find_executable(CNI_PLUGIN)
     if not cni_plugin_path:
         raise Exception("No CNI plugin %s found" % CNI_PLUGIN)
@@ -426,9 +509,6 @@ def minion_init(args):
                 }
         with open(CNI_FILE, 'w') as outfile:
             json.dump(data, outfile)
-
-    create_management_port(node_name, args.minion_switch_subnet,
-                           args.cluster_ip_subnet)
 
 
 def generate_gateway_ip():
