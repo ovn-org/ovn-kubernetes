@@ -513,7 +513,7 @@ class OvnNB(object):
                                 "--data=bare", "--no-heading",
                                 "--columns=name", "find",
                                 "logical_switch_port",
-                                "external_id:pod=true").split()
+                                "external-ids:pod=true").split()
             existing_logical_ports = set(existing_logical_ports)
         except Exception as e:
             vlog.err("sync_pods: find failed %s" % (str(e)))
