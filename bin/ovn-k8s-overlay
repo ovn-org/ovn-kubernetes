@@ -510,10 +510,6 @@ def gateway_init(args):
     # Add a static route in GR with distributed router as the nexthop.
     ovn_nbctl("--may-exist", "lr-route-add", gateway_router,
               args.cluster_ip_subnet, "100.64.1.1")
-    # Add a static route in GR with physical gateway as the default next hop.
-    if args.default_gw:
-        ovn_nbctl("--may-exist", "lr-route-add", gateway_router,
-                  "0.0.0.0/0", str(default_gw.ip))
 
     # Add a default route in distributed router with first GR as the nexthop.
     ovn_nbctl("--may-exist", "lr-route-add", k8s_cluster_router,
@@ -601,6 +597,11 @@ def gateway_init(args):
               "rtoe-" + gateway_router, mac_address, str(physical_ip),
               "--", "set", "logical_router_port", "rtoe-" + gateway_router,
               "external-ids:gateway-physical-ip=yes")
+
+    # Add a static route in GR with physical gateway as the default next hop.
+    if args.default_gw:
+        ovn_nbctl("--may-exist", "lr-route-add", gateway_router,
+                  "0.0.0.0/0", str(default_gw.ip), "rtoe-" + gateway_router)
 
     # Connect the external_switch to the router.
     ovn_nbctl("--", "--may-exist", "lsp-add", external_switch,
