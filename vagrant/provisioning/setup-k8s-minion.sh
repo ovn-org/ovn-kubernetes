@@ -9,6 +9,8 @@ set -o xtrace
 
 MASTER_IP=$1
 
+echo "MASTER_IP=$MASTER_IP" >> setup_minion_args.sh
+
 # Install CNI
 pushd ~/
 wget https://github.com/containernetworking/cni/releases/download/v0.2.0/cni-v0.2.0.tgz

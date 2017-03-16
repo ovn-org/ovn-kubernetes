@@ -19,6 +19,16 @@ MINION_NAME=$5
 MINION_SUBNET=$6
 GW_IP=$7
 
+cat > setup_minion_args.sh <<EOL
+MASTER_OVERLAY_IP=$1
+MINION_OVERLAY_IP=$2
+PUBLIC_IP=$3
+PUBLIC_SUBNET_MASK=$4
+MINION_NAME=$5
+MINION_SUBNET=$6
+GW_IP=$7
+EOL
+
 # Comment out the next line if you prefer TCP instead of SSL.
 SSL="true"
 

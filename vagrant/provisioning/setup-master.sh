@@ -15,6 +15,13 @@ GW_IP=$2
 MASTER_NAME=$3
 MASTER_SUBNET=$4
 
+cat > setup_master_args.sh <<EOL
+OVERLAY_IP=$1
+GW_IP=$2
+MASTER_NAME=$3
+MASTER_SUBNET=$4
+EOL
+
 # Comment out the next line, if you prefer TCP instead of SSL.
 SSL="true"
 

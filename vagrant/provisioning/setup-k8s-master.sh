@@ -13,6 +13,12 @@ PUBLIC_IP=$1
 PUBLIC_SUBNET_MASK=$2
 GW_IP=$3
 
+cat > setup_k8s_master_args.sh <<EOL
+PUBLIC_IP=$1
+PUBLIC_SUBNET_MASK=$2
+GW_IP=$3
+EOL
+
 # Install k8s
 
 # Install an etcd cluster
