@@ -144,6 +144,9 @@ every boot)
 /usr/share/openvswitch/scripts/ovn-ctl start_controller
 ```
 
+### (Optional) Please read docs/config.py if you want to override the default
+### values for the config options used in the init scripts.
+
 ### k8s master node initialization.
 
 Set the k8s API server address in the Open vSwitch database for the
