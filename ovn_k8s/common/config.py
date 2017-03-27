@@ -13,48 +13,74 @@
 # limitations under the License.
 
 import ast
-import ConfigParser
 import os
 import sys
 
-import ovn_k8s
 from ovn_k8s.common.util import ovs_vsctl
 from ovn_k8s.common.util import ovn_nbctl
 from ovn_k8s.common import variables
 
+if sys.version_info < (3, 0):
+    # python 2
+    import ConfigParser
+else:
+    # python 3
+    import configparser as ConfigParser
+
 
 raw_config_parser = ConfigParser.RawConfigParser()
-config_path = "/etc/openvswitch"
-config_file = '%s/ovn_k8s.conf' % config_path
-config_read = raw_config_parser.read(config_file)
-if len(config_read) != 1:
-    # raw_config_parser.read returns the list of filenames which were
-    # successfully parsed.
-    # If we reach here it means that it could not read the config file from
-    # "/etc/openvswitch".  Search in default prefix '/usr/local', this is
-    # where pip is installing the config file
-    config_file = '/usr/local%s' % config_file
-    config_read = raw_config_parser.read(config_file)
-    if len(config_read) != 1:
-        # If we reach here it means the config could not be found or read
-        # from the previous locations.  This could happen if we try to run
-        # it from a virtual env.  In this case, we try to read the config
-        # from the current repository
-        absolute_path = os.path.dirname(os.path.abspath(ovn_k8s.__file__))
-        absolute_path = absolute_path[:absolute_path.rfind("/")]
-        config_file = "%s/etc/ovn_k8s.conf" % absolute_path
-        config_read = raw_config_parser.read(config_file)
-        if len(config_read) != 1:
-            # Config could not be found or read
-            sys.exit("Error when reading config file: %s" % config_file)
+
+
+def init_config():
+    config_filename = 'ovn_k8s.conf'
+    if sys.platform != 'win32':
+        config_path = "/etc/openvswitch"
+    else:
+        config_path = "C:\\etc"
+    config_file = '%s/%s' % (config_path, config_filename)
+    # Convert the path to use platform specific path delimitators
+    config_file = os.path.abspath(config_file)
+    # Return True if the file could be read, otherwise False
+    return len(raw_config_parser.read(config_file)) == 1
+
+
+config_successfully_read = init_config()
+
+
+def get_default_value(option_name, section_name):
+    section_default = {
+        "mtu": 1400,
+        "conntrack_zone": 64000,
+        "ovn_mode": "overlay",
+        "log_path": "/var/log/openvswitch/ovn-k8s-cni-overlay.log",
+        "unix_socket": "/var/run/openvswitch/ovnnb_db.sock",
+        "cni_conf_path": "/etc/cni/net.d",
+        "cni_link_path": "/opt/cni/bin/",
+        "cni_plugin": "ovn-k8s-cni-overlay",
+        "private_key": "/etc/openvswitch/ovncontroller-privkey.pem",
+        "certificate": "/etc/openvswitch/ovncontroller-cert.pem",
+        "ca_cert": "/etc/openvswitch/ovnnb-ca.cert",
+        "k8s_ca_certificate": "/etc/openvswitch/k8s-ca.crt",
+        "rundir": "",
+        "logdir": ""
+    }
+    default_config = {'default': section_default}
+
+    section_dict = default_config.get(section_name, {})
+    return section_dict.get(option_name, None)
 
 
 def get_option(option_name, section_name='default'):
+    if not config_successfully_read:
+        return get_default_value(option_name, section_name)
+
     try:
         config_string = raw_config_parser.get(section_name, option_name)
     except Exception:
-        # Return None in case the option_name could not be found
-        return None
+        # Config value could not be found in the file, retrieve the
+        # default value
+        config_string = get_default_value(option_name, section_name)
+
     try:
         # Try to evaluate the string which may contain a Python expression
         expr = ast.literal_eval(config_string)
