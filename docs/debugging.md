@@ -54,8 +54,27 @@ modprobe vport-geneve  # or vport-stt for "stt".
 ### Sanity check cross host ping.
 
 Since on each host, a OVS internal device is created with the second IP
-address in the $CLUSTER_IP_SUBNET, you should be able to check cross
+address in the $MINION_SWITCH_SUBNET, you should be able to check cross
 host connectivity by pinging these internal devices.
+
+### Firewall blocking overlay networks
+
+If your host has a firewall blocking incoming connections as a default policy,
+you should open up ports to allow overlay networks.  If you use "geneve" as the
+encapsulation type, you should open up UDP port 6081.  If you use "stt" as the
+encapsulation type, you should open up TCP port 7471.
+
+You can use the following command to achieve it via iptables.
+
+```
+# To open up Geneve port.
+/usr/share/openvswitch/scripts/ovs-ctl --protocol=udp \
+        --dport=6081 enable-protocol
+
+# To open up STT port.
+/usr/share/openvswitch/scripts/ovs-ctl --protocol=tcp \
+        --dport=7471 enable-protocol
+```
 
 ### Check ovn-northd's log file.
 
