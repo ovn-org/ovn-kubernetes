@@ -144,10 +144,10 @@ every boot)
 /usr/share/openvswitch/scripts/ovn-ctl start_controller
 ```
 
-Note: Please read docs/config.md if you want to override the default
-values for the config options used in the init scripts.
-
 ### k8s master node initialization.
+
+Note: The init scripts used below use fair defaults.  If you are an advanced
+user, please read [config.md] for more fine grained control.
 
 Set the k8s API server address in the Open vSwitch database for the
 initialization scripts (and later daemons) to pick from.
@@ -391,3 +391,4 @@ There is a vagrant available to bring up a simple cluster at [vagrant].
 [debugging.md]: docs/debugging.md
 [vagrant]: vagrant/README.md
 [INSTALL.SSL.md]: docs/INSTALL.SSL.md
+[config.md]: docs/config.md
