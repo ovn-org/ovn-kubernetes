@@ -10,7 +10,7 @@ locations:
 ```
 /etc/openvswitch/ovn_k8s.conf
 ```
-The following command copies the config file if is run from inside the repo:
+The following command copies the config file if it is run from inside the repo:
 ```
 cp etc/ovn_k8s.conf /etc/openvswitch/ovn_k8s.conf
 ```
