@@ -1,0 +1,49 @@
+#!/bin/bash
+
+API_TOKEN=$1
+NODE_IP=$2
+K8S_API_SERVER_IP=${3-https://localhost:8443}
+MINION_SWITCH_SUBNET=${4-11.11.2.0/24}
+CLUSTER_IP_SUBNET=${5-11.11.0.0/16}
+hostname=`hostname`
+NODE_NAME=${6-$hostname}
+
+ENCAP_TYPE=${ENCAP_TYPE-geneve}
+CENTRAL_IP=$(echo -n ${K8S_API_SERVER_IP} | cut -d "/" -f 3 | cut -d ":" -f 1)
+
+if [[ "${API_TOKEN}" == "" ]]; then
+	echo "Supply kube access secret as the argument"
+	exit 1
+fi
+
+install() {
+	# Add a repo for where we can get OVS 2.6 packages
+	if [ ! -f /etc/yum.repos.d/delorean-deps.repo ] ; then
+	    curl http://trunk.rdoproject.org/centos7/delorean-deps.repo | sudo tee /etc/yum.repos.d/delorean-deps.repo
+	fi
+	sudo yum install -y openvswitch openvswitch-ovn-central openvswitch-ovn-host
+}
+
+init() {
+	systemctl start openvswitch
+	ovs-vsctl set Open_vSwitch . external_ids:ovn-remote="tcp:$CENTRAL_IP:6642" \
+	  external_ids:ovn-nb="tcp:${CENTRAL_IP}:6641" \
+	  external_ids:ovn-encap-ip=${NODE_IP} \
+	  external_ids:ovn-encap-type="$ENCAP_TYPE"
+	systemctl restart ovn-controller
+}
+
+ovnsetup() {
+	ovs-vsctl set Open_vSwitch . \
+	  external_ids:k8s-api-server="${K8S_API_SERVER_IP}" \
+	  external_ids:k8s-api-token="${API_TOKEN}"
+
+	ovn-k8s-overlay minion-init \
+	  --cluster-ip-subnet=${CLUSTER_IP_SUBNET} \
+	  --minion-switch-subnet=${MINION_SWITCH_SUBNET} \
+	  --node-name="${NODE_NAME}"
+}
+
+install
+init
+ovnsetup
