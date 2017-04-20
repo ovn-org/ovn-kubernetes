@@ -14,6 +14,14 @@ import (
 	"github.com/openshift/origin/pkg/util/netutils"
 )
 
+// StartClusterMaster runs a subnet IPAM and a controller that watches arrival/departure
+// of nodes in the cluster
+// On an addition to the cluster (node create), a new subnet is created for it that will translate
+// to creation of a logical switch (done by the node, but could be created here at the master process too)
+// Upon deletion of a node, the switch will be deleted
+//
+// TODO: Verify that the cluster was not already called with a different global subnet
+//  If true, then either quit or perform a complete reconfiguration of the cluster (recreate switches/routers with new subnet values)
 func (cluster *OvnClusterController) StartClusterMaster(masterNodeName string) error {
 	clusterNetwork := cluster.ClusterIPNet
 	hostSubnetLength := cluster.HostSubnetLength
@@ -34,7 +42,11 @@ func (cluster *OvnClusterController) StartClusterMaster(masterNodeName string) e
 	if err != nil {
 		return err
 	}
+	// Add the masterSwitchNetwork to subrange so that it is counted as one already taken
 	subrange = append(subrange, masterSwitchNetwork)
+	// NewSubnetAllocator is a subnet IPAM, which takes a CIDR (first argument)
+	// and gives out subnets of length 'hostSubnetLength' (second argument)
+	// but omitting any that exist in 'subrange' (third argument)
 	cluster.masterSubnetAllocator, err = netutils.NewSubnetAllocator(clusterNetwork.String(), hostSubnetLength, subrange)
 	if err != nil {
 		return err
@@ -53,6 +65,8 @@ func (cluster *OvnClusterController) StartClusterMaster(masterNodeName string) e
 
 	cluster.SetupMaster(masterNodeName, masterSwitchNetwork)
 
+	// go routine to watch all node events. On creation, addNode will be called that will create a subnet for the switch belonging to that node.
+	// On a delete call, the subnet will be returned to the allocator as the switch is deleted from ovn
 	go utilwait.Forever(cluster.watchNodes, 0)
 	return nil
 }

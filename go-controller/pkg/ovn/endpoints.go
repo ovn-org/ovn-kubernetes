@@ -11,6 +11,7 @@ import (
 )
 
 func (ovn *OvnController) getLoadBalancer(protocol kapi.Protocol) string {
+	// TODO: add a cache here for the load balancer lookup, so that multiple calls to nbctl can be avoided
 	var out []byte
 	if protocol == kapi.ProtocolTCP {
 		out, _ = exec.Command(OVN_NBCTL, "--data=bare", "--no-heading",

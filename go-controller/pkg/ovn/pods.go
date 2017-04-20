@@ -52,12 +52,12 @@ func (oc *OvnController) addLogicalPort(pod *kapi.Pod) {
 		}
 		if count != 30 {
 			time.Sleep(1 * time.Second)
-			count--
 		}
+		count--
 		p, err := oc.Kube.GetPod(pod.Namespace, pod.Name)
 		if err != nil {
 			glog.Errorf("Could not get pod %s/%s for obtaining the logical switch it belongs to", pod.Namespace, pod.Name)
-			return
+			continue
 		}
 		logical_switch = p.Spec.NodeName
 	}
@@ -94,6 +94,7 @@ func (oc *OvnController) addLogicalPort(pod *kapi.Pod) {
 		}
 		glog.V(4).Infof("Error while obtaining addresses for %s - %v", portName, err)
 		time.Sleep(time.Second)
+		count--;
 	}
 	if count == 0 {
 		glog.Errorf("Error while obtaining addresses for %s", portName)
