@@ -19,9 +19,9 @@ func (cluster *OvnClusterController) StartClusterNode(name string) error {
 
 	for count > 0 {
 		if count != 30 {
-			count--
 			time.Sleep(time.Second)
 		}
+		count--
 
 		// setup the node, create the logical switch
 		node, err = cluster.Kube.GetNode(name)
