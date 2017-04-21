@@ -10,23 +10,23 @@ import (
 	kapi "k8s.io/client-go/pkg/api/v1"
 )
 
-func (ovn *OvnController) getLoadBalancer(protocol kapi.Protocol) string {
+func (ovn *Controller) getLoadBalancer(protocol kapi.Protocol) string {
 	// TODO: add a cache here for the load balancer lookup, so that multiple calls to nbctl can be avoided
 	var out []byte
 	if protocol == kapi.ProtocolTCP {
-		out, _ = exec.Command(OVN_NBCTL, "--data=bare", "--no-heading",
+		out, _ = exec.Command(OvnNbctl, "--data=bare", "--no-heading",
 			"--columns=_uuid", "find", "load_balancer",
 			"external_ids:k8s-cluster-lb-tcp=yes").CombinedOutput()
 	} else if protocol == kapi.ProtocolUDP {
-		out, _ = exec.Command(OVN_NBCTL, "--data=bare", "--no-heading",
+		out, _ = exec.Command(OvnNbctl, "--data=bare", "--no-heading",
 			"--columns=_uuid", "find", "load_balancer",
 			"external_ids:k8s-cluster-lb-udp=yes").CombinedOutput()
 	}
 	outStr := strings.TrimFunc(string(out), unicode.IsSpace)
-	return string(outStr)
+	return outStr
 }
 
-func (ovn *OvnController) createLoadBalancerVIP(lb string, serviceIP string, port int32, ips []string, targetPort int32) error {
+func (ovn *Controller) createLoadBalancerVIP(lb string, serviceIP string, port int32, ips []string, targetPort int32) error {
 	glog.V(4).Infof("Creating lb with %s, %s, %d, [%v], %d", lb, serviceIP, port, ips, targetPort)
 
 	// With service_ip:port as a VIP, create an entry in 'load_balancer'
@@ -34,7 +34,7 @@ func (ovn *OvnController) createLoadBalancerVIP(lb string, serviceIP string, por
 	key := fmt.Sprintf("\"%s:%d\"", serviceIP, port)
 
 	if len(ips) == 0 {
-		_, err := exec.Command(OVN_NBCTL, "remove", "load_balancer", lb, "vips", key).CombinedOutput()
+		_, err := exec.Command(OvnNbctl, "remove", "load_balancer", lb, "vips", key).CombinedOutput()
 		return err
 	}
 
@@ -48,14 +48,14 @@ func (ovn *OvnController) createLoadBalancerVIP(lb string, serviceIP string, por
 	}
 	target := fmt.Sprintf("vips:\"%s:%d\"=\"%s\"", serviceIP, port, commaSeparatedEndpoints)
 
-	out, err := exec.Command(OVN_NBCTL, "set", "load_balancer", lb, target).CombinedOutput()
+	out, err := exec.Command(OvnNbctl, "set", "load_balancer", lb, target).CombinedOutput()
 	if err != nil {
 		glog.Errorf("Error in creating load balancer: %v(%v)", string(out), err)
 	}
 	return err
 }
 
-func (ovn *OvnController) addEndpoints(ep *kapi.Endpoints) error {
+func (ovn *Controller) addEndpoints(ep *kapi.Endpoints) error {
 	// get service
 	svc, err := ovn.Kube.GetService(ep.Namespace, ep.Name)
 	if err != nil {
@@ -108,7 +108,7 @@ func (ovn *OvnController) addEndpoints(ep *kapi.Endpoints) error {
 	return nil
 }
 
-func (ovn *OvnController) deleteEndpoints(ep *kapi.Endpoints) error {
+func (ovn *Controller) deleteEndpoints(ep *kapi.Endpoints) error {
 	svc, err := ovn.Kube.GetService(ep.Namespace, ep.Name)
 	if err != nil {
 		return err
@@ -116,7 +116,7 @@ func (ovn *OvnController) deleteEndpoints(ep *kapi.Endpoints) error {
 	for _, svcPort := range svc.Spec.Ports {
 		lb := ovn.getLoadBalancer(svcPort.Protocol)
 		key := fmt.Sprintf("\"%s:%d\"", svc.Spec.ClusterIP, svcPort.Port)
-		_, err := exec.Command(OVN_NBCTL, "remove", "load_balancer", lb, "vips", key).CombinedOutput()
+		_, err := exec.Command(OvnNbctl, "remove", "load_balancer", lb, "vips", key).CombinedOutput()
 		if err != nil {
 			glog.Errorf("Error in deleting endpoints: %v", err)
 		}

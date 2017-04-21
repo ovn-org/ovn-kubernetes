@@ -8,8 +8,9 @@ import (
 	"k8s.io/client-go/tools/cache"
 )
 
+// OvnClusterController is the object holder for utilities meant for cluster management
 type OvnClusterController struct {
-	Kube                  kube.KubeInterface
+	Kube                  kube.Interface
 	masterSubnetAllocator *netutils.SubnetAllocator
 
 	KubeServer       string
@@ -22,5 +23,6 @@ type OvnClusterController struct {
 }
 
 const (
-	OVN_HOST_SUBNET = "ovn_host_subnet"
+	// OvnHostSubnet is the constant string representing the annotation key
+	OvnHostSubnet = "ovn_host_subnet"
 )

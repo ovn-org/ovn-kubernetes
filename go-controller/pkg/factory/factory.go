@@ -30,14 +30,14 @@ func NewDefaultFactory(c kubernetes.Interface) *Factory {
 	}
 }
 
-// Create begins listing and watching against the API server for the pod and endpoint
+// CreateOvnController begins listing and watching against the API server for the pod and endpoint
 // resources. It spawns child goroutines that cannot be terminated.
-func (factory *Factory) CreateOvnController() *ovn.OvnController {
+func (factory *Factory) CreateOvnController() *ovn.Controller {
 
 	podInformer := factory.IFactory.Core().V1().Pods()
 	endpointsInformer := factory.IFactory.Core().V1().Endpoints()
 
-	return &ovn.OvnController{
+	return &ovn.Controller{
 		StartPodWatch: func(handler cache.ResourceEventHandler) {
 			podInformer.Informer().AddEventHandler(handler)
 			podInformer.Informer().Run(utilwait.NeverStop)
@@ -50,6 +50,8 @@ func (factory *Factory) CreateOvnController() *ovn.OvnController {
 	}
 }
 
+// CreateClusterController creates the controller for cluster management that watches nodes and gives
+// out the subnets for the logical switch meant for the node
 func (factory *Factory) CreateClusterController() *cluster.OvnClusterController {
 	nodeInformer := factory.IFactory.Core().V1().Nodes()
 	return &cluster.OvnClusterController{

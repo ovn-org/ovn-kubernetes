@@ -33,7 +33,7 @@ func (cluster *OvnClusterController) StartClusterMaster(masterNodeName string) e
 		return err
 	}
 	for _, node := range existingNodes.Items {
-		hostsubnet, ok := node.Annotations[OVN_HOST_SUBNET]
+		hostsubnet, ok := node.Annotations[OvnHostSubnet]
 		if ok {
 			subrange = append(subrange, hostsubnet)
 		}
@@ -54,7 +54,7 @@ func (cluster *OvnClusterController) StartClusterMaster(masterNodeName string) e
 
 	// now go over the 'existing' list again and create annotations for those who do not have it
 	for _, node := range existingNodes.Items {
-		_, ok := node.Annotations[OVN_HOST_SUBNET]
+		_, ok := node.Annotations[OvnHostSubnet]
 		if !ok {
 			err := cluster.addNode(&node)
 			if err != nil {
@@ -73,10 +73,14 @@ func (cluster *OvnClusterController) StartClusterMaster(masterNodeName string) e
 
 func calculateMasterSwitchNetwork(clusterNetwork string, hostSubnetLength uint32) (string, error) {
 	subAllocator, err := netutils.NewSubnetAllocator(clusterNetwork, hostSubnetLength, make([]string, 0))
+	if err != nil {
+		return "", err
+	}
 	sn, err := subAllocator.GetNetwork()
 	return sn.String(), err
 }
 
+// SetupMaster calls the external script to create the switch and central routers for the network
 func (cluster *OvnClusterController) SetupMaster(masterNodeName string, masterSwitchNetwork string) {
 	out, err := exec.Command("ovnkube-setup-master", cluster.Token, cluster.KubeServer, masterSwitchNetwork, cluster.ClusterIPNet.String(), masterNodeName).CombinedOutput()
 	if err != nil {
@@ -91,9 +95,9 @@ func (cluster *OvnClusterController) addNode(node *kapi.Node) error {
 		return fmt.Errorf("Error allocating network for node %s: %v", node.Name, err)
 	}
 
-	err = cluster.Kube.SetAnnotationOnNode(node, OVN_HOST_SUBNET, sn.String())
+	err = cluster.Kube.SetAnnotationOnNode(node, OvnHostSubnet, sn.String())
 	if err != nil {
-		cluster.masterSubnetAllocator.ReleaseNetwork(sn)
+		_ = cluster.masterSubnetAllocator.ReleaseNetwork(sn)
 		return fmt.Errorf("Error creating subnet %s for node %s: %v", sn.String(), node.Name, err)
 	}
 	glog.Infof("Created HostSubnet %s", sn.String())
@@ -101,7 +105,7 @@ func (cluster *OvnClusterController) addNode(node *kapi.Node) error {
 }
 
 func (cluster *OvnClusterController) deleteNode(node *kapi.Node) error {
-	sub, ok := node.Annotations[OVN_HOST_SUBNET]
+	sub, ok := node.Annotations[OvnHostSubnet]
 	if !ok {
 		return fmt.Errorf("Error in obtaining host subnet for node %q for deletion", node.Name)
 	}

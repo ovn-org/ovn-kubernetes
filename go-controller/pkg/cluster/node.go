@@ -11,6 +11,8 @@ import (
 	"github.com/openshift/origin/pkg/util/netutils"
 )
 
+// StartClusterNode learns the subnet assigned to it by the master controller
+// and calls the SetupNode script which establishes the logical switch
 func (cluster *OvnClusterController) StartClusterNode(name string) error {
 	count := 30
 	var err error
@@ -30,7 +32,7 @@ func (cluster *OvnClusterController) StartClusterNode(name string) error {
 			continue
 		}
 
-		sub, ok := node.Annotations[OVN_HOST_SUBNET]
+		sub, ok := node.Annotations[OvnHostSubnet]
 		if !ok {
 			glog.Errorf("Error starting node %s, no annotation found on node for subnet - %v", name, err)
 			continue

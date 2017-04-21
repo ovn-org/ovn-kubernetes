@@ -8,8 +8,10 @@ import (
 	"k8s.io/client-go/tools/cache"
 )
 
-type OvnController struct {
-	Kube kube.KubeInterface
+// Controller structure is the object which holds the controls for starting
+// and reacting upon the watched resources (e.g. pods, endpoints)
+type Controller struct {
+	Kube kube.Interface
 
 	StartPodWatch      func(handler cache.ResourceEventHandler)
 	StartEndpointWatch func(handler cache.ResourceEventHandler)
@@ -18,16 +20,19 @@ type OvnController struct {
 }
 
 const (
-	OVN_NBCTL = "ovn-nbctl"
+	// OvnNbctl is the constant string for the ovn nbctl shell command
+	OvnNbctl = "ovn-nbctl"
 )
 
-func (oc *OvnController) Run() {
+// Run starts the actual watching. Also initializes any local structures needed.
+func (oc *Controller) Run() {
 	oc.gatewayCache = make(map[string]string)
 	oc.WatchPods()
 	oc.WatchEndpoints()
 }
 
-func (oc *OvnController) WatchPods() {
+// WatchPods starts the watching of Pod resource and calls back the appropriate handler logic
+func (oc *Controller) WatchPods() {
 	oc.StartPodWatch(cache.ResourceEventHandlerFuncs{
 		AddFunc: func(obj interface{}) {
 			pod := obj.(*kapi.Pod)
@@ -57,7 +62,8 @@ func (oc *OvnController) WatchPods() {
 	})
 }
 
-func (oc *OvnController) WatchEndpoints() {
+// WatchEndpoints starts the watching of Endpoint resource and calls back the appropriate handler logic
+func (oc *Controller) WatchEndpoints() {
 	oc.StartEndpointWatch(cache.ResourceEventHandlerFuncs{
 		AddFunc: func(obj interface{}) {
 			ep := obj.(*kapi.Endpoints)

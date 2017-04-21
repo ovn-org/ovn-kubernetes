@@ -69,14 +69,19 @@ func main() {
 	if *node != "" {
 		if *token == "" {
 			panic("Cannot initialize node without service account 'token'. Please provide one with --token argument")
-			return
 		}
 
-		clusterController.StartClusterNode(*node)
+		err := clusterController.StartClusterNode(*node)
+		if err != nil {
+			panic(err.Error)
+		}
 	}
 	if *master != "" {
 		// run the cluster controller to init the master
-		clusterController.StartClusterMaster(*master)
+		err := clusterController.StartClusterMaster(*master)
+		if err != nil {
+			panic(err.Error)
+		}
 	}
 	if *netController {
 		ovnController.Run()
@@ -87,19 +92,20 @@ func main() {
 	}
 }
 
+// CreateConfig creates the restclient.Config object from token, ca file and the apiserver
+// (similar to what is obtainable from kubeconfig file)
 func CreateConfig(server, token, rootCAFile string) (*restclient.Config, error) {
 	tlsClientConfig := restclient.TLSClientConfig{}
 	if rootCAFile != "" {
 		if _, err := certutil.NewPool(rootCAFile); err != nil {
 			return nil, err
-		} else {
-			tlsClientConfig.CAFile = rootCAFile
 		}
+		tlsClientConfig.CAFile = rootCAFile
 	}
 
 	return &restclient.Config{
 		Host:            server,
-		BearerToken:     string(token),
+		BearerToken:     token,
 		TLSClientConfig: tlsClientConfig,
 	}, nil
 }
