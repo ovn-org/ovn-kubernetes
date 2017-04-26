@@ -1,18 +1,71 @@
 #!/bin/bash
 
+OUT_DIR=${OUT_DIR:-_output}
 
-# os::build::binaries_from_targets take a list of build targets and return the
-# full go package to be built
-function os::build::binaries_from_targets() {
-  local target
-  for target; do
-    echo "${OS_GO_PACKAGE}/${target}"
-  done
+# Output Vars:
+#   export GOPATH - A modified GOPATH to our created tree along with extra
+#     stuff.
+#   export GOBIN - This is actively unset if already set as we want binaries
+#     placed in a predictable place.
+function setup_env() {
+  init_source="$( dirname "${BASH_SOURCE}" )/.."
+  OVN_KUBE_ROOT="$( absolute_path "${init_source}" )"
+  export OVN_KUBE_ROOT
+  pushd ${OVN_KUBE_ROOT} >/dev/null
+  OVN_KUBE_GO_PACKAGE="github.com/openvswitch/ovn-kubernetes/go-controller"
+  OVN_KUBE_OUTPUT=${OVN_KUBE_ROOT}/${OUT_DIR}
+
+  if [[ -z "$(which go)" ]]; then
+    cat <<EOF
+
+Can't find 'go' in PATH, please fix and retry.
+See http://golang.org/doc/install for installation instructions.
+
+EOF
+    exit 2
+  fi
+
+  # Travis continuous build uses a head go release that doesn't report
+  # a version number, so we skip this check on Travis.  It's unnecessary
+  # there anyway.
+  if [[ "${TRAVIS:-}" != "true" ]]; then
+    local go_version
+    go_version=($(go version))
+    if [[ "${go_version[2]}" < "go1.5" ]]; then
+      cat <<EOF
+
+Detected Go version: ${go_version[*]}.
+ovn-kube builds require Go version 1.6 or greater.
+
+EOF
+      exit 2
+    fi
+  fi
+
+  unset GOBIN
+
+  # create a local GOPATH in _output
+  GOPATH="${OVN_KUBE_OUTPUT}/go"
+  OVN_KUBE_OUTPUT_BINPATH=${GOPATH}/bin
+  local go_pkg_dir="${GOPATH}/src/${OVN_KUBE_GO_PACKAGE}"
+  local go_pkg_basedir=$(dirname "${go_pkg_dir}")
+
+  mkdir -p "${go_pkg_basedir}"
+  rm -f "${go_pkg_dir}"
+
+  # TODO: This symlink should be relative.
+  ln -s "${OVN_KUBE_ROOT}" "${go_pkg_dir}"
+
+  popd >/dev/null
+  # lots of tools "just don't work" unless we're in the GOPATH
+  #cd "${go_pkg_dir}"
+
+  export GOPATH
 }
-readonly -f os::build::binaries_from_targets
+readonly -f setup_env
 
-# os::util::absolute_path returns the absolute path to the directory provided
-function os::util::absolute_path() {
+# absolute_path returns the absolute path to the directory provided
+function absolute_path() {
         local relative_path="$1"
         local absolute_path
 
@@ -25,8 +78,8 @@ function os::util::absolute_path() {
         fi
         popd >/dev/null
 
-        echo "${absolute_path}"
+	echo ${absolute_path}
 }
-readonly -f os::util::absolute_path
+readonly -f absolute_path
 
 
