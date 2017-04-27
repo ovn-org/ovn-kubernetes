@@ -35,12 +35,19 @@ func (oc *Controller) getGatewayFromSwitch(logicalSwitch string) (string, string
 
 func (oc *Controller) deleteLogicalPort(pod *kapi.Pod) {
 	logrus.Debugf("Deleting pod: %s", pod.Name)
+	logicalPort := fmt.Sprintf("%s_%s", pod.Namespace, pod.Name)
 	out, err := exec.Command(OvnNbctl, "--if-exists", "lsp-del",
-		fmt.Sprintf("%s_%s", pod.Namespace, pod.Name)).CombinedOutput()
+		logicalPort).CombinedOutput()
 	if err != nil {
 		logrus.Errorf("Error in deleting pod network switch - %s (%v)",
 			string(out), err)
 	}
+
+	ipAddress := oc.getIPFromOvnAnnotation(pod.Annotations["ovn"])
+
+	oc.deleteACLDeny(pod.Namespace, pod.Spec.NodeName, logicalPort)
+	oc.deletePodFromNamespaceAddressSet(pod.Namespace, ipAddress)
+	return
 }
 
 func (oc *Controller) addLogicalPort(pod *kapi.Pod) {
@@ -65,6 +72,11 @@ func (oc *Controller) addLogicalPort(pod *kapi.Pod) {
 	if logicalSwitch == "" {
 		logrus.Errorf("Could not find the logical switch that the pod %s/%s belongs to", pod.Namespace, pod.Name)
 		return
+	}
+
+	if !oc.logicalSwitchCache[logicalSwitch] {
+		oc.logicalSwitchCache[logicalSwitch] = true
+		oc.addAllowACLFromNode(logicalSwitch)
 	}
 
 	portName := fmt.Sprintf("%s_%s", pod.Namespace, pod.Name)
@@ -116,4 +128,8 @@ func (oc *Controller) addLogicalPort(pod *kapi.Pod) {
 	if err != nil {
 		logrus.Errorf("Failed to set annotation on pod %s - %v", pod.Name, err)
 	}
+
+	oc.addPodToNamespaceAddressSet(pod.Namespace, addresses[1])
+
+	return
 }

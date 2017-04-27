@@ -56,9 +56,13 @@ func main() {
 	master := flag.String("init-master", "", "initialize master, requires the hostname as argument")
 	node := flag.String("init-node", "", "initialize node, requires the name that node is registered with in kubernetes cluster")
 
-	logrus.SetLevel(logrus.DebugLevel)
+	// log flags
+	verbose := flag.Int("loglevel", 5, "logrus loglevels")
 
 	flag.Parse()
+
+	// Process log flags
+	logrus.SetLevel(logrus.Level(*verbose))
 
 	// Process auth flags
 	var config *restclient.Config

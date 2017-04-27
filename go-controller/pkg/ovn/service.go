@@ -24,8 +24,8 @@ func (ovn *Controller) deleteService(service *kapi.Service) {
 		}
 
 		protocol := svcPort.Protocol
-		if protocol == "" || (protocol != "TCP" && protocol != "UDP") {
-			protocol = "TCP"
+		if protocol == "" || (protocol != TCP && protocol != UDP) {
+			protocol = TCP
 		}
 
 		// TODO: Support named ports.

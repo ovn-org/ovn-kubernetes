@@ -3,10 +3,11 @@ package ovn
 import (
 	"github.com/Sirupsen/logrus"
 	"github.com/openvswitch/ovn-kubernetes/go-controller/pkg/kube"
-	"reflect"
-
 	kapi "k8s.io/client-go/pkg/api/v1"
+	kapisnetworking "k8s.io/client-go/pkg/apis/networking/v1"
 	"k8s.io/client-go/tools/cache"
+	"reflect"
+	"sync"
 )
 
 // Controller structure is the object which holds the controls for starting
@@ -14,20 +15,47 @@ import (
 type Controller struct {
 	Kube kube.Interface
 
-	StartPodWatch      func(handler cache.ResourceEventHandler)
-	StartServiceWatch  func(handler cache.ResourceEventHandler)
-	StartEndpointWatch func(handler cache.ResourceEventHandler)
+	StartPodWatch       func(handler cache.ResourceEventHandler)
+	StartEndpointWatch  func(handler cache.ResourceEventHandler)
+	StartServiceWatch   func(handler cache.ResourceEventHandler)
+	StartPolicyWatch    func(handler cache.ResourceEventHandler)
+	StartNamespaceWatch func(handler cache.ResourceEventHandler)
 
 	gatewayCache map[string]string
-
 	// For TCP and UDP type traffic, cache OVN load-balancers used for the
 	// cluster's east-west traffic.
 	loadbalancerClusterCache map[string]string
+
+	// A cache of all logical switches seen by the watcher
+	logicalSwitchCache map[string]bool
+
+	// For each namespace, an address_set that has all the pod IP
+	// address in that namespace
+	namespaceAddressSet map[string]map[string]bool
+
+	// For each namespace, a lock to protect critical regions
+	namespaceMutex map[string]*sync.Mutex
+
+	// For each namespace, a map of policy name to 'namespacePolicy'.
+	namespacePolicies map[string]map[string]*namespacePolicy
+
+	// For each logical port, the number of network policies that want
+	// to add a deny rule.
+	lspIngressDenyCache map[string]int
+
+	// A mutex for logicalPortIngressDenyCache
+	lspMutex *sync.Mutex
 }
 
 const (
-	// OvnNbctl is the constant string for the ovn nbctl shell command
+	// OvnNbctl is the constant string for the ovn-nbctl shell command
 	OvnNbctl = "ovn-nbctl"
+
+	// TCP is the constant string for the string "TCP"
+	TCP = "TCP"
+
+	// UDP is the constant string for the string "UDP"
+	UDP = "UDP"
 )
 
 // Run starts the actual watching. Also initializes any local structures needed.
@@ -36,6 +64,19 @@ func (oc *Controller) Run() {
 	oc.WatchPods()
 	oc.WatchServices()
 	oc.WatchEndpoints()
+	oc.WatchNamespaces()
+
+	oc.initializePolicyData()
+	oc.WatchNetworkPolicy()
+}
+
+func (oc *Controller) initializePolicyData() {
+	oc.logicalSwitchCache = make(map[string]bool)
+	oc.namespaceAddressSet = make(map[string]map[string]bool)
+	oc.namespacePolicies = make(map[string]map[string]*namespacePolicy)
+	oc.namespaceMutex = make(map[string]*sync.Mutex)
+	oc.lspIngressDenyCache = make(map[string]int)
+	oc.lspMutex = &sync.Mutex{}
 }
 
 // WatchPods starts the watching of Pod resource and calls back the appropriate handler logic
@@ -141,6 +182,76 @@ func (oc *Controller) WatchEndpoints() {
 			if err != nil {
 				logrus.Errorf("Error in deleting endpoints - %v", err)
 			}
+		},
+	})
+}
+
+// WatchNetworkPolicy starts the watching of network policy resource and calls
+// back the appropriate handler logic
+func (oc *Controller) WatchNetworkPolicy() {
+	oc.StartPolicyWatch(cache.ResourceEventHandlerFuncs{
+		AddFunc: func(obj interface{}) {
+			policy := obj.(*kapisnetworking.NetworkPolicy)
+			oc.addNetworkPolicy(policy)
+			return
+		},
+		UpdateFunc: func(old, newer interface{}) {
+			oldPolicy := old.(*kapisnetworking.NetworkPolicy)
+			newPolicy := newer.(*kapisnetworking.NetworkPolicy)
+			oc.deleteNetworkPolicy(oldPolicy)
+			oc.addNetworkPolicy(newPolicy)
+			return
+		},
+		DeleteFunc: func(obj interface{}) {
+			policy, ok := obj.(*kapisnetworking.NetworkPolicy)
+			if !ok {
+				tombstone, ok := obj.(cache.DeletedFinalStateUnknown)
+				if !ok {
+					logrus.Errorf("couldn't get object from tombstone %+v", obj)
+					return
+				}
+				policy, ok = tombstone.Obj.(*kapisnetworking.NetworkPolicy)
+				if !ok {
+					logrus.Errorf("tombstone contained object that is not a pod %#v", obj)
+					return
+				}
+			}
+			oc.deleteNetworkPolicy(policy)
+			return
+		},
+	})
+}
+
+// WatchNamespaces starts the watching of namespace resource and calls
+// back the appropriate handler logic
+func (oc *Controller) WatchNamespaces() {
+	oc.StartNamespaceWatch(cache.ResourceEventHandlerFuncs{
+		AddFunc: func(obj interface{}) {
+			ns := obj.(*kapi.Namespace)
+			oc.addNamespace(ns)
+			return
+		},
+		UpdateFunc: func(old, newer interface{}) {
+			ns := newer.(*kapi.Namespace)
+			oc.addNamespace(ns)
+			return
+		},
+		DeleteFunc: func(obj interface{}) {
+			ns, ok := obj.(*kapi.Namespace)
+			if !ok {
+				tombstone, ok := obj.(cache.DeletedFinalStateUnknown)
+				if !ok {
+					logrus.Errorf("couldn't get object from tombstone %+v", obj)
+					return
+				}
+				ns, ok = tombstone.Obj.(*kapi.Namespace)
+				if !ok {
+					logrus.Errorf("tombstone contained object that is not a namespace %#v", obj)
+					return
+				}
+			}
+			oc.deleteNamespace(ns)
+			return
 		},
 	})
 }
