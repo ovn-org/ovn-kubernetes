@@ -37,6 +37,8 @@ func (factory *Factory) CreateOvnController() *ovn.Controller {
 	podInformer := factory.IFactory.Core().V1().Pods()
 	serviceInformer := factory.IFactory.Core().V1().Services()
 	endpointsInformer := factory.IFactory.Core().V1().Endpoints()
+	policyInformer := factory.IFactory.Networking().V1().NetworkPolicies()
+	namespaceInformer := factory.IFactory.Core().V1().Namespaces()
 
 	return &ovn.Controller{
 		StartPodWatch: func(handler cache.ResourceEventHandler) {
@@ -50,6 +52,14 @@ func (factory *Factory) CreateOvnController() *ovn.Controller {
 		StartEndpointWatch: func(handler cache.ResourceEventHandler) {
 			endpointsInformer.Informer().AddEventHandler(handler)
 			go endpointsInformer.Informer().Run(utilwait.NeverStop)
+		},
+		StartPolicyWatch: func(handler cache.ResourceEventHandler) {
+			policyInformer.Informer().AddEventHandler(handler)
+			go policyInformer.Informer().Run(utilwait.NeverStop)
+		},
+		StartNamespaceWatch: func(handler cache.ResourceEventHandler) {
+			namespaceInformer.Informer().AddEventHandler(handler)
+			go namespaceInformer.Informer().Run(utilwait.NeverStop)
 		},
 		Kube: &kube.Kube{KClient: factory.KClient},
 	}
