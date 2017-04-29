@@ -11,6 +11,7 @@ const (
 	ovsVsctlCommand   = "ovs-vsctl"
 )
 
+// RunOVSVsctl runs a command via ovs-vsctl.
 func RunOVSVsctl(args ...string) (string, string, error) {
 	cmdPath, err := exec.LookPath(ovsVsctlCommand)
 	if err != nil {

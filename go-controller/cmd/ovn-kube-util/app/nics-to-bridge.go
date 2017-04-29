@@ -59,11 +59,7 @@ func saveIPAddress(iface, bridge netlink.Link, addrs []netlink.Addr) error {
 		logrus.Infof("Successfully saved addr %q to bridge %q", addr.String(), bridge.Attrs().Name)
 	}
 
-	if err := netlink.LinkSetUp(bridge); err != nil {
-		return err
-	}
-
-	return nil
+	return netlink.LinkSetUp(bridge)
 }
 
 func saveRoute(iface, bridge netlink.Link, routes []netlink.Route) error {
