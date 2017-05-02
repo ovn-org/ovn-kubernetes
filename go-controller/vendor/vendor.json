@@ -196,16 +196,16 @@
 			"revisionTime": "2016-10-06T03:53:53Z"
 		},
 		{
-			"checksumSHA1": "RowJozNKzA1qD/uxzZ5c4xkoAnE=",
+			"checksumSHA1": "Kq3hy55z59tmTlhp55JP5jGaE4E=",
 			"path": "github.com/vishvananda/netlink",
-			"revision": "1e8b53e5419be682d74f6b0fdf4fe488bdb0eec4",
-			"revisionTime": "2017-04-29T14:25:32Z"
+			"revision": "2632e243fb1a61b67ad23b04c16a5a48315e9391",
+			"revisionTime": "2017-04-03T14:39:32Z"
 		},
 		{
 			"checksumSHA1": "0KDxTyYZVKb+CBk9k7kjJlc8nEw=",
 			"path": "github.com/vishvananda/netlink/nl",
-			"revision": "1e8b53e5419be682d74f6b0fdf4fe488bdb0eec4",
-			"revisionTime": "2017-04-29T14:25:32Z"
+			"revision": "2632e243fb1a61b67ad23b04c16a5a48315e9391",
+			"revisionTime": "2017-04-03T14:39:32Z"
 		},
 		{
 			"checksumSHA1": "zjfUA3qOv6grhBLpyJ+7EejXWQE=",
