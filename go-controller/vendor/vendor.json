@@ -17,6 +17,12 @@
 			"revisionTime": "2017-02-27T20:08:46Z"
 		},
 		{
+			"checksumSHA1": "ZKxETlJdB2XubMrZnXB0FQimVA8=",
+			"path": "github.com/Sirupsen/logrus",
+			"revision": "10f801ebc38b33738c9d17d50860f484a0988ff5",
+			"revisionTime": "2017-03-17T14:32:14Z"
+		},
+		{
 			"checksumSHA1": "5rPfda8jFccr3A6heL+JAmi9K9g=",
 			"origin": "k8s.io/client-go/vendor/github.com/davecgh/go-spew/spew",
 			"path": "github.com/davecgh/go-spew/spew",
@@ -182,6 +188,30 @@
 			"path": "github.com/ugorji/go/codec",
 			"revision": "ca90456a21c1db4b5b1dadff1dbcc6f75692d0ee",
 			"revisionTime": "2017-03-02T18:21:54Z"
+		},
+		{
+			"checksumSHA1": "rEIS5EfbhPRBasakArGCeOWwY8c=",
+			"path": "github.com/urfave/cli",
+			"revision": "55f715e28c46073d0e217e2ce8eb46b0b45e3db6",
+			"revisionTime": "2016-10-06T03:53:53Z"
+		},
+		{
+			"checksumSHA1": "Kq3hy55z59tmTlhp55JP5jGaE4E=",
+			"path": "github.com/vishvananda/netlink",
+			"revision": "2632e243fb1a61b67ad23b04c16a5a48315e9391",
+			"revisionTime": "2017-04-03T14:39:32Z"
+		},
+		{
+			"checksumSHA1": "0KDxTyYZVKb+CBk9k7kjJlc8nEw=",
+			"path": "github.com/vishvananda/netlink/nl",
+			"revision": "2632e243fb1a61b67ad23b04c16a5a48315e9391",
+			"revisionTime": "2017-04-03T14:39:32Z"
+		},
+		{
+			"checksumSHA1": "zjfUA3qOv6grhBLpyJ+7EejXWQE=",
+			"path": "github.com/vishvananda/netns",
+			"revision": "8ba1072b58e0c2a240eb5f6120165c7776c3e7b8",
+			"revisionTime": "2016-04-30T05:37:23Z"
 		},
 		{
 			"checksumSHA1": "iXuNYJHz0a0gjQvtQ7m8v4wAsL8=",
