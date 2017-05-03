@@ -5,7 +5,7 @@ import (
 	"net"
 	"os/exec"
 
-	"github.com/golang/glog"
+	"github.com/Sirupsen/logrus"
 
 	utilwait "k8s.io/apimachinery/pkg/util/wait"
 	kapi "k8s.io/client-go/pkg/api/v1"
@@ -29,7 +29,7 @@ func (cluster *OvnClusterController) StartClusterMaster(masterNodeName string) e
 	subrange := make([]string, 0)
 	existingNodes, err := cluster.Kube.GetNodes()
 	if err != nil {
-		glog.Errorf("Error in initializing/fetching subnets: %v", err)
+		logrus.Errorf("Error in initializing/fetching subnets: %v", err)
 		return err
 	}
 	for _, node := range existingNodes.Items {
@@ -58,7 +58,7 @@ func (cluster *OvnClusterController) StartClusterMaster(masterNodeName string) e
 		if !ok {
 			err := cluster.addNode(&node)
 			if err != nil {
-				glog.Errorf("error creating subnet for node %s: %v", node.Name, err)
+				logrus.Errorf("error creating subnet for node %s: %v", node.Name, err)
 			}
 		}
 	}
@@ -84,7 +84,7 @@ func calculateMasterSwitchNetwork(clusterNetwork string, hostSubnetLength uint32
 func (cluster *OvnClusterController) SetupMaster(masterNodeName string, masterSwitchNetwork string) {
 	out, err := exec.Command("ovnkube-setup-master", cluster.Token, cluster.KubeServer, masterSwitchNetwork, cluster.ClusterIPNet.String(), masterNodeName).CombinedOutput()
 	if err != nil {
-		glog.Errorf("Error setting up master node - %v(%v)", string(out), err)
+		logrus.Errorf("Error setting up master node - %v(%v)", string(out), err)
 	}
 }
 
@@ -100,7 +100,7 @@ func (cluster *OvnClusterController) addNode(node *kapi.Node) error {
 		_ = cluster.masterSubnetAllocator.ReleaseNetwork(sn)
 		return fmt.Errorf("Error creating subnet %s for node %s: %v", sn.String(), node.Name, err)
 	}
-	glog.Infof("Created HostSubnet %s", sn.String())
+	logrus.Infof("Created HostSubnet %s", sn.String())
 	return nil
 }
 
@@ -119,7 +119,7 @@ func (cluster *OvnClusterController) deleteNode(node *kapi.Node) error {
 		return fmt.Errorf("Error deleting subnet %v for node %q: %v", sub, node.Name, err)
 	}
 
-	glog.Infof("Deleted HostSubnet %s for node %s", sub, node.Name)
+	logrus.Infof("Deleted HostSubnet %s for node %s", sub, node.Name)
 	return nil
 }
 
@@ -127,10 +127,10 @@ func (cluster *OvnClusterController) watchNodes() {
 	handler := cache.ResourceEventHandlerFuncs{
 		AddFunc: func(obj interface{}) {
 			node := obj.(*kapi.Node)
-			glog.V(5).Infof("Added event for Node %q", node.Name)
+			logrus.Debugf("Added event for Node %q", node.Name)
 			err := cluster.addNode(node)
 			if err != nil {
-				glog.Errorf("error creating subnet for node %s: %v", node.Name, err)
+				logrus.Errorf("error creating subnet for node %s: %v", node.Name, err)
 			}
 			return
 		},
@@ -140,19 +140,19 @@ func (cluster *OvnClusterController) watchNodes() {
 			if !ok {
 				tombstone, ok := obj.(cache.DeletedFinalStateUnknown)
 				if !ok {
-					glog.Errorf("couldn't get object from tombstone %+v", obj)
+					logrus.Errorf("couldn't get object from tombstone %+v", obj)
 					return
 				}
 				node, ok = tombstone.Obj.(*kapi.Node)
 				if !ok {
-					glog.Errorf("tombstone contained object that is not a node %#v", obj)
+					logrus.Errorf("tombstone contained object that is not a node %#v", obj)
 					return
 				}
 			}
-			glog.V(5).Infof("Delete event for Node %q", node.Name)
+			logrus.Debugf("Delete event for Node %q", node.Name)
 			err := cluster.deleteNode(node)
 			if err != nil {
-				glog.Errorf("Error deleting node %s: %v", node.Name, err)
+				logrus.Errorf("Error deleting node %s: %v", node.Name, err)
 			}
 			return
 		},

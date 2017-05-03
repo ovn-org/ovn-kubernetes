@@ -2,11 +2,11 @@ package ovn
 
 import (
 	"fmt"
-	"github.com/golang/glog"
 	"os/exec"
 	"strings"
 	"unicode"
 
+	"github.com/Sirupsen/logrus"
 	kapi "k8s.io/client-go/pkg/api/v1"
 )
 
@@ -27,7 +27,7 @@ func (ovn *Controller) getLoadBalancer(protocol kapi.Protocol) string {
 }
 
 func (ovn *Controller) createLoadBalancerVIP(lb string, serviceIP string, port int32, ips []string, targetPort int32) error {
-	glog.V(4).Infof("Creating lb with %s, %s, %d, [%v], %d", lb, serviceIP, port, ips, targetPort)
+	logrus.Debugf("Creating lb with %s, %s, %d, [%v], %d", lb, serviceIP, port, ips, targetPort)
 
 	// With service_ip:port as a VIP, create an entry in 'load_balancer'
 	// key is of the form "IP:port" (with quotes around)
@@ -50,7 +50,7 @@ func (ovn *Controller) createLoadBalancerVIP(lb string, serviceIP string, port i
 
 	out, err := exec.Command(OvnNbctl, "set", "load_balancer", lb, target).CombinedOutput()
 	if err != nil {
-		glog.Errorf("Error in creating load balancer: %v(%v)", string(out), err)
+		logrus.Errorf("Error in creating load balancer: %v(%v)", string(out), err)
 	}
 	return err
 }
@@ -83,7 +83,7 @@ func (ovn *Controller) addEndpoints(ep *kapi.Endpoints) error {
 		}
 	}
 
-	glog.V(4).Infof("Tcp table: %v\nUdp table: %v", tcpPortMap, udpPortMap)
+	logrus.Debugf("Tcp table: %v\nUdp table: %v", tcpPortMap, udpPortMap)
 
 	for targetPort, ips := range tcpPortMap {
 		for _, svcPort := range svc.Spec.Ports {
@@ -118,7 +118,7 @@ func (ovn *Controller) deleteEndpoints(ep *kapi.Endpoints) error {
 		key := fmt.Sprintf("\"%s:%d\"", svc.Spec.ClusterIP, svcPort.Port)
 		_, err := exec.Command(OvnNbctl, "remove", "load_balancer", lb, "vips", key).CombinedOutput()
 		if err != nil {
-			glog.Errorf("Error in deleting endpoints: %v", err)
+			logrus.Errorf("Error in deleting endpoints: %v", err)
 		}
 	}
 	return nil

@@ -1,9 +1,9 @@
 package ovn
 
 import (
-	"github.com/golang/glog"
-
+	"github.com/Sirupsen/logrus"
 	"github.com/openvswitch/ovn-kubernetes/go-controller/pkg/kube"
+
 	kapi "k8s.io/client-go/pkg/api/v1"
 	"k8s.io/client-go/tools/cache"
 )
@@ -47,12 +47,12 @@ func (oc *Controller) WatchPods() {
 			if !ok {
 				tombstone, ok := obj.(cache.DeletedFinalStateUnknown)
 				if !ok {
-					glog.Errorf("couldn't get object from tombstone %+v", obj)
+					logrus.Errorf("couldn't get object from tombstone %+v", obj)
 					return
 				}
 				pod, ok = tombstone.Obj.(*kapi.Pod)
 				if !ok {
-					glog.Errorf("tombstone contained object that is not a pod %#v", obj)
+					logrus.Errorf("tombstone contained object that is not a pod %#v", obj)
 					return
 				}
 			}
@@ -69,7 +69,7 @@ func (oc *Controller) WatchEndpoints() {
 			ep := obj.(*kapi.Endpoints)
 			err := oc.addEndpoints(ep)
 			if err != nil {
-				glog.Errorf("Error in adding load balancer: %v", err)
+				logrus.Errorf("Error in adding load balancer: %v", err)
 			}
 		},
 		UpdateFunc: func(old, new interface{}) { return },
@@ -78,18 +78,18 @@ func (oc *Controller) WatchEndpoints() {
 			if !ok {
 				tombstone, ok := obj.(cache.DeletedFinalStateUnknown)
 				if !ok {
-					glog.Errorf("couldn't get object from tombstone %+v", obj)
+					logrus.Errorf("couldn't get object from tombstone %+v", obj)
 					return
 				}
 				ep, ok = tombstone.Obj.(*kapi.Endpoints)
 				if !ok {
-					glog.Errorf("tombstone contained object that is not a pod %#v", obj)
+					logrus.Errorf("tombstone contained object that is not a pod %#v", obj)
 					return
 				}
 			}
 			err := oc.deleteEndpoints(ep)
 			if err != nil {
-				glog.Errorf("Error in deleting endpoints - %v", err)
+				logrus.Errorf("Error in deleting endpoints - %v", err)
 			}
 			return
 		},

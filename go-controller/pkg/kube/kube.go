@@ -3,7 +3,8 @@ package kube
 import (
 	"fmt"
 
-	"github.com/golang/glog"
+	"github.com/Sirupsen/logrus"
+
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/client-go/kubernetes"
@@ -28,22 +29,22 @@ type Kube struct {
 
 // SetAnnotationOnPod takes the pod object and key/value string pair to set it as an annotation
 func (k *Kube) SetAnnotationOnPod(pod *kapi.Pod, key, value string) error {
-	glog.Infof("Setting annotations %s=%s on pod %s", key, value, pod.Name)
+	logrus.Infof("Setting annotations %s=%s on pod %s", key, value, pod.Name)
 	patchData := fmt.Sprintf(`{"metadata":{"annotations":{"%s":"%s"}}}`, key, value)
 	_, err := k.KClient.Core().Pods(pod.Namespace).Patch(pod.Name, types.MergePatchType, []byte(patchData))
 	if err != nil {
-		glog.Errorf("Error in setting annotation on pod %s/%s: %v", pod.Name, pod.Namespace, err)
+		logrus.Errorf("Error in setting annotation on pod %s/%s: %v", pod.Name, pod.Namespace, err)
 	}
 	return err
 }
 
 // SetAnnotationOnNode takes the node object and key/value string pair to set it as an annotation
 func (k *Kube) SetAnnotationOnNode(node *kapi.Node, key, value string) error {
-	glog.Infof("Setting annotations %s=%s on node %s", key, value, node.Name)
+	logrus.Infof("Setting annotations %s=%s on node %s", key, value, node.Name)
 	patchData := fmt.Sprintf(`{"metadata":{"annotations":{"%s":"%s"}}}`, key, value)
 	_, err := k.KClient.Core().Nodes().Patch(node.Name, types.MergePatchType, []byte(patchData))
 	if err != nil {
-		glog.Errorf("Error in setting annotation on node %s: %v", node.Name, err)
+		logrus.Errorf("Error in setting annotation on node %s: %v", node.Name, err)
 	}
 	return err
 }
