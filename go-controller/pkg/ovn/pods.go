@@ -2,12 +2,12 @@ package ovn
 
 import (
 	"fmt"
-	"github.com/golang/glog"
 	"os/exec"
 	"strings"
 	"time"
 	"unicode"
 
+	"github.com/Sirupsen/logrus"
 	kapi "k8s.io/client-go/pkg/api/v1"
 )
 
@@ -19,7 +19,7 @@ func (oc *Controller) getGatewayFromSwitch(logicalSwitch string) (string, string
 			"logical_switch", logicalSwitch,
 			"external_ids:gateway_ip").Output()
 		if err != nil {
-			glog.V(4).Infof("Gateway IP:  %s, %v", string(gatewayIPBytes), err)
+			logrus.Debugf("Gateway IP:  %s, %v", string(gatewayIPBytes), err)
 			return "", "", err
 		}
 		gatewayIPMaskStr = strings.TrimFunc(string(gatewayIPBytes), unicode.IsSpace)
@@ -29,15 +29,15 @@ func (oc *Controller) getGatewayFromSwitch(logicalSwitch string) (string, string
 	gatewayIPMask := strings.Split(gatewayIPMaskStr, "/")
 	gatewayIP := gatewayIPMask[0]
 	mask := gatewayIPMask[1]
-	glog.V(4).Infof("Gateway IP: %s, Mask: %s", gatewayIP, mask)
+	logrus.Debugf("Gateway IP: %s, Mask: %s", gatewayIP, mask)
 	return gatewayIP, mask, nil
 }
 
 func (oc *Controller) deleteLogicalPort(pod *kapi.Pod) {
-	glog.V(4).Infof("Deleting pod: %s", pod.Name)
+	logrus.Debugf("Deleting pod: %s", pod.Name)
 	out, err := exec.Command(OvnNbctl, "lsp-del", fmt.Sprintf("%s_%s", pod.Namespace, pod.Name)).CombinedOutput()
 	if err != nil {
-		glog.Errorf("Error in deleting pod network switch - %v(%v)", out, err)
+		logrus.Errorf("Error in deleting pod network switch - %v(%v)", out, err)
 	}
 	return
 }
@@ -56,18 +56,18 @@ func (oc *Controller) addLogicalPort(pod *kapi.Pod) {
 		count--
 		p, err := oc.Kube.GetPod(pod.Namespace, pod.Name)
 		if err != nil {
-			glog.Errorf("Could not get pod %s/%s for obtaining the logical switch it belongs to", pod.Namespace, pod.Name)
+			logrus.Errorf("Could not get pod %s/%s for obtaining the logical switch it belongs to", pod.Namespace, pod.Name)
 			continue
 		}
 		logicalSwitch = p.Spec.NodeName
 	}
 	if logicalSwitch == "" {
-		glog.Errorf("Could not find the logical switch that the pod %s/%s belongs to", pod.Namespace, pod.Name)
+		logrus.Errorf("Could not find the logical switch that the pod %s/%s belongs to", pod.Namespace, pod.Name)
 		return
 	}
 
 	portName := fmt.Sprintf("%s_%s", pod.Namespace, pod.Name)
-	glog.V(4).Infof("Creating logical port for %s on switch %s", portName, logicalSwitch)
+	logrus.Debugf("Creating logical port for %s on switch %s", portName, logicalSwitch)
 
 	out, err := exec.Command(OvnNbctl, "--wait=sb", "--", "--may-exist", "lsp-add",
 		logicalSwitch, portName, "--", "lsp-set-addresses",
@@ -76,13 +76,13 @@ func (oc *Controller) addLogicalPort(pod *kapi.Pod) {
 		"external-ids:namespace="+pod.Namespace,
 		"external-ids:pod=true").CombinedOutput()
 	if err != nil {
-		glog.Errorf("Error while creating logical port %s - %v (%s)", portName, err, string(out))
+		logrus.Errorf("Error while creating logical port %s - %v (%s)", portName, err, string(out))
 		return
 	}
 
 	gatewayIP, mask, err := oc.getGatewayFromSwitch(logicalSwitch)
 	if err != nil {
-		glog.Errorf("Error obtaining gateway address for switch %s", logicalSwitch)
+		logrus.Errorf("Error obtaining gateway address for switch %s", logicalSwitch)
 		return
 	}
 
@@ -92,12 +92,12 @@ func (oc *Controller) addLogicalPort(pod *kapi.Pod) {
 		if err == nil {
 			break
 		}
-		glog.V(4).Infof("Error while obtaining addresses for %s - %v", portName, err)
+		logrus.Debugf("Error while obtaining addresses for %s - %v", portName, err)
 		time.Sleep(time.Second)
 		count--
 	}
 	if count == 0 {
-		glog.Errorf("Error while obtaining addresses for %s", portName)
+		logrus.Errorf("Error while obtaining addresses for %s", portName)
 		return
 	}
 
@@ -105,15 +105,15 @@ func (oc *Controller) addLogicalPort(pod *kapi.Pod) {
 	outStr = strings.Trim(outStr, `"`)
 	addresses := strings.Split(outStr, " ")
 	if len(addresses) != 2 {
-		glog.Errorf("Error while obtaining addresses for %s", portName)
+		logrus.Errorf("Error while obtaining addresses for %s", portName)
 		return
 	}
 
 	annotation := fmt.Sprintf(`{\"ip_address\":\"%s/%s\", \"mac_address\":\"%s\", \"gateway_ip\": \"%s\"}`, addresses[1], mask, addresses[0], gatewayIP)
-	glog.V(4).Infof("Annotation values: ip=%s/%s ; mac=%s ; gw=%s\nAnnotation=%s", addresses[1], mask, addresses[0], gatewayIP, annotation)
+	logrus.Debugf("Annotation values: ip=%s/%s ; mac=%s ; gw=%s\nAnnotation=%s", addresses[1], mask, addresses[0], gatewayIP, annotation)
 	err = oc.Kube.SetAnnotationOnPod(pod, "ovn", annotation)
 	if err != nil {
-		glog.Errorf("Failed to set annotation on pod %s - %v", pod.Name, err)
+		logrus.Errorf("Failed to set annotation on pod %s - %v", pod.Name, err)
 	}
 	return
 }
