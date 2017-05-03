@@ -105,9 +105,7 @@ func nicToBridge(iface string) error {
 	logrus.Infof("Successfully created OVS bridge %q", bridge)
 
 	// Get ip addresses and routes before any real operations.
-	// Note: addrList is a workround for also getting broadcast addr.
-	// TODO: switch to netlink.AddrList after https://github.com/vishvananda/netlink/pull/226 is merged.
-	addrs, err := addrList(ifaceLink, syscall.AF_INET)
+	addrs, err := netlink.AddrList(ifaceLink, syscall.AF_INET)
 	if err != nil {
 		return err
 	}
