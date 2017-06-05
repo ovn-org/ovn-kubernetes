@@ -35,12 +35,17 @@ func NewDefaultFactory(c kubernetes.Interface) *Factory {
 func (factory *Factory) CreateOvnController() *ovn.Controller {
 
 	podInformer := factory.IFactory.Core().V1().Pods()
+	serviceInformer := factory.IFactory.Core().V1().Services()
 	endpointsInformer := factory.IFactory.Core().V1().Endpoints()
 
 	return &ovn.Controller{
 		StartPodWatch: func(handler cache.ResourceEventHandler) {
 			podInformer.Informer().AddEventHandler(handler)
 			go podInformer.Informer().Run(utilwait.NeverStop)
+		},
+		StartServiceWatch: func(handler cache.ResourceEventHandler) {
+			serviceInformer.Informer().AddEventHandler(handler)
+			go serviceInformer.Informer().Run(utilwait.NeverStop)
 		},
 		StartEndpointWatch: func(handler cache.ResourceEventHandler) {
 			endpointsInformer.Informer().AddEventHandler(handler)
