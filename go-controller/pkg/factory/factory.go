@@ -40,11 +40,11 @@ func (factory *Factory) CreateOvnController() *ovn.Controller {
 	return &ovn.Controller{
 		StartPodWatch: func(handler cache.ResourceEventHandler) {
 			podInformer.Informer().AddEventHandler(handler)
-			podInformer.Informer().Run(utilwait.NeverStop)
+			go podInformer.Informer().Run(utilwait.NeverStop)
 		},
 		StartEndpointWatch: func(handler cache.ResourceEventHandler) {
 			endpointsInformer.Informer().AddEventHandler(handler)
-			endpointsInformer.Informer().Run(utilwait.NeverStop)
+			go endpointsInformer.Informer().Run(utilwait.NeverStop)
 		},
 		Kube: &kube.Kube{KClient: factory.KClient},
 	}
