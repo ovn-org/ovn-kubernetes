@@ -19,6 +19,10 @@ type Controller struct {
 	StartEndpointWatch func(handler cache.ResourceEventHandler)
 
 	gatewayCache map[string]string
+
+	// For TCP and UDP type traffic, cache OVN load-balancers used for the
+	// cluster's east-west traffic.
+	loadbalancerClusterCache map[string]string
 }
 
 const (
@@ -97,6 +101,8 @@ func (oc *Controller) WatchServices() {
 
 // WatchEndpoints starts the watching of Endpoint resource and calls back the appropriate handler logic
 func (oc *Controller) WatchEndpoints() {
+	oc.loadbalancerClusterCache = make(map[string]string)
+
 	oc.StartEndpointWatch(cache.ResourceEventHandlerFuncs{
 		AddFunc: func(obj interface{}) {
 			ep := obj.(*kapi.Endpoints)
