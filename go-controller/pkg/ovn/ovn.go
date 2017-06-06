@@ -111,9 +111,16 @@ func (oc *Controller) WatchEndpoints() {
 			if reflect.DeepEqual(epNew.Subsets, epOld.Subsets) {
 				return
 			}
-			err := oc.addEndpoints(epNew)
-			if err != nil {
-				logrus.Errorf("Error in modifying load balancer: %v", err)
+			if len(epNew.Subsets) == 0 {
+				err := oc.deleteEndpoints(epNew)
+				if err != nil {
+					logrus.Errorf("Error in deleting endpoints - %v", err)
+				}
+			} else {
+				err := oc.addEndpoints(epNew)
+				if err != nil {
+					logrus.Errorf("Error in modifying endpoints: %v", err)
+				}
 			}
 		},
 		DeleteFunc: func(obj interface{}) {
