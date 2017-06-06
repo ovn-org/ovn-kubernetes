@@ -59,7 +59,11 @@ func (ovn *Controller) addEndpoints(ep *kapi.Endpoints) error {
 	// get service
 	svc, err := ovn.Kube.GetService(ep.Namespace, ep.Name)
 	if err != nil {
-		return err
+		// This is not necessarily an error. For e.g when there are endpoints
+		// without a corresponding service.
+		logrus.Debugf("no service found for endpoint %s in namespace %s",
+			ep.Name, ep.Namespace)
+		return nil
 	}
 	tcpPortMap := make(map[int32]([]string))
 	udpPortMap := make(map[int32]([]string))
