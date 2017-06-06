@@ -3,6 +3,7 @@ package ovn
 import (
 	"github.com/Sirupsen/logrus"
 	"github.com/openvswitch/ovn-kubernetes/go-controller/pkg/kube"
+	"reflect"
 
 	kapi "k8s.io/client-go/pkg/api/v1"
 	"k8s.io/client-go/tools/cache"
@@ -104,7 +105,17 @@ func (oc *Controller) WatchEndpoints() {
 				logrus.Errorf("Error in adding load balancer: %v", err)
 			}
 		},
-		UpdateFunc: func(old, new interface{}) { return },
+		UpdateFunc: func(old, new interface{}) {
+			epNew := new.(*kapi.Endpoints)
+			epOld := old.(*kapi.Endpoints)
+			if reflect.DeepEqual(epNew.Subsets, epOld.Subsets) {
+				return
+			}
+			err := oc.addEndpoints(epNew)
+			if err != nil {
+				logrus.Errorf("Error in modifying load balancer: %v", err)
+			}
+		},
 		DeleteFunc: func(obj interface{}) {
 			ep, ok := obj.(*kapi.Endpoints)
 			if !ok {
