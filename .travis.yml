@@ -16,8 +16,10 @@ install:
     - eval "$(gimme 1.8.1)"
 script:
     - tox -e $TOX_ENV
-    - cd go-controller
-    - make
-    - make gofmt
-    - make install.tools
-    - make lint
+    - 'if [ "$TOX_ENV" = "py27" ]; then
+        cd go-controller;
+        make;
+        make gofmt;
+        make install.tools;
+        make lint;
+       fi'
