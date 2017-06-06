@@ -11,7 +11,10 @@ import (
 )
 
 func (ovn *Controller) getLoadBalancer(protocol kapi.Protocol) string {
-	// TODO: add a cache here for the load balancer lookup, so that multiple calls to nbctl can be avoided
+	if outStr, ok := ovn.loadbalancerClusterCache[string(protocol)]; ok {
+		return outStr
+	}
+
 	var out []byte
 	if protocol == kapi.ProtocolTCP {
 		out, _ = exec.Command(OvnNbctl, "--data=bare", "--no-heading",
@@ -23,6 +26,7 @@ func (ovn *Controller) getLoadBalancer(protocol kapi.Protocol) string {
 			"external_ids:k8s-cluster-lb-udp=yes").CombinedOutput()
 	}
 	outStr := strings.TrimFunc(string(out), unicode.IsSpace)
+	ovn.loadbalancerClusterCache[string(protocol)] = outStr
 	return outStr
 }
 
