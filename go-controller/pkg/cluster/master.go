@@ -89,6 +89,15 @@ func (cluster *OvnClusterController) SetupMaster(masterNodeName string, masterSw
 }
 
 func (cluster *OvnClusterController) addNode(node *kapi.Node) error {
+	// Do not create a subnet if the node already has a subnet
+	hostsubnet, ok := node.Annotations[OvnHostSubnet]
+	if ok {
+		// double check if the hostsubnet looks valid
+		_, _, err := net.ParseCIDR(hostsubnet)
+		if err == nil {
+			return nil
+		}
+	}
 	// Create new subnet
 	sn, err := cluster.masterSubnetAllocator.GetNetwork()
 	if err != nil {
