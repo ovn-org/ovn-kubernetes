@@ -61,7 +61,7 @@ popd
 sudo dpkg -i openvswitch-datapath-dkms*.deb
 sudo dpkg -i openvswitch-switch*.deb openvswitch-common*.deb \
              ovn-central*.deb ovn-common*.deb \
-             python-openvswitch*.deb ovn-docker*.deb \
+             python-openvswitch*.deb libopenvswitch*.deb \
              ovn-host*.deb
 
 # Start the daemons
