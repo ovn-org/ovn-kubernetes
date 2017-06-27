@@ -73,7 +73,12 @@ def _stream_api(url):
     if response.status_code != 200:
         # TODO: raise here
         return
-    return response.iter_lines(chunk_size=10, delimiter='\n')
+
+    if response.encoding is None:
+        response.encoding = 'utf-8'
+
+    return response.iter_lines(chunk_size=10, delimiter='\n',
+                               decode_unicode=True)
 
 
 def _watch_resource(server, resource):
