@@ -31,7 +31,7 @@ def call_popen(cmd):
     if len(output) == 0 or output[0] is None:
         output = ""
     else:
-        output = output[0].strip()
+        output = output[0].decode("utf8").strip()
     return output
 
 
