@@ -45,7 +45,7 @@ class BaseProcessor(object):
         return cls._instance
 
     def __init__(self):
-        self.event_queue = queue.PriorityQueue()
+        self.event_queue = queue.Queue()
         if config.get_option('ovn_mode') == "overlay":
             self.mode = ovn_k8s.modes.overlay.OvnNB()
         else:
