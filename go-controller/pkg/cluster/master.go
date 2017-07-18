@@ -141,9 +141,8 @@ func (cluster *OvnClusterController) watchNodes() {
 			if err != nil {
 				logrus.Errorf("error creating subnet for node %s: %v", node.Name, err)
 			}
-			return
 		},
-		UpdateFunc: func(old, new interface{}) { return },
+		UpdateFunc: func(old, new interface{}) {},
 		DeleteFunc: func(obj interface{}) {
 			node, ok := obj.(*kapi.Node)
 			if !ok {
@@ -163,7 +162,6 @@ func (cluster *OvnClusterController) watchNodes() {
 			if err != nil {
 				logrus.Errorf("Error deleting node %s: %v", node.Name, err)
 			}
-			return
 		},
 	}
 	cluster.StartNodeWatch(handler)
