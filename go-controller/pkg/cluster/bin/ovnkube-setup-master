@@ -15,8 +15,8 @@ if [[ "${API_TOKEN}" == "" ]]; then
 fi
 
 init() {
-	sudo systemctl start openvswitch
-	sudo systemctl start ovn-northd
+	systemctl start openvswitch
+	systemctl start ovn-northd
 }
 
 ovnsetup() {
