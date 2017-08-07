@@ -27,8 +27,8 @@ ifndef GOPATH
 endif
 
 install.tools: check-gopath
-	go get -u github.com/alecthomas/gometalinter; \
-	$(GOPATH)/bin/gometalinter --install;
+	go get -u gopkg.in/alecthomas/gometalinter.v1; \
+	$(GOPATH)/bin/gometalinter.v1 --install;
 
 lint:
 	@./hack/lint.sh
