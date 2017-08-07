@@ -35,9 +35,11 @@ func (oc *Controller) getGatewayFromSwitch(logicalSwitch string) (string, string
 
 func (oc *Controller) deleteLogicalPort(pod *kapi.Pod) {
 	logrus.Debugf("Deleting pod: %s", pod.Name)
-	out, err := exec.Command(OvnNbctl, "lsp-del", fmt.Sprintf("%s_%s", pod.Namespace, pod.Name)).CombinedOutput()
+	out, err := exec.Command(OvnNbctl, "--if-exists", "lsp-del",
+		fmt.Sprintf("%s_%s", pod.Namespace, pod.Name)).CombinedOutput()
 	if err != nil {
-		logrus.Errorf("Error in deleting pod network switch - %v(%v)", out, err)
+		logrus.Errorf("Error in deleting pod network switch - %s (%v)",
+			string(out), err)
 	}
 	return
 }
