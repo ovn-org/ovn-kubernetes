@@ -36,7 +36,7 @@ CERTIFICATE = config.get_option('certificate')
 CA_CERT = config.get_option('ca_cert')
 
 
-def fetch_ovn_nb():
+def fetch_ovn_nb(args):
     OVN_NB = ovs_vsctl("--if-exists", "get", "Open_vSwitch", ".",
                        "external_ids:ovn-nb").strip('"')
     if not OVN_NB:
@@ -46,24 +46,32 @@ def fetch_ovn_nb():
 
     if OVN_NB.startswith("ssl"):
         variables.NBCTL_PRIVATE_KEY = PRIVATE_KEY
+        if args.nb_privkey:
+                variables.NBCTL_PRIVATE_KEY = args.nb_privkey
         variables.NBCTL_CERTIFICATE = CERTIFICATE
+        if args.nb_cert:
+                variables.NBCTL_CERTIFICATE = args.nb_cert
         variables.NBCTL_CA_CERT = CA_CERT
+        if args.nb_cacert:
+                variables.NBCTL_CA_CERT = args.nb_cacert
 
-        if not os.path.isfile(PRIVATE_KEY):
-            raise Exception("No private key %s found" % (PRIVATE_KEY))
+        if not os.path.isfile(variables.NBCTL_PRIVATE_KEY):
+            raise Exception("No private key %s found" % (
+                variables.NBCTL_PRIVATE_KEY))
 
-        if not os.path.isfile(CERTIFICATE):
-            raise Exception("No certificate %s found" % (CERTIFICATE))
+        if not os.path.isfile(variables.NBCTL_CERTIFICATE):
+            raise Exception("No certificate %s found" % (
+                variables.NBCTL_CERTIFICATE))
 
         # We allow bootstrapping to get the CA_CERT.
-        if not os.path.isfile(CA_CERT):
+        if not os.path.isfile(variables.NBCTL_CA_CERT):
             # Bootstrap it with a simple transaction.
             try:
                 print("No CA certificate found. Attempting bootstrapping...")
                 ovn_nbctl("list", "logical_switch")
             except Exception:
                 # exception is expected. But did we bootstrap?
-                if not os.path.isfile(CA_CERT):
+                if not os.path.isfile(variables.NBCTL_CA_CERT):
                     raise Exception("Bootstapping OVN NB's certificate failed")
                 print("Bootstrapping successful. Continuing...")
 
@@ -405,7 +413,7 @@ def create_management_port(node_name, local_subnet, cluster_subnet):
 
 
 def master_init(args):
-    fetch_ovn_nb()
+    fetch_ovn_nb(args)
 
     if not args.node_name or not args.master_switch_subnet \
        or not args.cluster_ip_subnet:
@@ -461,7 +469,7 @@ def master_init(args):
 
 
 def minion_init(args):
-    fetch_ovn_nb()
+    fetch_ovn_nb(args)
 
     if not args.node_name or not args.minion_switch_subnet \
        or not args.cluster_ip_subnet:
@@ -544,7 +552,7 @@ def gateway_init(args):
     if args.default_gw:
         default_gw = netaddr.IPNetwork(args.default_gw)
 
-    fetch_ovn_nb()
+    fetch_ovn_nb(args)
 
     node_name = args.node_name
 
@@ -744,6 +752,15 @@ def main():
     parser_master_init.add_argument('--node-name',
                                     required=True,
                                     help="A unique node name.")
+    parser_master_init.add_argument('--nb-privkey',
+                                    help="A private key for northbound API "
+                                    "SSL connections.")
+    parser_master_init.add_argument('--nb-cert',
+                                    help="A certificate for northbound API "
+                                    "SSL connections.")
+    parser_master_init.add_argument('--nb-cacert',
+                                    help="A CA certificate for northbound API "
+                                    "SSL connections.")
     parser_master_init.set_defaults(func=master_init)
 
     # Parser for sub-command 'minion-init'.
