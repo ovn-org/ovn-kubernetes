@@ -11,7 +11,6 @@ export OUT_DIR
 all build:
 	hack/build-go.sh cmd/ovnkube/ovnkube.go
 	hack/build-go.sh cmd/ovn-kube-util/ovn-kube-util.go
-	cp -f pkg/cluster/bin/ovnkube-setup-* ${OUT_DIR}/go/bin/
 
 install:
 	cp ${OUT_DIR}/go/bin/* /usr/bin/
