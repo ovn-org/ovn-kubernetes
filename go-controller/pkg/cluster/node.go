@@ -1,6 +1,7 @@
 package cluster
 
 import (
+	"fmt"
 	"net"
 	"os/exec"
 	"time"
@@ -58,10 +59,47 @@ func (cluster *OvnClusterController) StartClusterNode(name string) error {
 
 	logrus.Infof("Node %s ready for ovn initialization with subnet %s", node.Name, subnet.String())
 
-	out, err := exec.Command("ovnkube-setup-node", cluster.Token, nodeIP, cluster.KubeServer, subnet.String(), cluster.ClusterIPNet.String(), name).CombinedOutput()
+	out, err := exec.Command("systemctl", "start", "openvswitch").CombinedOutput()
 	if err != nil {
-		logrus.Errorf("Error in setting up node - %s (%v)", string(out), err)
+		return fmt.Errorf("error starting openvswitch service: %v\n  %q", err, string(out))
 	}
 
-	return err
+	args := []string{
+		"set",
+		"Open_vSwitch",
+		".",
+		fmt.Sprintf("external_ids:ovn-nb=\"%s\"", cluster.NorthDBClientAuth.GetURL()),
+		fmt.Sprintf("external_ids:ovn-remote=\"%s\"", cluster.SouthDBClientAuth.GetURL()),
+		fmt.Sprintf("external_ids:ovn-encap-ip=%s", nodeIP),
+		"external_ids:ovn-encap-type=\"geneve\"",
+		fmt.Sprintf("external_ids:k8s-api-server=\"%s\"", cluster.KubeServer),
+		fmt.Sprintf("external_ids:k8s-api-token=\"%s\"", cluster.Token),
+	}
+	out, err = exec.Command("ovs-vsctl", args...).CombinedOutput()
+	if err != nil {
+		return fmt.Errorf("Error setting OVS external IDs: %v\n  %q", err, string(out))
+	}
+
+	out, err = exec.Command("systemctl", "restart", "ovn-controller").CombinedOutput()
+	if err != nil {
+		return fmt.Errorf("error starting ovn-controller service: %v\n  %q", err, string(out))
+	}
+
+	overlayArgs := []string{
+		"minion-init",
+		fmt.Sprintf("--cluster-ip-subnet=%s", cluster.ClusterIPNet.String()),
+		fmt.Sprintf("--minion-switch-subnet=%s", subnet.String()),
+		fmt.Sprintf("--node-name=%s", name),
+	}
+	if cluster.NorthDBClientAuth.scheme == OvnDBSchemeSSL {
+		overlayArgs = append(overlayArgs, fmt.Sprintf("--nb-privkey=%s", cluster.NorthDBClientAuth.PrivKey))
+		overlayArgs = append(overlayArgs, fmt.Sprintf("--nb-cert=%s", cluster.NorthDBClientAuth.Cert))
+		overlayArgs = append(overlayArgs, fmt.Sprintf("--nb-cacert=%s", cluster.NorthDBClientAuth.CACert))
+	}
+	out, err = exec.Command("ovn-k8s-overlay", overlayArgs...).CombinedOutput()
+	if err != nil {
+		return fmt.Errorf("error setting up OVN k8s overlay: %v\n  %q", err, string(out))
+	}
+
+	return nil
 }

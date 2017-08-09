@@ -125,7 +125,8 @@ func main() {
 
 		err := clusterController.StartClusterNode(*node)
 		if err != nil {
-			panic(err.Error)
+			logrus.Errorf(err.Error())
+			panic(err.Error())
 		}
 	}
 	if *master != "" {
