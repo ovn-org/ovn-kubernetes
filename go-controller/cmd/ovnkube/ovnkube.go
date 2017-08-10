@@ -6,6 +6,7 @@ import (
 	"net"
 	"strings"
 
+	"github.com/Sirupsen/logrus"
 	"k8s.io/client-go/kubernetes"
 	restclient "k8s.io/client-go/rest"
 	"k8s.io/client-go/tools/clientcmd"
@@ -26,6 +27,8 @@ func main() {
 	netController := flag.Bool("net-controller", false, "Flag to start the central controller that watches pods/services/policies")
 	master := flag.String("init-master", "", "initialize master, requires the hostname as argument")
 	node := flag.String("init-node", "", "initialize node, requires the name that node is registered with in kubernetes cluster")
+
+	logrus.SetLevel(logrus.DebugLevel)
 
 	flag.Parse()
 

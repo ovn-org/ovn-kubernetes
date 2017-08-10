@@ -44,10 +44,8 @@ func (oc *Controller) WatchPods() {
 		AddFunc: func(obj interface{}) {
 			pod := obj.(*kapi.Pod)
 			oc.addLogicalPort(pod)
-			return
 		},
 		UpdateFunc: func(old, new interface{}) {
-			return
 		},
 		DeleteFunc: func(obj interface{}) {
 			pod, ok := obj.(*kapi.Pod)
@@ -64,7 +62,6 @@ func (oc *Controller) WatchPods() {
 				}
 			}
 			oc.deleteLogicalPort(pod)
-			return
 		},
 	})
 }
@@ -74,10 +71,8 @@ func (oc *Controller) WatchPods() {
 func (oc *Controller) WatchServices() {
 	oc.StartServiceWatch(cache.ResourceEventHandlerFuncs{
 		AddFunc: func(obj interface{}) {
-			return
 		},
 		UpdateFunc: func(old, new interface{}) {
-			return
 		},
 		DeleteFunc: func(obj interface{}) {
 			service, ok := obj.(*kapi.Service)
@@ -94,7 +89,6 @@ func (oc *Controller) WatchServices() {
 				}
 			}
 			oc.deleteService(service)
-			return
 		},
 	})
 }
@@ -147,7 +141,6 @@ func (oc *Controller) WatchEndpoints() {
 			if err != nil {
 				logrus.Errorf("Error in deleting endpoints - %v", err)
 			}
-			return
 		},
 	})
 }
