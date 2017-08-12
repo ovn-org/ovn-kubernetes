@@ -132,7 +132,8 @@ func main() {
 		// run the cluster controller to init the master
 		err := clusterController.StartClusterMaster(*master)
 		if err != nil {
-			panic(err.Error)
+			logrus.Errorf(err.Error())
+			panic(err.Error())
 		}
 	}
 	if *netController {
