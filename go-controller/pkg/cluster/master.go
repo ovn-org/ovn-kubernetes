@@ -3,6 +3,7 @@ package cluster
 import (
 	"fmt"
 	"net"
+	"net/url"
 	"os/exec"
 
 	"github.com/Sirupsen/logrus"
@@ -63,7 +64,9 @@ func (cluster *OvnClusterController) StartClusterMaster(masterNodeName string) e
 		}
 	}
 
-	cluster.SetupMaster(masterNodeName, masterSwitchNetwork)
+	if err := cluster.SetupMaster(masterNodeName, masterSwitchNetwork); err != nil {
+		return err
+	}
 
 	// go routine to watch all node events. On creation, addNode will be called that will create a subnet for the switch belonging to that node.
 	// On a delete call, the subnet will be returned to the allocator as the switch is deleted from ovn
@@ -80,12 +83,83 @@ func calculateMasterSwitchNetwork(clusterNetwork string, hostSubnetLength uint32
 	return sn.String(), err
 }
 
-// SetupMaster calls the external script to create the switch and central routers for the network
-func (cluster *OvnClusterController) SetupMaster(masterNodeName string, masterSwitchNetwork string) {
-	out, err := exec.Command("ovnkube-setup-master", cluster.Token, cluster.KubeServer, masterSwitchNetwork, cluster.ClusterIPNet.String(), masterNodeName).CombinedOutput()
-	if err != nil {
-		logrus.Errorf("Error setting up master node - %v(%v)", string(out), err)
+func setDBServerAuth(ctlCmd, desc string, auth *OvnDBAuth) error {
+	if auth.scheme == OvnDBSchemeUnix {
+		return nil
 	}
+
+	out, err := exec.Command(ctlCmd, "set-connection", auth.GetURL()).CombinedOutput()
+	if err != nil {
+		return fmt.Errorf("Error setting %s API authentication: %v\n  %q", desc, err, string(out))
+	}
+	if auth.scheme == OvnDBSchemeSSL {
+		out, err = exec.Command(ctlCmd, "set-ssl", auth.PrivKey, auth.Cert, auth.CACert).CombinedOutput()
+		if err != nil {
+			return fmt.Errorf("Error setting SSL API certificates: %v\n  %q", err, string(out))
+		}
+	}
+	return nil
+}
+
+// SetupMaster calls the external script to create the switch and central routers for the network
+func (cluster *OvnClusterController) SetupMaster(masterNodeName string, masterSwitchNetwork string) error {
+	out, err := exec.Command("systemctl", "start", "openvswitch").CombinedOutput()
+	if err != nil {
+		return fmt.Errorf("error starting openvswitch service: %v\n  %q", err, string(out))
+	}
+	out, err = exec.Command("systemctl", "start", "ovn-northd").CombinedOutput()
+	if err != nil {
+		return fmt.Errorf("error starting ovn-northd service: %v\n  %q", err, string(out))
+	}
+
+	kubeURL, err := url.Parse(cluster.KubeServer)
+	if err != nil {
+		return fmt.Errorf("error parsing k8s server %q: %v", cluster.KubeServer, err)
+	}
+
+	// Set up north/southbound API authentication
+	err = setDBServerAuth("ovn-nbctl", "northbound", cluster.NorthDBServerAuth)
+	if err != nil {
+		return err
+	}
+	err = setDBServerAuth("ovn-sbctl", "southbound", cluster.SouthDBServerAuth)
+	if err != nil {
+		return err
+	}
+
+	args := []string{
+		"set",
+		"Open_vSwitch",
+		".",
+		fmt.Sprintf("external_ids:k8s-api-server=\"%s\"", kubeURL.Host),
+		fmt.Sprintf("external_ids:k8s-api-token=\"%s\"", cluster.Token),
+	}
+	if cluster.NorthDBClientAuth.scheme != OvnDBSchemeUnix {
+		args = append(args, fmt.Sprintf("external_ids:ovn-nb=\"%s\"", cluster.NorthDBClientAuth.GetURL()))
+	}
+	out, err = exec.Command("ovs-vsctl", args...).CombinedOutput()
+	if err != nil {
+		return fmt.Errorf("Error setting OVS external IDs: %v\n  %q", err, string(out))
+	}
+
+	overlayArgs := []string{
+		"master-init",
+		fmt.Sprintf("--cluster-ip-subnet=%s", cluster.ClusterIPNet.String()),
+		fmt.Sprintf("--master-switch-subnet=%s", masterSwitchNetwork),
+		fmt.Sprintf("--node-name=%s", masterNodeName),
+	}
+	if cluster.NorthDBClientAuth.scheme == OvnDBSchemeSSL {
+		overlayArgs = append(overlayArgs, fmt.Sprintf("--nb-privkey=%s", cluster.NorthDBClientAuth.PrivKey))
+		overlayArgs = append(overlayArgs, fmt.Sprintf("--nb-cert=%s", cluster.NorthDBClientAuth.Cert))
+		overlayArgs = append(overlayArgs, fmt.Sprintf("--nb-cacert=%s", cluster.NorthDBClientAuth.CACert))
+	}
+
+	out, err = exec.Command("ovn-k8s-overlay", overlayArgs...).CombinedOutput()
+	if err != nil {
+		return fmt.Errorf("error setting up OVN k8s overlay: %v\n  %q", err, string(out))
+	}
+
+	return nil
 }
 
 func (cluster *OvnClusterController) addNode(node *kapi.Node) error {
