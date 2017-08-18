@@ -35,12 +35,16 @@ SSL="true"
 # FIXME(mestery): Remove once Vagrant boxes allow apt-get to work again
 sudo rm -rf /var/lib/apt/lists/*
 
-# First, install docker
+# Add external repos to install docker and OVS from packages.
 sudo apt-get update
 sudo apt-get install -y apt-transport-https ca-certificates
+echo "deb https://packages.wand.net.nz $(lsb_release -sc) main" | sudo tee /etc/apt/sources.list.d/wand.list
+sudo curl https://packages.wand.net.nz/keyring.gpg -o /etc/apt/trusted.gpg.d/wand.gpg
 sudo apt-key adv --keyserver hkp://p80.pool.sks-keyservers.net:80 --recv-keys 58118E89F3A912897C070ADBF76221572C52609D
 sudo su -c "echo \"deb https://apt.dockerproject.org/repo ubuntu-xenial main\" >> /etc/apt/sources.list.d/docker.list"
 sudo apt-get update
+
+# First, install docker
 sudo apt-get purge lxc-docker
 sudo apt-get install -y linux-image-extra-$(uname -r) linux-image-extra-virtual
 sudo apt-get install -y docker-engine
@@ -48,24 +52,14 @@ sudo service docker start
 
 # Install OVS and dependencies
 sudo apt-get build-dep dkms
-sudo apt-get install -y autoconf automake bzip2 debhelper dh-autoreconf \
-                        libssl-dev libtool openssl procps \
-                        python-six dkms
+sudo apt-get install python-six openssl python-pip -y
+sudo -H pip install --upgrade pip
 
-git clone https://github.com/openvswitch/ovs.git
-pushd ovs/
-sudo DEB_BUILD_OPTIONS='nocheck parallel=2' fakeroot debian/rules binary
+sudo apt-get install openvswitch-datapath-dkms=2.7.0-1 -y
+sudo apt-get install openvswitch-switch=2.7.0-1 openvswitch-common=2.7.0-1 -y
+sudo -H pip install ovs
 
-# Install OVS/OVN debs
-popd
-sudo dpkg -i openvswitch-datapath-dkms*.deb
-sudo dpkg -i openvswitch-switch*.deb openvswitch-common*.deb \
-             ovn-central*.deb ovn-common*.deb \
-             python-openvswitch*.deb libopenvswitch*.deb \
-             ovn-host*.deb
-
-# Start the daemons
-sudo /etc/init.d/openvswitch-switch force-reload-kmod
+sudo apt-get install ovn-central=2.7.0-1 ovn-common=2.7.0-1 ovn-host=2.7.0-1 -y
 
 if [ -n "$SSL" ]; then
     # Install certificates
@@ -100,8 +94,6 @@ sudo /etc/init.d/ovn-host restart
 sudo ovs-vsctl set Open_vSwitch . external_ids:k8s-api-server="$MASTER_OVERLAY_IP:8080"
 
 # Install OVN+K8S Integration
-sudo apt-get install -y python-pip
-sudo -H pip install --upgrade pip
 git clone https://github.com/openvswitch/ovn-kubernetes
 pushd ovn-kubernetes
 sudo -H pip install .
