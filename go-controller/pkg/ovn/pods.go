@@ -41,7 +41,6 @@ func (oc *Controller) deleteLogicalPort(pod *kapi.Pod) {
 		logrus.Errorf("Error in deleting pod network switch - %s (%v)",
 			string(out), err)
 	}
-	return
 }
 
 func (oc *Controller) addLogicalPort(pod *kapi.Pod) {
@@ -117,5 +116,4 @@ func (oc *Controller) addLogicalPort(pod *kapi.Pod) {
 	if err != nil {
 		logrus.Errorf("Failed to set annotation on pod %s - %v", pod.Name, err)
 	}
-	return
 }

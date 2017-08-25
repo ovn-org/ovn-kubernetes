@@ -10,14 +10,16 @@ func (ovn *Controller) deleteService(service *kapi.Service) {
 		return
 	}
 
-	// TODO: Change this after supporting gateways.
-	if service.Spec.Type == "NodePort" {
-		return
-	}
 	ips := make([]string, 0)
 
 	for _, svcPort := range service.Spec.Ports {
-		if svcPort.Port == 0 {
+		var port int32
+		if service.Spec.Type == kapi.ServiceTypeNodePort {
+			port = svcPort.NodePort
+		} else {
+			port = svcPort.Port
+		}
+		if port == 0 {
 			continue
 		}
 
@@ -36,11 +38,21 @@ func (ovn *Controller) deleteService(service *kapi.Service) {
 			targetPort = svcPort.Port
 		}
 
-		err := ovn.createLoadBalancerVIP(ovn.getLoadBalancer(protocol),
-			service.Spec.ClusterIP, svcPort.Port, ips, targetPort)
-		if err != nil {
-			logrus.Errorf("Error in deleting load balancer for service "+
-				"%s:%d %+v", service.Name, svcPort.Port, err)
+		if service.Spec.Type == kapi.ServiceTypeNodePort {
+			// Delete the 'NodePort' service from a load-balancer instantiated in gateways.
+			err := ovn.createGatewaysVIP(string(protocol), port, targetPort, ips)
+			if err != nil {
+				logrus.Errorf("Error in deleting NodePort gateway entry for service "+
+					"%s:%d %+v", service.Name, port, err)
+			}
+		}
+		if service.Spec.Type == kapi.ServiceTypeNodePort || service.Spec.Type == kapi.ServiceTypeClusterIP {
+			err := ovn.createLoadBalancerVIP(ovn.getLoadBalancer(protocol),
+				service.Spec.ClusterIP, svcPort.Port, ips, targetPort)
+			if err != nil {
+				logrus.Errorf("Error in deleting load balancer for service "+
+					"%s:%d %+v", service.Name, port, err)
+			}
 		}
 	}
 }
