@@ -4,10 +4,14 @@
 require 'yaml'
 require 'ipaddr'
 
-vagrant_config = YAML.load_file("provisioning/virtualbox.conf.yml")
+vagrant_config = YAML.load_file("provisioning/vm_config.conf.yml")
 
 Vagrant.configure(2) do |config|
   config.vm.box = "ubuntu/xenial64"
+  config.vm.provider "libvirt" do |lv, override|
+    config.vm.box = "ceph/ubuntu-xenial"
+    lv.driver = "kvm"
+  end
 
   config.vm.synced_folder File.expand_path("k8s"), "/home/ubuntu/k8s"
 
@@ -28,8 +32,8 @@ Vagrant.configure(2) do |config|
       :args => "#{vagrant_config['k8smaster']['overlay-ip']} #{vagrant_config['k8smaster']['short_name']} #{vagrant_config['k8sminion1']['overlay-ip']} #{vagrant_config['k8sminion1']['short_name']} #{vagrant_config['k8sminion2']['overlay-ip']} #{vagrant_config['k8sminion2']['short_name']}"
     k8smaster.vm.provider "virtualbox" do |vb|
        vb.name = vagrant_config['k8smaster']['short_name']
-       vb.memory = 2048
-       vb.cpus = 2
+       vb.memory = vagrant_config['k8smaster']['memory']
+       vb.cpus = vagrant_config['k8smaster']['cpus']
        vb.customize [
            'modifyvm', :id,
            '--nicpromisc3', "allow-all"
@@ -38,6 +42,11 @@ Vagrant.configure(2) do |config|
            "guestproperty", "set", :id,
            "/VirtualBox/GuestAdd/VBoxService/--timesync-set-threshold", 10000
           ]
+    end
+    k8smaster.vm.provider "libvirt" do |domain|
+      domain.memory = vagrant_config['k8smaster']['memory']
+      domain.cpus = vagrant_config['k8smaster']['cpus']
+      domain.nic_model_type = "virtio"
     end
   end
 
@@ -54,8 +63,8 @@ Vagrant.configure(2) do |config|
       :args => "#{vagrant_config['k8smaster']['overlay-ip']} #{vagrant_config['k8smaster']['short_name']} #{vagrant_config['k8sminion1']['overlay-ip']} #{vagrant_config['k8sminion1']['short_name']} #{vagrant_config['k8sminion2']['overlay-ip']} #{vagrant_config['k8sminion2']['short_name']}"
     k8sminion1.vm.provider "virtualbox" do |vb|
        vb.name = vagrant_config['k8sminion1']['short_name']
-       vb.memory = 2048
-       vb.cpus = 2
+       vb.memory = vagrant_config['k8sminion1']['memory']
+       vb.cpus = vagrant_config['k8sminion1']['cpus']
        vb.customize [
            'modifyvm', :id,
            '--nicpromisc3', "allow-all"
@@ -64,6 +73,11 @@ Vagrant.configure(2) do |config|
            "guestproperty", "set", :id,
            "/VirtualBox/GuestAdd/VBoxService/--timesync-set-threshold", 10000
           ]
+    end
+    k8sminion1.vm.provider "libvirt" do |domain|
+      domain.memory = vagrant_config['k8sminion1']['memory']
+      domain.cpus = vagrant_config['k8sminion1']['cpus']
+      domain.nic_model_type = "virtio"
     end
   end
 
@@ -80,8 +94,8 @@ Vagrant.configure(2) do |config|
       :args => "#{vagrant_config['k8smaster']['overlay-ip']} #{vagrant_config['k8smaster']['short_name']} #{vagrant_config['k8sminion1']['overlay-ip']} #{vagrant_config['k8sminion1']['short_name']} #{vagrant_config['k8sminion2']['overlay-ip']} #{vagrant_config['k8sminion2']['short_name']}"
     k8sminion2.vm.provider "virtualbox" do |vb|
        vb.name = vagrant_config['k8sminion2']['short_name']
-       vb.memory = 2048
-       vb.cpus = 2
+       vb.memory = vagrant_config['k8sminion2']['memory']
+       vb.cpus = vagrant_config['k8sminion2']['cpus']
        vb.customize [
            'modifyvm', :id,
            '--nicpromisc3', "allow-all"
@@ -90,6 +104,11 @@ Vagrant.configure(2) do |config|
            "guestproperty", "set", :id,
            "/VirtualBox/GuestAdd/VBoxService/--timesync-set-threshold", 10000
           ]
+    end
+    k8sminion2.vm.provider "libvirt" do |domain|
+      domain.memory = vagrant_config['k8sminion2']['memory']
+      domain.cpus = vagrant_config['k8sminion2']['cpus']
+      domain.nic_model_type = "virtio"
     end
   end
 

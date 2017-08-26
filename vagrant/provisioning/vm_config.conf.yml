@@ -1,5 +1,4 @@
 ---
-box: "ubuntu/xenial64"
 public_network: "10.10.0.0/16"
 public_gateway: "10.10.0.1"
 k8smaster:
