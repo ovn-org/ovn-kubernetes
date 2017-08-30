@@ -9,7 +9,7 @@ vagrant_config = YAML.load_file("provisioning/vm_config.conf.yml")
 Vagrant.configure(2) do |config|
   config.vm.box = "ubuntu/xenial64"
   config.vm.provider "libvirt" do |lv, override|
-    config.vm.box = "ceph/ubuntu-xenial"
+    override.vm.box = "ceph/ubuntu-xenial"
     lv.driver = "kvm"
   end
 
