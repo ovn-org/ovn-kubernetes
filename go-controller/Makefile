@@ -26,9 +26,8 @@ ifndef GOPATH
 	$(error GOPATH is not set)
 endif
 
-install.tools: check-gopath
-	go get -u gopkg.in/alecthomas/gometalinter.v1; \
-	$(GOPATH)/bin/gometalinter.v1 --install;
+install.tools:
+	@./hack/install-tools.sh
 
 lint:
 	@./hack/lint.sh
