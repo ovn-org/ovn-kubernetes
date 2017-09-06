@@ -3,7 +3,7 @@
 install_redhat_linux() {
 	# Add a repo for where we can get OVS 2.6 packages
 	if [ ! -f /etc/yum.repos.d/delorean-deps.repo ] ; then
-	    curl http://trunk.rdoproject.org/centos7/delorean-deps.repo | sudo tee /etc/yum.repos.d/delorean-deps.repo
+	    curl -k https://trunk.rdoproject.org/centos7/delorean-deps.repo | sudo tee /etc/yum.repos.d/delorean-deps.repo
 	fi
 	sudo yum install -y openvswitch openvswitch-ovn-central openvswitch-ovn-host
 }
