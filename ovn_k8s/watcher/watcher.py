@@ -123,9 +123,17 @@ def start_threads():
     pool.spawn(_unixctl_run)
     pool.spawn(conn_processor.run_processor)
 
-    pod_watcher_inst = _create_k8s_pod_watcher()
-    service_watcher_inst = _create_k8s_service_watcher()
-    endpoint_watcher_inst = _create_k8s_endpoint_watcher()
+    try:
+        pod_watcher_inst = _create_k8s_pod_watcher()
+        service_watcher_inst = _create_k8s_service_watcher()
+        endpoint_watcher_inst = _create_k8s_endpoint_watcher()
+    except Exception as e:
+        # TODO: We need a better re-try mechanism.  This is only
+        # known to be a problem when there is no k8s-apiserver running
+        # right when the watcher is started.  After the initial connection
+        # we have a retry mechanism for any loss of connection.
+        vlog.exception("failed to create watchers (%s)" % (str(e)))
+        sys.exit(1)
 
     pool.spawn(_process_func, pod_watcher_inst, _create_k8s_pod_watcher)
     pool.spawn(_process_func, service_watcher_inst,
