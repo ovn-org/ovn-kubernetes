@@ -753,14 +753,14 @@ def main():
                                     required=True,
                                     help="A unique node name.")
     parser_master_init.add_argument('--nb-privkey',
-                                    help="A private key for northbound API "
-                                    "SSL connections.")
+                                    help="The private key used for northbound "
+                                    "API SSL connections.")
     parser_master_init.add_argument('--nb-cert',
-                                    help="A certificate for northbound API "
-                                    "SSL connections.")
+                                    help="The certificate used for northbound "
+                                    "API SSL connections.")
     parser_master_init.add_argument('--nb-cacert',
-                                    help="A CA certificate for northbound API "
-                                    "SSL connections.")
+                                    help="The CA certificate used for "
+                                    "northbound API SSL connections.")
     parser_master_init.set_defaults(func=master_init)
 
     # Parser for sub-command 'minion-init'.
@@ -776,6 +776,15 @@ def main():
     parser_minion_init.add_argument('--node-name',
                                     required=True,
                                     help="A unique node name.")
+    parser_minion_init.add_argument('--nb-privkey',
+                                    help="The private key used for northbound "
+                                    "API SSL connections.")
+    parser_minion_init.add_argument('--nb-cert',
+                                    help="The certificate used for northbound "
+                                    "API SSL connections.")
+    parser_minion_init.add_argument('--nb-cacert',
+                                    help="The CA certificate used for "
+                                    "northbound API SSL connections.")
     parser_minion_init.set_defaults(func=minion_init)
 
     # Parser for sub-command 'gateway-init'.
@@ -808,6 +817,15 @@ def main():
                                      "comma separated ip subnets.  Used to "
                                      "distribute outgoing traffic via "
                                      "multiple gateways.")
+    parser_gateway_init.add_argument('--nb-privkey',
+                                     help="The private key used for northbound"
+                                     " API SSL connections.")
+    parser_gateway_init.add_argument('--nb-cert',
+                                     help="The certificate used for northbound"
+                                     " API SSL connections.")
+    parser_gateway_init.add_argument('--nb-cacert',
+                                     help="The CA certificate used for "
+                                     "northbound API SSL connections.")
     parser_gateway_init.set_defaults(func=gateway_init)
 
     args = parser.parse_args()
