@@ -22,8 +22,12 @@ EOL
 # Install k8s
 
 # Install an etcd cluster
-sudo docker run --net=host -d gcr.io/google_containers/etcd:2.0.12 /usr/local/bin/etcd \
-                --addr=127.0.0.1:4001 --bind-addr=0.0.0.0:4001 --data-dir=/var/etcd/data
+sudo docker run --net=host -v /var/etcd/data:/var/etcd/data -d \
+        gcr.io/google_containers/etcd:3.0.17 /usr/local/bin/etcd \
+        --listen-peer-urls http://127.0.0.1:2380 \
+        --advertise-client-urls=http://127.0.0.1:4001 \
+        --listen-client-urls=http://0.0.0.0:4001 \
+        --data-dir=/var/etcd/data
 
 # Start k8s daemons
 pushd k8s/server/kubernetes/server/bin
