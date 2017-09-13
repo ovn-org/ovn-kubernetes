@@ -18,7 +18,7 @@ Pull down Kubernetes (it's big)
 
 * mkdir k8s
 * cd k8s
-* wget https://github.com/kubernetes/kubernetes/releases/download/v1.5.3/kubernetes.tar.gz
+* wget https://github.com/kubernetes/kubernetes/releases/download/v1.7.5/kubernetes.tar.gz
 * tar xvzf kubernetes.tar.gz
 * ./kubernetes/cluster/get-kube-binaries.sh
 * mkdir server
