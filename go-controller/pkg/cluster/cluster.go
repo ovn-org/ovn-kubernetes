@@ -38,19 +38,19 @@ const (
 	OvnHostSubnet = "ovn_host_subnet"
 
 	// OvnDBSchemeSSL specifies SSL as the OVN database transport method
-	OvnDBSchemeSSL  OvnDBScheme = "ssl"
+	OvnDBSchemeSSL OvnDBScheme = "ssl"
 	// OvnDBSchemeTCP specifies TCP as the OVN database transport method
-	OvnDBSchemeTCP  OvnDBScheme = "tcp"
+	OvnDBSchemeTCP OvnDBScheme = "tcp"
 	// OvnDBSchemeUnix specifies Unix domains sockets as the OVN database transport method
 	OvnDBSchemeUnix OvnDBScheme = "unix"
 )
 
 // OvnDBAuth describes an OVN database location and authentication method
 type OvnDBAuth struct {
-	URL string
+	URL     string
 	PrivKey string
-	Cert string
-	CACert string
+	Cert    string
+	CACert  string
 
 	server bool
 	host   string
