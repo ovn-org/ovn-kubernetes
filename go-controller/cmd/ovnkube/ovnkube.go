@@ -13,8 +13,8 @@ import (
 	"k8s.io/client-go/tools/clientcmd"
 	certutil "k8s.io/client-go/util/cert"
 
-	ovnfactory "github.com/openvswitch/ovn-kubernetes/go-controller/pkg/factory"
 	ovncluster "github.com/openvswitch/ovn-kubernetes/go-controller/pkg/cluster"
+	ovnfactory "github.com/openvswitch/ovn-kubernetes/go-controller/pkg/factory"
 )
 
 func main() {

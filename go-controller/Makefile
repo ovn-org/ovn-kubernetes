@@ -11,6 +11,7 @@ export OUT_DIR
 all build:
 	hack/build-go.sh cmd/ovnkube/ovnkube.go
 	hack/build-go.sh cmd/ovn-kube-util/ovn-kube-util.go
+	hack/build-go.sh cmd/ovn-kube-cni-overlay/ovn-kube-cni-overlay.go
 
 install:
 	cp ${OUT_DIR}/go/bin/* /usr/bin/
