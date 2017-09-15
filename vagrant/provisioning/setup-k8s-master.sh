@@ -29,13 +29,18 @@ sudo docker run --net=host -v /var/etcd/data:/var/etcd/data -d \
         --listen-client-urls=http://0.0.0.0:4001 \
         --data-dir=/var/etcd/data
 
+# Allow time for etcd to start up.
+sleep 5
+
 # Start k8s daemons
 pushd k8s/server/kubernetes/server/bin
 echo "Starting kube-apiserver ..."
 nohup sudo ./kube-apiserver --service-cluster-ip-range=192.168.200.0/24 \
                             --address=0.0.0.0 --etcd-servers=http://127.0.0.1:4001 \
                             --v=2 2>&1 0<&- &>/dev/null &
-sleep 5
+
+# Allow time for kube-apiserver to initialize and connect to etcd server.
+sleep 10
 
 echo "Starting kube-controller-manager ..."
 nohup sudo ./kube-controller-manager --master=127.0.0.1:8080 --v=2 2>&1 0<&- &>/dev/null &
