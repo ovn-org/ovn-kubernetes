@@ -75,6 +75,54 @@
 			"revisionTime": "2016-08-18T17:01:52Z"
 		},
 		{
+			"checksumSHA1": "LvjTFR2Am01kquJNDnfISncPfRw=",
+			"path": "github.com/containernetworking/cni/pkg/skel",
+			"revision": "909fe7d10d98ab99b9990966796316249c83b263",
+			"revisionTime": "2017-08-31T02:32:53Z"
+		},
+		{
+			"checksumSHA1": "Sfdjk2zzDd0npAjZdULWjWoKVkQ=",
+			"path": "github.com/containernetworking/cni/pkg/types",
+			"revision": "909fe7d10d98ab99b9990966796316249c83b263",
+			"revisionTime": "2017-08-31T02:32:53Z"
+		},
+		{
+			"checksumSHA1": "lmLYXYR/twmBu+6U678QNF+BQlQ=",
+			"path": "github.com/containernetworking/cni/pkg/types/020",
+			"revision": "909fe7d10d98ab99b9990966796316249c83b263",
+			"revisionTime": "2017-08-31T02:32:53Z"
+		},
+		{
+			"checksumSHA1": "r6qX7lyz4pweijiXjWMcxvm4wQQ=",
+			"path": "github.com/containernetworking/cni/pkg/types/current",
+			"revision": "909fe7d10d98ab99b9990966796316249c83b263",
+			"revisionTime": "2017-08-31T02:32:53Z"
+		},
+		{
+			"checksumSHA1": "Y9KLxL9fFDnFHaDGOUfDkcbyV0U=",
+			"path": "github.com/containernetworking/cni/pkg/version",
+			"revision": "909fe7d10d98ab99b9990966796316249c83b263",
+			"revisionTime": "2017-08-31T02:32:53Z"
+		},
+		{
+			"checksumSHA1": "fou5ySWGlDUCfgIecM1CFpO47nQ=",
+			"path": "github.com/containernetworking/plugins/pkg/ip",
+			"revision": "e256564546e8d1ca8a36911f8445c11929043221",
+			"revisionTime": "2017-09-13T09:41:14Z"
+		},
+		{
+			"checksumSHA1": "wmZ5nRpAN/myLfAzVpPR1RxnoFQ=",
+			"path": "github.com/containernetworking/plugins/pkg/ns",
+			"revision": "e256564546e8d1ca8a36911f8445c11929043221",
+			"revisionTime": "2017-09-13T09:41:14Z"
+		},
+		{
+			"checksumSHA1": "rUAk+nce6eDIWtYo/QYIoqlTfrY=",
+			"path": "github.com/containernetworking/plugins/pkg/utils/hwaddr",
+			"revision": "e256564546e8d1ca8a36911f8445c11929043221",
+			"revisionTime": "2017-09-13T09:41:14Z"
+		},
+		{
 			"checksumSHA1": "sFGNqtSE3WlMiyT+JkVaW2OzstM=",
 			"path": "github.com/coreos/etcd/alarm",
 			"revision": "20490caaf0dcd96bb4a95e40625559def8ef5b04",
@@ -409,6 +457,12 @@
 			"path": "github.com/coreos/etcd/wal/walpb",
 			"revision": "20490caaf0dcd96bb4a95e40625559def8ef5b04",
 			"revisionTime": "2017-03-27T17:20:28Z"
+		},
+		{
+			"checksumSHA1": "RM7wQmNoUSB93ogKxdpA4265++Y=",
+			"path": "github.com/coreos/go-iptables/iptables",
+			"revision": "073684287cdcd53403e26bedbf9884ade716e9e2",
+			"revisionTime": "2017-09-14T08:21:01Z"
 		},
 		{
 			"checksumSHA1": "vM0AXBjMyPUVF7sLxjXX0to78l0=",
@@ -909,16 +963,22 @@
 			"revisionTime": "2017-08-04T09:34:15Z"
 		},
 		{
-			"checksumSHA1": "BGpCBchrdshwh7sLBTvYRtXbd8o=",
+			"checksumSHA1": "Xx7Xi4y9emMxnLBmffT4znp4kj0=",
 			"path": "github.com/vishvananda/netlink",
-			"revision": "1e2e08e8a2dcdacaae3f14ac44c5cfa31361f270",
-			"revisionTime": "2015-08-20T01:49:04Z"
+			"revision": "f5a6f697a596c788d474984a38a0ac4ba0719e93",
+			"revisionTime": "2017-07-24T20:03:20Z"
 		},
 		{
-			"checksumSHA1": "r/vcO8YkOWNHKX5HKCukaU4Xzlg=",
+			"checksumSHA1": "sCVVNugUvrGiFLA0nBNcWHoEhRI=",
 			"path": "github.com/vishvananda/netlink/nl",
-			"revision": "1e2e08e8a2dcdacaae3f14ac44c5cfa31361f270",
-			"revisionTime": "2015-08-20T01:49:04Z"
+			"revision": "f5a6f697a596c788d474984a38a0ac4ba0719e93",
+			"revisionTime": "2017-07-24T20:03:20Z"
+		},
+		{
+			"checksumSHA1": "YDN9yoXZ/KBWqILw9PCNtd/SRAI=",
+			"path": "github.com/vishvananda/netns",
+			"revision": "86bef332bfc3b59b7624a600bd53009ce91a9829",
+			"revisionTime": "2017-07-07T00:42:18Z"
 		},
 		{
 			"checksumSHA1": "+SrMzo4EJeOuoF9AKdbw8QWOOYQ=",
