@@ -13,6 +13,7 @@
 # limitations under the License.
 
 import ast
+import json
 
 import ovs.vlog
 from ovn_k8s.common import exceptions
@@ -334,14 +335,14 @@ class OvnNB(object):
 
         ip_address_mask = "%s/%s" % (ip_address, mask)
 
-        annotation = {'ip_address': ip_address_mask,
-                      'mac_address': mac_address,
-                      'gateway_ip': gateway_ip}
+        annotation = {'ip_address': str(ip_address_mask),
+                      'mac_address': str(mac_address),
+                      'gateway_ip': str(gateway_ip)}
 
         try:
             kubernetes.set_pod_annotation(variables.K8S_API_SERVER,
                                           namespace, pod_name,
-                                          "ovn", str(annotation))
+                                          "ovn", json.dumps(annotation))
         except Exception as e:
             vlog.err("_create_logical_port: failed to annotate addresses (%s)"
                      % (str(e)))
