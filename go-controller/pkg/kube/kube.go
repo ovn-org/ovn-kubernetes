@@ -23,7 +23,9 @@ type Interface interface {
 	GetPodsByLabels(namespace string, selector labels.Selector) (*kapi.PodList, error)
 	GetNodes() (*kapi.NodeList, error)
 	GetNode(name string) (*kapi.Node, error)
+	GetServices(namespace string) (*kapi.ServiceList, error)
 	GetService(namespace, name string) (*kapi.Service, error)
+	GetNamespaces() (*kapi.NamespaceList, error)
 }
 
 // Kube is the structure object upon which the Interface is implemented
@@ -93,4 +95,14 @@ func (k *Kube) GetNode(name string) (*kapi.Node, error) {
 // GetService returns the Service resource from kubernetes apiserver, given its name and namespace
 func (k *Kube) GetService(namespace, name string) (*kapi.Service, error) {
 	return k.KClient.Core().Services(namespace).Get(name, metav1.GetOptions{})
+}
+
+// GetServices obtains the Service resource from kubernetes apiserver, given the namespace
+func (k *Kube) GetServices(namespace string) (*kapi.ServiceList, error) {
+	return k.KClient.Core().Services(namespace).List(metav1.ListOptions{})
+}
+
+// GetNamespaces returns the list of all Namespace objects from kubernetes
+func (k *Kube) GetNamespaces() (*kapi.NamespaceList, error) {
+	return k.KClient.Core().Namespaces().List(metav1.ListOptions{})
 }
