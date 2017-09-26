@@ -17,6 +17,7 @@ import (
 type Interface interface {
 	SetAnnotationOnPod(pod *kapi.Pod, key, value string) error
 	SetAnnotationOnNode(node *kapi.Node, key, value string) error
+	GetAnnotationsOnPod(namespace, name string) (map[string]string, error)
 	GetPod(namespace, name string) (*kapi.Pod, error)
 	GetPods(namespace string) (*kapi.PodList, error)
 	GetPodsByLabels(namespace string, selector labels.Selector) (*kapi.PodList, error)
@@ -50,6 +51,15 @@ func (k *Kube) SetAnnotationOnNode(node *kapi.Node, key, value string) error {
 		logrus.Errorf("Error in setting annotation on node %s: %v", node.Name, err)
 	}
 	return err
+}
+
+// GetAnnotationsOnPod obtains the pod annotations from kubernetes apiserver, given the name and namespace
+func (k *Kube) GetAnnotationsOnPod(namespace, name string) (map[string]string, error) {
+	pod, err := k.KClient.Core().Pods(namespace).Get(name, metav1.GetOptions{})
+	if err != nil {
+		return nil, err
+	}
+	return pod.ObjectMeta.Annotations, nil
 }
 
 // GetPod obtains the Pod resource from kubernetes apiserver, given the name and namespace
