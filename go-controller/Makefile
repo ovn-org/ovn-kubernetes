@@ -10,6 +10,7 @@ export OUT_DIR
 
 all build:
 	hack/build-go.sh cmd/ovnkube/ovnkube.go
+	hack/build-go.sh cmd/ovn-k8s-overlay/ovn-k8s-overlay.go
 	hack/build-go.sh cmd/ovn-kube-util/ovn-kube-util.go
 	hack/build-go.sh cmd/ovn-kube-cni-overlay/ovn-kube-cni-overlay.go
 
