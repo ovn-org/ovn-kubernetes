@@ -4,13 +4,14 @@ import (
 	"encoding/json"
 	"fmt"
 	"net"
-	"os"
 	"os/exec"
 	"strings"
 
 	"github.com/Sirupsen/logrus"
 
 	"github.com/containernetworking/cni/pkg/skel"
+	"github.com/containernetworking/cni/pkg/types"
+	"github.com/containernetworking/cni/pkg/types/current"
 	"github.com/containernetworking/cni/pkg/version"
 	"github.com/containernetworking/plugins/pkg/ip"
 	"github.com/containernetworking/plugins/pkg/ns"
@@ -43,31 +44,35 @@ func renameLink(curName, newName string) error {
 	return nil
 }
 
-func setupInterface(netns ns.NetNS, containerID, ifName, macAddress, ipAddress, gatewayIP string) (string, error) {
-	var hostIfaceName string
+func setupInterface(netns ns.NetNS, containerID, ifName, macAddress, ipAddress, gatewayIP string) (*current.Interface, *current.Interface, error) {
+	hostIface := &current.Interface{}
+	contIface := &current.Interface{}
 
+	var oldHostVethName string
 	err := netns.Do(func(hostNS ns.NetNS) error {
 		// create the veth pair in the container and move host end into host netns
 		hostVeth, containerVeth, err := ip.SetupVeth(ifName, defaultVethMTU, hostNS)
 		if err != nil {
 			return err
 		}
+		hostIface.Mac = hostVeth.HardwareAddr.String()
+		contIface.Name = containerVeth.Name
 
-		contIfaceName := containerVeth.Name
-
-		link, err := netlink.LinkByName(contIfaceName)
+		link, err := netlink.LinkByName(contIface.Name)
 		if err != nil {
-			return fmt.Errorf("failed to lookup %s: %v", contIfaceName, err)
+			return fmt.Errorf("failed to lookup %s: %v", contIface.Name, err)
 		}
 
 		hwAddr, err := net.ParseMAC(macAddress)
 		if err != nil {
-			return fmt.Errorf("failed to parse mac address for %s: %v", contIfaceName, err)
+			return fmt.Errorf("failed to parse mac address for %s: %v", contIface.Name, err)
 		}
 		err = netlink.LinkSetHardwareAddr(link, hwAddr)
 		if err != nil {
-			return fmt.Errorf("failed to add mac address %s to %s: %v", macAddress, contIfaceName, err)
+			return fmt.Errorf("failed to add mac address %s to %s: %v", macAddress, contIface.Name, err)
 		}
+		contIface.Mac = macAddress
+		contIface.Sandbox = netns.Path()
 
 		addr, err := netlink.ParseAddr(ipAddress)
 		if err != nil {
@@ -75,7 +80,7 @@ func setupInterface(netns ns.NetNS, containerID, ifName, macAddress, ipAddress, 
 		}
 		err = netlink.AddrAdd(link, addr)
 		if err != nil {
-			return fmt.Errorf("failed to add IP addr %s to %s: %v", ipAddress, contIfaceName, err)
+			return fmt.Errorf("failed to add IP addr %s to %s: %v", ipAddress, contIface.Name, err)
 		}
 
 		gw := net.ParseIP(gatewayIP)
@@ -87,21 +92,21 @@ func setupInterface(netns ns.NetNS, containerID, ifName, macAddress, ipAddress, 
 			return err
 		}
 
-		hostIfaceName = hostVeth.Name
+		oldHostVethName = hostVeth.Name
 
 		return nil
 	})
 	if err != nil {
-		return "", err
+		return nil, nil, err
 	}
 
 	// rename the host end of veth pair
-	newHostIfaceName := containerID[:15]
-	if err := renameLink(hostIfaceName, newHostIfaceName); err != nil {
-		return "", fmt.Errorf("failed to rename %s to %s: %v", hostIfaceName, newHostIfaceName, err)
+	hostIface.Name = containerID[:15]
+	if err := renameLink(oldHostVethName, hostIface.Name); err != nil {
+		return nil, nil, fmt.Errorf("failed to rename %s to %s: %v", oldHostVethName, hostIface.Name, err)
 	}
 
-	return newHostIfaceName, nil
+	return hostIface, contIface, nil
 }
 
 func argString2Map(args string) (map[string]string, error) {
@@ -122,6 +127,11 @@ func argString2Map(args string) (map[string]string, error) {
 }
 
 func cmdAdd(args *skel.CmdArgs) error {
+	conf := &types.NetConf{}
+	if err := json.Unmarshal(args.StdinData, conf); err != nil {
+		return fmt.Errorf("failed to load netconf: %v", err)
+	}
+
 	argsMap, err := argString2Map(args.Args)
 	if err != nil {
 		return err
@@ -198,7 +208,7 @@ func cmdAdd(args *skel.CmdArgs) error {
 	}
 	defer netns.Close()
 
-	vethOutside, err := setupInterface(netns, args.ContainerID, args.IfName, macAddress, ipAddress, gatewayIP)
+	hostIface, contIface, err := setupInterface(netns, args.ContainerID, args.IfName, macAddress, ipAddress, gatewayIP)
 	if err != nil {
 		return err
 	}
@@ -206,8 +216,8 @@ func cmdAdd(args *skel.CmdArgs) error {
 	ifaceID := fmt.Sprintf("%s_%s", namespace, podName)
 
 	ovsArgs = []string{
-		"add-port", "br-int", vethOutside, "--", "set",
-		"interface", vethOutside,
+		"add-port", "br-int", hostIface.Name, "--", "set",
+		"interface", hostIface.Name,
 		fmt.Sprintf("external_ids:attached_mac=%s", macAddress),
 		fmt.Sprintf("external_ids:iface-id=%s", ifaceID),
 		fmt.Sprintf("external_ids:ip_address=%s", ipAddress),
@@ -217,11 +227,28 @@ func cmdAdd(args *skel.CmdArgs) error {
 		return fmt.Errorf("failure in plugging pod interface: %v\n  %q", err, string(out))
 	}
 
-	// TODO: conform with cni specification
-	result := fmt.Sprintf("{\"ip_address\":\"%s\", \"mac_address\":\"%s\", \"gateway_ip\": \"%s\"}", ipAddress, macAddress, gatewayIP)
-	_, err = os.Stdout.Write([]byte(result))
+	// Build the result structure to pass back to the runtime
+	addr, addrNet, err := net.ParseCIDR(ipAddress)
+	if err != nil {
+		return fmt.Errorf("failed to parse IP address %q: %v", ipAddress, err)
+	}
+	ipVersion := "6"
+	if addr.To4() != nil {
+		ipVersion = "4"
+	}
+	result := &current.Result{
+		Interfaces: []*current.Interface{hostIface, contIface},
+		IPs: []*current.IPConfig{
+			{
+				Version:   ipVersion,
+				Interface: current.Int(1),
+				Address:   net.IPNet{IP: addr, Mask: addrNet.Mask},
+				Gateway:   net.ParseIP(gatewayIP),
+			},
+		},
+	}
 
-	return err
+	return types.PrintResult(result, conf.CNIVersion)
 }
 
 func cmdDel(args *skel.CmdArgs) error {
