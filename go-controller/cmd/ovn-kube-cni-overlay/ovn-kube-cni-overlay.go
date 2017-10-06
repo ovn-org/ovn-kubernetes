@@ -8,6 +8,8 @@ import (
 	"os/exec"
 	"strings"
 
+	"github.com/Sirupsen/logrus"
+
 	"github.com/containernetworking/cni/pkg/skel"
 	"github.com/containernetworking/cni/pkg/version"
 	"github.com/containernetworking/plugins/pkg/ip"
@@ -225,11 +227,12 @@ func cmdAdd(args *skel.CmdArgs) error {
 func cmdDel(args *skel.CmdArgs) error {
 	ifaceName := args.ContainerID[:15]
 	ovsArgs := []string{
-		"del-port", ifaceName,
+		"del-port", "br-int", ifaceName,
 	}
 	out, err := exec.Command("ovs-vsctl", ovsArgs...).CombinedOutput()
-	if err != nil {
-		return fmt.Errorf("failed to delete OVS port %s: %v\n  %q", ifaceName, err, string(out))
+	if err != nil && !strings.Contains(string(out), "no port named") {
+		// DEL should be idempotent; don't return an error just log it
+		logrus.Warningf("failed to delete OVS port %s: %v\n  %q", ifaceName, err, string(out))
 	}
 
 	return nil
