@@ -127,9 +127,7 @@ func cmdAdd(args *skel.CmdArgs) error {
 
 	namespace := argsMap["K8S_POD_NAMESPACE"]
 	podName := argsMap["K8S_POD_NAME"]
-	containerID := argsMap["K8S_POD_INFRA_CONTAINER_ID"]
-
-	if namespace == "" || podName == "" || containerID == "" {
+	if namespace == "" || podName == "" {
 		return fmt.Errorf("required CNI variable missing")
 	}
 
@@ -198,7 +196,7 @@ func cmdAdd(args *skel.CmdArgs) error {
 	}
 	defer netns.Close()
 
-	vethOutside, err := setupInterface(netns, containerID, args.IfName, macAddress, ipAddress, gatewayIP)
+	vethOutside, err := setupInterface(netns, args.ContainerID, args.IfName, macAddress, ipAddress, gatewayIP)
 	if err != nil {
 		return err
 	}
@@ -225,16 +223,7 @@ func cmdAdd(args *skel.CmdArgs) error {
 }
 
 func cmdDel(args *skel.CmdArgs) error {
-	argsMap, err := argString2Map(args.Args)
-	if err != nil {
-		return err
-	}
-	containerID := argsMap["K8S_POD_INFRA_CONTAINER_ID"]
-	if containerID == "" {
-		return fmt.Errorf("required CNI variable missing")
-	}
-
-	ifaceName := containerID[:15]
+	ifaceName := args.ContainerID[:15]
 	ovsArgs := []string{
 		"del-port", ifaceName,
 	}
