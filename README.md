@@ -31,10 +31,6 @@ OVS and OVN related packages.  You can also read the following quick-start
 quide for Ubuntu that installs OVS and OVN from source:  [INSTALL.UBUNTU.md]
 
 ## The "overlay" mode
-The "overlay" mode
-==================
-Overlay mode diagram:
-![alt text](https://i.imgur.com/i7sci9O.png "Overlay mode diagram")
 
 Kubernetes networking requirements:
 
@@ -367,6 +363,13 @@ ovn-k8s-watcher \
   -vconsole:emer \
   --detach
 ```
+
+### Overlay mode architecture diagram:
+
+The following digaram represents the internal architecture details
+of the overlay mode.
+
+![alt text](https://i.imgur.com/i7sci9O.png "Overlay mode diagram")
 
 ## The "underlay" mode
 
