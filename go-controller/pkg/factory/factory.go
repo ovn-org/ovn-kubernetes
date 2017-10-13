@@ -8,6 +8,7 @@ import (
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/tools/cache"
 
+	"github.com/Sirupsen/logrus"
 	"github.com/openvswitch/ovn-kubernetes/go-controller/pkg/cluster"
 	"github.com/openvswitch/ovn-kubernetes/go-controller/pkg/kube"
 	"github.com/openvswitch/ovn-kubernetes/go-controller/pkg/ovn"
@@ -43,7 +44,10 @@ func (factory *Factory) CreateOvnController() *ovn.Controller {
 	return &ovn.Controller{
 		StartPodWatch: func(handler cache.ResourceEventHandler, processExisting func([]interface{})) {
 			go podInformer.Informer().Run(utilwait.NeverStop)
-			cache.WaitForCacheSync(utilwait.NeverStop, podInformer.Informer().HasSynced)
+			if !cache.WaitForCacheSync(utilwait.NeverStop, podInformer.Informer().HasSynced) {
+				logrus.Errorf("Error in syncing cache for Pod Informer. Informer will not be run.")
+				return
+			}
 			if processExisting != nil {
 				// cache has synced, lets process the list
 				processExisting(podInformer.Informer().GetStore().List())
@@ -53,7 +57,10 @@ func (factory *Factory) CreateOvnController() *ovn.Controller {
 		},
 		StartServiceWatch: func(handler cache.ResourceEventHandler, processExisting func([]interface{})) {
 			go serviceInformer.Informer().Run(utilwait.NeverStop)
-			cache.WaitForCacheSync(utilwait.NeverStop, serviceInformer.Informer().HasSynced)
+			if !cache.WaitForCacheSync(utilwait.NeverStop, serviceInformer.Informer().HasSynced) {
+				logrus.Errorf("Error in syncing cache for Service Informer. Informer will not be run.")
+				return
+			}
 			if processExisting != nil {
 				processExisting(serviceInformer.Informer().GetStore().List())
 			}
@@ -61,7 +68,10 @@ func (factory *Factory) CreateOvnController() *ovn.Controller {
 		},
 		StartEndpointWatch: func(handler cache.ResourceEventHandler, processExisting func([]interface{})) {
 			go endpointsInformer.Informer().Run(utilwait.NeverStop)
-			cache.WaitForCacheSync(utilwait.NeverStop, endpointsInformer.Informer().HasSynced)
+			if !cache.WaitForCacheSync(utilwait.NeverStop, endpointsInformer.Informer().HasSynced) {
+				logrus.Errorf("Error in syncing cache for Endpoints Informer. Informer will not be run.")
+				return
+			}
 			if processExisting != nil {
 				processExisting(endpointsInformer.Informer().GetStore().List())
 			}
@@ -69,7 +79,10 @@ func (factory *Factory) CreateOvnController() *ovn.Controller {
 		},
 		StartPolicyWatch: func(handler cache.ResourceEventHandler, processExisting func([]interface{})) {
 			go policyInformer.Informer().Run(utilwait.NeverStop)
-			cache.WaitForCacheSync(utilwait.NeverStop, policyInformer.Informer().HasSynced)
+			if !cache.WaitForCacheSync(utilwait.NeverStop, policyInformer.Informer().HasSynced) {
+				logrus.Errorf("Error in syncing cache for Policy Informer. Informer will not be run.")
+				return
+			}
 			if processExisting != nil {
 				processExisting(policyInformer.Informer().GetStore().List())
 			}
@@ -77,7 +90,10 @@ func (factory *Factory) CreateOvnController() *ovn.Controller {
 		},
 		StartNamespaceWatch: func(handler cache.ResourceEventHandler, processExisting func([]interface{})) {
 			go namespaceInformer.Informer().Run(utilwait.NeverStop)
-			cache.WaitForCacheSync(utilwait.NeverStop, namespaceInformer.Informer().HasSynced)
+			if !cache.WaitForCacheSync(utilwait.NeverStop, namespaceInformer.Informer().HasSynced) {
+				logrus.Errorf("Error in syncing cache for Namespace Informer. Informer will not be run.")
+				return
+			}
 			if processExisting != nil {
 				processExisting(namespaceInformer.Informer().GetStore().List())
 			}
