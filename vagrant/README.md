@@ -29,6 +29,11 @@ Bringup the Vagrant setup
 
 * vagrant up
 
+Please note that, by default, the pods created cannot reach the internet.
+This is because, the network to which it is attached is a vagrant private
+network.  You can reach the pods running inside the VMs from your host via
+the nodeport though.
+
 Run some containers
 -------------------
 
