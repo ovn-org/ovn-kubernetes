@@ -12,11 +12,19 @@ set -o xtrace
 PUBLIC_IP=$1
 PUBLIC_SUBNET_MASK=$2
 GW_IP=$3
+OVN_EXTERNAL=$4
+
+if [ -n "$OVN_EXTERNAL" ]; then
+    PUBLIC_IP=`ifconfig enp0s9 | grep 'inet addr' | cut -d: -f2 | awk '{print $1}'`
+    PUBLIC_SUBNET_MASK=`ifconfig enp0s9 | grep 'inet addr' | cut -d: -f4`
+    GW_IP=`grep 'option routers' /var/lib/dhcp/dhclient.enp0s9.leases | head -1 | sed -e 's/;//' | awk '{print $3}'`
+fi
 
 cat > setup_k8s_master_args.sh <<EOL
 PUBLIC_IP=$1
 PUBLIC_SUBNET_MASK=$2
 GW_IP=$3
+OVN_EXTERNAL=$4
 EOL
 
 # Install k8s
@@ -65,7 +73,7 @@ sudo ifconfig br-enp0s9 $PUBLIC_IP netmask $PUBLIC_SUBNET_MASK up
 # Setup the GW node on the master
 sudo ovn-k8s-overlay gateway-init --cluster-ip-subnet="192.168.0.0/16" --bridge-interface br-enp0s9 \
                                   --physical-ip $PUBLIC_IP/$PUBLIC_SUBNET_MASK \
-                                  --node-name="kube-gateway-node1" --default-gw $GW_IP
+                                  --node-name="k8smaster" --default-gw $GW_IP
 
 # Start the gateway helper.
 sudo ovn-k8s-gateway-helper --physical-bridge=br-enp0s9 --physical-interface=enp0s9 --pidfile --detach

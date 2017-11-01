@@ -34,6 +34,14 @@ This is because, the network to which it is attached is a vagrant private
 network.  You can reach the pods running inside the VMs from your host via
 the nodeport though.
 
+If you need external network connectivity for your pods, you should use
+the vagrant's "public network" option. This will give dhcp provided IP
+address for your gateways. You can invoke this by providing your host's
+network interface while running the vagrant. For e.g., if your host network
+interface on your MAC is "en4: Thunderbolt Ethernet", you can run
+
+* OVN_EXTERNAL="en4: Thunderbolt Ethernet" vagrant up
+
 Run some containers
 -------------------
 
@@ -63,6 +71,12 @@ able to access the same service via the IP addresses of the minion nodes too.
 
 * curl 10.10.0.12:[nodeport]
 * curl 10.10.0.13:[nodeport]
+
+Note: The above IP addresss are NOT used when you use the vagrant's public
+network option. In that case, the above IP addresses are provided by dhcp
+by your underlying network. So it is dynamic. You can fetch these IP
+addresses by running 'ifconfig br-enp0s9' on each of your host.  You can then
+run the curl commands on those IP addresses.
 
 You should see OVN doing load-balancing between the pods, which means you will
 both the apache example page and the nginx example page.
