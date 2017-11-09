@@ -430,6 +430,23 @@ func createManagementPort(nodeName, localSubnet, clusterSubnet string) error {
 		return err
 	}
 
+	// Add DNS to the switch
+	dns, stderr, err := util.RunOVNNbctl("--data=bare", "--no-heading",
+		"--columns=_uuid", "find", "dns", "external_ids:k8s-dns=yes")
+	if err != nil || dns == "" {
+		logrus.Errorf("Failed to get dns, stderr: %q, error: %v", stderr,
+			err)
+		return err
+	}
+
+	stdout, stderr, err = util.RunOVNNbctl("add", "logical_switch", nodeName,
+		"dns_records", dns)
+	if err != nil {
+		logrus.Errorf("Failed to add dns for logical switch %s stdout: %q "+
+			"stderr: %q, error: %v", nodeName, stdout, stderr, err)
+		return err
+	}
+
 	return nil
 }
 

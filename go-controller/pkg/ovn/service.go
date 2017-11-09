@@ -1,11 +1,88 @@
 package ovn
 
 import (
+	"fmt"
 	"github.com/Sirupsen/logrus"
 	kapi "k8s.io/client-go/pkg/api/v1"
+	"os/exec"
+	"strings"
 )
 
+var dnsInSchema string
+var dnsRecord string
+
+func getDNSTable() string {
+	if dnsInSchema == "" {
+		_, err := exec.Command(OvnNbctl, "list", "dns").Output()
+		if err != nil {
+			dnsInSchema = "no"
+		}
+	}
+
+	if dnsInSchema == "no" {
+		return ""
+	}
+
+	if dnsRecord != "" {
+		return dnsRecord
+	}
+
+	uuid, err := exec.Command(OvnNbctl, "--data=bare", "--no-heading",
+		"--columns=_uuid", "find", "DNS", "external_ids:k8s-dns=yes").Output()
+	if err != nil || string(uuid) == "" {
+		logrus.Errorf("find failed to get the dns record (%v)", err)
+		return ""
+	}
+	dnsRecord = strings.TrimSpace(string(uuid))
+
+	return dnsRecord
+}
+
+func setDNSRecord(name, namespace, IP string) {
+	if name == "" || IP == "" || namespace == "" {
+		return
+	}
+	uuid := getDNSTable()
+	if uuid == "" {
+		return
+	}
+	dnsName := fmt.Sprintf("%s.%s", namespace, name)
+	value := fmt.Sprintf("records:%s=%s", dnsName, IP)
+	_, err := exec.Command(OvnNbctl, "set", "DNS", uuid,
+		value).CombinedOutput()
+	if err != nil {
+		logrus.Errorf("error in creating DNS record for %s=%s (%v)",
+			dnsName, IP, err)
+		return
+	}
+}
+
+func deleteDNSRecord(name, namespace string) {
+	if name == "" || namespace == "" {
+		return
+	}
+	uuid := getDNSTable()
+	if uuid == "" {
+		return
+	}
+
+	dnsName := fmt.Sprintf("%s.%s", namespace, name)
+	_, err := exec.Command(OvnNbctl, "--if-exists", "remove", "dns", uuid,
+		"records", dnsName).CombinedOutput()
+	if err != nil {
+		logrus.Errorf("failed to remove dns record for %s", dnsName)
+	}
+}
+
+func (ovn *Controller) addService(service *kapi.Service) {
+	logrus.Infof("addService received event: %+v", service)
+
+	setDNSRecord(service.Name, service.Namespace, service.Spec.ClusterIP)
+}
+
 func (ovn *Controller) deleteService(service *kapi.Service) {
+	deleteDNSRecord(service.Name, service.Namespace)
+
 	if service.Spec.ClusterIP == "" || len(service.Spec.Ports) == 0 {
 		return
 	}

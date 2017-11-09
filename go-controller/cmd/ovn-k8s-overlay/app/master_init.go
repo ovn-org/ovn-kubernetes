@@ -79,6 +79,33 @@ func initMaster(context *cli.Context) error {
 		return err
 	}
 
+	// Check whether this version of OVN supports DNS.
+	_, _, err = util.RunOVNNbctl("list", "dns")
+	if err == nil {
+		var dns string
+		dns, stderr, err = util.RunOVNNbctl("--data=bare",
+			"--no-heading", "--columns=_uuid", "find", "dns",
+			"external_ids:k8s-dns=yes")
+		if err != nil {
+			logrus.Errorf("Failed to get dns, stderr: %q, error: %v", stderr,
+				err)
+			return err
+		}
+
+		if dns == "" {
+			stdout, stderr, err = util.RunOVNNbctl("create", "dns",
+				"external_ids:k8s-dns=yes")
+			if err != nil {
+				logrus.Errorf("Failed to create dns, stdout: %q, stderr: %q, "+
+					"error: %v", stdout, stderr, err)
+				return err
+			}
+		}
+	} else {
+		// The schema does not support DNS.
+		logrus.Debugf("The schema does not support DNS. Ignoring..")
+	}
+
 	// Create 2 load-balancers for east-west traffic.  One handles UDP and another handles TCP.
 	k8sClusterLbTCP, stderr, err := util.RunOVNNbctl("--data=bare", "--no-heading", "--columns=_uuid", "find", "load_balancer", "external_ids:k8s-cluster-lb-tcp=yes")
 	if err != nil {

@@ -22,6 +22,7 @@ type Controller struct {
 	StartNamespaceWatch func(handler cache.ResourceEventHandler)
 
 	gatewayCache map[string]string
+
 	// For TCP and UDP type traffic, cache OVN load-balancers used for the
 	// cluster's east-west traffic.
 	loadbalancerClusterCache map[string]string
@@ -112,6 +113,8 @@ func (oc *Controller) WatchPods() {
 func (oc *Controller) WatchServices() {
 	oc.StartServiceWatch(cache.ResourceEventHandlerFuncs{
 		AddFunc: func(obj interface{}) {
+			service := obj.(*kapi.Service)
+			oc.addService(service)
 		},
 		UpdateFunc: func(old, new interface{}) {
 		},
