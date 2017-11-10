@@ -152,14 +152,14 @@ func configureManagementPortDebian(nodeName, clusterSubnet, routerIP, interfaceN
 
 		// Look for a line of the form "allow-ovs br-int".
 		if strings.Contains(line, "allow-ovs") && strings.Contains(line, "br-int") {
-			logrus.Infof("Has configed allow-ovs br-int")
+			logrus.Debugf("Has configed allow-ovs br-int")
 			bridgeExists = true
 			continue
 		}
 
 		// Look for a line of the form "allow-br-int $interfaceName".
 		if strings.Contains(line, "allow-br-int") && strings.Contains(line, interfaceName) {
-			logrus.Infof("Has configed allow-ovs %s", interfaceName)
+			logrus.Debugf("Has configed allow-ovs %s", interfaceName)
 			interfaceExists = true
 			continue
 		}
@@ -271,9 +271,7 @@ func configureManagementPort(nodeName, clusterSubnet, routerIP, interfaceName, i
 		if err != nil {
 			return err
 		}
-	}
-
-	if util.PathExist("/etc/sysconfig/network-scripts/ifup-ovs") {
+	} else if util.PathExist("/etc/sysconfig/network-scripts/ifup-ovs") {
 		err := configureManagementPortRedhat(nodeName, clusterSubnet, routerIP, interfaceName, interfaceIP)
 		if err != nil {
 			return err
@@ -368,7 +366,10 @@ func createManagementPort(nodeName, localSubnet, clusterSubnet string) error {
 
 	// Create a OVS internal interface.
 	interfaceName := "k8s-" + (nodeName[:11])
-	stdout, stderr, err = util.RunOVSVsctl("--", "--may-exist", "add-port", "br-int", interfaceName, "--", "set", "interface", interfaceName, "type=internal", "mtu_request="+string(config.MTU), "external-ids:iface-id=k8s-"+nodeName)
+	stdout, stderr, err = util.RunOVSVsctl("--", "--may-exist", "add-port",
+		"br-int", interfaceName, "--", "set", "interface", interfaceName,
+		"type=internal", "mtu_request="+fmt.Sprintf("%d", config.MTU),
+		"external-ids:iface-id=k8s-"+nodeName)
 	if err != nil {
 		logrus.Errorf("Failed to add port to br-int, stdout: %q, stderr: %q, error: %v", stdout, stderr, err)
 		return err
@@ -426,6 +427,23 @@ func createManagementPort(nodeName, localSubnet, clusterSubnet string) error {
 	stdout, stderr, err = util.RunOVNNbctl("add", "logical_switch", nodeName, "load_balancer", k8sClusterLbUDP)
 	if err != nil {
 		logrus.Errorf("Failed to add logical switch %v's loadbalancer, stdout: %q, stderr: %q, error: %v", nodeName, stdout, stderr, err)
+		return err
+	}
+
+	// Add DNS to the switch
+	dns, stderr, err := util.RunOVNNbctl("--data=bare", "--no-heading",
+		"--columns=_uuid", "find", "dns", "external_ids:k8s-dns=yes")
+	if err != nil || dns == "" {
+		logrus.Errorf("Failed to get dns, stderr: %q, error: %v", stderr,
+			err)
+		return err
+	}
+
+	stdout, stderr, err = util.RunOVNNbctl("add", "logical_switch", nodeName,
+		"dns_records", dns)
+	if err != nil {
+		logrus.Errorf("Failed to add dns for logical switch %s stdout: %q "+
+			"stderr: %q, error: %v", nodeName, stdout, stderr, err)
 		return err
 	}
 
