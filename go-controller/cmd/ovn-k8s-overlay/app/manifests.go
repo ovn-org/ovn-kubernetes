@@ -33,7 +33,7 @@ TYPE=OVSIntPort
 OVS_BRIDGE=br-int
 IP_ADDR={{.Address}}
 NETMASK={{.Netmask}}
-OVS_EXTRA="set interface $DEVICE mac=\"{{.Mac}\" external-ids:iface-id={{.IfaceID}}"
+OVS_EXTRA="set interface $DEVICE mac=\"{{.Mac}}\" external-ids:iface-id={{.IfaceID}}"
 `
 	routeTemplate = `
 ADDRESS0={{.ClusterIP}}
