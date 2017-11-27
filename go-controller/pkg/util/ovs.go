@@ -14,6 +14,7 @@ const (
 	ovsCommandTimeout = 5
 	ovsVsctlCommand   = "ovs-vsctl"
 	ovnNbctlCommand   = "ovn-nbctl"
+	ovsOfctlCommand   = "ovs-ofctl"
 )
 
 // PathExist checks the path exist or not.
@@ -79,4 +80,23 @@ func RunOVNNbctl(args ...string) (string, string, error) {
 
 	err = cmd.Run()
 	return strings.Trim(stdout.String(), "\" \n"), stderr.String(), err
+}
+
+// RunOVSOfctl runs a command via ovs-vsctl.
+func RunOVSOfctl(args ...string) (string, string, error) {
+	cmdPath, err := exec.LookPath(ovsOfctlCommand)
+	if err != nil {
+		return "", "", err
+	}
+
+	stdout := &bytes.Buffer{}
+	stderr := &bytes.Buffer{}
+	cmdArgs := []string{fmt.Sprintf("--timeout=%d", ovsCommandTimeout)}
+	cmdArgs = append(cmdArgs, args...)
+	cmd := exec.Command(cmdPath, cmdArgs...)
+	cmd.Stdout = stdout
+	cmd.Stderr = stderr
+
+	err = cmd.Run()
+	return stdout.String(), stderr.String(), err
 }

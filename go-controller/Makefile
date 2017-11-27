@@ -13,6 +13,7 @@ all build:
 	hack/build-go.sh cmd/ovn-k8s-overlay/ovn-k8s-overlay.go
 	hack/build-go.sh cmd/ovn-kube-util/ovn-kube-util.go
 	hack/build-go.sh cmd/ovn-kube-cni-overlay/ovn-kube-cni-overlay.go
+	hack/build-go.sh cmd/ovn-kube-gateway-helper/ovn-kube-gateway-helper.go
 
 install:
 	cp ${OUT_DIR}/go/bin/* /usr/bin/
