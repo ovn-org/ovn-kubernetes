@@ -106,7 +106,7 @@ func (oc *Controller) WatchPods() {
 			oc.deleteLogicalPort(pod)
 		},
 	}
-	oc.StartPodWatch(handler, nil)
+	oc.StartPodWatch(handler, oc.syncPods)
 }
 
 // WatchServices starts the watching of Service resource and calls back the
