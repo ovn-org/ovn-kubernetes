@@ -11,6 +11,41 @@ import (
 	kapi "k8s.io/client-go/pkg/api/v1"
 )
 
+func (oc *Controller) syncPods(pods []interface{}) {
+	// get the list of logical switch ports (equivalent to pods)
+	expectedLogicalPorts := make(map[string]bool)
+	for _, podInterface := range pods {
+		pod, ok := podInterface.(*kapi.Pod)
+		if !ok {
+			logrus.Errorf("Spurious object in syncPods: %v", podInterface)
+			continue
+		}
+		logicalPort := fmt.Sprintf("%s_%s", pod.Namespace, pod.Name)
+		expectedLogicalPorts[logicalPort] = true
+	}
+
+	// get the list of logical ports from OVN
+	output, err := exec.Command(OvnNbctl, "--data=bare", "--no-heading",
+		"--columns=name", "find", "logical_switch_port", "external_ids:pod=true").Output()
+	if err != nil {
+		logrus.Errorf("Error in obtaining list of logical ports from OVN: %v", err)
+		return
+	}
+	existingLogicalPorts := strings.Fields(string(output))
+	for _, existingPort := range existingLogicalPorts {
+		if _, ok := expectedLogicalPorts[existingPort]; !ok {
+			// not found, delete this logical port
+			logrus.Infof("Stale logical port found: %s. This logical port will be deleted.", existingPort)
+			out, err := exec.Command(OvnNbctl, "--if-exists", "lsp-del",
+				existingPort).CombinedOutput()
+			if err != nil {
+				logrus.Errorf("Error in deleting pod's logical port in ovn - %s (%v)",
+					string(out), err)
+			}
+		}
+	}
+}
+
 func (oc *Controller) getGatewayFromSwitch(logicalSwitch string) (string, string, error) {
 	var gatewayIPMaskStr string
 	var ok bool
