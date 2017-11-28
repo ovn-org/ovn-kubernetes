@@ -61,12 +61,13 @@ const (
 // Run starts the actual watching. Also initializes any local structures needed.
 func (oc *Controller) Run() {
 	oc.gatewayCache = make(map[string]string)
+	oc.initializePolicyData()
+
 	oc.WatchPods()
 	oc.WatchServices()
 	oc.WatchEndpoints()
 	oc.WatchNamespaces()
 
-	oc.initializePolicyData()
 	oc.WatchNetworkPolicy()
 }
 
