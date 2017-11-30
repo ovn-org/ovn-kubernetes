@@ -4,8 +4,10 @@ import (
 	"encoding/json"
 	"fmt"
 	"net"
+	"os"
 	"os/exec"
 	"strings"
+	"time"
 
 	"github.com/Sirupsen/logrus"
 
@@ -17,9 +19,12 @@ import (
 	"github.com/containernetworking/plugins/pkg/ns"
 	"github.com/vishvananda/netlink"
 
+	"github.com/openvswitch/ovn-kubernetes/go-controller/pkg/config"
 	"github.com/openvswitch/ovn-kubernetes/go-controller/pkg/kube"
+	"github.com/openvswitch/ovn-kubernetes/go-controller/pkg/util"
 
 	"k8s.io/client-go/kubernetes"
+	"k8s.io/client-go/rest"
 	"k8s.io/client-go/tools/clientcmd"
 )
 
@@ -152,26 +157,43 @@ func cmdAdd(args *skel.CmdArgs) error {
 		return fmt.Errorf("failed to get K8S_API_SERVER")
 	}
 	k8sAPIServer := strings.Trim(strings.TrimSpace(string(out)), "\"")
-	if !strings.HasPrefix(k8sAPIServer, "http") {
+	var cfg *rest.Config
+	if strings.HasPrefix(k8sAPIServer, "https") {
+		// get token and ca cert
+		ovsArgs = []string{
+			"--if-exists", "get", "Open_vSwitch",
+			".", "external_ids:k8s-api-token",
+		}
+		out, err = exec.Command("ovs-vsctl", ovsArgs...).CombinedOutput()
+		if err != nil {
+			return fmt.Errorf("failed to get K8S_API_TOKEN")
+		}
+		token := strings.Trim(strings.TrimSpace(string(out)), "\"")
+		config.FetchConfig()
+		cfg, err = util.CreateConfig(k8sAPIServer, token, config.K8sCACertificate)
+	} else if strings.HasPrefix(k8sAPIServer, "http") {
+		cfg, err = clientcmd.BuildConfigFromFlags(k8sAPIServer, "")
+	} else {
 		k8sAPIServer = fmt.Sprintf("http://%s", k8sAPIServer)
+		cfg, err = clientcmd.BuildConfigFromFlags(k8sAPIServer, "")
+	}
+	if err != nil {
+		return fmt.Errorf("Failed to get kubeclient: %v", err)
 	}
 
-	config, err := clientcmd.BuildConfigFromFlags(k8sAPIServer, "")
+	clientset, err := kubernetes.NewForConfig(cfg)
 	if err != nil {
-		return err
-	}
-	clientset, err := kubernetes.NewForConfig(config)
-	if err != nil {
-		return err
+		return fmt.Errorf("Could not create clientset for kubernetes: %v", err)
 	}
 	kubecli := &kube.Kube{KClient: clientset}
 
 	// Get the IP address and MAC address from the API server.
-	// Wait for a maximum of 3 seconds with a retry every 0.1 second.
+	// Wait for a maximum of 30 seconds with a retry every 1 second.
 	var annotation map[string]string
 	for cnt := 0; cnt < 30; cnt++ {
 		annotation, err = kubecli.GetAnnotationsOnPod(namespace, podName)
 		if err != nil {
+			time.Sleep(1 * time.Second)
 			continue
 		}
 		if _, ok := annotation["ovn"]; ok {
@@ -266,5 +288,7 @@ func cmdDel(args *skel.CmdArgs) error {
 }
 
 func main() {
+	f, _ := os.OpenFile(config.LogPath, os.O_WRONLY|os.O_CREATE, 0755)
+	logrus.SetOutput(f)
 	skel.PluginMain(cmdAdd, cmdDel, version.All)
 }

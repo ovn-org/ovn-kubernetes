@@ -11,10 +11,10 @@ import (
 	"k8s.io/client-go/kubernetes"
 	restclient "k8s.io/client-go/rest"
 	"k8s.io/client-go/tools/clientcmd"
-	certutil "k8s.io/client-go/util/cert"
 
 	ovncluster "github.com/openvswitch/ovn-kubernetes/go-controller/pkg/cluster"
 	ovnfactory "github.com/openvswitch/ovn-kubernetes/go-controller/pkg/factory"
+	util "github.com/openvswitch/ovn-kubernetes/go-controller/pkg/util"
 )
 
 func main() {
@@ -71,7 +71,7 @@ func main() {
 		// uses the current context in kubeconfig
 		config, err = clientcmd.BuildConfigFromFlags("", *kubeconfig)
 	} else if *server != "" && *token != "" && ((*rootCAFile != "") || !strings.HasPrefix(*server, "https")) {
-		config, err = CreateConfig(*server, *token, *rootCAFile)
+		config, err = util.CreateConfig(*server, *token, *rootCAFile)
 	} else {
 		err = fmt.Errorf("Provide kubeconfig file or give server/token/tls credentials")
 	}
@@ -148,22 +148,4 @@ func main() {
 		// run forever
 		select {}
 	}
-}
-
-// CreateConfig creates the restclient.Config object from token, ca file and the apiserver
-// (similar to what is obtainable from kubeconfig file)
-func CreateConfig(server, token, rootCAFile string) (*restclient.Config, error) {
-	tlsClientConfig := restclient.TLSClientConfig{}
-	if rootCAFile != "" {
-		if _, err := certutil.NewPool(rootCAFile); err != nil {
-			return nil, err
-		}
-		tlsClientConfig.CAFile = rootCAFile
-	}
-
-	return &restclient.Config{
-		Host:            server,
-		BearerToken:     token,
-		TLSClientConfig: tlsClientConfig,
-	}, nil
 }
