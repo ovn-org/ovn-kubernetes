@@ -131,6 +131,9 @@ func FetchConfig() {
 	if cfg.Default.CACert != "" {
 		NbctlCACert = cfg.Default.CACert
 	}
+	if cfg.Default.K8sCACertificate != "" {
+		K8sCACertificate = cfg.Default.K8sCACertificate
+	}
 	if cfg.Default.Rundir != "" {
 		Rundir = cfg.Default.Rundir
 	}
