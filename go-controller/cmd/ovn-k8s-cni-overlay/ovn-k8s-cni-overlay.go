@@ -288,7 +288,10 @@ func cmdDel(args *skel.CmdArgs) error {
 }
 
 func main() {
-	f, _ := os.OpenFile(config.LogPath, os.O_WRONLY|os.O_CREATE, 0755)
-	logrus.SetOutput(f)
+	f, err := os.OpenFile(config.LogPath, os.O_WRONLY|os.O_CREATE, 0755)
+	if err == nil {
+		defer f.Close()
+		logrus.SetOutput(f)
+	}
 	skel.PluginMain(cmdAdd, cmdDel, version.All)
 }
