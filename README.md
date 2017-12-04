@@ -249,6 +249,24 @@ ovn-k8s-overlay minion-init \
   --node-name="kube-minion1"
 ```
 
+Note on Windows: ```ovn-k8s-overlay``` cannot be invoked directly and has to
+be called via the python interpreter. The following is an example ran from an
+elevated powershell prompt.
+```
+python (Get-Command ovn-k8s-overlay).Source minion-init \
+  --cluster-ip-subnet="$CLUSTER_IP_SUBNET" \
+  --minion-switch-subnet="$MINION_SWITCH_SUBNET" \
+  --node-name="$NODE_NAME"
+```
+
+An example is:
+```
+python (Get-Command ovn-k8s-overlay).Source minion-init \
+  --cluster-ip-subnet="192.168.0.0/16" \
+  --minion-switch-subnet="192.168.2.0/24" \
+  --node-name="kube-minwin1"
+```
+
 ### k8s gateway node initialization
 
 Gateway nodes are needed for North-South connectivity.  OVN has support
