@@ -337,6 +337,16 @@ def create_management_port(node_name, local_subnet, cluster_subnet):
     ip.value = ip.value + 1
     router_ip_mask = str(ip)
     router_ip = str(ip.ip)
+    # Kubernetes emits events when pods are created. The event will contain
+    # only lowercase letters of the hostname even though the kubelet is started
+    # with a hostname that contains lowercase and uppercase letters.
+    # When the kubelet is started with a hostname containing lowercase and
+    # uppercase letters, this causes a mismatch between what the watcher
+    # will try to fetch and what kubernetes provides, thus failing to
+    # create the port on the logical switch.
+    # Until the above is changed, switch to a lowercase hostname for
+    # minion-init.
+    node_name = node_name.lower()
 
     router_mac = ovn_nbctl("--if-exist", "get", "logical_router_port",
                            "rtos-" + node_name, "mac").strip('"')
