@@ -321,6 +321,16 @@ func createManagementPort(nodeName, localSubnet, clusterSubnet string) error {
 	n, _ := localSubnetNet.Mask.Size()
 	routerIPMask := fmt.Sprintf("%s/%d", ip.String(), n)
 	routerIP := ip.String()
+	// Kubernetes emits events when pods are created. The event will contain
+	// only lowercase letters of the hostname even though the kubelet is
+	// started with a hostname that contains lowercase and uppercase letters.
+	// When the kubelet is started with a hostname containing lowercase and
+	// uppercase letters, this causes a mismatch between what the watcher
+	// will try to fetch and what kubernetes provides, thus failing to
+	// create the port on the logical switch.
+	// Until the above is changed, switch to a lowercase hostname for
+	// initMinion.
+	nodeName = strings.ToLower(nodeName)
 
 	routerMac, stderr, err := util.RunOVNNbctl("--if-exist", "get", "logical_router_port", "rtos-"+nodeName, "mac")
 	if err != nil {
