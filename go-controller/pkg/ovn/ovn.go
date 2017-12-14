@@ -61,6 +61,7 @@ const (
 // Run starts the actual watching. Also initializes any local structures needed.
 func (oc *Controller) Run() {
 	oc.gatewayCache = make(map[string]string)
+	oc.loadbalancerClusterCache = make(map[string]string)
 	oc.initializePolicyData()
 
 	oc.WatchPods()
@@ -134,13 +135,11 @@ func (oc *Controller) WatchServices() {
 			oc.deleteService(service)
 		},
 	}
-	oc.StartServiceWatch(handler, nil)
+	oc.StartServiceWatch(handler, oc.syncServices)
 }
 
 // WatchEndpoints starts the watching of Endpoint resource and calls back the appropriate handler logic
 func (oc *Controller) WatchEndpoints() {
-	oc.loadbalancerClusterCache = make(map[string]string)
-
 	handler := cache.ResourceEventHandlerFuncs{
 		AddFunc: func(obj interface{}) {
 			ep := obj.(*kapi.Endpoints)

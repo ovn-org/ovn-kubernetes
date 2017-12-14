@@ -122,3 +122,12 @@ func (oc *Controller) getIPFromOvnAnnotation(ovnAnnotation string) string {
 
 	return ipAddressMask[0]
 }
+
+func stringSliceMembership(slice []string, key string) bool {
+	for _, val := range slice {
+		if val == key {
+			return true
+		}
+	}
+	return false
+}
