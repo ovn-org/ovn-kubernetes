@@ -17,6 +17,32 @@ func (ovn *Controller) getOvnGateways() ([]string, error) {
 	return strings.Fields(string(out)), err
 }
 
+func (ovn *Controller) getGatewayPhysicalIP(
+	physicalGateway string) (string, error) {
+	out, err := exec.Command(OvnNbctl, "get", "logical_router",
+		physicalGateway, "external_ids:physical_ip").CombinedOutput()
+	if err != nil {
+		return "", err
+	}
+
+	physicalIP := strings.Trim(string(out), "\" \n")
+	return physicalIP, nil
+}
+
+func (ovn *Controller) getGatewayLoadBalancer(physicalGateway,
+	protocol string) (string, error) {
+	externalIDKey := protocol + "_lb_gateway_router"
+	out, err := exec.Command(OvnNbctl, "--data=bare", "--no-heading",
+		"--columns=_uuid", "find", "load_balancer",
+		"external_ids:"+externalIDKey+"="+
+			physicalGateway).CombinedOutput()
+	if err != nil {
+		return "", err
+	}
+	loadBalancer := strings.TrimFunc(string(out), unicode.IsSpace)
+	return loadBalancer, nil
+}
+
 func (ovn *Controller) createGatewaysVIP(protocol string, port, targetPort int32, ips []string) error {
 
 	logrus.Debugf("Creating Gateway VIP - %s, %s, %d, %v", protocol, port, targetPort, ips)
@@ -29,38 +55,20 @@ func (ovn *Controller) createGatewaysVIP(protocol string, port, targetPort int32
 	}
 
 	for _, physicalGateway := range physicalGateways {
-		// Go through each gateway to get its physical_ip and load-balancer.
-		out, err := exec.Command(OvnNbctl, "get", "logical_router", physicalGateway,
-			"external_ids:physical_ip").CombinedOutput()
+		physicalIP, err := ovn.getGatewayPhysicalIP(physicalGateway)
 		if err != nil {
-			logrus.Errorf("Error in getting gateway physical IP from %s: %v(%v)", physicalGateway, string(out), err)
+			logrus.Errorf("physical gateway %s does not have physical ip (%v)",
+				physicalGateway, err)
 			continue
 		}
 
-		physicalIP := strings.Trim(string(out), "\" \n")
-
-		if physicalIP == "" {
-			logrus.Errorf("physical gateway %s does not have physical ip", physicalGateway)
-			continue
-		}
-
-		externalIDKey := protocol + "_lb_gateway_router"
-		out, err = exec.Command(OvnNbctl, "--data=bare", "--no-heading",
-			"--columns=_uuid", "find", "load_balancer",
-			"external_ids:"+externalIDKey+"="+
-				physicalGateway).CombinedOutput()
+		loadBalancer, err := ovn.getGatewayLoadBalancer(physicalGateway,
+			protocol)
 		if err != nil {
-			logrus.Errorf("Error in creating Gateway VIP. Find failed for %s on protocol %s: (%v)",
-				physicalGateway, protocol, err)
+			logrus.Errorf("physical gateway %s does not have load_balancer "+
+				"(%v)", physicalGateway, err)
 			continue
 		}
-
-		if string(out) == "" {
-			logrus.Errorf("physical gateway %s does not have load_balancer",
-				(physicalGateway))
-			continue
-		}
-		loadBalancer := strings.TrimFunc(string(out), unicode.IsSpace)
 
 		// With the physical_ip:port as the VIP, add an entry in
 		// 'load_balancer'.
