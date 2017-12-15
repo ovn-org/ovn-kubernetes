@@ -7,39 +7,24 @@ import (
 	"runtime"
 
 	"github.com/openvswitch/ovn-kubernetes/go-controller/pkg/config"
+	"github.com/openvswitch/ovn-kubernetes/go-controller/pkg/util"
 	"github.com/urfave/cli"
+)
+
+const (
+	argMinionSwitchSubnet string = "minion-switch-subnet"
 )
 
 // InitMinionCmd initializes k8s minion node.
 var InitMinionCmd = cli.Command{
 	Name:  "minion-init",
 	Usage: "Initialize k8s minion node",
-	Flags: []cli.Flag{
+	Flags: newFlags(
 		cli.StringFlag{
-			Name:  "cluster-ip-subnet",
-			Usage: "The cluster wide larger subnet of private ip addresses.",
+			Name:  argMinionSwitchSubnet,
+			Usage: "The smaller subnet just for this minion.",
 		},
-		cli.StringFlag{
-			Name:  "minion-switch-subnet",
-			Usage: "The smaller subnet just for this master.",
-		},
-		cli.StringFlag{
-			Name:  "node-name",
-			Usage: "A unique node name.",
-		},
-		cli.StringFlag{
-			Name:  "nb-privkey",
-			Usage: "The private key used for northbound API SSL connections.",
-		},
-		cli.StringFlag{
-			Name:  "nb-cert",
-			Usage: "The certificate used for northbound API SSL connections.",
-		},
-		cli.StringFlag{
-			Name:  "nb-cacert",
-			Usage: "The CA certificate used for northbound API SSL connections.",
-		},
-	},
+	),
 	Action: func(context *cli.Context) error {
 		if err := initMinion(context); err != nil {
 			return fmt.Errorf("failed init minion: %v", err)
@@ -49,27 +34,26 @@ var InitMinionCmd = cli.Command{
 }
 
 func initMinion(context *cli.Context) error {
-	minionSwitchSubnet := context.String("minion-switch-subnet")
-	if minionSwitchSubnet == "" {
-		return fmt.Errorf("argument --minion-switch-subnet should be non-null")
+	minionSwitchSubnet, err := util.StringArg(context, argMinionSwitchSubnet)
+	if err != nil {
+		return err
 	}
 
-	clusterIPSubnet := context.String("cluster-ip-subnet")
-	if clusterIPSubnet == "" {
-		return fmt.Errorf("argument --cluster-ip-subnet should be non-null")
+	clusterIPSubnet, err := util.StringArg(context, argClusterIPSubnet)
+	if err != nil {
+		return err
 	}
 
-	nodeName := context.String("node-name")
-	if nodeName == "" {
-		return fmt.Errorf("argument --node-name should be non-null")
+	nodeName, err := util.StringArg(context, argNodeName)
+	if err != nil {
+		return err
 	}
 
 	// Fetch config file to override default values.
 	config.FetchConfig()
 
 	// Fetch OVN central database's ip address.
-	err := fetchOVNNB(context)
-	if err != nil {
+	if err := fetchOVNNB(context); err != nil {
 		return err
 	}
 
