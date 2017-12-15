@@ -19,6 +19,40 @@ import (
 	"github.com/urfave/cli"
 )
 
+const (
+	argClusterIPSubnet string = "cluster-ip-subnet"
+	argNodeName        string = "node-name"
+	argNBPrivKey       string = "nb-privkey"
+	argNBCert          string = "nb-cert"
+	argNBCACert        string = "nb-cacert"
+)
+
+func newFlags(customFlags ...cli.Flag) []cli.Flag {
+	flags := []cli.Flag{
+		cli.StringFlag{
+			Name:  argClusterIPSubnet,
+			Usage: "The cluster wide larger subnet of private ip addresses.",
+		},
+		cli.StringFlag{
+			Name:  argNodeName,
+			Usage: "A unique node name.",
+		},
+		cli.StringFlag{
+			Name:  argNBPrivKey,
+			Usage: "The private key used for northbound API SSL connections.",
+		},
+		cli.StringFlag{
+			Name:  argNBCert,
+			Usage: "The certificate used for northbound API SSL connections.",
+		},
+		cli.StringFlag{
+			Name:  argNBCACert,
+			Usage: "The CA certificate used for northbound API SSL connections.",
+		},
+	}
+	return append(flags, customFlags...)
+}
+
 func fetchOVNNB(context *cli.Context) error {
 	ovnNB, stderr, err := util.RunOVSVsctl("--if-exists", "get", "Open_vSwitch", ".", "external_ids:ovn-nb")
 	if err != nil {
@@ -38,19 +72,19 @@ func fetchOVNNB(context *cli.Context) error {
 
 	config.Scheme = url.Scheme
 	if url.Scheme == "ssl" {
-		privkey := context.String("nb-privkey")
-		cert := context.String("nb-cert")
-		cacert := context.String("nb-cacert")
-
+		privkey, _ := util.StringArg(context, argNBPrivKey)
 		if privkey != "" {
 			config.NbctlPrivateKey = privkey
 		}
+		cert, _ := util.StringArg(context, argNBCert)
 		if cert != "" {
 			config.NbctlCertificate = cert
 		}
+		cacert, _ := util.StringArg(context, argNBCACert)
 		if cacert != "" {
 			config.NbctlCACert = cacert
 		}
+
 		if config.NbctlPrivateKey == "" || config.NbctlCertificate == "" || config.NbctlCACert == "" {
 			return fmt.Errorf("Must specify private key, certificate, and CA certificate for 'ssl' scheme")
 		}

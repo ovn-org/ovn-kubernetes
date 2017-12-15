@@ -9,36 +9,20 @@ import (
 	"github.com/urfave/cli"
 )
 
+const (
+	argMasterSwitchSubnet string = "master-switch-subnet"
+)
+
 // InitMasterCmd initializes k8s master node.
 var InitMasterCmd = cli.Command{
 	Name:  "master-init",
 	Usage: "Initialize k8s master node",
-	Flags: []cli.Flag{
+	Flags: newFlags(
 		cli.StringFlag{
-			Name:  "cluster-ip-subnet",
-			Usage: "The cluster wide larger subnet of private ip addresses.",
-		},
-		cli.StringFlag{
-			Name:  "master-switch-subnet",
+			Name:  argMasterSwitchSubnet,
 			Usage: "The smaller subnet just for master.",
 		},
-		cli.StringFlag{
-			Name:  "node-name",
-			Usage: "A unique node name.",
-		},
-		cli.StringFlag{
-			Name:  "nb-privkey",
-			Usage: "The private key used for northbound API SSL connections.",
-		},
-		cli.StringFlag{
-			Name:  "nb-cert",
-			Usage: "The certificate used for northbound API SSL connections.",
-		},
-		cli.StringFlag{
-			Name:  "nb-cacert",
-			Usage: "The CA certificate used for northbound API SSL connections.",
-		},
-	},
+	),
 	Action: func(context *cli.Context) error {
 		if err := initMaster(context); err != nil {
 			return fmt.Errorf("Failed init master: %v", err)
@@ -48,27 +32,26 @@ var InitMasterCmd = cli.Command{
 }
 
 func initMaster(context *cli.Context) error {
-	masterSwitchSubnet := context.String("master-switch-subnet")
-	if masterSwitchSubnet == "" {
-		return fmt.Errorf("argument --master-switch-subnet should be non-null")
+	masterSwitchSubnet, err := util.StringArg(context, argMasterSwitchSubnet)
+	if err != nil {
+		return err
 	}
 
-	clusterIPSubnet := context.String("cluster-ip-subnet")
-	if clusterIPSubnet == "" {
-		return fmt.Errorf("argument --cluster-ip-subnet should be non-null")
+	clusterIPSubnet, err := util.StringArg(context, argClusterIPSubnet)
+	if err != nil {
+		return err
 	}
 
-	nodeName := context.String("node-name")
-	if nodeName == "" {
-		return fmt.Errorf("argument --cluster-ip-subnet should be non-null")
+	nodeName, err := util.StringArg(context, argNodeName)
+	if err != nil {
+		return err
 	}
 
 	// Fetch config file to override default values.
 	config.FetchConfig()
 
 	// Fetch OVN central database's ip address.
-	err := fetchOVNNB(context)
-	if err != nil {
+	if err := fetchOVNNB(context); err != nil {
 		return err
 	}
 
