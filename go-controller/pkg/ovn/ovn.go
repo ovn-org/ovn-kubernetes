@@ -1,6 +1,8 @@
 package ovn
 
 import (
+	"fmt"
+
 	"github.com/openvswitch/ovn-kubernetes/go-controller/pkg/factory"
 	"github.com/openvswitch/ovn-kubernetes/go-controller/pkg/kube"
 	"github.com/sirupsen/logrus"
@@ -12,12 +14,30 @@ import (
 	"sync"
 )
 
+// OvnPodSubnetMode describes the pod subnet mode
+type PodSubnetMode string
+
+const (
+	// PodSubnetModeNode indicates that each node is allocated one or more
+	// subnets from the cluster network from which pod IPs are allocated
+	PodSubnetModeNode PodSubnetMode = "node"
+)
+
+func ValidatePodSubnetMode(mode string) (PodSubnetMode, error) {
+	switch mode {
+	case string(PodSubnetModeNode):
+		return PodSubnetModeNode, nil
+	}
+	return "", fmt.Errorf("--pod-subnet-mode must be %q", PodSubnetModeNode)
+}
+
 // Controller structure is the object which holds the controls for starting
 // and reacting upon the watched resources (e.g. pods, endpoints)
 type Controller struct {
 	Kube           kube.Interface
 	NodePortEnable bool
 	watchFactory   *factory.WatchFactory
+	podSubnetMode  PodSubnetMode
 
 	gatewayCache map[string]string
 	// For TCP and UDP type traffic, cache OVN load-balancers used for the
@@ -66,10 +86,11 @@ const (
 
 // NewOvnController creates a new OVN controller for creating logical network
 // infrastructure and policy
-func NewOvnController(kubeClient kubernetes.Interface, wf *factory.WatchFactory) *Controller {
+func NewOvnController(kubeClient kubernetes.Interface, wf *factory.WatchFactory, podSubnetMode PodSubnetMode) *Controller {
 	return &Controller{
 		Kube:                     &kube.Kube{KClient: kubeClient},
 		watchFactory:             wf,
+		podSubnetMode:            podSubnetMode,
 		logicalSwitchCache:       make(map[string]bool),
 		logicalPortCache:         make(map[string]string),
 		namespaceAddressSet:      make(map[string]map[string]bool),

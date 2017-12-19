@@ -61,7 +61,7 @@ func getDefaultGatewayInterfaceDetails() (string, string, error) {
 	return "", "", fmt.Errorf("Failed to get default gateway interface")
 }
 
-func (cluster *OvnClusterController) addDefaultConntrackRules() error {
+func (cluster *nodeSubnetController) addDefaultConntrackRules() error {
 	patchPort := "k8s-patch-" + cluster.GatewayBridge + "-br-int"
 	// Get ofport of pathPort
 	ofportPatch, stderr, err := util.RunOVSVsctl("--if-exists", "get",
@@ -126,7 +126,7 @@ func (cluster *OvnClusterController) addDefaultConntrackRules() error {
 	return nil
 }
 
-func (cluster *OvnClusterController) initGateway(
+func (cluster *nodeSubnetController) initGateway(
 	nodeName, clusterIPSubnet, subnet string) error {
 	if cluster.GatewayNextHop == "" || cluster.GatewayIntf == "" {
 		// We need to get the interface details from the default gateway.

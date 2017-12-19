@@ -139,24 +139,26 @@ func (oc *Controller) deleteLogicalPort(pod *kapi.Pod) {
 }
 
 func (oc *Controller) addLogicalPort(pod *kapi.Pod) {
+	var logicalSwitch string
 
-	count := 30
-	logicalSwitch := pod.Spec.NodeName
-	for count > 0 {
-		if logicalSwitch != "" {
-			break
+	// If we don't have the logical switch
+	switch oc.podSubnetMode {
+	case PodSubnetModeNode:
+		logicalSwitch = pod.Spec.NodeName
+		for count := 30; count > 0; count-- {
+			p, err := oc.Kube.GetPod(pod.Namespace, pod.Name)
+			if err != nil {
+				logrus.Errorf("Could not get pod %s/%s for obtaining the logical switch it belongs to", pod.Namespace, pod.Name)
+				continue
+			}
+			logicalSwitch = p.Spec.NodeName
+			if logicalSwitch != "" {
+				break
+			}
+			time.Sleep(time.Second)
 		}
-		if count != 30 {
-			time.Sleep(1 * time.Second)
-		}
-		count--
-		p, err := oc.Kube.GetPod(pod.Namespace, pod.Name)
-		if err != nil {
-			logrus.Errorf("Could not get pod %s/%s for obtaining the logical switch it belongs to", pod.Namespace, pod.Name)
-			continue
-		}
-		logicalSwitch = p.Spec.NodeName
 	}
+
 	if logicalSwitch == "" {
 		logrus.Errorf("Could not find the logical switch that the pod %s/%s belongs to", pod.Namespace, pod.Name)
 		return
@@ -190,7 +192,7 @@ func (oc *Controller) addLogicalPort(pod *kapi.Pod) {
 		return
 	}
 
-	count = 30
+	count := 30
 	for count > 0 {
 		out, err = exec.Command(OvnNbctl, "get", "logical_switch_port", portName, "dynamic_addresses").Output()
 		if err == nil {

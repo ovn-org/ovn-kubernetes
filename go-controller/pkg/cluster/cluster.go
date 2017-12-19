@@ -5,45 +5,36 @@ import (
 	"net"
 	"net/url"
 
-	"github.com/openshift/origin/pkg/util/netutils"
 	"github.com/openvswitch/ovn-kubernetes/go-controller/pkg/config"
-	"github.com/openvswitch/ovn-kubernetes/go-controller/pkg/factory"
 	"github.com/openvswitch/ovn-kubernetes/go-controller/pkg/kube"
 	"github.com/openvswitch/ovn-kubernetes/go-controller/pkg/util"
-	"k8s.io/client-go/kubernetes"
+	"github.com/openvswitch/ovn-kubernetes/go-controller/pkg/ovn"
+
+	"github.com/openshift/origin/pkg/util/netutils"
 )
 
-// OvnClusterController is the object holder for utilities meant for cluster management
-type OvnClusterController struct {
-	Kube                  kube.Interface
-	watchFactory          *factory.WatchFactory
-	masterSubnetAllocator *netutils.SubnetAllocator
+type ClusterConfig struct {
+	Kube kube.Interface
 
 	ClusterIPNet          *net.IPNet
 	ClusterServicesSubnet string
-	HostSubnetLength      uint32
-
-	GatewayInit      bool
-	GatewayIntf      string
-	GatewayBridge    string
-	GatewayNextHop   string
-	GatewaySpareIntf bool
-	NodePortEnable   bool
+	PodSubnetLength       uint32
+	PodSubnetMode         ovn.PodSubnetMode
 }
+
+type OvnClusterController interface {
+	NodeInit(nodeName string) error
+	NodeStart(nodeName string) error
+	MasterStart(nodeName string) error
+}
+
+// OvnDBScheme describes the OVN database connection transport method
+type OvnDBScheme string
 
 const (
 	// OvnHostSubnet is the constant string representing the annotation key
 	OvnHostSubnet = "ovn_host_subnet"
 )
-
-// NewClusterController creates a new controller for IP subnet allocation to
-// a given resource type (either Namespace or Node)
-func NewClusterController(kubeClient kubernetes.Interface, wf *factory.WatchFactory) *OvnClusterController {
-	return &OvnClusterController{
-		Kube:         &kube.Kube{KClient: kubeClient},
-		watchFactory: wf,
-	}
-}
 
 func setOVSExternalIDs(nodeName string, ids ...string) error {
 	nodeIP, err := netutils.GetNodeIP(nodeName)

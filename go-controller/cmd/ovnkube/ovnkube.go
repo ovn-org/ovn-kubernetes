@@ -1,6 +1,7 @@
 package main
 
 import (
+	"fmt"
 	"net"
 	"os"
 	"runtime"
@@ -8,9 +9,10 @@ import (
 	"github.com/sirupsen/logrus"
 	"github.com/urfave/cli"
 
-	ovncluster "github.com/openvswitch/ovn-kubernetes/go-controller/pkg/cluster"
+	"github.com/openvswitch/ovn-kubernetes/go-controller/pkg/cluster"
 	"github.com/openvswitch/ovn-kubernetes/go-controller/pkg/config"
 	"github.com/openvswitch/ovn-kubernetes/go-controller/pkg/factory"
+	"github.com/openvswitch/ovn-kubernetes/go-controller/pkg/kube"
 	"github.com/openvswitch/ovn-kubernetes/go-controller/pkg/ovn"
 	util "github.com/openvswitch/ovn-kubernetes/go-controller/pkg/util"
 )
@@ -80,6 +82,16 @@ func main() {
 			Name:  "nodeport",
 			Usage: "Setup nodeport based ingress on gateways.",
 		},
+		cli.IntFlag{
+			Name:  "pod-subnet-prefix",
+			Value: 24,
+			Usage: "Subnet prefix allocated from --cluster-subnet which pods will be allocated IPs from",
+		},
+		cli.StringFlag{
+			Name:  "pod-subnet-mode",
+			Value: "node",
+			Usage: "Pod subnet-per-node ('node')",
+		},
 	}, config.Flags...)
 	c.Action = func(c *cli.Context) error {
 		return runOvnKube(c)
@@ -111,37 +123,59 @@ func runOvnKube(ctx *cli.Context) error {
 	master := ctx.String("init-master")
 	node := ctx.String("init-node")
 	nodePortEnable := ctx.Bool("nodeport")
+	psMode, err := ovn.ValidatePodSubnetMode(ctx.String("pod-subnet-mode"))
+	if err != nil {
+		panic(err.Error())
+	}
+	podSubnetPrefix := ctx.Int("pod-subnet-prefix")
 
 	if master != "" || node != "" {
-		clusterController := ovncluster.NewClusterController(clientset, factory)
-		clusterController.HostSubnetLength = 8
-		clusterController.GatewayInit = ctx.Bool("init-gateways")
-		clusterController.GatewayIntf = ctx.String("gateway-interface")
-		clusterController.GatewayNextHop = ctx.String("gateway-nexthop")
-		clusterController.GatewaySpareIntf = ctx.Bool("gateway-spare-interface")
-		_, clusterController.ClusterIPNet, err = net.ParseCIDR(ctx.String("cluster-subnet"))
+		_, ipNet, err := net.ParseCIDR(ctx.String("cluster-subnet"))
 		if err != nil {
 			panic(err.Error)
 		}
+		clusterSubnetSize, clusterSubnetBits := ipNet.Mask.Size()
+		clusterSubnetPrefix := clusterSubnetBits - clusterSubnetSize
+		if podSubnetPrefix > clusterSubnetBits || podSubnetPrefix < clusterSubnetPrefix+1 {
+			panic(fmt.Sprintf("--pod-subnet-prefix must be less than %d and greater than %d", clusterSubnetBits, clusterSubnetPrefix+1))
+		}
+		psLength := uint32(32 - podSubnetPrefix)
 
-		clusterServicesSubnet := ctx.String("service-cluster-ip-range")
-		if clusterServicesSubnet != "" {
+		clusterConfig := &cluster.ClusterConfig{
+			Kube: &kube.Kube{KClient: clientset},
+			ClusterIPNet: ipNet,
+			PodSubnetLength: psLength,
+		}
+		serviceCIDR := ctx.String("service-cluster-ip-range")
+		if serviceCIDR != "" {
 			var servicesSubnet *net.IPNet
-			_, servicesSubnet, err = net.ParseCIDR(
-				clusterServicesSubnet)
+			_, servicesSubnet, err = net.ParseCIDR(serviceCIDR)
 			if err != nil {
 				panic(err.Error)
 			}
-			clusterController.ClusterServicesSubnet = servicesSubnet.String()
+			clusterConfig.ClusterServicesSubnet = servicesSubnet.String()
 		}
-		clusterController.NodePortEnable = nodePortEnable
+
+		gatewayConfig := &cluster.GatewayConfig{
+			GatewayInit: ctx.Bool("init-gateways"),
+			GatewayIntf: ctx.String("gateway-interface"),
+			GatewayNextHop: ctx.String("gateway-nexthop"),
+			GatewaySpareIntf: ctx.Bool("gateway-spare-interface"),
+			NodePortEnable: nodePortEnable,
+		}
+
+		var clusterController cluster.OvnClusterController
+		switch psMode {
+		case ovn.PodSubnetModeNode:
+			clusterController = cluster.NewNodeSubnetController(clusterConfig, gatewayConfig, factory)
+		}
 
 		if master != "" {
 			if runtime.GOOS == "windows" {
 				panic("Windows is not supported as master node")
 			}
 			// run the cluster controller to init the master
-			err := clusterController.StartClusterMaster(master)
+			err := cluster.StartMaster(clusterController, master)
 			if err != nil {
 				logrus.Errorf(err.Error())
 				panic(err.Error())
@@ -153,7 +187,7 @@ func runOvnKube(ctx *cli.Context) error {
 				panic("Cannot initialize node without service account 'token'. Please provide one with --k8s-token argument")
 			}
 
-			err := clusterController.StartClusterNode(node)
+			err := cluster.StartNode(clusterController, node)
 			if err != nil {
 				logrus.Errorf(err.Error())
 				panic(err.Error())
@@ -161,10 +195,11 @@ func runOvnKube(ctx *cli.Context) error {
 		}
 	}
 	if netController {
-		ovnController := ovn.NewOvnController(clientset, factory)
+		ovnController := ovn.NewOvnController(clientset, factory, psMode)
 		ovnController.NodePortEnable = nodePortEnable
 		ovnController.Run()
 	}
+
 	if master != "" || netController {
 		// run forever
 		select {}
