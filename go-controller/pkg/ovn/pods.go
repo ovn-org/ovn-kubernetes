@@ -9,6 +9,8 @@ import (
 
 	"github.com/sirupsen/logrus"
 	kapi "k8s.io/api/core/v1"
+
+	"github.com/openvswitch/ovn-kubernetes/go-controller/pkg/util"
 )
 
 func (oc *Controller) syncPods(pods []interface{}) {
@@ -143,6 +145,20 @@ func (oc *Controller) addLogicalPort(pod *kapi.Pod) {
 
 	// If we don't have the logical switch
 	switch oc.podSubnetMode {
+	case PodSubnetModeNamespace:
+		logicalSwitch = pod.Namespace
+		for count := 30; count > 0; count-- {
+			ls, _, err := util.RunOVNNbctl("--data=bare", "--no-heading", "--columns=_uuid", "find", "logical_switch", "name="+pod.Namespace)
+			if err != nil {
+				logrus.Errorf("Could not get logical switch for namespace %q: %v", pod.Namespace)
+				continue
+			}
+			if ls != "" {
+				logicalSwitch = pod.Namespace
+				break
+			}
+			time.Sleep(time.Second)
+		}
 	case PodSubnetModeNode:
 		logicalSwitch = pod.Spec.NodeName
 		for count := 30; count > 0; count-- {

@@ -34,6 +34,8 @@ type OvnDBScheme string
 const (
 	// OvnHostSubnet is the constant string representing the annotation key
 	OvnHostSubnet = "ovn_host_subnet"
+	// OvnNamespaceSubnet is the constant string representing the annotation key
+	OvnNamespaceSubnet = "ovn_namespace_subnet"
 )
 
 func setOVSExternalIDs(nodeName string, ids ...string) error {

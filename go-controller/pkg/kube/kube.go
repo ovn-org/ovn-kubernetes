@@ -24,6 +24,10 @@ type Interface interface {
 	GetNodes() (*kapi.NodeList, error)
 	GetNode(name string) (*kapi.Node, error)
 	GetService(namespace, name string) (*kapi.Service, error)
+
+	SetAnnotationOnNamespace(namespace *kapi.Namespace, key, value string) error
+	GetNamespaces() (*kapi.NamespaceList, error)
+	GetNamespace(name string) (*kapi.Namespace, error)
 }
 
 // Kube is the structure object upon which the Interface is implemented
@@ -93,4 +97,25 @@ func (k *Kube) GetNode(name string) (*kapi.Node, error) {
 // GetService returns the Service resource from kubernetes apiserver, given its name and namespace
 func (k *Kube) GetService(namespace, name string) (*kapi.Service, error) {
 	return k.KClient.Core().Services(namespace).Get(name, metav1.GetOptions{})
+}
+
+// GetNamespaces obtains the Namespace resource from kubernetes apiserver
+func (k *Kube) GetNamespaces() (*kapi.NamespaceList, error) {
+	return k.KClient.Core().Namespaces().List(metav1.ListOptions{})
+}
+
+// GetNamespace obtains the Namespace resource from kubernetes apiserver, given the namespace's name
+func (k *Kube) GetNamespace(name string) (*kapi.Namespace, error) {
+	return k.KClient.Core().Namespaces().Get(name, metav1.GetOptions{})
+}
+
+// SetAnnotationOnNamespace takes the namespace object and key/value string pair to set it as an annotation
+func (k *Kube) SetAnnotationOnNamespace(namespace *kapi.Namespace, key, value string) error {
+	logrus.Infof("Setting annotations %s=%s on namespace %q", key, value, namespace.Name)
+	patchData := fmt.Sprintf(`{"metadata":{"annotations":{"%s":"%s"}}}`, key, value)
+	_, err := k.KClient.Core().Namespaces().Patch(namespace.Name, types.MergePatchType, []byte(patchData))
+	if err != nil {
+		logrus.Errorf("Error in setting annotation on namespace %q: %v", namespace.Name, err)
+	}
+	return err
 }

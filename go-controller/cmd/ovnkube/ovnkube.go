@@ -90,7 +90,7 @@ func main() {
 		cli.StringFlag{
 			Name:  "pod-subnet-mode",
 			Value: "node",
-			Usage: "Pod subnet-per-node ('node')",
+			Usage: "Pod subnet-per-node ('node') or subnet-per-namespace ('namespace')",
 		},
 	}, config.Flags...)
 	c.Action = func(c *cli.Context) error {
@@ -168,6 +168,8 @@ func runOvnKube(ctx *cli.Context) error {
 		switch psMode {
 		case ovn.PodSubnetModeNode:
 			clusterController = cluster.NewNodeSubnetController(clusterConfig, gatewayConfig, factory)
+		case ovn.PodSubnetModeNamespace:
+			clusterController = cluster.NewNamespaceSubnetController(clusterConfig, factory)
 		}
 
 		if master != "" {
@@ -200,7 +202,7 @@ func runOvnKube(ctx *cli.Context) error {
 		ovnController.Run()
 	}
 
-	if master != "" || netController {
+	if master != "" || node != "" || netController {
 		// run forever
 		select {}
 	}

@@ -21,14 +21,19 @@ const (
 	// PodSubnetModeNode indicates that each node is allocated one or more
 	// subnets from the cluster network from which pod IPs are allocated
 	PodSubnetModeNode PodSubnetMode = "node"
+	// PodSubnetModeNamespace indicates that each namespace is allocated one
+	// or more subnets from the cluster network from which pod IPs as are allocated
+	PodSubnetModeNamespace PodSubnetMode = "namespace"
 )
 
 func ValidatePodSubnetMode(mode string) (PodSubnetMode, error) {
 	switch mode {
 	case string(PodSubnetModeNode):
 		return PodSubnetModeNode, nil
+	case string(PodSubnetModeNamespace):
+		return PodSubnetModeNamespace, nil
 	}
-	return "", fmt.Errorf("--pod-subnet-mode must be %q", PodSubnetModeNode)
+	return "", fmt.Errorf("--pod-subnet-mode must be %q or %q", PodSubnetModeNode, PodSubnetModeNamespace)
 }
 
 // Controller structure is the object which holds the controls for starting
