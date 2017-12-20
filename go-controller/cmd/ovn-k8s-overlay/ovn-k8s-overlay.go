@@ -15,7 +15,6 @@ func main() {
 	c.Version = "0.0.1"
 
 	c.Commands = []cli.Command{
-		app.InitMasterCmd,
 		app.InitGatewayCmd,
 	}
 

@@ -12,6 +12,10 @@ import (
 	kapi "k8s.io/client-go/pkg/api/v1"
 	"k8s.io/client-go/tools/cache"
 
+	"github.com/openvswitch/ovn-kubernetes/go-controller/pkg/config"
+	"github.com/openvswitch/ovn-kubernetes/go-controller/pkg/ovn"
+	"github.com/openvswitch/ovn-kubernetes/go-controller/pkg/util"
+
 	"github.com/openshift/origin/pkg/util/netutils"
 )
 
@@ -142,21 +146,80 @@ func (cluster *OvnClusterController) SetupMaster(masterNodeName string, masterSw
 		return fmt.Errorf("Error setting OVS external IDs: %v\n  %q", err, string(out))
 	}
 
-	overlayArgs := []string{
-		"master-init",
-		fmt.Sprintf("--cluster-ip-subnet=%s", cluster.ClusterIPNet.String()),
-		fmt.Sprintf("--master-switch-subnet=%s", masterSwitchNetwork),
-		fmt.Sprintf("--node-name=%s", masterNodeName),
-	}
-	if cluster.NorthDBClientAuth.scheme == OvnDBSchemeSSL {
-		overlayArgs = append(overlayArgs, fmt.Sprintf("--nb-privkey=%s", cluster.NorthDBClientAuth.PrivKey))
-		overlayArgs = append(overlayArgs, fmt.Sprintf("--nb-cert=%s", cluster.NorthDBClientAuth.Cert))
-		overlayArgs = append(overlayArgs, fmt.Sprintf("--nb-cacert=%s", cluster.NorthDBClientAuth.CACert))
+	// Fetch config file to override default values.
+	config.FetchConfig()
+
+	// Update config globals that OVN exec utils use
+	cluster.NorthDBClientAuth.SetConfig()
+
+	// Create a single common distributed router for the cluster.
+	stdout, stderr, err := util.RunOVNNbctl("--", "--may-exist", "lr-add", masterNodeName, "--", "set", "logical_router", masterNodeName, "external_ids:k8s-cluster-router=yes")
+	if err != nil {
+		logrus.Errorf("Failed to create a single common distributed router for the cluster, stdout: %q, stderr: %q, error: %v", stdout, stderr, err)
+		return err
 	}
 
-	out, err = exec.Command("ovn-k8s-overlay", overlayArgs...).CombinedOutput()
+	// Create 2 load-balancers for east-west traffic.  One handles UDP and another handles TCP.
+	k8sClusterLbTCP, stderr, err := util.RunOVNNbctl("--data=bare", "--no-heading", "--columns=_uuid", "find", "load_balancer", "external_ids:k8s-cluster-lb-tcp=yes")
 	if err != nil {
-		return fmt.Errorf("error setting up OVN k8s overlay: %v\n  %q", err, string(out))
+		logrus.Errorf("Failed to get tcp load-balancer, stderr: %q, error: %v", stderr, err)
+		return err
+	}
+
+	if k8sClusterLbTCP == "" {
+		stdout, stderr, err = util.RunOVNNbctl("--", "create", "load_balancer", "external_ids:k8s-cluster-lb-tcp=yes")
+		if err != nil {
+			logrus.Errorf("Failed to create tcp load-balancer, stdout: %q, stderr: %q, error: %v", stdout, stderr, err)
+			return err
+		}
+	}
+
+	k8sClusterLbUDP, stderr, err := util.RunOVNNbctl("--data=bare", "--no-heading", "--columns=_uuid", "find", "load_balancer", "external_ids:k8s-cluster-lb-udp=yes")
+	if err != nil {
+		logrus.Errorf("Failed to get udp load-balancer, stderr: %q, error: %v", stderr, err)
+		return err
+	}
+	if k8sClusterLbUDP == "" {
+		stdout, stderr, err = util.RunOVNNbctl("--", "create", "load_balancer", "external_ids:k8s-cluster-lb-udp=yes", "protocol=udp")
+		if err != nil {
+			logrus.Errorf("Failed to create udp load-balancer, stdout: %q, stderr: %q, error: %v", stdout, stderr, err)
+			return err
+		}
+	}
+
+	// Create a logical switch called "join" that will be used to connect gateway routers to the distributed router.
+	// The "join" will be allocated IP addresses in the range 100.64.1.0/24.
+	stdout, stderr, err = util.RunOVNNbctl("--may-exist", "ls-add", "join")
+	if err != nil {
+		logrus.Errorf("Failed to create logical switch called \"join\", stdout: %q, stderr: %q, error: %v", stdout, stderr, err)
+		return err
+	}
+
+	// Connect the distributed router to "join".
+	routerMac, stderr, err := util.RunOVNNbctl("--if-exist", "get", "logical_router_port", "rtoj-"+masterNodeName, "mac")
+	if err != nil {
+		logrus.Errorf("Failed to get logical router port rtoj-%v, stderr: %q, error: %v", masterNodeName, stderr, err)
+		return err
+	}
+	if routerMac == "" {
+		routerMac = util.GenerateMac()
+		stdout, stderr, err = util.RunOVNNbctl("--", "--may-exist", "lrp-add", masterNodeName, "rtoj-"+masterNodeName, routerMac, "100.64.1.1/24", "--", "set", "logical_router_port", "rtoj-"+masterNodeName, "external_ids:connect_to_join=yes")
+		if err != nil {
+			logrus.Errorf("Failed to add logical router port rtoj-%v, stdout: %q, stderr: %q, error: %v", masterNodeName, stdout, stderr, err)
+			return err
+		}
+	}
+
+	// Connect the switch "join" to the router.
+	stdout, stderr, err = util.RunOVNNbctl("--", "--may-exist", "lsp-add", "join", "jtor-"+masterNodeName, "--", "set", "logical_switch_port", "jtor-"+masterNodeName, "type=router", "options:router-port=rtoj-"+masterNodeName, "addresses="+"\""+routerMac+"\"")
+	if err != nil {
+		logrus.Errorf("Failed to add logical switch port to logical router, stdout: %q, stderr: %q, error: %v", stdout, stderr, err)
+		return err
+	}
+
+	err = ovn.CreateManagementPort(masterNodeName, masterSwitchNetwork, cluster.ClusterIPNet.String())
+	if err != nil {
+		return fmt.Errorf("Failed create management port: %v", err)
 	}
 
 	return nil
