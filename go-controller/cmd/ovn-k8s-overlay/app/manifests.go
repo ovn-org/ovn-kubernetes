@@ -40,16 +40,4 @@ ADDRESS0={{.ClusterIP}}
 NETMASK0={{.ClusterMask}}
 GATEWAY0={{.GwIP}}
 `
-	cniConfigTemplate = `{
-    "name": "net", 
-    "type": "ovn_cni",
-    "bridge": "br-int",
-    "isGateway": "true",  
-    "ipMasq": "false", 
-    "ipam": {
-        "subnet": "{{.MinionSwitchSubnet}}", 
-        "type": "host-local"
-    }   
-}
-`
 )

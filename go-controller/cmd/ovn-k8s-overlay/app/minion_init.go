@@ -89,20 +89,12 @@ func initMinion(context *cli.Context) error {
 
 		// Always create the CNI config for consistency.
 		cniConf := config.CniConfPath + "/10-net.conf"
-		cniConfigContext := struct{ MinionSwitchSubnet string }{
-			MinionSwitchSubnet: minionSwitchSubnet,
-		}
-		cniConfigBytes, err := parseTemplate(cniConfigTemplate, cniConfigContext)
-		if err != nil {
-			return fmt.Errorf("Failed to parse cniConfigTemplate")
-		}
-
 		f, err := os.OpenFile(cniConf, os.O_CREATE|os.O_WRONLY, 0666)
 		if err != nil {
 			return err
 		}
 		defer f.Close()
-		_, err = f.Write(cniConfigBytes)
+		_, err = f.Write([]byte("{\"name\":\"ovn-cni\", \"type\":\"ovn_cni\"}"))
 		if err != nil {
 			return err
 		}
