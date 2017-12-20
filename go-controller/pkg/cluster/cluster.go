@@ -6,6 +6,7 @@ import (
 	"net/url"
 
 	"github.com/openshift/origin/pkg/util/netutils"
+	"github.com/openvswitch/ovn-kubernetes/go-controller/pkg/config"
 	"github.com/openvswitch/ovn-kubernetes/go-controller/pkg/kube"
 	"k8s.io/client-go/tools/cache"
 )
@@ -122,4 +123,15 @@ func (a *OvnDBAuth) GetURL() string {
 		return fmt.Sprintf("p%s:%s", a.scheme, a.port)
 	}
 	return fmt.Sprintf("%s:%s:%s", a.scheme, a.host, a.port)
+}
+
+// SetConfig sets global config variables from an OvnDBAuth object
+func (a *OvnDBAuth) SetConfig() {
+	config.Scheme = string(a.scheme)
+	if a.scheme == "ssl" {
+		config.NbctlPrivateKey = a.PrivKey
+		config.NbctlCertificate = a.Cert
+		config.NbctlCACert = a.CACert
+	}
+	config.OvnNB = a.GetURL()
 }

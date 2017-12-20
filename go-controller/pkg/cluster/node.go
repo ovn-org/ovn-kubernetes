@@ -3,11 +3,16 @@ package cluster
 import (
 	"fmt"
 	"net"
+	"os"
 	"os/exec"
+	"runtime"
 	"time"
 
 	"github.com/Sirupsen/logrus"
 	"github.com/openshift/origin/pkg/util/netutils"
+
+	"github.com/openvswitch/ovn-kubernetes/go-controller/pkg/config"
+	"github.com/openvswitch/ovn-kubernetes/go-controller/pkg/ovn"
 
 	kapi "k8s.io/client-go/pkg/api/v1"
 )
@@ -85,21 +90,54 @@ func (cluster *OvnClusterController) StartClusterNode(name string) error {
 		return fmt.Errorf("error starting ovn-controller service: %v\n  %q", err, string(out))
 	}
 
-	overlayArgs := []string{
-		"minion-init",
-		fmt.Sprintf("--cluster-ip-subnet=%s", cluster.ClusterIPNet.String()),
-		fmt.Sprintf("--minion-switch-subnet=%s", subnet.String()),
-		fmt.Sprintf("--node-name=%s", name),
-	}
-	if cluster.NorthDBClientAuth.scheme == OvnDBSchemeSSL {
-		overlayArgs = append(overlayArgs, fmt.Sprintf("--nb-privkey=%s", cluster.NorthDBClientAuth.PrivKey))
-		overlayArgs = append(overlayArgs, fmt.Sprintf("--nb-cert=%s", cluster.NorthDBClientAuth.Cert))
-		overlayArgs = append(overlayArgs, fmt.Sprintf("--nb-cacert=%s", cluster.NorthDBClientAuth.CACert))
-	}
-	out, err = exec.Command("ovn-k8s-overlay", overlayArgs...).CombinedOutput()
-	if err != nil {
-		return fmt.Errorf("error setting up OVN k8s overlay: %v\n  %q", err, string(out))
+	// Fetch config file to override default values.
+	config.FetchConfig()
+
+	// Update config globals that OVN exec utils use
+	cluster.NorthDBClientAuth.SetConfig()
+
+	if runtime.GOOS != "win32" {
+		cniPluginPath, err := exec.LookPath(config.CniPlugin)
+		if err != nil {
+			return fmt.Errorf("No cni plugin %v found", config.CniPlugin)
+		}
+
+		_, err = os.Stat(config.CniLinkPath)
+		if err != nil && !os.IsExist(err) {
+			err = os.MkdirAll(config.CniLinkPath, os.ModeDir)
+			if err != nil {
+				return err
+			}
+		}
+		cniFile := config.CniLinkPath + "/ovn_cni"
+		_, err = os.Stat(cniFile)
+		if err != nil && !os.IsExist(err) {
+			_, err = exec.Command("ln", "-s", cniPluginPath, cniFile).CombinedOutput()
+			if err != nil {
+				return err
+			}
+		}
+
+		_, err = os.Stat(config.CniConfPath)
+		if err != nil && !os.IsExist(err) {
+			err = os.MkdirAll(config.CniConfPath, os.ModeDir)
+			if err != nil {
+				return err
+			}
+		}
+
+		// Always create the CNI config for consistency.
+		cniConf := config.CniConfPath + "/10-net.conf"
+		f, err := os.OpenFile(cniConf, os.O_CREATE|os.O_WRONLY, 0666)
+		if err != nil {
+			return err
+		}
+		defer f.Close()
+		_, err = f.Write([]byte("{\"name\":\"ovn-cni\", \"type\":\"ovn_cni\"}"))
+		if err != nil {
+			return err
+		}
 	}
 
-	return nil
+	return ovn.CreateManagementPort(node.Name, subnet.String(), cluster.ClusterIPNet.String())
 }

@@ -16,7 +16,6 @@ func main() {
 
 	c.Commands = []cli.Command{
 		app.InitMasterCmd,
-		app.InitMinionCmd,
 		app.InitGatewayCmd,
 	}
 
