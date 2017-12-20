@@ -1,62 +1,14 @@
 package ovn
 
 import (
-	"bufio"
-	"bytes"
 	"fmt"
-	"html/template"
-	"io"
 	"net"
-	"os"
 	"os/exec"
-	"runtime"
 	"strings"
 
 	"github.com/Sirupsen/logrus"
 	"github.com/openvswitch/ovn-kubernetes/go-controller/pkg/config"
 	"github.com/openvswitch/ovn-kubernetes/go-controller/pkg/util"
-)
-
-const (
-	bridgeTemplateDebian = `
-allow-ovs br-int
-iface br-int inet manual
-    ovs_type OVSBridge
-    ovs_ports {{.InterfaceName}}
-    ovs_extra set bridge br-int fail_mode=secure
-`
-	interfaceTemplateDebian = `
-allow-br-int {{.InterfaceName}}
-iface {{.InterfaceName}} inet static
-    address {{.Address}}
-    netmask {{.Netmask}}
-    ovs_type OVSIntPort
-    ovs_bridge br-int
-    ovs_extra set interface $IFACE mac=\"{{.Mac}}\" external-ids:iface-id={{.IfaceID}}
-    up route add -net {{.ClusterIP}} netmask {{.ClusterMask}} gw {{.GwIP}}
-    down route del -net {{.ClusterIP}} netmask {{.ClusterMask}} gw {{.GwIP}}
-`
-	bridgeTemplateRedhat = `
-DEVICE=br-int
-ONBOOT=yes
-DEVICETYPE=ovs
-TYPE=OVSBridge
-OVS_EXTRA="set bridge br-int fail_mode=secure"
-`
-	interfaceTemplateRedhat = `
-DEVICE={{.InterfaceName}}
-DEVICETYPE=ovs
-TYPE=OVSIntPort
-OVS_BRIDGE=br-int
-IP_ADDR={{.Address}}
-NETMASK={{.Netmask}}
-OVS_EXTRA="set interface $DEVICE mac=\"{{.Mac}}\" external-ids:iface-id={{.IfaceID}}"
-`
-	routeTemplate = `
-ADDRESS0={{.ClusterIP}}
-NETMASK0={{.ClusterMask}}
-GATEWAY0={{.GwIP}}
-`
 )
 
 func getK8sClusterRouter() (string, error) {
@@ -72,189 +24,7 @@ func getK8sClusterRouter() (string, error) {
 	return k8sClusterRouter, nil
 }
 
-func configureManagementPortWindows(nodeName, clusterSubnet, routerIP, interfaceName, interfaceIP string) error {
-	// TODO
-	return fmt.Errorf("Not implemented")
-}
-
-func configureManagementPortDebian(nodeName, clusterSubnet, routerIP, interfaceName, interfaceIP string) error {
-	bridgeExists := false
-	interfaceExists := false
-
-	bridgeContext := struct{ InterfaceName string }{
-		InterfaceName: interfaceName,
-	}
-	bridgeBytes, err := parseTemplate(bridgeTemplateDebian, bridgeContext)
-	if err != nil {
-		return fmt.Errorf("Failed to parse bridgeTemplateDebian")
-	}
-
-	mac, stderr, err := util.RunOVSVsctl("--if-exists", "get", "interface", interfaceName, "mac_in_use")
-	if err != nil {
-		logrus.Errorf("Failed to get mac address, stderr: %q, error: %v", stderr, err)
-		return err
-	}
-	if mac == "" {
-		return fmt.Errorf("Failed to get mac address of interface %s", interfaceName)
-	}
-
-	ip, interfaceIPNet, _ := net.ParseCIDR(interfaceIP)
-	_, clusterIPNet, _ := net.ParseCIDR(clusterSubnet)
-	interfaceContext := struct{ InterfaceName, Address, Netmask, Mac, IfaceID, ClusterIP, ClusterMask, GwIP string }{
-		InterfaceName: interfaceName,
-		Address:       ip.String(),
-		Netmask:       interfaceIPNet.Mask.String(),
-		Mac:           mac,
-		IfaceID:       "k8s-" + nodeName,
-		ClusterIP:     clusterIPNet.IP.String(),
-		ClusterMask:   clusterIPNet.Mask.String(),
-		GwIP:          routerIP,
-	}
-	interfaceBytes, err := parseTemplate(interfaceTemplateDebian, interfaceContext)
-	if err != nil {
-		return fmt.Errorf("Failed to parse interfaceTemplateDebian")
-	}
-
-	f, err := os.OpenFile("/etc/network/interfaces", os.O_RDONLY, 0644)
-	if err != nil {
-		return fmt.Errorf("failed open file /etc/network/interfaces: %v", err)
-	}
-	defer f.Close()
-	rd := bufio.NewReader(f)
-	for {
-		line, err := rd.ReadString('\n')
-		if err != nil || io.EOF == err {
-			break
-		}
-
-		// Look for a line of the form "allow-ovs br-int".
-		if strings.Contains(line, "allow-ovs") && strings.Contains(line, "br-int") {
-			logrus.Debugf("Has configed allow-ovs br-int")
-			bridgeExists = true
-			continue
-		}
-
-		// Look for a line of the form "allow-br-int $interfaceName".
-		if strings.Contains(line, "allow-br-int") && strings.Contains(line, interfaceName) {
-			logrus.Debugf("Has configed allow-ovs %s", interfaceName)
-			interfaceExists = true
-			continue
-		}
-	}
-	if !bridgeExists {
-		f, err := os.OpenFile("/etc/network/interfaces", os.O_WRONLY, 0644)
-		if err != nil {
-			return err
-		}
-		defer f.Close()
-		n, _ := f.Seek(0, io.SeekEnd)
-		_, err = f.WriteAt(bridgeBytes, n)
-		if err != nil {
-			return err
-		}
-	}
-	if !interfaceExists {
-		f, err := os.OpenFile("/etc/network/interfaces", os.O_WRONLY, 0644)
-		if err != nil {
-			return err
-		}
-		defer f.Close()
-		n, _ := f.Seek(0, io.SeekEnd)
-		_, err = f.WriteAt(interfaceBytes, n)
-		if err != nil {
-			return err
-		}
-	}
-	return nil
-}
-
-func configureManagementPortRedhat(nodeName, clusterSubnet, routerIP, interfaceName, interfaceIP string) error {
-	f, err := os.OpenFile("/etc/sysconfig/network-scripts/ifcfg-br-int", os.O_WRONLY|os.O_CREATE, 0644)
-	if err != nil {
-		return err
-	}
-	_, err = f.Write([]byte(bridgeTemplateRedhat))
-	if err != nil {
-		return err
-	}
-	defer f.Close()
-
-	mac, stderr, err := util.RunOVSVsctl("--if-exists", "get", "interface", interfaceName, "mac_in_use")
-	if err != nil {
-		logrus.Errorf("Failed to get mac address, stderr: %q, error: %v", stderr, err)
-		return err
-	}
-	if mac == "" {
-		return fmt.Errorf("Failed to get mac address of interface %s", interfaceName)
-	}
-
-	ip, interfaceIPNet, _ := net.ParseCIDR(interfaceIP)
-	_, clusterIPNet, _ := net.ParseCIDR(clusterSubnet)
-	interfaceContext := struct{ InterfaceName, Address, Netmask, Mac, IfaceID string }{
-		InterfaceName: interfaceName,
-		Address:       ip.String(),
-		Netmask:       interfaceIPNet.Mask.String(),
-		Mac:           mac,
-		IfaceID:       "k8s-" + nodeName,
-	}
-	interfaceBytes, err := parseTemplate(interfaceTemplateRedhat, interfaceContext)
-	if err != nil {
-		return fmt.Errorf("Failed to parse interfaceTemplateRedhat")
-	}
-
-	fileName := "/etc/sysconfig/network-scripts/ifcfg-" + interfaceName
-	f, err = os.OpenFile(fileName, os.O_WRONLY|os.O_CREATE, 0644)
-	if err != nil {
-		return err
-	}
-	defer f.Close()
-	_, err = f.Write(interfaceBytes)
-	if err != nil {
-		return err
-	}
-
-	routeContext := struct{ ClusterIP, ClusterMask, GwIP string }{
-		ClusterIP:   clusterIPNet.IP.String(),
-		ClusterMask: clusterIPNet.Mask.String(),
-		GwIP:        routerIP,
-	}
-	routeBytes, err := parseTemplate(routeTemplate, routeContext)
-	if err != nil {
-		return fmt.Errorf("Failed to parse routeTemplate")
-	}
-
-	fileName = "/etc/sysconfig/network-scripts/route-" + interfaceName
-	f, err = os.OpenFile(fileName, os.O_WRONLY|os.O_CREATE, 0644)
-	if err != nil {
-		return err
-	}
-	defer f.Close()
-	_, err = f.Write(routeBytes)
-	return err
-}
-
 func configureManagementPort(nodeName, clusterSubnet, routerIP, interfaceName, interfaceIP string) error {
-	// First, try to configure management ports via platform specific tools.
-	if runtime.GOOS == "win32" {
-		err := configureManagementPortWindows(nodeName, clusterSubnet, routerIP, interfaceName, interfaceIP)
-		if err != nil {
-			return err
-		}
-	}
-
-	// Identify whether the platform is Debian based.
-	if util.PathExist("/etc/network/interfaces") {
-		err := configureManagementPortDebian(nodeName, clusterSubnet, routerIP, interfaceName, interfaceIP)
-		if err != nil {
-			return err
-		}
-	} else if util.PathExist("/etc/sysconfig/network-scripts/ifup-ovs") {
-		err := configureManagementPortRedhat(nodeName, clusterSubnet, routerIP, interfaceName, interfaceIP)
-		if err != nil {
-			return err
-		}
-	}
-
 	// Up the interface.
 	_, err := exec.Command("ip", "link", "set", interfaceName, "up").CombinedOutput()
 	if err != nil {
@@ -424,17 +194,4 @@ func CreateManagementPort(nodeName, localSubnet, clusterSubnet string) error {
 	}
 
 	return nil
-}
-
-func parseTemplate(strtmpl string, obj interface{}) ([]byte, error) {
-	var buf bytes.Buffer
-	tmpl, err := template.New("template").Parse(strtmpl)
-	if err != nil {
-		return nil, fmt.Errorf("error when parsing template: %v", err)
-	}
-	err = tmpl.Execute(&buf, obj)
-	if err != nil {
-		return nil, fmt.Errorf("error when executing template: %v", err)
-	}
-	return buf.Bytes(), nil
 }
