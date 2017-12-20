@@ -7,6 +7,7 @@ import (
 	"runtime"
 
 	"github.com/openvswitch/ovn-kubernetes/go-controller/pkg/config"
+	"github.com/openvswitch/ovn-kubernetes/go-controller/pkg/ovn"
 	"github.com/openvswitch/ovn-kubernetes/go-controller/pkg/util"
 	"github.com/urfave/cli"
 )
@@ -100,5 +101,5 @@ func initMinion(context *cli.Context) error {
 		}
 	}
 
-	return createManagementPort(nodeName, minionSwitchSubnet, clusterIPSubnet)
+	return ovn.CreateManagementPort(nodeName, minionSwitchSubnet, clusterIPSubnet)
 }
