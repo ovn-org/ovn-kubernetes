@@ -5,6 +5,7 @@ import (
 
 	"github.com/Sirupsen/logrus"
 	"github.com/openvswitch/ovn-kubernetes/go-controller/pkg/config"
+	"github.com/openvswitch/ovn-kubernetes/go-controller/pkg/ovn"
 	"github.com/openvswitch/ovn-kubernetes/go-controller/pkg/util"
 	"github.com/urfave/cli"
 )
@@ -120,7 +121,7 @@ func initMaster(context *cli.Context) error {
 		return err
 	}
 
-	err = createManagementPort(nodeName, masterSwitchSubnet, clusterIPSubnet)
+	err = ovn.CreateManagementPort(nodeName, masterSwitchSubnet, clusterIPSubnet)
 	if err != nil {
 		return fmt.Errorf("Failed create management port: %v", err)
 	}
