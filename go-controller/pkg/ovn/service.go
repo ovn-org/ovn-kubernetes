@@ -3,7 +3,7 @@ package ovn
 import (
 	"fmt"
 	"github.com/Sirupsen/logrus"
-	kapi "k8s.io/client-go/pkg/api/v1"
+	kapi "k8s.io/api/core/v1"
 	"net"
 )
 

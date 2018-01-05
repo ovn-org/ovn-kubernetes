@@ -9,7 +9,7 @@ import (
 	"k8s.io/apimachinery/pkg/labels"
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/client-go/kubernetes"
-	kapi "k8s.io/client-go/pkg/api/v1"
+	kapi "k8s.io/api/core/v1"
 )
 
 // Interface represents the exported methods for dealing with getting/setting
