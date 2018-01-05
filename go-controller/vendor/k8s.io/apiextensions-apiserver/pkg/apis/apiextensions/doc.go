@@ -14,8 +14,8 @@ See the License for the specific language governing permissions and
 limitations under the License.
 */
 
-// +k8s:deepcopy-gen=package,register
+// +k8s:deepcopy-gen=package
 
 // Package apiextensions is the internal version of the API.
 // +groupName=apiextensions.k8s.io
-package apiextensions // import "k8s.io/apiextension-server/pkg/apis/apiextensions"
+package apiextensions // import "k8s.io/apiextensions-apiserver/pkg/apis/apiextensions"

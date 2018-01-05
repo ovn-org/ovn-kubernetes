@@ -14,7 +14,7 @@ import (
 	"github.com/openvswitch/ovn-kubernetes/go-controller/pkg/config"
 	"github.com/openvswitch/ovn-kubernetes/go-controller/pkg/ovn"
 
-	kapi "k8s.io/client-go/pkg/api/v1"
+	kapi "k8s.io/api/core/v1"
 )
 
 // StartClusterNode learns the subnet assigned to it by the master controller

@@ -4,14 +4,13 @@ import (
 	"fmt"
 	"github.com/Sirupsen/logrus"
 	"github.com/openvswitch/ovn-kubernetes/go-controller/pkg/kube"
+	"k8s.io/api/core/v1"
+	kapi "k8s.io/api/core/v1"
+	kapisnetworking "k8s.io/api/networking/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	"k8s.io/apimachinery/pkg/labels"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/watch"
 	"k8s.io/client-go/kubernetes"
-	"k8s.io/client-go/pkg/api/v1"
-	kapi "k8s.io/client-go/pkg/api/v1"
-	kapisnetworking "k8s.io/client-go/pkg/apis/networking/v1"
 	"k8s.io/client-go/tools/cache"
 	"net"
 	"os/exec"
@@ -309,44 +308,44 @@ func (oc *Controller) deleteAclsPolicy(namespace, policy string) {
 }
 
 func newListWatchFromClient(c cache.Getter, resource string, namespace string,
-	labelSelector labels.Selector) *cache.ListWatch {
+	labelSelector string) *cache.ListWatch {
 	listFunc := func(options metav1.ListOptions) (runtime.Object, error) {
+		options.LabelSelector = labelSelector
 		return c.Get().
 			Namespace(namespace).
 			Resource(resource).
 			VersionedParams(&options, metav1.ParameterCodec).
-			LabelsSelectorParam(labelSelector).
 			Do().
 			Get()
 	}
 	watchFunc := func(options metav1.ListOptions) (watch.Interface, error) {
 		options.Watch = true
+		options.LabelSelector = labelSelector
 		return c.Get().
 			Namespace(namespace).
 			Resource(resource).
 			VersionedParams(&options, metav1.ParameterCodec).
-			LabelsSelectorParam(labelSelector).
 			Watch()
 	}
 	return &cache.ListWatch{ListFunc: listFunc, WatchFunc: watchFunc}
 }
 
 func newNamespaceListWatchFromClient(c cache.Getter,
-	labelSelector labels.Selector) *cache.ListWatch {
+	labelSelector string) *cache.ListWatch {
 	listFunc := func(options metav1.ListOptions) (runtime.Object, error) {
+		options.LabelSelector = labelSelector
 		return c.Get().
 			Resource("namespaces").
 			VersionedParams(&options, metav1.ParameterCodec).
-			LabelsSelectorParam(labelSelector).
 			Do().
 			Get()
 	}
 	watchFunc := func(options metav1.ListOptions) (watch.Interface, error) {
 		options.Watch = true
+		options.LabelSelector = labelSelector
 		return c.Get().
 			Resource("namespaces").
 			VersionedParams(&options, metav1.ParameterCodec).
-			LabelsSelectorParam(labelSelector).
 			Watch()
 	}
 	return &cache.ListWatch{ListFunc: listFunc, WatchFunc: watchFunc}
@@ -489,7 +488,7 @@ func (oc *Controller) handleLocalPodSelector(
 
 	client, _ := oc.Kube.(*kube.Kube)
 	clientset, _ := client.KClient.(*kubernetes.Clientset)
-	podSelectorAsSelector, _ := metav1.LabelSelectorAsSelector(
+	podSelectorAsSelector := metav1.FormatLabelSelector(
 		&policy.Spec.PodSelector)
 
 	watchlist := newListWatchFromClient(clientset.Core().RESTClient(), "pods",
@@ -529,7 +528,7 @@ func (oc *Controller) handlePeerPodSelector(
 
 	client, _ := oc.Kube.(*kube.Kube)
 	clientset, _ := client.KClient.(*kubernetes.Clientset)
-	podSelectorAsSelector, _ := metav1.LabelSelectorAsSelector(podSelector)
+	podSelectorAsSelector := metav1.FormatLabelSelector(podSelector)
 
 	watchlist := newListWatchFromClient(clientset.Core().RESTClient(), "pods",
 		policy.Namespace, podSelectorAsSelector)
@@ -635,7 +634,7 @@ func (oc *Controller) handlePeerNamespaceSelector(
 
 	client, _ := oc.Kube.(*kube.Kube)
 	clientset, _ := client.KClient.(*kubernetes.Clientset)
-	nsSelectorAsSelector, _ := metav1.LabelSelectorAsSelector(
+	nsSelectorAsSelector := metav1.FormatLabelSelector(
 		namespaceSelector)
 
 	watchlist := newNamespaceListWatchFromClient(clientset.Core().RESTClient(),

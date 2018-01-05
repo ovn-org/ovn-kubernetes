@@ -3,8 +3,8 @@ package ovn
 import (
 	"github.com/Sirupsen/logrus"
 	"github.com/openvswitch/ovn-kubernetes/go-controller/pkg/kube"
-	kapi "k8s.io/client-go/pkg/api/v1"
-	kapisnetworking "k8s.io/client-go/pkg/apis/networking/v1"
+	kapi "k8s.io/api/core/v1"
+	kapisnetworking "k8s.io/api/networking/v1"
 	"k8s.io/client-go/tools/cache"
 	"reflect"
 	"sync"
