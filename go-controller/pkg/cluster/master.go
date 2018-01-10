@@ -235,6 +235,15 @@ func (cluster *OvnClusterController) SetupMaster(masterNodeName string, masterSw
 		return fmt.Errorf("Failed create management port: %v", err)
 	}
 
+	// Create a lock for gateway-init to co-ordinate.
+	stdout, stderr, err = util.RunOVNNbctl("--", "set", "nb_global", ".",
+		"external-ids:gateway-lock=\"\"")
+	if err != nil {
+		logrus.Errorf("Failed to create lock for gateways, "+
+			"stdout: %q, stderr: %q, error: %v", stdout, stderr, err)
+		return err
+	}
+
 	return nil
 }
 
