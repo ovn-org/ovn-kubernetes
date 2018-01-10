@@ -11,19 +11,6 @@ import (
 	"github.com/openvswitch/ovn-kubernetes/go-controller/pkg/util"
 )
 
-func getK8sClusterRouter() (string, error) {
-	k8sClusterRouter, stderr, err := util.RunOVNNbctl("--data=bare", "--no-heading", "--columns=_uuid", "find", "logical_router", "external_ids:k8s-cluster-router=yes")
-	if err != nil {
-		logrus.Errorf("Failed to get k8s cluster router, stderr: %q, error: %v", stderr, err)
-		return "", err
-	}
-	if k8sClusterRouter == "" {
-		return "", fmt.Errorf("Failed to get k8s cluster router")
-	}
-
-	return k8sClusterRouter, nil
-}
-
 func configureManagementPort(nodeName, clusterSubnet, routerIP, interfaceName, interfaceIP string) error {
 	// Up the interface.
 	_, err := exec.Command("ip", "link", "set", interfaceName, "up").CombinedOutput()
@@ -88,7 +75,7 @@ func CreateManagementPort(nodeName, localSubnet, clusterSubnet string) error {
 	var clusterRouter string
 	if routerMac == "" {
 		routerMac = util.GenerateMac()
-		clusterRouter, err = getK8sClusterRouter()
+		clusterRouter, err = util.GetK8sClusterRouter()
 		if err != nil {
 			return err
 		}
