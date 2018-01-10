@@ -2,7 +2,6 @@ package util
 
 import (
 	"fmt"
-
 	"github.com/urfave/cli"
 )
 
