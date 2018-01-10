@@ -96,48 +96,31 @@ func (cluster *OvnClusterController) StartClusterNode(name string) error {
 	// Update config globals that OVN exec utils use
 	cluster.NorthDBClientAuth.SetConfig()
 
+	if err := ovn.CreateManagementPort(node.Name, subnet.String(), cluster.ClusterIPNet.String()); err != nil {
+		return err
+	}
+
+	// Install the CNI config file after all initialization is done
 	if runtime.GOOS != "win32" {
-		cniPluginPath, err := exec.LookPath(config.CniPlugin)
+		// MkdirAll() returns no error if the path already exists
+		err = os.MkdirAll(config.CniConfPath, os.ModeDir)
 		if err != nil {
-			return fmt.Errorf("No cni plugin %v found", config.CniPlugin)
-		}
-
-		_, err = os.Stat(config.CniLinkPath)
-		if err != nil && !os.IsExist(err) {
-			err = os.MkdirAll(config.CniLinkPath, os.ModeDir)
-			if err != nil {
-				return err
-			}
-		}
-		cniFile := config.CniLinkPath + "/ovn_cni"
-		_, err = os.Stat(cniFile)
-		if err != nil && !os.IsExist(err) {
-			_, err = exec.Command("ln", "-s", cniPluginPath, cniFile).CombinedOutput()
-			if err != nil {
-				return err
-			}
-		}
-
-		_, err = os.Stat(config.CniConfPath)
-		if err != nil && !os.IsExist(err) {
-			err = os.MkdirAll(config.CniConfPath, os.ModeDir)
-			if err != nil {
-				return err
-			}
+			return err
 		}
 
 		// Always create the CNI config for consistency.
-		cniConf := config.CniConfPath + "/10-net.conf"
-		f, err := os.OpenFile(cniConf, os.O_CREATE|os.O_WRONLY, 0666)
+		cniConf := config.CniConfPath + "/10-ovn-kubernetes.conf"
+		f, err := os.OpenFile(cniConf, os.O_CREATE|os.O_WRONLY, 0644)
 		if err != nil {
 			return err
 		}
 		defer f.Close()
-		_, err = f.Write([]byte("{\"name\":\"ovn-cni\", \"type\":\"ovn_cni\"}"))
+		confJSON := fmt.Sprintf("{\"name\":\"ovn-kubernetes\", \"type\":\"%s\"}", config.CniPlugin)
+		_, err = f.Write([]byte(confJSON))
 		if err != nil {
 			return err
 		}
 	}
 
-	return ovn.CreateManagementPort(node.Name, subnet.String(), cluster.ClusterIPNet.String())
+	return nil
 }

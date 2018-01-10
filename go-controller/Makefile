@@ -1,6 +1,8 @@
-
 OUT_DIR = _output
 export OUT_DIR
+PREFIX ?= ${DESTDIR}/usr
+BINDIR ?= ${PREFIX}/bin
+CNIBINDIR ?= ${DESTDIR}/opt/cni/bin
 
 .PHONY: all build
 
@@ -15,7 +17,10 @@ all build:
 	hack/build-go.sh cmd/ovn-k8s-cni-overlay/ovn-k8s-cni-overlay.go
 
 install:
-	cp ${OUT_DIR}/go/bin/* /usr/bin/
+	install -D -m 755 ${OUT_DIR}/go/bin/ovnkube ${BINDIR}/
+	install -D -m 755 ${OUT_DIR}/go/bin/ovn-k8s-overlay ${BINDIR}/
+	install -D -m 755 ${OUT_DIR}/go/bin/ovn-kube-util ${BINDIR}/
+	install -D -m 755 ${OUT_DIR}/go/bin/ovn-k8s-cni-overlay ${CNIBINDIR}/
 
 clean:
 	rm -rf ${OUT_DIR}
