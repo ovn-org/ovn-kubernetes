@@ -44,8 +44,9 @@ func RunOVSVsctl(args ...string) (string, string, error) {
 	return strings.Trim(stdout.String(), "\" \n"), stderr.String(), err
 }
 
-// RunOVNNbctl runs a command via ovs-nbctl.
-func RunOVNNbctl(args ...string) (string, string, error) {
+// RunOVNNbctlWithTimeout runs command via ovs-nbctl with a specific timeout
+func RunOVNNbctlWithTimeout(timeout int, args ...string) (string, string,
+	error) {
 	cmdPath, err := exec.LookPath(ovnNbctlCommand)
 	if err != nil {
 		return "", "", err
@@ -61,14 +62,14 @@ func RunOVNNbctl(args ...string) (string, string, error) {
 			fmt.Sprintf("--certificate=%s", config.NbctlCertificate),
 			fmt.Sprintf("--bootstrap-ca-cert=%s", config.NbctlCACert),
 			fmt.Sprintf("--db=%s", config.OvnNB),
-			fmt.Sprintf("--timeout=%d", ovsCommandTimeout),
+			fmt.Sprintf("--timeout=%d", timeout),
 		}
 		cmdArgs = append(cmdArgs, args...)
 		cmd = exec.Command(cmdPath, cmdArgs...)
 	} else {
 		cmdArgs := []string{
 			fmt.Sprintf("--db=%s", config.OvnNB),
-			fmt.Sprintf("--timeout=%d", ovsCommandTimeout),
+			fmt.Sprintf("--timeout=%d", timeout),
 		}
 		cmdArgs = append(cmdArgs, args...)
 		cmd = exec.Command(cmdPath, cmdArgs...)
@@ -79,4 +80,9 @@ func RunOVNNbctl(args ...string) (string, string, error) {
 
 	err = cmd.Run()
 	return strings.Trim(stdout.String(), "\" \n"), stderr.String(), err
+}
+
+// RunOVNNbctl runs a command via ovs-nbctl.
+func RunOVNNbctl(args ...string) (string, string, error) {
+	return RunOVNNbctlWithTimeout(ovsCommandTimeout, args...)
 }

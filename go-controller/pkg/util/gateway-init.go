@@ -40,7 +40,38 @@ func getLocalSystemID() (string, error) {
 	return localSystemID, nil
 }
 
+func lockNBForGateways() error {
+	localSystemID, err := getLocalSystemID()
+	if err != nil {
+		return err
+	}
+
+	stdout, stderr, err := RunOVNNbctlWithTimeout(60, "--", "wait-until",
+		"nb_global", ".", "external-ids:gateway-lock=\"\"", "--", "set",
+		"nb_global", ".", "external_ids:gateway-lock="+localSystemID)
+	if err != nil {
+		return fmt.Errorf("Failed to set gateway-lock "+
+			"stdout: %q, stderr: %q, error: %v", stdout, stderr, err)
+	}
+	return nil
+}
+
+func unlockNBForGateways() {
+	stdout, stderr, err := RunOVNNbctl("--", "set", "nb_global", ".",
+		"external-ids:gateway-lock=\"\"")
+	if err != nil {
+		logrus.Errorf("Failed to delete lock for gateways, "+
+			"stdout: %q, stderr: %q, error: %v", stdout, stderr, err)
+	}
+}
+
 func generateGatewayIP() (string, error) {
+	err := lockNBForGateways()
+	if err != nil {
+		return "", err
+	}
+	defer unlockNBForGateways()
+
 	// All the routers connected to "join" switch are in 100.64.1.0/24
 	// network and they have their external_ids:connect_to_join set.
 	stdout, stderr, err := RunOVNNbctl("--data=bare", "--no-heading",
