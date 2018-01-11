@@ -59,6 +59,21 @@ func main() {
 	// log flags
 	verbose := flag.Int("loglevel", 5, "logrus loglevels")
 
+	// gateway flags
+	gatewayInit := flag.Bool("init-gateways", false,
+		"initialize a gateway in each minion")
+	gatewayIntf := flag.String("gatewayInterface", "",
+		"The interface in minions that will be the gateway interface. "+
+			"If none specified, then the node's interface on which the "+
+			"default gateway is configured will be used as the gateway "+
+			"interface. Only useful with \"init-gateways\"")
+	gatewayNextHop := flag.String("gatewayNextHop", "",
+		"The external default gateway which is used as a next hop by "+
+			"OVN gateway.  This is many times just the default gateway "+
+			"of the node in question. If not specified, the default gateway"+
+			"configured in the node is used. Only useful with "+
+			"\"init-gateways\"")
+
 	flag.Parse()
 
 	// Process log flags
@@ -94,6 +109,9 @@ func main() {
 		clusterController.CACert = *rootCAFile
 		clusterController.Token = *token
 		clusterController.HostSubnetLength = 8
+		clusterController.GatewayInit = *gatewayInit
+		clusterController.GatewayIntf = *gatewayIntf
+		clusterController.GatewayNextHop = *gatewayNextHop
 		_, clusterController.ClusterIPNet, err = net.ParseCIDR(*clusterSubnet)
 		if err != nil {
 			panic(err.Error)
