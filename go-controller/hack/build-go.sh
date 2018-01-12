@@ -17,7 +17,8 @@ build_binaries() {
     mkdir -p "${OVN_KUBE_OUTPUT_BINPATH}"
     export GOBIN="${OVN_KUBE_OUTPUT_BINPATH}"
 
-    go install "${OVN_KUBE_BINARIES[@]}"
+    # Add a buildid to the executable - needed by rpmbuild
+    go install -a -ldflags "-B 0x$(head -c20 /dev/urandom|od -An -tx1|tr -d ' \n')" -v -x "${OVN_KUBE_BINARIES[@]}";
 }
 
 test() {
