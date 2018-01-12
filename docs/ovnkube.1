@@ -1,0 +1,107 @@
+.TH OVNKUBE "1" "Jan 2018" "ovn-kubernetes" "OVN-KUBERNETES User Commands"
+.SH NAME
+ovnkube \- ovn utility
+.SH SYNOPSIS
+.B ovnkube
+[\fI\,OPTION\/\fR]... [\fI\,FILE\/\fR]...
+.SH DESCRIPTION
+.PP
+The ovn utility used to confiugre ovn-kubernetes
+.SH OPTIONS
+.TP
+\fB\-alsologtostderr\fR
+log to standard error as well as files
+.TP
+\fB\-apiserver\fR string
+URL to the Kubernetes apiserver (default "https://localhost:8443")
+.TP
+\fB\-ca-cert\fR string
+CA cert for the Kubernetes api server
+.TP
+\fB\-cluster-subnet\fR string
+Cluster wide IP subnet to use (default "11.11.0.0/16")
+.TP
+\fB\-init-master\fR string
+initialize master, requires the hostname as argument
+.TP
+\fB\-init-node\fR string
+initialize node, requires the name that node is registered with in kubernetes cluster
+.TP
+\fB\-kubeconfig\fR string
+absolute path to the kubeconfig file
+.TP
+\fB\-log_backtrace_at value
+when logging hits line file:N, emit a stack trace
+.TP
+\fB\-log_dir\fR string
+If non-empty, write log files in this directory
+.TP
+\fB\-loglevel\fR int
+logrus loglevels (default 5)
+.TP
+\fB\-logtostderr
+log to standard error instead of files
+.TP
+\fB\-net-controller
+Flag to start the central controller that watches pods/services/policies
+.TP
+\fB\-ovn-north-client-cacert\fR string
+CA certificate that the client should use for talking to the OVN database.  Leave empty to use local unix socket.
+.TP
+\fB\-ovn-north-client-cert\fR string
+Client certificate that the client should use for talking to the OVN database.  Leave empty to use local unix socket.
+.TP
+\fB\-ovn-north-client-privkey\fR string
+Private key that the client should use for talking to the OVN database.  Leave empty to use local unix socket.
+.TP
+\fB\-ovn-north-db\fR string
+IP address and port of the OVN northbound API (eg, ssl://1.2.3.4:6641).  Leave empty to use a local unix socket.
+.TP
+\fB\-ovn-north-server-cacert\fR string
+CA certificate that the OVN northbound API should use for securing the API.  Leave empty to use local unix socket.
+.TP
+\fB\-ovn-north-server-cert\fR string
+Server certificate that the OVN northbound API should use for securing the API.  Leave empty to use local unix socket.
+.TP
+\fB\-ovn-north-server-privkey\fR string
+Private key that the OVN northbound API should use for securing the API.  Leave empty to use local unix socket.
+.TP
+\fB\-ovn-south-client-cacert\fR string
+CA certificate that the client should use for talking to the OVN database.
+.TP
+\fB\-ovn-south-client-cert\fR string
+Client certificate that the client should use for talking to the OVN database.
+.TP
+\fB\-ovn-south-client-privkey\fR string
+Private key that the client should use for talking to the OVN database.
+.TP
+\fB\-ovn-south-db\fR string
+IP address and port of the OVN southbound database (eg, ssl://1.2.3.4:6642).
+.TP
+\fB\-ovn-south-server-cacert\fR string
+CA certificate that the OVN southbound database should use for securing the API.
+.TP
+\fB\-ovn-south-server-cert\fR string
+Server certificate that the OVN southbound database should use for securing the API.
+.TP
+\fB\-ovn-south-server-privkey\fR string
+Private key that the OVN southbound database should use for securing the API.
+.TP
+\fB\-stderrthreshold\fR value
+logs at or above this threshold go to stderr
+.TP
+\fB\-token\fR string
+Bearer token to use for establishing ovn infrastructure
+.TP
+\fB\-v\fR value
+log level for V logs
+.TP
+\fB\-vmodule\fR value
+comma-separated list of pattern=N settings for file-filtered logging
+
+.SH "SEE ALSO"
+.BR ovn-k8s-overlay (1),
+.BR ovn-kube-util (1).
+
+.PP
+https://github.com/openvswitch/ovn-kubernetes
