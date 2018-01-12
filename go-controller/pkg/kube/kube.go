@@ -5,11 +5,11 @@ import (
 
 	"github.com/Sirupsen/logrus"
 
+	kapi "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/labels"
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/client-go/kubernetes"
-	kapi "k8s.io/api/core/v1"
 )
 
 // Interface represents the exported methods for dealing with getting/setting
