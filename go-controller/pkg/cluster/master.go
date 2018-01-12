@@ -8,8 +8,8 @@ import (
 
 	"github.com/Sirupsen/logrus"
 
-	utilwait "k8s.io/apimachinery/pkg/util/wait"
 	kapi "k8s.io/api/core/v1"
+	utilwait "k8s.io/apimachinery/pkg/util/wait"
 	"k8s.io/client-go/tools/cache"
 
 	"github.com/openvswitch/ovn-kubernetes/go-controller/pkg/config"
