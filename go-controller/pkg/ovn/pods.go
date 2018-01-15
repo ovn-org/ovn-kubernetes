@@ -80,7 +80,15 @@ func (oc *Controller) deleteLogicalPort(pod *kapi.Pod) {
 
 	ipAddress := oc.getIPFromOvnAnnotation(pod.Annotations["ovn"])
 
-	oc.deleteACLDeny(pod.Namespace, pod.Spec.NodeName, logicalPort)
+	delete(oc.logicalPortCache, logicalPort)
+
+	oc.lspMutex.Lock()
+	delete(oc.lspIngressDenyCache, logicalPort)
+	delete(oc.lspEgressDenyCache, logicalPort)
+	oc.lspMutex.Unlock()
+
+	oc.deleteACLDeny(pod.Namespace, pod.Spec.NodeName, logicalPort, "Ingress")
+	oc.deleteACLDeny(pod.Namespace, pod.Spec.NodeName, logicalPort, "Egress")
 	oc.deletePodFromNamespaceAddressSet(pod.Namespace, ipAddress)
 	return
 }
@@ -122,11 +130,14 @@ func (oc *Controller) addLogicalPort(pod *kapi.Pod) {
 		portName, "dynamic", "--", "set",
 		"logical_switch_port", portName,
 		"external-ids:namespace="+pod.Namespace,
+		"external-ids:logical_switch="+logicalSwitch,
 		"external-ids:pod=true").CombinedOutput()
 	if err != nil {
 		logrus.Errorf("Error while creating logical port %s - %v (%s)", portName, err, string(out))
 		return
 	}
+
+	oc.logicalPortCache[portName] = logicalSwitch
 
 	gatewayIP, mask, err := oc.getGatewayFromSwitch(logicalSwitch)
 	if err != nil {
