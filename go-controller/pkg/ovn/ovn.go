@@ -29,6 +29,10 @@ type Controller struct {
 	// A cache of all logical switches seen by the watcher
 	logicalSwitchCache map[string]bool
 
+	// A cache of all logical ports seen by the watcher and
+	// its corresponding logical switch
+	logicalPortCache map[string]string
+
 	// For each namespace, an address_set that has all the pod IP
 	// address in that namespace
 	namespaceAddressSet map[string]map[string]bool
@@ -40,8 +44,12 @@ type Controller struct {
 	namespacePolicies map[string]map[string]*namespacePolicy
 
 	// For each logical port, the number of network policies that want
-	// to add a deny rule.
+	// to add a ingress deny rule.
 	lspIngressDenyCache map[string]int
+
+	// For each logical port, the number of network policies that want
+	// to add a egress deny rule.
+	lspEgressDenyCache map[string]int
 
 	// A mutex for logicalPortIngressDenyCache
 	lspMutex *sync.Mutex
@@ -74,10 +82,12 @@ func (oc *Controller) Run() {
 
 func (oc *Controller) initializePolicyData() {
 	oc.logicalSwitchCache = make(map[string]bool)
+	oc.logicalPortCache = make(map[string]string)
 	oc.namespaceAddressSet = make(map[string]map[string]bool)
 	oc.namespacePolicies = make(map[string]map[string]*namespacePolicy)
 	oc.namespaceMutex = make(map[string]*sync.Mutex)
 	oc.lspIngressDenyCache = make(map[string]int)
+	oc.lspEgressDenyCache = make(map[string]int)
 	oc.lspMutex = &sync.Mutex{}
 }
 
@@ -201,8 +211,10 @@ func (oc *Controller) WatchNetworkPolicy() {
 		UpdateFunc: func(old, newer interface{}) {
 			oldPolicy := old.(*kapisnetworking.NetworkPolicy)
 			newPolicy := newer.(*kapisnetworking.NetworkPolicy)
-			oc.deleteNetworkPolicy(oldPolicy)
-			oc.addNetworkPolicy(newPolicy)
+			if !reflect.DeepEqual(oldPolicy, newPolicy) {
+				oc.deleteNetworkPolicy(oldPolicy)
+				oc.addNetworkPolicy(newPolicy)
+			}
 			return
 		},
 		DeleteFunc: func(obj interface{}) {
@@ -236,8 +248,7 @@ func (oc *Controller) WatchNamespaces() {
 			return
 		},
 		UpdateFunc: func(old, newer interface{}) {
-			ns := newer.(*kapi.Namespace)
-			oc.addNamespace(ns)
+			// We only use namespace's name and that does not get updated.
 			return
 		},
 		DeleteFunc: func(obj interface{}) {
