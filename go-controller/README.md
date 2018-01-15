@@ -12,9 +12,11 @@ make clean
 make
 ```
 
-Then find the executable here : go-controller/_output/go/bin/ovnkube
+Then find the executables here : go-controller/_output/go/bin/
 
 'ovnkube' is the single all-in-one executable useful for deploying the ovn cni plugin for a kubernetes deployment
+
+'ovn-k8s-cni-overlay' is the cni executable to be planted under /opt/cni/bin so that it can be invoked for each pod event
 
 ### Usage
 
@@ -72,6 +74,14 @@ With the above the master ovnkube controller will initialize the central master 
 
 
 #### Initialize a newly added node for the OVN network
+
+Remember to install the cni binary first. Use the Makefile, or, manually copy 'ovn-k8s-cni-overlay' to /opt/cni/bin (or the appropriate directory that kubernetes will use to look for the plugin).
+
+```
+make install
+```
+
+Then, run the ovnkube executable to initalize the node:
 
 ```
 ovnkube --init-node <name of the node as identified in kubernetes> \
