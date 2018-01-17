@@ -25,23 +25,6 @@ EOF
     exit 2
   fi
 
-  # Travis continuous build uses a head go release that doesn't report
-  # a version number, so we skip this check on Travis.  It's unnecessary
-  # there anyway.
-  if [[ "${TRAVIS:-}" != "true" ]]; then
-    local go_version
-    go_version=($(go version))
-    if [[ "${go_version[2]}" < "go1.5" ]]; then
-      cat <<EOF
-
-Detected Go version: ${go_version[*]}.
-ovn-kube builds require Go version 1.6 or greater.
-
-EOF
-      exit 2
-    fi
-  fi
-
   unset GOBIN
 
   # create a local GOPATH in _output
