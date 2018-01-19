@@ -194,7 +194,7 @@ func GatewayInit(clusterIPSubnet, nodeName, nicIP, physicalInterface,
 		return err
 	}
 	if k8sNSLbTCP == "" {
-		stdout, stderr, err = RunOVNNbctl("--", "create", "load_balancer",
+		k8sNSLbTCP, stderr, err = RunOVNNbctl("--", "create", "load_balancer",
 			"external_ids:TCP_lb_gateway_router="+gatewayRouter)
 		if err != nil {
 			logrus.Errorf("Failed to create load balancer, stdout: %q, "+
@@ -212,7 +212,7 @@ func GatewayInit(clusterIPSubnet, nodeName, nicIP, physicalInterface,
 		return err
 	}
 	if k8sNSLbUDP == "" {
-		stdout, stderr, err = RunOVNNbctl("--", "create", "load_balancer",
+		k8sNSLbUDP, stderr, err = RunOVNNbctl("--", "create", "load_balancer",
 			"external_ids:UDP_lb_gateway_router="+gatewayRouter,
 			"protocol=udp")
 		if err != nil {
