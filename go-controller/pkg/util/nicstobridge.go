@@ -73,7 +73,7 @@ func NicToBridge(iface string) error {
 		"--", "br-set-external-id", bridge, "bridge-id", bridge,
 		"--", "set", "bridge", bridge, "fail-mode=standalone",
 		fmt.Sprintf("other_config:hwaddr=%s", ifaceLink.Attrs().HardwareAddr),
-		"--", "add-port", bridge, iface)
+		"--", "--may-exist", "add-port", bridge, iface)
 	if err != nil {
 		logrus.Errorf("Failed to create OVS bridge, stdout: %q, stderr: %q, error: %v", stdout, stderr, err)
 		return err
