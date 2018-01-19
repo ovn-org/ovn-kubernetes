@@ -59,6 +59,9 @@ func (cluster *OvnClusterController) StartClusterMaster(masterNodeName string) e
 
 	// now go over the 'existing' list again and create annotations for those who do not have it
 	for _, node := range existingNodes.Items {
+		if node.Name == masterNodeName {
+			continue
+		}
 		_, ok := node.Annotations[OvnHostSubnet]
 		if !ok {
 			err := cluster.addNode(&node)
@@ -220,6 +223,15 @@ func (cluster *OvnClusterController) SetupMaster(masterNodeName string, masterSw
 	err = ovn.CreateManagementPort(masterNodeName, masterSwitchNetwork, cluster.ClusterIPNet.String())
 	if err != nil {
 		return fmt.Errorf("Failed create management port: %v", err)
+	}
+
+	// Create a lock for gateway-init to co-ordinate.
+	stdout, stderr, err = util.RunOVNNbctl("--", "set", "nb_global", ".",
+		"external-ids:gateway-lock=\"\"")
+	if err != nil {
+		logrus.Errorf("Failed to create lock for gateways, "+
+			"stdout: %q, stderr: %q, error: %v", stdout, stderr, err)
+		return err
 	}
 
 	return nil
