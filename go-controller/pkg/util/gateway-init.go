@@ -83,6 +83,7 @@ func generateGatewayIP() (string, error) {
 			stdout, stderr, err)
 		return "", err
 	}
+	ips := strings.Split(strings.TrimSpace(stdout), "\n")
 
 	ipStart, ipStartNet, _ := net.ParseCIDR("100.64.1.0/24")
 	ipMax, _, _ := net.ParseCIDR("100.64.1.255/24")
@@ -90,9 +91,9 @@ func generateGatewayIP() (string, error) {
 	for !ipStart.Equal(ipMax) {
 		ipStart = NextIP(ipStart)
 		used := 0
-		ips := strings.Split(strings.TrimSpace(stdout), "\n")
 		for _, v := range ips {
-			if ipStart.String() == v {
+			ipCompare, _, _ := net.ParseCIDR(v)
+			if ipStart.String() == ipCompare.String() {
 				used = 1
 				break
 			}
