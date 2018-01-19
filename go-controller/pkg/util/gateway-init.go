@@ -391,7 +391,7 @@ func GatewayInit(clusterIPSubnet, nodeName, nicIP, physicalInterface,
 
 				// Add source IP address based routes in distributed router
 				// for this gateway router.
-				stdout, stderr, err = RunOVSVsctl("--may-exist",
+				stdout, stderr, err = RunOVNNbctl("--may-exist",
 					"--policy=src-ip", "lr-route-add", k8sClusterRouter,
 					rampoutIPSubnet, routerIPByte.String())
 				if err != nil {
