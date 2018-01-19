@@ -112,7 +112,11 @@ func generateGatewayIP() (string, error) {
 func GatewayInit(clusterIPSubnet, nodeName, nicIP, physicalInterface,
 	bridgeInterface, defaultGW, rampoutIPSubnet string) error {
 
-	ip, physicalIPNet, _ := net.ParseCIDR(nicIP)
+	ip, physicalIPNet, err := net.ParseCIDR(nicIP)
+	if err != nil {
+		logrus.Errorf("error parsing %s (%v)", nicIP, err)
+		return err
+	}
 	n, _ := physicalIPNet.Mask.Size()
 	physicalIPMask := fmt.Sprintf("%s/%d", ip.String(), n)
 	physicalIP := ip.String()
