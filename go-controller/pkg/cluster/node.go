@@ -13,6 +13,7 @@ import (
 
 	"github.com/openvswitch/ovn-kubernetes/go-controller/pkg/config"
 	"github.com/openvswitch/ovn-kubernetes/go-controller/pkg/ovn"
+	"github.com/openvswitch/ovn-kubernetes/go-controller/pkg/util"
 
 	kapi "k8s.io/api/core/v1"
 )
@@ -64,9 +65,9 @@ func (cluster *OvnClusterController) StartClusterNode(name string) error {
 
 	logrus.Infof("Node %s ready for ovn initialization with subnet %s", node.Name, subnet.String())
 
-	out, err := exec.Command("systemctl", "start", "openvswitch").CombinedOutput()
+	err = util.StartOVS()
 	if err != nil {
-		return fmt.Errorf("error starting openvswitch service: %v\n  %q", err, string(out))
+		return err
 	}
 
 	args := []string{
@@ -80,14 +81,14 @@ func (cluster *OvnClusterController) StartClusterNode(name string) error {
 		fmt.Sprintf("external_ids:k8s-api-server=\"%s\"", cluster.KubeServer),
 		fmt.Sprintf("external_ids:k8s-api-token=\"%s\"", cluster.Token),
 	}
-	out, err = exec.Command("ovs-vsctl", args...).CombinedOutput()
+	out, err := exec.Command("ovs-vsctl", args...).CombinedOutput()
 	if err != nil {
 		return fmt.Errorf("Error setting OVS external IDs: %v\n  %q", err, string(out))
 	}
 
-	out, err = exec.Command("systemctl", "restart", "ovn-controller").CombinedOutput()
+	err = util.RestartOvnController()
 	if err != nil {
-		return fmt.Errorf("error starting ovn-controller service: %v\n  %q", err, string(out))
+		return err
 	}
 
 	// Fetch config file to override default values.
