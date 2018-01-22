@@ -4,6 +4,7 @@ import (
 	"flag"
 	"fmt"
 	"net"
+	"os"
 	"strings"
 
 	"github.com/Sirupsen/logrus"
@@ -57,12 +58,27 @@ func main() {
 	node := flag.String("init-node", "", "initialize node, requires the name that node is registered with in kubernetes cluster")
 
 	// log flags
-	verbose := flag.Int("loglevel", 5, "logrus loglevels")
+	verbose := flag.Int("loglevel", 4,
+		"loglevels 5=debug, 4=info, 3=warn, 2=error, 1=fatal")
+	logFile := flag.String("logfile", "",
+		"logfile name (with path) for ovnkube to write to.")
 
 	flag.Parse()
 
 	// Process log flags
 	logrus.SetLevel(logrus.Level(*verbose))
+	logrus.SetOutput(os.Stderr)
+	if *logFile != "" {
+		file, err := os.OpenFile(*logFile, os.O_CREATE|os.O_APPEND|os.O_WRONLY,
+			0660)
+		if err != nil {
+			logrus.Errorf("failed to open logfile %s (%v). Ignoring..",
+				*logFile, err)
+		} else {
+			defer file.Close()
+			logrus.SetOutput(file)
+		}
+	}
 
 	// Process auth flags
 	var config *restclient.Config
