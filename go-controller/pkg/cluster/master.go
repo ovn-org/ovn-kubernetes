@@ -132,15 +132,26 @@ func (cluster *OvnClusterController) SetupMaster(masterNodeName string, masterSw
 		return err
 	}
 
+	nodeIP, err := netutils.GetNodeIP(masterNodeName)
+	if err != nil {
+		logrus.Errorf("Failed to obtain master's IP: %v", err)
+		return err
+	}
+
 	args := []string{
 		"set",
 		"Open_vSwitch",
 		".",
+		"external_ids:ovn-encap-type=geneve",
+		fmt.Sprintf("external_ids:ovn-encap-ip=%s", nodeIP),
 		fmt.Sprintf("external_ids:k8s-api-server=\"%s\"", kubeURL.Host),
 		fmt.Sprintf("external_ids:k8s-api-token=\"%s\"", cluster.Token),
 	}
 	if cluster.NorthDBClientAuth.scheme != OvnDBSchemeUnix {
 		args = append(args, fmt.Sprintf("external_ids:ovn-nb=\"%s\"", cluster.NorthDBClientAuth.GetURL()))
+	}
+	if cluster.SouthDBClientAuth.scheme != OvnDBSchemeUnix {
+		args = append(args, fmt.Sprintf("external_ids:ovn-remote=\"%s\"", cluster.SouthDBClientAuth.GetURL()))
 	}
 
 	out, err := exec.Command("ovs-vsctl", args...).CombinedOutput()
