@@ -36,8 +36,11 @@ when logging hits line file:N, emit a stack trace
 \fB\-log_dir\fR string
 If non-empty, write log files in this directory
 .TP
+\fB\-logfile\fR string
+logfile name (with path) for ovnkube to write to.
+.TP
 \fB\-loglevel\fR int
-logrus loglevels (default 5)
+loglevels 5=debug, 4=info, 3=warn, 2=error, 1=fatal
 .TP
 \fB\-logtostderr
 log to standard error instead of files
