@@ -13,7 +13,8 @@ import (
 // Controller structure is the object which holds the controls for starting
 // and reacting upon the watched resources (e.g. pods, endpoints)
 type Controller struct {
-	Kube kube.Interface
+	Kube           kube.Interface
+	NodePortEnable bool
 
 	StartPodWatch       func(cache.ResourceEventHandler, func([]interface{}))
 	StartEndpointWatch  func(cache.ResourceEventHandler, func([]interface{}))

@@ -63,6 +63,10 @@ log to standard error instead of files
 \fB\-net-controller
 Flag to start the central controller that watches pods/services/policies
 .TP
+\fB\-nodeport\fR
+Setup nodeport based entries in OVN gateways for ingress into the k8s cluster.
+By default, it is disabled.
+.TP
 \fB\-ovn-north-client-cacert\fR string
 CA certificate that the client should use for talking to the OVN database.  Leave empty to use local unix socket.
 .TP
