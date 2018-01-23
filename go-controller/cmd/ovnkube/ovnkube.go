@@ -78,6 +78,10 @@ func main() {
 			"configured in the node is used. Only useful with "+
 			"\"init-gateways\"")
 
+	// Enable nodeport
+	nodePortEnable := flag.Bool("nodeport", false,
+		"Setup nodeport based ingress on gateways.")
+
 	flag.Parse()
 
 	// Process log flags
@@ -176,6 +180,7 @@ func main() {
 		}
 	}
 	if *netController {
+		ovnController.NodePortEnable = *nodePortEnable
 		ovnController.Run()
 	}
 	if *master != "" || *netController {
