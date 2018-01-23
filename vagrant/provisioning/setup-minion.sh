@@ -76,59 +76,38 @@ if [ -n "$SSL" ]; then
     sudo ovs-pki -b -d /vagrant/pki sign ovncontroller switch
     popd
 
-    sudo ovs-vsctl set Open_vSwitch . \
-                external_ids:ovn-remote="ssl:$MASTER_OVERLAY_IP:6642" \
-                external_ids:ovn-nb="ssl:$MASTER_OVERLAY_IP:6641" \
-                external_ids:ovn-encap-ip=$MINION_OVERLAY_IP \
-                external_ids:ovn-encap-type=geneve
-
     # Set ovn-controller SSL options in /etc/default/ovn-host
     sudo bash -c 'cat >> /etc/default/ovn-host <<EOF
 OVN_CTL_OPTS="--ovn-controller-ssl-key=/etc/openvswitch/ovncontroller-privkey.pem  --ovn-controller-ssl-cert=/etc/openvswitch/ovncontroller-cert.pem --ovn-controller-ssl-bootstrap-ca-cert=/etc/openvswitch/ovnsb-ca.cert"
 EOF'
-
-else
-    sudo ovs-vsctl set Open_vSwitch . \
-                external_ids:ovn-remote="tcp:$MASTER_OVERLAY_IP:6642" \
-                external_ids:ovn-nb="tcp:$MASTER_OVERLAY_IP:6641" \
-                external_ids:ovn-encap-ip=$MINION_OVERLAY_IP \
-                external_ids:ovn-encap-type=geneve
 fi
 
-# Re-start OVN controller
-sudo /etc/init.d/ovn-host restart
-
-# Set k8s API server IP
-sudo ovs-vsctl set Open_vSwitch . external_ids:k8s-api-server="$MASTER_OVERLAY_IP:8080"
-
-# Install OVN+K8S Integration
+# XXX: We only need this for ovn-k8s-gateway-helper
 git clone https://github.com/openvswitch/ovn-kubernetes
 pushd ovn-kubernetes
 sudo -H pip install .
 popd
+sudo rm `which ovn-k8s-cni-overlay`
+sudo rm `which ovn-k8s-overlay`
 
-# Initialize the minion
-sudo ovn-k8s-overlay minion-init --cluster-ip-subnet="192.168.0.0/16" \
-                                 --minion-switch-subnet="$MINION_SUBNET" \
-                                 --node-name="$MINION_NAME"
+# Install golang
+wget https://dl.google.com/go/go1.9.2.linux-amd64.tar.gz
+sudo tar -C /usr/local -xzf go1.9.2.linux-amd64.tar.gz
+export PATH="/usr/local/go/bin:echo $PATH"
+export GOPATH=$HOME/work
 
-# Create a OVS physical bridge and move IP address of enp0s9 to br-enp0s9
-echo "Creating physical bridge ..."
-sudo ovs-vsctl add-br br-enp0s9
-sudo ovs-vsctl add-port br-enp0s9 enp0s9
-sudo ip addr flush dev enp0s9
-sudo ifconfig br-enp0s9 $PUBLIC_IP netmask $PUBLIC_SUBNET_MASK up
+# Setup CNI directory
+sudo mkdir -p /opt/cni/bin/
 
-# Start a gateway
-sudo ovn-k8s-overlay gateway-init --cluster-ip-subnet="192.168.0.0/16" \
-                                 --bridge-interface br-enp0s9 \
-                                 --physical-ip $PUBLIC_IP/$PUBLIC_SUBNET_MASK \
-                                 --node-name="$MINION_NAME" --default-gw $GW_IP
-
-# Start the gateway helper.
-sudo ovn-k8s-gateway-helper --physical-bridge=br-enp0s9 \
-            --physical-interface=enp0s9 --pidfile --detach
-
+# Install OVN+K8S Integration
+mkdir -p $HOME/work/src/github.com/openvswitch
+pushd $HOME/work/src/github.com/openvswitch
+git clone https://github.com/openvswitch/ovn-kubernetes
+popd
+pushd $HOME/work/src/github.com/openvswitch/ovn-kubernetes/go-controller
+make 1>&2 2>/dev/null
+sudo make install
+popd
 
 # Restore xtrace
 $XTRACE

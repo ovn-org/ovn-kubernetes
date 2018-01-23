@@ -61,15 +61,14 @@ You can verify the services are up and running now:
 * ./kubectl get svc
 
 You can now get to the service from the host running Virtualbox by using
-the Nodeport and the IP 10.10.0.11 (the public-ip for the master found in
+the Nodeport and the IP 10.10.0.12 (the public-ip for the k8s-minion1 found in
 the vagrant/provisioning/vm_config.conf.yml file).
 
-* curl 10.10.0.11:[nodeport]
-
-Since the vagrant initializes gateway node on the minions too, you should be
-able to access the same service via the IP addresses of the minion nodes too.
-
 * curl 10.10.0.12:[nodeport]
+
+Since the vagrant initializes gateway node on the other minion too, you should
+be able to access the same service via 10.10.0.13 too.
+
 * curl 10.10.0.13:[nodeport]
 
 Note: The above IP addresss are NOT used when you use the vagrant's public
