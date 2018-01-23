@@ -59,6 +59,9 @@ func (cluster *OvnClusterController) StartClusterMaster(masterNodeName string) e
 
 	// now go over the 'existing' list again and create annotations for those who do not have it
 	for _, node := range existingNodes.Items {
+		if node.Name == masterNodeName {
+			continue
+		}
 		_, ok := node.Annotations[OvnHostSubnet]
 		if !ok {
 			err := cluster.addNode(&node)
