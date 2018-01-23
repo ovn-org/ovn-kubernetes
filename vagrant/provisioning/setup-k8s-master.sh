@@ -60,25 +60,44 @@ nohup sudo ./kube-controller-manager --master=127.0.0.1:8080 --v=2 2>&1 0<&- &>/
 echo "Starting kube-scheduler ..."
 nohup sudo ./kube-scheduler --master=127.0.0.1:8080 --v=2 2>&1 0<&- &>/dev/null &
 
-echo "Starting ovn-k8s-watcher ..."
-sudo ovn-k8s-watcher --overlay --pidfile --log-file -vfile:info -vconsole:emer --detach
-
-# Create a OVS physical bridge and move IP address of enp0s9 to br-enp0s9
-echo "Creating physical bridge ..."
-sudo ovs-vsctl add-br br-enp0s9
-sudo ovs-vsctl add-port br-enp0s9 enp0s9
-sudo ip addr flush dev enp0s9
-sudo ifconfig br-enp0s9 $PUBLIC_IP netmask $PUBLIC_SUBNET_MASK up
-
-# Setup the GW node on the master
-sudo ovn-k8s-overlay gateway-init --cluster-ip-subnet="192.168.0.0/16" --bridge-interface br-enp0s9 \
-                                  --physical-ip $PUBLIC_IP/$PUBLIC_SUBNET_MASK \
-                                  --node-name="k8smaster" --default-gw $GW_IP
-
-# Start the gateway helper.
-sudo ovn-k8s-gateway-helper --physical-bridge=br-enp0s9 --physical-interface=enp0s9 --pidfile --detach
-
 popd
+
+# Create a kubeconfig file.
+cat << KUBECONFIG >> ~/kubeconfig.yaml
+apiVersion: v1
+clusters:
+- cluster:
+    server: http://localhost:8080
+  name: default-cluster
+- cluster:
+    server: http://localhost:8080
+  name: local-server
+- cluster:
+    server: http://localhost:8080
+  name: ubuntu
+contexts:
+- context:
+    cluster: ubuntu
+    user: ubuntu
+  name: ubuntu
+current-context: ubuntu
+kind: Config
+preferences: {}
+users:
+- name: ubuntu
+  user:
+    password: p1NVMZqhOOOqkWQq
+    username: admin
+KUBECONFIG
+
+source ~/setup_master_args.sh
+nohup sudo ovnkube -kubeconfig $HOME/kubeconfig.yaml -net-controller -v=4 \
+ -apiserver="http://$OVERLAY_IP:8080" \
+ -logfile="/var/log/openvswitch/ovnkube.log" \
+ -init-master="k8smaster" -cluster-subnet="192.168.0.0/16" \
+ -ovn-north-db="tcp://$OVERLAY_IP:6631" \
+ -ovn-south-db="tcp://$OVERLAY_IP:6632" 2>&1 &
+
 
 # Setup some example yaml files
 cat << APACHEPOD >> ~/apache-pod.yaml

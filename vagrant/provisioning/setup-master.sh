@@ -71,46 +71,30 @@ if [ -n "$SSL" ]; then
     sudo ovs-pki -b -d /vagrant/pki sign ovncontroller switch
     popd
 
-    sudo ovn-nbctl set-connection pssl:6641
-    sudo ovn-sbctl set-connection pssl:6642
-
-    sudo ovs-vsctl set Open_vSwitch . external_ids:ovn-remote="ssl:$OVERLAY_IP:6642" \
-                                  external_ids:ovn-nb="ssl:$OVERLAY_IP:6641" \
-                                  external_ids:ovn-encap-ip=$OVERLAY_IP \
-                                  external_ids:ovn-encap-type=geneve
-
     # Set ovn-controller SSL options in /etc/default/ovn-host
     sudo bash -c 'cat >> /etc/default/ovn-host <<EOF
 OVN_CTL_OPTS="--ovn-controller-ssl-key=/etc/openvswitch/ovncontroller-privkey.pem  --ovn-controller-ssl-cert=/etc/openvswitch/ovncontroller-cert.pem --ovn-controller-ssl-bootstrap-ca-cert=/etc/openvswitch/ovnsb-ca.cert"
 EOF'
-
-else
-    # Plain TCP.
-    sudo ovn-nbctl set-connection ptcp:6641
-    sudo ovn-sbctl set-connection ptcp:6642
-
-    sudo ovs-vsctl set Open_vSwitch . external_ids:ovn-remote="tcp:$OVERLAY_IP:6642" \
-                                  external_ids:ovn-nb="tcp:$OVERLAY_IP:6641" \
-                                  external_ids:ovn-encap-ip=$OVERLAY_IP \
-                                  external_ids:ovn-encap-type=geneve
 fi
 
-# Re-start OVN controller
-sudo /etc/init.d/ovn-host restart
+# Install golang
+wget https://dl.google.com/go/go1.9.2.linux-amd64.tar.gz
+sudo tar -C /usr/local -xzf go1.9.2.linux-amd64.tar.gz
+export PATH="/usr/local/go/bin:echo $PATH"
+export GOPATH=$HOME/work
 
-# Set k8s API server IP
-sudo ovs-vsctl set Open_vSwitch . external_ids:k8s-api-server="0.0.0.0:8080"
+# Setup CNI directory
+sudo mkdir -p /opt/cni/bin/
 
 # Install OVN+K8S Integration
+mkdir -p $HOME/work/src/github.com/openvswitch
+pushd $HOME/work/src/github.com/openvswitch
 git clone https://github.com/openvswitch/ovn-kubernetes
-pushd ovn-kubernetes
-sudo -H pip install .
 popd
-
-# Initialize the master
-sudo ovn-k8s-overlay master-init --cluster-ip-subnet="192.168.0.0/16" \
-                                 --master-switch-subnet="$MASTER_SUBNET" \
-                                 --node-name="$MASTER_NAME"
+pushd $HOME/work/src/github.com/openvswitch/ovn-kubernetes/go-controller
+make 1>&2 2>/dev/null
+sudo make install
+popd
 
 # Restore xtrace
 $XTRACE
