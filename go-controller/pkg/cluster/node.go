@@ -205,40 +205,62 @@ func (cluster *OvnClusterController) initGateway(
 		}
 	}
 
-	// Check to see whether the interface is OVS bridge.
-	_, _, err := util.RunOVSVsctl("--", "br-exists", cluster.GatewayIntf)
-	if err != nil {
-		// This is not a OVS bridge. We need to create a OVS bridge
-		// and add cluster.GatewayIntf as a port of that bridge.
-		err = util.NicToBridge(cluster.GatewayIntf)
+	var ipAddress string
+	var err error
+	if !cluster.GatewaySpareIntf {
+		// Check to see whether the interface is OVS bridge.
+		_, _, err = util.RunOVSVsctl("--", "br-exists", cluster.GatewayIntf)
 		if err != nil {
-			return fmt.Errorf("Failed to convert nic %s to OVS bridge (%v)",
+			// This is not a OVS bridge. We need to create a OVS bridge
+			// and add cluster.GatewayIntf as a port of that bridge.
+			err = util.NicToBridge(cluster.GatewayIntf)
+			if err != nil {
+				return fmt.Errorf("Failed to convert nic %s to OVS bridge "+
+					"(%v)", cluster.GatewayIntf, err)
+			}
+			cluster.GatewayBridge = fmt.Sprintf("br%s", cluster.GatewayIntf)
+		} else {
+			return fmt.Errorf("gateway interface is not a physical device, " +
+				"but rather a bridge device")
+		}
+
+		// Now, we get IP address from OVS bridge. If IP does not exist,
+		// error out.
+		ipAddress, err = getIPv4Address(cluster.GatewayBridge)
+		if err != nil {
+			return fmt.Errorf("Failed to get interface details for %s (%v)",
+				cluster.GatewayBridge, err)
+		}
+		if ipAddress == "" {
+			return fmt.Errorf("%s does not have a ipv4 address",
+				cluster.GatewayBridge)
+		}
+		err = util.GatewayInit(clusterIPSubnet, nodeName, ipAddress, "",
+			cluster.GatewayBridge, cluster.GatewayNextHop, subnet)
+		if err != nil {
+			return err
+		}
+
+	} else {
+		// Now, we get IP address from physical interface. If IP does not
+		// exists error out.
+		ipAddress, err = getIPv4Address(cluster.GatewayIntf)
+		if err != nil {
+			return fmt.Errorf("Failed to get interface details for %s (%v)",
 				cluster.GatewayIntf, err)
 		}
-		cluster.GatewayBridge = fmt.Sprintf("br%s", cluster.GatewayIntf)
-	} else {
-		return fmt.Errorf("gateway interface is not a physical device, but " +
-			"rather a bridge devide")
+		if ipAddress == "" {
+			return fmt.Errorf("%s does not have a ipv4 address",
+				cluster.GatewayIntf)
+		}
+		err = util.GatewayInit(clusterIPSubnet, nodeName, ipAddress,
+			cluster.GatewayIntf, "", cluster.GatewayNextHop, subnet)
+		if err != nil {
+			return err
+		}
 	}
 
-	// Now, we get IP address from OVS bridge. If IP does not exist, error out.
-	ipAddress, err := getIPv4Address(cluster.GatewayBridge)
-	if err != nil {
-		return fmt.Errorf("Failed to get interface details for %s (%v)",
-			cluster.GatewayBridge, err)
-	}
-	if ipAddress == "" {
-		return fmt.Errorf("%s does not have a ipv4 address",
-			cluster.GatewayBridge)
-	}
-
-	err = util.GatewayInit(clusterIPSubnet, nodeName, ipAddress, "",
-		cluster.GatewayBridge, cluster.GatewayNextHop, subnet)
-	if err != nil {
-		return err
-	}
-
-	if !cluster.NodePortEnable {
+	if !cluster.NodePortEnable && !cluster.GatewaySpareIntf {
 		// Program cluster.GatewayIntf to let non-pod traffic to go to host
 		// stack
 		err = cluster.addDefaultConntrackRules()

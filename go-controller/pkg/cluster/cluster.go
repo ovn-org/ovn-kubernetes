@@ -22,11 +22,12 @@ type OvnClusterController struct {
 	ClusterIPNet     *net.IPNet
 	HostSubnetLength uint32
 
-	GatewayInit    bool
-	GatewayIntf    string
-	GatewayBridge  string
-	GatewayNextHop string
-	NodePortEnable bool
+	GatewayInit      bool
+	GatewayIntf      string
+	GatewayBridge    string
+	GatewayNextHop   string
+	GatewaySpareIntf bool
+	NodePortEnable   bool
 
 	NorthDBServerAuth *OvnDBAuth
 	NorthDBClientAuth *OvnDBAuth
