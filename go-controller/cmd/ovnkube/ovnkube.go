@@ -77,6 +77,10 @@ func main() {
 			"of the node in question. If not specified, the default gateway"+
 			"configured in the node is used. Only useful with "+
 			"\"init-gateways\"")
+	gatewaySpareIntf := flag.Bool("gateway-spare-interface", false,
+		"If true, assumes that \"gateway-interface\" provided can be "+
+			"exclusively used for the OVN gateway.  When true, only OVN"+
+			"related traffic can flow through this interface")
 
 	// Enable nodeport
 	nodePortEnable := flag.Bool("nodeport", false,
@@ -132,6 +136,7 @@ func main() {
 		clusterController.GatewayInit = *gatewayInit
 		clusterController.GatewayIntf = *gatewayIntf
 		clusterController.GatewayNextHop = *gatewayNextHop
+		clusterController.GatewaySpareIntf = *gatewaySpareIntf
 		_, clusterController.ClusterIPNet, err = net.ParseCIDR(*clusterSubnet)
 		if err != nil {
 			panic(err.Error)
