@@ -14,6 +14,7 @@ import (
 const (
 	ovsCommandTimeout = 5
 	ovsVsctlCommand   = "ovs-vsctl"
+	ovsOfctlCommand   = "ovs-ofctl"
 	ovnNbctlCommand   = "ovn-nbctl"
 	osRelease         = "/etc/os-release"
 	rhel              = "RHEL"
@@ -133,6 +134,23 @@ func RestartOvnController() error {
 		}
 	}
 	return nil
+}
+
+// RunOVSOfctl runs a command via ovs-ofctl.
+func RunOVSOfctl(args ...string) (string, string, error) {
+	cmdPath, err := exec.LookPath(ovsOfctlCommand)
+	if err != nil {
+		return "", "", err
+	}
+
+	stdout := &bytes.Buffer{}
+	stderr := &bytes.Buffer{}
+	cmd := exec.Command(cmdPath, args...)
+	cmd.Stdout = stdout
+	cmd.Stderr = stderr
+
+	err = cmd.Run()
+	return strings.Trim(stdout.String(), "\" \n"), stderr.String(), err
 }
 
 // RunOVSVsctl runs a command via ovs-vsctl.

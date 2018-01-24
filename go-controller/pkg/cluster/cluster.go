@@ -24,7 +24,9 @@ type OvnClusterController struct {
 
 	GatewayInit    bool
 	GatewayIntf    string
+	GatewayBridge  string
 	GatewayNextHop string
+	NodePortEnable bool
 
 	NorthDBServerAuth *OvnDBAuth
 	NorthDBClientAuth *OvnDBAuth

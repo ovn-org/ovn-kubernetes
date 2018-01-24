@@ -164,6 +164,7 @@ func main() {
 		if *token == "" {
 			panic("Cannot initialize node without service account 'token'. Please provide one with --token argument")
 		}
+		clusterController.NodePortEnable = *nodePortEnable
 
 		err := clusterController.StartClusterNode(*node)
 		if err != nil {
