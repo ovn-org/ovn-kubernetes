@@ -11,7 +11,7 @@ import (
 	"github.com/openvswitch/ovn-kubernetes/go-controller/pkg/util"
 )
 
-func configureManagementPort(nodeName, clusterSubnet, clusterServicesSubnet,
+func configureManagementPort(clusterSubnet, clusterServicesSubnet,
 	routerIP, interfaceName, interfaceIP string) error {
 	// Up the interface.
 	_, err := exec.Command("ip", "link", "set", interfaceName, "up").CombinedOutput()
@@ -166,8 +166,8 @@ func CreateManagementPort(nodeName, localSubnet, clusterSubnet,
 		logrus.Errorf("Failed to add logical port to switch, stdout: %q, stderr: %q, error: %v", stdout, stderr, err)
 		return err
 	}
-	err = configureManagementPort(nodeName, clusterSubnet,
-		clusterServicesSubnet, routerIP, interfaceName, portIPMask)
+	err = configureManagementPort(clusterSubnet, clusterServicesSubnet,
+		routerIP, interfaceName, portIPMask)
 	if err != nil {
 		return err
 	}
