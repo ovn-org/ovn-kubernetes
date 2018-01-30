@@ -4,10 +4,13 @@ import (
 	"fmt"
 	"net"
 	"net/url"
+	"os"
 
+	"github.com/Sirupsen/logrus"
 	"github.com/openshift/origin/pkg/util/netutils"
 	"github.com/openvswitch/ovn-kubernetes/go-controller/pkg/config"
 	"github.com/openvswitch/ovn-kubernetes/go-controller/pkg/kube"
+	"github.com/openvswitch/ovn-kubernetes/go-controller/pkg/util"
 	"k8s.io/client-go/tools/cache"
 )
 
@@ -135,10 +138,23 @@ func (a *OvnDBAuth) GetURL() string {
 // SetConfig sets global config variables from an OvnDBAuth object
 func (a *OvnDBAuth) SetConfig() {
 	config.Scheme = string(a.scheme)
+	config.OvnNB = a.GetURL()
 	if a.scheme == "ssl" {
 		config.NbctlPrivateKey = a.PrivKey
 		config.NbctlCertificate = a.Cert
 		config.NbctlCACert = a.CACert
+		_, err := os.Stat(config.NbctlCACert)
+		if os.IsNotExist(err) {
+			logrus.Infof("No ovn-nbctl CA certificate found. " +
+				"Attempting bootstrapping...")
+			_, _, err = util.RunOVNNbctl("list", "nb_global")
+			if err != nil {
+				// An error is expected. But did bootstrapping succeed?"
+				_, err = os.Stat(config.NbctlCACert)
+				if os.IsNotExist(err) {
+					logrus.Errorf("Bootstapping OVN NB's certificate failed")
+				}
+			}
+		}
 	}
-	config.OvnNB = a.GetURL()
 }
