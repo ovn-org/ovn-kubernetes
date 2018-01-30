@@ -9,7 +9,6 @@ import (
 	"github.com/Sirupsen/logrus"
 
 	kapi "k8s.io/api/core/v1"
-	utilwait "k8s.io/apimachinery/pkg/util/wait"
 	"k8s.io/client-go/tools/cache"
 
 	"github.com/openvswitch/ovn-kubernetes/go-controller/pkg/config"
@@ -74,7 +73,7 @@ func (cluster *OvnClusterController) StartClusterMaster(masterNodeName string) e
 
 	// go routine to watch all node events. On creation, addNode will be called that will create a subnet for the switch belonging to that node.
 	// On a delete call, the subnet will be returned to the allocator as the switch is deleted from ovn
-	go utilwait.Forever(cluster.watchNodes, 0)
+	cluster.watchNodes()
 	return nil
 }
 
@@ -293,7 +292,7 @@ func (cluster *OvnClusterController) deleteNode(node *kapi.Node) error {
 }
 
 func (cluster *OvnClusterController) watchNodes() {
-	handler := cache.ResourceEventHandlerFuncs{
+	cluster.watchFactory.AddNodeHandler(cache.ResourceEventHandlerFuncs{
 		AddFunc: func(obj interface{}) {
 			node := obj.(*kapi.Node)
 			logrus.Debugf("Added event for Node %q", node.Name)
@@ -323,6 +322,5 @@ func (cluster *OvnClusterController) watchNodes() {
 				logrus.Errorf("Error deleting node %s: %v", node.Name, err)
 			}
 		},
-	}
-	cluster.StartNodeWatch(handler)
+	}, nil)
 }

@@ -14,7 +14,8 @@ import (
 	"k8s.io/client-go/tools/clientcmd"
 
 	ovncluster "github.com/openvswitch/ovn-kubernetes/go-controller/pkg/cluster"
-	ovnfactory "github.com/openvswitch/ovn-kubernetes/go-controller/pkg/factory"
+	"github.com/openvswitch/ovn-kubernetes/go-controller/pkg/factory"
+	"github.com/openvswitch/ovn-kubernetes/go-controller/pkg/ovn"
 	util "github.com/openvswitch/ovn-kubernetes/go-controller/pkg/util"
 )
 
@@ -129,8 +130,12 @@ func main() {
 	}
 
 	// create factory and start the controllers asked for
-	factory := ovnfactory.NewDefaultFactory(clientset)
-	clusterController := factory.CreateClusterController()
+	stopChan := make(chan struct{})
+	factory, err := factory.NewWatchFactory(clientset, stopChan)
+	if err != nil {
+		panic(err.Error)
+	}
+	clusterController := ovncluster.NewClusterController(clientset, factory)
 
 	if *master != "" || *node != "" {
 		clusterController.KubeServer = *server
@@ -177,8 +182,6 @@ func main() {
 		}
 	}
 
-	ovnController := factory.CreateOvnController()
-
 	if *node != "" {
 		if *token == "" {
 			panic("Cannot initialize node without service account 'token'. Please provide one with --token argument")
@@ -200,6 +203,7 @@ func main() {
 		}
 	}
 	if *netController {
+		ovnController := ovn.NewOvnController(clientset, factory)
 		ovnController.NodePortEnable = *nodePortEnable
 		ovnController.Run()
 	}

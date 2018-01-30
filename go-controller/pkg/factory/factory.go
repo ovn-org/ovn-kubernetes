@@ -1,118 +1,93 @@
 package factory
 
 import (
+	"fmt"
 	"time"
 
-	utilwait "k8s.io/apimachinery/pkg/util/wait"
 	informerfactory "k8s.io/client-go/informers"
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/tools/cache"
-
-	"github.com/Sirupsen/logrus"
-	"github.com/openvswitch/ovn-kubernetes/go-controller/pkg/cluster"
-	"github.com/openvswitch/ovn-kubernetes/go-controller/pkg/kube"
-	"github.com/openvswitch/ovn-kubernetes/go-controller/pkg/ovn"
 )
 
-// Factory initializes and manages the kube watches that drive an ovn controller
-type Factory struct {
-	KClient        kubernetes.Interface
-	IFactory       informerfactory.SharedInformerFactory
-	ResyncInterval time.Duration
+// WatchFactory initializes and manages common kube watches
+type WatchFactory struct {
+	iFactory  informerfactory.SharedInformerFactory
+	informers map[string]cache.SharedIndexInformer
 }
 
-// NewDefaultFactory initializes a default ovn controller factory.
-func NewDefaultFactory(c kubernetes.Interface) *Factory {
-	resyncInterval := 10 * time.Minute
-	return &Factory{
-		KClient:        c,
-		ResyncInterval: resyncInterval,
-		IFactory:       informerfactory.NewSharedInformerFactory(c, resyncInterval),
+const (
+	typePods       = "pods"
+	typeServices   = "services"
+	typeEndpoints  = "endpoints"
+	typePolicies   = "policies"
+	typeNamespaces = "namespaces"
+	typeNodes      = "nodes"
+)
+
+// NewWatchFactory initializes a new watch factory
+func NewWatchFactory(c kubernetes.Interface, stopChan <-chan struct{}) (*WatchFactory, error) {
+	iFactory := informerfactory.NewSharedInformerFactory(c, 10*time.Minute)
+	wf := &WatchFactory{
+		iFactory:  iFactory,
+		informers: make(map[string]cache.SharedIndexInformer),
 	}
+
+	wf.informers[typePods] = iFactory.Core().V1().Pods().Informer()
+	wf.informers[typeServices] = iFactory.Core().V1().Services().Informer()
+	wf.informers[typeEndpoints] = iFactory.Core().V1().Endpoints().Informer()
+	wf.informers[typePolicies] = iFactory.Networking().V1().NetworkPolicies().Informer()
+	wf.informers[typeNamespaces] = iFactory.Core().V1().Namespaces().Informer()
+	wf.informers[typeNodes] = iFactory.Core().V1().Nodes().Informer()
+
+	for _, inf := range wf.informers {
+		go inf.Run(stopChan)
+		if !cache.WaitForCacheSync(stopChan, inf.HasSynced) {
+			return nil, fmt.Errorf("error in syncing cache for %T informer", inf)
+		}
+	}
+
+	return wf, nil
 }
 
-// CreateOvnController begins listing and watching against the API server for the pod and endpoint
-// resources. It spawns child goroutines that cannot be terminated.
-func (factory *Factory) CreateOvnController() *ovn.Controller {
-
-	podInformer := factory.IFactory.Core().V1().Pods()
-	serviceInformer := factory.IFactory.Core().V1().Services()
-	endpointsInformer := factory.IFactory.Core().V1().Endpoints()
-	policyInformer := factory.IFactory.Networking().V1().NetworkPolicies()
-	namespaceInformer := factory.IFactory.Core().V1().Namespaces()
-
-	return &ovn.Controller{
-		StartPodWatch: func(handler cache.ResourceEventHandler, processExisting func([]interface{})) {
-			go podInformer.Informer().Run(utilwait.NeverStop)
-			if !cache.WaitForCacheSync(utilwait.NeverStop, podInformer.Informer().HasSynced) {
-				logrus.Errorf("Error in syncing cache for Pod Informer. Informer will not be run.")
-				return
-			}
-			if processExisting != nil {
-				// cache has synced, lets process the list
-				processExisting(podInformer.Informer().GetStore().List())
-			}
-			// now register the event handler
-			podInformer.Informer().AddEventHandler(handler)
-		},
-		StartServiceWatch: func(handler cache.ResourceEventHandler, processExisting func([]interface{})) {
-			go serviceInformer.Informer().Run(utilwait.NeverStop)
-			if !cache.WaitForCacheSync(utilwait.NeverStop, serviceInformer.Informer().HasSynced) {
-				logrus.Errorf("Error in syncing cache for Service Informer. Informer will not be run.")
-				return
-			}
-			if processExisting != nil {
-				processExisting(serviceInformer.Informer().GetStore().List())
-			}
-			serviceInformer.Informer().AddEventHandler(handler)
-		},
-		StartEndpointWatch: func(handler cache.ResourceEventHandler, processExisting func([]interface{})) {
-			go endpointsInformer.Informer().Run(utilwait.NeverStop)
-			if !cache.WaitForCacheSync(utilwait.NeverStop, endpointsInformer.Informer().HasSynced) {
-				logrus.Errorf("Error in syncing cache for Endpoints Informer. Informer will not be run.")
-				return
-			}
-			if processExisting != nil {
-				processExisting(endpointsInformer.Informer().GetStore().List())
-			}
-			endpointsInformer.Informer().AddEventHandler(handler)
-		},
-		StartPolicyWatch: func(handler cache.ResourceEventHandler, processExisting func([]interface{})) {
-			go policyInformer.Informer().Run(utilwait.NeverStop)
-			if !cache.WaitForCacheSync(utilwait.NeverStop, policyInformer.Informer().HasSynced) {
-				logrus.Errorf("Error in syncing cache for Policy Informer. Informer will not be run.")
-				return
-			}
-			if processExisting != nil {
-				processExisting(policyInformer.Informer().GetStore().List())
-			}
-			policyInformer.Informer().AddEventHandler(handler)
-		},
-		StartNamespaceWatch: func(handler cache.ResourceEventHandler, processExisting func([]interface{})) {
-			go namespaceInformer.Informer().Run(utilwait.NeverStop)
-			if !cache.WaitForCacheSync(utilwait.NeverStop, namespaceInformer.Informer().HasSynced) {
-				logrus.Errorf("Error in syncing cache for Namespace Informer. Informer will not be run.")
-				return
-			}
-			if processExisting != nil {
-				processExisting(namespaceInformer.Informer().GetStore().List())
-			}
-			namespaceInformer.Informer().AddEventHandler(handler)
-		},
-		Kube: &kube.Kube{KClient: factory.KClient},
+func (wf *WatchFactory) addHandler(informerType string, handler cache.ResourceEventHandler, processExisting func([]interface{})) {
+	inf, ok := wf.informers[informerType]
+	if !ok {
+		panic("unknown informer type " + informerType)
 	}
+	if processExisting != nil {
+		// cache has synced, lets process the list
+		processExisting(inf.GetStore().List())
+	}
+	// now register the event handler
+	inf.AddEventHandler(handler)
 }
 
-// CreateClusterController creates the controller for cluster management that watches nodes and gives
-// out the subnets for the logical switch meant for the node
-func (factory *Factory) CreateClusterController() *cluster.OvnClusterController {
-	nodeInformer := factory.IFactory.Core().V1().Nodes()
-	return &cluster.OvnClusterController{
-		StartNodeWatch: func(handler cache.ResourceEventHandler) {
-			nodeInformer.Informer().AddEventHandler(handler)
-			nodeInformer.Informer().Run(utilwait.NeverStop)
-		},
-		//NodeInformer: nodeInformer,
-		Kube: &kube.Kube{KClient: factory.KClient},
-	}
+// AddPodHandler adds a handler function that will be executed on Pod object changes
+func (wf *WatchFactory) AddPodHandler(handler cache.ResourceEventHandler, processExisting func([]interface{})) {
+	wf.addHandler(typePods, handler, processExisting)
+}
+
+// AddServiceHandler adds a handler function that will be executed on Service object changes
+func (wf *WatchFactory) AddServiceHandler(handler cache.ResourceEventHandler, processExisting func([]interface{})) {
+	wf.addHandler(typeServices, handler, processExisting)
+}
+
+// AddEndpointHandler adds a handler function that will be executed on Endpoint object changes
+func (wf *WatchFactory) AddEndpointHandler(handler cache.ResourceEventHandler, processExisting func([]interface{})) {
+	wf.addHandler(typeEndpoints, handler, processExisting)
+}
+
+// AddPolicyHandler adds a handler function that will be executed on NetworkPolicy object changes
+func (wf *WatchFactory) AddPolicyHandler(handler cache.ResourceEventHandler, processExisting func([]interface{})) {
+	wf.addHandler(typePolicies, handler, processExisting)
+}
+
+// AddNamespaceHandler adds a handler function that will be executed on Namespace object changes
+func (wf *WatchFactory) AddNamespaceHandler(handler cache.ResourceEventHandler, processExisting func([]interface{})) {
+	wf.addHandler(typeNamespaces, handler, processExisting)
+}
+
+// AddNodeHandler adds a handler function that will be executed on Node object changes
+func (wf *WatchFactory) AddNodeHandler(handler cache.ResourceEventHandler, processExisting func([]interface{})) {
+	wf.addHandler(typeNodes, handler, processExisting)
 }
