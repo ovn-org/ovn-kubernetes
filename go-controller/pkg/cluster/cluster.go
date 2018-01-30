@@ -9,14 +9,16 @@ import (
 	"github.com/Sirupsen/logrus"
 	"github.com/openshift/origin/pkg/util/netutils"
 	"github.com/openvswitch/ovn-kubernetes/go-controller/pkg/config"
+	"github.com/openvswitch/ovn-kubernetes/go-controller/pkg/factory"
 	"github.com/openvswitch/ovn-kubernetes/go-controller/pkg/kube"
 	"github.com/openvswitch/ovn-kubernetes/go-controller/pkg/util"
-	"k8s.io/client-go/tools/cache"
+	"k8s.io/client-go/kubernetes"
 )
 
 // OvnClusterController is the object holder for utilities meant for cluster management
 type OvnClusterController struct {
 	Kube                  kube.Interface
+	watchFactory          *factory.WatchFactory
 	masterSubnetAllocator *netutils.SubnetAllocator
 
 	KubeServer            string
@@ -38,8 +40,6 @@ type OvnClusterController struct {
 
 	SouthDBServerAuth *OvnDBAuth
 	SouthDBClientAuth *OvnDBAuth
-
-	StartNodeWatch func(handler cache.ResourceEventHandler)
 }
 
 // OvnDBScheme describes the OVN database connection transport method
@@ -56,6 +56,15 @@ const (
 	// OvnDBSchemeUnix specifies Unix domains sockets as the OVN database transport method
 	OvnDBSchemeUnix OvnDBScheme = "unix"
 )
+
+// NewClusterController creates a new controller for IP subnet allocation to
+// a given resource type (either Namespace or Node)
+func NewClusterController(kubeClient kubernetes.Interface, wf *factory.WatchFactory) *OvnClusterController {
+	return &OvnClusterController{
+		Kube:         &kube.Kube{KClient: kubeClient},
+		watchFactory: wf,
+	}
+}
 
 // OvnDBAuth describes an OVN database location and authentication method
 type OvnDBAuth struct {

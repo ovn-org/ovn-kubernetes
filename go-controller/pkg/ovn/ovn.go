@@ -2,9 +2,11 @@ package ovn
 
 import (
 	"github.com/Sirupsen/logrus"
+	"github.com/openvswitch/ovn-kubernetes/go-controller/pkg/factory"
 	"github.com/openvswitch/ovn-kubernetes/go-controller/pkg/kube"
 	kapi "k8s.io/api/core/v1"
 	kapisnetworking "k8s.io/api/networking/v1"
+	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/tools/cache"
 	"reflect"
 	"sync"
@@ -15,12 +17,7 @@ import (
 type Controller struct {
 	Kube           kube.Interface
 	NodePortEnable bool
-
-	StartPodWatch       func(cache.ResourceEventHandler, func([]interface{}))
-	StartEndpointWatch  func(cache.ResourceEventHandler, func([]interface{}))
-	StartServiceWatch   func(cache.ResourceEventHandler, func([]interface{}))
-	StartPolicyWatch    func(cache.ResourceEventHandler, func([]interface{}))
-	StartNamespaceWatch func(cache.ResourceEventHandler, func([]interface{}))
+	watchFactory   *factory.WatchFactory
 
 	gatewayCache map[string]string
 	// For TCP and UDP type traffic, cache OVN load-balancers used for the
@@ -67,34 +64,37 @@ const (
 	UDP = "UDP"
 )
 
+// NewOvnController creates a new OVN controller for creating logical network
+// infrastructure and policy
+func NewOvnController(kubeClient kubernetes.Interface, wf *factory.WatchFactory) *Controller {
+	return &Controller{
+		Kube:                     &kube.Kube{KClient: kubeClient},
+		watchFactory:             wf,
+		logicalSwitchCache:       make(map[string]bool),
+		logicalPortCache:         make(map[string]string),
+		namespaceAddressSet:      make(map[string]map[string]bool),
+		namespacePolicies:        make(map[string]map[string]*namespacePolicy),
+		namespaceMutex:           make(map[string]*sync.Mutex),
+		lspIngressDenyCache:      make(map[string]int),
+		lspEgressDenyCache:       make(map[string]int),
+		lspMutex:                 &sync.Mutex{},
+		gatewayCache:             make(map[string]string),
+		loadbalancerClusterCache: make(map[string]string),
+	}
+}
+
 // Run starts the actual watching. Also initializes any local structures needed.
 func (oc *Controller) Run() {
-	oc.gatewayCache = make(map[string]string)
-	oc.loadbalancerClusterCache = make(map[string]string)
-	oc.initializePolicyData()
-
 	oc.WatchPods()
 	oc.WatchServices()
 	oc.WatchEndpoints()
 	oc.WatchNamespaces()
-
 	oc.WatchNetworkPolicy()
-}
-
-func (oc *Controller) initializePolicyData() {
-	oc.logicalSwitchCache = make(map[string]bool)
-	oc.logicalPortCache = make(map[string]string)
-	oc.namespaceAddressSet = make(map[string]map[string]bool)
-	oc.namespacePolicies = make(map[string]map[string]*namespacePolicy)
-	oc.namespaceMutex = make(map[string]*sync.Mutex)
-	oc.lspIngressDenyCache = make(map[string]int)
-	oc.lspEgressDenyCache = make(map[string]int)
-	oc.lspMutex = &sync.Mutex{}
 }
 
 // WatchPods starts the watching of Pod resource and calls back the appropriate handler logic
 func (oc *Controller) WatchPods() {
-	handler := cache.ResourceEventHandlerFuncs{
+	oc.watchFactory.AddPodHandler(cache.ResourceEventHandlerFuncs{
 		AddFunc: func(obj interface{}) {
 			pod := obj.(*kapi.Pod)
 			oc.addLogicalPort(pod)
@@ -117,14 +117,13 @@ func (oc *Controller) WatchPods() {
 			}
 			oc.deleteLogicalPort(pod)
 		},
-	}
-	oc.StartPodWatch(handler, oc.syncPods)
+	}, oc.syncPods)
 }
 
 // WatchServices starts the watching of Service resource and calls back the
 // appropriate handler logic
 func (oc *Controller) WatchServices() {
-	handler := cache.ResourceEventHandlerFuncs{
+	oc.watchFactory.AddServiceHandler(cache.ResourceEventHandlerFuncs{
 		AddFunc: func(obj interface{}) {
 		},
 		UpdateFunc: func(old, new interface{}) {
@@ -145,13 +144,12 @@ func (oc *Controller) WatchServices() {
 			}
 			oc.deleteService(service)
 		},
-	}
-	oc.StartServiceWatch(handler, oc.syncServices)
+	}, oc.syncServices)
 }
 
 // WatchEndpoints starts the watching of Endpoint resource and calls back the appropriate handler logic
 func (oc *Controller) WatchEndpoints() {
-	handler := cache.ResourceEventHandlerFuncs{
+	oc.watchFactory.AddEndpointHandler(cache.ResourceEventHandlerFuncs{
 		AddFunc: func(obj interface{}) {
 			ep := obj.(*kapi.Endpoints)
 			err := oc.addEndpoints(ep)
@@ -196,14 +194,13 @@ func (oc *Controller) WatchEndpoints() {
 				logrus.Errorf("Error in deleting endpoints - %v", err)
 			}
 		},
-	}
-	oc.StartEndpointWatch(handler, nil)
+	}, nil)
 }
 
 // WatchNetworkPolicy starts the watching of network policy resource and calls
 // back the appropriate handler logic
 func (oc *Controller) WatchNetworkPolicy() {
-	handler := cache.ResourceEventHandlerFuncs{
+	oc.watchFactory.AddPolicyHandler(cache.ResourceEventHandlerFuncs{
 		AddFunc: func(obj interface{}) {
 			policy := obj.(*kapisnetworking.NetworkPolicy)
 			oc.addNetworkPolicy(policy)
@@ -235,14 +232,13 @@ func (oc *Controller) WatchNetworkPolicy() {
 			oc.deleteNetworkPolicy(policy)
 			return
 		},
-	}
-	oc.StartPolicyWatch(handler, nil)
+	}, nil)
 }
 
 // WatchNamespaces starts the watching of namespace resource and calls
 // back the appropriate handler logic
 func (oc *Controller) WatchNamespaces() {
-	handler := cache.ResourceEventHandlerFuncs{
+	oc.watchFactory.AddNamespaceHandler(cache.ResourceEventHandlerFuncs{
 		AddFunc: func(obj interface{}) {
 			ns := obj.(*kapi.Namespace)
 			oc.addNamespace(ns)
@@ -269,6 +265,5 @@ func (oc *Controller) WatchNamespaces() {
 			oc.deleteNamespace(ns)
 			return
 		},
-	}
-	oc.StartNamespaceWatch(handler, nil)
+	}, nil)
 }
