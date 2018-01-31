@@ -91,12 +91,34 @@ users:
 KUBECONFIG
 
 source ~/setup_master_args.sh
-nohup sudo ovnkube -kubeconfig $HOME/kubeconfig.yaml -net-controller -v=4 \
+
+if [ $PROTOCOL = "ssl" ]; then
+  nohup sudo ovnkube -kubeconfig $HOME/kubeconfig.yaml -net-controller -v=4 \
  -apiserver="http://$OVERLAY_IP:8080" \
  -logfile="/var/log/openvswitch/ovnkube.log" \
  -init-master="k8smaster" -cluster-subnet="192.168.0.0/16" \
- -ovn-north-db="tcp://$OVERLAY_IP:6631" \
- -ovn-south-db="tcp://$OVERLAY_IP:6632" 2>&1 &
+ -ovn-north-db="$PROTOCOL://$OVERLAY_IP:6631" \
+ -ovn-north-server-privkey /etc/openvswitch/ovnnb-privkey.pem \
+ -ovn-north-server-cert /etc/openvswitch/ovnnb-cert.pem \
+ -ovn-north-server-cacert /vagrant/pki/switchca/cacert.pem \
+ -ovn-south-db="$PROTOCOL://$OVERLAY_IP:6632" \
+ -ovn-south-server-privkey /etc/openvswitch/ovnsb-privkey.pem \
+ -ovn-south-server-cert /etc/openvswitch/ovnsb-cert.pem \
+ -ovn-south-server-cacert /vagrant/pki/switchca/cacert.pem  \
+ -ovn-north-client-privkey /etc/openvswitch/ovncontroller-privkey.pem \
+ -ovn-north-client-cert /etc/openvswitch/ovncontroller-cert.pem \
+ -ovn-north-client-cacert /etc/openvswitch/ovnsb-ca.cert \
+ -ovn-south-client-privkey /etc/openvswitch/ovncontroller-privkey.pem \
+ -ovn-south-client-cert /etc/openvswitch/ovncontroller-cert.pem \
+ -ovn-south-client-cacert /etc/openvswitch/ovnsb-ca.cert 2>&1 &
+else
+  nohup sudo ovnkube -kubeconfig $HOME/kubeconfig.yaml -net-controller -v=4 \
+ -apiserver="http://$OVERLAY_IP:8080" \
+ -logfile="/var/log/openvswitch/ovnkube.log" \
+ -init-master="k8smaster" -cluster-subnet="192.168.0.0/16" \
+ -ovn-north-db="$PROTOCOL://$OVERLAY_IP:6631" \
+ -ovn-south-db="$PROTOCOL://$OVERLAY_IP:6632" 2>&1 &
+fi
 
 
 # Setup some example yaml files
