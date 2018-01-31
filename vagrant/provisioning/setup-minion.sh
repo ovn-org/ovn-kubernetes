@@ -70,6 +70,7 @@ sudo -H pip install ovs
 sudo apt-get install ovn-central=2.8.1-1 ovn-common=2.8.1-1 ovn-host=2.8.1-1 -y
 
 if [ -n "$SSL" ]; then
+    echo "PROTOCOL=ssl" >> setup_minion_args.sh
     # Install certificates
     pushd /etc/openvswitch
     sudo ovs-pki req ovncontroller
@@ -80,6 +81,8 @@ if [ -n "$SSL" ]; then
     sudo bash -c 'cat >> /etc/default/ovn-host <<EOF
 OVN_CTL_OPTS="--ovn-controller-ssl-key=/etc/openvswitch/ovncontroller-privkey.pem  --ovn-controller-ssl-cert=/etc/openvswitch/ovncontroller-cert.pem --ovn-controller-ssl-bootstrap-ca-cert=/etc/openvswitch/ovnsb-ca.cert"
 EOF'
+else
+  echo "PROTOCOL=tcp" >> setup_minion_args.sh
 fi
 
 # XXX: We only need this for ovn-k8s-gateway-helper

@@ -56,16 +56,13 @@ sudo apt-get install ovn-central=2.8.1-1 ovn-common=2.8.1-1 ovn-host=2.8.1-1 -y
 
 
 if [ -n "$SSL" ]; then
+    echo "PROTOCOL=ssl" >> setup_master_args.sh
     # Install SSL certificates
     pushd /etc/openvswitch
     sudo ovs-pki -d /vagrant/pki init --force
     sudo ovs-pki req ovnsb && sudo ovs-pki self-sign ovnsb
-    sudo ovn-sbctl set-ssl /etc/openvswitch/ovnsb-privkey.pem \
-        /etc/openvswitch/ovnsb-cert.pem  /vagrant/pki/switchca/cacert.pem
 
     sudo ovs-pki req ovnnb && sudo ovs-pki self-sign ovnnb
-    sudo ovn-nbctl set-ssl /etc/openvswitch/ovnnb-privkey.pem \
-        /etc/openvswitch/ovnnb-cert.pem  /vagrant/pki/switchca/cacert.pem
 
     sudo ovs-pki req ovncontroller
     sudo ovs-pki -b -d /vagrant/pki sign ovncontroller switch
@@ -75,6 +72,8 @@ if [ -n "$SSL" ]; then
     sudo bash -c 'cat >> /etc/default/ovn-host <<EOF
 OVN_CTL_OPTS="--ovn-controller-ssl-key=/etc/openvswitch/ovncontroller-privkey.pem  --ovn-controller-ssl-cert=/etc/openvswitch/ovncontroller-cert.pem --ovn-controller-ssl-bootstrap-ca-cert=/etc/openvswitch/ovnsb-ca.cert"
 EOF'
+else
+    echo "PROTOCOL=tcp" >> setup_master_args.sh
 fi
 
 # Install golang
