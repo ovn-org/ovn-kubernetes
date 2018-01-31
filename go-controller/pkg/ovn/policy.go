@@ -538,9 +538,8 @@ func (oc *Controller) handleLocalPodSelectorAddFunc(
 	obj interface{}) {
 	pod := obj.(*kapi.Pod)
 
-	//XXX: We can speed up if we use IP address from annotation. Otherwise, we
-	// wait till pod gets started.
-	if pod.Status.PodIP == "" {
+	ipAddress := oc.getIPFromOvnAnnotation(pod.Annotations["ovn"])
+	if ipAddress == "" {
 		return
 	}
 
@@ -648,8 +647,6 @@ func (oc *Controller) handlePeerPodSelector(
 	policy *kapisnetworking.NetworkPolicy, podSelector *metav1.LabelSelector,
 	addressSet string, stop chan bool) {
 
-	//XXX: We can speed up if we use IP address from annotation.
-
 	// TODO: Do we need a lock to protect this from concurrent delete and add
 	// events?
 	addressMap := make(map[string]bool)
@@ -668,11 +665,11 @@ func (oc *Controller) handlePeerPodSelector(
 		cache.ResourceEventHandlerFuncs{
 			AddFunc: func(obj interface{}) {
 				pod := obj.(*kapi.Pod)
-				if pod.Status.PodIP == "" ||
-					addressMap[pod.Status.PodIP] {
+				ipAddress := oc.getIPFromOvnAnnotation(pod.Annotations["ovn"])
+				if ipAddress == "" || addressMap[ipAddress] {
 					return
 				}
-				addressMap[pod.Status.PodIP] = true
+				addressMap[ipAddress] = true
 				addresses := make([]string, 0, len(addressMap))
 				for k := range addressMap {
 					addresses = append(addresses, k)
@@ -701,11 +698,11 @@ func (oc *Controller) handlePeerPodSelector(
 			},
 			UpdateFunc: func(oldObj, newObj interface{}) {
 				pod := newObj.(*kapi.Pod)
-				if pod.Status.PodIP == "" ||
-					addressMap[pod.Status.PodIP] {
+				ipAddress := oc.getIPFromOvnAnnotation(pod.Annotations["ovn"])
+				if ipAddress == "" || addressMap[ipAddress] {
 					return
 				}
-				addressMap[pod.Status.PodIP] = true
+				addressMap[ipAddress] = true
 				addresses := make([]string, 0, len(addressMap))
 				for k := range addressMap {
 					addresses = append(addresses, k)
