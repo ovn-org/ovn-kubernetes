@@ -135,9 +135,9 @@ func main() {
 	if err != nil {
 		panic(err.Error)
 	}
-	clusterController := ovncluster.NewClusterController(clientset, factory)
 
 	if *master != "" || *node != "" {
+		clusterController := ovncluster.NewClusterController(clientset, factory)
 		clusterController.KubeServer = *server
 		clusterController.CACert = *rootCAFile
 		clusterController.Token = *token
@@ -169,37 +169,36 @@ func main() {
 		if err != nil {
 			panic(err.Error())
 		}
-	}
 
-	if *master != "" {
-		clusterController.NorthDBServerAuth, err = ovncluster.NewOvnDBAuth(*ovnNorth, *ovnNorthServerPrivKey, *ovnNorthServerCert, *ovnNorthServerCACert, true)
-		if err != nil {
-			panic(err.Error())
-		}
-		clusterController.SouthDBServerAuth, err = ovncluster.NewOvnDBAuth(*ovnSouth, *ovnSouthServerPrivKey, *ovnSouthServerCert, *ovnSouthServerCACert, true)
-		if err != nil {
-			panic(err.Error())
-		}
-	}
+		if *node != "" {
+			if *token == "" {
+				panic("Cannot initialize node without service account 'token'. Please provide one with --token argument")
+			}
 
-	if *node != "" {
-		if *token == "" {
-			panic("Cannot initialize node without service account 'token'. Please provide one with --token argument")
+			err := clusterController.StartClusterNode(*node)
+			if err != nil {
+				logrus.Errorf(err.Error())
+				panic(err.Error())
+			}
 		}
 		clusterController.NodePortEnable = *nodePortEnable
 
-		err := clusterController.StartClusterNode(*node)
-		if err != nil {
-			logrus.Errorf(err.Error())
-			panic(err.Error())
-		}
-	}
-	if *master != "" {
-		// run the cluster controller to init the master
-		err := clusterController.StartClusterMaster(*master)
-		if err != nil {
-			logrus.Errorf(err.Error())
-			panic(err.Error())
+		if *master != "" {
+			clusterController.NorthDBServerAuth, err = ovncluster.NewOvnDBAuth(*ovnNorth, *ovnNorthServerPrivKey, *ovnNorthServerCert, *ovnNorthServerCACert, true)
+			if err != nil {
+				panic(err.Error())
+			}
+			clusterController.SouthDBServerAuth, err = ovncluster.NewOvnDBAuth(*ovnSouth, *ovnSouthServerPrivKey, *ovnSouthServerCert, *ovnSouthServerCACert, true)
+			if err != nil {
+				panic(err.Error())
+			}
+
+			// run the cluster controller to init the master
+			err := clusterController.StartClusterMaster(*master)
+			if err != nil {
+				logrus.Errorf(err.Error())
+				panic(err.Error())
+			}
 		}
 	}
 	if *netController {
