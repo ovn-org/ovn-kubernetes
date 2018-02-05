@@ -11,7 +11,8 @@ import (
 	"github.com/openvswitch/ovn-kubernetes/go-controller/pkg/util"
 )
 
-func configureManagementPort(nodeName, clusterSubnet, routerIP, interfaceName, interfaceIP string) error {
+func configureManagementPort(nodeName, clusterSubnet, clusterServicesSubnet,
+	routerIP, interfaceName, interfaceIP string) error {
 	// Up the interface.
 	_, err := exec.Command("ip", "link", "set", interfaceName, "up").CombinedOutput()
 	if err != nil {
@@ -38,14 +39,35 @@ func configureManagementPort(nodeName, clusterSubnet, routerIP, interfaceName, i
 
 	// Create a route for the entire subnet.
 	_, err = exec.Command("ip", "route", "add", clusterSubnet, "via", routerIP).CombinedOutput()
-	return err
+	if err != nil {
+		return err
+	}
+
+	if clusterServicesSubnet != "" {
+		// Flush the route for the services subnet (in case it was added before).
+		_, err = exec.Command("ip", "route", "flush",
+			clusterServicesSubnet).CombinedOutput()
+		if err != nil {
+			return err
+		}
+
+		// Create a route for the services subnet.
+		_, err = exec.Command("ip", "route", "add", clusterServicesSubnet,
+			"via", routerIP).CombinedOutput()
+		if err != nil {
+			return err
+		}
+	}
+
+	return nil
 }
 
 // CreateManagementPort creates a logical switch for the node and connect it to the distributed router. This switch will start with one logical port (A OVS internal interface).
 // 1. This logical port is via which a node can access all other nodes and the containers running inside them using the private IP addresses.
 // 2. When this port is created on the master node, the K8s daemons become reachable from the containers without any NAT.
 // 3. The nodes can health-check the pod IP addresses.
-func CreateManagementPort(nodeName, localSubnet, clusterSubnet string) error {
+func CreateManagementPort(nodeName, localSubnet, clusterSubnet,
+	clusterServicesSubnet string) error {
 	// Create a router port and provide it the first address in the 'local_subnet'.
 	ip, localSubnetNet, err := net.ParseCIDR(localSubnet)
 	if err != nil {
@@ -144,7 +166,8 @@ func CreateManagementPort(nodeName, localSubnet, clusterSubnet string) error {
 		logrus.Errorf("Failed to add logical port to switch, stdout: %q, stderr: %q, error: %v", stdout, stderr, err)
 		return err
 	}
-	err = configureManagementPort(nodeName, clusterSubnet, routerIP, interfaceName, portIPMask)
+	err = configureManagementPort(nodeName, clusterSubnet,
+		clusterServicesSubnet, routerIP, interfaceName, portIPMask)
 	if err != nil {
 		return err
 	}

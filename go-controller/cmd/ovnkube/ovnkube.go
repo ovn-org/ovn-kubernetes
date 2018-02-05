@@ -25,6 +25,10 @@ func main() {
 	rootCAFile := flag.String("ca-cert", "", "CA cert for the Kubernetes api server")
 	token := flag.String("token", "", "Bearer token to use for establishing ovn infrastructure")
 	clusterSubnet := flag.String("cluster-subnet", "11.11.0.0/16", "Cluster wide IP subnet to use")
+	clusterServicesSubnet := flag.String("service-cluster-ip-range", "",
+		"A CIDR notation IP range from which k8s assigns service cluster "+
+			"IPs. This should be the same as the one provided for "+
+			"kube-apiserver \"-service-cluster-ip-range\" option.")
 
 	// IP address and port of the northbound API server
 	ovnNorth := flag.String("ovn-north-db", "", "IP address and port of the OVN northbound API (eg, ssl://1.2.3.4:6641).  Leave empty to use a local unix socket.")
@@ -140,6 +144,16 @@ func main() {
 		_, clusterController.ClusterIPNet, err = net.ParseCIDR(*clusterSubnet)
 		if err != nil {
 			panic(err.Error)
+		}
+
+		if *clusterServicesSubnet != "" {
+			var servicesSubnet *net.IPNet
+			_, servicesSubnet, err = net.ParseCIDR(
+				*clusterServicesSubnet)
+			if err != nil {
+				panic(err.Error)
+			}
+			clusterController.ClusterServicesSubnet = servicesSubnet.String()
 		}
 
 		clusterController.NorthDBClientAuth, err = ovncluster.NewOvnDBAuth(*ovnNorth, *ovnNorthClientPrivKey, *ovnNorthClientCert, *ovnNorthClientCACert, false)

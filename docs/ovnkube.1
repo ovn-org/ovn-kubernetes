@@ -113,6 +113,11 @@ Server certificate that the OVN southbound database should use for securing the 
 \fB\-ovn-south-server-privkey\fR string
 Private key that the OVN southbound database should use for securing the API.
 .TP
+\fB\-service-cluster-ip-range\fR value
+A CIDR notation IP range from which k8s assigns service cluster IPs.
+This should be the same as the one provided for kube-apiserver's
+\fB\-service-cluster-ip-range\fR option.
+.TP
 \fB\-stderrthreshold\fR value
 logs at or above this threshold go to stderr
 .TP

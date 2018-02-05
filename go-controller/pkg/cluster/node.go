@@ -99,7 +99,10 @@ func (cluster *OvnClusterController) StartClusterNode(name string) error {
 	// Update config globals that OVN exec utils use
 	cluster.NorthDBClientAuth.SetConfig()
 
-	if err := ovn.CreateManagementPort(node.Name, subnet.String(), cluster.ClusterIPNet.String()); err != nil {
+	err = ovn.CreateManagementPort(node.Name, subnet.String(),
+		cluster.ClusterIPNet.String(),
+		cluster.ClusterServicesSubnet)
+	if err != nil {
 		return err
 	}
 

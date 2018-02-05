@@ -19,11 +19,12 @@ type OvnClusterController struct {
 	Kube                  kube.Interface
 	masterSubnetAllocator *netutils.SubnetAllocator
 
-	KubeServer       string
-	CACert           string
-	Token            string
-	ClusterIPNet     *net.IPNet
-	HostSubnetLength uint32
+	KubeServer            string
+	CACert                string
+	Token                 string
+	ClusterIPNet          *net.IPNet
+	ClusterServicesSubnet string
+	HostSubnetLength      uint32
 
 	GatewayInit      bool
 	GatewayIntf      string
