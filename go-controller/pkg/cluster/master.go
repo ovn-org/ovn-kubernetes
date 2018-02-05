@@ -230,7 +230,8 @@ func (cluster *OvnClusterController) SetupMaster(masterNodeName string, masterSw
 		return err
 	}
 
-	err = ovn.CreateManagementPort(masterNodeName, masterSwitchNetwork, cluster.ClusterIPNet.String())
+	err = ovn.CreateManagementPort(masterNodeName, masterSwitchNetwork,
+		cluster.ClusterIPNet.String(), cluster.ClusterServicesSubnet)
 	if err != nil {
 		return fmt.Errorf("Failed create management port: %v", err)
 	}
