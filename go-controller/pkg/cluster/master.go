@@ -86,24 +86,6 @@ func calculateMasterSwitchNetwork(clusterNetwork string, hostSubnetLength uint32
 	return sn.String(), err
 }
 
-func setDBServerAuth(ctlCmd, desc string, auth *OvnDBAuth) error {
-	if auth.scheme == OvnDBSchemeUnix {
-		return nil
-	}
-
-	out, err := exec.Command(ctlCmd, "set-connection", auth.GetURL()).CombinedOutput()
-	if err != nil {
-		return fmt.Errorf("Error setting %s API authentication: %v\n  %q", desc, err, string(out))
-	}
-	if auth.scheme == OvnDBSchemeSSL {
-		out, err = exec.Command(ctlCmd, "set-ssl", auth.PrivKey, auth.Cert, auth.CACert).CombinedOutput()
-		if err != nil {
-			return fmt.Errorf("Error setting SSL API certificates: %v\n  %q", err, string(out))
-		}
-	}
-	return nil
-}
-
 // SetupMaster calls the external script to create the switch and central routers for the network
 func (cluster *OvnClusterController) SetupMaster(masterNodeName string, masterSwitchNetwork string) error {
 	err := util.StartOVS()
@@ -122,11 +104,11 @@ func (cluster *OvnClusterController) SetupMaster(masterNodeName string, masterSw
 	}
 
 	// Set up north/southbound API authentication
-	err = setDBServerAuth("ovn-nbctl", "northbound", cluster.NorthDBServerAuth)
+	err = cluster.NorthDBServerAuth.SetDBServerAuth("ovn-nbctl", "northbound")
 	if err != nil {
 		return err
 	}
-	err = setDBServerAuth("ovn-sbctl", "southbound", cluster.SouthDBServerAuth)
+	err = cluster.SouthDBServerAuth.SetDBServerAuth("ovn-sbctl", "southbound")
 	if err != nil {
 		return err
 	}

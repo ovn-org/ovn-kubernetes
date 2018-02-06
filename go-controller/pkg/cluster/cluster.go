@@ -5,6 +5,7 @@ import (
 	"net"
 	"net/url"
 	"os"
+	"os/exec"
 
 	"github.com/Sirupsen/logrus"
 	"github.com/openshift/origin/pkg/util/netutils"
@@ -167,4 +168,24 @@ func (a *OvnDBAuth) SetConfig() {
 			}
 		}
 	}
+}
+
+// SetDBServerAuth sets the authentication configuration for the OVN
+// northbound or southbound database server
+func (a *OvnDBAuth) SetDBServerAuth(ctlCmd, desc string) error {
+	if a.scheme == OvnDBSchemeUnix {
+		return nil
+	}
+
+	out, err := exec.Command(ctlCmd, "set-connection", a.GetURL()).CombinedOutput()
+	if err != nil {
+		return fmt.Errorf("Error setting %s API authentication: %v\n  %q", desc, err, string(out))
+	}
+	if a.scheme == OvnDBSchemeSSL {
+		out, err = exec.Command(ctlCmd, "set-ssl", a.PrivKey, a.Cert, a.CACert).CombinedOutput()
+		if err != nil {
+			return fmt.Errorf("Error setting SSL API certificates: %v\n  %q", err, string(out))
+		}
+	}
+	return nil
 }
