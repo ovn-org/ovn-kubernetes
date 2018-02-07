@@ -42,7 +42,7 @@ var (
 	// NbctlCACert is the CA certificate for authenticating OVN DB.
 	NbctlCACert = "/etc/openvswitch/ovnnb-ca.cert"
 	// K8sCACertificate is k8s CA certificate.
-	K8sCACertificate = "/etc/openvswitch/k8s-ca.crt"
+	K8sCACertificate = ""
 	// Rundir is run dir of OVS core utilities, between "/var/run/openvswitch" and "/usr/local/var/run/openvswitch".
 	Rundir string
 	// Logdir is log dir of OVS core utilities, between "/var/log/openvswitch" and "/usr/local/var/log/openvswitch".

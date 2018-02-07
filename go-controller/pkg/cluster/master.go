@@ -3,7 +3,7 @@ package cluster
 import (
 	"fmt"
 	"net"
-	"net/url"
+	//"net/url"
 	"os/exec"
 
 	"github.com/Sirupsen/logrus"
@@ -107,23 +107,14 @@ func setDBServerAuth(ctlCmd, desc string, auth *OvnDBAuth) error {
 
 // SetupMaster calls the external script to create the switch and central routers for the network
 func (cluster *OvnClusterController) SetupMaster(masterNodeName string, masterSwitchNetwork string) error {
-	err := util.StartOVS()
-	if err != nil {
-		return err
-	}
 
-	err = util.StartOvnNorthd()
-	if err != nil {
-		return err
-	}
-
-	kubeURL, err := url.Parse(cluster.KubeServer)
-	if err != nil {
-		return fmt.Errorf("error parsing k8s server %q: %v", cluster.KubeServer, err)
-	}
+	//kubeURL, err := url.Parse(cluster.KubeServer)
+	//if err != nil {
+	//	return fmt.Errorf("error parsing k8s server %q: %v", cluster.KubeServer, err)
+	//}
 
 	// Set up north/southbound API authentication
-	err = setDBServerAuth("ovn-nbctl", "northbound", cluster.NorthDBServerAuth)
+	/*err = setDBServerAuth("ovn-nbctl", "northbound", cluster.NorthDBServerAuth)
 	if err != nil {
 		return err
 	}
@@ -136,23 +127,21 @@ func (cluster *OvnClusterController) SetupMaster(masterNodeName string, masterSw
 	if err != nil {
 		logrus.Errorf("Failed to obtain master's IP: %v", err)
 		return err
-	}
+	}*/
 
 	args := []string{
 		"set",
 		"Open_vSwitch",
 		".",
-		"external_ids:ovn-encap-type=geneve",
-		fmt.Sprintf("external_ids:ovn-encap-ip=%s", nodeIP),
-		fmt.Sprintf("external_ids:k8s-api-server=\"%s\"", kubeURL.Host),
+		fmt.Sprintf("external_ids:k8s-api-server=\"%s\"", cluster.KubeServer),
 		fmt.Sprintf("external_ids:k8s-api-token=\"%s\"", cluster.Token),
 	}
-	if cluster.NorthDBClientAuth.scheme != OvnDBSchemeUnix {
+	/*if cluster.NorthDBClientAuth.scheme != OvnDBSchemeUnix {
 		args = append(args, fmt.Sprintf("external_ids:ovn-nb=\"%s\"", cluster.NorthDBClientAuth.GetURL()))
 	}
 	if cluster.SouthDBClientAuth.scheme != OvnDBSchemeUnix {
 		args = append(args, fmt.Sprintf("external_ids:ovn-remote=\"%s\"", cluster.SouthDBClientAuth.GetURL()))
-	}
+	}*/
 
 	out, err := exec.Command("ovs-vsctl", args...).CombinedOutput()
 	if err != nil {
