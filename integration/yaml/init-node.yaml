@@ -1,0 +1,130 @@
+kind: ConfigMap
+apiVersion: v1
+metadata:
+  name: ovnkube-config
+  namespace: kube-system
+data:
+  #cluster cidr
+  k8s_cluster_cidr: "192.168.0.0/16"
+
+---
+
+kind: DaemonSet
+apiVersion: extensions/v1beta1
+metadata:
+  name: ovn-kube-node
+  namespace: kube-system
+  labels:
+    k8s-app: ovn-kube-node
+spec:
+  selector:
+    matchLabels:
+      name: ovn-kube-node
+  template:
+    metadata:
+      labels:
+        name: ovn-kube-node
+    spec:
+      hostNetwork: true
+      serviceAccountName: ovnkube-node-sa
+      containers:
+      - name: init-node
+        image: ganboing/ovnkube:latest
+        securityContext:
+          capabilities:
+            add: ["NET_ADMIN"]
+        env:
+        - name: OVN_K8S_CLUSTER_CIDR
+          valueFrom:
+            configMapKeyRef:
+              name: ovnkube-config
+              key: k8s_cluster_cidr
+        - name: OVN_K8S_NODE_NAME
+          valueFrom:
+            fieldRef:
+              fieldPath: spec.nodeName
+        command: ["/root/init-node.bash"]
+        volumeMounts:
+          - mountPath: /var/lib/kubelet
+            name: kubelet
+          - mountPath: /var/run/openvswitch
+            name: ovs-run
+      - name: install-cni
+        image: ganboing/ovnkube:latest
+        env:
+        - name: OVN_K8S_NODE_NAME
+          valueFrom:
+            fieldRef:
+              fieldPath: spec.nodeName
+        command: ["/root/install-cni.bash"]
+        volumeMounts:
+          - mountPath: /host/opt/cni/bin
+            name: cni-bin-dir
+          - mountPath: /host/etc/cni/net.d
+            name: cni-conf-dir
+          - mountPath: /var/lib/kubelet
+            name: kubelet
+          - mountPath: /var/run/openvswitch
+            name: ovs-run
+      volumes:
+      - name: cni-bin-dir
+        hostPath:
+          path: /opt/cni/bin
+      - name: cni-conf-dir
+        hostPath:
+          path: /etc/cni/net.d
+      - name: kubelet
+        hostPath:
+          path: /var/lib/kubelet
+      - name: ovs-run
+        hostPath:
+          path: /var/run/openvswitch
+
+---
+
+apiVersion: rbac.authorization.k8s.io/v1beta1
+kind: ClusterRoleBinding
+metadata:
+  name: ovnkube-node-crb
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: ovnkube-node-cr
+subjects:
+- kind: ServiceAccount
+  name: ovnkube-node-sa
+  namespace: kube-system
+
+---
+
+kind: ClusterRole
+apiVersion: rbac.authorization.k8s.io/v1beta1
+metadata:
+  name: ovnkube-node-cr
+rules:
+  - apiGroups:
+    - ""
+    resources:
+    - nodes
+    verbs:
+    - get
+    - list
+    - watch
+    - patch
+  - apiGroups:
+    - ""
+    resources:
+    - pods
+    - namespaces
+    verbs:
+    - get
+    - list
+---
+
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: ovnkube-node-sa
+  namespace: kube-system
+
+---

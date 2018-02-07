@@ -1,0 +1,105 @@
+kind: DaemonSet
+apiVersion: extensions/v1beta1
+metadata:
+  name: ovn-host
+  namespace: kube-system
+  labels:
+    k8s-app: ovn-host
+spec:
+  selector:
+    matchLabels:
+      name: ovn-host
+  template:
+    metadata:
+      labels:
+        name: ovn-host
+    spec:
+      hostNetwork: true
+      tolerations:
+      - key: node-role.kubernetes.io/master
+        effect: NoSchedule
+      serviceAccountName: ovnkube-ovn-host-sa
+      containers:
+      - name: ovsdb
+        image: ganboing/ovnkube:latest
+        command: ["/root/ovsdb.bash"]
+        volumeMounts:
+          - mountPath: /var/run/openvswitch
+            name: ovs-run
+          - mountPath: /etc/openvswitch
+            name: ovs-conf
+      - name: ovs-vswitchd
+        image: ganboing/ovnkube:latest
+        securityContext:
+          capabilities:
+            add: ["NET_ADMIN"]
+        command: ["/root/ovs-vswitchd.bash"]
+        volumeMounts:
+          - mountPath: /var/lib/kubelet
+            name: kubelet
+          - mountPath: /var/run/openvswitch
+            name: ovs-run
+        env:
+        - name: OVN_K8S_NODE_NAME
+          valueFrom:
+            fieldRef:
+              fieldPath: spec.nodeName
+      - name: ovn-controller
+        image: ganboing/ovnkube:latest
+        securityContext:
+          capabilities:
+            add: ["NET_ADMIN"]
+        command: ["/root/ovn-controller.bash"]
+        volumeMounts:
+          - mountPath: /var/lib/kubelet
+            name: kubelet
+          - mountPath: /var/run/openvswitch
+            name: ovs-run
+          - mountPath: /etc/openvswitch
+            name: ovs-conf
+      volumes:
+      - name: kubelet
+        hostPath:
+          path: /var/lib/kubelet
+      - name: ovs-run
+        hostPath:
+          path: /var/run/openvswitch
+      - name: ovs-conf
+        hostPath:
+          path: /etc/openvswitch
+
+---
+
+apiVersion: rbac.authorization.k8s.io/v1beta1
+kind: ClusterRoleBinding
+metadata:
+  name: ovnkube-ovn-host-crb
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: ovnkube-ovn-host-cr
+subjects:
+- kind: ServiceAccount
+  name: ovnkube-ovn-host-sa
+  namespace: kube-system
+
+---
+
+kind: ClusterRole
+apiVersion: rbac.authorization.k8s.io/v1beta1
+metadata:
+  name: ovnkube-ovn-host-cr
+rules:
+  - apiGroups: [""]
+    resources: ["nodes"]
+    verbs: ["get", "list"]
+
+---
+
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: ovnkube-ovn-host-sa
+  namespace: kube-system
+
+---

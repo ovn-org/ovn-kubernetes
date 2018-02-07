@@ -1,0 +1,3 @@
+To build the docker image, invoke build.sh
+
+Invoke test.sh for a "docker run" for the image
