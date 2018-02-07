@@ -3,15 +3,12 @@ package cluster
 import (
 	"fmt"
 	"net"
-	"net/url"
-	"os/exec"
 
 	"github.com/Sirupsen/logrus"
 
 	kapi "k8s.io/api/core/v1"
 	"k8s.io/client-go/tools/cache"
 
-	"github.com/openvswitch/ovn-kubernetes/go-controller/pkg/config"
 	"github.com/openvswitch/ovn-kubernetes/go-controller/pkg/ovn"
 	"github.com/openvswitch/ovn-kubernetes/go-controller/pkg/util"
 
@@ -98,11 +95,6 @@ func (cluster *OvnClusterController) SetupMaster(masterNodeName string, masterSw
 		return err
 	}
 
-	kubeURL, err := url.Parse(cluster.KubeServer)
-	if err != nil {
-		return fmt.Errorf("error parsing k8s server %q: %v", cluster.KubeServer, err)
-	}
-
 	// Set up north/southbound API authentication
 	err = cluster.NorthDBServerAuth.SetDBServerAuth("ovn-nbctl", "northbound")
 	if err != nil {
@@ -113,38 +105,9 @@ func (cluster *OvnClusterController) SetupMaster(masterNodeName string, masterSw
 		return err
 	}
 
-	nodeIP, err := netutils.GetNodeIP(masterNodeName)
-	if err != nil {
-		logrus.Errorf("Failed to obtain master's IP: %v", err)
+	if err := setupOVN(masterNodeName, cluster.KubeServer, cluster.Token, cluster.NorthDBClientAuth, cluster.SouthDBClientAuth); err != nil {
 		return err
 	}
-
-	args := []string{
-		"set",
-		"Open_vSwitch",
-		".",
-		"external_ids:ovn-encap-type=geneve",
-		fmt.Sprintf("external_ids:ovn-encap-ip=%s", nodeIP),
-		fmt.Sprintf("external_ids:k8s-api-server=\"%s\"", kubeURL.Host),
-		fmt.Sprintf("external_ids:k8s-api-token=\"%s\"", cluster.Token),
-	}
-	if cluster.NorthDBClientAuth.scheme != OvnDBSchemeUnix {
-		args = append(args, fmt.Sprintf("external_ids:ovn-nb=\"%s\"", cluster.NorthDBClientAuth.GetURL()))
-	}
-	if cluster.SouthDBClientAuth.scheme != OvnDBSchemeUnix {
-		args = append(args, fmt.Sprintf("external_ids:ovn-remote=\"%s\"", cluster.SouthDBClientAuth.GetURL()))
-	}
-
-	out, err := exec.Command("ovs-vsctl", args...).CombinedOutput()
-	if err != nil {
-		return fmt.Errorf("Error setting OVS external IDs: %v\n  %q", err, string(out))
-	}
-
-	// Fetch config file to override default values.
-	config.FetchConfig()
-
-	// Update config globals that OVN exec utils use
-	cluster.NorthDBClientAuth.SetConfig()
 
 	// Create a single common distributed router for the cluster.
 	stdout, stderr, err := util.RunOVNNbctl("--", "--may-exist", "lr-add", masterNodeName, "--", "set", "logical_router", masterNodeName, "external_ids:k8s-cluster-router=yes")

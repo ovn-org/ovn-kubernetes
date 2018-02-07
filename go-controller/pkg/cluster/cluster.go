@@ -67,6 +67,46 @@ func NewClusterController(kubeClient kubernetes.Interface, wf *factory.WatchFact
 	}
 }
 
+func setupOVN(nodeName, kubeServer, kubeToken string, northClientAuth, southClientAuth *OvnDBAuth) error {
+	if _, err := url.Parse(kubeServer); err != nil {
+		return fmt.Errorf("error parsing k8s server %q: %v", kubeServer, err)
+	}
+
+	nodeIP, err := netutils.GetNodeIP(nodeName)
+	if err != nil {
+		return fmt.Errorf("Failed to obtain local IP: %v", err)
+	}
+
+	args := []string{
+		"set",
+		"Open_vSwitch",
+		".",
+		"external_ids:ovn-encap-type=geneve",
+		fmt.Sprintf("external_ids:ovn-encap-ip=%s", nodeIP),
+		fmt.Sprintf("external_ids:k8s-api-server=\"%s\"", kubeServer),
+		fmt.Sprintf("external_ids:k8s-api-token=\"%s\"", kubeToken),
+	}
+	if northClientAuth.scheme != OvnDBSchemeUnix {
+		args = append(args, fmt.Sprintf("external_ids:ovn-nb=\"%s\"", northClientAuth.GetURL()))
+	}
+	if southClientAuth.scheme != OvnDBSchemeUnix {
+		args = append(args, fmt.Sprintf("external_ids:ovn-remote=\"%s\"", southClientAuth.GetURL()))
+	}
+
+	out, err := exec.Command("ovs-vsctl", args...).CombinedOutput()
+	if err != nil {
+		return fmt.Errorf("Error setting OVS external IDs: %v\n  %q", err, string(out))
+	}
+
+	// Fetch config file to override default values.
+	config.FetchConfig()
+
+	// Update config globals that OVN exec utils use
+	northClientAuth.SetConfig()
+
+	return nil
+}
+
 // OvnDBAuth describes an OVN database location and authentication method
 type OvnDBAuth struct {
 	URL     string
