@@ -64,6 +64,7 @@ if [ $PROTOCOL = "ssl" ]; then
 sudo ovnkube -kubeconfig $HOME/kubeconfig.yaml -v=4 -alsologtostderr \
     -apiserver="http://$MASTER_OVERLAY_IP:8080" \
     -init-node="$MINION_NAME"  \
+    -nodeport \
     -ovn-north-db="$PROTOCOL://$MASTER_OVERLAY_IP:6631" \
     -ovn-south-db="$PROTOCOL://$MASTER_OVERLAY_IP:6632" --token="test" \
     -ovn-north-client-privkey /etc/openvswitch/ovncontroller-privkey.pem \
@@ -73,14 +74,17 @@ sudo ovnkube -kubeconfig $HOME/kubeconfig.yaml -v=4 -alsologtostderr \
     -ovn-south-client-cert /etc/openvswitch/ovncontroller-cert.pem \
     -ovn-south-client-cacert /etc/openvswitch/ovnsb-ca.cert \
     -init-gateways -gateway-interface=enp0s9 -gateway-nexthop="$GW_IP" \
+    -service-cluster-ip-range=172.16.1.0/24 \
     -cluster-subnet="192.168.0.0/16" 2>&1
 else
 sudo ovnkube -kubeconfig $HOME/kubeconfig.yaml -v=4 -alsologtostderr \
     -apiserver="http://$MASTER_OVERLAY_IP:8080" \
     -init-node="$MINION_NAME"  \
+    -nodeport \
     -ovn-north-db="$PROTOCOL://$MASTER_OVERLAY_IP:6631" \
     -ovn-south-db="$PROTOCOL://$MASTER_OVERLAY_IP:6632" --token="test" \
     -init-gateways -gateway-interface=enp0s9 -gateway-nexthop="$GW_IP" \
+    -service-cluster-ip-range=172.16.1.0/24 \
     -cluster-subnet="192.168.0.0/16" 2>&1
 fi
 
