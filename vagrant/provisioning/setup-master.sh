@@ -72,6 +72,7 @@ if [ -n "$SSL" ]; then
     sudo bash -c 'cat >> /etc/default/ovn-host <<EOF
 OVN_CTL_OPTS="--ovn-controller-ssl-key=/etc/openvswitch/ovncontroller-privkey.pem  --ovn-controller-ssl-cert=/etc/openvswitch/ovncontroller-cert.pem --ovn-controller-ssl-bootstrap-ca-cert=/etc/openvswitch/ovnsb-ca.cert"
 EOF'
+   sudo service ovn-host restart
 else
     echo "PROTOCOL=tcp" >> setup_master_args.sh
 fi

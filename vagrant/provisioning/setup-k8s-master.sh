@@ -40,7 +40,7 @@ sudo docker run --net=host -v /var/etcd/data:/var/etcd/data -d \
 # Start k8s daemons
 pushd k8s/server/kubernetes/server/bin
 echo "Starting kube-apiserver ..."
-nohup sudo ./kube-apiserver --service-cluster-ip-range=192.168.200.0/24 \
+nohup sudo ./kube-apiserver --service-cluster-ip-range=172.16.1.0/24 \
                             --address=0.0.0.0 --etcd-servers=http://127.0.0.1:4001 \
                             --v=2 2>&1 0<&- &>/dev/null &
 
@@ -97,6 +97,8 @@ if [ $PROTOCOL = "ssl" ]; then
  -apiserver="http://$OVERLAY_IP:8080" \
  -logfile="/var/log/openvswitch/ovnkube.log" \
  -init-master="k8smaster" -cluster-subnet="192.168.0.0/16" \
+ -service-cluster-ip-range=172.16.1.0/24 \
+ -nodeport \
  -ovn-north-db="$PROTOCOL://$OVERLAY_IP:6631" \
  -ovn-north-server-privkey /etc/openvswitch/ovnnb-privkey.pem \
  -ovn-north-server-cert /etc/openvswitch/ovnnb-cert.pem \
@@ -107,7 +109,7 @@ if [ $PROTOCOL = "ssl" ]; then
  -ovn-south-server-cacert /vagrant/pki/switchca/cacert.pem  \
  -ovn-north-client-privkey /etc/openvswitch/ovncontroller-privkey.pem \
  -ovn-north-client-cert /etc/openvswitch/ovncontroller-cert.pem \
- -ovn-north-client-cacert /etc/openvswitch/ovnsb-ca.cert \
+ -ovn-north-client-cacert /etc/openvswitch/ovnnb-ca.cert \
  -ovn-south-client-privkey /etc/openvswitch/ovncontroller-privkey.pem \
  -ovn-south-client-cert /etc/openvswitch/ovncontroller-cert.pem \
  -ovn-south-client-cacert /etc/openvswitch/ovnsb-ca.cert 2>&1 &
@@ -116,6 +118,8 @@ else
  -apiserver="http://$OVERLAY_IP:8080" \
  -logfile="/var/log/openvswitch/ovnkube.log" \
  -init-master="k8smaster" -cluster-subnet="192.168.0.0/16" \
+ -service-cluster-ip-range=172.16.1.0/24 \
+ -nodeport \
  -ovn-north-db="$PROTOCOL://$OVERLAY_IP:6631" \
  -ovn-south-db="$PROTOCOL://$OVERLAY_IP:6632" 2>&1 &
 fi
