@@ -26,8 +26,6 @@ spec:
         volumeMounts:
           - mountPath: /var/run/openvswitch
             name: ovs-run
-          - mountPath: /etc/openvswitch
-            name: ovs-conf
       - name: ovs-vswitchd
         image: ganboing/ovnkube:latest
         securityContext:
@@ -55,8 +53,6 @@ spec:
             name: kubelet
           - mountPath: /var/run/openvswitch
             name: ovs-run
-          - mountPath: /etc/openvswitch
-            name: ovs-conf
       volumes:
       - name: kubelet
         hostPath:
@@ -64,9 +60,6 @@ spec:
       - name: ovs-run
         hostPath:
           path: /var/run/openvswitch
-      - name: ovs-conf
-        hostPath:
-          path: /etc/openvswitch
 
 ---
 

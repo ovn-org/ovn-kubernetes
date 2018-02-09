@@ -4,6 +4,7 @@ set -xe
 
 source "$(dirname "${BASH_SOURCE[0]}")/ovs-common.inc"
 
+mkdir -p /etc/openvswitch
 id_file=/etc/openvswitch/system-id.conf
 
 test -s $id_file || get_self_system_uuid > $id_file
