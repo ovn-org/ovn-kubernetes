@@ -21,6 +21,21 @@ build_binaries() {
     go install -ldflags "-B 0x$(head -c20 /dev/urandom|od -An -tx1|tr -d ' \n')" -v -x "${OVN_KUBE_BINARIES[@]}";
 }
 
+build_windows_binaries() {
+    # Check for `go` binary and set ${GOPATH}.
+    setup_env
+
+    local go_pkg_dir="${GOPATH}/src/${OVN_KUBE_GO_PACKAGE}"
+    cd ${go_pkg_dir}
+    mkdir -p "${OVN_KUBE_OUTPUT_BINPATH_WINDOWS}"
+
+    GOOS=windows GOARCH=amd64 go build "${OVN_KUBE_BINARIES[0]}"
+
+    _output_filename=$(basename ${OVN_KUBE_BINARIES[0]})
+    output_exe=${_output_filename/go/exe}
+    mv $output_exe "${OVN_KUBE_OUTPUT_BINPATH_WINDOWS}"
+}
+
 test() {
     for test in "${tests[@]:+${tests[@]}}"; do
       local outfile="${OVN_KUBE_OUTPUT_BINPATH}/${platform}/$(basename ${test})"
@@ -33,5 +48,8 @@ test() {
 }
 
 OVN_KUBE_BINARIES=("$@")
-build_binaries
-
+if [ -z "${WINDOWS_BUILD}" ]; then
+    build_binaries
+else
+    build_windows_binaries
+fi
