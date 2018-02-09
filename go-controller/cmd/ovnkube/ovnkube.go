@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"net"
 	"os"
+	"runtime"
 	"strings"
 
 	"github.com/Sirupsen/logrus"
@@ -184,6 +185,9 @@ func main() {
 		clusterController.NodePortEnable = *nodePortEnable
 
 		if *master != "" {
+			if runtime.GOOS == "windows" {
+				panic("Windows is not supported as master node")
+			}
 			clusterController.NorthDBServerAuth, err = ovncluster.NewOvnDBAuth(*ovnNorth, *ovnNorthServerPrivKey, *ovnNorthServerCert, *ovnNorthServerCACert, true)
 			if err != nil {
 				panic(err.Error())

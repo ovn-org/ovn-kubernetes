@@ -6,6 +6,7 @@ import (
 	"io/ioutil"
 	"os"
 	"os/exec"
+	"runtime"
 	"strings"
 
 	"github.com/openvswitch/ovn-kubernetes/go-controller/pkg/config"
@@ -19,6 +20,7 @@ const (
 	osRelease         = "/etc/os-release"
 	rhel              = "RHEL"
 	ubuntu            = "Ubuntu"
+	windowsOS         = "windows"
 )
 
 // PathExist checks the path exist or not.
@@ -31,6 +33,9 @@ func PathExist(path string) bool {
 }
 
 func runningPlatform() (string, error) {
+	if runtime.GOOS == windowsOS {
+		return windowsOS, nil
+	}
 	fileContents, err := ioutil.ReadFile(osRelease)
 	if err != nil {
 		return "", fmt.Errorf("failed to parse file %s (%v)", osRelease, err)
@@ -84,6 +89,13 @@ func StartOVS() error {
 			return fmt.Errorf("error starting openvswitch "+
 				"service: %v\n  %q", err, string(out))
 		}
+	} else if platform == windowsOS {
+		out, err := exec.Command("powershell", "Start-Service",
+			"ovs*").CombinedOutput()
+		if err != nil {
+			return fmt.Errorf("error starting openvswitch "+
+				"service: %v\n  %q", err, string(out))
+		}
 	}
 	return nil
 }
@@ -132,6 +144,13 @@ func RestartOvnController() error {
 			return fmt.Errorf("error starting ovn-host "+
 				"service: %v\n  %q", err, string(out))
 		}
+	} else if platform == windowsOS {
+		out, err := exec.Command("powershell", "Restart-Service",
+			"ovn-controller").CombinedOutput()
+		if err != nil {
+			return fmt.Errorf("error starting ovn-controller "+
+				"service: %v\n  %q", err, string(out))
+		}
 	}
 	return nil
 }
@@ -169,7 +188,7 @@ func RunOVSVsctl(args ...string) (string, string, error) {
 	cmd.Stderr = stderr
 
 	err = cmd.Run()
-	return strings.Trim(stdout.String(), "\" \n"), stderr.String(), err
+	return strings.Trim(strings.TrimSpace(stdout.String()), "\""), stderr.String(), err
 }
 
 // RunOVNNbctlWithTimeout runs command via ovs-nbctl with a specific timeout
@@ -207,7 +226,7 @@ func RunOVNNbctlWithTimeout(timeout int, args ...string) (string, string,
 	cmd.Stderr = stderr
 
 	err = cmd.Run()
-	return strings.Trim(stdout.String(), "\" \n"), stderr.String(), err
+	return strings.Trim(strings.TrimSpace(stdout.String()), "\""), stderr.String(), err
 }
 
 // RunOVNNbctl runs a command via ovs-nbctl.

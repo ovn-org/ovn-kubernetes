@@ -30,6 +30,7 @@ EOF
   # create a local GOPATH in _output
   GOPATH="${OVN_KUBE_OUTPUT}/go"
   OVN_KUBE_OUTPUT_BINPATH=${GOPATH}/bin
+  OVN_KUBE_OUTPUT_BINPATH_WINDOWS=${GOPATH}/windows
   local go_pkg_dir="${GOPATH}/src/${OVN_KUBE_GO_PACKAGE}"
   local go_pkg_basedir=$(dirname "${go_pkg_dir}")
 
