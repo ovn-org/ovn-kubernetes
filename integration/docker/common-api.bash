@@ -16,21 +16,26 @@ get_cluster_cidr(){
   echo "$OVN_K8S_CLUSTER_CIDR"
 }
 
+get_service_cidr(){
+  [ -z "$OVN_K8S_SERVICE_CIDR" ] && return 3
+  echo "$OVN_K8S_SERVICE_CIDR"
+}
+
 get_self_subnet(){
   local S
   #jq will return 0 on a empty input
   S="$( kube_api_get_node "$OVN_K8S_NODE_NAME" | jq -er '.metadata.annotations["ovn_host_subnet"]')"
-  [ -z "$S" ] && return 3
+  [ -z "$S" ] && return 4
   echo "$S"
 }
 
 get_node_internal_ip(){
   local D
   D="$(kube_api_get_node "$1" | jq -er '.status.addresses[] | select(.type == "InternalDNS") | .address')"
-  [ -z "$D" ] && return 4
+  [ -z "$D" ] && return 5
   local P
   P="$(dig +short "$D")"
-  [ -z "$P" ] && return 4
+  [ -z "$P" ] && return 5
   echo "$P"
 }
 
@@ -41,13 +46,13 @@ get_self_internal_ip(){
 get_self_role() {
   local L
   L="$( kube_api_get_node "$OVN_K8S_NODE_NAME" | jq -e '.metadata.labels')"
-  [ -z "$L" ] && return 5
+  [ -z "$L" ] && return 6
   echo "$L" | jq -er '."kubernetes.io/role"'
 }
 
 get_self_system_uuid() {
   local I
   I="$( kube_api_get_node "$OVN_K8S_NODE_NAME" | jq -er '.status.nodeInfo.systemUUID')"
-  [ -z "$I" ] && return 6
+  [ -z "$I" ] && return 7
   echo "${I,,}"
 }

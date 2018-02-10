@@ -6,6 +6,8 @@ metadata:
 data:
   #cluster cidr
   k8s_cluster_cidr: "192.168.0.0/16"
+  #service cidr
+  k8s_service_cidr: "10.0.0.0/24"
 
 ---
 
@@ -39,6 +41,11 @@ spec:
             configMapKeyRef:
               name: ovnkube-config
               key: k8s_cluster_cidr
+        - name: OVN_K8S_SERVICE_CIDR
+          valueFrom:
+            configMapKeyRef:
+              name: ovnkube-config
+              key: k8s_service_cidr
         - name: OVN_K8S_NODE_NAME
           valueFrom:
             fieldRef:
