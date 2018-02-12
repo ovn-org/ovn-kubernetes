@@ -1,7 +1,6 @@
 package main
 
 import (
-	"flag"
 	"fmt"
 	"net"
 	"os"
@@ -9,6 +8,7 @@ import (
 	"strings"
 
 	"github.com/sirupsen/logrus"
+	"github.com/urfave/cli"
 
 	"k8s.io/client-go/kubernetes"
 	restclient "k8s.io/client-go/rest"
@@ -21,88 +21,179 @@ import (
 )
 
 func main() {
-	// auth flags
-	kubeconfig := flag.String("kubeconfig", "", "absolute path to the kubeconfig file")
-	server := flag.String("apiserver", "https://localhost:8443", "URL to the Kubernetes apiserver")
-	rootCAFile := flag.String("ca-cert", "", "CA cert for the Kubernetes api server")
-	token := flag.String("token", "", "Bearer token to use for establishing ovn infrastructure")
-	clusterSubnet := flag.String("cluster-subnet", "11.11.0.0/16", "Cluster wide IP subnet to use")
-	clusterServicesSubnet := flag.String("service-cluster-ip-range", "",
-		"A CIDR notation IP range from which k8s assigns service cluster "+
-			"IPs. This should be the same as the one provided for "+
-			"kube-apiserver \"-service-cluster-ip-range\" option.")
+	c := cli.NewApp()
+	c.Name = "ovnkube"
+	c.Usage = "run ovnkube to start master, node, and gateway services"
+	c.Version = "0.0.1"
+	c.Flags = []cli.Flag{
+		// Kubernetes-related options
+		cli.StringFlag{
+			Name:  "kubeconfig",
+			Usage: "absolute path to the kubeconfig file",
+		},
+		cli.StringFlag{
+			Name:  "apiserver",
+			Value: "https://localhost:8443",
+			Usage: "URL to the Kubernetes apiserver",
+		},
+		cli.StringFlag{
+			Name:  "ca-cert",
+			Usage: "CA cert for the Kubernetes api server",
+		},
+		cli.StringFlag{
+			Name:  "token",
+			Usage: "Bearer token to use for establishing ovn infrastructure",
+		},
+		cli.StringFlag{
+			Name:  "cluster-subnet",
+			Value: "11.11.0.0/16",
+			Usage: "Cluster wide IP subnet to use",
+		},
+		cli.StringFlag{
+			Name: "service-cluster-ip-range",
+			Usage: "A CIDR notation IP range from which k8s assigns " +
+				"service cluster IPs. This should be the same as the one " +
+				"provided for kube-apiserver \"-service-cluster-ip-range\" " +
+				"option.",
+		},
 
-	// IP address and port of the northbound API server
-	ovnNorth := flag.String("ovn-north-db", "", "IP address and port of the OVN northbound API (eg, ssl://1.2.3.4:6641).  Leave empty to use a local unix socket.")
+		// OVN northbound database options
+		cli.StringFlag{
+			Name:  "ovn-north-db",
+			Usage: "IP address and port of the OVN northbound API (eg, ssl://1.2.3.4:6641).  Leave empty to use a local unix socket.",
+		},
+		cli.StringFlag{
+			Name:  "ovn-north-server-privkey",
+			Usage: "Private key that the OVN northbound API should use for securing the API.  Leave empty to use local unix socket.",
+		},
+		cli.StringFlag{
+			Name:  "ovn-north-server-cert",
+			Usage: "Server certificate that the OVN northbound API should use for securing the API.  Leave empty to use local unix socket.",
+		},
+		cli.StringFlag{
+			Name:  "ovn-north-server-cacert",
+			Usage: "CA certificate that the OVN northbound API should use for securing the API.  Leave empty to use local unix socket.",
+		},
+		cli.StringFlag{
+			Name:  "ovn-north-client-privkey",
+			Usage: "Private key that the client should use for talking to the OVN database.  Leave empty to use local unix socket.",
+		},
+		cli.StringFlag{
+			Name:  "ovn-north-client-cert",
+			Usage: "Client certificate that the client should use for talking to the OVN database.  Leave empty to use local unix socket.",
+		},
+		cli.StringFlag{
+			Name:  "ovn-north-client-cacert",
+			Usage: "CA certificate that the client should use for talking to the OVN database.  Leave empty to use local unix socket.",
+		},
 
-	// SSL-related flags for securing the northbound API server
-	ovnNorthServerPrivKey := flag.String("ovn-north-server-privkey", "", "Private key that the OVN northbound API should use for securing the API.  Leave empty to use local unix socket.")
-	ovnNorthServerCert := flag.String("ovn-north-server-cert", "", "Server certificate that the OVN northbound API should use for securing the API.  Leave empty to use local unix socket.")
-	ovnNorthServerCACert := flag.String("ovn-north-server-cacert", "", "CA certificate that the OVN northbound API should use for securing the API.  Leave empty to use local unix socket.")
+		// OVN southbound database options
+		cli.StringFlag{
+			Name:  "ovn-south-db",
+			Usage: "IP address and port of the OVN southbound API (eg, ssl://1.2.3.4:6642).  Leave empty to use a local unix socket.",
+		},
+		cli.StringFlag{
+			Name:  "ovn-south-server-privkey",
+			Usage: "Private key that the OVN southbound API should use for securing the API.  Leave empty to use local unix socket.",
+		},
+		cli.StringFlag{
+			Name:  "ovn-south-server-cert",
+			Usage: "Server certificate that the OVN southbound API should use for securing the API.  Leave empty to use local unix socket.",
+		},
+		cli.StringFlag{
+			Name:  "ovn-south-server-cacert",
+			Usage: "CA certificate that the OVN southbound API should use for securing the API.  Leave empty to use local unix socket.",
+		},
+		cli.StringFlag{
+			Name:  "ovn-south-client-privkey",
+			Usage: "Private key that the client should use for talking to the OVN database.  Leave empty to use local unix socket.",
+		},
+		cli.StringFlag{
+			Name:  "ovn-south-client-cert",
+			Usage: "Client certificate that the client should use for talking to the OVN database.  Leave empty to use local unix socket.",
+		},
+		cli.StringFlag{
+			Name:  "ovn-south-client-cacert",
+			Usage: "CA certificate that the client should use for talking to the OVN database.  Leave empty to use local unix socket.",
+		},
 
-	// SSL-related flags for clients connecting to the northbound API
-	ovnNorthClientPrivKey := flag.String("ovn-north-client-privkey", "", "Private key that the client should use for talking to the OVN database.  Leave empty to use local unix socket.")
-	ovnNorthClientCert := flag.String("ovn-north-client-cert", "", "Client certificate that the client should use for talking to the OVN database.  Leave empty to use local unix socket.")
-	ovnNorthClientCACert := flag.String("ovn-north-client-cacert", "", "CA certificate that the client should use for talking to the OVN database.  Leave empty to use local unix socket.")
+		// Mode flags
+		cli.BoolFlag{
+			Name:  "net-controller",
+			Usage: "Flag to start the central controller that watches pods/services/policies",
+		},
+		cli.StringFlag{
+			Name:  "init-master",
+			Usage: "initialize master, requires the hostname as argument",
+		},
+		cli.StringFlag{
+			Name:  "init-node",
+			Usage: "initialize node, requires the name that node is registered with in kubernetes cluster",
+		},
 
-	// IP address and port of the southbound database server
-	ovnSouth := flag.String("ovn-south-db", "", "IP address and port of the OVN southbound database (eg, ssl://1.2.3.4:6642).")
+		// Log flags
+		cli.IntFlag{
+			Name:  "loglevel",
+			Usage: "loglevels 5=debug, 4=info, 3=warn, 2=error, 1=fatal",
+			Value: 4,
+		},
+		cli.StringFlag{
+			Name:  "logfile",
+			Usage: "logfile name (with path) for ovnkube to write to.",
+		},
 
-	// SSL-related flags for securing the southbound database server
-	ovnSouthServerPrivKey := flag.String("ovn-south-server-privkey", "", "Private key that the OVN southbound database should use for securing the API.")
-	ovnSouthServerCert := flag.String("ovn-south-server-cert", "", "Server certificate that the OVN southbound database should use for securing the API.")
-	ovnSouthServerCACert := flag.String("ovn-south-server-cacert", "", "CA certificate that the OVN southbound database should use for securing the API.")
+		// Gateway flags
+		cli.BoolFlag{
+			Name:  "init-gateways",
+			Usage: "initialize a gateway in the minion. Only useful with \"init-node\"",
+		},
+		cli.StringFlag{
+			Name: "gateway-interface",
+			Usage: "The interface in minions that will be the gateway interface. " +
+				"If none specified, then the node's interface on which the " +
+				"default gateway is configured will be used as the gateway " +
+				"interface. Only useful with \"init-gateways\"",
+		},
+		cli.StringFlag{
+			Name: "gateway-nexthop",
+			Usage: "The external default gateway which is used as a next hop by " +
+				"OVN gateway.  This is many times just the default gateway " +
+				"of the node in question. If not specified, the default gateway" +
+				"configured in the node is used. Only useful with " +
+				"\"init-gateways\"",
+		},
+		cli.BoolFlag{
+			Name: "gateway-spare-interface",
+			Usage: "If true, assumes that \"gateway-interface\" provided can be " +
+				"exclusively used for the OVN gateway.  When true, only OVN" +
+				"related traffic can flow through this interface",
+		},
 
-	// SSL-related flags for clients connecting to the southbound database
-	ovnSouthClientPrivKey := flag.String("ovn-south-client-privkey", "", "Private key that the client should use for talking to the OVN database.")
-	ovnSouthClientCert := flag.String("ovn-south-client-cert", "", "Client certificate that the client should use for talking to the OVN database.")
-	ovnSouthClientCACert := flag.String("ovn-south-client-cacert", "", "CA certificate that the client should use for talking to the OVN database.")
+		cli.BoolFlag{
+			Name:  "nodeport",
+			Usage: "Setup nodeport based ingress on gateways.",
+		},
+	}
+	c.Action = func(c *cli.Context) error {
+		return runOvnKube(c)
+	}
 
-	// mode flags
-	netController := flag.Bool("net-controller", false, "Flag to start the central controller that watches pods/services/policies")
-	master := flag.String("init-master", "", "initialize master, requires the hostname as argument")
-	node := flag.String("init-node", "", "initialize node, requires the name that node is registered with in kubernetes cluster")
+	if err := c.Run(os.Args); err != nil {
+		logrus.Fatal(err)
+	}
+}
 
-	// log flags
-	verbose := flag.Int("loglevel", 4,
-		"loglevels 5=debug, 4=info, 3=warn, 2=error, 1=fatal")
-	logFile := flag.String("logfile", "",
-		"logfile name (with path) for ovnkube to write to.")
-
-	// gateway flags
-	gatewayInit := flag.Bool("init-gateways", false,
-		"initialize a gateway in the minion. Only useful with \"init-node\"")
-	gatewayIntf := flag.String("gateway-interface", "",
-		"The interface in minions that will be the gateway interface. "+
-			"If none specified, then the node's interface on which the "+
-			"default gateway is configured will be used as the gateway "+
-			"interface. Only useful with \"init-gateways\"")
-	gatewayNextHop := flag.String("gateway-nexthop", "",
-		"The external default gateway which is used as a next hop by "+
-			"OVN gateway.  This is many times just the default gateway "+
-			"of the node in question. If not specified, the default gateway"+
-			"configured in the node is used. Only useful with "+
-			"\"init-gateways\"")
-	gatewaySpareIntf := flag.Bool("gateway-spare-interface", false,
-		"If true, assumes that \"gateway-interface\" provided can be "+
-			"exclusively used for the OVN gateway.  When true, only OVN"+
-			"related traffic can flow through this interface")
-
-	// Enable nodeport
-	nodePortEnable := flag.Bool("nodeport", false,
-		"Setup nodeport based ingress on gateways.")
-
-	flag.Parse()
-
+func runOvnKube(ctx *cli.Context) error {
 	// Process log flags
-	logrus.SetLevel(logrus.Level(*verbose))
+	logrus.SetLevel(logrus.Level(ctx.Int("loglevel")))
 	logrus.SetOutput(os.Stderr)
-	if *logFile != "" {
-		file, err := os.OpenFile(*logFile, os.O_CREATE|os.O_APPEND|os.O_WRONLY,
+	logFile := ctx.String("logfile")
+	if logFile != "" {
+		file, err := os.OpenFile(logFile, os.O_CREATE|os.O_APPEND|os.O_WRONLY,
 			0660)
 		if err != nil {
 			logrus.Errorf("failed to open logfile %s (%v). Ignoring..",
-				*logFile, err)
+				logFile, err)
 		} else {
 			defer file.Close()
 			logrus.SetOutput(file)
@@ -112,11 +203,16 @@ func main() {
 	// Process auth flags
 	var config *restclient.Config
 	var err error
-	if *kubeconfig != "" {
+
+	kubeconfig := ctx.String("kubeconfig")
+	server := ctx.String("apiserver")
+	rootCAFile := ctx.String("ca-cert")
+	token := ctx.String("token")
+	if kubeconfig != "" {
 		// uses the current context in kubeconfig
-		config, err = clientcmd.BuildConfigFromFlags("", *kubeconfig)
-	} else if *server != "" && *token != "" && ((*rootCAFile != "") || !strings.HasPrefix(*server, "https")) {
-		config, err = util.CreateConfig(*server, *token, *rootCAFile)
+		config, err = clientcmd.BuildConfigFromFlags("", kubeconfig)
+	} else if server != "" && token != "" && ((rootCAFile != "") || !strings.HasPrefix(server, "https")) {
+		config, err = util.CreateConfig(server, token, rootCAFile)
 	} else {
 		err = fmt.Errorf("Provide kubeconfig file or give server/token/tls credentials")
 	}
@@ -137,81 +233,105 @@ func main() {
 		panic(err.Error)
 	}
 
-	if *master != "" || *node != "" {
+	netController := ctx.Bool("net-controller")
+	master := ctx.String("init-master")
+	node := ctx.String("init-node")
+	nodePortEnable := ctx.Bool("nodeport")
+
+	if master != "" || node != "" {
 		clusterController := ovncluster.NewClusterController(clientset, factory)
-		clusterController.KubeServer = *server
-		clusterController.CACert = *rootCAFile
-		clusterController.Token = *token
+		clusterController.KubeServer = server
+		clusterController.CACert = rootCAFile
+		clusterController.Token = token
 		clusterController.HostSubnetLength = 8
-		clusterController.GatewayInit = *gatewayInit
-		clusterController.GatewayIntf = *gatewayIntf
-		clusterController.GatewayNextHop = *gatewayNextHop
-		clusterController.GatewaySpareIntf = *gatewaySpareIntf
-		_, clusterController.ClusterIPNet, err = net.ParseCIDR(*clusterSubnet)
+		clusterController.GatewayInit = ctx.Bool("init-gateways")
+		clusterController.GatewayIntf = ctx.String("gateway-interface")
+		clusterController.GatewayNextHop = ctx.String("gateway-nexthop")
+		clusterController.GatewaySpareIntf = ctx.Bool("gateway-spare-interface")
+		_, clusterController.ClusterIPNet, err = net.ParseCIDR(ctx.String("cluster-subnet"))
 		if err != nil {
 			panic(err.Error)
 		}
 
-		if *clusterServicesSubnet != "" {
+		clusterServicesSubnet := ctx.String("service-cluster-ip-range")
+		if clusterServicesSubnet != "" {
 			var servicesSubnet *net.IPNet
 			_, servicesSubnet, err = net.ParseCIDR(
-				*clusterServicesSubnet)
+				clusterServicesSubnet)
 			if err != nil {
 				panic(err.Error)
 			}
 			clusterController.ClusterServicesSubnet = servicesSubnet.String()
 		}
 
-		clusterController.NorthDBClientAuth, err = ovncluster.NewOvnDBAuth(*ovnNorth, *ovnNorthClientPrivKey, *ovnNorthClientCert, *ovnNorthClientCACert, false)
-		if err != nil {
-			panic(err.Error())
-		}
-		clusterController.SouthDBClientAuth, err = ovncluster.NewOvnDBAuth(*ovnSouth, *ovnSouthClientPrivKey, *ovnSouthClientCert, *ovnSouthClientCACert, false)
+		ovnNorth := ctx.String("ovn-north-db")
+		ovnNorthClientPrivKey := ctx.String("ovn-north-client-privkey")
+		ovnNorthClientCert := ctx.String("ovn-north-client-cert")
+		ovnNorthClientCACert := ctx.String("ovn-north-client-cacert")
+		clusterController.NorthDBClientAuth, err = ovncluster.NewOvnDBAuth(ovnNorth, ovnNorthClientPrivKey, ovnNorthClientCert, ovnNorthClientCACert, false)
 		if err != nil {
 			panic(err.Error())
 		}
 
-		if *node != "" {
-			if *token == "" {
+		ovnSouth := ctx.String("ovn-south-db")
+		ovnSouthClientPrivKey := ctx.String("ovn-south-client-privkey")
+		ovnSouthClientCert := ctx.String("ovn-south-client-cert")
+		ovnSouthClientCACert := ctx.String("ovn-south-client-cacert")
+		clusterController.SouthDBClientAuth, err = ovncluster.NewOvnDBAuth(ovnSouth, ovnSouthClientPrivKey, ovnSouthClientCert, ovnSouthClientCACert, false)
+		if err != nil {
+			panic(err.Error())
+		}
+
+		if node != "" {
+			if token == "" {
 				panic("Cannot initialize node without service account 'token'. Please provide one with --token argument")
 			}
 
-			err := clusterController.StartClusterNode(*node)
+			err := clusterController.StartClusterNode(node)
 			if err != nil {
 				logrus.Errorf(err.Error())
 				panic(err.Error())
 			}
 		}
-		clusterController.NodePortEnable = *nodePortEnable
+		clusterController.NodePortEnable = nodePortEnable
 
-		if *master != "" {
+		if master != "" {
 			if runtime.GOOS == "windows" {
 				panic("Windows is not supported as master node")
 			}
-			clusterController.NorthDBServerAuth, err = ovncluster.NewOvnDBAuth(*ovnNorth, *ovnNorthServerPrivKey, *ovnNorthServerCert, *ovnNorthServerCACert, true)
+			ovnNorthServerPrivKey := ctx.String("ovn-north-server-privkey")
+			ovnNorthServerCert := ctx.String("ovn-north-server-cert")
+			ovnNorthServerCACert := ctx.String("ovn-north-server-cacert")
+			clusterController.NorthDBServerAuth, err = ovncluster.NewOvnDBAuth(ovnNorth, ovnNorthServerPrivKey, ovnNorthServerCert, ovnNorthServerCACert, true)
 			if err != nil {
 				panic(err.Error())
 			}
-			clusterController.SouthDBServerAuth, err = ovncluster.NewOvnDBAuth(*ovnSouth, *ovnSouthServerPrivKey, *ovnSouthServerCert, *ovnSouthServerCACert, true)
+
+			ovnSouthServerPrivKey := ctx.String("ovn-south-server-privkey")
+			ovnSouthServerCert := ctx.String("ovn-south-server-cert")
+			ovnSouthServerCACert := ctx.String("ovn-south-server-cacert")
+			clusterController.SouthDBServerAuth, err = ovncluster.NewOvnDBAuth(ovnSouth, ovnSouthServerPrivKey, ovnSouthServerCert, ovnSouthServerCACert, true)
 			if err != nil {
 				panic(err.Error())
 			}
 
 			// run the cluster controller to init the master
-			err := clusterController.StartClusterMaster(*master)
+			err := clusterController.StartClusterMaster(master)
 			if err != nil {
 				logrus.Errorf(err.Error())
 				panic(err.Error())
 			}
 		}
 	}
-	if *netController {
+	if netController {
 		ovnController := ovn.NewOvnController(clientset, factory)
-		ovnController.NodePortEnable = *nodePortEnable
+		ovnController.NodePortEnable = nodePortEnable
 		ovnController.Run()
 	}
-	if *master != "" || *netController {
+	if master != "" || netController {
 		// run forever
 		select {}
 	}
+
+	return nil
 }
