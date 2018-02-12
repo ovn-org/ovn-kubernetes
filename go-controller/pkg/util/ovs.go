@@ -203,19 +203,19 @@ func RunOVNNbctlWithTimeout(timeout int, args ...string) (string, string,
 	stderr := &bytes.Buffer{}
 
 	var cmd *exec.Cmd
-	if config.Scheme == "ssl" {
+	if config.OvnNorth.ClientAuth.Scheme == config.OvnDBSchemeSSL {
 		cmdArgs := []string{
-			fmt.Sprintf("--private-key=%s", config.NbctlPrivateKey),
-			fmt.Sprintf("--certificate=%s", config.NbctlCertificate),
-			fmt.Sprintf("--bootstrap-ca-cert=%s", config.NbctlCACert),
-			fmt.Sprintf("--db=%s", config.OvnNB),
+			fmt.Sprintf("--private-key=%s", config.OvnNorth.ClientAuth.PrivKey),
+			fmt.Sprintf("--certificate=%s", config.OvnNorth.ClientAuth.Cert),
+			fmt.Sprintf("--bootstrap-ca-cert=%s", config.OvnNorth.ClientAuth.CACert),
+			fmt.Sprintf("--db=%s", config.OvnNorth.ClientAuth.GetURL()),
 			fmt.Sprintf("--timeout=%d", timeout),
 		}
 		cmdArgs = append(cmdArgs, args...)
 		cmd = exec.Command(cmdPath, cmdArgs...)
 	} else {
 		cmdArgs := []string{
-			fmt.Sprintf("--db=%s", config.OvnNB),
+			fmt.Sprintf("--db=%s", config.OvnNorth.ClientAuth.GetURL()),
 			fmt.Sprintf("--timeout=%d", timeout),
 		}
 		cmdArgs = append(cmdArgs, args...)

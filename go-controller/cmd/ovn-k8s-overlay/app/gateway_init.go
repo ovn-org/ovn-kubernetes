@@ -2,11 +2,9 @@ package app
 
 import (
 	"fmt"
-	"net/url"
 
 	"github.com/openvswitch/ovn-kubernetes/go-controller/pkg/config"
 	"github.com/openvswitch/ovn-kubernetes/go-controller/pkg/util"
-	"github.com/sirupsen/logrus"
 	"github.com/urfave/cli"
 )
 
@@ -14,7 +12,7 @@ import (
 var InitGatewayCmd = cli.Command{
 	Name:  "gateway-init",
 	Usage: "Initialize k8s gateway node",
-	Flags: []cli.Flag{
+	Flags: append([]cli.Flag{
 		cli.StringFlag{
 			Name:  "cluster-ip-subnet",
 			Usage: "The cluster wide larger subnet of private ip addresses.",
@@ -43,19 +41,7 @@ var InitGatewayCmd = cli.Command{
 			Name:  "rampout-ip-subnets",
 			Usage: "Uses this gateway to rampout traffic originating from the specified comma separated ip subnets.  Used to distribute outgoing traffic via multiple gateways.",
 		},
-		cli.StringFlag{
-			Name:  "nb-privkey",
-			Usage: "The private key used for northbound API SSL connections.",
-		},
-		cli.StringFlag{
-			Name:  "nb-cert",
-			Usage: "The certificate used for northbound API SSL connections.",
-		},
-		cli.StringFlag{
-			Name:  "nb-cacert",
-			Usage: "The CA certificate used for northbound API SSL connections.",
-		},
-	},
+	}, config.Flags...),
 	Action: func(context *cli.Context) error {
 		if err := initGateway(context); err != nil {
 			return fmt.Errorf("failed init gateway: %v", err)
@@ -64,57 +50,11 @@ var InitGatewayCmd = cli.Command{
 	},
 }
 
-func fetchOVNNB(context *cli.Context) error {
-	ovnNB, stderr, err := util.RunOVSVsctl("--if-exists", "get", "Open_vSwitch", ".", "external_ids:ovn-nb")
-	if err != nil {
-		logrus.Errorf("Failed to get OVN central database's ip address, stderr: %q, error: %v", stderr, err)
+func initGateway(context *cli.Context) error {
+	if err := config.InitConfig(context, &config.Defaults{OvnNorthAddress: true}); err != nil {
 		return err
 	}
-	if ovnNB == "" {
-		return fmt.Errorf("OVN central database's ip address not set")
-	}
-	logrus.Infof("Successfully get OVN central database's ip address %q", ovnNB)
 
-	// verify the OVN central database's ip address.
-	url, err := url.Parse(ovnNB)
-	if err != nil {
-		return fmt.Errorf("Failed to parse OVN northbound URL %q: %v", ovnNB, err)
-	}
-
-	config.Scheme = url.Scheme
-	if url.Scheme == "ssl" {
-		privkey, _ := util.StringArg(context, "nb-privkey")
-		if privkey != "" {
-			config.NbctlPrivateKey = privkey
-		}
-		cert, _ := util.StringArg(context, "nb-cert")
-		if cert != "" {
-			config.NbctlCertificate = cert
-		}
-		cacert, _ := util.StringArg(context, "nb-cacert")
-		if cacert != "" {
-			config.NbctlCACert = cacert
-		}
-
-		if config.NbctlPrivateKey == "" || config.NbctlCertificate == "" || config.NbctlCACert == "" {
-			return fmt.Errorf("Must specify private key, certificate, and CA certificate for 'ssl' scheme")
-		}
-
-		if !util.PathExist(config.NbctlPrivateKey) {
-			return fmt.Errorf("No private key %s found", config.NbctlPrivateKey)
-		}
-		if !util.PathExist(config.NbctlCertificate) {
-			return fmt.Errorf("No certificate %s found", config.NbctlCertificate)
-		}
-		if !util.PathExist(config.NbctlCACert) {
-			return fmt.Errorf("No CA certificate %s found", config.NbctlCACert)
-		}
-	}
-	config.OvnNB = ovnNB
-	return nil
-}
-
-func initGateway(context *cli.Context) error {
 	clusterIPSubnet := context.String("cluster-ip-subnet")
 	if clusterIPSubnet == "" {
 		return fmt.Errorf("argument --cluster-ip-subnet should be non-null")
@@ -140,17 +80,6 @@ func initGateway(context *cli.Context) error {
 		return fmt.Errorf("One of physical-interface or bridge-interface has to be specified")
 	}
 
-	// Fetch config file to override default values.
-	config.FetchConfig()
-
-	// Fetch OVN central database's ip address.
-	err := fetchOVNNB(context)
-	if err != nil {
-		return err
-	}
-
-	err = util.GatewayInit(clusterIPSubnet, nodeName, physicalIP,
+	return util.GatewayInit(clusterIPSubnet, nodeName, physicalIP,
 		physicalInterface, bridgeInterface, defaultGW, rampoutIPSubnet)
-
-	return err
 }
