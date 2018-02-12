@@ -48,7 +48,7 @@ func configureManagementPortWindows(clusterSubnet, clusterServicesSubnet,
 
 	// Set MTU for the interface
 	_, err = exec.Command("netsh", "interface", "ipv4", "set", "subinterface",
-		fmt.Sprintf("%s", interfaceName), fmt.Sprintf("mtu=%d", config.MTU), "store=persistent").CombinedOutput()
+		fmt.Sprintf("%s", interfaceName), fmt.Sprintf("mtu=%d", config.Default.MTU), "store=persistent").CombinedOutput()
 	if err != nil {
 		return err
 	}
@@ -252,7 +252,7 @@ func CreateManagementPort(nodeName, localSubnet, clusterSubnet,
 
 	stdout, stderr, err = util.RunOVSVsctl("--", "--may-exist", "add-port",
 		"br-int", interfaceName, "--", "set", "interface", interfaceName,
-		"type=internal", "mtu_request="+fmt.Sprintf("%d", config.MTU),
+		"type=internal", "mtu_request="+fmt.Sprintf("%d", config.Default.MTU),
 		"external-ids:iface-id=k8s-"+nodeName)
 	if err != nil {
 		logrus.Errorf("Failed to add port to br-int, stdout: %q, stderr: %q, error: %v", stdout, stderr, err)

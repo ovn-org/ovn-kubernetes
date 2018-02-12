@@ -61,7 +61,7 @@ func (cluster *OvnClusterController) StartClusterNode(name string) error {
 
 	logrus.Infof("Node %s ready for ovn initialization with subnet %s", node.Name, subnet.String())
 
-	if err = setupOVN(name, cluster.KubeServer, cluster.Token, cluster.NorthDBClientAuth, cluster.SouthDBClientAuth); err != nil {
+	if err = setupOVN(name, config.Kubernetes.APIServer, config.Kubernetes.Token); err != nil {
 		return err
 	}
 
@@ -91,13 +91,13 @@ func (cluster *OvnClusterController) StartClusterNode(name string) error {
 	// Install the CNI config file after all initialization is done
 	if runtime.GOOS != windowsOS {
 		// MkdirAll() returns no error if the path already exists
-		err = os.MkdirAll(config.CniConfPath, os.ModeDir)
+		err = os.MkdirAll(config.CNI.ConfDir, os.ModeDir)
 		if err != nil {
 			return err
 		}
 
 		// Always create the CNI config for consistency.
-		cniConf := config.CniConfPath + "/10-ovn-kubernetes.conf"
+		cniConf := config.CNI.ConfDir + "/10-ovn-kubernetes.conf"
 
 		var f *os.File
 		f, err = os.OpenFile(cniConf, os.O_CREATE|os.O_WRONLY, 0644)
@@ -105,7 +105,7 @@ func (cluster *OvnClusterController) StartClusterNode(name string) error {
 			return err
 		}
 		defer f.Close()
-		confJSON := fmt.Sprintf("{\"name\":\"ovn-kubernetes\", \"type\":\"%s\"}", config.CniPlugin)
+		confJSON := fmt.Sprintf("{\"name\":\"ovn-kubernetes\", \"type\":\"%s\"}", config.CNI.Plugin)
 		_, err = f.Write([]byte(confJSON))
 		if err != nil {
 			return err
@@ -138,7 +138,7 @@ func (cluster *OvnClusterController) addDefaultConntrackRules() error {
 	_, stderr, err = util.RunOVSOfctl("add-flow", cluster.GatewayBridge,
 		fmt.Sprintf("priority=100, in_port=%s, ip, "+
 			"actions=ct(commit, zone=%d), output:%s",
-			ofportPatch, config.ConntrackZone, ofportPhys))
+			ofportPatch, config.Default.ConntrackZone, ofportPhys))
 	if err != nil {
 		return fmt.Errorf("Failed to add openflow flow to %s, stderr: %q, "+
 			"error: %v", cluster.GatewayBridge, stderr, err)
@@ -148,7 +148,7 @@ func (cluster *OvnClusterController) addDefaultConntrackRules() error {
 	// resubmit to table 1 to know the state of the connection.
 	_, stderr, err = util.RunOVSOfctl("add-flow", cluster.GatewayBridge,
 		fmt.Sprintf("priority=50, in_port=%s, ip, "+
-			"actions=ct(zone=%d, table=1)", ofportPhys, config.ConntrackZone))
+			"actions=ct(zone=%d, table=1)", ofportPhys, config.Default.ConntrackZone))
 	if err != nil {
 		return fmt.Errorf("Failed to add openflow flow to %s, stderr: %q, "+
 			"error: %v", cluster.GatewayBridge, stderr, err)

@@ -15,6 +15,7 @@ import (
 	"k8s.io/client-go/tools/clientcmd"
 
 	ovncluster "github.com/openvswitch/ovn-kubernetes/go-controller/pkg/cluster"
+	"github.com/openvswitch/ovn-kubernetes/go-controller/pkg/config"
 	"github.com/openvswitch/ovn-kubernetes/go-controller/pkg/factory"
 	"github.com/openvswitch/ovn-kubernetes/go-controller/pkg/ovn"
 	util "github.com/openvswitch/ovn-kubernetes/go-controller/pkg/util"
@@ -25,25 +26,8 @@ func main() {
 	c.Name = "ovnkube"
 	c.Usage = "run ovnkube to start master, node, and gateway services"
 	c.Version = "0.0.1"
-	c.Flags = []cli.Flag{
+	c.Flags = append([]cli.Flag{
 		// Kubernetes-related options
-		cli.StringFlag{
-			Name:  "kubeconfig",
-			Usage: "absolute path to the kubeconfig file",
-		},
-		cli.StringFlag{
-			Name:  "apiserver",
-			Value: "https://localhost:8443",
-			Usage: "URL to the Kubernetes apiserver",
-		},
-		cli.StringFlag{
-			Name:  "ca-cert",
-			Usage: "CA cert for the Kubernetes api server",
-		},
-		cli.StringFlag{
-			Name:  "token",
-			Usage: "Bearer token to use for establishing ovn infrastructure",
-		},
 		cli.StringFlag{
 			Name:  "cluster-subnet",
 			Value: "11.11.0.0/16",
@@ -55,66 +39,6 @@ func main() {
 				"service cluster IPs. This should be the same as the one " +
 				"provided for kube-apiserver \"-service-cluster-ip-range\" " +
 				"option.",
-		},
-
-		// OVN northbound database options
-		cli.StringFlag{
-			Name:  "ovn-north-db",
-			Usage: "IP address and port of the OVN northbound API (eg, ssl://1.2.3.4:6641).  Leave empty to use a local unix socket.",
-		},
-		cli.StringFlag{
-			Name:  "ovn-north-server-privkey",
-			Usage: "Private key that the OVN northbound API should use for securing the API.  Leave empty to use local unix socket.",
-		},
-		cli.StringFlag{
-			Name:  "ovn-north-server-cert",
-			Usage: "Server certificate that the OVN northbound API should use for securing the API.  Leave empty to use local unix socket.",
-		},
-		cli.StringFlag{
-			Name:  "ovn-north-server-cacert",
-			Usage: "CA certificate that the OVN northbound API should use for securing the API.  Leave empty to use local unix socket.",
-		},
-		cli.StringFlag{
-			Name:  "ovn-north-client-privkey",
-			Usage: "Private key that the client should use for talking to the OVN database.  Leave empty to use local unix socket.",
-		},
-		cli.StringFlag{
-			Name:  "ovn-north-client-cert",
-			Usage: "Client certificate that the client should use for talking to the OVN database.  Leave empty to use local unix socket.",
-		},
-		cli.StringFlag{
-			Name:  "ovn-north-client-cacert",
-			Usage: "CA certificate that the client should use for talking to the OVN database.  Leave empty to use local unix socket.",
-		},
-
-		// OVN southbound database options
-		cli.StringFlag{
-			Name:  "ovn-south-db",
-			Usage: "IP address and port of the OVN southbound API (eg, ssl://1.2.3.4:6642).  Leave empty to use a local unix socket.",
-		},
-		cli.StringFlag{
-			Name:  "ovn-south-server-privkey",
-			Usage: "Private key that the OVN southbound API should use for securing the API.  Leave empty to use local unix socket.",
-		},
-		cli.StringFlag{
-			Name:  "ovn-south-server-cert",
-			Usage: "Server certificate that the OVN southbound API should use for securing the API.  Leave empty to use local unix socket.",
-		},
-		cli.StringFlag{
-			Name:  "ovn-south-server-cacert",
-			Usage: "CA certificate that the OVN southbound API should use for securing the API.  Leave empty to use local unix socket.",
-		},
-		cli.StringFlag{
-			Name:  "ovn-south-client-privkey",
-			Usage: "Private key that the client should use for talking to the OVN database.  Leave empty to use local unix socket.",
-		},
-		cli.StringFlag{
-			Name:  "ovn-south-client-cert",
-			Usage: "Client certificate that the client should use for talking to the OVN database.  Leave empty to use local unix socket.",
-		},
-		cli.StringFlag{
-			Name:  "ovn-south-client-cacert",
-			Usage: "CA certificate that the client should use for talking to the OVN database.  Leave empty to use local unix socket.",
 		},
 
 		// Mode flags
@@ -129,17 +53,6 @@ func main() {
 		cli.StringFlag{
 			Name:  "init-node",
 			Usage: "initialize node, requires the name that node is registered with in kubernetes cluster",
-		},
-
-		// Log flags
-		cli.IntFlag{
-			Name:  "loglevel",
-			Usage: "loglevels 5=debug, 4=info, 3=warn, 2=error, 1=fatal",
-			Value: 4,
-		},
-		cli.StringFlag{
-			Name:  "logfile",
-			Usage: "logfile name (with path) for ovnkube to write to.",
 		},
 
 		// Gateway flags
@@ -173,7 +86,7 @@ func main() {
 			Name:  "nodeport",
 			Usage: "Setup nodeport based ingress on gateways.",
 		},
-	}
+	}, config.Flags...)
 	c.Action = func(c *cli.Context) error {
 		return runOvnKube(c)
 	}
@@ -184,16 +97,19 @@ func main() {
 }
 
 func runOvnKube(ctx *cli.Context) error {
+	if err := config.InitConfig(ctx, nil); err != nil {
+		return err
+	}
+
 	// Process log flags
-	logrus.SetLevel(logrus.Level(ctx.Int("loglevel")))
+	logrus.SetLevel(logrus.Level(config.Logging.Level))
 	logrus.SetOutput(os.Stderr)
-	logFile := ctx.String("logfile")
-	if logFile != "" {
-		file, err := os.OpenFile(logFile, os.O_CREATE|os.O_APPEND|os.O_WRONLY,
+	if config.Logging.File != "" {
+		file, err := os.OpenFile(config.Logging.File, os.O_CREATE|os.O_APPEND|os.O_WRONLY,
 			0660)
 		if err != nil {
 			logrus.Errorf("failed to open logfile %s (%v). Ignoring..",
-				logFile, err)
+				config.Logging.File, err)
 		} else {
 			defer file.Close()
 			logrus.SetOutput(file)
@@ -201,18 +117,13 @@ func runOvnKube(ctx *cli.Context) error {
 	}
 
 	// Process auth flags
-	var config *restclient.Config
+	var kconfig *restclient.Config
 	var err error
-
-	kubeconfig := ctx.String("kubeconfig")
-	server := ctx.String("apiserver")
-	rootCAFile := ctx.String("ca-cert")
-	token := ctx.String("token")
-	if kubeconfig != "" {
+	if config.Kubernetes.Kubeconfig != "" {
 		// uses the current context in kubeconfig
-		config, err = clientcmd.BuildConfigFromFlags("", kubeconfig)
-	} else if server != "" && token != "" && ((rootCAFile != "") || !strings.HasPrefix(server, "https")) {
-		config, err = util.CreateConfig(server, token, rootCAFile)
+		kconfig, err = clientcmd.BuildConfigFromFlags("", config.Kubernetes.Kubeconfig)
+	} else if config.Kubernetes.APIServer != "" && config.Kubernetes.Token != "" && ((config.Kubernetes.CACert != "") || !strings.HasPrefix(config.Kubernetes.APIServer, "https")) {
+		kconfig, err = util.CreateConfig(config.Kubernetes.APIServer, config.Kubernetes.Token, config.Kubernetes.CACert)
 	} else {
 		err = fmt.Errorf("Provide kubeconfig file or give server/token/tls credentials")
 	}
@@ -221,7 +132,7 @@ func runOvnKube(ctx *cli.Context) error {
 	}
 
 	// creates the clientset
-	clientset, err := kubernetes.NewForConfig(config)
+	clientset, err := kubernetes.NewForConfig(kconfig)
 	if err != nil {
 		panic(err.Error())
 	}
@@ -240,9 +151,6 @@ func runOvnKube(ctx *cli.Context) error {
 
 	if master != "" || node != "" {
 		clusterController := ovncluster.NewClusterController(clientset, factory)
-		clusterController.KubeServer = server
-		clusterController.CACert = rootCAFile
-		clusterController.Token = token
 		clusterController.HostSubnetLength = 8
 		clusterController.GatewayInit = ctx.Bool("init-gateways")
 		clusterController.GatewayIntf = ctx.String("gateway-interface")
@@ -264,26 +172,8 @@ func runOvnKube(ctx *cli.Context) error {
 			clusterController.ClusterServicesSubnet = servicesSubnet.String()
 		}
 
-		ovnNorth := ctx.String("ovn-north-db")
-		ovnNorthClientPrivKey := ctx.String("ovn-north-client-privkey")
-		ovnNorthClientCert := ctx.String("ovn-north-client-cert")
-		ovnNorthClientCACert := ctx.String("ovn-north-client-cacert")
-		clusterController.NorthDBClientAuth, err = ovncluster.NewOvnDBAuth(ovnNorth, ovnNorthClientPrivKey, ovnNorthClientCert, ovnNorthClientCACert, false)
-		if err != nil {
-			panic(err.Error())
-		}
-
-		ovnSouth := ctx.String("ovn-south-db")
-		ovnSouthClientPrivKey := ctx.String("ovn-south-client-privkey")
-		ovnSouthClientCert := ctx.String("ovn-south-client-cert")
-		ovnSouthClientCACert := ctx.String("ovn-south-client-cacert")
-		clusterController.SouthDBClientAuth, err = ovncluster.NewOvnDBAuth(ovnSouth, ovnSouthClientPrivKey, ovnSouthClientCert, ovnSouthClientCACert, false)
-		if err != nil {
-			panic(err.Error())
-		}
-
 		if node != "" {
-			if token == "" {
+			if config.Kubernetes.Token == "" {
 				panic("Cannot initialize node without service account 'token'. Please provide one with --token argument")
 			}
 
@@ -299,22 +189,6 @@ func runOvnKube(ctx *cli.Context) error {
 			if runtime.GOOS == "windows" {
 				panic("Windows is not supported as master node")
 			}
-			ovnNorthServerPrivKey := ctx.String("ovn-north-server-privkey")
-			ovnNorthServerCert := ctx.String("ovn-north-server-cert")
-			ovnNorthServerCACert := ctx.String("ovn-north-server-cacert")
-			clusterController.NorthDBServerAuth, err = ovncluster.NewOvnDBAuth(ovnNorth, ovnNorthServerPrivKey, ovnNorthServerCert, ovnNorthServerCACert, true)
-			if err != nil {
-				panic(err.Error())
-			}
-
-			ovnSouthServerPrivKey := ctx.String("ovn-south-server-privkey")
-			ovnSouthServerCert := ctx.String("ovn-south-server-cert")
-			ovnSouthServerCACert := ctx.String("ovn-south-server-cacert")
-			clusterController.SouthDBServerAuth, err = ovncluster.NewOvnDBAuth(ovnSouth, ovnSouthServerPrivKey, ovnSouthServerCert, ovnSouthServerCACert, true)
-			if err != nil {
-				panic(err.Error())
-			}
-
 			// run the cluster controller to init the master
 			err := clusterController.StartClusterMaster(master)
 			if err != nil {

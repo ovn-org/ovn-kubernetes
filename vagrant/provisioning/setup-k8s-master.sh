@@ -93,35 +93,35 @@ KUBECONFIG
 source ~/setup_master_args.sh
 
 if [ $PROTOCOL = "ssl" ]; then
-  nohup sudo ovnkube -kubeconfig $HOME/kubeconfig.yaml -net-controller -v=4 \
- -apiserver="http://$OVERLAY_IP:8080" \
+  nohup sudo ovnkube -k8s-kubeconfig $HOME/kubeconfig.yaml -net-controller -loglevel=4 \
+ -k8s-apiserver="http://$OVERLAY_IP:8080" \
  -logfile="/var/log/openvswitch/ovnkube.log" \
  -init-master="k8smaster" -cluster-subnet="192.168.0.0/16" \
  -service-cluster-ip-range=172.16.1.0/24 \
  -nodeport \
- -ovn-north-db="$PROTOCOL://$OVERLAY_IP:6631" \
- -ovn-north-server-privkey /etc/openvswitch/ovnnb-privkey.pem \
- -ovn-north-server-cert /etc/openvswitch/ovnnb-cert.pem \
- -ovn-north-server-cacert /vagrant/pki/switchca/cacert.pem \
- -ovn-south-db="$PROTOCOL://$OVERLAY_IP:6632" \
- -ovn-south-server-privkey /etc/openvswitch/ovnsb-privkey.pem \
- -ovn-south-server-cert /etc/openvswitch/ovnsb-cert.pem \
- -ovn-south-server-cacert /vagrant/pki/switchca/cacert.pem  \
- -ovn-north-client-privkey /etc/openvswitch/ovncontroller-privkey.pem \
- -ovn-north-client-cert /etc/openvswitch/ovncontroller-cert.pem \
- -ovn-north-client-cacert /etc/openvswitch/ovnnb-ca.cert \
- -ovn-south-client-privkey /etc/openvswitch/ovncontroller-privkey.pem \
- -ovn-south-client-cert /etc/openvswitch/ovncontroller-cert.pem \
- -ovn-south-client-cacert /etc/openvswitch/ovnsb-ca.cert 2>&1 &
+ -nb-address="$PROTOCOL://$OVERLAY_IP:6631" \
+ -nb-server-privkey /etc/openvswitch/ovnnb-privkey.pem \
+ -nb-server-cert /etc/openvswitch/ovnnb-cert.pem \
+ -nb-server-cacert /vagrant/pki/switchca/cacert.pem \
+ -sb-address="$PROTOCOL://$OVERLAY_IP:6632" \
+ -sb-server-privkey /etc/openvswitch/ovnsb-privkey.pem \
+ -sb-server-cert /etc/openvswitch/ovnsb-cert.pem \
+ -sb-server-cacert /vagrant/pki/switchca/cacert.pem  \
+ -nb-client-privkey /etc/openvswitch/ovncontroller-privkey.pem \
+ -nb-client-cert /etc/openvswitch/ovncontroller-cert.pem \
+ -nb-client-cacert /etc/openvswitch/ovnnb-ca.cert \
+ -sb-client-privkey /etc/openvswitch/ovncontroller-privkey.pem \
+ -sb-client-cert /etc/openvswitch/ovncontroller-cert.pem \
+ -sb-client-cacert /etc/openvswitch/ovnsb-ca.cert 2>&1 &
 else
-  nohup sudo ovnkube -kubeconfig $HOME/kubeconfig.yaml -net-controller -v=4 \
- -apiserver="http://$OVERLAY_IP:8080" \
+  nohup sudo ovnkube -k8s-kubeconfig $HOME/kubeconfig.yaml -net-controller -loglevel=4 \
+ -k8s-apiserver="http://$OVERLAY_IP:8080" \
  -logfile="/var/log/openvswitch/ovnkube.log" \
  -init-master="k8smaster" -cluster-subnet="192.168.0.0/16" \
  -service-cluster-ip-range=172.16.1.0/24 \
  -nodeport \
- -ovn-north-db="$PROTOCOL://$OVERLAY_IP:6631" \
- -ovn-south-db="$PROTOCOL://$OVERLAY_IP:6632" 2>&1 &
+ -nb-address="$PROTOCOL://$OVERLAY_IP:6631" \
+ -sb-address="$PROTOCOL://$OVERLAY_IP:6632" 2>&1 &
 fi
 
 

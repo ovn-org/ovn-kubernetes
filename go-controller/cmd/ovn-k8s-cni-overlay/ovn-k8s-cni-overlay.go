@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/sirupsen/logrus"
+	"github.com/urfave/cli"
 
 	"github.com/containernetworking/cni/pkg/skel"
 	"github.com/containernetworking/cni/pkg/types"
@@ -148,39 +149,20 @@ func cmdAdd(args *skel.CmdArgs) error {
 		return fmt.Errorf("required CNI variable missing")
 	}
 
-	ovsArgs := []string{
-		"--if-exists", "get", "Open_vSwitch",
-		".", "external_ids:k8s-api-server",
-	}
-	out, err := exec.Command("ovs-vsctl", ovsArgs...).CombinedOutput()
-	if err != nil {
-		return fmt.Errorf("failed to get K8S_API_SERVER")
-	}
-	k8sAPIServer := strings.Trim(strings.TrimSpace(string(out)), "\"")
-	var cfg *rest.Config
-	if strings.HasPrefix(k8sAPIServer, "https") {
-		// get token and ca cert
-		ovsArgs = []string{
-			"--if-exists", "get", "Open_vSwitch",
-			".", "external_ids:k8s-api-token",
-		}
-		out, err = exec.Command("ovs-vsctl", ovsArgs...).CombinedOutput()
-		if err != nil {
-			return fmt.Errorf("failed to get K8S_API_TOKEN")
-		}
-		token := strings.Trim(strings.TrimSpace(string(out)), "\"")
-		cfg, err = util.CreateConfig(k8sAPIServer, token, config.K8sCACertificate)
-	} else if strings.HasPrefix(k8sAPIServer, "http") {
-		cfg, err = clientcmd.BuildConfigFromFlags(k8sAPIServer, "")
+	var kubeCfg *rest.Config
+	cfg := config.Kubernetes
+	if strings.HasPrefix(cfg.APIServer, "https") {
+		kubeCfg, err = util.CreateConfig(cfg.APIServer, cfg.Token, cfg.CACert)
+	} else if strings.HasPrefix(cfg.APIServer, "http") {
+		kubeCfg, err = clientcmd.BuildConfigFromFlags(cfg.APIServer, "")
 	} else {
-		k8sAPIServer = fmt.Sprintf("http://%s", k8sAPIServer)
-		cfg, err = clientcmd.BuildConfigFromFlags(k8sAPIServer, "")
+		err = fmt.Errorf("invalid kubernetes configuration")
 	}
 	if err != nil {
 		return fmt.Errorf("Failed to get kubeclient: %v", err)
 	}
 
-	clientset, err := kubernetes.NewForConfig(cfg)
+	clientset, err := kubernetes.NewForConfig(kubeCfg)
 	if err != nil {
 		return fmt.Errorf("Could not create clientset for kubernetes: %v", err)
 	}
@@ -236,14 +218,14 @@ func cmdAdd(args *skel.CmdArgs) error {
 
 	ifaceID := fmt.Sprintf("%s_%s", namespace, podName)
 
-	ovsArgs = []string{
+	ovsArgs := []string{
 		"add-port", "br-int", hostIface.Name, "--", "set",
 		"interface", hostIface.Name,
 		fmt.Sprintf("external_ids:attached_mac=%s", macAddress),
 		fmt.Sprintf("external_ids:iface-id=%s", ifaceID),
 		fmt.Sprintf("external_ids:ip_address=%s", ipAddress),
 	}
-	out, err = exec.Command("ovs-vsctl", ovsArgs...).CombinedOutput()
+	out, err := exec.Command("ovs-vsctl", ovsArgs...).CombinedOutput()
 	if err != nil {
 		return fmt.Errorf("failure in plugging pod interface: %v\n  %q", err, string(out))
 	}
@@ -287,11 +269,35 @@ func cmdDel(args *skel.CmdArgs) error {
 }
 
 func main() {
-	config.FetchConfig()
-	f, err := os.OpenFile(config.LogPath, os.O_WRONLY|os.O_CREATE, 0755)
-	if err == nil {
-		defer f.Close()
-		logrus.SetOutput(f)
+	c := cli.NewApp()
+	c.Name = "ovn-k8s-cni-overlay"
+	c.Usage = "a CNI plugin to set up or tear down a container's network with OVN"
+	c.Version = "0.0.1"
+	c.Flags = config.Flags
+	c.Action = func(ctx *cli.Context) error {
+		if err := config.InitConfig(ctx, &config.Defaults{
+			K8sAPIServer: true,
+			K8sToken:     true,
+		}); err != nil {
+			return err
+		}
+
+		f, err := os.OpenFile(config.Logging.File, os.O_WRONLY|os.O_CREATE, 0755)
+		if err == nil {
+			defer f.Close()
+			logrus.SetOutput(f)
+		}
+
+		skel.PluginMain(cmdAdd, cmdDel, version.All)
+		return nil
 	}
-	skel.PluginMain(cmdAdd, cmdDel, version.All)
+
+	if err := c.Run(os.Args); err != nil {
+		// Print the error to stdout in conformance with the CNI spec
+		e, ok := err.(*types.Error)
+		if !ok {
+			e = &types.Error{Code: 100, Msg: err.Error()}
+		}
+		e.Print()
+	}
 }

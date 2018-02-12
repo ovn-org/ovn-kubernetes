@@ -61,28 +61,28 @@ popd
 
 # Initialize the minion and gateway.
 if [ $PROTOCOL = "ssl" ]; then
-sudo ovnkube -kubeconfig $HOME/kubeconfig.yaml -v=4 -alsologtostderr \
-    -apiserver="http://$MASTER_OVERLAY_IP:8080" \
+sudo ovnkube -k8s-kubeconfig $HOME/kubeconfig.yaml -loglevel=4 \
+    -k8s-apiserver="http://$MASTER_OVERLAY_IP:8080" \
     -init-node="$MINION_NAME"  \
     -nodeport \
-    -ovn-north-db="$PROTOCOL://$MASTER_OVERLAY_IP:6631" \
-    -ovn-south-db="$PROTOCOL://$MASTER_OVERLAY_IP:6632" --token="test" \
-    -ovn-north-client-privkey /etc/openvswitch/ovncontroller-privkey.pem \
-    -ovn-north-client-cert /etc/openvswitch/ovncontroller-cert.pem \
-    -ovn-north-client-cacert /etc/openvswitch/ovnnb-ca.cert \
-    -ovn-south-client-privkey /etc/openvswitch/ovncontroller-privkey.pem \
-    -ovn-south-client-cert /etc/openvswitch/ovncontroller-cert.pem \
-    -ovn-south-client-cacert /etc/openvswitch/ovnsb-ca.cert \
+    -nb-address="$PROTOCOL://$MASTER_OVERLAY_IP:6631" \
+    -sb-address="$PROTOCOL://$MASTER_OVERLAY_IP:6632" -k8s-token="test" \
+    -nb-client-privkey /etc/openvswitch/ovncontroller-privkey.pem \
+    -nb-client-cert /etc/openvswitch/ovncontroller-cert.pem \
+    -nb-client-cacert /etc/openvswitch/ovnnb-ca.cert \
+    -sb-client-privkey /etc/openvswitch/ovncontroller-privkey.pem \
+    -sb-client-cert /etc/openvswitch/ovncontroller-cert.pem \
+    -sb-client-cacert /etc/openvswitch/ovnsb-ca.cert \
     -init-gateways -gateway-interface=enp0s9 -gateway-nexthop="$GW_IP" \
     -service-cluster-ip-range=172.16.1.0/24 \
     -cluster-subnet="192.168.0.0/16" 2>&1
 else
-sudo ovnkube -kubeconfig $HOME/kubeconfig.yaml -v=4 -alsologtostderr \
-    -apiserver="http://$MASTER_OVERLAY_IP:8080" \
+sudo ovnkube -k8s-kubeconfig $HOME/kubeconfig.yaml -loglevel=4 \
+    -k8s-apiserver="http://$MASTER_OVERLAY_IP:8080" \
     -init-node="$MINION_NAME"  \
     -nodeport \
-    -ovn-north-db="$PROTOCOL://$MASTER_OVERLAY_IP:6631" \
-    -ovn-south-db="$PROTOCOL://$MASTER_OVERLAY_IP:6632" --token="test" \
+    -nb-address="$PROTOCOL://$MASTER_OVERLAY_IP:6631" \
+    -sb-address="$PROTOCOL://$MASTER_OVERLAY_IP:6632" -k8s-token="test" \
     -init-gateways -gateway-interface=enp0s9 -gateway-nexthop="$GW_IP" \
     -service-cluster-ip-range=172.16.1.0/24 \
     -cluster-subnet="192.168.0.0/16" 2>&1

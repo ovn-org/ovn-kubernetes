@@ -9,15 +9,6 @@ ovnkube \- ovn utility
 The ovn utility used to confiugre ovn-kubernetes
 .SH OPTIONS
 .TP
-\fB\-alsologtostderr\fR
-log to standard error as well as files
-.TP
-\fB\-apiserver\fR string
-URL to the Kubernetes apiserver (default "https://localhost:8443")
-.TP
-\fB\-ca-cert\fR string
-CA cert for the Kubernetes api server
-.TP
 \fB\-gateway\-interface\fR string
 The interface in minions that will be the gateway interface.  If none
 specified, then the node's interface on which the default gateway is
@@ -46,23 +37,11 @@ initialize master, requires the hostname as argument
 \fB\-init-node\fR string
 initialize node, requires the name that node is registered with in kubernetes cluster
 .TP
-\fB\-kubeconfig\fR string
-absolute path to the kubeconfig file
-.TP
-\fB\-log_backtrace_at value
-when logging hits line file:N, emit a stack trace
-.TP
-\fB\-log_dir\fR string
-If non-empty, write log files in this directory
-.TP
 \fB\-logfile\fR string
 logfile name (with path) for ovnkube to write to.
 .TP
 \fB\-loglevel\fR int
 loglevels 5=debug, 4=info, 3=warn, 2=error, 1=fatal
-.TP
-\fB\-logtostderr
-log to standard error instead of files
 .TP
 \fB\-net-controller
 Flag to start the central controller that watches pods/services/policies
@@ -71,46 +50,46 @@ Flag to start the central controller that watches pods/services/policies
 Setup nodeport based entries in OVN gateways for ingress into the k8s cluster.
 By default, it is disabled.
 .TP
-\fB\-ovn-north-client-cacert\fR string
+\fB\-nb-client-cacert\fR string
 CA certificate that the client should use for talking to the OVN database.  Leave empty to use local unix socket.
 .TP
-\fB\-ovn-north-client-cert\fR string
+\fB\-nb-client-cert\fR string
 Client certificate that the client should use for talking to the OVN database.  Leave empty to use local unix socket.
 .TP
-\fB\-ovn-north-client-privkey\fR string
+\fB\-nb-client-privkey\fR string
 Private key that the client should use for talking to the OVN database.  Leave empty to use local unix socket.
 .TP
-\fB\-ovn-north-db\fR string
+\fB\-nb-address\fR string
 IP address and port of the OVN northbound API (eg, ssl://1.2.3.4:6641).  Leave empty to use a local unix socket.
 .TP
-\fB\-ovn-north-server-cacert\fR string
+\fB\-nb-server-cacert\fR string
 CA certificate that the OVN northbound API should use for securing the API.  Leave empty to use local unix socket.
 .TP
-\fB\-ovn-north-server-cert\fR string
+\fB\-nb-server-cert\fR string
 Server certificate that the OVN northbound API should use for securing the API.  Leave empty to use local unix socket.
 .TP
-\fB\-ovn-north-server-privkey\fR string
+\fB\-nb-server-privkey\fR string
 Private key that the OVN northbound API should use for securing the API.  Leave empty to use local unix socket.
 .TP
-\fB\-ovn-south-client-cacert\fR string
+\fB\-sb-client-cacert\fR string
 CA certificate that the client should use for talking to the OVN database.
 .TP
-\fB\-ovn-south-client-cert\fR string
+\fB\-sb-client-cert\fR string
 Client certificate that the client should use for talking to the OVN database.
 .TP
-\fB\-ovn-south-client-privkey\fR string
+\fB\-sb-client-privkey\fR string
 Private key that the client should use for talking to the OVN database.
 .TP
-\fB\-ovn-south-db\fR string
+\fB\-sb-address\fR string
 IP address and port of the OVN southbound database (eg, ssl://1.2.3.4:6642).
 .TP
-\fB\-ovn-south-server-cacert\fR string
+\fB\-sb-server-cacert\fR string
 CA certificate that the OVN southbound database should use for securing the API.
 .TP
-\fB\-ovn-south-server-cert\fR string
+\fB\-sb-server-cert\fR string
 Server certificate that the OVN southbound database should use for securing the API.
 .TP
-\fB\-ovn-south-server-privkey\fR string
+\fB\-sb-server-privkey\fR string
 Private key that the OVN southbound database should use for securing the API.
 .TP
 \fB\-service-cluster-ip-range\fR value
@@ -118,17 +97,17 @@ A CIDR notation IP range from which k8s assigns service cluster IPs.
 This should be the same as the one provided for kube-apiserver's
 \fB\-service-cluster-ip-range\fR option.
 .TP
-\fB\-stderrthreshold\fR value
-logs at or above this threshold go to stderr
+\fB\-k8s-kubeconfig\fR string
+absolute path to the kubeconfig file
 .TP
-\fB\-token\fR string
+\fB\-k8s-apiserver\fR string
+URL to the Kubernetes apiserver (default "https://localhost:8443")
+.TP
+\fB\-k8s-ca-cert\fR string
+CA cert for the Kubernetes api server
+.TP
+\fB\-k8s-token\fR string
 Bearer token to use for establishing ovn infrastructure
-.TP
-\fB\-v\fR value
-log level for V logs
-.TP
-\fB\-vmodule\fR value
-comma-separated list of pattern=N settings for file-filtered logging
 
 .SH "SEE ALSO"
 .BR ovn-k8s-overlay (1),
