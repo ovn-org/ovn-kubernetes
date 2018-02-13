@@ -78,7 +78,7 @@ else
 fi
 
 # Install golang
-wget https://dl.google.com/go/go1.9.2.linux-amd64.tar.gz
+wget -nv https://dl.google.com/go/go1.9.2.linux-amd64.tar.gz
 sudo tar -C /usr/local -xzf go1.9.2.linux-amd64.tar.gz
 export PATH="/usr/local/go/bin:echo $PATH"
 export GOPATH=$HOME/work

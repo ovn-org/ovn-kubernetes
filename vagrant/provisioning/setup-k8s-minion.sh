@@ -13,7 +13,7 @@ echo "MASTER_IP=$MASTER_IP" >> setup_minion_args.sh
 
 # Install CNI
 pushd ~/
-wget https://github.com/containernetworking/cni/releases/download/v0.5.2/cni-amd64-v0.5.2.tgz
+wget -nv https://github.com/containernetworking/cni/releases/download/v0.5.2/cni-amd64-v0.5.2.tgz
 popd
 sudo mkdir -p /opt/cni/bin
 pushd /opt/cni/bin
