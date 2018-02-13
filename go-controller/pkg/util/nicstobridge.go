@@ -59,9 +59,28 @@ func saveRoute(iface, bridge netlink.Link, routes []netlink.Route) error {
 	for i := range routes {
 		route := routes[i]
 
+		// Handle routes for default gateway later.  This is a special case for
+		// GCE where we have /32 IP addresses and we can't add the default
+		// gateway before the route to the gateway.
+		if route.Dst == nil && route.Gw != nil && route.LinkIndex > 0 {
+			continue
+		}
+
 		err := delAddRoute(iface, bridge, route)
 		if err != nil {
 			return err
+		}
+	}
+
+	// Now add the default gateway (if any) via this interface.
+	for i := range routes {
+		route := routes[i]
+		if route.Dst == nil && route.Gw != nil && route.LinkIndex > 0 {
+			// Remove route from 'iface' and move it to 'bridge'
+			err := delAddRoute(iface, bridge, route)
+			if err != nil {
+				return err
+			}
 		}
 	}
 
