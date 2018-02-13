@@ -36,24 +36,33 @@ func saveIPAddress(iface, bridge netlink.Link, addrs []netlink.Addr) error {
 	return netlink.LinkSetUp(bridge)
 }
 
+// delAddRoute removes 'route' from 'iface' and moves to 'bridge'
+func delAddRoute(iface, bridge netlink.Link, route netlink.Route) error {
+	// Remove route from old interface
+	if err := netlink.RouteDel(&route); err != nil && !strings.Contains(err.Error(), "no such process") {
+		logrus.Errorf("Remove route from %q failed: %v", iface.Attrs().Name, err)
+		return err
+	}
+
+	// Add route to ovs bridge
+	route.LinkIndex = bridge.Attrs().Index
+	if err := netlink.RouteAdd(&route); err != nil && !os.IsExist(err) {
+		logrus.Errorf("Add route to bridge %q failed: %v", bridge.Attrs().Name, err)
+		return err
+	}
+
+	logrus.Infof("Successfully saved route %q", route.String())
+	return nil
+}
+
 func saveRoute(iface, bridge netlink.Link, routes []netlink.Route) error {
 	for i := range routes {
 		route := routes[i]
 
-		// Remove from old interface
-		if err := netlink.RouteDel(&route); err != nil && !strings.Contains(err.Error(), "no such process") {
-			logrus.Errorf("Remove route from %q failed: %v", iface.Attrs().Name, err)
+		err := delAddRoute(iface, bridge, route)
+		if err != nil {
 			return err
 		}
-
-		// Add to ovs bridge
-		route.LinkIndex = bridge.Attrs().Index
-		if err := netlink.RouteAdd(&route); err != nil && !os.IsExist(err) {
-			logrus.Errorf("Add route to bridge %q failed: %v", bridge.Attrs().Name, err)
-			return err
-		}
-
-		logrus.Infof("Successfully saved route %q", route.String())
 	}
 
 	return nil
