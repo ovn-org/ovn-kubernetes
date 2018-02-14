@@ -23,10 +23,6 @@ import (
 	"github.com/openvswitch/ovn-kubernetes/go-controller/pkg/config"
 	"github.com/openvswitch/ovn-kubernetes/go-controller/pkg/kube"
 	"github.com/openvswitch/ovn-kubernetes/go-controller/pkg/util"
-
-	"k8s.io/client-go/kubernetes"
-	"k8s.io/client-go/rest"
-	"k8s.io/client-go/tools/clientcmd"
 )
 
 const defaultVethMTU = 1400
@@ -149,20 +145,7 @@ func cmdAdd(args *skel.CmdArgs) error {
 		return fmt.Errorf("required CNI variable missing")
 	}
 
-	var kubeCfg *rest.Config
-	cfg := config.Kubernetes
-	if strings.HasPrefix(cfg.APIServer, "https") {
-		kubeCfg, err = util.CreateConfig(cfg.APIServer, cfg.Token, cfg.CACert)
-	} else if strings.HasPrefix(cfg.APIServer, "http") {
-		kubeCfg, err = clientcmd.BuildConfigFromFlags(cfg.APIServer, "")
-	} else {
-		err = fmt.Errorf("invalid kubernetes configuration")
-	}
-	if err != nil {
-		return fmt.Errorf("Failed to get kubeclient: %v", err)
-	}
-
-	clientset, err := kubernetes.NewForConfig(kubeCfg)
+	clientset, err := util.NewClientset(&config.Kubernetes)
 	if err != nil {
 		return fmt.Errorf("Could not create clientset for kubernetes: %v", err)
 	}

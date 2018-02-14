@@ -1,18 +1,12 @@
 package main
 
 import (
-	"fmt"
 	"net"
 	"os"
 	"runtime"
-	"strings"
 
 	"github.com/sirupsen/logrus"
 	"github.com/urfave/cli"
-
-	"k8s.io/client-go/kubernetes"
-	restclient "k8s.io/client-go/rest"
-	"k8s.io/client-go/tools/clientcmd"
 
 	ovncluster "github.com/openvswitch/ovn-kubernetes/go-controller/pkg/cluster"
 	"github.com/openvswitch/ovn-kubernetes/go-controller/pkg/config"
@@ -116,23 +110,7 @@ func runOvnKube(ctx *cli.Context) error {
 		}
 	}
 
-	// Process auth flags
-	var kconfig *restclient.Config
-	var err error
-	if config.Kubernetes.Kubeconfig != "" {
-		// uses the current context in kubeconfig
-		kconfig, err = clientcmd.BuildConfigFromFlags("", config.Kubernetes.Kubeconfig)
-	} else if config.Kubernetes.APIServer != "" && config.Kubernetes.Token != "" && ((config.Kubernetes.CACert != "") || !strings.HasPrefix(config.Kubernetes.APIServer, "https")) {
-		kconfig, err = util.CreateConfig(config.Kubernetes.APIServer, config.Kubernetes.Token, config.Kubernetes.CACert)
-	} else {
-		err = fmt.Errorf("Provide kubeconfig file or give server/token/tls credentials")
-	}
-	if err != nil {
-		panic(err.Error())
-	}
-
-	// creates the clientset
-	clientset, err := kubernetes.NewForConfig(kconfig)
+	clientset, err := util.NewClientset(&config.Kubernetes)
 	if err != nil {
 		panic(err.Error())
 	}
