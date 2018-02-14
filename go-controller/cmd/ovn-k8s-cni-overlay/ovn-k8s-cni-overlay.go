@@ -5,111 +5,21 @@ import (
 	"fmt"
 	"net"
 	"os"
-	"os/exec"
 	"strings"
 	"time"
 
-	"github.com/sirupsen/logrus"
 	"github.com/urfave/cli"
 
 	"github.com/containernetworking/cni/pkg/skel"
 	"github.com/containernetworking/cni/pkg/types"
 	"github.com/containernetworking/cni/pkg/types/current"
 	"github.com/containernetworking/cni/pkg/version"
-	"github.com/containernetworking/plugins/pkg/ip"
-	"github.com/containernetworking/plugins/pkg/ns"
-	"github.com/vishvananda/netlink"
 
+	"github.com/openvswitch/ovn-kubernetes/go-controller/cmd/ovn-k8s-cni-overlay/app"
 	"github.com/openvswitch/ovn-kubernetes/go-controller/pkg/config"
 	"github.com/openvswitch/ovn-kubernetes/go-controller/pkg/kube"
 	"github.com/openvswitch/ovn-kubernetes/go-controller/pkg/util"
 )
-
-const defaultVethMTU = 1400
-
-func renameLink(curName, newName string) error {
-	link, err := netlink.LinkByName(curName)
-	if err != nil {
-		return err
-	}
-
-	if err := netlink.LinkSetDown(link); err != nil {
-		return err
-	}
-	if err := netlink.LinkSetName(link, newName); err != nil {
-		return err
-	}
-	if err := netlink.LinkSetUp(link); err != nil {
-		return err
-	}
-
-	return nil
-}
-
-func setupInterface(netns ns.NetNS, containerID, ifName, macAddress, ipAddress, gatewayIP string) (*current.Interface, *current.Interface, error) {
-	hostIface := &current.Interface{}
-	contIface := &current.Interface{}
-
-	var oldHostVethName string
-	err := netns.Do(func(hostNS ns.NetNS) error {
-		// create the veth pair in the container and move host end into host netns
-		hostVeth, containerVeth, err := ip.SetupVeth(ifName, defaultVethMTU, hostNS)
-		if err != nil {
-			return err
-		}
-		hostIface.Mac = hostVeth.HardwareAddr.String()
-		contIface.Name = containerVeth.Name
-
-		link, err := netlink.LinkByName(contIface.Name)
-		if err != nil {
-			return fmt.Errorf("failed to lookup %s: %v", contIface.Name, err)
-		}
-
-		hwAddr, err := net.ParseMAC(macAddress)
-		if err != nil {
-			return fmt.Errorf("failed to parse mac address for %s: %v", contIface.Name, err)
-		}
-		err = netlink.LinkSetHardwareAddr(link, hwAddr)
-		if err != nil {
-			return fmt.Errorf("failed to add mac address %s to %s: %v", macAddress, contIface.Name, err)
-		}
-		contIface.Mac = macAddress
-		contIface.Sandbox = netns.Path()
-
-		addr, err := netlink.ParseAddr(ipAddress)
-		if err != nil {
-			return err
-		}
-		err = netlink.AddrAdd(link, addr)
-		if err != nil {
-			return fmt.Errorf("failed to add IP addr %s to %s: %v", ipAddress, contIface.Name, err)
-		}
-
-		gw := net.ParseIP(gatewayIP)
-		if gw == nil {
-			return fmt.Errorf("parse ip of gateway failed")
-		}
-		err = ip.AddRoute(nil, gw, link)
-		if err != nil {
-			return err
-		}
-
-		oldHostVethName = hostVeth.Name
-
-		return nil
-	})
-	if err != nil {
-		return nil, nil, err
-	}
-
-	// rename the host end of veth pair
-	hostIface.Name = containerID[:15]
-	if err := renameLink(oldHostVethName, hostIface.Name); err != nil {
-		return nil, nil, fmt.Errorf("failed to rename %s to %s: %v", oldHostVethName, hostIface.Name, err)
-	}
-
-	return hostIface, contIface, nil
-}
 
 func argString2Map(args string) (map[string]string, error) {
 	argsMap := make(map[string]string)
@@ -151,6 +61,15 @@ func cmdAdd(args *skel.CmdArgs) error {
 	}
 	kubecli := &kube.Kube{KClient: clientset}
 
+	// TODO: Remove the following once the Kubernetes will get
+	// proper Windows CNI support.
+	// NOTE Windows ONLY: there are some cases where we want to return here
+	// and not to continue
+	stop, fakeResult := app.InitialPlatformCheck(args)
+	if stop {
+		return types.PrintResult(fakeResult, conf.CNIVersion)
+	}
+
 	// Get the IP address and MAC address from the API server.
 	// Wait for a maximum of 30 seconds with a retry every 1 second.
 	var annotation map[string]string
@@ -188,29 +107,10 @@ func cmdAdd(args *skel.CmdArgs) error {
 		return fmt.Errorf("failed in pod annotation key extract")
 	}
 
-	netns, err := ns.GetNS(args.Netns)
-	if err != nil {
-		return fmt.Errorf("failed to open netns %q: %v", args.Netns, err)
-	}
-	defer netns.Close()
-
-	hostIface, contIface, err := setupInterface(netns, args.ContainerID, args.IfName, macAddress, ipAddress, gatewayIP)
+	var interfacesArray []*current.Interface
+	interfacesArray, err = app.ConfigureInterface(args, namespace, podName, macAddress, ipAddress, gatewayIP)
 	if err != nil {
 		return err
-	}
-
-	ifaceID := fmt.Sprintf("%s_%s", namespace, podName)
-
-	ovsArgs := []string{
-		"add-port", "br-int", hostIface.Name, "--", "set",
-		"interface", hostIface.Name,
-		fmt.Sprintf("external_ids:attached_mac=%s", macAddress),
-		fmt.Sprintf("external_ids:iface-id=%s", ifaceID),
-		fmt.Sprintf("external_ids:ip_address=%s", ipAddress),
-	}
-	out, err := exec.Command("ovs-vsctl", ovsArgs...).CombinedOutput()
-	if err != nil {
-		return fmt.Errorf("failure in plugging pod interface: %v\n  %q", err, string(out))
 	}
 
 	// Build the result structure to pass back to the runtime
@@ -223,7 +123,7 @@ func cmdAdd(args *skel.CmdArgs) error {
 		ipVersion = "4"
 	}
 	result := &current.Result{
-		Interfaces: []*current.Interface{hostIface, contIface},
+		Interfaces: interfacesArray,
 		IPs: []*current.IPConfig{
 			{
 				Version:   ipVersion,
@@ -238,17 +138,7 @@ func cmdAdd(args *skel.CmdArgs) error {
 }
 
 func cmdDel(args *skel.CmdArgs) error {
-	ifaceName := args.ContainerID[:15]
-	ovsArgs := []string{
-		"del-port", "br-int", ifaceName,
-	}
-	out, err := exec.Command("ovs-vsctl", ovsArgs...).CombinedOutput()
-	if err != nil && !strings.Contains(string(out), "no port named") {
-		// DEL should be idempotent; don't return an error just log it
-		logrus.Warningf("failed to delete OVS port %s: %v\n  %q", ifaceName, err, string(out))
-	}
-
-	return nil
+	return app.PlatformSpecificCleanup(args)
 }
 
 func main() {
