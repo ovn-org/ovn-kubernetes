@@ -232,7 +232,7 @@ func (oc *Controller) WatchNetworkPolicy() {
 			oc.deleteNetworkPolicy(policy)
 			return
 		},
-	}, nil)
+	}, oc.syncNetworkPolicies)
 }
 
 // WatchNamespaces starts the watching of namespace resource and calls
@@ -265,5 +265,5 @@ func (oc *Controller) WatchNamespaces() {
 			oc.deleteNamespace(ns)
 			return
 		},
-	}, nil)
+	}, oc.syncNamespaces)
 }

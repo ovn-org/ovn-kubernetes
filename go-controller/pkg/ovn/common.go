@@ -21,6 +21,35 @@ func hashedAddressSet(s string) string {
 	return fmt.Sprintf("a%s", hashString)
 }
 
+// forEachAddressSetUnhashedName will pass the unhashedName, namespaceName and
+// the first suffix in the name to the 'iteratorFn' for every address_set in
+// OVN. (Each unhashed name for an addressSet can be of the form
+// namespaceName.suffix1.suffix2. .suffixN)
+func (oc *Controller) forEachAddressSetUnhashedName(iteratorFn func(
+	string, string, string)) error {
+	output, err := exec.Command(OvnNbctl, "--data=bare", "--no-heading",
+		"--columns=external_ids", "find", "address_set").Output()
+	if err != nil {
+		logrus.Errorf("Error in obtaining list of address sets from OVN: %v",
+			err)
+		return err
+	}
+	for _, addrSet := range strings.Fields(string(output)) {
+		if !strings.HasPrefix(addrSet, "name=") {
+			continue
+		}
+		addrSetName := addrSet[5:]
+		names := strings.Split(addrSetName, ".")
+		addrSetNamespace := names[0]
+		nameSuffix := ""
+		if len(names) >= 2 {
+			nameSuffix = names[1]
+		}
+		iteratorFn(addrSetName, addrSetNamespace, nameSuffix)
+	}
+	return nil
+}
+
 func (oc *Controller) setAddressSet(hashName string, addresses []string) {
 	logrus.Debugf("setAddressSet for %s with %s", hashName, addresses)
 	if len(addresses) == 0 {
