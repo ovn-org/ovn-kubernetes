@@ -18,7 +18,8 @@ all build:
 
 windows:
 	export WINDOWS_BUILD="yes"; \
-	hack/build-go.sh cmd/ovnkube/ovnkube.go;
+	hack/build-go.sh cmd/ovnkube/ovnkube.go; \
+	hack/build-go.sh cmd/ovn-k8s-cni-overlay/ovn-k8s-cni-overlay.go;
 
 check test:
 	hack/test-go.sh ${PKGS}
