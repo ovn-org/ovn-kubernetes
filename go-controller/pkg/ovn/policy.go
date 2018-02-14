@@ -73,6 +73,34 @@ const (
 	emptyLabelSelector  = "<none>"
 )
 
+func (oc *Controller) syncNetworkPolicies(networkPolicies []interface{}) {
+	expectedPolicies := make(map[string]map[string]bool)
+	for _, npInterface := range networkPolicies {
+		policy, ok := npInterface.(kapisnetworking.NetworkPolicy)
+		if !ok {
+			logrus.Errorf("Spurious object in syncNetworkPolicies: %v",
+				npInterface)
+			continue
+		}
+		expectedPolicies[policy.Namespace] = map[string]bool{
+			policy.Name: true}
+	}
+
+	err := oc.forEachAddressSetUnhashedName(func(addrSetName, namespaceName,
+		policyName string) {
+		if policyName != "" &&
+			!expectedPolicies[namespaceName][policyName] {
+			// policy doesn't exist on k8s. Delete acl rules from OVN
+			oc.deleteAclsPolicy(namespaceName, policyName)
+			// delete the address sets for this policy from OVN
+			oc.deleteAddressSet(hashedAddressSet(addrSetName))
+		}
+	})
+	if err != nil {
+		logrus.Errorf("Error in syncing network policies: %v", err)
+	}
+}
+
 func (oc *Controller) addAllowACLFromNode(logicalSwitch string) {
 	uuid, err := exec.Command(OvnNbctl, "--data=bare", "--no-heading",
 		"--columns=_uuid", "find", "ACL",

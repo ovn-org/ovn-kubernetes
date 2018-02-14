@@ -8,6 +8,29 @@ import (
 	"time"
 )
 
+func (oc *Controller) syncNamespaces(namespaces []interface{}) {
+	expectedNs := make(map[string]bool)
+	for _, nsInterface := range namespaces {
+		ns, ok := nsInterface.(*kapi.Namespace)
+		if !ok {
+			logrus.Errorf("Spurious object in syncNamespaces: %v", nsInterface)
+			continue
+		}
+		expectedNs[ns.Name] = true
+	}
+
+	err := oc.forEachAddressSetUnhashedName(func(addrSetName,
+		namespaceName, nameSuffix string) {
+		if nameSuffix == "" && !expectedNs[namespaceName] {
+			// delete the address sets for this namespace from OVN
+			oc.deleteAddressSet(hashedAddressSet(addrSetName))
+		}
+	})
+	if err != nil {
+		logrus.Errorf("Error in syncing namespaces: %v", err)
+	}
+}
+
 func (oc *Controller) waitForNamespaceEvent(namespace string) error {
 	// Wait for 10 seconds to get the namespace event.
 	count := 100

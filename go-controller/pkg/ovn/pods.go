@@ -42,6 +42,51 @@ func (oc *Controller) syncPods(pods []interface{}) {
 				logrus.Errorf("Error in deleting pod's logical port in ovn - %s (%v)",
 					string(out), err)
 			}
+			oc.deletePodAcls(existingPort)
+		}
+	}
+}
+
+func (oc *Controller) deletePodAcls(logicalPort string) {
+	// delete the ACL rules on OVN that corresponding pod has been deleted
+	uuids, err := exec.Command(OvnNbctl, "--data=bare", "--no-heading",
+		"--columns=_uuid", "find", "ACL",
+		fmt.Sprintf("external_ids:logical_port=%s", logicalPort)).Output()
+	if err != nil {
+		logrus.Errorf("Error in getting list of acls")
+		return
+	}
+
+	if string(uuids) == "" {
+		logrus.Debugf("deletePodAcls: returning because find " +
+			"returned no ACLs")
+		return
+	}
+
+	uuidSlice := strings.Fields(string(uuids))
+	for _, uuid := range uuidSlice {
+		// Get logical switch
+		out, err := exec.Command(OvnNbctl, "--data=bare",
+			"--no-heading", "--columns=_uuid", "find", "logical_switch",
+			fmt.Sprintf("acls{>=}%s", uuid)).Output()
+		if err != nil {
+			logrus.Errorf("find failed to get the logical_switch of acl"+
+				"uuid=%s (%v)", uuid, err)
+			continue
+		}
+
+		if string(out) == "" {
+			continue
+		}
+		logicalSwitch := strings.TrimSpace(string(out))
+
+		_, err = exec.Command(OvnNbctl, "remove", "logical_switch",
+			logicalSwitch, "acls", uuid).Output()
+		if err != nil {
+			logrus.Errorf("remove failed to delete the allow-from rule %s for"+
+				" logical_switch=%s, logical_port=%s (%s)",
+				uuid, logicalSwitch, logicalPort, err)
+			continue
 		}
 	}
 }
