@@ -36,17 +36,6 @@ build_windows_binaries() {
     mv $output_exe "${OVN_KUBE_OUTPUT_BINPATH_WINDOWS}"
 }
 
-test() {
-    for test in "${tests[@]:+${tests[@]}}"; do
-      local outfile="${OVN_KUBE_OUTPUT_BINPATH}/${platform}/$(basename ${test})"
-      # disabling cgo allows use of delve
-      CGO_ENABLED=0 go test \
-        -i -c -o "${outfile}" \
-        "${goflags[@]:+${goflags[@]}}" \
-        "$(dirname ${test})"
-    done
-}
-
 OVN_KUBE_BINARIES=("$@")
 if [ -z "${WINDOWS_BUILD}" ]; then
     build_binaries

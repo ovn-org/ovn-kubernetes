@@ -4,7 +4,7 @@ PREFIX ?= ${DESTDIR}/usr
 BINDIR ?= ${PREFIX}/bin
 CNIBINDIR ?= ${DESTDIR}/opt/cni/bin
 
-.PHONY: all build
+.PHONY: all build check test
 
 # Example:
 #   make
@@ -19,6 +19,9 @@ all build:
 windows:
 	export WINDOWS_BUILD="yes"; \
 	hack/build-go.sh cmd/ovnkube/ovnkube.go;
+
+check test:
+	hack/test-go.sh ${PKGS}
 
 install:
 	install -D -m 755 ${OUT_DIR}/go/bin/ovnkube ${BINDIR}/
