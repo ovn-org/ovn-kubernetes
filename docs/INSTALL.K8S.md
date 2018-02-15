@@ -17,9 +17,10 @@ docker run \
 Download the latest stable kubernetes.tar.gz from:
 https://github.com/kubernetes/kubernetes/releases
 
-Untar the file and look for kubernetes-server-linux-amd64.tar.gz.  Untar that
-file too.  Copy kube-apiserver, kube-controller-manager, kube-scheduler,
-kubelet and kubectl to a directory.
+Untar the file kubernetes.tar.gz. Download the binary with script
+cluster/get-kube-binaries.sh. Find file kubernetes-server-linux-amd64.tar.gz
+under server folder and untar that file too.  Copy kube-apiserver,
+kube-controller-manager, kube-scheduler, kubelet and kubectl to a directory.
 
 On the master node, start the following daemons: kube-apiserver,
 kube-controller-manager, kube-scheduler.  You can start first two of them in
@@ -108,6 +109,44 @@ nohup ./kubelet \
   --network-plugin=cni \
   --network-plugin-dir=/etc/cni/net.d \
   2>&1 > /dev/null &
+```
+
+Note that in latest kubernetes release (after 1.8.0), api-servers has been
+deprecated and you need to use kubeconfig to config api servers. Also,
+network-plugin-dir option has been changed to cni-conf-dir. e.g.
+```
+nohup ./kubelet \
+  --kubeconfig=/root/kubeconfig.yaml
+  --v=2 \
+  --address=0.0.0.0 \
+  --enable-server=true \
+  --network-plugin=cni \
+  --cni-conf-dir="/etc/cni/net.d" \
+  --cni-bin-dir="/opt/cni/bin/" \
+  --fail-swap-on=false \
+  --runtime-cgroups=/systemd/system.slice \
+  --kubelet-cgroups=/systemd/system.slice \
+  2>&1 > /dev/null &
+```
+
+Here is a sample config for kubeconfig
+```
+kind: Config
+clusters:
+- name: local
+  cluster:
+    server: http://172.16.1.2:8080
+users:
+- name: ubuntu
+  user:
+    password: p1NVMZqhOOOqkWQq
+    username: admin
+contexts:
+- context:
+    cluster: local
+    user: ubuntu
+  name: ubuntu
+current-context: ubuntu
 ```
 
 If kube-apiserver and kube-controller-manager were started in HTTPS mode run
