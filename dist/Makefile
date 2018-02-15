@@ -6,17 +6,34 @@
 # without warranty of any kind.
 
 
+# Build distribution SRPM and RPMs based on version number specified
+# in the openvswitch-ovn-kubernetes.spec file
 rpms: srpm rpm
+
+# Build snapshot RPMs based on the commit number in the
+# the openvswitch-ovn-kubernetes.spec.snapshot file
+# The commit must be in https://github.com/openvswitch/ovn-kubernetes
+snapshot: rpmsnap
 
 dist: openvswitch-ovn-kubernetes.spec
 	spectool -g openvswitch-ovn-kubernetes.spec
 
 srpm: dist
 	rpmbuild --define "_sourcedir `pwd`" --define "_specdir `pwd`" \
-	--define "_rpmdir `pwd`" --define "_srcrpmdir `pwd`" -bs openvswitch-ovn-kubernetes.spec
+	--define "_rpmdir `pwd`" --define "_srcrpmdir `pwd`" \
+	-bs openvswitch-ovn-kubernetes.spec
 rpm: dist
 	rpmbuild --define "_sourcedir `pwd`" --define "_specdir `pwd`" \
-	--define "_rpmdir `pwd`" --define "_srcrpmdir `pwd`" -ba openvswitch-ovn-kubernetes.spec
+	--define "_rpmdir `pwd`" --define "_srcrpmdir `pwd`" \
+	-ba openvswitch-ovn-kubernetes.spec
+
+distsnap: openvswitch-ovn-kubernetes.spec.snapshot
+	spectool -g openvswitch-ovn-kubernetes.spec.snapshot
+
+rpmsnap: distsnap
+	rpmbuild --define "_sourcedir `pwd`" --define "_specdir `pwd`" \
+	--define "_rpmdir `pwd`" --define "_srcrpmdir `pwd`" \
+	-ba openvswitch-ovn-kubernetes.spec.snapshot
 
 .PHONY: clean
 clean:
