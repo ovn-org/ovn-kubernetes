@@ -15,12 +15,6 @@
 			"revision": ""
 		},
 		{
-			"checksumSHA1": "CWLxwFSj7MNed2MzAOSm0Cg9p+o=",
-			"path": "github.com/Sirupsen/logrus",
-			"revision": "d682213848ed68c0a260ca37d6dd5ace8423f5ba",
-			"revisionTime": "2017-12-05T20:32:29Z"
-		},
-		{
 			"checksumSHA1": "LvjTFR2Am01kquJNDnfISncPfRw=",
 			"path": "github.com/containernetworking/cni/pkg/skel",
 			"revision": "909fe7d10d98ab99b9990966796316249c83b263",
@@ -183,14 +177,14 @@
 			"revisionTime": "2016-08-15T18:11:09Z"
 		},
 		{
+			"path": "k8s.io/api/core/v1",
+			"revision": ""
+		},
+		{
 			"checksumSHA1": "V+yTFCwR2itFFupPP8aB13A33+M=",
 			"path": "k8s.io/client-go/pkg",
 			"revision": "18ec62fe90328a54f7ab513d5fedf3e8650c98b5",
 			"revisionTime": "2018-01-04T01:47:05Z"
-		},
-		{
-			"path": "k8s.io/api/core/v1",
-			"revision": ""
 		},
 		{
 			"path": "k8s.io/client-go/pkg/apis/networking/v1",
