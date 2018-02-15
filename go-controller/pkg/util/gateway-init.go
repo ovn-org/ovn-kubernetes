@@ -2,7 +2,7 @@ package util
 
 import (
 	"fmt"
-	"github.com/Sirupsen/logrus"
+	"github.com/sirupsen/logrus"
 	"net"
 	"os/exec"
 	"strings"

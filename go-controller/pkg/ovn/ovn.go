@@ -1,7 +1,7 @@
 package ovn
 
 import (
-	"github.com/Sirupsen/logrus"
+	"github.com/sirupsen/logrus"
 	"github.com/openvswitch/ovn-kubernetes/go-controller/pkg/factory"
 	"github.com/openvswitch/ovn-kubernetes/go-controller/pkg/kube"
 	kapi "k8s.io/api/core/v1"

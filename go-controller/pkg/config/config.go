@@ -3,7 +3,7 @@ package config
 import (
 	"os"
 
-	"github.com/Sirupsen/logrus"
+	"github.com/sirupsen/logrus"
 	gcfg "gopkg.in/gcfg.v1"
 )
 

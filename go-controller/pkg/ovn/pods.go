@@ -7,7 +7,7 @@ import (
 	"time"
 	"unicode"
 
-	"github.com/Sirupsen/logrus"
+	"github.com/sirupsen/logrus"
 	kapi "k8s.io/api/core/v1"
 )
 

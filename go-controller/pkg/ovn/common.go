@@ -3,7 +3,7 @@ package ovn
 import (
 	"encoding/json"
 	"fmt"
-	"github.com/Sirupsen/logrus"
+	"github.com/sirupsen/logrus"
 	"hash/fnv"
 	"os/exec"
 	"strconv"
