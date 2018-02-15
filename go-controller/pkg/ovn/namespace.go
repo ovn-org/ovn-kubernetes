@@ -1,7 +1,7 @@
 package ovn
 
 import (
-	"github.com/Sirupsen/logrus"
+	"github.com/sirupsen/logrus"
 	kapi "k8s.io/api/core/v1"
 	"sync"
 	"time"

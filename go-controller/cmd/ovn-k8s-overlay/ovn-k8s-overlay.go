@@ -3,7 +3,7 @@ package main
 import (
 	"os"
 
-	"github.com/Sirupsen/logrus"
+	"github.com/sirupsen/logrus"
 	"github.com/openvswitch/ovn-kubernetes/go-controller/cmd/ovn-k8s-overlay/app"
 	"github.com/urfave/cli"
 )

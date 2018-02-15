@@ -8,7 +8,7 @@ import (
 	"runtime"
 	"strings"
 
-	"github.com/Sirupsen/logrus"
+	"github.com/sirupsen/logrus"
 
 	"k8s.io/client-go/kubernetes"
 	restclient "k8s.io/client-go/rest"
