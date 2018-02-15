@@ -1,4 +1,8 @@
 %global project ovn-kubernetes
+%global git0 https://github.com/openvswitch/%{repo}
+# commit is the image that you want to build
+%global commit         73b46236d08ef2f38945e8f9a43f23d377540879
+%global shortcommit    %(c=%{commit}; echo ${c:0:7})
 %global repo %{project}
 %global debug_package %{nil}
 
@@ -19,13 +23,13 @@
 %endif
 
 Name: openvswitch-ovn-kubernetes
-Version: 0.2.0
+Version: %{commit}
 Release: 1%{?dist}
 URL: https://www.github.com/openvswitch/ovn-kubernetes
 Summary: Open Virtual Networking Kubernetes Wedge
 
 License: ASL 2.0
-Source0: https://github.com/openvswitch/ovn-kubernetes/archive/v%{version}.tar.gz
+Source0: %{git0}/archive/%{commit}/%{repo}-%{shortcommit}.tar.gz
 
 # golang not supported
 ExcludeArch: ppc64
