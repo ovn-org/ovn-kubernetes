@@ -2,8 +2,8 @@ package ovn
 
 import (
 	"fmt"
-	"github.com/sirupsen/logrus"
 	"github.com/openvswitch/ovn-kubernetes/go-controller/pkg/kube"
+	"github.com/sirupsen/logrus"
 	"k8s.io/api/core/v1"
 	kapi "k8s.io/api/core/v1"
 	kapisnetworking "k8s.io/api/networking/v1"
