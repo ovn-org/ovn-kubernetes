@@ -1,10 +1,7 @@
 sudo: required
-language: python
-python:
-      - "2.7"
-env:
-    - TOX_ENV=py27
-    - TOX_ENV=flake8
+language: go
+go:
+      - 1.8.1
 before_install:
     - export GOPATH=$HOME/go
     - export PATH=$HOME/usr/local/go/bin:$GOPATH/bin:$PATH
@@ -12,15 +9,11 @@ before_install:
     - mv $TRAVIS_BUILD_DIR $GOPATH/src/github.com/openvswitch/ovn-kubernetes
     - cd $GOPATH/src/github.com/openvswitch/ovn-kubernetes
 install:
-    - pip install tox-travis
     - eval "$(gimme 1.8.1)"
 script:
-    - tox -e $TOX_ENV
-    - 'if [ "$TOX_ENV" = "py27" ]; then
-        cd go-controller;
-        make;
-        make windows;
-        make gofmt;
-        make install.tools;
-        make lint;
-       fi'
+    -   cd go-controller;
+    -    make;
+    -    make windows;
+    -    make gofmt;
+    -    make install.tools;
+    -    make lint;

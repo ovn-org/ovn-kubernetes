@@ -1,6 +1,7 @@
 package ovn
 
 import (
+        "sync"
 	"github.com/openvswitch/ovn-kubernetes/go-controller/pkg/factory"
 	"github.com/openvswitch/ovn-kubernetes/go-controller/pkg/kube"
 	"github.com/sirupsen/logrus"
@@ -9,7 +10,6 @@ import (
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/tools/cache"
 	"reflect"
-	"sync"
 )
 
 // Controller structure is the object which holds the controls for starting
