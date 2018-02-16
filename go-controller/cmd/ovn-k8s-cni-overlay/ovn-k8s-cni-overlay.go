@@ -169,7 +169,6 @@ func cmdAdd(args *skel.CmdArgs) error {
 			return fmt.Errorf("failed to get K8S_API_TOKEN")
 		}
 		token := strings.Trim(strings.TrimSpace(string(out)), "\"")
-		config.FetchConfig()
 		cfg, err = util.CreateConfig(k8sAPIServer, token, config.K8sCACertificate)
 	} else if strings.HasPrefix(k8sAPIServer, "http") {
 		cfg, err = clientcmd.BuildConfigFromFlags(k8sAPIServer, "")
@@ -288,6 +287,7 @@ func cmdDel(args *skel.CmdArgs) error {
 }
 
 func main() {
+	config.FetchConfig()
 	f, err := os.OpenFile(config.LogPath, os.O_WRONLY|os.O_CREATE, 0755)
 	if err == nil {
 		defer f.Close()
