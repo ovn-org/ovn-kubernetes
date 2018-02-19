@@ -22,11 +22,17 @@ const (
 	typePolicies   = "policies"
 	typeNamespaces = "namespaces"
 	typeNodes      = "nodes"
+	resyncInterval = 12 * time.Hour
 )
 
 // NewWatchFactory initializes a new watch factory
 func NewWatchFactory(c kubernetes.Interface, stopChan <-chan struct{}) (*WatchFactory, error) {
-	iFactory := informerfactory.NewSharedInformerFactory(c, 10*time.Minute)
+	// resync time is 12 hours, none of the resources being watched in ovn-kubernetes have
+	// any race condition where a resync may be required e.g. cni executable on node watching for
+	// events on pods and assuming that an 'ADD' event will contain the annotations put in by
+	// ovnkube master (currently, it is just a 'get' loop)
+	// the downside of making it tight (like 10 minutes) is needless spinning on all resources
+	iFactory := informerfactory.NewSharedInformerFactory(c, resyncInterval)
 	wf := &WatchFactory{
 		iFactory:  iFactory,
 		informers: make(map[string]cache.SharedIndexInformer),
