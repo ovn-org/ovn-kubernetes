@@ -1043,7 +1043,12 @@ func (oc *Controller) addNetworkPolicy(policy *kapisnetworking.NetworkPolicy) {
 		return
 	}
 
-	oc.waitForNamespaceEvent(policy.Namespace)
+	err := oc.waitForNamespaceEvent(policy.Namespace)
+	if err != nil {
+		logrus.Errorf("failed to wait for namespace %s event (%v)",
+			policy.Namespace, err)
+		return
+	}
 
 	np := &namespacePolicy{}
 	np.name = policy.Name

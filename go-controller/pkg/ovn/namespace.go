@@ -1,19 +1,27 @@
 package ovn
 
 import (
+	"fmt"
 	"github.com/sirupsen/logrus"
 	kapi "k8s.io/api/core/v1"
 	"sync"
 	"time"
 )
 
-func (oc *Controller) waitForNamespaceEvent(namespace string) {
+func (oc *Controller) waitForNamespaceEvent(namespace string) error {
+	// Wait for 10 seconds to get the namespace event.
+	count := 100
 	for {
 		if oc.namespacePolicies[namespace] != nil {
 			break
 		}
 		time.Sleep(100 * time.Millisecond)
+		count--
+		if count == 0 {
+			return fmt.Errorf("timeout waiting for namespace event")
+		}
 	}
+	return nil
 }
 
 func (oc *Controller) addPodToNamespaceAddressSet(ns, address string) {
