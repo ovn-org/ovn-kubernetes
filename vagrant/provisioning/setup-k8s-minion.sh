@@ -52,7 +52,11 @@ KUBECONFIG
 # Start k8s daemons
 pushd k8s/server/kubernetes/server/bin
 echo "Starting kubelet ..."
-nohup sudo ./kubelet --api-servers=http://$MASTER_IP:8080 --v=2 --address=0.0.0.0 \
+nohup sudo ./kubelet --kubeconfig $HOME/kubeconfig.yaml \
+                     --v=2 --address=0.0.0.0 \
+                     --fail-swap-on=false \
+                     --runtime-cgroups=/systemd/system.slice \
+                     --kubelet-cgroups=/systemd/system.slice \
                      --enable-server=true --network-plugin=cni \
                      --cni-conf-dir=/etc/cni/net.d \
                      --cni-bin-dir="/opt/cni/bin/" 2>&1 0<&- &>/dev/null &
