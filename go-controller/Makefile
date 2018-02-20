@@ -24,7 +24,7 @@ install:
 	install -D -m 755 ${OUT_DIR}/go/bin/ovnkube ${BINDIR}/
 	install -D -m 755 ${OUT_DIR}/go/bin/ovn-k8s-overlay ${BINDIR}/
 	install -D -m 755 ${OUT_DIR}/go/bin/ovn-kube-util ${BINDIR}/
-	install -D -m 755 ${OUT_DIR}/go/bin/ovn-k8s-cni-overlay ${CNIBINDIR}/
+	install -D -m 755 ${OUT_DIR}/go/bin/ovn-k8s-cni-overlay -t ${CNIBINDIR}/
 
 clean:
 	rm -rf ${OUT_DIR}
