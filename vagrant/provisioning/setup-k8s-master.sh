@@ -26,6 +26,7 @@ PUBLIC_SUBNET_MASK=$2
 GW_IP=$3
 OVN_EXTERNAL=$4
 EOL
+source ~/setup_master_args.sh
 
 # Install k8s
 
@@ -38,10 +39,13 @@ sudo docker run --net=host -v /var/etcd/data:/var/etcd/data -d \
         --data-dir=/var/etcd/data
 
 # Start k8s daemons
+sudo sh -c 'echo "PATH=$PATH:$HOME/k8s/server/kubernetes/server/bin" >> /etc/profile'
 pushd k8s/server/kubernetes/server/bin
 echo "Starting kube-apiserver ..."
 nohup sudo ./kube-apiserver --service-cluster-ip-range=172.16.1.0/24 \
-                            --address=0.0.0.0 --etcd-servers=http://127.0.0.1:4001 \
+                            --address=0.0.0.0 \
+                            --etcd-servers=http://127.0.0.1:4001 \
+                            --advertise-address=$GW_IP \
                             --v=2 2>&1 0<&- &>/dev/null &
 
 # Wait till kube-apiserver starts up
@@ -89,8 +93,6 @@ users:
     password: p1NVMZqhOOOqkWQq
     username: admin
 KUBECONFIG
-
-source ~/setup_master_args.sh
 
 if [ $PROTOCOL = "ssl" ]; then
   nohup sudo ovnkube -kubeconfig $HOME/kubeconfig.yaml -net-controller -v=4 \
