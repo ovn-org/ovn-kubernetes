@@ -396,8 +396,8 @@ TBA
 ## Installing Kubernetes
 
 Installing k8s is out of scope of this documentation.  You can read
-[README.K8S.md] for that.  This repo does provide a quick start guide here:
-[INSTALL.K8S.md]
+[README.K8S.md] for that.  For a quick start, the vagrant in this repo,
+does install kubernetes in its simplest form.
 
 ## Debugging
 
@@ -410,7 +410,6 @@ There is a vagrant available to bring up a simple cluster at [vagrant].
 [INSTALL.rst]: http://docs.openvswitch.org/en/latest/intro/install
 [INSTALL.UBUNTU.md]: docs/INSTALL.UBUNTU.md
 [README.K8S.md]: https://github.com/kubernetes/kubernetes/tree/master/docs
-[INSTALL.K8S.md]: docs/INSTALL.K8S.md
 [README.RHEL.rst]: https://github.com/openvswitch/ovs/blob/master/rhel/README.RHEL.rst
 [openvswitch-switch.README.Debian]: https://github.com/openvswitch/ovs/blob/master/debian/openvswitch-switch.README.Debian
 [debugging.md]: docs/debugging.md
