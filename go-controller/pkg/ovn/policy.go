@@ -70,6 +70,7 @@ const (
 	defaultAllowPriority = "1001"
 	// IP Block except deny acl rule priority
 	ipBlockDenyPriority = "1010"
+	emptyLabelSelector  = "<none>"
 )
 
 func (oc *Controller) addAllowACLFromNode(logicalSwitch string) {
@@ -796,6 +797,9 @@ func (oc *Controller) handleLocalPodSelector(
 	clientset, _ := client.KClient.(*kubernetes.Clientset)
 	podSelectorAsSelector := metav1.FormatLabelSelector(
 		&policy.Spec.PodSelector)
+	if podSelectorAsSelector == emptyLabelSelector {
+		podSelectorAsSelector = ""
+	}
 
 	watchlist := newListWatchFromClient(clientset.Core().RESTClient(), "pods",
 		policy.Namespace, podSelectorAsSelector)
@@ -836,6 +840,9 @@ func (oc *Controller) handlePeerPodSelector(
 	client, _ := oc.Kube.(*kube.Kube)
 	clientset, _ := client.KClient.(*kubernetes.Clientset)
 	podSelectorAsSelector := metav1.FormatLabelSelector(podSelector)
+	if podSelectorAsSelector == emptyLabelSelector {
+		podSelectorAsSelector = ""
+	}
 
 	watchlist := newListWatchFromClient(clientset.Core().RESTClient(), "pods",
 		policy.Namespace, podSelectorAsSelector)
@@ -949,6 +956,9 @@ func (oc *Controller) handlePeerNamespaceSelector(
 	clientset, _ := client.KClient.(*kubernetes.Clientset)
 	nsSelectorAsSelector := metav1.FormatLabelSelector(
 		namespaceSelector)
+	if nsSelectorAsSelector == emptyLabelSelector {
+		nsSelectorAsSelector = ""
+	}
 
 	watchlist := newNamespaceListWatchFromClient(clientset.Core().RESTClient(),
 		nsSelectorAsSelector)
