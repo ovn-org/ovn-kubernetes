@@ -27,6 +27,13 @@ Copy-Item ".\etc\ovn_k8s.conf" -Destination (New-Item "C:\etc" -Type container -
 
 ## Config values
 
+The config file contains common configuration options shared between the various
+ovn-kubernetes programs (ovnkube, ovn-k8s-cni-overlay, etc).  All configuration
+file options can also be specified as command-line arguments which override
+config file options; see the -help output of each program for more details.
+
+### [default] section
+
 The following config option represents the MTU value which should be used
 for the overlay networks.
 ```
@@ -38,37 +45,61 @@ track connections that are initiated from the pods so that the reverse
 connections go back to the pods. This represents the conntrack zone used
 for the conntrack flow rules.
 ```
-conntrack_zone=64000
+conntrack-zone=64000
 ```
 
-The mode in which ovn-kubernetes should operate. This value can be overlay or
-underlay. At the moment only overlay networks are supported.
+### [logging] section
+
+The following config values control what verbosity level logging is written at
+and to what file (if any).
 ```
-ovn_mode=overlay
+loglevel=5
+logfile=/var/log/ovnkube.log
 ```
+
+### [cni] section
 
 The following config values are used for the CNI plugin.
 ```
-log_path=/var/log/openvswitch/ovn-k8s-cni-overlay.log
-unix_socket=/var/run/openvswitch/ovnnb_db.sock
-cni_conf_path=/etc/cni/net.d
-cni_link_path=/opt/cni/bin/
-cni_plugin=ovn-k8s-cni-overlay
+conf-dir=/etc/cni/net.d
+plugin=ovn-k8s-cni-overlay
 ```
 
-OVN and K8S certificates are stored in the following options.
+### [kubernetes] section
+
+Kubernetes API options are stored in the following section.
 ```
-private_key=/etc/openvswitch/ovncontroller-privkey.pem
-certificate=/etc/openvswitch/ovncontroller-cert.pem
-ca_cert=/etc/openvswitch/ovnnb-ca.cert
-k8s_ca_certificate=/etc/openvswitch/k8s-ca.crt
+apiserver=https://1.2.3.4:6443
+token=TG9yZW0gaXBzdW0gZG9sb3Igc2l0IGFtZXQsIGNvbnNlY3RldHVyIGFkaXBpc2NpbmcgZWxpdC4gQ3JhcyBhdCB1bHRyaWNpZXMgZWxpdC4gVXQgc2l0IGFtZXQgdm9sdXRwYXQgbnVuYy4K
+cacert=/etc/kubernetes/ca.crt
 ```
 
-We do not know how OVS core utilities have been installed. If those values
-are not set, we try to do a best guess for rundir / logdir and choose between
-"/var/run/openvswitch" / "/var/log/openvswitch" and
-"/usr/local/var/run/openvswitch" / "/usr/local/var/log/openvswitch"
+### [ovnnorth] section
+
+This section contains the address and (if the 'ssl' method is used) certificates
+needed to use the OVN northbound database API. Only the the ovn-kubernetes
+master needs to specify the 'server' options.
 ```
-rundir=
-logdir=
+address=ssl://1.2.3.4:6641
+client-privkey=/path/to/private.key
+client-cert=/path/to/client.crt
+client-cacert=/path/to/client-ca.crt
+server-privkey=/path/to/private.key
+server-cert=/path/to/server.crt
+server-cacert=/path/to/server-ca.crt
+```
+
+### [ovnsouth] section
+
+This section contains the address and (if the 'ssl' method is used) certificates
+needed to use the OVN southbound database API. Only the the ovn-kubernetes
+master needs to specify the 'server' options.
+```
+address=ssl://1.2.3.4:6642
+client-privkey=/path/to/private.key
+client-cert=/path/to/client.crt
+client-cacert=/path/to/client-ca.crt
+server-privkey=/path/to/private.key
+server-cert=/path/to/server.crt
+server-cacert=/path/to/server-ca.crt
 ```

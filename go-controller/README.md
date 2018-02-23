@@ -16,42 +16,112 @@ Then find the executables here : go-controller/_output/go/bin/
 
 'ovnkube' is the single all-in-one executable useful for deploying the ovn cni plugin for a kubernetes deployment
 
-'ovn-k8s-cni-overlay' is the cni executable to be planted under /opt/cni/bin so that it can be invoked for each pod event
+'ovn-k8s-cni-overlay' is the cni executable to be placed in /opt/cni/bin (or another directory in which kubernetes will look for the plugin) so that it can be invoked for each pod event by kubernetes
 
 ### Usage
 
 Run the 'ovnkube' executable to initialize master, node(s) and as the central all-in-one controller that builds the network as pods/services/ingress objects are born in kubernetes.
+Options specified on the command-line override both defaults and configuration file options.
 
 ```
 Usage:
-  -alsologtostderr
-    	log to standard error as well as files
-  -apiserver string
-    	url to the kubernetes apiserver (default "https://localhost:8443")
-  -ca-cert string
-    	CA cert for the api server
+  -config-file string
+     configuration file path (default: /etc/openvswitch/ovn_k8s.conf)
   -cluster-subnet string
-    	Cluster wide IP subnet to use (default "11.11.0.0/16")
+     cluster wide IP subnet to use (default: 11.11.0.0/16)
   -init-master string
-    	initialize master, requires the hostname as argument
+     initialize master, requires the hostname as argument
   -init-node string
-    	initialize node, requires the name that node is registered with in kubernetes cluster
-  -log_backtrace_at value
-    	when logging hits line file:N, emit a stack trace
-  -log_dir string
-    	If non-empty, write log files in this directory
-  -logtostderr
-    	log to standard error instead of files
+     initialize node, requires the name that node is registered with in kubernetes cluster
   -net-controller
-    	Flag to start the central controller that watches pods/services/policies
-  -stderrthreshold value
-    	logs at or above this threshold go to stderr
-  -token string
-    	Bearer token to use for establishing ovn infrastructure
-  -v value
-    	log level for V logs
-  -vmodule value
-    	comma-separated list of pattern=N settings for file-filtered logging
+     flag to start the central controller that watches pods/services/policies
+  -mtu int
+     MTU value used for the overlay networks (default: 1400)
+  -conntrack-zone int
+     for gateway nodes, the conntrack zone used for conntrack flow rules (default: 64000)
+  -loglevel int
+     log verbosity and level: 5=debug, 4=info, 3=warn, 2=error, 1=fatal (default: 4)
+  -logfile string
+     path of a file to direct log output to
+  -cni-conf-dir string
+     the CNI config directory in which to write the overlay CNI config file (default: /etc/cni/net.d)
+  -cni-plugin string
+     the name of the CNI plugin (default: ovn-k8s-cni-overlay)
+  -k8s-kubeconfig string
+     absolute path to the Kubernetes kubeconfig file (not required if the --k8s-apiserver, --k8s-ca-cert, and --k8s-token are given)
+  -k8s-apiserver string
+     URL of the Kubernetes API server (not required if --k8s-kubeconfig is given) (default: http://localhost:8443)
+  -k8s-cacert string
+     the absolute path to the Kubernetes API CA certificate (not required if --k8s-kubeconfig is given)
+  -k8s-token string
+     the Kubernetes API authentication token (not required if --k8s-kubeconfig is given)
+  -nb-address string
+     IP address and port of the OVN northbound API (eg, ssl://1.2.3.4:6641).  Leave empty to use a local unix socket.
+  -nb-server-privkey string
+     Private key that the OVN northbound API should use for securing the API.  Leave empty to use local unix socket. (default: /etc/openvswitch/ovnnb-privkey.pem)
+  -nb-server-cert string
+     Server certificate that the OVN northbound API should use for securing the API.  Leave empty to use local unix socket. (default: /etc/openvswitch/ovnnb-cert.pem)
+  -nb-server-cacert string
+     CA certificate that the OVN northbound API should use for securing the API.  Leave empty to use local unix socket. (default: /etc/openvswitch/ovnnb-ca.cert)
+  -nb-client-privkey string
+     Private key that the client should use for talking to the OVN database.  Leave empty to use local unix socket. (default: /etc/openvswitch/ovnnb-privkey.pem)
+  -nb-client-cert string
+     Client certificate that the client should use for talking to the OVN database.  Leave empty to use local unix socket. (default: /etc/openvswitch/ovnnb-cert.pem)
+  -nb-client-cacert string
+     CA certificate that the client should use for talking to the OVN database.  Leave empty to use local unix socket. (default: /etc/openvswitch/ovnnb-ca.cert)
+  -sb-address string
+     IP address and port of the OVN southbound API (eg, ssl://1.2.3.4:6642).  Leave empty to use a local unix socket.
+  -sb-server-privkey string
+     Private key that the OVN southbound API should use for securing the API.  Leave empty to use local unix socket. (default: /etc/openvswitch/ovnsb-privkey.pem)
+  -sb-server-cert string
+     Server certificate that the OVN southbound API should use for securing the API.  Leave empty to use local unix socket. (default: /etc/openvswitch/ovnsb-cert.pem)
+  -sb-server-cacert string
+     CA certificate that the OVN southbound API should use for securing the API.  Leave empty to use local unix socket. (default: /etc/openvswitch/ovnsb-ca.cert)
+  -sb-client-privkey string
+     Private key that the client should use for talking to the OVN database.  Leave empty to use local unix socket. (default: /etc/openvswitch/ovnsb-privkey.pem)
+  -sb-client-cert string
+     Client certificate that the client should use for talking to the OVN database.  Leave empty to use local unix socket. (default: /etc/openvswitch/ovnsb-cert.pem)
+  -sb-client-cacert string
+     CA certificate that the client should use for talking to the OVN database.  Leave empty to use local unix socket. (default: /etc/openvswitch/ovnsb-ca.cert)
+```
+
+### Configuration File
+
+Generic configuration options (those common between master, node, and gateway modes) can also be specified in the configuration file.
+The default configuration file path is /etc/openvswitch/ovn_k8s.conf but can be changed with the -config-file option.
+Options specified in the config file override defautl values, but are themselves overridden by command-line options.
+
+#### Example configuration file
+
+```
+[default]
+mtu=1500
+conntrack-zone=64321
+
+[kubernetes]
+apiserver=https://1.2.3.4:6443
+token=TG9yZW0gaXBzdW0gZG9sb3Igc2l0IGFtZXQsIGNvbnNlY3RldHVyIGFkaXBpc2NpbmcgZWxpdC4gQ3JhcyBhdCB1bHRyaWNpZXMgZWxpdC4gVXQgc2l0IGFtZXQgdm9sdXRwYXQgbnVuYy4K
+cacert=/etc/kubernetes/ca.crt
+
+[logging]
+loglevel=5
+logfile=/var/log/ovnkube.log
+
+[cni]
+conf-dir=/etc/cni/net.d
+plugin=ovn-k8s-cni-overlay
+
+[ovnnorth]
+address=ssl://1.2.3.4:6641
+client-privkey=/path/to/private.key
+client-cert=/path/to/client.crt
+client-cacert=/path/to/client-ca.crt
+server-privkey=/path/to/private.key
+server-cert=/path/to/server.crt
+server-cacert=path/to/server-ca.crt
+
+[ovnsouth]
+<same as ovn north>
 ```
 
 ## Example
@@ -60,9 +130,9 @@ Usage:
 
 ```
 ovnkube --init-master <master-host-name> \
-	--ca-cert <path to the cacert file> \
-	--token <token string for authentication with kube apiserver> \
-	--apiserver <url to the kube apiserver e.g. https://10.11.12.13.8443> \
+	--k8s-cacert <path to the cacert file> \
+	--k8s-token <token string for authentication with kube apiserver> \
+	--k8s-apiserver <url to the kube apiserver e.g. https://10.11.12.13.8443> \
 	--cluster-subnet <cidr representing the global pod network e.g. 192.168.0.0/16> \
 	--net-controller
 ```
@@ -85,9 +155,9 @@ Then, run the ovnkube executable to initalize the node:
 
 ```
 ovnkube --init-node <name of the node as identified in kubernetes> \
-	--ca-cert <path to the cacert file> \
-	--token <token string for authentication with kube apiserver> \
-	--apiserver <url to the kube apiserver e.g. https://10.11.12.13.8443>
+	--k8s-cacert <path to the cacert file> \
+	--k8s-token <token string for authentication with kube apiserver> \
+	--k8s-apiserver <url to the kube apiserver e.g. https://10.11.12.13.8443>
 ```
 
 With the above command, the node will get initialized for all OVN communication and a logical switch will be created for it.
