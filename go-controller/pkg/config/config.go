@@ -409,7 +409,7 @@ func InitConfig(ctx *cli.Context, defaults *Defaults) error {
 	Default.MTU = getConfigInt(cliConfig.Default.MTU, cfg.Default.MTU, 1400)
 	Default.ConntrackZone = getConfigInt(cliConfig.Default.ConntrackZone, cfg.Default.ConntrackZone, 64000)
 
-	Logging.File = getConfigStr(cliConfig.Logging.File, cfg.Logging.File, "/var/log/ovn-kubernetes.log")
+	Logging.File = getConfigStr(cliConfig.Logging.File, cfg.Logging.File, "")
 	Logging.Level = getConfigInt(cliConfig.Logging.Level, cfg.Logging.Level, 4)
 
 	CNI.ConfDir = getConfigStr(cliConfig.CNI.ConfDir, cfg.CNI.ConfDir, "/etc/cni/net.d")

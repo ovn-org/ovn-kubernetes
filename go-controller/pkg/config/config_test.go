@@ -125,7 +125,7 @@ var _ = Describe("Config Operations", func() {
 
 			Expect(Default.MTU).To(Equal(1400))
 			Expect(Default.ConntrackZone).To(Equal(64000))
-			Expect(Logging.File).To(Equal("/var/log/ovn-kubernetes.log"))
+			Expect(Logging.File).To(Equal(""))
 			Expect(Logging.Level).To(Equal(4))
 			Expect(CNI.ConfDir).To(Equal("/etc/cni/net.d"))
 			Expect(CNI.Plugin).To(Equal("ovn-k8s-cni-overlay"))
