@@ -61,6 +61,8 @@ install -d -m 0750 %{buildroot}%{_mandir}/man1
 install -p -m 644 docs/ovnkube.1 %{buildroot}%{_mandir}/man1
 install -p -m 644 docs/ovn-kube-util.1 %{buildroot}%{_mandir}/man1
 install -p -m 644 docs/ovn-k8s-overlay.1 %{buildroot}%{_mandir}/man1
+install -d -m 0750 %{buildroot}%{_mandir}/man5
+install -p -m 644 docs/ovn_k8s.conf.5 %{buildroot}%{_mandir}/man5
 
 %files
 %defattr(-,root,root)
@@ -70,6 +72,7 @@ install -p -m 644 docs/ovn-k8s-overlay.1 %{buildroot}%{_mandir}/man1
 %{_mandir}/man1/ovnkube.1.*
 %{_mandir}/man1/ovn-kube-util.1.*
 %{_mandir}/man1/ovn-k8s-overlay.1.*
+%{_mandir}/man5/ovn_k8s.conf.5.*
 %{_bindir}/ovnkube
 %{_bindir}/ovn-kube-util
 %{_bindir}/ovn-k8s-overlay

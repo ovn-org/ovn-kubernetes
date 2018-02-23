@@ -1,0 +1,94 @@
+.TH OVN_K8S.CONF "5" "Jan 2018" "ovn-kubernetes" "OVN-KUBERNETES Configuration File"
+.SH NAME
+ovn_k8s.conf \- Configuration File for ovn-kubernetes
+.SH DESCRIPTION
+.PP
+\fB/etc/openvswitch/ovn_k8s.conf\fR
+.PP
+ovn-kubernetes configuration defaults can be overridden by parameters in
+this file. This file can be overridden by ovnkube options.
+.PP
+This is in token=value format.
+.SH SECTIONS
+.PP
+.SH [Default]
+.TP
+\fBmtu\fR=1400
+MTU value used for the overlay networks.
+.TP
+\fBconntrack-zone\fR=64000
+ConntrackZone affects only the gateway nodes, This value is used to track connections
+that are initiated from the pods so that the reverse connections go back to the pods.
+This represents the conntrack zone used for the conntrack flow rules.
+.PP
+.SH [Logging]
+.TP
+\fBlogfile\fR=/var/log/openvswitch/ovn-k8s-cni-overlay.log
+Logfile name (with path) for ovnkube to write to.
+.TP
+\fBloglevel\fR=0
+Level is the logging verbosity level: 5=debug, 4=info, 3=warn, 2=error, 1=fatal (default: 0).
+.SH [CNI]
+.PP
+The following config values are used for the CNI plugin.
+.TP
+\fBcni-conf-dir\fR=/etc/cni/net.d
+Directory that contains the cni plugin.
+.TP
+\fBcni-plugin\fR=ovn-k8s-cni-overlay
+Cni plugin name.
+.SH [Kubernetes]
+.PP
+K8S apiserver and authentication details are stored in the following options.
+.TP
+\fBkubeconfig\fR=
+Absolute path to the kubeconfig file (not required if the apiserver, cacert, and token are given).
+.TP
+\fBcacert\fR=/etc/openvswitch/k8s-ca.crt
+The absolute path to the Kubernetes API CA certificate (not required if kubeconfig is given).
+.TP
+\fBapiserver\fR=
+URL to the Kubernetes apiserver (default "https://localhost:8443") (not required if kubeconfig is given).
+.TP
+\fBtoken\fR=
+The Kubernetes API authentication token (not required if kubeconfig is given).
+
+.SH [OvnNorth]
+.TP
+\fBaddress\fR=
+.TP
+\fBclient-privkey\fR=/etc/openvswitch/ovncontroller-privkey.pem
+.TP
+\fBclient-cert\fR=/etc/openvswitch/ovncontroller-cert.pem
+.TP
+\fBclient-cacert\fR=/etc/openvswitch/ovnnb-ca.cert
+.TP
+\fBserver-privkey\fR=
+.TP
+\fBserver-cert\fR=
+.TP
+\fBserver-cacert\fR=
+
+.SH [OvnSouth]
+.TP
+\fBaddress\fR=
+.TP
+\fBclient-privkey\fR=
+.TP
+\fBclient-cert\fR=
+.TP
+\fBclient-cacert\fR=
+.TP
+\fBserver-privkey\fR=
+.TP
+\fBserver-cert\fR=
+.TP
+\fBserver-cacert\fR=
+
+.SH "SEE ALso"
+.BR ovnkube (1),
+.BR ovn-k8s-overlay (1),
+.BR ovn-kube-util (1).
+
+.PP
+https://github.com/openvswitch/ovn-kubernetes
