@@ -165,7 +165,7 @@ func runOvnKube(ctx *cli.Context) error {
 
 		if node != "" {
 			if config.Kubernetes.Token == "" {
-				panic("Cannot initialize node without service account 'token'. Please provide one with --token argument")
+				panic("Cannot initialize node without service account 'token'. Please provide one with --k8s-token argument")
 			}
 
 			err := clusterController.StartClusterNode(node)

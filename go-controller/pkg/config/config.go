@@ -67,14 +67,14 @@ type LoggingConfig struct {
 
 // CNIConfig holds CNI-related parsed config file parameters and command-line overrides
 type CNIConfig struct {
-	// The following config values are used for the CNI plugin.
+	// ConfDir specifies the CNI config directory in which to write the overlay CNI config file
 	ConfDir string `gcfg:"conf-dir"`
-	Plugin  string `gcfg:"plugin"`
+	// Plugin specifies the name of the CNI plugin
+	Plugin string `gcfg:"plugin"`
 }
 
 // KubernetesConfig holds Kubernetes-related parsed config file parameters and command-line overrides
 type KubernetesConfig struct {
-	// K8S apiserver and authentication details are stored in the following options.
 	Kubeconfig string `gcfg:"kubeconfig"`
 	CACert     string `gcfg:"cacert"`
 	APIServer  string `gcfg:"apiserver"`
@@ -163,42 +163,42 @@ var cliConfig config
 var Flags = []cli.Flag{
 	cli.StringFlag{
 		Name:  "config-file",
-		Usage: "configuration file path",
+		Usage: "configuration file path (default: /etc/openvswitch/ovn_k8s.conf)",
 	},
 
 	// Generic options
 	cli.IntFlag{
 		Name:        "mtu",
-		Usage:       "MTU value used for the overlay networks.",
+		Usage:       "MTU value used for the overlay networks (default: 1400)",
 		Destination: &cliConfig.Default.MTU,
 	},
 	cli.IntFlag{
 		Name:        "conntrack-zone",
-		Usage:       "For gateway nodes, the conntrack zone used for conntrack flow rules",
+		Usage:       "For gateway nodes, the conntrack zone used for conntrack flow rules (default: 64000)",
 		Destination: &cliConfig.Default.ConntrackZone,
 	},
 
 	// Logging options
 	cli.IntFlag{
 		Name:        "loglevel",
-		Usage:       "log verbosity and level: 5=debug, 4=info, 3=warn, 2=error, 1=fatal",
+		Usage:       "log verbosity and level: 5=debug, 4=info, 3=warn, 2=error, 1=fatal (default: 4)",
 		Destination: &cliConfig.Logging.Level,
 	},
 	cli.StringFlag{
 		Name:        "logfile",
-		Usage:       "path of a file to direct log output to",
+		Usage:       "path of a file to direct log output to (default: /var/log/ovn-kubernetes.log)",
 		Destination: &cliConfig.Logging.File,
 	},
 
 	// CNI options
 	cli.StringFlag{
 		Name:        "cni-conf-dir",
-		Usage:       "the CNI config directory in which to write the overlay CNI config file",
+		Usage:       "the CNI config directory in which to write the overlay CNI config file (default: /etc/cni/net.d)",
 		Destination: &cliConfig.CNI.ConfDir,
 	},
 	cli.StringFlag{
 		Name:        "cni-plugin",
-		Usage:       "the name of the CNI plugin",
+		Usage:       "the name of the CNI plugin (default: ovn-k8s-cni-overlay)",
 		Destination: &cliConfig.CNI.Plugin,
 	},
 
@@ -210,7 +210,7 @@ var Flags = []cli.Flag{
 	},
 	cli.StringFlag{
 		Name:        "k8s-apiserver",
-		Usage:       "URL of the Kubernetes API server (not required if --k8s-kubeconfig is given)",
+		Usage:       "URL of the Kubernetes API server (not required if --k8s-kubeconfig is given) (default: http://localhost:8443)",
 		Destination: &cliConfig.Kubernetes.APIServer,
 	},
 	cli.StringFlag{
@@ -232,32 +232,32 @@ var Flags = []cli.Flag{
 	},
 	cli.StringFlag{
 		Name:        "nb-server-privkey",
-		Usage:       "Private key that the OVN northbound API should use for securing the API.  Leave empty to use local unix socket.",
+		Usage:       "Private key that the OVN northbound API should use for securing the API.  Leave empty to use local unix socket. (default: /etc/openvswitch/ovnnb-privkey.pem)",
 		Destination: &cliConfig.OvnNorth.ServerPrivKey,
 	},
 	cli.StringFlag{
 		Name:        "nb-server-cert",
-		Usage:       "Server certificate that the OVN northbound API should use for securing the API.  Leave empty to use local unix socket.",
+		Usage:       "Server certificate that the OVN northbound API should use for securing the API.  Leave empty to use local unix socket. (default: /etc/openvswitch/ovnnb-cert.pem)",
 		Destination: &cliConfig.OvnNorth.ServerCert,
 	},
 	cli.StringFlag{
 		Name:        "nb-server-cacert",
-		Usage:       "CA certificate that the OVN northbound API should use for securing the API.  Leave empty to use local unix socket.",
+		Usage:       "CA certificate that the OVN northbound API should use for securing the API.  Leave empty to use local unix socket. (default: /etc/openvswitch/ovnnb-ca.cert)",
 		Destination: &cliConfig.OvnNorth.ServerCACert,
 	},
 	cli.StringFlag{
 		Name:        "nb-client-privkey",
-		Usage:       "Private key that the client should use for talking to the OVN database.  Leave empty to use local unix socket.",
+		Usage:       "Private key that the client should use for talking to the OVN database.  Leave empty to use local unix socket. (default: /etc/openvswitch/ovnnb-privkey.pem)",
 		Destination: &cliConfig.OvnNorth.ClientPrivKey,
 	},
 	cli.StringFlag{
 		Name:        "nb-client-cert",
-		Usage:       "Client certificate that the client should use for talking to the OVN database.  Leave empty to use local unix socket.",
+		Usage:       "Client certificate that the client should use for talking to the OVN database.  Leave empty to use local unix socket. (default: /etc/openvswitch/ovnnb-cert.pem)",
 		Destination: &cliConfig.OvnNorth.ClientCert,
 	},
 	cli.StringFlag{
 		Name:        "nb-client-cacert",
-		Usage:       "CA certificate that the client should use for talking to the OVN database.  Leave empty to use local unix socket.",
+		Usage:       "CA certificate that the client should use for talking to the OVN database.  Leave empty to use local unix socket. (default: /etc/openvswitch/ovnnb-ca.cert)",
 		Destination: &cliConfig.OvnNorth.ClientCACert,
 	},
 
@@ -269,32 +269,32 @@ var Flags = []cli.Flag{
 	},
 	cli.StringFlag{
 		Name:        "sb-server-privkey",
-		Usage:       "Private key that the OVN southbound API should use for securing the API.  Leave empty to use local unix socket.",
+		Usage:       "Private key that the OVN southbound API should use for securing the API.  Leave empty to use local unix socket. (default: /etc/openvswitch/ovnsb-privkey.pem)",
 		Destination: &cliConfig.OvnSouth.ServerPrivKey,
 	},
 	cli.StringFlag{
 		Name:        "sb-server-cert",
-		Usage:       "Server certificate that the OVN southbound API should use for securing the API.  Leave empty to use local unix socket.",
+		Usage:       "Server certificate that the OVN southbound API should use for securing the API.  Leave empty to use local unix socket. (default: /etc/openvswitch/ovnsb-cert.pem)",
 		Destination: &cliConfig.OvnSouth.ServerCert,
 	},
 	cli.StringFlag{
 		Name:        "sb-server-cacert",
-		Usage:       "CA certificate that the OVN southbound API should use for securing the API.  Leave empty to use local unix socket.",
+		Usage:       "CA certificate that the OVN southbound API should use for securing the API.  Leave empty to use local unix socket. (default: /etc/openvswitch/ovnsb-ca.cert)",
 		Destination: &cliConfig.OvnSouth.ServerCACert,
 	},
 	cli.StringFlag{
 		Name:        "sb-client-privkey",
-		Usage:       "Private key that the client should use for talking to the OVN database.  Leave empty to use local unix socket.",
+		Usage:       "Private key that the client should use for talking to the OVN database.  Leave empty to use local unix socket. (default: /etc/openvswitch/ovnsb-privkey.pem)",
 		Destination: &cliConfig.OvnSouth.ClientPrivKey,
 	},
 	cli.StringFlag{
 		Name:        "sb-client-cert",
-		Usage:       "Client certificate that the client should use for talking to the OVN database.  Leave empty to use local unix socket.",
+		Usage:       "Client certificate that the client should use for talking to the OVN database.  Leave empty to use local unix socket. (default: /etc/openvswitch/ovnsb-cert.pem)",
 		Destination: &cliConfig.OvnSouth.ClientCert,
 	},
 	cli.StringFlag{
 		Name:        "sb-client-cacert",
-		Usage:       "CA certificate that the client should use for talking to the OVN database.  Leave empty to use local unix socket.",
+		Usage:       "CA certificate that the client should use for talking to the OVN database.  Leave empty to use local unix socket. (default: /etc/openvswitch/ovnsb-ca.cert)",
 		Destination: &cliConfig.OvnSouth.ClientCACert,
 	},
 }
