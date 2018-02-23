@@ -63,49 +63,42 @@ func setOVSExternalIDs(nodeName string, ids ...string) error {
 	}
 	_, stderr, err := util.RunOVSVsctl(args...)
 	if err != nil {
-		return fmt.Errorf("error setting OVS external IDs: %v\n  %q", err, string(stderr))
+		return fmt.Errorf("error setting OVS external IDs: %v\n  %q", err, stderr)
 	}
 	return nil
 }
 
 func setupOVNNode(nodeName, kubeServer, kubeToken string) error {
+	// Tell ovn-*bctl how to talk to the database
+	for _, auth := range []*config.OvnDBAuth{
+		config.OvnNorth.ClientAuth,
+		config.OvnSouth.ClientAuth} {
+		if err := auth.SetDBAuth(); err != nil {
+			return err
+		}
+	}
+
+	// Tell other utilities (ovn-k8s-cni-overlay, etc) how to talk to Kubernetes
 	if _, err := url.Parse(kubeServer); err != nil {
 		return fmt.Errorf("error parsing k8s server %q: %v", kubeServer, err)
 	}
-
-	ids := []string{
+	return setOVSExternalIDs(
+		nodeName,
 		fmt.Sprintf("k8s-api-server=\"%s\"", kubeServer),
-		fmt.Sprintf("k8s-api-token=\"%s\"", kubeToken),
-	}
-
-	if config.OvnNorth.ClientAuth.Scheme != config.OvnDBSchemeUnix {
-		ids = append(ids, fmt.Sprintf("ovn-nb=\"%s\"", config.OvnNorth.ClientAuth.GetURL()))
-	}
-	if config.OvnSouth.ClientAuth.Scheme != config.OvnDBSchemeUnix {
-		ids = append(ids, fmt.Sprintf("ovn-remote=\"%s\"", config.OvnSouth.ClientAuth.GetURL()))
-	}
-
-	return setOVSExternalIDs(nodeName, ids...)
+		fmt.Sprintf("k8s-api-token=\"%s\"", kubeToken))
 }
 
 func setupOVNMaster(nodeName string) error {
-	ids := []string{}
-
 	// Configure both server and client of OVN databases, since master uses both
-	err := config.OvnNorth.ServerAuth.SetDBServerAuth("ovn-nbctl", "northbound")
-	if err != nil {
-		return err
-	}
-	if config.OvnNorth.ClientAuth.Scheme != config.OvnDBSchemeUnix {
-		ids = append(ids, fmt.Sprintf("ovn-nb=\"%s\"", config.OvnNorth.ClientAuth.GetURL()))
-	}
-	err = config.OvnSouth.ServerAuth.SetDBServerAuth("ovn-sbctl", "southbound")
-	if err != nil {
-		return err
-	}
-	if config.OvnSouth.ClientAuth.Scheme != config.OvnDBSchemeUnix {
-		ids = append(ids, fmt.Sprintf("ovn-remote=\"%s\"", config.OvnSouth.ClientAuth.GetURL()))
+	for _, auth := range []*config.OvnDBAuth{
+		config.OvnNorth.ServerAuth,
+		config.OvnNorth.ClientAuth,
+		config.OvnSouth.ServerAuth,
+		config.OvnSouth.ClientAuth} {
+		if err := auth.SetDBAuth(); err != nil {
+			return err
+		}
 	}
 
-	return setOVSExternalIDs(nodeName, ids...)
+	return setOVSExternalIDs(nodeName)
 }
