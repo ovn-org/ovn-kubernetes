@@ -25,7 +25,7 @@ var (
 
 	// Logging holds logging-related parsed config file parameters and command-line overrides
 	Logging = LoggingConfig{
-		File:  "/var/log/ovn-kubernetes.log",
+		File:  "", // do not log to a file by default
 		Level: 4,
 	}
 
@@ -186,7 +186,7 @@ var Flags = []cli.Flag{
 	},
 	cli.StringFlag{
 		Name:        "logfile",
-		Usage:       "path of a file to direct log output to (default: /var/log/ovn-kubernetes.log)",
+		Usage:       "path of a file to direct log output to",
 		Destination: &cliConfig.Logging.File,
 	},
 
