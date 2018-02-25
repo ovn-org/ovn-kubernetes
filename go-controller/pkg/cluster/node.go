@@ -89,30 +89,25 @@ func (cluster *OvnClusterController) StartClusterNode(name string) error {
 	}
 
 	// Install the CNI config file after all initialization is done
-	if runtime.GOOS != windowsOS {
-		// MkdirAll() returns no error if the path already exists
-		err = os.MkdirAll(config.CNI.ConfDir, os.ModeDir)
-		if err != nil {
-			return err
-		}
-
-		// Always create the CNI config for consistency.
-		cniConf := config.CNI.ConfDir + "/10-ovn-kubernetes.conf"
-
-		var f *os.File
-		f, err = os.OpenFile(cniConf, os.O_CREATE|os.O_WRONLY, 0644)
-		if err != nil {
-			return err
-		}
-		defer f.Close()
-		confJSON := fmt.Sprintf("{\"name\":\"ovn-kubernetes\", \"type\":\"%s\"}", config.CNI.Plugin)
-		_, err = f.Write([]byte(confJSON))
-		if err != nil {
-			return err
-		}
+	// MkdirAll() returns no error if the path already exists
+	err = os.MkdirAll(config.CNI.ConfDir, os.ModeDir)
+	if err != nil {
+		return err
 	}
 
-	return nil
+	// Always create the CNI config for consistency.
+	cniConf := config.CNI.ConfDir + "/10-ovn-kubernetes.conf"
+
+	var f *os.File
+	f, err = os.OpenFile(cniConf, os.O_CREATE|os.O_WRONLY, 0644)
+	if err != nil {
+		return err
+	}
+	defer f.Close()
+	confJSON := fmt.Sprintf("{\"name\":\"ovn-kubernetes\", \"type\":\"%s\"}", config.CNI.Plugin)
+	_, err = f.Write([]byte(confJSON))
+
+	return err
 }
 
 func (cluster *OvnClusterController) addDefaultConntrackRules() error {

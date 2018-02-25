@@ -6,6 +6,7 @@ import (
 	"net/url"
 	"os"
 	"os/exec"
+	"runtime"
 	"strings"
 
 	"github.com/sirupsen/logrus"
@@ -388,7 +389,13 @@ func InitConfig(ctx *cli.Context, defaults *Defaults) error {
 		}
 	} else {
 		// Failure to find a default config file is not a hard error
-		f, _ = os.Open("/etc/openvswitch/ovn_k8s.conf")
+		if runtime.GOOS != "windows" {
+			f, _ = os.Open("/etc/openvswitch/ovn_k8s.conf")
+		} else {
+			// On Windows we have to retrieve the conf path via an environment variable
+			// which gets set by the OVS installer.
+			f, _ = os.Open(fmt.Sprintf("%s\\ovn_k8s.conf", os.Getenv("OVS_SYSCONFDIR")))
+		}
 	}
 	if f != nil {
 		defer f.Close()
