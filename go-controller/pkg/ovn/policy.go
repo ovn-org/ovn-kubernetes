@@ -1240,6 +1240,9 @@ func (oc *Controller) deleteNetworkPolicy(
 
 	if oc.namespacePolicies[policy.Namespace] == nil ||
 		oc.namespacePolicies[policy.Namespace][policy.Name] == nil {
+		logrus.Errorf("Delete network policy %s in namespace %s "+
+			"received without getting a create event",
+			policy.Name, policy.Namespace)
 		return
 	}
 	np := oc.namespacePolicies[policy.Namespace][policy.Name]
