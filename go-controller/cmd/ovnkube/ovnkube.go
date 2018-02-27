@@ -149,18 +149,6 @@ func runOvnKube(ctx *cli.Context) error {
 			}
 			clusterController.ClusterServicesSubnet = servicesSubnet.String()
 		}
-
-		if node != "" {
-			if config.Kubernetes.Token == "" {
-				panic("Cannot initialize node without service account 'token'. Please provide one with --token argument")
-			}
-
-			err := clusterController.StartClusterNode(node)
-			if err != nil {
-				logrus.Errorf(err.Error())
-				panic(err.Error())
-			}
-		}
 		clusterController.NodePortEnable = nodePortEnable
 
 		if master != "" {
@@ -169,6 +157,18 @@ func runOvnKube(ctx *cli.Context) error {
 			}
 			// run the cluster controller to init the master
 			err := clusterController.StartClusterMaster(master)
+			if err != nil {
+				logrus.Errorf(err.Error())
+				panic(err.Error())
+			}
+		}
+
+		if node != "" {
+			if config.Kubernetes.Token == "" {
+				panic("Cannot initialize node without service account 'token'. Please provide one with --token argument")
+			}
+
+			err := clusterController.StartClusterNode(node)
 			if err != nil {
 				logrus.Errorf(err.Error())
 				panic(err.Error())
