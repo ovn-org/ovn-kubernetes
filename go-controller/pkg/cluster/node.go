@@ -61,7 +61,7 @@ func (cluster *OvnClusterController) StartClusterNode(name string) error {
 
 	logrus.Infof("Node %s ready for ovn initialization with subnet %s", node.Name, subnet.String())
 
-	if err = setupOVN(name, config.Kubernetes.APIServer, config.Kubernetes.Token); err != nil {
+	if err = setupOVNNode(name, config.Kubernetes.APIServer, config.Kubernetes.Token); err != nil {
 		return err
 	}
 

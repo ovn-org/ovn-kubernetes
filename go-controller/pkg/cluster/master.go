@@ -9,7 +9,6 @@ import (
 	kapi "k8s.io/api/core/v1"
 	"k8s.io/client-go/tools/cache"
 
-	"github.com/openvswitch/ovn-kubernetes/go-controller/pkg/config"
 	"github.com/openvswitch/ovn-kubernetes/go-controller/pkg/ovn"
 	"github.com/openvswitch/ovn-kubernetes/go-controller/pkg/util"
 
@@ -96,17 +95,7 @@ func (cluster *OvnClusterController) SetupMaster(masterNodeName string, masterSw
 		return err
 	}
 
-	// Set up north/southbound API authentication
-	err = config.OvnNorth.ServerAuth.SetDBServerAuth("ovn-nbctl", "northbound")
-	if err != nil {
-		return err
-	}
-	err = config.OvnSouth.ServerAuth.SetDBServerAuth("ovn-sbctl", "southbound")
-	if err != nil {
-		return err
-	}
-
-	if err := setupOVN(masterNodeName, config.Kubernetes.APIServer, config.Kubernetes.Token); err != nil {
+	if err := setupOVNMaster(masterNodeName); err != nil {
 		return err
 	}
 
