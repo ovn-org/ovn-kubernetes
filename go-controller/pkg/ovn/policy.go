@@ -29,6 +29,7 @@ type namespacePolicy struct {
 	stop                 chan bool
 	namespacePolicyMutex *sync.Mutex
 	localPods            map[string]bool //pods effected by this policy
+	deleted              bool            //deleted policy
 }
 
 type gressPolicy struct {
@@ -735,6 +736,10 @@ func (oc *Controller) handleLocalPodSelectorAddFunc(
 	np.namespacePolicyMutex.Lock()
 	defer np.namespacePolicyMutex.Unlock()
 
+	if np.deleted {
+		return
+	}
+
 	if np.localPods[logicalPort] {
 		return
 	}
@@ -770,6 +775,10 @@ func (oc *Controller) handleLocalPodSelectorDelFunc(
 
 	np.namespacePolicyMutex.Lock()
 	defer np.namespacePolicyMutex.Unlock()
+
+	if np.deleted {
+		return
+	}
 
 	if !np.localPods[logicalPort] {
 		return
@@ -827,7 +836,7 @@ func (oc *Controller) handleLocalPodSelector(
 
 func (oc *Controller) handlePeerPodSelector(
 	policy *kapisnetworking.NetworkPolicy, podSelector *metav1.LabelSelector,
-	addressSet string, stop chan bool) {
+	addressSet string, np *namespacePolicy) {
 
 	// TODO: Do we need a lock to protect this from concurrent delete and add
 	// events?
@@ -851,6 +860,13 @@ func (oc *Controller) handlePeerPodSelector(
 				if ipAddress == "" || addressMap[ipAddress] {
 					return
 				}
+
+				np.namespacePolicyMutex.Lock()
+				defer np.namespacePolicyMutex.Unlock()
+				if np.deleted {
+					return
+				}
+
 				addressMap[ipAddress] = true
 				addresses := make([]string, 0, len(addressMap))
 				for k := range addressMap {
@@ -863,6 +879,12 @@ func (oc *Controller) handlePeerPodSelector(
 
 				ipAddress := oc.getIPFromOvnAnnotation(pod.Annotations["ovn"])
 				if ipAddress == "" {
+					return
+				}
+
+				np.namespacePolicyMutex.Lock()
+				defer np.namespacePolicyMutex.Unlock()
+				if np.deleted {
 					return
 				}
 
@@ -884,6 +906,13 @@ func (oc *Controller) handlePeerPodSelector(
 				if ipAddress == "" || addressMap[ipAddress] {
 					return
 				}
+
+				np.namespacePolicyMutex.Lock()
+				defer np.namespacePolicyMutex.Unlock()
+				if np.deleted {
+					return
+				}
+
 				addressMap[ipAddress] = true
 				addresses := make([]string, 0, len(addressMap))
 				for k := range addressMap {
@@ -897,7 +926,7 @@ func (oc *Controller) handlePeerPodSelector(
 	go controller.Run(channel)
 
 	// Wait for signal to stop
-	<-stop
+	<-np.stop
 	channel <- struct{}{}
 	close(channel)
 }
@@ -962,6 +991,9 @@ func (oc *Controller) handlePeerNamespaceSelector(
 				namespace := obj.(*kapi.Namespace)
 				np.namespacePolicyMutex.Lock()
 				defer np.namespacePolicyMutex.Unlock()
+				if np.deleted {
+					return
+				}
 				hashedAddressSet := hashedAddressSet(namespace.Name)
 				if gress.peerAddressSets[hashedAddressSet] {
 					return
@@ -986,6 +1018,9 @@ func (oc *Controller) handlePeerNamespaceSelector(
 				namespace := obj.(*kapi.Namespace)
 				np.namespacePolicyMutex.Lock()
 				defer np.namespacePolicyMutex.Unlock()
+				if np.deleted {
+					return
+				}
 				hashedAddressSet := hashedAddressSet(namespace.Name)
 				if !gress.peerAddressSets[hashedAddressSet] {
 					return
@@ -1095,7 +1130,7 @@ func (oc *Controller) addNetworkPolicy(policy *kapisnetworking.NetworkPolicy) {
 				// For each peer pod selector, we create a watcher that
 				// populates the addressSet
 				go oc.handlePeerPodSelector(policy, fromJSON.PodSelector,
-					hashedLocalAddressSet, np.stop)
+					hashedLocalAddressSet, np)
 			}
 		}
 		np.ingressPolicies = append(np.ingressPolicies, ingress)
@@ -1152,7 +1187,7 @@ func (oc *Controller) addNetworkPolicy(policy *kapisnetworking.NetworkPolicy) {
 				// For each peer pod selector, we create a watcher that
 				// populates the addressSet
 				go oc.handlePeerPodSelector(policy, toJSON.PodSelector,
-					hashedLocalAddressSet, np.stop)
+					hashedLocalAddressSet, np)
 			}
 		}
 		np.egressPolicies = append(np.egressPolicies, egress)
@@ -1204,6 +1239,9 @@ func (oc *Controller) deleteNetworkPolicy(
 	np.namespacePolicyMutex.Lock()
 	defer np.namespacePolicyMutex.Unlock()
 
+	// Mark the policy as deleted.
+	np.deleted = true
+
 	// Go through each ingress rule.  For each ingress rule, delete the
 	// addressSet for the local peer pods.
 	for i := range np.ingressPolicies {
@@ -1230,10 +1268,6 @@ func (oc *Controller) deleteNetworkPolicy(
 		oc.localPodDelDefaultDeny(policy, logicalPort, logicalSwitch)
 	}
 	oc.namespacePolicies[policy.Namespace][policy.Name] = nil
-
-	//TODO: We need to wait for all the goroutines to die to
-	// prevent race conditions from a older goroutine adding
-	// newer ACLs after we delete the ACLs below.
 
 	// We should now delete all the ACLs added by this network policy.
 	oc.deleteAclsPolicy(policy.Namespace, policy.Name)
