@@ -95,21 +95,6 @@ func runOvnKube(ctx *cli.Context) error {
 		return err
 	}
 
-	// Process log flags
-	logrus.SetLevel(logrus.Level(config.Logging.Level))
-	logrus.SetOutput(os.Stderr)
-	if config.Logging.File != "" {
-		file, err := os.OpenFile(config.Logging.File, os.O_CREATE|os.O_APPEND|os.O_WRONLY,
-			0660)
-		if err != nil {
-			logrus.Errorf("failed to open logfile %s (%v). Ignoring..",
-				config.Logging.File, err)
-		} else {
-			defer file.Close()
-			logrus.SetOutput(file)
-		}
-	}
-
 	clientset, err := util.NewClientset(&config.Kubernetes)
 	if err != nil {
 		panic(err.Error())
