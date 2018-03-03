@@ -619,7 +619,7 @@ func (a *OvnDBAuth) ensureCACert() error {
 	args = append(args, "list", "nb_global")
 	_ = exec.Command(cmdPath, args...).Run()
 	if _, err = os.Stat(a.CACert); os.IsNotExist(err) {
-		return fmt.Errorf("bootstapping %s CA certificate failed", a.CACert)
+		logrus.Warnf("bootstrapping %s CA certificate failed", a.CACert)
 	}
 	return nil
 }
