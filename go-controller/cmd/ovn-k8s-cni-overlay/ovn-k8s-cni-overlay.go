@@ -265,12 +265,6 @@ func main() {
 			return err
 		}
 
-		f, err := os.OpenFile(config.Logging.File, os.O_WRONLY|os.O_CREATE, 0755)
-		if err == nil {
-			defer f.Close()
-			logrus.SetOutput(f)
-		}
-
 		skel.PluginMain(cmdAdd, cmdDel, version.All)
 		return nil
 	}

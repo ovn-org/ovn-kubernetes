@@ -430,6 +430,8 @@ func InitConfig(ctx *cli.Context, defaults *Defaults) error {
 	var err error
 	var f *os.File
 
+	logrus.SetOutput(os.Stderr)
+
 	// Error parsing a user-provided config file is a hard error
 	configFile := ctx.String("config-file")
 	if configFile != "" {
@@ -465,10 +467,22 @@ func InitConfig(ctx *cli.Context, defaults *Defaults) error {
 	// Build config that needs no special processing
 	overrideFields(&Default, &cfg.Default)
 	overrideFields(&Default, &cliConfig.Default)
-	overrideFields(&Logging, &cfg.Logging)
-	overrideFields(&Logging, &cliConfig.Logging)
 	overrideFields(&CNI, &cfg.CNI)
 	overrideFields(&CNI, &cliConfig.CNI)
+
+	// Logging setup
+	overrideFields(&Logging, &cfg.Logging)
+	overrideFields(&Logging, &cliConfig.Logging)
+	logrus.SetLevel(logrus.Level(Logging.Level))
+	if Logging.File != "" {
+		var file *os.File
+		file, err = os.OpenFile(Logging.File, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0660)
+		if err != nil {
+			logrus.Errorf("failed to open logfile %s (%v). Ignoring..", Logging.File, err)
+		} else {
+			logrus.SetOutput(file)
+		}
+	}
 
 	if err = buildKubernetesConfig(&cliConfig, &cfg, defaults); err != nil {
 		return err
