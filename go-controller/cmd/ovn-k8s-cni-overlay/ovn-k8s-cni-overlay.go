@@ -8,12 +8,14 @@ import (
 	"strings"
 	"time"
 
+	"github.com/sirupsen/logrus"
 	"github.com/urfave/cli"
 
 	"github.com/containernetworking/cni/pkg/skel"
 	"github.com/containernetworking/cni/pkg/types"
 	"github.com/containernetworking/cni/pkg/types/current"
 	"github.com/containernetworking/cni/pkg/version"
+	"k8s.io/apimachinery/pkg/util/wait"
 
 	"github.com/openvswitch/ovn-kubernetes/go-controller/cmd/ovn-k8s-cni-overlay/app"
 	"github.com/openvswitch/ovn-kubernetes/go-controller/pkg/config"
@@ -71,26 +73,27 @@ func cmdAdd(args *skel.CmdArgs) error {
 	}
 
 	// Get the IP address and MAC address from the API server.
-	// Wait for a maximum of 30 seconds with a retry every 1 second.
+	// Exponential back off ~32 seconds + 7* t(api call)
+	var annotationBackoff = wait.Backoff{Duration: 1 * time.Second, Steps: 7, Factor: 1.5, Jitter: 0.1}
 	var annotation map[string]string
-	for cnt := 0; cnt < 30; cnt++ {
+	if err := wait.ExponentialBackoff(annotationBackoff, func() (bool, error) {
 		annotation, err = kubecli.GetAnnotationsOnPod(namespace, podName)
 		if err != nil {
-			time.Sleep(1 * time.Second)
-			continue
+			// TODO: check if err is non recoverable
+			logrus.Warningf("Error while obtaining pod annotations - %v", err)
+			return false, nil
 		}
 		if _, ok := annotation["ovn"]; ok {
-			break
+			return true, nil
 		}
-	}
-
-	if annotation == nil {
-		return fmt.Errorf("failed to get pod annotation")
+		return false, nil
+	}); err != nil {
+		return fmt.Errorf("failed to get pod annotation - %v", err)
 	}
 
 	ovnAnnotation, ok := annotation["ovn"]
 	if !ok {
-		return fmt.Errorf("failed to get annotation of ovn")
+		return fmt.Errorf("failed to get ovn annotation from pod")
 	}
 
 	var ovnAnnotatedMap map[string]string
