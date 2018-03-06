@@ -200,7 +200,8 @@ func GatewayInit(clusterIPSubnet, nodeName, nicIP, physicalInterface,
 	// Add a static route in GR with physical gateway as the default next hop.
 	if defaultGW != "" {
 		stdout, stderr, err = RunOVNNbctl("--may-exist", "lr-route-add",
-			gatewayRouter, "0.0.0.0/0", defaultGW)
+			gatewayRouter, "0.0.0.0/0", defaultGW,
+			fmt.Sprintf("rtoe-%s", gatewayRouter))
 		if err != nil {
 			logrus.Errorf("Failed to add a static route in GR with physical "+
 				"gateway as the default next hop, stdout: %q, "+
