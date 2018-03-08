@@ -80,6 +80,11 @@ func main() {
 			Name:  "nodeport",
 			Usage: "Setup nodeport based ingress on gateways.",
 		},
+
+		cli.BoolFlag{
+			Name:  "ha",
+			Usage: "HA option to reconstruct OVN database after failover",
+		},
 	}, config.Flags...)
 	c.Action = func(c *cli.Context) error {
 		return runOvnKube(c)
@@ -111,14 +116,15 @@ func runOvnKube(ctx *cli.Context) error {
 	master := ctx.String("init-master")
 	node := ctx.String("init-node")
 	nodePortEnable := ctx.Bool("nodeport")
+	clusterController := ovncluster.NewClusterController(clientset, factory)
 
 	if master != "" || node != "" {
-		clusterController := ovncluster.NewClusterController(clientset, factory)
 		clusterController.HostSubnetLength = 8
 		clusterController.GatewayInit = ctx.Bool("init-gateways")
 		clusterController.GatewayIntf = ctx.String("gateway-interface")
 		clusterController.GatewayNextHop = ctx.String("gateway-nexthop")
 		clusterController.GatewaySpareIntf = ctx.Bool("gateway-spare-interface")
+		clusterController.OvnHA = ctx.Bool("ha")
 		_, clusterController.ClusterIPNet, err = net.ParseCIDR(ctx.String("cluster-subnet"))
 		if err != nil {
 			panic(err.Error)
@@ -162,6 +168,13 @@ func runOvnKube(ctx *cli.Context) error {
 	}
 	if netController {
 		ovnController := ovn.NewOvnController(clientset, factory, nodePortEnable)
+		if clusterController.OvnHA {
+			err := clusterController.RebuildOVNDatabase(master, ovnController)
+			if err != nil {
+				logrus.Errorf(err.Error())
+				panic(err.Error())
+			}
+		}
 		if err := ovnController.Run(); err != nil {
 			logrus.Errorf(err.Error())
 			panic(err.Error())
@@ -171,7 +184,7 @@ func runOvnKube(ctx *cli.Context) error {
 		// run forever
 		select {}
 	}
-	if node != "" && nodePortEnable {
+	if node != "" && (nodePortEnable || clusterController.OvnHA) {
 		// run forever
 		select {}
 	}

@@ -223,7 +223,7 @@ func (oc *Controller) addAllowACLFromNode(logicalSwitch string) {
 	subnetRaw, err := exec.Command(OvnNbctl, "get", "logical_switch",
 		logicalSwitch, "other-config:subnet").Output()
 	if err != nil {
-		logrus.Errorf("failed to get the logical_switch %s subent (%v)",
+		logrus.Errorf("failed to get the logical_switch %s subnet (%v)",
 			logicalSwitch, err)
 		return
 	}
@@ -1025,7 +1025,8 @@ func (oc *Controller) handlePeerNamespaceSelector(
 	np.stopWg.Done()
 }
 
-func (oc *Controller) addNetworkPolicy(policy *knet.NetworkPolicy) {
+// AddNetworkPolicy adds network policy and create corresponding acl rules
+func (oc *Controller) AddNetworkPolicy(policy *knet.NetworkPolicy) {
 	logrus.Infof("Adding network policy %s in namespace %s", policy.Name,
 		policy.Namespace)
 

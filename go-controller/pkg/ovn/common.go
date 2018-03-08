@@ -152,6 +152,22 @@ func (oc *Controller) getIPFromOvnAnnotation(ovnAnnotation string) string {
 	return ipAddressMask[0]
 }
 
+func (oc *Controller) getMacFromOvnAnnotation(ovnAnnotation string) string {
+	if ovnAnnotation == "" {
+		return ""
+	}
+
+	var ovnAnnotationMap map[string]string
+	err := json.Unmarshal([]byte(ovnAnnotation), &ovnAnnotationMap)
+	if err != nil {
+		logrus.Errorf("Error in json unmarshaling ovn annotation "+
+			"(%v)", err)
+		return ""
+	}
+
+	return ovnAnnotationMap["mac_address"]
+}
+
 func stringSliceMembership(slice []string, key string) bool {
 	for _, val := range slice {
 		if val == key {

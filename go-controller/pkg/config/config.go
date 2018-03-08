@@ -646,6 +646,7 @@ func (a *OvnDBAuth) ensureCACert() error {
 	}
 	if a.Scheme == OvnDBSchemeSSL {
 		args = append(args, "--private-key="+a.PrivKey)
+
 		args = append(args, "--certificate="+a.Cert)
 		args = append(args, "--bootstrap-ca-cert="+a.CACert)
 	}
@@ -718,4 +719,54 @@ func (a *OvnDBAuth) SetDBAuth() error {
 		}
 	}
 	return nil
+}
+
+// UpdateOvnNodeAuth updates the host and URL in ClientAuth and ServerAuth
+// for both OvnNorth and OvnSouth. It updates them with the new masterIP.
+func UpdateOvnNodeAuth(masterIP string) error {
+	var err error
+	logrus.Debugf("Update OVN node auth with new master ip: %s", masterIP)
+	OvnNorth.ClientAuth.host = masterIP
+	OvnNorth.ClientAuth.URL, err = updateURLString(
+		OvnNorth.ClientAuth.URL, masterIP)
+	if err != nil {
+		logrus.Errorf("Failed to update OvnNorth ClientAuth URL: %v", err)
+		return err
+	}
+	OvnNorth.ServerAuth.host = masterIP
+	OvnNorth.ServerAuth.URL, err = updateURLString(
+		OvnNorth.ServerAuth.URL, masterIP)
+	if err != nil {
+		logrus.Errorf("Failed to update OvnNorth ServerAuth URL: %v", err)
+		return err
+	}
+	OvnSouth.ClientAuth.host = masterIP
+	OvnSouth.ClientAuth.URL, err = updateURLString(
+		OvnSouth.ClientAuth.URL, masterIP)
+	if err != nil {
+		logrus.Errorf("Failed to update OvnSouth ClientAuth URL: %v", err)
+		return err
+	}
+	OvnSouth.ServerAuth.host = masterIP
+	OvnSouth.ServerAuth.URL, err = updateURLString(
+		OvnSouth.ServerAuth.URL, masterIP)
+	if err != nil {
+		logrus.Errorf("Failed to update OvnSouth ServerAuth URL: %v", err)
+		return err
+	}
+
+	return nil
+}
+
+func updateURLString(urlString, newIP string) (string, error) {
+	if urlString == "" {
+		return "", nil
+	}
+	s := strings.Split(urlString, ":")
+	if len(s) != 3 {
+		return "", fmt.Errorf("Failed to parse OVN DB url: %q", urlString)
+	}
+	newURLString := s[0] + ":" + newIP + ":" + s[2]
+	logrus.Debugf("New OVN urlString: %q", newURLString)
+	return newURLString, nil
 }

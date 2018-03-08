@@ -4,8 +4,6 @@ import (
 	"fmt"
 	"net"
 
-	"github.com/sirupsen/logrus"
-
 	kapi "k8s.io/api/core/v1"
 	"k8s.io/client-go/tools/cache"
 
@@ -14,7 +12,190 @@ import (
 	"github.com/openvswitch/ovn-kubernetes/go-controller/pkg/util"
 
 	"github.com/openshift/origin/pkg/util/netutils"
+	"github.com/sirupsen/logrus"
 )
+
+// RebuildOVNDatabase rebuilds db if HA option is enabled and OVN DB
+// doesn't exist. First It updates k8s nodes by creating a logical
+// switch for each node. Then it reads all resources from k8s and
+// creates needed resources in OVN DB. Last, it updates master node
+// ip in default namespace to trigger event on node.
+func (cluster *OvnClusterController) RebuildOVNDatabase(
+	masterNodeName string, oc *ovn.Controller) error {
+	logrus.Debugf("Rebuild OVN database for cluster nodes")
+	var err error
+	ipChange, err := cluster.checkMasterIPChange(masterNodeName)
+	if err != nil {
+		logrus.Errorf("Error when checking Master Node IP Change: %v", err)
+		return err
+	}
+
+	// If OvnHA options is enabled, make sure default namespace has the
+	// annotation of current cluster master node's overlay IP address
+	logrus.Debugf("cluster.OvnHA: %t", cluster.OvnHA)
+	if cluster.OvnHA && ipChange {
+		logrus.Debugf("HA is enabled and DB doesn't exist!")
+		// Rebuild OVN DB for the k8s nodes
+		err = cluster.UpdateDBForKubeNodes(masterNodeName)
+		if err != nil {
+			return err
+		}
+		// Rebuild OVN DB for the k8s namespaces and all the resource
+		// objects inside the namespace including pods and network
+		// policies
+		err = cluster.UpdateKubeNsObjects(oc)
+		if err != nil {
+			return err
+		}
+		// Update master node IP annotation on default namespace
+		err = cluster.UpdateMasterNodeIP(masterNodeName)
+		if err != nil {
+			return err
+		}
+	}
+
+	return nil
+}
+
+// UpdateDBForKubeNodes rebuilds ovn db for k8s nodes
+func (cluster *OvnClusterController) UpdateDBForKubeNodes(
+	masterNodeName string) error {
+	nodes, err := cluster.Kube.GetNodes()
+	if err != nil {
+		logrus.Errorf("Failed to obtain k8s nodes: %v", err)
+		return err
+	}
+	for _, node := range nodes.Items {
+		subnet, ok := node.Annotations[OvnHostSubnet]
+		if ok {
+			// Create a logical switch for the node
+			logrus.Debugf("ovn_host_subnet: %s", subnet)
+			ip, localNet, err := net.ParseCIDR(subnet)
+			if err != nil {
+				return fmt.Errorf("Failed to parse subnet %v: %v", subnet,
+					err)
+			}
+			ip = util.NextIP(ip)
+			n, _ := localNet.Mask.Size()
+			routerIPMask := fmt.Sprintf("%s/%d", ip.String(), n)
+			stdout, stderr, err := util.RunOVNNbctl("--may-exist",
+				"ls-add", node.Name, "--", "set", "logical_switch",
+				node.Name, fmt.Sprintf("other-config:subnet=%s", subnet),
+				fmt.Sprintf("external-ids:gateway_ip=%s", routerIPMask))
+			if err != nil {
+				logrus.Errorf("Failed to create logical switch for "+
+					"node %s, stdout: %q, stderr: %q, error: %v",
+					node.Name, stdout, stderr, err)
+				return err
+			}
+		}
+	}
+	return nil
+}
+
+// UpdateKubeNsObjects rebuilds ovn db for k8s namespaces
+// and pods/networkpolicies inside the namespaces.
+func (cluster *OvnClusterController) UpdateKubeNsObjects(
+	oc *ovn.Controller) error {
+	namespaces, err := cluster.Kube.GetNamespaces()
+	if err != nil {
+		logrus.Errorf("Failed to get k8s namespaces: %v", err)
+		return err
+	}
+	for _, ns := range namespaces.Items {
+		oc.AddNamespace(&ns)
+		pods, err := cluster.Kube.GetPods(ns.Name)
+		if err != nil {
+			logrus.Errorf("Failed to get k8s pods: %v", err)
+			return err
+		}
+		for _, pod := range pods.Items {
+			oc.AddLogicalPortWithIP(&pod)
+		}
+		endpoints, err := cluster.Kube.GetEndpoints(ns.Name)
+		if err != nil {
+			logrus.Errorf("Failed to get k8s endpoints: %v", err)
+			return err
+		}
+		for _, ep := range endpoints.Items {
+			er := oc.AddEndpoints(&ep)
+			if er != nil {
+				logrus.Errorf("Error adding endpoints: %v", er)
+				return er
+			}
+		}
+		policies, err := cluster.Kube.GetNetworkPolicies(ns.Name)
+		if err != nil {
+			logrus.Errorf("Failed to get k8s network policies: %v", err)
+			return err
+		}
+		for _, policy := range policies.Items {
+			oc.AddNetworkPolicy(&policy)
+		}
+	}
+	return nil
+}
+
+// UpdateMasterNodeIP add annotations of master node IP on
+// default namespace
+func (cluster *OvnClusterController) UpdateMasterNodeIP(
+	masterNodeName string) error {
+	masterNodeIP, err := netutils.GetNodeIP(masterNodeName)
+	if err != nil {
+		return fmt.Errorf("Failed to obtain local IP from master node "+
+			"%q: %v", masterNodeName, err)
+	}
+
+	defaultNs, err := cluster.Kube.GetNamespace(DefaultNamespace)
+	if err != nil {
+		return fmt.Errorf("Failed to get default namespace: %v", err)
+	}
+
+	// Get overlay ip on OVN master node from default namespace. If it
+	// doesn't have it or the IP address is different than the current one,
+	// set it with current master overlay IP.
+	masterIP, ok := defaultNs.Annotations[MasterOverlayIP]
+	if !ok || masterIP != masterNodeIP {
+		err := cluster.Kube.SetAnnotationOnNamespace(defaultNs, MasterOverlayIP,
+			masterNodeIP)
+		if err != nil {
+			return fmt.Errorf("Failed to set %s=%s on namespace %s: %v",
+				MasterOverlayIP, masterNodeIP, defaultNs.Name, err)
+		}
+	}
+
+	return nil
+}
+
+func (cluster *OvnClusterController) checkMasterIPChange(
+	masterNodeName string) (bool, error) {
+	// Check DB existence by checking if the default namespace annotated
+	// IP address is the same as the master node IP. If annotated IP
+	// address is different, we assume that the ovn db is crashed on the
+	// old node and needs to be rebuilt on the new master node.
+	masterNodeIP, err := netutils.GetNodeIP(masterNodeName)
+	if err != nil {
+		return false, fmt.Errorf("Failed to obtain local IP from master "+
+			"node %q: %v", masterNodeName, err)
+	}
+
+	defaultNs, err := cluster.Kube.GetNamespace(DefaultNamespace)
+	if err != nil {
+		return false, fmt.Errorf("Failed to get default namespace: %v", err)
+	}
+
+	// Get overlay ip on OVN master node from default namespace. If the IP
+	// address is different than master node IP, return true. Else, return
+	// false.
+	masterIP := defaultNs.Annotations[MasterOverlayIP]
+	logrus.Debugf("Master IP: %s, Annotated IP: %s", masterNodeIP, masterIP)
+	if masterIP != masterNodeIP {
+		logrus.Debugf("Detected Master node IP is different than default " +
+			"namespae annotated IP.")
+		return true, nil
+	}
+	return false, nil
+}
 
 // StartClusterMaster runs a subnet IPAM and a controller that watches arrival/departure
 // of nodes in the cluster

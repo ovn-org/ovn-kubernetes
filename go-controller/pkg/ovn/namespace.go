@@ -90,7 +90,8 @@ func (oc *Controller) deletePodFromNamespaceAddressSet(ns, address string) {
 	oc.setAddressSet(hashedAddressSet(ns), addresses)
 }
 
-func (oc *Controller) addNamespace(ns *kapi.Namespace) {
+// AddNamespace creates corresponding addressset in ovn db
+func (oc *Controller) AddNamespace(ns *kapi.Namespace) {
 	logrus.Debugf("Adding namespace: %s", ns.Name)
 
 	if oc.namespaceMutex[ns.Name] == nil {
@@ -128,7 +129,6 @@ func (oc *Controller) addNamespace(ns *kapi.Namespace) {
 		addresses)
 
 	oc.namespacePolicies[ns.Name] = make(map[string]*namespacePolicy)
-	return
 }
 
 func (oc *Controller) deleteNamespace(ns *kapi.Namespace) {
