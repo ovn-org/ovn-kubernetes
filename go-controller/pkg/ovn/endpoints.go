@@ -8,7 +8,8 @@ import (
 	kapi "k8s.io/api/core/v1"
 )
 
-func (ovn *Controller) addEndpoints(ep *kapi.Endpoints) error {
+// AddEndpoints adds endpoints and creates corresponding resources in OVN
+func (ovn *Controller) AddEndpoints(ep *kapi.Endpoints) error {
 	// get service
 	// TODO: cache the service
 	svc, err := ovn.kube.GetService(ep.Namespace, ep.Name)

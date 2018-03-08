@@ -29,11 +29,16 @@ type OvnClusterController struct {
 	GatewayNextHop   string
 	GatewaySpareIntf bool
 	NodePortEnable   bool
+	OvnHA            bool
 }
 
 const (
 	// OvnHostSubnet is the constant string representing the annotation key
 	OvnHostSubnet = "ovn_host_subnet"
+	// DefaultNamespace is the name of the default namespace
+	DefaultNamespace = "default"
+	// MasterOverlayIP is the overlay IP address on master node
+	MasterOverlayIP = "master_overlay_ip"
 )
 
 // NewClusterController creates a new controller for IP subnet allocation to

@@ -129,7 +129,7 @@ func (oc *Controller) WatchEndpoints() error {
 	_, err := oc.watchFactory.AddEndpointsHandler(cache.ResourceEventHandlerFuncs{
 		AddFunc: func(obj interface{}) {
 			ep := obj.(*kapi.Endpoints)
-			err := oc.addEndpoints(ep)
+			err := oc.AddEndpoints(ep)
 			if err != nil {
 				logrus.Errorf("Error in adding load balancer: %v", err)
 			}
@@ -146,7 +146,7 @@ func (oc *Controller) WatchEndpoints() error {
 					logrus.Errorf("Error in deleting endpoints - %v", err)
 				}
 			} else {
-				err := oc.addEndpoints(epNew)
+				err := oc.AddEndpoints(epNew)
 				if err != nil {
 					logrus.Errorf("Error in modifying endpoints: %v", err)
 				}
@@ -169,7 +169,7 @@ func (oc *Controller) WatchNetworkPolicy() error {
 	_, err := oc.watchFactory.AddPolicyHandler(cache.ResourceEventHandlerFuncs{
 		AddFunc: func(obj interface{}) {
 			policy := obj.(*kapisnetworking.NetworkPolicy)
-			oc.addNetworkPolicy(policy)
+			oc.AddNetworkPolicy(policy)
 			return
 		},
 		UpdateFunc: func(old, newer interface{}) {
@@ -177,7 +177,7 @@ func (oc *Controller) WatchNetworkPolicy() error {
 			newPolicy := newer.(*kapisnetworking.NetworkPolicy)
 			if !reflect.DeepEqual(oldPolicy, newPolicy) {
 				oc.deleteNetworkPolicy(oldPolicy)
-				oc.addNetworkPolicy(newPolicy)
+				oc.AddNetworkPolicy(newPolicy)
 			}
 			return
 		},
@@ -196,7 +196,7 @@ func (oc *Controller) WatchNamespaces() error {
 	_, err := oc.watchFactory.AddNamespaceHandler(cache.ResourceEventHandlerFuncs{
 		AddFunc: func(obj interface{}) {
 			ns := obj.(*kapi.Namespace)
-			oc.addNamespace(ns)
+			oc.AddNamespace(ns)
 			return
 		},
 		UpdateFunc: func(old, newer interface{}) {

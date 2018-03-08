@@ -92,6 +92,8 @@ Usage:
      Client certificate that the client should use for talking to the OVN database.  Leave empty to use local unix socket. (default: /etc/openvswitch/ovnsb-cert.pem)
   -sb-client-cacert string
      CA certificate that the client should use for talking to the OVN database.  Leave empty to use local unix socket. (default: /etc/openvswitch/ovnsb-ca.cert)
+  -ha
+     rebuilds ovn db if it is started on a new node (experimental feature)
 ```
 
 ### Configuration File
@@ -145,6 +147,8 @@ ovnkube --init-master <master-host-name> \
 	--cluster-subnet <cidr representing the global pod network e.g. 192.168.0.0/16> \
 	--net-controller
 ```
+
+Note that to rebuild ovn database on a new master node in case of failover, you can provide -ha option when you start ovnkube on both master and all nodes.
 
 With the above the master ovnkube controller will initialize the central master logical router and establish the watcher loops for the following:
  - nodes: as new nodes are born and init-node is called, the logical switches will be created automatically by giving out IPAM for the respective nodes

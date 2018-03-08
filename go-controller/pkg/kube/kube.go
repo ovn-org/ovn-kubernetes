@@ -6,6 +6,7 @@ import (
 	"github.com/sirupsen/logrus"
 
 	kapi "k8s.io/api/core/v1"
+	kapisnetworking "k8s.io/api/networking/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/labels"
 	"k8s.io/apimachinery/pkg/types"
@@ -17,6 +18,7 @@ import (
 type Interface interface {
 	SetAnnotationOnPod(pod *kapi.Pod, key, value string) error
 	SetAnnotationOnNode(node *kapi.Node, key, value string) error
+	SetAnnotationOnNamespace(ns *kapi.Namespace, key, value string) error
 	GetAnnotationsOnPod(namespace, name string) (map[string]string, error)
 	GetPod(namespace, name string) (*kapi.Pod, error)
 	GetPods(namespace string) (*kapi.PodList, error)
@@ -24,6 +26,10 @@ type Interface interface {
 	GetNodes() (*kapi.NodeList, error)
 	GetNode(name string) (*kapi.Node, error)
 	GetService(namespace, name string) (*kapi.Service, error)
+	GetEndpoints(namespace string) (*kapi.EndpointsList, error)
+	GetNamespace(name string) (*kapi.Namespace, error)
+	GetNamespaces() (*kapi.NamespaceList, error)
+	GetNetworkPolicies(namespace string) (*kapisnetworking.NetworkPolicyList, error)
 }
 
 // Kube is the structure object upon which the Interface is implemented
@@ -49,6 +55,23 @@ func (k *Kube) SetAnnotationOnNode(node *kapi.Node, key, value string) error {
 	_, err := k.KClient.Core().Nodes().Patch(node.Name, types.MergePatchType, []byte(patchData))
 	if err != nil {
 		logrus.Errorf("Error in setting annotation on node %s: %v", node.Name, err)
+	}
+	return err
+}
+
+// SetAnnotationOnNamespace takes the Namespace object and key/value pair
+// to set it as an annotation
+func (k *Kube) SetAnnotationOnNamespace(ns *kapi.Namespace, key,
+	value string) error {
+	logrus.Infof("Setting annotations %s=%s on namespace %s", key, value,
+		ns.Name)
+	patchData := fmt.Sprintf(`{"metadata":{"annotations":{"%s":"%s"}}}`, key,
+		value)
+	_, err := k.KClient.Core().Namespaces().Patch(ns.Name,
+		types.MergePatchType, []byte(patchData))
+	if err != nil {
+		logrus.Errorf("Error in setting annotation on namespace %s: %v",
+			ns.Name, err)
 	}
 	return err
 }
@@ -93,4 +116,26 @@ func (k *Kube) GetNode(name string) (*kapi.Node, error) {
 // GetService returns the Service resource from kubernetes apiserver, given its name and namespace
 func (k *Kube) GetService(namespace, name string) (*kapi.Service, error) {
 	return k.KClient.Core().Services(namespace).Get(name, metav1.GetOptions{})
+}
+
+// GetEndpoints returns all the Endpoint resources from kubernetes
+// apiserver, given namespace
+func (k *Kube) GetEndpoints(namespace string) (*kapi.EndpointsList, error) {
+	return k.KClient.Core().Endpoints(namespace).List(metav1.ListOptions{})
+}
+
+// GetNamespace returns the Namespace resource from kubernetes apiserver,
+// given its name
+func (k *Kube) GetNamespace(name string) (*kapi.Namespace, error) {
+	return k.KClient.Core().Namespaces().Get(name, metav1.GetOptions{})
+}
+
+// GetNamespaces returns all Namespace resource from kubernetes apiserver
+func (k *Kube) GetNamespaces() (*kapi.NamespaceList, error) {
+	return k.KClient.Core().Namespaces().List(metav1.ListOptions{})
+}
+
+// GetNetworkPolicies returns all network policy objects from kubernetes
+func (k *Kube) GetNetworkPolicies(namespace string) (*kapisnetworking.NetworkPolicyList, error) {
+	return k.KClient.Networking().NetworkPolicies(namespace).List(metav1.ListOptions{})
 }
