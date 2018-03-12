@@ -868,11 +868,7 @@ func (oc *Controller) handleLocalPodSelector(
 
 func (oc *Controller) handlePeerPodSelector(
 	policy *kapisnetworking.NetworkPolicy, podSelector *metav1.LabelSelector,
-	addressSet string, np *namespacePolicy) {
-
-	// TODO: Do we need a lock to protect this from concurrent delete and add
-	// events?
-	addressMap := make(map[string]bool)
+	addressSet string, addressMap map[string]bool, np *namespacePolicy) {
 
 	client, _ := oc.Kube.(*kube.Kube)
 	clientset, _ := client.KClient.(*kubernetes.Clientset)
@@ -1141,6 +1137,9 @@ func (oc *Controller) addNetworkPolicy(policy *kapisnetworking.NetworkPolicy) {
 		}
 
 		hashedLocalAddressSet := ""
+		// peerPodAddressMap represents the IP addresses of all the peer pods
+		// for this ingress.
+		peerPodAddressMap := make(map[string]bool)
 		if len(ingressJSON.From) != 0 {
 			// localPeerPods represents all the peer pods in the same
 			// namespace from which we need to allow traffic.
@@ -1173,7 +1172,7 @@ func (oc *Controller) addNetworkPolicy(policy *kapisnetworking.NetworkPolicy) {
 				// For each peer pod selector, we create a watcher that
 				// populates the addressSet
 				go oc.handlePeerPodSelector(policy, fromJSON.PodSelector,
-					hashedLocalAddressSet, np)
+					hashedLocalAddressSet, peerPodAddressMap, np)
 			}
 		}
 		np.ingressPolicies = append(np.ingressPolicies, ingress)
@@ -1198,6 +1197,9 @@ func (oc *Controller) addNetworkPolicy(policy *kapisnetworking.NetworkPolicy) {
 		}
 
 		hashedLocalAddressSet := ""
+		// peerPodAddressMap represents the IP addresses of all the peer pods
+		// for this egress.
+		peerPodAddressMap := make(map[string]bool)
 		if len(egressJSON.To) != 0 {
 			// localPeerPods represents all the peer pods in the same
 			// namespace to which we need to allow traffic.
@@ -1230,7 +1232,7 @@ func (oc *Controller) addNetworkPolicy(policy *kapisnetworking.NetworkPolicy) {
 				// For each peer pod selector, we create a watcher that
 				// populates the addressSet
 				go oc.handlePeerPodSelector(policy, toJSON.PodSelector,
-					hashedLocalAddressSet, np)
+					hashedLocalAddressSet, peerPodAddressMap, np)
 			}
 		}
 		np.egressPolicies = append(np.egressPolicies, egress)
