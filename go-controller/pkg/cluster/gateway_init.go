@@ -7,9 +7,9 @@ import (
 	"net"
 	"syscall"
 
-	"github.com/vishvananda/netlink"
-
+	"github.com/openvswitch/ovn-kubernetes/go-controller/pkg/config"
 	"github.com/openvswitch/ovn-kubernetes/go-controller/pkg/util"
+	"github.com/vishvananda/netlink"
 )
 
 // getIPv4Address returns the ipv4 address for the network interface 'iface'.
@@ -59,6 +59,71 @@ func getDefaultGatewayInterfaceDetails() (string, string, error) {
 		}
 	}
 	return "", "", fmt.Errorf("Failed to get default gateway interface")
+}
+
+func (cluster *OvnClusterController) addDefaultConntrackRules() error {
+	patchPort := "k8s-patch-" + cluster.GatewayBridge + "-br-int"
+	// Get ofport of pathPort
+	ofportPatch, stderr, err := util.RunOVSVsctl("--if-exists", "get",
+		"interface", patchPort, "ofport")
+	if err != nil {
+		return fmt.Errorf("Failed to get ofport of %s, stderr: %q, error: %v",
+			patchPort, stderr, err)
+	}
+
+	// Get ofport of physical interface
+	ofportPhys, stderr, err := util.RunOVSVsctl("--if-exists", "get",
+		"interface", cluster.GatewayIntf, "ofport")
+	if err != nil {
+		return fmt.Errorf("Failed to get ofport of %s, stderr: %q, error: %v",
+			cluster.GatewayIntf, stderr, err)
+	}
+
+	// table 0, packets coming from pods headed externally. Commit connections
+	// so that reverse direction goes back to the pods.
+	_, stderr, err = util.RunOVSOfctl("add-flow", cluster.GatewayBridge,
+		fmt.Sprintf("priority=100, in_port=%s, ip, "+
+			"actions=ct(commit, zone=%d), output:%s",
+			ofportPatch, config.Default.ConntrackZone, ofportPhys))
+	if err != nil {
+		return fmt.Errorf("Failed to add openflow flow to %s, stderr: %q, "+
+			"error: %v", cluster.GatewayBridge, stderr, err)
+	}
+
+	// table 0, packets coming from external. Send it through conntrack and
+	// resubmit to table 1 to know the state of the connection.
+	_, stderr, err = util.RunOVSOfctl("add-flow", cluster.GatewayBridge,
+		fmt.Sprintf("priority=50, in_port=%s, ip, "+
+			"actions=ct(zone=%d, table=1)", ofportPhys, config.Default.ConntrackZone))
+	if err != nil {
+		return fmt.Errorf("Failed to add openflow flow to %s, stderr: %q, "+
+			"error: %v", cluster.GatewayBridge, stderr, err)
+	}
+
+	// table 1, established and related connections go to pod
+	_, stderr, err = util.RunOVSOfctl("add-flow", cluster.GatewayBridge,
+		fmt.Sprintf("priority=100, table=1, ct_state=+trk+est, "+
+			"actions=output:%s", ofportPatch))
+	if err != nil {
+		return fmt.Errorf("Failed to add openflow flow to %s, stderr: %q, "+
+			"error: %v", cluster.GatewayBridge, stderr, err)
+	}
+	_, stderr, err = util.RunOVSOfctl("add-flow", cluster.GatewayBridge,
+		fmt.Sprintf("priority=100, table=1, ct_state=+trk+rel, "+
+			"actions=output:%s", ofportPatch))
+	if err != nil {
+		return fmt.Errorf("Failed to add openflow flow to %s, stderr: %q, "+
+			"error: %v", cluster.GatewayBridge, stderr, err)
+	}
+
+	// table 1, all other connections go to the bridge interface.
+	_, stderr, err = util.RunOVSOfctl("add-flow", cluster.GatewayBridge,
+		"priority=0, table=1, actions=output:LOCAL")
+	if err != nil {
+		return fmt.Errorf("Failed to add openflow flow to %s, stderr: %q, "+
+			"error: %v", cluster.GatewayBridge, stderr, err)
+	}
+	return nil
 }
 
 func (cluster *OvnClusterController) initGateway(
