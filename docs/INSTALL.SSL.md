@@ -102,22 +102,6 @@ on the node where you intend to start your k8s central daemons by running:
 /usr/share/openvswitch/scripts/ovn-ctl start_northd
 ```
 
-Now, you need to additionally run the following commands to open up SSL ports
-via which the database can be accessed.
-
-```
-ovn-nbctl set-connection ssl:6641
-ovn-sbctl set-connection ssl:6642
-```
-
-On each host in your cluster (including the master node), you will need to run
-the following command.
-
-```
-ovs-vsctl set Open_vSwitch . external_ids:ovn-remote="ssl:$CENTRAL_IP:6642" \
-  external_ids:ovn-nb="ssl:$CENTRAL_IP:6641"
-```
-
 You should now restart the ovn-controller on each host with the following
 additional options.
 
@@ -138,6 +122,52 @@ file.  For e.g. on Ubuntu, if you installed ovn-controller via the package
 OVN_CTL_OPTS="--ovn-controller-ssl-key=/etc/openvswitch/ovncontroller-privkey.pem  --ovn-controller-ssl-cert=/etc/openvswitch/ovncontroller-cert.pem --ovn-controller-ssl-bootstrap-ca-cert=/etc/openvswitch/ovnsb-ca.cert"
 ```
 
+Now, when you start the ovnkube utility on master, you should pass the SSL
+certificates to it. For e.g:
+
+```
+sudo ovnkube -k8s-kubeconfig kubeconfig.yaml -net-controller -loglevel=4 \
+ -k8s-apiserver="http://$CENTRAL_IP:8080" \
+ -logfile="/var/log/openvswitch/ovnkube.log" \
+ -init-master="$NODE_NAME" -cluster-subnet=$CLUSTER_IP_SUBNET \
+ -service-cluster-ip-range=$SERVICE_IP_SUBNET \
+ -nodeport \
+ -nb-address="ssl://$CENTRAL_IP:6631" \
+ -nb-server-privkey /etc/openvswitch/ovnnb-privkey.pem \
+ -nb-server-cert /etc/openvswitch/ovnnb-cert.pem \
+ -nb-server-cacert /vagrant/pki/switchca/cacert.pem \
+ -sb-address="ssl://$CENTRAL_IP:6632" \
+ -sb-server-privkey /etc/openvswitch/ovnsb-privkey.pem \
+ -sb-server-cert /etc/openvswitch/ovnsb-cert.pem \
+ -sb-server-cacert /vagrant/pki/switchca/cacert.pem  \
+ -nb-client-privkey /etc/openvswitch/ovncontroller-privkey.pem \
+ -nb-client-cert /etc/openvswitch/ovncontroller-cert.pem \
+ -nb-client-cacert /etc/openvswitch/ovnnb-ca.cert \
+ -sb-client-privkey /etc/openvswitch/ovncontroller-privkey.pem \
+ -sb-client-cert /etc/openvswitch/ovncontroller-cert.pem \
+ -sb-client-cacert /etc/openvswitch/ovnsb-ca.cert
+```
+
+And when you start your ovnkube utility on nodes, you should pass the SSL
+certificates to it. For e.g:
+
+```
+sudo ovnkube -k8s-kubeconfig $HOME/kubeconfig.yaml -loglevel=4 \
+    -k8s-apiserver="http://$CENTRAL_IP:8080" \
+    -init-node="$MINION_NAME"  \
+    -nodeport \
+    -nb-address="ssl://$CENTRAL_IP:6631" \
+    -sb-address="ssl://$CENTRAL_IP:6632" -k8s-token=$TOKEN \
+    -nb-client-privkey /etc/openvswitch/ovncontroller-privkey.pem \
+    -nb-client-cert /etc/openvswitch/ovncontroller-cert.pem \
+    -nb-client-cacert /etc/openvswitch/ovnnb-ca.cert \
+    -sb-client-privkey /etc/openvswitch/ovncontroller-privkey.pem \
+    -sb-client-cert /etc/openvswitch/ovncontroller-cert.pem \
+    -sb-client-cacert /etc/openvswitch/ovnsb-ca.cert \
+    -init-gateways \
+    -service-cluster-ip-range=$SERVICE_IP_SUBNET \
+    -cluster-subnet=$CLUSTER_IP_SUBNET
+```
 
 [README.md]: README.md
 [OVS.SSL]: http://docs.openvswitch.org/en/latest/howto/ssl

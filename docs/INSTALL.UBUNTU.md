@@ -30,7 +30,7 @@ On the master node, where you intend to start OVN's central components,
 run:
 
 ```
-sudo apt-get install ovn-central ovn-common -y
+sudo apt-get install ovn-central ovn-common ovn-host -y
 ```
 
 On the agent nodes, run:
