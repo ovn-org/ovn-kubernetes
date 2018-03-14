@@ -104,7 +104,7 @@ func configureManagementPortWindows(clusterSubnet, clusterServicesSubnet,
 			clusterServiceMask := fmt.Sprintf("%s", net.IP(clusterServiceIPNet.Mask))
 			// Create a route for the entire subnet.
 			stdoutStderr, err = exec.Command("powershell", "route", "-p", "add",
-				fmt.Sprintf("%s", clusterIP), "mask", fmt.Sprintf("%s", clusterServiceMask),
+				fmt.Sprintf("%s", clusterServiceIP), "mask", fmt.Sprintf("%s", clusterServiceMask),
 				fmt.Sprintf("%s", routerIP), "METRIC", "2", "IF", fmt.Sprintf("%s", interfaceIndex)).CombinedOutput()
 			if err != nil {
 				logrus.Errorf("failed to run route add, stderr: %q, error: %v", fmt.Sprintf("%s", stdoutStderr), err)
