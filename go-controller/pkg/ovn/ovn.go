@@ -94,7 +94,7 @@ func (oc *Controller) Run() {
 
 // WatchPods starts the watching of Pod resource and calls back the appropriate handler logic
 func (oc *Controller) WatchPods() {
-	oc.watchFactory.AddPodHandler(cache.ResourceEventHandlerFuncs{
+	oc.watchFactory.AddPodHandler("", cache.ResourceEventHandlerFuncs{
 		AddFunc: func(obj interface{}) {
 			pod := obj.(*kapi.Pod)
 			oc.addLogicalPort(pod)
@@ -123,7 +123,7 @@ func (oc *Controller) WatchPods() {
 // WatchServices starts the watching of Service resource and calls back the
 // appropriate handler logic
 func (oc *Controller) WatchServices() {
-	oc.watchFactory.AddServiceHandler(cache.ResourceEventHandlerFuncs{
+	oc.watchFactory.AddServiceHandler("", cache.ResourceEventHandlerFuncs{
 		AddFunc: func(obj interface{}) {
 		},
 		UpdateFunc: func(old, new interface{}) {
@@ -149,7 +149,7 @@ func (oc *Controller) WatchServices() {
 
 // WatchEndpoints starts the watching of Endpoint resource and calls back the appropriate handler logic
 func (oc *Controller) WatchEndpoints() {
-	oc.watchFactory.AddEndpointHandler(cache.ResourceEventHandlerFuncs{
+	oc.watchFactory.AddEndpointHandler("", cache.ResourceEventHandlerFuncs{
 		AddFunc: func(obj interface{}) {
 			ep := obj.(*kapi.Endpoints)
 			err := oc.addEndpoints(ep)
@@ -200,7 +200,7 @@ func (oc *Controller) WatchEndpoints() {
 // WatchNetworkPolicy starts the watching of network policy resource and calls
 // back the appropriate handler logic
 func (oc *Controller) WatchNetworkPolicy() {
-	oc.watchFactory.AddPolicyHandler(cache.ResourceEventHandlerFuncs{
+	oc.watchFactory.AddPolicyHandler("", cache.ResourceEventHandlerFuncs{
 		AddFunc: func(obj interface{}) {
 			policy := obj.(*kapisnetworking.NetworkPolicy)
 			oc.addNetworkPolicy(policy)
@@ -238,7 +238,7 @@ func (oc *Controller) WatchNetworkPolicy() {
 // WatchNamespaces starts the watching of namespace resource and calls
 // back the appropriate handler logic
 func (oc *Controller) WatchNamespaces() {
-	oc.watchFactory.AddNamespaceHandler(cache.ResourceEventHandlerFuncs{
+	oc.watchFactory.AddNamespaceHandler("", cache.ResourceEventHandlerFuncs{
 		AddFunc: func(obj interface{}) {
 			ns := obj.(*kapi.Namespace)
 			oc.addNamespace(ns)
