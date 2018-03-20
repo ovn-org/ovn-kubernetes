@@ -670,7 +670,12 @@ func (a *OvnDBAuth) SetDBAuth() error {
 			if !pathExists(a.CACert) {
 				return fmt.Errorf("server CA certificate file %s not found", a.CACert)
 			}
-			// Tell the database what SSL keys and certs to use
+			// Tell the database what SSL keys and certs to use, but before that delete
+			// any SSL configuration. Otherwise, ovn-{nbctl|sbctl} set-ssl command will hang
+			out, err = exec.Command(a.ctlCmd, "del-ssl").CombinedOutput()
+			if err != nil {
+				return fmt.Errorf("error deleting %s SSL configuration: %v\n %q", a.ctlCmd, err, string(out))
+			}
 			out, err = exec.Command(a.ctlCmd, "set-ssl", a.PrivKey, a.Cert, a.CACert).CombinedOutput()
 			if err != nil {
 				return fmt.Errorf("error setting %s SSL API certificates: %v\n  %q", a.ctlCmd, err, string(out))
