@@ -401,6 +401,9 @@ func buildOvnAuth(direction, externalID string, cliAuth, confAuth *rawOvnAuthCon
 	}
 	if address == "" && readAddress {
 		address = getOVSExternalID("ovn-" + direction)
+		// address will be in format ssl:1.2.3.4:6641 from external_ids,
+		// but we want it in url format, i.e. ssl://1.2.3.4:6641
+		address = strings.Replace(address, ":", "://", 1)
 	}
 
 	auth := &rawOvnAuthConfig{Address: address}
