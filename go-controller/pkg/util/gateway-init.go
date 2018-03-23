@@ -197,19 +197,6 @@ func GatewayInit(clusterIPSubnet, nodeName, nicIP, physicalInterface,
 		return err
 	}
 
-	// Add a static route in GR with physical gateway as the default next hop.
-	if defaultGW != "" {
-		stdout, stderr, err = RunOVNNbctl("--may-exist", "lr-route-add",
-			gatewayRouter, "0.0.0.0/0", defaultGW,
-			fmt.Sprintf("rtoe-%s", gatewayRouter))
-		if err != nil {
-			logrus.Errorf("Failed to add a static route in GR with physical "+
-				"gateway as the default next hop, stdout: %q, "+
-				"stderr: %q, error: %v", stdout, stderr, err)
-			return err
-		}
-	}
-
 	// Add a default route in distributed router with first GR as the nexthop.
 	stdout, stderr, err = RunOVNNbctl("--may-exist", "lr-route-add",
 		k8sClusterRouter, "0.0.0.0/0", "100.64.1.2")
@@ -390,6 +377,19 @@ func GatewayInit(clusterIPSubnet, nodeName, nicIP, physicalInterface,
 		logrus.Errorf("Failed to add logical port to router, stdout: %q, "+
 			"stderr: %q, error: %v", stdout, stderr, err)
 		return err
+	}
+
+	// Add a static route in GR with physical gateway as the default next hop.
+	if defaultGW != "" {
+		stdout, stderr, err = RunOVNNbctl("--may-exist", "lr-route-add",
+			gatewayRouter, "0.0.0.0/0", defaultGW,
+			fmt.Sprintf("rtoe-%s", gatewayRouter))
+		if err != nil {
+			logrus.Errorf("Failed to add a static route in GR with physical "+
+				"gateway as the default next hop, stdout: %q, "+
+				"stderr: %q, error: %v", stdout, stderr, err)
+			return err
+		}
 	}
 
 	// Default SNAT rules.
