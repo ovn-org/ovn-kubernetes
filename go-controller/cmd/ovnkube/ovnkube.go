@@ -169,6 +169,10 @@ func runOvnKube(ctx *cli.Context) error {
 		// run forever
 		select {}
 	}
+	if node != "" && nodePortEnable {
+		// run forever
+		select {}
+	}
 
 	return nil
 }
