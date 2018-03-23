@@ -5,11 +5,16 @@ package cluster
 import (
 	"fmt"
 	"net"
+	"regexp"
+	"strings"
 	"syscall"
 
 	"github.com/openvswitch/ovn-kubernetes/go-controller/pkg/config"
 	"github.com/openvswitch/ovn-kubernetes/go-controller/pkg/util"
+	"github.com/sirupsen/logrus"
 	"github.com/vishvananda/netlink"
+	kapi "k8s.io/api/core/v1"
+	"k8s.io/client-go/tools/cache"
 )
 
 // getIPv4Address returns the ipv4 address for the network interface 'iface'.
@@ -126,6 +131,188 @@ func (cluster *OvnClusterController) addDefaultConntrackRules() error {
 	return nil
 }
 
+func (cluster *OvnClusterController) addService(
+	service *kapi.Service, inport, outport string) {
+	if service.Spec.Type != kapi.ServiceTypeNodePort {
+		return
+	}
+
+	for _, svcPort := range service.Spec.Ports {
+		if svcPort.Protocol != kapi.ProtocolTCP &&
+			svcPort.Protocol != kapi.ProtocolUDP {
+			continue
+		}
+		protocol := strings.ToLower(string(svcPort.Protocol))
+
+		_, stderr, err := util.RunOVSOfctl("add-flow", cluster.GatewayBridge,
+			fmt.Sprintf("priority=100, in_port=%s, %s, tp_dst=%d, actions=%s",
+				inport, protocol, svcPort.NodePort, outport))
+		if err != nil {
+			logrus.Errorf("Failed to add openflow flow on %s for nodePort "+
+				"%d, stderr: %q, error: %v", cluster.GatewayBridge,
+				svcPort.NodePort, stderr, err)
+		}
+	}
+}
+
+func (cluster *OvnClusterController) deleteService(service *kapi.Service,
+	inport string) {
+	if service.Spec.Type != kapi.ServiceTypeNodePort {
+		return
+	}
+
+	for _, svcPort := range service.Spec.Ports {
+		if svcPort.Protocol != kapi.ProtocolTCP &&
+			svcPort.Protocol != kapi.ProtocolUDP {
+			continue
+		}
+
+		protocol := strings.ToLower(string(svcPort.Protocol))
+
+		_, stderr, err := util.RunOVSOfctl("del-flows", cluster.GatewayBridge,
+			fmt.Sprintf("in_port=%s, %s, tp_dst=%d",
+				inport, protocol, svcPort.NodePort))
+		if err != nil {
+			logrus.Errorf("Failed to delete openflow flow on %s for nodePort "+
+				"%d, stderr: %q, error: %v", cluster.GatewayBridge,
+				svcPort.NodePort, stderr, err)
+		}
+	}
+}
+
+func (cluster *OvnClusterController) syncServices(services []interface{}) {
+	// Get ofport of physical interface
+	inport, stderr, err := util.RunOVSVsctl("--if-exists", "get",
+		"interface", cluster.GatewayIntf, "ofport")
+	if err != nil {
+		logrus.Errorf("Failed to get ofport of %s, stderr: %q, error: %v",
+			cluster.GatewayIntf, stderr, err)
+		return
+	}
+
+	nodePorts := make(map[string]bool)
+	for _, serviceInterface := range services {
+		service, ok := serviceInterface.(*kapi.Service)
+		if !ok {
+			logrus.Errorf("Spurious object in syncServices: %v",
+				serviceInterface)
+			continue
+		}
+
+		if service.Spec.Type != kapi.ServiceTypeNodePort ||
+			len(service.Spec.Ports) == 0 {
+			continue
+		}
+
+		for _, svcPort := range service.Spec.Ports {
+			port := svcPort.NodePort
+			if port == 0 {
+				continue
+			}
+
+			prot := svcPort.Protocol
+			if prot != kapi.ProtocolTCP && prot != kapi.ProtocolUDP {
+				continue
+			}
+			protocol := strings.ToLower(string(prot))
+			nodePortKey := fmt.Sprintf("%s_%d", protocol, port)
+			nodePorts[nodePortKey] = true
+		}
+	}
+
+	stdout, stderr, err := util.RunOVSOfctl("dump-flows",
+		cluster.GatewayBridge)
+	if err != nil {
+		logrus.Errorf("dump-flows failed: %q (%v)", stderr, err)
+		return
+	}
+	flows := strings.Split(stdout, "\n")
+
+	re, err := regexp.Compile(`tp_dst=(.*?)[, ]`)
+	if err != nil {
+		logrus.Errorf("regexp compile failed: %v", err)
+		return
+	}
+
+	for _, flow := range flows {
+		group := re.FindStringSubmatch(flow)
+		if group == nil {
+			continue
+		}
+
+		var key string
+		if strings.Contains(flow, "tcp") {
+			key = fmt.Sprintf("tcp_%s", group[1])
+		} else if strings.Contains(flow, "udp") {
+			key = fmt.Sprintf("udp_%s", group[1])
+		} else {
+			continue
+		}
+
+		if _, ok := nodePorts[key]; !ok {
+			pair := strings.Split(key, "_")
+			protocol, port := pair[0], pair[1]
+
+			stdout, _, err := util.RunOVSOfctl(
+				"del-flows", cluster.GatewayBridge,
+				fmt.Sprintf("in_port=%s, %s, tp_dst=%s",
+					inport, protocol, port))
+			if err != nil {
+				logrus.Errorf("del-flows of %s failed: %q",
+					cluster.GatewayBridge, stdout)
+			}
+		}
+	}
+}
+
+func (cluster *OvnClusterController) nodePortWatcher() error {
+	patchPort := "k8s-patch-" + cluster.GatewayBridge + "-br-int"
+	// Get ofport of patchPort
+	ofportPatch, stderr, err := util.RunOVSVsctl("--if-exists", "get",
+		"interface", patchPort, "ofport")
+	if err != nil {
+		return fmt.Errorf("Failed to get ofport of %s, stderr: %q, error: %v",
+			patchPort, stderr, err)
+	}
+
+	// Get ofport of physical interface
+	ofportPhys, stderr, err := util.RunOVSVsctl("--if-exists", "get",
+		"interface", cluster.GatewayIntf, "ofport")
+	if err != nil {
+		return fmt.Errorf("Failed to get ofport of %s, stderr: %q, error: %v",
+			cluster.GatewayIntf, stderr, err)
+	}
+
+	cluster.watchFactory.AddServiceHandler(cache.ResourceEventHandlerFuncs{
+		AddFunc: func(obj interface{}) {
+			service := obj.(*kapi.Service)
+			cluster.addService(service, ofportPhys, ofportPatch)
+		},
+		UpdateFunc: func(old, new interface{}) {
+		},
+		DeleteFunc: func(obj interface{}) {
+			service, ok := obj.(*kapi.Service)
+			if !ok {
+				tombstone, ok := obj.(cache.DeletedFinalStateUnknown)
+				if !ok {
+					logrus.Errorf("couldn't get object from tombstone %+v",
+						obj)
+					return
+				}
+				service, ok = tombstone.Obj.(*kapi.Service)
+				if !ok {
+					logrus.Errorf("tombstone contained object that is not a "+
+						"Service %#v", obj)
+					return
+				}
+			}
+			cluster.deleteService(service, ofportPhys)
+		},
+	}, cluster.syncServices)
+
+	return nil
+}
+
 func (cluster *OvnClusterController) initGateway(
 	nodeName, clusterIPSubnet, subnet string) error {
 	if cluster.GatewayNextHop == "" || cluster.GatewayIntf == "" {
@@ -207,5 +394,21 @@ func (cluster *OvnClusterController) initGateway(
 			return err
 		}
 	}
+
+	if cluster.NodePortEnable && !cluster.GatewaySpareIntf {
+		// Program cluster.GatewayIntf to let non-pod traffic to go to host
+		// stack
+		err = cluster.addDefaultConntrackRules()
+		if err != nil {
+			return err
+		}
+
+		// Program cluster.GatewayIntf to let nodePort traffic to go to pods.
+		err = cluster.nodePortWatcher()
+		if err != nil {
+			return err
+		}
+	}
+
 	return nil
 }
