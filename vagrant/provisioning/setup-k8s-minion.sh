@@ -66,6 +66,7 @@ popd
 # Initialize the minion and gateway.
 if [ $PROTOCOL = "ssl" ]; then
 sudo ovnkube -k8s-kubeconfig $HOME/kubeconfig.yaml -loglevel=4 \
+    -logfile="/var/log/openvswitch/ovnkube.log" \
     -k8s-apiserver="http://$MASTER_OVERLAY_IP:8080" \
     -init-node="$MINION_NAME"  \
     -nodeport \
@@ -79,9 +80,10 @@ sudo ovnkube -k8s-kubeconfig $HOME/kubeconfig.yaml -loglevel=4 \
     -sb-client-cacert /etc/openvswitch/ovnsb-ca.cert \
     -init-gateways -gateway-interface=enp0s9 -gateway-nexthop="$GW_IP" \
     -service-cluster-ip-range=172.16.1.0/24 \
-    -cluster-subnet="192.168.0.0/16" 2>&1
+    -cluster-subnet="192.168.0.0/16" 2>&1 &
 else
 sudo ovnkube -k8s-kubeconfig $HOME/kubeconfig.yaml -loglevel=4 \
+    -logfile="/var/log/openvswitch/ovnkube.log" \
     -k8s-apiserver="http://$MASTER_OVERLAY_IP:8080" \
     -init-node="$MINION_NAME"  \
     -nodeport \
@@ -89,12 +91,8 @@ sudo ovnkube -k8s-kubeconfig $HOME/kubeconfig.yaml -loglevel=4 \
     -sb-address="$PROTOCOL://$MASTER_OVERLAY_IP:6632" -k8s-token="test" \
     -init-gateways -gateway-interface=enp0s9 -gateway-nexthop="$GW_IP" \
     -service-cluster-ip-range=172.16.1.0/24 \
-    -cluster-subnet="192.168.0.0/16" 2>&1
+    -cluster-subnet="192.168.0.0/16" 2>&1 &
 fi
-
-# Start the gateway helper.
-sudo ovn-k8s-gateway-helper --physical-bridge=brenp0s9 \
-            --physical-interface=enp0s9 --pidfile --detach
 
 # Restore xtrace
 $XTRACE

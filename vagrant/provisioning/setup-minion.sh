@@ -60,8 +60,7 @@ sudo service docker start
 
 # Install OVS and dependencies
 sudo apt-get build-dep dkms
-sudo apt-get install python-six openssl python-pip -y
-sudo -H pip install --upgrade pip
+sudo apt-get install python-six openssl -y
 
 sudo apt-get install openvswitch-datapath-dkms=2.8.1-1 -y
 sudo apt-get install openvswitch-switch=2.8.1-1 openvswitch-common=2.8.1-1 libopenvswitch=2.8.1-1 -y
@@ -84,14 +83,6 @@ EOF'
 else
   echo "PROTOCOL=tcp" >> setup_minion_args.sh
 fi
-
-# XXX: We only need this for ovn-k8s-gateway-helper
-git clone https://github.com/openvswitch/ovn-kubernetes
-pushd ovn-kubernetes
-sudo -H pip install .
-popd
-sudo rm `which ovn-k8s-cni-overlay`
-sudo rm `which ovn-k8s-overlay`
 
 # Install golang
 wget -nv https://dl.google.com/go/go1.9.2.linux-amd64.tar.gz
