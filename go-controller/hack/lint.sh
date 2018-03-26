@@ -7,6 +7,7 @@ set -o nounset
 set -o pipefail
 
 for d in $(find . -type d -not -iwholename '*.git*' -a -not -iname '.tool' -a -not -iwholename '*vendor*' -a -not -iname '_output'); do
+	echo "Linting ${d}"
 	${GOPATH}/bin/gometalinter.v1 \
 		 --exclude='error return value not checked.*(Close|Log|Print).*\(errcheck\)$' \
 		 --exclude='.*_test\.go:.*error return value not checked.*\(errcheck\)$' \

@@ -45,7 +45,7 @@ install.tools: check-gopath
 	$(GOPATH)/bin/gometalinter.v1 --install;
 
 lint:
-	@./hack/lint.sh
+	./hack/lint.sh
 
 gofmt:
 	@./hack/verify-gofmt.sh
