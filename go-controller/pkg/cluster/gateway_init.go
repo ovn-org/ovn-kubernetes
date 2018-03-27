@@ -291,21 +291,7 @@ func (cluster *OvnClusterController) nodePortWatcher() error {
 		UpdateFunc: func(old, new interface{}) {
 		},
 		DeleteFunc: func(obj interface{}) {
-			service, ok := obj.(*kapi.Service)
-			if !ok {
-				tombstone, ok := obj.(cache.DeletedFinalStateUnknown)
-				if !ok {
-					logrus.Errorf("couldn't get object from tombstone %+v",
-						obj)
-					return
-				}
-				service, ok = tombstone.Obj.(*kapi.Service)
-				if !ok {
-					logrus.Errorf("tombstone contained object that is not a "+
-						"Service %#v", obj)
-					return
-				}
-			}
+			service := obj.(*kapi.Service)
 			cluster.deleteService(service, ofportPhys)
 		},
 	}, cluster.syncServices)
