@@ -65,7 +65,7 @@ popd
 
 # Initialize the minion and gateway.
 if [ $PROTOCOL = "ssl" ]; then
-sudo ovnkube -k8s-kubeconfig $HOME/kubeconfig.yaml -loglevel=4 \
+nohup sudo ovnkube -k8s-kubeconfig $HOME/kubeconfig.yaml -loglevel=4 \
     -logfile="/var/log/openvswitch/ovnkube.log" \
     -k8s-apiserver="http://$MASTER_OVERLAY_IP:8080" \
     -init-node="$MINION_NAME"  \
@@ -82,7 +82,7 @@ sudo ovnkube -k8s-kubeconfig $HOME/kubeconfig.yaml -loglevel=4 \
     -service-cluster-ip-range=172.16.1.0/24 \
     -cluster-subnet="192.168.0.0/16" 2>&1 &
 else
-sudo ovnkube -k8s-kubeconfig $HOME/kubeconfig.yaml -loglevel=4 \
+nohup sudo ovnkube -k8s-kubeconfig $HOME/kubeconfig.yaml -loglevel=4 \
     -logfile="/var/log/openvswitch/ovnkube.log" \
     -k8s-apiserver="http://$MASTER_OVERLAY_IP:8080" \
     -init-node="$MINION_NAME"  \
