@@ -4,12 +4,18 @@ package util
 
 import (
 	"fmt"
+	"io/ioutil"
 	"os"
 	"strings"
 	"syscall"
 
 	"github.com/sirupsen/logrus"
 	"github.com/vishvananda/netlink"
+)
+
+const (
+	ubuntuDefaultFile = "/etc/default/openvswitch-switch"
+	rhelDefaultFile   = "/etc/default/openvswitch"
 )
 
 func getBridgeName(iface string) string {
@@ -89,6 +95,55 @@ func saveRoute(iface, bridge netlink.Link, routes []netlink.Route) error {
 	return nil
 }
 
+func setupDefaultFile() {
+	platform, err := runningPlatform()
+	if err != nil {
+		logrus.Errorf("Failed to set OVS package default file (%v)", err)
+		return
+	}
+
+	var defaultFile, text string
+	if platform == ubuntu {
+		defaultFile = ubuntuDefaultFile
+		text = "OVS_CTL_OPTS=\"$OVS_CTL_OPTS --delete-transient-ports\""
+	} else if platform == rhel {
+		defaultFile = rhelDefaultFile
+		text = "OPTIONS=--delete-transient-ports"
+	} else {
+		return
+	}
+
+	fileContents, err := ioutil.ReadFile(defaultFile)
+	if err != nil {
+		logrus.Errorf("failed to parse file %s (%v)",
+			defaultFile, err)
+		return
+	}
+
+	ss := strings.Split(string(fileContents), "\n")
+	for _, line := range ss {
+		if strings.Contains(line, "--delete-transient-ports") {
+			// Nothing to do
+			return
+		}
+	}
+
+	// The defaultFile does not contain '--delete-transient-ports' set.
+	// We should set it.
+	f, err := os.OpenFile(defaultFile, os.O_APPEND|os.O_WRONLY, 0644)
+	if err != nil {
+		logrus.Errorf("failed to open %s to write (%v)", defaultFile, err)
+		return
+	}
+	defer f.Close()
+
+	if _, err = f.WriteString(text); err != nil {
+		logrus.Errorf("failed to write to %s (%v)",
+			defaultFile, err)
+		return
+	}
+}
+
 // NicToBridge creates a OVS bridge for the 'iface' and also moves the IP
 // address and routes of 'iface' to OVS bridge.
 func NicToBridge(iface string) error {
@@ -110,6 +165,8 @@ func NicToBridge(iface string) error {
 		return err
 	}
 	logrus.Infof("Successfully created OVS bridge %q", bridge)
+
+	setupDefaultFile()
 
 	// Get ip addresses and routes before any real operations.
 	addrs, err := netlink.AddrList(ifaceLink, syscall.AF_INET)

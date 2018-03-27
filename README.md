@@ -170,6 +170,17 @@ provide '-gateway-interface' and '-gateway-nexthop' as options. For e.g:
 -init-gateways -gateway-interface=enp0s9 -gateway-nexthop="$NEXTHOP"
 ```
 
+* For both the above cases, ovnkube will create a OVS bridge on top of
+your physical interface and move the IP address and route informations
+from the physical interface to OVS bridge.  If you are using Ubuntu
+and OVS startup scripts are systemd (e.g: there is a file called
+/lib/systemd/system/ovsdb-server.service) , you will have to add the
+following line to /etc/default/openvswitch
+
+```
+OPTIONS=--delete-transient-ports
+```
+
 * If you have a spare interface that you want to exclusively use for OVN
 gateway on a node, you also need to pass the -gateway-spare-interface option.
 Foe e.g:
