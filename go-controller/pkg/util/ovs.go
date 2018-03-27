@@ -58,7 +58,7 @@ func runningPlatform() (string, error) {
 	}
 
 	if strings.Contains(platform, "Fedora") ||
-		strings.Contains(platform, rhel) {
+		strings.Contains(platform, rhel) || strings.Contains(platform, "CentOS") {
 		return rhel, nil
 	} else if strings.Contains(platform, "Debian") ||
 		strings.Contains(platform, ubuntu) {
