@@ -106,7 +106,7 @@ func (oc *Controller) addNamespace(ns *kapi.Namespace) {
 
 	// Get all the pods in the namespace and append their IP to the
 	// address_set
-	existingPods, err := oc.Kube.GetPods(ns.Name)
+	existingPods, err := oc.kube.GetPods(ns.Name)
 	if err != nil {
 		logrus.Errorf("Failed to get all the pods (%v)", err)
 	} else {
