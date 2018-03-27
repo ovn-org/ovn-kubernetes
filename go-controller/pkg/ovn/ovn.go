@@ -100,22 +100,9 @@ func (oc *Controller) WatchPods() {
 			pod := obj.(*kapi.Pod)
 			oc.addLogicalPort(pod)
 		},
-		UpdateFunc: func(old, new interface{}) {
-		},
+		UpdateFunc: func(old, new interface{}) {},
 		DeleteFunc: func(obj interface{}) {
-			pod, ok := obj.(*kapi.Pod)
-			if !ok {
-				tombstone, ok := obj.(cache.DeletedFinalStateUnknown)
-				if !ok {
-					logrus.Errorf("couldn't get object from tombstone %+v", obj)
-					return
-				}
-				pod, ok = tombstone.Obj.(*kapi.Pod)
-				if !ok {
-					logrus.Errorf("tombstone contained object that is not a pod %#v", obj)
-					return
-				}
-			}
+			pod := obj.(*kapi.Pod)
 			oc.deleteLogicalPort(pod)
 		},
 	}, oc.syncPods)
@@ -125,24 +112,10 @@ func (oc *Controller) WatchPods() {
 // appropriate handler logic
 func (oc *Controller) WatchServices() {
 	oc.watchFactory.AddServiceHandler(cache.ResourceEventHandlerFuncs{
-		AddFunc: func(obj interface{}) {
-		},
-		UpdateFunc: func(old, new interface{}) {
-		},
+		AddFunc:    func(obj interface{}) {},
+		UpdateFunc: func(old, new interface{}) {},
 		DeleteFunc: func(obj interface{}) {
-			service, ok := obj.(*kapi.Service)
-			if !ok {
-				tombstone, ok := obj.(cache.DeletedFinalStateUnknown)
-				if !ok {
-					logrus.Errorf("couldn't get object from tombstone %+v", obj)
-					return
-				}
-				service, ok = tombstone.Obj.(*kapi.Service)
-				if !ok {
-					logrus.Errorf("tombstone contained object that is not a Service %#v", obj)
-					return
-				}
-			}
+			service := obj.(*kapi.Service)
 			oc.deleteService(service)
 		},
 	}, oc.syncServices)
@@ -177,19 +150,7 @@ func (oc *Controller) WatchEndpoints() {
 			}
 		},
 		DeleteFunc: func(obj interface{}) {
-			ep, ok := obj.(*kapi.Endpoints)
-			if !ok {
-				tombstone, ok := obj.(cache.DeletedFinalStateUnknown)
-				if !ok {
-					logrus.Errorf("couldn't get object from tombstone %+v", obj)
-					return
-				}
-				ep, ok = tombstone.Obj.(*kapi.Endpoints)
-				if !ok {
-					logrus.Errorf("tombstone contained object that is not a pod %#v", obj)
-					return
-				}
-			}
+			ep := obj.(*kapi.Endpoints)
 			err := oc.deleteEndpoints(ep)
 			if err != nil {
 				logrus.Errorf("Error in deleting endpoints - %v", err)
@@ -217,19 +178,7 @@ func (oc *Controller) WatchNetworkPolicy() {
 			return
 		},
 		DeleteFunc: func(obj interface{}) {
-			policy, ok := obj.(*kapisnetworking.NetworkPolicy)
-			if !ok {
-				tombstone, ok := obj.(cache.DeletedFinalStateUnknown)
-				if !ok {
-					logrus.Errorf("couldn't get object from tombstone %+v", obj)
-					return
-				}
-				policy, ok = tombstone.Obj.(*kapisnetworking.NetworkPolicy)
-				if !ok {
-					logrus.Errorf("tombstone contained object that is not a pod %#v", obj)
-					return
-				}
-			}
+			policy := obj.(*kapisnetworking.NetworkPolicy)
 			oc.deleteNetworkPolicy(policy)
 			return
 		},
@@ -250,19 +199,7 @@ func (oc *Controller) WatchNamespaces() {
 			return
 		},
 		DeleteFunc: func(obj interface{}) {
-			ns, ok := obj.(*kapi.Namespace)
-			if !ok {
-				tombstone, ok := obj.(cache.DeletedFinalStateUnknown)
-				if !ok {
-					logrus.Errorf("couldn't get object from tombstone %+v", obj)
-					return
-				}
-				ns, ok = tombstone.Obj.(*kapi.Namespace)
-				if !ok {
-					logrus.Errorf("tombstone contained object that is not a namespace %#v", obj)
-					return
-				}
-			}
+			ns := obj.(*kapi.Namespace)
 			oc.deleteNamespace(ns)
 			return
 		},

@@ -244,19 +244,7 @@ func (cluster *OvnClusterController) watchNodes() {
 		},
 		UpdateFunc: func(old, new interface{}) {},
 		DeleteFunc: func(obj interface{}) {
-			node, ok := obj.(*kapi.Node)
-			if !ok {
-				tombstone, ok := obj.(cache.DeletedFinalStateUnknown)
-				if !ok {
-					logrus.Errorf("couldn't get object from tombstone %+v", obj)
-					return
-				}
-				node, ok = tombstone.Obj.(*kapi.Node)
-				if !ok {
-					logrus.Errorf("tombstone contained object that is not a node %#v", obj)
-					return
-				}
-			}
+			node := obj.(*kapi.Node)
 			logrus.Debugf("Delete event for Node %q", node.Name)
 			err := cluster.deleteNode(node)
 			if err != nil {
