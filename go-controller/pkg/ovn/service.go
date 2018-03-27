@@ -169,7 +169,7 @@ func (ovn *Controller) deleteService(service *kapi.Service) {
 			targetPort = svcPort.Port
 		}
 
-		if service.Spec.Type == kapi.ServiceTypeNodePort && ovn.NodePortEnable {
+		if service.Spec.Type == kapi.ServiceTypeNodePort && ovn.nodePortEnable {
 			// Delete the 'NodePort' service from a load-balancer instantiated in gateways.
 			err := ovn.createGatewaysVIP(string(protocol), port, targetPort, ips)
 			if err != nil {

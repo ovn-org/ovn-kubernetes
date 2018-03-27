@@ -161,8 +161,7 @@ func runOvnKube(ctx *cli.Context) error {
 		}
 	}
 	if netController {
-		ovnController := ovn.NewOvnController(clientset, factory)
-		ovnController.NodePortEnable = nodePortEnable
+		ovnController := ovn.NewOvnController(clientset, factory, nodePortEnable)
 		ovnController.Run()
 	}
 	if master != "" || netController {

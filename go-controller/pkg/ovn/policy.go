@@ -830,7 +830,7 @@ func (oc *Controller) handleLocalPodSelectorDelFunc(
 func (oc *Controller) handleLocalPodSelector(
 	policy *kapisnetworking.NetworkPolicy, np *namespacePolicy) {
 
-	client, _ := oc.Kube.(*kube.Kube)
+	client, _ := oc.kube.(*kube.Kube)
 	clientset, _ := client.KClient.(*kubernetes.Clientset)
 	podSelectorAsSelector := metav1.FormatLabelSelector(
 		&policy.Spec.PodSelector)
@@ -870,7 +870,7 @@ func (oc *Controller) handlePeerPodSelector(
 	policy *kapisnetworking.NetworkPolicy, podSelector *metav1.LabelSelector,
 	addressSet string, addressMap map[string]bool, np *namespacePolicy) {
 
-	client, _ := oc.Kube.(*kube.Kube)
+	client, _ := oc.kube.(*kube.Kube)
 	clientset, _ := client.KClient.(*kubernetes.Clientset)
 	podSelectorAsSelector := metav1.FormatLabelSelector(podSelector)
 	if podSelectorAsSelector == emptyLabelSelector {
@@ -1005,7 +1005,7 @@ func (oc *Controller) handlePeerNamespaceSelector(
 	namespaceSelector *metav1.LabelSelector,
 	gress *gressPolicy, gressNum int, policyType string, np *namespacePolicy) {
 
-	client, _ := oc.Kube.(*kube.Kube)
+	client, _ := oc.kube.(*kube.Kube)
 	clientset, _ := client.KClient.(*kubernetes.Clientset)
 	nsSelectorAsSelector := metav1.FormatLabelSelector(
 		namespaceSelector)

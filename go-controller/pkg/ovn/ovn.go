@@ -15,8 +15,8 @@ import (
 // Controller structure is the object which holds the controls for starting
 // and reacting upon the watched resources (e.g. pods, endpoints)
 type Controller struct {
-	Kube           kube.Interface
-	NodePortEnable bool
+	kube           kube.Interface
+	nodePortEnable bool
 	watchFactory   *factory.WatchFactory
 
 	gatewayCache map[string]string
@@ -66,9 +66,9 @@ const (
 
 // NewOvnController creates a new OVN controller for creating logical network
 // infrastructure and policy
-func NewOvnController(kubeClient kubernetes.Interface, wf *factory.WatchFactory) *Controller {
+func NewOvnController(kubeClient kubernetes.Interface, wf *factory.WatchFactory, nodePortEnable bool) *Controller {
 	return &Controller{
-		Kube:                     &kube.Kube{KClient: kubeClient},
+		kube:                     &kube.Kube{KClient: kubeClient},
 		watchFactory:             wf,
 		logicalSwitchCache:       make(map[string]bool),
 		logicalPortCache:         make(map[string]string),
@@ -80,6 +80,7 @@ func NewOvnController(kubeClient kubernetes.Interface, wf *factory.WatchFactory)
 		lspMutex:                 &sync.Mutex{},
 		gatewayCache:             make(map[string]string),
 		loadbalancerClusterCache: make(map[string]string),
+		nodePortEnable:           nodePortEnable,
 	}
 }
 

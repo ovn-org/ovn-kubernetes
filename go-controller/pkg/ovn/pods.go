@@ -150,7 +150,7 @@ func (oc *Controller) addLogicalPort(pod *kapi.Pod) {
 			time.Sleep(1 * time.Second)
 		}
 		count--
-		p, err := oc.Kube.GetPod(pod.Namespace, pod.Name)
+		p, err := oc.kube.GetPod(pod.Namespace, pod.Name)
 		if err != nil {
 			logrus.Errorf("Could not get pod %s/%s for obtaining the logical switch it belongs to", pod.Namespace, pod.Name)
 			continue
@@ -215,7 +215,7 @@ func (oc *Controller) addLogicalPort(pod *kapi.Pod) {
 
 	annotation := fmt.Sprintf(`{\"ip_address\":\"%s/%s\", \"mac_address\":\"%s\", \"gateway_ip\": \"%s\"}`, addresses[1], mask, addresses[0], gatewayIP)
 	logrus.Debugf("Annotation values: ip=%s/%s ; mac=%s ; gw=%s\nAnnotation=%s", addresses[1], mask, addresses[0], gatewayIP, annotation)
-	err = oc.Kube.SetAnnotationOnPod(pod, "ovn", annotation)
+	err = oc.kube.SetAnnotationOnPod(pod, "ovn", annotation)
 	if err != nil {
 		logrus.Errorf("Failed to set annotation on pod %s - %v", pod.Name, err)
 	}

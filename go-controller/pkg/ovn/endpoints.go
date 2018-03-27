@@ -11,7 +11,7 @@ import (
 func (ovn *Controller) addEndpoints(ep *kapi.Endpoints) error {
 	// get service
 	// TODO: cache the service
-	svc, err := ovn.Kube.GetService(ep.Namespace, ep.Name)
+	svc, err := ovn.kube.GetService(ep.Namespace, ep.Name)
 	if err != nil {
 		// This is not necessarily an error. For e.g when there are endpoints
 		// without a corresponding service.
@@ -46,7 +46,7 @@ func (ovn *Controller) addEndpoints(ep *kapi.Endpoints) error {
 	for targetPort, ips := range tcpPortMap {
 		for _, svcPort := range svc.Spec.Ports {
 			if svcPort.Protocol == kapi.ProtocolTCP && svcPort.TargetPort.IntVal == targetPort {
-				if svc.Spec.Type == kapi.ServiceTypeNodePort && ovn.NodePortEnable {
+				if svc.Spec.Type == kapi.ServiceTypeNodePort && ovn.nodePortEnable {
 					logrus.Debugf("Creating Gateways IP for NodePort: %d, %d, %v", svcPort.NodePort, targetPort, ips)
 					err = ovn.createGatewaysVIP(string(svcPort.Protocol), svcPort.NodePort, targetPort, ips)
 					if err != nil {
@@ -67,7 +67,7 @@ func (ovn *Controller) addEndpoints(ep *kapi.Endpoints) error {
 	for targetPort, ips := range udpPortMap {
 		for _, svcPort := range svc.Spec.Ports {
 			if svcPort.Protocol == kapi.ProtocolUDP && svcPort.TargetPort.IntVal == targetPort {
-				if svc.Spec.Type == kapi.ServiceTypeNodePort && ovn.NodePortEnable {
+				if svc.Spec.Type == kapi.ServiceTypeNodePort && ovn.nodePortEnable {
 					err = ovn.createGatewaysVIP(string(svcPort.Protocol), svcPort.NodePort, targetPort, ips)
 					if err != nil {
 						logrus.Errorf("Error in creating Node Port for svc %s, node port: %d - %v\n", svc.Name, svcPort.NodePort, err)
@@ -87,7 +87,7 @@ func (ovn *Controller) addEndpoints(ep *kapi.Endpoints) error {
 }
 
 func (ovn *Controller) deleteEndpoints(ep *kapi.Endpoints) error {
-	svc, err := ovn.Kube.GetService(ep.Namespace, ep.Name)
+	svc, err := ovn.kube.GetService(ep.Namespace, ep.Name)
 	if err != nil {
 		// This is not necessarily an error. For e.g when a service is deleted,
 		// you will get endpoint delete event and the call to fetch service
