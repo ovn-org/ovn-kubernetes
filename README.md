@@ -157,6 +157,21 @@ sudo ovnkube -k8s-kubeconfig kubeconfig.yaml -loglevel=4 \
     -sb-address="tcp://$CENTRAL_IP:6632" -k8s-token="$TOKEN" \
     -init-gateways \
     -service-cluster-ip-range=$SERVICE_IP_SUBNET \
+    -cluster-subnet=$CLUSTER_IP_SUBNET 2>&1
+```
+
+You can run the above command in the background instead, with:
+
+```
+nohup sudo ovnkube -k8s-kubeconfig kubeconfig.yaml -loglevel=4 \
+    -logfile="/var/log/openvswitch/ovnkube.log" \
+    -k8s-apiserver="http://$CENTRAL_IP:8080" \
+    -init-node="$NODE_NAME"  \
+    -nodeport \
+    -nb-address="tcp://$CENTRAL_IP:6631" \
+    -sb-address="tcp://$CENTRAL_IP:6632" -k8s-token="$TOKEN" \
+    -init-gateways \
+    -service-cluster-ip-range=$SERVICE_IP_SUBNET \
     -cluster-subnet=$CLUSTER_IP_SUBNET 2>&1 &
 ```
 
