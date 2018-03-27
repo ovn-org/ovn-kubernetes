@@ -98,20 +98,6 @@ uses the hostname.  kubelet allows this name to be overridden with
 --service-cluster-ip-range option. An e.g is 172.16.1.0/24.
 
 ```
- sudo ovnkube -k8s-kubeconfig kubeconfig.yaml -net-controller \
- -loglevel=4 \
- -k8s-apiserver="http://$CENTRAL_IP:8080" \
- -logfile="/var/log/openvswitch/ovnkube.log" \
- -init-master=$NODE_NAME -cluster-subnet="$CLUSTER_IP_SUBNET" \
- -service-cluster-ip-range=$SERVICE_IP_SUBNET \
- -nodeport \
- -nb-address="tcp://$CENTRAL_IP:6631" \
- -sb-address="tcp://$CENTRAL_IP:6632"
-```
-
-You can run the above command in the background instead, with:
-
-```
  nohup sudo ovnkube -k8s-kubeconfig kubeconfig.yaml -net-controller \
  -loglevel=4 \
  -k8s-apiserver="http://$CENTRAL_IP:8080" \
@@ -122,6 +108,9 @@ You can run the above command in the background instead, with:
  -nb-address="tcp://$CENTRAL_IP:6631" \
  -sb-address="tcp://$CENTRAL_IP:6632" 2>&1 &
 ```
+
+Note: Make sure to read /var/log/openvswitch/ovnkube.log to see that there were
+no obvious errors with argument passing.
 
 If you want to use SSL instead of TCP for OVN databases, please read
 [INSTALL.SSL.md].
@@ -148,7 +137,7 @@ the k8s cluster, you can skip providing the '-nodeport' option with the
 below command.
 
 ```
-sudo ovnkube -k8s-kubeconfig kubeconfig.yaml -loglevel=4 \
+nohup sudo ovnkube -k8s-kubeconfig kubeconfig.yaml -loglevel=4 \
     -logfile="/var/log/openvswitch/ovnkube.log" \
     -k8s-apiserver="http://$CENTRAL_IP:8080" \
     -init-node="$NODE_NAME"  \
@@ -159,6 +148,9 @@ sudo ovnkube -k8s-kubeconfig kubeconfig.yaml -loglevel=4 \
     -service-cluster-ip-range=$SERVICE_IP_SUBNET \
     -cluster-subnet=$CLUSTER_IP_SUBNET 2>&1 &
 ```
+
+Note: Make sure to read /var/log/openvswitch/ovnkube.log to see that there were
+no obvious errors with argument passing.
 
 Notes on gateway nodes:
 
