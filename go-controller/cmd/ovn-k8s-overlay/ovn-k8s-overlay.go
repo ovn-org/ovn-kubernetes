@@ -12,7 +12,7 @@ func main() {
 	c := cli.NewApp()
 	c.Name = "ovn-k8s-overlay"
 	c.Usage = "run ovn-k8s-overlay to init master, minion, gateway"
-	c.Version = "0.0.1"
+	c.Version = "0.0.2"
 
 	c.Commands = []cli.Command{
 		app.InitGatewayCmd,

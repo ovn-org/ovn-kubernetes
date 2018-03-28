@@ -12,7 +12,7 @@ func main() {
 	c := cli.NewApp()
 	c.Name = "ovn-kube-util"
 	c.Usage = "Utils for kubernetes ovn"
-	c.Version = "0.0.1"
+	c.Version = "0.0.2"
 
 	c.Commands = []cli.Command{
 		app.NicsToBridgeCommand,

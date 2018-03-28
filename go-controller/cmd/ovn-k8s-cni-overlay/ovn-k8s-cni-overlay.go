@@ -148,7 +148,7 @@ func main() {
 	c := cli.NewApp()
 	c.Name = "ovn-k8s-cni-overlay"
 	c.Usage = "a CNI plugin to set up or tear down a container's network with OVN"
-	c.Version = "0.0.1"
+	c.Version = "0.0.2"
 	c.Flags = config.Flags
 	c.Action = func(ctx *cli.Context) error {
 		if err := config.InitConfig(ctx, &config.Defaults{
