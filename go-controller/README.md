@@ -18,6 +18,15 @@ Then find the executables here : go-controller/_output/go/bin/
 
 'ovn-k8s-cni-overlay' is the cni executable to be placed in /opt/cni/bin (or another directory in which kubernetes will look for the plugin) so that it can be invoked for each pod event by kubernetes
 
+To get the Windows version of 'ovnkube' and 'ovn-k8s-cni-overlay' run the following:
+```
+cd go-controller
+make clean
+make windows
+```
+
+Then find the executables here : go-controller/_output/go/windows/
+
 ### Usage
 
 Run the 'ovnkube' executable to initialize master, node(s) and as the central all-in-one controller that builds the network as pods/services/ingress objects are born in kubernetes.
