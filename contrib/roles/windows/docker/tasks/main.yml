@@ -1,0 +1,18 @@
+---
+- name: Docker | include vars
+  include_vars: "{{ ansible_os_family|lower }}.yml"
+  tags:
+    - facts
+
+- name: Docker | Install required features
+  include_tasks: "./requirements-16299.yaml"
+  when: ansible_kernel == "10.0.16299.0"
+
+- name: Docker | Check if docker is installed
+  win_service:
+    name: docker
+  register: docker_service
+
+- name: Docker | Get Docker binaries
+  include_tasks: ./install_docker.yml
+  when: not docker_service.exists

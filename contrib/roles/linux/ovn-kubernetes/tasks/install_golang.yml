@@ -1,0 +1,25 @@
+---
+- name: golang | Detecting golang architecture
+  set_fact:
+    golang_arch: "amd64"
+  when: ansible_architecture == "x86_64"
+
+- name: golang | Detecting golang architecture
+  set_fact:
+    golang_arch: "386"
+  when: ansible_architecture != "x86_64"
+
+- name: golang | get go1.9.4.{{ansible_system | lower}}-{{golang_arch}}.tar.gz
+  get_url:
+    url: "https://dl.google.com/go/go1.9.4.{{ansible_system | lower}}-{{golang_arch}}.tar.gz"
+    dest: "/tmp/go1.9.4.tar.gz"
+    force_basic_auth: yes
+    mode: 0755
+    timeout: 30
+  retries: 3
+
+- name: golang | Install golang
+  unarchive:
+    src: "/tmp/go1.9.4.tar.gz"
+    dest: "/usr/local/"
+    remote_src: yes

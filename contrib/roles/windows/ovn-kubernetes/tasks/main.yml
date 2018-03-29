@@ -1,0 +1,7 @@
+---
+- name: ovn-kubernetes | include vars
+  include_vars: "{{ ansible_os_family|lower }}.yml"
+  tags:
+    - facts
+
+- include_tasks: ./distribute_binaries.yml

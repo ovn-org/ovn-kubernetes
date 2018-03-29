@@ -1,0 +1,10 @@
+[kube-master]
+node1
+
+[kube-minions-linux]
+node2
+node3
+
+[kube-minions-windows]
+node4
+node5

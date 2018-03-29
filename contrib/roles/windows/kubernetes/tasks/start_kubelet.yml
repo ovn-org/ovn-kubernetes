@@ -1,0 +1,50 @@
+---
+- name: Kubelet | Delete kubeconfig
+  win_file:
+    path: "{{ install_info.install_path }}/kubeconfig.yaml"
+    state: absent
+- name: Kubelet | Create kubeconfig
+  win_lineinfile:
+    path: "{{ install_info.install_path }}/kubeconfig.yaml"
+    create: yes
+    line: |
+      apiVersion: v1
+      kind: Config
+      clusters:
+      - name: local
+        cluster:
+          server: http://{{ kubernetes_info.MASTER_IP }}:8080
+      users:
+      - name: kubelet
+      contexts:
+      - context:
+          cluster: local
+          user: kubelet
+        name: kubelet-context
+      current-context: kubelet-context
+    newline: unix
+
+- name: Kubelet | Create Kubelet service
+  win_service:
+    name: kubelet
+    path: '"{{ install_info.install_path }}\\servicewrapper.exe" kubelet "{{ install_info.install_path }}\\kubelet.exe" --hostname-override="{{ ansible_hostname }}" --cluster-dns="{{ kubernetes_info.K8S_DNS_SERVICE_IP }}" --cluster-domain="{{ kubernetes_info.K8S_DNS_DOMAIN }}" --pod-infra-container-image="{{kubernetes_info.infracontainername_1709}}" --resolv-conf="" --kubeconfig="{{ install_info.install_path }}\\kubeconfig.yaml" --network-plugin=cni --cni-bin-dir="{{ install_info.install_path }}\\cni" --cni-conf-dir="{{ install_info.install_path }}\\cni" --log-dir="{{ install_info.install_path }}"'
+    display_name: Kubernetes Kubelet
+    description: Kubernetes Kubelet service
+    username: LocalSystem
+    password: ""
+
+- name: Kubelet | Set kubectl context
+  win_shell: |
+    {{ install_info.install_path }}\\kubectl.exe config set-cluster default-cluster --server={{ kubernetes_info.MASTER_IP }}:8080
+    {{ install_info.install_path }}\\kubectl.exe config set-context local --cluster=default-cluster --user=default-admin
+    {{ install_info.install_path }}\\kubectl.exe config use-context local
+
+# Start the kubelet to ensure OVN gives subnet to this minion
+- name: Kubelet | Start service kubelet
+  win_service:
+    name: kubelet
+    state: started
+
+- name: Kubelet | Wait 15 seconds for kubelet to register this node
+  pause:
+    seconds: 15

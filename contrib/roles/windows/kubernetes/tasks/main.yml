@@ -1,0 +1,60 @@
+---
+- name: Kubernetes | include global vars for minions
+  include_vars: "{{ansible_tmp_dir}}/generated_global_vars.yml"
+  when: not master
+
+- name: Kubernetes | include vars
+  include_vars: "{{ ansible_os_family|lower }}.yml"
+  tags:
+    - facts
+
+- include_tasks: set_ip_facts.yml
+  tags:
+    - facts
+
+- name: Kubernetes | check if Kubelet is installed
+  win_service:
+    name: kubelet
+  register: kubelet_service
+
+# We need to start kubelet in order to be able to retrieve the ovn_host_subnet from kubernetes
+# node annotations
+- include_tasks: ./start_kubelet.yml
+  when: not kubelet_service.exists
+
+- include_tasks: ./get_ovn_subnet.yml
+  tags:
+    - facts
+
+- name: Kubernetes | Check if transparent network was created
+  win_shell: "docker network inspect {{ docker_info.docker_network_name }}"
+  register: transparent_inspect
+  failed_when: transparent_inspect.rc != 0 and transparent_inspect.rc != 1
+  changed_when: false
+
+- include_tasks: ./setup_docker.yml
+  when: transparent_inspect.rc != 0
+
+# This creates a startup script which will be added to run once at login time.
+# This is due to the fact that connection drops while doing the initial setup
+# and it's safer to have everything inside a powershell script to run.
+- include_tasks: ./setup_ovs_docker.yml
+  when: transparent_inspect.rc != 0
+
+# This will create another powershell script for minion init. OVS on Windows
+# does not allow any commands to be ran through network. Ansible uses WinRM
+# for the connection.
+- include_tasks: ./run_minion_init.yml
+  when: transparent_inspect.rc != 0
+
+# There is no infra container for Windows Server 1709, this creates a custom
+# infra container
+- name: Kubernetes | Check if infra container exists
+  win_shell: "docker image inspect {{kubernetes_info.infracontainername_1709}}"
+  register: infra_inspect
+  failed_when: infra_inspect.rc != 0 and infra_inspect.rc != 1
+  changed_when: false
+  when: ansible_kernel == "10.0.16299.0"
+
+- include_tasks: ./create_infracontainer.yml
+  when: infra_inspect.rc != 0 and ansible_kernel == "10.0.16299.0"

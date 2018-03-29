@@ -1,0 +1,4 @@
+---
+download_info:
+  service_wrapper_link: https://docs.google.com/uc?export=download&id=1uqUHyM4F-zMlTBdkWmG9j8aSV6Yux6f9
+  install_path: "{{install_path | default('C:/kubernetes')}}"

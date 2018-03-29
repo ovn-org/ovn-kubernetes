@@ -1,0 +1,20 @@
+---
+install_info:
+  install_path: C:/kubernetes
+
+docker_info:
+  docker_network_name: external
+
+kubernetes_info:
+  MASTER_IP: "{{MASTER_IP}}"
+  CLUSTER_SUBNET: "{{CLUSTER_SUBNET | default('10.0.0.0/16')}}"
+  MASTER_INTERNAL_IP: "{{MASTER_INTERNAL_IP | default('10.0.0.2')}}" # Will always be the second IP of CLUSTER_SUBNET
+  SERVICE_CLUSTER_IP_RANGE: "{{SERVICE_CLUSTER_IP_RANGE | default('10.0.9.0/24')}}"
+  K8S_DNS_DOMAIN: "{{K8S_DNS_DOMAIN | default('cluster.local')}}"
+  K8S_DNS_SERVICE_IP: "{{K8S_DNS_SERVICE_IP | default('10.0.9.10')}}"
+  K8S_API_SERVICE_IP: "{{K8S_API_SERVICE_IP | default('10.0.9.1')}}"
+  infracontainername_1709: "ovnkubernetes/pause"
+
+host_info:
+  username: "{{ ansible_user }}"
+  password: "{{ ansible_password }}"

@@ -1,0 +1,54 @@
+---
+# Interface index changes after docker was installed, gather the facts again
+# to have the information up to date
+- name: IP facts | do facts module to get latest information
+  setup:
+
+- name: IP facts | set internal IP
+  set_fact:
+    host_internal_ip: "{{ ansible_ip_addresses[0] }}"
+
+# TODO: enable this for future GCE support in the playbooks
+# - name: IP facts | set public IP
+#   set_fact:
+#     host_public_ip: "{{ ansible_ip_addresses[0] }}"
+#   when: GCE
+
+- name: IP facts | set public IP
+  set_fact:
+    host_public_ip: "{{ ansible_ip_addresses[0] }}"
+  # when: not GCE
+
+- name: IP facts | set interface details
+  set_fact:
+    interface_description: "{{ ansible_interfaces[0].interface_name }}"
+    interface_mac_addr: "{{ ansible_interfaces[0].macaddress }}"
+    interface_default_gateway: "{{ ansible_interfaces[0].default_gateway }}"
+    interface_index: "{{ ansible_interfaces[0].interface_index }}"
+
+# Do not mark those as changed when executing the command
+- name: IP facts | Get Windows Prefix Length of {{interface_description}}
+  win_shell: (Get-NetIPAddress -InterfaceIndex "{{interface_index}}" -AddressFamily IPv4 -ErrorAction SilentlyContinue).PrefixLength
+  register: prefix_length_interface
+  changed_when: false
+
+- name: IP facts | Get Windows Interface name of {{interface_description}}
+  win_shell: (Get-NetAdapter -InterfaceIndex "{{interface_index}}" -ErrorAction SilentlyContinue).Name
+  register: interface_out_name
+  changed_when: false
+
+- name: IP facts | set interface details
+  set_fact:
+    interface_prefix_length: "{{prefix_length_interface.stdout | trim}}"
+
+- name: IP facts | set interface name
+  set_fact:
+    interface_name: "{{interface_out_name.stdout | trim}}"
+
+- debug: var=interface_mac_addr
+- debug: var=interface_default_gateway
+- debug: var=interface_index
+- debug: var=host_internal_ip
+- debug: var=host_public_ip
+- debug: var=interface_prefix_length
+- debug: var=interface_name

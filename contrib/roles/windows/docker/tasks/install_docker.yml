@@ -1,0 +1,43 @@
+---
+# TODO: Fix this, always fails the first time
+- name: Docker | Download latest docker
+  win_get_url:
+    url: https://download.docker.com/win/static/test/x86_64/docker-{{ docker_download_info.docker_version }}.zip
+    dest: "{{ docker_download_info.temp_dir }}/docker-{{ docker_download_info.docker_version }}.zip"
+    timeout: 60
+  retries: 3
+  ignore_errors: yes
+
+- name: Docker | Download latest docker
+  win_get_url:
+    url: https://download.docker.com/win/static/test/x86_64/docker-{{ docker_download_info.docker_version }}.zip
+    dest: "{{ docker_download_info.temp_dir }}/docker-{{ docker_download_info.docker_version }}.zip"
+    timeout: 60
+  retries: 3
+
+- name: Docker | Unzip docker
+  win_unzip:
+    src: "{{ docker_download_info.temp_dir }}/docker-{{ docker_download_info.docker_version }}.zip"
+    dest: "{{ docker_download_info.install_dir }}"
+
+- name: Docker | Remove docker zip
+  win_file:
+    path: "{{ docker_download_info.temp_dir }}/docker-{{ docker_download_info.docker_version }}.zip"
+    state: absent
+
+- name: Docker | Add docker to path
+  win_path:
+    elements: "{{ docker_download_info.install_dir }}/docker"
+    scope: machine
+    state: present
+
+- name: Docker | Register docker Get-Service
+  win_shell: dockerd --register-service
+
+- name: Docker | Start docker service
+  win_service:
+    name: docker
+    state: started
+
+- name: Docker | Reboot computer to update Path with docker
+  win_reboot:

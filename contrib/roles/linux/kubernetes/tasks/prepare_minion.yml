@@ -1,0 +1,107 @@
+---
+- name: Kubernetes Minion | Setting OVN external_ids
+  shell: |
+    ovs-vsctl set Open_vSwitch . external_ids:ovn-remote="tcp:{{ kubernetes_cluster_info.MASTER_IP }}:6642" \
+      external_ids:ovn-nb="tcp:{{ kubernetes_cluster_info.MASTER_IP }}:6641" \
+      external_ids:ovn-encap-ip="{{ host_public_ip }}" \
+      external_ids:ovn-encap-type="geneve"
+
+- stat:
+    path: /etc/kubernetes/tls/ca.pem
+  register: certs_check
+
+- include_tasks: ./generate_certs_minion.yml
+  when: not certs_check.stat.exists
+
+- file:
+    path: /etc/systemd/system/kubelet.service
+    state: absent
+- name: Kubernetes Minion | Create service kubelet
+  lineinfile:
+    path: /etc/systemd/system/kubelet.service
+    create: yes
+    line: |
+      [Unit]
+      Description=Kubelet Server
+      Documentation=https://github.com/GoogleCloudPlatform/kubernetes
+      [Service]
+      ExecStart=/usr/bin/kubelet \
+        --network-plugin=cni \
+        --allow-privileged=true \
+        --hostname-override={{ ansible_hostname }} \
+        --cluster-dns={{ kubernetes_cluster_info.K8S_DNS_SERVICE_IP }} \
+        --cluster-domain={{ kubernetes_cluster_info.K8S_DNS_DOMAIN }} \
+        --cni-bin-dir=/opt/cni/bin \
+        --cni-conf-dir=/etc/cni/net.d \
+        --kubeconfig=/etc/kubernetes/kubeconfig.yaml \
+        --tls-cert-file=/etc/kubernetes/tls/node.pem \
+        --tls-private-key-file=/etc/kubernetes/tls/node-key.pem \
+        --fail-swap-on=false
+      Restart=on-failure
+      RestartSec=10
+      WorkingDirectory=/root/
+      [Install]
+      WantedBy=multi-user.target
+
+- name: Kubernetes Minion | start kubelet
+  service:
+    name: "kubelet"
+    enabled: yes
+    state: restarted
+    daemon_reload: yes
+
+- name: Kubernetes Minion | Setting kubectl context
+  shell: |
+    kubectl config set-cluster default-cluster --server=https://{{ kubernetes_cluster_info.MASTER_IP }} --certificate-authority=/etc/kubernetes/tls/ca.pem
+    kubectl config set-credentials default-admin --certificate-authority=/etc/kubernetes/tls/ca.pem --client-key=/etc/kubernetes/tls/node-key.pem --client-certificate=/etc/kubernetes/tls/node.pem
+    kubectl config set-context local --cluster=default-cluster --user=default-admin
+    kubectl config use-context local
+
+- name: Kubernetes Minion | Prepare OVN certs
+  shell: |
+    ovs-vsctl set Open_vSwitch . \
+      external_ids:k8s-api-server="http://{{ host_public_ip }}:8080" \
+      external_ids:k8s-api-token="{{TOKEN}}"
+
+    ln -fs /etc/kubernetes/tls/ca.pem /etc/openvswitch/k8s-ca.crt
+
+- name: Kubernetes Minion | Ensure /etc/hosts is updated
+  lineinfile:
+    path: /etc/hosts
+    line: "{{ host_public_ip }} {{ ansible_hostname }}"
+
+- name: Kubernetes Minion | Create CNI binaries folder
+  file:
+    path: "/opt/cni/bin"
+    state: directory
+    mode: 0755
+
+- name: Kubernetes Minion | get cni archive
+  get_url:
+    url: "{{kubernetes_binaries_info.cni_linux_download_link}}"
+    dest: "/opt/cni/bin/cni.tgz"
+    force_basic_auth: yes
+    timeout: 30
+  retries: 3
+
+- name: Kubernetes Minion | unarchive tar.gz
+  unarchive:
+    src: "/opt/cni/bin/cni.tgz"
+    dest: "/opt/cni/bin/"
+    remote_src: yes
+
+- name: Kubernetes Minion | Minion init
+  shell: |
+    /usr/bin/ovnkube \
+        --init-node "{{ ansible_hostname }}" \
+        --cluster-subnet "{{ kubernetes_cluster_info.CLUSTER_SUBNET }}" \
+        --k8s-token {{TOKEN}} \
+        --k8s-cacert /etc/openvswitch/k8s-ca.crt \
+        --k8s-apiserver "http://{{ kubernetes_cluster_info.MASTER_IP }}:8080" \
+        --nb-address tcp://{{ kubernetes_cluster_info.MASTER_IP }}:6641 \
+        --sb-address tcp://{{ kubernetes_cluster_info.MASTER_IP }}:6642
+  when: not init_gateway
+
+- name: Kubernetes Minion | Minion init with gateway
+  include_tasks: ./init_gateway.yml
+  when: init_gateway

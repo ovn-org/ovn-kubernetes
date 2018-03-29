@@ -1,0 +1,59 @@
+---
+- name: Kubernetes bins | create temp directory
+  file:
+    path: "{{ kubernetes_binaries_info.tmp_download_path }}"
+    state: directory
+    mode: 0755
+
+- name: Kubernetes bins | get kubernetes.tar.gz archive
+  get_url:
+    url: "{{ kubernetes_binaries_info.kubernetes_targz_link }}"
+    dest: "{{ kubernetes_binaries_info.tmp_download_path }}/kubernetes.tar.gz"
+    force_basic_auth: yes
+    timeout: 30
+  retries: 3
+
+- name: Kubernetes bins | unarchive tar.gz
+  unarchive:
+    src: "{{ kubernetes_binaries_info.tmp_download_path }}/kubernetes.tar.gz"
+    dest: "{{ kubernetes_binaries_info.tmp_download_path }}"
+    remote_src: yes
+
+- name: Kubernetes bins | download kubernetes binaries
+  action: shell yes | "{{ kubernetes_binaries_info.tmp_download_path }}/kubernetes/cluster/get-kube-binaries.sh"
+
+- name: Kubernetes bins | unarchive binaries
+  unarchive:
+    src: "{{ kubernetes_binaries_info.tmp_download_path }}/kubernetes/server/kubernetes-server-linux-amd64.tar.gz"
+    dest: "{{ kubernetes_binaries_info.tmp_download_path }}/kubernetes/server"
+    remote_src: yes
+
+- name: Kubernetes bins | install Linux master binaries
+  copy:
+    src: "{{ kubernetes_binaries_info.tmp_download_path }}/kubernetes/server/kubernetes/server/bin/{{item}}"
+    dest: "{{ kubernetes_binaries_info.install_path }}/{{item}}"
+    owner: root
+    group: root
+    mode: 0755
+    remote_src: yes
+  with_items:
+    - kube-apiserver
+    - kube-scheduler
+    - kube-controller-manager
+    - kubelet
+    - kube-proxy
+    - kubectl
+
+- name: Kubernetes bins | downloading Windows binaries
+  get_url:
+    url: "{{ kubernetes_binaries_info.windows_bins_link }}"
+    dest: "{{ kubernetes_binaries_info.tmp_download_path }}/winbins.tar.gz"
+    force_basic_auth: yes
+    timeout: 30
+  retries: 3
+
+- name: Kubernetes bins | unarchive Windows binaries
+  unarchive:
+    src: "{{ kubernetes_binaries_info.tmp_download_path }}/winbins.tar.gz"
+    dest: "{{ kubernetes_binaries_info.tmp_download_path }}/"
+    remote_src: yes

@@ -1,0 +1,39 @@
+---
+- name: Kubernetes global vars | Delete global vars
+  file:
+    path: "/tmp/generated_global_vars.yml"
+    state: absent
+  changed_when: false
+
+- name: Kubernetes global vars | Fetch Token
+  shell: kubectl describe secret $(kubectl get secrets | grep default | cut -f1 -d ' ') | grep -E '^token' | cut -f2 -d':' | tr -d '\t'
+  register: fetch_token
+  changed_when: false
+
+- name: Kubernetes global vars | Register Token
+  set_fact:
+    TOKEN: "{{fetch_token.stdout | trim}}"
+
+- name: Kubernetes global vars | Fetch global variables
+  lineinfile:
+    path: "/tmp/generated_global_vars.yml"
+    create: yes
+    line: |
+      ---
+      MASTER_IP: {{host_public_ip}}
+      MASTER_INTERNAL_IP_OVN: {{MASTER_INTERNAL_IP}}
+      MASTER_INTERNAL_IP: {{host_internal_ip}}
+      TOKEN: {{TOKEN}}
+      CLUSTER_SUBNET: {{CLUSTER_SUBNET}}
+      SERVICE_CLUSTER_IP_RANGE: {{SERVICE_CLUSTER_IP_RANGE}}
+      K8S_DNS_DOMAIN: {{K8S_DNS_DOMAIN}}
+      K8S_DNS_SERVICE_IP: {{K8S_DNS_SERVICE_IP}}
+      K8S_API_SERVICE_IP: {{K8S_API_SERVICE_IP}}
+  changed_when: false
+
+- name: Kubernetes global vars | Fetch vars
+  fetch:
+    fail_on_missing: yes
+    flat: yes
+    src: /tmp/generated_global_vars.yml
+    dest: "{{ansible_tmp_dir}}/generated_global_vars.yml"

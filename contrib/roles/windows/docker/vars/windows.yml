@@ -1,0 +1,5 @@
+---
+docker_download_info:
+  temp_dir: "{{docker_temp_dir | default('C:/Windows/Temp')}}"
+  docker_version: "{{docker_version | default('17.10.0-ce')}}"
+  install_dir: C:/Program Files
