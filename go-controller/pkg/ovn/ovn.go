@@ -85,17 +85,18 @@ func NewOvnController(kubeClient kubernetes.Interface, wf *factory.WatchFactory,
 }
 
 // Run starts the actual watching. Also initializes any local structures needed.
-func (oc *Controller) Run() {
-	oc.WatchPods()
-	oc.WatchServices()
-	oc.WatchEndpoints()
-	oc.WatchNamespaces()
-	oc.WatchNetworkPolicy()
+func (oc *Controller) Run() error {
+	for _, f := range []func() error{oc.WatchPods, oc.WatchServices, oc.WatchEndpoints, oc.WatchNamespaces, oc.WatchNetworkPolicy} {
+		if err := f(); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 // WatchPods starts the watching of Pod resource and calls back the appropriate handler logic
-func (oc *Controller) WatchPods() {
-	oc.watchFactory.AddPodHandler(cache.ResourceEventHandlerFuncs{
+func (oc *Controller) WatchPods() error {
+	_, err := oc.watchFactory.AddPodHandler(cache.ResourceEventHandlerFuncs{
 		AddFunc: func(obj interface{}) {
 			pod := obj.(*kapi.Pod)
 			oc.addLogicalPort(pod)
@@ -106,12 +107,13 @@ func (oc *Controller) WatchPods() {
 			oc.deleteLogicalPort(pod)
 		},
 	}, oc.syncPods)
+	return err
 }
 
 // WatchServices starts the watching of Service resource and calls back the
 // appropriate handler logic
-func (oc *Controller) WatchServices() {
-	oc.watchFactory.AddServiceHandler(cache.ResourceEventHandlerFuncs{
+func (oc *Controller) WatchServices() error {
+	_, err := oc.watchFactory.AddServiceHandler(cache.ResourceEventHandlerFuncs{
 		AddFunc:    func(obj interface{}) {},
 		UpdateFunc: func(old, new interface{}) {},
 		DeleteFunc: func(obj interface{}) {
@@ -119,11 +121,12 @@ func (oc *Controller) WatchServices() {
 			oc.deleteService(service)
 		},
 	}, oc.syncServices)
+	return err
 }
 
 // WatchEndpoints starts the watching of Endpoint resource and calls back the appropriate handler logic
-func (oc *Controller) WatchEndpoints() {
-	oc.watchFactory.AddEndpointHandler(cache.ResourceEventHandlerFuncs{
+func (oc *Controller) WatchEndpoints() error {
+	_, err := oc.watchFactory.AddEndpointsHandler(cache.ResourceEventHandlerFuncs{
 		AddFunc: func(obj interface{}) {
 			ep := obj.(*kapi.Endpoints)
 			err := oc.addEndpoints(ep)
@@ -157,12 +160,13 @@ func (oc *Controller) WatchEndpoints() {
 			}
 		},
 	}, nil)
+	return err
 }
 
 // WatchNetworkPolicy starts the watching of network policy resource and calls
 // back the appropriate handler logic
-func (oc *Controller) WatchNetworkPolicy() {
-	oc.watchFactory.AddPolicyHandler(cache.ResourceEventHandlerFuncs{
+func (oc *Controller) WatchNetworkPolicy() error {
+	_, err := oc.watchFactory.AddPolicyHandler(cache.ResourceEventHandlerFuncs{
 		AddFunc: func(obj interface{}) {
 			policy := obj.(*kapisnetworking.NetworkPolicy)
 			oc.addNetworkPolicy(policy)
@@ -183,12 +187,13 @@ func (oc *Controller) WatchNetworkPolicy() {
 			return
 		},
 	}, oc.syncNetworkPolicies)
+	return err
 }
 
 // WatchNamespaces starts the watching of namespace resource and calls
 // back the appropriate handler logic
-func (oc *Controller) WatchNamespaces() {
-	oc.watchFactory.AddNamespaceHandler(cache.ResourceEventHandlerFuncs{
+func (oc *Controller) WatchNamespaces() error {
+	_, err := oc.watchFactory.AddNamespaceHandler(cache.ResourceEventHandlerFuncs{
 		AddFunc: func(obj interface{}) {
 			ns := obj.(*kapi.Namespace)
 			oc.addNamespace(ns)
@@ -204,4 +209,5 @@ func (oc *Controller) WatchNamespaces() {
 			return
 		},
 	}, oc.syncNamespaces)
+	return err
 }

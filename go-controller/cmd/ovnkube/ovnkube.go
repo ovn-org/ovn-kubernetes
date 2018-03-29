@@ -162,7 +162,10 @@ func runOvnKube(ctx *cli.Context) error {
 	}
 	if netController {
 		ovnController := ovn.NewOvnController(clientset, factory, nodePortEnable)
-		ovnController.Run()
+		if err := ovnController.Run(); err != nil {
+			logrus.Errorf(err.Error())
+			panic(err.Error())
+		}
 	}
 	if master != "" || netController {
 		// run forever

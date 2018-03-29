@@ -2,22 +2,16 @@ package ovn
 
 import (
 	"fmt"
-	"github.com/openvswitch/ovn-kubernetes/go-controller/pkg/kube"
 	"github.com/sirupsen/logrus"
-	"k8s.io/api/core/v1"
 	kapi "k8s.io/api/core/v1"
 	kapisnetworking "k8s.io/api/networking/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	"k8s.io/apimachinery/pkg/runtime"
-	"k8s.io/apimachinery/pkg/watch"
-	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/tools/cache"
 	"net"
 	"os/exec"
 	"sort"
 	"strings"
 	"sync"
-	"time"
 	"unicode"
 )
 
@@ -71,7 +65,6 @@ const (
 	defaultAllowPriority = "1001"
 	// IP Block except deny acl rule priority
 	ipBlockDenyPriority = "1010"
-	emptyLabelSelector  = "<none>"
 )
 
 func (oc *Controller) syncNetworkPolicies(networkPolicies []interface{}) {
@@ -491,50 +484,6 @@ func (oc *Controller) deleteAclsPolicy(namespace, policy string) {
 	}
 }
 
-func newListWatchFromClient(c cache.Getter, resource string, namespace string,
-	labelSelector string) *cache.ListWatch {
-	listFunc := func(options metav1.ListOptions) (runtime.Object, error) {
-		options.LabelSelector = labelSelector
-		return c.Get().
-			Namespace(namespace).
-			Resource(resource).
-			VersionedParams(&options, metav1.ParameterCodec).
-			Do().
-			Get()
-	}
-	watchFunc := func(options metav1.ListOptions) (watch.Interface, error) {
-		options.Watch = true
-		options.LabelSelector = labelSelector
-		return c.Get().
-			Namespace(namespace).
-			Resource(resource).
-			VersionedParams(&options, metav1.ParameterCodec).
-			Watch()
-	}
-	return &cache.ListWatch{ListFunc: listFunc, WatchFunc: watchFunc}
-}
-
-func newNamespaceListWatchFromClient(c cache.Getter,
-	labelSelector string) *cache.ListWatch {
-	listFunc := func(options metav1.ListOptions) (runtime.Object, error) {
-		options.LabelSelector = labelSelector
-		return c.Get().
-			Resource("namespaces").
-			VersionedParams(&options, metav1.ParameterCodec).
-			Do().
-			Get()
-	}
-	watchFunc := func(options metav1.ListOptions) (watch.Interface, error) {
-		options.Watch = true
-		options.LabelSelector = labelSelector
-		return c.Get().
-			Resource("namespaces").
-			VersionedParams(&options, metav1.ParameterCodec).
-			Watch()
-	}
-	return &cache.ListWatch{ListFunc: listFunc, WatchFunc: watchFunc}
-}
-
 func getL3MatchFromAddressSet(addressSets []string, policyType string) string {
 	var l3Match, addresses string
 	for _, addressSet := range addressSets {
@@ -830,21 +779,8 @@ func (oc *Controller) handleLocalPodSelectorDelFunc(
 func (oc *Controller) handleLocalPodSelector(
 	policy *kapisnetworking.NetworkPolicy, np *namespacePolicy) {
 
-	client, _ := oc.kube.(*kube.Kube)
-	clientset, _ := client.KClient.(*kubernetes.Clientset)
-	podSelectorAsSelector := metav1.FormatLabelSelector(
-		&policy.Spec.PodSelector)
-	if podSelectorAsSelector == emptyLabelSelector {
-		podSelectorAsSelector = ""
-	}
-
-	watchlist := newListWatchFromClient(clientset.Core().RESTClient(), "pods",
-		policy.Namespace, podSelectorAsSelector)
-
-	_, controller := cache.NewInformer(
-		watchlist,
-		&v1.Pod{},
-		time.Second*0,
+	id, err := oc.watchFactory.AddFilteredPodHandler(policy.Namespace,
+		&policy.Spec.PodSelector,
 		cache.ResourceEventHandlerFuncs{
 			AddFunc: func(obj interface{}) {
 				oc.handleLocalPodSelectorAddFunc(policy, np, obj)
@@ -855,35 +791,23 @@ func (oc *Controller) handleLocalPodSelector(
 			UpdateFunc: func(oldObj, newObj interface{}) {
 				oc.handleLocalPodSelectorAddFunc(policy, np, newObj)
 			},
-		},
-	)
-	channel := make(chan struct{})
-	go controller.Run(channel)
+		}, nil)
+	if err != nil {
+		logrus.Errorf("error watching local pods for policy %s in namespace %s: %v",
+			policy.Name, policy.Namespace, err)
+		return
+	}
 
-	// Wait for signal to stop.
 	<-np.stop
-	channel <- struct{}{}
-	close(channel)
+	_ = oc.watchFactory.RemovePodHandler(id)
 }
 
 func (oc *Controller) handlePeerPodSelector(
 	policy *kapisnetworking.NetworkPolicy, podSelector *metav1.LabelSelector,
 	addressSet string, addressMap map[string]bool, np *namespacePolicy) {
 
-	client, _ := oc.kube.(*kube.Kube)
-	clientset, _ := client.KClient.(*kubernetes.Clientset)
-	podSelectorAsSelector := metav1.FormatLabelSelector(podSelector)
-	if podSelectorAsSelector == emptyLabelSelector {
-		podSelectorAsSelector = ""
-	}
-
-	watchlist := newListWatchFromClient(clientset.Core().RESTClient(), "pods",
-		policy.Namespace, podSelectorAsSelector)
-
-	_, controller := cache.NewInformer(
-		watchlist,
-		&v1.Pod{},
-		time.Second*0,
+	id, err := oc.watchFactory.AddFilteredPodHandler(policy.Namespace,
+		podSelector,
 		cache.ResourceEventHandlerFuncs{
 			AddFunc: func(obj interface{}) {
 				pod := obj.(*kapi.Pod)
@@ -951,15 +875,15 @@ func (oc *Controller) handlePeerPodSelector(
 				}
 				oc.setAddressSet(addressSet, addresses)
 			},
-		},
-	)
-	channel := make(chan struct{})
-	go controller.Run(channel)
+		}, nil)
+	if err != nil {
+		logrus.Errorf("error watching peer pods for policy %s in namespace %s: %v",
+			policy.Name, policy.Namespace, err)
+		return
+	}
 
-	// Wait for signal to stop
 	<-np.stop
-	channel <- struct{}{}
-	close(channel)
+	_ = oc.watchFactory.RemovePodHandler(id)
 }
 
 func (oc *Controller) handlePeerNamespaceSelectorModify(
@@ -1005,21 +929,8 @@ func (oc *Controller) handlePeerNamespaceSelector(
 	namespaceSelector *metav1.LabelSelector,
 	gress *gressPolicy, gressNum int, policyType string, np *namespacePolicy) {
 
-	client, _ := oc.kube.(*kube.Kube)
-	clientset, _ := client.KClient.(*kubernetes.Clientset)
-	nsSelectorAsSelector := metav1.FormatLabelSelector(
-		namespaceSelector)
-	if nsSelectorAsSelector == emptyLabelSelector {
-		nsSelectorAsSelector = ""
-	}
-
-	watchlist := newNamespaceListWatchFromClient(clientset.Core().RESTClient(),
-		nsSelectorAsSelector)
-
-	_, controller := cache.NewInformer(
-		watchlist,
-		&v1.Namespace{},
-		time.Second*0,
+	id, err := oc.watchFactory.AddFilteredNamespaceHandler("",
+		namespaceSelector,
 		cache.ResourceEventHandlerFuncs{
 			AddFunc: func(obj interface{}) {
 				namespace := obj.(*kapi.Namespace)
@@ -1082,15 +993,15 @@ func (oc *Controller) handlePeerNamespaceSelector(
 			UpdateFunc: func(oldObj, newObj interface{}) {
 				return
 			},
-		},
-	)
-	channel := make(chan struct{})
-	go controller.Run(channel)
+		}, nil)
+	if err != nil {
+		logrus.Errorf("error watching namespaces for policy %s: %v",
+			policy.Name, err)
+		return
+	}
 
-	// Wait for signal to stop
 	<-np.stop
-	channel <- struct{}{}
-	close(channel)
+	_ = oc.watchFactory.RemoveNamespaceHandler(id)
 }
 
 func (oc *Controller) addNetworkPolicy(policy *kapisnetworking.NetworkPolicy) {
