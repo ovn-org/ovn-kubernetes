@@ -1,0 +1,36 @@
+---
+- name: ovn-kubernetes | install golang
+  include_tasks: ./install_golang.yml
+
+- name: ovn-kubernetes | git clone
+  git:
+    repo: "{{ ovn_kubernetes_info.git_url }}"
+    dest: "{{ ovn_kubernetes_info.build_path }}/ovn-kubernetes-checkout"
+    version: "{{ ovn_kubernetes_info.branch }}"
+
+- name: ovn-kubernetes | compile sources - make clean
+  make:
+    chdir: "{{ovn_kubernetes_info.build_path}}/ovn-kubernetes-checkout/go-controller"
+    target: clean
+  environment:
+    PATH: "{{ ansible_env.PATH }}:/usr/local/go/bin"
+
+- name: ovn-kubernetes | compile sources - make linux
+  make:
+    chdir: "{{ovn_kubernetes_info.build_path}}/ovn-kubernetes-checkout/go-controller"
+  environment:
+    PATH: "{{ ansible_env.PATH }}:/usr/local/go/bin"
+
+- name: ovn-kubernetes | compile sources - make windows
+  make:
+    chdir: "{{ovn_kubernetes_info.build_path}}/ovn-kubernetes-checkout/go-controller"
+    target: windows
+  environment:
+    PATH: "{{ ansible_env.PATH }}:/usr/local/go/bin"
+
+- name: ovn-kubernetes | compile sources - make install
+  make:
+    chdir: "{{ovn_kubernetes_info.build_path}}/ovn-kubernetes-checkout/go-controller"
+    target: install
+  environment:
+    PATH: "{{ ansible_env.PATH }}:/usr/local/go/bin"

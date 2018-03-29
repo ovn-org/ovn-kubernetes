@@ -1,0 +1,20 @@
+# the master node will overwrite this value
+master: false
+# the minion nodes will overwrite this value
+minion: false
+
+CLUSTER_SUBNET: "10.0.0.0/16"
+MASTER_INTERNAL_IP: "10.0.0.2" # Should always be the second IP of CLUSTER_SUBNET
+
+SERVICE_CLUSTER_IP_RANGE: "10.1.0.0/24"
+K8S_DNS_DOMAIN: "cluster.local"
+K8S_DNS_SERVICE_IP: "10.0.9.10"
+K8S_API_SERVICE_IP: "10.0.9.1"
+
+# set this to true to build ovn-kubernetes only on master and then
+# distribute on the minion nodes. Set this to false if you have different
+# Linux versions
+distribute_binaries: true
+
+# the place where the temporary binaries and files are stored
+ansible_tmp_dir: "{{playbook_dir}}/tmp"

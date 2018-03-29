@@ -1,0 +1,71 @@
+---
+- name: Kubernetes | include global vars for minions
+  include_vars: "{{ansible_tmp_dir}}/generated_global_vars.yml"
+  when: not master
+
+- name: Kubernetes | include vars
+  include_vars: "{{ ansible_distribution|lower }}.yml"
+  tags:
+    - facts
+
+- include_tasks: set_ip_facts.yml
+  tags:
+    - facts
+
+- name: debug
+  debug:
+    msg: "{{ansible_hostname}}"
+
+- name: Kubernetes | Expecting all binaries to be already present
+  set_fact:
+    binaries_missing: false
+
+- name: Kubernetes | Checking if binaries are already present on ansible machine
+  local_action: stat path="{{ansible_tmp_dir}}/{{item}}"
+  register: stat_bins_exists
+  with_items: "{{kubernetes_binaries}}"
+
+- name: Kubernetes | Checking all binaries
+  set_fact:
+    binaries_missing: true
+  with_items:
+    - "{{stat_bins_exists.results}}"
+  loop_control:
+    label: "{{item.item}}"
+  when: not item.stat.exists
+
+- debug:
+    msg: "Binaries are missing: {{binaries_missing}}"
+
+- name: Kubernetes | Get Kubernetes binaries
+  include_tasks: ./download_k8s_binaries.yml
+  when: binaries_missing or (binaries_missing and master)
+
+- name: Kubernetes | Get Kubernetes binaries
+  include_tasks: ./fetch_k8s_binaries.yml
+  when: binaries_missing
+
+- name: Kubernetes | Distribute binaries for minions
+  include_tasks: ./distribute_binaries.yml
+  when: minion
+
+# Using this as a check to see if the node has been already prepared to be a master node
+- stat:
+    path: "/etc/systemd/system/ovn-k8s-watcher.service"
+  register: ovnk8swatcher_stats
+
+- name: Kubernetes | Prepare master
+  include_tasks: ./prepare_master.yml
+  when: master and not ovnk8swatcher_stats.stat.exists or force_regen_certs
+
+# Using this as a check to see if the node has been already prepared to be a minion node
+- stat:
+    path: "/etc/openvswitch/k8s-ca.crt"
+  register: certovs
+
+- name: Kubernetes | Prepare minion
+  include_tasks: ./prepare_minion.yml
+  when: minion and not certovs.stat.exists or force_regen_certs
+
+- include_tasks: generate_global_vars.yml
+  when: master

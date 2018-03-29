@@ -1,0 +1,24 @@
+---
+- name: Kubernetes bins | fetch Linux binaries to the ansible host
+  fetch:
+    fail_on_missing: yes
+    flat: yes
+    src: "{{kubernetes_binaries_info.tmp_download_path}}/kubernetes/server/kubernetes/server/bin/{{item}}"
+    dest: "{{ansible_tmp_dir}}/{{item}}"
+  with_items:
+    - kube-apiserver
+    - kube-scheduler
+    - kube-controller-manager
+    - kubelet
+    - kube-proxy
+    - kubectl
+
+- name: Kubernetes bins | fetch Windows binaries to the ansible host
+  fetch:
+    fail_on_missing: yes
+    flat: yes
+    src: "{{kubernetes_binaries_info.tmp_download_path}}/kubernetes/node/bin/{{item}}"
+    dest: "{{ansible_tmp_dir}}/{{item}}"
+  with_items:
+    - kubelet.exe
+    - kubectl.exe

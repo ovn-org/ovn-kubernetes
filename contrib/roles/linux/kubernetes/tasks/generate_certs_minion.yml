@@ -1,0 +1,106 @@
+---
+- file:
+    path: /etc/kubernetes/tls/
+    state: directory
+    mode: 0755
+
+- copy:
+    src: "{{ansible_tmp_dir}}/k8s_{{item}}"
+    dest: "/etc/kubernetes/tls/{{item}}"
+  with_items:
+    - ca.pem
+    - ca-key.pem
+
+- file:
+    path: "{{ kubernetes_certificates.tmp_generate_path }}"
+    state: directory
+    mode: 0755
+
+- lineinfile:
+    path: "{{ kubernetes_certificates.tmp_generate_path }}/make-certs"
+    mode: 0755
+    create: yes
+    line: |
+      #!/bin/bash -
+
+      #set -o errexit
+      set -o nounset
+      set -o pipefail
+
+      cert_group=kube-cert
+      cert_dir=/etc/kubernetes/tls
+
+      mkdir -p "$cert_dir"
+      rm -rf "$cert_dir/*"
+
+      pem_ca=$cert_dir/ca.pem
+      pem_ca_key=$cert_dir/ca-key.pem
+
+      pem_node=$cert_dir/node.pem
+      pem_node_key=$cert_dir/node-key.pem
+      pem_node_csr=$cert_dir/node-csr.pem
+
+      # Make sure cert group exists
+      #groupadd -r $cert_group
+
+      # Make sure perms are right
+      chgrp $cert_group $pem_ca $pem_ca_key
+      chmod 600 $pem_ca_key
+      chmod 660 $pem_ca
+
+      # Generate TLS artifacts
+      openssl genrsa -out $pem_node_key 2048
+      openssl req -new -key $pem_node_key -out $pem_node_csr -subj "/CN={{ ansible_hostname }}" -config openssl.cnf
+      openssl x509 -req -in $pem_node_csr -CA $pem_ca -CAkey $pem_ca_key -CAcreateserial -out $pem_node -days 365 -extensions v3_req -extfile openssl.cnf
+
+      # Make server certs accessible to apiserver.
+      chgrp $cert_group $pem_node $pem_node_key
+      chmod 600 $pem_node_key
+      chmod 660 $pem_node $pem_ca
+
+- lineinfile:
+    path: "{{ kubernetes_certificates.tmp_generate_path }}/openssl.cnf"
+    create: yes
+    line: |
+      [req]
+      req_extensions = v3_req
+      distinguished_name = req_distinguished_name
+      [req_distinguished_name]
+      [ v3_req ]
+      basicConstraints = CA:FALSE
+      keyUsage = nonRepudiation, digitalSignature, keyEncipherment
+      subjectAltName = @alt_names
+      [alt_names]
+      IP.1 = {{ host_internal_ip }}
+
+- lineinfile:
+    path: /etc/kubernetes/kubeconfig.yaml
+    create: yes
+    line: |
+      apiVersion: v1
+      kind: Config
+      clusters:
+      - cluster:
+          certificate-authority: /etc/kubernetes/tls/ca.pem
+          server: https://{{ kubernetes_cluster_info.MASTER_IP }}
+        name: local
+      users:
+      - name: kubelet
+        user:
+          client-certificate: /etc/kubernetes/tls/node.pem
+          client-key: /etc/kubernetes/tls/node-key.pem
+      contexts:
+      - context:
+          cluster: local
+          user: kubelet
+        name: kubelet-context
+      current-context: kubelet-context
+
+- name: Kubernetes certs | Generating Certificates
+  shell: |
+    cd {{ kubernetes_certificates.tmp_generate_path }}
+    ./make-certs
+
+- file:
+    path: "{{ kubernetes_certificates.tmp_generate_path }}"
+    state: absent

@@ -1,0 +1,38 @@
+---
+- name: ovn-kubernetes | Create kubernetes dir
+  win_file:
+    path: "{{ download_info.install_path }}"
+    state: directory
+
+- name: ovn-kubernetes | Create CNI dir
+  win_file:
+    path: "{{ download_info.install_path }}/cni"
+    state: directory
+
+- name: ovn-kubernetes | get kubernetes binaries
+  win_copy:
+    src: "{{ansible_tmp_dir}}/{{item}}"
+    dest: "{{ download_info.install_path }}/{{item}}"
+  with_items:
+    - ovnkube.exe
+    - kubectl.exe
+    - kubelet.exe
+
+- name: ovn-kubernetes | get cni binary
+  win_copy:
+    src: "{{ansible_tmp_dir}}/ovn-k8s-cni-overlay.exe"
+    dest: "{{ download_info.install_path }}\\cni\\ovn-k8s-cni-overlay.exe"
+
+- name: ovn-kubernetes | check if servicewrapper exists
+  win_stat:
+    path: "{{ download_info.install_path }}/servicewrapper.exe"
+  register: servicewrapper_info
+
+# TODO: Use this only for older kubernetes versions (version less than 1.11)
+- name: ovn-kubernetes | Download service wrapper
+  win_get_url:
+    url: "{{ download_info.service_wrapper_link }}"
+    dest: "{{ download_info.install_path }}/servicewrapper.exe"
+    timeout: 60
+  retries: 3
+  when: not servicewrapper_info.stat.exists

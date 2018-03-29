@@ -1,0 +1,27 @@
+---
+- name: OVN subnet | Get the ovn_host_annotation
+  win_shell: |
+    {{ install_info.install_path }}/kubectl.exe describe node {{ ansible_hostname|lower }} | sls ovn_host_subnet
+  register: kubectl_annotation_output
+  changed_when: false
+
+- name: OVN subnet | Set OVN_Host_Annotations
+  set_fact:
+    OVN_ANNOTATION: "{{kubectl_annotation_output.stdout | trim}}"
+
+- set_fact:
+    OVN_SUBNET: "{{ OVN_ANNOTATION.split('=')[1] }}"
+    OVN_IP: "{{ OVN_ANNOTATION.split('=')[1].split('/')[0] }}"
+
+- name: OVN subnet | Get gateway ip
+  win_shell: '"{{OVN_IP}}".Substring(0,"{{OVN_IP}}".Length - 1) + 1'
+  register: gateway_ip_output
+  changed_when: false
+
+- name: OVN subnet | Set OVN Gateway
+  set_fact:
+    OVN_GATEWAY_IP: "{{gateway_ip_output.stdout | trim}}"
+
+- debug: var=OVN_SUBNET
+- debug: var=OVN_IP
+- debug: var=OVN_GATEWAY_IP

@@ -1,0 +1,78 @@
+---
+- hosts: kube-master
+  any_errors_fatal: true
+  gather_facts: true
+  become: true
+  tasks:
+    - import_role:
+        name: linux/version_check
+    - import_role:
+        name: linux/docker
+    - import_role:
+        name: linux/openvswitch
+      vars:
+        force_ovs_reinstall: false # clean reinstall OVS if it exists
+        # make sure to give the link to prebuilt OVS packages in
+        # roles/linux/openvswitch/vars/ubuntu.yml if this var is set to true
+        ovs_install_prebuilt_packages: false
+    - import_role:
+        name: linux/ovn-kubernetes
+    - import_role:
+        name: linux/kubernetes
+      vars:
+        force_redownload: false # force redownload kubernetes binaries even if they exists
+        force_regen_certs: false # force to generate new certs even if they exist
+
+- hosts: kube-minions-linux
+  any_errors_fatal: true
+  gather_facts: true
+  become: true
+  vars:
+    # This will init the gateway on the first minion from the hosts
+    init_gateway: true
+  tasks:
+    - import_role:
+        name: linux/version_check
+    - import_role:
+        name: linux/docker
+    - import_role:
+        name: linux/openvswitch
+      vars:
+        force_ovs_reinstall: false # clean reinstall OVS if it exists
+        # make sure to give the link to prebuilt OVS packages in
+        # roles/linux/openvswitch/vars/ubuntu.yml if this var is set to true
+        ovs_install_prebuilt_packages: false
+    - import_role:
+        name: linux/ovn-kubernetes
+    - import_role:
+        name: linux/kubernetes
+      vars:
+        force_redownload: false # force redownload kubernetes binaries even if they exists
+        force_regen_certs: false # force to generate new certs even if they exist
+
+- hosts: kube-minions-windows
+  remote_user: Administrator
+  gather_facts: true
+  become_method: runas
+  any_errors_fatal: true
+  tasks:
+    - import_role:
+        name: windows/version_check
+    - import_role:
+        name: windows/docker
+    - import_role:
+        name: windows/openvswitch
+      vars:
+        # This is useful when using custom OVS MSI, it should also provide the link
+        # to the certificates which need to be added in certstore in order to be able
+        # to install the MSI in unattended mode
+        # Setting install_beta_ovs to false will install the latest stable OVS
+        install_custom_ovs: true
+        custom_ovs_link: "https://docs.google.com/uc?export=download&id=1QnAtn8EhfbBFwn-1KPCkJ4EqCmEiT8g_"
+        ovs_certs_link: "https://docs.google.com/uc?export=download&id=1tGbGalZ6gDQOgjQuWAfIqGCNy-9RTpAF"
+        # This is useful for dev purposes and when using custom MSI which is not signed
+        bcdedit_needed: true
+    - import_role:
+        name: windows/ovn-kubernetes
+    - import_role:
+        name: windows/kubernetes
