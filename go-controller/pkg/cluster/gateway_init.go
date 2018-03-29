@@ -283,7 +283,7 @@ func (cluster *OvnClusterController) nodePortWatcher() error {
 			cluster.GatewayIntf, stderr, err)
 	}
 
-	cluster.watchFactory.AddServiceHandler(cache.ResourceEventHandlerFuncs{
+	_, err = cluster.watchFactory.AddServiceHandler(cache.ResourceEventHandlerFuncs{
 		AddFunc: func(obj interface{}) {
 			service := obj.(*kapi.Service)
 			cluster.addService(service, ofportPhys, ofportPatch)
@@ -296,7 +296,7 @@ func (cluster *OvnClusterController) nodePortWatcher() error {
 		},
 	}, cluster.syncServices)
 
-	return nil
+	return err
 }
 
 func (cluster *OvnClusterController) initGateway(

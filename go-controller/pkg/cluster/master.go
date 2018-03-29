@@ -69,10 +69,11 @@ func (cluster *OvnClusterController) StartClusterMaster(masterNodeName string) e
 		return err
 	}
 
-	// go routine to watch all node events. On creation, addNode will be called that will create a subnet for the switch belonging to that node.
-	// On a delete call, the subnet will be returned to the allocator as the switch is deleted from ovn
-	cluster.watchNodes()
-	return nil
+	// Watch all node events.  On creation, addNode will be called that will
+	// create a subnet for the switch belonging to that node. On a delete
+	// call, the subnet will be returned to the allocator as the switch is
+	// deleted from ovn
+	return cluster.watchNodes()
 }
 
 func calculateMasterSwitchNetwork(clusterNetwork string, hostSubnetLength uint32) (string, error) {
@@ -232,8 +233,8 @@ func (cluster *OvnClusterController) deleteNode(node *kapi.Node) error {
 	return nil
 }
 
-func (cluster *OvnClusterController) watchNodes() {
-	cluster.watchFactory.AddNodeHandler(cache.ResourceEventHandlerFuncs{
+func (cluster *OvnClusterController) watchNodes() error {
+	_, err := cluster.watchFactory.AddNodeHandler(cache.ResourceEventHandlerFuncs{
 		AddFunc: func(obj interface{}) {
 			node := obj.(*kapi.Node)
 			logrus.Debugf("Added event for Node %q", node.Name)
@@ -252,4 +253,5 @@ func (cluster *OvnClusterController) watchNodes() {
 			}
 		},
 	}, nil)
+	return err
 }
