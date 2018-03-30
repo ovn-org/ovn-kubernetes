@@ -66,12 +66,6 @@ func unlockNBForGateways() {
 }
 
 func generateGatewayIP() (string, error) {
-	err := lockNBForGateways()
-	if err != nil {
-		return "", err
-	}
-	defer unlockNBForGateways()
-
 	// All the routers connected to "join" switch are in 100.64.1.0/24
 	// network and they have their external_ids:connect_to_join set.
 	stdout, stderr, err := RunOVNNbctl("--data=bare", "--no-heading",
@@ -159,18 +153,28 @@ func GatewayInit(clusterIPSubnet, nodeName, nicIP, physicalInterface,
 	var routerIP string
 	if routerMac == "" {
 		routerMac = GenerateMac()
-		routerIP, err = generateGatewayIP()
-		if err != nil {
-			return err
-		}
+		if err := func() error {
+			err := lockNBForGateways()
+			if err != nil {
+				return err
+			}
+			defer unlockNBForGateways()
+			routerIP, err = generateGatewayIP()
+			if err != nil {
+				return err
+			}
 
-		stdout, stderr, err = RunOVNNbctl("--", "--may-exist", "lrp-add",
-			gatewayRouter, "rtoj-"+gatewayRouter, routerMac, routerIP,
-			"--", "set", "logical_router_port", "rtoj-"+gatewayRouter,
-			"external_ids:connect_to_join=yes")
-		if err != nil {
-			logrus.Errorf("Failed to add logical port to router, stdout: %q, "+
-				"stderr: %q, error: %v", stdout, stderr, err)
+			stdout, stderr, err = RunOVNNbctl("--", "--may-exist", "lrp-add",
+				gatewayRouter, "rtoj-"+gatewayRouter, routerMac, routerIP,
+				"--", "set", "logical_router_port", "rtoj-"+gatewayRouter,
+				"external_ids:connect_to_join=yes")
+			if err != nil {
+				return fmt.Errorf("failed to add logical port to router, stdout: %q, "+
+					"stderr: %q, error: %v", stdout, stderr, err)
+			}
+			return nil
+		}(); err != nil {
+			logrus.Errorf(err.Error())
 			return err
 		}
 	}
