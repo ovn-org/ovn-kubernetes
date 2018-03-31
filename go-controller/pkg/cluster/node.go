@@ -65,7 +65,7 @@ func (cluster *OvnClusterController) StartClusterNode(name string) error {
 		return err
 	}
 
-	err = util.RestartOvnController()
+	err = util.RestartOvnController(config.OvnSouth.ClientAuth)
 	if err != nil {
 		return err
 	}

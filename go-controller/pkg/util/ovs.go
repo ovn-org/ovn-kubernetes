@@ -21,6 +21,7 @@ const (
 	rhel              = "RHEL"
 	ubuntu            = "Ubuntu"
 	windowsOS         = "windows"
+	ovnHostOptFile    = "/etc/default/ovn-host"
 )
 
 // PathExist checks the path exist or not.
@@ -124,11 +125,57 @@ func StartOvnNorthd() error {
 	return nil
 }
 
+func persistOvnControllerOptions(clientAuth *config.OvnDBAuth) error {
+	fileBytes, err := ioutil.ReadFile(ovnHostOptFile)
+	// if the file doesn't exist, then we will create the file as part of ioutil.Writefile() call later
+	if err != nil && !os.IsNotExist(err) {
+		return err
+	}
+
+	index := 0
+	found := false
+	lines := []string{}
+	if len(fileBytes) != 0 {
+		lines = strings.Split(string(fileBytes), "\n")
+	}
+
+	for i, line := range lines {
+		line = strings.TrimLeft(line, "\n\t\r")
+		if !strings.HasPrefix(line, "OVN_CTL_OPTS") {
+			continue
+		}
+		index = i
+		found = true
+		break
+	}
+
+	ovnCtlOpt := fmt.Sprintf("OVN_CTL_OPTS=\"--ovn-controller-ssl-key=%s "+
+		"--ovn-controller-ssl-cert=%s "+
+		"--ovn-controller-ssl-bootstrap-ca-cert=%s\"\n",
+		clientAuth.PrivKey,
+		clientAuth.Cert,
+		clientAuth.CACert)
+	if !found {
+		lines = append(lines, ovnCtlOpt)
+	} else {
+		lines[index] = ovnCtlOpt
+	}
+	// Note that if "/etc/default" directory itself is missing, then we error out here
+	// and we don't want to go about creating system directory with correct permissions
+	return ioutil.WriteFile(ovnHostOptFile, []byte(strings.Join(lines, "\n")), 0644)
+}
+
 // RestartOvnController restarts ovn-controller
-func RestartOvnController() error {
+func RestartOvnController(clientAuth *config.OvnDBAuth) error {
 	platform, err := runningPlatform()
 	if err != nil {
 		return err
+	}
+	if clientAuth.Scheme == config.OvnDBSchemeSSL && (platform == rhel || platform == ubuntu) {
+		if err := persistOvnControllerOptions(clientAuth); err != nil {
+			return fmt.Errorf("error persisting OVN client certificate info in %s",
+				ovnHostOptFile)
+		}
 	}
 	if platform == rhel {
 		out, err := exec.Command("systemctl", "restart",
