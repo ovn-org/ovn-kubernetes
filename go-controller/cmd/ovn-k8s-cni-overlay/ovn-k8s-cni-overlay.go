@@ -154,6 +154,7 @@ func main() {
 		if err := config.InitConfig(ctx, &config.Defaults{
 			K8sAPIServer: true,
 			K8sToken:     true,
+			K8sCert:      true,
 		}); err != nil {
 			return err
 		}
