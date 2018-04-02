@@ -75,11 +75,6 @@ if [ -n "$SSL" ]; then
     sudo ovs-pki req ovncontroller
     sudo ovs-pki -b -d /vagrant/pki sign ovncontroller switch
     popd
-
-    # Set ovn-controller SSL options in /etc/default/ovn-host
-    sudo bash -c 'cat >> /etc/default/ovn-host <<EOF
-OVN_CTL_OPTS="--ovn-controller-ssl-key=/etc/openvswitch/ovncontroller-privkey.pem  --ovn-controller-ssl-cert=/etc/openvswitch/ovncontroller-cert.pem --ovn-controller-ssl-bootstrap-ca-cert=/etc/openvswitch/ovnsb-ca.cert"
-EOF'
 else
   echo "PROTOCOL=tcp" >> setup_minion_args.sh
 fi
