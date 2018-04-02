@@ -314,6 +314,7 @@ type Defaults struct {
 	OvnNorthAddress bool
 	K8sAPIServer    bool
 	K8sToken        bool
+	K8sCert         bool
 }
 
 const (
@@ -364,6 +365,9 @@ func buildKubernetesConfig(cli, file *config, defaults *Defaults) error {
 	}
 	if defaults.K8sToken {
 		Kubernetes.Token = getOVSExternalID("k8s-api-token")
+	}
+	if defaults.K8sCert {
+		Kubernetes.CACert = getOVSExternalID("k8s-ca-certificate")
 	}
 
 	// Copy config file values over default values

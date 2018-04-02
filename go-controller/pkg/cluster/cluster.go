@@ -68,7 +68,7 @@ func setOVSExternalIDs(nodeName string, ids ...string) error {
 	return nil
 }
 
-func setupOVNNode(nodeName, kubeServer, kubeToken string) error {
+func setupOVNNode(nodeName, kubeServer, kubeToken, kubeCACert string) error {
 	// Tell ovn-*bctl how to talk to the database
 	for _, auth := range []*config.OvnDBAuth{
 		config.OvnNorth.ClientAuth,
@@ -85,7 +85,8 @@ func setupOVNNode(nodeName, kubeServer, kubeToken string) error {
 	return setOVSExternalIDs(
 		nodeName,
 		fmt.Sprintf("k8s-api-server=\"%s\"", kubeServer),
-		fmt.Sprintf("k8s-api-token=\"%s\"", kubeToken))
+		fmt.Sprintf("k8s-api-token=\"%s\"", kubeToken),
+		fmt.Sprintf("k8s-ca-certificate=\"%s\"", kubeCACert))
 }
 
 func setupOVNMaster(nodeName string) error {
