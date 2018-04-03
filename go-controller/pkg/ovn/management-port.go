@@ -260,11 +260,11 @@ func CreateManagementPort(nodeName, localSubnet, clusterSubnet,
 	}
 	macAddress, stderr, err := util.RunOVSVsctl("--if-exists", "get", "interface", interfaceName, "mac_in_use")
 	if err != nil {
-		logrus.Errorf("Failed to get mac address of ovn-k8s-master, stderr: %q, error: %v", stderr, err)
+		logrus.Errorf("Failed to get mac address of %v, stderr: %q, error: %v", interfaceName, stderr, err)
 		return err
 	}
-	if macAddress == "" {
-		return fmt.Errorf("Failed to get mac address of ovn-k8s-master")
+	if macAddress == "[]" {
+		return fmt.Errorf("Failed to get mac address of %v", interfaceName)
 	}
 
 	if runtime.GOOS == windowsOS && macAddress == "00:00:00:00:00:00" {
