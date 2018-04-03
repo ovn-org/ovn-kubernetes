@@ -120,7 +120,7 @@ func (cluster *OvnClusterController) SetupMaster(masterNodeName string, masterSw
 	}
 
 	if k8sClusterLbTCP == "" {
-		stdout, stderr, err = util.RunOVNNbctl("--", "create", "load_balancer", "external_ids:k8s-cluster-lb-tcp=yes")
+		stdout, stderr, err = util.RunOVNNbctl("--", "create", "load_balancer", "external_ids:k8s-cluster-lb-tcp=yes", "protocol=tcp")
 		if err != nil {
 			logrus.Errorf("Failed to create tcp load-balancer, stdout: %q, stderr: %q, error: %v", stdout, stderr, err)
 			return err
