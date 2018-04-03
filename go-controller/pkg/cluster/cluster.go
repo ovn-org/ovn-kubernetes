@@ -46,17 +46,26 @@ func NewClusterController(kubeClient kubernetes.Interface, wf *factory.WatchFact
 }
 
 func setOVSExternalIDs(nodeName string, ids ...string) error {
-	nodeIP, err := netutils.GetNodeIP(nodeName)
-	if err != nil {
-		return fmt.Errorf("failed to obtain local IP from hostname %q: %v", nodeName, err)
+	var err error
+
+	nodeIP := config.Default.EncapIP
+	if nodeIP == "" {
+		nodeIP, err = netutils.GetNodeIP(nodeName)
+		if err != nil {
+			return fmt.Errorf("failed to obtain local IP from hostname %q: %v", nodeName, err)
+		}
+	} else {
+		if ip := net.ParseIP(nodeIP); ip == nil {
+			return fmt.Errorf("invalid encapsulation IP provided %q", nodeIP)
+		}
 	}
 
 	args := []string{
 		"set",
 		"Open_vSwitch",
 		".",
-		"external_ids:ovn-encap-type=geneve",
-		"external_ids:ovn-encap-ip=" + nodeIP,
+		fmt.Sprintf("external_ids:ovn-encap-type=%s", config.Default.EncapType),
+		fmt.Sprintf("external_ids:ovn-encap-ip=%s", nodeIP),
 	}
 	for _, str := range ids {
 		args = append(args, "external_ids:"+str)

@@ -21,6 +21,8 @@ var (
 	Default = DefaultConfig{
 		MTU:           1400,
 		ConntrackZone: 64000,
+		EncapType:     "geneve",
+		EncapIP:       "",
 	}
 
 	// Logging holds logging-related parsed config file parameters and command-line overrides
@@ -56,6 +58,12 @@ type DefaultConfig struct {
 	// that are initiated from the pods so that the reverse connections go back to the pods.
 	// This represents the conntrack zone used for the conntrack flow rules.
 	ConntrackZone int `gcfg:"conntrack-zone"`
+	// EncapType value defines the encapsulation protocol to use to transmit packets between
+	// hypervisors. By default the value is 'geneve'
+	EncapType string `gcfg:"encap-type"`
+	// The IP address of the encapsulation endpoint. If not specified, the IP address the
+	// NodeName resolves to will be used
+	EncapIP string `gcfg:"encap-ip"`
 }
 
 // LoggingConfig holds logging-related parsed config file parameters and command-line overrides
@@ -179,6 +187,16 @@ var Flags = []cli.Flag{
 		Name:        "conntrack-zone",
 		Usage:       "For gateway nodes, the conntrack zone used for conntrack flow rules (default: 64000)",
 		Destination: &cliConfig.Default.ConntrackZone,
+	},
+	cli.StringFlag{
+		Name:        "encap-type",
+		Usage:       "The encapsulation protocol to use to transmit packets between hypervisors (default: geneve)",
+		Destination: &cliConfig.Default.EncapType,
+	},
+	cli.StringFlag{
+		Name:        "encap-ip",
+		Usage:       "The IP address of the encapsulation endpoint (default: Node IP address resolved from Node hostname)",
+		Destination: &cliConfig.Default.EncapIP,
 	},
 
 	// Logging options
