@@ -21,6 +21,7 @@ type namespacePolicy struct {
 	ingressPolicies      []*gressPolicy
 	egressPolicies       []*gressPolicy
 	stop                 chan bool
+	stopWg               *sync.WaitGroup
 	namespacePolicyMutex *sync.Mutex
 	localPods            map[string]bool //pods effected by this policy
 	deleted              bool            //deleted policy
@@ -779,6 +780,7 @@ func (oc *Controller) handleLocalPodSelectorDelFunc(
 func (oc *Controller) handleLocalPodSelector(
 	policy *kapisnetworking.NetworkPolicy, np *namespacePolicy) {
 
+	np.stopWg.Add(1)
 	id, err := oc.watchFactory.AddFilteredPodHandler(policy.Namespace,
 		&policy.Spec.PodSelector,
 		cache.ResourceEventHandlerFuncs{
@@ -800,12 +802,14 @@ func (oc *Controller) handleLocalPodSelector(
 
 	<-np.stop
 	_ = oc.watchFactory.RemovePodHandler(id)
+	np.stopWg.Done()
 }
 
 func (oc *Controller) handlePeerPodSelector(
 	policy *kapisnetworking.NetworkPolicy, podSelector *metav1.LabelSelector,
 	addressSet string, addressMap map[string]bool, np *namespacePolicy) {
 
+	np.stopWg.Add(1)
 	id, err := oc.watchFactory.AddFilteredPodHandler(policy.Namespace,
 		podSelector,
 		cache.ResourceEventHandlerFuncs{
@@ -884,6 +888,7 @@ func (oc *Controller) handlePeerPodSelector(
 
 	<-np.stop
 	_ = oc.watchFactory.RemovePodHandler(id)
+	np.stopWg.Done()
 }
 
 func (oc *Controller) handlePeerNamespaceSelectorModify(
@@ -929,6 +934,7 @@ func (oc *Controller) handlePeerNamespaceSelector(
 	namespaceSelector *metav1.LabelSelector,
 	gress *gressPolicy, gressNum int, policyType string, np *namespacePolicy) {
 
+	np.stopWg.Add(1)
 	id, err := oc.watchFactory.AddFilteredNamespaceHandler("",
 		namespaceSelector,
 		cache.ResourceEventHandlerFuncs{
@@ -1002,6 +1008,7 @@ func (oc *Controller) handlePeerNamespaceSelector(
 
 	<-np.stop
 	_ = oc.watchFactory.RemoveNamespaceHandler(id)
+	np.stopWg.Done()
 }
 
 func (oc *Controller) addNetworkPolicy(policy *kapisnetworking.NetworkPolicy) {
@@ -1026,6 +1033,7 @@ func (oc *Controller) addNetworkPolicy(policy *kapisnetworking.NetworkPolicy) {
 	np.ingressPolicies = make([]*gressPolicy, 0)
 	np.egressPolicies = make([]*gressPolicy, 0)
 	np.stop = make(chan bool, 1)
+	np.stopWg = &sync.WaitGroup{}
 	np.localPods = make(map[string]bool)
 	np.namespacePolicyMutex = &sync.Mutex{}
 
@@ -1220,6 +1228,7 @@ func (oc *Controller) deleteNetworkPolicy(
 
 	// We should now stop all the go routines.
 	close(np.stop)
+	np.stopWg.Wait()
 
 	for logicalPort := range np.localPods {
 		logicalSwitch := oc.getLogicalSwitchForLogicalPort(
