@@ -22,40 +22,44 @@ func getBridgeName(iface string) string {
 	return fmt.Sprintf("br%s", iface)
 }
 
-func saveIPAddress(iface, bridge netlink.Link, addrs []netlink.Addr) error {
+func getNicName(brName string) string {
+	return fmt.Sprintf("%s", brName[len("br"):])
+}
+
+func saveIPAddress(oldLink, newLink netlink.Link, addrs []netlink.Addr) error {
 	for i := range addrs {
 		addr := addrs[i]
 
-		// Remove from old interface
-		if err := netlink.AddrDel(iface, &addr); err != nil {
-			logrus.Errorf("Remove addr from %q failed: %v", iface.Attrs().Name, err)
+		// Remove from oldLink
+		if err := netlink.AddrDel(oldLink, &addr); err != nil {
+			logrus.Errorf("Remove addr from %q failed: %v", oldLink.Attrs().Name, err)
 			return err
 		}
 
-		// Add to ovs bridge
-		addr.Label = bridge.Attrs().Name
-		if err := netlink.AddrAdd(bridge, &addr); err != nil {
-			logrus.Errorf("Add addr to bridge %q failed: %v", bridge.Attrs().Name, err)
+		// Add to newLink
+		addr.Label = newLink.Attrs().Name
+		if err := netlink.AddrAdd(newLink, &addr); err != nil {
+			logrus.Errorf("Add addr to newLink %q failed: %v", newLink.Attrs().Name, err)
 			return err
 		}
-		logrus.Infof("Successfully saved addr %q to bridge %q", addr.String(), bridge.Attrs().Name)
+		logrus.Infof("Successfully saved addr %q to newLink %q", addr.String(), newLink.Attrs().Name)
 	}
 
-	return netlink.LinkSetUp(bridge)
+	return netlink.LinkSetUp(newLink)
 }
 
-// delAddRoute removes 'route' from 'iface' and moves to 'bridge'
-func delAddRoute(iface, bridge netlink.Link, route netlink.Route) error {
+// delAddRoute removes 'route' from 'oldLink' and moves to 'newLink'
+func delAddRoute(oldLink, newLink netlink.Link, route netlink.Route) error {
 	// Remove route from old interface
 	if err := netlink.RouteDel(&route); err != nil && !strings.Contains(err.Error(), "no such process") {
-		logrus.Errorf("Remove route from %q failed: %v", iface.Attrs().Name, err)
+		logrus.Errorf("Remove route from %q failed: %v", oldLink.Attrs().Name, err)
 		return err
 	}
 
-	// Add route to ovs bridge
-	route.LinkIndex = bridge.Attrs().Index
+	// Add route to newLink
+	route.LinkIndex = newLink.Attrs().Index
 	if err := netlink.RouteAdd(&route); err != nil && !os.IsExist(err) {
-		logrus.Errorf("Add route to bridge %q failed: %v", bridge.Attrs().Name, err)
+		logrus.Errorf("Add route to newLink %q failed: %v", newLink.Attrs().Name, err)
 		return err
 	}
 
@@ -63,7 +67,7 @@ func delAddRoute(iface, bridge netlink.Link, route netlink.Route) error {
 	return nil
 }
 
-func saveRoute(iface, bridge netlink.Link, routes []netlink.Route) error {
+func saveRoute(oldLink, newLink netlink.Link, routes []netlink.Route) error {
 	for i := range routes {
 		route := routes[i]
 
@@ -74,7 +78,7 @@ func saveRoute(iface, bridge netlink.Link, routes []netlink.Route) error {
 			continue
 		}
 
-		err := delAddRoute(iface, bridge, route)
+		err := delAddRoute(oldLink, newLink, route)
 		if err != nil {
 			return err
 		}
@@ -84,8 +88,8 @@ func saveRoute(iface, bridge netlink.Link, routes []netlink.Route) error {
 	for i := range routes {
 		route := routes[i]
 		if route.Dst == nil && route.Gw != nil && route.LinkIndex > 0 {
-			// Remove route from 'iface' and move it to 'bridge'
-			err := delAddRoute(iface, bridge, route)
+			// Remove route from 'oldLink' and move it to 'newLink'
+			err := delAddRoute(oldLink, newLink, route)
 			if err != nil {
 				return err
 			}
@@ -190,6 +194,59 @@ func NicToBridge(iface string) error {
 
 	// save routes to bridge.
 	if err = saveRoute(ifaceLink, bridgeLink, routes); err != nil {
+		return err
+	}
+
+	return nil
+}
+
+// BridgeToNic moves the IP address and routes of internal port of the bridge to
+// underlying NIC interface and deletes the OVS bridge.
+func BridgeToNic(bridge string) error {
+	// Internal port is named same as the bridge
+	bridgeLink, err := netlink.LinkByName(bridge)
+	if err != nil {
+		return err
+	}
+
+	// Get ip addresses and routes before any real operations.
+	addrs, err := netlink.AddrList(bridgeLink, syscall.AF_INET)
+	if err != nil {
+		return err
+	}
+	routes, err := netlink.RouteList(bridgeLink, syscall.AF_INET)
+	if err != nil {
+		return err
+	}
+
+	ifaceLink, err := netlink.LinkByName(getNicName(bridge))
+	if err != nil {
+		return err
+	}
+
+	// save ip addresses to iface.
+	if err = saveIPAddress(bridgeLink, ifaceLink, addrs); err != nil {
+		return err
+	}
+
+	// save routes to iface.
+	if err = saveRoute(bridgeLink, ifaceLink, routes); err != nil {
+		return err
+	}
+
+	// Now delete the bridge
+	stdout, stderr, err := RunOVSVsctl("--", "--if-exists", "del-br", bridge)
+	if err != nil {
+		logrus.Errorf("Failed to delete OVS bridge, stdout: %q, stderr: %q, error: %v", stdout, stderr, err)
+		return err
+	}
+	logrus.Infof("Successfully deleted OVS bridge %q", bridge)
+
+	// Now delete the patch port on the integration bridge, if present
+	stdout, stderr, err = RunOVSVsctl("--", "--if-exists", "del-port", "br-int",
+		fmt.Sprintf("k8s-patch-br-int-%s", bridge))
+	if err != nil {
+		logrus.Errorf("Failed to delete patch port on br-int, stdout: %q, stderr: %q, error: %v", stdout, stderr, err)
 		return err
 	}
 
