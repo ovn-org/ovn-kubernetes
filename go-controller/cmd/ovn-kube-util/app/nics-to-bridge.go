@@ -29,3 +29,25 @@ var NicsToBridgeCommand = cli.Command{
 		return errors.NewAggregate(errorList)
 	},
 }
+
+// BridgesToNicCommand removes a NIC interface from OVS bridge and deletes the bridge
+var BridgesToNicCommand = cli.Command{
+	Name:  "bridges-to-nic",
+	Usage: "Delete ovs bridge and move IP/routes to underlying NIC",
+	Flags: []cli.Flag{},
+	Action: func(context *cli.Context) error {
+		args := context.Args()
+		if len(args) == 0 {
+			return fmt.Errorf("Please specify list of bridges")
+		}
+
+		var errorList []error
+		for _, bridge := range args {
+			if err := util.BridgeToNic(bridge); err != nil {
+				errorList = append(errorList, err)
+			}
+		}
+
+		return errors.NewAggregate(errorList)
+	},
+}
