@@ -27,7 +27,9 @@ Pull down Kubernetes (it's big)
 
 Bringup the Vagrant setup
 
-* vagrant up
+* vagrant up k8s-master
+* vagrant up k8s-minion1
+* vagrant up k8s-minion2
 
 Please note that, by default, the pods created cannot reach the internet.
 This is because, the network to which it is attached is a vagrant private
@@ -40,7 +42,7 @@ address for your gateways. You can invoke this by providing your host's
 network interface while running the vagrant. For e.g., if your host network
 interface on your MAC is "en4: Thunderbolt Ethernet", you can run
 
-* OVN_EXTERNAL="en4: Thunderbolt Ethernet" vagrant up
+* OVN_EXTERNAL="en4: Thunderbolt Ethernet" vagrant up k8s-minion1
 
 Run some containers
 -------------------
