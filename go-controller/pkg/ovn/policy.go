@@ -963,7 +963,7 @@ func (oc *Controller) handlePeerPodSelector(
 }
 
 func (oc *Controller) handlePeerNamespaceSelectorModify(
-	namespace *kapi.Namespace, gress *gressPolicy, gressNum int,
+	gress *gressPolicy, gressNum int,
 	np *namespacePolicy, oldl3Match, newl3Match, policyType string) {
 
 	for logicalPort := range np.localPods {
@@ -1043,7 +1043,7 @@ func (oc *Controller) handlePeerNamespaceSelector(
 				newL3Match := getL3MatchFromAddressSet(
 					gress.sortedPeerAddressSets, policyType)
 
-				oc.handlePeerNamespaceSelectorModify(namespace, gress,
+				oc.handlePeerNamespaceSelectorModify(gress,
 					gressNum, np, oldL3Match, newL3Match, policyType)
 				gress.peerAddressSets[hashedAddressSet] = true
 
@@ -1074,7 +1074,7 @@ func (oc *Controller) handlePeerNamespaceSelector(
 				newL3Match := getL3MatchFromAddressSet(
 					gress.sortedPeerAddressSets, policyType)
 
-				oc.handlePeerNamespaceSelectorModify(namespace, gress,
+				oc.handlePeerNamespaceSelectorModify(gress,
 					gressNum, np, oldL3Match, newL3Match, policyType)
 
 				delete(gress.peerAddressSets, hashedAddressSet)
