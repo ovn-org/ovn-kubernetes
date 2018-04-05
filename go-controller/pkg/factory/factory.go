@@ -7,12 +7,23 @@ import (
 	informerfactory "k8s.io/client-go/informers"
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/tools/cache"
+	kapisnetworking "k8s.io/api/networking/v1"
+	kapi "k8s.io/api/core/v1"
+	"github.com/sirupsen/logrus"
+	"sync"
 )
 
 // WatchFactory initializes and manages common kube watches
 type WatchFactory struct {
 	iFactory  informerfactory.SharedInformerFactory
 	informers map[string]cache.SharedIndexInformer
+	handlers  map[string]federatedHandler
+}
+
+type federatedHandler struct {
+	mainHandler	cache.ResourceEventHandler
+	handlerMap	map[string]cache.ResourceEventHandler
+	handlerMutex    *sync.Mutex
 }
 
 const (
@@ -52,10 +63,110 @@ func NewWatchFactory(c kubernetes.Interface, stopChan <-chan struct{}) (*WatchFa
 		}
 	}
 
+	wf.initializeHandlers()
+
 	return wf, nil
 }
 
-func (wf *WatchFactory) addHandler(informerType string, handler cache.ResourceEventHandler, processExisting func([]interface{})) {
+func (wf *WatchFactory) defaultHandlerFuncs(informerType string) cache.ResourceEventHandler {
+	return cache.ResourceEventHandlerFuncs{
+		AddFunc: func(obj interface{}) {
+			wf.FederateAddEvent(informerType, obj)
+		},
+		UpdateFunc: func(oldObj, newObj interface{}) {
+			wf.FederateUpdateEvent(informerType, oldObj, newObj)
+		},
+		DeleteFunc: func(obj interface{}) {
+			var returnObj interface{}
+			var ok bool
+			switch informerType {
+				case typePods:
+					returnObj, ok = obj.(*kapi.Pod)
+				case typeServices:
+					returnObj, ok = obj.(*kapi.Service)
+				case typeEndpoints:
+					returnObj, ok = obj.(*kapi.Endpoints)
+				case typePolicies:
+					returnObj, ok = obj.(*kapisnetworking.NetworkPolicy)
+				case typeNamespaces:
+					returnObj, ok = obj.(*kapi.Namespace)
+				case typeNodes:
+					returnObj, ok = obj.(*kapi.Node)
+			}
+			if !ok {
+				tombstone, ok := obj.(cache.DeletedFinalStateUnknown)
+				if !ok {
+					logrus.Errorf("couldn't get object from tombstone %+v", obj)
+					return
+				}
+				switch informerType {
+					case typePods:
+						returnObj, ok = tombstone.Obj.(*kapi.Pod)
+					case typeServices:
+						returnObj, ok = tombstone.Obj.(*kapi.Service)
+					case typeEndpoints:
+						returnObj, ok = tombstone.Obj.(*kapi.Endpoints)
+					case typePolicies:
+						returnObj, ok = tombstone.Obj.(*kapisnetworking.NetworkPolicy)
+					case typeNamespaces:
+						returnObj, ok = tombstone.Obj.(*kapi.Namespace)
+					case typeNodes:
+						returnObj, ok = tombstone.Obj.(*kapi.Node)
+				}
+				if !ok {
+					logrus.Errorf("tombstone contained object that is not an object of type '%s' : %#v", informerType, obj)
+					return
+				}
+			}
+			wf.FederateDeleteEvent(informerType, returnObj)
+		},
+	}
+}
+
+func (wf *WatchFactory) initializeHandlers() {
+	informerTypes := []string {typePods, typeServices, typeEndpoints, typePolicies, typeNamespaces, typeNodes}
+	for _, informerType := range informerTypes {
+		fh := federatedHandler{
+					mainHandler: wf.defaultHandlerFuncs(informerType),
+					handlerMap: make(map[string]cache.ResourceEventHandler),
+					handlerMutex: &sync.Mutex{},
+				}
+		wf.handlers[informerType] = fh
+		wf.informers[informerType].AddEventHandler(fh.mainHandler)
+	}
+}
+
+func (wf *WatchFactory) FederateAddEvent(informerType string, obj interface {}) {
+	handler := wf.handlers[informerType]
+	handler.handlerMutex.Lock()
+	defer handler.handlerMutex.Unlock()
+	for key, handler := range handler.handlerMap {
+		logrus.Debugf("Issuing Add '%s' event for handler key '%s'", informerType, key)
+		handler.OnAdd(obj)
+	}
+}
+
+func (wf *WatchFactory) FederateUpdateEvent(informerType string, oldObj, newObj interface {}) {
+	handler := wf.handlers[informerType]
+	handler.handlerMutex.Lock()
+	defer handler.handlerMutex.Unlock()
+	for key, handler := range handler.handlerMap {
+		logrus.Debugf("Issuing Update '%s' event for handler key '%s'", informerType, key)
+		handler.OnUpdate(oldObj, newObj)
+	}
+}
+
+func (wf *WatchFactory) FederateDeleteEvent(informerType string, obj interface {}) {
+	handler := wf.handlers[informerType]
+	handler.handlerMutex.Lock()
+	defer handler.handlerMutex.Unlock()
+	for key, handler := range handler.handlerMap {
+		logrus.Debugf("Issuing Delete '%s' event for handler key '%s'", informerType, key)
+		handler.OnDelete(obj)
+	}
+}
+
+func (wf *WatchFactory) addHandler(informerType string, handlerKey string, handler cache.ResourceEventHandler, processExisting func([]interface{})) {
 	inf, ok := wf.informers[informerType]
 	if !ok {
 		panic("unknown informer type " + informerType)
@@ -65,35 +176,37 @@ func (wf *WatchFactory) addHandler(informerType string, handler cache.ResourceEv
 		processExisting(inf.GetStore().List())
 	}
 	// now register the event handler
-	inf.AddEventHandler(handler)
+	wf.handlers[informerType].handlerMutex.Lock()
+	defer wf.handlers[informerType].handlerMutex.Unlock()
+	wf.handlers[informerType].handlerMap[handlerKey] = handler
 }
 
 // AddPodHandler adds a handler function that will be executed on Pod object changes
-func (wf *WatchFactory) AddPodHandler(handler cache.ResourceEventHandler, processExisting func([]interface{})) {
-	wf.addHandler(typePods, handler, processExisting)
+func (wf *WatchFactory) AddPodHandler(handlerKey string, handler cache.ResourceEventHandler, processExisting func([]interface{})) {
+	wf.addHandler(typePods, handlerKey, handler, processExisting)
 }
 
 // AddServiceHandler adds a handler function that will be executed on Service object changes
-func (wf *WatchFactory) AddServiceHandler(handler cache.ResourceEventHandler, processExisting func([]interface{})) {
-	wf.addHandler(typeServices, handler, processExisting)
+func (wf *WatchFactory) AddServiceHandler(handlerKey string, handler cache.ResourceEventHandler, processExisting func([]interface{})) {
+	wf.addHandler(typeServices, handlerKey, handler, processExisting)
 }
 
 // AddEndpointHandler adds a handler function that will be executed on Endpoint object changes
-func (wf *WatchFactory) AddEndpointHandler(handler cache.ResourceEventHandler, processExisting func([]interface{})) {
-	wf.addHandler(typeEndpoints, handler, processExisting)
+func (wf *WatchFactory) AddEndpointHandler(handlerKey string, handler cache.ResourceEventHandler, processExisting func([]interface{})) {
+	wf.addHandler(typeEndpoints, handlerKey, handler, processExisting)
 }
 
 // AddPolicyHandler adds a handler function that will be executed on NetworkPolicy object changes
-func (wf *WatchFactory) AddPolicyHandler(handler cache.ResourceEventHandler, processExisting func([]interface{})) {
-	wf.addHandler(typePolicies, handler, processExisting)
+func (wf *WatchFactory) AddPolicyHandler(handlerKey string, handler cache.ResourceEventHandler, processExisting func([]interface{})) {
+	wf.addHandler(typePolicies, handlerKey, handler, processExisting)
 }
 
 // AddNamespaceHandler adds a handler function that will be executed on Namespace object changes
-func (wf *WatchFactory) AddNamespaceHandler(handler cache.ResourceEventHandler, processExisting func([]interface{})) {
-	wf.addHandler(typeNamespaces, handler, processExisting)
+func (wf *WatchFactory) AddNamespaceHandler(handlerKey string, handler cache.ResourceEventHandler, processExisting func([]interface{})) {
+	wf.addHandler(typeNamespaces, handlerKey, handler, processExisting)
 }
 
 // AddNodeHandler adds a handler function that will be executed on Node object changes
-func (wf *WatchFactory) AddNodeHandler(handler cache.ResourceEventHandler, processExisting func([]interface{})) {
-	wf.addHandler(typeNodes, handler, processExisting)
+func (wf *WatchFactory) AddNodeHandler(handlerKey string, handler cache.ResourceEventHandler, processExisting func([]interface{})) {
+	wf.addHandler(typeNodes, handlerKey, handler, processExisting)
 }

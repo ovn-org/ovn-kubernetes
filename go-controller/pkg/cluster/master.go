@@ -233,7 +233,7 @@ func (cluster *OvnClusterController) deleteNode(node *kapi.Node) error {
 }
 
 func (cluster *OvnClusterController) watchNodes() {
-	cluster.watchFactory.AddNodeHandler(cache.ResourceEventHandlerFuncs{
+	cluster.watchFactory.AddNodeHandler("", cache.ResourceEventHandlerFuncs{
 		AddFunc: func(obj interface{}) {
 			node := obj.(*kapi.Node)
 			logrus.Debugf("Added event for Node %q", node.Name)
