@@ -21,7 +21,7 @@ var NicsToBridgeCommand = cli.Command{
 
 		var errorList []error
 		for _, nic := range args {
-			if err := util.NicToBridge(nic); err != nil {
+			if _, err := util.NicToBridge(nic); err != nil {
 				errorList = append(errorList, err)
 			}
 		}

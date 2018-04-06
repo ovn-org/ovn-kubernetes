@@ -339,15 +339,30 @@ func (cluster *OvnClusterController) initGateway(
 		if err != nil {
 			// This is not a OVS bridge. We need to create a OVS bridge
 			// and add cluster.GatewayIntf as a port of that bridge.
-			err = util.NicToBridge(cluster.GatewayIntf)
+			bridgeName, err := util.NicToBridge(cluster.GatewayIntf)
 			if err != nil {
-				return fmt.Errorf("Failed to convert nic %s to OVS bridge "+
-					"(%v)", cluster.GatewayIntf, err)
+				return fmt.Errorf("failed to convert %s to OVS bridge: %v",
+					cluster.GatewayIntf, err)
 			}
-			cluster.GatewayBridge = fmt.Sprintf("br%s", cluster.GatewayIntf)
+			cluster.GatewayBridge = bridgeName
 		} else {
-			return fmt.Errorf("gateway interface is not a physical device, " +
-				"but rather a bridge device")
+			// The given (or autodetected) interface is an OVS bridge;
+			// detect if we previously ran NIC/bridge setup
+			if !strings.HasPrefix(cluster.GatewayIntf, "br") {
+				return fmt.Errorf("gateway interface %s is an OVS bridge not "+
+					"a physical device", cluster.GatewayIntf)
+			}
+
+			// Is intfName a port of cluster.GatewayIntf?
+			intfName := util.GetNicName(cluster.GatewayIntf)
+			_, stderr, err := util.RunOVSVsctl("--if-exists", "get",
+				"interface", intfName, "ofport")
+			if err != nil {
+				return fmt.Errorf("failed to get ofport of %s, stderr: %q, error: %v",
+					intfName, stderr, err)
+			}
+			cluster.GatewayBridge = cluster.GatewayIntf
+			cluster.GatewayIntf = intfName
 		}
 
 		// Now, we get IP address from OVS bridge. If IP does not exist,

@@ -22,7 +22,9 @@ func getBridgeName(iface string) string {
 	return fmt.Sprintf("br%s", iface)
 }
 
-func getNicName(brName string) string {
+// GetNicName returns the physical NIC name, given an OVS bridge name
+// configured by NicToBridge()
+func GetNicName(brName string) string {
 	return fmt.Sprintf("%s", brName[len("br"):])
 }
 
@@ -150,10 +152,10 @@ func setupDefaultFile() {
 
 // NicToBridge creates a OVS bridge for the 'iface' and also moves the IP
 // address and routes of 'iface' to OVS bridge.
-func NicToBridge(iface string) error {
+func NicToBridge(iface string) (string, error) {
 	ifaceLink, err := netlink.LinkByName(iface)
 	if err != nil {
-		return err
+		return "", err
 	}
 
 	bridge := getBridgeName(iface)
@@ -166,7 +168,7 @@ func NicToBridge(iface string) error {
 		"--", "set", "port", iface, "other-config:transient=true")
 	if err != nil {
 		logrus.Errorf("Failed to create OVS bridge, stdout: %q, stderr: %q, error: %v", stdout, stderr, err)
-		return err
+		return "", err
 	}
 	logrus.Infof("Successfully created OVS bridge %q", bridge)
 
@@ -175,29 +177,29 @@ func NicToBridge(iface string) error {
 	// Get ip addresses and routes before any real operations.
 	addrs, err := netlink.AddrList(ifaceLink, syscall.AF_INET)
 	if err != nil {
-		return err
+		return "", err
 	}
 	routes, err := netlink.RouteList(ifaceLink, syscall.AF_INET)
 	if err != nil {
-		return err
+		return "", err
 	}
 
 	bridgeLink, err := netlink.LinkByName(bridge)
 	if err != nil {
-		return err
+		return "", err
 	}
 
 	// save ip addresses to bridge.
 	if err = saveIPAddress(ifaceLink, bridgeLink, addrs); err != nil {
-		return err
+		return "", err
 	}
 
 	// save routes to bridge.
 	if err = saveRoute(ifaceLink, bridgeLink, routes); err != nil {
-		return err
+		return "", err
 	}
 
-	return nil
+	return bridge, nil
 }
 
 // BridgeToNic moves the IP address and routes of internal port of the bridge to
@@ -219,7 +221,7 @@ func BridgeToNic(bridge string) error {
 		return err
 	}
 
-	ifaceLink, err := netlink.LinkByName(getNicName(bridge))
+	ifaceLink, err := netlink.LinkByName(GetNicName(bridge))
 	if err != nil {
 		return err
 	}
