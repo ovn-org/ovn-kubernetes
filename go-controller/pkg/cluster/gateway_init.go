@@ -401,16 +401,7 @@ func (cluster *OvnClusterController) initGateway(
 		}
 	}
 
-	if !cluster.NodePortEnable && !cluster.GatewaySpareIntf {
-		// Program cluster.GatewayIntf to let non-pod traffic to go to host
-		// stack
-		err = cluster.addDefaultConntrackRules()
-		if err != nil {
-			return err
-		}
-	}
-
-	if cluster.NodePortEnable && !cluster.GatewaySpareIntf {
+	if !cluster.GatewaySpareIntf {
 		// Program cluster.GatewayIntf to let non-pod traffic to go to host
 		// stack
 		err = cluster.addDefaultConntrackRules()
@@ -418,10 +409,12 @@ func (cluster *OvnClusterController) initGateway(
 			return err
 		}
 
-		// Program cluster.GatewayIntf to let nodePort traffic to go to pods.
-		err = cluster.nodePortWatcher()
-		if err != nil {
-			return err
+		if cluster.NodePortEnable {
+			// Program cluster.GatewayIntf to let nodePort traffic to go to pods.
+			err = cluster.nodePortWatcher()
+			if err != nil {
+				return err
+			}
 		}
 	}
 
