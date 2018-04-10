@@ -8,8 +8,6 @@
   shell: "OVN_ROOT={{ ansible_env.GOPATH }}/src/github.com/openvswitch/ovn-kubernetes hack/dind-cluster.sh start -n ovn"
   args:
     chdir: "{{ ansible_env.GOPATH }}/src/github.com/openshift/origin"
-  async: 5400
-  poll: 30
 
 - name: ensure artifacts directory is present
   file: path={{ artifacts }} state=directory
@@ -18,12 +16,8 @@
   shell: "OPENSHIFT_TEST_KUBECONFIG={{ openshift_dind_kubeconfig }} ./cni_vendor_test.sh &> {{ artifacts }}/cni_vendor_test.log"
   args:
     chdir: "{{ ansible_env.GOPATH }}/src/github.com/openshift/origin/test/extended"
-  async: 5400
-  poll: 30
 
 - name: cleanup after integration tests
   shell: "./hack/dind-cluster.sh stop"
   args:
     chdir: "{{ ansible_env.GOPATH }}/src/github.com/openshift/origin"
-  async: 5400
-  poll: 30
