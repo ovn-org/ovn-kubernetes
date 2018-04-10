@@ -77,7 +77,7 @@ const (
 func (oc *Controller) syncNetworkPolicies(networkPolicies []interface{}) {
 	expectedPolicies := make(map[string]map[string]bool)
 	for _, npInterface := range networkPolicies {
-		policy, ok := npInterface.(kapisnetworking.NetworkPolicy)
+		policy, ok := npInterface.(*kapisnetworking.NetworkPolicy)
 		if !ok {
 			logrus.Errorf("Spurious object in syncNetworkPolicies: %v",
 				npInterface)
