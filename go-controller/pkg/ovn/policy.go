@@ -16,15 +16,15 @@ import (
 )
 
 type namespacePolicy struct {
-	name                 string
-	namespace            string
-	ingressPolicies      []*gressPolicy
-	egressPolicies       []*gressPolicy
-	stop                 chan bool
-	stopWg               *sync.WaitGroup
-	namespacePolicyMutex *sync.Mutex
-	localPods            map[string]bool //pods effected by this policy
-	deleted              bool            //deleted policy
+	sync.Mutex
+	name            string
+	namespace       string
+	ingressPolicies []*gressPolicy
+	egressPolicies  []*gressPolicy
+	stop            chan bool
+	stopWg          *sync.WaitGroup
+	localPods       map[string]bool //pods effected by this policy
+	deleted         bool            //deleted policy
 }
 
 type gressPolicy struct {
@@ -712,8 +712,8 @@ func (oc *Controller) handleLocalPodSelectorAddFunc(
 	// Get the logical port name.
 	logicalPort := fmt.Sprintf("%s_%s", pod.Namespace, pod.Name)
 
-	np.namespacePolicyMutex.Lock()
-	defer np.namespacePolicyMutex.Unlock()
+	np.Lock()
+	defer np.Unlock()
 
 	if np.deleted {
 		return
@@ -752,8 +752,8 @@ func (oc *Controller) handleLocalPodSelectorDelFunc(
 	// Get the logical port name.
 	logicalPort := fmt.Sprintf("%s_%s", pod.Namespace, pod.Name)
 
-	np.namespacePolicyMutex.Lock()
-	defer np.namespacePolicyMutex.Unlock()
+	np.Lock()
+	defer np.Unlock()
 
 	if np.deleted {
 		return
@@ -820,8 +820,8 @@ func (oc *Controller) handlePeerPodSelector(
 					return
 				}
 
-				np.namespacePolicyMutex.Lock()
-				defer np.namespacePolicyMutex.Unlock()
+				np.Lock()
+				defer np.Unlock()
 				if np.deleted {
 					return
 				}
@@ -841,8 +841,8 @@ func (oc *Controller) handlePeerPodSelector(
 					return
 				}
 
-				np.namespacePolicyMutex.Lock()
-				defer np.namespacePolicyMutex.Unlock()
+				np.Lock()
+				defer np.Unlock()
 				if np.deleted {
 					return
 				}
@@ -866,8 +866,8 @@ func (oc *Controller) handlePeerPodSelector(
 					return
 				}
 
-				np.namespacePolicyMutex.Lock()
-				defer np.namespacePolicyMutex.Unlock()
+				np.Lock()
+				defer np.Unlock()
 				if np.deleted {
 					return
 				}
@@ -940,8 +940,8 @@ func (oc *Controller) handlePeerNamespaceSelector(
 		cache.ResourceEventHandlerFuncs{
 			AddFunc: func(obj interface{}) {
 				namespace := obj.(*kapi.Namespace)
-				np.namespacePolicyMutex.Lock()
-				defer np.namespacePolicyMutex.Unlock()
+				np.Lock()
+				defer np.Unlock()
 				if np.deleted {
 					return
 				}
@@ -967,8 +967,8 @@ func (oc *Controller) handlePeerNamespaceSelector(
 			},
 			DeleteFunc: func(obj interface{}) {
 				namespace := obj.(*kapi.Namespace)
-				np.namespacePolicyMutex.Lock()
-				defer np.namespacePolicyMutex.Unlock()
+				np.Lock()
+				defer np.Unlock()
 				if np.deleted {
 					return
 				}
@@ -1035,7 +1035,6 @@ func (oc *Controller) addNetworkPolicy(policy *kapisnetworking.NetworkPolicy) {
 	np.stop = make(chan bool, 1)
 	np.stopWg = &sync.WaitGroup{}
 	np.localPods = make(map[string]bool)
-	np.namespacePolicyMutex = &sync.Mutex{}
 
 	// Go through each ingress rule.  For each ingress rule, create an
 	// addressSet for the peer pods.
@@ -1203,8 +1202,8 @@ func (oc *Controller) deleteNetworkPolicy(
 	}
 	np := oc.namespacePolicies[policy.Namespace][policy.Name]
 
-	np.namespacePolicyMutex.Lock()
-	defer np.namespacePolicyMutex.Unlock()
+	np.Lock()
+	defer np.Unlock()
 
 	// Mark the policy as deleted.
 	np.deleted = true
