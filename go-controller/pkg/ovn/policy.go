@@ -4,7 +4,7 @@ import (
 	"fmt"
 	"github.com/sirupsen/logrus"
 	kapi "k8s.io/api/core/v1"
-	kapisnetworking "k8s.io/api/networking/v1"
+	knet "k8s.io/api/networking/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/client-go/tools/cache"
 	"net"
@@ -53,13 +53,11 @@ type portPolicy struct {
 }
 
 const (
-	ingressPolicyType = "Ingress"
-	egressPolicyType  = "Egress"
-	toLport           = "to-lport"
-	fromLport         = "from-lport"
-	addACL            = "add"
-	deleteACL         = "delete"
-	noneMatch         = "None"
+	toLport   = "to-lport"
+	fromLport = "from-lport"
+	addACL    = "add"
+	deleteACL = "delete"
+	noneMatch = "None"
 	// Default deny acl rule priority
 	defaultDenyPriority = "1000"
 	// Default allow acl rule priority
@@ -71,7 +69,7 @@ const (
 func (oc *Controller) syncNetworkPolicies(networkPolicies []interface{}) {
 	expectedPolicies := make(map[string]map[string]bool)
 	for _, npInterface := range networkPolicies {
-		policy, ok := npInterface.(*kapisnetworking.NetworkPolicy)
+		policy, ok := npInterface.(*knet.NetworkPolicy)
 		if !ok {
 			logrus.Errorf("Spurious object in syncNetworkPolicies: %v",
 				npInterface)
@@ -155,9 +153,9 @@ func (oc *Controller) addAllowACLFromNode(logicalSwitch string) {
 
 func (oc *Controller) addACLAllow(namespace, policy, logicalSwitch,
 	logicalPort, match, l4Match string, ipBlockCidr bool, gressNum int,
-	policyType string) {
+	policyType knet.PolicyType) {
 	var direction string
-	if policyType == ingressPolicyType {
+	if policyType == knet.PolicyTypeIngress {
 		direction = toLport
 	} else {
 		direction = fromLport
@@ -204,7 +202,7 @@ func (oc *Controller) addACLAllow(namespace, policy, logicalSwitch,
 }
 
 func (oc *Controller) modifyACLAllow(namespace, policy, logicalPort,
-	oldMatch string, newMatch string, gressNum int, policyType string) {
+	oldMatch string, newMatch string, gressNum int, policyType knet.PolicyType) {
 	uuid, err := exec.Command(OvnNbctl, "--data=bare", "--no-heading",
 		"--columns=_uuid", "find", "ACL", oldMatch,
 		fmt.Sprintf("external-ids:namespace=%s", namespace),
@@ -234,7 +232,7 @@ func (oc *Controller) modifyACLAllow(namespace, policy, logicalPort,
 
 func (oc *Controller) deleteACLAllow(namespace, policy, logicalSwitch,
 	logicalPort, match, l4Match string, ipBlockCidr bool, gressNum int,
-	policyType string) {
+	policyType knet.PolicyType) {
 	uuid, err := exec.Command(OvnNbctl, "--data=bare", "--no-heading",
 		"--columns=_uuid", "find", "ACL",
 		fmt.Sprintf("external-ids:l4Match=\"%s\"", l4Match),
@@ -268,9 +266,9 @@ func (oc *Controller) deleteACLAllow(namespace, policy, logicalSwitch,
 }
 
 func (oc *Controller) addIPBlockACLDeny(namespace, policy, logicalSwitch,
-	logicalPort, policyType, except, priority string) {
+	logicalPort, except, priority string, policyType knet.PolicyType) {
 	var match, l3Match, direction, lportMatch string
-	if policyType == ingressPolicyType {
+	if policyType == knet.PolicyTypeIngress {
 		lportMatch = fmt.Sprintf("outport == \\\"%s\\\"", logicalPort)
 		l3Match = fmt.Sprintf("ip4.src == %s", except)
 		match = fmt.Sprintf("match=\"%s && %s\"", lportMatch, l3Match)
@@ -316,9 +314,9 @@ func (oc *Controller) addIPBlockACLDeny(namespace, policy, logicalSwitch,
 }
 
 func (oc *Controller) deleteIPBlockACLDeny(namespace, policy,
-	logicalSwitch, logicalPort, policyType, except string) {
+	logicalSwitch, logicalPort, except string, policyType knet.PolicyType) {
 	var match, direction, lportMatch, l3Match string
-	if policyType == ingressPolicyType {
+	if policyType == knet.PolicyTypeIngress {
 		lportMatch = fmt.Sprintf("outport == \\\"%s\\\"", logicalPort)
 		l3Match = fmt.Sprintf("ip4.src == %s", except)
 		match = fmt.Sprintf("match=\"%s && %s\"", lportMatch, l3Match)
@@ -360,9 +358,9 @@ func (oc *Controller) deleteIPBlockACLDeny(namespace, policy,
 }
 
 func (oc *Controller) addACLDeny(namespace, logicalSwitch, logicalPort,
-	policyType, priority string) {
+	priority string, policyType knet.PolicyType) {
 	var match, direction string
-	if policyType == ingressPolicyType {
+	if policyType == knet.PolicyTypeIngress {
 		match = fmt.Sprintf("match=\"outport == \\\"%s\\\"\"", logicalPort)
 		direction = toLport
 	} else {
@@ -401,10 +399,10 @@ func (oc *Controller) addACLDeny(namespace, logicalSwitch, logicalPort,
 	return
 }
 
-func (oc *Controller) deleteACLDeny(namespace, logicalSwitch, logicalPort,
-	policyType string) {
+func (oc *Controller) deleteACLDeny(namespace, logicalSwitch, logicalPort string,
+	policyType knet.PolicyType) {
 	var match, direction string
-	if policyType == ingressPolicyType {
+	if policyType == knet.PolicyTypeIngress {
 		match = fmt.Sprintf("match=\"outport == \\\"%s\\\"\"", logicalPort)
 		direction = toLport
 	} else {
@@ -485,7 +483,7 @@ func (oc *Controller) deleteAclsPolicy(namespace, policy string) {
 	}
 }
 
-func getL3MatchFromAddressSet(addressSets []string, policyType string) string {
+func getL3MatchFromAddressSet(addressSets []string, policyType knet.PolicyType) string {
 	var l3Match, addresses string
 	for _, addressSet := range addressSets {
 		if addresses == "" {
@@ -498,7 +496,7 @@ func getL3MatchFromAddressSet(addressSets []string, policyType string) string {
 	if addresses == "" {
 		l3Match = "ip4"
 	} else {
-		if policyType == ingressPolicyType {
+		if policyType == knet.PolicyTypeIngress {
 			l3Match = fmt.Sprintf("ip4.src == {%s}", addresses)
 		} else {
 			l3Match = fmt.Sprintf("ip4.dst == {%s}", addresses)
@@ -507,10 +505,10 @@ func getL3MatchFromAddressSet(addressSets []string, policyType string) string {
 	return l3Match
 }
 
-func getMatchFromIPBlock(ipBlockCidr, lportMatch, l4Match,
-	policyType string) string {
+func getMatchFromIPBlock(ipBlockCidr, lportMatch, l4Match string,
+	policyType knet.PolicyType) string {
 	var match string
-	if policyType == ingressPolicyType {
+	if policyType == knet.PolicyTypeIngress {
 		if l4Match == noneMatch {
 			match = fmt.Sprintf("match=\"ip4.src == {%s} && %s\"",
 				ipBlockCidr, lportMatch)
@@ -531,14 +529,14 @@ func getMatchFromIPBlock(ipBlockCidr, lportMatch, l4Match,
 }
 
 func (oc *Controller) localPodAddOrDelACL(addDel string,
-	policy *kapisnetworking.NetworkPolicy, pod *kapi.Pod, gress *gressPolicy,
-	gressNum int, policyType, logicalSwitch string) {
+	policy *knet.NetworkPolicy, pod *kapi.Pod, gress *gressPolicy,
+	gressNum int, logicalSwitch string, policyType knet.PolicyType) {
 	logicalPort := fmt.Sprintf("%s_%s", pod.Namespace, pod.Name)
 	l3Match := getL3MatchFromAddressSet(gress.sortedPeerAddressSets,
 		policyType)
 
 	var lportMatch, cidrMatch string
-	if policyType == ingressPolicyType {
+	if policyType == knet.PolicyTypeIngress {
 		lportMatch = fmt.Sprintf("outport == \\\"%s\\\"", logicalPort)
 	} else {
 		lportMatch = fmt.Sprintf("inport == \\\"%s\\\"", logicalPort)
@@ -550,10 +548,10 @@ func (oc *Controller) localPodAddOrDelACL(addDel string,
 		except := fmt.Sprintf("{%s}", strings.Join(gress.ipBlockExcept, ", "))
 		if addDel == addACL {
 			oc.addIPBlockACLDeny(policy.Namespace, policy.Name, logicalSwitch,
-				logicalPort, policyType, except, ipBlockDenyPriority)
+				logicalPort, except, ipBlockDenyPriority, policyType)
 		} else {
 			oc.deleteIPBlockACLDeny(policy.Namespace, policy.Name,
-				logicalSwitch, logicalPort, policyType, except)
+				logicalSwitch, logicalPort, except, policyType)
 		}
 	}
 
@@ -630,7 +628,7 @@ func (oc *Controller) localPodAddOrDelACL(addDel string,
 }
 
 func (oc *Controller) localPodAddDefaultDeny(
-	policy *kapisnetworking.NetworkPolicy,
+	policy *knet.NetworkPolicy,
 	logicalPort, logicalSwitch string) {
 
 	oc.lspMutex.Lock()
@@ -646,20 +644,20 @@ func (oc *Controller) localPodAddDefaultDeny(
 	// egress deny rule.
 
 	// Handle condition 1 above.
-	if !(len(policy.Spec.PolicyTypes) == 1 && policy.Spec.PolicyTypes[0] == egressPolicyType) {
+	if !(len(policy.Spec.PolicyTypes) == 1 && policy.Spec.PolicyTypes[0] == knet.PolicyTypeEgress) {
 		if oc.lspIngressDenyCache[logicalPort] == 0 {
 			oc.addACLDeny(policy.Namespace, logicalSwitch, logicalPort,
-				ingressPolicyType, defaultDenyPriority)
+				defaultDenyPriority, knet.PolicyTypeIngress)
 		}
 		oc.lspIngressDenyCache[logicalPort]++
 	}
 
 	// Handle condition 2 above.
-	if (len(policy.Spec.PolicyTypes) == 1 && policy.Spec.PolicyTypes[0] == egressPolicyType) ||
+	if (len(policy.Spec.PolicyTypes) == 1 && policy.Spec.PolicyTypes[0] == knet.PolicyTypeEgress) ||
 		len(policy.Spec.Egress) > 0 || len(policy.Spec.PolicyTypes) == 2 {
 		if oc.lspEgressDenyCache[logicalPort] == 0 {
 			oc.addACLDeny(policy.Namespace, logicalSwitch, logicalPort,
-				egressPolicyType, defaultDenyPriority)
+				defaultDenyPriority, knet.PolicyTypeEgress)
 		}
 		oc.lspEgressDenyCache[logicalPort]++
 	}
@@ -667,27 +665,27 @@ func (oc *Controller) localPodAddDefaultDeny(
 }
 
 func (oc *Controller) localPodDelDefaultDeny(
-	policy *kapisnetworking.NetworkPolicy,
+	policy *knet.NetworkPolicy,
 	logicalPort, logicalSwitch string) {
 	oc.lspMutex.Lock()
 
-	if !(len(policy.Spec.PolicyTypes) == 1 && policy.Spec.PolicyTypes[0] == egressPolicyType) {
+	if !(len(policy.Spec.PolicyTypes) == 1 && policy.Spec.PolicyTypes[0] == knet.PolicyTypeEgress) {
 		if oc.lspIngressDenyCache[logicalPort] > 0 {
 			oc.lspIngressDenyCache[logicalPort]--
 			if oc.lspIngressDenyCache[logicalPort] == 0 {
 				oc.deleteACLDeny(policy.Namespace, logicalSwitch,
-					logicalPort, ingressPolicyType)
+					logicalPort, knet.PolicyTypeIngress)
 			}
 		}
 	}
 
-	if (len(policy.Spec.PolicyTypes) == 1 && policy.Spec.PolicyTypes[0] == egressPolicyType) ||
+	if (len(policy.Spec.PolicyTypes) == 1 && policy.Spec.PolicyTypes[0] == knet.PolicyTypeEgress) ||
 		len(policy.Spec.Egress) > 0 || len(policy.Spec.PolicyTypes) == 2 {
 		if oc.lspEgressDenyCache[logicalPort] > 0 {
 			oc.lspEgressDenyCache[logicalPort]--
 			if oc.lspEgressDenyCache[logicalPort] == 0 {
 				oc.deleteACLDeny(policy.Namespace, logicalSwitch,
-					logicalPort, egressPolicyType)
+					logicalPort, knet.PolicyTypeEgress)
 			}
 		}
 	}
@@ -695,7 +693,7 @@ func (oc *Controller) localPodDelDefaultDeny(
 }
 
 func (oc *Controller) handleLocalPodSelectorAddFunc(
-	policy *kapisnetworking.NetworkPolicy, np *namespacePolicy,
+	policy *knet.NetworkPolicy, np *namespacePolicy,
 	obj interface{}) {
 	pod := obj.(*kapi.Pod)
 
@@ -728,19 +726,19 @@ func (oc *Controller) handleLocalPodSelectorAddFunc(
 	// For each ingress rule, add a ACL
 	for i, ingress := range np.ingressPolicies {
 		oc.localPodAddOrDelACL(addACL, policy, pod, ingress, i,
-			ingressPolicyType, logicalSwitch)
+			logicalSwitch, knet.PolicyTypeIngress)
 	}
 	// For each egress rule, add a ACL
 	for i, egress := range np.egressPolicies {
 		oc.localPodAddOrDelACL(addACL, policy, pod, egress, i,
-			egressPolicyType, logicalSwitch)
+			logicalSwitch, knet.PolicyTypeEgress)
 	}
 
 	np.localPods[logicalPort] = true
 }
 
 func (oc *Controller) handleLocalPodSelectorDelFunc(
-	policy *kapisnetworking.NetworkPolicy, np *namespacePolicy,
+	policy *knet.NetworkPolicy, np *namespacePolicy,
 	obj interface{}) {
 	pod := obj.(*kapi.Pod)
 
@@ -768,17 +766,17 @@ func (oc *Controller) handleLocalPodSelectorDelFunc(
 	// For each ingress rule, remove the ACL
 	for i, ingress := range np.ingressPolicies {
 		oc.localPodAddOrDelACL(deleteACL, policy, pod, ingress, i,
-			ingressPolicyType, logicalSwitch)
+			logicalSwitch, knet.PolicyTypeIngress)
 	}
 	// For each egress rule, remove the ACL
 	for i, egress := range np.egressPolicies {
 		oc.localPodAddOrDelACL(deleteACL, policy, pod, egress, i,
-			egressPolicyType, logicalSwitch)
+			logicalSwitch, knet.PolicyTypeEgress)
 	}
 }
 
 func (oc *Controller) handleLocalPodSelector(
-	policy *kapisnetworking.NetworkPolicy, np *namespacePolicy) {
+	policy *knet.NetworkPolicy, np *namespacePolicy) {
 
 	np.stopWg.Add(1)
 	id, err := oc.watchFactory.AddFilteredPodHandler(policy.Namespace,
@@ -806,7 +804,7 @@ func (oc *Controller) handleLocalPodSelector(
 }
 
 func (oc *Controller) handlePeerPodSelector(
-	policy *kapisnetworking.NetworkPolicy, podSelector *metav1.LabelSelector,
+	policy *knet.NetworkPolicy, podSelector *metav1.LabelSelector,
 	addressSet string, addressMap map[string]bool, np *namespacePolicy) {
 
 	np.stopWg.Add(1)
@@ -893,11 +891,11 @@ func (oc *Controller) handlePeerPodSelector(
 
 func (oc *Controller) handlePeerNamespaceSelectorModify(
 	gress *gressPolicy, gressNum int,
-	np *namespacePolicy, oldl3Match, newl3Match, policyType string) {
+	np *namespacePolicy, oldl3Match, newl3Match string, policyType knet.PolicyType) {
 
 	for logicalPort := range np.localPods {
 		var lportMatch string
-		if policyType == ingressPolicyType {
+		if policyType == knet.PolicyTypeIngress {
 			lportMatch = fmt.Sprintf("outport == \\\"%s\\\"", logicalPort)
 		} else {
 			lportMatch = fmt.Sprintf("inport == \\\"%s\\\"", logicalPort)
@@ -930,9 +928,10 @@ func (oc *Controller) handlePeerNamespaceSelectorModify(
 }
 
 func (oc *Controller) handlePeerNamespaceSelector(
-	policy *kapisnetworking.NetworkPolicy,
+	policy *knet.NetworkPolicy,
 	namespaceSelector *metav1.LabelSelector,
-	gress *gressPolicy, gressNum int, policyType string, np *namespacePolicy) {
+	gress *gressPolicy, gressNum int, policyType knet.PolicyType,
+	np *namespacePolicy) {
 
 	np.stopWg.Add(1)
 	id, err := oc.watchFactory.AddFilteredNamespaceHandler("",
@@ -1011,7 +1010,7 @@ func (oc *Controller) handlePeerNamespaceSelector(
 	np.stopWg.Done()
 }
 
-func (oc *Controller) addNetworkPolicy(policy *kapisnetworking.NetworkPolicy) {
+func (oc *Controller) addNetworkPolicy(policy *knet.NetworkPolicy) {
 	logrus.Infof("Adding network policy %s in namespace %s", policy.Name,
 		policy.Namespace)
 
@@ -1082,7 +1081,7 @@ func (oc *Controller) addNetworkPolicy(policy *kapisnetworking.NetworkPolicy) {
 				// For each peer namespace selector, we create a watcher that
 				// populates ingress.peerAddressSets
 				go oc.handlePeerNamespaceSelector(policy,
-					fromJSON.NamespaceSelector, ingress, i, ingressPolicyType,
+					fromJSON.NamespaceSelector, ingress, i, knet.PolicyTypeIngress,
 					np)
 			}
 
@@ -1142,7 +1141,7 @@ func (oc *Controller) addNetworkPolicy(policy *kapisnetworking.NetworkPolicy) {
 				// For each peer namespace selector, we create a watcher that
 				// populates egress.peerAddressSets
 				go oc.handlePeerNamespaceSelector(policy,
-					toJSON.NamespaceSelector, egress, i, egressPolicyType,
+					toJSON.NamespaceSelector, egress, i, knet.PolicyTypeEgress,
 					np)
 			}
 
@@ -1189,7 +1188,7 @@ func (oc *Controller) getLogicalSwitchForLogicalPort(
 }
 
 func (oc *Controller) deleteNetworkPolicy(
-	policy *kapisnetworking.NetworkPolicy) {
+	policy *knet.NetworkPolicy) {
 	logrus.Infof("Deleting network policy %s in namespace %s",
 		policy.Name, policy.Namespace)
 
