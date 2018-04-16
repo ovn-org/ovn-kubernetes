@@ -19,17 +19,31 @@ const (
 func configureManagementPortWindows(clusterSubnet, clusterServicesSubnet,
 	routerIP, interfaceName, interfaceIP string) error {
 	// Up the interface.
-	_, err := exec.Command("powershell", "Enable-NetAdapter", fmt.Sprintf("%s", interfaceName)).CombinedOutput()
+	args := []string{"Enable-NetAdapter", fmt.Sprintf("%s", interfaceName)}
+	logrus.Debugf("Executing 'powershell %s'", strings.Join(args, " "))
+
+	_, err := exec.Command("powershell", args...).CombinedOutput()
 	if err != nil {
 		return err
 	}
 
-	// The interface may already exist, in which case delete the routes and IP.
-	_, err = exec.Command("powershell", "Remove-NetIPAddress",
-		fmt.Sprintf("-InterfaceAlias %s", interfaceName),
-		"-Confirm:$false").CombinedOutput()
-	if err != nil {
-		return err
+	//check if interface already exists
+	args = []string{"Get-NetIPAddress", fmt.Sprintf("-InterfaceAlias %s", interfaceName)}
+	logrus.Debugf("Executing 'powershell %s'", strings.Join(args, " "))
+
+	_, err = exec.Command("powershell", args...).CombinedOutput()
+	if err == nil {
+		//The interface already exists, we should delete the routes and IP
+		logrus.Debugf("Interface %s exists, removing.", interfaceName)
+		args = []string{"Remove-NetIPAddress",
+			fmt.Sprintf("-InterfaceAlias %s", interfaceName),
+			"-Confirm:$false"}
+		logrus.Debugf("Executing 'powershell %s'", strings.Join(args, " "))
+
+		_, err = exec.Command("powershell", args...).CombinedOutput()
+		if err != nil {
+			return err
+		}
 	}
 
 	// Assign IP address to the internal interface.
