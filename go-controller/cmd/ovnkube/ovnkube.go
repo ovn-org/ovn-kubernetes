@@ -1,9 +1,13 @@
 package main
 
 import (
+	"fmt"
+	"io/ioutil"
 	"net"
 	"os"
+	"os/signal"
 	"runtime"
+	"syscall"
 
 	"github.com/sirupsen/logrus"
 	"github.com/urfave/cli"
@@ -49,6 +53,12 @@ func main() {
 			Usage: "initialize node, requires the name that node is registered with in kubernetes cluster",
 		},
 
+		// Daemon file
+		cli.StringFlag{
+			Name:  "pidfile",
+			Usage: "Name of file that will hold the ovnkube pid (optional)",
+		},
+
 		// Gateway flags
 		cli.BoolFlag{
 			Name:  "init-gateways",
@@ -90,9 +100,59 @@ func main() {
 	}
 }
 
+func delPidfile(pidfile string) {
+	if pidfile != "" {
+		if _, err := os.Stat(pidfile); err == nil {
+			if err := os.Remove(pidfile); err != nil {
+				logrus.Errorf("%s delete failed: %v", pidfile, err)
+			}
+		}
+	}
+}
+
 func runOvnKube(ctx *cli.Context) error {
 	if err := config.InitConfig(ctx, nil); err != nil {
 		return err
+	}
+	pidfile := ctx.String("pidfile")
+
+	c := make(chan os.Signal, 2)
+	signal.Notify(c, os.Interrupt, syscall.SIGTERM)
+	go func() {
+		<-c
+		delPidfile(pidfile)
+		os.Exit(1)
+	}()
+
+	defer delPidfile(pidfile)
+
+	if pidfile != "" {
+		// need to test if already there
+		_, err := os.Stat(pidfile)
+
+		// Create if it doesn't exist, else exit with error
+		if os.IsNotExist(err) {
+			if err := ioutil.WriteFile(pidfile, []byte(fmt.Sprintf("%d", os.Getpid())), 0644); err != nil {
+				logrus.Errorf("failed to write pidfile %s (%v). Ignoring..", pidfile, err)
+			}
+		} else {
+			// get the pid and see if it exists
+			pid, err := ioutil.ReadFile(pidfile)
+			if err != nil {
+				logrus.Errorf("pidfile %s exists but can't be read", pidfile)
+				return err
+			}
+			_, err1 := os.Stat("/proc/" + string(pid[:]) + "/cmdline")
+			if os.IsNotExist(err1) {
+				// Left over pid from dead process
+				if err := ioutil.WriteFile(pidfile, []byte(fmt.Sprintf("%d", os.Getpid())), 0644); err != nil {
+					logrus.Errorf("failed to write pidfile %s (%v). Ignoring..", pidfile, err)
+				}
+			} else {
+				logrus.Errorf("pidfile %s exists and ovnkube is running", pidfile)
+				os.Exit(1)
+			}
+		}
 	}
 
 	clientset, err := util.NewClientset(&config.Kubernetes)
