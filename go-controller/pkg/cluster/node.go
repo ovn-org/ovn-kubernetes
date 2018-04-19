@@ -11,7 +11,6 @@ import (
 
 	"github.com/openvswitch/ovn-kubernetes/go-controller/pkg/config"
 	"github.com/openvswitch/ovn-kubernetes/go-controller/pkg/ovn"
-	"github.com/openvswitch/ovn-kubernetes/go-controller/pkg/util"
 
 	kapi "k8s.io/api/core/v1"
 	"k8s.io/client-go/tools/cache"
@@ -64,11 +63,6 @@ func (cluster *OvnClusterController) StartClusterNode(name string) error {
 
 	err = setupOVNNode(name, config.Kubernetes.APIServer, config.Kubernetes.Token,
 		config.Kubernetes.CACert)
-	if err != nil {
-		return err
-	}
-
-	err = util.RestartOvnController(config.OvnSouth.ClientAuth)
 	if err != nil {
 		return err
 	}

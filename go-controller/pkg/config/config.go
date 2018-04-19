@@ -339,39 +339,43 @@ const (
 	ovsVsctlCommand = "ovs-vsctl"
 )
 
-// Can't use pkg/ovs here because that package imports this one
-func getOVSExternalID(name string) string {
+// Can't use pkg/ovs or pkg/util here because those package import this one
+func runOVSVsctl(args ...string) (string, error) {
 	cmdPath, err := exec.LookPath(ovsVsctlCommand)
 	if err != nil {
-		return ""
+		return "", err
 	}
-	out, err := exec.Command(
-		cmdPath,
+
+	newArgs := append([]string{"--timeout=5"}, args...)
+	out, err := exec.Command(cmdPath, newArgs...).CombinedOutput()
+	if err != nil {
+		return "", err
+	}
+	return strings.Trim(strings.TrimSpace(string(out)), "\""), nil
+}
+
+func getOVSExternalID(name string) string {
+	out, err := runOVSVsctl(
 		"--if-exists",
 		"get",
 		"Open_vSwitch",
 		".",
-		"external_ids:"+name).CombinedOutput()
+		"external_ids:"+name)
 	if err != nil {
 		logrus.Debugf("failed to get OVS external_id %s: %v\n\t%s", name, err, out)
 		return ""
 	}
-	return strings.Trim(strings.TrimSpace(string(out)), "\"")
+	return out
 }
 
 func setOVSExternalID(key, value string) error {
-	cmdPath, err := exec.LookPath(ovsVsctlCommand)
-	if err != nil {
-		return err
-	}
-	out, err := exec.Command(
-		cmdPath,
+	out, err := runOVSVsctl(
 		"set",
 		"Open_vSwitch",
 		".",
-		fmt.Sprintf("external_ids:%s=%s", key, value)).CombinedOutput()
+		fmt.Sprintf("external_ids:%s=%s", key, value))
 	if err != nil {
-		return fmt.Errorf("Error setting OVS external ID '%s=%s': %v\n  %q", key, value, err, string(out))
+		return fmt.Errorf("Error setting OVS external ID '%s=%s': %v\n  %q", key, value, err, out)
 	}
 	return nil
 }
@@ -634,8 +638,12 @@ func (a *OvnDBAuth) ensureCACert() error {
 		return fmt.Errorf("CA certificate file %s not found", a.CACert)
 	}
 
-	// Client can bootstrap the CA from the OVN API
-	cmdPath, err := exec.LookPath(a.ctlCmd)
+	// Client can bootstrap the CA from the OVN API.  Use nbctl for both
+	// SB and NB since ovn-sbctl only supports --bootstrap-ca-cert from
+	// 2.9.90+.
+	// FIXME: change back to a.ctlCmd when sbctl supports --bootstrap-ca-cert
+	// https://github.com/openvswitch/ovs/pull/226
+	cmdPath, err := exec.LookPath("ovn-nbctl")
 	if err != nil {
 		return err
 	}
@@ -708,14 +716,26 @@ func (a *OvnDBAuth) SetDBAuth() error {
 			}
 		}
 	} else {
-		if err := setOVSExternalID(a.externalID, "\""+a.GetURL()+"\""); err != nil {
-			return err
-		}
 		if a.Scheme == OvnDBSchemeSSL {
 			// Client can bootstrap the CA cert from the DB
 			if err := a.ensureCACert(); err != nil {
 				return err
 			}
+
+			// Tell Southbound DB clients (like ovn-controller)
+			// which certificates to use to talk to the DB.
+			// Must happen *before* setting the "ovn-remote"
+			// external-id.
+			if a.ctlCmd == "ovn-sbctl" {
+				out, err := runOVSVsctl("set-ssl", a.PrivKey, a.Cert, a.CACert)
+				if err != nil {
+					return fmt.Errorf("error setting client southbound DB SSL options: %v\n  %q", err, out)
+				}
+			}
+		}
+
+		if err := setOVSExternalID(a.externalID, "\""+a.GetURL()+"\""); err != nil {
+			return err
 		}
 	}
 	return nil

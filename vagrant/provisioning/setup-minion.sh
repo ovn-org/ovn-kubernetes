@@ -66,7 +66,7 @@ sudo apt-get install openvswitch-datapath-dkms=2.8.1-1 -y
 sudo apt-get install openvswitch-switch=2.8.1-1 openvswitch-common=2.8.1-1 libopenvswitch=2.8.1-1 -y
 sudo -H pip install ovs
 
-sudo apt-get install ovn-central=2.8.1-1 ovn-common=2.8.1-1 ovn-host=2.8.1-1 -y
+sudo apt-get install ovn-common=2.8.1-1 ovn-host=2.8.1-1 -y
 
 if [ -n "$SSL" ]; then
     echo "PROTOCOL=ssl" >> setup_minion_args.sh
