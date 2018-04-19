@@ -9,7 +9,6 @@ import (
 	kapi "k8s.io/api/core/v1"
 	"k8s.io/client-go/tools/cache"
 
-	"github.com/openvswitch/ovn-kubernetes/go-controller/pkg/config"
 	"github.com/openvswitch/ovn-kubernetes/go-controller/pkg/ovn"
 	"github.com/openvswitch/ovn-kubernetes/go-controller/pkg/util"
 
@@ -87,22 +86,7 @@ func calculateMasterSwitchNetwork(clusterNetwork string, hostSubnetLength uint32
 
 // SetupMaster calls the external script to create the switch and central routers for the network
 func (cluster *OvnClusterController) SetupMaster(masterNodeName string, masterSwitchNetwork string) error {
-	err := util.StartOVS()
-	if err != nil {
-		return err
-	}
-
-	err = util.StartOvnNorthd()
-	if err != nil {
-		return err
-	}
-
 	if err := setupOVNMaster(masterNodeName); err != nil {
-		return err
-	}
-
-	err = util.RestartOvnController(config.OvnSouth.ClientAuth)
-	if err != nil {
 		return err
 	}
 
