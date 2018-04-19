@@ -95,17 +95,9 @@ users:
 KUBECONFIG
 
 if [ $PROTOCOL = "ssl" ]; then
-  nohup sudo ovnkube -k8s-kubeconfig $HOME/kubeconfig.yaml -net-controller -loglevel=4 \
- -k8s-apiserver="http://$OVERLAY_IP:8080" \
- -logfile="/var/log/openvswitch/ovnkube.log" \
- -init-master="k8smaster" -cluster-subnet="192.168.0.0/16" \
- -service-cluster-ip-range=172.16.1.0/24 \
- -nodeport \
- -nb-address="$PROTOCOL://$OVERLAY_IP:6631" \
- -nb-server-privkey /etc/openvswitch/ovnnb-privkey.pem \
+ SSL_ARGS="-nb-server-privkey /etc/openvswitch/ovnnb-privkey.pem \
  -nb-server-cert /etc/openvswitch/ovnnb-cert.pem \
  -nb-server-cacert /vagrant/pki/switchca/cacert.pem \
- -sb-address="$PROTOCOL://$OVERLAY_IP:6632" \
  -sb-server-privkey /etc/openvswitch/ovnsb-privkey.pem \
  -sb-server-cert /etc/openvswitch/ovnsb-cert.pem \
  -sb-server-cacert /vagrant/pki/switchca/cacert.pem  \
@@ -114,17 +106,18 @@ if [ $PROTOCOL = "ssl" ]; then
  -nb-client-cacert /etc/openvswitch/ovnnb-ca.cert \
  -sb-client-privkey /etc/openvswitch/ovncontroller-privkey.pem \
  -sb-client-cert /etc/openvswitch/ovncontroller-cert.pem \
- -sb-client-cacert /etc/openvswitch/ovnsb-ca.cert 2>&1 &
-else
-  nohup sudo ovnkube -k8s-kubeconfig $HOME/kubeconfig.yaml -net-controller -loglevel=4 \
+ -sb-client-cacert /etc/openvswitch/ovnsb-ca.cert"
+fi
+
+nohup sudo ovnkube -k8s-kubeconfig $HOME/kubeconfig.yaml -net-controller -loglevel=4 \
  -k8s-apiserver="http://$OVERLAY_IP:8080" \
  -logfile="/var/log/openvswitch/ovnkube.log" \
  -init-master="k8smaster" -cluster-subnet="192.168.0.0/16" \
  -service-cluster-ip-range=172.16.1.0/24 \
  -nodeport \
  -nb-address="$PROTOCOL://$OVERLAY_IP:6631" \
- -sb-address="$PROTOCOL://$OVERLAY_IP:6632" 2>&1 &
-fi
+ -sb-address="$PROTOCOL://$OVERLAY_IP:6632" \
+ ${SSL_ARGS} 2>&1 &
 
 
 # Setup some example yaml files
