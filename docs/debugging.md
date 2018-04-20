@@ -10,6 +10,11 @@ Open_vSwitch database.  You can fetch its value with:
 ovs-vsctl get Open_vSwitch . external-ids:system-id
 ```
 
+This is automatically set by OVS startup scripts (that come with packages).
+But if you installed OVS from source, and don't use a startup script,
+this will be empty.  If you clone your VM, then you may endup with
+same system-id for all your VMs - which is a problem.
+
 ### All nodes should register with OVN SB database.
 
 On the master node, run:
@@ -24,11 +29,10 @@ should all be unique.
 
 ## Hosts should have unique node names.
 
-When you run ovn-kubernetes initialization scripts like "master-init",
-"minion-init", "gateway-init" etc, it asks for a $NODE_NAME.  This should
-be the same as used by "kubelet" on each node.  So the names you see when
-you run the below command should be the same ones that you supply your
-init scripts:
+When you run 'ovnkube -init-node' or 'ovnkube -init-master' commands, it will
+ask for node names. This should all be unique. This should also be the same as
+used by "kubelet" on each node.  So the names you see when you run the below
+command should be the same ones that you supply to ovnkube:
 
 ```
 kubectl get nodes
@@ -53,9 +57,10 @@ modprobe vport-geneve  # or vport-stt for "stt".
 
 ### Sanity check cross host ping.
 
-Since on each host, a OVS internal device is created with the second IP
-address in the $MINION_SWITCH_SUBNET, you should be able to check cross
-host connectivity by pinging these internal devices.
+Since on each host, a OVS internal device named "k8s-$NODENAME" is created
+with the second IP address in the subnet assigned for that node, you should be
+able to check cross host connectivity by pinging these internal devices across
+hosts.
 
 ### Firewall blocking overlay networks
 
@@ -85,13 +90,13 @@ for any errors with the setup of the OVN central node.
 
 ### Check the watcher's log file.
 
-On the master node, check whether ovn-k8s-watcher is running by:
+On the master node, check whether ovnkube is running by:
 
 ```
-ps -ef | grep ovn-k8s-watcher
+ps -ef | grep ovnkube
 ```
 
-Check the watcher's log file at /var/log/openvswitch/ovn-k8s-watcher.log
+Check the watcher's log file at "/var/log/openvswitch/ovnkube.log"
 to see whether it is creating logical ports whenever a pod is created and
 for any obvious errors.
 
@@ -101,7 +106,9 @@ When you create a pod and it gets scheduled on a particular host, the
 OVN CNI plugin on that host, tries to access the pod's information from
 the K8s api server.  Specifically, it tries to get the IP address and
 mac address for that pod.  This information is logged in the OVN CNI log
-file on each minion at /var/log/openvswitch/ovn-k8s-cni-overlay.log.
+file on each minion if you have specified a log file via 
+"/etc/openvswitch/ovn_k8s.conf". You can read how to provide a logfile
+by reading 'man ovn_k8s.conf.5'.
 
 ### Check the kubelet's log file.
 
