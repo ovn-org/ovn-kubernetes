@@ -1,6 +1,11 @@
 #!/usr/bin/env bash
 
-echo $GOPATH
+source "$(dirname "${BASH_SOURCE}")/init.sh"
+
+# Check for `go` binary and set ${GOPATH}.
+setup_env
+
+echo ${GOPATH}
 
 set -o errexit
 set -o nounset

@@ -1,5 +1,10 @@
 #!/bin/bash
 
+source "$(dirname "${BASH_SOURCE}")/init.sh"
+
+# Check for `go` binary and set ${GOPATH}.
+setup_env
+
 set -o errexit
 set -o nounset
 set -o pipefail
@@ -8,6 +13,7 @@ find_files() {
   find . -not \( \
       \( \
         -wholename '*/vendor/*' \
+        -o -wholename '*/alecthomas/*' \
       \) -prune \
     \) -name '*.go'
 }
