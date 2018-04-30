@@ -1,9 +1,0 @@
-pbr>=1.8
-netaddr>=0.7.18
-requests
-urllib3
-ipaddress
-ovs>=2.6.0
-six
-eventlet
-pyroute2>=0.4.6
