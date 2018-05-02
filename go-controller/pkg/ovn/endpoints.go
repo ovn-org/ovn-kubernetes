@@ -2,8 +2,8 @@ package ovn
 
 import (
 	"fmt"
-	"os/exec"
 
+	util "github.com/openvswitch/ovn-kubernetes/go-controller/pkg/util"
 	"github.com/sirupsen/logrus"
 	kapi "k8s.io/api/core/v1"
 )
@@ -100,9 +100,11 @@ func (ovn *Controller) deleteEndpoints(ep *kapi.Endpoints) error {
 	for _, svcPort := range svc.Spec.Ports {
 		lb := ovn.getLoadBalancer(svcPort.Protocol)
 		key := fmt.Sprintf("\"%s:%d\"", svc.Spec.ClusterIP, svcPort.Port)
-		_, err := exec.Command(OvnNbctl, "remove", "load_balancer", lb, "vips", key).CombinedOutput()
+		_, stderr, err := util.RunOVNNbctlUnix("remove", "load_balancer", lb,
+			"vips", key)
 		if err != nil {
-			logrus.Errorf("Error in deleting endpoints: %v", err)
+			logrus.Errorf("Error in deleting endpoints for lb %s, "+
+				"stderr: %q (%v)", lb, stderr, err)
 		}
 	}
 	return nil
