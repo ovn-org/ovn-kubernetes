@@ -105,7 +105,28 @@ func RunOVSVsctl(args ...string) (string, string, error) {
 	return strings.Trim(strings.TrimSpace(stdout.String()), "\""), stderr.String(), err
 }
 
-// RunOVNNbctlWithTimeout runs command via ovs-nbctl with a specific timeout
+// RunOVNNbctlUnix runs command via ovn-nbctl, with ovn-nbctl using the unix
+// domain sockets to connect to the ovsdb-server backing the OVN NB database.
+func RunOVNNbctlUnix(args ...string) (string, string, error) {
+	cmdPath, err := exec.LookPath(ovnNbctlCommand)
+	if err != nil {
+		return "", "", err
+	}
+
+	stdout := &bytes.Buffer{}
+	stderr := &bytes.Buffer{}
+
+	cmdArgs := []string{fmt.Sprintf("--timeout=%d", ovsCommandTimeout)}
+	cmdArgs = append(cmdArgs, args...)
+	cmd := exec.Command(cmdPath, cmdArgs...)
+	cmd.Stdout = stdout
+	cmd.Stderr = stderr
+
+	err = cmd.Run()
+	return strings.Trim(strings.TrimSpace(stdout.String()), "\""), stderr.String(), err
+}
+
+// RunOVNNbctlWithTimeout runs command via ovn-nbctl with a specific timeout
 func RunOVNNbctlWithTimeout(timeout int, args ...string) (string, string,
 	error) {
 	cmdPath, err := exec.LookPath(ovnNbctlCommand)
@@ -143,7 +164,7 @@ func RunOVNNbctlWithTimeout(timeout int, args ...string) (string, string,
 	return strings.Trim(strings.TrimSpace(stdout.String()), "\""), stderr.String(), err
 }
 
-// RunOVNNbctl runs a command via ovs-nbctl.
+// RunOVNNbctl runs a command via ovn-nbctl.
 func RunOVNNbctl(args ...string) (string, string, error) {
 	return RunOVNNbctlWithTimeout(ovsCommandTimeout, args...)
 }
