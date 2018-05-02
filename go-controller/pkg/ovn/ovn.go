@@ -54,9 +54,6 @@ type Controller struct {
 }
 
 const (
-	// OvnNbctl is the constant string for the ovn-nbctl shell command
-	OvnNbctl = "ovn-nbctl"
-
 	// TCP is the constant string for the string "TCP"
 	TCP = "TCP"
 

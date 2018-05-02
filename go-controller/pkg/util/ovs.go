@@ -8,6 +8,7 @@ import (
 	"os/exec"
 	"runtime"
 	"strings"
+	"unicode"
 
 	"github.com/openvswitch/ovn-kubernetes/go-controller/pkg/config"
 )
@@ -123,7 +124,8 @@ func RunOVNNbctlUnix(args ...string) (string, string, error) {
 	cmd.Stderr = stderr
 
 	err = cmd.Run()
-	return strings.Trim(strings.TrimSpace(stdout.String()), "\""), stderr.String(), err
+	return strings.Trim(strings.TrimFunc(stdout.String(), unicode.IsSpace), "\""),
+		stderr.String(), err
 }
 
 // RunOVNNbctlWithTimeout runs command via ovn-nbctl with a specific timeout

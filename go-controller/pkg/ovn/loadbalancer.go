@@ -3,10 +3,9 @@ package ovn
 import (
 	"encoding/json"
 	"fmt"
-	"os/exec"
 	"strings"
-	"unicode"
 
+	util "github.com/openvswitch/ovn-kubernetes/go-controller/pkg/util"
 	"github.com/sirupsen/logrus"
 	kapi "k8s.io/api/core/v1"
 )
@@ -16,29 +15,27 @@ func (ovn *Controller) getLoadBalancer(protocol kapi.Protocol) string {
 		return outStr
 	}
 
-	var out []byte
+	var out string
 	if protocol == kapi.ProtocolTCP {
-		out, _ = exec.Command(OvnNbctl, "--data=bare", "--no-heading",
-			"--columns=_uuid", "find", "load_balancer",
-			"external_ids:k8s-cluster-lb-tcp=yes").CombinedOutput()
+		out, _, _ = util.RunOVNNbctlUnix("--data=bare",
+			"--no-heading", "--columns=_uuid", "find", "load_balancer",
+			"external_ids:k8s-cluster-lb-tcp=yes")
 	} else if protocol == kapi.ProtocolUDP {
-		out, _ = exec.Command(OvnNbctl, "--data=bare", "--no-heading",
+		out, _, _ = util.RunOVNNbctlUnix("--data=bare", "--no-heading",
 			"--columns=_uuid", "find", "load_balancer",
-			"external_ids:k8s-cluster-lb-udp=yes").CombinedOutput()
+			"external_ids:k8s-cluster-lb-udp=yes")
 	}
-	outStr := strings.TrimFunc(string(out), unicode.IsSpace)
-	ovn.loadbalancerClusterCache[string(protocol)] = outStr
-	return outStr
+	ovn.loadbalancerClusterCache[string(protocol)] = out
+	return out
 }
 
 func (ovn *Controller) getLoadBalancerVIPS(
 	loadBalancer string) (map[string]interface{}, error) {
-	output, err := exec.Command(OvnNbctl, "--data=bare", "--no-heading",
-		"get", "load_balancer", loadBalancer, "vips").Output()
+	outStr, _, err := util.RunOVNNbctlUnix("--data=bare", "--no-heading",
+		"get", "load_balancer", loadBalancer, "vips")
 	if err != nil {
 		return nil, err
 	}
-	outStr := strings.TrimFunc(string(output), unicode.IsSpace)
 	if outStr == "" {
 		return nil, nil
 	}
@@ -54,11 +51,12 @@ func (ovn *Controller) getLoadBalancerVIPS(
 
 func (ovn *Controller) deleteLoadBalancerVIP(loadBalancer, vip string) {
 	vipQuotes := fmt.Sprintf("\"%s\"", vip)
-	_, err := exec.Command(OvnNbctl, "--if-exists", "remove", "load_balancer",
-		loadBalancer, "vips", vipQuotes).Output()
+	stdout, stderr, err := util.RunOVNNbctlUnix("--if-exists", "remove",
+		"load_balancer", loadBalancer, "vips", vipQuotes)
 	if err != nil {
-		logrus.Errorf("Error in deleting load balancer vip %s for %s: %v",
-			vip, loadBalancer, err)
+		logrus.Errorf("Error in deleting load balancer vip %s for %s"+
+			"stdout: %q, stderr: %q, error: %v",
+			vip, loadBalancer, stdout, stderr, err)
 	}
 }
 
@@ -70,7 +68,8 @@ func (ovn *Controller) createLoadBalancerVIP(lb string, serviceIP string, port i
 	key := fmt.Sprintf("\"%s:%d\"", serviceIP, port)
 
 	if len(ips) == 0 {
-		_, err := exec.Command(OvnNbctl, "remove", "load_balancer", lb, "vips", key).CombinedOutput()
+		_, _, err := util.RunOVNNbctlUnix("remove", "load_balancer", lb,
+			"vips", key)
 		return err
 	}
 
@@ -84,9 +83,11 @@ func (ovn *Controller) createLoadBalancerVIP(lb string, serviceIP string, port i
 	}
 	target := fmt.Sprintf("vips:\"%s:%d\"=\"%s\"", serviceIP, port, commaSeparatedEndpoints)
 
-	out, err := exec.Command(OvnNbctl, "set", "load_balancer", lb, target).CombinedOutput()
+	out, stderr, err := util.RunOVNNbctlUnix("set", "load_balancer", lb,
+		target)
 	if err != nil {
-		logrus.Errorf("Error in creating load balancer: %v(%v)", string(out), err)
+		logrus.Errorf("Error in creating load balancer: %s "+
+			"stdout: %q, stderr: %q, error: %v", lb, out, stderr, err)
 	}
 	return err
 }
