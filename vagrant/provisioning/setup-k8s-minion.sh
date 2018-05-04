@@ -60,7 +60,6 @@ nohup sudo ./kubelet --kubeconfig $HOME/kubeconfig.yaml \
                      --enable-server=true --network-plugin=cni \
                      --cni-conf-dir=/etc/cni/net.d \
                      --cni-bin-dir="/opt/cni/bin/" 2>&1 0<&- &>/dev/null &
-sleep 10
 popd
 
 # Initialize the minion and gateway.
