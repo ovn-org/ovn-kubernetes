@@ -161,13 +161,15 @@ func (oc *Controller) addLogicalPort(pod *kapi.Pod) {
 		count--
 		p, err := oc.kube.GetPod(pod.Namespace, pod.Name)
 		if err != nil {
-			logrus.Errorf("Could not get pod %s/%s for obtaining the logical switch it belongs to", pod.Namespace, pod.Name)
+			logrus.Errorf("Failed to get pod %s/%s's information from kube "+
+				"API server", pod.Namespace, pod.Name)
 			continue
 		}
 		logicalSwitch = p.Spec.NodeName
 	}
 	if logicalSwitch == "" {
-		logrus.Errorf("Could not find the logical switch that the pod %s/%s belongs to", pod.Namespace, pod.Name)
+		logrus.Errorf("Failed to find the logical switch for pod %s/%s",
+			pod.Namespace, pod.Name)
 		return
 	}
 
