@@ -102,15 +102,18 @@ uses the hostname.  kubelet allows this name to be overridden with
  -loglevel=4 \
  -k8s-apiserver="http://$CENTRAL_IP:8080" \
  -logfile="/var/log/openvswitch/ovnkube.log" \
- -init-master=$NODE_NAME -cluster-subnet="$CLUSTER_IP_SUBNET" \
+ -init-master=$NODE_NAME -init-node=$NODE_NAME \
+ -cluster-subnet="$CLUSTER_IP_SUBNET" \
  -service-cluster-ip-range=$SERVICE_IP_SUBNET \
  -nodeport \
+ -k8s-token="$TOKEN" \
  -nb-address="tcp://$CENTRAL_IP:6631" \
  -sb-address="tcp://$CENTRAL_IP:6632" 2>&1 &
 ```
 
 Note: Make sure to read /var/log/openvswitch/ovnkube.log to see that there were
-no obvious errors with argument passing.
+no obvious errors with argument passing.  Also, you should only pass
+"-init-node" argument if there is a kubelet running on the master node too.
 
 If you want to use SSL instead of TCP for OVN databases, please read
 [INSTALL.SSL.md].
