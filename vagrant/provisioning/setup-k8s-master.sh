@@ -28,6 +28,15 @@ OVN_EXTERNAL=$4
 EOL
 source ~/setup_master_args.sh
 
+# Install CNI
+pushd ~/
+wget -nv https://github.com/containernetworking/cni/releases/download/v0.5.2/cni-amd64-v0.5.2.tgz
+popd
+sudo mkdir -p /opt/cni/bin
+pushd /opt/cni/bin
+sudo tar xvzf ~/cni-amd64-v0.5.2.tgz
+popd
+
 # Install k8s
 
 # Install an etcd cluster
@@ -94,6 +103,17 @@ users:
     username: admin
 KUBECONFIG
 
+pushd k8s/server/kubernetes/server/bin
+nohup sudo ./kubelet --kubeconfig $HOME/kubeconfig.yaml \
+                     --v=2 --address=0.0.0.0 \
+                     --fail-swap-on=false \
+                     --runtime-cgroups=/systemd/system.slice \
+                     --kubelet-cgroups=/systemd/system.slice \
+                     --enable-server=true --network-plugin=cni \
+                     --cni-conf-dir=/etc/cni/net.d \
+                     --cni-bin-dir="/opt/cni/bin/" 2>&1 0<&- &>/dev/null &
+popd
+
 if [ $PROTOCOL = "ssl" ]; then
  SSL_ARGS="-nb-server-privkey /etc/openvswitch/ovnnb-privkey.pem \
  -nb-server-cert /etc/openvswitch/ovnnb-cert.pem \
@@ -113,8 +133,10 @@ nohup sudo ovnkube -k8s-kubeconfig $HOME/kubeconfig.yaml -net-controller -loglev
  -k8s-apiserver="http://$OVERLAY_IP:8080" \
  -logfile="/var/log/openvswitch/ovnkube.log" \
  -init-master="k8smaster" -cluster-subnet="192.168.0.0/16" \
+ -init-node="k8smaster" \
  -service-cluster-ip-range=172.16.1.0/24 \
  -nodeport \
+ -k8s-token="test" \
  -nb-address="$PROTOCOL://$OVERLAY_IP:6631" \
  -sb-address="$PROTOCOL://$OVERLAY_IP:6632" \
  ${SSL_ARGS} 2>&1 &
