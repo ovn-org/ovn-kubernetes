@@ -220,12 +220,6 @@ func (cluster *OvnClusterController) StartClusterMaster(masterNodeName string) e
 			subrange = append(subrange, hostsubnet)
 		}
 	}
-	masterSwitchNetwork, err := calculateMasterSwitchNetwork(clusterNetwork.String(), hostSubnetLength)
-	if err != nil {
-		return err
-	}
-	// Add the masterSwitchNetwork to subrange so that it is counted as one already taken
-	subrange = append(subrange, masterSwitchNetwork)
 	// NewSubnetAllocator is a subnet IPAM, which takes a CIDR (first argument)
 	// and gives out subnets of length 'hostSubnetLength' (second argument)
 	// but omitting any that exist in 'subrange' (third argument)
@@ -245,7 +239,7 @@ func (cluster *OvnClusterController) StartClusterMaster(masterNodeName string) e
 		}
 	}
 
-	if err := cluster.SetupMaster(masterNodeName, masterSwitchNetwork); err != nil {
+	if err := cluster.SetupMaster(masterNodeName); err != nil {
 		return err
 	}
 
@@ -256,17 +250,8 @@ func (cluster *OvnClusterController) StartClusterMaster(masterNodeName string) e
 	return cluster.watchNodes()
 }
 
-func calculateMasterSwitchNetwork(clusterNetwork string, hostSubnetLength uint32) (string, error) {
-	subAllocator, err := netutils.NewSubnetAllocator(clusterNetwork, hostSubnetLength, make([]string, 0))
-	if err != nil {
-		return "", err
-	}
-	sn, err := subAllocator.GetNetwork()
-	return sn.String(), err
-}
-
-// SetupMaster calls the external script to create the switch and central routers for the network
-func (cluster *OvnClusterController) SetupMaster(masterNodeName string, masterSwitchNetwork string) error {
+// SetupMaster creates the central router and load-balancers for the network
+func (cluster *OvnClusterController) SetupMaster(masterNodeName string) error {
 	if err := setupOVNMaster(masterNodeName); err != nil {
 		return err
 	}
@@ -334,12 +319,6 @@ func (cluster *OvnClusterController) SetupMaster(masterNodeName string, masterSw
 	if err != nil {
 		logrus.Errorf("Failed to add logical switch port to logical router, stdout: %q, stderr: %q, error: %v", stdout, stderr, err)
 		return err
-	}
-
-	err = ovn.CreateManagementPort(masterNodeName, masterSwitchNetwork,
-		cluster.ClusterIPNet.String(), cluster.ClusterServicesSubnet)
-	if err != nil {
-		return fmt.Errorf("Failed create management port: %v", err)
 	}
 
 	// Create a lock for gateway-init to co-ordinate.
