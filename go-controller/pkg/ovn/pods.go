@@ -107,6 +107,10 @@ func (oc *Controller) getGatewayFromSwitch(logicalSwitch string) (string, string
 				gatewayIPMaskStr, stderr, err)
 			return "", "", err
 		}
+		if gatewayIPMaskStr == "" {
+			return "", "", fmt.Errorf("Empty gateway IP in logical switch %s",
+				logicalSwitch)
+		}
 		oc.gatewayCache[logicalSwitch] = gatewayIPMaskStr
 	}
 	gatewayIPMask := strings.Split(gatewayIPMaskStr, "/")
