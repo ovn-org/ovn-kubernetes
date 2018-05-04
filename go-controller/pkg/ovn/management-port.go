@@ -238,16 +238,17 @@ func CreateManagementPort(nodeName, localSubnet, clusterSubnet,
 	var clusterRouter string
 	if routerMac == "" {
 		routerMac = util.GenerateMac()
-		clusterRouter, err = util.GetK8sClusterRouter()
-		if err != nil {
-			return err
-		}
+	}
 
-		_, stderr, err = util.RunOVNNbctl("--may-exist", "lrp-add", clusterRouter, "rtos-"+nodeName, routerMac, routerIPMask)
-		if err != nil {
-			logrus.Errorf("Failed to add logical port to router, stderr: %q, error: %v", stderr, err)
-			return err
-		}
+	clusterRouter, err = util.GetK8sClusterRouter()
+	if err != nil {
+		return err
+	}
+
+	_, stderr, err = util.RunOVNNbctl("--may-exist", "lrp-add", clusterRouter, "rtos-"+nodeName, routerMac, routerIPMask)
+	if err != nil {
+		logrus.Errorf("Failed to add logical port to router, stderr: %q, error: %v", stderr, err)
+		return err
 	}
 
 	// Create a logical switch and set its subnet.
