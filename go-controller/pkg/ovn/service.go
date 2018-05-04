@@ -91,9 +91,10 @@ func (ovn *Controller) syncServices(services []interface{}) {
 
 	// For each gateway, remove any VIP that does not exist in
 	// 'nodeportServices'.
-	gateways, err := ovn.getOvnGateways()
+	gateways, stderr, err := ovn.getOvnGateways()
 	if err != nil {
-		logrus.Errorf("failed to get ovn gateways. Not syncing nodeport")
+		logrus.Errorf("failed to get ovn gateways. Not syncing nodeport"+
+			"stdout: %q, stderr: %q (%v)", gateways, stderr, err)
 		return
 	}
 

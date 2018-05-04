@@ -2,17 +2,16 @@ package ovn
 
 import (
 	"fmt"
+	util "github.com/openvswitch/ovn-kubernetes/go-controller/pkg/util"
 	"github.com/sirupsen/logrus"
 	kapi "k8s.io/api/core/v1"
 	knet "k8s.io/api/networking/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/client-go/tools/cache"
 	"net"
-	"os/exec"
 	"sort"
 	"strings"
 	"sync"
-	"unicode"
 )
 
 type namespacePolicy struct {
@@ -206,34 +205,31 @@ func (oc *Controller) syncNetworkPolicies(networkPolicies []interface{}) {
 }
 
 func (oc *Controller) addAllowACLFromNode(logicalSwitch string) {
-	uuid, err := exec.Command(OvnNbctl, "--data=bare", "--no-heading",
+	uuid, stderr, err := util.RunOVNNbctlUnix("--data=bare", "--no-heading",
 		"--columns=_uuid", "find", "ACL",
 		fmt.Sprintf("external-ids:logical_switch=%s", logicalSwitch),
-		"external-ids:node-acl=yes").Output()
+		"external-ids:node-acl=yes")
 	if err != nil {
 		logrus.Errorf("find failed to get the node acl for "+
-			"logical_switch=%s (%v)", logicalSwitch, err)
+			"logical_switch=%s, stderr: %q, (%v)", logicalSwitch, stderr, err)
 		return
 	}
 
-	if string(uuid) != "" {
+	if uuid != "" {
 		return
 	}
 
-	subnetRaw, err := exec.Command(OvnNbctl, "get", "logical_switch",
-		logicalSwitch, "other-config:subnet").Output()
+	subnet, stderr, err := util.RunOVNNbctlUnix("get", "logical_switch",
+		logicalSwitch, "other-config:subnet")
 	if err != nil {
-		logrus.Errorf("failed to get the logical_switch %s subnet (%v)",
-			logicalSwitch, err)
+		logrus.Errorf("failed to get the logical_switch %s subnet, "+
+			"stderr: %q (%v)", logicalSwitch, stderr, err)
 		return
 	}
 
-	if string(subnetRaw) == "" {
+	if subnet == "" {
 		return
 	}
-
-	subnet := strings.TrimFunc(string(subnetRaw), unicode.IsSpace)
-	subnet = strings.Trim(subnet, `"`)
 
 	ip, _, err := net.ParseCIDR(subnet)
 	if err != nil {
@@ -249,15 +245,15 @@ func (oc *Controller) addAllowACLFromNode(logicalSwitch string) {
 
 	match := fmt.Sprintf("match=\"ip4.src == %s\"", address)
 
-	_, err = exec.Command(OvnNbctl, "--id=@acl", "create", "acl",
+	_, stderr, err = util.RunOVNNbctlUnix("--id=@acl", "create", "acl",
 		fmt.Sprintf("priority=%s", defaultAllowPriority),
 		"direction=to-lport", match, "action=allow-related",
 		fmt.Sprintf("external-ids:logical_switch=%s", logicalSwitch),
 		"external-ids:node-acl=yes",
-		"--", "add", "logical_switch", logicalSwitch, "acls", "@acl").Output()
+		"--", "add", "logical_switch", logicalSwitch, "acls", "@acl")
 	if err != nil {
 		logrus.Errorf("failed to create the node acl for "+
-			"logical_switch=%s (%v)", logicalSwitch, err)
+			"logical_switch=%s, stderr: %q (%v)", logicalSwitch, stderr, err)
 		return
 	}
 }
@@ -272,7 +268,7 @@ func (oc *Controller) addACLAllow(namespace, policy, logicalSwitch,
 		direction = fromLport
 	}
 
-	uuid, err := exec.Command(OvnNbctl, "--data=bare", "--no-heading",
+	uuid, stderr, err := util.RunOVNNbctlUnix("--data=bare", "--no-heading",
 		"--columns=_uuid", "find", "ACL",
 		fmt.Sprintf("external-ids:l4Match=\"%s\"", l4Match),
 		fmt.Sprintf("external-ids:ipblock_cidr=%t", ipBlockCidr),
@@ -281,19 +277,20 @@ func (oc *Controller) addACLAllow(namespace, policy, logicalSwitch,
 		fmt.Sprintf("external-ids:%s_num=%d", policyType, gressNum),
 		fmt.Sprintf("external-ids:allow_direction=%s", policyType),
 		fmt.Sprintf("external-ids:logical_switch=%s", logicalSwitch),
-		fmt.Sprintf("external-ids:logical_port=%s", logicalPort)).Output()
+		fmt.Sprintf("external-ids:logical_port=%s", logicalPort))
 	if err != nil {
 		logrus.Errorf("find failed to get the allow rule for "+
-			"namespace=%s, logical_port=%s (%v)", namespace, logicalPort, err)
+			"namespace=%s, logical_port=%s, stderr: %q (%v)",
+			namespace, logicalPort, stderr, err)
 		return
 	}
 
-	if string(uuid) != "" {
+	if uuid != "" {
 		return
 	}
 
-	_, err = exec.Command(OvnNbctl, "--id=@acl", "create", "acl",
-		fmt.Sprintf("priority=%s", defaultAllowPriority),
+	_, stderr, err = util.RunOVNNbctlUnix("--id=@acl", "create",
+		"acl", fmt.Sprintf("priority=%s", defaultAllowPriority),
 		fmt.Sprintf("direction=%s", direction), match,
 		"action=allow-related",
 		fmt.Sprintf("external-ids:l4Match=\"%s\"", l4Match),
@@ -304,38 +301,39 @@ func (oc *Controller) addACLAllow(namespace, policy, logicalSwitch,
 		fmt.Sprintf("external-ids:allow_direction=%s", policyType),
 		fmt.Sprintf("external-ids:logical_switch=%s", logicalSwitch),
 		fmt.Sprintf("external-ids:logical_port=%s", logicalPort),
-		"--", "add", "logical_switch", logicalSwitch, "acls", "@acl").Output()
+		"--", "add", "logical_switch", logicalSwitch, "acls", "@acl")
 	if err != nil {
 		logrus.Errorf("failed to create the allow-from rule for "+
-			"namespace=%s, logical_port=%s (%v)", namespace, logicalPort, err)
+			"namespace=%s, logical_port=%s, stderr: %q (%v)", namespace,
+			logicalPort, stderr, err)
 		return
 	}
 }
 
 func (oc *Controller) modifyACLAllow(namespace, policy, logicalPort,
 	oldMatch string, newMatch string, gressNum int, policyType knet.PolicyType) {
-	uuid, err := exec.Command(OvnNbctl, "--data=bare", "--no-heading",
+	uuid, stderr, err := util.RunOVNNbctlUnix("--data=bare", "--no-heading",
 		"--columns=_uuid", "find", "ACL", oldMatch,
 		fmt.Sprintf("external-ids:namespace=%s", namespace),
 		fmt.Sprintf("external-ids:policy=%s", policy),
 		fmt.Sprintf("external-ids:%s_num=%d", policyType, gressNum),
 		fmt.Sprintf("external-ids:allow_direction=%s", policyType),
-		fmt.Sprintf("external-ids:logical_port=%s", logicalPort)).Output()
+		fmt.Sprintf("external-ids:logical_port=%s", logicalPort))
 	if err != nil {
 		logrus.Errorf("find failed to get the allow rule for "+
-			"namespace=%s, logical_port=%s (%v)", namespace, logicalPort, err)
+			"namespace=%s, logical_port=%s, stderr: %q (%v)",
+			namespace, logicalPort, stderr, err)
 		return
 	}
 
-	if string(uuid) != "" {
+	if uuid != "" {
 		// We already have an ACL. We will update it.
-		uuidTrim := strings.TrimSpace(string(uuid))
-		_, err = exec.Command(OvnNbctl, "set", "acl", uuidTrim,
-			fmt.Sprintf("%s", newMatch)).Output()
+		_, stderr, err = util.RunOVNNbctlUnix("set", "acl", uuid,
+			fmt.Sprintf("%s", newMatch))
 		if err != nil {
 			logrus.Errorf("failed to modify the allow-from rule for "+
-				"namespace=%s, logical_port=%s (%v)", namespace, logicalPort,
-				err)
+				"namespace=%s, logical_port=%s, stderr: %q (%v)",
+				namespace, logicalPort, stderr, err)
 		}
 		return
 	}
@@ -344,7 +342,7 @@ func (oc *Controller) modifyACLAllow(namespace, policy, logicalPort,
 func (oc *Controller) deleteACLAllow(namespace, policy, logicalSwitch,
 	logicalPort, match, l4Match string, ipBlockCidr bool, gressNum int,
 	policyType knet.PolicyType) {
-	uuid, err := exec.Command(OvnNbctl, "--data=bare", "--no-heading",
+	uuid, stderr, err := util.RunOVNNbctlUnix("--data=bare", "--no-heading",
 		"--columns=_uuid", "find", "ACL",
 		fmt.Sprintf("external-ids:l4Match=\"%s\"", l4Match),
 		fmt.Sprintf("external-ids:ipblock_cidr=%t", ipBlockCidr),
@@ -353,25 +351,25 @@ func (oc *Controller) deleteACLAllow(namespace, policy, logicalSwitch,
 		fmt.Sprintf("external-ids:%s_num=%d", policyType, gressNum),
 		fmt.Sprintf("external-ids:allow_direction=%s", policyType),
 		fmt.Sprintf("external-ids:logical_switch=%s", logicalSwitch),
-		fmt.Sprintf("external-ids:logical_port=%s", logicalPort)).Output()
+		fmt.Sprintf("external-ids:logical_port=%s", logicalPort))
 	if err != nil {
 		logrus.Errorf("find failed to get the allow rule for "+
-			"namespace=%s, logical_port=%s (%v)", namespace, logicalPort, err)
+			"namespace=%s, logical_port=%s, stderr: %q, (%v)",
+			namespace, logicalPort, stderr, err)
 		return
 	}
 
-	if string(uuid) == "" {
+	if uuid == "" {
 		logrus.Infof("deleteACLAllow: returning because find returned empty")
 		return
 	}
 
-	uuidTrim := strings.TrimSpace(string(uuid))
-
-	_, err = exec.Command(OvnNbctl, "remove", "logical_switch", logicalSwitch,
-		"acls", uuidTrim).Output()
+	_, stderr, err = util.RunOVNNbctlUnix("remove", "logical_switch",
+		logicalSwitch, "acls", uuid)
 	if err != nil {
 		logrus.Errorf("remove failed to delete the allow-from rule for "+
-			"namespace=%s, logical_port=%s (%v)", namespace, logicalPort, err)
+			"namespace=%s, logical_port=%s, stderr: %q (%v)", namespace,
+			logicalPort, stderr, err)
 		return
 	}
 }
@@ -391,24 +389,25 @@ func (oc *Controller) addIPBlockACLDeny(namespace, policy, logicalSwitch,
 		direction = fromLport
 	}
 
-	uuid, err := exec.Command(OvnNbctl, "--data=bare", "--no-heading",
+	uuid, stderr, err := util.RunOVNNbctlUnix("--data=bare", "--no-heading",
 		"--columns=_uuid", "find", "ACL", match, "action=drop",
 		fmt.Sprintf("external-ids:ipblock-deny-direction=%s", direction),
 		fmt.Sprintf("external-ids:namespace=%s", namespace),
 		fmt.Sprintf("external-ids:policy=%s", policy),
 		fmt.Sprintf("external-ids:logical_switch=%s", logicalSwitch),
-		fmt.Sprintf("external-ids:logical_port=%s", logicalPort)).Output()
+		fmt.Sprintf("external-ids:logical_port=%s", logicalPort))
 	if err != nil {
 		logrus.Errorf("find failed to get the default deny rule for "+
-			"namespace=%s, logical_port=%s (%v)", namespace, logicalPort, err)
+			"namespace=%s, logical_port=%s stderr: %q, (%v)",
+			namespace, logicalPort, stderr, err)
 		return
 	}
 
-	if string(uuid) != "" {
+	if uuid != "" {
 		return
 	}
 
-	_, err = exec.Command("ovn-nbctl", "--id=@acl", "create", "acl",
+	_, stderr, err = util.RunOVNNbctlUnix("--id=@acl", "create", "acl",
 		fmt.Sprintf("priority=%s", priority),
 		fmt.Sprintf("direction=%s", direction), match, "action=drop",
 		fmt.Sprintf("external-ids:ipblock-deny-direction=%s", direction),
@@ -417,9 +416,10 @@ func (oc *Controller) addIPBlockACLDeny(namespace, policy, logicalSwitch,
 		fmt.Sprintf("external-ids:logical_switch=%s", logicalSwitch),
 		fmt.Sprintf("external-ids:logical_port=%s", logicalPort),
 		"--", "add", "logical_switch", logicalSwitch,
-		"acls", "@acl").Output()
+		"acls", "@acl")
 	if err != nil {
-		logrus.Errorf("error executing create ACL command %+v", err)
+		logrus.Errorf("error executing create ACL command, stderr: %q, %+v",
+			stderr, err)
 	}
 	return
 }
@@ -439,30 +439,30 @@ func (oc *Controller) deleteIPBlockACLDeny(namespace, policy,
 		direction = fromLport
 	}
 
-	uuid, err := exec.Command(OvnNbctl, "--data=bare", "--no-heading",
+	uuid, stderr, err := util.RunOVNNbctlUnix("--data=bare", "--no-heading",
 		"--columns=_uuid", "find", "ACL", match, "action=drop",
 		fmt.Sprintf("external-ids:ipblock-deny-direction=%s", direction),
 		fmt.Sprintf("external-ids:namespace=%s", namespace),
 		fmt.Sprintf("external-ids:policy=%s", policy),
 		fmt.Sprintf("external-ids:logical_switch=%s", logicalSwitch),
-		fmt.Sprintf("external-ids:logical_port=%s", logicalPort)).Output()
+		fmt.Sprintf("external-ids:logical_port=%s", logicalPort))
 	if err != nil {
 		logrus.Errorf("find failed to get the default deny rule for "+
-			"namespace=%s, logical_port=%s (%v)", namespace, logicalPort, err)
+			"namespace=%s, logical_port=%s, stderr: %q. (%v)",
+			namespace, logicalPort, stderr, err)
 		return
 	}
 
-	if string(uuid) == "" {
+	if uuid == "" {
 		return
 	}
 
-	uuidTrim := strings.TrimSpace(string(uuid))
-
-	_, err = exec.Command(OvnNbctl, "remove", "logical_switch", logicalSwitch,
-		"acls", uuidTrim).Output()
+	_, stderr, err = util.RunOVNNbctlUnix("remove", "logical_switch",
+		logicalSwitch, "acls", uuid)
 	if err != nil {
 		logrus.Errorf("remove failed to delete the deny rule for "+
-			"namespace=%s, logical_port=%s (%v)", namespace, logicalPort, err)
+			"namespace=%s, logical_port=%s, stderr: %q (%v)",
+			namespace, logicalPort, stderr, err)
 		return
 	}
 	return
@@ -479,23 +479,24 @@ func (oc *Controller) addACLDeny(namespace, logicalSwitch, logicalPort,
 		direction = fromLport
 	}
 
-	uuid, err := exec.Command(OvnNbctl, "--data=bare", "--no-heading",
+	uuid, stderr, err := util.RunOVNNbctlUnix("--data=bare", "--no-heading",
 		"--columns=_uuid", "find", "ACL", match, "action=drop",
 		fmt.Sprintf("external-ids:default-deny-direction=%s", direction),
 		fmt.Sprintf("external-ids:namespace=%s", namespace),
 		fmt.Sprintf("external-ids:logical_switch=%s", logicalSwitch),
-		fmt.Sprintf("external-ids:logical_port=%s", logicalPort)).Output()
+		fmt.Sprintf("external-ids:logical_port=%s", logicalPort))
 	if err != nil {
 		logrus.Errorf("find failed to get the default deny rule for "+
-			"namespace=%s, logical_port=%s (%v)", namespace, logicalPort, err)
+			"namespace=%s, logical_port=%s, stderr: %q (%v)", namespace,
+			logicalPort, stderr, err)
 		return
 	}
 
-	if string(uuid) != "" {
+	if uuid != "" {
 		return
 	}
 
-	_, err = exec.Command("ovn-nbctl", "--id=@acl", "create", "acl",
+	_, stderr, err = util.RunOVNNbctlUnix("--id=@acl", "create", "acl",
 		fmt.Sprintf("priority=%s", priority),
 		fmt.Sprintf("direction=%s", direction), match, "action=drop",
 		fmt.Sprintf("external-ids:default-deny-direction=%s", direction),
@@ -503,9 +504,10 @@ func (oc *Controller) addACLDeny(namespace, logicalSwitch, logicalPort,
 		fmt.Sprintf("external-ids:logical_switch=%s", logicalSwitch),
 		fmt.Sprintf("external-ids:logical_port=%s", logicalPort),
 		"--", "add", "logical_switch", logicalSwitch,
-		"acls", "@acl").Output()
+		"acls", "@acl")
 	if err != nil {
-		logrus.Errorf("error executing create ACL command %+v", err)
+		logrus.Errorf("error executing create ACL command, stderr: %q, %+v",
+			stderr, err)
 	}
 	return
 }
@@ -521,74 +523,74 @@ func (oc *Controller) deleteACLDeny(namespace, logicalSwitch, logicalPort string
 		direction = fromLport
 	}
 
-	uuid, err := exec.Command(OvnNbctl, "--data=bare", "--no-heading",
+	uuid, stderr, err := util.RunOVNNbctlUnix("--data=bare", "--no-heading",
 		"--columns=_uuid", "find", "ACL", match, "action=drop",
 		fmt.Sprintf("external-ids:default-deny-direction=%s", direction),
 		fmt.Sprintf("external-ids:namespace=%s", namespace),
 		fmt.Sprintf("external-ids:logical_switch=%s", logicalSwitch),
-		fmt.Sprintf("external-ids:logical_port=%s", logicalPort)).Output()
+		fmt.Sprintf("external-ids:logical_port=%s", logicalPort))
 	if err != nil {
 		logrus.Errorf("find failed to get the default deny rule for "+
-			"namespace=%s, logical_port=%s (%v)", namespace, logicalPort, err)
+			"namespace=%s, logical_port=%s, stderr: %q, (%v)",
+			namespace, logicalPort, stderr, err)
 		return
 	}
 
-	if string(uuid) == "" {
+	if uuid == "" {
 		return
 	}
 
-	uuidTrim := strings.TrimSpace(string(uuid))
-
-	_, err = exec.Command(OvnNbctl, "remove", "logical_switch", logicalSwitch,
-		"acls", uuidTrim).Output()
+	_, stderr, err = util.RunOVNNbctlUnix("remove", "logical_switch",
+		logicalSwitch, "acls", uuid)
 	if err != nil {
 		logrus.Errorf("remove failed to delete the deny rule for "+
-			"namespace=%s, logical_port=%s (%v)", namespace, logicalPort, err)
+			"namespace=%s, logical_port=%s, stderr: %q (%v)",
+			namespace, logicalPort, stderr, err)
 		return
 	}
 	return
 }
 
 func (oc *Controller) deleteAclsPolicy(namespace, policy string) {
-	uuids, err := exec.Command(OvnNbctl, "--data=bare", "--no-heading",
+	uuids, stderr, err := util.RunOVNNbctlUnix("--data=bare", "--no-heading",
 		"--columns=_uuid", "find", "ACL",
 		fmt.Sprintf("external-ids:namespace=%s", namespace),
-		fmt.Sprintf("external-ids:policy=%s", policy)).Output()
+		fmt.Sprintf("external-ids:policy=%s", policy))
 	if err != nil {
 		logrus.Errorf("find failed to get the allow rule for "+
-			"namespace=%s, policy=%s (%v)", namespace, policy, err)
+			"namespace=%s, policy=%s, stderr: %q (%v)",
+			namespace, policy, stderr, err)
 		return
 	}
 
-	if string(uuids) == "" {
+	if uuids == "" {
 		logrus.Debugf("deleteAclsPolicy: returning because find " +
 			"returned no ACLs")
 		return
 	}
 
-	uuidSlice := strings.Fields(string(uuids))
+	uuidSlice := strings.Fields(uuids)
 	for _, uuid := range uuidSlice {
 		// Get logical switch
-		out, err := exec.Command(OvnNbctl, "--data=bare",
+		logicalSwitch, stderr, err := util.RunOVNNbctlUnix("--data=bare",
 			"--no-heading", "--columns=_uuid", "find", "logical_switch",
-			fmt.Sprintf("acls{>=}%s", uuid)).Output()
+			fmt.Sprintf("acls{>=}%s", uuid))
 		if err != nil {
 			logrus.Errorf("find failed to get the logical_switch of acl"+
-				"uuid=%s (%v)", uuid, err)
+				"uuid=%s, stderr: %q (%v)", uuid, stderr, err)
 			continue
 		}
 
-		if string(out) == "" {
+		if logicalSwitch == "" {
 			continue
 		}
-		logicalSwitch := strings.TrimSpace(string(out))
 
-		_, err = exec.Command(OvnNbctl, "remove", "logical_switch",
-			logicalSwitch, "acls", uuid).Output()
+		_, stderr, err = util.RunOVNNbctlUnix("remove", "logical_switch",
+			logicalSwitch, "acls", uuid)
 		if err != nil {
 			logrus.Errorf("remove failed to delete the allow-from rule %s for"+
-				" namespace=%s, policy=%s, logical_switch=%s (%s)",
-				uuid, namespace, policy, logicalSwitch, err)
+				" namespace=%s, policy=%s, logical_switch=%s, stderr: %q (%v)",
+				uuid, namespace, policy, logicalSwitch, stderr, err)
 			continue
 		}
 	}
@@ -1164,15 +1166,13 @@ func (oc *Controller) getLogicalSwitchForLogicalPort(
 		return oc.logicalPortCache[logicalPort]
 	}
 
-	out, err := exec.Command(OvnNbctl, "get", "logical_switch_port",
-		logicalPort, "external-ids:logical_switch").Output()
+	logicalSwitch, stderr, err := util.RunOVNNbctlUnix("get",
+		"logical_switch_port", logicalPort, "external-ids:logical_switch")
 	if err != nil {
-		logrus.Errorf("Error obtaining logical switch for %s",
-			logicalPort)
+		logrus.Errorf("Error obtaining logical switch for %s, stderr: %q (%v)",
+			logicalPort, stderr, err)
 		return ""
 	}
-	logicalSwitch := strings.TrimSpace(string(out))
-	logicalSwitch = strings.Trim(logicalSwitch, `"`)
 	if logicalSwitch == "" {
 		logrus.Errorf("Error obtaining logical switch for %s",
 			logicalPort)

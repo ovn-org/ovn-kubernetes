@@ -1,45 +1,42 @@
 package ovn
 
 import (
-	"os/exec"
 	"strings"
-	"unicode"
 
+	util "github.com/openvswitch/ovn-kubernetes/go-controller/pkg/util"
 	"github.com/sirupsen/logrus"
 )
 
-func (ovn *Controller) getOvnGateways() ([]string, error) {
+func (ovn *Controller) getOvnGateways() ([]string, string, error) {
 	// Return all created gateways.
-	out, err := exec.Command(OvnNbctl, "--data=bare", "--no-heading",
+	out, stderr, err := util.RunOVNNbctlUnix("--data=bare", "--no-heading",
 		"--columns=name", "find",
 		"logical_router",
-		"options:chassis!=null").CombinedOutput()
-	return strings.Fields(string(out)), err
+		"options:chassis!=null")
+	return strings.Fields(out), stderr, err
 }
 
 func (ovn *Controller) getGatewayPhysicalIP(
 	physicalGateway string) (string, error) {
-	out, err := exec.Command(OvnNbctl, "get", "logical_router",
-		physicalGateway, "external_ids:physical_ip").CombinedOutput()
+	physicalIP, _, err := util.RunOVNNbctlUnix("get", "logical_router",
+		physicalGateway, "external_ids:physical_ip")
 	if err != nil {
 		return "", err
 	}
 
-	physicalIP := strings.Trim(string(out), "\" \n")
 	return physicalIP, nil
 }
 
 func (ovn *Controller) getGatewayLoadBalancer(physicalGateway,
 	protocol string) (string, error) {
 	externalIDKey := protocol + "_lb_gateway_router"
-	out, err := exec.Command(OvnNbctl, "--data=bare", "--no-heading",
+	loadBalancer, _, err := util.RunOVNNbctlUnix("--data=bare", "--no-heading",
 		"--columns=_uuid", "find", "load_balancer",
 		"external_ids:"+externalIDKey+"="+
-			physicalGateway).CombinedOutput()
+			physicalGateway)
 	if err != nil {
 		return "", err
 	}
-	loadBalancer := strings.TrimFunc(string(out), unicode.IsSpace)
 	return loadBalancer, nil
 }
 
@@ -49,7 +46,7 @@ func (ovn *Controller) createGatewaysVIP(protocol string, port, targetPort int32
 
 	// Each gateway has a separate load-balancer for N/S traffic
 
-	physicalGateways, err := ovn.getOvnGateways()
+	physicalGateways, _, err := ovn.getOvnGateways()
 	if err != nil {
 		return err
 	}

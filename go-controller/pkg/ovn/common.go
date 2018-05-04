@@ -3,9 +3,9 @@ package ovn
 import (
 	"encoding/json"
 	"fmt"
+	util "github.com/openvswitch/ovn-kubernetes/go-controller/pkg/util"
 	"github.com/sirupsen/logrus"
 	"hash/fnv"
-	"os/exec"
 	"strconv"
 	"strings"
 )
@@ -27,14 +27,14 @@ func hashedAddressSet(s string) string {
 // namespaceName.suffix1.suffix2. .suffixN)
 func (oc *Controller) forEachAddressSetUnhashedName(iteratorFn func(
 	string, string, string)) error {
-	output, err := exec.Command(OvnNbctl, "--data=bare", "--no-heading",
-		"--columns=external_ids", "find", "address_set").Output()
+	output, stderr, err := util.RunOVNNbctlUnix("--data=bare", "--no-heading",
+		"--columns=external_ids", "find", "address_set")
 	if err != nil {
-		logrus.Errorf("Error in obtaining list of address sets from OVN: %v",
-			err)
+		logrus.Errorf("Error in obtaining list of address sets from OVN: "+
+			"stdout: %q, stderr: %q err: %v", output, stderr, err)
 		return err
 	}
-	for _, addrSet := range strings.Fields(string(output)) {
+	for _, addrSet := range strings.Fields(output) {
 		if !strings.HasPrefix(addrSet, "name=") {
 			continue
 		}
@@ -53,39 +53,43 @@ func (oc *Controller) forEachAddressSetUnhashedName(iteratorFn func(
 func (oc *Controller) setAddressSet(hashName string, addresses []string) {
 	logrus.Debugf("setAddressSet for %s with %s", hashName, addresses)
 	if len(addresses) == 0 {
-		_, err := exec.Command(OvnNbctl, "clear", "address_set",
-			hashName, "addresses").Output()
+		_, stderr, err := util.RunOVNNbctlUnix("clear", "address_set",
+			hashName, "addresses")
 		if err != nil {
-			logrus.Errorf("failed to clear address_set (%v)", err)
+			logrus.Errorf("failed to clear address_set, stderr: %q (%v)",
+				stderr, err)
 		}
 		return
 	}
 
 	ips := strings.Join(addresses, " ")
-	_, err := exec.Command(OvnNbctl, "set", "address_set",
-		hashName, fmt.Sprintf("addresses=%s", ips)).Output()
+	_, stderr, err := util.RunOVNNbctlUnix("set", "address_set",
+		hashName, fmt.Sprintf("addresses=%s", ips))
 	if err != nil {
-		logrus.Errorf("failed to set address_set (%v)", err)
+		logrus.Errorf("failed to set address_set, stderr: %q (%v)",
+			stderr, err)
 	}
 }
 
 func (oc *Controller) createAddressSet(name string, hashName string,
 	addresses []string) {
 	logrus.Debugf("createAddressSet with %s and %s", name, addresses)
-	addressSet, err := exec.Command(OvnNbctl, "--data=bare", "--no-heading",
-		"--columns=_uuid", "find", "address_set",
-		fmt.Sprintf("name=%s", hashName)).Output()
+	addressSet, stderr, err := util.RunOVNNbctlUnix("--data=bare",
+		"--no-heading", "--columns=_uuid", "find", "address_set",
+		fmt.Sprintf("name=%s", hashName))
 	if err != nil {
-		logrus.Errorf("find failed to get address set (%v)", err)
+		logrus.Errorf("find failed to get address set, stderr: %q (%v)",
+			stderr, err)
 		return
 	}
 
 	// addressSet has already been created in the database and nothing to set.
-	if string(addressSet) != "" && len(addresses) == 0 {
-		_, err = exec.Command(OvnNbctl, "clear", "address_set",
-			hashName, "addresses").Output()
+	if addressSet != "" && len(addresses) == 0 {
+		_, stderr, err = util.RunOVNNbctlUnix("clear", "address_set",
+			hashName, "addresses")
 		if err != nil {
-			logrus.Errorf("failed to clear address_set (%v)", err)
+			logrus.Errorf("failed to clear address_set, stderr: %q (%v)",
+				stderr, err)
 		}
 		return
 	}
@@ -93,39 +97,42 @@ func (oc *Controller) createAddressSet(name string, hashName string,
 	ips := strings.Join(addresses, " ")
 
 	// An addressSet has already been created. Just set addresses.
-	if string(addressSet) != "" {
+	if addressSet != "" {
 		// Set the addresses
-		_, err = exec.Command(OvnNbctl, "set", "address_set",
-			hashName, fmt.Sprintf("addresses=%s", ips)).Output()
+		_, stderr, err = util.RunOVNNbctlUnix("set", "address_set",
+			hashName, fmt.Sprintf("addresses=%s", ips))
 		if err != nil {
-			logrus.Errorf("failed to set address_set (%v)", err)
+			logrus.Errorf("failed to set address_set, stderr: %q (%v)",
+				stderr, err)
 		}
 		return
 	}
 
 	// addressSet has not been created yet. Create it.
 	if len(addresses) == 0 {
-		_, err = exec.Command(OvnNbctl, "create", "address_set",
+		_, stderr, err = util.RunOVNNbctlUnix("create", "address_set",
 			fmt.Sprintf("name=%s", hashName),
-			fmt.Sprintf("external-ids:name=%s", name)).Output()
+			fmt.Sprintf("external-ids:name=%s", name))
 	} else {
-		_, err = exec.Command(OvnNbctl, "create", "address_set",
+		_, stderr, err = util.RunOVNNbctlUnix("create", "address_set",
 			fmt.Sprintf("name=%s", hashName),
 			fmt.Sprintf("external-ids:name=%s", name),
-			fmt.Sprintf("addresses=%s", ips)).Output()
+			fmt.Sprintf("addresses=%s", ips))
 	}
 	if err != nil {
-		logrus.Errorf("failed to create address_set %s (%v)", name, err)
+		logrus.Errorf("failed to create address_set %s, stderr: %q (%v)",
+			name, stderr, err)
 	}
 }
 
 func (oc *Controller) deleteAddressSet(hashName string) {
 	logrus.Debugf("deleteAddressSet %s", hashName)
 
-	_, err := exec.Command(OvnNbctl, "--if-exists", "destroy",
-		"address_set", hashName).Output()
+	_, stderr, err := util.RunOVNNbctlUnix("--if-exists", "destroy",
+		"address_set", hashName)
 	if err != nil {
-		logrus.Errorf("failed to destroy address set %s (%v)", hashName, err)
+		logrus.Errorf("failed to destroy address set %s, stderr: %q, (%v)",
+			hashName, stderr, err)
 		return
 	}
 }
