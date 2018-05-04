@@ -51,16 +51,15 @@ The Vagrant will create some sample yaml files for configuring a pod
 running Apache, as well as yaml for creating an east-west service and
 a north-south service. To try these out, follow these instructions.
 
-* cd ~/k8s/server/kubernetes/server/bin
-* ./kubectl create -f ~/apache-pod.yaml
-* ./kubectl create -f ~/nginx-pod.yaml
-* ./kubectl create -f ~/apache-e-w.yaml
-* ./kubectl create -f ~/apache-n-s.yaml
+* kubectl create -f ~/apache-pod.yaml
+* kubectl create -f ~/nginx-pod.yaml
+* kubectl create -f ~/apache-e-w.yaml
+* kubectl create -f ~/apache-n-s.yaml
 
 You can verify the services are up and running now:
 
-* ./kubectl get pods
-* ./kubectl get svc
+* kubectl get pods
+* kubectl get svc
 
 You can now get to the service from the host running Virtualbox by using
 the Nodeport and the IP 10.10.0.12 (the public-ip for the k8s-minion1 found in
