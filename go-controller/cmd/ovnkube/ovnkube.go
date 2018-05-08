@@ -52,6 +52,11 @@ func main() {
 			Name:  "init-node",
 			Usage: "initialize node, requires the name that node is registered with in kubernetes cluster",
 		},
+		cli.StringFlag{
+			Name: "remove-node",
+			Usage: "Remove a node from the OVN cluster, requires the name " +
+				"that the node is registered with in the kubernetes cluster",
+		},
 
 		// Daemon file
 		cli.StringFlag{
@@ -158,6 +163,15 @@ func runOvnKube(ctx *cli.Context) error {
 				os.Exit(1)
 			}
 		}
+	}
+
+	nodeToRemove := ctx.String("remove-node")
+	if nodeToRemove != "" {
+		err := util.RemoveNode(nodeToRemove)
+		if err != nil {
+			logrus.Errorf("Failed to remove node %v", err)
+		}
+		return nil
 	}
 
 	clientset, err := util.NewClientset(&config.Kubernetes)
