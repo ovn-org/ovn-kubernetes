@@ -42,6 +42,9 @@ Usage:
      initialize master, requires the hostname as argument
   -init-node string
      initialize node, requires the name that node is registered with in kubernetes cluster
+  -remove-node string
+     remove a node from the OVN cluster. Requires the name that node is
+     registered with in kubernetes cluster
   -net-controller
      flag to start the central controller that watches pods/services/policies
   -mtu int
