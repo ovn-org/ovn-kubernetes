@@ -16,6 +16,7 @@ func main() {
 
 	c.Commands = []cli.Command{
 		app.InitGatewayCmd,
+		app.RemoveNode,
 	}
 
 	if err := c.Run(os.Args); err != nil {
