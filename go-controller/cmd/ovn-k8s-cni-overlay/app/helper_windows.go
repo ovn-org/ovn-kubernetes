@@ -110,7 +110,9 @@ func deleteHNSEndpoint(endpointName string) error {
 // The fact that CNI add should be idempotent on Windows is stated here:
 // https://github.com/kubernetes/kubernetes/blob/master/pkg/kubelet/network/cni/cni_windows.go#L38
 // TODO: add proper MTU config (GetCurrentThreadId/SetCurrentThreadId) or via OVS properties
-func ConfigureInterface(args *skel.CmdArgs, namespace string, conf *config.OVNNetConf, podName string, macAddress string, ipAddress string, gatewayIP string, mtu int) ([]*current.Interface, error) {
+func ConfigureInterface(args *skel.CmdArgs, namespace string, conf *config.OVNNetConf,
+	podName string, macAddress string, ipAddress string, gatewayIP string,
+	mtu int, ingress, egress int64) ([]*current.Interface, error) {
 	ipAddr, ipNet, err := net.ParseCIDR(ipAddress)
 	if err != nil {
 		return nil, err
@@ -196,6 +198,14 @@ func ConfigureInterface(args *skel.CmdArgs, namespace string, conf *config.OVNNe
 		logrus.Warningf("Failed to set MTU on endpoint, reason: %q", err)
 	}
 
+	// TODO: uncomment when OVS QoS is supported on Windows
+	//if err = clearPodBandwidth(args.ContainerID); err != nil {
+	//	return nil, err
+	//}
+	//if err = setPodBandwidth(args.ContainerID, endpointName, ingress, egress); err != nil {
+	//	return nil, err
+	//}
+
 	return []*current.Interface{}, nil
 }
 
@@ -225,5 +235,7 @@ func PlatformSpecificCleanup(args *skel.CmdArgs, argsMap map[string]string) erro
 	if err = deleteHNSEndpoint(endpointName); err != nil {
 		logrus.Warningf("failed to delete HNSEndpoint %v: %v", endpointName, err)
 	}
+	// TODO: uncomment when OVS QoS is supported on Windows
+	// _ = clearPodBandwidth(args.ContainerID)
 	return nil
 }
