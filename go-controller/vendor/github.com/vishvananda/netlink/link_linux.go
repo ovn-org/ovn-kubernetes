@@ -568,6 +568,12 @@ func (h *Handle) LinkSetNsFd(link Link, fd int) error {
 // LinkSetXdpFd adds a bpf function to the driver. The fd must be a bpf
 // program loaded with bpf(type=BPF_PROG_TYPE_XDP)
 func LinkSetXdpFd(link Link, fd int) error {
+	return LinkSetXdpFdWithFlags(link, fd, 0)
+}
+
+// LinkSetXdpFdWithFlags adds a bpf function to the driver with the given
+// options. The fd must be a bpf program loaded with bpf(type=BPF_PROG_TYPE_XDP)
+func LinkSetXdpFdWithFlags(link Link, fd, flags int) error {
 	base := link.Attrs()
 	ensureIndex(base)
 	req := nl.NewNetlinkRequest(syscall.RTM_SETLINK, syscall.NLM_F_ACK)
@@ -576,7 +582,7 @@ func LinkSetXdpFd(link Link, fd int) error {
 	msg.Index = int32(base.Index)
 	req.AddData(msg)
 
-	addXdpAttrs(&LinkXdp{Fd: fd}, req)
+	addXdpAttrs(&LinkXdp{Fd: fd, Flags: uint32(flags)}, req)
 
 	_, err := req.Execute(syscall.NETLINK_ROUTE, 0)
 	return err
@@ -933,6 +939,8 @@ func (h *Handle) linkModify(link Link, flags int) error {
 		addGretapAttrs(gretap, linkInfo)
 	} else if iptun, ok := link.(*Iptun); ok {
 		addIptunAttrs(iptun, linkInfo)
+	} else if gretun, ok := link.(*Gretun); ok {
+		addGretunAttrs(gretun, linkInfo)
 	} else if vti, ok := link.(*Vti); ok {
 		addVtiAttrs(vti, linkInfo)
 	} else if vrf, ok := link.(*Vrf); ok {
@@ -1170,6 +1178,8 @@ func LinkDeserialize(hdr *syscall.NlMsghdr, m []byte) (Link, error) {
 						link = &Gretap{}
 					case "ipip":
 						link = &Iptun{}
+					case "gre":
+						link = &Gretun{}
 					case "vti":
 						link = &Vti{}
 					case "vrf":
@@ -1201,6 +1211,8 @@ func LinkDeserialize(hdr *syscall.NlMsghdr, m []byte) (Link, error) {
 						parseGretapData(link, data)
 					case "ipip":
 						parseIptunData(link, data)
+					case "gre":
+						parseGretunData(link, data)
 					case "vti":
 						parseVtiData(link, data)
 					case "vrf":
@@ -1438,6 +1450,33 @@ func (h *Handle) setProtinfoAttr(link Link, mode bool, attr int) error {
 		return err
 	}
 	return nil
+}
+
+// LinkSetTxQLen sets the transaction queue length for the link.
+// Equivalent to: `ip link set $link txqlen $qlen`
+func LinkSetTxQLen(link Link, qlen int) error {
+	return pkgHandle.LinkSetTxQLen(link, qlen)
+}
+
+// LinkSetTxQLen sets the transaction queue length for the link.
+// Equivalent to: `ip link set $link txqlen $qlen`
+func (h *Handle) LinkSetTxQLen(link Link, qlen int) error {
+	base := link.Attrs()
+	h.ensureIndex(base)
+	req := h.newNetlinkRequest(syscall.RTM_SETLINK, syscall.NLM_F_ACK)
+
+	msg := nl.NewIfInfomsg(syscall.AF_UNSPEC)
+	msg.Index = int32(base.Index)
+	req.AddData(msg)
+
+	b := make([]byte, 4)
+	native.PutUint32(b, uint32(qlen))
+
+	data := nl.NewRtAttr(syscall.IFLA_TXQLEN, b)
+	req.AddData(data)
+
+	_, err := req.Execute(syscall.NETLINK_ROUTE, 0)
+	return err
 }
 
 func parseVlanData(link Link, data []syscall.NetlinkRouteAttr) {
@@ -1704,6 +1743,67 @@ func parseGretapData(link Link, data []syscall.NetlinkRouteAttr) {
 	}
 }
 
+func addGretunAttrs(gre *Gretun, linkInfo *nl.RtAttr) {
+	data := nl.NewRtAttrChild(linkInfo, nl.IFLA_INFO_DATA, nil)
+
+	ip := gre.Local.To4()
+	if ip != nil {
+		nl.NewRtAttrChild(data, nl.IFLA_GRE_LOCAL, []byte(ip))
+	}
+	ip = gre.Remote.To4()
+	if ip != nil {
+		nl.NewRtAttrChild(data, nl.IFLA_GRE_REMOTE, []byte(ip))
+	}
+
+	if gre.IKey != 0 {
+		nl.NewRtAttrChild(data, nl.IFLA_GRE_IKEY, htonl(gre.IKey))
+		gre.IFlags |= uint16(nl.GRE_KEY)
+	}
+
+	if gre.OKey != 0 {
+		nl.NewRtAttrChild(data, nl.IFLA_GRE_OKEY, htonl(gre.OKey))
+		gre.OFlags |= uint16(nl.GRE_KEY)
+	}
+
+	nl.NewRtAttrChild(data, nl.IFLA_GRE_IFLAGS, htons(gre.IFlags))
+	nl.NewRtAttrChild(data, nl.IFLA_GRE_OFLAGS, htons(gre.OFlags))
+
+	if gre.Link != 0 {
+		nl.NewRtAttrChild(data, nl.IFLA_GRE_LINK, nl.Uint32Attr(gre.Link))
+	}
+
+	nl.NewRtAttrChild(data, nl.IFLA_GRE_PMTUDISC, nl.Uint8Attr(gre.PMtuDisc))
+	nl.NewRtAttrChild(data, nl.IFLA_GRE_TTL, nl.Uint8Attr(gre.Ttl))
+	nl.NewRtAttrChild(data, nl.IFLA_GRE_TOS, nl.Uint8Attr(gre.Tos))
+}
+
+func parseGretunData(link Link, data []syscall.NetlinkRouteAttr) {
+	gre := link.(*Gretun)
+	for _, datum := range data {
+		switch datum.Attr.Type {
+		case nl.IFLA_GRE_OKEY:
+			gre.IKey = ntohl(datum.Value[0:4])
+		case nl.IFLA_GRE_IKEY:
+			gre.OKey = ntohl(datum.Value[0:4])
+		case nl.IFLA_GRE_LOCAL:
+			gre.Local = net.IP(datum.Value[0:4])
+		case nl.IFLA_GRE_REMOTE:
+			gre.Remote = net.IP(datum.Value[0:4])
+		case nl.IFLA_GRE_IFLAGS:
+			gre.IFlags = ntohs(datum.Value[0:2])
+		case nl.IFLA_GRE_OFLAGS:
+			gre.OFlags = ntohs(datum.Value[0:2])
+
+		case nl.IFLA_GRE_TTL:
+			gre.Ttl = uint8(datum.Value[0])
+		case nl.IFLA_GRE_TOS:
+			gre.Tos = uint8(datum.Value[0])
+		case nl.IFLA_GRE_PMTUDISC:
+			gre.PMtuDisc = uint8(datum.Value[0])
+		}
+	}
+}
+
 func parseLinkStats32(data []byte) *LinkStatistics {
 	return (*LinkStatistics)((*LinkStatistics32)(unsafe.Pointer(&data[0:SizeofLinkStats32][0])).to64())
 }
@@ -1717,8 +1817,10 @@ func addXdpAttrs(xdp *LinkXdp, req *nl.NetlinkRequest) {
 	b := make([]byte, 4)
 	native.PutUint32(b, uint32(xdp.Fd))
 	nl.NewRtAttrChild(attrs, nl.IFLA_XDP_FD, b)
-	native.PutUint32(b, xdp.Flags)
-	nl.NewRtAttrChild(attrs, nl.IFLA_XDP_FLAGS, b)
+	if xdp.Flags != 0 {
+		native.PutUint32(b, xdp.Flags)
+		nl.NewRtAttrChild(attrs, nl.IFLA_XDP_FLAGS, b)
+	}
 	req.AddData(attrs)
 }
 
