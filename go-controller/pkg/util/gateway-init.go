@@ -397,9 +397,8 @@ func GatewayInit(clusterIPSubnet, nodeName, nicIP, physicalInterface,
 	}
 
 	// Default SNAT rules.
-	stdout, stderr, err = RunOVNNbctl("--", "--id=@nat", "create", "nat",
-		"type=snat", "logical_ip="+clusterIPSubnet, "external_ip="+physicalIP,
-		"--", "add", "logical_router", gatewayRouter, "nat", "@nat")
+	stdout, stderr, err = RunOVNNbctl("--may-exist", "lr-nat-add",
+		gatewayRouter, "snat", physicalIP, clusterIPSubnet)
 	if err != nil {
 		logrus.Errorf("Failed to create default SNAT rules, stdout: %q, "+
 			"stderr: %q, error: %v", stdout, stderr, err)
