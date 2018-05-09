@@ -23,13 +23,13 @@ const (
 // StartClusterNode learns the subnet assigned to it by the master controller
 // and calls the SetupNode script which establishes the logical switch
 func (cluster *OvnClusterController) StartClusterNode(name string) error {
-	count := 30
+	count := 300
 	var err error
 	var node *kapi.Node
 	var subnet *net.IPNet
 
 	for count > 0 {
-		if count != 30 {
+		if count != 300 {
 			time.Sleep(time.Second)
 		}
 		count--
