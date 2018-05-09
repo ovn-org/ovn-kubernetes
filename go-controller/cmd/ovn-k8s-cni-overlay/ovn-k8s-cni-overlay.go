@@ -15,6 +15,7 @@ import (
 	"github.com/containernetworking/cni/pkg/types"
 	"github.com/containernetworking/cni/pkg/types/current"
 	"github.com/containernetworking/cni/pkg/version"
+	"k8s.io/apimachinery/pkg/api/resource"
 	"k8s.io/apimachinery/pkg/util/wait"
 
 	"github.com/openvswitch/ovn-kubernetes/go-controller/cmd/ovn-k8s-cni-overlay/app"
@@ -38,6 +39,47 @@ func argString2Map(args string) (map[string]string, error) {
 	}
 
 	return argsMap, nil
+}
+
+var minRsrc = resource.MustParse("1k")
+var maxRsrc = resource.MustParse("1P")
+
+func validateBandwidthIsReasonable(rsrc *resource.Quantity) error {
+	if rsrc.Value() < minRsrc.Value() {
+		return fmt.Errorf("resource is unreasonably small (< 1kbit)")
+	}
+	if rsrc.Value() > maxRsrc.Value() {
+		return fmt.Errorf("resoruce is unreasonably large (> 1Pbit)")
+	}
+	return nil
+}
+
+func extractPodBandwidthResources(podAnnotations map[string]string) (int64, int64, error) {
+	ingress := int64(-1)
+	egress := int64(-1)
+	str, found := podAnnotations["kubernetes.io/ingress-bandwidth"]
+	if found {
+		ingressVal, err := resource.ParseQuantity(str)
+		if err != nil {
+			return -1, -1, err
+		}
+		if err := validateBandwidthIsReasonable(&ingressVal); err != nil {
+			return -1, -1, err
+		}
+		ingress = ingressVal.Value()
+	}
+	str, found = podAnnotations["kubernetes.io/egress-bandwidth"]
+	if found {
+		egressVal, err := resource.ParseQuantity(str)
+		if err != nil {
+			return -1, -1, err
+		}
+		if err := validateBandwidthIsReasonable(&egressVal); err != nil {
+			return -1, -1, err
+		}
+		egress = egressVal.Value()
+	}
+	return ingress, egress, nil
 }
 
 func initConfig(ctx *cli.Context, args *skel.CmdArgs) (*config.OVNNetConf, error) {
@@ -118,8 +160,15 @@ func cmdAdd(ctx *cli.Context, args *skel.CmdArgs) error {
 		return fmt.Errorf("failed in pod annotation key extract")
 	}
 
+	ingress, egress, err := extractPodBandwidthResources(annotation)
+	if err != nil {
+		return fmt.Errorf("failed to parse bandwidth request: %v", err)
+	}
+
 	var interfacesArray []*current.Interface
-	interfacesArray, err = app.ConfigureInterface(args, namespace, conf, podName, macAddress, ipAddress, gatewayIP, config.Default.MTU)
+	interfacesArray, err = app.ConfigureInterface(args, namespace, conf,
+		podName, macAddress, ipAddress, gatewayIP, config.Default.MTU,
+		ingress, egress)
 	if err != nil {
 		return err
 	}

@@ -104,7 +104,9 @@ func setupInterface(netns ns.NetNS, containerID, ifName, macAddress, ipAddress, 
 }
 
 // ConfigureInterface sets up the container interface
-func ConfigureInterface(args *skel.CmdArgs, namespace string, conf *config.OVNNetConf, podName string, macAddress string, ipAddress string, gatewayIP string, mtu int) ([]*current.Interface, error) {
+func ConfigureInterface(args *skel.CmdArgs, namespace string,
+	conf *config.OVNNetConf, podName string, macAddress string,
+	ipAddress string, gatewayIP string, mtu int, ingress, egress int64) ([]*current.Interface, error) {
 	netns, err := ns.GetNS(args.Netns)
 	if err != nil {
 		return nil, fmt.Errorf("failed to open netns %q: %v", args.Netns, err)
@@ -124,11 +126,28 @@ func ConfigureInterface(args *skel.CmdArgs, namespace string, conf *config.OVNNe
 		fmt.Sprintf("external_ids:attached_mac=%s", macAddress),
 		fmt.Sprintf("external_ids:iface-id=%s", ifaceID),
 		fmt.Sprintf("external_ids:ip_address=%s", ipAddress),
+		fmt.Sprintf("external_ids:sandbox=%s", args.ContainerID),
 	}
-	var out []byte
-	out, err = exec.Command("ovs-vsctl", ovsArgs...).CombinedOutput()
-	if err != nil {
-		return nil, fmt.Errorf("failure in plugging pod interface: %v\n  %q", err, string(out))
+	if out, err := ovsExec(ovsArgs...); err != nil {
+		return nil, fmt.Errorf("failure in plugging pod interface: %v\n  %q", err, out)
+	}
+
+	if err := clearPodBandwidth(args.ContainerID); err != nil {
+		return nil, err
+	}
+	if ingress > 0 || egress > 0 {
+		l, err := netlink.LinkByName(hostIface.Name)
+		if err != nil {
+			return nil, fmt.Errorf("failed to find host veth interface %s: %v", hostIface.Name, err)
+		}
+		err = netlink.LinkSetTxQLen(l, 1000)
+		if err != nil {
+			return nil, fmt.Errorf("failed to set host veth txqlen: %v", err)
+		}
+
+		if err := setPodBandwidth(args.ContainerID, hostIface.Name, ingress, egress); err != nil {
+			return nil, err
+		}
 	}
 
 	return []*current.Interface{hostIface, contIface}, nil
@@ -145,5 +164,8 @@ func PlatformSpecificCleanup(args *skel.CmdArgs, argsMap map[string]string) erro
 		// DEL should be idempotent; don't return an error just log it
 		logrus.Warningf("failed to delete OVS port %s: %v\n  %q", ifaceName, err, string(out))
 	}
+
+	_ = clearPodBandwidth(args.ContainerID)
+
 	return nil
 }
