@@ -19,7 +19,7 @@
 %endif
 
 Name: openvswitch-ovn-kubernetes
-Version: 0.2.0
+Version: 0.3.0
 Release: 1%{?dist}
 URL: https://www.github.com/openvswitch/ovn-kubernetes
 Summary: Open Virtual Networking Kubernetes Wedge
@@ -129,6 +129,9 @@ install -p -D -m 0644 dist/files/ovn-kubernetes.sysconfig \
 
 
 %changelog
+* Wed May 9 2018 Phil Cameron <pcameron@redhat.com> - 0.3.0-1
+- Added support for containers
+
 * Fri Mar 23 2018 Phil Cameron <pcameron@redhat.com> - 0.2.0-1
 - Added packages for systemd packages openvswitch-ovn-kubernetes-node
   and openvswitch-ovn-kubernetes-master.
