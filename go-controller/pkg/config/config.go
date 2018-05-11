@@ -17,6 +17,9 @@ import (
 
 // The following are global config parameters that other modules may access directly
 var (
+	// ovn-kubernetes version, to be changed with every release
+	Version = "0.3.0"
+
 	// Default holds parsed config file parameters and command-line overrides
 	Default = DefaultConfig{
 		MTU:           1400,

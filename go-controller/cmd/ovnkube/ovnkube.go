@@ -23,7 +23,7 @@ func main() {
 	c := cli.NewApp()
 	c.Name = "ovnkube"
 	c.Usage = "run ovnkube to start master, node, and gateway services"
-	c.Version = "0.0.2"
+	c.Version = config.Version
 	c.Flags = append([]cli.Flag{
 		// Kubernetes-related options
 		cli.StringFlag{
