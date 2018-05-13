@@ -2,4 +2,4 @@
 - name: version check | Check if the Windows version is supported by the playbooks
   fail:
     msg: The system distribution is not supported yet by the playbooks
-  when: ansible_kernel != "10.0.16299.0"
+  when: ansible_kernel != "10.0.16299.0" and ansible_kernel != "10.0.17134.0"
