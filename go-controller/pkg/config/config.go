@@ -6,6 +6,7 @@ import (
 	"net/url"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"reflect"
 	"runtime"
 	"strings"
@@ -463,38 +464,53 @@ func buildOvnAuth(direction, externalID string, cliAuth, confAuth *rawOvnAuthCon
 	}, nil
 }
 
+// getConfigFilePath returns config file path and 'true' if the config file is
+// the fallback path (eg not given by the user), 'false' if given explicitly
+// by the user
+func getConfigFilePath(ctx *cli.Context) (string, bool) {
+	configFile := ctx.String("config-file")
+	if configFile != "" {
+		return configFile, false
+	}
+
+	// Linux default
+	if runtime.GOOS != "windows" {
+		return filepath.Join("/etc", "openvswitch", "ovn_k8s.conf"), true
+	}
+
+	// Windows default
+	return filepath.Join(os.Getenv("OVS_SYSCONFDIR"), "ovn_k8s.conf"), true
+}
+
 // InitConfig reads the config file and common command-line options and
-// constructs the global config object from them.
-func InitConfig(ctx *cli.Context, defaults *Defaults) error {
+// constructs the global config object from them. It returns the config file
+// path (if explicitly specified) or an error
+func InitConfig(ctx *cli.Context, defaults *Defaults) (string, error) {
 	var cfg config
 	var err error
 	var f *os.File
+	var retConfigFile string
 
 	logrus.SetOutput(os.Stderr)
 
 	// Error parsing a user-provided config file is a hard error
-	configFile := ctx.String("config-file")
-	if configFile != "" {
-		f, err = os.Open(configFile)
-		if err != nil {
-			return fmt.Errorf("failed to open config file %s: %v", configFile, err)
-		}
-	} else {
-		// Failure to find a default config file is not a hard error
-		if runtime.GOOS != "windows" {
-			f, _ = os.Open("/etc/openvswitch/ovn_k8s.conf")
-		} else {
-			// On Windows we have to retrieve the conf path via an environment variable
-			// which gets set by the OVS installer.
-			f, _ = os.Open(fmt.Sprintf("%s\\ovn_k8s.conf", os.Getenv("OVS_SYSCONFDIR")))
-		}
+	configFile, isDefault := getConfigFilePath(ctx)
+	if !isDefault {
+		// Only return explicitly specified config file
+		retConfigFile = configFile
+	}
+
+	f, err = os.Open(configFile)
+	// Failure to find a default config file is not a hard error
+	if err != nil && !isDefault {
+		return "", fmt.Errorf("failed to open config file %s: %v", configFile, err)
 	}
 	if f != nil {
 		defer f.Close()
 
 		// Parse ovn-k8s config file.
 		if err = gcfg.ReadInto(&cfg, f); err != nil {
-			return fmt.Errorf("failed to parse config file %s: %v", f.Name(), err)
+			return "", fmt.Errorf("failed to parse config file %s: %v", f.Name(), err)
 		}
 		logrus.Infof("Parsed config file %s", f.Name())
 		logrus.Infof("Parsed config: %+v", cfg)
@@ -525,17 +541,17 @@ func InitConfig(ctx *cli.Context, defaults *Defaults) error {
 	}
 
 	if err = buildKubernetesConfig(&cliConfig, &cfg, defaults); err != nil {
-		return err
+		return "", err
 	}
 
 	OvnNorth, err = buildOvnAuth("nb", "ovn-nb", &cliConfig.OvnNorth, &cfg.OvnNorth, defaults.OvnNorthAddress)
 	if err != nil {
-		return err
+		return "", err
 	}
 
 	OvnSouth, err = buildOvnAuth("sb", "ovn-remote", &cliConfig.OvnSouth, &cfg.OvnSouth, false)
 	if err != nil {
-		return err
+		return "", err
 	}
 	logrus.Debugf("Default config: %+v", Default)
 	logrus.Debugf("Logging config: %+v", Logging)
@@ -544,7 +560,7 @@ func InitConfig(ctx *cli.Context, defaults *Defaults) error {
 	logrus.Debugf("OVN North config: %+v", OvnNorth)
 	logrus.Debugf("OVN South config: %+v", OvnSouth)
 
-	return nil
+	return retConfigFile, nil
 }
 
 // OvnDBAuth describes an OVN database location and authentication method

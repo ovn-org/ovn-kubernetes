@@ -151,7 +151,7 @@ func main() {
 	c.Version = "0.0.2"
 	c.Flags = config.Flags
 	c.Action = func(ctx *cli.Context) error {
-		if err := config.InitConfig(ctx, &config.Defaults{
+		if _, err := config.InitConfig(ctx, &config.Defaults{
 			K8sAPIServer: true,
 			K8sToken:     true,
 			K8sCert:      true,

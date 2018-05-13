@@ -77,7 +77,8 @@ func writeConfigFile(cfgFile *os.File, randomOptData bool, args ...string) error
 // runType 3: command-line args and random config file option data to test CLI override
 func runInit(app *cli.App, runType int, cfgFile *os.File, args ...string) error {
 	app.Action = func(ctx *cli.Context) error {
-		return InitConfig(ctx, nil)
+		_, err := InitConfig(ctx, nil)
+		return err
 	}
 
 	finalArgs := []string{app.Name, "-loglevel=5"}
@@ -169,8 +170,9 @@ var _ = Describe("Config Operations", func() {
 
 	It("uses expected defaults", func() {
 		app.Action = func(ctx *cli.Context) error {
-			err := InitConfig(ctx, nil)
+			cfgPath, err := InitConfig(ctx, nil)
 			Expect(err).NotTo(HaveOccurred())
+			Expect(cfgPath).To(Equal(cfgFile.Name()))
 
 			Expect(Default.MTU).To(Equal(1400))
 			Expect(Default.ConntrackZone).To(Equal(64000))
@@ -266,8 +268,10 @@ server-cacert=%s`, kubeconfigFile, kubeCAFile, nbServerCAFile, sbServerCAFile)
 		Expect(err).NotTo(HaveOccurred())
 
 		app.Action = func(ctx *cli.Context) error {
-			err = InitConfig(ctx, nil)
+			var cfgPath string
+			cfgPath, err = InitConfig(ctx, nil)
 			Expect(err).NotTo(HaveOccurred())
+			Expect(cfgPath).To(Equal(cfgFile.Name()))
 
 			Expect(Default.MTU).To(Equal(1500))
 			Expect(Default.ConntrackZone).To(Equal(64321))
@@ -377,8 +381,10 @@ server-cacert=/path/to/sb-ca.crt`), 0644)
 		Expect(err).NotTo(HaveOccurred())
 
 		app.Action = func(ctx *cli.Context) error {
-			err = InitConfig(ctx, nil)
+			var cfgPath string
+			cfgPath, err = InitConfig(ctx, nil)
 			Expect(err).NotTo(HaveOccurred())
+			Expect(cfgPath).To(Equal(cfgFile.Name()))
 
 			Expect(Default.MTU).To(Equal(1234))
 			Expect(Default.ConntrackZone).To(Equal(5555))
