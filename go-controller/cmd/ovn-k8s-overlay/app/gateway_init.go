@@ -51,7 +51,7 @@ var InitGatewayCmd = cli.Command{
 }
 
 func initGateway(context *cli.Context) error {
-	if err := config.InitConfig(context, &config.Defaults{OvnNorthAddress: true}); err != nil {
+	if _, err := config.InitConfig(context, &config.Defaults{OvnNorthAddress: true}); err != nil {
 		return err
 	}
 
