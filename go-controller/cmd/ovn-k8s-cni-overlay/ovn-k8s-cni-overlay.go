@@ -128,7 +128,7 @@ func cmdAdd(ctx *cli.Context, args *skel.CmdArgs) error {
 	}
 
 	var interfacesArray []*current.Interface
-	interfacesArray, err = app.ConfigureInterface(args, namespace, podName, macAddress, ipAddress, gatewayIP)
+	interfacesArray, err = app.ConfigureInterface(args, namespace, podName, macAddress, ipAddress, gatewayIP, config.Default.MTU)
 	if err != nil {
 		return err
 	}
