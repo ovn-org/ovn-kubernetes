@@ -486,23 +486,34 @@ func getConfigFilePath(ctx *cli.Context) (string, bool) {
 // constructs the global config object from them. It returns the config file
 // path (if explicitly specified) or an error
 func InitConfig(ctx *cli.Context, defaults *Defaults) (string, error) {
+	return InitConfigWithPath(ctx, "", defaults)
+}
+
+// InitConfigWithPath reads the given config file (or if empty, reads the config file
+// specified by command-line arguments, or empty, the default config file) and
+// common command-line options and constructs the global config object from
+// them. It returns the config file path (if explicitly specified) or an error
+func InitConfigWithPath(ctx *cli.Context, configFile string, defaults *Defaults) (string, error) {
 	var cfg config
-	var err error
-	var f *os.File
 	var retConfigFile string
+	var configFileIsDefault bool
+
+	// If no specific config file was given, try to find one from command-line
+	// arguments, or the platform-specific default config file path
+	if configFile == "" {
+		configFile, configFileIsDefault = getConfigFilePath(ctx)
+	}
 
 	logrus.SetOutput(os.Stderr)
 
-	// Error parsing a user-provided config file is a hard error
-	configFile, isDefault := getConfigFilePath(ctx)
-	if !isDefault {
+	if !configFileIsDefault {
 		// Only return explicitly specified config file
 		retConfigFile = configFile
 	}
 
-	f, err = os.Open(configFile)
+	f, err := os.Open(configFile)
 	// Failure to find a default config file is not a hard error
-	if err != nil && !isDefault {
+	if err != nil && !configFileIsDefault {
 		return "", fmt.Errorf("failed to open config file %s: %v", configFile, err)
 	}
 	if f != nil {

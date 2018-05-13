@@ -40,10 +40,27 @@ func argString2Map(args string) (map[string]string, error) {
 	return argsMap, nil
 }
 
-func cmdAdd(args *skel.CmdArgs) error {
-	conf := &types.NetConf{}
-	if err := json.Unmarshal(args.StdinData, conf); err != nil {
-		return fmt.Errorf("failed to load netconf: %v", err)
+func initConfig(ctx *cli.Context, args *skel.CmdArgs) (*config.OVNNetConf, error) {
+	conf, err := config.ReadCNIConfig(args.StdinData)
+	if err != nil {
+		return nil, fmt.Errorf("failed to load netconf: %v", err)
+	}
+
+	if _, err := config.InitConfigWithPath(ctx, conf.ConfigFilePath, &config.Defaults{
+		K8sAPIServer: true,
+		K8sToken:     true,
+		K8sCert:      true,
+	}); err != nil {
+		return nil, err
+	}
+
+	return conf, nil
+}
+
+func cmdAdd(ctx *cli.Context, args *skel.CmdArgs) error {
+	conf, err := initConfig(ctx, args)
+	if err != nil {
+		return err
 	}
 
 	argsMap, err := argString2Map(args.Args)
@@ -76,7 +93,7 @@ func cmdAdd(args *skel.CmdArgs) error {
 	// Exponential back off ~32 seconds + 7* t(api call)
 	var annotationBackoff = wait.Backoff{Duration: 1 * time.Second, Steps: 7, Factor: 1.5, Jitter: 0.1}
 	var annotation map[string]string
-	if err := wait.ExponentialBackoff(annotationBackoff, func() (bool, error) {
+	if err = wait.ExponentialBackoff(annotationBackoff, func() (bool, error) {
 		annotation, err = kubecli.GetAnnotationsOnPod(namespace, podName)
 		if err != nil {
 			// TODO: check if err is non recoverable
@@ -151,15 +168,12 @@ func main() {
 	c.Version = "0.0.2"
 	c.Flags = config.Flags
 	c.Action = func(ctx *cli.Context) error {
-		if _, err := config.InitConfig(ctx, &config.Defaults{
-			K8sAPIServer: true,
-			K8sToken:     true,
-			K8sCert:      true,
-		}); err != nil {
-			return err
-		}
-
-		skel.PluginMain(cmdAdd, cmdDel, version.All)
+		skel.PluginMain(
+			func(args *skel.CmdArgs) error {
+				return cmdAdd(ctx, args)
+			},
+			cmdDel,
+			version.All)
 		return nil
 	}
 
