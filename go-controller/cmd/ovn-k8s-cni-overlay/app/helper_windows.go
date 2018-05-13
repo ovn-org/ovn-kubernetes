@@ -120,7 +120,8 @@ func deleteHNSEndpoint(endpointName string) error {
 // Small note on this, the call to this function should be idempotent on Windows.
 // The fact that CNI add should be idempotent on Windows is stated here:
 // https://github.com/kubernetes/kubernetes/blob/master/pkg/kubelet/network/cni/cni_windows.go#L38
-func ConfigureInterface(args *skel.CmdArgs, namespace string, podName string, macAddress string, ipAddress string, gatewayIP string) ([]*current.Interface, error) {
+// TODO: add support for custom MTU
+func ConfigureInterface(args *skel.CmdArgs, namespace string, podName string, macAddress string, ipAddress string, gatewayIP string, mtu int) ([]*current.Interface, error) {
 	if strings.HasPrefix(args.Netns, containerNetNS) || strings.Compare(args.Netns, noNameNetNS) != 0 {
 		// If it is a normal container from the pod, there is nothing to do.
 		// Also, if it is not an infra container, nothing to do in this case as well.
