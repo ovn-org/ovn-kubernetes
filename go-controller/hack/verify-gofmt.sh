@@ -4,10 +4,13 @@ set -o errexit
 set -o nounset
 set -o pipefail
 
+PKGS=${PKGS:-.}
+
 find_files() {
-  find . -not \( \
+  find ${PKGS} -not \( \
       \( \
         -wholename '*/vendor/*' \
+        -o -wholename '*/_output/*' \
       \) -prune \
     \) -name '*.go'
 }
