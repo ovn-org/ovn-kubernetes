@@ -1,12 +1,9 @@
 ---
-- file:
-    path: /etc/systemd/system/kube-apiserver.service
-    state: absent
 - name: Kubernetes Master | register kube-apiserver
-  lineinfile:
+  blockinfile:
     path: /etc/systemd/system/kube-apiserver.service
     create: yes
-    line: |
+    block: |
       [Unit]
       Description=Kubernetes API Server
       Documentation=https://github.com/GoogleCloudPlatform/kubernetes
@@ -34,14 +31,11 @@
       [Install]
       WantedBy=multi-user.target
 
-- file:
-    path: /etc/systemd/system/kube-controller-manager.service
-    state: absent
 - name: Kubernetes Master | register kube-controller-manager
-  lineinfile:
+  blockinfile:
     path: /etc/systemd/system/kube-controller-manager.service
     create: yes
-    line: |
+    block: |
       [Unit]
       Description=Kubernetes Controller Manager
       Documentation=https://github.com/GoogleCloudPlatform/kubernetes
@@ -60,14 +54,11 @@
       [Install]
       WantedBy=multi-user.target
 
-- file:
-    path: /etc/systemd/system/kube-scheduler.service
-    state: absent
 - name: Kubernetes Master | register kube-scheduler
-  lineinfile:
+  blockinfile:
     path: /etc/systemd/system/kube-scheduler.service
     create: yes
-    line: |
+    block: |
       [Unit]
       Description=Kubernetes Scheduler
       Documentation=https://github.com/GoogleCloudPlatform/kubernetes
@@ -81,14 +72,11 @@
       [Install]
       WantedBy=multi-user.target
 
-- file:
-    path: /etc/systemd/system/etcd3.service
-    state: absent
 - name: Kubernetes Master | register etcd3
-  lineinfile:
+  blockinfile:
     path: /etc/systemd/system/etcd3.service
     create: yes
-    line: |
+    block: |
       [Unit]
       Description=Etcd store
       Documentation=https://github.com/coreos/etcd
@@ -110,8 +98,16 @@
     path: /etc/kubernetes/tls/admin.pem
   register: certs_check
 
-- include_tasks: ./generate_certs_master.yml
-  when: not certs_check.stat.exists or force_regen_certs
+- name: Kubernetes Master | Setting certs generated to false
+  set_fact:
+    certs_generated: false
+
+- name: Kubernetes Master | Generate certs
+  block:
+    - include_tasks: ./generate_certs_master.yml
+    - set_fact:
+        certs_generated: true
+  when: not certs_check.stat.exists
 
 - name: Kubernetes Master | Fetching certificates on the ansible host
   fetch:
@@ -133,6 +129,7 @@
     - kube-apiserver
     - kube-controller-manager
     - kube-scheduler
+  changed_when: false
 
 - name: Kubernetes Master | Setting kubectl context
   shell: |
@@ -140,28 +137,43 @@
     kubectl config set-credentials default-admin --certificate-authority=/etc/kubernetes/tls/ca.pem --client-key=/etc/kubernetes/tls/admin-key.pem --client-certificate=/etc/kubernetes/tls/admin.pem
     kubectl config set-context local --cluster=default-cluster --user=default-admin
     kubectl config use-context local
+  changed_when: false
 
-# TODO: Improve this wait
-- name: Wait 30 seconds for kube-apiserver to start
-  pause:
-    seconds: 30
+- name: Kubernetes Master | Waiting for kube-apiserver to start
+  block:
+    - name: Kubernetes Master | Running kubectl version
+      shell: kubectl version
+      changed_when: false
+      register: kubeapiserver_ready
+      until: kubeapiserver_ready.rc == 0
+      retries: 30
+      delay: 3
+  rescue:
+    - fail:
+        msg: Kubernetes API server could not reach ready status, check the service log
 
 - name: Kubernetes Master | Fetch Token
   shell: kubectl describe secret $(kubectl get secrets | grep default | cut -f1 -d ' ') | grep -E '^token' | cut -f2 -d':' | tr -d '\t'
+  changed_when: false
   register: fetch_token
+  until: fetch_token.stdout | trim != ""
+  retries: 10
+  delay: 3
 
 - name: Kubernetes Master | Register Token
   set_fact:
     TOKEN: "{{fetch_token.stdout | trim}}"
 
-- file:
-    path: /etc/systemd/system/ovn-k8s-watcher.service
-    state: absent
+- name: Kubernetes Master | Checking Token
+  fail:
+      msg: Could not fetch Token, make sure kubectl can connect to the API server
+  when: TOKEN == ""
+
 - name: Kubernetes Master | Create service OVN Kube
-  lineinfile:
+  blockinfile:
     path: /etc/systemd/system/ovn-k8s-watcher.service
     create: yes
-    line: |
+    block: |
       [Unit]
       Description=OVN watches the Kubernetes API
       Documentation=https://github.com/openvswitch/ovn-kubernetes#watchers-on-master-node
@@ -192,6 +204,7 @@
   shell: |
     ovn-nbctl set-connection ptcp:6641
     ovn-sbctl set-connection ptcp:6642
+  changed_when: false
 
 - name: Kubernetes Master | Setting OVN external_ids
   shell: |
@@ -199,6 +212,7 @@
       external_ids:ovn-nb="tcp:{{ host_public_ip }}:6641" \
       external_ids:ovn-encap-ip="{{ host_internal_ip }}" \
       external_ids:ovn-encap-type="geneve"
+  changed_when: false
 
 # TODO: enable this for future GCE support in the playbooks
 # - name: Kubernetes Master | Setting OVN external_ids when GCE
@@ -213,28 +227,22 @@
       external_ids:k8s-api-token="{{TOKEN}}"
 
     ln -fs /etc/kubernetes/tls/ca.pem /etc/openvswitch/k8s-ca.crt
+  changed_when: false
 
-- name: Kubernetes Master | start ovn-k8s-watcher
+- name: Kubernetes Master | restart ovn-k8s-watcher
   service:
     name: "ovn-k8s-watcher"
     enabled: yes
     state: restarted
     daemon_reload: yes
+  changed_when: false
 
-- file:
-    path: /root/{{item}}.yaml
-    state: absent
-  with_items:
-    - apache-pod
-    - nginx-pod
-    - apache-e-w
-    - apache-n-s
-    - nano-pod-1709
 - name: Kubernetes Master | Create test yamls
-  lineinfile:
+  blockinfile:
     path: /root/apache-pod.yaml
     create: yes
-    line: |
+    marker: "# {mark} Ansible automatic example generation"
+    block: |
       apiVersion: v1
       kind: Pod
       metadata:
@@ -248,10 +256,11 @@
         nodeSelector:
           beta.kubernetes.io/os: linux
 - name: Create test yamls
-  lineinfile:
+  blockinfile:
     path: /root/apache-e-w.yaml
     create: yes
-    line: |
+    marker: "# {mark} Ansible automatic example generation"
+    block: |
       apiVersion: v1
       kind: Service
       metadata:
@@ -268,10 +277,11 @@
         selector:
           name: webserver
 - name: Create test yamls
-  lineinfile:
+  blockinfile:
     path: /root/apache-n-s.yaml
     create: yes
-    line: |
+    marker: "# {mark} Ansible automatic example generation"
+    block: |
       apiVersion: v1
       kind: Service
       metadata:
@@ -289,10 +299,11 @@
           name: webserver
         type: NodePort
 - name: Create test yamls
-  lineinfile:
+  blockinfile:
     path: /root/nginx-pod.yaml
     create: yes
-    line: |
+    marker: "# {mark} Ansible automatic example generation"
+    block: |
       apiVersion: v1
       kind: Pod
       metadata:
@@ -306,10 +317,11 @@
         nodeSelector:
           beta.kubernetes.io/os: linux
 - name: Create test yamls
-  lineinfile:
+  blockinfile:
     path: /root/nano-pod-1709.yaml
     create: yes
-    line: |
+    marker: "# {mark} Ansible automatic example generation"
+    block: |
       apiVersion: v1
       kind: Pod
       metadata:
@@ -321,8 +333,11 @@
         - name: nano
           image: ovnkubernetes/pause
           imagePullPolicy: IfNotPresent
+        # This test yaml uses a custom nanoserver container that starts a simple
+        # http server that can be used for tests. It's much faster compared to the
+        # IIS container.
         - name: nano2
-          image: microsoft/iis:windowsservercore-1709
+          image: alinbalutoiu/nanoserver-web:1709
           imagePullPolicy: IfNotPresent
         nodeSelector:
           beta.kubernetes.io/os: windows

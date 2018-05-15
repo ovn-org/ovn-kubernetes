@@ -27,6 +27,8 @@ Note: minimum required ansible version is 2.4.2.0
 
 - Windows Server 2016 build number 14393
 
+- Windows Server 2016 build version 1803
+
 - Different Linux versions support (currently only Ubuntu 14.04 and 16.04 supported)
 
 ### Known issues

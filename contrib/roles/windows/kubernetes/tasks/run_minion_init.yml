@@ -27,6 +27,7 @@
     line: |
       $RegROPath = "HKCU:\SOFTWARE\Microsoft\Windows\CurrentVersion\Run"
       Remove-ItemProperty $RegROPath "OVN_Init_Node" -ErrorAction SilentlyContinue
+      # TODO: Remove the sleep for the next release of OVS
       sleep 30
       {{ install_info.install_path }}\\ovnkube.exe --k8s-kubeconfig={{ install_info.install_path }}\\kubeconfig.yaml --k8s-apiserver http://{{ kubernetes_info.MASTER_IP }}:8080 --init-node {{ ansible_hostname|lower }} --k8s-token {{TOKEN}} --nb-address "tcp://{{ kubernetes_info.MASTER_IP }}:6641" --sb-address "tcp://{{ kubernetes_info.MASTER_IP }}:6642" --cluster-subnet {{ kubernetes_info.CLUSTER_SUBNET }} --cni-conf-dir="{{ install_info.install_path }}/cni" --cni-plugin "ovn-k8s-cni-overlay.exe"
       ovs-vsctl set open_vswitch . external_ids:ovn-encap-ip="{{ host_public_ip }}"
@@ -50,6 +51,10 @@
 - name: Kubernetes minion | Reboot
   win_reboot:
 
-- name: Kubernetes minion | Wait for minion-init script 30 seconds
-  pause:
-    seconds: 30
+- name: Kubernetes minion | Wait for minion-init script to finish
+  win_shell: ping {{OVN_GATEWAY_IP}} -n 1
+  changed_when: false
+  register: ovngateway_ping
+  until: ovngateway_ping.rc == 0
+  retries: 30
+  delay: 3

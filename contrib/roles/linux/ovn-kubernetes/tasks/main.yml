@@ -9,9 +9,11 @@
     - facts
 
 - name: ovn-kubernetes | Checking if binaries are already present on ansible machine
-  local_action: stat path="{{playbook_dir}}/tmp/{{item}}"
+  local_action: stat path="{{ansible_tmp_dir}}/{{item}}"
   register: stat_bins_exists
-  with_items: "{{ovn_kubernetes_binaries}}"
+  with_items:
+    - "{{ovn_kubernetes_binaries.linux}}"
+    - "{{ovn_kubernetes_binaries.windows}}"
 
 - name: ovn-kubernetes | Expecting all binaries to be already present
   set_fact:
@@ -31,7 +33,7 @@
 
 - name: ovn-kubernetes | Build and install binaries
   include_tasks: ./build_install_bins.yml
-  when: binaries_missing or (binaries_missing and master) or not distribute_binaries
+  when: binaries_missing or master or not distribute_binaries
 
 - name: ovn-kubernetes | Fetching Linux and Windows binaries
   include_tasks: ./fetch_bins.yml

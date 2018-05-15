@@ -20,6 +20,8 @@
 
 # Wait for docker to create the HNS Network and the new adapter. Connection will
 # drop shortly when doing this, wait for the connection to come back
-- name: Docker network setup | Wait 15 seconds
-  pause:
-    seconds: 15
+- name: Docker network setup | Wait for system to become reachable over WinRM
+  wait_for_connection:
+    # The connection should come back usually after a few seconds
+    delay: 5
+    timeout: 60

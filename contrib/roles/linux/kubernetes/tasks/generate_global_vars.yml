@@ -1,10 +1,4 @@
 ---
-- name: Kubernetes global vars | Delete global vars
-  file:
-    path: "/tmp/generated_global_vars.yml"
-    state: absent
-  changed_when: false
-
 - name: Kubernetes global vars | Fetch Token
   shell: kubectl describe secret $(kubectl get secrets | grep default | cut -f1 -d ' ') | grep -E '^token' | cut -f2 -d':' | tr -d '\t'
   register: fetch_token
@@ -14,11 +8,16 @@
   set_fact:
     TOKEN: "{{fetch_token.stdout | trim}}"
 
+- name: Kubernetes global vars | Checking Token
+  fail:
+    msg: Could not fetch Token, make sure kubectl can run without any errors on the node {{ansible_hostname}}
+  when: TOKEN == ""
+
 - name: Kubernetes global vars | Fetch global variables
-  lineinfile:
+  blockinfile:
     path: "/tmp/generated_global_vars.yml"
     create: yes
-    line: |
+    block: |
       ---
       MASTER_IP: {{host_public_ip}}
       MASTER_INTERNAL_IP_OVN: {{MASTER_INTERNAL_IP}}
@@ -29,6 +28,7 @@
       K8S_DNS_DOMAIN: {{K8S_DNS_DOMAIN}}
       K8S_DNS_SERVICE_IP: {{K8S_DNS_SERVICE_IP}}
       K8S_API_SERVICE_IP: {{K8S_API_SERVICE_IP}}
+      certs_generated: {{certs_generated}}
   changed_when: false
 
 - name: Kubernetes global vars | Fetch vars

@@ -7,9 +7,5 @@
     group: root
     mode: 0755
   with_items:
-    - kube-apiserver
-    - kube-scheduler
-    - kube-controller-manager
-    - kubelet
-    - kube-proxy
-    - kubectl
+    - "{{kubernetes_binaries.linux_common}}"
+    - "{{kubernetes_binaries.linux_minion}}"

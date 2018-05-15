@@ -19,9 +19,6 @@
         name: linux/ovn-kubernetes
     - import_role:
         name: linux/kubernetes
-      vars:
-        force_redownload: false # force redownload kubernetes binaries even if they exists
-        force_regen_certs: false # force to generate new certs even if they exist
 
 - hosts: kube-minions-linux
   any_errors_fatal: true
@@ -46,9 +43,6 @@
         name: linux/ovn-kubernetes
     - import_role:
         name: linux/kubernetes
-      vars:
-        force_redownload: false # force redownload kubernetes binaries even if they exists
-        force_regen_certs: false # force to generate new certs even if they exist
 
 - hosts: kube-minions-windows
   remote_user: Administrator

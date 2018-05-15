@@ -22,11 +22,14 @@ kubernetes_certificates:
   tmp_generate_path: /tmp/k8s_certs
 
 kubernetes_binaries:
-  - kube-apiserver
-  - kube-scheduler
-  - kube-controller-manager
-  - kubelet
-  - kube-proxy
-  - kubectl
-  - kubelet.exe
-  - kubectl.exe
+  linux_common:
+    - kubectl
+  linux_master:
+    - kube-apiserver
+    - kube-scheduler
+    - kube-controller-manager
+  linux_minion:
+    - kubelet
+  windows:
+    - kubelet.exe
+    - kubectl.exe

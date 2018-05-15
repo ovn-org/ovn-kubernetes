@@ -17,10 +17,10 @@
   when: interface_name[0:2] == "br"
 
 - name: OVN Gateway | Create service OVN Kube Gateway
-  lineinfile:
+  blockinfile:
     path: /etc/systemd/system/ovnkube-gateway-helper.service
     create: yes
-    line: |
+    block: |
       [Unit]
       Description=OVN Gateway Helper
       Documentation=https://github.com/openvswitch/ovn-kubernetes
@@ -50,3 +50,4 @@
     enabled: yes
     state: restarted
     daemon_reload: yes
+  changed_when: false
