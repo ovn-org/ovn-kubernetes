@@ -4,4 +4,5 @@
   tags:
     - facts
 
-- include_tasks: ./distribute_binaries.yml
+- name: ovn-kubernetes | fetch binaries from the master node
+  include_tasks: ./distribute_binaries.yml

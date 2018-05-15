@@ -5,22 +5,46 @@
       external_ids:ovn-nb="tcp:{{ kubernetes_cluster_info.MASTER_IP }}:6641" \
       external_ids:ovn-encap-ip="{{ host_public_ip }}" \
       external_ids:ovn-encap-type="geneve"
+  changed_when: false
 
-- stat:
+- name: Kubernetes Minion | Checking if certs have been already generated
+  stat:
     path: /etc/kubernetes/tls/ca.pem
   register: certs_check
 
-- include_tasks: ./generate_certs_minion.yml
-  when: not certs_check.stat.exists
+- name: Kubernetes Minion | Generating certs if needed
+  include_tasks: ./generate_certs_minion.yml
+  when: not certs_check.stat.exists or certs_generated
 
-- file:
-    path: /etc/systemd/system/kubelet.service
-    state: absent
+- name: Kubernetes Minion | Creating kubeconfig
+  blockinfile:
+    path: /etc/kubernetes/kubeconfig.yaml
+    create: yes
+    block: |
+      apiVersion: v1
+      kind: Config
+      clusters:
+      - cluster:
+          certificate-authority: /etc/kubernetes/tls/ca.pem
+          server: https://{{ kubernetes_cluster_info.MASTER_IP }}
+        name: local
+      users:
+      - name: kubelet
+        user:
+          client-certificate: /etc/kubernetes/tls/node.pem
+          client-key: /etc/kubernetes/tls/node-key.pem
+      contexts:
+      - context:
+          cluster: local
+          user: kubelet
+        name: kubelet-context
+      current-context: kubelet-context
+
 - name: Kubernetes Minion | Create service kubelet
-  lineinfile:
+  blockinfile:
     path: /etc/systemd/system/kubelet.service
     create: yes
-    line: |
+    block: |
       [Unit]
       Description=Kubelet Server
       Documentation=https://github.com/GoogleCloudPlatform/kubernetes
@@ -49,6 +73,7 @@
     enabled: yes
     state: restarted
     daemon_reload: yes
+  changed_when: false
 
 - name: Kubernetes Minion | Setting kubectl context
   shell: |
@@ -56,6 +81,7 @@
     kubectl config set-credentials default-admin --certificate-authority=/etc/kubernetes/tls/ca.pem --client-key=/etc/kubernetes/tls/node-key.pem --client-certificate=/etc/kubernetes/tls/node.pem
     kubectl config set-context local --cluster=default-cluster --user=default-admin
     kubectl config use-context local
+  changed_when: false
 
 - name: Kubernetes Minion | Prepare OVN certs
   shell: |
@@ -64,6 +90,7 @@
       external_ids:k8s-api-token="{{TOKEN}}"
 
     ln -fs /etc/kubernetes/tls/ca.pem /etc/openvswitch/k8s-ca.crt
+  changed_when: false
 
 - name: Kubernetes Minion | Ensure /etc/hosts is updated
   lineinfile:

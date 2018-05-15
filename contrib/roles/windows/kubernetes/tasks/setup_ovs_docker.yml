@@ -66,8 +66,15 @@
     Set-ItemProperty $RegPath "DefaultPassword" -Value "{{ host_info.password }}" -type String
     Set-ItemProperty $RegPath "AutoLogonCount" -Value "1" -type DWord
     Set-ItemProperty $RegROPath "OVN_Init_Node" -Value "$script" -type String
+
 - name: OVS Docker network setup | Reboot
   win_reboot:
-- name: OVS Docker network setup | Wait for startup script 60 seconds
-  pause:
-    seconds: 60
+
+# Wait for docker to create the HNS Network and the new adapter. Connection will
+# drop shortly when doing this, wait for the connection to come back
+- name: OVS Docker network setup | Wait for startup script up to 120 seconds to complete
+  wait_for_connection:
+    # The connection will drop while the script is running, start checking for
+    # the connection after 30 seconds
+    delay: 30
+    timeout: 120

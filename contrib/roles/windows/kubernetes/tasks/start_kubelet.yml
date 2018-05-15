@@ -3,6 +3,8 @@
   win_file:
     path: "{{ install_info.install_path }}/kubeconfig.yaml"
     state: absent
+  changed_when: false
+
 - name: Kubelet | Create kubeconfig
   win_lineinfile:
     path: "{{ install_info.install_path }}/kubeconfig.yaml"
@@ -23,6 +25,27 @@
         name: kubelet-context
       current-context: kubelet-context
     newline: unix
+  changed_when: false
+
+- name: Kubernetes | check if Kubelet is installed
+  win_service:
+    name: kubelet
+  register: kubelet_service
+
+- name: Kubelet | Remove kubelet service if it exists
+  block:
+    - name: Kubelet | Stop Kubelet service
+      win_service:
+        name: kubelet
+        state: stopped
+      changed_when: false
+
+    - name: Kubelet | Remove Kubelet service
+      win_service:
+        name: kubelet
+        state: absent
+      changed_when: false
+  when: kubelet_service.exists
 
 - name: Kubelet | Create Kubelet service
   win_service:
@@ -32,19 +55,18 @@
     description: Kubernetes Kubelet service
     username: LocalSystem
     password: ""
+  changed_when: false
 
 - name: Kubelet | Set kubectl context
   win_shell: |
     {{ install_info.install_path }}\\kubectl.exe config set-cluster default-cluster --server={{ kubernetes_info.MASTER_IP }}:8080
     {{ install_info.install_path }}\\kubectl.exe config set-context local --cluster=default-cluster --user=default-admin
     {{ install_info.install_path }}\\kubectl.exe config use-context local
+  changed_when: false
 
 # Start the kubelet to ensure OVN gives subnet to this minion
 - name: Kubelet | Start service kubelet
   win_service:
     name: kubelet
     state: started
-
-- name: Kubelet | Wait 15 seconds for kubelet to register this node
-  pause:
-    seconds: 15
+  changed_when: false

@@ -7,8 +7,10 @@ ovn_kubernetes_info:
   branch: master
 
 ovn_kubernetes_binaries:
-  - ovnkube
-  - ovn-k8s-cni-overlay
-  - ovn-kube-util
-  - ovnkube.exe
-  - ovn-k8s-cni-overlay.exe
+  linux:
+    - ovnkube
+    - ovn-k8s-cni-overlay
+    - ovn-kube-util
+  windows:
+    - ovnkube.exe
+    - ovn-k8s-cni-overlay.exe

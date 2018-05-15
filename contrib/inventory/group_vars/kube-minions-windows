@@ -15,3 +15,5 @@ docker_version: 17.10.0-ce
 # install_path: where kubernetes binaries and CNI plugin will be installed
 install_path: C:\kubernetes
 install_beta_ovs: true
+
+windows1709: 10.0.16299.0

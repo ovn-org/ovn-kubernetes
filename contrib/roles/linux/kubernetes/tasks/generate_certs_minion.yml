@@ -73,29 +73,6 @@
       [alt_names]
       IP.1 = {{ host_internal_ip }}
 
-- lineinfile:
-    path: /etc/kubernetes/kubeconfig.yaml
-    create: yes
-    line: |
-      apiVersion: v1
-      kind: Config
-      clusters:
-      - cluster:
-          certificate-authority: /etc/kubernetes/tls/ca.pem
-          server: https://{{ kubernetes_cluster_info.MASTER_IP }}
-        name: local
-      users:
-      - name: kubelet
-        user:
-          client-certificate: /etc/kubernetes/tls/node.pem
-          client-key: /etc/kubernetes/tls/node-key.pem
-      contexts:
-      - context:
-          cluster: local
-          user: kubelet
-        name: kubelet-context
-      current-context: kubelet-context
-
 - name: Kubernetes certs | Generating Certificates
   shell: |
     cd {{ kubernetes_certificates.tmp_generate_path }}

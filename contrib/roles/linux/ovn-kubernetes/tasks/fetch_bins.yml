@@ -1,35 +1,18 @@
 ---
-- name: ovn-kubernetes | fetch ovnkube
+- name: ovn-kubernetes | fetch linux bins
   fetch:
     fail_on_missing: yes
     flat: yes
-    src: "{{ovn_kubernetes_info.build_path}}/ovn-kubernetes-checkout/go-controller/_output/go/bin/ovnkube"
-    dest: "{{ansible_tmp_dir}}/ovnkube"
+    src: "{{ovn_kubernetes_info.build_path}}/ovn-kubernetes-checkout/go-controller/_output/go/bin/{{item}}"
+    dest: "{{ansible_tmp_dir}}/{{item}}"
+  with_items:
+    - "{{ovn_kubernetes_binaries.linux}}"
 
-- name: ovn-kubernetes | fetch ovn-k8s-cni-overlay
+- name: ovn-kubernetes | fetch windows bins
   fetch:
     fail_on_missing: yes
     flat: yes
-    src: "{{ovn_kubernetes_info.build_path}}/ovn-kubernetes-checkout/go-controller/_output/go/bin/ovn-k8s-cni-overlay"
-    dest: "{{ansible_tmp_dir}}/ovn-k8s-cni-overlay"
-
-- name: ovn-kubernetes | fetch ovn-kube-util
-  fetch:
-    fail_on_missing: yes
-    flat: yes
-    src: "{{ovn_kubernetes_info.build_path}}/ovn-kubernetes-checkout/go-controller/_output/go/bin/ovn-kube-util"
-    dest: "{{ansible_tmp_dir}}/ovn-kube-util"
-
-- name: ovn-kubernetes | fetch ovnkube.exe (windows version)
-  fetch:
-    fail_on_missing: yes
-    flat: yes
-    src: "{{ovn_kubernetes_info.build_path}}/ovn-kubernetes-checkout/go-controller/_output/go/windows/ovnkube.exe"
-    dest: "{{ansible_tmp_dir}}/ovnkube.exe"
-
-- name: ovn-kubernetes | fetch ovn-k8s-cni-overlay.exe (windows version)
-  fetch:
-    fail_on_missing: yes
-    flat: yes
-    src: "{{ovn_kubernetes_info.build_path}}/ovn-kubernetes-checkout/go-controller/_output/go/windows/ovn-k8s-cni-overlay.exe"
-    dest: "{{ansible_tmp_dir}}/ovn-k8s-cni-overlay.exe"
+    src: "{{ovn_kubernetes_info.build_path}}/ovn-kubernetes-checkout/go-controller/_output/go/windows/{{item}}"
+    dest: "{{ansible_tmp_dir}}/{{item}}"
+  with_items:
+    - "{{ovn_kubernetes_binaries.windows}}"

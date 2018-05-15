@@ -4,15 +4,17 @@
   tags:
     - facts
 
-- name: Docker | Install required features
-  include_tasks: "./requirements-16299.yaml"
-  when: ansible_kernel == "10.0.16299.0"
-
 - name: Docker | Check if docker is installed
   win_service:
     name: docker
   register: docker_service
 
-- name: Docker | Get Docker binaries
-  include_tasks: ./install_docker.yml
+- name: Docker | Install docker
+  block:
+  - name: Docker | Install required features
+    include_tasks: "./requirements-16299.yaml"
+    when: ansible_kernel == windows1709
+
+  - name: Docker | Get Docker binaries
+    include_tasks: ./install_docker.yml
   when: not docker_service.exists
