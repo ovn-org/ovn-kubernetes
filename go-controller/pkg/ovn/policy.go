@@ -1196,7 +1196,6 @@ func (oc *Controller) deleteNetworkPolicy(
 	np := oc.namespacePolicies[policy.Namespace][policy.Name]
 
 	np.Lock()
-	defer np.Unlock()
 
 	// Mark the policy as deleted.
 	np.deleted = true
@@ -1219,8 +1218,13 @@ func (oc *Controller) deleteNetworkPolicy(
 	}
 
 	// We should now stop all the go routines.
+	// But, we got to give up on np Lock, so that any pending pod events can proceed further, and release their own informer lock
+	np.Unlock()
 	close(np.stop)
 	np.stopWg.Wait()
+
+	np.Lock()
+	defer np.Unlock()
 
 	for logicalPort := range np.localPods {
 		logicalSwitch := oc.getLogicalSwitchForLogicalPort(
