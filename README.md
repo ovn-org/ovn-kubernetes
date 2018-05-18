@@ -18,6 +18,8 @@ installations.  If you use packages to install OVS, you should install both
 OVS and OVN related packages.  You can also read the following quick-start
 guide for Ubuntu that installs OVS and OVN from source and packages:
 [INSTALL.UBUNTU.md]
+The following guide explains setting up an OVN overlay network on Openshift
+running on RHEL/Centos/Fedora: [INSTALL.OPENSHIFT.md](docs/INSTALL.OPENSHIFT.md)
 
 On each node, you should also install the 'ovnkube' utility that comes with
 this repository. To install it, you can run:
