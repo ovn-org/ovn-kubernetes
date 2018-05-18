@@ -35,6 +35,14 @@ rpmsnap: distsnap
 	--define "_rpmdir `pwd`" --define "_srcrpmdir `pwd`" \
 	-ba openvswitch-ovn-kubernetes.spec.snapshot
 
+.PHONY: ../go-controller/_output/go/bin/ovnkube
+
+../go-controller/_output/go/bin/ovnkube:
+	cd ../go-controller ; make
+
+container: ../go-controller/_output/go/bin/ovnkube
+	cp ../go-controller/_output/go/bin/* images
+
 .PHONY: clean
 clean:
 	-rm -rf *~ \#* .#*
