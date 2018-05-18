@@ -8,6 +8,11 @@ import (
 	kapi "k8s.io/api/core/v1"
 )
 
+type lbEndpoints struct {
+	IPs  []string
+	Port int32
+}
+
 // AddEndpoints adds endpoints and creates corresponding resources in OVN
 func (ovn *Controller) AddEndpoints(ep *kapi.Endpoints) error {
 	// get service
@@ -20,35 +25,38 @@ func (ovn *Controller) AddEndpoints(ep *kapi.Endpoints) error {
 			ep.Name, ep.Namespace)
 		return nil
 	}
-	tcpPortMap := make(map[int32]([]string))
-	udpPortMap := make(map[int32]([]string))
+	tcpPortMap := make(map[string]lbEndpoints)
+	udpPortMap := make(map[string]lbEndpoints)
 	for _, s := range ep.Subsets {
 		for _, ip := range s.Addresses {
 			for _, port := range s.Ports {
 				var ips []string
-				var portMap map[int32]([]string)
-				var ok bool
+				var portMap map[string]lbEndpoints
 				if port.Protocol == kapi.ProtocolUDP {
 					portMap = udpPortMap
 				} else if port.Protocol == kapi.ProtocolTCP {
 					portMap = tcpPortMap
 				}
-				if ips, ok = portMap[port.Port]; !ok {
+				if lbEps, ok := portMap[port.Name]; ok {
+					ips = lbEps.IPs
+				} else {
 					ips = make([]string, 0)
 				}
 				ips = append(ips, ip.IP)
-				portMap[port.Port] = ips
+				portMap[port.Name] = lbEndpoints{IPs: ips, Port: port.Port}
 			}
 		}
 	}
 
 	logrus.Debugf("Tcp table: %v\nUdp table: %v", tcpPortMap, udpPortMap)
 
-	for targetPort, ips := range tcpPortMap {
+	for svcPortName, lbEps := range tcpPortMap {
+		ips := lbEps.IPs
+		targetPort := lbEps.Port
 		for _, svcPort := range svc.Spec.Ports {
-			if svcPort.Protocol == kapi.ProtocolTCP && svcPort.TargetPort.IntVal == targetPort {
+			if svcPort.Protocol == kapi.ProtocolTCP && svcPort.Name == svcPortName {
 				if svc.Spec.Type == kapi.ServiceTypeNodePort && ovn.nodePortEnable {
-					logrus.Debugf("Creating Gateways IP for NodePort: %d, %d, %v", svcPort.NodePort, targetPort, ips)
+					logrus.Debugf("Creating Gateways IP for NodePort: %d, %v", svcPort.NodePort, ips)
 					err = ovn.createGatewaysVIP(string(svcPort.Protocol), svcPort.NodePort, targetPort, ips)
 					if err != nil {
 						logrus.Errorf("Error in creating Node Port for svc %s, node port: %d - %v\n", svc.Name, svcPort.NodePort, err)
@@ -65,9 +73,11 @@ func (ovn *Controller) AddEndpoints(ep *kapi.Endpoints) error {
 			}
 		}
 	}
-	for targetPort, ips := range udpPortMap {
+	for svcPortName, lbEps := range udpPortMap {
+		ips := lbEps.IPs
+		targetPort := lbEps.Port
 		for _, svcPort := range svc.Spec.Ports {
-			if svcPort.Protocol == kapi.ProtocolUDP && svcPort.TargetPort.IntVal == targetPort {
+			if svcPort.Protocol == kapi.ProtocolUDP && svcPort.Name == svcPortName {
 				if svc.Spec.Type == kapi.ServiceTypeNodePort && ovn.nodePortEnable {
 					err = ovn.createGatewaysVIP(string(svcPort.Protocol), svcPort.NodePort, targetPort, ips)
 					if err != nil {
