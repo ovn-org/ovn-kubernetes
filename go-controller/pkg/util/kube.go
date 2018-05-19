@@ -38,7 +38,10 @@ func NewClientset(conf *config.KubernetesConfig) (*kubernetes.Clientset, error) 
 	} else if strings.HasPrefix(conf.APIServer, "http") {
 		kconfig, err = clientcmd.BuildConfigFromFlags(conf.APIServer, "")
 	} else {
-		err = fmt.Errorf("a kubeconfig file or server/token/tls credentials are required")
+		// Assume we are running from a container managed by kubernetes
+		// and read the apiserver address and tokens from the
+		// container's environment.
+		kconfig, err = rest.InClusterConfig()
 	}
 	if err != nil {
 		return nil, err
