@@ -1,0 +1,15 @@
+
+---
+
+- name: clone kubernetes repo
+  git:
+    repo: "https://github.com/kubernetes/kubernetes.git"
+    dest: "{{ ansible_env.GOPATH }}/src/github.com/kubernetes/kubernetes"
+    force: "{{ force_clone | default(False) | bool}}"
+
+- name: build kube e2e
+  make:
+    target: all
+    params: 
+        WHAT: test/e2e/e2e.test
+    chdir: "{{ ansible_env.GOPATH }}/src/github.com/kubernetes/kubernetes"

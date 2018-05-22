@@ -17,6 +17,11 @@
   args:
     chdir: "{{ ansible_env.GOPATH }}/src/github.com/openshift/origin/test/extended"
 
+- name: run kube e2e tests
+  shell: "./_output/local/go/bin/e2e.test --provider=local --kubeconfig={{ openshift_dind_kubeconfig }} --ginkgo.focus=\"NetworkPolicy\" --ginkgo.skip=\"access on one named port\" &> {{ artifacts }}/kube_e2e_test.log"
+  args:
+    chdir: "{{ ansible_env.GOPATH }}/src/github.com/kubernetes/kubernetes"
+
 - name: cleanup after integration tests
   shell: "./hack/dind-cluster.sh stop"
   args:

@@ -16,6 +16,9 @@
     - name: clone build and install openshift 
       include: "build/openshift.yml"
 
+    - name: clone build and install kubernetes
+      include: "build/kubernetes.yml"
+
 - hosts: all
   vars_files:
     - "{{ playbook_dir }}/vars.yml"
@@ -24,5 +27,7 @@
   tasks:
     - name: clone build and install ovn-kubernetes
       include: "build/ovnkube.yml"
+    - name: clone build and install kubernetes
+      include: "build/kubernetes.yml"
     - name: run openshift-dind tests
       include: "openshift-dind-test.yml"
