@@ -160,16 +160,8 @@ func (ovn *Controller) deleteService(service *kapi.Service) {
 			protocol = TCP
 		}
 
-		// TODO: Support named ports.
-		if svcPort.TargetPort.Type == 1 {
-			continue
-		}
-
-		targetPort := svcPort.TargetPort.IntVal
-		if targetPort == 0 {
-			targetPort = svcPort.Port
-		}
-
+		// targetPort can be anything, the deletion logic does not use it
+		var targetPort int32
 		if service.Spec.Type == kapi.ServiceTypeNodePort && ovn.nodePortEnable {
 			// Delete the 'NodePort' service from a load-balancer instantiated in gateways.
 			err := ovn.createGatewaysVIP(string(protocol), port, targetPort, ips)
