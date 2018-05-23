@@ -18,18 +18,6 @@ import (
 	"github.com/openvswitch/ovn-kubernetes/go-controller/pkg/config"
 )
 
-// noNameNetNS - This is received for the infra container, in this case we
-// have to create the network endpoint and attach it to the infra container
-// containerNetNS - This is received for all the other containers from
-// the same pod, do not create the network endpoint in this case
-const (
-	noNameNetNS    = "none"
-	containerNetNS = "container:"
-)
-
-// More details about the above constants can be found in the following PR:
-// https://github.com/kubernetes/kubernetes/pull/51063
-
 // getHNSIdFromConfigOrByGatewayIP returns the HNS Id using the Gateway IP or
 // the config value
 // When the HNS Endpoint is created, it asks for the HNS Id in order to
@@ -109,11 +97,12 @@ func deleteHNSEndpoint(endpointName string) error {
 		} else {
 			logrus.Infof("HNS endpoint successfully deleted: %q", endpointName)
 		}
-	} else {
-		logrus.Infof("No endpoint with name %v was found, error %v", endpointName, err)
+		// Return the error in case delete failed, we don't want to leak any HNS Endpoints
+		return err
 	}
-	// Return the error in case it failed, we don't want to leak any HNS Endpoints
-	return err
+	// If endpoint was not found just log a message and return no error
+	logrus.Infof("No endpoint with name %v was found, error %v", endpointName, err)
+	return nil
 }
 
 // ConfigureInterface sets up the container interface
@@ -122,19 +111,16 @@ func deleteHNSEndpoint(endpointName string) error {
 // https://github.com/kubernetes/kubernetes/blob/master/pkg/kubelet/network/cni/cni_windows.go#L38
 // TODO: add support for custom MTU
 func ConfigureInterface(args *skel.CmdArgs, namespace string, podName string, macAddress string, ipAddress string, gatewayIP string, mtu int) ([]*current.Interface, error) {
-	if strings.HasPrefix(args.Netns, containerNetNS) || strings.Compare(args.Netns, noNameNetNS) != 0 {
-		// If it is a normal container from the pod, there is nothing to do.
-		// Also, if it is not an infra container, nothing to do in this case as well.
-		logrus.Infof("CNI called for normal container or infra container, nothing to do")
-		return []*current.Interface{}, nil
-	}
-
 	ipAddr, ipNet, err := net.ParseCIDR(ipAddress)
 	if err != nil {
 		return nil, err
 	}
 	ipMaskSize, _ := ipNet.Mask.Size()
-	endpointName := args.ContainerID
+	// NOTE(abalutoiu): The endpoint name should not depend on the container ID.
+	// This is for backwards compatibility in kubernetes which calls the CNI
+	// even for containers that are not the infra container.
+	// This is getting fixed by https://github.com/kubernetes/kubernetes/pull/64189
+	endpointName := fmt.Sprintf("%s_%s", namespace, podName)
 
 	var hnsNetworkId string
 	hnsNetworkId, err = getHNSIdFromConfigOrByGatewayIP(gatewayIP)
@@ -143,15 +129,16 @@ func ConfigureInterface(args *skel.CmdArgs, namespace string, podName string, ma
 		return nil, err
 	}
 
-	// Ensure that the macAddress is given in xx:xx:xx:xx:xx:xx format
-	macAddressIpFormat := strings.Replace(macAddress, ":", "-", -1)
-
 	// Check if endpoint is created, otherwise create it.
 	// This is to make the call to add idempotent
 	var createdEndpoint *hcsshim.HNSEndpoint
 	createdEndpoint, err = hcsshim.GetHNSEndpointByName(endpointName)
 	if err != nil {
 		logrus.Infof("HNS endpoint %q does not exist", endpointName)
+
+		// HNSEndpoint requires the xx-xx-xx-xx-xx-xx format for the MacAddress field
+		macAddressIpFormat := strings.Replace(macAddress, ":", "-", -1)
+
 		hnsEndpoint := &hcsshim.HNSEndpoint{
 			Name:           endpointName,
 			VirtualNetwork: hnsNetworkId,
@@ -200,8 +187,19 @@ func ConfigureInterface(args *skel.CmdArgs, namespace string, podName string, ma
 
 // PlatformSpecificCleanup deletes the OVS port and also the corresponding
 // HNS Endpoint for the OVS port.
-func PlatformSpecificCleanup(args *skel.CmdArgs) error {
-	endpointName := args.ContainerID
+func PlatformSpecificCleanup(args *skel.CmdArgs, argsMap map[string]string) error {
+	if argsMap == nil {
+		logrus.Warningf("cleanup failed, invalid args passed: %v", args.Args)
+		return nil
+	}
+	namespace := argsMap["K8S_POD_NAMESPACE"]
+	podName := argsMap["K8S_POD_NAME"]
+	if namespace == "" || podName == "" {
+		logrus.Warningf("cleanup failed, required CNI variable missing from args: %v", args.Args)
+		return nil
+	}
+
+	endpointName := fmt.Sprintf("%s_%s", namespace, podName)
 	ovsArgs := []string{
 		"del-port", "br-int", endpointName,
 	}
@@ -210,31 +208,8 @@ func PlatformSpecificCleanup(args *skel.CmdArgs) error {
 		// DEL should be idempotent; don't return an error just log it
 		logrus.Warningf("failed to delete OVS port %s: %v  %q", endpointName, err, string(out))
 	}
-	// Return the error if we can't delete the HNS Endpoint, we don't want any leaks
-	return deleteHNSEndpoint(endpointName)
-}
-
-// InitialPlatformCheck checks to see if the container is an infra container
-// by looking at the namespace prefix. If it's not, then it has nothing to
-// do and the CNI should stop here.
-func InitialPlatformCheck(args *skel.CmdArgs) (bool, *current.Result) {
-	if strings.HasPrefix(args.Netns, containerNetNS) || strings.Compare(args.Netns, noNameNetNS) != 0 {
-		// If it is a normal container from the pod, there is nothing to do.
-		// Also, if it is not an infra container, nothing to do in this case as well.
-		logrus.Infof("InitialPlatformCheck: CNI called for normal container or infra container, nothing to do")
-		// This result is ignored anyway by Kubernetes.
-		fakeAddr, fakeAddrNet, _ := net.ParseCIDR("1.2.3.4/32")
-		fakeResult := &current.Result{
-			IPs: []*current.IPConfig{
-				{
-					Version:   "4",
-					Interface: current.Int(1),
-					Address:   net.IPNet{IP: fakeAddr, Mask: fakeAddrNet.Mask},
-					Gateway:   net.ParseIP("1.2.3.4"),
-				},
-			},
-		}
-		return true, fakeResult
+	if err = deleteHNSEndpoint(endpointName); err != nil {
+		logrus.Warningf("failed to delete HNSEndpoint %v: %v", endpointName, err)
 	}
-	return false, &current.Result{}
+	return nil
 }

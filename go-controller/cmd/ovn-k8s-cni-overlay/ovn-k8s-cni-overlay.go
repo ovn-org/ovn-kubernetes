@@ -80,15 +80,6 @@ func cmdAdd(ctx *cli.Context, args *skel.CmdArgs) error {
 	}
 	kubecli := &kube.Kube{KClient: clientset}
 
-	// TODO: Remove the following once the Kubernetes will get
-	// proper Windows CNI support.
-	// NOTE Windows ONLY: there are some cases where we want to return here
-	// and not to continue
-	stop, fakeResult := app.InitialPlatformCheck(args)
-	if stop {
-		return types.PrintResult(fakeResult, conf.CNIVersion)
-	}
-
 	// Get the IP address and MAC address from the API server.
 	// Exponential back off ~32 seconds + 7* t(api call)
 	var annotationBackoff = wait.Backoff{Duration: 1 * time.Second, Steps: 7, Factor: 1.5, Jitter: 0.1}
@@ -158,7 +149,10 @@ func cmdAdd(ctx *cli.Context, args *skel.CmdArgs) error {
 }
 
 func cmdDel(args *skel.CmdArgs) error {
-	return app.PlatformSpecificCleanup(args)
+	// argsMap is used only on Windows. Ignore the error, DEL should be idempotent
+	argsMap, _ := argString2Map(args.Args)
+
+	return app.PlatformSpecificCleanup(args, argsMap)
 }
 
 func main() {
