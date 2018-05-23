@@ -757,7 +757,13 @@ func (a *OvnDBAuth) SetDBAuth() error {
 			// Must happen *before* setting the "ovn-remote"
 			// external-id.
 			if a.ctlCmd == "ovn-sbctl" {
-				out, err := runOVSVsctl("set-ssl", a.PrivKey, a.Cert, a.CACert)
+				out, err := runOVSVsctl("del-ssl")
+				if err != nil {
+					return fmt.Errorf("error deleting ovs-vsctl SSL "+
+						"configuration: %q (%v)", out, err)
+				}
+
+				out, err = runOVSVsctl("set-ssl", a.PrivKey, a.Cert, a.CACert)
 				if err != nil {
 					return fmt.Errorf("error setting client southbound DB SSL options: %v\n  %q", err, out)
 				}
