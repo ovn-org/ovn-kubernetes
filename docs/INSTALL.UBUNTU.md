@@ -2,15 +2,14 @@
 
 ## Installing OVS and OVN from packages
 
-Some students in a university in New Zealand maintain OVS and OVN packages at
-http://packages.wand.net.nz/
-
+For testing and POCs, we maintain OVS and OVN packages in a AWS VM.
+(For production, it is recommended that you build your own OVS packages.)
 To install packages from there, you can run:
 
 ```
 sudo apt-get install apt-transport-https
-echo "deb https://packages.wand.net.nz $(lsb_release -sc) main" | sudo tee /etc/apt/sources.list.d/wand.list
-sudo curl https://packages.wand.net.nz/keyring.gpg -o /etc/apt/trusted.gpg.d/wand.gpg
+echo "deb http://18.191.116.101/openvswitch/stable /" |  sudo tee /etc/apt/sources.list.d/openvswitch.list
+wget -O - http://18.191.116.101/openvswitch/keyFile |  sudo apt-key add -
 sudo apt-get update
 ```
 
@@ -18,12 +17,10 @@ To install OVS bits on all nodes, run:
 
 ```
 sudo apt-get build-dep dkms
-sudo apt-get install python-six openssl python-pip -y
-sudo -H pip install --upgrade pip
+sudo apt-get install python-six openssl -y
 
 sudo apt-get install openvswitch-datapath-dkms -y
 sudo apt-get install openvswitch-switch openvswitch-common -y
-sudo -H pip install ovs
 ```
 
 On the master node, where you intend to start OVN's central components,
@@ -52,7 +49,6 @@ apt-get install -y build-essential fakeroot debhelper \
                     python-six \
                     libtool git dh-autoreconf \
                     linux-headers-$(uname -r)
-easy_install -U pip
 ```
 
 Clone the OVS repo.
@@ -75,12 +71,6 @@ Install the executables
 ```
 make install
 make modules_install
-```
-
-Install OVS python libraries
-
-```
-pip install ovs
 ```
 
 Create a depmod.d file to use OVS kernel modules from this repo instead of
