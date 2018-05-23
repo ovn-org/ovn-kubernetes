@@ -50,7 +50,7 @@
 - name: Kubelet | Create Kubelet service
   win_service:
     name: kubelet
-    path: '"{{ install_info.install_path }}\\servicewrapper.exe" kubelet "{{ install_info.install_path }}\\kubelet.exe" --hostname-override="{{ ansible_hostname }}" --cluster-dns="{{ kubernetes_info.K8S_DNS_SERVICE_IP }}" --cluster-domain="{{ kubernetes_info.K8S_DNS_DOMAIN }}" --pod-infra-container-image="{{kubernetes_info.infracontainername_1709}}" --resolv-conf="" --kubeconfig="{{ install_info.install_path }}\\kubeconfig.yaml" --network-plugin=cni --cni-bin-dir="{{ install_info.install_path }}\\cni" --cni-conf-dir="{{ install_info.install_path }}\\cni" --log-dir="{{ install_info.install_path }}"'
+    path: '"{{ install_info.install_path }}\\servicewrapper.exe" kubelet "{{ install_info.install_path }}\\kubelet.exe" --hostname-override="{{ ansible_hostname }}" --cluster-dns="{{ kubernetes_info.K8S_DNS_SERVICE_IP }}" --cluster-domain="{{ kubernetes_info.K8S_DNS_DOMAIN }}" --pod-infra-container-image="{{kubernetes_info.infracontainername_1709}}" --resolv-conf="" --kubeconfig="{{ install_info.install_path }}\\kubeconfig.yaml" --network-plugin=cni --cni-bin-dir="{{ install_info.install_path }}\\cni" --cni-conf-dir="{{ install_info.install_path }}\\cni" --log-dir="{{ install_info.install_path }}" --cgroups-per-qos=false --enforce-node-allocatable=""'
     display_name: Kubernetes Kubelet
     description: Kubernetes Kubelet service
     username: LocalSystem
