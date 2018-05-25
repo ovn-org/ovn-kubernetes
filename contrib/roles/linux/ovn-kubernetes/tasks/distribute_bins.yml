@@ -13,14 +13,6 @@
     group: root
     mode: 0755
 
-- name: ovn-kubernetes | get ovn-k8s-overlay
-  copy:
-    src: "{{ansible_tmp_dir}}/ovn-k8s-overlay"
-    dest: "{{ ovn_kubernetes_info.install_path }}/ovn-k8s-overlay"
-    owner: root
-    group: root
-    mode: 0755
-
 - name: ovn-kubernetes | get ovn-kube-util
   copy:
     src: "{{ansible_tmp_dir}}/ovn-kube-util"

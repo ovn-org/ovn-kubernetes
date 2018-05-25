@@ -8,7 +8,6 @@ ovn_kubernetes_info:
 
 ovn_kubernetes_binaries:
   - ovnkube
-  - ovn-k8s-overlay
   - ovn-k8s-cni-overlay
   - ovn-kube-util
   - ovnkube.exe
