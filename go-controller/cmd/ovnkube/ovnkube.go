@@ -17,6 +17,8 @@ import (
 	"github.com/openvswitch/ovn-kubernetes/go-controller/pkg/factory"
 	"github.com/openvswitch/ovn-kubernetes/go-controller/pkg/ovn"
 	util "github.com/openvswitch/ovn-kubernetes/go-controller/pkg/util"
+
+	kexec "k8s.io/utils/exec"
 )
 
 func main() {
@@ -125,7 +127,8 @@ func delPidfile(pidfile string) {
 }
 
 func runOvnKube(ctx *cli.Context) error {
-	_, err := config.InitConfig(ctx, nil)
+	exec := kexec.New()
+	_, err := config.InitConfig(ctx, exec, nil)
 	if err != nil {
 		return err
 	}
@@ -168,6 +171,11 @@ func runOvnKube(ctx *cli.Context) error {
 				os.Exit(1)
 			}
 		}
+	}
+
+	if err = util.SetExec(exec); err != nil {
+		logrus.Errorf("Failed to initialize exec helper: %v", err)
+		return err
 	}
 
 	nodeToRemove := ctx.String("remove-node")

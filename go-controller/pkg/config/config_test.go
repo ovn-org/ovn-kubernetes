@@ -9,6 +9,7 @@ import (
 	"testing"
 
 	"github.com/urfave/cli"
+	kexec "k8s.io/utils/exec"
 
 	. "github.com/onsi/ginkgo"
 	. "github.com/onsi/gomega"
@@ -77,7 +78,7 @@ func writeConfigFile(cfgFile *os.File, randomOptData bool, args ...string) error
 // runType 3: command-line args and random config file option data to test CLI override
 func runInit(app *cli.App, runType int, cfgFile *os.File, args ...string) error {
 	app.Action = func(ctx *cli.Context) error {
-		_, err := InitConfig(ctx, nil)
+		_, err := InitConfig(ctx, kexec.New(), nil)
 		return err
 	}
 
@@ -170,7 +171,7 @@ var _ = Describe("Config Operations", func() {
 
 	It("uses expected defaults", func() {
 		app.Action = func(ctx *cli.Context) error {
-			cfgPath, err := InitConfig(ctx, nil)
+			cfgPath, err := InitConfig(ctx, kexec.New(), nil)
 			Expect(err).NotTo(HaveOccurred())
 			Expect(cfgPath).To(Equal(cfgFile.Name()))
 
@@ -269,7 +270,7 @@ server-cacert=%s`, kubeconfigFile, kubeCAFile, nbServerCAFile, sbServerCAFile)
 
 		app.Action = func(ctx *cli.Context) error {
 			var cfgPath string
-			cfgPath, err = InitConfig(ctx, nil)
+			cfgPath, err = InitConfig(ctx, kexec.New(), nil)
 			Expect(err).NotTo(HaveOccurred())
 			Expect(cfgPath).To(Equal(cfgFile.Name()))
 
@@ -382,7 +383,7 @@ server-cacert=/path/to/sb-ca.crt`), 0644)
 
 		app.Action = func(ctx *cli.Context) error {
 			var cfgPath string
-			cfgPath, err = InitConfig(ctx, nil)
+			cfgPath, err = InitConfig(ctx, kexec.New(), nil)
 			Expect(err).NotTo(HaveOccurred())
 			Expect(cfgPath).To(Equal(cfgFile.Name()))
 
