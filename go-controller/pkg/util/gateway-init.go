@@ -4,7 +4,6 @@ import (
 	"fmt"
 	"github.com/sirupsen/logrus"
 	"net"
-	"os/exec"
 	"strings"
 )
 
@@ -305,7 +304,7 @@ func GatewayInit(clusterIPSubnet, nodeName, nicIP, physicalInterface,
 		}
 
 		// Flush the IP address of the physical interface.
-		_, err = exec.Command("ip", "addr", "flush", "dev", physicalInterface).CombinedOutput()
+		_, _, err = RunIP("addr", "flush", "dev", physicalInterface)
 		if err != nil {
 			return err
 		}

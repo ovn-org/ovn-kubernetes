@@ -155,46 +155,45 @@ func configureManagementPort(clusterSubnet, clusterServicesSubnet,
 	}
 
 	// Up the interface.
-	_, err := exec.Command("ip", "link", "set", interfaceName, "up").CombinedOutput()
+	_, _, err := util.RunIP("link", "set", interfaceName, "up")
 	if err != nil {
 		return err
 	}
 
 	// The interface may already exist, in which case delete the routes and IP.
-	_, err = exec.Command("ip", "addr", "flush", "dev", interfaceName).CombinedOutput()
+	_, _, err = util.RunIP("addr", "flush", "dev", interfaceName)
 	if err != nil {
 		return err
 	}
 
 	// Assign IP address to the internal interface.
-	_, err = exec.Command("ip", "addr", "add", interfaceIP, "dev", interfaceName).CombinedOutput()
+	_, _, err = util.RunIP("addr", "add", interfaceIP, "dev", interfaceName)
 	if err != nil {
 		return err
 	}
 
 	// Flush the route for the entire subnet (in case it was added before).
-	_, err = exec.Command("ip", "route", "flush", clusterSubnet).CombinedOutput()
+	_, _, err = util.RunIP("route", "flush", clusterSubnet)
 	if err != nil {
 		return err
 	}
 
 	// Create a route for the entire subnet.
-	_, err = exec.Command("ip", "route", "add", clusterSubnet, "via", routerIP).CombinedOutput()
+	_, _, err = util.RunIP("route", "add", clusterSubnet, "via", routerIP)
 	if err != nil {
 		return err
 	}
 
 	if clusterServicesSubnet != "" {
 		// Flush the route for the services subnet (in case it was added before).
-		_, err = exec.Command("ip", "route", "flush",
-			clusterServicesSubnet).CombinedOutput()
+		_, _, err = util.RunIP("route", "flush", clusterServicesSubnet)
 		if err != nil {
 			return err
 		}
 
 		// Create a route for the services subnet.
-		_, err = exec.Command("ip", "route", "add", clusterServicesSubnet,
-			"via", routerIP).CombinedOutput()
+		_, _, err = util.RunIP("route", "add", clusterServicesSubnet,
+			"via", routerIP)
 		if err != nil {
 			return err
 		}

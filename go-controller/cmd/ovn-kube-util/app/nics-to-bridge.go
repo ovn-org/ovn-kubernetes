@@ -6,6 +6,7 @@ import (
 	"github.com/openvswitch/ovn-kubernetes/go-controller/pkg/util"
 	"github.com/urfave/cli"
 	"k8s.io/apimachinery/pkg/util/errors"
+	kexec "k8s.io/utils/exec"
 )
 
 // NicsToBridgeCommand creates ovs bridge for provided nic interfaces.
@@ -17,6 +18,10 @@ var NicsToBridgeCommand = cli.Command{
 		args := context.Args()
 		if len(args) == 0 {
 			return fmt.Errorf("Please specify list of nic interfaces")
+		}
+
+		if err := util.SetExec(kexec.New()); err != nil {
+			return err
 		}
 
 		var errorList []error
@@ -39,6 +44,10 @@ var BridgesToNicCommand = cli.Command{
 		args := context.Args()
 		if len(args) == 0 {
 			return fmt.Errorf("Please specify list of bridges")
+		}
+
+		if err := util.SetExec(kexec.New()); err != nil {
+			return err
 		}
 
 		var errorList []error

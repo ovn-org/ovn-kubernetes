@@ -5,7 +5,6 @@ import (
 	"net"
 	"net/url"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"reflect"
 	"runtime"
@@ -14,6 +13,8 @@ import (
 	"github.com/sirupsen/logrus"
 	"github.com/urfave/cli"
 	gcfg "gopkg.in/gcfg.v1"
+
+	kexec "k8s.io/utils/exec"
 )
 
 // The following are global config parameters that other modules may access directly
@@ -344,22 +345,33 @@ const (
 )
 
 // Can't use pkg/ovs or pkg/util here because those package import this one
-func runOVSVsctl(args ...string) (string, error) {
-	cmdPath, err := exec.LookPath(ovsVsctlCommand)
+func rawExec(exec kexec.Interface, cmd string, args ...string) (string, error) {
+	cmdPath, err := exec.LookPath(cmd)
 	if err != nil {
 		return "", err
 	}
 
-	newArgs := append([]string{"--timeout=5"}, args...)
-	out, err := exec.Command(cmdPath, newArgs...).CombinedOutput()
+	logrus.Debugf("exec: %s %s", cmdPath, strings.Join(args, " "))
+	out, err := exec.Command(cmdPath, args...).CombinedOutput()
 	if err != nil {
+		logrus.Debugf("exec: %s %s => %v", cmdPath, strings.Join(args, " "), err)
 		return "", err
 	}
-	return strings.Trim(strings.TrimSpace(string(out)), "\""), nil
+	return strings.TrimSpace(string(out)), nil
 }
 
-func getOVSExternalID(name string) string {
-	out, err := runOVSVsctl(
+// Can't use pkg/ovs or pkg/util here because those package import this one
+func runOVSVsctl(exec kexec.Interface, args ...string) (string, error) {
+	newArgs := append([]string{"--timeout=5"}, args...)
+	out, err := rawExec(exec, ovsVsctlCommand, newArgs...)
+	if err != nil {
+		return "", err
+	}
+	return strings.Trim(strings.TrimSpace(out), "\""), nil
+}
+
+func getOVSExternalID(exec kexec.Interface, name string) string {
+	out, err := runOVSVsctl(exec,
 		"--if-exists",
 		"get",
 		"Open_vSwitch",
@@ -372,8 +384,8 @@ func getOVSExternalID(name string) string {
 	return out
 }
 
-func setOVSExternalID(key, value string) error {
-	out, err := runOVSVsctl(
+func setOVSExternalID(exec kexec.Interface, key, value string) error {
+	out, err := runOVSVsctl(exec,
 		"set",
 		"Open_vSwitch",
 		".",
@@ -384,16 +396,16 @@ func setOVSExternalID(key, value string) error {
 	return nil
 }
 
-func buildKubernetesConfig(cli, file *config, defaults *Defaults) error {
+func buildKubernetesConfig(exec kexec.Interface, cli, file *config, defaults *Defaults) error {
 	// Grab default values from OVS external IDs
 	if defaults.K8sAPIServer {
-		Kubernetes.APIServer = getOVSExternalID("k8s-api-server")
+		Kubernetes.APIServer = getOVSExternalID(exec, "k8s-api-server")
 	}
 	if defaults.K8sToken {
-		Kubernetes.Token = getOVSExternalID("k8s-api-token")
+		Kubernetes.Token = getOVSExternalID(exec, "k8s-api-token")
 	}
 	if defaults.K8sCert {
-		Kubernetes.CACert = getOVSExternalID("k8s-ca-certificate")
+		Kubernetes.CACert = getOVSExternalID(exec, "k8s-ca-certificate")
 	}
 
 	// Copy config file values over default values
@@ -418,7 +430,7 @@ func buildKubernetesConfig(cli, file *config, defaults *Defaults) error {
 	return nil
 }
 
-func buildOvnAuth(direction, externalID string, cliAuth, confAuth *rawOvnAuthConfig, readAddress bool) (OvnAuthConfig, error) {
+func buildOvnAuth(exec kexec.Interface, direction, externalID string, cliAuth, confAuth *rawOvnAuthConfig, readAddress bool) (OvnAuthConfig, error) {
 	ctlCmd := "ovn-" + direction + "ctl"
 
 	// Determine final address so we know how to set cert/key defaults
@@ -427,7 +439,7 @@ func buildOvnAuth(direction, externalID string, cliAuth, confAuth *rawOvnAuthCon
 		address = confAuth.Address
 	}
 	if address == "" && readAddress {
-		address = getOVSExternalID("ovn-" + direction)
+		address = getOVSExternalID(exec, "ovn-"+direction)
 		// address will be in format ssl:1.2.3.4:6641 from external_ids,
 		// but we want it in url format, i.e. ssl://1.2.3.4:6641
 		address = strings.Replace(address, ":", "://", 1)
@@ -446,11 +458,11 @@ func buildOvnAuth(direction, externalID string, cliAuth, confAuth *rawOvnAuthCon
 	overrideFields(auth, confAuth)
 	overrideFields(auth, cliAuth)
 
-	clientAuth, err := newOvnDBAuth(ctlCmd, externalID, auth.Address, auth.ClientPrivKey, auth.ClientCert, auth.ClientCACert, false)
+	clientAuth, err := newOvnDBAuth(exec, ctlCmd, externalID, auth.Address, auth.ClientPrivKey, auth.ClientCert, auth.ClientCACert, false)
 	if err != nil {
 		return OvnAuthConfig{}, err
 	}
-	serverAuth, err := newOvnDBAuth(ctlCmd, externalID, auth.Address, auth.ServerPrivKey, auth.ServerCert, auth.ServerCACert, true)
+	serverAuth, err := newOvnDBAuth(exec, ctlCmd, externalID, auth.Address, auth.ServerPrivKey, auth.ServerCert, auth.ServerCACert, true)
 	if err != nil {
 		return OvnAuthConfig{}, err
 	}
@@ -482,15 +494,15 @@ func getConfigFilePath(ctx *cli.Context) (string, bool) {
 // InitConfig reads the config file and common command-line options and
 // constructs the global config object from them. It returns the config file
 // path (if explicitly specified) or an error
-func InitConfig(ctx *cli.Context, defaults *Defaults) (string, error) {
-	return InitConfigWithPath(ctx, "", defaults)
+func InitConfig(ctx *cli.Context, exec kexec.Interface, defaults *Defaults) (string, error) {
+	return InitConfigWithPath(ctx, exec, "", defaults)
 }
 
 // InitConfigWithPath reads the given config file (or if empty, reads the config file
 // specified by command-line arguments, or empty, the default config file) and
 // common command-line options and constructs the global config object from
 // them. It returns the config file path (if explicitly specified) or an error
-func InitConfigWithPath(ctx *cli.Context, configFile string, defaults *Defaults) (string, error) {
+func InitConfigWithPath(ctx *cli.Context, exec kexec.Interface, configFile string, defaults *Defaults) (string, error) {
 	var cfg config
 	var retConfigFile string
 	var configFileIsDefault bool
@@ -548,16 +560,16 @@ func InitConfigWithPath(ctx *cli.Context, configFile string, defaults *Defaults)
 		}
 	}
 
-	if err = buildKubernetesConfig(&cliConfig, &cfg, defaults); err != nil {
+	if err = buildKubernetesConfig(exec, &cliConfig, &cfg, defaults); err != nil {
 		return "", err
 	}
 
-	OvnNorth, err = buildOvnAuth("nb", "ovn-nb", &cliConfig.OvnNorth, &cfg.OvnNorth, defaults.OvnNorthAddress)
+	OvnNorth, err = buildOvnAuth(exec, "nb", "ovn-nb", &cliConfig.OvnNorth, &cfg.OvnNorth, defaults.OvnNorthAddress)
 	if err != nil {
 		return "", err
 	}
 
-	OvnSouth, err = buildOvnAuth("sb", "ovn-remote", &cliConfig.OvnSouth, &cfg.OvnSouth, false)
+	OvnSouth, err = buildOvnAuth(exec, "sb", "ovn-remote", &cliConfig.OvnSouth, &cfg.OvnSouth, false)
 	if err != nil {
 		return "", err
 	}
@@ -584,6 +596,8 @@ type OvnDBAuth struct {
 	port       string
 	ctlCmd     string
 	externalID string
+
+	exec kexec.Interface
 }
 
 func pathExists(path string) bool {
@@ -597,7 +611,7 @@ func pathExists(path string) bool {
 // newOvnDBAuth returns an OvnDBAuth object describing the connection to an
 // OVN database, given a connection description string and authentication
 // details
-func newOvnDBAuth(ctlCmd, externalID, urlString, privkey, cert, cacert string, server bool) (*OvnDBAuth, error) {
+func newOvnDBAuth(exec kexec.Interface, ctlCmd, externalID, urlString, privkey, cert, cacert string, server bool) (*OvnDBAuth, error) {
 	if urlString == "" {
 		if privkey != "" || cert != "" || cacert != "" {
 			return nil, fmt.Errorf("certificate or key given; perhaps you mean to use the 'ssl' scheme?")
@@ -607,6 +621,7 @@ func newOvnDBAuth(ctlCmd, externalID, urlString, privkey, cert, cacert string, s
 			Scheme:     OvnDBSchemeUnix,
 			ctlCmd:     ctlCmd,
 			externalID: externalID,
+			exec:       exec,
 		}, nil
 	}
 
@@ -631,6 +646,7 @@ func newOvnDBAuth(ctlCmd, externalID, urlString, privkey, cert, cacert string, s
 		port:       port,
 		ctlCmd:     ctlCmd,
 		externalID: externalID,
+		exec:       exec,
 	}
 
 	switch {
@@ -670,24 +686,18 @@ func (a *OvnDBAuth) ensureCACert() error {
 	// 2.9.90+.
 	// FIXME: change back to a.ctlCmd when sbctl supports --bootstrap-ca-cert
 	// https://github.com/openvswitch/ovs/pull/226
-	cmdPath, err := exec.LookPath("ovn-nbctl")
-	if err != nil {
-		return err
-	}
-
 	args := []string{
 		"--db=" + a.GetURL(),
 		"--timeout=5",
 	}
 	if a.Scheme == OvnDBSchemeSSL {
 		args = append(args, "--private-key="+a.PrivKey)
-
 		args = append(args, "--certificate="+a.Cert)
 		args = append(args, "--bootstrap-ca-cert="+a.CACert)
 	}
 	args = append(args, "list", "nb_global")
-	_ = exec.Command(cmdPath, args...).Run()
-	if _, err = os.Stat(a.CACert); os.IsNotExist(err) {
+	_, _ = rawExec(a.exec, "ovn-nbctl", args...)
+	if _, err := os.Stat(a.CACert); os.IsNotExist(err) {
 		logrus.Warnf("bootstrapping %s CA certificate failed", a.CACert)
 	}
 	return nil
@@ -721,9 +731,9 @@ func (a *OvnDBAuth) SetDBAuth() error {
 
 	if a.server {
 		// Set the database connection method
-		out, err := exec.Command(a.ctlCmd, "set-connection", a.GetURL()).CombinedOutput()
+		out, err := rawExec(a.exec, a.ctlCmd, "set-connection", a.GetURL())
 		if err != nil {
-			return fmt.Errorf("error setting %s API connection: %v\n  %q", a.ctlCmd, err, string(out))
+			return fmt.Errorf("error setting %s API connection: %v\n  %q", a.ctlCmd, err, out)
 		}
 
 		if a.Scheme == OvnDBSchemeSSL {
@@ -733,13 +743,13 @@ func (a *OvnDBAuth) SetDBAuth() error {
 			}
 			// Tell the database what SSL keys and certs to use, but before that delete
 			// any SSL configuration. Otherwise, ovn-{nbctl|sbctl} set-ssl command will hang
-			out, err = exec.Command(a.ctlCmd, "del-ssl").CombinedOutput()
+			out, err = rawExec(a.exec, a.ctlCmd, "del-ssl")
 			if err != nil {
-				return fmt.Errorf("error deleting %s SSL configuration: %v\n %q", a.ctlCmd, err, string(out))
+				return fmt.Errorf("error deleting %s SSL configuration: %v\n %q", a.ctlCmd, err, out)
 			}
-			out, err = exec.Command(a.ctlCmd, "set-ssl", a.PrivKey, a.Cert, a.CACert).CombinedOutput()
+			out, err = rawExec(a.exec, a.ctlCmd, "set-ssl", a.PrivKey, a.Cert, a.CACert)
 			if err != nil {
-				return fmt.Errorf("error setting %s SSL API certificates: %v\n  %q", a.ctlCmd, err, string(out))
+				return fmt.Errorf("error setting %s SSL API certificates: %v\n  %q", a.ctlCmd, err, out)
 			}
 		}
 	} else {
@@ -754,20 +764,20 @@ func (a *OvnDBAuth) SetDBAuth() error {
 			// Must happen *before* setting the "ovn-remote"
 			// external-id.
 			if a.ctlCmd == "ovn-sbctl" {
-				out, err := runOVSVsctl("del-ssl")
+				out, err := runOVSVsctl(a.exec, "del-ssl")
 				if err != nil {
 					return fmt.Errorf("error deleting ovs-vsctl SSL "+
 						"configuration: %q (%v)", out, err)
 				}
 
-				out, err = runOVSVsctl("set-ssl", a.PrivKey, a.Cert, a.CACert)
+				out, err = runOVSVsctl(a.exec, "set-ssl", a.PrivKey, a.Cert, a.CACert)
 				if err != nil {
 					return fmt.Errorf("error setting client southbound DB SSL options: %v\n  %q", err, out)
 				}
 			}
 		}
 
-		if err := setOVSExternalID(a.externalID, "\""+a.GetURL()+"\""); err != nil {
+		if err := setOVSExternalID(a.exec, a.externalID, "\""+a.GetURL()+"\""); err != nil {
 			return err
 		}
 	}
