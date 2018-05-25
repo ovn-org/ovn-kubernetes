@@ -6,13 +6,6 @@
     src: "{{ovn_kubernetes_info.build_path}}/ovn-kubernetes-checkout/go-controller/_output/go/bin/ovnkube"
     dest: "{{ansible_tmp_dir}}/ovnkube"
 
-- name: ovn-kubernetes | fetch ovn-k8s-overlay
-  fetch:
-    fail_on_missing: yes
-    flat: yes
-    src: "{{ovn_kubernetes_info.build_path}}/ovn-kubernetes-checkout/go-controller/_output/go/bin/ovn-k8s-overlay"
-    dest: "{{ansible_tmp_dir}}/ovn-k8s-overlay"
-
 - name: ovn-kubernetes | fetch ovn-k8s-cni-overlay
   fetch:
     fail_on_missing: yes
