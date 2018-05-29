@@ -814,52 +814,34 @@ func (a *OvnDBAuth) SetDBAuth() error {
 	return nil
 }
 
-// UpdateOvnNodeAuth updates the host and URL in ClientAuth and ServerAuth
-// for both OvnNorth and OvnSouth. It updates them with the new masterIP.
-func UpdateOvnNodeAuth(masterIP string) error {
-	var err error
-	logrus.Debugf("Update OVN node auth with new master ip: %s", masterIP)
-	OvnNorth.ClientAuth.host = masterIP
-	OvnNorth.ClientAuth.URL, err = updateURLString(
-		OvnNorth.ClientAuth.URL, masterIP)
-	if err != nil {
-		logrus.Errorf("Failed to update OvnNorth ClientAuth URL: %v", err)
-		return err
+func (a *OvnDBAuth) updateIP(newIP string) error {
+	a.host = newIP
+	if a.URL != "" {
+		s := strings.Split(a.URL, ":")
+		if len(s) != 3 {
+			return fmt.Errorf("failed to parse OvnDBAuth URL: %q", a.URL)
+		}
+		a.URL = s[0] + ":" + newIP + ":" + s[2]
 	}
-	OvnNorth.ServerAuth.host = masterIP
-	OvnNorth.ServerAuth.URL, err = updateURLString(
-		OvnNorth.ServerAuth.URL, masterIP)
-	if err != nil {
-		logrus.Errorf("Failed to update OvnNorth ServerAuth URL: %v", err)
-		return err
-	}
-	OvnSouth.ClientAuth.host = masterIP
-	OvnSouth.ClientAuth.URL, err = updateURLString(
-		OvnSouth.ClientAuth.URL, masterIP)
-	if err != nil {
-		logrus.Errorf("Failed to update OvnSouth ClientAuth URL: %v", err)
-		return err
-	}
-	OvnSouth.ServerAuth.host = masterIP
-	OvnSouth.ServerAuth.URL, err = updateURLString(
-		OvnSouth.ServerAuth.URL, masterIP)
-	if err != nil {
-		logrus.Errorf("Failed to update OvnSouth ServerAuth URL: %v", err)
-		return err
-	}
-
 	return nil
 }
 
-func updateURLString(urlString, newIP string) (string, error) {
-	if urlString == "" {
-		return "", nil
+// UpdateOvnNodeAuth updates the host and URL in ClientAuth and ServerAuth
+// for both OvnNorth and OvnSouth. It updates them with the new masterIP.
+func UpdateOvnNodeAuth(masterIP string) error {
+	logrus.Debugf("Update OVN node auth with new master ip: %s", masterIP)
+	if err := OvnNorth.ClientAuth.updateIP(masterIP); err != nil {
+		return fmt.Errorf("failed to update OvnNorth ClientAuth URL: %v", err)
 	}
-	s := strings.Split(urlString, ":")
-	if len(s) != 3 {
-		return "", fmt.Errorf("Failed to parse OVN DB url: %q", urlString)
+	if err := OvnNorth.ServerAuth.updateIP(masterIP); err != nil {
+		return fmt.Errorf("failed to update OvnNorth ServerAuth URL: %v", err)
 	}
-	newURLString := s[0] + ":" + newIP + ":" + s[2]
-	logrus.Debugf("New OVN urlString: %q", newURLString)
-	return newURLString, nil
+
+	if err := OvnSouth.ClientAuth.updateIP(masterIP); err != nil {
+		return fmt.Errorf("failed to update OvnSouth ClientAuth URL: %v", err)
+	}
+	if err := OvnSouth.ServerAuth.updateIP(masterIP); err != nil {
+		return fmt.Errorf("failed to update OvnSouth ServerAuth URL: %v", err)
+	}
+	return nil
 }
