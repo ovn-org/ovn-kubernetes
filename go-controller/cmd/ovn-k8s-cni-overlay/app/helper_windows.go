@@ -110,7 +110,7 @@ func deleteHNSEndpoint(endpointName string) error {
 // The fact that CNI add should be idempotent on Windows is stated here:
 // https://github.com/kubernetes/kubernetes/blob/master/pkg/kubelet/network/cni/cni_windows.go#L38
 // TODO: add support for custom MTU
-func ConfigureInterface(args *skel.CmdArgs, namespace string, podName string, macAddress string, ipAddress string, gatewayIP string, mtu int) ([]*current.Interface, error) {
+func ConfigureInterface(args *skel.CmdArgs, namespace string, conf *config.OVNNetConf, podName string, macAddress string, ipAddress string, gatewayIP string, mtu int) ([]*current.Interface, error) {
 	ipAddr, ipNet, err := net.ParseCIDR(ipAddress)
 	if err != nil {
 		return nil, err
@@ -145,6 +145,8 @@ func ConfigureInterface(args *skel.CmdArgs, namespace string, podName string, ma
 			IPAddress:      ipAddr,
 			MacAddress:     macAddressIpFormat,
 			PrefixLength:   uint8(ipMaskSize),
+			DNSServerList:  strings.Join(conf.NetConf.DNS.Nameservers, ","),
+			DNSSuffix:      strings.Join(conf.NetConf.DNS.Search, ","),
 		}
 		createdEndpoint, err = createHNSEndpoint(hnsEndpoint)
 		if err != nil {
