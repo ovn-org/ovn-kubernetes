@@ -15,6 +15,8 @@ import (
 	"github.com/containernetworking/plugins/pkg/ip"
 	"github.com/containernetworking/plugins/pkg/ns"
 	"github.com/vishvananda/netlink"
+
+	"github.com/openvswitch/ovn-kubernetes/go-controller/pkg/config"
 )
 
 func renameLink(curName, newName string) error {
@@ -102,7 +104,7 @@ func setupInterface(netns ns.NetNS, containerID, ifName, macAddress, ipAddress, 
 }
 
 // ConfigureInterface sets up the container interface
-func ConfigureInterface(args *skel.CmdArgs, namespace string, podName string, macAddress string, ipAddress string, gatewayIP string, mtu int) ([]*current.Interface, error) {
+func ConfigureInterface(args *skel.CmdArgs, namespace string, conf *config.OVNNetConf, podName string, macAddress string, ipAddress string, gatewayIP string, mtu int) ([]*current.Interface, error) {
 	netns, err := ns.GetNS(args.Netns)
 	if err != nil {
 		return nil, fmt.Errorf("failed to open netns %q: %v", args.Netns, err)
