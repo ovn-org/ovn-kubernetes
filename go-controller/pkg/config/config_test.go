@@ -10,6 +10,9 @@ import (
 
 	"github.com/urfave/cli"
 	kexec "k8s.io/utils/exec"
+	fakeexec "k8s.io/utils/exec/testing"
+
+	ovntest "github.com/openvswitch/ovn-kubernetes/go-controller/pkg/testing"
 
 	. "github.com/onsi/ginkgo"
 	. "github.com/onsi/gomega"
@@ -183,6 +186,95 @@ var _ = Describe("Config Operations", func() {
 				Expect(a.host).To(Equal(""))
 				Expect(a.port).To(Equal(""))
 			}
+			return nil
+		}
+		err := app.Run([]string{app.Name, "-config-file=" + cfgFile.Name()})
+		Expect(err).NotTo(HaveOccurred())
+	})
+
+	It("reads defaults from ovs-vsctl external IDs", func() {
+		app.Action = func(ctx *cli.Context) error {
+			// k8s-api-server
+			fakeCmds := ovntest.AddFakeCmd(nil, &ovntest.ExpectedCmd{
+				Cmd:    "ovs-vsctl --timeout=5 --if-exists get Open_vSwitch . external_ids:k8s-api-server",
+				Output: "https://somewhere.com:8081",
+			})
+
+			// k8s-api-token
+			fakeCmds = ovntest.AddFakeCmd(fakeCmds, &ovntest.ExpectedCmd{
+				Cmd:    "ovs-vsctl --timeout=5 --if-exists get Open_vSwitch . external_ids:k8s-api-token",
+				Output: "asadfasdfasrw3atr3r3rf33fasdaa3233",
+			})
+			// k8s-ca-certificate
+			fname, err := createTempFile("kube-cacert.pem")
+			Expect(err).NotTo(HaveOccurred())
+			fakeCmds = ovntest.AddFakeCmd(fakeCmds, &ovntest.ExpectedCmd{
+				Cmd:    "ovs-vsctl --timeout=5 --if-exists get Open_vSwitch . external_ids:k8s-ca-certificate",
+				Output: fname,
+			})
+			// ovn-nb address
+			fakeCmds = ovntest.AddFakeCmd(fakeCmds, &ovntest.ExpectedCmd{
+				Cmd:    "ovs-vsctl --timeout=5 --if-exists get Open_vSwitch . external_ids:ovn-nb",
+				Output: "tcp:1.1.1.1:6441",
+			})
+
+			fexec := &fakeexec.FakeExec{
+				CommandScript: fakeCmds,
+				LookPathFunc: func(file string) (string, error) {
+					return fmt.Sprintf("/fake-bin/%s", file), nil
+				},
+			}
+
+			cfgPath, err := InitConfig(ctx, fexec, &Defaults{
+				OvnNorthAddress: true,
+				K8sAPIServer:    true,
+				K8sToken:        true,
+				K8sCert:         true,
+			})
+			Expect(err).NotTo(HaveOccurred())
+			Expect(cfgPath).To(Equal(cfgFile.Name()))
+			Expect(fexec.CommandCalls).To(Equal(len(fakeCmds)))
+
+			Expect(Kubernetes.APIServer).To(Equal("https://somewhere.com:8081"))
+			Expect(Kubernetes.CACert).To(Equal(fname))
+			Expect(Kubernetes.Token).To(Equal("asadfasdfasrw3atr3r3rf33fasdaa3233"))
+
+			Expect(OvnNorth.ClientAuth.Scheme).To(Equal(OvnDBSchemeTCP))
+			Expect(OvnNorth.ClientAuth.URL).To(Equal("tcp://1.1.1.1:6441"))
+			Expect(OvnNorth.ClientAuth.PrivKey).To(Equal(""))
+			Expect(OvnNorth.ClientAuth.Cert).To(Equal(""))
+			Expect(OvnNorth.ClientAuth.CACert).To(Equal(""))
+			Expect(OvnNorth.ClientAuth.server).To(BeFalse())
+			Expect(OvnNorth.ClientAuth.host).To(Equal("1.1.1.1"))
+			Expect(OvnNorth.ClientAuth.port).To(Equal("6441"))
+
+			Expect(OvnSouth.ClientAuth.Scheme).To(Equal(OvnDBSchemeUnix))
+			Expect(OvnSouth.ClientAuth.URL).To(Equal(""))
+			Expect(OvnSouth.ClientAuth.PrivKey).To(Equal(""))
+			Expect(OvnSouth.ClientAuth.Cert).To(Equal(""))
+			Expect(OvnSouth.ClientAuth.CACert).To(Equal(""))
+			Expect(OvnSouth.ClientAuth.server).To(BeFalse())
+			Expect(OvnSouth.ClientAuth.host).To(Equal(""))
+			Expect(OvnSouth.ClientAuth.port).To(Equal(""))
+
+			Expect(OvnNorth.ServerAuth.Scheme).To(Equal(OvnDBSchemeTCP))
+			Expect(OvnNorth.ServerAuth.URL).To(Equal("tcp://1.1.1.1:6441"))
+			Expect(OvnNorth.ServerAuth.PrivKey).To(Equal(""))
+			Expect(OvnNorth.ServerAuth.Cert).To(Equal(""))
+			Expect(OvnNorth.ServerAuth.CACert).To(Equal(""))
+			Expect(OvnNorth.ServerAuth.server).To(BeTrue())
+			Expect(OvnNorth.ServerAuth.host).To(Equal("1.1.1.1"))
+			Expect(OvnNorth.ServerAuth.port).To(Equal("6441"))
+
+			Expect(OvnSouth.ServerAuth.Scheme).To(Equal(OvnDBSchemeUnix))
+			Expect(OvnSouth.ServerAuth.URL).To(Equal(""))
+			Expect(OvnSouth.ServerAuth.PrivKey).To(Equal(""))
+			Expect(OvnSouth.ServerAuth.Cert).To(Equal(""))
+			Expect(OvnSouth.ServerAuth.CACert).To(Equal(""))
+			Expect(OvnSouth.ServerAuth.server).To(BeTrue())
+			Expect(OvnSouth.ServerAuth.host).To(Equal(""))
+			Expect(OvnSouth.ServerAuth.port).To(Equal(""))
+
 			return nil
 		}
 		err := app.Run([]string{app.Name, "-config-file=" + cfgFile.Name()})
@@ -442,6 +534,192 @@ server-cacert=/path/to/sb-ca.crt`), 0644)
 		}
 		err = app.Run(cliArgs)
 		Expect(err).NotTo(HaveOccurred())
+	})
+
+	Describe("OvnDBAuth operations", func() {
+		var certFile, keyFile, caFile string
+
+		BeforeEach(func() {
+			var err error
+			certFile, err = createTempFile("cert.crt")
+			Expect(err).NotTo(HaveOccurred())
+			keyFile, err = createTempFile("priv.key")
+			Expect(err).NotTo(HaveOccurred())
+			caFile = filepath.Join(tmpDir, "ca.crt")
+		})
+
+		AfterEach(func() {
+			err := os.Remove(certFile)
+			Expect(err).NotTo(HaveOccurred())
+			err = os.Remove(keyFile)
+			Expect(err).NotTo(HaveOccurred())
+			os.Remove(caFile)
+		})
+
+		const (
+			nbURL string = "ssl://1.2.3.4:6641"
+			sbURL string = "ssl://1.2.3.4:6642"
+		)
+
+		It("configures server northbound SSL correctly", func() {
+			fakeCmds := ovntest.AddFakeCmd(nil, &ovntest.ExpectedCmd{
+				Cmd: "ovn-nbctl set-connection pssl:6641",
+			})
+			fakeCmds = ovntest.AddFakeCmd(fakeCmds, &ovntest.ExpectedCmd{
+				Cmd: "ovn-nbctl del-ssl",
+			})
+			fakeCmds = ovntest.AddFakeCmd(fakeCmds, &ovntest.ExpectedCmd{
+				Cmd: fmt.Sprintf("ovn-nbctl set-ssl %s %s %s", keyFile, certFile, caFile),
+			})
+
+			fexec := &fakeexec.FakeExec{
+				CommandScript: fakeCmds,
+				LookPathFunc: func(file string) (string, error) {
+					return fmt.Sprintf("/fake-bin/%s", file), nil
+				},
+			}
+
+			var err error
+			caFile, err = createTempFile("ca.crt")
+			Expect(err).NotTo(HaveOccurred())
+
+			a, err := newOvnDBAuth(fexec, "ovn-nbctl", "ovn-nb", nbURL, keyFile, certFile, caFile, true)
+			Expect(err).NotTo(HaveOccurred())
+			Expect(a.Scheme).To(Equal(OvnDBSchemeSSL))
+			Expect(a.URL).To(Equal(nbURL))
+			Expect(a.PrivKey).To(Equal(keyFile))
+			Expect(a.Cert).To(Equal(certFile))
+			Expect(a.CACert).To(Equal(caFile))
+			Expect(a.server).To(BeTrue())
+			Expect(a.host).To(Equal("1.2.3.4"))
+			Expect(a.port).To(Equal("6641"))
+			Expect(a.ctlCmd).To(Equal("ovn-nbctl"))
+			Expect(a.externalID).To(Equal("ovn-nb"))
+
+			Expect(a.GetURL()).To(Equal("pssl:6641"))
+			err = a.SetDBAuth()
+			Expect(err).NotTo(HaveOccurred())
+			Expect(fexec.CommandCalls).To(Equal(len(fakeCmds)))
+		})
+
+		It("configures client northbound SSL correctly", func() {
+			const nbURLOVN string = "ssl:1.2.3.4:6641"
+
+			fakeCmds := ovntest.AddFakeCmd(nil, &ovntest.ExpectedCmd{
+				Cmd: fmt.Sprintf("ovn-nbctl --db=%s --timeout=5 --private-key=%s --certificate=%s --bootstrap-ca-cert=%s list nb_global", nbURLOVN, keyFile, certFile, caFile),
+			})
+			fakeCmds = ovntest.AddFakeCmd(fakeCmds, &ovntest.ExpectedCmd{
+				Cmd: fmt.Sprintf("ovs-vsctl --timeout=5 set Open_vSwitch . external_ids:ovn-nb=\"%s\"", nbURLOVN),
+			})
+
+			fexec := &fakeexec.FakeExec{
+				CommandScript: fakeCmds,
+				LookPathFunc: func(file string) (string, error) {
+					return fmt.Sprintf("/fake-bin/%s", file), nil
+				},
+			}
+
+			a, err := newOvnDBAuth(fexec, "ovn-nbctl", "ovn-nb", nbURL, keyFile, certFile, caFile, false)
+			Expect(err).NotTo(HaveOccurred())
+			Expect(a.Scheme).To(Equal(OvnDBSchemeSSL))
+			Expect(a.URL).To(Equal(nbURL))
+			Expect(a.PrivKey).To(Equal(keyFile))
+			Expect(a.Cert).To(Equal(certFile))
+			Expect(a.CACert).To(Equal(caFile))
+			Expect(a.server).To(BeFalse())
+			Expect(a.host).To(Equal("1.2.3.4"))
+			Expect(a.port).To(Equal("6641"))
+			Expect(a.ctlCmd).To(Equal("ovn-nbctl"))
+			Expect(a.externalID).To(Equal("ovn-nb"))
+
+			Expect(a.GetURL()).To(Equal(nbURLOVN))
+			err = a.SetDBAuth()
+			Expect(err).NotTo(HaveOccurred())
+			Expect(fexec.CommandCalls).To(Equal(len(fakeCmds)))
+		})
+
+		It("configures server southbound SSL correctly", func() {
+			fakeCmds := ovntest.AddFakeCmd(nil, &ovntest.ExpectedCmd{
+				Cmd: "ovn-sbctl set-connection pssl:6642",
+			})
+			fakeCmds = ovntest.AddFakeCmd(fakeCmds, &ovntest.ExpectedCmd{
+				Cmd: "ovn-sbctl del-ssl",
+			})
+			fakeCmds = ovntest.AddFakeCmd(fakeCmds, &ovntest.ExpectedCmd{
+				Cmd: fmt.Sprintf("ovn-sbctl set-ssl %s %s %s", keyFile, certFile, caFile),
+			})
+
+			fexec := &fakeexec.FakeExec{
+				CommandScript: fakeCmds,
+				LookPathFunc: func(file string) (string, error) {
+					return fmt.Sprintf("/fake-bin/%s", file), nil
+				},
+			}
+
+			var err error
+			caFile, err = createTempFile("ca.crt")
+			Expect(err).NotTo(HaveOccurred())
+
+			a, err := newOvnDBAuth(fexec, "ovn-sbctl", "ovn-remote", sbURL, keyFile, certFile, caFile, true)
+			Expect(err).NotTo(HaveOccurred())
+			Expect(a.Scheme).To(Equal(OvnDBSchemeSSL))
+			Expect(a.URL).To(Equal(sbURL))
+			Expect(a.PrivKey).To(Equal(keyFile))
+			Expect(a.Cert).To(Equal(certFile))
+			Expect(a.CACert).To(Equal(caFile))
+			Expect(a.server).To(BeTrue())
+			Expect(a.host).To(Equal("1.2.3.4"))
+			Expect(a.port).To(Equal("6642"))
+			Expect(a.ctlCmd).To(Equal("ovn-sbctl"))
+			Expect(a.externalID).To(Equal("ovn-remote"))
+
+			Expect(a.GetURL()).To(Equal("pssl:6642"))
+			err = a.SetDBAuth()
+			Expect(err).NotTo(HaveOccurred())
+			Expect(fexec.CommandCalls).To(Equal(len(fakeCmds)))
+		})
+
+		It("configures client southbound SSL correctly", func() {
+			const sbURLOVN string = "ssl:1.2.3.4:6642"
+
+			fakeCmds := ovntest.AddFakeCmd(nil, &ovntest.ExpectedCmd{
+				Cmd: fmt.Sprintf("ovn-nbctl --db=%s --timeout=5 --private-key=%s --certificate=%s --bootstrap-ca-cert=%s list nb_global", sbURLOVN, keyFile, certFile, caFile),
+			})
+			fakeCmds = ovntest.AddFakeCmd(fakeCmds, &ovntest.ExpectedCmd{
+				Cmd: "ovs-vsctl --timeout=5 del-ssl",
+			})
+			fakeCmds = ovntest.AddFakeCmd(fakeCmds, &ovntest.ExpectedCmd{
+				Cmd: fmt.Sprintf("ovs-vsctl --timeout=5 set-ssl %s %s %s", keyFile, certFile, caFile),
+			})
+			fakeCmds = ovntest.AddFakeCmd(fakeCmds, &ovntest.ExpectedCmd{
+				Cmd: fmt.Sprintf("ovs-vsctl --timeout=5 set Open_vSwitch . external_ids:ovn-remote=\"%s\"", sbURLOVN),
+			})
+
+			fexec := &fakeexec.FakeExec{
+				CommandScript: fakeCmds,
+				LookPathFunc: func(file string) (string, error) {
+					return fmt.Sprintf("/fake-bin/%s", file), nil
+				},
+			}
+
+			a, err := newOvnDBAuth(fexec, "ovn-sbctl", "ovn-remote", sbURL, keyFile, certFile, caFile, false)
+			Expect(err).NotTo(HaveOccurred())
+			Expect(a.Scheme).To(Equal(OvnDBSchemeSSL))
+			Expect(a.URL).To(Equal(sbURL))
+			Expect(a.PrivKey).To(Equal(keyFile))
+			Expect(a.Cert).To(Equal(certFile))
+			Expect(a.CACert).To(Equal(caFile))
+			Expect(a.server).To(BeFalse())
+			Expect(a.host).To(Equal("1.2.3.4"))
+			Expect(a.port).To(Equal("6642"))
+			Expect(a.ctlCmd).To(Equal("ovn-sbctl"))
+			Expect(a.externalID).To(Equal("ovn-remote"))
+
+			Expect(a.GetURL()).To(Equal(sbURLOVN))
+			err = a.SetDBAuth()
+			Expect(err).NotTo(HaveOccurred())
+			Expect(fexec.CommandCalls).To(Equal(len(fakeCmds)))
+		})
 	})
 
 	// This testcase factory function exists only to ensure that 'runType'
