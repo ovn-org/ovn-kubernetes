@@ -147,26 +147,9 @@ func (oc *Controller) deleteLogicalPort(pod *kapi.Pod) {
 }
 
 func (oc *Controller) addLogicalPort(pod *kapi.Pod) {
-	count := 30
 	var out, stderr string
 	var err error
 	logicalSwitch := pod.Spec.NodeName
-	for count > 0 {
-		if logicalSwitch != "" {
-			break
-		}
-		if count != 30 {
-			time.Sleep(1 * time.Second)
-		}
-		count--
-		p, err := oc.kube.GetPod(pod.Namespace, pod.Name)
-		if err != nil {
-			logrus.Errorf("Failed to get pod %s/%s's information from kube "+
-				"API server", pod.Namespace, pod.Name)
-			continue
-		}
-		logicalSwitch = p.Spec.NodeName
-	}
 	if logicalSwitch == "" {
 		logrus.Errorf("Failed to find the logical switch for pod %s/%s",
 			pod.Namespace, pod.Name)
@@ -223,7 +206,7 @@ func (oc *Controller) addLogicalPort(pod *kapi.Pod) {
 		return
 	}
 
-	count = 30
+	count := 30
 	for count > 0 {
 		if isStaticIP {
 			out, stderr, err = util.RunOVNNbctlUnix("get",

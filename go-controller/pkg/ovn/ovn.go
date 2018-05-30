@@ -96,9 +96,17 @@ func (oc *Controller) WatchPods() error {
 	_, err := oc.watchFactory.AddPodHandler(cache.ResourceEventHandlerFuncs{
 		AddFunc: func(obj interface{}) {
 			pod := obj.(*kapi.Pod)
-			oc.addLogicalPort(pod)
+			if pod.Spec.NodeName != "" {
+				oc.addLogicalPort(pod)
+			}
 		},
-		UpdateFunc: func(old, new interface{}) {},
+		UpdateFunc: func(old, newer interface{}) {
+			podNew := newer.(*kapi.Pod)
+			podOld := old.(*kapi.Pod)
+			if podOld.Spec.NodeName == "" && podNew.Spec.NodeName != "" {
+				oc.addLogicalPort(podNew)
+			}
+		},
 		DeleteFunc: func(obj interface{}) {
 			pod := obj.(*kapi.Pod)
 			oc.deleteLogicalPort(pod)
