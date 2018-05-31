@@ -232,11 +232,14 @@ func (oc *Controller) addLogicalPort(pod *kapi.Pod) {
 			out, stderr, err = util.RunOVNNbctlUnix("get",
 				"logical_switch_port", portName, "dynamic_addresses")
 		}
-		if err == nil {
+		if err == nil && out != "[]" {
 			break
 		}
-		logrus.Debugf("Error while obtaining addresses for %s - %v", portName,
-			err)
+		if err != nil {
+			logrus.Errorf("Error while obtaining addresses for %s - %v", portName,
+				err)
+			return
+		}
 		time.Sleep(time.Second)
 		count--
 	}
