@@ -121,6 +121,10 @@ func (oc *Controller) getGatewayFromSwitch(logicalSwitch string) (string, string
 }
 
 func (oc *Controller) deleteLogicalPort(pod *kapi.Pod) {
+	if pod.Spec.HostNetwork {
+		return
+	}
+
 	logrus.Infof("Deleting pod: %s", pod.Name)
 	logicalPort := fmt.Sprintf("%s_%s", pod.Namespace, pod.Name)
 	out, stderr, err := util.RunOVNNbctlUnix("--if-exists", "lsp-del",
@@ -149,6 +153,10 @@ func (oc *Controller) deleteLogicalPort(pod *kapi.Pod) {
 func (oc *Controller) addLogicalPort(pod *kapi.Pod) {
 	var out, stderr string
 	var err error
+	if pod.Spec.HostNetwork {
+		return
+	}
+
 	logicalSwitch := pod.Spec.NodeName
 	if logicalSwitch == "" {
 		logrus.Errorf("Failed to find the logical switch for pod %s/%s",
@@ -259,6 +267,10 @@ func (oc *Controller) addLogicalPort(pod *kapi.Pod) {
 // AddLogicalPortWithIP add logical port with static ip address
 // and mac adddress for the pod
 func (oc *Controller) AddLogicalPortWithIP(pod *kapi.Pod) {
+	if pod.Spec.HostNetwork {
+		return
+	}
+
 	portName := fmt.Sprintf("%s_%s", pod.Namespace, pod.Name)
 	logicalSwitch := pod.Spec.NodeName
 	logrus.Debugf("Creating logical port for %s on switch %s", portName,
