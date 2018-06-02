@@ -41,6 +41,10 @@ var InitGatewayCmd = cli.Command{
 			Name:  "rampout-ip-subnets",
 			Usage: "Uses this gateway to rampout traffic originating from the specified comma separated ip subnets.  Used to distribute outgoing traffic via multiple gateways.",
 		},
+		cli.BoolFlag{
+			Name:  "enable-load-balancers",
+			Usage: "Enable load-balancers on Gateway router for nodeports.",
+		},
 	}, config.Flags...),
 	Action: func(context *cli.Context) error {
 		if err := initGateway(context); err != nil {
@@ -74,6 +78,7 @@ func initGateway(context *cli.Context) error {
 	bridgeInterface := context.String("bridge-interface")
 	defaultGW := context.String("default-gw")
 	rampoutIPSubnet := context.String("rampout-ip-subnet")
+	enableLB := context.Bool("enable-load-balancers")
 
 	// We want either of args.physical_interface or args.bridge_interface provided. But not both. (XOR)
 	if (len(physicalInterface) == 0 && len(bridgeInterface) == 0) || (len(physicalInterface) != 0 && len(bridgeInterface) != 0) {
@@ -81,5 +86,6 @@ func initGateway(context *cli.Context) error {
 	}
 
 	return util.GatewayInit(clusterIPSubnet, nodeName, physicalIP,
-		physicalInterface, bridgeInterface, defaultGW, rampoutIPSubnet)
+		physicalInterface, bridgeInterface, defaultGW, rampoutIPSubnet,
+		enableLB)
 }

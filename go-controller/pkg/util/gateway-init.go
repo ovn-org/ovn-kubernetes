@@ -104,7 +104,8 @@ func generateGatewayIP() (string, error) {
 
 // GatewayInit creates a gateway router for the local chassis.
 func GatewayInit(clusterIPSubnet, nodeName, nicIP, physicalInterface,
-	bridgeInterface, defaultGW, rampoutIPSubnet string) error {
+	bridgeInterface, defaultGW, rampoutIPSubnet string,
+	gatewayLBEnable bool) error {
 
 	ip, physicalIPNet, err := net.ParseCIDR(nicIP)
 	if err != nil {
@@ -211,61 +212,66 @@ func GatewayInit(clusterIPSubnet, nodeName, nicIP, physicalInterface,
 		return err
 	}
 
-	// Create 2 load-balancers for north-south traffic for each gateway router.
-	// One handles UDP and another handles TCP.
-	k8sNSLbTCP, stderr, err := RunOVNNbctl("--data=bare", "--no-heading",
-		"--columns=_uuid", "find", "load_balancer",
-		"external_ids:TCP_lb_gateway_router="+gatewayRouter)
-	if err != nil {
-		logrus.Errorf("Failed to get k8sNSLbTCP, stderr: %q, error: %v",
-			stderr, err)
-		return err
-	}
-	if k8sNSLbTCP == "" {
-		k8sNSLbTCP, stderr, err = RunOVNNbctl("--", "create", "load_balancer",
+	if gatewayLBEnable {
+		// Create 2 load-balancers for north-south traffic for each gateway
+		// router.  One handles UDP and another handles TCP.
+		var k8sNSLbTCP, k8sNSLbUDP string
+		k8sNSLbTCP, stderr, err = RunOVNNbctl("--data=bare", "--no-heading",
+			"--columns=_uuid", "find", "load_balancer",
 			"external_ids:TCP_lb_gateway_router="+gatewayRouter)
 		if err != nil {
-			logrus.Errorf("Failed to create load balancer, stdout: %q, "+
-				"stderr: %q, error: %v", stdout, stderr, err)
+			logrus.Errorf("Failed to get k8sNSLbTCP, stderr: %q, error: %v",
+				stderr, err)
 			return err
 		}
-	}
+		if k8sNSLbTCP == "" {
+			k8sNSLbTCP, stderr, err = RunOVNNbctl("--", "create",
+				"load_balancer",
+				"external_ids:TCP_lb_gateway_router="+gatewayRouter)
+			if err != nil {
+				logrus.Errorf("Failed to create load balancer, stdout: %q, "+
+					"stderr: %q, error: %v", stdout, stderr, err)
+				return err
+			}
+		}
 
-	k8sNSLbUDP, stderr, err := RunOVNNbctl("--data=bare", "--no-heading",
-		"--columns=_uuid", "find", "load_balancer",
-		"external_ids:UDP_lb_gateway_router="+gatewayRouter)
-	if err != nil {
-		logrus.Errorf("Failed to get k8sNSLbUDP, stderr: %q, error: %v",
-			stderr, err)
-		return err
-	}
-	if k8sNSLbUDP == "" {
-		k8sNSLbUDP, stderr, err = RunOVNNbctl("--", "create", "load_balancer",
-			"external_ids:UDP_lb_gateway_router="+gatewayRouter,
-			"protocol=udp")
+		k8sNSLbUDP, stderr, err = RunOVNNbctl("--data=bare", "--no-heading",
+			"--columns=_uuid", "find", "load_balancer",
+			"external_ids:UDP_lb_gateway_router="+gatewayRouter)
 		if err != nil {
-			logrus.Errorf("Failed to create load balancer, stdout: %q, "+
-				"stderr: %q, error: %v", stdout, stderr, err)
+			logrus.Errorf("Failed to get k8sNSLbUDP, stderr: %q, error: %v",
+				stderr, err)
 			return err
 		}
-	}
+		if k8sNSLbUDP == "" {
+			k8sNSLbUDP, stderr, err = RunOVNNbctl("--", "create",
+				"load_balancer",
+				"external_ids:UDP_lb_gateway_router="+gatewayRouter,
+				"protocol=udp")
+			if err != nil {
+				logrus.Errorf("Failed to create load balancer, stdout: %q, "+
+					"stderr: %q, error: %v", stdout, stderr, err)
+				return err
+			}
+		}
 
-	// Add north-south load-balancers to the gateway router.
-	stdout, stderr, err = RunOVNNbctl("set", "logical_router", gatewayRouter,
-		"load_balancer="+k8sNSLbTCP)
-	if err != nil {
-		logrus.Errorf("Failed to set north-south load-balancers to the "+
-			"gateway router, stdout: %q, stderr: %q, error: %v",
-			stdout, stderr, err)
-		return err
-	}
-	stdout, stderr, err = RunOVNNbctl("add", "logical_router", gatewayRouter,
-		"load_balancer", k8sNSLbUDP)
-	if err != nil {
-		logrus.Errorf("Failed to add north-south load-balancers to the "+
-			"gateway router, stdout: %q, stderr: %q, error: %v",
-			stdout, stderr, err)
-		return err
+		// Add north-south load-balancers to the gateway router.
+		stdout, stderr, err = RunOVNNbctl("set", "logical_router",
+			gatewayRouter, "load_balancer="+k8sNSLbTCP)
+		if err != nil {
+			logrus.Errorf("Failed to set north-south load-balancers to the "+
+				"gateway router, stdout: %q, stderr: %q, error: %v",
+				stdout, stderr, err)
+			return err
+		}
+		stdout, stderr, err = RunOVNNbctl("add", "logical_router",
+			gatewayRouter, "load_balancer", k8sNSLbUDP)
+		if err != nil {
+			logrus.Errorf("Failed to add north-south load-balancers to the "+
+				"gateway router, stdout: %q, stderr: %q, error: %v",
+				stdout, stderr, err)
+			return err
+		}
 	}
 
 	// Create the external switch for the physical interface to connect to.
