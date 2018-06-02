@@ -66,6 +66,9 @@ func (ovn *Controller) createGatewaysVIP(protocol string, port, targetPort int32
 				"(%v)", physicalGateway, err)
 			continue
 		}
+		if loadBalancer == "" {
+			continue
+		}
 
 		// With the physical_ip:port as the VIP, add an entry in
 		// 'load_balancer'.
