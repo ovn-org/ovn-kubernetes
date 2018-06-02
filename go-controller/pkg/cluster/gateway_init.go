@@ -363,7 +363,8 @@ func (cluster *OvnClusterController) initGateway(
 				cluster.GatewayBridge)
 		}
 		err = util.GatewayInit(clusterIPSubnet, nodeName, ipAddress, "",
-			cluster.GatewayBridge, cluster.GatewayNextHop, subnet)
+			cluster.GatewayBridge, cluster.GatewayNextHop, subnet,
+			cluster.NodePortEnable)
 		if err != nil {
 			return err
 		}
@@ -381,7 +382,8 @@ func (cluster *OvnClusterController) initGateway(
 				cluster.GatewayIntf)
 		}
 		err = util.GatewayInit(clusterIPSubnet, nodeName, ipAddress,
-			cluster.GatewayIntf, "", cluster.GatewayNextHop, subnet)
+			cluster.GatewayIntf, "", cluster.GatewayNextHop, subnet,
+			cluster.NodePortEnable)
 		if err != nil {
 			return err
 		}
