@@ -10,23 +10,31 @@ import (
 	kapi "k8s.io/api/core/v1"
 )
 
-func (ovn *Controller) getLoadBalancer(protocol kapi.Protocol) string {
+func (ovn *Controller) getLoadBalancer(protocol kapi.Protocol) (string,
+	error) {
 	if outStr, ok := ovn.loadbalancerClusterCache[string(protocol)]; ok {
-		return outStr
+		return outStr, nil
 	}
 
 	var out string
+	var err error
 	if protocol == kapi.ProtocolTCP {
-		out, _, _ = util.RunOVNNbctlUnix("--data=bare",
+		out, _, err = util.RunOVNNbctlUnix("--data=bare",
 			"--no-heading", "--columns=_uuid", "find", "load_balancer",
 			"external_ids:k8s-cluster-lb-tcp=yes")
 	} else if protocol == kapi.ProtocolUDP {
-		out, _, _ = util.RunOVNNbctlUnix("--data=bare", "--no-heading",
+		out, _, err = util.RunOVNNbctlUnix("--data=bare", "--no-heading",
 			"--columns=_uuid", "find", "load_balancer",
 			"external_ids:k8s-cluster-lb-udp=yes")
 	}
+	if err != nil {
+		return "", err
+	}
+	if out == "" {
+		return "", fmt.Errorf("no load-balancer found in the database")
+	}
 	ovn.loadbalancerClusterCache[string(protocol)] = out
-	return out
+	return out, nil
 }
 
 func (ovn *Controller) getLoadBalancerVIPS(

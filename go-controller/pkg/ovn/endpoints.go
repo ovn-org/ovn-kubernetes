@@ -64,10 +64,18 @@ func (ovn *Controller) AddEndpoints(ep *kapi.Endpoints) error {
 					}
 				}
 				if svc.Spec.Type == kapi.ServiceTypeClusterIP || svc.Spec.Type == kapi.ServiceTypeNodePort {
-					err = ovn.createLoadBalancerVIP(ovn.getLoadBalancer(svcPort.Protocol), svc.Spec.ClusterIP, svcPort.Port, ips, targetPort)
+					var loadBalancer string
+					loadBalancer, err = ovn.getLoadBalancer(svcPort.Protocol)
+					if err != nil {
+						logrus.Errorf("Failed to get loadbalancer for %s (%v)",
+							svcPort.Protocol, err)
+						continue
+					}
+					err = ovn.createLoadBalancerVIP(loadBalancer,
+						svc.Spec.ClusterIP, svcPort.Port, ips, targetPort)
 					if err != nil {
 						logrus.Errorf("Error in creating Cluster IP for svc %s, target port: %d - %v\n", svc.Name, targetPort, err)
-						return err
+						continue
 					}
 				}
 			}
@@ -85,10 +93,18 @@ func (ovn *Controller) AddEndpoints(ep *kapi.Endpoints) error {
 						continue
 					}
 				} else if svc.Spec.Type == kapi.ServiceTypeNodePort || svc.Spec.Type == kapi.ServiceTypeClusterIP {
-					err = ovn.createLoadBalancerVIP(ovn.getLoadBalancer(svcPort.Protocol), svc.Spec.ClusterIP, svcPort.Port, ips, targetPort)
+					var loadBalancer string
+					loadBalancer, err = ovn.getLoadBalancer(svcPort.Protocol)
+					if err != nil {
+						logrus.Errorf("Failed to get loadbalancer for %s (%v)",
+							svcPort.Protocol, err)
+						continue
+					}
+					err = ovn.createLoadBalancerVIP(loadBalancer,
+						svc.Spec.ClusterIP, svcPort.Port, ips, targetPort)
 					if err != nil {
 						logrus.Errorf("Error in creating Cluster IP for svc %s, target port: %d - %v\n", svc.Name, targetPort, err)
-						return err
+						continue
 					}
 				}
 			}
@@ -108,7 +124,13 @@ func (ovn *Controller) deleteEndpoints(ep *kapi.Endpoints) error {
 		return nil
 	}
 	for _, svcPort := range svc.Spec.Ports {
-		lb := ovn.getLoadBalancer(svcPort.Protocol)
+		var lb string
+		lb, err = ovn.getLoadBalancer(svcPort.Protocol)
+		if err != nil {
+			logrus.Errorf("Failed to get load-balancer for %s (%v)",
+				lb, err)
+			continue
+		}
 		key := fmt.Sprintf("\"%s:%d\"", svc.Spec.ClusterIP, svcPort.Port)
 		_, stderr, err := util.RunOVNNbctlUnix("remove", "load_balancer", lb,
 			"vips", key)
