@@ -7,6 +7,7 @@ import (
 
 	"github.com/sirupsen/logrus"
 
+	"github.com/openvswitch/ovn-kubernetes/go-controller/pkg/cni"
 	"github.com/openvswitch/ovn-kubernetes/go-controller/pkg/config"
 	"github.com/openvswitch/ovn-kubernetes/go-controller/pkg/ovn"
 
@@ -20,7 +21,7 @@ const (
 
 // StartClusterNode learns the subnet assigned to it by the master controller
 // and calls the SetupNode script which establishes the logical switch
-func (cluster *OvnClusterController) StartClusterNode(name, configFilePath string) error {
+func (cluster *OvnClusterController) StartClusterNode(name string) error {
 	count := 300
 	var err error
 	var node *kapi.Node
@@ -83,7 +84,7 @@ func (cluster *OvnClusterController) StartClusterNode(name, configFilePath strin
 		}
 	}
 
-	if err = config.WriteCNIConfig(configFilePath); err != nil {
+	if err = config.WriteCNIConfig(); err != nil {
 		return err
 	}
 
@@ -91,6 +92,10 @@ func (cluster *OvnClusterController) StartClusterNode(name, configFilePath strin
 		err = cluster.watchNamespaceUpdate(node, subnet.String())
 		return err
 	}
+
+	// start the cni server
+	cniServer := cni.NewCNIServer("")
+	err = cniServer.Start(cni.HandleCNIRequest)
 
 	return nil
 }

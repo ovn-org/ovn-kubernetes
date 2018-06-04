@@ -121,7 +121,7 @@ func delPidfile(pidfile string) {
 }
 
 func runOvnKube(ctx *cli.Context) error {
-	configFilePath, err := config.InitConfig(ctx, nil)
+	_, err := config.InitConfig(ctx, nil)
 	if err != nil {
 		return err
 	}
@@ -234,7 +234,7 @@ func runOvnKube(ctx *cli.Context) error {
 				panic("Cannot initialize node without service account 'token'. Please provide one with --k8s-token argument")
 			}
 
-			err := clusterController.StartClusterNode(node, configFilePath)
+			err := clusterController.StartClusterNode(node)
 			if err != nil {
 				logrus.Errorf(err.Error())
 				panic(err.Error())
@@ -259,7 +259,7 @@ func runOvnKube(ctx *cli.Context) error {
 		// run forever
 		select {}
 	}
-	if node != "" && (nodePortEnable || clusterController.OvnHA) {
+	if node != "" {
 		// run forever
 		select {}
 	}
