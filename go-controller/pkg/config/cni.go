@@ -19,14 +19,13 @@ type OVNNetConf struct {
 }
 
 // WriteCNIConfig writes a CNI JSON config file to directory given by global config
-func WriteCNIConfig(configFilePath string) error {
+func WriteCNIConfig() error {
 	bytes, err := json.Marshal(&OVNNetConf{
 		NetConf: types.NetConf{
 			CNIVersion: "0.3.1",
 			Name:       "ovn-kubernetes",
 			Type:       CNI.Plugin,
 		},
-		ConfigFilePath: configFilePath,
 	})
 	if err != nil {
 		return fmt.Errorf("failed to marshal CNI config JSON: %v", err)

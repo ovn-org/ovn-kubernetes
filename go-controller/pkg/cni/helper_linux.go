@@ -1,6 +1,6 @@
 // +build linux
 
-package app
+package cni
 
 import (
 	"fmt"
@@ -10,7 +10,6 @@ import (
 
 	"github.com/sirupsen/logrus"
 
-	"github.com/containernetworking/cni/pkg/skel"
 	"github.com/containernetworking/cni/pkg/types/current"
 	"github.com/containernetworking/plugins/pkg/ip"
 	"github.com/containernetworking/plugins/pkg/ns"
@@ -104,16 +103,14 @@ func setupInterface(netns ns.NetNS, containerID, ifName, macAddress, ipAddress, 
 }
 
 // ConfigureInterface sets up the container interface
-func ConfigureInterface(args *skel.CmdArgs, namespace string,
-	conf *config.OVNNetConf, podName string, macAddress string,
-	ipAddress string, gatewayIP string, mtu int, ingress, egress int64) ([]*current.Interface, error) {
-	netns, err := ns.GetNS(args.Netns)
+func (pr *PodRequest) ConfigureInterface(namespace string, podName string, macAddress string, ipAddress string, gatewayIP string, mtu int, ingress, egress int64) ([]*current.Interface, error) {
+	netns, err := ns.GetNS(pr.Netns)
 	if err != nil {
-		return nil, fmt.Errorf("failed to open netns %q: %v", args.Netns, err)
+		return nil, fmt.Errorf("failed to open netns %q: %v", pr.Netns, err)
 	}
 	defer netns.Close()
 
-	hostIface, contIface, err := setupInterface(netns, args.ContainerID, args.IfName, macAddress, ipAddress, gatewayIP, mtu)
+	hostIface, contIface, err := setupInterface(netns, pr.SandboxID, pr.IfName, macAddress, ipAddress, gatewayIP, mtu)
 	if err != nil {
 		return nil, err
 	}
@@ -154,8 +151,8 @@ func ConfigureInterface(args *skel.CmdArgs, namespace string,
 }
 
 // PlatformSpecificCleanup deletes the OVS port
-func PlatformSpecificCleanup(args *skel.CmdArgs, argsMap map[string]string) error {
-	ifaceName := args.ContainerID[:15]
+func (pr *PodRequest) PlatformSpecificCleanup() error {
+	ifaceName := pr.SandboxID[:15]
 	ovsArgs := []string{
 		"del-port", "br-int", ifaceName,
 	}

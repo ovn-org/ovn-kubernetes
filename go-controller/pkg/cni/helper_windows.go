@@ -1,6 +1,6 @@
 // +build windows
 
-package app
+package cni
 
 import (
 	"encoding/json"
@@ -110,9 +110,8 @@ func deleteHNSEndpoint(endpointName string) error {
 // The fact that CNI add should be idempotent on Windows is stated here:
 // https://github.com/kubernetes/kubernetes/blob/master/pkg/kubelet/network/cni/cni_windows.go#L38
 // TODO: add proper MTU config (GetCurrentThreadId/SetCurrentThreadId) or via OVS properties
-func ConfigureInterface(args *skel.CmdArgs, namespace string, conf *config.OVNNetConf,
-	podName string, macAddress string, ipAddress string, gatewayIP string,
-	mtu int, ingress, egress int64) ([]*current.Interface, error) {
+func (pr *PodRequest) ConfigureInterface(namespace string, podName string, macAddress string, ipAddress string, gatewayIP string, mtu int, ingres, egress int64) ([]*current.Interface, error) {
+        conf := pr.CNINetConf
 	ipAddr, ipNet, err := net.ParseCIDR(ipAddress)
 	if err != nil {
 		return nil, err
@@ -158,11 +157,11 @@ func ConfigureInterface(args *skel.CmdArgs, namespace string, conf *config.OVNNe
 		logrus.Infof("HNS endpoint already exists with name: %q", endpointName)
 	}
 
-	err = containerHotAttachEndpoint(createdEndpoint, args.ContainerID)
+	err = containerHotAttachEndpoint(createdEndpoint, pr.SandboxID)
 	if err != nil {
-		logrus.Warningf("Failed to hot attach HNS Endpoint %q to container %q, reason: %q", endpointName, args.ContainerID, err)
+		logrus.Warningf("Failed to hot attach HNS Endpoint %q to container %q, reason: %q", endpointName, pr.SandboxID, err)
 		// In case the attach failed, delete the endpoint
-		errHNSDelete := deleteHNSEndpoint(args.ContainerID)
+		errHNSDelete := deleteHNSEndpoint(pr.SandboxID)
 		if errHNSDelete != nil {
 			logrus.Warningf("Failed to delete the HNS Endpoint, reason: %q", errHNSDelete)
 		}
@@ -211,15 +210,11 @@ func ConfigureInterface(args *skel.CmdArgs, namespace string, conf *config.OVNNe
 
 // PlatformSpecificCleanup deletes the OVS port and also the corresponding
 // HNS Endpoint for the OVS port.
-func PlatformSpecificCleanup(args *skel.CmdArgs, argsMap map[string]string) error {
-	if argsMap == nil {
-		logrus.Warningf("cleanup failed, invalid args passed: %v", args.Args)
-		return nil
-	}
-	namespace := argsMap["K8S_POD_NAMESPACE"]
-	podName := argsMap["K8S_POD_NAME"]
+func (pr *PodRequest) PlatformSpecificCleanup() error {
+	namespace := pr.PodNamespace
+	podName := pr.PodName
 	if namespace == "" || podName == "" {
-		logrus.Warningf("cleanup failed, required CNI variable missing from args: %v", args.Args)
+		logrus.Warningf("cleanup failed, required CNI variable missing from args: %v", pr)
 		return nil
 	}
 
