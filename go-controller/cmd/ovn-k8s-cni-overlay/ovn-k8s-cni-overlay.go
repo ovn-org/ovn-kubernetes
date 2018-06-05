@@ -1,7 +1,6 @@
 package main
 
 import (
-	"fmt"
 	"os"
 
 	"github.com/openvswitch/ovn-kubernetes/go-controller/pkg/cni"
@@ -10,8 +9,6 @@ import (
 	"github.com/containernetworking/cni/pkg/skel"
 	"github.com/containernetworking/cni/pkg/types"
 	"github.com/containernetworking/cni/pkg/version"
-
-	"github.com/containernetworking/plugins/pkg/ns"
 	"github.com/urfave/cli"
 )
 
@@ -22,12 +19,7 @@ func main() {
 	c.Version = "0.0.2"
 	c.Flags = config.Flags
 
-	hostNS, err := ns.GetCurrentNS()
-	if err != nil {
-		panic(fmt.Sprintf("could not get current kernel netns: %v", err))
-	}
-	defer hostNS.Close()
-	p := cni.NewCNIPlugin(cni.CNIServerSocketPath, hostNS)
+	p := cni.NewCNIPlugin(cni.CNIServerSocketPath)
 	c.Action = func(ctx *cli.Context) error {
 		skel.PluginMain(
 			p.CmdAdd,

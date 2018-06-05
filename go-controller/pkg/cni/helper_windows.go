@@ -12,7 +12,6 @@ import (
 	"github.com/sirupsen/logrus"
 
 	"github.com/Microsoft/hcsshim"
-	"github.com/containernetworking/cni/pkg/skel"
 	"github.com/containernetworking/cni/pkg/types/current"
 
 	"github.com/openvswitch/ovn-kubernetes/go-controller/pkg/config"
@@ -109,9 +108,14 @@ func deleteHNSEndpoint(endpointName string) error {
 // Small note on this, the call to this function should be idempotent on Windows.
 // The fact that CNI add should be idempotent on Windows is stated here:
 // https://github.com/kubernetes/kubernetes/blob/master/pkg/kubelet/network/cni/cni_windows.go#L38
+<<<<<<< HEAD
 // TODO: add proper MTU config (GetCurrentThreadId/SetCurrentThreadId) or via OVS properties
 func (pr *PodRequest) ConfigureInterface(namespace string, podName string, macAddress string, ipAddress string, gatewayIP string, mtu int, ingres, egress int64) ([]*current.Interface, error) {
         conf := pr.CNINetConf
+=======
+// TODO: add support for custom MTU
+func (pr *PodRequest) ConfigureInterface(namespace string, podName string, macAddress string, ipAddress string, gatewayIP string, mtu int) ([]*current.Interface, error) {
+>>>>>>> cnishim/cniserver windows compatibility
 	ipAddr, ipNet, err := net.ParseCIDR(ipAddress)
 	if err != nil {
 		return nil, err

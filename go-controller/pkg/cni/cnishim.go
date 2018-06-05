@@ -16,16 +16,14 @@ import (
 
 	"github.com/containernetworking/cni/pkg/skel"
 	"github.com/containernetworking/cni/pkg/types/current"
-	"github.com/containernetworking/plugins/pkg/ns"
 )
 
 type cniPlugin struct {
 	socketPath string
-	hostNS     ns.NetNS
 }
 
-func NewCNIPlugin(socketPath string, hostNS ns.NetNS) *cniPlugin {
-	return &cniPlugin{socketPath: socketPath, hostNS: hostNS}
+func NewCNIPlugin(socketPath string) *cniPlugin {
+	return &cniPlugin{socketPath: socketPath}
 }
 
 // Create and fill a CNIRequest with this plugin's environment and stdin which
@@ -61,11 +59,7 @@ func (p *cniPlugin) doCNI(url string, req *CNIRequest) ([]byte, error) {
 		},
 	}
 
-	var resp *http.Response
-	err = p.hostNS.Do(func(ns.NetNS) error {
-		resp, err = client.Post(url, "application/json", bytes.NewReader(data))
-		return err
-	})
+	resp, err := client.Post(url, "application/json", bytes.NewReader(data))
 	if err != nil {
 		return nil, fmt.Errorf("failed to send CNI request: %v", err)
 	}
