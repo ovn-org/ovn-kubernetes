@@ -154,17 +154,24 @@ func (pr *PodRequest) cmdAdd() *PodResult {
 }
 
 func (pr *PodRequest) cmdDel() *PodResult {
-	pr.PlatformSpecificCleanup()
+	err := pr.PlatformSpecificCleanup()
+	if err != nil {
+		logrus.Error("Teardown error: %v", err)
+	}
 	return &PodResult{}
 }
 
+// HandleCNIRequest is the callback for all the requests
+// coming to the cniserver after being procesed into PodRequest objects
+// Argument '*PodRequest' encapsulates all the necessary information
+// Return value is the actual bytes to be sent back without further processing.
 func HandleCNIRequest(request *PodRequest) ([]byte, error) {
 	logrus.Infof("Dispatching pod network request %v", request)
 	var result *PodResult
 	switch request.Command {
-	case CNI_ADD:
+	case CNIAdd:
 		result = request.cmdAdd()
-	case CNI_DEL:
+	case CNIDel:
 		result = request.cmdDel()
 	default:
 	}

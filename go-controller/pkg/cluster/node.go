@@ -97,7 +97,7 @@ func (cluster *OvnClusterController) StartClusterNode(name string) error {
 	cniServer := cni.NewCNIServer("")
 	err = cniServer.Start(cni.HandleCNIRequest)
 
-	return nil
+	return err
 }
 
 // If default namespace MasterOverlayIP annotation has been chaged, update

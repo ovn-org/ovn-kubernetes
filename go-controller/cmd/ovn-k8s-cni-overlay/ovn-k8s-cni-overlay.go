@@ -19,7 +19,7 @@ func main() {
 	c.Version = "0.0.2"
 	c.Flags = config.Flags
 
-	p := cni.NewCNIPlugin(cni.CNIServerSocketPath)
+	p := cni.NewCNIPlugin("")
 	c.Action = func(ctx *cli.Context) error {
 		skel.PluginMain(
 			p.CmdAdd,
