@@ -4,33 +4,37 @@ import (
 	"net/http"
 )
 
-// Default directory for CNIServer runtime files
-const CNIServerRunDir string = "/var/run/"
+// serverRunDir is the default directory for CNIServer runtime files
+const serverRunDir string = "/var/run/"
 
-// CNIServer socket name, and default full path
-const CNIServerSocketName string = "ovn-cni-server.sock"
-const CNIServerSocketPath string = CNIServerRunDir + "/" + CNIServerSocketName
+const serverSocketName string = "ovn-cni-server.sock"
+const serverSocketPath string = serverRunDir + "/" + serverSocketName
 
 // Explicit type for CNI commands the server handles
-type CNICommand string
+type command string
 
-const CNI_ADD CNICommand = "ADD"
-const CNI_UPDATE CNICommand = "UPDATE"
-const CNI_DEL CNICommand = "DEL"
+// CNIAdd is the command representing add operation for a new pod
+const CNIAdd command = "ADD"
 
-// Request sent to the CNIServer by the OVN CNI plugin
-type CNIRequest struct {
+// CNIUpdate is the command representing update operation for an existing pod
+const CNIUpdate command = "UPDATE"
+
+// CNIDel is the command representing delete operation on a pod that is to be torn down
+const CNIDel command = "DEL"
+
+// Request sent to the Server by the OVN CNI plugin
+type Request struct {
 	// CNI environment variables, like CNI_COMMAND and CNI_NETNS
 	Env map[string]string `json:"env,omitempty"`
 	// CNI configuration passed via stdin to the CNI plugin
 	Config []byte `json:"config,omitempty"`
 }
 
-// Request structure built from CNIRequest which is passed to the
-// handler function given to the CNIServer at creation time
+// PodRequest structure built from Request which is passed to the
+// handler function given to the Server at creation time
 type PodRequest struct {
 	// The CNI command of the operation
-	Command CNICommand
+	Command command
 	// kubernetes namespace name
 	PodNamespace string
 	// kubernetes pod name
@@ -43,11 +47,11 @@ type PodRequest struct {
 	IfName string
 	// CNI version string obtained from stdin conf
 	CNIVersion string
-	// Channel for returning the operation result to the CNIServer
+	// Channel for returning the operation result to the Server
 	Result chan *PodResult
 }
 
-// Result of a PodRequest sent through the PodRequest's Result channel.
+// PodResult of a PodRequest sent through the PodRequest's Result channel.
 type PodResult struct {
 	// Response to be returned to the OpenShift SDN CNI plugin on success
 	Response []byte
@@ -57,9 +61,9 @@ type PodResult struct {
 
 type cniRequestFunc func(request *PodRequest) ([]byte, error)
 
-// CNI server object that listens for JSON-marshaled CNIRequest objects
+// Server object that listens for JSON-marshaled Request objects
 // on a private root-only Unix domain socket.
-type CNIServer struct {
+type Server struct {
 	http.Server
 	requestFunc cniRequestFunc
 	rundir      string

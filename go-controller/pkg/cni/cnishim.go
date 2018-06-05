@@ -1,6 +1,6 @@
 package cni
 
-// contains code for cnishim - one that gets called as the cni plugin
+// contains code for cnishim - one that gets called as the cni Plugin
 // This does not do the real cni work. This is just the client to the cniserver
 // that does the real work.
 
@@ -18,17 +18,23 @@ import (
 	"github.com/containernetworking/cni/pkg/types/current"
 )
 
-type cniPlugin struct {
+// Plugin is the structure to hold the endpoint information and the corresponding
+// functions to use it
+type Plugin struct {
 	socketPath string
 }
 
-func NewCNIPlugin(socketPath string) *cniPlugin {
-	return &cniPlugin{socketPath: socketPath}
+// NewCNIPlugin creates the internal Plugin object
+func NewCNIPlugin(socketPath string) *Plugin {
+	if len(socketPath) == 0 {
+		socketPath = serverSocketPath
+	}
+	return &Plugin{socketPath: socketPath}
 }
 
-// Create and fill a CNIRequest with this plugin's environment and stdin which
+// Create and fill a Request with this Plugin's environment and stdin which
 // contain the CNI variables and configuration
-func newCNIRequest(args *skel.CmdArgs) *CNIRequest {
+func newCNIRequest(args *skel.CmdArgs) *Request {
 	envMap := make(map[string]string)
 	for _, item := range os.Environ() {
 		idx := strings.Index(item, "=")
@@ -37,7 +43,7 @@ func newCNIRequest(args *skel.CmdArgs) *CNIRequest {
 		}
 	}
 
-	return &CNIRequest{
+	return &Request{
 		Env:    envMap,
 		Config: args.StdinData,
 	}
@@ -45,7 +51,7 @@ func newCNIRequest(args *skel.CmdArgs) *CNIRequest {
 
 // Send a CNI request to the CNI server via JSON + HTTP over a root-owned unix socket,
 // and return the result
-func (p *cniPlugin) doCNI(url string, req *CNIRequest) ([]byte, error) {
+func (p *Plugin) doCNI(url string, req *Request) ([]byte, error) {
 	data, err := json.Marshal(req)
 	if err != nil {
 		return nil, fmt.Errorf("failed to marshal CNI request %v: %v", req, err)
@@ -77,7 +83,8 @@ func (p *cniPlugin) doCNI(url string, req *CNIRequest) ([]byte, error) {
 	return body, nil
 }
 
-func (p *cniPlugin) CmdAdd(args *skel.CmdArgs) error {
+// CmdAdd is the callback for 'add' cni calls from skel
+func (p *Plugin) CmdAdd(args *skel.CmdArgs) error {
 	req := newCNIRequest(args)
 
 	body, err := p.doCNI("http://dummy/", req)
@@ -93,7 +100,8 @@ func (p *cniPlugin) CmdAdd(args *skel.CmdArgs) error {
 	return result.Print()
 }
 
-func (p *cniPlugin) CmdDel(args *skel.CmdArgs) error {
+// CmdDel is the callback for 'teardown' cni calls from skel
+func (p *Plugin) CmdDel(args *skel.CmdArgs) error {
 	_, err := p.doCNI("http://dummy/", newCNIRequest(args))
 	return err
 }

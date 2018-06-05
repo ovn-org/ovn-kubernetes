@@ -21,7 +21,7 @@ import (
 	cni020 "github.com/containernetworking/cni/pkg/types/020"
 )
 
-func clientDoCNI(t *testing.T, client *http.Client, req *CNIRequest) ([]byte, int) {
+func clientDoCNI(t *testing.T, client *http.Client, req *Request) ([]byte, int) {
 	data, err := json.Marshal(req)
 	if err != nil {
 		t.Fatalf("failed to marshal CNI request %v: %v", req, err)
@@ -44,11 +44,11 @@ func clientDoCNI(t *testing.T, client *http.Client, req *CNIRequest) ([]byte, in
 var expectedResult cnitypes.Result
 
 func serverHandleCNI(request *PodRequest) ([]byte, error) {
-	if request.Command == CNI_ADD {
+	if request.Command == CNIAdd {
 		return json.Marshal(&expectedResult)
-	} else if request.Command == CNI_DEL {
+	} else if request.Command == CNIDel {
 		return nil, nil
-	} else if request.Command == CNI_UPDATE {
+	} else if request.Command == CNIUpdate {
 		return nil, nil
 	}
 	return nil, fmt.Errorf("unhandled CNI command %v", request.Command)
@@ -60,7 +60,7 @@ func TestCNIServer(t *testing.T) {
 		t.Fatalf("failed to create temp directory: %v", err)
 	}
 	defer os.RemoveAll(tmpDir)
-	socketPath := filepath.Join(tmpDir, CNIServerSocketName)
+	socketPath := filepath.Join(tmpDir, serverSocketName)
 
 	s := NewCNIServer(tmpDir)
 	if err := s.Start(serverHandleCNI); err != nil {
@@ -87,7 +87,7 @@ func TestCNIServer(t *testing.T) {
 
 	type testcase struct {
 		name        string
-		request     *CNIRequest
+		request     *Request
 		result      cnitypes.Result
 		errorPrefix string
 	}
@@ -96,24 +96,23 @@ func TestCNIServer(t *testing.T) {
 		// Normal ADD request
 		{
 			name: "ADD",
-			request: &CNIRequest{
+			request: &Request{
 				Env: map[string]string{
-					"CNI_COMMAND":     string(CNI_ADD),
+					"CNI_COMMAND":     string(CNIAdd),
 					"CNI_CONTAINERID": "adsfadsfasfdasdfasf",
 					"CNI_NETNS":       "/path/to/something",
 					"CNI_ARGS":        "K8S_POD_NAMESPACE=awesome-namespace;K8S_POD_NAME=awesome-name",
 				},
-				Config:   []byte("{\"cniVersion\": \"0.1.0\",\"name\": \"openshift-sdn\",\"type\": \"openshift-sdn\"}"),
-				HostVeth: "vethABC",
+				Config: []byte("{\"cniVersion\": \"0.1.0\",\"name\": \"openshift-sdn\",\"type\": \"openshift-sdn\"}"),
 			},
 			result: expectedResult,
 		},
 		// Normal DEL request
 		{
 			name: "DEL",
-			request: &CNIRequest{
+			request: &Request{
 				Env: map[string]string{
-					"CNI_COMMAND":     string(CNI_DEL),
+					"CNI_COMMAND":     string(CNIDel),
 					"CNI_CONTAINERID": "adsfadsfasfdasdfasf",
 					"CNI_NETNS":       "/path/to/something",
 					"CNI_ARGS":        "K8S_POD_NAMESPACE=awesome-namespace;K8S_POD_NAME=awesome-name",
@@ -125,9 +124,9 @@ func TestCNIServer(t *testing.T) {
 		// Normal UPDATE request
 		{
 			name: "UPDATE",
-			request: &CNIRequest{
+			request: &Request{
 				Env: map[string]string{
-					"CNI_COMMAND":     string(CNI_UPDATE),
+					"CNI_COMMAND":     string(CNIUpdate),
 					"CNI_CONTAINERID": "adsfadsfasfdasdfasf",
 					"CNI_NETNS":       "/path/to/something",
 					"CNI_ARGS":        "K8S_POD_NAMESPACE=awesome-namespace;K8S_POD_NAME=awesome-name",
@@ -139,14 +138,13 @@ func TestCNIServer(t *testing.T) {
 		// Missing CNI_ARGS
 		{
 			name: "ARGS1",
-			request: &CNIRequest{
+			request: &Request{
 				Env: map[string]string{
-					"CNI_COMMAND":     string(CNI_ADD),
+					"CNI_COMMAND":     string(CNIAdd),
 					"CNI_CONTAINERID": "adsfadsfasfdasdfasf",
 					"CNI_NETNS":       "/path/to/something",
 				},
-				Config:   []byte("{\"cniVersion\": \"0.1.0\",\"name\": \"openshift-sdn\",\"type\": \"openshift-sdn\"}"),
-				HostVeth: "vethABC",
+				Config: []byte("{\"cniVersion\": \"0.1.0\",\"name\": \"openshift-sdn\",\"type\": \"openshift-sdn\"}"),
 			},
 			result:      nil,
 			errorPrefix: "missing CNI_ARGS",
@@ -154,14 +152,13 @@ func TestCNIServer(t *testing.T) {
 		// Missing CNI_NETNS
 		{
 			name: "ARGS2",
-			request: &CNIRequest{
+			request: &Request{
 				Env: map[string]string{
-					"CNI_COMMAND":     string(CNI_ADD),
+					"CNI_COMMAND":     string(CNIAdd),
 					"CNI_CONTAINERID": "adsfadsfasfdasdfasf",
 					"CNI_ARGS":        "K8S_POD_NAMESPACE=awesome-namespace;K8S_POD_NAME=awesome-name",
 				},
-				Config:   []byte("{\"cniVersion\": \"0.1.0\",\"name\": \"openshift-sdn\",\"type\": \"openshift-sdn\"}"),
-				HostVeth: "vethABC",
+				Config: []byte("{\"cniVersion\": \"0.1.0\",\"name\": \"openshift-sdn\",\"type\": \"openshift-sdn\"}"),
 			},
 			result:      nil,
 			errorPrefix: "missing CNI_NETNS",
@@ -169,24 +166,8 @@ func TestCNIServer(t *testing.T) {
 		// Missing CNI_COMMAND
 		{
 			name: "ARGS3",
-			request: &CNIRequest{
+			request: &Request{
 				Env: map[string]string{
-					"CNI_CONTAINERID": "adsfadsfasfdasdfasf",
-					"CNI_NETNS":       "/path/to/something",
-					"CNI_ARGS":        "K8S_POD_NAMESPACE=awesome-namespace;K8S_POD_NAME=awesome-name",
-				},
-				Config:   []byte("{\"cniVersion\": \"0.1.0\",\"name\": \"openshift-sdn\",\"type\": \"openshift-sdn\"}"),
-				HostVeth: "vethABC",
-			},
-			result:      nil,
-			errorPrefix: "unexpected or missing CNI_COMMAND",
-		},
-		// Missing HostVeth
-		{
-			name: "ARGS4",
-			request: &CNIRequest{
-				Env: map[string]string{
-					"CNI_COMMAND":     string(CNI_ADD),
 					"CNI_CONTAINERID": "adsfadsfasfdasdfasf",
 					"CNI_NETNS":       "/path/to/something",
 					"CNI_ARGS":        "K8S_POD_NAMESPACE=awesome-namespace;K8S_POD_NAME=awesome-name",
@@ -194,7 +175,7 @@ func TestCNIServer(t *testing.T) {
 				Config: []byte("{\"cniVersion\": \"0.1.0\",\"name\": \"openshift-sdn\",\"type\": \"openshift-sdn\"}"),
 			},
 			result:      nil,
-			errorPrefix: "missing HostVeth",
+			errorPrefix: "unexpected or missing CNI_COMMAND",
 		},
 	}
 

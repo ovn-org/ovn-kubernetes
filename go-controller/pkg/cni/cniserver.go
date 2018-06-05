@@ -18,39 +18,39 @@ import (
 	utilwait "k8s.io/apimachinery/pkg/util/wait"
 )
 
-// *** The CNIServer is PRIVATE API between OVN components and may be
+// *** The Server is PRIVATE API between OVN components and may be
 // changed at any time.  It is in no way a supported interface or API. ***
 //
-// The CNIServer accepts pod setup/teardown requests from the OVN
+// The Server accepts pod setup/teardown requests from the OVN
 // CNI plugin, which is itself called by kubelet when pod networking
 // should be set up or torn down.  The OVN CNI plugin gathers up
 // the standard CNI environment variables and network configuration provided
-// on stdin and forwards them to the CNIServer over a private, root-only
+// on stdin and forwards them to the Server over a private, root-only
 // Unix domain socket, using HTTP as the transport and JSON as the protocol.
 //
-// The CNIServer interprets standard CNI environment variables as specified
+// The Server interprets standard CNI environment variables as specified
 // by the Container Network Interface (CNI) specification available here:
 // https://github.com/containernetworking/cni/blob/master/SPEC.md
-// While the CNIServer interface is not itself versioned, as the CNI
+// While the Server interface is not itself versioned, as the CNI
 // specification requires that CNI network configuration is versioned, and
 // since the OVN CNI plugin passes that configuration to the
-// CNIServer, versioning is ensured in exactly the same way as an executable
+// Server, versioning is ensured in exactly the same way as an executable
 // CNI plugin would be versioned.
 //
-// Security: since the Unix domain socket created by the CNIServer is owned
+// Security: since the Unix domain socket created by the Server is owned
 // by root and inaccessible to any other user, no unprivileged process may
-// access the CNIServer.  The Unix domain socket and its parent directory are
+// access the Server.  The Unix domain socket and its parent directory are
 // removed and re-created with 0700 permissions each time ovnkube on the node is
 // started.
 
-// Create and return a new CNIServer object which will listen on a socket in the given path
-func NewCNIServer(rundir string) *CNIServer {
+// NewCNIServer creates and returns a new Server object which will listen on a socket in the given path
+func NewCNIServer(rundir string) *Server {
 	if len(rundir) == 0 {
-		rundir = CNIServerRunDir
+		rundir = serverRunDir
 	}
 	router := mux.NewRouter()
 
-	s := &CNIServer{
+	s := &Server{
 		Server: http.Server{
 			Handler: router,
 		},
@@ -61,11 +61,11 @@ func NewCNIServer(rundir string) *CNIServer {
 	return s
 }
 
-// Start the CNIServer's local HTTP server on a root-owned Unix domain socket.
+// Start the Server's local HTTP server on a root-owned Unix domain socket.
 // requestFunc will be called to handle pod setup/teardown operations on each
-// request to the CNIServer's HTTP server, and should return a PodResult
+// request to the Server's HTTP server, and should return a PodResult
 // when the operation has completed.
-func (s *CNIServer) Start(requestFunc cniRequestFunc) error {
+func (s *Server) Start(requestFunc cniRequestFunc) error {
 	if requestFunc == nil {
 		return fmt.Errorf("no pod request handler")
 	}
@@ -85,7 +85,7 @@ func (s *CNIServer) Start(requestFunc cniRequestFunc) error {
 	// On Linux the socket is created with the permissions of the directory
 	// it is in, so as long as the directory is root-only we can avoid
 	// racy umask manipulation.
-	socketPath := filepath.Join(s.rundir, CNIServerSocketName)
+	socketPath := filepath.Join(s.rundir, serverSocketName)
 	l, err := net.Listen("unix", socketPath)
 	if err != nil {
 		return fmt.Errorf("failed to listen on pod info socket: %v", err)
@@ -126,7 +126,7 @@ func gatherCNIArgs(env map[string]string) (map[string]string, error) {
 }
 
 func cniRequestToPodRequest(r *http.Request) (*PodRequest, error) {
-	var cr CNIRequest
+	var cr Request
 	b, _ := ioutil.ReadAll(r.Body)
 	if err := json.Unmarshal(b, &cr); err != nil {
 		return nil, fmt.Errorf("JSON unmarshal error: %v", err)
@@ -138,7 +138,7 @@ func cniRequestToPodRequest(r *http.Request) (*PodRequest, error) {
 	}
 
 	req := &PodRequest{
-		Command: CNICommand(cmd),
+		Command: command(cmd),
 		Result:  make(chan *PodResult),
 	}
 
@@ -157,12 +157,12 @@ func cniRequestToPodRequest(r *http.Request) (*PodRequest, error) {
 	}
 
 	req.PodNamespace, ok = cniArgs["K8S_POD_NAMESPACE"]
-	if err != nil {
+	if !ok {
 		return nil, fmt.Errorf("missing K8S_POD_NAMESPACE")
 	}
 
 	req.PodName, ok = cniArgs["K8S_POD_NAME"]
-	if err != nil {
+	if !ok {
 		return nil, fmt.Errorf("missing K8S_POD_NAME")
 	}
 
@@ -176,7 +176,7 @@ func cniRequestToPodRequest(r *http.Request) (*PodRequest, error) {
 
 // Dispatch a pod request to the request handler and return the result to the
 // CNI server client
-func (s *CNIServer) handleCNIRequest(w http.ResponseWriter, r *http.Request) {
+func (s *Server) handleCNIRequest(w http.ResponseWriter, r *http.Request) {
 	req, err := cniRequestToPodRequest(r)
 	if err != nil {
 		http.Error(w, fmt.Sprintf("%v", err), http.StatusBadRequest)
