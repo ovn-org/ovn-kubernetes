@@ -19,7 +19,7 @@ const (
 func configureManagementPortWindows(clusterSubnet, clusterServicesSubnet,
 	routerIP, interfaceName, interfaceIP string) error {
 	// Up the interface.
-	args := []string{"Enable-NetAdapter", fmt.Sprintf("%s", interfaceName)}
+	args := []string{"Enable-NetAdapter", "-IncludeHidden", fmt.Sprintf("%s", interfaceName)}
 	logrus.Debugf("Executing 'powershell %s'", strings.Join(args, " "))
 
 	_, err := exec.Command("powershell", args...).CombinedOutput()
@@ -87,7 +87,7 @@ func configureManagementPortWindows(clusterSubnet, clusterServicesSubnet,
 	if strings.Contains(fmt.Sprintf("%s", stdoutStderr), fmt.Sprintf("%s", clusterIP)) {
 		logrus.Debugf("Route was found, skipping route add")
 	} else {
-		args = []string{"$(Get-NetAdapter", "|", "Where",
+		args = []string{"$(Get-NetAdapter", "-IncludeHidden", "|", "Where",
 			"{", "$_.Name", "-Match", fmt.Sprintf("\"%s\"", interfaceName), "}).ifIndex"}
 		logrus.Debugf("Executing 'powershell %s'", strings.Join(args, " "))
 
@@ -299,7 +299,7 @@ func CreateManagementPort(nodeName, localSubnet, clusterSubnet,
 
 	if runtime.GOOS == windowsOS && macAddress == "00:00:00:00:00:00" {
 		var stdoutStderr []byte
-		stdoutStderr, err = exec.Command("powershell", "$(Get-NetAdapter", "|", "Where", "{", "$_.Name",
+		stdoutStderr, err = exec.Command("powershell", "$(Get-NetAdapter", "-IncludeHidden", "|", "Where", "{", "$_.Name",
 			"-Match", fmt.Sprintf("\"%s\"", interfaceName), "}).MacAddress").CombinedOutput()
 		if err != nil {
 			logrus.Errorf("Failed to get mac address of ovn-k8s-master, stderr: %q, error: %v", fmt.Sprintf("%s", stdoutStderr), err)
