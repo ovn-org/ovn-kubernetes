@@ -2,6 +2,7 @@ package cni
 
 import (
 	"encoding/json"
+	"fmt"
 	"net"
 	"time"
 
@@ -122,6 +123,7 @@ func (pr *PodRequest) cmdAdd() *PodResult {
 	var interfacesArray []*current.Interface
 	interfacesArray, err = pr.ConfigureInterface(namespace, podName, macAddress, ipAddress, gatewayIP, config.Default.MTU, ingress, egress)
 	if err != nil {
+		logrus.Errorf("Failed to configure interface in pod: %v", err)
 		return nil
 	}
 
@@ -174,6 +176,9 @@ func HandleCNIRequest(request *PodRequest) ([]byte, error) {
 	case CNIDel:
 		result = request.cmdDel()
 	default:
+	}
+	if result == nil {
+		return PodResult{}.Response, fmt.Errorf("Nil response to CNI request")
 	}
 	logrus.Infof("Returning pod network request %v, result %s err %v", request, string(result.Response), result.Err)
 	return result.Response, result.Err
