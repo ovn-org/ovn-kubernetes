@@ -77,8 +77,8 @@ nohup sudo ovnkube -k8s-kubeconfig $HOME/kubeconfig.yaml -loglevel=4 \
     -k8s-apiserver="http://$MASTER_OVERLAY_IP:8080" \
     -init-node="$MINION_NAME"  \
     -nodeport \
-    -nb-address="$PROTOCOL://$MASTER_OVERLAY_IP:6631" \
-    -sb-address="$PROTOCOL://$MASTER_OVERLAY_IP:6632" \
+    -nb-address="$PROTOCOL://$MASTER_OVERLAY_IP:6641" \
+    -sb-address="$PROTOCOL://$MASTER_OVERLAY_IP:6642" \
     ${SSL_ARGS} \
     -k8s-token="test" \
     -init-gateways -gateway-interface=enp0s9 -gateway-nexthop="$GW_IP" \

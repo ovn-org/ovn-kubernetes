@@ -137,8 +137,8 @@ nohup sudo ovnkube -k8s-kubeconfig $HOME/kubeconfig.yaml -net-controller -loglev
  -service-cluster-ip-range=172.16.1.0/24 \
  -nodeport \
  -k8s-token="test" \
- -nb-address="$PROTOCOL://$OVERLAY_IP:6631" \
- -sb-address="$PROTOCOL://$OVERLAY_IP:6632" \
+ -nb-address="$PROTOCOL://$OVERLAY_IP:6641" \
+ -sb-address="$PROTOCOL://$OVERLAY_IP:6642" \
  ${SSL_ARGS} 2>&1 &
 
 
