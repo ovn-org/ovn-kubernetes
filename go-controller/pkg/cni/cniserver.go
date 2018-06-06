@@ -151,6 +151,11 @@ func cniRequestToPodRequest(r *http.Request) (*PodRequest, error) {
 		return nil, fmt.Errorf("missing CNI_NETNS")
 	}
 
+	req.IfName, ok = cr.Env["CNI_IFNAME"]
+	if !ok {
+		req.IfName = "eth0"
+	}
+
 	cniArgs, err := gatherCNIArgs(cr.Env)
 	if err != nil {
 		return nil, err
