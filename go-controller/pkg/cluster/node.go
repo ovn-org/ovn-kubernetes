@@ -107,6 +107,7 @@ func (cluster *OvnClusterController) updateOvnNode(masterIP string,
 	err = setupOVNNode(node.Name, config.Kubernetes.APIServer,
 		config.Kubernetes.Token, config.Kubernetes.CACert)
 	if err != nil {
+		logrus.Errorf("Failed to setup OVN node (%v)", err)
 		return err
 	}
 
