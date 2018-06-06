@@ -132,11 +132,11 @@ sudo ovnkube -k8s-kubeconfig kubeconfig.yaml -net-controller -loglevel=4 \
  -init-master="$NODE_NAME" -cluster-subnet=$CLUSTER_IP_SUBNET \
  -service-cluster-ip-range=$SERVICE_IP_SUBNET \
  -nodeport \
- -nb-address="ssl://$CENTRAL_IP:6631" \
+ -nb-address="ssl://$CENTRAL_IP:6641" \
  -nb-server-privkey /etc/openvswitch/ovnnb-privkey.pem \
  -nb-server-cert /etc/openvswitch/ovnnb-cert.pem \
  -nb-server-cacert /vagrant/pki/switchca/cacert.pem \
- -sb-address="ssl://$CENTRAL_IP:6632" \
+ -sb-address="ssl://$CENTRAL_IP:6642" \
  -sb-server-privkey /etc/openvswitch/ovnsb-privkey.pem \
  -sb-server-cert /etc/openvswitch/ovnsb-cert.pem \
  -sb-server-cacert /vagrant/pki/switchca/cacert.pem  \
@@ -156,8 +156,8 @@ sudo ovnkube -k8s-kubeconfig $HOME/kubeconfig.yaml -loglevel=4 \
     -k8s-apiserver="http://$CENTRAL_IP:8080" \
     -init-node="$MINION_NAME"  \
     -nodeport \
-    -nb-address="ssl://$CENTRAL_IP:6631" \
-    -sb-address="ssl://$CENTRAL_IP:6632" -k8s-token=$TOKEN \
+    -nb-address="ssl://$CENTRAL_IP:6641" \
+    -sb-address="ssl://$CENTRAL_IP:6642" -k8s-token=$TOKEN \
     -nb-client-privkey /etc/openvswitch/ovncontroller-privkey.pem \
     -nb-client-cert /etc/openvswitch/ovncontroller-cert.pem \
     -nb-client-cacert /etc/openvswitch/ovnnb-ca.cert \
