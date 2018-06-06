@@ -240,6 +240,7 @@ func (cluster *OvnClusterController) StartClusterMaster(masterNodeName string) e
 	}
 
 	if err := cluster.SetupMaster(masterNodeName); err != nil {
+		logrus.Errorf("Failed to setup master (%v)", err)
 		return err
 	}
 
