@@ -30,6 +30,7 @@ type OvnClusterController struct {
 	GatewaySpareIntf bool
 	NodePortEnable   bool
 	OvnHA            bool
+	LocalnetGateway  bool
 }
 
 const (

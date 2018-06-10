@@ -5,10 +5,12 @@ package cluster
 import (
 	"fmt"
 	"net"
+	"os/exec"
 	"regexp"
 	"strings"
 	"syscall"
 
+	"github.com/coreos/go-iptables/iptables"
 	"github.com/openvswitch/ovn-kubernetes/go-controller/pkg/config"
 	"github.com/openvswitch/ovn-kubernetes/go-controller/pkg/util"
 	"github.com/sirupsen/logrus"
@@ -16,6 +18,18 @@ import (
 	kapi "k8s.io/api/core/v1"
 	"k8s.io/client-go/tools/cache"
 )
+
+const (
+	localnetGatewayIP            = "169.254.33.2/24"
+	localnetGatewayNextHop       = "169.254.33.1"
+	localnetGatewayNextHopSubnet = "169.254.33.1/24"
+)
+
+type iptRule struct {
+	table string
+	chain string
+	args  []string
+}
 
 // getIPv4Address returns the ipv4 address for the network interface 'iface'.
 func getIPv4Address(iface string) (string, error) {
@@ -39,6 +53,68 @@ func getIPv4Address(iface string) (string, error) {
 		}
 	}
 	return ipAddress, nil
+}
+
+func ensureChain(ipt *iptables.IPTables, table, chain string) error {
+	chains, err := ipt.ListChains(table)
+	if err != nil {
+		return fmt.Errorf("failed to list iptables chains: %v", err)
+	}
+	for _, ch := range chains {
+		if ch == chain {
+			return nil
+		}
+	}
+
+	return ipt.NewChain(table, chain)
+}
+
+func generateGatewayNATRules(ifname string, ip string) []iptRule {
+	// Allow packets to/from the gateway interface in case defaults deny
+	rules := make([]iptRule, 0)
+	rules = append(rules, iptRule{
+		table: "filter",
+		chain: "FORWARD",
+		args:  []string{"-i", ifname, "-j", "ACCEPT"},
+	})
+	rules = append(rules, iptRule{
+		table: "filter",
+		chain: "FORWARD",
+		args: []string{"-o", ifname, "-m", "conntrack", "--ctstate",
+			"RELATED,ESTABLISHED", "-j", "ACCEPT"},
+	})
+
+	// NAT for the interface
+	rules = append(rules, iptRule{
+		table: "nat",
+		chain: "POSTROUTING",
+		args:  []string{"-s", ip, "-j", "MASQUERADE"},
+	})
+	return rules
+}
+
+func localnetGatewayNAT(ifname, ip string) error {
+	ipt, err := iptables.NewWithProtocol(iptables.ProtocolIPv4)
+	if err != nil {
+		return fmt.Errorf("failed to initialize iptables: %v", err)
+	}
+
+	rules := generateGatewayNATRules(ifname, ip)
+	for _, r := range rules {
+		if err := ensureChain(ipt, r.table, r.chain); err != nil {
+			return fmt.Errorf("failed to ensure %s/%s: %v", r.table, r.chain, err)
+		}
+		exists, err := ipt.Exists(r.table, r.chain, r.args...)
+		if !exists && err == nil {
+			err = ipt.Insert(r.table, r.chain, 1, r.args...)
+		}
+		if err != nil {
+			return fmt.Errorf("failed to add iptables %s/%s rule %q: %v",
+				r.table, r.chain, strings.Join(r.args, " "), err)
+		}
+	}
+
+	return nil
 }
 
 // getDefaultGatewayInterfaceDetails returns the interface name on
@@ -301,6 +377,77 @@ func (cluster *OvnClusterController) nodePortWatcher() error {
 
 func (cluster *OvnClusterController) initGateway(
 	nodeName, clusterIPSubnet, subnet string) error {
+	if cluster.LocalnetGateway {
+		// Create a localnet OVS bridge.
+		localnetBridgeName := "br-localnet"
+		_, stderr, err := util.RunOVSVsctl("--may-exist", "add-br",
+			localnetBridgeName)
+		if err != nil {
+			return fmt.Errorf("Failed to create localnet bridge %s"+
+				", stderr:%s (%v)", localnetBridgeName, stderr, err)
+		}
+
+		_, err = exec.Command("ip", "link", "set", localnetBridgeName,
+			"up").CombinedOutput()
+		if err != nil {
+			logrus.Errorf("failed to up %s (%v)", localnetBridgeName, err)
+			return err
+		}
+
+		// Create a localnet bridge nexthop
+		localnetBridgeNextHop := "br-nexthop"
+		_, stderr, err = util.RunOVSVsctl("--may-exist", "add-port",
+			localnetBridgeName, localnetBridgeNextHop, "--", "set",
+			"interface", localnetBridgeNextHop, "type=internal")
+		if err != nil {
+			return fmt.Errorf("Failed to create localnet bridge next hop %s"+
+				", stderr:%s (%v)", localnetBridgeNextHop, stderr, err)
+		}
+		_, err = exec.Command("ip", "link", "set", localnetBridgeNextHop,
+			"up").CombinedOutput()
+		if err != nil {
+			logrus.Errorf("failed to up %s (%v)", localnetBridgeNextHop, err)
+			return err
+		}
+
+		// Flush IPv4 address of localnetBridgeNextHop.
+		_, err = exec.Command("ip", "addr", "flush",
+			"dev", localnetBridgeNextHop).CombinedOutput()
+		if err != nil {
+			logrus.Errorf("failed to flush ip address of %s (%v)",
+				localnetBridgeNextHop, err)
+			return err
+		}
+
+		// Set localnetBridgeNextHop with an IP address.
+		_, err = exec.Command("ip", "addr", "add",
+			localnetGatewayNextHopSubnet,
+			"dev", localnetBridgeNextHop).CombinedOutput()
+		if err != nil {
+			logrus.Errorf("failed to assign ip address to %s (%v)",
+				localnetBridgeNextHop, err)
+			return err
+		}
+
+		err = util.GatewayInit(clusterIPSubnet, nodeName,
+			localnetGatewayIP, "",
+			localnetBridgeName, localnetGatewayNextHop, subnet,
+			false)
+		if err != nil {
+			logrus.Errorf("failed to GatewayInit for localnet (%v)", err)
+			return err
+		}
+
+		err = localnetGatewayNAT(localnetBridgeNextHop, localnetGatewayIP)
+		if err != nil {
+			logrus.Errorf("Failed to add NAT rules for localnet gateway (%v)",
+				err)
+			return err
+		}
+
+		return nil
+	}
+
 	if cluster.GatewayNextHop == "" || cluster.GatewayIntf == "" {
 		// We need to get the interface details from the default gateway.
 		gatewayIntf, gatewayNextHop, err := getDefaultGatewayInterfaceDetails()
@@ -366,6 +513,7 @@ func (cluster *OvnClusterController) initGateway(
 			cluster.GatewayBridge, cluster.GatewayNextHop, subnet,
 			cluster.NodePortEnable)
 		if err != nil {
+			logrus.Errorf("failed to GatewayInit (%v)", err)
 			return err
 		}
 
@@ -385,6 +533,7 @@ func (cluster *OvnClusterController) initGateway(
 			cluster.GatewayIntf, "", cluster.GatewayNextHop, subnet,
 			cluster.NodePortEnable)
 		if err != nil {
+			logrus.Errorf("failed to GatewayInit (%v)", err)
 			return err
 		}
 	}

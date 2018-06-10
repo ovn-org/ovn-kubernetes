@@ -139,6 +139,7 @@ nohup sudo ovnkube -k8s-kubeconfig $HOME/kubeconfig.yaml -net-controller -loglev
  -k8s-token="test" \
  -nb-address="$PROTOCOL://$OVERLAY_IP:6641" \
  -sb-address="$PROTOCOL://$OVERLAY_IP:6642" \
+ -init-gateways -gateway-localnet \
  ${SSL_ARGS} 2>&1 &
 
 
