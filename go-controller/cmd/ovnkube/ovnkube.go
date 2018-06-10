@@ -90,7 +90,11 @@ func main() {
 				"exclusively used for the OVN gateway.  When true, only OVN" +
 				"related traffic can flow through this interface",
 		},
-
+		cli.BoolFlag{
+			Name: "gateway-localnet",
+			Usage: "If true, creates a localnet gateway to let traffic reach " +
+				"host network and also exit host with iptables NAT",
+		},
 		cli.BoolFlag{
 			Name:  "nodeport",
 			Usage: "Setup nodeport based ingress on gateways.",
@@ -199,6 +203,7 @@ func runOvnKube(ctx *cli.Context) error {
 		clusterController.GatewayIntf = ctx.String("gateway-interface")
 		clusterController.GatewayNextHop = ctx.String("gateway-nexthop")
 		clusterController.GatewaySpareIntf = ctx.Bool("gateway-spare-interface")
+		clusterController.LocalnetGateway = ctx.Bool("gateway-localnet")
 		clusterController.OvnHA = ctx.Bool("ha")
 		_, clusterController.ClusterIPNet, err = net.ParseCIDR(ctx.String("cluster-subnet"))
 		if err != nil {

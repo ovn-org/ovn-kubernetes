@@ -54,6 +54,11 @@ If true, assumes that "gateway-interface" provided can be exclusively
 used for the OVN gateway.  When true, only OVNrelated traffic can flow
 through this interface.
 .TP
+\fB\--gateway-localnet\fR
+If true, creates a localnet gateway to let traffic reach host network
+and also exit host with iptables NAT. A localnet gateway will have
+a IP address of 169.254.33.2.
+.TP
 \fB\--nodeport\fR
 Setup nodeport based entries in OVN gateways for ingress into the k8s cluster.
 By default, it is disabled.
