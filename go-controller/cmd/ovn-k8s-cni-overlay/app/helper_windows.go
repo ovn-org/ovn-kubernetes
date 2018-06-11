@@ -109,7 +109,7 @@ func deleteHNSEndpoint(endpointName string) error {
 // Small note on this, the call to this function should be idempotent on Windows.
 // The fact that CNI add should be idempotent on Windows is stated here:
 // https://github.com/kubernetes/kubernetes/blob/master/pkg/kubelet/network/cni/cni_windows.go#L38
-// TODO: add support for custom MTU
+// TODO: add proper MTU config (GetCurrentThreadId/SetCurrentThreadId) or via OVS properties
 func ConfigureInterface(args *skel.CmdArgs, namespace string, conf *config.OVNNetConf, podName string, macAddress string, ipAddress string, gatewayIP string, mtu int) ([]*current.Interface, error) {
 	ipAddr, ipNet, err := net.ParseCIDR(ipAddress)
 	if err != nil {
@@ -182,6 +182,18 @@ func ConfigureInterface(args *skel.CmdArgs, namespace string, conf *config.OVNNe
 	out, err = exec.Command("ovs-vsctl", ovsArgs...).CombinedOutput()
 	if err != nil {
 		return nil, fmt.Errorf("failure in plugging pod interface: %v  %q", err, string(out))
+	}
+
+	mtuArgs := []string{
+		"Set-NetIPInterface",
+		"-IncludeAllCompartments",
+		fmt.Sprintf("-InterfaceAlias \"vEthernet (%s)\"", ifaceID),
+		fmt.Sprintf("-NlMtuBytes %d", mtu),
+	}
+
+	_, err = exec.Command("powershell", mtuArgs...).CombinedOutput()
+	if err != nil {
+		logrus.Warningf("Failed to set MTU on endpoint, reason: %q", err)
 	}
 
 	return []*current.Interface{}, nil
