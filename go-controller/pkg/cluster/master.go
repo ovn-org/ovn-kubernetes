@@ -396,6 +396,10 @@ func (cluster *OvnClusterController) watchNodes() error {
 			if err != nil {
 				logrus.Errorf("Error deleting node %s: %v", node.Name, err)
 			}
+			err = util.RemoveNode(node.Name)
+			if err != nil {
+				logrus.Errorf("Failed to remove node %s (%v)", node.Name, err)
+			}
 		},
 	}, nil)
 	return err
