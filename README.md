@@ -20,14 +20,30 @@ guide for Ubuntu that installs OVS and OVN from source and packages:
 [INSTALL.UBUNTU.md]
 
 On each node, you should also install the 'ovnkube' utility that comes with
-this repository. To install it, you can run:
+this repository. To compile it, you will need golang installed.  You can
+install golang with:
 
 ```
+wget -nv https://dl.google.com/go/go1.9.2.linux-amd64.tar.gz
+sudo tar -C /usr/local -xzf go1.9.2.linux-amd64.tar.gz
+```
+
+You need to set your GOPATH, clone the ovn-kubernetes repo, compile and
+install it.
+
+```
+export GOPATH=$HOME/work
+mkdir -p $GOPATH/github.com/openvswitch
+cd $GOPATH/github.com/openvswitch
 git clone https://github.com/openvswitch/ovn-kubernetes
-cd go-controller
+cd ovn-kubernetes/go-controller
 make
 sudo make install
 ```
+
+Note that, you need not do the above compilation on every host. You can copy
+over the compiled binaries to other hosts.  We will have the option to run
+OVN via kubernetes daemonsets soon.
 
 ### Kubernetes networking requirements:
 
