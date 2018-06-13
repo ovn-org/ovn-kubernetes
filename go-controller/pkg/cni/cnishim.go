@@ -12,6 +12,7 @@ import (
 	"net"
 	"net/http"
 	"os"
+	"runtime"
 	"strings"
 
 	"github.com/containernetworking/cni/pkg/skel"
@@ -60,7 +61,13 @@ func (p *Plugin) doCNI(url string, req *Request) ([]byte, error) {
 	client := &http.Client{
 		Transport: &http.Transport{
 			Dial: func(proto, addr string) (net.Conn, error) {
-				return net.Dial("unix", p.socketPath)
+				var conn net.Conn
+				if runtime.GOOS != "windows" {
+					conn, err = net.Dial("unix", p.socketPath)
+				} else {
+					conn, err = net.Dial("tcp", serverTCPAddress)
+				}
+				return conn, err
 			},
 		},
 	}
