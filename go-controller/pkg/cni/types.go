@@ -2,6 +2,8 @@ package cni
 
 import (
 	"net/http"
+
+	"github.com/containernetworking/cni/pkg/types"
 )
 
 // serverRunDir is the default directory for CNIServer runtime files
@@ -9,6 +11,7 @@ const serverRunDir string = "/var/run/ovn-kubernetes/"
 
 const serverSocketName string = "ovn-cni-server.sock"
 const serverSocketPath string = serverRunDir + "/" + serverSocketName
+const serverTCPAddress string = "127.0.0.1:3996"
 
 // Explicit type for CNI commands the server handles
 type command string
@@ -45,8 +48,8 @@ type PodRequest struct {
 	Netns string
 	// Interface name to be configured
 	IfName string
-	// CNI version string obtained from stdin conf
-	CNIVersion string
+	// CNI conf obtained from stdin conf
+	CNIConf *types.NetConf
 	// Channel for returning the operation result to the Server
 	Result chan *PodResult
 }

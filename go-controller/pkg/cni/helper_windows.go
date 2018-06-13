@@ -108,14 +108,9 @@ func deleteHNSEndpoint(endpointName string) error {
 // Small note on this, the call to this function should be idempotent on Windows.
 // The fact that CNI add should be idempotent on Windows is stated here:
 // https://github.com/kubernetes/kubernetes/blob/master/pkg/kubelet/network/cni/cni_windows.go#L38
-<<<<<<< HEAD
 // TODO: add proper MTU config (GetCurrentThreadId/SetCurrentThreadId) or via OVS properties
-func (pr *PodRequest) ConfigureInterface(namespace string, podName string, macAddress string, ipAddress string, gatewayIP string, mtu int, ingres, egress int64) ([]*current.Interface, error) {
-        conf := pr.CNINetConf
-=======
-// TODO: add support for custom MTU
-func (pr *PodRequest) ConfigureInterface(namespace string, podName string, macAddress string, ipAddress string, gatewayIP string, mtu int) ([]*current.Interface, error) {
->>>>>>> cnishim/cniserver windows compatibility
+func (pr *PodRequest) ConfigureInterface(namespace string, podName string, macAddress string, ipAddress string, gatewayIP string, mtu int, ingress, egress int64) ([]*current.Interface, error) {
+	conf := pr.CNIConf
 	ipAddr, ipNet, err := net.ParseCIDR(ipAddress)
 	if err != nil {
 		return nil, err
@@ -150,8 +145,8 @@ func (pr *PodRequest) ConfigureInterface(namespace string, podName string, macAd
 			IPAddress:      ipAddr,
 			MacAddress:     macAddressIpFormat,
 			PrefixLength:   uint8(ipMaskSize),
-			DNSServerList:  strings.Join(conf.NetConf.DNS.Nameservers, ","),
-			DNSSuffix:      strings.Join(conf.NetConf.DNS.Search, ","),
+			DNSServerList:  strings.Join(conf.DNS.Nameservers, ","),
+			DNSSuffix:      strings.Join(conf.DNS.Search, ","),
 		}
 		createdEndpoint, err = createHNSEndpoint(hnsEndpoint)
 		if err != nil {

@@ -10,22 +10,12 @@ import (
 	"github.com/containernetworking/cni/pkg/types"
 )
 
-// OVNNetConf is the Go structure representing configuration for the
-// ovn-kubernetes CNI plugin
-type OVNNetConf struct {
-	types.NetConf
-
-	ConfigFilePath string `json:"configFilePath,omitempty"`
-}
-
 // WriteCNIConfig writes a CNI JSON config file to directory given by global config
 func WriteCNIConfig() error {
-	bytes, err := json.Marshal(&OVNNetConf{
-		NetConf: types.NetConf{
-			CNIVersion: "0.3.1",
-			Name:       "ovn-kubernetes",
-			Type:       CNI.Plugin,
-		},
+	bytes, err := json.Marshal(&types.NetConf{
+		CNIVersion: "0.3.1",
+		Name:       "ovn-kubernetes",
+		Type:       CNI.Plugin,
 	})
 	if err != nil {
 		return fmt.Errorf("failed to marshal CNI config JSON: %v", err)
@@ -59,9 +49,9 @@ func WriteCNIConfig() error {
 	return os.Rename(f.Name(), confFile)
 }
 
-// ReadCNIConfig unmarshals a CNI JSON config into an OVNNetConf structure
-func ReadCNIConfig(bytes []byte) (*OVNNetConf, error) {
-	conf := &OVNNetConf{}
+// ReadCNIConfig unmarshals a CNI JSON config into an NetConf structure
+func ReadCNIConfig(bytes []byte) (*types.NetConf, error) {
+	conf := &types.NetConf{}
 	if err := json.Unmarshal(bytes, conf); err != nil {
 		return nil, err
 	}

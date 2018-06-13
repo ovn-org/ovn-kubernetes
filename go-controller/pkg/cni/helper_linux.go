@@ -14,8 +14,6 @@ import (
 	"github.com/containernetworking/plugins/pkg/ip"
 	"github.com/containernetworking/plugins/pkg/ns"
 	"github.com/vishvananda/netlink"
-
-	"github.com/openvswitch/ovn-kubernetes/go-controller/pkg/config"
 )
 
 func renameLink(curName, newName string) error {
