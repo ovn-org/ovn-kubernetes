@@ -121,13 +121,13 @@ func (pr *PodRequest) ConfigureInterface(namespace string, podName string, macAd
 		fmt.Sprintf("external_ids:attached_mac=%s", macAddress),
 		fmt.Sprintf("external_ids:iface-id=%s", ifaceID),
 		fmt.Sprintf("external_ids:ip_address=%s", ipAddress),
-		fmt.Sprintf("external_ids:sandbox=%s", args.ContainerID),
+		fmt.Sprintf("external_ids:sandbox=%s", pr.SandboxID),
 	}
 	if out, err := ovsExec(ovsArgs...); err != nil {
 		return nil, fmt.Errorf("failure in plugging pod interface: %v\n  %q", err, out)
 	}
 
-	if err := clearPodBandwidth(args.ContainerID); err != nil {
+	if err := clearPodBandwidth(pr.SandboxID); err != nil {
 		return nil, err
 	}
 	if ingress > 0 || egress > 0 {
@@ -140,7 +140,7 @@ func (pr *PodRequest) ConfigureInterface(namespace string, podName string, macAd
 			return nil, fmt.Errorf("failed to set host veth txqlen: %v", err)
 		}
 
-		if err := setPodBandwidth(args.ContainerID, hostIface.Name, ingress, egress); err != nil {
+		if err := setPodBandwidth(pr.SandboxID, hostIface.Name, ingress, egress); err != nil {
 			return nil, err
 		}
 	}
@@ -160,7 +160,7 @@ func (pr *PodRequest) PlatformSpecificCleanup() error {
 		logrus.Warningf("failed to delete OVS port %s: %v\n  %q", ifaceName, err, string(out))
 	}
 
-	_ = clearPodBandwidth(args.ContainerID)
+	_ = clearPodBandwidth(pr.SandboxID)
 
 	return nil
 }
