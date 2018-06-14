@@ -117,7 +117,8 @@ func (pr *PodRequest) cmdAdd() *PodResult {
 
 	ingress, egress, err := extractPodBandwidthResources(annotation)
 	if err != nil {
-		return fmt.Errorf("failed to parse bandwidth request: %v", err)
+		logrus.Errorf("failed to parse bandwidth request: %v", err)
+		return nil
 	}
 
 	var interfacesArray []*current.Interface
