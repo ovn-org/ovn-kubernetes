@@ -3,6 +3,7 @@ package config
 import (
 	"encoding/json"
 	"fmt"
+	"io/ioutil"
 	"os"
 	"path/filepath"
 
@@ -42,14 +43,21 @@ func WriteCNIConfig(configFilePath string) error {
 	confFile := filepath.Join(CNI.ConfDir, "10-ovn-kubernetes.conf")
 
 	var f *os.File
-	f, err = os.OpenFile(confFile, os.O_CREATE|os.O_WRONLY, 0644)
+	f, err = ioutil.TempFile(CNI.ConfDir, "ovnkube-")
 	if err != nil {
 		return err
 	}
-	defer f.Close()
 
 	_, err = f.Write(bytes)
-	return err
+	if err != nil {
+		return err
+	}
+	err = f.Close()
+	if err != nil {
+		return err
+	}
+
+	return os.Rename(f.Name(), confFile)
 }
 
 // ReadCNIConfig unmarshals a CNI JSON config into an OVNNetConf structure
