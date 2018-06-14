@@ -22,18 +22,18 @@ func NewClientset(conf *config.KubernetesConfig) (*kubernetes.Clientset, error) 
 		// uses the current context in kubeconfig
 		kconfig, err = clientcmd.BuildConfigFromFlags("", conf.Kubeconfig)
 	} else if strings.HasPrefix(conf.APIServer, "https") {
-		if conf.APIServer == "" || conf.Token == "" || conf.CACert == "" {
+		if conf.APIServer == "" || conf.Token == "" {
 			return nil, fmt.Errorf("TLS-secured apiservers require token and CA certificate")
 		}
-
-		if _, err := cert.NewPool(conf.CACert); err != nil {
-			return nil, err
-		}
-
 		kconfig = &rest.Config{
-			Host:            conf.APIServer,
-			BearerToken:     conf.Token,
-			TLSClientConfig: rest.TLSClientConfig{CAFile: conf.CACert},
+			Host:        conf.APIServer,
+			BearerToken: conf.Token,
+		}
+		if conf.CACert != "" {
+			if _, err := cert.NewPool(conf.CACert); err != nil {
+				return nil, err
+			}
+			kconfig.TLSClientConfig = rest.TLSClientConfig{CAFile: conf.CACert}
 		}
 	} else if strings.HasPrefix(conf.APIServer, "http") {
 		kconfig, err = clientcmd.BuildConfigFromFlags(conf.APIServer, "")

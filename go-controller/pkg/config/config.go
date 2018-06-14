@@ -415,9 +415,6 @@ func buildKubernetesConfig(cli, file *config, defaults *Defaults) error {
 		return fmt.Errorf("kubernetes API server URL scheme %q invalid", url.Scheme)
 	}
 
-	if strings.HasPrefix(Kubernetes.APIServer, "https") && Kubernetes.CACert == "" {
-		return fmt.Errorf("kubernetes API server %q scheme requires a CA certificate", Kubernetes.APIServer)
-	}
 	return nil
 }
 
