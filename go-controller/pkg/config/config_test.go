@@ -515,10 +515,6 @@ server-cacert=/path/to/sb-ca.crt`), 0644)
 	// Run once without config file, once with
 	Describe("Kubernetes config options", func() {
 		Context("returns an error when the", func() {
-			generateTestsSimple("apiserver scheme is HTTPS but no CACert is provided",
-				"kubernetes API server \"https://localhost:8443\" scheme requires a CA certificate",
-				"-k8s-apiserver=https://localhost:8443")
-
 			generateTestsSimple("CA cert does not exist",
 				"kubernetes CA certificate file \"/foo/bar/baz.cert\" not found",
 				"-k8s-apiserver=https://localhost:8443", "-k8s-cacert=/foo/bar/baz.cert")
