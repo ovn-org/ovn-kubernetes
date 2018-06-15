@@ -56,9 +56,9 @@ type PodRequest struct {
 
 // PodResult of a PodRequest sent through the PodRequest's Result channel.
 type PodResult struct {
-	// Response to be returned to the OpenShift SDN CNI plugin on success
+	// Response to be returned to the OVN CNI plugin on success
 	Response []byte
-	// Error to be returned to the OpenShift SDN CNI plugin on failure
+	// Error to be returned to the OVN CNI plugin on failure
 	Err error
 }
 
