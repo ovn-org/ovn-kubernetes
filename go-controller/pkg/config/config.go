@@ -128,7 +128,7 @@ const (
 	OvnDBSchemeUnix OvnDBScheme = "unix"
 )
 
-// config is used to read the structured config file
+// Config is used to read the structured config file and to cache config in testcases
 type config struct {
 	Default    DefaultConfig
 	Logging    LoggingConfig
@@ -136,6 +136,36 @@ type config struct {
 	Kubernetes KubernetesConfig
 	OvnNorth   rawOvnAuthConfig
 	OvnSouth   rawOvnAuthConfig
+}
+
+var (
+	savedDefault    DefaultConfig
+	savedLogging    LoggingConfig
+	savedCNI        CNIConfig
+	savedKubernetes KubernetesConfig
+	savedOvnNorth   OvnAuthConfig
+	savedOvnSouth   OvnAuthConfig
+)
+
+func init() {
+	// Cache original default config values so they can be restored by testcases
+	savedDefault = Default
+	savedLogging = Logging
+	savedCNI = CNI
+	savedKubernetes = Kubernetes
+	savedOvnNorth = OvnNorth
+	savedOvnSouth = OvnSouth
+}
+
+// RestoreDefaultConfig restores default config values. Used by testcases to
+// provide a pristine environment between tests.
+func RestoreDefaultConfig() {
+	Default = savedDefault
+	Logging = savedLogging
+	CNI = savedCNI
+	Kubernetes = savedKubernetes
+	OvnNorth = savedOvnNorth
+	OvnSouth = savedOvnSouth
 }
 
 // copy members of struct 'src' into the corresponding field in struct 'dst'
