@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"fmt"
 	"io/ioutil"
+	"path/filepath"
 	"runtime"
 	"strings"
 	"unicode"
@@ -20,6 +21,9 @@ const (
 	ovsOfctlCommand   = "ovs-ofctl"
 	ovnNbctlCommand   = "ovn-nbctl"
 	ipCommand         = "ip"
+	powershellCommand = "powershell"
+	netshCommand      = "netsh"
+	routeCommand      = "route"
 	osRelease         = "/etc/os-release"
 	rhel              = "RHEL"
 	ubuntu            = "Ubuntu"
@@ -65,11 +69,14 @@ func runningPlatform() (string, error) {
 
 // Exec runs various OVN and OVS utilities
 type execHelper struct {
-	exec      kexec.Interface
-	ofctlPath string
-	vsctlPath string
-	nbctlPath string
-	ipPath    string
+	exec           kexec.Interface
+	ofctlPath      string
+	vsctlPath      string
+	nbctlPath      string
+	ipPath         string
+	powershellPath string
+	netshPath      string
+	routePath      string
 }
 
 var runner *execHelper
@@ -92,8 +99,26 @@ func SetExec(exec kexec.Interface) error {
 	if err != nil {
 		return err
 	}
-	runner.ipPath, err = exec.LookPath(ipCommand)
-	return err
+	if runtime.GOOS == windowsOS {
+		runner.powershellPath, err = exec.LookPath(powershellCommand)
+		if err != nil {
+			return err
+		}
+		runner.netshPath, err = exec.LookPath(netshCommand)
+		if err != nil {
+			return err
+		}
+		runner.routePath, err = exec.LookPath(routeCommand)
+		if err != nil {
+			return err
+		}
+	} else {
+		runner.ipPath, err = exec.LookPath(ipCommand)
+		if err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 // GetExec returns the exec interface which can be used for running commands directly.
@@ -175,9 +200,35 @@ func RunIP(args ...string) (string, string, error) {
 	return strings.TrimSpace(stdout.String()), stderr.String(), err
 }
 
+// RunPowershell runs a command via the Windows powershell utility
+func RunPowershell(args ...string) (string, string, error) {
+	stdout, stderr, err := run(runner.powershellPath, args...)
+	return strings.TrimSpace(stdout.String()), stderr.String(), err
+}
+
+// RunNetsh runs a command via the Windows netsh utility
+func RunNetsh(args ...string) (string, string, error) {
+	stdout, stderr, err := run(runner.netshPath, args...)
+	return strings.TrimSpace(stdout.String()), stderr.String(), err
+}
+
+// RunRoute runs a command via the Windows route utility
+func RunRoute(args ...string) (string, string, error) {
+	stdout, stderr, err := run(runner.routePath, args...)
+	return strings.TrimSpace(stdout.String()), stderr.String(), err
+}
+
 // RawExec runs the given command via the exec interface. Should only be used
 // for early calls before configuration is read.
 func RawExec(cmdPath string, args ...string) (string, string, error) {
+	// If the command is not a path to a binary, try finding it
+	if filepath.Base(cmdPath) == cmdPath {
+		var err error
+		cmdPath, err = runner.exec.LookPath(cmdPath)
+		if err != nil {
+			return "", "", err
+		}
+	}
 	stdout, stderr, err := run(cmdPath, args...)
 	return strings.TrimSpace(stdout.String()), stderr.String(), err
 }
