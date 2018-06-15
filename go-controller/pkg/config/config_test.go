@@ -103,26 +103,7 @@ func runInit(app *cli.App, runType int, cfgFile *os.File, args ...string) error 
 	return app.Run(finalArgs)
 }
 
-var (
-	savedDefault    DefaultConfig
-	savedLogging    LoggingConfig
-	savedCNI        CNIConfig
-	savedKubernetes KubernetesConfig
-	savedOvnNorth   OvnAuthConfig
-	savedOvnSouth   OvnAuthConfig
-
-	tmpDir string
-)
-
-func init() {
-	// Cache original default config values so we can restore them before each testcase
-	savedDefault = Default
-	savedLogging = Logging
-	savedCNI = CNI
-	savedKubernetes = Kubernetes
-	savedOvnNorth = OvnNorth
-	savedOvnSouth = OvnSouth
-}
+var tmpDir string
 
 var _ = AfterSuite(func() {
 	err := os.RemoveAll(tmpDir)
@@ -149,12 +130,7 @@ var _ = Describe("Config Operations", func() {
 
 	BeforeEach(func() {
 		// Restore global default values before each testcase
-		Default = savedDefault
-		Logging = savedLogging
-		CNI = savedCNI
-		Kubernetes = savedKubernetes
-		OvnNorth = savedOvnNorth
-		OvnSouth = savedOvnSouth
+		RestoreDefaultConfig()
 
 		app = cli.NewApp()
 		app.Name = "test"
