@@ -44,3 +44,12 @@ func AddFakeCmd(fakeCmds []fakeexec.FakeCommandAction, expected *ExpectedCmd) []
 		}
 	})
 }
+
+// AddFakeCmdsNoOutputNoError takes a list of commands and appends those commands
+// to the expected command set. The command cannot return any output or error.
+func AddFakeCmdsNoOutputNoError(fakeCmds []fakeexec.FakeCommandAction, commands []string) []fakeexec.FakeCommandAction {
+	for _, cmd := range commands {
+		fakeCmds = AddFakeCmd(fakeCmds, &ExpectedCmd{Cmd: cmd})
+	}
+	return fakeCmds
+}
