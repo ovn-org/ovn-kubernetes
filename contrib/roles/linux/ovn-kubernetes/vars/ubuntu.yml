@@ -2,9 +2,9 @@
 ovn_kubernetes_info:
   install_path: /usr/bin
   # ovn-kubernetes build info
-  git_url:  https://github.com/aserdean/ovn-kubernetes
+  git_url: https://github.com/alinbalutoiu/ovn-kubernetes
   build_path: /tmp
-  branch: no_hyperv
+  branch: master
 
 ovn_kubernetes_binaries:
   linux:
