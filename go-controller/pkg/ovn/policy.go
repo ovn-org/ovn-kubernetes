@@ -164,7 +164,6 @@ func (gp *gressPolicy) delAddressSet(hashedAddressSet string) (string, string, b
 
 const (
 	toLport   = "to-lport"
-	fromLport = "from-lport"
 	addACL    = "add"
 	deleteACL = "delete"
 	noneMatch = "None"
@@ -261,11 +260,12 @@ func (oc *Controller) addAllowACLFromNode(logicalSwitch string) {
 func (oc *Controller) addACLAllow(namespace, policy, logicalSwitch,
 	logicalPort, match, l4Match string, ipBlockCidr bool, gressNum int,
 	policyType knet.PolicyType) {
-	var direction string
+	var direction, action string
+	direction = toLport
 	if policyType == knet.PolicyTypeIngress {
-		direction = toLport
+		action = "allow-related"
 	} else {
-		direction = fromLport
+		action = "allow"
 	}
 
 	uuid, stderr, err := util.RunOVNNbctlUnix("--data=bare", "--no-heading",
@@ -275,7 +275,7 @@ func (oc *Controller) addACLAllow(namespace, policy, logicalSwitch,
 		fmt.Sprintf("external-ids:namespace=%s", namespace),
 		fmt.Sprintf("external-ids:policy=%s", policy),
 		fmt.Sprintf("external-ids:%s_num=%d", policyType, gressNum),
-		fmt.Sprintf("external-ids:allow_direction=%s", policyType),
+		fmt.Sprintf("external-ids:policy_type=%s", policyType),
 		fmt.Sprintf("external-ids:logical_switch=%s", logicalSwitch),
 		fmt.Sprintf("external-ids:logical_port=%s", logicalPort))
 	if err != nil {
@@ -292,13 +292,13 @@ func (oc *Controller) addACLAllow(namespace, policy, logicalSwitch,
 	_, stderr, err = util.RunOVNNbctlUnix("--id=@acl", "create",
 		"acl", fmt.Sprintf("priority=%s", defaultAllowPriority),
 		fmt.Sprintf("direction=%s", direction), match,
-		"action=allow-related",
+		fmt.Sprintf("action=%s", action),
 		fmt.Sprintf("external-ids:l4Match=\"%s\"", l4Match),
 		fmt.Sprintf("external-ids:ipblock_cidr=%t", ipBlockCidr),
 		fmt.Sprintf("external-ids:namespace=%s", namespace),
 		fmt.Sprintf("external-ids:policy=%s", policy),
 		fmt.Sprintf("external-ids:%s_num=%d", policyType, gressNum),
-		fmt.Sprintf("external-ids:allow_direction=%s", policyType),
+		fmt.Sprintf("external-ids:policy_type=%s", policyType),
 		fmt.Sprintf("external-ids:logical_switch=%s", logicalSwitch),
 		fmt.Sprintf("external-ids:logical_port=%s", logicalPort),
 		"--", "add", "logical_switch", logicalSwitch, "acls", "@acl")
@@ -317,7 +317,7 @@ func (oc *Controller) modifyACLAllow(namespace, policy, logicalPort,
 		fmt.Sprintf("external-ids:namespace=%s", namespace),
 		fmt.Sprintf("external-ids:policy=%s", policy),
 		fmt.Sprintf("external-ids:%s_num=%d", policyType, gressNum),
-		fmt.Sprintf("external-ids:allow_direction=%s", policyType),
+		fmt.Sprintf("external-ids:policy_type=%s", policyType),
 		fmt.Sprintf("external-ids:logical_port=%s", logicalPort))
 	if err != nil {
 		logrus.Errorf("find failed to get the allow rule for "+
@@ -349,7 +349,7 @@ func (oc *Controller) deleteACLAllow(namespace, policy, logicalSwitch,
 		fmt.Sprintf("external-ids:namespace=%s", namespace),
 		fmt.Sprintf("external-ids:policy=%s", policy),
 		fmt.Sprintf("external-ids:%s_num=%d", policyType, gressNum),
-		fmt.Sprintf("external-ids:allow_direction=%s", policyType),
+		fmt.Sprintf("external-ids:policy_type=%s", policyType),
 		fmt.Sprintf("external-ids:logical_switch=%s", logicalSwitch),
 		fmt.Sprintf("external-ids:logical_port=%s", logicalPort))
 	if err != nil {
@@ -377,21 +377,20 @@ func (oc *Controller) deleteACLAllow(namespace, policy, logicalSwitch,
 func (oc *Controller) addIPBlockACLDeny(namespace, policy, logicalSwitch,
 	logicalPort, except, priority string, policyType knet.PolicyType) {
 	var match, l3Match, direction, lportMatch string
+	direction = toLport
 	if policyType == knet.PolicyTypeIngress {
 		lportMatch = fmt.Sprintf("outport == \\\"%s\\\"", logicalPort)
 		l3Match = fmt.Sprintf("ip4.src == %s", except)
 		match = fmt.Sprintf("match=\"%s && %s\"", lportMatch, l3Match)
-		direction = toLport
 	} else {
 		lportMatch = fmt.Sprintf("inport == \\\"%s\\\"", logicalPort)
 		l3Match = fmt.Sprintf("ip4.dst == %s", except)
 		match = fmt.Sprintf("match=\"%s && %s\"", lportMatch, l3Match)
-		direction = fromLport
 	}
 
 	uuid, stderr, err := util.RunOVNNbctlUnix("--data=bare", "--no-heading",
 		"--columns=_uuid", "find", "ACL", match, "action=drop",
-		fmt.Sprintf("external-ids:ipblock-deny-direction=%s", direction),
+		fmt.Sprintf("external-ids:ipblock-deny-policy-type=%s", policyType),
 		fmt.Sprintf("external-ids:namespace=%s", namespace),
 		fmt.Sprintf("external-ids:policy=%s", policy),
 		fmt.Sprintf("external-ids:logical_switch=%s", logicalSwitch),
@@ -410,7 +409,7 @@ func (oc *Controller) addIPBlockACLDeny(namespace, policy, logicalSwitch,
 	_, stderr, err = util.RunOVNNbctlUnix("--id=@acl", "create", "acl",
 		fmt.Sprintf("priority=%s", priority),
 		fmt.Sprintf("direction=%s", direction), match, "action=drop",
-		fmt.Sprintf("external-ids:ipblock-deny-direction=%s", direction),
+		fmt.Sprintf("external-ids:ipblock-deny-policy-type=%s", policyType),
 		fmt.Sprintf("external-ids:namespace=%s", namespace),
 		fmt.Sprintf("external-ids:policy=%s", policy),
 		fmt.Sprintf("external-ids:logical_switch=%s", logicalSwitch),
@@ -426,22 +425,20 @@ func (oc *Controller) addIPBlockACLDeny(namespace, policy, logicalSwitch,
 
 func (oc *Controller) deleteIPBlockACLDeny(namespace, policy,
 	logicalSwitch, logicalPort, except string, policyType knet.PolicyType) {
-	var match, direction, lportMatch, l3Match string
+	var match, lportMatch, l3Match string
 	if policyType == knet.PolicyTypeIngress {
 		lportMatch = fmt.Sprintf("outport == \\\"%s\\\"", logicalPort)
 		l3Match = fmt.Sprintf("ip4.src == %s", except)
 		match = fmt.Sprintf("match=\"%s && %s\"", lportMatch, l3Match)
-		direction = toLport
 	} else {
 		lportMatch = fmt.Sprintf("inport == \\\"%s\\\"", logicalPort)
 		l3Match = fmt.Sprintf("ip4.dst == %s", except)
 		match = fmt.Sprintf("match=\"%s && %s\"", lportMatch, l3Match)
-		direction = fromLport
 	}
 
 	uuid, stderr, err := util.RunOVNNbctlUnix("--data=bare", "--no-heading",
 		"--columns=_uuid", "find", "ACL", match, "action=drop",
-		fmt.Sprintf("external-ids:ipblock-deny-direction=%s", direction),
+		fmt.Sprintf("external-ids:ipblock-deny-policy-type=%s", policyType),
 		fmt.Sprintf("external-ids:namespace=%s", namespace),
 		fmt.Sprintf("external-ids:policy=%s", policy),
 		fmt.Sprintf("external-ids:logical_switch=%s", logicalSwitch),
@@ -471,17 +468,16 @@ func (oc *Controller) deleteIPBlockACLDeny(namespace, policy,
 func (oc *Controller) addACLDeny(namespace, logicalSwitch, logicalPort,
 	priority string, policyType knet.PolicyType) {
 	var match, direction string
+	direction = toLport
 	if policyType == knet.PolicyTypeIngress {
 		match = fmt.Sprintf("match=\"outport == \\\"%s\\\"\"", logicalPort)
-		direction = toLport
 	} else {
 		match = fmt.Sprintf("match=\"inport == \\\"%s\\\"\"", logicalPort)
-		direction = fromLport
 	}
 
 	uuid, stderr, err := util.RunOVNNbctlUnix("--data=bare", "--no-heading",
 		"--columns=_uuid", "find", "ACL", match, "action=drop",
-		fmt.Sprintf("external-ids:default-deny-direction=%s", direction),
+		fmt.Sprintf("external-ids:default-deny-policy-type=%s", policyType),
 		fmt.Sprintf("external-ids:namespace=%s", namespace),
 		fmt.Sprintf("external-ids:logical_switch=%s", logicalSwitch),
 		fmt.Sprintf("external-ids:logical_port=%s", logicalPort))
@@ -499,7 +495,7 @@ func (oc *Controller) addACLDeny(namespace, logicalSwitch, logicalPort,
 	_, stderr, err = util.RunOVNNbctlUnix("--id=@acl", "create", "acl",
 		fmt.Sprintf("priority=%s", priority),
 		fmt.Sprintf("direction=%s", direction), match, "action=drop",
-		fmt.Sprintf("external-ids:default-deny-direction=%s", direction),
+		fmt.Sprintf("external-ids:default-deny-policy-type=%s", policyType),
 		fmt.Sprintf("external-ids:namespace=%s", namespace),
 		fmt.Sprintf("external-ids:logical_switch=%s", logicalSwitch),
 		fmt.Sprintf("external-ids:logical_port=%s", logicalPort),
@@ -514,18 +510,16 @@ func (oc *Controller) addACLDeny(namespace, logicalSwitch, logicalPort,
 
 func (oc *Controller) deleteACLDeny(namespace, logicalSwitch, logicalPort string,
 	policyType knet.PolicyType) {
-	var match, direction string
+	var match string
 	if policyType == knet.PolicyTypeIngress {
 		match = fmt.Sprintf("match=\"outport == \\\"%s\\\"\"", logicalPort)
-		direction = toLport
 	} else {
 		match = fmt.Sprintf("match=\"inport == \\\"%s\\\"\"", logicalPort)
-		direction = fromLport
 	}
 
 	uuid, stderr, err := util.RunOVNNbctlUnix("--data=bare", "--no-heading",
 		"--columns=_uuid", "find", "ACL", match, "action=drop",
-		fmt.Sprintf("external-ids:default-deny-direction=%s", direction),
+		fmt.Sprintf("external-ids:default-deny-policy-type=%s", policyType),
 		fmt.Sprintf("external-ids:namespace=%s", namespace),
 		fmt.Sprintf("external-ids:logical_switch=%s", logicalSwitch),
 		fmt.Sprintf("external-ids:logical_port=%s", logicalPort))
