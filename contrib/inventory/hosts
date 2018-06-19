@@ -1,10 +1,14 @@
 [kube-master]
-node1
+#192.168.85.100
+35.205.201.254
 
 [kube-minions-linux]
-node2
-node3
+#192.168.85.101
+35.233.32.45
+#node2
+#node3
 
 [kube-minions-windows]
-node4
-node5
+#192.168.85.131
+#node4
+#node5

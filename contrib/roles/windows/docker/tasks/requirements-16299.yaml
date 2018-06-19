@@ -8,9 +8,9 @@
   register: features_installed
   with_items:
     - Containers
-    - Hyper-V # TODO
-    - RSAT-Hyper-V-Tools # TODO
-    - Hyper-V-PowerShell # TODO
+    #- Hyper-V # TODO
+    #- RSAT-Hyper-V-Tools # TODO
+    #- Hyper-V-PowerShell # TODO
 
 - name: Windows 1709 | Expect reboot_required to false
   set_fact:

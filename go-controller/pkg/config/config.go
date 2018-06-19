@@ -350,7 +350,7 @@ func runOVSVsctl(args ...string) (string, error) {
 		return "", err
 	}
 
-	newArgs := append([]string{"--timeout=5"}, args...)
+	newArgs := append([]string{"--timeout=15"}, args...)
 	out, err := exec.Command(cmdPath, newArgs...).CombinedOutput()
 	if err != nil {
 		return "", err
