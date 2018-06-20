@@ -20,7 +20,7 @@ const (
 func configureManagementPortWindows(clusterSubnet, clusterServicesSubnet,
 	routerIP, interfaceName, interfaceIP string) error {
 	// Up the interface.
-	_, _, err := util.RunPowershell("Enable-NetAdapter", interfaceName)
+	_, _, err := util.RunPowershell("Enable-NetAdapter", "-IncludeHidden", interfaceName)
 	if err != nil {
 		return err
 	}
@@ -60,7 +60,7 @@ func configureManagementPortWindows(clusterSubnet, clusterServicesSubnet,
 	}
 
 	// Retrieve the interface index
-	stdout, stderr, err := util.RunPowershell("$(Get-NetAdapter", "|", "Where",
+	stdout, stderr, err := util.RunPowershell("$(Get-NetAdapter", "-IncludeHidden", "|", "Where",
 		"{", "$_.Name", "-Match", fmt.Sprintf("\"%s\"", interfaceName), "}).ifIndex")
 	if err != nil {
 		logrus.Errorf("Failed to fetch interface index, stderr: %q, error: %v", stderr, err)
@@ -280,7 +280,7 @@ func CreateManagementPort(nodeName, localSubnet, clusterSubnet,
 
 	if runtime.GOOS == windowsOS && macAddress == "00:00:00:00:00:00" {
 		var stdoutStderr []byte
-		stdoutStderr, err = exec.Command("powershell", "$(Get-NetAdapter", "|", "Where", "{", "$_.Name",
+		stdoutStderr, err = exec.Command("powershell", "$(Get-NetAdapter", "-IncludeHidden", "|", "Where", "{", "$_.Name",
 			"-Match", fmt.Sprintf("\"%s\"", interfaceName), "}).MacAddress").CombinedOutput()
 		if err != nil {
 			logrus.Errorf("Failed to get mac address of ovn-k8s-master, stderr: %q, error: %v", fmt.Sprintf("%s", stdoutStderr), err)
