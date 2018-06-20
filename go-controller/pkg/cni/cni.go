@@ -151,8 +151,8 @@ func (pr *PodRequest) cmdAdd() *PodResult {
 	}
 
 	podResult := &PodResult{}
-	versionedResult, _ := result.GetAsVersion(pr.CNIConf.CNIVersion)
-	podResult.Response, _ = json.Marshal(versionedResult)
+	//versionedResult, _ := result.GetAsVersion(pr.CNIConf.CNIVersion)
+	podResult.Response, _ = json.Marshal(result)
 	return podResult
 }
 
