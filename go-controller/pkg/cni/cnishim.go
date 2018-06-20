@@ -16,7 +16,10 @@ import (
 	"strings"
 
 	"github.com/containernetworking/cni/pkg/skel"
+	"github.com/containernetworking/cni/pkg/types"
 	"github.com/containernetworking/cni/pkg/types/current"
+
+	"github.com/openvswitch/ovn-kubernetes/go-controller/pkg/config"
 )
 
 // Plugin is the structure to hold the endpoint information and the corresponding
@@ -92,6 +95,13 @@ func (p *Plugin) doCNI(url string, req *Request) ([]byte, error) {
 
 // CmdAdd is the callback for 'add' cni calls from skel
 func (p *Plugin) CmdAdd(args *skel.CmdArgs) error {
+
+	// read the config stdin args to obtain cniVersion
+	conf, err := config.ReadCNIConfig(args.StdinData)
+	if err != nil {
+		return fmt.Errorf("invalid stdin args")
+	}
+
 	req := newCNIRequest(args)
 
 	body, err := p.doCNI("http://dummy/", req)
@@ -104,7 +114,7 @@ func (p *Plugin) CmdAdd(args *skel.CmdArgs) error {
 		return fmt.Errorf("failed to unmarshal response '%s': %v", string(body), err)
 	}
 
-	return result.Print()
+	return types.PrintResult(result, conf.CNIVersion)
 }
 
 // CmdDel is the callback for 'teardown' cni calls from skel
