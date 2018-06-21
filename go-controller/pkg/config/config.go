@@ -287,8 +287,10 @@ var Flags = []cli.Flag{
 
 	// OVN northbound database options
 	cli.StringFlag{
-		Name:        "nb-address",
-		Usage:       "IP address and port of the OVN northbound API (eg, ssl://1.2.3.4:6641).  Leave empty to use a local unix socket.",
+		Name: "nb-address",
+		Usage: "IP address and port of the OVN northbound API " +
+			"(eg, ssl://1.2.3.4:6641,ssl://1.2.3.5:6642).  Leave empty to " +
+			"use a local unix socket.",
 		Destination: &cliConfig.OvnNorth.Address,
 	},
 	cli.StringFlag{
@@ -324,8 +326,10 @@ var Flags = []cli.Flag{
 
 	// OVN southbound database options
 	cli.StringFlag{
-		Name:        "sb-address",
-		Usage:       "IP address and port of the OVN southbound API (eg, ssl://1.2.3.4:6642).  Leave empty to use a local unix socket.",
+		Name: "sb-address",
+		Usage: "IP address and port of the OVN southbound API " +
+			"(eg, ssl://1.2.3.4:6642,ssl://1.2.3.5:6642).  " +
+			"Leave empty to use a local unix socket.",
 		Destination: &cliConfig.OvnSouth.Address,
 	},
 	cli.StringFlag{
@@ -470,9 +474,6 @@ func buildOvnAuth(exec kexec.Interface, direction, externalID string, cliAuth, c
 	}
 	if address == "" && readAddress {
 		address = getOVSExternalID(exec, "ovn-"+direction)
-		// address will be in format ssl:1.2.3.4:6641 from external_ids,
-		// but we want it in url format, i.e. ssl://1.2.3.4:6641
-		address = strings.Replace(address, ":", "://", 1)
 	}
 
 	auth := &rawOvnAuthConfig{Address: address}
@@ -615,7 +616,7 @@ func InitConfigWithPath(ctx *cli.Context, exec kexec.Interface, configFile strin
 
 // OvnDBAuth describes an OVN database location and authentication method
 type OvnDBAuth struct {
-	OvnAddressForClient string // e.g: "ssl:192.168.1.2:6641"
+	OvnAddressForClient string // e.g: "ssl:192.168.1.2:6641,ssl:192.168.1.2:6642"
 	OvnAddressForServer string // e.g: "pssl:6641"
 	PrivKey             string
 	Cert                string
@@ -654,20 +655,6 @@ func newOvnDBAuth(exec kexec.Interface, ctlCmd, externalID, urlString, privkey, 
 		}, nil
 	}
 
-	url, err := url.Parse(urlString)
-	if err != nil {
-		return nil, fmt.Errorf("failed to parse OVN DB URL %q: %v", urlString, err)
-	}
-	host, port, err := net.SplitHostPort(url.Host)
-	if err != nil {
-		return nil, fmt.Errorf("failed to parse OVN DB host/port %q: %v", url.Host, err)
-	}
-	// OVN requires the --db argument to be an IP, not a DNS name
-	ip := net.ParseIP(host)
-	if ip == nil {
-		return nil, fmt.Errorf("OVN DB host %q must be an IP address, not a DNS name", url.Host)
-	}
-
 	auth := &OvnDBAuth{
 		server:     server,
 		ctlCmd:     ctlCmd,
@@ -675,15 +662,53 @@ func newOvnDBAuth(exec kexec.Interface, ctlCmd, externalID, urlString, privkey, 
 		exec:       exec,
 	}
 
-	if server {
-		auth.OvnAddressForServer = fmt.Sprintf("p%s:%s", url.Scheme, port)
-	} else {
-		auth.OvnAddressForClient = fmt.Sprintf("%s:%s:%s",
-			url.Scheme, host, port)
+	// urlString can be of form "ssl:1.2.3.4:6641,ssl:1.2.3.5:6641" or
+	// "ssl://1.2.3.4:6641,ssl://1.2.3.5:6641"
+	scheme := ""
+	urlString = strings.Replace(urlString, "//", "", -1)
+	ovnAddresses := strings.Split(urlString, ",")
+	for _, ovnAddress := range ovnAddresses {
+		splits := strings.Split(ovnAddress, ":")
+		if len(splits) != 3 {
+			return nil, fmt.Errorf("Failed to parse OVN address %s", urlString)
+		}
+		hostPort := splits[1] + ":" + splits[2]
+
+		if scheme == "" {
+			scheme = splits[0]
+		} else if scheme != splits[0] {
+			return nil, fmt.Errorf("Invalid protocols in OVN address %s",
+				urlString)
+		}
+
+		host, port, err := net.SplitHostPort(hostPort)
+		if err != nil {
+			return nil, fmt.Errorf("failed to parse OVN DB host/port %q: %v",
+				hostPort, err)
+		}
+		ip := net.ParseIP(host)
+		if ip == nil {
+			return nil, fmt.Errorf("OVN DB host %q must be an IP address, "+
+				"not a DNS name", hostPort)
+		}
+
+		if server && auth.OvnAddressForServer == "" {
+			auth.OvnAddressForServer = fmt.Sprintf("p%s:%s", scheme, port)
+		}
+
+		if !server {
+			if auth.OvnAddressForClient == "" {
+				auth.OvnAddressForClient = fmt.Sprintf("%s:%s:%s",
+					scheme, host, port)
+			} else {
+				auth.OvnAddressForClient = fmt.Sprintf("%s,%s:%s:%s",
+					auth.OvnAddressForClient, scheme, host, port)
+			}
+		}
 	}
 
 	switch {
-	case url.Scheme == "ssl":
+	case scheme == "ssl":
 		if privkey == "" || cert == "" || cacert == "" {
 			return nil, fmt.Errorf("must specify private key, certificate, and CA certificate for 'ssl' scheme")
 		}
@@ -691,13 +716,13 @@ func newOvnDBAuth(exec kexec.Interface, ctlCmd, externalID, urlString, privkey, 
 		auth.PrivKey = privkey
 		auth.Cert = cert
 		auth.CACert = cacert
-	case url.Scheme == "tcp":
+	case scheme == "tcp":
 		if privkey != "" || cert != "" || cacert != "" {
 			return nil, fmt.Errorf("certificate or key given; perhaps you mean to use the 'ssl' scheme?")
 		}
 		auth.Scheme = OvnDBSchemeTCP
 	default:
-		return nil, fmt.Errorf("unknown OVN DB scheme %q", url.Scheme)
+		return nil, fmt.Errorf("unknown OVN DB scheme %q", scheme)
 	}
 
 	return auth, nil
