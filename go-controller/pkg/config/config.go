@@ -615,17 +615,17 @@ func InitConfigWithPath(ctx *cli.Context, exec kexec.Interface, configFile strin
 
 // OvnDBAuth describes an OVN database location and authentication method
 type OvnDBAuth struct {
-	URL     string
-	PrivKey string
-	Cert    string
-	CACert  string
-	Scheme  OvnDBScheme
+	URL                 string // e.g: "ssl://192.168.1.2:6441"
+	OvnAddressForClient string // e.g: "ssl:192.168.1.2:6641"
+	OvnAddressForServer string // e.g: "pssl:6641"
+	PrivKey             string
+	Cert                string
+	CACert              string
+	Scheme              OvnDBScheme
 
 	server     bool
-	host       string
-	port       string
-	ctlCmd     string
-	externalID string
+	ctlCmd     string // e.g: ovn-nbctl
+	externalID string // ovn-nb or ovn-remote
 
 	exec kexec.Interface
 }
@@ -672,11 +672,16 @@ func newOvnDBAuth(exec kexec.Interface, ctlCmd, externalID, urlString, privkey, 
 	auth := &OvnDBAuth{
 		URL:        urlString,
 		server:     server,
-		host:       host,
-		port:       port,
 		ctlCmd:     ctlCmd,
 		externalID: externalID,
 		exec:       exec,
+	}
+
+	if server {
+		auth.OvnAddressForServer = fmt.Sprintf("p%s:%s", url.Scheme, port)
+	} else {
+		auth.OvnAddressForClient = fmt.Sprintf("%s:%s:%s",
+			url.Scheme, host, port)
 	}
 
 	switch {
@@ -738,9 +743,9 @@ func (a *OvnDBAuth) ensureCACert() error {
 func (a *OvnDBAuth) GetURL() string {
 	// FIXME: support specific IP Addresses or non-default Unix socket paths
 	if a.server {
-		return fmt.Sprintf("p%s:%s", a.Scheme, a.port)
+		return a.OvnAddressForServer
 	}
-	return fmt.Sprintf("%s:%s:%s", a.Scheme, a.host, a.port)
+	return a.OvnAddressForClient
 }
 
 // SetDBAuth sets the authentication configuration and connection method
@@ -815,13 +820,20 @@ func (a *OvnDBAuth) SetDBAuth() error {
 }
 
 func (a *OvnDBAuth) updateIP(newIP string) error {
-	a.host = newIP
+	if a.OvnAddressForClient != "" {
+		s := strings.Split(a.OvnAddressForClient, ":")
+		if len(s) != 3 {
+			return fmt.Errorf("failed to parse OvnDBAuth "+
+				"a.OvnAddressForClient: %q", a.OvnAddressForClient)
+		}
+		a.OvnAddressForClient = s[0] + ":" + newIP + s[2]
+	}
 	if a.URL != "" {
 		s := strings.Split(a.URL, ":")
 		if len(s) != 3 {
 			return fmt.Errorf("failed to parse OvnDBAuth URL: %q", a.URL)
 		}
-		a.URL = s[0] + ":" + newIP + ":" + s[2]
+		a.URL = s[0] + "://" + newIP + ":" + s[2]
 	}
 	return nil
 }
