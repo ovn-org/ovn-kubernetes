@@ -275,6 +275,92 @@ var _ = Describe("Config Operations", func() {
 		Expect(err).NotTo(HaveOccurred())
 	})
 
+	It("reads defaults (multiple master) from ovs-vsctl external IDs", func() {
+		app.Action = func(ctx *cli.Context) error {
+			// k8s-api-server
+			fakeCmds := ovntest.AddFakeCmd(nil, &ovntest.ExpectedCmd{
+				Cmd:    "ovs-vsctl --timeout=5 --if-exists get Open_vSwitch . external_ids:k8s-api-server",
+				Output: "https://somewhere.com:8081",
+			})
+
+			// k8s-api-token
+			fakeCmds = ovntest.AddFakeCmd(fakeCmds, &ovntest.ExpectedCmd{
+				Cmd:    "ovs-vsctl --timeout=5 --if-exists get Open_vSwitch . external_ids:k8s-api-token",
+				Output: "asadfasdfasrw3atr3r3rf33fasdaa3233",
+			})
+			// k8s-ca-certificate
+			fname, err := createTempFile("kube-cacert.pem")
+			Expect(err).NotTo(HaveOccurred())
+			fakeCmds = ovntest.AddFakeCmd(fakeCmds, &ovntest.ExpectedCmd{
+				Cmd:    "ovs-vsctl --timeout=5 --if-exists get Open_vSwitch . external_ids:k8s-ca-certificate",
+				Output: fname,
+			})
+			// ovn-nb address
+			fakeCmds = ovntest.AddFakeCmd(fakeCmds, &ovntest.ExpectedCmd{
+				Cmd:    "ovs-vsctl --timeout=5 --if-exists get Open_vSwitch . external_ids:ovn-nb",
+				Output: "tcp:1.1.1.1:6441,tcp:1.1.1.2:6641,tcp:1.1.1.3:6641",
+			})
+
+			fexec := &fakeexec.FakeExec{
+				CommandScript: fakeCmds,
+				LookPathFunc: func(file string) (string, error) {
+					return fmt.Sprintf("/fake-bin/%s", file), nil
+				},
+			}
+
+			cfgPath, err := InitConfig(ctx, fexec, &Defaults{
+				OvnNorthAddress: true,
+				K8sAPIServer:    true,
+				K8sToken:        true,
+				K8sCert:         true,
+			})
+			Expect(err).NotTo(HaveOccurred())
+			Expect(cfgPath).To(Equal(cfgFile.Name()))
+			Expect(fexec.CommandCalls).To(Equal(len(fakeCmds)))
+
+			Expect(Kubernetes.APIServer).To(Equal("https://somewhere.com:8081"))
+			Expect(Kubernetes.CACert).To(Equal(fname))
+			Expect(Kubernetes.Token).To(Equal("asadfasdfasrw3atr3r3rf33fasdaa3233"))
+
+			Expect(OvnNorth.ClientAuth.Scheme).To(Equal(OvnDBSchemeTCP))
+			Expect(OvnNorth.ClientAuth.PrivKey).To(Equal(""))
+			Expect(OvnNorth.ClientAuth.Cert).To(Equal(""))
+			Expect(OvnNorth.ClientAuth.CACert).To(Equal(""))
+			Expect(OvnNorth.ClientAuth.server).To(BeFalse())
+			Expect(OvnNorth.ClientAuth.OvnAddressForClient).To(
+				Equal("tcp:1.1.1.1:6441,tcp:1.1.1.2:6641,tcp:1.1.1.3:6641"))
+			Expect(OvnNorth.ClientAuth.OvnAddressForServer).To(Equal(""))
+
+			Expect(OvnSouth.ClientAuth.Scheme).To(Equal(OvnDBSchemeUnix))
+			Expect(OvnSouth.ClientAuth.PrivKey).To(Equal(""))
+			Expect(OvnSouth.ClientAuth.Cert).To(Equal(""))
+			Expect(OvnSouth.ClientAuth.CACert).To(Equal(""))
+			Expect(OvnSouth.ClientAuth.server).To(BeFalse())
+			Expect(OvnSouth.ClientAuth.OvnAddressForClient).To(Equal(""))
+			Expect(OvnSouth.ClientAuth.OvnAddressForServer).To(Equal(""))
+
+			Expect(OvnNorth.ServerAuth.Scheme).To(Equal(OvnDBSchemeTCP))
+			Expect(OvnNorth.ServerAuth.PrivKey).To(Equal(""))
+			Expect(OvnNorth.ServerAuth.Cert).To(Equal(""))
+			Expect(OvnNorth.ServerAuth.CACert).To(Equal(""))
+			Expect(OvnNorth.ServerAuth.server).To(BeTrue())
+			Expect(OvnNorth.ServerAuth.OvnAddressForClient).To(Equal(""))
+			Expect(OvnNorth.ServerAuth.OvnAddressForServer).To(Equal("ptcp:6441"))
+
+			Expect(OvnSouth.ServerAuth.Scheme).To(Equal(OvnDBSchemeUnix))
+			Expect(OvnSouth.ServerAuth.PrivKey).To(Equal(""))
+			Expect(OvnSouth.ServerAuth.Cert).To(Equal(""))
+			Expect(OvnSouth.ServerAuth.CACert).To(Equal(""))
+			Expect(OvnSouth.ServerAuth.server).To(BeTrue())
+			Expect(OvnSouth.ServerAuth.OvnAddressForClient).To(Equal(""))
+			Expect(OvnSouth.ServerAuth.OvnAddressForServer).To(Equal(""))
+
+			return nil
+		}
+		err := app.Run([]string{app.Name, "-config-file=" + cfgFile.Name()})
+		Expect(err).NotTo(HaveOccurred())
+	})
+
 	It("overrides defaults with config file options", func() {
 		kubeconfigFile, err := createTempFile("kubeconfig")
 		Expect(err).NotTo(HaveOccurred())
@@ -511,6 +597,145 @@ server-cacert=/path/to/sb-ca.crt`), 0644)
 			"-nb-client-cert=/client/cert",
 			"-nb-client-cacert=/client/cacert",
 			"-sb-address=ssl://6.5.4.1:6652",
+			"-sb-server-privkey=/server/privkey2",
+			"-sb-server-cert=/server/cert2",
+			"-sb-server-cacert=" + sbServerCAFile,
+			"-sb-client-privkey=/client/privkey2",
+			"-sb-client-cert=/client/cert2",
+			"-sb-client-cacert=/client/cacert2",
+		}
+		err = app.Run(cliArgs)
+		Expect(err).NotTo(HaveOccurred())
+	})
+
+	It("overrides config file and defaults with CLI options (multi-master)", func() {
+		kubeconfigFile, err := createTempFile("kubeconfig")
+		Expect(err).NotTo(HaveOccurred())
+		defer os.Remove(kubeconfigFile)
+
+		kubeCAFile, err := createTempFile("kube-ca.crt")
+		Expect(err).NotTo(HaveOccurred())
+		defer os.Remove(kubeCAFile)
+
+		nbServerCAFile, err := createTempFile("nbca.crt")
+		Expect(err).NotTo(HaveOccurred())
+		defer os.Remove(nbServerCAFile)
+
+		sbServerCAFile, err := createTempFile("sbca.crt")
+		Expect(err).NotTo(HaveOccurred())
+		defer os.Remove(sbServerCAFile)
+
+		err = ioutil.WriteFile(cfgFile.Name(), []byte(`[default]
+mtu=1500
+conntrack-zone=64321
+
+[kubernetes]
+kubeconfig=/path/to/kubeconfig
+apiserver=https://1.2.3.4:6443
+token=TG9yZW0gaXBzdW0gZ
+cacert=/path/to/kubeca.crt
+
+[logging]
+loglevel=5
+logfile=/var/log/ovnkube.log
+
+[cni]
+conf-dir=/etc/cni/net.d22
+plugin=ovn-k8s-cni-overlay22
+
+[ovnnorth]
+address=ssl://1.2.3.4:6641
+client-privkey=/path/to/nb-client-private.key
+client-cert=/path/to/nb-client.crt
+client-cacert=/path/to/nb-client-ca.crt
+server-privkey=/path/to/nb-server-private.key
+server-cert=/path/to/nb-server.crt
+server-cacert=/path/to/nb-ca.crt
+
+[ovnsouth]
+address=ssl://1.2.3.4:6642
+client-privkey=/path/to/sb-client-private.key
+client-cert=/path/to/sb-client.crt
+client-cacert=/path/to/sb-client-ca.crt
+server-privkey=/path/to/sb-server-private.key
+server-cert=/path/to/sb-server.crt
+server-cacert=/path/to/sb-ca.crt`), 0644)
+		Expect(err).NotTo(HaveOccurred())
+
+		app.Action = func(ctx *cli.Context) error {
+			var cfgPath string
+			cfgPath, err = InitConfig(ctx, kexec.New(), nil)
+			Expect(err).NotTo(HaveOccurred())
+			Expect(cfgPath).To(Equal(cfgFile.Name()))
+
+			Expect(Default.MTU).To(Equal(1234))
+			Expect(Default.ConntrackZone).To(Equal(5555))
+			Expect(Logging.File).To(Equal("/some/logfile"))
+			Expect(Logging.Level).To(Equal(3))
+			Expect(CNI.ConfDir).To(Equal("/some/cni/dir"))
+			Expect(CNI.Plugin).To(Equal("a-plugin"))
+			Expect(Kubernetes.Kubeconfig).To(Equal(kubeconfigFile))
+			Expect(Kubernetes.CACert).To(Equal(kubeCAFile))
+			Expect(Kubernetes.Token).To(Equal("asdfasdfasdfasfd"))
+			Expect(Kubernetes.APIServer).To(Equal("https://4.4.3.2:8080"))
+
+			Expect(OvnNorth.ClientAuth.Scheme).To(Equal(OvnDBSchemeSSL))
+			Expect(OvnNorth.ClientAuth.PrivKey).To(Equal("/client/privkey"))
+			Expect(OvnNorth.ClientAuth.Cert).To(Equal("/client/cert"))
+			Expect(OvnNorth.ClientAuth.CACert).To(Equal("/client/cacert"))
+			Expect(OvnNorth.ClientAuth.server).To(BeFalse())
+			Expect(OvnNorth.ClientAuth.OvnAddressForClient).To(
+				Equal("ssl:6.5.4.3:6651,ssl:6.5.4.4:6651,ssl:6.5.4.5:6651"))
+			Expect(OvnNorth.ClientAuth.OvnAddressForServer).To(Equal(""))
+
+			Expect(OvnNorth.ServerAuth.Scheme).To(Equal(OvnDBSchemeSSL))
+			Expect(OvnNorth.ServerAuth.PrivKey).To(Equal("/server/privkey"))
+			Expect(OvnNorth.ServerAuth.Cert).To(Equal("/server/cert"))
+			Expect(OvnNorth.ServerAuth.CACert).To(Equal(nbServerCAFile))
+			Expect(OvnNorth.ServerAuth.server).To(BeTrue())
+			Expect(OvnNorth.ServerAuth.OvnAddressForClient).To(Equal(""))
+			Expect(OvnNorth.ServerAuth.OvnAddressForServer).To(Equal("pssl:6651"))
+
+			Expect(OvnSouth.ClientAuth.Scheme).To(Equal(OvnDBSchemeSSL))
+			Expect(OvnSouth.ClientAuth.PrivKey).To(Equal("/client/privkey2"))
+			Expect(OvnSouth.ClientAuth.Cert).To(Equal("/client/cert2"))
+			Expect(OvnSouth.ClientAuth.CACert).To(Equal("/client/cacert2"))
+			Expect(OvnSouth.ClientAuth.server).To(BeFalse())
+			Expect(OvnSouth.ClientAuth.OvnAddressForClient).To(
+				Equal("ssl:6.5.4.1:6652,ssl:6.5.4.2:6652,ssl:6.5.4.3:6652"))
+			Expect(OvnSouth.ClientAuth.OvnAddressForServer).To(Equal(""))
+
+			Expect(OvnSouth.ServerAuth.Scheme).To(Equal(OvnDBSchemeSSL))
+			Expect(OvnSouth.ServerAuth.PrivKey).To(Equal("/server/privkey2"))
+			Expect(OvnSouth.ServerAuth.Cert).To(Equal("/server/cert2"))
+			Expect(OvnSouth.ServerAuth.CACert).To(Equal(sbServerCAFile))
+			Expect(OvnSouth.ServerAuth.server).To(BeTrue())
+			Expect(OvnSouth.ServerAuth.OvnAddressForClient).To(Equal(""))
+			Expect(OvnSouth.ServerAuth.OvnAddressForServer).To(Equal("pssl:6652"))
+
+			return nil
+		}
+		cliArgs := []string{
+			app.Name,
+			"-config-file=" + cfgFile.Name(),
+			"-mtu=1234",
+			"-conntrack-zone=5555",
+			"-loglevel=3",
+			"-logfile=/some/logfile",
+			"-cni-conf-dir=/some/cni/dir",
+			"-cni-plugin=a-plugin",
+			"-k8s-kubeconfig=" + kubeconfigFile,
+			"-k8s-apiserver=https://4.4.3.2:8080",
+			"-k8s-cacert=" + kubeCAFile,
+			"-k8s-token=asdfasdfasdfasfd",
+			"-nb-address=ssl://6.5.4.3:6651,ssl://6.5.4.4:6651,ssl://6.5.4.5:6651",
+			"-nb-server-privkey=/server/privkey",
+			"-nb-server-cert=/server/cert",
+			"-nb-server-cacert=" + nbServerCAFile,
+			"-nb-client-privkey=/client/privkey",
+			"-nb-client-cert=/client/cert",
+			"-nb-client-cacert=/client/cacert",
+			"-sb-address=ssl://6.5.4.1:6652,ssl://6.5.4.2:6652,ssl://6.5.4.3:6652",
 			"-sb-server-privkey=/server/privkey2",
 			"-sb-server-cert=/server/cert2",
 			"-sb-server-cacert=" + sbServerCAFile,
@@ -807,7 +1032,7 @@ server-cacert=/path/to/sb-ca.crt`), 0644)
 				})
 
 			generateTests("the OVN URL has no port",
-				"failed to parse OVN DB host/port \"4.3.2.1\": address 4.3.2.1: missing port in address",
+				"Failed to parse OVN address tcp:4.3.2.1",
 				func() []string {
 					return []string{
 						"address=tcp://4.3.2.1",
