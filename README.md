@@ -86,7 +86,7 @@ in the master node.
 OVN architecture has a central component which stores your networking intent
 in a database.  Start this central component on one of the nodes where you
 have started your k8s central daemons and which has an IP address of
-$CENTRAL_IP.
+$CENTRAL_IP.  (For HA of the central component, please read [HA.md])
 
 Start ovn-northd daemon.  This daemon translates networking intent from k8s
 stored in the OVN_Northbound database to logical flows in OVN_Southbound
@@ -242,3 +242,4 @@ does install kubernetes in its simplest form.
 [vagrant]: vagrant/README.md
 [INSTALL.SSL.md]: docs/INSTALL.SSL.md
 [config.md]: docs/config.md
+[HA.md]: docs/ha.md
