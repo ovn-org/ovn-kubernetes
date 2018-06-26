@@ -37,6 +37,30 @@ func (ovn *Controller) getLoadBalancer(protocol kapi.Protocol) (string,
 	return out, nil
 }
 
+func (ovn *Controller) getDefaultGatewayLoadBalancer(protocol kapi.Protocol) string {
+	if outStr, ok := ovn.loadbalancerGWCache[string(protocol)]; ok {
+		return outStr
+	}
+
+	var gw string
+	gw, _, _ = util.RunOVNNbctlUnix("--data=bare",
+		"--no-heading", "--columns=name", "find", "logical_router",
+		"options:lb_force_snat_ip=100.64.1.2")
+	if len(gw) == 0 {
+		logrus.Errorf("Error locating default gateway")
+		return ""
+	}
+
+	externalIdKey := string(protocol) + "_lb_gateway_router"
+	lb, _, _ := util.RunOVNNbctlUnix("--data=bare",
+		"--no-heading", "--columns=_uuid", "find", "load_balancer",
+		"external_ids:"+externalIdKey+"="+gw)
+	if len(lb) != 0 {
+		ovn.loadbalancerGWCache[string(protocol)] = lb
+	}
+	return lb
+}
+
 func (ovn *Controller) getLoadBalancerVIPS(
 	loadBalancer string) (map[string]interface{}, error) {
 	outStr, _, err := util.RunOVNNbctlHA("--data=bare", "--no-heading",

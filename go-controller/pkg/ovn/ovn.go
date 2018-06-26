@@ -25,6 +25,10 @@ type Controller struct {
 	// cluster's east-west traffic.
 	loadbalancerClusterCache map[string]string
 
+	// For TCP and UDP type traffice, cache OVN load balancer that exists on the
+	// default gateway
+	loadbalancerGWCache map[string]string
+
 	// A cache of all logical switches seen by the watcher
 	logicalSwitchCache map[string]bool
 
@@ -91,6 +95,7 @@ func NewOvnController(kubeClient kubernetes.Interface, wf *factory.WatchFactory,
 		lspMutex:                 &sync.Mutex{},
 		gatewayCache:             make(map[string]string),
 		loadbalancerClusterCache: make(map[string]string),
+		loadbalancerGWCache:      make(map[string]string),
 		nodePortEnable:           nodePortEnable,
 	}
 }
