@@ -1,13 +1,30 @@
-# build image for ovn cni
+# build image for ovn overlay network cni plugin
 
-# both ovnkube.yaml and onvkube-master.yaml use this image
+# Both ovnkube.yaml and onvkube-master.yaml use this image
 # this image is built from files in this directory and pushed to 
-# a docker repository that is accesseble on each node
+# a docker registry that is accesseble on each node
 
-# The temprary (insecure) repository is netdev22:5000/ovn-kube:latest
+# The temprary (insecure) registry is netdev31:5000/ovn-kube:latest
+# which is the image name in the daemonsets.
+# Registry must be setup ahead of time.
+# The registry is configured in /etc/containers/registries.conf
+# on each node in both "registries:" and "insecure_registries:" sections.
 
-all:
+all: bld
 	docker build -t ovn-kube .
-	docker tag ovn-kube netdev22:5000/ovn-kube:latest
-	docker push netdev22:5000/ovn-kube:latest
+	docker tag ovn-kube netdev31:5000/ovn-kube:latest
+	docker push netdev31:5000/ovn-kube:latest
+
+fedora: bld
+	docker build -t ovn-kube-f -f Dockerfile.fedora .
+	docker tag ovn-kube-f netdev31:5000/ovn-kube:latest
+	docker push netdev31:5000/ovn-kube:latest
+
+.PHONY: ../../go-controller/_output/go/bin/ovnkube
+
+../../go-controller/_output/go/bin/ovnkube:
+	cd ../../go-controller ; make
+
+bld: ../../go-controller/_output/go/bin/ovnkube
+	cp ../../go-controller/_output/go/bin/* .
 

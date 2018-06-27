@@ -2,6 +2,7 @@ kind: DaemonSet
 apiVersion: apps/v1
 metadata:
   name: ovnkube-master
+  # namespace set up by install
   namespace: ovn-kubernetes
   annotations:
     kubernetes.io/description: |
@@ -10,6 +11,8 @@ spec:
   selector:
     matchLabels:
       name: ovnkube-master
+      # use master nodes - Will likley change
+      # Supports one master at present
       node-role.kubernetes.io/master: "true"
   updateStrategy:
     type: RollingUpdate
@@ -39,8 +42,9 @@ spec:
       # ovs flow for ovn (geneve)
       # /usr/share/openvswitch/scripts/ovs-ctl --protocol=udp --dport=6081 enable-protocol
       - name: ovnkube-master
-        image: "netdev22:5000/ovn-kube:latest"
-        imagePullPolicy: "Always"
+        # this is development build image
+        image: "netdev31:5000/ovn-kube:latest"
+        # imagePullPolicy: "Always"
 
         securityContext:
           runAsUser: 0
@@ -69,7 +73,7 @@ spec:
         - mountPath: /var/run/kubernetes/
           name: host-var-run-kubernetes
           readOnly: true
-        # We mount our socket here
+        # We mount our socket here   ---- is this needed PHIL
         - mountPath: /var/run/ovn-kubernetes
           name: host-var-run-ovn-kubernetes
         # CNI related mounts which we take over
@@ -85,8 +89,6 @@ spec:
             cpu: 100m
             memory: 300Mi
         env:
-        - name: OPENSHIFT_DNS_DOMAIN
-          value: cluster.local
         - name: OVN_MASTER
           value: "true"
         - name: OVN_NORTH
@@ -114,11 +116,6 @@ spec:
             configMapKeyRef:
               name: ovn-config
               key: k8s_apiserver
-        - name: K8S_TOKEN
-          valueFrom:
-            configMapKeyRef:
-              name: ovn-config
-              key: k8s_token
         ports:
         - name: healthz
           containerPort: 10256

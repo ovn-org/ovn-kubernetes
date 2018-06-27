@@ -1,11 +1,27 @@
 ovn container construction and operation
 
 NOTES/LIMITS:
-- Uses node-role.kubernetes.io/master and compute labels. 
+- Uses node-role.kubernetes.io/master and compute labels.
   Eventually there will be ovn specific labels.
-- currently building in ../go_controller and copying files to
-  ../images and put in an image. This will likely change.
+- When the ovn-master comes up it annotates each node with
+  the subnet cidr for the node. This MUST be done before 
+  the daemonset on the other nodes is started.
+- OVN requires cluster admin to annotate nodes
+- if ovs is stopped or fails, host networking is broken
+  rebooting doesn't fix always the problem.
+- only one network cidr is supported.
+- only one ovn-master is supported.
+- the image build builds whichever commit is currently checkedout
+  Not a specified version (v0.4.0)
+- the rpm build builds a specified version.
+- the cluster install installs ovs and multitenant. The daemonsets
+  must be deleted before running ovn daemonsets.
 NOTES/LIMITS:
+
+The ovs daemonset runs
+/usr/share/openvswitch/scripts/ovs-ctl start
+to start openvswitch. it must be running for the ovn-daemonsets to
+run.
 
 There are two daemonsets that support ovn. ovnkube-master runs
 on the cluster master node, ovnkube runs on the remaining nodes.
@@ -15,19 +31,19 @@ The both daemonsets run the node daemons, ovn-controller and ovn-node.
 In addition the daemonset runs ovn-northd and ovn-master.
 
 The startup sequence requires this startup order:
-- ovs 
+- ovs
 - ovnkube-master on the master node
 - ovnkube on the rest of the nodes.
 
 ===============================
 
-There is one docker image that is used by both the ovnkube-master
-and ovnkube daemonsets. The master sets environmet variable
-OVN_MASTER="true".
+There is one docker image that is used by sdn-ovs, ovnkube-master
+and ovnkube daemonsets. The ovnkube-master daemonset sets environmet
+variable OVN_MASTER="true".
 
 When this is present the image runs ovn-northd and ovn-master
 before running ovn-controller and ovn-node
- 
+
 The image entrypoint is /root/ovnkube.sh
 This script sequences through the operations to bring up networking.
 Configuration is passed in via environment variables.
@@ -51,8 +67,8 @@ Configuration is passed in via environment variables.
 ===========================
 How networking is set up.
 
-The ovn cni plugin, ovn-k8s-cni-overlay, must be visible to kubelet so that 
-kubelet can use it. The ovn plugin and setup are in the container image so 
+The ovn cni plugin, ovn-k8s-cni-overlay, must be visible to kubelet so that
+kubelet can use it. The ovn plugin and setup are in the container image so
 they need to be moved to the host. This is done by mounting the following
 directories and copying files from the contianer to the mounted directories.
 
@@ -64,3 +80,38 @@ directories and copying files from the contianer to the mounted directories.
 loopback are copied into /opt/cni/bin. This makes the plugin available to
 kubelet.
 
+===========================
+
+$ cd images && make
+builds the default centos based image from  Dockerfile
+$  make fedora
+builds the image with the fedora 
+
+Once the image is built it must be tagged and pushed to a docker image repo
+that is availabe for all nodes to download the image. A local docker repo,
+netdev31:5000 is used in the build. This will need to be changed when building
+for different clusters.
+
+It is convient to set up a docker registry for the cluster and add it to
+the /etc/containers/registries.conf file on each node in both the
+"registries:" and "insecure_registries:" sections.
+
+============================
+Cluster install:
+
+Follow the directions in the openshift documents to provision the hosts in the
+cluster and install openshift. Make sure the cluster hosts file contains:
+os_sdn_network_plugin_name='cni'
+
+When the install is complete, delete the ovs and openshift-sdn daemonsets.
+
+Run the cluster master:
+$ ansible/scripts/ovn-setup.sh
+script to to set up kubernetes configuration. Next:
+$ kubectl create -f yaml/sdn-ovs.yaml
+$ kubectl create -f yaml/ovskube-master.yaml
+$ kubectl create -f yaml/ovskube.yaml
+
+Verify the install with 
+$ oc get nodes
+All should show Ready.
