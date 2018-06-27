@@ -2,6 +2,7 @@ kind: DaemonSet
 apiVersion: apps/v1
 metadata:
   name: ovnkube
+  # namespace set up by install
   namespace: ovn-kubernetes
   annotations:
     kubernetes.io/description: |
@@ -10,6 +11,7 @@ spec:
   selector:
     matchLabels:
       app: ovnkube
+      # use compute nodes - Will likley change
       node-role.kubernetes.io/compute: "true"
   updateStrategy:
     type: RollingUpdate
@@ -38,8 +40,9 @@ spec:
       # The network container launches the ovn-k8s-cni-overlay process, the kube-proxy, and the local DNS service.
       # It relies on an up to date node-config.yaml being present.
       - name: ovnkube
-        image: "netdev22:5000/ovn-kube:latest"
-        imagePullPolicy: "Always"
+        # this is development build image
+        image: "netdev31:5000/ovn-kube:latest"
+        # imagePullPolicy: "Always"
 
         securityContext:
           runAsUser: 0
@@ -84,8 +87,6 @@ spec:
             cpu: 100m
             memory: 300Mi
         env:
-        - name: OPENSHIFT_DNS_DOMAIN
-          value: cluster.local
         - name: OVN_NORTH
           valueFrom:
             configMapKeyRef:
@@ -111,11 +112,6 @@ spec:
             configMapKeyRef:
               name: ovn-config
               key: k8s_apiserver
-        - name: K8S_TOKEN
-          valueFrom:
-            configMapKeyRef:
-              name: ovn-config
-              key: k8s_token
         ports:
         - name: healthz
           containerPort: 10256

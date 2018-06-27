@@ -1,44 +1,54 @@
 #
-# This is the OpenShift sdn-ovn image.
-# it provides an overlay network using ovs/ovn/ovnkube
+# This is the OpenShift ovn overlay network image.
+# it provides an overlay network using ovs/ovn/ovn-kube
 #
-# The standard name for this image is origin-network-ovn
+# The standard name for this image is ovn-kube
 
 # Notes:
-# The ovn-kubernetes utilities can come from the openvswitch-ovn-kubernetes rpm
-# or built in go_controller, copied to this directory and copied to the container.
-# The question becomes one of determining which version are we using.
+# This is for a development build where the ovn-kubernetes utilities
+# are built locally and included in the image (instead of the rpm)
 #
-# At present this uses fedora:28, this may default to centos:7 
-# when the needed ovs/ovn rpms are at 2.8 or higher and the
-# openvswitch-ovn-kubernetes is available.
+# At present this uses centos:7
+# openvswitch rpms are from
+# http://cbs.centos.org/kojifiles/packages/openvswitch/2.9.0/4.el7/x86_64/
 #
 # So this file will change over time.
 
-FROM fedora:28
-
-MAINTAINER Phil Cameron <pcameron@redhat.com>
+FROM centos:7
 
 USER root
 
 ENV PYTHONDONTWRITEBYTECODE yes
 
-RUN dnf install --refresh -y  \
-	PyYAML bind-utils procps-ng hostname \
-	openvswitch openvswitch-ovn-common openvswitch-ovn-host openvswitch-ovn-central \
-	openvswitch-ovn-docker python2-openvswitch openvswitch-ovn-vtep \
-	containernetworking-cni \
-	jq iproute strace socat && \
-	dnf clean all
+RUN yum install -y  \
+	PyYAML bind-utils \
+	libnuma.so \
+	openssl \
+	numactl-libs \
+	firewalld-filesystem \
+	libpcap \
+	iproute strace socat && \
+	yum clean all
+
+# get a reasonable version of openvswitch
+RUN rpm -i http://cbs.centos.org/kojifiles/packages/openvswitch/2.9.0/4.el7/x86_64/openvswitch-2.9.0-4.el7.x86_64.rpm
+RUN rpm -i http://cbs.centos.org/kojifiles/packages/openvswitch/2.9.0/4.el7/x86_64/openvswitch-ovn-common-2.9.0-4.el7.x86_64.rpm
+RUN rpm -i http://cbs.centos.org/kojifiles/packages/openvswitch/2.9.0/4.el7/x86_64/openvswitch-ovn-central-2.9.0-4.el7.x86_64.rpm
+RUN rpm -i http://cbs.centos.org/kojifiles/packages/openvswitch/2.9.0/4.el7/x86_64/openvswitch-ovn-host-2.9.0-4.el7.x86_64.rpm
+#RUN rpm -i http://cbs.centos.org/kojifiles/packages/openvswitch/2.9.0/4.el7/x86_64/openvswitch-ovn-docker-2.9.0-4.el7.x86_64.rpm
+RUN rpm -i http://cbs.centos.org/kojifiles/packages/openvswitch/2.9.0/4.el7/x86_64/openvswitch-ovn-vtep-2.9.0-4.el7.x86_64.rpm
+RUN rpm -i http://cbs.centos.org/kojifiles/packages/openvswitch/2.9.0/4.el7/x86_64/openvswitch-devel-2.9.0-4.el7.x86_64.rpm
+RUN rpm -i http://dl.fedoraproject.org/pub/epel/7/x86_64/Packages/c/containernetworking-cni-0.5.1-1.el7.x86_64.rpm
 
 RUN mkdir -p /var/run/openvswitch
 RUN mkdir -p /etc/cni/net.d
 RUN mkdir -p /opt/cni/bin
 
-# Built in ../go_controller, then copied to ../image
-# alternatively, install openvswitch-ovn-kubernetes rpm
-COPY ovn-k8s-cni-overlay /opt/cni/bin/ovn-k8s-cni-overlay
+# Built in ../../go_controller, then the binaries are copied here.
+# put things where they are in the rpm
+RUN mkdir -p /usr/libexec/cni/
 COPY ovn-k8s-overlay ovnkube ovn-kube-util /usr/bin/
+COPY ovn-k8s-cni-overlay /usr/libexec/cni/ovn-k8s-cni-overlay
 
 # ovnkube.sh is the entry point. This script examines environment
 # variables to direct operation and configure ovn

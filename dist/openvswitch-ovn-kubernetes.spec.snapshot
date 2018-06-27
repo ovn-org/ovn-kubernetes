@@ -66,6 +66,7 @@ This allows systemd to control ovn on the node
 cd go-controller && make
 strip _output/go/bin/ovnkube
 strip _output/go/bin/ovn-kube-util
+strip _output/go/bin/ovn-k8s-overlay
 strip _output/go/bin/ovn-k8s-cni-overlay
 
 %install
@@ -73,12 +74,14 @@ install -d -m 0750 %{buildroot}%{_bindir}
 install -d -m 0750 %{buildroot}%{_libexecdir}/cni
 install -p -m 755 go-controller/_output/go/bin/ovnkube %{buildroot}%{_bindir}
 install -p -m 755 go-controller/_output/go/bin/ovn-kube-util %{buildroot}%{_bindir}
+install -p -m 755 go-controller/_output/go/bin/ovn-k8s-overlay %{buildroot}%{_bindir}
 install -p -m 755 go-controller/_output/go/bin/ovn-k8s-cni-overlay %{buildroot}%{_libexecdir}/cni
 install -d -m 0750 %{buildroot}/etc/openvswitch
 install -p -m 644 go-controller/etc/ovn_k8s.conf %{buildroot}/etc/openvswitch
 install -d -m 0750 %{buildroot}%{_mandir}/man1
 install -p -m 644 docs/ovnkube.1 %{buildroot}%{_mandir}/man1
 install -p -m 644 docs/ovn-kube-util.1 %{buildroot}%{_mandir}/man1
+install -p -m 644 docs/ovn-k8s-overlay.1 %{buildroot}%{_mandir}/man1
 install -d -m 0750 %{buildroot}%{_mandir}/man5
 install -p -m 644 docs/ovn_k8s.conf.5 %{buildroot}%{_mandir}/man5
 
@@ -111,9 +114,11 @@ install -p -D -m 0644 dist/files/ovn-kubernetes.sysconfig \
 %doc docs/config.md  docs/debugging.md  docs/INSTALL.SSL.md  docs/INSTALL.UBUNTU.md
 %{_mandir}/man1/ovnkube.1.*
 %{_mandir}/man1/ovn-kube-util.1.*
+%{_mandir}/man1/ovn-k8s-overlay.1.*
 %{_mandir}/man5/ovn_k8s.conf.5.*
 %{_bindir}/ovnkube
 %{_bindir}/ovn-kube-util
+%{_bindir}/ovn-k8s-overlay
 %{_libexecdir}/cni/ovn-k8s-cni-overlay
 %config(noreplace) %{_sysconfdir}/openvswitch/ovn_k8s.conf
 

@@ -16,10 +16,10 @@ ovn_master=${OVN_MASTER:-"false"}
 # otherwise it is the container ID (useful for debugging).
 ovn_host=$(hostname)
 
-# # The ovs user id 
-# ovs_user_id=${OVS_USER_IDi:-root:root}
+# The ovs user id
+# ovs_user_id=${OVS_USER_ID:-root:root}
 
-# # ovs options
+# ovs options
 # ovs_options=${OVS_OPTIONS:-""}
 
 # Cluster's internal network cidr
@@ -35,7 +35,7 @@ ovn_nbdb_test=$(echo ${ovn_nbdb} | sed 's;//;;')
 
 # kubernetes api server configuration
 k8s_api=${K8S_APISERVER:-""}
-k8s_token=${K8S_TOKEN:-""}
+k8s_token=$(cat /var/run/secrets/kubernetes.io/serviceaccount/token)
 
 # ovn-northd - /etc/sysconfig/ovn-northd
 ovn_northd_opts=${OVN_NORTHD_OPTS:-"--db-nb-sock=/var/run/openvswitch/ovnnb_db.sock --db-sb-sock=/var/run/openvswitch/ovnsb_db.sock"}
@@ -167,23 +167,29 @@ display () {
 setup_cni () {
   # Take over network functions on the node
   # rm -Rf /etc/cni/net.d/*
-  rm -Rf /host/opt/cni/bin/ovn-k8s-cni-overlay
-  cp -Rf /opt/cni/bin/* /host/opt/cni/bin/
-  cp -f  /usr/libexec/cni/loopback /host/opt/cni/bin/
+  rm -f /host/opt/cni/bin/ovn-k8s-cni-overlay
+  cp -f /usr/libexec/cni/ovn-k8s-cni-overlay /host/opt/cni/bin/ovn-k8s-cni-overlay
+  cp -f /usr/libexec/cni/loopback /host/opt/cni/bin/loopback
+}
+
+display_env () {
+# echo OVS_USER_ID ${ovs_user_id}  OVS_OPTIONS ${ovs_options}
+echo OVN_NORTH ${ovn_nbdb}       OVN_NORTHD_OPTS ${ovn_northd_opts}
+echo OVN_SOUTH ${ovn_sbdb}
+echo OVN_CONTROLLER_OPTS ${ovn_controller_opts}
+echo OVN_NET_CIDR ${net_cidr}
+echo OVN_SVC_CIDR ${svc_cidr}
+echo K8S_APISERVER ${k8s_api}
+echo K8S_TOKEN ${k8s_token}
 }
 
 start_ovn () {
   echo " ==================== hostname: ${ovn_host} "
 
-echo OVN_NORTH $OVN_NORTH
-echo OVN_SOUTH $OVN_SOUTH
-echo OVN_NET_CIDR $OVN_NET_CIDR
-echo OVN_SVC_CIDR $OVN_SVC_CIDR
-echo K8S_APISERVER $K8S_APISERVER
-echo K8S_TOKEN $K8S_TOKEN
-
+  display_env
   setup_cni
 
+# ovs is started from ovs_ctl commands not here...
 # # start ovsdb-server
 # /usr/share/openvswitch/scripts/ovs-ctl \
 #   --no-ovs-vswitchd --no-monitor --system-id=random \
@@ -196,18 +202,17 @@ echo K8S_TOKEN $K8S_TOKEN
 #   --ovs-user=${ovs_user_id} \
 #   start ${ovs_options}
 
+  # on the master only
   if [[ ${ovn_master} = "true" ]]
   then
     # ovn-northd - master node only
     echo "=============== start ovn-northd ========== MASTER ONLY"
     /usr/share/openvswitch/scripts/ovn-ctl start_northd \
       --db-nb-addr=${ovn_nbdb} --db-sb-addr=${ovn_sbdb} \
-      --db-nb-sock=/var/run/openvswitch/ovnnb_db.sock \
-      --db-sb-sock=/var/run/openvswitch/ovnsb_db.sock
-
-    # ovn-master - master node only
+      ${ovn_northd_opts}
 #   wait_for_northdb
 
+    # ovn-master - master node only
     echo "=============== start ovn-master ========== MASTER ONLY"
     /usr/bin/ovnkube \
       --init-master ${ovn_host} --net-controller \
@@ -217,17 +222,15 @@ echo K8S_TOKEN $K8S_TOKEN
       --nodeport \
       --pidfile /var/run/openvswitch/ovnkube-master.pid \
       --logfile /var/log/openvswitch/ovnkube-master.log &
-
   fi
 
   # ovn-controller - all nodes
   echo "=============== start ovn-controller"
   /usr/share/openvswitch/scripts/ovn-ctl --no-monitor start_controller \
     ${ovn_controller_opts}
-
-  # ovn-node - all nodes
 #   wait_for_northdb
 
+  # ovn-node - all nodes
   echo  "=============== start ovn-node"
   /usr/bin/ovnkube --init-node ${ovn_host} \
       --cluster-subnet ${net_cidr} --service-cluster-ip-range=${svc_cidr} \
@@ -251,8 +254,8 @@ echo "================== ovnkube.sh ================"
 
 # Start the ovn daemons
 # daemons come up in order
-# ovs-db-server  - all nodes  - done in another daemonset
-# ovs-vswitchd   - all nodes  - done in another daemonset
+# ovs-db-server  - all nodes
+# ovs-vswitchd   - all nodes
 # ovn-northd     - master node only
 # ovn-master     - master node only
 # ovn-controller - all nodes
