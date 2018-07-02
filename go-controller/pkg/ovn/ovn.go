@@ -3,6 +3,7 @@ package ovn
 import (
 	"github.com/openvswitch/ovn-kubernetes/go-controller/pkg/factory"
 	"github.com/openvswitch/ovn-kubernetes/go-controller/pkg/kube"
+	util "github.com/openvswitch/ovn-kubernetes/go-controller/pkg/util"
 	"github.com/sirupsen/logrus"
 	kapi "k8s.io/api/core/v1"
 	kapisnetworking "k8s.io/api/networking/v1"
@@ -51,6 +52,9 @@ type Controller struct {
 
 	// A mutex for logicalPortIngressDenyCache
 	lspMutex *sync.Mutex
+
+	// supports port_group?
+	portGroupSupport bool
 }
 
 const (
@@ -83,6 +87,12 @@ func NewOvnController(kubeClient kubernetes.Interface, wf *factory.WatchFactory,
 
 // Run starts the actual watching. Also initializes any local structures needed.
 func (oc *Controller) Run() error {
+	_, _, err := util.RunOVNNbctlUnix("--columns=_uuid", "list",
+		"port_group")
+	if err != nil {
+		oc.portGroupSupport = true
+	}
+
 	for _, f := range []func() error{oc.WatchPods, oc.WatchServices, oc.WatchEndpoints, oc.WatchNamespaces, oc.WatchNetworkPolicy} {
 		if err := f(); err != nil {
 			return err
