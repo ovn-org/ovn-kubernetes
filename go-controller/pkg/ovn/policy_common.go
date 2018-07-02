@@ -224,3 +224,23 @@ func (oc *Controller) addAllowACLFromNode(logicalSwitch string) {
 		return
 	}
 }
+
+func (oc *Controller) syncNetworkPolicies(networkPolicies []interface{}) {
+	if !oc.portGroupSupport {
+		oc.syncNetworkPoliciesOld(networkPolicies)
+	}
+}
+
+// AddNetworkPolicy adds network policy and create corresponding acl rules
+func (oc *Controller) AddNetworkPolicy(policy *knet.NetworkPolicy) {
+	if !oc.portGroupSupport {
+		oc.addNetworkPolicyOld(policy)
+	}
+}
+
+func (oc *Controller) deleteNetworkPolicy(
+	policy *knet.NetworkPolicy) {
+	if !oc.portGroupSupport {
+		oc.deleteNetworkPolicyOld(policy)
+	}
+}

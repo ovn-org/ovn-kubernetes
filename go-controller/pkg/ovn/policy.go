@@ -12,7 +12,7 @@ import (
 	"sync"
 )
 
-func (oc *Controller) syncNetworkPolicies(networkPolicies []interface{}) {
+func (oc *Controller) syncNetworkPoliciesOld(networkPolicies []interface{}) {
 	expectedPolicies := make(map[string]map[string]bool)
 	for _, npInterface := range networkPolicies {
 		policy, ok := npInterface.(*knet.NetworkPolicy)
@@ -30,7 +30,7 @@ func (oc *Controller) syncNetworkPolicies(networkPolicies []interface{}) {
 		if policyName != "" &&
 			!expectedPolicies[namespaceName][policyName] {
 			// policy doesn't exist on k8s. Delete acl rules from OVN
-			oc.deleteAclsPolicy(namespaceName, policyName)
+			oc.deleteAclsPolicyOld(namespaceName, policyName)
 			// delete the address sets for this policy from OVN
 			oc.deleteAddressSet(hashedAddressSet(addrSetName))
 		}
@@ -40,7 +40,7 @@ func (oc *Controller) syncNetworkPolicies(networkPolicies []interface{}) {
 	}
 }
 
-func (oc *Controller) addACLAllow(namespace, policy, logicalSwitch,
+func (oc *Controller) addACLAllowOld(namespace, policy, logicalSwitch,
 	logicalPort, match, l4Match string, ipBlockCidr bool, gressNum int,
 	policyType knet.PolicyType) {
 	var direction, action string
@@ -93,7 +93,7 @@ func (oc *Controller) addACLAllow(namespace, policy, logicalSwitch,
 	}
 }
 
-func (oc *Controller) modifyACLAllow(namespace, policy, logicalPort,
+func (oc *Controller) modifyACLAllowOld(namespace, policy, logicalPort,
 	oldMatch string, newMatch string, gressNum int, policyType knet.PolicyType) {
 	uuid, stderr, err := util.RunOVNNbctlUnix("--data=bare", "--no-heading",
 		"--columns=_uuid", "find", "ACL", oldMatch,
@@ -122,7 +122,7 @@ func (oc *Controller) modifyACLAllow(namespace, policy, logicalPort,
 	}
 }
 
-func (oc *Controller) deleteACLAllow(namespace, policy, logicalSwitch,
+func (oc *Controller) deleteACLAllowOld(namespace, policy, logicalSwitch,
 	logicalPort, match, l4Match string, ipBlockCidr bool, gressNum int,
 	policyType knet.PolicyType) {
 	uuid, stderr, err := util.RunOVNNbctlUnix("--data=bare", "--no-heading",
@@ -157,7 +157,7 @@ func (oc *Controller) deleteACLAllow(namespace, policy, logicalSwitch,
 	}
 }
 
-func (oc *Controller) addIPBlockACLDeny(namespace, policy, logicalSwitch,
+func (oc *Controller) addIPBlockACLDenyOld(namespace, policy, logicalSwitch,
 	logicalPort, except, priority string, policyType knet.PolicyType) {
 	var match, l3Match, direction, lportMatch string
 	direction = toLport
@@ -206,7 +206,7 @@ func (oc *Controller) addIPBlockACLDeny(namespace, policy, logicalSwitch,
 	return
 }
 
-func (oc *Controller) deleteIPBlockACLDeny(namespace, policy,
+func (oc *Controller) deleteIPBlockACLDenyOld(namespace, policy,
 	logicalSwitch, logicalPort, except string, policyType knet.PolicyType) {
 	var match, lportMatch, l3Match string
 	if policyType == knet.PolicyTypeIngress {
@@ -248,7 +248,7 @@ func (oc *Controller) deleteIPBlockACLDeny(namespace, policy,
 	return
 }
 
-func (oc *Controller) addACLDeny(namespace, logicalSwitch, logicalPort,
+func (oc *Controller) addACLDenyOld(namespace, logicalSwitch, logicalPort,
 	priority string, policyType knet.PolicyType) {
 	var match, direction string
 	direction = toLport
@@ -291,7 +291,7 @@ func (oc *Controller) addACLDeny(namespace, logicalSwitch, logicalPort,
 	return
 }
 
-func (oc *Controller) deleteACLDeny(namespace, logicalSwitch, logicalPort string,
+func (oc *Controller) deleteACLDenyOld(namespace, logicalSwitch, logicalPort string,
 	policyType knet.PolicyType) {
 	var match string
 	if policyType == knet.PolicyTypeIngress {
@@ -328,7 +328,7 @@ func (oc *Controller) deleteACLDeny(namespace, logicalSwitch, logicalPort string
 	return
 }
 
-func (oc *Controller) deleteAclsPolicy(namespace, policy string) {
+func (oc *Controller) deleteAclsPolicyOld(namespace, policy string) {
 	uuids, stderr, err := util.RunOVNNbctlUnix("--data=bare", "--no-heading",
 		"--columns=_uuid", "find", "ACL",
 		fmt.Sprintf("external-ids:namespace=%s", namespace),
@@ -373,7 +373,7 @@ func (oc *Controller) deleteAclsPolicy(namespace, policy string) {
 	}
 }
 
-func (oc *Controller) localPodAddOrDelACL(addDel string,
+func (oc *Controller) localPodAddOrDelACLOld(addDel string,
 	policy *knet.NetworkPolicy, pod *kapi.Pod, gress *gressPolicy,
 	logicalSwitch string) {
 	logicalPort := fmt.Sprintf("%s_%s", pod.Namespace, pod.Name)
@@ -391,10 +391,10 @@ func (oc *Controller) localPodAddOrDelACL(addDel string,
 	if len(gress.ipBlockCidr) > 0 && len(gress.ipBlockExcept) > 0 {
 		except := fmt.Sprintf("{%s}", strings.Join(gress.ipBlockExcept, ", "))
 		if addDel == addACL {
-			oc.addIPBlockACLDeny(policy.Namespace, policy.Name, logicalSwitch,
+			oc.addIPBlockACLDenyOld(policy.Namespace, policy.Name, logicalSwitch,
 				logicalPort, except, ipBlockDenyPriority, gress.policyType)
 		} else {
-			oc.deleteIPBlockACLDeny(policy.Namespace, policy.Name,
+			oc.deleteIPBlockACLDenyOld(policy.Namespace, policy.Name,
 				logicalSwitch, logicalPort, except, gress.policyType)
 		}
 	}
@@ -408,22 +408,22 @@ func (oc *Controller) localPodAddOrDelACL(addDel string,
 			if len(gress.ipBlockCidr) > 0 {
 				// Add ACL allow rule for IPBlock CIDR
 				cidrMatch = gress.getMatchFromIPBlock(lportMatch, l4Match)
-				oc.addACLAllow(policy.Namespace, policy.Name,
+				oc.addACLAllowOld(policy.Namespace, policy.Name,
 					logicalSwitch, logicalPort, cidrMatch, l4Match,
 					true, gress.idx, gress.policyType)
 			}
-			oc.addACLAllow(policy.Namespace, policy.Name,
+			oc.addACLAllowOld(policy.Namespace, policy.Name,
 				logicalSwitch, logicalPort, match, l4Match,
 				false, gress.idx, gress.policyType)
 		} else {
 			if len(gress.ipBlockCidr) > 0 {
 				// Delete ACL allow rule for IPBlock CIDR
 				cidrMatch = gress.getMatchFromIPBlock(lportMatch, l4Match)
-				oc.deleteACLAllow(policy.Namespace, policy.Name,
+				oc.deleteACLAllowOld(policy.Namespace, policy.Name,
 					logicalSwitch, logicalPort, cidrMatch, l4Match,
 					true, gress.idx, gress.policyType)
 			}
-			oc.deleteACLAllow(policy.Namespace, policy.Name,
+			oc.deleteACLAllowOld(policy.Namespace, policy.Name,
 				logicalSwitch, logicalPort, match, l4Match,
 				false, gress.idx, gress.policyType)
 		}
@@ -439,29 +439,29 @@ func (oc *Controller) localPodAddOrDelACL(addDel string,
 			if len(gress.ipBlockCidr) > 0 {
 				// Add ACL allow rule for IPBlock CIDR
 				cidrMatch = gress.getMatchFromIPBlock(lportMatch, l4Match)
-				oc.addACLAllow(policy.Namespace, policy.Name,
+				oc.addACLAllowOld(policy.Namespace, policy.Name,
 					logicalSwitch, logicalPort, cidrMatch, l4Match,
 					true, gress.idx, gress.policyType)
 			}
-			oc.addACLAllow(policy.Namespace, policy.Name,
+			oc.addACLAllowOld(policy.Namespace, policy.Name,
 				pod.Spec.NodeName, logicalPort, match, l4Match,
 				false, gress.idx, gress.policyType)
 		} else {
 			if len(gress.ipBlockCidr) > 0 {
 				// Delete ACL allow rule for IPBlock CIDR
 				cidrMatch = gress.getMatchFromIPBlock(lportMatch, l4Match)
-				oc.deleteACLAllow(policy.Namespace, policy.Name,
+				oc.deleteACLAllowOld(policy.Namespace, policy.Name,
 					logicalSwitch, logicalPort, cidrMatch, l4Match,
 					true, gress.idx, gress.policyType)
 			}
-			oc.deleteACLAllow(policy.Namespace, policy.Name,
+			oc.deleteACLAllowOld(policy.Namespace, policy.Name,
 				pod.Spec.NodeName, logicalPort, match, l4Match,
 				false, gress.idx, gress.policyType)
 		}
 	}
 }
 
-func (oc *Controller) localPodAddDefaultDeny(
+func (oc *Controller) localPodAddDefaultDenyOld(
 	policy *knet.NetworkPolicy,
 	logicalPort, logicalSwitch string) {
 
@@ -480,7 +480,7 @@ func (oc *Controller) localPodAddDefaultDeny(
 	// Handle condition 1 above.
 	if !(len(policy.Spec.PolicyTypes) == 1 && policy.Spec.PolicyTypes[0] == knet.PolicyTypeEgress) {
 		if oc.lspIngressDenyCache[logicalPort] == 0 {
-			oc.addACLDeny(policy.Namespace, logicalSwitch, logicalPort,
+			oc.addACLDenyOld(policy.Namespace, logicalSwitch, logicalPort,
 				defaultDenyPriority, knet.PolicyTypeIngress)
 		}
 		oc.lspIngressDenyCache[logicalPort]++
@@ -490,7 +490,7 @@ func (oc *Controller) localPodAddDefaultDeny(
 	if (len(policy.Spec.PolicyTypes) == 1 && policy.Spec.PolicyTypes[0] == knet.PolicyTypeEgress) ||
 		len(policy.Spec.Egress) > 0 || len(policy.Spec.PolicyTypes) == 2 {
 		if oc.lspEgressDenyCache[logicalPort] == 0 {
-			oc.addACLDeny(policy.Namespace, logicalSwitch, logicalPort,
+			oc.addACLDenyOld(policy.Namespace, logicalSwitch, logicalPort,
 				defaultDenyPriority, knet.PolicyTypeEgress)
 		}
 		oc.lspEgressDenyCache[logicalPort]++
@@ -498,7 +498,7 @@ func (oc *Controller) localPodAddDefaultDeny(
 	oc.lspMutex.Unlock()
 }
 
-func (oc *Controller) localPodDelDefaultDeny(
+func (oc *Controller) localPodDelDefaultDenyOld(
 	policy *knet.NetworkPolicy,
 	logicalPort, logicalSwitch string) {
 	oc.lspMutex.Lock()
@@ -507,7 +507,7 @@ func (oc *Controller) localPodDelDefaultDeny(
 		if oc.lspIngressDenyCache[logicalPort] > 0 {
 			oc.lspIngressDenyCache[logicalPort]--
 			if oc.lspIngressDenyCache[logicalPort] == 0 {
-				oc.deleteACLDeny(policy.Namespace, logicalSwitch,
+				oc.deleteACLDenyOld(policy.Namespace, logicalSwitch,
 					logicalPort, knet.PolicyTypeIngress)
 			}
 		}
@@ -518,7 +518,7 @@ func (oc *Controller) localPodDelDefaultDeny(
 		if oc.lspEgressDenyCache[logicalPort] > 0 {
 			oc.lspEgressDenyCache[logicalPort]--
 			if oc.lspEgressDenyCache[logicalPort] == 0 {
-				oc.deleteACLDeny(policy.Namespace, logicalSwitch,
+				oc.deleteACLDenyOld(policy.Namespace, logicalSwitch,
 					logicalPort, knet.PolicyTypeEgress)
 			}
 		}
@@ -526,7 +526,7 @@ func (oc *Controller) localPodDelDefaultDeny(
 	oc.lspMutex.Unlock()
 }
 
-func (oc *Controller) handleLocalPodSelectorAddFunc(
+func (oc *Controller) handleLocalPodSelectorAddFuncOld(
 	policy *knet.NetworkPolicy, np *namespacePolicy,
 	obj interface{}) {
 	pod := obj.(*kapi.Pod)
@@ -555,21 +555,21 @@ func (oc *Controller) handleLocalPodSelectorAddFunc(
 		return
 	}
 
-	oc.localPodAddDefaultDeny(policy, logicalPort, logicalSwitch)
+	oc.localPodAddDefaultDenyOld(policy, logicalPort, logicalSwitch)
 
 	// For each ingress rule, add a ACL
 	for _, ingress := range np.ingressPolicies {
-		oc.localPodAddOrDelACL(addACL, policy, pod, ingress, logicalSwitch)
+		oc.localPodAddOrDelACLOld(addACL, policy, pod, ingress, logicalSwitch)
 	}
 	// For each egress rule, add a ACL
 	for _, egress := range np.egressPolicies {
-		oc.localPodAddOrDelACL(addACL, policy, pod, egress, logicalSwitch)
+		oc.localPodAddOrDelACLOld(addACL, policy, pod, egress, logicalSwitch)
 	}
 
 	np.localPods[logicalPort] = true
 }
 
-func (oc *Controller) handleLocalPodSelectorDelFunc(
+func (oc *Controller) handleLocalPodSelectorDelFuncOld(
 	policy *knet.NetworkPolicy, np *namespacePolicy,
 	obj interface{}) {
 	pod := obj.(*kapi.Pod)
@@ -593,19 +593,19 @@ func (oc *Controller) handleLocalPodSelectorDelFunc(
 		return
 	}
 	delete(np.localPods, logicalPort)
-	oc.localPodDelDefaultDeny(policy, logicalPort, logicalSwitch)
+	oc.localPodDelDefaultDenyOld(policy, logicalPort, logicalSwitch)
 
 	// For each ingress rule, remove the ACL
 	for _, ingress := range np.ingressPolicies {
-		oc.localPodAddOrDelACL(deleteACL, policy, pod, ingress, logicalSwitch)
+		oc.localPodAddOrDelACLOld(deleteACL, policy, pod, ingress, logicalSwitch)
 	}
 	// For each egress rule, remove the ACL
 	for _, egress := range np.egressPolicies {
-		oc.localPodAddOrDelACL(deleteACL, policy, pod, egress, logicalSwitch)
+		oc.localPodAddOrDelACLOld(deleteACL, policy, pod, egress, logicalSwitch)
 	}
 }
 
-func (oc *Controller) handleLocalPodSelector(
+func (oc *Controller) handleLocalPodSelectorOld(
 	policy *knet.NetworkPolicy, np *namespacePolicy) {
 
 	np.stopWg.Add(1)
@@ -613,13 +613,13 @@ func (oc *Controller) handleLocalPodSelector(
 		&policy.Spec.PodSelector,
 		cache.ResourceEventHandlerFuncs{
 			AddFunc: func(obj interface{}) {
-				oc.handleLocalPodSelectorAddFunc(policy, np, obj)
+				oc.handleLocalPodSelectorAddFuncOld(policy, np, obj)
 			},
 			DeleteFunc: func(obj interface{}) {
-				oc.handleLocalPodSelectorDelFunc(policy, np, obj)
+				oc.handleLocalPodSelectorDelFuncOld(policy, np, obj)
 			},
 			UpdateFunc: func(oldObj, newObj interface{}) {
-				oc.handleLocalPodSelectorAddFunc(policy, np, newObj)
+				oc.handleLocalPodSelectorAddFuncOld(policy, np, newObj)
 			},
 		}, nil)
 	if err != nil {
@@ -633,7 +633,7 @@ func (oc *Controller) handleLocalPodSelector(
 	np.stopWg.Done()
 }
 
-func (oc *Controller) handlePeerPodSelector(
+func (oc *Controller) handlePeerPodSelectorOld(
 	policy *knet.NetworkPolicy, podSelector *metav1.LabelSelector,
 	addressSet string, addressMap map[string]bool, np *namespacePolicy) {
 
@@ -719,7 +719,7 @@ func (oc *Controller) handlePeerPodSelector(
 	np.stopWg.Done()
 }
 
-func (oc *Controller) handlePeerNamespaceSelectorModify(
+func (oc *Controller) handlePeerNamespaceSelectorModifyOld(
 	gress *gressPolicy, np *namespacePolicy, oldl3Match, newl3Match string) {
 
 	for logicalPort := range np.localPods {
@@ -734,7 +734,7 @@ func (oc *Controller) handlePeerNamespaceSelectorModify(
 				lportMatch)
 			newMatch := fmt.Sprintf("match=\"%s && %s\"", newl3Match,
 				lportMatch)
-			oc.modifyACLAllow(np.namespace, np.name, logicalPort,
+			oc.modifyACLAllowOld(np.namespace, np.name, logicalPort,
 				oldMatch, newMatch, gress.idx, gress.policyType)
 		}
 		for _, port := range gress.portPolicies {
@@ -746,13 +746,13 @@ func (oc *Controller) handlePeerNamespaceSelectorModify(
 				oldl3Match, l4Match, lportMatch)
 			newMatch := fmt.Sprintf("match=\"%s && %s && %s\"",
 				newl3Match, l4Match, lportMatch)
-			oc.modifyACLAllow(np.namespace, np.name, logicalPort,
+			oc.modifyACLAllowOld(np.namespace, np.name, logicalPort,
 				oldMatch, newMatch, gress.idx, gress.policyType)
 		}
 	}
 }
 
-func (oc *Controller) handlePeerNamespaceSelector(
+func (oc *Controller) handlePeerNamespaceSelectorOld(
 	policy *knet.NetworkPolicy,
 	namespaceSelector *metav1.LabelSelector,
 	gress *gressPolicy, np *namespacePolicy) {
@@ -771,7 +771,7 @@ func (oc *Controller) handlePeerNamespaceSelector(
 				hashedAddressSet := hashedAddressSet(namespace.Name)
 				oldL3Match, newL3Match, added := gress.addAddressSet(hashedAddressSet)
 				if added {
-					oc.handlePeerNamespaceSelectorModify(gress,
+					oc.handlePeerNamespaceSelectorModifyOld(gress,
 						np, oldL3Match, newL3Match)
 				}
 			},
@@ -785,7 +785,7 @@ func (oc *Controller) handlePeerNamespaceSelector(
 				hashedAddressSet := hashedAddressSet(namespace.Name)
 				oldL3Match, newL3Match, removed := gress.delAddressSet(hashedAddressSet)
 				if removed {
-					oc.handlePeerNamespaceSelectorModify(gress,
+					oc.handlePeerNamespaceSelectorModifyOld(gress,
 						np, oldL3Match, newL3Match)
 				}
 			},
@@ -805,7 +805,7 @@ func (oc *Controller) handlePeerNamespaceSelector(
 }
 
 // AddNetworkPolicy adds network policy and create corresponding acl rules
-func (oc *Controller) AddNetworkPolicy(policy *knet.NetworkPolicy) {
+func (oc *Controller) addNetworkPolicyOld(policy *knet.NetworkPolicy) {
 	logrus.Infof("Adding network policy %s in namespace %s", policy.Name,
 		policy.Namespace)
 
@@ -865,14 +865,14 @@ func (oc *Controller) AddNetworkPolicy(policy *knet.NetworkPolicy) {
 			if fromJSON.NamespaceSelector != nil {
 				// For each peer namespace selector, we create a watcher that
 				// populates ingress.peerAddressSets
-				go oc.handlePeerNamespaceSelector(policy,
+				go oc.handlePeerNamespaceSelectorOld(policy,
 					fromJSON.NamespaceSelector, ingress, np)
 			}
 
 			if fromJSON.PodSelector != nil {
 				// For each peer pod selector, we create a watcher that
 				// populates the addressSet
-				go oc.handlePeerPodSelector(policy, fromJSON.PodSelector,
+				go oc.handlePeerPodSelectorOld(policy, fromJSON.PodSelector,
 					hashedLocalAddressSet, peerPodAddressMap, np)
 			}
 		}
@@ -914,14 +914,14 @@ func (oc *Controller) AddNetworkPolicy(policy *knet.NetworkPolicy) {
 			if toJSON.NamespaceSelector != nil {
 				// For each peer namespace selector, we create a watcher that
 				// populates egress.peerAddressSets
-				go oc.handlePeerNamespaceSelector(policy,
+				go oc.handlePeerNamespaceSelectorOld(policy,
 					toJSON.NamespaceSelector, egress, np)
 			}
 
 			if toJSON.PodSelector != nil {
 				// For each peer pod selector, we create a watcher that
 				// populates the addressSet
-				go oc.handlePeerPodSelector(policy, toJSON.PodSelector,
+				go oc.handlePeerPodSelectorOld(policy, toJSON.PodSelector,
 					hashedLocalAddressSet, peerPodAddressMap, np)
 			}
 		}
@@ -932,7 +932,7 @@ func (oc *Controller) AddNetworkPolicy(policy *knet.NetworkPolicy) {
 
 	// For all the pods in the local namespace that this policy
 	// effects, add ACL rules.
-	go oc.handleLocalPodSelector(policy, np)
+	go oc.handleLocalPodSelectorOld(policy, np)
 
 	return
 }
@@ -958,7 +958,7 @@ func (oc *Controller) getLogicalSwitchForLogicalPort(
 	return logicalSwitch
 }
 
-func (oc *Controller) deleteNetworkPolicy(
+func (oc *Controller) deleteNetworkPolicyOld(
 	policy *knet.NetworkPolicy) {
 	logrus.Infof("Deleting network policy %s in namespace %s",
 		policy.Name, policy.Namespace)
@@ -1006,12 +1006,12 @@ func (oc *Controller) deleteNetworkPolicy(
 	for logicalPort := range np.localPods {
 		logicalSwitch := oc.getLogicalSwitchForLogicalPort(
 			logicalPort)
-		oc.localPodDelDefaultDeny(policy, logicalPort, logicalSwitch)
+		oc.localPodDelDefaultDenyOld(policy, logicalPort, logicalSwitch)
 	}
 	oc.namespacePolicies[policy.Namespace][policy.Name] = nil
 
 	// We should now delete all the ACLs added by this network policy.
-	oc.deleteAclsPolicy(policy.Namespace, policy.Name)
+	oc.deleteAclsPolicyOld(policy.Namespace, policy.Name)
 
 	return
 }

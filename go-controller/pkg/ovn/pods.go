@@ -44,7 +44,9 @@ func (oc *Controller) syncPods(pods []interface{}) {
 					"stdout: %q, stderr: %q err: %v",
 					out, stderr, err)
 			}
-			oc.deletePodAcls(existingPort)
+			if !oc.portGroupSupport {
+				oc.deletePodAcls(existingPort)
+			}
 		}
 	}
 }
@@ -144,8 +146,12 @@ func (oc *Controller) deleteLogicalPort(pod *kapi.Pod) {
 	delete(oc.lspEgressDenyCache, logicalPort)
 	oc.lspMutex.Unlock()
 
-	oc.deleteACLDeny(pod.Namespace, pod.Spec.NodeName, logicalPort, "Ingress")
-	oc.deleteACLDeny(pod.Namespace, pod.Spec.NodeName, logicalPort, "Egress")
+	if !oc.portGroupSupport {
+		oc.deleteACLDenyOld(pod.Namespace, pod.Spec.NodeName, logicalPort,
+			"Ingress")
+		oc.deleteACLDenyOld(pod.Namespace, pod.Spec.NodeName, logicalPort,
+			"Egress")
+	}
 	oc.deletePodFromNamespaceAddressSet(pod.Namespace, ipAddress)
 	return
 }
