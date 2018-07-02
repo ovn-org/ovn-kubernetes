@@ -19,7 +19,9 @@ type namespacePolicy struct {
 	stop            chan bool
 	stopWg          *sync.WaitGroup
 	localPods       map[string]bool //pods effected by this policy
-	deleted         bool            //deleted policy
+	portGroupUUID   string          //uuid for OVN port_group
+	portGroupName   string
+	deleted         bool //deleted policy
 }
 
 type gressPolicy struct {
@@ -226,21 +228,28 @@ func (oc *Controller) addAllowACLFromNode(logicalSwitch string) {
 }
 
 func (oc *Controller) syncNetworkPolicies(networkPolicies []interface{}) {
-	if !oc.portGroupSupport {
+	if oc.portGroupSupport {
+		oc.syncNetworkPoliciesPortGroup(networkPolicies)
+	} else {
 		oc.syncNetworkPoliciesOld(networkPolicies)
 	}
 }
 
 // AddNetworkPolicy adds network policy and create corresponding acl rules
 func (oc *Controller) AddNetworkPolicy(policy *knet.NetworkPolicy) {
-	if !oc.portGroupSupport {
+	if oc.portGroupSupport {
+		oc.addNetworkPolicyPortGroup(policy)
+	} else {
 		oc.addNetworkPolicyOld(policy)
 	}
 }
 
 func (oc *Controller) deleteNetworkPolicy(
 	policy *knet.NetworkPolicy) {
-	if !oc.portGroupSupport {
+	if oc.portGroupSupport {
+		oc.deleteNetworkPolicyPortGroup(policy)
+	} else {
 		oc.deleteNetworkPolicyOld(policy)
 	}
+
 }
