@@ -32,6 +32,9 @@ type Controller struct {
 	// its corresponding logical switch
 	logicalPortCache map[string]string
 
+	// A cache of all logical ports and its corresponding uuids.
+	logicalPortUUIDCache map[string]string
+
 	// For each namespace, an address_set that has all the pod IP
 	// address in that namespace
 	namespaceAddressSet map[string]map[string]bool
@@ -42,6 +45,12 @@ type Controller struct {
 	// For each namespace, a map of policy name to 'namespacePolicy'.
 	namespacePolicies map[string]map[string]*namespacePolicy
 
+	// Port group for ingress deny rule
+	portGroupIngressDeny string
+
+	// Port group for egress deny rule
+	portGroupEgressDeny string
+
 	// For each logical port, the number of network policies that want
 	// to add a ingress deny rule.
 	lspIngressDenyCache map[string]int
@@ -50,7 +59,7 @@ type Controller struct {
 	// to add a egress deny rule.
 	lspEgressDenyCache map[string]int
 
-	// A mutex for logicalPortIngressDenyCache
+	// A mutex for lspIngressDenyCache and lspEgressDenyCache
 	lspMutex *sync.Mutex
 
 	// supports port_group?
@@ -73,6 +82,7 @@ func NewOvnController(kubeClient kubernetes.Interface, wf *factory.WatchFactory,
 		watchFactory:             wf,
 		logicalSwitchCache:       make(map[string]bool),
 		logicalPortCache:         make(map[string]string),
+		logicalPortUUIDCache:     make(map[string]string),
 		namespaceAddressSet:      make(map[string]map[string]bool),
 		namespacePolicies:        make(map[string]map[string]*namespacePolicy),
 		namespaceMutex:           make(map[string]*sync.Mutex),
@@ -89,7 +99,7 @@ func NewOvnController(kubeClient kubernetes.Interface, wf *factory.WatchFactory,
 func (oc *Controller) Run() error {
 	_, _, err := util.RunOVNNbctlUnix("--columns=_uuid", "list",
 		"port_group")
-	if err != nil {
+	if err == nil {
 		oc.portGroupSupport = true
 	}
 

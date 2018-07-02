@@ -85,8 +85,8 @@ func (oc *Controller) deletePodAcls(logicalPort string) {
 		}
 		logicalSwitch := out
 
-		_, stderr, err = util.RunOVNNbctlUnix("remove", "logical_switch",
-			logicalSwitch, "acls", uuid)
+		_, stderr, err = util.RunOVNNbctlUnix("--if-exists", "remove",
+			"logical_switch", logicalSwitch, "acls", uuid)
 		if err != nil {
 			logrus.Errorf("failed to delete the allow-from rule %s for"+
 				" logical_switch=%s, logical_port=%s, stderr: %q, (%v)",
@@ -94,6 +94,27 @@ func (oc *Controller) deletePodAcls(logicalPort string) {
 			continue
 		}
 	}
+}
+
+func (oc *Controller) getLogicalPortUUID(logicalPort string) string {
+	if oc.logicalPortUUIDCache[logicalPort] != "" {
+		return oc.logicalPortUUIDCache[logicalPort]
+	}
+
+	out, stderr, err := util.RunOVNNbctlUnix("--if-exists", "get",
+		"logical_switch_port", logicalPort, "_uuid")
+	if err != nil {
+		logrus.Errorf("Error while getting uuid for logical_switch_port "+
+			"%s, stderr: %q, err: %v", logicalPort, stderr, err)
+		return ""
+	}
+
+	if out == "" {
+		return out
+	}
+
+	oc.logicalPortUUIDCache[logicalPort] = out
+	return oc.logicalPortUUIDCache[logicalPort]
 }
 
 func (oc *Controller) getGatewayFromSwitch(logicalSwitch string) (string, string, error) {
@@ -144,6 +165,7 @@ func (oc *Controller) deleteLogicalPort(pod *kapi.Pod) {
 	oc.lspMutex.Lock()
 	delete(oc.lspIngressDenyCache, logicalPort)
 	delete(oc.lspEgressDenyCache, logicalPort)
+	delete(oc.logicalPortUUIDCache, logicalPort)
 	oc.lspMutex.Unlock()
 
 	if !oc.portGroupSupport {

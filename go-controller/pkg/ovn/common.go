@@ -10,8 +10,8 @@ import (
 	"strings"
 )
 
-// hash the provided input to make it a valid addressSet name.
-func hashedAddressSet(s string) string {
+// hash the provided input to make it a valid addressSet or portGroup name.
+func hashForOVN(s string) string {
 	h := fnv.New64a()
 	_, err := h.Write([]byte(s))
 	if err != nil {
@@ -19,6 +19,16 @@ func hashedAddressSet(s string) string {
 	}
 	hashString := strconv.FormatUint(h.Sum64(), 10)
 	return fmt.Sprintf("a%s", hashString)
+}
+
+// hash the provided input to make it a valid addressSet name.
+func hashedAddressSet(s string) string {
+	return hashForOVN(s)
+}
+
+// hash the provided input to make it a valid portGroup name.
+func hashedPortGroup(s string) string {
+	return hashForOVN(s)
 }
 
 // forEachAddressSetUnhashedName will pass the unhashedName, namespaceName and
@@ -132,6 +142,57 @@ func (oc *Controller) deleteAddressSet(hashName string) {
 		"address_set", hashName)
 	if err != nil {
 		logrus.Errorf("failed to destroy address set %s, stderr: %q, (%v)",
+			hashName, stderr, err)
+		return
+	}
+}
+
+func (oc *Controller) createPortGroup(name string,
+	hashName string) (string, error) {
+	logrus.Debugf("createPortGroup with %s", name)
+	portGroup, stderr, err := util.RunOVNNbctlUnix("--data=bare",
+		"--no-heading", "--columns=_uuid", "find", "port_group",
+		fmt.Sprintf("name=%s", hashName))
+	if err != nil {
+		return "", fmt.Errorf("find failed to get port_group, stderr: %q (%v)",
+			stderr, err)
+	}
+
+	if portGroup != "" {
+		return portGroup, nil
+	}
+
+	portGroup, stderr, err = util.RunOVNNbctlUnix("create", "port_group",
+		fmt.Sprintf("name=%s", hashName),
+		fmt.Sprintf("external-ids:name=%s", name))
+	if err != nil {
+		return "", fmt.Errorf("failed to create port_group %s, "+
+			"stderr: %q (%v)", name, stderr, err)
+	}
+
+	return portGroup, nil
+}
+
+func (oc *Controller) deletePortGroup(hashName string) {
+	logrus.Debugf("deletePortGroup %s", hashName)
+
+	portGroup, stderr, err := util.RunOVNNbctlUnix("--data=bare",
+		"--no-heading", "--columns=_uuid", "find", "port_group",
+		fmt.Sprintf("name=%s", hashName))
+	if err != nil {
+		logrus.Errorf("find failed to get port_group, stderr: %q (%v)",
+			stderr, err)
+		return
+	}
+
+	if portGroup == "" {
+		return
+	}
+
+	_, stderr, err = util.RunOVNNbctlUnix("--if-exists", "destroy",
+		"port_group", portGroup)
+	if err != nil {
+		logrus.Errorf("failed to destroy port_group %s, stderr: %q, (%v)",
 			hashName, stderr, err)
 		return
 	}
