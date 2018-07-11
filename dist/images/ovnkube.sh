@@ -35,7 +35,12 @@ ovn_nbdb_test=$(echo ${ovn_nbdb} | sed 's;//;;')
 
 # kubernetes api server configuration
 k8s_api=${K8S_APISERVER:-""}
-k8s_token=$(cat /var/run/secrets/kubernetes.io/serviceaccount/token)
+if [ -f /var/run/secrets/kubernetes.io/serviceaccount/token ]
+then
+  k8s_token=$(cat /var/run/secrets/kubernetes.io/serviceaccount/token)
+else
+  k8s_token=""
+fi
 
 # ovn-northd - /etc/sysconfig/ovn-northd
 ovn_northd_opts=${OVN_NORTHD_OPTS:-"--db-nb-sock=/var/run/openvswitch/ovnnb_db.sock --db-sb-sock=/var/run/openvswitch/ovnsb_db.sock"}
@@ -185,6 +190,12 @@ echo K8S_TOKEN ${k8s_token}
 
 start_ovn () {
   echo " ==================== hostname: ${ovn_host} "
+  if [ -f /root/.git/HEAD ]
+  then
+    head=$(gawk '{ print $2 }' /root/.git/HEAD )
+    commit=$(cat /root/.git/${head})
+    echo "Image built from ovn-kubernetes ref: ${head}  commit: ${commit}"
+  fi
 
   display_env
   setup_cni

@@ -12,13 +12,13 @@
 
 all: bld
 	docker build -t ovn-kube .
-	docker tag ovn-kube netdev31:5000/ovn-kube:latest
-	docker push netdev31:5000/ovn-kube:latest
+	#docker tag ovn-kube my-registry:5000/ovn-kube:latest
+	#docker push my-registry:5000/ovn-kube:latest
 
 fedora: bld
 	docker build -t ovn-kube-f -f Dockerfile.fedora .
-	docker tag ovn-kube-f netdev31:5000/ovn-kube:latest
-	docker push netdev31:5000/ovn-kube:latest
+	#docker tag ovn-kube-f my-registry:5000/ovn-kube:latest
+	#docker push my-registry:5000/ovn-kube:latest
 
 .PHONY: ../../go-controller/_output/go/bin/ovnkube
 
@@ -27,4 +27,7 @@ fedora: bld
 
 bld: ../../go-controller/_output/go/bin/ovnkube
 	cp ../../go-controller/_output/go/bin/* .
+	mkdir -p .git/ .git/refs/heads/
+	cp ../../.git/HEAD .git/HEAD
+	cp ../../.git/refs/heads/* .git/refs/heads/
 
