@@ -12,42 +12,25 @@
       if (!([Security.Principal.WindowsPrincipal][Security.Principal.WindowsIdentity]::GetCurrent()).IsInRole([Security.Principal.WindowsBuiltInRole] "Administrator")) { Start-Process powershell.exe "-NoProfile -ExecutionPolicy Bypass -File `"$PSCommandPath`"" -Verb RunAs; exit }
       $RegROPath = "HKCU:\SOFTWARE\Microsoft\Windows\CurrentVersion\Run"
       Remove-ItemProperty $RegROPath "OVN_Init_Node" -ErrorAction SilentlyContinue
-
-      # Start-BitsTransfer https://raw.githubusercontent.com/Microsoft/SDN/master/Kubernetes/windows/hns.psm1
-      # Import-Module ./hns.psm1
+      #TODO figure why they don't get automatically included
+      Import-Module "C:\Windows\System32\WindowsPowerShell\v1.0\Modules\HostNetworkingService\HostNetworkingService.psm1"
+      Import-Module "C:\Windows\System32\WindowsPowerShell\v1.0\Modules\OVS\OVS.psm1"
+      Import-Module "C:\Windows\System32\WindowsPowerShell\v1.0\Modules\HNSHelper\HNSHelper.psm1"
 
       # # There should be only one transparent network
-      # $HNS_NW=Get-HNSNetworks | where {$_.type -eq "transparent"}
-      # $HNS_ID=$HNS_NW.Id
-      # $OVS_EXTENSION_ID="583cc151-73ec-4a6a-8b47-578297ad7623"
-
-      # Set-HnsSwitchExtension -NetworkId $HNS_ID -ExtensionId $OVS_EXTENSION_ID -state 0
-      # # Rename-NetAdapter -Name "vEthernet ({{interface_name}})" -NewName "Management_Interface"
-      # ovs-vsctl --if-exists --no-wait del-br br-ex
-      # ovs-vsctl --no-wait --may-exist add-br br-ex
-      # ovs-vsctl --no-wait add-port br-ex "{{interface_name}}"
-      # Stop-Service ovs-vswitchd
-      # Set-HnsSwitchExtension -NetworkId $HNS_ID -ExtensionId $OVS_EXTENSION_ID -state 1
-      Get-VMSwitch -SwitchType External | Disable-VMSwitchExtension "Cloudbase Open vSwitch Extension"
+      $HNS_NW = Get-HNSNetwork | where {$_.type -eq "transparent"}
+      $HNS_ID = $HNS_NW.Id
+      Disable-OVSOnHNSNetwork $HNS_ID
       ovs-vsctl --if-exists --no-wait del-br br-ex
-      Get-VMSwitch -SwitchType External | Set-VMSwitch -AllowManagementOS $false
-      Get-VMSwitch -SwitchType External | Set-VMSwitch -AllowManagementOS $false
       ovs-vsctl --no-wait --may-exist add-br br-ex
+      ovs-vsctl --no-wait add-port br-ex "vEthernet ({{interface_name}})" -- set interface  "vEthernet ({{interface_name}})" type=internal
       ovs-vsctl --no-wait add-port br-ex '{{interface_name}}'
       Stop-Service ovs-vswitchd
-      Get-VMSwitch -SwitchType External | Enable-VMSwitchExtension "Cloudbase Open vSwitch Extension"
+      Enable-OVSOnHNSNetwork $HNS_ID
 
       Start-Service ovs-vswitchd
       sleep 2
       Restart-Service ovs-vswitchd
-      # Clone the MAC addr
-      # TODO: this does not work if the mac ends in 99
-      Set-NetAdapter -Name "{{ interface_name }}" -MacAddress {{ interface_mac_addr[:-2] }}99 -Confirm:$false
-      Set-NetAdapter -Name br-ex -MacAddress {{ interface_mac_addr }} -Confirm:$false
-      Enable-NetAdapter br-ex
-      # Remove-NetIPAddress -ifAlias br-ex -Confirm:$false
-      # New-NetIPAddress -ifAlias br-ex -IPAddress {{ host_internal_ip }} -DefaultGateway {{ interface_default_gateway }} -PrefixLength {{ interface_prefix_length }}
-      # Set-DnsClientServerAddress -InterfaceAlias br-ex -ServerAddresses ("8.8.8.8")
       $GUID = (New-Guid).Guid
       ovs-vsctl set Open_vSwitch . external_ids:system-id="$($GUID)"
       ovs-vsctl set Open_vSwitch . external_ids:k8s-api-server="http://{{ kubernetes_info.MASTER_IP }}:8080"

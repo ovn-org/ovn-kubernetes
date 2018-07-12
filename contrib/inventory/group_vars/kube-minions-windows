@@ -17,3 +17,4 @@ install_path: C:\kubernetes
 install_beta_ovs: true
 
 windows1709: 10.0.16299.0
+windows1803: 10.0.17134.0

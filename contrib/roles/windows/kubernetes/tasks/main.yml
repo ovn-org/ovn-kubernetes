@@ -38,7 +38,7 @@
 # and it's safer to have everything inside a powershell script to run.
 - name: Kubernetes | OVS Docker network setup
   include_tasks: ./setup_ovs_docker.yml
-  when: interface_name != "br-ex"
+  when: transparent_inspect.rc != 0
 
 - name: Kubernetes | Check ping to OVN gateway
   win_shell: ping {{OVN_GATEWAY_IP}} -n 1
@@ -57,14 +57,14 @@
       include_tasks: ./run_minion_init.yml
   when: ping_ovn_gateway.rc != 0
 
-# There is no infra container for Windows Server 1709, this creates a custom
+# There is no infra container for Windows Server, this creates a custom
 # infra container
 - name: Kubernetes | Check if infra container exists
-  win_shell: "docker image inspect {{kubernetes_info.infracontainername_1709}}"
+  win_shell: "docker image inspect {{kubernetes_info.infracontainername}}"
   register: infra_inspect
   failed_when: infra_inspect.rc != 0 and infra_inspect.rc != 1
   changed_when: false
-  when: ansible_kernel == windows1709
+  when: ansible_kernel in supported_versions_by_the_playbook
 
 - include_tasks: ./create_infracontainer.yml
-  when: infra_inspect.rc != 0 and ansible_kernel == windows1709
+  when: infra_inspect.rc != 0 and ansible_kernel in supported_versions_by_the_playbook

@@ -16,7 +16,11 @@ import (
 )
 
 const (
-	ovsCommandTimeout = 5
+	// On Windows we need an increased timeout on OVS commands, because
+	// adding internal ports on a non Hyper-V enabled host will call
+	// external Powershell commandlets.
+	// TODO: Decrease the timeout once port adding is improved on Windows
+	ovsCommandTimeout = 15
 	ovsVsctlCommand   = "ovs-vsctl"
 	ovsOfctlCommand   = "ovs-ofctl"
 	ovnNbctlCommand   = "ovn-nbctl"

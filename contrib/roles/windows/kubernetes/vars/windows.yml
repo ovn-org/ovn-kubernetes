@@ -13,7 +13,7 @@ kubernetes_info:
   K8S_DNS_DOMAIN: "{{K8S_DNS_DOMAIN | default('cluster.local')}}"
   K8S_DNS_SERVICE_IP: "{{K8S_DNS_SERVICE_IP | default('10.0.9.10')}}"
   K8S_API_SERVICE_IP: "{{K8S_API_SERVICE_IP | default('10.0.9.1')}}"
-  infracontainername_1709: "ovnkubernetes/pause"
+  infracontainername: "ovnkubernetes/pause"
 
 host_info:
   username: "{{ ansible_user }}"

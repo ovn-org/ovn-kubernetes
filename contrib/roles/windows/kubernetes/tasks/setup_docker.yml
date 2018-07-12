@@ -14,7 +14,9 @@
 # Launch and do not wait for result, connection will drop
 - name: Docker network setup | Create transparent network
   win_shell: |
+    $mtu = (Get-NetIPInterface -InterfaceAlias "{{interface_name}}" -AddressFamily IPv4).NlMtu
     docker network create -d transparent --gateway {{OVN_GATEWAY_IP}} --subnet {{OVN_SUBNET}} -o com.docker.network.windowsshim.interface="{{ interface_name }}" {{ docker_info.docker_network_name }}
+    Set-NetIPInterface -InterfaceAlias "vEthernet ({{interface_name}})" -NlMtuBytes $mtu
   async: 10
   poll: 0
 
