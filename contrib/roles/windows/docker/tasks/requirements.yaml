@@ -1,0 +1,25 @@
+---
+- name: Windows | Installing Required features
+  win_feature:
+    name: "{{item}}"
+    state: present
+  register: features_installed
+  with_items:
+    - Containers
+
+- name: Windows | Expect reboot_required to false
+  set_fact:
+    reboot_required: false
+
+- name: Windows | Checking if reboot_required
+  set_fact:
+    reboot_required: true
+  with_items:
+    - "{{features_installed.results}}"
+  loop_control:
+    label: "{{item.item}}"
+  when: item.reboot_required
+
+- name: Windows | Reboot the node
+  win_reboot:
+  when: reboot_required

@@ -12,8 +12,8 @@
 - name: Docker | Install docker
   block:
   - name: Docker | Install required features
-    include_tasks: "./requirements-16299.yaml"
-    when: ansible_kernel == windows1709
+    include_tasks: "./requirements.yaml"
+    when: ansible_kernel in supported_versions_by_the_playbook
 
   - name: Docker | Get Docker binaries
     include_tasks: ./install_docker.yml

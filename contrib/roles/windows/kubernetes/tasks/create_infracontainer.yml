@@ -9,12 +9,12 @@
     path: "{{ install_info.install_path }}/Dockerfile"
     create: yes
     line: |
-      FROM microsoft/nanoserver:1709
+      FROM microsoft/nanoserver:{{windows_container_tag}}
 
       CMD ping 127.0.0.1 -t
     newline: unix
 
-- name: Kubernetes infracontainer | Create container {{kubernetes_info.infracontainername_1709}}
+- name: Kubernetes infracontainer | Create container {{kubernetes_info.infracontainername}}
   win_shell: |
     cd {{ install_info.install_path }}
-    docker image build -t {{kubernetes_info.infracontainername_1709}} .
+    docker image build -t {{kubernetes_info.infracontainername}} .

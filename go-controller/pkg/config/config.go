@@ -396,7 +396,7 @@ func rawExec(exec kexec.Interface, cmd string, args ...string) (string, error) {
 
 // Can't use pkg/ovs or pkg/util here because those package import this one
 func runOVSVsctl(exec kexec.Interface, args ...string) (string, error) {
-	newArgs := append([]string{"--timeout=5"}, args...)
+	newArgs := append([]string{"--timeout=15"}, args...)
 	out, err := rawExec(exec, ovsVsctlCommand, newArgs...)
 	if err != nil {
 		return "", err

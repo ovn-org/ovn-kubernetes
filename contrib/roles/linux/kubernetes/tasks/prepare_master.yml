@@ -318,14 +318,14 @@
           beta.kubernetes.io/os: linux
 - name: Create test yamls
   blockinfile:
-    path: /root/nano-pod-1709.yaml
+    path: /root/nano-pod-{{item}}.yaml
     create: yes
     marker: "# {mark} Ansible automatic example generation"
     block: |
       apiVersion: v1
       kind: Pod
       metadata:
-        name: nano-1709
+        name: nano-{{item}}
         labels:
           name: webserver
       spec:
@@ -337,7 +337,11 @@
         # http server that can be used for tests. It's much faster compared to the
         # IIS container.
         - name: nano2
-          image: alinbalutoiu/nanoserver-web:1709
+          image: alinbalutoiu/nanoserver-web:{{item}}
           imagePullPolicy: IfNotPresent
         nodeSelector:
           beta.kubernetes.io/os: windows
+          # kubernetes.io/hostname: windows_{{item}}_hostname
+  with_items:
+    - 1709
+    - 1803
