@@ -12,7 +12,6 @@ set -o xtrace
 # $5: Gateway IP
 
 MASTER_OVERLAY_IP=$1
-MINION_OVERLAY_IP=$2
 PUBLIC_IP=$2
 PUBLIC_SUBNET_MASK=$3
 MINION_NAME=$4
@@ -24,6 +23,8 @@ if [ -n "$OVN_EXTERNAL" ]; then
     PUBLIC_SUBNET_MASK=`ifconfig enp0s8 | grep 'inet addr' | cut -d: -f4`
     GW_IP=`grep 'option routers' /var/lib/dhcp/dhclient.enp0s8.leases | head -1 | sed -e 's/;//' | awk '{print $3}'`
 fi
+
+MINION_OVERLAY_IP=$PUBLIC_IP
 
 cat > setup_minion_args.sh <<EOL
 MASTER_OVERLAY_IP=$MASTER_OVERLAY_IP
@@ -68,6 +69,7 @@ sudo -H pip install ovs
 sudo apt-get install ovn-common=2.9.2-1 ovn-host=2.9.2-1 -y
 
 if [ -n "$SSL" ]; then
+    PROTOCOL=ssl
     echo "PROTOCOL=ssl" >> setup_minion_args.sh
     # Install certificates
     pushd /etc/openvswitch
@@ -75,7 +77,8 @@ if [ -n "$SSL" ]; then
     sudo ovs-pki -b -d /vagrant/pki sign ovncontroller switch
     popd
 else
-  echo "PROTOCOL=tcp" >> setup_minion_args.sh
+    PROTOCOL=tcp
+    echo "PROTOCOL=tcp" >> setup_minion_args.sh
 fi
 
 # Install golang
@@ -96,6 +99,81 @@ pushd $HOME/work/src/github.com/openvswitch/ovn-kubernetes/go-controller
 make 1>&2 2>/dev/null
 sudo make install
 popd
+
+# Install CNI
+pushd ~/
+wget -nv https://github.com/containernetworking/cni/releases/download/v0.5.2/cni-amd64-v0.5.2.tgz
+popd
+sudo mkdir -p /opt/cni/bin
+pushd /opt/cni/bin
+sudo tar xvzf ~/cni-amd64-v0.5.2.tgz
+popd
+
+# Create a kubeconfig file.
+cat << KUBECONFIG >> ~/kubeconfig.yaml
+apiVersion: v1
+clusters:
+- cluster:
+    server: http://$MASTER_OVERLAY_IP:8080
+  name: default-cluster
+- cluster:
+    server: http://$MASTER_OVERLAY_IP:8080
+  name: local-server
+- cluster:
+    server: http://$MASTER_OVERLAY_IP:8080
+  name: ubuntu
+contexts:
+- context:
+    cluster: ubuntu
+    user: ubuntu
+  name: ubuntu
+current-context: ubuntu
+kind: Config
+preferences: {}
+users:
+- name: ubuntu
+  user:
+    password: p1NVMZqhOOOqkWQq
+    username: admin
+KUBECONFIG
+
+# Start k8s daemons
+pushd k8s/server/kubernetes/server/bin
+echo "Starting kubelet ..."
+nohup sudo ./kubelet --kubeconfig $HOME/kubeconfig.yaml \
+                     --v=2 --address=0.0.0.0 \
+                     --fail-swap-on=false \
+                     --runtime-cgroups=/systemd/system.slice \
+                     --kubelet-cgroups=/systemd/system.slice \
+                     --enable-server=true --network-plugin=cni \
+                     --cni-conf-dir=/etc/cni/net.d \
+                     --cni-bin-dir="/opt/cni/bin/" >/tmp/kubelet.log 2>&1 0<&- &
+popd
+
+# Initialize the minion and gateway.
+if [ $PROTOCOL = "ssl" ]; then
+  SSL_ARGS="-nb-client-privkey /etc/openvswitch/ovncontroller-privkey.pem \
+    -nb-client-cert /etc/openvswitch/ovncontroller-cert.pem \
+    -nb-client-cacert /etc/openvswitch/ovnnb-ca.cert \
+    -sb-client-privkey /etc/openvswitch/ovncontroller-privkey.pem \
+    -sb-client-cert /etc/openvswitch/ovncontroller-cert.pem \
+    -sb-client-cacert /etc/openvswitch/ovnsb-ca.cert"
+fi
+
+nohup sudo ovnkube -k8s-kubeconfig $HOME/kubeconfig.yaml -loglevel=4 \
+    -logfile="/var/log/openvswitch/ovnkube.log" \
+    -k8s-apiserver="http://$MASTER_OVERLAY_IP:8080" \
+    -init-node="$MINION_NAME"  \
+    -nodeport \
+    -nb-address="$PROTOCOL://$MASTER_OVERLAY_IP:6641" \
+    -sb-address="$PROTOCOL://$MASTER_OVERLAY_IP:6642" \
+    ${SSL_ARGS} \
+    -k8s-token="test" \
+    -init-gateways -gateway-interface=enp0s8 -gateway-nexthop="$GW_IP" \
+    -service-cluster-ip-range=172.16.1.0/24 \
+    -cluster-subnet="192.168.0.0/16" 2>&1 &
+
+sleep 10
 
 # Restore xtrace
 $XTRACE
