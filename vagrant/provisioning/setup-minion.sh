@@ -7,34 +7,35 @@ set -o xtrace
 # ARGS:
 # $1: IP of second interface of master
 # $2: IP of second interface of minion
-# $3: IP of third interface of master
+# $3: netmask
 # $4: Hostname of specific minion
 # $5: Subnet to use
+# $6: Gateway IP
 
 MASTER_OVERLAY_IP=$1
 MINION_OVERLAY_IP=$2
-PUBLIC_IP=$3
-PUBLIC_SUBNET_MASK=$4
-MINION_NAME=$5
-MINION_SUBNET=$6
-GW_IP=$7
-OVN_EXTERNAL=$8
+PUBLIC_IP=$2
+PUBLIC_SUBNET_MASK=$3
+MINION_NAME=$4
+MINION_SUBNET=$5
+GW_IP=$6
+OVN_EXTERNAL=$7
 
 if [ -n "$OVN_EXTERNAL" ]; then
-    PUBLIC_IP=`ifconfig enp0s9 | grep 'inet addr' | cut -d: -f2 | awk '{print $1}'`
-    PUBLIC_SUBNET_MASK=`ifconfig enp0s9 | grep 'inet addr' | cut -d: -f4`
-    GW_IP=`grep 'option routers' /var/lib/dhcp/dhclient.enp0s9.leases | head -1 | sed -e 's/;//' | awk '{print $3}'`
+    PUBLIC_IP=`ifconfig enp0s8 | grep 'inet addr' | cut -d: -f2 | awk '{print $1}'`
+    PUBLIC_SUBNET_MASK=`ifconfig enp0s8 | grep 'inet addr' | cut -d: -f4`
+    GW_IP=`grep 'option routers' /var/lib/dhcp/dhclient.enp0s8.leases | head -1 | sed -e 's/;//' | awk '{print $3}'`
 fi
 
 cat > setup_minion_args.sh <<EOL
-MASTER_OVERLAY_IP=$1
-MINION_OVERLAY_IP=$2
+MASTER_OVERLAY_IP=$MASTER_OVERLAY_IP
+MINION_OVERLAY_IP=$MINION_OVERLAY_IP
 PUBLIC_IP=$PUBLIC_IP
 PUBLIC_SUBNET_MASK=$PUBLIC_SUBNET_MASK
-MINION_NAME=$5
-MINION_SUBNET=$6
+MINION_NAME=$MINION_NAME
+MINION_SUBNET=$MINION_SUBNET
 GW_IP=$GW_IP
-OVN_EXTERNAL=$8
+OVN_EXTERNAL=$OVN_EXTERNAL
 EOL
 
 # Comment out the next line if you prefer TCP instead of SSL.

@@ -6,20 +6,18 @@ set -o xtrace
 
 # ARGS:
 # $1: IP of second interface of master
-# $2: IP of third interface of master
-# $3: Hostname of the master
-# $4: Master switch subnet
+# $2: Hostname of the master
+# $3: Master switch subnet
 
 OVERLAY_IP=$1
-GW_IP=$2
-MASTER_NAME=$3
-MASTER_SUBNET=$4
+MASTER_NAME=$2
+MASTER_SUBNET=$3
 
 cat > setup_master_args.sh <<EOL
 OVERLAY_IP=$1
-GW_IP=$2
-MASTER_NAME=$3
-MASTER_SUBNET=$4
+GW_IP=$1
+MASTER_NAME=$2
+MASTER_SUBNET=$3
 EOL
 
 # Comment out the next line, if you prefer TCP instead of SSL.

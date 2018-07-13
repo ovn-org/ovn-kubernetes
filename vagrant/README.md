@@ -75,7 +75,7 @@ be able to access the same service via 10.10.0.13 too.
 Note: The above IP addresss are NOT used when you use the vagrant's public
 network option. In that case, the above IP addresses are provided by dhcp
 by your underlying network. So it is dynamic. You can fetch these IP
-addresses by running 'ifconfig brenp0s9' on each of your host.  You can then
+addresses by running 'ifconfig brenp0s8' on each of your host.  You can then
 run the curl commands on those IP addresses.
 
 You should see OVN doing load-balancing between the pods, which means you will
