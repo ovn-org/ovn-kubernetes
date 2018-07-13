@@ -207,5 +207,7 @@ spec:
   type: NodePort
 APACHENS
 
+sleep 10
+
 # Restore xtrace
 $XTRACE
