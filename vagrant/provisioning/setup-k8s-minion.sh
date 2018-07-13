@@ -81,7 +81,7 @@ nohup sudo ovnkube -k8s-kubeconfig $HOME/kubeconfig.yaml -loglevel=4 \
     -sb-address="$PROTOCOL://$MASTER_OVERLAY_IP:6642" \
     ${SSL_ARGS} \
     -k8s-token="test" \
-    -init-gateways -gateway-interface=enp0s9 -gateway-nexthop="$GW_IP" \
+    -init-gateways -gateway-interface=enp0s8 -gateway-nexthop="$GW_IP" \
     -service-cluster-ip-range=172.16.1.0/24 \
     -cluster-subnet="192.168.0.0/16" 2>&1 &
 
