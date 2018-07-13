@@ -85,5 +85,7 @@ nohup sudo ovnkube -k8s-kubeconfig $HOME/kubeconfig.yaml -loglevel=4 \
     -service-cluster-ip-range=172.16.1.0/24 \
     -cluster-subnet="192.168.0.0/16" 2>&1 &
 
+sleep 10
+
 # Restore xtrace
 $XTRACE
