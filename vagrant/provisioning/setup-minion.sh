@@ -9,17 +9,15 @@ set -o xtrace
 # $2: IP of second interface of minion
 # $3: netmask
 # $4: Hostname of specific minion
-# $5: Subnet to use
-# $6: Gateway IP
+# $5: Gateway IP
 
 MASTER_OVERLAY_IP=$1
 MINION_OVERLAY_IP=$2
 PUBLIC_IP=$2
 PUBLIC_SUBNET_MASK=$3
 MINION_NAME=$4
-MINION_SUBNET=$5
-GW_IP=$6
-OVN_EXTERNAL=$7
+GW_IP=$5
+OVN_EXTERNAL=$6
 
 if [ -n "$OVN_EXTERNAL" ]; then
     PUBLIC_IP=`ifconfig enp0s8 | grep 'inet addr' | cut -d: -f2 | awk '{print $1}'`
