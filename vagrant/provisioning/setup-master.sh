@@ -4,38 +4,38 @@
 XTRACE=$(set +o | grep xtrace)
 set -o xtrace
 
-# ARGS:
-# $1: IP of second interface of master
-# $2: Hostname of the master
-# $3: subnet mask
-# $4: GW_IP
-# $5: OVN_EXTERNAL
-
-PUBLIC_IP=$1
-MASTER_NAME=$2
-PUBLIC_SUBNET_MASK=$3
-GW_IP=$4
-OVN_EXTERNAL=$5
+MASTER1=$1
+MASTER2=$2
+MASTER3=$3
+NODE_NAME=$4
+PUBLIC_SUBNET_MASK=$5
+GW_IP=$6
+OVN_EXTERNAL=$7
 
 if [ -n "$OVN_EXTERNAL" ]; then
-    PUBLIC_IP=`ifconfig enp0s8 | grep 'inet addr' | cut -d: -f2 | awk '{print $1}'`
+    MASTER1=`ifconfig enp0s8 | grep 'inet addr' | cut -d: -f2 | awk '{print $1}'`
     PUBLIC_SUBNET_MASK=`ifconfig enp0s8 | grep 'inet addr' | cut -d: -f4`
     GW_IP=`grep 'option routers' /var/lib/dhcp/dhclient.enp0s8.leases | head -1 | sed -e 's/;//' | awk '{print $3}'`
 fi
 
-OVERLAY_IP=$PUBLIC_IP
+OVERLAY_IP=$MASTER1
 
 cat > setup_master_args.sh <<EOL
 OVERLAY_IP=$OVERLAY_IP
-PUBLIC_IP=$PUBLIC_IP
+MASTER1=$MASTER1
+MASTER2=$MASTER2
+MASTER3=$MASTER3
 PUBLIC_SUBNET_MASK=$PUBLIC_SUBNET_MASK
 GW_IP=$GW_IP
-MASTER_NAME=$MASTER_NAME
+NODE_NAME=$NODE_NAME
 OVN_EXTERNAL=$OVN_EXTERNAL
 EOL
 
 # Comment out the next line, if you prefer TCP instead of SSL.
 SSL="true"
+
+# Set HA to "true" if you want OVN HA
+HA="false"
 
 # FIXME(mestery): Remove once Vagrant boxes allow apt-get to work again
 sudo rm -rf /var/lib/apt/lists/*
@@ -66,7 +66,6 @@ sudo -H pip install ovs
 
 sudo apt-get install ovn-central=2.9.2-1 ovn-common=2.9.2-1 ovn-host=2.9.2-1 -y
 
-
 if [ -n "$SSL" ]; then
     PROTOCOL=ssl
     echo "PROTOCOL=ssl" >> setup_master_args.sh
@@ -83,6 +82,29 @@ if [ -n "$SSL" ]; then
 else
     PROTOCOL=tcp
     echo "PROTOCOL=tcp" >> setup_master_args.sh
+fi
+
+if [ "$HA" = "true" ]; then
+    sudo /usr/share/openvswitch/scripts/ovn-ctl stop_nb_ovsdb
+    sudo /usr/share/openvswitch/scripts/ovn-ctl stop_sb_ovsdb
+    sudo rm /etc/openvswitch/ovn*.db
+    sudo /usr/share/openvswitch/scripts/ovn-ctl stop_northd
+
+    LOCAL_IP=$OVERLAY_IP
+
+    sudo /usr/share/openvswitch/scripts/ovn-ctl \
+        --db-nb-cluster-local-addr=$LOCAL_IP start_nb_ovsdb
+
+    sudo /usr/share/openvswitch/scripts/ovn-ctl \
+        --db-sb-cluster-local-addr=$LOCAL_IP start_sb_ovsdb
+    
+    ovn_nb="$PROTOCOL:$MASTER1:6641,$PROTOCOL:$MASTER2:6641,$PROTOCOL:$MASTER3:6641"
+    ovn_sb="$PROTOCOL:$MASTER1:6642,$PROTOCOL:$MASTER2:6642,$PROTOCOL:$MASTER3:6642"
+
+    sudo ovn-northd -vconsole:emer -vsyslog:err -vfile:info \
+    --ovnnb-db="$ovn_nb" --ovnsb-db="$ovn_sb" --no-chdir \
+    --log-file=/var/log/openvswitch/ovn-northd.log \
+    --pidfile=/var/run/openvswitch/ovn-northd.pid --detach --monitor
 fi
 
 # Install golang
@@ -130,7 +152,7 @@ echo "Starting kube-apiserver ..."
 nohup sudo ./kube-apiserver --service-cluster-ip-range=172.16.1.0/24 \
                             --address=0.0.0.0 \
                             --etcd-servers=http://127.0.0.1:4001 \
-                            --advertise-address=$PUBLIC_IP \
+                            --advertise-address=$MASTER1 \
                             --v=2 2>&1 0<&- &>/dev/null &
 
 # Wait till kube-apiserver starts up
@@ -205,6 +227,14 @@ if [ $PROTOCOL = "ssl" ]; then
  -sb-client-cacert /etc/openvswitch/ovnsb-ca.cert"
 fi
 
+if [ "$HA" = "true" ]; then
+    ovn_nb="$PROTOCOL://$MASTER1:6641,$PROTOCOL://$MASTER2:6641,$PROTOCOL://$MASTER3:6641"
+    ovn_sb="$PROTOCOL://$MASTER1:6642,$PROTOCOL://$MASTER2:6642,$PROTOCOL://$MASTER3:6642"
+else
+    ovn_nb="$PROTOCOL://$OVERLAY_IP:6641" 
+    ovn_sb="$PROTOCOL://$OVERLAY_IP:6642"
+fi
+
 nohup sudo ovnkube -k8s-kubeconfig $HOME/kubeconfig.yaml -net-controller -loglevel=4 \
  -k8s-apiserver="http://$OVERLAY_IP:8080" \
  -logfile="/var/log/openvswitch/ovnkube.log" \
@@ -213,8 +243,8 @@ nohup sudo ovnkube -k8s-kubeconfig $HOME/kubeconfig.yaml -net-controller -loglev
  -service-cluster-ip-range=172.16.1.0/24 \
  -nodeport \
  -k8s-token="test" \
- -nb-address="$PROTOCOL://$OVERLAY_IP:6641" \
- -sb-address="$PROTOCOL://$OVERLAY_IP:6642" \
+ -nb-address="$ovn_nb" \
+ -sb-address="$ovn_sb" \
  -init-gateways -gateway-localnet \
  ${SSL_ARGS} 2>&1 &
 
