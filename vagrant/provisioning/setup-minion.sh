@@ -4,41 +4,35 @@
 XTRACE=$(set +o | grep xtrace)
 set -o xtrace
 
-# ARGS:
-# $1: IP of second interface of master
-# $2: IP of second interface of minion
-# $3: netmask
-# $4: Hostname of specific minion
-# $5: Gateway IP
-
-MASTER_OVERLAY_IP=$1
-PUBLIC_IP=$2
-PUBLIC_SUBNET_MASK=$3
-MINION_NAME=$4
-GW_IP=$5
-OVN_EXTERNAL=$6
+OVERLAY_IP=$1
+MASTER1=$2
+MASTER2=$3
+PUBLIC_SUBNET_MASK=$4
+MINION_NAME=$5
+GW_IP=$6
+OVN_EXTERNAL=$7
 
 if [ -n "$OVN_EXTERNAL" ]; then
-    PUBLIC_IP=`ifconfig enp0s8 | grep 'inet addr' | cut -d: -f2 | awk '{print $1}'`
+    OVERLAY_IP=`ifconfig enp0s8 | grep 'inet addr' | cut -d: -f2 | awk '{print $1}'`
     PUBLIC_SUBNET_MASK=`ifconfig enp0s8 | grep 'inet addr' | cut -d: -f4`
     GW_IP=`grep 'option routers' /var/lib/dhcp/dhclient.enp0s8.leases | head -1 | sed -e 's/;//' | awk '{print $3}'`
 fi
 
-MINION_OVERLAY_IP=$PUBLIC_IP
-
 cat > setup_minion_args.sh <<EOL
-MASTER_OVERLAY_IP=$MASTER_OVERLAY_IP
-MINION_OVERLAY_IP=$MINION_OVERLAY_IP
-PUBLIC_IP=$PUBLIC_IP
+MASTER1=$MASTER1
+MASTER2=$MASTER2
+OVERLAY_IP=$OVERLAY_IP
 PUBLIC_SUBNET_MASK=$PUBLIC_SUBNET_MASK
 MINION_NAME=$MINION_NAME
-MINION_SUBNET=$MINION_SUBNET
 GW_IP=$GW_IP
 OVN_EXTERNAL=$OVN_EXTERNAL
 EOL
 
 # Comment out the next line if you prefer TCP instead of SSL.
 SSL="true"
+
+# Set HA to "true" if you want OVN HA
+HA="false"
 
 # FIXME(mestery): Remove once Vagrant boxes allow apt-get to work again
 sudo rm -rf /var/lib/apt/lists/*
@@ -81,6 +75,27 @@ else
     echo "PROTOCOL=tcp" >> setup_minion_args.sh
 fi
 
+if [ $HA = "true" ]; then
+    sudo apt-get install ovn-central=2.9.2-1 -y
+
+    sudo /usr/share/openvswitch/scripts/ovn-ctl stop_nb_ovsdb
+    sudo /usr/share/openvswitch/scripts/ovn-ctl stop_sb_ovsdb
+    sudo rm /etc/openvswitch/ovn*.db
+    sudo /usr/share/openvswitch/scripts/ovn-ctl stop_northd
+
+    LOCAL_IP=$OVERLAY_IP
+    MASTER_IP=$MASTER1
+
+    sudo /usr/share/openvswitch/scripts/ovn-ctl  \
+    --db-nb-cluster-local-addr=$LOCAL_IP \
+    --db-nb-cluster-remote-addr=$MASTER_IP start_nb_ovsdb
+
+    sudo /usr/share/openvswitch/scripts/ovn-ctl  \
+    --db-sb-cluster-local-addr=$LOCAL_IP \
+    --db-sb-cluster-remote-addr=$MASTER_IP start_sb_ovsdb
+fi
+
+
 # Install golang
 wget -nv https://dl.google.com/go/go1.9.2.linux-amd64.tar.gz
 sudo tar -C /usr/local -xzf go1.9.2.linux-amd64.tar.gz
@@ -114,13 +129,13 @@ cat << KUBECONFIG >> ~/kubeconfig.yaml
 apiVersion: v1
 clusters:
 - cluster:
-    server: http://$MASTER_OVERLAY_IP:8080
+    server: http://$MASTER1:8080
   name: default-cluster
 - cluster:
-    server: http://$MASTER_OVERLAY_IP:8080
+    server: http://$MASTER1:8080
   name: local-server
 - cluster:
-    server: http://$MASTER_OVERLAY_IP:8080
+    server: http://$MASTER1:8080
   name: ubuntu
 contexts:
 - context:
@@ -160,13 +175,22 @@ if [ $PROTOCOL = "ssl" ]; then
     -sb-client-cacert /etc/openvswitch/ovnsb-ca.cert"
 fi
 
+if [ "$HA" = "true" ]; then
+    ovn_nb="$PROTOCOL://$MASTER1:6641,$PROTOCOL://$OVERLAY_IP:6641,$PROTOCOL://$MASTER2:6641"
+    ovn_sb="$PROTOCOL://$MASTER1:6642,$PROTOCOL://$OVERLAY_IP:6642,$PROTOCOL://$MASTER2:6642"
+else
+    ovn_nb="$PROTOCOL://$MASTER1:6641" 
+    ovn_sb="$PROTOCOL://$MASTER1:6642"
+fi
+
+
 nohup sudo ovnkube -k8s-kubeconfig $HOME/kubeconfig.yaml -loglevel=4 \
     -logfile="/var/log/openvswitch/ovnkube.log" \
-    -k8s-apiserver="http://$MASTER_OVERLAY_IP:8080" \
+    -k8s-apiserver="http://$MASTER1:8080" \
     -init-node="$MINION_NAME"  \
     -nodeport \
-    -nb-address="$PROTOCOL://$MASTER_OVERLAY_IP:6641" \
-    -sb-address="$PROTOCOL://$MASTER_OVERLAY_IP:6642" \
+    -nb-address="$ovn_nb" \
+    -sb-address="$ovn_sb" \
     ${SSL_ARGS} \
     -k8s-token="test" \
     -init-gateways -gateway-interface=enp0s8 -gateway-nexthop="$GW_IP" \

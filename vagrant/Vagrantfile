@@ -32,7 +32,7 @@ Vagrant.configure(2) do |config|
     k8smaster.vm.provision "shell", path: "provisioning/setup-hostnames.sh", privileged: true,
       :args => "#{vagrant_config['k8smaster']['public-ip']} #{vagrant_config['k8smaster']['short_name']} #{vagrant_config['k8sminion1']['public-ip']} #{vagrant_config['k8sminion1']['short_name']} #{vagrant_config['k8sminion2']['public-ip']} #{vagrant_config['k8sminion2']['short_name']}"
     k8smaster.vm.provision "shell", path: "provisioning/setup-master.sh", privileged: false,
-      :args => "#{vagrant_config['k8smaster']['public-ip']} #{vagrant_config['k8smaster']['short_name']} #{netmask} #{vagrant_config['public_gateway']} #{ovn_external}"
+      :args => "#{vagrant_config['k8smaster']['public-ip']} #{vagrant_config['k8sminion1']['public-ip']} #{vagrant_config['k8sminion2']['public-ip']} #{vagrant_config['k8smaster']['short_name']} #{netmask} #{vagrant_config['public_gateway']} #{ovn_external}"
     k8smaster.vm.provider "virtualbox" do |vb|
        vb.name = vagrant_config['k8smaster']['short_name']
        vb.memory = vagrant_config['k8smaster']['memory']
@@ -64,7 +64,7 @@ Vagrant.configure(2) do |config|
     k8sminion1.vm.provision "shell", path: "provisioning/setup-hostnames.sh", privileged: true,
       :args => "#{vagrant_config['k8smaster']['public-ip']} #{vagrant_config['k8smaster']['short_name']} #{vagrant_config['k8sminion1']['public-ip']} #{vagrant_config['k8sminion1']['short_name']} #{vagrant_config['k8sminion2']['public_ip']} #{vagrant_config['k8sminion2']['short_name']}"
     k8sminion1.vm.provision "shell", path: "provisioning/setup-minion.sh", privileged: false,
-      :args => "#{vagrant_config['k8smaster']['public-ip']} #{vagrant_config['k8sminion1']['public-ip']} #{netmask} #{vagrant_config['k8sminion1']['short_name']} #{vagrant_config['public_gateway']} #{ovn_external}"
+      :args => "#{vagrant_config['k8sminion1']['public-ip']} #{vagrant_config['k8smaster']['public-ip']} #{vagrant_config['k8sminion2']['public-ip']} #{netmask} #{vagrant_config['k8sminion1']['short_name']} #{vagrant_config['public_gateway']} #{ovn_external}"
     k8sminion1.vm.provider "virtualbox" do |vb|
        vb.name = vagrant_config['k8sminion1']['short_name']
        vb.memory = vagrant_config['k8sminion1']['memory']
@@ -96,7 +96,7 @@ Vagrant.configure(2) do |config|
     k8sminion2.vm.provision "shell", path: "provisioning/setup-hostnames.sh", privileged: true,
       :args => "#{vagrant_config['k8smaster']['public-ip']} #{vagrant_config['k8smaster']['short_name']} #{vagrant_config['k8sminion1']['public-ip']} #{vagrant_config['k8sminion1']['short_name']} #{vagrant_config['k8sminion2']['public-ip']} #{vagrant_config['k8sminion2']['short_name']}"
     k8sminion2.vm.provision "shell", path: "provisioning/setup-minion.sh", privileged: false,
-      :args => "#{vagrant_config['k8smaster']['public-ip']} #{vagrant_config['k8sminion2']['public-ip']} #{netmask} #{vagrant_config['k8sminion2']['short_name']} #{vagrant_config['public_gateway']} #{ovn_external}"
+      :args => "#{vagrant_config['k8sminion2']['public-ip']} #{vagrant_config['k8smaster']['public-ip']} #{vagrant_config['k8sminion1']['public-ip']} #{netmask} #{vagrant_config['k8sminion2']['short_name']} #{vagrant_config['public_gateway']} #{ovn_external}"
     k8sminion2.vm.provider "virtualbox" do |vb|
        vb.name = vagrant_config['k8sminion2']['short_name']
        vb.memory = vagrant_config['k8sminion2']['memory']
