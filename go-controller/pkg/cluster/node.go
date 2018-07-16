@@ -77,7 +77,7 @@ func (cluster *OvnClusterController) StartClusterNode(name string) error {
 		if runtime.GOOS == windowsOS {
 			panic("Windows is not supported as a gateway node")
 		}
-		err = cluster.initGateway(node.Name, cluster.ClusterIPNet.String(),
+		err = cluster.InitGateway(node.Name, cluster.ClusterIPNet.String(),
 			subnet.String())
 		if err != nil {
 			return err
@@ -129,7 +129,7 @@ func (cluster *OvnClusterController) updateOvnNode(masterIP string,
 		if runtime.GOOS == windowsOS {
 			panic("Windows is not supported as a gateway node")
 		}
-		err = cluster.initGateway(node.Name, cluster.ClusterIPNet.String(),
+		err = cluster.InitGateway(node.Name, cluster.ClusterIPNet.String(),
 			subnet)
 		if err != nil {
 			return err

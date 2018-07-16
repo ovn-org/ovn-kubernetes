@@ -79,6 +79,11 @@ func main() {
 				"interface. Only useful with \"init-gateways\"",
 		},
 		cli.StringFlag{
+			Name: "gateway-name",
+			Usage: "The name of the gateway.  By default, it uses the name " +
+				"provided with \"init-node\"",
+		},
+		cli.StringFlag{
 			Name: "gateway-nexthop",
 			Usage: "The external default gateway which is used as a next hop by " +
 				"OVN gateway.  This is many times just the default gateway " +
@@ -124,6 +129,17 @@ func delPidfile(pidfile string) {
 			}
 		}
 	}
+}
+
+func initGatewayOptions(clusterController *ovncluster.OvnClusterController,
+	ctx *cli.Context, nodePortEnable bool) {
+	clusterController.GatewayInit = ctx.Bool("init-gateways")
+	clusterController.GatewayIntf = ctx.String("gateway-interface")
+	clusterController.GatewayName = ctx.String("gateway-name")
+	clusterController.GatewayNextHop = ctx.String("gateway-nexthop")
+	clusterController.GatewaySpareIntf = ctx.Bool("gateway-spare-interface")
+	clusterController.LocalnetGateway = ctx.Bool("gateway-localnet")
+	clusterController.NodePortEnable = nodePortEnable
 }
 
 func runOvnKube(ctx *cli.Context) error {
@@ -204,14 +220,11 @@ func runOvnKube(ctx *cli.Context) error {
 	node := ctx.String("init-node")
 	nodePortEnable := ctx.Bool("nodeport")
 	clusterController := ovncluster.NewClusterController(clientset, factory)
+	initGatewayOptions(clusterController, ctx, nodePortEnable)
 
+	var runForever bool
 	if master != "" || node != "" {
 		clusterController.HostSubnetLength = 8
-		clusterController.GatewayInit = ctx.Bool("init-gateways")
-		clusterController.GatewayIntf = ctx.String("gateway-interface")
-		clusterController.GatewayNextHop = ctx.String("gateway-nexthop")
-		clusterController.GatewaySpareIntf = ctx.Bool("gateway-spare-interface")
-		clusterController.LocalnetGateway = ctx.Bool("gateway-localnet")
 		clusterController.OvnHA = ctx.Bool("ha")
 		_, clusterController.ClusterIPNet, err = net.ParseCIDR(ctx.String("cluster-subnet"))
 		if err != nil {
@@ -228,14 +241,14 @@ func runOvnKube(ctx *cli.Context) error {
 			}
 			clusterController.ClusterServicesSubnet = servicesSubnet.String()
 		}
-		clusterController.NodePortEnable = nodePortEnable
+		runForever = true
 
 		if master != "" {
 			if runtime.GOOS == "windows" {
 				panic("Windows is not supported as master node")
 			}
 			// run the cluster controller to init the master
-			err := clusterController.StartClusterMaster(master)
+			err = clusterController.StartClusterMaster(master)
 			if err != nil {
 				logrus.Errorf(err.Error())
 				panic(err.Error())
@@ -247,13 +260,32 @@ func runOvnKube(ctx *cli.Context) error {
 				panic("Cannot initialize node without service account 'token'. Please provide one with --k8s-token argument")
 			}
 
-			err := clusterController.StartClusterNode(node)
+			err = clusterController.StartClusterNode(node)
 			if err != nil {
 				logrus.Errorf(err.Error())
 				panic(err.Error())
 			}
 		}
 	}
+
+	if clusterController.GatewayInit && clusterController.GatewayName != "" &&
+		node == "" {
+		_, clusterController.ClusterIPNet, err = net.ParseCIDR(ctx.String("cluster-subnet"))
+		if err != nil {
+			panic(err.Error)
+		}
+		err = clusterController.InitGateway(clusterController.GatewayName,
+			clusterController.ClusterIPNet.String(), "")
+		if err != nil {
+			logrus.Errorf(err.Error())
+			panic(err.Error())
+		}
+
+		if nodePortEnable {
+			runForever = true
+		}
+	}
+
 	if netController {
 		ovnController := ovn.NewOvnController(clientset, factory, nodePortEnable)
 		if clusterController.OvnHA {
@@ -267,13 +299,10 @@ func runOvnKube(ctx *cli.Context) error {
 			logrus.Errorf(err.Error())
 			panic(err.Error())
 		}
+		runForever = true
 	}
-	if master != "" || netController {
-		// run forever
-		select {}
-	}
-	if node != "" {
-		// run forever
+
+	if runForever {
 		select {}
 	}
 

@@ -375,8 +375,14 @@ func (cluster *OvnClusterController) nodePortWatcher() error {
 	return err
 }
 
-func (cluster *OvnClusterController) initGateway(
+// InitGateway setsup OVS bridge for the gateway, initialize the gateway in
+// OVN NB and listen for nodeport events if needed.
+func (cluster *OvnClusterController) InitGateway(
 	nodeName, clusterIPSubnet, subnet string) error {
+	if cluster.GatewayName != "" {
+		nodeName = cluster.GatewayName
+	}
+
 	if cluster.LocalnetGateway {
 		// Create a localnet OVS bridge.
 		localnetBridgeName := "br-localnet"

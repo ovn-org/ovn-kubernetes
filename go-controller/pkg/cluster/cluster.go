@@ -24,6 +24,7 @@ type OvnClusterController struct {
 
 	GatewayInit      bool
 	GatewayIntf      string
+	GatewayName      string
 	GatewayBridge    string
 	GatewayNextHop   string
 	GatewaySpareIntf bool
