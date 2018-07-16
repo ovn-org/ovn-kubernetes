@@ -1,6 +1,6 @@
 #!/bin/bash
 #set -x
-set -euo pipefail
+#set -euo pipefail
 
 # This script is the entrypoint to the image.
 
@@ -59,10 +59,10 @@ wait_for_northdb () {
   retries=0
   while true; do
     # northd is up when this works
-    ovn-nbctl --db=${ovn_nbdb_test} show > /dev/null
+    ovn-nbctl --db=${ovn_nbdb_test} show > /dev/null 2>&1
     if [[ $? != 0 ]] ; then
       echo "info: Waiting for ovn-northd to come up, waiting 10s ..." 2>&1
-      sleep 10 & wait
+      sleep 10
       (( retries += 1 ))
     else
       break
@@ -190,10 +190,17 @@ echo K8S_TOKEN ${k8s_token}
 
 start_ovn () {
   echo " ==================== hostname: ${ovn_host} "
-  if [ -f /root/.git/HEAD ]
+  if [[ -f /root/.git/HEAD ]]
   then
-    head=$(gawk '{ print $2 }' /root/.git/HEAD )
-    commit=$(cat /root/.git/${head})
+    commit=$(gawk '{ print $1 }' /root/.git/HEAD )
+    if [[ ${commit} == "ref:" ]]
+    then
+      head=$(gawk '{ print $2 }' /root/.git/HEAD )
+      commit=$(cat /root/.git/${head} )
+    else
+      head="master"
+      commit=$(cat /root/.git/HEAD)
+    fi
     echo "Image built from ovn-kubernetes ref: ${head}  commit: ${commit}"
   fi
 
@@ -216,6 +223,8 @@ start_ovn () {
   # on the master only
   if [[ ${ovn_master} = "true" ]]
   then
+    # Make sure /var/lib/openvswitch exists
+    mkdir -p /var/lib/openvswitch
     # ovn-northd - master node only
     echo "=============== start ovn-northd ========== MASTER ONLY"
     /usr/share/openvswitch/scripts/ovn-ctl start_northd \
@@ -237,18 +246,24 @@ start_ovn () {
 
   # ovn-controller - all nodes
   echo "=============== start ovn-controller"
+  rm -f /var/run/ovn-kubernetes/*
   /usr/share/openvswitch/scripts/ovn-ctl --no-monitor start_controller \
     ${ovn_controller_opts}
 #   wait_for_northdb
 
   # ovn-node - all nodes
   echo  "=============== start ovn-node"
+  # TEMP HACK - WORKAROUND
+  # --init-gateways --gateway-localnet works around a problem that
+  # results in loss of network connectivity when docker is
+  # restarted or ovs daemonset is deleted.
+  # TEMP HACK - WORKAROUND
   /usr/bin/ovnkube --init-node ${ovn_host} \
       --cluster-subnet ${net_cidr} --service-cluster-ip-range=${svc_cidr} \
       --k8s-token=${k8s_token} --k8s-apiserver=${k8s_api} \
       --nb-address=${ovn_nbdb} --sb-address=${ovn_sbdb} \
       --nodeport \
-      --init-gateways \
+      --init-gateways --gateway-localnet \
       --pidfile /var/run/openvswitch/ovnkube.pid \
       --logfile /var/log/openvswitch/ovnkube.log &
 

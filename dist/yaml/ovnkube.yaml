@@ -65,6 +65,8 @@ spec:
         - mountPath: /var/run/dbus/
           name: host-var-run-dbus
           readOnly: true
+        - mountPath: /var/lib/openvswitch/
+          name: host-var-lib-ovs
         - mountPath: /var/run/openvswitch/
           name: host-var-run-ovs
        #  readOnly: false
@@ -146,6 +148,9 @@ spec:
       - name: host-var-run-dbus
         hostPath:
           path: /var/run/dbus
+      - name: host-var-lib-ovs
+        hostPath:
+          path: /var/lib/openvswitch
       - name: host-var-run-ovs
         hostPath:
           path: /var/run/openvswitch
