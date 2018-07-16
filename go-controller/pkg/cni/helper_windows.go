@@ -173,6 +173,17 @@ func (pr *PodRequest) ConfigureInterface(namespace string, podName string, macAd
 	}
 
 	ifaceID := fmt.Sprintf("%s_%s", namespace, podName)
+
+	// To skip calling powershell for MTU and OVS to add the internal port, checking here
+	// if the interface exists and then return. This improves the performance of the CNI.
+	// TODO: Remove this once kubelet on Windows does not call the CNI for every container
+	// within a pod. Issue: https://github.com/kubernetes/kubernetes/issues/64188
+	ifaceName, errFind := ovsFind("interface", "name", "external-ids:iface-id="+ifaceID)
+	if errFind == nil && len(ifaceName) > 0 && ifaceName[0] != "" {
+		logrus.Infof("HNS endpoint %q already set up for container %q", endpointName, pr.SandboxID)
+		return []*current.Interface{}, nil
+	}
+
 	// TODO: Revisit this once Hyper-V Containers are supported in Kubernetes
 	// "--may-exist"  is added to support the function idempotency
 	ovsArgs := []string{
