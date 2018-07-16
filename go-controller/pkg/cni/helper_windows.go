@@ -122,6 +122,16 @@ func (pr *PodRequest) ConfigureInterface(namespace string, podName string, macAd
 	// This is getting fixed by https://github.com/kubernetes/kubernetes/pull/64189
 	endpointName := fmt.Sprintf("%s_%s", namespace, podName)
 
+	defer func() {
+		// Delete the endpoint in case CNI fails
+		if err != nil {
+			errHNSDelete := deleteHNSEndpoint(endpointName)
+			if errHNSDelete != nil {
+				logrus.Warningf("Failed to delete the HNS Endpoint, reason: %q", errHNSDelete)
+			}
+		}
+	}()
+
 	var hnsNetworkId string
 	hnsNetworkId, err = getHNSIdFromConfigOrByGatewayIP(gatewayIP)
 	if err != nil {
@@ -159,11 +169,6 @@ func (pr *PodRequest) ConfigureInterface(namespace string, podName string, macAd
 	err = containerHotAttachEndpoint(createdEndpoint, pr.SandboxID)
 	if err != nil {
 		logrus.Warningf("Failed to hot attach HNS Endpoint %q to container %q, reason: %q", endpointName, pr.SandboxID, err)
-		// In case the attach failed, delete the endpoint
-		errHNSDelete := deleteHNSEndpoint(pr.SandboxID)
-		if errHNSDelete != nil {
-			logrus.Warningf("Failed to delete the HNS Endpoint, reason: %q", errHNSDelete)
-		}
 		return nil, err
 	}
 
@@ -191,9 +196,10 @@ func (pr *PodRequest) ConfigureInterface(namespace string, podName string, macAd
 		fmt.Sprintf("-NlMtuBytes %d", mtu),
 	}
 
-	_, err = exec.Command("powershell", mtuArgs...).CombinedOutput()
+	out, err = exec.Command("powershell", mtuArgs...).CombinedOutput()
 	if err != nil {
-		logrus.Warningf("Failed to set MTU on endpoint, reason: %q", err)
+		logrus.Warningf("Failed to set MTU on endpoint %q, with: %q", endpointName, string(out))
+		return nil, fmt.Errorf("failed to set MTU on endpoint, reason: %q", err)
 	}
 
 	// TODO: uncomment when OVS QoS is supported on Windows
