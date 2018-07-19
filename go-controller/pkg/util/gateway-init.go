@@ -179,6 +179,18 @@ func GatewayInit(clusterIPSubnet, nodeName, nicIP, physicalInterface,
 		}
 	}
 
+	if routerIP == "" {
+		stdout, stderr, err = RunOVNNbctl("--if-exists", "get",
+			"logical_router_port", "rtoj-"+gatewayRouter, "networks")
+		if err != nil {
+			logrus.Errorf("failed to get routerIP for %s "+
+				"stdout: %q, stderr: %q, error: %v",
+				"rtoj-"+gatewayRouter, stdout, stderr, err)
+			return err
+		}
+		routerIP = strings.Trim(stdout, "[]\"")
+	}
+
 	// Connect the switch "join" to the router.
 	stdout, stderr, err = RunOVNNbctl("--", "--may-exist", "lsp-add",
 		"join", "jtor-"+gatewayRouter, "--", "set", "logical_switch_port",
