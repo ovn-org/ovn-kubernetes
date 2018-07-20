@@ -154,19 +154,19 @@ echo "kind: ClusterRoleBinding ovn-reader -- $?"
 
 cat << EOF | kubectl create -f - > /dev/null 2>&1
 # oc adm policy add-cluster-role-to-user cluster-admin -z ovn -o yaml
-- apiVersion: authorization.openshift.io/v1
-  kind: ClusterRoleBinding
-  metadata:
-    name: cluster-admin-0
-  roleRef:
-    name: cluster-admin
-  subjects:
-  - kind: ServiceAccount
-    name: ovn
-    namespace: ovn-kubernetes
-  userNames:
-  - system:serviceaccount:ovn-kubernetes:ovn
-  groupNames: []
+apiVersion: authorization.openshift.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: cluster-admin-0
+roleRef:
+  name: cluster-admin
+subjects:
+- kind: ServiceAccount
+  name: ovn
+  namespace: ovn-kubernetes
+userNames:
+- system:serviceaccount:ovn-kubernetes:ovn
+groupNames: []
 EOF
 echo "kind: ClusterRoleBinding cluster-admin-0 -- $?"
 
