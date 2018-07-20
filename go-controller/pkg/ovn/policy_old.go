@@ -51,7 +51,7 @@ func (oc *Controller) addACLAllowOld(namespace, policy, logicalSwitch,
 		action = "allow"
 	}
 
-	uuid, stderr, err := util.RunOVNNbctlUnix("--data=bare", "--no-heading",
+	uuid, stderr, err := util.RunOVNNbctlHA("--data=bare", "--no-heading",
 		"--columns=_uuid", "find", "ACL",
 		fmt.Sprintf("external-ids:l4Match=\"%s\"", l4Match),
 		fmt.Sprintf("external-ids:ipblock_cidr=%t", ipBlockCidr),
@@ -72,7 +72,7 @@ func (oc *Controller) addACLAllowOld(namespace, policy, logicalSwitch,
 		return
 	}
 
-	_, stderr, err = util.RunOVNNbctlUnix("--id=@acl", "create",
+	_, stderr, err = util.RunOVNNbctlHA("--id=@acl", "create",
 		"acl", fmt.Sprintf("priority=%s", defaultAllowPriority),
 		fmt.Sprintf("direction=%s", direction), match,
 		fmt.Sprintf("action=%s", action),
@@ -95,7 +95,7 @@ func (oc *Controller) addACLAllowOld(namespace, policy, logicalSwitch,
 
 func (oc *Controller) modifyACLAllowOld(namespace, policy, logicalPort,
 	oldMatch string, newMatch string, gressNum int, policyType knet.PolicyType) {
-	uuid, stderr, err := util.RunOVNNbctlUnix("--data=bare", "--no-heading",
+	uuid, stderr, err := util.RunOVNNbctlHA("--data=bare", "--no-heading",
 		"--columns=_uuid", "find", "ACL", oldMatch,
 		fmt.Sprintf("external-ids:namespace=%s", namespace),
 		fmt.Sprintf("external-ids:policy=%s", policy),
@@ -111,7 +111,7 @@ func (oc *Controller) modifyACLAllowOld(namespace, policy, logicalPort,
 
 	if uuid != "" {
 		// We already have an ACL. We will update it.
-		_, stderr, err = util.RunOVNNbctlUnix("set", "acl", uuid,
+		_, stderr, err = util.RunOVNNbctlHA("set", "acl", uuid,
 			fmt.Sprintf("%s", newMatch))
 		if err != nil {
 			logrus.Errorf("failed to modify the allow-from rule for "+
@@ -125,7 +125,7 @@ func (oc *Controller) modifyACLAllowOld(namespace, policy, logicalPort,
 func (oc *Controller) deleteACLAllowOld(namespace, policy, logicalSwitch,
 	logicalPort, match, l4Match string, ipBlockCidr bool, gressNum int,
 	policyType knet.PolicyType) {
-	uuid, stderr, err := util.RunOVNNbctlUnix("--data=bare", "--no-heading",
+	uuid, stderr, err := util.RunOVNNbctlHA("--data=bare", "--no-heading",
 		"--columns=_uuid", "find", "ACL",
 		fmt.Sprintf("external-ids:l4Match=\"%s\"", l4Match),
 		fmt.Sprintf("external-ids:ipblock_cidr=%t", ipBlockCidr),
@@ -147,7 +147,7 @@ func (oc *Controller) deleteACLAllowOld(namespace, policy, logicalSwitch,
 		return
 	}
 
-	_, stderr, err = util.RunOVNNbctlUnix("remove", "logical_switch",
+	_, stderr, err = util.RunOVNNbctlHA("remove", "logical_switch",
 		logicalSwitch, "acls", uuid)
 	if err != nil {
 		logrus.Errorf("remove failed to delete the allow-from rule for "+
@@ -171,7 +171,7 @@ func (oc *Controller) addIPBlockACLDenyOld(namespace, policy, logicalSwitch,
 		match = fmt.Sprintf("match=\"%s && %s\"", lportMatch, l3Match)
 	}
 
-	uuid, stderr, err := util.RunOVNNbctlUnix("--data=bare", "--no-heading",
+	uuid, stderr, err := util.RunOVNNbctlHA("--data=bare", "--no-heading",
 		"--columns=_uuid", "find", "ACL", match, "action=drop",
 		fmt.Sprintf("external-ids:ipblock-deny-policy-type=%s", policyType),
 		fmt.Sprintf("external-ids:namespace=%s", namespace),
@@ -189,7 +189,7 @@ func (oc *Controller) addIPBlockACLDenyOld(namespace, policy, logicalSwitch,
 		return
 	}
 
-	_, stderr, err = util.RunOVNNbctlUnix("--id=@acl", "create", "acl",
+	_, stderr, err = util.RunOVNNbctlHA("--id=@acl", "create", "acl",
 		fmt.Sprintf("priority=%s", priority),
 		fmt.Sprintf("direction=%s", direction), match, "action=drop",
 		fmt.Sprintf("external-ids:ipblock-deny-policy-type=%s", policyType),
@@ -219,7 +219,7 @@ func (oc *Controller) deleteIPBlockACLDenyOld(namespace, policy,
 		match = fmt.Sprintf("match=\"%s && %s\"", lportMatch, l3Match)
 	}
 
-	uuid, stderr, err := util.RunOVNNbctlUnix("--data=bare", "--no-heading",
+	uuid, stderr, err := util.RunOVNNbctlHA("--data=bare", "--no-heading",
 		"--columns=_uuid", "find", "ACL", match, "action=drop",
 		fmt.Sprintf("external-ids:ipblock-deny-policy-type=%s", policyType),
 		fmt.Sprintf("external-ids:namespace=%s", namespace),
@@ -237,7 +237,7 @@ func (oc *Controller) deleteIPBlockACLDenyOld(namespace, policy,
 		return
 	}
 
-	_, stderr, err = util.RunOVNNbctlUnix("remove", "logical_switch",
+	_, stderr, err = util.RunOVNNbctlHA("remove", "logical_switch",
 		logicalSwitch, "acls", uuid)
 	if err != nil {
 		logrus.Errorf("remove failed to delete the deny rule for "+
@@ -258,7 +258,7 @@ func (oc *Controller) addACLDenyOld(namespace, logicalSwitch, logicalPort,
 		match = fmt.Sprintf("match=\"inport == \\\"%s\\\"\"", logicalPort)
 	}
 
-	uuid, stderr, err := util.RunOVNNbctlUnix("--data=bare", "--no-heading",
+	uuid, stderr, err := util.RunOVNNbctlHA("--data=bare", "--no-heading",
 		"--columns=_uuid", "find", "ACL", match, "action=drop",
 		fmt.Sprintf("external-ids:default-deny-policy-type=%s", policyType),
 		fmt.Sprintf("external-ids:namespace=%s", namespace),
@@ -275,7 +275,7 @@ func (oc *Controller) addACLDenyOld(namespace, logicalSwitch, logicalPort,
 		return
 	}
 
-	_, stderr, err = util.RunOVNNbctlUnix("--id=@acl", "create", "acl",
+	_, stderr, err = util.RunOVNNbctlHA("--id=@acl", "create", "acl",
 		fmt.Sprintf("priority=%s", priority),
 		fmt.Sprintf("direction=%s", direction), match, "action=drop",
 		fmt.Sprintf("external-ids:default-deny-policy-type=%s", policyType),
@@ -300,7 +300,7 @@ func (oc *Controller) deleteACLDenyOld(namespace, logicalSwitch, logicalPort str
 		match = fmt.Sprintf("match=\"inport == \\\"%s\\\"\"", logicalPort)
 	}
 
-	uuid, stderr, err := util.RunOVNNbctlUnix("--data=bare", "--no-heading",
+	uuid, stderr, err := util.RunOVNNbctlHA("--data=bare", "--no-heading",
 		"--columns=_uuid", "find", "ACL", match, "action=drop",
 		fmt.Sprintf("external-ids:default-deny-policy-type=%s", policyType),
 		fmt.Sprintf("external-ids:namespace=%s", namespace),
@@ -317,7 +317,7 @@ func (oc *Controller) deleteACLDenyOld(namespace, logicalSwitch, logicalPort str
 		return
 	}
 
-	_, stderr, err = util.RunOVNNbctlUnix("remove", "logical_switch",
+	_, stderr, err = util.RunOVNNbctlHA("remove", "logical_switch",
 		logicalSwitch, "acls", uuid)
 	if err != nil {
 		logrus.Errorf("remove failed to delete the deny rule for "+
@@ -329,7 +329,7 @@ func (oc *Controller) deleteACLDenyOld(namespace, logicalSwitch, logicalPort str
 }
 
 func (oc *Controller) deleteAclsPolicyOld(namespace, policy string) {
-	uuids, stderr, err := util.RunOVNNbctlUnix("--data=bare", "--no-heading",
+	uuids, stderr, err := util.RunOVNNbctlHA("--data=bare", "--no-heading",
 		"--columns=_uuid", "find", "ACL",
 		fmt.Sprintf("external-ids:namespace=%s", namespace),
 		fmt.Sprintf("external-ids:policy=%s", policy))
@@ -349,7 +349,7 @@ func (oc *Controller) deleteAclsPolicyOld(namespace, policy string) {
 	uuidSlice := strings.Fields(uuids)
 	for _, uuid := range uuidSlice {
 		// Get logical switch
-		logicalSwitch, stderr, err := util.RunOVNNbctlUnix("--data=bare",
+		logicalSwitch, stderr, err := util.RunOVNNbctlHA("--data=bare",
 			"--no-heading", "--columns=_uuid", "find", "logical_switch",
 			fmt.Sprintf("acls{>=}%s", uuid))
 		if err != nil {
@@ -362,7 +362,7 @@ func (oc *Controller) deleteAclsPolicyOld(namespace, policy string) {
 			continue
 		}
 
-		_, stderr, err = util.RunOVNNbctlUnix("remove", "logical_switch",
+		_, stderr, err = util.RunOVNNbctlHA("remove", "logical_switch",
 			logicalSwitch, "acls", uuid)
 		if err != nil {
 			logrus.Errorf("remove failed to delete the allow-from rule %s for"+
@@ -943,7 +943,7 @@ func (oc *Controller) getLogicalSwitchForLogicalPort(
 		return oc.logicalPortCache[logicalPort]
 	}
 
-	logicalSwitch, stderr, err := util.RunOVNNbctlUnix("get",
+	logicalSwitch, stderr, err := util.RunOVNNbctlHA("get",
 		"logical_switch_port", logicalPort, "external-ids:logical_switch")
 	if err != nil {
 		logrus.Errorf("Error obtaining logical switch for %s, stderr: %q (%v)",

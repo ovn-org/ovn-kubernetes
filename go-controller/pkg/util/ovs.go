@@ -170,6 +170,18 @@ func RunOVNNbctlUnix(args ...string) (string, string, error) {
 		stderr.String(), err
 }
 
+// RunOVNNbctlHA connects to multiple servers if they are provided as an input.
+// If there is a single server provided, it assumes that it is local and uses
+// Unix domain sockets for the connection.
+func RunOVNNbctlHA(args ...string) (string, string, error) {
+	ovnNorthAddress := config.OvnNorth.ClientAuth.OvnAddressForClient
+	ovnNorthAddresses := strings.Split(ovnNorthAddress, ",")
+	if len(ovnNorthAddresses) == 1 {
+		return RunOVNNbctlUnix(args...)
+	}
+	return RunOVNNbctl(args...)
+}
+
 // RunOVNNbctlWithTimeout runs command via ovn-nbctl with a specific timeout
 func RunOVNNbctlWithTimeout(timeout int, args ...string) (string, string,
 	error) {

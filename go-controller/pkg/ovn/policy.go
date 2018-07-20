@@ -55,7 +55,7 @@ func (oc *Controller) addACLAllow(np *namespacePolicy,
 		action = "allow"
 	}
 
-	uuid, stderr, err := util.RunOVNNbctlUnix("--data=bare", "--no-heading",
+	uuid, stderr, err := util.RunOVNNbctlHA("--data=bare", "--no-heading",
 		"--columns=_uuid", "find", "ACL",
 		fmt.Sprintf("external-ids:l4Match=\"%s\"", l4Match),
 		fmt.Sprintf("external-ids:ipblock_cidr=%t", ipBlockCidr),
@@ -74,7 +74,7 @@ func (oc *Controller) addACLAllow(np *namespacePolicy,
 		return
 	}
 
-	_, stderr, err = util.RunOVNNbctlUnix("--id=@acl", "create",
+	_, stderr, err = util.RunOVNNbctlHA("--id=@acl", "create",
 		"acl", fmt.Sprintf("priority=%s", defaultAllowPriority),
 		fmt.Sprintf("direction=%s", direction), match,
 		fmt.Sprintf("action=%s", action),
@@ -96,7 +96,7 @@ func (oc *Controller) addACLAllow(np *namespacePolicy,
 func (oc *Controller) modifyACLAllow(namespace, policy,
 	oldMatch string, newMatch string, gressNum int,
 	policyType knet.PolicyType) {
-	uuid, stderr, err := util.RunOVNNbctlUnix("--data=bare", "--no-heading",
+	uuid, stderr, err := util.RunOVNNbctlHA("--data=bare", "--no-heading",
 		"--columns=_uuid", "find", "ACL", oldMatch,
 		fmt.Sprintf("external-ids:namespace=%s", namespace),
 		fmt.Sprintf("external-ids:policy=%s", policy),
@@ -111,7 +111,7 @@ func (oc *Controller) modifyACLAllow(namespace, policy,
 
 	if uuid != "" {
 		// We already have an ACL. We will update it.
-		_, stderr, err = util.RunOVNNbctlUnix("set", "acl", uuid,
+		_, stderr, err = util.RunOVNNbctlHA("set", "acl", uuid,
 			fmt.Sprintf("%s", newMatch))
 		if err != nil {
 			logrus.Errorf("failed to modify the allow-from rule for "+
@@ -136,7 +136,7 @@ func (oc *Controller) addIPBlockACLDeny(np *namespacePolicy,
 		match = fmt.Sprintf("match=\"%s && %s\"", lportMatch, l3Match)
 	}
 
-	uuid, stderr, err := util.RunOVNNbctlUnix("--data=bare", "--no-heading",
+	uuid, stderr, err := util.RunOVNNbctlHA("--data=bare", "--no-heading",
 		"--columns=_uuid", "find", "ACL", match, "action=drop",
 		fmt.Sprintf("external-ids:ipblock-deny-policy-type=%s", policyType),
 		fmt.Sprintf("external-ids:namespace=%s", np.namespace),
@@ -153,7 +153,7 @@ func (oc *Controller) addIPBlockACLDeny(np *namespacePolicy,
 		return
 	}
 
-	_, stderr, err = util.RunOVNNbctlUnix("--id=@acl", "create", "acl",
+	_, stderr, err = util.RunOVNNbctlHA("--id=@acl", "create", "acl",
 		fmt.Sprintf("priority=%s", priority),
 		fmt.Sprintf("direction=%s", direction), match, "action=drop",
 		fmt.Sprintf("external-ids:ipblock-deny-policy-type=%s", policyType),
@@ -179,7 +179,7 @@ func (oc *Controller) addACLDenyPortGroup(portGroupUUID, portGroupName,
 		match = fmt.Sprintf("match=\"inport == @%s\"", portGroupName)
 	}
 
-	uuid, stderr, err := util.RunOVNNbctlUnix("--data=bare", "--no-heading",
+	uuid, stderr, err := util.RunOVNNbctlHA("--data=bare", "--no-heading",
 		"--columns=_uuid", "find", "ACL", match, "action=drop",
 		fmt.Sprintf("external-ids:default-deny-policy-type=%s", policyType))
 	if err != nil {
@@ -191,7 +191,7 @@ func (oc *Controller) addACLDenyPortGroup(portGroupUUID, portGroupName,
 		return nil
 	}
 
-	_, stderr, err = util.RunOVNNbctlUnix("--id=@acl", "create", "acl",
+	_, stderr, err = util.RunOVNNbctlHA("--id=@acl", "create", "acl",
 		fmt.Sprintf("priority=%s", priority),
 		fmt.Sprintf("direction=%s", direction), match, "action=drop",
 		fmt.Sprintf("external-ids:default-deny-policy-type=%s", policyType),
@@ -210,7 +210,7 @@ func (oc *Controller) addToACLDeny(portGroup, logicalPort string) {
 		return
 	}
 
-	_, stderr, err := util.RunOVNNbctlUnix("--if-exists", "remove",
+	_, stderr, err := util.RunOVNNbctlHA("--if-exists", "remove",
 		"port_group", portGroup, "ports", logicalPortUUID, "--",
 		"add", "port_group", portGroup, "ports", logicalPortUUID)
 	if err != nil {
@@ -225,7 +225,7 @@ func (oc *Controller) deleteFromACLDeny(portGroup, logicalPort string) {
 		return
 	}
 
-	_, stderr, err := util.RunOVNNbctlUnix("--if-exists", "remove",
+	_, stderr, err := util.RunOVNNbctlHA("--if-exists", "remove",
 		"port_group", portGroup, "ports", logicalPortUUID)
 	if err != nil {
 		logrus.Errorf("Failed to delete logicalPort %s to portGroup %s "+
@@ -419,7 +419,7 @@ func (oc *Controller) handleLocalPodSelectorAddFunc(
 		return
 	}
 
-	_, stderr, err := util.RunOVNNbctlUnix("--if-exists", "remove",
+	_, stderr, err := util.RunOVNNbctlHA("--if-exists", "remove",
 		"port_group", np.portGroupUUID, "ports", logicalPortUUID, "--",
 		"add", "port_group", np.portGroupUUID, "ports", logicalPortUUID)
 	if err != nil {
@@ -461,7 +461,7 @@ func (oc *Controller) handleLocalPodSelectorDelFunc(
 		return
 	}
 
-	_, stderr, err := util.RunOVNNbctlUnix("--if-exists", "remove",
+	_, stderr, err := util.RunOVNNbctlHA("--if-exists", "remove",
 		"port_group", np.portGroupUUID, "ports", logicalPortUUID)
 	if err != nil {
 		logrus.Errorf("Failed to delete logicalPort %s from portGroup %s "+
