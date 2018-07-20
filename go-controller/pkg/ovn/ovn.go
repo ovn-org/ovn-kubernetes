@@ -97,7 +97,7 @@ func NewOvnController(kubeClient kubernetes.Interface, wf *factory.WatchFactory,
 
 // Run starts the actual watching. Also initializes any local structures needed.
 func (oc *Controller) Run() error {
-	_, _, err := util.RunOVNNbctlUnix("--columns=_uuid", "list",
+	_, _, err := util.RunOVNNbctlHA("--columns=_uuid", "list",
 		"port_group")
 	if err == nil {
 		oc.portGroupSupport = true

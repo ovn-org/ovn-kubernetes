@@ -132,7 +132,7 @@ func (ovn *Controller) deleteEndpoints(ep *kapi.Endpoints) error {
 			continue
 		}
 		key := fmt.Sprintf("\"%s:%d\"", svc.Spec.ClusterIP, svcPort.Port)
-		_, stderr, err := util.RunOVNNbctlUnix("remove", "load_balancer", lb,
+		_, stderr, err := util.RunOVNNbctlHA("remove", "load_balancer", lb,
 			"vips", key)
 		if err != nil {
 			logrus.Errorf("Error in deleting endpoints for lb %s, "+

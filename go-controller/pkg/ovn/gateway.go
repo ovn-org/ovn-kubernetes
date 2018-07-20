@@ -9,7 +9,7 @@ import (
 
 func (ovn *Controller) getOvnGateways() ([]string, string, error) {
 	// Return all created gateways.
-	out, stderr, err := util.RunOVNNbctlUnix("--data=bare", "--no-heading",
+	out, stderr, err := util.RunOVNNbctlHA("--data=bare", "--no-heading",
 		"--columns=name", "find",
 		"logical_router",
 		"options:chassis!=null")
@@ -18,7 +18,7 @@ func (ovn *Controller) getOvnGateways() ([]string, string, error) {
 
 func (ovn *Controller) getGatewayPhysicalIP(
 	physicalGateway string) (string, error) {
-	physicalIP, _, err := util.RunOVNNbctlUnix("get", "logical_router",
+	physicalIP, _, err := util.RunOVNNbctlHA("get", "logical_router",
 		physicalGateway, "external_ids:physical_ip")
 	if err != nil {
 		return "", err
@@ -30,7 +30,7 @@ func (ovn *Controller) getGatewayPhysicalIP(
 func (ovn *Controller) getGatewayLoadBalancer(physicalGateway,
 	protocol string) (string, error) {
 	externalIDKey := protocol + "_lb_gateway_router"
-	loadBalancer, _, err := util.RunOVNNbctlUnix("--data=bare", "--no-heading",
+	loadBalancer, _, err := util.RunOVNNbctlHA("--data=bare", "--no-heading",
 		"--columns=_uuid", "find", "load_balancer",
 		"external_ids:"+externalIDKey+"="+
 			physicalGateway)

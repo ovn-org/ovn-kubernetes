@@ -174,7 +174,7 @@ const (
 )
 
 func (oc *Controller) addAllowACLFromNode(logicalSwitch string) {
-	uuid, stderr, err := util.RunOVNNbctlUnix("--data=bare", "--no-heading",
+	uuid, stderr, err := util.RunOVNNbctlHA("--data=bare", "--no-heading",
 		"--columns=_uuid", "find", "ACL",
 		fmt.Sprintf("external-ids:logical_switch=%s", logicalSwitch),
 		"external-ids:node-acl=yes")
@@ -188,7 +188,7 @@ func (oc *Controller) addAllowACLFromNode(logicalSwitch string) {
 		return
 	}
 
-	subnet, stderr, err := util.RunOVNNbctlUnix("get", "logical_switch",
+	subnet, stderr, err := util.RunOVNNbctlHA("get", "logical_switch",
 		logicalSwitch, "other-config:subnet")
 	if err != nil {
 		logrus.Errorf("failed to get the logical_switch %s subnet, "+
@@ -214,7 +214,7 @@ func (oc *Controller) addAllowACLFromNode(logicalSwitch string) {
 
 	match := fmt.Sprintf("match=\"ip4.src == %s\"", address)
 
-	_, stderr, err = util.RunOVNNbctlUnix("--id=@acl", "create", "acl",
+	_, stderr, err = util.RunOVNNbctlHA("--id=@acl", "create", "acl",
 		fmt.Sprintf("priority=%s", defaultAllowPriority),
 		"direction=to-lport", match, "action=allow-related",
 		fmt.Sprintf("external-ids:logical_switch=%s", logicalSwitch),
