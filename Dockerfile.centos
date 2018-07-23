@@ -50,6 +50,7 @@ RUN yum install -y  \
 	numactl-libs \
 	firewalld-filesystem \
 	libpcap \
+	hostname \
 	iproute strace socat && \
 	yum clean all
 
