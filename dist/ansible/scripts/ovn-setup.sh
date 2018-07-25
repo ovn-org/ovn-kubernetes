@@ -259,6 +259,7 @@ metadata:
   namespace: ovn-kubernetes
 data:
   k8s_apiserver: $apiserver
+  k8s_token:     $token
   net_cidr:      $net_cidr
   svc_cidr:      $svc_cidr
   OvnNorth:      $OvnNorth
