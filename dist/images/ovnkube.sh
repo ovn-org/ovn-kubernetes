@@ -6,6 +6,21 @@
 
 # ====================
 # Environment variables are used to customize operation
+#
+# The following variables are REQUIRED:
+# K8S_APISERVER - hostname:port of the real apiserver, not the service address
+# OVN_NET_CIDR - the network cidr
+# OVN_SVC_CIDR - the cluster-service-cidr
+# OVN_NORTH - the full URL to the ovn northdb
+# OVN_SOUTH - the full URL to the ovn southdb
+#
+# Optional:
+# OVN_MASTER - whether or not to run the master processes
+# K8S_TOKEN - the apiserver token. Automatically detected when running in a pod
+# K8S_CACERT - the apiserver CA. Automatically detected when running in a pod
+# OVN_CONTROLLER_OPTS - the options for ovn-ctl
+# OVN_NORTHD_OPTS - the options for the ovn northbound db
+
 
 # There is a single image for both master node and compute node
 # setup. When OVN_MASTER is true, start the master daemons
@@ -22,25 +37,14 @@ ovn_host=$(hostname)
 # ovs options
 # ovs_options=${OVS_OPTIONS:-""}
 
-# Cluster's internal network cidr
-net_cidr=${OVN_NET_CIDR:-"10.128.0.0/14"}
-# Cluster's service ip subnet
-svc_cidr=${OVN_SVC_CIDR:-"172.30.0.0/16"}
-
-# ovn north and south databases
-ovn_nbdb=${OVN_NORTH:-""}
-ovn_sbdb=${OVN_SOUTH:-""}
-# Used to test for ovn-northd coming up
-ovn_nbdb_test=$(echo ${ovn_nbdb} | sed 's;//;;')
-
-# kubernetes api server configuration
-k8s_api=${K8S_APISERVER:-""}
 if [ -f /var/run/secrets/kubernetes.io/serviceaccount/token ]
 then
   k8s_token=$(cat /var/run/secrets/kubernetes.io/serviceaccount/token)
 else
-  k8s_token=""
+  k8s_token=${K8S_TOKEN}
 fi
+
+K8S_CACERT=${K8S_CACERT:-/var/run/secrets/kubernetes.io/serviceaccount/ca.crt}
 
 # ovn-northd - /etc/sysconfig/ovn-northd
 ovn_northd_opts=${OVN_NORTHD_OPTS:-"--db-nb-sock=/var/run/openvswitch/ovnnb_db.sock --db-sb-sock=/var/run/openvswitch/ovnsb_db.sock"}
@@ -54,6 +58,8 @@ ovn_controller_opts=${OVN_CONTROLLER_OPTS:-"--ovn-controller-log=-vconsole:emer"
 # Master must be up before the nodes can come up.
 # This waits for northd to come up
 wait_for_northdb () {
+
+  ovn_nbdb_test=$(echo ${OVN_NORTH} | sed 's;//;;')
   # Wait for ovn-northd to come up
   trap 'kill $(jobs -p); exit 0' TERM
   retries=0
@@ -179,13 +185,12 @@ setup_cni () {
 
 display_env () {
 # echo OVS_USER_ID ${ovs_user_id}  OVS_OPTIONS ${ovs_options}
-echo OVN_NORTH ${ovn_nbdb}       OVN_NORTHD_OPTS ${ovn_northd_opts}
-echo OVN_SOUTH ${ovn_sbdb}
+echo OVN_NORTH ${OVN_NORTH}       OVN_NORTHD_OPTS ${ovn_northd_opts}
+echo OVN_SOUTH ${OVN_SOUTH}
 echo OVN_CONTROLLER_OPTS ${ovn_controller_opts}
-echo OVN_NET_CIDR ${net_cidr}
-echo OVN_SVC_CIDR ${svc_cidr}
-echo K8S_APISERVER ${k8s_api}
-echo K8S_TOKEN ${k8s_token}
+echo OVN_NET_CIDR ${OVN_NET_CIDR}
+echo OVN_SVC_CIDR ${OVN_SVC_CIDR}
+echo K8S_APISERVER ${K8S_APISERVER}
 }
 
 start_ovn () {
@@ -228,7 +233,7 @@ start_ovn () {
     # ovn-northd - master node only
     echo "=============== start ovn-northd ========== MASTER ONLY"
     /usr/share/openvswitch/scripts/ovn-ctl start_northd \
-      --db-nb-addr=${ovn_nbdb} --db-sb-addr=${ovn_sbdb} \
+      --db-nb-addr=${OVN_NORTH} --db-sb-addr=${OVN_SOUTH} \
       ${ovn_northd_opts}
 #   wait_for_northdb
 
@@ -236,9 +241,9 @@ start_ovn () {
     echo "=============== start ovn-master ========== MASTER ONLY"
     /usr/bin/ovnkube \
       --init-master ${ovn_host} --net-controller \
-      --cluster-subnet ${net_cidr} --service-cluster-ip-range=${svc_cidr} \
-      --k8s-token=${k8s_token} --k8s-apiserver=${k8s_api} \
-      --nb-address=${ovn_nbdb} --sb-address=${ovn_sbdb} \
+      --cluster-subnet ${OVN_NET_CIDR} --service-cluster-ip-range=${OVN_SVC_CIDR} \
+      --k8s-token=${k8s_token} --k8s-apiserver=${K8S_APISERVER} --k8s-cacert=${K8S_CACERT} \
+      --nb-address=${OVN_NORTH} --sb-address=${OVN_SOUTH} \
       --nodeport \
       --pidfile /var/run/openvswitch/ovnkube-master.pid \
       --logfile /var/log/openvswitch/ovnkube-master.log &
@@ -258,10 +263,10 @@ start_ovn () {
   # results in loss of network connectivity when docker is
   # restarted or ovs daemonset is deleted.
   # TEMP HACK - WORKAROUND
-  /usr/bin/ovnkube --init-node ${ovn_host} \
-      --cluster-subnet ${net_cidr} --service-cluster-ip-range=${svc_cidr} \
-      --k8s-token=${k8s_token} --k8s-apiserver=${k8s_api} \
-      --nb-address=${ovn_nbdb} --sb-address=${ovn_sbdb} \
+  /usr/bin/ovnkube --init-node ${K8S_NODE} \
+      --cluster-subnet ${OVN_NET_CIDR} --service-cluster-ip-range=${OVN_SVC_CIDR} \
+      --k8s-token=${k8s_token} --k8s-apiserver=${K8S_APISERVER} --k8s-cacert=${K8S_CACERT} \
+      --nb-address=${OVN_NORTH} --sb-address=${OVN_SOUTH} \
       --nodeport \
       --init-gateways --gateway-localnet \
       --pidfile /var/run/openvswitch/ovnkube.pid \
