@@ -189,14 +189,13 @@ data:
   OvnNorth: tcp://10.19.188.22:6641
   OvnSouth: tcp://10.19.188.22:6642
   k8s_apiserver: https://wsfd-netdev22.ntdv.lab.eng.bos.redhat.com:8443
-  k8s_token: eyJhbGciOiJSUzI1NiIsIm ..... XGwBj4FuMgcOlX9rh5h2X5w
   net_cidr: 10.128.0.0/14
   svc_cidr: 172.30.0.0/16
 kind: ConfigMap
 ```
 OvnNorth and OvnSouth are used by ovn to access its daemons. They are host IP address of the daemons.
 
-k8s_apiserver and k8s_token allow access to Openshift's api server.
+k8s_apiserver allows access to Openshift's api server.
 
 net_cidr and svc_cidr are the configuration configuration cidrs
 
