@@ -6,9 +6,9 @@
 
 # Notes:
 # This is for a development build where the ovn-kubernetes utilities
-# are built locally and included in the image (instead of the rpm)
+# are built in this Dockerfile and included in the image (instead of the rpm)
 #
-# At present this uses centos:7
+# This is based on centos:7
 # openvswitch rpms are from
 # http://cbs.centos.org/kojifiles/packages/openvswitch/2.9.0/4.el7/x86_64/
 #
@@ -22,11 +22,11 @@ ENV PYTHONDONTWRITEBYTECODE yes
 
 RUN yum install -y  \
 	PyYAML bind-utils \
-	libnuma.so \
 	openssl \
 	numactl-libs \
 	firewalld-filesystem \
 	libpcap \
+	hostname \
 	iproute strace socat && \
 	yum clean all
 
@@ -35,10 +35,10 @@ RUN rpm -i http://cbs.centos.org/kojifiles/packages/openvswitch/2.9.0/4.el7/x86_
 RUN rpm -i http://cbs.centos.org/kojifiles/packages/openvswitch/2.9.0/4.el7/x86_64/openvswitch-ovn-common-2.9.0-4.el7.x86_64.rpm
 RUN rpm -i http://cbs.centos.org/kojifiles/packages/openvswitch/2.9.0/4.el7/x86_64/openvswitch-ovn-central-2.9.0-4.el7.x86_64.rpm
 RUN rpm -i http://cbs.centos.org/kojifiles/packages/openvswitch/2.9.0/4.el7/x86_64/openvswitch-ovn-host-2.9.0-4.el7.x86_64.rpm
-#RUN rpm -i http://cbs.centos.org/kojifiles/packages/openvswitch/2.9.0/4.el7/x86_64/openvswitch-ovn-docker-2.9.0-4.el7.x86_64.rpm
 RUN rpm -i http://cbs.centos.org/kojifiles/packages/openvswitch/2.9.0/4.el7/x86_64/openvswitch-ovn-vtep-2.9.0-4.el7.x86_64.rpm
 RUN rpm -i http://cbs.centos.org/kojifiles/packages/openvswitch/2.9.0/4.el7/x86_64/openvswitch-devel-2.9.0-4.el7.x86_64.rpm
 RUN rpm -i http://dl.fedoraproject.org/pub/epel/7/x86_64/Packages/c/containernetworking-cni-0.5.1-1.el7.x86_64.rpm
+RUN rm -rf /var/cache/yum
 
 RUN mkdir -p /var/run/openvswitch
 RUN mkdir -p /etc/cni/net.d
