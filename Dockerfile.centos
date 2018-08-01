@@ -45,7 +45,6 @@ RUN yum remove -y  \
 # install needed rpms
 RUN yum install -y  \
 	PyYAML bind-utils \
-	libnuma.so \
 	openssl \
 	numactl-libs \
 	firewalld-filesystem \
