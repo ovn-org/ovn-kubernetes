@@ -1,3 +1,8 @@
+# ovs-ovn
+# daemonset version 1
+# This daemonset starts, in a single container, all of the needed
+# ovs daemons. It does not use the ovnkube.sh startup script in the image.
+# It is run on every node in the cluster.
 kind: DaemonSet
 apiVersion: apps/v1
 metadata:
