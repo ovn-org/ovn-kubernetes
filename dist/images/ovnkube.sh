@@ -251,7 +251,7 @@ start_ovn () {
 
   # ovn-controller - all nodes
   echo "=============== start ovn-controller"
-  rm -f /var/run/ovn-kubernetes/*
+  rm -f /var/run/ovn-kubernetes/cni/*
   /usr/share/openvswitch/scripts/ovn-ctl --no-monitor start_controller \
     ${ovn_controller_opts}
 #   wait_for_northdb

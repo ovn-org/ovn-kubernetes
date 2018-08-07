@@ -7,7 +7,7 @@ import (
 )
 
 // serverRunDir is the default directory for CNIServer runtime files
-const serverRunDir string = "/var/run/ovn-kubernetes/"
+const serverRunDir string = "/var/run/ovn-kubernetes/cni/"
 
 const serverSocketName string = "ovn-cni-server.sock"
 const serverSocketPath string = serverRunDir + "/" + serverSocketName
