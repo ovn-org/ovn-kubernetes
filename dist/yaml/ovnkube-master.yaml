@@ -1,3 +1,8 @@
+# ovnkube-master
+# daemonset version 1
+# This daemonset starts, in a single container,  all on the daemons
+# that need to run on the master node.
+# This supports a single master node.
 kind: DaemonSet
 apiVersion: apps/v1
 metadata:
@@ -38,8 +43,10 @@ spec:
       # ovs flow for ovn (geneve)
       # /usr/share/openvswitch/scripts/ovs-ctl --protocol=udp --dport=6081 enable-protocol
       - name: ovnkube-master
-        # this is development build image
-        image: "netdev31:5000/ovn-kube:latest"
+        # This is an official build
+        image: "brew-pulp-docker01.web.prod.ext.phx2.redhat.com:8888/openshift3/ose-ovn-kubernetes:v3.11.0-123483"
+        # This is development build image
+        # image: "quay.io/pecameron/ovn-kube:latest"
         # imagePullPolicy: "Always"
 
         securityContext:
@@ -85,6 +92,8 @@ spec:
         env:
         - name: OVN_MASTER
           value: "true"
+        - name: OVNKUBE_LOGLEVEL
+          value: "4"
         - name: OVN_NORTH
           valueFrom:
             configMapKeyRef:
