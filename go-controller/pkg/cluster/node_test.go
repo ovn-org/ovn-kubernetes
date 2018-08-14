@@ -68,7 +68,7 @@ var _ = Describe("Node Operations", func() {
 			)
 
 			fakeCmds := ovntest.AddFakeCmd(nil, &ovntest.ExpectedCmd{
-				Cmd: "ovs-vsctl --timeout=5 set Open_vSwitch . external_ids:ovn-encap-type=geneve external_ids:ovn-encap-ip=" + nodeName,
+				Cmd: "ovs-vsctl --timeout=15 set Open_vSwitch . external_ids:ovn-encap-type=geneve external_ids:ovn-encap-ip=" + nodeName,
 			})
 
 			fexec := &fakeexec.FakeExec{

@@ -194,25 +194,25 @@ var _ = Describe("Config Operations", func() {
 		app.Action = func(ctx *cli.Context) error {
 			// k8s-api-server
 			fakeCmds := ovntest.AddFakeCmd(nil, &ovntest.ExpectedCmd{
-				Cmd:    "ovs-vsctl --timeout=5 --if-exists get Open_vSwitch . external_ids:k8s-api-server",
+				Cmd:    "ovs-vsctl --timeout=15 --if-exists get Open_vSwitch . external_ids:k8s-api-server",
 				Output: "https://somewhere.com:8081",
 			})
 
 			// k8s-api-token
 			fakeCmds = ovntest.AddFakeCmd(fakeCmds, &ovntest.ExpectedCmd{
-				Cmd:    "ovs-vsctl --timeout=5 --if-exists get Open_vSwitch . external_ids:k8s-api-token",
+				Cmd:    "ovs-vsctl --timeout=15 --if-exists get Open_vSwitch . external_ids:k8s-api-token",
 				Output: "asadfasdfasrw3atr3r3rf33fasdaa3233",
 			})
 			// k8s-ca-certificate
 			fname, err := createTempFile("kube-cacert.pem")
 			Expect(err).NotTo(HaveOccurred())
 			fakeCmds = ovntest.AddFakeCmd(fakeCmds, &ovntest.ExpectedCmd{
-				Cmd:    "ovs-vsctl --timeout=5 --if-exists get Open_vSwitch . external_ids:k8s-ca-certificate",
+				Cmd:    "ovs-vsctl --timeout=15 --if-exists get Open_vSwitch . external_ids:k8s-ca-certificate",
 				Output: fname,
 			})
 			// ovn-nb address
 			fakeCmds = ovntest.AddFakeCmd(fakeCmds, &ovntest.ExpectedCmd{
-				Cmd:    "ovs-vsctl --timeout=5 --if-exists get Open_vSwitch . external_ids:ovn-nb",
+				Cmd:    "ovs-vsctl --timeout=15 --if-exists get Open_vSwitch . external_ids:ovn-nb",
 				Output: "tcp:1.1.1.1:6441",
 			})
 
@@ -279,25 +279,25 @@ var _ = Describe("Config Operations", func() {
 		app.Action = func(ctx *cli.Context) error {
 			// k8s-api-server
 			fakeCmds := ovntest.AddFakeCmd(nil, &ovntest.ExpectedCmd{
-				Cmd:    "ovs-vsctl --timeout=5 --if-exists get Open_vSwitch . external_ids:k8s-api-server",
+				Cmd:    "ovs-vsctl --timeout=15 --if-exists get Open_vSwitch . external_ids:k8s-api-server",
 				Output: "https://somewhere.com:8081",
 			})
 
 			// k8s-api-token
 			fakeCmds = ovntest.AddFakeCmd(fakeCmds, &ovntest.ExpectedCmd{
-				Cmd:    "ovs-vsctl --timeout=5 --if-exists get Open_vSwitch . external_ids:k8s-api-token",
+				Cmd:    "ovs-vsctl --timeout=15 --if-exists get Open_vSwitch . external_ids:k8s-api-token",
 				Output: "asadfasdfasrw3atr3r3rf33fasdaa3233",
 			})
 			// k8s-ca-certificate
 			fname, err := createTempFile("kube-cacert.pem")
 			Expect(err).NotTo(HaveOccurred())
 			fakeCmds = ovntest.AddFakeCmd(fakeCmds, &ovntest.ExpectedCmd{
-				Cmd:    "ovs-vsctl --timeout=5 --if-exists get Open_vSwitch . external_ids:k8s-ca-certificate",
+				Cmd:    "ovs-vsctl --timeout=15 --if-exists get Open_vSwitch . external_ids:k8s-ca-certificate",
 				Output: fname,
 			})
 			// ovn-nb address
 			fakeCmds = ovntest.AddFakeCmd(fakeCmds, &ovntest.ExpectedCmd{
-				Cmd:    "ovs-vsctl --timeout=5 --if-exists get Open_vSwitch . external_ids:ovn-nb",
+				Cmd:    "ovs-vsctl --timeout=15 --if-exists get Open_vSwitch . external_ids:ovn-nb",
 				Output: "tcp:1.1.1.1:6441,tcp:1.1.1.2:6641,tcp:1.1.1.3:6641",
 			})
 
@@ -819,7 +819,7 @@ server-cacert=/path/to/sb-ca.crt`), 0644)
 				Cmd: fmt.Sprintf("ovn-nbctl --db=%s --timeout=5 --private-key=%s --certificate=%s --bootstrap-ca-cert=%s list nb_global", nbURLOVN, keyFile, certFile, caFile),
 			})
 			fakeCmds = ovntest.AddFakeCmd(fakeCmds, &ovntest.ExpectedCmd{
-				Cmd: fmt.Sprintf("ovs-vsctl --timeout=5 set Open_vSwitch . external_ids:ovn-nb=\"%s\"", nbURLOVN),
+				Cmd: fmt.Sprintf("ovs-vsctl --timeout=15 set Open_vSwitch . external_ids:ovn-nb=\"%s\"", nbURLOVN),
 			})
 
 			fexec := &fakeexec.FakeExec{
@@ -894,13 +894,13 @@ server-cacert=/path/to/sb-ca.crt`), 0644)
 				Cmd: fmt.Sprintf("ovn-nbctl --db=%s --timeout=5 --private-key=%s --certificate=%s --bootstrap-ca-cert=%s list nb_global", sbURLOVN, keyFile, certFile, caFile),
 			})
 			fakeCmds = ovntest.AddFakeCmd(fakeCmds, &ovntest.ExpectedCmd{
-				Cmd: "ovs-vsctl --timeout=5 del-ssl",
+				Cmd: "ovs-vsctl --timeout=15 del-ssl",
 			})
 			fakeCmds = ovntest.AddFakeCmd(fakeCmds, &ovntest.ExpectedCmd{
-				Cmd: fmt.Sprintf("ovs-vsctl --timeout=5 set-ssl %s %s %s", keyFile, certFile, caFile),
+				Cmd: fmt.Sprintf("ovs-vsctl --timeout=15 set-ssl %s %s %s", keyFile, certFile, caFile),
 			})
 			fakeCmds = ovntest.AddFakeCmd(fakeCmds, &ovntest.ExpectedCmd{
-				Cmd: fmt.Sprintf("ovs-vsctl --timeout=5 set Open_vSwitch . external_ids:ovn-remote=\"%s\"", sbURLOVN),
+				Cmd: fmt.Sprintf("ovs-vsctl --timeout=15 set Open_vSwitch . external_ids:ovn-remote=\"%s\"", sbURLOVN),
 			})
 
 			fexec := &fakeexec.FakeExec{
