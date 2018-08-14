@@ -71,6 +71,8 @@ func setOVSExternalIDs(nodeName string, ids ...string) error {
 		".",
 		fmt.Sprintf("external_ids:ovn-encap-type=%s", config.Default.EncapType),
 		fmt.Sprintf("external_ids:ovn-encap-ip=%s", nodeIP),
+		fmt.Sprintf("external_ids:ovn-remote-probe-interval=%d",
+			config.Default.InactivityProbe),
 	}
 	for _, str := range ids {
 		args = append(args, "external_ids:"+str)

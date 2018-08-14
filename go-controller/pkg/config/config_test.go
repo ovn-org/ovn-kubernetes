@@ -774,7 +774,7 @@ server-cacert=/path/to/sb-ca.crt`), 0644)
 
 		It("configures server northbound SSL correctly", func() {
 			fakeCmds := ovntest.AddFakeCmd(nil, &ovntest.ExpectedCmd{
-				Cmd: "ovn-nbctl set-connection pssl:6641",
+				Cmd: "ovn-nbctl set-connection pssl:6641 -- set connection . inactivity_probe=0",
 			})
 			fakeCmds = ovntest.AddFakeCmd(fakeCmds, &ovntest.ExpectedCmd{
 				Cmd: "ovn-nbctl del-ssl",
@@ -849,7 +849,7 @@ server-cacert=/path/to/sb-ca.crt`), 0644)
 
 		It("configures server southbound SSL correctly", func() {
 			fakeCmds := ovntest.AddFakeCmd(nil, &ovntest.ExpectedCmd{
-				Cmd: "ovn-sbctl set-connection pssl:6642",
+				Cmd: "ovn-sbctl set-connection pssl:6642 -- set connection . inactivity_probe=0",
 			})
 			fakeCmds = ovntest.AddFakeCmd(fakeCmds, &ovntest.ExpectedCmd{
 				Cmd: "ovn-sbctl del-ssl",
