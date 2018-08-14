@@ -12,16 +12,16 @@ import (
 
 type namespacePolicy struct {
 	sync.Mutex
-	name            string
-	namespace       string
-	ingressPolicies []*gressPolicy
-	egressPolicies  []*gressPolicy
-	stop            chan bool
-	stopWg          *sync.WaitGroup
-	localPods       map[string]bool //pods effected by this policy
-	portGroupUUID   string          //uuid for OVN port_group
-	portGroupName   string
-	deleted         bool //deleted policy
+	name             string
+	namespace        string
+	ingressPolicies  []*gressPolicy
+	egressPolicies   []*gressPolicy
+	podHandlerIDList []uint64
+	nsHandlerIDList  []uint64
+	localPods        map[string]bool //pods effected by this policy
+	portGroupUUID    string          //uuid for OVN port_group
+	portGroupName    string
+	deleted          bool //deleted policy
 }
 
 type gressPolicy struct {
@@ -252,4 +252,13 @@ func (oc *Controller) deleteNetworkPolicy(
 		oc.deleteNetworkPolicyOld(policy)
 	}
 
+}
+
+func (oc *Controller) shutdownHandlers(np *namespacePolicy) {
+	for _, id := range np.podHandlerIDList {
+		_ = oc.watchFactory.RemovePodHandler(id)
+	}
+	for _, id := range np.nsHandlerIDList {
+		_ = oc.watchFactory.RemoveNamespaceHandler(id)
+	}
 }

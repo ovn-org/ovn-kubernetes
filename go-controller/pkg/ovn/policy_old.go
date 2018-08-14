@@ -9,7 +9,6 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/client-go/tools/cache"
 	"strings"
-	"sync"
 )
 
 func (oc *Controller) syncNetworkPoliciesOld(networkPolicies []interface{}) {
@@ -608,7 +607,6 @@ func (oc *Controller) handleLocalPodSelectorDelFuncOld(
 func (oc *Controller) handleLocalPodSelectorOld(
 	policy *knet.NetworkPolicy, np *namespacePolicy) {
 
-	np.stopWg.Add(1)
 	id, err := oc.watchFactory.AddFilteredPodHandler(policy.Namespace,
 		&policy.Spec.PodSelector,
 		cache.ResourceEventHandlerFuncs{
@@ -628,16 +626,14 @@ func (oc *Controller) handleLocalPodSelectorOld(
 		return
 	}
 
-	<-np.stop
-	_ = oc.watchFactory.RemovePodHandler(id)
-	np.stopWg.Done()
+	np.podHandlerIDList = append(np.podHandlerIDList, id)
+
 }
 
 func (oc *Controller) handlePeerPodSelectorOld(
 	policy *knet.NetworkPolicy, podSelector *metav1.LabelSelector,
 	addressSet string, addressMap map[string]bool, np *namespacePolicy) {
 
-	np.stopWg.Add(1)
 	id, err := oc.watchFactory.AddFilteredPodHandler(policy.Namespace,
 		podSelector,
 		cache.ResourceEventHandlerFuncs{
@@ -714,9 +710,8 @@ func (oc *Controller) handlePeerPodSelectorOld(
 		return
 	}
 
-	<-np.stop
-	_ = oc.watchFactory.RemovePodHandler(id)
-	np.stopWg.Done()
+	np.podHandlerIDList = append(np.podHandlerIDList, id)
+
 }
 
 func (oc *Controller) handlePeerNamespaceSelectorModifyOld(
@@ -757,7 +752,6 @@ func (oc *Controller) handlePeerNamespaceSelectorOld(
 	namespaceSelector *metav1.LabelSelector,
 	gress *gressPolicy, np *namespacePolicy) {
 
-	np.stopWg.Add(1)
 	id, err := oc.watchFactory.AddFilteredNamespaceHandler("",
 		namespaceSelector,
 		cache.ResourceEventHandlerFuncs{
@@ -799,9 +793,8 @@ func (oc *Controller) handlePeerNamespaceSelectorOld(
 		return
 	}
 
-	<-np.stop
-	_ = oc.watchFactory.RemoveNamespaceHandler(id)
-	np.stopWg.Done()
+	np.nsHandlerIDList = append(np.nsHandlerIDList, id)
+
 }
 
 // AddNetworkPolicy adds network policy and create corresponding acl rules
@@ -826,8 +819,8 @@ func (oc *Controller) addNetworkPolicyOld(policy *knet.NetworkPolicy) {
 	np.namespace = policy.Namespace
 	np.ingressPolicies = make([]*gressPolicy, 0)
 	np.egressPolicies = make([]*gressPolicy, 0)
-	np.stop = make(chan bool, 1)
-	np.stopWg = &sync.WaitGroup{}
+	np.podHandlerIDList = make([]uint64, 0)
+	np.nsHandlerIDList = make([]uint64, 0)
 	np.localPods = make(map[string]bool)
 
 	// Go through each ingress rule.  For each ingress rule, create an
@@ -865,14 +858,14 @@ func (oc *Controller) addNetworkPolicyOld(policy *knet.NetworkPolicy) {
 			if fromJSON.NamespaceSelector != nil {
 				// For each peer namespace selector, we create a watcher that
 				// populates ingress.peerAddressSets
-				go oc.handlePeerNamespaceSelectorOld(policy,
+				oc.handlePeerNamespaceSelectorOld(policy,
 					fromJSON.NamespaceSelector, ingress, np)
 			}
 
 			if fromJSON.PodSelector != nil {
 				// For each peer pod selector, we create a watcher that
 				// populates the addressSet
-				go oc.handlePeerPodSelectorOld(policy, fromJSON.PodSelector,
+				oc.handlePeerPodSelectorOld(policy, fromJSON.PodSelector,
 					hashedLocalAddressSet, peerPodAddressMap, np)
 			}
 		}
@@ -914,14 +907,14 @@ func (oc *Controller) addNetworkPolicyOld(policy *knet.NetworkPolicy) {
 			if toJSON.NamespaceSelector != nil {
 				// For each peer namespace selector, we create a watcher that
 				// populates egress.peerAddressSets
-				go oc.handlePeerNamespaceSelectorOld(policy,
+				oc.handlePeerNamespaceSelectorOld(policy,
 					toJSON.NamespaceSelector, egress, np)
 			}
 
 			if toJSON.PodSelector != nil {
 				// For each peer pod selector, we create a watcher that
 				// populates the addressSet
-				go oc.handlePeerPodSelectorOld(policy, toJSON.PodSelector,
+				oc.handlePeerPodSelectorOld(policy, toJSON.PodSelector,
 					hashedLocalAddressSet, peerPodAddressMap, np)
 			}
 		}
@@ -932,7 +925,7 @@ func (oc *Controller) addNetworkPolicyOld(policy *knet.NetworkPolicy) {
 
 	// For all the pods in the local namespace that this policy
 	// effects, add ACL rules.
-	go oc.handleLocalPodSelectorOld(policy, np)
+	oc.handleLocalPodSelectorOld(policy, np)
 
 	return
 }
@@ -973,6 +966,7 @@ func (oc *Controller) deleteNetworkPolicyOld(
 	np := oc.namespacePolicies[policy.Namespace][policy.Name]
 
 	np.Lock()
+	defer np.Unlock()
 
 	// Mark the policy as deleted.
 	np.deleted = true
@@ -994,14 +988,8 @@ func (oc *Controller) deleteNetworkPolicyOld(
 		oc.deleteAddressSet(hashedAddressSet)
 	}
 
-	// We should now stop all the go routines.
-	// But, we got to give up on np Lock, so that any pending pod events can proceed further, and release their own informer lock
-	np.Unlock()
-	close(np.stop)
-	np.stopWg.Wait()
-
-	np.Lock()
-	defer np.Unlock()
+	// We should now stop all the handlers go routines.
+	oc.shutdownHandlers(np)
 
 	for logicalPort := range np.localPods {
 		logicalSwitch := oc.getLogicalSwitchForLogicalPort(
