@@ -24,10 +24,11 @@ var (
 
 	// Default holds parsed config file parameters and command-line overrides
 	Default = DefaultConfig{
-		MTU:           1400,
-		ConntrackZone: 64000,
-		EncapType:     "geneve",
-		EncapIP:       "",
+		MTU:             1400,
+		ConntrackZone:   64000,
+		EncapType:       "geneve",
+		EncapIP:         "",
+		InactivityProbe: 100000,
 	}
 
 	// Logging holds logging-related parsed config file parameters and command-line overrides
@@ -69,6 +70,9 @@ type DefaultConfig struct {
 	// The IP address of the encapsulation endpoint. If not specified, the IP address the
 	// NodeName resolves to will be used
 	EncapIP string `gcfg:"encap-ip"`
+	// Maximum number of milliseconds of idle time on connection that
+	// ovn-controller waits before it will send a connection health probe.
+	InactivityProbe int `gcfg:"inactivity-probe"`
 }
 
 // LoggingConfig holds logging-related parsed config file parameters and command-line overrides
@@ -232,6 +236,12 @@ var Flags = []cli.Flag{
 		Name:        "encap-ip",
 		Usage:       "The IP address of the encapsulation endpoint (default: Node IP address resolved from Node hostname)",
 		Destination: &cliConfig.Default.EncapIP,
+	},
+	cli.IntFlag{
+		Name: "inactivity-probe",
+		Usage: "Maximum number of milliseconds of idle time on " +
+			"connection for ovn-controller before it sends a inactivity probe",
+		Destination: &cliConfig.Default.InactivityProbe,
 	},
 
 	// Logging options
@@ -788,8 +798,11 @@ func (a *OvnDBAuth) SetDBAuth() error {
 	}
 
 	if a.server {
-		// Set the database connection method
-		out, err := rawExec(a.exec, a.ctlCmd, "set-connection", a.GetURL())
+		// Set the database connection method. Also set the inactivity_probe
+		// to zero as a server need not try to maintain connections to the
+		// client via OVSDB echo request/responses on top of a TCP connection.
+		out, err := rawExec(a.exec, a.ctlCmd, "set-connection", a.GetURL(),
+			"--", "set", "connection", ".", "inactivity_probe=0")
 		if err != nil {
 			return fmt.Errorf("error setting %s API connection: %v\n  %q", a.ctlCmd, err, out)
 		}

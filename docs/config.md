@@ -48,6 +48,20 @@ for the conntrack flow rules.
 conntrack-zone=64000
 ```
 
+The following option only affects ovn-controller. This is the maximum number
+of milliseconds of idle time on connection to the server before sending an
+inactivity probe message.  As a client connects to the server over TCP, it
+may take a while for the kernel to figure out if the connection is
+broken.  But the client can overcome this by periodically sending probes over
+the TCP connection to make sure that the connection is up.  On the flip side,
+when there are hundreds of nodes, the server can get bogged down by client
+probe messages.
+
+The default value is set as 100000ms. But can be changed with this config
+option
+
+inactivity-probe=600000
+
 ### [logging] section
 
 The following config values control what verbosity level logging is written at
