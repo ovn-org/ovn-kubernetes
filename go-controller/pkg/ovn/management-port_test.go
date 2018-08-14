@@ -75,27 +75,27 @@ var _ = Describe("Management Port Operations", func() {
 			)
 
 			fakeCmds := ovntest.AddFakeCmd(nil, &ovntest.ExpectedCmd{
-				Cmd: "ovn-nbctl --timeout=5 --if-exist get logical_router_port rtos-" + nodeName + " mac",
+				Cmd: "ovn-nbctl --timeout=15 --if-exist get logical_router_port rtos-" + nodeName + " mac",
 				// Return a known MAC; otherwise code autogenerates it
 				Output: lrpMAC,
 			})
 			fakeCmds = ovntest.AddFakeCmd(fakeCmds, &ovntest.ExpectedCmd{
-				Cmd:    "ovn-nbctl --timeout=5 --data=bare --no-heading --columns=_uuid find logical_router external_ids:k8s-cluster-router=yes",
+				Cmd:    "ovn-nbctl --timeout=15 --data=bare --no-heading --columns=_uuid find logical_router external_ids:k8s-cluster-router=yes",
 				Output: clusterRouterUUID,
 			})
 			fakeCmds = ovntest.AddFakeCmdsNoOutputNoError(fakeCmds, []string{
-				"ovn-nbctl --timeout=5 --may-exist lrp-add " + clusterRouterUUID + " rtos-" + nodeName + " " + lrpMAC + " " + gwCIDR,
-				"ovn-nbctl --timeout=5 -- --may-exist ls-add " + nodeName + " -- set logical_switch " + nodeName + " other-config:subnet=" + nodeSubnet + " external-ids:gateway_ip=" + gwCIDR,
-				"ovn-nbctl --timeout=5 -- --may-exist lsp-add " + nodeName + " stor-" + nodeName + " -- set logical_switch_port stor-" + nodeName + " type=router options:router-port=rtos-" + nodeName + " addresses=\"" + lrpMAC + "\"",
-				"ovs-vsctl --timeout=5 -- --may-exist add-br br-int",
-				"ovs-vsctl --timeout=5 -- --may-exist add-port br-int " + mgtPort + " -- set interface " + mgtPort + " type=internal mtu_request=" + mtu + " external-ids:iface-id=" + mgtPort,
+				"ovn-nbctl --timeout=15 --may-exist lrp-add " + clusterRouterUUID + " rtos-" + nodeName + " " + lrpMAC + " " + gwCIDR,
+				"ovn-nbctl --timeout=15 -- --may-exist ls-add " + nodeName + " -- set logical_switch " + nodeName + " other-config:subnet=" + nodeSubnet + " external-ids:gateway_ip=" + gwCIDR,
+				"ovn-nbctl --timeout=15 -- --may-exist lsp-add " + nodeName + " stor-" + nodeName + " -- set logical_switch_port stor-" + nodeName + " type=router options:router-port=rtos-" + nodeName + " addresses=\"" + lrpMAC + "\"",
+				"ovs-vsctl --timeout=15 -- --may-exist add-br br-int",
+				"ovs-vsctl --timeout=15 -- --may-exist add-port br-int " + mgtPort + " -- set interface " + mgtPort + " type=internal mtu_request=" + mtu + " external-ids:iface-id=" + mgtPort,
 			})
 			fakeCmds = ovntest.AddFakeCmd(fakeCmds, &ovntest.ExpectedCmd{
-				Cmd:    "ovs-vsctl --timeout=5 --if-exists get interface " + mgtPort + " mac_in_use",
+				Cmd:    "ovs-vsctl --timeout=15 --if-exists get interface " + mgtPort + " mac_in_use",
 				Output: mgtPortMAC,
 			})
 			fakeCmds = ovntest.AddFakeCmd(fakeCmds, &ovntest.ExpectedCmd{
-				Cmd: "ovn-nbctl --timeout=5 -- --may-exist lsp-add " + nodeName + " " + mgtPort + " -- lsp-set-addresses " + mgtPort + " " + mgtPortMAC + " " + mgtPortIP,
+				Cmd: "ovn-nbctl --timeout=15 -- --may-exist lsp-add " + nodeName + " " + mgtPort + " -- lsp-set-addresses " + mgtPort + " " + mgtPortMAC + " " + mgtPortIP,
 			})
 			if runtime.GOOS == windowsOS {
 				const ifindex string = "10"
@@ -130,18 +130,18 @@ var _ = Describe("Management Port Operations", func() {
 				})
 			}
 			fakeCmds = ovntest.AddFakeCmd(fakeCmds, &ovntest.ExpectedCmd{
-				Cmd:    "ovn-nbctl --timeout=5 --data=bare --no-heading --columns=_uuid find load_balancer external_ids:k8s-cluster-lb-tcp=yes",
+				Cmd:    "ovn-nbctl --timeout=15 --data=bare --no-heading --columns=_uuid find load_balancer external_ids:k8s-cluster-lb-tcp=yes",
 				Output: tcpLBUUID,
 			})
 			fakeCmds = ovntest.AddFakeCmdsNoOutputNoError(fakeCmds, []string{
-				"ovn-nbctl --timeout=5 set logical_switch " + nodeName + " load_balancer=" + tcpLBUUID,
+				"ovn-nbctl --timeout=15 set logical_switch " + nodeName + " load_balancer=" + tcpLBUUID,
 			})
 			fakeCmds = ovntest.AddFakeCmd(fakeCmds, &ovntest.ExpectedCmd{
-				Cmd:    "ovn-nbctl --timeout=5 --data=bare --no-heading --columns=_uuid find load_balancer external_ids:k8s-cluster-lb-udp=yes",
+				Cmd:    "ovn-nbctl --timeout=15 --data=bare --no-heading --columns=_uuid find load_balancer external_ids:k8s-cluster-lb-udp=yes",
 				Output: udpLBUUID,
 			})
 			fakeCmds = ovntest.AddFakeCmdsNoOutputNoError(fakeCmds, []string{
-				"ovn-nbctl --timeout=5 add logical_switch " + nodeName + " load_balancer " + udpLBUUID,
+				"ovn-nbctl --timeout=15 add logical_switch " + nodeName + " load_balancer " + udpLBUUID,
 			})
 
 			fexec := &fakeexec.FakeExec{
