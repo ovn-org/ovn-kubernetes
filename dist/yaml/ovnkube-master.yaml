@@ -66,6 +66,10 @@ spec:
         - mountPath: /var/run/dbus/
           name: host-var-run-dbus
           readOnly: true
+        # ovn db is stored in the pod in /etc/openvswitch
+        # and on the host in /var/lib/openvswitch/
+        - mountPath: /etc/openvswitch/
+          name: host-var-lib-ovs
         - mountPath: /var/lib/openvswitch/
           name: host-var-lib-ovs
         - mountPath: /var/run/openvswitch/
