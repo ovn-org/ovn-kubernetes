@@ -3,6 +3,9 @@ master: false
 # the minion nodes will overwrite this value
 minion: false
 
+# Timeout variable for OVS/OVN commands in seconds
+TIMEOUT : 15
+
 CLUSTER_SUBNET: "10.0.0.0/16"
 MASTER_INTERNAL_IP: "10.0.0.2" # Should always be the second IP of CLUSTER_SUBNET
 

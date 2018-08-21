@@ -202,13 +202,13 @@
 
 - name: Kubernetes Master | Enabling OVN to listen on 6641 and 6642
   shell: |
-    ovn-nbctl set-connection ptcp:6641
-    ovn-sbctl set-connection ptcp:6642
+    ovn-nbctl --timeout={{TIMEOUT}} set-connection ptcp:6641 &&
+    ovn-sbctl --timeout={{TIMEOUT}} set-connection ptcp:6642
   changed_when: false
 
 - name: Kubernetes Master | Setting OVN external_ids
   shell: |
-    ovs-vsctl set Open_vSwitch . external_ids:ovn-remote="tcp:{{ host_public_ip }}:6642" \
+    ovs-vsctl --timeout={{TIMEOUT}} set Open_vSwitch . external_ids:ovn-remote="tcp:{{ host_public_ip }}:6642" \
       external_ids:ovn-nb="tcp:{{ host_public_ip }}:6641" \
       external_ids:ovn-encap-ip="{{ host_internal_ip }}" \
       external_ids:ovn-encap-type="geneve"
@@ -222,10 +222,9 @@
 
 - name: Kubernetes Master | Prepare OVN certs
   shell: |
-    ovs-vsctl set Open_vSwitch . \
+    ovs-vsctl --timeout={{TIMEOUT}} set Open_vSwitch . \
       external_ids:k8s-api-server="https://{{ host_public_ip }}" \
-      external_ids:k8s-api-token="{{TOKEN}}"
-
+      external_ids:k8s-api-token="{{TOKEN}}" &&
     ln -fs /etc/kubernetes/tls/ca.pem /etc/openvswitch/k8s-ca.crt
   changed_when: false
 
