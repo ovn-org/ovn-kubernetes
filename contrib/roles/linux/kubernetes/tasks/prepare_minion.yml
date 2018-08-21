@@ -1,7 +1,7 @@
 ---
 - name: Kubernetes Minion | Setting OVN external_ids
   shell: |
-    ovs-vsctl set Open_vSwitch . external_ids:ovn-remote="tcp:{{ kubernetes_cluster_info.MASTER_IP }}:6642" \
+    ovs-vsctl --timeout={{TIMEOUT}} set Open_vSwitch . external_ids:ovn-remote="tcp:{{ kubernetes_cluster_info.MASTER_IP }}:6642" \
       external_ids:ovn-nb="tcp:{{ kubernetes_cluster_info.MASTER_IP }}:6641" \
       external_ids:ovn-encap-ip="{{ host_public_ip }}" \
       external_ids:ovn-encap-type="geneve"
@@ -85,10 +85,9 @@
 
 - name: Kubernetes Minion | Prepare OVN certs
   shell: |
-    ovs-vsctl set Open_vSwitch . \
+    ovs-vsctl --timeout={{TIMEOUT}} set Open_vSwitch . \
       external_ids:k8s-api-server="http://{{ host_public_ip }}:8080" \
-      external_ids:k8s-api-token="{{TOKEN}}"
-
+      external_ids:k8s-api-token="{{TOKEN}}" &&
     ln -fs /etc/kubernetes/tls/ca.pem /etc/openvswitch/k8s-ca.crt
   changed_when: false
 
