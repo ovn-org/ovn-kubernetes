@@ -43,6 +43,13 @@
         name: linux/ovn-kubernetes
     - import_role:
         name: linux/kubernetes
+    - name: Ensure /etc/hosts is updated on kube-master
+      lineinfile:
+        path: /etc/hosts
+        regexp: '{{ansible_hostname}}$'
+        line: '{{host_public_ip}} {{ansible_hostname}}'
+      delegate_to: "{{ item }}"
+      with_items: "{{groups['kube-master']}}"
 
 - hosts: kube-minions-windows
   remote_user: Administrator
@@ -76,3 +83,12 @@
         name: windows/ovn-kubernetes
     - import_role:
         name: windows/kubernetes
+    - name: Ensure /etc/hosts is updated on kube-master
+      become: true
+      become_method: sudo
+      lineinfile:
+        path: /etc/hosts
+        regexp: '{{ansible_hostname}}$'
+        line: '{{host_public_ip}} {{ansible_hostname}}'
+      delegate_to: "{{ item }}"
+      with_items: "{{groups['kube-master']}}"
