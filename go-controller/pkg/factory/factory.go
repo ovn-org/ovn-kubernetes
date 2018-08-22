@@ -42,6 +42,7 @@ func (i *informer) forEachHandler(obj interface{}, f func(id uint64, handler cac
 
 // WatchFactory initializes and manages common kube watches
 type WatchFactory struct {
+	sync.Mutex
 	iFactory       informerfactory.SharedInformerFactory
 	informers      map[reflect.Type]*informer
 	handlerCounter uint64
@@ -104,18 +105,24 @@ func NewWatchFactory(c kubernetes.Interface, stopChan <-chan struct{}) (*WatchFa
 func (wf *WatchFactory) newFederatedHandler(inf *informer) cache.ResourceEventHandlerFuncs {
 	return cache.ResourceEventHandlerFuncs{
 		AddFunc: func(obj interface{}) {
+			wf.Lock()
+			defer wf.Unlock()
 			inf.forEachHandler(obj, func(id uint64, handler cache.ResourceEventHandler) {
 				logrus.Debugf("running %v ADD event for handler %d", inf.oType, id)
 				handler.OnAdd(obj)
 			})
 		},
 		UpdateFunc: func(oldObj, newObj interface{}) {
+			wf.Lock()
+			defer wf.Unlock()
 			inf.forEachHandler(newObj, func(id uint64, handler cache.ResourceEventHandler) {
 				logrus.Debugf("running %v UPDATE event for handler %d", inf.oType, id)
 				handler.OnUpdate(oldObj, newObj)
 			})
 		},
 		DeleteFunc: func(obj interface{}) {
+			wf.Lock()
+			defer wf.Unlock()
 			if inf.oType != reflect.TypeOf(obj) {
 				tombstone, ok := obj.(cache.DeletedFinalStateUnknown)
 				if !ok {
