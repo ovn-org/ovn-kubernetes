@@ -32,16 +32,25 @@ func (oc *Controller) syncNamespaces(namespaces []interface{}) {
 }
 
 func (oc *Controller) waitForNamespaceEvent(namespace string) error {
-	// Wait for 10 seconds to get the namespace event.
-	count := 100
+	// Do 'count' retries to get namespace.
+	count := 3
 	for {
-		if oc.namespacePolicies[namespace] != nil {
-			break
+		ns, err := oc.kube.GetNamespace(namespace)
+		if err != nil {
+			logrus.Errorf("GetNamespace for %s returned error (%v)",
+				namespace, err)
 		}
+
+		if ns != nil {
+			oc.AddNamespace(ns)
+			return nil
+		}
+
 		time.Sleep(100 * time.Millisecond)
 		count--
 		if count == 0 {
-			return fmt.Errorf("timeout waiting for namespace event")
+			return fmt.Errorf("timeout getting namespace information for %s",
+				namespace)
 		}
 	}
 	return nil
@@ -92,6 +101,9 @@ func (oc *Controller) deletePodFromNamespaceAddressSet(ns, address string) {
 
 // AddNamespace creates corresponding addressset in ovn db
 func (oc *Controller) AddNamespace(ns *kapi.Namespace) {
+	if oc.namespacePolicies[ns.Name] != nil {
+		return
+	}
 	logrus.Debugf("Adding namespace: %s", ns.Name)
 
 	if oc.namespaceMutex[ns.Name] == nil {
