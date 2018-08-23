@@ -39,9 +39,6 @@ type Controller struct {
 	// address in that namespace
 	namespaceAddressSet map[string]map[string]bool
 
-	// For each namespace, a lock to protect critical regions
-	namespaceMutex map[string]*sync.Mutex
-
 	// For each namespace, a map of policy name to 'namespacePolicy'.
 	namespacePolicies map[string]map[string]*namespacePolicy
 
@@ -85,7 +82,6 @@ func NewOvnController(kubeClient kubernetes.Interface, wf *factory.WatchFactory,
 		logicalPortUUIDCache:     make(map[string]string),
 		namespaceAddressSet:      make(map[string]map[string]bool),
 		namespacePolicies:        make(map[string]map[string]*namespacePolicy),
-		namespaceMutex:           make(map[string]*sync.Mutex),
 		lspIngressDenyCache:      make(map[string]int),
 		lspEgressDenyCache:       make(map[string]int),
 		lspMutex:                 &sync.Mutex{},

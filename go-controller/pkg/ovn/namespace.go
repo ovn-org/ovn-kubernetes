@@ -4,7 +4,6 @@ import (
 	"fmt"
 	"github.com/sirupsen/logrus"
 	kapi "k8s.io/api/core/v1"
-	"sync"
 	"time"
 )
 
@@ -53,16 +52,12 @@ func (oc *Controller) waitForNamespaceEvent(namespace string) error {
 				namespace)
 		}
 	}
-	return nil
 }
 
 func (oc *Controller) addPodToNamespaceAddressSet(ns, address string) {
 	if oc.namespacePolicies[ns] == nil {
 		return
 	}
-
-	oc.namespaceMutex[ns].Lock()
-	defer oc.namespaceMutex[ns].Unlock()
 
 	// If pod has already been added, nothing to do.
 	if oc.namespaceAddressSet[ns][address] {
@@ -83,9 +78,6 @@ func (oc *Controller) deletePodFromNamespaceAddressSet(ns, address string) {
 		return
 	}
 
-	oc.namespaceMutex[ns].Lock()
-	defer oc.namespaceMutex[ns].Unlock()
-
 	if !oc.namespaceAddressSet[ns][address] {
 		return
 	}
@@ -105,15 +97,6 @@ func (oc *Controller) AddNamespace(ns *kapi.Namespace) {
 		return
 	}
 	logrus.Debugf("Adding namespace: %s", ns.Name)
-
-	if oc.namespaceMutex[ns.Name] == nil {
-		oc.namespaceMutex[ns.Name] = &sync.Mutex{}
-	}
-
-	// A big fat lock per namespace to prevent race conditions
-	// with namespace resources like address sets and deny acls.
-	oc.namespaceMutex[ns.Name].Lock()
-	defer oc.namespaceMutex[ns.Name].Unlock()
 
 	oc.namespaceAddressSet[ns.Name] = make(map[string]bool)
 
@@ -150,12 +133,7 @@ func (oc *Controller) deleteNamespace(ns *kapi.Namespace) {
 		return
 	}
 
-	oc.namespaceMutex[ns.Name].Lock()
-
 	oc.deleteAddressSet(hashedAddressSet(ns.Name))
 	oc.namespacePolicies[ns.Name] = nil
 	oc.namespaceAddressSet[ns.Name] = nil
-
-	oc.namespaceMutex[ns.Name].Unlock()
-	oc.namespaceMutex[ns.Name] = nil
 }
