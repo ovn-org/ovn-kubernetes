@@ -319,9 +319,6 @@ func (oc *Controller) createDefaultDenyPortGroup(policyType knet.PolicyType) {
 func (oc *Controller) localPodAddDefaultDeny(
 	policy *knet.NetworkPolicy, logicalPort string) {
 
-	oc.lspMutex.Lock()
-	defer oc.lspMutex.Unlock()
-
 	oc.createDefaultDenyPortGroup(knet.PolicyTypeIngress)
 	oc.createDefaultDenyPortGroup(knet.PolicyTypeEgress)
 
@@ -356,8 +353,6 @@ func (oc *Controller) localPodAddDefaultDeny(
 
 func (oc *Controller) localPodDelDefaultDeny(
 	policy *knet.NetworkPolicy, logicalPort string) {
-	oc.lspMutex.Lock()
-	defer oc.lspMutex.Unlock()
 
 	if !(len(policy.Spec.PolicyTypes) == 1 && policy.Spec.PolicyTypes[0] == knet.PolicyTypeEgress) {
 		if oc.lspIngressDenyCache[logicalPort] > 0 {

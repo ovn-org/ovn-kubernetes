@@ -162,11 +162,9 @@ func (oc *Controller) deleteLogicalPort(pod *kapi.Pod) {
 
 	delete(oc.logicalPortCache, logicalPort)
 
-	oc.lspMutex.Lock()
 	delete(oc.lspIngressDenyCache, logicalPort)
 	delete(oc.lspEgressDenyCache, logicalPort)
 	delete(oc.logicalPortUUIDCache, logicalPort)
-	oc.lspMutex.Unlock()
 
 	if !oc.portGroupSupport {
 		oc.deleteACLDenyOld(pod.Namespace, pod.Spec.NodeName, logicalPort,

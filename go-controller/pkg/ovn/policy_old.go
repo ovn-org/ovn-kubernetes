@@ -464,7 +464,6 @@ func (oc *Controller) localPodAddDefaultDenyOld(
 	policy *knet.NetworkPolicy,
 	logicalPort, logicalSwitch string) {
 
-	oc.lspMutex.Lock()
 	// Default deny rule.
 	// 1. Any pod that matches a network policy should get a default
 	// ingress deny rule.  This is irrespective of whether there
@@ -494,13 +493,11 @@ func (oc *Controller) localPodAddDefaultDenyOld(
 		}
 		oc.lspEgressDenyCache[logicalPort]++
 	}
-	oc.lspMutex.Unlock()
 }
 
 func (oc *Controller) localPodDelDefaultDenyOld(
 	policy *knet.NetworkPolicy,
 	logicalPort, logicalSwitch string) {
-	oc.lspMutex.Lock()
 
 	if !(len(policy.Spec.PolicyTypes) == 1 && policy.Spec.PolicyTypes[0] == knet.PolicyTypeEgress) {
 		if oc.lspIngressDenyCache[logicalPort] > 0 {
@@ -522,7 +519,6 @@ func (oc *Controller) localPodDelDefaultDenyOld(
 			}
 		}
 	}
-	oc.lspMutex.Unlock()
 }
 
 func (oc *Controller) handleLocalPodSelectorAddFuncOld(

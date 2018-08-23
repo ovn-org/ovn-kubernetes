@@ -10,7 +10,6 @@ import (
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/tools/cache"
 	"reflect"
-	"sync"
 )
 
 // Controller structure is the object which holds the controls for starting
@@ -56,9 +55,6 @@ type Controller struct {
 	// to add a egress deny rule.
 	lspEgressDenyCache map[string]int
 
-	// A mutex for lspIngressDenyCache and lspEgressDenyCache
-	lspMutex *sync.Mutex
-
 	// supports port_group?
 	portGroupSupport bool
 }
@@ -84,7 +80,6 @@ func NewOvnController(kubeClient kubernetes.Interface, wf *factory.WatchFactory,
 		namespacePolicies:        make(map[string]map[string]*namespacePolicy),
 		lspIngressDenyCache:      make(map[string]int),
 		lspEgressDenyCache:       make(map[string]int),
-		lspMutex:                 &sync.Mutex{},
 		gatewayCache:             make(map[string]string),
 		loadbalancerClusterCache: make(map[string]string),
 		nodePortEnable:           nodePortEnable,
