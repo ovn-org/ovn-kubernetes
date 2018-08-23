@@ -25,7 +25,8 @@ Pull down Kubernetes (it's big)
 * cd server
 * tar xvzf ../kubernetes/server/kubernetes-server-linux-amd64.tar.gz
 
-Bringup the Vagrant setup
+Bringup the Vagrant setup (by going back to the ovn-kubernetes/vagrant
+directory)
 
 * vagrant up k8s-master
 * vagrant up k8s-minion1
