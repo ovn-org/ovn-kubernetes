@@ -539,9 +539,6 @@ func (oc *Controller) handleLocalPodSelectorAddFuncOld(
 	// Get the logical port name.
 	logicalPort := fmt.Sprintf("%s_%s", pod.Namespace, pod.Name)
 
-	np.Lock()
-	defer np.Unlock()
-
 	if np.deleted {
 		return
 	}
@@ -576,9 +573,6 @@ func (oc *Controller) handleLocalPodSelectorDelFuncOld(
 
 	// Get the logical port name.
 	logicalPort := fmt.Sprintf("%s_%s", pod.Namespace, pod.Name)
-
-	np.Lock()
-	defer np.Unlock()
 
 	if np.deleted {
 		return
@@ -640,8 +634,6 @@ func (oc *Controller) handlePeerPodSelectorOld(
 					return
 				}
 
-				np.Lock()
-				defer np.Unlock()
 				if np.deleted {
 					return
 				}
@@ -661,8 +653,6 @@ func (oc *Controller) handlePeerPodSelectorOld(
 					return
 				}
 
-				np.Lock()
-				defer np.Unlock()
 				if np.deleted {
 					return
 				}
@@ -686,8 +676,6 @@ func (oc *Controller) handlePeerPodSelectorOld(
 					return
 				}
 
-				np.Lock()
-				defer np.Unlock()
 				if np.deleted {
 					return
 				}
@@ -753,8 +741,6 @@ func (oc *Controller) handlePeerNamespaceSelectorOld(
 		cache.ResourceEventHandlerFuncs{
 			AddFunc: func(obj interface{}) {
 				namespace := obj.(*kapi.Namespace)
-				np.Lock()
-				defer np.Unlock()
 				if np.deleted {
 					return
 				}
@@ -767,8 +753,6 @@ func (oc *Controller) handlePeerNamespaceSelectorOld(
 			},
 			DeleteFunc: func(obj interface{}) {
 				namespace := obj.(*kapi.Namespace)
-				np.Lock()
-				defer np.Unlock()
 				if np.deleted {
 					return
 				}
@@ -960,9 +944,6 @@ func (oc *Controller) deleteNetworkPolicyOld(
 		return
 	}
 	np := oc.namespacePolicies[policy.Namespace][policy.Name]
-
-	np.Lock()
-	defer np.Unlock()
 
 	// Mark the policy as deleted.
 	np.deleted = true
