@@ -107,8 +107,8 @@ At this point ovn is providing networking for the cluster.
 
 There is a single docker image that is used in all of the ovn daemonsets.
 All daemonset yaml files must be edited to reference the same desired image.
-The images can be found in the official OKD repositories or they can be
-built in the openvswitch/ovn-kubernetes git repo.
+The images can be found in docker.io, the official OKD repositories or
+they can be built in the openvswitch/ovn-kubernetes git repo.
 
 The OKD image is built in the openshift/ose-ovn-kubernetes repo from rhel:7
 with openvswitch from the fastdatapath repo.
@@ -126,10 +126,12 @@ The OKD 3.11 image name includes the build tag:
 openshift3/ose-ovn-kubernetes:v3.11.0-123483
 ```
 
-NOTE:
-- A prebuilt community version of the image is not currently available.  The
-daemonset yaml files point to the OKD image above. You may have to change the
-image name.
+The community image based on current development is:
+```
+docker.io/ovnkube/ovn-daemonset:latest
+```
+The daemonset yaml files reference the community image.
+
 
 Alternatively, the image can be built from the ovn-kubernetes repo.
 When doing this edit the Makefile to itag and push the image to your existing
@@ -159,7 +161,3 @@ can be deleted and recreated.
 # oc create -f ovnkube-master.yaml
 # oc create -f ovnkube.yaml
 ```
-
-NOTE:
-- Never delete the ovs-ovn daemonset.
-
