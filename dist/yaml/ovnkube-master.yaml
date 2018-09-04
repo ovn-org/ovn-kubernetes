@@ -25,6 +25,7 @@ spec:
         component: network
         type: infra
         openshift.io/component: network
+        beta.kubernetes.io/os: "linux"
       annotations:
         scheduler.alpha.kubernetes.io/critical-pod: ''
     spec:
@@ -143,6 +144,7 @@ spec:
         lifecycle:
       nodeSelector:
         node-role.kubernetes.io/master: "true"
+        beta.kubernetes.io/os: "linux"
       volumes:
       # In bootstrap mode, the host config contains information not easily available
       # from other locations.
