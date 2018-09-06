@@ -315,32 +315,3 @@
           image: nginx
         nodeSelector:
           beta.kubernetes.io/os: linux
-- name: Create test yamls
-  blockinfile:
-    path: /root/nano-pod-{{item}}.yaml
-    create: yes
-    marker: "# {mark} Ansible automatic example generation"
-    block: |
-      apiVersion: v1
-      kind: Pod
-      metadata:
-        name: nano-{{item}}
-        labels:
-          name: webserver
-      spec:
-        containers:
-        - name: nano
-          image: ovnkubernetes/pause
-          imagePullPolicy: IfNotPresent
-        # This test yaml uses a custom nanoserver container that starts a simple
-        # http server that can be used for tests. It's much faster compared to the
-        # IIS container.
-        - name: nano2
-          image: alinbalutoiu/nanoserver-web:{{item}}
-          imagePullPolicy: IfNotPresent
-        nodeSelector:
-          beta.kubernetes.io/os: windows
-          # kubernetes.io/hostname: windows_{{item}}_hostname
-  with_items:
-    - 1709
-    - 1803
