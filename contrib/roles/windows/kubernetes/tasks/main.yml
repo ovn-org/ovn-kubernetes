@@ -68,3 +68,34 @@
 
 - include_tasks: ./create_infracontainer.yml
   when: infra_inspect.rc != 0 and ansible_kernel in supported_versions_by_the_playbook
+
+- name: Create test yaml for this host
+  become: true
+  become_method: sudo
+  blockinfile:
+    path: /root/nano-pod-{{windows_container_tag}}-{{ansible_hostname|lower}}.yaml
+    create: yes
+    marker: "# {mark} Ansible automatic example generation"
+    block: |
+      apiVersion: v1
+      kind: Pod
+      metadata:
+        name: nano-{{windows_container_tag}}-{{ansible_hostname|lower}}
+        labels:
+          name: webserver
+      spec:
+        containers:
+        - name: nano
+          image: ovnkubernetes/pause
+          imagePullPolicy: IfNotPresent
+        # This test yaml uses a custom nanoserver container that starts a simple
+        # http server that can be used for tests. It's much faster compared to the
+        # IIS container.
+        - name: nano2
+          image: alinbalutoiu/nanoserver-web:{{windows_container_tag}}
+          imagePullPolicy: IfNotPresent
+        nodeSelector:
+          beta.kubernetes.io/os: windows
+          kubernetes.io/hostname: {{ansible_hostname|lower}}
+  delegate_to: "{{ item }}"
+  with_items: "{{groups['kube-master']}}"
