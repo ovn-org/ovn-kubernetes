@@ -59,6 +59,7 @@
       Remove-ItemProperty $RegROPath "OVN_Init_Node" -ErrorAction SilentlyContinue
       Start-Service ovn-kubernetes-node
       netsh firewall set opmode disable
+      Set-ExecutionPolicy -ExecutionPolicy Restricted -Force
     newline: unix
 
 - name: Kubernetes minion | Make minion-init startup script Run
@@ -69,6 +70,7 @@
 
     $script = "C:\WINDOWS\system32\WindowsPowerShell\v1.0\powershell.exe -noexit C:\startup.ps1"
 
+    Set-ExecutionPolicy -ExecutionPolicy Unrestricted -Force
     Set-ItemProperty $RegPath "AutoAdminLogon" -Value "1" -type String  
     Set-ItemProperty $RegPath "DefaultUsername" -Value "{{ host_info.username }}" -type String  
     Set-ItemProperty $RegPath "DefaultPassword" -Value "{{ host_info.password }}" -type String
