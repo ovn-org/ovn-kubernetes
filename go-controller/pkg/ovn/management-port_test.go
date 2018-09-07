@@ -157,7 +157,7 @@ var _ = Describe("Management Port Operations", func() {
 			_, err = config.InitConfig(ctx, fexec, nil)
 			Expect(err).NotTo(HaveOccurred())
 
-			err = CreateManagementPort(nodeName, nodeSubnet, clusterCIDR, serviceCIDR)
+			err = CreateManagementPort(nodeName, nodeSubnet, serviceCIDR, []string{clusterCIDR})
 			Expect(err).NotTo(HaveOccurred())
 
 			Expect(fexec.CommandCalls).To(Equal(len(fakeCmds)))

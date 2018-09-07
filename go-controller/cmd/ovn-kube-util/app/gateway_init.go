@@ -92,7 +92,7 @@ func initGateway(context *cli.Context) error {
 		return fmt.Errorf("One of physical-interface or bridge-interface has to be specified")
 	}
 
-	return util.GatewayInit(clusterIPSubnet, nodeName, physicalIP,
+	return util.GatewayInit([]string{clusterIPSubnet}, nodeName, physicalIP,
 		physicalInterface, bridgeInterface, defaultGW, rampoutIPSubnet,
 		enableLB)
 }
