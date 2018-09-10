@@ -5,7 +5,8 @@ import (
 	"strings"
 	"time"
 
-	util "github.com/openvswitch/ovn-kubernetes/go-controller/pkg/util"
+	"github.com/TomCodeLV/OVSDB-golang-lib/pkg/dbtransaction"
+	"github.com/TomCodeLV/OVSDB-golang-lib/pkg/helpers"
 	"github.com/sirupsen/logrus"
 	kapi "k8s.io/api/core/v1"
 )
@@ -23,27 +24,49 @@ func (oc *Controller) syncPods(pods []interface{}) {
 		expectedLogicalPorts[logicalPort] = true
 	}
 
-	// get the list of logical ports from OVN
-	output, stderr, err := util.RunOVNNbctlHA("--data=bare", "--no-heading",
-		"--columns=name", "find", "logical_switch_port", "external_ids:pod=true")
-	if err != nil {
-		logrus.Errorf("Error in obtaining list of logical ports, "+
-			"stderr: %q, err: %v",
-			stderr, err)
-		return
+	var existingLogicalPorts []string
+	ports := oc.ovnNbCache.GetMap("Logical_Switch_Port", "name")
+	for _, port := range ports {
+		if externalIds, ok := port.(map[string]interface{})["external_ids"]; ok {
+			if externalIds != nil {
+				if pod, ok := externalIds.(map[string]interface{})["pod"]; ok {
+					if pod == "true" {
+						existingLogicalPorts = append(existingLogicalPorts, port.(map[string]interface{})["name"].(string))
+					}
+				}
+			}
+		}
 	}
-	existingLogicalPorts := strings.Fields(output)
+
+	switches := oc.ovnNbCache.GetMap("Logical_Switch", "uuid")
 	for _, existingPort := range existingLogicalPorts {
 		if _, ok := expectedLogicalPorts[existingPort]; !ok {
 			// not found, delete this logical port
 			logrus.Infof("Stale logical port found: %s. This logical port will be deleted.", existingPort)
-			out, stderr, err := util.RunOVNNbctlHA("--if-exists", "lsp-del",
-				existingPort)
-			if err != nil {
-				logrus.Errorf("Error in deleting pod's logical port "+
-					"stdout: %q, stderr: %q err: %v",
-					out, stderr, err)
+
+			portID := ports[existingPort].(map[string]interface{})["uuid"].(string)
+
+			// find corresponding switch
+			var switchID string
+			for uuid, sw := range switches {
+				if _, ok := sw.(map[string]interface{})["ports"].(map[string]interface{})[portID]; ok {
+					switchID = uuid
+					break
+				}
 			}
+
+			var retry = true
+			for retry {
+				_, _, retry = (*oc.ovnNBDB).Transaction("OVN_Northbound").DeleteReferences(dbtransaction.DeleteReferences{
+					Table:           "Logical_Switch",
+					WhereId:         switchID,
+					ReferenceColumn: "ports",
+					DeleteIdsList:   []string{portID},
+					Wait:            true,
+					Cache:           oc.ovnNbCache,
+				}).Commit()
+			}
+
 			if !oc.portGroupSupport {
 				oc.deletePodAcls(existingPort)
 			}
@@ -52,46 +75,63 @@ func (oc *Controller) syncPods(pods []interface{}) {
 }
 
 func (oc *Controller) deletePodAcls(logicalPort string) {
-	// delete the ACL rules on OVN that corresponding pod has been deleted
-	uuids, stderr, err := util.RunOVNNbctlHA("--data=bare", "--no-heading",
-		"--columns=_uuid", "find", "ACL",
-		fmt.Sprintf("external_ids:logical_port=%s", logicalPort))
-	if err != nil {
-		logrus.Errorf("Error in getting list of acls "+
-			"stdout: %q, stderr: %q, error: %v", uuids, stderr, err)
-		return
+	acls := oc.ovnNbCache.GetMap("ACL", "uuid")
+	var aclUUIDs []string
+	for uuid, acl := range acls {
+		if externalIds, ok := acl.(map[string]interface{})["external_ids"]; ok {
+			if externalIds != nil {
+				if aclLogicalPort, ok := externalIds.(map[string]interface{})["logical_port"]; ok {
+					if aclLogicalPort == logicalPort {
+						aclUUIDs = append(aclUUIDs, uuid)
+					}
+				}
+			}
+		}
 	}
 
-	if uuids == "" {
+	if len(aclUUIDs) == 0 {
 		logrus.Debugf("deletePodAcls: returning because find " +
 			"returned no ACLs")
 		return
 	}
 
-	uuidSlice := strings.Fields(uuids)
-	for _, uuid := range uuidSlice {
+	for _, uuid := range aclUUIDs {
 		// Get logical switch
-		out, stderr, err := util.RunOVNNbctlHA("--data=bare",
-			"--no-heading", "--columns=_uuid", "find", "logical_switch",
-			fmt.Sprintf("acls{>=}%s", uuid))
-		if err != nil {
-			logrus.Errorf("find failed to get the logical_switch of acl "+
-				"uuid=%s, stderr: %q, (%v)", uuid, stderr, err)
+		switches := oc.ovnNbCache.GetMap("Logical_Switch", "uuid")
+		var logicalSwitch string
+		for swUUID, sw := range switches {
+			if acls, ok := sw.(map[string]interface{})["acls"]; ok {
+				if acls != nil {
+					for aclID := range acls.(map[string]interface{}) {
+						if aclID == uuid {
+							logicalSwitch = swUUID
+							break
+						}
+					}
+				}
+			}
+
+			if logicalSwitch != "" {
+				break
+			}
+		}
+		if logicalSwitch == "" {
+			logrus.Errorf("failed to get the logical_switch of acl "+
+				"uuid=%s", uuid)
 			continue
 		}
 
-		if out == "" {
-			continue
-		}
-		logicalSwitch := out
-
-		_, stderr, err = util.RunOVNNbctlHA("--if-exists", "remove",
-			"logical_switch", logicalSwitch, "acls", uuid)
-		if err != nil {
-			logrus.Errorf("failed to delete the allow-from rule %s for"+
-				" logical_switch=%s, logical_port=%s, stderr: %q, (%v)",
-				uuid, logicalSwitch, logicalPort, stderr, err)
-			continue
+		// delete the ACL rules on OVN that corresponding pod has been deleted
+		var retry = true
+		for retry {
+			_, _, retry = (*oc.ovnNBDB).Transaction("OVN_Northbound").DeleteReferences(dbtransaction.DeleteReferences{
+				Table:           "Logical_Switch",
+				WhereId:         logicalSwitch,
+				ReferenceColumn: "acls",
+				DeleteIdsList:   []string{uuid},
+				Wait:            true,
+				Cache:           oc.ovnNbCache,
+			}).Commit()
 		}
 	}
 }
@@ -101,41 +141,39 @@ func (oc *Controller) getLogicalPortUUID(logicalPort string) string {
 		return oc.logicalPortUUIDCache[logicalPort]
 	}
 
-	out, stderr, err := util.RunOVNNbctlHA("--if-exists", "get",
-		"logical_switch_port", logicalPort, "_uuid")
-	if err != nil {
-		logrus.Errorf("Error while getting uuid for logical_switch_port "+
-			"%s, stderr: %q, err: %v", logicalPort, stderr, err)
+	uuid := oc.ovnNbCache.GetMap("Logical_Switch_Port", "name", logicalPort)["uuid"]
+
+	if uuid == nil {
 		return ""
 	}
 
-	if out == "" {
-		return out
-	}
-
-	oc.logicalPortUUIDCache[logicalPort] = out
+	oc.logicalPortUUIDCache[logicalPort] = uuid.(string)
 	return oc.logicalPortUUIDCache[logicalPort]
 }
 
 func (oc *Controller) getGatewayFromSwitch(logicalSwitch string) (string, string, error) {
-	var gatewayIPMaskStr, stderr string
+	var gatewayIPMaskStr string
 	var ok bool
-	var err error
+
 	if gatewayIPMaskStr, ok = oc.gatewayCache[logicalSwitch]; !ok {
-		gatewayIPMaskStr, stderr, err = util.RunOVNNbctlHA("--if-exists",
-			"get", "logical_switch", logicalSwitch,
-			"external_ids:gateway_ip")
-		if err != nil {
-			logrus.Errorf("Failed to get gateway IP:  %s, stderr: %q, %v",
-				gatewayIPMaskStr, stderr, err)
-			return "", "", err
+		ls := oc.ovnNbCache.GetMap("Logical_Switch", "name", logicalSwitch)
+		if externalIds, ok := ls["external_ids"]; ok {
+			if externalIds != nil {
+				if gatewayIPMaskStr, ok = externalIds.(map[string]interface{})["gateway_ip"].(string); ok {
+					if gatewayIPMaskStr == "" {
+						return "", "", fmt.Errorf("Empty gateway IP in logical switch %s", logicalSwitch)
+					}
+
+					oc.gatewayCache[logicalSwitch] = gatewayIPMaskStr
+				}
+			}
 		}
 		if gatewayIPMaskStr == "" {
-			return "", "", fmt.Errorf("Empty gateway IP in logical switch %s",
-				logicalSwitch)
+			logrus.Errorf("Failed to get gateway")
+			return "", "", fmt.Errorf("No gateway IP")
 		}
-		oc.gatewayCache[logicalSwitch] = gatewayIPMaskStr
 	}
+
 	gatewayIPMask := strings.Split(gatewayIPMaskStr, "/")
 	gatewayIP := gatewayIPMask[0]
 	mask := gatewayIPMask[1]
@@ -150,12 +188,36 @@ func (oc *Controller) deleteLogicalPort(pod *kapi.Pod) {
 
 	logrus.Infof("Deleting pod: %s", pod.Name)
 	logicalPort := fmt.Sprintf("%s_%s", pod.Namespace, pod.Name)
-	out, stderr, err := util.RunOVNNbctlHA("--if-exists", "lsp-del",
-		logicalPort)
-	if err != nil {
-		logrus.Errorf("Error in deleting pod logical port "+
-			"stdout: %q, stderr: %q, (%v)",
-			out, stderr, err)
+
+	portID := oc.ovnNbCache.GetMap("Logical_Switch_Port", "name", logicalPort)["uuid"]
+
+	if portID != nil {
+		// find corresponding switch
+		var switchID string
+		var err error
+		switches := oc.ovnNbCache.GetMap("Logical_Switch", "uuid")
+		for uuid, sw := range switches {
+			if _, ok := sw.(map[string]interface{})["ports"].(map[string]interface{})[portID.(string)]; ok {
+				switchID = uuid
+				break
+			}
+		}
+
+		retry := true
+		for retry {
+			_, err, retry = oc.ovnNBDB.Transaction("OVN_Northbound").DeleteReferences(dbtransaction.DeleteReferences{
+				Table:           "Logical_Switch",
+				WhereId:         switchID,
+				ReferenceColumn: "ports",
+				DeleteIdsList:   []string{portID.(string)},
+				Wait:            true,
+				Cache:           oc.ovnNbCache,
+			}).Commit()
+		}
+
+		if err != nil {
+			logrus.Errorf("Error in deleting pod logical port (%v)", err)
+		}
 	}
 
 	ipAddress := oc.getIPFromOvnAnnotation(pod.Annotations["ovn"])
@@ -208,29 +270,80 @@ func (oc *Controller) addLogicalPort(pod *kapi.Pod) {
 		ipAddress := oc.getIPFromOvnAnnotation(annotation)
 		macAddress := oc.getMacFromOvnAnnotation(annotation)
 
-		out, stderr, err = util.RunOVNNbctlHA("--may-exist", "lsp-add",
-			logicalSwitch, portName, "--", "lsp-set-addresses", portName,
-			fmt.Sprintf("%s %s", macAddress, ipAddress), "--", "--if-exists",
-			"clear", "logical_switch_port", portName, "dynamic_addresses")
+		switchID := oc.ovnNbCache.GetMap("Logical_Switch", "name", logicalSwitch)["uuid"].(string)
+
+		portID := oc.ovnNbCache.GetMap("Logical_Switch_Port", "name", portName)["uuid"]
+
+		if portID != nil {
+			retry := true
+			for retry {
+				txn := oc.ovnNBDB.Transaction("OVN_Northbound")
+				txn.Update(dbtransaction.Update{
+					Table: "Logical_Switch_Port",
+					Where: [][]interface{}{{"_uuid", "==", []string{"uuid", portID.(string)}}},
+					Row: map[string]interface{}{
+						"addresses":         fmt.Sprintf("%s %s", macAddress, ipAddress),
+						"dynamic_addresses": dbtransaction.GetNil(),
+					},
+				})
+				_, err, retry = txn.Commit()
+			}
+		} else {
+			retry := true
+			for retry {
+				txn := oc.ovnNBDB.Transaction("OVN_Northbound")
+				newPortID := txn.Insert(dbtransaction.Insert{
+					Table: "Logical_Switch_Port",
+					Row: map[string]interface{}{
+						"name":      portName,
+						"addresses": fmt.Sprintf("%s %s", macAddress, ipAddress),
+					},
+				})
+				txn.InsertReferences(dbtransaction.InsertReferences{
+					Table:           "Logical_Switch",
+					WhereId:         switchID,
+					ReferenceColumn: "ports",
+					InsertIdsList:   []string{newPortID},
+					Wait:            true,
+					Cache:           oc.ovnNbCache,
+				})
+				_, err, retry = txn.Commit()
+			}
+		}
 		if err != nil {
-			logrus.Errorf("Failed to add logical port to switch "+
-				"stdout: %q, stderr: %q (%v)",
-				out, stderr, err)
+			logrus.Errorf("Failed to add logical port to switch (%v)", err)
 			return
 		}
 	} else {
-		out, stderr, err = util.RunOVNNbctlHA("--wait=sb", "--",
-			"--may-exist", "lsp-add", logicalSwitch, portName,
-			"--", "lsp-set-addresses",
-			portName, "dynamic", "--", "set",
-			"logical_switch_port", portName,
-			"external-ids:namespace="+pod.Namespace,
-			"external-ids:logical_switch="+logicalSwitch,
-			"external-ids:pod=true")
+		switchID := oc.ovnNbCache.GetMap("Logical_Switch", "name", logicalSwitch)["uuid"].(string)
+
+		retry := true
+		for retry {
+			txn := oc.ovnNBDB.Transaction("OVN_Northbound")
+			newPortID := txn.Insert(dbtransaction.Insert{
+				Table: "Logical_Switch_Port",
+				Row: map[string]interface{}{
+					"name":      portName,
+					"addresses": "dynamic",
+					"external_ids": helpers.MakeOVSDBMap(map[string]interface{}{
+						"logical_switch": logicalSwitch,
+						"namespace":      pod.Namespace,
+						"pod":            "true",
+					}),
+				},
+			})
+			txn.InsertReferences(dbtransaction.InsertReferences{
+				Table:           "Logical_Switch",
+				WhereId:         switchID,
+				ReferenceColumn: "ports",
+				InsertIdsList:   []string{newPortID},
+				Wait:            true,
+				Cache:           oc.ovnNbCache,
+			})
+			_, err, retry = txn.Commit()
+		}
 		if err != nil {
-			logrus.Errorf("Error while creating logical port %s "+
-				"stdout: %q, stderr: %q (%v)",
-				portName, out, stderr, err)
+			logrus.Errorf("Failed to add dynamic logical port to switch (%v)", err)
 			return
 		}
 	}
@@ -245,20 +358,15 @@ func (oc *Controller) addLogicalPort(pod *kapi.Pod) {
 
 	count := 30
 	for count > 0 {
+		var addr interface{}
 		if isStaticIP {
-			out, stderr, err = util.RunOVNNbctlHA("get",
-				"logical_switch_port", portName, "addresses")
+			addr = oc.ovnNbCache.GetMap("Logical_Switch_Port", "name", portName)["addresses"]
 		} else {
-			out, stderr, err = util.RunOVNNbctlHA("get",
-				"logical_switch_port", portName, "dynamic_addresses")
+			addr = oc.ovnNbCache.GetMap("Logical_Switch_Port", "name", portName)["dynamic_addresses"]
 		}
-		if err == nil && out != "[]" {
+		if addr != nil {
+			out = addr.(string)
 			break
-		}
-		if err != nil {
-			logrus.Errorf("Error while obtaining addresses for %s - %v", portName,
-				err)
-			return
 		}
 		time.Sleep(time.Second)
 		count--
@@ -313,12 +421,49 @@ func (oc *Controller) AddLogicalPortWithIP(pod *kapi.Pod) {
 	ipAddress := oc.getIPFromOvnAnnotation(annotation)
 	macAddress := oc.getMacFromOvnAnnotation(annotation)
 
-	stdout, stderr, err := util.RunOVNNbctlHA("--", "--may-exist", "lsp-add",
-		logicalSwitch, portName, "--", "lsp-set-addresses", portName,
-		fmt.Sprintf("%s %s", macAddress, ipAddress))
+	switchID := oc.ovnNbCache.GetMap("Logical_Switch", "name", logicalSwitch)["uuid"].(string)
+
+	portID := oc.ovnNbCache.GetMap("Logical_Switch_Port", "name", portName)["uuid"]
+
+	var err error
+	if portID != nil {
+		retry := true
+		for retry {
+			txn := oc.ovnNBDB.Transaction("OVN_Northbound")
+			txn.Update(dbtransaction.Update{
+				Table: "Logical_Switch_Port",
+				Where: [][]interface{}{{"_uuid", "==", []string{"uuid", portID.(string)}}},
+				Row: map[string]interface{}{
+					"addresses": fmt.Sprintf("%s %s", macAddress, ipAddress),
+				},
+			})
+			_, err, retry = txn.Commit()
+		}
+	} else {
+		retry := true
+		for retry {
+			txn := oc.ovnNBDB.Transaction("OVN_Northbound")
+			newPortID := txn.Insert(dbtransaction.Insert{
+				Table: "Logical_Switch_Port",
+				Row: map[string]interface{}{
+					"name":      portName,
+					"addresses": fmt.Sprintf("%s %s", macAddress, ipAddress),
+				},
+			})
+			txn.InsertReferences(dbtransaction.InsertReferences{
+				Table:           "Logical_Switch",
+				WhereId:         switchID,
+				ReferenceColumn: "ports",
+				InsertIdsList:   []string{newPortID},
+				Wait:            true,
+				Cache:           oc.ovnNbCache,
+			})
+			_, err, retry = txn.Commit()
+		}
+	}
+
 	if err != nil {
-		logrus.Errorf("Failed to add logical port to switch, stdout: %q, "+
-			"stderr: %q, error: %v", stdout, stderr, err)
+		logrus.Errorf("Failed to add logical port to switch (%v)", err)
 		return
 	}
 }

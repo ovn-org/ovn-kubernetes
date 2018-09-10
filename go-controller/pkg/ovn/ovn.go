@@ -1,15 +1,19 @@
 package ovn
 
 import (
+	"github.com/TomCodeLV/OVSDB-golang-lib/pkg/dbcache"
+	"github.com/TomCodeLV/OVSDB-golang-lib/pkg/ovsdb"
+	"github.com/openvswitch/ovn-kubernetes/go-controller/pkg/config"
 	"github.com/openvswitch/ovn-kubernetes/go-controller/pkg/factory"
 	"github.com/openvswitch/ovn-kubernetes/go-controller/pkg/kube"
-	util "github.com/openvswitch/ovn-kubernetes/go-controller/pkg/util"
+	"github.com/openvswitch/ovn-kubernetes/go-controller/pkg/util"
 	"github.com/sirupsen/logrus"
 	kapi "k8s.io/api/core/v1"
 	kapisnetworking "k8s.io/api/networking/v1"
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/tools/cache"
 	"reflect"
+	"strings"
 	"sync"
 )
 
@@ -64,6 +68,12 @@ type Controller struct {
 
 	// supports port_group?
 	portGroupSupport bool
+
+	// NB database handle
+	ovnNBDB *ovsdb.OVSDB
+
+	// NB database cache handle
+	ovnNbCache *dbcache.Cache
 }
 
 const (
@@ -74,9 +84,43 @@ const (
 	UDP = "UDP"
 )
 
+// dialNB dials into NorthBound database. Initialize callback creates a cache where
+// all required data will be available for later use.
+func dialNB() (*ovsdb.OVSDB, *dbcache.Cache) {
+	addr := strings.SplitN(config.OvnNorth.ClientAuth.OvnAddressForClient, ":", 2)
+
+	nbCache := new(dbcache.Cache)
+	db := ovsdb.Dial([][]string{{addr[0], addr[1]}}, func(db *ovsdb.OVSDB) error {
+		// initialize cache
+		tmpCache, err := db.Cache(ovsdb.Cache{
+			Schema: "OVN_Northbound",
+			Tables: map[string][]string{
+				"Logical_Switch":      {"_uuid", "name", "ports", "acls", "external_ids"},
+				"Logical_Switch_Port": {"_uuid", "name", "external_ids", "addresses", "dynamic_addresses"},
+				"ACL": {"_uuid", "external_ids"},
+			},
+			Indexes: map[string][]string{
+				"Logical_Switch_Port": {"name"},
+				"Logical_Switch":      {"name"},
+			},
+		})
+
+		if err == nil {
+			*nbCache = *tmpCache
+			return nil
+		}
+
+		logrus.Errorf("Error in NB cache: %v", err)
+		return err
+	})
+
+	return db, nbCache
+}
+
 // NewOvnController creates a new OVN controller for creating logical network
 // infrastructure and policy
 func NewOvnController(kubeClient kubernetes.Interface, wf *factory.WatchFactory, nodePortEnable bool) *Controller {
+	db, tmpCache := dialNB()
 	return &Controller{
 		kube:                     &kube.Kube{KClient: kubeClient},
 		watchFactory:             wf,
@@ -92,6 +136,8 @@ func NewOvnController(kubeClient kubernetes.Interface, wf *factory.WatchFactory,
 		gatewayCache:             make(map[string]string),
 		loadbalancerClusterCache: make(map[string]string),
 		nodePortEnable:           nodePortEnable,
+		ovnNBDB:                  db,
+		ovnNbCache:               tmpCache,
 	}
 }
 
