@@ -29,7 +29,7 @@ net_cidr=10.128.0.0/14
 svc_cidr=172.30.0.0/16
 
 # get the ovn master's ip address
-host_ip=$(host $(hostname) | gawk '{ print $4 }' )
+host_ip=$(host -t A $(hostname) | gawk '{ print $4 }' )
 
 # Currently using tcp, may move to ssl
 OvnNorth="tcp://${host_ip}:6641"
