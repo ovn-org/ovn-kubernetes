@@ -1,0 +1,14 @@
+# ovn-namespace.yaml
+#
+# Setup for Kubernetes to support the ovn-kubernetes plugin
+#
+# Create the namespace for ovn-kubernetes.
+#
+# This provisioning is done as part of installation after the cluster is
+# up and before the ovn daemonsets are created.
+
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: ovn-kubernetes
+

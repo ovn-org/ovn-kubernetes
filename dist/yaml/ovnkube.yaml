@@ -45,6 +45,8 @@ spec:
         # This is the community build
         image: "docker.io/ovnkube/ovn-daemonset:latest"
         # This is an official redhat build
+        # image: "registry.access.redhat.com/openshift3/ose-ovn-kubernetes:v3.11.0-123483"
+        # This is an official (internal) redhat build
         # image: "brew-pulp-docker01.web.prod.ext.phx2.redhat.com:8888/openshift3/ose-ovn-kubernetes:v3.11.0-123483"
         # This is development build image
         # image: "quay.io/pecameron/ovn-kube:latest"
