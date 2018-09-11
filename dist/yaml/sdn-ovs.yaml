@@ -107,6 +107,8 @@ spec:
             cpu: 200m
             memory: 400Mi
 
+      nodeSelector:
+        beta.kubernetes.io/os: "linux"
       volumes:
       - name: host-modules
         hostPath:
