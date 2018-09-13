@@ -60,6 +60,7 @@ metadata:
   name: ovn-cluster-reader
 roleRef:
   name: cluster-reader
+  kind: ClusterRole
 subjects:
 - kind: ServiceAccount
   name: ovn
@@ -75,6 +76,7 @@ metadata:
   name: ovn-reader
 roleRef:
   name: system:ovn-reader
+  kind: ClusterRole
 subjects:
 - kind: ServiceAccount
   name: ovn
@@ -90,6 +92,7 @@ metadata:
   name: cluster-admin-0
 roleRef:
   name: cluster-admin
+  kind: ClusterRole
 subjects:
 - kind: ServiceAccount
   name: ovn
