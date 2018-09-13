@@ -10,5 +10,7 @@
 apiVersion: v1
 kind: Namespace
 metadata:
+  annotations:
+    openshift.io/node-selector: ""        
   name: ovn-kubernetes
 
