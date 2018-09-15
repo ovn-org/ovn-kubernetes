@@ -54,7 +54,7 @@ rules:
   - update
 
 ---
-apiVersion: rbac.authorization.k8s.io/v1
+apiVersion: authorization.openshift.io/v1
 kind: ClusterRoleBinding
 metadata:
   name: ovn-cluster-reader
@@ -69,7 +69,7 @@ userNames:
 groupNames: []
 
 ---
-apiVersion: rbac.authorization.k8s.io/v1
+apiVersion: authorization.openshift.io/v1
 kind: ClusterRoleBinding
 metadata:
   name: ovn-reader
@@ -84,7 +84,7 @@ userNames:
 groupNames: []
 
 ---
-apiVersion: rbac.authorization.k8s.io/v1
+apiVersion: authorization.openshift.io/v1
 kind: ClusterRoleBinding
 metadata:
   name: cluster-admin-0
