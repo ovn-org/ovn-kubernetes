@@ -13,4 +13,6 @@ metadata:
   annotations:
     openshift.io/node-selector: ""        
   name: ovn-kubernetes
+  annotations:
+    openshift.io/node-selector: ""
 
