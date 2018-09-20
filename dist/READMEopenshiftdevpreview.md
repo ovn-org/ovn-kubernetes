@@ -22,17 +22,15 @@ os_sdn_network_plugin_name='redhat/openshift-ovs-multitenant'
   to
 ```
 os_sdn_network_plugin_name='cni'
+openshift_use_openshift_sdn='False'
 ```
 
 When the cluster install is complete and the cluster is up there will
-be no cluster networking. The openshift-sdn and openshift-ovs daemonsets
-are, however, installed and must be removed.
-
+be no cluster networking. The ovn northdb on the ovn master is persistent and must be
+deleted. login to the master and:
 ```
 $ ssh root@master.node.com   <<<----- the cluster master node
-# oc project openshift-sdn
-# oc delete ds sdn
-# oc delete ds ovs
+# rm -rf /var/lib/openvswitch/ovn*.db
 ```
 
 The ovn daemons that run on master use tcp ports 6641 an 6642. The ports must be
@@ -90,8 +88,8 @@ Using project "ovn-kubernetes" on server "https://wsfd-netdev22.ntdv.lab.eng.bos
 # oc get nodes
 NAME                                        STATUS    ROLES           AGE       VERSION
 wsfd-netdev22.ntdv.lab.eng.bos.redhat.com   Ready     infra,master    43d       v1.10.0+b81c8f8
-wsfd-netdev28.ntdv.lab.eng.bos.redhat.com   Ready     compute,infra   43d       v1.10.0+b81c8f8
-wsfd-netdev35.ntdv.lab.eng.bos.redhat.com   Ready     compute,infra   43d       v1.10.0+b81c8f8
+wsfd-netdev28.ntdv.lab.eng.bos.redhat.com   Ready     compute         43d       v1.10.0+b81c8f8
+wsfd-netdev35.ntdv.lab.eng.bos.redhat.com   Ready     compute         43d       v1.10.0+b81c8f8
 # oc get ds
 NAME             DESIRED   CURRENT   READY     UP-TO-DATE   AVAILABLE   NODE SELECTOR                         AGE
 ovnkube          2         2         2         2            2           <none>                                22h
@@ -130,7 +128,7 @@ aws.openshift.com:443/
 ```
 The OKD 3.11 image name includes the build tag:
 ```
-openshift3/ose-ovn-kubernetes:v3.11.0
+openshift3/ose-ovn-kubernetes:v3.11
 ```
 
 The community image based on current development is:
