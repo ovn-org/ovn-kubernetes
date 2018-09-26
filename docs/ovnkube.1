@@ -10,7 +10,11 @@ The ovn utility used to confiugre ovn-kubernetes
 .SH GLOBAL OPTIONS
 .TP
 \fB\--cluster-subnet\fR string
-Cluster wide IP subnet to use (default "11.11.0.0/16")
+A comma separated set of IP subnets and the associated hostsubnetlengths to use for
+the cluster (eg, "10.128.0.0/14/23,10.0.0.0/14/23").  Each entry is given in the form
+IP address/subnet mask/hostsubnetlength, the hostsubnetlength is optional and if
+unspecified defaults to 24. The hostsubnetlength defines how many IP addresses are
+dedicated to each node. (default "11.11.0.0/16")
 .TP
 \fB\--service-cluster-ip-range\fR value
 A CIDR notation IP range from which k8s assigns service cluster IPs.
