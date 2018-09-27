@@ -102,7 +102,7 @@ func generateGatewayIP() (string, error) {
 }
 
 // GatewayInit creates a gateway router for the local chassis.
-func GatewayInit(clusterIPSubnet, nodeName, nicIP, physicalInterface,
+func GatewayInit(clusterIPSubnet []string, nodeName, nicIP, physicalInterface,
 	bridgeInterface, defaultGW, rampoutIPSubnet string,
 	gatewayLBEnable bool) error {
 
@@ -203,14 +203,16 @@ func GatewayInit(clusterIPSubnet, nodeName, nicIP, physicalInterface,
 		return err
 	}
 
-	// Add a static route in GR with distributed router as the nexthop.
-	stdout, stderr, err = RunOVNNbctl("--may-exist", "lr-route-add",
-		gatewayRouter, clusterIPSubnet, "100.64.1.1")
-	if err != nil {
-		logrus.Errorf("Failed to add a static route in GR with distributed "+
-			"router as the nexthop, stdout: %q, stderr: %q, error: %v",
-			stdout, stderr, err)
-		return err
+	for _, entry := range clusterIPSubnet {
+		// Add a static route in GR with distributed router as the nexthop.
+		stdout, stderr, err = RunOVNNbctl("--may-exist", "lr-route-add",
+			gatewayRouter, entry, "100.64.1.1")
+		if err != nil {
+			logrus.Errorf("Failed to add a static route in GR with distributed "+
+				"router as the nexthop, stdout: %q, stderr: %q, error: %v",
+				stdout, stderr, err)
+			return err
+		}
 	}
 
 	// Add a default route in distributed router with first GR as the nexthop.
@@ -414,12 +416,14 @@ func GatewayInit(clusterIPSubnet, nodeName, nicIP, physicalInterface,
 	}
 
 	// Default SNAT rules.
-	stdout, stderr, err = RunOVNNbctl("--may-exist", "lr-nat-add",
-		gatewayRouter, "snat", physicalIP, clusterIPSubnet)
-	if err != nil {
-		logrus.Errorf("Failed to create default SNAT rules, stdout: %q, "+
-			"stderr: %q, error: %v", stdout, stderr, err)
-		return err
+	for _, entry := range clusterIPSubnet {
+		stdout, stderr, err = RunOVNNbctl("--may-exist", "lr-nat-add",
+			gatewayRouter, "snat", physicalIP, entry)
+		if err != nil {
+			logrus.Errorf("Failed to create default SNAT rules, stdout: %q, "+
+				"stderr: %q, error: %v", stdout, stderr, err)
+			return err
+		}
 	}
 
 	// When there are multiple gateway routers (which would be the likely

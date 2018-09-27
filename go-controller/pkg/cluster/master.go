@@ -205,10 +205,8 @@ func (cluster *OvnClusterController) checkMasterIPChange(
 // TODO: Verify that the cluster was not already called with a different global subnet
 //  If true, then either quit or perform a complete reconfiguration of the cluster (recreate switches/routers with new subnet values)
 func (cluster *OvnClusterController) StartClusterMaster(masterNodeName string) error {
-	clusterNetwork := cluster.ClusterIPNet
-	hostSubnetLength := cluster.HostSubnetLength
 
-	subrange := make([]string, 0)
+	alreadyAllocated := make([]string, 0)
 	existingNodes, err := cluster.Kube.GetNodes()
 	if err != nil {
 		logrus.Errorf("Error in initializing/fetching subnets: %v", err)
@@ -217,16 +215,27 @@ func (cluster *OvnClusterController) StartClusterMaster(masterNodeName string) e
 	for _, node := range existingNodes.Items {
 		hostsubnet, ok := node.Annotations[OvnHostSubnet]
 		if ok {
-			subrange = append(subrange, hostsubnet)
+			alreadyAllocated = append(alreadyAllocated, hostsubnet)
 		}
 	}
+	masterSubnetAllocatorList := make([]*netutils.SubnetAllocator, 0)
 	// NewSubnetAllocator is a subnet IPAM, which takes a CIDR (first argument)
 	// and gives out subnets of length 'hostSubnetLength' (second argument)
 	// but omitting any that exist in 'subrange' (third argument)
-	cluster.masterSubnetAllocator, err = netutils.NewSubnetAllocator(clusterNetwork.String(), hostSubnetLength, subrange)
-	if err != nil {
-		return err
+	for _, clusterEntry := range cluster.ClusterIPNet {
+		subrange := make([]string, 0)
+		for _, entry := range alreadyAllocated {
+			if clusterEntry.CIDR.Contains(net.ParseIP(entry)) {
+				subrange = append(subrange, entry)
+			}
+		}
+		subnetAllocator, err := netutils.NewSubnetAllocator(clusterEntry.CIDR.String(), 32-clusterEntry.HostSubnetLength, subrange)
+		if err != nil {
+			return err
+		}
+		masterSubnetAllocatorList = append(masterSubnetAllocatorList, subnetAllocator)
 	}
+	cluster.masterSubnetAllocatorList = masterSubnetAllocatorList
 
 	// now go over the 'existing' list again and create annotations for those who do not have it
 	for _, node := range existingNodes.Items {
@@ -344,19 +353,26 @@ func (cluster *OvnClusterController) addNode(node *kapi.Node) error {
 			return nil
 		}
 	}
-	// Create new subnet
-	sn, err := cluster.masterSubnetAllocator.GetNetwork()
-	if err != nil {
-		return fmt.Errorf("Error allocating network for node %s: %v", node.Name, err)
-	}
 
-	err = cluster.Kube.SetAnnotationOnNode(node, OvnHostSubnet, sn.String())
-	if err != nil {
-		_ = cluster.masterSubnetAllocator.ReleaseNetwork(sn)
-		return fmt.Errorf("Error creating subnet %s for node %s: %v", sn.String(), node.Name, err)
+	// Create new subnet
+	for _, possibleSubnet := range cluster.masterSubnetAllocatorList {
+		sn, err := possibleSubnet.GetNetwork()
+		if err == netutils.ErrSubnetAllocatorFull {
+			// Current subnet exhausted, check next possible subnet
+			continue
+		} else if err != nil {
+			return fmt.Errorf("Error allocating network for node %s: %v", node.Name, err)
+		} else {
+			err = cluster.Kube.SetAnnotationOnNode(node, OvnHostSubnet, sn.String())
+			if err != nil {
+				_ = possibleSubnet.ReleaseNetwork(sn)
+				return fmt.Errorf("Error creating subnet %s for node %s: %v", sn.String(), node.Name, err)
+			}
+			logrus.Infof("Created HostSubnet %s", sn.String())
+			return nil
+		}
 	}
-	logrus.Infof("Created HostSubnet %s", sn.String())
-	return nil
+	return fmt.Errorf("error allocating netork for node %s: No more allocatable ranges", node.Name)
 }
 
 func (cluster *OvnClusterController) deleteNode(node *kapi.Node) error {
@@ -369,13 +385,17 @@ func (cluster *OvnClusterController) deleteNode(node *kapi.Node) error {
 	if err != nil {
 		return fmt.Errorf("Error in parsing hostsubnet - %v", err)
 	}
-	err = cluster.masterSubnetAllocator.ReleaseNetwork(subnet)
-	if err != nil {
-		return fmt.Errorf("Error deleting subnet %v for node %q: %v", sub, node.Name, err)
+	for _, possibleSubnet := range cluster.masterSubnetAllocatorList {
+		err = possibleSubnet.ReleaseNetwork(subnet)
+		if err == nil {
+			logrus.Infof("Deleted HostSubnet %s for node %s", sub, node.Name)
+			return nil
+		}
 	}
+	// SubnetAllocator.network is an unexported field so the only way to figure out if a subnet is in a network is to try and delete it
+	// if deletion succeeds then stop iterating, if the list is exhausted the node subnet wasn't deleteted return err
+	return fmt.Errorf("Error deleting subnet %v for node %q: subnet not found in any CIDR range or already available", sub, node.Name)
 
-	logrus.Infof("Deleted HostSubnet %s for node %s", sub, node.Name)
-	return nil
 }
 
 func (cluster *OvnClusterController) watchNodes() error {

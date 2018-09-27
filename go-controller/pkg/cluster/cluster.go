@@ -14,13 +14,12 @@ import (
 
 // OvnClusterController is the object holder for utilities meant for cluster management
 type OvnClusterController struct {
-	Kube                  kube.Interface
-	watchFactory          *factory.WatchFactory
-	masterSubnetAllocator *netutils.SubnetAllocator
+	Kube                      kube.Interface
+	watchFactory              *factory.WatchFactory
+	masterSubnetAllocatorList []*netutils.SubnetAllocator
 
-	ClusterIPNet          *net.IPNet
 	ClusterServicesSubnet string
-	HostSubnetLength      uint32
+	ClusterIPNet          []CIDRNetworkEntry
 
 	GatewayInit      bool
 	GatewayIntf      string
@@ -30,6 +29,12 @@ type OvnClusterController struct {
 	NodePortEnable   bool
 	OvnHA            bool
 	LocalnetGateway  bool
+}
+
+// CIDRNetworkEntry is the object that holds the definition for a single network CIDR range
+type CIDRNetworkEntry struct {
+	CIDR             *net.IPNet
+	HostSubnetLength uint32
 }
 
 const (

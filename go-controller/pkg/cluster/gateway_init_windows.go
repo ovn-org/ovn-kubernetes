@@ -3,6 +3,6 @@
 package cluster
 
 func (cluster *OvnClusterController) initGateway(
-	nodeName, clusterIPSubnet, subnet string) error {
+	nodeName string, clusterIPSubnet []string, subnet string) error {
 	return nil
 }
