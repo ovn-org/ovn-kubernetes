@@ -1,0 +1,12 @@
+# ansible hosts file
+
+# This may be a copy of the host file used to install the cluster
+
+[OSEv3:children]
+masters
+
+[masters]
+# result of `hostname` on master node
+#wsfd-netdev22.ntdv.lab.eng.bos.redhat.com
+
+
