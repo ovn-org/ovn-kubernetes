@@ -10,23 +10,74 @@
 # This script is run as part of installation after the cluster is
 # up and before the ovn daemonsets are created.
 
-health=$(kubectl get --raw /healthz/ready)
-if [ $health != 'ok' ]
-then
-  echo " cluster not ready"
-  exit 1
-fi
+trap 'kill $(jobs -p); exit 0' TERM
 
+cfg=${1:-"/etc/origin/master/master-config.yaml"}
 
-# get api server
-api=$(kubectl get po -n kube-system -o wide | gawk '/master-api/{ print $7 }')
+is_cluster_up () {
+  health=$(kubectl get --raw /healthz/ready)
+  if [[ $health != 'ok' ]]; then
+    return 1
+  fi
+  return 0
+}
+
+is_api_server_ready () {
+  api=$(kubectl get po -n kube-system -o wide | gawk '/master-api/{ print $7 }')
+  if [[ ${api} == '' ]]; then
+    return 1
+  fi
+  return 0
+}
+
+wait_for_condition () {
+  msg="$1"
+  retries=0
+  while true; do
+    $1
+    if [[ $? != 0 ]]; then
+      (( retries += 1 ))
+      if [[ "${retries}" -gt 4 ]]; then
+        echo "error: ${msg} - NO, exiting"
+        exit 1
+      fi
+      echo "info: Waiting 2 sec for ${msg} - YES ..."
+      sleep 2
+    else
+      break
+    fi
+  done
+}
+
+#  ---------------
+# wait for cluster up
+wait_for_condition is_cluster_up
+
+# wait for  api server
+wait_for_condition is_api_server_ready
 apiserver=https://${api}:8443
 
-# get the network cidr (master-config.yaml clusterNetworkCIDR)
-net_cidr=10.128.0.0/14
+# from master-config.yaml
+#clusterNetworks:
+#  - cidr: 10.128.0.0/14
+#    hostSubnetLength: 9
+#    externalIPNetworkCIDRs:
+#  - 0.0.0.0/0
+#    networkPluginName: cni
+#  serviceNetworkCIDR: 172.30.0.0/16
 
-# get the service subnet cidr (master-config.yaml servicesSubnet)
+net_cidr=10.128.0.0/14/23
 svc_cidr=172.30.0.0/16
+if [[ -s ${cfg} ]]; then
+  # get the network cidr (master-config.yaml clusterNetworkCIDR)
+  cidr=$(gawk '/cidr:/{ print $3}'  ${cfg} )
+  sub=$(gawk '/hostSubnetLength/{ print $2}'  ${cfg} )
+  (( net = 32 - ${sub} ))
+  net_cidr=${cidr}"/"${net}
+
+  # get the service subnet cidr (master-config.yaml servicesSubnet)
+  svc_cidr=$(gawk '/serviceNetworkCIDR/{ print $2}'  ${cfg} )
+fi
 
 # get the ovn master's ip address
 host_ip=$(host -t A $(hostname) | gawk '{ print $4 }' )
