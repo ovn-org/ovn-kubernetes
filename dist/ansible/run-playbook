@@ -1,0 +1,11 @@
+#!/bin/bash
+
+# clone ovn-kubernetes on master and cd to dist/ansible
+# git clone https://github.com/openvswitch/ovn-kubernetes ~/ovn-kubernetes
+# cd ~/ovn-kubernetes/dist/ansible
+# edit hosts for hostname of master
+# edit ../dist/*yaml for desired image
+# ./run-playbook
+
+ansible-playbook -i hosts ovn-playbook.yaml
+

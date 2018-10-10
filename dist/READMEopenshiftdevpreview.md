@@ -26,61 +26,25 @@ openshift_use_openshift_sdn='False'
 ```
 
 When the cluster install is complete and the cluster is up there will
-be no cluster networking. The ovn northdb on the ovn master is persistent and must be
-deleted. login to the master and:
-```
-$ ssh root@master.node.com   <<<----- the cluster master node
-# rm -rf /var/lib/openvswitch/ovn*.db
-```
+be no cluster networking.
 
-The ovn daemons that run on master use tcp ports 6641 an 6642. The ports must be
-opened on the master. As root, run the following:
-
-```
-# iptables -A OS_FIREWALL_ALLOW -p tcp -m state --state NEW -m tcp --dport 6641 -j ACCEPT
-# iptables -A OS_FIREWALL_ALLOW -p tcp -m state --state NEW -m tcp --dport 6642 -j ACCEPT
-```
-
-The needed ovn daemonsets and setup script are in the openvswitch/ovn-kubernetes
-repo on github.
-
-Clone ovn-kubernetes:
+Clone ovn-kubernetes on a convenient host where you can run ansible-playbook:
 ```
 # git clone https://github.com/openvswitch/ovn-kubernetes
-# cd ovn-kubernetes/dist
+# cd ovn-kubernetes/dist/ansible
 ```
+
+Edit the hosts file adding the name of the cluster master.
+
+Optionally, edit the name of the desired image into the daemonset
+yaml files. All of the daemonsets use the same image.
+The default is the community image.
+
 Provision the cluster for OVN:
 ```
-# oc create -f yaml/ovn-namespace.yaml
-# oc create -f yaml/ovn-policy.yaml
-# oc project ovn-kubernetes
-# oc adm policy add-scc-to-user anyuid -z ovn
+# ./run-playbook
 ```
 
-Run the ovn-setup script to create the needed configmap:
-```
-# ./ansible/scripts/ovn-setup.sh
-```
-
-NOTE:
-- All of the daemonsets use the same image.
-- You must edit each yaml file, yaml/ovnkube.yaml, yaml/ovnkube-master.yaml, and
-yaml/sdn-ovs.yaml, to include your image name. (see discussion below)
-
-Start the ovn-ovs daemonset (it runs openvswitch on all nodes)
-```
-# oc create -f yaml/sdn-ovs.yaml
-```
-
-Start the master ovn daemonset (it runs on the master node):
-```
-# oc create -f yaml/ovnkube-master.yaml
-```
-
-Start the node ovn daemonsets (they run on the compute nodes):
-```
-# oc create -f yaml/ovnkube.yaml
-```
 
 ```
 # oc project
@@ -107,11 +71,11 @@ ovs-ovn-qfk5n          1/1       Running   0          16d
 
 At this point ovn is providing networking for the cluster.
 
-## Images
+## Images:
 
 There is a single docker image that is used in all of the ovn daemonsets.
 All daemonset yaml files must be edited to reference the same desired image.
-The images can be found in docker.io, the official OKD repositories or
+The images can be found in docker.io, one of the official OKD repositories or
 they can be built in the openvswitch/ovn-kubernetes git repo.
 
 The OKD image is built in the openshift/ose-ovn-kubernetes repo from rhel:7

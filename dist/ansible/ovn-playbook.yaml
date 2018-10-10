@@ -1,0 +1,94 @@
+# Install ovn onto cluster
+# This is done when the cluster is up with no networking
+
+# On a convienent host, clone ovn-kubernetes cd to dist/ansible 
+# git clone https://github.com/openvswitch/ovn-kubernetes ~/ovn-kubernetes
+# cd ~/ovn-kubernetes/dist/ansible
+
+# edit hosts file for the hostname of the master
+
+# ./run-playbook
+
+- hosts: masters
+  become: yes
+  become_user: root
+  tasks:
+  # OVN data is persistent, so delete the database
+  - name: Remove OVS DB Content
+    file:
+      state: absent
+      name: /var/lib/openvswitch/ovnnb_db.db
+  - name: Remove OVS DB Content
+    file:
+      state: absent
+      name: /var/lib/openvswitch/ovnsb_db.db
+
+  # iptables -A OS_FIREWALL_ALLOW -p tcp -m state --state NEW -m tcp --dport 6641 -j ACCEPT
+  - name: iptables allow 6641
+    iptables:
+      chain: OS_FIREWALL_ALLOW
+      ctstate: NEW
+      destination_port: 6641
+      jump: ACCEPT
+      protocol: tcp
+
+  # iptables -A OS_FIREWALL_ALLOW -p tcp -m state --state NEW -m tcp --dport 6642 -j ACCEPT
+  - name: iptables allow 6642
+    iptables:
+      chain: OS_FIREWALL_ALLOW
+      ctstate: NEW
+      destination_port: 6642
+      jump: ACCEPT
+      protocol: tcp
+
+  # copy yaml files to master
+  - name: Make dirctory /root/ovn/yaml
+    file:
+      state: directory
+      path: /root/ovn/yaml
+  - name: Make directory /root/ovn/scripts
+    file:
+      state: directory
+      path: /root/ovn/scripts
+  - name: Copy ovn-namespace.yaml
+    copy: src=../yaml/ovn-namespace.yaml dest=/root/ovn/yaml/ovn-namespace.yaml
+  - name: Copy ovn-policy.yaml
+    copy: src=../yaml/ovn-policy.yaml dest=/root/ovn/yaml/ovn-policy.yaml
+  - name: Copy ovn-policy.yaml
+    copy:
+      src: scripts/ovn-setup.sh
+      dest: /root/ovn/scripts/ovn-setup.sh
+      mode: 0755
+  - name: Copy sdn-ovs.yaml
+    copy: src=../yaml/sdn-ovs.yaml dest=/root/ovn/yaml/sdn-ovs.yaml
+  - name: Copy ovnkube-master.yaml
+    copy: src=../yaml/ovnkube-master.yaml dest=/root/ovn/yaml/ovnkube-master.yaml
+  - name: Copy ovnkube.yaml
+    copy: src=../yaml/ovnkube.yaml dest=/root/ovn/yaml/ovnkube.yaml
+
+  - name: Provision the OVN Namespace
+    shell: oc create -f /root/ovn/yaml/ovn-namespace.yaml
+    ignore_errors: yes
+  - name: Provision the OVN Policy
+    shell: oc create -f /root/ovn/yaml/ovn-policy.yaml
+    ignore_errors: yes
+  - name: Provision the OVN Project
+    shell: oc project ovn-kubernetes
+    ignore_errors: yes
+  - name: Add adm policy auyuid
+    shell: oc adm policy add-scc-to-user anyuid -z ovn
+    ignore_errors: yes
+
+  - name: Run the ovn-setup
+    shell: /root/ovn/scripts/ovn-setup.sh
+    ignore_errors: yes
+
+  - name: Start the ovn-ovs daemonset
+    shell: oc create -f /root/ovn/yaml/sdn-ovs.yaml
+    ignore_errors: yes
+  - name: Start the master ovn daemonset
+    shell: oc create -f /root/ovn/yaml/ovnkube-master.yaml
+    ignore_errors: yes
+  - name: Start the node ovn daemonset
+    shell: oc create -f /root/ovn/yaml/ovnkube.yaml
+    ignore_errors: yes
