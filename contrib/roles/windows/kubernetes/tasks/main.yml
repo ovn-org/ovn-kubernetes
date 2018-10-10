@@ -33,6 +33,20 @@
   include_tasks: ./setup_docker.yml
   when: transparent_inspect.rc != 0
 
+- name: Kubernetes | Check powershell execution policy
+  win_shell: Get-ExecutionPolicy
+  register: execution_policy
+  changed_when: false
+
+- name: Kubernetes | Set execution_policy_required variable
+  set_fact:
+    execution_policy_required: "{{ true if execution_policy.stdout_lines[0] == 'Restricted' else false}}"
+
+- name: Kubernetes | Enable unrestricted execution policy for powershell scripts
+  win_shell: Set-ExecutionPolicy -ExecutionPolicy Unrestricted -Force
+  changed_when: false
+  when: execution_policy_required
+
 # This creates a startup script which will be added to run once at login time.
 # This is due to the fact that connection drops while doing the initial setup
 # and it's safer to have everything inside a powershell script to run.
@@ -56,6 +70,11 @@
     - name: Kubernetes | Run minion-init
       include_tasks: ./run_minion_init.yml
   when: ping_ovn_gateway.rc != 0
+
+- name: Kubernetes | Change to restricted execution policy for powershell scripts
+  win_shell: Set-ExecutionPolicy -ExecutionPolicy Restricted -Force
+  changed_when: false
+  when: execution_policy_required
 
 # There is no infra container for Windows Server, this creates a custom
 # infra container
