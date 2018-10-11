@@ -147,25 +147,9 @@ var _ = Describe("Gateway Init Operations", func() {
 			_, err = config.InitConfig(ctx, fexec, nil)
 			Expect(err).NotTo(HaveOccurred())
 
-			fakeClient := &fake.Clientset{}
-			stop := make(chan struct{})
-			wf, err := factory.NewWatchFactory(fakeClient, stop)
-			Expect(err).NotTo(HaveOccurred())
-
-			cluster := OvnClusterController{
-				watchFactory:     wf,
-				GatewayInit:      true,
-				GatewayIntf:      "",
-				GatewayBridge:    "",
-				GatewayNextHop:   "",
-				GatewaySpareIntf: false,
-				NodePortEnable:   false,
-				LocalnetGateway:  true,
-			}
-
 			ipt, err := util.NewFakeWithProtocol(iptables.ProtocolIPv4)
 			Expect(err).NotTo(HaveOccurred())
-			err = cluster.initGatewayInternal(nodeName, []string{clusterCIDR}, nodeSubnet, ipt)
+			err = initLocalnetGatewayInternal(nodeName, []string{clusterCIDR}, nodeSubnet, ipt)
 			Expect(err).NotTo(HaveOccurred())
 
 			Expect(fexec.CommandCalls).To(Equal(len(fakeCmds)))
@@ -408,7 +392,7 @@ cookie=0x0, duration=8366.597s, table=1, n_packets=10641, n_bytes=10370087, prio
 				err = testNS.Do(func(ns.NetNS) error {
 					defer GinkgoRecover()
 
-					err = cluster.initGatewayInternal(nodeName, []string{clusterCIDR}, nodeSubnet, ipt)
+					err = cluster.initGateway(nodeName, []string{clusterCIDR}, nodeSubnet)
 					Expect(err).NotTo(HaveOccurred())
 
 					// Verify the code moved eth0's IP address, MAC, and routes
@@ -540,7 +524,7 @@ cookie=0x0, duration=8366.597s, table=1, n_packets=10641, n_bytes=10370087, prio
 				err = testNS.Do(func(ns.NetNS) error {
 					defer GinkgoRecover()
 
-					err = cluster.initGatewayInternal(nodeName, []string{clusterCIDR}, nodeSubnet, ipt)
+					err = cluster.initGateway(nodeName, []string{clusterCIDR}, nodeSubnet)
 					Expect(err).NotTo(HaveOccurred())
 
 					// Verify the code didn't touch eth0's IP and MAC

@@ -76,7 +76,9 @@ func generateGatewayIP() (string, error) {
 			stdout, stderr, err)
 		return "", err
 	}
-	ips := strings.Split(strings.TrimSpace(stdout), "\n")
+	// Convert \r\n to \n to support Windows line endings
+	stdout = strings.Replace(strings.TrimSpace(stdout), "\r\n", "\n", -1)
+	ips := strings.Split(stdout, "\n")
 
 	ipStart, ipStartNet, _ := net.ParseCIDR("100.64.1.0/24")
 	ipMax, _, _ := net.ParseCIDR("100.64.1.255/24")

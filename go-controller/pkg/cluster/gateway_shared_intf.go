@@ -1,5 +1,3 @@
-// +build linux
-
 package cluster
 
 import (
@@ -265,20 +263,9 @@ func initSharedGateway(
 				gwIntf, err)
 		}
 	} else {
-		// The given (or autodetected) interface is an OVS bridge;
-		// detect if we previously ran NIC/bridge setup
-		if !strings.HasPrefix(gwIntf, "br") {
-			return "", "", fmt.Errorf("gateway interface %s is an OVS bridge not "+
-				"a physical device", gwIntf)
-		}
-
-		// Is intfName a port of cluster.GatewayIntf?
-		intfName := util.GetNicName(gwIntf)
-		_, stderr, err := util.RunOVSVsctl("--if-exists", "get",
-			"interface", intfName, "ofport")
+		intfName, err := getIntfName(gwIntf)
 		if err != nil {
-			return "", "", fmt.Errorf("failed to get ofport of %s, stderr: %q, error: %v",
-				intfName, stderr, err)
+			return "", "", err
 		}
 		bridgeName = gwIntf
 		gwIntf = intfName
