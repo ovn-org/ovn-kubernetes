@@ -11,10 +11,18 @@
 
 - name: Docker | Install docker
   block:
-  - name: Docker | Install required features
-    include_tasks: "./requirements.yaml"
-    when: ansible_kernel in supported_versions_by_the_playbook
+    - name: Docker | Install docker
+      include_tasks: ./install_docker.yml
 
-  - name: Docker | Get Docker binaries
-    include_tasks: ./install_docker.yml
+    - name: Docker | Disable docker default network
+      win_lineinfile:
+        path: C:\ProgramData\docker\config\daemon.json
+        create: yes
+        line: |
+          { "bridge" : "none" }
+        newline: unix
+
+    - name: Docker | Remove current default nat network
+      win_shell: |
+        Get-HNSNetwork | Remove-HNSNetwork
   when: not docker_service.exists

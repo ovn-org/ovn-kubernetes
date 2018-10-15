@@ -32,6 +32,3 @@
   win_service:
     name: docker
     state: started
-
-- name: Docker | Reboot computer to update Path with docker
-  win_reboot:

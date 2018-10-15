@@ -20,6 +20,8 @@
       # # There should be only one transparent network
       $HNS_NW = Get-HNSNetwork | where {$_.type -eq "transparent"}
       $HNS_ID = $HNS_NW.Id
+      sc.exe config ovs-vswitchd start= disabled
+      Stop-Service ovs-vswitchd -Force
       Disable-OVSOnHNSNetwork $HNS_ID
       ovs-vsctl --if-exists --no-wait del-br br-ex
       ovs-vsctl --no-wait --may-exist add-br br-ex
@@ -28,6 +30,7 @@
       Stop-Service ovs-vswitchd
       Enable-OVSOnHNSNetwork $HNS_ID
 
+      sc.exe config ovs-vswitchd start= auto
       Start-Service ovs-vswitchd
       sleep 2
       Restart-Service ovs-vswitchd

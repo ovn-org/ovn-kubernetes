@@ -5,11 +5,6 @@
     start_mode: auto
     state: restarted
 
-- name: Kubernetes minion | Remove Startup-script if exists
-  win_file:
-    path: C:\startup.ps1
-    state: absent
-
 - name: Kubernetes minion | Update C:\Windows\System32\drivers\etc\hosts
   win_lineinfile:
     path: C:\Windows\System32\drivers\etc\hosts
@@ -50,35 +45,15 @@
   changed_when: false
 
 # TODO: add firewall rules instead of disabling it
-- name: Kubernetes minion | Create startup-script
-  win_lineinfile:
-    path: C:\startup.ps1
-    create: yes
-    line: |
-      $RegROPath = "HKCU:\SOFTWARE\Microsoft\Windows\CurrentVersion\Run"
-      Remove-ItemProperty $RegROPath "OVN_Init_Node" -ErrorAction SilentlyContinue
-      Start-Service ovn-kubernetes-node
-      netsh firewall set opmode disable
-    newline: unix
+- name: Kubernetes minion | Disable firewall
+  win_shell: netsh firewall set opmode disable
 
-- name: Kubernetes minion | Make minion-init startup script Run
-  win_shell: |
-    $RegPath = "HKLM:\SOFTWARE\Microsoft\Windows NT\CurrentVersion\Winlogon"
-    # HKCU to run after the user logs in
-    $RegROPath = "HKCU:\SOFTWARE\Microsoft\Windows\CurrentVersion\Run"
+- name: Kubernetes minion | Start ovn-kubernetes-node service
+  win_service:
+    name: ovn-kubernetes-node
+    state: started
 
-    $script = "C:\WINDOWS\system32\WindowsPowerShell\v1.0\powershell.exe -noexit C:\startup.ps1"
-
-    Set-ItemProperty $RegPath "AutoAdminLogon" -Value "1" -type String  
-    Set-ItemProperty $RegPath "DefaultUsername" -Value "{{ host_info.username }}" -type String  
-    Set-ItemProperty $RegPath "DefaultPassword" -Value "{{ host_info.password }}" -type String
-    Set-ItemProperty $RegPath "AutoLogonCount" -Value "1" -type DWord
-    Set-ItemProperty $RegROPath "OVN_Init_Node" -Value "$script" -type String
-
-- name: Kubernetes minion | Reboot
-  win_reboot:
-
-- name: Kubernetes minion | Wait for minion-init script to finish
+- name: Kubernetes minion | Wait for ovn-kubernetes-node service to finish init
   win_shell: ping {{OVN_GATEWAY_IP}} -n 1
   changed_when: false
   register: ovngateway_ping
