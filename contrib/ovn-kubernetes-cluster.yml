@@ -66,7 +66,7 @@
     - import_role:
         name: windows/version_check
     - import_role:
-        name: windows/docker
+        name: windows/requirements
     - import_role:
         name: windows/openvswitch
       vars:
@@ -81,6 +81,8 @@
         # ovs_certs_link: ""  # link to certificates for OVS if required
     - import_role:
         name: windows/ovn-kubernetes
+    - import_role:
+        name: windows/docker
     - import_role:
         name: windows/kubernetes
     - name: Ensure /etc/hosts is updated on kube-master

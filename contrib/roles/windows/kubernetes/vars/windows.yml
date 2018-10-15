@@ -2,8 +2,8 @@
 install_info:
   install_path: C:/kubernetes
 
-docker_info:
-  docker_network_name: external
+sdn_info:
+  sdn_network_name: external
 
 kubernetes_info:
   MASTER_IP: "{{MASTER_IP}}"

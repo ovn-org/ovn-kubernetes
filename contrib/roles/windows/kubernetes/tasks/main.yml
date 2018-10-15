@@ -8,11 +8,6 @@
   tags:
     - facts
 
-- name: Kubernetes | fetch network details
-  include_tasks: set_ip_facts.yml
-  tags:
-    - facts
-
 # We need to start kubelet in order to be able to retrieve the ovn_host_subnet from kubernetes
 # node annotations
 - name: Kubernetes | Register and start kubelet service
@@ -23,15 +18,21 @@
   tags:
     - facts
 
-- name: Kubernetes | Check if transparent network was created
-  win_shell: "docker network inspect {{ docker_info.docker_network_name }}"
-  register: transparent_inspect
-  failed_when: transparent_inspect.rc != 0 and transparent_inspect.rc != 1
+- name: Kubernetes | fetch network details
+  include_tasks: set_ip_facts.yml
+
+- name: Kubernetes | check if sdn is already set up
+  win_shell: (Get-HNSNetwork | where {$_.type -eq "transparent"}).ID
+  register: hns_net_id_out
   changed_when: false
 
-- name: Kubernetes | Create docker transparent network
-  include_tasks: ./setup_docker.yml
-  when: transparent_inspect.rc != 0
+- name: Kubernetes | set hns_exists
+  set_fact:
+    hns_exists: "{{ false if hns_net_id_out.stdout == '' else true}}"
+
+- name: Kubernetes | setup sdn
+  include_tasks: ./setup_sdn.yml
+  when: not hns_exists
 
 - name: Kubernetes | Check powershell execution policy
   win_shell: Get-ExecutionPolicy
@@ -52,7 +53,7 @@
 # and it's safer to have everything inside a powershell script to run.
 - name: Kubernetes | OVS Docker network setup
   include_tasks: ./setup_ovs_docker.yml
-  when: transparent_inspect.rc != 0
+  when: not hns_exists
 
 - name: Kubernetes | Check ping to OVN gateway
   win_shell: ping {{OVN_GATEWAY_IP}} -n 1
