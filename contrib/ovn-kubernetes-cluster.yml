@@ -75,10 +75,10 @@
         # to install the MSI in unattended mode
         # Setting install_beta_ovs to false will install the latest stable OVS
         install_custom_ovs: true
-        custom_ovs_link: "https://balutoiu.com/ionut/OpenvSwitch.msi"
-        ovs_certs_link: "https://docs.google.com/uc?export=download&id=1tGbGalZ6gDQOgjQuWAfIqGCNy-9RTpAF"
+        custom_ovs_link: "https://cloudbase.it/downloads/openvswitch-hyperv-installer-beta.msi"
         # This is useful for dev purposes and when using custom MSI which is not signed
-        bcdedit_needed: true
+        bcdedit_needed: false
+        # ovs_certs_link: ""  # link to certificates for OVS if required
     - import_role:
         name: windows/ovn-kubernetes
     - import_role:
