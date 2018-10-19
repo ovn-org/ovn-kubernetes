@@ -2,10 +2,6 @@ package cluster
 
 import (
 	"fmt"
-	"io/ioutil"
-	"os"
-	"path/filepath"
-	"testing"
 
 	"github.com/urfave/cli"
 	fakeexec "k8s.io/utils/exec/testing"
@@ -18,34 +14,8 @@ import (
 	. "github.com/onsi/gomega"
 )
 
-func TestClusterNode(t *testing.T) {
-	RegisterFailHandler(Fail)
-	RunSpecs(t, "Cluster Node Suite")
-}
-
-var tmpDir string
-
-var _ = AfterSuite(func() {
-	err := os.RemoveAll(tmpDir)
-	Expect(err).NotTo(HaveOccurred())
-})
-
-func createTempFile(name string) (string, error) {
-	fname := filepath.Join(tmpDir, name)
-	if err := ioutil.WriteFile(fname, []byte{0x20}, 0644); err != nil {
-		return "", err
-	}
-	return fname, nil
-}
-
 var _ = Describe("Node Operations", func() {
-	var tmpErr error
 	var app *cli.App
-
-	tmpDir, tmpErr = ioutil.TempDir("", "clusternodetest_certdir")
-	if tmpErr != nil {
-		GinkgoT().Errorf("failed to create tempdir: %v", tmpErr)
-	}
 
 	BeforeEach(func() {
 		// Restore global default values before each testcase
