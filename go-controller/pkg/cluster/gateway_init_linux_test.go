@@ -25,6 +25,28 @@ import (
 	. "github.com/onsi/gomega"
 )
 
+func addNodeportLBs(nodeName, tcpLBUUID, udpLBUUID string, fakeCmds []fakeexec.FakeCommandAction) []fakeexec.FakeCommandAction {
+	fakeCmds = ovntest.AddFakeCmdsNoOutputNoError(fakeCmds, []string{
+		"ovn-nbctl --timeout=15 --data=bare --no-heading --columns=_uuid find load_balancer external_ids:TCP_lb_gateway_router=GR_" + nodeName,
+	})
+	fakeCmds = ovntest.AddFakeCmd(fakeCmds, &ovntest.ExpectedCmd{
+		Cmd:    "ovn-nbctl --timeout=15 -- create load_balancer external_ids:TCP_lb_gateway_router=GR_" + nodeName,
+		Output: tcpLBUUID,
+	})
+	fakeCmds = ovntest.AddFakeCmdsNoOutputNoError(fakeCmds, []string{
+		"ovn-nbctl --timeout=15 --data=bare --no-heading --columns=_uuid find load_balancer external_ids:UDP_lb_gateway_router=GR_" + nodeName,
+	})
+	fakeCmds = ovntest.AddFakeCmd(fakeCmds, &ovntest.ExpectedCmd{
+		Cmd:    "ovn-nbctl --timeout=15 -- create load_balancer external_ids:UDP_lb_gateway_router=GR_" + nodeName + " protocol=udp",
+		Output: udpLBUUID,
+	})
+	fakeCmds = ovntest.AddFakeCmdsNoOutputNoError(fakeCmds, []string{
+		"ovn-nbctl --timeout=15 set logical_router GR_node1 load_balancer=" + tcpLBUUID,
+		"ovn-nbctl --timeout=15 add logical_router GR_node1 load_balancer " + udpLBUUID,
+	})
+	return fakeCmds
+}
+
 var _ = Describe("Gateway Init Operations", func() {
 	var app *cli.App
 	var testNS ns.NetNS
@@ -290,22 +312,9 @@ var _ = Describe("Gateway Init Operations", func() {
 					"ovn-nbctl --timeout=15 -- --may-exist lsp-add join jtor-" + gwRouter + " -- set logical_switch_port jtor-" + gwRouter + " type=router options:router-port=rtoj-" + gwRouter + " addresses=\"" + lrpMAC + "\"",
 					"ovn-nbctl --timeout=15 --may-exist lr-route-add " + gwRouter + " " + clusterCIDR + " 100.64.1.1",
 					"ovn-nbctl --timeout=15 --may-exist lr-route-add " + clusterRouterUUID + " 0.0.0.0/0 100.64.1.2",
-					"ovn-nbctl --timeout=15 --data=bare --no-heading --columns=_uuid find load_balancer external_ids:TCP_lb_gateway_router=GR_" + nodeName,
 				})
-				fakeCmds = ovntest.AddFakeCmd(fakeCmds, &ovntest.ExpectedCmd{
-					Cmd:    "ovn-nbctl --timeout=15 -- create load_balancer external_ids:TCP_lb_gateway_router=GR_" + nodeName,
-					Output: tcpLBUUID,
-				})
+				fakeCmds = addNodeportLBs(nodeName, tcpLBUUID, udpLBUUID, fakeCmds)
 				fakeCmds = ovntest.AddFakeCmdsNoOutputNoError(fakeCmds, []string{
-					"ovn-nbctl --timeout=15 --data=bare --no-heading --columns=_uuid find load_balancer external_ids:UDP_lb_gateway_router=GR_" + nodeName,
-				})
-				fakeCmds = ovntest.AddFakeCmd(fakeCmds, &ovntest.ExpectedCmd{
-					Cmd:    "ovn-nbctl --timeout=15 -- create load_balancer external_ids:UDP_lb_gateway_router=GR_" + nodeName + " protocol=udp",
-					Output: udpLBUUID,
-				})
-				fakeCmds = ovntest.AddFakeCmdsNoOutputNoError(fakeCmds, []string{
-					"ovn-nbctl --timeout=15 set logical_router GR_node1 load_balancer=" + tcpLBUUID,
-					"ovn-nbctl --timeout=15 add logical_router GR_node1 load_balancer " + udpLBUUID,
 					"ovn-nbctl --timeout=15 --may-exist ls-add ext_" + nodeName,
 				})
 				fakeCmds = ovntest.AddFakeCmd(fakeCmds, &ovntest.ExpectedCmd{
@@ -358,12 +367,12 @@ var _ = Describe("Gateway Init Operations", func() {
 				fakeCmds = ovntest.AddFakeCmd(fakeCmds, &ovntest.ExpectedCmd{
 					Cmd: "ovs-ofctl dump-flows breth0",
 					Output: `cookie=0x0, duration=8366.605s, table=0, n_packets=0, n_bytes=0, priority=100,ip,in_port="k8s-patch-breth" actions=ct(commit,zone=64000),output:eth0
-	 cookie=0x0, duration=8366.603s, table=0, n_packets=10642, n_bytes=10370438, priority=50,ip,in_port=eth0 actions=ct(table=1,zone=64000)
-	 cookie=0x0, duration=8366.705s, table=0, n_packets=11549, n_bytes=1746901, priority=0 actions=NORMAL
-	 cookie=0x0, duration=8366.602s, table=1, n_packets=0, n_bytes=0, priority=100,ct_state=+est+trk actions=output:"k8s-patch-breth"
-	 cookie=0x0, duration=8366.600s, table=1, n_packets=0, n_bytes=0, priority=100,ct_state=+rel+trk actions=output:"k8s-patch-breth"
-	 cookie=0x0, duration=8366.597s, table=1, n_packets=10641, n_bytes=10370087, priority=0 actions=LOCAL
-	`,
+cookie=0x0, duration=8366.603s, table=0, n_packets=10642, n_bytes=10370438, priority=50,ip,in_port=eth0 actions=ct(table=1,zone=64000)
+cookie=0x0, duration=8366.705s, table=0, n_packets=11549, n_bytes=1746901, priority=0 actions=NORMAL
+cookie=0x0, duration=8366.602s, table=1, n_packets=0, n_bytes=0, priority=100,ct_state=+est+trk actions=output:"k8s-patch-breth"
+cookie=0x0, duration=8366.600s, table=1, n_packets=0, n_bytes=0, priority=100,ct_state=+rel+trk actions=output:"k8s-patch-breth"
+cookie=0x0, duration=8366.597s, table=1, n_packets=10641, n_bytes=10370087, priority=0 actions=LOCAL
+`,
 				})
 
 				fexec := &fakeexec.FakeExec{
@@ -477,22 +486,9 @@ var _ = Describe("Gateway Init Operations", func() {
 					"ovn-nbctl --timeout=15 -- --may-exist lsp-add join jtor-" + gwRouter + " -- set logical_switch_port jtor-" + gwRouter + " type=router options:router-port=rtoj-" + gwRouter + " addresses=\"" + lrpMAC + "\"",
 					"ovn-nbctl --timeout=15 --may-exist lr-route-add " + gwRouter + " " + clusterCIDR + " 100.64.1.1",
 					"ovn-nbctl --timeout=15 --may-exist lr-route-add " + clusterRouterUUID + " 0.0.0.0/0 100.64.1.2",
-					"ovn-nbctl --timeout=15 --data=bare --no-heading --columns=_uuid find load_balancer external_ids:TCP_lb_gateway_router=GR_" + nodeName,
 				})
-				fakeCmds = ovntest.AddFakeCmd(fakeCmds, &ovntest.ExpectedCmd{
-					Cmd:    "ovn-nbctl --timeout=15 -- create load_balancer external_ids:TCP_lb_gateway_router=GR_" + nodeName,
-					Output: tcpLBUUID,
-				})
+				fakeCmds = addNodeportLBs(nodeName, tcpLBUUID, udpLBUUID, fakeCmds)
 				fakeCmds = ovntest.AddFakeCmdsNoOutputNoError(fakeCmds, []string{
-					"ovn-nbctl --timeout=15 --data=bare --no-heading --columns=_uuid find load_balancer external_ids:UDP_lb_gateway_router=GR_" + nodeName,
-				})
-				fakeCmds = ovntest.AddFakeCmd(fakeCmds, &ovntest.ExpectedCmd{
-					Cmd:    "ovn-nbctl --timeout=15 -- create load_balancer external_ids:UDP_lb_gateway_router=GR_" + nodeName + " protocol=udp",
-					Output: udpLBUUID,
-				})
-				fakeCmds = ovntest.AddFakeCmdsNoOutputNoError(fakeCmds, []string{
-					"ovn-nbctl --timeout=15 set logical_router GR_node1 load_balancer=" + tcpLBUUID,
-					"ovn-nbctl --timeout=15 add logical_router GR_node1 load_balancer " + udpLBUUID,
 					"ovn-nbctl --timeout=15 --may-exist ls-add ext_" + nodeName,
 					"ovs-vsctl --timeout=15 -- --may-exist add-port br-int eth0 -- set interface eth0 external-ids:iface-id=eth0_" + nodeName,
 				})
