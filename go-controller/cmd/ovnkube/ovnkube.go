@@ -202,7 +202,7 @@ func runOvnKube(ctx *cli.Context) error {
 	stopChan := make(chan struct{})
 	factory, err := factory.NewWatchFactory(clientset, stopChan)
 	if err != nil {
-		panic(err.Error)
+		panic(err.Error())
 	}
 
 	netController := ctx.Bool("net-controller")
@@ -221,7 +221,7 @@ func runOvnKube(ctx *cli.Context) error {
 
 		clusterController.ClusterIPNet, err = parseClusterSubnetEntries(ctx.String("cluster-subnet"))
 		if err != nil {
-			panic(err.Error)
+			panic(err.Error())
 		}
 
 		clusterServicesSubnet := ctx.String("service-cluster-ip-range")
@@ -230,7 +230,7 @@ func runOvnKube(ctx *cli.Context) error {
 			_, servicesSubnet, err = net.ParseCIDR(
 				clusterServicesSubnet)
 			if err != nil {
-				panic(err.Error)
+				panic(err.Error())
 			}
 			clusterController.ClusterServicesSubnet = servicesSubnet.String()
 		}
