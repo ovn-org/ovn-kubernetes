@@ -61,6 +61,7 @@ metadata:
 roleRef:
   name: cluster-reader
   kind: ClusterRole
+  apiGroup: rbac.authorization.k8s.io
 subjects:
 - kind: ServiceAccount
   name: ovn
@@ -77,6 +78,7 @@ metadata:
 roleRef:
   name: system:ovn-reader
   kind: ClusterRole
+  apiGroup: rbac.authorization.k8s.io
 subjects:
 - kind: ServiceAccount
   name: ovn
@@ -93,6 +95,7 @@ metadata:
 roleRef:
   name: cluster-admin
   kind: ClusterRole
+  apiGroup: rbac.authorization.k8s.io
 subjects:
 - kind: ServiceAccount
   name: ovn
