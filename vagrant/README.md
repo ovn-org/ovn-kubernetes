@@ -14,20 +14,6 @@ Howto
 From the cloned ovn-kubernetes repo,
 * cd vagrant
 
-Pull down Kubernetes (it's big)
-
-* mkdir k8s
-* cd k8s
-* wget https://github.com/kubernetes/kubernetes/releases/download/v1.8.8/kubernetes.tar.gz
-* tar xvzf kubernetes.tar.gz
-* ./kubernetes/cluster/get-kube-binaries.sh
-* mkdir server
-* cd server
-* tar xvzf ../kubernetes/server/kubernetes-server-linux-amd64.tar.gz
-
-Bringup the Vagrant setup (by going back to the ovn-kubernetes/vagrant
-directory)
-
 * vagrant up k8s-master
 * vagrant up k8s-minion1
 * vagrant up k8s-minion2

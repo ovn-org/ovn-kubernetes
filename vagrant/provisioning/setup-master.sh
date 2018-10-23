@@ -40,9 +40,26 @@ HA="false"
 # FIXME(mestery): Remove once Vagrant boxes allow apt-get to work again
 sudo rm -rf /var/lib/apt/lists/*
 
-# Add external repos to install docker and OVS from packages.
+# Install CNI
+pushd ~/
+wget -nv https://github.com/containernetworking/cni/releases/download/v0.5.2/cni-amd64-v0.5.2.tgz
+popd
+sudo mkdir -p /opt/cni/bin
+pushd /opt/cni/bin
+sudo tar xvzf ~/cni-amd64-v0.5.2.tgz
+popd
+sudo mkdir -p /etc/cni/net.d
+# Create a 99loopback.conf to have atleast one CNI config.
+echo '{
+    "cniVersion": "0.2.0",
+    "type": "loopback"
+}' | sudo tee /etc/cni/net.d/99loopback.conf
+
+# Add external repos to install docker, k8s and OVS from packages.
 sudo apt-get update
 sudo apt-get install -y apt-transport-https ca-certificates
+echo "deb https://apt.kubernetes.io/ kubernetes-xenial main" |  sudo tee /etc/apt/sources.list.d/kubernetes.list
+curl -s https://packages.cloud.google.com/apt/doc/apt-key.gpg | sudo apt-key add -
 echo "deb http://18.191.116.101/openvswitch/stable /" |  sudo tee /etc/apt/sources.list.d/openvswitch.list
 wget -O - http://18.191.116.101/openvswitch/keyFile |  sudo apt-key add -
 sudo apt-key adv --keyserver hkp://keyserver.ubuntu.com:80 --recv-keys 58118E89F3A912897C070ADBF76221572C52609D
@@ -55,14 +72,40 @@ sudo apt-get install -y linux-image-extra-$(uname -r) linux-image-extra-virtual
 sudo apt-get install -y docker-engine
 sudo service docker start
 
+# Install kubernetes
+sudo apt-get install -y kubelet kubeadm kubectl
+sudo apt-mark hold kubelet kubeadm kubectl
+sudo service kubelet restart
+
+sudo swapoff -a
+sudo kubeadm config images pull
+sudo kubeadm init --pod-network-cidr=192.168.0.0/16 --apiserver-advertise-address=$OVERLAY_IP \
+	--service-cidr=172.16.1.0/24 2>&1 | tee kubeadm.log
+grep "kubeadm join" kubeadm.log | sudo tee /vagrant/kubeadm.log
+
+mkdir -p $HOME/.kube
+sudo cp -i /etc/kubernetes/admin.conf $HOME/.kube/config
+sudo chown $(id -u):$(id -g) $HOME/.kube/config
+
+# Wait till kube-apiserver is up
+while true; do
+    kubectl get node $NODE_NAME
+    if [ $? -eq 0 ]; then
+        break
+    fi
+    echo "waiting for kube-apiserver to be up"
+    sleep 1
+done
+
+# Let master run pods too.
+kubectl taint nodes --all node-role.kubernetes.io/master-
+
 # Install OVS and dependencies
 sudo apt-get build-dep dkms
 sudo apt-get install python-six openssl python-pip -y
-sudo -H pip install --upgrade pip
 
 sudo apt-get install openvswitch-datapath-dkms=2.9.2-1 -y
 sudo apt-get install openvswitch-switch=2.9.2-1 openvswitch-common=2.9.2-1 libopenvswitch=2.9.2-1 -y
-sudo -H pip install ovs
 
 sudo apt-get install ovn-central=2.9.2-1 ovn-common=2.9.2-1 ovn-host=2.9.2-1 -y
 
@@ -113,9 +156,6 @@ sudo tar -C /usr/local -xzf go1.9.2.linux-amd64.tar.gz
 export PATH="/usr/local/go/bin:echo $PATH"
 export GOPATH=$HOME/work
 
-# Setup CNI directory
-sudo mkdir -p /opt/cni/bin/
-
 # Install OVN+K8S Integration
 mkdir -p $HOME/work/src/github.com/openvswitch
 pushd $HOME/work/src/github.com/openvswitch
@@ -124,92 +164,6 @@ popd
 pushd $HOME/work/src/github.com/openvswitch/ovn-kubernetes/go-controller
 make 1>&2 2>/dev/null
 sudo make install
-popd
-
-# Install CNI
-pushd ~/
-wget -nv https://github.com/containernetworking/cni/releases/download/v0.5.2/cni-amd64-v0.5.2.tgz
-popd
-sudo mkdir -p /opt/cni/bin
-pushd /opt/cni/bin
-sudo tar xvzf ~/cni-amd64-v0.5.2.tgz
-popd
-
-# Install k8s
-
-# Install an etcd cluster
-sudo docker run --net=host -v /var/etcd/data:/var/etcd/data -d \
-        gcr.io/google_containers/etcd:3.0.17 /usr/local/bin/etcd \
-        --listen-peer-urls http://127.0.0.1:2380 \
-        --advertise-client-urls=http://127.0.0.1:4001 \
-        --listen-client-urls=http://0.0.0.0:4001 \
-        --data-dir=/var/etcd/data
-
-# Start k8s daemons
-sudo sh -c 'echo "PATH=$PATH:$HOME/k8s/server/kubernetes/server/bin" >> /etc/profile'
-pushd k8s/server/kubernetes/server/bin
-echo "Starting kube-apiserver ..."
-nohup sudo ./kube-apiserver --service-cluster-ip-range=172.16.1.0/24 \
-                            --address=0.0.0.0 \
-                            --etcd-servers=http://127.0.0.1:4001 \
-                            --advertise-address=$MASTER1 \
-                            --v=2 2>&1 0<&- &>/dev/null &
-
-# Wait till kube-apiserver starts up
-while true; do
-    ./kubectl get nodes
-    if [ $? -eq 0 ]; then
-        break
-    fi
-    echo "waiting for kube-apiserver to start...."
-    sleep 1
-done
-
-echo "Starting kube-controller-manager ..."
-nohup sudo ./kube-controller-manager --master=127.0.0.1:8080 --v=2 2>&1 0<&- &>/dev/null &
-
-echo "Starting kube-scheduler ..."
-nohup sudo ./kube-scheduler --master=127.0.0.1:8080 --v=2 2>&1 0<&- &>/dev/null &
-
-popd
-
-# Create a kubeconfig file.
-cat << KUBECONFIG >> ~/kubeconfig.yaml
-apiVersion: v1
-clusters:
-- cluster:
-    server: http://localhost:8080
-  name: default-cluster
-- cluster:
-    server: http://localhost:8080
-  name: local-server
-- cluster:
-    server: http://localhost:8080
-  name: ubuntu
-contexts:
-- context:
-    cluster: ubuntu
-    user: ubuntu
-  name: ubuntu
-current-context: ubuntu
-kind: Config
-preferences: {}
-users:
-- name: ubuntu
-  user:
-    password: p1NVMZqhOOOqkWQq
-    username: admin
-KUBECONFIG
-
-pushd k8s/server/kubernetes/server/bin
-nohup sudo ./kubelet --kubeconfig $HOME/kubeconfig.yaml \
-                     --v=2 --address=0.0.0.0 \
-                     --fail-swap-on=false \
-                     --runtime-cgroups=/systemd/system.slice \
-                     --kubelet-cgroups=/systemd/system.slice \
-                     --enable-server=true --network-plugin=cni \
-                     --cni-conf-dir=/etc/cni/net.d \
-                     --cni-bin-dir="/opt/cni/bin/" >/tmp/kubelet.log 2>&1 0<&- &
 popd
 
 if [ $PROTOCOL = "ssl" ]; then
@@ -235,14 +189,21 @@ else
     ovn_sb="$PROTOCOL://$OVERLAY_IP:6642"
 fi
 
-nohup sudo ovnkube -k8s-kubeconfig $HOME/kubeconfig.yaml -net-controller -loglevel=4 \
- -k8s-apiserver="http://$OVERLAY_IP:8080" \
+sudo kubectl create -f /vagrant/ovnkube-rbac.yaml
+
+SECRET=`kubectl get secret | grep ovnkube | awk '{print $1}'`
+TOKEN=`kubectl get secret/$SECRET -o yaml |grep "token:" | cut -f2  -d ":" | sed 's/^  *//' | base64 -d`
+echo $TOKEN > /vagrant/token
+
+nohup sudo ovnkube -net-controller -loglevel=4 \
+ -k8s-apiserver="https://$OVERLAY_IP:6443" \
+ -k8s-cacert=/etc/kubernetes/pki/ca.crt \
+ -k8s-token="$TOKEN" \
  -logfile="/var/log/openvswitch/ovnkube.log" \
  -init-master="k8smaster" -cluster-subnet="192.168.0.0/16" \
  -init-node="k8smaster" \
  -service-cluster-ip-range=172.16.1.0/24 \
  -nodeport \
- -k8s-token="test" \
  -nb-address="$ovn_nb" \
  -sb-address="$ovn_sb" \
  -init-gateways -gateway-localnet \

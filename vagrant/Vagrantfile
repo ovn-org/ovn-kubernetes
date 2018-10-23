@@ -15,8 +15,6 @@ Vagrant.configure(2) do |config|
     lv.driver = "kvm"
   end
 
-  config.vm.synced_folder File.expand_path("k8s"), "/home/vagrant/k8s"
-
   # Use the ipaddr library to calculate the netmask of a given network
   net = IPAddr.new vagrant_config['public_network']
   netmask = net.inspect().split("/")[1].split(">")[0]
