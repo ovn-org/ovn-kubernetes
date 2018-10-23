@@ -45,6 +45,10 @@
   set_fact:
     interface_name: "{{interface_out_name.stdout | trim}}"
 
+- name: IP facts | set physical interface name
+  set_fact:
+    phys_interface_name: "{{ interface_name | regex_replace('^vEthernet \\((?P<ifname>.+)\\)$', '\\g<ifname>') }}"
+
 - debug: var=interface_mac_addr
 - debug: var=interface_default_gateway
 - debug: var=interface_index
@@ -52,3 +56,4 @@
 - debug: var=host_public_ip
 - debug: var=interface_prefix_length
 - debug: var=interface_name
+- debug: var=phys_interface_name

@@ -48,12 +48,8 @@
   changed_when: false
   when: execution_policy_required
 
-# This creates a startup script which will be added to run once at login time.
-# This is due to the fact that connection drops while doing the initial setup
-# and it's safer to have everything inside a powershell script to run.
 - name: Kubernetes | OVS Docker network setup
   include_tasks: ./setup_ovs_docker.yml
-  when: not hns_exists
 
 - name: Kubernetes | Check ping to OVN gateway
   win_shell: ping {{OVN_GATEWAY_IP}} -n 1

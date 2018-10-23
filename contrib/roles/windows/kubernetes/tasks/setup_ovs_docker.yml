@@ -1,11 +1,29 @@
 ---
-- name: OVS Docker network setup | Remove Startup-script if exists
+- name: OVS Docker network setup | Remove setup_ovs_docker script if exists
   win_file:
-    path: C:\startup.ps1
+    path: C:\setup_ovs_docker.ps1
     state: absent
-- name: OVS Docker network setup | Create startup-script
+
+- name: OVS Docker network setup | Remove script output if exists
+  win_file:
+    path: C:\setup_ovs_docker_output.txt
+    state: absent
+
+- name: OVS Docker network setup | Get psexec
+  win_get_url:
+    url: https://download.sysinternals.com/files/PSTools.zip
+    dest: "C:/PSTools.zip"
+  retries: 10
+  delay: 5
+
+- name: OVS Docker network setup | Unzip psexec
+  win_unzip:
+    src: "C:/PSTools.zip"
+    dest: "C:/PSTools"
+
+- name: OVS Docker network setup | Create setup_ovs_docker script
   win_lineinfile:
-    path: C:\startup.ps1
+    path: C:\setup_ovs_docker.ps1
     create: yes
     line: |
       # Get Admin rights in case the current powershell doesnt have admin rights
@@ -25,8 +43,8 @@
       Disable-OVSOnHNSNetwork $HNS_ID
       ovs-vsctl --if-exists --no-wait del-br br-ex
       ovs-vsctl --no-wait --may-exist add-br br-ex
-      ovs-vsctl --no-wait add-port br-ex "vEthernet ({{interface_name}})" -- set interface  "vEthernet ({{interface_name}})" type=internal
-      ovs-vsctl --no-wait add-port br-ex '{{interface_name}}'
+      ovs-vsctl --no-wait add-port br-ex "vEthernet ({{phys_interface_name}})" -- set interface  "vEthernet ({{phys_interface_name}})" type=internal
+      ovs-vsctl --no-wait add-port br-ex '{{phys_interface_name}}'
       Stop-Service ovs-vswitchd
       Enable-OVSOnHNSNetwork $HNS_ID
 
@@ -39,28 +57,19 @@
       ovs-vsctl set Open_vSwitch . external_ids:k8s-api-server="http://{{ kubernetes_info.MASTER_IP }}:8080"
       ovs-vsctl set Open_vSwitch . external_ids:ovn-remote="tcp:{{ kubernetes_info.MASTER_IP }}:6642" external_ids:ovn-nb="tcp:{{ kubernetes_info.MASTER_IP }}:6641" external_ids:ovn-encap-ip={{ host_public_ip }} external_ids:ovn-encap-type="geneve"
     newline: unix
-- name: OVS Docker network setup | Make startup script Run
-  win_shell: |
-    $RegPath = "HKLM:\SOFTWARE\Microsoft\Windows NT\CurrentVersion\Winlogon"
-    # HKCU to run after the user logs in
-    $RegROPath = "HKCU:\SOFTWARE\Microsoft\Windows\CurrentVersion\Run"
 
-    $script = "C:\WINDOWS\system32\WindowsPowerShell\v1.0\powershell.exe -noexit C:\startup.ps1"
-
-    Set-ItemProperty $RegPath "AutoAdminLogon" -Value "1" -type String
-    Set-ItemProperty $RegPath "DefaultUsername" -Value "{{ host_info.username }}" -type String  
-    Set-ItemProperty $RegPath "DefaultPassword" -Value "{{ host_info.password }}" -type String
-    Set-ItemProperty $RegPath "AutoLogonCount" -Value "1" -type DWord
-    Set-ItemProperty $RegROPath "OVN_Init_Node" -Value "$script" -type String
-
-- name: OVS Docker network setup | Reboot
-  win_reboot:
-
-# Wait for docker to create the HNS Network and the new adapter. Connection will
-# drop shortly when doing this, wait for the connection to come back
-- name: OVS Docker network setup | Wait for startup script up to 120 seconds to complete
-  wait_for_connection:
-    # The connection will drop while the script is running, start checking for
-    # the connection after 30 seconds
-    delay: 30
+- name: OVS Docker network setup | Run setup_ovs_docker script
+  win_psexec:
+    executable: C:\PSTools\psexec.exe
+    command: cmd /c powershell.exe C:\setup_ovs_docker.ps1 2>&1 >> C:\setup_ovs_docker_output.txt
+    username: "{{ host_info.username }}"
+    password: "{{ host_info.password }}"
     timeout: 120
+
+- name: OVS Docker network setup | Delete psexec
+  win_file:
+    path: "{{item}}"
+    state: absent
+  with_items:
+    - "C:/PSTools.zip"
+    - "C:/PSTools"
