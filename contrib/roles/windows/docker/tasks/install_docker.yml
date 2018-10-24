@@ -1,32 +1,9 @@
 ---
 - name: Docker | Download latest docker
-  win_get_url:
-    url: https://download.docker.com/win/static/test/x86_64/docker-{{ docker_download_info.docker_version }}.zip
-    dest: "{{ docker_download_info.temp_dir }}/docker-{{ docker_download_info.docker_version }}.zip"
-    timeout: 60
-  register: docker_download_status
-  retries: 10
-  delay: 5
-  until: docker_download_status.status_code == 200
-
-- name: Docker | Unzip docker
-  win_unzip:
-    src: "{{ docker_download_info.temp_dir }}/docker-{{ docker_download_info.docker_version }}.zip"
-    dest: "{{ docker_download_info.install_dir }}"
-
-- name: Docker | Remove docker zip
-  win_file:
-    path: "{{ docker_download_info.temp_dir }}/docker-{{ docker_download_info.docker_version }}.zip"
-    state: absent
-
-- name: Docker | Add docker to path
-  win_path:
-    elements: "{{ docker_download_info.install_dir }}/docker"
-    scope: machine
-    state: present
-
-- name: Docker | Register docker Get-Service
-  win_shell: dockerd --register-service
+  win_shell: |
+    Find-PackageProvider -Name "Nuget" | Install-PackageProvider -Force
+    Install-Module -Name "DockerMsftProvider" -Repository "PSGallery" -Force
+    Install-Package -Name "Docker" -ProviderName "DockerMsftProvider" -Force -RequiredVersion "{{ docker_version }}"
 
 - name: Docker | Start docker service
   win_service:

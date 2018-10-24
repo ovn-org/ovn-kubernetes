@@ -8,6 +8,9 @@
   tags:
     - facts
 
+- name: Kubernetes | fetch network details
+  include_tasks: set_ip_facts.yml
+
 # We need to start kubelet in order to be able to retrieve the ovn_host_subnet from kubernetes
 # node annotations
 - name: Kubernetes | Register and start kubelet service
@@ -17,9 +20,6 @@
   include_tasks: ./get_ovn_subnet.yml
   tags:
     - facts
-
-- name: Kubernetes | fetch network details
-  include_tasks: set_ip_facts.yml
 
 - name: Kubernetes | check if sdn is already set up
   win_shell: (Get-HNSNetwork | where {$_.type -eq "transparent"}).ID

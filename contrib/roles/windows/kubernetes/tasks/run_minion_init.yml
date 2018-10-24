@@ -37,7 +37,7 @@
 - name: Kubelet | Create ovn-kubernetes-node service
   win_service:
     name: ovn-kubernetes-node
-    path: '"{{ install_info.install_path }}\\servicewrapper.exe" ovn-kubernetes-node {{ install_info.install_path }}\\ovnkube.exe --k8s-kubeconfig={{ install_info.install_path }}\\kubeconfig.yaml --k8s-apiserver http://{{ kubernetes_info.MASTER_IP }}:8080 --init-node {{ ansible_hostname|lower }} --k8s-token {{TOKEN}} --nb-address "tcp://{{ kubernetes_info.MASTER_IP }}:6641" --sb-address "tcp://{{ kubernetes_info.MASTER_IP }}:6642" --cluster-subnet {{ kubernetes_info.CLUSTER_SUBNET }} --cni-conf-dir="{{ install_info.install_path }}/cni" --cni-plugin "ovn-k8s-cni-overlay.exe" --encap-ip="{{host_internal_ip}}"'
+    path: '"{{ install_info.install_path }}\\servicewrapper.exe" --log-file "{{ install_info.install_path }}/ovn-kubernetes-node.log" ovn-kubernetes-node {{ install_info.install_path }}\\ovnkube.exe --k8s-kubeconfig={{ install_info.install_path }}\\kubeconfig.yaml --k8s-apiserver http://{{ kubernetes_info.MASTER_IP }}:8080 --init-node {{ ansible_hostname|lower }} --k8s-token {{TOKEN}} --nb-address "tcp://{{ kubernetes_info.MASTER_IP }}:6641" --sb-address "tcp://{{ kubernetes_info.MASTER_IP }}:6642" --cluster-subnet {{ kubernetes_info.CLUSTER_SUBNET }} --cni-conf-dir="{{ install_info.install_path }}/cni" --cni-plugin "ovn-k8s-cni-overlay.exe" --encap-ip="{{host_internal_ip}}"'
     display_name: OVN Kubernetes Node
     description: OVN Kubernetes Node CNI Server
     username: LocalSystem
