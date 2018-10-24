@@ -432,7 +432,7 @@ func (cluster *OvnClusterController) initGateway(
 		err = util.GatewayInit(clusterIPSubnet, nodeName,
 			localnetGatewayIP, "",
 			localnetBridgeName, localnetGatewayNextHop, subnet,
-			false)
+			cluster.NodePortEnable)
 		if err != nil {
 			logrus.Errorf("failed to GatewayInit for localnet (%v)", err)
 			return err
