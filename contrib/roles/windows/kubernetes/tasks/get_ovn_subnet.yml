@@ -13,13 +13,17 @@
     - fail:
         msg: Could not fetch OVN host subnet, check that kubelet can connect to kubernetes
 
+- debug: var=kubectl_annotation_output
+
 - name: OVN subnet | Set OVN_Host_Annotations
   set_fact:
     OVN_ANNOTATION: "{{kubectl_annotation_output.stdout | trim}}"
 
+- debug: var=OVN_ANNOTATION
+
 - set_fact:
-    OVN_SUBNET: "{{ OVN_ANNOTATION.split('=')[1] }}"
-    OVN_IP: "{{ OVN_ANNOTATION.split('=')[1].split('/')[0] }}"
+    OVN_SUBNET: "{{ OVN_ANNOTATION.split(': ')[1] }}"
+    OVN_IP: "{{ OVN_ANNOTATION.split(': ')[1].split('/')[0] }}"
 
 - name: OVN subnet | Set OVN Gateway
   set_fact:
