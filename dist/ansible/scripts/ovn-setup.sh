@@ -23,8 +23,9 @@ is_cluster_up () {
 }
 
 is_api_server_ready () {
-  api=$(kubectl get po -n kube-system -o wide | gawk '/master-api/{ print $7 }')
-  if [[ ${api} == '' ]]; then
+  # on OpenShift, oc whoami --show-server
+  apiserver=$(kubectl cluster-info | gawk '/Kubernetes master/{ print $6 }')
+  if [[ ${apiserver} == '' ]]; then
     return 1
   fi
   return 0
@@ -55,7 +56,6 @@ wait_for_condition is_cluster_up
 
 # wait for  api server
 wait_for_condition is_api_server_ready
-apiserver=https://${api}:8443
 
 # from master-config.yaml
 #clusterNetworks:
