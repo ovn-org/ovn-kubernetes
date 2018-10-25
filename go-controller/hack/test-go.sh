@@ -5,17 +5,6 @@ source "$(dirname "${BASH_SOURCE}")/init.sh"
 # Check for `go` binary and set ${GOPATH}.
 setup_env
 
-# Test targets specified. Should always be run in a sub-shell so we don't leak GOBIN
-#
-# Input:
-#   $@ - targets and go flags.  If no targets are set then all binaries targets
-#     are built.
-test() {
-    CGO_ENABLED=0 go test \
-        "${goflags[@]:+${goflags[@]}}" \
-        ${PKGS}
-}
-
 pushd ${GOPATH}/src/${OVN_KUBE_GO_PACKAGE}
 
 if [ -z "$PKGS" ]; then
@@ -23,6 +12,9 @@ if [ -z "$PKGS" ]; then
   PKGS="$(go list ./... | grep -v vendor | xargs echo)"
 fi
 
-test ${PKGS}
+# Work around sudo's PATH handling since Travis puts in Go in the travis user's homedir
+GO=`which go`
+# sudo is required because some testcases manipulate network namespaces
+sudo -E bash -c "umask 0; CGO_ENABLED=0 ${GO} test "${goflags[@]:+${goflags[@]}}" ${PKGS}"
 
 popd
