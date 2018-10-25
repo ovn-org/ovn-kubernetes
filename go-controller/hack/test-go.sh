@@ -11,7 +11,7 @@ setup_env
 #   $@ - targets and go flags.  If no targets are set then all binaries targets
 #     are built.
 test() {
-    CGO_ENABLED=0 go test \
+    CGO_ENABLED=0 PATH="${GOROOT}/bin:${PATH}" go test \
         "${goflags[@]:+${goflags[@]}}" \
         ${PKGS}
 }

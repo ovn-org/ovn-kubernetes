@@ -17,4 +17,4 @@ script:
     -    make gofmt;
     -    make install.tools;
     -    make lint;
-    -    make check;
+    -    sudo -E make check;

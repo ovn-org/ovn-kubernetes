@@ -20,6 +20,8 @@ type ExpectedCmd struct {
 	Stderr string
 	// Err is any error that should be returned for the invocation of Cmd
 	Err error
+	// Action is run when the fake command is "run"
+	Action func() error
 }
 
 // AddFakeCmd takes the ExpectedCmd and appends its runner function to
@@ -38,6 +40,10 @@ func AddFakeCmd(fakeCmds []fakeexec.FakeCommandAction, expected *ExpectedCmd) []
 			},
 			RunScript: []fakeexec.FakeRunAction{
 				func() ([]byte, []byte, error) {
+					if expected.Action != nil {
+						err := expected.Action()
+						gomega.Expect(err).NotTo(gomega.HaveOccurred())
+					}
 					return []byte(expected.Output), []byte(expected.Stderr), expected.Err
 				},
 			},

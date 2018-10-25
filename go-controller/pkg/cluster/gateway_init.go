@@ -5,13 +5,14 @@ package cluster
 import (
 	"fmt"
 	"net"
-	"os/exec"
 	"regexp"
 	"strings"
 	"syscall"
 
-	"github.com/coreos/go-iptables/iptables"
 	"github.com/openvswitch/ovn-kubernetes/go-controller/pkg/config"
+	"github.com/openvswitch/ovn-kubernetes/go-controller/pkg/factory"
+
+	"github.com/coreos/go-iptables/iptables"
 	"github.com/openvswitch/ovn-kubernetes/go-controller/pkg/util"
 	"github.com/sirupsen/logrus"
 	"github.com/vishvananda/netlink"
@@ -55,7 +56,7 @@ func getIPv4Address(iface string) (string, error) {
 	return ipAddress, nil
 }
 
-func ensureChain(ipt *iptables.IPTables, table, chain string) error {
+func ensureChain(ipt util.IPTablesHelper, table, chain string) error {
 	chains, err := ipt.ListChains(table)
 	if err != nil {
 		return fmt.Errorf("failed to list iptables chains: %v", err)
@@ -98,12 +99,7 @@ func generateGatewayNATRules(ifname string, ip string) []iptRule {
 	return rules
 }
 
-func localnetGatewayNAT(ifname, ip string) error {
-	ipt, err := iptables.NewWithProtocol(iptables.ProtocolIPv4)
-	if err != nil {
-		return fmt.Errorf("failed to initialize iptables: %v", err)
-	}
-
+func localnetGatewayNAT(ipt util.IPTablesHelper, ifname, ip string) error {
 	rules := generateGatewayNATRules(ifname, ip)
 	for _, r := range rules {
 		if err := ensureChain(ipt, r.table, r.chain); err != nil {
@@ -147,8 +143,8 @@ func getDefaultGatewayInterfaceDetails() (string, string, error) {
 	return "", "", fmt.Errorf("Failed to get default gateway interface")
 }
 
-func (cluster *OvnClusterController) addDefaultConntrackRules() error {
-	patchPort := "k8s-patch-" + cluster.GatewayBridge + "-br-int"
+func addDefaultConntrackRules(gwBridge, gwIntf string) error {
+	patchPort := "k8s-patch-" + gwBridge + "-br-int"
 	// Get ofport of pathPort
 	ofportPatch, stderr, err := util.RunOVSVsctl("--if-exists", "get",
 		"interface", patchPort, "ofport")
@@ -159,61 +155,60 @@ func (cluster *OvnClusterController) addDefaultConntrackRules() error {
 
 	// Get ofport of physical interface
 	ofportPhys, stderr, err := util.RunOVSVsctl("--if-exists", "get",
-		"interface", cluster.GatewayIntf, "ofport")
+		"interface", gwIntf, "ofport")
 	if err != nil {
 		return fmt.Errorf("Failed to get ofport of %s, stderr: %q, error: %v",
-			cluster.GatewayIntf, stderr, err)
+			gwIntf, stderr, err)
 	}
 
 	// table 0, packets coming from pods headed externally. Commit connections
 	// so that reverse direction goes back to the pods.
-	_, stderr, err = util.RunOVSOfctl("add-flow", cluster.GatewayBridge,
+	_, stderr, err = util.RunOVSOfctl("add-flow", gwBridge,
 		fmt.Sprintf("priority=100, in_port=%s, ip, "+
 			"actions=ct(commit, zone=%d), output:%s",
 			ofportPatch, config.Default.ConntrackZone, ofportPhys))
 	if err != nil {
 		return fmt.Errorf("Failed to add openflow flow to %s, stderr: %q, "+
-			"error: %v", cluster.GatewayBridge, stderr, err)
+			"error: %v", gwBridge, stderr, err)
 	}
 
 	// table 0, packets coming from external. Send it through conntrack and
 	// resubmit to table 1 to know the state of the connection.
-	_, stderr, err = util.RunOVSOfctl("add-flow", cluster.GatewayBridge,
+	_, stderr, err = util.RunOVSOfctl("add-flow", gwBridge,
 		fmt.Sprintf("priority=50, in_port=%s, ip, "+
 			"actions=ct(zone=%d, table=1)", ofportPhys, config.Default.ConntrackZone))
 	if err != nil {
 		return fmt.Errorf("Failed to add openflow flow to %s, stderr: %q, "+
-			"error: %v", cluster.GatewayBridge, stderr, err)
+			"error: %v", gwBridge, stderr, err)
 	}
 
 	// table 1, established and related connections go to pod
-	_, stderr, err = util.RunOVSOfctl("add-flow", cluster.GatewayBridge,
+	_, stderr, err = util.RunOVSOfctl("add-flow", gwBridge,
 		fmt.Sprintf("priority=100, table=1, ct_state=+trk+est, "+
 			"actions=output:%s", ofportPatch))
 	if err != nil {
 		return fmt.Errorf("Failed to add openflow flow to %s, stderr: %q, "+
-			"error: %v", cluster.GatewayBridge, stderr, err)
+			"error: %v", gwBridge, stderr, err)
 	}
-	_, stderr, err = util.RunOVSOfctl("add-flow", cluster.GatewayBridge,
+	_, stderr, err = util.RunOVSOfctl("add-flow", gwBridge,
 		fmt.Sprintf("priority=100, table=1, ct_state=+trk+rel, "+
 			"actions=output:%s", ofportPatch))
 	if err != nil {
 		return fmt.Errorf("Failed to add openflow flow to %s, stderr: %q, "+
-			"error: %v", cluster.GatewayBridge, stderr, err)
+			"error: %v", gwBridge, stderr, err)
 	}
 
 	// table 1, all other connections go to the bridge interface.
-	_, stderr, err = util.RunOVSOfctl("add-flow", cluster.GatewayBridge,
+	_, stderr, err = util.RunOVSOfctl("add-flow", gwBridge,
 		"priority=0, table=1, actions=output:LOCAL")
 	if err != nil {
 		return fmt.Errorf("Failed to add openflow flow to %s, stderr: %q, "+
-			"error: %v", cluster.GatewayBridge, stderr, err)
+			"error: %v", gwBridge, stderr, err)
 	}
 	return nil
 }
 
-func (cluster *OvnClusterController) addService(
-	service *kapi.Service, inport, outport string) {
+func addService(service *kapi.Service, inport, outport, gwBridge string) {
 	if service.Spec.Type != kapi.ServiceTypeNodePort {
 		return
 	}
@@ -225,19 +220,18 @@ func (cluster *OvnClusterController) addService(
 		}
 		protocol := strings.ToLower(string(svcPort.Protocol))
 
-		_, stderr, err := util.RunOVSOfctl("add-flow", cluster.GatewayBridge,
+		_, stderr, err := util.RunOVSOfctl("add-flow", gwBridge,
 			fmt.Sprintf("priority=100, in_port=%s, %s, tp_dst=%d, actions=%s",
 				inport, protocol, svcPort.NodePort, outport))
 		if err != nil {
 			logrus.Errorf("Failed to add openflow flow on %s for nodePort "+
-				"%d, stderr: %q, error: %v", cluster.GatewayBridge,
+				"%d, stderr: %q, error: %v", gwBridge,
 				svcPort.NodePort, stderr, err)
 		}
 	}
 }
 
-func (cluster *OvnClusterController) deleteService(service *kapi.Service,
-	inport string) {
+func deleteService(service *kapi.Service, inport, gwBridge string) {
 	if service.Spec.Type != kapi.ServiceTypeNodePort {
 		return
 	}
@@ -250,24 +244,24 @@ func (cluster *OvnClusterController) deleteService(service *kapi.Service,
 
 		protocol := strings.ToLower(string(svcPort.Protocol))
 
-		_, stderr, err := util.RunOVSOfctl("del-flows", cluster.GatewayBridge,
+		_, stderr, err := util.RunOVSOfctl("del-flows", gwBridge,
 			fmt.Sprintf("in_port=%s, %s, tp_dst=%d",
 				inport, protocol, svcPort.NodePort))
 		if err != nil {
 			logrus.Errorf("Failed to delete openflow flow on %s for nodePort "+
-				"%d, stderr: %q, error: %v", cluster.GatewayBridge,
+				"%d, stderr: %q, error: %v", gwBridge,
 				svcPort.NodePort, stderr, err)
 		}
 	}
 }
 
-func (cluster *OvnClusterController) syncServices(services []interface{}) {
+func syncServices(services []interface{}, gwBridge, gwIntf string) {
 	// Get ofport of physical interface
 	inport, stderr, err := util.RunOVSVsctl("--if-exists", "get",
-		"interface", cluster.GatewayIntf, "ofport")
+		"interface", gwIntf, "ofport")
 	if err != nil {
 		logrus.Errorf("Failed to get ofport of %s, stderr: %q, error: %v",
-			cluster.GatewayIntf, stderr, err)
+			gwIntf, stderr, err)
 		return
 	}
 
@@ -302,7 +296,7 @@ func (cluster *OvnClusterController) syncServices(services []interface{}) {
 	}
 
 	stdout, stderr, err := util.RunOVSOfctl("dump-flows",
-		cluster.GatewayBridge)
+		gwBridge)
 	if err != nil {
 		logrus.Errorf("dump-flows failed: %q (%v)", stderr, err)
 		return
@@ -335,19 +329,19 @@ func (cluster *OvnClusterController) syncServices(services []interface{}) {
 			protocol, port := pair[0], pair[1]
 
 			stdout, _, err := util.RunOVSOfctl(
-				"del-flows", cluster.GatewayBridge,
+				"del-flows", gwBridge,
 				fmt.Sprintf("in_port=%s, %s, tp_dst=%s",
 					inport, protocol, port))
 			if err != nil {
 				logrus.Errorf("del-flows of %s failed: %q",
-					cluster.GatewayBridge, stdout)
+					gwBridge, stdout)
 			}
 		}
 	}
 }
 
-func (cluster *OvnClusterController) nodePortWatcher() error {
-	patchPort := "k8s-patch-" + cluster.GatewayBridge + "-br-int"
+func nodePortWatcher(gwBridge, gwIntf string, wf *factory.WatchFactory) error {
+	patchPort := "k8s-patch-" + gwBridge + "-br-int"
 	// Get ofport of patchPort
 	ofportPatch, stderr, err := util.RunOVSVsctl("--if-exists", "get",
 		"interface", patchPort, "ofport")
@@ -358,30 +352,42 @@ func (cluster *OvnClusterController) nodePortWatcher() error {
 
 	// Get ofport of physical interface
 	ofportPhys, stderr, err := util.RunOVSVsctl("--if-exists", "get",
-		"interface", cluster.GatewayIntf, "ofport")
+		"interface", gwIntf, "ofport")
 	if err != nil {
 		return fmt.Errorf("Failed to get ofport of %s, stderr: %q, error: %v",
-			cluster.GatewayIntf, stderr, err)
+			gwIntf, stderr, err)
 	}
 
-	_, err = cluster.watchFactory.AddServiceHandler(cache.ResourceEventHandlerFuncs{
+	_, err = wf.AddServiceHandler(cache.ResourceEventHandlerFuncs{
 		AddFunc: func(obj interface{}) {
 			service := obj.(*kapi.Service)
-			cluster.addService(service, ofportPhys, ofportPatch)
+			addService(service, ofportPhys, ofportPatch, gwBridge)
 		},
 		UpdateFunc: func(old, new interface{}) {
 		},
 		DeleteFunc: func(obj interface{}) {
 			service := obj.(*kapi.Service)
-			cluster.deleteService(service, ofportPhys)
+			deleteService(service, ofportPhys, gwBridge)
 		},
-	}, cluster.syncServices)
+	}, func(services []interface{}) {
+		syncServices(services, gwBridge, gwIntf)
+	})
 
 	return err
 }
 
 func (cluster *OvnClusterController) initGateway(
 	nodeName string, clusterIPSubnet []string, subnet string) error {
+	ipt, err := iptables.NewWithProtocol(iptables.ProtocolIPv4)
+	if err != nil {
+		return fmt.Errorf("failed to initialize iptables: %v", err)
+	}
+	return cluster.initGatewayInternal(nodeName, clusterIPSubnet, subnet, ipt)
+}
+
+func (cluster *OvnClusterController) initGatewayInternal(
+	nodeName string, clusterIPSubnet []string, subnet string,
+	ipt util.IPTablesHelper) error {
 	if cluster.LocalnetGateway {
 		// Create a localnet OVS bridge.
 		localnetBridgeName := "br-localnet"
@@ -392,11 +398,9 @@ func (cluster *OvnClusterController) initGateway(
 				", stderr:%s (%v)", localnetBridgeName, stderr, err)
 		}
 
-		_, err = exec.Command("ip", "link", "set", localnetBridgeName,
-			"up").CombinedOutput()
+		_, _, err = util.RunIP("link", "set", localnetBridgeName, "up")
 		if err != nil {
-			logrus.Errorf("failed to up %s (%v)", localnetBridgeName, err)
-			return err
+			return fmt.Errorf("failed to up %s (%v)", localnetBridgeName, err)
 		}
 
 		// Create a localnet bridge nexthop
@@ -408,30 +412,25 @@ func (cluster *OvnClusterController) initGateway(
 			return fmt.Errorf("Failed to create localnet bridge next hop %s"+
 				", stderr:%s (%v)", localnetBridgeNextHop, stderr, err)
 		}
-		_, err = exec.Command("ip", "link", "set", localnetBridgeNextHop,
-			"up").CombinedOutput()
+		_, _, err = util.RunIP("link", "set", localnetBridgeNextHop, "up")
 		if err != nil {
-			logrus.Errorf("failed to up %s (%v)", localnetBridgeNextHop, err)
-			return err
+			return fmt.Errorf("failed to up %s (%v)", localnetBridgeNextHop, err)
 		}
 
 		// Flush IPv4 address of localnetBridgeNextHop.
-		_, err = exec.Command("ip", "addr", "flush",
-			"dev", localnetBridgeNextHop).CombinedOutput()
+		_, _, err = util.RunIP("addr", "flush", "dev", localnetBridgeNextHop)
 		if err != nil {
-			logrus.Errorf("failed to flush ip address of %s (%v)",
+			return fmt.Errorf("failed to flush ip address of %s (%v)",
 				localnetBridgeNextHop, err)
-			return err
 		}
 
 		// Set localnetBridgeNextHop with an IP address.
-		_, err = exec.Command("ip", "addr", "add",
+		_, _, err = util.RunIP("addr", "add",
 			localnetGatewayNextHopSubnet,
-			"dev", localnetBridgeNextHop).CombinedOutput()
+			"dev", localnetBridgeNextHop)
 		if err != nil {
-			logrus.Errorf("failed to assign ip address to %s (%v)",
+			return fmt.Errorf("failed to assign ip address to %s (%v)",
 				localnetBridgeNextHop, err)
-			return err
 		}
 
 		err = util.GatewayInit(clusterIPSubnet, nodeName,
@@ -439,15 +438,13 @@ func (cluster *OvnClusterController) initGateway(
 			localnetBridgeName, localnetGatewayNextHop, subnet,
 			false)
 		if err != nil {
-			logrus.Errorf("failed to GatewayInit for localnet (%v)", err)
-			return err
+			return fmt.Errorf("failed to GatewayInit for localnet (%v)", err)
 		}
 
-		err = localnetGatewayNAT(localnetBridgeNextHop, localnetGatewayIP)
+		err = localnetGatewayNAT(ipt, localnetBridgeNextHop, localnetGatewayIP)
 		if err != nil {
-			logrus.Errorf("Failed to add NAT rules for localnet gateway (%v)",
+			return fmt.Errorf("Failed to add NAT rules for localnet gateway (%v)",
 				err)
-			return err
 		}
 
 		return nil
@@ -546,14 +543,15 @@ func (cluster *OvnClusterController) initGateway(
 	if !cluster.GatewaySpareIntf {
 		// Program cluster.GatewayIntf to let non-pod traffic to go to host
 		// stack
-		err = cluster.addDefaultConntrackRules()
+		err = addDefaultConntrackRules(cluster.GatewayBridge, cluster.GatewayIntf)
 		if err != nil {
 			return err
 		}
 
 		if cluster.NodePortEnable {
 			// Program cluster.GatewayIntf to let nodePort traffic to go to pods.
-			err = cluster.nodePortWatcher()
+			err = nodePortWatcher(cluster.GatewayBridge,
+				cluster.GatewayIntf, cluster.watchFactory)
 			if err != nil {
 				return err
 			}
