@@ -17,4 +17,7 @@ script:
     -    make gofmt;
     -    make install.tools;
     -    make lint;
-    -    sudo -E make check;
+    -    which go;
+    -    echo $PATH;
+    -    sudo -E echo $PATH;
+    -    sudo -E hack/test-go.sh;
