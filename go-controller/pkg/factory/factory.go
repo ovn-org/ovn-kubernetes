@@ -26,8 +26,15 @@ type informer struct {
 }
 
 func (i *informer) forEachHandler(obj interface{}, f func(id uint64, handler cache.ResourceEventHandler)) {
+	handlersCopy := make(map[uint64]cache.ResourceEventHandler)
+
 	i.Lock()
-	defer i.Unlock()
+	// copying the informer handlers and releasing the lock prevents deadlocks when trying to change
+	// handlers within a handler
+	for key, value := range i.handlers {
+		handlersCopy[key] = value
+	}
+	i.Unlock()
 
 	objType := reflect.TypeOf(obj)
 	if objType != i.oType {
@@ -35,7 +42,7 @@ func (i *informer) forEachHandler(obj interface{}, f func(id uint64, handler cac
 		return
 	}
 
-	for id, handler := range i.handlers {
+	for id, handler := range handlersCopy {
 		f(id, handler)
 	}
 }
