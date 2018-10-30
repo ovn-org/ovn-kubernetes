@@ -28,6 +28,9 @@ GW_IP=$GW_IP
 OVN_EXTERNAL=$OVN_EXTERNAL
 EOL
 
+# Comment out the next line if you don't prefer daemonsets.
+DAEMONSET="true"
+
 # Comment out the next line if you prefer TCP instead of SSL.
 SSL="true"
 
@@ -63,29 +66,22 @@ sudo apt-key adv --keyserver hkp://keyserver.ubuntu.com:80 --recv-keys 58118E89F
 sudo su -c "echo \"deb https://apt.dockerproject.org/repo ubuntu-xenial main\" >> /etc/apt/sources.list.d/docker.list"
 sudo apt-get update
 
-# First, install docker
+## First, install docker
 sudo apt-get purge lxc-docker
 sudo apt-get install -y linux-image-extra-$(uname -r) linux-image-extra-virtual
 sudo apt-get install -y docker-engine
 sudo service docker start
 
-# Install kubernetes
-sudo swapoff -a
-sudo apt-get install -y kubelet kubeadm
-sudo service kubelet restart
-
-# Start kubelet join the cluster
-cat /vagrant/kubeadm.log > kubeadm_join.sh
-sudo sh kubeadm_join.sh
-
-# Install OVS and dependencies
+## Install OVS and dependencies
 sudo apt-get build-dep dkms
 sudo apt-get install python-six openssl -y
 
 sudo apt-get install openvswitch-datapath-dkms=2.9.2-1 -y
 sudo apt-get install openvswitch-switch=2.9.2-1 openvswitch-common=2.9.2-1 libopenvswitch=2.9.2-1 -y
 
-sudo apt-get install ovn-common=2.9.2-1 ovn-host=2.9.2-1 -y
+if [ "$DAEMONSET" != "true" ]; then
+  sudo apt-get install ovn-common=2.9.2-1 ovn-host=2.9.2-1 -y
+fi
 
 if [ -n "$SSL" ]; then
     PROTOCOL=ssl
@@ -120,55 +116,69 @@ if [ $HA = "true" ]; then
     --db-sb-cluster-remote-addr=$MASTER_IP start_sb_ovsdb
 fi
 
+## Install kubernetes
+sudo swapoff -a
+sudo apt-get install -y kubelet kubeadm
+sudo sh -c "sed -i 's/KUBELET_EXTRA_ARGS=/KUBELET_EXTRA_ARGS=--node-labels=node-role.kubernetes.io\/compute=true/' /etc/default/kubelet"
+sudo service kubelet restart
 
-# Install golang
-wget -nv https://dl.google.com/go/go1.9.2.linux-amd64.tar.gz
-sudo tar -C /usr/local -xzf go1.9.2.linux-amd64.tar.gz
-export PATH="/usr/local/go/bin:echo $PATH"
-export GOPATH=$HOME/work
+# Start kubelet join the cluster
+cat /vagrant/kubeadm.log > kubeadm_join.sh
+sudo sh kubeadm_join.sh
 
-# Install OVN+K8S Integration
+
+## Clone ovn-kubernetes repo
 mkdir -p $HOME/work/src/github.com/openvswitch
 pushd $HOME/work/src/github.com/openvswitch
 git clone https://github.com/openvswitch/ovn-kubernetes
 popd
-pushd $HOME/work/src/github.com/openvswitch/ovn-kubernetes/go-controller
-make 1>&2 2>/dev/null
-sudo make install
-popd
 
-# Initialize the minion and gateway.
-if [ $PROTOCOL = "ssl" ]; then
-  SSL_ARGS="-nb-client-privkey /etc/openvswitch/ovncontroller-privkey.pem \
-    -nb-client-cert /etc/openvswitch/ovncontroller-cert.pem \
-    -nb-client-cacert /etc/openvswitch/ovnnb-ca.cert \
-    -sb-client-privkey /etc/openvswitch/ovncontroller-privkey.pem \
-    -sb-client-cert /etc/openvswitch/ovncontroller-cert.pem \
-    -sb-client-cacert /etc/openvswitch/ovnsb-ca.cert"
+if [ "$DAEMONSET" != "true" ]; then
+  # Install golang
+  wget -nv https://dl.google.com/go/go1.9.2.linux-amd64.tar.gz
+  sudo tar -C /usr/local -xzf go1.9.2.linux-amd64.tar.gz
+  export PATH="/usr/local/go/bin:echo $PATH"
+  export GOPATH=$HOME/work
+
+  # Install OVN+K8S Integration
+  pushd $HOME/work/src/github.com/openvswitch/ovn-kubernetes/go-controller
+  make 1>&2 2>/dev/null
+  sudo make install
+  popd
+
+  # Initialize the minion and gateway.
+  if [ $PROTOCOL = "ssl" ]; then
+    SSL_ARGS="-nb-client-privkey /etc/openvswitch/ovncontroller-privkey.pem \
+      -nb-client-cert /etc/openvswitch/ovncontroller-cert.pem \
+      -nb-client-cacert /etc/openvswitch/ovnnb-ca.cert \
+      -sb-client-privkey /etc/openvswitch/ovncontroller-privkey.pem \
+      -sb-client-cert /etc/openvswitch/ovncontroller-cert.pem \
+      -sb-client-cacert /etc/openvswitch/ovnsb-ca.cert"
+  fi
+ 
+  if [ "$HA" = "true" ]; then
+      ovn_nb="$PROTOCOL://$MASTER1:6641,$PROTOCOL://$OVERLAY_IP:6641,$PROTOCOL://$MASTER2:6641"
+      ovn_sb="$PROTOCOL://$MASTER1:6642,$PROTOCOL://$OVERLAY_IP:6642,$PROTOCOL://$MASTER2:6642"
+  else
+      ovn_nb="$PROTOCOL://$MASTER1:6641"
+      ovn_sb="$PROTOCOL://$MASTER1:6642"
+  fi
+
+  TOKEN=`sudo cat /vagrant/token`
+
+  nohup sudo ovnkube -loglevel=4 -logfile="/var/log/openvswitch/ovnkube.log" \
+      -k8s-apiserver="https://$MASTER1:6443" \
+      -k8s-cacert=/etc/kubernetes/pki/ca.crt \
+      -k8s-token="$TOKEN" \
+      -init-node="$MINION_NAME"  \
+      -nodeport \
+      -nb-address="$ovn_nb" \
+      -sb-address="$ovn_sb" \
+      ${SSL_ARGS} \
+      -init-gateways -gateway-interface=enp0s8 -gateway-nexthop="$GW_IP" \
+      -service-cluster-ip-range=172.16.1.0/24 \
+      -cluster-subnet="192.168.0.0/16" 2>&1 &
 fi
-
-if [ "$HA" = "true" ]; then
-    ovn_nb="$PROTOCOL://$MASTER1:6641,$PROTOCOL://$OVERLAY_IP:6641,$PROTOCOL://$MASTER2:6641"
-    ovn_sb="$PROTOCOL://$MASTER1:6642,$PROTOCOL://$OVERLAY_IP:6642,$PROTOCOL://$MASTER2:6642"
-else
-    ovn_nb="$PROTOCOL://$MASTER1:6641" 
-    ovn_sb="$PROTOCOL://$MASTER1:6642"
-fi
-
-TOKEN=`sudo cat /vagrant/token`
-
-nohup sudo ovnkube -loglevel=4 -logfile="/var/log/openvswitch/ovnkube.log" \
-    -k8s-apiserver="https://$MASTER1:6443" \
-    -k8s-cacert=/etc/kubernetes/pki/ca.crt \
-    -k8s-token="$TOKEN" \
-    -init-node="$MINION_NAME"  \
-    -nodeport \
-    -nb-address="$ovn_nb" \
-    -sb-address="$ovn_sb" \
-    ${SSL_ARGS} \
-    -init-gateways -gateway-interface=enp0s8 -gateway-nexthop="$GW_IP" \
-    -service-cluster-ip-range=172.16.1.0/24 \
-    -cluster-subnet="192.168.0.0/16" 2>&1 &
 
 sleep 10
 

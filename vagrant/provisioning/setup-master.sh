@@ -31,6 +31,9 @@ NODE_NAME=$NODE_NAME
 OVN_EXTERNAL=$OVN_EXTERNAL
 EOL
 
+# Comment out the next line if you don't prefer daemonsets.
+DAEMONSET="true"
+
 # Comment out the next line, if you prefer TCP instead of SSL.
 SSL="true"
 
@@ -66,13 +69,13 @@ sudo apt-key adv --keyserver hkp://keyserver.ubuntu.com:80 --recv-keys 58118E89F
 sudo su -c "echo \"deb https://apt.dockerproject.org/repo ubuntu-xenial main\" >> /etc/apt/sources.list.d/docker.list"
 sudo apt-get update
 
-# First, install docker
+## First, install docker
 sudo apt-get purge lxc-docker
 sudo apt-get install -y linux-image-extra-$(uname -r) linux-image-extra-virtual
 sudo apt-get install -y docker-engine
 sudo service docker start
 
-# Install kubernetes
+## Install kubernetes
 sudo apt-get install -y kubelet kubeadm kubectl
 sudo apt-mark hold kubelet kubeadm kubectl
 sudo service kubelet restart
@@ -100,15 +103,16 @@ done
 # Let master run pods too.
 kubectl taint nodes --all node-role.kubernetes.io/master-
 
-# Install OVS and dependencies
+## Install OVS and dependencies
 sudo apt-get build-dep dkms
 sudo apt-get install python-six openssl python-pip -y
 
 sudo apt-get install openvswitch-datapath-dkms=2.9.2-1 -y
 sudo apt-get install openvswitch-switch=2.9.2-1 openvswitch-common=2.9.2-1 libopenvswitch=2.9.2-1 -y
 
-sudo apt-get install ovn-central=2.9.2-1 ovn-common=2.9.2-1 ovn-host=2.9.2-1 -y
-
+if [ "$DAEMONSET" != "true" ]; then
+  sudo apt-get install ovn-central=2.9.2-1 ovn-common=2.9.2-1 ovn-host=2.9.2-1 -y
+fi
 if [ -n "$SSL" ]; then
     PROTOCOL=ssl
     echo "PROTOCOL=ssl" >> setup_master_args.sh
@@ -150,64 +154,103 @@ if [ "$HA" = "true" ]; then
     --pidfile=/var/run/openvswitch/ovn-northd.pid --detach --monitor
 fi
 
-# Install golang
-wget -nv https://dl.google.com/go/go1.9.2.linux-amd64.tar.gz
-sudo tar -C /usr/local -xzf go1.9.2.linux-amd64.tar.gz
-export PATH="/usr/local/go/bin:echo $PATH"
-export GOPATH=$HOME/work
 
-# Install OVN+K8S Integration
+# Clone ovn-kubernetes repo
 mkdir -p $HOME/work/src/github.com/openvswitch
 pushd $HOME/work/src/github.com/openvswitch
 git clone https://github.com/openvswitch/ovn-kubernetes
 popd
-pushd $HOME/work/src/github.com/openvswitch/ovn-kubernetes/go-controller
-make 1>&2 2>/dev/null
-sudo make install
-popd
 
-if [ $PROTOCOL = "ssl" ]; then
- SSL_ARGS="-nb-server-privkey /etc/openvswitch/ovnnb-privkey.pem \
- -nb-server-cert /etc/openvswitch/ovnnb-cert.pem \
- -nb-server-cacert /vagrant/pki/switchca/cacert.pem \
- -sb-server-privkey /etc/openvswitch/ovnsb-privkey.pem \
- -sb-server-cert /etc/openvswitch/ovnsb-cert.pem \
- -sb-server-cacert /vagrant/pki/switchca/cacert.pem  \
- -nb-client-privkey /etc/openvswitch/ovncontroller-privkey.pem \
- -nb-client-cert /etc/openvswitch/ovncontroller-cert.pem \
- -nb-client-cacert /etc/openvswitch/ovnnb-ca.cert \
- -sb-client-privkey /etc/openvswitch/ovncontroller-privkey.pem \
- -sb-client-cert /etc/openvswitch/ovncontroller-cert.pem \
- -sb-client-cacert /etc/openvswitch/ovnsb-ca.cert"
-fi
+if [ "$DAEMONSET" != "true" ]; then
+  # Install golang
+  wget -nv https://dl.google.com/go/go1.9.2.linux-amd64.tar.gz
+  sudo tar -C /usr/local -xzf go1.9.2.linux-amd64.tar.gz
+  export PATH="/usr/local/go/bin:echo $PATH"
+  export GOPATH=$HOME/work
 
-if [ "$HA" = "true" ]; then
-    ovn_nb="$PROTOCOL://$MASTER1:6641,$PROTOCOL://$MASTER2:6641,$PROTOCOL://$MASTER3:6641"
-    ovn_sb="$PROTOCOL://$MASTER1:6642,$PROTOCOL://$MASTER2:6642,$PROTOCOL://$MASTER3:6642"
+  pushd $HOME/work/src/github.com/openvswitch/ovn-kubernetes/go-controller
+  make 1>&2 2>/dev/null
+  sudo make install
+  popd
+
+  if [ $PROTOCOL = "ssl" ]; then
+   SSL_ARGS="-nb-server-privkey /etc/openvswitch/ovnnb-privkey.pem \
+   -nb-server-cert /etc/openvswitch/ovnnb-cert.pem \
+   -nb-server-cacert /vagrant/pki/switchca/cacert.pem \
+   -sb-server-privkey /etc/openvswitch/ovnsb-privkey.pem \
+   -sb-server-cert /etc/openvswitch/ovnsb-cert.pem \
+   -sb-server-cacert /vagrant/pki/switchca/cacert.pem  \
+   -nb-client-privkey /etc/openvswitch/ovncontroller-privkey.pem \
+   -nb-client-cert /etc/openvswitch/ovncontroller-cert.pem \
+   -nb-client-cacert /etc/openvswitch/ovnnb-ca.cert \
+   -sb-client-privkey /etc/openvswitch/ovncontroller-privkey.pem \
+   -sb-client-cert /etc/openvswitch/ovncontroller-cert.pem \
+   -sb-client-cacert /etc/openvswitch/ovnsb-ca.cert"
+  fi
+
+  if [ "$HA" = "true" ]; then
+      ovn_nb="$PROTOCOL://$MASTER1:6641,$PROTOCOL://$MASTER2:6641,$PROTOCOL://$MASTER3:6641"
+      ovn_sb="$PROTOCOL://$MASTER1:6642,$PROTOCOL://$MASTER2:6642,$PROTOCOL://$MASTER3:6642"
+  else
+      ovn_nb="$PROTOCOL://$OVERLAY_IP:6641"
+      ovn_sb="$PROTOCOL://$OVERLAY_IP:6642"
+  fi
+
+  sudo kubectl create -f /vagrant/ovnkube-rbac.yaml
+
+  SECRET=`kubectl get secret | grep ovnkube | awk '{print $1}'`
+  TOKEN=`kubectl get secret/$SECRET -o yaml |grep "token:" | cut -f2  -d ":" | sed 's/^  *//' | base64 -d`
+  echo $TOKEN > /vagrant/token
+
+  nohup sudo ovnkube -net-controller -loglevel=4 \
+   -k8s-apiserver="https://$OVERLAY_IP:6443" \
+   -k8s-cacert=/etc/kubernetes/pki/ca.crt \
+   -k8s-token="$TOKEN" \
+   -logfile="/var/log/openvswitch/ovnkube.log" \
+   -init-master="k8smaster" -cluster-subnet="192.168.0.0/16" \
+   -init-node="k8smaster" \
+   -service-cluster-ip-range=172.16.1.0/24 \
+   -nodeport \
+   -nb-address="$ovn_nb" \
+   -sb-address="$ovn_sb" \
+   -init-gateways -gateway-localnet \
+   ${SSL_ARGS} 2>&1 &
 else
-    ovn_nb="$PROTOCOL://$OVERLAY_IP:6641" 
-    ovn_sb="$PROTOCOL://$OVERLAY_IP:6642"
+  # Daemonset is enabled.
+
+  # Dameonsets only work with TCP now.
+  PROTOCOL="tcp"
+
+  # label the master node for daemonsets
+  kubectl label node k8smaster node-role.kubernetes.io/master=true --overwrite
+
+  # Create namespace
+  kubectl create -f $HOME/work/src/github.com/openvswitch/ovn-kubernetes/dist/yaml/ovn-namespace.yaml
+
+  # Create service accounts and policies
+  kubectl create -f $HOME/work/src/github.com/openvswitch/ovn-kubernetes/dist/yaml/ovn-policy.yaml
+
+  # Create ovn config map.
+  cat << EOF | kubectl create -f - > /dev/null 2>&1
+kind: ConfigMap
+apiVersion: v1
+metadata:
+  name: ovn-config
+  namespace: ovn-kubernetes
+data:
+  k8s_apiserver: "https://$OVERLAY_IP:6443"
+  net_cidr:      "192.168.0.0/16"
+  svc_cidr:      "172.16.1.0/24"
+  OvnNorth:      $PROTOCOL://$OVERLAY_IP:6641
+  OvnSouth:      $PROTOCOL://$OVERLAY_IP:6642
+EOF
+
+  # Run ovnkube-master daemonset.
+  kubectl create -f $HOME/work/src/github.com/openvswitch/ovn-kubernetes/dist/yaml/ovnkube-master.yaml
+
+  # Run ovnkube daemonsets for nodes
+  kubectl create -f $HOME/work/src/github.com/openvswitch/ovn-kubernetes/dist/yaml/ovnkube.yaml
 fi
-
-sudo kubectl create -f /vagrant/ovnkube-rbac.yaml
-
-SECRET=`kubectl get secret | grep ovnkube | awk '{print $1}'`
-TOKEN=`kubectl get secret/$SECRET -o yaml |grep "token:" | cut -f2  -d ":" | sed 's/^  *//' | base64 -d`
-echo $TOKEN > /vagrant/token
-
-nohup sudo ovnkube -net-controller -loglevel=4 \
- -k8s-apiserver="https://$OVERLAY_IP:6443" \
- -k8s-cacert=/etc/kubernetes/pki/ca.crt \
- -k8s-token="$TOKEN" \
- -logfile="/var/log/openvswitch/ovnkube.log" \
- -init-master="k8smaster" -cluster-subnet="192.168.0.0/16" \
- -init-node="k8smaster" \
- -service-cluster-ip-range=172.16.1.0/24 \
- -nodeport \
- -nb-address="$ovn_nb" \
- -sb-address="$ovn_sb" \
- -init-gateways -gateway-localnet \
- ${SSL_ARGS} 2>&1 &
 
 # Setup some example yaml files
 cat << APACHEPOD >> ~/apache-pod.yaml
