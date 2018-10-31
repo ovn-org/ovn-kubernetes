@@ -109,7 +109,11 @@ func deleteHNSEndpoint(endpointName string) error {
 // The fact that CNI add should be idempotent on Windows is stated here:
 // https://github.com/kubernetes/kubernetes/blob/master/pkg/kubelet/network/cni/cni_windows.go#L38
 // TODO: add proper MTU config (GetCurrentThreadId/SetCurrentThreadId) or via OVS properties
-func (pr *PodRequest) ConfigureInterface(namespace string, podName string, macAddress string, ipAddress string, gatewayIP string, mtu int, ingress, egress int64) ([]*current.Interface, error) {
+func (pr *PodRequest) ConfigureInterface(namespace string, podName string, networkName string, macAddress string, ipAddress string, gatewayIP string, mtu int, ingress, egress int64) ([]*current.Interface, error) {
+	if networkName != "ovn-kubernetes" {
+		return nil, fmt.Errorf("Cannot add network %s to pod %s. Non-default networks are currently not supported on windows", networkName, podName)
+	}
+
 	conf := pr.CNIConf
 	ipAddr, ipNet, err := net.ParseCIDR(ipAddress)
 	if err != nil {

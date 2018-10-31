@@ -1,6 +1,7 @@
 package ovn
 
 import (
+	"fmt"
 	"github.com/openvswitch/ovn-kubernetes/go-controller/pkg/factory"
 	"github.com/openvswitch/ovn-kubernetes/go-controller/pkg/kube"
 	util "github.com/openvswitch/ovn-kubernetes/go-controller/pkg/util"
@@ -10,6 +11,7 @@ import (
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/tools/cache"
 	"reflect"
+	"strings"
 	"sync"
 )
 
@@ -116,20 +118,63 @@ func (oc *Controller) Run() error {
 	return nil
 }
 
+func (oc *Controller) addDefaultLogicalPort(pod *kapi.Pod) {
+	annotation := oc.addLogicalPort(pod, pod.Spec.NodeName)
+	if annotation == "" {
+		return
+	}
+
+	_, isStaticIP := pod.Annotations["ovn"]
+	if !isStaticIP {
+		err := oc.kube.SetAnnotationOnPod(pod, "ovn", annotation)
+		if err != nil {
+			logrus.Errorf("Failed to set annotation on pod %s - %v", pod.Name, err)
+		}
+	}
+}
+
+func (oc *Controller) addLogicalPortsToExtraSwitches(pod *kapi.Pod) {
+	switches := oc.getNetworkNamesFromPodAnnotations(pod.Annotations)
+	if switches != nil {
+		annotations := make(map[string]string)
+		for _, logicalSwitch := range switches {
+			annotations[logicalSwitch] = oc.addLogicalPort(pod, logicalSwitch)
+		}
+
+		ovnExtraAnnotation := fmt.Sprintf("{")
+		for network, networkAnnotation := range annotations {
+			if networkAnnotation == "" {
+				continue
+			}
+			ovnExtraAnnotation = fmt.Sprintf("%s\\\"%s\\\":%s, ", ovnExtraAnnotation, network, networkAnnotation)
+		}
+
+		ovnExtraAnnotation = strings.TrimSuffix(ovnExtraAnnotation, ", ")
+		ovnExtraAnnotation = fmt.Sprintf("%s}", ovnExtraAnnotation)
+
+		err := oc.kube.SetAnnotationOnPod(pod, "ovn_extra", ovnExtraAnnotation)
+		if err != nil {
+			logrus.Errorf("Failed to set annotation on pod %s : %v", pod.Name, err)
+		}
+	}
+}
+
 // WatchPods starts the watching of Pod resource and calls back the appropriate handler logic
 func (oc *Controller) WatchPods() error {
 	_, err := oc.watchFactory.AddPodHandler(cache.ResourceEventHandlerFuncs{
 		AddFunc: func(obj interface{}) {
 			pod := obj.(*kapi.Pod)
 			if pod.Spec.NodeName != "" {
-				oc.addLogicalPort(pod)
+				oc.addLogicalPortsToExtraSwitches(pod)
+				oc.addDefaultLogicalPort(pod)
 			}
 		},
 		UpdateFunc: func(old, newer interface{}) {
 			podNew := newer.(*kapi.Pod)
 			podOld := old.(*kapi.Pod)
 			if podOld.Spec.NodeName == "" && podNew.Spec.NodeName != "" {
-				oc.addLogicalPort(podNew)
+				oc.addLogicalPortsToExtraSwitches(podNew)
+				oc.addDefaultLogicalPort(podNew)
 			}
 		},
 		DeleteFunc: func(obj interface{}) {
