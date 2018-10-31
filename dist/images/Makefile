@@ -11,9 +11,11 @@
 # on each node in both "registries:" and "insecure_registries:" sections.
 
 all: bld
-	docker build -t ovn-kube .
-	#docker tag ovn-kube my-registry:5000/ovn-kube:latest
-	#docker push my-registry:5000/ovn-kube:latest
+	docker build -t ovn-daemonset .
+	# This is the default in the ovnkube*.yaml files
+	docker tag ovn-daemonset docker.io/ovnkube/ovn-daemonset:latest
+	# docker login -u ovnkube docker.io/ovnkube
+	docker push docker.io/ovnkube/ovn-daemonset:latest
 
 fedora: bld
 	docker build -t ovn-kube-f -f Dockerfile.fedora .
