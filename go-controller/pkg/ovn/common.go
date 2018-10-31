@@ -198,16 +198,8 @@ func (oc *Controller) deletePortGroup(hashName string) {
 	}
 }
 
-func (oc *Controller) getIPFromOvnAnnotation(ovnAnnotation string) string {
-	if ovnAnnotation == "" {
-		return ""
-	}
-
-	var ovnAnnotationMap map[string]string
-	err := json.Unmarshal([]byte(ovnAnnotation), &ovnAnnotationMap)
-	if err != nil {
-		logrus.Errorf("Error in json unmarshaling ovn annotation "+
-			"(%v)", err)
+func (oc *Controller) getIPFromOvnAnnotationMap(ovnAnnotationMap map[string]string) string {
+	if ovnAnnotationMap == nil {
 		return ""
 	}
 
@@ -220,20 +212,65 @@ func (oc *Controller) getIPFromOvnAnnotation(ovnAnnotation string) string {
 	return ipAddressMask[0]
 }
 
-func (oc *Controller) getMacFromOvnAnnotation(ovnAnnotation string) string {
-	if ovnAnnotation == "" {
+func (oc *Controller) getIPFromOvnAnnotation(ovnAnnotation string) string {
+	return oc.getIPFromOvnAnnotationMap(oc.getOvnAnnotationMap(ovnAnnotation))
+}
+
+func (oc *Controller) getMacFromOvnAnnotationMap(ovnAnnotationMap map[string]string) string {
+	if ovnAnnotationMap == nil {
 		return ""
+	}
+
+	return ovnAnnotationMap["mac_address"]
+}
+
+func (oc *Controller) getMacFromOvnAnnotation(ovnAnnotation string) string {
+	return oc.getMacFromOvnAnnotationMap(oc.getOvnAnnotationMap(ovnAnnotation))
+}
+
+func (oc *Controller) getOvnAnnotationMap(ovnAnnotation string) map[string]string {
+	if ovnAnnotation == "" {
+		return nil
 	}
 
 	var ovnAnnotationMap map[string]string
 	err := json.Unmarshal([]byte(ovnAnnotation), &ovnAnnotationMap)
 	if err != nil {
-		logrus.Errorf("Error in json unmarshaling ovn annotation "+
-			"(%v)", err)
-		return ""
+		logrus.Errorf("Error in json unmarshaling ovn annotation (%v)", err)
+		return nil
+	}
+	return ovnAnnotationMap
+}
+
+func (oc *Controller) getNetworkInfoFromOvnAnnotation(ovnAnnotation string, networkName string) map[string]string {
+	if ovnAnnotation == "" {
+		return nil
 	}
 
-	return ovnAnnotationMap["mac_address"]
+	var ovnExtraAnnotationMap map[string]map[string]string
+	err := json.Unmarshal([]byte(ovnAnnotation), &ovnExtraAnnotationMap)
+	if err != nil {
+		logrus.Errorf("Error in json unmarshaling ovn annotation  (%v)", err)
+		return nil
+	}
+
+	return ovnExtraAnnotationMap[networkName]
+}
+
+func (oc *Controller) getNetworkNamesFromPodAnnotations(podAnnotations map[string]string) []string {
+	switchesAnnotation, hasExtraSwitches := podAnnotations["switches"]
+
+	if hasExtraSwitches {
+		var switches []string
+		err := json.Unmarshal([]byte(switchesAnnotation), &switches)
+
+		if err != nil {
+			logrus.Errorf("Error in json unmarshaling switches annotation  (%v)", err)
+			return nil
+		}
+		return switches
+	}
+	return nil
 }
 
 func stringSliceMembership(slice []string, key string) bool {
