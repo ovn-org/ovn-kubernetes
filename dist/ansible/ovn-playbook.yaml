@@ -23,19 +23,21 @@
       state: absent
       name: /var/lib/openvswitch/ovnsb_db.db
 
-  # iptables -A OS_FIREWALL_ALLOW -p tcp -m state --state NEW -m tcp --dport 6641 -j ACCEPT
+  # iptables -I INPUT -p tcp -m state --state NEW -m tcp --dport 6641 -j ACCEPT
   - name: iptables allow 6641
     iptables:
-      chain: OS_FIREWALL_ALLOW
+      action: insert
+      chain: INPUT
       ctstate: NEW
       destination_port: 6641
       jump: ACCEPT
       protocol: tcp
 
-  # iptables -A OS_FIREWALL_ALLOW -p tcp -m state --state NEW -m tcp --dport 6642 -j ACCEPT
+  # iptables -I INPUT -p tcp -m state --state NEW -m tcp --dport 6642 -j ACCEPT
   - name: iptables allow 6642
     iptables:
-      chain: OS_FIREWALL_ALLOW
+      action: insert
+      chain: INPUT
       ctstate: NEW
       destination_port: 6642
       jump: ACCEPT
@@ -59,8 +61,6 @@
       src: scripts/ovn-setup.sh
       dest: /root/ovn/scripts/ovn-setup.sh
       mode: 0755
-  - name: Copy sdn-ovs.yaml
-    copy: src=../yaml/sdn-ovs.yaml dest=/root/ovn/yaml/sdn-ovs.yaml
   - name: Copy ovnkube-master.yaml
     copy: src=../yaml/ovnkube-master.yaml dest=/root/ovn/yaml/ovnkube-master.yaml
   - name: Copy ovnkube.yaml
@@ -83,12 +83,9 @@
     shell: /root/ovn/scripts/ovn-setup.sh
     ignore_errors: yes
 
-  - name: Start the ovn-ovs daemonset
-    shell: oc create -f /root/ovn/yaml/sdn-ovs.yaml
+  - name: Start the node ovn daemonset on all nodes
+    shell: oc create -f /root/ovn/yaml/ovnkube.yaml
     ignore_errors: yes
   - name: Start the master ovn daemonset
     shell: oc create -f /root/ovn/yaml/ovnkube-master.yaml
-    ignore_errors: yes
-  - name: Start the node ovn daemonset
-    shell: oc create -f /root/ovn/yaml/ovnkube.yaml
     ignore_errors: yes
