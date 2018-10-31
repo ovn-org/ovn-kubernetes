@@ -89,7 +89,7 @@ func setOVSExternalIDs(nodeName string, ids ...string) error {
 	return nil
 }
 
-func setupOVNNode(nodeName, kubeServer, kubeToken, kubeCACert string) error {
+func setupOVNNode(nodeName string) error {
 	// Tell ovn-*bctl how to talk to the database
 	for _, auth := range []*config.OvnDBAuth{
 		config.OvnNorth.ClientAuth,
