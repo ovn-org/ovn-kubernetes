@@ -23,8 +23,9 @@ is_cluster_up () {
 }
 
 is_api_server_ready () {
-  # on OpenShift, oc whoami --show-server
-  apiserver=$(kubectl cluster-info | gawk '/Kubernetes master/{ print $6 }')
+  # kubectl cluster-info leaves ^[[0 in output string
+  #apiserver=$(kubectl cluster-info | gawk '/Kubernetes master/{ print $6 }')
+  apiserver=$(oc whoami --show-server)
   if [[ ${apiserver} == '' ]]; then
     return 1
   fi
@@ -66,6 +67,7 @@ wait_for_condition is_api_server_ready
 #    networkPluginName: cni
 #  serviceNetworkCIDR: 172.30.0.0/16
 
+# ocp 4.0 permits multiple CIDRs that include the subnet length
 net_cidr=10.128.0.0/14/23
 svc_cidr=172.30.0.0/16
 if [[ -s ${cfg} ]]; then
@@ -87,11 +89,11 @@ OvnNorth="tcp://${host_ip}:6641"
 OvnSouth="tcp://${host_ip}:6642"
 
 # build the ovn.master file
-echo apiserver $apiserver
-echo net_cidr $net_cidr
-echo svc_cidr $svc_cidr
-echo OvnNorth $OvnNorth
-echo OvnSouth $OvnSouth
+echo apiserver ${apiserver}
+echo net_cidr ${net_cidr}
+echo svc_cidr ${svc_cidr}
+echo OvnNorth ${OvnNorth}
+echo OvnSouth ${OvnSouth}
 
 # if the config map exists, delete it.
 kubectl get configmap ovn-config > /dev/null 2>&1
@@ -108,11 +110,11 @@ metadata:
   name: ovn-config
   namespace: ovn-kubernetes
 data:
-  k8s_apiserver: $apiserver
-  net_cidr:      $net_cidr
-  svc_cidr:      $svc_cidr
-  OvnNorth:      $OvnNorth
-  OvnSouth:      $OvnSouth
+  k8s_apiserver: ${apiserver}
+  net_cidr:      ${net_cidr}
+  svc_cidr:      ${svc_cidr}
+  OvnNorth:      ${OvnNorth}
+  OvnSouth:      ${OvnSouth}
 EOF
 echo "kind: ConfigMap ovn-config -- $?"
 
