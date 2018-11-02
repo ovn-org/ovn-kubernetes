@@ -62,9 +62,9 @@
       dest: /root/ovn/scripts/ovn-setup.sh
       mode: 0755
   - name: Copy ovnkube-master.yaml
-    copy: src=../yaml/ovnkube-master.yaml dest=/root/ovn/yaml/ovnkube-master.yaml
+    template: src=../templates/ovnkube-master.yaml.j2 dest=/root/ovn/yaml/ovnkube-master.yaml
   - name: Copy ovnkube.yaml
-    copy: src=../yaml/ovnkube.yaml dest=/root/ovn/yaml/ovnkube.yaml
+    template: src=../templates/ovnkube.yaml.j2 dest=/root/ovn/yaml/ovnkube.yaml
 
   - name: Provision the OVN Namespace
     shell: oc create -f /root/ovn/yaml/ovn-namespace.yaml

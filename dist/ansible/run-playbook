@@ -3,9 +3,25 @@
 # clone ovn-kubernetes on master and cd to dist/ansible
 # git clone https://github.com/openvswitch/ovn-kubernetes ~/ovn-kubernetes
 # cd ~/ovn-kubernetes/dist/ansible
-# edit hosts for hostname of master
-# edit ../dist/*yaml for desired image
-# ./run-playbook
+# edit hosts for hostname of master and desired image
 
-ansible-playbook -i hosts ovn-playbook.yaml
+# ./run-playbook
+# ./run-playbook install    # The default
+# ./run-playbook uninstall  # Remove ovn components
+
+cmd=${1:-install}
+
+case ${cmd} in
+  install )
+    ansible-playbook -i hosts ovn-playbook.yaml
+    ;;
+  uninstall )
+    ansible-playbook -i hosts ovn-uninstall.yaml
+    ;;
+  * )
+    echo "./run-playbook [|install|uninstall]"
+    echo "./run-playbook    default is install"
+    ;;
+esac
+
 
