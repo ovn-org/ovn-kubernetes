@@ -1,6 +1,7 @@
 package kube
 
 import (
+	"encoding/json"
 	"fmt"
 
 	"github.com/sirupsen/logrus"
@@ -30,6 +31,7 @@ type Interface interface {
 	GetNamespace(name string) (*kapi.Namespace, error)
 	GetNamespaces() (*kapi.NamespaceList, error)
 	GetNetworkPolicies(namespace string) (*kapisnetworking.NetworkPolicyList, error)
+	GetConfigFromNetworkAttachment(namespace string, networkName string) (map[string]interface{}, error)
 }
 
 // Kube is the structure object upon which the Interface is implemented
@@ -138,4 +140,30 @@ func (k *Kube) GetNamespaces() (*kapi.NamespaceList, error) {
 // GetNetworkPolicies returns all network policy objects from kubernetes
 func (k *Kube) GetNetworkPolicies(namespace string) (*kapisnetworking.NetworkPolicyList, error) {
 	return k.KClient.Networking().NetworkPolicies(namespace).List(metav1.ListOptions{})
+}
+
+func (k *Kube) GetConfigFromNetworkAttachment(namespace string, networkName string) (map[string]interface{}, error) {
+	rawPath := fmt.Sprintf("/apis/k8s.cni.cncf.io/v1/namespaces/%s/network-attachment-definitions/%s", namespace, networkName)
+	netData, err := k.KClient.ExtensionsV1beta1().RESTClient().Get().AbsPath(rawPath).DoRaw()
+	if err != nil {
+		return nil, err
+	}
+
+	customResource := &NetworkAttachmentDefinition{}
+	if err := json.Unmarshal(netData, customResource); err != nil {
+		return nil, err
+	}
+
+	emptySpec := NetworkAttachmentDefinitionSpec{}
+	if customResource.Spec == emptySpec {
+		return nil, nil
+	}
+
+	var rawConfig map[string]interface{}
+	configBytes := []byte(customResource.Spec.Config)
+	err = json.Unmarshal(configBytes, &rawConfig)
+	if err != nil {
+		return nil, err
+	}
+	return rawConfig, nil
 }

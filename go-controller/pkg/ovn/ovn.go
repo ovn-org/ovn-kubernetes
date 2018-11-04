@@ -134,8 +134,8 @@ func (oc *Controller) addDefaultLogicalPort(pod *kapi.Pod) {
 }
 
 func (oc *Controller) addLogicalPortsToExtraSwitches(pod *kapi.Pod) {
-	switches := oc.getNetworkNamesFromPodAnnotations(pod.Annotations)
-	if switches != nil {
+	switches := oc.getNetworkNamesFromPodAnnotations(pod.Annotations, pod.Namespace)
+	if switches != nil && len(switches) > 0 {
 		annotations := make(map[string]string)
 		for _, logicalSwitch := range switches {
 			annotations[logicalSwitch] = oc.addLogicalPort(pod, logicalSwitch)

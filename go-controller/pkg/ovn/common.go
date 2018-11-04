@@ -257,18 +257,32 @@ func (oc *Controller) getNetworkInfoFromOvnAnnotation(ovnAnnotation string, netw
 	return ovnExtraAnnotationMap[networkName]
 }
 
-func (oc *Controller) getNetworkNamesFromPodAnnotations(podAnnotations map[string]string) []string {
-	switchesAnnotation, hasExtraSwitches := podAnnotations["switches"]
+func (oc *Controller) getNetworkNamesFromPodAnnotations(podAnnotations map[string]string, namespace string) []string {
+	networksAnnotation, hasExtraNetworks := podAnnotations["k8s.v1.cni.cncf.io/networks"]
 
-	if hasExtraSwitches {
-		var switches []string
-		err := json.Unmarshal([]byte(switchesAnnotation), &switches)
+	if hasExtraNetworks {
+		var networks []map[string]string
+		err := json.Unmarshal([]byte(networksAnnotation), &networks)
 
 		if err != nil {
-			logrus.Errorf("Error in json unmarshaling switches annotation  (%v)", err)
+			logrus.Errorf("Error in json unmarshaling networks annotation  (%v)", err)
 			return nil
 		}
-		return switches
+
+		var networkNames []string
+		for _, network := range networks {
+			networkAttachmentName := network["name"]
+			config, err := oc.kube.GetConfigFromNetworkAttachment(namespace, networkAttachmentName)
+
+			if err != nil {
+				logrus.Errorf("Error getting the config of network attachment %s, (%v)", networkAttachmentName, err)
+				return nil
+			}
+			if config["type"] == "ovn-k8s-cni-overlay" {
+				networkNames = append(networkNames, config["name"].(string))
+			}
+		}
+		return networkNames
 	}
 	return nil
 }
