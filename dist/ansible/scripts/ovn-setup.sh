@@ -23,9 +23,8 @@ is_cluster_up () {
 }
 
 is_api_server_ready () {
-  # kubectl cluster-info leaves ^[[0 in output string
-  #apiserver=$(kubectl cluster-info | gawk '/Kubernetes master/{ print $6 }')
-  apiserver=$(oc whoami --show-server)
+  #apiserver=$(oc whoami --show-server)
+  apiserver=$(kubectl config view -o jsonpath='{.clusters[0].cluster.server}')
   if [[ ${apiserver} == '' ]]; then
     return 1
   fi
