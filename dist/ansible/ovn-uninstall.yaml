@@ -1,0 +1,46 @@
+# Unnstall ovn
+# This is done when installed ovn is no longer needed
+
+# On a convienent host, clone ovn-kubernetes cd to dist/ansible 
+# git clone https://github.com/openvswitch/ovn-kubernetes ~/ovn-kubernetes
+# cd ~/ovn-kubernetes/dist/ansible
+
+# edit hosts file for the hostname of the master
+
+# ./run-playbook
+
+- hosts: masters
+  become: yes
+  become_user: root
+  tasks:
+  - name: Delete the OVN Namespace
+    shell: oc delete -f /root/ovn/yaml/ovn-namespace.yaml
+    ignore_errors: yes
+
+  # remove /root/ovn
+  - name: Remove /root/ovn
+    shell: rm -rf /root/ovn/*
+
+  # OVN data is persistent, so delete the database
+  - name: Remove OVS DB Content
+    file:
+      state: absent
+      name: /var/lib/openvswitch/ovnnb_db.db
+  - name: Remove OVS DB Content
+    file:
+      state: absent
+      name: /var/lib/openvswitch/ovnsb_db.db
+
+  # iptables -D INPUT -p tcp -m state --state NEW -m tcp --dport 6641 -j ACCEPT
+  - name: iptables allow 6641
+    shell: iptables -D INPUT -p tcp -m tcp --dport 6641 -m conntrack --ctstate NEW -j ACCEPT
+
+  # iptables -D INPUT -p tcp -m state --state NEW -m tcp --dport 6642 -j ACCEPT
+  - name: iptables allow 6642
+    shell: iptables -D INPUT -p tcp -m tcp --dport 6642 -m conntrack --ctstate NEW -j ACCEPT
+
+# - name: Add adm policy auyuid
+#   shell: oc adm policy add-scc-to-user anyuid -z ovn
+#   ignore_errors: yes
+
+
