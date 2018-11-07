@@ -81,8 +81,7 @@ func (cluster *OvnClusterController) StartClusterNode(name string) error {
 		if runtime.GOOS == windowsOS {
 			panic("Windows is not supported as a gateway node")
 		}
-		err = cluster.initGateway(node.Name, clusterSubnets,
-			subnet.String())
+		err = cluster.initGateway(node.Name, clusterSubnets, subnet.String())
 		if err != nil {
 			return err
 		}
@@ -138,8 +137,7 @@ func (cluster *OvnClusterController) updateOvnNode(masterIP string,
 		if runtime.GOOS == windowsOS {
 			panic("Windows is not supported as a gateway node")
 		}
-		err = cluster.initGateway(node.Name, clusterSubnets,
-			subnet)
+		err = cluster.initGateway(node.Name, clusterSubnets, subnet)
 		if err != nil {
 			return err
 		}
@@ -162,7 +160,7 @@ func (cluster *OvnClusterController) watchNamespaceUpdate(node *kapi.Node,
 				if newMasterIP != oldMasterIP {
 					err := cluster.updateOvnNode(newMasterIP, node, subnet)
 					if err != nil {
-						logrus.Errorf("Failed to update OVN node with new ",
+						logrus.Errorf("Failed to update OVN node with new "+
 							"masterIP %s: %v", newMasterIP, err)
 					}
 				}
