@@ -17,7 +17,8 @@ Currently supported Linux nodes:
 - Ubuntu 14.04 and 16.04
 
 Currently supported Windows nodes:
-- Windows Server 2016 build version 1709
+- Windows Server 2016 build version 1709 (OS Version 10.0.16299.0)
+- Windows Server 2016 build version 1803 (OS Version 10.0.17134.0)
 
 Note: minimum required ansible version is 2.4.2.0
 
@@ -25,17 +26,9 @@ Note: minimum required ansible version is 2.4.2.0
 
 - Support for hybrid cluster with master/minion nodes on different cloud providers.
 
-- Windows Server 2016 build number 14393
-
-- Windows Server 2016 build version 1803
-
 - Different Linux versions support (currently only Ubuntu 14.04 and 16.04 supported)
 
 ### Known issues
-
-- Windows Server 2016 build version 1709 requires the Hyper-V feature for the moment. This will be fixed with the next release of Open vSwitch on Windows
-
-- The interface on Windows should be able to receive the IP via DHCP
 
 - Warning: the firewall on Windows gets disabled for this test
 
