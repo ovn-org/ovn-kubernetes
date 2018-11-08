@@ -280,3 +280,5 @@ spec:
       - name: host-var-lib-cni-networks-ovn-kubernetes
         hostPath:
           path: /var/lib/cni/networks/ovn-k8s-cni-overlay
+      tolerations:
+      - operator: "Exists"
