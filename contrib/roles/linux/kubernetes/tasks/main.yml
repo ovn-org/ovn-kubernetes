@@ -61,5 +61,9 @@
   include_tasks: ./prepare_minion.yml
   when: minion
 
+- name: Kubernetes | Deploy CoreDNS
+  include_tasks: ./deploy_coredns.yml
+  when: master
+
 - include_tasks: generate_global_vars.yml
   when: master
