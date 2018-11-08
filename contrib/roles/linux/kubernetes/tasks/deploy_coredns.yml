@@ -1,0 +1,21 @@
+---
+- name: CoreDNS | check if CoreDNS is cloned
+  stat:
+    path: "{{ kubernetes_dns.tmp_path }}/coredns-checkout"
+  register: coredns_repo
+
+- name: CoreDNS | git clone
+  git:
+    repo: "{{ kubernetes_dns.coredns_git_url }}"
+    dest: "{{ kubernetes_dns.tmp_path }}/coredns-checkout"
+    version: "{{ kubernetes_dns.branch }}"
+  when: not coredns_repo.stat.exists
+
+- name: Docker | ensure docker packages are installed
+  shell: apt install jq -y
+
+- name: CoreDNS | generate yaml and apply it
+  shell: |
+    cd {{ kubernetes_dns.tmp_path }}/coredns-checkout/kubernetes
+    kubectl delete --namespace=kube-system deployment coredns
+    ./deploy.sh -i {{K8S_DNS_SERVICE_IP}} -d {{K8S_DNS_DOMAIN}} -s coredns.yaml.sed | kubectl apply -f -
