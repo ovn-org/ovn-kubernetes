@@ -2,7 +2,8 @@ package ovn
 
 import (
 	"fmt"
-	util "github.com/openvswitch/ovn-kubernetes/go-controller/pkg/util"
+	"github.com/openvswitch/ovn-kubernetes/go-controller/pkg/factory"
+	"github.com/openvswitch/ovn-kubernetes/go-controller/pkg/util"
 	"github.com/sirupsen/logrus"
 	kapi "k8s.io/api/core/v1"
 	knet "k8s.io/api/networking/v1"
@@ -607,7 +608,7 @@ func (oc *Controller) handleLocalPodSelectorDelFuncOld(
 func (oc *Controller) handleLocalPodSelectorOld(
 	policy *knet.NetworkPolicy, np *namespacePolicy) {
 
-	id, err := oc.watchFactory.AddFilteredPodHandler(policy.Namespace,
+	h, err := oc.watchFactory.AddFilteredPodHandler(policy.Namespace,
 		&policy.Spec.PodSelector,
 		cache.ResourceEventHandlerFuncs{
 			AddFunc: func(obj interface{}) {
@@ -626,7 +627,7 @@ func (oc *Controller) handleLocalPodSelectorOld(
 		return
 	}
 
-	np.podHandlerIDList = append(np.podHandlerIDList, id)
+	np.podHandlerList = append(np.podHandlerList, h)
 
 }
 
@@ -634,7 +635,7 @@ func (oc *Controller) handlePeerPodSelectorOld(
 	policy *knet.NetworkPolicy, podSelector *metav1.LabelSelector,
 	addressSet string, addressMap map[string]bool, np *namespacePolicy) {
 
-	id, err := oc.watchFactory.AddFilteredPodHandler(policy.Namespace,
+	h, err := oc.watchFactory.AddFilteredPodHandler(policy.Namespace,
 		podSelector,
 		cache.ResourceEventHandlerFuncs{
 			AddFunc: func(obj interface{}) {
@@ -710,7 +711,7 @@ func (oc *Controller) handlePeerPodSelectorOld(
 		return
 	}
 
-	np.podHandlerIDList = append(np.podHandlerIDList, id)
+	np.podHandlerList = append(np.podHandlerList, h)
 
 }
 
@@ -752,7 +753,7 @@ func (oc *Controller) handlePeerNamespaceSelectorOld(
 	namespaceSelector *metav1.LabelSelector,
 	gress *gressPolicy, np *namespacePolicy) {
 
-	id, err := oc.watchFactory.AddFilteredNamespaceHandler("",
+	h, err := oc.watchFactory.AddFilteredNamespaceHandler("",
 		namespaceSelector,
 		cache.ResourceEventHandlerFuncs{
 			AddFunc: func(obj interface{}) {
@@ -793,7 +794,7 @@ func (oc *Controller) handlePeerNamespaceSelectorOld(
 		return
 	}
 
-	np.nsHandlerIDList = append(np.nsHandlerIDList, id)
+	np.nsHandlerList = append(np.nsHandlerList, h)
 
 }
 
@@ -819,8 +820,8 @@ func (oc *Controller) addNetworkPolicyOld(policy *knet.NetworkPolicy) {
 	np.namespace = policy.Namespace
 	np.ingressPolicies = make([]*gressPolicy, 0)
 	np.egressPolicies = make([]*gressPolicy, 0)
-	np.podHandlerIDList = make([]uint64, 0)
-	np.nsHandlerIDList = make([]uint64, 0)
+	np.podHandlerList = make([]*factory.Handler, 0)
+	np.nsHandlerList = make([]*factory.Handler, 0)
 	np.localPods = make(map[string]bool)
 
 	// Go through each ingress rule.  For each ingress rule, create an
