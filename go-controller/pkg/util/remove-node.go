@@ -67,6 +67,20 @@ func RemoveNode(nodeName string) error {
 		}
 	}
 
+	// Remove the patch port that connects join switch to gateway router
+	_, stderr, err = RunOVNNbctl("--if-exist", "lsp-del", "jtor-"+gatewayRouter)
+	if err != nil {
+		return fmt.Errorf("Failed to delete logical switch port jtor-%s, "+
+			"stderr: %q, error: %v", gatewayRouter, stderr, err)
+	}
+
+	// Remove the patch port that connects distributed router to node's logical switch
+	_, stderr, err = RunOVNNbctl("--if-exist", "lrp-del", "rtos-"+nodeName)
+	if err != nil {
+		return fmt.Errorf("Failed to delete logical router port rtos-%s, "+
+			"stderr: %q, error: %v", nodeName, stderr, err)
+	}
+
 	// Remove any gateway routers associated with nodeName
 	_, stderr, err = RunOVNNbctl("--if-exist", "lr-del",
 		gatewayRouter)
