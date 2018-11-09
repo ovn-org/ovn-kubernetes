@@ -56,10 +56,25 @@
     copy: src=../yaml/ovn-namespace.yaml dest=/root/ovn/yaml/ovn-namespace.yaml
   - name: Copy ovn-policy.yaml
     copy: src=../yaml/ovn-policy.yaml dest=/root/ovn/yaml/ovn-policy.yaml
-  - name: Copy ovn-policy.yaml
+  - name: Copy ovn-setup.sh
     copy:
       src: scripts/ovn-setup.sh
       dest: /root/ovn/scripts/ovn-setup.sh
+      mode: 0755
+  - name: Copy ovn-logs
+    copy:
+      src: scripts/ovn-logs
+      dest: /root/ovn/ovn-logs
+      mode: 0755
+  - name: Copy ovn-display
+    copy:
+      src: scripts/ovn-display
+      dest: /root/ovn/ovn-display
+      mode: 0755
+  - name: Copy ovn-debug
+    copy:
+      src: scripts/ovn-debug
+      dest: /root/ovn/ovn-debug
       mode: 0755
   - name: Copy ovnkube-master.yaml
     template: src=../templates/ovnkube-master.yaml.j2 dest=/root/ovn/yaml/ovnkube-master.yaml

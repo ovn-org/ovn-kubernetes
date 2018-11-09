@@ -67,6 +67,9 @@ spec:
           limits:
             cpu: 200m
             memory: 400Mi
+        env:
+        - name: OVN_DAEMONSET_VERSION
+          value: "3"
 
 
       # firewall rules for ovn - assumed to be setup
@@ -125,7 +128,7 @@ spec:
             memory: 300Mi
         env:
         - name: OVN_DAEMONSET_VERSION
-          value: "2"
+          value: "3"
         - name: OVNKUBE_LOGLEVEL
           value: "4"
         - name: OVN_NORTH
@@ -167,7 +170,7 @@ spec:
         #   initialDelaySeconds: 10
         #   httpGet:
         #     path: /healthz
-        #     port: 10256
+        #     port: 10258
         #     scheme: HTTP
         lifecycle:
 
@@ -220,7 +223,7 @@ spec:
             memory: 300Mi
         env:
         - name: OVN_DAEMONSET_VERSION
-          value: "2"
+          value: "3"
         - name: OVNKUBE_LOGLEVEL
           value: "5"
         - name: OVN_NORTH
@@ -262,7 +265,7 @@ spec:
         #   initialDelaySeconds: 10
         #   httpGet:
         #     path: /healthz
-        #     port: 10256
+        #     port: 10259
         #     scheme: HTTP
         lifecycle:
 

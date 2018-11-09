@@ -1,5 +1,5 @@
 # ovnkube-master
-# daemonset version 2
+# daemonset version 3
 # starts master daemons, each in a separate container
 # it is run on the master node(s)
 kind: DaemonSet
@@ -42,11 +42,13 @@ spec:
       # iptables -A OS_FIREWALL_ALLOW -p tcp -m state --state NEW -m tcp --dport 6642 -j ACCEPT
       # ovs flow for ovn (geneve)
       # /usr/share/openvswitch/scripts/ovs-ctl --protocol=udp --dport=6081 enable-protocol
-      - name: ovn-northd
+
+      # run-ovn-northd - v3
+      - name: run-ovn-northd
         image: "{{ ovn_image | default('docker.io/ovnkube/ovn-daemonset:latest') }}"
         imagePullPolicy: "{{ ovn_image_pull_policy | default('IfNotPresent') }}"
 
-        command: ["/root/ovnkube.sh", "ovn-northd"]
+        command: ["/root/ovnkube.sh", "run-ovn-northd"]
 
         securityContext:
           runAsUser: 0
@@ -94,9 +96,7 @@ spec:
             memory: 300Mi
         env:
         - name: OVN_DAEMONSET_VERSION
-          value: "2"
-        - name: OVN_MASTER
-          value: "true"
+          value: "3"
         - name: OVN_NORTH
           valueFrom:
             configMapKeyRef:
@@ -136,6 +136,200 @@ spec:
         #   httpGet:
         #     path: /healthz
         #     port: 10257
+        #     scheme: HTTP
+        lifecycle:
+      # end of container
+
+      # nb-ovsdb - v3
+      - name: nb-ovsdb
+        image: "{{ ovn_image | default('docker.io/ovnkube/ovn-daemonset:latest') }}"
+        imagePullPolicy: "{{ ovn_image_pull_policy | default('IfNotPresent') }}"
+
+        command: ["/root/ovnkube.sh", "nb-ovsdb"]
+
+        securityContext:
+          runAsUser: 0
+          # Permission could be reduced by selecting an appropriate SELinux policy
+          privileged: true
+
+        volumeMounts:
+        - mountPath: /etc/sysconfig/origin-node
+          name: host-sysconfig-node
+          readOnly: true
+        # Mount the entire run directory for socket access for Docker or CRI-o
+        # TODO: remove
+        - mountPath: /var/run
+          name: host-var-run
+        # Run directories where we need to be able to access sockets
+        - mountPath: /var/run/dbus/
+          name: host-var-run-dbus
+          readOnly: true
+        # ovn db is stored in the pod in /etc/openvswitch
+        # and on the host in /var/lib/openvswitch/
+        - mountPath: /etc/openvswitch/
+          name: host-var-lib-ovs
+        - mountPath: /var/lib/openvswitch/
+          name: host-var-lib-ovs
+        - mountPath: /var/run/openvswitch/
+          name: host-var-run-ovs
+       #  readOnly: false
+        - mountPath: /var/run/kubernetes/
+          name: host-var-run-kubernetes
+          readOnly: true
+        # We mount our socket here
+        - mountPath: /var/run/ovn-kubernetes
+          name: host-var-run-ovn-kubernetes
+        # CNI related mounts which we take over
+        - mountPath: /host/opt/cni/bin
+          name: host-opt-cni-bin
+        - mountPath: /etc/cni/net.d
+          name: host-etc-cni-netd
+        - mountPath: /var/lib/cni/networks/ovn-k8s-cni-overlay
+          name: host-var-lib-cni-networks-ovn-kubernetes
+
+        resources:
+          requests:
+            cpu: 100m
+            memory: 300Mi
+        env:
+        - name: OVN_DAEMONSET_VERSION
+          value: "3"
+        - name: OVN_NORTH
+          valueFrom:
+            configMapKeyRef:
+              name: ovn-config
+              key: OvnNorth
+        - name: OVN_SOUTH
+          valueFrom:
+            configMapKeyRef:
+              name: ovn-config
+              key: OvnSouth
+        - name: OVN_NET_CIDR
+          valueFrom:
+            configMapKeyRef:
+              name: ovn-config
+              key: net_cidr
+        - name: OVN_SVC_CIDR
+          valueFrom:
+            configMapKeyRef:
+              name: ovn-config
+              key: svc_cidr
+        - name: K8S_APISERVER
+          valueFrom:
+            configMapKeyRef:
+              name: ovn-config
+              key: k8s_apiserver
+        - name: K8S_NODE
+          valueFrom:
+            fieldRef:
+              fieldPath: spec.nodeName
+        ports:
+        - name: healthz
+          containerPort: 10256
+        # TODO: Temporarily disabled until we determine how to wait for clean default
+        # config
+        # livenessProbe:
+        #   initialDelaySeconds: 10
+        #   httpGet:
+        #     path: /healthz
+        #     port: 10256
+        #     scheme: HTTP
+        lifecycle:
+      # end of container
+
+      # sb-ovsdb - v3
+      - name: sb-ovsdb
+        image: "{{ ovn_image | default('docker.io/ovnkube/ovn-daemonset:latest') }}"
+        imagePullPolicy: "{{ ovn_image_pull_policy | default('IfNotPresent') }}"
+
+        command: ["/root/ovnkube.sh", "sb-ovsdb"]
+
+        securityContext:
+          runAsUser: 0
+          # Permission could be reduced by selecting an appropriate SELinux policy
+          privileged: true
+
+        volumeMounts:
+        - mountPath: /etc/sysconfig/origin-node
+          name: host-sysconfig-node
+          readOnly: true
+        # Mount the entire run directory for socket access for Docker or CRI-o
+        # TODO: remove
+        - mountPath: /var/run
+          name: host-var-run
+        # Run directories where we need to be able to access sockets
+        - mountPath: /var/run/dbus/
+          name: host-var-run-dbus
+          readOnly: true
+        # ovn db is stored in the pod in /etc/openvswitch
+        # and on the host in /var/lib/openvswitch/
+        - mountPath: /etc/openvswitch/
+          name: host-var-lib-ovs
+        - mountPath: /var/lib/openvswitch/
+          name: host-var-lib-ovs
+        - mountPath: /var/run/openvswitch/
+          name: host-var-run-ovs
+       #  readOnly: false
+        - mountPath: /var/run/kubernetes/
+          name: host-var-run-kubernetes
+          readOnly: true
+        # We mount our socket here
+        - mountPath: /var/run/ovn-kubernetes
+          name: host-var-run-ovn-kubernetes
+        # CNI related mounts which we take over
+        - mountPath: /host/opt/cni/bin
+          name: host-opt-cni-bin
+        - mountPath: /etc/cni/net.d
+          name: host-etc-cni-netd
+        - mountPath: /var/lib/cni/networks/ovn-k8s-cni-overlay
+          name: host-var-lib-cni-networks-ovn-kubernetes
+
+        resources:
+          requests:
+            cpu: 100m
+            memory: 300Mi
+        env:
+        - name: OVN_DAEMONSET_VERSION
+          value: "3"
+        - name: OVN_NORTH
+          valueFrom:
+            configMapKeyRef:
+              name: ovn-config
+              key: OvnNorth
+        - name: OVN_SOUTH
+          valueFrom:
+            configMapKeyRef:
+              name: ovn-config
+              key: OvnSouth
+        - name: OVN_NET_CIDR
+          valueFrom:
+            configMapKeyRef:
+              name: ovn-config
+              key: net_cidr
+        - name: OVN_SVC_CIDR
+          valueFrom:
+            configMapKeyRef:
+              name: ovn-config
+              key: svc_cidr
+        - name: K8S_APISERVER
+          valueFrom:
+            configMapKeyRef:
+              name: ovn-config
+              key: k8s_apiserver
+        - name: K8S_NODE
+          valueFrom:
+            fieldRef:
+              fieldPath: spec.nodeName
+        ports:
+        - name: healthz
+          containerPort: 10255
+        # TODO: Temporarily disabled until we determine how to wait for clean default
+        # config
+        # livenessProbe:
+        #   initialDelaySeconds: 10
+        #   httpGet:
+        #     path: /healthz
+        #     port: 10255
         #     scheme: HTTP
         lifecycle:
       # end of container
@@ -192,7 +386,7 @@ spec:
             memory: 300Mi
         env:
         - name: OVN_DAEMONSET_VERSION
-          value: "2"
+          value: "3"
         - name: OVN_MASTER
           value: "true"
         - name: OVNKUBE_LOGLEVEL
@@ -228,14 +422,14 @@ spec:
               fieldPath: spec.nodeName
         ports:
         - name: healthz
-          containerPort: 10256
+          containerPort: 10254
         # TODO: Temporarily disabled until we determine how to wait for clean default
         # config
         # livenessProbe:
         #   initialDelaySeconds: 10
         #   httpGet:
         #     path: /healthz
-        #     port: 10256
+        #     port: 10254
         #     scheme: HTTP
         lifecycle:
       # end of container
