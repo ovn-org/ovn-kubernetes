@@ -3,6 +3,7 @@
 
 [OSEv3:children]
 masters
+nodes
 
 [OSEv3:vars]
 
@@ -28,3 +29,9 @@ ovn_image_pull_policy=IfNotPresent
 # result of `hostname` on master node
 #wsfd-netdev22.ntdv.lab.eng.bos.redhat.com
 
+[nodes]
+
+# list of all of the nodes
+#wsfd-netdev22.ntdv.lab.eng.bos.redhat.com
+#wsfd-netdev28.ntdv.lab.eng.bos.redhat.com
+#wsfd-netdev35.ntdv.lab.eng.bos.redhat.com
