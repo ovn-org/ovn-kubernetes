@@ -245,6 +245,11 @@ data:
   OvnSouth:      $PROTOCOL://$OVERLAY_IP:6642
 EOF
 
+  # Make daemonset yamls
+  pushd $HOME/work/src/github.com/openvswitch/ovn-kubernetes/dist/images
+  make daemonsetyaml 1>&2 2>/dev/null
+  popd
+
   # Run ovnkube-master daemonset.
   kubectl create -f $HOME/work/src/github.com/openvswitch/ovn-kubernetes/dist/yaml/ovnkube-master.yaml
 
