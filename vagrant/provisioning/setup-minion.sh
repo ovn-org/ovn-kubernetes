@@ -119,7 +119,6 @@ fi
 ## Install kubernetes
 sudo swapoff -a
 sudo apt-get install -y kubelet kubeadm
-sudo sh -c "sed -i 's/KUBELET_EXTRA_ARGS=/KUBELET_EXTRA_ARGS=--node-labels=node-role.kubernetes.io\/compute=true/' /etc/default/kubelet"
 sudo service kubelet restart
 
 # Start kubelet join the cluster
