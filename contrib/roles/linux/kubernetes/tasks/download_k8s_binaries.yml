@@ -44,6 +44,8 @@
         remote_src: yes
 
     - name: Kubernetes bins | download kubernetes binaries
+      environment:
+        KUBERNETES_RELEASE_URL: "{{KUBERNETES_DOWNLOAD_PREFIX}}"
       action: shell yes | "{{ kubernetes_binaries_info.tmp_download_path }}/kubernetes/cluster/get-kube-binaries.sh"
 
     - name: Kubernetes bins | unarchive binaries

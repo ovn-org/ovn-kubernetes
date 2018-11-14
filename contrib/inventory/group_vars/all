@@ -14,6 +14,9 @@ K8S_DNS_DOMAIN: "cluster.local"
 K8S_DNS_SERVICE_IP: "10.1.0.10"
 K8S_API_SERVICE_IP: "10.1.0.1"
 
+KUBERNETES_DOWNLOAD_PREFIX: "https://dl.k8s.io"
+KUBERNETES_VERSION: "v1.12.0"
+
 # set this to true to build ovn-kubernetes only on master and then
 # distribute on the minion nodes. Set this to false if you have different
 # Linux versions

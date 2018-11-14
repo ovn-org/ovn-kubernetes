@@ -3,9 +3,9 @@ kubernetes_binaries_info:
   install_path: /usr/bin
   tmp_download_path: /tmp/k8s_bins
   # Download link from here https://github.com/kubernetes/kubernetes/blob/master/CHANGELOG-1.10.md#downloads-for-v1100
-  kubernetes_targz_link: https://dl.k8s.io/v1.12.0/kubernetes.tar.gz
+  kubernetes_targz_link: "{{KUBERNETES_DOWNLOAD_PREFIX}}/{{KUBERNETES_VERSION}}/kubernetes.tar.gz"
   # Download link from here https://github.com/kubernetes/kubernetes/blob/master/CHANGELOG-1.10.md#node-binaries
-  windows_bins_link: https://dl.k8s.io/v1.12.0/kubernetes-node-windows-amd64.tar.gz
+  windows_bins_link: "{{KUBERNETES_DOWNLOAD_PREFIX}}/{{KUBERNETES_VERSION}}/kubernetes-node-windows-amd64.tar.gz"
   cni_linux_download_link: https://github.com/containernetworking/cni/releases/download/v0.3.0/cni-v0.3.0.tgz
 
 kubernetes_cluster_info:
