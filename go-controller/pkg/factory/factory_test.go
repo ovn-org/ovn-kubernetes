@@ -184,14 +184,14 @@ var _ = Describe("Watch Factory Operations", func() {
 		testExisting := func(objType reflect.Type, namespace string, lsel *metav1.LabelSelector) {
 			wf, err := NewWatchFactory(fakeClient, stop)
 			Expect(err).NotTo(HaveOccurred())
-			id, err := wf.addHandler(objType, namespace, lsel,
+			h, err := wf.addHandler(objType, namespace, lsel,
 				cache.ResourceEventHandlerFuncs{},
 				func(objs []interface{}) {
 					Expect(len(objs)).To(Equal(1))
 				})
 			Expect(err).NotTo(HaveOccurred())
-			Expect(id).To(BeNumerically(">", uint64(0)))
-			wf.removeHandler(objType, id)
+			Expect(h).NotTo(BeNil())
+			wf.removeHandler(objType, h)
 			close(stop)
 		}
 
@@ -239,7 +239,7 @@ var _ = Describe("Watch Factory Operations", func() {
 		testExisting := func(objType reflect.Type) {
 			wf, err := NewWatchFactory(fakeClient, stop)
 			Expect(err).NotTo(HaveOccurred())
-			id, err := wf.addHandler(objType, "", nil,
+			h, err := wf.addHandler(objType, "", nil,
 				cache.ResourceEventHandlerFuncs{
 					AddFunc: func(obj interface{}) {
 						numAdded++
@@ -249,7 +249,7 @@ var _ = Describe("Watch Factory Operations", func() {
 				}, nil)
 			Expect(err).NotTo(HaveOccurred())
 			Expect(numAdded).To(Equal(2))
-			wf.removeHandler(objType, id)
+			wf.removeHandler(objType, h)
 			close(stop)
 		}
 
@@ -290,8 +290,8 @@ var _ = Describe("Watch Factory Operations", func() {
 		})
 	})
 
-	addFilteredHandler := func(wf *WatchFactory, objType reflect.Type, namespace string, lsel *metav1.LabelSelector, funcs cache.ResourceEventHandlerFuncs) uint64 {
-		id, err := wf.addHandler(objType, namespace, lsel, cache.ResourceEventHandlerFuncs{
+	addFilteredHandler := func(wf *WatchFactory, objType reflect.Type, namespace string, lsel *metav1.LabelSelector, funcs cache.ResourceEventHandlerFuncs) *Handler {
+		h, err := wf.addHandler(objType, namespace, lsel, cache.ResourceEventHandlerFuncs{
 			AddFunc: func(obj interface{}) {
 				defer GinkgoRecover()
 				numAdded++
@@ -309,11 +309,11 @@ var _ = Describe("Watch Factory Operations", func() {
 			},
 		}, nil)
 		Expect(err).NotTo(HaveOccurred())
-		Expect(id).To(BeNumerically(">", uint64(0)))
-		return id
+		Expect(h).NotTo(BeNil())
+		return h
 	}
 
-	addHandler := func(wf *WatchFactory, objType reflect.Type, funcs cache.ResourceEventHandlerFuncs) uint64 {
+	addHandler := func(wf *WatchFactory, objType reflect.Type, funcs cache.ResourceEventHandlerFuncs) *Handler {
 		return addFilteredHandler(wf, objType, "", nil, funcs)
 	}
 
@@ -322,7 +322,7 @@ var _ = Describe("Watch Factory Operations", func() {
 		Expect(err).NotTo(HaveOccurred())
 
 		added := newPod("pod1", "default")
-		id := addHandler(wf, podType, cache.ResourceEventHandlerFuncs{
+		h := addHandler(wf, podType, cache.ResourceEventHandlerFuncs{
 			AddFunc: func(obj interface{}) {
 				pod := obj.(*v1.Pod)
 				Expect(reflect.DeepEqual(pod, added)).To(BeTrue())
@@ -348,7 +348,7 @@ var _ = Describe("Watch Factory Operations", func() {
 		podWatch.Delete(added)
 		Eventually(func() int { return numDeleted }, 2).Should(Equal(1))
 
-		wf.RemovePodHandler(id)
+		wf.RemovePodHandler(h)
 		close(stop)
 	})
 
@@ -357,7 +357,7 @@ var _ = Describe("Watch Factory Operations", func() {
 		Expect(err).NotTo(HaveOccurred())
 
 		added := newNamespace("default")
-		id := addHandler(wf, namespaceType, cache.ResourceEventHandlerFuncs{
+		h := addHandler(wf, namespaceType, cache.ResourceEventHandlerFuncs{
 			AddFunc: func(obj interface{}) {
 				ns := obj.(*v1.Namespace)
 				Expect(reflect.DeepEqual(ns, added)).To(BeTrue())
@@ -383,7 +383,7 @@ var _ = Describe("Watch Factory Operations", func() {
 		namespaceWatch.Delete(added)
 		Eventually(func() int { return numDeleted }, 2).Should(Equal(1))
 
-		wf.RemoveNamespaceHandler(id)
+		wf.RemoveNamespaceHandler(h)
 		close(stop)
 	})
 
@@ -392,7 +392,7 @@ var _ = Describe("Watch Factory Operations", func() {
 		Expect(err).NotTo(HaveOccurred())
 
 		added := newNode("mynode")
-		id := addHandler(wf, nodeType, cache.ResourceEventHandlerFuncs{
+		h := addHandler(wf, nodeType, cache.ResourceEventHandlerFuncs{
 			AddFunc: func(obj interface{}) {
 				node := obj.(*v1.Node)
 				Expect(reflect.DeepEqual(node, added)).To(BeTrue())
@@ -418,7 +418,7 @@ var _ = Describe("Watch Factory Operations", func() {
 		nodeWatch.Delete(added)
 		Eventually(func() int { return numDeleted }, 2).Should(Equal(1))
 
-		wf.removeHandler(nodeType, id)
+		wf.removeHandler(nodeType, h)
 		close(stop)
 	})
 
@@ -427,7 +427,7 @@ var _ = Describe("Watch Factory Operations", func() {
 		Expect(err).NotTo(HaveOccurred())
 
 		added := newPolicy("mypolicy", "default")
-		id := addHandler(wf, policyType, cache.ResourceEventHandlerFuncs{
+		h := addHandler(wf, policyType, cache.ResourceEventHandlerFuncs{
 			AddFunc: func(obj interface{}) {
 				np := obj.(*knet.NetworkPolicy)
 				Expect(reflect.DeepEqual(np, added)).To(BeTrue())
@@ -453,7 +453,7 @@ var _ = Describe("Watch Factory Operations", func() {
 		policyWatch.Delete(added)
 		Eventually(func() int { return numDeleted }, 2).Should(Equal(1))
 
-		wf.removeHandler(policyType, id)
+		wf.removeHandler(policyType, h)
 		close(stop)
 	})
 
@@ -462,7 +462,7 @@ var _ = Describe("Watch Factory Operations", func() {
 		Expect(err).NotTo(HaveOccurred())
 
 		added := newEndpoints("myendpoints", "default")
-		id := addHandler(wf, endpointsType, cache.ResourceEventHandlerFuncs{
+		h := addHandler(wf, endpointsType, cache.ResourceEventHandlerFuncs{
 			AddFunc: func(obj interface{}) {
 				eps := obj.(*v1.Endpoints)
 				Expect(reflect.DeepEqual(eps, added)).To(BeTrue())
@@ -495,7 +495,7 @@ var _ = Describe("Watch Factory Operations", func() {
 		endpointsWatch.Delete(added)
 		Eventually(func() int { return numDeleted }, 2).Should(Equal(1))
 
-		wf.removeHandler(endpointsType, id)
+		wf.removeHandler(endpointsType, h)
 		close(stop)
 	})
 
@@ -504,7 +504,7 @@ var _ = Describe("Watch Factory Operations", func() {
 		Expect(err).NotTo(HaveOccurred())
 
 		added := newService("myservice", "default")
-		id := addHandler(wf, serviceType, cache.ResourceEventHandlerFuncs{
+		h := addHandler(wf, serviceType, cache.ResourceEventHandlerFuncs{
 			AddFunc: func(obj interface{}) {
 				service := obj.(*v1.Service)
 				Expect(reflect.DeepEqual(service, added)).To(BeTrue())
@@ -530,7 +530,7 @@ var _ = Describe("Watch Factory Operations", func() {
 		serviceWatch.Delete(added)
 		Eventually(func() int { return numDeleted }, 2).Should(Equal(1))
 
-		wf.removeHandler(serviceType, id)
+		wf.removeHandler(serviceType, h)
 		close(stop)
 	})
 
@@ -539,7 +539,7 @@ var _ = Describe("Watch Factory Operations", func() {
 		Expect(err).NotTo(HaveOccurred())
 
 		added := newNamespace("default")
-		id := addHandler(wf, namespaceType, cache.ResourceEventHandlerFuncs{
+		h := addHandler(wf, namespaceType, cache.ResourceEventHandlerFuncs{
 			AddFunc:    func(obj interface{}) {},
 			UpdateFunc: func(old, new interface{}) {},
 			DeleteFunc: func(obj interface{}) {},
@@ -548,7 +548,7 @@ var _ = Describe("Watch Factory Operations", func() {
 		namespaces = append(namespaces, added)
 		namespaceWatch.Add(added)
 		Eventually(func() int { return numAdded }, 2).Should(Equal(1))
-		wf.RemoveNamespaceHandler(id)
+		wf.RemoveNamespaceHandler(h)
 
 		added2 := newNamespace("other")
 		namespaces = append(namespaces, added2)
@@ -639,7 +639,7 @@ var _ = Describe("Watch Factory Operations", func() {
 		pod.ObjectMeta.Labels["blah"] = "baz"
 
 		equalPod := pod
-		id := addFilteredHandler(wf,
+		h := addFilteredHandler(wf,
 			podType,
 			"default",
 			&metav1.LabelSelector{
@@ -680,7 +680,7 @@ var _ = Describe("Watch Factory Operations", func() {
 		Consistently(func() int { return numAdded }, 2).Should(Equal(1))
 		Consistently(func() int { return numUpdated }, 2).Should(Equal(0))
 
-		wf.RemovePodHandler(id)
+		wf.RemovePodHandler(h)
 		close(stop)
 	})
 })

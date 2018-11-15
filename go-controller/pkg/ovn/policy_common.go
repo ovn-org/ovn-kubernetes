@@ -2,7 +2,8 @@ package ovn
 
 import (
 	"fmt"
-	util "github.com/openvswitch/ovn-kubernetes/go-controller/pkg/util"
+	"github.com/openvswitch/ovn-kubernetes/go-controller/pkg/factory"
+	"github.com/openvswitch/ovn-kubernetes/go-controller/pkg/util"
 	"github.com/sirupsen/logrus"
 	knet "k8s.io/api/networking/v1"
 	"net"
@@ -12,16 +13,16 @@ import (
 
 type namespacePolicy struct {
 	sync.Mutex
-	name             string
-	namespace        string
-	ingressPolicies  []*gressPolicy
-	egressPolicies   []*gressPolicy
-	podHandlerIDList []uint64
-	nsHandlerIDList  []uint64
-	localPods        map[string]bool //pods effected by this policy
-	portGroupUUID    string          //uuid for OVN port_group
-	portGroupName    string
-	deleted          bool //deleted policy
+	name            string
+	namespace       string
+	ingressPolicies []*gressPolicy
+	egressPolicies  []*gressPolicy
+	podHandlerList  []*factory.Handler
+	nsHandlerList   []*factory.Handler
+	localPods       map[string]bool //pods effected by this policy
+	portGroupUUID   string          //uuid for OVN port_group
+	portGroupName   string
+	deleted         bool //deleted policy
 }
 
 type gressPolicy struct {
@@ -255,10 +256,10 @@ func (oc *Controller) deleteNetworkPolicy(
 }
 
 func (oc *Controller) shutdownHandlers(np *namespacePolicy) {
-	for _, id := range np.podHandlerIDList {
-		_ = oc.watchFactory.RemovePodHandler(id)
+	for _, handler := range np.podHandlerList {
+		_ = oc.watchFactory.RemovePodHandler(handler)
 	}
-	for _, id := range np.nsHandlerIDList {
-		_ = oc.watchFactory.RemoveNamespaceHandler(id)
+	for _, handler := range np.nsHandlerList {
+		_ = oc.watchFactory.RemoveNamespaceHandler(handler)
 	}
 }
