@@ -159,7 +159,7 @@ func (pr *PodRequest) cmdAdd() *PodResult {
 func (pr *PodRequest) cmdDel() *PodResult {
 	err := pr.PlatformSpecificCleanup()
 	if err != nil {
-		logrus.Error("Teardown error: %v", err)
+		logrus.Errorf("Teardown error: %v", err)
 	}
 	return &PodResult{}
 }

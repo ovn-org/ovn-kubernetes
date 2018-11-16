@@ -42,7 +42,7 @@ func (ovn *Controller) getGatewayLoadBalancer(physicalGateway,
 
 func (ovn *Controller) createGatewaysVIP(protocol string, port, targetPort int32, ips []string) error {
 
-	logrus.Debugf("Creating Gateway VIP - %s, %s, %d, %v", protocol, port, targetPort, ips)
+	logrus.Debugf("Creating Gateway VIP - %s, %d, %d, %v", protocol, port, targetPort, ips)
 
 	// Each gateway has a separate load-balancer for N/S traffic
 
