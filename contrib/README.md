@@ -30,6 +30,8 @@ Note: minimum required ansible version is 2.4.2.0
 
 ### Known issues
 
+- Windows containers do not support IPv6 at the moment. You can read more [here](https://docs.microsoft.com/en-us/virtualization/windowscontainers/container-networking/architecture#unsupported-features-and-network-options)
+
 - Warning: the firewall on Windows gets disabled for this test
 
 ## Ansible requirements
