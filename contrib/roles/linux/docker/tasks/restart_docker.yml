@@ -6,6 +6,7 @@
   service:
     name: docker.socket
     state: restarted
+  when: ansible_distribution_version != '18.04'
 
 - name: Docker | reload docker
   service:

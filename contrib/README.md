@@ -14,7 +14,7 @@ ansible-playbook ovn-kubernetes-cluster.yml
 ```
 
 Currently supported Linux nodes:
-- Ubuntu 14.04 and 16.04
+- Ubuntu 18.04 and 16.04
 
 Currently supported Windows nodes:
 - Windows Server 2016 build version 1709 (OS Version 10.0.16299.0)
