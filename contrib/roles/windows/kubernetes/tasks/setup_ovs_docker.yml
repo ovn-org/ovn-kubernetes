@@ -52,8 +52,11 @@
       Start-Service ovs-vswitchd
       sleep 2
       Restart-Service ovs-vswitchd
-      $GUID = (New-Guid).Guid
-      ovs-vsctl set Open_vSwitch . external_ids:system-id="$($GUID)"
+      ovs-vsctl get Open_vSwitch . external_ids:system-id
+      if ($LASTEXITCODE -ne 0) {
+          $GUID = (New-Guid).Guid
+          ovs-vsctl set Open_vSwitch . external_ids:system-id="$($GUID)"
+      }
       ovs-vsctl set Open_vSwitch . external_ids:k8s-api-server="http://{{ kubernetes_info.MASTER_IP }}:8080"
       ovs-vsctl set Open_vSwitch . external_ids:ovn-remote="tcp:{{ kubernetes_info.MASTER_IP }}:6642" external_ids:ovn-nb="tcp:{{ kubernetes_info.MASTER_IP }}:6641" external_ids:ovn-encap-ip={{ host_public_ip }} external_ids:ovn-encap-type="geneve"
     newline: unix
