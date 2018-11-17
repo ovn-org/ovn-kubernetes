@@ -11,7 +11,7 @@ master: false
 minion: true
 controller: false
 
-docker_version: 17.06.2-ee-16
+docker_version: 18.03.1-ee-3
 # install_path: where kubernetes binaries and CNI plugin will be installed
 install_path: C:\kubernetes
 install_beta_ovs: true

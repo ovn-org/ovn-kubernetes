@@ -1,11 +1,70 @@
 ---
 - name: Docker | Download latest docker
   win_shell: |
+    $ErrorActionPreference = "Stop"
     Find-PackageProvider -Name "Nuget" | Install-PackageProvider -Force
     Install-Module -Name "DockerMsftProvider" -Repository "PSGallery" -Force
     Install-Package -Name "Docker" -ProviderName "DockerMsftProvider" -Force -RequiredVersion "{{ docker_version }}"
 
-- name: Docker | Start docker service
+- name: Docker | Remove existing Docker Windows service
   win_service:
-    name: docker
+    name: "{{ docker_info.service_name }}"
+    state: absent
+
+- name: Docker | check if the service wrapper exists
+  win_stat:
+    path: "{{ docker_info.install_dir }}/servicewrapper.exe"
+  register: servicewrapper_info
+
+- name: Docker | Download the service wrapper
+  win_get_url:
+    url: "{{ docker_info.service_wrapper_link }}"
+    dest: "{{ docker_info.install_dir }}/servicewrapper.exe"
+    timeout: 60
+  retries: 3
+  when: not servicewrapper_info.stat.exists
+
+- name: Docker | Create the Docker Windows service using the service wrapper
+  win_service:
+    name: "{{ docker_info.service_name }}"
+    display_name: "Docker Windows Agent"
+    path: >-
+      "{{ docker_info.install_dir }}/servicewrapper.exe"
+      --service-name "{{ docker_info.service_name }}"
+      --log-file "{{ docker_info.install_dir }}/dockerd.log"
+      "{{ docker_info.install_dir }}/dockerd.exe"
+    state: stopped
+    start_mode: disabled
+
+- name: Docker | Create Docker config directory
+  win_file:
+    path: "{{ docker_info.config_dir }}"
+    state: directory
+
+- name: Docker | Disable docker default network
+  win_lineinfile:
+    path: "{{ docker_info.config_dir }}/daemon.json"
+    create: yes
+    line: '{ "bridge" : "none" }'
+    newline: unix
+
+- name: Docker | Remove current default nat network
+  win_shell: |
+    Get-HNSNetwork | Where-Object { $_.Name -eq "nat" } | Remove-HNSNetwork
+
+- name: Docker | Set Docker service failure command
+  win_shell: >-
+    sc.exe failure {{ docker_info.service_name }} reset=40 command="powershell.exe Move-Item
+    \\\`"{{ docker_info.install_dir }}/dockerd.log\\\`"
+    \\\`"{{ docker_info.install_dir }}/dockerd.log_`$(Get-Date -f yyyy-MM-dd-hh-mm-ss)\\\`";
+    Restart-Service {{ docker_info.service_name }}"
+    actions=restart/0/restart/0/run/30000
+
+- name: Docker | Enable Docker service failure flags
+  win_shell: sc.exe failureflag {{ docker_info.service_name }} 1
+
+- name: Docker | Start the Docker service
+  win_service:
+    name: "{{ docker_info.service_name }}"
+    start_mode: auto
     state: started
