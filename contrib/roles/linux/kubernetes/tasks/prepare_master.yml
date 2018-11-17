@@ -136,10 +136,11 @@
          not admin_cert_key.stat.exists)
 
 - name: Kubernetes Master | Fetching certificates on the ansible host
-  fetch:
-    flat: yes
+  synchronize:
+    mode: pull
     src: "{{ kubernetes_certificates.directory }}/{{ item }}"
     dest: "{{ ansible_tmp_dir }}/k8s_{{ item }}"
+    use_ssh_args: yes
   with_items:
     - ca.pem
     - ca-key.pem
