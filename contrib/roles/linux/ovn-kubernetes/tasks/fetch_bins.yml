@@ -1,18 +1,24 @@
 ---
+- name: ovn-kubernetes | create local temporary directory
+  local_action:
+    module: file
+    path: "{{ ansible_tmp_dir }}"
+    state: directory
+
 - name: ovn-kubernetes | fetch linux bins
-  fetch:
-    fail_on_missing: yes
-    flat: yes
+  synchronize:
+    mode: pull
     src: "{{ovn_kubernetes_info.build_path}}/ovn-kubernetes-checkout/go-controller/_output/go/bin/{{item}}"
     dest: "{{ansible_tmp_dir}}/{{item}}"
+    use_ssh_args: yes
   with_items:
     - "{{ovn_kubernetes_binaries.linux}}"
 
 - name: ovn-kubernetes | fetch windows bins
-  fetch:
-    fail_on_missing: yes
-    flat: yes
+  synchronize:
+    mode: pull
     src: "{{ovn_kubernetes_info.build_path}}/ovn-kubernetes-checkout/go-controller/_output/go/windows/{{item}}"
     dest: "{{ansible_tmp_dir}}/{{item}}"
+    use_ssh_args: yes
   with_items:
     - "{{ovn_kubernetes_binaries.windows}}"
