@@ -41,10 +41,8 @@
       sc.exe config ovs-vswitchd start= disabled
       Stop-Service ovs-vswitchd -Force
       Disable-OVSOnHNSNetwork $HNS_ID
-      ovs-vsctl --if-exists --no-wait del-br br-ex
-      ovs-vsctl --no-wait --may-exist add-br br-ex
-      ovs-vsctl --no-wait add-port br-ex "vEthernet ({{phys_interface_name}})" -- set interface  "vEthernet ({{phys_interface_name}})" type=internal
-      ovs-vsctl --no-wait add-port br-ex '{{phys_interface_name}}'
+      ovs-vsctl --no-wait --may-exist add-br "vEthernet ({{phys_interface_name}})"
+      ovs-vsctl --no-wait add-port "vEthernet ({{phys_interface_name}})" '{{phys_interface_name}}'
       Stop-Service ovs-vswitchd
       Enable-OVSOnHNSNetwork $HNS_ID
 

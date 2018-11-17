@@ -56,6 +56,9 @@
   gather_facts: true
   become_method: runas
   any_errors_fatal: true
+  vars:
+    # This will init the gateway on the first minion from the hosts
+    init_gateway: true
   tasks:
     - set_fact:
         windows_container_tag: 1709

@@ -2,7 +2,6 @@ package cluster
 
 import (
 	"net"
-	"runtime"
 	"time"
 
 	"github.com/sirupsen/logrus"
@@ -13,10 +12,6 @@ import (
 
 	kapi "k8s.io/api/core/v1"
 	"k8s.io/client-go/tools/cache"
-)
-
-const (
-	windowsOS = "windows"
 )
 
 // StartClusterNode learns the subnet assigned to it by the master controller
@@ -78,9 +73,6 @@ func (cluster *OvnClusterController) StartClusterNode(name string) error {
 	}
 
 	if cluster.GatewayInit {
-		if runtime.GOOS == windowsOS {
-			panic("Windows is not supported as a gateway node")
-		}
 		err = cluster.initGateway(node.Name, clusterSubnets, subnet.String())
 		if err != nil {
 			return err
@@ -134,9 +126,6 @@ func (cluster *OvnClusterController) updateOvnNode(masterIP string,
 
 	// Reinit Gateway for this node if the --init-gateways flag is set
 	if cluster.GatewayInit {
-		if runtime.GOOS == windowsOS {
-			panic("Windows is not supported as a gateway node")
-		}
 		err = cluster.initGateway(node.Name, clusterSubnets, subnet)
 		if err != nil {
 			return err
