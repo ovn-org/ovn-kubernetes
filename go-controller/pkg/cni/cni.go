@@ -61,7 +61,11 @@ func extractPodBandwidthResources(podAnnotations map[string]string) (int64, int6
 func (pr *PodRequest) cmdAdd() *PodResult {
 	namespace := pr.PodNamespace
 	podName := pr.PodName
-	if namespace == "" || podName == "" {
+
+	networkName := pr.CNIConf.Name
+	logrus.Infof("Adding interface for network = %s", networkName)
+
+	if namespace == "" || podName == "" || networkName == "" {
 		logrus.Errorf("required CNI variable missing")
 		return nil
 	}
@@ -73,81 +77,101 @@ func (pr *PodRequest) cmdAdd() *PodResult {
 	}
 	kubecli := &kube.Kube{KClient: clientset}
 
-	// Get the IP address and MAC address from the API server.
-	// Exponential back off ~32 seconds + 7* t(api call)
-	var annotationBackoff = wait.Backoff{Duration: 1 * time.Second, Steps: 7, Factor: 1.5, Jitter: 0.1}
-	var annotation map[string]string
-	if err = wait.ExponentialBackoff(annotationBackoff, func() (bool, error) {
-		annotation, err = kubecli.GetAnnotationsOnPod(namespace, podName)
-		if err != nil {
-			// TODO: check if err is non recoverable
-			logrus.Warningf("Error while obtaining pod annotations - %v", err)
+	var macAddress string
+	var gatewayIP string
+	var ipAddress string
+	var ingress int64
+	var egress int64
+
+	isDefaultInterface := networkName == "ovn-kubernetes"
+	if isDefaultInterface {
+		// Get the IP address and MAC address from the API server.
+		// Exponential back off ~32 seconds + 7* t(api call)
+		var annotationBackoff = wait.Backoff{Duration: 1 * time.Second, Steps: 7, Factor: 1.5, Jitter: 0.1}
+		var annotation map[string]string
+		if err = wait.ExponentialBackoff(annotationBackoff, func() (bool, error) {
+			annotation, err = kubecli.GetAnnotationsOnPod(namespace, podName)
+			if err != nil {
+				// TODO: check if err is non recoverable
+				logrus.Warningf("Error while obtaining pod annotations - %v", err)
+				return false, nil
+			}
+			if _, ok := annotation["ovn"]; ok {
+				return true, nil
+			}
 			return false, nil
+		}); err != nil {
+			logrus.Errorf("failed to get pod annotation - %v", err)
+			return nil
 		}
-		if _, ok := annotation["ovn"]; ok {
-			return true, nil
+
+		var ovnNetworkAnnotatedMap map[string]string
+		ovnAnnotation, ok := annotation["ovn"]
+		if !ok {
+			logrus.Errorf("failed to get ovn annotation from pod")
+			return nil
 		}
-		return false, nil
-	}); err != nil {
-		logrus.Errorf("failed to get pod annotation - %v", err)
-		return nil
-	}
 
-	ovnAnnotation, ok := annotation["ovn"]
-	if !ok {
-		logrus.Errorf("failed to get ovn annotation from pod")
-		return nil
-	}
+		err = json.Unmarshal([]byte(ovnAnnotation), &ovnNetworkAnnotatedMap)
+		if err != nil {
+			logrus.Errorf("failed to unmarshal ovn annotation: %v", err)
+			return nil
+		}
 
-	var ovnAnnotatedMap map[string]string
-	err = json.Unmarshal([]byte(ovnAnnotation), &ovnAnnotatedMap)
-	if err != nil {
-		logrus.Errorf("unmarshal ovn annotation failed")
-		return nil
-	}
+		ipAddress = ovnNetworkAnnotatedMap["ip_address"]
+		macAddress = ovnNetworkAnnotatedMap["mac_address"]
+		gatewayIP = ovnNetworkAnnotatedMap["gateway_ip"]
 
-	ipAddress := ovnAnnotatedMap["ip_address"]
-	macAddress := ovnAnnotatedMap["mac_address"]
-	gatewayIP := ovnAnnotatedMap["gateway_ip"]
+		if macAddress == "" || ipAddress == "" || gatewayIP == "" {
+			logrus.Errorf("failed in pod annotation key extract")
+			return nil
+		}
 
-	if ipAddress == "" || macAddress == "" || gatewayIP == "" {
-		logrus.Errorf("failed in pod annotation key extract")
-		return nil
-	}
-
-	ingress, egress, err := extractPodBandwidthResources(annotation)
-	if err != nil {
-		logrus.Errorf("failed to parse bandwidth request: %v", err)
-		return nil
+		var err error
+		ingress, egress, err = extractPodBandwidthResources(annotation)
+		if err != nil {
+			logrus.Errorf("failed to parse bandwidth request: %v", err)
+			return nil
+		}
+	} else {
+		ipAddress = pr.Ip
+		macAddress = pr.Mac
+		if macAddress == "" {
+			logrus.Errorf("pod request doesn't contain a MAC address")
+			return nil
+		}
 	}
 
 	var interfacesArray []*current.Interface
-	interfacesArray, err = pr.ConfigureInterface(namespace, podName, macAddress, ipAddress, gatewayIP, config.Default.MTU, ingress, egress)
+	interfacesArray, err = pr.ConfigureInterface(namespace, podName, networkName, macAddress, ipAddress, gatewayIP, config.Default.MTU, ingress, egress)
 	if err != nil {
 		logrus.Errorf("Failed to configure interface in pod: %v", err)
 		return nil
 	}
 
 	// Build the result structure to pass back to the runtime
-	addr, addrNet, err := net.ParseCIDR(ipAddress)
-	if err != nil {
-		logrus.Errorf("failed to parse IP address %q: %v", ipAddress, err)
-		return nil
-	}
-	ipVersion := "6"
-	if addr.To4() != nil {
-		ipVersion = "4"
-	}
 	result := &current.Result{
 		Interfaces: interfacesArray,
-		IPs: []*current.IPConfig{
+	}
+
+	if ipAddress != "" {
+		addr, addrNet, err := net.ParseCIDR(ipAddress)
+		if err != nil {
+			logrus.Errorf("failed to parse IP address %q: %v", ipAddress, err)
+			return nil
+		}
+		ipVersion := "6"
+		if addr.To4() != nil {
+			ipVersion = "4"
+		}
+		result.IPs = []*current.IPConfig{
 			{
 				Version:   ipVersion,
 				Interface: current.Int(1),
 				Address:   net.IPNet{IP: addr, Mask: addrNet.Mask},
 				Gateway:   net.ParseIP(gatewayIP),
 			},
-		},
+		}
 	}
 
 	podResult := &PodResult{}

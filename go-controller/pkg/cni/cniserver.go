@@ -123,6 +123,9 @@ func cniRequestToPodRequest(r *http.Request) (*PodRequest, error) {
 		return nil, fmt.Errorf("missing K8S_POD_NAME")
 	}
 
+	req.Mac, _ = cniArgs["MAC"]
+	req.Ip, _ = cniArgs["IP"]
+
 	conf, err := config.ReadCNIConfig(cr.Config)
 	if err != nil {
 		return nil, fmt.Errorf("broken stdin args")
