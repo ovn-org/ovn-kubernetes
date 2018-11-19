@@ -29,11 +29,11 @@ ovs_info:
   modules_file_path: /etc/modules-load.d/modules.conf
   branch: branch-2.9
   service_path: /etc/systemd/system/openvswitch.service
-  release_link: http://openvswitch.org/releases/openvswitch-2.9.2.tar.gz
-  release_name: openvswitch-2.9.2
-  pkg_build_version: 2.9.2-1
+  release_link: http://openvswitch.org/releases/openvswitch-2.10.1.tar.gz
+  release_name: openvswitch-2.10.1
+  pkg_build_version: 2.10.1-1
   # Prebuilt packages info and download link
   install_prebuilt_packages: "{{ovs_install_prebuilt_packages | default(false)}}"
   prebuilt_packages_download_path: /tmp
-  prebuilt_version: "2.9.2-1"
+  prebuilt_version: "2.10.1-1"
   debs_targz_link: "replace_me"
