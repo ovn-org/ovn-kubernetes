@@ -19,6 +19,11 @@
     timeout: 30
   retries: 3
 
+- name: OVS | Remove remove directory if exists
+  file:
+    path: "{{ ovs_info.build_path }}/{{ ovs_info.release_name }}"
+    state: absent
+
 - name: OVS | unarchive tar.gz
   unarchive:
     src: "{{ ovs_info.build_path }}/{{ ovs_info.release_name }}.tar.gz"
@@ -26,7 +31,7 @@
     remote_src: yes
 
 - name: OVS | build debs
-  action: shell cd {{ ovs_info.build_path }}/{{ ovs_info.release_name }}; make clean; make uninstall; dpkg-checkbuilddeps; fakeroot debian/rules clean; DEB_BUILD_OPTIONS='nocheck parallel=4' fakeroot debian/rules binary
+  action: shell cd {{ ovs_info.build_path }}/{{ ovs_info.release_name }}; dpkg-checkbuilddeps; fakeroot debian/rules clean; DEB_BUILD_OPTIONS='nocheck parallel=4' fakeroot debian/rules binary
 
 - name: OVS | install debs
   apt: deb="{{ ovs_info.build_path }}/{{item}}{{ ovs_info.pkg_build_version }}_amd64.deb"
