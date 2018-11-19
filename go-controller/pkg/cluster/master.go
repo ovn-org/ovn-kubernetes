@@ -224,9 +224,13 @@ func (cluster *OvnClusterController) StartClusterMaster(masterNodeName string) e
 	// but omitting any that exist in 'subrange' (third argument)
 	for _, clusterEntry := range cluster.ClusterIPNet {
 		subrange := make([]string, 0)
-		for _, entry := range alreadyAllocated {
-			if clusterEntry.CIDR.Contains(net.ParseIP(entry)) {
-				subrange = append(subrange, entry)
+		for _, allocatedRange := range alreadyAllocated {
+			firstAddress, _, err := net.ParseCIDR(allocatedRange)
+			if err != nil {
+				return err
+			}
+			if clusterEntry.CIDR.Contains(firstAddress) {
+				subrange = append(subrange, allocatedRange)
 			}
 		}
 		subnetAllocator, err := netutils.NewSubnetAllocator(clusterEntry.CIDR.String(), 32-clusterEntry.HostSubnetLength, subrange)
