@@ -18,18 +18,18 @@
       #
       $net = Get-HnsNetwork | Where-Object { $_.ID -eq "{{ hns_net_id }}" }
       Set-Service "ovs-vswitchd" -StartupType Disabled
-      Stop-Service "ovs-vswitchd" -Force -ErrorAction SilentlyContinue
+      Stop-Service "ovs-vswitchd" -Force
       Disable-OVSOnHNSNetwork $net.ID
       $bridgeName = "vEthernet ($($net.NetworkAdapterName))"
-      ovs-vsctl.exe --timeout {{ ovs_cmd_timeout }} --if-exists --no-wait del-br "$bridgeName"
+      ovs-vsctl.exe --no-wait --if-exists del-br "$bridgeName"
       if($LASTEXITCODE) {
           Throw "Failed to cleanup existing OVS bridge"
       }
-      ovs-vsctl.exe --timeout {{ ovs_cmd_timeout }} --no-wait --may-exist add-br "$bridgeName"
+      ovs-vsctl.exe --no-wait add-br "$bridgeName"
       if($LASTEXITCODE) {
           Throw "Failed to add the OVS bridge"
       }
-      ovs-vsctl.exe --timeout {{ ovs_cmd_timeout }} --no-wait --may-exist add-port "$bridgeName" "$($net.NetworkAdapterName)"
+      ovs-vsctl.exe --no-wait add-port "$bridgeName" "$($net.NetworkAdapterName)"
       if($LASTEXITCODE) {
           Throw "Failed to add the HNS interface to OVS bridge"
       }
