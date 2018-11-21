@@ -168,7 +168,8 @@ const (
 	// Default deny acl rule priority
 	defaultDenyPriority = "1000"
 	// Default allow acl rule priority
-	defaultAllowPriority = "1001"
+	defaultAllowPriority    = "1001"
+	defaultAllowPriorityInt = 1001
 	// IP Block except deny acl rule priority
 	ipBlockDenyPriority = "1010"
 )
