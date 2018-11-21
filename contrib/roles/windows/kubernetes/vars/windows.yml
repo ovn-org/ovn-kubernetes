@@ -5,6 +5,8 @@ install_info:
 sdn_info:
   sdn_network_name: external
 
+ovs_cmd_timeout: 30
+
 kubernetes_info:
   MASTER_IP: "{{MASTER_IP}}"
   CLUSTER_SUBNET: "{{CLUSTER_SUBNET | default('10.0.0.0/16')}}"
@@ -14,7 +16,3 @@ kubernetes_info:
   K8S_DNS_SERVICE_IP: "{{K8S_DNS_SERVICE_IP | default('10.0.9.10')}}"
   K8S_API_SERVICE_IP: "{{K8S_API_SERVICE_IP | default('10.0.9.1')}}"
   infracontainername: "ovnkubernetes/pause"
-
-host_info:
-  username: "{{ ansible_user }}"
-  password: "{{ ansible_password }}"

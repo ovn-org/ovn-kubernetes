@@ -22,22 +22,8 @@
 - name: Kubernetes | Setup SDN
   include_tasks: ./setup_sdn.yml
 
-- name: Kubernetes | Check powershell execution policy
-  win_shell: Get-ExecutionPolicy
-  register: execution_policy
-  changed_when: false
-
-- name: Kubernetes | Set execution_policy_required variable
-  set_fact:
-    execution_policy_required: "{{ true if execution_policy.stdout_lines[0] == 'Restricted' else false}}"
-
-- name: Kubernetes | Enable unrestricted execution policy for powershell scripts
-  win_shell: Set-ExecutionPolicy -ExecutionPolicy Unrestricted -Force
-  changed_when: false
-  when: execution_policy_required
-
-- name: Kubernetes | OVS Docker network setup
-  include_tasks: ./setup_ovs_docker.yml
+- name: Kubernetes | OVS HNS network setup
+  include_tasks: ./setup_ovs_hns.yml
 
 - name: Kubernetes | refresh network details
   include_tasks: set_ip_facts.yml
@@ -58,11 +44,6 @@
     - name: Kubernetes | Run minion-init
       include_tasks: ./run_minion_init.yml
   when: ping_ovn_gateway.rc != 0
-
-- name: Kubernetes | Change to restricted execution policy for powershell scripts
-  win_shell: Set-ExecutionPolicy -ExecutionPolicy Restricted -Force
-  changed_when: false
-  when: execution_policy_required
 
 # There is no infra container for Windows Server, this creates a custom
 # infra container
