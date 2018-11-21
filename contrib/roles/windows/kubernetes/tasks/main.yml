@@ -17,18 +17,10 @@
 - name: Kubernetes | Fetch OVN subnet for the node
   include_tasks: ./get_ovn_subnet.yml
 
-- name: Kubernetes | check if sdn is already set up
-  win_shell: (Get-HNSNetwork | where {$_.type -eq "transparent"}).ID
-  register: hns_net_id_out
-  changed_when: false
-
-- name: Kubernetes | set hns_exists
-  set_fact:
-    hns_exists: "{{ false if hns_net_id_out.stdout == '' else true}}"
-
-- name: Kubernetes | setup sdn
+# This will create the HNS network if it doesn't exist, or get its HNS id if
+# it was already previously created.
+- name: Kubernetes | Setup SDN
   include_tasks: ./setup_sdn.yml
-  when: not hns_exists
 
 - name: Kubernetes | Check powershell execution policy
   win_shell: Get-ExecutionPolicy
