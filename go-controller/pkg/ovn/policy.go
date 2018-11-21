@@ -2,12 +2,15 @@ package ovn
 
 import (
 	"fmt"
-	util "github.com/openvswitch/ovn-kubernetes/go-controller/pkg/util"
+	"github.com/TomCodeLV/OVSDB-golang-lib/pkg/dbtransaction"
+	"github.com/TomCodeLV/OVSDB-golang-lib/pkg/helpers"
 	"github.com/sirupsen/logrus"
 	kapi "k8s.io/api/core/v1"
 	knet "k8s.io/api/networking/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/client-go/tools/cache"
+	"regexp"
+	"strconv"
 	"strings"
 	"sync"
 )
@@ -44,6 +47,64 @@ func (oc *Controller) syncNetworkPoliciesPortGroup(
 	}
 }
 
+func (oc *Controller) getACLUUIDFromMap(acls map[string]interface{}, filters map[string]interface{}) string {
+	for aclUUID, acl := range acls {
+		found := true
+		for filterID, filter := range filters {
+			if filterID == "external_ids" {
+				if externalIds, ok := acl.(map[string]interface{})["external_ids"]; ok {
+					for key, val := range filter.(map[string]string) {
+						externalID := externalIds.(map[string]interface{})[key]
+						if externalID == nil || externalID.(string) != val {
+							found = false
+							break
+						}
+					}
+					if !found {
+						break
+					}
+				} else {
+					found = false
+					break
+				}
+			} else if acl.(map[string]interface{})[filterID] != filter {
+				found = false
+				break
+			}
+		}
+
+		if found {
+			return aclUUID
+		}
+	}
+
+	return ""
+}
+
+func (oc *Controller) insertACL(row map[string]interface{}, portGroupUUID string) error {
+	var err error
+
+	retry := true
+	for retry {
+		txn := oc.ovnNBDB.Transaction("OVN_Northbound")
+		newACLID := txn.Insert(dbtransaction.Insert{
+			Table: "ACL",
+			Row:   row,
+		})
+		txn.InsertReferences(dbtransaction.InsertReferences{
+			Table:           "Port_Group",
+			WhereId:         portGroupUUID,
+			ReferenceColumn: "acls",
+			InsertIdsList:   []string{newACLID},
+			Wait:            true,
+			Cache:           oc.ovnNbCache,
+		})
+		_, err, retry = txn.Commit()
+	}
+
+	return err
+}
+
 func (oc *Controller) addACLAllow(np *namespacePolicy,
 	match, l4Match string, ipBlockCidr bool, gressNum int,
 	policyType knet.PolicyType) {
@@ -55,70 +116,98 @@ func (oc *Controller) addACLAllow(np *namespacePolicy,
 		action = "allow"
 	}
 
-	uuid, stderr, err := util.RunOVNNbctlHA("--data=bare", "--no-heading",
-		"--columns=_uuid", "find", "ACL",
-		fmt.Sprintf("external-ids:l4Match=\"%s\"", l4Match),
-		fmt.Sprintf("external-ids:ipblock_cidr=%t", ipBlockCidr),
-		fmt.Sprintf("external-ids:namespace=%s", np.namespace),
-		fmt.Sprintf("external-ids:policy=%s", np.name),
-		fmt.Sprintf("external-ids:%s_num=%d", policyType, gressNum),
-		fmt.Sprintf("external-ids:policy_type=%s", policyType))
-	if err != nil {
-		logrus.Errorf("find failed to get the allow rule for "+
-			"namespace=%s, policy=%s, stderr: %q (%v)",
-			np.namespace, np.name, stderr, err)
-		return
-	}
+	acls := oc.ovnNbCache.GetMap("ACL", "uuid")
+	uuid := oc.getACLUUIDFromMap(acls, map[string]interface{}{
+		"external_ids": map[string]string{
+			"l4Match":      l4Match,
+			"ipblock_cidr": fmt.Sprintf("%t", ipBlockCidr),
+			"namespace":    np.namespace,
+			"policy":       np.name,
+			fmt.Sprintf("%s_num", policyType): fmt.Sprintf("%d", gressNum),
+			"policy_type":                     fmt.Sprintf("%s", policyType),
+		},
+	})
 
 	if uuid != "" {
 		return
 	}
 
-	_, stderr, err = util.RunOVNNbctlHA("--id=@acl", "create",
-		"acl", fmt.Sprintf("priority=%s", defaultAllowPriority),
-		fmt.Sprintf("direction=%s", direction), match,
-		fmt.Sprintf("action=%s", action),
-		fmt.Sprintf("external-ids:l4Match=\"%s\"", l4Match),
-		fmt.Sprintf("external-ids:ipblock_cidr=%t", ipBlockCidr),
-		fmt.Sprintf("external-ids:namespace=%s", np.namespace),
-		fmt.Sprintf("external-ids:policy=%s", np.name),
-		fmt.Sprintf("external-ids:%s_num=%d", policyType, gressNum),
-		fmt.Sprintf("external-ids:policy_type=%s", policyType),
-		"--", "add", "port_group", np.portGroupUUID, "acls", "@acl")
+	// strip out match value from 'match="some match value"'
+	r, _ := regexp.Compile("match=\"(.*)\"")
+	matches := r.FindStringSubmatch(match)
+	if matches != nil {
+		match = matches[1]
+	}
+
+	err := oc.insertACL(map[string]interface{}{
+		"priority":  defaultAllowPriorityInt,
+		"direction": direction,
+		"match":     match,
+		"action":    action,
+		"external_ids": helpers.MakeOVSDBMap(map[string]interface{}{
+			"l4Match":      l4Match,
+			"ipblock_cidr": fmt.Sprintf("%t", ipBlockCidr),
+			"namespace":    np.namespace,
+			"policy":       np.name,
+			fmt.Sprintf("%s_num", policyType): fmt.Sprintf("%d", gressNum),
+			"policy_type":                     fmt.Sprintf("%s", policyType),
+		}),
+	}, np.portGroupUUID)
+
 	if err != nil {
-		logrus.Errorf("failed to create the acl allow rule for "+
-			"namespace=%s, policy=%s, stderr: %q (%v)", np.namespace,
-			np.name, stderr, err)
-		return
+		logrus.Errorf("failed to create the acl allow rule for namespace=%s, policy=%s, (%v)",
+			np.namespace, np.name, err)
 	}
 }
 
 func (oc *Controller) modifyACLAllow(namespace, policy,
 	oldMatch string, newMatch string, gressNum int,
 	policyType knet.PolicyType) {
-	uuid, stderr, err := util.RunOVNNbctlHA("--data=bare", "--no-heading",
-		"--columns=_uuid", "find", "ACL", oldMatch,
-		fmt.Sprintf("external-ids:namespace=%s", namespace),
-		fmt.Sprintf("external-ids:policy=%s", policy),
-		fmt.Sprintf("external-ids:%s_num=%d", policyType, gressNum),
-		fmt.Sprintf("external-ids:policy_type=%s", policyType))
-	if err != nil {
-		logrus.Errorf("find failed to get the allow rule for "+
-			"namespace=%s, policy=%s, stderr: %q (%v)",
-			namespace, policy, stderr, err)
-		return
+	// strip out match value from 'match="some match value"'
+	r, _ := regexp.Compile("match=\"(.*)\"")
+	matches := r.FindStringSubmatch(oldMatch)
+	if matches != nil {
+		oldMatch = matches[1]
 	}
+
+	acls := oc.ovnNbCache.GetMap("ACL", "uuid")
+	uuid := oc.getACLUUIDFromMap(acls, map[string]interface{}{
+		"match": oldMatch,
+		"external_ids": map[string]string{
+			"namespace": namespace,
+			"policy":    policy,
+			fmt.Sprintf("%s_num", policyType): fmt.Sprintf("%d", gressNum),
+			"policy_type":                     fmt.Sprintf("%s", policyType),
+		},
+	})
 
 	if uuid != "" {
 		// We already have an ACL. We will update it.
-		_, stderr, err = util.RunOVNNbctlHA("set", "acl", uuid,
-			fmt.Sprintf("%s", newMatch))
-		if err != nil {
-			logrus.Errorf("failed to modify the allow-from rule for "+
-				"namespace=%s, policy=%s, stderr: %q (%v)",
-				namespace, policy, stderr, err)
+		r, _ := regexp.Compile("match=\"(.*)\"")
+		matches := r.FindStringSubmatch(newMatch)
+		var newMatch string
+		if matches != nil {
+			newMatch = matches[1]
 		}
-		return
+
+		var err error
+		retry := true
+		for retry {
+			txn := oc.ovnNBDB.Transaction("OVN_Northbound")
+			txn.Update(dbtransaction.Update{
+				Table: "ACL",
+				Where: [][]interface{}{{"_uuid", "==", []string{"uuid", uuid}}},
+				Row: map[string]interface{}{
+					"match": newMatch,
+				},
+			})
+			_, err, retry = txn.Commit()
+		}
+
+		if err != nil {
+			logrus.Errorf("failed to modify the allow-from rule for namespace=%s, policy=%s, (%v)",
+				namespace, policy, err)
+		}
 	}
 }
 
@@ -129,93 +218,121 @@ func (oc *Controller) addIPBlockACLDeny(np *namespacePolicy,
 	if policyType == knet.PolicyTypeIngress {
 		lportMatch = fmt.Sprintf("outport == @%s", np.portGroupName)
 		l3Match = fmt.Sprintf("ip4.src == %s", except)
-		match = fmt.Sprintf("match=\"%s && %s\"", lportMatch, l3Match)
+		match = fmt.Sprintf("%s && %s", lportMatch, l3Match)
 	} else {
 		lportMatch = fmt.Sprintf("inport == @%s", np.portGroupName)
 		l3Match = fmt.Sprintf("ip4.dst == %s", except)
-		match = fmt.Sprintf("match=\"%s && %s\"", lportMatch, l3Match)
+		match = fmt.Sprintf("%s && %s", lportMatch, l3Match)
 	}
 
-	uuid, stderr, err := util.RunOVNNbctlHA("--data=bare", "--no-heading",
-		"--columns=_uuid", "find", "ACL", match, "action=drop",
-		fmt.Sprintf("external-ids:ipblock-deny-policy-type=%s", policyType),
-		fmt.Sprintf("external-ids:namespace=%s", np.namespace),
-		fmt.Sprintf("external-ids:%s_num=%d", policyType, gressNum),
-		fmt.Sprintf("external-ids:policy=%s", np.name))
-	if err != nil {
-		logrus.Errorf("find failed to get the ipblock default deny rule for "+
-			"namespace=%s, policy=%s stderr: %q, (%v)",
-			np.namespace, np.name, stderr, err)
-		return
-	}
+	acls := oc.ovnNbCache.GetMap("ACL", "uuid")
+	uuid := oc.getACLUUIDFromMap(acls, map[string]interface{}{
+		"match":  match,
+		"action": "drop",
+		"external_ids": map[string]string{
+			"ipblock-deny-policy-type":        fmt.Sprintf("%s", policyType),
+			"namespace":                       np.namespace,
+			fmt.Sprintf("%s_num", policyType): fmt.Sprintf("%d", gressNum),
+			"policy": np.name,
+		},
+	})
 
 	if uuid != "" {
 		return
 	}
 
-	_, stderr, err = util.RunOVNNbctlHA("--id=@acl", "create", "acl",
-		fmt.Sprintf("priority=%s", priority),
-		fmt.Sprintf("direction=%s", direction), match, "action=drop",
-		fmt.Sprintf("external-ids:ipblock-deny-policy-type=%s", policyType),
-		fmt.Sprintf("external-ids:%s_num=%d", policyType, gressNum),
-		fmt.Sprintf("external-ids:namespace=%s", np.namespace),
-		fmt.Sprintf("external-ids:policy=%s", np.name),
-		"--", "add", "port_group", np.portGroupUUID,
-		"acls", "@acl")
+	priorityInt, _ := strconv.Atoi(priority)
+
+	err := oc.insertACL(map[string]interface{}{
+		"priority":  priorityInt,
+		"direction": direction,
+		"match":     match,
+		"action":    "drop",
+		"external_ids": helpers.MakeOVSDBMap(map[string]interface{}{
+			"namespace": np.namespace,
+			"policy":    np.name,
+			fmt.Sprintf("%s_num", policyType): fmt.Sprintf("%d", gressNum),
+			"ipblock-deny-policy-type":        fmt.Sprintf("%s", policyType),
+		}),
+	}, np.portGroupUUID)
+
 	if err != nil {
-		logrus.Errorf("error executing create ACL command, stderr: %q, %+v",
-			stderr, err)
+		logrus.Errorf("failed to create the acl allow rule for namespace=%s, policy=%s, (%v)",
+			np.namespace, np.name, err)
 	}
-	return
 }
 
 func (oc *Controller) addACLDenyPortGroup(portGroupUUID, portGroupName,
 	priority string, policyType knet.PolicyType) error {
+
 	var match, direction string
 	direction = toLport
 	if policyType == knet.PolicyTypeIngress {
-		match = fmt.Sprintf("match=\"outport == @%s\"", portGroupName)
+		match = fmt.Sprintf("outport == @%s", portGroupName)
 	} else {
-		match = fmt.Sprintf("match=\"inport == @%s\"", portGroupName)
+		match = fmt.Sprintf("inport == @%s", portGroupName)
 	}
 
-	uuid, stderr, err := util.RunOVNNbctlHA("--data=bare", "--no-heading",
-		"--columns=_uuid", "find", "ACL", match, "action=drop",
-		fmt.Sprintf("external-ids:default-deny-policy-type=%s", policyType))
-	if err != nil {
-		return fmt.Errorf("find failed to get the default deny rule for "+
-			"policy type %s stderr: %q (%v)", policyType, stderr, err)
-	}
+	acls := oc.ovnNbCache.GetMap("ACL", "uuid")
+	uuid := oc.getACLUUIDFromMap(acls, map[string]interface{}{
+		"match":  match,
+		"action": "drop",
+		"external_ids": map[string]string{
+			"default-deny-policy-type": fmt.Sprintf("%s", policyType),
+		},
+	})
 
 	if uuid != "" {
 		return nil
 	}
 
-	_, stderr, err = util.RunOVNNbctlHA("--id=@acl", "create", "acl",
-		fmt.Sprintf("priority=%s", priority),
-		fmt.Sprintf("direction=%s", direction), match, "action=drop",
-		fmt.Sprintf("external-ids:default-deny-policy-type=%s", policyType),
-		"--", "add", "port_group", portGroupUUID,
-		"acls", "@acl")
+	priorityInt, _ := strconv.Atoi(priority)
+	err := oc.insertACL(map[string]interface{}{
+		"priority":  priorityInt,
+		"direction": direction,
+		"match":     match,
+		"action":    "drop",
+		"external_ids": helpers.MakeOVSDBMap(map[string]interface{}{
+			"default-deny-policy-type": fmt.Sprintf("%s", policyType),
+		}),
+	}, portGroupUUID)
+
 	if err != nil {
 		return fmt.Errorf("error executing create ACL command for "+
-			"policy type %s stderr: %q (%v)", policyType, stderr, err)
+			"policy type %s (%v)", policyType, err)
 	}
 	return nil
 }
 
 func (oc *Controller) addToACLDeny(portGroup, logicalPort string) {
 	logicalPortUUID := oc.getLogicalPortUUID(logicalPort)
+
 	if logicalPortUUID == "" {
 		return
 	}
 
-	_, stderr, err := util.RunOVNNbctlHA("--if-exists", "remove",
-		"port_group", portGroup, "ports", logicalPortUUID, "--",
-		"add", "port_group", portGroup, "ports", logicalPortUUID)
-	if err != nil {
-		logrus.Errorf("Failed to add logicalPort %s to portGroup %s "+
-			"stderr: %q (%v)", logicalPort, portGroup, stderr, err)
+	pg := oc.ovnNbCache.GetMap("Port_Group", "uuid", portGroup)
+
+	if m, ok := pg["ports"].(map[string]interface{}); !ok || m[logicalPortUUID] == nil {
+		var err error
+
+		retry := true
+		for retry {
+			txn := oc.ovnNBDB.Transaction("OVN_Northbound")
+			txn.InsertReferences(dbtransaction.InsertReferences{
+				Table:                 "Port_Group",
+				WhereId:               portGroup,
+				ReferenceColumn:       "ports",
+				InsertExistingIdsList: []string{logicalPortUUID},
+				Wait:  true,
+				Cache: oc.ovnNbCache,
+			})
+			_, err, retry = txn.Commit()
+		}
+
+		if err != nil {
+			logrus.Errorf("Failed to add logicalPort %s to portGroup %s (%v)", logicalPort, portGroup, err)
+		}
 	}
 }
 
@@ -225,11 +342,28 @@ func (oc *Controller) deleteFromACLDeny(portGroup, logicalPort string) {
 		return
 	}
 
-	_, stderr, err := util.RunOVNNbctlHA("--if-exists", "remove",
-		"port_group", portGroup, "ports", logicalPortUUID)
-	if err != nil {
-		logrus.Errorf("Failed to delete logicalPort %s to portGroup %s "+
-			"stderr: %q (%v)", logicalPort, portGroup, stderr, err)
+	pg := oc.ovnNbCache.GetMap("Port_Group", "uuid", portGroup)
+
+	if m, ok := pg["ports"].(map[string]interface{}); ok && m[logicalPortUUID] != nil {
+		var err error
+
+		retry := true
+		for retry {
+			txn := oc.ovnNBDB.Transaction("OVN_Northbound")
+			txn.DeleteReferences(dbtransaction.DeleteReferences{
+				Table:           "Port_Group",
+				WhereId:         portGroup,
+				ReferenceColumn: "ports",
+				DeleteIdsList:   []string{logicalPortUUID},
+				Wait:            true,
+				Cache:           oc.ovnNbCache,
+			})
+			_, err, retry = txn.Commit()
+		}
+
+		if err != nil {
+			logrus.Errorf("Failed to delete logicalPort %s to portGroup %s (%v)", logicalPort, portGroup, err)
+		}
 	}
 }
 
@@ -419,12 +553,29 @@ func (oc *Controller) handleLocalPodSelectorAddFunc(
 		return
 	}
 
-	_, stderr, err := util.RunOVNNbctlHA("--if-exists", "remove",
-		"port_group", np.portGroupUUID, "ports", logicalPortUUID, "--",
-		"add", "port_group", np.portGroupUUID, "ports", logicalPortUUID)
-	if err != nil {
-		logrus.Errorf("Failed to add logicalPort %s to portGroup %s "+
-			"stderr: %q (%v)", logicalPort, np.portGroupUUID, stderr, err)
+	pg := oc.ovnNbCache.GetMap("Port_Group", "uuid", np.portGroupUUID)
+
+	if m, ok := pg["ports"].(map[string]interface{}); !ok || m[logicalPortUUID] == nil {
+		var err error
+
+		retry := true
+		for retry {
+			txn := oc.ovnNBDB.Transaction("OVN_Northbound")
+			txn.InsertReferences(dbtransaction.InsertReferences{
+				Table:                 "Port_Group",
+				WhereId:               np.portGroupUUID,
+				ReferenceColumn:       "ports",
+				InsertExistingIdsList: []string{logicalPortUUID},
+				Wait:  true,
+				Cache: oc.ovnNbCache,
+			})
+			_, err, retry = txn.Commit()
+		}
+
+		if err != nil {
+			logrus.Errorf("Failed to add logicalPort %s to portGroup %s (%v)",
+				logicalPort, np.portGroupUUID, err)
+		}
 	}
 
 	np.localPods[logicalPort] = true
@@ -461,11 +612,29 @@ func (oc *Controller) handleLocalPodSelectorDelFunc(
 		return
 	}
 
-	_, stderr, err := util.RunOVNNbctlHA("--if-exists", "remove",
-		"port_group", np.portGroupUUID, "ports", logicalPortUUID)
-	if err != nil {
-		logrus.Errorf("Failed to delete logicalPort %s from portGroup %s "+
-			"stderr: %q (%v)", logicalPort, np.portGroupUUID, stderr, err)
+	pg := oc.ovnNbCache.GetMap("Port_Group", "uuid", np.portGroupUUID)
+
+	if m, ok := pg["ports"].(map[string]interface{}); ok && m[logicalPortUUID] != nil {
+		var err error
+
+		retry := true
+		for retry {
+			txn := oc.ovnNBDB.Transaction("OVN_Northbound")
+			txn.DeleteReferences(dbtransaction.DeleteReferences{
+				Table:           "Port_Group",
+				WhereId:         np.portGroupUUID,
+				ReferenceColumn: "ports",
+				DeleteIdsList:   []string{logicalPortUUID},
+				Wait:            true,
+				Cache:           oc.ovnNbCache,
+			})
+			_, err, retry = txn.Commit()
+		}
+
+		if err != nil {
+			logrus.Errorf("Failed to delete logicalPort %s to portGroup %s (%v)",
+				logicalPort, np.portGroupUUID, err)
+		}
 	}
 }
 
