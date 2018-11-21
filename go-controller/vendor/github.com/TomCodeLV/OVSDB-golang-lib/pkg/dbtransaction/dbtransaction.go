@@ -275,13 +275,14 @@ func (txn *Transaction) DeleteReferences(dr DeleteReferences) *Transaction {
 }
 
 type InsertReferences struct {
-	Table           string
-	WhereId         string
-	ReferenceColumn string
-	InsertIdsList   []string
-	CurrentIdsList  []string
-	Wait            bool
-	Cache           *dbcache.Cache
+	Table           		string
+	WhereId        			string
+	ReferenceColumn			string
+	InsertIdsList   		[]string
+	InsertExistingIdsList   []string
+	CurrentIdsList  		[]string
+	Wait            		bool
+	Cache           		*dbcache.Cache
 }
 
 func (txn *Transaction) InsertReferences(ir InsertReferences) *Transaction {
@@ -292,12 +293,17 @@ func (txn *Transaction) InsertReferences(ir InsertReferences) *Transaction {
 		bridgeIdList = ir.Cache.GetKeys(ir.Table, "uuid", ir.WhereId, ir.ReferenceColumn)
 	}
 
+	var newBridgeIdList = bridgeIdList
+	if ir.InsertExistingIdsList != nil {
+		newBridgeIdList = append(newBridgeIdList, ir.InsertExistingIdsList...)
+	}
+
 	update := Update{
 		Table: ir.Table,
 		Where: [][]interface{}{{"_uuid", "==", []string{"uuid", ir.WhereId}}},
 		Row: map[string]interface{}{
 			ir.ReferenceColumn: helpers.MakeOVSDBSet(map[string]interface{}{
-				"uuid":       bridgeIdList,
+				"uuid":       newBridgeIdList,
 				"named-uuid": ir.InsertIdsList,
 			}),
 		},
