@@ -1,34 +1,31 @@
 ---
 - name: OVN subnet | Get the ovn_host_annotation
   block:
-    - name: OVN subnet | Fetch ovn_host_annotation
+    - name: OVN subnet | Fetch the ovn_host_subnet annotation
       win_shell: |
-        {{ install_info.install_path }}/kubectl.exe describe node {{ ansible_hostname|lower }} | sls ovn_host_subnet
-      register: kubectl_annotation_output
-      until: kubectl_annotation_output.stdout.find("ovn_host_subnet") != -1
+        $ErrorActionPreference = "Stop"
+        $output = & "{{ install_path }}\kubectl.exe" get node {{ ansible_hostname | lower }} --output json
+        if($LASTEXITCODE) {
+            Throw "Failed to execute kubectl.exe get node"
+        }
+        $json = $output | ConvertFrom-Json
+        $json.metadata.annotations.ovn_host_subnet
+      register: cmd_output
+      until: cmd_output.stdout != ""
       retries: 10
       delay: 3
-      changed_when: false
   rescue:
     - fail:
         msg: Could not fetch OVN host subnet, check that kubelet can connect to kubernetes
 
-- debug: var=kubectl_annotation_output
-
-- name: OVN subnet | Set OVN_Host_Annotations
+- name: OVN subnet | Set ovn_subnet and ovn_gateway_ip facts
   set_fact:
-    OVN_ANNOTATION: "{{kubectl_annotation_output.stdout | trim}}"
+    ovn_subnet: "{{ cmd_output.stdout | trim }}"
 
-- debug: var=OVN_ANNOTATION
-
-- set_fact:
-    OVN_SUBNET: "{{ OVN_ANNOTATION.split(': ')[1] }}"
-    OVN_IP: "{{ OVN_ANNOTATION.split(': ')[1].split('/')[0] }}"
-
-- name: OVN subnet | Set OVN Gateway
+- name: OVN subnet | Set the ovn_gateway_ip
   set_fact:
-    OVN_GATEWAY_IP: "{{OVN_IP[:-1] + '1'}}"
+    # Set the ovn_gateway_ip by parsing the ovn_subnet
+    ovn_gateway_ip: "{{ ovn_subnet.split('/')[0][:-1] + '1' }}"
 
-- debug: var=OVN_SUBNET
-- debug: var=OVN_IP
-- debug: var=OVN_GATEWAY_IP
+- debug: var=ovn_subnet
+- debug: var=ovn_gateway_ip
