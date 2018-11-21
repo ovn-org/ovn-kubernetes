@@ -1,59 +1,93 @@
 ---
-# Interface index changes after docker was installed, gather the facts again
-# to have the information up to date
-- name: IP facts | do facts module to get latest information
-  setup:
+- name: IP facts | Get the preferred network interface index
+  register: cmd_output
+  win_shell: |
+    $ErrorActionPreference = "Stop"
+    $hnsNet = Get-HnsNetwork | Where-Object {
+        ($_.Name -eq "{{ sdn_info.sdn_network_name }}") -and ($_.Type -eq "Transparent")
+    }
+    if($hnsNet) {
+        if($hnsNet.Count -gt 1) {
+            Throw "There is more than one HNS transparent networks with the name {{ sdn_info.sdn_network_name }}"
+        }
+        (Get-NetAdapter -Name $hnsNet.NetworkAdapterName).InterfaceIndex
+        exit 0
+    }
+    $preferredIfName = "{{ sdn_info.sdn_preferred_nic_name | default('') }}"
+    if($preferredIfName) {
+        (Get-NetAdapter -Name $preferredIfName).InterfaceIndex
+        exit 0
+    }
+    $defaultRoute = Get-NetRoute -DestinationPrefix "0.0.0.0/0"
+    if(!$defaultRoute) {
+        Throw "No default route. Cannot get the default SDN preferred NIC"
+    }
+    if($defaultRoute.Count -gt 1) {
+        Throw "There is more than one default gateway. Cannot get the default SDN preferred NIC"
+    }
+    $defaultRoute.ifIndex
 
-- name: IP facts | set internal IP
+- name: IP facts | Set the interface_index fact
   set_fact:
-    host_internal_ip: "{{ ansible_ip_addresses[0] }}"
+    interface_index: "{{ cmd_output.stdout | trim }}"
 
-# TODO: enable this for future GCE support in the playbooks
-# - name: IP facts | set public IP
-#   set_fact:
-#     host_public_ip: "{{ ansible_ip_addresses[0] }}"
-#   when: GCE
+- name: IP facts | Get the default gateway
+  register: cmd_output
+  win_shell: (Get-NetRoute -DestinationPrefix "0.0.0.0/0").NextHop
 
-- name: IP facts | set public IP
+- name: IP facts | Set the interface_default_gateway fact
   set_fact:
-    host_public_ip: "{{ ansible_ip_addresses[0] }}"
-  # when: not GCE
+    interface_default_gateway: "{{ cmd_output.stdout | trim }}"
 
-- name: IP facts | set interface details
+- name: IP facts | Get the preferred network interface name
+  register: cmd_output
+  win_shell: (Get-NetAdapter -InterfaceIndex "{{ interface_index }}").Name
+
+- name: IP facts | Set the interface_name fact
   set_fact:
-    interface_description: "{{ ansible_interfaces[0].interface_name }}"
-    interface_mac_addr: "{{ ansible_interfaces[0].macaddress }}"
-    interface_default_gateway: "{{ ansible_interfaces[0].default_gateway }}"
-    interface_index: "{{ ansible_interfaces[0].interface_index }}"
+    interface_name: "{{ cmd_output.stdout | trim }}"
 
-# Do not mark those as changed when executing the command
-- name: IP facts | Get Windows Prefix Length of {{interface_description}}
-  win_shell: (Get-NetIPAddress -InterfaceIndex "{{interface_index}}" -AddressFamily IPv4 -ErrorAction SilentlyContinue).PrefixLength
-  register: prefix_length_interface
-  changed_when: false
+- name: IP facts | Get the configured network interface index
+  register: cmd_output
+  win_shell: |
+    $ErrorActionPreference = "Stop"
+    $vEthernet = Get-NetAdapter -Name "vEthernet ({{ interface_name }})" -ErrorAction SilentlyContinue
+    if($vEthernet) {
+        $vEthernet.InterfaceIndex
+    } else {
+        "{{ interface_index }}"
+    }
 
-- name: IP facts | Get Windows Interface name of {{interface_description}}
-  win_shell: (Get-NetAdapter -InterfaceIndex "{{interface_index}}" -ErrorAction SilentlyContinue).Name
-  register: interface_out_name
-  changed_when: false
-
-- name: IP facts | set interface details
+- name: IP facts | Set the configured_interface_index fact
   set_fact:
-    interface_prefix_length: "{{prefix_length_interface.stdout | trim}}"
+    configured_interface_index: "{{ cmd_output.stdout | trim }}"
 
-- name: IP facts | set interface name
+- name: IP facts | Validate IP address on the preferred network interface
+  win_shell: |
+    $ErrorActionPreference = "Stop"
+    $netAddress = Get-NetIPAddress -InterfaceIndex "{{ configured_interface_index }}"
+    if(!$netAddress) {
+        Throw "The network interface {{ configured_interface_index }} doesn't have any addresses configured"
+    }
+    if($netAddress.Count -gt 1) {
+        Throw "There is more than one IP address configured on the interface {{ configured_interface_index }}"
+    }
+
+- name: IP facts | Get the internal IP address
+  register: cmd_output
+  win_shell: (Get-NetIPAddress -InterfaceIndex "{{ configured_interface_index }}").IPAddress
+
+- name: IP facts | Set the host_internal_ip and host_public_ip facts
   set_fact:
-    interface_name: "{{interface_out_name.stdout | trim}}"
+    host_internal_ip: "{{ cmd_output.stdout | trim }}"
+    # TODO: Set this to the proper public IP address in order to have support
+    #       for GCE or cross-cloud deployments of k8s. For now, we simply set
+    #       it to the host_internal_ip.
+    host_public_ip: "{{ cmd_output.stdout | trim }}"
 
-- name: IP facts | set physical interface name
-  set_fact:
-    phys_interface_name: "{{ interface_name | regex_replace('^vEthernet \\((?P<ifname>.+)\\)$', '\\g<ifname>') }}"
-
-- debug: var=interface_mac_addr
-- debug: var=interface_default_gateway
 - debug: var=interface_index
+- debug: var=configured_interface_index
+- debug: var=interface_name
+- debug: var=interface_default_gateway
 - debug: var=host_internal_ip
 - debug: var=host_public_ip
-- debug: var=interface_prefix_length
-- debug: var=interface_name
-- debug: var=phys_interface_name
