@@ -2,25 +2,13 @@
 - name: Docker | include vars
   include_vars: "{{ ansible_os_family|lower }}.yml"
 
-- name: Docker | Check if docker is installed
+- name: Docker | Check if Docker is installed
   win_service:
-    name: docker
+    name: Docker
   register: docker_service
 
 - name: Docker | Install docker
   block:
     - name: Docker | Install docker
       include_tasks: ./install_docker.yml
-
-    - name: Docker | Disable docker default network
-      win_lineinfile:
-        path: C:\ProgramData\docker\config\daemon.json
-        create: yes
-        line: |
-          { "bridge" : "none" }
-        newline: unix
-
-    - name: Docker | Remove current default nat network
-      win_shell: |
-        Get-HNSNetwork | Remove-HNSNetwork
   when: not docker_service.exists
