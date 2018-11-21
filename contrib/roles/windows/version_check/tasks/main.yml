@@ -1,8 +1,6 @@
 ---
 - name: ovn-kubernetes | include vars
   include_vars: "{{ ansible_os_family|lower }}.yml"
-  tags:
-    - facts
 
 - name: version check | Check if the Windows version is supported by the playbooks
   fail:

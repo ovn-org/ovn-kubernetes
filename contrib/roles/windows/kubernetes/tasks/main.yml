@@ -5,8 +5,6 @@
 
 - name: Kubernetes | include vars
   include_vars: "{{ ansible_os_family|lower }}.yml"
-  tags:
-    - facts
 
 - name: Kubernetes | fetch network details
   include_tasks: set_ip_facts.yml
@@ -18,8 +16,6 @@
 
 - name: Kubernetes | Fetch OVN subnet for the node
   include_tasks: ./get_ovn_subnet.yml
-  tags:
-    - facts
 
 - name: Kubernetes | check if sdn is already set up
   win_shell: (Get-HNSNetwork | where {$_.type -eq "transparent"}).ID
