@@ -46,10 +46,10 @@
     - name: Ensure /etc/hosts is updated on kube-master
       lineinfile:
         path: /etc/hosts
-        regexp: '{{ansible_hostname}}$'
-        line: '{{host_public_ip}} {{ansible_hostname}}'
+        regexp: ' {{ ansible_hostname | lower }}$'
+        line: '{{ host_public_ip }} {{ ansible_hostname | lower }}'
       delegate_to: "{{ item }}"
-      with_items: "{{groups['kube-master']}}"
+      with_items: "{{ groups['kube-master'] }}"
 
 - hosts: kube-minions-windows
   remote_user: Administrator
@@ -71,6 +71,8 @@
     - import_role:
         name: windows/requirements
     - import_role:
+        name: windows/docker
+    - import_role:
         name: windows/openvswitch
       vars:
         # This is useful when using custom OVS MSI, it should also provide the link
@@ -85,15 +87,13 @@
     - import_role:
         name: windows/ovn-kubernetes
     - import_role:
-        name: windows/docker
-    - import_role:
         name: windows/kubernetes
     - name: Ensure /etc/hosts is updated on kube-master
       become: true
       become_method: sudo
       lineinfile:
         path: /etc/hosts
-        regexp: '{{ansible_hostname}}$'
-        line: '{{host_public_ip}} {{ansible_hostname}}'
+        regexp: ' {{ ansible_hostname | lower }}$'
+        line: '{{ host_public_ip }} {{ ansible_hostname | lower }}'
       delegate_to: "{{ item }}"
-      with_items: "{{groups['kube-master']}}"
+      with_items: "{{ groups['kube-master'] }}"
