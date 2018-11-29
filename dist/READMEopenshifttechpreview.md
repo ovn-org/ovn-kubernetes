@@ -60,7 +60,7 @@ The yaml/{ovnkube.yaml,ovnkube-master.yaml} files are now created as follows:
 # make daemonsetyaml
 ```
 The daemonsets are now in template files that are expanded on the master. The
-previous daemonsets in dist/yaml have been deleted and can be reconstructed 
+previous daemonsets in dist/yaml have been deleted and can be reconstructed
 using the above make.
 
 ```
@@ -138,14 +138,133 @@ or
 $ make fedora
 ```
 
-In a development cycle, a new image can be built and pushed and the ovnkube-master and ovnkube daemonsets
-can be deleted and recreated.
+## Development Cycle:
+In a development cycle, a new image can be built and pushed and the ansible
+scripts can uninstall and reinstall ovn on the cluster.
 
 ```
-# cd ovn-kubernetes/dist/yaml
-# oc project ovn-kubernetes
-# oc delete -f ovnkube.yaml
-# oc delete -f ovnkube-master.yaml
-# oc create -f ovnkube-master.yaml
-# oc create -f ovnkube.yaml
+# cd ansible
+# ./run-playbook uninstall
+# ./run-playbook
 ```
+
+Alternatively once the daemonsets are running, the pods can be deleted. They
+will be automatically created using the new image.
+```
+# oc project ovn-kubernetes
+# oc get po
+NAME                   READY     STATUS    RESTARTS   AGE
+ovnkube-6sk8k          3/3       Running   0          1m
+ovnkube-9gc8j          3/3       Running   0          1m
+ovnkube-ks8kt          3/3       Running   0          1m
+ovnkube-master-4nnkh   4/4       Running   0          1m
+# oc delete po ovnkube-6sk8k ovnkube-9gc8j ovnkube-ks8kt ovnkube-master-4nnkh
+```
+
+##Debugging Aids
+
+The ovnkube pod has the following containers: ovs-daemons ovn-controller
+ovn-node The ovnkube-master pod has the following containers: run-ovn-northd
+nb-ovsdb sb-ovsdb ovnkube-master
+
+Logs from the containers can be viewed using the "kubectl logs" command. Each
+container does a "tail -f" of its log file and the results are displayed
+using "oc logs". The log may be truncated but the full log is available
+by rsh into the container and runnning ./ovnkube.sh display in the container
+(see below).
+
+The log is on a container basis so the logs can be shown using:
+```
+On each node pod:
+# kubectl logs -c ovs-daemons ovnkube-6sk8k
+# kubectl logs -c ovn-controller ovnkube-6sk8k
+# kubectl logs -c ovn-node ovnkube-6sk8k
+
+On each master pod:
+# kubectl logs -c run-ovn-northd ovnkube-master-4nnkh
+# kubectl logs -c nb-ovsdb ovnkube-master-4nnkh
+# kubectl logs -c sb-ovsdb ovnkube-master-4nnkh
+# kubectl logs -c ovnkube-master ovnkube-master-4nnkh
+```
+There is a convenience script, $HOME/ovn/ovn-logs that extracts logs
+for all ovn pods in the cluster. The optional parameter will just display the
+desired pod. The script is installed on the master by ./run-playbook.
+```
+# $HOME/ovn/ovn-logs
+# $HOME/ovn/ovn-logs ovnkube-6sk8k
+```
+
+
+The full logs are available using:
+```
+# oc rsh -c ovs-daemons ovnkube-6sk8k ./ovnkube.sh display
+```
+Where the container names and pods are as described above.
+
+There is a convenience script, $HOME/ovn/ovn-display that extracts the complete logs
+for all ovn pods in the cluster. The optional parameter will just display the
+desired pod. The script is installed on the master by ./run-playbook.
+```
+# $HOME/ovn/ovn-display
+# $HOME/ovn/ovn-display ovnkube-6sk8k
+```
+
+The display includes information on the image, daemonset and cluster in addition to the log. For example,
+```
+================== ovnkube.sh version 3 ================
+ ==================== command: display
+ =================== hostname: wsfd-netdev22.ntdv.lab.eng.bos.redhat.com
+ =================== daemonset version 3
+ =================== Image built from ovn-kubernetes ref: refs/heads/ovn-v3  commit: eacdf15c917e1bb49d06047711dab920d72af178
+OVS_USER_ID root:root
+OVS_OPTIONS
+OVN_NORTH tcp://10.19.188.9:6641
+OVN_NORTHD_OPTS --db-nb-sock=/var/run/openvswitch/ovnnb_db.sock --db-sb-sock=/var/run/openvswitch/ovnsb_db.sock
+OVN_SOUTH tcp://10.19.188.9:6642
+OVN_CONTROLLER_OPTS --ovn-controller-log=-vconsole:emer
+OVN_NET_CIDR 10.128.0.0/14/24
+OVN_SVC_CIDR 172.30.0.0/16
+K8S_APISERVER https://wsfd-netdev22.ntdv.lab.eng.bos.redhat.com:8443
+OVNKUBE_LOGLEVEL 4
+OVN_DAEMONSET_VERSION 3
+ovnkube.sh version 3
+==================== display for wsfd-netdev22.ntdv.lab.eng.bos.redhat.com  ===================
+Wed Nov 14 20:14:18 UTC 2018
+====================== run-ovn-northd pid
+10072
+====================== run-ovn-northd log
+2018-11-14T17:59:07.917Z|00001|vlog|INFO|opened log file /var/log/openvswitch/ovn-northd.log
+2018-11-14T17:59:07.918Z|00002|reconnect|INFO|unix:/var/run/openvswitch/ovnnb_db.sock: connecting...
+2018-11-14T17:59:07.918Z|00003|reconnect|INFO|unix:/var/run/openvswitch/ovnnb_db.sock: connection attempt failed (Connection refused)
+...
+```
+
+The ovn configuration for each of the ovn pods can be extracted using:
+```
+# oc rsh -c ovs-daemons ovnkube-6sk8k ./ovnkube.sh ovn_debug
+```
+Where the container names and pods are as described above.
+
+There is a convenience script, $HOME/ovn/ovn-debug that extracts the complete logs
+for all ovn pods in the cluster. The optional parameter will just display the
+desired pod. The script is installed on the master by ./run-playbook.
+```
+# $HOME/ovn/ovn-debug
+# $HOME/ovn/ovn-debug ovnkube-6sk8k
+```
+
+The reported ovn configuration includes:
+- ovn-nbctl show
+- ovn-nbctl list ACL
+- ovn-nbctl list address_set
+- ovs-vsctl show
+- ovs-ofctl -O OpenFlow13 dump-ports br-int
+- ovs-ofctl -O OpenFlow13 dump-ports-desc br-int
+- ovs-ofctl dump-flows br-int
+
+On the Master:
+- ovn-sbctl show
+- ovn-sbctl lflow-list
+- ovn-sbctl list datapath
+- ovn-sbctl list port
+
