@@ -85,16 +85,17 @@ func localnetGatewayNAT(ipt util.IPTablesHelper, ifname, ip string) error {
 }
 
 func initLocalnetGateway(nodeName string, clusterIPSubnet []string,
-	subnet string) error {
+	subnet string, nodePortEnable bool) error {
 	ipt, err := iptables.NewWithProtocol(iptables.ProtocolIPv4)
 	if err != nil {
 		return fmt.Errorf("failed to initialize iptables: %v", err)
 	}
-	return initLocalnetGatewayInternal(nodeName, clusterIPSubnet, subnet, ipt)
+	return initLocalnetGatewayInternal(nodeName, clusterIPSubnet, subnet, ipt,
+		nodePortEnable)
 }
 
 func initLocalnetGatewayInternal(nodeName string, clusterIPSubnet []string,
-	subnet string, ipt util.IPTablesHelper) error {
+	subnet string, ipt util.IPTablesHelper, nodePortEnable bool) error {
 	// Create a localnet OVS bridge.
 	localnetBridgeName := "br-localnet"
 	_, stderr, err := util.RunOVSVsctl("--may-exist", "add-br",
@@ -141,7 +142,7 @@ func initLocalnetGatewayInternal(nodeName string, clusterIPSubnet []string,
 
 	err = util.GatewayInit(clusterIPSubnet, nodeName,
 		localnetGatewayIP, "", localnetBridgeName, localnetGatewayNextHop,
-		subnet, false)
+		subnet, nodePortEnable)
 	if err != nil {
 		return fmt.Errorf("failed to localnet gateway: %v", err)
 	}

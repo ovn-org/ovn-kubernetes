@@ -78,6 +78,8 @@ var _ = Describe("Gateway Init Operations", func() {
 				lrpCIDR           string = lrpIP + "/24"
 				clusterRouterUUID string = "5cedba03-679f-41f3-b00e-b8ed7437bc6c"
 				systemID          string = "cb9ec8fa-b409-4ef3-9f42-d9283c47aac6"
+				tcpLBUUID         string = "d2e858b2-cb5a-441b-a670-ed450f79a91f"
+				udpLBUUID         string = "12832f14-eb0f-44d4-b8db-4cccbc73c792"
 				nodeSubnet        string = "10.1.1.0/24"
 				gwRouter          string = "GR_" + nodeName
 				clusterIPNet      string = "10.1.0.0"
@@ -115,6 +117,9 @@ var _ = Describe("Gateway Init Operations", func() {
 				"ovn-nbctl --timeout=15 -- --may-exist lsp-add join jtor-" + gwRouter + " -- set logical_switch_port jtor-" + gwRouter + " type=router options:router-port=rtoj-" + gwRouter + " addresses=\"" + lrpMAC + "\"",
 				"ovn-nbctl --timeout=15 --may-exist lr-route-add " + gwRouter + " " + clusterCIDR + " 100.64.1.1",
 				"ovn-nbctl --timeout=15 --may-exist lr-route-add " + clusterRouterUUID + " 0.0.0.0/0 100.64.1.2",
+			})
+			fakeCmds = addNodeportLBs(nodeName, tcpLBUUID, udpLBUUID, fakeCmds)
+			fakeCmds = ovntest.AddFakeCmdsNoOutputNoError(fakeCmds, []string{
 				"ovn-nbctl --timeout=15 --may-exist ls-add ext_" + nodeName,
 			})
 			fakeCmds = ovntest.AddFakeCmd(fakeCmds, &ovntest.ExpectedCmd{
@@ -149,7 +154,7 @@ var _ = Describe("Gateway Init Operations", func() {
 
 			ipt, err := util.NewFakeWithProtocol(iptables.ProtocolIPv4)
 			Expect(err).NotTo(HaveOccurred())
-			err = initLocalnetGatewayInternal(nodeName, []string{clusterCIDR}, nodeSubnet, ipt)
+			err = initLocalnetGatewayInternal(nodeName, []string{clusterCIDR}, nodeSubnet, ipt, true)
 			Expect(err).NotTo(HaveOccurred())
 
 			Expect(fexec.CommandCalls).To(Equal(len(fakeCmds)))
