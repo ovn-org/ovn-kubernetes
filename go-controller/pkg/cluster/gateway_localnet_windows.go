@@ -7,7 +7,7 @@ import (
 )
 
 func initLocalnetGateway(nodeName string, clusterIPSubnet []string,
-	subnet string) error {
+	subnet string, nodePortEnable bool) error {
 	// TODO: Implement this
 	return fmt.Errorf("Not implemented yet on Windows")
 }

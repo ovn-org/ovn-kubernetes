@@ -31,7 +31,8 @@ func getIPv4Address(iface string) (string, error) {
 func (cluster *OvnClusterController) initGateway(
 	nodeName string, clusterIPSubnet []string, subnet string) error {
 	if cluster.LocalnetGateway {
-		return initLocalnetGateway(nodeName, clusterIPSubnet, subnet)
+		return initLocalnetGateway(nodeName, clusterIPSubnet, subnet,
+			cluster.NodePortEnable)
 	}
 
 	if cluster.GatewayNextHop == "" || cluster.GatewayIntf == "" {
