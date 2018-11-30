@@ -271,9 +271,11 @@ func (cluster *OvnClusterController) SetupMaster(masterNodeName string) error {
 	}
 
 	// Create a single common distributed router for the cluster.
-	stdout, stderr, err := util.RunOVNNbctl("--", "--may-exist", "lr-add", masterNodeName, "--", "set", "logical_router", masterNodeName, "external_ids:k8s-cluster-router=yes")
+	stdout, stderr, err := util.RunOVNNbctl("--", "--may-exist", "lr-add", OvnClusterRouter,
+		"--", "set", "logical_router", OvnClusterRouter, "external_ids:k8s-cluster-router=yes")
 	if err != nil {
-		logrus.Errorf("Failed to create a single common distributed router for the cluster, stdout: %q, stderr: %q, error: %v", stdout, stderr, err)
+		logrus.Errorf("Failed to create a single common distributed router for the cluster, "+
+			"stdout: %q, stderr: %q, error: %v", stdout, stderr, err)
 		return err
 	}
 
@@ -314,24 +316,30 @@ func (cluster *OvnClusterController) SetupMaster(masterNodeName string) error {
 	}
 
 	// Connect the distributed router to "join".
-	routerMac, stderr, err := util.RunOVNNbctl("--if-exist", "get", "logical_router_port", "rtoj-"+masterNodeName, "mac")
+	routerMac, stderr, err := util.RunOVNNbctl("--if-exist", "get", "logical_router_port", "rtoj-"+OvnClusterRouter, "mac")
 	if err != nil {
-		logrus.Errorf("Failed to get logical router port rtoj-%v, stderr: %q, error: %v", masterNodeName, stderr, err)
+		logrus.Errorf("Failed to get logical router port rtoj-%v, stderr: %q, error: %v", OvnClusterRouter, stderr, err)
 		return err
 	}
 	if routerMac == "" {
 		routerMac = util.GenerateMac()
-		stdout, stderr, err = util.RunOVNNbctl("--", "--may-exist", "lrp-add", masterNodeName, "rtoj-"+masterNodeName, routerMac, "100.64.1.1/24", "--", "set", "logical_router_port", "rtoj-"+masterNodeName, "external_ids:connect_to_join=yes")
+		stdout, stderr, err = util.RunOVNNbctl("--", "--may-exist", "lrp-add", OvnClusterRouter,
+			"rtoj-"+OvnClusterRouter, routerMac, "100.64.1.1/24", "--", "set", "logical_router_port",
+			"rtoj-"+OvnClusterRouter, "external_ids:connect_to_join=yes")
 		if err != nil {
-			logrus.Errorf("Failed to add logical router port rtoj-%v, stdout: %q, stderr: %q, error: %v", masterNodeName, stdout, stderr, err)
+			logrus.Errorf("Failed to add logical router port rtoj-%v, stdout: %q, stderr: %q, error: %v",
+				OvnClusterRouter, stdout, stderr, err)
 			return err
 		}
 	}
 
 	// Connect the switch "join" to the router.
-	stdout, stderr, err = util.RunOVNNbctl("--", "--may-exist", "lsp-add", "join", "jtor-"+masterNodeName, "--", "set", "logical_switch_port", "jtor-"+masterNodeName, "type=router", "options:router-port=rtoj-"+masterNodeName, "addresses="+"\""+routerMac+"\"")
+	stdout, stderr, err = util.RunOVNNbctl("--", "--may-exist", "lsp-add", "join", "jtor-"+OvnClusterRouter,
+		"--", "set", "logical_switch_port", "jtor-"+OvnClusterRouter, "type=router",
+		"options:router-port=rtoj-"+OvnClusterRouter, "addresses="+"\""+routerMac+"\"")
 	if err != nil {
-		logrus.Errorf("Failed to add logical switch port to logical router, stdout: %q, stderr: %q, error: %v", stdout, stderr, err)
+		logrus.Errorf("Failed to add router-type logical switch port to join, stdout: %q, stderr: %q, error: %v",
+			stdout, stderr, err)
 		return err
 	}
 

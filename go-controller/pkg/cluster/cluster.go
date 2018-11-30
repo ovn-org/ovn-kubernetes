@@ -44,6 +44,8 @@ const (
 	DefaultNamespace = "default"
 	// MasterOverlayIP is the overlay IP address on master node
 	MasterOverlayIP = "master_overlay_ip"
+	// Name of the distributed router
+	OvnClusterRouter = "ovn_cluster_router"
 )
 
 // NewClusterController creates a new controller for IP subnet allocation to
