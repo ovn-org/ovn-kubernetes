@@ -121,6 +121,9 @@ func (oc *Controller) getGatewayFromSwitch(logicalSwitch string) (string, string
 	var gatewayIPMaskStr, stderr string
 	var ok bool
 	var err error
+
+	oc.lsMutex.Lock()
+	defer oc.lsMutex.Unlock()
 	if gatewayIPMaskStr, ok = oc.gatewayCache[logicalSwitch]; !ok {
 		gatewayIPMaskStr, stderr, err = util.RunOVNNbctlHA("--if-exists",
 			"get", "logical_switch", logicalSwitch,
@@ -192,10 +195,12 @@ func (oc *Controller) addLogicalPort(pod *kapi.Pod) {
 		return
 	}
 
+	oc.lsMutex.Lock()
 	if !oc.logicalSwitchCache[logicalSwitch] {
 		oc.logicalSwitchCache[logicalSwitch] = true
 		oc.addAllowACLFromNode(logicalSwitch)
 	}
+	oc.lsMutex.Unlock()
 
 	portName := fmt.Sprintf("%s_%s", pod.Namespace, pod.Name)
 	logrus.Debugf("Creating logical port for %s on switch %s", portName, logicalSwitch)
