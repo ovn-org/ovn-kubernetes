@@ -66,6 +66,10 @@ type Controller struct {
 	// A mutex for lspIngressDenyCache and lspEgressDenyCache
 	lspMutex *sync.Mutex
 
+	// A mutex for gatewayCache and logicalSwitchCache which holds
+	// logicalSwitch information
+	lsMutex *sync.Mutex
+
 	// supports port_group?
 	portGroupSupport bool
 }
@@ -93,6 +97,7 @@ func NewOvnController(kubeClient kubernetes.Interface, wf *factory.WatchFactory,
 		lspIngressDenyCache:      make(map[string]int),
 		lspEgressDenyCache:       make(map[string]int),
 		lspMutex:                 &sync.Mutex{},
+		lsMutex:                  &sync.Mutex{},
 		gatewayCache:             make(map[string]string),
 		loadbalancerClusterCache: make(map[string]string),
 		loadbalancerGWCache:      make(map[string]string),
@@ -108,7 +113,8 @@ func (oc *Controller) Run() error {
 		oc.portGroupSupport = true
 	}
 
-	for _, f := range []func() error{oc.WatchPods, oc.WatchServices, oc.WatchEndpoints, oc.WatchNamespaces, oc.WatchNetworkPolicy} {
+	for _, f := range []func() error{oc.WatchPods, oc.WatchServices, oc.WatchEndpoints, oc.WatchNamespaces,
+		oc.WatchNetworkPolicy, oc.WatchNodes} {
 		if err := f(); err != nil {
 			return err
 		}
@@ -239,5 +245,25 @@ func (oc *Controller) WatchNamespaces() error {
 			return
 		},
 	}, oc.syncNamespaces)
+	return err
+}
+
+// WatchNodes starts the watching of node resource and calls
+// back the appropriate handler logic
+func (oc *Controller) WatchNodes() error {
+	_, err := oc.watchFactory.AddNodeHandler(cache.ResourceEventHandlerFuncs{
+		AddFunc:    func(obj interface{}) {},
+		UpdateFunc: func(old, new interface{}) {},
+		DeleteFunc: func(obj interface{}) {
+			node := obj.(*kapi.Node)
+			logrus.Debugf("Delete event for Node %q. Removing the node from "+
+				"various caches", node.Name)
+
+			oc.lsMutex.Lock()
+			delete(oc.gatewayCache, node.Name)
+			delete(oc.logicalSwitchCache, node.Name)
+			oc.lsMutex.Unlock()
+		},
+	}, nil)
 	return err
 }
