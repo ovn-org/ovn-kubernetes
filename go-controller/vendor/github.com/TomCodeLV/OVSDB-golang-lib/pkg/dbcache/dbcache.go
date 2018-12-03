@@ -211,6 +211,16 @@ func deepCopy(data interface{}) interface{} {
 	}
 }
 
+// GetList is used to retrieve data from cache data structure and deep copy it.
+// Cache structure: Data[table][index_type][index_val][column]
+//
+// Arguments is used as keys in order as in structure:
+// first - table name of interest
+// second - index type of interest, for example "uuid", "name", ...
+// third - index value, for example particular item name
+// fourth - column name, for example "external_ids"
+//
+// Any amount of arguments can be provided
 func (cache *Cache) GetList(args ...string) []interface{} {
 	cache.RLock()
 	data := cache.getData(args...)
@@ -226,6 +236,16 @@ func (cache *Cache) GetList(args ...string) []interface{} {
 	return list
 }
 
+// GetMap is used to retrieve data from cache data structure and deep copy it.
+// Cache structure: Data[table][index_type][index_val][column]
+//
+// Arguments is used as keys in order as in structure:
+// first - table name of interest
+// second - index type of interest, for example "uuid", "name", ...
+// third - index value, for example particular item name
+// fourth - column name, for example "external_ids"
+//
+// Any amount of arguments can be provided
 func (cache *Cache) GetMap(args ...string) map[string]interface{} {
 	cache.RLock()
 	data := cache.getData(args...)
