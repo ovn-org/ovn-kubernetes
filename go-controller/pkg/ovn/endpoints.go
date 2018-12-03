@@ -28,8 +28,19 @@ func (ovn *Controller) AddEndpoints(ep *kapi.Endpoints) error {
 	tcpPortMap := make(map[string]lbEndpoints)
 	udpPortMap := make(map[string]lbEndpoints)
 	for _, s := range ep.Subsets {
-		for _, ip := range s.Addresses {
+		for _, addr := range s.Addresses {
+			if addr.IP == "" {
+				logrus.Warningf("ignoring empty endpoint %s/%s subset address",
+					ep.Namespace, ep.Name)
+				continue
+			}
 			for _, port := range s.Ports {
+				if port.Port == 0 {
+					logrus.Warningf("ignoring invalid endpoint %s/%s port %s",
+						ep.Namespace, ep.Name, port.Name)
+					continue
+				}
+
 				var ips []string
 				var portMap map[string]lbEndpoints
 				if port.Protocol == kapi.ProtocolUDP {
@@ -42,7 +53,7 @@ func (ovn *Controller) AddEndpoints(ep *kapi.Endpoints) error {
 				} else {
 					ips = make([]string, 0)
 				}
-				ips = append(ips, ip.IP)
+				ips = append(ips, addr.IP)
 				portMap[port.Name] = lbEndpoints{IPs: ips, Port: port.Port}
 			}
 		}
