@@ -106,6 +106,22 @@ func dialNB() (*ovsdb.OVSDB, *dbcache.Cache) {
 			},
 		})
 
+		// fallback for older version
+		if err != nil && err.Error() == "syntax error: no table named Port_Group ()" {
+			tmpCache, err = db.Cache(ovsdb.Cache{
+				Schema: "OVN_Northbound",
+				Tables: map[string][]string{
+					"Logical_Switch":      {"_uuid", "name", "ports", "acls", "external_ids"},
+					"Logical_Switch_Port": {"_uuid", "name", "external_ids", "addresses", "dynamic_addresses"},
+					"ACL": {"_uuid", "external_ids", "match", "action"},
+				},
+				Indexes: map[string][]string{
+					"Logical_Switch_Port": {"name"},
+					"Logical_Switch":      {"name"},
+				},
+			})
+		}
+
 		if err == nil {
 			*nbCache = *tmpCache
 			return nil
