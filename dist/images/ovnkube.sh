@@ -501,6 +501,7 @@ ovn-controller () {
 
   echo "=============== ovn-controller"
   rm -f /var/run/ovn-kubernetes/cni/*
+  rm -f /var/run/openvswitch/ovn-controller.*.ctl
   /usr/share/openvswitch/scripts/ovn-ctl --no-monitor start_controller \
     ${ovn_controller_opts}
   echo "=============== ovn-controller ========== running"
@@ -605,6 +606,7 @@ start_ovn () {
   wait_for_northdb
   echo "=============== start ovn-controller"
   rm -f /var/run/ovn-kubernetes/cni/*
+  rm -f /var/run/openvswitch/ovn-controller.*.ctl
   /usr/share/openvswitch/scripts/ovn-ctl --no-monitor start_controller \
     ${ovn_controller_opts}
 
