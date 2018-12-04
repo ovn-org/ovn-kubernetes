@@ -3,12 +3,18 @@ export OUT_DIR
 PREFIX ?= ${DESTDIR}/usr
 BINDIR ?= ${PREFIX}/bin
 CNIBINDIR ?= ${DESTDIR}/opt/cni/bin
+GCFLAGS ?=
+export GCFLAGS
 
 .PHONY: all build check test
 
 # Example:
 #   make
 #   make all
+#   make all GCFLAGS="-N -l"
+#       (disables compiler optimization and inlining to aid source debugging tools
+#        like delve)
+
 
 all build:
 	hack/build-go.sh cmd/ovnkube/ovnkube.go

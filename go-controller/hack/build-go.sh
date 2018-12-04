@@ -18,7 +18,7 @@ build_binaries() {
     export GOBIN="${OVN_KUBE_OUTPUT_BINPATH}"
 
     # Add a buildid to the executable - needed by rpmbuild
-    go install -ldflags "-B 0x$(head -c20 /dev/urandom|od -An -tx1|tr -d ' \n')" "${OVN_KUBE_BINARIES[@]}";
+    go install -gcflags "${GCFLAGS}" -ldflags "-B 0x$(head -c20 /dev/urandom|od -An -tx1|tr -d ' \n')" "${OVN_KUBE_BINARIES[@]}";
 }
 
 build_windows_binaries() {
