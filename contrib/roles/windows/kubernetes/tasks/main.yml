@@ -1,64 +1,60 @@
 ---
-- name: Kubernetes | include global vars for minions
+- name: Kubernetes | Include global vars for minions
   include_vars: "{{ansible_tmp_dir}}/generated_global_vars.yml"
   when: not master
 
-- name: Kubernetes | include vars
+- name: Kubernetes | Include vars
   include_vars: "{{ ansible_os_family|lower }}.yml"
-  tags:
-    - facts
 
-- name: Kubernetes | fetch network details
+- name: Kubernetes | Fetch network details
   include_tasks: set_ip_facts.yml
 
-# We need to start kubelet in order to be able to retrieve the ovn_host_subnet from kubernetes
-# node annotations
+# We need to start kubelet in order to be able to retrieve the ovn_host_subnet
+# from kubernetes node annotations
 - name: Kubernetes | Register and start kubelet service
   include_tasks: ./start_kubelet.yml
 
 - name: Kubernetes | Fetch OVN subnet for the node
   include_tasks: ./get_ovn_subnet.yml
-  tags:
-    - facts
 
-- name: Kubernetes | check if sdn is already set up
-  win_shell: (Get-HNSNetwork | where {$_.type -eq "transparent"}).ID
-  register: hns_net_id_out
-  changed_when: false
-
-- name: Kubernetes | set hns_exists
-  set_fact:
-    hns_exists: "{{ false if hns_net_id_out.stdout == '' else true}}"
-
-- name: Kubernetes | setup sdn
+# This will create the HNS network if it doesn't exist, or get its HNS id if
+# it was already previously created. The variable "hns_net_id" is set at the
+# end of the Setup SDN task.
+- name: Kubernetes | Setup SDN
   include_tasks: ./setup_sdn.yml
-  when: not hns_exists
 
-- name: Kubernetes | Check powershell execution policy
-  win_shell: Get-ExecutionPolicy
-  register: execution_policy
-  changed_when: false
+- name: Kubernetes | OVS HNS network setup
+  include_tasks: ./setup_ovs_hns.yml
 
-- name: Kubernetes | Set execution_policy_required variable
-  set_fact:
-    execution_policy_required: "{{ true if execution_policy.stdout_lines[0] == 'Restricted' else false}}"
+- name: Kubernetes | Configure the Windows firewall
+  block:
+    - name: Disable firewall (only for testing environments)
+      win_command: NetSh Advfirewall set allprofiles state off
+      when: firewall.disable_completely == True
 
-- name: Kubernetes | Enable unrestricted execution policy for powershell scripts
-  win_shell: Set-ExecutionPolicy -ExecutionPolicy Unrestricted -Force
-  changed_when: false
-  when: execution_policy_required
+    - name: Enable firewall (for production environments)
+      win_command: NetSh Advfirewall set allprofiles state on
+      when: firewall.disable_completely == False
 
-- name: Kubernetes | OVS Docker network setup
-  include_tasks: ./setup_ovs_docker.yml
-
-- name: Kubernetes | refresh network details
-  include_tasks: set_ip_facts.yml
+    - name: "Enable firewall rules"
+      win_shell: |
+        $ErrorActionPreference = "Stop"
+        $rule = Get-NetFirewallRule -Name "{{ item['name'] }}" -ErrorAction SilentlyContinue
+        if($rule) {
+            # Delete existing rule to re-create it with latest config
+            Remove-NetFirewallRule -InputObject $rule
+        }
+        New-NetFirewallRule -Enabled True -Action Allow `
+                            -Name "{{ item['name'] }}" -DisplayName "{{ item['name'] }}" `
+                            -Protocol "{{ item['protocol'] }}" -LocalPort "{{ item['port'] }}" `
+                            -Direction "{{ item['direction'] }}" 
+      with_items: "{{ firewall['rules'] }}"
+      when: firewall.disable_completely == False
 
 - name: Kubernetes | Check ping to OVN gateway
-  win_shell: ping {{OVN_GATEWAY_IP}} -n 1
+  win_shell: ping {{ ovn_gateway_ip }} -n 1
   register: ping_ovn_gateway
   ignore_errors: true
-  changed_when: false
 
 - name: Kubernetes | Check if minion-init has executed already
   block:
@@ -71,18 +67,12 @@
       include_tasks: ./run_minion_init.yml
   when: ping_ovn_gateway.rc != 0
 
-- name: Kubernetes | Change to restricted execution policy for powershell scripts
-  win_shell: Set-ExecutionPolicy -ExecutionPolicy Restricted -Force
-  changed_when: false
-  when: execution_policy_required
-
 # There is no infra container for Windows Server, this creates a custom
 # infra container
 - name: Kubernetes | Check if infra container exists
-  win_shell: "docker image inspect {{kubernetes_info.infracontainername}}"
+  win_shell: "docker image inspect {{ kubernetes_info.infracontainername }}"
   register: infra_inspect
   failed_when: infra_inspect.rc != 0 and infra_inspect.rc != 1
-  changed_when: false
   when: ansible_kernel in supported_versions_by_the_playbook
 
 - include_tasks: ./create_infracontainer.yml
@@ -117,4 +107,4 @@
           beta.kubernetes.io/os: windows
           kubernetes.io/hostname: {{ansible_hostname|lower}}
   delegate_to: "{{ item }}"
-  with_items: "{{groups['kube-master']}}"
+  with_items: "{{ groups['kube-master'] }}"

@@ -47,3 +47,6 @@
 - name: Windows | Reboot the node
   win_reboot:
   when: reboot_required
+
+- name: Windows | Fetch Windows utils
+  include_tasks: ./fetch_utils.yml

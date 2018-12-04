@@ -20,7 +20,27 @@ Currently supported Windows nodes:
 - Windows Server 2016 build version 1709 (OS Version 10.0.16299.0)
 - Windows Server 2016 build version 1803 (OS Version 10.0.17134.0)
 
-Note: minimum required ansible version is 2.4.2.0
+Note: Minimum required ansible version is 2.4.2.0. The recommended version is 2.7.2.
+
+## Ports to be opened in public clouds
+
+The following ports need to be opened if we access the cluster machines via the public address.
+
+#### OVN related ports
+
+- GENEVE: UDP `6081` or alternatively with STT: TCP `7471`
+- OVN Database Ports: TCP `6641 - 6642`
+
+#### Kubernetes ports
+
+- Kubernetes service ports: UDP and TCP `30000 - 32767`
+- Kubelet: TCP `10250 - 10252`
+- Kubernetes API: TCP `8080` for HTTP and TCP `443` for HTTPS
+
+#### Ansible related ports
+
+- WinRM via HTTPS: TCP `5986` (for HTTP also TCP `5985`)
+- SSH: TCP `22`
 
 ## Work in progress
 
@@ -31,8 +51,6 @@ Note: minimum required ansible version is 2.4.2.0
 ### Known issues
 
 - Windows containers do not support IPv6 at the moment. You can read more [here](https://docs.microsoft.com/en-us/virtualization/windowscontainers/container-networking/architecture#unsupported-features-and-network-options)
-
-- Warning: the firewall on Windows gets disabled for this test
 
 ## Ansible requirements
 

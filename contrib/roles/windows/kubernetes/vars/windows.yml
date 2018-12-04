@@ -1,9 +1,11 @@
 ---
-install_info:
-  install_path: C:/kubernetes
-
 sdn_info:
   sdn_network_name: external
+  # This should be set if you want a preferred network interface for the SDN setup.
+  # If this is not set, the interface with the default gateway configured is chosen.
+  # sdn_preferred_nic_name: "Ethernet"
+
+ovs_cmd_timeout: 30
 
 kubernetes_info:
   MASTER_IP: "{{MASTER_IP}}"
@@ -15,6 +17,41 @@ kubernetes_info:
   K8S_API_SERVICE_IP: "{{K8S_API_SERVICE_IP | default('10.0.9.1')}}"
   infracontainername: "ovnkubernetes/pause"
 
-host_info:
-  username: "{{ ansible_user }}"
-  password: "{{ ansible_password }}"
+firewall:
+  disable_completely: false  # WARNING: Do NOT enable this in production. Used only for testing purposes.
+
+  rules:
+    - name: "Open vSwitch OVN GENEVE Port"
+      protocol: "UDP"
+      port: 6081
+      direction: "Inbound"
+
+    - name: "Open vSwitch OVN Database Ports"
+      protocol: "TCP"
+      port: 6641-6642
+      direction: "Inbound"
+
+    - name: "Kubernetes TCP Service Ports"
+      protocol: "TCP"
+      port: 30000-32767
+      direction: "Inbound"
+
+    - name: "Kubernetes UDP Service Ports"
+      protocol: "UDP"
+      port: 30000-32767
+      direction: "Inbound"
+
+    - name: "Kubernetes Kubelet Ports"
+      protocol: "TCP"
+      port: 10250-10252
+      direction: "Inbound"
+
+    - name: "Kubernetes HTTP API Port"
+      protocol: "TCP"
+      port: 8080
+      direction: "Inbound"
+
+    - name: "Kubernetes HTTPS API Port"
+      protocol: "TCP"
+      port: 443
+      direction: "Inbound"

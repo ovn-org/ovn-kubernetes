@@ -2,19 +2,19 @@
 # Need to generate infra container image
 - name: Kubernetes infracontainer | Delete Dockerfile
   win_file:
-    path: "{{ install_info.install_path }}/Dockerfile"
+    path: "{{ install_path }}/Dockerfile"
     state: absent
 - name: Kubernetes infracontainer | Create Dockerfile
   win_lineinfile:
-    path: "{{ install_info.install_path }}/Dockerfile"
+    path: "{{ install_path }}/Dockerfile"
     create: yes
     line: |
-      FROM microsoft/nanoserver:{{windows_container_tag}}
+      FROM microsoft/nanoserver:{{ windows_container_tag }}
 
       CMD ping 127.0.0.1 -t
     newline: unix
 
-- name: Kubernetes infracontainer | Create container {{kubernetes_info.infracontainername}}
+- name: Kubernetes infracontainer | Create container {{ kubernetes_info.infracontainername }}
   win_shell: |
-    cd {{ install_info.install_path }}
-    docker image build -t {{kubernetes_info.infracontainername}} .
+    cd {{ install_path }}
+    docker image build -t {{ kubernetes_info.infracontainername }} .

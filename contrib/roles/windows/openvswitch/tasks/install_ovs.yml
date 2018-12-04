@@ -11,6 +11,3 @@
     wait: yes
     state: present
     arguments: ADDLOCAL="OpenvSwitchCLI,OpenvSwitchDriver,OVNHost"
-
-- name: OVS | Restarting after OVS install
-  win_reboot:
