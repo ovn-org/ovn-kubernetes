@@ -7,6 +7,10 @@ import (
 	"net"
 )
 
+func isServiceIPSet(service *kapi.Service) bool {
+	return service.Spec.ClusterIP != kapi.ClusterIPNone && service.Spec.ClusterIP != ""
+}
+
 func (ovn *Controller) syncServices(services []interface{}) {
 	// For all clusterIP in k8s, we will populate the below slice with
 	// IP:port. In OVN's database those are the keys. We need to
@@ -39,7 +43,9 @@ func (ovn *Controller) syncServices(services []interface{}) {
 			continue
 		}
 
-		if service.Spec.ClusterIP == "" {
+		if !isServiceIPSet(service) {
+			logrus.Debugf("Skipping service %s due to clusterIP = %q",
+				service.Name, service.Spec.ClusterIP)
 			continue
 		}
 
@@ -164,7 +170,7 @@ func (ovn *Controller) syncServices(services []interface{}) {
 }
 
 func (ovn *Controller) deleteService(service *kapi.Service) {
-	if service.Spec.ClusterIP == "" || len(service.Spec.Ports) == 0 {
+	if !isServiceIPSet(service) || len(service.Spec.Ports) == 0 {
 		return
 	}
 
