@@ -850,14 +850,20 @@ func (oc *Controller) addNetworkPolicyPortGroup(policy *knet.NetworkPolicy) {
 		oc.localPodAddACL(np, egress)
 
 		for _, toJSON := range egressJSON.To {
-			if toJSON.NamespaceSelector != nil {
+			if toJSON.NamespaceSelector != nil && toJSON.PodSelector != nil {
+				// For each rule that contains both peer namespace selector and
+				// peer pod selector, we create a watcher for each matching namespace
+				// that populates the addressSet
+				oc.handlePeerNamespaceAndPodSelector(policy,
+					toJSON.NamespaceSelector, toJSON.PodSelector,
+					hashedLocalAddressSet, peerPodAddressMap, egress, np)
+
+			} else if toJSON.NamespaceSelector != nil {
 				// For each peer namespace selector, we create a watcher that
 				// populates egress.peerAddressSets
 				go oc.handlePeerNamespaceSelector(policy,
 					toJSON.NamespaceSelector, egress, np)
-			}
-
-			if toJSON.PodSelector != nil {
+			} else if toJSON.PodSelector != nil {
 				// For each peer pod selector, we create a watcher that
 				// populates the addressSet
 				oc.handlePeerPodSelector(policy, toJSON.PodSelector,
