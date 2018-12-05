@@ -967,14 +967,20 @@ func (oc *Controller) addNetworkPolicyOld(policy *knet.NetworkPolicy) {
 			if toJSON.IPBlock != nil {
 				egress.addIPBlock(toJSON.IPBlock)
 			}
-			if toJSON.NamespaceSelector != nil {
+
+			if toJSON.NamespaceSelector != nil && toJSON.PodSelector != nil {
+				// For each rule that contains both peer namespace selector and
+				// peer pod selector, we create a watcher for each matching namespace
+				// that populates the addressSet
+				oc.handlePeerNamespaceAndPodSelectorOld(policy,
+					toJSON.NamespaceSelector, toJSON.PodSelector,
+					hashedLocalAddressSet, peerPodAddressMap, egress, np)
+			} else if toJSON.NamespaceSelector != nil {
 				// For each peer namespace selector, we create a watcher that
 				// populates egress.peerAddressSets
 				oc.handlePeerNamespaceSelectorOld(policy,
 					toJSON.NamespaceSelector, egress, np)
-			}
-
-			if toJSON.PodSelector != nil {
+			} else if toJSON.PodSelector != nil {
 				// For each peer pod selector, we create a watcher that
 				// populates the addressSet
 				oc.handlePeerPodSelectorOld(policy, toJSON.PodSelector,
