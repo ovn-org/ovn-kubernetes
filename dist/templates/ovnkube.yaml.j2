@@ -105,6 +105,8 @@ spec:
           readOnly: true
         - mountPath: /var/lib/openvswitch/
           name: host-var-lib-ovs
+        - mountPath: /var/log/openvswitch/
+          name: host-var-log-ovs
         - mountPath: /var/run/openvswitch/
           name: host-var-run-ovs
        #  readOnly: false
@@ -200,6 +202,8 @@ spec:
           readOnly: true
         - mountPath: /var/lib/openvswitch/
           name: host-var-lib-ovs
+        - mountPath: /var/log/openvswitch/
+          name: host-var-log-ovs
         - mountPath: /var/run/openvswitch/
           name: host-var-run-ovs
        #  readOnly: false
@@ -291,6 +295,9 @@ spec:
       - name: host-var-lib-ovs
         hostPath:
           path: /var/lib/openvswitch
+      - name: host-var-log-ovs
+        hostPath:
+          path: /var/log/openvswitch
       - name: host-run-ovs
         hostPath:
           path: /run/openvswitch

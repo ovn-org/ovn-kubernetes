@@ -54,3 +54,9 @@
     file:
       state: absent
       name: /etc/cni/net.d/10-ovn-kubernetes.conf
+
+  - name: Remove old log files
+    shell: rm -rf /var/log/openvswitch/ovn*log /var/log/openvswitch/ovs*log
+
+  - name: remove old unix sockets
+    shell: rm -rf /var/run/openvswitch/ovn*ctl /var/run/openvswitch/ovn*pid /var/run/openvswitch/ovs*ctl /var/run/openvswitch/ovs*pid
