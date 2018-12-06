@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"github.com/sirupsen/logrus"
 	"net"
+	"runtime"
 	"strings"
 )
 
@@ -318,6 +319,12 @@ func GatewayInit(clusterIPSubnet []string, nodeName, nicIP, physicalInterface,
 		}
 		if macAddress == "" {
 			return fmt.Errorf("No mac_address found for the bridge-interface")
+		}
+		if runtime.GOOS == windowsOS && macAddress == "00:00:00:00:00:00" {
+			macAddress, err = FetchIfMacWindows(bridgeInterface)
+			if err != nil {
+				return err
+			}
 		}
 		stdout, stderr, err = RunOVSVsctl("set", "bridge",
 			bridgeInterface, "other-config:hwaddr="+macAddress)
