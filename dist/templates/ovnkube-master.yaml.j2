@@ -73,6 +73,8 @@ spec:
           name: host-var-lib-ovs
         - mountPath: /var/lib/openvswitch/
           name: host-var-lib-ovs
+        - mountPath: /var/log/openvswitch/
+          name: host-var-log-ovs
         - mountPath: /var/run/openvswitch/
           name: host-var-run-ovs
        #  readOnly: false
@@ -97,6 +99,8 @@ spec:
         env:
         - name: OVN_DAEMONSET_VERSION
           value: "3"
+        - name: OVN_LOG_NORTHD
+          value: "-vconsole:info"
         - name: OVN_NORTH
           valueFrom:
             configMapKeyRef:
@@ -170,6 +174,8 @@ spec:
           name: host-var-lib-ovs
         - mountPath: /var/lib/openvswitch/
           name: host-var-lib-ovs
+        - mountPath: /var/log/openvswitch/
+          name: host-var-log-ovs
         - mountPath: /var/run/openvswitch/
           name: host-var-run-ovs
        #  readOnly: false
@@ -194,6 +200,8 @@ spec:
         env:
         - name: OVN_DAEMONSET_VERSION
           value: "3"
+        - name: OVN_LOG_NB
+          value: "-vconsole:info -vfile:info"
         - name: OVN_NORTH
           valueFrom:
             configMapKeyRef:
@@ -267,6 +275,8 @@ spec:
           name: host-var-lib-ovs
         - mountPath: /var/lib/openvswitch/
           name: host-var-lib-ovs
+        - mountPath: /var/log/openvswitch/
+          name: host-var-log-ovs
         - mountPath: /var/run/openvswitch/
           name: host-var-run-ovs
        #  readOnly: false
@@ -291,6 +301,8 @@ spec:
         env:
         - name: OVN_DAEMONSET_VERSION
           value: "3"
+        - name: OVN_LOG_SB
+          value: "-vconsole:info -vfile:info"
         - name: OVN_NORTH
           valueFrom:
             configMapKeyRef:
@@ -363,6 +375,8 @@ spec:
           name: host-var-lib-ovs
         - mountPath: /var/lib/openvswitch/
           name: host-var-lib-ovs
+        - mountPath: /var/log/openvswitch/
+          name: host-var-log-ovs
         - mountPath: /var/run/openvswitch/
           name: host-var-run-ovs
        #  readOnly: false
@@ -456,6 +470,9 @@ spec:
       - name: host-var-lib-ovs
         hostPath:
           path: /var/lib/openvswitch
+      - name: host-var-log-ovs
+        hostPath:
+          path: /var/log/openvswitch
       - name: host-var-run-ovs
         hostPath:
           path: /var/run/openvswitch

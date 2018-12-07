@@ -49,6 +49,9 @@
 # OVN_CONTROLLER_OPTS - the options for ovn-ctl
 # OVN_NORTHD_OPTS - the options for the ovn northbound db
 # OVNKUBE_LOGLEVEL - log level for ovnkube (0..5, default 4)
+# OVN_LOG_NORTHD - log level (ovn-ctl default: -vconsole:emer -vsyslog:err -vfile:info)
+# OVN_LOG_NB - log level (ovn-ctl default: -vconsole:off -vfile:info)
+# OVN_LOG_SB - log level (ovn-ctl default: -vconsole:off -vfile:info)
 
 # The argument to the command is the operation to be performed
 # ovn-northd ovn-master ovn-controller ovn-node display display_env ovn_debug
@@ -58,6 +61,16 @@ cmd=${1:-"start-ovn"}
 # There is a single image for both master nodes and compute nodes
 # When OVN_MASTER is true, start the master daemons
 ovn_master=${OVN_MASTER:-"false"}
+
+# ovn daemon log levels
+ovn_log_northd=${OVN_LOG_NORTHD:-"-vconsole:info"}
+ovn_log_nb=${OVN_LOG_NB:-"-vconsole:info"}
+ovn_log_sb=${OVN_LOG_SB:-"-vconsole:info"}
+
+logdir=/var/log/openvswitch
+logpost=$(date +%F-%T)
+ovn_nb_log_file=${logdir}/ovsdb-server-nb-${logpost}.log
+ovn_sb_log_file=${logdir}/ovsdb-server-sb-${logpost}.log
 
 # ovnkube.sh version (update when script changes - v.x.y)
 ovnkube_version="3"
@@ -90,10 +103,12 @@ ovn_northd_opts=${OVN_NORTHD_OPTS:-"--db-nb-sock=/var/run/openvswitch/ovnnb_db.s
 
 # ovn-controller
 #OVN_CONTROLLER_OPTS="--ovn-controller-log=-vconsole:emer --vsyslog:err -vfile:info"
-ovn_controller_opts=${OVN_CONTROLLER_OPTS:-"--ovn-controller-log=-vconsole:emer"}
+ovn_controller_opts=${OVN_CONTROLLER_OPTS:-"--ovn-controller-log=-vconsole:info"}
 
 # set the log level for ovnkube
 ovnkube_loglevel=${OVNKUBE_LOGLEVEL:-4}
+
+
 
 # =========================================
 
@@ -134,9 +149,10 @@ wait_for_ovs () {
   done
 }
 
+
 # ovn must be up before ovnkube --master
 # This waits for northd to come up
-wait_for_northdb () {
+wait_for_northd () {
 
   ovn_nbdb_test=$(echo ${OVN_NORTH} | sed 's;//;;')
   # Wait for ovn-northd to come up
@@ -224,14 +240,16 @@ display_file () {
 display () {
   echo "==================== display for ${ovn_host}  =================== "
   date
-  display_file "nb-ovsdb" /var/run/openvswitch/ovnnb_db.pid /var/log/openvswitch/ovsdb-server-nb.log
-  display_file "sb-ovsdb" /var/run/openvswitch/ovnsb_db.pid /var/log/openvswitch/ovsdb-server-sb.log
-  display_file "run-ovn-northd" /var/run/openvswitch/ovn-northd.pid /var/log/openvswitch/ovn-northd.log
-  display_file "ovn-master" /var/run/openvswitch/ovnkube-master.pid /var/log/openvswitch/ovnkube-master.log
-  display_file "ovs-vswitchd" /var/run/openvswitch/ovs-vswitchd.pid /var/log/openvswitch/ovs-vswitchd.log
-  display_file "ovsdb-server" /var/run/openvswitch/ovsdb-server.pid /var/log/openvswitch/ovsdb-server.log
-  display_file "ovn-controller" /var/run/openvswitch/ovn-controller.pid /var/log/openvswitch/ovn-controller.log
-  display_file "ovnkube" /var/run/openvswitch/ovnkube.pid /var/log/openvswitch/ovnkube.log
+  latest=$(ls -t ${logdir}/ovsdb-server-nb-*.log | head -1)
+  display_file "nb-ovsdb" /var/run/openvswitch/ovnnb_db.pid ${latest}
+  latest=$(ls -t ${logdir}/ovsdb-server-sb-*.log | head -1)
+  display_file "sb-ovsdb" /var/run/openvswitch/ovnsb_db.pid ${latest}
+  display_file "run-ovn-northd" /var/run/openvswitch/ovn-northd.pid ${logdir}/ovn-northd.log
+  display_file "ovn-master" /var/run/openvswitch/ovnkube-master.pid ${logdir}/ovnkube-master.log
+  display_file "ovs-vswitchd" /var/run/openvswitch/ovs-vswitchd.pid ${logdir}/ovs-vswitchd.log
+  display_file "ovsdb-server" /var/run/openvswitch/ovsdb-server.pid ${logdir}/ovsdb-server.log
+  display_file "ovn-controller" /var/run/openvswitch/ovn-controller.pid ${logdir}/ovn-controller.log
+  display_file "ovnkube" /var/run/openvswitch/ovnkube.pid ${logdir}/ovnkube.log
 }
 
 setup_cni () {
@@ -382,17 +400,12 @@ nb-ovsdb () {
   # this is only run on masters in a separate container
   # Make sure /var/lib/openvswitch exists
   mkdir -p /var/lib/openvswitch
-  echo "=============== run_nb_ovsdb ========== MASTER ONLY"
-  /usr/share/openvswitch/scripts/ovn-ctl run_nb_ovsdb --no-monitor &
-  echo "=============== run_nb_ovsdb ========== running"
 
-  sleep 10
-  tail --follow=name /var/log/openvswitch/ovsdb-server-nb.log &
-  nb_tail_pid=$!
-
-  wait_for_pid /var/run/openvswitch/ovnnb_db.pid
-
-  pid_health /var/run/openvswitch/ovnnb_db.pid ${nb_tail_pid}
+  echo "=============== run nb_ovsdb ========== MASTER ONLY"
+  echo "ovn_log_nb=${ovn_log_nb} ovn_nb_log_file=${ovn_nb_log_file}"
+  /usr/share/openvswitch/scripts/ovn-ctl run_nb_ovsdb --no-monitor \
+  --ovn-nb-logfile=${ovn_nb_log_file} --ovn-nb-log="${ovn_log_nb}"
+  echo "=============== run nb_ovsdb ========== terminated"
 }
 
 # v3 - run sb_ovsdb in a separate container
@@ -401,18 +414,14 @@ sb-ovsdb () {
   # this is only run on masters in a separate container
   # Make sure /var/lib/openvswitch exists
   mkdir -p /var/lib/openvswitch
-  echo "=============== run_sb_ovsdb ========== MASTER ONLY"
-  /usr/share/openvswitch/scripts/ovn-ctl run_sb_ovsdb --no-monitor &
-  echo "=============== run_sb_ovsdb ========== running"
 
-  sleep 10
-  tail --follow=name /var/log/openvswitch/ovsdb-server-sb.log &
-  sb_tail_pid=$!
-
-  wait_for_pid /var/run/openvswitch/ovnsb_db.pid
-
-  pid_health /var/run/openvswitch/ovnsb_db.pid ${sb_tail_pid}
+  echo "=============== run sb_ovsdb ========== MASTER ONLY"
+  echo "ovn_log_sb=${ovn_log_sb} ovn_sb_log_file=${ovn_sb_log_file}"
+  /usr/share/openvswitch/scripts/ovn-ctl run_sb_ovsdb --no-monitor \
+  --ovn-sb-logfile=${ovn_sb_log_file} --ovn-sb-log="${ovn_log_sb}"
+  echo "=============== run sb_ovsdb ========== terminated"
 }
+
 
 # v3 - Runs northd. Does not run nb_ovsdb, and sb_ovsdb
 run-ovn-northd () {
@@ -420,12 +429,18 @@ run-ovn-northd () {
   # this is only run on masters
   # Make sure /var/lib/openvswitch exists
   mkdir -p /var/lib/openvswitch
-  # run_ovn_northd - master node only
+
+  echo "=============== ovnkube-master (wait for ovs) ========== MASTER ONLY"
+  wait_for_ovs
+
   echo "=============== run_ovn_northd ========== MASTER ONLY"
-  echo OVN_NORTH=${OVN_NORTH}  OVN_SOUTH==${OVN_SOUTH} ovn_northd_opts=${ovn_northd_opts}
+  echo "OVN_NORTH=${OVN_NORTH}  OVN_SOUTH==${OVN_SOUTH}"
+  echo "ovn_northd_opts=${ovn_northd_opts}"
+  echo "ovn_log_northd=${ovn_log_northd}"
   # no monitor (and no detach), start nb_ovsdb and sb_ovsdb in separate containers
   /usr/share/openvswitch/scripts/ovn-ctl start_northd \
     --no-monitor --ovn-manage-ovsdb=no \
+    --ovn-northd-log=${ovn_log_northd} \
     --db-nb-addr=${OVN_NORTH} --db-sb-addr=${OVN_SOUTH} \
     ${ovn_northd_opts}
   echo "=============== run_ovn_northd ========== RUNNING"
@@ -448,7 +463,7 @@ ovn-northd () {
     mkdir -p /var/lib/openvswitch
     # ovn-northd - master node only
     echo "=============== ovn-northd ========== MASTER ONLY"
-    echo OVN_NORTH=${OVN_NORTH}  OVN_SOUTH==${OVN_SOUTH} ovn_northd_opts=${ovn_northd_opts}
+    echo "OVN_NORTH=${OVN_NORTH}  OVN_SOUTH==${OVN_SOUTH} ovn_northd_opts=${ovn_northd_opts}"
     /usr/share/openvswitch/scripts/ovn-ctl start_northd \
       --db-nb-addr=${OVN_NORTH} --db-sb-addr=${OVN_SOUTH} \
       ${ovn_northd_opts}
@@ -466,8 +481,8 @@ ovn-master () {
   echo "=============== ovn-master (wait for ovs) ========== MASTER ONLY"
   wait_for_ovs
 
-  echo "=============== ovn-master (wait for northdb) ========== MASTER ONLY"
-  wait_for_northdb
+  echo "=============== ovn-master (wait for northd) ========== MASTER ONLY"
+  wait_for_northd
 
   echo "=============== ovn-master ========== MASTER ONLY"
   /usr/bin/ovnkube \
@@ -496,11 +511,9 @@ ovn-controller () {
   echo "=============== ovn-controller - (wait for ovs)"
   wait_for_ovs
 
-  echo "=============== ovn-controller - (wait for northdb)"
-  wait_for_northdb
-
   echo "=============== ovn-controller"
   rm -f /var/run/ovn-kubernetes/cni/*
+  rm -f /var/run/openvswitch/ovn-controller.*.ctl
   /usr/share/openvswitch/scripts/ovn-ctl --no-monitor start_controller \
     ${ovn_controller_opts}
   echo "=============== ovn-controller ========== running"
@@ -522,8 +535,8 @@ ovn-node () {
   echo "=============== ovn-node - (wait for ovs)"
   wait_for_ovs
 
-  echo "=============== ovn-node - (wait for northdb)"
-  wait_for_northdb
+  echo "=============== ovn-node - (wait for northd)"
+  wait_for_northd
 
   echo "=============== ovn-node"
   # TEMP HACK - WORKAROUND
@@ -581,13 +594,14 @@ start_ovn () {
     # ovn-northd - master node only
     echo "=============== start ovn-northd ========== MASTER ONLY"
     echo OVN_NORTH=${OVN_NORTH}  OVN_SOUTH==${OVN_SOUTH} ovn_northd_opts=${ovn_northd_opts}
+    rm -f /var/run/openvswitch/ovn-northd.*.ctl
     /usr/share/openvswitch/scripts/ovn-ctl start_northd --no-monitor \
       --db-nb-addr=${OVN_NORTH} --db-sb-addr=${OVN_SOUTH} \
       ${ovn_northd_opts}
 
     # ovn-master - master node only
     echo "=============== start ovn-master (wait for northbd) ========== MASTER ONLY"
-    wait_for_northdb
+    wait_for_northd
     echo "=============== start ovn-master ========== MASTER ONLY"
     /usr/bin/ovnkube \
       --init-master ${ovn_host} --net-controller \
@@ -601,8 +615,8 @@ start_ovn () {
   fi
 
   # ovn-controller - all nodes
-  echo "=============== start ovn-controller (wait for northdb)"
-  wait_for_northdb
+  echo "=============== start ovn-controller (wait for northd)"
+  wait_for_northd
   echo "=============== start ovn-controller"
   rm -f /var/run/ovn-kubernetes/cni/*
   /usr/share/openvswitch/scripts/ovn-ctl --no-monitor start_controller \
