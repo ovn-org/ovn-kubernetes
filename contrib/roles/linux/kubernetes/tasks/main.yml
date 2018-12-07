@@ -43,15 +43,14 @@
 
 - name: Kubernetes | Get Kubernetes binaries
   include_tasks: ./download_k8s_binaries.yml
-  when: binaries_missing or master
+  when: binaries_missing
 
 - name: Kubernetes | Fetch Kubernetes binaries to the ansible host
   include_tasks: ./fetch_k8s_binaries.yml
   when: binaries_missing
 
-- name: Kubernetes | Distribute binaries for minions
+- name: Kubernetes | Distribute binaries
   include_tasks: ./distribute_binaries.yml
-  when: minion
 
 - name: Kubernetes | Prepare master
   include_tasks: ./prepare_master.yml
