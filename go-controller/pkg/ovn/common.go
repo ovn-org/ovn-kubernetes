@@ -3,7 +3,8 @@ package ovn
 import (
 	"encoding/json"
 	"fmt"
-	util "github.com/openvswitch/ovn-kubernetes/go-controller/pkg/util"
+	"github.com/TomCodeLV/OVSDB-golang-lib/pkg/dbtransaction"
+	"github.com/TomCodeLV/OVSDB-golang-lib/pkg/helpers"
 	"github.com/sirupsen/logrus"
 	"hash/fnv"
 	"strconv"
@@ -37,69 +38,90 @@ func hashedPortGroup(s string) string {
 // namespaceName.suffix1.suffix2. .suffixN)
 func (oc *Controller) forEachAddressSetUnhashedName(iteratorFn func(
 	string, string, string)) error {
-	output, stderr, err := util.RunOVNNbctlHA("--data=bare", "--no-heading",
-		"--columns=external_ids", "find", "address_set")
-	if err != nil {
-		logrus.Errorf("Error in obtaining list of address sets from OVN: "+
-			"stdout: %q, stderr: %q err: %v", output, stderr, err)
-		return err
-	}
-	for _, addrSet := range strings.Fields(output) {
-		if !strings.HasPrefix(addrSet, "name=") {
+	for _, addrSet := range oc.ovnNbCache.GetMap("Address_Set", "uuid") {
+		externalIds := addrSet.(map[string]interface{})["external_ids"]
+		if externalIds == nil {
 			continue
 		}
-		addrSetName := addrSet[5:]
-		names := strings.Split(addrSetName, ".")
+		addrSetName := externalIds.(map[string]interface{})["name"]
+		if addrSetName == nil {
+			continue
+		}
+		names := strings.Split(addrSetName.(string), ".")
 		addrSetNamespace := names[0]
 		nameSuffix := ""
 		if len(names) >= 2 {
 			nameSuffix = names[1]
 		}
-		iteratorFn(addrSetName, addrSetNamespace, nameSuffix)
+		iteratorFn(addrSetName.(string), addrSetNamespace, nameSuffix)
 	}
+
 	return nil
 }
 
 func (oc *Controller) setAddressSet(hashName string, addresses []string) {
 	logrus.Debugf("setAddressSet for %s with %s", hashName, addresses)
 	if len(addresses) == 0 {
-		_, stderr, err := util.RunOVNNbctlHA("clear", "address_set",
-			hashName, "addresses")
+		var err error
+		retry := true
+		for retry {
+			txn := oc.ovnNBDB.Transaction("OVN_Northbound")
+			txn.Update(dbtransaction.Update{
+				Table: "Address_Set",
+				Where: [][]interface{}{{"name", "==", hashName}},
+				Row: map[string]interface{}{
+					"addresses": dbtransaction.GetNil(),
+				},
+			})
+			_, err, retry = txn.Commit()
+		}
 		if err != nil {
-			logrus.Errorf("failed to clear address_set, stderr: %q (%v)",
-				stderr, err)
+			logrus.Errorf("failed to clear address_set (%v)", err)
 		}
 		return
 	}
 
 	ips := strings.Join(addresses, " ")
-	_, stderr, err := util.RunOVNNbctlHA("set", "address_set",
-		hashName, fmt.Sprintf("addresses=%s", ips))
+	var err error
+	retry := true
+	for retry {
+		txn := oc.ovnNBDB.Transaction("OVN_Northbound")
+		txn.Update(dbtransaction.Update{
+			Table: "Address_Set",
+			Where: [][]interface{}{{"name", "==", hashName}},
+			Row: map[string]interface{}{
+				"addresses": ips,
+			},
+		})
+		_, err, retry = txn.Commit()
+	}
 	if err != nil {
-		logrus.Errorf("failed to set address_set, stderr: %q (%v)",
-			stderr, err)
+		logrus.Errorf("failed to set address_set (%v)", err)
 	}
 }
 
 func (oc *Controller) createAddressSet(name string, hashName string,
 	addresses []string) {
 	logrus.Debugf("createAddressSet with %s and %s", name, addresses)
-	addressSet, stderr, err := util.RunOVNNbctlHA("--data=bare",
-		"--no-heading", "--columns=_uuid", "find", "address_set",
-		fmt.Sprintf("name=%s", hashName))
-	if err != nil {
-		logrus.Errorf("find failed to get address set, stderr: %q (%v)",
-			stderr, err)
-		return
-	}
+	addressSet := oc.ovnNbCache.GetMap("Address_Set", "name", hashName)["uuid"]
 
 	// addressSet has already been created in the database and nothing to set.
-	if addressSet != "" && len(addresses) == 0 {
-		_, stderr, err = util.RunOVNNbctlHA("clear", "address_set",
-			hashName, "addresses")
+	if addressSet != nil && addressSet.(string) != "" && len(addresses) == 0 {
+		var err error
+		retry := true
+		for retry {
+			txn := oc.ovnNBDB.Transaction("OVN_Northbound")
+			txn.Update(dbtransaction.Update{
+				Table: "Address_Set",
+				Where: [][]interface{}{{"name", "==", hashName}},
+				Row: map[string]interface{}{
+					"addresses": dbtransaction.GetNil(),
+				},
+			})
+			_, err, retry = txn.Commit()
+		}
 		if err != nil {
-			logrus.Errorf("failed to clear address_set, stderr: %q (%v)",
-				stderr, err)
+			logrus.Errorf("failed to clear address_set (%v)", err)
 		}
 		return
 	}
@@ -107,42 +129,66 @@ func (oc *Controller) createAddressSet(name string, hashName string,
 	ips := strings.Join(addresses, " ")
 
 	// An addressSet has already been created. Just set addresses.
-	if addressSet != "" {
+	if addressSet != nil && addressSet.(string) != "" {
 		// Set the addresses
-		_, stderr, err = util.RunOVNNbctlHA("set", "address_set",
-			hashName, fmt.Sprintf("addresses=%s", ips))
+		var err error
+		retry := true
+		for retry {
+			txn := oc.ovnNBDB.Transaction("OVN_Northbound")
+			txn.Update(dbtransaction.Update{
+				Table: "Address_Set",
+				Where: [][]interface{}{{"name", "==", hashName}},
+				Row: map[string]interface{}{
+					"addresses": ips,
+				},
+			})
+			_, err, retry = txn.Commit()
+		}
 		if err != nil {
-			logrus.Errorf("failed to set address_set, stderr: %q (%v)",
-				stderr, err)
+			logrus.Errorf("failed to set address_set (%v)", err)
 		}
 		return
 	}
 
 	// addressSet has not been created yet. Create it.
-	if len(addresses) == 0 {
-		_, stderr, err = util.RunOVNNbctlHA("create", "address_set",
-			fmt.Sprintf("name=%s", hashName),
-			fmt.Sprintf("external-ids:name=%s", name))
-	} else {
-		_, stderr, err = util.RunOVNNbctlHA("create", "address_set",
-			fmt.Sprintf("name=%s", hashName),
-			fmt.Sprintf("external-ids:name=%s", name),
-			fmt.Sprintf("addresses=%s", ips))
+	var err error
+	row := map[string]interface{}{
+		"name": hashName,
+		"external_ids": helpers.MakeOVSDBMap(map[string]interface{}{
+			"name": name,
+		}),
+	}
+	if len(addresses) != 0 {
+		row["addresses"] = ips
+	}
+	retry := true
+	for retry {
+		txn := oc.ovnNBDB.Transaction("OVN_Northbound")
+		txn.Insert(dbtransaction.Insert{
+			Table: "Address_Set",
+			Row:   row,
+		})
+		_, err, retry = txn.Commit()
 	}
 	if err != nil {
-		logrus.Errorf("failed to create address_set %s, stderr: %q (%v)",
-			name, stderr, err)
+		logrus.Errorf("failed to create address_set %s (%v)", name, err)
 	}
 }
 
 func (oc *Controller) deleteAddressSet(hashName string) {
 	logrus.Debugf("deleteAddressSet %s", hashName)
-
-	_, stderr, err := util.RunOVNNbctlHA("--if-exists", "destroy",
-		"address_set", hashName)
+	var err error
+	retry := true
+	for retry {
+		txn := oc.ovnNBDB.Transaction("OVN_Northbound")
+		txn.Delete(dbtransaction.Delete{
+			Table: "Address_Set",
+			Where: [][]interface{}{{"name", "==", hashName}},
+		})
+		_, err, retry = txn.Commit()
+	}
 	if err != nil {
-		logrus.Errorf("failed to destroy address set %s, stderr: %q, (%v)",
-			hashName, stderr, err)
+		logrus.Errorf("failed to destroy address set %s (%v)", hashName, err)
 		return
 	}
 }
@@ -150,50 +196,48 @@ func (oc *Controller) deleteAddressSet(hashName string) {
 func (oc *Controller) createPortGroup(name string,
 	hashName string) (string, error) {
 	logrus.Debugf("createPortGroup with %s", name)
-	portGroup, stderr, err := util.RunOVNNbctlHA("--data=bare",
-		"--no-heading", "--columns=_uuid", "find", "port_group",
-		fmt.Sprintf("name=%s", hashName))
+	portGroup := oc.ovnNbCache.GetMap("Port_Group", "name", hashName)["uuid"]
+	if portGroup != nil {
+		return portGroup.(string), nil
+	}
+
+	var err error
+	var resp dbtransaction.Transact
+	retry := true
+	for retry {
+		txn := oc.ovnNBDB.Transaction("OVN_Northbound")
+		txn.Insert(dbtransaction.Insert{
+			Table: "Port_Group",
+			Row: map[string]interface{}{
+				"name": hashName,
+				"external_ids": helpers.MakeOVSDBMap(map[string]interface{}{
+					"name": name,
+				}),
+			},
+		})
+		resp, err, retry = txn.Commit()
+	}
 	if err != nil {
-		return "", fmt.Errorf("find failed to get port_group, stderr: %q (%v)",
-			stderr, err)
+		logrus.Errorf("failed to create port_group %s (%v)", name, err)
 	}
 
-	if portGroup != "" {
-		return portGroup, nil
-	}
-
-	portGroup, stderr, err = util.RunOVNNbctlHA("create", "port_group",
-		fmt.Sprintf("name=%s", hashName),
-		fmt.Sprintf("external-ids:name=%s", name))
-	if err != nil {
-		return "", fmt.Errorf("failed to create port_group %s, "+
-			"stderr: %q (%v)", name, stderr, err)
-	}
-
-	return portGroup, nil
+	return resp[0].UUID[1], nil
 }
 
 func (oc *Controller) deletePortGroup(hashName string) {
 	logrus.Debugf("deletePortGroup %s", hashName)
-
-	portGroup, stderr, err := util.RunOVNNbctlHA("--data=bare",
-		"--no-heading", "--columns=_uuid", "find", "port_group",
-		fmt.Sprintf("name=%s", hashName))
-	if err != nil {
-		logrus.Errorf("find failed to get port_group, stderr: %q (%v)",
-			stderr, err)
-		return
+	var err error
+	retry := true
+	for retry {
+		txn := oc.ovnNBDB.Transaction("OVN_Northbound")
+		txn.Delete(dbtransaction.Delete{
+			Table: "Port_Group",
+			Where: [][]interface{}{{"name", "==", hashName}},
+		})
+		_, err, retry = txn.Commit()
 	}
-
-	if portGroup == "" {
-		return
-	}
-
-	_, stderr, err = util.RunOVNNbctlHA("--if-exists", "destroy",
-		"port_group", portGroup)
 	if err != nil {
-		logrus.Errorf("failed to destroy port_group %s, stderr: %q, (%v)",
-			hashName, stderr, err)
+		logrus.Errorf("failed to destroy port_group %s (%v)", hashName, err)
 		return
 	}
 }
