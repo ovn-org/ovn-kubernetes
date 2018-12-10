@@ -2,3 +2,4 @@
 supported_versions_by_the_playbook:
   - "{{windows1709}}"
   - "{{windows1803}}"
+  - "{{windows2019}}"
