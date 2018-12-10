@@ -3,6 +3,27 @@
 The ansible playbooks are able to deploy a kubernetes cluster with
 Linux and Windows minion nodes.
 
+## Ansible requirements
+
+Minimum required ansible version is `2.4.2.0`. The recommended version is `2.7.2`.
+
+For Linux: Make sure that you are able to SSH into the target nodes without being
+asked for the password. You can read more [here](http://docs.ansible.com/ansible/latest/user_guide/intro_getting_started.html).
+
+For Windows: Follow [this guide](https://docs.ansible.com/ansible/devel/user_guide/windows_setup.html)
+to setup the node to be used with ansible.
+
+#### Verifying the setup
+
+To verify the setup and that ansible has been successfully configured you can run the following:
+
+```
+ansible -m setup all
+```
+
+This will connect to the target hosts and will gather host facts.
+If the command succeeds and everything is green, you're good to go with running the playbook.
+
 ## How to use
 
 Make sure to update first the [inventory](/contrib/inventory) with
@@ -20,9 +41,7 @@ Currently supported Windows nodes:
 - Windows Server 2016 build version 1709 (OS Version 10.0.16299.0)
 - Windows Server 2016 build version 1803 (OS Version 10.0.17134.0)
 
-Note: Minimum required ansible version is 2.4.2.0. The recommended version is 2.7.2.
-
-## Ports that must be opened on public clouds when using the playbooks
+## Ports that have to be opened on public clouds when using the playbooks
 
 The following ports need to be opened if we access the cluster machines via the public address.
 
@@ -61,22 +80,3 @@ The following ports need to be opened if we access the cluster machines via the 
 ### Known issues
 
 - Windows containers do not support IPv6 at the moment. You can read more [here](https://docs.microsoft.com/en-us/virtualization/windowscontainers/container-networking/architecture#unsupported-features-and-network-options)
-
-## Ansible requirements
-
-For Linux: Make sure that you are able to SSH into the target nodes without being
-asked for the password. You can read more [here](http://docs.ansible.com/ansible/latest/user_guide/intro_getting_started.html).
-
-For Windows: Follow [this guide](https://docs.ansible.com/ansible/devel/user_guide/windows_setup.html)
-to setup the node to be used with ansible.
-
-#### Verifying the setup
-
-To verify the setup and that ansible has been successfully configured you can run the following:
-
-```
-ansible -m setup all
-```
-
-This will connect to the target hosts and will gather host facts.
-If the command succeeds and everything is green, you're good to go with running the playbook.
