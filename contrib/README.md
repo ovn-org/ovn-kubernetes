@@ -22,25 +22,35 @@ Currently supported Windows nodes:
 
 Note: Minimum required ansible version is 2.4.2.0. The recommended version is 2.7.2.
 
-## Ports to be opened in public clouds
+## Ports that must be opened on public clouds when using the playbooks
 
 The following ports need to be opened if we access the cluster machines via the public address.
 
-#### OVN related ports
-
-- GENEVE: UDP `6081` or alternatively with STT: TCP `7471`
-- OVN Database Ports: TCP `6641 - 6642`
-
 #### Kubernetes ports
 
-- Kubernetes service ports: UDP and TCP `30000 - 32767`
-- Kubelet: TCP `10250 - 10252`
+- Kubernetes service ports (deployment specific): UDP and TCP `30000 - 32767`
+- Kubelet (default port): TCP `10250`
 - Kubernetes API: TCP `8080` for HTTP and TCP `443` for HTTPS
 
 #### Ansible related ports
 
 - WinRM via HTTPS: TCP `5986` (for HTTP also TCP `5985`)
 - SSH: TCP `22`
+
+### OVN related ports
+
+- OVN Northbound (NB): TCP `6641`
+- OVN Southbound (SB): TCP `6642`
+
+### OVS related encapsulation ports
+
+- GENEVE encapsulation (used by default): UDP `6081`
+- STT encapsulation (optional encapsulation type, [no special NIC required](https://networkheresy.com/2012/03/04/network-virtualization-encapsulation-and-stateless-tcp-transport-stt/)): TCP `7471`
+
+### Further useful ports/types
+
+- Windows RDP Port: 3389 (TCP)
+- ICMP: useful for debugging
 
 ## Work in progress
 
