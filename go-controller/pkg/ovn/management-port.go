@@ -3,7 +3,6 @@ package ovn
 import (
 	"fmt"
 	"net"
-	"os/exec"
 	"runtime"
 	"strconv"
 	"strings"
@@ -283,15 +282,10 @@ func CreateManagementPort(nodeName, localSubnet,
 	}
 
 	if runtime.GOOS == windowsOS && macAddress == "00:00:00:00:00:00" {
-		var stdoutStderr []byte
-		stdoutStderr, err = exec.Command("powershell", "$(Get-NetAdapter", "-IncludeHidden", "|", "Where", "{", "$_.Name",
-			"-Match", fmt.Sprintf("\"%s\"", interfaceName), "}).MacAddress").CombinedOutput()
+		macAddress, err = util.FetchIfMacWindows(interfaceName)
 		if err != nil {
-			logrus.Errorf("Failed to get mac address of ovn-k8s-master, stderr: %q, error: %v", fmt.Sprintf("%s", stdoutStderr), err)
 			return err
 		}
-		// Windows returns it in 00-00-00-00-00-00 format, we want ':' instead of '-'
-		macAddress = strings.Replace(strings.TrimSpace(fmt.Sprintf("%s", stdoutStderr)), "-", ":", -1)
 	}
 
 	// Create the OVN logical port.
