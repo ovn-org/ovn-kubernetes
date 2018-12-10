@@ -66,6 +66,9 @@
     - set_fact:
         windows_container_tag: 1803
       when: ansible_kernel == windows1803
+    - set_fact:
+        windows_container_tag: 1809
+      when: ansible_kernel == windows2019
     - import_role:
         name: windows/version_check
     - import_role:

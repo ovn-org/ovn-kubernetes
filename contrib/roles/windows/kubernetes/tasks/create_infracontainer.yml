@@ -9,7 +9,7 @@
     path: "{{ install_path }}/Dockerfile"
     create: yes
     line: |
-      FROM microsoft/nanoserver:{{ windows_container_tag }}
+      FROM mcr.microsoft.com/windows/nanoserver:{{ windows_container_tag }}
 
       CMD ping 127.0.0.1 -t
     newline: unix
