@@ -19,6 +19,7 @@ Currently supported Linux nodes:
 Currently supported Windows nodes:
 - Windows Server 2016 build version 1709 (OS Version 10.0.16299.0)
 - Windows Server 2016 build version 1803 (OS Version 10.0.17134.0)
+- Windows Server 2019 LTSC and build version 1809 (OS Version 10.0.17763.0)
 
 Note: Minimum required ansible version is 2.4.2.0. The recommended version is 2.7.2.
 
