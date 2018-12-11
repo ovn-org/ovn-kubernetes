@@ -1,9 +1,6 @@
 ---
 sdn_info:
   sdn_network_name: external
-  # This should be set if you want a preferred network interface for the SDN setup.
-  # If this is not set, the interface with the default gateway configured is chosen.
-  # sdn_preferred_nic_name: "Ethernet"
 
 ovs_cmd_timeout: 30
 

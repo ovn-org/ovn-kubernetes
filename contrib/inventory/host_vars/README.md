@@ -18,3 +18,9 @@ one present in group_vars. Example for "node5":
 ansible_user: Administrator
 ansible_password: different_password
 ```
+
+If you want a preferred network interface for the SDN setup, use the
+following configuration option:
+```
+sdn_preferred_nic_name: "Ethernet 2"
+```
