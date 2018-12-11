@@ -47,8 +47,7 @@
         --service-account-private-key-file=/etc/kubernetes/tls/apiserver-key.pem \
         --root-ca-file=/etc/kubernetes/tls/ca.pem \
         --cluster-signing-cert-file=/etc/kubernetes/tls/ca.pem \
-        --cluster-signing-key-file=/etc/kubernetes/tls/ca-key.pem \
-        --insecure-experimental-approve-all-kubelet-csrs-for-group=system:kubelet-bootstrap
+        --cluster-signing-key-file=/etc/kubernetes/tls/ca-key.pem
       Restart=on-failure
       RestartSec=10
       [Install]
