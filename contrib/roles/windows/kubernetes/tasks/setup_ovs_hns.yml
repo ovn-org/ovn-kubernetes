@@ -47,16 +47,6 @@
               Throw "Failed to set the OVS system-id guid"
           }
       }
-      $macInUse = ovs-vsctl.exe get interface "vEthernet ({{ interface_name }})" mac_in_use
-      if($LASTEXITCODE) {
-          Throw "Failed to get the mac_in_use for the vEthernet"
-      }
-      if($macInUse -eq '"00:00:00:00:00:00"') {
-          # TODO: There is a known issue with OVS not correctly picking up the
-          #       physical network interface MAC address. As a temporary workaround,
-          #       we just need to restart the ovs-vswitchd Windows service.
-          Restart-Service -Name "ovs-vswitchd"
-      }
       ovs-vsctl.exe --timeout {{ ovs_cmd_timeout }} set Open_vSwitch . external_ids:k8s-api-server="http://{{ kubernetes_info.MASTER_IP }}:8080"
       if($LASTEXITCODE) {
           Throw "Failed to set the k8s-api-server"
