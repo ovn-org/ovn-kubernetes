@@ -13,7 +13,7 @@
         (Get-NetAdapter -Name $hnsNet.NetworkAdapterName).InterfaceIndex
         exit 0
     }
-    $preferredIfName = "{{ sdn_info.sdn_preferred_nic_name | default('') }}"
+    $preferredIfName = "{{ sdn_preferred_nic_name | default('') }}"
     if($preferredIfName) {
         (Get-NetAdapter -Name $preferredIfName).InterfaceIndex
         exit 0
