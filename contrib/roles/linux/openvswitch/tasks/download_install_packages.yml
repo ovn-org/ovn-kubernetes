@@ -28,7 +28,7 @@
   apt: deb="{{ ovs_info.prebuilt_packages_download_path }}/{{item}}{{ ovs_info.prebuilt_version }}_all.deb"
   with_items:
     - openvswitch-datapath-dkms_
-    - python-openvswitch_         
+    - python-openvswitch_
 
 - name: OVS | install controller deb if applicable
   apt: deb="{{ ovs_info.prebuilt_packages_download_path }}/ovn-central_{{ ovs_info.prebuilt_version }}_amd64.deb"
