@@ -16,19 +16,19 @@
     remote_src: yes
 
 - name: OVS | install debs
-  apt: deb="{{ ovs_info.prebuilt_packages_download_path }}/{{item}}{{ ovs_info.prebuilt_version }}_amd64.deb"
+  apt: deb="{{ ovs_info.prebuilt_packages_download_path }}/{{item}}_{{ ovs_info.prebuilt_version }}_amd64.deb"
   with_items:
-    - libopenvswitch_
-    - openvswitch-common_
-    - openvswitch-switch_
-    - ovn-common_
-    - ovn-host_
+    - libopenvswitch
+    - openvswitch-common
+    - openvswitch-switch
+    - ovn-common
+    - ovn-host
 
 - name: OVS | install additional debs
-  apt: deb="{{ ovs_info.prebuilt_packages_download_path }}/{{item}}{{ ovs_info.prebuilt_version }}_all.deb"
+  apt: deb="{{ ovs_info.prebuilt_packages_download_path }}/{{item}}_{{ ovs_info.prebuilt_version }}_all.deb"
   with_items:
-    - openvswitch-datapath-dkms_
-    - python-openvswitch_
+    - openvswitch-datapath-dkms
+    - python-openvswitch
 
 - name: OVS | install controller deb if applicable
   apt: deb="{{ ovs_info.prebuilt_packages_download_path }}/ovn-central_{{ ovs_info.prebuilt_version }}_amd64.deb"
