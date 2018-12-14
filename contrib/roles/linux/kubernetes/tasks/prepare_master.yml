@@ -132,6 +132,7 @@
 
 - name: Kubernetes Master | Setting kubectl context
   shell: |
+    set -o errexit
     kubectl config set-cluster default-cluster --server=https://{{ host_public_ip }} --certificate-authority=/etc/kubernetes/tls/ca.pem
     kubectl config set-credentials default-admin --certificate-authority=/etc/kubernetes/tls/ca.pem --client-key=/etc/kubernetes/tls/admin-key.pem --client-certificate=/etc/kubernetes/tls/admin.pem
     kubectl config set-context local --cluster=default-cluster --user=default-admin
@@ -201,7 +202,8 @@
 
 - name: Kubernetes Master | Enabling OVN to listen on 6641 and 6642
   shell: |
-    ovn-nbctl --timeout={{TIMEOUT}} set-connection ptcp:6641 &&
+    set -o errexit
+    ovn-nbctl --timeout={{TIMEOUT}} set-connection ptcp:6641
     ovn-sbctl --timeout={{TIMEOUT}} set-connection ptcp:6642
   changed_when: false
 
@@ -221,9 +223,10 @@
 
 - name: Kubernetes Master | Prepare OVN certs
   shell: |
+    set -o errexit
     ovs-vsctl --timeout={{TIMEOUT}} set Open_vSwitch . \
       external_ids:k8s-api-server="https://{{ host_public_ip }}" \
-      external_ids:k8s-api-token="{{TOKEN}}" &&
+      external_ids:k8s-api-token="{{TOKEN}}"
     ln -fs /etc/kubernetes/tls/ca.pem /etc/openvswitch/k8s-ca.crt
   changed_when: false
 

@@ -23,7 +23,7 @@
     line: |
       #!/bin/bash -
 
-      #set -o errexit
+      set -o errexit
       set -o nounset
       set -o pipefail
 
@@ -41,7 +41,7 @@
       pem_node_csr=$cert_dir/node-csr.pem
 
       # Make sure cert group exists
-      #groupadd -r $cert_group
+      [ $(getent group $cert_group) ] || groupadd -r $cert_group
 
       # Make sure perms are right
       chgrp $cert_group $pem_ca $pem_ca_key
@@ -75,6 +75,7 @@
 
 - name: Kubernetes certs | Generating Certificates
   shell: |
+    set -o errexit
     cd {{ kubernetes_certificates.tmp_generate_path }}
     ./make-certs
 
