@@ -11,9 +11,6 @@
     version: "{{ kubernetes_dns.branch }}"
   when: not coredns_repo.stat.exists
 
-- name: Docker | ensure docker packages are installed
-  shell: apt install jq -y
-
 - name: CoreDNS | generate yaml and apply it
   shell: |
     cd {{ kubernetes_dns.tmp_path }}/coredns-checkout/kubernetes
