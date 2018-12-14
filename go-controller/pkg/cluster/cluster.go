@@ -57,7 +57,16 @@ func NewClusterController(kubeClient kubernetes.Interface, wf *factory.WatchFact
 	}
 }
 
-func setOVSExternalIDs(nodeName string, ids ...string) error {
+func setupOVNNode(nodeName string) error {
+	// Tell ovn-*bctl how to talk to the database
+	for _, auth := range []*config.OvnDBAuth{
+		config.OvnNorth.ClientAuth,
+		config.OvnSouth.ClientAuth} {
+		if err := auth.SetDBAuth(); err != nil {
+			return err
+		}
+	}
+
 	var err error
 
 	nodeIP := config.Default.EncapIP
@@ -72,36 +81,18 @@ func setOVSExternalIDs(nodeName string, ids ...string) error {
 		}
 	}
 
-	args := []string{
-		"set",
+	_, stderr, err := util.RunOVSVsctl("set",
 		"Open_vSwitch",
 		".",
 		fmt.Sprintf("external_ids:ovn-encap-type=%s", config.Default.EncapType),
 		fmt.Sprintf("external_ids:ovn-encap-ip=%s", nodeIP),
 		fmt.Sprintf("external_ids:ovn-remote-probe-interval=%d",
 			config.Default.InactivityProbe),
-	}
-	for _, str := range ids {
-		args = append(args, "external_ids:"+str)
-	}
-	_, stderr, err := util.RunOVSVsctl(args...)
+	)
 	if err != nil {
 		return fmt.Errorf("error setting OVS external IDs: %v\n  %q", err, stderr)
 	}
 	return nil
-}
-
-func setupOVNNode(nodeName string) error {
-	// Tell ovn-*bctl how to talk to the database
-	for _, auth := range []*config.OvnDBAuth{
-		config.OvnNorth.ClientAuth,
-		config.OvnSouth.ClientAuth} {
-		if err := auth.SetDBAuth(); err != nil {
-			return err
-		}
-	}
-
-	return setOVSExternalIDs(nodeName)
 }
 
 func setupOVNMaster(nodeName string) error {
@@ -115,6 +106,5 @@ func setupOVNMaster(nodeName string) error {
 			return err
 		}
 	}
-
-	return setOVSExternalIDs(nodeName)
+	return nil
 }
