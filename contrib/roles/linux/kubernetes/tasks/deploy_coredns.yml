@@ -14,5 +14,5 @@
 - name: CoreDNS | generate yaml and apply it
   shell: |
     cd {{ kubernetes_dns.tmp_path }}/coredns-checkout/kubernetes
-    kubectl delete --namespace=kube-system deployment coredns
+    kubectl delete --namespace=kube-system deployment coredns --wait --ignore-not-found=true
     ./deploy.sh -i {{K8S_DNS_SERVICE_IP}} -d {{K8S_DNS_DOMAIN}} -s coredns.yaml.sed | kubectl apply -f -
