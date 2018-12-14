@@ -5,8 +5,6 @@
 
 - name: OVS | include vars
   include_vars: "{{ ansible_distribution|lower }}.yml"
-  tags:
-    - facts
 
 - stat:
     path: "{{ ovs_info.service_path }}"

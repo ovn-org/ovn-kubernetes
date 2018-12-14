@@ -5,8 +5,6 @@
 
 - name: Docker | include vars
   include_vars: "{{ ansible_distribution|lower }}.yml"
-  tags:
-    - facts
 
 - name: Docker | ensure docker repository public key is installed
   action: "{{ docker_repo_key_info.pkg_key }}"

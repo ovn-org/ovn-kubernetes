@@ -5,13 +5,9 @@
 
 - name: Kubernetes | include vars
   include_vars: "{{ ansible_distribution|lower }}.yml"
-  tags:
-    - facts
 
 - name: Kubernetes | fetch network details
   include_tasks: set_ip_facts.yml
-  tags:
-    - facts
 
 - debug:
     msg: "{{ansible_hostname}}"
