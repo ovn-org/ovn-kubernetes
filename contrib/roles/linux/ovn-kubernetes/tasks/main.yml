@@ -5,8 +5,6 @@
 
 - name: ovn-kubernetes | include vars
   include_vars: "{{ ansible_distribution|lower }}.yml"
-  tags:
-    - facts
 
 - name: ovn-kubernetes | Checking if binaries are already present on ansible machine
   local_action: stat path="{{ansible_tmp_dir}}/{{item}}"
