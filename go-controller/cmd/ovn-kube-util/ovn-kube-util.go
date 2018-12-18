@@ -18,7 +18,6 @@ func main() {
 	c.Commands = []cli.Command{
 		app.NicsToBridgeCommand,
 		app.BridgesToNicCommand,
-		app.InitGatewayCmd,
 	}
 
 	if err := c.Run(os.Args); err != nil {
