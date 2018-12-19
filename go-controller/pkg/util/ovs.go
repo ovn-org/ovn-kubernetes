@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 	"runtime"
 	"strings"
+	"sync/atomic"
 	"time"
 	"unicode"
 
@@ -133,16 +134,24 @@ func GetExec() kexec.Interface {
 	return runner.exec
 }
 
+var runCounter uint64
+
 func run(cmdPath string, args ...string) (*bytes.Buffer, *bytes.Buffer, error) {
 	stdout := &bytes.Buffer{}
 	stderr := &bytes.Buffer{}
 	cmd := runner.exec.Command(cmdPath, args...)
 	cmd.SetStdout(stdout)
 	cmd.SetStderr(stderr)
-	logrus.Debugf("exec: %s %s", cmdPath, strings.Join(args, " "))
+
+	counter := atomic.AddUint64(&runCounter, 1)
+	logCmd := fmt.Sprintf("%s %s", cmdPath, strings.Join(args, " "))
+	logrus.Debugf("exec(%d): %s", counter, logCmd)
+
 	err := cmd.Run()
+	logrus.Debugf("exec(%d): stdout: %q", counter, stdout)
+	logrus.Debugf("exec(%d): stderr: %q", counter, stderr)
 	if err != nil {
-		logrus.Debugf("exec: %s %s => %v", cmdPath, strings.Join(args, " "), err)
+		logrus.Debugf("exec(%d): err: %v", counter, err)
 	}
 	return stdout, stderr, err
 }
