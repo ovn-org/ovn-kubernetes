@@ -52,15 +52,6 @@
     file:
       state: directory
       path: /root/ovn/scripts
-  - name: Copy ovn-namespace.yaml
-    copy: src=../yaml/ovn-namespace.yaml dest=/root/ovn/yaml/ovn-namespace.yaml
-  - name: Copy ovn-policy.yaml
-    copy: src=../yaml/ovn-policy.yaml dest=/root/ovn/yaml/ovn-policy.yaml
-  - name: Copy ovn-setup.sh
-    copy:
-      src: scripts/ovn-setup.sh
-      dest: /root/ovn/scripts/ovn-setup.sh
-      mode: 0755
   - name: Copy ovn-logs
     copy:
       src: scripts/ovn-logs
@@ -78,14 +69,13 @@
       mode: 0755
   - name: Copy ovnkube-master.yaml
     template: src=../templates/ovnkube-master.yaml.j2 dest=/root/ovn/yaml/ovnkube-master.yaml
-  - name: Copy ovnkube.yaml
-    template: src=../templates/ovnkube.yaml.j2 dest=/root/ovn/yaml/ovnkube.yaml
+  - name: Copy ovnkube-node.yaml
+    template: src=../templates/ovnkube-node.yaml.j2 dest=/root/ovn/yaml/ovnkube-node.yaml
+  - name: Set up ovn
+    template: src=../templates/ovn-setup.yaml.j2 dest=/root/ovn/yaml/ovn-setup.yaml
 
-  - name: Provision the OVN Namespace
-    shell: oc create -f /root/ovn/yaml/ovn-namespace.yaml
-    ignore_errors: yes
-  - name: Provision the OVN Policy
-    shell: oc create -f /root/ovn/yaml/ovn-policy.yaml
+  - name: Provision the OVN 
+    shell: oc create -f /root/ovn/yaml/ovn-setup.yaml
     ignore_errors: yes
   - name: Provision the OVN Project
     shell: oc project ovn-kubernetes
@@ -94,12 +84,8 @@
     shell: oc adm policy add-scc-to-user anyuid -z ovn
     ignore_errors: yes
 
-  - name: Run the ovn-setup
-    shell: /root/ovn/scripts/ovn-setup.sh
-    ignore_errors: yes
-
   - name: Start the node ovn daemonset on all nodes
-    shell: oc create -f /root/ovn/yaml/ovnkube.yaml
+    shell: oc create -f /root/ovn/yaml/ovnkube-node.yaml
     ignore_errors: yes
   - name: Start the master ovn daemonset
     shell: oc create -f /root/ovn/yaml/ovnkube-master.yaml

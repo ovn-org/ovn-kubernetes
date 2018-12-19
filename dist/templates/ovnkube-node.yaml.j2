@@ -1,11 +1,12 @@
-# ovnkube
-# daemonset version 2
+---
+# ovnkube-node
+# daemonset version 3
 # starts node daemons for ovs and ovn, each in a separate container
 # it is run on all nodes
 kind: DaemonSet
 apiVersion: apps/v1
 metadata:
-  name: ovnkube
+  name: ovnkube-node
   # namespace set up by install
   namespace: ovn-kubernetes
   annotations:
@@ -14,13 +15,13 @@ metadata:
 spec:
   selector:
     matchLabels:
-      app: ovnkube
+      app: ovnkube-node
   updateStrategy:
     type: RollingUpdate
   template:
     metadata:
       labels:
-        app: ovnkube
+        app: ovnkube-node
         component: network
         type: infra
         openshift.io/component: network
@@ -58,6 +59,8 @@ spec:
         - mountPath: /sys
           name: host-sys
           readOnly: true
+        - mountPath: /etc/origin/node
+          name: host-origin-node
         - mountPath: /etc/openvswitch
           name: host-config-openvswitch
         resources:
@@ -116,6 +119,8 @@ spec:
         # We mount our socket here
         - mountPath: /var/run/ovn-kubernetes
           name: host-var-run-ovn-kubernetes
+        - mountPath: /etc/origin/node
+          name: host-origin-node
         # CNI related mounts which we take over
         - mountPath: /host/opt/cni/bin
           name: host-opt-cni-bin
@@ -133,16 +138,6 @@ spec:
           value: "3"
         - name: OVNKUBE_LOGLEVEL
           value: "4"
-        - name: OVN_NORTH
-          valueFrom:
-            configMapKeyRef:
-              name: ovn-config
-              key: OvnNorth
-        - name: OVN_SOUTH
-          valueFrom:
-            configMapKeyRef:
-              name: ovn-config
-              key: OvnSouth
         - name: OVN_NET_CIDR
           valueFrom:
             configMapKeyRef:
@@ -153,11 +148,6 @@ spec:
             configMapKeyRef:
               name: ovn-config
               key: svc_cidr
-        - name: K8S_APISERVER
-          valueFrom:
-            configMapKeyRef:
-              name: ovn-config
-              key: k8s_apiserver
         - name: K8S_NODE
           valueFrom:
             fieldRef:
@@ -213,6 +203,8 @@ spec:
         # We mount our socket here
         - mountPath: /var/run/ovn-kubernetes
           name: host-var-run-ovn-kubernetes
+        - mountPath: /etc/origin/node
+          name: host-origin-node
         # CNI related mounts which we take over
         - mountPath: /host/opt/cni/bin
           name: host-opt-cni-bin
@@ -230,16 +222,6 @@ spec:
           value: "3"
         - name: OVNKUBE_LOGLEVEL
           value: "5"
-        - name: OVN_NORTH
-          valueFrom:
-            configMapKeyRef:
-              name: ovn-config
-              key: OvnNorth
-        - name: OVN_SOUTH
-          valueFrom:
-            configMapKeyRef:
-              name: ovn-config
-              key: OvnSouth
         - name: OVN_NET_CIDR
           valueFrom:
             configMapKeyRef:
@@ -250,11 +232,6 @@ spec:
             configMapKeyRef:
               name: ovn-config
               key: svc_cidr
-        - name: K8S_APISERVER
-          valueFrom:
-            configMapKeyRef:
-              name: ovn-config
-              key: k8s_apiserver
         - name: K8S_NODE
           valueFrom:
             fieldRef:
@@ -314,6 +291,9 @@ spec:
         hostPath:
           path: /sys
 
+      - name: host-origin-node
+        hostPath:
+          path: /etc/origin/node
       - name: host-opt-cni-bin
         hostPath:
           path: /opt/cni/bin

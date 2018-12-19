@@ -21,8 +21,11 @@ RUN apt-get update && apt-get install -y iptables iproute2 curl gawk software-pr
 RUN echo "deb http://18.191.116.101/openvswitch/stable /" |  tee /etc/apt/sources.list.d/openvswitch.list
 RUN curl http://18.191.116.101/openvswitch/keyFile |  apt-key add -
 
+RUN echo "deb https://apt.kubernetes.io/ kubernetes-xenial main" | tee -a /etc/apt/sources.list.d/kubernetes.list
+RUN curl -s https://packages.cloud.google.com/apt/doc/apt-key.gpg | apt-key add -
+
 # Install OVS and OVN packages.
-RUN apt-get update && apt-get install -y openvswitch-switch openvswitch-common ovn-central ovn-common ovn-host
+RUN apt-get update && apt-get install -y openvswitch-switch openvswitch-common ovn-central ovn-common ovn-host kubectl
 
 RUN mkdir -p /var/run/openvswitch
 RUN mkdir -p /etc/cni/net.d
