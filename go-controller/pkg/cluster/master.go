@@ -308,8 +308,8 @@ func (cluster *OvnClusterController) SetupMaster(masterNodeName string) error {
 	}
 
 	// Create a logical switch called "join" that will be used to connect gateway routers to the distributed router.
-	// The "join" will be allocated IP addresses in the range 100.64.1.0/24.
-	joinIP, joinCIDR, _ := net.ParseCIDR("100.64.1.1/24")
+	// The "join" switch will be allocated IP addresses in the range 100.64.0.0/16.
+	joinIP, joinCIDR, _ := net.ParseCIDR("100.64.0.1/16")
 	prefixLen, _ := joinCIDR.Mask.Size()
 	stdout, stderr, err = util.RunOVNNbctl("--may-exist", "ls-add", "join",
 		"--", "set", "logical_switch", "join", fmt.Sprintf("other-config:subnet=%s", joinCIDR.String()),
@@ -329,7 +329,7 @@ func (cluster *OvnClusterController) SetupMaster(masterNodeName string) error {
 	if routerMac == "" {
 		routerMac = util.GenerateMac()
 		stdout, stderr, err = util.RunOVNNbctl("--", "--may-exist", "lrp-add", OvnClusterRouter,
-			"rtoj-"+OvnClusterRouter, routerMac, "100.64.1.1/24")
+			"rtoj-"+OvnClusterRouter, routerMac, fmt.Sprintf("%s/%d", joinIP.String(), prefixLen))
 		if err != nil {
 			logrus.Errorf("Failed to add logical router port rtoj-%v, stdout: %q, stderr: %q, error: %v",
 				OvnClusterRouter, stdout, stderr, err)
