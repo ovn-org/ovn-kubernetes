@@ -23,6 +23,7 @@ RUN dnf install --refresh -y  \
 	PyYAML bind-utils procps-ng hostname \
 	openvswitch openvswitch-ovn-common openvswitch-ovn-host openvswitch-ovn-central \
 	openvswitch-ovn-docker python2-openvswitch openvswitch-ovn-vtep \
+	kubernetes-client \
 	containernetworking-cni \
 	jq iproute strace socat && \
 	dnf clean all

@@ -27,6 +27,7 @@ RUN yum install -y  \
 	firewalld-filesystem \
 	libpcap \
 	hostname \
+	kubernetes-client \
 	iproute strace socat && \
 	yum clean all
 
