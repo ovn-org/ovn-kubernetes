@@ -171,7 +171,7 @@
 
 - name: Kubernetes Master | Create service OVN Kube
   blockinfile:
-    path: /etc/systemd/system/ovn-k8s-watcher.service
+    path: /etc/systemd/system/ovn-kubernetes-master.service
     create: yes
     block: |
       [Unit]
@@ -230,9 +230,9 @@
     ln -fs /etc/kubernetes/tls/ca.pem /etc/openvswitch/k8s-ca.crt
   changed_when: false
 
-- name: Kubernetes Master | restart ovn-k8s-watcher
+- name: Kubernetes Master | restart ovn-kubernetes-master
   service:
-    name: "ovn-k8s-watcher"
+    name: "ovn-kubernetes-master"
     enabled: yes
     state: restarted
     daemon_reload: yes

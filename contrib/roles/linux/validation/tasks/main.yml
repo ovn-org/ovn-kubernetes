@@ -1,0 +1,19 @@
+---
+- name: Linux validation | include vars
+  include_vars: "{{ ansible_distribution | lower }}.yml"
+
+- name: Linux validation | Set the service_names fact
+  block:
+    - name: Linux validation | Set the Linux master service names
+      set_fact:
+        service_names: "{{ master_service_names }}"
+      when: master
+
+    - name: Linux validation | Set the Linux minion service names
+      set_fact:
+        service_names: "{{ minion_service_names }}"
+      when: minion
+
+- name: Linux validation | Validate the services success state
+  include: "./validate_service.yml service_name={{ item }}"
+  with_items: "{{ service_names }}"

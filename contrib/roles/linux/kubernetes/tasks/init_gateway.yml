@@ -14,7 +14,7 @@
 
 - name: OVN Gateway | Create service OVN Kube Gateway
   blockinfile:
-    path: /etc/systemd/system/ovnkube-gateway-helper.service
+    path: /etc/systemd/system/ovn-kubernetes-node.service
     create: yes
     block: |
       [Unit]
@@ -42,7 +42,7 @@
 
 - name: OVN Gateway | start OVN Kube Gateway Helper
   service:
-    name: "ovnkube-gateway-helper"
+    name: "ovn-kubernetes-node"
     enabled: yes
     state: restarted
     daemon_reload: yes
