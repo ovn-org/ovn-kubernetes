@@ -24,3 +24,10 @@ following configuration option:
 ```
 sdn_preferred_nic_name: "Ethernet 2"
 ```
+
+By default, all the Kubernetes minions will be configured as gateway nodes.
+If you don't want a particular node to be a gateway, use the following
+configuration option:
+```
+init_gateway: false
+```

@@ -49,6 +49,11 @@
       log-file={{ install_path }}/ovn-kubernetes-node.log
       service-name=ovn-kubernetes-node
 
+- name: Kubernetes minion | Set default "init_gateway" fact if not already defined
+  set_fact:
+    init_gateway: true
+  when: init_gateway is not defined
+
 - name: Kubernetes minion | Set the ovnkube service-command with gateway args
   win_lineinfile:
     path: '{{ install_path }}\ovnkube-servicewrapper-config.ini'

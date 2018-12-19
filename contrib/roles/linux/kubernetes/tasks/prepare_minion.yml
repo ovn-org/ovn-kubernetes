@@ -118,6 +118,11 @@
     dest: "/opt/cni/bin/"
     remote_src: yes
 
+- name: Kubernetes Minion | Set default "init_gateway" fact if not already defined
+  set_fact:
+    init_gateway: true
+  when: init_gateway is not defined
+
 - name: Kubernetes Minion | Minion init
   shell: |
     /usr/bin/ovnkube \

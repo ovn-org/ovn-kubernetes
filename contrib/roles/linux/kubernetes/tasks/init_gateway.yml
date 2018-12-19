@@ -1,8 +1,4 @@
 ---
-- name: OVN Gateway | Set init_gateway to false
-  set_fact:
-    init_gateway: false
-
 # The following makes sure that the second time we enter init_gateway we actually
 # fetch the physical interface name and not the bridge name
 # TODO: interfaces that start with 'br' are not supported
