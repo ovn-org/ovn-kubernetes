@@ -95,6 +95,19 @@
       delegate_to: "{{ item }}"
       with_items: "{{ groups['kube-master'] }}"
 
+# TODO(ionutbalutoiu):
+# Remove below workaround when this is fixed: https://github.com/openvswitch/ovn-kubernetes/issues/531
+# Right now, the CoreDNS pods will never reach "running" state. We need to kill the existing pods and
+# new ones will be successfully created.
+- hosts: kube-master
+  any_errors_fatal: true
+  gather_facts: true
+  become: true
+  tasks:
+    - name: Kill the kube-dns pods
+      run_once: true
+      shell: kubectl delete pod --force --grace-period=0 --namespace kube-system --selector k8s-app=kube-dns
+
 - hosts: kube-master:kube-minions-linux
   any_errors_fatal: true
   gather_facts: true
