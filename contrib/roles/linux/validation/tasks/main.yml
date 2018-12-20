@@ -17,3 +17,42 @@
 - name: Linux validation | Validate the services success state
   include: "./validate_service.yml service_name={{ item }}"
   with_items: "{{ service_names }}"
+
+- name: Linux validation | Validate if the CoreDNS pods are running
+  run_once: true
+  block:
+    - name: Linux validation | Create temp file for Python script
+      tempfile:
+        state: file
+      register: python_script
+
+    - name: Linux validation | Set the Python script content
+      blockinfile:
+        path: "{{ python_script.path }}"
+        create: yes
+        block: |
+          import json
+          import sys
+          pods = json.load(sys.stdin)
+          for pod in pods['items']:
+              if pod['status']['phase'] != 'Running':
+                  #
+                  # More info about pod phase here:
+                  # https://kubernetes.io/docs/concepts/workloads/pods/pod-lifecycle/#pod-phase
+                  #
+                  print('ERROR: Pod %s is not running.'
+                        'Current phase is: %s' % (pod['metadata']['name'],
+                                                  pod['status']['phase']))
+                  sys.exit(1)
+              print('Pod %s is running.' % (pod['metadata']['name']))
+
+    - name: Linux validation | Check the CoreDNS pods
+      shell: |
+        set -o pipefail
+        kubectl get pod --selector k8s-app=kube-dns --namespace kube-system --output json | python3 "{{ python_script.path }}"
+        EXIT_CODE=$?
+        rm -f "{{ python_script.path }}"
+        exit $EXIT_CODE
+      args:
+        executable: /bin/bash
+  when: master
