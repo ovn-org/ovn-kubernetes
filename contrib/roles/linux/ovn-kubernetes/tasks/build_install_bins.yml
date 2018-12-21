@@ -1,13 +1,4 @@
 ---
-- name: ovn-kubernetes | check if golang is installed
-  stat:
-    path: /usr/local/go/bin
-  register: golang_binfolder
-
-- name: ovn-kubernetes | install golang
-  include_tasks: ./install_golang.yml
-  when: not golang_binfolder.stat.exists
-
 - name: ovn-kubernetes | check if ovn-kubernetes is cloned
   stat:
     path: "{{ ovn_kubernetes_info.build_path }}/ovn-kubernetes-checkout"
@@ -57,30 +48,27 @@
 
 - name: ovn-kubernetes | build binaries
   block:
+  - name: ovn-kubernetes | Install golang dependency
+    import_role:
+      name: linux/common
+      tasks_from: golang
+
   - name: ovn-kubernetes | compile sources - make clean
     make:
       chdir: "{{ovn_kubernetes_info.build_path}}/ovn-kubernetes-checkout/go-controller"
       target: clean
-    environment:
-      PATH: "{{ ansible_env.PATH }}:/usr/local/go/bin"
 
   - name: ovn-kubernetes | compile sources - make linux
     make:
       chdir: "{{ovn_kubernetes_info.build_path}}/ovn-kubernetes-checkout/go-controller"
-    environment:
-      PATH: "{{ ansible_env.PATH }}:/usr/local/go/bin"
 
   - name: ovn-kubernetes | compile sources - make windows
     make:
       chdir: "{{ovn_kubernetes_info.build_path}}/ovn-kubernetes-checkout/go-controller"
       target: windows
-    environment:
-      PATH: "{{ ansible_env.PATH }}:/usr/local/go/bin"
 
   - name: ovn-kubernetes | compile sources - make install
     make:
       chdir: "{{ovn_kubernetes_info.build_path}}/ovn-kubernetes-checkout/go-controller"
       target: install
-    environment:
-      PATH: "{{ ansible_env.PATH }}:/usr/local/go/bin"
   when: windows_bins_missing or linux_bins_missing
