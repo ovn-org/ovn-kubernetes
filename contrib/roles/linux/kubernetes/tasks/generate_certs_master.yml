@@ -18,7 +18,7 @@
       set -o pipefail
 
       cert_group=kube-cert
-      cert_dir=/etc/kubernetes/tls
+      cert_dir={{ kubernetes_certificates.directory }}
 
       pem_ca=$cert_dir/ca.pem
       pem_ca_key=$cert_dir/ca-key.pem

@@ -20,6 +20,7 @@ kubernetes_cluster_info:
 
 kubernetes_certificates:
   tmp_generate_path: /tmp/k8s_certs
+  directory: /etc/kubernetes/tls
 
 kubernetes_binaries:
   linux_common:
