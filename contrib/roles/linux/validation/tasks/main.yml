@@ -47,6 +47,8 @@
               print('Pod %s is running.' % (pod['metadata']['name']))
 
     - name: Linux validation | Check the CoreDNS pods
+      retries: 10
+      delay: 5
       shell: |
         set -o pipefail
         kubectl get pod --selector k8s-app=kube-dns --namespace kube-system --output json | python3 "{{ python_script.path }}"
