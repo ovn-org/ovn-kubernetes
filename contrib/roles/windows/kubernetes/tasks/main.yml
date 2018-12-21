@@ -28,8 +28,13 @@
 
 - name: Kubernetes | Configure the Windows firewall
   block:
-    - name: Disable firewall (only for testing environments)
-      win_command: NetSh Advfirewall set allprofiles state off
+    - name: Disable firewall & realtime monitoring (only for testing environments)
+      block:
+        - name: Disable firewall
+          win_command: NetSh Advfirewall set allprofiles state off
+
+        - name: Disable realtime monitoring
+          win_shell: Set-MpPreference -DisableRealtimeMonitoring $true
       when: firewall.disable_completely == True
 
     - name: Enable firewall (for production environments)
