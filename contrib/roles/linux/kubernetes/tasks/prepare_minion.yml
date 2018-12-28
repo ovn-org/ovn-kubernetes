@@ -96,7 +96,8 @@
 - name: Kubernetes Minion | Ensure /etc/hosts is updated
   lineinfile:
     path: /etc/hosts
-    line: "{{ host_public_ip }} {{ ansible_hostname }}"
+    regexp: ' {{ ansible_hostname | lower }}$'
+    line: '{{ host_public_ip }} {{ ansible_hostname | lower }}'
 
 - name: Kubernetes Minion | Create CNI binaries folder
   file:
