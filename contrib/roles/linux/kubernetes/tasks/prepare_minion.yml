@@ -25,14 +25,14 @@
       kind: Config
       clusters:
       - cluster:
-          certificate-authority: /etc/kubernetes/tls/ca.pem
+          certificate-authority: {{ kubernetes_certificates.directory }}/ca.pem
           server: https://{{ kubernetes_cluster_info.MASTER_IP }}
         name: local
       users:
       - name: kubelet
         user:
-          client-certificate: /etc/kubernetes/tls/node.pem
-          client-key: /etc/kubernetes/tls/node-key.pem
+          client-certificate: {{ kubernetes_certificates.directory }}/node.pem
+          client-key: {{ kubernetes_certificates.directory }}/node-key.pem
       contexts:
       - context:
           cluster: local
@@ -58,8 +58,8 @@
         --cni-bin-dir=/opt/cni/bin \
         --cni-conf-dir=/etc/cni/net.d \
         --kubeconfig=/etc/kubernetes/kubeconfig.yaml \
-        --tls-cert-file=/etc/kubernetes/tls/node.pem \
-        --tls-private-key-file=/etc/kubernetes/tls/node-key.pem \
+        --tls-cert-file={{ kubernetes_certificates.directory }}/node.pem \
+        --tls-private-key-file={{ kubernetes_certificates.directory }}/node-key.pem \
         --fail-swap-on=false
       Restart=on-failure
       RestartSec=10
@@ -90,7 +90,7 @@
     ovs-vsctl --timeout={{TIMEOUT}} set Open_vSwitch . \
       external_ids:k8s-api-server="http://{{ host_public_ip }}:8080" \
       external_ids:k8s-api-token="{{TOKEN}}"
-    ln -fs /etc/kubernetes/tls/ca.pem /etc/openvswitch/k8s-ca.crt
+    ln -fs {{ kubernetes_certificates.directory }}/ca.pem /etc/openvswitch/k8s-ca.crt
   changed_when: false
 
 - name: Kubernetes Minion | Ensure /etc/hosts is updated
