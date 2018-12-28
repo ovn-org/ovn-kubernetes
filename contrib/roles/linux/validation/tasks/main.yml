@@ -49,12 +49,16 @@
     - name: Linux validation | Check the CoreDNS pods
       retries: 10
       delay: 5
+      register: result
       shell: |
         set -o pipefail
         kubectl get pod --selector k8s-app=kube-dns --namespace kube-system --output json | python3 "{{ python_script.path }}"
-        EXIT_CODE=$?
-        rm -f "{{ python_script.path }}"
-        exit $EXIT_CODE
       args:
         executable: /bin/bash
+      until: result.rc == 0
+
+    - name: Linux validation | Cleanup the temp Python script file
+      file:
+        path: "{{ python_script.path }}"
+        state: absent
   when: master
