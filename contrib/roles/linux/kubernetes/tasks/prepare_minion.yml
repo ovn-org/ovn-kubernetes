@@ -7,14 +7,10 @@
       external_ids:ovn-encap-type="geneve"
   changed_when: false
 
-- name: Kubernetes Minion | Checking if certs have been already generated
-  stat:
-    path: /etc/kubernetes/tls/ca.pem
-  register: certs_check
-
-- name: Kubernetes Minion | Generating certs if needed
-  include_tasks: ./generate_certs_minion.yml
-  when: not certs_check.stat.exists or certs_generated
+- name: Kubernetes Minion | Generate the client certificates for the current minion
+  import_role:
+    name: linux/common
+    tasks_from: k8s_client_certs
 
 - name: Kubernetes Minion | Creating kubeconfig
   blockinfile:
@@ -96,7 +92,8 @@
 - name: Kubernetes Minion | Ensure /etc/hosts is updated
   lineinfile:
     path: /etc/hosts
-    line: "{{ host_public_ip }} {{ ansible_hostname }}"
+    regexp: ' {{ ansible_hostname | lower }}$'
+    line: '{{ host_public_ip }} {{ ansible_hostname | lower }}'
 
 - name: Kubernetes Minion | Create CNI binaries folder
   file:
