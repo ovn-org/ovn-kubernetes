@@ -71,14 +71,10 @@
     daemon_reload: yes
   changed_when: false
 
-- name: Kubernetes Minion | Setting kubectl context
-  shell: |
-    set -o errexit
-    kubectl config set-cluster default-cluster --server=https://{{ kubernetes_cluster_info.MASTER_IP }} --certificate-authority=/etc/kubernetes/tls/ca.pem
-    kubectl config set-credentials default-admin --certificate-authority=/etc/kubernetes/tls/ca.pem --client-key=/etc/kubernetes/tls/node-key.pem --client-certificate=/etc/kubernetes/tls/node.pem
-    kubectl config set-context local --cluster=default-cluster --user=default-admin
-    kubectl config use-context local
-  changed_when: false
+- name: Kubernetes Minion | Setup kubectl
+  import_role:
+    name: linux/common
+    tasks_from: kubectl_client
 
 - name: Kubernetes Minion | Prepare OVN certs
   shell: |
