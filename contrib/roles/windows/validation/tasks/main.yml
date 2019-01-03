@@ -5,3 +5,25 @@
 - name: Windows validation | Validate the services success state
   include: "./validate_service.yml service_name={{ item }}"
   with_items: "{{ service_names }}"
+
+- name: Windows validation | Confirm that the minion is registered to the K8s API
+  retries: 10
+  delay: 5
+  register: result
+  win_shell: |
+    $ErrorActionPreference = "Stop"
+    $output = kubectl.exe get node {{ ansible_hostname | lower }} --output=json
+    if($LASTEXITCODE) {
+        Write-Output "ERROR: kubectl.exe CLI exec failed"
+        exit 1
+    }
+    $nodeInfo = $output | ConvertFrom-Json
+    $lastStatus = $nodeInfo.status.conditions[-1]
+    if($lastStatus.type -eq "Ready" -and $lastStatus.status -eq "True") {
+        Write-Output "Node $($nodeInfo.metadata.name) is ready"
+        exit 0
+    }
+    Write-Output "Node $($nodeInfo.metadata.name) is not ready"
+    exit 1
+
+  until: result.rc == 0

@@ -62,3 +62,44 @@
         path: "{{ python_script.path }}"
         state: absent
   when: master
+
+- name: Linux validation | Confirm that the minion is registered to the K8s API
+  block:
+    - name: Linux validation | Create temp file for Python script
+      tempfile:
+        state: file
+      register: python_script
+
+    - name: Linux validation | Set the Python script content
+      blockinfile:
+        path: "{{ python_script.path }}"
+        create: yes
+        block: |
+          import json
+          import sys
+          node_info = json.load(sys.stdin)
+          last_status = node_info['status']['conditions'][-1]
+
+          if last_status['type'] == 'Ready' and last_status['status'] == 'True':
+              print('Node %s is ready' % (node_info['metadata']['name']))
+              sys.exit(0)
+
+          print('ERROR: Node %s is not ready.' % (node_info['metadata']['name']))
+          sys.exit(1)
+
+    - name: Linux validation | Confirm K8s minion health
+      retries: 10
+      delay: 5
+      register: result
+      shell: |
+        set -o pipefail
+        kubectl get node {{ ansible_hostname | lower }} --output json | python3 "{{ python_script.path }}"
+      args:
+        executable: /bin/bash
+      until: result.rc == 0
+
+    - name: Linux validation | Cleanup the temp Python script file
+      file:
+        path: "{{ python_script.path }}"
+        state: absent
+  when: not master
