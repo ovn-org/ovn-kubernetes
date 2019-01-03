@@ -52,7 +52,7 @@
       register: result
       shell: |
         set -o pipefail
-        kubectl get pod --selector k8s-app=kube-dns --namespace kube-system --output json | python3 "{{ python_script.path }}"
+        kubectl get pod --selector k8s-app=kube-dns --namespace kube-system --output json | {{ ansible_python.executable }} "{{ python_script.path }}"
       args:
         executable: /bin/bash
       until: result.rc == 0
@@ -93,7 +93,7 @@
       register: result
       shell: |
         set -o pipefail
-        kubectl get node {{ ansible_hostname | lower }} --output json | python3 "{{ python_script.path }}"
+        kubectl get node {{ ansible_hostname | lower }} --output json | {{ ansible_python.executable }} "{{ python_script.path }}"
       args:
         executable: /bin/bash
       until: result.rc == 0
