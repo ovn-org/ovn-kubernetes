@@ -87,15 +87,32 @@ const (
 // dialNB dials into NorthBound database. Initialize callback creates a cache where
 // all required data will be available for later use.
 func dialNB() (*ovsdb.OVSDB, *dbcache.Cache) {
+	var addrList [][]string
+
 	addr := strings.SplitN(config.OvnNorth.ClientAuth.OvnAddressForClient, ":", 2)
 
+	var options map[string]interface{}
+
+	if addr[0] == "ssl" {
+		addr = append(addr, config.OvnNorth.ClientAuth.Cert)
+		addr = append(addr, config.OvnNorth.ClientAuth.PrivKey)
+		addr = append(addr, config.OvnNorth.ClientAuth.CACert)
+
+		options = map[string]interface{}{
+			"ServerName":         "ovnnb id:ac380054-0a6b-4a3c-9f2d-16a9eb55a89f",
+			"InsecureSkipVerify": true,
+		}
+	}
+
+	addrList = append(addrList, addr)
+
 	nbCache := new(dbcache.Cache)
-	db := ovsdb.Dial([][]string{{addr[0], addr[1]}}, func(db *ovsdb.OVSDB) error {
+	db := ovsdb.Dial(addrList, func(db *ovsdb.OVSDB) error {
 		// initialize cache
 		tmpCache, err := db.Cache(ovsdb.Cache{
 			Schema: "OVN_Northbound",
 			Tables: map[string][]string{
-				"Logical_Switch":      {"_uuid", "name", "ports", "acls", "external_ids"},
+				"Logical_Switch":      {"_uuid", "name", "ports", "acls", "external_ids", "other_config"},
 				"Logical_Switch_Port": {"_uuid", "name", "external_ids", "addresses", "dynamic_addresses"},
 				"ACL":         {"_uuid", "external_ids", "match", "action"},
 				"Address_Set": {"_uuid", "name", "external_ids"},
@@ -114,7 +131,7 @@ func dialNB() (*ovsdb.OVSDB, *dbcache.Cache) {
 			tmpCache, err = db.Cache(ovsdb.Cache{
 				Schema: "OVN_Northbound",
 				Tables: map[string][]string{
-					"Logical_Switch":      {"_uuid", "name", "ports", "acls", "external_ids"},
+					"Logical_Switch":      {"_uuid", "name", "ports", "acls", "external_ids", "other_config"},
 					"Logical_Switch_Port": {"_uuid", "name", "external_ids", "addresses", "dynamic_addresses"},
 					"ACL":         {"_uuid", "external_ids", "match", "action"},
 					"Address_Set": {"_uuid", "name", "external_ids"},
@@ -134,7 +151,7 @@ func dialNB() (*ovsdb.OVSDB, *dbcache.Cache) {
 
 		logrus.Errorf("Error in NB cache: %v", err)
 		return err
-	})
+	}, options)
 
 	return db, nbCache
 }
