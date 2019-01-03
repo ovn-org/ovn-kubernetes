@@ -1,11 +1,14 @@
 package ovsdb
 
 import (
+	"crypto/tls"
+	"crypto/x509"
 	"encoding/json"
 	"errors"
 	"github.com/TomCodeLV/OVSDB-golang-lib/pkg/dbcache"
 	"github.com/TomCodeLV/OVSDB-golang-lib/pkg/dbmonitor"
 	"github.com/TomCodeLV/OVSDB-golang-lib/pkg/dbtransaction"
+	"io/ioutil"
 	"math/rand"
 	"net"
 	"strconv"
@@ -138,7 +141,7 @@ func (s *Synchronize) SetError() {
 // Initialize will be called after every successful connection to db.
 // Function will lock until first successful connect.
 // Returns a pointer to db which will point to new db structure on each connect.
-func Dial(addressList [][]string, initialize func(*OVSDB) error) (*OVSDB) {
+func Dial(addressList [][]string, initialize func(*OVSDB) error, options map[string]interface{}) *OVSDB {
 	ovsdb := new(OVSDB)
 
 	ovsdb.decoderMutex = new(sync.Mutex)
@@ -166,7 +169,30 @@ func Dial(addressList [][]string, initialize func(*OVSDB) error) (*OVSDB) {
 			network := addressList[idx][0]
 			address := addressList[idx][1]
 
-			conn, err := net.Dial(network, address)
+			var err error
+			var conn net.Conn
+			if network == "ssl" {
+				certFile := addressList[idx][2]
+				privateKeyFile := addressList[idx][3]
+				CACertFile := addressList[idx][4]
+
+				cert, _ := tls.LoadX509KeyPair(certFile, privateKeyFile)
+				caCert, _ := ioutil.ReadFile(CACertFile)
+				caCertPool := x509.NewCertPool()
+				caCertPool.AppendCertsFromPEM(caCert)
+
+				cfg := &tls.Config{
+					Certificates: []tls.Certificate{cert},
+					ServerName: options["ServerName"].(string),
+					RootCAs : caCertPool,
+					InsecureSkipVerify: options["InsecureSkipVerify"].(bool),
+				}
+
+				conn, err = tls.Dial("tcp", address, cfg)
+			} else {
+				conn, err = net.Dial(network, address)
+			}
+
 			if err != nil {
 				idx = idx + 1
 				if idx == len(addressList) {
