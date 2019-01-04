@@ -248,16 +248,11 @@ func (oc *Controller) addLogicalPort(pod *kapi.Pod) {
 		return
 	}
 
+	var podMac, podIP string
 	count := 30
 	for count > 0 {
-		if isStaticIP {
-			out, stderr, err = util.RunOVNNbctl("get",
-				"logical_switch_port", portName, "addresses")
-		} else {
-			out, stderr, err = util.RunOVNNbctl("get",
-				"logical_switch_port", portName, "dynamic_addresses")
-		}
-		if err == nil && out != "[]" {
+		podMac, podIP, err = util.GetPortAddresses(portName, isStaticIP)
+		if err == nil && podMac != "" && podIP != "" {
 			break
 		}
 		if err != nil {
@@ -274,26 +269,15 @@ func (oc *Controller) addLogicalPort(pod *kapi.Pod) {
 		return
 	}
 
-	// static addresses have format ["0a:00:00:00:00:01 192.168.1.3"], while
-	// dynamic addresses have format "0a:00:00:00:00:01 192.168.1.3".
-	outStr := strings.TrimLeft(out, `[`)
-	outStr = strings.TrimRight(outStr, `]`)
-	outStr = strings.Trim(outStr, `"`)
-	addresses := strings.Split(outStr, " ")
-	if len(addresses) != 2 {
-		logrus.Errorf("Error while obtaining addresses for %s", portName)
-		return
-	}
-
 	if !isStaticIP {
-		annotation = fmt.Sprintf(`{\"ip_address\":\"%s/%s\", \"mac_address\":\"%s\", \"gateway_ip\": \"%s\"}`, addresses[1], mask, addresses[0], gatewayIP)
-		logrus.Debugf("Annotation values: ip=%s/%s ; mac=%s ; gw=%s\nAnnotation=%s", addresses[1], mask, addresses[0], gatewayIP, annotation)
+		annotation = fmt.Sprintf(`{\"ip_address\":\"%s/%s\", \"mac_address\":\"%s\", \"gateway_ip\": \"%s\"}`, podIP, mask, podMac, gatewayIP)
+		logrus.Debugf("Annotation values: ip=%s/%s ; mac=%s ; gw=%s\nAnnotation=%s", podMac, mask, podIP, gatewayIP, annotation)
 		err = oc.kube.SetAnnotationOnPod(pod, "ovn", annotation)
 		if err != nil {
 			logrus.Errorf("Failed to set annotation on pod %s - %v", pod.Name, err)
 		}
 	}
-	oc.addPodToNamespaceAddressSet(pod.Namespace, addresses[1])
+	oc.addPodToNamespaceAddressSet(pod.Namespace, podIP)
 
 	return
 }

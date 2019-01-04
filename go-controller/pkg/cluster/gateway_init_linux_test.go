@@ -74,8 +74,8 @@ var _ = Describe("Gateway Init Operations", func() {
 				nodeName          string = "node1"
 				lrpMAC            string = "00:00:00:05:46:C3"
 				brLocalnetMAC     string = "11:22:33:44:55:66"
-				lrpIP             string = "100.64.2.3"
-				lrpCIDR           string = lrpIP + "/24"
+				lrpIP             string = "100.64.0.3"
+				lrpCIDR           string = lrpIP + "/16"
 				clusterRouterUUID string = "5cedba03-679f-41f3-b00e-b8ed7437bc6c"
 				systemID          string = "cb9ec8fa-b409-4ef3-9f42-d9283c47aac6"
 				tcpLBUUID         string = "d2e858b2-cb5a-441b-a670-ed450f79a91f"
@@ -106,17 +106,33 @@ var _ = Describe("Gateway Init Operations", func() {
 				"ovn-nbctl --timeout=15 -- --may-exist lr-add " + gwRouter + " -- set logical_router " + gwRouter + " options:chassis=" + systemID + " external_ids:physical_ip=169.254.33.2",
 			})
 			fakeCmds = ovntest.AddFakeCmd(fakeCmds, &ovntest.ExpectedCmd{
-				Cmd:    "ovn-nbctl --timeout=15 --if-exist get logical_router_port rtoj-" + gwRouter + " mac",
-				Output: lrpMAC,
-			})
-			fakeCmds = ovntest.AddFakeCmd(fakeCmds, &ovntest.ExpectedCmd{
-				Cmd:    "ovn-nbctl --timeout=15 --if-exists get logical_router_port rtoj-" + gwRouter + " networks",
-				Output: "[" + lrpCIDR + "]",
+				Cmd:    "ovn-nbctl --timeout=15 get logical_switch_port jtor-" + gwRouter + " dynamic_addresses",
+				Output: "",
 			})
 			fakeCmds = ovntest.AddFakeCmdsNoOutputNoError(fakeCmds, []string{
-				"ovn-nbctl --timeout=15 -- --may-exist lsp-add join jtor-" + gwRouter + " -- set logical_switch_port jtor-" + gwRouter + " type=router options:router-port=rtoj-" + gwRouter + " addresses=\"" + lrpMAC + "\"",
-				"ovn-nbctl --timeout=15 --may-exist lr-route-add " + gwRouter + " " + clusterCIDR + " 100.64.1.1",
-				"ovn-nbctl --timeout=15 --may-exist lr-route-add " + clusterRouterUUID + " 0.0.0.0/0 100.64.1.2",
+				"ovn-nbctl --timeout=15 --wait=sb --may-exist lsp-add join jtor-GR_" + nodeName + " -- --if-exists clear logical_switch_port jtor-GR_" + nodeName + " dynamic_addresses -- lsp-set-addresses jtor-GR_" + nodeName + " dynamic",
+			})
+			fakeCmds = ovntest.AddFakeCmd(fakeCmds, &ovntest.ExpectedCmd{
+				Cmd:    "ovn-nbctl --timeout=15 get logical_switch_port jtor-" + gwRouter + " dynamic_addresses",
+				Output: lrpMAC + " " + lrpIP,
+			})
+			fakeCmds = ovntest.AddFakeCmd(fakeCmds, &ovntest.ExpectedCmd{
+				Cmd:    "ovn-nbctl --timeout=15 --if-exists get logical_switch join external-ids:join-subnet-prefix-length",
+				Output: "16",
+			})
+			fakeCmds = ovntest.AddFakeCmdsNoOutputNoError(fakeCmds, []string{
+				"ovn-nbctl --timeout=15 -- --may-exist lrp-add GR_" + nodeName + " rtoj-GR_" + nodeName + " " + lrpMAC + " " + lrpCIDR + " -- set logical_switch_port jtor-GR_" + nodeName + " type=router options:router-port=rtoj-GR_" + nodeName + " addresses=router",
+				"ovn-nbctl --timeout=15 set logical_router " + gwRouter + " options:lb_force_snat_ip=" + lrpIP,
+				"ovn-nbctl --timeout=15 --may-exist lr-route-add " + gwRouter + " " + clusterCIDR + " 100.64.0.1",
+			})
+			fakeCmds = ovntest.AddFakeCmd(fakeCmds, &ovntest.ExpectedCmd{
+				Cmd: "ovn-nbctl --timeout=15 --data=bare --format=table --no-heading --columns=name,options find logical_router options:lb_force_snat_ip!=-",
+				Output: fmt.Sprintf(`GR_openshift-node-2      chassis=5befb1e1-b0b1-4277-bb1d-54e8732a39c6 lb_force_snat_ip=%s
+GR_openshift-node-1      chassis=0861e85c-5060-42fd-839e-8c463c7da378 lb_force_snat_ip=100.64.0.2
+GR_openshift-master-node chassis=6a47b33b-89d3-4d65-ac31-b19b549326c7 lb_force_snat_ip=100.64.0.4`, lrpIP),
+			})
+			fakeCmds = ovntest.AddFakeCmdsNoOutputNoError(fakeCmds, []string{
+				"ovn-nbctl --timeout=15 --may-exist lr-route-add " + clusterRouterUUID + " 0.0.0.0/0 " + lrpIP,
 			})
 			fakeCmds = addNodeportLBs(nodeName, tcpLBUUID, udpLBUUID, fakeCmds)
 			fakeCmds = ovntest.AddFakeCmdsNoOutputNoError(fakeCmds, []string{
@@ -135,7 +151,6 @@ var _ = Describe("Gateway Init Operations", func() {
 				"ovn-nbctl --timeout=15 -- --may-exist lsp-add ext_" + nodeName + " etor-" + gwRouter + " -- set logical_switch_port etor-" + gwRouter + " type=router options:router-port=rtoe-" + gwRouter + " addresses=\"" + brLocalnetMAC + "\"",
 				"ovn-nbctl --timeout=15 --may-exist lr-route-add " + gwRouter + " 0.0.0.0/0 169.254.33.1 rtoe-" + gwRouter,
 				"ovn-nbctl --timeout=15 --may-exist lr-nat-add " + gwRouter + " snat 169.254.33.2 " + clusterCIDR,
-				"ovn-nbctl --timeout=15 set logical_router " + gwRouter + " options:lb_force_snat_ip=" + lrpIP,
 				"ovn-nbctl --timeout=15 --may-exist --policy=src-ip lr-route-add " + clusterRouterUUID + " " + nodeSubnet + " " + lrpIP,
 			})
 
@@ -239,8 +254,8 @@ var _ = Describe("Gateway Init Operations", func() {
 				const (
 					nodeName          string = "node1"
 					lrpMAC            string = "00:00:00:05:46:C3"
-					lrpIP             string = "100.64.2.3"
-					lrpCIDR           string = lrpIP + "/24"
+					lrpIP             string = "100.64.0.3"
+					lrpCIDR           string = lrpIP + "/16"
 					clusterRouterUUID string = "5cedba03-679f-41f3-b00e-b8ed7437bc6c"
 					systemID          string = "cb9ec8fa-b409-4ef3-9f42-d9283c47aac6"
 					tcpLBUUID         string = "d2e858b2-cb5a-441b-a670-ed450f79a91f"
@@ -290,17 +305,33 @@ var _ = Describe("Gateway Init Operations", func() {
 					"ovn-nbctl --timeout=15 -- --may-exist lr-add " + gwRouter + " -- set logical_router " + gwRouter + " options:chassis=" + systemID + " external_ids:physical_ip=" + eth0IP,
 				})
 				fakeCmds = ovntest.AddFakeCmd(fakeCmds, &ovntest.ExpectedCmd{
-					Cmd:    "ovn-nbctl --timeout=15 --if-exist get logical_router_port rtoj-" + gwRouter + " mac",
-					Output: lrpMAC,
-				})
-				fakeCmds = ovntest.AddFakeCmd(fakeCmds, &ovntest.ExpectedCmd{
-					Cmd:    "ovn-nbctl --timeout=15 --if-exists get logical_router_port rtoj-" + gwRouter + " networks",
-					Output: "[" + lrpCIDR + "]",
+					Cmd:    "ovn-nbctl --timeout=15 get logical_switch_port jtor-" + gwRouter + " dynamic_addresses",
+					Output: "",
 				})
 				fakeCmds = ovntest.AddFakeCmdsNoOutputNoError(fakeCmds, []string{
-					"ovn-nbctl --timeout=15 -- --may-exist lsp-add join jtor-" + gwRouter + " -- set logical_switch_port jtor-" + gwRouter + " type=router options:router-port=rtoj-" + gwRouter + " addresses=\"" + lrpMAC + "\"",
-					"ovn-nbctl --timeout=15 --may-exist lr-route-add " + gwRouter + " " + clusterCIDR + " 100.64.1.1",
-					"ovn-nbctl --timeout=15 --may-exist lr-route-add " + clusterRouterUUID + " 0.0.0.0/0 100.64.1.2",
+					"ovn-nbctl --timeout=15 --wait=sb --may-exist lsp-add join jtor-GR_" + nodeName + " -- --if-exists clear logical_switch_port jtor-GR_" + nodeName + " dynamic_addresses -- lsp-set-addresses jtor-GR_" + nodeName + " dynamic",
+				})
+				fakeCmds = ovntest.AddFakeCmd(fakeCmds, &ovntest.ExpectedCmd{
+					Cmd:    "ovn-nbctl --timeout=15 get logical_switch_port jtor-" + gwRouter + " dynamic_addresses",
+					Output: lrpMAC + " " + lrpIP,
+				})
+				fakeCmds = ovntest.AddFakeCmd(fakeCmds, &ovntest.ExpectedCmd{
+					Cmd:    "ovn-nbctl --timeout=15 --if-exists get logical_switch join external-ids:join-subnet-prefix-length",
+					Output: "16",
+				})
+				fakeCmds = ovntest.AddFakeCmdsNoOutputNoError(fakeCmds, []string{
+					"ovn-nbctl --timeout=15 -- --may-exist lrp-add GR_" + nodeName + " rtoj-GR_" + nodeName + " " + lrpMAC + " " + lrpCIDR + " -- set logical_switch_port jtor-GR_" + nodeName + " type=router options:router-port=rtoj-GR_" + nodeName + " addresses=router",
+					"ovn-nbctl --timeout=15 set logical_router " + gwRouter + " options:lb_force_snat_ip=" + lrpIP,
+					"ovn-nbctl --timeout=15 --may-exist lr-route-add " + gwRouter + " " + clusterCIDR + " 100.64.0.1",
+				})
+				fakeCmds = ovntest.AddFakeCmd(fakeCmds, &ovntest.ExpectedCmd{
+					Cmd: "ovn-nbctl --timeout=15 --data=bare --format=table --no-heading --columns=name,options find logical_router options:lb_force_snat_ip!=-",
+					Output: fmt.Sprintf(`GR_openshift-node-2      chassis=5befb1e1-b0b1-4277-bb1d-54e8732a39c6 lb_force_snat_ip=%s
+GR_openshift-node-1      chassis=0861e85c-5060-42fd-839e-8c463c7da378 lb_force_snat_ip=100.64.0.2
+GR_openshift-master-node chassis=6a47b33b-89d3-4d65-ac31-b19b549326c7 lb_force_snat_ip=100.64.0.4`, lrpIP),
+				})
+				fakeCmds = ovntest.AddFakeCmdsNoOutputNoError(fakeCmds, []string{
+					"ovn-nbctl --timeout=15 --may-exist lr-route-add " + clusterRouterUUID + " 0.0.0.0/0 " + lrpIP,
 				})
 				fakeCmds = addNodeportLBs(nodeName, tcpLBUUID, udpLBUUID, fakeCmds)
 				fakeCmds = ovntest.AddFakeCmdsNoOutputNoError(fakeCmds, []string{
@@ -319,7 +350,6 @@ var _ = Describe("Gateway Init Operations", func() {
 					"ovn-nbctl --timeout=15 -- --may-exist lsp-add ext_" + nodeName + " etor-" + gwRouter + " -- set logical_switch_port etor-" + gwRouter + " type=router options:router-port=rtoe-" + gwRouter + " addresses=\"" + eth0MAC + "\"",
 					"ovn-nbctl --timeout=15 --may-exist lr-route-add " + gwRouter + " 0.0.0.0/0 " + eth0GWIP + " rtoe-" + gwRouter,
 					"ovn-nbctl --timeout=15 --may-exist lr-nat-add " + gwRouter + " snat " + eth0IP + " " + clusterCIDR,
-					"ovn-nbctl --timeout=15 set logical_router " + gwRouter + " options:lb_force_snat_ip=" + lrpIP,
 					"ovn-nbctl --timeout=15 --may-exist --policy=src-ip lr-route-add " + clusterRouterUUID + " " + nodeSubnet + " " + lrpIP,
 				})
 				fakeCmds = ovntest.AddFakeCmd(fakeCmds, &ovntest.ExpectedCmd{
@@ -440,8 +470,8 @@ cookie=0x0, duration=8366.597s, table=1, n_packets=10641, n_bytes=10370087, prio
 				const (
 					nodeName          string = "node1"
 					lrpMAC            string = "00:00:00:05:46:C3"
-					lrpIP             string = "100.64.2.3"
-					lrpCIDR           string = lrpIP + "/24"
+					lrpIP             string = "100.64.0.3"
+					lrpCIDR           string = lrpIP + "/16"
 					clusterRouterUUID string = "5cedba03-679f-41f3-b00e-b8ed7437bc6c"
 					systemID          string = "cb9ec8fa-b409-4ef3-9f42-d9283c47aac6"
 					tcpLBUUID         string = "d2e858b2-cb5a-441b-a670-ed450f79a91f"
@@ -464,17 +494,33 @@ cookie=0x0, duration=8366.597s, table=1, n_packets=10641, n_bytes=10370087, prio
 					"ovn-nbctl --timeout=15 -- --may-exist lr-add " + gwRouter + " -- set logical_router " + gwRouter + " options:chassis=" + systemID + " external_ids:physical_ip=" + eth0IP,
 				})
 				fakeCmds = ovntest.AddFakeCmd(fakeCmds, &ovntest.ExpectedCmd{
-					Cmd:    "ovn-nbctl --timeout=15 --if-exist get logical_router_port rtoj-" + gwRouter + " mac",
-					Output: lrpMAC,
-				})
-				fakeCmds = ovntest.AddFakeCmd(fakeCmds, &ovntest.ExpectedCmd{
-					Cmd:    "ovn-nbctl --timeout=15 --if-exists get logical_router_port rtoj-" + gwRouter + " networks",
-					Output: "[" + lrpCIDR + "]",
+					Cmd:    "ovn-nbctl --timeout=15 get logical_switch_port jtor-" + gwRouter + " dynamic_addresses",
+					Output: "",
 				})
 				fakeCmds = ovntest.AddFakeCmdsNoOutputNoError(fakeCmds, []string{
-					"ovn-nbctl --timeout=15 -- --may-exist lsp-add join jtor-" + gwRouter + " -- set logical_switch_port jtor-" + gwRouter + " type=router options:router-port=rtoj-" + gwRouter + " addresses=\"" + lrpMAC + "\"",
-					"ovn-nbctl --timeout=15 --may-exist lr-route-add " + gwRouter + " " + clusterCIDR + " 100.64.1.1",
-					"ovn-nbctl --timeout=15 --may-exist lr-route-add " + clusterRouterUUID + " 0.0.0.0/0 100.64.1.2",
+					"ovn-nbctl --timeout=15 --wait=sb --may-exist lsp-add join jtor-GR_" + nodeName + " -- --if-exists clear logical_switch_port jtor-GR_" + nodeName + " dynamic_addresses -- lsp-set-addresses jtor-GR_" + nodeName + " dynamic",
+				})
+				fakeCmds = ovntest.AddFakeCmd(fakeCmds, &ovntest.ExpectedCmd{
+					Cmd:    "ovn-nbctl --timeout=15 get logical_switch_port jtor-" + gwRouter + " dynamic_addresses",
+					Output: lrpMAC + " " + lrpIP,
+				})
+				fakeCmds = ovntest.AddFakeCmd(fakeCmds, &ovntest.ExpectedCmd{
+					Cmd:    "ovn-nbctl --timeout=15 --if-exists get logical_switch join external-ids:join-subnet-prefix-length",
+					Output: "16",
+				})
+				fakeCmds = ovntest.AddFakeCmdsNoOutputNoError(fakeCmds, []string{
+					"ovn-nbctl --timeout=15 -- --may-exist lrp-add GR_" + nodeName + " rtoj-GR_" + nodeName + " " + lrpMAC + " " + lrpCIDR + " -- set logical_switch_port jtor-GR_" + nodeName + " type=router options:router-port=rtoj-GR_" + nodeName + " addresses=router",
+					"ovn-nbctl --timeout=15 set logical_router " + gwRouter + " options:lb_force_snat_ip=" + lrpIP,
+					"ovn-nbctl --timeout=15 --may-exist lr-route-add " + gwRouter + " " + clusterCIDR + " 100.64.0.1",
+				})
+				fakeCmds = ovntest.AddFakeCmd(fakeCmds, &ovntest.ExpectedCmd{
+					Cmd: "ovn-nbctl --timeout=15 --data=bare --format=table --no-heading --columns=name,options find logical_router options:lb_force_snat_ip!=-",
+					Output: fmt.Sprintf(`GR_openshift-node-2      chassis=5befb1e1-b0b1-4277-bb1d-54e8732a39c6 lb_force_snat_ip=%s
+GR_openshift-node-1      chassis=0861e85c-5060-42fd-839e-8c463c7da378 lb_force_snat_ip=100.64.0.2
+GR_openshift-master-node chassis=6a47b33b-89d3-4d65-ac31-b19b549326c7 lb_force_snat_ip=100.64.0.4`, lrpIP),
+				})
+				fakeCmds = ovntest.AddFakeCmdsNoOutputNoError(fakeCmds, []string{
+					"ovn-nbctl --timeout=15 --may-exist lr-route-add " + clusterRouterUUID + " 0.0.0.0/0 " + lrpIP,
 				})
 				fakeCmds = addNodeportLBs(nodeName, tcpLBUUID, udpLBUUID, fakeCmds)
 				fakeCmds = ovntest.AddFakeCmdsNoOutputNoError(fakeCmds, []string{
@@ -492,7 +538,6 @@ cookie=0x0, duration=8366.597s, table=1, n_packets=10641, n_bytes=10370087, prio
 					"ovn-nbctl --timeout=15 -- --may-exist lsp-add ext_" + nodeName + " etor-" + gwRouter + " -- set logical_switch_port etor-" + gwRouter + " type=router options:router-port=rtoe-" + gwRouter + " addresses=\"" + eth0MAC + "\"",
 					"ovn-nbctl --timeout=15 --may-exist lr-route-add " + gwRouter + " 0.0.0.0/0 " + eth0GWIP + " rtoe-" + gwRouter,
 					"ovn-nbctl --timeout=15 --may-exist lr-nat-add " + gwRouter + " snat " + eth0IP + " " + clusterCIDR,
-					"ovn-nbctl --timeout=15 set logical_router " + gwRouter + " options:lb_force_snat_ip=" + lrpIP,
 					"ovn-nbctl --timeout=15 --may-exist --policy=src-ip lr-route-add " + clusterRouterUUID + " " + nodeSubnet + " " + lrpIP,
 				})
 
