@@ -34,3 +34,23 @@
     executable: /bin/bash
   until: result.rc == 0
   when: master
+
+- name: Linux validation | Confirm K8s minions health
+  retries: 10
+  delay: 5
+  register: result
+  shell: |
+    set -o errexit
+    READY_STATUS=$(kubectl get node {{ hostvars[item]['ansible_facts']['hostname'] | lower }} --output jsonpath='{@.status.conditions[?(@.type=="Ready")].status}')
+    if [[ "$READY_STATUS" != "True" ]]; then
+        echo "ERROR: Node {{ hostvars[item]['ansible_facts']['hostname'] | lower }} is not ready"
+        exit 1
+    fi
+    echo "Node {{ hostvars[item]['ansible_facts']['hostname'] | lower }} is ready"
+  args:
+    executable: /bin/bash
+  until: result.rc == 0
+  with_items:
+    - "{{ groups['kube-minions-linux'] }}"
+    - "{{ groups['kube-minions-windows'] }}"
+  when: master
