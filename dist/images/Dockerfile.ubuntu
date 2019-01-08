@@ -12,8 +12,7 @@ FROM ubuntu:18.04
 
 USER root
 
-RUN apt-get update
-RUN apt-get install -y iptables iproute2 curl gawk software-properties-common
+RUN apt-get update && apt-get install -y iptables iproute2 curl gawk software-properties-common
 
 # We do not have much control over the exact version of OVS/OVN that can be
 # obtained from upstream Ubuntu. guru@ovn.org maintains more latest versions of
@@ -21,11 +20,9 @@ RUN apt-get install -y iptables iproute2 curl gawk software-properties-common
 # you prefer to use upstream Ubuntu packages instead.
 RUN echo "deb http://18.191.116.101/openvswitch/stable /" |  tee /etc/apt/sources.list.d/openvswitch.list
 RUN curl http://18.191.116.101/openvswitch/keyFile |  apt-key add -
-RUN apt-get update
 
 # Install OVS and OVN packages.
-RUN apt-get install -y openvswitch-switch openvswitch-common
-RUN apt-get install -y ovn-central ovn-common ovn-host
+RUN apt-get update && apt-get install -y openvswitch-switch openvswitch-common ovn-central ovn-common ovn-host
 
 RUN mkdir -p /var/run/openvswitch
 RUN mkdir -p /etc/cni/net.d
