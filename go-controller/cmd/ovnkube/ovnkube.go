@@ -132,14 +132,7 @@ func delPidfile(pidfile string) {
 	}
 }
 
-func runOvnKube(ctx *cli.Context) error {
-	exec := kexec.New()
-	_, err := config.InitConfig(ctx, exec, nil)
-	if err != nil {
-		return err
-	}
-	pidfile := ctx.String("pidfile")
-
+func setupPIDFile(pidfile string) error {
 	c := make(chan os.Signal, 2)
 	signal.Notify(c, os.Interrupt, syscall.SIGTERM)
 	go func() {
@@ -148,40 +141,55 @@ func runOvnKube(ctx *cli.Context) error {
 		os.Exit(1)
 	}()
 
-	defer delPidfile(pidfile)
+	// need to test if already there
+	_, err := os.Stat(pidfile)
 
-	if pidfile != "" {
-		// need to test if already there
-		_, err := os.Stat(pidfile)
-
-		// Create if it doesn't exist, else exit with error
-		if os.IsNotExist(err) {
+	// Create if it doesn't exist, else exit with error
+	if os.IsNotExist(err) {
+		if err := ioutil.WriteFile(pidfile, []byte(fmt.Sprintf("%d", os.Getpid())), 0644); err != nil {
+			logrus.Errorf("failed to write pidfile %s (%v). Ignoring..", pidfile, err)
+		}
+	} else {
+		// get the pid and see if it exists
+		pid, err := ioutil.ReadFile(pidfile)
+		if err != nil {
+			logrus.Errorf("pidfile %s exists but can't be read", pidfile)
+			return err
+		}
+		_, err1 := os.Stat("/proc/" + string(pid[:]) + "/cmdline")
+		if os.IsNotExist(err1) {
+			// Left over pid from dead process
 			if err := ioutil.WriteFile(pidfile, []byte(fmt.Sprintf("%d", os.Getpid())), 0644); err != nil {
 				logrus.Errorf("failed to write pidfile %s (%v). Ignoring..", pidfile, err)
 			}
 		} else {
-			// get the pid and see if it exists
-			pid, err := ioutil.ReadFile(pidfile)
-			if err != nil {
-				logrus.Errorf("pidfile %s exists but can't be read", pidfile)
-				return err
-			}
-			_, err1 := os.Stat("/proc/" + string(pid[:]) + "/cmdline")
-			if os.IsNotExist(err1) {
-				// Left over pid from dead process
-				if err := ioutil.WriteFile(pidfile, []byte(fmt.Sprintf("%d", os.Getpid())), 0644); err != nil {
-					logrus.Errorf("failed to write pidfile %s (%v). Ignoring..", pidfile, err)
-				}
-			} else {
-				logrus.Errorf("pidfile %s exists and ovnkube is running", pidfile)
-				os.Exit(1)
-			}
+			logrus.Errorf("pidfile %s exists and ovnkube is running", pidfile)
+			os.Exit(1)
 		}
+	}
+
+	return nil
+}
+
+func runOvnKube(ctx *cli.Context) error {
+	exec := kexec.New()
+	_, err := config.InitConfig(ctx, exec, nil)
+	if err != nil {
+		return err
 	}
 
 	if err = util.SetExec(exec); err != nil {
 		logrus.Errorf("Failed to initialize exec helper: %v", err)
 		return err
+	}
+
+	pidfile := ctx.String("pidfile")
+	if pidfile != "" {
+		defer delPidfile(pidfile)
+		err = setupPIDFile(pidfile)
+		if err != nil {
+			return err
+		}
 	}
 
 	nodeToRemove := ctx.String("remove-node")
