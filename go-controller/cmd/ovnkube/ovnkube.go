@@ -183,15 +183,6 @@ func runOvnKube(ctx *cli.Context) error {
 		return err
 	}
 
-	pidfile := ctx.String("pidfile")
-	if pidfile != "" {
-		defer delPidfile(pidfile)
-		err = setupPIDFile(pidfile)
-		if err != nil {
-			return err
-		}
-	}
-
 	nodeToRemove := ctx.String("remove-node")
 	if nodeToRemove != "" {
 		err = util.RemoveNode(nodeToRemove)
@@ -199,6 +190,15 @@ func runOvnKube(ctx *cli.Context) error {
 			logrus.Errorf("Failed to remove node %v", err)
 		}
 		return nil
+	}
+
+	pidfile := ctx.String("pidfile")
+	if pidfile != "" {
+		defer delPidfile(pidfile)
+		err = setupPIDFile(pidfile)
+		if err != nil {
+			return err
+		}
 	}
 
 	clientset, err := util.NewClientset(&config.Kubernetes)
