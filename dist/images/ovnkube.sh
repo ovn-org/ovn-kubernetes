@@ -440,7 +440,7 @@ run-ovn-northd () {
   # no monitor (and no detach), start nb_ovsdb and sb_ovsdb in separate containers
   /usr/share/openvswitch/scripts/ovn-ctl start_northd \
     --no-monitor --ovn-manage-ovsdb=no \
-    --ovn-northd-log=${ovn_log_northd} \
+    --ovn-northd-log="${ovn_log_northd}" \
     --db-nb-addr=${OVN_NORTH} --db-sb-addr=${OVN_SOUTH} \
     ${ovn_northd_opts}
   echo "=============== run_ovn_northd ========== RUNNING"
