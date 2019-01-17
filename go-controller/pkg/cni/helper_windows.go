@@ -123,8 +123,16 @@ func (pr *PodRequest) ConfigureInterface(namespace string, podName string, macAd
 	endpointName := fmt.Sprintf("%s_%s", namespace, podName)
 
 	defer func() {
-		// Delete the endpoint in case CNI fails
+		// Delete the OVS port and endpoint in case CNI fails
 		if err != nil {
+			ovsArgs := []string{
+				"del-port", "br-int", endpointName,
+			}
+			out, errOVSDelete := exec.Command("ovs-vsctl", ovsArgs...).CombinedOutput()
+			if errOVSDelete != nil && !strings.Contains(string(out), "no port named") {
+				// Don't return an error just log it
+				logrus.Warningf("failed to delete OVS port %s: %v  %q", endpointName, errOVSDelete, string(out))
+			}
 			errHNSDelete := deleteHNSEndpoint(endpointName)
 			if errHNSDelete != nil {
 				logrus.Warningf("Failed to delete the HNS Endpoint, reason: %q", errHNSDelete)
