@@ -4,7 +4,6 @@ package cluster
 
 import (
 	"fmt"
-	"strings"
 	"syscall"
 
 	"github.com/openvswitch/ovn-kubernetes/go-controller/pkg/util"
@@ -38,12 +37,8 @@ func getDefaultGatewayInterfaceDetails() (string, string, error) {
 }
 
 func getIntfName(gatewayIntf string) (string, error) {
-	// The given (or autodetected) interface is an OVS bridge;
-	// detect if we previously ran NIC/bridge setup
-	if !strings.HasPrefix(gatewayIntf, "br") {
-		return "", fmt.Errorf("gateway interface %s is an OVS bridge not "+
-			"a physical device", gatewayIntf)
-	}
+	// The given (or autodetected) interface is an OVS bridge and this could be
+	// created by us using util.NicToBridge() or it was pre-created by the user.
 
 	// Is intfName a port of gatewayIntf?
 	intfName := util.GetNicName(gatewayIntf)
