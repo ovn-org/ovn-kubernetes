@@ -256,7 +256,7 @@ var _ = Describe("Gateway Init Operations", func() {
 					Err: fmt.Errorf(""),
 				})
 				fakeCmds = ovntest.AddFakeCmd(fakeCmds, &ovntest.ExpectedCmd{
-					Cmd: "ovs-vsctl --timeout=15 -- --may-exist add-br breth0 -- br-set-external-id breth0 bridge-id breth0 -- set bridge breth0 fail-mode=standalone other_config:hwaddr=" + eth0MAC + " -- --may-exist add-port breth0 eth0 -- set port eth0 other-config:transient=true",
+					Cmd: "ovs-vsctl --timeout=15 -- --may-exist add-br breth0 -- br-set-external-id breth0 bridge-id breth0 -- br-set-external-id breth0 bridge-uplink eth0 -- set bridge breth0 fail-mode=standalone other_config:hwaddr=" + eth0MAC + " -- --may-exist add-port breth0 eth0 -- set port eth0 other-config:transient=true",
 					Action: func() error {
 						return testNS.Do(func(ns.NetNS) error {
 							defer GinkgoRecover()

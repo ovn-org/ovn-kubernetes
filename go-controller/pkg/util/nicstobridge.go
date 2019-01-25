@@ -25,7 +25,19 @@ func getBridgeName(iface string) string {
 // GetNicName returns the physical NIC name, given an OVS bridge name
 // configured by NicToBridge()
 func GetNicName(brName string) string {
-	return fmt.Sprintf("%s", brName[len("br"):])
+	stdout, stderr, err := RunOVSVsctl(
+		"br-get-external-id", brName, "bridge-uplink")
+	if err != nil {
+		logrus.Errorf("Failed to get the bridge-uplink for the bridge %q:, stderr: %q, error: %v",
+			brName, stderr, err)
+		return ""
+	}
+	if stdout == "" && strings.HasPrefix(brName, "br") {
+		// This would happen if the bridge was created before the bridge-uplink
+		// changes got integrated.
+		return fmt.Sprintf("%s", brName[len("br"):])
+	}
+	return stdout
 }
 
 func saveIPAddress(oldLink, newLink netlink.Link, addrs []netlink.Addr) error {
@@ -162,6 +174,7 @@ func NicToBridge(iface string) (string, error) {
 	stdout, stderr, err := RunOVSVsctl(
 		"--", "--may-exist", "add-br", bridge,
 		"--", "br-set-external-id", bridge, "bridge-id", bridge,
+		"--", "br-set-external-id", bridge, "bridge-uplink", iface,
 		"--", "set", "bridge", bridge, "fail-mode=standalone",
 		fmt.Sprintf("other_config:hwaddr=%s", ifaceLink.Attrs().HardwareAddr),
 		"--", "--may-exist", "add-port", bridge, iface,
