@@ -84,10 +84,13 @@ var _ = Describe("Gateway Init Operations", func() {
 				gwRouter          string = "GR_" + nodeName
 				clusterIPNet      string = "10.1.0.0"
 				clusterCIDR       string = clusterIPNet + "/16"
+				patch1            string = "patch-br-int-to-br-localnet_node1"
+				patch2            string = "patch-br-localnet_node1-to-br-int"
 			)
 
 			fakeCmds := ovntest.AddFakeCmdsNoOutputNoError(nil, []string{
 				"ovs-vsctl --timeout=15 --may-exist add-br br-localnet",
+				"ovs-vsctl --timeout=15 set Open_vSwitch . external_ids:ovn-bridge-mappings=" + util.PhysicalNetworkName + ":br-localnet",
 				"ip link set br-localnet up",
 				"ovs-vsctl --timeout=15 --may-exist add-port br-localnet br-nexthop -- set interface br-nexthop type=internal",
 				"ip link set br-nexthop up",
@@ -128,9 +131,9 @@ var _ = Describe("Gateway Init Operations", func() {
 			})
 			fakeCmds = ovntest.AddFakeCmdsNoOutputNoError(fakeCmds, []string{
 				"ovs-vsctl --timeout=15 set bridge br-localnet other-config:hwaddr=" + brLocalnetMAC,
-				"ovs-vsctl --timeout=15 --may-exist add-port br-localnet k8s-patch-br-localnet-br-int -- set interface k8s-patch-br-localnet-br-int type=patch options:peer=k8s-patch-br-int-br-localnet",
-				"ovs-vsctl --timeout=15 --may-exist add-port br-int k8s-patch-br-int-br-localnet -- set interface k8s-patch-br-int-br-localnet type=patch options:peer=k8s-patch-br-localnet-br-int external-ids:iface-id=br-localnet_" + nodeName,
-				"ovn-nbctl --timeout=15 -- --may-exist lsp-add ext_" + nodeName + " br-localnet_" + nodeName + " -- lsp-set-addresses br-localnet_" + nodeName + " unknown",
+				"ovs-vsctl --timeout=15 --may-exist add-port br-localnet " + patch2 + " -- set interface " + patch2 + " type=patch options:peer=" + patch1 + " -- set port " + patch2 + " external_ids:ovn-localnet-port=br-localnet_node1",
+				"ovs-vsctl --timeout=15 --may-exist add-port br-int " + patch1 + " -- set interface " + patch1 + " type=patch options:peer=" + patch2 + " -- set port " + patch1 + " external_ids:ovn-localnet-port=br-localnet_node1",
+				"ovn-nbctl --timeout=15 -- --may-exist lsp-add ext_" + nodeName + " br-localnet_" + nodeName + " -- lsp-set-addresses br-localnet_" + nodeName + " unknown -- lsp-set-type br-localnet_" + nodeName + " localnet -- lsp-set-options br-localnet_" + nodeName + " network_name=" + util.PhysicalNetworkName,
 				"ovn-nbctl --timeout=15 -- --may-exist lrp-add " + gwRouter + " rtoe-" + gwRouter + " " + brLocalnetMAC + " 169.254.33.2/24 -- set logical_router_port rtoe-" + gwRouter + " external-ids:gateway-physical-ip=yes",
 				"ovn-nbctl --timeout=15 -- --may-exist lsp-add ext_" + nodeName + " etor-" + gwRouter + " -- set logical_switch_port etor-" + gwRouter + " type=router options:router-port=rtoe-" + gwRouter + " addresses=\"" + brLocalnetMAC + "\"",
 				"ovn-nbctl --timeout=15 --may-exist lr-route-add " + gwRouter + " 0.0.0.0/0 169.254.33.1 rtoe-" + gwRouter,
@@ -278,6 +281,9 @@ var _ = Describe("Gateway Init Operations", func() {
 						})
 					},
 				})
+				fakeCmds = ovntest.AddFakeCmdsNoOutputNoError(fakeCmds, []string{
+					"ovs-vsctl --timeout=15 set Open_vSwitch . external_ids:ovn-bridge-mappings=" + util.PhysicalNetworkName + ":breth0",
+				})
 				fakeCmds = ovntest.AddFakeCmd(fakeCmds, &ovntest.ExpectedCmd{
 					Cmd:    "ovn-nbctl --timeout=15 --data=bare --no-heading --columns=_uuid find logical_router external_ids:k8s-cluster-router=yes",
 					Output: clusterRouterUUID,
@@ -312,9 +318,9 @@ var _ = Describe("Gateway Init Operations", func() {
 				})
 				fakeCmds = ovntest.AddFakeCmdsNoOutputNoError(fakeCmds, []string{
 					"ovs-vsctl --timeout=15 set bridge breth0 other-config:hwaddr=" + eth0MAC,
-					"ovs-vsctl --timeout=15 --may-exist add-port breth0 k8s-patch-breth0-br-int -- set interface k8s-patch-breth0-br-int type=patch options:peer=k8s-patch-br-int-breth0",
-					"ovs-vsctl --timeout=15 --may-exist add-port br-int k8s-patch-br-int-breth0 -- set interface k8s-patch-br-int-breth0 type=patch options:peer=k8s-patch-breth0-br-int external-ids:iface-id=breth0_" + nodeName,
-					"ovn-nbctl --timeout=15 -- --may-exist lsp-add ext_" + nodeName + " breth0_" + nodeName + " -- lsp-set-addresses breth0_" + nodeName + " unknown",
+					"ovs-vsctl --timeout=15 --may-exist add-port breth0 patch-breth0_node1-to-br-int -- set interface patch-breth0_node1-to-br-int type=patch options:peer=patch-br-int-to-breth0_node1 -- set port patch-breth0_node1-to-br-int external_ids:ovn-localnet-port=breth0_node1",
+					"ovs-vsctl --timeout=15 --may-exist add-port br-int patch-br-int-to-breth0_node1 -- set interface patch-br-int-to-breth0_node1 type=patch options:peer=patch-breth0_node1-to-br-int -- set port patch-br-int-to-breth0_node1 external_ids:ovn-localnet-port=breth0_node1",
+					"ovn-nbctl --timeout=15 -- --may-exist lsp-add ext_" + nodeName + " breth0_" + nodeName + " -- lsp-set-addresses breth0_" + nodeName + " unknown -- lsp-set-type breth0_" + nodeName + " localnet -- lsp-set-options breth0_" + nodeName + " network_name=" + util.PhysicalNetworkName,
 					"ovn-nbctl --timeout=15 -- --may-exist lrp-add " + gwRouter + " rtoe-" + gwRouter + " " + eth0MAC + " " + eth0CIDR + " -- set logical_router_port rtoe-" + gwRouter + " external-ids:gateway-physical-ip=yes",
 					"ovn-nbctl --timeout=15 -- --may-exist lsp-add ext_" + nodeName + " etor-" + gwRouter + " -- set logical_switch_port etor-" + gwRouter + " type=router options:router-port=rtoe-" + gwRouter + " addresses=\"" + eth0MAC + "\"",
 					"ovn-nbctl --timeout=15 --may-exist lr-route-add " + gwRouter + " 0.0.0.0/0 " + eth0GWIP + " rtoe-" + gwRouter,
@@ -323,7 +329,7 @@ var _ = Describe("Gateway Init Operations", func() {
 					"ovn-nbctl --timeout=15 --may-exist --policy=src-ip lr-route-add " + clusterRouterUUID + " " + nodeSubnet + " " + lrpIP,
 				})
 				fakeCmds = ovntest.AddFakeCmd(fakeCmds, &ovntest.ExpectedCmd{
-					Cmd:    "ovs-vsctl --timeout=15 --if-exists get interface k8s-patch-breth0-br-int ofport",
+					Cmd:    "ovs-vsctl --timeout=15 --if-exists get interface patch-breth0_node1-to-br-int ofport",
 					Output: "5",
 				})
 				fakeCmds = ovntest.AddFakeCmd(fakeCmds, &ovntest.ExpectedCmd{
@@ -339,7 +345,7 @@ var _ = Describe("Gateway Init Operations", func() {
 				})
 				// nodePortWatcher()
 				fakeCmds = ovntest.AddFakeCmd(fakeCmds, &ovntest.ExpectedCmd{
-					Cmd:    "ovs-vsctl --timeout=15 --if-exists get interface k8s-patch-breth0-br-int ofport",
+					Cmd:    "ovs-vsctl --timeout=15 --if-exists get interface patch-breth0_node1-to-br-int ofport",
 					Output: "9",
 				})
 				fakeCmds = ovntest.AddFakeCmd(fakeCmds, &ovntest.ExpectedCmd{
@@ -355,11 +361,11 @@ var _ = Describe("Gateway Init Operations", func() {
 				// syncServices()
 				fakeCmds = ovntest.AddFakeCmd(fakeCmds, &ovntest.ExpectedCmd{
 					Cmd: "ovs-ofctl dump-flows breth0",
-					Output: `cookie=0x0, duration=8366.605s, table=0, n_packets=0, n_bytes=0, priority=100,ip,in_port="k8s-patch-breth" actions=ct(commit,zone=64000),output:eth0
+					Output: `cookie=0x0, duration=8366.605s, table=0, n_packets=0, n_bytes=0, priority=100,ip,in_port="patch-breth0_no" actions=ct(commit,zone=64000),output:eth0
 cookie=0x0, duration=8366.603s, table=0, n_packets=10642, n_bytes=10370438, priority=50,ip,in_port=eth0 actions=ct(table=1,zone=64000)
 cookie=0x0, duration=8366.705s, table=0, n_packets=11549, n_bytes=1746901, priority=0 actions=NORMAL
-cookie=0x0, duration=8366.602s, table=1, n_packets=0, n_bytes=0, priority=100,ct_state=+est+trk actions=output:"k8s-patch-breth"
-cookie=0x0, duration=8366.600s, table=1, n_packets=0, n_bytes=0, priority=100,ct_state=+rel+trk actions=output:"k8s-patch-breth"
+cookie=0x0, duration=8366.602s, table=1, n_packets=0, n_bytes=0, priority=100,ct_state=+est+trk actions=output:"patch-breth0_no"
+cookie=0x0, duration=8366.600s, table=1, n_packets=0, n_bytes=0, priority=100,ct_state=+rel+trk actions=output:"patch-breth0_no"
 cookie=0x0, duration=8366.597s, table=1, n_packets=10641, n_bytes=10370087, priority=0 actions=LOCAL
 `,
 				})
