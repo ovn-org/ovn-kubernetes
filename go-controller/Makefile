@@ -6,7 +6,7 @@ CNIBINDIR ?= ${DESTDIR}/opt/cni/bin
 GCFLAGS ?=
 export GCFLAGS
 
-.PHONY: all build check test
+.PHONY: all build extensions check test
 
 # Example:
 #   make
@@ -25,6 +25,9 @@ windows:
 	export WINDOWS_BUILD="yes"; \
 	hack/build-go.sh cmd/ovnkube/ovnkube.go; \
 	hack/build-go.sh cmd/ovn-k8s-cni-overlay/ovn-k8s-cni-overlay.go;
+
+extensions:
+	hack/build-go.sh extensions/cmd/hybrid-sdn/hybrid-sdn.go
 
 check test:
 	hack/test-go.sh ${PKGS}
