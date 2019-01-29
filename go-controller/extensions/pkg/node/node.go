@@ -7,22 +7,22 @@ import (
 	"k8s.io/client-go/kubernetes"
 )
 
-type NodeController struct {
+type nodeController struct {
 	clientset *kubernetes.Clientset
 }
 
 func NewNodeHandler(clientset *kubernetes.Clientset) types.NodeHandler {
-	return &NodeController{clientset: clientset}
+	return &nodeController{clientset: clientset}
 }
 
-func (n *NodeController) Add(node *kapi.Node) {
+func (n *nodeController) Add(node *kapi.Node) {
 	return
 }
 
-func (n *NodeController) Update(oldNode, newNode *kapi.Node) {
+func (n *nodeController) Update(oldNode, newNode *kapi.Node) {
 	return
 }
 
-func (n *NodeController) Delete(node *kapi.Node) {
+func (n *nodeController) Delete(node *kapi.Node) {
 	return
 }

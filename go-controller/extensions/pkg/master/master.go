@@ -11,22 +11,22 @@ var (
 	HybridClusterSubnet string
 )
 
-type MasterController struct {
+type masterController struct {
 	clientset *kubernetes.Clientset
 }
 
 func NewNodeHandler(clientset *kubernetes.Clientset) types.NodeHandler {
-	return &MasterController{clientset: clientset}
+	return &masterController{clientset: clientset}
 }
 
-func (m *MasterController) Add(node *kapi.Node) {
+func (m *masterController) Add(node *kapi.Node) {
 	return
 }
 
-func (m *MasterController) Update(oldNode, newNode *kapi.Node) {
+func (m *masterController) Update(oldNode, newNode *kapi.Node) {
 	return
 }
 
-func (m *MasterController) Delete(node *kapi.Node) {
+func (m *masterController) Delete(node *kapi.Node) {
 	return
 }
