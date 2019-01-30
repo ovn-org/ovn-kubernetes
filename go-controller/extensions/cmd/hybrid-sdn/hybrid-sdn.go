@@ -63,7 +63,7 @@ func runHybridSDN(ctx *cli.Context) error {
 		panic(err.Error())
 	}
 
-	// TODO: expose the stop channel to user?
+	// TODO: expose the stop channel to user? (trap etc)
 	stopChan := make(chan struct{})
 
 	master := ctx.Bool("master")
