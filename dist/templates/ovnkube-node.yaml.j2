@@ -43,6 +43,14 @@ spec:
 
         command: ["/root/ovnkube.sh", "ovs-server"]
 
+        livenessProbe:
+          exec:
+            command:
+            - /usr/share/openvswitch/scripts/ovs-ctl
+            - status
+          initialDelaySeconds: 15
+          periodSeconds: 5
+
         securityContext:
           runAsUser: 0
           # Permission could be reduced by selecting an appropriate SELinux policy
