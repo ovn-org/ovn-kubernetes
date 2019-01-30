@@ -28,6 +28,8 @@ windows:
 
 extensions:
 	hack/build-go.sh extensions/cmd/hybrid-sdn/hybrid-sdn.go
+	export WINDOWS_BUILD="yes"; \
+	hack/build-go.sh extensions/cmd/hybrid-sdn/hybrid-sdn.go
 
 check test:
 	hack/test-go.sh ${PKGS}

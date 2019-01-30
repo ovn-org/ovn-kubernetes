@@ -13,11 +13,16 @@ type nodeController struct {
 }
 
 func NewNodeHandler(clientset kubernetes.Interface) types.NodeHandler {
-	return &nodeController{
+	n := &nodeController{
 		kube: &kube.Kube{KClient: clientset},
 	}
+	// initialize self
+	n.InitSelf()
+	return n
 }
 
+// Add function learns about a new node being added to the cluster
+// For a windows node, this means watching for all nodes and programming the routing
 func (n *nodeController) Add(node *kapi.Node) {
 	return
 }
@@ -28,4 +33,11 @@ func (n *nodeController) Update(oldNode, newNode *kapi.Node) {
 
 func (n *nodeController) Delete(node *kapi.Node) {
 	return
+}
+
+// InitSelf initializes the node it is currently running on.
+// On Windows, this means:
+//  1. Setting up this node and its VxLAN extension for talking to other nodes
+//  2. Setting back annotations about its VTEP and gateway MAC address to its own node object
+func (n *nodeController) InitSelf() {
 }
