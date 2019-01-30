@@ -25,7 +25,7 @@ image_str="{{ ovn_image | default('docker.io/ovnkube/ovn-daemonset:latest') }}"
 policy_str="{{ ovn_image_pull_policy | default('IfNotPresent') }}"
 
 sed "s,${image_str},${image},
-s,${policy_str},${policy}," ../templates/ovnkube.yaml.j2 > ../yaml/ovnkube.yaml
+s,${policy_str},${policy}," ../templates/ovnkube-node.yaml.j2 > ../yaml/ovnkube.yaml
 
 sed "s,${image_str},${image},
 s,${policy_str},${policy}," ../templates/ovnkube-master.yaml.j2 > ../yaml/ovnkube-master.yaml
