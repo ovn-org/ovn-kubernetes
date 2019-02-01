@@ -36,6 +36,7 @@
 #
 # OVN_NET_CIDR - the network cidr
 # OVN_SVC_CIDR - the cluster-service-cidr
+# KUBECONFIG   - to access the cluster
 #
 # The following variables are optional and can override internally derived values.
 # K8S_APISERVER - hostname:port (URL)of the real apiserver, not the service address
@@ -62,6 +63,9 @@ cmd=${1:-"start-ovn"}
 # There is a single image for both master nodes and compute nodes
 # When OVN_MASTER is true, start the master daemons
 ovn_master=${OVN_MASTER:-"false"}
+
+# KUBECONFIG - allows the pods to access the cluster. The path must be mounted in the 
+# container.
 
 # ovn daemon log levels
 ovn_log_northd=${OVN_LOG_NORTHD:-"-vconsole:info"}
@@ -145,7 +149,7 @@ wait_for_event () {
 ready_to_start_node () {
 
   # See if ep is available ...
-  ovn_master_host=$(KUBECONFIG=/etc/origin/node/node.kubeconfig kubectl get ep -n ovn-kubernetes ovnkube-master 2>/dev/null | grep 6642 | sed 's/:/ /' | gawk '/ovnkube-master/{ print $2 }')
+  ovn_master_host=$(KUBECONFIG=${KUBECONFIG:-"/etc/origin/node/node.kubeconfig"} kubectl get ep -n ovn-kubernetes ovnkube-master 2>/dev/null | grep 6642 | sed 's/:/ /' | awk '/ovnkube-master/{ print $2 }')
   if [[ ${ovn_master_host} == "" ]] ; then
     # ... if not (we may be on the master) see if northd is up
     get_master_ovn_vars
@@ -176,7 +180,7 @@ check_ovn_daemonset_version () {
 # (on non-master call oc get ep ...)
 get_master_ovn_vars () {
   master_host=$(hostname)
-  ovn_master_host=$(host ${master_host} | gawk '{ print $4 }')
+  ovn_master_host=$(host ${master_host} | awk '{ print $4 }')
   # OVN_NORTH and OVN_SOUTH override derived host
   # Currently limited to tcp (ssl is not supported yet)
   ovn_nbdb=${OVN_NORTH:-tcp://${ovn_master_host}:6641}
@@ -282,10 +286,10 @@ display_version () {
   echo " =================== daemonset version ${ovn_daemonset_version}"
   if [[ -f /root/.git/HEAD ]]
   then
-    commit=$(gawk '{ print $1 }' /root/.git/HEAD )
+    commit=$(awk '{ print $1 }' /root/.git/HEAD )
     if [[ ${commit} == "ref:" ]]
     then
-      head=$(gawk '{ print $2 }' /root/.git/HEAD )
+      head=$(awk '{ print $2 }' /root/.git/HEAD )
       commit=$(cat /root/.git/${head} )
     else
       head="master"
@@ -750,7 +754,7 @@ echo "================== ovnkube.sh --- version: ${ovnkube_version} ============
   display_version
 
   # get api server
-  k8s_server=$(KUBECONFIG=/etc/origin/node/node.kubeconfig kubectl config view --minify | gawk '/server:/{ print $2 }')
+  k8s_server=$(KUBECONFIG=${KUBECONFIG:-"/etc/origin/node/node.kubeconfig"} kubectl config view --minify | awk '/server:/{ print $2 }')
   k8s_apiserver=${K8S_APISERVER:-${k8s_server}}
 
   # display_env
