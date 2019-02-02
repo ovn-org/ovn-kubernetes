@@ -20,6 +20,7 @@ USER root
 
 ENV PYTHONDONTWRITEBYTECODE yes
 
+COPY kubernetes.repo /etc/yum.repos.d/kubernetes.repo
 RUN yum install -y  \
 	PyYAML bind-utils \
 	openssl \
@@ -27,7 +28,7 @@ RUN yum install -y  \
 	firewalld-filesystem \
 	libpcap \
 	hostname \
-	kubernetes-client \
+	kubectl \
 	iproute strace socat && \
 	yum clean all
 
