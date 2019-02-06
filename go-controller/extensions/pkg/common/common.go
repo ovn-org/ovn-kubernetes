@@ -25,17 +25,19 @@ var (
 	nodeType reflect.Type = reflect.TypeOf(&kapi.Node{})
 )
 
-func RunNode(clientset *kubernetes.Clientset, stopChan chan struct{}) error {
+// RunNode is the top level function to run hybrid-sdn in node mode
+func RunNode(clientset kubernetes.Interface, stopChan chan struct{}) error {
 	h := node.NewNodeHandler(clientset)
 	return watch(clientset, stopChan, h)
 }
 
-func RunMaster(clientset *kubernetes.Clientset, stopChan chan struct{}) error {
+// RunMaster is the top level function to run hybrid-sdn in master mode
+func RunMaster(clientset kubernetes.Interface, stopChan chan struct{}) error {
 	h := master.NewNodeHandler(clientset)
 	return watch(clientset, stopChan, h)
 }
 
-func watch(clientset *kubernetes.Clientset, stopChan chan struct{}, h types.NodeHandler) error {
+func watch(clientset kubernetes.Interface, stopChan chan struct{}, h types.NodeHandler) error {
 	// create factory and start the node informer
 	factory := informerfactory.NewSharedInformerFactory(clientset, resyncInterval)
 	inf := factory.Core().V1().Nodes().Informer()

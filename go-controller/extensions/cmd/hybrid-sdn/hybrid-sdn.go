@@ -71,11 +71,11 @@ func runHybridSDN(ctx *cli.Context) error {
 
 	if master {
 		mastercontroller.HybridClusterSubnet = ctx.String("hybrid-cluster-subnet")
-		common.RunMaster(clientset, stopChan)
+		err = common.RunMaster(clientset, stopChan)
 	}
 	if node {
-		common.RunNode(clientset, stopChan)
+		err = common.RunNode(clientset, stopChan)
 	}
 
-	return nil
+	return err
 }

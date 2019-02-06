@@ -14,11 +14,13 @@ import (
 )
 
 const (
-	ExtensionHostSubnet = "hybrid-sdn.extensions.ovn.kubernets.io/hostsubnet"
-	KubeOSKey           = "beta.kubernetes.io/os"
+	extensionHostSubnet = "hybrid-sdn.extensions.ovn.kubernets.io/hostsubnet"
+	kubeOSKey           = "beta.kubernetes.io/os"
 )
 
 var (
+	// HybridClusterSubnet is the CIDR string given to the extension network
+	// This means all pods running in the extension network are part of this subnet
 	HybridClusterSubnet string
 )
 
@@ -27,6 +29,8 @@ type masterController struct {
 	masterSubnetAllocator *netutils.SubnetAllocator
 }
 
+// NewNodeHandler returns an implementation of NodeHandler interface
+// so that Add/Update/Delete events are handled properly
 func NewNodeHandler(clientset kubernetes.Interface) types.NodeHandler {
 	m := &masterController{
 		kube: &kube.Kube{KClient: clientset},
@@ -46,13 +50,13 @@ func NewNodeHandler(clientset kubernetes.Interface) types.NodeHandler {
 func (m *masterController) Add(node *kapi.Node) {
 	// check if this is a node that we care about
 	// for the hybrid-sdn case, we care about it only if its a windows node
-	osPlatform, ok := node.Annotations[KubeOSKey]
+	osPlatform, ok := node.Annotations[kubeOSKey]
 	if !ok || osPlatform != "Windows" {
 		return
 	}
 
 	// Do not create a subnet if the node already has a subnet
-	hostsubnet, ok := node.Annotations[ExtensionHostSubnet]
+	hostsubnet, ok := node.Annotations[extensionHostSubnet]
 	if ok {
 		// double check if the hostsubnet looks valid
 		_, _, err := net.ParseCIDR(hostsubnet)
@@ -65,17 +69,16 @@ func (m *masterController) Add(node *kapi.Node) {
 	sn, err := m.masterSubnetAllocator.GetNetwork()
 	if err != nil {
 		logrus.Errorf("Error allocating network for node %s: %v", node.Name, err)
-		return
 	} else {
-		err = m.kube.SetAnnotationOnNode(node, ExtensionHostSubnet, sn.String())
+		err = m.kube.SetAnnotationOnNode(node, extensionHostSubnet, sn.String())
 		if err != nil {
 			_ = m.masterSubnetAllocator.ReleaseNetwork(sn)
 			logrus.Errorf("Error creating subnet %s for node %s: %v", sn.String(), node.Name, err)
 			return
 		}
 		logrus.Infof("Created HostSubnet %s", sn.String())
-		return
 	}
+	return
 }
 
 func (m *masterController) Update(oldNode, newNode *kapi.Node) {
@@ -83,7 +86,7 @@ func (m *masterController) Update(oldNode, newNode *kapi.Node) {
 }
 
 func (m *masterController) Delete(node *kapi.Node) {
-	sub, ok := node.Annotations[ExtensionHostSubnet]
+	sub, ok := node.Annotations[extensionHostSubnet]
 	if !ok {
 		logrus.Errorf("Error in obtaining host subnet for node %q for deletion", node.Name)
 		return

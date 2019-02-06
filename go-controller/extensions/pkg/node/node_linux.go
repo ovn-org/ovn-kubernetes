@@ -12,6 +12,8 @@ type nodeController struct {
 	kube *kube.Kube
 }
 
+// NewNodeHandler returns an implementation of NodeHandler interface
+// so that Add/Update/Delete events are appropriately handled
 func NewNodeHandler(clientset kubernetes.Interface) types.NodeHandler {
 	n := &nodeController{
 		kube: &kube.Kube{KClient: clientset},
@@ -26,6 +28,7 @@ func NewNodeHandler(clientset kubernetes.Interface) types.NodeHandler {
 // and then programming the VxLAN gateway for the VTEP routes based on hostsubnet
 // For a windows node, this means watching for all nodes and programming the routing
 func (n *nodeController) Add(node *kapi.Node) {
+	// check if OVN has initialized a gateway for this node or not
 	return
 }
 
