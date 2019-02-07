@@ -67,8 +67,6 @@ spec:
         - mountPath: /sys
           name: host-sys
           readOnly: true
-        - mountPath: /etc/origin/node
-          name: host-origin-node
         - mountPath: /etc/openvswitch
           name: host-config-openvswitch
         resources:
@@ -81,6 +79,11 @@ spec:
         env:
         - name: OVN_DAEMONSET_VERSION
           value: "3"
+        - name: K8S_APISERVER
+          valueFrom:
+            configMapKeyRef:
+              name: ovn-config
+              key: k8s_apiserver
 
 
       # firewall rules for ovn - assumed to be setup
@@ -127,8 +130,6 @@ spec:
         # We mount our socket here
         - mountPath: /var/run/ovn-kubernetes
           name: host-var-run-ovn-kubernetes
-        - mountPath: /etc/origin/node
-          name: host-origin-node
         # CNI related mounts which we take over
         - mountPath: /host/opt/cni/bin
           name: host-opt-cni-bin
@@ -156,6 +157,11 @@ spec:
             configMapKeyRef:
               name: ovn-config
               key: svc_cidr
+        - name: K8S_APISERVER
+          valueFrom:
+            configMapKeyRef:
+              name: ovn-config
+              key: k8s_apiserver
         - name: K8S_NODE
           valueFrom:
             fieldRef:
@@ -211,8 +217,6 @@ spec:
         # We mount our socket here
         - mountPath: /var/run/ovn-kubernetes
           name: host-var-run-ovn-kubernetes
-        - mountPath: /etc/origin/node
-          name: host-origin-node
         # CNI related mounts which we take over
         - mountPath: /host/opt/cni/bin
           name: host-opt-cni-bin
@@ -240,6 +244,11 @@ spec:
             configMapKeyRef:
               name: ovn-config
               key: svc_cidr
+        - name: K8S_APISERVER
+          valueFrom:
+            configMapKeyRef:
+              name: ovn-config
+              key: k8s_apiserver
         - name: K8S_NODE
           valueFrom:
             fieldRef:
@@ -298,10 +307,6 @@ spec:
       - name: host-sys
         hostPath:
           path: /sys
-
-      - name: host-origin-node
-        hostPath:
-          path: /etc/origin/node
       - name: host-opt-cni-bin
         hostPath:
           path: /opt/cni/bin

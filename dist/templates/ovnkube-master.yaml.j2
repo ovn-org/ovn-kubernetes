@@ -87,8 +87,6 @@ spec:
         # We mount our socket here
         - mountPath: /var/run/ovn-kubernetes
           name: host-var-run-ovn-kubernetes
-        - mountPath: /etc/origin/node
-          name: host-origin-node
         # CNI related mounts which we take over
         - mountPath: /host/opt/cni/bin
           name: host-opt-cni-bin
@@ -116,6 +114,11 @@ spec:
             configMapKeyRef:
               name: ovn-config
               key: svc_cidr
+        - name: K8S_APISERVER
+          valueFrom:
+            configMapKeyRef:
+              name: ovn-config
+              key: k8s_apiserver
         - name: K8S_NODE
           valueFrom:
             fieldRef:
@@ -175,8 +178,6 @@ spec:
         # We mount our socket here
         - mountPath: /var/run/ovn-kubernetes
           name: host-var-run-ovn-kubernetes
-        - mountPath: /etc/origin/node
-          name: host-origin-node
         # CNI related mounts which we take over
         - mountPath: /host/opt/cni/bin
           name: host-opt-cni-bin
@@ -204,6 +205,11 @@ spec:
             configMapKeyRef:
               name: ovn-config
               key: svc_cidr
+        - name: K8S_APISERVER
+          valueFrom:
+            configMapKeyRef:
+              name: ovn-config
+              key: k8s_apiserver
         - name: K8S_NODE
           valueFrom:
             fieldRef:
@@ -263,8 +269,6 @@ spec:
         # We mount our socket here
         - mountPath: /var/run/ovn-kubernetes
           name: host-var-run-ovn-kubernetes
-        - mountPath: /etc/origin/node
-          name: host-origin-node
         # CNI related mounts which we take over
         - mountPath: /host/opt/cni/bin
           name: host-opt-cni-bin
@@ -292,6 +296,11 @@ spec:
             configMapKeyRef:
               name: ovn-config
               key: svc_cidr
+        - name: K8S_APISERVER
+          valueFrom:
+            configMapKeyRef:
+              name: ovn-config
+              key: k8s_apiserver
         - name: K8S_NODE
           valueFrom:
             fieldRef:
@@ -350,8 +359,6 @@ spec:
         # We mount our socket here
         - mountPath: /var/run/ovn-kubernetes
           name: host-var-run-ovn-kubernetes
-        - mountPath: /etc/origin/node
-          name: host-origin-node
         # CNI related mounts which we take over
         - mountPath: /host/opt/cni/bin
           name: host-opt-cni-bin
@@ -381,6 +388,11 @@ spec:
             configMapKeyRef:
               name: ovn-config
               key: svc_cidr
+        - name: K8S_APISERVER
+          valueFrom:
+            configMapKeyRef:
+              name: ovn-config
+              key: k8s_apiserver
         - name: K8S_NODE
           valueFrom:
             fieldRef:
@@ -433,9 +445,6 @@ spec:
       - name: host-var-run-ovn-kubernetes
         hostPath:
           path: /var/run/ovn-kubernetes
-      - name: host-origin-node
-        hostPath:
-          path: /etc/origin/node
       - name: host-opt-cni-bin
         hostPath:
           path: /opt/cni/bin

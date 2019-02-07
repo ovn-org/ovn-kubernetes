@@ -12,7 +12,7 @@ FROM ubuntu:18.04
 
 USER root
 
-RUN apt-get update && apt-get install -y iptables iproute2 curl gawk software-properties-common
+RUN apt-get update && apt-get install -y iptables iproute2 curl software-properties-common
 
 # We do not have much control over the exact version of OVS/OVN that can be
 # obtained from upstream Ubuntu. guru@ovn.org maintains more latest versions of
