@@ -48,10 +48,12 @@
 # K8S_CACERT - the apiserver CA. Automatically detected when running in a pod
 # OVN_CONTROLLER_OPTS - the options for ovn-ctl
 # OVN_NORTHD_OPTS - the options for the ovn northbound db
+# OVN_GATEWAY_OPTS - the options for the ovn gateway
 # OVNKUBE_LOGLEVEL - log level for ovnkube (0..5, default 4)
 # OVN_LOG_NORTHD - log level (ovn-ctl default: -vconsole:emer -vsyslog:err -vfile:info)
 # OVN_LOG_NB - log level (ovn-ctl default: -vconsole:off -vfile:info)
 # OVN_LOG_SB - log level (ovn-ctl default: -vconsole:off -vfile:info)
+# OVN_LOG_CONTROLLER - log level (ovn-ctl default: -vconsole:off -vfile:info)
 
 # The argument to the command is the operation to be performed
 # ovn-northd ovn-master ovn-controller ovn-node display display_env ovn_debug
@@ -66,6 +68,7 @@ ovn_master=${OVN_MASTER:-"false"}
 ovn_log_northd=${OVN_LOG_NORTHD:-"-vconsole:info"}
 ovn_log_nb=${OVN_LOG_NB:-"-vconsole:info"}
 ovn_log_sb=${OVN_LOG_SB:-"-vconsole:info"}
+ovn_log_controller=${OVN_LOG_CONTROLLER:-"-vconsole:info"}
 
 logdir=/var/log/openvswitch
 logpost=$(date +%F-%T)
@@ -103,12 +106,14 @@ K8S_CACERT=${K8S_CACERT:-/var/run/secrets/kubernetes.io/serviceaccount/ca.crt}
 ovn_northd_opts=${OVN_NORTHD_OPTS:-"--db-nb-sock=/var/run/openvswitch/ovnnb_db.sock --db-sb-sock=/var/run/openvswitch/ovnsb_db.sock"}
 
 # ovn-controller
-#OVN_CONTROLLER_OPTS="--ovn-controller-log=-vconsole:emer --vsyslog:err -vfile:info"
-ovn_controller_opts=${OVN_CONTROLLER_OPTS:-"--ovn-controller-log=-vconsole:info"}
+#OVN_CONTROLLER_OPTS=""
+ovn_controller_opts=${OVN_CONTROLLER_OPTS:-""}
 
 # set the log level for ovnkube
 ovnkube_loglevel=${OVNKUBE_LOGLEVEL:-4}
 
+#OVN_GATEWAY_OPTS=""
+ovn_gateway_opts=${OVN_GATEWAY_OPTS:-"--gateway-localnet"}
 
 net_cidr=${OVN_NET_CIDR:-10.128.0.0/14/23}
 svc_cidr=${OVN_SVC_CIDR:-172.30.0.0/16}
@@ -302,6 +307,8 @@ echo OVN_NORTH ${ovn_nbdb}
 echo OVN_NORTHD_OPTS ${ovn_northd_opts}
 echo OVN_SOUTH ${ovn_sbdb}
 echo OVN_CONTROLLER_OPTS ${ovn_controller_opts}
+echo OVN_LOG_CONTROLLER ${ovn_log_controller}
+echo OVN_GATEWAY_OPTS ${ovn_gateway_opts}
 echo OVN_NET_CIDR ${net_cidr}
 echo OVN_SVC_CIDR ${svc_cidr}
 echo K8S_APISERVER ${K8S_APISERVER}
@@ -482,7 +489,7 @@ run-ovn-northd () {
   /usr/share/openvswitch/scripts/ovn-ctl start_northd \
     --no-monitor --ovn-manage-ovsdb=no \
     --db-nb-addr=${ovn_nbdb_i} --db-sb-addr=${ovn_sbdb_i} \
-    --ovn-northd-log=${ovn_log_northd} \
+    --ovn-northd-log="${ovn_log_northd}" \
     ${ovn_northd_opts}
 
   wait_for_event pid_ready ovn-northd.pid
@@ -590,7 +597,7 @@ ovn-controller () {
   rm -f /var/run/ovn-kubernetes/cni/*
   rm -f /var/run/openvswitch/ovn-controller.*.ctl
   /usr/share/openvswitch/scripts/ovn-ctl --no-monitor start_controller \
-    ${ovn_controller_opts}
+    --ovn-controller-log="${ovn_log_controller}" ${ovn_controller_opts}
 
   wait_for_event pid_ready ovn-controller.pid
   echo "=============== ovn-controller ========== running"
@@ -646,7 +653,7 @@ ovn-node () {
       --nb-address=${ovn_nbdb} --sb-address=${ovn_sbdb} \
       --nodeport \
       --loglevel=${ovnkube_loglevel} \
-      --init-gateways --gateway-localnet \
+      --init-gateways ${ovn_gateway_opts}  \
       --pidfile /var/run/openvswitch/ovnkube.pid \
       --logfile /var/log/openvswitch/ovnkube.log &
 
@@ -722,7 +729,7 @@ start_ovn () {
   echo "=============== start ovn-controller"
   rm -f /var/run/ovn-kubernetes/cni/*
   /usr/share/openvswitch/scripts/ovn-ctl --no-monitor start_controller \
-    ${ovn_controller_opts}
+    --ovn-controller-log="${ovn_log_controller}" ${ovn_controller_opts}
 
   # ovn-node - all nodes
   echo  "=============== start ovn-node"
@@ -737,7 +744,7 @@ start_ovn () {
       --nb-address=${ovn_nbdb} --sb-address=${ovn_sbdb} \
       --nodeport \
       --loglevel=${ovnkube_loglevel} \
-      --init-gateways --gateway-localnet \
+      --init-gateways ${ovn_gateway_opts}  \
       --pidfile /var/run/openvswitch/ovnkube.pid \
       --logfile /var/log/openvswitch/ovnkube.log &
 
