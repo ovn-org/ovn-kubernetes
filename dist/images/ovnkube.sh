@@ -33,13 +33,11 @@
 
 # ====================
 # Environment variables are used to customize operation
-#
+# K8S_APISERVER - hostname:port (URL)of the real apiserver, not the service address
 # OVN_NET_CIDR - the network cidr
 # OVN_SVC_CIDR - the cluster-service-cidr
-# KUBECONFIG   - to access the cluster
 #
 # The following variables are optional and can override internally derived values.
-# K8S_APISERVER - hostname:port (URL)of the real apiserver, not the service address
 # OVN_NORTH - the full URL to the ovn northdb
 # OVN_SOUTH - the full URL to the ovn southdb
 #
@@ -63,9 +61,6 @@ cmd=${1:-"start-ovn"}
 # There is a single image for both master nodes and compute nodes
 # When OVN_MASTER is true, start the master daemons
 ovn_master=${OVN_MASTER:-"false"}
-
-# KUBECONFIG - allows the pods to access the cluster. The path must be mounted in the 
-# container.
 
 # ovn daemon log levels
 ovn_log_northd=${OVN_LOG_NORTHD:-"-vconsole:info"}
@@ -149,7 +144,7 @@ wait_for_event () {
 ready_to_start_node () {
 
   # See if ep is available ...
-  ovn_master_host=$(KUBECONFIG=${KUBECONFIG:-"/etc/origin/node/node.kubeconfig"} kubectl get ep -n ovn-kubernetes ovnkube-master 2>/dev/null | grep 6642 | sed 's/:/ /' | awk '/ovnkube-master/{ print $2 }')
+  ovn_master_host=$(kubectl --server=${K8S_APISERVER} --token=${k8s_token} --certificate-authority=${K8S_CACERT} get ep -n ovn-kubernetes ovnkube-master 2>/dev/null | grep 6642 | sed 's/:/ /' | awk '/ovnkube-master/{ print $2 }')
   if [[ ${ovn_master_host} == "" ]] ; then
     # ... if not (we may be on the master) see if northd is up
     get_master_ovn_vars
@@ -180,7 +175,8 @@ check_ovn_daemonset_version () {
 # (on non-master call oc get ep ...)
 get_master_ovn_vars () {
   master_host=$(hostname)
-  ovn_master_host=$(host ${master_host} | awk '{ print $4 }')
+
+  ovn_master_host=$(getent ahosts ${master_host} | head -1 | awk '{ print $1 }')
   # OVN_NORTH and OVN_SOUTH override derived host
   # Currently limited to tcp (ssl is not supported yet)
   ovn_nbdb=${OVN_NORTH:-tcp://${ovn_master_host}:6641}
@@ -308,7 +304,7 @@ echo OVN_SOUTH ${ovn_sbdb}
 echo OVN_CONTROLLER_OPTS ${ovn_controller_opts}
 echo OVN_NET_CIDR ${net_cidr}
 echo OVN_SVC_CIDR ${svc_cidr}
-echo K8S_APISERVER ${k8s_apiserver}
+echo K8S_APISERVER ${K8S_APISERVER}
 echo OVNKUBE_LOGLEVEL ${ovnkube_loglevel}
 echo OVN_DAEMONSET_VERSION ${ovn_daemonset_version}
 echo ovnkube.sh version ${ovnkube_version}
@@ -542,7 +538,7 @@ ovn-master () {
   /usr/bin/ovnkube \
     --init-master ${ovn_pod_host} --net-controller \
     --cluster-subnet ${net_cidr} --service-cluster-ip-range=${svc_cidr} \
-    --k8s-token=${k8s_token} --k8s-apiserver=${k8s_apiserver} --k8s-cacert=${K8S_CACERT} \
+    --k8s-token=${k8s_token} --k8s-apiserver=${K8S_APISERVER} --k8s-cacert=${K8S_CACERT} \
     --nb-address=${ovn_nbdb_i} --sb-address=${ovn_sbdb_i} \
     --nodeport \
     --loglevel=${ovnkube_loglevel} \
@@ -646,7 +642,7 @@ ovn-node () {
   # TEMP HACK - WORKAROUND
   /usr/bin/ovnkube --init-node ${K8S_NODE} \
       --cluster-subnet ${net_cidr} --service-cluster-ip-range=${svc_cidr} \
-      --k8s-token=${k8s_token} --k8s-apiserver=${k8s_apiserver} --k8s-cacert=${K8S_CACERT} \
+      --k8s-token=${k8s_token} --k8s-apiserver=${K8S_APISERVER} --k8s-cacert=${K8S_CACERT} \
       --nb-address=${ovn_nbdb} --sb-address=${ovn_sbdb} \
       --nodeport \
       --loglevel=${ovnkube_loglevel} \
@@ -711,7 +707,7 @@ start_ovn () {
     /usr/bin/ovnkube \
       --init-master ${ovn_pod_host} --net-controller \
       --cluster-subnet ${net_cidr} --service-cluster-ip-range=${svc_cidr} \
-      --k8s-token=${k8s_token} --k8s-apiserver=${k8s_apiserver} --k8s-cacert=${K8S_CACERT} \
+      --k8s-token=${k8s_token} --k8s-apiserver=${K8S_APISERVER} --k8s-cacert=${K8S_CACERT} \
       --nb-address=${ovn_nbdb} --sb-address=${ovn_sbdb} \
       --nodeport \
       --loglevel=${ovnkube_loglevel} \
@@ -737,7 +733,7 @@ start_ovn () {
   # TEMP HACK - WORKAROUND
   /usr/bin/ovnkube --init-node ${K8S_NODE} \
       --cluster-subnet ${net_cidr} --service-cluster-ip-range=${svc_cidr} \
-      --k8s-token=${k8s_token} --k8s-apiserver=${k8s_apiserver} --k8s-cacert=${K8S_CACERT} \
+      --k8s-token=${k8s_token} --k8s-apiserver=${K8S_APISERVER} --k8s-cacert=${K8S_CACERT} \
       --nb-address=${ovn_nbdb} --sb-address=${ovn_sbdb} \
       --nodeport \
       --loglevel=${ovnkube_loglevel} \
@@ -752,10 +748,6 @@ echo "================== ovnkube.sh --- version: ${ovnkube_version} ============
 
   echo " ==================== command: ${cmd}"
   display_version
-
-  # get api server
-  k8s_server=$(KUBECONFIG=${KUBECONFIG:-"/etc/origin/node/node.kubeconfig"} kubectl config view --minify | awk '/server:/{ print $2 }')
-  k8s_apiserver=${K8S_APISERVER:-${k8s_server}}
 
   # display_env
 
