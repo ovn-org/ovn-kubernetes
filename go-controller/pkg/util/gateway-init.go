@@ -8,6 +8,12 @@ import (
 	"strings"
 )
 
+const (
+	// PhysicalNetworkName is the name that maps to an OVS bridge that provides
+	// access to physical/external network
+	PhysicalNetworkName = "physnet"
+)
+
 // GetK8sClusterRouter returns back the OVN distibuted router
 func GetK8sClusterRouter() (string, error) {
 	k8sClusterRouter, stderr, err := RunOVNNbctl("--data=bare",
@@ -286,6 +292,7 @@ func GatewayInit(clusterIPSubnet []string, nodeName, nicIP, physicalInterface,
 	}
 
 	var ifaceID, macAddress string
+	var localNetArgs = []string{}
 	if physicalInterface != "" {
 		// Connect physical interface to br-int. Get its mac address.
 		ifaceID = physicalInterface + "_" + nodeName
@@ -333,33 +340,18 @@ func GatewayInit(clusterIPSubnet []string, nodeName, nicIP, physicalInterface,
 				"error: %v", stdout, stderr, err)
 		}
 		ifaceID = bridgeInterface + "_" + nodeName
-
-		// Connect bridge interface to br-int via patch ports.
-		patch1 := "k8s-patch-br-int-" + bridgeInterface
-		patch2 := "k8s-patch-" + bridgeInterface + "-br-int"
-
-		stdout, stderr, err = RunOVSVsctl("--may-exist", "add-port",
-			bridgeInterface, patch2, "--", "set", "interface", patch2,
-			"type=patch", "options:peer="+patch1)
-		if err != nil {
-			return fmt.Errorf("Failed to add port, stdout: %q, stderr: %q, "+
-				"error: %v", stdout, stderr, err)
-		}
-
-		stdout, stderr, err = RunOVSVsctl("--may-exist", "add-port",
-			"br-int", patch1, "--", "set", "interface", patch1, "type=patch",
-			"options:peer="+patch2, "external-ids:iface-id="+ifaceID)
-		if err != nil {
-			return fmt.Errorf("Failed to add port, stdout: %q, stderr: %q, "+
-				"error: %v", stdout, stderr, err)
-		}
+		localNetArgs = []string{"--", "lsp-set-type", ifaceID, "localnet",
+			"--", "lsp-set-options", ifaceID,
+			fmt.Sprintf("network_name=%s", PhysicalNetworkName)}
 	}
 
 	// Add external interface as a logical port to external_switch.
 	// This is a learning switch port with "unknown" address. The external
 	// world is accessed via this port.
-	stdout, stderr, err = RunOVNNbctl("--", "--may-exist", "lsp-add",
-		externalSwitch, ifaceID, "--", "lsp-set-addresses", ifaceID, "unknown")
+	cmdArgs := []string{"--", "--may-exist", "lsp-add", externalSwitch, ifaceID,
+		"--", "lsp-set-addresses", ifaceID, "unknown"}
+	cmdArgs = append(cmdArgs, localNetArgs...)
+	stdout, stderr, err = RunOVNNbctl(cmdArgs...)
 	if err != nil {
 		return fmt.Errorf("Failed to add logical port to switch, stdout: %q, "+
 			"stderr: %q, error: %v", stdout, stderr, err)
