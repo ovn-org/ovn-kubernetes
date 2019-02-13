@@ -105,6 +105,15 @@ func initLocalnetGatewayInternal(nodeName string, clusterIPSubnet []string,
 			", stderr:%s (%v)", localnetBridgeName, stderr, err)
 	}
 
+	// ovn-bridge-mappings maps a physical network name to a local ovs bridge
+	// that provides connectivity to that network.
+	_, stderr, err = util.RunOVSVsctl("set", "Open_vSwitch", ".",
+		fmt.Sprintf("external_ids:ovn-bridge-mappings=%s:%s", util.PhysicalNetworkName, localnetBridgeName))
+	if err != nil {
+		return fmt.Errorf("Failed to set ovn-bridge-mappings for ovs bridge %s"+
+			", stderr:%s (%v)", localnetBridgeName, stderr, err)
+	}
+
 	_, _, err = util.RunIP("link", "set", localnetBridgeName, "up")
 	if err != nil {
 		return fmt.Errorf("failed to up %s (%v)", localnetBridgeName, err)
