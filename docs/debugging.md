@@ -96,7 +96,7 @@ On the master node, check whether ovnkube is running by:
 ps -ef | grep ovnkube
 ```
 
-Check the watcher's log file at "/var/log/openvswitch/ovnkube.log"
+Check the watcher's log file at "/var/log/ovn-kubernetes/ovnkube.log"
 to see whether it is creating logical ports whenever a pod is created and
 for any obvious errors.
 

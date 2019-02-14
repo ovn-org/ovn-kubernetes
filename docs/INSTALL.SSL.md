@@ -128,7 +128,7 @@ certificates to it. For e.g:
 ```
 sudo ovnkube -k8s-kubeconfig kubeconfig.yaml -net-controller -loglevel=4 \
  -k8s-apiserver="http://$CENTRAL_IP:8080" \
- -logfile="/var/log/openvswitch/ovnkube.log" \
+ -logfile="/var/log/ovn-kubernetes/ovnkube.log" \
  -init-master="$NODE_NAME" -cluster-subnet=$CLUSTER_IP_SUBNET \
  -service-cluster-ip-range=$SERVICE_IP_SUBNET \
  -nodeport \

@@ -128,7 +128,7 @@ ovn-master () {
            --cluster-subnet "${ovn_cidr}" \
            --init-master ${ovn_host} \
 	   --pidfile /var/run/openvswitch/ovnkube-master.pid \
-	   --logfile /var/log/openvswitch/ovnkube-master.log \
+	   --logfile /var/log/ovn-kubernetes/ovnkube-master.log \
            --net-controller &
 	 fi
 	 ;;
@@ -151,7 +151,7 @@ ovn-master () {
 	 ;;
   "logs") echo "ovn-master - LOGS"
 	 echo "============ ovnkube-master.log ======================="
-	 cat /var/log/openvswitch/ovnkube-master.log
+	 cat /var/log/ovn-kubernetes/ovnkube-master.log
 	 ;;
   "debug") echo "ovn-master - DEBUG"
 	if [ -f /var/run/openvswitch/ovnkube-master.pid ] ; then

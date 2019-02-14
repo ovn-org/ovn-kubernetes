@@ -71,6 +71,7 @@ ovn_log_sb=${OVN_LOG_SB:-"-vconsole:info"}
 ovn_log_controller=${OVN_LOG_CONTROLLER:-"-vconsole:info"}
 
 logdir=/var/log/openvswitch
+ovnkubelogdir=/var/log/ovn-kubernetes
 logpost=$(date +%F-%T)
 ovn_nb_log_file=${logdir}/ovsdb-server-nb-${logpost}.log
 ovn_sb_log_file=${logdir}/ovsdb-server-sb-${logpost}.log
@@ -265,11 +266,11 @@ display () {
   latest=$(ls -t ${logdir}/ovsdb-server-sb-*.log | head -1)
   display_file "sb-ovsdb" /var/run/openvswitch/ovnsb_db.pid ${latest}
   display_file "run-ovn-northd" /var/run/openvswitch/ovn-northd.pid ${logdir}/ovn-northd.log
-  display_file "ovn-master" /var/run/openvswitch/ovnkube-master.pid ${logdir}/ovnkube-master.log
+  display_file "ovn-master" /var/run/openvswitch/ovnkube-master.pid ${ovnkubelogdir}/ovnkube-master.log
   display_file "ovs-vswitchd" /var/run/openvswitch/ovs-vswitchd.pid ${logdir}/ovs-vswitchd.log
   display_file "ovsdb-server" /var/run/openvswitch/ovsdb-server.pid ${logdir}/ovsdb-server.log
   display_file "ovn-controller" /var/run/openvswitch/ovn-controller.pid ${logdir}/ovn-controller.log
-  display_file "ovnkube" /var/run/openvswitch/ovnkube.pid ${logdir}/ovnkube.log
+  display_file "ovnkube" /var/run/openvswitch/ovnkube.pid ${ovnkubelogdir}/ovnkube.log
 }
 
 setup_cni () {
@@ -550,7 +551,7 @@ ovn-master () {
     --nodeport \
     --loglevel=${ovnkube_loglevel} \
     --pidfile /var/run/openvswitch/ovnkube-master.pid \
-    --logfile /var/log/openvswitch/ovnkube-master.log &
+    --logfile /var/log/ovn-kubernetes/ovnkube-master.log &
   echo "=============== ovn-master ========== running"
   # time to set up northd and databases
   wait_for_event pid_ready ovnkube-master.pid
@@ -560,7 +561,7 @@ ovn-master () {
   ovn-sbctl set-connection ptcp:6642
   ovn-nbctl set-connection ptcp:6641
 
-  tail --follow=name /var/log/openvswitch/ovnkube-master.log &
+  tail --follow=name /var/log/ovn-kubernetes/ovnkube-master.log &
   kube_tail_pid=$!
 
   pid_health /var/run/openvswitch/ovnkube-master.pid ${kube_tail_pid}
@@ -655,14 +656,14 @@ ovn-node () {
       --loglevel=${ovnkube_loglevel} \
       --init-gateways ${ovn_gateway_opts}  \
       --pidfile /var/run/openvswitch/ovnkube.pid \
-      --logfile /var/log/openvswitch/ovnkube.log &
+      --logfile /var/log/ovn-kubernetes/ovnkube.log &
 
   wait_for_event pid_ready ovnkube.pid
   setup_cni
   echo "=============== ovn-node ========== running"
 
   sleep 5
-  tail --follow=name /var/log/openvswitch/ovnkube.log &
+  tail --follow=name /var/log/ovn-kubernetes/ovnkube.log &
   node_tail_pid=$!
 
   pid_health /var/run/openvswitch/ovnkube.pid ${node_tail_pid}
@@ -719,7 +720,7 @@ start_ovn () {
       --nodeport \
       --loglevel=${ovnkube_loglevel} \
       --pidfile /var/run/openvswitch/ovnkube-master.pid \
-      --logfile /var/log/openvswitch/ovnkube-master.log &
+      --logfile /var/log/ovn-kubernetes/ovnkube-master.log &
   fi
 
   # ovn-controller - all nodes
@@ -746,7 +747,7 @@ start_ovn () {
       --loglevel=${ovnkube_loglevel} \
       --init-gateways ${ovn_gateway_opts}  \
       --pidfile /var/run/openvswitch/ovnkube.pid \
-      --logfile /var/log/openvswitch/ovnkube.log &
+      --logfile /var/log/ovn-kubernetes/ovnkube.log &
 
   echo "=============== done starting daemons ================="
 }
