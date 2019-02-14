@@ -119,7 +119,7 @@ uses the hostname.  kubelet allows this name to be overridden with
  nohup sudo ovnkube -k8s-kubeconfig kubeconfig.yaml -net-controller \
  -loglevel=4 \
  -k8s-apiserver="http://$CENTRAL_IP:8080" \
- -logfile="/var/log/openvswitch/ovnkube.log" \
+ -logfile="/var/log/ovn-kubernetes/ovnkube.log" \
  -init-master=$NODE_NAME -init-node=$NODE_NAME \
  -cluster-subnet="$CLUSTER_IP_SUBNET" \
  -service-cluster-ip-range=$SERVICE_IP_SUBNET \
@@ -130,7 +130,7 @@ uses the hostname.  kubelet allows this name to be overridden with
  -sb-address="tcp://$CENTRAL_IP:6642" 2>&1 &
 ```
 
-Note: Make sure to read /var/log/openvswitch/ovnkube.log to see that there were
+Note: Make sure to read /var/log/ovn-kubernetes/ovnkube.log to see that there were
 no obvious errors with argument passing.  Also, you should only pass
 "-init-node" argument if there is a kubelet running on the master node too.
 
@@ -160,7 +160,7 @@ below command.
 
 ```
 nohup sudo ovnkube -k8s-kubeconfig kubeconfig.yaml -loglevel=4 \
-    -logfile="/var/log/openvswitch/ovnkube.log" \
+    -logfile="/var/log/ovn-kubernetes/ovnkube.log" \
     -k8s-apiserver="http://$CENTRAL_IP:8080" \
     -init-node="$NODE_NAME"  \
     -nodeport \
@@ -171,7 +171,7 @@ nohup sudo ovnkube -k8s-kubeconfig kubeconfig.yaml -loglevel=4 \
     -cluster-subnet=$CLUSTER_IP_SUBNET 2>&1 &
 ```
 
-Note: Make sure to read /var/log/openvswitch/ovnkube.log to see that there were
+Note: Make sure to read /var/log/ovn-kubernetes/ovnkube.log to see that there were
 no obvious errors with argument passing.
 
 Notes on gateway nodes:

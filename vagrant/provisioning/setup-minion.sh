@@ -165,7 +165,7 @@ if [ "$DAEMONSET" != "true" ]; then
 
   TOKEN=`sudo cat /vagrant/token`
 
-  nohup sudo ovnkube -loglevel=4 -logfile="/var/log/openvswitch/ovnkube.log" \
+  nohup sudo ovnkube -loglevel=4 -logfile="/var/log/ovn-kubernetes/ovnkube.log" \
       -k8s-apiserver="https://$MASTER1:6443" \
       -k8s-cacert=/etc/kubernetes/pki/ca.crt \
       -k8s-token="$TOKEN" \
