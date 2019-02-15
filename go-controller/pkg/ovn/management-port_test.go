@@ -54,39 +54,22 @@ var _ = Describe("Management Port Operations", func() {
 	It("sets up the management port", func() {
 		app.Action = func(ctx *cli.Context) error {
 			const (
-				nodeName          string = "node1"
-				lrpMAC            string = "00:00:00:05:46:C3"
-				clusterRouterUUID string = "5cedba03-679f-41f3-b00e-b8ed7437bc6c"
-				tcpLBUUID         string = "1a3dfc82-2749-4931-9190-c30e7c0ecea3"
-				udpLBUUID         string = "6d3142fc-53e8-4ac1-88e6-46094a5a9957"
-				nodeSubnet        string = "10.1.1.0/24"
-				mgtPortMAC        string = "00:00:00:55:66:77"
-				mgtPort           string = "k8s-" + nodeName
-				mgtPortIP         string = "10.1.1.2"
-				mgtPortPrefix     string = "24"
-				mgtPortCIDR       string = mgtPortIP + "/" + mgtPortPrefix
-				clusterIPNet      string = "10.1.0.0"
-				clusterCIDR       string = clusterIPNet + "/16"
-				serviceIPNet      string = "172.16.0.0"
-				serviceCIDR       string = serviceIPNet + "/16"
-				mtu               string = "1400"
-				gwIP              string = "10.1.1.1"
-				gwCIDR            string = gwIP + "/24"
+				nodeName      string = "node1"
+				nodeSubnet    string = "10.1.1.0/24"
+				mgtPortMAC    string = "00:00:00:55:66:77"
+				mgtPort       string = "k8s-" + nodeName
+				mgtPortIP     string = "10.1.1.2"
+				mgtPortPrefix string = "24"
+				mgtPortCIDR   string = mgtPortIP + "/" + mgtPortPrefix
+				clusterIPNet  string = "10.1.0.0"
+				clusterCIDR   string = clusterIPNet + "/16"
+				serviceIPNet  string = "172.16.0.0"
+				serviceCIDR   string = serviceIPNet + "/16"
+				mtu           string = "1400"
+				gwIP          string = "10.1.1.1"
 			)
 
-			fakeCmds := ovntest.AddFakeCmd(nil, &ovntest.ExpectedCmd{
-				Cmd: "ovn-nbctl --timeout=15 --if-exist get logical_router_port rtos-" + nodeName + " mac",
-				// Return a known MAC; otherwise code autogenerates it
-				Output: lrpMAC,
-			})
-			fakeCmds = ovntest.AddFakeCmd(fakeCmds, &ovntest.ExpectedCmd{
-				Cmd:    "ovn-nbctl --timeout=15 --data=bare --no-heading --columns=_uuid find logical_router external_ids:k8s-cluster-router=yes",
-				Output: clusterRouterUUID,
-			})
-			fakeCmds = ovntest.AddFakeCmdsNoOutputNoError(fakeCmds, []string{
-				"ovn-nbctl --timeout=15 --may-exist lrp-add " + clusterRouterUUID + " rtos-" + nodeName + " " + lrpMAC + " " + gwCIDR,
-				"ovn-nbctl --timeout=15 -- --may-exist ls-add " + nodeName + " -- set logical_switch " + nodeName + " other-config:subnet=" + nodeSubnet + " external-ids:gateway_ip=" + gwCIDR,
-				"ovn-nbctl --timeout=15 -- --may-exist lsp-add " + nodeName + " stor-" + nodeName + " -- set logical_switch_port stor-" + nodeName + " type=router options:router-port=rtos-" + nodeName + " addresses=\"" + lrpMAC + "\"",
+			fakeCmds := ovntest.AddFakeCmdsNoOutputNoError(nil, []string{
 				"ovs-vsctl --timeout=15 -- --may-exist add-br br-int",
 				"ovs-vsctl --timeout=15 -- --may-exist add-port br-int " + mgtPort + " -- set interface " + mgtPort + " type=internal mtu_request=" + mtu + " external-ids:iface-id=" + mgtPort,
 			})
@@ -129,20 +112,6 @@ var _ = Describe("Management Port Operations", func() {
 					"ip route add " + serviceCIDR + " via " + gwIP,
 				})
 			}
-			fakeCmds = ovntest.AddFakeCmd(fakeCmds, &ovntest.ExpectedCmd{
-				Cmd:    "ovn-nbctl --timeout=15 --data=bare --no-heading --columns=_uuid find load_balancer external_ids:k8s-cluster-lb-tcp=yes",
-				Output: tcpLBUUID,
-			})
-			fakeCmds = ovntest.AddFakeCmdsNoOutputNoError(fakeCmds, []string{
-				"ovn-nbctl --timeout=15 set logical_switch " + nodeName + " load_balancer=" + tcpLBUUID,
-			})
-			fakeCmds = ovntest.AddFakeCmd(fakeCmds, &ovntest.ExpectedCmd{
-				Cmd:    "ovn-nbctl --timeout=15 --data=bare --no-heading --columns=_uuid find load_balancer external_ids:k8s-cluster-lb-udp=yes",
-				Output: udpLBUUID,
-			})
-			fakeCmds = ovntest.AddFakeCmdsNoOutputNoError(fakeCmds, []string{
-				"ovn-nbctl --timeout=15 add logical_switch " + nodeName + " load_balancer " + udpLBUUID,
-			})
 
 			fexec := &fakeexec.FakeExec{
 				CommandScript: fakeCmds,
