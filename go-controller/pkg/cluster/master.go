@@ -241,17 +241,6 @@ func (cluster *OvnClusterController) StartClusterMaster(masterNodeName string) e
 	}
 	cluster.masterSubnetAllocatorList = masterSubnetAllocatorList
 
-	// now go over the 'existing' list again and create annotations for those who do not have it
-	for _, node := range existingNodes.Items {
-		_, ok := node.Annotations[OvnHostSubnet]
-		if !ok {
-			err := cluster.addNode(&node)
-			if err != nil {
-				logrus.Errorf("error creating subnet for node %s: %v", node.Name, err)
-			}
-		}
-	}
-
 	if err := cluster.SetupMaster(masterNodeName); err != nil {
 		logrus.Errorf("Failed to setup master (%v)", err)
 		return err
