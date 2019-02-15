@@ -182,7 +182,7 @@ func runOVNretry(cmdPath string, args ...string) (*bytes.Buffer, *bytes.Buffer, 
 			time.Sleep(2 * time.Second)
 		} else {
 			// Some other problem for caller to handle
-			return stdout, stderr, err
+			return stdout, stderr, fmt.Errorf("OVN command '%s %s' failed: %s", cmdPath, strings.Join(args, " "), err)
 		}
 	}
 }
