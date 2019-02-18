@@ -1,10 +1,4 @@
 ---
-- name: ovn-kubernetes | create local temporary directory
-  local_action:
-    module: file
-    path: "{{ ansible_tmp_dir }}"
-    state: directory
-
 - name: ovn-kubernetes | fetch linux bins
   synchronize:
     mode: pull

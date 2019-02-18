@@ -1,4 +1,14 @@
 ---
+- hosts: localhost
+  any_errors_fatal: true
+  tasks:
+    # This directory is used only for caching files on the Ansible host
+    # in order to speed up the deployment time on subsequent playbook runs.
+    - name: ovn-kubernetes | Create local Ansible temporary directory
+      file:
+        path: "{{ ansible_tmp_dir }}"
+        state: directory
+
 - hosts: kube-master
   any_errors_fatal: true
   gather_facts: true
