@@ -524,11 +524,26 @@ ovn-northd () {
   fi
 }
 
+# make sure ports 6641/6642 are open on master
+iptables-rules () {
+iptables -C INPUT -p tcp -m tcp --dport 6642 -m conntrack --ctstate NEW -j ACCEPT
+if [[ $? != 0 ]] ; then
+  iptables -I INPUT -p tcp -m tcp --dport 6642 -m conntrack --ctstate NEW -j ACCEPT
+fi
+iptables -C INPUT -p tcp -m tcp --dport 6641 -m conntrack --ctstate NEW -j ACCEPT
+if [[ $? != 0 ]] ; then
+  iptables -I INPUT -p tcp -m tcp --dport 6641 -m conntrack --ctstate NEW -j ACCEPT
+fi
+
+}
+
 # v2 v3 - run ovnkube --master
 ovn-master () {
   trap 'kill $(jobs -p); exit 0' TERM
   check_ovn_daemonset_version "2 3"
   rm -f /var/run/openvswitch/ovnkube-master.pid
+
+  iptables-rules
 
   echo "=============== ovn-master (wait for northd_ready) ========== MASTER ONLY"
   get_master_ovn_vars
