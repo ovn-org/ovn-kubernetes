@@ -159,6 +159,11 @@ func init() {
 	savedKubernetes = Kubernetes
 	savedOvnNorth = OvnNorth
 	savedOvnSouth = OvnSouth
+	Flags = append(Flags, CommonFlags...)
+	Flags = append(Flags, K8sFlags...)
+	Flags = append(Flags, OvnNBFlags...)
+	Flags = append(Flags, OvnSBFlags...)
+	Flags = append(Flags, OVNGatewayFlags...)
 }
 
 // RestoreDefaultConfig restores default config values. Used by testcases to
@@ -208,15 +213,33 @@ func overrideFields(dst, src interface{}) {
 
 var cliConfig config
 
-// Flags are general command-line flags. Apps should add these flags to their
-// own urfave/cli flags and call InitConfig() early in the application.
-var Flags = []cli.Flag{
+//CommonFlags capture general options.
+var CommonFlags = []cli.Flag{
+	// Mode flags
+	cli.BoolFlag{
+		Name:  "net-controller",
+		Usage: "Flag to start the central controller that watches pods/services/policies",
+	},
+	cli.StringFlag{
+		Name:  "init-master",
+		Usage: "initialize master, requires the hostname as argument",
+	},
+	cli.StringFlag{
+		Name:  "init-node",
+		Usage: "initialize node, requires the name that node is registered with in kubernetes cluster",
+	},
+	cli.StringFlag{
+		Name:  "pidfile",
+		Usage: "Name of file that will hold the ovnkube pid (optional)",
+	},
+	cli.BoolFlag{
+		Name:  "ha",
+		Usage: "HA option to reconstruct OVN database after failover",
+	},
 	cli.StringFlag{
 		Name:  "config-file",
 		Usage: "configuration file path (default: /etc/openvswitch/ovn_k8s.conf)",
 	},
-
-	// Generic options
 	cli.IntFlag{
 		Name:        "mtu",
 		Usage:       "MTU value used for the overlay networks (default: 1400)",
@@ -255,7 +278,19 @@ var Flags = []cli.Flag{
 		Usage:       "path of a file to direct log output to",
 		Destination: &cliConfig.Logging.File,
 	},
+}
 
+// K8sFlags capture Kubernetes-related options
+var K8sFlags = []cli.Flag{
+	cli.StringFlag{
+		Name:  "cluster-subnet",
+		Value: "11.11.0.0/16",
+		Usage: "A comma separated set of IP subnets and the associated" +
+			"hostsubnetlengths to use for the cluster (eg, \"10.128.0.0/14/23,10.0.0.0/14/23\"). " +
+			"Each entry is given in the form IP address/subnet mask/hostsubnetlength, " +
+			"the hostsubnetlength is optional and if unspecified defaults to 24. The " +
+			"hostsubnetlength defines how many IP addresses are dedicated to each node.",
+	},
 	// CNI options
 	cli.StringFlag{
 		Name:        "cni-conf-dir",
@@ -272,8 +307,13 @@ var Flags = []cli.Flag{
 		Usage:       "the ID of the HNS network to which containers will be attached (default: not set)",
 		Destination: &cliConfig.CNI.WinHNSNetworkID,
 	},
-
-	// Kubernetes-related options
+	cli.StringFlag{
+		Name: "service-cluster-ip-range",
+		Usage: "A CIDR notation IP range from which k8s assigns " +
+			"service cluster IPs. This should be the same as the one " +
+			"provided for kube-apiserver \"-service-cluster-ip-range\" " +
+			"option.",
+	},
 	cli.StringFlag{
 		Name:        "k8s-kubeconfig",
 		Usage:       "absolute path to the Kubernetes kubeconfig file (not required if the --k8s-apiserver, --k8s-ca-cert, and --k8s-token are given)",
@@ -294,8 +334,10 @@ var Flags = []cli.Flag{
 		Usage:       "the Kubernetes API authentication token (not required if --k8s-kubeconfig is given)",
 		Destination: &cliConfig.Kubernetes.Token,
 	},
+}
 
-	// OVN northbound database options
+// OvnNBFlags capture OVN northbound database options
+var OvnNBFlags = []cli.Flag{
 	cli.StringFlag{
 		Name: "nb-address",
 		Usage: "IP address and port of the OVN northbound API " +
@@ -333,8 +375,10 @@ var Flags = []cli.Flag{
 		Usage:       "CA certificate that the client should use for talking to the OVN database.  Leave empty to use local unix socket. (default: /etc/openvswitch/ovnnb-ca.cert)",
 		Destination: &cliConfig.OvnNorth.ClientCACert,
 	},
+}
 
-	// OVN southbound database options
+//OvnSBFlags capture OVN southbound database options
+var OvnSBFlags = []cli.Flag{
 	cli.StringFlag{
 		Name: "sb-address",
 		Usage: "IP address and port of the OVN southbound API " +
@@ -373,6 +417,53 @@ var Flags = []cli.Flag{
 		Destination: &cliConfig.OvnSouth.ClientCACert,
 	},
 }
+
+//OVNGatewayFlags capture L3 Gateway related flags
+var OVNGatewayFlags = []cli.Flag{
+	cli.BoolFlag{
+		Name:  "init-gateways",
+		Usage: "initialize a gateway in the minion. Only useful with \"init-node\"",
+	},
+	cli.StringFlag{
+		Name: "gateway-interface",
+		Usage: "The interface in minions that will be the gateway interface. " +
+			"If none specified, then the node's interface on which the " +
+			"default gateway is configured will be used as the gateway " +
+			"interface. Only useful with \"init-gateways\"",
+	},
+	cli.StringFlag{
+		Name: "gateway-nexthop",
+		Usage: "The external default gateway which is used as a next hop by " +
+			"OVN gateway.  This is many times just the default gateway " +
+			"of the node in question. If not specified, the default gateway" +
+			"configured in the node is used. Only useful with " +
+			"\"init-gateways\"",
+	},
+	cli.BoolFlag{
+		Name: "gateway-spare-interface",
+		Usage: "If true, assumes that \"gateway-interface\" provided can be " +
+			"exclusively used for the OVN gateway.  When true, only OVN" +
+			"related traffic can flow through this interface",
+	},
+	cli.BoolFlag{
+		Name: "gateway-localnet",
+		Usage: "If true, creates a localnet gateway to let traffic reach " +
+			"host network and also exit host with iptables NAT",
+	},
+	cli.UintFlag{
+		Name: "gateway-vlanid",
+		Usage: "The VLAN on which the external network is available. " +
+			"Valid only for Shared or Spare Gateway interface mode.",
+	},
+	cli.BoolFlag{
+		Name:  "nodeport",
+		Usage: "Setup nodeport based ingress on gateways.",
+	},
+}
+
+// Flags are general command-line flags. Apps should add these flags to their
+// own urfave/cli flags and call InitConfig() early in the application.
+var Flags []cli.Flag
 
 // Defaults are a set of flags to indicate which options should be read from
 // ovs-vsctl and used as default values if option is not found via the config

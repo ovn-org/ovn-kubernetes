@@ -2,6 +2,7 @@ package main
 
 import (
 	"fmt"
+	"io"
 	"io/ioutil"
 	"net"
 	"os"
@@ -10,6 +11,8 @@ import (
 	"strconv"
 	"strings"
 	"syscall"
+	"text/tabwriter"
+	"text/template"
 
 	"github.com/sirupsen/logrus"
 	"github.com/urfave/cli"
@@ -23,96 +26,76 @@ import (
 	kexec "k8s.io/utils/exec"
 )
 
+const (
+	// CustomAppHelpTemplate helps in grouping options to ovnkube
+	CustomAppHelpTemplate = `NAME:
+   {{.Name}} - {{.Usage}}
+
+USAGE:
+   {{.HelpName}} [global options]
+
+VERSION:
+   {{.Version}}{{if .Description}}
+
+DESCRIPTION:
+   {{.Description}}{{end}}
+
+COMMANDS:{{range .VisibleCategories}}{{if .Name}}
+
+   {{.Name}}:{{end}}{{range .VisibleCommands}}
+     {{join .Names ", "}}{{"\t"}}{{.Usage}}{{end}}{{end}}
+
+GLOBAL OPTIONS:{{range $title, $category := getFlagsByCategory}}
+   {{upper $title}}
+   {{range $index, $option := $category}}{{if $index}}
+   {{end}}{{$option}}{{end}}
+   {{end}}`
+)
+
+func getFlagsByCategory() map[string][]cli.Flag {
+	m := map[string][]cli.Flag{}
+	m["Generic Options"] = config.CommonFlags
+	m["K8s-related Options"] = config.K8sFlags
+	m["OVN Northbound DB Options"] = config.OvnNBFlags
+	m["OVN Southbound DB Options"] = config.OvnSBFlags
+	m["OVN Gateway Options"] = config.OVNGatewayFlags
+
+	return m
+}
+
+// borrowed from cli packages' printHelpCustom()
+func printOvnKubeHelp(out io.Writer, templ string, data interface{}, customFunc map[string]interface{}) {
+	funcMap := template.FuncMap{
+		"join":               strings.Join,
+		"upper":              strings.ToUpper,
+		"getFlagsByCategory": getFlagsByCategory,
+	}
+	if customFunc != nil {
+		for key, value := range customFunc {
+			funcMap[key] = value
+		}
+	}
+
+	w := tabwriter.NewWriter(out, 1, 8, 2, ' ', 0)
+	t := template.Must(template.New("help").Funcs(funcMap).Parse(templ))
+	err := t.Execute(w, data)
+	if err == nil {
+		_ = w.Flush()
+	}
+}
+
 func main() {
+	cli.HelpPrinterCustom = printOvnKubeHelp
 	c := cli.NewApp()
 	c.Name = "ovnkube"
 	c.Usage = "run ovnkube to start master, node, and gateway services"
 	c.Version = config.Version
-	c.Flags = append([]cli.Flag{
-		// Kubernetes-related options
-		cli.StringFlag{
-			Name:  "cluster-subnet",
-			Value: "11.11.0.0/16",
-			Usage: "A comma separated set of IP subnets and the associated" +
-				"hostsubnetlengths to use for the cluster (eg, \"10.128.0.0/14/23,10.0.0.0/14/23\"). " +
-				"Each entry is given in the form IP address/subnet mask/hostsubnetlength, " +
-				"the hostsubnetlength is optional and if unspecified defaults to 24. The " +
-				"hostsubnetlength defines how many IP addresses are dedicated to each node.",
-		},
-		cli.StringFlag{
-			Name: "service-cluster-ip-range",
-			Usage: "A CIDR notation IP range from which k8s assigns " +
-				"service cluster IPs. This should be the same as the one " +
-				"provided for kube-apiserver \"-service-cluster-ip-range\" " +
-				"option.",
-		},
-
-		// Mode flags
-		cli.BoolFlag{
-			Name:  "net-controller",
-			Usage: "Flag to start the central controller that watches pods/services/policies",
-		},
-		cli.StringFlag{
-			Name:  "init-master",
-			Usage: "initialize master, requires the hostname as argument",
-		},
-		cli.StringFlag{
-			Name:  "init-node",
-			Usage: "initialize node, requires the name that node is registered with in kubernetes cluster",
-		},
-
-		// Daemon file
-		cli.StringFlag{
-			Name:  "pidfile",
-			Usage: "Name of file that will hold the ovnkube pid (optional)",
-		},
-
-		// Gateway flags
-		cli.BoolFlag{
-			Name:  "init-gateways",
-			Usage: "initialize a gateway in the minion. Only useful with \"init-node\"",
-		},
-		cli.StringFlag{
-			Name: "gateway-interface",
-			Usage: "The interface in minions that will be the gateway interface. " +
-				"If none specified, then the node's interface on which the " +
-				"default gateway is configured will be used as the gateway " +
-				"interface. Only useful with \"init-gateways\"",
-		},
-		cli.StringFlag{
-			Name: "gateway-nexthop",
-			Usage: "The external default gateway which is used as a next hop by " +
-				"OVN gateway.  This is many times just the default gateway " +
-				"of the node in question. If not specified, the default gateway" +
-				"configured in the node is used. Only useful with " +
-				"\"init-gateways\"",
-		},
-		cli.BoolFlag{
-			Name: "gateway-spare-interface",
-			Usage: "If true, assumes that \"gateway-interface\" provided can be " +
-				"exclusively used for the OVN gateway.  When true, only OVN" +
-				"related traffic can flow through this interface",
-		},
-		cli.BoolFlag{
-			Name: "gateway-localnet",
-			Usage: "If true, creates a localnet gateway to let traffic reach " +
-				"host network and also exit host with iptables NAT",
-		},
-		cli.UintFlag{
-			Name: "gateway-vlanid",
-			Usage: "The VLAN on which the external network is available. " +
-				"Valid only for Shared or Spare Gateway interface mode.",
-		},
-		cli.BoolFlag{
-			Name:  "nodeport",
-			Usage: "Setup nodeport based ingress on gateways.",
-		},
-
-		cli.BoolFlag{
-			Name:  "ha",
-			Usage: "HA option to reconstruct OVN database after failover",
-		},
-	}, config.Flags...)
+	c.CustomAppHelpTemplate = CustomAppHelpTemplate
+	c.Flags = config.CommonFlags
+	c.Flags = append(c.Flags, config.K8sFlags...)
+	c.Flags = append(c.Flags, config.OvnNBFlags...)
+	c.Flags = append(c.Flags, config.OvnSBFlags...)
+	c.Flags = append(c.Flags, config.OVNGatewayFlags...)
 	c.Action = func(c *cli.Context) error {
 		return runOvnKube(c)
 	}
