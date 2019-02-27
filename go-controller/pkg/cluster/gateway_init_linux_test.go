@@ -74,8 +74,8 @@ var _ = Describe("Gateway Init Operations", func() {
 				nodeName          string = "node1"
 				lrpMAC            string = "00:00:00:05:46:C3"
 				brLocalnetMAC     string = "11:22:33:44:55:66"
-				lrpIP             string = "100.64.2.3"
-				lrpCIDR           string = lrpIP + "/24"
+				lrpIP             string = "100.64.0.3"
+				lrpCIDR           string = lrpIP + "/16"
 				clusterRouterUUID string = "5cedba03-679f-41f3-b00e-b8ed7437bc6c"
 				systemID          string = "cb9ec8fa-b409-4ef3-9f42-d9283c47aac6"
 				tcpLBUUID         string = "d2e858b2-cb5a-441b-a670-ed450f79a91f"
@@ -116,8 +116,8 @@ var _ = Describe("Gateway Init Operations", func() {
 			})
 			fakeCmds = ovntest.AddFakeCmdsNoOutputNoError(fakeCmds, []string{
 				"ovn-nbctl --timeout=15 -- --may-exist lsp-add join jtor-" + gwRouter + " -- set logical_switch_port jtor-" + gwRouter + " type=router options:router-port=rtoj-" + gwRouter + " addresses=\"" + lrpMAC + "\"",
-				"ovn-nbctl --timeout=15 --may-exist lr-route-add " + gwRouter + " " + clusterCIDR + " 100.64.1.1",
-				"ovn-nbctl --timeout=15 --may-exist lr-route-add " + clusterRouterUUID + " 0.0.0.0/0 100.64.1.2",
+				"ovn-nbctl --timeout=15 --may-exist lr-route-add " + gwRouter + " " + clusterCIDR + " 100.64.0.1",
+				"ovn-nbctl --timeout=15 --may-exist lr-route-add " + clusterRouterUUID + " 0.0.0.0/0 100.64.0.2",
 			})
 			fakeCmds = addNodeportLBs(nodeName, tcpLBUUID, udpLBUUID, fakeCmds)
 			fakeCmds = ovntest.AddFakeCmdsNoOutputNoError(fakeCmds, []string{
@@ -238,8 +238,8 @@ var _ = Describe("Gateway Init Operations", func() {
 				const (
 					nodeName          string = "node1"
 					lrpMAC            string = "00:00:00:05:46:C3"
-					lrpIP             string = "100.64.2.3"
-					lrpCIDR           string = lrpIP + "/24"
+					lrpIP             string = "100.64.0.3"
+					lrpCIDR           string = lrpIP + "/16"
 					clusterRouterUUID string = "5cedba03-679f-41f3-b00e-b8ed7437bc6c"
 					systemID          string = "cb9ec8fa-b409-4ef3-9f42-d9283c47aac6"
 					tcpLBUUID         string = "d2e858b2-cb5a-441b-a670-ed450f79a91f"
@@ -301,8 +301,8 @@ var _ = Describe("Gateway Init Operations", func() {
 				})
 				fakeCmds = ovntest.AddFakeCmdsNoOutputNoError(fakeCmds, []string{
 					"ovn-nbctl --timeout=15 -- --may-exist lsp-add join jtor-" + gwRouter + " -- set logical_switch_port jtor-" + gwRouter + " type=router options:router-port=rtoj-" + gwRouter + " addresses=\"" + lrpMAC + "\"",
-					"ovn-nbctl --timeout=15 --may-exist lr-route-add " + gwRouter + " " + clusterCIDR + " 100.64.1.1",
-					"ovn-nbctl --timeout=15 --may-exist lr-route-add " + clusterRouterUUID + " 0.0.0.0/0 100.64.1.2",
+					"ovn-nbctl --timeout=15 --may-exist lr-route-add " + gwRouter + " " + clusterCIDR + " 100.64.0.1",
+					"ovn-nbctl --timeout=15 --may-exist lr-route-add " + clusterRouterUUID + " 0.0.0.0/0 100.64.0.2",
 				})
 				fakeCmds = addNodeportLBs(nodeName, tcpLBUUID, udpLBUUID, fakeCmds)
 				fakeCmds = ovntest.AddFakeCmdsNoOutputNoError(fakeCmds, []string{
@@ -440,8 +440,8 @@ cookie=0x0, duration=8366.597s, table=1, n_packets=10641, n_bytes=10370087, prio
 				const (
 					nodeName          string = "node1"
 					lrpMAC            string = "00:00:00:05:46:C3"
-					lrpIP             string = "100.64.2.3"
-					lrpCIDR           string = lrpIP + "/24"
+					lrpIP             string = "100.64.0.3"
+					lrpCIDR           string = lrpIP + "/16"
 					clusterRouterUUID string = "5cedba03-679f-41f3-b00e-b8ed7437bc6c"
 					systemID          string = "cb9ec8fa-b409-4ef3-9f42-d9283c47aac6"
 					tcpLBUUID         string = "d2e858b2-cb5a-441b-a670-ed450f79a91f"
@@ -473,8 +473,8 @@ cookie=0x0, duration=8366.597s, table=1, n_packets=10641, n_bytes=10370087, prio
 				})
 				fakeCmds = ovntest.AddFakeCmdsNoOutputNoError(fakeCmds, []string{
 					"ovn-nbctl --timeout=15 -- --may-exist lsp-add join jtor-" + gwRouter + " -- set logical_switch_port jtor-" + gwRouter + " type=router options:router-port=rtoj-" + gwRouter + " addresses=\"" + lrpMAC + "\"",
-					"ovn-nbctl --timeout=15 --may-exist lr-route-add " + gwRouter + " " + clusterCIDR + " 100.64.1.1",
-					"ovn-nbctl --timeout=15 --may-exist lr-route-add " + clusterRouterUUID + " 0.0.0.0/0 100.64.1.2",
+					"ovn-nbctl --timeout=15 --may-exist lr-route-add " + gwRouter + " " + clusterCIDR + " 100.64.0.1",
+					"ovn-nbctl --timeout=15 --may-exist lr-route-add " + clusterRouterUUID + " 0.0.0.0/0 100.64.0.2",
 				})
 				fakeCmds = addNodeportLBs(nodeName, tcpLBUUID, udpLBUUID, fakeCmds)
 				fakeCmds = ovntest.AddFakeCmdsNoOutputNoError(fakeCmds, []string{

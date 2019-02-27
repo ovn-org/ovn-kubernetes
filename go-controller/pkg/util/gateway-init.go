@@ -72,7 +72,7 @@ func unlockNBForGateways() {
 }
 
 func generateGatewayIP() (string, error) {
-	// All the routers connected to "join" switch are in 100.64.1.0/24
+	// All the routers connected to "join" switch are in 100.64.0.0/16
 	// network and they have their external_ids:connect_to_join set.
 	stdout, stderr, err := RunOVNNbctl("--data=bare", "--no-heading",
 		"--columns=network", "find", "logical_router_port",
@@ -87,8 +87,8 @@ func generateGatewayIP() (string, error) {
 	stdout = strings.Replace(strings.TrimSpace(stdout), "\r\n", "\n", -1)
 	ips := strings.Split(stdout, "\n")
 
-	ipStart, ipStartNet, _ := net.ParseCIDR("100.64.1.0/24")
-	ipMax, _, _ := net.ParseCIDR("100.64.1.255/24")
+	ipStart, ipStartNet, _ := net.ParseCIDR("100.64.0.0/16")
+	ipMax, _, _ := net.ParseCIDR("100.64.255.255/16")
 	n, _ := ipStartNet.Mask.Size()
 	for !ipStart.Equal(ipMax) {
 		ipStart = NextIP(ipStart)
@@ -209,7 +209,7 @@ func GatewayInit(clusterIPSubnet []string, nodeName, nicIP, physicalInterface,
 	for _, entry := range clusterIPSubnet {
 		// Add a static route in GR with distributed router as the nexthop.
 		stdout, stderr, err = RunOVNNbctl("--may-exist", "lr-route-add",
-			gatewayRouter, entry, "100.64.1.1")
+			gatewayRouter, entry, "100.64.0.1")
 		if err != nil {
 			return fmt.Errorf("Failed to add a static route in GR with distributed "+
 				"router as the nexthop, stdout: %q, stderr: %q, error: %v",
@@ -219,7 +219,7 @@ func GatewayInit(clusterIPSubnet []string, nodeName, nicIP, physicalInterface,
 
 	// Add a default route in distributed router with first GR as the nexthop.
 	stdout, stderr, err = RunOVNNbctl("--may-exist", "lr-route-add",
-		k8sClusterRouter, "0.0.0.0/0", "100.64.1.2")
+		k8sClusterRouter, "0.0.0.0/0", "100.64.0.2")
 	if err != nil {
 		return fmt.Errorf("Failed to add a default route in distributed router "+
 			"with first GR as the nexthop, stdout: %q, stderr: %q, error: %v",
