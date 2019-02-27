@@ -2,6 +2,8 @@ package cluster
 
 import (
 	"net"
+	"os"
+	"path/filepath"
 	"time"
 
 	"github.com/sirupsen/logrus"
@@ -79,8 +81,13 @@ func (cluster *OvnClusterController) StartClusterNode(name string) error {
 		}
 	}
 
-	if err = config.WriteCNIConfig(); err != nil {
-		return err
+	confFile := filepath.Join(config.CNI.ConfDir, config.CNIConfFileName)
+	_, err = os.Stat(confFile)
+	if os.IsNotExist(err) {
+		err = config.WriteCNIConfig(config.CNI.ConfDir, config.CNIConfFileName)
+		if err != nil {
+			return err
+		}
 	}
 
 	if cluster.OvnHA {
