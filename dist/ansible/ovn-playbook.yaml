@@ -23,26 +23,6 @@
       state: absent
       name: /var/lib/openvswitch/ovnsb_db.db
 
-  # iptables -I INPUT -p tcp -m state --state NEW -m tcp --dport 6641 -j ACCEPT
-  - name: iptables allow 6641
-    iptables:
-      action: insert
-      chain: INPUT
-      ctstate: NEW
-      destination_port: 6641
-      jump: ACCEPT
-      protocol: tcp
-
-  # iptables -I INPUT -p tcp -m state --state NEW -m tcp --dport 6642 -j ACCEPT
-  - name: iptables allow 6642
-    iptables:
-      action: insert
-      chain: INPUT
-      ctstate: NEW
-      destination_port: 6642
-      jump: ACCEPT
-      protocol: tcp
-
   # copy yaml files to master
   - name: Make dirctory /root/ovn/yaml
     file:
