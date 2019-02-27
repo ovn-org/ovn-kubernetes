@@ -11,7 +11,7 @@ import (
 )
 
 // WriteCNIConfig writes a CNI JSON config file to directory given by global config
-func WriteCNIConfig() error {
+func WriteCNIConfig(ConfDir string, fileName string) error {
 	bytes, err := json.Marshal(&types.NetConf{
 		CNIVersion: "0.3.1",
 		Name:       "ovn-kubernetes",
@@ -23,16 +23,16 @@ func WriteCNIConfig() error {
 
 	// Install the CNI config file after all initialization is done
 	// MkdirAll() returns no error if the path already exists
-	err = os.MkdirAll(CNI.ConfDir, os.ModeDir)
+	err = os.MkdirAll(ConfDir, os.ModeDir)
 	if err != nil {
 		return err
 	}
 
 	// Always create the CNI config for consistency.
-	confFile := filepath.Join(CNI.ConfDir, "10-ovn-kubernetes.conf")
+	confFile := filepath.Join(ConfDir, fileName)
 
 	var f *os.File
-	f, err = ioutil.TempFile(CNI.ConfDir, "ovnkube-")
+	f, err = ioutil.TempFile(ConfDir, "ovnkube-")
 	if err != nil {
 		return err
 	}

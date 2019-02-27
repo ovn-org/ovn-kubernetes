@@ -22,6 +22,9 @@ var (
 	// ovn-kubernetes version, to be changed with every release
 	Version = "0.3.0"
 
+	// ovn-kubernetes cni config file name
+	CNIConfFileName = "10-ovn-kubernetes.conf"
+
 	// Default holds parsed config file parameters and command-line overrides
 	Default = DefaultConfig{
 		MTU:             1400,
