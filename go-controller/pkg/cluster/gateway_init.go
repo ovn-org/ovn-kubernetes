@@ -53,13 +53,13 @@ func (cluster *OvnClusterController) initGateway(
 
 	if cluster.GatewaySpareIntf {
 		return initSpareGateway(nodeName, clusterIPSubnet, subnet,
-			cluster.GatewayNextHop, cluster.GatewayIntf,
+			cluster.GatewayNextHop, cluster.GatewayIntf, cluster.GatewayVLANID,
 			cluster.NodePortEnable)
 	}
 
 	bridge, gwIntf, err := initSharedGateway(nodeName, clusterIPSubnet, subnet,
-		cluster.GatewayNextHop, cluster.GatewayIntf, cluster.NodePortEnable,
-		cluster.watchFactory)
+		cluster.GatewayNextHop, cluster.GatewayIntf, cluster.GatewayVLANID,
+		cluster.NodePortEnable, cluster.watchFactory)
 	if err != nil {
 		return err
 	}

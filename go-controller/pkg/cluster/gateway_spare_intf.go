@@ -7,7 +7,7 @@ import (
 )
 
 func initSpareGateway(nodeName string, clusterIPSubnet []string,
-	subnet, gwNextHop, gwIntf string, nodeportEnable bool) error {
+	subnet, gwNextHop, gwIntf string, gwVLANId uint, nodeportEnable bool) error {
 
 	// Now, we get IP address from physical interface. If IP does not
 	// exists error out.
@@ -20,7 +20,7 @@ func initSpareGateway(nodeName string, clusterIPSubnet []string,
 		return fmt.Errorf("%s does not have a ipv4 address", gwIntf)
 	}
 	err = util.GatewayInit(clusterIPSubnet, nodeName, ipAddress,
-		gwIntf, "", gwNextHop, subnet, nodeportEnable)
+		gwIntf, "", gwNextHop, subnet, gwVLANId, nodeportEnable)
 	if err != nil {
 		return fmt.Errorf("failed to init spare interface gateway: %v", err)
 	}

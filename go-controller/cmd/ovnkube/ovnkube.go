@@ -103,6 +103,11 @@ func main() {
 			Usage: "If true, creates a localnet gateway to let traffic reach " +
 				"host network and also exit host with iptables NAT",
 		},
+		cli.UintFlag{
+			Name: "gateway-vlanid",
+			Usage: "The VLAN on which the external network is available. " +
+				"Valid only for Shared or Spare Gateway interface mode.",
+		},
 		cli.BoolFlag{
 			Name:  "nodeport",
 			Usage: "Setup nodeport based ingress on gateways.",
@@ -225,6 +230,7 @@ func runOvnKube(ctx *cli.Context) error {
 		clusterController.GatewayNextHop = ctx.String("gateway-nexthop")
 		clusterController.GatewaySpareIntf = ctx.Bool("gateway-spare-interface")
 		clusterController.LocalnetGateway = ctx.Bool("gateway-localnet")
+		clusterController.GatewayVLANID = ctx.Uint("gateway-vlanid")
 		clusterController.OvnHA = ctx.Bool("ha")
 
 		clusterController.ClusterIPNet, err = parseClusterSubnetEntries(ctx.String("cluster-subnet"))

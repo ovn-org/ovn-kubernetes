@@ -112,7 +112,7 @@ func generateGatewayIP() (string, error) {
 
 // GatewayInit creates a gateway router for the local chassis.
 func GatewayInit(clusterIPSubnet []string, nodeName, nicIP, physicalInterface,
-	bridgeInterface, defaultGW, rampoutIPSubnet string,
+	bridgeInterface, defaultGW, rampoutIPSubnet string, gatewayVLANId uint,
 	gatewayLBEnable bool) error {
 
 	ip, physicalIPNet, err := net.ParseCIDR(nicIP)
@@ -296,9 +296,14 @@ func GatewayInit(clusterIPSubnet []string, nodeName, nicIP, physicalInterface,
 	if physicalInterface != "" {
 		// Connect physical interface to br-int. Get its mac address.
 		ifaceID = physicalInterface + "_" + nodeName
-		stdout, stderr, err = RunOVSVsctl("--", "--may-exist", "add-port",
+		addPortCmdArgs := []string{"--", "--may-exist", "add-port",
 			"br-int", physicalInterface, "--", "set", "interface",
-			physicalInterface, "external-ids:iface-id="+ifaceID)
+			physicalInterface, "external-ids:iface-id=" + ifaceID}
+		if gatewayVLANId != 0 {
+			addPortCmdArgs = append(addPortCmdArgs, "--", "set", "port", physicalInterface,
+				fmt.Sprintf("tag=%d", gatewayVLANId))
+		}
+		stdout, stderr, err = RunOVSVsctl(addPortCmdArgs...)
 		if err != nil {
 			return fmt.Errorf("Failed to add port to br-int, stdout: %q, "+
 				"stderr: %q, error: %v", stdout, stderr, err)
@@ -343,6 +348,10 @@ func GatewayInit(clusterIPSubnet []string, nodeName, nicIP, physicalInterface,
 		localNetArgs = []string{"--", "lsp-set-type", ifaceID, "localnet",
 			"--", "lsp-set-options", ifaceID,
 			fmt.Sprintf("network_name=%s", PhysicalNetworkName)}
+		if gatewayVLANId != 0 {
+			localNetArgs = append(localNetArgs, "--", "set", "logical_switch_port",
+				ifaceID, fmt.Sprintf("tag_request=%d", gatewayVLANId))
+		}
 	}
 
 	// Add external interface as a logical port to external_switch.

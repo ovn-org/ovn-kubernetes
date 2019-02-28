@@ -151,7 +151,7 @@ func initLocalnetGatewayInternal(nodeName string, clusterIPSubnet []string,
 
 	err = util.GatewayInit(clusterIPSubnet, nodeName,
 		localnetGatewayIP, "", localnetBridgeName, localnetGatewayNextHop,
-		subnet, nodePortEnable)
+		subnet, 0, nodePortEnable)
 	if err != nil {
 		return fmt.Errorf("failed to localnet gateway: %v", err)
 	}
