@@ -26,6 +26,7 @@ type OvnClusterController struct {
 	GatewayBridge    string
 	GatewayNextHop   string
 	GatewaySpareIntf bool
+	GatewayVLANID    uint
 	NodePortEnable   bool
 	OvnHA            bool
 	LocalnetGateway  bool

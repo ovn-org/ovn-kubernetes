@@ -255,7 +255,7 @@ func addDefaultConntrackRules(nodeName, gwBridge, gwIntf string) error {
 
 func initSharedGateway(
 	nodeName string, clusterIPSubnet []string, subnet,
-	gwNextHop, gwIntf string, nodeportEnable bool,
+	gwNextHop, gwIntf string, gwVLANId uint, nodeportEnable bool,
 	wf *factory.WatchFactory) (string, string, error) {
 	var bridgeName string
 
@@ -297,7 +297,7 @@ func initSharedGateway(
 		return "", "", fmt.Errorf("%s does not have a ipv4 address", bridgeName)
 	}
 	err = util.GatewayInit(clusterIPSubnet, nodeName, ipAddress, "",
-		bridgeName, gwNextHop, subnet, nodeportEnable)
+		bridgeName, gwNextHop, subnet, gwVLANId, nodeportEnable)
 	if err != nil {
 		return "", "", fmt.Errorf("failed to init shared interface gateway: %v", err)
 	}
