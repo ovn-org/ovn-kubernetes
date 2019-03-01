@@ -174,7 +174,7 @@ const (
 	ipBlockDenyPriority = "1010"
 )
 
-func (oc *Controller) addAllowACLFromNode(logicalSwitch string) {
+func (oc *Controller) addAllowACLFromNode(logicalSwitch string) error {
 	uuid, stderr, err := util.RunOVNNbctl("--data=bare", "--no-heading",
 		"--columns=_uuid", "find", "ACL",
 		fmt.Sprintf("external-ids:logical_switch=%s", logicalSwitch),
@@ -182,11 +182,12 @@ func (oc *Controller) addAllowACLFromNode(logicalSwitch string) {
 	if err != nil {
 		logrus.Errorf("find failed to get the node acl for "+
 			"logical_switch=%s, stderr: %q, (%v)", logicalSwitch, stderr, err)
-		return
+		return err
 	}
 
 	if uuid != "" {
-		return
+		// node ACL already added
+		return nil
 	}
 
 	subnet, stderr, err := util.RunOVNNbctl("get", "logical_switch",
@@ -194,17 +195,17 @@ func (oc *Controller) addAllowACLFromNode(logicalSwitch string) {
 	if err != nil {
 		logrus.Errorf("failed to get the logical_switch %s subnet, "+
 			"stderr: %q (%v)", logicalSwitch, stderr, err)
-		return
+		return err
 	}
 
 	if subnet == "" {
-		return
+		return fmt.Errorf("logical_switch %q had no subnet", logicalSwitch)
 	}
 
 	ip, _, err := net.ParseCIDR(subnet)
 	if err != nil {
 		logrus.Errorf("failed to parse subnet %s", subnet)
-		return
+		return err
 	}
 
 	// K8s only supports IPv4 right now. The second IP address of the
@@ -224,8 +225,9 @@ func (oc *Controller) addAllowACLFromNode(logicalSwitch string) {
 	if err != nil {
 		logrus.Errorf("failed to create the node acl for "+
 			"logical_switch=%s, stderr: %q (%v)", logicalSwitch, stderr, err)
-		return
 	}
+
+	return err
 }
 
 func (oc *Controller) syncNetworkPolicies(networkPolicies []interface{}) {
