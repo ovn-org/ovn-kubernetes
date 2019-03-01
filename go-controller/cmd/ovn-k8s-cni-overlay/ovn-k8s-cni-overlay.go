@@ -3,12 +3,10 @@ package main
 import (
 	"os"
 
-	"github.com/openvswitch/ovn-kubernetes/go-controller/pkg/cni"
-	"github.com/openvswitch/ovn-kubernetes/go-controller/pkg/config"
-
 	"github.com/containernetworking/cni/pkg/skel"
 	"github.com/containernetworking/cni/pkg/types"
 	"github.com/containernetworking/cni/pkg/version"
+	"github.com/openvswitch/ovn-kubernetes/go-controller/pkg/cni"
 	"github.com/urfave/cli"
 )
 
@@ -17,7 +15,6 @@ func main() {
 	c.Name = "ovn-k8s-cni-overlay"
 	c.Usage = "a CNI plugin to set up or tear down a container's network with OVN"
 	c.Version = "0.0.2"
-	c.Flags = config.Flags
 
 	p := cni.NewCNIPlugin("")
 	c.Action = func(ctx *cli.Context) error {
