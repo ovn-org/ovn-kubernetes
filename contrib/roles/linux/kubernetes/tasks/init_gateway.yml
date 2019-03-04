@@ -30,7 +30,7 @@
         -service-cluster-ip-range "{{ kubernetes_cluster_info.SERVICE_CLUSTER_IP_RANGE }}" \
         -nodeport \
         -init-gateways \
-        -gateway-interface={{interface_name}} \
+        -gateway-interface={{physical_interface_name}} \
         -gateway-nexthop="{{gateway_next_hop}}" \
         -nb-address tcp://{{ kubernetes_cluster_info.MASTER_IP }}:6641 \
         -sb-address tcp://{{ kubernetes_cluster_info.MASTER_IP }}:6642
