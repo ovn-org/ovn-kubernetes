@@ -2,6 +2,7 @@ package util
 
 import (
 	"fmt"
+	kapi "k8s.io/api/core/v1"
 	"os/exec"
 	"strings"
 
@@ -30,4 +31,9 @@ func FetchIfMacWindows(interfaceName string) (string, error) {
 	macAddress := strings.Replace(strings.TrimSpace(fmt.Sprintf("%s", stdoutStderr)), "-", ":", -1)
 
 	return strings.ToLower(macAddress), nil
+}
+
+// IsServiceIPSet checks if the service is an headless service or not
+func IsServiceIPSet(service *kapi.Service) bool {
+	return service.Spec.ClusterIP != kapi.ClusterIPNone && service.Spec.ClusterIP != ""
 }
