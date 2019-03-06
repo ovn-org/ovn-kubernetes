@@ -3,6 +3,7 @@ package cluster
 import (
 	"fmt"
 	"net"
+	"strings"
 
 	kapi "k8s.io/api/core/v1"
 	"k8s.io/client-go/tools/cache"
@@ -333,14 +334,25 @@ func (cluster *OvnClusterController) SetupMaster(masterNodeName string) error {
 	return nil
 }
 
+func parseNodeHostSubnet(node *kapi.Node) (*net.IPNet, error) {
+	sub, ok := node.Annotations[OvnHostSubnet]
+	if !ok {
+		return nil, fmt.Errorf("Error in obtaining host subnet for node %q for deletion", node.Name)
+	}
+
+	_, subnet, err := net.ParseCIDR(sub)
+	if err != nil {
+		return nil, fmt.Errorf("Error in parsing hostsubnet - %v", err)
+	}
+
+	return subnet, nil
+}
+
 func (cluster *OvnClusterController) ensureNodeHostSubnet(node *kapi.Node) (*net.IPNet, *netutils.SubnetAllocator, error) {
 	// Do not create a subnet if the node already has a subnet
-	hostsubnet, ok := node.Annotations[OvnHostSubnet]
-	if ok {
-		// double check if the hostsubnet looks valid
-		if _, ipNet, err := net.ParseCIDR(hostsubnet); err == nil {
-			return ipNet, nil, nil
-		}
+	subnet, _ := parseNodeHostSubnet(node)
+	if subnet != nil {
+		return subnet, nil, nil
 	}
 
 	// Create new subnet
@@ -451,26 +463,16 @@ func (cluster *OvnClusterController) addNode(node *kapi.Node) (err error) {
 	return nil
 }
 
-func (cluster *OvnClusterController) deleteNodeHostSubnet(node *kapi.Node) error {
-	sub, ok := node.Annotations[OvnHostSubnet]
-	if !ok {
-		return fmt.Errorf("Error in obtaining host subnet for node %q for deletion", node.Name)
-	}
-
-	_, subnet, err := net.ParseCIDR(sub)
-	if err != nil {
-		return fmt.Errorf("Error in parsing hostsubnet - %v", err)
-	}
+func (cluster *OvnClusterController) deleteNodeHostSubnet(nodeName string, subnet *net.IPNet) error {
 	for _, possibleSubnet := range cluster.masterSubnetAllocatorList {
-		err = possibleSubnet.ReleaseNetwork(subnet)
-		if err == nil {
-			logrus.Infof("Deleted HostSubnet %s for node %s", sub, node.Name)
+		if err := possibleSubnet.ReleaseNetwork(subnet); err == nil {
+			logrus.Infof("Deleted HostSubnet %v for node %s", subnet, nodeName)
 			return nil
 		}
 	}
 	// SubnetAllocator.network is an unexported field so the only way to figure out if a subnet is in a network is to try and delete it
 	// if deletion succeeds then stop iterating, if the list is exhausted the node subnet wasn't deleteted return err
-	return fmt.Errorf("Error deleting subnet %v for node %q: subnet not found in any CIDR range or already available", sub, node.Name)
+	return fmt.Errorf("Error deleting subnet %v for node %q: subnet not found in any CIDR range or already available", subnet, nodeName)
 }
 
 func (cluster *OvnClusterController) deleteNodeLogicalNetwork(nodeName string) error {
@@ -489,17 +491,66 @@ func (cluster *OvnClusterController) deleteNodeLogicalNetwork(nodeName string) e
 	return nil
 }
 
-func (cluster *OvnClusterController) deleteNode(node *kapi.Node) error {
+func (cluster *OvnClusterController) deleteNode(nodeName string, nodeSubnet *net.IPNet) error {
 	// Clean up as much as we can but don't hard error
-	if err := cluster.deleteNodeHostSubnet(node); err != nil {
-		logrus.Errorf("Error deleting node %s HostSubnet: %v", node.Name, err)
+	if nodeSubnet != nil {
+		if err := cluster.deleteNodeHostSubnet(nodeName, nodeSubnet); err != nil {
+			logrus.Errorf("Error deleting node %s HostSubnet: %v", nodeName, err)
+		}
 	}
 
-	if err := cluster.deleteNodeLogicalNetwork(node.Name); err != nil {
-		logrus.Errorf("Error deleting node %s logical network: %v", node.Name, err)
+	if err := cluster.deleteNodeLogicalNetwork(nodeName); err != nil {
+		logrus.Errorf("Error deleting node %s logical network: %v", nodeName, err)
+	}
+
+	if err := util.RemoveNode(nodeName); err != nil {
+		return fmt.Errorf("Failed to clean up node %s gateway: (%v)", nodeName, err)
 	}
 
 	return nil
+}
+
+func (cluster *OvnClusterController) syncNodes(nodes []interface{}) {
+	foundNodes := make(map[string]*kapi.Node)
+	for _, tmp := range nodes {
+		node, ok := tmp.(*kapi.Node)
+		if !ok {
+			logrus.Errorf("Spurious object in syncNodes: %v", tmp)
+			continue
+		}
+		foundNodes[node.Name] = node
+	}
+
+	// We only deal with cleaning up nodes that shouldn't exist here, since
+	// watchNodes() will be called for all existing nodes at startup anyway
+	nodeSwitches, stderr, err := util.RunOVNNbctl("--data=bare", "--no-heading",
+		"--columns=name,other-config", "find", "logical_switch", "other-config:subnet!=_")
+	if err != nil {
+		logrus.Errorf("Failed to get node logical switches: stderr: %q, error: %v",
+			stderr, err)
+		return
+	}
+	for _, result := range strings.Split(nodeSwitches, "\n\n") {
+		// Split result into name and other-config
+		items := strings.Split(result, "\n")
+		if len(items) != 2 || len(items[0]) == 0 {
+			continue
+		}
+		if _, ok := foundNodes[items[0]]; ok {
+			// node still exists, no cleanup to do
+			continue
+		}
+
+		var subnet *net.IPNet
+		if strings.HasPrefix(items[1], "subnet=") {
+			subnetStr := strings.TrimPrefix(items[1], "subnet=")
+			_, subnet, _ = net.ParseCIDR(subnetStr)
+		}
+
+		if err := cluster.deleteNode(items[0], subnet); err != nil {
+			logrus.Error(err)
+		}
+	}
 }
 
 func (cluster *OvnClusterController) watchNodes() error {
@@ -516,15 +567,12 @@ func (cluster *OvnClusterController) watchNodes() error {
 		DeleteFunc: func(obj interface{}) {
 			node := obj.(*kapi.Node)
 			logrus.Debugf("Delete event for Node %q", node.Name)
-			err := cluster.deleteNode(node)
+			nodeSubnet, _ := parseNodeHostSubnet(node)
+			err := cluster.deleteNode(node.Name, nodeSubnet)
 			if err != nil {
-				logrus.Errorf("Error deleting node %s: %v", node.Name, err)
-			}
-			err = util.RemoveNode(node.Name)
-			if err != nil {
-				logrus.Errorf("Failed to remove node %s (%v)", node.Name, err)
+				logrus.Error(err)
 			}
 		},
-	}, nil)
+	}, cluster.syncNodes)
 	return err
 }

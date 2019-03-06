@@ -70,6 +70,7 @@ var _ = Describe("Master Operations", func() {
 			fakeCmds = ovntest.AddFakeCmdsNoOutputNoError(fakeCmds, []string{
 				"ovn-nbctl --timeout=15 -- --may-exist lsp-add join jtor-ovn_cluster_router -- set logical_switch_port jtor-ovn_cluster_router type=router options:router-port=rtoj-ovn_cluster_router addresses=\"" + joinLRPMAC + "\"",
 				"ovn-nbctl --timeout=15 -- set nb_global . external-ids:gateway-lock=\"\"",
+				"ovn-nbctl --timeout=15 --data=bare --no-heading --columns=name,other-config find logical_switch other-config:subnet!=_",
 			})
 
 			var (
@@ -110,13 +111,13 @@ var _ = Describe("Master Operations", func() {
 			Expect(err).NotTo(HaveOccurred())
 
 			stopChan := make(chan struct{})
-			factory, err := factory.NewWatchFactory(fakeClient, stopChan)
+			f, err := factory.NewWatchFactory(fakeClient, stopChan)
 			Expect(err).NotTo(HaveOccurred())
 			defer func() {
 				close(stopChan)
 			}()
 
-			clusterController := NewClusterController(fakeClient, factory)
+			clusterController := NewClusterController(fakeClient, f)
 			Expect(clusterController).NotTo(BeNil())
 			clusterController.TCPLoadBalancerUUID = tcpLBUUID
 			clusterController.UDPLoadBalancerUUID = udpLBUUID
@@ -129,6 +130,118 @@ var _ = Describe("Master Operations", func() {
 			})
 
 			err = clusterController.StartClusterMaster("master")
+			Expect(err).NotTo(HaveOccurred())
+
+			Expect(fexec.CommandCalls).To(Equal(len(fakeCmds)))
+			return nil
+		}
+
+		err := app.Run([]string{app.Name})
+		Expect(err).NotTo(HaveOccurred())
+	})
+
+	It("removes deleted nodes from the OVN database", func() {
+		app.Action = func(ctx *cli.Context) error {
+			const (
+				tcpLBUUID         string = "1a3dfc82-2749-4931-9190-c30e7c0ecea3"
+				udpLBUUID         string = "6d3142fc-53e8-4ac1-88e6-46094a5a9957"
+				clusterRouterUUID string = "6d3142fc-53e8-4ac1-88e6-46094a5a9957"
+				node1Name         string = "openshift-node-1"
+				node1Subnet       string = "10.128.0.0/24"
+				node1RouteUUID    string = "0cac12cf-3e0f-4682-b028-5ea2e0001962"
+				masterName        string = "openshift-master-node"
+				masterSubnet      string = "10.128.2.0/24"
+				masterGWCIDR      string = "10.128.2.1/24"
+				lrpMAC            string = "00:00:00:05:46:C3"
+			)
+
+			fakeCmds := ovntest.AddFakeCmd(nil, &ovntest.ExpectedCmd{
+				Cmd: "ovn-nbctl --timeout=15 --data=bare --no-heading --columns=name,other-config find logical_switch other-config:subnet!=_",
+				// Return two nodes
+				Output: fmt.Sprintf(`%s
+subnet=%s
+
+%s
+subnet=%s
+`, node1Name, node1Subnet, masterName, masterSubnet),
+			})
+
+			// Expect the code to delete node1 which no longer exists in Kubernetes API
+			fakeCmds = ovntest.AddFakeCmdsNoOutputNoError(fakeCmds, []string{
+				"ovn-nbctl --timeout=15 --if-exist ls-del " + node1Name,
+				"ovn-nbctl --timeout=15 --if-exist lrp-del rtos-" + node1Name,
+			})
+
+			fakeCmds = ovntest.AddFakeCmd(fakeCmds, &ovntest.ExpectedCmd{
+				Cmd:    "ovn-nbctl --timeout=15 --data=bare --no-heading --columns=_uuid find logical_router external_ids:k8s-cluster-router=yes",
+				Output: clusterRouterUUID,
+			})
+			fakeCmds = ovntest.AddFakeCmd(fakeCmds, &ovntest.ExpectedCmd{
+				Cmd:    "ovn-nbctl --timeout=15 --if-exist get logical_router_port rtoj-GR_openshift-node-1 networks",
+				Output: "[\"100.64.0.3/16\"]",
+			})
+			fakeCmds = ovntest.AddFakeCmd(fakeCmds, &ovntest.ExpectedCmd{
+				Cmd:    "ovn-nbctl --timeout=15 --data=bare --no-heading --columns=_uuid find logical_router_static_route nexthop=100.64.0.3",
+				Output: node1RouteUUID,
+			})
+			fakeCmds = ovntest.AddFakeCmdsNoOutputNoError(fakeCmds, []string{
+				"ovn-nbctl --timeout=15 --if-exists remove logical_router " + clusterRouterUUID + " static_routes " + node1RouteUUID,
+				"ovn-nbctl --timeout=15 --if-exist lsp-del jtor-GR_" + node1Name,
+				"ovn-nbctl --timeout=15 --if-exist lr-del GR_" + node1Name,
+				"ovn-nbctl --timeout=15 --if-exist ls-del ext_" + node1Name,
+			})
+
+			// Expect the code to re-add the master node (which still exists)
+			// when the factory watch begins and enumerates all existing
+			// Kubernetes API nodes
+			fakeCmds = ovntest.AddFakeCmd(fakeCmds, &ovntest.ExpectedCmd{
+				Cmd: "ovn-nbctl --timeout=15 --if-exist get logical_router_port rtos-" + masterName + " mac",
+				// Return a known MAC; otherwise code autogenerates it
+				Output: lrpMAC,
+			})
+			fakeCmds = ovntest.AddFakeCmdsNoOutputNoError(fakeCmds, []string{
+				"ovn-nbctl --timeout=15 --may-exist lrp-add ovn_cluster_router rtos-" + masterName + " " + lrpMAC + " " + masterGWCIDR,
+				"ovn-nbctl --timeout=15 -- --may-exist ls-add " + masterName + " -- set logical_switch " + masterName + " other-config:subnet=" + masterSubnet + " external-ids:gateway_ip=" + masterGWCIDR,
+				"ovn-nbctl --timeout=15 -- --may-exist lsp-add " + masterName + " stor-" + masterName + " -- set logical_switch_port stor-" + masterName + " type=router options:router-port=rtos-" + masterName + " addresses=\"" + lrpMAC + "\"",
+			})
+
+			fexec := &fakeexec.FakeExec{
+				CommandScript: fakeCmds,
+				LookPathFunc: func(file string) (string, error) {
+					return fmt.Sprintf("/fake-bin/%s", file), nil
+				},
+			}
+
+			masterNode := v1.Node{ObjectMeta: metav1.ObjectMeta{
+				Name: masterName,
+				Annotations: map[string]string{
+					OvnHostSubnet: masterSubnet,
+				},
+			}}
+			fakeClient := fake.NewSimpleClientset(&v1.NodeList{
+				Items: []v1.Node{masterNode},
+			})
+
+			err := util.SetExec(fexec)
+			Expect(err).NotTo(HaveOccurred())
+
+			_, err = config.InitConfig(ctx, fexec, nil)
+			Expect(err).NotTo(HaveOccurred())
+
+			stopChan := make(chan struct{})
+			f, err := factory.NewWatchFactory(fakeClient, stopChan)
+			Expect(err).NotTo(HaveOccurred())
+			defer close(stopChan)
+
+			clusterController := NewClusterController(fakeClient, f)
+			Expect(clusterController).NotTo(BeNil())
+
+			// Initialize OVS/OVN connection methods
+			err = setupOVNMaster(masterNode.Name)
+			Expect(err).NotTo(HaveOccurred())
+
+			// Let the real code run and ensure OVN database sync
+			err = clusterController.watchNodes()
 			Expect(err).NotTo(HaveOccurred())
 
 			Expect(fexec.CommandCalls).To(Equal(len(fakeCmds)))
