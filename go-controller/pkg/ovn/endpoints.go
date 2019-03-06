@@ -25,6 +25,11 @@ func (ovn *Controller) AddEndpoints(ep *kapi.Endpoints) error {
 			ep.Name, ep.Namespace)
 		return nil
 	}
+	if !util.IsServiceIPSet(svc) {
+		logrus.Debugf("Skipping service %s due to clusterIP = %q",
+			svc.Name, svc.Spec.ClusterIP)
+		return nil
+	}
 	tcpPortMap := make(map[string]lbEndpoints)
 	udpPortMap := make(map[string]lbEndpoints)
 	for _, s := range ep.Subsets {
@@ -141,6 +146,9 @@ func (ovn *Controller) deleteEndpoints(ep *kapi.Endpoints) error {
 		// will fail.
 		logrus.Debugf("no service found for endpoint %s in namespace %s",
 			ep.Name, ep.Namespace)
+		return nil
+	}
+	if !util.IsServiceIPSet(svc) {
 		return nil
 	}
 	for _, svcPort := range svc.Spec.Ports {
