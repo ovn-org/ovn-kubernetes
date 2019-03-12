@@ -61,6 +61,7 @@ type WatchFactory struct {
 	iFactory       informerfactory.SharedInformerFactory
 	informers      map[reflect.Type]*informer
 	handlerCounter uint64
+	stopChan       chan struct{}
 }
 
 const (
@@ -87,7 +88,7 @@ var (
 )
 
 // NewWatchFactory initializes a new watch factory
-func NewWatchFactory(c kubernetes.Interface, stopChan <-chan struct{}) (*WatchFactory, error) {
+func NewWatchFactory(c kubernetes.Interface, stopChan chan struct{}) (*WatchFactory, error) {
 	// resync time is 12 hours, none of the resources being watched in ovn-kubernetes have
 	// any race condition where a resync may be required e.g. cni executable on node watching for
 	// events on pods and assuming that an 'ADD' event will contain the annotations put in by
@@ -96,6 +97,7 @@ func NewWatchFactory(c kubernetes.Interface, stopChan <-chan struct{}) (*WatchFa
 	wf := &WatchFactory{
 		iFactory:  informerfactory.NewSharedInformerFactory(c, resyncInterval),
 		informers: make(map[reflect.Type]*informer),
+		stopChan:  stopChan,
 	}
 
 	// Create shared informers we know we'll use
@@ -117,6 +119,20 @@ func NewWatchFactory(c kubernetes.Interface, stopChan <-chan struct{}) (*WatchFa
 	}
 
 	return wf, nil
+}
+
+// Shutdown removes all handlers
+func (wf *WatchFactory) Shutdown() {
+	close(wf.stopChan)
+	for _, inf := range wf.informers {
+		inf.Lock()
+		defer inf.Unlock()
+		for _, handler := range inf.handlers {
+			if atomic.CompareAndSwapUint32(&handler.tombstone, handlerAlive, handlerDead) {
+				delete(inf.handlers, handler.id)
+			}
+		}
+	}
 }
 
 func (wf *WatchFactory) newFederatedHandler(inf *informer) cache.ResourceEventHandlerFuncs {

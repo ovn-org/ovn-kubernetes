@@ -113,9 +113,7 @@ var _ = Describe("Master Operations", func() {
 			stopChan := make(chan struct{})
 			f, err := factory.NewWatchFactory(fakeClient, stopChan)
 			Expect(err).NotTo(HaveOccurred())
-			defer func() {
-				close(stopChan)
-			}()
+			defer f.Shutdown()
 
 			clusterController := NewClusterController(fakeClient, f)
 			Expect(clusterController).NotTo(BeNil())
@@ -231,7 +229,7 @@ subnet=%s
 			stopChan := make(chan struct{})
 			f, err := factory.NewWatchFactory(fakeClient, stopChan)
 			Expect(err).NotTo(HaveOccurred())
-			defer close(stopChan)
+			defer f.Shutdown()
 
 			clusterController := NewClusterController(fakeClient, f)
 			Expect(clusterController).NotTo(BeNil())
