@@ -18,6 +18,9 @@ type OvnClusterController struct {
 	watchFactory              *factory.WatchFactory
 	masterSubnetAllocatorList []*netutils.SubnetAllocator
 
+	TCPLoadBalancerUUID string
+	UDPLoadBalancerUUID string
+
 	ClusterServicesSubnet string
 	ClusterIPNet          []CIDRNetworkEntry
 

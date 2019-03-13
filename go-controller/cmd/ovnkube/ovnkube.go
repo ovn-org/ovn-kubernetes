@@ -60,11 +60,6 @@ func main() {
 			Name:  "init-node",
 			Usage: "initialize node, requires the name that node is registered with in kubernetes cluster",
 		},
-		cli.StringFlag{
-			Name: "remove-node",
-			Usage: "Remove a node from the OVN cluster, requires the name " +
-				"that the node is registered with in the kubernetes cluster",
-		},
 
 		// Daemon file
 		cli.StringFlag{
@@ -186,15 +181,6 @@ func runOvnKube(ctx *cli.Context) error {
 	if err = util.SetExec(exec); err != nil {
 		logrus.Errorf("Failed to initialize exec helper: %v", err)
 		return err
-	}
-
-	nodeToRemove := ctx.String("remove-node")
-	if nodeToRemove != "" {
-		err = util.RemoveNode(nodeToRemove)
-		if err != nil {
-			logrus.Errorf("Failed to remove node %v", err)
-		}
-		return nil
 	}
 
 	pidfile := ctx.String("pidfile")

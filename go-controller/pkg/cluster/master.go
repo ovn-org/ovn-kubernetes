@@ -3,6 +3,7 @@ package cluster
 import (
 	"fmt"
 	"net"
+	"strings"
 
 	kapi "k8s.io/api/core/v1"
 	"k8s.io/client-go/tools/cache"
@@ -65,26 +66,15 @@ func (cluster *OvnClusterController) UpdateDBForKubeNodes(
 		return err
 	}
 	for _, node := range nodes.Items {
-		subnet, ok := node.Annotations[OvnHostSubnet]
+		subnetStr, ok := node.Annotations[OvnHostSubnet]
 		if ok {
-			// Create a logical switch for the node
-			logrus.Debugf("ovn_host_subnet: %s", subnet)
-			ip, localNet, err := net.ParseCIDR(subnet)
+			ip, subnet, err := net.ParseCIDR(subnetStr)
 			if err != nil {
-				return fmt.Errorf("Failed to parse subnet %v: %v", subnet,
-					err)
+				return fmt.Errorf("Failed to parse subnet %s: %v", subnetStr, err)
 			}
-			ip = util.NextIP(ip)
-			n, _ := localNet.Mask.Size()
-			routerIPMask := fmt.Sprintf("%s/%d", ip.String(), n)
-			stdout, stderr, err := util.RunOVNNbctl("--may-exist",
-				"ls-add", node.Name, "--", "set", "logical_switch",
-				node.Name, fmt.Sprintf("other-config:subnet=%s", subnet),
-				fmt.Sprintf("external-ids:gateway_ip=%s", routerIPMask))
+			subnet.IP = util.NextIP(ip)
+			err = cluster.ensureNodeLogicalNetwork(node.Name, subnet)
 			if err != nil {
-				logrus.Errorf("Failed to create logical switch for "+
-					"node %s, stdout: %q, stderr: %q, error: %v",
-					node.Name, stdout, stderr, err)
 				return err
 			}
 		}
@@ -241,17 +231,6 @@ func (cluster *OvnClusterController) StartClusterMaster(masterNodeName string) e
 	}
 	cluster.masterSubnetAllocatorList = masterSubnetAllocatorList
 
-	// now go over the 'existing' list again and create annotations for those who do not have it
-	for _, node := range existingNodes.Items {
-		_, ok := node.Annotations[OvnHostSubnet]
-		if !ok {
-			err := cluster.addNode(&node)
-			if err != nil {
-				logrus.Errorf("error creating subnet for node %s: %v", node.Name, err)
-			}
-		}
-	}
-
 	if err := cluster.SetupMaster(masterNodeName); err != nil {
 		logrus.Errorf("Failed to setup master (%v)", err)
 		return err
@@ -280,27 +259,27 @@ func (cluster *OvnClusterController) SetupMaster(masterNodeName string) error {
 	}
 
 	// Create 2 load-balancers for east-west traffic.  One handles UDP and another handles TCP.
-	k8sClusterLbTCP, stderr, err := util.RunOVNNbctl("--data=bare", "--no-heading", "--columns=_uuid", "find", "load_balancer", "external_ids:k8s-cluster-lb-tcp=yes")
+	cluster.TCPLoadBalancerUUID, stderr, err = util.RunOVNNbctl("--data=bare", "--no-heading", "--columns=_uuid", "find", "load_balancer", "external_ids:k8s-cluster-lb-tcp=yes")
 	if err != nil {
 		logrus.Errorf("Failed to get tcp load-balancer, stderr: %q, error: %v", stderr, err)
 		return err
 	}
 
-	if k8sClusterLbTCP == "" {
-		stdout, stderr, err = util.RunOVNNbctl("--", "create", "load_balancer", "external_ids:k8s-cluster-lb-tcp=yes", "protocol=tcp")
+	if cluster.TCPLoadBalancerUUID == "" {
+		cluster.TCPLoadBalancerUUID, stderr, err = util.RunOVNNbctl("--", "create", "load_balancer", "external_ids:k8s-cluster-lb-tcp=yes", "protocol=tcp")
 		if err != nil {
 			logrus.Errorf("Failed to create tcp load-balancer, stdout: %q, stderr: %q, error: %v", stdout, stderr, err)
 			return err
 		}
 	}
 
-	k8sClusterLbUDP, stderr, err := util.RunOVNNbctl("--data=bare", "--no-heading", "--columns=_uuid", "find", "load_balancer", "external_ids:k8s-cluster-lb-udp=yes")
+	cluster.UDPLoadBalancerUUID, stderr, err = util.RunOVNNbctl("--data=bare", "--no-heading", "--columns=_uuid", "find", "load_balancer", "external_ids:k8s-cluster-lb-udp=yes")
 	if err != nil {
 		logrus.Errorf("Failed to get udp load-balancer, stderr: %q, error: %v", stderr, err)
 		return err
 	}
-	if k8sClusterLbUDP == "" {
-		stdout, stderr, err = util.RunOVNNbctl("--", "create", "load_balancer", "external_ids:k8s-cluster-lb-udp=yes", "protocol=udp")
+	if cluster.UDPLoadBalancerUUID == "" {
+		cluster.UDPLoadBalancerUUID, stderr, err = util.RunOVNNbctl("--", "create", "load_balancer", "external_ids:k8s-cluster-lb-udp=yes", "protocol=udp")
 		if err != nil {
 			logrus.Errorf("Failed to create udp load-balancer, stdout: %q, stderr: %q, error: %v", stdout, stderr, err)
 			return err
@@ -355,15 +334,25 @@ func (cluster *OvnClusterController) SetupMaster(masterNodeName string) error {
 	return nil
 }
 
-func (cluster *OvnClusterController) addNode(node *kapi.Node) error {
+func parseNodeHostSubnet(node *kapi.Node) (*net.IPNet, error) {
+	sub, ok := node.Annotations[OvnHostSubnet]
+	if !ok {
+		return nil, fmt.Errorf("Error in obtaining host subnet for node %q for deletion", node.Name)
+	}
+
+	_, subnet, err := net.ParseCIDR(sub)
+	if err != nil {
+		return nil, fmt.Errorf("Error in parsing hostsubnet - %v", err)
+	}
+
+	return subnet, nil
+}
+
+func (cluster *OvnClusterController) ensureNodeHostSubnet(node *kapi.Node) (*net.IPNet, *netutils.SubnetAllocator, error) {
 	// Do not create a subnet if the node already has a subnet
-	hostsubnet, ok := node.Annotations[OvnHostSubnet]
-	if ok {
-		// double check if the hostsubnet looks valid
-		_, _, err := net.ParseCIDR(hostsubnet)
-		if err == nil {
-			return nil
-		}
+	subnet, _ := parseNodeHostSubnet(node)
+	if subnet != nil {
+		return subnet, nil, nil
 	}
 
 	// Create new subnet
@@ -373,41 +362,195 @@ func (cluster *OvnClusterController) addNode(node *kapi.Node) error {
 			// Current subnet exhausted, check next possible subnet
 			continue
 		} else if err != nil {
-			return fmt.Errorf("Error allocating network for node %s: %v", node.Name, err)
-		} else {
-			err = cluster.Kube.SetAnnotationOnNode(node, OvnHostSubnet, sn.String())
-			if err != nil {
-				_ = possibleSubnet.ReleaseNetwork(sn)
-				return fmt.Errorf("Error creating subnet %s for node %s: %v", sn.String(), node.Name, err)
-			}
-			logrus.Infof("Created HostSubnet %s", sn.String())
-			return nil
+			return nil, nil, fmt.Errorf("Error allocating network for node %s: %v", node.Name, err)
 		}
+
+		// Success
+		logrus.Infof("Allocated node %s HostSubnet %s", node.Name, sn.String())
+		return sn, possibleSubnet, nil
 	}
-	return fmt.Errorf("error allocating netork for node %s: No more allocatable ranges", node.Name)
+	return nil, nil, fmt.Errorf("error allocating network for node %s: No more allocatable ranges", node.Name)
 }
 
-func (cluster *OvnClusterController) deleteNode(node *kapi.Node) error {
-	sub, ok := node.Annotations[OvnHostSubnet]
-	if !ok {
-		return fmt.Errorf("Error in obtaining host subnet for node %q for deletion", node.Name)
+func (cluster *OvnClusterController) ensureNodeLogicalNetwork(nodeName string, hostsubnet *net.IPNet) error {
+	ip := util.NextIP(hostsubnet.IP)
+	n, _ := hostsubnet.Mask.Size()
+	firstIP := fmt.Sprintf("%s/%d", ip.String(), n)
+
+	nodeLRPMac, stderr, err := util.RunOVNNbctl("--if-exist", "get", "logical_router_port", "rtos-"+nodeName, "mac")
+	if err != nil {
+		logrus.Errorf("Failed to get logical router port,stderr: %q, error: %v", stderr, err)
+		return err
+	}
+	if nodeLRPMac == "" {
+		nodeLRPMac = util.GenerateMac()
 	}
 
-	_, subnet, err := net.ParseCIDR(sub)
+	// Create a router port and provide it the first address on the node's host subnet
+	_, stderr, err = util.RunOVNNbctl("--may-exist", "lrp-add", OvnClusterRouter, "rtos-"+nodeName, nodeLRPMac, firstIP)
 	if err != nil {
-		return fmt.Errorf("Error in parsing hostsubnet - %v", err)
+		logrus.Errorf("Failed to add logical port to router, stderr: %q, error: %v", stderr, err)
+		return err
 	}
+
+	// Create a logical switch and set its subnet.
+	stdout, stderr, err := util.RunOVNNbctl("--", "--may-exist", "ls-add", nodeName,
+		"--", "set", "logical_switch", nodeName, "other-config:subnet="+hostsubnet.String(), "external-ids:gateway_ip="+firstIP)
+	if err != nil {
+		logrus.Errorf("Failed to create a logical switch %v, stdout: %q, stderr: %q, error: %v", nodeName, stdout, stderr, err)
+		return err
+	}
+
+	// Connect the switch to the router.
+	stdout, stderr, err = util.RunOVNNbctl("--", "--may-exist", "lsp-add", nodeName, "stor-"+nodeName,
+		"--", "set", "logical_switch_port", "stor-"+nodeName, "type=router", "options:router-port=rtos-"+nodeName, "addresses="+"\""+nodeLRPMac+"\"")
+	if err != nil {
+		logrus.Errorf("Failed to add logical port to switch, stdout: %q, stderr: %q, error: %v", stdout, stderr, err)
+		return err
+	}
+
+	// Add our cluster TCP and UDP load balancers to the node switch
+	if cluster.TCPLoadBalancerUUID == "" {
+		return fmt.Errorf("TCP cluster load balancer not created")
+	}
+	stdout, stderr, err = util.RunOVNNbctl("set", "logical_switch", nodeName, "load_balancer="+cluster.TCPLoadBalancerUUID)
+	if err != nil {
+		logrus.Errorf("Failed to set logical switch %v's loadbalancer, stdout: %q, stderr: %q, error: %v", nodeName, stdout, stderr, err)
+		return err
+	}
+
+	if cluster.UDPLoadBalancerUUID == "" {
+		return fmt.Errorf("UDP cluster load balancer not created")
+	}
+	stdout, stderr, err = util.RunOVNNbctl("add", "logical_switch", nodeName, "load_balancer", cluster.UDPLoadBalancerUUID)
+	if err != nil {
+		logrus.Errorf("Failed to add logical switch %v's loadbalancer, stdout: %q, stderr: %q, error: %v", nodeName, stdout, stderr, err)
+		return err
+	}
+
+	return nil
+}
+
+func (cluster *OvnClusterController) addNode(node *kapi.Node) (err error) {
+	var hostsubnet *net.IPNet
+	var subnetAllocator *netutils.SubnetAllocator
+	hostsubnet, subnetAllocator, err = cluster.ensureNodeHostSubnet(node)
+	if err != nil {
+		return err
+	}
+
+	defer func() {
+		if err != nil && subnetAllocator != nil {
+			_ = subnetAllocator.ReleaseNetwork(hostsubnet)
+		}
+	}()
+
+	// Ensure that the node's logical network has been created
+	err = cluster.ensureNodeLogicalNetwork(node.Name, hostsubnet)
+	if err != nil {
+		return err
+	}
+
+	// Set the HostSubnet annotation on the node object to signal
+	// to nodes that their logical infrastructure is set up and they can
+	// proceed with their initialization
+	err = cluster.Kube.SetAnnotationOnNode(node, OvnHostSubnet, hostsubnet.String())
+	if err != nil {
+		logrus.Errorf("Failed to set node %s host subnet annotation: %v", node.Name, hostsubnet.String())
+		return err
+	}
+
+	return nil
+}
+
+func (cluster *OvnClusterController) deleteNodeHostSubnet(nodeName string, subnet *net.IPNet) error {
 	for _, possibleSubnet := range cluster.masterSubnetAllocatorList {
-		err = possibleSubnet.ReleaseNetwork(subnet)
-		if err == nil {
-			logrus.Infof("Deleted HostSubnet %s for node %s", sub, node.Name)
+		if err := possibleSubnet.ReleaseNetwork(subnet); err == nil {
+			logrus.Infof("Deleted HostSubnet %v for node %s", subnet, nodeName)
 			return nil
 		}
 	}
 	// SubnetAllocator.network is an unexported field so the only way to figure out if a subnet is in a network is to try and delete it
 	// if deletion succeeds then stop iterating, if the list is exhausted the node subnet wasn't deleteted return err
-	return fmt.Errorf("Error deleting subnet %v for node %q: subnet not found in any CIDR range or already available", sub, node.Name)
+	return fmt.Errorf("Error deleting subnet %v for node %q: subnet not found in any CIDR range or already available", subnet, nodeName)
+}
 
+func (cluster *OvnClusterController) deleteNodeLogicalNetwork(nodeName string) error {
+	// Remove the logical switch associated with the node
+	if _, stderr, err := util.RunOVNNbctl("--if-exist", "ls-del", nodeName); err != nil {
+		return fmt.Errorf("Failed to delete logical switch %s, "+
+			"stderr: %q, error: %v", nodeName, stderr, err)
+	}
+
+	// Remove the patch port that connects distributed router to node's logical switch
+	if _, stderr, err := util.RunOVNNbctl("--if-exist", "lrp-del", "rtos-"+nodeName); err != nil {
+		return fmt.Errorf("Failed to delete logical router port rtos-%s, "+
+			"stderr: %q, error: %v", nodeName, stderr, err)
+	}
+
+	return nil
+}
+
+func (cluster *OvnClusterController) deleteNode(nodeName string, nodeSubnet *net.IPNet) error {
+	// Clean up as much as we can but don't hard error
+	if nodeSubnet != nil {
+		if err := cluster.deleteNodeHostSubnet(nodeName, nodeSubnet); err != nil {
+			logrus.Errorf("Error deleting node %s HostSubnet: %v", nodeName, err)
+		}
+	}
+
+	if err := cluster.deleteNodeLogicalNetwork(nodeName); err != nil {
+		logrus.Errorf("Error deleting node %s logical network: %v", nodeName, err)
+	}
+
+	if err := util.GatewayCleanup(nodeName); err != nil {
+		return fmt.Errorf("Failed to clean up node %s gateway: (%v)", nodeName, err)
+	}
+
+	return nil
+}
+
+func (cluster *OvnClusterController) syncNodes(nodes []interface{}) {
+	foundNodes := make(map[string]*kapi.Node)
+	for _, tmp := range nodes {
+		node, ok := tmp.(*kapi.Node)
+		if !ok {
+			logrus.Errorf("Spurious object in syncNodes: %v", tmp)
+			continue
+		}
+		foundNodes[node.Name] = node
+	}
+
+	// We only deal with cleaning up nodes that shouldn't exist here, since
+	// watchNodes() will be called for all existing nodes at startup anyway
+	nodeSwitches, stderr, err := util.RunOVNNbctl("--data=bare", "--no-heading",
+		"--columns=name,other-config", "find", "logical_switch", "other-config:subnet!=_")
+	if err != nil {
+		logrus.Errorf("Failed to get node logical switches: stderr: %q, error: %v",
+			stderr, err)
+		return
+	}
+	for _, result := range strings.Split(nodeSwitches, "\n\n") {
+		// Split result into name and other-config
+		items := strings.Split(result, "\n")
+		if len(items) != 2 || len(items[0]) == 0 {
+			continue
+		}
+		if _, ok := foundNodes[items[0]]; ok {
+			// node still exists, no cleanup to do
+			continue
+		}
+
+		var subnet *net.IPNet
+		if strings.HasPrefix(items[1], "subnet=") {
+			subnetStr := strings.TrimPrefix(items[1], "subnet=")
+			_, subnet, _ = net.ParseCIDR(subnetStr)
+		}
+
+		if err := cluster.deleteNode(items[0], subnet); err != nil {
+			logrus.Error(err)
+		}
+	}
 }
 
 func (cluster *OvnClusterController) watchNodes() error {
@@ -424,15 +567,12 @@ func (cluster *OvnClusterController) watchNodes() error {
 		DeleteFunc: func(obj interface{}) {
 			node := obj.(*kapi.Node)
 			logrus.Debugf("Delete event for Node %q", node.Name)
-			err := cluster.deleteNode(node)
+			nodeSubnet, _ := parseNodeHostSubnet(node)
+			err := cluster.deleteNode(node.Name, nodeSubnet)
 			if err != nil {
-				logrus.Errorf("Error deleting node %s: %v", node.Name, err)
-			}
-			err = util.RemoveNode(node.Name)
-			if err != nil {
-				logrus.Errorf("Failed to remove node %s (%v)", node.Name, err)
+				logrus.Error(err)
 			}
 		},
-	}, nil)
+	}, cluster.syncNodes)
 	return err
 }

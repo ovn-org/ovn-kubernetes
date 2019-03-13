@@ -7,19 +7,12 @@ import (
 	"github.com/sirupsen/logrus"
 )
 
-// RemoveNode removes all the NB DB objects created for that node.
-func RemoveNode(nodeName string) error {
+// GatewayCleanup removes all the NB DB objects created for a node's gateway
+func GatewayCleanup(nodeName string) error {
 	// Get the cluster router
 	clusterRouter, err := GetK8sClusterRouter()
 	if err != nil {
 		return fmt.Errorf("failed to get cluster router")
-	}
-
-	// Remove the logical switch associated with nodeName
-	_, stderr, err := RunOVNNbctl("--if-exist", "ls-del", nodeName)
-	if err != nil {
-		return fmt.Errorf("Failed to delete logical switch %s, "+
-			"stderr: %q, error: %v", nodeName, stderr, err)
 	}
 
 	gatewayRouter := fmt.Sprintf("GR_%s", nodeName)
@@ -72,13 +65,6 @@ func RemoveNode(nodeName string) error {
 	if err != nil {
 		return fmt.Errorf("Failed to delete logical switch port jtor-%s, "+
 			"stderr: %q, error: %v", gatewayRouter, stderr, err)
-	}
-
-	// Remove the patch port that connects distributed router to node's logical switch
-	_, stderr, err = RunOVNNbctl("--if-exist", "lrp-del", "rtos-"+nodeName)
-	if err != nil {
-		return fmt.Errorf("Failed to delete logical router port rtos-%s, "+
-			"stderr: %q, error: %v", nodeName, stderr, err)
 	}
 
 	// Remove any gateway routers associated with nodeName
