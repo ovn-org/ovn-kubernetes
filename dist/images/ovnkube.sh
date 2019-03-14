@@ -433,9 +433,6 @@ nb-ovsdb () {
   # Make sure /var/lib/openvswitch exists
   mkdir -p /var/lib/openvswitch
 
-  echo "=============== run nb_ovsdb (wait for ovs) ========== MASTER ONLY"
-  wait_for_event ovs_ready
-
   echo "=============== run nb_ovsdb ========== MASTER ONLY"
   echo "ovn_log_nb=${ovn_log_nb} ovn_nb_log_file=${ovn_nb_log_file}"
   /usr/share/openvswitch/scripts/ovn-ctl run_nb_ovsdb --no-monitor \
@@ -449,9 +446,6 @@ sb-ovsdb () {
   # this is only run on masters in a separate container
   # Make sure /var/lib/openvswitch exists
   mkdir -p /var/lib/openvswitch
-
-  echo "=============== run sb_ovsdb (wait for ovs) ========== MASTER ONLY"
-  wait_for_event ovs_ready
 
   echo "=============== run sb_ovsdb ========== MASTER ONLY"
   echo "ovn_log_sb=${ovn_log_sb} ovn_sb_log_file=${ovn_sb_log_file}"
@@ -470,8 +464,7 @@ run-ovn-northd () {
   mkdir -p /var/lib/openvswitch
 
 
-  echo "=============== run-ovn-northd (wait for ovs, sdb, and ndb) ========== MASTER ONLY"
-  wait_for_event ovs_ready
+  echo "=============== run-ovn-northd (wait for sdb and ndb) ========== MASTER ONLY"
   wait_for_event pid_ready ovnsb_db.pid
   wait_for_event pid_ready ovnnb_db.pid
   sleep 1
