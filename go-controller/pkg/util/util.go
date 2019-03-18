@@ -37,3 +37,12 @@ func FetchIfMacWindows(interfaceName string) (string, error) {
 func IsServiceIPSet(service *kapi.Service) bool {
 	return service.Spec.ClusterIP != kapi.ClusterIPNone && service.Spec.ClusterIP != ""
 }
+
+// GetK8sMgmtIntfName returns the correct length interface name to be used
+// as an OVS internal port on the node
+func GetK8sMgmtIntfName(nodeName string) string {
+	if len(nodeName) > 11 {
+		return "k8s-" + (nodeName[:11])
+	}
+	return "k8s-" + nodeName
+}

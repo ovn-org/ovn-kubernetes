@@ -67,6 +67,7 @@ var _ = Describe("Management Port Operations", func() {
 				serviceCIDR   string = serviceIPNet + "/16"
 				mtu           string = "1400"
 				gwIP          string = "10.1.1.1"
+				lrpMAC        string = "00:00:00:00:00:03"
 			)
 
 			fakeCmds := ovntest.AddFakeCmdsNoOutputNoError(nil, []string{
@@ -80,6 +81,11 @@ var _ = Describe("Management Port Operations", func() {
 			fakeCmds = ovntest.AddFakeCmd(fakeCmds, &ovntest.ExpectedCmd{
 				Cmd: "ovn-nbctl --timeout=15 -- --may-exist lsp-add " + nodeName + " " + mgtPort + " -- lsp-set-addresses " + mgtPort + " " + mgtPortMAC + " " + mgtPortIP,
 			})
+			fakeCmds = ovntest.AddFakeCmd(fakeCmds, &ovntest.ExpectedCmd{
+				Cmd:    "ovn-nbctl --timeout=15 lsp-get-addresses stor-" + nodeName,
+				Output: lrpMAC,
+			})
+
 			if runtime.GOOS == windowsOS {
 				const ifindex string = "10"
 				fakeCmds = ovntest.AddFakeCmdsNoOutputNoError(fakeCmds, []string{
@@ -110,6 +116,7 @@ var _ = Describe("Management Port Operations", func() {
 					"ip route add " + clusterCIDR + " via " + gwIP,
 					"ip route flush " + serviceCIDR,
 					"ip route add " + serviceCIDR + " via " + gwIP,
+					"ip neigh add " + gwIP + " dev " + mgtPort + " lladdr " + lrpMAC,
 				})
 			}
 

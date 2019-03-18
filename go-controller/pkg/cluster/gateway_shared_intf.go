@@ -253,6 +253,28 @@ func addDefaultConntrackRules(nodeName, gwBridge, gwIntf string) error {
 	return nil
 }
 
+func addStaticRouteToHost(nodeName, nicIP string) error {
+	k8sClusterRouter, err := util.GetK8sClusterRouter()
+	if err != nil {
+		return err
+	}
+
+	k8sMgmtIntfName := util.GetK8sMgmtIntfName(nodeName)
+	k8sMgmtIntfIPAddress, err := getIPv4Address(k8sMgmtIntfName)
+	if err != nil {
+		return fmt.Errorf("failed to get interface IP address for %s (%v)",
+			k8sMgmtIntfName, err)
+	}
+	prefix := strings.Split(nicIP, "/")[0] + "/32"
+	nexthop := strings.Split(k8sMgmtIntfIPAddress, "/")[0]
+	_, stderr, err := util.RunOVNNbctl("--may-exist", "lr-route-add", k8sClusterRouter, prefix, nexthop)
+	if err != nil {
+		return fmt.Errorf("failed to add static route '%s via %s' for host %q on %s "+
+			"stderr: %q, error: %v", nicIP, k8sMgmtIntfIPAddress, nodeName, k8sClusterRouter, stderr, err)
+	}
+	return nil
+}
+
 func initSharedGateway(
 	nodeName string, clusterIPSubnet []string, subnet,
 	gwNextHop, gwIntf string, gwVLANId uint, nodeportEnable bool,
@@ -300,6 +322,13 @@ func initSharedGateway(
 		bridgeName, gwNextHop, subnet, gwVLANId, nodeportEnable)
 	if err != nil {
 		return "", "", fmt.Errorf("failed to init shared interface gateway: %v", err)
+	}
+
+	// Add static routes to OVN Cluster Router to enable pods on this Node to
+	// reach the host IP
+	err = addStaticRouteToHost(nodeName, ipAddress)
+	if err != nil {
+		return "", "", err
 	}
 
 	// Program cluster.GatewayIntf to let non-pod traffic to go to host
