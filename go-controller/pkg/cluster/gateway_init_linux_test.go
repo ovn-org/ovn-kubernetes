@@ -63,6 +63,8 @@ func shareGatewayInterfaceTest(app *cli.App, testNS ns.NetNS,
 			gwRouter          string = "GR_" + nodeName
 			clusterIPNet      string = "10.1.0.0"
 			clusterCIDR       string = clusterIPNet + "/16"
+			mgtPortName       string = "k8s-" + nodeName
+			mgtPortIP         string = "10.1.1.2"
 		)
 
 		fakeCmds := ovntest.AddFakeCmd(nil, &ovntest.ExpectedCmd{
@@ -141,6 +143,35 @@ func shareGatewayInterfaceTest(app *cli.App, testNS ns.NetNS,
 			"ovn-nbctl --timeout=15 --may-exist lr-nat-add " + gwRouter + " snat " + eth0IP + " " + clusterCIDR,
 			"ovn-nbctl --timeout=15 set logical_router " + gwRouter + " options:lb_force_snat_ip=" + lrpIP,
 			"ovn-nbctl --timeout=15 --may-exist --policy=src-ip lr-route-add " + clusterRouterUUID + " " + nodeSubnet + " " + lrpIP,
+		})
+		fakeCmds = ovntest.AddFakeCmd(fakeCmds, &ovntest.ExpectedCmd{
+			Cmd:    "ovn-nbctl --timeout=15 --data=bare --no-heading --columns=_uuid find logical_router external_ids:k8s-cluster-router=yes",
+			Output: clusterRouterUUID,
+			Action: func() error {
+				defer GinkgoRecover()
+
+				err := netlink.LinkAdd(&netlink.Dummy{
+					LinkAttrs: netlink.LinkAttrs{
+						Name: mgtPortName,
+					},
+				})
+				Expect(err).NotTo(HaveOccurred())
+				l, err := netlink.LinkByName(mgtPortName)
+				Expect(err).NotTo(HaveOccurred())
+				err = netlink.LinkSetUp(l)
+				Expect(err).NotTo(HaveOccurred())
+
+				// Add an IP address
+				addr, err := netlink.ParseAddr(mgtPortIP + "/24")
+				Expect(err).NotTo(HaveOccurred())
+				err = netlink.AddrAdd(l, addr)
+				Expect(err).NotTo(HaveOccurred())
+
+				return nil
+			},
+		})
+		fakeCmds = ovntest.AddFakeCmdsNoOutputNoError(fakeCmds, []string{
+			"ovn-nbctl --timeout=15 --may-exist lr-route-add " + clusterRouterUUID + " " + eth0IP + "/32 " + mgtPortIP,
 		})
 		fakeCmds = ovntest.AddFakeCmd(fakeCmds, &ovntest.ExpectedCmd{
 			Cmd:    "ovs-vsctl --timeout=15 wait-until Interface patch-breth0_node1-to-br-int ofport>0 -- get Interface patch-breth0_node1-to-br-int ofport",

@@ -3,6 +3,7 @@ package ovn
 import (
 	"fmt"
 	"net"
+	"os"
 	"runtime"
 	"strconv"
 	"strings"
@@ -129,7 +130,7 @@ func configureManagementPortWindows(clusterSubnet []string, clusterServicesSubne
 }
 
 func configureManagementPort(clusterSubnet []string, clusterServicesSubnet,
-	routerIP, interfaceName, interfaceIP string) error {
+	routerIP, routerMac, interfaceName, interfaceIP string) error {
 	if runtime.GOOS == windowsOS {
 		// Return here for Windows, the commands for enabling the interface, setting the IP and adding the
 		// route will be done in the above function
@@ -184,6 +185,16 @@ func configureManagementPort(clusterSubnet []string, clusterServicesSubnet,
 		}
 	}
 
+	// Add a neighbour entry on the K8s node to map routerIP with routerMAC. This is
+	// required because in certain cases ARP requests from the K8s Node to the routerIP
+	// arrives on OVN Logical Router pipeline with ARP source protocol address set to
+	// K8s Node IP. OVN Logical Router pipeline drops such packets since it expects
+	// source protocol address to be in the Logical Switch's subnet.
+	_, _, err = util.RunIP("neigh", "add", routerIP, "dev", interfaceName, "lladdr", routerMac)
+	if err != nil && os.IsNotExist(err) {
+		return err
+	}
+
 	return nil
 }
 
@@ -220,12 +231,7 @@ func CreateManagementPort(nodeName, localSubnet,
 	}
 
 	// Create a OVS internal interface.
-	var interfaceName string
-	if len(nodeName) > 11 {
-		interfaceName = "k8s-" + (nodeName[:11])
-	} else {
-		interfaceName = "k8s-" + nodeName
-	}
+	interfaceName := util.GetK8sMgmtIntfName(nodeName)
 
 	stdout, stderr, err = util.RunOVSVsctl("--", "--may-exist", "add-port",
 		"br-int", interfaceName, "--", "set", "interface", interfaceName,
@@ -261,7 +267,14 @@ func CreateManagementPort(nodeName, localSubnet,
 		logrus.Errorf("Failed to add logical port to switch, stdout: %q, stderr: %q, error: %v", stdout, stderr, err)
 		return err
 	}
+	// switch-to-router ports only have MAC address and nothing else.
+	routerMac, stderr, err := util.RunOVNNbctl("lsp-get-addresses", "stor-"+nodeName)
+	if err != nil {
+		logrus.Errorf("Failed to retrieve the MAC address of the logical port, stderr: %q, error: %v",
+			stderr, err)
+		return err
+	}
 	err = configureManagementPort(clusterSubnet, clusterServicesSubnet,
-		routerIP, interfaceName, portIPMask)
+		routerIP, routerMac, interfaceName, portIPMask)
 	return err
 }
