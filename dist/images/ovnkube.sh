@@ -119,6 +119,10 @@ ovn_gateway_opts=${OVN_GATEWAY_OPTS:-"--gateway-localnet"}
 net_cidr=${OVN_NET_CIDR:-10.128.0.0/14/23}
 svc_cidr=${OVN_SVC_CIDR:-172.30.0.0/16}
 
+# host on which ovnkube-db POD is running and this POD contains both
+# OVN NB and SB DB running in their own container
+ovn_db_host=""
+
 # =========================================
 
 # $1 function to call to test event present, returns 0 (OK) 1 (bad)
@@ -147,17 +151,20 @@ wait_for_event () {
 
 }
 
+# OVN DBs must be up and initialized before ovn-master and ovn-node PODs can come up
+# This waits for ovnkube-db POD to come up
 ready_to_start_node () {
 
   # See if ep is available ...
-  ovn_master_host=$(kubectl --server=${K8S_APISERVER} --token=${k8s_token} --certificate-authority=${K8S_CACERT} get ep -n ovn-kubernetes ovnkube-master 2>/dev/null | grep 6642 | sed 's/:/ /' | awk '/ovnkube-master/{ print $2 }')
-  if [[ ${ovn_master_host} == "" ]] ; then
-    # ... if not (we may be on the master) see if northd is up
-    get_master_ovn_vars
-    ovn-nbctl --db=${ovn_nbdb_test} show > /dev/null 2>&1
-    if [[ $? != 0 ]] ; then
+  ovn_db_host=$(kubectl --server=${K8S_APISERVER} --token=${k8s_token} --certificate-authority=${K8S_CACERT} \
+    get ep -n ovn-kubernetes ovnkube-db 2>/dev/null | grep 6642 | sed 's/:/ /' | awk '/ovnkube-db/{ print $2 }')
+  if [[ ${ovn_db_host} == "" ]] ; then
       return 1
-    fi
+  fi
+  get_ovn_db_vars
+  ovn-nbctl --db=${ovn_nbdb_test} show > /dev/null 2>&1
+  if [[ $? != 0 ]] ; then
+      return 1
   fi
   return 0
 }
@@ -176,17 +183,13 @@ check_ovn_daemonset_version () {
   exit 1
 }
 
-# The ovn vars on the master are based on the hostname and IP
-# the master is running on.
-# (on non-master call oc get ep ...)
-get_master_ovn_vars () {
-  master_host=$(hostname)
-
-  ovn_master_host=$(getent ahosts ${master_host} | head -1 | awk '{ print $1 }')
+# The ovn vars are based on the IP address of the K8s node
+# on which ovnkube-db is running on.
+get_ovn_db_vars () {
   # OVN_NORTH and OVN_SOUTH override derived host
   # Currently limited to tcp (ssl is not supported yet)
-  ovn_nbdb=${OVN_NORTH:-tcp://${ovn_master_host}:6641}
-  ovn_sbdb=${OVN_SOUTH:-tcp://${ovn_master_host}:6642}
+  ovn_nbdb=${OVN_NORTH:-tcp://${ovn_db_host}:6641}
+  ovn_sbdb=${OVN_SOUTH:-tcp://${ovn_db_host}:6642}
   ovn_nbdb_test=$(echo ${ovn_nbdb} | sed 's;//;;')
 }
 
@@ -201,7 +204,8 @@ ovs_ready () {
 }
 #wait_for_event ovs_ready
 
-# ovn must be up and initialized before ovn-controller and init-node
+# version 1 daemonset compatibility
+# ovn must be up and initialized before ovn-controller, init-node, and init-master
 # This waits for northd to come up
 northd_ready () {
   ovn-nbctl --db=${ovn_nbdb_test} show > /dev/null 2>&1
@@ -319,13 +323,8 @@ echo ovnkube.sh version ${ovnkube_version}
 }
 
 ovn_debug () {
-  # get ovn_master_host
+  # get ovn_db_host
   ready_to_start_node
-  # OVN_NORTH and OVN_SOUTH override derived host
-  # Currently limited to tcp (ssl is not supported yet)
-  ovn_nbdb=${OVN_NORTH:-tcp://${ovn_master_host}:6641}
-  ovn_sbdb=${OVN_SOUTH:-tcp://${ovn_master_host}:6642}
-  ovn_nbdb_test=$(echo ${ovn_nbdb} | sed 's;//;;')
   echo "ovn_nbdb ${ovn_nbdb}   ovn_sbdb ${ovn_sbdb}"
   echo "ovn_nbdb_test ${ovn_nbdb_test}"
 
@@ -336,10 +335,10 @@ ovn_debug () {
   ovn-nbctl --db=${ovn_nbdb_test} show
   echo " "
   echo "=========== ovn-nbctl list ACL ============="
-  ovn-nbctl list ACL
+  ovn-nbctl --db=${ovn_nbdb_test} list ACL
   echo " "
   echo "=========== ovn-nbctl list address_set ============="
-  ovn-nbctl list address_set
+  ovn-nbctl --db=${ovn_nbdb_test} list address_set
   echo " "
   echo "=========== ovs-vsctl show ============="
   ovs-vsctl show
@@ -353,7 +352,6 @@ ovn_debug () {
   echo "=========== ovs-ofctl dump-flows br-int ============="
   ovs-ofctl dump-flows br-int
   echo " "
-  echo "=========== MASTER NODE ==========="
   echo "=========== ovn-sbctl show ============="
   ovn_sbdb_test=$(echo ${ovn_sbdb} | sed 's;//;;')
   echo "=========== ovn-sbctl --db=${ovn_sbdb_test} show ============="
@@ -426,31 +424,94 @@ ovs-server () {
   done
 }
 
+# create the ovnkube_db endpoint for other pods to query the OVN DB IP
+create_ovnkube_db_ep () {
+  # delete any endpoint by name ovnkube-db
+  kubectl --server=${K8S_APISERVER} --token=${k8s_token} --certificate-authority=${K8S_CACERT} \
+    delete ep -n ovn-kubernetes ovnkube-db 2>/dev/null
+
+  # create a new endpoint for the headless onvkube-db service without selectors
+  # using the current host has the endpoint IP
+  ovn_db_host=$(getent ahosts $(hostname) | head -1 | awk '{ print $1 }')
+  kubectl --server=${K8S_APISERVER} --token=${k8s_token} --certificate-authority=${K8S_CACERT} create -f - << EOF
+apiVersion: v1
+kind: Endpoints
+metadata:
+  name: ovnkube-db
+  namespace: ovn-kubernetes
+subsets:
+  - addresses:
+      - ip: ${ovn_db_host}
+    ports:
+    - name: north
+      port: 6641
+      protocol: TCP
+    - name: south
+      port: 6642
+      protocol: TCP
+EOF
+    if [[ $? != 0 ]] ; then
+        echo "Failed to create endpoint with host ${ovn_db_host} for ovnkube-db service"
+        exit 1
+    fi
+}
+
 # v3 - run nb_ovsdb in a separate container
 nb-ovsdb () {
+  trap 'kill $(jobs -p); exit 0' TERM
   check_ovn_daemonset_version "3"
+  rm -f /var/run/openvswitch/ovnnb_db.pid
 
   # Make sure /var/lib/openvswitch exists
   mkdir -p /var/lib/openvswitch
 
+  iptables-rules 6641
+
   echo "=============== run nb_ovsdb ========== MASTER ONLY"
   echo "ovn_log_nb=${ovn_log_nb} ovn_nb_log_file=${ovn_nb_log_file}"
   /usr/share/openvswitch/scripts/ovn-ctl run_nb_ovsdb --no-monitor \
-  --ovn-nb-logfile=${ovn_nb_log_file} --ovn-nb-log="${ovn_log_nb}"
+  --ovn-nb-logfile=${ovn_nb_log_file} --ovn-nb-log="${ovn_log_nb}" &
+
+  wait_for_event pid_ready ovnnb_db.pid
+  echo "=============== nb-ovsdb ========== RUNNING"
+  sleep 3
+  ovn-nbctl set-connection ptcp:6641 -- set connection . inactivity_probe=0
+
+  tail --follow=name ${ovn_nb_log_file} &
+  ovn_tail_pid=$!
+
+  pid_health /var/run/openvswitch/ovnnb_db.pid ${ovn_tail_pid}
   echo "=============== run nb_ovsdb ========== terminated"
 }
 
 # v3 - run sb_ovsdb in a separate container
 sb-ovsdb () {
+  trap 'kill $(jobs -p); exit 0' TERM
   check_ovn_daemonset_version "3"
-  # this is only run on masters in a separate container
+  rm -f /var/run/openvswitch/ovnsb_db.pid
+
   # Make sure /var/lib/openvswitch exists
   mkdir -p /var/lib/openvswitch
+
+  iptables-rules 6642
 
   echo "=============== run sb_ovsdb ========== MASTER ONLY"
   echo "ovn_log_sb=${ovn_log_sb} ovn_sb_log_file=${ovn_sb_log_file}"
   /usr/share/openvswitch/scripts/ovn-ctl run_sb_ovsdb --no-monitor \
-  --ovn-sb-logfile=${ovn_sb_log_file} --ovn-sb-log="${ovn_log_sb}"
+  --ovn-sb-logfile=${ovn_sb_log_file} --ovn-sb-log="${ovn_log_sb}" &
+
+  wait_for_event pid_ready ovnsb_db.pid
+  echo "=============== sb-ovsdb ========== RUNNING"
+  sleep 3
+  ovn-sbctl set-connection ptcp:6642 -- set connection . inactivity_probe=0
+
+  # create the ovnkube_db endpoint for other pods to query the OVN DB IP
+  create_ovnkube_db_ep
+
+  tail --follow=name ${ovn_sb_log_file} &
+  ovn_tail_pid=$!
+
+  pid_health /var/run/openvswitch/ovnsb_db.pid ${ovn_tail_pid}
   echo "=============== run sb_ovsdb ========== terminated"
 }
 
@@ -463,26 +524,24 @@ run-ovn-northd () {
   # Make sure /var/lib/openvswitch exists
   mkdir -p /var/lib/openvswitch
 
+  echo "=============== run-ovn-northd (wait for ready_to_start_node)"
+  wait_for_event ready_to_start_node
 
-  echo "=============== run-ovn-northd (wait for sdb and ndb) ========== MASTER ONLY"
-  wait_for_event pid_ready ovnsb_db.pid
-  wait_for_event pid_ready ovnnb_db.pid
   sleep 1
 
   echo "=============== run_ovn_northd ========== MASTER ONLY"
-  get_master_ovn_vars
-  echo "ovn_master_host ${ovn_master_host}"
+  echo "ovn_db_host ${ovn_db_host}"
   echo "ovn_nbdb ${ovn_nbdb}   ovn_sbdb ${ovn_sbdb}"
   echo "ovn_northd_opts=${ovn_northd_opts}"
   echo "ovn_log_northd=${ovn_log_northd}"
 
-  # no monitor (and no detach), start nb_ovsdb and sb_ovsdb in separate containers
-  # use unix socket
-  ovn_nbdb_i=""
-  ovn_sbdb_i=""
+  # no monitor (and no detach), start northd which connects to the
+  # ovnkube-db service
+  ovn_nbdb_i=$(echo ${ovn_nbdb} | sed 's;//;;')
+  ovn_sbdb_i=$(echo ${ovn_sbdb} | sed 's;//;;')
   /usr/share/openvswitch/scripts/ovn-ctl start_northd \
     --no-monitor --ovn-manage-ovsdb=no \
-    --db-nb-addr=${ovn_nbdb_i} --db-sb-addr=${ovn_sbdb_i} \
+    --ovn-northd-nb-db=${ovn_nbdb_i} --ovn-northd-sb-db=${ovn_sbdb_i} \
     --ovn-northd-log="${ovn_log_northd}" \
     ${ovn_northd_opts}
 
@@ -518,17 +577,13 @@ ovn-northd () {
   fi
 }
 
-# make sure ports 6641/6642 are open on master
+# make sure the specified dport is open
 iptables-rules () {
-iptables -C INPUT -p tcp -m tcp --dport 6642 -m conntrack --ctstate NEW -j ACCEPT
-if [[ $? != 0 ]] ; then
-  iptables -I INPUT -p tcp -m tcp --dport 6642 -m conntrack --ctstate NEW -j ACCEPT
-fi
-iptables -C INPUT -p tcp -m tcp --dport 6641 -m conntrack --ctstate NEW -j ACCEPT
-if [[ $? != 0 ]] ; then
-  iptables -I INPUT -p tcp -m tcp --dport 6641 -m conntrack --ctstate NEW -j ACCEPT
-fi
-
+  dport=$1
+  iptables -C INPUT -p tcp -m tcp --dport $dport -m conntrack --ctstate NEW -j ACCEPT
+  if [[ $? != 0 ]] ; then
+    iptables -I INPUT -p tcp -m tcp --dport $dport -m conntrack --ctstate NEW -j ACCEPT
+  fi
 }
 
 # v2 v3 - run ovnkube --master
@@ -537,10 +592,8 @@ ovn-master () {
   check_ovn_daemonset_version "2 3"
   rm -f /var/run/openvswitch/ovnkube-master.pid
 
-  iptables-rules
-
-  echo "=============== ovn-master (wait for northd_ready) ========== MASTER ONLY"
-  get_master_ovn_vars
+  echo "=============== ovn-master (wait for ready_to_start_node) ========== MASTER ONLY"
+  wait_for_event ready_to_start_node
   echo "ovn_nbdb ${ovn_nbdb}   ovn_sbdb ${ovn_sbdb}"
 
   # wait for northd to start
@@ -548,26 +601,18 @@ ovn-master () {
   sleep 5
 
   echo "=============== ovn-master ========== MASTER ONLY"
-  # use unix socket
-  ovn_nbdb_i=""
-  ovn_sbdb_i=""
   /usr/bin/ovnkube \
     --init-master ${ovn_pod_host} --net-controller \
     --cluster-subnet ${net_cidr} --service-cluster-ip-range=${svc_cidr} \
     --k8s-token=${k8s_token} --k8s-apiserver=${K8S_APISERVER} --k8s-cacert=${K8S_CACERT} \
-    --nb-address=${ovn_nbdb_i} --sb-address=${ovn_sbdb_i} \
+    --nb-address=${ovn_nbdb} --sb-address=${ovn_sbdb} \
     --nodeport \
     --loglevel=${ovnkube_loglevel} \
     --pidfile /var/run/openvswitch/ovnkube-master.pid \
     --logfile /var/log/ovn-kubernetes/ovnkube-master.log &
   echo "=============== ovn-master ========== running"
-  # time to set up northd and databases
   wait_for_event pid_ready ovnkube-master.pid
   sleep 1
-
-  echo "set-connection ptcp:664"
-  ovn-sbctl set-connection ptcp:6642
-  ovn-nbctl set-connection ptcp:6641
 
   tail --follow=name /var/log/ovn-kubernetes/ovnkube-master.log &
   kube_tail_pid=$!
@@ -585,22 +630,10 @@ ovn-controller () {
   wait_for_event ovs_ready
 
   echo "=============== ovn-controller - (wait for ready_to_start_node)"
-  # ovnkube --init-master needs to run to completion before we can
-  # start assigning IP addresses.
-  # master pod. On the rest of the nodes just wait for the
-  # master IP to become available.
   wait_for_event ready_to_start_node
 
-  # OVN_NORTH and OVN_SOUTH override derived host
-  # Currently limited to tcp (ssl is not supported yet)
-  ovn_nbdb=${OVN_NORTH:-tcp://${ovn_master_host}:6641}
-  ovn_sbdb=${OVN_SOUTH:-tcp://${ovn_master_host}:6642}
-  ovn_nbdb_test=$(echo ${ovn_nbdb} | sed 's;//;;')
   echo "ovn_nbdb ${ovn_nbdb}   ovn_sbdb ${ovn_sbdb}"
   echo "ovn_nbdb_test ${ovn_nbdb_test}"
-
-  echo "=============== ovn-controller - (wait for northd_ready)"
-  wait_for_event northd_ready
 
   echo "=============== ovn-controller  start_controller"
   rm -f /var/run/ovn-kubernetes/cni/*
@@ -631,20 +664,9 @@ ovn-node () {
   wait_for_event ovs_ready
 
   echo "=============== ovn-node - (wait for ready_to_start_node)"
-  # on the master ovn-node must run to generate the IP for the
-  # master pod. On the rest of the nodes just wait for the
-  # master IP to become available.
-
   wait_for_event ready_to_start_node
-  echo "=============== ovn-node - (ovn-node  wait for northd_ready)"
 
-  # OVN_NORTH and OVN_SOUTH override derived host
-  # Currently limited to tcp (ssl is not supported yet)
-  ovn_nbdb=${OVN_NORTH:-tcp://${ovn_master_host}:6641}
-  ovn_sbdb=${OVN_SOUTH:-tcp://${ovn_master_host}:6642}
-  ovn_nbdb_test=$(echo ${ovn_nbdb} | sed 's;//;;')
-  echo "ovn_nbdb ${ovn_nbdb}   ovn_sbdb ${ovn_sbdb}  ovn_nbdb_test ${ovn_nbdb_test}" 
-  wait_for_event northd_ready
+  echo "ovn_nbdb ${ovn_nbdb}   ovn_sbdb ${ovn_sbdb}  ovn_nbdb_test ${ovn_nbdb_test}"
 
   echo "=============== ovn-node - (ovn-node  wait for ovn-controller.pid)"
   wait_for_event pid_ready ovn-controller.pid
@@ -702,6 +724,7 @@ start_ovn () {
   echo "=============== wait for ovs"
   wait_for_event ovs_ready
 
+  get_ovn_db_vars
   # on the master only
   if [[ ${ovn_master} = "true" ]]
   then
@@ -780,10 +803,10 @@ echo "================== ovnkube.sh --- version: ${ovnkube_version} ============
 # ovn-node       - all nodes (v2 v3)
 
   case ${cmd} in
-    "nb-ovsdb")        # pod ovnkube-master container nb-ovsdb
+    "nb-ovsdb")        # pod ovnkube-db container nb-ovsdb
 	nb-ovsdb
     ;;
-    "sb-ovsdb")        # pod ovnkube-master container sb-ovsdb
+    "sb-ovsdb")        # pod ovnkube-db container sb-ovsdb
 	sb-ovsdb
     ;;
     "run-ovn-northd")  # pod ovnkube-master container run-ovn-northd

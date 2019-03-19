@@ -34,6 +34,9 @@ s,${policy_str},${policy}," ../templates/ovnkube-node.yaml.j2 > ../yaml/ovnkube-
 sed "s,${image_str},${image},
 s,${policy_str},${policy}," ../templates/ovnkube-master.yaml.j2 > ../yaml/ovnkube-master.yaml
 
+sed "s,${image_str},${image},
+s,${policy_str},${policy}," ../templates/ovnkube-db.yaml.j2 > ../yaml/ovnkube-db.yaml
+
 # ovn-setup.yaml
 # net_cidr=10.128.0.0/14/23
 # svc_cidr=172.30.0.0/16
