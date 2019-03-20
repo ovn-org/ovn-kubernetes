@@ -419,6 +419,18 @@ func GatewayInit(clusterIPSubnet []string, nodeName, nicIP, physicalInterface,
 		if err != nil {
 			return err
 		}
+
+		// We need to add a /32 route to the Gateway router's IP, on the
+		// cluster router, to ensure that the return traffic goes back
+		// to the same gateway router
+		stdout, stderr, err = RunOVNNbctl("--may-exist", "lr-route-add",
+			k8sClusterRouter, routerIPByte.String(), routerIPByte.String())
+		if err != nil {
+			return fmt.Errorf("Failed to add /32 route to Gateway router's IP of %q "+
+				"on the distributed router, stdout: %q, stderr: %q, error: %v",
+				routerIPByte.String(), stdout, stderr, err)
+		}
+
 		stdout, stderr, err = RunOVNNbctl("set", "logical_router",
 			gatewayRouter, "options:lb_force_snat_ip="+routerIPByte.String())
 		if err != nil {
