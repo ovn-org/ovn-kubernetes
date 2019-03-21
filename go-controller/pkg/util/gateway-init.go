@@ -240,7 +240,8 @@ func GatewayInit(clusterIPSubnet []string, nodeName, nicIP, physicalInterface,
 		if k8sNSLbTCP == "" {
 			k8sNSLbTCP, stderr, err = RunOVNNbctl("--", "create",
 				"load_balancer",
-				"external_ids:TCP_lb_gateway_router="+gatewayRouter)
+				"external_ids:TCP_lb_gateway_router="+gatewayRouter,
+				"protocol=tcp")
 			if err != nil {
 				return fmt.Errorf("Failed to create load balancer: "+
 					"stderr: %q, error: %v", stderr, err)

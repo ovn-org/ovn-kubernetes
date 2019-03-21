@@ -30,7 +30,7 @@ func addNodeportLBs(nodeName, tcpLBUUID, udpLBUUID string, fakeCmds []fakeexec.F
 		"ovn-nbctl --timeout=15 --data=bare --no-heading --columns=_uuid find load_balancer external_ids:TCP_lb_gateway_router=GR_" + nodeName,
 	})
 	fakeCmds = ovntest.AddFakeCmd(fakeCmds, &ovntest.ExpectedCmd{
-		Cmd:    "ovn-nbctl --timeout=15 -- create load_balancer external_ids:TCP_lb_gateway_router=GR_" + nodeName,
+		Cmd:    "ovn-nbctl --timeout=15 -- create load_balancer external_ids:TCP_lb_gateway_router=GR_" + nodeName + " protocol=tcp",
 		Output: tcpLBUUID,
 	})
 	fakeCmds = ovntest.AddFakeCmdsNoOutputNoError(fakeCmds, []string{
