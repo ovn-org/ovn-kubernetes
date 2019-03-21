@@ -5,9 +5,9 @@ go:
 before_install:
     - export GOPATH=$HOME/go
     - export PATH=$HOME/usr/local/go/bin:$GOPATH/bin:$PATH
-    - mkdir -p $GOPATH/src/github.com/openshift
-    - mv $TRAVIS_BUILD_DIR $GOPATH/src/github.com/openshift/ovn-kubernetes
-    - cd $GOPATH/src/github.com/openshift/ovn-kubernetes
+    - mkdir -p $GOPATH/src/github.com/openvswitch
+    - mv $TRAVIS_BUILD_DIR $GOPATH/src/github.com/openvswitch/ovn-kubernetes
+    - cd $GOPATH/src/github.com/openvswitch/ovn-kubernetes
 install:
     - eval "$(gimme 1.10.4)"
 script:
