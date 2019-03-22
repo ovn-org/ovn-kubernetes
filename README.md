@@ -237,7 +237,7 @@ does install kubernetes in its simplest form.
 
 [INSTALL.rst]: http://docs.openvswitch.org/en/latest/intro/install
 [INSTALL.UBUNTU.md]: docs/INSTALL.UBUNTU.md
-[README.K8S.md]: https://github.com/kubernetes/kubernetes/tree/master/docs
+[README.K8S.md]: https://kubernetes.io/docs/setup/independent/install-kubeadm/
 [README.RHEL.rst]: https://github.com/openvswitch/ovs/blob/master/rhel/README.RHEL.rst
 [debugging.md]: docs/debugging.md
 [vagrant]: vagrant/README.md
