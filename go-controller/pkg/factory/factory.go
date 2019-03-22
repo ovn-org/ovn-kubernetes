@@ -58,10 +58,13 @@ func (i *informer) forEachHandler(obj interface{}, f func(h *Handler)) {
 
 // WatchFactory initializes and manages common kube watches
 type WatchFactory struct {
-	iFactory       informerfactory.SharedInformerFactory
-	informers      map[reflect.Type]*informer
+	// Must be first member in the struct due to Golang ARM/x86 32-bit
+	// requirements with atomic accesses
 	handlerCounter uint64
-	stopChan       chan struct{}
+
+	iFactory  informerfactory.SharedInformerFactory
+	informers map[reflect.Type]*informer
+	stopChan  chan struct{}
 }
 
 const (
