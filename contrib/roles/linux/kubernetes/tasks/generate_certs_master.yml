@@ -34,8 +34,8 @@
       [ $(getent group $cert_group) ] || groupadd -r $cert_group
 
       # Generate TLS artifacts
-      mkdir -p "$cert_dir"
-      rm -rf "$cert_dir/*"
+      rm -rf $cert_dir
+      mkdir -p $cert_dir
 
       openssl genrsa -out $pem_ca_key 2048
       openssl req -x509 -new -nodes -key $pem_ca_key -days 10000 -out $pem_ca -subj "/CN=kube-ca"
