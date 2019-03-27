@@ -111,6 +111,10 @@ func deleteHNSEndpoint(endpointName string) error {
 // TODO: add proper MTU config (GetCurrentThreadId/SetCurrentThreadId) or via OVS properties
 func (pr *PodRequest) ConfigureInterface(namespace string, podName string, macAddress string, ipAddress string, gatewayIP string, mtu int, ingress, egress int64) ([]*current.Interface, error) {
 	conf := pr.CNIConf
+
+	if conf.DeviceID != "" {
+		return nil, fmt.Errorf("failure OVS-Offload is not supported in Windows")
+	}
 	ipAddr, ipNet, err := net.ParseCIDR(ipAddress)
 	if err != nil {
 		return nil, err
