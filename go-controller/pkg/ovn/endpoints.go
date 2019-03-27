@@ -98,7 +98,8 @@ func (ovn *Controller) AddEndpoints(ep *kapi.Endpoints) error {
 						logrus.Errorf("Error in creating Node Port for svc %s, node port: %d - %v\n", svc.Name, svcPort.NodePort, err)
 						continue
 					}
-				} else if svc.Spec.Type == kapi.ServiceTypeNodePort || svc.Spec.Type == kapi.ServiceTypeClusterIP {
+				}
+				if svc.Spec.Type == kapi.ServiceTypeNodePort || svc.Spec.Type == kapi.ServiceTypeClusterIP {
 					var loadBalancer string
 					loadBalancer, err = ovn.getLoadBalancer(svcPort.Protocol)
 					if err != nil {
