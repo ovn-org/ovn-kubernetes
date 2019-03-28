@@ -82,8 +82,8 @@ func (ovn *Controller) AddEndpoints(ep *kapi.Endpoints) error {
 						logrus.Errorf("Error in creating Cluster IP for svc %s, target port: %d - %v\n", svc.Name, targetPort, err)
 						continue
 					}
+					ovn.handleExternalIPs(svc, svcPort, ips, targetPort)
 				}
-				ovn.handleExternalIPs(svc, svcPort, ips, targetPort)
 			}
 		}
 	}
@@ -113,8 +113,8 @@ func (ovn *Controller) AddEndpoints(ep *kapi.Endpoints) error {
 						logrus.Errorf("Error in creating Cluster IP for svc %s, target port: %d - %v\n", svc.Name, targetPort, err)
 						continue
 					}
+					ovn.handleExternalIPs(svc, svcPort, ips, targetPort)
 				}
-				ovn.handleExternalIPs(svc, svcPort, ips, targetPort)
 			}
 		}
 	}
