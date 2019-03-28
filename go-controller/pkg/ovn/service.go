@@ -213,7 +213,7 @@ func (ovn *Controller) deleteService(service *kapi.Service) {
 				logrus.Errorf("Error in deleting load balancer for service "+
 					"%s:%d %+v", service.Name, port, err)
 			}
+			ovn.handleExternalIPs(service, svcPort, ips, targetPort)
 		}
-		ovn.handleExternalIPs(service, svcPort, ips, targetPort)
 	}
 }
