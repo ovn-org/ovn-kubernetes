@@ -75,13 +75,13 @@ sudo service docker start
 ## install packages that deliver ovs-pki and its dependencies
 sudo apt-get build-dep dkms
 sudo apt-get install python-six openssl -y
-sudo apt-get install openvswitch-common=2.9.2-1 libopenvswitch=2.9.2-1 -y
+sudo apt-get install openvswitch-common libopenvswitch -y
 
 if [ "$DAEMONSET" != "true" ]; then
   ## Install OVS and OVN components
-  sudo apt-get install openvswitch-datapath-dkms=2.9.2-1 -y
-  sudo apt-get install openvswitch-switch=2.9.2-1
-  sudo apt-get install ovn-common=2.9.2-1 ovn-host=2.9.2-1 -y
+  sudo apt-get install openvswitch-datapath-dkms -y
+  sudo apt-get install openvswitch-switch
+  sudo apt-get install ovn-common ovn-host -y
 fi
 
 if [ -n "$SSL" ]; then
@@ -98,7 +98,7 @@ else
 fi
 
 if [ $HA = "true" ]; then
-    sudo apt-get install ovn-central=2.9.2-1 -y
+    sudo apt-get install ovn-central -y
 
     sudo /usr/share/openvswitch/scripts/ovn-ctl stop_nb_ovsdb
     sudo /usr/share/openvswitch/scripts/ovn-ctl stop_sb_ovsdb
