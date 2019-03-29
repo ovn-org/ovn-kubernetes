@@ -72,14 +72,15 @@ sudo apt-get install -y linux-image-extra-$(uname -r) linux-image-extra-virtual
 sudo apt-get install -y docker-engine
 sudo service docker start
 
-## Install OVS and dependencies
+## install packages that deliver ovs-pki and its dependencies
 sudo apt-get build-dep dkms
 sudo apt-get install python-six openssl -y
-
-sudo apt-get install openvswitch-datapath-dkms=2.9.2-1 -y
-sudo apt-get install openvswitch-switch=2.9.2-1 openvswitch-common=2.9.2-1 libopenvswitch=2.9.2-1 -y
+sudo apt-get install openvswitch-common=2.9.2-1 libopenvswitch=2.9.2-1 -y
 
 if [ "$DAEMONSET" != "true" ]; then
+  ## Install OVS and OVN components
+  sudo apt-get install openvswitch-datapath-dkms=2.9.2-1 -y
+  sudo apt-get install openvswitch-switch=2.9.2-1
   sudo apt-get install ovn-common=2.9.2-1 ovn-host=2.9.2-1 -y
 fi
 

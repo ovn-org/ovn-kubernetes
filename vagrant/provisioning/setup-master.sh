@@ -84,7 +84,7 @@ sudo swapoff -a
 sudo kubeadm config images pull
 sudo kubeadm init --pod-network-cidr=192.168.0.0/16 --apiserver-advertise-address=$OVERLAY_IP \
 	--service-cidr=172.16.1.0/24 2>&1 | tee kubeadm.log
-grep "kubeadm join" kubeadm.log | sudo tee /vagrant/kubeadm.log
+grep -A1 "kubeadm join" kubeadm.log | sudo tee /vagrant/kubeadm.log
 
 mkdir -p $HOME/.kube
 sudo cp -i /etc/kubernetes/admin.conf $HOME/.kube/config
@@ -103,14 +103,15 @@ done
 # Let master run pods too.
 kubectl taint nodes --all node-role.kubernetes.io/master-
 
-## Install OVS and dependencies
+## install packages that deliver ovs-pki and its dependencies
 sudo apt-get build-dep dkms
 sudo apt-get install python-six openssl python-pip -y
-
-sudo apt-get install openvswitch-datapath-dkms=2.9.2-1 -y
-sudo apt-get install openvswitch-switch=2.9.2-1 openvswitch-common=2.9.2-1 libopenvswitch=2.9.2-1 -y
+sudo apt-get install openvswitch-common=2.9.2-1 libopenvswitch=2.9.2-1 -y
 
 if [ "$DAEMONSET" != "true" ]; then
+  ## Install OVS and OVN components
+  sudo apt-get install openvswitch-datapath-dkms=2.9.2-1 -y
+  sudo apt-get install openvswitch-switch=2.9.2-1
   sudo apt-get install ovn-central=2.9.2-1 ovn-common=2.9.2-1 ovn-host=2.9.2-1 -y
 fi
 if [ -n "$SSL" ]; then
@@ -221,14 +222,19 @@ else
   # Dameonsets only work with TCP now.
   PROTOCOL="tcp"
 
+  # Make daemonset yamls
+  pushd $HOME/work/src/github.com/openvswitch/ovn-kubernetes/dist/images
+  make daemonsetyaml 1>&2 2>/dev/null
+  popd
+
   # label the master node for daemonsets
   kubectl label node k8smaster node-role.kubernetes.io/master=true --overwrite
 
-  # Create namespace
-  kubectl create -f $HOME/work/src/github.com/openvswitch/ovn-kubernetes/dist/yaml/ovn-namespace.yaml
+  # Create OVN namespace, service accounts, ovnkube-master headless service, and policies
+  kubectl create -f $HOME/work/src/github.com/openvswitch/ovn-kubernetes/dist/yaml/ovn-setup.yaml
 
-  # Create service accounts and policies
-  kubectl create -f $HOME/work/src/github.com/openvswitch/ovn-kubernetes/dist/yaml/ovn-policy.yaml
+  # Delete ovn config map that was created by default in ovn-setup.yaml
+  kubectl delete configmap ovn-config -n ovn-kubernetes
 
   # Create ovn config map.
   cat << EOF | kubectl create -f - > /dev/null 2>&1
@@ -245,16 +251,11 @@ data:
   OvnSouth:      $PROTOCOL://$OVERLAY_IP:6642
 EOF
 
-  # Make daemonset yamls
-  pushd $HOME/work/src/github.com/openvswitch/ovn-kubernetes/dist/images
-  make daemonsetyaml 1>&2 2>/dev/null
-  popd
-
   # Run ovnkube-master daemonset.
   kubectl create -f $HOME/work/src/github.com/openvswitch/ovn-kubernetes/dist/yaml/ovnkube-master.yaml
 
   # Run ovnkube daemonsets for nodes
-  kubectl create -f $HOME/work/src/github.com/openvswitch/ovn-kubernetes/dist/yaml/ovnkube.yaml
+  kubectl create -f $HOME/work/src/github.com/openvswitch/ovn-kubernetes/dist/yaml/ovnkube-node.yaml
 fi
 
 # Setup some example yaml files
