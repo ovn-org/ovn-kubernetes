@@ -279,7 +279,7 @@ display () {
 
 setup_cni () {
   # Take over network functions on the node
-  # rm -Rf /etc/cni/net.d/*
+  # rm -f /etc/cni/net.d/*
   cp -f /usr/libexec/cni/ovn-k8s-cni-overlay /host/opt/cni/bin/ovn-k8s-cni-overlay
   if [[ ! -f /host/opt/cni/bin/loopback ]]
   then
@@ -660,7 +660,7 @@ ovn-controller () {
 
 # ovn-node - all nodes
 ovn-node () {
-  trap 'kill $(jobs -p); exit 0' TERM
+  trap 'kill $(jobs -p) ; rm -f /etc/cni/net.d/10-ovn-kubernetes.conf ; exit 0' TERM
   check_ovn_daemonset_version "2 3"
   rm -f /var/run/openvswitch/ovnkube.pid
 

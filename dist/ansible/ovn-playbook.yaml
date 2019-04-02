@@ -9,6 +9,13 @@
 
 # ./run-playbook
 
+- hosts: nodes
+  become: yes
+  become_user: root
+  tasks:
+  - name: copy tmpfile.d file
+    template: src=../templates/cleanup-ovn-cni.conf.j2 dest=/usr/lib/tmpfiles.d/cleanup-ovn-cni.conf
+
 - hosts: masters
   become: yes
   become_user: root
