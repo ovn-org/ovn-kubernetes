@@ -222,6 +222,9 @@ else
   # Dameonsets only work with TCP now.
   PROTOCOL="tcp"
 
+  # cleanup /etc/hosts as it incorrectly maps the hostname to `127.0.1.1`
+  sudo sed -i '/^127.0.1.1/d' /etc/hosts
+
   # Make daemonset yamls
   pushd $HOME/work/src/github.com/openvswitch/ovn-kubernetes/dist/images
   make daemonsetyaml 1>&2 2>/dev/null
@@ -247,9 +250,10 @@ data:
   k8s_apiserver: "https://$OVERLAY_IP:6443"
   net_cidr:      "192.168.0.0/16"
   svc_cidr:      "172.16.1.0/24"
-  OvnNorth:      $PROTOCOL://$OVERLAY_IP:6641
-  OvnSouth:      $PROTOCOL://$OVERLAY_IP:6642
 EOF
+
+  # Run ovnkube-db daemonset.
+  kubectl create -f $HOME/work/src/github.com/openvswitch/ovn-kubernetes/dist/yaml/ovnkube-db.yaml
 
   # Run ovnkube-master daemonset.
   kubectl create -f $HOME/work/src/github.com/openvswitch/ovn-kubernetes/dist/yaml/ovnkube-master.yaml
