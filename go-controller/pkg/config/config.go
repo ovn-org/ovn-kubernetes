@@ -101,11 +101,10 @@ type KubernetesConfig struct {
 	Token      string `gcfg:"token"`
 }
 
-// OvnAuthConfig holds client and server authentication and location details for
+// OvnAuthConfig holds client authentication and location details for
 // an OVN database (either northbound or southbound)
 type OvnAuthConfig struct {
 	ClientAuth *OvnDBAuth
-	ServerAuth *OvnDBAuth
 }
 
 // Holds values read from the config file or command-line that are then
@@ -115,9 +114,6 @@ type rawOvnAuthConfig struct {
 	ClientPrivKey string `gcfg:"client-privkey"`
 	ClientCert    string `gcfg:"client-cert"`
 	ClientCACert  string `gcfg:"client-cacert"`
-	ServerPrivKey string `gcfg:"server-privkey"`
-	ServerCert    string `gcfg:"server-cert"`
-	ServerCACert  string `gcfg:"server-cacert"`
 }
 
 // OvnDBScheme describes the OVN database connection transport method
@@ -346,21 +342,6 @@ var OvnNBFlags = []cli.Flag{
 		Destination: &cliConfig.OvnNorth.Address,
 	},
 	cli.StringFlag{
-		Name:        "nb-server-privkey",
-		Usage:       "Private key that the OVN northbound API should use for securing the API.  Leave empty to use local unix socket. (default: /etc/openvswitch/ovnnb-privkey.pem)",
-		Destination: &cliConfig.OvnNorth.ServerPrivKey,
-	},
-	cli.StringFlag{
-		Name:        "nb-server-cert",
-		Usage:       "Server certificate that the OVN northbound API should use for securing the API.  Leave empty to use local unix socket. (default: /etc/openvswitch/ovnnb-cert.pem)",
-		Destination: &cliConfig.OvnNorth.ServerCert,
-	},
-	cli.StringFlag{
-		Name:        "nb-server-cacert",
-		Usage:       "CA certificate that the OVN northbound API should use for securing the API.  Leave empty to use local unix socket. (default: /etc/openvswitch/ovnnb-ca.cert)",
-		Destination: &cliConfig.OvnNorth.ServerCACert,
-	},
-	cli.StringFlag{
 		Name:        "nb-client-privkey",
 		Usage:       "Private key that the client should use for talking to the OVN database.  Leave empty to use local unix socket. (default: /etc/openvswitch/ovnnb-privkey.pem)",
 		Destination: &cliConfig.OvnNorth.ClientPrivKey,
@@ -385,21 +366,6 @@ var OvnSBFlags = []cli.Flag{
 			"(eg, ssl://1.2.3.4:6642,ssl://1.2.3.5:6642).  " +
 			"Leave empty to use a local unix socket.",
 		Destination: &cliConfig.OvnSouth.Address,
-	},
-	cli.StringFlag{
-		Name:        "sb-server-privkey",
-		Usage:       "Private key that the OVN southbound API should use for securing the API.  Leave empty to use local unix socket. (default: /etc/openvswitch/ovnsb-privkey.pem)",
-		Destination: &cliConfig.OvnSouth.ServerPrivKey,
-	},
-	cli.StringFlag{
-		Name:        "sb-server-cert",
-		Usage:       "Server certificate that the OVN southbound API should use for securing the API.  Leave empty to use local unix socket. (default: /etc/openvswitch/ovnsb-cert.pem)",
-		Destination: &cliConfig.OvnSouth.ServerCert,
-	},
-	cli.StringFlag{
-		Name:        "sb-server-cacert",
-		Usage:       "CA certificate that the OVN southbound API should use for securing the API.  Leave empty to use local unix socket. (default: /etc/openvswitch/ovnsb-ca.cert)",
-		Destination: &cliConfig.OvnSouth.ServerCACert,
 	},
 	cli.StringFlag{
 		Name:        "sb-client-privkey",
@@ -581,27 +547,19 @@ func buildOvnAuth(exec kexec.Interface, direction, externalID string, cliAuth, c
 	if strings.HasPrefix(address, "ssl") {
 		// Set up default SSL cert/key paths
 		auth.ClientCACert = "/etc/openvswitch/ovn" + direction + "-ca.cert"
-		auth.ServerCACert = auth.ClientCACert
 		auth.ClientPrivKey = "/etc/openvswitch/ovn" + direction + "-privkey.pem"
-		auth.ServerPrivKey = auth.ClientPrivKey
 		auth.ClientCert = "/etc/openvswitch/ovn" + direction + "-cert.pem"
-		auth.ServerCert = auth.ClientCert
 	}
 	overrideFields(auth, confAuth)
 	overrideFields(auth, cliAuth)
 
-	clientAuth, err := newOvnDBAuth(exec, ctlCmd, externalID, auth.Address, auth.ClientPrivKey, auth.ClientCert, auth.ClientCACert, false)
-	if err != nil {
-		return OvnAuthConfig{}, err
-	}
-	serverAuth, err := newOvnDBAuth(exec, ctlCmd, externalID, auth.Address, auth.ServerPrivKey, auth.ServerCert, auth.ServerCACert, true)
+	clientAuth, err := newOvnDBAuth(exec, ctlCmd, externalID, auth.Address, auth.ClientPrivKey, auth.ClientCert, auth.ClientCACert)
 	if err != nil {
 		return OvnAuthConfig{}, err
 	}
 
 	return OvnAuthConfig{
 		ClientAuth: clientAuth,
-		ServerAuth: serverAuth,
 	}, nil
 }
 
@@ -724,13 +682,11 @@ func InitConfigWithPath(ctx *cli.Context, exec kexec.Interface, configFile strin
 // OvnDBAuth describes an OVN database location and authentication method
 type OvnDBAuth struct {
 	OvnAddressForClient string // e.g: "ssl:192.168.1.2:6641,ssl:192.168.1.2:6642"
-	OvnAddressForServer string // e.g: "pssl:6641"
 	PrivKey             string
 	Cert                string
 	CACert              string
 	Scheme              OvnDBScheme
 
-	server     bool
 	ctlCmd     string // e.g: ovn-nbctl
 	externalID string // ovn-nb or ovn-remote
 
@@ -748,13 +704,12 @@ func pathExists(path string) bool {
 // newOvnDBAuth returns an OvnDBAuth object describing the connection to an
 // OVN database, given a connection description string and authentication
 // details
-func newOvnDBAuth(exec kexec.Interface, ctlCmd, externalID, urlString, privkey, cert, cacert string, server bool) (*OvnDBAuth, error) {
+func newOvnDBAuth(exec kexec.Interface, ctlCmd, externalID, urlString, privkey, cert, cacert string) (*OvnDBAuth, error) {
 	if urlString == "" {
 		if privkey != "" || cert != "" || cacert != "" {
 			return nil, fmt.Errorf("certificate or key given; perhaps you mean to use the 'ssl' scheme?")
 		}
 		return &OvnDBAuth{
-			server:     server,
 			Scheme:     OvnDBSchemeUnix,
 			ctlCmd:     ctlCmd,
 			externalID: externalID,
@@ -763,7 +718,6 @@ func newOvnDBAuth(exec kexec.Interface, ctlCmd, externalID, urlString, privkey, 
 	}
 
 	auth := &OvnDBAuth{
-		server:     server,
 		ctlCmd:     ctlCmd,
 		externalID: externalID,
 		exec:       exec,
@@ -799,18 +753,12 @@ func newOvnDBAuth(exec kexec.Interface, ctlCmd, externalID, urlString, privkey, 
 				"not a DNS name", hostPort)
 		}
 
-		if server && auth.OvnAddressForServer == "" {
-			auth.OvnAddressForServer = fmt.Sprintf("p%s:%s", scheme, port)
-		}
-
-		if !server {
-			if auth.OvnAddressForClient == "" {
-				auth.OvnAddressForClient = fmt.Sprintf("%s:%s:%s",
-					scheme, host, port)
-			} else {
-				auth.OvnAddressForClient = fmt.Sprintf("%s,%s:%s:%s",
-					auth.OvnAddressForClient, scheme, host, port)
-			}
+		if auth.OvnAddressForClient == "" {
+			auth.OvnAddressForClient = fmt.Sprintf("%s:%s:%s",
+				scheme, host, port)
+		} else {
+			auth.OvnAddressForClient = fmt.Sprintf("%s,%s:%s:%s",
+				auth.OvnAddressForClient, scheme, host, port)
 		}
 	}
 
@@ -841,11 +789,6 @@ func (a *OvnDBAuth) ensureCACert() error {
 		return nil
 	}
 
-	if a.server {
-		// Server requires CA certificate file
-		return fmt.Errorf("CA certificate file %s not found", a.CACert)
-	}
-
 	// Client can bootstrap the CA from the OVN API.  Use nbctl for both
 	// SB and NB since ovn-sbctl only supports --bootstrap-ca-cert from
 	// 2.9.90+.
@@ -871,10 +814,6 @@ func (a *OvnDBAuth) ensureCACert() error {
 // GetURL returns a URL suitable for passing to ovn-northd which describes the
 // transport mechanism for connection to the database
 func (a *OvnDBAuth) GetURL() string {
-	// FIXME: support specific IP Addresses or non-default Unix socket paths
-	if a.server {
-		return a.OvnAddressForServer
-	}
 	return a.OvnAddressForClient
 }
 
@@ -894,60 +833,32 @@ func (a *OvnDBAuth) SetDBAuth() error {
 		}
 	}
 
-	if a.server {
-		// Set the database connection method. Also set the inactivity_probe
-		// to zero as a server need not try to maintain connections to the
-		// client via OVSDB echo request/responses on top of a TCP connection.
-		out, err := rawExec(a.exec, a.ctlCmd, "set-connection", a.GetURL(),
-			"--", "set", "connection", ".", "inactivity_probe=0")
-		if err != nil {
-			return fmt.Errorf("error setting %s API connection: %v\n  %q", a.ctlCmd, err, out)
-		}
-
-		if a.Scheme == OvnDBSchemeSSL {
-			// Server auth requires CA certificate to exist
-			if !pathExists(a.CACert) {
-				return fmt.Errorf("server CA certificate file %s not found", a.CACert)
-			}
-			// Tell the database what SSL keys and certs to use, but before that delete
-			// any SSL configuration. Otherwise, ovn-{nbctl|sbctl} set-ssl command will hang
-			out, err = rawExec(a.exec, a.ctlCmd, "del-ssl")
-			if err != nil {
-				return fmt.Errorf("error deleting %s SSL configuration: %v\n %q", a.ctlCmd, err, out)
-			}
-			out, err = rawExec(a.exec, a.ctlCmd, "set-ssl", a.PrivKey, a.Cert, a.CACert)
-			if err != nil {
-				return fmt.Errorf("error setting %s SSL API certificates: %v\n  %q", a.ctlCmd, err, out)
-			}
-		}
-	} else {
-		if a.Scheme == OvnDBSchemeSSL {
-			// Client can bootstrap the CA cert from the DB
-			if err := a.ensureCACert(); err != nil {
-				return err
-			}
-
-			// Tell Southbound DB clients (like ovn-controller)
-			// which certificates to use to talk to the DB.
-			// Must happen *before* setting the "ovn-remote"
-			// external-id.
-			if a.ctlCmd == "ovn-sbctl" {
-				out, err := runOVSVsctl(a.exec, "del-ssl")
-				if err != nil {
-					return fmt.Errorf("error deleting ovs-vsctl SSL "+
-						"configuration: %q (%v)", out, err)
-				}
-
-				out, err = runOVSVsctl(a.exec, "set-ssl", a.PrivKey, a.Cert, a.CACert)
-				if err != nil {
-					return fmt.Errorf("error setting client southbound DB SSL options: %v\n  %q", err, out)
-				}
-			}
-		}
-
-		if err := setOVSExternalID(a.exec, a.externalID, "\""+a.GetURL()+"\""); err != nil {
+	if a.Scheme == OvnDBSchemeSSL {
+		// Client can bootstrap the CA cert from the DB
+		if err := a.ensureCACert(); err != nil {
 			return err
 		}
+
+		// Tell Southbound DB clients (like ovn-controller)
+		// which certificates to use to talk to the DB.
+		// Must happen *before* setting the "ovn-remote"
+		// external-id.
+		if a.ctlCmd == "ovn-sbctl" {
+			out, err := runOVSVsctl(a.exec, "del-ssl")
+			if err != nil {
+				return fmt.Errorf("error deleting ovs-vsctl SSL "+
+					"configuration: %q (%v)", out, err)
+			}
+
+			out, err = runOVSVsctl(a.exec, "set-ssl", a.PrivKey, a.Cert, a.CACert)
+			if err != nil {
+				return fmt.Errorf("error setting client southbound DB SSL options: %v\n  %q", err, out)
+			}
+		}
+	}
+
+	if err := setOVSExternalID(a.exec, a.externalID, "\""+a.GetURL()+"\""); err != nil {
+		return err
 	}
 	return nil
 }
@@ -964,22 +875,16 @@ func (a *OvnDBAuth) updateIP(newIP string) error {
 	return nil
 }
 
-// UpdateOvnNodeAuth updates the host and URL in ClientAuth and ServerAuth
+// UpdateOvnNodeAuth updates the host and URL in ClientAuth
 // for both OvnNorth and OvnSouth. It updates them with the new masterIP.
 func UpdateOvnNodeAuth(masterIP string) error {
 	logrus.Debugf("Update OVN node auth with new master ip: %s", masterIP)
 	if err := OvnNorth.ClientAuth.updateIP(masterIP); err != nil {
 		return fmt.Errorf("failed to update OvnNorth ClientAuth URL: %v", err)
 	}
-	if err := OvnNorth.ServerAuth.updateIP(masterIP); err != nil {
-		return fmt.Errorf("failed to update OvnNorth ServerAuth URL: %v", err)
-	}
 
 	if err := OvnSouth.ClientAuth.updateIP(masterIP); err != nil {
 		return fmt.Errorf("failed to update OvnSouth ClientAuth URL: %v", err)
-	}
-	if err := OvnSouth.ServerAuth.updateIP(masterIP); err != nil {
-		return fmt.Errorf("failed to update OvnSouth ServerAuth URL: %v", err)
 	}
 	return nil
 }
