@@ -175,18 +175,21 @@ if [ "$DAEMONSET" != "true" ]; then
   popd
 
   if [ $PROTOCOL = "ssl" ]; then
-   SSL_ARGS="-nb-server-privkey /etc/openvswitch/ovnnb-privkey.pem \
-   -nb-server-cert /etc/openvswitch/ovnnb-cert.pem \
-   -nb-server-cacert /vagrant/pki/switchca/cacert.pem \
-   -sb-server-privkey /etc/openvswitch/ovnsb-privkey.pem \
-   -sb-server-cert /etc/openvswitch/ovnsb-cert.pem \
-   -sb-server-cacert /vagrant/pki/switchca/cacert.pem  \
-   -nb-client-privkey /etc/openvswitch/ovncontroller-privkey.pem \
+   sudo ovn-nbctl set-connection pssl:6641 -- set connection . inactivity_probe=0
+   sudo ovn-sbctl set-connection pssl:6642 -- set connection . inactivity_probe=0
+   sudo ovn-nbctl set-ssl /etc/openvswitch/ovnnb-privkey.pem \
+    /etc/openvswitch/ovnnb-cert.pem /vagrant/pki/switchca/cacert.pem
+   sudo ovn-sbctl set-ssl /etc/openvswitch/ovnsb-privkey.pem \
+    /etc/openvswitch/ovnsb-cert.pem /vagrant/pki/switchca/cacert.pem
+   SSL_ARGS="-nb-client-privkey /etc/openvswitch/ovncontroller-privkey.pem \
    -nb-client-cert /etc/openvswitch/ovncontroller-cert.pem \
-   -nb-client-cacert /etc/openvswitch/ovnnb-ca.cert \
+   -nb-client-cacert /etc/openvswitch/ovnnb-cert.pem \
    -sb-client-privkey /etc/openvswitch/ovncontroller-privkey.pem \
    -sb-client-cert /etc/openvswitch/ovncontroller-cert.pem \
-   -sb-client-cacert /etc/openvswitch/ovnsb-ca.cert"
+   -sb-client-cacert /etc/openvswitch/ovnsb-cert.pem"
+  elif [ $PROTOCOL = "tcp" ]; then
+   sudo ovn-nbctl set-connection ptcp:6641 -- set connection . inactivity_probe=0
+   sudo ovn-sbctl set-connection ptcp:6642 -- set connection . inactivity_probe=0
   fi
 
   if [ "$HA" = "true" ]; then
