@@ -76,10 +76,10 @@ sudo service docker start
 sudo apt-get build-dep dkms
 sudo apt-get install python-six openssl -y
 sudo apt-get install openvswitch-common libopenvswitch -y
+sudo apt-get install openvswitch-datapath-dkms -y
 
 if [ "$DAEMONSET" != "true" ]; then
   ## Install OVS and OVN components
-  sudo apt-get install openvswitch-datapath-dkms -y
   sudo apt-get install openvswitch-switch
   sudo apt-get install ovn-common ovn-host -y
 fi
