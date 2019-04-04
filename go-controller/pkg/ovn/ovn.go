@@ -118,9 +118,10 @@ func dialNB() (*ovsdb.OVSDB, *dbcache.Cache) {
 			Tables: map[string][]string{
 				"Logical_Switch":      {"_uuid", "name", "ports", "acls", "external_ids", "other_config"},
 				"Logical_Switch_Port": {"_uuid", "name", "external_ids", "addresses", "dynamic_addresses"},
-				"ACL":         {"_uuid", "external_ids", "match", "action"},
-				"Address_Set": {"_uuid", "name", "external_ids"},
-				"Port_Group":  {"_uuid", "name", "acls", "ports"},
+				"ACL":           {"_uuid", "external_ids", "match", "action"},
+				"Address_Set":   {"_uuid", "name", "external_ids"},
+				"Port_Group":    {"_uuid", "name", "acls", "ports"},
+				"Load_Balancer": {"_uuid", "vips", "protocol"},
 			},
 			Indexes: map[string][]string{
 				"Logical_Switch_Port": {"name"},
@@ -137,8 +138,9 @@ func dialNB() (*ovsdb.OVSDB, *dbcache.Cache) {
 				Tables: map[string][]string{
 					"Logical_Switch":      {"_uuid", "name", "ports", "acls", "external_ids", "other_config"},
 					"Logical_Switch_Port": {"_uuid", "name", "external_ids", "addresses", "dynamic_addresses"},
-					"ACL":         {"_uuid", "external_ids", "match", "action"},
-					"Address_Set": {"_uuid", "name", "external_ids"},
+					"ACL":           {"_uuid", "external_ids", "match", "action"},
+					"Address_Set":   {"_uuid", "name", "external_ids"},
+					"Load_Balancer": {"_uuid", "vips", "protocol"},
 				},
 				Indexes: map[string][]string{
 					"Logical_Switch_Port": {"name"},
