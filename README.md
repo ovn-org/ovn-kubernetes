@@ -88,6 +88,14 @@ in a database.  Start this central component on one of the nodes where you
 have started your k8s central daemons and which has an IP address of
 $CENTRAL_IP.  (For HA of the central component, please read [HA.md])
 
+Run the following commands to open up TCP port for OVN Northbound and Southbound
+ovsdb-server. The clients will connect to the respective database at its port.
+
+```
+ovn-nbctl set-connection ptcp:6641
+ovn-sbctl set-connection ptcp:6642
+```
+
 Start ovn-northd daemon.  This daemon translates networking intent from k8s
 stored in the OVN_Northbound database to logical flows in OVN_Southbound
 database.

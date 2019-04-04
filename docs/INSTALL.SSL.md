@@ -45,12 +45,15 @@ The above commands will generate a private key "ovnnb-privkey.pem"
 and create a self signed certificate "ovnnb-cert.pem".  These will
 be used by the ovsdb-server that fronts the OVN NB database.
 
-Now run the following command to ask ovsdb-server to use these
-certificates.
+Now run the following commands to ask ovsdb-server to use these
+certificates and also to open up SSL ports via which the database
+can be accessed.
 
 ```
 ovn-nbctl set-ssl /etc/openvswitch/ovnnb-privkey.pem \
     /etc/openvswitch/ovnnb-cert.pem  /etc/openvswitch/cacert.pem
+
+ovn-nbctl set-connection pssl:6641
 ```
 
 ```
@@ -61,12 +64,15 @@ The above commands will generate a private key "ovnsb-privkey.pem"
 and create a self signed certificate "ovnsb-cert.pem".  These will
 be used by the ovsdb-server that fronts the OVN SB database.
 
-Now run the following command to ask ovsdb-server to use these
-certificates.
+Now run the following commands to ask ovsdb-server to use these
+certificates  and also to open up SSL ports via which the database
+can be accessed.
 
 ```
 ovn-sbctl set-ssl /etc/openvswitch/ovnsb-privkey.pem \
     /etc/openvswitch/ovnsb-cert.pem  /etc/openvswitch/cacert.pem
+
+ovn-sbctl set-connection pssl:6642
 ```
 
 ### Generate certificates for the minion.
@@ -109,7 +115,7 @@ additional options.
 /usr/share/openvswitch/scripts/ovn-ctl \
     --ovn-controller-ssl-key="/etc/openvswitch/ovncontroller-privkey.pem"  \
     --ovn-controller-ssl-cert="/etc/openvswitch/ovncontroller-cert.pem"    \
-    --ovn-controller-ssl-bootstrap-ca-cert="/etc/openvswitch/ovnsb-ca.cert" \
+    --ovn-controller-ssl-bootstrap-ca-cert="/etc/openvswitch/ovnsb-cert.pem" \
     restart_controller
 ```
 
@@ -119,7 +125,7 @@ file.  For e.g. on Ubuntu, if you installed ovn-controller via the package
 'ovn-host*.deb', write the following to your /etc/default/ovn-host file
 
 ```
-OVN_CTL_OPTS="--ovn-controller-ssl-key=/etc/openvswitch/ovncontroller-privkey.pem  --ovn-controller-ssl-cert=/etc/openvswitch/ovncontroller-cert.pem --ovn-controller-ssl-bootstrap-ca-cert=/etc/openvswitch/ovnsb-ca.cert"
+OVN_CTL_OPTS="--ovn-controller-ssl-key=/etc/openvswitch/ovncontroller-privkey.pem  --ovn-controller-ssl-cert=/etc/openvswitch/ovncontroller-cert.pem --ovn-controller-ssl-bootstrap-ca-cert=/etc/openvswitch/ovnsb-cert.pem"
 ```
 
 Now, when you start the ovnkube utility on master, you should pass the SSL
@@ -133,19 +139,13 @@ sudo ovnkube -k8s-kubeconfig kubeconfig.yaml -net-controller -loglevel=4 \
  -service-cluster-ip-range=$SERVICE_IP_SUBNET \
  -nodeport \
  -nb-address="ssl://$CENTRAL_IP:6641" \
- -nb-server-privkey /etc/openvswitch/ovnnb-privkey.pem \
- -nb-server-cert /etc/openvswitch/ovnnb-cert.pem \
- -nb-server-cacert /vagrant/pki/switchca/cacert.pem \
  -sb-address="ssl://$CENTRAL_IP:6642" \
- -sb-server-privkey /etc/openvswitch/ovnsb-privkey.pem \
- -sb-server-cert /etc/openvswitch/ovnsb-cert.pem \
- -sb-server-cacert /vagrant/pki/switchca/cacert.pem  \
  -nb-client-privkey /etc/openvswitch/ovncontroller-privkey.pem \
  -nb-client-cert /etc/openvswitch/ovncontroller-cert.pem \
- -nb-client-cacert /etc/openvswitch/ovnnb-ca.cert \
+ -nb-client-cacert /etc/openvswitch/ovnnb-cert.pem \
  -sb-client-privkey /etc/openvswitch/ovncontroller-privkey.pem \
  -sb-client-cert /etc/openvswitch/ovncontroller-cert.pem \
- -sb-client-cacert /etc/openvswitch/ovnsb-ca.cert
+ -sb-client-cacert /etc/openvswitch/ovnsb-cert.pem
 ```
 
 And when you start your ovnkube utility on nodes, you should pass the SSL
@@ -160,10 +160,10 @@ sudo ovnkube -k8s-kubeconfig $HOME/kubeconfig.yaml -loglevel=4 \
     -sb-address="ssl://$CENTRAL_IP:6642" -k8s-token=$TOKEN \
     -nb-client-privkey /etc/openvswitch/ovncontroller-privkey.pem \
     -nb-client-cert /etc/openvswitch/ovncontroller-cert.pem \
-    -nb-client-cacert /etc/openvswitch/ovnnb-ca.cert \
+    -nb-client-cacert /etc/openvswitch/ovnnb-cert.pem \
     -sb-client-privkey /etc/openvswitch/ovncontroller-privkey.pem \
     -sb-client-cert /etc/openvswitch/ovncontroller-cert.pem \
-    -sb-client-cacert /etc/openvswitch/ovnsb-ca.cert \
+    -sb-client-cacert /etc/openvswitch/ovnsb-cert.pem \
     -init-gateways \
     -service-cluster-ip-range=$SERVICE_IP_SUBNET \
     -cluster-subnet=$CLUSTER_IP_SUBNET

@@ -170,19 +170,7 @@ var _ = Describe("Config Operations", func() {
 				Expect(a.PrivKey).To(Equal(""))
 				Expect(a.Cert).To(Equal(""))
 				Expect(a.CACert).To(Equal(""))
-				Expect(a.server).To(BeFalse())
 				Expect(a.OvnAddressForClient).To(Equal(""))
-				Expect(a.OvnAddressForServer).To(Equal(""))
-			}
-
-			for _, a := range []*OvnDBAuth{OvnNorth.ServerAuth, OvnSouth.ServerAuth} {
-				Expect(a.Scheme).To(Equal(OvnDBSchemeUnix))
-				Expect(a.PrivKey).To(Equal(""))
-				Expect(a.Cert).To(Equal(""))
-				Expect(a.CACert).To(Equal(""))
-				Expect(a.server).To(BeTrue())
-				Expect(a.OvnAddressForClient).To(Equal(""))
-				Expect(a.OvnAddressForServer).To(Equal(""))
 			}
 			return nil
 		}
@@ -241,33 +229,13 @@ var _ = Describe("Config Operations", func() {
 			Expect(OvnNorth.ClientAuth.PrivKey).To(Equal(""))
 			Expect(OvnNorth.ClientAuth.Cert).To(Equal(""))
 			Expect(OvnNorth.ClientAuth.CACert).To(Equal(""))
-			Expect(OvnNorth.ClientAuth.server).To(BeFalse())
 			Expect(OvnNorth.ClientAuth.OvnAddressForClient).To(Equal("tcp:1.1.1.1:6441"))
-			Expect(OvnNorth.ClientAuth.OvnAddressForServer).To(Equal(""))
 
 			Expect(OvnSouth.ClientAuth.Scheme).To(Equal(OvnDBSchemeUnix))
 			Expect(OvnSouth.ClientAuth.PrivKey).To(Equal(""))
 			Expect(OvnSouth.ClientAuth.Cert).To(Equal(""))
 			Expect(OvnSouth.ClientAuth.CACert).To(Equal(""))
-			Expect(OvnSouth.ClientAuth.server).To(BeFalse())
 			Expect(OvnSouth.ClientAuth.OvnAddressForClient).To(Equal(""))
-			Expect(OvnSouth.ClientAuth.OvnAddressForServer).To(Equal(""))
-
-			Expect(OvnNorth.ServerAuth.Scheme).To(Equal(OvnDBSchemeTCP))
-			Expect(OvnNorth.ServerAuth.PrivKey).To(Equal(""))
-			Expect(OvnNorth.ServerAuth.Cert).To(Equal(""))
-			Expect(OvnNorth.ServerAuth.CACert).To(Equal(""))
-			Expect(OvnNorth.ServerAuth.server).To(BeTrue())
-			Expect(OvnNorth.ServerAuth.OvnAddressForClient).To(Equal(""))
-			Expect(OvnNorth.ServerAuth.OvnAddressForServer).To(Equal("ptcp:6441"))
-
-			Expect(OvnSouth.ServerAuth.Scheme).To(Equal(OvnDBSchemeUnix))
-			Expect(OvnSouth.ServerAuth.PrivKey).To(Equal(""))
-			Expect(OvnSouth.ServerAuth.Cert).To(Equal(""))
-			Expect(OvnSouth.ServerAuth.CACert).To(Equal(""))
-			Expect(OvnSouth.ServerAuth.server).To(BeTrue())
-			Expect(OvnSouth.ServerAuth.OvnAddressForClient).To(Equal(""))
-			Expect(OvnSouth.ServerAuth.OvnAddressForServer).To(Equal(""))
 
 			return nil
 		}
@@ -326,34 +294,14 @@ var _ = Describe("Config Operations", func() {
 			Expect(OvnNorth.ClientAuth.PrivKey).To(Equal(""))
 			Expect(OvnNorth.ClientAuth.Cert).To(Equal(""))
 			Expect(OvnNorth.ClientAuth.CACert).To(Equal(""))
-			Expect(OvnNorth.ClientAuth.server).To(BeFalse())
 			Expect(OvnNorth.ClientAuth.OvnAddressForClient).To(
 				Equal("tcp:1.1.1.1:6441,tcp:1.1.1.2:6641,tcp:1.1.1.3:6641"))
-			Expect(OvnNorth.ClientAuth.OvnAddressForServer).To(Equal(""))
 
 			Expect(OvnSouth.ClientAuth.Scheme).To(Equal(OvnDBSchemeUnix))
 			Expect(OvnSouth.ClientAuth.PrivKey).To(Equal(""))
 			Expect(OvnSouth.ClientAuth.Cert).To(Equal(""))
 			Expect(OvnSouth.ClientAuth.CACert).To(Equal(""))
-			Expect(OvnSouth.ClientAuth.server).To(BeFalse())
 			Expect(OvnSouth.ClientAuth.OvnAddressForClient).To(Equal(""))
-			Expect(OvnSouth.ClientAuth.OvnAddressForServer).To(Equal(""))
-
-			Expect(OvnNorth.ServerAuth.Scheme).To(Equal(OvnDBSchemeTCP))
-			Expect(OvnNorth.ServerAuth.PrivKey).To(Equal(""))
-			Expect(OvnNorth.ServerAuth.Cert).To(Equal(""))
-			Expect(OvnNorth.ServerAuth.CACert).To(Equal(""))
-			Expect(OvnNorth.ServerAuth.server).To(BeTrue())
-			Expect(OvnNorth.ServerAuth.OvnAddressForClient).To(Equal(""))
-			Expect(OvnNorth.ServerAuth.OvnAddressForServer).To(Equal("ptcp:6441"))
-
-			Expect(OvnSouth.ServerAuth.Scheme).To(Equal(OvnDBSchemeUnix))
-			Expect(OvnSouth.ServerAuth.PrivKey).To(Equal(""))
-			Expect(OvnSouth.ServerAuth.Cert).To(Equal(""))
-			Expect(OvnSouth.ServerAuth.CACert).To(Equal(""))
-			Expect(OvnSouth.ServerAuth.server).To(BeTrue())
-			Expect(OvnSouth.ServerAuth.OvnAddressForClient).To(Equal(""))
-			Expect(OvnSouth.ServerAuth.OvnAddressForServer).To(Equal(""))
 
 			return nil
 		}
@@ -369,14 +317,6 @@ var _ = Describe("Config Operations", func() {
 		kubeCAFile, err := createTempFile("kube-ca.crt")
 		Expect(err).NotTo(HaveOccurred())
 		defer os.Remove(kubeCAFile)
-
-		nbServerCAFile, err := createTempFile("nbca.crt")
-		Expect(err).NotTo(HaveOccurred())
-		defer os.Remove(nbServerCAFile)
-
-		sbServerCAFile, err := createTempFile("sbca.crt")
-		Expect(err).NotTo(HaveOccurred())
-		defer os.Remove(sbServerCAFile)
 
 		cfgData := fmt.Sprintf(`[default]
 mtu=1500
@@ -401,18 +341,13 @@ address=ssl://1.2.3.4:6641
 client-privkey=/path/to/nb-client-private.key
 client-cert=/path/to/nb-client.crt
 client-cacert=/path/to/nb-client-ca.crt
-server-privkey=/path/to/nb-server-private.key
-server-cert=/path/to/nb-server.crt
-server-cacert=%s
 
 [ovnsouth]
 address=ssl://1.2.3.4:6642
 client-privkey=/path/to/sb-client-private.key
 client-cert=/path/to/sb-client.crt
 client-cacert=/path/to/sb-client-ca.crt
-server-privkey=/path/to/sb-server-private.key
-server-cert=/path/to/sb-server.crt
-server-cacert=%s`, kubeconfigFile, kubeCAFile, nbServerCAFile, sbServerCAFile)
+`, kubeconfigFile, kubeCAFile)
 		err = ioutil.WriteFile(cfgFile.Name(), []byte(cfgData), 0644)
 		Expect(err).NotTo(HaveOccurred())
 
@@ -437,33 +372,13 @@ server-cacert=%s`, kubeconfigFile, kubeCAFile, nbServerCAFile, sbServerCAFile)
 			Expect(OvnNorth.ClientAuth.PrivKey).To(Equal("/path/to/nb-client-private.key"))
 			Expect(OvnNorth.ClientAuth.Cert).To(Equal("/path/to/nb-client.crt"))
 			Expect(OvnNorth.ClientAuth.CACert).To(Equal("/path/to/nb-client-ca.crt"))
-			Expect(OvnNorth.ClientAuth.server).To(BeFalse())
 			Expect(OvnNorth.ClientAuth.OvnAddressForClient).To(Equal("ssl:1.2.3.4:6641"))
-			Expect(OvnNorth.ClientAuth.OvnAddressForServer).To(Equal(""))
-
-			Expect(OvnNorth.ServerAuth.Scheme).To(Equal(OvnDBSchemeSSL))
-			Expect(OvnNorth.ServerAuth.PrivKey).To(Equal("/path/to/nb-server-private.key"))
-			Expect(OvnNorth.ServerAuth.Cert).To(Equal("/path/to/nb-server.crt"))
-			Expect(OvnNorth.ServerAuth.CACert).To(Equal(nbServerCAFile))
-			Expect(OvnNorth.ServerAuth.server).To(BeTrue())
-			Expect(OvnNorth.ServerAuth.OvnAddressForClient).To(Equal(""))
-			Expect(OvnNorth.ServerAuth.OvnAddressForServer).To(Equal("pssl:6641"))
 
 			Expect(OvnSouth.ClientAuth.Scheme).To(Equal(OvnDBSchemeSSL))
 			Expect(OvnSouth.ClientAuth.PrivKey).To(Equal("/path/to/sb-client-private.key"))
 			Expect(OvnSouth.ClientAuth.Cert).To(Equal("/path/to/sb-client.crt"))
 			Expect(OvnSouth.ClientAuth.CACert).To(Equal("/path/to/sb-client-ca.crt"))
-			Expect(OvnSouth.ClientAuth.server).To(BeFalse())
 			Expect(OvnSouth.ClientAuth.OvnAddressForClient).To(Equal("ssl:1.2.3.4:6642"))
-			Expect(OvnSouth.ClientAuth.OvnAddressForServer).To(Equal(""))
-
-			Expect(OvnSouth.ServerAuth.Scheme).To(Equal(OvnDBSchemeSSL))
-			Expect(OvnSouth.ServerAuth.PrivKey).To(Equal("/path/to/sb-server-private.key"))
-			Expect(OvnSouth.ServerAuth.Cert).To(Equal("/path/to/sb-server.crt"))
-			Expect(OvnSouth.ServerAuth.CACert).To(Equal(sbServerCAFile))
-			Expect(OvnSouth.ServerAuth.server).To(BeTrue())
-			Expect(OvnSouth.ServerAuth.OvnAddressForClient).To(Equal(""))
-			Expect(OvnSouth.ServerAuth.OvnAddressForServer).To(Equal("pssl:6642"))
 
 			return nil
 		}
@@ -479,14 +394,6 @@ server-cacert=%s`, kubeconfigFile, kubeCAFile, nbServerCAFile, sbServerCAFile)
 		kubeCAFile, err := createTempFile("kube-ca.crt")
 		Expect(err).NotTo(HaveOccurred())
 		defer os.Remove(kubeCAFile)
-
-		nbServerCAFile, err := createTempFile("nbca.crt")
-		Expect(err).NotTo(HaveOccurred())
-		defer os.Remove(nbServerCAFile)
-
-		sbServerCAFile, err := createTempFile("sbca.crt")
-		Expect(err).NotTo(HaveOccurred())
-		defer os.Remove(sbServerCAFile)
 
 		err = ioutil.WriteFile(cfgFile.Name(), []byte(`[default]
 mtu=1500
@@ -511,18 +418,13 @@ address=ssl://1.2.3.4:6641
 client-privkey=/path/to/nb-client-private.key
 client-cert=/path/to/nb-client.crt
 client-cacert=/path/to/nb-client-ca.crt
-server-privkey=/path/to/nb-server-private.key
-server-cert=/path/to/nb-server.crt
-server-cacert=/path/to/nb-ca.crt
 
 [ovnsouth]
 address=ssl://1.2.3.4:6642
 client-privkey=/path/to/sb-client-private.key
 client-cert=/path/to/sb-client.crt
 client-cacert=/path/to/sb-client-ca.crt
-server-privkey=/path/to/sb-server-private.key
-server-cert=/path/to/sb-server.crt
-server-cacert=/path/to/sb-ca.crt`), 0644)
+`), 0644)
 		Expect(err).NotTo(HaveOccurred())
 
 		app.Action = func(ctx *cli.Context) error {
@@ -546,33 +448,13 @@ server-cacert=/path/to/sb-ca.crt`), 0644)
 			Expect(OvnNorth.ClientAuth.PrivKey).To(Equal("/client/privkey"))
 			Expect(OvnNorth.ClientAuth.Cert).To(Equal("/client/cert"))
 			Expect(OvnNorth.ClientAuth.CACert).To(Equal("/client/cacert"))
-			Expect(OvnNorth.ClientAuth.server).To(BeFalse())
 			Expect(OvnNorth.ClientAuth.OvnAddressForClient).To(Equal("ssl:6.5.4.3:6651"))
-			Expect(OvnNorth.ClientAuth.OvnAddressForServer).To(Equal(""))
-
-			Expect(OvnNorth.ServerAuth.Scheme).To(Equal(OvnDBSchemeSSL))
-			Expect(OvnNorth.ServerAuth.PrivKey).To(Equal("/server/privkey"))
-			Expect(OvnNorth.ServerAuth.Cert).To(Equal("/server/cert"))
-			Expect(OvnNorth.ServerAuth.CACert).To(Equal(nbServerCAFile))
-			Expect(OvnNorth.ServerAuth.server).To(BeTrue())
-			Expect(OvnNorth.ServerAuth.OvnAddressForClient).To(Equal(""))
-			Expect(OvnNorth.ServerAuth.OvnAddressForServer).To(Equal("pssl:6651"))
 
 			Expect(OvnSouth.ClientAuth.Scheme).To(Equal(OvnDBSchemeSSL))
 			Expect(OvnSouth.ClientAuth.PrivKey).To(Equal("/client/privkey2"))
 			Expect(OvnSouth.ClientAuth.Cert).To(Equal("/client/cert2"))
 			Expect(OvnSouth.ClientAuth.CACert).To(Equal("/client/cacert2"))
-			Expect(OvnSouth.ClientAuth.server).To(BeFalse())
 			Expect(OvnSouth.ClientAuth.OvnAddressForClient).To(Equal("ssl:6.5.4.1:6652"))
-			Expect(OvnSouth.ClientAuth.OvnAddressForServer).To(Equal(""))
-
-			Expect(OvnSouth.ServerAuth.Scheme).To(Equal(OvnDBSchemeSSL))
-			Expect(OvnSouth.ServerAuth.PrivKey).To(Equal("/server/privkey2"))
-			Expect(OvnSouth.ServerAuth.Cert).To(Equal("/server/cert2"))
-			Expect(OvnSouth.ServerAuth.CACert).To(Equal(sbServerCAFile))
-			Expect(OvnSouth.ServerAuth.server).To(BeTrue())
-			Expect(OvnSouth.ServerAuth.OvnAddressForClient).To(Equal(""))
-			Expect(OvnSouth.ServerAuth.OvnAddressForServer).To(Equal("pssl:6652"))
 
 			return nil
 		}
@@ -590,16 +472,10 @@ server-cacert=/path/to/sb-ca.crt`), 0644)
 			"-k8s-cacert=" + kubeCAFile,
 			"-k8s-token=asdfasdfasdfasfd",
 			"-nb-address=ssl://6.5.4.3:6651",
-			"-nb-server-privkey=/server/privkey",
-			"-nb-server-cert=/server/cert",
-			"-nb-server-cacert=" + nbServerCAFile,
 			"-nb-client-privkey=/client/privkey",
 			"-nb-client-cert=/client/cert",
 			"-nb-client-cacert=/client/cacert",
 			"-sb-address=ssl://6.5.4.1:6652",
-			"-sb-server-privkey=/server/privkey2",
-			"-sb-server-cert=/server/cert2",
-			"-sb-server-cacert=" + sbServerCAFile,
 			"-sb-client-privkey=/client/privkey2",
 			"-sb-client-cert=/client/cert2",
 			"-sb-client-cacert=/client/cacert2",
@@ -616,14 +492,6 @@ server-cacert=/path/to/sb-ca.crt`), 0644)
 		kubeCAFile, err := createTempFile("kube-ca.crt")
 		Expect(err).NotTo(HaveOccurred())
 		defer os.Remove(kubeCAFile)
-
-		nbServerCAFile, err := createTempFile("nbca.crt")
-		Expect(err).NotTo(HaveOccurred())
-		defer os.Remove(nbServerCAFile)
-
-		sbServerCAFile, err := createTempFile("sbca.crt")
-		Expect(err).NotTo(HaveOccurred())
-		defer os.Remove(sbServerCAFile)
 
 		err = ioutil.WriteFile(cfgFile.Name(), []byte(`[default]
 mtu=1500
@@ -648,18 +516,13 @@ address=ssl://1.2.3.4:6641
 client-privkey=/path/to/nb-client-private.key
 client-cert=/path/to/nb-client.crt
 client-cacert=/path/to/nb-client-ca.crt
-server-privkey=/path/to/nb-server-private.key
-server-cert=/path/to/nb-server.crt
-server-cacert=/path/to/nb-ca.crt
 
 [ovnsouth]
 address=ssl://1.2.3.4:6642
 client-privkey=/path/to/sb-client-private.key
 client-cert=/path/to/sb-client.crt
 client-cacert=/path/to/sb-client-ca.crt
-server-privkey=/path/to/sb-server-private.key
-server-cert=/path/to/sb-server.crt
-server-cacert=/path/to/sb-ca.crt`), 0644)
+`), 0644)
 		Expect(err).NotTo(HaveOccurred())
 
 		app.Action = func(ctx *cli.Context) error {
@@ -683,35 +546,15 @@ server-cacert=/path/to/sb-ca.crt`), 0644)
 			Expect(OvnNorth.ClientAuth.PrivKey).To(Equal("/client/privkey"))
 			Expect(OvnNorth.ClientAuth.Cert).To(Equal("/client/cert"))
 			Expect(OvnNorth.ClientAuth.CACert).To(Equal("/client/cacert"))
-			Expect(OvnNorth.ClientAuth.server).To(BeFalse())
 			Expect(OvnNorth.ClientAuth.OvnAddressForClient).To(
 				Equal("ssl:6.5.4.3:6651,ssl:6.5.4.4:6651,ssl:6.5.4.5:6651"))
-			Expect(OvnNorth.ClientAuth.OvnAddressForServer).To(Equal(""))
-
-			Expect(OvnNorth.ServerAuth.Scheme).To(Equal(OvnDBSchemeSSL))
-			Expect(OvnNorth.ServerAuth.PrivKey).To(Equal("/server/privkey"))
-			Expect(OvnNorth.ServerAuth.Cert).To(Equal("/server/cert"))
-			Expect(OvnNorth.ServerAuth.CACert).To(Equal(nbServerCAFile))
-			Expect(OvnNorth.ServerAuth.server).To(BeTrue())
-			Expect(OvnNorth.ServerAuth.OvnAddressForClient).To(Equal(""))
-			Expect(OvnNorth.ServerAuth.OvnAddressForServer).To(Equal("pssl:6651"))
 
 			Expect(OvnSouth.ClientAuth.Scheme).To(Equal(OvnDBSchemeSSL))
 			Expect(OvnSouth.ClientAuth.PrivKey).To(Equal("/client/privkey2"))
 			Expect(OvnSouth.ClientAuth.Cert).To(Equal("/client/cert2"))
 			Expect(OvnSouth.ClientAuth.CACert).To(Equal("/client/cacert2"))
-			Expect(OvnSouth.ClientAuth.server).To(BeFalse())
 			Expect(OvnSouth.ClientAuth.OvnAddressForClient).To(
 				Equal("ssl:6.5.4.1:6652,ssl:6.5.4.2:6652,ssl:6.5.4.3:6652"))
-			Expect(OvnSouth.ClientAuth.OvnAddressForServer).To(Equal(""))
-
-			Expect(OvnSouth.ServerAuth.Scheme).To(Equal(OvnDBSchemeSSL))
-			Expect(OvnSouth.ServerAuth.PrivKey).To(Equal("/server/privkey2"))
-			Expect(OvnSouth.ServerAuth.Cert).To(Equal("/server/cert2"))
-			Expect(OvnSouth.ServerAuth.CACert).To(Equal(sbServerCAFile))
-			Expect(OvnSouth.ServerAuth.server).To(BeTrue())
-			Expect(OvnSouth.ServerAuth.OvnAddressForClient).To(Equal(""))
-			Expect(OvnSouth.ServerAuth.OvnAddressForServer).To(Equal("pssl:6652"))
 
 			return nil
 		}
@@ -729,16 +572,10 @@ server-cacert=/path/to/sb-ca.crt`), 0644)
 			"-k8s-cacert=" + kubeCAFile,
 			"-k8s-token=asdfasdfasdfasfd",
 			"-nb-address=ssl://6.5.4.3:6651,ssl://6.5.4.4:6651,ssl://6.5.4.5:6651",
-			"-nb-server-privkey=/server/privkey",
-			"-nb-server-cert=/server/cert",
-			"-nb-server-cacert=" + nbServerCAFile,
 			"-nb-client-privkey=/client/privkey",
 			"-nb-client-cert=/client/cert",
 			"-nb-client-cacert=/client/cacert",
 			"-sb-address=ssl://6.5.4.1:6652,ssl://6.5.4.2:6652,ssl://6.5.4.3:6652",
-			"-sb-server-privkey=/server/privkey2",
-			"-sb-server-cert=/server/cert2",
-			"-sb-server-cacert=" + sbServerCAFile,
 			"-sb-client-privkey=/client/privkey2",
 			"-sb-client-cert=/client/cert2",
 			"-sb-client-cacert=/client/cacert2",
@@ -772,46 +609,6 @@ server-cacert=/path/to/sb-ca.crt`), 0644)
 			sbURL string = "ssl://1.2.3.4:6642"
 		)
 
-		It("configures server northbound SSL correctly", func() {
-			fakeCmds := ovntest.AddFakeCmd(nil, &ovntest.ExpectedCmd{
-				Cmd: "ovn-nbctl set-connection pssl:6641 -- set connection . inactivity_probe=0",
-			})
-			fakeCmds = ovntest.AddFakeCmd(fakeCmds, &ovntest.ExpectedCmd{
-				Cmd: "ovn-nbctl del-ssl",
-			})
-			fakeCmds = ovntest.AddFakeCmd(fakeCmds, &ovntest.ExpectedCmd{
-				Cmd: fmt.Sprintf("ovn-nbctl set-ssl %s %s %s", keyFile, certFile, caFile),
-			})
-
-			fexec := &fakeexec.FakeExec{
-				CommandScript: fakeCmds,
-				LookPathFunc: func(file string) (string, error) {
-					return fmt.Sprintf("/fake-bin/%s", file), nil
-				},
-			}
-
-			var err error
-			caFile, err = createTempFile("ca.crt")
-			Expect(err).NotTo(HaveOccurred())
-
-			a, err := newOvnDBAuth(fexec, "ovn-nbctl", "ovn-nb", nbURL, keyFile, certFile, caFile, true)
-			Expect(err).NotTo(HaveOccurred())
-			Expect(a.Scheme).To(Equal(OvnDBSchemeSSL))
-			Expect(a.PrivKey).To(Equal(keyFile))
-			Expect(a.Cert).To(Equal(certFile))
-			Expect(a.CACert).To(Equal(caFile))
-			Expect(a.server).To(BeTrue())
-			Expect(a.OvnAddressForClient).To(Equal(""))
-			Expect(a.OvnAddressForServer).To(Equal("pssl:6641"))
-			Expect(a.ctlCmd).To(Equal("ovn-nbctl"))
-			Expect(a.externalID).To(Equal("ovn-nb"))
-
-			Expect(a.GetURL()).To(Equal("pssl:6641"))
-			err = a.SetDBAuth()
-			Expect(err).NotTo(HaveOccurred())
-			Expect(fexec.CommandCalls).To(Equal(len(fakeCmds)))
-		})
-
 		It("configures client northbound SSL correctly", func() {
 			const nbURLOVN string = "ssl:1.2.3.4:6641"
 
@@ -829,59 +626,17 @@ server-cacert=/path/to/sb-ca.crt`), 0644)
 				},
 			}
 
-			a, err := newOvnDBAuth(fexec, "ovn-nbctl", "ovn-nb", nbURL, keyFile, certFile, caFile, false)
+			a, err := newOvnDBAuth(fexec, "ovn-nbctl", "ovn-nb", nbURL, keyFile, certFile, caFile)
 			Expect(err).NotTo(HaveOccurred())
 			Expect(a.Scheme).To(Equal(OvnDBSchemeSSL))
 			Expect(a.PrivKey).To(Equal(keyFile))
 			Expect(a.Cert).To(Equal(certFile))
 			Expect(a.CACert).To(Equal(caFile))
-			Expect(a.server).To(BeFalse())
 			Expect(a.OvnAddressForClient).To(Equal("ssl:1.2.3.4:6641"))
-			Expect(a.OvnAddressForServer).To(Equal(""))
 			Expect(a.ctlCmd).To(Equal("ovn-nbctl"))
 			Expect(a.externalID).To(Equal("ovn-nb"))
 
 			Expect(a.GetURL()).To(Equal(nbURLOVN))
-			err = a.SetDBAuth()
-			Expect(err).NotTo(HaveOccurred())
-			Expect(fexec.CommandCalls).To(Equal(len(fakeCmds)))
-		})
-
-		It("configures server southbound SSL correctly", func() {
-			fakeCmds := ovntest.AddFakeCmd(nil, &ovntest.ExpectedCmd{
-				Cmd: "ovn-sbctl set-connection pssl:6642 -- set connection . inactivity_probe=0",
-			})
-			fakeCmds = ovntest.AddFakeCmd(fakeCmds, &ovntest.ExpectedCmd{
-				Cmd: "ovn-sbctl del-ssl",
-			})
-			fakeCmds = ovntest.AddFakeCmd(fakeCmds, &ovntest.ExpectedCmd{
-				Cmd: fmt.Sprintf("ovn-sbctl set-ssl %s %s %s", keyFile, certFile, caFile),
-			})
-
-			fexec := &fakeexec.FakeExec{
-				CommandScript: fakeCmds,
-				LookPathFunc: func(file string) (string, error) {
-					return fmt.Sprintf("/fake-bin/%s", file), nil
-				},
-			}
-
-			var err error
-			caFile, err = createTempFile("ca.crt")
-			Expect(err).NotTo(HaveOccurred())
-
-			a, err := newOvnDBAuth(fexec, "ovn-sbctl", "ovn-remote", sbURL, keyFile, certFile, caFile, true)
-			Expect(err).NotTo(HaveOccurred())
-			Expect(a.Scheme).To(Equal(OvnDBSchemeSSL))
-			Expect(a.PrivKey).To(Equal(keyFile))
-			Expect(a.Cert).To(Equal(certFile))
-			Expect(a.CACert).To(Equal(caFile))
-			Expect(a.server).To(BeTrue())
-			Expect(a.OvnAddressForClient).To(Equal(""))
-			Expect(a.OvnAddressForServer).To(Equal("pssl:6642"))
-			Expect(a.ctlCmd).To(Equal("ovn-sbctl"))
-			Expect(a.externalID).To(Equal("ovn-remote"))
-
-			Expect(a.GetURL()).To(Equal("pssl:6642"))
 			err = a.SetDBAuth()
 			Expect(err).NotTo(HaveOccurred())
 			Expect(fexec.CommandCalls).To(Equal(len(fakeCmds)))
@@ -910,15 +665,13 @@ server-cacert=/path/to/sb-ca.crt`), 0644)
 				},
 			}
 
-			a, err := newOvnDBAuth(fexec, "ovn-sbctl", "ovn-remote", sbURL, keyFile, certFile, caFile, false)
+			a, err := newOvnDBAuth(fexec, "ovn-sbctl", "ovn-remote", sbURL, keyFile, certFile, caFile)
 			Expect(err).NotTo(HaveOccurred())
 			Expect(a.Scheme).To(Equal(OvnDBSchemeSSL))
 			Expect(a.PrivKey).To(Equal(keyFile))
 			Expect(a.Cert).To(Equal(certFile))
 			Expect(a.CACert).To(Equal(caFile))
-			Expect(a.server).To(BeFalse())
 			Expect(a.OvnAddressForClient).To(Equal("ssl:1.2.3.4:6642"))
-			Expect(a.OvnAddressForServer).To(Equal(""))
 			Expect(a.ctlCmd).To(Equal("ovn-sbctl"))
 			Expect(a.externalID).To(Equal("ovn-remote"))
 
