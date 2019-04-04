@@ -1,40 +1,47 @@
 package ovn
 
 import (
-	"encoding/json"
 	"fmt"
-	"strings"
 
-	util "github.com/openvswitch/ovn-kubernetes/go-controller/pkg/util"
+	"github.com/TomCodeLV/OVSDB-golang-lib/pkg/dbtransaction"
+	"github.com/TomCodeLV/OVSDB-golang-lib/pkg/helpers"
 	"github.com/sirupsen/logrus"
 	kapi "k8s.io/api/core/v1"
 )
 
 func (ovn *Controller) getLoadBalancer(protocol kapi.Protocol) (string,
 	error) {
+	if protocol != kapi.ProtocolTCP && protocol != kapi.ProtocolUDP {
+		return "", fmt.Errorf("unknown protocol")
+	}
+
 	if outStr, ok := ovn.loadbalancerClusterCache[string(protocol)]; ok {
 		return outStr, nil
 	}
 
-	var out string
-	var err error
+	var key string
 	if protocol == kapi.ProtocolTCP {
-		out, _, err = util.RunOVNNbctlHA("--data=bare",
-			"--no-heading", "--columns=_uuid", "find", "load_balancer",
-			"external_ids:k8s-cluster-lb-tcp=yes")
-	} else if protocol == kapi.ProtocolUDP {
-		out, _, err = util.RunOVNNbctlHA("--data=bare", "--no-heading",
-			"--columns=_uuid", "find", "load_balancer",
-			"external_ids:k8s-cluster-lb-udp=yes")
+		key = "k8s-cluster-lb-tcp"
+	} else {
+		key = "k8s-cluster-lb-udp"
 	}
-	if err != nil {
-		return "", err
+
+	lbs := ovn.ovnNbCache.GetMap("Load_Balancer", "uuid")
+	for _, lb := range lbs {
+		externalIds := lb.(map[string]interface{})["external_ids"]
+		if externalIds == nil {
+			continue
+		}
+
+		externalID := externalIds.(map[string]interface{})[key]
+		if externalID != nil && externalID.(string) == "yes" {
+			ovn.loadbalancerClusterCache[string(protocol)] = lb.(map[string]interface{})["uuid"].(string)
+			return lb.(map[string]interface{})["uuid"].(string), nil
+		}
 	}
-	if out == "" {
-		return "", fmt.Errorf("no load-balancer found in the database")
-	}
-	ovn.loadbalancerClusterCache[string(protocol)] = out
-	return out, nil
+
+	ovn.loadbalancerClusterCache[string(protocol)] = ""
+	return "", nil
 }
 
 func (ovn *Controller) getDefaultGatewayLoadBalancer(protocol kapi.Protocol) string {
@@ -42,53 +49,92 @@ func (ovn *Controller) getDefaultGatewayLoadBalancer(protocol kapi.Protocol) str
 		return outStr
 	}
 
-	var gw string
-	gw, _, _ = util.RunOVNNbctlUnix("--data=bare",
-		"--no-heading", "--columns=name", "find", "logical_router",
-		"options:lb_force_snat_ip=100.64.1.2")
-	if len(gw) == 0 {
+	var defaultGateway string
+
+	gateways := ovn.ovnNbCache.GetMap("Logical_Router", "uuid")
+	for _, gateway := range gateways {
+		options := gateway.(map[string]interface{})["options"]
+		if options == nil {
+			continue
+		}
+		option := options.(map[string]interface{})["lb_force_snat_ip"]
+		if option != nil && option.(string) == "100.64.1.2" {
+			defaultGateway = gateway.(map[string]interface{})["name"].(string)
+			break
+		}
+	}
+
+	if defaultGateway == "" {
 		logrus.Errorf("Error locating default gateway")
 		return ""
 	}
 
 	externalIDKey := string(protocol) + "_lb_gateway_router"
-	lb, _, _ := util.RunOVNNbctlUnix("--data=bare",
-		"--no-heading", "--columns=_uuid", "find", "load_balancer",
-		"external_ids:"+externalIDKey+"="+gw)
-	if len(lb) != 0 {
-		ovn.loadbalancerGWCache[string(protocol)] = lb
+	lbs := ovn.ovnNbCache.GetMap("Load_Balancer", "uuid")
+	for _, lb := range lbs {
+		externalIds := lb.(map[string]interface{})["external_ids"]
+		if externalIds == nil {
+			continue
+		}
+		externalID := externalIds.(map[string]interface{})[externalIDKey]
+		if externalID != nil && externalID.(string) == defaultGateway {
+			ovn.loadbalancerGWCache[string(protocol)] = lb.(map[string]interface{})["uuid"].(string)
+			return lb.(map[string]interface{})["uuid"].(string)
+		}
 	}
-	return lb
+
+	return ""
 }
 
 func (ovn *Controller) getLoadBalancerVIPS(
 	loadBalancer string) (map[string]interface{}, error) {
-	outStr, _, err := util.RunOVNNbctlHA("--data=bare", "--no-heading",
-		"get", "load_balancer", loadBalancer, "vips")
-	if err != nil {
-		return nil, err
+	lb := ovn.ovnNbCache.GetMap("Load_Balancer", "uuid", loadBalancer)
+	if lb == nil {
+		return nil, fmt.Errorf("Failed to get load balancer record for %s",
+			loadBalancer)
 	}
-	if outStr == "" {
-		return nil, nil
-	}
-	outStrMap := strings.Replace(outStr, "=", ":", -1)
 
-	var raw map[string]interface{}
-	err = json.Unmarshal([]byte(outStrMap), &raw)
-	if err != nil {
-		return nil, err
+	vips := lb["vips"]
+	if vips != nil {
+		return vips.(map[string]interface{}), nil
 	}
-	return raw, nil
+	return nil, nil
 }
 
-func (ovn *Controller) deleteLoadBalancerVIP(loadBalancer, vip string) {
-	vipQuotes := fmt.Sprintf("\"%s\"", vip)
-	stdout, stderr, err := util.RunOVNNbctlHA("--if-exists", "remove",
-		"load_balancer", loadBalancer, "vips", vipQuotes)
+func (ovn *Controller) deleteLoadBalancerVIP(loadBalancer, vipString string) {
+	lb := ovn.ovnNbCache.GetMap("Load_Balancer", "uuid", loadBalancer)
+	if lb == nil {
+		return
+	}
+
+	if lb["vips"] == nil {
+		return
+	}
+	vips := lb["vips"].(map[string]interface{})
+
+	for vip := range vips {
+		if vip == vipString {
+			delete(vips, vipString)
+		}
+	}
+
+	var err error
+	retry := true
+	for retry {
+		txn := ovn.ovnNBDB.Transaction("OVN_Northbound")
+		txn.Update(dbtransaction.Update{
+			Table: "Load_Balancer",
+			Where: [][]interface{}{{"_uuid", "==", []string{"uuid", loadBalancer}}},
+			Row: map[string]interface{}{
+				"vips": helpers.MakeOVSDBMap(vips),
+			},
+		})
+		_, err, retry = txn.Commit()
+	}
+
 	if err != nil {
 		logrus.Errorf("Error in deleting load balancer vip %s for %s"+
-			"stdout: %q, stderr: %q, error: %v",
-			vip, loadBalancer, stdout, stderr, err)
+			"error: %v", vipString, loadBalancer, err)
 	}
 }
 
@@ -96,13 +142,11 @@ func (ovn *Controller) createLoadBalancerVIP(lb string, serviceIP string, port i
 	logrus.Debugf("Creating lb with %s, %s, %d, [%v], %d", lb, serviceIP, port, ips, targetPort)
 
 	// With service_ip:port as a VIP, create an entry in 'load_balancer'
-	// key is of the form "IP:port" (with quotes around)
-	key := fmt.Sprintf("\"%s:%d\"", serviceIP, port)
+	key := fmt.Sprintf("%s:%d", serviceIP, port)
 
 	if len(ips) == 0 {
-		_, _, err := util.RunOVNNbctlHA("remove", "load_balancer", lb,
-			"vips", key)
-		return err
+		ovn.deleteLoadBalancerVIP(lb, key)
+		return nil
 	}
 
 	var commaSeparatedEndpoints string
@@ -113,13 +157,35 @@ func (ovn *Controller) createLoadBalancerVIP(lb string, serviceIP string, port i
 		}
 		commaSeparatedEndpoints += fmt.Sprintf("%s%s:%d", comma, ep, targetPort)
 	}
-	target := fmt.Sprintf("vips:\"%s:%d\"=\"%s\"", serviceIP, port, commaSeparatedEndpoints)
-
-	out, stderr, err := util.RunOVNNbctlHA("set", "load_balancer", lb,
-		target)
-	if err != nil {
-		logrus.Errorf("Error in creating load balancer: %s "+
-			"stdout: %q, stderr: %q, error: %v", lb, out, stderr, err)
+	lbOvsdb := ovn.ovnNbCache.GetMap("Load_Balancer", "uuid", lb)
+	if lbOvsdb == nil {
+		return fmt.Errorf("Failed to get Load_Balancer record for %s", lb)
 	}
-	return err
+
+	newVips := make(map[string]interface{})
+	if lbOvsdb["vips"] != nil {
+		newVips = lbOvsdb["vips"].(map[string]interface{})
+	}
+
+	newVips[key] = commaSeparatedEndpoints
+
+	var err error
+	retry := true
+	for retry {
+		txn := ovn.ovnNBDB.Transaction("OVN_Northbound")
+		txn.Update(dbtransaction.Update{
+			Table: "Load_Balancer",
+			Where: [][]interface{}{{"_uuid", "==", []string{"uuid", lb}}},
+			Row: map[string]interface{}{
+				"vips": helpers.MakeOVSDBMap(newVips),
+			},
+		})
+		_, err, retry = txn.Commit()
+	}
+
+	if err != nil {
+		return fmt.Errorf("Error in creating load balancer: %s "+
+			"error: %v", lb, err)
+	}
+	return nil
 }
