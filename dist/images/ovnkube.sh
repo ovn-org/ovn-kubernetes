@@ -600,6 +600,10 @@ ovn-master () {
   wait_for_event pid_ready ovn-northd.pid
   sleep 5
 
+  # wait for ovs-servers to start since ovn-master sets some fields in OVS DB
+  echo "=============== ovn-master - (wait for ovs)"
+  wait_for_event ovs_ready
+
   echo "=============== ovn-master ========== MASTER ONLY"
   /usr/bin/ovnkube \
     --init-master ${ovn_pod_host} --net-controller \
