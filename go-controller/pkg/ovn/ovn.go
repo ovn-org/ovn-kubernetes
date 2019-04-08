@@ -122,12 +122,13 @@ func dialNB() (*ovsdb.OVSDB, *dbcache.Cache) {
 				"Address_Set":    {"_uuid", "name", "external_ids"},
 				"Port_Group":     {"_uuid", "name", "acls", "ports"},
 				"Load_Balancer":  {"_uuid", "vips", "protocol", "external_ids"},
-				"Logical_Router": {"_uuid", "name", "options"},
+				"Logical_Router": {"_uuid", "name", "options", "external_ids"},
 			},
 			Indexes: map[string][]string{
 				"Logical_Switch_Port": {"name"},
 				"Logical_Switch":      {"name"},
 				"Address_Set":         {"name"},
+				"Logical_Router":      {"name"},
 				"Port_Group":          {"name"},
 			},
 		})
@@ -142,12 +143,13 @@ func dialNB() (*ovsdb.OVSDB, *dbcache.Cache) {
 					"ACL":            {"_uuid", "external_ids", "match", "action"},
 					"Address_Set":    {"_uuid", "name", "external_ids"},
 					"Load_Balancer":  {"_uuid", "vips", "protocol", "external_ids"},
-					"Logical_Router": {"_uuid", "name", "options"},
+					"Logical_Router": {"_uuid", "name", "options", "external_ids"},
 				},
 				Indexes: map[string][]string{
 					"Logical_Switch_Port": {"name"},
 					"Logical_Switch":      {"name"},
 					"Address_Set":         {"name"},
+					"Logical_Router":      {"name"},
 				},
 			})
 		}
