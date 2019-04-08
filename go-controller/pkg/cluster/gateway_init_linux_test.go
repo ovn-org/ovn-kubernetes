@@ -471,10 +471,10 @@ var _ = Describe("Gateway Init Operations", func() {
 			)
 
 			fakeCmds := ovntest.AddFakeCmdsNoOutputNoError(nil, []string{
-				"ovs-vsctl --timeout=15 --may-exist add-br br-localnet",
-				"ovs-vsctl --timeout=15 set Open_vSwitch . external_ids:ovn-bridge-mappings=" + util.PhysicalNetworkName + ":br-localnet",
-				"ip link set br-localnet up",
-				"ovs-vsctl --timeout=15 --may-exist add-port br-localnet br-nexthop -- set interface br-nexthop type=internal",
+				"ovs-vsctl --timeout=15 --may-exist add-br br-local",
+				"ovs-vsctl --timeout=15 set Open_vSwitch . external_ids:ovn-bridge-mappings=" + util.PhysicalNetworkName + ":br-local",
+				"ip link set br-local up",
+				"ovs-vsctl --timeout=15 --may-exist add-port br-local br-nexthop -- set interface br-nexthop type=internal",
 				"ip link set br-nexthop up",
 				"ip addr flush dev br-nexthop",
 				"ip addr add 169.254.33.1/24 dev br-nexthop",
@@ -508,12 +508,12 @@ var _ = Describe("Gateway Init Operations", func() {
 				"ovn-nbctl --timeout=15 --may-exist ls-add ext_" + nodeName,
 			})
 			fakeCmds = ovntest.AddFakeCmd(fakeCmds, &ovntest.ExpectedCmd{
-				Cmd:    "ovs-vsctl --timeout=15 --if-exists get interface br-localnet mac_in_use",
+				Cmd:    "ovs-vsctl --timeout=15 --if-exists get interface br-local mac_in_use",
 				Output: brLocalnetMAC,
 			})
 			fakeCmds = ovntest.AddFakeCmdsNoOutputNoError(fakeCmds, []string{
-				"ovs-vsctl --timeout=15 set bridge br-localnet other-config:hwaddr=" + brLocalnetMAC,
-				"ovn-nbctl --timeout=15 -- --may-exist lsp-add ext_" + nodeName + " br-localnet_" + nodeName + " -- lsp-set-addresses br-localnet_" + nodeName + " unknown -- lsp-set-type br-localnet_" + nodeName + " localnet -- lsp-set-options br-localnet_" + nodeName + " network_name=" + util.PhysicalNetworkName,
+				"ovs-vsctl --timeout=15 set bridge br-local other-config:hwaddr=" + brLocalnetMAC,
+				"ovn-nbctl --timeout=15 -- --may-exist lsp-add ext_" + nodeName + " br-local_" + nodeName + " -- lsp-set-addresses br-local_" + nodeName + " unknown -- lsp-set-type br-local_" + nodeName + " localnet -- lsp-set-options br-local_" + nodeName + " network_name=" + util.PhysicalNetworkName,
 				"ovn-nbctl --timeout=15 -- --may-exist lrp-add " + gwRouter + " rtoe-" + gwRouter + " " + brLocalnetMAC + " 169.254.33.2/24 -- set logical_router_port rtoe-" + gwRouter + " external-ids:gateway-physical-ip=yes",
 				"ovn-nbctl --timeout=15 -- --may-exist lsp-add ext_" + nodeName + " etor-" + gwRouter + " -- set logical_switch_port etor-" + gwRouter + " type=router options:router-port=rtoe-" + gwRouter + " addresses=\"" + brLocalnetMAC + "\"",
 				"ovn-nbctl --timeout=15 --may-exist lr-route-add " + gwRouter + " 0.0.0.0/0 169.254.33.1 rtoe-" + gwRouter,

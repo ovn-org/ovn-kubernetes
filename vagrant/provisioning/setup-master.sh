@@ -214,7 +214,7 @@ if [ "$DAEMONSET" != "true" ]; then
    -nodeport \
    -nb-address="$ovn_nb" \
    -sb-address="$ovn_sb" \
-   -init-gateways -gateway-localnet \
+   -init-gateways -gateway-local \
    ${SSL_ARGS} 2>&1 &
 else
   # Daemonset is enabled.

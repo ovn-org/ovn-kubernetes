@@ -114,7 +114,7 @@ ovn_controller_opts=${OVN_CONTROLLER_OPTS:-""}
 ovnkube_loglevel=${OVNKUBE_LOGLEVEL:-4}
 
 #OVN_GATEWAY_OPTS=""
-ovn_gateway_opts=${OVN_GATEWAY_OPTS:-"--gateway-localnet"}
+ovn_gateway_opts=${OVN_GATEWAY_OPTS:-"--gateway-local"}
 
 net_cidr=${OVN_NET_CIDR:-10.128.0.0/14/23}
 svc_cidr=${OVN_SVC_CIDR:-172.30.0.0/16}
@@ -678,7 +678,7 @@ ovn-node () {
 
   echo "=============== ovn-node   --init-node"
   # TEMP HACK - WORKAROUND
-  # --init-gateways --gateway-localnet works around a problem that
+  # --init-gateways --gateway-local works around a problem that
   # results in loss of network connectivity when docker is
   # restarted or ovs daemonset is deleted.
   # TEMP HACK - WORKAROUND
@@ -770,7 +770,7 @@ start_ovn () {
   # ovn-node - all nodes
   echo  "=============== start ovn-node"
   # TEMP HACK - WORKAROUND
-  # --init-gateways --gateway-localnet works around a problem that
+  # --init-gateways --gateway-local works around a problem that
   # results in loss of network connectivity when docker is
   # restarted or ovs daemonset is deleted.
   # TEMP HACK - WORKAROUND
