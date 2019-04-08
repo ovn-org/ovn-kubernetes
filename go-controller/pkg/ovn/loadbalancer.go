@@ -88,13 +88,8 @@ func (ovn *Controller) getDefaultGatewayLoadBalancer(protocol kapi.Protocol) str
 
 func (ovn *Controller) getLoadBalancerVIPS(
 	loadBalancer string) (map[string]interface{}, error) {
-	lb := ovn.ovnNbCache.GetMap("Load_Balancer", "uuid", loadBalancer)
-	if lb == nil {
-		return nil, fmt.Errorf("Failed to get load balancer record for %s",
-			loadBalancer)
-	}
+	vips := ovn.ovnNbCache.GetMap("Load_Balancer", "uuid", loadBalancer)["vips"]
 
-	vips := lb["vips"]
 	if vips != nil {
 		return vips.(map[string]interface{}), nil
 	}
@@ -103,9 +98,6 @@ func (ovn *Controller) getLoadBalancerVIPS(
 
 func (ovn *Controller) deleteLoadBalancerVIP(loadBalancer, vipString string) {
 	lb := ovn.ovnNbCache.GetMap("Load_Balancer", "uuid", loadBalancer)
-	if lb == nil {
-		return
-	}
 
 	if lb["vips"] == nil {
 		return
@@ -158,7 +150,7 @@ func (ovn *Controller) createLoadBalancerVIP(lb string, serviceIP string, port i
 		commaSeparatedEndpoints += fmt.Sprintf("%s%s:%d", comma, ep, targetPort)
 	}
 	lbOvsdb := ovn.ovnNbCache.GetMap("Load_Balancer", "uuid", lb)
-	if lbOvsdb == nil {
+	if len(lbOvsdb) == 0 {
 		return fmt.Errorf("Failed to get Load_Balancer record for %s", lb)
 	}
 
