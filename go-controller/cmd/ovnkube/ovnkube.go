@@ -198,7 +198,7 @@ func runOvnKube(ctx *cli.Context) error {
 		clusterController.GatewayIntf = ctx.String("gateway-interface")
 		clusterController.GatewayNextHop = ctx.String("gateway-nexthop")
 		clusterController.GatewaySpareIntf = ctx.Bool("gateway-spare-interface")
-		clusterController.LocalnetGateway = ctx.Bool("gateway-localnet")
+		clusterController.LocalnetGateway = ctx.Bool("gateway-local")
 		clusterController.GatewayVLANID = ctx.Uint("gateway-vlanid")
 		clusterController.OvnHA = ctx.Bool("ha")
 

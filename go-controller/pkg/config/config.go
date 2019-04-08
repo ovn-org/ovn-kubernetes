@@ -446,8 +446,8 @@ var OVNGatewayFlags = []cli.Flag{
 			"related traffic can flow through this interface",
 	},
 	cli.BoolFlag{
-		Name: "gateway-localnet",
-		Usage: "If true, creates a localnet gateway to let traffic reach " +
+		Name: "gateway-local",
+		Usage: "If true, creates a local gateway (br-local) to let traffic reach " +
 			"host network and also exit host with iptables NAT",
 	},
 	cli.UintFlag{

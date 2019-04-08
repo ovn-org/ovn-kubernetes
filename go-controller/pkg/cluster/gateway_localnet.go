@@ -97,7 +97,7 @@ func initLocalnetGateway(nodeName string, clusterIPSubnet []string,
 func initLocalnetGatewayInternal(nodeName string, clusterIPSubnet []string,
 	subnet string, ipt util.IPTablesHelper, nodePortEnable bool) error {
 	// Create a localnet OVS bridge.
-	localnetBridgeName := "br-localnet"
+	localnetBridgeName := "br-local"
 	_, stderr, err := util.RunOVSVsctl("--may-exist", "add-br",
 		localnetBridgeName)
 	if err != nil {
