@@ -114,21 +114,11 @@ func (ovn *Controller) syncServices(services []interface{}) {
 
 	// For each gateway, remove any VIP that does not exist in
 	// 'nodeportServices'.
-	gateways, stderr, err := ovn.getOvnGateways()
-	if err != nil {
-		logrus.Errorf("failed to get ovn gateways. Not syncing nodeport"+
-			"stdout: %q, stderr: %q (%v)", gateways, stderr, err)
-		return
-	}
+	gateways := ovn.getOvnGateways()
 
 	for _, gateway := range gateways {
 		for _, protocol := range []string{TCP, UDP} {
-			loadBalancer, err := ovn.getGatewayLoadBalancer(gateway, protocol)
-			if err != nil {
-				logrus.Errorf("physical gateway %s does not have "+
-					"load_balancer (%v)", gateway, err)
-				continue
-			}
+			loadBalancer := ovn.getGatewayLoadBalancer(gateway, protocol)
 			if loadBalancer == "" {
 				continue
 			}

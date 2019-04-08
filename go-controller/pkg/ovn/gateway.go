@@ -1,43 +1,77 @@
 package ovn
 
 import (
-	"strings"
-
-	util "github.com/openvswitch/ovn-kubernetes/go-controller/pkg/util"
+	"fmt"
 	"github.com/sirupsen/logrus"
 )
 
-func (ovn *Controller) getOvnGateways() ([]string, string, error) {
+func (ovn *Controller) getOvnGateways() []string {
 	// Return all created gateways.
-	out, stderr, err := util.RunOVNNbctlHA("--data=bare", "--no-heading",
-		"--columns=name", "find",
-		"logical_router",
-		"options:chassis!=null")
-	return strings.Fields(out), stderr, err
+	var gateways []string
+	gatewayRecords := ovn.ovnNbCache.GetMap("Logical_Router", "uuid")
+	for _, gatewayRecord := range gatewayRecords {
+		options := gatewayRecord.(map[string]interface{})["options"]
+		if options == nil {
+			continue
+		}
+
+		chassis := options.(map[string]interface{})["chassis"]
+		if chassis == nil {
+			continue
+		}
+
+		gateways = append(gateways, gatewayRecord.(map[string]interface{})["name"].(string))
+	}
+
+	return gateways
 }
 
 func (ovn *Controller) getGatewayPhysicalIP(
 	physicalGateway string) (string, error) {
-	physicalIP, _, err := util.RunOVNNbctlHA("get", "logical_router",
-		physicalGateway, "external_ids:physical_ip")
-	if err != nil {
-		return "", err
+	gatewayRecord := ovn.ovnNbCache.GetMap("Logical_Router", "name",
+		physicalGateway)
+	if len(gatewayRecord) == 0 {
+		return "", fmt.Errorf("failed to get gateway record for gateway %s",
+			physicalGateway)
 	}
 
-	return physicalIP, nil
+	externalIds := gatewayRecord["external_ids"]
+	if externalIds == nil {
+		return "", fmt.Errorf("failed to get external_ids for gateway %s",
+			physicalGateway)
+	}
+
+	physicalIP := externalIds.(map[string]interface{})["physical_ip"]
+	if physicalIP == nil {
+		return "", fmt.Errorf("failed to get physical_ip for gateway %s",
+			physicalGateway)
+	}
+
+	return physicalIP.(string), nil
 }
 
 func (ovn *Controller) getGatewayLoadBalancer(physicalGateway,
-	protocol string) (string, error) {
+	protocol string) string {
 	externalIDKey := protocol + "_lb_gateway_router"
-	loadBalancer, _, err := util.RunOVNNbctlHA("--data=bare", "--no-heading",
-		"--columns=_uuid", "find", "load_balancer",
-		"external_ids:"+externalIDKey+"="+
-			physicalGateway)
-	if err != nil {
-		return "", err
+
+	lbRecords := ovn.ovnNbCache.GetMap("Load_Balancer", "uuid")
+	for _, lbRecord := range lbRecords {
+		externalIds := lbRecord.(map[string]interface{})["external_ids"]
+		if externalIds == nil {
+			continue
+		}
+
+		externalIDValue := externalIds.(map[string]interface{})[externalIDKey]
+		if externalIDValue == nil {
+			continue
+		}
+
+		if externalIDValue.(string) == physicalGateway {
+			return lbRecord.(map[string]interface{})["uuid"].(string)
+		}
 	}
-	return loadBalancer, nil
+
+	return ""
 }
 
 func (ovn *Controller) createGatewaysVIP(protocol string, port, targetPort int32, ips []string) error {
@@ -46,10 +80,7 @@ func (ovn *Controller) createGatewaysVIP(protocol string, port, targetPort int32
 
 	// Each gateway has a separate load-balancer for N/S traffic
 
-	physicalGateways, _, err := ovn.getOvnGateways()
-	if err != nil {
-		return err
-	}
+	physicalGateways := ovn.getOvnGateways()
 
 	for _, physicalGateway := range physicalGateways {
 		physicalIP, err := ovn.getGatewayPhysicalIP(physicalGateway)
@@ -59,13 +90,8 @@ func (ovn *Controller) createGatewaysVIP(protocol string, port, targetPort int32
 			continue
 		}
 
-		loadBalancer, err := ovn.getGatewayLoadBalancer(physicalGateway,
+		loadBalancer := ovn.getGatewayLoadBalancer(physicalGateway,
 			protocol)
-		if err != nil {
-			logrus.Errorf("physical gateway %s does not have load_balancer "+
-				"(%v)", physicalGateway, err)
-			continue
-		}
 		if loadBalancer == "" {
 			continue
 		}
