@@ -246,7 +246,11 @@ func (oc *Controller) addLogicalPort(pod *kapi.Pod) {
 
 		out, stderr, err = util.RunOVNNbctl("--may-exist", "lsp-add",
 			logicalSwitch, portName, "--", "lsp-set-addresses", portName,
-			fmt.Sprintf("%s %s", macAddress, ipAddress), "--", "--if-exists",
+			fmt.Sprintf("%s %s", macAddress, ipAddress), "--", "set",
+			"logical_switch_port", portName,
+			"external-ids:namespace="+pod.Namespace,
+			"external-ids:logical_switch="+logicalSwitch,
+			"external-ids:pod=true", "--", "--if-exists",
 			"clear", "logical_switch_port", portName, "dynamic_addresses")
 		if err != nil {
 			logrus.Errorf("Failed to add logical port to switch "+
