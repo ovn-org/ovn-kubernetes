@@ -93,22 +93,31 @@ const (
 func dialNB() (*ovsdb.OVSDB, *dbcache.Cache) {
 	var addrList [][]string
 
-	addr := strings.SplitN(config.OvnNorth.ClientAuth.OvnAddressForClient, ":", 2)
+	addresses := strings.Split(config.OvnNorth.ClientAuth.OvnAddressForClient,
+		",")
 
 	var options map[string]interface{}
+	var useSSL bool
+	for _, address := range addresses {
+		addr := strings.SplitN(address, ":", 2)
 
-	if addr[0] == "ssl" {
-		addr = append(addr, config.OvnNorth.ClientAuth.Cert)
-		addr = append(addr, config.OvnNorth.ClientAuth.PrivKey)
-		addr = append(addr, config.OvnNorth.ClientAuth.CACert)
+		if addr[0] == "ssl" {
+			addr = append(addr, config.OvnNorth.ClientAuth.Cert)
+			addr = append(addr, config.OvnNorth.ClientAuth.PrivKey)
+			addr = append(addr, config.OvnNorth.ClientAuth.CACert)
 
+			useSSL = true
+
+		}
+		addrList = append(addrList, addr)
+	}
+
+	if useSSL {
 		options = map[string]interface{}{
 			"ServerName":         "ovnnb id:ac380054-0a6b-4a3c-9f2d-16a9eb55a89f",
 			"InsecureSkipVerify": true,
 		}
 	}
-
-	addrList = append(addrList, addr)
 
 	nbCache := new(dbcache.Cache)
 	db := ovsdb.Dial(addrList, func(db *ovsdb.OVSDB) error {
