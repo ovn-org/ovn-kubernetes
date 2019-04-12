@@ -224,7 +224,7 @@ pid_ready () {
   pidfile=/var/run/openvswitch/${1}
   if [[ -f ${pidfile} ]] ; then
     pid=$(cat ${pidfile})
-    pidTest=$(ps ax | awk '{ print $1 }' | grep "${pid:-XX}")
+    pidTest=$(ps ax | awk '{ print $1 }' | grep "^${pid:-XX}$")
     if [[ ${pid:-XX} == ${pidTest} ]] ; then
       return 0
     fi
@@ -239,7 +239,7 @@ pid_ready () {
 pid_health () {
   pid=$(cat $1)
   while true; do
-    pidTest=$(ps ax | awk '{ print $1 }' | grep "${pid:-XX}")
+    pidTest=$(ps ax | awk '{ print $1 }' | grep "^${pid:-XX}$")
     if [[ ${pid:-XX} != ${pidTest} ]] ; then
       echo "=============== pid ${pid} terminated ========== "
       # kill the tail -f
