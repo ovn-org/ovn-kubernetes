@@ -228,32 +228,18 @@ else
   # cleanup /etc/hosts as it incorrectly maps the hostname to `127.0.1.1`
   sudo sed -i '/^127.0.1.1/d' /etc/hosts
 
-  # Make daemonset yamls
+  # Generate various OVN K8s yamls from the template files
   pushd $HOME/work/src/github.com/openvswitch/ovn-kubernetes/dist/images
-  make daemonsetyaml 1>&2 2>/dev/null
+  ./daemonset.sh --image=docker.io/ovnkube/ovn-daemonset-u:latest \
+  --net-cidr=192.168.0.0/16 --svc-cidr=172.16.1.0/24 \
+  --k8s-apiserver=https://$OVERLAY_IP:6443
   popd
 
   # label the master node for daemonsets
   kubectl label node k8smaster node-role.kubernetes.io/master=true --overwrite
 
-  # Create OVN namespace, service accounts, ovnkube-master headless service, and policies
+  # Create OVN namespace, service accounts, ovnkube-db headless service, configmap, and policies
   kubectl create -f $HOME/work/src/github.com/openvswitch/ovn-kubernetes/dist/yaml/ovn-setup.yaml
-
-  # Delete ovn config map that was created by default in ovn-setup.yaml
-  kubectl delete configmap ovn-config -n ovn-kubernetes
-
-  # Create ovn config map.
-  cat << EOF | kubectl create -f - > /dev/null 2>&1
-kind: ConfigMap
-apiVersion: v1
-metadata:
-  name: ovn-config
-  namespace: ovn-kubernetes
-data:
-  k8s_apiserver: "https://$OVERLAY_IP:6443"
-  net_cidr:      "192.168.0.0/16"
-  svc_cidr:      "172.16.1.0/24"
-EOF
 
   # Run ovnkube-db daemonset.
   kubectl create -f $HOME/work/src/github.com/openvswitch/ovn-kubernetes/dist/yaml/ovnkube-db.yaml
