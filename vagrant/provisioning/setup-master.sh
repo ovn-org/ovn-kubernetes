@@ -52,11 +52,6 @@ pushd /opt/cni/bin
 sudo tar xvzf ~/cni-amd64-v0.5.2.tgz
 popd
 sudo mkdir -p /etc/cni/net.d
-# Create a 99loopback.conf to have atleast one CNI config.
-echo '{
-    "cniVersion": "0.2.0",
-    "type": "loopback"
-}' | sudo tee /etc/cni/net.d/99loopback.conf
 
 # Add external repos to install docker, k8s and OVS from packages.
 sudo apt-get update
