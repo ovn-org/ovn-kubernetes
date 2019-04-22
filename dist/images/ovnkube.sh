@@ -88,8 +88,8 @@ ovn_daemonset_version=${OVN_DAEMONSET_VERSION:-"1"}
 # otherwise it is the container ID (useful for debugging).
 ovn_pod_host=$(hostname)
 
-# The ovs user id
-ovs_user_id=${OVS_USER_ID:-root:root}
+# The ovs user id, by default it is going to be root:root
+ovs_user_id=${OVS_USER_ID:-""}
 
 # ovs options
 ovs_options=${OVS_OPTIONS:-""}
@@ -394,8 +394,9 @@ ovs-server () {
       exit 1
   }
   trap quit SIGTERM
+  [ ${ovs_user_id:-XX} != "XX" ] && set "$@" --ovs-user ${ovs_user_id}
   /usr/share/openvswitch/scripts/ovs-ctl start --no-ovs-vswitchd \
-    --system-id=random --ovs-user=${ovs_user_id} ${ovs_options}
+    --system-id=random ${ovs_options} "$@"
 
   # Restrict the number of pthreads ovs-vswitchd creates to reduce the
   # amount of RSS it uses on hosts with many cores
@@ -406,7 +407,7 @@ ovs-server () {
       ovs-vsctl --no-wait set Open_vSwitch . other_config:n-handler-threads=10
   fi
   /usr/share/openvswitch/scripts/ovs-ctl start --no-ovsdb-server \
-    --system-id=random --ovs-user=${ovs_user_id} ${ovs_options}
+    --system-id=random ${ovs_options} "$@"
 
   # Ensure GENEVE's UDP port isn't firewalled
   /usr/share/openvswitch/scripts/ovs-ctl --protocol=udp --dport=6081 enable-protocol
