@@ -221,7 +221,9 @@ else
   PROTOCOL="tcp"
 
   # cleanup /etc/hosts as it incorrectly maps the hostname to `127.0.1.1`
+  # or `127.0.0.1`
   sudo sed -i '/^127.0.1.1/d' /etc/hosts
+  sudo sed -i  '/^127.0.0.1\tk8s/d' /etc/hosts
 
   # Generate various OVN K8s yamls from the template files
   pushd $HOME/work/src/github.com/openvswitch/ovn-kubernetes/dist/images
