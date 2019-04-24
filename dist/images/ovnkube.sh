@@ -149,7 +149,7 @@ wait_for_event () {
 ready_to_start_node () {
 
   # See if ep is available ...
-  ovn_master_host=$(kubectl --server=${K8S_APISERVER} --token=${k8s_token} --certificate-authority=${K8S_CACERT} get ep -n ovn-kubernetes ovnkube-master 2>/dev/null | grep 6642 | sed 's/:/ /' | awk '/ovnkube-master/{ print $2 }')
+  ovn_master_host=$(kubectl --server=${K8S_APISERVER} --token=${k8s_token} --certificate-authority=${K8S_CACERT} get ep -n openshift-ovn-kubernetes ovnkube-master 2>/dev/null | grep 6642 | sed 's/:/ /' | awk '/ovnkube-master/{ print $2 }')
   if [[ ${ovn_master_host} == "" ]] ; then
     # ... if not (we may be on the master) see if northd is up
     get_master_ovn_vars
