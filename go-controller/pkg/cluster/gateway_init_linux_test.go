@@ -549,8 +549,8 @@ var _ = Describe("Gateway Init Operations", func() {
 						"-i br-nexthop -m comment --comment from OVN to localhost -j ACCEPT",
 					},
 					"FORWARD": []string{
-						"-i br-nexthop -j ACCEPT",
 						"-o br-nexthop -m conntrack --ctstate RELATED,ESTABLISHED -j ACCEPT",
+						"-i br-nexthop -j ACCEPT",
 					},
 				},
 				"nat": {

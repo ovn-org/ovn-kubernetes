@@ -131,11 +131,11 @@ func (f *FakeIPTables) Insert(tableName, chainName string, pos int, rulespec ...
 	}
 	rule := strings.Join(rulespec, " ")
 	chain, _ := table.getChain(chainName)
-	if pos >= len(chain) {
+	if pos > len(chain) {
 		(*table)[chainName] = append(chain, rule)
 	} else {
-		first := append(chain[:pos-1], rule)
-		(*table)[chainName] = append(first, chain[pos-1:]...)
+		last := append([]string{rule}, chain[pos-1:]...)
+		(*table)[chainName] = append(chain[:pos-1], last...)
 	}
 	return nil
 }
