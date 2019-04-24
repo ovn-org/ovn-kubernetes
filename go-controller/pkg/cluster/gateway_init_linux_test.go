@@ -536,9 +536,15 @@ var _ = Describe("Gateway Init Operations", func() {
 			_, err = config.InitConfig(ctx, fexec, nil)
 			Expect(err).NotTo(HaveOccurred())
 
+			fakeClient := &fake.Clientset{}
+			stop := make(chan struct{})
+			wf, err := factory.NewWatchFactory(fakeClient, stop)
+			Expect(err).NotTo(HaveOccurred())
+			defer wf.Shutdown()
+
 			ipt, err := util.NewFakeWithProtocol(iptables.ProtocolIPv4)
 			Expect(err).NotTo(HaveOccurred())
-			err = initLocalnetGatewayInternal(nodeName, []string{clusterCIDR}, nodeSubnet, ipt, true)
+			err = initLocalnetGatewayInternal(nodeName, []string{clusterCIDR}, nodeSubnet, ipt, true, wf)
 			Expect(err).NotTo(HaveOccurred())
 
 			Expect(fexec.CommandCalls).To(Equal(len(fakeCmds)))
@@ -549,14 +555,20 @@ var _ = Describe("Gateway Init Operations", func() {
 						"-i br-nexthop -m comment --comment from OVN to localhost -j ACCEPT",
 					},
 					"FORWARD": []string{
+						"-j OVN-KUBE-NODEPORT",
 						"-o br-nexthop -m conntrack --ctstate RELATED,ESTABLISHED -j ACCEPT",
 						"-i br-nexthop -j ACCEPT",
 					},
+					"OVN-KUBE-NODEPORT": []string{},
 				},
 				"nat": {
 					"POSTROUTING": []string{
 						"-s 169.254.33.2/24 -j MASQUERADE",
 					},
+					"PREROUTING": []string{
+						"-j OVN-KUBE-NODEPORT",
+					},
+					"OVN-KUBE-NODEPORT": []string{},
 				},
 			}
 			Expect(ipt.MatchState(expectedTables)).NotTo(HaveOccurred())

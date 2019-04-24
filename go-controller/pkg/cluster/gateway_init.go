@@ -32,7 +32,7 @@ func (cluster *OvnClusterController) initGateway(
 	nodeName string, clusterIPSubnet []string, subnet string) error {
 	if cluster.LocalnetGateway {
 		return initLocalnetGateway(nodeName, clusterIPSubnet, subnet,
-			cluster.NodePortEnable)
+			cluster.NodePortEnable, cluster.watchFactory)
 	}
 
 	if cluster.GatewayNextHop == "" || cluster.GatewayIntf == "" {

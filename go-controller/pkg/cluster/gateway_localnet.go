@@ -4,16 +4,23 @@ package cluster
 
 import (
 	"fmt"
+	"k8s.io/client-go/tools/cache"
+	"reflect"
 	"strings"
 
 	"github.com/coreos/go-iptables/iptables"
+	"github.com/openvswitch/ovn-kubernetes/go-controller/pkg/factory"
 	"github.com/openvswitch/ovn-kubernetes/go-controller/pkg/util"
+	"github.com/sirupsen/logrus"
+
+	kapi "k8s.io/api/core/v1"
 )
 
 const (
 	localnetGatewayIP            = "169.254.33.2/24"
 	localnetGatewayNextHop       = "169.254.33.1"
 	localnetGatewayNextHopSubnet = "169.254.33.1/24"
+	iptableNodePortChain         = "OVN-KUBE-NODEPORT"
 )
 
 type iptRule struct {
@@ -34,6 +41,34 @@ func ensureChain(ipt util.IPTablesHelper, table, chain string) error {
 	}
 
 	return ipt.NewChain(table, chain)
+}
+
+func addIptRules(ipt util.IPTablesHelper, rules []iptRule) error {
+	for _, r := range rules {
+		if err := ensureChain(ipt, r.table, r.chain); err != nil {
+			return fmt.Errorf("failed to ensure %s/%s: %v", r.table, r.chain, err)
+		}
+		exists, err := ipt.Exists(r.table, r.chain, r.args...)
+		if !exists && err == nil {
+			err = ipt.Insert(r.table, r.chain, 1, r.args...)
+		}
+		if err != nil {
+			return fmt.Errorf("failed to add iptables %s/%s rule %q: %v",
+				r.table, r.chain, strings.Join(r.args, " "), err)
+		}
+	}
+
+	return nil
+}
+
+func delIptRules(ipt util.IPTablesHelper, rules []iptRule) {
+	for _, r := range rules {
+		err := ipt.Delete(r.table, r.chain, r.args...)
+		if err != nil {
+			logrus.Warningf("failed to delete iptables %s/%s rule %q: %v", r.table, r.chain,
+				strings.Join(r.args, " "), err)
+		}
+	}
 }
 
 func generateGatewayNATRules(ifname string, ip string) []iptRule {
@@ -67,35 +102,21 @@ func generateGatewayNATRules(ifname string, ip string) []iptRule {
 
 func localnetGatewayNAT(ipt util.IPTablesHelper, ifname, ip string) error {
 	rules := generateGatewayNATRules(ifname, ip)
-	for _, r := range rules {
-		if err := ensureChain(ipt, r.table, r.chain); err != nil {
-			return fmt.Errorf("failed to ensure %s/%s: %v", r.table, r.chain, err)
-		}
-		exists, err := ipt.Exists(r.table, r.chain, r.args...)
-		if !exists && err == nil {
-			err = ipt.Insert(r.table, r.chain, 1, r.args...)
-		}
-		if err != nil {
-			return fmt.Errorf("failed to add iptables %s/%s rule %q: %v",
-				r.table, r.chain, strings.Join(r.args, " "), err)
-		}
-	}
-
-	return nil
+	return addIptRules(ipt, rules)
 }
 
 func initLocalnetGateway(nodeName string, clusterIPSubnet []string,
-	subnet string, nodePortEnable bool) error {
+	subnet string, nodePortEnable bool, wf *factory.WatchFactory) error {
 	ipt, err := iptables.NewWithProtocol(iptables.ProtocolIPv4)
 	if err != nil {
 		return fmt.Errorf("failed to initialize iptables: %v", err)
 	}
 	return initLocalnetGatewayInternal(nodeName, clusterIPSubnet, subnet, ipt,
-		nodePortEnable)
+		nodePortEnable, wf)
 }
 
 func initLocalnetGatewayInternal(nodeName string, clusterIPSubnet []string,
-	subnet string, ipt util.IPTablesHelper, nodePortEnable bool) error {
+	subnet string, ipt util.IPTablesHelper, nodePortEnable bool, wf *factory.WatchFactory) error {
 	// Create a localnet OVS bridge.
 	localnetBridgeName := "br-local"
 	_, stderr, err := util.RunOVSVsctl("--may-exist", "add-br",
@@ -162,5 +183,134 @@ func initLocalnetGatewayInternal(nodeName string, clusterIPSubnet []string,
 			err)
 	}
 
+	if nodePortEnable {
+		return localnetNodePortWatcher(ipt, wf)
+	}
+
 	return nil
+}
+
+// AddService adds service and creates corresponding resources in OVN
+func localnetAddService(svc *kapi.Service) error {
+	if svc.Spec.Type != kapi.ServiceTypeNodePort {
+		return nil
+	}
+	ipt, err := iptables.NewWithProtocol(iptables.ProtocolIPv4)
+	if err != nil {
+		return fmt.Errorf("failed to initialize iptables: %v", err)
+	}
+	rules := make([]iptRule, 0)
+	for _, svcPort := range svc.Spec.Ports {
+		protocol := svcPort.Protocol
+		if protocol != kapi.ProtocolUDP && protocol != kapi.ProtocolTCP {
+			protocol = kapi.ProtocolTCP
+		}
+
+		nodePort := fmt.Sprintf("%d", svcPort.NodePort)
+		rules = append(rules, iptRule{
+			table: "nat",
+			chain: iptableNodePortChain,
+			args: []string{"-p", string(protocol), "--dport", nodePort, "-j", "DNAT", "--to-destination",
+				strings.Split(localnetGatewayIP, "/")[0] + ":" + nodePort},
+		})
+		rules = append(rules, iptRule{
+			table: "filter",
+			chain: iptableNodePortChain,
+			args:  []string{"-p", string(protocol), "--dport", nodePort, "-j", "ACCEPT"},
+		})
+	}
+
+	logrus.Debugf("Add rules %v for service %v", rules, svc.Name)
+	return addIptRules(ipt, rules)
+}
+
+func localnetDeleteService(svc *kapi.Service) error {
+	if svc.Spec.Type != kapi.ServiceTypeNodePort {
+		return nil
+	}
+	ipt, err := iptables.NewWithProtocol(iptables.ProtocolIPv4)
+	if err != nil {
+		return fmt.Errorf("failed to initialize iptables: %v", err)
+	}
+
+	rules := make([]iptRule, 0)
+	for _, svcPort := range svc.Spec.Ports {
+		protocol := svcPort.Protocol
+		if protocol != kapi.ProtocolUDP && protocol != kapi.ProtocolTCP {
+			protocol = kapi.ProtocolTCP
+		}
+
+		nodePort := fmt.Sprintf("%d", svcPort.NodePort)
+		rules = append(rules, iptRule{
+			table: "nat",
+			chain: iptableNodePortChain,
+			args: []string{"-p", string(protocol), "--dport", nodePort, "-j", "DNAT", "--to-destination",
+				strings.Split(localnetGatewayIP, "/")[0] + ":" + nodePort},
+		})
+		rules = append(rules, iptRule{
+			table: "filter",
+			chain: iptableNodePortChain,
+			args:  []string{"-p", string(protocol), "--dport", nodePort, "-j", "ACCEPT"},
+		})
+	}
+
+	logrus.Debugf("Delete rules %v for service %v", rules, svc.Name)
+	delIptRules(ipt, rules)
+	return nil
+}
+
+func localnetNodePortWatcher(ipt util.IPTablesHelper, wf *factory.WatchFactory) error {
+	// delete all the existing OVN-NODEPORT rules
+	// TODO: Add a localnetSyncService method to remove the stale entries only
+	_ = ipt.ClearChain("nat", iptableNodePortChain)
+	_ = ipt.ClearChain("filter", iptableNodePortChain)
+
+	rules := make([]iptRule, 0)
+	rules = append(rules, iptRule{
+		table: "nat",
+		chain: "PREROUTING",
+		args:  []string{"-j", iptableNodePortChain},
+	})
+	rules = append(rules, iptRule{
+		table: "filter",
+		chain: "FORWARD",
+		args:  []string{"-j", iptableNodePortChain},
+	})
+
+	if err := addIptRules(ipt, rules); err != nil {
+		return err
+	}
+
+	_, err := wf.AddServiceHandler(cache.ResourceEventHandlerFuncs{
+		AddFunc: func(obj interface{}) {
+			svc := obj.(*kapi.Service)
+			err := localnetAddService(svc)
+			if err != nil {
+				logrus.Errorf("Error in adding service: %v", err)
+			}
+		},
+		UpdateFunc: func(old, new interface{}) {
+			svcNew := new.(*kapi.Service)
+			svcOld := old.(*kapi.Service)
+			if reflect.DeepEqual(svcNew.Spec, svcOld.Spec) {
+				return
+			}
+			err := localnetDeleteService(svcOld)
+			if err != nil {
+				logrus.Errorf("Error in deleting service - %v", err)
+			}
+			err = localnetAddService(svcNew)
+			if err != nil {
+				logrus.Errorf("Error in modifying service: %v", err)
+			}
+		},
+		DeleteFunc: func(obj interface{}) {
+			svc := obj.(*kapi.Service)
+			err := localnetDeleteService(svc)
+			if err != nil {
+				logrus.Errorf("Error in deleting service - %v", err)
+			}
+		},
+	}, nil)
+	return err
 }
