@@ -17,6 +17,8 @@ COPY go-controller/ .
 # build the binaries
 RUN make
 
+FROM openshift/origin-cli AS cli
+
 FROM openshift/origin-base
 
 USER root
@@ -56,6 +58,9 @@ RUN mkdir -p /var/run/openvswitch && \
 COPY --from=builder /go-controller/_output/go/bin/ovnkube /usr/bin/
 COPY --from=builder /go-controller/_output/go/bin/ovn-kube-util /usr/bin/
 COPY --from=builder /go-controller/_output/go/bin/ovn-k8s-cni-overlay /usr/libexec/cni/ovn-k8s-cni-overlay
+
+COPY --from=cli /usr/bin/oc /usr/bin
+RUN ln -s /usr/bin/oc /usr/bin/kubectl
 
 # copy git commit number into image
 COPY .git/HEAD /root/.git/HEAD
