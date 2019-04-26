@@ -36,6 +36,7 @@
 # K8S_APISERVER - hostname:port (URL)of the real apiserver, not the service address
 # OVN_NET_CIDR - the network cidr
 # OVN_SVC_CIDR - the cluster-service-cidr
+# OVN_KUBERNETES_NAMESPACE - k8s namespace
 #
 # The following variables are optional and can override internally derived values.
 # OVN_NORTH - the full URL to the ovn northdb
@@ -119,6 +120,8 @@ ovn_gateway_opts=${OVN_GATEWAY_OPTS:-"--gateway-local"}
 net_cidr=${OVN_NET_CIDR:-10.128.0.0/14/23}
 svc_cidr=${OVN_SVC_CIDR:-172.30.0.0/16}
 
+ovn_kubernetes_namespace=${OVN_KUBERNETES_NAMESPACE:-ovn-kubernetes}
+
 # host on which ovnkube-db POD is running and this POD contains both
 # OVN NB and SB DB running in their own container
 ovn_db_host=""
@@ -157,7 +160,7 @@ ready_to_start_node () {
 
   # See if ep is available ...
   ovn_db_host=$(kubectl --server=${K8S_APISERVER} --token=${k8s_token} --certificate-authority=${K8S_CACERT} \
-    get ep -n ovn-kubernetes ovnkube-db 2>/dev/null | grep 6642 | sed 's/:/ /' | awk '/ovnkube-db/{ print $2 }')
+    get ep -n ${ovn_kubernetes_namespace} ovnkube-db 2>/dev/null | grep 6642 | sed 's/:/ /' | awk '/ovnkube-db/{ print $2 }')
   if [[ ${ovn_db_host} == "" ]] ; then
       return 1
   fi
@@ -429,7 +432,7 @@ ovs-server () {
 create_ovnkube_db_ep () {
   # delete any endpoint by name ovnkube-db
   kubectl --server=${K8S_APISERVER} --token=${k8s_token} --certificate-authority=${K8S_CACERT} \
-    delete ep -n ovn-kubernetes ovnkube-db 2>/dev/null
+    delete ep -n ${ovn_kubernetes_namespace} ovnkube-db 2>/dev/null
 
   # create a new endpoint for the headless onvkube-db service without selectors
   # using the current host has the endpoint IP
@@ -439,7 +442,7 @@ apiVersion: v1
 kind: Endpoints
 metadata:
   name: ovnkube-db
-  namespace: ovn-kubernetes
+  namespace: ${ovn_kubernetes_namespace}
 subsets:
   - addresses:
       - ip: ${ovn_db_host}
