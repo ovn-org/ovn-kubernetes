@@ -115,9 +115,11 @@ if [ -n "$SSL" ]; then
     # Install SSL certificates
     pushd /etc/openvswitch
     sudo ovs-pki -d /vagrant/pki init --force
-    sudo ovs-pki req ovnsb && sudo ovs-pki self-sign ovnsb
+    sudo ovs-pki req ovnsb
+    sudo ovs-pki -b -d /vagrant/pki sign ovnsb
 
-    sudo ovs-pki req ovnnb && sudo ovs-pki self-sign ovnnb
+    sudo ovs-pki req ovnnb
+    sudo ovs-pki -b -d /vagrant/pki sign ovnnb
 
     sudo ovs-pki req ovncontroller
     sudo ovs-pki -b -d /vagrant/pki sign ovncontroller switch
@@ -178,10 +180,10 @@ if [ "$DAEMONSET" != "true" ]; then
     /etc/openvswitch/ovnsb-cert.pem /vagrant/pki/switchca/cacert.pem
    SSL_ARGS="-nb-client-privkey /etc/openvswitch/ovncontroller-privkey.pem \
    -nb-client-cert /etc/openvswitch/ovncontroller-cert.pem \
-   -nb-client-cacert /etc/openvswitch/ovnnb-cert.pem \
+   -nb-client-cacert /vagrant/pki/switchca/cacert.pem \
    -sb-client-privkey /etc/openvswitch/ovncontroller-privkey.pem \
    -sb-client-cert /etc/openvswitch/ovncontroller-cert.pem \
-   -sb-client-cacert /etc/openvswitch/ovnsb-cert.pem"
+   -sb-client-cacert /vagrant/pki/switchca/cacert.pem"
   elif [ $PROTOCOL = "tcp" ]; then
    sudo ovn-nbctl set-connection ptcp:6641 -- set connection . inactivity_probe=0
    sudo ovn-sbctl set-connection ptcp:6642 -- set connection . inactivity_probe=0

@@ -150,10 +150,10 @@ if [ "$DAEMONSET" != "true" ]; then
   if [ $PROTOCOL = "ssl" ]; then
     SSL_ARGS="-nb-client-privkey /etc/openvswitch/ovncontroller-privkey.pem \
       -nb-client-cert /etc/openvswitch/ovncontroller-cert.pem \
-      -nb-client-cacert /etc/openvswitch/ovnnb-cert.pem \
+      -nb-client-cacert /vagrant/pki/switchca/cacert.pem \
       -sb-client-privkey /etc/openvswitch/ovncontroller-privkey.pem \
       -sb-client-cert /etc/openvswitch/ovncontroller-cert.pem \
-      -sb-client-cacert /etc/openvswitch/ovnsb-cert.pem"
+      -sb-client-cacert /vagrant/pki/switchca/cacert.pem"
   fi
  
   if [ "$HA" = "true" ]; then
