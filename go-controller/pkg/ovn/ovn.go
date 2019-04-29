@@ -252,7 +252,13 @@ func (oc *Controller) WatchNamespaces() error {
 // back the appropriate handler logic
 func (oc *Controller) WatchNodes() error {
 	_, err := oc.watchFactory.AddNodeHandler(cache.ResourceEventHandlerFuncs{
-		AddFunc:    func(obj interface{}) {},
+		AddFunc: func(obj interface{}) {
+			if !oc.nodePortEnable {
+				return
+			}
+			node := obj.(*kapi.Node)
+			oc.handleNodePortLB(node)
+		},
 		UpdateFunc: func(old, new interface{}) {},
 		DeleteFunc: func(obj interface{}) {
 			node := obj.(*kapi.Node)
