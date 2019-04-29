@@ -110,6 +110,27 @@ func generateGatewayIP() (string, error) {
 	return ipMask, nil
 }
 
+// getGatewayLoadBalancers find TCP UDP load-balancers from gateway router.
+func getGatewayLoadBalancers(gatewayRouter string) (string, string, error) {
+	lbTCP, stderr, err := RunOVNNbctl("--data=bare", "--no-heading",
+		"--columns=_uuid", "find", "load_balancer",
+		"external_ids:TCP_lb_gateway_router="+gatewayRouter)
+	if err != nil {
+		return "", "", fmt.Errorf("Failed to get gateway router %q TCP "+
+			"loadbalancer, stderr: %q, error: %v", gatewayRouter, stderr, err)
+	}
+
+	lbUDP, stderr, err := RunOVNNbctl("--data=bare", "--no-heading",
+		"--columns=_uuid", "find", "load_balancer",
+		"external_ids:UDP_lb_gateway_router="+gatewayRouter)
+	if err != nil {
+		return "", "", fmt.Errorf("Failed to get gateway router %q UDP "+
+			"loadbalancer, stderr: %q, error: %v", gatewayRouter, stderr, err)
+	}
+
+	return lbTCP, lbUDP, nil
+}
+
 // GatewayInit creates a gateway router for the local chassis.
 func GatewayInit(clusterIPSubnet []string, nodeName, nicIP, physicalInterface,
 	bridgeInterface, defaultGW, rampoutIPSubnet string, gatewayVLANId uint,
@@ -230,12 +251,9 @@ func GatewayInit(clusterIPSubnet []string, nodeName, nicIP, physicalInterface,
 		// Create 2 load-balancers for north-south traffic for each gateway
 		// router.  One handles UDP and another handles TCP.
 		var k8sNSLbTCP, k8sNSLbUDP string
-		k8sNSLbTCP, stderr, err = RunOVNNbctl("--data=bare", "--no-heading",
-			"--columns=_uuid", "find", "load_balancer",
-			"external_ids:TCP_lb_gateway_router="+gatewayRouter)
+		k8sNSLbTCP, k8sNSLbUDP, err = getGatewayLoadBalancers(gatewayRouter)
 		if err != nil {
-			return fmt.Errorf("Failed to get k8sNSLbTCP, stderr: %q, error: %v",
-				stderr, err)
+			return err
 		}
 		if k8sNSLbTCP == "" {
 			k8sNSLbTCP, stderr, err = RunOVNNbctl("--", "create",
@@ -246,14 +264,6 @@ func GatewayInit(clusterIPSubnet []string, nodeName, nicIP, physicalInterface,
 				return fmt.Errorf("Failed to create load balancer: "+
 					"stderr: %q, error: %v", stderr, err)
 			}
-		}
-
-		k8sNSLbUDP, stderr, err = RunOVNNbctl("--data=bare", "--no-heading",
-			"--columns=_uuid", "find", "load_balancer",
-			"external_ids:UDP_lb_gateway_router="+gatewayRouter)
-		if err != nil {
-			return fmt.Errorf("Failed to get k8sNSLbUDP, stderr: %q, error: %v",
-				stderr, err)
 		}
 		if k8sNSLbUDP == "" {
 			k8sNSLbUDP, stderr, err = RunOVNNbctl("--", "create",
