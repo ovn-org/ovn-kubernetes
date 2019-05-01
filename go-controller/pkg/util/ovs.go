@@ -201,16 +201,16 @@ func RunOVNNbctlUnix(args ...string) (string, string, error) {
 func RunOVNNbctlWithTimeout(timeout int, args ...string) (string, string,
 	error) {
 	var cmdArgs []string
-	if config.OvnNorth.ClientAuth.Scheme == config.OvnDBSchemeSSL {
+	if config.OvnNorth.Scheme == config.OvnDBSchemeSSL {
 		cmdArgs = []string{
-			fmt.Sprintf("--private-key=%s", config.OvnNorth.ClientAuth.PrivKey),
-			fmt.Sprintf("--certificate=%s", config.OvnNorth.ClientAuth.Cert),
-			fmt.Sprintf("--bootstrap-ca-cert=%s", config.OvnNorth.ClientAuth.CACert),
-			fmt.Sprintf("--db=%s", config.OvnNorth.ClientAuth.GetURL()),
+			fmt.Sprintf("--private-key=%s", config.OvnNorth.PrivKey),
+			fmt.Sprintf("--certificate=%s", config.OvnNorth.Cert),
+			fmt.Sprintf("--bootstrap-ca-cert=%s", config.OvnNorth.CACert),
+			fmt.Sprintf("--db=%s", config.OvnNorth.GetURL()),
 		}
-	} else if config.OvnNorth.ClientAuth.Scheme == config.OvnDBSchemeTCP {
+	} else if config.OvnNorth.Scheme == config.OvnDBSchemeTCP {
 		cmdArgs = []string{
-			fmt.Sprintf("--db=%s", config.OvnNorth.ClientAuth.GetURL()),
+			fmt.Sprintf("--db=%s", config.OvnNorth.GetURL()),
 		}
 	}
 

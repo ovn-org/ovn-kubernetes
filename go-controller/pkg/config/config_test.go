@@ -165,12 +165,12 @@ var _ = Describe("Config Operations", func() {
 			Expect(Kubernetes.Token).To(Equal(""))
 			Expect(Kubernetes.APIServer).To(Equal("http://localhost:8080"))
 
-			for _, a := range []*OvnDBAuth{OvnNorth.ClientAuth, OvnSouth.ClientAuth} {
+			for _, a := range []OvnAuthConfig{OvnNorth, OvnSouth} {
 				Expect(a.Scheme).To(Equal(OvnDBSchemeUnix))
 				Expect(a.PrivKey).To(Equal(""))
 				Expect(a.Cert).To(Equal(""))
 				Expect(a.CACert).To(Equal(""))
-				Expect(a.OvnAddressForClient).To(Equal(""))
+				Expect(a.Address).To(Equal(""))
 			}
 			return nil
 		}
@@ -225,17 +225,17 @@ var _ = Describe("Config Operations", func() {
 			Expect(Kubernetes.CACert).To(Equal(fname))
 			Expect(Kubernetes.Token).To(Equal("asadfasdfasrw3atr3r3rf33fasdaa3233"))
 
-			Expect(OvnNorth.ClientAuth.Scheme).To(Equal(OvnDBSchemeTCP))
-			Expect(OvnNorth.ClientAuth.PrivKey).To(Equal(""))
-			Expect(OvnNorth.ClientAuth.Cert).To(Equal(""))
-			Expect(OvnNorth.ClientAuth.CACert).To(Equal(""))
-			Expect(OvnNorth.ClientAuth.OvnAddressForClient).To(Equal("tcp:1.1.1.1:6441"))
+			Expect(OvnNorth.Scheme).To(Equal(OvnDBSchemeTCP))
+			Expect(OvnNorth.PrivKey).To(Equal(""))
+			Expect(OvnNorth.Cert).To(Equal(""))
+			Expect(OvnNorth.CACert).To(Equal(""))
+			Expect(OvnNorth.Address).To(Equal("tcp:1.1.1.1:6441"))
 
-			Expect(OvnSouth.ClientAuth.Scheme).To(Equal(OvnDBSchemeUnix))
-			Expect(OvnSouth.ClientAuth.PrivKey).To(Equal(""))
-			Expect(OvnSouth.ClientAuth.Cert).To(Equal(""))
-			Expect(OvnSouth.ClientAuth.CACert).To(Equal(""))
-			Expect(OvnSouth.ClientAuth.OvnAddressForClient).To(Equal(""))
+			Expect(OvnSouth.Scheme).To(Equal(OvnDBSchemeUnix))
+			Expect(OvnSouth.PrivKey).To(Equal(""))
+			Expect(OvnSouth.Cert).To(Equal(""))
+			Expect(OvnSouth.CACert).To(Equal(""))
+			Expect(OvnSouth.Address).To(Equal(""))
 
 			return nil
 		}
@@ -290,18 +290,18 @@ var _ = Describe("Config Operations", func() {
 			Expect(Kubernetes.CACert).To(Equal(fname))
 			Expect(Kubernetes.Token).To(Equal("asadfasdfasrw3atr3r3rf33fasdaa3233"))
 
-			Expect(OvnNorth.ClientAuth.Scheme).To(Equal(OvnDBSchemeTCP))
-			Expect(OvnNorth.ClientAuth.PrivKey).To(Equal(""))
-			Expect(OvnNorth.ClientAuth.Cert).To(Equal(""))
-			Expect(OvnNorth.ClientAuth.CACert).To(Equal(""))
-			Expect(OvnNorth.ClientAuth.OvnAddressForClient).To(
+			Expect(OvnNorth.Scheme).To(Equal(OvnDBSchemeTCP))
+			Expect(OvnNorth.PrivKey).To(Equal(""))
+			Expect(OvnNorth.Cert).To(Equal(""))
+			Expect(OvnNorth.CACert).To(Equal(""))
+			Expect(OvnNorth.Address).To(
 				Equal("tcp:1.1.1.1:6441,tcp:1.1.1.2:6641,tcp:1.1.1.3:6641"))
 
-			Expect(OvnSouth.ClientAuth.Scheme).To(Equal(OvnDBSchemeUnix))
-			Expect(OvnSouth.ClientAuth.PrivKey).To(Equal(""))
-			Expect(OvnSouth.ClientAuth.Cert).To(Equal(""))
-			Expect(OvnSouth.ClientAuth.CACert).To(Equal(""))
-			Expect(OvnSouth.ClientAuth.OvnAddressForClient).To(Equal(""))
+			Expect(OvnSouth.Scheme).To(Equal(OvnDBSchemeUnix))
+			Expect(OvnSouth.PrivKey).To(Equal(""))
+			Expect(OvnSouth.Cert).To(Equal(""))
+			Expect(OvnSouth.CACert).To(Equal(""))
+			Expect(OvnSouth.Address).To(Equal(""))
 
 			return nil
 		}
@@ -368,17 +368,17 @@ client-cacert=/path/to/sb-client-ca.crt
 			Expect(Kubernetes.Token).To(Equal("TG9yZW0gaXBzdW0gZ"))
 			Expect(Kubernetes.APIServer).To(Equal("https://1.2.3.4:6443"))
 
-			Expect(OvnNorth.ClientAuth.Scheme).To(Equal(OvnDBSchemeSSL))
-			Expect(OvnNorth.ClientAuth.PrivKey).To(Equal("/path/to/nb-client-private.key"))
-			Expect(OvnNorth.ClientAuth.Cert).To(Equal("/path/to/nb-client.crt"))
-			Expect(OvnNorth.ClientAuth.CACert).To(Equal("/path/to/nb-client-ca.crt"))
-			Expect(OvnNorth.ClientAuth.OvnAddressForClient).To(Equal("ssl:1.2.3.4:6641"))
+			Expect(OvnNorth.Scheme).To(Equal(OvnDBSchemeSSL))
+			Expect(OvnNorth.PrivKey).To(Equal("/path/to/nb-client-private.key"))
+			Expect(OvnNorth.Cert).To(Equal("/path/to/nb-client.crt"))
+			Expect(OvnNorth.CACert).To(Equal("/path/to/nb-client-ca.crt"))
+			Expect(OvnNorth.Address).To(Equal("ssl:1.2.3.4:6641"))
 
-			Expect(OvnSouth.ClientAuth.Scheme).To(Equal(OvnDBSchemeSSL))
-			Expect(OvnSouth.ClientAuth.PrivKey).To(Equal("/path/to/sb-client-private.key"))
-			Expect(OvnSouth.ClientAuth.Cert).To(Equal("/path/to/sb-client.crt"))
-			Expect(OvnSouth.ClientAuth.CACert).To(Equal("/path/to/sb-client-ca.crt"))
-			Expect(OvnSouth.ClientAuth.OvnAddressForClient).To(Equal("ssl:1.2.3.4:6642"))
+			Expect(OvnSouth.Scheme).To(Equal(OvnDBSchemeSSL))
+			Expect(OvnSouth.PrivKey).To(Equal("/path/to/sb-client-private.key"))
+			Expect(OvnSouth.Cert).To(Equal("/path/to/sb-client.crt"))
+			Expect(OvnSouth.CACert).To(Equal("/path/to/sb-client-ca.crt"))
+			Expect(OvnSouth.Address).To(Equal("ssl:1.2.3.4:6642"))
 
 			return nil
 		}
@@ -444,17 +444,17 @@ client-cacert=/path/to/sb-client-ca.crt
 			Expect(Kubernetes.Token).To(Equal("asdfasdfasdfasfd"))
 			Expect(Kubernetes.APIServer).To(Equal("https://4.4.3.2:8080"))
 
-			Expect(OvnNorth.ClientAuth.Scheme).To(Equal(OvnDBSchemeSSL))
-			Expect(OvnNorth.ClientAuth.PrivKey).To(Equal("/client/privkey"))
-			Expect(OvnNorth.ClientAuth.Cert).To(Equal("/client/cert"))
-			Expect(OvnNorth.ClientAuth.CACert).To(Equal("/client/cacert"))
-			Expect(OvnNorth.ClientAuth.OvnAddressForClient).To(Equal("ssl:6.5.4.3:6651"))
+			Expect(OvnNorth.Scheme).To(Equal(OvnDBSchemeSSL))
+			Expect(OvnNorth.PrivKey).To(Equal("/client/privkey"))
+			Expect(OvnNorth.Cert).To(Equal("/client/cert"))
+			Expect(OvnNorth.CACert).To(Equal("/client/cacert"))
+			Expect(OvnNorth.Address).To(Equal("ssl:6.5.4.3:6651"))
 
-			Expect(OvnSouth.ClientAuth.Scheme).To(Equal(OvnDBSchemeSSL))
-			Expect(OvnSouth.ClientAuth.PrivKey).To(Equal("/client/privkey2"))
-			Expect(OvnSouth.ClientAuth.Cert).To(Equal("/client/cert2"))
-			Expect(OvnSouth.ClientAuth.CACert).To(Equal("/client/cacert2"))
-			Expect(OvnSouth.ClientAuth.OvnAddressForClient).To(Equal("ssl:6.5.4.1:6652"))
+			Expect(OvnSouth.Scheme).To(Equal(OvnDBSchemeSSL))
+			Expect(OvnSouth.PrivKey).To(Equal("/client/privkey2"))
+			Expect(OvnSouth.Cert).To(Equal("/client/cert2"))
+			Expect(OvnSouth.CACert).To(Equal("/client/cacert2"))
+			Expect(OvnSouth.Address).To(Equal("ssl:6.5.4.1:6652"))
 
 			return nil
 		}
@@ -542,18 +542,18 @@ client-cacert=/path/to/sb-client-ca.crt
 			Expect(Kubernetes.Token).To(Equal("asdfasdfasdfasfd"))
 			Expect(Kubernetes.APIServer).To(Equal("https://4.4.3.2:8080"))
 
-			Expect(OvnNorth.ClientAuth.Scheme).To(Equal(OvnDBSchemeSSL))
-			Expect(OvnNorth.ClientAuth.PrivKey).To(Equal("/client/privkey"))
-			Expect(OvnNorth.ClientAuth.Cert).To(Equal("/client/cert"))
-			Expect(OvnNorth.ClientAuth.CACert).To(Equal("/client/cacert"))
-			Expect(OvnNorth.ClientAuth.OvnAddressForClient).To(
+			Expect(OvnNorth.Scheme).To(Equal(OvnDBSchemeSSL))
+			Expect(OvnNorth.PrivKey).To(Equal("/client/privkey"))
+			Expect(OvnNorth.Cert).To(Equal("/client/cert"))
+			Expect(OvnNorth.CACert).To(Equal("/client/cacert"))
+			Expect(OvnNorth.Address).To(
 				Equal("ssl:6.5.4.3:6651,ssl:6.5.4.4:6651,ssl:6.5.4.5:6651"))
 
-			Expect(OvnSouth.ClientAuth.Scheme).To(Equal(OvnDBSchemeSSL))
-			Expect(OvnSouth.ClientAuth.PrivKey).To(Equal("/client/privkey2"))
-			Expect(OvnSouth.ClientAuth.Cert).To(Equal("/client/cert2"))
-			Expect(OvnSouth.ClientAuth.CACert).To(Equal("/client/cacert2"))
-			Expect(OvnSouth.ClientAuth.OvnAddressForClient).To(
+			Expect(OvnSouth.Scheme).To(Equal(OvnDBSchemeSSL))
+			Expect(OvnSouth.PrivKey).To(Equal("/client/privkey2"))
+			Expect(OvnSouth.Cert).To(Equal("/client/cert2"))
+			Expect(OvnSouth.CACert).To(Equal("/client/cacert2"))
+			Expect(OvnSouth.Address).To(
 				Equal("ssl:6.5.4.1:6652,ssl:6.5.4.2:6652,ssl:6.5.4.3:6652"))
 
 			return nil
@@ -626,14 +626,20 @@ client-cacert=/path/to/sb-client-ca.crt
 				},
 			}
 
-			a, err := newOvnDBAuth(fexec, "ovn-nbctl", "ovn-nb", nbURL, keyFile, certFile, caFile)
+			cliConfig := &OvnAuthConfig{
+				Address: nbURL,
+				PrivKey: keyFile,
+				Cert:    certFile,
+				CACert:  caFile,
+			}
+			a, err := buildOvnAuth(fexec, true, cliConfig, &OvnAuthConfig{}, true)
 			Expect(err).NotTo(HaveOccurred())
 			Expect(a.Scheme).To(Equal(OvnDBSchemeSSL))
 			Expect(a.PrivKey).To(Equal(keyFile))
 			Expect(a.Cert).To(Equal(certFile))
 			Expect(a.CACert).To(Equal(caFile))
-			Expect(a.OvnAddressForClient).To(Equal("ssl:1.2.3.4:6641"))
-			Expect(a.ctlCmd).To(Equal("ovn-nbctl"))
+			Expect(a.Address).To(Equal("ssl:1.2.3.4:6641"))
+			Expect(a.northbound).To(BeTrue())
 			Expect(a.externalID).To(Equal("ovn-nb"))
 
 			Expect(a.GetURL()).To(Equal(nbURLOVN))
@@ -665,14 +671,20 @@ client-cacert=/path/to/sb-client-ca.crt
 				},
 			}
 
-			a, err := newOvnDBAuth(fexec, "ovn-sbctl", "ovn-remote", sbURL, keyFile, certFile, caFile)
+			cliConfig := &OvnAuthConfig{
+				Address: sbURL,
+				PrivKey: keyFile,
+				Cert:    certFile,
+				CACert:  caFile,
+			}
+			a, err := buildOvnAuth(fexec, false, cliConfig, &OvnAuthConfig{}, false)
 			Expect(err).NotTo(HaveOccurred())
 			Expect(a.Scheme).To(Equal(OvnDBSchemeSSL))
 			Expect(a.PrivKey).To(Equal(keyFile))
 			Expect(a.Cert).To(Equal(certFile))
 			Expect(a.CACert).To(Equal(caFile))
-			Expect(a.OvnAddressForClient).To(Equal("ssl:1.2.3.4:6642"))
-			Expect(a.ctlCmd).To(Equal("ovn-sbctl"))
+			Expect(a.Address).To(Equal("ssl:1.2.3.4:6642"))
+			Expect(a.northbound).To(BeFalse())
 			Expect(a.externalID).To(Equal("ovn-remote"))
 
 			Expect(a.GetURL()).To(Equal(sbURLOVN))
