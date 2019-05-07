@@ -25,6 +25,11 @@ func (ovn *Controller) AddEndpoints(ep *kapi.Endpoints) error {
 			ep.Name, ep.Namespace)
 		return nil
 	}
+	if !util.IsServiceIPSet(svc) {
+		logrus.Debugf("Skipping service %s due to clusterIP = %q",
+			svc.Name, svc.Spec.ClusterIP)
+		return nil
+	}
 	tcpPortMap := make(map[string]lbEndpoints)
 	udpPortMap := make(map[string]lbEndpoints)
 	for _, s := range ep.Subsets {
@@ -77,8 +82,8 @@ func (ovn *Controller) AddEndpoints(ep *kapi.Endpoints) error {
 						logrus.Errorf("Error in creating Cluster IP for svc %s, target port: %d - %v\n", svc.Name, targetPort, err)
 						continue
 					}
+					ovn.handleExternalIPs(svc, svcPort, ips, targetPort)
 				}
-				ovn.handleExternalIPs(svc, svcPort, ips, targetPort)
 			}
 		}
 	}
@@ -93,7 +98,8 @@ func (ovn *Controller) AddEndpoints(ep *kapi.Endpoints) error {
 						logrus.Errorf("Error in creating Node Port for svc %s, node port: %d - %v\n", svc.Name, svcPort.NodePort, err)
 						continue
 					}
-				} else if svc.Spec.Type == kapi.ServiceTypeNodePort || svc.Spec.Type == kapi.ServiceTypeClusterIP {
+				}
+				if svc.Spec.Type == kapi.ServiceTypeNodePort || svc.Spec.Type == kapi.ServiceTypeClusterIP {
 					var loadBalancer string
 					loadBalancer, err = ovn.getLoadBalancer(svcPort.Protocol)
 					if err != nil {
@@ -107,8 +113,8 @@ func (ovn *Controller) AddEndpoints(ep *kapi.Endpoints) error {
 						logrus.Errorf("Error in creating Cluster IP for svc %s, target port: %d - %v\n", svc.Name, targetPort, err)
 						continue
 					}
+					ovn.handleExternalIPs(svc, svcPort, ips, targetPort)
 				}
-				ovn.handleExternalIPs(svc, svcPort, ips, targetPort)
 			}
 		}
 	}
@@ -141,6 +147,9 @@ func (ovn *Controller) deleteEndpoints(ep *kapi.Endpoints) error {
 		// will fail.
 		logrus.Debugf("no service found for endpoint %s in namespace %s",
 			ep.Name, ep.Namespace)
+		return nil
+	}
+	if !util.IsServiceIPSet(svc) {
 		return nil
 	}
 	for _, svcPort := range svc.Spec.Ports {

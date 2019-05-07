@@ -29,6 +29,7 @@ type ExpectedCmd struct {
 func AddFakeCmd(fakeCmds []fakeexec.FakeCommandAction, expected *ExpectedCmd) []fakeexec.FakeCommandAction {
 	return append(fakeCmds, func(cmd string, args ...string) kexec.Cmd {
 		parts := strings.Split(expected.Cmd, " ")
+		gomega.Expect(len(parts)).To(gomega.BeNumerically(">=", 2))
 		gomega.Expect(cmd).To(gomega.Equal("/fake-bin/" + parts[0]))
 		gomega.Expect(strings.Join(args, " ")).To(gomega.Equal(strings.Join(parts[1:], " ")))
 		return &fakeexec.FakeCmd{

@@ -72,15 +72,16 @@ sudo apt-get install -y linux-image-extra-$(uname -r) linux-image-extra-virtual
 sudo apt-get install -y docker-engine
 sudo service docker start
 
-## Install OVS and dependencies
+## install packages that deliver ovs-pki and its dependencies
 sudo apt-get build-dep dkms
 sudo apt-get install python-six openssl -y
-
-sudo apt-get install openvswitch-datapath-dkms=2.9.2-1 -y
-sudo apt-get install openvswitch-switch=2.9.2-1 openvswitch-common=2.9.2-1 libopenvswitch=2.9.2-1 -y
+sudo apt-get install openvswitch-common libopenvswitch -y
+sudo apt-get install openvswitch-datapath-dkms -y
 
 if [ "$DAEMONSET" != "true" ]; then
-  sudo apt-get install ovn-common=2.9.2-1 ovn-host=2.9.2-1 -y
+  ## Install OVS and OVN components
+  sudo apt-get install openvswitch-switch
+  sudo apt-get install ovn-common ovn-host -y
 fi
 
 if [ -n "$SSL" ]; then
@@ -97,7 +98,7 @@ else
 fi
 
 if [ $HA = "true" ]; then
-    sudo apt-get install ovn-central=2.9.2-1 -y
+    sudo apt-get install ovn-central -y
 
     sudo /usr/share/openvswitch/scripts/ovn-ctl stop_nb_ovsdb
     sudo /usr/share/openvswitch/scripts/ovn-ctl stop_sb_ovsdb
@@ -149,10 +150,10 @@ if [ "$DAEMONSET" != "true" ]; then
   if [ $PROTOCOL = "ssl" ]; then
     SSL_ARGS="-nb-client-privkey /etc/openvswitch/ovncontroller-privkey.pem \
       -nb-client-cert /etc/openvswitch/ovncontroller-cert.pem \
-      -nb-client-cacert /etc/openvswitch/ovnnb-ca.cert \
+      -nb-client-cacert /vagrant/pki/switchca/cacert.pem \
       -sb-client-privkey /etc/openvswitch/ovncontroller-privkey.pem \
       -sb-client-cert /etc/openvswitch/ovncontroller-cert.pem \
-      -sb-client-cacert /etc/openvswitch/ovnsb-ca.cert"
+      -sb-client-cacert /vagrant/pki/switchca/cacert.pem"
   fi
  
   if [ "$HA" = "true" ]; then
@@ -165,7 +166,7 @@ if [ "$DAEMONSET" != "true" ]; then
 
   TOKEN=`sudo cat /vagrant/token`
 
-  nohup sudo ovnkube -loglevel=4 -logfile="/var/log/openvswitch/ovnkube.log" \
+  nohup sudo ovnkube -loglevel=4 -logfile="/var/log/ovn-kubernetes/ovnkube.log" \
       -k8s-apiserver="https://$MASTER1:6443" \
       -k8s-cacert=/etc/kubernetes/pki/ca.crt \
       -k8s-token="$TOKEN" \

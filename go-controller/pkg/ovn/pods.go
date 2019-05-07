@@ -8,6 +8,7 @@ import (
 	util "github.com/openvswitch/ovn-kubernetes/go-controller/pkg/util"
 	"github.com/sirupsen/logrus"
 	kapi "k8s.io/api/core/v1"
+	"k8s.io/apimachinery/pkg/util/wait"
 )
 
 func (oc *Controller) syncPods(pods []interface{}) {
@@ -181,6 +182,39 @@ func (oc *Controller) deleteLogicalPort(pod *kapi.Pod) {
 	return
 }
 
+func (oc *Controller) waitForNodeLogicalSwitch(nodeName string) error {
+	oc.lsMutex.Lock()
+	ok := oc.logicalSwitchCache[nodeName]
+	oc.lsMutex.Unlock()
+	// Fast return if we already have the node switch in our cache
+	if ok {
+		return nil
+	}
+
+	// Otherwise wait for the node logical switch to be created by the ClusterController.
+	// The node switch will be created very soon after startup so we should
+	// only be waiting here once per node at most.
+	if err := wait.PollImmediate(500*time.Millisecond, 30*time.Second, func() (bool, error) {
+		if _, _, err := util.RunOVNNbctl("get", "logical_switch", nodeName, "other-config"); err != nil {
+			return false, nil
+		}
+		return true, nil
+	}); err != nil {
+		logrus.Errorf("timed out waiting for node %q logical switch: %v", nodeName, err)
+		return err
+	}
+
+	oc.lsMutex.Lock()
+	defer oc.lsMutex.Unlock()
+	if !oc.logicalSwitchCache[nodeName] {
+		if err := oc.addAllowACLFromNode(nodeName); err != nil {
+			return err
+		}
+		oc.logicalSwitchCache[nodeName] = true
+	}
+	return nil
+}
+
 func (oc *Controller) addLogicalPort(pod *kapi.Pod) {
 	var out, stderr string
 	var err error
@@ -195,12 +229,9 @@ func (oc *Controller) addLogicalPort(pod *kapi.Pod) {
 		return
 	}
 
-	oc.lsMutex.Lock()
-	if !oc.logicalSwitchCache[logicalSwitch] {
-		oc.logicalSwitchCache[logicalSwitch] = true
-		oc.addAllowACLFromNode(logicalSwitch)
+	if err = oc.waitForNodeLogicalSwitch(pod.Spec.NodeName); err != nil {
+		return
 	}
-	oc.lsMutex.Unlock()
 
 	portName := fmt.Sprintf("%s_%s", pod.Namespace, pod.Name)
 	logrus.Debugf("Creating logical port for %s on switch %s", portName, logicalSwitch)
@@ -215,7 +246,11 @@ func (oc *Controller) addLogicalPort(pod *kapi.Pod) {
 
 		out, stderr, err = util.RunOVNNbctl("--may-exist", "lsp-add",
 			logicalSwitch, portName, "--", "lsp-set-addresses", portName,
-			fmt.Sprintf("%s %s", macAddress, ipAddress), "--", "--if-exists",
+			fmt.Sprintf("%s %s", macAddress, ipAddress), "--", "set",
+			"logical_switch_port", portName,
+			"external-ids:namespace="+pod.Namespace,
+			"external-ids:logical_switch="+logicalSwitch,
+			"external-ids:pod=true", "--", "--if-exists",
 			"clear", "logical_switch_port", portName, "dynamic_addresses")
 		if err != nil {
 			logrus.Errorf("Failed to add logical port to switch "+

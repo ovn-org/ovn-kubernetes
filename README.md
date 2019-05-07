@@ -88,6 +88,14 @@ in a database.  Start this central component on one of the nodes where you
 have started your k8s central daemons and which has an IP address of
 $CENTRAL_IP.  (For HA of the central component, please read [HA.md])
 
+Run the following commands to open up TCP port for OVN Northbound and Southbound
+ovsdb-server. The clients will connect to the respective database at its port.
+
+```
+ovn-nbctl set-connection ptcp:6641
+ovn-sbctl set-connection ptcp:6642
+```
+
 Start ovn-northd daemon.  This daemon translates networking intent from k8s
 stored in the OVN_Northbound database to logical flows in OVN_Southbound
 database.
@@ -119,18 +127,18 @@ uses the hostname.  kubelet allows this name to be overridden with
  nohup sudo ovnkube -k8s-kubeconfig kubeconfig.yaml -net-controller \
  -loglevel=4 \
  -k8s-apiserver="http://$CENTRAL_IP:8080" \
- -logfile="/var/log/openvswitch/ovnkube.log" \
+ -logfile="/var/log/ovn-kubernetes/ovnkube.log" \
  -init-master=$NODE_NAME -init-node=$NODE_NAME \
  -cluster-subnet="$CLUSTER_IP_SUBNET" \
  -service-cluster-ip-range=$SERVICE_IP_SUBNET \
  -nodeport \
- -init-gateways -gateway-localnet \
+ -init-gateways -gateway-local \
  -k8s-token="$TOKEN" \
  -nb-address="tcp://$CENTRAL_IP:6641" \
  -sb-address="tcp://$CENTRAL_IP:6642" 2>&1 &
 ```
 
-Note: Make sure to read /var/log/openvswitch/ovnkube.log to see that there were
+Note: Make sure to read /var/log/ovn-kubernetes/ovnkube.log to see that there were
 no obvious errors with argument passing.  Also, you should only pass
 "-init-node" argument if there is a kubelet running on the master node too.
 
@@ -160,7 +168,7 @@ below command.
 
 ```
 nohup sudo ovnkube -k8s-kubeconfig kubeconfig.yaml -loglevel=4 \
-    -logfile="/var/log/openvswitch/ovnkube.log" \
+    -logfile="/var/log/ovn-kubernetes/ovnkube.log" \
     -k8s-apiserver="http://$CENTRAL_IP:8080" \
     -init-node="$NODE_NAME"  \
     -nodeport \
@@ -171,7 +179,7 @@ nohup sudo ovnkube -k8s-kubeconfig kubeconfig.yaml -loglevel=4 \
     -cluster-subnet=$CLUSTER_IP_SUBNET 2>&1 &
 ```
 
-Note: Make sure to read /var/log/openvswitch/ovnkube.log to see that there were
+Note: Make sure to read /var/log/ovn-kubernetes/ovnkube.log to see that there were
 no obvious errors with argument passing.
 
 Notes on gateway nodes:

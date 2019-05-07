@@ -1,6 +1,6 @@
 # build image for ovn overlay network cni plugin
 
-# Both ovnkube.yaml and onvkube-master.yaml use this image.
+# ovnkube-db.yaml, ovnkube-node.yaml, and onvkube-master.yaml use this image.
 # This image is built from files in this directory and pushed to
 # a docker registry that is accesseble on each node.
 
@@ -8,20 +8,25 @@
 # The registry is configured in /etc/containers/registries.conf
 # on each node in both "registries:" and "insecure_registries:" sections.
 
-all: bld daemonsetyaml
-	docker build -t ovn-daemonset .
+all: bld
+	docker build -t ovn-kube-u -f Dockerfile.ubuntu .
 	# This is the default in the ovnkube*.yaml files
+	# docker login -u ovnkube docker.io/ovnkube
+	# docker push docker.io/ovnkube/ovn-daemonset-u:latest
+	./daemonset.sh --image=docker.io/ovnkube/ovn-daemonset-u:latest
+
+centos: bld
+	docker build -t ovn-daemonset .
 	docker tag ovn-daemonset docker.io/ovnkube/ovn-daemonset:latest
 	# docker login -u ovnkube docker.io/ovnkube
 	# docker push docker.io/ovnkube/ovn-daemonset:latest
+	./daemonset.sh --image=docker.io/ovnkube/ovn-daemonset:latest
 
-fedora: bld daemonsetyaml
+fedora: bld
 	docker build -t ovn-kube-f -f Dockerfile.fedora .
-	#docker tag ovn-kube-f my-registry:5000/ovn-kube:latest
-	#docker push my-registry:5000/ovn-kube:latest
-
-ubuntu: bld daemonsetyaml
-	docker build -t ovn-kube-u -f Dockerfile.ubuntu .
+	# docker login -u ovnkube docker.io/ovnkube
+	# docker push docker.io/ovnkube/ovn-daemonset-f:latest
+	./daemonset.sh --image=docker.io/ovnkube/ovn-daemonset-f:latest
 
 # This target expands the daemonset yaml templates into final form
 # It gets the image name from ../ansible/hosts

@@ -18,6 +18,9 @@ type OvnClusterController struct {
 	watchFactory              *factory.WatchFactory
 	masterSubnetAllocatorList []*netutils.SubnetAllocator
 
+	TCPLoadBalancerUUID string
+	UDPLoadBalancerUUID string
+
 	ClusterServicesSubnet string
 	ClusterIPNet          []CIDRNetworkEntry
 
@@ -26,6 +29,7 @@ type OvnClusterController struct {
 	GatewayBridge    string
 	GatewayNextHop   string
 	GatewaySpareIntf bool
+	GatewayVLANID    uint
 	NodePortEnable   bool
 	OvnHA            bool
 	LocalnetGateway  bool
@@ -59,9 +63,7 @@ func NewClusterController(kubeClient kubernetes.Interface, wf *factory.WatchFact
 
 func setupOVNNode(nodeName string) error {
 	// Tell ovn-*bctl how to talk to the database
-	for _, auth := range []*config.OvnDBAuth{
-		config.OvnNorth.ClientAuth,
-		config.OvnSouth.ClientAuth} {
+	for _, auth := range []config.OvnAuthConfig{config.OvnNorth, config.OvnSouth} {
 		if err := auth.SetDBAuth(); err != nil {
 			return err
 		}
@@ -97,11 +99,7 @@ func setupOVNNode(nodeName string) error {
 
 func setupOVNMaster(nodeName string) error {
 	// Configure both server and client of OVN databases, since master uses both
-	for _, auth := range []*config.OvnDBAuth{
-		config.OvnNorth.ServerAuth,
-		config.OvnNorth.ClientAuth,
-		config.OvnSouth.ServerAuth,
-		config.OvnSouth.ClientAuth} {
+	for _, auth := range []config.OvnAuthConfig{config.OvnNorth, config.OvnSouth} {
 		if err := auth.SetDBAuth(); err != nil {
 			return err
 		}
