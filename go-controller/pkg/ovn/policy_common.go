@@ -174,37 +174,23 @@ const (
 	ipBlockDenyPriority = "1010"
 )
 
-func (oc *Controller) addAllowACLFromNode(logicalSwitch string) {
-	uuid, stderr, err := util.RunOVNNbctl("--data=bare", "--no-heading",
-		"--columns=_uuid", "find", "ACL",
-		fmt.Sprintf("external-ids:logical_switch=%s", logicalSwitch),
-		"external-ids:node-acl=yes")
-	if err != nil {
-		logrus.Errorf("find failed to get the node acl for "+
-			"logical_switch=%s, stderr: %q, (%v)", logicalSwitch, stderr, err)
-		return
-	}
-
-	if uuid != "" {
-		return
-	}
-
+func (oc *Controller) addAllowACLFromNode(logicalSwitch string) error {
 	subnet, stderr, err := util.RunOVNNbctl("get", "logical_switch",
 		logicalSwitch, "other-config:subnet")
 	if err != nil {
 		logrus.Errorf("failed to get the logical_switch %s subnet, "+
 			"stderr: %q (%v)", logicalSwitch, stderr, err)
-		return
+		return err
 	}
 
 	if subnet == "" {
-		return
+		return fmt.Errorf("logical_switch %q had no subnet", logicalSwitch)
 	}
 
 	ip, _, err := net.ParseCIDR(subnet)
 	if err != nil {
 		logrus.Errorf("failed to parse subnet %s", subnet)
-		return
+		return err
 	}
 
 	// K8s only supports IPv4 right now. The second IP address of the
@@ -213,19 +199,15 @@ func (oc *Controller) addAllowACLFromNode(logicalSwitch string) {
 	ip[3] = ip[3] + 2
 	address := ip.String()
 
-	match := fmt.Sprintf("match=\"ip4.src == %s\"", address)
-
-	_, stderr, err = util.RunOVNNbctl("--id=@acl", "create", "acl",
-		fmt.Sprintf("priority=%s", defaultAllowPriority),
-		"direction=to-lport", match, "action=allow-related",
-		fmt.Sprintf("external-ids:logical_switch=%s", logicalSwitch),
-		"external-ids:node-acl=yes",
-		"--", "add", "logical_switch", logicalSwitch, "acls", "@acl")
+	match := fmt.Sprintf("ip4.src==%s", address)
+	_, stderr, err = util.RunOVNNbctl("--may-exist", "acl-add", logicalSwitch,
+		"to-lport", defaultAllowPriority, match, "allow-related")
 	if err != nil {
 		logrus.Errorf("failed to create the node acl for "+
 			"logical_switch=%s, stderr: %q (%v)", logicalSwitch, stderr, err)
-		return
 	}
+
+	return err
 }
 
 func (oc *Controller) syncNetworkPolicies(networkPolicies []interface{}) {

@@ -249,21 +249,45 @@ func BridgeToNic(bridge string) error {
 		return err
 	}
 
+	// for every bridge interface that is of type "patch", find the peer
+	// interface and delete that interface from the integration bridge
+	stdout, stderr, err := RunOVSVsctl("list-ifaces", bridge)
+	if err != nil {
+		logrus.Errorf("Failed to get interfaces for OVS bridge: %q, "+
+			"stderr: %q, error: %v", bridge, stderr, err)
+		return err
+	}
+	ifacesList := strings.Split(strings.TrimSpace(stdout), "\n")
+	for _, iface := range ifacesList {
+		stdout, stderr, err = RunOVSVsctl("get", "interface", iface, "type")
+		if err != nil {
+			logrus.Warnf("Failed to determine the type of interface: %q, "+
+				"stderr: %q, error: %v", iface, stderr, err)
+			continue
+		} else if stdout != "patch" {
+			continue
+		}
+		stdout, stderr, err = RunOVSVsctl("get", "interface", iface, "options:peer")
+		if err != nil {
+			logrus.Warnf("Failed to get the peer port for patch interface: %q, "+
+				"stderr: %q, error: %v", iface, stderr, err)
+			continue
+		}
+		// stdout has the peer interface, just delete it
+		peer := strings.TrimSpace(stdout)
+		_, stderr, err = RunOVSVsctl("--if-exists", "del-port", "br-int", peer)
+		if err != nil {
+			logrus.Warnf("Failed to delete patch port %q on br-int, "+
+				"stderr: %q, error: %v", peer, stderr, err)
+		}
+	}
+
 	// Now delete the bridge
-	stdout, stderr, err := RunOVSVsctl("--", "--if-exists", "del-br", bridge)
+	stdout, stderr, err = RunOVSVsctl("--", "--if-exists", "del-br", bridge)
 	if err != nil {
 		logrus.Errorf("Failed to delete OVS bridge, stdout: %q, stderr: %q, error: %v", stdout, stderr, err)
 		return err
 	}
 	logrus.Infof("Successfully deleted OVS bridge %q", bridge)
-
-	// Now delete the patch port on the integration bridge, if present
-	stdout, stderr, err = RunOVSVsctl("--", "--if-exists", "del-port", "br-int",
-		fmt.Sprintf("k8s-patch-br-int-%s", bridge))
-	if err != nil {
-		logrus.Errorf("Failed to delete patch port on br-int, stdout: %q, stderr: %q, error: %v", stdout, stderr, err)
-		return err
-	}
-
 	return nil
 }

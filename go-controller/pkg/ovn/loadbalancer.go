@@ -45,7 +45,7 @@ func (ovn *Controller) getDefaultGatewayLoadBalancer(protocol kapi.Protocol) str
 	var gw string
 	gw, _, _ = util.RunOVNNbctl("--data=bare",
 		"--no-heading", "--columns=name", "find", "logical_router",
-		"options:lb_force_snat_ip=100.64.1.2")
+		"options:lb_force_snat_ip=100.64.0.2")
 	if len(gw) == 0 {
 		logrus.Errorf("Error locating default gateway")
 		return ""

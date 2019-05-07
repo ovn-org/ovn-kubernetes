@@ -32,8 +32,8 @@
   changed_when: false
 
 - name: Kubernetes global vars | Fetch vars
-  fetch:
-    fail_on_missing: yes
-    flat: yes
+  synchronize:
+    mode: pull
     src: /tmp/generated_global_vars.yml
     dest: "{{ansible_tmp_dir}}/generated_global_vars.yml"
+    use_ssh_args: yes

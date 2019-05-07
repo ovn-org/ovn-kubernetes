@@ -146,8 +146,10 @@ func syncServices(services []interface{}, gwBridge, gwIntf string) {
 	}
 }
 
-func nodePortWatcher(gwBridge, gwIntf string, wf *factory.WatchFactory) error {
-	patchPort := "k8s-patch-" + gwBridge + "-br-int"
+func nodePortWatcher(nodeName, gwBridge, gwIntf string, wf *factory.WatchFactory) error {
+	// the name of the patch port created by ovn-controller is of the form
+	// patch-<logical_port_name_of_localnet_port>-to-br-int
+	patchPort := "patch-" + gwBridge + "_" + nodeName + "-to-br-int"
 	// Get ofport of patchPort
 	ofportPatch, stderr, err := util.RunOVSVsctl("--if-exists", "get",
 		"interface", patchPort, "ofport")
@@ -182,14 +184,18 @@ func nodePortWatcher(gwBridge, gwIntf string, wf *factory.WatchFactory) error {
 	return err
 }
 
-func addDefaultConntrackRules(gwBridge, gwIntf string) error {
-	patchPort := "k8s-patch-" + gwBridge + "-br-int"
-	// Get ofport of pathPort
-	ofportPatch, stderr, err := util.RunOVSVsctl("--if-exists", "get",
-		"interface", patchPort, "ofport")
+func addDefaultConntrackRules(nodeName, gwBridge, gwIntf string) error {
+	// the name of the patch port created by ovn-controller is of the form
+	// patch-<logical_port_name_of_localnet_port>-to-br-int
+	localnetLpName := gwBridge + "_" + nodeName
+	patchPort := "patch-" + localnetLpName + "-to-br-int"
+	// Get ofport of patchPort, but before that make sure ovn-controller created
+	// one for us (waits for about ovsCommandTimeout seconds)
+	ofportPatch, stderr, err := util.RunOVSVsctl("wait-until", "Interface", patchPort, "ofport>0",
+		"--", "get", "Interface", patchPort, "ofport")
 	if err != nil {
-		return fmt.Errorf("Failed to get ofport of %s, stderr: %q, error: %v",
-			patchPort, stderr, err)
+		return fmt.Errorf("Failed while waiting on patch port %q to be created by ovn-controller and "+
+			"while getting ofport. stderr: %q, error: %v", patchPort, stderr, err)
 	}
 
 	// Get ofport of physical interface
@@ -247,9 +253,31 @@ func addDefaultConntrackRules(gwBridge, gwIntf string) error {
 	return nil
 }
 
+func addStaticRouteToHost(nodeName, nicIP string) error {
+	k8sClusterRouter, err := util.GetK8sClusterRouter()
+	if err != nil {
+		return err
+	}
+
+	k8sMgmtIntfName := util.GetK8sMgmtIntfName(nodeName)
+	k8sMgmtIntfIPAddress, err := getIPv4Address(k8sMgmtIntfName)
+	if err != nil {
+		return fmt.Errorf("failed to get interface IP address for %s (%v)",
+			k8sMgmtIntfName, err)
+	}
+	prefix := strings.Split(nicIP, "/")[0] + "/32"
+	nexthop := strings.Split(k8sMgmtIntfIPAddress, "/")[0]
+	_, stderr, err := util.RunOVNNbctl("--may-exist", "lr-route-add", k8sClusterRouter, prefix, nexthop)
+	if err != nil {
+		return fmt.Errorf("failed to add static route '%s via %s' for host %q on %s "+
+			"stderr: %q, error: %v", nicIP, k8sMgmtIntfIPAddress, nodeName, k8sClusterRouter, stderr, err)
+	}
+	return nil
+}
+
 func initSharedGateway(
 	nodeName string, clusterIPSubnet []string, subnet,
-	gwNextHop, gwIntf string, nodeportEnable bool,
+	gwNextHop, gwIntf string, gwVLANId uint, nodeportEnable bool,
 	wf *factory.WatchFactory) (string, string, error) {
 	var bridgeName string
 
@@ -271,6 +299,15 @@ func initSharedGateway(
 		gwIntf = intfName
 	}
 
+	// ovn-bridge-mappings maps a physical network name to a local ovs bridge
+	// that provides connectivity to that network.
+	_, stderr, err := util.RunOVSVsctl("set", "Open_vSwitch", ".",
+		fmt.Sprintf("external_ids:ovn-bridge-mappings=%s:%s", util.PhysicalNetworkName, bridgeName))
+	if err != nil {
+		return "", "", fmt.Errorf("Failed to set ovn-bridge-mappings for ovs bridge %s"+
+			", stderr:%s (%v)", bridgeName, stderr, err)
+	}
+
 	// Now, we get IP address from OVS bridge. If IP does not exist,
 	// error out.
 	ipAddress, err := getIPv4Address(bridgeName)
@@ -282,20 +319,27 @@ func initSharedGateway(
 		return "", "", fmt.Errorf("%s does not have a ipv4 address", bridgeName)
 	}
 	err = util.GatewayInit(clusterIPSubnet, nodeName, ipAddress, "",
-		bridgeName, gwNextHop, subnet, nodeportEnable)
+		bridgeName, gwNextHop, subnet, gwVLANId, nodeportEnable)
 	if err != nil {
 		return "", "", fmt.Errorf("failed to init shared interface gateway: %v", err)
 	}
 
+	// Add static routes to OVN Cluster Router to enable pods on this Node to
+	// reach the host IP
+	err = addStaticRouteToHost(nodeName, ipAddress)
+	if err != nil {
+		return "", "", err
+	}
+
 	// Program cluster.GatewayIntf to let non-pod traffic to go to host
 	// stack
-	if err := addDefaultConntrackRules(bridgeName, gwIntf); err != nil {
+	if err := addDefaultConntrackRules(nodeName, bridgeName, gwIntf); err != nil {
 		return "", "", err
 	}
 
 	if nodeportEnable {
 		// Program cluster.GatewayIntf to let nodePort traffic to go to pods.
-		if err := nodePortWatcher(bridgeName, gwIntf, wf); err != nil {
+		if err := nodePortWatcher(nodeName, bridgeName, gwIntf, wf); err != nil {
 			return "", "", err
 		}
 	}

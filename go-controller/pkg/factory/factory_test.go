@@ -192,7 +192,7 @@ var _ = Describe("Watch Factory Operations", func() {
 			Expect(err).NotTo(HaveOccurred())
 			Expect(h).NotTo(BeNil())
 			wf.removeHandler(objType, h)
-			close(stop)
+			wf.Shutdown()
 		}
 
 		It("is called for each existing pod", func() {
@@ -250,7 +250,7 @@ var _ = Describe("Watch Factory Operations", func() {
 			Expect(err).NotTo(HaveOccurred())
 			Expect(numAdded).To(Equal(2))
 			wf.removeHandler(objType, h)
-			close(stop)
+			wf.Shutdown()
 		}
 
 		It("calls ADD for each existing pod", func() {
@@ -349,7 +349,7 @@ var _ = Describe("Watch Factory Operations", func() {
 		Eventually(func() int { return numDeleted }, 2).Should(Equal(1))
 
 		wf.RemovePodHandler(h)
-		close(stop)
+		wf.Shutdown()
 	})
 
 	It("responds to namespace add/update/delete events", func() {
@@ -384,7 +384,7 @@ var _ = Describe("Watch Factory Operations", func() {
 		Eventually(func() int { return numDeleted }, 2).Should(Equal(1))
 
 		wf.RemoveNamespaceHandler(h)
-		close(stop)
+		wf.Shutdown()
 	})
 
 	It("responds to node add/update/delete events", func() {
@@ -419,7 +419,7 @@ var _ = Describe("Watch Factory Operations", func() {
 		Eventually(func() int { return numDeleted }, 2).Should(Equal(1))
 
 		wf.removeHandler(nodeType, h)
-		close(stop)
+		wf.Shutdown()
 	})
 
 	It("responds to policy add/update/delete events", func() {
@@ -454,7 +454,7 @@ var _ = Describe("Watch Factory Operations", func() {
 		Eventually(func() int { return numDeleted }, 2).Should(Equal(1))
 
 		wf.removeHandler(policyType, h)
-		close(stop)
+		wf.Shutdown()
 	})
 
 	It("responds to endpoints add/update/delete events", func() {
@@ -496,7 +496,7 @@ var _ = Describe("Watch Factory Operations", func() {
 		Eventually(func() int { return numDeleted }, 2).Should(Equal(1))
 
 		wf.removeHandler(endpointsType, h)
-		close(stop)
+		wf.Shutdown()
 	})
 
 	It("responds to service add/update/delete events", func() {
@@ -531,7 +531,7 @@ var _ = Describe("Watch Factory Operations", func() {
 		Eventually(func() int { return numDeleted }, 2).Should(Equal(1))
 
 		wf.removeHandler(serviceType, h)
-		close(stop)
+		wf.Shutdown()
 	})
 
 	It("stops processing events after the handler is removed", func() {
@@ -562,7 +562,7 @@ var _ = Describe("Watch Factory Operations", func() {
 		namespaceWatch.Delete(added2)
 		Consistently(func() int { return numDeleted }, 2).Should(Equal(0))
 
-		close(stop)
+		wf.Shutdown()
 	})
 
 	It("filters correctly by label and namespace", func() {
@@ -628,7 +628,7 @@ var _ = Describe("Watch Factory Operations", func() {
 		podWatch.Delete(passesFilter)
 		Eventually(func() int { return numDeleted }, 2).Should(Equal(1))
 
-		close(stop)
+		wf.Shutdown()
 	})
 
 	It("correctly handles object updates that cause filter changes", func() {
@@ -681,6 +681,6 @@ var _ = Describe("Watch Factory Operations", func() {
 		Consistently(func() int { return numUpdated }, 2).Should(Equal(0))
 
 		wf.RemovePodHandler(h)
-		close(stop)
+		wf.Shutdown()
 	})
 })

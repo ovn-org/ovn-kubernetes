@@ -99,14 +99,11 @@ subjects:
   namespace: ovn-kubernetes
 
 ---
-# service to expose the ovn-master pod
-# at present ovn-master is limited to a single instance so
-# when the cluster has multiple masters we can get to the
-# ovn-master via this service.
+# service to expose the ovnkube-db pod
 apiVersion: v1
 kind: Service
 metadata:
-  name: ovnkube-master
+  name: ovnkube-db
   namespace: ovn-kubernetes
 spec:
   ports:
@@ -121,8 +118,6 @@ spec:
   sessionAffinity: None
   clusterIP: None
   type: ClusterIP
-  selector:
-    name: ovnkube-master
 
 ---
 # The network cidr and service cidr are set in the ovn-config configmap

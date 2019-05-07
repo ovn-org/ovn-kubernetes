@@ -3,6 +3,7 @@ package ovn
 import (
 	"fmt"
 	"net"
+	"os"
 	"runtime"
 	"strconv"
 	"strings"
@@ -129,7 +130,7 @@ func configureManagementPortWindows(clusterSubnet []string, clusterServicesSubne
 }
 
 func configureManagementPort(clusterSubnet []string, clusterServicesSubnet,
-	routerIP, interfaceName, interfaceIP string) error {
+	routerIP, routerMac, interfaceName, interfaceIP string) error {
 	if runtime.GOOS == windowsOS {
 		// Return here for Windows, the commands for enabling the interface, setting the IP and adding the
 		// route will be done in the above function
@@ -184,24 +185,33 @@ func configureManagementPort(clusterSubnet []string, clusterServicesSubnet,
 		}
 	}
 
+	// Add a neighbour entry on the K8s node to map routerIP with routerMAC. This is
+	// required because in certain cases ARP requests from the K8s Node to the routerIP
+	// arrives on OVN Logical Router pipeline with ARP source protocol address set to
+	// K8s Node IP. OVN Logical Router pipeline drops such packets since it expects
+	// source protocol address to be in the Logical Switch's subnet.
+	_, _, err = util.RunIP("neigh", "add", routerIP, "dev", interfaceName, "lladdr", routerMac)
+	if err != nil && os.IsNotExist(err) {
+		return err
+	}
+
 	return nil
 }
 
-// CreateManagementPort creates a logical switch for the node and connect it to the distributed router. This switch will start with one logical port (A OVS internal interface).
-// 1. This logical port is via which a node can access all other nodes and the containers running inside them using the private IP addresses.
-// 2. When this port is created on the master node, the K8s daemons become reachable from the containers without any NAT.
-// 3. The nodes can health-check the pod IP addresses.
+// CreateManagementPort creates a management port attached to the node switch
+// that lets the node access its pods via their private IP address. This is used
+// for health checking and other management tasks.
 func CreateManagementPort(nodeName, localSubnet,
 	clusterServicesSubnet string, clusterSubnet []string) error {
-	// Create a router port and provide it the first address in the 'local_subnet'.
-	ip, localSubnetNet, err := net.ParseCIDR(localSubnet)
+
+	// Determine the IP of the node switch's logical router port on the cluster router
+	ip, subnet, err := net.ParseCIDR(localSubnet)
 	if err != nil {
-		return fmt.Errorf("Failed to parse local subnet %v : %v", localSubnetNet, err)
+		return fmt.Errorf("Failed to parse local subnet %s: %v", localSubnet, err)
 	}
 	ip = util.NextIP(ip)
-	n, _ := localSubnetNet.Mask.Size()
-	routerIPMask := fmt.Sprintf("%s/%d", ip.String(), n)
 	routerIP := ip.String()
+
 	// Kubernetes emits events when pods are created. The event will contain
 	// only lowercase letters of the hostname even though the kubelet is
 	// started with a hostname that contains lowercase and uppercase letters.
@@ -213,56 +223,15 @@ func CreateManagementPort(nodeName, localSubnet,
 	// initMinion.
 	nodeName = strings.ToLower(nodeName)
 
-	routerMac, stderr, err := util.RunOVNNbctl("--if-exist", "get", "logical_router_port", "rtos-"+nodeName, "mac")
-	if err != nil {
-		logrus.Errorf("Failed to get logical router port,stderr: %q, error: %v", stderr, err)
-		return err
-	}
-
-	var clusterRouter string
-	if routerMac == "" {
-		routerMac = util.GenerateMac()
-	}
-
-	clusterRouter, err = util.GetK8sClusterRouter()
-	if err != nil {
-		return err
-	}
-
-	_, stderr, err = util.RunOVNNbctl("--may-exist", "lrp-add", clusterRouter, "rtos-"+nodeName, routerMac, routerIPMask)
-	if err != nil {
-		logrus.Errorf("Failed to add logical port to router, stderr: %q, error: %v", stderr, err)
-		return err
-	}
-
-	// Create a logical switch and set its subnet.
-	stdout, stderr, err := util.RunOVNNbctl("--", "--may-exist", "ls-add", nodeName, "--", "set", "logical_switch", nodeName, "other-config:subnet="+localSubnet, "external-ids:gateway_ip="+routerIPMask)
-	if err != nil {
-		logrus.Errorf("Failed to create a logical switch %v, stdout: %q, stderr: %q, error: %v", nodeName, stdout, stderr, err)
-		return err
-	}
-
-	// Connect the switch to the router.
-	stdout, stderr, err = util.RunOVNNbctl("--", "--may-exist", "lsp-add", nodeName, "stor-"+nodeName, "--", "set", "logical_switch_port", "stor-"+nodeName, "type=router", "options:router-port=rtos-"+nodeName, "addresses="+"\""+routerMac+"\"")
-	if err != nil {
-		logrus.Errorf("Failed to add logical port to switch, stdout: %q, stderr: %q, error: %v", stdout, stderr, err)
-		return err
-	}
-
 	// Make sure br-int is created.
-	stdout, stderr, err = util.RunOVSVsctl("--", "--may-exist", "add-br", "br-int")
+	stdout, stderr, err := util.RunOVSVsctl("--", "--may-exist", "add-br", "br-int")
 	if err != nil {
 		logrus.Errorf("Failed to create br-int, stdout: %q, stderr: %q, error: %v", stdout, stderr, err)
 		return err
 	}
 
 	// Create a OVS internal interface.
-	var interfaceName string
-	if len(nodeName) > 11 {
-		interfaceName = "k8s-" + (nodeName[:11])
-	} else {
-		interfaceName = "k8s-" + nodeName
-	}
+	interfaceName := util.GetK8sMgmtIntfName(nodeName)
 
 	stdout, stderr, err = util.RunOVSVsctl("--", "--may-exist", "add-port",
 		"br-int", interfaceName, "--", "set", "interface", interfaceName,
@@ -288,51 +257,24 @@ func CreateManagementPort(nodeName, localSubnet,
 		}
 	}
 
-	// Create the OVN logical port.
+	// Create this node's management logical port on the node switch
 	ip = util.NextIP(ip)
 	portIP := ip.String()
+	n, _ := subnet.Mask.Size()
 	portIPMask := fmt.Sprintf("%s/%d", portIP, n)
 	stdout, stderr, err = util.RunOVNNbctl("--", "--may-exist", "lsp-add", nodeName, "k8s-"+nodeName, "--", "lsp-set-addresses", "k8s-"+nodeName, macAddress+" "+portIP)
 	if err != nil {
 		logrus.Errorf("Failed to add logical port to switch, stdout: %q, stderr: %q, error: %v", stdout, stderr, err)
 		return err
 	}
+	// switch-to-router ports only have MAC address and nothing else.
+	routerMac, stderr, err := util.RunOVNNbctl("lsp-get-addresses", "stor-"+nodeName)
+	if err != nil {
+		logrus.Errorf("Failed to retrieve the MAC address of the logical port, stderr: %q, error: %v",
+			stderr, err)
+		return err
+	}
 	err = configureManagementPort(clusterSubnet, clusterServicesSubnet,
-		routerIP, interfaceName, portIPMask)
-	if err != nil {
-		return err
-	}
-
-	// Add the load_balancer to the switch.
-	k8sClusterLbTCP, stderr, err := util.RunOVNNbctl("--data=bare", "--no-heading", "--columns=_uuid", "find", "load_balancer", "external_ids:k8s-cluster-lb-tcp=yes")
-	if err != nil {
-		logrus.Errorf("Failed to get k8sClusterLbTCP, stderr: %q, error: %v", stderr, err)
-		return err
-	}
-	if k8sClusterLbTCP == "" {
-		return fmt.Errorf("Failed to get k8sClusterLbTCP")
-	}
-
-	stdout, stderr, err = util.RunOVNNbctl("set", "logical_switch", nodeName, "load_balancer="+k8sClusterLbTCP)
-	if err != nil {
-		logrus.Errorf("Failed to set logical switch %v's loadbalancer, stdout: %q, stderr: %q, error: %v", nodeName, stdout, stderr, err)
-		return err
-	}
-
-	k8sClusterLbUDP, stderr, err := util.RunOVNNbctl("--data=bare", "--no-heading", "--columns=_uuid", "find", "load_balancer", "external_ids:k8s-cluster-lb-udp=yes")
-	if err != nil {
-		logrus.Errorf("Failed to get k8sClusterLbUDP, stderr: %q, error: %v", stderr, err)
-		return err
-	}
-	if k8sClusterLbUDP == "" {
-		return fmt.Errorf("Failed to get k8sClusterLbUDP")
-	}
-
-	stdout, stderr, err = util.RunOVNNbctl("add", "logical_switch", nodeName, "load_balancer", k8sClusterLbUDP)
-	if err != nil {
-		logrus.Errorf("Failed to add logical switch %v's loadbalancer, stdout: %q, stderr: %q, error: %v", nodeName, stdout, stderr, err)
-		return err
-	}
-
-	return nil
+		routerIP, routerMac, interfaceName, portIPMask)
+	return err
 }

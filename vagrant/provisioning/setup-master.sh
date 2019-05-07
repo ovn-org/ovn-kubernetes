@@ -52,11 +52,6 @@ pushd /opt/cni/bin
 sudo tar xvzf ~/cni-amd64-v0.5.2.tgz
 popd
 sudo mkdir -p /etc/cni/net.d
-# Create a 99loopback.conf to have atleast one CNI config.
-echo '{
-    "cniVersion": "0.2.0",
-    "type": "loopback"
-}' | sudo tee /etc/cni/net.d/99loopback.conf
 
 # Add external repos to install docker, k8s and OVS from packages.
 sudo apt-get update
@@ -84,7 +79,7 @@ sudo swapoff -a
 sudo kubeadm config images pull
 sudo kubeadm init --pod-network-cidr=192.168.0.0/16 --apiserver-advertise-address=$OVERLAY_IP \
 	--service-cidr=172.16.1.0/24 2>&1 | tee kubeadm.log
-grep "kubeadm join" kubeadm.log | sudo tee /vagrant/kubeadm.log
+grep -A1 "kubeadm join" kubeadm.log | sudo tee /vagrant/kubeadm.log
 
 mkdir -p $HOME/.kube
 sudo cp -i /etc/kubernetes/admin.conf $HOME/.kube/config
@@ -103,15 +98,16 @@ done
 # Let master run pods too.
 kubectl taint nodes --all node-role.kubernetes.io/master-
 
-## Install OVS and dependencies
+## install packages that deliver ovs-pki and its dependencies
 sudo apt-get build-dep dkms
 sudo apt-get install python-six openssl python-pip -y
-
-sudo apt-get install openvswitch-datapath-dkms=2.9.2-1 -y
-sudo apt-get install openvswitch-switch=2.9.2-1 openvswitch-common=2.9.2-1 libopenvswitch=2.9.2-1 -y
+sudo apt-get install openvswitch-common libopenvswitch -y
+sudo apt-get install openvswitch-datapath-dkms -y
 
 if [ "$DAEMONSET" != "true" ]; then
-  sudo apt-get install ovn-central=2.9.2-1 ovn-common=2.9.2-1 ovn-host=2.9.2-1 -y
+  ## Install OVS and OVN components
+  sudo apt-get install openvswitch-switch
+  sudo apt-get install ovn-central ovn-common ovn-host -y
 fi
 if [ -n "$SSL" ]; then
     PROTOCOL=ssl
@@ -119,9 +115,11 @@ if [ -n "$SSL" ]; then
     # Install SSL certificates
     pushd /etc/openvswitch
     sudo ovs-pki -d /vagrant/pki init --force
-    sudo ovs-pki req ovnsb && sudo ovs-pki self-sign ovnsb
+    sudo ovs-pki req ovnsb
+    sudo ovs-pki -b -d /vagrant/pki sign ovnsb
 
-    sudo ovs-pki req ovnnb && sudo ovs-pki self-sign ovnnb
+    sudo ovs-pki req ovnnb
+    sudo ovs-pki -b -d /vagrant/pki sign ovnnb
 
     sudo ovs-pki req ovncontroller
     sudo ovs-pki -b -d /vagrant/pki sign ovncontroller switch
@@ -174,18 +172,21 @@ if [ "$DAEMONSET" != "true" ]; then
   popd
 
   if [ $PROTOCOL = "ssl" ]; then
-   SSL_ARGS="-nb-server-privkey /etc/openvswitch/ovnnb-privkey.pem \
-   -nb-server-cert /etc/openvswitch/ovnnb-cert.pem \
-   -nb-server-cacert /vagrant/pki/switchca/cacert.pem \
-   -sb-server-privkey /etc/openvswitch/ovnsb-privkey.pem \
-   -sb-server-cert /etc/openvswitch/ovnsb-cert.pem \
-   -sb-server-cacert /vagrant/pki/switchca/cacert.pem  \
-   -nb-client-privkey /etc/openvswitch/ovncontroller-privkey.pem \
+   sudo ovn-nbctl set-connection pssl:6641 -- set connection . inactivity_probe=0
+   sudo ovn-sbctl set-connection pssl:6642 -- set connection . inactivity_probe=0
+   sudo ovn-nbctl set-ssl /etc/openvswitch/ovnnb-privkey.pem \
+    /etc/openvswitch/ovnnb-cert.pem /vagrant/pki/switchca/cacert.pem
+   sudo ovn-sbctl set-ssl /etc/openvswitch/ovnsb-privkey.pem \
+    /etc/openvswitch/ovnsb-cert.pem /vagrant/pki/switchca/cacert.pem
+   SSL_ARGS="-nb-client-privkey /etc/openvswitch/ovncontroller-privkey.pem \
    -nb-client-cert /etc/openvswitch/ovncontroller-cert.pem \
-   -nb-client-cacert /etc/openvswitch/ovnnb-ca.cert \
+   -nb-client-cacert /vagrant/pki/switchca/cacert.pem \
    -sb-client-privkey /etc/openvswitch/ovncontroller-privkey.pem \
    -sb-client-cert /etc/openvswitch/ovncontroller-cert.pem \
-   -sb-client-cacert /etc/openvswitch/ovnsb-ca.cert"
+   -sb-client-cacert /vagrant/pki/switchca/cacert.pem"
+  elif [ $PROTOCOL = "tcp" ]; then
+   sudo ovn-nbctl set-connection ptcp:6641 -- set connection . inactivity_probe=0
+   sudo ovn-sbctl set-connection ptcp:6642 -- set connection . inactivity_probe=0
   fi
 
   if [ "$HA" = "true" ]; then
@@ -206,14 +207,14 @@ if [ "$DAEMONSET" != "true" ]; then
    -k8s-apiserver="https://$OVERLAY_IP:6443" \
    -k8s-cacert=/etc/kubernetes/pki/ca.crt \
    -k8s-token="$TOKEN" \
-   -logfile="/var/log/openvswitch/ovnkube.log" \
+   -logfile="/var/log/ovn-kubernetes/ovnkube.log" \
    -init-master="k8smaster" -cluster-subnet="192.168.0.0/16" \
    -init-node="k8smaster" \
    -service-cluster-ip-range=172.16.1.0/24 \
    -nodeport \
    -nb-address="$ovn_nb" \
    -sb-address="$ovn_sb" \
-   -init-gateways -gateway-localnet \
+   -init-gateways -gateway-local \
    ${SSL_ARGS} 2>&1 &
 else
   # Daemonset is enabled.
@@ -221,40 +222,32 @@ else
   # Dameonsets only work with TCP now.
   PROTOCOL="tcp"
 
+  # cleanup /etc/hosts as it incorrectly maps the hostname to `127.0.1.1`
+  # or `127.0.0.1`
+  sudo sed -i '/^127.0.1.1/d' /etc/hosts
+  sudo sed -i  '/^127.0.0.1\tk8s/d' /etc/hosts
+
+  # Generate various OVN K8s yamls from the template files
+  pushd $HOME/work/src/github.com/openvswitch/ovn-kubernetes/dist/images
+  ./daemonset.sh --image=docker.io/ovnkube/ovn-daemonset-u:latest \
+  --net-cidr=192.168.0.0/16 --svc-cidr=172.16.1.0/24 \
+  --k8s-apiserver=https://$OVERLAY_IP:6443
+  popd
+
   # label the master node for daemonsets
   kubectl label node k8smaster node-role.kubernetes.io/master=true --overwrite
 
-  # Create namespace
-  kubectl create -f $HOME/work/src/github.com/openvswitch/ovn-kubernetes/dist/yaml/ovn-namespace.yaml
+  # Create OVN namespace, service accounts, ovnkube-db headless service, configmap, and policies
+  kubectl create -f $HOME/work/src/github.com/openvswitch/ovn-kubernetes/dist/yaml/ovn-setup.yaml
 
-  # Create service accounts and policies
-  kubectl create -f $HOME/work/src/github.com/openvswitch/ovn-kubernetes/dist/yaml/ovn-policy.yaml
-
-  # Create ovn config map.
-  cat << EOF | kubectl create -f - > /dev/null 2>&1
-kind: ConfigMap
-apiVersion: v1
-metadata:
-  name: ovn-config
-  namespace: ovn-kubernetes
-data:
-  k8s_apiserver: "https://$OVERLAY_IP:6443"
-  net_cidr:      "192.168.0.0/16"
-  svc_cidr:      "172.16.1.0/24"
-  OvnNorth:      $PROTOCOL://$OVERLAY_IP:6641
-  OvnSouth:      $PROTOCOL://$OVERLAY_IP:6642
-EOF
-
-  # Make daemonset yamls
-  pushd $HOME/work/src/github.com/openvswitch/ovn-kubernetes/dist/images
-  make daemonsetyaml 1>&2 2>/dev/null
-  popd
+  # Run ovnkube-db daemonset.
+  kubectl create -f $HOME/work/src/github.com/openvswitch/ovn-kubernetes/dist/yaml/ovnkube-db.yaml
 
   # Run ovnkube-master daemonset.
   kubectl create -f $HOME/work/src/github.com/openvswitch/ovn-kubernetes/dist/yaml/ovnkube-master.yaml
 
   # Run ovnkube daemonsets for nodes
-  kubectl create -f $HOME/work/src/github.com/openvswitch/ovn-kubernetes/dist/yaml/ovnkube.yaml
+  kubectl create -f $HOME/work/src/github.com/openvswitch/ovn-kubernetes/dist/yaml/ovnkube-node.yaml
 fi
 
 # Setup some example yaml files

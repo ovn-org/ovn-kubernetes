@@ -2,6 +2,8 @@ package cluster
 
 import (
 	"net"
+	"os"
+	"path/filepath"
 	"time"
 
 	"github.com/sirupsen/logrus"
@@ -9,52 +11,45 @@ import (
 	"github.com/openvswitch/ovn-kubernetes/go-controller/pkg/cni"
 	"github.com/openvswitch/ovn-kubernetes/go-controller/pkg/config"
 	"github.com/openvswitch/ovn-kubernetes/go-controller/pkg/ovn"
+	"github.com/openvswitch/ovn-kubernetes/go-controller/pkg/util"
 
 	kapi "k8s.io/api/core/v1"
+	"k8s.io/apimachinery/pkg/util/wait"
 	"k8s.io/client-go/tools/cache"
 )
 
 // StartClusterNode learns the subnet assigned to it by the master controller
 // and calls the SetupNode script which establishes the logical switch
 func (cluster *OvnClusterController) StartClusterNode(name string) error {
-	count := 300
 	var err error
 	var node *kapi.Node
 	var subnet *net.IPNet
 	var clusterSubnets []string
+	var cidr string
 
 	for _, clusterSubnet := range cluster.ClusterIPNet {
 		clusterSubnets = append(clusterSubnets, clusterSubnet.CIDR.String())
 	}
 
-	for count > 0 {
-		if count != 300 {
-			time.Sleep(time.Second)
-		}
-		count--
-
-		// setup the node, create the logical switch
+	// First wait for the node logical switch to be created by the Master, timeout is 300s.
+	if err := wait.PollImmediate(500*time.Millisecond, 300*time.Second, func() (bool, error) {
 		node, err = cluster.Kube.GetNode(name)
 		if err != nil {
 			logrus.Errorf("Error starting node %s, no node found - %v", name, err)
-			continue
+			return false, nil
 		}
-
-		sub, ok := node.Annotations[OvnHostSubnet]
-		if !ok {
-			logrus.Errorf("Error starting node %s, no annotation found on node for subnet - %v", name, err)
-			continue
+		if cidr, _, err = util.RunOVNNbctl("get", "logical_switch", node.Name, "other-config:subnet"); err != nil {
+			return false, nil
 		}
-		_, subnet, err = net.ParseCIDR(sub)
-		if err != nil {
-			logrus.Errorf("Invalid hostsubnet found for node %s - %v", node.Name, err)
-			return err
-		}
-		break
+		return true, nil
+	}); err != nil {
+		logrus.Errorf("timed out waiting for node %q logical switch: %v", name, err)
+		return err
 	}
 
-	if count == 0 {
-		logrus.Errorf("Failed to get node/node-annotation for %s - %v", name, err)
+	_, subnet, err = net.ParseCIDR(cidr)
+	if err != nil {
+		logrus.Errorf("Invalid hostsubnet found for node %s - %v", node.Name, err)
 		return err
 	}
 
@@ -79,8 +74,13 @@ func (cluster *OvnClusterController) StartClusterNode(name string) error {
 		}
 	}
 
-	if err = config.WriteCNIConfig(); err != nil {
-		return err
+	confFile := filepath.Join(config.CNI.ConfDir, config.CNIConfFileName)
+	_, err = os.Stat(confFile)
+	if os.IsNotExist(err) {
+		err = config.WriteCNIConfig(config.CNI.ConfDir, config.CNIConfFileName)
+		if err != nil {
+			return err
+		}
 	}
 
 	if cluster.OvnHA {

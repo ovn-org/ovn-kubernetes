@@ -73,9 +73,6 @@
           cert_group=kube-cert
           cert_dir="{{ k8s_client_certs.directory }}"
 
-          mkdir -p "$cert_dir"
-          rm -rf "$cert_dir/*"
-
           pem_ca=$cert_dir/ca.pem
           pem_ca_key=$cert_dir/ca-key.pem
 

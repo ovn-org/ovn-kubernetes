@@ -1,4 +1,14 @@
 ---
+- hosts: localhost
+  any_errors_fatal: true
+  tasks:
+    # This directory is used only for caching files on the Ansible host
+    # in order to speed up the deployment time on subsequent playbook runs.
+    - name: ovn-kubernetes | Create local Ansible temporary directory
+      file:
+        path: "{{ ansible_tmp_dir }}"
+        state: directory
+
 - hosts: kube-master
   any_errors_fatal: true
   gather_facts: true
@@ -40,6 +50,16 @@
         name: linux/ovn-kubernetes
     - import_role:
         name: linux/kubernetes
+
+# TODO(alinbalutoiu): Move the hosts file update above once ansible fixes
+# lineinfile concurrency issues https://github.com/ansible/ansible/issues/30413
+- hosts: kube-minions-linux
+  any_errors_fatal: true
+  gather_facts: true
+  become: true
+  serial: 1
+  tasks:
+    - include_tasks: roles/linux/kubernetes/tasks/set_ip_facts.yml
     - name: Ensure /etc/hosts is updated on kube-master
       lineinfile:
         path: /etc/hosts
@@ -85,6 +105,18 @@
         name: windows/ovn-kubernetes
     - import_role:
         name: windows/kubernetes
+
+# TODO(alinbalutoiu): Move the hosts file update above once ansible fixes
+# lineinfile concurrency issues https://github.com/ansible/ansible/issues/30413
+- hosts: kube-minions-windows
+  remote_user: Administrator
+  gather_facts: true
+  become_method: runas
+  any_errors_fatal: true
+  serial: 1
+  tasks:
+    - include_vars: roles/windows/kubernetes/vars/{{ ansible_os_family|lower }}.yml
+    - include_tasks: roles/windows/kubernetes/tasks/set_ip_facts.yml
     - name: Ensure /etc/hosts is updated on kube-master
       become: true
       become_method: sudo

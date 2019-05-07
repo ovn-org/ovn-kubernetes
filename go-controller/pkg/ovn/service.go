@@ -2,14 +2,11 @@ package ovn
 
 import (
 	"fmt"
+	"github.com/openvswitch/ovn-kubernetes/go-controller/pkg/util"
 	"github.com/sirupsen/logrus"
 	kapi "k8s.io/api/core/v1"
 	"net"
 )
-
-func isServiceIPSet(service *kapi.Service) bool {
-	return service.Spec.ClusterIP != kapi.ClusterIPNone && service.Spec.ClusterIP != ""
-}
 
 func (ovn *Controller) syncServices(services []interface{}) {
 	// For all clusterIP in k8s, we will populate the below slice with
@@ -43,7 +40,7 @@ func (ovn *Controller) syncServices(services []interface{}) {
 			continue
 		}
 
-		if !isServiceIPSet(service) {
+		if !util.IsServiceIPSet(service) {
 			logrus.Debugf("Skipping service %s due to clusterIP = %q",
 				service.Name, service.Spec.ClusterIP)
 			continue
@@ -170,7 +167,7 @@ func (ovn *Controller) syncServices(services []interface{}) {
 }
 
 func (ovn *Controller) deleteService(service *kapi.Service) {
-	if !isServiceIPSet(service) || len(service.Spec.Ports) == 0 {
+	if !util.IsServiceIPSet(service) || len(service.Spec.Ports) == 0 {
 		return
 	}
 
@@ -216,7 +213,7 @@ func (ovn *Controller) deleteService(service *kapi.Service) {
 				logrus.Errorf("Error in deleting load balancer for service "+
 					"%s:%d %+v", service.Name, port, err)
 			}
+			ovn.handleExternalIPs(service, svcPort, ips, targetPort)
 		}
-		ovn.handleExternalIPs(service, svcPort, ips, targetPort)
 	}
 }
