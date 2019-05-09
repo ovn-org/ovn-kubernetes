@@ -63,8 +63,8 @@ var _ = Describe("Management Port Operations", func() {
 				mgtPortCIDR   string = mgtPortIP + "/" + mgtPortPrefix
 				clusterIPNet  string = "10.1.0.0"
 				clusterCIDR   string = clusterIPNet + "/16"
-				serviceIPNet  string = "172.16.0.0"
-				serviceCIDR   string = serviceIPNet + "/16"
+				serviceIPNet  string = "172.16.1.0"
+				serviceCIDR   string = serviceIPNet + "/24"
 				mtu           string = "1400"
 				gwIP          string = "10.1.1.1"
 				lrpMAC        string = "00:00:00:00:00:03"
@@ -133,7 +133,7 @@ var _ = Describe("Management Port Operations", func() {
 			_, err = config.InitConfig(ctx, fexec, nil)
 			Expect(err).NotTo(HaveOccurred())
 
-			err = CreateManagementPort(nodeName, nodeSubnet, serviceCIDR, []string{clusterCIDR})
+			err = CreateManagementPort(nodeName, nodeSubnet, []string{clusterCIDR})
 			Expect(err).NotTo(HaveOccurred())
 
 			Expect(fexec.CommandCalls).To(Equal(len(fakeCmds)))
