@@ -31,7 +31,7 @@
       --nb-address "tcp://{{ kubernetes_info.MASTER_IP }}:6641"
       --sb-address "tcp://{{ kubernetes_info.MASTER_IP }}:6642"
       --cluster-subnet {{ kubernetes_info.CLUSTER_SUBNET }}
-      --service-cluster-ip-range {{ kubernetes_info.SERVICE_CLUSTER_IP_RANGE }}
+      --k8s-service-cidr {{ kubernetes_info.SERVICE_CLUSTER_IP_RANGE }}
       --cni-conf-dir="{{ install_path }}/cni"
       --cni-plugin "ovn-k8s-cni-overlay.exe"
       --encap-ip="{{ host_internal_ip }}"

@@ -10,7 +10,7 @@
       [Service]
       ExecStart=/usr/bin/kube-apiserver \
         --bind-address=0.0.0.0 \
-        --service-cluster-ip-range={{ kubernetes_cluster_info.SERVICE_CLUSTER_IP_RANGE }} \
+        --k8s-service-cidr={{ kubernetes_cluster_info.SERVICE_CLUSTER_IP_RANGE }} \
         --address=0.0.0.0 \
         --etcd-servers=http://127.0.0.1:2379 \
         --v=2 \
@@ -209,7 +209,7 @@
       ExecStart=/usr/bin/ovnkube \
         -init-master "{{ ansible_hostname }}" \
         -cluster-subnet "{{ kubernetes_cluster_info.CLUSTER_SUBNET }}" \
-        -service-cluster-ip-range "{{ kubernetes_cluster_info.SERVICE_CLUSTER_IP_RANGE }}" \
+        -k8s-service-cidr "{{ kubernetes_cluster_info.SERVICE_CLUSTER_IP_RANGE }}" \
         -nodeport \
         -net-controller \
         -k8s-token {{TOKEN}} \

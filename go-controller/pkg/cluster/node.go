@@ -61,8 +61,7 @@ func (cluster *OvnClusterController) StartClusterNode(name string) error {
 	}
 
 	err = ovn.CreateManagementPort(node.Name, subnet.String(),
-		cluster.ClusterServicesSubnet,
-		clusterSubnets)
+		config.Kubernetes.ServiceCIDR, clusterSubnets)
 	if err != nil {
 		return err
 	}
@@ -118,8 +117,7 @@ func (cluster *OvnClusterController) updateOvnNode(masterIP string,
 
 	// Recreate logical switch and management port for this node
 	err = ovn.CreateManagementPort(node.Name, subnet,
-		cluster.ClusterServicesSubnet,
-		clusterSubnets)
+		config.Kubernetes.ServiceCIDR, clusterSubnets)
 	if err != nil {
 		return err
 	}

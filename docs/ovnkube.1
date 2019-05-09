@@ -16,7 +16,7 @@ IP address/subnet mask/hostsubnetlength, the hostsubnetlength is optional and if
 unspecified defaults to 24. The hostsubnetlength defines how many IP addresses are
 dedicated to each node. (default "11.11.0.0/16")
 .TP
-\fB\--service-cluster-ip-range\fR value
+\fB\--k8s-service-cidr\fR value
 A CIDR notation IP range from which k8s assigns service cluster IPs.
 This should be the same as the one provided for kube-apiserver's
 \fB\--service-cluster-ip-range\fR option.

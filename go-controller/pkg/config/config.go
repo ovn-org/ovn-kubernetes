@@ -49,7 +49,8 @@ var (
 
 	// Kubernetes holds Kubernetes-related parsed config file parameters and command-line overrides
 	Kubernetes = KubernetesConfig{
-		APIServer: "http://localhost:8080",
+		APIServer:   "http://localhost:8080",
+		ServiceCIDR: "172.16.1.0/24",
 	}
 
 	// OvnNorth holds northbound OVN database client and server authentication and location details
@@ -98,10 +99,11 @@ type CNIConfig struct {
 
 // KubernetesConfig holds Kubernetes-related parsed config file parameters and command-line overrides
 type KubernetesConfig struct {
-	Kubeconfig string `gcfg:"kubeconfig"`
-	CACert     string `gcfg:"cacert"`
-	APIServer  string `gcfg:"apiserver"`
-	Token      string `gcfg:"token"`
+	Kubeconfig  string `gcfg:"kubeconfig"`
+	CACert      string `gcfg:"cacert"`
+	APIServer   string `gcfg:"apiserver"`
+	Token       string `gcfg:"token"`
+	ServiceCIDR string `gcfg:"service-cidr"`
 }
 
 // OvnAuthConfig holds client authentication and location details for
@@ -149,6 +151,9 @@ var (
 	savedKubernetes KubernetesConfig
 	savedOvnNorth   OvnAuthConfig
 	savedOvnSouth   OvnAuthConfig
+
+	// legacy service-cluster-ip-range CLI option
+	serviceClusterIPRange string
 )
 
 func init() {
@@ -331,11 +336,17 @@ var K8sFlags = []cli.Flag{
 		Destination: &cliConfig.CNI.WinHNSNetworkID,
 	},
 	cli.StringFlag{
-		Name: "service-cluster-ip-range",
+		Name:        "service-cluster-ip-range",
+		Usage:       "Deprecated alias for k8s-service-cidr.",
+		Destination: &serviceClusterIPRange,
+	},
+	cli.StringFlag{
+		Name: "k8s-service-cidr",
 		Usage: "A CIDR notation IP range from which k8s assigns " +
 			"service cluster IPs. This should be the same as the one " +
 			"provided for kube-apiserver \"-service-cluster-ip-range\" " +
-			"option.",
+			"option. (default: 172.16.1.0/24)",
+		Destination: &cliConfig.Kubernetes.ServiceCIDR,
 	},
 	cli.StringFlag{
 		Name:        "k8s-kubeconfig",
@@ -553,6 +564,16 @@ func buildKubernetesConfig(exec kexec.Interface, cli, file *config, defaults *De
 		return fmt.Errorf("kubernetes API server address %q invalid: %v", Kubernetes.APIServer, err)
 	} else if url.Scheme != "https" && url.Scheme != "http" {
 		return fmt.Errorf("kubernetes API server URL scheme %q invalid", url.Scheme)
+	}
+
+	// Legacy service-cluster-ip-range CLI option overrides config file or --k8s-service-cidr
+	if serviceClusterIPRange != "" {
+		Kubernetes.ServiceCIDR = serviceClusterIPRange
+	}
+	if Kubernetes.ServiceCIDR == "" {
+		return fmt.Errorf("kubernetes service-cidr is required")
+	} else if _, _, err := net.ParseCIDR(Kubernetes.ServiceCIDR); err != nil {
+		return fmt.Errorf("kubernetes service network CIDR %q invalid: %v", Kubernetes.ServiceCIDR, err)
 	}
 
 	return nil
