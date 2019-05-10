@@ -125,7 +125,7 @@
         block: |
           [Unit]
           Description=OVN Kube Systemd Daemon
-          Documentation=https://github.com/openvswitch/ovn-kubernetes
+          Documentation=https://github.com/ovn-org/ovn-kubernetes
           [Service]
           ExecStart=/usr/bin/ovnkube \
             --init-node "{{ ansible_hostname }}" \

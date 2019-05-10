@@ -128,7 +128,7 @@
       with_items: "{{ groups['kube-master'] }}"
 
 # TODO(ionutbalutoiu):
-# Remove below workaround when this is fixed: https://github.com/openvswitch/ovn-kubernetes/issues/531
+# Remove below workaround when this is fixed: https://github.com/ovn-org/ovn-kubernetes/issues/531
 # Right now, the CoreDNS pods will never reach "running" state. We need to kill the existing pods and
 # new ones will be successfully created.
 - hosts: kube-master
