@@ -35,7 +35,7 @@ ansible-playbook ovn-kubernetes-cluster.yml
 ```
 
 Currently supported Linux nodes:
-- Ubuntu 14.04 and 16.04
+- Ubuntu 16.04 and 18.04
 
 Currently supported Windows nodes:
 - Windows Server 2016 build version 1709 (OS Version 10.0.16299.0)
@@ -76,7 +76,7 @@ The following ports need to be opened if we access the cluster machines via the 
 
 - Support for hybrid cluster with master/minion nodes on different cloud providers.
 
-- Different Linux versions support (currently only Ubuntu 14.04 and 16.04 supported)
+- Different Linux versions support (currently only Ubuntu 16.04 and 18.04 supported)
 
 ### Known issues
 
