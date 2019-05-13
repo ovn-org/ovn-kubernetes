@@ -105,6 +105,12 @@
 			"revisionTime": "2019-06-20T21:17:52Z"
 		},
 		{
+			"checksumSHA1": "pBmaTjNo279YtPKnLPtakPY97sI=",
+			"path": "github.com/Mellanox/sriovnet",
+			"revision": "73402dc8fcaa26a2aa195ff12245bd2bafd1494f",
+			"revisionTime": "2019-05-13T20:44:09Z"
+		},
+		{
 			"checksumSHA1": "LvjTFR2Am01kquJNDnfISncPfRw=",
 			"path": "github.com/containernetworking/cni/pkg/skel",
 			"revision": "909fe7d10d98ab99b9990966796316249c83b263",
