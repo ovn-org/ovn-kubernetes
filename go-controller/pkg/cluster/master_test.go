@@ -61,7 +61,7 @@ var _ = Describe("Master Operations", func() {
 				Output: udpLBUUID,
 			})
 			fexec.AddFakeCmdsNoOutputNoError([]string{
-				"ovn-nbctl --timeout=15 --may-exist ls-add join",
+				"ovn-nbctl --timeout=15 --may-exist ls-add join -- set logical_switch join other-config:subnet=100.64.0.0/16 -- set logical_switch join other-config:exclude_ips=100.64.0.1",
 			})
 			fexec.AddFakeCmd(&ovntest.ExpectedCmd{
 				Cmd:    "ovn-nbctl --timeout=15 --if-exist get logical_router_port rtoj-ovn_cluster_router mac",
@@ -69,11 +69,10 @@ var _ = Describe("Master Operations", func() {
 			})
 			fexec.AddFakeCmdsNoOutputNoError([]string{
 				"ovn-nbctl --timeout=15 -- --may-exist lsp-add join jtor-ovn_cluster_router -- set logical_switch_port jtor-ovn_cluster_router type=router options:router-port=rtoj-ovn_cluster_router addresses=\"" + joinLRPMAC + "\"",
-				"ovn-nbctl --timeout=15 -- set nb_global . external-ids:gateway-lock=\"\"",
-				"ovn-nbctl --timeout=15 --data=bare --no-heading --columns=name,other-config find logical_switch other-config:subnet!=_",
 			})
 
-			var (
+			// Node-related logical network stuff
+			const (
 				nodeName       string = "node1"
 				lrpMAC         string = "00:00:00:05:46:C3"
 				nodeSubnet     string = "10.1.0.0/24"
@@ -81,6 +80,9 @@ var _ = Describe("Master Operations", func() {
 				nodeMgmtPortIP string = "10.1.0.2"
 			)
 
+			fexec.AddFakeCmdsNoOutputNoError([]string{
+				"ovn-nbctl --timeout=15 --data=bare --no-heading --columns=name,other-config find logical_switch other-config:subnet!=_",
+			})
 			fexec.AddFakeCmd(&ovntest.ExpectedCmd{
 				Cmd: "ovn-nbctl --timeout=15 --if-exist get logical_router_port rtos-" + nodeName + " mac",
 				// Return a known MAC; otherwise code autogenerates it
