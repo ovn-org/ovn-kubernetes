@@ -74,10 +74,11 @@ var _ = Describe("Master Operations", func() {
 			})
 
 			var (
-				nodeName   string = "node1"
-				lrpMAC     string = "00:00:00:05:46:C3"
-				nodeSubnet string = "10.1.0.0/24"
-				gwCIDR     string = "10.1.0.1/24"
+				nodeName       string = "node1"
+				lrpMAC         string = "00:00:00:05:46:C3"
+				nodeSubnet     string = "10.1.0.0/24"
+				gwCIDR         string = "10.1.0.1/24"
+				nodeMgmtPortIP string = "10.1.0.2"
 			)
 
 			fakeCmds = ovntest.AddFakeCmd(fakeCmds, &ovntest.ExpectedCmd{
@@ -87,7 +88,7 @@ var _ = Describe("Master Operations", func() {
 			})
 			fakeCmds = ovntest.AddFakeCmdsNoOutputNoError(fakeCmds, []string{
 				"ovn-nbctl --timeout=15 --may-exist lrp-add ovn_cluster_router rtos-" + nodeName + " " + lrpMAC + " " + gwCIDR,
-				"ovn-nbctl --timeout=15 -- --may-exist ls-add " + nodeName + " -- set logical_switch " + nodeName + " other-config:subnet=" + nodeSubnet + " external-ids:gateway_ip=" + gwCIDR,
+				"ovn-nbctl --timeout=15 -- --may-exist ls-add " + nodeName + " -- set logical_switch " + nodeName + " other-config:subnet=" + nodeSubnet + " other-config:exclude_ips=" + nodeMgmtPortIP + " external-ids:gateway_ip=" + gwCIDR,
 				"ovn-nbctl --timeout=15 -- --may-exist lsp-add " + nodeName + " stor-" + nodeName + " -- set logical_switch_port stor-" + nodeName + " type=router options:router-port=rtos-" + nodeName + " addresses=\"" + lrpMAC + "\"",
 				"ovn-nbctl --timeout=15 set logical_switch " + nodeName + " load_balancer=" + tcpLBUUID,
 				"ovn-nbctl --timeout=15 add logical_switch " + nodeName + " load_balancer " + udpLBUUID,
@@ -150,6 +151,7 @@ var _ = Describe("Master Operations", func() {
 				masterName        string = "openshift-master-node"
 				masterSubnet      string = "10.128.2.0/24"
 				masterGWCIDR      string = "10.128.2.1/24"
+				masterMgmtPortIP  string = "10.128.2.2"
 				lrpMAC            string = "00:00:00:05:46:C3"
 			)
 
@@ -199,7 +201,7 @@ subnet=%s
 			})
 			fakeCmds = ovntest.AddFakeCmdsNoOutputNoError(fakeCmds, []string{
 				"ovn-nbctl --timeout=15 --may-exist lrp-add ovn_cluster_router rtos-" + masterName + " " + lrpMAC + " " + masterGWCIDR,
-				"ovn-nbctl --timeout=15 -- --may-exist ls-add " + masterName + " -- set logical_switch " + masterName + " other-config:subnet=" + masterSubnet + " external-ids:gateway_ip=" + masterGWCIDR,
+				"ovn-nbctl --timeout=15 -- --may-exist ls-add " + masterName + " -- set logical_switch " + masterName + " other-config:subnet=" + masterSubnet + " other-config:exclude_ips=" + masterMgmtPortIP + " external-ids:gateway_ip=" + masterGWCIDR,
 				"ovn-nbctl --timeout=15 -- --may-exist lsp-add " + masterName + " stor-" + masterName + " -- set logical_switch_port stor-" + masterName + " type=router options:router-port=rtos-" + masterName + " addresses=\"" + lrpMAC + "\"",
 			})
 
