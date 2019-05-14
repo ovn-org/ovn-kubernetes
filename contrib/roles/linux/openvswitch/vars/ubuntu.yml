@@ -9,6 +9,7 @@ ovs_package_info:
     - name: "automake"
     - name: "bzip2"
     - name: "libssl-dev"
+    - name: "libunbound-dev"
     - name: "openssl"
     - name: "graphviz"
     - name: "python-all"
