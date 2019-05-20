@@ -49,8 +49,9 @@ var (
 
 	// Kubernetes holds Kubernetes-related parsed config file parameters and command-line overrides
 	Kubernetes = KubernetesConfig{
-		APIServer:   "http://localhost:8080",
-		ServiceCIDR: "172.16.1.0/24",
+		APIServer:          "http://localhost:8080",
+		ServiceCIDR:        "172.16.1.0/24",
+		OVNConfigNamespace: "ovn-kubernetes",
 	}
 
 	// OvnNorth holds northbound OVN database client and server authentication and location details
@@ -99,11 +100,12 @@ type CNIConfig struct {
 
 // KubernetesConfig holds Kubernetes-related parsed config file parameters and command-line overrides
 type KubernetesConfig struct {
-	Kubeconfig  string `gcfg:"kubeconfig"`
-	CACert      string `gcfg:"cacert"`
-	APIServer   string `gcfg:"apiserver"`
-	Token       string `gcfg:"token"`
-	ServiceCIDR string `gcfg:"service-cidr"`
+	Kubeconfig         string `gcfg:"kubeconfig"`
+	CACert             string `gcfg:"cacert"`
+	APIServer          string `gcfg:"apiserver"`
+	Token              string `gcfg:"token"`
+	ServiceCIDR        string `gcfg:"service-cidr"`
+	OVNConfigNamespace string `gcfg:"ovn-config-namespace"`
 }
 
 // OvnAuthConfig holds client authentication and location details for
@@ -367,6 +369,11 @@ var K8sFlags = []cli.Flag{
 		Name:        "k8s-token",
 		Usage:       "the Kubernetes API authentication token (not required if --k8s-kubeconfig is given)",
 		Destination: &cliConfig.Kubernetes.Token,
+	},
+	cli.StringFlag{
+		Name:        "ovn-config-namespace",
+		Usage:       "specify a namespace which will contain services to config the OVN databases",
+		Destination: &cliConfig.Kubernetes.OVNConfigNamespace,
 	},
 }
 
@@ -900,26 +907,37 @@ func (a *OvnAuthConfig) SetDBAuth() error {
 	return nil
 }
 
-func (a *OvnAuthConfig) updateIP(newIP string) error {
+func (a *OvnAuthConfig) updateIP(newIP []string, port string) error {
 	if a.Address != "" {
 		s := strings.Split(a.Address, ":")
 		if len(s) != 3 {
 			return fmt.Errorf("failed to parse OvnAuthConfig address %q", a.Address)
 		}
-		a.Address = s[0] + ":" + newIP + s[2]
+		var newPort string
+		if port != "" {
+			newPort = port
+		} else {
+			newPort = s[2]
+		}
+
+		newAddresses := make([]string, 0, len(newIP))
+		for _, ipAddress := range newIP {
+			newAddresses = append(newAddresses, s[0]+":"+ipAddress+":"+newPort)
+		}
+		a.Address = strings.Join(newAddresses, ",")
 	}
 	return nil
 }
 
-// UpdateOvnNodeAuth updates the host and URL in ClientAuth
+// UpdateOVNNodeAuth updates the host and URL in ClientAuth
 // for both OvnNorth and OvnSouth. It updates them with the new masterIP.
-func UpdateOvnNodeAuth(masterIP string) error {
+func UpdateOVNNodeAuth(masterIP []string, southboundDBPort, northboundDBPort string) error {
 	logrus.Debugf("Update OVN node auth with new master ip: %s", masterIP)
-	if err := OvnNorth.updateIP(masterIP); err != nil {
+	if err := OvnNorth.updateIP(masterIP, northboundDBPort); err != nil {
 		return fmt.Errorf("failed to update OvnNorth ClientAuth URL: %v", err)
 	}
 
-	if err := OvnSouth.updateIP(masterIP); err != nil {
+	if err := OvnSouth.updateIP(masterIP, southboundDBPort); err != nil {
 		return fmt.Errorf("failed to update OvnSouth ClientAuth URL: %v", err)
 	}
 	return nil
