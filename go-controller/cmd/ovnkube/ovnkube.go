@@ -207,16 +207,6 @@ func runOvnKube(ctx *cli.Context) error {
 			panic(err.Error())
 		}
 
-		clusterServicesSubnet := ctx.String("service-cluster-ip-range")
-		if clusterServicesSubnet != "" {
-			var servicesSubnet *net.IPNet
-			_, servicesSubnet, err = net.ParseCIDR(
-				clusterServicesSubnet)
-			if err != nil {
-				panic(err.Error())
-			}
-			clusterController.ClusterServicesSubnet = servicesSubnet.String()
-		}
 		clusterController.NodePortEnable = nodePortEnable
 
 		if master != "" {

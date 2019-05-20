@@ -21,8 +21,7 @@ type OvnClusterController struct {
 	TCPLoadBalancerUUID string
 	UDPLoadBalancerUUID string
 
-	ClusterServicesSubnet string
-	ClusterIPNet          []CIDRNetworkEntry
+	ClusterIPNet []CIDRNetworkEntry
 
 	GatewayInit      bool
 	GatewayIntf      string

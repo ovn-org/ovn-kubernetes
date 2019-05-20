@@ -611,7 +611,7 @@ ovn-master () {
   echo "=============== ovn-master ========== MASTER ONLY"
   /usr/bin/ovnkube \
     --init-master ${ovn_pod_host} --net-controller \
-    --cluster-subnet ${net_cidr} --service-cluster-ip-range=${svc_cidr} \
+    --cluster-subnet ${net_cidr} --k8s-service-cidr=${svc_cidr} \
     --k8s-token=${k8s_token} --k8s-apiserver=${K8S_APISERVER} --k8s-cacert=${K8S_CACERT} \
     --nb-address=${ovn_nbdb} --sb-address=${ovn_sbdb} \
     --nodeport \
@@ -687,7 +687,7 @@ ovn-node () {
   # restarted or ovs daemonset is deleted.
   # TEMP HACK - WORKAROUND
   /usr/bin/ovnkube --init-node ${K8S_NODE} \
-      --cluster-subnet ${net_cidr} --service-cluster-ip-range=${svc_cidr} \
+      --cluster-subnet ${net_cidr} --k8s-service-cidr=${svc_cidr} \
       --k8s-token=${k8s_token} --k8s-apiserver=${K8S_APISERVER} --k8s-cacert=${K8S_CACERT} \
       --nb-address=${ovn_nbdb} --sb-address=${ovn_sbdb} \
       --nodeport \
@@ -753,7 +753,7 @@ start_ovn () {
     echo "=============== start ovn-master ========== MASTER ONLY"
     /usr/bin/ovnkube \
       --init-master ${ovn_pod_host} --net-controller \
-      --cluster-subnet ${net_cidr} --service-cluster-ip-range=${svc_cidr} \
+      --cluster-subnet ${net_cidr} --k8s-service-cidr=${svc_cidr} \
       --k8s-token=${k8s_token} --k8s-apiserver=${K8S_APISERVER} --k8s-cacert=${K8S_CACERT} \
       --nb-address=${ovn_nbdb} --sb-address=${ovn_sbdb} \
       --nodeport \
@@ -779,7 +779,7 @@ start_ovn () {
   # restarted or ovs daemonset is deleted.
   # TEMP HACK - WORKAROUND
   /usr/bin/ovnkube --init-node ${K8S_NODE} \
-      --cluster-subnet ${net_cidr} --service-cluster-ip-range=${svc_cidr} \
+      --cluster-subnet ${net_cidr} --k8s-service-cidr=${svc_cidr} \
       --k8s-token=${k8s_token} --k8s-apiserver=${K8S_APISERVER} --k8s-cacert=${K8S_CACERT} \
       --nb-address=${ovn_nbdb} --sb-address=${ovn_sbdb} \
       --nodeport \

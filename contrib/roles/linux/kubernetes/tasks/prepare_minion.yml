@@ -133,7 +133,7 @@
             --k8s-token {{TOKEN}} \
             --k8s-cacert /etc/openvswitch/k8s-ca.crt \
             --k8s-apiserver "http://{{ kubernetes_cluster_info.MASTER_IP }}:8080" \
-            --service-cluster-ip-range "{{ kubernetes_cluster_info.SERVICE_CLUSTER_IP_RANGE }}" \
+            --k8s-service-cidr "{{ kubernetes_cluster_info.SERVICE_CLUSTER_IP_RANGE }}" \
             --nb-address tcp://{{ kubernetes_cluster_info.MASTER_IP }}:6641 \
             --sb-address tcp://{{ kubernetes_cluster_info.MASTER_IP }}:6642
           Restart=on-failure
