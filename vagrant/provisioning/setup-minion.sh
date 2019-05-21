@@ -128,9 +128,9 @@ sudo sh kubeadm_join.sh
 
 
 ## Clone ovn-kubernetes repo
-mkdir -p $HOME/work/src/github.com/openvswitch
-pushd $HOME/work/src/github.com/openvswitch
-git clone https://github.com/openvswitch/ovn-kubernetes
+mkdir -p $HOME/work/src/github.com/ovn-org
+pushd $HOME/work/src/github.com/ovn-org
+git clone https://github.com/ovn-org/ovn-kubernetes
 popd
 
 if [ "$DAEMONSET" != "true" ]; then
@@ -141,7 +141,7 @@ if [ "$DAEMONSET" != "true" ]; then
   export GOPATH=$HOME/work
 
   # Install OVN+K8S Integration
-  pushd $HOME/work/src/github.com/openvswitch/ovn-kubernetes/go-controller
+  pushd $HOME/work/src/github.com/ovn-org/ovn-kubernetes/go-controller
   make 1>&2 2>/dev/null
   sudo make install
   popd

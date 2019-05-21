@@ -6,9 +6,9 @@ import (
 	"github.com/urfave/cli"
 	fakeexec "k8s.io/utils/exec/testing"
 
-	"github.com/openvswitch/ovn-kubernetes/go-controller/pkg/config"
-	ovntest "github.com/openvswitch/ovn-kubernetes/go-controller/pkg/testing"
-	"github.com/openvswitch/ovn-kubernetes/go-controller/pkg/util"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
+	ovntest "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/testing"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
 
 	. "github.com/onsi/ginkgo"
 	. "github.com/onsi/gomega"

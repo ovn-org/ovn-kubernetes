@@ -35,9 +35,9 @@ install it.
 
 ```
 export GOPATH=$HOME/work
-mkdir -p $GOPATH/github.com/openvswitch
-cd $GOPATH/github.com/openvswitch
-git clone https://github.com/openvswitch/ovn-kubernetes
+mkdir -p $GOPATH/github.com/ovn-org
+cd $GOPATH/github.com/ovn-org
+git clone https://github.com/ovn-org/ovn-kubernetes
 cd ovn-kubernetes/go-controller
 make
 sudo make install

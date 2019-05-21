@@ -12,7 +12,7 @@ import (
 	kexec "k8s.io/utils/exec"
 	fakeexec "k8s.io/utils/exec/testing"
 
-	ovntest "github.com/openvswitch/ovn-kubernetes/go-controller/pkg/testing"
+	ovntest "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/testing"
 
 	. "github.com/onsi/ginkgo"
 	. "github.com/onsi/gomega"

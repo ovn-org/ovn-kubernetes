@@ -1,5 +1,5 @@
 %global project ovn-kubernetes
-%global git0 https://github.com/openvswitch/%{repo}
+%global git0 https://github.com/ovn-org/%{repo}
 # commit is the image that you want to build
 %global commit         87cd2fdedb89ed4bf43f09d8ccfc70b5e5607e3f
 %global shortcommit    %(c=%{commit}; echo ${c:0:7})
@@ -25,7 +25,7 @@
 Name: openvswitch-ovn-kubernetes
 Version: %{commit}
 Release: 1%{?dist}
-URL: https://www.github.com/openvswitch/ovn-kubernetes
+URL: https://www.github.com/ovn-org/ovn-kubernetes
 Summary: Open Virtual Networking Kubernetes Wedge
 
 License: ASL 2.0

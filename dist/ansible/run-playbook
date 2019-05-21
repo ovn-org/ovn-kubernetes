@@ -1,7 +1,7 @@
 #!/bin/bash
 
 # clone ovn-kubernetes on master and cd to dist/ansible
-# git clone https://github.com/openvswitch/ovn-kubernetes ~/ovn-kubernetes
+# git clone https://github.com/ovn-org/ovn-kubernetes ~/ovn-kubernetes
 # cd ~/ovn-kubernetes/dist/ansible
 # edit hosts for hostname of master and desired image
 

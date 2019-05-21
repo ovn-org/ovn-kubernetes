@@ -13,7 +13,7 @@ import (
 	"github.com/sirupsen/logrus"
 	kexec "k8s.io/utils/exec"
 
-	"github.com/openvswitch/ovn-kubernetes/go-controller/pkg/config"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
 )
 
 const (

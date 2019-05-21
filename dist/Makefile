@@ -17,7 +17,7 @@ rpms: srpm rpm
 
 # Build snapshot RPMs based on the commit number in the
 # the openvswitch-ovn-kubernetes.spec.snapshot file
-# The commit must be in https://github.com/openvswitch/ovn-kubernetes
+# The commit must be in https://github.com/ovn-org/ovn-kubernetes
 snapshot: rpmsnap
 
 dist: openvswitch-ovn-kubernetes.spec

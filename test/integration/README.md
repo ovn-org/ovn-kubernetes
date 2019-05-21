@@ -15,5 +15,5 @@ The playbooks assume the following things about your system:
  - on RHEL, the server and extras repos are configured and certs are present
  - `ansible` is installed and the host is boot-strapped to allow `ansible` to run against it
  - the `$GOPATH` is set and present for all shells (*e.g.* written in `/etc/environment`)
- - ovn-kubernetes repository is checked out to the correct state at `${GOPATH}/src/github.com/openvswitch/ovn-kubernetes`
+ - ovn-kubernetes repository is checked out to the correct state at `${GOPATH}/src/github.com/ovn-org/ovn-kubernetes`
  - the user running the playbook has access to passwordless `sudo`

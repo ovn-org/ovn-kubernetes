@@ -17,11 +17,11 @@ import (
 	"github.com/sirupsen/logrus"
 	"github.com/urfave/cli"
 
-	ovncluster "github.com/openvswitch/ovn-kubernetes/go-controller/pkg/cluster"
-	"github.com/openvswitch/ovn-kubernetes/go-controller/pkg/config"
-	"github.com/openvswitch/ovn-kubernetes/go-controller/pkg/factory"
-	"github.com/openvswitch/ovn-kubernetes/go-controller/pkg/ovn"
-	util "github.com/openvswitch/ovn-kubernetes/go-controller/pkg/util"
+	ovncluster "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/cluster"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/factory"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn"
+	util "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
 
 	kexec "k8s.io/utils/exec"
 )
