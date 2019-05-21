@@ -10,10 +10,10 @@ import (
 	"k8s.io/client-go/kubernetes/fake"
 	fakeexec "k8s.io/utils/exec/testing"
 
-	"github.com/openvswitch/ovn-kubernetes/go-controller/pkg/config"
-	"github.com/openvswitch/ovn-kubernetes/go-controller/pkg/factory"
-	ovntest "github.com/openvswitch/ovn-kubernetes/go-controller/pkg/testing"
-	"github.com/openvswitch/ovn-kubernetes/go-controller/pkg/util"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/factory"
+	ovntest "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/testing"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
 
 	. "github.com/onsi/ginkgo"
 	. "github.com/onsi/gomega"

@@ -12,7 +12,7 @@ function setup_env() {
   OVN_KUBE_ROOT="$( absolute_path "${init_source}" )"
   export OVN_KUBE_ROOT
   pushd ${OVN_KUBE_ROOT} >/dev/null
-  OVN_KUBE_GO_PACKAGE="github.com/openvswitch/ovn-kubernetes/go-controller"
+  OVN_KUBE_GO_PACKAGE="github.com/ovn-org/ovn-kubernetes/go-controller"
   OVN_KUBE_OUTPUT=${OVN_KUBE_ROOT}/${OUT_DIR}
 
   if [[ -z "$(which go)" ]]; then

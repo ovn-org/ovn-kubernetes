@@ -38,7 +38,7 @@
     path: "{{ item }}"
     state: directory
   with_items:
-    - "{{ ansible_env.GOPATH }}/src/github.com/openvswitch"
+    - "{{ ansible_env.GOPATH }}/src/github.com/ovn-org"
     - "{{ ansible_env.GOPATH }}/src/github.com/k8s.io"
     - "{{ ansible_env.GOPATH }}/src/github.com/openshift"
 

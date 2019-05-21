@@ -154,9 +154,9 @@ fi
 
 
 # Clone ovn-kubernetes repo
-mkdir -p $HOME/work/src/github.com/openvswitch
-pushd $HOME/work/src/github.com/openvswitch
-git clone https://github.com/openvswitch/ovn-kubernetes
+mkdir -p $HOME/work/src/github.com/ovn-org
+pushd $HOME/work/src/github.com/ovn-org
+git clone https://github.com/ovn-org/ovn-kubernetes
 popd
 
 if [ "$DAEMONSET" != "true" ]; then
@@ -166,7 +166,7 @@ if [ "$DAEMONSET" != "true" ]; then
   export PATH="/usr/local/go/bin:echo $PATH"
   export GOPATH=$HOME/work
 
-  pushd $HOME/work/src/github.com/openvswitch/ovn-kubernetes/go-controller
+  pushd $HOME/work/src/github.com/ovn-org/ovn-kubernetes/go-controller
   make 1>&2 2>/dev/null
   sudo make install
   popd
@@ -227,7 +227,7 @@ else
   sudo sed -i  '/^127.0.0.1\tk8s/d' /etc/hosts
 
   # Generate various OVN K8s yamls from the template files
-  pushd $HOME/work/src/github.com/openvswitch/ovn-kubernetes/dist/images
+  pushd $HOME/work/src/github.com/ovn-org/ovn-kubernetes/dist/images
   ./daemonset.sh --image=docker.io/ovnkube/ovn-daemonset-u:latest \
   --net-cidr=192.168.0.0/16 --svc-cidr=172.16.1.0/24 \
   --k8s-apiserver=https://$OVERLAY_IP:6443
@@ -237,16 +237,16 @@ else
   kubectl label node k8smaster node-role.kubernetes.io/master=true --overwrite
 
   # Create OVN namespace, service accounts, ovnkube-db headless service, configmap, and policies
-  kubectl create -f $HOME/work/src/github.com/openvswitch/ovn-kubernetes/dist/yaml/ovn-setup.yaml
+  kubectl create -f $HOME/work/src/github.com/ovn-org/ovn-kubernetes/dist/yaml/ovn-setup.yaml
 
   # Run ovnkube-db daemonset.
-  kubectl create -f $HOME/work/src/github.com/openvswitch/ovn-kubernetes/dist/yaml/ovnkube-db.yaml
+  kubectl create -f $HOME/work/src/github.com/ovn-org/ovn-kubernetes/dist/yaml/ovnkube-db.yaml
 
   # Run ovnkube-master daemonset.
-  kubectl create -f $HOME/work/src/github.com/openvswitch/ovn-kubernetes/dist/yaml/ovnkube-master.yaml
+  kubectl create -f $HOME/work/src/github.com/ovn-org/ovn-kubernetes/dist/yaml/ovnkube-master.yaml
 
   # Run ovnkube daemonsets for nodes
-  kubectl create -f $HOME/work/src/github.com/openvswitch/ovn-kubernetes/dist/yaml/ovnkube-node.yaml
+  kubectl create -f $HOME/work/src/github.com/ovn-org/ovn-kubernetes/dist/yaml/ovnkube-node.yaml
 fi
 
 # Setup some example yaml files

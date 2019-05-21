@@ -3,7 +3,7 @@ package cluster
 import (
 	"fmt"
 
-	"github.com/openvswitch/ovn-kubernetes/go-controller/pkg/util"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
 )
 
 func initSpareGateway(nodeName string, clusterIPSubnet []string,

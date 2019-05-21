@@ -5,10 +5,10 @@ import (
 	"net"
 
 	"github.com/openshift/origin/pkg/util/netutils"
-	"github.com/openvswitch/ovn-kubernetes/go-controller/pkg/config"
-	"github.com/openvswitch/ovn-kubernetes/go-controller/pkg/factory"
-	"github.com/openvswitch/ovn-kubernetes/go-controller/pkg/kube"
-	"github.com/openvswitch/ovn-kubernetes/go-controller/pkg/util"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/factory"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/kube"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
 	"k8s.io/client-go/kubernetes"
 )
 
