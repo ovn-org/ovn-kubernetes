@@ -112,9 +112,18 @@
     remote_src: yes
 
 - name: Kubernetes Minion | Set default "init_gateway" fact if not already defined
-  set_fact:
-    init_gateway: true
+  block:
+  - set_fact:
+      init_gateway: true
+    when: ansible_distribution_version == '16.04'
+  - set_fact:
+      init_gateway: false
+    when: ansible_distribution_version == '18.04'
   when: init_gateway is not defined
+
+- fail:
+    msg: "Gateway not supported yet on Ubuntu 18.04"
+  when: init_gateway == true and ansible_distribution_version == '18.04'
 
 - name: Kubernetes Minion | Setup OVN Kube service
   block:
