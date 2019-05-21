@@ -204,7 +204,7 @@
     block: |
       [Unit]
       Description=OVN watches the Kubernetes API
-      Documentation=https://github.com/openvswitch/ovn-kubernetes#watchers-on-master-node
+      Documentation=https://github.com/ovn-org/ovn-kubernetes#watchers-on-master-node
       [Service]
       ExecStart=/usr/bin/ovnkube \
         -init-master "{{ ansible_hostname }}" \
