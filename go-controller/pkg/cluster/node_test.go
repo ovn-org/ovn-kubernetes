@@ -4,7 +4,6 @@ import (
 	"fmt"
 
 	"github.com/urfave/cli"
-	fakeexec "k8s.io/utils/exec/testing"
 
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
 	ovntest "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/testing"
@@ -33,20 +32,14 @@ var _ = Describe("Node Operations", func() {
 				interval int    = 100000
 			)
 
-			fakeCmds := ovntest.AddFakeCmd(nil, &ovntest.ExpectedCmd{
+			fexec := ovntest.NewFakeExec()
+			fexec.AddFakeCmd(&ovntest.ExpectedCmd{
 				Cmd: fmt.Sprintf("ovs-vsctl --timeout=15 set Open_vSwitch . "+
 					"external_ids:ovn-encap-type=geneve "+
 					"external_ids:ovn-encap-ip=%s "+
 					"external_ids:ovn-remote-probe-interval=%d",
 					nodeName, interval),
 			})
-
-			fexec := &fakeexec.FakeExec{
-				CommandScript: fakeCmds,
-				LookPathFunc: func(file string) (string, error) {
-					return fmt.Sprintf("/fake-bin/%s", file), nil
-				},
-			}
 
 			err := util.SetExec(fexec)
 			Expect(err).NotTo(HaveOccurred())
@@ -57,7 +50,7 @@ var _ = Describe("Node Operations", func() {
 			err = setupOVNNode(nodeName)
 			Expect(err).NotTo(HaveOccurred())
 
-			Expect(fexec.CommandCalls).To(Equal(len(fakeCmds)))
+			Expect(fexec.CalledMatchesExpected()).To(BeTrue())
 			return nil
 		}
 

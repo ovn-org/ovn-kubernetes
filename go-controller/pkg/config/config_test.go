@@ -10,7 +10,6 @@ import (
 
 	"github.com/urfave/cli"
 	kexec "k8s.io/utils/exec"
-	fakeexec "k8s.io/utils/exec/testing"
 
 	ovntest "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/testing"
 
@@ -181,36 +180,31 @@ var _ = Describe("Config Operations", func() {
 
 	It("reads defaults from ovs-vsctl external IDs", func() {
 		app.Action = func(ctx *cli.Context) error {
+			fexec := ovntest.NewFakeExec()
+
 			// k8s-api-server
-			fakeCmds := ovntest.AddFakeCmd(nil, &ovntest.ExpectedCmd{
+			fexec.AddFakeCmd(&ovntest.ExpectedCmd{
 				Cmd:    "ovs-vsctl --timeout=15 --if-exists get Open_vSwitch . external_ids:k8s-api-server",
 				Output: "https://somewhere.com:8081",
 			})
 
 			// k8s-api-token
-			fakeCmds = ovntest.AddFakeCmd(fakeCmds, &ovntest.ExpectedCmd{
+			fexec.AddFakeCmd(&ovntest.ExpectedCmd{
 				Cmd:    "ovs-vsctl --timeout=15 --if-exists get Open_vSwitch . external_ids:k8s-api-token",
 				Output: "asadfasdfasrw3atr3r3rf33fasdaa3233",
 			})
 			// k8s-ca-certificate
 			fname, err := createTempFile("kube-cacert.pem")
 			Expect(err).NotTo(HaveOccurred())
-			fakeCmds = ovntest.AddFakeCmd(fakeCmds, &ovntest.ExpectedCmd{
+			fexec.AddFakeCmd(&ovntest.ExpectedCmd{
 				Cmd:    "ovs-vsctl --timeout=15 --if-exists get Open_vSwitch . external_ids:k8s-ca-certificate",
 				Output: fname,
 			})
 			// ovn-nb address
-			fakeCmds = ovntest.AddFakeCmd(fakeCmds, &ovntest.ExpectedCmd{
+			fexec.AddFakeCmd(&ovntest.ExpectedCmd{
 				Cmd:    "ovs-vsctl --timeout=15 --if-exists get Open_vSwitch . external_ids:ovn-nb",
 				Output: "tcp:1.1.1.1:6441",
 			})
-
-			fexec := &fakeexec.FakeExec{
-				CommandScript: fakeCmds,
-				LookPathFunc: func(file string) (string, error) {
-					return fmt.Sprintf("/fake-bin/%s", file), nil
-				},
-			}
 
 			cfgPath, err := InitConfig(ctx, fexec, &Defaults{
 				OvnNorthAddress: true,
@@ -220,7 +214,7 @@ var _ = Describe("Config Operations", func() {
 			})
 			Expect(err).NotTo(HaveOccurred())
 			Expect(cfgPath).To(Equal(cfgFile.Name()))
-			Expect(fexec.CommandCalls).To(Equal(len(fakeCmds)))
+			Expect(fexec.CalledMatchesExpected()).To(BeTrue())
 
 			Expect(Kubernetes.APIServer).To(Equal("https://somewhere.com:8081"))
 			Expect(Kubernetes.CACert).To(Equal(fname))
@@ -246,36 +240,31 @@ var _ = Describe("Config Operations", func() {
 
 	It("reads defaults (multiple master) from ovs-vsctl external IDs", func() {
 		app.Action = func(ctx *cli.Context) error {
+			fexec := ovntest.NewFakeExec()
+
 			// k8s-api-server
-			fakeCmds := ovntest.AddFakeCmd(nil, &ovntest.ExpectedCmd{
+			fexec.AddFakeCmd(&ovntest.ExpectedCmd{
 				Cmd:    "ovs-vsctl --timeout=15 --if-exists get Open_vSwitch . external_ids:k8s-api-server",
 				Output: "https://somewhere.com:8081",
 			})
 
 			// k8s-api-token
-			fakeCmds = ovntest.AddFakeCmd(fakeCmds, &ovntest.ExpectedCmd{
+			fexec.AddFakeCmd(&ovntest.ExpectedCmd{
 				Cmd:    "ovs-vsctl --timeout=15 --if-exists get Open_vSwitch . external_ids:k8s-api-token",
 				Output: "asadfasdfasrw3atr3r3rf33fasdaa3233",
 			})
 			// k8s-ca-certificate
 			fname, err := createTempFile("kube-cacert.pem")
 			Expect(err).NotTo(HaveOccurred())
-			fakeCmds = ovntest.AddFakeCmd(fakeCmds, &ovntest.ExpectedCmd{
+			fexec.AddFakeCmd(&ovntest.ExpectedCmd{
 				Cmd:    "ovs-vsctl --timeout=15 --if-exists get Open_vSwitch . external_ids:k8s-ca-certificate",
 				Output: fname,
 			})
 			// ovn-nb address
-			fakeCmds = ovntest.AddFakeCmd(fakeCmds, &ovntest.ExpectedCmd{
+			fexec.AddFakeCmd(&ovntest.ExpectedCmd{
 				Cmd:    "ovs-vsctl --timeout=15 --if-exists get Open_vSwitch . external_ids:ovn-nb",
 				Output: "tcp:1.1.1.1:6441,tcp:1.1.1.2:6641,tcp:1.1.1.3:6641",
 			})
-
-			fexec := &fakeexec.FakeExec{
-				CommandScript: fakeCmds,
-				LookPathFunc: func(file string) (string, error) {
-					return fmt.Sprintf("/fake-bin/%s", file), nil
-				},
-			}
 
 			cfgPath, err := InitConfig(ctx, fexec, &Defaults{
 				OvnNorthAddress: true,
@@ -285,7 +274,7 @@ var _ = Describe("Config Operations", func() {
 			})
 			Expect(err).NotTo(HaveOccurred())
 			Expect(cfgPath).To(Equal(cfgFile.Name()))
-			Expect(fexec.CommandCalls).To(Equal(len(fakeCmds)))
+			Expect(fexec.CalledMatchesExpected()).To(BeTrue())
 
 			Expect(Kubernetes.APIServer).To(Equal("https://somewhere.com:8081"))
 			Expect(Kubernetes.CACert).To(Equal(fname))
@@ -658,19 +647,11 @@ client-cacert=/path/to/sb-client-ca.crt
 		It("configures client northbound SSL correctly", func() {
 			const nbURLOVN string = "ssl:1.2.3.4:6641"
 
-			fakeCmds := ovntest.AddFakeCmd(nil, &ovntest.ExpectedCmd{
-				Cmd: fmt.Sprintf("ovn-nbctl --db=%s --timeout=5 --private-key=%s --certificate=%s --bootstrap-ca-cert=%s list nb_global", nbURLOVN, keyFile, certFile, caFile),
+			fexec := ovntest.NewFakeExec()
+			fexec.AddFakeCmdsNoOutputNoError([]string{
+				"ovn-nbctl --db=" + nbURLOVN + " --timeout=5 --private-key=" + keyFile + " --certificate=" + certFile + " --bootstrap-ca-cert=" + caFile + " list nb_global",
+				"ovs-vsctl --timeout=15 set Open_vSwitch . external_ids:ovn-nb=\"" + nbURLOVN + "\"",
 			})
-			fakeCmds = ovntest.AddFakeCmd(fakeCmds, &ovntest.ExpectedCmd{
-				Cmd: fmt.Sprintf("ovs-vsctl --timeout=15 set Open_vSwitch . external_ids:ovn-nb=\"%s\"", nbURLOVN),
-			})
-
-			fexec := &fakeexec.FakeExec{
-				CommandScript: fakeCmds,
-				LookPathFunc: func(file string) (string, error) {
-					return fmt.Sprintf("/fake-bin/%s", file), nil
-				},
-			}
 
 			cliConfig := &OvnAuthConfig{
 				Address: nbURL,
@@ -691,31 +672,19 @@ client-cacert=/path/to/sb-client-ca.crt
 			Expect(a.GetURL()).To(Equal(nbURLOVN))
 			err = a.SetDBAuth()
 			Expect(err).NotTo(HaveOccurred())
-			Expect(fexec.CommandCalls).To(Equal(len(fakeCmds)))
+			Expect(fexec.CalledMatchesExpected()).To(BeTrue())
 		})
 
 		It("configures client southbound SSL correctly", func() {
 			const sbURLOVN string = "ssl:1.2.3.4:6642"
 
-			fakeCmds := ovntest.AddFakeCmd(nil, &ovntest.ExpectedCmd{
-				Cmd: fmt.Sprintf("ovn-nbctl --db=%s --timeout=5 --private-key=%s --certificate=%s --bootstrap-ca-cert=%s list nb_global", sbURLOVN, keyFile, certFile, caFile),
+			fexec := ovntest.NewFakeExec()
+			fexec.AddFakeCmdsNoOutputNoError([]string{
+				"ovn-nbctl --db=" + sbURLOVN + " --timeout=5 --private-key=" + keyFile + " --certificate=" + certFile + " --bootstrap-ca-cert=" + caFile + " list nb_global",
+				"ovs-vsctl --timeout=15 del-ssl",
+				"ovs-vsctl --timeout=15 set-ssl " + keyFile + " " + certFile + " " + caFile,
+				"ovs-vsctl --timeout=15 set Open_vSwitch . external_ids:ovn-remote=\"" + sbURLOVN + "\"",
 			})
-			fakeCmds = ovntest.AddFakeCmd(fakeCmds, &ovntest.ExpectedCmd{
-				Cmd: "ovs-vsctl --timeout=15 del-ssl",
-			})
-			fakeCmds = ovntest.AddFakeCmd(fakeCmds, &ovntest.ExpectedCmd{
-				Cmd: fmt.Sprintf("ovs-vsctl --timeout=15 set-ssl %s %s %s", keyFile, certFile, caFile),
-			})
-			fakeCmds = ovntest.AddFakeCmd(fakeCmds, &ovntest.ExpectedCmd{
-				Cmd: fmt.Sprintf("ovs-vsctl --timeout=15 set Open_vSwitch . external_ids:ovn-remote=\"%s\"", sbURLOVN),
-			})
-
-			fexec := &fakeexec.FakeExec{
-				CommandScript: fakeCmds,
-				LookPathFunc: func(file string) (string, error) {
-					return fmt.Sprintf("/fake-bin/%s", file), nil
-				},
-			}
 
 			cliConfig := &OvnAuthConfig{
 				Address: sbURL,
@@ -736,7 +705,7 @@ client-cacert=/path/to/sb-client-ca.crt
 			Expect(a.GetURL()).To(Equal(sbURLOVN))
 			err = a.SetDBAuth()
 			Expect(err).NotTo(HaveOccurred())
-			Expect(fexec.CommandCalls).To(Equal(len(fakeCmds)))
+			Expect(fexec.CalledMatchesExpected()).To(BeTrue())
 		})
 	})
 
