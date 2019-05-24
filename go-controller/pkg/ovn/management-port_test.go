@@ -1,14 +1,12 @@
 package ovn
 
 import (
-	"fmt"
 	"io/ioutil"
 	"os"
 	"path/filepath"
 	"runtime"
 
 	"github.com/urfave/cli"
-	fakeexec "k8s.io/utils/exec/testing"
 
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
 	ovntest "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/testing"
@@ -70,36 +68,37 @@ var _ = Describe("Management Port Operations", func() {
 				lrpMAC        string = "00:00:00:00:00:03"
 			)
 
-			fakeCmds := ovntest.AddFakeCmdsNoOutputNoError(nil, []string{
+			fexec := ovntest.NewFakeExec()
+			fexec.AddFakeCmdsNoOutputNoError([]string{
 				"ovs-vsctl --timeout=15 -- --may-exist add-br br-int",
 				"ovs-vsctl --timeout=15 -- --may-exist add-port br-int " + mgtPort + " -- set interface " + mgtPort + " type=internal mtu_request=" + mtu + " external-ids:iface-id=" + mgtPort,
 			})
-			fakeCmds = ovntest.AddFakeCmd(fakeCmds, &ovntest.ExpectedCmd{
+			fexec.AddFakeCmd(&ovntest.ExpectedCmd{
 				Cmd:    "ovs-vsctl --timeout=15 --if-exists get interface " + mgtPort + " mac_in_use",
 				Output: mgtPortMAC,
 			})
-			fakeCmds = ovntest.AddFakeCmd(fakeCmds, &ovntest.ExpectedCmd{
+			fexec.AddFakeCmd(&ovntest.ExpectedCmd{
 				Cmd: "ovn-nbctl --timeout=15 -- --may-exist lsp-add " + nodeName + " " + mgtPort + " -- lsp-set-addresses " + mgtPort + " " + mgtPortMAC + " " + mgtPortIP,
 			})
-			fakeCmds = ovntest.AddFakeCmd(fakeCmds, &ovntest.ExpectedCmd{
+			fexec.AddFakeCmd(&ovntest.ExpectedCmd{
 				Cmd:    "ovn-nbctl --timeout=15 lsp-get-addresses stor-" + nodeName,
 				Output: lrpMAC,
 			})
 
 			if runtime.GOOS == windowsOS {
 				const ifindex string = "10"
-				fakeCmds = ovntest.AddFakeCmdsNoOutputNoError(fakeCmds, []string{
+				fexec.AddFakeCmdsNoOutputNoError([]string{
 					"powershell Enable-NetAdapter " + mgtPort,
 					"powershell Get-NetIPAddress -InterfaceAlias " + mgtPort,
 					"powershell Remove-NetIPAddress -InterfaceAlias " + mgtPort + " -Confirm:$false",
 					"powershell New-NetIPAddress -IPAddress " + mgtPortIP + " -PrefixLength " + mgtPortPrefix + " -InterfaceAlias " + mgtPort,
 					"netsh interface ipv4 set subinterface " + mgtPort + " mtu=" + mtu + " store=persistent",
 				})
-				fakeCmds = ovntest.AddFakeCmd(fakeCmds, &ovntest.ExpectedCmd{
+				fexec.AddFakeCmd(&ovntest.ExpectedCmd{
 					Cmd:    "powershell $(Get-NetAdapter | Where { $_.Name -Match \"" + mgtPort + "\" }).ifIndex",
 					Output: ifindex,
 				})
-				fakeCmds = ovntest.AddFakeCmdsNoOutputNoError(fakeCmds, []string{
+				fexec.AddFakeCmdsNoOutputNoError([]string{
 					// Don't print route output; test that network is not yet found
 					"route print -4 " + clusterIPNet,
 					"route -p add " + clusterIPNet + " mask 255.255.0.0 " + gwIP + " METRIC 2 IF " + ifindex,
@@ -108,7 +107,7 @@ var _ = Describe("Management Port Operations", func() {
 					"route -p add " + serviceIPNet + " mask 255.255.0.0 " + gwIP + " METRIC 2 IF " + ifindex,
 				})
 			} else {
-				fakeCmds = ovntest.AddFakeCmdsNoOutputNoError(fakeCmds, []string{
+				fexec.AddFakeCmdsNoOutputNoError([]string{
 					"ip link set " + mgtPort + " up",
 					"ip addr flush dev " + mgtPort,
 					"ip addr add " + mgtPortCIDR + " dev " + mgtPort,
@@ -120,13 +119,6 @@ var _ = Describe("Management Port Operations", func() {
 				})
 			}
 
-			fexec := &fakeexec.FakeExec{
-				CommandScript: fakeCmds,
-				LookPathFunc: func(file string) (string, error) {
-					return fmt.Sprintf("/fake-bin/%s", file), nil
-				},
-			}
-
 			err := util.SetExec(fexec)
 			Expect(err).NotTo(HaveOccurred())
 
@@ -136,7 +128,7 @@ var _ = Describe("Management Port Operations", func() {
 			err = CreateManagementPort(nodeName, nodeSubnet, []string{clusterCIDR})
 			Expect(err).NotTo(HaveOccurred())
 
-			Expect(fexec.CommandCalls).To(Equal(len(fakeCmds)))
+			Expect(fexec.CalledMatchesExpected()).To(BeTrue())
 			return nil
 		}
 
