@@ -29,6 +29,7 @@ RUN yum install -y  \
 	libpcap \
 	hostname \
 	kubectl \
+	unbound-libs \
 	iproute strace socat && \
 	yum clean all
 
@@ -36,8 +37,8 @@ RUN yum install -y  \
 # docker build --build-arg rpmArch=ARCH -f Dockerfile.centos -t some_tag .
 # where ARCH can be x86_64 (default), aarch64, or ppc64le
 ARG rpmArch=x86_64
-ARG ovsVer=2.9.2
-ARG ovsSubVer=1.el7
+ARG ovsVer=2.10.1
+ARG ovsSubVer=3.el7
 ARG dpdkVer=17.11
 ARG dpdkSubVer=3.el7
 RUN rpm -i http://cbs.centos.org/kojifiles/packages/dpdk/${dpdkVer}/${dpdkSubVer}/${rpmArch}/dpdk-${dpdkVer}-${dpdkSubVer}.${rpmArch}.rpm
