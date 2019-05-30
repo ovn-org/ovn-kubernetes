@@ -10,7 +10,7 @@
       [Service]
       ExecStart=/usr/bin/kube-apiserver \
         --bind-address=0.0.0.0 \
-        --k8s-service-cidr={{ kubernetes_cluster_info.SERVICE_CLUSTER_IP_RANGE }} \
+        --service-cluster-ip-range={{ kubernetes_cluster_info.SERVICE_CLUSTER_IP_RANGE }} \
         --address=0.0.0.0 \
         --etcd-servers=http://127.0.0.1:2379 \
         --v=2 \
