@@ -120,6 +120,14 @@ func createTempFile(name string) (string, error) {
 	return fname, nil
 }
 
+func createTempFileContent(name, value string) (string, error) {
+	fname := filepath.Join(tmpDir, name)
+	if err := ioutil.WriteFile(fname, []byte(value), 0644); err != nil {
+		return "", err
+	}
+	return fname, nil
+}
+
 var _ = Describe("Config Operations", func() {
 	var app *cli.App
 	var cfgFile *os.File
@@ -129,6 +137,7 @@ var _ = Describe("Config Operations", func() {
 	if tmpErr != nil {
 		GinkgoT().Errorf("failed to create tempdir: %v", tmpErr)
 	}
+	tmpDir += "/"
 
 	BeforeEach(func() {
 		// Restore global default values before each testcase
@@ -149,7 +158,7 @@ var _ = Describe("Config Operations", func() {
 
 	It("uses expected defaults", func() {
 		app.Action = func(ctx *cli.Context) error {
-			cfgPath, err := InitConfig(ctx, kexec.New(), nil)
+			cfgPath, err := InitConfigSa(ctx, kexec.New(), tmpDir, nil)
 			Expect(err).NotTo(HaveOccurred())
 			Expect(cfgPath).To(Equal(cfgFile.Name()))
 
@@ -194,7 +203,7 @@ var _ = Describe("Config Operations", func() {
 				Output: "asadfasdfasrw3atr3r3rf33fasdaa3233",
 			})
 			// k8s-ca-certificate
-			fname, err := createTempFile("kube-cacert.pem")
+			fname, err := createTempFile("ca.crt")
 			Expect(err).NotTo(HaveOccurred())
 			fexec.AddFakeCmd(&ovntest.ExpectedCmd{
 				Cmd:    "ovs-vsctl --timeout=15 --if-exists get Open_vSwitch . external_ids:k8s-ca-certificate",
@@ -206,7 +215,7 @@ var _ = Describe("Config Operations", func() {
 				Output: "tcp:1.1.1.1:6441",
 			})
 
-			cfgPath, err := InitConfig(ctx, fexec, &Defaults{
+			cfgPath, err := InitConfigSa(ctx, fexec, tmpDir, &Defaults{
 				OvnNorthAddress: true,
 				K8sAPIServer:    true,
 				K8sToken:        true,
@@ -266,7 +275,11 @@ var _ = Describe("Config Operations", func() {
 				Output: "tcp:1.1.1.1:6441,tcp:1.1.1.2:6641,tcp:1.1.1.3:6641",
 			})
 
-			cfgPath, err := InitConfig(ctx, fexec, &Defaults{
+			tokenFile, err1 := createTempFileContent("token", "TG9yZW0gaXBzdW0gZ")
+			Expect(err1).NotTo(HaveOccurred())
+			defer os.Remove(tokenFile)
+
+			cfgPath, err := InitConfigSa(ctx, fexec, tmpDir, &Defaults{
 				OvnNorthAddress: true,
 				K8sAPIServer:    true,
 				K8sToken:        true,
@@ -297,6 +310,66 @@ var _ = Describe("Config Operations", func() {
 		}
 		err := app.Run([]string{app.Name, "-config-file=" + cfgFile.Name()})
 		Expect(err).NotTo(HaveOccurred())
+	})
+
+	It("uses serviceaccount files", func() {
+		kubeCAcertFile, err := createTempFile("ca.crt")
+		Expect(err).NotTo(HaveOccurred())
+		defer os.Remove(kubeCAcertFile)
+
+		tokenFile, err1 := createTempFileContent("token", "TG9yZW0gaXBzdW0gZ")
+		Expect(err1).NotTo(HaveOccurred())
+		defer os.Remove(tokenFile)
+
+		app.Action = func(ctx *cli.Context) error {
+			_, err := InitConfigSa(ctx, kexec.New(), tmpDir, nil)
+			Expect(err).NotTo(HaveOccurred())
+
+			Expect(Kubernetes.CACert).To(Equal(kubeCAcertFile))
+			Expect(Kubernetes.Token).To(Equal("TG9yZW0gaXBzdW0gZ"))
+
+			return nil
+		}
+		err2 := app.Run([]string{app.Name})
+		Expect(err2).NotTo(HaveOccurred())
+
+	})
+
+	It("uses environment variables", func() {
+		kubeconfigEnvFile, err := createTempFile("kubeconfig.env")
+		Expect(err).NotTo(HaveOccurred())
+		defer os.Remove(kubeconfigEnvFile)
+		os.Setenv("KUBECONFIG", kubeconfigEnvFile)
+		defer os.Setenv("KUBECONFIG", "")
+
+		os.Setenv("K8S_TOKEN", "this is the  token test")
+		defer os.Setenv("K8S_TOKEN", "")
+
+		os.Setenv("K8S_APISERVER", "https://9.2.3.4:6443")
+		defer os.Setenv("K8S_APISERVER", "")
+
+		kubeCAFile, err1 := createTempFile("kube-ca.crt")
+		Expect(err1).NotTo(HaveOccurred())
+		defer os.Remove(kubeCAFile)
+		os.Setenv("K8S_CACERT", kubeCAFile)
+		defer os.Setenv("K8S_CACERT", "")
+
+		app.Action = func(ctx *cli.Context) error {
+			var cfgPath string
+			cfgPath, err = InitConfigSa(ctx, kexec.New(), tmpDir, nil)
+			Expect(err).NotTo(HaveOccurred())
+			Expect(cfgPath).To(Equal(cfgFile.Name()))
+
+			Expect(Kubernetes.Kubeconfig).To(Equal(kubeconfigEnvFile))
+			Expect(Kubernetes.CACert).To(Equal(kubeCAFile))
+			Expect(Kubernetes.Token).To(Equal("this is the  token test"))
+			Expect(Kubernetes.APIServer).To(Equal("https://9.2.3.4:6443"))
+
+			return nil
+		}
+		err = app.Run([]string{app.Name, "-config-file=" + cfgFile.Name()})
+		Expect(err).NotTo(HaveOccurred())
+
 	})
 
 	It("overrides defaults with config file options", func() {

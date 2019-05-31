@@ -30,7 +30,7 @@ Then find the executables here : go-controller/_output/go/windows/
 ### Usage
 
 Run the 'ovnkube' executable to initialize master, node(s) and as the central all-in-one controller that builds the network as pods/services/ingress objects are born in kubernetes.
-Options specified on the command-line override both defaults and configuration file options.
+Options specified on the command-line override configuration file options which override environment variables. Environment variables override service account files.
 
 ```
 Usage:
@@ -60,7 +60,7 @@ Usage:
   -cni-plugin string
      the name of the CNI plugin (default: ovn-k8s-cni-overlay)
   -k8s-kubeconfig string
-     absolute path to the Kubernetes kubeconfig file (not required if the --k8s-apiserver, --k8s-ca-cert, and --k8s-token are given)
+     absolute path to the Kubernetes kubeconfig file (not required if the --k8s-apiserver, --k8s-cacert, and --k8s-token are given)
   -k8s-apiserver string
      URL of the Kubernetes API server (not required if --k8s-kubeconfig is given) (default: http://localhost:8443)
   -k8s-cacert string
@@ -85,6 +85,30 @@ Usage:
      CA certificate that the client should use for talking to the OVN database.  Leave empty to use local unix socket. (default: /etc/openvswitch/ovnsb-ca.cert)
   -ha
      rebuilds ovn db if it is started on a new node (experimental feature)
+```
+
+### Environment Variables
+Values for some configuration options can be passed in environment variables. 
+
+```
+  -KUBECONFIG
+     absolute path to the Kubernetes kubeconfig file overridden by --k8s-kubeconfig
+  -K8S_APISERVER
+     URL of the Kubernetes API server overriden by --k8s-apiserver
+  -K8S_CACERT
+     the absolute path to the Kubernetes API CA certificate overriden by --k8s-cacert
+  -K8S_TOKEN
+     the Kubernetes API authentication token overriden by --k8s-token
+```
+
+### Service Account Files
+The cluster makes the serviceaccount ca.crt and token available in files that are mounted in each container.
+
+```
+  -/var/run/secrets/kubernetes.io/serviceaccount/ca.crt
+     contains the Kubernetes API CA certificate overriden by --k8s-cacert and K8S_CACERT.
+  -/var/run/secrets/kubernetes.io/serviceaccount/token
+     contains the Kubernetes API token overriden by --k8s-token and K8S_TOKEN
 ```
 
 ### Configuration File
