@@ -331,6 +331,11 @@ func (wf *WatchFactory) AddEndpointsHandler(handlerFuncs cache.ResourceEventHand
 	return wf.addHandler(endpointsType, "", nil, handlerFuncs, processExisting)
 }
 
+// AddFilteredEndpointsHandler adds a handler function that will be executed when Endpoint objects that match the given filters change
+func (wf *WatchFactory) AddFilteredEndpointsHandler(namespace string, handlerFuncs cache.ResourceEventHandler, processExisting func([]interface{})) (*Handler, error) {
+	return wf.addHandler(endpointsType, namespace, nil, handlerFuncs, processExisting)
+}
+
 // RemoveEndpointsHandler removes a Endpoints object event handler function
 func (wf *WatchFactory) RemoveEndpointsHandler(handler *Handler) error {
 	return wf.removeHandler(endpointsType, handler)
