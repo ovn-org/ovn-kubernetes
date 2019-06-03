@@ -1,6 +1,6 @@
 # How to use Open Virtual Networking with Kubernetes
 
-The easiest way to get started is to use OVN daemonsets.
+On Linux, the easiest way to get started is to use OVN daemonsets.
 
 ## Install Open vSwitch kernel modules on all hosts.
 
@@ -64,10 +64,14 @@ kubectl create -f $HOME/work/src/github.com/ovn-org/ovn-kubernetes/dist/yaml/ovn
 kubectl create -f $HOME/work/src/github.com/ovn-org/ovn-kubernetes/dist/yaml/ovnkube-node.yaml
 ```
 
+NOTE: You don't need kube-proxy for OVN to work. You can delete that from your
+cluster.
+
 ## Manual installation and Vagrant
 
-If you want to understand what daemonsets run internally, please read
-[MANUAL.md] or read the scripts in the vagrant directory of this repo.
+For Windows, (and to understand what daemonsets run internally), please read
+[MANUAL.md].  For more advanced use cases too (like SSL and HA of databases),
+please read [MANUAL.md].
 
 [INSTALL.rst]: http://docs.openvswitch.org/en/latest/intro/install
 [INSTALL.UBUNTU.md]: docs/INSTALL.UBUNTU.md
