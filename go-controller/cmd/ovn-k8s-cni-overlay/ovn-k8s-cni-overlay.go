@@ -6,7 +6,7 @@ import (
 	"github.com/containernetworking/cni/pkg/skel"
 	"github.com/containernetworking/cni/pkg/types"
 	"github.com/containernetworking/cni/pkg/version"
-	"github.com/openvswitch/ovn-kubernetes/go-controller/pkg/cni"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/cni"
 	"github.com/urfave/cli"
 )
 

@@ -19,7 +19,7 @@ import (
 	"github.com/containernetworking/cni/pkg/types"
 	"github.com/containernetworking/cni/pkg/types/current"
 
-	"github.com/openvswitch/ovn-kubernetes/go-controller/pkg/config"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
 )
 
 // Plugin is the structure to hold the endpoint information and the corresponding

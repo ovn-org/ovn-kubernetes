@@ -2,7 +2,7 @@
 # This is done when installed ovn is no longer needed
 
 # On a convienent host, clone ovn-kubernetes cd to dist/ansible 
-# git clone https://github.com/openvswitch/ovn-kubernetes ~/ovn-kubernetes
+# git clone https://github.com/ovn-org/ovn-kubernetes ~/ovn-kubernetes
 # cd ~/ovn-kubernetes/dist/ansible
 
 # edit hosts file for the hostname of the master

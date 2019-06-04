@@ -2,6 +2,7 @@ package config
 
 import (
 	"fmt"
+	"io/ioutil"
 	"net"
 	"net/url"
 	"os"
@@ -49,7 +50,9 @@ var (
 
 	// Kubernetes holds Kubernetes-related parsed config file parameters and command-line overrides
 	Kubernetes = KubernetesConfig{
-		APIServer: "http://localhost:8080",
+		APIServer:          "http://localhost:8080",
+		ServiceCIDR:        "172.16.1.0/24",
+		OVNConfigNamespace: "ovn-kubernetes",
 	}
 
 	// OvnNorth holds northbound OVN database client and server authentication and location details
@@ -57,6 +60,12 @@ var (
 
 	// OvnSouth holds southbound OVN database client and server authentication and location details
 	OvnSouth OvnAuthConfig
+)
+
+const (
+	kubeServiceAccountPath       string = "/var/run/secrets/kubernetes.io/serviceaccount/"
+	kubeServiceAccountFileToken  string = "token"
+	kubeServiceAccountFileCACert string = "ca.crt"
 )
 
 // DefaultConfig holds parsed config file parameters and command-line overrides
@@ -98,10 +107,12 @@ type CNIConfig struct {
 
 // KubernetesConfig holds Kubernetes-related parsed config file parameters and command-line overrides
 type KubernetesConfig struct {
-	Kubeconfig string `gcfg:"kubeconfig"`
-	CACert     string `gcfg:"cacert"`
-	APIServer  string `gcfg:"apiserver"`
-	Token      string `gcfg:"token"`
+	Kubeconfig         string `gcfg:"kubeconfig"`
+	CACert             string `gcfg:"cacert"`
+	APIServer          string `gcfg:"apiserver"`
+	Token              string `gcfg:"token"`
+	ServiceCIDR        string `gcfg:"service-cidr"`
+	OVNConfigNamespace string `gcfg:"ovn-config-namespace"`
 }
 
 // OvnAuthConfig holds client authentication and location details for
@@ -149,6 +160,9 @@ var (
 	savedKubernetes KubernetesConfig
 	savedOvnNorth   OvnAuthConfig
 	savedOvnSouth   OvnAuthConfig
+
+	// legacy service-cluster-ip-range CLI option
+	serviceClusterIPRange string
 )
 
 func init() {
@@ -331,11 +345,17 @@ var K8sFlags = []cli.Flag{
 		Destination: &cliConfig.CNI.WinHNSNetworkID,
 	},
 	cli.StringFlag{
-		Name: "service-cluster-ip-range",
+		Name:        "service-cluster-ip-range",
+		Usage:       "Deprecated alias for k8s-service-cidr.",
+		Destination: &serviceClusterIPRange,
+	},
+	cli.StringFlag{
+		Name: "k8s-service-cidr",
 		Usage: "A CIDR notation IP range from which k8s assigns " +
 			"service cluster IPs. This should be the same as the one " +
 			"provided for kube-apiserver \"-service-cluster-ip-range\" " +
-			"option.",
+			"option. (default: 172.16.1.0/24)",
+		Destination: &cliConfig.Kubernetes.ServiceCIDR,
 	},
 	cli.StringFlag{
 		Name:        "k8s-kubeconfig",
@@ -356,6 +376,11 @@ var K8sFlags = []cli.Flag{
 		Name:        "k8s-token",
 		Usage:       "the Kubernetes API authentication token (not required if --k8s-kubeconfig is given)",
 		Destination: &cliConfig.Kubernetes.Token,
+	},
+	cli.StringFlag{
+		Name:        "ovn-config-namespace",
+		Usage:       "specify a namespace which will contain services to config the OVN databases",
+		Destination: &cliConfig.Kubernetes.OVNConfigNamespace,
 	},
 }
 
@@ -524,7 +549,17 @@ func setOVSExternalID(exec kexec.Interface, key, value string) error {
 	return nil
 }
 
-func buildKubernetesConfig(exec kexec.Interface, cli, file *config, defaults *Defaults) error {
+func buildKubernetesConfig(exec kexec.Interface, cli, file *config, saPath string, defaults *Defaults) error {
+	// token adn ca.crt may be from files mounted in container.
+	var saConfig KubernetesConfig
+	if data, err := ioutil.ReadFile(filepath.Join(saPath, kubeServiceAccountFileToken)); err == nil {
+		saConfig.Token = string(data)
+	}
+	if _, err2 := os.Stat(filepath.Join(saPath, kubeServiceAccountFileCACert)); err2 == nil {
+		saConfig.CACert = filepath.Join(saPath, kubeServiceAccountFileCACert)
+	}
+	overrideFields(&Kubernetes, &saConfig)
+
 	// Grab default values from OVS external IDs
 	if defaults.K8sAPIServer {
 		Kubernetes.APIServer = getOVSExternalID(exec, "k8s-api-server")
@@ -535,6 +570,18 @@ func buildKubernetesConfig(exec kexec.Interface, cli, file *config, defaults *De
 	if defaults.K8sCert {
 		Kubernetes.CACert = getOVSExternalID(exec, "k8s-ca-certificate")
 	}
+
+	// values for token, cacert, kubeconfig, api-server may be found in several places.
+	// Take the first found when looking in this order: command line options, config file,
+	// environment variables, service account files
+
+	envConfig := KubernetesConfig{
+		Kubeconfig: os.Getenv("KUBECONFIG"),
+		CACert:     os.Getenv("K8S_CACERT"),
+		APIServer:  os.Getenv("K8S_APISERVER"),
+		Token:      os.Getenv("K8S_TOKEN"),
+	}
+	overrideFields(&Kubernetes, &envConfig)
 
 	// Copy config file values over default values
 	overrideFields(&Kubernetes, &file.Kubernetes)
@@ -553,6 +600,16 @@ func buildKubernetesConfig(exec kexec.Interface, cli, file *config, defaults *De
 		return fmt.Errorf("kubernetes API server address %q invalid: %v", Kubernetes.APIServer, err)
 	} else if url.Scheme != "https" && url.Scheme != "http" {
 		return fmt.Errorf("kubernetes API server URL scheme %q invalid", url.Scheme)
+	}
+
+	// Legacy service-cluster-ip-range CLI option overrides config file or --k8s-service-cidr
+	if serviceClusterIPRange != "" {
+		Kubernetes.ServiceCIDR = serviceClusterIPRange
+	}
+	if Kubernetes.ServiceCIDR == "" {
+		return fmt.Errorf("kubernetes service-cidr is required")
+	} else if _, _, err := net.ParseCIDR(Kubernetes.ServiceCIDR); err != nil {
+		return fmt.Errorf("kubernetes service network CIDR %q invalid: %v", Kubernetes.ServiceCIDR, err)
 	}
 
 	return nil
@@ -580,23 +637,27 @@ func getConfigFilePath(ctx *cli.Context) (string, bool) {
 // constructs the global config object from them. It returns the config file
 // path (if explicitly specified) or an error
 func InitConfig(ctx *cli.Context, exec kexec.Interface, defaults *Defaults) (string, error) {
-	return InitConfigWithPath(ctx, exec, "", defaults)
+	return initConfigWithPath(ctx, exec, kubeServiceAccountPath, defaults)
 }
 
-// InitConfigWithPath reads the given config file (or if empty, reads the config file
+// InitConfigSa reads the config file and common command-line options and
+// constructs the global config object from them. It passes the service account directory.
+// It returns the config file path (if explicitly specified) or an error
+func InitConfigSa(ctx *cli.Context, exec kexec.Interface, saPath string, defaults *Defaults) (string, error) {
+	return initConfigWithPath(ctx, exec, saPath, defaults)
+}
+
+// initConfigWithPath reads the given config file (or if empty, reads the config file
 // specified by command-line arguments, or empty, the default config file) and
 // common command-line options and constructs the global config object from
 // them. It returns the config file path (if explicitly specified) or an error
-func InitConfigWithPath(ctx *cli.Context, exec kexec.Interface, configFile string, defaults *Defaults) (string, error) {
+func initConfigWithPath(ctx *cli.Context, exec kexec.Interface, saPath string, defaults *Defaults) (string, error) {
 	var cfg config
 	var retConfigFile string
+	var configFile string
 	var configFileIsDefault bool
 
-	// If no specific config file was given, try to find one from command-line
-	// arguments, or the platform-specific default config file path
-	if configFile == "" {
-		configFile, configFileIsDefault = getConfigFilePath(ctx)
-	}
+	configFile, configFileIsDefault = getConfigFilePath(ctx)
 
 	logrus.SetOutput(os.Stderr)
 
@@ -651,7 +712,7 @@ func InitConfigWithPath(ctx *cli.Context, exec kexec.Interface, configFile strin
 		}
 	}
 
-	if err = buildKubernetesConfig(exec, &cliConfig, &cfg, defaults); err != nil {
+	if err = buildKubernetesConfig(exec, &cliConfig, &cfg, saPath, defaults); err != nil {
 		return "", err
 	}
 
@@ -879,26 +940,37 @@ func (a *OvnAuthConfig) SetDBAuth() error {
 	return nil
 }
 
-func (a *OvnAuthConfig) updateIP(newIP string) error {
+func (a *OvnAuthConfig) updateIP(newIP []string, port string) error {
 	if a.Address != "" {
 		s := strings.Split(a.Address, ":")
 		if len(s) != 3 {
 			return fmt.Errorf("failed to parse OvnAuthConfig address %q", a.Address)
 		}
-		a.Address = s[0] + ":" + newIP + s[2]
+		var newPort string
+		if port != "" {
+			newPort = port
+		} else {
+			newPort = s[2]
+		}
+
+		newAddresses := make([]string, 0, len(newIP))
+		for _, ipAddress := range newIP {
+			newAddresses = append(newAddresses, s[0]+":"+ipAddress+":"+newPort)
+		}
+		a.Address = strings.Join(newAddresses, ",")
 	}
 	return nil
 }
 
-// UpdateOvnNodeAuth updates the host and URL in ClientAuth
+// UpdateOVNNodeAuth updates the host and URL in ClientAuth
 // for both OvnNorth and OvnSouth. It updates them with the new masterIP.
-func UpdateOvnNodeAuth(masterIP string) error {
+func UpdateOVNNodeAuth(masterIP []string, southboundDBPort, northboundDBPort string) error {
 	logrus.Debugf("Update OVN node auth with new master ip: %s", masterIP)
-	if err := OvnNorth.updateIP(masterIP); err != nil {
+	if err := OvnNorth.updateIP(masterIP, northboundDBPort); err != nil {
 		return fmt.Errorf("failed to update OvnNorth ClientAuth URL: %v", err)
 	}
 
-	if err := OvnSouth.updateIP(masterIP); err != nil {
+	if err := OvnSouth.updateIP(masterIP, southboundDBPort); err != nil {
 		return fmt.Errorf("failed to update OvnSouth ClientAuth URL: %v", err)
 	}
 	return nil

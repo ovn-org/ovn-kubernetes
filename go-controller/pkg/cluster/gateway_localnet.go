@@ -9,8 +9,8 @@ import (
 	"strings"
 
 	"github.com/coreos/go-iptables/iptables"
-	"github.com/openvswitch/ovn-kubernetes/go-controller/pkg/factory"
-	"github.com/openvswitch/ovn-kubernetes/go-controller/pkg/util"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/factory"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
 	"github.com/sirupsen/logrus"
 
 	kapi "k8s.io/api/core/v1"

@@ -5,7 +5,7 @@
     state: disabled
 
 - name: setup dind cluster with ovn
-  shell: "OVN_ROOT={{ ansible_env.GOPATH }}/src/github.com/openvswitch/ovn-kubernetes hack/dind-cluster.sh start -n ovn"
+  shell: "OVN_ROOT={{ ansible_env.GOPATH }}/src/github.com/ovn-org/ovn-kubernetes hack/dind-cluster.sh start -n ovn"
   args:
     chdir: "{{ ansible_env.GOPATH }}/src/github.com/openshift/origin"
 

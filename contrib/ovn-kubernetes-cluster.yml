@@ -97,7 +97,7 @@
         # to install the MSI in unattended mode
         # Setting install_beta_ovs to false will install the latest stable OVS
         install_custom_ovs: true
-        custom_ovs_link: "https://cloudbase.it/downloads/openvswitch-hyperv-installer-beta.msi"
+        custom_ovs_link: "https://cloudbase.it/downloads/openvswitch-hyperv-installer-beta-2.10.msi"
         # This is useful for dev purposes and when using custom MSI which is not signed
         bcdedit_needed: false
         # ovs_certs_link: ""  # link to certificates for OVS if required
@@ -128,7 +128,7 @@
       with_items: "{{ groups['kube-master'] }}"
 
 # TODO(ionutbalutoiu):
-# Remove below workaround when this is fixed: https://github.com/openvswitch/ovn-kubernetes/issues/531
+# Remove below workaround when this is fixed: https://github.com/ovn-org/ovn-kubernetes/issues/531
 # Right now, the CoreDNS pods will never reach "running" state. We need to kill the existing pods and
 # new ones will be successfully created.
 - hosts: kube-master

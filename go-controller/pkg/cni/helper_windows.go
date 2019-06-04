@@ -14,7 +14,7 @@ import (
 	"github.com/Microsoft/hcsshim"
 	"github.com/containernetworking/cni/pkg/types/current"
 
-	"github.com/openvswitch/ovn-kubernetes/go-controller/pkg/config"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
 )
 
 // getHNSIdFromConfigOrByGatewayIP returns the HNS Id using the Gateway IP or

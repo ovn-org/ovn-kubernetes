@@ -12,9 +12,9 @@ import (
 	"k8s.io/apimachinery/pkg/api/resource"
 	"k8s.io/apimachinery/pkg/util/wait"
 
-	"github.com/openvswitch/ovn-kubernetes/go-controller/pkg/config"
-	"github.com/openvswitch/ovn-kubernetes/go-controller/pkg/kube"
-	"github.com/openvswitch/ovn-kubernetes/go-controller/pkg/util"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/kube"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
 )
 
 var minRsrc = resource.MustParse("1k")

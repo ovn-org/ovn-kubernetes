@@ -8,8 +8,8 @@ import (
 	kapi "k8s.io/api/core/v1"
 	"k8s.io/client-go/tools/cache"
 
-	"github.com/openvswitch/ovn-kubernetes/go-controller/pkg/ovn"
-	"github.com/openvswitch/ovn-kubernetes/go-controller/pkg/util"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
 
 	"github.com/openshift/origin/pkg/util/netutils"
 	"github.com/sirupsen/logrus"
@@ -287,8 +287,12 @@ func (cluster *OvnClusterController) SetupMaster(masterNodeName string) error {
 	}
 
 	// Create a logical switch called "join" that will be used to connect gateway routers to the distributed router.
-	// The "join" will be allocated IP addresses in the range 100.64.0.0/16.
-	stdout, stderr, err = util.RunOVNNbctl("--may-exist", "ls-add", "join")
+	// The "join" switch will be allocated IP addresses in the range 100.64.0.0/16.
+	const joinSubnet string = "100.64.0.1/16"
+	joinIP, joinCIDR, _ := net.ParseCIDR(joinSubnet)
+	stdout, stderr, err = util.RunOVNNbctl("--may-exist", "ls-add", "join",
+		"--", "set", "logical_switch", "join", fmt.Sprintf("other-config:subnet=%s", joinCIDR.String()),
+		"--", "set", "logical_switch", "join", fmt.Sprintf("other-config:exclude_ips=%s", joinIP.String()))
 	if err != nil {
 		logrus.Errorf("Failed to create logical switch called \"join\", stdout: %q, stderr: %q, error: %v", stdout, stderr, err)
 		return err
@@ -303,8 +307,7 @@ func (cluster *OvnClusterController) SetupMaster(masterNodeName string) error {
 	if routerMac == "" {
 		routerMac = util.GenerateMac()
 		stdout, stderr, err = util.RunOVNNbctl("--", "--may-exist", "lrp-add", OvnClusterRouter,
-			"rtoj-"+OvnClusterRouter, routerMac, "100.64.0.1/16", "--", "set", "logical_router_port",
-			"rtoj-"+OvnClusterRouter, "external_ids:connect_to_join=yes")
+			"rtoj-"+OvnClusterRouter, routerMac, joinSubnet)
 		if err != nil {
 			logrus.Errorf("Failed to add logical router port rtoj-%v, stdout: %q, stderr: %q, error: %v",
 				OvnClusterRouter, stdout, stderr, err)
@@ -319,15 +322,6 @@ func (cluster *OvnClusterController) SetupMaster(masterNodeName string) error {
 	if err != nil {
 		logrus.Errorf("Failed to add router-type logical switch port to join, stdout: %q, stderr: %q, error: %v",
 			stdout, stderr, err)
-		return err
-	}
-
-	// Create a lock for gateway-init to co-ordinate.
-	stdout, stderr, err = util.RunOVNNbctl("--", "set", "nb_global", ".",
-		"external-ids:gateway-lock=\"\"")
-	if err != nil {
-		logrus.Errorf("Failed to create lock for gateways, "+
-			"stdout: %q, stderr: %q, error: %v", stdout, stderr, err)
 		return err
 	}
 
@@ -393,9 +387,15 @@ func (cluster *OvnClusterController) ensureNodeLogicalNetwork(nodeName string, h
 		return err
 	}
 
+	// Skip the second address of the LogicalSwitch's subnet since we set it aside for the
+	// management port on that node.
+	secondIP := util.NextIP(ip)
+
 	// Create a logical switch and set its subnet.
 	stdout, stderr, err := util.RunOVNNbctl("--", "--may-exist", "ls-add", nodeName,
-		"--", "set", "logical_switch", nodeName, "other-config:subnet="+hostsubnet.String(), "external-ids:gateway_ip="+firstIP)
+		"--", "set", "logical_switch", nodeName, "other-config:subnet="+hostsubnet.String(),
+		"other-config:exclude_ips="+secondIP.String(),
+		"external-ids:gateway_ip="+firstIP)
 	if err != nil {
 		logrus.Errorf("Failed to create a logical switch %v, stdout: %q, stderr: %q, error: %v", nodeName, stdout, stderr, err)
 		return err
@@ -503,7 +503,7 @@ func (cluster *OvnClusterController) deleteNode(nodeName string, nodeSubnet *net
 		logrus.Errorf("Error deleting node %s logical network: %v", nodeName, err)
 	}
 
-	if err := util.GatewayCleanup(nodeName); err != nil {
+	if err := util.GatewayCleanup(nodeName, cluster.NodePortEnable); err != nil {
 		return fmt.Errorf("Failed to clean up node %s gateway: (%v)", nodeName, err)
 	}
 
@@ -522,7 +522,9 @@ func (cluster *OvnClusterController) syncNodes(nodes []interface{}) {
 	}
 
 	// We only deal with cleaning up nodes that shouldn't exist here, since
-	// watchNodes() will be called for all existing nodes at startup anyway
+	// watchNodes() will be called for all existing nodes at startup anyway.
+	// Note that this list will include the 'join' cluster switch, which we
+	// do not want to delete.
 	nodeSwitches, stderr, err := util.RunOVNNbctl("--data=bare", "--no-heading",
 		"--columns=name,other-config", "find", "logical_switch", "other-config:subnet!=_")
 	if err != nil {
@@ -534,6 +536,10 @@ func (cluster *OvnClusterController) syncNodes(nodes []interface{}) {
 		// Split result into name and other-config
 		items := strings.Split(result, "\n")
 		if len(items) != 2 || len(items[0]) == 0 {
+			continue
+		}
+		if items[0] == "join" {
+			// Don't delete the cluster switch
 			continue
 		}
 		if _, ok := foundNodes[items[0]]; ok {
