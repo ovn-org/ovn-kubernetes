@@ -4,14 +4,16 @@ import (
 	"net"
 	"os"
 	"path/filepath"
+	"reflect"
+	"strconv"
 	"time"
 
 	"github.com/sirupsen/logrus"
 
-	"github.com/openvswitch/ovn-kubernetes/go-controller/pkg/cni"
-	"github.com/openvswitch/ovn-kubernetes/go-controller/pkg/config"
-	"github.com/openvswitch/ovn-kubernetes/go-controller/pkg/ovn"
-	"github.com/openvswitch/ovn-kubernetes/go-controller/pkg/util"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/cni"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
 
 	kapi "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/util/wait"
@@ -55,14 +57,17 @@ func (cluster *OvnClusterController) StartClusterNode(name string) error {
 
 	logrus.Infof("Node %s ready for ovn initialization with subnet %s", node.Name, subnet.String())
 
+	err = cluster.watchConfigEndpoints()
+	if err != nil {
+		return err
+	}
+
 	err = setupOVNNode(name)
 	if err != nil {
 		return err
 	}
 
-	err = ovn.CreateManagementPort(node.Name, subnet.String(),
-		cluster.ClusterServicesSubnet,
-		clusterSubnets)
+	err = ovn.CreateManagementPort(node.Name, subnet.String(), clusterSubnets)
 	if err != nil {
 		return err
 	}
@@ -83,11 +88,6 @@ func (cluster *OvnClusterController) StartClusterNode(name string) error {
 		}
 	}
 
-	if cluster.OvnHA {
-		err = cluster.watchNamespaceUpdate(node, subnet.String())
-		return err
-	}
-
 	// start the cni server
 	cniServer := cni.NewCNIServer("")
 	err = cniServer.Start(cni.HandleCNIRequest)
@@ -95,64 +95,67 @@ func (cluster *OvnClusterController) StartClusterNode(name string) error {
 	return err
 }
 
-// If default namespace MasterOverlayIP annotation has been chaged, update
-// config.OvnNorth and config.OvnSouth auth with new ovn-nb and ovn-remote
-// IP address
-func (cluster *OvnClusterController) updateOvnNode(masterIP string,
-	node *kapi.Node, subnet string) error {
-	err := config.UpdateOvnNodeAuth(masterIP)
-	if err != nil {
-		return err
-	}
-	err = setupOVNNode(node.Name)
-	if err != nil {
-		logrus.Errorf("Failed to setup OVN node (%v)", err)
-		return err
+func validateOVNConfigEndpoint(ep *kapi.Endpoints) bool {
+	if len(ep.Subsets) == 1 && len(ep.Subsets[0].Ports) == 2 {
+		return true
 	}
 
-	var clusterSubnets []string
+	return false
 
-	for _, clusterSubnet := range cluster.ClusterIPNet {
-		clusterSubnets = append(clusterSubnets, clusterSubnet.CIDR.String())
-	}
-
-	// Recreate logical switch and management port for this node
-	err = ovn.CreateManagementPort(node.Name, subnet,
-		cluster.ClusterServicesSubnet,
-		clusterSubnets)
-	if err != nil {
-		return err
-	}
-
-	// Reinit Gateway for this node if the --init-gateways flag is set
-	if cluster.GatewayInit {
-		err = cluster.initGateway(node.Name, clusterSubnets, subnet)
-		if err != nil {
-			return err
-		}
-	}
-
-	return nil
 }
 
-// watchNamespaceUpdate starts watching namespace resources and calls back
-// the update handler logic if there is any namspace update event
-func (cluster *OvnClusterController) watchNamespaceUpdate(node *kapi.Node,
-	subnet string) error {
-	_, err := cluster.watchFactory.AddNamespaceHandler(
+func updateOVNConfig(ep *kapi.Endpoints) {
+	if !validateOVNConfigEndpoint(ep) {
+		logrus.Errorf("endpoint %s is not in the right format to configure OVN", ep.Name)
+		return
+	}
+	var southboundDBPort string
+	var northboundDBPort string
+	var masterIPList []string
+	for _, ovnDB := range ep.Subsets[0].Ports {
+		if ovnDB.Name == "south" {
+			southboundDBPort = strconv.Itoa(int(ovnDB.Port))
+		}
+		if ovnDB.Name == "north" {
+			northboundDBPort = strconv.Itoa(int(ovnDB.Port))
+		}
+	}
+	for _, address := range ep.Subsets[0].Addresses {
+		masterIPList = append(masterIPList, address.IP)
+	}
+	err := config.UpdateOVNNodeAuth(masterIPList, southboundDBPort, northboundDBPort)
+	if err != nil {
+		logrus.Errorf(err.Error())
+		return
+	}
+	for _, auth := range []config.OvnAuthConfig{config.OvnNorth, config.OvnSouth} {
+		if err := auth.SetDBAuth(); err != nil {
+			logrus.Errorf(err.Error())
+			return
+		}
+		logrus.Infof("OVN databases reconfigured, masterIP %s, northbound-db %s, southbound-db %s", ep.Subsets[0].Addresses[0].IP, northboundDBPort, southboundDBPort)
+	}
+
+}
+
+//watchConfigEndpoints starts the watching of Endpoint resource and calls back to the appropriate handler logic
+func (cluster *OvnClusterController) watchConfigEndpoints() error {
+	_, err := cluster.watchFactory.AddFilteredEndpointsHandler(config.Kubernetes.OVNConfigNamespace,
 		cache.ResourceEventHandlerFuncs{
-			UpdateFunc: func(old, newer interface{}) {
-				oldNs := old.(*kapi.Namespace)
-				oldMasterIP := oldNs.Annotations[MasterOverlayIP]
-				newNs := newer.(*kapi.Namespace)
-				newMasterIP := newNs.Annotations[MasterOverlayIP]
-				if newMasterIP != oldMasterIP {
-					err := cluster.updateOvnNode(newMasterIP, node, subnet)
-					if err != nil {
-						logrus.Errorf("Failed to update OVN node with new "+
-							"masterIP %s: %v", newMasterIP, err)
-					}
+			AddFunc: func(obj interface{}) {
+				ep := obj.(*kapi.Endpoints)
+				if ep.Name == "ovnkube-db" {
+					updateOVNConfig(ep)
+					return
 				}
+			},
+			UpdateFunc: func(old, new interface{}) {
+				epNew := new.(*kapi.Endpoints)
+				epOld := old.(*kapi.Endpoints)
+				if !reflect.DeepEqual(epNew.Subsets, epOld.Subsets) && epNew.Name == "ovnkube-db" {
+					updateOVNConfig(epNew)
+				}
+
 			},
 		}, nil)
 	return err

@@ -4,7 +4,7 @@ package cluster
 
 import (
 	"fmt"
-	"github.com/openvswitch/ovn-kubernetes/go-controller/pkg/factory"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/factory"
 )
 
 func initLocalnetGateway(nodeName string, clusterIPSubnet []string,

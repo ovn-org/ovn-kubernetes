@@ -21,11 +21,11 @@
 Name: openvswitch-ovn-kubernetes
 Version: 0.3.0
 Release: 1%{?dist}
-URL: https://www.github.com/openvswitch/ovn-kubernetes
+URL: https://www.github.com/ovn-org/ovn-kubernetes
 Summary: Open Virtual Networking Kubernetes Wedge
 
 License: ASL 2.0
-Source0: https://github.com/openvswitch/ovn-kubernetes/archive/v%{version}.tar.gz
+Source0: https://github.com/ovn-org/ovn-kubernetes/archive/v%{version}.tar.gz
 
 # golang not supported
 ExcludeArch: ppc64

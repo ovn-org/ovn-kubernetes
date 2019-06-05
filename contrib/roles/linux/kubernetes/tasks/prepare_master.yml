@@ -204,12 +204,12 @@
     block: |
       [Unit]
       Description=OVN watches the Kubernetes API
-      Documentation=https://github.com/openvswitch/ovn-kubernetes#watchers-on-master-node
+      Documentation=https://github.com/ovn-org/ovn-kubernetes#watchers-on-master-node
       [Service]
       ExecStart=/usr/bin/ovnkube \
         -init-master "{{ ansible_hostname }}" \
         -cluster-subnet "{{ kubernetes_cluster_info.CLUSTER_SUBNET }}" \
-        -service-cluster-ip-range "{{ kubernetes_cluster_info.SERVICE_CLUSTER_IP_RANGE }}" \
+        -k8s-service-cidr "{{ kubernetes_cluster_info.SERVICE_CLUSTER_IP_RANGE }}" \
         -nodeport \
         -net-controller \
         -k8s-token {{TOKEN}} \

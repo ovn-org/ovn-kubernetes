@@ -8,8 +8,8 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/openvswitch/ovn-kubernetes/go-controller/pkg/config"
-	"github.com/openvswitch/ovn-kubernetes/go-controller/pkg/util"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
 	"github.com/sirupsen/logrus"
 )
 
@@ -17,8 +17,8 @@ const (
 	windowsOS = "windows"
 )
 
-func configureManagementPortWindows(clusterSubnet []string, clusterServicesSubnet,
-	routerIP, interfaceName, interfaceIP string) error {
+func configureManagementPortWindows(clusterSubnet []string, routerIP,
+	interfaceName, interfaceIP string) error {
 	// Up the interface.
 	_, _, err := util.RunPowershell("Enable-NetAdapter", "-IncludeHidden", interfaceName)
 	if err != nil {
@@ -99,43 +99,40 @@ func configureManagementPortWindows(clusterSubnet []string, clusterServicesSubne
 		}
 	}
 
-	if clusterServicesSubnet != "" {
-		clusterServiceIP, clusterServiceIPNet, err := net.ParseCIDR(clusterServicesSubnet)
-		if err != nil {
-			return fmt.Errorf("Failed to parse clusterServicesSubnet %v : %v", clusterServicesSubnet, err)
-		}
-		// Checking if the route already exists, in which case it will not be created again
-		stdout, stderr, err = util.RunRoute("print", "-4", clusterServiceIP.String())
-		if err != nil {
-			logrus.Debugf("Failed to run route print, stderr: %q, error: %v", stderr, err)
-		}
+	clusterServiceIP, clusterServiceIPNet, err := net.ParseCIDR(config.Kubernetes.ServiceCIDR)
+	if err != nil {
+		return fmt.Errorf("Failed to parse clusterServicesSubnet %v : %v", config.Kubernetes.ServiceCIDR, err)
+	}
+	// Checking if the route already exists, in which case it will not be created again
+	stdout, stderr, err = util.RunRoute("print", "-4", clusterServiceIP.String())
+	if err != nil {
+		logrus.Debugf("Failed to run route print, stderr: %q, error: %v", stderr, err)
+	}
 
-		if strings.Contains(stdout, clusterServiceIP.String()) {
-			logrus.Debugf("Route was found, skipping route add")
-		} else {
-			// Windows route command requires the mask to be specified in the IP format
-			clusterServiceMask := net.IP(clusterServiceIPNet.Mask).String()
-			// Create a route for the entire subnet.
-			_, stderr, err = util.RunRoute("-p", "add",
-				clusterServiceIP.String(), "mask", clusterServiceMask,
-				routerIP, "METRIC", "2", "IF", interfaceIndex)
-			if err != nil {
-				logrus.Errorf("failed to run route add, stderr: %q, error: %v", stderr, err)
-				return err
-			}
+	if strings.Contains(stdout, clusterServiceIP.String()) {
+		logrus.Debugf("Route was found, skipping route add")
+	} else {
+		// Windows route command requires the mask to be specified in the IP format
+		clusterServiceMask := net.IP(clusterServiceIPNet.Mask).String()
+		// Create a route for the entire subnet.
+		_, stderr, err = util.RunRoute("-p", "add",
+			clusterServiceIP.String(), "mask", clusterServiceMask,
+			routerIP, "METRIC", "2", "IF", interfaceIndex)
+		if err != nil {
+			logrus.Errorf("failed to run route add, stderr: %q, error: %v", stderr, err)
+			return err
 		}
 	}
 
 	return nil
 }
 
-func configureManagementPort(clusterSubnet []string, clusterServicesSubnet,
-	routerIP, routerMac, interfaceName, interfaceIP string) error {
+func configureManagementPort(clusterSubnet []string, routerIP, routerMac,
+	interfaceName, interfaceIP string) error {
 	if runtime.GOOS == windowsOS {
 		// Return here for Windows, the commands for enabling the interface, setting the IP and adding the
 		// route will be done in the above function
-		return configureManagementPortWindows(clusterSubnet, clusterServicesSubnet,
-			routerIP, interfaceName, interfaceIP)
+		return configureManagementPortWindows(clusterSubnet, routerIP, interfaceName, interfaceIP)
 	}
 
 	// Up the interface.
@@ -170,19 +167,16 @@ func configureManagementPort(clusterSubnet []string, clusterServicesSubnet,
 		}
 	}
 
-	if clusterServicesSubnet != "" {
-		// Flush the route for the services subnet (in case it was added before).
-		_, _, err = util.RunIP("route", "flush", clusterServicesSubnet)
-		if err != nil {
-			return err
-		}
+	// Flush the route for the services subnet (in case it was added before).
+	_, _, err = util.RunIP("route", "flush", config.Kubernetes.ServiceCIDR)
+	if err != nil {
+		return err
+	}
 
-		// Create a route for the services subnet.
-		_, _, err = util.RunIP("route", "add", clusterServicesSubnet,
-			"via", routerIP)
-		if err != nil {
-			return err
-		}
+	// Create a route for the services subnet.
+	_, _, err = util.RunIP("route", "add", config.Kubernetes.ServiceCIDR, "via", routerIP)
+	if err != nil {
+		return err
 	}
 
 	// Add a neighbour entry on the K8s node to map routerIP with routerMAC. This is
@@ -201,8 +195,7 @@ func configureManagementPort(clusterSubnet []string, clusterServicesSubnet,
 // CreateManagementPort creates a management port attached to the node switch
 // that lets the node access its pods via their private IP address. This is used
 // for health checking and other management tasks.
-func CreateManagementPort(nodeName, localSubnet,
-	clusterServicesSubnet string, clusterSubnet []string) error {
+func CreateManagementPort(nodeName, localSubnet string, clusterSubnet []string) error {
 
 	// Determine the IP of the node switch's logical router port on the cluster router
 	ip, subnet, err := net.ParseCIDR(localSubnet)
@@ -274,7 +267,6 @@ func CreateManagementPort(nodeName, localSubnet,
 			stderr, err)
 		return err
 	}
-	err = configureManagementPort(clusterSubnet, clusterServicesSubnet,
-		routerIP, routerMac, interfaceName, portIPMask)
+	err = configureManagementPort(clusterSubnet, routerIP, routerMac, interfaceName, portIPMask)
 	return err
 }

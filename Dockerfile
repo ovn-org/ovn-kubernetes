@@ -9,7 +9,7 @@
 # are built in this Dockerfile and included in the image (instead of the rpm)
 #
 
-FROM openshift/origin-release:golang-1.10 AS builder
+FROM openshift/origin-release:golang-1.12 AS builder
 
 WORKDIR /go-controller
 COPY go-controller/ .
@@ -25,7 +25,7 @@ USER root
 
 ENV PYTHONDONTWRITEBYTECODE yes
 
-# install needed rpms - openvswitch must be 2.9.2 or higher
+# install needed rpms - openvswitch must be 2.10.4 or higher
 # install selinux-policy first to avoid a race
 RUN yum install -y  \
 	selinux-policy && \
@@ -70,8 +70,6 @@ COPY .git/refs/heads/ /root/.git/refs/heads/
 # variables to direct operation and configure ovn
 COPY dist/images/ovnkube.sh /root/
 COPY dist/images/ovn-debug.sh /root/
-# override the rpm's ovn_k8s.conf with this local copy
-COPY dist/images/ovn_k8s.conf /etc/openvswitch/ovn_k8s.conf
 
 
 LABEL io.k8s.display-name="ovn kubernetes" \

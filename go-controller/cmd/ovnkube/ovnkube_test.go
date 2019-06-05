@@ -1,7 +1,7 @@
 package main
 
 import (
-	ovncluster "github.com/openvswitch/ovn-kubernetes/go-controller/pkg/cluster"
+	ovncluster "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/cluster"
 	"net"
 	"testing"
 )

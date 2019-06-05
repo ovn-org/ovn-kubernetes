@@ -191,5 +191,5 @@
 			"revision": ""
 		}
 	],
-	"rootPath": "github.com/openvswitch/ovn-kubernetes/go-controller"
+	"rootPath": "github.com/ovn-org/ovn-kubernetes/go-controller"
 }

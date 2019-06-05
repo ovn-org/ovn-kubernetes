@@ -10,9 +10,8 @@ import (
 
 	"github.com/urfave/cli"
 	kexec "k8s.io/utils/exec"
-	fakeexec "k8s.io/utils/exec/testing"
 
-	ovntest "github.com/openvswitch/ovn-kubernetes/go-controller/pkg/testing"
+	ovntest "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/testing"
 
 	. "github.com/onsi/ginkgo"
 	. "github.com/onsi/gomega"
@@ -121,6 +120,14 @@ func createTempFile(name string) (string, error) {
 	return fname, nil
 }
 
+func createTempFileContent(name, value string) (string, error) {
+	fname := filepath.Join(tmpDir, name)
+	if err := ioutil.WriteFile(fname, []byte(value), 0644); err != nil {
+		return "", err
+	}
+	return fname, nil
+}
+
 var _ = Describe("Config Operations", func() {
 	var app *cli.App
 	var cfgFile *os.File
@@ -130,6 +137,7 @@ var _ = Describe("Config Operations", func() {
 	if tmpErr != nil {
 		GinkgoT().Errorf("failed to create tempdir: %v", tmpErr)
 	}
+	tmpDir += "/"
 
 	BeforeEach(func() {
 		// Restore global default values before each testcase
@@ -150,7 +158,7 @@ var _ = Describe("Config Operations", func() {
 
 	It("uses expected defaults", func() {
 		app.Action = func(ctx *cli.Context) error {
-			cfgPath, err := InitConfig(ctx, kexec.New(), nil)
+			cfgPath, err := InitConfigSa(ctx, kexec.New(), tmpDir, nil)
 			Expect(err).NotTo(HaveOccurred())
 			Expect(cfgPath).To(Equal(cfgFile.Name()))
 
@@ -164,6 +172,7 @@ var _ = Describe("Config Operations", func() {
 			Expect(Kubernetes.CACert).To(Equal(""))
 			Expect(Kubernetes.Token).To(Equal(""))
 			Expect(Kubernetes.APIServer).To(Equal("http://localhost:8080"))
+			Expect(Kubernetes.ServiceCIDR).To(Equal("172.16.1.0/24"))
 
 			for _, a := range []OvnAuthConfig{OvnNorth, OvnSouth} {
 				Expect(a.Scheme).To(Equal(OvnDBSchemeUnix))
@@ -180,38 +189,33 @@ var _ = Describe("Config Operations", func() {
 
 	It("reads defaults from ovs-vsctl external IDs", func() {
 		app.Action = func(ctx *cli.Context) error {
+			fexec := ovntest.NewFakeExec()
+
 			// k8s-api-server
-			fakeCmds := ovntest.AddFakeCmd(nil, &ovntest.ExpectedCmd{
+			fexec.AddFakeCmd(&ovntest.ExpectedCmd{
 				Cmd:    "ovs-vsctl --timeout=15 --if-exists get Open_vSwitch . external_ids:k8s-api-server",
 				Output: "https://somewhere.com:8081",
 			})
 
 			// k8s-api-token
-			fakeCmds = ovntest.AddFakeCmd(fakeCmds, &ovntest.ExpectedCmd{
+			fexec.AddFakeCmd(&ovntest.ExpectedCmd{
 				Cmd:    "ovs-vsctl --timeout=15 --if-exists get Open_vSwitch . external_ids:k8s-api-token",
 				Output: "asadfasdfasrw3atr3r3rf33fasdaa3233",
 			})
 			// k8s-ca-certificate
-			fname, err := createTempFile("kube-cacert.pem")
+			fname, err := createTempFile("ca.crt")
 			Expect(err).NotTo(HaveOccurred())
-			fakeCmds = ovntest.AddFakeCmd(fakeCmds, &ovntest.ExpectedCmd{
+			fexec.AddFakeCmd(&ovntest.ExpectedCmd{
 				Cmd:    "ovs-vsctl --timeout=15 --if-exists get Open_vSwitch . external_ids:k8s-ca-certificate",
 				Output: fname,
 			})
 			// ovn-nb address
-			fakeCmds = ovntest.AddFakeCmd(fakeCmds, &ovntest.ExpectedCmd{
+			fexec.AddFakeCmd(&ovntest.ExpectedCmd{
 				Cmd:    "ovs-vsctl --timeout=15 --if-exists get Open_vSwitch . external_ids:ovn-nb",
 				Output: "tcp:1.1.1.1:6441",
 			})
 
-			fexec := &fakeexec.FakeExec{
-				CommandScript: fakeCmds,
-				LookPathFunc: func(file string) (string, error) {
-					return fmt.Sprintf("/fake-bin/%s", file), nil
-				},
-			}
-
-			cfgPath, err := InitConfig(ctx, fexec, &Defaults{
+			cfgPath, err := InitConfigSa(ctx, fexec, tmpDir, &Defaults{
 				OvnNorthAddress: true,
 				K8sAPIServer:    true,
 				K8sToken:        true,
@@ -219,7 +223,7 @@ var _ = Describe("Config Operations", func() {
 			})
 			Expect(err).NotTo(HaveOccurred())
 			Expect(cfgPath).To(Equal(cfgFile.Name()))
-			Expect(fexec.CommandCalls).To(Equal(len(fakeCmds)))
+			Expect(fexec.CalledMatchesExpected()).To(BeTrue())
 
 			Expect(Kubernetes.APIServer).To(Equal("https://somewhere.com:8081"))
 			Expect(Kubernetes.CACert).To(Equal(fname))
@@ -245,38 +249,37 @@ var _ = Describe("Config Operations", func() {
 
 	It("reads defaults (multiple master) from ovs-vsctl external IDs", func() {
 		app.Action = func(ctx *cli.Context) error {
+			fexec := ovntest.NewFakeExec()
+
 			// k8s-api-server
-			fakeCmds := ovntest.AddFakeCmd(nil, &ovntest.ExpectedCmd{
+			fexec.AddFakeCmd(&ovntest.ExpectedCmd{
 				Cmd:    "ovs-vsctl --timeout=15 --if-exists get Open_vSwitch . external_ids:k8s-api-server",
 				Output: "https://somewhere.com:8081",
 			})
 
 			// k8s-api-token
-			fakeCmds = ovntest.AddFakeCmd(fakeCmds, &ovntest.ExpectedCmd{
+			fexec.AddFakeCmd(&ovntest.ExpectedCmd{
 				Cmd:    "ovs-vsctl --timeout=15 --if-exists get Open_vSwitch . external_ids:k8s-api-token",
 				Output: "asadfasdfasrw3atr3r3rf33fasdaa3233",
 			})
 			// k8s-ca-certificate
 			fname, err := createTempFile("kube-cacert.pem")
 			Expect(err).NotTo(HaveOccurred())
-			fakeCmds = ovntest.AddFakeCmd(fakeCmds, &ovntest.ExpectedCmd{
+			fexec.AddFakeCmd(&ovntest.ExpectedCmd{
 				Cmd:    "ovs-vsctl --timeout=15 --if-exists get Open_vSwitch . external_ids:k8s-ca-certificate",
 				Output: fname,
 			})
 			// ovn-nb address
-			fakeCmds = ovntest.AddFakeCmd(fakeCmds, &ovntest.ExpectedCmd{
+			fexec.AddFakeCmd(&ovntest.ExpectedCmd{
 				Cmd:    "ovs-vsctl --timeout=15 --if-exists get Open_vSwitch . external_ids:ovn-nb",
 				Output: "tcp:1.1.1.1:6441,tcp:1.1.1.2:6641,tcp:1.1.1.3:6641",
 			})
 
-			fexec := &fakeexec.FakeExec{
-				CommandScript: fakeCmds,
-				LookPathFunc: func(file string) (string, error) {
-					return fmt.Sprintf("/fake-bin/%s", file), nil
-				},
-			}
+			tokenFile, err1 := createTempFileContent("token", "TG9yZW0gaXBzdW0gZ")
+			Expect(err1).NotTo(HaveOccurred())
+			defer os.Remove(tokenFile)
 
-			cfgPath, err := InitConfig(ctx, fexec, &Defaults{
+			cfgPath, err := InitConfigSa(ctx, fexec, tmpDir, &Defaults{
 				OvnNorthAddress: true,
 				K8sAPIServer:    true,
 				K8sToken:        true,
@@ -284,7 +287,7 @@ var _ = Describe("Config Operations", func() {
 			})
 			Expect(err).NotTo(HaveOccurred())
 			Expect(cfgPath).To(Equal(cfgFile.Name()))
-			Expect(fexec.CommandCalls).To(Equal(len(fakeCmds)))
+			Expect(fexec.CalledMatchesExpected()).To(BeTrue())
 
 			Expect(Kubernetes.APIServer).To(Equal("https://somewhere.com:8081"))
 			Expect(Kubernetes.CACert).To(Equal(fname))
@@ -309,6 +312,66 @@ var _ = Describe("Config Operations", func() {
 		Expect(err).NotTo(HaveOccurred())
 	})
 
+	It("uses serviceaccount files", func() {
+		kubeCAcertFile, err := createTempFile("ca.crt")
+		Expect(err).NotTo(HaveOccurred())
+		defer os.Remove(kubeCAcertFile)
+
+		tokenFile, err1 := createTempFileContent("token", "TG9yZW0gaXBzdW0gZ")
+		Expect(err1).NotTo(HaveOccurred())
+		defer os.Remove(tokenFile)
+
+		app.Action = func(ctx *cli.Context) error {
+			_, err := InitConfigSa(ctx, kexec.New(), tmpDir, nil)
+			Expect(err).NotTo(HaveOccurred())
+
+			Expect(Kubernetes.CACert).To(Equal(kubeCAcertFile))
+			Expect(Kubernetes.Token).To(Equal("TG9yZW0gaXBzdW0gZ"))
+
+			return nil
+		}
+		err2 := app.Run([]string{app.Name})
+		Expect(err2).NotTo(HaveOccurred())
+
+	})
+
+	It("uses environment variables", func() {
+		kubeconfigEnvFile, err := createTempFile("kubeconfig.env")
+		Expect(err).NotTo(HaveOccurred())
+		defer os.Remove(kubeconfigEnvFile)
+		os.Setenv("KUBECONFIG", kubeconfigEnvFile)
+		defer os.Setenv("KUBECONFIG", "")
+
+		os.Setenv("K8S_TOKEN", "this is the  token test")
+		defer os.Setenv("K8S_TOKEN", "")
+
+		os.Setenv("K8S_APISERVER", "https://9.2.3.4:6443")
+		defer os.Setenv("K8S_APISERVER", "")
+
+		kubeCAFile, err1 := createTempFile("kube-ca.crt")
+		Expect(err1).NotTo(HaveOccurred())
+		defer os.Remove(kubeCAFile)
+		os.Setenv("K8S_CACERT", kubeCAFile)
+		defer os.Setenv("K8S_CACERT", "")
+
+		app.Action = func(ctx *cli.Context) error {
+			var cfgPath string
+			cfgPath, err = InitConfigSa(ctx, kexec.New(), tmpDir, nil)
+			Expect(err).NotTo(HaveOccurred())
+			Expect(cfgPath).To(Equal(cfgFile.Name()))
+
+			Expect(Kubernetes.Kubeconfig).To(Equal(kubeconfigEnvFile))
+			Expect(Kubernetes.CACert).To(Equal(kubeCAFile))
+			Expect(Kubernetes.Token).To(Equal("this is the  token test"))
+			Expect(Kubernetes.APIServer).To(Equal("https://9.2.3.4:6443"))
+
+			return nil
+		}
+		err = app.Run([]string{app.Name, "-config-file=" + cfgFile.Name()})
+		Expect(err).NotTo(HaveOccurred())
+
+	})
+
 	It("overrides defaults with config file options", func() {
 		kubeconfigFile, err := createTempFile("kubeconfig")
 		Expect(err).NotTo(HaveOccurred())
@@ -327,6 +390,7 @@ kubeconfig=%s
 apiserver=https://1.2.3.4:6443
 token=TG9yZW0gaXBzdW0gZ
 cacert=%s
+service-cidr=172.18.0.0/24
 
 [logging]
 loglevel=5
@@ -367,6 +431,7 @@ client-cacert=/path/to/sb-client-ca.crt
 			Expect(Kubernetes.CACert).To(Equal(kubeCAFile))
 			Expect(Kubernetes.Token).To(Equal("TG9yZW0gaXBzdW0gZ"))
 			Expect(Kubernetes.APIServer).To(Equal("https://1.2.3.4:6443"))
+			Expect(Kubernetes.ServiceCIDR).To(Equal("172.18.0.0/24"))
 
 			Expect(OvnNorth.Scheme).To(Equal(OvnDBSchemeSSL))
 			Expect(OvnNorth.PrivKey).To(Equal("/path/to/nb-client-private.key"))
@@ -404,6 +469,7 @@ kubeconfig=/path/to/kubeconfig
 apiserver=https://1.2.3.4:6443
 token=TG9yZW0gaXBzdW0gZ
 cacert=/path/to/kubeca.crt
+service-cidr=172.18.0.0/24
 
 [logging]
 loglevel=5
@@ -443,6 +509,7 @@ client-cacert=/path/to/sb-client-ca.crt
 			Expect(Kubernetes.CACert).To(Equal(kubeCAFile))
 			Expect(Kubernetes.Token).To(Equal("asdfasdfasdfasfd"))
 			Expect(Kubernetes.APIServer).To(Equal("https://4.4.3.2:8080"))
+			Expect(Kubernetes.ServiceCIDR).To(Equal("172.15.0.0/24"))
 
 			Expect(OvnNorth.Scheme).To(Equal(OvnDBSchemeSSL))
 			Expect(OvnNorth.PrivKey).To(Equal("/client/privkey"))
@@ -471,6 +538,7 @@ client-cacert=/path/to/sb-client-ca.crt
 			"-k8s-apiserver=https://4.4.3.2:8080",
 			"-k8s-cacert=" + kubeCAFile,
 			"-k8s-token=asdfasdfasdfasfd",
+			"-k8s-service-cidr=172.15.0.0/24",
 			"-nb-address=ssl://6.5.4.3:6651",
 			"-nb-client-privkey=/client/privkey",
 			"-nb-client-cert=/client/cert",
@@ -481,6 +549,43 @@ client-cacert=/path/to/sb-client-ca.crt
 			"-sb-client-cacert=/client/cacert2",
 		}
 		err = app.Run(cliArgs)
+		Expect(err).NotTo(HaveOccurred())
+	})
+
+	It("overrides config file and defaults with CLI legacy service-cluster-ip-range option", func() {
+		err := ioutil.WriteFile(cfgFile.Name(), []byte(`[kubernetes]
+service-cidr=172.18.0.0/24
+`), 0644)
+		Expect(err).NotTo(HaveOccurred())
+
+		app.Action = func(ctx *cli.Context) error {
+			var cfgPath string
+			cfgPath, err = InitConfig(ctx, kexec.New(), nil)
+			Expect(err).NotTo(HaveOccurred())
+			Expect(cfgPath).To(Equal(cfgFile.Name()))
+			Expect(Kubernetes.ServiceCIDR).To(Equal("172.15.0.0/24"))
+			return nil
+		}
+		cliArgs := []string{
+			app.Name,
+			"-config-file=" + cfgFile.Name(),
+			"-service-cluster-ip-range=172.15.0.0/24",
+		}
+		err = app.Run(cliArgs)
+		Expect(err).NotTo(HaveOccurred())
+	})
+
+	It("returns an error when the k8s-service-cidr is invalid", func() {
+		app.Action = func(ctx *cli.Context) error {
+			_, err := InitConfig(ctx, kexec.New(), nil)
+			Expect(err).To(MatchError("kubernetes service network CIDR \"adsfasdfaf\" invalid: invalid CIDR address: adsfasdfaf"))
+			return nil
+		}
+		cliArgs := []string{
+			app.Name,
+			"-k8s-service-cidr=adsfasdfaf",
+		}
+		err := app.Run(cliArgs)
 		Expect(err).NotTo(HaveOccurred())
 	})
 
@@ -502,6 +607,7 @@ kubeconfig=/path/to/kubeconfig
 apiserver=https://1.2.3.4:6443
 token=TG9yZW0gaXBzdW0gZ
 cacert=/path/to/kubeca.crt
+service-cidr=172.18.0.0/24
 
 [logging]
 loglevel=5
@@ -541,6 +647,7 @@ client-cacert=/path/to/sb-client-ca.crt
 			Expect(Kubernetes.CACert).To(Equal(kubeCAFile))
 			Expect(Kubernetes.Token).To(Equal("asdfasdfasdfasfd"))
 			Expect(Kubernetes.APIServer).To(Equal("https://4.4.3.2:8080"))
+			Expect(Kubernetes.ServiceCIDR).To(Equal("172.15.0.0/24"))
 
 			Expect(OvnNorth.Scheme).To(Equal(OvnDBSchemeSSL))
 			Expect(OvnNorth.PrivKey).To(Equal("/client/privkey"))
@@ -571,6 +678,7 @@ client-cacert=/path/to/sb-client-ca.crt
 			"-k8s-apiserver=https://4.4.3.2:8080",
 			"-k8s-cacert=" + kubeCAFile,
 			"-k8s-token=asdfasdfasdfasfd",
+			"-k8s-service-cidr=172.15.0.0/24",
 			"-nb-address=ssl://6.5.4.3:6651,ssl://6.5.4.4:6651,ssl://6.5.4.5:6651",
 			"-nb-client-privkey=/client/privkey",
 			"-nb-client-cert=/client/cert",
@@ -612,19 +720,11 @@ client-cacert=/path/to/sb-client-ca.crt
 		It("configures client northbound SSL correctly", func() {
 			const nbURLOVN string = "ssl:1.2.3.4:6641"
 
-			fakeCmds := ovntest.AddFakeCmd(nil, &ovntest.ExpectedCmd{
-				Cmd: fmt.Sprintf("ovn-nbctl --db=%s --timeout=5 --private-key=%s --certificate=%s --bootstrap-ca-cert=%s list nb_global", nbURLOVN, keyFile, certFile, caFile),
+			fexec := ovntest.NewFakeExec()
+			fexec.AddFakeCmdsNoOutputNoError([]string{
+				"ovn-nbctl --db=" + nbURLOVN + " --timeout=5 --private-key=" + keyFile + " --certificate=" + certFile + " --bootstrap-ca-cert=" + caFile + " list nb_global",
+				"ovs-vsctl --timeout=15 set Open_vSwitch . external_ids:ovn-nb=\"" + nbURLOVN + "\"",
 			})
-			fakeCmds = ovntest.AddFakeCmd(fakeCmds, &ovntest.ExpectedCmd{
-				Cmd: fmt.Sprintf("ovs-vsctl --timeout=15 set Open_vSwitch . external_ids:ovn-nb=\"%s\"", nbURLOVN),
-			})
-
-			fexec := &fakeexec.FakeExec{
-				CommandScript: fakeCmds,
-				LookPathFunc: func(file string) (string, error) {
-					return fmt.Sprintf("/fake-bin/%s", file), nil
-				},
-			}
 
 			cliConfig := &OvnAuthConfig{
 				Address: nbURL,
@@ -645,31 +745,19 @@ client-cacert=/path/to/sb-client-ca.crt
 			Expect(a.GetURL()).To(Equal(nbURLOVN))
 			err = a.SetDBAuth()
 			Expect(err).NotTo(HaveOccurred())
-			Expect(fexec.CommandCalls).To(Equal(len(fakeCmds)))
+			Expect(fexec.CalledMatchesExpected()).To(BeTrue())
 		})
 
 		It("configures client southbound SSL correctly", func() {
 			const sbURLOVN string = "ssl:1.2.3.4:6642"
 
-			fakeCmds := ovntest.AddFakeCmd(nil, &ovntest.ExpectedCmd{
-				Cmd: fmt.Sprintf("ovn-nbctl --db=%s --timeout=5 --private-key=%s --certificate=%s --bootstrap-ca-cert=%s list nb_global", sbURLOVN, keyFile, certFile, caFile),
+			fexec := ovntest.NewFakeExec()
+			fexec.AddFakeCmdsNoOutputNoError([]string{
+				"ovn-nbctl --db=" + sbURLOVN + " --timeout=5 --private-key=" + keyFile + " --certificate=" + certFile + " --bootstrap-ca-cert=" + caFile + " list nb_global",
+				"ovs-vsctl --timeout=15 del-ssl",
+				"ovs-vsctl --timeout=15 set-ssl " + keyFile + " " + certFile + " " + caFile,
+				"ovs-vsctl --timeout=15 set Open_vSwitch . external_ids:ovn-remote=\"" + sbURLOVN + "\"",
 			})
-			fakeCmds = ovntest.AddFakeCmd(fakeCmds, &ovntest.ExpectedCmd{
-				Cmd: "ovs-vsctl --timeout=15 del-ssl",
-			})
-			fakeCmds = ovntest.AddFakeCmd(fakeCmds, &ovntest.ExpectedCmd{
-				Cmd: fmt.Sprintf("ovs-vsctl --timeout=15 set-ssl %s %s %s", keyFile, certFile, caFile),
-			})
-			fakeCmds = ovntest.AddFakeCmd(fakeCmds, &ovntest.ExpectedCmd{
-				Cmd: fmt.Sprintf("ovs-vsctl --timeout=15 set Open_vSwitch . external_ids:ovn-remote=\"%s\"", sbURLOVN),
-			})
-
-			fexec := &fakeexec.FakeExec{
-				CommandScript: fakeCmds,
-				LookPathFunc: func(file string) (string, error) {
-					return fmt.Sprintf("/fake-bin/%s", file), nil
-				},
-			}
 
 			cliConfig := &OvnAuthConfig{
 				Address: sbURL,
@@ -690,7 +778,7 @@ client-cacert=/path/to/sb-client-ca.crt
 			Expect(a.GetURL()).To(Equal(sbURLOVN))
 			err = a.SetDBAuth()
 			Expect(err).NotTo(HaveOccurred())
-			Expect(fexec.CommandCalls).To(Equal(len(fakeCmds)))
+			Expect(fexec.CalledMatchesExpected()).To(BeTrue())
 		})
 	})
 

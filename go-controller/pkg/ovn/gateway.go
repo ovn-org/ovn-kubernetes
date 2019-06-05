@@ -3,7 +3,7 @@ package ovn
 import (
 	"strings"
 
-	util "github.com/openvswitch/ovn-kubernetes/go-controller/pkg/util"
+	util "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
 	"github.com/sirupsen/logrus"
 )
 

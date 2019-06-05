@@ -1,9 +1,9 @@
 package ovn
 
 import (
-	"github.com/openvswitch/ovn-kubernetes/go-controller/pkg/factory"
-	"github.com/openvswitch/ovn-kubernetes/go-controller/pkg/kube"
-	util "github.com/openvswitch/ovn-kubernetes/go-controller/pkg/util"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/factory"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/kube"
+	util "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
 	"github.com/sirupsen/logrus"
 	kapi "k8s.io/api/core/v1"
 	kapisnetworking "k8s.io/api/networking/v1"
@@ -252,7 +252,13 @@ func (oc *Controller) WatchNamespaces() error {
 // back the appropriate handler logic
 func (oc *Controller) WatchNodes() error {
 	_, err := oc.watchFactory.AddNodeHandler(cache.ResourceEventHandlerFuncs{
-		AddFunc:    func(obj interface{}) {},
+		AddFunc: func(obj interface{}) {
+			if !oc.nodePortEnable {
+				return
+			}
+			node := obj.(*kapi.Node)
+			oc.handleNodePortLB(node)
+		},
 		UpdateFunc: func(old, new interface{}) {},
 		DeleteFunc: func(obj interface{}) {
 			node := obj.(*kapi.Node)

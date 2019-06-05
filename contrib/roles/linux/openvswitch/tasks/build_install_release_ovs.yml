@@ -39,24 +39,11 @@
   args:
     chdir: "{{ ovs_info.build_path }}/{{ ovs_info.release_name }}"
 
-- name: OVS | install debs
-  apt: deb="{{ ovs_info.build_path }}/{{item}}_{{ ovs_info.pkg_build_version }}_amd64.deb"
-  with_items:
-    - libopenvswitch
-    - openvswitch-common
-    - openvswitch-switch
-    - ovn-common
-    - ovn-host
-
-- name: OVS | install additional debs
+- name: OVS | install datapath debs
   apt: deb="{{ ovs_info.build_path }}/{{item}}_{{ ovs_info.pkg_build_version }}_all.deb"
   with_items:
     - openvswitch-datapath-dkms
     - python-openvswitch
-
-- name: OVS | install controller deb if applicable
-  apt: deb="{{ ovs_info.build_path }}/ovn-central_{{ ovs_info.pkg_build_version }}_amd64.deb"
-  when: controller
 
 - name: OVS | add modules
   lineinfile:
@@ -77,6 +64,7 @@
   with_items:
     - openvswitch
     - vport-geneve
+    - vport-stt
 
 - name: OVS | add modprobe
   modprobe:
@@ -85,6 +73,20 @@
   with_items:
     - openvswitch
     - vport-geneve
+    - vport-stt
+
+- name: OVS | install debs
+  apt: deb="{{ ovs_info.build_path }}/{{item}}_{{ ovs_info.pkg_build_version }}_amd64.deb"
+  with_items:
+    - libopenvswitch
+    - openvswitch-common
+    - openvswitch-switch
+    - ovn-common
+    - ovn-host
+
+- name: OVS | install controller deb if applicable
+  apt: deb="{{ ovs_info.build_path }}/ovn-central_{{ ovs_info.pkg_build_version }}_amd64.deb"
+  when: controller
 
 # TODO: .deb packages are not creating services, we need this for ovnkube
 # when it tries to start/restart services

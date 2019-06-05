@@ -3,8 +3,8 @@ package main
 import (
 	"os"
 
-	"github.com/openvswitch/ovn-kubernetes/go-controller/cmd/ovn-kube-util/app"
-	"github.com/openvswitch/ovn-kubernetes/go-controller/pkg/config"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/cmd/ovn-kube-util/app"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
 	"github.com/sirupsen/logrus"
 	"github.com/urfave/cli"
 )

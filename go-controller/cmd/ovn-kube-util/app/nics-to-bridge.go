@@ -3,7 +3,7 @@ package app
 import (
 	"fmt"
 
-	"github.com/openvswitch/ovn-kubernetes/go-controller/pkg/util"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
 	"github.com/urfave/cli"
 	"k8s.io/apimachinery/pkg/util/errors"
 	kexec "k8s.io/utils/exec"

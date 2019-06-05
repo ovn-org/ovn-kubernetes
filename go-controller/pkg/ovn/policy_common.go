@@ -2,12 +2,13 @@ package ovn
 
 import (
 	"fmt"
-	"github.com/openvswitch/ovn-kubernetes/go-controller/pkg/factory"
-	"github.com/openvswitch/ovn-kubernetes/go-controller/pkg/util"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/factory"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
 	"github.com/sirupsen/logrus"
 	knet "k8s.io/api/networking/v1"
 	"net"
 	"sort"
+	"strings"
 	"sync"
 )
 
@@ -42,9 +43,9 @@ type gressPolicy struct {
 	// the rule in question.
 	portPolicies []*portPolicy
 
-	// ipBlock represents the CIDR IP block from which traffic is allowed
+	// ipBlockCidr represents the CIDR from which traffic is allowed
 	// except the IP block in the except, which should be dropped.
-	ipBlockCidr   string
+	ipBlockCidr   []string
 	ipBlockExcept []string
 }
 
@@ -69,6 +70,8 @@ func newGressPolicy(policyType knet.PolicyType, idx int) *gressPolicy {
 		peerAddressSets:       make(map[string]bool),
 		sortedPeerAddressSets: make([]string, 0),
 		portPolicies:          make([]*portPolicy, 0),
+		ipBlockCidr:           make([]string, 0),
+		ipBlockExcept:         make([]string, 0),
 	}
 }
 
@@ -80,8 +83,8 @@ func (gp *gressPolicy) addPortPolicy(portJSON *knet.NetworkPolicyPort) {
 }
 
 func (gp *gressPolicy) addIPBlock(ipblockJSON *knet.IPBlock) {
-	gp.ipBlockCidr = ipblockJSON.CIDR
-	gp.ipBlockExcept = append([]string{}, ipblockJSON.Except...)
+	gp.ipBlockCidr = append(gp.ipBlockCidr, ipblockJSON.CIDR)
+	gp.ipBlockExcept = append(gp.ipBlockExcept, ipblockJSON.Except...)
 }
 
 func (gp *gressPolicy) getL3MatchFromAddressSet() string {
@@ -107,21 +110,22 @@ func (gp *gressPolicy) getL3MatchFromAddressSet() string {
 
 func (gp *gressPolicy) getMatchFromIPBlock(lportMatch, l4Match string) string {
 	var match string
+	ipBlockCidr := fmt.Sprintf("{%s}", strings.Join(gp.ipBlockCidr, ", "))
 	if gp.policyType == knet.PolicyTypeIngress {
 		if l4Match == noneMatch {
-			match = fmt.Sprintf("match=\"ip4.src == {%s} && %s\"",
-				gp.ipBlockCidr, lportMatch)
+			match = fmt.Sprintf("match=\"ip4.src == %s && %s\"",
+				ipBlockCidr, lportMatch)
 		} else {
-			match = fmt.Sprintf("match=\"ip4.src == {%s} && %s && %s\"",
-				gp.ipBlockCidr, l4Match, lportMatch)
+			match = fmt.Sprintf("match=\"ip4.src == %s && %s && %s\"",
+				ipBlockCidr, l4Match, lportMatch)
 		}
 	} else {
 		if l4Match == noneMatch {
-			match = fmt.Sprintf("match=\"ip4.dst == {%s} && %s\"",
-				gp.ipBlockCidr, lportMatch)
+			match = fmt.Sprintf("match=\"ip4.dst == %s && %s\"",
+				ipBlockCidr, lportMatch)
 		} else {
-			match = fmt.Sprintf("match=\"ip4.dst == {%s} && %s && %s\"",
-				gp.ipBlockCidr, l4Match, lportMatch)
+			match = fmt.Sprintf("match=\"ip4.dst == %s && %s && %s\"",
+				ipBlockCidr, l4Match, lportMatch)
 		}
 	}
 	return match

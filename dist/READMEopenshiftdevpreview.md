@@ -30,7 +30,7 @@ be no cluster networking.
 
 Clone ovn-kubernetes on a convenient host where you can run ansible-playbook:
 ```
-# git clone https://github.com/openvswitch/ovn-kubernetes
+# git clone https://github.com/ovn-org/ovn-kubernetes
 # cd ovn-kubernetes/dist/ansible
 ```
 
