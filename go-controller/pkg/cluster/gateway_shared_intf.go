@@ -299,15 +299,6 @@ func initSharedGateway(
 		gwIntf = intfName
 	}
 
-	// ovn-bridge-mappings maps a physical network name to a local ovs bridge
-	// that provides connectivity to that network.
-	_, stderr, err := util.RunOVSVsctl("set", "Open_vSwitch", ".",
-		fmt.Sprintf("external_ids:ovn-bridge-mappings=%s:%s", util.PhysicalNetworkName, bridgeName))
-	if err != nil {
-		return "", "", fmt.Errorf("Failed to set ovn-bridge-mappings for ovs bridge %s"+
-			", stderr:%s (%v)", bridgeName, stderr, err)
-	}
-
 	// Now, we get IP address from OVS bridge. If IP does not exist,
 	// error out.
 	ipAddress, err := getIPv4Address(bridgeName)
@@ -318,8 +309,14 @@ func initSharedGateway(
 	if ipAddress == "" {
 		return "", "", fmt.Errorf("%s does not have a ipv4 address", bridgeName)
 	}
-	err = util.GatewayInit(clusterIPSubnet, nodeName, ipAddress, "",
-		bridgeName, gwNextHop, subnet, gwVLANId, nodeportEnable)
+
+	ifaceID, macAddress, err := bridgedGatewayNodeSetup(nodeName, bridgeName)
+	if err != nil {
+		return "", "", fmt.Errorf("failed to set up shared interface gateway: %v", err)
+	}
+
+	err = util.GatewayInit(clusterIPSubnet, nodeName, ifaceID, ipAddress,
+		macAddress, gwNextHop, subnet, true, gwVLANId, nodeportEnable)
 	if err != nil {
 		return "", "", fmt.Errorf("failed to init shared interface gateway: %v", err)
 	}
