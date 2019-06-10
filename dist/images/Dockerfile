@@ -21,7 +21,6 @@ USER root
 ENV PYTHONDONTWRITEBYTECODE yes
 
 COPY kubernetes.repo /etc/yum.repos.d/kubernetes.repo
-RUN if [ "$(uname -m)" = "aarch64" ]; then sed -i "s/x86_64/aarch64/" /etc/yum.repos.d/kubernetes.repo; fi
 RUN yum install -y  \
 	PyYAML bind-utils \
 	openssl \
