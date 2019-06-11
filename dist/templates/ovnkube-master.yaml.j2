@@ -1,4 +1,5 @@
 # ovnkube-master
+    - "bar.remote"
 # daemonset version 3
 # starts master daemons, each in a separate container
 # it is run on the master node(s)
@@ -246,7 +247,7 @@ spec:
       # end of container
 
       nodeSelector:
-        node-role.kubernetes.io/master: "true"
+        node-role.kubernetes.io/master: ""
         beta.kubernetes.io/os: "linux"
       volumes:
       # In bootstrap mode, the host config contains information not easily available
