@@ -50,7 +50,7 @@ RUN rpm -i http://cbs.centos.org/kojifiles/packages/openvswitch/${ovsVer}/${ovsS
 RUN rpm -i http://cbs.centos.org/kojifiles/packages/openvswitch/${ovsVer}/${ovsSubVer}/${rpmArch}/openvswitch-ovn-host-${ovsVer}-${ovsSubVer}.${rpmArch}.rpm
 RUN rpm -i http://cbs.centos.org/kojifiles/packages/openvswitch/${ovsVer}/${ovsSubVer}/${rpmArch}/openvswitch-ovn-vtep-${ovsVer}-${ovsSubVer}.${rpmArch}.rpm
 RUN rpm -i http://cbs.centos.org/kojifiles/packages/openvswitch/${ovsVer}/${ovsSubVer}/${rpmArch}/openvswitch-devel-${ovsVer}-${ovsSubVer}.${rpmArch}.rpm
-RUN rpm -i http://dl.fedoraproject.org/pub/epel/7/${rpmArch}/Packages/c/containernetworking-cni-0.5.1-1.el7.${rpmArch}.rpm
+RUN rpm -i http://ftp.vcu.edu/pub/gnu_linux/epel/7Server/${rpmArch}/Packages/c/containernetworking-cni-0.5.1-1.el7.${rpmArch}.rpm
 RUN rm -rf /var/cache/yum
 
 RUN mkdir -p /var/run/openvswitch
