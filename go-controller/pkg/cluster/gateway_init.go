@@ -49,12 +49,16 @@ func getIPv4Address(iface string) (string, error) {
 	if err != nil {
 		return ipAddress, err
 	}
-
+loop:
 	for _, addr := range addrs {
 		switch ip := addr.(type) {
 		case *net.IPNet:
 			if ip.IP.To4() != nil {
 				ipAddress = ip.String()
+			}
+			// get the first ip address
+			if ipAddress != "" {
+				break loop
 			}
 		}
 	}
