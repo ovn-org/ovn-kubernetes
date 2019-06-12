@@ -5,6 +5,7 @@ import (
 	"math/big"
 	"math/rand"
 	"net"
+	"runtime"
 	"strings"
 	"time"
 )
@@ -66,4 +67,30 @@ func GetPortAddresses(portName string, isStaticIP bool) (net.HardwareAddr, net.I
 		return nil, nil, fmt.Errorf("failed to parse logical switch port %q MAC %q: %v", portName, addresses[0], err)
 	}
 	return mac, ip, nil
+}
+
+// GetOVSPortMACAddress returns the MAC address of a given OVS port
+func GetOVSPortMACAddress(portName string) (net.HardwareAddr, error) {
+	macAddress, stderr, err := RunOVSVsctl("--if-exists", "get",
+		"interface", portName, "mac_in_use")
+	if err != nil {
+		return nil, fmt.Errorf("Failed to get MAC address for %q, stderr: %q, error: %v",
+			portName, stderr, err)
+	}
+	if macAddress == "" {
+		return nil, fmt.Errorf("No mac_address found for %q", portName)
+	}
+	if runtime.GOOS == windowsOS && macAddress == "00:00:00:00:00:00" {
+		macAddress, err = FetchIfMacWindows(portName)
+		if err != nil {
+			return nil, err
+		}
+	}
+
+	mac, err := net.ParseMAC(macAddress)
+	if err != nil {
+		return nil, fmt.Errorf("failed to parse port %q MAC %q: %v", portName, macAddress, err)
+	}
+
+	return mac, nil
 }

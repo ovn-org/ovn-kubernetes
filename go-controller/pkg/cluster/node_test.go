@@ -41,8 +41,9 @@ var _ = Describe("Node Operations", func() {
 				Cmd: fmt.Sprintf("ovs-vsctl --timeout=15 set Open_vSwitch . "+
 					"external_ids:ovn-encap-type=geneve "+
 					"external_ids:ovn-encap-ip=%s "+
-					"external_ids:ovn-remote-probe-interval=%d",
-					nodeName, interval),
+					"external_ids:ovn-remote-probe-interval=%d "+
+					"external_ids:hostname=\"%s\"",
+					nodeName, interval, nodeName),
 			})
 
 			err := util.SetExec(fexec)
