@@ -591,6 +591,9 @@ GR_openshift-master-node chassis=6a47b33b-89d3-4d65-ac31-b19b549326c7 lb_force_s
 					"PREROUTING": []string{
 						"-j OVN-KUBE-NODEPORT",
 					},
+					"OUTPUT": []string{
+						"-j OVN-KUBE-NODEPORT",
+					},
 					"OVN-KUBE-NODEPORT": []string{},
 				},
 			}

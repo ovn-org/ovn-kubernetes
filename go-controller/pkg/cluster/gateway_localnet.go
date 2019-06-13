@@ -267,6 +267,11 @@ func localnetNodePortWatcher(ipt util.IPTablesHelper, wf *factory.WatchFactory) 
 		args:  []string{"-j", iptableNodePortChain},
 	})
 	rules = append(rules, iptRule{
+		table: "nat",
+		chain: "OUTPUT",
+		args:  []string{"-j", iptableNodePortChain},
+	})
+	rules = append(rules, iptRule{
 		table: "filter",
 		chain: "FORWARD",
 		args:  []string{"-j", iptableNodePortChain},
