@@ -233,9 +233,6 @@ else
   --k8s-apiserver=https://$OVERLAY_IP:6443
   popd
 
-  # label the master node for daemonsets
-  kubectl label node k8smaster node-role.kubernetes.io/master=true --overwrite
-
   # Create OVN namespace, service accounts, ovnkube-db headless service, configmap, and policies
   kubectl create -f $HOME/work/src/github.com/ovn-org/ovn-kubernetes/dist/yaml/ovn-setup.yaml
 

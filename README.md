@@ -25,12 +25,10 @@ sudo apt-get install openvswitch-datapath-dkms -y
 
 ## Run daemonsets
 
-On Kubernetes master, label it to run daemonsets. $NODENAME below is master's
-node name.
+On Kubernetes master, label it to run daemonsets.
 
 ```
 kubectl taint nodes --all node-role.kubernetes.io/master-
-kubectl label node $NODENAME node-role.kubernetes.io/master=true --overwrite
 ```
 
 Create OVN daemonset yamls from templates by:
