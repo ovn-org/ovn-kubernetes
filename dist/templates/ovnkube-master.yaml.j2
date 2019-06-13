@@ -39,17 +39,7 @@ spec:
       serviceAccountName: ovn
       hostNetwork: true
       hostPID: true
-      # TODO: For now always place ovnkube-master POD in the same node as ovnkube-db POD till will fix #644
-      affinity:
-        podAffinity:
-          requiredDuringSchedulingIgnoredDuringExecution:
-          - labelSelector:
-              matchExpressions:
-                - key: name
-                  operator: In
-                  values:
-                    - ovnkube-db
-            topologyKey: kubernetes.io/hostname
+
       containers:
 
       # run-ovn-northd - v3
