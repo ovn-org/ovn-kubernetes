@@ -94,13 +94,12 @@ func (cluster *OvnClusterController) initGateway(
 			cluster.NodePortEnable)
 	}
 
-	bridge, gwIntf, err := initSharedGateway(nodeName, clusterIPSubnet, subnet,
+	gwIntf, err := initSharedGateway(nodeName, clusterIPSubnet, subnet,
 		cluster.GatewayNextHop, cluster.GatewayIntf, cluster.GatewayVLANID,
 		cluster.NodePortEnable, cluster.watchFactory)
 	if err != nil {
 		return err
 	}
-	cluster.GatewayBridge = bridge
 	cluster.GatewayIntf = gwIntf
 	return nil
 }

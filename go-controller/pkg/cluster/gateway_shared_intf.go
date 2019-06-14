@@ -278,7 +278,7 @@ func addStaticRouteToHost(nodeName, nicIP string) error {
 func initSharedGateway(
 	nodeName string, clusterIPSubnet []string, subnet,
 	gwNextHop, gwIntf string, gwVLANId uint, nodeportEnable bool,
-	wf *factory.WatchFactory) (string, string, error) {
+	wf *factory.WatchFactory) (string, error) {
 	var bridgeName string
 
 	// Check to see whether the interface is OVS bridge.
@@ -287,13 +287,13 @@ func initSharedGateway(
 		// and add cluster.GatewayIntf as a port of that bridge.
 		bridgeName, err = util.NicToBridge(gwIntf)
 		if err != nil {
-			return "", "", fmt.Errorf("failed to convert %s to OVS bridge: %v",
+			return "", fmt.Errorf("failed to convert %s to OVS bridge: %v",
 				gwIntf, err)
 		}
 	} else {
 		intfName, err := getIntfName(gwIntf)
 		if err != nil {
-			return "", "", err
+			return "", err
 		}
 		bridgeName = gwIntf
 		gwIntf = intfName
@@ -303,43 +303,43 @@ func initSharedGateway(
 	// error out.
 	ipAddress, err := getIPv4Address(bridgeName)
 	if err != nil {
-		return "", "", fmt.Errorf("Failed to get interface details for %s (%v)",
+		return "", fmt.Errorf("Failed to get interface details for %s (%v)",
 			bridgeName, err)
 	}
 	if ipAddress == "" {
-		return "", "", fmt.Errorf("%s does not have a ipv4 address", bridgeName)
+		return "", fmt.Errorf("%s does not have a ipv4 address", bridgeName)
 	}
 
 	ifaceID, macAddress, err := bridgedGatewayNodeSetup(nodeName, bridgeName)
 	if err != nil {
-		return "", "", fmt.Errorf("failed to set up shared interface gateway: %v", err)
+		return "", fmt.Errorf("failed to set up shared interface gateway: %v", err)
 	}
 
 	err = util.GatewayInit(clusterIPSubnet, nodeName, ifaceID, ipAddress,
 		macAddress, gwNextHop, subnet, true, gwVLANId, nodeportEnable)
 	if err != nil {
-		return "", "", fmt.Errorf("failed to init shared interface gateway: %v", err)
+		return "", fmt.Errorf("failed to init shared interface gateway: %v", err)
 	}
 
 	// Add static routes to OVN Cluster Router to enable pods on this Node to
 	// reach the host IP
 	err = addStaticRouteToHost(nodeName, ipAddress)
 	if err != nil {
-		return "", "", err
+		return "", err
 	}
 
 	// Program cluster.GatewayIntf to let non-pod traffic to go to host
 	// stack
 	if err := addDefaultConntrackRules(nodeName, bridgeName, gwIntf); err != nil {
-		return "", "", err
+		return "", err
 	}
 
 	if nodeportEnable {
 		// Program cluster.GatewayIntf to let nodePort traffic to go to pods.
 		if err := nodePortWatcher(nodeName, bridgeName, gwIntf, wf); err != nil {
-			return "", "", err
+			return "", err
 		}
 	}
 
-	return bridgeName, gwIntf, nil
+	return gwIntf, nil
 }
