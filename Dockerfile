@@ -71,6 +71,14 @@ COPY .git/refs/heads/ /root/.git/refs/heads/
 COPY dist/images/ovnkube.sh /root/
 COPY dist/images/ovn-debug.sh /root/
 
+# iptables wrappers
+COPY ./dist/images/iptables-scripts/iptables /usr/sbin/
+COPY ./dist/images/iptables-scripts/iptables-save /usr/sbin/
+COPY ./dist/images/iptables-scripts/iptables-restore /usr/sbin/
+COPY ./dist/images/iptables-scripts/ip6tables /usr/sbin/
+COPY ./dist/images/iptables-scripts/ip6tables-save /usr/sbin/
+COPY ./dist/images/iptables-scripts/ip6tables-restore /usr/sbin/
+COPY ./dist/images/iptables-scripts/iptables /usr/sbin/
 
 LABEL io.k8s.display-name="ovn kubernetes" \
       io.k8s.description="This is a component of OpenShift Container Platform that provides an overlay network using ovn." \
