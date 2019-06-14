@@ -43,8 +43,6 @@ spec:
       # firewall rules for ovn - assumed to be setup
       # iptables -A OS_FIREWALL_ALLOW -p tcp -m state --state NEW -m tcp --dport 6641 -j ACCEPT
       # iptables -A OS_FIREWALL_ALLOW -p tcp -m state --state NEW -m tcp --dport 6642 -j ACCEPT
-      # ovs flow for ovn (geneve)
-      # /usr/share/openvswitch/scripts/ovs-ctl --protocol=udp --dport=6081 enable-protocol
 
       # nb-ovsdb - v3
       - name: nb-ovsdb
@@ -59,22 +57,9 @@ spec:
           privileged: true
 
         volumeMounts:
-        - mountPath: /etc/sysconfig/origin-node
-          name: host-sysconfig-node
-          readOnly: true
-        # Mount the entire run directory for socket access for Docker or CRI-o
-        # TODO: remove
-        - mountPath: /var/run
-          name: host-var-run
-        # Run directories where we need to be able to access sockets
-        - mountPath: /var/run/dbus/
-          name: host-var-run-dbus
-          readOnly: true
         # ovn db is stored in the pod in /etc/openvswitch
         # and on the host in /var/lib/openvswitch/
         - mountPath: /etc/openvswitch/
-          name: host-var-lib-ovs
-        - mountPath: /var/lib/openvswitch/
           name: host-var-lib-ovs
         - mountPath: /var/log/openvswitch/
           name: host-var-log-ovs
@@ -95,10 +80,6 @@ spec:
             configMapKeyRef:
               name: ovn-config
               key: k8s_apiserver
-        - name: K8S_NODE
-          valueFrom:
-            fieldRef:
-              fieldPath: spec.nodeName
         - name: OVN_KUBERNETES_NAMESPACE
           valueFrom:
             fieldRef:
@@ -130,22 +111,9 @@ spec:
           privileged: true
 
         volumeMounts:
-        - mountPath: /etc/sysconfig/origin-node
-          name: host-sysconfig-node
-          readOnly: true
-        # Mount the entire run directory for socket access for Docker or CRI-o
-        # TODO: remove
-        - mountPath: /var/run
-          name: host-var-run
-        # Run directories where we need to be able to access sockets
-        - mountPath: /var/run/dbus/
-          name: host-var-run-dbus
-          readOnly: true
         # ovn db is stored in the pod in /etc/openvswitch
         # and on the host in /var/lib/openvswitch/
         - mountPath: /etc/openvswitch/
-          name: host-var-lib-ovs
-        - mountPath: /var/lib/openvswitch/
           name: host-var-lib-ovs
         - mountPath: /var/log/openvswitch/
           name: host-var-log-ovs
@@ -166,10 +134,6 @@ spec:
             configMapKeyRef:
               name: ovn-config
               key: k8s_apiserver
-        - name: K8S_NODE
-          valueFrom:
-            fieldRef:
-              fieldPath: spec.nodeName
         - name: OVN_KUBERNETES_NAMESPACE
           valueFrom:
             fieldRef:
@@ -192,21 +156,6 @@ spec:
         node-role.kubernetes.io/master: ""
         beta.kubernetes.io/os: "linux"
       volumes:
-      # In bootstrap mode, the host config contains information not easily available
-      # from other locations.
-      - name: host-sysconfig-node
-        hostPath:
-          path: /etc/sysconfig/origin-node
-      - name: host-modules
-        hostPath:
-          path: /lib/modules
-      # TODO: access to the docker socket should be replaced by CRI socket
-      - name: host-var-run
-        hostPath:
-          path: /var/run
-      - name: host-var-run-dbus
-        hostPath:
-          path: /var/run/dbus
       - name: host-var-lib-ovs
         hostPath:
           path: /var/lib/openvswitch
