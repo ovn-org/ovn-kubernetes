@@ -161,6 +161,13 @@ address=ssl://1.2.3.4:6642
 client-privkey=/path/to/sb-client-private.key
 client-cert=/path/to/sb-client.crt
 client-cacert=/path/to/sb-client-ca.crt
+
+[gateway]
+mode=shared
+interface=eth1
+next-hop=1.3.4.5
+vlan-id=10
+nodeport=false
 `
 
 	var newData string
@@ -465,6 +472,12 @@ var _ = Describe("Config Operations", func() {
 			Expect(OvnSouth.CACert).To(Equal("/path/to/sb-client-ca.crt"))
 			Expect(OvnSouth.Address).To(Equal("ssl:1.2.3.4:6642"))
 
+			Expect(Gateway.Mode).To(Equal(GatewayModeShared))
+			Expect(Gateway.Interface).To(Equal("eth1"))
+			Expect(Gateway.NextHop).To(Equal("1.3.4.5"))
+			Expect(Gateway.VLANID).To(Equal(uint(10)))
+			Expect(Gateway.NodeportEnable).To(BeFalse())
+
 			return nil
 		}
 		err = app.Run([]string{app.Name, "-config-file=" + cfgFile.Name()})
@@ -513,6 +526,11 @@ var _ = Describe("Config Operations", func() {
 			Expect(OvnSouth.CACert).To(Equal("/client/cacert2"))
 			Expect(OvnSouth.Address).To(Equal("ssl:6.5.4.1:6652"))
 
+			Expect(Gateway.Mode).To(Equal(GatewayModeSpare))
+			Expect(Gateway.Interface).To(Equal("eth5"))
+			Expect(Gateway.NextHop).To(Equal("1.3.5.6"))
+			Expect(Gateway.VLANID).To(Equal(uint(100)))
+			Expect(Gateway.NodeportEnable).To(BeTrue())
 			return nil
 		}
 		cliArgs := []string{
@@ -537,6 +555,12 @@ var _ = Describe("Config Operations", func() {
 			"-sb-client-privkey=/client/privkey2",
 			"-sb-client-cert=/client/cert2",
 			"-sb-client-cacert=/client/cacert2",
+			"-init-gateways",
+			"-gateway-interface=eth5",
+			"-gateway-nexthop=1.3.5.6",
+			"-gateway-spare-interface",
+			"-gateway-vlanid=100",
+			"-nodeport",
 		}
 		err = app.Run(cliArgs)
 		Expect(err).NotTo(HaveOccurred())
