@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
 	util "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
 	"github.com/sirupsen/logrus"
 	kapi "k8s.io/api/core/v1"
@@ -64,7 +65,7 @@ func (ovn *Controller) AddEndpoints(ep *kapi.Endpoints) error {
 		targetPort := lbEps.Port
 		for _, svcPort := range svc.Spec.Ports {
 			if svcPort.Protocol == kapi.ProtocolTCP && svcPort.Name == svcPortName {
-				if svc.Spec.Type == kapi.ServiceTypeNodePort && ovn.nodePortEnable {
+				if svc.Spec.Type == kapi.ServiceTypeNodePort && config.Gateway.NodeportEnable {
 					logrus.Debugf("Creating Gateways IP for NodePort: %d, %v", svcPort.NodePort, ips)
 					err = ovn.createGatewaysVIP(string(svcPort.Protocol), svcPort.NodePort, targetPort, ips)
 					if err != nil {
@@ -96,7 +97,7 @@ func (ovn *Controller) AddEndpoints(ep *kapi.Endpoints) error {
 		targetPort := lbEps.Port
 		for _, svcPort := range svc.Spec.Ports {
 			if svcPort.Protocol == kapi.ProtocolUDP && svcPort.Name == svcPortName {
-				if svc.Spec.Type == kapi.ServiceTypeNodePort && ovn.nodePortEnable {
+				if svc.Spec.Type == kapi.ServiceTypeNodePort && config.Gateway.NodeportEnable {
 					err = ovn.createGatewaysVIP(string(svcPort.Protocol), svcPort.NodePort, targetPort, ips)
 					if err != nil {
 						logrus.Errorf("Error in creating Node Port for svc %s, node port: %d - %v\n", svc.Name, svcPort.NodePort, err)

@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"net"
 
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
 )
 
@@ -67,39 +68,37 @@ loop:
 
 func (cluster *OvnClusterController) initGateway(
 	nodeName string, clusterIPSubnet []string, subnet string) error {
-	if cluster.LocalnetGateway {
+	if config.Gateway.Mode == config.GatewayModeLocal {
 		return initLocalnetGateway(nodeName, clusterIPSubnet, subnet,
-			cluster.NodePortEnable, cluster.watchFactory)
+			cluster.watchFactory)
 	}
 
-	if cluster.GatewayNextHop == "" || cluster.GatewayIntf == "" {
+	gatewayNextHop := config.Gateway.NextHop
+	gatewayIntf := config.Gateway.Interface
+	if gatewayNextHop == "" || gatewayIntf == "" {
 		// We need to get the interface details from the default gateway.
-		gatewayIntf, gatewayNextHop, err := getDefaultGatewayInterfaceDetails()
+		defaultGatewayIntf, defaultGatewayNextHop, err := getDefaultGatewayInterfaceDetails()
 		if err != nil {
 			return err
 		}
 
-		if cluster.GatewayNextHop == "" {
-			cluster.GatewayNextHop = gatewayNextHop
+		if gatewayNextHop == "" {
+			gatewayNextHop = defaultGatewayNextHop
 		}
 
-		if cluster.GatewayIntf == "" {
-			cluster.GatewayIntf = gatewayIntf
+		if gatewayIntf == "" {
+			gatewayIntf = defaultGatewayIntf
 		}
 	}
 
-	if cluster.GatewaySpareIntf {
-		return initSpareGateway(nodeName, clusterIPSubnet, subnet,
-			cluster.GatewayNextHop, cluster.GatewayIntf, cluster.GatewayVLANID,
-			cluster.NodePortEnable)
+	var err error
+	if config.Gateway.Mode == config.GatewayModeSpare {
+		err = initSpareGateway(nodeName, clusterIPSubnet, subnet,
+			gatewayNextHop, gatewayIntf)
+	} else if config.Gateway.Mode == config.GatewayModeShared {
+		err = initSharedGateway(nodeName, clusterIPSubnet, subnet,
+			gatewayNextHop, gatewayIntf, cluster.watchFactory)
 	}
 
-	gwIntf, err := initSharedGateway(nodeName, clusterIPSubnet, subnet,
-		cluster.GatewayNextHop, cluster.GatewayIntf, cluster.GatewayVLANID,
-		cluster.NodePortEnable, cluster.watchFactory)
-	if err != nil {
-		return err
-	}
-	cluster.GatewayIntf = gwIntf
-	return nil
+	return err
 }

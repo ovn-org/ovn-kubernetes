@@ -72,7 +72,7 @@ func (cluster *OvnClusterController) StartClusterNode(name string) error {
 		return err
 	}
 
-	if cluster.GatewayInit {
+	if config.Gateway.Mode != config.GatewayModeDisabled {
 		err = cluster.initGateway(node.Name, clusterSubnets, subnet.String())
 		if err != nil {
 			return err

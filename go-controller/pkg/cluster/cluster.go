@@ -22,14 +22,6 @@ type OvnClusterController struct {
 	UDPLoadBalancerUUID string
 
 	ClusterIPNet []CIDRNetworkEntry
-
-	GatewayInit      bool
-	GatewayIntf      string
-	GatewayNextHop   string
-	GatewaySpareIntf bool
-	GatewayVLANID    uint
-	NodePortEnable   bool
-	LocalnetGateway  bool
 }
 
 // CIDRNetworkEntry is the object that holds the definition for a single network CIDR range
