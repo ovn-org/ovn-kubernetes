@@ -43,6 +43,7 @@ git clone https://github.com/ovn-org/ovn-kubernetes
 cd $HOME/work/src/github.com/ovn-org/ovn-kubernetes/dist/images
 ./daemonset.sh --image=docker.io/ovnkube/ovn-daemonset-u:latest \
     --net-cidr=192.168.0.0/16 --svc-cidr=172.16.1.0/24 \
+    --gateway-options="--gateway-local" \
     --k8s-apiserver=https://$MASTER_IP:6443
 ```
 
@@ -68,8 +69,8 @@ cluster.
 ## Manual installation and Vagrant
 
 For Windows, (and to understand what daemonsets run internally), please read
-[MANUAL.md].  For more advanced use cases too (like SSL and HA of databases),
-please read [MANUAL.md].
+[MANUAL.md].  For more advanced use cases too (like SSL, HA of databases, and various
+gateway modes supported), please read [MANUAL.md].
 
 [INSTALL.rst]: http://docs.openvswitch.org/en/latest/intro/install
 [INSTALL.UBUNTU.md]: docs/INSTALL.UBUNTU.md
