@@ -128,6 +128,57 @@ func createTempFileContent(name, value string) (string, error) {
 	return fname, nil
 }
 
+// writeTestConfigFile writes out a config file with well-known options but
+// allows specific fields to be overridden by the testcase
+func writeTestConfigFile(path string, overrides ...string) error {
+	const defaultData string = `[default]
+mtu=1500
+conntrack-zone=64321
+
+[kubernetes]
+kubeconfig=/path/to/kubeconfig
+apiserver=https://1.2.3.4:6443
+token=TG9yZW0gaXBzdW0gZ
+cacert=/path/to/kubeca.crt
+service-cidr=172.18.0.0/24
+
+[logging]
+loglevel=5
+logfile=/var/log/ovnkube.log
+
+[cni]
+conf-dir=/etc/cni/net.d22
+plugin=ovn-k8s-cni-overlay22
+
+[ovnnorth]
+address=ssl://1.2.3.4:6641
+client-privkey=/path/to/nb-client-private.key
+client-cert=/path/to/nb-client.crt
+client-cacert=/path/to/nb-client-ca.crt
+
+[ovnsouth]
+address=ssl://1.2.3.4:6642
+client-privkey=/path/to/sb-client-private.key
+client-cert=/path/to/sb-client.crt
+client-cacert=/path/to/sb-client-ca.crt
+`
+
+	var newData string
+	for _, line := range strings.Split(defaultData, "\n") {
+		equalsPos := strings.Index(line, "=")
+		if equalsPos >= 0 {
+			for _, override := range overrides {
+				if strings.HasPrefix(override, line[:equalsPos+1]) {
+					line = override
+					break
+				}
+			}
+		}
+		newData += line + "\n"
+	}
+	return ioutil.WriteFile(path, []byte(newData), 0644)
+}
+
 var _ = Describe("Config Operations", func() {
 	var app *cli.App
 	var cfgFile *os.File
@@ -381,38 +432,7 @@ var _ = Describe("Config Operations", func() {
 		Expect(err).NotTo(HaveOccurred())
 		defer os.Remove(kubeCAFile)
 
-		cfgData := fmt.Sprintf(`[default]
-mtu=1500
-conntrack-zone=64321
-
-[kubernetes]
-kubeconfig=%s
-apiserver=https://1.2.3.4:6443
-token=TG9yZW0gaXBzdW0gZ
-cacert=%s
-service-cidr=172.18.0.0/24
-
-[logging]
-loglevel=5
-logfile=/var/log/ovnkube.log
-
-[cni]
-conf-dir=/etc/cni/net.d22
-plugin=ovn-k8s-cni-overlay22
-
-[ovnnorth]
-address=ssl://1.2.3.4:6641
-client-privkey=/path/to/nb-client-private.key
-client-cert=/path/to/nb-client.crt
-client-cacert=/path/to/nb-client-ca.crt
-
-[ovnsouth]
-address=ssl://1.2.3.4:6642
-client-privkey=/path/to/sb-client-private.key
-client-cert=/path/to/sb-client.crt
-client-cacert=/path/to/sb-client-ca.crt
-`, kubeconfigFile, kubeCAFile)
-		err = ioutil.WriteFile(cfgFile.Name(), []byte(cfgData), 0644)
+		err = writeTestConfigFile(cfgFile.Name(), "kubeconfig="+kubeconfigFile, "cacert="+kubeCAFile)
 		Expect(err).NotTo(HaveOccurred())
 
 		app.Action = func(ctx *cli.Context) error {
@@ -460,37 +480,7 @@ client-cacert=/path/to/sb-client-ca.crt
 		Expect(err).NotTo(HaveOccurred())
 		defer os.Remove(kubeCAFile)
 
-		err = ioutil.WriteFile(cfgFile.Name(), []byte(`[default]
-mtu=1500
-conntrack-zone=64321
-
-[kubernetes]
-kubeconfig=/path/to/kubeconfig
-apiserver=https://1.2.3.4:6443
-token=TG9yZW0gaXBzdW0gZ
-cacert=/path/to/kubeca.crt
-service-cidr=172.18.0.0/24
-
-[logging]
-loglevel=5
-logfile=/var/log/ovnkube.log
-
-[cni]
-conf-dir=/etc/cni/net.d22
-plugin=ovn-k8s-cni-overlay22
-
-[ovnnorth]
-address=ssl://1.2.3.4:6641
-client-privkey=/path/to/nb-client-private.key
-client-cert=/path/to/nb-client.crt
-client-cacert=/path/to/nb-client-ca.crt
-
-[ovnsouth]
-address=ssl://1.2.3.4:6642
-client-privkey=/path/to/sb-client-private.key
-client-cert=/path/to/sb-client.crt
-client-cacert=/path/to/sb-client-ca.crt
-`), 0644)
+		err = writeTestConfigFile(cfgFile.Name())
 		Expect(err).NotTo(HaveOccurred())
 
 		app.Action = func(ctx *cli.Context) error {
@@ -598,37 +588,7 @@ service-cidr=172.18.0.0/24
 		Expect(err).NotTo(HaveOccurred())
 		defer os.Remove(kubeCAFile)
 
-		err = ioutil.WriteFile(cfgFile.Name(), []byte(`[default]
-mtu=1500
-conntrack-zone=64321
-
-[kubernetes]
-kubeconfig=/path/to/kubeconfig
-apiserver=https://1.2.3.4:6443
-token=TG9yZW0gaXBzdW0gZ
-cacert=/path/to/kubeca.crt
-service-cidr=172.18.0.0/24
-
-[logging]
-loglevel=5
-logfile=/var/log/ovnkube.log
-
-[cni]
-conf-dir=/etc/cni/net.d22
-plugin=ovn-k8s-cni-overlay22
-
-[ovnnorth]
-address=ssl://1.2.3.4:6641
-client-privkey=/path/to/nb-client-private.key
-client-cert=/path/to/nb-client.crt
-client-cacert=/path/to/nb-client-ca.crt
-
-[ovnsouth]
-address=ssl://1.2.3.4:6642
-client-privkey=/path/to/sb-client-private.key
-client-cert=/path/to/sb-client.crt
-client-cacert=/path/to/sb-client-ca.crt
-`), 0644)
+		err = writeTestConfigFile(cfgFile.Name())
 		Expect(err).NotTo(HaveOccurred())
 
 		app.Action = func(ctx *cli.Context) error {
