@@ -114,8 +114,9 @@ ovn_controller_opts=${OVN_CONTROLLER_OPTS:-""}
 # set the log level for ovnkube
 ovnkube_loglevel=${OVNKUBE_LOGLEVEL:-4}
 
-#OVN_GATEWAY_OPTS=""
-ovn_gateway_opts=${OVN_GATEWAY_OPTS:-"--gateway-local"}
+# by default it is going to be a shared gateway mode, however this can be overridden to any of the other
+# two gateway modes that we support using `images/daemonset.sh` tool
+ovn_gateway_opts=${OVN_GATEWAY_OPTS:-""}
 
 net_cidr=${OVN_NET_CIDR:-10.128.0.0/14/23}
 svc_cidr=${OVN_SVC_CIDR:-172.30.0.0/16}
