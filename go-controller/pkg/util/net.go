@@ -36,12 +36,8 @@ func intToIP(i *big.Int) net.IP {
 }
 
 // GetPortAddresses returns the MAC and IP of the given logical switch port
-func GetPortAddresses(portName string, isStaticIP bool) (net.HardwareAddr, net.IP, error) {
-	addrType := "dynamic_addresses"
-	if isStaticIP {
-		addrType = "addresses"
-	}
-	out, _, err := RunOVNNbctl("get", "logical_switch_port", portName, addrType)
+func GetPortAddresses(portName string) (net.HardwareAddr, net.IP, error) {
+	out, _, err := RunOVNNbctl("get", "logical_switch_port", portName, "dynamic_addresses")
 	if err != nil {
 		return nil, nil, fmt.Errorf("Error while obtaining addresses for %s: %v", portName, err)
 	}
@@ -50,10 +46,8 @@ func GetPortAddresses(portName string, isStaticIP bool) (net.HardwareAddr, net.I
 		return nil, nil, nil
 	}
 
-	// static addresses have format ["0a:00:00:00:00:01 192.168.1.3"], while
 	// dynamic addresses have format "0a:00:00:00:00:01 192.168.1.3".
-	outStr := strings.Trim(out, `[]`)
-	outStr = strings.Trim(outStr, `"`)
+	outStr := strings.Trim(out, `"`)
 	addresses := strings.Split(outStr, " ")
 	if len(addresses) != 2 {
 		return nil, nil, fmt.Errorf("Error while obtaining addresses for %s", portName)

@@ -97,7 +97,7 @@ func GetDefaultGatewayRouterIP() (string, net.IP, error) {
 }
 
 func ensureGatewayPortAddress(portName string) (net.HardwareAddr, *net.IPNet, error) {
-	mac, ip, _ := GetPortAddresses(portName, false)
+	mac, ip, _ := GetPortAddresses(portName)
 	if mac == nil || ip == nil {
 		// Create the gateway switch port in 'join' if it doesn't exist yet
 		stdout, stderr, err := RunOVNNbctl("--wait=sb",
@@ -110,7 +110,7 @@ func ensureGatewayPortAddress(portName string) (net.HardwareAddr, *net.IPNet, er
 				portName, stdout, stderr, err)
 		}
 		// Should have an address already since we waited for the SB above
-		mac, ip, err = GetPortAddresses(portName, false)
+		mac, ip, err = GetPortAddresses(portName)
 		if err != nil {
 			return nil, nil, fmt.Errorf("error while waiting for addresses "+
 				"for gateway switch port %q: %v", portName, err)
