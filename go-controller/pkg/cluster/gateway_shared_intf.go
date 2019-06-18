@@ -15,7 +15,7 @@ import (
 )
 
 func addService(service *kapi.Service, inport, outport, gwBridge string) {
-	if service.Spec.Type != kapi.ServiceTypeNodePort {
+	if !util.ServiceHasNodePort(service) {
 		return
 	}
 
@@ -38,7 +38,7 @@ func addService(service *kapi.Service, inport, outport, gwBridge string) {
 }
 
 func deleteService(service *kapi.Service, inport, gwBridge string) {
-	if service.Spec.Type != kapi.ServiceTypeNodePort {
+	if !util.ServiceHasNodePort(service) {
 		return
 	}
 
@@ -80,7 +80,7 @@ func syncServices(services []interface{}, gwBridge, gwIntf string) {
 			continue
 		}
 
-		if service.Spec.Type != kapi.ServiceTypeNodePort ||
+		if !util.ServiceHasNodePort(service) ||
 			len(service.Spec.Ports) == 0 {
 			continue
 		}

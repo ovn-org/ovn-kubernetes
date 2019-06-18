@@ -65,7 +65,7 @@ func (ovn *Controller) AddEndpoints(ep *kapi.Endpoints) error {
 		targetPort := lbEps.Port
 		for _, svcPort := range svc.Spec.Ports {
 			if svcPort.Protocol == kapi.ProtocolTCP && svcPort.Name == svcPortName {
-				if svc.Spec.Type == kapi.ServiceTypeNodePort && config.Gateway.NodeportEnable {
+				if util.ServiceHasNodePort(svc) && config.Gateway.NodeportEnable {
 					logrus.Debugf("Creating Gateways IP for NodePort: %d, %v", svcPort.NodePort, ips)
 					err = ovn.createGatewaysVIP(string(svcPort.Protocol), svcPort.NodePort, targetPort, ips)
 					if err != nil {
@@ -73,7 +73,7 @@ func (ovn *Controller) AddEndpoints(ep *kapi.Endpoints) error {
 						continue
 					}
 				}
-				if svc.Spec.Type == kapi.ServiceTypeClusterIP || svc.Spec.Type == kapi.ServiceTypeNodePort {
+				if util.ServiceHasClusterIP(svc) {
 					var loadBalancer string
 					loadBalancer, err = ovn.getLoadBalancer(svcPort.Protocol)
 					if err != nil {
@@ -97,14 +97,14 @@ func (ovn *Controller) AddEndpoints(ep *kapi.Endpoints) error {
 		targetPort := lbEps.Port
 		for _, svcPort := range svc.Spec.Ports {
 			if svcPort.Protocol == kapi.ProtocolUDP && svcPort.Name == svcPortName {
-				if svc.Spec.Type == kapi.ServiceTypeNodePort && config.Gateway.NodeportEnable {
+				if util.ServiceHasNodePort(svc) && config.Gateway.NodeportEnable {
 					err = ovn.createGatewaysVIP(string(svcPort.Protocol), svcPort.NodePort, targetPort, ips)
 					if err != nil {
 						logrus.Errorf("Error in creating Node Port for svc %s, node port: %d - %v\n", svc.Name, svcPort.NodePort, err)
 						continue
 					}
 				}
-				if svc.Spec.Type == kapi.ServiceTypeNodePort || svc.Spec.Type == kapi.ServiceTypeClusterIP {
+				if util.ServiceHasClusterIP(svc) {
 					var loadBalancer string
 					loadBalancer, err = ovn.getLoadBalancer(svcPort.Protocol)
 					if err != nil {
@@ -161,7 +161,7 @@ func (ovn *Controller) handleNodePortLB(node *kapi.Node) {
 			if err != nil {
 				continue
 			}
-			if svc.Spec.Type != kapi.ServiceTypeNodePort {
+			if !util.ServiceHasNodePort(svc) {
 				continue
 			}
 			tcpPortMap := make(map[string]lbEndpoints)

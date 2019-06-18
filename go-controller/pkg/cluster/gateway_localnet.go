@@ -187,7 +187,7 @@ func initLocalnetGatewayInternal(nodeName string, clusterIPSubnet []string,
 
 // AddService adds service and creates corresponding resources in OVN
 func localnetAddService(svc *kapi.Service) error {
-	if svc.Spec.Type != kapi.ServiceTypeNodePort {
+	if !util.ServiceHasNodePort(svc) {
 		return nil
 	}
 	ipt, err := iptables.NewWithProtocol(iptables.ProtocolIPv4)
@@ -220,7 +220,7 @@ func localnetAddService(svc *kapi.Service) error {
 }
 
 func localnetDeleteService(svc *kapi.Service) error {
-	if svc.Spec.Type != kapi.ServiceTypeNodePort {
+	if !util.ServiceHasNodePort(svc) {
 		return nil
 	}
 	ipt, err := iptables.NewWithProtocol(iptables.ProtocolIPv4)
