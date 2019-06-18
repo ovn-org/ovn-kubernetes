@@ -237,43 +237,19 @@ func (oc *Controller) addLogicalPort(pod *kapi.Pod) {
 	portName := fmt.Sprintf("%s_%s", pod.Namespace, pod.Name)
 	logrus.Debugf("Creating logical port for %s on switch %s", portName, logicalSwitch)
 
-	annotation, isStaticIP := pod.Annotations["ovn"]
-
-	// If pod already has annotations, just add the lsp with static ip/mac.
-	// Else, create the lsp with dynamic addresses.
-	if isStaticIP {
-		ipAddress := oc.getIPFromOvnAnnotation(annotation)
-		macAddress := oc.getMacFromOvnAnnotation(annotation)
-
-		out, stderr, err = util.RunOVNNbctl("--may-exist", "lsp-add",
-			logicalSwitch, portName, "--", "lsp-set-addresses", portName,
-			fmt.Sprintf("%s %s", macAddress, ipAddress), "--", "set",
-			"logical_switch_port", portName,
-			"external-ids:namespace="+pod.Namespace,
-			"external-ids:logical_switch="+logicalSwitch,
-			"external-ids:pod=true", "--", "--if-exists",
-			"clear", "logical_switch_port", portName, "dynamic_addresses")
-		if err != nil {
-			logrus.Errorf("Failed to add logical port to switch "+
-				"stdout: %q, stderr: %q (%v)",
-				out, stderr, err)
-			return
-		}
-	} else {
-		out, stderr, err = util.RunOVNNbctl("--wait=sb", "--",
-			"--may-exist", "lsp-add", logicalSwitch, portName,
-			"--", "lsp-set-addresses",
-			portName, "dynamic", "--", "set",
-			"logical_switch_port", portName,
-			"external-ids:namespace="+pod.Namespace,
-			"external-ids:logical_switch="+logicalSwitch,
-			"external-ids:pod=true")
-		if err != nil {
-			logrus.Errorf("Error while creating logical port %s "+
-				"stdout: %q, stderr: %q (%v)",
-				portName, out, stderr, err)
-			return
-		}
+	out, stderr, err = util.RunOVNNbctl("--wait=sb", "--",
+		"--may-exist", "lsp-add", logicalSwitch, portName,
+		"--", "lsp-set-addresses",
+		portName, "dynamic", "--", "set",
+		"logical_switch_port", portName,
+		"external-ids:namespace="+pod.Namespace,
+		"external-ids:logical_switch="+logicalSwitch,
+		"external-ids:pod=true")
+	if err != nil {
+		logrus.Errorf("Error while creating logical port %s "+
+			"stdout: %q, stderr: %q (%v)",
+			portName, out, stderr, err)
+		return
 	}
 
 	oc.logicalPortCache[portName] = logicalSwitch
@@ -288,7 +264,7 @@ func (oc *Controller) addLogicalPort(pod *kapi.Pod) {
 	var podIP net.IP
 	count := 30
 	for count > 0 {
-		podMac, podIP, err = util.GetPortAddresses(portName, isStaticIP)
+		podMac, podIP, err = util.GetPortAddresses(portName)
 		if err == nil && podMac != nil && podIP != nil {
 			break
 		}
@@ -306,45 +282,13 @@ func (oc *Controller) addLogicalPort(pod *kapi.Pod) {
 		return
 	}
 
-	if !isStaticIP {
-		annotation = fmt.Sprintf(`{\"ip_address\":\"%s/%s\", \"mac_address\":\"%s\", \"gateway_ip\": \"%s\"}`, podIP.String(), mask, podMac.String(), gatewayIP)
-		logrus.Debugf("Annotation values: ip=%s/%s ; mac=%s ; gw=%s\nAnnotation=%s", podIP.String(), mask, podMac.String(), gatewayIP, annotation)
-		err = oc.kube.SetAnnotationOnPod(pod, "ovn", annotation)
-		if err != nil {
-			logrus.Errorf("Failed to set annotation on pod %s - %v", pod.Name, err)
-		}
+	annotation := fmt.Sprintf(`{\"ip_address\":\"%s/%s\", \"mac_address\":\"%s\", \"gateway_ip\": \"%s\"}`, podIP.String(), mask, podMac.String(), gatewayIP)
+	logrus.Debugf("Annotation values: ip=%s/%s ; mac=%s ; gw=%s\nAnnotation=%s", podIP.String(), mask, podMac.String(), gatewayIP, annotation)
+	err = oc.kube.SetAnnotationOnPod(pod, "ovn", annotation)
+	if err != nil {
+		logrus.Errorf("Failed to set annotation on pod %s - %v", pod.Name, err)
 	}
 	oc.addPodToNamespaceAddressSet(pod.Namespace, podIP.String())
 
 	return
-}
-
-// AddLogicalPortWithIP add logical port with static ip address
-// and mac adddress for the pod
-func (oc *Controller) AddLogicalPortWithIP(pod *kapi.Pod) {
-	if pod.Spec.HostNetwork {
-		return
-	}
-
-	portName := fmt.Sprintf("%s_%s", pod.Namespace, pod.Name)
-	logicalSwitch := pod.Spec.NodeName
-	logrus.Debugf("Creating logical port for %s on switch %s", portName,
-		logicalSwitch)
-
-	annotation, ok := pod.Annotations["ovn"]
-	if !ok {
-		logrus.Errorf("Failed to get ovn annotation from pod!")
-		return
-	}
-	ipAddress := oc.getIPFromOvnAnnotation(annotation)
-	macAddress := oc.getMacFromOvnAnnotation(annotation)
-
-	stdout, stderr, err := util.RunOVNNbctl("--", "--may-exist", "lsp-add",
-		logicalSwitch, portName, "--", "lsp-set-addresses", portName,
-		fmt.Sprintf("%s %s", macAddress, ipAddress))
-	if err != nil {
-		logrus.Errorf("Failed to add logical port to switch, stdout: %q, "+
-			"stderr: %q, error: %v", stdout, stderr, err)
-		return
-	}
 }

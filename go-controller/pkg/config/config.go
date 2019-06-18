@@ -269,10 +269,6 @@ var CommonFlags = []cli.Flag{
 		Name:  "pidfile",
 		Usage: "Name of file that will hold the ovnkube pid (optional)",
 	},
-	cli.BoolFlag{
-		Name:  "ha",
-		Usage: "HA option to reconstruct OVN database after failover",
-	},
 	cli.StringFlag{
 		Name:  "config-file",
 		Usage: "configuration file path (default: /etc/openvswitch/ovn_k8s.conf)",

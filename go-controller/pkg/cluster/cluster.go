@@ -30,7 +30,6 @@ type OvnClusterController struct {
 	GatewaySpareIntf bool
 	GatewayVLANID    uint
 	NodePortEnable   bool
-	OvnHA            bool
 	LocalnetGateway  bool
 }
 
@@ -43,10 +42,6 @@ type CIDRNetworkEntry struct {
 const (
 	// OvnHostSubnet is the constant string representing the annotation key
 	OvnHostSubnet = "ovn_host_subnet"
-	// DefaultNamespace is the name of the default namespace
-	DefaultNamespace = "default"
-	// MasterOverlayIP is the overlay IP address on master node
-	MasterOverlayIP = "master_overlay_ip"
 	// OvnClusterRouter is the name of the distributed router
 	OvnClusterRouter = "ovn_cluster_router"
 )

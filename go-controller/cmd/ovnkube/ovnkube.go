@@ -191,16 +191,15 @@ func runOvnKube(ctx *cli.Context) error {
 	master := ctx.String("init-master")
 	node := ctx.String("init-node")
 	nodePortEnable := ctx.Bool("nodeport")
-	clusterController := ovncluster.NewClusterController(clientset, factory)
 
 	if master != "" || node != "" {
+		clusterController := ovncluster.NewClusterController(clientset, factory)
 		clusterController.GatewayInit = ctx.Bool("init-gateways")
 		clusterController.GatewayIntf = ctx.String("gateway-interface")
 		clusterController.GatewayNextHop = ctx.String("gateway-nexthop")
 		clusterController.GatewaySpareIntf = ctx.Bool("gateway-spare-interface")
 		clusterController.LocalnetGateway = ctx.Bool("gateway-local")
 		clusterController.GatewayVLANID = ctx.Uint("gateway-vlanid")
-		clusterController.OvnHA = ctx.Bool("ha")
 
 		clusterController.ClusterIPNet, err = parseClusterSubnetEntries(ctx.String("cluster-subnet"))
 		if err != nil {
@@ -235,13 +234,6 @@ func runOvnKube(ctx *cli.Context) error {
 	}
 	if netController {
 		ovnController := ovn.NewOvnController(clientset, factory, nodePortEnable)
-		if clusterController.OvnHA {
-			err := clusterController.RebuildOVNDatabase(master, ovnController)
-			if err != nil {
-				logrus.Errorf(err.Error())
-				panic(err.Error())
-			}
-		}
 		if err := ovnController.Run(); err != nil {
 			logrus.Errorf(err.Error())
 			panic(err.Error())
