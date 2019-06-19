@@ -8,8 +8,8 @@ To install packages from there, you can run:
 
 ```
 sudo apt-get install apt-transport-https
-echo "deb http://18.191.116.101/openvswitch/stable /" |  sudo tee /etc/apt/sources.list.d/openvswitch.list
-wget -O - http://18.191.116.101/openvswitch/keyFile |  sudo apt-key add -
+echo "deb http://3.19.28.122/openvswitch/stable /" |  sudo tee /etc/apt/sources.list.d/openvswitch.list
+wget -O - http://3.19.28.122/openvswitch/keyFile |  sudo apt-key add -
 sudo apt-get update
 ```
 
