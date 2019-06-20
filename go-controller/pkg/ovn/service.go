@@ -2,6 +2,7 @@ package ovn
 
 import (
 	"fmt"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
 	"github.com/sirupsen/logrus"
 	kapi "k8s.io/api/core/v1"
@@ -191,7 +192,7 @@ func (ovn *Controller) deleteService(service *kapi.Service) {
 
 		// targetPort can be anything, the deletion logic does not use it
 		var targetPort int32
-		if service.Spec.Type == kapi.ServiceTypeNodePort && ovn.nodePortEnable {
+		if service.Spec.Type == kapi.ServiceTypeNodePort && config.Gateway.NodeportEnable {
 			// Delete the 'NodePort' service from a load-balancer instantiated in gateways.
 			err := ovn.createGatewaysVIP(string(protocol), port, targetPort, ips)
 			if err != nil {

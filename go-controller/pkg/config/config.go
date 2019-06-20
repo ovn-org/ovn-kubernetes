@@ -60,6 +60,9 @@ var (
 
 	// OvnSouth holds southbound OVN database client and server authentication and location details
 	OvnSouth OvnAuthConfig
+
+	// Gateway holds node gateway-related parsed config file parameters and command-line overrides
+	Gateway GatewayConfig
 )
 
 const (
@@ -115,6 +118,34 @@ type KubernetesConfig struct {
 	OVNConfigNamespace string `gcfg:"ovn-config-namespace"`
 }
 
+// GatewayMode holds the node gateway mode
+type GatewayMode string
+
+const (
+	// GatewayModeDisabled indicates the node gateway mode is disabled
+	GatewayModeDisabled GatewayMode = ""
+	// GatewayModeShared indicates OVN shares a gateway interface with the node
+	GatewayModeShared GatewayMode = "shared"
+	// GatewayModeSpare indicates OVN claims a spare interfaface for the gateway
+	GatewayModeSpare GatewayMode = "spare"
+	// GatewayModeLocal indicates OVN creates a local NAT-ed interface for the gateway
+	GatewayModeLocal GatewayMode = "local"
+)
+
+// GatewayConfig holds node gateway-related parsed config file parameters and command-line overrides
+type GatewayConfig struct {
+	// Mode is the gateway mode; if may be either empty (disabled), "shared", "spare", or "local"
+	Mode GatewayMode `gcfg:"mode"`
+	// Interface is the network interface to use for the gateway in "shared" or "spare" mode
+	Interface string `gcfg:"interface"`
+	// NextHop is the gateway IP address of Interface; will be autodetected if not given
+	NextHop string `gcfg:"next-hop"`
+	// VLANID is the option VLAN tag to apply to gateway traffic for "shared" or "spare" modes
+	VLANID uint `gcfg:"vlan-id"`
+	// NodeportEnable sets whether to provide Kubernetes NodePort service or not
+	NodeportEnable bool `gcfg:"nodeport"`
+}
+
 // OvnAuthConfig holds client authentication and location details for
 // an OVN database (either northbound or southbound)
 type OvnAuthConfig struct {
@@ -151,6 +182,7 @@ type config struct {
 	Kubernetes KubernetesConfig
 	OvnNorth   OvnAuthConfig
 	OvnSouth   OvnAuthConfig
+	Gateway    GatewayConfig
 }
 
 var (
@@ -160,6 +192,7 @@ var (
 	savedKubernetes KubernetesConfig
 	savedOvnNorth   OvnAuthConfig
 	savedOvnSouth   OvnAuthConfig
+	savedGateway    GatewayConfig
 
 	// legacy service-cluster-ip-range CLI option
 	serviceClusterIPRange string
@@ -173,6 +206,7 @@ func init() {
 	savedKubernetes = Kubernetes
 	savedOvnNorth = OvnNorth
 	savedOvnSouth = OvnSouth
+	savedGateway = Gateway
 	Flags = append(Flags, CommonFlags...)
 	Flags = append(Flags, K8sFlags...)
 	Flags = append(Flags, OvnNBFlags...)
@@ -189,6 +223,7 @@ func RestoreDefaultConfig() {
 	Kubernetes = savedKubernetes
 	OvnNorth = savedOvnNorth
 	OvnSouth = savedOvnSouth
+	Gateway = savedGateway
 }
 
 // copy members of struct 'src' into the corresponding field in struct 'dst'
@@ -235,6 +270,14 @@ func overrideFields(dst, src interface{}) {
 			}
 		case reflect.Int:
 			if srcField.Int() != 0 {
+				dstField.Set(srcField)
+			}
+		case reflect.Uint:
+			if srcField.Uint() != 0 {
+				dstField.Set(srcField)
+			}
+		case reflect.Bool:
+			if srcField.Bool() {
 				dstField.Set(srcField)
 			}
 		default:
@@ -444,6 +487,7 @@ var OVNGatewayFlags = []cli.Flag{
 			"If none specified, then the node's interface on which the " +
 			"default gateway is configured will be used as the gateway " +
 			"interface. Only useful with \"init-gateways\"",
+		Destination: &cliConfig.Gateway.Interface,
 	},
 	cli.StringFlag{
 		Name: "gateway-nexthop",
@@ -452,6 +496,7 @@ var OVNGatewayFlags = []cli.Flag{
 			"of the node in question. If not specified, the default gateway" +
 			"configured in the node is used. Only useful with " +
 			"\"init-gateways\"",
+		Destination: &cliConfig.Gateway.NextHop,
 	},
 	cli.BoolFlag{
 		Name: "gateway-spare-interface",
@@ -468,10 +513,12 @@ var OVNGatewayFlags = []cli.Flag{
 		Name: "gateway-vlanid",
 		Usage: "The VLAN on which the external network is available. " +
 			"Valid only for Shared or Spare Gateway interface mode.",
+		Destination: &cliConfig.Gateway.VLANID,
 	},
 	cli.BoolFlag{
-		Name:  "nodeport",
-		Usage: "Setup nodeport based ingress on gateways.",
+		Name:        "nodeport",
+		Usage:       "Setup nodeport based ingress on gateways.",
+		Destination: &cliConfig.Gateway.NodeportEnable,
 	},
 }
 
@@ -611,6 +658,39 @@ func buildKubernetesConfig(exec kexec.Interface, cli, file *config, saPath strin
 	return nil
 }
 
+func buildGatewayConfig(ctx *cli.Context, cli, file *config) error {
+	// Copy config file values over default values
+	overrideFields(&Gateway, &file.Gateway)
+
+	// And CLI overrides over config file and default values
+	if ctx.Bool("init-gateways") {
+		cli.Gateway.Mode = GatewayModeShared
+		if ctx.Bool("gateway-spare-interface") {
+			cli.Gateway.Mode = GatewayModeSpare
+		} else if ctx.Bool("gateway-local") {
+			cli.Gateway.Mode = GatewayModeLocal
+		}
+	}
+	overrideFields(&Gateway, &cli.Gateway)
+
+	// Options are only valid if Mode is not disabled
+	if Gateway.Mode == GatewayModeDisabled {
+		if Gateway.Interface != "" {
+			return fmt.Errorf("gateway interface option %q not allowed when gateway is disabled", Gateway.Interface)
+		}
+		if Gateway.NextHop != "" {
+			return fmt.Errorf("gateway next-hop option %q not allowed when gateway is disabled", Gateway.NextHop)
+		}
+		if Gateway.VLANID != 0 {
+			return fmt.Errorf("gateway VLAN ID option '%d' not allowed when gateway is disabled", Gateway.VLANID)
+		}
+		if Gateway.NodeportEnable {
+			return fmt.Errorf("gateway nodeport enable option not allowed when gateway is disabled")
+		}
+	}
+	return nil
+}
+
 // getConfigFilePath returns config file path and 'true' if the config file is
 // the fallback path (eg not given by the user), 'false' if given explicitly
 // by the user
@@ -709,6 +789,10 @@ func initConfigWithPath(ctx *cli.Context, exec kexec.Interface, saPath string, d
 	}
 
 	if err = buildKubernetesConfig(exec, &cliConfig, &cfg, saPath, defaults); err != nil {
+		return "", err
+	}
+
+	if err = buildGatewayConfig(ctx, &cliConfig, &cfg); err != nil {
 		return "", err
 	}
 

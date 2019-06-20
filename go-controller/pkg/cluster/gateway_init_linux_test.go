@@ -239,13 +239,7 @@ cookie=0x0, duration=8366.597s, table=1, n_packets=10641, n_bytes=10370087, prio
 		defer wf.Shutdown()
 
 		cluster := OvnClusterController{
-			watchFactory:     wf,
-			GatewayInit:      true,
-			GatewayIntf:      eth0Name,
-			GatewaySpareIntf: false,
-			NodePortEnable:   true,
-			LocalnetGateway:  false,
-			GatewayVLANID:    gatewayVLANID,
+			watchFactory: wf,
 		}
 
 		ipt, err := util.NewFakeWithProtocol(iptables.ProtocolIPv4)
@@ -288,7 +282,13 @@ cookie=0x0, duration=8366.597s, table=1, n_packets=10641, n_bytes=10370087, prio
 		return nil
 	}
 
-	err := app.Run([]string{app.Name})
+	err := app.Run([]string{
+		app.Name,
+		"--init-gateways",
+		"--gateway-interface=" + eth0Name,
+		"--nodeport",
+		"--gateway-vlanid=" + fmt.Sprintf("%d", gatewayVLANID),
+	})
 	Expect(err).NotTo(HaveOccurred())
 }
 
@@ -391,13 +391,7 @@ GR_openshift-master-node chassis=6a47b33b-89d3-4d65-ac31-b19b549326c7 lb_force_s
 		defer wf.Shutdown()
 
 		cluster := OvnClusterController{
-			watchFactory:     wf,
-			GatewayInit:      true,
-			GatewayIntf:      eth0Name,
-			GatewaySpareIntf: true,
-			NodePortEnable:   true,
-			LocalnetGateway:  false,
-			GatewayVLANID:    gatewayVLANID,
+			watchFactory: wf,
 		}
 
 		ipt, err := util.NewFakeWithProtocol(iptables.ProtocolIPv4)
@@ -438,7 +432,14 @@ GR_openshift-master-node chassis=6a47b33b-89d3-4d65-ac31-b19b549326c7 lb_force_s
 		return nil
 	}
 
-	err := app.Run([]string{app.Name})
+	err := app.Run([]string{
+		app.Name,
+		"--init-gateways",
+		"--gateway-interface=" + eth0Name,
+		"--gateway-spare-interface",
+		"--nodeport",
+		"--gateway-vlanid=" + fmt.Sprintf("%d", gatewayVLANID),
+	})
 	Expect(err).NotTo(HaveOccurred())
 }
 
@@ -566,7 +567,7 @@ GR_openshift-master-node chassis=6a47b33b-89d3-4d65-ac31-b19b549326c7 lb_force_s
 
 			ipt, err := util.NewFakeWithProtocol(iptables.ProtocolIPv4)
 			Expect(err).NotTo(HaveOccurred())
-			err = initLocalnetGatewayInternal(nodeName, []string{clusterCIDR}, nodeSubnet, ipt, true, wf)
+			err = initLocalnetGatewayInternal(nodeName, []string{clusterCIDR}, nodeSubnet, ipt, wf)
 			Expect(err).NotTo(HaveOccurred())
 
 			Expect(fexec.CalledMatchesExpected()).To(BeTrue())
@@ -597,7 +598,12 @@ GR_openshift-master-node chassis=6a47b33b-89d3-4d65-ac31-b19b549326c7 lb_force_s
 			return nil
 		}
 
-		err := app.Run([]string{app.Name})
+		err := app.Run([]string{
+			app.Name,
+			"--init-gateways",
+			"--gateway-local",
+			"--nodeport",
+		})
 		Expect(err).NotTo(HaveOccurred())
 	})
 

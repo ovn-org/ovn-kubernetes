@@ -5,10 +5,12 @@ import (
 	"strings"
 
 	"github.com/sirupsen/logrus"
+
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
 )
 
 // GatewayCleanup removes all the NB DB objects created for a node's gateway
-func GatewayCleanup(nodeName string, gatewayLBEnable bool) error {
+func GatewayCleanup(nodeName string) error {
 	// Get the cluster router
 	clusterRouter, err := GetK8sClusterRouter()
 	if err != nil {
@@ -84,7 +86,7 @@ func GatewayCleanup(nodeName string, gatewayLBEnable bool) error {
 			"error: %v", externalSwitch, stderr, err)
 	}
 
-	if gatewayLBEnable {
+	if config.Gateway.NodeportEnable {
 		//Remove the TCP, UDP load-balancers created for north-south traffic for gateway router.
 		k8sNSLbTCP, k8sNSLbUDP, err := getGatewayLoadBalancers(gatewayRouter)
 		if err != nil {

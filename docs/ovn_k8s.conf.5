@@ -114,6 +114,27 @@ The port, by default, is 6442. E.g., ssl://1.2.3.4:6642
 .TP
 \fBserver-cacert\fR=
 
+.SH [Gateway]
+.TP
+\fBmode\fR=shared
+This is the node gateway mode. It can be left empty (disable gateway functionality),
+or set to "shared" (share a network interface), "spare" (take over a network interface),
+or "local" (use a NAT-ed virtual interface).
+.TP
+\fBinterface\fR=eth1
+This interface will be used as the gateway interface in "shared" or "spare" mode. If not
+specified the interface with the default route will be used.
+.TP
+\fBnext-hop\fR=1.2.3.4
+This is the gateway IP address of \fBinterface\fR to which traffic exiting the
+OVN logical network should be sent in "shared" or "spare" mode. If not specified
+the next-hop of the default route will be used.
+\fBvlan-id\fR=0
+This is the VLAN tag to apply to traffic exiting the OVN logical network in
+"shared" or "spare" mode. A value of 0 means traffic should be untagged.
+\fBnodeport\fR=true
+When set to true Kubernetes NodePort services will be supported.
+
 .SH "SEE ALso"
 .BR ovnkube (1),
 .BR ovn-kube-util (1).

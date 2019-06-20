@@ -9,6 +9,7 @@ import (
 	"strings"
 
 	"github.com/coreos/go-iptables/iptables"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/factory"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
 	"github.com/sirupsen/logrus"
@@ -106,17 +107,16 @@ func localnetGatewayNAT(ipt util.IPTablesHelper, ifname, ip string) error {
 }
 
 func initLocalnetGateway(nodeName string, clusterIPSubnet []string,
-	subnet string, nodePortEnable bool, wf *factory.WatchFactory) error {
+	subnet string, wf *factory.WatchFactory) error {
 	ipt, err := iptables.NewWithProtocol(iptables.ProtocolIPv4)
 	if err != nil {
 		return fmt.Errorf("failed to initialize iptables: %v", err)
 	}
-	return initLocalnetGatewayInternal(nodeName, clusterIPSubnet, subnet, ipt,
-		nodePortEnable, wf)
+	return initLocalnetGatewayInternal(nodeName, clusterIPSubnet, subnet, ipt, wf)
 }
 
 func initLocalnetGatewayInternal(nodeName string, clusterIPSubnet []string,
-	subnet string, ipt util.IPTablesHelper, nodePortEnable bool, wf *factory.WatchFactory) error {
+	subnet string, ipt util.IPTablesHelper, wf *factory.WatchFactory) error {
 	// Create a localnet OVS bridge.
 	localnetBridgeName := "br-local"
 	_, stderr, err := util.RunOVSVsctl("--may-exist", "add-br",
@@ -167,7 +167,7 @@ func initLocalnetGatewayInternal(nodeName string, clusterIPSubnet []string,
 	}
 
 	err = util.GatewayInit(clusterIPSubnet, nodeName, ifaceID, localnetGatewayIP,
-		macAddress, localnetGatewayNextHop, subnet, true, 0, nodePortEnable)
+		macAddress, localnetGatewayNextHop, subnet, true, nil)
 	if err != nil {
 		return fmt.Errorf("failed to localnet gateway: %v", err)
 	}
@@ -178,7 +178,7 @@ func initLocalnetGatewayInternal(nodeName string, clusterIPSubnet []string,
 			err)
 	}
 
-	if nodePortEnable {
+	if config.Gateway.NodeportEnable {
 		return localnetNodePortWatcher(ipt, wf)
 	}
 
