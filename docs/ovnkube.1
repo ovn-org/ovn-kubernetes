@@ -21,11 +21,8 @@ A CIDR notation IP range from which k8s assigns service cluster IPs.
 This should be the same as the one provided for kube-apiserver's
 \fB\--service-cluster-ip-range\fR option.
 .TP
-\fB\--net-controller
-Flag to start the central controller that watches pods/services/policies.
-.TP
 \fB\--init-master\fR string
-Initialize master, requires the hostname as argument.
+Initialize master that acts as a controller that watches pods/services/policies. Requires the hostname as argument.
 .TP
 \fB\--init-node\fR string
 Initialize node, requires the name that node is registered with in kubernetes cluster.

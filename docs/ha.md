@@ -86,7 +86,7 @@ IP3="$MASTER3"
 ovn_nb="tcp://$IP1:6641,tcp://$IP2:6641,tcp://$IP3:6641"
 ovn_sb="tcp://$IP1:6642,tcp://$IP2:6642,tcp://$IP3:6642"
 
-nohup sudo ovnkube -k8s-kubeconfig kubeconfig.yaml -net-controller \
+nohup sudo ovnkube -k8s-kubeconfig kubeconfig.yaml \
  -loglevel=4 \
  -k8s-apiserver="http://$K8S_APISERVER_IP:8080" \
  -logfile="/var/log/openvswitch/ovnkube.log" \
