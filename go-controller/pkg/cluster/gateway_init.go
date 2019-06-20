@@ -68,6 +68,14 @@ loop:
 
 func (cluster *OvnClusterController) initGateway(
 	nodeName string, clusterIPSubnet []string, subnet string) error {
+
+	if config.Gateway.NodeportEnable {
+		err := initLoadBalancerHealthChecker(nodeName, cluster.watchFactory)
+		if err != nil {
+			return err
+		}
+	}
+
 	if config.Gateway.Mode == config.GatewayModeLocal {
 		return initLocalnetGateway(nodeName, clusterIPSubnet, subnet,
 			cluster.watchFactory)
