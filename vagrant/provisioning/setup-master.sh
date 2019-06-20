@@ -203,7 +203,7 @@ if [ "$DAEMONSET" != "true" ]; then
   TOKEN=`kubectl get secret/$SECRET -o yaml |grep "token:" | cut -f2  -d ":" | sed 's/^  *//' | base64 -d`
   echo $TOKEN > /vagrant/token
 
-  nohup sudo ovnkube -net-controller -loglevel=4 \
+  nohup sudo ovnkube -loglevel=4 \
    -k8s-apiserver="https://$OVERLAY_IP:6443" \
    -k8s-cacert=/etc/kubernetes/pki/ca.crt \
    -k8s-token="$TOKEN" \

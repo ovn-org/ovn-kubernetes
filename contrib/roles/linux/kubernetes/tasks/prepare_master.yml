@@ -211,7 +211,6 @@
         -cluster-subnet "{{ kubernetes_cluster_info.CLUSTER_SUBNET }}" \
         -k8s-service-cidr "{{ kubernetes_cluster_info.SERVICE_CLUSTER_IP_RANGE }}" \
         -nodeport \
-        -net-controller \
         -k8s-token {{TOKEN}} \
         -k8s-cacert /etc/openvswitch/k8s-ca.crt \
         -k8s-apiserver "https://{{ host_public_ip }}" \

@@ -124,7 +124,7 @@ uses the hostname.  kubelet allows this name to be overridden with
 --service-cluster-ip-range option. An e.g is 172.16.1.0/24.
 
 ```
- nohup sudo ovnkube -k8s-kubeconfig kubeconfig.yaml -net-controller \
+ nohup sudo ovnkube -k8s-kubeconfig kubeconfig.yaml \
  -loglevel=4 \
  -k8s-apiserver="http://$CENTRAL_IP:8080" \
  -logfile="/var/log/ovn-kubernetes/ovnkube.log" \

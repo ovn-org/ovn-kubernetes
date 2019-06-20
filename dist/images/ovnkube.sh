@@ -632,7 +632,7 @@ ovn-master () {
 
   echo "=============== ovn-master ========== MASTER ONLY"
   /usr/bin/ovnkube \
-    --init-master ${ovn_pod_host} --net-controller \
+    --init-master ${ovn_pod_host} \
     --cluster-subnet ${net_cidr} --k8s-service-cidr=${svc_cidr} \
     --nb-address=${ovn_nbdb} --sb-address=${ovn_sbdb} \
     --nodeport \
@@ -797,7 +797,7 @@ start_ovn () {
 
     echo "=============== start ovn-master ========== MASTER ONLY"
     /usr/bin/ovnkube \
-      --init-master ${ovn_pod_host} --net-controller \
+      --init-master ${ovn_pod_host} \
       --cluster-subnet ${net_cidr} --k8s-service-cidr=${svc_cidr} \
       --nb-address=${ovn_nbdb} --sb-address=${ovn_sbdb} \
       --nodeport \

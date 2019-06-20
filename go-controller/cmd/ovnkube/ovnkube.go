@@ -187,7 +187,6 @@ func runOvnKube(ctx *cli.Context) error {
 		panic(err.Error())
 	}
 
-	netController := ctx.Bool("net-controller")
 	master := ctx.String("init-master")
 	node := ctx.String("init-node")
 	clusterController := ovncluster.NewClusterController(clientset, factory)
@@ -222,6 +221,11 @@ func runOvnKube(ctx *cli.Context) error {
 				logrus.Errorf(err.Error())
 				panic(err.Error())
 			}
+			ovnController := ovn.NewOvnController(clientset, factory)
+			if err := ovnController.Run(); err != nil {
+				logrus.Errorf(err.Error())
+				panic(err.Error())
+			}
 		}
 
 		if node != "" {
@@ -235,24 +239,12 @@ func runOvnKube(ctx *cli.Context) error {
 				panic(err.Error())
 			}
 		}
-	}
-	if netController {
-		ovnController := ovn.NewOvnController(clientset, factory)
-		if err := ovnController.Run(); err != nil {
-			logrus.Errorf(err.Error())
-			panic(err.Error())
-		}
-	}
-	if master != "" || netController {
-		// run forever
-		select {}
-	}
-	if node != "" {
+
 		// run forever
 		select {}
 	}
 
-	return nil
+	return fmt.Errorf("need to run ovnkube in either master and/or node mode")
 }
 
 // parseClusterSubnetEntries returns the parsed set of CIDRNetworkEntries passed by the user on the command line
