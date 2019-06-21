@@ -480,7 +480,7 @@ var _ = Describe("Config Operations", func() {
 
 			return nil
 		}
-		err = app.Run([]string{app.Name, "-config-file=" + cfgFile.Name()})
+		err = app.Run([]string{app.Name, "-config-file=" + cfgFile.Name(), "-init-node=node1", "-init-gateways"})
 		Expect(err).NotTo(HaveOccurred())
 	})
 
@@ -555,6 +555,7 @@ var _ = Describe("Config Operations", func() {
 			"-sb-client-privkey=/client/privkey2",
 			"-sb-client-cert=/client/cert2",
 			"-sb-client-cacert=/client/cacert2",
+			"-init-node=node1",
 			"-init-gateways",
 			"-gateway-interface=eth5",
 			"-gateway-nexthop=1.3.5.6",

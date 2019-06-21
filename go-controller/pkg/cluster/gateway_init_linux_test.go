@@ -285,6 +285,7 @@ cookie=0x0, duration=8366.597s, table=1, n_packets=10641, n_bytes=10370087, prio
 	err := app.Run([]string{
 		app.Name,
 		"--init-gateways",
+		"--init-node=node1",
 		"--gateway-interface=" + eth0Name,
 		"--nodeport",
 		"--gateway-vlanid=" + fmt.Sprintf("%d", gatewayVLANID),
@@ -435,6 +436,7 @@ GR_openshift-master-node chassis=6a47b33b-89d3-4d65-ac31-b19b549326c7 lb_force_s
 	err := app.Run([]string{
 		app.Name,
 		"--init-gateways",
+		"--init-node=node1",
 		"--gateway-interface=" + eth0Name,
 		"--gateway-spare-interface",
 		"--nodeport",
@@ -601,6 +603,7 @@ GR_openshift-master-node chassis=6a47b33b-89d3-4d65-ac31-b19b549326c7 lb_force_s
 		err := app.Run([]string{
 			app.Name,
 			"--init-gateways",
+			"--init-node=node1",
 			"--gateway-local",
 			"--nodeport",
 		})
