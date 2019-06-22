@@ -555,10 +555,9 @@ var _ = Describe("Config Operations", func() {
 			"-sb-client-privkey=/client/privkey2",
 			"-sb-client-cert=/client/cert2",
 			"-sb-client-cacert=/client/cacert2",
-			"-init-gateways",
+			"-gateway-mode=spare",
 			"-gateway-interface=eth5",
 			"-gateway-nexthop=1.3.5.6",
-			"-gateway-spare-interface",
 			"-gateway-vlanid=100",
 			"-nodeport",
 		}
@@ -598,6 +597,91 @@ service-cidr=172.18.0.0/24
 		cliArgs := []string{
 			app.Name,
 			"-k8s-service-cidr=adsfasdfaf",
+		}
+		err := app.Run(cliArgs)
+		Expect(err).NotTo(HaveOccurred())
+	})
+
+	It("overrides config file and defaults with CLI legacy --init-gateways option", func() {
+		err := ioutil.WriteFile(cfgFile.Name(), []byte(`[gateway]
+mode=spare
+`), 0644)
+		Expect(err).NotTo(HaveOccurred())
+
+		app.Action = func(ctx *cli.Context) error {
+			var cfgPath string
+			cfgPath, err = InitConfig(ctx, kexec.New(), nil)
+			Expect(err).NotTo(HaveOccurred())
+			Expect(cfgPath).To(Equal(cfgFile.Name()))
+			Expect(Gateway.Mode).To(Equal(GatewayModeShared))
+			return nil
+		}
+		cliArgs := []string{
+			app.Name,
+			"-config-file=" + cfgFile.Name(),
+			"-init-gateways",
+		}
+		err = app.Run(cliArgs)
+		Expect(err).NotTo(HaveOccurred())
+	})
+
+	It("overrides config file and defaults with CLI legacy --gateway-spare-interface option", func() {
+		err := ioutil.WriteFile(cfgFile.Name(), []byte(`[gateway]
+mode=shared
+`), 0644)
+		Expect(err).NotTo(HaveOccurred())
+
+		app.Action = func(ctx *cli.Context) error {
+			var cfgPath string
+			cfgPath, err = InitConfig(ctx, kexec.New(), nil)
+			Expect(err).NotTo(HaveOccurred())
+			Expect(cfgPath).To(Equal(cfgFile.Name()))
+			Expect(Gateway.Mode).To(Equal(GatewayModeSpare))
+			return nil
+		}
+		cliArgs := []string{
+			app.Name,
+			"-config-file=" + cfgFile.Name(),
+			"-init-gateways",
+			"-gateway-spare-interface",
+		}
+		err = app.Run(cliArgs)
+		Expect(err).NotTo(HaveOccurred())
+	})
+
+	It("overrides config file and defaults with CLI legacy --gateway-local option", func() {
+		err := ioutil.WriteFile(cfgFile.Name(), []byte(`[gateway]
+mode=shared
+`), 0644)
+		Expect(err).NotTo(HaveOccurred())
+
+		app.Action = func(ctx *cli.Context) error {
+			var cfgPath string
+			cfgPath, err = InitConfig(ctx, kexec.New(), nil)
+			Expect(err).NotTo(HaveOccurred())
+			Expect(cfgPath).To(Equal(cfgFile.Name()))
+			Expect(Gateway.Mode).To(Equal(GatewayModeLocal))
+			return nil
+		}
+		cliArgs := []string{
+			app.Name,
+			"-config-file=" + cfgFile.Name(),
+			"-init-gateways",
+			"-gateway-local",
+		}
+		err = app.Run(cliArgs)
+		Expect(err).NotTo(HaveOccurred())
+	})
+
+	It("returns an error when the gateway mode is invalid", func() {
+		app.Action = func(ctx *cli.Context) error {
+			_, err := InitConfig(ctx, kexec.New(), nil)
+			Expect(err).To(MatchError("invalid gateway mode \"adsfasdfaf\": expect one of shared,spare,local"))
+			return nil
+		}
+		cliArgs := []string{
+			app.Name,
+			"-gateway-mode=adsfasdfaf",
 		}
 		err := app.Run(cliArgs)
 		Expect(err).NotTo(HaveOccurred())

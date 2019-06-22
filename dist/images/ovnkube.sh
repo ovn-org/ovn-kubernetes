@@ -49,6 +49,7 @@
 # K8S_CACERT - the apiserver CA. Automatically detected when running in a pod
 # OVN_CONTROLLER_OPTS - the options for ovn-ctl
 # OVN_NORTHD_OPTS - the options for the ovn northbound db
+# OVN_GATEWAY_MODE - the gateway mode (shared, spare, local)
 # OVN_GATEWAY_OPTS - the options for the ovn gateway
 # OVNKUBE_LOGLEVEL - log level for ovnkube (0..5, default 4)
 # OVN_LOG_NORTHD - log level (ovn-ctl default: -vconsole:emer -vsyslog:err -vfile:info)
@@ -116,6 +117,7 @@ ovnkube_loglevel=${OVNKUBE_LOGLEVEL:-4}
 
 # by default it is going to be a shared gateway mode, however this can be overridden to any of the other
 # two gateway modes that we support using `images/daemonset.sh` tool
+ovn_gateway_mode=${OVN_GATEWAY_MODE:-"shared"}
 ovn_gateway_opts=${OVN_GATEWAY_OPTS:-""}
 
 net_cidr=${OVN_NET_CIDR:-10.128.0.0/14/23}
@@ -317,6 +319,7 @@ echo OVN_NORTHD_OPTS ${ovn_northd_opts}
 echo OVN_SOUTH ${ovn_sbdb}
 echo OVN_CONTROLLER_OPTS ${ovn_controller_opts}
 echo OVN_LOG_CONTROLLER ${ovn_log_controller}
+echo OVN_GATEWAY_MODE ${ovn_gateway_mode}
 echo OVN_GATEWAY_OPTS ${ovn_gateway_opts}
 echo OVN_NET_CIDR ${net_cidr}
 echo OVN_SVC_CIDR ${svc_cidr}
@@ -682,7 +685,7 @@ ovn-node () {
 
   echo "=============== ovn-node   --init-node"
   # TEMP HACK - WORKAROUND
-  # --init-gateways --gateway-local works around a problem that
+  # --gateway-mode=local works around a problem that
   # results in loss of network connectivity when docker is
   # restarted or ovs daemonset is deleted.
   # TEMP HACK - WORKAROUND
@@ -691,7 +694,7 @@ ovn-node () {
       --nb-address=${ovn_nbdb} --sb-address=${ovn_sbdb} \
       --nodeport \
       --loglevel=${ovnkube_loglevel} \
-      --init-gateways ${ovn_gateway_opts}  \
+      --gateway-mode=${ovn_gateway_mode} ${ovn_gateway_opts}  \
       --pidfile /var/run/openvswitch/ovnkube.pid \
       --logfile /var/log/ovn-kubernetes/ovnkube.log &
 
@@ -772,7 +775,7 @@ start_ovn () {
   # ovn-node - all nodes
   echo  "=============== start ovn-node"
   # TEMP HACK - WORKAROUND
-  # --init-gateways --gateway-local works around a problem that
+  # --gateway-mode=local works around a problem that
   # results in loss of network connectivity when docker is
   # restarted or ovs daemonset is deleted.
   # TEMP HACK - WORKAROUND
@@ -781,7 +784,7 @@ start_ovn () {
       --nb-address=${ovn_nbdb} --sb-address=${ovn_sbdb} \
       --nodeport \
       --loglevel=${ovnkube_loglevel} \
-      --init-gateways ${ovn_gateway_opts}  \
+      --gateway-mode=${ovn_gateway_mode} ${ovn_gateway_opts}  \
       --pidfile /var/run/openvswitch/ovnkube.pid \
       --logfile /var/log/ovn-kubernetes/ovnkube.log &
 

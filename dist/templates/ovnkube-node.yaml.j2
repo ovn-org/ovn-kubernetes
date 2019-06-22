@@ -259,6 +259,8 @@ spec:
           valueFrom:
             fieldRef:
               fieldPath: spec.nodeName
+        - name: OVN_GATEWAY_MODE
+          value: "{{ ovn_gateway_mode }}"
         - name: OVN_GATEWAY_OPTS
           value: "{{ ovn_gateway_opts }}"
 

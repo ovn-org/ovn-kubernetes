@@ -12,6 +12,7 @@ OVN_IMAGE_PULL_POLICY=""
 OVN_NET_CIDR=""
 OVN_SVC_DIDR=""
 OVN_K8S_APISERVER=""
+OVN_GATEWAY_MODE=""
 OVN_GATEWAY_OPTS=""
 
 # Parse parameters given as arguments to this script.
@@ -24,6 +25,9 @@ while [ "$1" != "" ]; do
             ;;
         --image-pull-policy)
             OVN_IMAGE_PULL_POLICY=$VALUE
+            ;;
+        --gateway-mode)
+            OVN_GATEWAY_MODE=$VALUE
             ;;
         --gateway-options)
             OVN_GATEWAY_OPTS=$VALUE
@@ -76,6 +80,9 @@ else
 fi
 echo "imagePullPolicy: ${policy}"
 
+ovn_gateway_mode=${OVN_GATEWAY_MODE}
+echo "ovn_gateway_mode: ${ovn_gateway_mode}"
+
 ovn_gateway_opts=${OVN_GATEWAY_OPTS}
 echo "ovn_gateway_opts: ${ovn_gateway_opts}"
 
@@ -83,8 +90,10 @@ echo "ovn_gateway_opts: ${ovn_gateway_opts}"
 image_str="{{ ovn_image | default('docker.io/ovnkube/ovn-daemonset:latest') }}"
 policy_str="{{ ovn_image_pull_policy | default('IfNotPresent') }}"
 ovn_gateway_opts_repl="{{ ovn_gateway_opts }}"
+ovn_gateway_mode_repl="{{ ovn_gateway_mode }}"
 
 sed "s,${image_str},${image},
+s,${ovn_gateway_mode_repl},${ovn_gateway_mode},
 s,${ovn_gateway_opts_repl},${ovn_gateway_opts},
 s,${policy_str},${policy}," ../templates/ovnkube-node.yaml.j2 > ../yaml/ovnkube-node.yaml
 
