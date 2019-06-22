@@ -715,9 +715,6 @@ func buildGatewayConfig(ctx *cli.Context, cli, file *config) error {
 		if Gateway.VLANID != 0 {
 			return fmt.Errorf("gateway VLAN ID option '%d' not allowed when gateway is disabled", Gateway.VLANID)
 		}
-		if Gateway.NodeportEnable {
-			return fmt.Errorf("gateway nodeport enable option not allowed when gateway is disabled")
-		}
 	}
 	return nil
 }
