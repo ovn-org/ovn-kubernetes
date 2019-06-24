@@ -18,6 +18,8 @@ import (
 	kapi "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/util/wait"
 	"k8s.io/client-go/tools/cache"
+
+	. "github.com/onsi/ginkgo"
 )
 
 // StartClusterNode learns the subnet assigned to it by the master controller
@@ -143,16 +145,20 @@ func (cluster *OvnClusterController) watchConfigEndpoints() error {
 	_, err := cluster.watchFactory.AddFilteredEndpointsHandler(config.Kubernetes.OVNConfigNamespace,
 		cache.ResourceEventHandlerFuncs{
 			AddFunc: func(obj interface{}) {
+				defer GinkgoRecover()
 				ep := obj.(*kapi.Endpoints)
 				if ep.Name == "ovnkube-db" {
+					GinkgoT().Logf("########## ovnkube-db endpoint added %+v", ep)
 					updateOVNConfig(ep)
 					return
 				}
 			},
 			UpdateFunc: func(old, new interface{}) {
+				defer GinkgoRecover()
 				epNew := new.(*kapi.Endpoints)
 				epOld := old.(*kapi.Endpoints)
 				if !reflect.DeepEqual(epNew.Subsets, epOld.Subsets) && epNew.Name == "ovnkube-db" {
+					GinkgoT().Logf("########## ovnkube-db endpoint changed from %+v -> %+v", epOld, epNew)
 					updateOVNConfig(epNew)
 				}
 
