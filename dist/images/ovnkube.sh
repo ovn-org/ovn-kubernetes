@@ -20,6 +20,8 @@
 #    ovn-master     Runs ovnkube in master mode (v2, v3)
 #    ovn-controller Runs ovn controller (v2, v3)
 #    ovn-node       Runs ovnkube in node mode (v2, v3)
+#    cleanup-ovn-node   Runs ovnkube to cleanup the node (v3)
+#    cleanup-ovs-server Cleanup ovs-server
 #
 #    display        Displays log files
 #    display_env    Displays environment variables
@@ -394,6 +396,8 @@ ovs-server () {
       exit 1
     fi
   done
+  rm -f /var/run/openvswitch/ovs-vswitchd.pid
+  rm -f /var/run/openvswitch/ovsdb-server.pid
 
   # launch OVS
   function quit {
@@ -430,6 +434,20 @@ ovs-server () {
     fi
     sleep 15
   done
+}
+
+cleanup-ovs-server () {
+  echo "=============== time: $(date +%d-%m-%H:%M:%S:%N) cleanup-ovs-server (wait for ovn-node to exit) ======="
+  retries=0
+  while [[ ${retries} -lt 80 ]]; do
+    if [[ ! -e /var/run/openvswitch/ovnkube.pid ]] ; then
+      break
+    fi
+    echo "=============== time: $(date +%d-%m-%H:%M:%S:%N) cleanup-ovs-server ovn-node still running, wait) ======="
+    sleep 1
+  done
+  echo "=============== time: $(date +%d-%m-%H:%M:%S:%N) cleanup-ovs-server (ovs-ctl stop) ======="
+  /usr/share/openvswitch/scripts/ovs-ctl stop
 }
 
 # create the ovnkube_db endpoint for other pods to query the OVN DB IP
@@ -710,6 +728,31 @@ ovn-node () {
   exit 7
 }
 
+# cleanup-ovn-node - all nodes
+cleanup-ovn-node () {
+  check_ovn_daemonset_version "3"
+
+  rm -f /etc/cni/net.d/10-ovn-kubernetes.conf
+
+  echo "=============== time: $(date +%d-%m-%H:%M:%S:%N) cleanup-ovn-node - (wait for ovn-controller to exit)"
+  retries=0
+  while [[ ${retries} -lt 80 ]]; do
+    pid_ready ovn-controller.pid
+    if [[ $? != 0 ]] ; then
+      break
+    fi
+    echo "=============== time: $(date +%d-%m-%H:%M:%S:%N) cleanup-ovn-node - (ovn-controller still running, wait)"
+    sleep 1
+  done
+
+  echo "=============== time: $(date +%d-%m-%H:%M:%S:%N) cleanup-ovn-node --cleanup-node"
+  /usr/bin/ovnkube --cleanup-node ${K8S_NODE} --gateway-mode=${ovn_gateway_mode} ${ovn_gateway_opts} \
+      --k8s-token=${k8s_token} --k8s-apiserver=${K8S_APISERVER} --k8s-cacert=${K8S_CACERT} \
+      --loglevel=${ovnkube_loglevel} \
+      --logfile /var/log/ovn-kubernetes/ovnkube.log
+
+}
+
 # version 1 daemonset compatibility
 # $1 is "" or "start_ovn"
 start_ovn () {
@@ -809,6 +852,7 @@ echo "================== ovnkube.sh --- version: ${ovnkube_version} ============
 # ovn-master     - master node only (v2 v3)
 # ovn-controller - all nodes (v2 v3)
 # ovn-node       - all nodes (v2 v3)
+# cleanup-ovn-node - all nodes (v3)
 
   case ${cmd} in
     "nb-ovsdb")        # pod ovnkube-db container nb-ovsdb
@@ -847,6 +891,12 @@ echo "================== ovnkube.sh --- version: ${ovnkube_version} ============
 	ovn_debug
 	exit 0
     ;;
+    "cleanup-ovs-server")
+	cleanup-ovs-server
+    ;;
+    "cleanup-ovn-node")
+	cleanup-ovn-node
+    ;;
     # This is being deprecated
     # daemonset version 1 compatibility mode
     "start-ovn")
@@ -861,7 +911,7 @@ echo "================== ovnkube.sh --- version: ${ovnkube_version} ============
 	echo "invalid command ${cmd}"
 	echo "valid v1 commands: start-ovn display_env display ovn_debug"
 	echo "valid v2 commands: ovn-northd ovn-master ovn-controller ovn-node display_env display ovn_debug"
-	echo "valid v3 commands: ovs-server nb-ovsdb sb-ovsdb run-ovn-northd ovn-master ovn-controller ovn-node display_env display ovn_debug"
+	echo "valid v3 commands: ovs-server nb-ovsdb sb-ovsdb run-ovn-northd ovn-master ovn-controller ovn-node display_env display ovn_debug cleanup-ovs-server cleanup-ovn-node"
 	exit 0
   esac
 

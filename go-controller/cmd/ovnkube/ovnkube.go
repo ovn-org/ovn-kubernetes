@@ -190,10 +190,23 @@ func runOvnKube(ctx *cli.Context) error {
 	netController := ctx.Bool("net-controller")
 	master := ctx.String("init-master")
 	node := ctx.String("init-node")
+	clusterController := ovncluster.NewClusterController(clientset, factory)
+
+	cleanupNode := ctx.String("cleanup-node")
+	if cleanupNode != "" {
+		if master != "" || node != "" {
+			panic("Cannot specify cleanup-node together with 'init-node or 'init-master'.")
+		}
+
+		err = clusterController.CleanupClusterNode(cleanupNode)
+		if err != nil {
+			logrus.Errorf(err.Error())
+			panic(err.Error())
+		}
+		return nil
+	}
 
 	if master != "" || node != "" {
-		clusterController := ovncluster.NewClusterController(clientset, factory)
-
 		clusterController.ClusterIPNet, err = parseClusterSubnetEntries(ctx.String("cluster-subnet"))
 		if err != nil {
 			panic(err.Error())
