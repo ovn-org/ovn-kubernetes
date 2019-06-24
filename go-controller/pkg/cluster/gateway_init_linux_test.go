@@ -313,11 +313,11 @@ func spareGatewayInterfaceTest(app *cli.App, testNS ns.NetNS,
 		fexec := ovntest.NewFakeExec()
 		if gatewayVLANID == 0 {
 			fexec.AddFakeCmdsNoOutputNoError([]string{
-				"ovs-vsctl --timeout=15 -- --may-exist add-port br-int eth0 -- set interface eth0 external-ids:iface-id=eth0_" + nodeName,
+				"ovs-vsctl --timeout=15 -- --may-exist add-port br-int eth0 -- set interface eth0 external-ids:iface-id=eth0_" + nodeName + " external-ids:physical-ip=" + eth0CIDR,
 			})
 		} else {
 			fexec.AddFakeCmdsNoOutputNoError([]string{
-				"ovs-vsctl --timeout=15 -- --may-exist add-port br-int eth0 -- set interface eth0 external-ids:iface-id=eth0_" + nodeName + fmt.Sprintf(" -- set port eth0 tag=%d", gatewayVLANID),
+				"ovs-vsctl --timeout=15 -- --may-exist add-port br-int eth0 -- set interface eth0 external-ids:iface-id=eth0_" + nodeName + " external-ids:physical-ip=" + eth0CIDR + fmt.Sprintf(" -- set port eth0 tag=%d", gatewayVLANID),
 			})
 		}
 		fexec.AddFakeCmd(&ovntest.ExpectedCmd{

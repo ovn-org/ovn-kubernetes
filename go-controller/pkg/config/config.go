@@ -315,6 +315,10 @@ var CommonFlags = []cli.Flag{
 		Usage: "initialize node, requires the name that node is registered with in kubernetes cluster",
 	},
 	cli.StringFlag{
+		Name:  "cleanup-node",
+		Usage: "cleanup node, requires the name that node is registered with in kubernetes cluster",
+	},
+	cli.StringFlag{
 		Name:  "pidfile",
 		Usage: "Name of file that will hold the ovnkube pid (optional)",
 	},

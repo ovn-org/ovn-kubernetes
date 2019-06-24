@@ -84,6 +84,10 @@ spec:
             configMapKeyRef:
               name: ovn-config
               key: k8s_apiserver
+        lifecycle:
+          preStop:
+            exec:
+              command: ["/root/ovnkube.sh", "cleanup-ovs-server"]
 
 
       # firewall rules for ovn - assumed to be setup
@@ -278,7 +282,7 @@ spec:
         lifecycle:
           preStop:
             exec:
-              command: ["rm","-f","/etc/cni/net.d/10-ovn-kubernetes.conf"]
+              command: ["/root/ovnkube.sh", "cleanup-ovn-node"]
 
       nodeSelector:
         beta.kubernetes.io/os: "linux"
