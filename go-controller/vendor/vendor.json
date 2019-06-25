@@ -183,6 +183,12 @@
 			"revisionTime": "2016-01-25T20:49:56Z"
 		},
 		{
+			"checksumSHA1": "LHNzQwau1zPeFPPG5zbNf8AgUOQ=",
+			"path": "github.com/golang/groupcache/lru",
+			"revision": "5b532d6fd5efaf7fa130d4e859a2fde0fc3a9e1b",
+			"revisionTime": "2019-01-29T15:46:38Z"
+		},
+		{
 			"checksumSHA1": "CGj8VcI/CpzxaNqlqpEVM7qElD4=",
 			"path": "github.com/golang/protobuf/proto",
 			"revision": "b285ee9cfc6c881bb20c0d8dc73370ea9b9ec90f",
@@ -2795,6 +2801,22 @@
 		{
 			"checksumSHA1": "E8JeIq/Zl3X94M8aPZuvYI0S8gg=",
 			"path": "k8s.io/client-go/tools/pager",
+			"revision": "b8faab9c5193b482cbf69c78578474b7a40e3e6d",
+			"revisionTime": "2019-06-06T20:45:21Z",
+			"version": "kubernetes-1.14.3",
+			"versionExact": "kubernetes-1.14.3"
+		},
+		{
+			"checksumSHA1": "wjIhPUFz0mMzt+wDZH+nHYE0D2c=",
+			"path": "k8s.io/client-go/tools/record",
+			"revision": "b8faab9c5193b482cbf69c78578474b7a40e3e6d",
+			"revisionTime": "2019-06-06T20:45:21Z",
+			"version": "kubernetes-1.14.3",
+			"versionExact": "kubernetes-1.14.3"
+		},
+		{
+			"checksumSHA1": "W+yDEnCoCF5vhUc2bOWH+TkoW/U=",
+			"path": "k8s.io/client-go/tools/record/util",
 			"revision": "b8faab9c5193b482cbf69c78578474b7a40e3e6d",
 			"revisionTime": "2019-06-06T20:45:21Z",
 			"version": "kubernetes-1.14.3",
