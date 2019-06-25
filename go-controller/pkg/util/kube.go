@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"strings"
 
+	kapi "k8s.io/api/core/v1"
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/rest"
 	"k8s.io/client-go/tools/clientcmd"
@@ -48,4 +49,19 @@ func NewClientset(conf *config.KubernetesConfig) (*kubernetes.Clientset, error) 
 	}
 
 	return kubernetes.NewForConfig(kconfig)
+}
+
+// IsClusterIPSet checks if the service is an headless service or not
+func IsClusterIPSet(service *kapi.Service) bool {
+	return service.Spec.ClusterIP != kapi.ClusterIPNone && service.Spec.ClusterIP != ""
+}
+
+// ServiceTypeHasClusterIP checks if the service has an associated ClusterIP or not
+func ServiceTypeHasClusterIP(service *kapi.Service) bool {
+	return service.Spec.Type == kapi.ServiceTypeClusterIP || service.Spec.Type == kapi.ServiceTypeNodePort || service.Spec.Type == kapi.ServiceTypeLoadBalancer
+}
+
+// ServiceTypeHasNodePort checks if the service has an associated NodePort or not
+func ServiceTypeHasNodePort(service *kapi.Service) bool {
+	return service.Spec.Type == kapi.ServiceTypeNodePort || service.Spec.Type == kapi.ServiceTypeLoadBalancer
 }

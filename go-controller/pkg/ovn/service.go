@@ -35,13 +35,11 @@ func (ovn *Controller) syncServices(services []interface{}) {
 			continue
 		}
 
-		if service.Spec.Type != kapi.ServiceTypeClusterIP &&
-			service.Spec.Type != kapi.ServiceTypeNodePort &&
-			service.Spec.Type != kapi.ServiceTypeLoadBalancer {
+		if !util.ServiceTypeHasClusterIP(service) {
 			continue
 		}
 
-		if !util.IsServiceIPSet(service) {
+		if !util.IsClusterIPSet(service) {
 			logrus.Debugf("Skipping service %s due to clusterIP = %q",
 				service.Name, service.Spec.ClusterIP)
 			continue
@@ -53,7 +51,7 @@ func (ovn *Controller) syncServices(services []interface{}) {
 				protocol = TCP
 			}
 
-			if service.Spec.Type == kapi.ServiceTypeNodePort {
+			if util.ServiceTypeHasNodePort(service) {
 				port := fmt.Sprintf("%d", svcPort.NodePort)
 				if protocol == TCP {
 					nodeportServices[TCP] = append(nodeportServices[TCP], port)
@@ -168,7 +166,7 @@ func (ovn *Controller) syncServices(services []interface{}) {
 }
 
 func (ovn *Controller) deleteService(service *kapi.Service) {
-	if !util.IsServiceIPSet(service) || len(service.Spec.Ports) == 0 {
+	if !util.IsClusterIPSet(service) || len(service.Spec.Ports) == 0 {
 		return
 	}
 
@@ -176,7 +174,7 @@ func (ovn *Controller) deleteService(service *kapi.Service) {
 
 	for _, svcPort := range service.Spec.Ports {
 		var port int32
-		if service.Spec.Type == kapi.ServiceTypeNodePort {
+		if util.ServiceTypeHasNodePort(service) {
 			port = svcPort.NodePort
 		} else {
 			port = svcPort.Port
@@ -192,7 +190,7 @@ func (ovn *Controller) deleteService(service *kapi.Service) {
 
 		// targetPort can be anything, the deletion logic does not use it
 		var targetPort int32
-		if service.Spec.Type == kapi.ServiceTypeNodePort && config.Gateway.NodeportEnable {
+		if util.ServiceTypeHasNodePort(service) && config.Gateway.NodeportEnable {
 			// Delete the 'NodePort' service from a load-balancer instantiated in gateways.
 			err := ovn.createGatewaysVIP(string(protocol), port, targetPort, ips)
 			if err != nil {
@@ -200,7 +198,7 @@ func (ovn *Controller) deleteService(service *kapi.Service) {
 					"%s:%d %+v", service.Name, port, err)
 			}
 		}
-		if service.Spec.Type == kapi.ServiceTypeNodePort || service.Spec.Type == kapi.ServiceTypeClusterIP {
+		if util.ServiceTypeHasClusterIP(service) {
 			loadBalancer, err := ovn.getLoadBalancer(protocol)
 			if err != nil {
 				logrus.Errorf("Failed to get load-balancer for %s (%v)",
