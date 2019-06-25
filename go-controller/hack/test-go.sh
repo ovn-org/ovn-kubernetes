@@ -9,7 +9,7 @@ pushd ${GOPATH}/src/${OVN_KUBE_GO_PACKAGE}
 
 if [ -z "$PKGS" ]; then
   # by default, test everything that's not in vendor
-  PKGS="$(go list ./... | grep -v vendor | xargs echo)"
+  PKGS="$(go list -f '{{if len .TestGoFiles}} {{.ImportPath}} {{end}}' ./... | xargs echo)"
 fi
 
 # Work around sudo's PATH handling since Travis puts in Go in the travis user's homedir
