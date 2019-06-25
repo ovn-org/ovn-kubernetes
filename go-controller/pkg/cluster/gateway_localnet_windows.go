@@ -12,3 +12,8 @@ func initLocalnetGateway(nodeName string, clusterIPSubnet []string,
 	// TODO: Implement this
 	return fmt.Errorf("Not implemented yet on Windows")
 }
+
+func cleanupLocalnetGateway() error {
+	// TODO: Implement this
+	return fmt.Errorf("Not implemented yet on Windows")
+}
