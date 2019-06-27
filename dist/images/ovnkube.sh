@@ -7,28 +7,28 @@ if [[ "${OVNKUBE_SH_VERBOSE:-}" == "true" ]]; then
 fi
 
 # This script is the entrypoint to the image.
-# Supports version 3 daemonsets
+# Supports version 3, and 4 daemonsets
 #    $1 is the daemon to start.
-#        In version 3 each process has a separate container. Some daemons start
+#        Each process has a separate container. Some daemons start
 #        more than 1 process. Also, where possible, output is to stdout and
 #        The script waits for prerquisite deamons to come up first.
 # Commands ($1 values)
-#    ovs-server     Runs the ovs daemons - ovsdb-server and ovs-switchd (v3)
-#    run-ovn-northd Runs ovn-northd as a process does not run nb_ovsdb or sb_ovsdb (v3)
-#    nb-ovsdb       Runs nb_ovsdb as a process (no detach or monitor) (v3)
-#    sb-ovsdb       Runs sb_ovsdb as a process (no detach or monitor) (v3)
-#    ovn-master     Runs ovnkube in master mode (v3)
-#    ovn-controller Runs ovn controller (v3)
-#    ovn-node       Runs ovnkube in node mode (v3)
-#    cleanup-ovn-node   Runs ovnkube to cleanup the node (v3)
-#    cleanup-ovs-server Cleanup ovs-server (v3)
-#    run-nbctld     Runs ovn-nbctl in the daemon mode (v3)
+#    ovs-server     Runs the ovs daemons - ovsdb-server and ovs-switchd (v3, v4)
+#    run-ovn-northd Runs ovn-northd as a process does not run nb_ovsdb or sb_ovsdb (v3, v4)
+#    nb-ovsdb       Runs nb_ovsdb as a process (no detach or monitor) (v3, v4)
+#    sb-ovsdb       Runs sb_ovsdb as a process (no detach or monitor) (v3, v4)
+#    ovn-master     Runs ovnkube in master mode (v3, v4)
+#    ovn-controller Runs ovn controller (v3, v4)
+#    ovn-node       Runs ovnkube in node mode (v3, v4)
+#    cleanup-ovn-node   Runs ovnkube to cleanup the node (v3, v4)
+#    cleanup-ovs-server Cleanup ovs-server (v3, v4)
+#    run-nbctld     Runs ovn-nbctl in the daemon mode (v3, v4)
 #    display        Displays log files
 #    display_env    Displays environment variables
 #    ovn_debug      Displays ovn/ovs configuration and flows
 
 # NOTE: The script/image must be compatible with the daemonset.
-# This script supports version 3 daemonsets
+# This script supports version 3, 4 daemonsets
 #      When called, it starts all needed daemons.
 
 # ====================
@@ -37,9 +37,9 @@ fi
 # OVN_NET_CIDR - the network cidr - v3
 # OVN_SVC_CIDR - the cluster-service-cidr - v3
 # OVN_KUBERNETES_NAMESPACE - k8s namespace - v3
-# K8S_NODE - hostname of the node - v3
+# K8S_NODE - hostname of the node - v3, v4
 #
-# OVN_DAEMONSET_VERSION - version match daemonset and image - v3
+# OVN_DAEMONSET_VERSION - version match daemonset and image - v3, v4
 # K8S_TOKEN - the apiserver token. Automatically detected when running in a pod - v3
 # K8S_CACERT - the apiserver CA. Automatically detected when running in a pod - v3
 # OVN_CONTROLLER_OPTS - the options for ovn-ctl
@@ -47,10 +47,10 @@ fi
 # OVN_GATEWAY_MODE - the gateway mode (shared, spare, local) - v3
 # OVN_GATEWAY_OPTS - the options for the ovn gateway
 # OVNKUBE_LOGLEVEL - log level for ovnkube (0..5, default 4) - v3
-# OVN_LOG_NORTHD - log level (ovn-ctl default: -vconsole:emer -vsyslog:err -vfile:info) - v3
-# OVN_LOG_NB - log level (ovn-ctl default: -vconsole:off -vfile:info) - v3
-# OVN_LOG_SB - log level (ovn-ctl default: -vconsole:off -vfile:info) - v3
-# OVN_LOG_CONTROLLER - log level (ovn-ctl default: -vconsole:off -vfile:info) - v3
+# OVN_LOG_NORTHD - log level (ovn-ctl default: -vconsole:emer -vsyslog:err -vfile:info) - v3, v4
+# OVN_LOG_NB - log level (ovn-ctl default: -vconsole:off -vfile:info) - v3, v4
+# OVN_LOG_SB - log level (ovn-ctl default: -vconsole:off -vfile:info) - v3, v4
+# OVN_LOG_CONTROLLER - log level (ovn-ctl default: -vconsole:off -vfile:info) - v3, v4
 # OVN_LOG_NBCTLD - log file (ovn-nbctl daemon mode default: /var/log/openvswitch/ovn-nbctl.log)
 # OVN_NB_PORT - ovn north db port (default 6641)
 # OVN_SB_PORT - ovn south db port (default 6642)
@@ -59,6 +59,15 @@ fi
 # ovn-master ovn-controller ovn-node display display_env ovn_debug
 # a cmd must be provided, there is no default
 cmd=${1:-""}
+
+# as an alternative to environmnet variables, the ovn-config config map can be
+# mounted into the container and values can be taked from there
+# environment variables are preserved for existing users
+cm_dir="/var/run/ovn-config"
+cm_k8s_apiserver=$(cat ${cm_dir}/k8s_apiserver 2>/dev/null)
+echo "cm_k8s_apiserver ${cm_k8s_apiserver}   K8S_APISERVER ${K8S_APISERVER}"
+k8s_apiserver=${K8S_APISERVER:-${cm_k8s_apiserver}}
+echo "k8s_apiserver ${k8s_apiserver}"
 
 # ovn daemon log levels
 ovn_log_northd=${OVN_LOG_NORTHD:-"-vconsole:info"}
@@ -71,16 +80,11 @@ logdir=/var/log/openvswitch
 ovnkubelogdir=/var/log/ovn-kubernetes
 
 # ovnkube.sh version (update when API between daemonset and script changes - v.x.y)
-ovnkube_version="3"
+ovnkube_version="4"
 
 # The daemonset version must be compatible with this script.
-# The default when OVN_DAEMONSET_VERSION is not set is version 3
-ovn_daemonset_version=${OVN_DAEMONSET_VERSION:-"3"}
-
-# hostname is the host's hostname when using host networking,
-# This is useful on the master node
-# otherwise it is the container ID (useful for debugging).
-ovn_pod_host=$(hostname)
+# The default when OVN_DAEMONSET_VERSION is not set is version 4
+ovn_daemonset_version=${OVN_DAEMONSET_VERSION:-"4"}
 
 # The ovs user id, by default it is going to be root:root
 ovs_user_id=${OVS_USER_ID:-""}
@@ -95,7 +99,7 @@ else
   k8s_token=${K8S_TOKEN}
 fi
 
-K8S_CACERT=${K8S_CACERT:-/var/run/secrets/kubernetes.io/serviceaccount/ca.crt}
+k8s_cacert=${K8S_CACERT:-/var/run/secrets/kubernetes.io/serviceaccount/ca.crt}
 
 # ovn-northd - /etc/sysconfig/ovn-northd
 ovn_northd_opts=${OVN_NORTHD_OPTS:-""}
@@ -106,15 +110,26 @@ ovn_controller_opts=${OVN_CONTROLLER_OPTS:-""}
 # set the log level for ovnkube
 ovnkube_loglevel=${OVNKUBE_LOGLEVEL:-4}
 
-# by default it is going to be a shared gateway mode, however this can be overridden to any of the other
-# two gateway modes that we support using `images/daemonset.sh` tool
-ovn_gateway_mode=${OVN_GATEWAY_MODE:-"shared"}
+# by default it is going to be a shared gateway mode, however this can be overridden to any
+# of the other two gateway modes that we support using `images/daemonset.sh` tool
+# v3
+ovn_gateway_mode=${OVN_GATEWAY_MODE}
 ovn_gateway_opts=${OVN_GATEWAY_OPTS:-""}
 
-net_cidr=${OVN_NET_CIDR:-10.128.0.0/14/23}
-svc_cidr=${OVN_SVC_CIDR:-172.30.0.0/16}
+# v3
+cm_net_cidr=$(cat ${cm_dir}/net_cidr 2>/dev/null)
+net_cidr=${OVN_NET_CIDR:-${cm_net_cidr}}
+if [[ ${net_cidr} == "" ]] ; then net_cidr=10.128.0.0/14/23 ; fi
+cm_svc_cidr=$(cat ${cm_dir}/svc_cidr 2>/dev/null)
+svc_cidr=${OVN_SVC_CIDR:-${cm_svc_cidr}}
+if [[ ${svc_cidr} == "" ]] ; then svc_cidr=172.30.0.0/16 ; fi
 
-ovn_kubernetes_namespace=${OVN_KUBERNETES_NAMESPACE:-ovn-kubernetes}
+cm_namespace=$(cat ${cm_dir}/namespace 2>/dev/null)
+ovn_namespace=${OVN_KUBERNETES_NAMESPACE:-${cm_namespace}}
+echo "cm_namespace ${cm_namespace}   ovn_namespace ${ovn_namespace}"
+# v3 support
+ovn_kubernetes_namespace=${ovn_namespace:-ovn-kubernetes}
+echo "ovn_kubernetes_namespace ${ovn_kubernetes_namespace}"
 
 # host on which ovnkube-db POD is running and this POD contains both
 # OVN NB and SB DB running in their own container
@@ -128,7 +143,7 @@ ovn_sb_port=${OVN_SB_PORT:-6642}
 # =========================================
 
 setup_ovs_permissions () {
-  if [ ${ovs_user_id:-XX} != "XX" ]; then
+  if [[ -n "${ovs_user_id}" ]] ; then
       chown -R ${ovs_user_id} /etc/openvswitch
       chown -R ${ovs_user_id} /var/run/openvswitch
       chown -R ${ovs_user_id} /var/log/openvswitch
@@ -138,7 +153,7 @@ setup_ovs_permissions () {
 run_as_ovs_user_if_needed () {
   setup_ovs_permissions
 
-  if [ ${ovs_user_id:-XX} != "XX" ]; then
+  if [[ -n "${ovs_user_id}" ]] ; then
       local uid=$(id -u "${ovs_user_id%:*}")
       local gid=$(id -g "${ovs_user_id%:*}")
       local groups=$(id -G "${ovs_user_id%:*}" | tr ' ' ',')
@@ -185,13 +200,23 @@ wait_for_event () {
 
 }
 
+
+# Get the ovn_db_host
+get_ovn_db_host () {
+  ovn_db_host=$(kubectl --server=${k8s_apiserver} --token=${k8s_token} --certificate-authority=${k8s_cacert} \
+    get ep -n ${ovn_kubernetes_namespace} ovnkube-db 2>/dev/null | grep 6642 | sed 's/:/ /' | awk '/ovnkube-db/{ print $2 }')
+  if [[ ${ovn_db_host} == "" ]] ; then
+      return 1
+  fi
+}
+# wait_for_event get_ovn_db_host
+
 # OVN DBs must be up and initialized before ovn-master and ovn-node PODs can come up
 # This waits for ovnkube-db POD to come up
 ready_to_start_node () {
 
   # See if ep is available ...
-  ovn_db_host=$(kubectl --server=${K8S_APISERVER} --token=${k8s_token} --certificate-authority=${K8S_CACERT} \
-    get ep -n ${ovn_kubernetes_namespace} ovnkube-db 2>/dev/null | grep ${ovn_sb_port} | sed 's/:/ /' | awk '/ovnkube-db/{ print $2 }')
+  get_ovn_db_host
   if [[ ${ovn_db_host} == "" ]] ; then
       return 1
   fi
@@ -323,7 +348,7 @@ display_file () {
 
 # pid and log file for each container
 display () {
-  echo "==================== display for ${ovn_pod_host}  =================== "
+  echo "==================== display for ${K8S_NODE}  =================== "
   date
   display_file "nb-ovsdb" /var/run/openvswitch/ovnnb_db.pid ${logdir}/ovsdb-server-nb.log
   display_file "sb-ovsdb" /var/run/openvswitch/ovnsb_db.pid ${logdir}/ovsdb-server-sb.log
@@ -332,7 +357,7 @@ display () {
   display_file "ovs-vswitchd" /var/run/openvswitch/ovs-vswitchd.pid ${logdir}/ovs-vswitchd.log
   display_file "ovsdb-server" /var/run/openvswitch/ovsdb-server.pid ${logdir}/ovsdb-server.log
   display_file "ovn-controller" /var/run/openvswitch/ovn-controller.pid ${logdir}/ovn-controller.log
-  display_file "ovnkube" /var/run/openvswitch/ovnkube.pid ${ovnkubelogdir}/ovnkube.log
+  display_file "ovnkube" /var/run/openvswitch/ovnkube.pid ${ovnkubelogdir}/ovnkube-node.log
   display_file "run-nbctld" /var/run/openvswitch/ovn-nbctl.pid ${logdir}/ovn-nbctl.log
 }
 
@@ -341,13 +366,12 @@ setup_cni () {
 }
 
 display_version () {
-  echo " =================== hostname: ${ovn_pod_host}"
+  echo " =================== hostname: ${K8S_NODE}"
   echo " =================== daemonset version ${ovn_daemonset_version}"
   if [[ -f /root/git_info ]]
   then
-	disp_ver=$(cat /root/git_info)
-	echo " =================== Image built from ovn-kubernetes ${disp_ver}"
-	return
+    disp_ver=$(cat /root/git_info)
+    echo " =================== Image built from ovn-kubernetes ${disp_ver}"
   fi
 }
 
@@ -358,15 +382,22 @@ echo OVN_NORTH ${ovn_nbdb}
 echo OVN_NORTHD_OPTS ${ovn_northd_opts}
 echo OVN_SOUTH ${ovn_sbdb}
 echo OVN_CONTROLLER_OPTS ${ovn_controller_opts}
+echo OVN_LOG_NORTHD${ovn_log_northd}
+echo OVN_LOG_NB ${ovn_log_nb}
+echo OVN_LOG_SB ${ovn_log_sb}
 echo OVN_LOG_CONTROLLER ${ovn_log_controller}
-echo OVN_GATEWAY_MODE ${ovn_gateway_mode}
-echo OVN_GATEWAY_OPTS ${ovn_gateway_opts}
 echo OVN_NET_CIDR ${net_cidr}
 echo OVN_SVC_CIDR ${svc_cidr}
 echo OVN_NB_PORT ${ovn_nb_port}
 echo OVN_SB_PORT ${ovn_sb_port}
-echo K8S_APISERVER ${K8S_APISERVER}
-echo OVNKUBE_LOGLEVEL ${ovnkube_loglevel}
+echo K8S_APISERVER ${k8s_apiserver}
+echo K8S_CACERT ${k8s_cacert}
+echo K8S_tOKEN ${k8s_token}
+if [[ ${ovn_daemonset_version} == "3" ]] ; then
+  echo OVN_GATEWAY_MODE ${ovn_gateway_mode}
+  echo OVN_GATEWAY_OPTS ${ovn_gateway_opts}
+  echo OVNKUBE_LOGLEVEL ${ovnkube_loglevel}
+fi
 echo OVN_DAEMONSET_VERSION ${ovn_daemonset_version}
 echo ovnkube.sh version ${ovnkube_version}
 }
@@ -378,7 +409,7 @@ ovn_debug () {
   echo "ovn_nbdb_test ${ovn_nbdb_test}"
 
   # get ovs/ovn info from the node for debug purposes
-  echo "=========== ovn_debug   hostname: ${ovn_pod_host} ============="
+  echo "=========== ovn_debug   hostname: ${K8S_NODE} ============="
   echo "=========== ovn-nbctl show ============="
   echo "=========== ovn-nbctl --db=${ovn_nbdb_test} show ============="
   ovn-nbctl --db=${ovn_nbdb_test} show
@@ -501,13 +532,14 @@ cleanup-ovs-server () {
 # set the ovnkube_db endpoint for other pods to query the OVN DB IP
 set_ovnkube_db_ep () {
   # delete any endpoint by name ovnkube-db
-  kubectl --server=${K8S_APISERVER} --token=${k8s_token} --certificate-authority=${K8S_CACERT} \
+  kubectl --server=${k8s_apiserver} --token=${k8s_token} --certificate-authority=${k8s_cacert} \
     delete ep -n ${ovn_kubernetes_namespace} ovnkube-db 2>/dev/null
 
   # create a new endpoint for the headless onvkube-db service without selectors
   # using the current host has the endpoint IP
-  ovn_db_host=$(getent ahosts $(hostname) | head -1 | awk '{ print $1 }')
-  kubectl --server=${K8S_APISERVER} --token=${k8s_token} --certificate-authority=${K8S_CACERT} apply -f - << EOF
+  ovn_db_host=$(host ${K8S_NODE} | awk '{ print $4}')
+  # use apply here because on restart if endpoint exists create will fail
+  kubectl --server=${k8s_apiserver} --token=${k8s_token} --certificate-authority=${k8s_cacert} apply -f - << EOF
 apiVersion: v1
 kind: Endpoints
 metadata:
@@ -530,10 +562,10 @@ EOF
     fi
 }
 
-# v3 - run nb_ovsdb in a separate container
+# v3 v4 - run nb_ovsdb in a separate container
 nb-ovsdb () {
   trap 'kill $(jobs -p); exit 0' TERM
-  check_ovn_daemonset_version "3"
+  check_ovn_daemonset_version "3 4"
   rm -f /var/run/openvswitch/ovnnb_db.pid
 
   # Make sure /var/lib/openvswitch exists
@@ -542,6 +574,7 @@ nb-ovsdb () {
   iptables-rules ${ovn_nb_port}
 
   echo "=============== run nb_ovsdb ========== MASTER ONLY"
+  echo "ovn_log_nb=${ovn_log_nb} ovn_nb_log_file=${ovn_nb_log_file}"
   run_as_ovs_user_if_needed \
       /usr/share/openvswitch/scripts/ovn-ctl run_nb_ovsdb --no-monitor \
       --ovn-nb-log="${ovn_log_nb}" &
@@ -558,10 +591,10 @@ nb-ovsdb () {
   echo "=============== run nb_ovsdb ========== terminated"
 }
 
-# v3 - run sb_ovsdb in a separate container
+# v3 v4 - run sb_ovsdb in a separate container
 sb-ovsdb () {
   trap 'kill $(jobs -p); exit 0' TERM
-  check_ovn_daemonset_version "3"
+  check_ovn_daemonset_version "3 4"
   rm -f /var/run/openvswitch/ovnsb_db.pid
 
   # Make sure /var/lib/openvswitch exists
@@ -590,18 +623,18 @@ sb-ovsdb () {
 }
 
 
-# v3 - Runs northd on master. Does not run nb_ovsdb, and sb_ovsdb
+# v3 v4 - Runs northd on master. Does not run nb_ovsdb, and sb_ovsdb
 run-ovn-northd () {
-  check_ovn_daemonset_version "3"
+  check_ovn_daemonset_version "3 4"
   rm -f /var/run/openvswitch/ovn-northd.pid
   rm -f /var/run/openvswitch/ovn-northd.*.ctl
 
   # Make sure /var/lib/openvswitch exists
   mkdir -p /var/lib/openvswitch
 
-  echo "=============== run-ovn-northd (wait for ready_to_start_node)"
-  wait_for_event ready_to_start_node
-
+  echo "=============== run-ovn-northd (wait for get_ovn_db_host)"
+  wait_for_event get_ovn_db_host
+  get_ovn_db_vars
   sleep 1
 
   echo "=============== run_ovn_northd ========== MASTER ONLY"
@@ -643,10 +676,10 @@ iptables-rules () {
   fi
 }
 
-# v3 - run ovnkube --master
+# v3 v4 - run ovnkube --master
 ovn-master () {
   trap 'kill $(jobs -p); exit 0' TERM
-  check_ovn_daemonset_version "3"
+  check_ovn_daemonset_version "3 4"
   rm -f /var/run/openvswitch/ovnkube-master.pid
 
   echo "=============== ovn-master (wait for ready_to_start_node) ========== MASTER ONLY"
@@ -656,30 +689,35 @@ ovn-master () {
   # wait for northd to start
   wait_for_event process_ready ovn-northd
 
-  echo "=============== ovn-master (wait for ovn-nbctl daemon) ========== MASTER ONLY"
-  wait_for_event process_ready ovn-nbctl
-
-  sleep 5
-
   # wait for ovs-servers to start since ovn-master sets some fields in OVS DB
   echo "=============== ovn-master - (wait for ovs)"
   wait_for_event ovs_ready
 
-  echo "=============== ovn-master ========== MASTER ONLY"
-  /usr/bin/ovnkube \
-    --init-master ${ovn_pod_host} \
-    --cluster-subnets ${net_cidr} --k8s-service-cidr=${svc_cidr} \
+  echo "=============== ovn-master   ${K8S_NODE}  ========== MASTER ONLY"
+  if [[ ${ovn_daemonset_version} == "3" ]] ; then
+  /usr/bin/ovnkube --init-master ${K8S_NODE} \
+    --k8s-apiserver=${k8s_apiserver} \
+    --cluster-subnet ${net_cidr} --k8s-service-cidr=${svc_cidr} \
     --nb-address=${ovn_nbdb} --sb-address=${ovn_sbdb} \
     --nodeport \
     --nbctl-daemon-mode \
     --loglevel=${ovnkube_loglevel} \
     --pidfile /var/run/openvswitch/ovnkube-master.pid \
-    --logfile /var/log/ovn-kubernetes/ovnkube-master.log &
+    --logfile ${ovnkubelogdir}/ovnkube-master.log &
+  fi
+  if [[ ${ovn_daemonset_version} == "4" ]] ; then
+  /usr/bin/ovnkube --init-master ${K8S_NODE} \
+    --config-file=/var/run/ovnkube-config/ovn_k8s.conf \
+    --nb-address=${ovn_nbdb} --sb-address=${ovn_sbdb} \
+    --nbctl-daemon-mode \
+    --pidfile /var/run/openvswitch/ovnkube-master.pid \
+    --logfile ${ovnkubelogdir}/ovnkube-master.log &
+  fi
   echo "=============== ovn-master ========== running"
   wait_for_event attempts=3 process_ready ovnkube-master
   sleep 1
 
-  tail --follow=name /var/log/ovn-kubernetes/ovnkube-master.log &
+  tail --follow=name ${ovnkubelogdir}/ovnkube-master.log &
   kube_tail_pid=$!
 
   process_healthy ovnkube-master ${kube_tail_pid}
@@ -688,7 +726,7 @@ ovn-master () {
 
 # ovn-controller - all nodes
 ovn-controller () {
-  check_ovn_daemonset_version "3"
+  check_ovn_daemonset_version "3 4"
   rm -f /var/run/openvswitch/ovn-controller.pid
 
   echo "=============== ovn-controller - (wait for ovs)"
@@ -697,8 +735,7 @@ ovn-controller () {
   echo "=============== ovn-controller - (wait for ready_to_start_node)"
   wait_for_event ready_to_start_node
 
-  echo "ovn_nbdb ${ovn_nbdb}   ovn_sbdb ${ovn_sbdb}"
-  echo "ovn_nbdb_test ${ovn_nbdb_test}"
+  echo "ovn_nbdb ${ovn_nbdb}   ovn_sbdb ${ovn_sbdb}  ovn_nbdb_test ${ovn_nbdb_test}"
 
   echo "=============== ovn-controller  start_controller"
   rm -f /var/run/ovn-kubernetes/cni/*
@@ -712,7 +749,6 @@ ovn-controller () {
   wait_for_event attempts=3 process_ready ovn-controller
   echo "=============== ovn-controller ========== running"
 
-  sleep 4
   tail --follow=name /var/log/openvswitch/ovn-controller.log &
   controller_tail_pid=$!
 
@@ -725,7 +761,7 @@ ovn-controller () {
 # ovn-node - all nodes
 ovn-node () {
   trap 'kill $(jobs -p) ; rm -f /etc/cni/net.d/10-ovn-kubernetes.conf ; exit 0' TERM
-  check_ovn_daemonset_version "3"
+  check_ovn_daemonset_version "3 4"
   rm -f /var/run/openvswitch/ovnkube.pid
 
   echo "=============== ovn-node - (wait for ovs)"
@@ -740,22 +776,32 @@ ovn-node () {
   wait_for_event process_ready ovn-controller
   sleep 1
 
-  echo "=============== ovn-node   --init-node"
+  echo "=============== ovn-node   --init-node  ${K8S_NODE}"
+  if [[ ${ovn_daemonset_version} == "3" ]] ; then
   /usr/bin/ovnkube --init-node ${K8S_NODE} \
+      --k8s-apiserver=${k8s_apiserver} \
       --cluster-subnets ${net_cidr} --k8s-service-cidr=${svc_cidr} \
       --nb-address=${ovn_nbdb} --sb-address=${ovn_sbdb} \
       --nodeport \
       --loglevel=${ovnkube_loglevel} \
       --gateway-mode=${ovn_gateway_mode} ${ovn_gateway_opts}  \
       --pidfile /var/run/openvswitch/ovnkube.pid \
-      --logfile /var/log/ovn-kubernetes/ovnkube.log &
+      --logfile ${ovnkubelogdir}/ovnkube-node.log &
+  fi
+  if [[ ${ovn_daemonset_version} == "4" ]] ; then
+  /usr/bin/ovnkube --init-node ${K8S_NODE} \
+    --config-file=/var/run/ovnkube-config/ovn_k8s.conf \
+    --nb-address=${ovn_nbdb} --sb-address=${ovn_sbdb} \
+    --pidfile /var/run/openvswitch/ovnkube.pid \
+    --logfile ${ovnkubelogdir}/ovnkube-node.log &
+  fi
 
   wait_for_event attempts=3 process_ready ovnkube
   setup_cni
   echo "=============== ovn-node ========== running"
 
   sleep 5
-  tail --follow=name /var/log/ovn-kubernetes/ovnkube.log &
+  tail --follow=name ${ovnkubelogdir}/ovnkube-node.log &
   node_tail_pid=$!
 
   process_healthy ovnkube ${node_tail_pid}
@@ -764,7 +810,7 @@ ovn-node () {
 
 # cleanup-ovn-node - all nodes
 cleanup-ovn-node () {
-  check_ovn_daemonset_version "3"
+  check_ovn_daemonset_version "3 4"
 
   rm -f /etc/cni/net.d/10-ovn-kubernetes.conf
 
@@ -781,21 +827,25 @@ cleanup-ovn-node () {
   done
 
   echo "=============== time: $(date +%d-%m-%H:%M:%S:%N) cleanup-ovn-node --cleanup-node"
+  if [[ ${ovn_daemonset_version} == "3" ]] ; then
   /usr/bin/ovnkube --cleanup-node ${K8S_NODE} --gateway-mode=${ovn_gateway_mode} ${ovn_gateway_opts} \
-      --k8s-token=${k8s_token} --k8s-apiserver=${K8S_APISERVER} --k8s-cacert=${K8S_CACERT} \
+      --k8s-token=${k8s_token} --k8s-apiserver=${k8s_apiserver} --k8s-cacert=${k8s_cacert} \
       --loglevel=${ovnkube_loglevel} \
       --logfile /var/log/ovn-kubernetes/ovnkube.log
-
+      --logfile ${ovnkubelogdir}/ovnkube-cleanup.log
+  fi
+  if [[ ${ovn_daemonset_version} == "4" ]] ; then
+  /usr/bin/ovnkube --cleanup-node ${K8S_NODE} \
+      --config-file=/var/run/ovnkube-config/ovn_k8s.conf \
+      --logfile ${ovnkubelogdir}/ovnkube-cleanup.log
+  fi
 }
 
-# v3 - Runs ovn-nbctl in daemon mode
+# v3 v4 - Runs ovn-nbctl in daemon mode
 run-nbctld () {
-  check_ovn_daemonset_version "3"
+  check_ovn_daemonset_version "3 4"
   rm -f /var/run/openvswitch/ovn-nbctl.pid
   rm -f /var/run/openvswitch/ovn-nbctl.*.ctl
-
-  echo "=============== run-nbctld - (wait for ready_to_start_node)"
-  wait_for_event ready_to_start_node
 
   echo "ovn_nbdb ${ovn_nbdb}   ovn_sbdb ${ovn_sbdb}  ovn_nbdb_test ${ovn_nbdb_test}"
   echo "ovn_log_nbctld=${ovn_log_nbctld}"
@@ -813,6 +863,7 @@ run-nbctld () {
   echo "=============== run_ovn_nbctl ========== terminated"
 }
 
+
 echo "================== ovnkube.sh --- version: ${ovnkube_version} ================"
 
   echo " ==================== command: ${cmd}"
@@ -822,15 +873,15 @@ echo "================== ovnkube.sh --- version: ${ovnkube_version} ============
 
 # Start the requested daemons
 # daemons come up in order
-# ovs-db-server  - all nodes  -- not done by this script (v3)
-# ovs-vswitchd   - all nodes  -- not done by this script (v3)
-#  run-ovn-northd Runs ovn-northd as a process does not run nb_ovsdb or sb_ovsdb (v3)
-#  nb-ovsdb       Runs nb_ovsdb as a process (no detach or monitor) (v3)
-#  sb-ovsdb       Runs sb_ovsdb as a process (no detach or monitor) (v3)
-# ovn-master     - master node only (v3)
-# ovn-controller - all nodes (v3)
-# ovn-node       - all nodes (v3)
-# cleanup-ovn-node - all nodes (v3)
+# ovs-db-server  - all nodes  -- not done by this script (v3 v4)
+# ovs-vswitchd   - all nodes  -- not done by this script (v3 v4)
+#  run-ovn-northd Runs ovn-northd as a process does not run nb_ovsdb or sb_ovsdb (v3 v4)
+#  nb-ovsdb       Runs nb_ovsdb as a process (no detach or monitor) (v3 v4)
+#  sb-ovsdb       Runs sb_ovsdb as a process (no detach or monitor) (v3 v4)
+# ovn-master     - master node only (v3 v4)
+# ovn-controller - all nodes (v3 v4)
+# ovn-node       - all nodes (v3 v4)
+# cleanup-ovn-node - all nodes (v3 v4)
 
   case ${cmd} in
     "nb-ovsdb")        # pod ovnkube-db container nb-ovsdb
@@ -857,9 +908,6 @@ echo "================== ovnkube.sh --- version: ${ovnkube_version} ============
     "run-nbctld")   # pod ovnkube-master container run-nbctld
     run-nbctld
     ;;
-    "ovn-northd")
-	ovn-northd
-    ;;
     "display_env")
         display_env
 	exit 0
@@ -880,7 +928,8 @@ echo "================== ovnkube.sh --- version: ${ovnkube_version} ============
     ;;
     *)
 	echo "invalid command ${cmd}"
-	echo "valid v3 commands: ovs-server nb-ovsdb sb-ovsdb run-ovn-northd ovn-master ovn-controller ovn-node display_env display ovn_debug cleanup-ovs-server cleanup-ovn-node"
+	echo "valid v3 commands: ovs-server nb-ovsdb sb-ovsdb run-ovn-northd ovn-master ovn-controller ovn-node display_env display ovn_debug cleanup-ovs-server cleanup-ovn-node run-nbctld"
+	echo "valid v4 commands: ovs-server nb-ovsdb sb-ovsdb run-ovn-northd ovn-master ovn-controller ovn-node display_env display ovn_debug cleanup-ovs-server cleanup-ovn-node run-nbctld"
 	exit 0
   esac
 

@@ -962,7 +962,7 @@ mode=shared
 				"-k8s-apiserver=https://localhost:8443", "-k8s-cacert=/foo/bar/baz.cert")
 
 			generateTestsSimple("apiserver URL scheme is invalid",
-				"kubernetes API server URL scheme \"gggggg\" invalid",
+				"kubernetes API server URL scheme \"gggggg\" invalid gggggg://localhost:8443",
 				"-k8s-apiserver=gggggg://localhost:8443")
 
 			generateTestsSimple("apiserver URL is invalid",

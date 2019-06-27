@@ -130,3 +130,27 @@ data:
   net_cidr:      "{{ net_cidr | default('10.128.0.0/14/23') }}"
   svc_cidr:      "{{ svc_cidr | default('172.30.0.0/16') }}"
   k8s_apiserver: "{{ k8s_apiserver.stdout }}"
+---
+# the ovnkube config file
+kind: ConfigMap
+apiVersion: v1
+metadata:
+  name: ovnkube-config
+  namespace: ovn-kubernetes
+data:
+  config:   |-
+    [default]
+    mtu="1400"
+
+    [kubernetes]
+    service-cidr="{{ svc_cidr | default('172.30.0.0/16') }}"
+    cluster-subnets="{{ net_cidr | default('10.128.0.0/14/23') }}"
+    apiserver="{{ k8s_apiserver.stdout }}"
+
+    [logging]
+    loglevel=4
+
+    [gateway]
+    mode=local
+    nodeport=true
+

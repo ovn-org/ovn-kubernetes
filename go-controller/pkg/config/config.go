@@ -657,7 +657,7 @@ func setOVSExternalID(exec kexec.Interface, key, value string) error {
 }
 
 func buildKubernetesConfig(exec kexec.Interface, cli, file *config, saPath string, defaults *Defaults) error {
-	// token adn ca.crt may be from files mounted in container.
+	// token and ca.crt may be from files mounted in container.
 	var saConfig KubernetesConfig
 	if data, err := ioutil.ReadFile(filepath.Join(saPath, kubeServiceAccountFileToken)); err == nil {
 		saConfig.Token = string(data)
@@ -706,7 +706,7 @@ func buildKubernetesConfig(exec kexec.Interface, cli, file *config, saPath strin
 	if err != nil {
 		return fmt.Errorf("kubernetes API server address %q invalid: %v", Kubernetes.APIServer, err)
 	} else if url.Scheme != "https" && url.Scheme != "http" {
-		return fmt.Errorf("kubernetes API server URL scheme %q invalid", url.Scheme)
+		return fmt.Errorf("kubernetes API server URL scheme %q invalid %v", url.Scheme, Kubernetes.APIServer)
 	}
 
 	// Legacy service-cluster-ip-range CLI option overrides config file or --k8s-service-cidr
