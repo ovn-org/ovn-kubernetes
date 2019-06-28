@@ -8,7 +8,9 @@
 # The registry is configured in /etc/containers/registries.conf
 # on each node in both "registries:" and "insecure_registries:" sections.
 
-all: bld
+all: ubuntu centos fedora
+
+ubuntu: bld
 	docker build -t ovn-kube-u -f Dockerfile.ubuntu .
 	# This is the default in the ovnkube*.yaml files
 	# docker login -u ovnkube docker.io/ovnkube
