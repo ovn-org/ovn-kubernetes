@@ -230,7 +230,7 @@ else
   pushd $HOME/work/src/github.com/ovn-org/ovn-kubernetes/dist/images
   ./daemonset.sh --image=docker.io/ovnkube/ovn-daemonset-u:latest \
   --net-cidr=192.168.0.0/16 --svc-cidr=172.16.1.0/24 \
-  --gateway-options="--gateway-local" \
+  --gateway-mode="local" \
   --k8s-apiserver=https://$OVERLAY_IP:6443
   popd
 
