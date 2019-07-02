@@ -1,6 +1,7 @@
 package ovn
 
 import (
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/factory"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/kube"
 	util "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
@@ -16,9 +17,8 @@ import (
 // Controller structure is the object which holds the controls for starting
 // and reacting upon the watched resources (e.g. pods, endpoints)
 type Controller struct {
-	kube           kube.Interface
-	nodePortEnable bool
-	watchFactory   *factory.WatchFactory
+	kube         kube.Interface
+	watchFactory *factory.WatchFactory
 
 	gatewayCache map[string]string
 	// For TCP and UDP type traffic, cache OVN load-balancers used for the
@@ -84,7 +84,7 @@ const (
 
 // NewOvnController creates a new OVN controller for creating logical network
 // infrastructure and policy
-func NewOvnController(kubeClient kubernetes.Interface, wf *factory.WatchFactory, nodePortEnable bool) *Controller {
+func NewOvnController(kubeClient kubernetes.Interface, wf *factory.WatchFactory) *Controller {
 	return &Controller{
 		kube:                     &kube.Kube{KClient: kubeClient},
 		watchFactory:             wf,
@@ -101,7 +101,6 @@ func NewOvnController(kubeClient kubernetes.Interface, wf *factory.WatchFactory,
 		gatewayCache:             make(map[string]string),
 		loadbalancerClusterCache: make(map[string]string),
 		loadbalancerGWCache:      make(map[string]string),
-		nodePortEnable:           nodePortEnable,
 	}
 }
 
@@ -253,7 +252,7 @@ func (oc *Controller) WatchNamespaces() error {
 func (oc *Controller) WatchNodes() error {
 	_, err := oc.watchFactory.AddNodeHandler(cache.ResourceEventHandlerFuncs{
 		AddFunc: func(obj interface{}) {
-			if !oc.nodePortEnable {
+			if !config.Gateway.NodeportEnable {
 				return
 			}
 			node := obj.(*kapi.Node)

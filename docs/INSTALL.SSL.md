@@ -163,7 +163,7 @@ Now, when you start the ovnkube utility on master, you should pass the SSL
 certificates to it. For e.g:
 
 ```
-sudo ovnkube -k8s-kubeconfig kubeconfig.yaml -net-controller -loglevel=4 \
+sudo ovnkube -k8s-kubeconfig kubeconfig.yaml -loglevel=4 \
  -k8s-apiserver="http://$CENTRAL_IP:8080" \
  -logfile="/var/log/ovn-kubernetes/ovnkube.log" \
  -init-master="$NODE_NAME" -cluster-subnet=$CLUSTER_IP_SUBNET \

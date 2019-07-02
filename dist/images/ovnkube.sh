@@ -20,6 +20,8 @@
 #    ovn-master     Runs ovnkube in master mode (v2, v3)
 #    ovn-controller Runs ovn controller (v2, v3)
 #    ovn-node       Runs ovnkube in node mode (v2, v3)
+#    cleanup-ovn-node   Runs ovnkube to cleanup the node (v3)
+#    cleanup-ovs-server Cleanup ovs-server
 #
 #    display        Displays log files
 #    display_env    Displays environment variables
@@ -49,6 +51,7 @@
 # K8S_CACERT - the apiserver CA. Automatically detected when running in a pod
 # OVN_CONTROLLER_OPTS - the options for ovn-ctl
 # OVN_NORTHD_OPTS - the options for the ovn northbound db
+# OVN_GATEWAY_MODE - the gateway mode (shared, spare, local)
 # OVN_GATEWAY_OPTS - the options for the ovn gateway
 # OVNKUBE_LOGLEVEL - log level for ovnkube (0..5, default 4)
 # OVN_LOG_NORTHD - log level (ovn-ctl default: -vconsole:emer -vsyslog:err -vfile:info)
@@ -114,8 +117,10 @@ ovn_controller_opts=${OVN_CONTROLLER_OPTS:-""}
 # set the log level for ovnkube
 ovnkube_loglevel=${OVNKUBE_LOGLEVEL:-4}
 
-#OVN_GATEWAY_OPTS=""
-ovn_gateway_opts=${OVN_GATEWAY_OPTS:-"--gateway-local"}
+# by default it is going to be a shared gateway mode, however this can be overridden to any of the other
+# two gateway modes that we support using `images/daemonset.sh` tool
+ovn_gateway_mode=${OVN_GATEWAY_MODE:-"shared"}
+ovn_gateway_opts=${OVN_GATEWAY_OPTS:-""}
 
 net_cidr=${OVN_NET_CIDR:-10.128.0.0/14/23}
 svc_cidr=${OVN_SVC_CIDR:-172.30.0.0/16}
@@ -316,6 +321,7 @@ echo OVN_NORTHD_OPTS ${ovn_northd_opts}
 echo OVN_SOUTH ${ovn_sbdb}
 echo OVN_CONTROLLER_OPTS ${ovn_controller_opts}
 echo OVN_LOG_CONTROLLER ${ovn_log_controller}
+echo OVN_GATEWAY_MODE ${ovn_gateway_mode}
 echo OVN_GATEWAY_OPTS ${ovn_gateway_opts}
 echo OVN_NET_CIDR ${net_cidr}
 echo OVN_SVC_CIDR ${svc_cidr}
@@ -390,6 +396,8 @@ ovs-server () {
       exit 1
     fi
   done
+  rm -f /var/run/openvswitch/ovs-vswitchd.pid
+  rm -f /var/run/openvswitch/ovsdb-server.pid
 
   # launch OVS
   function quit {
@@ -426,6 +434,20 @@ ovs-server () {
     fi
     sleep 15
   done
+}
+
+cleanup-ovs-server () {
+  echo "=============== time: $(date +%d-%m-%H:%M:%S:%N) cleanup-ovs-server (wait for ovn-node to exit) ======="
+  retries=0
+  while [[ ${retries} -lt 80 ]]; do
+    if [[ ! -e /var/run/openvswitch/ovnkube.pid ]] ; then
+      break
+    fi
+    echo "=============== time: $(date +%d-%m-%H:%M:%S:%N) cleanup-ovs-server ovn-node still running, wait) ======="
+    sleep 1
+  done
+  echo "=============== time: $(date +%d-%m-%H:%M:%S:%N) cleanup-ovs-server (ovs-ctl stop) ======="
+  /usr/share/openvswitch/scripts/ovs-ctl stop
 }
 
 # create the ovnkube_db endpoint for other pods to query the OVN DB IP
@@ -610,7 +632,7 @@ ovn-master () {
 
   echo "=============== ovn-master ========== MASTER ONLY"
   /usr/bin/ovnkube \
-    --init-master ${ovn_pod_host} --net-controller \
+    --init-master ${ovn_pod_host} \
     --cluster-subnet ${net_cidr} --k8s-service-cidr=${svc_cidr} \
     --nb-address=${ovn_nbdb} --sb-address=${ovn_sbdb} \
     --nodeport \
@@ -681,7 +703,7 @@ ovn-node () {
 
   echo "=============== ovn-node   --init-node"
   # TEMP HACK - WORKAROUND
-  # --init-gateways --gateway-local works around a problem that
+  # --gateway-mode=local works around a problem that
   # results in loss of network connectivity when docker is
   # restarted or ovs daemonset is deleted.
   # TEMP HACK - WORKAROUND
@@ -690,7 +712,7 @@ ovn-node () {
       --nb-address=${ovn_nbdb} --sb-address=${ovn_sbdb} \
       --nodeport \
       --loglevel=${ovnkube_loglevel} \
-      --init-gateways ${ovn_gateway_opts}  \
+      --gateway-mode=${ovn_gateway_mode} ${ovn_gateway_opts}  \
       --pidfile /var/run/openvswitch/ovnkube.pid \
       --logfile /var/log/ovn-kubernetes/ovnkube.log &
 
@@ -704,6 +726,31 @@ ovn-node () {
 
   pid_health /var/run/openvswitch/ovnkube.pid ${node_tail_pid}
   exit 7
+}
+
+# cleanup-ovn-node - all nodes
+cleanup-ovn-node () {
+  check_ovn_daemonset_version "3"
+
+  rm -f /etc/cni/net.d/10-ovn-kubernetes.conf
+
+  echo "=============== time: $(date +%d-%m-%H:%M:%S:%N) cleanup-ovn-node - (wait for ovn-controller to exit)"
+  retries=0
+  while [[ ${retries} -lt 80 ]]; do
+    pid_ready ovn-controller.pid
+    if [[ $? != 0 ]] ; then
+      break
+    fi
+    echo "=============== time: $(date +%d-%m-%H:%M:%S:%N) cleanup-ovn-node - (ovn-controller still running, wait)"
+    sleep 1
+  done
+
+  echo "=============== time: $(date +%d-%m-%H:%M:%S:%N) cleanup-ovn-node --cleanup-node"
+  /usr/bin/ovnkube --cleanup-node ${K8S_NODE} --gateway-mode=${ovn_gateway_mode} ${ovn_gateway_opts} \
+      --k8s-token=${k8s_token} --k8s-apiserver=${K8S_APISERVER} --k8s-cacert=${K8S_CACERT} \
+      --loglevel=${ovnkube_loglevel} \
+      --logfile /var/log/ovn-kubernetes/ovnkube.log
+
 }
 
 # version 1 daemonset compatibility
@@ -750,7 +797,7 @@ start_ovn () {
 
     echo "=============== start ovn-master ========== MASTER ONLY"
     /usr/bin/ovnkube \
-      --init-master ${ovn_pod_host} --net-controller \
+      --init-master ${ovn_pod_host} \
       --cluster-subnet ${net_cidr} --k8s-service-cidr=${svc_cidr} \
       --nb-address=${ovn_nbdb} --sb-address=${ovn_sbdb} \
       --nodeport \
@@ -771,7 +818,7 @@ start_ovn () {
   # ovn-node - all nodes
   echo  "=============== start ovn-node"
   # TEMP HACK - WORKAROUND
-  # --init-gateways --gateway-local works around a problem that
+  # --gateway-mode=local works around a problem that
   # results in loss of network connectivity when docker is
   # restarted or ovs daemonset is deleted.
   # TEMP HACK - WORKAROUND
@@ -780,7 +827,7 @@ start_ovn () {
       --nb-address=${ovn_nbdb} --sb-address=${ovn_sbdb} \
       --nodeport \
       --loglevel=${ovnkube_loglevel} \
-      --init-gateways ${ovn_gateway_opts}  \
+      --gateway-mode=${ovn_gateway_mode} ${ovn_gateway_opts}  \
       --pidfile /var/run/openvswitch/ovnkube.pid \
       --logfile /var/log/ovn-kubernetes/ovnkube.log &
 
@@ -805,6 +852,7 @@ echo "================== ovnkube.sh --- version: ${ovnkube_version} ============
 # ovn-master     - master node only (v2 v3)
 # ovn-controller - all nodes (v2 v3)
 # ovn-node       - all nodes (v2 v3)
+# cleanup-ovn-node - all nodes (v3)
 
   case ${cmd} in
     "nb-ovsdb")        # pod ovnkube-db container nb-ovsdb
@@ -843,6 +891,12 @@ echo "================== ovnkube.sh --- version: ${ovnkube_version} ============
 	ovn_debug
 	exit 0
     ;;
+    "cleanup-ovs-server")
+	cleanup-ovs-server
+    ;;
+    "cleanup-ovn-node")
+	cleanup-ovn-node
+    ;;
     # This is being deprecated
     # daemonset version 1 compatibility mode
     "start-ovn")
@@ -857,7 +911,7 @@ echo "================== ovnkube.sh --- version: ${ovnkube_version} ============
 	echo "invalid command ${cmd}"
 	echo "valid v1 commands: start-ovn display_env display ovn_debug"
 	echo "valid v2 commands: ovn-northd ovn-master ovn-controller ovn-node display_env display ovn_debug"
-	echo "valid v3 commands: ovs-server nb-ovsdb sb-ovsdb run-ovn-northd ovn-master ovn-controller ovn-node display_env display ovn_debug"
+	echo "valid v3 commands: ovs-server nb-ovsdb sb-ovsdb run-ovn-northd ovn-master ovn-controller ovn-node display_env display ovn_debug cleanup-ovs-server cleanup-ovn-node"
 	exit 0
   esac
 

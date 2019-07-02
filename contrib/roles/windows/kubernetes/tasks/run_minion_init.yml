@@ -62,7 +62,7 @@
     line: >
       service-command={{ ovnkube_service_command }}
       --nodeport
-      --init-gateways
+      --gateway-mode=shared
       --gateway-interface="vEthernet ({{ interface_name }})"
       --gateway-nexthop="{{ interface_default_gateway }}"
   when: init_gateway

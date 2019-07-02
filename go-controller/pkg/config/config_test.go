@@ -128,6 +128,64 @@ func createTempFileContent(name, value string) (string, error) {
 	return fname, nil
 }
 
+// writeTestConfigFile writes out a config file with well-known options but
+// allows specific fields to be overridden by the testcase
+func writeTestConfigFile(path string, overrides ...string) error {
+	const defaultData string = `[default]
+mtu=1500
+conntrack-zone=64321
+
+[kubernetes]
+kubeconfig=/path/to/kubeconfig
+apiserver=https://1.2.3.4:6443
+token=TG9yZW0gaXBzdW0gZ
+cacert=/path/to/kubeca.crt
+service-cidr=172.18.0.0/24
+
+[logging]
+loglevel=5
+logfile=/var/log/ovnkube.log
+
+[cni]
+conf-dir=/etc/cni/net.d22
+plugin=ovn-k8s-cni-overlay22
+
+[ovnnorth]
+address=ssl://1.2.3.4:6641
+client-privkey=/path/to/nb-client-private.key
+client-cert=/path/to/nb-client.crt
+client-cacert=/path/to/nb-client-ca.crt
+
+[ovnsouth]
+address=ssl://1.2.3.4:6642
+client-privkey=/path/to/sb-client-private.key
+client-cert=/path/to/sb-client.crt
+client-cacert=/path/to/sb-client-ca.crt
+
+[gateway]
+mode=shared
+interface=eth1
+next-hop=1.3.4.5
+vlan-id=10
+nodeport=false
+`
+
+	var newData string
+	for _, line := range strings.Split(defaultData, "\n") {
+		equalsPos := strings.Index(line, "=")
+		if equalsPos >= 0 {
+			for _, override := range overrides {
+				if strings.HasPrefix(override, line[:equalsPos+1]) {
+					line = override
+					break
+				}
+			}
+		}
+		newData += line + "\n"
+	}
+	return ioutil.WriteFile(path, []byte(newData), 0644)
+}
+
 var _ = Describe("Config Operations", func() {
 	var app *cli.App
 	var cfgFile *os.File
@@ -381,38 +439,7 @@ var _ = Describe("Config Operations", func() {
 		Expect(err).NotTo(HaveOccurred())
 		defer os.Remove(kubeCAFile)
 
-		cfgData := fmt.Sprintf(`[default]
-mtu=1500
-conntrack-zone=64321
-
-[kubernetes]
-kubeconfig=%s
-apiserver=https://1.2.3.4:6443
-token=TG9yZW0gaXBzdW0gZ
-cacert=%s
-service-cidr=172.18.0.0/24
-
-[logging]
-loglevel=5
-logfile=/var/log/ovnkube.log
-
-[cni]
-conf-dir=/etc/cni/net.d22
-plugin=ovn-k8s-cni-overlay22
-
-[ovnnorth]
-address=ssl://1.2.3.4:6641
-client-privkey=/path/to/nb-client-private.key
-client-cert=/path/to/nb-client.crt
-client-cacert=/path/to/nb-client-ca.crt
-
-[ovnsouth]
-address=ssl://1.2.3.4:6642
-client-privkey=/path/to/sb-client-private.key
-client-cert=/path/to/sb-client.crt
-client-cacert=/path/to/sb-client-ca.crt
-`, kubeconfigFile, kubeCAFile)
-		err = ioutil.WriteFile(cfgFile.Name(), []byte(cfgData), 0644)
+		err = writeTestConfigFile(cfgFile.Name(), "kubeconfig="+kubeconfigFile, "cacert="+kubeCAFile)
 		Expect(err).NotTo(HaveOccurred())
 
 		app.Action = func(ctx *cli.Context) error {
@@ -445,6 +472,12 @@ client-cacert=/path/to/sb-client-ca.crt
 			Expect(OvnSouth.CACert).To(Equal("/path/to/sb-client-ca.crt"))
 			Expect(OvnSouth.Address).To(Equal("ssl:1.2.3.4:6642"))
 
+			Expect(Gateway.Mode).To(Equal(GatewayModeShared))
+			Expect(Gateway.Interface).To(Equal("eth1"))
+			Expect(Gateway.NextHop).To(Equal("1.3.4.5"))
+			Expect(Gateway.VLANID).To(Equal(uint(10)))
+			Expect(Gateway.NodeportEnable).To(BeFalse())
+
 			return nil
 		}
 		err = app.Run([]string{app.Name, "-config-file=" + cfgFile.Name()})
@@ -460,37 +493,7 @@ client-cacert=/path/to/sb-client-ca.crt
 		Expect(err).NotTo(HaveOccurred())
 		defer os.Remove(kubeCAFile)
 
-		err = ioutil.WriteFile(cfgFile.Name(), []byte(`[default]
-mtu=1500
-conntrack-zone=64321
-
-[kubernetes]
-kubeconfig=/path/to/kubeconfig
-apiserver=https://1.2.3.4:6443
-token=TG9yZW0gaXBzdW0gZ
-cacert=/path/to/kubeca.crt
-service-cidr=172.18.0.0/24
-
-[logging]
-loglevel=5
-logfile=/var/log/ovnkube.log
-
-[cni]
-conf-dir=/etc/cni/net.d22
-plugin=ovn-k8s-cni-overlay22
-
-[ovnnorth]
-address=ssl://1.2.3.4:6641
-client-privkey=/path/to/nb-client-private.key
-client-cert=/path/to/nb-client.crt
-client-cacert=/path/to/nb-client-ca.crt
-
-[ovnsouth]
-address=ssl://1.2.3.4:6642
-client-privkey=/path/to/sb-client-private.key
-client-cert=/path/to/sb-client.crt
-client-cacert=/path/to/sb-client-ca.crt
-`), 0644)
+		err = writeTestConfigFile(cfgFile.Name())
 		Expect(err).NotTo(HaveOccurred())
 
 		app.Action = func(ctx *cli.Context) error {
@@ -523,6 +526,11 @@ client-cacert=/path/to/sb-client-ca.crt
 			Expect(OvnSouth.CACert).To(Equal("/client/cacert2"))
 			Expect(OvnSouth.Address).To(Equal("ssl:6.5.4.1:6652"))
 
+			Expect(Gateway.Mode).To(Equal(GatewayModeSpare))
+			Expect(Gateway.Interface).To(Equal("eth5"))
+			Expect(Gateway.NextHop).To(Equal("1.3.5.6"))
+			Expect(Gateway.VLANID).To(Equal(uint(100)))
+			Expect(Gateway.NodeportEnable).To(BeTrue())
 			return nil
 		}
 		cliArgs := []string{
@@ -547,6 +555,11 @@ client-cacert=/path/to/sb-client-ca.crt
 			"-sb-client-privkey=/client/privkey2",
 			"-sb-client-cert=/client/cert2",
 			"-sb-client-cacert=/client/cacert2",
+			"-gateway-mode=spare",
+			"-gateway-interface=eth5",
+			"-gateway-nexthop=1.3.5.6",
+			"-gateway-vlanid=100",
+			"-nodeport",
 		}
 		err = app.Run(cliArgs)
 		Expect(err).NotTo(HaveOccurred())
@@ -589,6 +602,91 @@ service-cidr=172.18.0.0/24
 		Expect(err).NotTo(HaveOccurred())
 	})
 
+	It("overrides config file and defaults with CLI legacy --init-gateways option", func() {
+		err := ioutil.WriteFile(cfgFile.Name(), []byte(`[gateway]
+mode=spare
+`), 0644)
+		Expect(err).NotTo(HaveOccurred())
+
+		app.Action = func(ctx *cli.Context) error {
+			var cfgPath string
+			cfgPath, err = InitConfig(ctx, kexec.New(), nil)
+			Expect(err).NotTo(HaveOccurred())
+			Expect(cfgPath).To(Equal(cfgFile.Name()))
+			Expect(Gateway.Mode).To(Equal(GatewayModeShared))
+			return nil
+		}
+		cliArgs := []string{
+			app.Name,
+			"-config-file=" + cfgFile.Name(),
+			"-init-gateways",
+		}
+		err = app.Run(cliArgs)
+		Expect(err).NotTo(HaveOccurred())
+	})
+
+	It("overrides config file and defaults with CLI legacy --gateway-spare-interface option", func() {
+		err := ioutil.WriteFile(cfgFile.Name(), []byte(`[gateway]
+mode=shared
+`), 0644)
+		Expect(err).NotTo(HaveOccurred())
+
+		app.Action = func(ctx *cli.Context) error {
+			var cfgPath string
+			cfgPath, err = InitConfig(ctx, kexec.New(), nil)
+			Expect(err).NotTo(HaveOccurred())
+			Expect(cfgPath).To(Equal(cfgFile.Name()))
+			Expect(Gateway.Mode).To(Equal(GatewayModeSpare))
+			return nil
+		}
+		cliArgs := []string{
+			app.Name,
+			"-config-file=" + cfgFile.Name(),
+			"-init-gateways",
+			"-gateway-spare-interface",
+		}
+		err = app.Run(cliArgs)
+		Expect(err).NotTo(HaveOccurred())
+	})
+
+	It("overrides config file and defaults with CLI legacy --gateway-local option", func() {
+		err := ioutil.WriteFile(cfgFile.Name(), []byte(`[gateway]
+mode=shared
+`), 0644)
+		Expect(err).NotTo(HaveOccurred())
+
+		app.Action = func(ctx *cli.Context) error {
+			var cfgPath string
+			cfgPath, err = InitConfig(ctx, kexec.New(), nil)
+			Expect(err).NotTo(HaveOccurred())
+			Expect(cfgPath).To(Equal(cfgFile.Name()))
+			Expect(Gateway.Mode).To(Equal(GatewayModeLocal))
+			return nil
+		}
+		cliArgs := []string{
+			app.Name,
+			"-config-file=" + cfgFile.Name(),
+			"-init-gateways",
+			"-gateway-local",
+		}
+		err = app.Run(cliArgs)
+		Expect(err).NotTo(HaveOccurred())
+	})
+
+	It("returns an error when the gateway mode is invalid", func() {
+		app.Action = func(ctx *cli.Context) error {
+			_, err := InitConfig(ctx, kexec.New(), nil)
+			Expect(err).To(MatchError("invalid gateway mode \"adsfasdfaf\": expect one of shared,spare,local"))
+			return nil
+		}
+		cliArgs := []string{
+			app.Name,
+			"-gateway-mode=adsfasdfaf",
+		}
+		err := app.Run(cliArgs)
+		Expect(err).NotTo(HaveOccurred())
+	})
+
 	It("overrides config file and defaults with CLI options (multi-master)", func() {
 		kubeconfigFile, err := createTempFile("kubeconfig")
 		Expect(err).NotTo(HaveOccurred())
@@ -598,37 +696,7 @@ service-cidr=172.18.0.0/24
 		Expect(err).NotTo(HaveOccurred())
 		defer os.Remove(kubeCAFile)
 
-		err = ioutil.WriteFile(cfgFile.Name(), []byte(`[default]
-mtu=1500
-conntrack-zone=64321
-
-[kubernetes]
-kubeconfig=/path/to/kubeconfig
-apiserver=https://1.2.3.4:6443
-token=TG9yZW0gaXBzdW0gZ
-cacert=/path/to/kubeca.crt
-service-cidr=172.18.0.0/24
-
-[logging]
-loglevel=5
-logfile=/var/log/ovnkube.log
-
-[cni]
-conf-dir=/etc/cni/net.d22
-plugin=ovn-k8s-cni-overlay22
-
-[ovnnorth]
-address=ssl://1.2.3.4:6641
-client-privkey=/path/to/nb-client-private.key
-client-cert=/path/to/nb-client.crt
-client-cacert=/path/to/nb-client-ca.crt
-
-[ovnsouth]
-address=ssl://1.2.3.4:6642
-client-privkey=/path/to/sb-client-private.key
-client-cert=/path/to/sb-client.crt
-client-cacert=/path/to/sb-client-ca.crt
-`), 0644)
+		err = writeTestConfigFile(cfgFile.Name())
 		Expect(err).NotTo(HaveOccurred())
 
 		app.Action = func(ctx *cli.Context) error {

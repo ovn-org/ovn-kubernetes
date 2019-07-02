@@ -187,27 +187,29 @@ func runOvnKube(ctx *cli.Context) error {
 		panic(err.Error())
 	}
 
-	netController := ctx.Bool("net-controller")
 	master := ctx.String("init-master")
 	node := ctx.String("init-node")
-	nodePortEnable := ctx.Bool("nodeport")
 	clusterController := ovncluster.NewClusterController(clientset, factory)
 
-	if master != "" || node != "" {
-		clusterController.GatewayInit = ctx.Bool("init-gateways")
-		clusterController.GatewayIntf = ctx.String("gateway-interface")
-		clusterController.GatewayNextHop = ctx.String("gateway-nexthop")
-		clusterController.GatewaySpareIntf = ctx.Bool("gateway-spare-interface")
-		clusterController.LocalnetGateway = ctx.Bool("gateway-local")
-		clusterController.GatewayVLANID = ctx.Uint("gateway-vlanid")
-		clusterController.OvnHA = ctx.Bool("ha")
+	cleanupNode := ctx.String("cleanup-node")
+	if cleanupNode != "" {
+		if master != "" || node != "" {
+			panic("Cannot specify cleanup-node together with 'init-node or 'init-master'.")
+		}
 
+		err = clusterController.CleanupClusterNode(cleanupNode)
+		if err != nil {
+			logrus.Errorf(err.Error())
+			panic(err.Error())
+		}
+		return nil
+	}
+
+	if master != "" || node != "" {
 		clusterController.ClusterIPNet, err = parseClusterSubnetEntries(ctx.String("cluster-subnet"))
 		if err != nil {
 			panic(err.Error())
 		}
-
-		clusterController.NodePortEnable = nodePortEnable
 
 		if master != "" {
 			if runtime.GOOS == "windows" {
@@ -216,6 +218,11 @@ func runOvnKube(ctx *cli.Context) error {
 			// run the cluster controller to init the master
 			err := clusterController.StartClusterMaster(master)
 			if err != nil {
+				logrus.Errorf(err.Error())
+				panic(err.Error())
+			}
+			ovnController := ovn.NewOvnController(clientset, factory)
+			if err := ovnController.Run(); err != nil {
 				logrus.Errorf(err.Error())
 				panic(err.Error())
 			}
@@ -232,31 +239,12 @@ func runOvnKube(ctx *cli.Context) error {
 				panic(err.Error())
 			}
 		}
-	}
-	if netController {
-		ovnController := ovn.NewOvnController(clientset, factory, nodePortEnable)
-		if clusterController.OvnHA {
-			err := clusterController.RebuildOVNDatabase(master, ovnController)
-			if err != nil {
-				logrus.Errorf(err.Error())
-				panic(err.Error())
-			}
-		}
-		if err := ovnController.Run(); err != nil {
-			logrus.Errorf(err.Error())
-			panic(err.Error())
-		}
-	}
-	if master != "" || netController {
-		// run forever
-		select {}
-	}
-	if node != "" {
+
 		// run forever
 		select {}
 	}
 
-	return nil
+	return fmt.Errorf("need to run ovnkube in either master and/or node mode")
 }
 
 // parseClusterSubnetEntries returns the parsed set of CIDRNetworkEntries passed by the user on the command line

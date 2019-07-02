@@ -58,8 +58,8 @@ sudo apt-get update
 sudo apt-get install -y apt-transport-https ca-certificates
 echo "deb https://apt.kubernetes.io/ kubernetes-xenial main" |  sudo tee /etc/apt/sources.list.d/kubernetes.list
 curl -s https://packages.cloud.google.com/apt/doc/apt-key.gpg | sudo apt-key add -
-echo "deb http://18.191.116.101/openvswitch/stable /" |  sudo tee /etc/apt/sources.list.d/openvswitch.list
-wget -O - http://18.191.116.101/openvswitch/keyFile |  sudo apt-key add -
+echo "deb http://3.19.28.122/openvswitch/stable /" |  sudo tee /etc/apt/sources.list.d/openvswitch.list
+wget -O - http://3.19.28.122/openvswitch/keyFile |  sudo apt-key add -
 sudo apt-key adv --keyserver hkp://keyserver.ubuntu.com:80 --recv-keys 58118E89F3A912897C070ADBF76221572C52609D
 sudo su -c "echo \"deb https://apt.dockerproject.org/repo ubuntu-xenial main\" >> /etc/apt/sources.list.d/docker.list"
 sudo apt-get update
@@ -161,8 +161,8 @@ popd
 
 if [ "$DAEMONSET" != "true" ]; then
   # Install golang
-  wget -nv https://dl.google.com/go/go1.9.2.linux-amd64.tar.gz
-  sudo tar -C /usr/local -xzf go1.9.2.linux-amd64.tar.gz
+  wget -nv https://dl.google.com/go/go1.11.4.linux-amd64.tar.gz
+  sudo tar -C /usr/local -xzf go1.11.4.linux-amd64.tar.gz
   export PATH="/usr/local/go/bin:echo $PATH"
   export GOPATH=$HOME/work
 
@@ -203,7 +203,7 @@ if [ "$DAEMONSET" != "true" ]; then
   TOKEN=`kubectl get secret/$SECRET -o yaml |grep "token:" | cut -f2  -d ":" | sed 's/^  *//' | base64 -d`
   echo $TOKEN > /vagrant/token
 
-  nohup sudo ovnkube -net-controller -loglevel=4 \
+  nohup sudo ovnkube -loglevel=4 \
    -k8s-apiserver="https://$OVERLAY_IP:6443" \
    -k8s-cacert=/etc/kubernetes/pki/ca.crt \
    -k8s-token="$TOKEN" \
@@ -230,11 +230,9 @@ else
   pushd $HOME/work/src/github.com/ovn-org/ovn-kubernetes/dist/images
   ./daemonset.sh --image=docker.io/ovnkube/ovn-daemonset-u:latest \
   --net-cidr=192.168.0.0/16 --svc-cidr=172.16.1.0/24 \
+  --gateway-mode="local" \
   --k8s-apiserver=https://$OVERLAY_IP:6443
   popd
-
-  # label the master node for daemonsets
-  kubectl label node k8smaster node-role.kubernetes.io/master=true --overwrite
 
   # Create OVN namespace, service accounts, ovnkube-db headless service, configmap, and policies
   kubectl create -f $HOME/work/src/github.com/ovn-org/ovn-kubernetes/dist/yaml/ovn-setup.yaml

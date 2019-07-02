@@ -11,7 +11,7 @@
     - name: install Golang tools
       include: golang.yml
       vars:
-        version: "1.9.1"
+        version: "1.11.4"
 
     - name: clone build and install openshift 
       include: "build/openshift.yml"
