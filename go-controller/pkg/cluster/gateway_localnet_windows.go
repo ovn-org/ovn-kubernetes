@@ -8,7 +8,12 @@ import (
 )
 
 func initLocalnetGateway(nodeName string, clusterIPSubnet []string,
-	subnet string, nodePortEnable bool, wf *factory.WatchFactory) error {
+	subnet string, wf *factory.WatchFactory) error {
+	// TODO: Implement this
+	return fmt.Errorf("Not implemented yet on Windows")
+}
+
+func cleanupLocalnetGateway() error {
 	// TODO: Implement this
 	return fmt.Errorf("Not implemented yet on Windows")
 }

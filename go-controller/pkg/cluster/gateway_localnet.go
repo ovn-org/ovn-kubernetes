@@ -9,6 +9,7 @@ import (
 	"strings"
 
 	"github.com/coreos/go-iptables/iptables"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/factory"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
 	"github.com/sirupsen/logrus"
@@ -106,32 +107,22 @@ func localnetGatewayNAT(ipt util.IPTablesHelper, ifname, ip string) error {
 }
 
 func initLocalnetGateway(nodeName string, clusterIPSubnet []string,
-	subnet string, nodePortEnable bool, wf *factory.WatchFactory) error {
+	subnet string, wf *factory.WatchFactory) error {
 	ipt, err := iptables.NewWithProtocol(iptables.ProtocolIPv4)
 	if err != nil {
 		return fmt.Errorf("failed to initialize iptables: %v", err)
 	}
-	return initLocalnetGatewayInternal(nodeName, clusterIPSubnet, subnet, ipt,
-		nodePortEnable, wf)
+	return initLocalnetGatewayInternal(nodeName, clusterIPSubnet, subnet, ipt, wf)
 }
 
 func initLocalnetGatewayInternal(nodeName string, clusterIPSubnet []string,
-	subnet string, ipt util.IPTablesHelper, nodePortEnable bool, wf *factory.WatchFactory) error {
+	subnet string, ipt util.IPTablesHelper, wf *factory.WatchFactory) error {
 	// Create a localnet OVS bridge.
 	localnetBridgeName := "br-local"
 	_, stderr, err := util.RunOVSVsctl("--may-exist", "add-br",
 		localnetBridgeName)
 	if err != nil {
 		return fmt.Errorf("Failed to create localnet bridge %s"+
-			", stderr:%s (%v)", localnetBridgeName, stderr, err)
-	}
-
-	// ovn-bridge-mappings maps a physical network name to a local ovs bridge
-	// that provides connectivity to that network.
-	_, stderr, err = util.RunOVSVsctl("set", "Open_vSwitch", ".",
-		fmt.Sprintf("external_ids:ovn-bridge-mappings=%s:%s", util.PhysicalNetworkName, localnetBridgeName))
-	if err != nil {
-		return fmt.Errorf("Failed to set ovn-bridge-mappings for ovs bridge %s"+
 			", stderr:%s (%v)", localnetBridgeName, stderr, err)
 	}
 
@@ -170,9 +161,13 @@ func initLocalnetGatewayInternal(nodeName string, clusterIPSubnet []string,
 			localnetBridgeNextHop, err)
 	}
 
-	err = util.GatewayInit(clusterIPSubnet, nodeName,
-		localnetGatewayIP, "", localnetBridgeName, localnetGatewayNextHop,
-		subnet, 0, nodePortEnable)
+	ifaceID, macAddress, err := bridgedGatewayNodeSetup(nodeName, localnetBridgeName)
+	if err != nil {
+		return fmt.Errorf("failed to set up shared interface gateway: %v", err)
+	}
+
+	err = util.GatewayInit(clusterIPSubnet, nodeName, ifaceID, localnetGatewayIP,
+		macAddress, localnetGatewayNextHop, subnet, true, nil)
 	if err != nil {
 		return fmt.Errorf("failed to localnet gateway: %v", err)
 	}
@@ -183,7 +178,7 @@ func initLocalnetGatewayInternal(nodeName string, clusterIPSubnet []string,
 			err)
 	}
 
-	if nodePortEnable {
+	if config.Gateway.NodeportEnable {
 		return localnetNodePortWatcher(ipt, wf)
 	}
 
@@ -192,7 +187,7 @@ func initLocalnetGatewayInternal(nodeName string, clusterIPSubnet []string,
 
 // AddService adds service and creates corresponding resources in OVN
 func localnetAddService(svc *kapi.Service) error {
-	if svc.Spec.Type != kapi.ServiceTypeNodePort {
+	if !util.ServiceTypeHasNodePort(svc) {
 		return nil
 	}
 	ipt, err := iptables.NewWithProtocol(iptables.ProtocolIPv4)
@@ -225,7 +220,7 @@ func localnetAddService(svc *kapi.Service) error {
 }
 
 func localnetDeleteService(svc *kapi.Service) error {
-	if svc.Spec.Type != kapi.ServiceTypeNodePort {
+	if !util.ServiceTypeHasNodePort(svc) {
 		return nil
 	}
 	ipt, err := iptables.NewWithProtocol(iptables.ProtocolIPv4)
@@ -272,6 +267,11 @@ func localnetNodePortWatcher(ipt util.IPTablesHelper, wf *factory.WatchFactory) 
 		args:  []string{"-j", iptableNodePortChain},
 	})
 	rules = append(rules, iptRule{
+		table: "nat",
+		chain: "OUTPUT",
+		args:  []string{"-j", iptableNodePortChain},
+	})
+	rules = append(rules, iptRule{
 		table: "filter",
 		chain: "FORWARD",
 		args:  []string{"-j", iptableNodePortChain},
@@ -312,5 +312,20 @@ func localnetNodePortWatcher(ipt util.IPTablesHelper, wf *factory.WatchFactory) 
 			}
 		},
 	}, nil)
+	return err
+}
+
+func cleanupLocalnetGateway() error {
+	// get bridgeName from ovn-bridge-mappings.
+	stdout, stderr, err := util.RunOVSVsctl("--if-exists", "get", "Open_vSwitch", ".",
+		"external_ids:ovn-bridge-mappings")
+	if err != nil {
+		return fmt.Errorf("Failed to get ovn-bridge-mappings stderr:%s (%v)", stderr, err)
+	}
+	bridgeName := strings.Split(stdout, ":")[1]
+	_, stderr, err = util.RunOVSVsctl("--", "--if-exists", "del-br", bridgeName)
+	if err != nil {
+		return fmt.Errorf("Failed to ovs-vsctl del-br %s stderr:%s (%v)", bridgeName, stderr, err)
+	}
 	return err
 }

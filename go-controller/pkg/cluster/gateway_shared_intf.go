@@ -15,7 +15,7 @@ import (
 )
 
 func addService(service *kapi.Service, inport, outport, gwBridge string) {
-	if service.Spec.Type != kapi.ServiceTypeNodePort {
+	if !util.ServiceTypeHasNodePort(service) {
 		return
 	}
 
@@ -38,7 +38,7 @@ func addService(service *kapi.Service, inport, outport, gwBridge string) {
 }
 
 func deleteService(service *kapi.Service, inport, gwBridge string) {
-	if service.Spec.Type != kapi.ServiceTypeNodePort {
+	if !util.ServiceTypeHasNodePort(service) {
 		return
 	}
 
@@ -80,7 +80,7 @@ func syncServices(services []interface{}, gwBridge, gwIntf string) {
 			continue
 		}
 
-		if service.Spec.Type != kapi.ServiceTypeNodePort ||
+		if !util.ServiceTypeHasNodePort(service) ||
 			len(service.Spec.Ports) == 0 {
 			continue
 		}
@@ -277,8 +277,7 @@ func addStaticRouteToHost(nodeName, nicIP string) error {
 
 func initSharedGateway(
 	nodeName string, clusterIPSubnet []string, subnet,
-	gwNextHop, gwIntf string, gwVLANId uint, nodeportEnable bool,
-	wf *factory.WatchFactory) (string, string, error) {
+	gwNextHop, gwIntf string, wf *factory.WatchFactory) error {
 	var bridgeName string
 
 	// Check to see whether the interface is OVS bridge.
@@ -287,62 +286,82 @@ func initSharedGateway(
 		// and add cluster.GatewayIntf as a port of that bridge.
 		bridgeName, err = util.NicToBridge(gwIntf)
 		if err != nil {
-			return "", "", fmt.Errorf("failed to convert %s to OVS bridge: %v",
+			return fmt.Errorf("failed to convert %s to OVS bridge: %v",
 				gwIntf, err)
 		}
 	} else {
 		intfName, err := getIntfName(gwIntf)
 		if err != nil {
-			return "", "", err
+			return err
 		}
 		bridgeName = gwIntf
 		gwIntf = intfName
-	}
-
-	// ovn-bridge-mappings maps a physical network name to a local ovs bridge
-	// that provides connectivity to that network.
-	_, stderr, err := util.RunOVSVsctl("set", "Open_vSwitch", ".",
-		fmt.Sprintf("external_ids:ovn-bridge-mappings=%s:%s", util.PhysicalNetworkName, bridgeName))
-	if err != nil {
-		return "", "", fmt.Errorf("Failed to set ovn-bridge-mappings for ovs bridge %s"+
-			", stderr:%s (%v)", bridgeName, stderr, err)
 	}
 
 	// Now, we get IP address from OVS bridge. If IP does not exist,
 	// error out.
 	ipAddress, err := getIPv4Address(bridgeName)
 	if err != nil {
-		return "", "", fmt.Errorf("Failed to get interface details for %s (%v)",
+		return fmt.Errorf("Failed to get interface details for %s (%v)",
 			bridgeName, err)
 	}
 	if ipAddress == "" {
-		return "", "", fmt.Errorf("%s does not have a ipv4 address", bridgeName)
+		return fmt.Errorf("%s does not have a ipv4 address", bridgeName)
 	}
-	err = util.GatewayInit(clusterIPSubnet, nodeName, ipAddress, "",
-		bridgeName, gwNextHop, subnet, gwVLANId, nodeportEnable)
+
+	ifaceID, macAddress, err := bridgedGatewayNodeSetup(nodeName, bridgeName)
 	if err != nil {
-		return "", "", fmt.Errorf("failed to init shared interface gateway: %v", err)
+		return fmt.Errorf("failed to set up shared interface gateway: %v", err)
+	}
+
+	var lspArgs []string
+	if config.Gateway.VLANID > 0 {
+		lspArgs = []string{"--", "set", "logical_switch_port",
+			ifaceID, fmt.Sprintf("tag_request=%d", config.Gateway.VLANID)}
+	}
+
+	err = util.GatewayInit(clusterIPSubnet, nodeName, ifaceID, ipAddress,
+		macAddress, gwNextHop, subnet, true, lspArgs)
+	if err != nil {
+		return fmt.Errorf("failed to init shared interface gateway: %v", err)
 	}
 
 	// Add static routes to OVN Cluster Router to enable pods on this Node to
 	// reach the host IP
 	err = addStaticRouteToHost(nodeName, ipAddress)
 	if err != nil {
-		return "", "", err
+		return err
 	}
 
 	// Program cluster.GatewayIntf to let non-pod traffic to go to host
 	// stack
 	if err := addDefaultConntrackRules(nodeName, bridgeName, gwIntf); err != nil {
-		return "", "", err
+		return err
 	}
 
-	if nodeportEnable {
+	if config.Gateway.NodeportEnable {
 		// Program cluster.GatewayIntf to let nodePort traffic to go to pods.
 		if err := nodePortWatcher(nodeName, bridgeName, gwIntf, wf); err != nil {
-			return "", "", err
+			return err
 		}
 	}
 
-	return bridgeName, gwIntf, nil
+	return nil
+}
+
+func cleanupSharedGateway() error {
+	// NicToBridge() may be created before-hand, only delete the patch port here
+	stdout, stderr, err := util.RunOVSVsctl("--columns=name", "--no-heading", "find", "port",
+		"external_ids:ovn-localnet-port!=_")
+	if err != nil {
+		return fmt.Errorf("Failed to get ovn-localnet-port port stderr:%s (%v)", stderr, err)
+	}
+	ports := strings.Fields(strings.Trim(stdout, "\""))
+	for _, port := range ports {
+		_, stderr, err := util.RunOVSVsctl("--if-exists", "del-port", strings.Trim(port, "\""))
+		if err != nil {
+			return fmt.Errorf("Failed to delete port %s stderr:%s (%v)", port, stderr, err)
+		}
+	}
+	return nil
 }

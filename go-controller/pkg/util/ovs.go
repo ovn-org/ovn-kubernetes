@@ -26,6 +26,7 @@ const (
 	ovsVsctlCommand   = "ovs-vsctl"
 	ovsOfctlCommand   = "ovs-ofctl"
 	ovnNbctlCommand   = "ovn-nbctl"
+	ovnSbctlCommand   = "ovn-sbctl"
 	ipCommand         = "ip"
 	powershellCommand = "powershell"
 	netshCommand      = "netsh"
@@ -79,6 +80,7 @@ type execHelper struct {
 	ofctlPath      string
 	vsctlPath      string
 	nbctlPath      string
+	sbctlPath      string
 	ipPath         string
 	powershellPath string
 	netshPath      string
@@ -102,6 +104,10 @@ func SetExec(exec kexec.Interface) error {
 		return err
 	}
 	runner.nbctlPath, err = exec.LookPath(ovnNbctlCommand)
+	if err != nil {
+		return err
+	}
+	runner.sbctlPath, err = exec.LookPath(ovnSbctlCommand)
 	if err != nil {
 		return err
 	}
@@ -232,6 +238,44 @@ func RunOVNNbctlWithTimeout(timeout int, args ...string) (string, string,
 // RunOVNNbctl runs a command via ovn-nbctl.
 func RunOVNNbctl(args ...string) (string, string, error) {
 	return RunOVNNbctlWithTimeout(ovsCommandTimeout, args...)
+}
+
+// RunOVNSbctlUnix runs command via ovn-sbctl, with ovn-sbctl using the unix
+// domain sockets to connect to the ovsdb-server backing the OVN NB database.
+func RunOVNSbctlUnix(args ...string) (string, string, error) {
+	cmdArgs := []string{fmt.Sprintf("--timeout=%d", ovsCommandTimeout)}
+	cmdArgs = append(cmdArgs, args...)
+	stdout, stderr, err := runOVNretry(runner.sbctlPath, cmdArgs...)
+	return strings.Trim(strings.TrimFunc(stdout.String(), unicode.IsSpace), "\""),
+		stderr.String(), err
+}
+
+// RunOVNSbctlWithTimeout runs command via ovn-sbctl with a specific timeout
+func RunOVNSbctlWithTimeout(timeout int, args ...string) (string, string,
+	error) {
+	var cmdArgs []string
+	if config.OvnSouth.Scheme == config.OvnDBSchemeSSL {
+		cmdArgs = []string{
+			fmt.Sprintf("--private-key=%s", config.OvnSouth.PrivKey),
+			fmt.Sprintf("--certificate=%s", config.OvnSouth.Cert),
+			fmt.Sprintf("--bootstrap-ca-cert=%s", config.OvnSouth.CACert),
+			fmt.Sprintf("--db=%s", config.OvnSouth.GetURL()),
+		}
+	} else if config.OvnSouth.Scheme == config.OvnDBSchemeTCP {
+		cmdArgs = []string{
+			fmt.Sprintf("--db=%s", config.OvnSouth.GetURL()),
+		}
+	}
+
+	cmdArgs = append(cmdArgs, fmt.Sprintf("--timeout=%d", timeout))
+	cmdArgs = append(cmdArgs, args...)
+	stdout, stderr, err := runOVNretry(runner.sbctlPath, cmdArgs...)
+	return strings.Trim(strings.TrimSpace(stdout.String()), "\""), stderr.String(), err
+}
+
+// RunOVNSbctl runs a command via ovn-sbctl.
+func RunOVNSbctl(args ...string) (string, string, error) {
+	return RunOVNSbctlWithTimeout(ovsCommandTimeout, args...)
 }
 
 // RunIP runs a command via the iproute2 "ip" utility

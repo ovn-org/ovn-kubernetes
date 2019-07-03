@@ -128,8 +128,7 @@ ovn-master () {
            --cluster-subnet "${ovn_cidr}" \
            --init-master ${ovn_host} \
 	   --pidfile /var/run/openvswitch/ovnkube-master.pid \
-	   --logfile /var/log/ovn-kubernetes/ovnkube-master.log \
-           --net-controller &
+	   --logfile /var/log/ovn-kubernetes/ovnkube-master.log &
 	 fi
 	 ;;
   "stop") echo "ovn-master - STOP"

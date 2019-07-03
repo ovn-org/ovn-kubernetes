@@ -5,9 +5,10 @@ import (
 	"fmt"
 	"github.com/sirupsen/logrus"
 	"net"
-	"runtime"
 	"sort"
 	"strings"
+
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
 )
 
 const (
@@ -33,19 +34,19 @@ func GetK8sClusterRouter() (string, error) {
 	return k8sClusterRouter, nil
 }
 
-func getLocalSystemID() (string, error) {
-	localSystemID, stderr, err := RunOVSVsctl("--if-exists", "get",
-		"Open_vSwitch", ".", "external_ids:system-id")
+func getNodeChassisID(nodeName string) (string, error) {
+	chassisID, stderr, err := RunOVNSbctl("--data=bare", "--no-heading",
+		"--columns=name", "find", "Chassis", "hostname="+nodeName)
 	if err != nil {
-		logrus.Errorf("No system-id configured in the local host, "+
-			"stderr: %q, error: %v", stderr, err)
+		logrus.Errorf("Failed to find Chassis ID for node %s, "+
+			"stderr: %q, error: %v", nodeName, stderr, err)
 		return "", err
 	}
-	if localSystemID == "" {
-		return "", fmt.Errorf("No system-id configured in the local host")
+	if chassisID == "" {
+		return "", fmt.Errorf("No chassis ID configured for node %s", nodeName)
 	}
 
-	return localSystemID, nil
+	return chassisID, nil
 }
 
 // GetDefaultGatewayRouterIP returns the first gateway logical router name
@@ -98,7 +99,7 @@ func GetDefaultGatewayRouterIP() (string, net.IP, error) {
 }
 
 func ensureGatewayPortAddress(portName string) (net.HardwareAddr, *net.IPNet, error) {
-	mac, ip, _ := GetPortAddresses(portName, false)
+	mac, ip, _ := GetPortAddresses(portName)
 	if mac == nil || ip == nil {
 		// Create the gateway switch port in 'join' if it doesn't exist yet
 		stdout, stderr, err := RunOVNNbctl("--wait=sb",
@@ -111,7 +112,7 @@ func ensureGatewayPortAddress(portName string) (net.HardwareAddr, *net.IPNet, er
 				portName, stdout, stderr, err)
 		}
 		// Should have an address already since we waited for the SB above
-		mac, ip, err = GetPortAddresses(portName, false)
+		mac, ip, err = GetPortAddresses(portName)
 		if err != nil {
 			return nil, nil, fmt.Errorf("error while waiting for addresses "+
 				"for gateway switch port %q: %v", portName, err)
@@ -165,9 +166,8 @@ func getGatewayLoadBalancers(gatewayRouter string) (string, string, error) {
 }
 
 // GatewayInit creates a gateway router for the local chassis.
-func GatewayInit(clusterIPSubnet []string, nodeName, nicIP, physicalInterface,
-	bridgeInterface, defaultGW, rampoutIPSubnet string, gatewayVLANId uint,
-	gatewayLBEnable bool) error {
+func GatewayInit(clusterIPSubnet []string, nodeName, ifaceID, nicIP, nicMacAddress,
+	defaultGW string, rampoutIPSubnet string, localnet bool, lspArgs []string) error {
 
 	ip, physicalIPNet, err := net.ParseCIDR(nicIP)
 	if err != nil {
@@ -187,7 +187,7 @@ func GatewayInit(clusterIPSubnet []string, nodeName, nicIP, physicalInterface,
 		return err
 	}
 
-	systemID, err := getLocalSystemID()
+	systemID, err := getNodeChassisID(nodeName)
 	if err != nil {
 		return err
 	}
@@ -256,7 +256,7 @@ func GatewayInit(clusterIPSubnet []string, nodeName, nicIP, physicalInterface,
 			stdout, stderr, err)
 	}
 
-	if gatewayLBEnable {
+	if config.Gateway.NodeportEnable {
 		// Create 2 load-balancers for north-south traffic for each gateway
 		// router.  One handles UDP and another handles TCP.
 		var k8sNSLbTCP, k8sNSLbUDP string
@@ -311,75 +311,17 @@ func GatewayInit(clusterIPSubnet []string, nodeName, nicIP, physicalInterface,
 			"stderr: %q, error: %v", stdout, stderr, err)
 	}
 
-	var ifaceID, macAddress string
-	var localNetArgs = []string{}
-	if physicalInterface != "" {
-		// Connect physical interface to br-int. Get its mac address.
-		ifaceID = physicalInterface + "_" + nodeName
-		addPortCmdArgs := []string{"--", "--may-exist", "add-port",
-			"br-int", physicalInterface, "--", "set", "interface",
-			physicalInterface, "external-ids:iface-id=" + ifaceID}
-		if gatewayVLANId != 0 {
-			addPortCmdArgs = append(addPortCmdArgs, "--", "set", "port", physicalInterface,
-				fmt.Sprintf("tag=%d", gatewayVLANId))
-		}
-		stdout, stderr, err = RunOVSVsctl(addPortCmdArgs...)
-		if err != nil {
-			return fmt.Errorf("Failed to add port to br-int, stdout: %q, "+
-				"stderr: %q, error: %v", stdout, stderr, err)
-		}
-		macAddress, stderr, err = RunOVSVsctl("--if-exists", "get",
-			"interface", physicalInterface, "mac_in_use")
-		if err != nil {
-			return fmt.Errorf("Failed to get macAddress, stderr: %q, error: %v",
-				stderr, err)
-		}
-
-		// Flush the IP address of the physical interface.
-		_, _, err = RunIP("addr", "flush", "dev", physicalInterface)
-		if err != nil {
-			return err
-		}
-	} else {
-		// A OVS bridge's mac address can change when ports are added to it.
-		// We cannot let that happen, so make the bridge mac address permanent.
-		macAddress, stderr, err = RunOVSVsctl("--if-exists", "get",
-			"interface", bridgeInterface, "mac_in_use")
-		if err != nil {
-			return fmt.Errorf("Failed to get macAddress, stderr: %q, error: %v",
-				stderr, err)
-		}
-		if macAddress == "" {
-			return fmt.Errorf("No mac_address found for the bridge-interface")
-		}
-		if runtime.GOOS == windowsOS && macAddress == "00:00:00:00:00:00" {
-			macAddress, err = FetchIfMacWindows(bridgeInterface)
-			if err != nil {
-				return err
-			}
-		}
-		stdout, stderr, err = RunOVSVsctl("set", "bridge",
-			bridgeInterface, "other-config:hwaddr="+macAddress)
-		if err != nil {
-			return fmt.Errorf("Failed to set bridge, stdout: %q, stderr: %q, "+
-				"error: %v", stdout, stderr, err)
-		}
-		ifaceID = bridgeInterface + "_" + nodeName
-		localNetArgs = []string{"--", "lsp-set-type", ifaceID, "localnet",
-			"--", "lsp-set-options", ifaceID,
-			fmt.Sprintf("network_name=%s", PhysicalNetworkName)}
-		if gatewayVLANId != 0 {
-			localNetArgs = append(localNetArgs, "--", "set", "logical_switch_port",
-				ifaceID, fmt.Sprintf("tag_request=%d", gatewayVLANId))
-		}
-	}
-
 	// Add external interface as a logical port to external_switch.
 	// This is a learning switch port with "unknown" address. The external
 	// world is accessed via this port.
 	cmdArgs := []string{"--", "--may-exist", "lsp-add", externalSwitch, ifaceID,
 		"--", "lsp-set-addresses", ifaceID, "unknown"}
-	cmdArgs = append(cmdArgs, localNetArgs...)
+	if localnet {
+		cmdArgs = append(cmdArgs, "--", "lsp-set-type", ifaceID,
+			"localnet", "--", "lsp-set-options", ifaceID,
+			"network_name="+PhysicalNetworkName)
+	}
+	cmdArgs = append(cmdArgs, lspArgs...)
 	stdout, stderr, err = RunOVNNbctl(cmdArgs...)
 	if err != nil {
 		return fmt.Errorf("Failed to add logical port to switch, stdout: %q, "+
@@ -389,7 +331,7 @@ func GatewayInit(clusterIPSubnet []string, nodeName, nicIP, physicalInterface,
 	// Connect GR to external_switch with mac address of external interface
 	// and that IP address.
 	stdout, stderr, err = RunOVNNbctl("--", "--may-exist", "lrp-add",
-		gatewayRouter, "rtoe-"+gatewayRouter, macAddress, physicalIPMask,
+		gatewayRouter, "rtoe-"+gatewayRouter, nicMacAddress, physicalIPMask,
 		"--", "set", "logical_router_port", "rtoe-"+gatewayRouter,
 		"external-ids:gateway-physical-ip=yes")
 	if err != nil {
@@ -402,7 +344,7 @@ func GatewayInit(clusterIPSubnet []string, nodeName, nicIP, physicalInterface,
 		externalSwitch, "etor-"+gatewayRouter, "--", "set",
 		"logical_switch_port", "etor-"+gatewayRouter, "type=router",
 		"options:router-port=rtoe-"+gatewayRouter,
-		"addresses="+"\""+macAddress+"\"")
+		"addresses="+"\""+nicMacAddress+"\"")
 	if err != nil {
 		return fmt.Errorf("Failed to add logical port to router, stdout: %q, "+
 			"stderr: %q, error: %v", stdout, stderr, err)

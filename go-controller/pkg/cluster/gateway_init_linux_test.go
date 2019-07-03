@@ -91,7 +91,12 @@ func shareGatewayInterfaceTest(app *cli.App, testNS ns.NetNS,
 				})
 			},
 		})
+		fexec.AddFakeCmd(&ovntest.ExpectedCmd{
+			Cmd:    "ovs-vsctl --timeout=15 --if-exists get interface breth0 mac_in_use",
+			Output: eth0MAC,
+		})
 		fexec.AddFakeCmdsNoOutputNoError([]string{
+			"ovs-vsctl --timeout=15 set bridge breth0 other-config:hwaddr=" + eth0MAC,
 			"ovs-vsctl --timeout=15 set Open_vSwitch . external_ids:ovn-bridge-mappings=" + util.PhysicalNetworkName + ":breth0",
 		})
 		fexec.AddFakeCmd(&ovntest.ExpectedCmd{
@@ -99,7 +104,7 @@ func shareGatewayInterfaceTest(app *cli.App, testNS ns.NetNS,
 			Output: clusterRouterUUID,
 		})
 		fexec.AddFakeCmd(&ovntest.ExpectedCmd{
-			Cmd:    "ovs-vsctl --timeout=15 --if-exists get Open_vSwitch . external_ids:system-id",
+			Cmd:    "ovn-sbctl --timeout=15 --data=bare --no-heading --columns=name find Chassis hostname=" + nodeName,
 			Output: systemID,
 		})
 		fexec.AddFakeCmdsNoOutputNoError([]string{
@@ -137,17 +142,11 @@ GR_openshift-master-node chassis=6a47b33b-89d3-4d65-ac31-b19b549326c7 lb_force_s
 		fexec.AddFakeCmdsNoOutputNoError([]string{
 			"ovn-nbctl --timeout=15 --may-exist ls-add ext_" + nodeName,
 		})
-		fexec.AddFakeCmd(&ovntest.ExpectedCmd{
-			Cmd:    "ovs-vsctl --timeout=15 --if-exists get interface breth0 mac_in_use",
-			Output: eth0MAC,
-		})
 		localnetPortCmd := "ovn-nbctl --timeout=15 -- --may-exist lsp-add ext_" + nodeName + " breth0_" + nodeName + " -- lsp-set-addresses breth0_" + nodeName + " unknown -- lsp-set-type breth0_" + nodeName + " localnet -- lsp-set-options breth0_" + nodeName + " network_name=" + util.PhysicalNetworkName
 		if gatewayVLANID != 0 {
 			localnetPortCmd += fmt.Sprintf(" -- set logical_switch_port breth0_%s tag_request=%d", nodeName, gatewayVLANID)
 		}
-
 		fexec.AddFakeCmdsNoOutputNoError([]string{
-			"ovs-vsctl --timeout=15 set bridge breth0 other-config:hwaddr=" + eth0MAC,
 			localnetPortCmd,
 			"ovn-nbctl --timeout=15 -- --may-exist lrp-add " + gwRouter + " rtoe-" + gwRouter + " " + eth0MAC + " " + eth0CIDR + " -- set logical_router_port rtoe-" + gwRouter + " external-ids:gateway-physical-ip=yes",
 			"ovn-nbctl --timeout=15 -- --may-exist lsp-add ext_" + nodeName + " etor-" + gwRouter + " -- set logical_switch_port etor-" + gwRouter + " type=router options:router-port=rtoe-" + gwRouter + " addresses=\"" + eth0MAC + "\"",
@@ -240,13 +239,7 @@ cookie=0x0, duration=8366.597s, table=1, n_packets=10641, n_bytes=10370087, prio
 		defer wf.Shutdown()
 
 		cluster := OvnClusterController{
-			watchFactory:     wf,
-			GatewayInit:      true,
-			GatewayIntf:      eth0Name,
-			GatewaySpareIntf: false,
-			NodePortEnable:   true,
-			LocalnetGateway:  false,
-			GatewayVLANID:    gatewayVLANID,
+			watchFactory: wf,
 		}
 
 		ipt, err := util.NewFakeWithProtocol(iptables.ProtocolIPv4)
@@ -289,7 +282,13 @@ cookie=0x0, duration=8366.597s, table=1, n_packets=10641, n_bytes=10370087, prio
 		return nil
 	}
 
-	err := app.Run([]string{app.Name})
+	err := app.Run([]string{
+		app.Name,
+		"--init-gateways",
+		"--gateway-interface=" + eth0Name,
+		"--nodeport",
+		"--gateway-vlanid=" + fmt.Sprintf("%d", gatewayVLANID),
+	})
 	Expect(err).NotTo(HaveOccurred())
 }
 
@@ -312,12 +311,28 @@ func spareGatewayInterfaceTest(app *cli.App, testNS ns.NetNS,
 		)
 
 		fexec := ovntest.NewFakeExec()
+		if gatewayVLANID == 0 {
+			fexec.AddFakeCmdsNoOutputNoError([]string{
+				"ovs-vsctl --timeout=15 -- --may-exist add-port br-int eth0 -- set interface eth0 external-ids:iface-id=eth0_" + nodeName + " external-ids:physical-ip=" + eth0CIDR,
+			})
+		} else {
+			fexec.AddFakeCmdsNoOutputNoError([]string{
+				"ovs-vsctl --timeout=15 -- --may-exist add-port br-int eth0 -- set interface eth0 external-ids:iface-id=eth0_" + nodeName + " external-ids:physical-ip=" + eth0CIDR + fmt.Sprintf(" -- set port eth0 tag=%d", gatewayVLANID),
+			})
+		}
+		fexec.AddFakeCmd(&ovntest.ExpectedCmd{
+			Cmd:    "ovs-vsctl --timeout=15 --if-exists get interface eth0 mac_in_use",
+			Output: eth0MAC,
+		})
+		fexec.AddFakeCmdsNoOutputNoError([]string{
+			"ip addr flush dev eth0",
+		})
 		fexec.AddFakeCmd(&ovntest.ExpectedCmd{
 			Cmd:    "ovn-nbctl --timeout=15 --data=bare --no-heading --columns=_uuid find logical_router external_ids:k8s-cluster-router=yes",
 			Output: clusterRouterUUID,
 		})
 		fexec.AddFakeCmd(&ovntest.ExpectedCmd{
-			Cmd:    "ovs-vsctl --timeout=15 --if-exists get Open_vSwitch . external_ids:system-id",
+			Cmd:    "ovn-sbctl --timeout=15 --data=bare --no-heading --columns=name find Chassis hostname=" + nodeName,
 			Output: systemID,
 		})
 		fexec.AddFakeCmdsNoOutputNoError([]string{
@@ -354,22 +369,6 @@ GR_openshift-master-node chassis=6a47b33b-89d3-4d65-ac31-b19b549326c7 lb_force_s
 		addNodeportLBs(fexec, nodeName, tcpLBUUID, udpLBUUID)
 		fexec.AddFakeCmdsNoOutputNoError([]string{
 			"ovn-nbctl --timeout=15 --may-exist ls-add ext_" + nodeName,
-		})
-		if gatewayVLANID == 0 {
-			fexec.AddFakeCmdsNoOutputNoError([]string{
-				"ovs-vsctl --timeout=15 -- --may-exist add-port br-int eth0 -- set interface eth0 external-ids:iface-id=eth0_" + nodeName,
-			})
-		} else {
-			fexec.AddFakeCmdsNoOutputNoError([]string{
-				"ovs-vsctl --timeout=15 -- --may-exist add-port br-int eth0 -- set interface eth0 external-ids:iface-id=eth0_" + nodeName + fmt.Sprintf(" -- set port eth0 tag=%d", gatewayVLANID),
-			})
-		}
-		fexec.AddFakeCmd(&ovntest.ExpectedCmd{
-			Cmd:    "ovs-vsctl --timeout=15 --if-exists get interface eth0 mac_in_use",
-			Output: eth0MAC,
-		})
-		fexec.AddFakeCmdsNoOutputNoError([]string{
-			"ip addr flush dev eth0",
 			"ovn-nbctl --timeout=15 -- --may-exist lsp-add ext_" + nodeName + " eth0_" + nodeName + " -- lsp-set-addresses eth0_" + nodeName + " unknown",
 			"ovn-nbctl --timeout=15 -- --may-exist lrp-add " + gwRouter + " rtoe-" + gwRouter + " " + eth0MAC + " " + eth0CIDR + " -- set logical_router_port rtoe-" + gwRouter + " external-ids:gateway-physical-ip=yes",
 			"ovn-nbctl --timeout=15 -- --may-exist lsp-add ext_" + nodeName + " etor-" + gwRouter + " -- set logical_switch_port etor-" + gwRouter + " type=router options:router-port=rtoe-" + gwRouter + " addresses=\"" + eth0MAC + "\"",
@@ -392,13 +391,7 @@ GR_openshift-master-node chassis=6a47b33b-89d3-4d65-ac31-b19b549326c7 lb_force_s
 		defer wf.Shutdown()
 
 		cluster := OvnClusterController{
-			watchFactory:     wf,
-			GatewayInit:      true,
-			GatewayIntf:      eth0Name,
-			GatewaySpareIntf: true,
-			NodePortEnable:   true,
-			LocalnetGateway:  false,
-			GatewayVLANID:    gatewayVLANID,
+			watchFactory: wf,
 		}
 
 		ipt, err := util.NewFakeWithProtocol(iptables.ProtocolIPv4)
@@ -439,7 +432,14 @@ GR_openshift-master-node chassis=6a47b33b-89d3-4d65-ac31-b19b549326c7 lb_force_s
 		return nil
 	}
 
-	err := app.Run([]string{app.Name})
+	err := app.Run([]string{
+		app.Name,
+		"--init-gateways",
+		"--gateway-interface=" + eth0Name,
+		"--gateway-spare-interface",
+		"--nodeport",
+		"--gateway-vlanid=" + fmt.Sprintf("%d", gatewayVLANID),
+	})
 	Expect(err).NotTo(HaveOccurred())
 }
 
@@ -485,7 +485,6 @@ var _ = Describe("Gateway Init Operations", func() {
 			fexec := ovntest.NewFakeExec()
 			fexec.AddFakeCmdsNoOutputNoError([]string{
 				"ovs-vsctl --timeout=15 --may-exist add-br br-local",
-				"ovs-vsctl --timeout=15 set Open_vSwitch . external_ids:ovn-bridge-mappings=" + util.PhysicalNetworkName + ":br-local",
 				"ip link set br-local up",
 				"ovs-vsctl --timeout=15 --may-exist add-port br-local br-nexthop -- set interface br-nexthop type=internal",
 				"ip link set br-nexthop up",
@@ -493,11 +492,19 @@ var _ = Describe("Gateway Init Operations", func() {
 				"ip addr add 169.254.33.1/24 dev br-nexthop",
 			})
 			fexec.AddFakeCmd(&ovntest.ExpectedCmd{
+				Cmd:    "ovs-vsctl --timeout=15 --if-exists get interface br-local mac_in_use",
+				Output: brLocalnetMAC,
+			})
+			fexec.AddFakeCmdsNoOutputNoError([]string{
+				"ovs-vsctl --timeout=15 set bridge br-local other-config:hwaddr=" + brLocalnetMAC,
+				"ovs-vsctl --timeout=15 set Open_vSwitch . external_ids:ovn-bridge-mappings=" + util.PhysicalNetworkName + ":br-local",
+			})
+			fexec.AddFakeCmd(&ovntest.ExpectedCmd{
 				Cmd:    "ovn-nbctl --timeout=15 --data=bare --no-heading --columns=_uuid find logical_router external_ids:k8s-cluster-router=yes",
 				Output: clusterRouterUUID,
 			})
 			fexec.AddFakeCmd(&ovntest.ExpectedCmd{
-				Cmd:    "ovs-vsctl --timeout=15 --if-exists get Open_vSwitch . external_ids:system-id",
+				Cmd:    "ovn-sbctl --timeout=15 --data=bare --no-heading --columns=name find Chassis hostname=" + nodeName,
 				Output: systemID,
 			})
 			fexec.AddFakeCmdsNoOutputNoError([]string{
@@ -536,12 +543,7 @@ GR_openshift-master-node chassis=6a47b33b-89d3-4d65-ac31-b19b549326c7 lb_force_s
 			fexec.AddFakeCmdsNoOutputNoError([]string{
 				"ovn-nbctl --timeout=15 --may-exist ls-add ext_" + nodeName,
 			})
-			fexec.AddFakeCmd(&ovntest.ExpectedCmd{
-				Cmd:    "ovs-vsctl --timeout=15 --if-exists get interface br-local mac_in_use",
-				Output: brLocalnetMAC,
-			})
 			fexec.AddFakeCmdsNoOutputNoError([]string{
-				"ovs-vsctl --timeout=15 set bridge br-local other-config:hwaddr=" + brLocalnetMAC,
 				"ovn-nbctl --timeout=15 -- --may-exist lsp-add ext_" + nodeName + " br-local_" + nodeName + " -- lsp-set-addresses br-local_" + nodeName + " unknown -- lsp-set-type br-local_" + nodeName + " localnet -- lsp-set-options br-local_" + nodeName + " network_name=" + util.PhysicalNetworkName,
 				"ovn-nbctl --timeout=15 -- --may-exist lrp-add " + gwRouter + " rtoe-" + gwRouter + " " + brLocalnetMAC + " 169.254.33.2/24 -- set logical_router_port rtoe-" + gwRouter + " external-ids:gateway-physical-ip=yes",
 				"ovn-nbctl --timeout=15 -- --may-exist lsp-add ext_" + nodeName + " etor-" + gwRouter + " -- set logical_switch_port etor-" + gwRouter + " type=router options:router-port=rtoe-" + gwRouter + " addresses=\"" + brLocalnetMAC + "\"",
@@ -565,7 +567,7 @@ GR_openshift-master-node chassis=6a47b33b-89d3-4d65-ac31-b19b549326c7 lb_force_s
 
 			ipt, err := util.NewFakeWithProtocol(iptables.ProtocolIPv4)
 			Expect(err).NotTo(HaveOccurred())
-			err = initLocalnetGatewayInternal(nodeName, []string{clusterCIDR}, nodeSubnet, ipt, true, wf)
+			err = initLocalnetGatewayInternal(nodeName, []string{clusterCIDR}, nodeSubnet, ipt, wf)
 			Expect(err).NotTo(HaveOccurred())
 
 			Expect(fexec.CalledMatchesExpected()).To(BeTrue())
@@ -589,6 +591,9 @@ GR_openshift-master-node chassis=6a47b33b-89d3-4d65-ac31-b19b549326c7 lb_force_s
 					"PREROUTING": []string{
 						"-j OVN-KUBE-NODEPORT",
 					},
+					"OUTPUT": []string{
+						"-j OVN-KUBE-NODEPORT",
+					},
 					"OVN-KUBE-NODEPORT": []string{},
 				},
 			}
@@ -596,7 +601,12 @@ GR_openshift-master-node chassis=6a47b33b-89d3-4d65-ac31-b19b549326c7 lb_force_s
 			return nil
 		}
 
-		err := app.Run([]string{app.Name})
+		err := app.Run([]string{
+			app.Name,
+			"--init-gateways",
+			"--gateway-local",
+			"--nodeport",
+		})
 		Expect(err).NotTo(HaveOccurred())
 	})
 

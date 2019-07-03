@@ -16,8 +16,8 @@ the kernel module package by:
 
 ```
 sudo apt-get install apt-transport-https
-echo "deb http://18.191.116.101/openvswitch/stable /" |  sudo tee /etc/apt/sources.list.d/openvswitch.list
-wget -O - http://18.191.116.101/openvswitch/keyFile |  sudo apt-key add -
+echo "deb http://3.19.28.122/openvswitch/stable /" |  sudo tee /etc/apt/sources.list.d/openvswitch.list
+wget -O - http://3.19.28.122/openvswitch/keyFile |  sudo apt-key add -
 sudo apt-get update
 sudo apt-get build-dep dkms
 sudo apt-get install openvswitch-datapath-dkms -y
@@ -25,12 +25,10 @@ sudo apt-get install openvswitch-datapath-dkms -y
 
 ## Run daemonsets
 
-On Kubernetes master, label it to run daemonsets. $NODENAME below is master's
-node name.
+On Kubernetes master, label it to run daemonsets.
 
 ```
 kubectl taint nodes --all node-role.kubernetes.io/master-
-kubectl label node $NODENAME node-role.kubernetes.io/master=true --overwrite
 ```
 
 Create OVN daemonset yamls from templates by:
@@ -45,6 +43,7 @@ git clone https://github.com/ovn-org/ovn-kubernetes
 cd $HOME/work/src/github.com/ovn-org/ovn-kubernetes/dist/images
 ./daemonset.sh --image=docker.io/ovnkube/ovn-daemonset-u:latest \
     --net-cidr=192.168.0.0/16 --svc-cidr=172.16.1.0/24 \
+    --gateway-mode="local" \
     --k8s-apiserver=https://$MASTER_IP:6443
 ```
 
@@ -70,8 +69,8 @@ cluster.
 ## Manual installation and Vagrant
 
 For Windows, (and to understand what daemonsets run internally), please read
-[MANUAL.md].  For more advanced use cases too (like SSL and HA of databases),
-please read [MANUAL.md].
+[MANUAL.md].  For more advanced use cases too (like SSL, HA of databases, and various
+gateway modes supported), please read [MANUAL.md].
 
 [INSTALL.rst]: http://docs.openvswitch.org/en/latest/intro/install
 [INSTALL.UBUNTU.md]: docs/INSTALL.UBUNTU.md

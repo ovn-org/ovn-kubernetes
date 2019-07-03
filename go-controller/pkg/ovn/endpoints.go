@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
 	util "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
 	"github.com/sirupsen/logrus"
 	kapi "k8s.io/api/core/v1"
@@ -51,7 +52,7 @@ func (ovn *Controller) AddEndpoints(ep *kapi.Endpoints) error {
 			ep.Name, ep.Namespace)
 		return nil
 	}
-	if !util.IsServiceIPSet(svc) {
+	if !util.IsClusterIPSet(svc) {
 		logrus.Debugf("Skipping service %s due to clusterIP = %q",
 			svc.Name, svc.Spec.ClusterIP)
 		return nil
@@ -64,7 +65,7 @@ func (ovn *Controller) AddEndpoints(ep *kapi.Endpoints) error {
 		targetPort := lbEps.Port
 		for _, svcPort := range svc.Spec.Ports {
 			if svcPort.Protocol == kapi.ProtocolTCP && svcPort.Name == svcPortName {
-				if svc.Spec.Type == kapi.ServiceTypeNodePort && ovn.nodePortEnable {
+				if util.ServiceTypeHasNodePort(svc) && config.Gateway.NodeportEnable {
 					logrus.Debugf("Creating Gateways IP for NodePort: %d, %v", svcPort.NodePort, ips)
 					err = ovn.createGatewaysVIP(string(svcPort.Protocol), svcPort.NodePort, targetPort, ips)
 					if err != nil {
@@ -72,7 +73,7 @@ func (ovn *Controller) AddEndpoints(ep *kapi.Endpoints) error {
 						continue
 					}
 				}
-				if svc.Spec.Type == kapi.ServiceTypeClusterIP || svc.Spec.Type == kapi.ServiceTypeNodePort {
+				if util.ServiceTypeHasClusterIP(svc) {
 					var loadBalancer string
 					loadBalancer, err = ovn.getLoadBalancer(svcPort.Protocol)
 					if err != nil {
@@ -96,14 +97,14 @@ func (ovn *Controller) AddEndpoints(ep *kapi.Endpoints) error {
 		targetPort := lbEps.Port
 		for _, svcPort := range svc.Spec.Ports {
 			if svcPort.Protocol == kapi.ProtocolUDP && svcPort.Name == svcPortName {
-				if svc.Spec.Type == kapi.ServiceTypeNodePort && ovn.nodePortEnable {
+				if util.ServiceTypeHasNodePort(svc) && config.Gateway.NodeportEnable {
 					err = ovn.createGatewaysVIP(string(svcPort.Protocol), svcPort.NodePort, targetPort, ips)
 					if err != nil {
 						logrus.Errorf("Error in creating Node Port for svc %s, node port: %d - %v\n", svc.Name, svcPort.NodePort, err)
 						continue
 					}
 				}
-				if svc.Spec.Type == kapi.ServiceTypeNodePort || svc.Spec.Type == kapi.ServiceTypeClusterIP {
+				if util.ServiceTypeHasClusterIP(svc) {
 					var loadBalancer string
 					loadBalancer, err = ovn.getLoadBalancer(svcPort.Protocol)
 					if err != nil {
@@ -160,7 +161,7 @@ func (ovn *Controller) handleNodePortLB(node *kapi.Node) {
 			if err != nil {
 				continue
 			}
-			if svc.Spec.Type != kapi.ServiceTypeNodePort {
+			if !util.ServiceTypeHasNodePort(svc) {
 				continue
 			}
 			tcpPortMap := make(map[string]lbEndpoints)
@@ -226,7 +227,7 @@ func (ovn *Controller) deleteEndpoints(ep *kapi.Endpoints) error {
 			ep.Name, ep.Namespace)
 		return nil
 	}
-	if !util.IsServiceIPSet(svc) {
+	if !util.IsClusterIPSet(svc) {
 		return nil
 	}
 	for _, svcPort := range svc.Spec.Ports {

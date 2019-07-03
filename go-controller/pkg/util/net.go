@@ -5,6 +5,7 @@ import (
 	"math/big"
 	"math/rand"
 	"net"
+	"runtime"
 	"strings"
 	"time"
 )
@@ -35,12 +36,8 @@ func intToIP(i *big.Int) net.IP {
 }
 
 // GetPortAddresses returns the MAC and IP of the given logical switch port
-func GetPortAddresses(portName string, isStaticIP bool) (net.HardwareAddr, net.IP, error) {
-	addrType := "dynamic_addresses"
-	if isStaticIP {
-		addrType = "addresses"
-	}
-	out, _, err := RunOVNNbctl("get", "logical_switch_port", portName, addrType)
+func GetPortAddresses(portName string) (net.HardwareAddr, net.IP, error) {
+	out, _, err := RunOVNNbctl("get", "logical_switch_port", portName, "dynamic_addresses")
 	if err != nil {
 		return nil, nil, fmt.Errorf("Error while obtaining addresses for %s: %v", portName, err)
 	}
@@ -49,10 +46,8 @@ func GetPortAddresses(portName string, isStaticIP bool) (net.HardwareAddr, net.I
 		return nil, nil, nil
 	}
 
-	// static addresses have format ["0a:00:00:00:00:01 192.168.1.3"], while
 	// dynamic addresses have format "0a:00:00:00:00:01 192.168.1.3".
-	outStr := strings.Trim(out, `[]`)
-	outStr = strings.Trim(outStr, `"`)
+	outStr := strings.Trim(out, `"`)
 	addresses := strings.Split(outStr, " ")
 	if len(addresses) != 2 {
 		return nil, nil, fmt.Errorf("Error while obtaining addresses for %s", portName)
@@ -66,4 +61,30 @@ func GetPortAddresses(portName string, isStaticIP bool) (net.HardwareAddr, net.I
 		return nil, nil, fmt.Errorf("failed to parse logical switch port %q MAC %q: %v", portName, addresses[0], err)
 	}
 	return mac, ip, nil
+}
+
+// GetOVSPortMACAddress returns the MAC address of a given OVS port
+func GetOVSPortMACAddress(portName string) (net.HardwareAddr, error) {
+	macAddress, stderr, err := RunOVSVsctl("--if-exists", "get",
+		"interface", portName, "mac_in_use")
+	if err != nil {
+		return nil, fmt.Errorf("Failed to get MAC address for %q, stderr: %q, error: %v",
+			portName, stderr, err)
+	}
+	if macAddress == "" {
+		return nil, fmt.Errorf("No mac_address found for %q", portName)
+	}
+	if runtime.GOOS == windowsOS && macAddress == "00:00:00:00:00:00" {
+		macAddress, err = FetchIfMacWindows(portName)
+		if err != nil {
+			return nil, err
+		}
+	}
+
+	mac, err := net.ParseMAC(macAddress)
+	if err != nil {
+		return nil, fmt.Errorf("failed to parse port %q MAC %q: %v", portName, macAddress, err)
+	}
+
+	return mac, nil
 }

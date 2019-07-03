@@ -52,9 +52,12 @@ func (f *FakeExec) AddFakeCmd(expected *ExpectedCmd) {
 	f.CommandScript = append(f.CommandScript, func(cmd string, args ...string) kexec.Cmd {
 		parts := strings.Split(expected.Cmd, " ")
 		gomega.Expect(len(parts)).To(gomega.BeNumerically(">=", 2))
-		gomega.Expect(cmd).To(gomega.Equal("/fake-bin/" + parts[0]))
+
+		executedCommandline := cmd + " " + strings.Join(args, " ")
+		expectedCommandline := "/fake-bin/" + strings.Join(parts, " ")
 		// Expect the incoming 'args' to equal the fake/expected command 'parts'
-		gomega.Expect(strings.Join(args, " ")).To(gomega.Equal(strings.Join(parts[1:], " ")), "Called command doesn't match expected fake command")
+		gomega.Expect(executedCommandline).To(gomega.Equal(expectedCommandline), "Called command doesn't match expected fake command")
+
 		return &fakeexec.FakeCmd{
 			Argv: parts[1:],
 			CombinedOutputScript: []fakeexec.FakeCombinedOutputAction{
