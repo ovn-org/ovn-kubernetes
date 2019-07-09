@@ -129,7 +129,7 @@ var _ = Describe("Master Operations", func() {
 
 			_, ipnet, err := net.ParseCIDR(clusterCIDR)
 			Expect(err).NotTo(HaveOccurred())
-			clusterController.ClusterIPNet = append(clusterController.ClusterIPNet, CIDRNetworkEntry{
+			clusterController.ClusterIPNet = append(clusterController.ClusterIPNet, config.CIDRNetworkEntry{
 				CIDR:             ipnet,
 				HostSubnetLength: 24,
 			})
