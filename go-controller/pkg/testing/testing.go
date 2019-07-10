@@ -7,7 +7,14 @@ import (
 	fakeexec "k8s.io/utils/exec/testing"
 
 	"github.com/onsi/gomega"
+	"github.com/onsi/gomega/format"
 )
+
+func init() {
+	// Gomega's default string diff behavior makes it impossible to figure
+	// out what fake command is failing, so turn it off
+	format.TruncatedDiff = false
+}
 
 // FakeExec is a convenience struct that wraps testing.FakeExec
 type FakeExec struct {
