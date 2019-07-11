@@ -74,6 +74,9 @@ var (
 		ElectionLeaseDuration: 60,
 		ElectionRenewDeadline: 30,
 		ElectionRetryPeriod:   20,
+		ManageDBServers:       false,
+		NbPort:                6641,
+		SbPort:                6642,
 	}
 
 	// NbctlDaemon enables ovn-nbctl to run in daemon mode
@@ -145,6 +148,7 @@ type KubernetesConfig struct {
 	OVNConfigNamespace string `gcfg:"ovn-config-namespace"`
 	MetricsBindAddress string `gcfg:"metrics-bind-address"`
 	OVNEmptyLbEvents   bool   `gcfg:"ovn-empty-lb-events"`
+	PodIP              string `gcfg:"pod-ip"`
 }
 
 // GatewayMode holds the node gateway mode
@@ -192,9 +196,12 @@ type OvnAuthConfig struct {
 // MasterHAConfig holds configuration for master HA
 // configuration.
 type MasterHAConfig struct {
-	ElectionLeaseDuration int `gcfg:"election-lease-duration"`
-	ElectionRenewDeadline int `gcfg:"election-renew-deadline"`
-	ElectionRetryPeriod   int `gcfg:"election-retry-period"`
+	ElectionLeaseDuration int  `gcfg:"election-lease-duration"`
+	ElectionRenewDeadline int  `gcfg:"election-renew-deadline"`
+	ElectionRetryPeriod   int  `gcfg:"election-retry-period"`
+	ManageDBServers       bool `gcfg:"manage-db-servers"`
+	NbPort                int  `gcfg:"port"`
+	SbPort                int  `gcfg:"port"`
 }
 
 // OvnDBScheme describes the OVN database connection transport method
@@ -507,6 +514,11 @@ var K8sFlags = []cli.Flag{
 			"will spin up pods for the load balancer to send traffic to.",
 		Destination: &cliConfig.Kubernetes.OVNEmptyLbEvents,
 	},
+	cli.StringFlag{
+		Name:        "pod-ip",
+		Usage:       "specify the ovnkube pod IP.",
+		Destination: &cliConfig.Kubernetes.PodIP,
+	},
 }
 
 // OvnNBFlags capture OVN northbound database options
@@ -612,6 +624,21 @@ var OVNGatewayFlags = []cli.Flag{
 
 // MasterHAFlags capture OVN northbound database options
 var MasterHAFlags = []cli.Flag{
+	cli.BoolFlag{
+		Name:        "manage-db-servers",
+		Usage:       "Manages the OVN North and South DB servers in active/passive",
+		Destination: &cliConfig.MasterHA.ManageDBServers,
+	},
+	cli.IntFlag{
+		Name:        "nb-port",
+		Usage:       "Port of the OVN northbound DB server to configure (default: 6641)",
+		Destination: &cliConfig.MasterHA.NbPort,
+	},
+	cli.IntFlag{
+		Name:        "sb-port",
+		Usage:       "Port of the OVN southbound DB server to configure (default: 6642)",
+		Destination: &cliConfig.MasterHA.SbPort,
+	},
 	cli.IntFlag{
 		Name:        "ha-election-lease-duration",
 		Usage:       "Leader election lease duration (in secs) (default: 60)",
@@ -773,6 +800,11 @@ func buildKubernetesConfig(exec kexec.Interface, cli, file *config, saPath strin
 		return fmt.Errorf("kubernetes service network CIDR %q invalid: %v", Kubernetes.ServiceCIDR, err)
 	}
 
+	if Kubernetes.PodIP != "" {
+		if ip := net.ParseIP(Kubernetes.PodIP); ip == nil {
+			return fmt.Errorf("Pod IP is invalid")
+		}
+	}
 	return nil
 }
 
@@ -1124,6 +1156,11 @@ func buildOvnAuth(exec kexec.Interface, northbound bool, cliAuth, confAuth *OvnA
 		}
 		auth.Scheme = OvnDBSchemeUnix
 		return auth, nil
+	} else if MasterHA.ManageDBServers {
+		if northbound {
+			return nil, fmt.Errorf("--nb-address is not allowed with --manage-db-servers")
+		}
+		return nil, fmt.Errorf("--sb-address is not allowed with --manage-db-servers")
 	}
 
 	var err error

@@ -180,38 +180,14 @@ func (cluster *OvnClusterController) StartClusterNode(name string) error {
 	return err
 }
 
-func validateOVNConfigEndpoint(ep *kapi.Endpoints) bool {
-	if len(ep.Subsets) == 1 && len(ep.Subsets[0].Ports) == 2 {
-		return true
-	}
-
-	return false
-
-}
-
 func updateOVNConfig(ep *kapi.Endpoints) error {
-	if !validateOVNConfigEndpoint(ep) {
-		return fmt.Errorf("endpoint %s is not of the right format to configure OVN", ep.Name)
+	masterIPList, southboundDBPort, northboundDBPort, err := util.ExtractDbRemotesFromEndpoint(ep)
+	if err != nil {
+		return err
 	}
 
-	var southboundDBPort string
-	var northboundDBPort string
-	var masterIPList []string
-
-	for _, ovnDB := range ep.Subsets[0].Ports {
-		if ovnDB.Name == "south" {
-			southboundDBPort = strconv.Itoa(int(ovnDB.Port))
-		}
-		if ovnDB.Name == "north" {
-			northboundDBPort = strconv.Itoa(int(ovnDB.Port))
-		}
-	}
-
-	for _, address := range ep.Subsets[0].Addresses {
-		masterIPList = append(masterIPList, address.IP)
-	}
-
-	if err := config.UpdateOVNNodeAuth(masterIPList, southboundDBPort, northboundDBPort); err != nil {
+	err = config.UpdateOVNNodeAuth(masterIPList, strconv.Itoa(int(southboundDBPort)), strconv.Itoa(int(northboundDBPort)))
+	if err != nil {
 		return err
 	}
 
@@ -219,7 +195,7 @@ func updateOVNConfig(ep *kapi.Endpoints) error {
 		if err := auth.SetDBAuth(); err != nil {
 			return err
 		}
-		logrus.Infof("OVN databases reconfigured, masterIP %s, northbound-db %s, southbound-db %s", ep.Subsets[0].Addresses[0].IP, northboundDBPort, southboundDBPort)
+		logrus.Infof("OVN databases reconfigured, masterIP %s, northbound-db %d, southbound-db %d", ep.Subsets[0].Addresses[0].IP, northboundDBPort, southboundDBPort)
 	}
 
 	return nil

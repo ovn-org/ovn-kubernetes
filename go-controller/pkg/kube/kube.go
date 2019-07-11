@@ -30,6 +30,9 @@ type Interface interface {
 	GetNode(name string) (*kapi.Node, error)
 	GetService(namespace, name string) (*kapi.Service, error)
 	GetEndpoints(namespace string) (*kapi.EndpointsList, error)
+	GetEndpoint(namespace, name string) (*kapi.Endpoints, error)
+	CreateEndpoint(namespace string, ep *kapi.Endpoints) (*kapi.Endpoints, error)
+	UpdateEndpoint(namespace string, ep *kapi.Endpoints) (*kapi.Endpoints, error)
 	GetNamespaces() (*kapi.NamespaceList, error)
 	Events() kv1core.EventInterface
 }
@@ -145,6 +148,21 @@ func (k *Kube) GetService(namespace, name string) (*kapi.Service, error) {
 // apiserver, given namespace
 func (k *Kube) GetEndpoints(namespace string) (*kapi.EndpointsList, error) {
 	return k.KClient.CoreV1().Endpoints(namespace).List(metav1.ListOptions{})
+}
+
+// GetEndpoint returns the Endpoints resource
+func (k *Kube) GetEndpoint(namespace, name string) (*kapi.Endpoints, error) {
+	return k.KClient.CoreV1().Endpoints(namespace).Get(name, metav1.GetOptions{})
+}
+
+// CreateEndpoint creates the Endpoints resource
+func (k *Kube) CreateEndpoint(namespace string, ep *kapi.Endpoints) (*kapi.Endpoints, error) {
+	return k.KClient.CoreV1().Endpoints(namespace).Create(ep)
+}
+
+// UpdateEndpoint updates the Endpoints resource
+func (k *Kube) UpdateEndpoint(namespace string, ep *kapi.Endpoints) (*kapi.Endpoints, error) {
+	return k.KClient.CoreV1().Endpoints(namespace).Update(ep)
 }
 
 // GetNamespaces returns all Namespace resource from kubernetes apiserver
