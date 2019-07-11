@@ -58,6 +58,7 @@ func getFlagsByCategory() map[string][]cli.Flag {
 	m["OVN Northbound DB Options"] = config.OvnNBFlags
 	m["OVN Southbound DB Options"] = config.OvnSBFlags
 	m["OVN Gateway Options"] = config.OVNGatewayFlags
+	m["Master HA Options"] = config.MasterHAFlags
 
 	return m
 }
@@ -96,6 +97,7 @@ func main() {
 	c.Flags = append(c.Flags, config.OvnNBFlags...)
 	c.Flags = append(c.Flags, config.OvnSBFlags...)
 	c.Flags = append(c.Flags, config.OVNGatewayFlags...)
+	c.Flags = append(c.Flags, config.MasterHAFlags...)
 	c.Action = func(c *cli.Context) error {
 		return runOvnKube(c)
 	}
@@ -212,15 +214,11 @@ func runOvnKube(ctx *cli.Context) error {
 			if runtime.GOOS == "windows" {
 				panic("Windows is not supported as master node")
 			}
-			// run the master controller to init the master
-			ovnController := ovn.NewOvnController(clientset, factory)
-			err := ovnController.StartClusterMaster(master)
+
+			// run the HA master controller to init the master
+			ovnHAController := ovn.NewHAMasterController(clientset, factory, master)
+			err := ovnHAController.StartHAMasterController()
 			if err != nil {
-				logrus.Errorf(err.Error())
-				panic(err.Error())
-			}
-			// add watchers for relevant resources' events
-			if err := ovnController.Run(); err != nil {
 				logrus.Errorf(err.Error())
 				panic(err.Error())
 			}
