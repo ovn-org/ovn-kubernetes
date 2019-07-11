@@ -27,6 +27,7 @@ const (
 	ovsOfctlCommand   = "ovs-ofctl"
 	ovnNbctlCommand   = "ovn-nbctl"
 	ovnSbctlCommand   = "ovn-sbctl"
+	ovsAppctlCommand  = "ovs-appctl"
 	ipCommand         = "ip"
 	powershellCommand = "powershell"
 	netshCommand      = "netsh"
@@ -81,6 +82,7 @@ type execHelper struct {
 	vsctlPath      string
 	nbctlPath      string
 	sbctlPath      string
+	appctlPath     string
 	ipPath         string
 	powershellPath string
 	netshPath      string
@@ -108,6 +110,10 @@ func SetExec(exec kexec.Interface) error {
 		return err
 	}
 	runner.sbctlPath, err = exec.LookPath(ovnSbctlCommand)
+	if err != nil {
+		return err
+	}
+	runner.appctlPath, err = exec.LookPath(ovsAppctlCommand)
 	if err != nil {
 		return err
 	}
@@ -212,9 +218,7 @@ func RunOVNNbctlUnix(args ...string) (string, string, error) {
 		stderr.String(), err
 }
 
-// RunOVNNbctlWithTimeout runs command via ovn-nbctl with a specific timeout
-func RunOVNNbctlWithTimeout(timeout int, args ...string) (string, string,
-	error) {
+func getConnectionParams() []string {
 	var cmdArgs []string
 	if config.OvnNorth.Scheme == config.OvnDBSchemeSSL {
 		cmdArgs = []string{
@@ -229,9 +233,70 @@ func RunOVNNbctlWithTimeout(timeout int, args ...string) (string, string,
 		}
 	}
 
+	return cmdArgs
+}
+
+var daemonRunning bool
+
+func StopOVNNbctlDaemon()(*bytes.Buffer, *bytes.Buffer, error) {
+	var cmdArgs []string
+
+	logrus.Info("Stopping ovn-nbctl daemon")
+	cmdArgs = append(cmdArgs, fmt.Sprintf("--timeout=%d", ovsCommandTimeout))
+	cmdArgs = append(cmdArgs, "-t", "ovn-nbctl", "exit")
+	stdout, stderr, err := runOVNretry(runner.appctlPath, cmdArgs...)
+	if err != nil && strings.Contains(stderr.String(), "No such file") {
+		// Not an actual error. The daemon isn't running
+		err = nil
+	}
+	if err == nil {
+		daemonRunning = false
+	}
+	return stdout, stderr, err
+}
+
+func StartOVNNbctlDaemon()(*bytes.Buffer, *bytes.Buffer, error) {
+	var cmdArgs []string
+
+	// End any running daemons
+	stdout, stderr, err := StopOVNNbctlDaemon()
+	if err != nil {
+		return stdout, stderr, err
+	}
+
+	logrus.Info("Starting ovn-nbctl daemon")
+	cmdArgs = getConnectionParams()
+	cmdArgs = append(cmdArgs, fmt.Sprintf("--timeout=%d", ovsCommandTimeout))
+	cmdArgs = append(cmdArgs, "--pidfile", "--detach")
+	stdout, stderr, err = runOVNretry(runner.nbctlPath, cmdArgs...)
+	if err == nil {
+		daemonRunning = true
+	}
+	return stdout, stderr, err
+}
+
+// RunOVNNbctlWithTimeout runs command via ovn-nbctl with a specific timeout
+func RunOVNNbctlWithTimeout(timeout int, args ...string) (string, string,
+	error) {
+
+	var cmdArgs []string
+	var path string
+
+	if !daemonRunning {
+		StartOVNNbctlDaemon()
+	}
+
+	if !daemonRunning {
+		path = runner.nbctlPath
+		cmdArgs = append(getConnectionParams())
+	} else {
+		path = runner.appctlPath
+		cmdArgs = append(cmdArgs, "-t", "ovn-nbctl", "run")
+	}
+
 	cmdArgs = append(cmdArgs, fmt.Sprintf("--timeout=%d", timeout))
 	cmdArgs = append(cmdArgs, args...)
-	stdout, stderr, err := runOVNretry(runner.nbctlPath, cmdArgs...)
+	stdout, stderr, err := runOVNretry(path, cmdArgs...)
 	return strings.Trim(strings.TrimSpace(stdout.String()), "\""), stderr.String(), err
 }
 
