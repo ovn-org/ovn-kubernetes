@@ -69,6 +69,16 @@ var (
 	// Gateway holds node gateway-related parsed config file parameters and command-line overrides
 	Gateway GatewayConfig
 
+	// MasterHA holds master HA related config options.
+	MasterHA = MasterHAConfig{
+		ManageDBServers:         false,
+		NbPort:                  6641,
+		SbPort:                  6642,
+		HAElectionLeaseDuration: 60,
+		HAElectionRenewDeadline: 30,
+		HAElectionRetryPeriod:   20,
+	}
+
 	// NbctlDaemon enables ovn-nbctl to run in daemon mode
 	NbctlDaemonMode bool
 
@@ -137,6 +147,7 @@ type KubernetesConfig struct {
 	ServiceCIDR        string `gcfg:"service-cidr"`
 	OVNConfigNamespace string `gcfg:"ovn-config-namespace"`
 	MetricsBindAddress string `gcfg:"metrics-bind-address"`
+	PodIP              string `gcfg:"pod-ip"`
 }
 
 // GatewayMode holds the node gateway mode
@@ -181,6 +192,17 @@ type OvnAuthConfig struct {
 	exec kexec.Interface
 }
 
+// MasterHAConfig holds configuration for master HA
+// configuration.
+type MasterHAConfig struct {
+	ManageDBServers         bool `gcfg:"manage-db-servers"`
+	NbPort                  int  `gcfg:"port"`
+	SbPort                  int  `gcfg:"port"`
+	HAElectionLeaseDuration int  `gcfg:"ha-election-lease-duration"`
+	HAElectionRenewDeadline int  `gcfg:"ha-election-renew-deadline"`
+	HAElectionRetryPeriod   int  `gcfg:"ha-election-retry-period"`
+}
+
 // OvnDBScheme describes the OVN database connection transport method
 type OvnDBScheme string
 
@@ -202,6 +224,7 @@ type config struct {
 	OvnNorth   OvnAuthConfig
 	OvnSouth   OvnAuthConfig
 	Gateway    GatewayConfig
+	MasterHA   MasterHAConfig
 }
 
 var (
@@ -212,7 +235,7 @@ var (
 	savedOvnNorth   OvnAuthConfig
 	savedOvnSouth   OvnAuthConfig
 	savedGateway    GatewayConfig
-
+	savedMasterHA   MasterHAConfig
 	// legacy service-cluster-ip-range CLI option
 	serviceClusterIPRange string
 	// legacy cluster-subnet CLI option
@@ -232,12 +255,14 @@ func init() {
 	savedOvnNorth = OvnNorth
 	savedOvnSouth = OvnSouth
 	savedGateway = Gateway
+	savedMasterHA = MasterHA
 	Flags = append(Flags, CommonFlags...)
 	Flags = append(Flags, CNIFlags...)
 	Flags = append(Flags, K8sFlags...)
 	Flags = append(Flags, OvnNBFlags...)
 	Flags = append(Flags, OvnSBFlags...)
 	Flags = append(Flags, OVNGatewayFlags...)
+	Flags = append(Flags, MasterHAFlags...)
 }
 
 // RestoreDefaultConfig restores default config values. Used by testcases to
@@ -250,6 +275,7 @@ func RestoreDefaultConfig() {
 	OvnNorth = savedOvnNorth
 	OvnSouth = savedOvnSouth
 	Gateway = savedGateway
+	MasterHA = savedMasterHA
 }
 
 // copy members of struct 'src' into the corresponding field in struct 'dst'
@@ -480,6 +506,11 @@ var K8sFlags = []cli.Flag{
 		Usage:       "The IP address and port for the metrics server to serve on (set to 0.0.0.0 for all IPv4 interfaces)",
 		Destination: &cliConfig.Kubernetes.MetricsBindAddress,
 	},
+	cli.StringFlag{
+		Name:        "pod-ip",
+		Usage:       "specify the ovnkube pod IP.",
+		Destination: &cliConfig.Kubernetes.PodIP,
+	},
 }
 
 // OvnNBFlags capture OVN northbound database options
@@ -580,6 +611,40 @@ var OVNGatewayFlags = []cli.Flag{
 		Name:        "gateway-local",
 		Usage:       "DEPRECATED; use --gateway-mode instead",
 		Destination: &gatewayLocal,
+	},
+}
+
+// MasterHAFlags capture OVN northbound database options
+var MasterHAFlags = []cli.Flag{
+	cli.BoolFlag{
+		Name:        "manage-db-servers",
+		Usage:       "Manages the OVN North and South DB servers in active/passive",
+		Destination: &cliConfig.MasterHA.ManageDBServers,
+	},
+	cli.IntFlag{
+		Name:        "nb-port",
+		Usage:       "Port of the OVN northbound DB server to configure (default: 6641)",
+		Destination: &cliConfig.MasterHA.NbPort,
+	},
+	cli.IntFlag{
+		Name:        "sb-port",
+		Usage:       "Port of the OVN southbound DB server to configure (default: 6642)",
+		Destination: &cliConfig.MasterHA.SbPort,
+	},
+	cli.IntFlag{
+		Name:        "ha-election-lease-duration",
+		Usage:       "Leader election lease duration (in secs) (default: 60)",
+		Destination: &cliConfig.MasterHA.HAElectionLeaseDuration,
+	},
+	cli.IntFlag{
+		Name:        "ha-election-renew-deadline",
+		Usage:       "Leader election renew deadline (in secs) (default: 35)",
+		Destination: &cliConfig.MasterHA.HAElectionRenewDeadline,
+	},
+	cli.IntFlag{
+		Name:        "ha-election-retry-period",
+		Usage:       "Leader election retry period (in secs) (default: 10)",
+		Destination: &cliConfig.MasterHA.HAElectionRetryPeriod,
 	},
 }
 
@@ -716,6 +781,11 @@ func buildKubernetesConfig(exec kexec.Interface, cli, file *config, saPath strin
 		return fmt.Errorf("kubernetes service network CIDR %q invalid: %v", Kubernetes.ServiceCIDR, err)
 	}
 
+	if Kubernetes.PodIP != "" {
+		if ip := net.ParseIP(Kubernetes.PodIP); ip == nil {
+			return fmt.Errorf("Pod IP is invalid")
+		}
+	}
 	return nil
 }
 
@@ -761,6 +831,27 @@ func buildGatewayConfig(ctx *cli.Context, cli, file *config) error {
 		if Gateway.VLANID != 0 {
 			return fmt.Errorf("gateway VLAN ID option '%d' not allowed when gateway is disabled", Gateway.VLANID)
 		}
+	}
+	return nil
+}
+
+func buildMasterHAConfig(ctx *cli.Context, cli, file *config) error {
+	// Copy config file values over default values
+	overrideFields(&MasterHA, &file.MasterHA)
+
+	// And CLI overrides over config file and default values
+	overrideFields(&MasterHA, &cli.MasterHA)
+
+	if MasterHA.HAElectionLeaseDuration <= MasterHA.HAElectionRenewDeadline {
+		return fmt.Errorf("Invalid HA election lease duration '%d'. "+
+			"It should be greater than HA election renew deadline '%d'",
+			MasterHA.HAElectionLeaseDuration, MasterHA.HAElectionRenewDeadline)
+	}
+
+	if MasterHA.HAElectionRenewDeadline <= MasterHA.HAElectionRetryPeriod {
+		return fmt.Errorf("Invalid HA election renew deadline duration '%d'. "+
+			"It should be greater than HA election retry period '%d'",
+			MasterHA.HAElectionRenewDeadline, MasterHA.HAElectionRetryPeriod)
 	}
 	return nil
 }
@@ -892,6 +983,10 @@ func initConfigWithPath(ctx *cli.Context, exec kexec.Interface, saPath string, d
 		return "", err
 	}
 
+	if err = buildMasterHAConfig(ctx, &cliConfig, &cfg); err != nil {
+		return "", err
+	}
+
 	tmpAuth, err := buildOvnAuth(exec, true, &cliConfig.OvnNorth, &cfg.OvnNorth, defaults.OvnNorthAddress)
 	if err != nil {
 		return "", err
@@ -1014,6 +1109,12 @@ func buildOvnAuth(exec kexec.Interface, northbound bool, cliAuth, confAuth *OvnA
 		}
 		auth.Scheme = OvnDBSchemeUnix
 		return auth, nil
+	} else if MasterHA.ManageDBServers {
+		if northbound {
+			panic("--nb-address is not allowed with --manage-db-servers.")
+		} else {
+			panic("--sb-address is not allowed with --manage-db-servers.")
+		}
 	}
 
 	var err error

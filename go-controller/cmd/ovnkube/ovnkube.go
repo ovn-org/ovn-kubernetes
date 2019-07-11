@@ -58,6 +58,7 @@ func getFlagsByCategory() map[string][]cli.Flag {
 	m["OVN Northbound DB Options"] = config.OvnNBFlags
 	m["OVN Southbound DB Options"] = config.OvnSBFlags
 	m["OVN Gateway Options"] = config.OVNGatewayFlags
+	m["Master HA Options"] = config.MasterHAFlags
 
 	return m
 }
@@ -96,6 +97,7 @@ func main() {
 	c.Flags = append(c.Flags, config.OvnNBFlags...)
 	c.Flags = append(c.Flags, config.OvnSBFlags...)
 	c.Flags = append(c.Flags, config.OVNGatewayFlags...)
+	c.Flags = append(c.Flags, config.MasterHAFlags...)
 	c.Action = func(c *cli.Context) error {
 		return runOvnKube(c)
 	}
@@ -212,15 +214,16 @@ func runOvnKube(ctx *cli.Context) error {
 			if runtime.GOOS == "windows" {
 				panic("Windows is not supported as master node")
 			}
-			// run the master controller to init the master
-			ovnController := ovn.NewOvnController(clientset, factory)
-			err := ovnController.StartClusterMaster(master)
-			if err != nil {
-				logrus.Errorf(err.Error())
-				panic(err.Error())
+
+			// Check if the pod ip is set or not if manageDBServers is set
+			if config.MasterHA.ManageDBServers && config.Kubernetes.PodIP == "" {
+				panic("--manage-db-servers requires --pod-ip.")
 			}
-			// add watchers for relevant resources' events
-			if err := ovnController.Run(); err != nil {
+
+			// run the master controller to init the master
+			ovnHAController := ovn.NewHAMasterController(clientset, factory, master, config.MasterHA.ManageDBServers)
+			err := ovnHAController.StartHAMasterController()
+			if err != nil {
 				logrus.Errorf(err.Error())
 				panic(err.Error())
 			}
