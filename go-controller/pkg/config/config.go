@@ -69,6 +69,13 @@ var (
 	// Gateway holds node gateway-related parsed config file parameters and command-line overrides
 	Gateway GatewayConfig
 
+	// MasterHA holds master HA related config options.
+	MasterHA = MasterHAConfig{
+		HAElectionLeaseDuration: 60,
+		HAElectionRenewDeadline: 30,
+		HAElectionRetryPeriod:   20,
+	}
+
 	// NbctlDaemon enables ovn-nbctl to run in daemon mode
 	NbctlDaemonMode bool
 
@@ -181,6 +188,14 @@ type OvnAuthConfig struct {
 	exec kexec.Interface
 }
 
+// MasterHAConfig holds configuration for master HA
+// configuration.
+type MasterHAConfig struct {
+	HAElectionLeaseDuration int `gcfg:"ha-election-lease-duration"`
+	HAElectionRenewDeadline int `gcfg:"ha-election-renew-deadline"`
+	HAElectionRetryPeriod   int `gcfg:"ha-election-retry-period"`
+}
+
 // OvnDBScheme describes the OVN database connection transport method
 type OvnDBScheme string
 
@@ -202,6 +217,7 @@ type config struct {
 	OvnNorth   OvnAuthConfig
 	OvnSouth   OvnAuthConfig
 	Gateway    GatewayConfig
+	MasterHA   MasterHAConfig
 }
 
 var (
@@ -212,7 +228,7 @@ var (
 	savedOvnNorth   OvnAuthConfig
 	savedOvnSouth   OvnAuthConfig
 	savedGateway    GatewayConfig
-
+	savedMasterHA   MasterHAConfig
 	// legacy service-cluster-ip-range CLI option
 	serviceClusterIPRange string
 	// legacy cluster-subnet CLI option
@@ -232,12 +248,14 @@ func init() {
 	savedOvnNorth = OvnNorth
 	savedOvnSouth = OvnSouth
 	savedGateway = Gateway
+	savedMasterHA = MasterHA
 	Flags = append(Flags, CommonFlags...)
 	Flags = append(Flags, CNIFlags...)
 	Flags = append(Flags, K8sFlags...)
 	Flags = append(Flags, OvnNBFlags...)
 	Flags = append(Flags, OvnSBFlags...)
 	Flags = append(Flags, OVNGatewayFlags...)
+	Flags = append(Flags, MasterHAFlags...)
 }
 
 // RestoreDefaultConfig restores default config values. Used by testcases to
@@ -250,6 +268,7 @@ func RestoreDefaultConfig() {
 	OvnNorth = savedOvnNorth
 	OvnSouth = savedOvnSouth
 	Gateway = savedGateway
+	MasterHA = savedMasterHA
 }
 
 // copy members of struct 'src' into the corresponding field in struct 'dst'
@@ -583,6 +602,25 @@ var OVNGatewayFlags = []cli.Flag{
 	},
 }
 
+// MasterHAFlags capture OVN northbound database options
+var MasterHAFlags = []cli.Flag{
+	cli.IntFlag{
+		Name:        "ha-election-lease-duration",
+		Usage:       "Leader election lease duration (in secs) (default: 60)",
+		Destination: &cliConfig.MasterHA.HAElectionLeaseDuration,
+	},
+	cli.IntFlag{
+		Name:        "ha-election-renew-deadline",
+		Usage:       "Leader election renew deadline (in secs) (default: 35)",
+		Destination: &cliConfig.MasterHA.HAElectionRenewDeadline,
+	},
+	cli.IntFlag{
+		Name:        "ha-election-retry-period",
+		Usage:       "Leader election retry period (in secs) (default: 10)",
+		Destination: &cliConfig.MasterHA.HAElectionRetryPeriod,
+	},
+}
+
 // Flags are general command-line flags. Apps should add these flags to their
 // own urfave/cli flags and call InitConfig() early in the application.
 var Flags []cli.Flag
@@ -765,6 +803,27 @@ func buildGatewayConfig(ctx *cli.Context, cli, file *config) error {
 	return nil
 }
 
+func buildMasterHAConfig(ctx *cli.Context, cli, file *config) error {
+	// Copy config file values over default values
+	overrideFields(&MasterHA, &file.MasterHA)
+
+	// And CLI overrides over config file and default values
+	overrideFields(&MasterHA, &cli.MasterHA)
+
+	if MasterHA.HAElectionLeaseDuration <= MasterHA.HAElectionRenewDeadline {
+		return fmt.Errorf("Invalid HA election lease duration '%d'. "+
+			"It should be greater than HA election renew deadline '%d'",
+			MasterHA.HAElectionLeaseDuration, MasterHA.HAElectionRenewDeadline)
+	}
+
+	if MasterHA.HAElectionRenewDeadline <= MasterHA.HAElectionRetryPeriod {
+		return fmt.Errorf("Invalid HA election renew deadline duration '%d'. "+
+			"It should be greater than HA election retry period '%d'",
+			MasterHA.HAElectionRenewDeadline, MasterHA.HAElectionRetryPeriod)
+	}
+	return nil
+}
+
 func buildDefaultConfig(cli, file *config) error {
 	overrideFields(&Default, &file.Default)
 	overrideFields(&Default, &cli.Default)
@@ -889,6 +948,10 @@ func initConfigWithPath(ctx *cli.Context, exec kexec.Interface, saPath string, d
 	}
 
 	if err = buildGatewayConfig(ctx, &cliConfig, &cfg); err != nil {
+		return "", err
+	}
+
+	if err = buildMasterHAConfig(ctx, &cliConfig, &cfg); err != nil {
 		return "", err
 	}
 
