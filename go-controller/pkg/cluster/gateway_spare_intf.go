@@ -50,7 +50,7 @@ func initSpareGateway(nodeName string, clusterIPSubnet []string,
 	}
 
 	err = util.GatewayInit(clusterIPSubnet, nodeName, ifaceID, ipAddress,
-		macAddress, gwNextHop, subnet, false, nil)
+		macAddress, gwNextHop, subnet, false, true, nil)
 	if err != nil {
 		return fmt.Errorf("failed to init spare interface gateway: %v", err)
 	}
