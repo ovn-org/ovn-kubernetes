@@ -55,6 +55,7 @@ GLOBAL OPTIONS:{{range $title, $category := getFlagsByCategory}}
 func getFlagsByCategory() map[string][]cli.Flag {
 	m := map[string][]cli.Flag{}
 	m["Generic Options"] = config.CommonFlags
+	m["CNI Options"] = config.CNIFlags
 	m["K8s-related Options"] = config.K8sFlags
 	m["OVN Northbound DB Options"] = config.OvnNBFlags
 	m["OVN Southbound DB Options"] = config.OvnSBFlags
@@ -92,6 +93,7 @@ func main() {
 	c.Version = config.Version
 	c.CustomAppHelpTemplate = CustomAppHelpTemplate
 	c.Flags = config.CommonFlags
+	c.Flags = append(c.Flags, config.CNIFlags...)
 	c.Flags = append(c.Flags, config.K8sFlags...)
 	c.Flags = append(c.Flags, config.OvnNBFlags...)
 	c.Flags = append(c.Flags, config.OvnSBFlags...)

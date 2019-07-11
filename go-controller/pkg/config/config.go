@@ -214,6 +214,7 @@ func init() {
 	savedOvnSouth = OvnSouth
 	savedGateway = Gateway
 	Flags = append(Flags, CommonFlags...)
+	Flags = append(Flags, CNIFlags...)
 	Flags = append(Flags, K8sFlags...)
 	Flags = append(Flags, OvnNBFlags...)
 	Flags = append(Flags, OvnSBFlags...)
@@ -362,17 +363,8 @@ var CommonFlags = []cli.Flag{
 	},
 }
 
-// K8sFlags capture Kubernetes-related options
-var K8sFlags = []cli.Flag{
-	cli.StringFlag{
-		Name:  "cluster-subnet",
-		Value: "11.11.0.0/16",
-		Usage: "A comma separated set of IP subnets and the associated" +
-			"hostsubnetlengths to use for the cluster (eg, \"10.128.0.0/14/23,10.0.0.0/14/23\"). " +
-			"Each entry is given in the form IP address/subnet mask/hostsubnetlength, " +
-			"the hostsubnetlength is optional and if unspecified defaults to 24. The " +
-			"hostsubnetlength defines how many IP addresses are dedicated to each node.",
-	},
+// CNIFlags capture CNI-related options
+var CNIFlags = []cli.Flag{
 	// CNI options
 	cli.StringFlag{
 		Name:        "cni-conf-dir",
@@ -388,6 +380,19 @@ var K8sFlags = []cli.Flag{
 		Name:        "win-hnsnetwork-id",
 		Usage:       "the ID of the HNS network to which containers will be attached (default: not set)",
 		Destination: &cliConfig.CNI.WinHNSNetworkID,
+	},
+}
+
+// K8sFlags capture Kubernetes-related options
+var K8sFlags = []cli.Flag{
+	cli.StringFlag{
+		Name:  "cluster-subnet",
+		Value: "11.11.0.0/16",
+		Usage: "A comma separated set of IP subnets and the associated" +
+			"hostsubnetlengths to use for the cluster (eg, \"10.128.0.0/14/23,10.0.0.0/14/23\"). " +
+			"Each entry is given in the form IP address/subnet mask/hostsubnetlength, " +
+			"the hostsubnetlength is optional and if unspecified defaults to 24. The " +
+			"hostsubnetlength defines how many IP addresses are dedicated to each node.",
 	},
 	cli.StringFlag{
 		Name:        "service-cluster-ip-range",
