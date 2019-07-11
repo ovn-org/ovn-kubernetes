@@ -129,7 +129,7 @@ uses the hostname.  kubelet allows this name to be overridden with
  -k8s-apiserver="http://$CENTRAL_IP:8080" \
  -logfile="/var/log/ovn-kubernetes/ovnkube.log" \
  -init-master=$NODE_NAME -init-node=$NODE_NAME \
- -cluster-subnet="$CLUSTER_IP_SUBNET" \
+ -cluster-subnets="$CLUSTER_IP_SUBNET" \
  -k8s-service-cidr=$SERVICE_IP_SUBNET \
  -nodeport \
  -init-gateways -gateway-local \
@@ -176,7 +176,7 @@ nohup sudo ovnkube -k8s-kubeconfig kubeconfig.yaml -loglevel=4 \
     -sb-address="tcp://$CENTRAL_IP:6642" -k8s-token="$TOKEN" \
     -init-gateways \
     -k8s-service-cidr=$SERVICE_IP_SUBNET \
-    -cluster-subnet=$CLUSTER_IP_SUBNET 2>&1 &
+    -cluster-subnets=$CLUSTER_IP_SUBNET 2>&1 &
 ```
 
 Note: Make sure to read /var/log/ovn-kubernetes/ovnkube.log to see that there were

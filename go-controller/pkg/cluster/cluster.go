@@ -20,8 +20,6 @@ type OvnClusterController struct {
 
 	TCPLoadBalancerUUID string
 	UDPLoadBalancerUUID string
-
-	ClusterIPNet []config.CIDRNetworkEntry
 }
 
 const (

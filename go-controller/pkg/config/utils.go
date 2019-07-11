@@ -35,7 +35,7 @@ func ParseClusterSubnetEntries(clusterSubnetCmd string) ([]CIDRNetworkEntry, err
 			// the old hardcoded value for backwards compatability
 			parsedClusterEntry.HostSubnetLength = 24
 		} else {
-			return nil, fmt.Errorf("cluster-cidr not formatted properly")
+			return nil, fmt.Errorf("CIDR %q not properly formatted", clusterEntry)
 		}
 
 		var err error
@@ -46,11 +46,10 @@ func ParseClusterSubnetEntries(clusterSubnetCmd string) ([]CIDRNetworkEntry, err
 
 		//check to make sure that no cidrs overlap
 		if cidrsOverlap(parsedClusterEntry.CIDR, parsedClusterList) {
-			return nil, fmt.Errorf("CIDR %s overlaps with another cluster network CIDR", parsedClusterEntry.CIDR.String())
+			return nil, fmt.Errorf("CIDR %q overlaps with another cluster network CIDR", clusterEntry)
 		}
 
 		parsedClusterList = append(parsedClusterList, parsedClusterEntry)
-
 	}
 
 	if len(parsedClusterList) == 0 {
@@ -62,7 +61,6 @@ func ParseClusterSubnetEntries(clusterSubnetCmd string) ([]CIDRNetworkEntry, err
 
 //cidrsOverlap returns a true if the cidr range overlaps any in the list of cidr ranges
 func cidrsOverlap(cidr *net.IPNet, cidrList []CIDRNetworkEntry) bool {
-
 	for _, clusterEntry := range cidrList {
 		if cidr.Contains(clusterEntry.CIDR.IP) || clusterEntry.CIDR.Contains(cidr.IP) {
 			return true

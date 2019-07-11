@@ -3,6 +3,7 @@ package config
 import (
 	"fmt"
 	"io/ioutil"
+	"net"
 	"os"
 	"path/filepath"
 	"strings"
@@ -134,6 +135,7 @@ func writeTestConfigFile(path string, overrides ...string) error {
 	const defaultData string = `[default]
 mtu=1500
 conntrack-zone=64321
+cluster-subnets=10.129.0.0/14/23
 
 [kubernetes]
 kubeconfig=/path/to/kubeconfig
@@ -186,6 +188,14 @@ nodeport=false
 	return ioutil.WriteFile(path, []byte(newData), 0644)
 }
 
+func mustParseCIDR(cidr string) *net.IPNet {
+	_, net, err := net.ParseCIDR(cidr)
+	if err != nil {
+		panic("bad CIDR string constant " + cidr)
+	}
+	return net
+}
+
 var _ = Describe("Config Operations", func() {
 	var app *cli.App
 	var cfgFile *os.File
@@ -231,6 +241,9 @@ var _ = Describe("Config Operations", func() {
 			Expect(Kubernetes.Token).To(Equal(""))
 			Expect(Kubernetes.APIServer).To(Equal("http://localhost:8080"))
 			Expect(Kubernetes.ServiceCIDR).To(Equal("172.16.1.0/24"))
+			Expect(Default.ClusterSubnets).To(Equal([]CIDRNetworkEntry{
+				{mustParseCIDR("10.128.0.0/14"), 23},
+			}))
 
 			for _, a := range []OvnAuthConfig{OvnNorth, OvnSouth} {
 				Expect(a.Scheme).To(Equal(OvnDBSchemeUnix))
@@ -459,6 +472,9 @@ var _ = Describe("Config Operations", func() {
 			Expect(Kubernetes.Token).To(Equal("TG9yZW0gaXBzdW0gZ"))
 			Expect(Kubernetes.APIServer).To(Equal("https://1.2.3.4:6443"))
 			Expect(Kubernetes.ServiceCIDR).To(Equal("172.18.0.0/24"))
+			Expect(Default.ClusterSubnets).To(Equal([]CIDRNetworkEntry{
+				{mustParseCIDR("10.129.0.0/14"), 23},
+			}))
 
 			Expect(OvnNorth.Scheme).To(Equal(OvnDBSchemeSSL))
 			Expect(OvnNorth.PrivKey).To(Equal("/path/to/nb-client-private.key"))
@@ -513,6 +529,9 @@ var _ = Describe("Config Operations", func() {
 			Expect(Kubernetes.Token).To(Equal("asdfasdfasdfasfd"))
 			Expect(Kubernetes.APIServer).To(Equal("https://4.4.3.2:8080"))
 			Expect(Kubernetes.ServiceCIDR).To(Equal("172.15.0.0/24"))
+			Expect(Default.ClusterSubnets).To(Equal([]CIDRNetworkEntry{
+				{mustParseCIDR("10.130.0.0/15"), 24},
+			}))
 
 			Expect(OvnNorth.Scheme).To(Equal(OvnDBSchemeSSL))
 			Expect(OvnNorth.PrivKey).To(Equal("/client/privkey"))
@@ -542,6 +561,7 @@ var _ = Describe("Config Operations", func() {
 			"-logfile=/some/logfile",
 			"-cni-conf-dir=/some/cni/dir",
 			"-cni-plugin=a-plugin",
+			"-cluster-subnets=10.130.0.0/15/24",
 			"-k8s-kubeconfig=" + kubeconfigFile,
 			"-k8s-apiserver=https://4.4.3.2:8080",
 			"-k8s-cacert=" + kubeCAFile,
@@ -597,6 +617,45 @@ service-cidr=172.18.0.0/24
 		cliArgs := []string{
 			app.Name,
 			"-k8s-service-cidr=adsfasdfaf",
+		}
+		err := app.Run(cliArgs)
+		Expect(err).NotTo(HaveOccurred())
+	})
+
+	It("overrides config file and defaults with CLI legacy cluster-subnet option", func() {
+		err := ioutil.WriteFile(cfgFile.Name(), []byte(`[default]
+cluster-subnets=172.18.0.0/24
+`), 0644)
+		Expect(err).NotTo(HaveOccurred())
+
+		app.Action = func(ctx *cli.Context) error {
+			var cfgPath string
+			cfgPath, err = InitConfig(ctx, kexec.New(), nil)
+			Expect(err).NotTo(HaveOccurred())
+			Expect(cfgPath).To(Equal(cfgFile.Name()))
+			Expect(Default.ClusterSubnets).To(Equal([]CIDRNetworkEntry{
+				{mustParseCIDR("172.15.0.0/24"), 24},
+			}))
+			return nil
+		}
+		cliArgs := []string{
+			app.Name,
+			"-config-file=" + cfgFile.Name(),
+			"-cluster-subnet=172.15.0.0/24",
+		}
+		err = app.Run(cliArgs)
+		Expect(err).NotTo(HaveOccurred())
+	})
+
+	It("returns an error when the cluster-subnets is invalid", func() {
+		app.Action = func(ctx *cli.Context) error {
+			_, err := InitConfig(ctx, kexec.New(), nil)
+			Expect(err).To(MatchError("cluster subnet invalid: CIDR \"adsfasdfaf\" not properly formatted"))
+			return nil
+		}
+		cliArgs := []string{
+			app.Name,
+			"-cluster-subnets=adsfasdfaf",
 		}
 		err := app.Run(cliArgs)
 		Expect(err).NotTo(HaveOccurred())

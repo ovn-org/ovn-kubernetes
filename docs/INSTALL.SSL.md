@@ -166,7 +166,7 @@ certificates to it. For e.g:
 sudo ovnkube -k8s-kubeconfig kubeconfig.yaml -loglevel=4 \
  -k8s-apiserver="http://$CENTRAL_IP:8080" \
  -logfile="/var/log/ovn-kubernetes/ovnkube.log" \
- -init-master="$NODE_NAME" -cluster-subnet=$CLUSTER_IP_SUBNET \
+ -init-master="$NODE_NAME" -cluster-subnets=$CLUSTER_IP_SUBNET \
  -k8s-service-cidr=$SERVICE_IP_SUBNET \
  -nodeport \
  -nb-address="ssl://$CENTRAL_IP:6641" \
@@ -197,7 +197,7 @@ sudo ovnkube -k8s-kubeconfig $HOME/kubeconfig.yaml -loglevel=4 \
     -sb-client-cacert /etc/openvswitch/cacert.pem \
     -init-gateways \
     -k8s-service-cidr=$SERVICE_IP_SUBNET \
-    -cluster-subnet=$CLUSTER_IP_SUBNET
+    -cluster-subnets=$CLUSTER_IP_SUBNET
 ```
 
 [README.md]: README.md

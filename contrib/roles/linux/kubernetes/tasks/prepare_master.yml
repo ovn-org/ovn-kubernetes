@@ -208,7 +208,7 @@
       [Service]
       ExecStart=/usr/bin/ovnkube \
         -init-master "{{ ansible_hostname }}" \
-        -cluster-subnet "{{ kubernetes_cluster_info.CLUSTER_SUBNET }}" \
+        -cluster-subnets "{{ kubernetes_cluster_info.CLUSTER_SUBNET }}" \
         -k8s-service-cidr "{{ kubernetes_cluster_info.SERVICE_CLUSTER_IP_RANGE }}" \
         -nodeport \
         -k8s-token {{TOKEN}} \

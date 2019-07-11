@@ -208,7 +208,7 @@ if [ "$DAEMONSET" != "true" ]; then
    -k8s-cacert=/etc/kubernetes/pki/ca.crt \
    -k8s-token="$TOKEN" \
    -logfile="/var/log/ovn-kubernetes/ovnkube.log" \
-   -init-master="k8smaster" -cluster-subnet="192.168.0.0/16" \
+   -init-master="k8smaster" -cluster-subnets="192.168.0.0/16" \
    -init-node="k8smaster" \
    -nodeport \
    -nb-address="$ovn_nb" \

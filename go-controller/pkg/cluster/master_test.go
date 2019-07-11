@@ -98,11 +98,15 @@ var _ = Describe("Master Operations", func() {
 	})
 
 	It("creates logical network elements for a 2-node cluster", func() {
+		const (
+			clusterIPNet string = "10.1.0.0"
+			clusterCIDR  string = clusterIPNet + "/16"
+		)
+
 		app.Action = func(ctx *cli.Context) error {
 			const (
-				nodeName    string = "node1"
-				nodeSubnet  string = "10.1.0.0/24"
-				clusterCIDR string = "10.1.0.0/16"
+				nodeName   string = "node1"
+				nodeSubnet string = "10.1.0.0/24"
 			)
 
 			fexec, tcpLBUUID, udpLBUUID := defaultFakeExec(nodeSubnet, nodeName)
@@ -127,13 +131,6 @@ var _ = Describe("Master Operations", func() {
 			clusterController.TCPLoadBalancerUUID = tcpLBUUID
 			clusterController.UDPLoadBalancerUUID = udpLBUUID
 
-			_, ipnet, err := net.ParseCIDR(clusterCIDR)
-			Expect(err).NotTo(HaveOccurred())
-			clusterController.ClusterIPNet = append(clusterController.ClusterIPNet, config.CIDRNetworkEntry{
-				CIDR:             ipnet,
-				HostSubnetLength: 24,
-			})
-
 			err = clusterController.StartClusterMaster("master")
 			Expect(err).NotTo(HaveOccurred())
 
@@ -144,16 +141,23 @@ var _ = Describe("Master Operations", func() {
 			return nil
 		}
 
-		err := app.Run([]string{app.Name})
+		err := app.Run([]string{
+			app.Name,
+			"-cluster-subnets=" + clusterCIDR,
+		})
 		Expect(err).NotTo(HaveOccurred())
 	})
 
 	It("does not allocate a hostsubnet for a node that already has one", func() {
+		const (
+			clusterIPNet string = "10.1.0.0"
+			clusterCIDR  string = clusterIPNet + "/16"
+		)
+
 		app.Action = func(ctx *cli.Context) error {
 			const (
-				nodeName    string = "node1"
-				nodeSubnet  string = "10.1.3.0/24"
-				clusterCIDR string = "10.1.0.0/16"
+				nodeName   string = "node1"
+				nodeSubnet string = "10.1.3.0/24"
 			)
 
 			fakeClient := fake.NewSimpleClientset(&v1.NodeList{
@@ -189,13 +193,6 @@ var _ = Describe("Master Operations", func() {
 			clusterController.TCPLoadBalancerUUID = tcpLBUUID
 			clusterController.UDPLoadBalancerUUID = udpLBUUID
 
-			_, ipnet, err := net.ParseCIDR(clusterCIDR)
-			Expect(err).NotTo(HaveOccurred())
-			clusterController.ClusterIPNet = append(clusterController.ClusterIPNet, CIDRNetworkEntry{
-				CIDR:             ipnet,
-				HostSubnetLength: 24,
-			})
-
 			err = clusterController.StartClusterMaster("master")
 			Expect(err).NotTo(HaveOccurred())
 
@@ -206,7 +203,10 @@ var _ = Describe("Master Operations", func() {
 			return nil
 		}
 
-		err := app.Run([]string{app.Name})
+		err := app.Run([]string{
+			app.Name,
+			"-cluster-subnets=" + clusterCIDR,
+		})
 		Expect(err).NotTo(HaveOccurred())
 	})
 

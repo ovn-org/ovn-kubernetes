@@ -138,7 +138,7 @@
           [Service]
           ExecStart=/usr/bin/ovnkube \
             --init-node "{{ ansible_hostname }}" \
-            --cluster-subnet "{{ kubernetes_cluster_info.CLUSTER_SUBNET }}" \
+            --cluster-subnets "{{ kubernetes_cluster_info.CLUSTER_SUBNET }}" \
             --k8s-token {{TOKEN}} \
             --k8s-cacert /etc/openvswitch/k8s-ca.crt \
             --k8s-apiserver "http://{{ kubernetes_cluster_info.MASTER_IP }}:8080" \

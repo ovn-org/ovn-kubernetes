@@ -206,11 +206,6 @@ func runOvnKube(ctx *cli.Context) error {
 	}
 
 	if master != "" || node != "" {
-		clusterController.ClusterIPNet, err = config.ParseClusterSubnetEntries(ctx.String("cluster-subnet"))
-		if err != nil {
-			panic(err.Error())
-		}
-
 		if master != "" {
 			if runtime.GOOS == "windows" {
 				panic("Windows is not supported as master node")
