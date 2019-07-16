@@ -3,6 +3,12 @@
 	"ignore": "test appengine",
 	"package": [
 		{
+			"checksumSHA1": "pBmaTjNo279YtPKnLPtakPY97sI=",
+			"path": "github.com/Mellanox/sriovnet",
+			"revision": "73402dc8fcaa26a2aa195ff12245bd2bafd1494f",
+			"revisionTime": "2019-05-13T20:44:09Z"
+		},
+		{
 			"checksumSHA1": "7CZFKc5GTJHTnrvclrIfPzALGys=",
 			"path": "github.com/Microsoft/go-winio",
 			"revision": "12afdbf8b879f9ce020255d4dea63525b16518f5",
@@ -535,6 +541,12 @@
 			"path": "github.com/pkg/errors",
 			"revision": "27936f6d90f9c8e1145f11ed52ffffbfdb9e0af7",
 			"revisionTime": "2019-02-27T00:00:51Z"
+		},
+		{
+			"checksumSHA1": "Tutue3nEgM/87jitUcYv6ODwyNE=",
+			"path": "github.com/satori/go.uuid",
+			"revision": "b2ce2384e17bbe0c6d34077efa39dbab3e09123b",
+			"revisionTime": "2018-10-28T12:50:25Z"
 		},
 		{
 			"checksumSHA1": "F/VVrVmpuEMaCWZ+2Vvzf5vnj0E=",
