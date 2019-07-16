@@ -20,5 +20,5 @@ script:
     -    make check
     - popd
     - pushd dist/images
-    -    [[ -n "$(git diff --stat origin/master.. | grep dist/images/Dockerfile)" ]] && make all
+    -    if [ -n "$(git diff --stat origin/master.. | grep dist/images/Dockerfile)" ]; then  make all fi
     - popd
