@@ -14,6 +14,15 @@ import (
 	"github.com/sirupsen/logrus"
 )
 
+// AddWARToAccessAPIServer adds a workaround (WAR) to allow access to kubernetes service
+// cluster ip from the master node and from the HostNetwork Pods on the master node. It does
+// so by adding iptable rules in the host stack and by completely avoid OVS pipeline for K8s API
+// server access. This is done only for the Master node and only for the HostNetwork Pods and
+// the K8s node itself.
+func (cluster *OvnClusterController) AddWARToAccessAPIServer() error {
+	return addWARToAccessAPIServer(cluster.Kube)
+}
+
 // StartClusterMaster runs a subnet IPAM and a controller that watches arrival/departure
 // of nodes in the cluster
 // On an addition to the cluster (node create), a new subnet is created for it that will translate

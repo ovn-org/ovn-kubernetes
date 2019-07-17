@@ -215,6 +215,15 @@ func runOvnKube(ctx *cli.Context) error {
 			if runtime.GOOS == "windows" {
 				panic("Windows is not supported as master node")
 			}
+
+			// provide the workaround to allow access to kubernetes service cluster ip from the
+			// master node and from the HostNetwork Pods on the master node. See:
+			// https://github.com/ovn-org/ovn-kubernetes/issues/758 for more details.
+			if err := clusterController.AddWARToAccessAPIServer(); err != nil {
+				logrus.Errorf(err.Error())
+				panic(err.Error())
+			}
+
 			// run the cluster controller to init the master
 			err := clusterController.StartClusterMaster(master)
 			if err != nil {

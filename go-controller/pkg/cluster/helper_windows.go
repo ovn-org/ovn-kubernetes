@@ -4,6 +4,7 @@ package cluster
 
 import (
 	"fmt"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/kube"
 
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
 )
@@ -29,4 +30,8 @@ func getIntfName(gatewayIntf string) (string, error) {
 			intfName, stderr, err)
 	}
 	return intfName, nil
+}
+
+func addWARToAccessAPIServer(kube kube.Interface) error {
+	return fmt.Errorf("Not required to be run on Windows")
 }

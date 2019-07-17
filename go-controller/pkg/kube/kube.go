@@ -24,6 +24,7 @@ type Interface interface {
 	GetNodes() (*kapi.NodeList, error)
 	GetNode(name string) (*kapi.Node, error)
 	GetService(namespace, name string) (*kapi.Service, error)
+	GetEndpoint(namespace, name string) (*kapi.Endpoints, error)
 	GetEndpoints(namespace string) (*kapi.EndpointsList, error)
 	GetNamespaces() (*kapi.NamespaceList, error)
 }
@@ -95,6 +96,11 @@ func (k *Kube) GetNode(name string) (*kapi.Node, error) {
 // GetService returns the Service resource from kubernetes apiserver, given its name and namespace
 func (k *Kube) GetService(namespace, name string) (*kapi.Service, error) {
 	return k.KClient.CoreV1().Services(namespace).Get(name, metav1.GetOptions{})
+}
+
+// GetEndpoint returns the endpoint resource from kubernetes apiserver, given its name and namespace
+func (k *Kube) GetEndpoint(namespace, name string) (*kapi.Endpoints, error) {
+	return k.KClient.CoreV1().Endpoints(namespace).Get(name, metav1.GetOptions{})
 }
 
 // GetEndpoints returns all the Endpoint resources from kubernetes
