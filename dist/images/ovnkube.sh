@@ -445,6 +445,7 @@ cleanup-ovs-server () {
     fi
     echo "=============== time: $(date +%d-%m-%H:%M:%S:%N) cleanup-ovs-server ovn-node still running, wait) ======="
     sleep 1
+    (( retries += 1 ))
   done
   echo "=============== time: $(date +%d-%m-%H:%M:%S:%N) cleanup-ovs-server (ovs-ctl stop) ======="
   /usr/share/openvswitch/scripts/ovs-ctl stop
@@ -743,6 +744,7 @@ cleanup-ovn-node () {
     fi
     echo "=============== time: $(date +%d-%m-%H:%M:%S:%N) cleanup-ovn-node - (ovn-controller still running, wait)"
     sleep 1
+    (( retries += 1 ))
   done
 
   echo "=============== time: $(date +%d-%m-%H:%M:%S:%N) cleanup-ovn-node --cleanup-node"
