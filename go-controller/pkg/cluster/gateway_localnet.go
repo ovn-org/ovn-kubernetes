@@ -18,7 +18,8 @@ import (
 )
 
 const (
-	localnetGatewayIP            = "169.254.33.2/24"
+	localnetGatewayIP            = "169.254.33.2"
+	localnetGatewayCIDR          = localnetGatewayIP + "/24"
 	localnetGatewayNextHop       = "169.254.33.1"
 	localnetGatewayNextHopSubnet = "169.254.33.1/24"
 	iptableNodePortChain         = "OVN-KUBE-NODEPORT"
@@ -72,9 +73,16 @@ func delIptRules(ipt util.IPTablesHelper, rules []iptRule) {
 	}
 }
 
+const natFwMark string = "0x466"
+
 func generateGatewayNATRules(ifname string, clusterCIDRs []string) []iptRule {
 	// Allow packets to/from the gateway interface in case defaults deny
 	rules := make([]iptRule, 0)
+	rules = append(rules, iptRule{
+		table: "filter",
+		chain: "FORWARD",
+		args:  []string{"-m", "mark", "--mark", natFwMark, "-j", "ACCEPT"},
+	})
 	rules = append(rules, iptRule{
 		table: "filter",
 		chain: "FORWARD",
@@ -92,14 +100,37 @@ func generateGatewayNATRules(ifname string, clusterCIDRs []string) []iptRule {
 		args:  []string{"-i", ifname, "-m", "comment", "--comment", "from OVN to localhost", "-j", "ACCEPT"},
 	})
 
+	rules = append(rules, iptRule{
+		table: "mangle",
+		chain: "PREROUTING",
+		args:  []string{"-j", "CONNMARK", "--restore-mark"},
+	})
+	rules = append(rules, iptRule{
+		table: "mangle",
+		chain: "PREROUTING",
+		args:  []string{"-m", "mark", "!", "--mark", "0x0", "-j", "ACCEPT"},
+	})
+
 	for _, cidr := range clusterCIDRs {
-		// NAT for the interface
 		rules = append(rules, iptRule{
-			table: "nat",
-			chain: "POSTROUTING",
-			args:  []string{"-s", cidr, "-j", "MASQUERADE"},
+			table: "mangle",
+			chain: "PREROUTING",
+			args:  []string{"-s", cidr, "-i", "br-nexthop", "-m", "mark", "--mark", "0x0", "-j", "MARK", "--set-xmark", natFwMark},
 		})
 	}
+
+	rules = append(rules, iptRule{
+		table: "mangle",
+		chain: "PREROUTING",
+		args:  []string{"-j", "CONNMARK", "--save-mark"},
+	})
+
+	// NAT for the interface
+	rules = append(rules, iptRule{
+		table: "nat",
+		chain: "POSTROUTING",
+		args:  []string{"-m", "mark", "--mark", natFwMark, "-j", "MASQUERADE"},
+	})
 
 	return rules
 }
@@ -169,10 +200,24 @@ func initLocalnetGatewayInternal(nodeName string, clusterIPSubnet []string,
 		return fmt.Errorf("failed to set up shared interface gateway: %v", err)
 	}
 
-	err = util.GatewayInit(clusterIPSubnet, nodeName, ifaceID, localnetGatewayIP,
+	err = util.GatewayInit(clusterIPSubnet, nodeName, ifaceID, localnetGatewayCIDR,
 		macAddress, localnetGatewayNextHop, subnet, true, false, nil)
 	if err != nil {
 		return fmt.Errorf("failed to localnet gateway: %v", err)
+	}
+
+	// Redirect local host return traffic that originally came from
+	// br-nexthop to a different routing table to make sure it doesn't
+	// go into the management interface (which claims the ClusterNetwork route)
+	_, _, err = util.RunIP("rule", "add", "not", "from", subnet, "fwmark", natFwMark,
+		"table", "42")
+	if err != nil {
+		return fmt.Errorf("failed to set up fwmark routing redirect: %v", err)
+	}
+	_, _, err = util.RunIP("route", "add", subnet, "via", localnetGatewayIP,
+		"table", "42")
+	if err != nil {
+		return fmt.Errorf("failed to set up fwmark routing table: %v", err)
 	}
 
 	err = localnetGatewayNAT(ipt, localnetBridgeNextHop, clusterIPSubnet)
@@ -209,7 +254,7 @@ func localnetAddService(svc *kapi.Service) error {
 			table: "nat",
 			chain: iptableNodePortChain,
 			args: []string{"-p", string(protocol), "--dport", nodePort, "-j", "DNAT", "--to-destination",
-				strings.Split(localnetGatewayIP, "/")[0] + ":" + nodePort},
+				localnetGatewayIP + ":" + nodePort},
 		})
 		rules = append(rules, iptRule{
 			table: "filter",
@@ -243,7 +288,7 @@ func localnetDeleteService(svc *kapi.Service) error {
 			table: "nat",
 			chain: iptableNodePortChain,
 			args: []string{"-p", string(protocol), "--dport", nodePort, "-j", "DNAT", "--to-destination",
-				strings.Split(localnetGatewayIP, "/")[0] + ":" + nodePort},
+				localnetGatewayIP + ":" + nodePort},
 		})
 		rules = append(rules, iptRule{
 			table: "filter",

@@ -67,6 +67,7 @@ func NewFakeWithProtocol(proto iptables.Protocol) (*FakeIPTables, error) {
 	}
 	// Prepopulate some common tables
 	ipt.tables["filter"] = newFakeTable()
+	ipt.tables["mangle"] = newFakeTable()
 	ipt.tables["nat"] = newFakeTable()
 	return ipt, nil
 }
@@ -184,7 +185,7 @@ func (f *FakeIPTables) Delete(tableName, chainName string, rulespec ...string) e
 // code under test added to iptables
 func (f *FakeIPTables) MatchState(tables map[string]FakeTable) error {
 	if len(tables) != len(f.tables) {
-		return fmt.Errorf("expeted %d tables, got %d", len(tables), len(f.tables))
+		return fmt.Errorf("expected %d tables, got %d", len(tables), len(f.tables))
 	}
 	for tableName, table := range tables {
 		foundTable, err := f.getTable(tableName)

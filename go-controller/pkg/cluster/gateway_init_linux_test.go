@@ -276,6 +276,7 @@ cookie=0x0, duration=8366.597s, table=1, n_packets=10641, n_bytes=10370087, prio
 
 		expectedTables := map[string]util.FakeTable{
 			"filter": {},
+			"mangle": {},
 			"nat":    {},
 		}
 		Expect(ipt.MatchState(expectedTables)).NotTo(HaveOccurred())
@@ -426,6 +427,7 @@ GR_openshift-master-node chassis=6a47b33b-89d3-4d65-ac31-b19b549326c7 lb_force_s
 
 		expectedTables := map[string]util.FakeTable{
 			"filter": {},
+			"mangle": {},
 			"nat":    {},
 		}
 		Expect(ipt.MatchState(expectedTables)).NotTo(HaveOccurred())
@@ -489,7 +491,7 @@ var _ = Describe("Gateway Init Operations", func() {
 				"ovs-vsctl --timeout=15 --may-exist add-port br-local br-nexthop -- set interface br-nexthop type=internal",
 				"ip link set br-nexthop up",
 				"ip addr flush dev br-nexthop",
-				"ip addr add 169.254.33.1/24 dev br-nexthop",
+				"ip addr add " + localnetGatewayNextHopSubnet + " dev br-nexthop",
 			})
 			fexec.AddFakeCmd(&ovntest.ExpectedCmd{
 				Cmd:    "ovs-vsctl --timeout=15 --if-exists get interface br-local mac_in_use",
@@ -508,7 +510,7 @@ var _ = Describe("Gateway Init Operations", func() {
 				Output: systemID,
 			})
 			fexec.AddFakeCmdsNoOutputNoError([]string{
-				"ovn-nbctl --timeout=15 -- --may-exist lr-add " + gwRouter + " -- set logical_router " + gwRouter + " options:chassis=" + systemID + " external_ids:physical_ip=169.254.33.2",
+				"ovn-nbctl --timeout=15 -- --may-exist lr-add " + gwRouter + " -- set logical_router " + gwRouter + " options:chassis=" + systemID + " external_ids:physical_ip=" + localnetGatewayIP,
 			})
 			fexec.AddFakeCmd(&ovntest.ExpectedCmd{
 				Cmd:    "ovn-nbctl --timeout=15 get logical_switch_port jtor-" + gwRouter + " dynamic_addresses",
@@ -545,11 +547,13 @@ GR_openshift-master-node chassis=6a47b33b-89d3-4d65-ac31-b19b549326c7 lb_force_s
 			})
 			fexec.AddFakeCmdsNoOutputNoError([]string{
 				"ovn-nbctl --timeout=15 -- --may-exist lsp-add ext_" + nodeName + " br-local_" + nodeName + " -- lsp-set-addresses br-local_" + nodeName + " unknown -- lsp-set-type br-local_" + nodeName + " localnet -- lsp-set-options br-local_" + nodeName + " network_name=" + util.PhysicalNetworkName,
-				"ovn-nbctl --timeout=15 -- --may-exist lrp-add " + gwRouter + " rtoe-" + gwRouter + " " + brLocalnetMAC + " 169.254.33.2/24 -- set logical_router_port rtoe-" + gwRouter + " external-ids:gateway-physical-ip=yes",
+				"ovn-nbctl --timeout=15 -- --may-exist lrp-add " + gwRouter + " rtoe-" + gwRouter + " " + brLocalnetMAC + " " + localnetGatewayCIDR + " -- set logical_router_port rtoe-" + gwRouter + " external-ids:gateway-physical-ip=yes",
 				"ovn-nbctl --timeout=15 -- --may-exist lsp-add ext_" + nodeName + " etor-" + gwRouter + " -- set logical_switch_port etor-" + gwRouter + " type=router options:router-port=rtoe-" + gwRouter + " addresses=\"" + brLocalnetMAC + "\"",
-				"ovn-nbctl --timeout=15 --may-exist lr-route-add " + gwRouter + " 0.0.0.0/0 169.254.33.1 rtoe-" + gwRouter,
+				"ovn-nbctl --timeout=15 --may-exist lr-route-add " + gwRouter + " 0.0.0.0/0 " + localnetGatewayNextHop + " rtoe-" + gwRouter,
 				"ovn-nbctl --timeout=15 --may-exist lr-route-add " + clusterRouterUUID + " " + lrpIP + " " + lrpIP,
 				"ovn-nbctl --timeout=15 --may-exist --policy=src-ip lr-route-add " + clusterRouterUUID + " " + nodeSubnet + " " + lrpIP,
+				"ip rule add not from " + nodeSubnet + " fwmark 0x466 table 42",
+				"ip route add " + nodeSubnet + " via " + localnetGatewayIP + " table 42",
 			})
 
 			err := util.SetExec(fexec)
@@ -580,12 +584,21 @@ GR_openshift-master-node chassis=6a47b33b-89d3-4d65-ac31-b19b549326c7 lb_force_s
 						"-j OVN-KUBE-NODEPORT",
 						"-o br-nexthop -m conntrack --ctstate RELATED,ESTABLISHED -j ACCEPT",
 						"-i br-nexthop -j ACCEPT",
+						"-m mark --mark 0x466 -j ACCEPT",
 					},
 					"OVN-KUBE-NODEPORT": []string{},
 				},
+				"mangle": {
+					"PREROUTING": []string{
+						"-j CONNMARK --save-mark",
+						"-s " + clusterCIDR + " -i br-nexthop -m mark --mark 0x0 -j MARK --set-xmark 0x466",
+						"-m mark ! --mark 0x0 -j ACCEPT",
+						"-j CONNMARK --restore-mark",
+					},
+				},
 				"nat": {
 					"POSTROUTING": []string{
-						"-s " + clusterCIDR + " -j MASQUERADE",
+						"-m mark --mark 0x466 -j MASQUERADE",
 					},
 					"PREROUTING": []string{
 						"-j OVN-KUBE-NODEPORT",
