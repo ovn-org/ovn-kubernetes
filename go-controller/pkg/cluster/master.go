@@ -170,10 +170,82 @@ func parseNodeHostSubnet(node *kapi.Node) (*net.IPNet, error) {
 	return subnet, nil
 }
 
-func (cluster *OvnClusterController) ensureNodeLogicalNetwork(nodeName string, hostsubnet *net.IPNet) error {
+func parseNodeGatewayMacAddress(node *kapi.Node) (string, error) {
+	macAddress, ok := node.Annotations[OvnNodeGatewayMacAddress]
+	if !ok {
+		return "", fmt.Errorf("annotation %s does not exist on gw %s", OvnNodeGatewayMacAddress, node.Name)
+	}
+
+	_, err := net.ParseMAC(macAddress)
+	if err != nil {
+		return "", fmt.Errorf("unable to parse gateway macAddress %v: %v", macAddress, err)
+	}
+
+	return macAddress, nil
+}
+
+func parseNodeGatewayIP(node *kapi.Node) (string, error) {
+	nodeGatewayIP, ok := node.Annotations[OvnNodeGatewayIP]
+	if !ok {
+		return "", fmt.Errorf("annotation %s does not exist on gw %s", OvnNodeGatewayIP, node.Name)
+	}
+
+	ip := net.ParseIP(nodeGatewayIP)
+	if ip == nil {
+		return "", fmt.Errorf("unable to parse gateway IP")
+	}
+
+	return nodeGatewayIP, nil
+}
+
+func parseNodeGatewayNextHop(node *kapi.Node) (string, error) {
+	nodeGatewayNextHop, ok := node.Annotations[OvnNodeGatewayNextHop]
+	if !ok {
+		return "", fmt.Errorf("annotation %s does not exist on gw %s", OvnNodeGatewayNextHop, node.Name)
+	}
+
+	ip := net.ParseIP(nodeGatewayNextHop)
+	if ip == nil {
+		return "", fmt.Errorf("unable to parse gateway next hop")
+	}
+
+	return nodeGatewayNextHop, nil
+}
+
+func syncGatewayLogicalNetwork(node *kapi.Node, hostsubnet *net.IPNet) error {
+	var clusterIPSubnet []string
+	nodeName := node.Name
+	ifaceID := node.Annotations[OvnNodeGatewayIfaceID]
+
+	macAddress, err := parseNodeGatewayMacAddress(node)
+	if err != nil {
+		return err
+	}
+
+	localnetGatewayIP, err := parseNodeGatewayIP(node)
+	if err != nil {
+		return err
+	}
+
+	localnetGatewayNextHop, err := parseNodeGatewayNextHop(node)
+	if err != nil {
+		return err
+	}
+
+	err = util.GatewayInit(clusterIPSubnet, nodeName, ifaceID, localnetGatewayIP,
+		macAddress, localnetGatewayNextHop, hostsubnet.String(), true, false, nil)
+	if err != nil {
+		return err
+	}
+
+	return nil
+}
+
+func (cluster *OvnClusterController) ensureNodeLogicalNetwork(node *kapi.Node, hostsubnet *net.IPNet) error {
 	ip := util.NextIP(hostsubnet.IP)
 	n, _ := hostsubnet.Mask.Size()
 	firstIP := fmt.Sprintf("%s/%d", ip.String(), n)
+	nodeName := node.Name
 
 	nodeLRPMac, stderr, err := util.RunOVNNbctl("--if-exist", "get", "logical_router_port", "rtos-"+nodeName, "mac")
 	if err != nil {
@@ -239,7 +311,7 @@ func (cluster *OvnClusterController) addNode(node *kapi.Node) (err error) {
 	hostsubnet, _ := parseNodeHostSubnet(node)
 	if hostsubnet != nil {
 		// Node already has subnet assigned; ensure its logical network is set up
-		return cluster.ensureNodeLogicalNetwork(node.Name, hostsubnet)
+		return cluster.ensureNodeLogicalNetwork(node, hostsubnet)
 	}
 
 	// Node doesn't have a subnet assigned; reserve a new one for it
@@ -263,7 +335,7 @@ func (cluster *OvnClusterController) addNode(node *kapi.Node) (err error) {
 	}()
 
 	// Ensure that the node's logical network has been created
-	err = cluster.ensureNodeLogicalNetwork(node.Name, hostsubnet)
+	err = cluster.ensureNodeLogicalNetwork(node, hostsubnet)
 	if err != nil {
 		return err
 	}
@@ -271,7 +343,9 @@ func (cluster *OvnClusterController) addNode(node *kapi.Node) (err error) {
 	// Set the HostSubnet annotation on the node object to signal
 	// to nodes that their logical infrastructure is set up and they can
 	// proceed with their initialization
-	err = cluster.Kube.SetAnnotationOnNode(node, OvnHostSubnet, hostsubnet.String())
+	annotations := make(map[string]string)
+	annotations[OvnHostSubnet] = hostsubnet.String()
+	err = cluster.Kube.SetAnnotationOnNode(node, annotations)
 	if err != nil {
 		logrus.Errorf("Failed to set node %s host subnet annotation to %q: %v",
 			node.Name, hostsubnet.String(), err)

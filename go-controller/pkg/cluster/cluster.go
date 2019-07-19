@@ -34,7 +34,13 @@ const (
 	// OvnHostSubnet is the constant string representing the annotation key
 	OvnHostSubnet = "ovn_host_subnet"
 	// OvnClusterRouter is the name of the distributed router
-	OvnClusterRouter = "ovn_cluster_router"
+	OvnClusterRouter         = "ovn_cluster_router"
+	OvnNodeGatewayMode       = "ovn_node_gateway_mode"
+	OvnNodeGatewayVlanID     = "ovn_node_gateway_vlan_id"
+	OvnNodeGatewayIfaceID    = "ovn_node_gateway_iface_id"
+	OvnNodeGatewayMacAddress = "ovn_node_gateway_mac_address"
+	OvnNodeGatewayIP         = "ovn_node_gateway_ip"
+	OvnNodeGatewayNextHop    = "ovn_node_gateway_next_hop"
 )
 
 // NewClusterController creates a new controller for IP subnet allocation to

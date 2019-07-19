@@ -1,6 +1,7 @@
 package kube
 
 import (
+	"encoding/json"
 	"fmt"
 
 	"github.com/sirupsen/logrus"
@@ -16,7 +17,7 @@ import (
 // kubernetes resources
 type Interface interface {
 	SetAnnotationOnPod(pod *kapi.Pod, key, value string) error
-	SetAnnotationOnNode(node *kapi.Node, key, value string) error
+	SetAnnotationOnNode(node *kapi.Node, annotations map[string]string) error
 	GetAnnotationsOnPod(namespace, name string) (map[string]string, error)
 	GetPod(namespace, name string) (*kapi.Pod, error)
 	GetPods(namespace string) (*kapi.PodList, error)
@@ -45,10 +46,14 @@ func (k *Kube) SetAnnotationOnPod(pod *kapi.Pod, key, value string) error {
 }
 
 // SetAnnotationOnNode takes the node object and key/value string pair to set it as an annotation
-func (k *Kube) SetAnnotationOnNode(node *kapi.Node, key, value string) error {
-	logrus.Infof("Setting annotations %s=%s on node %s", key, value, node.Name)
-	patchData := fmt.Sprintf(`{"metadata":{"annotations":{"%s":"%s"}}}`, key, value)
-	_, err := k.KClient.CoreV1().Nodes().Patch(node.Name, types.MergePatchType, []byte(patchData))
+func (k *Kube) SetAnnotationOnNode(node *kapi.Node, annotations map[string]string) error {
+	logrus.Infof("Setting annotations %v on node %s", annotations, node.Name)
+	annotationData, err := json.Marshal(annotations)
+	if err != nil {
+		fmt.Errorf("failed to marshal annotations: %v", err)
+	}
+	patchData := fmt.Sprintf(`{"metadata":{"annotations":%s}}`, annotationData)
+	_, err = k.KClient.CoreV1().Nodes().Patch(node.Name, types.MergePatchType, []byte(patchData))
 	if err != nil {
 		logrus.Errorf("Error in setting annotation on node %s: %v", node.Name, err)
 	}

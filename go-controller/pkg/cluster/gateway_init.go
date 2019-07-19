@@ -3,10 +3,38 @@ package cluster
 import (
 	"fmt"
 	"net"
+	"strconv"
 
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/kube"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
+	kapi "k8s.io/api/core/v1"
 )
+
+// setGatewayAnnotations sets the annotations on the GW node
+func setGatewayAnnotations(nodeName, mode string, vlanID uint, ifaceID, macAddress, interfaceIP, interfaceNextHop string) error {
+
+	var node *kapi.Node
+	var kube kube.Interface
+	node, err := kube.GetNode(nodeName)
+	if err != nil {
+		return fmt.Errorf("failed to get node: %v", err)
+	}
+	annotations := make(map[string]string)
+	annotations[OvnNodeGatewayMode] = mode
+	annotations[OvnNodeGatewayVlanID] = strconv.Itoa(int(config.Gateway.VLANID))
+	annotations[OvnNodeGatewayIfaceID] = ifaceID
+	annotations[OvnNodeGatewayMacAddress] = macAddress
+	annotations[OvnNodeGatewayIP] = interfaceIP
+	annotations[OvnNodeGatewayNextHop] = interfaceNextHop
+
+	err = kube.SetAnnotationOnNode(node, annotations)
+	if err != nil {
+		return fmt.Errorf("failed to set annotations on node: %v", err)
+	}
+
+	return nil
+}
 
 // bridgedGatewayNodeSetup makes the bridge's MAC address permanent, sets up
 // the physical network name mappings for the bridge, and returns an ifaceID
