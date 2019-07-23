@@ -95,7 +95,7 @@ fi
 K8S_CACERT=${K8S_CACERT:-/var/run/secrets/kubernetes.io/serviceaccount/ca.crt}
 
 # ovn-northd - /etc/sysconfig/ovn-northd
-ovn_northd_opts=${OVN_NORTHD_OPTS:-"--db-nb-sock=/var/run/openvswitch/ovnnb_db.sock --db-sb-sock=/var/run/openvswitch/ovnsb_db.sock"}
+ovn_northd_opts=${OVN_NORTHD_OPTS:-""}
 
 # ovn-controller
 ovn_controller_opts=${OVN_CONTROLLER_OPTS:-""}
