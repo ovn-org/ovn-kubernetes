@@ -90,7 +90,7 @@ nohup sudo ovnkube -k8s-kubeconfig kubeconfig.yaml \
  -loglevel=4 \
  -k8s-apiserver="http://$K8S_APISERVER_IP:8080" \
  -logfile="/var/log/openvswitch/ovnkube.log" \
- -init-master="$NODENAME" -cluster-subnet="$CLUSTER_IP_SUBNET" \
+ -init-master="$NODENAME" -cluster-subnets="$CLUSTER_IP_SUBNET" \
  -init-node="$NODENAME" \
  -k8s-service-cidr="$SERVICE_IP_SUBNET" \
  -k8s-token="$TOKEN" \
@@ -139,5 +139,5 @@ nohup sudo ovnkube -k8s-kubeconfig $HOME/kubeconfig.yaml -loglevel=4 \
     -k8s-token="$TOKEN" \
     -init-gateways \
     -k8s-service-cidr= \
-    -cluster-subnet="$SERVICE_IP_SUBNET" 2>&1 &
+    -cluster-subnets="$SERVICE_IP_SUBNET" 2>&1 &
 ```

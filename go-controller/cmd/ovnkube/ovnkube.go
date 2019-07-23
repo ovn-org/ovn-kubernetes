@@ -4,11 +4,9 @@ import (
 	"fmt"
 	"io"
 	"io/ioutil"
-	"net"
 	"os"
 	"os/signal"
 	"runtime"
-	"strconv"
 	"strings"
 	"syscall"
 	"text/tabwriter"
@@ -55,6 +53,7 @@ GLOBAL OPTIONS:{{range $title, $category := getFlagsByCategory}}
 func getFlagsByCategory() map[string][]cli.Flag {
 	m := map[string][]cli.Flag{}
 	m["Generic Options"] = config.CommonFlags
+	m["CNI Options"] = config.CNIFlags
 	m["K8s-related Options"] = config.K8sFlags
 	m["OVN Northbound DB Options"] = config.OvnNBFlags
 	m["OVN Southbound DB Options"] = config.OvnSBFlags
@@ -92,6 +91,7 @@ func main() {
 	c.Version = config.Version
 	c.CustomAppHelpTemplate = CustomAppHelpTemplate
 	c.Flags = config.CommonFlags
+	c.Flags = append(c.Flags, config.CNIFlags...)
 	c.Flags = append(c.Flags, config.K8sFlags...)
 	c.Flags = append(c.Flags, config.OvnNBFlags...)
 	c.Flags = append(c.Flags, config.OvnSBFlags...)
@@ -206,11 +206,6 @@ func runOvnKube(ctx *cli.Context) error {
 	}
 
 	if master != "" || node != "" {
-		clusterController.ClusterIPNet, err = parseClusterSubnetEntries(ctx.String("cluster-subnet"))
-		if err != nil {
-			panic(err.Error())
-		}
-
 		if master != "" {
 			if runtime.GOOS == "windows" {
 				panic("Windows is not supported as master node")
@@ -245,58 +240,4 @@ func runOvnKube(ctx *cli.Context) error {
 	}
 
 	return fmt.Errorf("need to run ovnkube in either master and/or node mode")
-}
-
-// parseClusterSubnetEntries returns the parsed set of CIDRNetworkEntries passed by the user on the command line
-// These entries define the clusters network space by specifying a set of CIDR and netmaskas the SDN can allocate
-// addresses from.
-func parseClusterSubnetEntries(clusterSubnetCmd string) ([]ovncluster.CIDRNetworkEntry, error) {
-	var parsedClusterList []ovncluster.CIDRNetworkEntry
-
-	clusterEntriesList := strings.Split(clusterSubnetCmd, ",")
-
-	for _, clusterEntry := range clusterEntriesList {
-		var parsedClusterEntry ovncluster.CIDRNetworkEntry
-
-		splitClusterEntry := strings.Split(clusterEntry, "/")
-		if len(splitClusterEntry) == 3 {
-			tmp, err := strconv.ParseUint(splitClusterEntry[2], 10, 32)
-			if err != nil {
-				return nil, err
-			}
-			parsedClusterEntry.HostSubnetLength = uint32(tmp)
-		} else if len(splitClusterEntry) == 2 {
-			// the old hardcoded value for backwards compatability
-			parsedClusterEntry.HostSubnetLength = 24
-		} else {
-			return nil, fmt.Errorf("cluster-cidr not formatted properly")
-		}
-
-		var err error
-		_, parsedClusterEntry.CIDR, err = net.ParseCIDR(fmt.Sprintf("%s/%s", splitClusterEntry[0], splitClusterEntry[1]))
-		if err != nil {
-			return nil, err
-		}
-
-		//check to make sure that no cidrs overlap
-		if cidrsOverlap(parsedClusterEntry.CIDR, parsedClusterList) {
-			return nil, fmt.Errorf("CIDR %s overlaps with another cluster network CIDR", parsedClusterEntry.CIDR.String())
-		}
-
-		parsedClusterList = append(parsedClusterList, parsedClusterEntry)
-
-	}
-
-	return parsedClusterList, nil
-}
-
-//cidrsOverlap returns a true if the cidr range overlaps any in the list of cidr ranges
-func cidrsOverlap(cidr *net.IPNet, cidrList []ovncluster.CIDRNetworkEntry) bool {
-
-	for _, clusterEntry := range cidrList {
-		if cidr.Contains(clusterEntry.CIDR.IP) || clusterEntry.CIDR.Contains(cidr.IP) {
-			return true
-		}
-	}
-	return false
 }

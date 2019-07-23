@@ -10,7 +10,7 @@ function ovn-kubernetes-node() {
 
   echo "Enable and start ovn-kubernetes node services"
   /usr/bin/ovnkube \
-	--cluster-subnet "${cluster_cidr}" \
+	--cluster-subnets "${cluster_cidr}" \
 	--init-node `hostname`
 }
 

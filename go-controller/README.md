@@ -36,7 +36,7 @@ Options specified on the command-line override configuration file options which 
 Usage:
   -config-file string
      configuration file path (default: /etc/openvswitch/ovn_k8s.conf)
-  -cluster-subnet string
+  -cluster-subnets string
      cluster wide IP subnet to use (default: 11.11.0.0/16)
   -init-master string
      initialize master (that watches pods/nodes/services/policies), requires the hostname as argument
@@ -155,7 +155,7 @@ ovnkube --init-master <master-host-name> \
 	--k8s-cacert <path to the cacert file> \
 	--k8s-token <token string for authentication with kube apiserver> \
 	--k8s-apiserver <url to the kube apiserver e.g. https://10.11.12.13.8443> \
-	--cluster-subnet <cidr representing the global pod network e.g. 192.168.0.0/16>
+	--cluster-subnets <cidr representing the global pod network e.g. 192.168.0.0/16>
 ```
 
 With the above the master ovnkube controller will initialize the central master logical router and establish the watcher loops for the following:

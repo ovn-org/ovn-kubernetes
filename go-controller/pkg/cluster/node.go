@@ -30,7 +30,7 @@ func (cluster *OvnClusterController) StartClusterNode(name string) error {
 	var clusterSubnets []string
 	var cidr string
 
-	for _, clusterSubnet := range cluster.ClusterIPNet {
+	for _, clusterSubnet := range config.Default.ClusterSubnets {
 		clusterSubnets = append(clusterSubnets, clusterSubnet.CIDR.String())
 	}
 

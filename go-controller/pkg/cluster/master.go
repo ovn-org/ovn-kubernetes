@@ -8,6 +8,7 @@ import (
 	kapi "k8s.io/api/core/v1"
 	"k8s.io/client-go/tools/cache"
 
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
 
 	"github.com/openshift/origin/pkg/util/netutils"
@@ -40,7 +41,7 @@ func (cluster *OvnClusterController) StartClusterMaster(masterNodeName string) e
 	// NewSubnetAllocator is a subnet IPAM, which takes a CIDR (first argument)
 	// and gives out subnets of length 'hostSubnetLength' (second argument)
 	// but omitting any that exist in 'subrange' (third argument)
-	for _, clusterEntry := range cluster.ClusterIPNet {
+	for _, clusterEntry := range config.Default.ClusterSubnets {
 		subrange := make([]string, 0)
 		for _, allocatedRange := range alreadyAllocated {
 			firstAddress, _, err := net.ParseCIDR(allocatedRange)
