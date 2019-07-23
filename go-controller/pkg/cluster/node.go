@@ -9,13 +9,13 @@ import (
 	"reflect"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/sirupsen/logrus"
 
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/cni"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
-	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
 
 	kapi "k8s.io/api/core/v1"
@@ -76,9 +76,13 @@ func (cluster *OvnClusterController) StartClusterNode(name string) error {
 	var cidr string
 	var connected bool
 
+	var wg sync.WaitGroup
+
 	for _, clusterSubnet := range config.Default.ClusterSubnets {
 		clusterSubnets = append(clusterSubnets, clusterSubnet.CIDR.String())
 	}
+
+	messages := make(chan error)
 
 	// First wait for the node logical switch to be created by the Master, timeout is 300s.
 	if err := wait.PollImmediate(500*time.Millisecond, 300*time.Second, func() (bool, error) {
@@ -122,9 +126,46 @@ func (cluster *OvnClusterController) StartClusterNode(name string) error {
 		return nil
 	}
 
-	err = ovn.CreateManagementPort(node.Name, subnet.String(), clusterSubnets)
+	type readyFunc func(string) (bool, error)
+	var readyFuncs []readyFunc
+
+	mgmtPortAnnotations, err := CreateManagementPort(node.Name, subnet.String(), clusterSubnets)
 	if err != nil {
 		return err
+	}
+
+	readyFuncs = append(readyFuncs, ManagementPortReady)
+	wg.Add(len(readyFuncs))
+
+	// Set management port macAddress as annotation
+	err = cluster.Kube.SetAnnotationsOnNode(node, mgmtPortAnnotations)
+	if err != nil {
+		logrus.Errorf("Failed to set node %s mgmt port macAddress annotation: %v", node.Name, mgmtPortAnnotations)
+		return err
+	}
+
+	portName := "k8s-" + node.Name
+
+	// Wait for the portMac to be created
+	for _, f := range readyFuncs {
+		go func(rf readyFunc) {
+			defer wg.Done()
+			err := wait.PollImmediate(500*time.Millisecond, 300*time.Second, func() (bool, error) {
+				return rf(portName)
+			})
+			messages <- err
+		}(f)
+	}
+	go func() {
+		wg.Wait()
+		close(messages)
+	}()
+
+	for i := range messages {
+		if i != nil {
+			logrus.Errorf("Timeout error while obtaining addresses for %s (%v)", portName, i)
+			return i
+		}
 	}
 
 	if config.Gateway.Mode != config.GatewayModeDisabled {

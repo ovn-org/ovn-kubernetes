@@ -1,13 +1,12 @@
-// +build linux
+// +build windows
 
-package ovn
+package cluster
 
 import (
 	"io/ioutil"
 	"os"
 	"path/filepath"
 
-	"github.com/coreos/go-iptables/iptables"
 	"github.com/urfave/cli"
 
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
@@ -60,14 +59,13 @@ var _ = Describe("Management Port Operations", func() {
 				mgtPort       string = "k8s-" + nodeName
 				mgtPortIP     string = "10.1.1.2"
 				mgtPortPrefix string = "24"
-				mgtPortCIDR   string = mgtPortIP + "/" + mgtPortPrefix
 				clusterIPNet  string = "10.1.0.0"
 				clusterCIDR   string = clusterIPNet + "/16"
 				serviceIPNet  string = "172.16.1.0"
-				serviceCIDR   string = serviceIPNet + "/24"
 				mtu           string = "1400"
 				gwIP          string = "10.1.1.1"
 				lrpMAC        string = "00:00:00:00:00:03"
+				ifindex       string = "10"
 			)
 
 			fexec := ovntest.NewFakeExec()
@@ -89,27 +87,28 @@ var _ = Describe("Management Port Operations", func() {
 				Output: lrpMAC,
 			})
 
-			// linux-specific setup
+			// windows-specific setup
 			fexec.AddFakeCmdsNoOutputNoError([]string{
-				"ip link set " + mgtPort + " up",
-				"ip addr flush dev " + mgtPort,
-				"ip addr add " + mgtPortCIDR + " dev " + mgtPort,
-				"ip route flush " + clusterCIDR,
-				"ip route add " + clusterCIDR + " via " + gwIP,
-				"ip route flush " + serviceCIDR,
-				"ip route add " + serviceCIDR + " via " + gwIP,
-				"ip neigh add " + gwIP + " dev " + mgtPort + " lladdr " + lrpMAC,
+				"powershell Enable-NetAdapter " + mgtPort,
+				"powershell Get-NetIPAddress -InterfaceAlias " + mgtPort,
+				"powershell Remove-NetIPAddress -InterfaceAlias " + mgtPort + " -Confirm:$false",
+				"powershell New-NetIPAddress -IPAddress " + mgtPortIP + " -PrefixLength " + mgtPortPrefix + " -InterfaceAlias " + mgtPort,
+				"netsh interface ipv4 set subinterface " + mgtPort + " mtu=" + mtu + " store=persistent",
+			})
+			fexec.AddFakeCmd(&ovntest.ExpectedCmd{
+				Cmd:    "powershell $(Get-NetAdapter | Where { $_.Name -Match \"" + mgtPort + "\" }).ifIndex",
+				Output: ifindex,
+			})
+			fexec.AddFakeCmdsNoOutputNoError([]string{
+				// Don't print route output; test that network is not yet found
+				"route print -4 " + clusterIPNet,
+				"route -p add " + clusterIPNet + " mask 255.255.0.0 " + gwIP + " METRIC 2 IF " + ifindex,
+				// Don't print route output; test that network is not yet found
+				"route print -4 " + serviceIPNet,
+				"route -p add " + serviceIPNet + " mask 255.255.0.0 " + gwIP + " METRIC 2 IF " + ifindex,
 			})
 
 			err := util.SetExec(fexec)
-			Expect(err).NotTo(HaveOccurred())
-
-			fakeipt, err := util.NewFakeWithProtocol(iptables.ProtocolIPv4)
-			Expect(err).NotTo(HaveOccurred())
-			util.SetIPTablesHelper(iptables.ProtocolIPv4, fakeipt)
-			err = fakeipt.NewChain("nat", "POSTROUTING")
-			Expect(err).NotTo(HaveOccurred())
-			err = fakeipt.NewChain("nat", "OVN-KUBE-SNAT-MGMTPORT")
 			Expect(err).NotTo(HaveOccurred())
 
 			_, err = config.InitConfig(ctx, fexec, nil)
@@ -119,21 +118,6 @@ var _ = Describe("Management Port Operations", func() {
 			Expect(err).NotTo(HaveOccurred())
 
 			Expect(fexec.CalledMatchesExpected()).To(BeTrue())
-
-			expectedTables := map[string]util.FakeTable{
-				"filter": {},
-				"nat": {
-					"POSTROUTING": []string{
-						"-o " + mgtPort + " -j OVN-KUBE-SNAT-MGMTPORT",
-					},
-					"OVN-KUBE-SNAT-MGMTPORT": []string{
-						"-o " + mgtPort + " -j SNAT --to-source " + mgtPortIP + " -m comment --comment OVN SNAT to Management Port",
-					},
-				},
-			}
-			err = fakeipt.MatchState(expectedTables)
-			Expect(err).NotTo(HaveOccurred())
-
 			return nil
 		}
 

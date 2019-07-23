@@ -1,15 +1,21 @@
-// +build windows
+// +build linux
 
-package ovn
+package cluster
 
 import (
 	"io/ioutil"
 	"os"
 	"path/filepath"
 
+	"github.com/coreos/go-iptables/iptables"
 	"github.com/urfave/cli"
 
+	"k8s.io/api/core/v1"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/client-go/kubernetes/fake"
+
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn"
 	ovntest "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/testing"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
 
@@ -59,13 +65,14 @@ var _ = Describe("Management Port Operations", func() {
 				mgtPort       string = "k8s-" + nodeName
 				mgtPortIP     string = "10.1.1.2"
 				mgtPortPrefix string = "24"
+				mgtPortCIDR   string = mgtPortIP + "/" + mgtPortPrefix
 				clusterIPNet  string = "10.1.0.0"
 				clusterCIDR   string = clusterIPNet + "/16"
 				serviceIPNet  string = "172.16.1.0"
+				serviceCIDR   string = serviceIPNet + "/24"
 				mtu           string = "1400"
 				gwIP          string = "10.1.1.1"
 				lrpMAC        string = "00:00:00:00:00:03"
-				ifindex       string = "10"
 			)
 
 			fexec := ovntest.NewFakeExec()
@@ -80,44 +87,79 @@ var _ = Describe("Management Port Operations", func() {
 				Output: mgtPortMAC,
 			})
 			fexec.AddFakeCmd(&ovntest.ExpectedCmd{
-				Cmd: "ovn-nbctl --timeout=15 -- --may-exist lsp-add " + nodeName + " " + mgtPort + " -- lsp-set-addresses " + mgtPort + " " + mgtPortMAC + " " + mgtPortIP + " -- --if-exists remove logical_switch " + nodeName + " other-config exclude_ips",
-			})
-			fexec.AddFakeCmd(&ovntest.ExpectedCmd{
 				Cmd:    "ovn-nbctl --timeout=15 lsp-get-addresses stor-" + nodeName,
 				Output: lrpMAC,
 			})
 
-			// windows-specific setup
+			// linux-specific setup
 			fexec.AddFakeCmdsNoOutputNoError([]string{
-				"powershell Enable-NetAdapter " + mgtPort,
-				"powershell Get-NetIPAddress -InterfaceAlias " + mgtPort,
-				"powershell Remove-NetIPAddress -InterfaceAlias " + mgtPort + " -Confirm:$false",
-				"powershell New-NetIPAddress -IPAddress " + mgtPortIP + " -PrefixLength " + mgtPortPrefix + " -InterfaceAlias " + mgtPort,
-				"netsh interface ipv4 set subinterface " + mgtPort + " mtu=" + mtu + " store=persistent",
+				"ip link set " + mgtPort + " up",
+				"ip addr flush dev " + mgtPort,
+				"ip addr add " + mgtPortCIDR + " dev " + mgtPort,
+				"ip route flush " + clusterCIDR,
+				"ip route add " + clusterCIDR + " via " + gwIP,
+				"ip route flush " + serviceCIDR,
+				"ip route add " + serviceCIDR + " via " + gwIP,
+				"ip neigh add " + gwIP + " dev " + mgtPort + " lladdr " + lrpMAC,
 			})
 			fexec.AddFakeCmd(&ovntest.ExpectedCmd{
-				Cmd:    "powershell $(Get-NetAdapter | Where { $_.Name -Match \"" + mgtPort + "\" }).ifIndex",
-				Output: ifindex,
-			})
-			fexec.AddFakeCmdsNoOutputNoError([]string{
-				// Don't print route output; test that network is not yet found
-				"route print -4 " + clusterIPNet,
-				"route -p add " + clusterIPNet + " mask 255.255.0.0 " + gwIP + " METRIC 2 IF " + ifindex,
-				// Don't print route output; test that network is not yet found
-				"route print -4 " + serviceIPNet,
-				"route -p add " + serviceIPNet + " mask 255.255.0.0 " + gwIP + " METRIC 2 IF " + ifindex,
+				Cmd:    "ovn-nbctl --timeout=15 get logical_switch_port k8s-" + nodeName + " dynamic_addresses",
+				Output: `"` + mgtPortMAC + " " + mgtPortIP + `"`,
 			})
 
 			err := util.SetExec(fexec)
 			Expect(err).NotTo(HaveOccurred())
 
+			fakeipt, err := util.NewFakeWithProtocol(iptables.ProtocolIPv4)
+			Expect(err).NotTo(HaveOccurred())
+			util.SetIPTablesHelper(iptables.ProtocolIPv4, fakeipt)
+			err = fakeipt.NewChain("nat", "POSTROUTING")
+			Expect(err).NotTo(HaveOccurred())
+			err = fakeipt.NewChain("nat", "OVN-KUBE-SNAT-MGMTPORT")
+			Expect(err).NotTo(HaveOccurred())
+
+			existingNode := v1.Node{ObjectMeta: metav1.ObjectMeta{
+				Name: nodeName,
+				Annotations: map[string]string{
+					ovn.OvnHostSubnet:                   nodeSubnet,
+					ovn.OvnNodeManagementPortMacAddress: mgtPortMAC,
+				},
+			}}
+			fakeClient := fake.NewSimpleClientset(&v1.NodeList{
+				Items: []v1.Node{existingNode},
+			})
+
 			_, err = config.InitConfig(ctx, fexec, nil)
 			Expect(err).NotTo(HaveOccurred())
 
-			err = CreateManagementPort(nodeName, nodeSubnet, []string{clusterCIDR})
+			macAddress, err := CreateManagementPort(nodeName, nodeSubnet, []string{clusterCIDR})
+			Expect(err).NotTo(HaveOccurred())
+			i := 0
+			for k, v := range macAddress {
+				Expect(k).To(Equal(ovn.OvnNodeManagementPortMacAddress))
+				Expect(v).To(Equal(mgtPortMAC))
+				i++
+			}
+			Expect(i).To(Equal(1))
+
+			expectedTables := map[string]util.FakeTable{
+				"filter": {},
+				"nat": {
+					"POSTROUTING": []string{
+						"-o " + mgtPort + " -j OVN-KUBE-SNAT-MGMTPORT",
+					},
+					"OVN-KUBE-SNAT-MGMTPORT": []string{
+						"-o " + mgtPort + " -j SNAT --to-source " + mgtPortIP + " -m comment --comment OVN SNAT to Management Port",
+					},
+				},
+			}
+			err = fakeipt.MatchState(expectedTables)
 			Expect(err).NotTo(HaveOccurred())
 
-			Expect(fexec.CalledMatchesExpected()).To(BeTrue())
+			updatedNode, err := fakeClient.CoreV1().Nodes().Get(nodeName, metav1.GetOptions{})
+			Expect(err).NotTo(HaveOccurred())
+			Expect(updatedNode.Annotations).To(HaveKeyWithValue(ovn.OvnNodeManagementPortMacAddress, mgtPortMAC))
+
 			return nil
 		}
 
