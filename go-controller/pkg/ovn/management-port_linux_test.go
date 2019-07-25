@@ -7,6 +7,7 @@ import (
 	"os"
 	"path/filepath"
 
+	"github.com/coreos/go-iptables/iptables"
 	"github.com/urfave/cli"
 
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
@@ -103,6 +104,12 @@ var _ = Describe("Management Port Operations", func() {
 			err := util.SetExec(fexec)
 			Expect(err).NotTo(HaveOccurred())
 
+			fakeipt, err := util.NewFakeWithProtocol(iptables.ProtocolIPv4)
+			Expect(err).NotTo(HaveOccurred())
+			util.SetIPTablesHelper(iptables.ProtocolIPv4, fakeipt)
+			err = fakeipt.NewChain("nat", "POSTROUTING")
+			Expect(err).NotTo(HaveOccurred())
+
 			_, err = config.InitConfig(ctx, fexec, nil)
 			Expect(err).NotTo(HaveOccurred())
 
@@ -110,6 +117,18 @@ var _ = Describe("Management Port Operations", func() {
 			Expect(err).NotTo(HaveOccurred())
 
 			Expect(fexec.CalledMatchesExpected()).To(BeTrue())
+
+			expectedTables := map[string]util.FakeTable{
+				"filter": {},
+				"nat": {
+					"POSTROUTING": []string{
+						"-o " + mgtPort + " -j SNAT --to-source " + mgtPortIP,
+					},
+				},
+			}
+			err = fakeipt.MatchState(expectedTables)
+			Expect(err).NotTo(HaveOccurred())
+
 			return nil
 		}
 
