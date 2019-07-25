@@ -3,7 +3,11 @@
 package ovn
 
 import (
+	"fmt"
 	"os"
+	"strings"
+
+	"github.com/coreos/go-iptables/iptables"
 
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
@@ -71,6 +75,21 @@ func CreateManagementPort(nodeName, localSubnet string, clusterSubnet []string) 
 	_, _, err = util.RunIP("neigh", "add", routerIP, "dev", interfaceName, "lladdr", routerMAC)
 	if err != nil && os.IsNotExist(err) {
 		return err
+	}
+
+	// Set up necessary iptables rules
+	ipt, err := util.GetIPTablesHelper(iptables.ProtocolIPv4)
+	if err != nil {
+		return err
+	}
+	interfaceAddr := strings.Split(interfaceIP, "/")
+	rule := []string{"-o", interfaceName, "-j", "SNAT", "--to-source", interfaceAddr[0]}
+	exists, err := ipt.Exists("nat", "POSTROUTING", rule...)
+	if err == nil && !exists {
+		err = ipt.Insert("nat", "POSTROUTING", 1, rule...)
+	}
+	if err != nil {
+		return fmt.Errorf("could not set up iptables rules for management port: %v", err)
 	}
 
 	return nil
