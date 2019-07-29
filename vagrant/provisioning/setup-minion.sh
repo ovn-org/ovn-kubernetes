@@ -176,7 +176,7 @@ if [ "$DAEMONSET" != "true" ]; then
       -sb-address="$ovn_sb" \
       ${SSL_ARGS} \
       -init-gateways -gateway-interface=enp0s8 -gateway-nexthop="$GW_IP" \
-      -cluster-subnet="192.168.0.0/16" 2>&1 &
+      -cluster-subnets="192.168.0.0/16" 2>&1 &
 fi
 
 sleep 10

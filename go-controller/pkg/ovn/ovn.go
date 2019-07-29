@@ -250,15 +250,24 @@ func (oc *Controller) WatchNamespaces() error {
 // WatchNodes starts the watching of node resource and calls
 // back the appropriate handler logic
 func (oc *Controller) WatchNodes() error {
+	gatewaysHandled := make(map[string]bool)
 	_, err := oc.watchFactory.AddNodeHandler(cache.ResourceEventHandlerFuncs{
 		AddFunc: func(obj interface{}) {
 			if !config.Gateway.NodeportEnable {
 				return
 			}
 			node := obj.(*kapi.Node)
-			oc.handleNodePortLB(node)
+			gatewaysHandled[node.Name] = oc.handleNodePortLB(node)
 		},
-		UpdateFunc: func(old, new interface{}) {},
+		UpdateFunc: func(old, new interface{}) {
+			if !config.Gateway.NodeportEnable {
+				return
+			}
+			node := new.(*kapi.Node)
+			if !gatewaysHandled[node.Name] {
+				gatewaysHandled[node.Name] = oc.handleNodePortLB(node)
+			}
+		},
 		DeleteFunc: func(obj interface{}) {
 			node := obj.(*kapi.Node)
 			logrus.Debugf("Delete event for Node %q. Removing the node from "+
@@ -268,6 +277,7 @@ func (oc *Controller) WatchNodes() error {
 			delete(oc.gatewayCache, node.Name)
 			delete(oc.logicalSwitchCache, node.Name)
 			oc.lsMutex.Unlock()
+			delete(gatewaysHandled, node.Name)
 		},
 	}, nil)
 	return err

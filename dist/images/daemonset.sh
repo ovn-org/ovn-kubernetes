@@ -14,6 +14,10 @@ OVN_SVC_DIDR=""
 OVN_K8S_APISERVER=""
 OVN_GATEWAY_MODE=""
 OVN_GATEWAY_OPTS=""
+# In the future we will have RAFT based HA support.
+OVN_DB_VIP_IMAGE=""
+OVN_DB_VIP=""
+OVN_DB_REPLICAS=""
 
 # Parse parameters given as arguments to this script.
 while [ "$1" != "" ]; do
@@ -40,6 +44,15 @@ while [ "$1" != "" ]; do
             ;;
         --k8s-apiserver)
             OVN_K8S_APISERVER=$VALUE
+            ;;
+        --db-vip-image)
+            OVN_DB_VIP_IMAGE=$VALUE
+            ;;
+        --db-replicas)
+            OVN_DB_REPLICAS=$VALUE
+            ;;
+        --db-vip)
+            OVN_DB_VIP=$VALUE
             ;;
         *)
             echo "WARNING: unknown parameter \"$PARAM\""
@@ -86,11 +99,21 @@ echo "ovn_gateway_mode: ${ovn_gateway_mode}"
 ovn_gateway_opts=${OVN_GATEWAY_OPTS}
 echo "ovn_gateway_opts: ${ovn_gateway_opts}"
 
+ovn_db_vip_image=${OVN_DB_VIP_IMAGE:-"docker.io/ovnkube/ovndb-vip-u:latest"}
+echo "ovn_db_vip_image: ${ovn_db_vip_image}"
+ovn_db_replicas=${OVN_DB_REPLICAS:-3}
+echo "ovn_db_replicas: ${ovn_db_replicas}"
+ovn_db_vip=${OVN_DB_VIP}
+echo "ovn_db_vip: ${ovn_db_vip}"
+
 # Simplified expansion of template 
 image_str="{{ ovn_image | default('docker.io/ovnkube/ovn-daemonset:latest') }}"
 policy_str="{{ ovn_image_pull_policy | default('IfNotPresent') }}"
 ovn_gateway_opts_repl="{{ ovn_gateway_opts }}"
 ovn_gateway_mode_repl="{{ ovn_gateway_mode }}"
+ovn_db_vip_image_repl="{{ ovn_db_vip_image | default('docker.io/ovnkube/ovndb-vip-u:latest') }}"
+ovn_db_replicas_repl="{{ ovn_db_replicas | default(3) }}"
+ovn_db_vip_repl="{{ ovn_db_vip }}"
 
 sed "s,${image_str},${image},
 s,${ovn_gateway_mode_repl},${ovn_gateway_mode},
@@ -102,6 +125,11 @@ s,${policy_str},${policy}," ../templates/ovnkube-master.yaml.j2 > ../yaml/ovnkub
 
 sed "s,${image_str},${image},
 s,${policy_str},${policy}," ../templates/ovnkube-db.yaml.j2 > ../yaml/ovnkube-db.yaml
+
+sed "s,${ovn_db_vip_image_repl},${ovn_db_vip_image},
+s,${ovn_db_replicas_repl},${ovn_db_replicas},
+s,${ovn_db_vip_repl},${ovn_db_vip},
+s,${policy_str},${policy}," ../templates/ovnkube-db-vip.yaml.j2 > ../yaml/ovnkube-db-vip.yaml
 
 # ovn-setup.yaml
 # net_cidr=10.128.0.0/14/23

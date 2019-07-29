@@ -11,10 +11,14 @@ before_install:
 install:
     - eval "$(gimme 1.11.4)"
 script:
-    -   cd go-controller;
-    -    make;
-    -    make windows;
-    -    make gofmt;
-    -    make install.tools;
-    -    make lint;
-    -    make check;
+    - pushd go-controller
+    -    make
+    -    make windows
+    -    make gofmt
+    -    make install.tools
+    -    make lint
+    -    make check
+    - popd
+    - pushd dist/images
+    -    if [ -n "$(git diff --stat origin/master.. | grep dist/images/Dockerfile)" ]; then make all; fi
+    - popd

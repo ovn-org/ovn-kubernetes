@@ -2,13 +2,11 @@ package ovn
 
 import (
 	"fmt"
-	"time"
 
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
 	util "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
 	"github.com/sirupsen/logrus"
 	kapi "k8s.io/api/core/v1"
-	"k8s.io/apimachinery/pkg/util/wait"
 )
 
 type lbEndpoints struct {
@@ -126,29 +124,25 @@ func (ovn *Controller) AddEndpoints(ep *kapi.Endpoints) error {
 	return nil
 }
 
-func (ovn *Controller) handleNodePortLB(node *kapi.Node) {
+func (ovn *Controller) handleNodePortLB(node *kapi.Node) bool {
 	physicalGateway := "GR_" + node.Name
 	var k8sNSLbTCP, k8sNSLbUDP, physicalIP string
-	// Wait for the TCP, UDP north-south load balancers created by the new node.
-	if err := wait.Poll(500*time.Millisecond, 300*time.Second, func() (bool, error) {
-		if k8sNSLbTCP, _ = ovn.getGatewayLoadBalancer(physicalGateway, TCP); k8sNSLbTCP == "" {
-			return false, nil
-		}
-		if k8sNSLbUDP, _ = ovn.getGatewayLoadBalancer(physicalGateway, UDP); k8sNSLbUDP == "" {
-			return false, nil
-		}
-		if physicalIP, _ = ovn.getGatewayPhysicalIP(physicalGateway); physicalIP == "" {
-			return false, nil
-		}
-		return true, nil
-	}); err != nil {
-		logrus.Errorf("timed out waiting for load balancer to be ready on node %q", node.Name)
-		return
+	if k8sNSLbTCP, _ = ovn.getGatewayLoadBalancer(physicalGateway, TCP); k8sNSLbTCP == "" {
+		logrus.Debugf("TCP load balancer for node %q does not yet exist", node.Name)
+		return false
+	}
+	if k8sNSLbUDP, _ = ovn.getGatewayLoadBalancer(physicalGateway, UDP); k8sNSLbUDP == "" {
+		logrus.Debugf("UDP load balancer for node %q does not yet exist", node.Name)
+		return false
+	}
+	if physicalIP, _ = ovn.getGatewayPhysicalIP(physicalGateway); physicalIP == "" {
+		logrus.Debugf("gateway physical IP for node %q does not yet exist", node.Name)
+		return false
 	}
 	namespaces, err := ovn.kube.GetNamespaces()
 	if err != nil {
 		logrus.Errorf("failed to get k8s namespaces: %v", err)
-		return
+		return false
 	}
 	for _, ns := range namespaces.Items {
 		endpoints, err := ovn.kube.GetEndpoints(ns.Name)
@@ -197,6 +191,7 @@ func (ovn *Controller) handleNodePortLB(node *kapi.Node) {
 			}
 		}
 	}
+	return true
 }
 
 func (ovn *Controller) handleExternalIPs(svc *kapi.Service, svcPort kapi.ServicePort, ips []string, targetPort int32) {

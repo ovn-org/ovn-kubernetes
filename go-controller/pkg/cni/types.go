@@ -3,7 +3,7 @@ package cni
 import (
 	"net/http"
 
-	"github.com/containernetworking/cni/pkg/types"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/cni/types"
 )
 
 // serverRunDir is the default directory for CNIServer runtime files

@@ -125,7 +125,7 @@ ovn-master () {
   "start") echo "ovn-master - START"
 	 if [ ! -f /var/run/openvswitch/ovnkube-master.pid ] ; then
 	 /usr/bin/ovnkube \
-           --cluster-subnet "${ovn_cidr}" \
+           --cluster-subnets "${ovn_cidr}" \
            --init-master ${ovn_host} \
 	   --pidfile /var/run/openvswitch/ovnkube-master.pid \
 	   --logfile /var/log/ovn-kubernetes/ovnkube-master.log &
@@ -205,7 +205,7 @@ ovn-node () {
   case $1 in
   "start") echo "ovn-node - START"
 	 /usr/bin/ovnkube \
-        --cluster-subnet "${ovn_cidr}" \
+        --cluster-subnets "${ovn_cidr}" \
         --init-node "${ovn_host}" &
 	 ;;
   "stop") echo "ovn-node - STOP"

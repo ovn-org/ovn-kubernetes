@@ -28,11 +28,12 @@ var (
 
 	// Default holds parsed config file parameters and command-line overrides
 	Default = DefaultConfig{
-		MTU:             1400,
-		ConntrackZone:   64000,
-		EncapType:       "geneve",
-		EncapIP:         "",
-		InactivityProbe: 100000,
+		MTU:               1400,
+		ConntrackZone:     64000,
+		EncapType:         "geneve",
+		EncapIP:           "",
+		InactivityProbe:   100000,
+		RawClusterSubnets: "10.128.0.0/14/23",
 	}
 
 	// Logging holds logging-related parsed config file parameters and command-line overrides
@@ -88,6 +89,12 @@ type DefaultConfig struct {
 	// Maximum number of milliseconds of idle time on connection that
 	// ovn-controller waits before it will send a connection health probe.
 	InactivityProbe int `gcfg:"inactivity-probe"`
+	// RawClusterSubnets holds the unparsed cluster subnets. Should only be
+	// used inside config module.
+	RawClusterSubnets string `gcfg:"cluster-subnets"`
+	// ClusterSubnets holds parsed cluster subnet entries and may be used
+	// outside the config module.
+	ClusterSubnets []CIDRNetworkEntry
 }
 
 // LoggingConfig holds logging-related parsed config file parameters and command-line overrides
@@ -196,6 +203,8 @@ var (
 
 	// legacy service-cluster-ip-range CLI option
 	serviceClusterIPRange string
+	// legacy cluster-subnet CLI option
+	clusterSubnet string
 	// legacy init-gateways CLI option
 	initGateways bool
 	// legacy gateway-spare-interface CLI option
@@ -214,6 +223,7 @@ func init() {
 	savedOvnSouth = OvnSouth
 	savedGateway = Gateway
 	Flags = append(Flags, CommonFlags...)
+	Flags = append(Flags, CNIFlags...)
 	Flags = append(Flags, K8sFlags...)
 	Flags = append(Flags, OvnNBFlags...)
 	Flags = append(Flags, OvnSBFlags...)
@@ -348,6 +358,24 @@ var CommonFlags = []cli.Flag{
 			"connection for ovn-controller before it sends a inactivity probe",
 		Destination: &cliConfig.Default.InactivityProbe,
 	},
+	cli.StringFlag{
+		Name:        "cluster-subnet",
+		Usage:       "Deprecated alias for cluster-subnets.",
+		Destination: &clusterSubnet,
+	},
+	cli.StringFlag{
+		Name:  "cluster-subnets",
+		Value: "10.128.0.0/14/23",
+		Usage: "A comma separated set of IP subnets and the associated " +
+			"hostsubnet prefix lengths to use for the cluster (eg, \"10.128.0.0/14/23,10.0.0.0/14/23\"). " +
+			"Each entry is given in the form [IP address/prefix-length/hostsubnet-prefix-length] " +
+			"and cannot overlap with other entries. The hostsubnet-prefix-length " +
+			"is optional and if unspecified defaults to 24. The " +
+			"hostsubnet-prefix-length defines how many IP addresses " +
+			"are dedicated to each node and may be different for each " +
+			"entry.",
+		Destination: &cliConfig.Default.RawClusterSubnets,
+	},
 
 	// Logging options
 	cli.IntFlag{
@@ -362,17 +390,8 @@ var CommonFlags = []cli.Flag{
 	},
 }
 
-// K8sFlags capture Kubernetes-related options
-var K8sFlags = []cli.Flag{
-	cli.StringFlag{
-		Name:  "cluster-subnet",
-		Value: "11.11.0.0/16",
-		Usage: "A comma separated set of IP subnets and the associated" +
-			"hostsubnetlengths to use for the cluster (eg, \"10.128.0.0/14/23,10.0.0.0/14/23\"). " +
-			"Each entry is given in the form IP address/subnet mask/hostsubnetlength, " +
-			"the hostsubnetlength is optional and if unspecified defaults to 24. The " +
-			"hostsubnetlength defines how many IP addresses are dedicated to each node.",
-	},
+// CNIFlags capture CNI-related options
+var CNIFlags = []cli.Flag{
 	// CNI options
 	cli.StringFlag{
 		Name:        "cni-conf-dir",
@@ -389,6 +408,10 @@ var K8sFlags = []cli.Flag{
 		Usage:       "the ID of the HNS network to which containers will be attached (default: not set)",
 		Destination: &cliConfig.CNI.WinHNSNetworkID,
 	},
+}
+
+// K8sFlags capture Kubernetes-related options
+var K8sFlags = []cli.Flag{
 	cli.StringFlag{
 		Name:        "service-cluster-ip-range",
 		Usage:       "Deprecated alias for k8s-service-cidr.",
@@ -719,6 +742,26 @@ func buildGatewayConfig(ctx *cli.Context, cli, file *config) error {
 	return nil
 }
 
+func buildDefaultConfig(cli, file *config) error {
+	overrideFields(&Default, &file.Default)
+	overrideFields(&Default, &cli.Default)
+
+	// Legacy cluster-subnet CLI option overrides config file or --cluster-subnets
+	if clusterSubnet != "" {
+		Default.RawClusterSubnets = clusterSubnet
+	}
+	if Default.RawClusterSubnets == "" {
+		return fmt.Errorf("cluster subnet is required")
+	}
+
+	var err error
+	Default.ClusterSubnets, err = ParseClusterSubnetEntries(Default.RawClusterSubnets)
+	if err != nil {
+		return fmt.Errorf("cluster subnet invalid: %v", err)
+	}
+	return nil
+}
+
 // getConfigFilePath returns config file path and 'true' if the config file is
 // the fallback path (eg not given by the user), 'false' if given explicitly
 // by the user
@@ -791,8 +834,6 @@ func initConfigWithPath(ctx *cli.Context, exec kexec.Interface, saPath string, d
 	}
 
 	// Build config that needs no special processing
-	overrideFields(&Default, &cfg.Default)
-	overrideFields(&Default, &cliConfig.Default)
 	overrideFields(&CNI, &cfg.CNI)
 	overrideFields(&CNI, &cliConfig.CNI)
 
@@ -814,6 +855,10 @@ func initConfigWithPath(ctx *cli.Context, exec kexec.Interface, saPath string, d
 		} else {
 			logrus.SetOutput(file)
 		}
+	}
+
+	if err = buildDefaultConfig(&cliConfig, &cfg); err != nil {
+		return "", err
 	}
 
 	if err = buildKubernetesConfig(exec, &cliConfig, &cfg, saPath, defaults); err != nil {
