@@ -37,7 +37,6 @@ spec:
       # as all pods.
       serviceAccountName: ovn
       hostNetwork: true
-      hostPID: true
       # required to be scheduled on node with openvswitch.org/ovnkube-db=true label but can
       # only have one instance per node
       affinity:
@@ -78,8 +77,6 @@ spec:
           name: host-var-lib-ovs
         - mountPath: /var/log/openvswitch/
           name: host-var-log-ovs
-        - mountPath: /var/run/openvswitch/
-          name: host-var-run-ovs
         - mountPath: /etc/corosync
           name: host-etc-corosync
         - mountPath: /var/log/corosync
@@ -128,9 +125,6 @@ spec:
       - name: host-var-log-ovs
         hostPath:
           path: /var/log/openvswitch
-      - name: host-var-run-ovs
-        hostPath:
-          path: /var/run/openvswitch
       - name: host-var-log-corosync
         hostPath:
           path: /var/log/corosync
