@@ -250,12 +250,16 @@ func CreateManagementPort(nodeName, localSubnet string, clusterSubnet []string) 
 		}
 	}
 
-	// Create this node's management logical port on the node switch
+	// Create this node's management logical port on the node switch. Now that the second subnet IP is
+	// statically allocated to the management logical port, we can safely remove the other_config:exclude_ips
+	// in the same transaction to avoid "Duplicate IP set" warning messages in ovn-northd.
 	ip = util.NextIP(ip)
 	portIP := ip.String()
 	n, _ := subnet.Mask.Size()
 	portIPMask := fmt.Sprintf("%s/%d", portIP, n)
-	stdout, stderr, err = util.RunOVNNbctl("--", "--may-exist", "lsp-add", nodeName, "k8s-"+nodeName, "--", "lsp-set-addresses", "k8s-"+nodeName, macAddress+" "+portIP)
+	stdout, stderr, err = util.RunOVNNbctl("--", "--may-exist", "lsp-add", nodeName, "k8s-"+nodeName,
+		"--", "lsp-set-addresses", "k8s-"+nodeName, macAddress+" "+portIP,
+		"--", "--if-exists", "remove", "logical_switch", nodeName, "other-config", "exclude_ips")
 	if err != nil {
 		logrus.Errorf("Failed to add logical port to switch, stdout: %q, stderr: %q, error: %v", stdout, stderr, err)
 		return err
