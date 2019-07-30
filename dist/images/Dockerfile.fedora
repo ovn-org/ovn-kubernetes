@@ -27,7 +27,7 @@ RUN dnf install --refresh -y  \
 	ovn-central \
 	ovn-host \
 	kubernetes-client \
-	iproute strace socat && \
+	iproute strace socat iptables && \
 	dnf clean all
 
 RUN rm -rf /var/cache/dnf
