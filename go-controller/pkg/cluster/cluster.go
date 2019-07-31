@@ -20,14 +20,6 @@ type OvnClusterController struct {
 
 	TCPLoadBalancerUUID string
 	UDPLoadBalancerUUID string
-
-	ClusterIPNet []CIDRNetworkEntry
-}
-
-// CIDRNetworkEntry is the object that holds the definition for a single network CIDR range
-type CIDRNetworkEntry struct {
-	CIDR             *net.IPNet
-	HostSubnetLength uint32
 }
 
 const (

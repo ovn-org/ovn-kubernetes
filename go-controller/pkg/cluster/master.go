@@ -8,6 +8,7 @@ import (
 	kapi "k8s.io/api/core/v1"
 	"k8s.io/client-go/tools/cache"
 
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
 
 	"github.com/openshift/origin/pkg/util/netutils"
@@ -40,7 +41,7 @@ func (cluster *OvnClusterController) StartClusterMaster(masterNodeName string) e
 	// NewSubnetAllocator is a subnet IPAM, which takes a CIDR (first argument)
 	// and gives out subnets of length 'hostSubnetLength' (second argument)
 	// but omitting any that exist in 'subrange' (third argument)
-	for _, clusterEntry := range cluster.ClusterIPNet {
+	for _, clusterEntry := range config.Default.ClusterSubnets {
 		subrange := make([]string, 0)
 		for _, allocatedRange := range alreadyAllocated {
 			firstAddress, _, err := net.ParseCIDR(allocatedRange)
@@ -170,30 +171,6 @@ func parseNodeHostSubnet(node *kapi.Node) (*net.IPNet, error) {
 	return subnet, nil
 }
 
-func (cluster *OvnClusterController) ensureNodeHostSubnet(node *kapi.Node) (*net.IPNet, *netutils.SubnetAllocator, error) {
-	// Do not create a subnet if the node already has a subnet
-	subnet, _ := parseNodeHostSubnet(node)
-	if subnet != nil {
-		return subnet, nil, nil
-	}
-
-	// Create new subnet
-	for _, possibleSubnet := range cluster.masterSubnetAllocatorList {
-		sn, err := possibleSubnet.GetNetwork()
-		if err == netutils.ErrSubnetAllocatorFull {
-			// Current subnet exhausted, check next possible subnet
-			continue
-		} else if err != nil {
-			return nil, nil, fmt.Errorf("Error allocating network for node %s: %v", node.Name, err)
-		}
-
-		// Success
-		logrus.Infof("Allocated node %s HostSubnet %s", node.Name, sn.String())
-		return sn, possibleSubnet, nil
-	}
-	return nil, nil, fmt.Errorf("error allocating network for node %s: No more allocatable ranges", node.Name)
-}
-
 func (cluster *OvnClusterController) ensureNodeLogicalNetwork(nodeName string, hostsubnet *net.IPNet) error {
 	ip := util.NextIP(hostsubnet.IP)
 	n, _ := hostsubnet.Mask.Size()
@@ -260,15 +237,28 @@ func (cluster *OvnClusterController) ensureNodeLogicalNetwork(nodeName string, h
 }
 
 func (cluster *OvnClusterController) addNode(node *kapi.Node) (err error) {
-	var hostsubnet *net.IPNet
+	hostsubnet, _ := parseNodeHostSubnet(node)
+	if hostsubnet != nil {
+		// Node already has subnet assigned; ensure its logical network is set up
+		return cluster.ensureNodeLogicalNetwork(node.Name, hostsubnet)
+	}
+
+	// Node doesn't have a subnet assigned; reserve a new one for it
 	var subnetAllocator *netutils.SubnetAllocator
-	hostsubnet, subnetAllocator, err = cluster.ensureNodeHostSubnet(node)
-	if err != nil {
-		return err
+	for _, subnetAllocator = range cluster.masterSubnetAllocatorList {
+		hostsubnet, err = subnetAllocator.GetNetwork()
+		if err == netutils.ErrSubnetAllocatorFull {
+			// Current subnet exhausted, check next possible subnet
+			continue
+		} else if err != nil {
+			return fmt.Errorf("Error allocating network for node %s: %v", node.Name, err)
+		}
+		logrus.Infof("Allocated node %s HostSubnet %s", node.Name, hostsubnet.String())
 	}
 
 	defer func() {
-		if err != nil && subnetAllocator != nil {
+		// Release the allocation on error
+		if err != nil {
 			_ = subnetAllocator.ReleaseNetwork(hostsubnet)
 		}
 	}()
@@ -284,7 +274,8 @@ func (cluster *OvnClusterController) addNode(node *kapi.Node) (err error) {
 	// proceed with their initialization
 	err = cluster.Kube.SetAnnotationOnNode(node, OvnHostSubnet, hostsubnet.String())
 	if err != nil {
-		logrus.Errorf("Failed to set node %s host subnet annotation: %v", node.Name, hostsubnet.String())
+		logrus.Errorf("Failed to set node %s host subnet annotation to %q: %v",
+			node.Name, hostsubnet.String(), err)
 		return err
 	}
 

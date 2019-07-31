@@ -7,7 +7,9 @@ import (
 	"github.com/urfave/cli"
 	"k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	kuberuntime "k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/client-go/kubernetes/fake"
+	kubetesting "k8s.io/client-go/testing"
 
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/factory"
@@ -17,6 +19,71 @@ import (
 	. "github.com/onsi/ginkgo"
 	. "github.com/onsi/gomega"
 )
+
+func defaultFakeExec(nodeSubnet, nodeName string) (*ovntest.FakeExec, string, string) {
+	const (
+		tcpLBUUID  string = "1a3dfc82-2749-4931-9190-c30e7c0ecea3"
+		udpLBUUID  string = "6d3142fc-53e8-4ac1-88e6-46094a5a9957"
+		joinLRPMAC string = "00:00:00:83:25:1C"
+		lrpMAC     string = "00:00:00:05:46:C3"
+	)
+
+	fexec := ovntest.NewFakeExec()
+	fexec.AddFakeCmdsNoOutputNoError([]string{
+		"ovn-nbctl --timeout=15 -- --may-exist lr-add ovn_cluster_router -- set logical_router ovn_cluster_router external_ids:k8s-cluster-router=yes",
+	})
+	fexec.AddFakeCmd(&ovntest.ExpectedCmd{
+		Cmd:    "ovn-nbctl --timeout=15 --data=bare --no-heading --columns=_uuid find load_balancer external_ids:k8s-cluster-lb-tcp=yes",
+		Output: "",
+	})
+	fexec.AddFakeCmd(&ovntest.ExpectedCmd{
+		Cmd:    "ovn-nbctl --timeout=15 -- create load_balancer external_ids:k8s-cluster-lb-tcp=yes protocol=tcp",
+		Output: tcpLBUUID,
+	})
+	fexec.AddFakeCmd(&ovntest.ExpectedCmd{
+		Cmd:    "ovn-nbctl --timeout=15 --data=bare --no-heading --columns=_uuid find load_balancer external_ids:k8s-cluster-lb-udp=yes",
+		Output: "",
+	})
+	fexec.AddFakeCmd(&ovntest.ExpectedCmd{
+		Cmd:    "ovn-nbctl --timeout=15 -- create load_balancer external_ids:k8s-cluster-lb-udp=yes protocol=udp",
+		Output: udpLBUUID,
+	})
+	fexec.AddFakeCmdsNoOutputNoError([]string{
+		"ovn-nbctl --timeout=15 --may-exist ls-add join -- set logical_switch join other-config:subnet=100.64.0.0/16 -- set logical_switch join other-config:exclude_ips=100.64.0.1",
+	})
+	fexec.AddFakeCmd(&ovntest.ExpectedCmd{
+		Cmd:    "ovn-nbctl --timeout=15 --if-exist get logical_router_port rtoj-ovn_cluster_router mac",
+		Output: joinLRPMAC,
+	})
+	fexec.AddFakeCmdsNoOutputNoError([]string{
+		"ovn-nbctl --timeout=15 -- --may-exist lsp-add join jtor-ovn_cluster_router -- set logical_switch_port jtor-ovn_cluster_router type=router options:router-port=rtoj-ovn_cluster_router addresses=\"" + joinLRPMAC + "\"",
+	})
+
+	// Node-related logical network stuff
+	ip, cidr, err := net.ParseCIDR(nodeSubnet)
+	Expect(err).NotTo(HaveOccurred())
+	cidr.IP = util.NextIP(ip)
+	gwCIDR := cidr.String()
+	nodeMgmtPortIP := util.NextIP(cidr.IP).String()
+
+	fexec.AddFakeCmdsNoOutputNoError([]string{
+		"ovn-nbctl --timeout=15 --data=bare --no-heading --columns=name,other-config find logical_switch other-config:subnet!=_",
+	})
+	fexec.AddFakeCmd(&ovntest.ExpectedCmd{
+		Cmd: "ovn-nbctl --timeout=15 --if-exist get logical_router_port rtos-" + nodeName + " mac",
+		// Return a known MAC; otherwise code autogenerates it
+		Output: lrpMAC,
+	})
+	fexec.AddFakeCmdsNoOutputNoError([]string{
+		"ovn-nbctl --timeout=15 --may-exist lrp-add ovn_cluster_router rtos-" + nodeName + " " + lrpMAC + " " + gwCIDR,
+		"ovn-nbctl --timeout=15 -- --may-exist ls-add " + nodeName + " -- set logical_switch " + nodeName + " other-config:subnet=" + nodeSubnet + " other-config:exclude_ips=" + nodeMgmtPortIP + " external-ids:gateway_ip=" + gwCIDR,
+		"ovn-nbctl --timeout=15 -- --may-exist lsp-add " + nodeName + " stor-" + nodeName + " -- set logical_switch_port stor-" + nodeName + " type=router options:router-port=rtos-" + nodeName + " addresses=\"" + lrpMAC + "\"",
+		"ovn-nbctl --timeout=15 set logical_switch " + nodeName + " load_balancer=" + tcpLBUUID,
+		"ovn-nbctl --timeout=15 add logical_switch " + nodeName + " load_balancer " + udpLBUUID,
+	})
+
+	return fexec, tcpLBUUID, udpLBUUID
+}
 
 var _ = Describe("Master Operations", func() {
 	var app *cli.App
@@ -31,70 +98,18 @@ var _ = Describe("Master Operations", func() {
 	})
 
 	It("creates logical network elements for a 2-node cluster", func() {
+		const (
+			clusterIPNet string = "10.1.0.0"
+			clusterCIDR  string = clusterIPNet + "/16"
+		)
+
 		app.Action = func(ctx *cli.Context) error {
 			const (
-				tcpLBUUID    string = "1a3dfc82-2749-4931-9190-c30e7c0ecea3"
-				udpLBUUID    string = "6d3142fc-53e8-4ac1-88e6-46094a5a9957"
-				clusterIPNet string = "10.1.0.0"
-				clusterCIDR  string = clusterIPNet + "/16"
-				joinLRPMAC   string = "00:00:00:83:25:1C"
+				nodeName   string = "node1"
+				nodeSubnet string = "10.1.0.0/24"
 			)
 
-			fexec := ovntest.NewFakeExec()
-			fexec.AddFakeCmdsNoOutputNoError([]string{
-				"ovn-nbctl --timeout=15 -- --may-exist lr-add ovn_cluster_router -- set logical_router ovn_cluster_router external_ids:k8s-cluster-router=yes",
-			})
-			fexec.AddFakeCmd(&ovntest.ExpectedCmd{
-				Cmd:    "ovn-nbctl --timeout=15 --data=bare --no-heading --columns=_uuid find load_balancer external_ids:k8s-cluster-lb-tcp=yes",
-				Output: "",
-			})
-			fexec.AddFakeCmd(&ovntest.ExpectedCmd{
-				Cmd:    "ovn-nbctl --timeout=15 -- create load_balancer external_ids:k8s-cluster-lb-tcp=yes protocol=tcp",
-				Output: tcpLBUUID,
-			})
-			fexec.AddFakeCmd(&ovntest.ExpectedCmd{
-				Cmd:    "ovn-nbctl --timeout=15 --data=bare --no-heading --columns=_uuid find load_balancer external_ids:k8s-cluster-lb-udp=yes",
-				Output: "",
-			})
-			fexec.AddFakeCmd(&ovntest.ExpectedCmd{
-				Cmd:    "ovn-nbctl --timeout=15 -- create load_balancer external_ids:k8s-cluster-lb-udp=yes protocol=udp",
-				Output: udpLBUUID,
-			})
-			fexec.AddFakeCmdsNoOutputNoError([]string{
-				"ovn-nbctl --timeout=15 --may-exist ls-add join -- set logical_switch join other-config:subnet=100.64.0.0/16 -- set logical_switch join other-config:exclude_ips=100.64.0.1",
-			})
-			fexec.AddFakeCmd(&ovntest.ExpectedCmd{
-				Cmd:    "ovn-nbctl --timeout=15 --if-exist get logical_router_port rtoj-ovn_cluster_router mac",
-				Output: joinLRPMAC,
-			})
-			fexec.AddFakeCmdsNoOutputNoError([]string{
-				"ovn-nbctl --timeout=15 -- --may-exist lsp-add join jtor-ovn_cluster_router -- set logical_switch_port jtor-ovn_cluster_router type=router options:router-port=rtoj-ovn_cluster_router addresses=\"" + joinLRPMAC + "\"",
-			})
-
-			// Node-related logical network stuff
-			const (
-				nodeName       string = "node1"
-				lrpMAC         string = "00:00:00:05:46:C3"
-				nodeSubnet     string = "10.1.0.0/24"
-				gwCIDR         string = "10.1.0.1/24"
-				nodeMgmtPortIP string = "10.1.0.2"
-			)
-
-			fexec.AddFakeCmdsNoOutputNoError([]string{
-				"ovn-nbctl --timeout=15 --data=bare --no-heading --columns=name,other-config find logical_switch other-config:subnet!=_",
-			})
-			fexec.AddFakeCmd(&ovntest.ExpectedCmd{
-				Cmd: "ovn-nbctl --timeout=15 --if-exist get logical_router_port rtos-" + nodeName + " mac",
-				// Return a known MAC; otherwise code autogenerates it
-				Output: lrpMAC,
-			})
-			fexec.AddFakeCmdsNoOutputNoError([]string{
-				"ovn-nbctl --timeout=15 --may-exist lrp-add ovn_cluster_router rtos-" + nodeName + " " + lrpMAC + " " + gwCIDR,
-				"ovn-nbctl --timeout=15 -- --may-exist ls-add " + nodeName + " -- set logical_switch " + nodeName + " other-config:subnet=" + nodeSubnet + " other-config:exclude_ips=" + nodeMgmtPortIP + " external-ids:gateway_ip=" + gwCIDR,
-				"ovn-nbctl --timeout=15 -- --may-exist lsp-add " + nodeName + " stor-" + nodeName + " -- set logical_switch_port stor-" + nodeName + " type=router options:router-port=rtos-" + nodeName + " addresses=\"" + lrpMAC + "\"",
-				"ovn-nbctl --timeout=15 set logical_switch " + nodeName + " load_balancer=" + tcpLBUUID,
-				"ovn-nbctl --timeout=15 add logical_switch " + nodeName + " load_balancer " + udpLBUUID,
-			})
+			fexec, tcpLBUUID, udpLBUUID := defaultFakeExec(nodeSubnet, nodeName)
 
 			fakeClient := fake.NewSimpleClientset(&v1.NodeList{
 				Items: []v1.Node{{ObjectMeta: metav1.ObjectMeta{Name: nodeName}}},
@@ -116,21 +131,82 @@ var _ = Describe("Master Operations", func() {
 			clusterController.TCPLoadBalancerUUID = tcpLBUUID
 			clusterController.UDPLoadBalancerUUID = udpLBUUID
 
-			_, ipnet, err := net.ParseCIDR(clusterCIDR)
+			err = clusterController.StartClusterMaster("master")
 			Expect(err).NotTo(HaveOccurred())
-			clusterController.ClusterIPNet = append(clusterController.ClusterIPNet, CIDRNetworkEntry{
-				CIDR:             ipnet,
-				HostSubnetLength: 24,
+
+			Expect(fexec.CalledMatchesExpected()).To(BeTrue())
+			updatedNode, err := fakeClient.CoreV1().Nodes().Get(nodeName, metav1.GetOptions{})
+			Expect(err).NotTo(HaveOccurred())
+			Expect(updatedNode.Annotations).To(HaveKeyWithValue(OvnHostSubnet, nodeSubnet))
+			return nil
+		}
+
+		err := app.Run([]string{
+			app.Name,
+			"-cluster-subnets=" + clusterCIDR,
+		})
+		Expect(err).NotTo(HaveOccurred())
+	})
+
+	It("does not allocate a hostsubnet for a node that already has one", func() {
+		const (
+			clusterIPNet string = "10.1.0.0"
+			clusterCIDR  string = clusterIPNet + "/16"
+		)
+
+		app.Action = func(ctx *cli.Context) error {
+			const (
+				nodeName   string = "node1"
+				nodeSubnet string = "10.1.3.0/24"
+			)
+
+			fakeClient := fake.NewSimpleClientset(&v1.NodeList{
+				Items: []v1.Node{
+					{ObjectMeta: metav1.ObjectMeta{
+						Name: nodeName,
+						Annotations: map[string]string{
+							OvnHostSubnet: nodeSubnet,
+						},
+					}},
+				},
 			})
+			fakeClient.PrependReactor("patch", "nodes", func(action kubetesting.Action) (bool, kuberuntime.Object, error) {
+				// Should not be called as the node already has a subnet
+				Expect(true).To(BeFalse())
+				return true, nil, fmt.Errorf("should not be called")
+			})
+
+			fexec, tcpLBUUID, udpLBUUID := defaultFakeExec(nodeSubnet, nodeName)
+			err := util.SetExec(fexec)
+			Expect(err).NotTo(HaveOccurred())
+
+			_, err = config.InitConfig(ctx, fexec, nil)
+			Expect(err).NotTo(HaveOccurred())
+
+			stopChan := make(chan struct{})
+			f, err := factory.NewWatchFactory(fakeClient, stopChan)
+			Expect(err).NotTo(HaveOccurred())
+			defer f.Shutdown()
+
+			clusterController := NewClusterController(fakeClient, f)
+			Expect(clusterController).NotTo(BeNil())
+			clusterController.TCPLoadBalancerUUID = tcpLBUUID
+			clusterController.UDPLoadBalancerUUID = udpLBUUID
 
 			err = clusterController.StartClusterMaster("master")
 			Expect(err).NotTo(HaveOccurred())
 
 			Expect(fexec.CalledMatchesExpected()).To(BeTrue())
+			updatedNode, err := fakeClient.CoreV1().Nodes().Get(nodeName, metav1.GetOptions{})
+			Expect(err).NotTo(HaveOccurred())
+			Expect(updatedNode.Annotations).To(HaveKeyWithValue(OvnHostSubnet, nodeSubnet))
 			return nil
 		}
 
-		err := app.Run([]string{app.Name})
+		err := app.Run([]string{
+			app.Name,
+			"-cluster-subnets=" + clusterCIDR,
+		})
 		Expect(err).NotTo(HaveOccurred())
 	})
 

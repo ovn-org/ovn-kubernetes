@@ -321,7 +321,7 @@ func initSharedGateway(
 	}
 
 	err = util.GatewayInit(clusterIPSubnet, nodeName, ifaceID, ipAddress,
-		macAddress, gwNextHop, subnet, true, lspArgs)
+		macAddress, gwNextHop, subnet, true, true, lspArgs)
 	if err != nil {
 		return fmt.Errorf("failed to init shared interface gateway: %v", err)
 	}
