@@ -548,6 +548,7 @@ GR_openshift-master-node chassis=6a47b33b-89d3-4d65-ac31-b19b549326c7 lb_force_s
 				"ovn-nbctl --timeout=15 -- --may-exist lrp-add " + gwRouter + " rtoe-" + gwRouter + " " + brLocalnetMAC + " 169.254.33.2/24 -- set logical_router_port rtoe-" + gwRouter + " external-ids:gateway-physical-ip=yes",
 				"ovn-nbctl --timeout=15 -- --may-exist lsp-add ext_" + nodeName + " etor-" + gwRouter + " -- set logical_switch_port etor-" + gwRouter + " type=router options:router-port=rtoe-" + gwRouter + " addresses=\"" + brLocalnetMAC + "\"",
 				"ovn-nbctl --timeout=15 --may-exist lr-route-add " + gwRouter + " 0.0.0.0/0 169.254.33.1 rtoe-" + gwRouter,
+				"ovn-nbctl --timeout=15 --may-exist lr-nat-add " + gwRouter + " snat 169.254.33.2 " + clusterCIDR,
 				"ovn-nbctl --timeout=15 --may-exist lr-route-add " + clusterRouterUUID + " " + lrpIP + " " + lrpIP,
 				"ovn-nbctl --timeout=15 --may-exist --policy=src-ip lr-route-add " + clusterRouterUUID + " " + nodeSubnet + " " + lrpIP,
 			})
@@ -585,7 +586,7 @@ GR_openshift-master-node chassis=6a47b33b-89d3-4d65-ac31-b19b549326c7 lb_force_s
 				},
 				"nat": {
 					"POSTROUTING": []string{
-						"-s " + clusterCIDR + " -j MASQUERADE",
+						"-s 169.254.33.2/24 -j MASQUERADE",
 					},
 					"PREROUTING": []string{
 						"-j OVN-KUBE-NODEPORT",
