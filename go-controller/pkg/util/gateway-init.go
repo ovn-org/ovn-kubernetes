@@ -167,7 +167,7 @@ func getGatewayLoadBalancers(gatewayRouter string) (string, string, error) {
 
 // GatewayInit creates a gateway router for the local chassis.
 func GatewayInit(clusterIPSubnet []string, nodeName, ifaceID, nicIP, nicMacAddress,
-	defaultGW string, rampoutIPSubnet string, localnet, snat bool, lspArgs []string) error {
+	defaultGW string, rampoutIPSubnet string, localnet bool, lspArgs []string) error {
 
 	ip, physicalIPNet, err := net.ParseCIDR(nicIP)
 	if err != nil {
@@ -362,15 +362,13 @@ func GatewayInit(clusterIPSubnet []string, nodeName, ifaceID, nicIP, nicMacAddre
 		}
 	}
 
-	if snat {
-		// Default SNAT rules.
-		for _, entry := range clusterIPSubnet {
-			stdout, stderr, err = RunOVNNbctl("--may-exist", "lr-nat-add",
-				gatewayRouter, "snat", physicalIP, entry)
-			if err != nil {
-				return fmt.Errorf("Failed to create default SNAT rules, stdout: %q, "+
-					"stderr: %q, error: %v", stdout, stderr, err)
-			}
+	// Default SNAT rules.
+	for _, entry := range clusterIPSubnet {
+		stdout, stderr, err = RunOVNNbctl("--may-exist", "lr-nat-add",
+			gatewayRouter, "snat", physicalIP, entry)
+		if err != nil {
+			return fmt.Errorf("Failed to create default SNAT rules, stdout: %q, "+
+				"stderr: %q, error: %v", stdout, stderr, err)
 		}
 	}
 
