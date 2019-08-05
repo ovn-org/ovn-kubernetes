@@ -136,6 +136,51 @@ spec:
         lifecycle:
       # end of container
 
+      - name: run-nbctld
+        image: "{{ ovn_image | default('docker.io/ovnkube/ovn-daemonset:latest') }}"
+        imagePullPolicy: "{{ ovn_image_pull_policy | default('IfNotPresent') }}"
+
+        command: ["/root/ovnkube.sh", "run-nbctld"]
+
+        securityContext:
+          runAsUser: 0
+          # Permission could be reduced by selecting an appropriate SELinux policy
+          privileged: true
+
+        volumeMounts:
+        - mountPath: /var/run
+          name: host-var-run
+        - mountPath: /var/log/openvswitch/
+          name: host-var-log-ovs
+        - mountPath: /var/run/openvswitch/
+          name: host-var-run-ovs
+
+        resources:
+          requests:
+            cpu: 100m
+            memory: 300Mi
+        env:
+        - name: OVN_DAEMONSET_VERSION
+          value: "3"
+        - name: K8S_APISERVER
+          valueFrom:
+            configMapKeyRef:
+              name: ovn-config
+              key: k8s_apiserver
+
+        ports:
+        - name: healthz
+          containerPort: 10260
+        # TODO: Temporarily disabled until we determine how to wait for clean default
+        # config
+        # livenessProbe:
+        #   initialDelaySeconds: 10
+        #   httpGet:
+        #     path: /healthz
+        #     port: 10258
+        #     scheme: HTTP
+        lifecycle:
+
       - name: ovnkube-master
         image: "{{ ovn_image | default('docker.io/ovnkube/ovn-daemonset:latest') }}"
         imagePullPolicy: "{{ ovn_image_pull_policy | default('IfNotPresent') }}"
