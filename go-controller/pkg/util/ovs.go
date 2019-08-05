@@ -25,6 +25,7 @@ const (
 	ovsCommandTimeout = 15
 	ovsVsctlCommand   = "ovs-vsctl"
 	ovsOfctlCommand   = "ovs-ofctl"
+	ovsAppctlCommand  = "ovs-appctl"
 	ovnNbctlCommand   = "ovn-nbctl"
 	ovnSbctlCommand   = "ovn-sbctl"
 	ipCommand         = "ip"
@@ -79,6 +80,7 @@ type execHelper struct {
 	exec           kexec.Interface
 	ofctlPath      string
 	vsctlPath      string
+	appctlPath     string
 	nbctlPath      string
 	sbctlPath      string
 	ipPath         string
@@ -100,6 +102,10 @@ func SetExec(exec kexec.Interface) error {
 		return err
 	}
 	runner.vsctlPath, err = exec.LookPath(ovsVsctlCommand)
+	if err != nil {
+		return err
+	}
+	runner.appctlPath, err = exec.LookPath(ovsAppctlCommand)
 	if err != nil {
 		return err
 	}
@@ -184,6 +190,14 @@ func RunOVSVsctl(args ...string) (string, string, error) {
 	cmdArgs := []string{fmt.Sprintf("--timeout=%d", ovsCommandTimeout)}
 	cmdArgs = append(cmdArgs, args...)
 	stdout, stderr, err := run(runner.vsctlPath, cmdArgs...)
+	return strings.Trim(strings.TrimSpace(stdout.String()), "\""), stderr.String(), err
+}
+
+// RunOVSAppctl runs a command via ovs-appctl.
+func RunOVSAppctl(args ...string) (string, string, error) {
+	cmdArgs := []string{fmt.Sprintf("--timeout=%d", ovsCommandTimeout)}
+	cmdArgs = append(cmdArgs, args...)
+	stdout, stderr, err := run(runner.appctlPath, cmdArgs...)
 	return strings.Trim(strings.TrimSpace(stdout.String()), "\""), stderr.String(), err
 }
 
