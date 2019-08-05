@@ -21,6 +21,41 @@ import (
 	"k8s.io/client-go/tools/cache"
 )
 
+func isOVNControllerReady(name string) (bool, error) {
+	if err := wait.PollImmediate(500 * time.Millisecond,
+				     300 * time.Second,
+				     func() (bool, error) {
+		ret, _, err := util.RunOVSAppctl("-t", "ovn-controller",
+						 "connection-status")
+		if err != nil {
+			return false, err
+		} else {
+			logrus.Infof("node %s connection status = %s",
+				     name, ret)
+			return ret == "connected", nil
+		}
+	}); err != nil {
+		logrus.Errorf("timed out waiting sbdb for node %s: %v", name, err)
+		return false, err
+	}
+
+	if err := wait.PollImmediate(500 * time.Millisecond,
+				     300 * time.Second,
+				     func() (bool, error) {
+		flows, _, err := util.RunOVSOfctl("dump-flows", "br-int")
+		if err != nil {
+			return false, err
+		} else {
+			return len(flows) > 0, nil
+		}
+	}); err != nil {
+		logrus.Errorf("timed out dumping oflows for node %s: %v",
+			      name, err)
+		return false, err
+	}
+	return true, nil
+}
+
 // StartClusterNode learns the subnet assigned to it by the master controller
 // and calls the SetupNode script which establishes the logical switch
 func (cluster *OvnClusterController) StartClusterNode(name string) error {
@@ -29,6 +64,7 @@ func (cluster *OvnClusterController) StartClusterNode(name string) error {
 	var subnet *net.IPNet
 	var clusterSubnets []string
 	var cidr string
+	var connected bool
 
 	for _, clusterSubnet := range config.Default.ClusterSubnets {
 		clusterSubnets = append(clusterSubnets, clusterSubnet.CIDR.String())
@@ -66,6 +102,14 @@ func (cluster *OvnClusterController) StartClusterNode(name string) error {
 	err = setupOVNNode(name)
 	if err != nil {
 		return err
+	}
+
+	connected, err = isOVNControllerReady(name)
+	if err != nil {
+		return err
+	}
+	if connected == false {
+		return nil
 	}
 
 	err = ovn.CreateManagementPort(node.Name, subnet.String(), clusterSubnets)
