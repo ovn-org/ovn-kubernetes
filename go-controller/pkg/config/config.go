@@ -71,6 +71,9 @@ var (
 
 	// NbctlDaemon enables ovn-nbctl to run in daemon mode
 	NbctlDaemonMode bool
+
+	// UnprivilegedMode allows ovnkube-node to run without SYS_ADMIN capability, by performing interface setup in the CNI plugin
+	UnprivilegedMode bool
 )
 
 const (
@@ -395,6 +398,11 @@ var CommonFlags = []cli.Flag{
 		Name:        "nbctl-daemon-mode",
 		Usage:       "Run ovn-nbctl in daemon mode to improve performance in large clusters",
 		Destination: &NbctlDaemonMode,
+	},
+	cli.BoolFlag{
+		Name:        "unprivileged-mode",
+		Usage:       "Run ovnkube-node container in unprivileged mode. Valid only with --init-node option.",
+		Destination: &UnprivilegedMode,
 	},
 
 	// Logging options
