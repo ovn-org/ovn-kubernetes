@@ -89,14 +89,6 @@ spec:
             exec:
               command: ["/root/ovnkube.sh", "cleanup-ovs-server"]
 
-
-      # firewall rules for ovn - assumed to be setup
-      # iptables -A OS_FIREWALL_ALLOW -p tcp -m state --state NEW -m tcp --dport 6641 -j ACCEPT
-      # iptables -A OS_FIREWALL_ALLOW -p tcp -m state --state NEW -m tcp --dport 6642 -j ACCEPT
-      # ovs flow for ovn (geneve)
-      # /usr/share/openvswitch/scripts/ovs-ctl --protocol=udp --dport=6081 enable-protocol
-      # The network container launches the ovn-k8s-cni-overlay process, the kube-proxy, and the local DNS service.
-      # It relies on an up to date node-config.yaml being present.
       - name: ovn-controller
         image: "{{ ovn_image | default('docker.io/ovnkube/ovn-daemonset:latest') }}"
         imagePullPolicy: "{{ ovn_image_pull_policy | default('IfNotPresent') }}"
@@ -109,38 +101,13 @@ spec:
           privileged: true
 
         volumeMounts:
-        # Directory which contains the host configuration.
-        - mountPath: /etc/sysconfig/origin-node
-          name: host-sysconfig-node
-          readOnly: true
-        # Mount the entire run directory for socket access for Docker or CRI-o
-        # TODO: remove
-        - mountPath: /var/run
-          name: host-var-run
-        # Run directories where we need to be able to access sockets
         - mountPath: /var/run/dbus/
           name: host-var-run-dbus
           readOnly: true
-        - mountPath: /var/lib/openvswitch/
-          name: host-var-lib-ovs
         - mountPath: /var/log/openvswitch/
           name: host-var-log-ovs
         - mountPath: /var/run/openvswitch/
           name: host-var-run-ovs
-       #  readOnly: false
-        - mountPath: /var/run/kubernetes/
-          name: host-var-run-kubernetes
-          readOnly: true
-        # We mount our socket here
-        - mountPath: /var/run/ovn-kubernetes
-          name: host-var-run-ovn-kubernetes
-        # CNI related mounts which we take over
-        - mountPath: /host/opt/cni/bin
-          name: host-opt-cni-bin
-        - mountPath: /etc/cni/net.d
-          name: host-etc-cni-netd
-        - mountPath: /var/lib/cni/networks/ovn-k8s-cni-overlay
-          name: host-var-lib-cni-networks-ovn-kubernetes
 
         resources:
           requests:
@@ -200,30 +167,13 @@ spec:
           privileged: true
 
         volumeMounts:
-        # Directory which contains the host configuration.
-        - mountPath: /etc/sysconfig/origin-node
-          name: host-sysconfig-node
-          readOnly: true
-        # Mount the entire run directory for socket access for Docker or CRI-o
-        # TODO: remove
-        - mountPath: /var/run
-          name: host-var-run
-        # Run directories where we need to be able to access sockets
         - mountPath: /var/run/dbus/
           name: host-var-run-dbus
           readOnly: true
-        - mountPath: /var/lib/openvswitch/
-          name: host-var-lib-ovs
-        - mountPath: /var/log/openvswitch/
-          name: host-var-log-ovs
         - mountPath: /var/log/ovn-kubernetes/
           name: host-var-log-ovnkube
         - mountPath: /var/run/openvswitch/
           name: host-var-run-ovs
-       #  readOnly: false
-        - mountPath: /var/run/kubernetes/
-          name: host-var-run-kubernetes
-          readOnly: true
         # We mount our socket here
         - mountPath: /var/run/ovn-kubernetes
           name: host-var-run-ovn-kubernetes
@@ -232,8 +182,6 @@ spec:
           name: host-opt-cni-bin
         - mountPath: /etc/cni/net.d
           name: host-etc-cni-netd
-        - mountPath: /var/lib/cni/networks/ovn-k8s-cni-overlay
-          name: host-var-lib-cni-networks-ovn-kubernetes
 
         resources:
           requests:
@@ -287,25 +235,13 @@ spec:
       nodeSelector:
         beta.kubernetes.io/os: "linux"
       volumes:
-      # In bootstrap mode, the host config contains information not easily available
-      # from other locations.
-      - name: host-sysconfig-node
-        hostPath:
-          path: /etc/sysconfig/origin-node
       - name: host-modules
         hostPath:
           path: /lib/modules
 
-      # TODO: access to the docker socket should be replaced by CRI socket
-      - name: host-var-run
-        hostPath:
-          path: /var/run
       - name: host-var-run-dbus
         hostPath:
           path: /var/run/dbus
-      - name: host-var-lib-ovs
-        hostPath:
-          path: /var/lib/openvswitch
       - name: host-var-log-ovs
         hostPath:
           path: /var/log/openvswitch
@@ -318,9 +254,6 @@ spec:
       - name: host-var-run-ovs
         hostPath:
           path: /var/run/openvswitch
-      - name: host-var-run-kubernetes
-        hostPath:
-          path: /var/run/kubernetes
       - name: host-var-run-ovn-kubernetes
         hostPath:
           path: /var/run/ovn-kubernetes
@@ -336,8 +269,5 @@ spec:
       - name: host-config-openvswitch
         hostPath:
           path: /etc/origin/openvswitch
-      - name: host-var-lib-cni-networks-ovn-kubernetes
-        hostPath:
-          path: /var/lib/cni/networks/ovn-k8s-cni-overlay
       tolerations:
       - operator: "Exists"
