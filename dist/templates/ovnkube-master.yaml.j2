@@ -54,41 +54,14 @@ spec:
           privileged: true
 
         volumeMounts:
-        - mountPath: /etc/sysconfig/origin-node
-          name: host-sysconfig-node
-          readOnly: true
-        # Mount the entire run directory for socket access for Docker or CRI-o
-        # TODO: remove
-        - mountPath: /var/run
-          name: host-var-run
         # Run directories where we need to be able to access sockets
         - mountPath: /var/run/dbus/
           name: host-var-run-dbus
           readOnly: true
-        # ovn db is stored in the pod in /etc/openvswitch
-        # and on the host in /var/lib/openvswitch/
-        - mountPath: /etc/openvswitch/
-          name: host-var-lib-ovs
-        - mountPath: /var/lib/openvswitch/
-          name: host-var-lib-ovs
         - mountPath: /var/log/openvswitch/
           name: host-var-log-ovs
         - mountPath: /var/run/openvswitch/
           name: host-var-run-ovs
-       #  readOnly: false
-        - mountPath: /var/run/kubernetes/
-          name: host-var-run-kubernetes
-          readOnly: true
-        # We mount our socket here
-        - mountPath: /var/run/ovn-kubernetes
-          name: host-var-run-ovn-kubernetes
-        # CNI related mounts which we take over
-        - mountPath: /host/opt/cni/bin
-          name: host-opt-cni-bin
-        - mountPath: /etc/cni/net.d
-          name: host-etc-cni-netd
-        - mountPath: /var/lib/cni/networks/ovn-k8s-cni-overlay
-          name: host-var-lib-cni-networks-ovn-kubernetes
 
         resources:
           requests:
@@ -148,8 +121,6 @@ spec:
           privileged: true
 
         volumeMounts:
-        - mountPath: /var/run
-          name: host-var-run
         - mountPath: /var/log/openvswitch/
           name: host-var-log-ovs
         - mountPath: /var/run/openvswitch/
@@ -193,43 +164,14 @@ spec:
           privileged: true
 
         volumeMounts:
-        - mountPath: /etc/sysconfig/origin-node
-          name: host-sysconfig-node
-          readOnly: true
-        # Mount the entire run directory for socket access for Docker or CRI-o
-        # TODO: remove
-        - mountPath: /var/run
-          name: host-var-run
         # Run directories where we need to be able to access sockets
         - mountPath: /var/run/dbus/
           name: host-var-run-dbus
           readOnly: true
-        # ovn db is stored in the pod in /etc/openvswitch
-        # and on the host in /var/lib/openvswitch/
-        - mountPath: /etc/openvswitch/
-          name: host-var-lib-ovs
-        - mountPath: /var/lib/openvswitch/
-          name: host-var-lib-ovs
-        - mountPath: /var/log/openvswitch/
-          name: host-var-log-ovs
         - mountPath: /var/log/ovn-kubernetes/
           name: host-var-log-ovnkube
         - mountPath: /var/run/openvswitch/
           name: host-var-run-ovs
-       #  readOnly: false
-        - mountPath: /var/run/kubernetes/
-          name: host-var-run-kubernetes
-          readOnly: true
-        # We mount our socket here
-        - mountPath: /var/run/ovn-kubernetes
-          name: host-var-run-ovn-kubernetes
-        # CNI related mounts which we take over
-        - mountPath: /host/opt/cni/bin
-          name: host-opt-cni-bin
-        - mountPath: /etc/cni/net.d
-          name: host-etc-cni-netd
-        - mountPath: /var/lib/cni/networks/ovn-k8s-cni-overlay
-          name: host-var-lib-cni-networks-ovn-kubernetes
 
         resources:
           requests:
@@ -283,24 +225,10 @@ spec:
         node-role.kubernetes.io/master: ""
         beta.kubernetes.io/os: "linux"
       volumes:
-      # In bootstrap mode, the host config contains information not easily available
-      # from other locations.
-      - name: host-sysconfig-node
-        hostPath:
-          path: /etc/sysconfig/origin-node
-      - name: host-modules
-        hostPath:
-          path: /lib/modules
-      # TODO: access to the docker socket should be replaced by CRI socket
-      - name: host-var-run
-        hostPath:
-          path: /var/run
+      # TODO: Need to check why we need this?
       - name: host-var-run-dbus
         hostPath:
           path: /var/run/dbus
-      - name: host-var-lib-ovs
-        hostPath:
-          path: /var/lib/openvswitch
       - name: host-var-log-ovs
         hostPath:
           path: /var/log/openvswitch
@@ -310,20 +238,5 @@ spec:
       - name: host-var-run-ovs
         hostPath:
           path: /var/run/openvswitch
-      - name: host-var-run-kubernetes
-        hostPath:
-          path: /var/run/kubernetes
-      - name: host-var-run-ovn-kubernetes
-        hostPath:
-          path: /var/run/ovn-kubernetes
-      - name: host-opt-cni-bin
-        hostPath:
-          path: /opt/cni/bin
-      - name: host-etc-cni-netd
-        hostPath:
-          path: /etc/cni/net.d
-      - name: host-var-lib-cni-networks-ovn-kubernetes
-        hostPath:
-          path: /var/lib/cni/networks/ovn-k8s-cni-overlay
       tolerations:
       - operator: "Exists"
