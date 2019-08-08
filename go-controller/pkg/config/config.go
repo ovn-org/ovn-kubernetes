@@ -64,6 +64,9 @@ var (
 
 	// Gateway holds node gateway-related parsed config file parameters and command-line overrides
 	Gateway GatewayConfig
+
+	// NbctlDaemon enables ovn-nbctl to run in daemon mode
+	NbctlDaemonMode bool
 )
 
 const (
@@ -375,6 +378,11 @@ var CommonFlags = []cli.Flag{
 			"are dedicated to each node and may be different for each " +
 			"entry.",
 		Destination: &cliConfig.Default.RawClusterSubnets,
+	},
+	cli.BoolFlag{
+		Name:        "nbctl-daemon-mode",
+		Usage:       "Run ovn-nbctl in daemon mode to improve performance in large clusters",
+		Destination: &NbctlDaemonMode,
 	},
 
 	// Logging options

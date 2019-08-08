@@ -22,7 +22,7 @@
 #    ovn-node       Runs ovnkube in node mode (v2, v3)
 #    cleanup-ovn-node   Runs ovnkube to cleanup the node (v3)
 #    cleanup-ovs-server Cleanup ovs-server
-#
+#    run-nbctld     Runs ovn-nbctl in the daemon mode (v3)
 #    display        Displays log files
 #    display_env    Displays environment variables
 #    ovn_debug      Displays ovn/ovs configuration and flows
@@ -58,6 +58,7 @@
 # OVN_LOG_NB - log level (ovn-ctl default: -vconsole:off -vfile:info)
 # OVN_LOG_SB - log level (ovn-ctl default: -vconsole:off -vfile:info)
 # OVN_LOG_CONTROLLER - log level (ovn-ctl default: -vconsole:off -vfile:info)
+# OVN_LOG_NBCTLD - log file (ovn-nbctl daemon mode default: /var/log/openvswitch/ovn-nbctl.log)
 
 # The argument to the command is the operation to be performed
 # ovn-northd ovn-master ovn-controller ovn-node display display_env ovn_debug
@@ -73,6 +74,7 @@ ovn_log_northd=${OVN_LOG_NORTHD:-"-vconsole:info"}
 ovn_log_nb=${OVN_LOG_NB:-"-vconsole:info"}
 ovn_log_sb=${OVN_LOG_SB:-"-vconsole:info"}
 ovn_log_controller=${OVN_LOG_CONTROLLER:-"-vconsole:info"}
+ovn_log_nbctld=${OVN_LOG_NBCTLD:-"/var/log/openvswitch/ovn-nbctl.log"}
 
 logdir=/var/log/openvswitch
 ovnkubelogdir=/var/log/ovn-kubernetes
@@ -298,7 +300,7 @@ check_health () {
     "ovnnb_db"|"ovnsb_db")
     ctl_file=/var/run/openvswitch/${1}.ctl
     ;;
-    "ovn-northd"|"ovn-controller"|"ovsdb-server"|"ovs-vswitchd")
+    "ovn-northd"|"ovn-controller"|"ovsdb-server"|"ovs-vswitchd"|"ovn-nbctl")
     ctl_file=/var/run/openvswitch/${1}.${2}.ctl
     ;;
     *)
@@ -350,6 +352,7 @@ display () {
   display_file "ovsdb-server" /var/run/openvswitch/ovsdb-server.pid ${logdir}/ovsdb-server.log
   display_file "ovn-controller" /var/run/openvswitch/ovn-controller.pid ${logdir}/ovn-controller.log
   display_file "ovnkube" /var/run/openvswitch/ovnkube.pid ${ovnkubelogdir}/ovnkube.log
+  display_file "run-nbctld" /var/run/openvswitch/ovn-nbctl.pid ${logdir}/ovn-nbctl.log
 }
 
 setup_cni () {
@@ -704,6 +707,10 @@ ovn-master () {
 
   # wait for northd to start
   wait_for_event process_ready ovn-northd
+
+  echo "=============== ovn-master (wait for ovn-nbctl daemon) ========== MASTER ONLY"
+  wait_for_event process_ready ovn-nbctl
+
   sleep 5
 
   # wait for ovs-servers to start since ovn-master sets some fields in OVS DB
@@ -716,6 +723,7 @@ ovn-master () {
     --cluster-subnets ${net_cidr} --k8s-service-cidr=${svc_cidr} \
     --nb-address=${ovn_nbdb} --sb-address=${ovn_sbdb} \
     --nodeport \
+    --nbctl-daemon-mode \
     --loglevel=${ovnkube_loglevel} \
     --pidfile /var/run/openvswitch/ovnkube-master.pid \
     --logfile /var/log/ovn-kubernetes/ovnkube-master.log &
@@ -835,6 +843,31 @@ cleanup-ovn-node () {
       --loglevel=${ovnkube_loglevel} \
       --logfile /var/log/ovn-kubernetes/ovnkube.log
 
+}
+
+# v3 - Runs ovn-nbctl in daemon mode
+run-nbctld () {
+  check_ovn_daemonset_version "3"
+  rm -f /var/run/openvswitch/ovn-nbctl.pid
+  rm -f /var/run/openvswitch/ovn-nbctl.*.ctl
+
+  echo "=============== run-nbctld - (wait for ready_to_start_node)"
+  wait_for_event ready_to_start_node
+
+  echo "ovn_nbdb ${ovn_nbdb}   ovn_sbdb ${ovn_sbdb}  ovn_nbdb_test ${ovn_nbdb_test}"
+  echo "ovn_log_nbctld=${ovn_log_nbctld}"
+
+  # use unix socket
+  /usr/bin/ovn-nbctl --pidfile --detach --db=${ovn_nbdb_test} --log-file=${ovn_log_nbctld}
+
+  wait_for_event process_ready ovn-nbctl
+  echo "=============== run_ovn_nbctl ========== RUNNING"
+
+  tail --follow=name /var/log/openvswitch/ovn-nbctl.log &
+  nbctl_tail_pid=$!
+
+  process_healthy ovn-nbctl ${nbctl_tail_pid}
+  echo "=============== run_ovn_nbctl ========== terminated"
 }
 
 # version 1 daemonset compatibility
@@ -960,6 +993,9 @@ echo "================== ovnkube.sh --- version: ${ovnkube_version} ============
     ;;
     "ovn-node")        # pod ovnkube-node container ovn-node
 	ovn-node
+    ;;
+    "run-nbctld")   # pod ovnkube-master container run-nbctld
+    run-nbctld
     ;;
     "ovn-northd")
 	ovn-northd
