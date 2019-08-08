@@ -785,11 +785,6 @@ ovn-node () {
   sleep 1
 
   echo "=============== ovn-node   --init-node"
-  # TEMP HACK - WORKAROUND
-  # --gateway-mode=local works around a problem that
-  # results in loss of network connectivity when docker is
-  # restarted or ovs daemonset is deleted.
-  # TEMP HACK - WORKAROUND
   /usr/bin/ovnkube --init-node ${K8S_NODE} \
       --cluster-subnets ${net_cidr} --k8s-service-cidr=${svc_cidr} \
       --nb-address=${ovn_nbdb} --sb-address=${ovn_sbdb} \
@@ -902,11 +897,6 @@ start_ovn () {
 
   # ovn-node - all nodes
   echo  "=============== start ovn-node"
-  # TEMP HACK - WORKAROUND
-  # --gateway-mode=local works around a problem that
-  # results in loss of network connectivity when docker is
-  # restarted or ovs daemonset is deleted.
-  # TEMP HACK - WORKAROUND
   /usr/bin/ovnkube --init-node ${K8S_NODE} \
       --cluster-subnets ${net_cidr} --k8s-service-cidr=${svc_cidr} \
       --nb-address=${ovn_nbdb} --sb-address=${ovn_sbdb} \
