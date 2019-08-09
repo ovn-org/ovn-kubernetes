@@ -21,17 +21,14 @@ USER root
 ENV PYTHONDONTWRITEBYTECODE yes
 
 COPY kubernetes.repo /etc/yum.repos.d/kubernetes.repo
-RUN yum install -y  \
-	PyYAML bind-utils \
-	openssl \
-	numactl-libs \
-	firewalld-filesystem \
-	libpcap \
-	hostname \
-	kubectl \
+RUN INSTALL_PKGS=" \
+	PyYAML bind-utils procps-ng openssl numactl-libs firewalld-filesystem \
+	libpcap kubernetes-client \
+	iptables iproute strace socat \
 	unbound-libs \
-	iproute strace socat && \
-	yum clean all
+        " && \
+	yum install -y --setopt=tsflags=nodocs --setopt=skip_missing_names_on_install=False $INSTALL_PKGS && \
+	yum clean all && rm -rf /var/cache/yum/*
 
 # Get a reasonable version of openvswitch (2.9.2 or higher)
 # docker build --build-arg rpmArch=ARCH -f Dockerfile.centos -t some_tag .
