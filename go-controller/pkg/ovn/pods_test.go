@@ -120,6 +120,9 @@ var _ = Describe("OVN Pod Operations", func() {
 					Cmd:    "ovn-nbctl --timeout=15 get logical_switch_port " + portName + " dynamic_addresses",
 					Output: `"` + podMAC + " " + podIP + `"`,
 				})
+				fexec.AddFakeCmdsNoOutputNoError([]string{
+					"ovn-nbctl --timeout=15 lsp-set-port-security " + portName + " " + podMAC + " " + podIP + "/24",
+				})
 
 				err := util.SetExec(fexec)
 				Expect(err).NotTo(HaveOccurred())
@@ -229,6 +232,9 @@ var _ = Describe("OVN Pod Operations", func() {
 				fexec.AddFakeCmd(&ovntest.ExpectedCmd{
 					Cmd:    "ovn-nbctl --timeout=15 get logical_switch_port " + portName + " dynamic_addresses",
 					Output: `"` + podMAC + " " + podIP + `"`,
+				})
+				fexec.AddFakeCmdsNoOutputNoError([]string{
+					"ovn-nbctl --timeout=15 lsp-set-port-security " + portName + " " + podMAC + " " + podIP + "/24",
 				})
 
 				err := util.SetExec(fexec)
