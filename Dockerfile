@@ -31,24 +31,16 @@ RUN yum install -y  \
 	selinux-policy && \
 	yum clean all
 
-RUN yum install -y  \
-	PyYAML bind-utils \
-	openssl \
-	numactl-libs \
-	firewalld-filesystem \
-	libpcap \
-	hostname \
-	"openvswitch2.11" \
-	"openvswitch2.11-ovn-common" \
-	"openvswitch2.11-ovn-central" \
-	"openvswitch2.11-ovn-host" \
-	"openvswitch2.11-ovn-vtep" \
-	"openvswitch2.11-devel" \
+RUN INSTALL_PKGS=" \
+	PyYAML bind-utils openssl numactl-libs firewalld-filesystem \
+	libpcap  hostname iproute strace socat \
+	openvswitch2.11 openvswitch2.11-devel \
+	openvswitch2.11-ovn-common openvswitch2.11-ovn-central \
+	openvswitch2.11-ovn-host openvswitch2.11-ovn-vtep \
 	containernetworking-plugins \
-	iproute strace socat && \
-	yum clean all
-
-RUN rm -rf /var/cache/yum
+	" && \
+	yum install -y --setopt=tsflags=nodocs --setopt=skip_missing_names_on_install=False $INSTALL_PKGS && \
+	yum clean all && rm -rf /var/cache/*
 
 RUN mkdir -p /var/run/openvswitch && \
     mkdir -p /etc/cni/net.d && \
