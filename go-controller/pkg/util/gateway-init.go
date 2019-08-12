@@ -34,16 +34,16 @@ func GetK8sClusterRouter() (string, error) {
 	return k8sClusterRouter, nil
 }
 
-func getNodeChassisID(nodeName string) (string, error) {
-	chassisID, stderr, err := RunOVNSbctl("--data=bare", "--no-heading",
-		"--columns=name", "find", "Chassis", "hostname="+nodeName)
+func getNodeChassisID() (string, error) {
+	chassisID, stderr, err := RunOVSVsctl("--if-exists", "get",
+		"Open_vSwitch", ".", "external_ids:system-id")
 	if err != nil {
-		logrus.Errorf("Failed to find Chassis ID for node %s, "+
-			"stderr: %q, error: %v", nodeName, stderr, err)
+		logrus.Errorf("No system-id configured in the local host, "+
+			"stderr: %q, error: %v", stderr, err)
 		return "", err
 	}
 	if chassisID == "" {
-		return "", fmt.Errorf("No chassis ID configured for node %s", nodeName)
+		return "", fmt.Errorf("No system-id configured in the local host")
 	}
 
 	return chassisID, nil
@@ -187,7 +187,7 @@ func GatewayInit(clusterIPSubnet []string, nodeName, ifaceID, nicIP, nicMacAddre
 		return err
 	}
 
-	systemID, err := getNodeChassisID(nodeName)
+	systemID, err := getNodeChassisID()
 	if err != nil {
 		return err
 	}
