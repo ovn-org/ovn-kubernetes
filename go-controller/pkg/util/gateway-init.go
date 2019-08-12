@@ -34,21 +34,6 @@ func GetK8sClusterRouter() (string, error) {
 	return k8sClusterRouter, nil
 }
 
-func getNodeChassisID(nodeName string) (string, error) {
-	chassisID, stderr, err := RunOVNSbctl("--data=bare", "--no-heading",
-		"--columns=name", "find", "Chassis", "hostname="+nodeName)
-	if err != nil {
-		logrus.Errorf("Failed to find Chassis ID for node %s, "+
-			"stderr: %q, error: %v", nodeName, stderr, err)
-		return "", err
-	}
-	if chassisID == "" {
-		return "", fmt.Errorf("No chassis ID configured for node %s", nodeName)
-	}
-
-	return chassisID, nil
-}
-
 // GetDefaultGatewayRouterIP returns the first gateway logical router name
 // and IP address as listed in the OVN database
 func GetDefaultGatewayRouterIP() (string, net.IP, error) {
@@ -187,7 +172,7 @@ func GatewayInit(clusterIPSubnet []string, nodeName, ifaceID, nicIP, nicMacAddre
 		return err
 	}
 
-	systemID, err := getNodeChassisID(nodeName)
+	systemID, err := GetNodeChassisID()
 	if err != nil {
 		return err
 	}
