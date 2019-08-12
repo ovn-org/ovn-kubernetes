@@ -18,6 +18,9 @@ import (
 	kexec "k8s.io/utils/exec"
 )
 
+// DefaultEncapPort number used if not supplied
+const DefaultEncapPort = 6081
+
 // The following are global config parameters that other modules may access directly
 var (
 	// ovn-kubernetes version, to be changed with every release
@@ -32,6 +35,7 @@ var (
 		ConntrackZone:     64000,
 		EncapType:         "geneve",
 		EncapIP:           "",
+		EncapPort:         DefaultEncapPort,
 		InactivityProbe:   100000,
 		RawClusterSubnets: "10.128.0.0/14/23",
 	}
@@ -89,6 +93,9 @@ type DefaultConfig struct {
 	// The IP address of the encapsulation endpoint. If not specified, the IP address the
 	// NodeName resolves to will be used
 	EncapIP string `gcfg:"encap-ip"`
+	// The UDP Port of the encapsulation endpoint. If not specified, the IP default port
+	// of 6081 will be used
+	EncapPort uint `gcfg:"encap-port"`
 	// Maximum number of milliseconds of idle time on connection that
 	// ovn-controller waits before it will send a connection health probe.
 	InactivityProbe int `gcfg:"inactivity-probe"`
@@ -354,6 +361,11 @@ var CommonFlags = []cli.Flag{
 		Name:        "encap-ip",
 		Usage:       "The IP address of the encapsulation endpoint (default: Node IP address resolved from Node hostname)",
 		Destination: &cliConfig.Default.EncapIP,
+	},
+	cli.UintFlag{
+		Name:        "encap-port",
+		Usage:       "The UDP port used by the encapsulation endpoint (default: 6081)",
+		Destination: &cliConfig.Default.EncapPort,
 	},
 	cli.IntFlag{
 		Name: "inactivity-probe",

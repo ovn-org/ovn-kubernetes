@@ -62,6 +62,51 @@ var _ = Describe("Node Operations", func() {
 		err := app.Run([]string{app.Name})
 		Expect(err).NotTo(HaveOccurred())
 	})
+	It("sets non-default OVN encap port", func() {
+		app.Action = func(ctx *cli.Context) error {
+			const (
+				nodeName    string = "1.2.5.6"
+				encapPort   uint   = 666
+				interval    int    = 100000
+				chassisUUID string = "1a3dfc82-2749-4931-9190-c30e7c0ecea3"
+			)
+
+			fexec := ovntest.NewFakeExec()
+			fexec.AddFakeCmd(&ovntest.ExpectedCmd{
+				Cmd: fmt.Sprintf("ovs-vsctl --timeout=15 set Open_vSwitch . "+
+					"external_ids:ovn-encap-type=geneve "+
+					"external_ids:ovn-encap-ip=%s "+
+					"external_ids:ovn-remote-probe-interval=%d "+
+					"external_ids:hostname=\"%s\"",
+					nodeName, interval, nodeName),
+			})
+			fexec.AddFakeCmd(&ovntest.ExpectedCmd{
+				Cmd: fmt.Sprintf("ovs-vsctl --timeout=15 " +
+					"--if-exists get Open_vSwitch . external_ids:system-id"),
+				Output: chassisUUID,
+			})
+			fexec.AddFakeCmd(&ovntest.ExpectedCmd{
+				Cmd: fmt.Sprintf("ovn-sbctl --timeout=15 set encap "+
+					"%s options:dst_port=%d", chassisUUID, encapPort),
+			})
+
+			err := util.SetExec(fexec)
+			Expect(err).NotTo(HaveOccurred())
+
+			_, err = config.InitConfig(ctx, fexec, nil)
+			Expect(err).NotTo(HaveOccurred())
+			config.Default.EncapPort = encapPort
+
+			err = setupOVNNode(nodeName)
+			Expect(err).NotTo(HaveOccurred())
+
+			Expect(fexec.CalledMatchesExpected()).To(BeTrue())
+			return nil
+		}
+
+		err := app.Run([]string{app.Name})
+		Expect(err).NotTo(HaveOccurred())
+	})
 	It("test validateOVNConfigEndpoint()", func() {
 
 		type testcase struct {
