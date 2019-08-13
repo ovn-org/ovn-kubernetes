@@ -48,9 +48,8 @@ daemonsetyaml:
 ../../go-controller/_output/go/bin/ovnkube:
 	cd ../../go-controller ; make
 
+BRANCH = $(shell git rev-parse  --symbolic-full-name HEAD)
+COMMIT = $(shell git rev-parse  HEAD)
 bld: ../../go-controller/_output/go/bin/ovnkube
 	cp ../../go-controller/_output/go/bin/* .
-	mkdir -p .git/ .git/refs/heads/
-	cp ../../.git/HEAD .git/HEAD
-	cp ../../.git/refs/heads/* .git/refs/heads/
-
+	echo "ref: ${BRANCH}  commit: ${COMMIT}" > git_info

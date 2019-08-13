@@ -70,9 +70,7 @@ COPY ovn-debug.sh /root/
 COPY ovn_k8s.conf /etc/openvswitch/ovn_k8s.conf
 
 # copy git commit number into image
-RUN mkdir -p /root/.git/ /root/.git/refs/heads/
-COPY .git/HEAD /root/.git/HEAD
-COPY .git/refs/heads/ /root/.git/refs/heads/
+COPY git_info /root
 
 
 LABEL io.k8s.display-name="ovn kubernetes" \
