@@ -1,2 +1,6 @@
 ovnkube-master.yaml
 ovnkube.yaml
+ovn-setup.yaml
+ovnkube-db-vip.yaml
+ovnkube-db.yaml
+ovnkube-node.yaml
