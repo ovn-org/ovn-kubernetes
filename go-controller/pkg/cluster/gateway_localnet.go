@@ -72,7 +72,7 @@ func delIptRules(ipt util.IPTablesHelper, rules []iptRule) {
 	}
 }
 
-func generateGatewayNATRules(ifname string, clusterCIDRs []string) []iptRule {
+func generateGatewayNATRules(ifname string, ip string) []iptRule {
 	// Allow packets to/from the gateway interface in case defaults deny
 	rules := make([]iptRule, 0)
 	rules = append(rules, iptRule{
@@ -92,20 +92,17 @@ func generateGatewayNATRules(ifname string, clusterCIDRs []string) []iptRule {
 		args:  []string{"-i", ifname, "-m", "comment", "--comment", "from OVN to localhost", "-j", "ACCEPT"},
 	})
 
-	for _, cidr := range clusterCIDRs {
-		// NAT for the interface
-		rules = append(rules, iptRule{
-			table: "nat",
-			chain: "POSTROUTING",
-			args:  []string{"-s", cidr, "-j", "MASQUERADE"},
-		})
-	}
-
+	// NAT for the interface
+	rules = append(rules, iptRule{
+		table: "nat",
+		chain: "POSTROUTING",
+		args:  []string{"-s", ip, "-j", "MASQUERADE"},
+	})
 	return rules
 }
 
-func localnetGatewayNAT(ipt util.IPTablesHelper, ifname string, clusterCIDRs []string) error {
-	rules := generateGatewayNATRules(ifname, clusterCIDRs)
+func localnetGatewayNAT(ipt util.IPTablesHelper, ifname, ip string) error {
+	rules := generateGatewayNATRules(ifname, ip)
 	return addIptRules(ipt, rules)
 }
 
@@ -170,12 +167,12 @@ func initLocalnetGatewayInternal(nodeName string, clusterIPSubnet []string,
 	}
 
 	err = util.GatewayInit(clusterIPSubnet, nodeName, ifaceID, localnetGatewayIP,
-		macAddress, localnetGatewayNextHop, subnet, true, false, nil)
+		macAddress, localnetGatewayNextHop, subnet, true, nil)
 	if err != nil {
 		return fmt.Errorf("failed to localnet gateway: %v", err)
 	}
 
-	err = localnetGatewayNAT(ipt, localnetBridgeNextHop, clusterIPSubnet)
+	err = localnetGatewayNAT(ipt, localnetBridgeNextHop, localnetGatewayIP)
 	if err != nil {
 		return fmt.Errorf("Failed to add NAT rules for localnet gateway (%v)",
 			err)
