@@ -336,18 +336,11 @@ setup_cni () {
 display_version () {
   echo " =================== hostname: ${ovn_pod_host}"
   echo " =================== daemonset version ${ovn_daemonset_version}"
-  if [[ -f /root/.git/HEAD ]]
+  if [[ -f /root/git_info ]]
   then
-    commit=$(awk '{ print $1 }' /root/.git/HEAD )
-    if [[ ${commit} == "ref:" ]]
-    then
-      head=$(awk '{ print $2 }' /root/.git/HEAD )
-      commit=$(cat /root/.git/${head} )
-    else
-      head="master"
-      commit=$(cat /root/.git/HEAD)
-    fi
-    echo " =================== Image built from ovn-kubernetes ref: ${head}  commit: ${commit}"
+	disp_ver=$(cat /root/git_info)
+	echo " =================== Image built from ovn-kubernetes ${disp_ver}"
+	return
   fi
 }
 
