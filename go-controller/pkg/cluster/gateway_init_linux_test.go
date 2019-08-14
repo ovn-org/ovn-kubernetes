@@ -567,7 +567,9 @@ GR_openshift-master-node chassis=6a47b33b-89d3-4d65-ac31-b19b549326c7 lb_force_s
 
 			ipt, err := util.NewFakeWithProtocol(iptables.ProtocolIPv4)
 			Expect(err).NotTo(HaveOccurred())
-			err = initLocalnetGatewayInternal(nodeName, []string{clusterCIDR}, nodeSubnet, ipt, wf)
+			util.SetIPTablesHelper(iptables.ProtocolIPv4, ipt)
+
+			err = initLocalnetGateway(nodeName, []string{clusterCIDR}, nodeSubnet, wf)
 			Expect(err).NotTo(HaveOccurred())
 
 			Expect(fexec.CalledMatchesExpected()).To(BeTrue())
