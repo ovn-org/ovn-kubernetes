@@ -19,7 +19,7 @@ func bridgedGatewayNodeSetup(nodeName, bridgeInterface string) (string, string, 
 		return "", "", err
 	}
 	stdout, stderr, err := util.RunOVSVsctl("set", "bridge",
-		bridgeInterface, "other-config:hwaddr="+macAddress.String())
+		bridgeInterface, "other-config:hwaddr="+macAddress)
 	if err != nil {
 		return "", "", fmt.Errorf("Failed to set bridge, stdout: %q, stderr: %q, "+
 			"error: %v", stdout, stderr, err)
@@ -35,7 +35,7 @@ func bridgedGatewayNodeSetup(nodeName, bridgeInterface string) (string, string, 
 	}
 
 	ifaceID := bridgeInterface + "_" + nodeName
-	return ifaceID, macAddress.String(), nil
+	return ifaceID, macAddress, nil
 }
 
 // getIPv4Address returns the ipv4 address for the network interface 'iface'.

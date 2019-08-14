@@ -234,20 +234,10 @@ func CreateManagementPort(nodeName, localSubnet string, clusterSubnet []string) 
 		logrus.Errorf("Failed to add port to br-int, stdout: %q, stderr: %q, error: %v", stdout, stderr, err)
 		return err
 	}
-	macAddress, stderr, err := util.RunOVSVsctl("--if-exists", "get", "interface", interfaceName, "mac_in_use")
+	macAddress, err := util.GetOVSPortMACAddress(interfaceName)
 	if err != nil {
-		logrus.Errorf("Failed to get mac address of %v, stderr: %q, error: %v", interfaceName, stderr, err)
+		logrus.Errorf("Failed to get management port MAC address: %v", err)
 		return err
-	}
-	if macAddress == "[]" {
-		return fmt.Errorf("Failed to get mac address of %v", interfaceName)
-	}
-
-	if runtime.GOOS == windowsOS && macAddress == "00:00:00:00:00:00" {
-		macAddress, err = util.FetchIfMacWindows(interfaceName)
-		if err != nil {
-			return err
-		}
 	}
 
 	// Create this node's management logical port on the node switch. Now that the second subnet IP is
