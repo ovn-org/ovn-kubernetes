@@ -27,9 +27,24 @@ type IPTablesHelper interface {
 	Delete(string, string, ...string) error
 }
 
-// NewWithProtocol creates a new IPTablesHelper wrapping "live" go-iptables
-func NewWithProtocol(proto iptables.Protocol) (IPTablesHelper, error) {
-	return iptables.NewWithProtocol(proto)
+var helpers = make(map[iptables.Protocol]IPTablesHelper)
+
+// SetIPTablesHelper sets the IPTablesHelper to be used
+func SetIPTablesHelper(proto iptables.Protocol, ipt IPTablesHelper) {
+	helpers[proto] = ipt
+}
+
+// GetIPTablesHelper returns an IPTablesHelper. If SetIPTablesHelper has not yet been
+// called, it will create a new IPTablesHelper wrapping "live" go-iptables
+func GetIPTablesHelper(proto iptables.Protocol) (IPTablesHelper, error) {
+	if helpers[proto] == nil {
+		ipt, err := iptables.NewWithProtocol(proto)
+		if err != nil {
+			return nil, err
+		}
+		SetIPTablesHelper(proto, ipt)
+	}
+	return helpers[proto], nil
 }
 
 // FakeTable represents a mock iptables table and can be used for
