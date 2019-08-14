@@ -64,27 +64,26 @@ func GetPortAddresses(portName string) (net.HardwareAddr, net.IP, error) {
 }
 
 // GetOVSPortMACAddress returns the MAC address of a given OVS port
-func GetOVSPortMACAddress(portName string) (net.HardwareAddr, error) {
+func GetOVSPortMACAddress(portName string) (string, error) {
 	macAddress, stderr, err := RunOVSVsctl("--if-exists", "get",
 		"interface", portName, "mac_in_use")
 	if err != nil {
-		return nil, fmt.Errorf("Failed to get MAC address for %q, stderr: %q, error: %v",
+		return "", fmt.Errorf("failed to get MAC address for %q, stderr: %q, error: %v",
 			portName, stderr, err)
 	}
-	if macAddress == "" {
-		return nil, fmt.Errorf("No mac_address found for %q", portName)
+	if macAddress == "[]" {
+		return "", fmt.Errorf("no mac_address found for %q", portName)
 	}
 	if runtime.GOOS == windowsOS && macAddress == "00:00:00:00:00:00" {
-		macAddress, err = FetchIfMacWindows(portName)
+		// There is a known issue with OVS not correctly picking up the
+		// physical network interface MAC address.
+		stdout, stderr, err := RunPowershell("$(Get-NetAdapter", "-IncludeHidden",
+			"-InterfaceAlias", fmt.Sprintf("\"%s\"", portName), ").MacAddress")
 		if err != nil {
-			return nil, err
+			return "", fmt.Errorf("failed to get mac address of %q, stderr: %q, error: %v", portName, stderr, err)
 		}
+		// Windows returns it in 00-00-00-00-00-00 format, we want ':' instead of '-'
+		macAddress = strings.ToLower(strings.Replace(stdout, "-", ":", -1))
 	}
-
-	mac, err := net.ParseMAC(macAddress)
-	if err != nil {
-		return nil, fmt.Errorf("failed to parse port %q MAC %q: %v", portName, macAddress, err)
-	}
-
-	return mac, nil
+	return macAddress, nil
 }
