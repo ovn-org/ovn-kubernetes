@@ -2,6 +2,7 @@ package util
 
 import (
 	"fmt"
+	"net"
 	"strings"
 
 	"github.com/sirupsen/logrus"
@@ -10,7 +11,7 @@ import (
 )
 
 // GatewayCleanup removes all the NB DB objects created for a node's gateway
-func GatewayCleanup(nodeName string) error {
+func GatewayCleanup(nodeName, nodeSubnet string) error {
 	// Get the cluster router
 	clusterRouter, err := GetK8sClusterRouter()
 	if err != nil {
@@ -20,7 +21,8 @@ func GatewayCleanup(nodeName string) error {
 	gatewayRouter := fmt.Sprintf("GR_%s", nodeName)
 
 	// Get the gateway router port's IP address (connected to join switch)
-	var routerIP string
+	var routerIP, mgtPortIP string
+	var nextHops []string
 	routerIPNetwork, stderr, err := RunOVNNbctl("--if-exist", "get",
 		"logical_router_port", "rtoj-"+gatewayRouter, "networks")
 	if err != nil {
@@ -34,33 +36,14 @@ func GatewayCleanup(nodeName string) error {
 			routerIP = strings.Split(routerIPNetwork, "/")[0]
 		}
 	}
-
 	if routerIP != "" {
-		// Get a list of all the routes in cluster router with this gateway
-		// Router as the next hop.
-		var uuids string
-		uuids, stderr, err = RunOVNNbctl("--data=bare", "--no-heading",
-			"--columns=_uuid", "find", "logical_router_static_route",
-			"nexthop="+routerIP)
-		if err != nil {
-			return fmt.Errorf("Failed to fetch all routes with gateway "+
-				"router %s as nexthop, stderr: %q, "+
-				"error: %v", gatewayRouter, stderr, err)
-		}
-
-		// Remove all the routes in cluster router with this gateway Router
-		// as the nexthop.
-		routes := strings.Fields(uuids)
-		for _, route := range routes {
-			_, stderr, err = RunOVNNbctl("--if-exists", "remove",
-				"logical_router", clusterRouter, "static_routes", route)
-			if err != nil {
-				logrus.Errorf("Failed to delete static route %s"+
-					", stderr: %q, err = %v", route, stderr, err)
-				continue
-			}
-		}
+		nextHops = append(nextHops, routerIP)
 	}
+	mgtPortIP = getMgtPortIP(nodeSubnet)
+	if mgtPortIP != "" {
+		nextHops = append(nextHops, mgtPortIP)
+	}
+	staticRouteCleanup(clusterRouter, nextHops)
 
 	// Remove the patch port that connects join switch to gateway router
 	_, stderr, err = RunOVNNbctl("--if-exist", "lsp-del", "jtor-"+gatewayRouter)
@@ -104,4 +87,43 @@ func GatewayCleanup(nodeName string) error {
 		}
 	}
 	return nil
+}
+
+func staticRouteCleanup(clusterRouter string, nextHops []string) {
+	for _, nextHop := range nextHops {
+		// Get a list of all the routes in cluster router with the next hop IP.
+		var uuids string
+		uuids, stderr, err := RunOVNNbctl("--data=bare", "--no-heading",
+			"--columns=_uuid", "find", "logical_router_static_route",
+			"nexthop="+nextHop)
+		if err != nil {
+			logrus.Errorf("Failed to fetch all routes with "+
+				"IP %s as nexthop, stderr: %q, "+
+				"error: %v", nextHop, stderr, err)
+			continue
+		}
+
+		// Remove all the routes in cluster router with this IP as the nexthop.
+		routes := strings.Fields(uuids)
+		for _, route := range routes {
+			_, stderr, err = RunOVNNbctl("--if-exists", "remove",
+				"logical_router", clusterRouter, "static_routes", route)
+			if err != nil {
+				logrus.Errorf("Failed to delete static route %s"+
+					", stderr: %q, err = %v", route, stderr, err)
+				continue
+			}
+		}
+	}
+}
+
+func getMgtPortIP(nodeSubnet string) string {
+	ip, _, err := net.ParseCIDR(nodeSubnet)
+	if err != nil {
+		logrus.Errorf("Failed to parse local subnet %s: %v", nodeSubnet, err)
+		return ""
+	}
+	//Get the fixed second IP for the management Port
+	ip = NextIP(NextIP(ip))
+	return ip.String()
 }
