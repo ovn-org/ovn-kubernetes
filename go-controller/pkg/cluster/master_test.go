@@ -219,6 +219,7 @@ var _ = Describe("Master Operations", func() {
 				node1Name         string = "openshift-node-1"
 				node1Subnet       string = "10.128.0.0/24"
 				node1RouteUUID    string = "0cac12cf-3e0f-4682-b028-5ea2e0001962"
+				node1mgtRouteUUID string = "0cac12cf-3e0f-4682-b028-5ea2e0001963"
 				masterName        string = "openshift-master-node"
 				masterSubnet      string = "10.128.2.0/24"
 				masterGWCIDR      string = "10.128.2.1/24"
@@ -258,6 +259,15 @@ subnet=%s
 			})
 			fexec.AddFakeCmdsNoOutputNoError([]string{
 				"ovn-nbctl --timeout=15 --if-exists remove logical_router " + clusterRouterUUID + " static_routes " + node1RouteUUID,
+			})
+			fexec.AddFakeCmd(&ovntest.ExpectedCmd{
+				Cmd:    "ovn-nbctl --timeout=15 --data=bare --no-heading --columns=_uuid find logical_router_static_route nexthop=10.128.0.2",
+				Output: node1mgtRouteUUID,
+			})
+			fexec.AddFakeCmdsNoOutputNoError([]string{
+				"ovn-nbctl --timeout=15 --if-exists remove logical_router " + clusterRouterUUID + " static_routes " + node1mgtRouteUUID,
+			})
+			fexec.AddFakeCmdsNoOutputNoError([]string{
 				"ovn-nbctl --timeout=15 --if-exist lsp-del jtor-GR_" + node1Name,
 				"ovn-nbctl --timeout=15 --if-exist lr-del GR_" + node1Name,
 				"ovn-nbctl --timeout=15 --if-exist ls-del ext_" + node1Name,
