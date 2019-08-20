@@ -14,8 +14,8 @@ import (
 
 // nodeChanged returns true if any relevant node attributes changed
 func nodeChanged(node1 *kapi.Node, node2 *kapi.Node) bool {
-	cidr1, nodeIP1, drMAC1 := getNodeDetails(node1)
-	cidr2, nodeIP2, drMAC2 := getNodeDetails(node2)
+	cidr1, nodeIP1, drMAC1 := getNodeDetails(node1, true)
+	cidr2, nodeIP2, drMAC2 := getNodeDetails(node2, true)
 
 	if cidr1 != nil && cidr2 != nil && nodeIP1 != nil && nodeIP2 != nil && drMAC1 != nil && drMAC2 != nil {
 		// The node was updated if either its subnet, its IP or its DRMAC has changed.
@@ -30,7 +30,7 @@ func nodeChanged(node1 *kapi.Node, node2 *kapi.Node) bool {
 // 1) the node's hybrid overlay hostsubnet
 // 2) the node's first InternalIP
 // 3) the node's distributed router MAC (eg the MAC to which VXLAN packets should be sent)
-func getNodeDetails(node *kapi.Node) (*net.IPNet, net.IP, net.HardwareAddr) {
+func getNodeDetails(node *kapi.Node, queryDrMac bool) (*net.IPNet, net.IP, net.HardwareAddr) {
 	hostsubnet, ok := node.Annotations[types.HybridOverlayHostSubnet]
 	if !ok {
 		return nil, nil, nil
@@ -41,16 +41,19 @@ func getNodeDetails(node *kapi.Node) (*net.IPNet, net.IP, net.HardwareAddr) {
 		return nil, nil, nil
 	}
 
-	drMACString, ok := node.Annotations[types.HybridOverlayDrMac]
-	if !ok {
-		logrus.Warningf("missing node %q distributed router MAC annotation", node.Name)
-		return nil, nil, nil
-	}
+	var drMAC net.HardwareAddr
+	if queryDrMac {
+		drMACString, ok := node.Annotations[types.HybridOverlayDrMac]
+		if !ok {
+			logrus.Warningf("missing node %q distributed router MAC annotation", node.Name)
+			return nil, nil, nil
+		}
 
-	drMAC, err := net.ParseMAC(drMACString)
-	if err != nil {
-		logrus.Warningf("error parsing node %q distributed router MAC %q: %v", node.Name, drMACString, err)
-		return nil, nil, nil
+		drMAC, err = net.ParseMAC(drMACString)
+		if err != nil {
+			logrus.Warningf("error parsing node %q distributed router MAC %q: %v", node.Name, drMACString, err)
+			return nil, nil, nil
+		}
 	}
 
 	nodeIP, err := util.GetNodeInternalIP(node)

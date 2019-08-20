@@ -6,7 +6,7 @@ import (
 
 const (
 	// HybridOverlayAnnotationBase holds the hybrid overlay annotation base
-	HybridOverlayAnnotationBase = "k8s.ovn.org/hybrid-overlay-"
+	HybridOverlayAnnotationBase = "k8s.v1.ovn.org/hybrid-overlay-"
 	// HybridOverlayHostSubnet holds the pod CIDR assigned to the node
 	HybridOverlayHostSubnet = HybridOverlayAnnotationBase + "hostsubnet"
 	// HybridOverlayDrMac holds the MAC address of the Distributed Router/gateway

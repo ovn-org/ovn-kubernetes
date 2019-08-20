@@ -1,6 +1,7 @@
 package hcsshim
 
 import (
+	"context"
 	"fmt"
 	"os"
 	"sync"
@@ -75,7 +76,7 @@ func CreateContainer(id string, c *ContainerConfig) (Container, error) {
 		return nil, fmt.Errorf("failed to merge additional JSON '%s': %s", createContainerAdditionalJSON, err)
 	}
 
-	system, err := hcs.CreateComputeSystem(id, fullConfig)
+	system, err := hcs.CreateComputeSystem(context.Background(), id, fullConfig)
 	if err != nil {
 		return nil, err
 	}
@@ -84,7 +85,7 @@ func CreateContainer(id string, c *ContainerConfig) (Container, error) {
 
 // OpenContainer opens an existing container by ID.
 func OpenContainer(id string) (Container, error) {
-	system, err := hcs.OpenComputeSystem(id)
+	system, err := hcs.OpenComputeSystem(context.Background(), id)
 	if err != nil {
 		return nil, err
 	}
@@ -93,17 +94,17 @@ func OpenContainer(id string) (Container, error) {
 
 // GetContainers gets a list of the containers on the system that match the query
 func GetContainers(q ComputeSystemQuery) ([]ContainerProperties, error) {
-	return hcs.GetComputeSystems(q)
+	return hcs.GetComputeSystems(context.Background(), q)
 }
 
 // Start synchronously starts the container.
 func (container *container) Start() error {
-	return convertSystemError(container.system.Start(), container)
+	return convertSystemError(container.system.Start(context.Background()), container)
 }
 
 // Shutdown requests a container shutdown, but it may not actually be shutdown until Wait() succeeds.
 func (container *container) Shutdown() error {
-	err := container.system.Shutdown()
+	err := container.system.Shutdown(context.Background())
 	if err != nil {
 		return convertSystemError(err, container)
 	}
@@ -112,7 +113,7 @@ func (container *container) Shutdown() error {
 
 // Terminate requests a container terminate, but it may not actually be terminated until Wait() succeeds.
 func (container *container) Terminate() error {
-	err := container.system.Terminate()
+	err := container.system.Terminate(context.Background())
 	if err != nil {
 		return convertSystemError(err, container)
 	}
@@ -150,12 +151,12 @@ func (container *container) WaitTimeout(timeout time.Duration) error {
 
 // Pause pauses the execution of a container.
 func (container *container) Pause() error {
-	return convertSystemError(container.system.Pause(), container)
+	return convertSystemError(container.system.Pause(context.Background()), container)
 }
 
 // Resume resumes the execution of a container.
 func (container *container) Resume() error {
-	return convertSystemError(container.system.Resume(), container)
+	return convertSystemError(container.system.Resume(context.Background()), container)
 }
 
 // HasPendingUpdates returns true if the container has updates pending to install
@@ -165,7 +166,7 @@ func (container *container) HasPendingUpdates() (bool, error) {
 
 // Statistics returns statistics for the container. This is a legacy v1 call
 func (container *container) Statistics() (Statistics, error) {
-	properties, err := container.system.Properties(schema1.PropertyTypeStatistics)
+	properties, err := container.system.Properties(context.Background(), schema1.PropertyTypeStatistics)
 	if err != nil {
 		return Statistics{}, convertSystemError(err, container)
 	}
@@ -175,7 +176,7 @@ func (container *container) Statistics() (Statistics, error) {
 
 // ProcessList returns an array of ProcessListItems for the container. This is a legacy v1 call
 func (container *container) ProcessList() ([]ProcessListItem, error) {
-	properties, err := container.system.Properties(schema1.PropertyTypeProcessList)
+	properties, err := container.system.Properties(context.Background(), schema1.PropertyTypeProcessList)
 	if err != nil {
 		return nil, convertSystemError(err, container)
 	}
@@ -185,7 +186,7 @@ func (container *container) ProcessList() ([]ProcessListItem, error) {
 
 // This is a legacy v1 call
 func (container *container) MappedVirtualDisks() (map[int]MappedVirtualDiskController, error) {
-	properties, err := container.system.Properties(schema1.PropertyTypeMappedVirtualDisk)
+	properties, err := container.system.Properties(context.Background(), schema1.PropertyTypeMappedVirtualDisk)
 	if err != nil {
 		return nil, convertSystemError(err, container)
 	}
@@ -204,7 +205,7 @@ func (container *container) CreateProcess(c *ProcessConfig) (Process, error) {
 
 // OpenProcess gets an interface to an existing process within the container.
 func (container *container) OpenProcess(pid int) (Process, error) {
-	p, err := container.system.OpenProcess(pid)
+	p, err := container.system.OpenProcess(context.Background(), pid)
 	if err != nil {
 		return nil, convertSystemError(err, container)
 	}
@@ -218,5 +219,5 @@ func (container *container) Close() error {
 
 // Modify the System
 func (container *container) Modify(config *ResourceModificationRequestResponse) error {
-	return convertSystemError(container.system.Modify(config), container)
+	return convertSystemError(container.system.Modify(context.Background(), config), container)
 }
