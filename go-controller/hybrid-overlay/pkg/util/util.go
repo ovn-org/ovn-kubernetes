@@ -46,6 +46,17 @@ func IsHybridOverlayNode(node *kapi.Node) bool {
 	return false
 }
 
+// SameIPNet returns true if both inputs are nil or if both inputs have the
+// same value
+func SameIPNet(a, b *net.IPNet) bool {
+	if a == b {
+		return true
+	} else if a == nil || b == nil {
+		return false
+	}
+	return a.String() == b.String()
+}
+
 // GetNodeInternalIP returns the first NodeInternalIP address of the node
 func GetNodeInternalIP(node *kapi.Node) (string, error) {
 	for _, addr := range node.Status.Addresses {
