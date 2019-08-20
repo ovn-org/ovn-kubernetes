@@ -27,88 +27,130 @@
 			"revisionTime": "2019-05-16T16:56:58Z"
 		},
 		{
-			"checksumSHA1": "GmaVYHnSp9RYnJuoobxFQQGVSxk=",
+			"checksumSHA1": "vJzF45abvzSXI3kqcszcVwjcPAY=",
 			"path": "github.com/Microsoft/hcsshim",
-			"revision": "115e455336c0a9adf2ff64ab6064156ef24ae348",
-			"revisionTime": "2019-06-20T21:17:52Z"
+			"revision": "e6890e6c30ebf9ce517c96ca1b6ba8ebb2a4d2cc",
+			"revisionTime": "2019-09-09T20:46:26Z"
 		},
 		{
-			"checksumSHA1": "a3qh6Yq1COEVzvXwXzEacOABOgs=",
+			"checksumSHA1": "pIUn4Lq+mMQRxekry5n0gyqT4Qg=",
+			"path": "github.com/Microsoft/hcsshim/hcn",
+			"revision": "e6890e6c30ebf9ce517c96ca1b6ba8ebb2a4d2cc",
+			"revisionTime": "2019-09-09T20:46:26Z"
+		},
+		{
+			"checksumSHA1": "WC/MbXjj+zlRf09RplFNlW0xcds=",
+			"path": "github.com/Microsoft/hcsshim/internal/cni",
+			"revision": "e6890e6c30ebf9ce517c96ca1b6ba8ebb2a4d2cc",
+			"revisionTime": "2019-09-09T20:46:26Z"
+		},
+		{
+			"checksumSHA1": "mXad08VLocKbFJw8w1Bwl6fzqaM=",
 			"path": "github.com/Microsoft/hcsshim/internal/cow",
-			"revision": "115e455336c0a9adf2ff64ab6064156ef24ae348",
-			"revisionTime": "2019-06-20T21:17:52Z"
+			"revision": "e6890e6c30ebf9ce517c96ca1b6ba8ebb2a4d2cc",
+			"revisionTime": "2019-09-09T20:46:26Z"
 		},
 		{
-			"checksumSHA1": "VsbPwVsL0ePPJuIcENkqHgXf4dE=",
+			"checksumSHA1": "JLVkXvYKR6bj/+U40sunwZ0BqEc=",
 			"path": "github.com/Microsoft/hcsshim/internal/hcs",
-			"revision": "115e455336c0a9adf2ff64ab6064156ef24ae348",
-			"revisionTime": "2019-06-20T21:17:52Z"
+			"revision": "e6890e6c30ebf9ce517c96ca1b6ba8ebb2a4d2cc",
+			"revisionTime": "2019-09-09T20:46:26Z"
 		},
 		{
 			"checksumSHA1": "I+ocNs4NwGoF2IABWOHNJweq/OI=",
 			"path": "github.com/Microsoft/hcsshim/internal/hcserror",
-			"revision": "115e455336c0a9adf2ff64ab6064156ef24ae348",
-			"revisionTime": "2019-06-20T21:17:52Z"
+			"revision": "e6890e6c30ebf9ce517c96ca1b6ba8ebb2a4d2cc",
+			"revisionTime": "2019-09-09T20:46:26Z"
 		},
 		{
 			"checksumSHA1": "aqwDgZhPFFD56T3cai6WX2r/Si4=",
 			"path": "github.com/Microsoft/hcsshim/internal/hns",
-			"revision": "115e455336c0a9adf2ff64ab6064156ef24ae348",
-			"revisionTime": "2019-06-20T21:17:52Z"
+			"revision": "e6890e6c30ebf9ce517c96ca1b6ba8ebb2a4d2cc",
+			"revisionTime": "2019-09-09T20:46:26Z"
 		},
 		{
-			"checksumSHA1": "wXWE0WI+iZX5tSGl2oaeDIUxexs=",
+			"checksumSHA1": "L1NFAMQwV1D/htO3sMBQVDIlCDQ=",
 			"path": "github.com/Microsoft/hcsshim/internal/interop",
-			"revision": "115e455336c0a9adf2ff64ab6064156ef24ae348",
-			"revisionTime": "2019-06-20T21:17:52Z"
+			"revision": "e6890e6c30ebf9ce517c96ca1b6ba8ebb2a4d2cc",
+			"revisionTime": "2019-09-09T20:46:26Z"
+		},
+		{
+			"checksumSHA1": "Jp0Up8UXSjfA2+tqb97BMS7hsc0=",
+			"path": "github.com/Microsoft/hcsshim/internal/log",
+			"revision": "e6890e6c30ebf9ce517c96ca1b6ba8ebb2a4d2cc",
+			"revisionTime": "2019-09-09T20:46:26Z"
 		},
 		{
 			"checksumSHA1": "dmKi7kGo9rXyIaZNnA2WXO52hjE=",
 			"path": "github.com/Microsoft/hcsshim/internal/logfields",
-			"revision": "115e455336c0a9adf2ff64ab6064156ef24ae348",
-			"revisionTime": "2019-06-20T21:17:52Z"
+			"revision": "e6890e6c30ebf9ce517c96ca1b6ba8ebb2a4d2cc",
+			"revisionTime": "2019-09-09T20:46:26Z"
 		},
 		{
 			"checksumSHA1": "f0vNxw3EFKzbbJmU/poYdME9TVQ=",
 			"path": "github.com/Microsoft/hcsshim/internal/longpath",
-			"revision": "115e455336c0a9adf2ff64ab6064156ef24ae348",
-			"revisionTime": "2019-06-20T21:17:52Z"
+			"revision": "e6890e6c30ebf9ce517c96ca1b6ba8ebb2a4d2cc",
+			"revisionTime": "2019-09-09T20:46:26Z"
 		},
 		{
 			"checksumSHA1": "PEn6Wpx3dn3sATok/oHQxsPKAI8=",
 			"path": "github.com/Microsoft/hcsshim/internal/mergemaps",
-			"revision": "115e455336c0a9adf2ff64ab6064156ef24ae348",
-			"revisionTime": "2019-06-20T21:17:52Z"
+			"revision": "e6890e6c30ebf9ce517c96ca1b6ba8ebb2a4d2cc",
+			"revisionTime": "2019-09-09T20:46:26Z"
+		},
+		{
+			"checksumSHA1": "Bt7agGK+cD7Qskz0udYeF6hPhhk=",
+			"path": "github.com/Microsoft/hcsshim/internal/oc",
+			"revision": "e6890e6c30ebf9ce517c96ca1b6ba8ebb2a4d2cc",
+			"revisionTime": "2019-09-09T20:46:26Z"
+		},
+		{
+			"checksumSHA1": "/6f/3GY4yUmcSQyW3n4DZeTmmIs=",
+			"path": "github.com/Microsoft/hcsshim/internal/regstate",
+			"revision": "e6890e6c30ebf9ce517c96ca1b6ba8ebb2a4d2cc",
+			"revisionTime": "2019-09-09T20:46:26Z"
+		},
+		{
+			"checksumSHA1": "qXw70pNZxp1VdBfUkDkHY+f1AGU=",
+			"path": "github.com/Microsoft/hcsshim/internal/runhcs",
+			"revision": "e6890e6c30ebf9ce517c96ca1b6ba8ebb2a4d2cc",
+			"revisionTime": "2019-09-09T20:46:26Z"
 		},
 		{
 			"checksumSHA1": "iFj5p/kecUof3JEDo9hWZFzqOVs=",
 			"path": "github.com/Microsoft/hcsshim/internal/safefile",
-			"revision": "115e455336c0a9adf2ff64ab6064156ef24ae348",
-			"revisionTime": "2019-06-20T21:17:52Z"
+			"revision": "e6890e6c30ebf9ce517c96ca1b6ba8ebb2a4d2cc",
+			"revisionTime": "2019-09-09T20:46:26Z"
 		},
 		{
-			"checksumSHA1": "45IjOBQEnmbVeWG0hnhypzHzAbI=",
+			"checksumSHA1": "ayjFhrPe86GfNY7ZFI5yw4z642A=",
 			"path": "github.com/Microsoft/hcsshim/internal/schema1",
-			"revision": "115e455336c0a9adf2ff64ab6064156ef24ae348",
-			"revisionTime": "2019-06-20T21:17:52Z"
+			"revision": "e6890e6c30ebf9ce517c96ca1b6ba8ebb2a4d2cc",
+			"revisionTime": "2019-09-09T20:46:26Z"
 		},
 		{
 			"checksumSHA1": "2iRmqX8jmclbBXe9x01uJ1w/5HM=",
 			"path": "github.com/Microsoft/hcsshim/internal/schema2",
-			"revision": "115e455336c0a9adf2ff64ab6064156ef24ae348",
-			"revisionTime": "2019-06-20T21:17:52Z"
+			"revision": "e6890e6c30ebf9ce517c96ca1b6ba8ebb2a4d2cc",
+			"revisionTime": "2019-09-09T20:46:26Z"
 		},
 		{
 			"checksumSHA1": "NOyi1RKwBzxv1ZLShtaaK0pFUZI=",
 			"path": "github.com/Microsoft/hcsshim/internal/timeout",
-			"revision": "115e455336c0a9adf2ff64ab6064156ef24ae348",
-			"revisionTime": "2019-06-20T21:17:52Z"
+			"revision": "e6890e6c30ebf9ce517c96ca1b6ba8ebb2a4d2cc",
+			"revisionTime": "2019-09-09T20:46:26Z"
+		},
+		{
+			"checksumSHA1": "/ACX7ppeji+WiaotxOcah3nooPY=",
+			"path": "github.com/Microsoft/hcsshim/internal/vmcompute",
+			"revision": "e6890e6c30ebf9ce517c96ca1b6ba8ebb2a4d2cc",
+			"revisionTime": "2019-09-09T20:46:26Z"
 		},
 		{
 			"checksumSHA1": "Z1NHt6n5dxrjFv2sxTS2hyKoPPE=",
 			"path": "github.com/Microsoft/hcsshim/internal/wclayer",
-			"revision": "115e455336c0a9adf2ff64ab6064156ef24ae348",
-			"revisionTime": "2019-06-20T21:17:52Z"
+			"revision": "e6890e6c30ebf9ce517c96ca1b6ba8ebb2a4d2cc",
+			"revisionTime": "2019-09-09T20:46:26Z"
 		},
 		{
 			"checksumSHA1": "0rido7hYHQtfq3UJzVT5LClLAWc=",
@@ -703,6 +745,36 @@
 			"revisionTime": "2018-07-20T11:23:40Z"
 		},
 		{
+			"checksumSHA1": "30aPgYbCukGPX4Mq++0NjrHDMBU=",
+			"path": "go.opencensus.io",
+			"revision": "3da91ae5e6af5a3e42dac7761866fa513a753d5e",
+			"revisionTime": "2019-09-10T21:32:05Z"
+		},
+		{
+			"checksumSHA1": "qJGsfghV4/lQ6Rhq/EaVqQPJ0s4=",
+			"path": "go.opencensus.io/internal",
+			"revision": "3da91ae5e6af5a3e42dac7761866fa513a753d5e",
+			"revisionTime": "2019-09-10T21:32:05Z"
+		},
+		{
+			"checksumSHA1": "Qehn8Uz+e5KgZW8gPXK4snQNfiU=",
+			"path": "go.opencensus.io/trace",
+			"revision": "3da91ae5e6af5a3e42dac7761866fa513a753d5e",
+			"revisionTime": "2019-09-10T21:32:05Z"
+		},
+		{
+			"checksumSHA1": "JkvEb8oMEFjic5K/03Tyr5Lok+w=",
+			"path": "go.opencensus.io/trace/internal",
+			"revision": "3da91ae5e6af5a3e42dac7761866fa513a753d5e",
+			"revisionTime": "2019-09-10T21:32:05Z"
+		},
+		{
+			"checksumSHA1": "UHbxxaMqpEPsubh8kPwzSlyEwqI=",
+			"path": "go.opencensus.io/trace/tracestate",
+			"revision": "3da91ae5e6af5a3e42dac7761866fa513a753d5e",
+			"revisionTime": "2019-09-10T21:32:05Z"
+		},
+		{
 			"checksumSHA1": "Zsm3tvgRFJOt3afwwhrGymcSZgg=",
 			"path": "golang.org/x/crypto/ssh/terminal",
 			"revision": "ea8f1a30c4438cc8b13f05538385ad8dc6049b43",
@@ -779,6 +851,12 @@
 			"path": "golang.org/x/sys/windows",
 			"revision": "943d5127bdb0eb373a40b79594525d32b0fde236",
 			"revisionTime": "2019-06-21T07:42:30Z"
+		},
+		{
+			"checksumSHA1": "FCBHX83YaM1LmNHtSM30BKmbJQY=",
+			"path": "golang.org/x/sys/windows/registry",
+			"revision": "f460065e899abee61eb86816fd1fd684ea5a0f26",
+			"revisionTime": "2019-09-08T12:33:06Z"
 		},
 		{
 			"checksumSHA1": "tqqo7DEeFCclb58XbN44WwdpWww=",
@@ -959,6 +1037,10 @@
 			"path": "gopkg.in/yaml.v2",
 			"revision": "51d6538a90f86fe93ac480b35f37b2be17fef232",
 			"revisionTime": "2018-11-15T11:05:04Z"
+		},
+		{
+			"path": "http://github.com/Microsoft/hcsshim",
+			"revision": ""
 		},
 		{
 			"checksumSHA1": "qt2NIBMPd2LABq8WO+l5rFaUPx0=",
