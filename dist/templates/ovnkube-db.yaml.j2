@@ -52,8 +52,8 @@ spec:
 
         securityContext:
           runAsUser: 0
-          # Permission could be reduced by selecting an appropriate SELinux policy
-          privileged: true
+          capabilities:
+            add: ["NET_ADMIN"]
 
         volumeMounts:
         # ovn db is stored in the pod in /etc/openvswitch
@@ -104,8 +104,8 @@ spec:
 
         securityContext:
           runAsUser: 0
-          # Permission could be reduced by selecting an appropriate SELinux policy
-          privileged: true
+          capabilities:
+            add: ["NET_ADMIN"]
 
         volumeMounts:
         # ovn db is stored in the pod in /etc/openvswitch
