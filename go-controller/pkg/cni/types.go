@@ -48,6 +48,8 @@ type PodRequest struct {
 	Netns string
 	// Interface name to be configured
 	IfName string
+	// custom mac
+	MAC string
 	// CNI conf obtained from stdin conf
 	CNIConf *types.NetConf
 	// Channel for returning the operation result to the Server

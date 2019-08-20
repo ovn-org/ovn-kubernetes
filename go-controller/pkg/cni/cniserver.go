@@ -118,6 +118,8 @@ func cniRequestToPodRequest(r *http.Request) (*PodRequest, error) {
 		return nil, fmt.Errorf("missing K8S_POD_NAMESPACE")
 	}
 
+	req.MAC, _ = cniArgs["MAC"]
+
 	req.PodName, ok = cniArgs["K8S_POD_NAME"]
 	if !ok {
 		return nil, fmt.Errorf("missing K8S_POD_NAME")

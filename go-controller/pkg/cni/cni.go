@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net"
+	"strings"
 	"time"
 
 	"github.com/sirupsen/logrus"
@@ -59,6 +60,8 @@ func extractPodBandwidthResources(podAnnotations map[string]string) (int64, int6
 }
 
 func (pr *PodRequest) cmdAdd() *PodResult {
+	var err error
+
 	namespace := pr.PodNamespace
 	podName := pr.PodName
 	if namespace == "" || podName == "" {
@@ -113,6 +116,36 @@ func (pr *PodRequest) cmdAdd() *PodResult {
 	if ipAddress == "" || macAddress == "" || gatewayIP == "" {
 		logrus.Errorf("failed in pod annotation key extract")
 		return nil
+	}
+
+	ipAddressMask := strings.Split(ipAddress, "/")
+	if len(ipAddressMask) != 2 {
+		logrus.Errorf("Invalid IP address %s in the ovn pod annotation of %s/%s", ipAddress, namespace, podName)
+		return nil
+	}
+
+	// Pod spec requested for custom MAC address, update the corresponding logical port and the pod annotation
+	if len(pr.MAC) != 0 && pr.MAC != macAddress {
+		logrus.Debugf("cmdAdd: Pod %s/%s requested custom MAC %s", namespace, podName, pr.MAC)
+
+		portName := fmt.Sprintf("%s_%s", namespace, podName)
+		out, stderr, err := util.RunOVNNbctl("--wait=sb",
+			"--", "lsp-set-addresses", portName, fmt.Sprintf("%s %s", pr.MAC, ipAddressMask[0]),
+			"--", "lsp-set-port-security", portName, fmt.Sprintf("%s %s", pr.MAC, ipAddress))
+		if err != nil {
+			logrus.Errorf("Error while updating logical port %s's mac address to %s "+
+				"stdout: %q, stderr: %q (%v)", portName, pr.MAC, out, stderr, err)
+			return nil
+		}
+		annotation := fmt.Sprintf(`{\"ip_address\":\"%s\", \"mac_address\":\"%s\", \"gateway_ip\": \"%s\"}`, ipAddress, pr.MAC, gatewayIP)
+		logrus.Debugf("Annotation values: ip=%s ; mac=%s ; gw=%s\nAnnotation=%s", ipAddress, pr.MAC, gatewayIP, annotation)
+		err = kubecli.SetAnnotationOnPod(namespace, podName, "ovn", annotation)
+		if err != nil {
+			logrus.Errorf("Failed to set annotation on pod %s/%s - %v", namespace, podName, err)
+			return nil
+		}
+
+		macAddress = pr.MAC
 	}
 
 	ingress, egress, err := extractPodBandwidthResources(annotation)
