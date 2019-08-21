@@ -534,8 +534,10 @@ nb-ovsdb () {
 
   echo "=============== run nb_ovsdb ========== MASTER ONLY"
   echo "ovn_log_nb=${ovn_log_nb} ovn_nb_log_file=${ovn_nb_log_file}"
-  /usr/share/openvswitch/scripts/ovn-ctl run_nb_ovsdb --no-monitor \
-  --ovn-nb-logfile=${ovn_nb_log_file} --ovn-nb-log="${ovn_log_nb}" &
+
+  run_as_ovs_user_if_needed \
+      /usr/share/openvswitch/scripts/ovn-ctl run_nb_ovsdb --no-monitor \
+      --ovn-nb-logfile=${ovn_nb_log_file} --ovn-nb-log="${ovn_log_nb}" &
 
   wait_for_event process_ready ovnnb_db
   echo "=============== nb-ovsdb ========== RUNNING"
