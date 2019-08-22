@@ -329,9 +329,13 @@ func GatewayInit(clusterIPSubnet []string, nodeName, ifaceID, nicIP, nicMacAddre
 	}
 
 	// Connect GR to external_switch with mac address of external interface
-	// and that IP address.
-	stdout, stderr, err = RunOVNNbctl("--", "--may-exist", "lrp-add",
-		gatewayRouter, "rtoe-"+gatewayRouter, nicMacAddress, physicalIPMask,
+	// and that IP address. In the case of `local` gateway mode, whenever ovnkube-node container
+	// restarts a new br-local bridge will be created with a new `nicMacAddress`. As a result,
+	// direct addition of logical_router_port with --may-exists will not work since the MAC
+	// has changed. So, we need to delete that port, if it exists, and it back.
+	stdout, stderr, err = RunOVNNbctl(
+		"--", "--if-exists", "lrp-del", "rtoe-"+gatewayRouter,
+		"--", "lrp-add", gatewayRouter, "rtoe-"+gatewayRouter, nicMacAddress, physicalIPMask,
 		"--", "set", "logical_router_port", "rtoe-"+gatewayRouter,
 		"external-ids:gateway-physical-ip=yes")
 	if err != nil {

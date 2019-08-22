@@ -148,7 +148,7 @@ GR_openshift-master-node chassis=6a47b33b-89d3-4d65-ac31-b19b549326c7 lb_force_s
 		}
 		fexec.AddFakeCmdsNoOutputNoError([]string{
 			localnetPortCmd,
-			"ovn-nbctl --timeout=15 -- --may-exist lrp-add " + gwRouter + " rtoe-" + gwRouter + " " + eth0MAC + " " + eth0CIDR + " -- set logical_router_port rtoe-" + gwRouter + " external-ids:gateway-physical-ip=yes",
+			"ovn-nbctl --timeout=15 -- --if-exists lrp-del rtoe-" + gwRouter + " -- lrp-add " + gwRouter + " rtoe-" + gwRouter + " " + eth0MAC + " " + eth0CIDR + " -- set logical_router_port rtoe-" + gwRouter + " external-ids:gateway-physical-ip=yes",
 			"ovn-nbctl --timeout=15 -- --may-exist lsp-add ext_" + nodeName + " etor-" + gwRouter + " -- set logical_switch_port etor-" + gwRouter + " type=router options:router-port=rtoe-" + gwRouter + " addresses=\"" + eth0MAC + "\"",
 			"ovn-nbctl --timeout=15 --may-exist lr-route-add " + gwRouter + " 0.0.0.0/0 " + eth0GWIP + " rtoe-" + gwRouter,
 			"ovn-nbctl --timeout=15 --may-exist lr-nat-add " + gwRouter + " snat " + eth0IP + " " + clusterCIDR,
@@ -370,7 +370,7 @@ GR_openshift-master-node chassis=6a47b33b-89d3-4d65-ac31-b19b549326c7 lb_force_s
 		fexec.AddFakeCmdsNoOutputNoError([]string{
 			"ovn-nbctl --timeout=15 --may-exist ls-add ext_" + nodeName,
 			"ovn-nbctl --timeout=15 -- --may-exist lsp-add ext_" + nodeName + " eth0_" + nodeName + " -- lsp-set-addresses eth0_" + nodeName + " unknown",
-			"ovn-nbctl --timeout=15 -- --may-exist lrp-add " + gwRouter + " rtoe-" + gwRouter + " " + eth0MAC + " " + eth0CIDR + " -- set logical_router_port rtoe-" + gwRouter + " external-ids:gateway-physical-ip=yes",
+			"ovn-nbctl --timeout=15 -- --if-exists lrp-del rtoe-" + gwRouter + " -- lrp-add " + gwRouter + " rtoe-" + gwRouter + " " + eth0MAC + " " + eth0CIDR + " -- set logical_router_port rtoe-" + gwRouter + " external-ids:gateway-physical-ip=yes",
 			"ovn-nbctl --timeout=15 -- --may-exist lsp-add ext_" + nodeName + " etor-" + gwRouter + " -- set logical_switch_port etor-" + gwRouter + " type=router options:router-port=rtoe-" + gwRouter + " addresses=\"" + eth0MAC + "\"",
 			"ovn-nbctl --timeout=15 --may-exist lr-route-add " + gwRouter + " 0.0.0.0/0 " + eth0GWIP + " rtoe-" + gwRouter,
 			"ovn-nbctl --timeout=15 --may-exist lr-nat-add " + gwRouter + " snat " + eth0IP + " " + clusterCIDR,
@@ -545,7 +545,7 @@ GR_openshift-master-node chassis=6a47b33b-89d3-4d65-ac31-b19b549326c7 lb_force_s
 			})
 			fexec.AddFakeCmdsNoOutputNoError([]string{
 				"ovn-nbctl --timeout=15 -- --may-exist lsp-add ext_" + nodeName + " br-local_" + nodeName + " -- lsp-set-addresses br-local_" + nodeName + " unknown -- lsp-set-type br-local_" + nodeName + " localnet -- lsp-set-options br-local_" + nodeName + " network_name=" + util.PhysicalNetworkName,
-				"ovn-nbctl --timeout=15 -- --may-exist lrp-add " + gwRouter + " rtoe-" + gwRouter + " " + brLocalnetMAC + " 169.254.33.2/24 -- set logical_router_port rtoe-" + gwRouter + " external-ids:gateway-physical-ip=yes",
+				"ovn-nbctl --timeout=15 -- --if-exists lrp-del rtoe-" + gwRouter + " -- lrp-add " + gwRouter + " rtoe-" + gwRouter + " " + brLocalnetMAC + " 169.254.33.2/24 -- set logical_router_port rtoe-" + gwRouter + " external-ids:gateway-physical-ip=yes",
 				"ovn-nbctl --timeout=15 -- --may-exist lsp-add ext_" + nodeName + " etor-" + gwRouter + " -- set logical_switch_port etor-" + gwRouter + " type=router options:router-port=rtoe-" + gwRouter + " addresses=\"" + brLocalnetMAC + "\"",
 				"ovn-nbctl --timeout=15 --may-exist lr-route-add " + gwRouter + " 0.0.0.0/0 169.254.33.1 rtoe-" + gwRouter,
 				"ovn-nbctl --timeout=15 --may-exist lr-nat-add " + gwRouter + " snat 169.254.33.2 " + clusterCIDR,
