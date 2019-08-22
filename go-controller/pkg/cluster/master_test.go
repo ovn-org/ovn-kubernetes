@@ -254,6 +254,10 @@ subnet=%s
 				Output: "[\"100.64.0.3/16\"]",
 			})
 			fexec.AddFakeCmd(&ovntest.ExpectedCmd{
+				Cmd:    "ovn-nbctl --timeout=15 --data=bare --no-heading --columns=_uuid find logical_router_static_route ip_prefix=0.0.0.0/0 nexthop=100.64.0.3",
+				Output: "",
+			})
+			fexec.AddFakeCmd(&ovntest.ExpectedCmd{
 				Cmd:    "ovn-nbctl --timeout=15 --data=bare --no-heading --columns=_uuid find logical_router_static_route nexthop=100.64.0.3",
 				Output: node1RouteUUID,
 			})

@@ -194,6 +194,51 @@ func (ovn *Controller) handleNodePortLB(node *kapi.Node) bool {
 	return true
 }
 
+func (ovn *Controller) handleExternalIPsLB() {
+	namespaces, err := ovn.kube.GetNamespaces()
+	if err != nil {
+		logrus.Errorf("failed to get k8s namespaces: %v", err)
+		return
+	}
+	for _, ns := range namespaces.Items {
+		endpoints, err := ovn.kube.GetEndpoints(ns.Name)
+		if err != nil {
+			logrus.Errorf("failed to get k8s endpoints: %v", err)
+			continue
+		}
+		for _, ep := range endpoints.Items {
+			svc, err := ovn.kube.GetService(ep.Namespace, ep.Name)
+			if err != nil {
+				continue
+			}
+			if len(svc.Spec.ExternalIPs) == 0 {
+				continue
+			}
+			tcpPortMap := make(map[string]lbEndpoints)
+			udpPortMap := make(map[string]lbEndpoints)
+			ovn.getLbEndpoints(&ep, tcpPortMap, udpPortMap)
+			for svcPortName, lbEps := range tcpPortMap {
+				ips := lbEps.IPs
+				targetPort := lbEps.Port
+				for _, svcPort := range svc.Spec.Ports {
+					if svcPort.Protocol == kapi.ProtocolTCP && svcPort.Name == svcPortName {
+						ovn.handleExternalIPs(svc, svcPort, ips, targetPort)
+					}
+				}
+			}
+			for svcPortName, lbEps := range udpPortMap {
+				ips := lbEps.IPs
+				targetPort := lbEps.Port
+				for _, svcPort := range svc.Spec.Ports {
+					if svcPort.Protocol == kapi.ProtocolUDP && svcPort.Name == svcPortName {
+						ovn.handleExternalIPs(svc, svcPort, ips, targetPort)
+					}
+				}
+			}
+		}
+	}
+}
+
 func (ovn *Controller) handleExternalIPs(svc *kapi.Service, svcPort kapi.ServicePort, ips []string, targetPort int32) {
 	logrus.Debugf("handling external IPs for svc %v", svc.Name)
 	if len(svc.Spec.ExternalIPs) == 0 {
