@@ -155,7 +155,7 @@ spec:
         #     scheme: HTTP
         lifecycle:
 
-      - name: ovn-node
+      - name: ovnkube-node
         image: "{{ ovn_image | default('docker.io/ovnkube/ovn-daemonset:latest') }}"
         imagePullPolicy: "{{ ovn_image_pull_policy | default('IfNotPresent') }}"
 
