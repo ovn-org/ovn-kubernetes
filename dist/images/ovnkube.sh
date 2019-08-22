@@ -589,6 +589,7 @@ sb-ovsdb () {
 run-ovn-northd () {
   check_ovn_daemonset_version "3"
   rm -f /var/run/openvswitch/ovn-northd.pid
+  rm -f /var/run/openvswitch/ovn-northd.*.ctl
 
   # Make sure /var/lib/openvswitch exists
   mkdir -p /var/lib/openvswitch
