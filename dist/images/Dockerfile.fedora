@@ -16,21 +16,14 @@ USER root
 ENV PYTHONDONTWRITEBYTECODE yes
 
 # install needed rpms - openvswitch must be 2.10.4 or higher
-RUN dnf install --refresh -y  \
-	PyYAML bind-utils procps-ng \
-	openssl \
-	numactl-libs \
-	firewalld-filesystem \
-	libpcap \
-	hostname \
-	ovn \
-	ovn-central \
-	ovn-host \
-	kubernetes-client \
-	iproute strace socat iptables && \
-	dnf clean all
-
-RUN rm -rf /var/cache/dnf
+RUN INSTALL_PKGS=" \
+	PyYAML bind-utils procps-ng openssl numactl-libs firewalld-filesystem \
+	libpcap hostname kubernetes-client \
+        ovn ovn-central ovn-host \
+	iptables iproute strace socat \
+        " && \
+	dnf install --refresh -y --setopt=tsflags=nodocs $INSTALL_PKGS && \
+	dnf clean all && rm -rf /var/cache/dnf/*
 
 RUN mkdir -p /var/run/openvswitch && \
     mkdir -p /etc/cni/net.d && \
