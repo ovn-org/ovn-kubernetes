@@ -63,9 +63,6 @@ ovn_log_nbctld=${OVN_LOG_NBCTLD:-"/var/log/openvswitch/ovn-nbctl.log"}
 
 logdir=/var/log/openvswitch
 ovnkubelogdir=/var/log/ovn-kubernetes
-logpost=$(date +%F-%T)
-ovn_nb_log_file=${logdir}/ovsdb-server-nb-${logpost}.log
-ovn_sb_log_file=${logdir}/ovsdb-server-sb-${logpost}.log
 
 # ovnkube.sh version (update when API between daemonset and script changes - v.x.y)
 ovnkube_version="3"
@@ -310,10 +307,8 @@ display_file () {
 display () {
   echo "==================== display for ${ovn_pod_host}  =================== "
   date
-  latest=$(ls -t ${logdir}/ovsdb-server-nb-*.log | head -1)
-  display_file "nb-ovsdb" /var/run/openvswitch/ovnnb_db.pid ${latest}
-  latest=$(ls -t ${logdir}/ovsdb-server-sb-*.log | head -1)
-  display_file "sb-ovsdb" /var/run/openvswitch/ovnsb_db.pid ${latest}
+  display_file "nb-ovsdb" /var/run/openvswitch/ovnnb_db.pid ${logdir}/ovsdb-server-nb.log
+  display_file "sb-ovsdb" /var/run/openvswitch/ovnsb_db.pid ${logdir}/ovsdb-server-sb.log
   display_file "run-ovn-northd" /var/run/openvswitch/ovn-northd.pid ${logdir}/ovn-northd.log
   display_file "ovn-master" /var/run/openvswitch/ovnkube-master.pid ${ovnkubelogdir}/ovnkube-master.log
   display_file "ovs-vswitchd" /var/run/openvswitch/ovs-vswitchd.pid ${logdir}/ovs-vswitchd.log
@@ -533,18 +528,16 @@ nb-ovsdb () {
   iptables-rules 6641
 
   echo "=============== run nb_ovsdb ========== MASTER ONLY"
-  echo "ovn_log_nb=${ovn_log_nb} ovn_nb_log_file=${ovn_nb_log_file}"
-
   run_as_ovs_user_if_needed \
       /usr/share/openvswitch/scripts/ovn-ctl run_nb_ovsdb --no-monitor \
-      --ovn-nb-logfile=${ovn_nb_log_file} --ovn-nb-log="${ovn_log_nb}" &
+      --ovn-nb-log="${ovn_log_nb}" &
 
   wait_for_event process_ready ovnnb_db
   echo "=============== nb-ovsdb ========== RUNNING"
   sleep 3
   ovn-nbctl set-connection ptcp:6641 -- set connection . inactivity_probe=0
 
-  tail --follow=name ${ovn_nb_log_file} &
+  tail --follow=name /var/log/openvswitch/ovsdb-server-nb.log &
   ovn_tail_pid=$!
 
   process_healthy ovnnb_db ${ovn_tail_pid}
@@ -563,11 +556,9 @@ sb-ovsdb () {
   iptables-rules 6642
 
   echo "=============== run sb_ovsdb ========== MASTER ONLY"
-  echo "ovn_log_sb=${ovn_log_sb} ovn_sb_log_file=${ovn_sb_log_file}"
-
   run_as_ovs_user_if_needed \
       /usr/share/openvswitch/scripts/ovn-ctl run_sb_ovsdb --no-monitor     \
-      --ovn-sb-logfile=${ovn_sb_log_file} --ovn-sb-log="${ovn_log_sb}" &
+      --ovn-sb-log="${ovn_log_sb}" &
 
   wait_for_event process_ready ovnsb_db
   echo "=============== sb-ovsdb ========== RUNNING"
@@ -577,7 +568,7 @@ sb-ovsdb () {
   # create the ovnkube_db endpoint for other pods to query the OVN DB IP
   create_ovnkube_db_ep
 
-  tail --follow=name ${ovn_sb_log_file} &
+  tail --follow=name /var/log/openvswitch/ovsdb-server-sb.log &
   ovn_tail_pid=$!
 
   process_healthy ovnsb_db ${ovn_tail_pid}
