@@ -65,3 +65,9 @@ func ServiceTypeHasClusterIP(service *kapi.Service) bool {
 func ServiceTypeHasNodePort(service *kapi.Service) bool {
 	return service.Spec.Type == kapi.ServiceTypeNodePort || service.Spec.Type == kapi.ServiceTypeLoadBalancer
 }
+
+// GetConfigMapStringData gets the value of a specific key in the configmap
+func GetConfigMapStringData(configMap *kapi.ConfigMap, key string) string {
+	value, _ := configMap.Data[key]
+	return value
+}

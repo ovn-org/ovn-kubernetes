@@ -130,3 +130,13 @@ data:
   net_cidr:      "{{ net_cidr | default('10.128.0.0/14/23') }}"
   svc_cidr:      "{{ svc_cidr | default('172.30.0.0/16') }}"
   k8s_apiserver: "{{ k8s_apiserver.stdout }}"
+
+  # The CNI network configuration to install on each node.
+  cni_network_config: |-
+    { 
+      "cniVersion": "0.3.1",
+      "name": "ovn-kubernetes",
+      "type": "ovn-k8s-cni-overlay",
+      "ipam": {},
+      "dns": {}
+    }

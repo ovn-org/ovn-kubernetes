@@ -13,14 +13,17 @@ import (
 )
 
 // WriteCNIConfig writes a CNI JSON config file to directory given by global config
-func WriteCNIConfig(ConfDir string, fileName string) error {
-	bytes, err := json.Marshal(&types.NetConf{
-		CNIVersion: "0.3.1",
-		Name:       "ovn-kubernetes",
-		Type:       CNI.Plugin,
-	})
+func WriteCNIConfig(ConfDir, fileName, cniConfig string) error {
+	conf := &types.NetConf{}
+	bytes := []byte(cniConfig)
+
+	err := json.Unmarshal(bytes, conf)
 	if err != nil {
-		return fmt.Errorf("failed to marshal CNI config JSON: %v", err)
+		return fmt.Errorf("invalid OVN CNI config json string %s: %v", cniConfig, err)
+	}
+
+	if conf.CNIVersion == "" || conf.Name == "" || conf.Type == "" {
+		return fmt.Errorf("OVN CNI config json string %s is missing mandatory field(s)", cniConfig)
 	}
 
 	// Install the CNI config file after all initialization is done
