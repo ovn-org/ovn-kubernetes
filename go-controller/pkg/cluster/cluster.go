@@ -74,12 +74,11 @@ func setupOVNNode(nodeName string) error {
 	}
 	// If EncapPort is not the default tell sbdb to use specified port.
 	if config.Default.EncapPort != config.DefaultEncapPort {
-		uuID, stderr, errGet := util.RunOVSVsctl("--if-exists", "get", "Open_vSwitch", ".",
-			"external_ids:system-id")
-		if errGet != nil {
-			return fmt.Errorf("Failed to get system-id stderr:%s (%v)", stderr, errGet)
+		systemID, err := util.GetNodeChassisID()
+		if err != nil {
+			return err
 		}
-		_, stderr, errSet := util.RunOVNSbctl("set", "encap", uuID,
+		_, stderr, errSet := util.RunOVNSbctl("set", "encap", systemID,
 			fmt.Sprintf("options:dst_port=%d", config.Default.EncapPort),
 		)
 		if errSet != nil {
