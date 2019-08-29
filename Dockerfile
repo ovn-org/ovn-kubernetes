@@ -32,7 +32,7 @@ RUN yum install -y  \
 	yum clean all
 
 RUN INSTALL_PKGS=" \
-	PyYAML bind-utils openssl numactl-libs firewalld-filesystem \
+	PyYAML bind-utils openssl firewalld-filesystem \
 	libpcap  hostname iproute strace socat \
 	openvswitch2.11 openvswitch2.11-devel \
 	openvswitch2.11-ovn-common openvswitch2.11-ovn-central \
