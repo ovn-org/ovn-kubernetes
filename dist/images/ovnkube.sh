@@ -323,12 +323,7 @@ display () {
 }
 
 setup_cni () {
-  # Take over network functions on the node
   cp -f /usr/libexec/cni/ovn-k8s-cni-overlay /opt/cni/bin/ovn-k8s-cni-overlay
-  if [[ ! -f /opt/cni/bin/loopback ]]
-  then
-    cp -f /usr/libexec/cni/loopback /opt/cni/bin/loopback
-  fi
 }
 
 display_version () {
