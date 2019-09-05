@@ -50,8 +50,6 @@ RUN rpm -i http://cbs.centos.org/kojifiles/packages/openvswitch/${ovsVer}/${ovsS
 RUN rm -rf /var/cache/yum
 
 RUN mkdir -p /var/run/openvswitch
-RUN mkdir -p /etc/cni/net.d
-RUN mkdir -p /opt/cni/bin
 
 # Built in ../../go_controller, then the binaries are copied here.
 # put things where they are in the rpm
