@@ -190,17 +190,49 @@ func localnetIptRules(svc *kapi.Service) []iptRule {
 		}
 
 		nodePort := fmt.Sprintf("%d", svcPort.NodePort)
+		destination := strings.Split(localnetGatewayIP, "/")[0] + ":" + nodePort
+
 		rules = append(rules, iptRule{
 			table: "nat",
 			chain: iptableNodePortChain,
-			args: []string{"-p", string(protocol), "--dport", nodePort, "-j", "DNAT", "--to-destination",
-				strings.Split(localnetGatewayIP, "/")[0] + ":" + nodePort},
+			args: []string{
+				"-p", string(protocol), "--dport", nodePort,
+				"-j", "DNAT", "--to-destination", destination,
+			},
 		})
 		rules = append(rules, iptRule{
 			table: "filter",
 			chain: iptableNodePortChain,
-			args:  []string{"-p", string(protocol), "--dport", nodePort, "-j", "ACCEPT"},
+			args: []string{
+				"-p", string(protocol), "--dport", nodePort,
+				"-j", "ACCEPT",
+			},
 		})
+
+		ingPort := fmt.Sprintf("%d", svcPort.Port)
+		for _, ing := range svc.Status.LoadBalancer.Ingress {
+			if ing.IP == "" {
+				continue
+			}
+			rules = append(rules, iptRule{
+				table: "nat",
+				chain: iptableNodePortChain,
+				args: []string{
+					"-d", ing.IP,
+					"-p", string(protocol), "--dport", ingPort,
+					"-j", "DNAT", "--to-destination", destination,
+				},
+			})
+			rules = append(rules, iptRule{
+				table: "filter",
+				chain: iptableNodePortChain,
+				args: []string{
+					"-d", ing.IP,
+					"-p", string(protocol), "--dport", ingPort,
+					"-j", "ACCEPT",
+				},
+			})
+		}
 	}
 	return rules
 }
@@ -271,7 +303,8 @@ func localnetNodePortWatcher(ipt util.IPTablesHelper, wf *factory.WatchFactory) 
 		UpdateFunc: func(old, new interface{}) {
 			svcNew := new.(*kapi.Service)
 			svcOld := old.(*kapi.Service)
-			if reflect.DeepEqual(svcNew.Spec, svcOld.Spec) {
+			if reflect.DeepEqual(svcNew.Spec, svcOld.Spec) &&
+				reflect.DeepEqual(svcNew.Status, svcOld.Status) {
 				return
 			}
 			err := localnetDeleteService(svcOld)
