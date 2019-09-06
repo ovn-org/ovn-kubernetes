@@ -1,6 +1,10 @@
 #!/bin/bash
-#set -x
 #set -euo pipefail
+
+# Enable verbose shell output if OVNKUBE_SH_VERBOSE is set to 'true'
+if [[ "${OVNKUBE_SH_VERBOSE:-}" == "true" ]]; then
+  set -x
+fi
 
 # This script is the entrypoint to the image.
 # Supports version 3 daemonsets
