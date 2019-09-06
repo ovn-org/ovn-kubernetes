@@ -29,7 +29,6 @@
 
 # ====================
 # Environment variables are used to customize operation
-# K8S_APISERVER - hostname:port (URL)of the real apiserver, not the service address - v3
 # OVN_NET_CIDR - the network cidr - v3
 # OVN_SVC_CIDR - the cluster-service-cidr - v3
 # OVN_KUBERNETES_NAMESPACE - k8s namespace - v3
@@ -172,7 +171,7 @@ wait_for_event () {
 ready_to_start_node () {
 
   # See if ep is available ...
-  ovn_db_host=$(kubectl --server=${K8S_APISERVER} --token=${k8s_token} --certificate-authority=${K8S_CACERT} \
+  ovn_db_host=$(kubectl --token=${k8s_token} --certificate-authority=${K8S_CACERT} \
     get ep -n ${ovn_kubernetes_namespace} ovnkube-db 2>/dev/null | grep 6642 | sed 's/:/ /' | awk '/ovnkube-db/{ print $2 }')
   if [[ ${ovn_db_host} == "" ]] ; then
       return 1
@@ -351,7 +350,6 @@ echo OVN_GATEWAY_MODE ${ovn_gateway_mode}
 echo OVN_GATEWAY_OPTS ${ovn_gateway_opts}
 echo OVN_NET_CIDR ${net_cidr}
 echo OVN_SVC_CIDR ${svc_cidr}
-echo K8S_APISERVER ${K8S_APISERVER}
 echo OVNKUBE_LOGLEVEL ${ovnkube_loglevel}
 echo OVN_DAEMONSET_VERSION ${ovn_daemonset_version}
 echo ovnkube.sh version ${ovnkube_version}
@@ -487,13 +485,13 @@ cleanup-ovs-server () {
 # create the ovnkube_db endpoint for other pods to query the OVN DB IP
 create_ovnkube_db_ep () {
   # delete any endpoint by name ovnkube-db
-  kubectl --server=${K8S_APISERVER} --token=${k8s_token} --certificate-authority=${K8S_CACERT} \
+  kubectl --token=${k8s_token} --certificate-authority=${K8S_CACERT} \
     delete ep -n ${ovn_kubernetes_namespace} ovnkube-db 2>/dev/null
 
   # create a new endpoint for the headless onvkube-db service without selectors
   # using the current host has the endpoint IP
   ovn_db_host=$(getent ahosts $(hostname) | head -1 | awk '{ print $1 }')
-  kubectl --server=${K8S_APISERVER} --token=${k8s_token} --certificate-authority=${K8S_CACERT} create -f - << EOF
+  kubectl --token=${k8s_token} --certificate-authority=${K8S_CACERT} create -f - << EOF
 apiVersion: v1
 kind: Endpoints
 metadata:
@@ -768,7 +766,7 @@ cleanup-ovn-node () {
 
   echo "=============== time: $(date +%d-%m-%H:%M:%S:%N) cleanup-ovn-node --cleanup-node"
   /usr/bin/ovnkube --cleanup-node ${K8S_NODE} --gateway-mode=${ovn_gateway_mode} ${ovn_gateway_opts} \
-      --k8s-token=${k8s_token} --k8s-apiserver=${K8S_APISERVER} --k8s-cacert=${K8S_CACERT} \
+      --k8s-token=${k8s_token} --k8s-cacert=${K8S_CACERT} \
       --loglevel=${ovnkube_loglevel} \
       --logfile /var/log/ovn-kubernetes/ovnkube.log
 

@@ -82,11 +82,6 @@ spec:
             configMapKeyRef:
               name: ovn-config
               key: svc_cidr
-        - name: K8S_APISERVER
-          valueFrom:
-            configMapKeyRef:
-              name: ovn-config
-              key: k8s_apiserver
         - name: K8S_NODE
           valueFrom:
             fieldRef:
@@ -131,11 +126,6 @@ spec:
         env:
         - name: OVN_DAEMONSET_VERSION
           value: "3"
-        - name: K8S_APISERVER
-          valueFrom:
-            configMapKeyRef:
-              name: ovn-config
-              key: k8s_apiserver
 
         ports:
         - name: healthz
@@ -188,11 +178,6 @@ spec:
             configMapKeyRef:
               name: ovn-config
               key: svc_cidr
-        - name: K8S_APISERVER
-          valueFrom:
-            configMapKeyRef:
-              name: ovn-config
-              key: k8s_apiserver
         - name: K8S_NODE
           valueFrom:
             fieldRef:

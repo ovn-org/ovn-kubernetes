@@ -14,7 +14,6 @@
 # ====================
 # Environment variables are used to customize operation
 # Required:
-# K8S_APISERVER - hostname:port (URL)of the real apiserver, not the service address
 # OVN_DB_VIP - the virtual IP address to be used by ovn-controller, ovn-northd,
 #                 and other OVN client-side utilities to connect to the OVN DB.
 #
@@ -65,12 +64,12 @@ check_ovn_daemonset_version () {
 # create the ovnkube_db endpoint for other pods to query the OVN DB IP
 create_ovnkube_db_ep () {
   # delete any endpoint by name ovnkube-db
-  kubectl --server=${K8S_APISERVER} --token=${k8s_token} --certificate-authority=${K8S_CACERT} \
+  kubectl --token=${k8s_token} --certificate-authority=${K8S_CACERT} \
     delete ep -n ${ovn_kubernetes_namespace} ovnkube-db 2>/dev/null
 
   # create a new endpoint for the headless onvkube-db service without selectors
   # using the provided VIP
-  kubectl --server=${K8S_APISERVER} --token=${k8s_token} --certificate-authority=${K8S_CACERT} apply -f - << EOF
+  kubectl --token=${k8s_token} --certificate-authority=${K8S_CACERT} apply -f - << EOF
 apiVersion: v1
 kind: Endpoints
 metadata:
@@ -126,7 +125,7 @@ crm_node_status () {
 
 config_corosync () {
   # get all the nodes that are participating in hosting the OVN DBs
-  cluster_nodes=$(kubectl --server=${K8S_APISERVER} --token=${k8s_token} --certificate-authority=${K8S_CACERT} \
+  cluster_nodes=$(kubectl --token=${k8s_token} --certificate-authority=${K8S_CACERT} \
     get nodes --selector=openvswitch.org/ovnkube-db=true \
     -o=jsonpath='{.items[*].status.addresses[?(@.type=="InternalIP")].address}' 2>/dev/null)
   nnodes=$(echo $cluster_nodes |wc -w)

@@ -11,7 +11,6 @@ OVN_IMAGE=""
 OVN_IMAGE_PULL_POLICY=""
 OVN_NET_CIDR=""
 OVN_SVC_DIDR=""
-OVN_K8S_APISERVER=""
 OVN_GATEWAY_MODE=""
 OVN_GATEWAY_OPTS=""
 # In the future we will have RAFT based HA support.
@@ -41,9 +40,6 @@ while [ "$1" != "" ]; do
             ;;
         --svc-cidr)
             OVN_SVC_CIDR=$VALUE
-            ;;
-        --k8s-apiserver)
-            OVN_K8S_APISERVER=$VALUE
             ;;
         --db-vip-image)
             OVN_DB_VIP_IMAGE=$VALUE
@@ -156,8 +152,6 @@ then
 else
     svc_cidr=$OVN_SVC_CIDR
 fi
-
-k8s_apiserver=${OVN_K8S_APISERVER:-10.0.2.16:6443}
 
 net_cidr_repl="{{ net_cidr | default('10.128.0.0/14/23') }}"
 svc_cidr_repl="{{ svc_cidr | default('172.30.0.0/16') }}"

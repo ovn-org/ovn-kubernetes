@@ -93,11 +93,6 @@ spec:
           value: "3"
         - name: OVN_LOG_NB
           value: "-vconsole:info -vfile:info"
-        - name: K8S_APISERVER
-          valueFrom:
-            configMapKeyRef:
-              name: ovn-config
-              key: k8s_apiserver
         - name: OVN_KUBERNETES_NAMESPACE
           valueFrom:
             fieldRef:
