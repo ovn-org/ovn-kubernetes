@@ -213,6 +213,20 @@ func setupSriovInterface(netns ns.NetNS, containerID, ifName, macAddress, ipAddr
 	return hostIface, contIface, nil
 }
 
+var iptablesCommands = [][]string{
+	// Block MCS
+	{"-A", "OUTPUT", "-p", "tcp", "-m", "tcp", "--dport", "22623", "-j", "REJECT"},
+	{"-A", "OUTPUT", "-p", "tcp", "-m", "tcp", "--dport", "22624", "-j", "REJECT"},
+	{"-A", "FORWARD", "-p", "tcp", "-m", "tcp", "--dport", "22623", "-j", "REJECT"},
+	{"-A", "FORWARD", "-p", "tcp", "-m", "tcp", "--dport", "22624", "-j", "REJECT"},
+
+	// Block cloud provider metadata IP except DNS
+	{"-A", "OUTPUT", "-p", "tcp", "-m", "tcp", "-d", "169.254.169.254", "!", "--dport", "53", "-j", "REJECT"},
+	{"-A", "OUTPUT", "-p", "udp", "-m", "udp", "-d", "169.254.169.254", "!", "--dport", "53", "-j", "REJECT"},
+	{"-A", "FORWARD", "-p", "tcp", "-m", "tcp", "-d", "169.254.169.254", "!", "--dport", "53", "-j", "REJECT"},
+	{"-A", "FORWARD", "-p", "udp", "-m", "udp", "-d", "169.254.169.254", "!", "--dport", "53", "-j", "REJECT"},
+}
+
 // ConfigureInterface sets up the container interface
 func (pr *PodRequest) ConfigureInterface(namespace string, podName string, macAddress string, ipAddress string, gatewayIP string, mtu int, ingress, egress int64) ([]*current.Interface, error) {
 	netns, err := ns.GetNS(pr.Netns)
@@ -256,7 +270,8 @@ func (pr *PodRequest) ConfigureInterface(namespace string, podName string, macAd
 	}
 
 	if ingress > 0 || egress > 0 {
-		l, err := netlink.LinkByName(hostIface.Name)
+		var l netlink.Link
+		l, err = netlink.LinkByName(hostIface.Name)
 		if err != nil {
 			return nil, fmt.Errorf("failed to find host veth interface %s: %v", hostIface.Name, err)
 		}
@@ -268,6 +283,20 @@ func (pr *PodRequest) ConfigureInterface(namespace string, podName string, macAd
 		if err := setPodBandwidth(pr.SandboxID, hostIface.Name, ingress, egress); err != nil {
 			return nil, err
 		}
+	}
+
+	err = netns.Do(func(hostNS ns.NetNS) error {
+		// Block access to certain things
+		for _, args := range iptablesCommands {
+			out, err := exec.Command("iptables", args...).CombinedOutput()
+			if err != nil {
+				return fmt.Errorf("could not set up pod iptables rules: %s", string(out))
+			}
+		}
+		return nil
+	})
+	if err != nil {
+		return nil, err
 	}
 
 	return []*current.Interface{hostIface, contIface}, nil
