@@ -320,11 +320,10 @@ display () {
 
 setup_cni () {
   # Take over network functions on the node
-  # rm -f /etc/cni/net.d/*
-  cp -f /usr/libexec/cni/ovn-k8s-cni-overlay /host/opt/cni/bin/ovn-k8s-cni-overlay
-  if [[ ! -f /host/opt/cni/bin/loopback ]]
+  cp -f /usr/libexec/cni/ovn-k8s-cni-overlay /opt/cni/bin/ovn-k8s-cni-overlay
+  if [[ ! -f /opt/cni/bin/loopback ]]
   then
-    cp -f /usr/libexec/cni/loopback /host/opt/cni/bin/loopback
+    cp -f /usr/libexec/cni/loopback /opt/cni/bin/loopback
   fi
 }
 

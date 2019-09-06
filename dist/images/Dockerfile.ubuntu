@@ -28,8 +28,6 @@ RUN curl -s https://packages.cloud.google.com/apt/doc/apt-key.gpg | apt-key add 
 RUN apt-get update && apt-get install -y openvswitch-switch openvswitch-common ovn-central ovn-common ovn-host kubectl
 
 RUN mkdir -p /var/run/openvswitch
-RUN mkdir -p /etc/cni/net.d
-RUN mkdir -p /opt/cni/bin
 
 # Built in ../../go_controller, then the binaries are copied here.
 # put things where they are in the pkg

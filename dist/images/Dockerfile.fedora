@@ -26,8 +26,6 @@ RUN INSTALL_PKGS=" \
 	dnf clean all && rm -rf /var/cache/dnf/*
 
 RUN mkdir -p /var/run/openvswitch && \
-    mkdir -p /etc/cni/net.d && \
-    mkdir -p /opt/cni/bin && \
     mkdir -p /usr/libexec/cni/
 
 COPY ovnkube /usr/bin/
