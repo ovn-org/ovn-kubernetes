@@ -18,6 +18,7 @@ import (
 	ovncluster "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/cluster"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/factory"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/kube"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn"
 	util "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
 
@@ -189,7 +190,6 @@ func runOvnKube(ctx *cli.Context) error {
 
 	master := ctx.String("init-master")
 	node := ctx.String("init-node")
-	clusterController := ovncluster.NewClusterController(clientset, factory)
 
 	cleanupNode := ctx.String("cleanup-node")
 	if cleanupNode != "" {
@@ -197,14 +197,15 @@ func runOvnKube(ctx *cli.Context) error {
 			panic("Cannot specify cleanup-node together with 'init-node or 'init-master'.")
 		}
 
-		err = clusterController.CleanupClusterNode(cleanupNode)
-		if err != nil {
+		kube := &kube.Kube{KClient: clientset}
+		if err := ovncluster.CleanupClusterNode(cleanupNode, kube); err != nil {
 			logrus.Errorf(err.Error())
 			panic(err.Error())
 		}
 		return nil
 	}
 
+	clusterController := ovncluster.NewClusterController(clientset, factory)
 	if master != "" || node != "" {
 		if master != "" {
 			if runtime.GOOS == "windows" {
