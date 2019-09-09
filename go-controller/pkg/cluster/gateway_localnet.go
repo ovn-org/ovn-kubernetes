@@ -181,15 +181,7 @@ func initLocalnetGateway(nodeName string, clusterIPSubnet []string,
 	return nil
 }
 
-// AddService adds service and creates corresponding resources in OVN
-func localnetAddService(svc *kapi.Service) error {
-	if !util.ServiceTypeHasNodePort(svc) {
-		return nil
-	}
-	ipt, err := util.GetIPTablesHelper(iptables.ProtocolIPv4)
-	if err != nil {
-		return fmt.Errorf("failed to initialize iptables: %v", err)
-	}
+func localnetIptRules(svc *kapi.Service) []iptRule {
 	rules := make([]iptRule, 0)
 	for _, svcPort := range svc.Spec.Ports {
 		protocol := svcPort.Protocol
@@ -210,7 +202,19 @@ func localnetAddService(svc *kapi.Service) error {
 			args:  []string{"-p", string(protocol), "--dport", nodePort, "-j", "ACCEPT"},
 		})
 	}
+	return rules
+}
 
+// AddService adds service and creates corresponding resources in OVN
+func localnetAddService(svc *kapi.Service) error {
+	if !util.ServiceTypeHasNodePort(svc) {
+		return nil
+	}
+	ipt, err := util.GetIPTablesHelper(iptables.ProtocolIPv4)
+	if err != nil {
+		return fmt.Errorf("failed to initialize iptables: %v", err)
+	}
+	rules := localnetIptRules(svc)
 	logrus.Debugf("Add rules %v for service %v", rules, svc.Name)
 	return addIptRules(ipt, rules)
 }
@@ -223,28 +227,7 @@ func localnetDeleteService(svc *kapi.Service) error {
 	if err != nil {
 		return fmt.Errorf("failed to initialize iptables: %v", err)
 	}
-
-	rules := make([]iptRule, 0)
-	for _, svcPort := range svc.Spec.Ports {
-		protocol := svcPort.Protocol
-		if protocol != kapi.ProtocolUDP && protocol != kapi.ProtocolTCP {
-			protocol = kapi.ProtocolTCP
-		}
-
-		nodePort := fmt.Sprintf("%d", svcPort.NodePort)
-		rules = append(rules, iptRule{
-			table: "nat",
-			chain: iptableNodePortChain,
-			args: []string{"-p", string(protocol), "--dport", nodePort, "-j", "DNAT", "--to-destination",
-				strings.Split(localnetGatewayIP, "/")[0] + ":" + nodePort},
-		})
-		rules = append(rules, iptRule{
-			table: "filter",
-			chain: iptableNodePortChain,
-			args:  []string{"-p", string(protocol), "--dport", nodePort, "-j", "ACCEPT"},
-		})
-	}
-
+	rules := localnetIptRules(svc)
 	logrus.Debugf("Delete rules %v for service %v", rules, svc.Name)
 	delIptRules(ipt, rules)
 	return nil
