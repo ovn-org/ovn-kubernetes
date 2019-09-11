@@ -122,3 +122,9 @@ func (p *Plugin) CmdDel(args *skel.CmdArgs) error {
 	_, err := p.doCNI("http://dummy/", newCNIRequest(args))
 	return err
 }
+
+// CmdCheck is the callback for 'checking' container's networking is as expected.
+// Currently not implemented, so returns `nil`.
+func (p *Plugin) CmdCheck(args *skel.CmdArgs) error {
+	return nil
+}
