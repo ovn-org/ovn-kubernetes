@@ -108,15 +108,11 @@ func localnetGatewayNAT(ipt util.IPTablesHelper, ifname, ip string) error {
 
 func initLocalnetGateway(nodeName string, clusterIPSubnet []string,
 	subnet string, wf *factory.WatchFactory) error {
-	ipt, err := iptables.NewWithProtocol(iptables.ProtocolIPv4)
+	ipt, err := util.GetIPTablesHelper(iptables.ProtocolIPv4)
 	if err != nil {
 		return fmt.Errorf("failed to initialize iptables: %v", err)
 	}
-	return initLocalnetGatewayInternal(nodeName, clusterIPSubnet, subnet, ipt, wf)
-}
 
-func initLocalnetGatewayInternal(nodeName string, clusterIPSubnet []string,
-	subnet string, ipt util.IPTablesHelper, wf *factory.WatchFactory) error {
 	// Create a localnet OVS bridge.
 	localnetBridgeName := "br-local"
 	_, stderr, err := util.RunOVSVsctl("--may-exist", "add-br",
@@ -185,15 +181,7 @@ func initLocalnetGatewayInternal(nodeName string, clusterIPSubnet []string,
 	return nil
 }
 
-// AddService adds service and creates corresponding resources in OVN
-func localnetAddService(svc *kapi.Service) error {
-	if !util.ServiceTypeHasNodePort(svc) {
-		return nil
-	}
-	ipt, err := iptables.NewWithProtocol(iptables.ProtocolIPv4)
-	if err != nil {
-		return fmt.Errorf("failed to initialize iptables: %v", err)
-	}
+func localnetIptRules(svc *kapi.Service) []iptRule {
 	rules := make([]iptRule, 0)
 	for _, svcPort := range svc.Spec.Ports {
 		protocol := svcPort.Protocol
@@ -202,19 +190,63 @@ func localnetAddService(svc *kapi.Service) error {
 		}
 
 		nodePort := fmt.Sprintf("%d", svcPort.NodePort)
+		destination := strings.Split(localnetGatewayIP, "/")[0] + ":" + nodePort
+
 		rules = append(rules, iptRule{
 			table: "nat",
 			chain: iptableNodePortChain,
-			args: []string{"-p", string(protocol), "--dport", nodePort, "-j", "DNAT", "--to-destination",
-				strings.Split(localnetGatewayIP, "/")[0] + ":" + nodePort},
+			args: []string{
+				"-p", string(protocol), "--dport", nodePort,
+				"-j", "DNAT", "--to-destination", destination,
+			},
 		})
 		rules = append(rules, iptRule{
 			table: "filter",
 			chain: iptableNodePortChain,
-			args:  []string{"-p", string(protocol), "--dport", nodePort, "-j", "ACCEPT"},
+			args: []string{
+				"-p", string(protocol), "--dport", nodePort,
+				"-j", "ACCEPT",
+			},
 		})
-	}
 
+		ingPort := fmt.Sprintf("%d", svcPort.Port)
+		for _, ing := range svc.Status.LoadBalancer.Ingress {
+			if ing.IP == "" {
+				continue
+			}
+			rules = append(rules, iptRule{
+				table: "nat",
+				chain: iptableNodePortChain,
+				args: []string{
+					"-d", ing.IP,
+					"-p", string(protocol), "--dport", ingPort,
+					"-j", "DNAT", "--to-destination", destination,
+				},
+			})
+			rules = append(rules, iptRule{
+				table: "filter",
+				chain: iptableNodePortChain,
+				args: []string{
+					"-d", ing.IP,
+					"-p", string(protocol), "--dport", ingPort,
+					"-j", "ACCEPT",
+				},
+			})
+		}
+	}
+	return rules
+}
+
+// AddService adds service and creates corresponding resources in OVN
+func localnetAddService(svc *kapi.Service) error {
+	if !util.ServiceTypeHasNodePort(svc) {
+		return nil
+	}
+	ipt, err := util.GetIPTablesHelper(iptables.ProtocolIPv4)
+	if err != nil {
+		return fmt.Errorf("failed to initialize iptables: %v", err)
+	}
+	rules := localnetIptRules(svc)
 	logrus.Debugf("Add rules %v for service %v", rules, svc.Name)
 	return addIptRules(ipt, rules)
 }
@@ -223,32 +255,11 @@ func localnetDeleteService(svc *kapi.Service) error {
 	if !util.ServiceTypeHasNodePort(svc) {
 		return nil
 	}
-	ipt, err := iptables.NewWithProtocol(iptables.ProtocolIPv4)
+	ipt, err := util.GetIPTablesHelper(iptables.ProtocolIPv4)
 	if err != nil {
 		return fmt.Errorf("failed to initialize iptables: %v", err)
 	}
-
-	rules := make([]iptRule, 0)
-	for _, svcPort := range svc.Spec.Ports {
-		protocol := svcPort.Protocol
-		if protocol != kapi.ProtocolUDP && protocol != kapi.ProtocolTCP {
-			protocol = kapi.ProtocolTCP
-		}
-
-		nodePort := fmt.Sprintf("%d", svcPort.NodePort)
-		rules = append(rules, iptRule{
-			table: "nat",
-			chain: iptableNodePortChain,
-			args: []string{"-p", string(protocol), "--dport", nodePort, "-j", "DNAT", "--to-destination",
-				strings.Split(localnetGatewayIP, "/")[0] + ":" + nodePort},
-		})
-		rules = append(rules, iptRule{
-			table: "filter",
-			chain: iptableNodePortChain,
-			args:  []string{"-p", string(protocol), "--dport", nodePort, "-j", "ACCEPT"},
-		})
-	}
-
+	rules := localnetIptRules(svc)
 	logrus.Debugf("Delete rules %v for service %v", rules, svc.Name)
 	delIptRules(ipt, rules)
 	return nil
@@ -292,7 +303,8 @@ func localnetNodePortWatcher(ipt util.IPTablesHelper, wf *factory.WatchFactory) 
 		UpdateFunc: func(old, new interface{}) {
 			svcNew := new.(*kapi.Service)
 			svcOld := old.(*kapi.Service)
-			if reflect.DeepEqual(svcNew.Spec, svcOld.Spec) {
+			if reflect.DeepEqual(svcNew.Spec, svcOld.Spec) &&
+				reflect.DeepEqual(svcNew.Status, svcOld.Status) {
 				return
 			}
 			err := localnetDeleteService(svcOld)
