@@ -1,0 +1,48 @@
+#
+# This is the OpenShift ovn overlay network image.
+# it provides an overlay network using ovs/ovn/ovn-kube
+#
+# The standard name for this image is ovn-kube
+
+# Notes:
+# This is for a development build where the ovn-kubernetes utilities
+# are built locally and included in the image (instead of the rpm)
+#
+
+FROM fedora:29
+
+USER root
+
+ENV PYTHONDONTWRITEBYTECODE yes
+
+# install needed rpms - openvswitch must be 2.10.4 or higher
+RUN INSTALL_PKGS=" \
+	PyYAML bind-utils procps-ng openssl numactl-libs firewalld-filesystem \
+	libpcap hostname kubernetes-client \
+        ovn ovn-central ovn-host \
+	iptables-nft iproute strace socat \
+        " && \
+	dnf install --refresh -y --setopt=tsflags=nodocs $INSTALL_PKGS && \
+	dnf clean all && rm -rf /var/cache/dnf/*
+
+RUN mkdir -p /var/run/openvswitch && \
+    mkdir -p /usr/libexec/cni/
+
+COPY ovnkube /usr/bin/
+COPY ovn-k8s-cni-overlay /usr/libexec/cni/ovn-k8s-cni-overlay
+
+# copy git commit number into image
+COPY git_info /root
+
+# ovnkube.sh is the entry point. This script examines environment
+# variables to direct operation and configure ovn
+COPY ovnkube.sh /root/
+COPY ovn-debug.sh /root/
+
+
+LABEL io.k8s.display-name="ovn-kubernetes" \
+      io.k8s.description="This is a Kubernetes network plugin that provides an overlay network using OVN." \
+      maintainer="Phil Cameron <pcameron@redhat.com>"
+
+WORKDIR /root
+ENTRYPOINT /root/ovnkube.sh
