@@ -52,6 +52,8 @@ fi
 # OVN_LOG_SB - log level (ovn-ctl default: -vconsole:off -vfile:info) - v3
 # OVN_LOG_CONTROLLER - log level (ovn-ctl default: -vconsole:off -vfile:info) - v3
 # OVN_LOG_NBCTLD - log file (ovn-nbctl daemon mode default: /var/log/openvswitch/ovn-nbctl.log)
+# OVN_NB_PORT - ovn north db port (default 6641)
+# OVN_SB_PORT - ovn south db port (default 6642)
 
 # The argument to the command is the operation to be performed
 # ovn-master ovn-controller ovn-node display display_env ovn_debug
@@ -118,6 +120,11 @@ ovn_kubernetes_namespace=${OVN_KUBERNETES_NAMESPACE:-ovn-kubernetes}
 # OVN NB and SB DB running in their own container
 ovn_db_host=""
 
+# OVN_NB_PORT - ovn north db port (default 6641)
+ovn_nb_port=${OVN_NB_PORT:-6641}
+# OVN_SB_PORT - ovn south db port (default 6642)
+ovn_sb_port=${OVN_SB_PORT:-6642}
+
 # =========================================
 
 setup_ovs_permissions () {
@@ -177,7 +184,7 @@ ready_to_start_node () {
 
   # See if ep is available ...
   ovn_db_host=$(kubectl --server=${K8S_APISERVER} --token=${k8s_token} --certificate-authority=${K8S_CACERT} \
-    get ep -n ${ovn_kubernetes_namespace} ovnkube-db 2>/dev/null | grep 6642 | sed 's/:/ /' | awk '/ovnkube-db/{ print $2 }')
+    get ep -n ${ovn_kubernetes_namespace} ovnkube-db 2>/dev/null | grep ${ovn_sb_port} | sed 's/:/ /' | awk '/ovnkube-db/{ print $2 }')
   if [[ ${ovn_db_host} == "" ]] ; then
       return 1
   fi
@@ -204,8 +211,8 @@ check_ovn_daemonset_version () {
 }
 
 get_ovn_db_vars () {
-  ovn_nbdb=tcp://${ovn_db_host}:6641
-  ovn_sbdb=tcp://${ovn_db_host}:6642
+  ovn_nbdb=tcp://${ovn_db_host}:${ovn_nb_port}
+  ovn_sbdb=tcp://${ovn_db_host}:${ovn_sb_port}
   ovn_nbdb_test=$(echo ${ovn_nbdb} | sed 's;//;;')
 }
 
@@ -349,6 +356,8 @@ echo OVN_GATEWAY_MODE ${ovn_gateway_mode}
 echo OVN_GATEWAY_OPTS ${ovn_gateway_opts}
 echo OVN_NET_CIDR ${net_cidr}
 echo OVN_SVC_CIDR ${svc_cidr}
+echo OVN_NB_PORT ${ovn_nb_port}
+echo OVN_SB_PORT ${ovn_sb_port}
 echo K8S_APISERVER ${K8S_APISERVER}
 echo OVNKUBE_LOGLEVEL ${ovnkube_loglevel}
 echo OVN_DAEMONSET_VERSION ${ovn_daemonset_version}
@@ -502,10 +511,10 @@ subsets:
       - ip: ${ovn_db_host}
     ports:
     - name: north
-      port: 6641
+      port: ${ovn_nb_port}
       protocol: TCP
     - name: south
-      port: 6642
+      port: ${ovn_sb_port}
       protocol: TCP
 EOF
     if [[ $? != 0 ]] ; then
@@ -523,7 +532,7 @@ nb-ovsdb () {
   # Make sure /var/lib/openvswitch exists
   mkdir -p /var/lib/openvswitch
 
-  iptables-rules 6641
+  iptables-rules ${ovn_nb_port}
 
   echo "=============== run nb_ovsdb ========== MASTER ONLY"
   run_as_ovs_user_if_needed \
@@ -533,7 +542,7 @@ nb-ovsdb () {
   wait_for_event process_ready ovnnb_db
   echo "=============== nb-ovsdb ========== RUNNING"
   sleep 3
-  ovn-nbctl set-connection ptcp:6641 -- set connection . inactivity_probe=0
+  ovn-nbctl set-connection ptcp:${ovn_nb_port} -- set connection . inactivity_probe=0
 
   tail --follow=name /var/log/openvswitch/ovsdb-server-nb.log &
   ovn_tail_pid=$!
@@ -551,7 +560,7 @@ sb-ovsdb () {
   # Make sure /var/lib/openvswitch exists
   mkdir -p /var/lib/openvswitch
 
-  iptables-rules 6642
+  iptables-rules ${ovn_sb_port}
 
   echo "=============== run sb_ovsdb ========== MASTER ONLY"
   run_as_ovs_user_if_needed \
@@ -561,7 +570,7 @@ sb-ovsdb () {
   wait_for_event process_ready ovnsb_db
   echo "=============== sb-ovsdb ========== RUNNING"
   sleep 3
-  ovn-sbctl set-connection ptcp:6642 -- set connection . inactivity_probe=0
+  ovn-sbctl set-connection ptcp:${ovn_sb_port} -- set connection . inactivity_probe=0
 
   # create the ovnkube_db endpoint for other pods to query the OVN DB IP
   create_ovnkube_db_ep
