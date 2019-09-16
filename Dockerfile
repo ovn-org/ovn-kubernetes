@@ -15,7 +15,7 @@ WORKDIR /go-controller
 COPY go-controller/ .
 
 # build the binaries
-RUN make
+RUN CGO_ENABLED=0 make
 
 FROM openshift/origin-cli AS cli
 
