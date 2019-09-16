@@ -156,6 +156,14 @@ func setupPIDFile(pidfile string) error {
 }
 
 func runOvnKube(ctx *cli.Context) error {
+	pidfile := ctx.String("pidfile")
+	if pidfile != "" {
+		defer delPidfile(pidfile)
+		err := setupPIDFile(pidfile)
+		if err != nil {
+			return err
+		}
+	}
 	exec := kexec.New()
 	_, err := config.InitConfig(ctx, exec, nil)
 	if err != nil {
@@ -165,15 +173,6 @@ func runOvnKube(ctx *cli.Context) error {
 	if err = util.SetExec(exec); err != nil {
 		logrus.Errorf("Failed to initialize exec helper: %v", err)
 		return err
-	}
-
-	pidfile := ctx.String("pidfile")
-	if pidfile != "" {
-		defer delPidfile(pidfile)
-		err = setupPIDFile(pidfile)
-		if err != nil {
-			return err
-		}
 	}
 
 	clientset, err := util.NewClientset(&config.Kubernetes)
