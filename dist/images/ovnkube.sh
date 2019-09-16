@@ -151,17 +151,24 @@ run_as_ovs_user_if_needed () {
   fi
 }
 
-
-# $1 function to call to test event present, returns 0 (OK) 1 (bad)
-# $2 (optional) arg to $1
+# wait_for_event [attempts=<num>] function_to_call [arguments_to_function]
+#
+# Processes running inside the container should immediately start, so we
+# shouldn't be making 80 attempts (default value). The "attempts=<num>"
+# argument will help us in configuring that value.
 wait_for_event () {
   retries=0
   sleeper=1
+  attempts=80
+  if [[ $1 =~ ^attempts= ]]; then
+    eval $1
+    shift
+  fi
   while true; do
     $1 $2
     if [[ $? != 0 ]] ; then
       (( retries += 1 ))
-      if [[ "${retries}" -gt 80 ]]; then
+      if [[ "${retries}" -gt ${attempts} ]]; then
         echo "error: $1 $2 did not come up, exiting"
         exit 1
       fi
@@ -539,7 +546,7 @@ nb-ovsdb () {
       /usr/share/openvswitch/scripts/ovn-ctl run_nb_ovsdb --no-monitor \
       --ovn-nb-log="${ovn_log_nb}" &
 
-  wait_for_event process_ready ovnnb_db
+  wait_for_event attempts=3 process_ready ovnnb_db
   echo "=============== nb-ovsdb ========== RUNNING"
   sleep 3
   ovn-nbctl set-connection ptcp:${ovn_nb_port} -- set connection . inactivity_probe=0
@@ -567,7 +574,7 @@ sb-ovsdb () {
       /usr/share/openvswitch/scripts/ovn-ctl run_sb_ovsdb --no-monitor     \
       --ovn-sb-log="${ovn_log_sb}" &
 
-  wait_for_event process_ready ovnsb_db
+  wait_for_event attempts=3 process_ready ovnsb_db
   echo "=============== sb-ovsdb ========== RUNNING"
   sleep 3
   ovn-sbctl set-connection ptcp:${ovn_sb_port} -- set connection . inactivity_probe=0
@@ -614,7 +621,7 @@ run-ovn-northd () {
       --ovn-northd-log="${ovn_log_northd}" \
     ${ovn_northd_opts}
 
-  wait_for_event process_ready ovn-northd
+  wait_for_event attempts=3 process_ready ovn-northd
   echo "=============== run_ovn_northd ========== RUNNING"
   sleep 1
 
@@ -669,7 +676,7 @@ ovn-master () {
     --pidfile /var/run/openvswitch/ovnkube-master.pid \
     --logfile /var/log/ovn-kubernetes/ovnkube-master.log &
   echo "=============== ovn-master ========== running"
-  wait_for_event process_ready ovnkube-master
+  wait_for_event attempts=3 process_ready ovnkube-master
   sleep 1
 
   tail --follow=name /var/log/ovn-kubernetes/ovnkube-master.log &
@@ -702,7 +709,7 @@ ovn-controller () {
                --ovn-controller-log="${ovn_log_controller}" \
                ${ovn_controller_opts}
 
-  wait_for_event process_ready ovn-controller
+  wait_for_event attempts=3 process_ready ovn-controller
   echo "=============== ovn-controller ========== running"
 
   sleep 4
@@ -743,7 +750,7 @@ ovn-node () {
       --pidfile /var/run/openvswitch/ovnkube.pid \
       --logfile /var/log/ovn-kubernetes/ovnkube.log &
 
-  wait_for_event process_ready ovnkube
+  wait_for_event attempts=3 process_ready ovnkube
   setup_cni
   echo "=============== ovn-node ========== running"
 
@@ -796,7 +803,7 @@ run-nbctld () {
   # use unix socket
   /usr/bin/ovn-nbctl --pidfile --detach --db=${ovn_nbdb_test} --log-file=${ovn_log_nbctld}
 
-  wait_for_event process_ready ovn-nbctl
+  wait_for_event attempts=3 process_ready ovn-nbctl
   echo "=============== run_ovn_nbctl ========== RUNNING"
 
   tail --follow=name /var/log/openvswitch/ovn-nbctl.log &
