@@ -109,9 +109,20 @@ func (p *Plugin) CmdAdd(args *skel.CmdArgs) error {
 		return err
 	}
 
-	result, err := current.NewResult(body)
-	if err != nil {
+	response := &Response{}
+	if err = json.Unmarshal(body, response); err != nil {
 		return fmt.Errorf("failed to unmarshal response '%s': %v", string(body), err)
+	}
+
+	var result *current.Result
+	if response.Result != nil {
+		result = response.Result
+	} else {
+		pr, _ := cniRequestToPodRequest(req)
+		result = pr.getCNIResult(response.PodIFInfo)
+		if result == nil {
+			return fmt.Errorf("failed to get CNI Result from pod interface info %q", response.PodIFInfo)
+		}
 	}
 
 	return types.PrintResult(result, conf.CNIVersion)

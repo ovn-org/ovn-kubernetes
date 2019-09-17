@@ -3,6 +3,7 @@ package cni
 import (
 	"net/http"
 
+	"github.com/containernetworking/cni/pkg/types/current"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/cni/types"
 )
 
@@ -12,6 +13,16 @@ const serverRunDir string = "/var/run/ovn-kubernetes/cni/"
 const serverSocketName string = "ovn-cni-server.sock"
 const serverSocketPath string = serverRunDir + "/" + serverSocketName
 const serverTCPAddress string = "127.0.0.1:3996"
+
+// PodInterfaceInfo consists of interface info result from cni server if cni client configure's interface
+type PodInterfaceInfo struct {
+	MTU        int    `json:"mtu"`
+	MacAddress string `json:"macAddress"`
+	IPAddress  string `json:"ipAddress"`
+	GatewayIP  string `json:"gatewayIP"`
+	Ingress    int64  `json:"ingress"`
+	Egress     int64  `json:"egress"`
+}
 
 // Explicit type for CNI commands the server handles
 type command string
@@ -31,6 +42,12 @@ type Request struct {
 	Env map[string]string `json:"env,omitempty"`
 	// CNI configuration passed via stdin to the CNI plugin
 	Config []byte `json:"config,omitempty"`
+}
+
+// Response sent to the OVN CNI plugin by the Server
+type Response struct {
+	Result    *current.Result
+	PodIFInfo *PodInterfaceInfo
 }
 
 // PodRequest structure built from Request which is passed to the
