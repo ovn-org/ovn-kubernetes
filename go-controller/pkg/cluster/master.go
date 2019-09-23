@@ -367,9 +367,13 @@ func (cluster *OvnClusterController) syncNodes(nodes []interface{}) {
 		}
 
 		var subnet *net.IPNet
-		if strings.HasPrefix(items[1], "subnet=") {
-			subnetStr := strings.TrimPrefix(items[1], "subnet=")
-			_, subnet, _ = net.ParseCIDR(subnetStr)
+		configs := strings.Fields(items[1])
+		for _, config := range configs {
+			if strings.HasPrefix(config, "subnet=") {
+				subnetStr := strings.TrimPrefix(config, "subnet=")
+				_, subnet, _ = net.ParseCIDR(subnetStr)
+				break
+			}
 		}
 
 		if err := cluster.deleteNode(items[0], subnet); err != nil {
