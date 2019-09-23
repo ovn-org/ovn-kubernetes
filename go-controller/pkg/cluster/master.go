@@ -322,8 +322,10 @@ func (cluster *OvnClusterController) deleteNode(nodeName string, nodeSubnet *net
 		logrus.Errorf("Error deleting node %s logical network: %v", nodeName, err)
 	}
 
-	if err := util.GatewayCleanup(nodeName, nodeSubnet.String()); err != nil {
-		return fmt.Errorf("Failed to clean up node %s gateway: (%v)", nodeName, err)
+	if nodeSubnet != nil {
+		if err := util.GatewayCleanup(nodeName, nodeSubnet.String()); err != nil {
+			return fmt.Errorf("Failed to clean up node %s gateway: (%v)", nodeName, err)
+		}
 	}
 
 	return nil
