@@ -245,6 +245,7 @@ func (cluster *OvnClusterController) addNode(node *kapi.Node) (err error) {
 
 	// Node doesn't have a subnet assigned; reserve a new one for it
 	var subnetAllocator *netutils.SubnetAllocator
+	err = netutils.ErrSubnetAllocatorFull
 	for _, subnetAllocator = range cluster.masterSubnetAllocatorList {
 		hostsubnet, err = subnetAllocator.GetNetwork()
 		if err == netutils.ErrSubnetAllocatorFull {
@@ -254,6 +255,9 @@ func (cluster *OvnClusterController) addNode(node *kapi.Node) (err error) {
 			return fmt.Errorf("Error allocating network for node %s: %v", node.Name, err)
 		}
 		logrus.Infof("Allocated node %s HostSubnet %s", node.Name, hostsubnet.String())
+	}
+	if err == netutils.ErrSubnetAllocatorFull {
+		return fmt.Errorf("Error allocating network for node %s: %v", node.Name, err)
 	}
 
 	defer func() {
