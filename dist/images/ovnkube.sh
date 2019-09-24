@@ -549,7 +549,9 @@ nb-ovsdb () {
   wait_for_event attempts=3 process_ready ovnnb_db
   echo "=============== nb-ovsdb ========== RUNNING"
   sleep 3
-  ovn-nbctl set-connection ptcp:${ovn_nb_port} -- set connection . inactivity_probe=0
+
+  ovn_db_host=$(getent ahosts $(hostname) | head -1 | awk '{ print $1 }')
+  ovn-nbctl set-connection ptcp:${ovn_nb_port}:${ovn_db_host} -- set connection . inactivity_probe=0
 
   tail --follow=name /var/log/openvswitch/ovsdb-server-nb.log &
   ovn_tail_pid=$!
@@ -577,7 +579,9 @@ sb-ovsdb () {
   wait_for_event attempts=3 process_ready ovnsb_db
   echo "=============== sb-ovsdb ========== RUNNING"
   sleep 3
-  ovn-sbctl set-connection ptcp:${ovn_sb_port} -- set connection . inactivity_probe=0
+
+  ovn_db_host=$(getent ahosts $(hostname) | head -1 | awk '{ print $1 }')
+  ovn-sbctl set-connection ptcp:${ovn_sb_port}:${ovn_db_host} -- set connection . inactivity_probe=0
 
   # create the ovnkube_db endpoint for other pods to query the OVN DB IP
   create_ovnkube_db_ep
