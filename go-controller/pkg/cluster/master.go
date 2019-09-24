@@ -255,6 +255,7 @@ func (cluster *OvnClusterController) addNode(node *kapi.Node) (err error) {
 			return fmt.Errorf("Error allocating network for node %s: %v", node.Name, err)
 		}
 		logrus.Infof("Allocated node %s HostSubnet %s", node.Name, hostsubnet.String())
+		break
 	}
 	if err == netutils.ErrSubnetAllocatorFull {
 		return fmt.Errorf("Error allocating network for node %s: %v", node.Name, err)
