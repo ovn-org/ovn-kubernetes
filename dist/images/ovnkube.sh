@@ -127,6 +127,9 @@ ovn_nb_port=${OVN_NB_PORT:-6641}
 # OVN_SB_PORT - ovn south db port (default 6642)
 ovn_sb_port=${OVN_SB_PORT:-6642}
 
+ovn_hybrid_overlay_enable=${OVN_HYBRID_OVERLAY_ENABLE:-}
+ovn_hybrid_overlay_net_cidr=${OVN_HYBRID_OVERLAY_NET_CIDR:-}
+
 # Determine the ovn rundir.
 if [[ -f /usr/bin/ovn-appctl ]] ; then
 	# ovn-appctl is present. Use new ovn run dir path.
@@ -712,6 +715,14 @@ ovn-master () {
   echo "=============== ovn-master - (wait for ovs)"
   wait_for_event ovs_ready
 
+  hybrid_overlay_flags=
+  if [[ -n "${ovn_hybrid_overlay_enable}" ]]; then
+    hybrid_overlay_flags="--enable-hybrid-overlay"
+    if [[ -n "${ovn_hybrid_overlay_net_cidr}" ]]; then
+      hybrid_overlay_flags="${hybrid_overlay_flags} --hybrid-overlay-cluster-subnets=${ovn_hybrid_overlay_net_cidr}"
+    fi
+  fi
+
   echo "=============== ovn-master ========== MASTER ONLY"
   /usr/bin/ovnkube \
     --init-master ${ovn_pod_host} \
@@ -719,6 +730,7 @@ ovn-master () {
     --nb-address=${ovn_nbdb} --sb-address=${ovn_sbdb} \
     --nbctl-daemon-mode \
     --loglevel=${ovnkube_loglevel} \
+    ${hybrid_overlay_flags} \
     --pidfile ${OVN_RUNDIR}/ovnkube-master.pid \
     --logfile /var/log/ovn-kubernetes/ovnkube-master.log \
     --metrics-bind-address "0.0.0.0:9409" &
@@ -791,12 +803,16 @@ ovn-node () {
   wait_for_event process_ready ovn-controller
   sleep 1
 
+  hybrid_overlay_flags=
+  if [[ -n "${ovn_hybrid_overlay_enable}" ]]; then
+    hybrid_overlay_flags="--enable-hybrid-overlay"
+  fi
+
   OVN_ENCAP_IP=""
   ovn_encap_ip=`ovs-vsctl --if-exists get Open_vSwitch . external_ids:ovn-encap-ip | tr -d '\"'`
   if [[ $? == 0 && "${ovn_encap_ip}" != "" ]]; then
     OVN_ENCAP_IP=$(echo --encap-ip=${ovn_encap_ip})
   fi
-
 
   echo "=============== ovn-node   --init-node"
   /usr/bin/ovnkube --init-node ${K8S_NODE} \
@@ -806,6 +822,7 @@ ovn-node () {
       --mtu=${mtu} \
       ${OVN_ENCAP_IP} \
       --loglevel=${ovnkube_loglevel} \
+      ${hybrid_overlay_flags} \
       --gateway-mode=${ovn_gateway_mode} ${ovn_gateway_opts}  \
       --pidfile ${OVN_RUNDIR}/ovnkube.pid \
       --logfile /var/log/ovn-kubernetes/ovnkube.log \
