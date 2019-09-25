@@ -13,6 +13,10 @@ import (
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
 )
 
+const (
+	iptableMgmPortChain = "OVN-KUBE-SNAT-MGMTPORT"
+)
+
 // CreateManagementPort creates a management port attached to the node switch
 // that lets the node access its pods via their private IP address. This is used
 // for health checking and other management tasks.
@@ -78,19 +82,50 @@ func CreateManagementPort(nodeName, localSubnet string, clusterSubnet []string) 
 	}
 
 	// Set up necessary iptables rules
+	err = addMgtPortIptRules(interfaceName, interfaceIP)
+	if err != nil {
+		return err
+	}
+
+	return nil
+}
+
+func addMgtPortIptRules(ifname, interfaceIP string) error {
 	ipt, err := util.GetIPTablesHelper(iptables.ProtocolIPv4)
 	if err != nil {
 		return err
 	}
 	interfaceAddr := strings.Split(interfaceIP, "/")
-	rule := []string{"-o", interfaceName, "-j", "SNAT", "--to-source", interfaceAddr[0]}
+	err = ipt.ClearChain("nat", iptableMgmPortChain)
+	if err != nil {
+		return fmt.Errorf("could not set up iptables chain for management port: %v", err)
+	}
+	rule := []string{"-o", ifname, "-j", iptableMgmPortChain}
 	exists, err := ipt.Exists("nat", "POSTROUTING", rule...)
 	if err == nil && !exists {
 		err = ipt.Insert("nat", "POSTROUTING", 1, rule...)
 	}
 	if err != nil {
+		return fmt.Errorf("could not set up iptables chain rules for management port: %v", err)
+	}
+	rule = []string{"-o", ifname, "-j", "SNAT", "--to-source", interfaceAddr[0], "-m", "comment", "--comment", "OVN SNAT to Management Port"}
+	err = ipt.Insert("nat", iptableMgmPortChain, 1, rule...)
+	if err != nil {
 		return fmt.Errorf("could not set up iptables rules for management port: %v", err)
 	}
 
 	return nil
+}
+
+//DelMgtPortIptRules delete all the iptable rules for the management port.
+func DelMgtPortIptRules(nodeName string) {
+	ipt, err := util.GetIPTablesHelper(iptables.ProtocolIPv4)
+	if err != nil {
+		return
+	}
+	ifname := util.GetK8sMgmtIntfName(nodeName)
+	rule := []string{"-o", ifname, "-j", iptableMgmPortChain}
+	_ = ipt.Delete("nat", "POSTROUTING", rule...)
+	_ = ipt.ClearChain("nat", iptableMgmPortChain)
+	_ = ipt.DeleteChain("nat", iptableMgmPortChain)
 }

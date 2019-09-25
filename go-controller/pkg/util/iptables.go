@@ -17,6 +17,8 @@ type IPTablesHelper interface {
 	// ClearChain removes all rules in the specified table/chain.
 	// If the chain does not exist, a new one will be created
 	ClearChain(string, string) error
+	// DeleteChain deletes the chain in the specified table.
+	DeleteChain(string, string) error
 	// NewChain creates a new chain in the specified table
 	NewChain(string, string) error
 	// Exists checks if given rulespec in specified table/chain exists
@@ -134,6 +136,12 @@ func (f *FakeIPTables) ClearChain(tableName, chainName string) error {
 		return nil
 	}
 	return f.NewChain(tableName, chainName)
+}
+
+// DeleteChain deletes the chain in the specified table.
+// The chain must be empty
+func (f *FakeIPTables) DeleteChain(tableName, chainName string) error {
+	return f.DeleteChain(tableName, chainName)
 }
 
 // Exists checks if given rulespec in specified table/chain exists

@@ -2,10 +2,13 @@ package cluster
 
 import (
 	"fmt"
+	"runtime"
+
 	"github.com/sirupsen/logrus"
 	"net"
 
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
 )
 
@@ -126,6 +129,11 @@ func CleanupClusterNode(name string) error {
 	stdout, stderr, err := util.RunOVSVsctl("--", "--if-exists", "del-br", "br-int")
 	if err != nil {
 		logrus.Errorf("Failed to delete bridge br-int, stdout: %q, stderr: %q, error: %v", stdout, stderr, err)
+	}
+
+	// Delete iptable rules for management port on Linux.
+	if runtime.GOOS != "windows" {
+		ovn.DelMgtPortIptRules(name)
 	}
 
 	return nil
