@@ -109,6 +109,8 @@ var _ = Describe("Management Port Operations", func() {
 			util.SetIPTablesHelper(iptables.ProtocolIPv4, fakeipt)
 			err = fakeipt.NewChain("nat", "POSTROUTING")
 			Expect(err).NotTo(HaveOccurred())
+			err = fakeipt.NewChain("nat", "OVN-KUBE-SNAT-MGMTPORT")
+			Expect(err).NotTo(HaveOccurred())
 
 			_, err = config.InitConfig(ctx, fexec, nil)
 			Expect(err).NotTo(HaveOccurred())
@@ -122,7 +124,10 @@ var _ = Describe("Management Port Operations", func() {
 				"filter": {},
 				"nat": {
 					"POSTROUTING": []string{
-						"-o " + mgtPort + " -j SNAT --to-source " + mgtPortIP,
+						"-o " + mgtPort + " -j OVN-KUBE-SNAT-MGMTPORT",
+					},
+					"OVN-KUBE-SNAT-MGMTPORT": []string{
+						"-o " + mgtPort + " -j SNAT --to-source " + mgtPortIP + " -m comment --comment OVN SNAT to Management Port",
 					},
 				},
 			}
