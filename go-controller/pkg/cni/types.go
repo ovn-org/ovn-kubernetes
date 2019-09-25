@@ -5,6 +5,7 @@ import (
 
 	"github.com/containernetworking/cni/pkg/types/current"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/cni/types"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
 )
 
 // serverRunDir is the default directory for CNIServer runtime files
@@ -16,12 +17,11 @@ const serverTCPAddress string = "127.0.0.1:3996"
 
 // PodInterfaceInfo consists of interface info result from cni server if cni client configure's interface
 type PodInterfaceInfo struct {
-	MTU        int    `json:"mtu"`
-	MacAddress string `json:"macAddress"`
-	IPAddress  string `json:"ipAddress"`
-	GatewayIP  string `json:"gatewayIP"`
-	Ingress    int64  `json:"ingress"`
-	Egress     int64  `json:"egress"`
+	util.PodAnnotation
+
+	MTU     int   `json:"mtu"`
+	Ingress int64 `json:"ingress"`
+	Egress  int64 `json:"egress"`
 }
 
 // Explicit type for CNI commands the server handles

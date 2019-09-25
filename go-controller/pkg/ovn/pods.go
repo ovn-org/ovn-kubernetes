@@ -119,7 +119,7 @@ func (oc *Controller) getLogicalPortUUID(logicalPort string) string {
 	return oc.logicalPortUUIDCache[logicalPort]
 }
 
-func (oc *Controller) getGatewayFromSwitch(logicalSwitch string) (string, string, error) {
+func (oc *Controller) getGatewayFromSwitch(logicalSwitch string) (*net.IPNet, error) {
 	var gatewayIPMaskStr, stderr string
 	var ok bool
 	var err error
@@ -133,19 +133,20 @@ func (oc *Controller) getGatewayFromSwitch(logicalSwitch string) (string, string
 		if err != nil {
 			logrus.Errorf("Failed to get gateway IP:  %s, stderr: %q, %v",
 				gatewayIPMaskStr, stderr, err)
-			return "", "", err
+			return nil, err
 		}
 		if gatewayIPMaskStr == "" {
-			return "", "", fmt.Errorf("Empty gateway IP in logical switch %s",
+			return nil, fmt.Errorf("Empty gateway IP in logical switch %s",
 				logicalSwitch)
 		}
 		oc.gatewayCache[logicalSwitch] = gatewayIPMaskStr
 	}
-	gatewayIPMask := strings.Split(gatewayIPMaskStr, "/")
-	gatewayIP := gatewayIPMask[0]
-	mask := gatewayIPMask[1]
-	logrus.Debugf("Gateway IP: %s, Mask: %s", gatewayIP, mask)
-	return gatewayIP, mask, nil
+	ip, ipnet, err := net.ParseCIDR(gatewayIPMaskStr)
+	if err != nil {
+		return nil, fmt.Errorf("failed to parse gateway IP %q: %v", gatewayIPMaskStr, err)
+	}
+	ipnet.IP = ip
+	return ipnet, nil
 }
 
 func (oc *Controller) deleteLogicalPort(pod *kapi.Pod) {
@@ -254,7 +255,7 @@ func (oc *Controller) addLogicalPort(pod *kapi.Pod) {
 
 	oc.logicalPortCache[portName] = logicalSwitch
 
-	gatewayIP, mask, err := oc.getGatewayFromSwitch(logicalSwitch)
+	gatewayIP, err := oc.getGatewayFromSwitch(logicalSwitch)
 	if err != nil {
 		logrus.Errorf("Error obtaining gateway address for switch %s", logicalSwitch)
 		return
@@ -282,19 +283,25 @@ func (oc *Controller) addLogicalPort(pod *kapi.Pod) {
 		return
 	}
 
+	podCIDR := &net.IPNet{IP: podIP, Mask: gatewayIP.Mask}
+
 	// now set the port security for the logical switch port
 	out, stderr, err = util.RunOVNNbctl("lsp-set-port-security", portName,
-		fmt.Sprintf("%s %s/%s", podMac.String(), podIP.String(), mask))
+		fmt.Sprintf("%s %s", podMac, podCIDR))
 	if err != nil {
 		logrus.Errorf("error while setting port security for logical port %s "+
 			"stdout: %q, stderr: %q (%v)", portName, out, stderr, err)
 		return
 	}
 
-	annotation := fmt.Sprintf(`{\"ip_address\":\"%s/%s\", \"mac_address\":\"%s\", \"gateway_ip\": \"%s\"}`,
-		podIP.String(), mask, podMac.String(), gatewayIP)
-	logrus.Debugf("Annotation values: ip=%s/%s ; mac=%s ; gw=%s\nAnnotation=%s",
-		podIP.String(), mask, podMac.String(), gatewayIP, annotation)
+	annotation, err := util.MarshalPodAnnotation(podCIDR, podMac, gatewayIP.IP, nil)
+	if err != nil {
+		logrus.Errorf("error creating pod network annotation: %v", err)
+		return
+	}
+
+	logrus.Debugf("Annotation values: ip=%s ; mac=%s ; gw=%s\nAnnotation=%s",
+		podCIDR, podMac, gatewayIP, annotation)
 	err = oc.kube.SetAnnotationOnPod(pod, "ovn", annotation)
 	if err != nil {
 		logrus.Errorf("Failed to set annotation on pod %s - %v", pod.Name, err)

@@ -2,6 +2,7 @@ package kube
 
 import (
 	"fmt"
+	"strings"
 
 	"github.com/sirupsen/logrus"
 
@@ -36,6 +37,8 @@ type Kube struct {
 // SetAnnotationOnPod takes the pod object and key/value string pair to set it as an annotation
 func (k *Kube) SetAnnotationOnPod(pod *kapi.Pod, key, value string) error {
 	logrus.Infof("Setting annotations %s=%s on pod %s", key, value, pod.Name)
+	// escape double quotes in the annotation value so it can be sent as a JSON patch
+	value = strings.Replace(value, "\"", "\\\"", -1)
 	patchData := fmt.Sprintf(`{"metadata":{"annotations":{"%s":"%s"}}}`, key, value)
 	_, err := k.KClient.CoreV1().Pods(pod.Namespace).Patch(pod.Name, types.MergePatchType, []byte(patchData))
 	if err != nil {
