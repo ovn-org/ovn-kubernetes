@@ -164,7 +164,7 @@ spec:
         securityContext:
           runAsUser: 0
           capabilities:
-            add: ["NET_ADMIN", "SYS_ADMIN"]
+            add: ["NET_ADMIN", "SYS_ADMIN", "SYS_PTRACE"]
 
         volumeMounts:
         - mountPath: /var/run/dbus/
