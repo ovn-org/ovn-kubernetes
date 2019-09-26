@@ -372,6 +372,11 @@ func (wf *WatchFactory) AddNodeHandler(handlerFuncs cache.ResourceEventHandler, 
 	return wf.addHandler(nodeType, "", nil, handlerFuncs, processExisting)
 }
 
+// AddFilteredNodeHandler adds a handler function that will be executed when Node objects that match the given filters change
+func (wf *WatchFactory) AddFilteredNodeHandler(lsel *metav1.LabelSelector, handlerFuncs cache.ResourceEventHandler, processExisting func([]interface{})) (*Handler, error) {
+	return wf.addHandler(nodeType, "", lsel, handlerFuncs, processExisting)
+}
+
 // RemoveNodeHandler removes a Node object event handler function
 func (wf *WatchFactory) RemoveNodeHandler(handler *Handler) error {
 	return wf.removeHandler(nodeType, handler)
