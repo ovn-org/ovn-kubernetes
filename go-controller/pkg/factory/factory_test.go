@@ -233,6 +233,15 @@ var _ = Describe("Watch Factory Operations", func() {
 				MatchLabels: map[string]string{"blah": "foobar"},
 			})
 		})
+
+		It("is called for each existing node that matches a given label", func() {
+			node := newNode("default")
+			node.ObjectMeta.Labels["blah"] = "foobar"
+			nodes = append(nodes, node)
+			testExisting(nodeType, "", &metav1.LabelSelector{
+				MatchLabels: map[string]string{"blah": "foobar"},
+			})
+		})
 	})
 
 	Context("when existing items are known to the informer", func() {
