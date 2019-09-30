@@ -500,10 +500,6 @@ cleanup-ovs-server () {
 
 # set the ovnkube_db endpoint for other pods to query the OVN DB IP
 set_ovnkube_db_ep () {
-  # delete any endpoint by name ovnkube-db
-  kubectl --server=${K8S_APISERVER} --token=${k8s_token} --certificate-authority=${K8S_CACERT} \
-    delete ep -n ${ovn_kubernetes_namespace} ovnkube-db 2>/dev/null
-
   # create a new endpoint for the headless onvkube-db service without selectors
   # using the current host has the endpoint IP
   ovn_db_host=$(getent ahosts $(hostname) | head -1 | awk '{ print $1 }')

@@ -62,12 +62,8 @@ check_ovn_daemonset_version () {
   exit 1
 }
 
-# create the ovnkube_db endpoint for other pods to query the OVN DB IP
-create_ovnkube_db_ep () {
-  # delete any endpoint by name ovnkube-db
-  kubectl --server=${K8S_APISERVER} --token=${k8s_token} --certificate-authority=${K8S_CACERT} \
-    delete ep -n ${ovn_kubernetes_namespace} ovnkube-db 2>/dev/null
-
+# set the ovnkube_db endpoint for other pods to query the OVN DB IP
+set_ovnkube_db_ep () {
   # create a new endpoint for the headless onvkube-db service without selectors
   # using the provided VIP
   kubectl --server=${K8S_APISERVER} --token=${k8s_token} --certificate-authority=${K8S_CACERT} apply -f - << EOF
@@ -216,7 +212,7 @@ run-ovndb () {
 
         # now we can create the ovnkube-db endpoint with the ${ovndb_vip} as the IP address. with that
         # the waiting ovnkube-node and ovnkube-master PODs will continue
-        create_ovnkube_db_ep
+        set_ovnkube_db_ep
       elif [[ $ret -eq 1 ]]; then
 	echo pcs node unstandby ${ovn_pod_host}
         pcs node unstandby ${ovn_pod_host}
