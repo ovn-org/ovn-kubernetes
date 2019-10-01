@@ -1,6 +1,9 @@
 package ovn
 
 import (
+	"reflect"
+	"sync"
+
 	"github.com/openshift/origin/pkg/util/netutils"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/factory"
@@ -10,8 +13,6 @@ import (
 	kapisnetworking "k8s.io/api/networking/v1"
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/tools/cache"
-	"reflect"
-	"sync"
 )
 
 // Controller structure is the object which holds the controls for starting
