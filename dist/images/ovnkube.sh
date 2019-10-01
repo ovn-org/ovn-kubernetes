@@ -564,6 +564,7 @@ nb-ovsdb () {
 sb-ovsdb () {
   trap 'kill $(jobs -p); exit 0' TERM
   check_ovn_daemonset_version "3"
+  rm -f /etc/openvswitch/.ovnsb_db.db.~lock~
   rm -f /var/run/openvswitch/ovnsb_db.pid
 
   # Make sure /var/lib/openvswitch exists
