@@ -282,8 +282,19 @@ func (oc *Controller) addLogicalPort(pod *kapi.Pod) {
 		return
 	}
 
-	annotation := fmt.Sprintf(`{\"ip_address\":\"%s/%s\", \"mac_address\":\"%s\", \"gateway_ip\": \"%s\"}`, podIP.String(), mask, podMac.String(), gatewayIP)
-	logrus.Debugf("Annotation values: ip=%s/%s ; mac=%s ; gw=%s\nAnnotation=%s", podIP.String(), mask, podMac.String(), gatewayIP, annotation)
+	// now set the port security for the logical switch port
+	out, stderr, err = util.RunOVNNbctl("lsp-set-port-security", portName,
+		fmt.Sprintf("%s %s/%s", podMac.String(), podIP.String(), mask))
+	if err != nil {
+		logrus.Errorf("error while setting port security for logical port %s "+
+			"stdout: %q, stderr: %q (%v)", portName, out, stderr, err)
+		return
+	}
+
+	annotation := fmt.Sprintf(`{\"ip_address\":\"%s/%s\", \"mac_address\":\"%s\", \"gateway_ip\": \"%s\"}`,
+		podIP.String(), mask, podMac.String(), gatewayIP)
+	logrus.Debugf("Annotation values: ip=%s/%s ; mac=%s ; gw=%s\nAnnotation=%s",
+		podIP.String(), mask, podMac.String(), gatewayIP, annotation)
 	err = oc.kube.SetAnnotationOnPod(pod, "ovn", annotation)
 	if err != nil {
 		logrus.Errorf("Failed to set annotation on pod %s - %v", pod.Name, err)

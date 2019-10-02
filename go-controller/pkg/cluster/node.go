@@ -1,6 +1,8 @@
 package cluster
 
 import (
+	"fmt"
+	"io/ioutil"
 	"net"
 	"os"
 	"path/filepath"
@@ -21,6 +23,49 @@ import (
 	"k8s.io/client-go/tools/cache"
 )
 
+func isOVNControllerReady(name string) (bool, error) {
+	const runDir string = "/var/run/openvswitch/"
+
+	pid, err := ioutil.ReadFile(runDir + "ovn-controller.pid")
+	if err != nil {
+		logrus.Errorf("unknown pid for ovn-controller process: %v", err)
+		return false, err
+	}
+
+	if err := wait.PollImmediate(500*time.Millisecond,
+		300*time.Second,
+		func() (bool, error) {
+			ctlFile := runDir + fmt.Sprintf("ovn-controller.%s.ctl",
+				strings.TrimSuffix(string(pid), "\n"))
+			ret, _, err := util.RunOVSAppctl("-t", ctlFile,
+				"connection-status")
+			if err == nil {
+				logrus.Infof("node %s connection status = %s",
+					name, ret)
+				return ret == "connected", nil
+			}
+			return false, err
+		}); err != nil {
+		logrus.Errorf("timed out waiting sbdb for node %s: %v", name, err)
+		return false, err
+	}
+
+	if err := wait.PollImmediate(500*time.Millisecond,
+		300*time.Second,
+		func() (bool, error) {
+			flows, _, err := util.RunOVSOfctl("dump-flows", "br-int")
+			if err == nil {
+				return len(flows) > 0, nil
+			}
+			return false, err
+		}); err != nil {
+		logrus.Errorf("timed out dumping br-int flow entries for node %s: %v",
+			name, err)
+		return false, err
+	}
+	return true, nil
+}
+
 // StartClusterNode learns the subnet assigned to it by the master controller
 // and calls the SetupNode script which establishes the logical switch
 func (cluster *OvnClusterController) StartClusterNode(name string) error {
@@ -29,6 +74,7 @@ func (cluster *OvnClusterController) StartClusterNode(name string) error {
 	var subnet *net.IPNet
 	var clusterSubnets []string
 	var cidr string
+	var connected bool
 
 	for _, clusterSubnet := range config.Default.ClusterSubnets {
 		clusterSubnets = append(clusterSubnets, clusterSubnet.CIDR.String())
@@ -66,6 +112,14 @@ func (cluster *OvnClusterController) StartClusterNode(name string) error {
 	err = setupOVNNode(name)
 	if err != nil {
 		return err
+	}
+
+	connected, err = isOVNControllerReady(name)
+	if err != nil {
+		return err
+	}
+	if !connected {
+		return nil
 	}
 
 	err = ovn.CreateManagementPort(node.Name, subnet.String(), clusterSubnets)
@@ -160,31 +214,4 @@ func (cluster *OvnClusterController) watchConfigEndpoints() error {
 			},
 		}, nil)
 	return err
-}
-
-// CleanupClusterNode cleans up OVS resources on the k8s node on ovnkube-node daemonset deletion.
-// This is going to be a best effort cleanup.
-func (cluster *OvnClusterController) CleanupClusterNode(name string) error {
-	var err error
-	var node *kapi.Node
-	var nodeName string
-
-	node, err = cluster.Kube.GetNode(name)
-	if err != nil {
-		logrus.Errorf("Failed to get kubernetes node %q, error: %v", name, err)
-		return nil
-	}
-	nodeName = strings.ToLower(node.Name)
-	err = cluster.cleanupGateway(nodeName)
-	if err != nil {
-		logrus.Errorf("Failed to cleanup Gateway, error: %v", err)
-	}
-
-	// Make sure br-int is deleted, the management internal port is also deleted at the same time.
-	stdout, stderr, err := util.RunOVSVsctl("--", "--if-exists", "del-br", "br-int")
-	if err != nil {
-		logrus.Errorf("Failed to delete bridge br-int, stdout: %q, stderr: %q, error: %v", stdout, stderr, err)
-	}
-
-	return nil
 }

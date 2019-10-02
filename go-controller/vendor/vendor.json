@@ -9,6 +9,12 @@
 			"revisionTime": "2019-05-13T20:44:09Z"
 		},
 		{
+			"checksumSHA1": "pBmaTjNo279YtPKnLPtakPY97sI=",
+			"path": "github.com/Mellanox/sriovnet",
+			"revision": "73402dc8fcaa26a2aa195ff12245bd2bafd1494f",
+			"revisionTime": "2019-05-13T20:44:09Z"
+		},
+		{
 			"checksumSHA1": "7CZFKc5GTJHTnrvclrIfPzALGys=",
 			"path": "github.com/Microsoft/go-winio",
 			"revision": "12afdbf8b879f9ce020255d4dea63525b16518f5",
@@ -105,58 +111,84 @@
 			"revisionTime": "2019-06-20T21:17:52Z"
 		},
 		{
-			"checksumSHA1": "pBmaTjNo279YtPKnLPtakPY97sI=",
-			"path": "github.com/Mellanox/sriovnet",
-			"revision": "73402dc8fcaa26a2aa195ff12245bd2bafd1494f",
-			"revisionTime": "2019-05-13T20:44:09Z"
-		},
-		{
-			"checksumSHA1": "LvjTFR2Am01kquJNDnfISncPfRw=",
+			"checksumSHA1": "wPKiEWFfo1lFKXb7TQW1HffbuP8=",
 			"path": "github.com/containernetworking/cni/pkg/skel",
-			"revision": "909fe7d10d98ab99b9990966796316249c83b263",
-			"revisionTime": "2017-08-31T02:32:53Z"
+			"revision": "4cfb7b568922a3c79a23e438dc52fe537fc9687e",
+			"revisionTime": "2019-06-05T15:31:12Z",
+			"version": "=v0.7.1",
+			"versionExact": "v0.7.1"
 		},
 		{
-			"checksumSHA1": "Sfdjk2zzDd0npAjZdULWjWoKVkQ=",
+			"checksumSHA1": "Dhi4+8X7U2oVzVkgxPrmLaN8qFI=",
 			"path": "github.com/containernetworking/cni/pkg/types",
-			"revision": "a7885cb6f8ab03fba07852ded351e4f5e7a112bf",
-			"revisionTime": "2017-07-28T13:30:50Z"
+			"revision": "4cfb7b568922a3c79a23e438dc52fe537fc9687e",
+			"revisionTime": "2019-06-05T15:31:12Z",
+			"version": "=v0.7.1",
+			"versionExact": "v0.7.1"
 		},
 		{
-			"checksumSHA1": "lmLYXYR/twmBu+6U678QNF+BQlQ=",
+			"checksumSHA1": "6+ng8oaM9SB0TyCE7I7N940IpPY=",
 			"path": "github.com/containernetworking/cni/pkg/types/020",
-			"revision": "a7885cb6f8ab03fba07852ded351e4f5e7a112bf",
-			"revisionTime": "2017-07-28T13:30:50Z"
+			"revision": "4cfb7b568922a3c79a23e438dc52fe537fc9687e",
+			"revisionTime": "2019-06-05T15:31:12Z",
+			"version": "=v0.7.1",
+			"versionExact": "v0.7.1"
 		},
 		{
-			"checksumSHA1": "r6qX7lyz4pweijiXjWMcxvm4wQQ=",
+			"checksumSHA1": "X6dNZ3yc3V9ffW9vz4yIyeKXGD0=",
 			"path": "github.com/containernetworking/cni/pkg/types/current",
-			"revision": "a7885cb6f8ab03fba07852ded351e4f5e7a112bf",
-			"revisionTime": "2017-07-28T13:30:50Z"
+			"revision": "4cfb7b568922a3c79a23e438dc52fe537fc9687e",
+			"revisionTime": "2019-06-05T15:31:12Z",
+			"version": "=v0.7.1",
+			"versionExact": "v0.7.1"
 		},
 		{
-			"checksumSHA1": "Y9KLxL9fFDnFHaDGOUfDkcbyV0U=",
+			"checksumSHA1": "aojwjPoA9XSGB/zVtOGzWvmv/i8=",
 			"path": "github.com/containernetworking/cni/pkg/version",
-			"revision": "a7885cb6f8ab03fba07852ded351e4f5e7a112bf",
-			"revisionTime": "2017-07-28T13:30:50Z"
+			"revision": "4cfb7b568922a3c79a23e438dc52fe537fc9687e",
+			"revisionTime": "2019-06-05T15:31:12Z",
+			"version": "=v0.7.1",
+			"versionExact": "v0.7.1"
 		},
 		{
-			"checksumSHA1": "fou5ySWGlDUCfgIecM1CFpO47nQ=",
+			"checksumSHA1": "LTsIp3CxydS38W9whhqj4aWShBg=",
 			"path": "github.com/containernetworking/plugins/pkg/ip",
-			"revision": "e256564546e8d1ca8a36911f8445c11929043221",
-			"revisionTime": "2017-09-13T09:41:14Z"
+			"revision": "485be65581341430f9106a194a98f0f2412245fb",
+			"revisionTime": "2019-08-14T18:26:26Z",
+			"version": "=v0.8.2",
+			"versionExact": "v0.8.2"
 		},
 		{
-			"checksumSHA1": "umfzSifCgODa2RhhkS8/cjw0WjU=",
+			"checksumSHA1": "n3dCDigZOU+eD84Cr4Kg30GO4nI=",
 			"path": "github.com/containernetworking/plugins/pkg/ns",
-			"revision": "03e316b07b52997f6a7bf85c11b89b8cb713af36",
-			"revisionTime": "2017-12-06T17:21:47Z"
+			"revision": "485be65581341430f9106a194a98f0f2412245fb",
+			"revisionTime": "2019-08-14T18:26:26Z",
+			"version": "=v0.8.2",
+			"versionExact": "v0.8.2"
+		},
+		{
+			"checksumSHA1": "5EBbYDfGWtJZXQuno5QwE1HRgO4=",
+			"path": "github.com/containernetworking/plugins/pkg/testutils",
+			"revision": "485be65581341430f9106a194a98f0f2412245fb",
+			"revisionTime": "2019-08-14T18:26:26Z",
+			"version": "=v0.8.2",
+			"versionExact": "v0.8.2"
+		},
+		{
+			"checksumSHA1": "LxTzOk0+wIfpgFgyw/HzuLM4H3c=",
+			"path": "github.com/containernetworking/plugins/pkg/utils/buildversion",
+			"revision": "485be65581341430f9106a194a98f0f2412245fb",
+			"revisionTime": "2019-08-14T18:26:26Z",
+			"version": "=v0.8.2",
+			"versionExact": "v0.8.2"
 		},
 		{
 			"checksumSHA1": "rUAk+nce6eDIWtYo/QYIoqlTfrY=",
 			"path": "github.com/containernetworking/plugins/pkg/utils/hwaddr",
-			"revision": "03e316b07b52997f6a7bf85c11b89b8cb713af36",
-			"revisionTime": "2017-12-06T17:21:47Z"
+			"revision": "485be65581341430f9106a194a98f0f2412245fb",
+			"revisionTime": "2019-08-14T18:26:26Z",
+			"version": "=v0.8.2",
+			"versionExact": "v0.8.2"
 		},
 		{
 			"checksumSHA1": "PyPZHCviY7udHpG8gXG2YnROH6U=",
@@ -547,6 +579,12 @@
 			"path": "github.com/pkg/errors",
 			"revision": "27936f6d90f9c8e1145f11ed52ffffbfdb9e0af7",
 			"revisionTime": "2019-02-27T00:00:51Z"
+		},
+		{
+			"checksumSHA1": "sdkUNIxS+39OB5wZ+6+A/QAh/PA=",
+			"path": "github.com/safchain/ethtool",
+			"revision": "42ed695e3de80b9d695f280295fd7994639f209d",
+			"revisionTime": "2019-03-26T07:43:33Z"
 		},
 		{
 			"checksumSHA1": "Tutue3nEgM/87jitUcYv6ODwyNE=",

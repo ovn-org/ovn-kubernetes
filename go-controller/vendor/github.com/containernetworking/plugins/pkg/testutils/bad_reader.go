@@ -1,4 +1,4 @@
-// Copyright 2015-2017 CNI authors
+// Copyright 2016 CNI authors
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -12,23 +12,22 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-// +build !linux
+package testutils
 
-package ip
+import "errors"
 
-import (
-	"net"
-
-	"github.com/containernetworking/cni/pkg/types"
-	"github.com/vishvananda/netlink"
-)
-
-// AddRoute adds a universally-scoped route to a device.
-func AddRoute(ipn *net.IPNet, gw net.IP, dev netlink.Link) error {
-	return types.NotImplementedError
+// BadReader is an io.Reader which always errors
+type BadReader struct {
+	Error error
 }
 
-// AddHostRoute adds a host-scoped route to a device.
-func AddHostRoute(ipn *net.IPNet, gw net.IP, dev netlink.Link) error {
-	return types.NotImplementedError
+func (r *BadReader) Read(buffer []byte) (int, error) {
+	if r.Error != nil {
+		return 0, r.Error
+	}
+	return 0, errors.New("banana")
+}
+
+func (r *BadReader) Close() error {
+	return nil
 }

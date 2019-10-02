@@ -245,6 +245,7 @@ func (cluster *OvnClusterController) addNode(node *kapi.Node) (err error) {
 
 	// Node doesn't have a subnet assigned; reserve a new one for it
 	var subnetAllocator *netutils.SubnetAllocator
+	err = netutils.ErrSubnetAllocatorFull
 	for _, subnetAllocator = range cluster.masterSubnetAllocatorList {
 		hostsubnet, err = subnetAllocator.GetNetwork()
 		if err == netutils.ErrSubnetAllocatorFull {
@@ -254,6 +255,10 @@ func (cluster *OvnClusterController) addNode(node *kapi.Node) (err error) {
 			return fmt.Errorf("Error allocating network for node %s: %v", node.Name, err)
 		}
 		logrus.Infof("Allocated node %s HostSubnet %s", node.Name, hostsubnet.String())
+		break
+	}
+	if err == netutils.ErrSubnetAllocatorFull {
+		return fmt.Errorf("Error allocating network for node %s: %v", node.Name, err)
 	}
 
 	defer func() {
@@ -322,8 +327,10 @@ func (cluster *OvnClusterController) deleteNode(nodeName string, nodeSubnet *net
 		logrus.Errorf("Error deleting node %s logical network: %v", nodeName, err)
 	}
 
-	if err := util.GatewayCleanup(nodeName); err != nil {
-		return fmt.Errorf("Failed to clean up node %s gateway: (%v)", nodeName, err)
+	if nodeSubnet != nil {
+		if err := util.GatewayCleanup(nodeName, nodeSubnet.String()); err != nil {
+			return fmt.Errorf("Failed to clean up node %s gateway: (%v)", nodeName, err)
+		}
 	}
 
 	return nil
@@ -367,9 +374,13 @@ func (cluster *OvnClusterController) syncNodes(nodes []interface{}) {
 		}
 
 		var subnet *net.IPNet
-		if strings.HasPrefix(items[1], "subnet=") {
-			subnetStr := strings.TrimPrefix(items[1], "subnet=")
-			_, subnet, _ = net.ParseCIDR(subnetStr)
+		configs := strings.Fields(items[1])
+		for _, config := range configs {
+			if strings.HasPrefix(config, "subnet=") {
+				subnetStr := strings.TrimPrefix(config, "subnet=")
+				_, subnet, _ = net.ParseCIDR(subnetStr)
+				break
+			}
 		}
 
 		if err := cluster.deleteNode(items[0], subnet); err != nil {
