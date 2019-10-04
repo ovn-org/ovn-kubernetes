@@ -38,7 +38,6 @@ spec:
       # as all pods.
       serviceAccountName: ovn
       hostNetwork: true
-      hostPID: true
       containers:
       # firewall rules for ovn - assumed to be setup
       # iptables -A OS_FIREWALL_ALLOW -p tcp -m state --state NEW -m tcp --dport 6641 -j ACCEPT
@@ -53,8 +52,8 @@ spec:
 
         securityContext:
           runAsUser: 0
-          # Permission could be reduced by selecting an appropriate SELinux policy
-          privileged: true
+          capabilities:
+            add: ["NET_ADMIN"]
 
         volumeMounts:
         # ovn db is stored in the pod in /etc/openvswitch
@@ -63,8 +62,6 @@ spec:
           name: host-var-lib-ovs
         - mountPath: /var/log/openvswitch/
           name: host-var-log-ovs
-        - mountPath: /var/run/openvswitch/
-          name: host-var-run-ovs
 
         resources:
           requests:
@@ -107,8 +104,8 @@ spec:
 
         securityContext:
           runAsUser: 0
-          # Permission could be reduced by selecting an appropriate SELinux policy
-          privileged: true
+          capabilities:
+            add: ["NET_ADMIN"]
 
         volumeMounts:
         # ovn db is stored in the pod in /etc/openvswitch
@@ -117,8 +114,6 @@ spec:
           name: host-var-lib-ovs
         - mountPath: /var/log/openvswitch/
           name: host-var-log-ovs
-        - mountPath: /var/run/openvswitch/
-          name: host-var-run-ovs
 
         resources:
           requests:
@@ -162,8 +157,5 @@ spec:
       - name: host-var-log-ovs
         hostPath:
           path: /var/log/openvswitch
-      - name: host-var-run-ovs
-        hostPath:
-          path: /var/run/openvswitch
       tolerations:
       - operator: "Exists"

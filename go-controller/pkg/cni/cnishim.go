@@ -109,9 +109,20 @@ func (p *Plugin) CmdAdd(args *skel.CmdArgs) error {
 		return err
 	}
 
-	result, err := current.NewResult(body)
-	if err != nil {
+	response := &Response{}
+	if err = json.Unmarshal(body, response); err != nil {
 		return fmt.Errorf("failed to unmarshal response '%s': %v", string(body), err)
+	}
+
+	var result *current.Result
+	if response.Result != nil {
+		result = response.Result
+	} else {
+		pr, _ := cniRequestToPodRequest(req)
+		result = pr.getCNIResult(response.PodIFInfo)
+		if result == nil {
+			return fmt.Errorf("failed to get CNI Result from pod interface info %q", response.PodIFInfo)
+		}
 	}
 
 	return types.PrintResult(result, conf.CNIVersion)
@@ -121,4 +132,10 @@ func (p *Plugin) CmdAdd(args *skel.CmdArgs) error {
 func (p *Plugin) CmdDel(args *skel.CmdArgs) error {
 	_, err := p.doCNI("http://dummy/", newCNIRequest(args))
 	return err
+}
+
+// CmdCheck is the callback for 'checking' container's networking is as expected.
+// Currently not implemented, so returns `nil`.
+func (p *Plugin) CmdCheck(args *skel.CmdArgs) error {
+	return nil
 }

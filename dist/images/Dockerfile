@@ -21,16 +21,13 @@ USER root
 ENV PYTHONDONTWRITEBYTECODE yes
 
 COPY kubernetes.repo /etc/yum.repos.d/kubernetes.repo
-RUN yum install -y --setopt=tsflags=nodocs --setopt=skip_missing_names_on_install=False \
-	PyYAML bind-utils \
-	openssl \
-	numactl-libs \
-	firewalld-filesystem \
-	libpcap \
-	hostname \
-	kubectl \
+RUN INSTALL_PKGS=" \
+	PyYAML bind-utils procps-ng openssl numactl-libs firewalld-filesystem \
+	libpcap kubernetes-client \
+	iptables iproute strace socat \
 	unbound-libs \
-	iproute strace socat && \
+        " && \
+	yum install -y --setopt=tsflags=nodocs --setopt=skip_missing_names_on_install=False $INSTALL_PKGS && \
 	yum clean all && rm -rf /var/cache/yum/*
 
 # Get a reasonable version of openvswitch (2.9.2 or higher)
@@ -53,8 +50,6 @@ RUN rpm -i http://cbs.centos.org/kojifiles/packages/openvswitch/${ovsVer}/${ovsS
 RUN rm -rf /var/cache/yum
 
 RUN mkdir -p /var/run/openvswitch
-RUN mkdir -p /etc/cni/net.d
-RUN mkdir -p /opt/cni/bin
 
 # Built in ../../go_controller, then the binaries are copied here.
 # put things where they are in the rpm
@@ -70,9 +65,7 @@ COPY ovn-debug.sh /root/
 COPY ovn_k8s.conf /etc/openvswitch/ovn_k8s.conf
 
 # copy git commit number into image
-RUN mkdir -p /root/.git/ /root/.git/refs/heads/
-COPY .git/HEAD /root/.git/HEAD
-COPY .git/refs/heads/ /root/.git/refs/heads/
+COPY git_info /root
 
 
 LABEL io.k8s.display-name="ovn kubernetes" \

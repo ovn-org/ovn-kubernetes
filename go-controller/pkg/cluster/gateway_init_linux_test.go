@@ -17,6 +17,7 @@ import (
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
 
 	"github.com/containernetworking/plugins/pkg/ns"
+	"github.com/containernetworking/plugins/pkg/testutils"
 	"github.com/coreos/go-iptables/iptables"
 	"github.com/vishvananda/netlink"
 
@@ -104,7 +105,7 @@ func shareGatewayInterfaceTest(app *cli.App, testNS ns.NetNS,
 			Output: clusterRouterUUID,
 		})
 		fexec.AddFakeCmd(&ovntest.ExpectedCmd{
-			Cmd:    "ovn-sbctl --timeout=15 --data=bare --no-heading --columns=name find Chassis hostname=" + nodeName,
+			Cmd:    "ovs-vsctl --timeout=15 --if-exists get Open_vSwitch . external_ids:system-id",
 			Output: systemID,
 		})
 		fexec.AddFakeCmdsNoOutputNoError([]string{
@@ -148,7 +149,7 @@ GR_openshift-master-node chassis=6a47b33b-89d3-4d65-ac31-b19b549326c7 lb_force_s
 		}
 		fexec.AddFakeCmdsNoOutputNoError([]string{
 			localnetPortCmd,
-			"ovn-nbctl --timeout=15 -- --may-exist lrp-add " + gwRouter + " rtoe-" + gwRouter + " " + eth0MAC + " " + eth0CIDR + " -- set logical_router_port rtoe-" + gwRouter + " external-ids:gateway-physical-ip=yes",
+			"ovn-nbctl --timeout=15 -- --if-exists lrp-del rtoe-" + gwRouter + " -- lrp-add " + gwRouter + " rtoe-" + gwRouter + " " + eth0MAC + " " + eth0CIDR + " -- set logical_router_port rtoe-" + gwRouter + " external-ids:gateway-physical-ip=yes",
 			"ovn-nbctl --timeout=15 -- --may-exist lsp-add ext_" + nodeName + " etor-" + gwRouter + " -- set logical_switch_port etor-" + gwRouter + " type=router options:router-port=rtoe-" + gwRouter + " addresses=\"" + eth0MAC + "\"",
 			"ovn-nbctl --timeout=15 --may-exist lr-route-add " + gwRouter + " 0.0.0.0/0 " + eth0GWIP + " rtoe-" + gwRouter,
 			"ovn-nbctl --timeout=15 --may-exist lr-nat-add " + gwRouter + " snat " + eth0IP + " " + clusterCIDR,
@@ -332,7 +333,7 @@ func spareGatewayInterfaceTest(app *cli.App, testNS ns.NetNS,
 			Output: clusterRouterUUID,
 		})
 		fexec.AddFakeCmd(&ovntest.ExpectedCmd{
-			Cmd:    "ovn-sbctl --timeout=15 --data=bare --no-heading --columns=name find Chassis hostname=" + nodeName,
+			Cmd:    "ovs-vsctl --timeout=15 --if-exists get Open_vSwitch . external_ids:system-id",
 			Output: systemID,
 		})
 		fexec.AddFakeCmdsNoOutputNoError([]string{
@@ -370,7 +371,7 @@ GR_openshift-master-node chassis=6a47b33b-89d3-4d65-ac31-b19b549326c7 lb_force_s
 		fexec.AddFakeCmdsNoOutputNoError([]string{
 			"ovn-nbctl --timeout=15 --may-exist ls-add ext_" + nodeName,
 			"ovn-nbctl --timeout=15 -- --may-exist lsp-add ext_" + nodeName + " eth0_" + nodeName + " -- lsp-set-addresses eth0_" + nodeName + " unknown",
-			"ovn-nbctl --timeout=15 -- --may-exist lrp-add " + gwRouter + " rtoe-" + gwRouter + " " + eth0MAC + " " + eth0CIDR + " -- set logical_router_port rtoe-" + gwRouter + " external-ids:gateway-physical-ip=yes",
+			"ovn-nbctl --timeout=15 -- --if-exists lrp-del rtoe-" + gwRouter + " -- lrp-add " + gwRouter + " rtoe-" + gwRouter + " " + eth0MAC + " " + eth0CIDR + " -- set logical_router_port rtoe-" + gwRouter + " external-ids:gateway-physical-ip=yes",
 			"ovn-nbctl --timeout=15 -- --may-exist lsp-add ext_" + nodeName + " etor-" + gwRouter + " -- set logical_switch_port etor-" + gwRouter + " type=router options:router-port=rtoe-" + gwRouter + " addresses=\"" + eth0MAC + "\"",
 			"ovn-nbctl --timeout=15 --may-exist lr-route-add " + gwRouter + " 0.0.0.0/0 " + eth0GWIP + " rtoe-" + gwRouter,
 			"ovn-nbctl --timeout=15 --may-exist lr-nat-add " + gwRouter + " snat " + eth0IP + " " + clusterCIDR,
@@ -449,7 +450,7 @@ var _ = Describe("Gateway Init Operations", func() {
 
 	BeforeEach(func() {
 		var err error
-		testNS, err = ns.NewNS()
+		testNS, err = testutils.NewNS()
 		Expect(err).NotTo(HaveOccurred())
 
 		// Restore global default values before each testcase
@@ -504,7 +505,7 @@ var _ = Describe("Gateway Init Operations", func() {
 				Output: clusterRouterUUID,
 			})
 			fexec.AddFakeCmd(&ovntest.ExpectedCmd{
-				Cmd:    "ovn-sbctl --timeout=15 --data=bare --no-heading --columns=name find Chassis hostname=" + nodeName,
+				Cmd:    "ovs-vsctl --timeout=15 --if-exists get Open_vSwitch . external_ids:system-id",
 				Output: systemID,
 			})
 			fexec.AddFakeCmdsNoOutputNoError([]string{
@@ -545,7 +546,7 @@ GR_openshift-master-node chassis=6a47b33b-89d3-4d65-ac31-b19b549326c7 lb_force_s
 			})
 			fexec.AddFakeCmdsNoOutputNoError([]string{
 				"ovn-nbctl --timeout=15 -- --may-exist lsp-add ext_" + nodeName + " br-local_" + nodeName + " -- lsp-set-addresses br-local_" + nodeName + " unknown -- lsp-set-type br-local_" + nodeName + " localnet -- lsp-set-options br-local_" + nodeName + " network_name=" + util.PhysicalNetworkName,
-				"ovn-nbctl --timeout=15 -- --may-exist lrp-add " + gwRouter + " rtoe-" + gwRouter + " " + brLocalnetMAC + " 169.254.33.2/24 -- set logical_router_port rtoe-" + gwRouter + " external-ids:gateway-physical-ip=yes",
+				"ovn-nbctl --timeout=15 -- --if-exists lrp-del rtoe-" + gwRouter + " -- lrp-add " + gwRouter + " rtoe-" + gwRouter + " " + brLocalnetMAC + " 169.254.33.2/24 -- set logical_router_port rtoe-" + gwRouter + " external-ids:gateway-physical-ip=yes",
 				"ovn-nbctl --timeout=15 -- --may-exist lsp-add ext_" + nodeName + " etor-" + gwRouter + " -- set logical_switch_port etor-" + gwRouter + " type=router options:router-port=rtoe-" + gwRouter + " addresses=\"" + brLocalnetMAC + "\"",
 				"ovn-nbctl --timeout=15 --may-exist lr-route-add " + gwRouter + " 0.0.0.0/0 169.254.33.1 rtoe-" + gwRouter,
 				"ovn-nbctl --timeout=15 --may-exist lr-nat-add " + gwRouter + " snat 169.254.33.2 " + clusterCIDR,

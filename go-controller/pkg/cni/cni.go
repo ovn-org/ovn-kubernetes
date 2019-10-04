@@ -120,39 +120,22 @@ func (pr *PodRequest) cmdAdd() *PodResult {
 		logrus.Errorf("failed to parse bandwidth request: %v", err)
 		return nil
 	}
-
-	var interfacesArray []*current.Interface
-	interfacesArray, err = pr.ConfigureInterface(namespace, podName, macAddress, ipAddress, gatewayIP, config.Default.MTU, ingress, egress)
-	if err != nil {
-		logrus.Errorf("Failed to configure interface in pod: %v", err)
-		return nil
+	podInterfaceInfo := &PodInterfaceInfo{
+		MTU:        config.Default.MTU,
+		MacAddress: macAddress,
+		IPAddress:  ipAddress,
+		GatewayIP:  gatewayIP,
+		Ingress:    ingress,
+		Egress:     egress,
 	}
-
-	// Build the result structure to pass back to the runtime
-	addr, addrNet, err := net.ParseCIDR(ipAddress)
-	if err != nil {
-		logrus.Errorf("failed to parse IP address %q: %v", ipAddress, err)
-		return nil
-	}
-	ipVersion := "6"
-	if addr.To4() != nil {
-		ipVersion = "4"
-	}
-	result := &current.Result{
-		Interfaces: interfacesArray,
-		IPs: []*current.IPConfig{
-			{
-				Version:   ipVersion,
-				Interface: current.Int(1),
-				Address:   net.IPNet{IP: addr, Mask: addrNet.Mask},
-				Gateway:   net.ParseIP(gatewayIP),
-			},
-		},
-	}
-
 	podResult := &PodResult{}
-	//versionedResult, _ := result.GetAsVersion(pr.CNIConf.CNIVersion)
-	podResult.Response, _ = json.Marshal(result)
+	response := &Response{}
+	if !config.UnprivilegedMode {
+		response.Result = pr.getCNIResult(podInterfaceInfo)
+	} else {
+		response.PodIFInfo = podInterfaceInfo
+	}
+	podResult.Response, _ = json.Marshal(response)
 	return podResult
 }
 
@@ -183,4 +166,38 @@ func HandleCNIRequest(request *PodRequest) ([]byte, error) {
 	}
 	logrus.Infof("Returning pod network request %v, result %s err %v", request, string(result.Response), result.Err)
 	return result.Response, result.Err
+}
+
+// getCNIResult get result from pod interface info.
+func (pr *PodRequest) getCNIResult(podInterfaceInfo *PodInterfaceInfo) *current.Result {
+	var interfacesArray []*current.Interface
+	ipAddress := podInterfaceInfo.IPAddress
+	gatewayIP := podInterfaceInfo.GatewayIP
+	interfacesArray, err := pr.ConfigureInterface(pr.PodNamespace, pr.PodName, podInterfaceInfo.MacAddress, ipAddress, gatewayIP, podInterfaceInfo.MTU, podInterfaceInfo.Ingress, podInterfaceInfo.Egress)
+	if err != nil {
+		logrus.Errorf("Failed to configure interface in pod: %v", err)
+		return nil
+	}
+
+	// Build the result structure to pass back to the runtime
+	addr, addrNet, err := net.ParseCIDR(ipAddress)
+	if err != nil {
+		logrus.Errorf("Failed to parse IP address %q: %v", ipAddress, err)
+		return nil
+	}
+	ipVersion := "6"
+	if addr.To4() != nil {
+		ipVersion = "4"
+	}
+	return &current.Result{
+		Interfaces: interfacesArray,
+		IPs: []*current.IPConfig{
+			{
+				Version:   ipVersion,
+				Interface: current.Int(1),
+				Address:   net.IPNet{IP: addr, Mask: addrNet.Mask},
+				Gateway:   net.ParseIP(gatewayIP),
+			},
+		},
+	}
 }

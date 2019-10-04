@@ -25,6 +25,7 @@ const (
 	ovsCommandTimeout = 15
 	ovsVsctlCommand   = "ovs-vsctl"
 	ovsOfctlCommand   = "ovs-ofctl"
+	ovsAppctlCommand  = "ovs-appctl"
 	ovnNbctlCommand   = "ovn-nbctl"
 	ovnSbctlCommand   = "ovn-sbctl"
 	ipCommand         = "ip"
@@ -79,6 +80,7 @@ type execHelper struct {
 	exec           kexec.Interface
 	ofctlPath      string
 	vsctlPath      string
+	appctlPath     string
 	nbctlPath      string
 	sbctlPath      string
 	ipPath         string
@@ -100,6 +102,10 @@ func SetExec(exec kexec.Interface) error {
 		return err
 	}
 	runner.vsctlPath, err = exec.LookPath(ovsVsctlCommand)
+	if err != nil {
+		return err
+	}
+	runner.appctlPath, err = exec.LookPath(ovsAppctlCommand)
 	if err != nil {
 		return err
 	}
@@ -142,10 +148,10 @@ func GetExec() kexec.Interface {
 
 var runCounter uint64
 
-func run(cmdPath string, args ...string) (*bytes.Buffer, *bytes.Buffer, error) {
+func runCmd(cmd kexec.Cmd, cmdPath string, args ...string) (*bytes.Buffer, *bytes.Buffer, error) {
 	stdout := &bytes.Buffer{}
 	stderr := &bytes.Buffer{}
-	cmd := runner.exec.Command(cmdPath, args...)
+
 	cmd.SetStdout(stdout)
 	cmd.SetStderr(stderr)
 
@@ -162,6 +168,17 @@ func run(cmdPath string, args ...string) (*bytes.Buffer, *bytes.Buffer, error) {
 	return stdout, stderr, err
 }
 
+func run(cmdPath string, args ...string) (*bytes.Buffer, *bytes.Buffer, error) {
+	cmd := runner.exec.Command(cmdPath, args...)
+	return runCmd(cmd, cmdPath, args...)
+}
+
+func runWithEnvVars(cmdPath string, envVars []string, args ...string) (*bytes.Buffer, *bytes.Buffer, error) {
+	cmd := runner.exec.Command(cmdPath, args...)
+	cmd.SetEnv(envVars)
+	return runCmd(cmd, cmdPath, args...)
+}
+
 // RunOVSOfctl runs a command via ovs-ofctl.
 func RunOVSOfctl(args ...string) (string, string, error) {
 	stdout, stderr, err := run(runner.ofctlPath, args...)
@@ -176,13 +193,21 @@ func RunOVSVsctl(args ...string) (string, string, error) {
 	return strings.Trim(strings.TrimSpace(stdout.String()), "\""), stderr.String(), err
 }
 
+// RunOVSAppctl runs a command via ovs-appctl.
+func RunOVSAppctl(args ...string) (string, string, error) {
+	cmdArgs := []string{fmt.Sprintf("--timeout=%d", ovsCommandTimeout)}
+	cmdArgs = append(cmdArgs, args...)
+	stdout, stderr, err := run(runner.appctlPath, cmdArgs...)
+	return strings.Trim(strings.TrimSpace(stdout.String()), "\""), stderr.String(), err
+}
+
 // Run the ovn-ctl command and retry if "Connection refused"
 // poll waitng for service to become available
-func runOVNretry(cmdPath string, args ...string) (*bytes.Buffer, *bytes.Buffer, error) {
+func runOVNretry(cmdPath string, envVars []string, args ...string) (*bytes.Buffer, *bytes.Buffer, error) {
 
 	retriesLeft := 200
 	for {
-		stdout, stderr, err := run(cmdPath, args...)
+		stdout, stderr, err := runWithEnvVars(cmdPath, envVars, args...)
 		if err == nil {
 			return stdout, stderr, err
 		}
@@ -202,36 +227,55 @@ func runOVNretry(cmdPath string, args ...string) (*bytes.Buffer, *bytes.Buffer, 
 	}
 }
 
+func getNbctlArgsAndEnv(timeout int, args ...string) ([]string, []string) {
+	var cmdArgs, envVars []string
+
+	if config.NbctlDaemonMode {
+		// when ovn-nbctl is running in a "daemon mode", the user first starts
+		// ovn-nbctl running in the background and afterward uses the daemon to execute
+		// operations. The client needs to use the control socket and set the path to the
+		// control socket in environment variable OVN_NB_DAEMON
+		pid, err := ioutil.ReadFile("/var/run/openvswitch/ovn-nbctl.pid")
+		if err == nil {
+			envVars = append(envVars,
+				fmt.Sprintf("OVN_NB_DAEMON=/var/run/openvswitch/ovn-nbctl.%s.ctl",
+					strings.Trim(string(pid), " \n")))
+			logrus.Debugf("using ovn-nbctl daemon mode at %s", envVars)
+			cmdArgs = append(cmdArgs, fmt.Sprintf("--timeout=%d", timeout))
+			cmdArgs = append(cmdArgs, args...)
+			return cmdArgs, envVars
+		}
+		logrus.Warningf("failed to retrieve ovn-nbctl daemon's control socket " +
+			"so resorting to non-daemon mode")
+	}
+
+	if config.OvnNorth.Scheme == config.OvnDBSchemeSSL {
+		cmdArgs = append(cmdArgs,
+			fmt.Sprintf("--private-key=%s", config.OvnNorth.PrivKey),
+			fmt.Sprintf("--certificate=%s", config.OvnNorth.Cert),
+			fmt.Sprintf("--bootstrap-ca-cert=%s", config.OvnNorth.CACert),
+			fmt.Sprintf("--db=%s", config.OvnNorth.GetURL()))
+	} else if config.OvnNorth.Scheme == config.OvnDBSchemeTCP {
+		cmdArgs = append(cmdArgs, fmt.Sprintf("--db=%s", config.OvnNorth.GetURL()))
+	}
+	cmdArgs = append(cmdArgs, fmt.Sprintf("--timeout=%d", timeout))
+	cmdArgs = append(cmdArgs, args...)
+	return cmdArgs, envVars
+}
+
 // RunOVNNbctlUnix runs command via ovn-nbctl, with ovn-nbctl using the unix
 // domain sockets to connect to the ovsdb-server backing the OVN NB database.
 func RunOVNNbctlUnix(args ...string) (string, string, error) {
-	cmdArgs := []string{fmt.Sprintf("--timeout=%d", ovsCommandTimeout)}
-	cmdArgs = append(cmdArgs, args...)
-	stdout, stderr, err := runOVNretry(runner.nbctlPath, cmdArgs...)
+	cmdArgs, envVars := getNbctlArgsAndEnv(ovsCommandTimeout, args...)
+	stdout, stderr, err := runOVNretry(runner.nbctlPath, envVars, cmdArgs...)
 	return strings.Trim(strings.TrimFunc(stdout.String(), unicode.IsSpace), "\""),
 		stderr.String(), err
 }
 
 // RunOVNNbctlWithTimeout runs command via ovn-nbctl with a specific timeout
-func RunOVNNbctlWithTimeout(timeout int, args ...string) (string, string,
-	error) {
-	var cmdArgs []string
-	if config.OvnNorth.Scheme == config.OvnDBSchemeSSL {
-		cmdArgs = []string{
-			fmt.Sprintf("--private-key=%s", config.OvnNorth.PrivKey),
-			fmt.Sprintf("--certificate=%s", config.OvnNorth.Cert),
-			fmt.Sprintf("--bootstrap-ca-cert=%s", config.OvnNorth.CACert),
-			fmt.Sprintf("--db=%s", config.OvnNorth.GetURL()),
-		}
-	} else if config.OvnNorth.Scheme == config.OvnDBSchemeTCP {
-		cmdArgs = []string{
-			fmt.Sprintf("--db=%s", config.OvnNorth.GetURL()),
-		}
-	}
-
-	cmdArgs = append(cmdArgs, fmt.Sprintf("--timeout=%d", timeout))
-	cmdArgs = append(cmdArgs, args...)
-	stdout, stderr, err := runOVNretry(runner.nbctlPath, cmdArgs...)
+func RunOVNNbctlWithTimeout(timeout int, args ...string) (string, string, error) {
+	cmdArgs, envVars := getNbctlArgsAndEnv(timeout, args...)
+	stdout, stderr, err := runOVNretry(runner.nbctlPath, envVars, cmdArgs...)
 	return strings.Trim(strings.TrimSpace(stdout.String()), "\""), stderr.String(), err
 }
 
@@ -245,7 +289,7 @@ func RunOVNNbctl(args ...string) (string, string, error) {
 func RunOVNSbctlUnix(args ...string) (string, string, error) {
 	cmdArgs := []string{fmt.Sprintf("--timeout=%d", ovsCommandTimeout)}
 	cmdArgs = append(cmdArgs, args...)
-	stdout, stderr, err := runOVNretry(runner.sbctlPath, cmdArgs...)
+	stdout, stderr, err := runOVNretry(runner.sbctlPath, nil, cmdArgs...)
 	return strings.Trim(strings.TrimFunc(stdout.String(), unicode.IsSpace), "\""),
 		stderr.String(), err
 }
@@ -269,7 +313,7 @@ func RunOVNSbctlWithTimeout(timeout int, args ...string) (string, string,
 
 	cmdArgs = append(cmdArgs, fmt.Sprintf("--timeout=%d", timeout))
 	cmdArgs = append(cmdArgs, args...)
-	stdout, stderr, err := runOVNretry(runner.sbctlPath, cmdArgs...)
+	stdout, stderr, err := runOVNretry(runner.sbctlPath, nil, cmdArgs...)
 	return strings.Trim(strings.TrimSpace(stdout.String()), "\""), stderr.String(), err
 }
 

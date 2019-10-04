@@ -34,21 +34,6 @@ func GetK8sClusterRouter() (string, error) {
 	return k8sClusterRouter, nil
 }
 
-func getNodeChassisID(nodeName string) (string, error) {
-	chassisID, stderr, err := RunOVNSbctl("--data=bare", "--no-heading",
-		"--columns=name", "find", "Chassis", "hostname="+nodeName)
-	if err != nil {
-		logrus.Errorf("Failed to find Chassis ID for node %s, "+
-			"stderr: %q, error: %v", nodeName, stderr, err)
-		return "", err
-	}
-	if chassisID == "" {
-		return "", fmt.Errorf("No chassis ID configured for node %s", nodeName)
-	}
-
-	return chassisID, nil
-}
-
 // GetDefaultGatewayRouterIP returns the first gateway logical router name
 // and IP address as listed in the OVN database
 func GetDefaultGatewayRouterIP() (string, net.IP, error) {
@@ -187,7 +172,7 @@ func GatewayInit(clusterIPSubnet []string, nodeName, ifaceID, nicIP, nicMacAddre
 		return err
 	}
 
-	systemID, err := getNodeChassisID(nodeName)
+	systemID, err := GetNodeChassisID()
 	if err != nil {
 		return err
 	}
@@ -329,9 +314,13 @@ func GatewayInit(clusterIPSubnet []string, nodeName, ifaceID, nicIP, nicMacAddre
 	}
 
 	// Connect GR to external_switch with mac address of external interface
-	// and that IP address.
-	stdout, stderr, err = RunOVNNbctl("--", "--may-exist", "lrp-add",
-		gatewayRouter, "rtoe-"+gatewayRouter, nicMacAddress, physicalIPMask,
+	// and that IP address. In the case of `local` gateway mode, whenever ovnkube-node container
+	// restarts a new br-local bridge will be created with a new `nicMacAddress`. As a result,
+	// direct addition of logical_router_port with --may-exists will not work since the MAC
+	// has changed. So, we need to delete that port, if it exists, and it back.
+	stdout, stderr, err = RunOVNNbctl(
+		"--", "--if-exists", "lrp-del", "rtoe-"+gatewayRouter,
+		"--", "lrp-add", gatewayRouter, "rtoe-"+gatewayRouter, nicMacAddress, physicalIPMask,
 		"--", "set", "logical_router_port", "rtoe-"+gatewayRouter,
 		"external-ids:gateway-physical-ip=yes")
 	if err != nil {

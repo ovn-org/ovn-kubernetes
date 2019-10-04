@@ -18,6 +18,7 @@ import (
 	ovncluster "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/cluster"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/factory"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/kube"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn"
 	util "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
 
@@ -155,6 +156,14 @@ func setupPIDFile(pidfile string) error {
 }
 
 func runOvnKube(ctx *cli.Context) error {
+	pidfile := ctx.String("pidfile")
+	if pidfile != "" {
+		defer delPidfile(pidfile)
+		err := setupPIDFile(pidfile)
+		if err != nil {
+			return err
+		}
+	}
 	exec := kexec.New()
 	_, err := config.InitConfig(ctx, exec, nil)
 	if err != nil {
@@ -164,15 +173,6 @@ func runOvnKube(ctx *cli.Context) error {
 	if err = util.SetExec(exec); err != nil {
 		logrus.Errorf("Failed to initialize exec helper: %v", err)
 		return err
-	}
-
-	pidfile := ctx.String("pidfile")
-	if pidfile != "" {
-		defer delPidfile(pidfile)
-		err = setupPIDFile(pidfile)
-		if err != nil {
-			return err
-		}
 	}
 
 	clientset, err := util.NewClientset(&config.Kubernetes)
@@ -189,7 +189,6 @@ func runOvnKube(ctx *cli.Context) error {
 
 	master := ctx.String("init-master")
 	node := ctx.String("init-node")
-	clusterController := ovncluster.NewClusterController(clientset, factory)
 
 	cleanupNode := ctx.String("cleanup-node")
 	if cleanupNode != "" {
@@ -197,14 +196,15 @@ func runOvnKube(ctx *cli.Context) error {
 			panic("Cannot specify cleanup-node together with 'init-node or 'init-master'.")
 		}
 
-		err = clusterController.CleanupClusterNode(cleanupNode)
-		if err != nil {
+		kube := &kube.Kube{KClient: clientset}
+		if err := ovncluster.CleanupClusterNode(cleanupNode, kube); err != nil {
 			logrus.Errorf(err.Error())
 			panic(err.Error())
 		}
 		return nil
 	}
 
+	clusterController := ovncluster.NewClusterController(clientset, factory)
 	if master != "" || node != "" {
 		if master != "" {
 			if runtime.GOOS == "windows" {

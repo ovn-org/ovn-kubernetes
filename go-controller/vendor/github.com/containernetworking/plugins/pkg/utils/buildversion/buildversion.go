@@ -1,4 +1,4 @@
-// Copyright 2015 CNI authors
+// Copyright 2019 CNI authors
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -12,16 +12,15 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-package ip
+// Buildversion is a destination for the linker trickery so we can auto
+// set the build-version
+package buildversion
 
-import (
-	"net"
+import "fmt"
 
-	"github.com/vishvananda/netlink"
-)
+// This is overridden in the linker script
+var BuildVersion = "version unknown"
 
-// AddDefaultRoute sets the default route on the given gateway.
-func AddDefaultRoute(gw net.IP, dev netlink.Link) error {
-	_, defNet, _ := net.ParseCIDR("0.0.0.0/0")
-	return AddRoute(defNet, gw, dev)
+func BuildString(pluginName string) string {
+	return fmt.Sprintf("CNI %s plugin %s", pluginName, BuildVersion)
 }
