@@ -146,21 +146,19 @@ const (
 	GatewayModeDisabled GatewayMode = ""
 	// GatewayModeShared indicates OVN shares a gateway interface with the node
 	GatewayModeShared GatewayMode = "shared"
-	// GatewayModeSpare indicates OVN claims a spare interfaface for the gateway
-	GatewayModeSpare GatewayMode = "spare"
 	// GatewayModeLocal indicates OVN creates a local NAT-ed interface for the gateway
 	GatewayModeLocal GatewayMode = "local"
 )
 
 // GatewayConfig holds node gateway-related parsed config file parameters and command-line overrides
 type GatewayConfig struct {
-	// Mode is the gateway mode; if may be either empty (disabled), "shared", "spare", or "local"
+	// Mode is the gateway mode; if may be either empty (disabled), "shared", or "local"
 	Mode GatewayMode `gcfg:"mode"`
-	// Interface is the network interface to use for the gateway in "shared" or "spare" mode
+	// Interface is the network interface to use for the gateway in "shared" mode
 	Interface string `gcfg:"interface"`
 	// NextHop is the gateway IP address of Interface; will be autodetected if not given
 	NextHop string `gcfg:"next-hop"`
-	// VLANID is the option VLAN tag to apply to gateway traffic for "shared" or "spare" modes
+	// VLANID is the option VLAN tag to apply to gateway traffic for "shared" mode
 	VLANID uint `gcfg:"vlan-id"`
 	// NodeportEnable sets whether to provide Kubernetes NodePort service or not
 	NodeportEnable bool `gcfg:"nodeport"`
@@ -220,8 +218,6 @@ var (
 	clusterSubnet string
 	// legacy init-gateways CLI option
 	initGateways bool
-	// legacy gateway-spare-interface CLI option
-	gatewaySpareInterface bool
 	// legacy gateway-local CLI option
 	gatewayLocal bool
 )
@@ -536,8 +532,8 @@ var OvnSBFlags = []cli.Flag{
 var OVNGatewayFlags = []cli.Flag{
 	cli.StringFlag{
 		Name: "gateway-mode",
-		Usage: "Sets the cluster gateway mode. One of \"shared\", \"spare\", " +
-			"or \"local\". If not given gateway functionality is disabled.",
+		Usage: "Sets the cluster gateway mode. One of \"shared\", " +
+			"or \"local\". If not given, gateway functionality is disabled.",
 	},
 	cli.StringFlag{
 		Name: "gateway-interface",
@@ -559,7 +555,7 @@ var OVNGatewayFlags = []cli.Flag{
 	cli.UintFlag{
 		Name: "gateway-vlanid",
 		Usage: "The VLAN on which the external network is available. " +
-			"Valid only for Shared or Spare Gateway interface mode.",
+			"Valid only for Shared Gateway interface mode.",
 		Destination: &cliConfig.Gateway.VLANID,
 	},
 	cli.BoolFlag{
@@ -573,11 +569,6 @@ var OVNGatewayFlags = []cli.Flag{
 		Name:        "init-gateways",
 		Usage:       "DEPRECATED; use --gateway-mode instead",
 		Destination: &initGateways,
-	},
-	cli.BoolFlag{
-		Name:        "gateway-spare-interface",
-		Usage:       "DEPRECATED; use --gateway-mode instead",
-		Destination: &gatewaySpareInterface,
 	},
 	cli.BoolFlag{
 		Name:        "gateway-local",
@@ -731,9 +722,7 @@ func buildGatewayConfig(ctx *cli.Context, cli, file *config) error {
 		// Handle legacy CLI options
 		if ctx.Bool("init-gateways") {
 			cli.Gateway.Mode = GatewayModeShared
-			if ctx.Bool("gateway-spare-interface") {
-				cli.Gateway.Mode = GatewayModeSpare
-			} else if ctx.Bool("gateway-local") {
+			if ctx.Bool("gateway-local") {
 				cli.Gateway.Mode = GatewayModeLocal
 			}
 		}
@@ -742,7 +731,7 @@ func buildGatewayConfig(ctx *cli.Context, cli, file *config) error {
 	overrideFields(&Gateway, &cli.Gateway)
 
 	if Gateway.Mode != GatewayModeDisabled {
-		validModes := []string{string(GatewayModeShared), string(GatewayModeSpare), string(GatewayModeLocal)}
+		validModes := []string{string(GatewayModeShared), string(GatewayModeLocal)}
 		var found bool
 		for _, mode := range validModes {
 			if string(Gateway.Mode) == mode {

@@ -34,9 +34,8 @@ with in kubernetes cluster.
 .TP
 \fB\--gateway-mode\fR string
 On nodes, creates a gateway for traffic to exit the cluster. Set to one of
-"shared", "spare", or "local". Shared mode shares the gateway interface with
-the OVN logical network. Spare mode takes over the gateway interface for use
-with the OVN logical network. Local mode creates a NAT-ed interface for use
+"shared" or "local". Shared mode shares the gateway interface with
+the OVN logical network. Local mode creates a NAT-ed interface for use
 with the OVN logical network.
 .TP
 \fB\--init-gateways\fR
@@ -46,8 +45,6 @@ DEPRECATED; use \fB\--gateway-mode\fR instead.
 The interface in nodes that will be the gateway interface.  If none
 specified, then the node's interface on which the default gateway is
 configured will be used as the gateway interface. Only useful with
-\fB\--gateway-spare-interface\fR
-DEPRECATED; use \fB\--gateway-mode\fR instead.
 \fB--init-gateways\fR.
 .TP
 \fB\--gateway-nexthop\fR string
@@ -55,11 +52,6 @@ The external default gateway which is used as a next hop by
 OVN gateway. This is many times just the default gateway
 of the node in question. If not specified, the default gateway
 configured in the node is used. Only useful with \fB--init-gateways\fR.
-.TP
-\fB\--gateway-spare-interface\fR
-If true, assumes that "gateway-interface" provided can be exclusively
-used for the OVN gateway.  When true, only OVNrelated traffic can flow
-through this interface.
 .TP
 \fB\--gateway-local\fR
 DEPRECATED; use \fB\--gateway-mode\fR instead.
