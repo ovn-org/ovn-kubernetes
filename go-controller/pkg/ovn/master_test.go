@@ -1,4 +1,4 @@
-package cluster
+package ovn
 
 import (
 	"fmt"
@@ -57,6 +57,7 @@ func defaultFakeExec(nodeSubnet, nodeName string) (*ovntest.FakeExec, string, st
 	})
 	fexec.AddFakeCmdsNoOutputNoError([]string{
 		"ovn-nbctl --timeout=15 -- --may-exist lsp-add join jtor-ovn_cluster_router -- set logical_switch_port jtor-ovn_cluster_router type=router options:router-port=rtoj-ovn_cluster_router addresses=\"" + joinLRPMAC + "\"",
+		"ovn-nbctl --timeout=15 --columns=_uuid list port_group",
 	})
 
 	// Node-related logical network stuff
@@ -126,12 +127,15 @@ var _ = Describe("Master Operations", func() {
 			Expect(err).NotTo(HaveOccurred())
 			defer f.Shutdown()
 
-			clusterController := NewClusterController(fakeClient, f)
+			clusterController := NewOvnController(fakeClient, f)
 			Expect(clusterController).NotTo(BeNil())
 			clusterController.TCPLoadBalancerUUID = tcpLBUUID
 			clusterController.UDPLoadBalancerUUID = udpLBUUID
 
 			err = clusterController.StartClusterMaster("master")
+			Expect(err).NotTo(HaveOccurred())
+
+			err = clusterController.WatchNodes()
 			Expect(err).NotTo(HaveOccurred())
 
 			Expect(fexec.CalledMatchesExpected()).To(BeTrue())
@@ -188,12 +192,15 @@ var _ = Describe("Master Operations", func() {
 			Expect(err).NotTo(HaveOccurred())
 			defer f.Shutdown()
 
-			clusterController := NewClusterController(fakeClient, f)
+			clusterController := NewOvnController(fakeClient, f)
 			Expect(clusterController).NotTo(BeNil())
 			clusterController.TCPLoadBalancerUUID = tcpLBUUID
 			clusterController.UDPLoadBalancerUUID = udpLBUUID
 
 			err = clusterController.StartClusterMaster("master")
+			Expect(err).NotTo(HaveOccurred())
+
+			err = clusterController.WatchNodes()
 			Expect(err).NotTo(HaveOccurred())
 
 			Expect(fexec.CalledMatchesExpected()).To(BeTrue())
@@ -312,7 +319,7 @@ subnet=%s
 			Expect(err).NotTo(HaveOccurred())
 			defer f.Shutdown()
 
-			clusterController := NewClusterController(fakeClient, f)
+			clusterController := NewOvnController(fakeClient, f)
 			Expect(clusterController).NotTo(BeNil())
 
 			// Initialize OVS/OVN connection methods
@@ -320,7 +327,7 @@ subnet=%s
 			Expect(err).NotTo(HaveOccurred())
 
 			// Let the real code run and ensure OVN database sync
-			err = clusterController.watchNodes()
+			err = clusterController.WatchNodes()
 			Expect(err).NotTo(HaveOccurred())
 
 			Expect(fexec.CalledMatchesExpected()).To(BeTrue())
