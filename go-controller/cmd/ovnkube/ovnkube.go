@@ -207,19 +207,19 @@ func runOvnKube(ctx *cli.Context) error {
 		ovncluster.StartMetricsServer(config.Kubernetes.MetricsBindAddress)
 	}
 
-	clusterController := ovncluster.NewClusterController(clientset, factory)
 	if master != "" || node != "" {
 		if master != "" {
 			if runtime.GOOS == "windows" {
 				panic("Windows is not supported as master node")
 			}
-			// run the cluster controller to init the master
-			err := clusterController.StartClusterMaster(master)
+			// run the master controller to init the master
+			ovnController := ovn.NewOvnController(clientset, factory)
+			err := ovnController.StartClusterMaster(master)
 			if err != nil {
 				logrus.Errorf(err.Error())
 				panic(err.Error())
 			}
-			ovnController := ovn.NewOvnController(clientset, factory)
+			// add watchers for relevant resources' events
 			if err := ovnController.Run(); err != nil {
 				logrus.Errorf(err.Error())
 				panic(err.Error())
@@ -230,7 +230,7 @@ func runOvnKube(ctx *cli.Context) error {
 			if config.Kubernetes.Token == "" {
 				panic("Cannot initialize node without service account 'token'. Please provide one with --k8s-token argument")
 			}
-
+			clusterController := ovncluster.NewClusterController(clientset, factory)
 			err := clusterController.StartClusterNode(node)
 			if err != nil {
 				logrus.Errorf(err.Error())
