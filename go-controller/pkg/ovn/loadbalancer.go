@@ -54,6 +54,7 @@ func (ovn *Controller) getDefaultGatewayLoadBalancer(protocol kapi.Protocol) str
 		"external_ids:"+externalIDKey+"="+gw)
 	if len(lb) != 0 {
 		ovn.loadbalancerGWCache[string(protocol)] = lb
+		ovn.defGatewayRouter = gw
 	}
 	return lb
 }

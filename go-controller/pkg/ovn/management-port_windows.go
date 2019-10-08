@@ -132,3 +132,6 @@ func CreateManagementPort(nodeName, localSubnet string, clusterSubnet []string) 
 
 	return nil
 }
+
+func DelMgtPortIptRules(nodeName string) {
+}

@@ -28,6 +28,7 @@ type Controller struct {
 	// For TCP and UDP type traffice, cache OVN load balancer that exists on the
 	// default gateway
 	loadbalancerGWCache map[string]string
+	defGatewayRouter    string
 
 	// A cache of all logical switches seen by the watcher
 	logicalSwitchCache map[string]bool
@@ -278,6 +279,12 @@ func (oc *Controller) WatchNodes() error {
 			delete(oc.logicalSwitchCache, node.Name)
 			oc.lsMutex.Unlock()
 			delete(gatewaysHandled, node.Name)
+			if oc.defGatewayRouter == "GR_"+node.Name {
+				delete(oc.loadbalancerGWCache, TCP)
+				delete(oc.loadbalancerGWCache, UDP)
+				oc.defGatewayRouter = ""
+				oc.handleExternalIPsLB()
+			}
 		},
 	}, nil)
 	return err

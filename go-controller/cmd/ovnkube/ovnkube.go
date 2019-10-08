@@ -18,9 +18,8 @@ import (
 	ovncluster "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/cluster"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/factory"
-	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/kube"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn"
-	util "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
 
 	kexec "k8s.io/utils/exec"
 )
@@ -196,8 +195,7 @@ func runOvnKube(ctx *cli.Context) error {
 			panic("Cannot specify cleanup-node together with 'init-node or 'init-master'.")
 		}
 
-		kube := &kube.Kube{KClient: clientset}
-		if err := ovncluster.CleanupClusterNode(cleanupNode, kube); err != nil {
+		if err := ovncluster.CleanupClusterNode(cleanupNode); err != nil {
 			logrus.Errorf(err.Error())
 			panic(err.Error())
 		}

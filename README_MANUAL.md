@@ -211,15 +211,6 @@ following line to /etc/default/openvswitch
 OPTIONS=--delete-transient-ports
 ```
 
-* If you have a spare interface that you want to exclusively use for OVN
-gateway on a node, you also need to pass the -gateway-spare-interface option.
-Foe e.g:
-
-```
--init-gateways -gateway-interface=enp0s9 -gateway-nexthop="$NEXTHOP" \
-    -gateway-spare-interface
-```
-
 For more control on the options to ovnkube, please read [config.md]
 
 ## Debugging
