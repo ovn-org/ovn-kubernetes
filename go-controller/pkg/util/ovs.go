@@ -104,9 +104,11 @@ var runner *execHelper
 // SetExec validates executable paths and saves the given exec interface
 // to be used for running various OVS and OVN utilites
 func SetExec(exec kexec.Interface) error {
-	var err error
+	err := SetExecWithoutOVS(exec)
+	if err != nil {
+		return err
+	}
 
-	runner = &execHelper{exec: exec}
 	runner.ofctlPath, err = exec.LookPath(ovsOfctlCommand)
 	if err != nil {
 		return err
@@ -144,6 +146,15 @@ func SetExec(exec kexec.Interface) error {
 		return err
 	}
 
+	return nil
+}
+
+// SetExecWithoutOVS validates executable paths excluding OVS/OVN binaries and
+// saves the given exec interface to be used for running various utilites
+func SetExecWithoutOVS(exec kexec.Interface) error {
+	var err error
+
+	runner = &execHelper{exec: exec}
 	if runtime.GOOS == windowsOS {
 		runner.powershellPath, err = exec.LookPath(powershellCommand)
 		if err != nil {
