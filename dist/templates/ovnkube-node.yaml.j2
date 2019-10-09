@@ -207,6 +207,11 @@ spec:
             configMapKeyRef:
               name: ovn-config
               key: k8s_apiserver
+        - name: OVN_MTU
+          valueFrom:
+            configMapKeyRef:
+              name: ovn-config
+              key: mtu
         - name: K8S_NODE
           valueFrom:
             fieldRef:
