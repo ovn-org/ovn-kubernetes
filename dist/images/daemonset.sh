@@ -18,6 +18,7 @@ OVN_GATEWAY_OPTS=""
 OVN_DB_VIP_IMAGE=""
 OVN_DB_VIP=""
 OVN_DB_REPLICAS=""
+OVN_MTU="1400"
 
 # Parse parameters given as arguments to this script.
 while [ "$1" != "" ]; do
@@ -53,6 +54,9 @@ while [ "$1" != "" ]; do
             ;;
         --db-vip)
             OVN_DB_VIP=$VALUE
+            ;;
+        --mtu)
+            OVN_MTU=$VALUE
             ;;
         *)
             echo "WARNING: unknown parameter \"$PARAM\""
@@ -162,13 +166,16 @@ k8s_apiserver=${OVN_K8S_APISERVER:-10.0.2.16:6443}
 net_cidr_repl="{{ net_cidr | default('10.128.0.0/14/23') }}"
 svc_cidr_repl="{{ svc_cidr | default('172.30.0.0/16') }}"
 k8s_apiserver_repl="{{ k8s_apiserver.stdout }}"
+mtu_repl="{{ mtu_value }}"
 
 echo "net_cidr: ${net_cidr}"
 echo "svc_cidr: ${svc_cidr}"
 echo "k8s_apiserver: ${k8s_apiserver}"
+echo "mtu: ${OVN_MTU}"
 
 sed "s,${net_cidr_repl},${net_cidr},
 s,${svc_cidr_repl},${svc_cidr},
+s,${mtu_repl},${OVN_MTU},
 s,${k8s_apiserver_repl},${k8s_apiserver}," ../templates/ovn-setup.yaml.j2 > ../yaml/ovn-setup.yaml
 
 exit 0
