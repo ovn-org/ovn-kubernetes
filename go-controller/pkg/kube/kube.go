@@ -18,6 +18,7 @@ import (
 type Interface interface {
 	SetAnnotationOnPod(pod *kapi.Pod, key, value string) error
 	SetAnnotationOnNode(node *kapi.Node, key, value string) error
+	UpdateNodeStatus(node *kapi.Node) error
 	GetAnnotationsOnPod(namespace, name string) (map[string]string, error)
 	GetPod(namespace, name string) (*kapi.Pod, error)
 	GetPods(namespace string) (*kapi.PodList, error)
@@ -54,6 +55,16 @@ func (k *Kube) SetAnnotationOnNode(node *kapi.Node, key, value string) error {
 	_, err := k.KClient.CoreV1().Nodes().Patch(node.Name, types.MergePatchType, []byte(patchData))
 	if err != nil {
 		logrus.Errorf("Error in setting annotation on node %s: %v", node.Name, err)
+	}
+	return err
+}
+
+// UpdateNodeStatus takes the node object and sets the provided update status
+func (k *Kube) UpdateNodeStatus(node *kapi.Node) error {
+	logrus.Infof("Updating status on node %s", node.Name)
+	_, err := k.KClient.CoreV1().Nodes().UpdateStatus(node)
+	if err != nil {
+		logrus.Errorf("Error in updating status on node %s: %v", node.Name, err)
 	}
 	return err
 }

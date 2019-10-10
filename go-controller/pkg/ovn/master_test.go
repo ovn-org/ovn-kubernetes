@@ -5,7 +5,7 @@ import (
 	"net"
 
 	"github.com/urfave/cli"
-	"k8s.io/api/core/v1"
+	v1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	kuberuntime "k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/client-go/kubernetes/fake"
@@ -298,12 +298,25 @@ subnet=%s
 				"ovn-nbctl --timeout=15 -- --may-exist lsp-add " + masterName + " stor-" + masterName + " -- set logical_switch_port stor-" + masterName + " type=router options:router-port=rtos-" + masterName + " addresses=\"" + lrpMAC + "\"",
 			})
 
-			masterNode := v1.Node{ObjectMeta: metav1.ObjectMeta{
-				Name: masterName,
-				Annotations: map[string]string{
-					OvnHostSubnet: masterSubnet,
+			masterNode := v1.Node{
+				ObjectMeta: metav1.ObjectMeta{
+					Name: masterName,
+					Annotations: map[string]string{
+						OvnHostSubnet: masterSubnet,
+					},
 				},
-			}}
+				Status: v1.NodeStatus{
+					Conditions: []v1.NodeCondition{
+						{
+							Type:               v1.NodeNetworkUnavailable,
+							Status:             v1.ConditionTrue,
+							Reason:             "NoRouteCreated",
+							Message:            "Node created without a route",
+							LastTransitionTime: metav1.Now(),
+						},
+					},
+				},
+			}
 			fakeClient := fake.NewSimpleClientset(&v1.NodeList{
 				Items: []v1.Node{masterNode},
 			})
@@ -331,6 +344,12 @@ subnet=%s
 			Expect(err).NotTo(HaveOccurred())
 
 			Expect(fexec.CalledMatchesExpected()).To(BeTrue())
+
+			node, err := fakeClient.CoreV1().Nodes().Get(masterNode.Name, metav1.GetOptions{})
+			Expect(err).NotTo(HaveOccurred())
+			Expect(len(node.Status.Conditions)).To(BeIdenticalTo(1))
+			Expect(node.Status.Conditions[0].Message).To(BeIdenticalTo("ovn-kube cleared kubelet-set NoRouteCreated"))
+
 			return nil
 		}
 
