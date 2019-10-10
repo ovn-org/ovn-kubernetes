@@ -6,6 +6,8 @@ import (
 	"strings"
 
 	kapi "k8s.io/api/core/v1"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/client-go/util/retry"
 
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
@@ -252,6 +254,8 @@ func (oc *Controller) ensureNodeLogicalNetwork(nodeName string, hostsubnet *net.
 }
 
 func (oc *Controller) addNode(node *kapi.Node) (err error) {
+	oc.clearInitialNodeNetworkUnavailableCondition(node)
+
 	hostsubnet, _ := parseNodeHostSubnet(node)
 	if hostsubnet != nil {
 		// Node already has subnet assigned; ensure its logical network is set up
@@ -349,6 +353,50 @@ func (oc *Controller) deleteNode(nodeName string, nodeSubnet *net.IPNet) error {
 	}
 
 	return nil
+}
+
+// OVN uses an overlay and doesn't need GCE Routes, we need to
+// clear the NetworkUnavailable condition that kubelet adds to initial node
+// status when using GCE (done here: https://github.com/kubernetes/kubernetes/blob/master/pkg/controller/cloud/node_controller.go#L237).
+// See discussion surrounding this here: https://github.com/kubernetes/kubernetes/pull/34398.
+// TODO: make upstream kubelet more flexible with overlays and GCE so this
+// condition doesn't get added for network plugins that don't want it, and then
+// we can remove this function.
+func (oc *Controller) clearInitialNodeNetworkUnavailableCondition(origNode *kapi.Node) {
+	// Informer cache should not be mutated, so get a copy of the object
+	cleared := false
+	resultErr := retry.RetryOnConflict(retry.DefaultBackoff, func() error {
+		var err error
+
+		oldNode, err := oc.kube.GetNode(origNode.Name)
+		if err != nil {
+			return err
+		}
+
+		node := oldNode.DeepCopy()
+
+		for i := range node.Status.Conditions {
+			if node.Status.Conditions[i].Type == kapi.NodeNetworkUnavailable {
+				condition := &node.Status.Conditions[i]
+				if condition.Status != kapi.ConditionFalse && condition.Reason == "NoRouteCreated" {
+					condition.Status = kapi.ConditionFalse
+					condition.Reason = "RouteCreated"
+					condition.Message = "ovn-kube cleared kubelet-set NoRouteCreated"
+					condition.LastTransitionTime = metav1.Now()
+					if err = oc.kube.UpdateNodeStatus(node); err == nil {
+						cleared = true
+					}
+				}
+				break
+			}
+		}
+		return err
+	})
+	if resultErr != nil {
+		logrus.Errorf("status update failed for local node %s: %v", origNode.Name, resultErr)
+	} else if cleared {
+		logrus.Infof("Cleared node NetworkUnavailable/NoRouteCreated condition for %s", origNode.Name)
+	}
 }
 
 func (oc *Controller) syncNodes(nodes []interface{}) {
