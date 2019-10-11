@@ -105,7 +105,7 @@ func (pr *PodRequest) cmdAdd() *PodResult {
 		return nil
 	}
 
-	if podInfo.IP == "" || podInfo.MAC == "" || podInfo.GW == "" {
+	if podInfo.IP == "" || podInfo.MAC == "" {
 		logrus.Errorf("failed in pod annotation key extract")
 		return nil
 	}
