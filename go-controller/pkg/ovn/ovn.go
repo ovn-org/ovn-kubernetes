@@ -15,6 +15,7 @@ import (
 	"github.com/sirupsen/logrus"
 	kapi "k8s.io/api/core/v1"
 	kapisnetworking "k8s.io/api/networking/v1"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/kubernetes/scheme"
@@ -110,6 +111,9 @@ type Controller struct {
 	serviceVIPToName map[ServiceVIPKey]types.NamespacedName
 
 	serviceVIPToNameLock sync.Mutex
+
+	// List of subnets to assign to hybrid overlay entities
+	hybridOverlayClusterSubnets []config.CIDRNetworkEntry
 }
 
 const (
@@ -122,38 +126,39 @@ const (
 
 // NewOvnController creates a new OVN controller for creating logical network
 // infrastructure and policy
-func NewOvnController(kubeClient kubernetes.Interface, wf *factory.WatchFactory) *Controller {
+func NewOvnController(kubeClient kubernetes.Interface, wf *factory.WatchFactory, hybridOverlayClusterSubnets []config.CIDRNetworkEntry) *Controller {
 	return &Controller{
-		kube:                     &kube.Kube{KClient: kubeClient},
-		watchFactory:             wf,
-		logicalSwitchCache:       make(map[string]bool),
-		logicalPortCache:         make(map[string]string),
-		logicalPortUUIDCache:     make(map[string]string),
-		namespaceAddressSet:      make(map[string]map[string]string),
-		namespacePolicies:        make(map[string]map[string]*namespacePolicy),
-		namespaceMutex:           make(map[string]*sync.Mutex),
-		namespaceMutexMutex:      sync.Mutex{},
-		lspIngressDenyCache:      make(map[string]int),
-		lspEgressDenyCache:       make(map[string]int),
-		lspMutex:                 &sync.Mutex{},
-		lsMutex:                  &sync.Mutex{},
-		gatewayCache:             make(map[string]string),
-		loadbalancerClusterCache: make(map[string]string),
-		loadbalancerGWCache:      make(map[string]string),
-		multicastEnabled:         make(map[string]bool),
-		serviceVIPToName:         make(map[ServiceVIPKey]types.NamespacedName),
-		serviceVIPToNameLock:     sync.Mutex{},
+		kube:                        &kube.Kube{KClient: kubeClient},
+		watchFactory:                wf,
+		logicalSwitchCache:          make(map[string]bool),
+		logicalPortCache:            make(map[string]string),
+		logicalPortUUIDCache:        make(map[string]string),
+		namespaceAddressSet:         make(map[string]map[string]string),
+		namespacePolicies:           make(map[string]map[string]*namespacePolicy),
+		namespaceMutex:              make(map[string]*sync.Mutex),
+		namespaceMutexMutex:         sync.Mutex{},
+		lspIngressDenyCache:         make(map[string]int),
+		lspEgressDenyCache:          make(map[string]int),
+		lspMutex:                    &sync.Mutex{},
+		lsMutex:                     &sync.Mutex{},
+		gatewayCache:                make(map[string]string),
+		loadbalancerClusterCache:    make(map[string]string),
+		loadbalancerGWCache:         make(map[string]string),
+		multicastEnabled:            make(map[string]bool),
+		serviceVIPToName:            make(map[ServiceVIPKey]types.NamespacedName),
+		serviceVIPToNameLock:        sync.Mutex{},
+		hybridOverlayClusterSubnets: hybridOverlayClusterSubnets,
 	}
 }
 
 // Run starts the actual watching.
-func (oc *Controller) Run(stopChan chan struct{}) error {
+func (oc *Controller) Run(nodeSelector *metav1.LabelSelector, stopChan chan struct{}) error {
 	startOvnUpdater()
 
 	// WatchNodes must be started first so that its initial Add will
 	// create all node logical switches, which other watches may depend on.
 	// https://github.com/ovn-org/ovn-kubernetes/pull/859
-	if err := oc.WatchNodes(); err != nil {
+	if err := oc.WatchNodes(nodeSelector); err != nil {
 		return err
 	}
 
@@ -453,9 +458,9 @@ func (oc *Controller) WatchNamespaces() error {
 
 // WatchNodes starts the watching of node resource and calls
 // back the appropriate handler logic
-func (oc *Controller) WatchNodes() error {
+func (oc *Controller) WatchNodes(nodeSelector *metav1.LabelSelector) error {
 	gatewaysHandled := make(map[string]bool)
-	_, err := oc.watchFactory.AddNodeHandler(cache.ResourceEventHandlerFuncs{
+	_, err := oc.watchFactory.AddFilteredNodeHandler(nodeSelector, cache.ResourceEventHandlerFuncs{
 		AddFunc: func(obj interface{}) {
 			node := obj.(*kapi.Node)
 			logrus.Debugf("Added event for Node %q", node.Name)
