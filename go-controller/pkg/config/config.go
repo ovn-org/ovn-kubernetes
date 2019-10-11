@@ -136,6 +136,7 @@ type KubernetesConfig struct {
 	Token              string `gcfg:"token"`
 	ServiceCIDR        string `gcfg:"service-cidr"`
 	OVNConfigNamespace string `gcfg:"ovn-config-namespace"`
+	MetricsBindAddress string `gcfg:"metrics-bind-address"`
 }
 
 // GatewayMode holds the node gateway mode
@@ -473,6 +474,11 @@ var K8sFlags = []cli.Flag{
 		Name:        "ovn-config-namespace",
 		Usage:       "specify a namespace which will contain services to config the OVN databases",
 		Destination: &cliConfig.Kubernetes.OVNConfigNamespace,
+	},
+	cli.StringFlag{
+		Name:        "metrics-bind-address",
+		Usage:       "The IP address and port for the metrics server to serve on (set to 0.0.0.0 for all IPv4 interfaces)",
+		Destination: &cliConfig.Kubernetes.MetricsBindAddress,
 	},
 }
 

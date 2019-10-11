@@ -675,7 +675,8 @@ ovn-master () {
     --nbctl-daemon-mode \
     --loglevel=${ovnkube_loglevel} \
     --pidfile /var/run/openvswitch/ovnkube-master.pid \
-    --logfile /var/log/ovn-kubernetes/ovnkube-master.log &
+    --logfile /var/log/ovn-kubernetes/ovnkube-master.log \
+    --metrics-bind-address "0.0.0.0:9102" &
   echo "=============== ovn-master ========== running"
   wait_for_event attempts=3 process_ready ovnkube-master
   sleep 1
@@ -750,7 +751,8 @@ ovn-node () {
       --loglevel=${ovnkube_loglevel} \
       --gateway-mode=${ovn_gateway_mode} ${ovn_gateway_opts}  \
       --pidfile /var/run/openvswitch/ovnkube.pid \
-      --logfile /var/log/ovn-kubernetes/ovnkube.log &
+      --logfile /var/log/ovn-kubernetes/ovnkube.log \
+      --metrics-bind-address "0.0.0.0:9101" &
 
   wait_for_event attempts=3 process_ready ovnkube
   setup_cni

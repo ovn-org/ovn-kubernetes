@@ -202,6 +202,11 @@ func runOvnKube(ctx *cli.Context) error {
 		return nil
 	}
 
+	// start the prometheus server
+	if config.Kubernetes.MetricsBindAddress != "" {
+		ovncluster.StartMetricsServer(config.Kubernetes.MetricsBindAddress)
+	}
+
 	clusterController := ovncluster.NewClusterController(clientset, factory)
 	if master != "" || node != "" {
 		if master != "" {
