@@ -43,8 +43,9 @@ type HAMasterController struct {
 
 // NewHAMasterController creates a new HA Master controller
 func NewHAMasterController(kubeClient kubernetes.Interface, wf *factory.WatchFactory,
-	nodeName string, stopChan chan struct{}) *HAMasterController {
-	ovnController := NewOvnController(kubeClient, wf)
+	nodeName string, stopChan chan struct{},
+	hybridOverlayClusterSubnets []config.CIDRNetworkEntry) *HAMasterController {
+	ovnController := NewOvnController(kubeClient, wf, hybridOverlayClusterSubnets)
 	return &HAMasterController{
 		kubeClient:      kubeClient,
 		ovnController:   ovnController,

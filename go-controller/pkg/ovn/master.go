@@ -85,7 +85,7 @@ func (oc *Controller) StartClusterMaster(masterNodeName string) error {
 		}
 	}
 	for _, node := range existingNodes.Items {
-		hostsubnet, _ := parseNodeHostSubnet(&node)
+		hostsubnet, _ := ParseNodeHostSubnet(&node)
 		if hostsubnet != nil {
 			err := oc.masterSubnetAllocator.MarkAllocatedNetwork(hostsubnet.String())
 			if err != nil {
@@ -295,7 +295,7 @@ func (oc *Controller) syncNodeManagementPort(node *kapi.Node, subnet *net.IPNet)
 	}
 
 	if subnet == nil {
-		subnet, err = parseNodeHostSubnet(node)
+		subnet, err = ParseNodeHostSubnet(node)
 		if err != nil {
 			return err
 		}
@@ -304,23 +304,19 @@ func (oc *Controller) syncNodeManagementPort(node *kapi.Node, subnet *net.IPNet)
 	_, portIP := util.GetNodeWellKnownAddresses(subnet)
 
 	// Create this node's management logical port on the node switch
-	var stdout, stderr string
-	if config.IPv6Mode {
-		stdout, stderr, err = util.RunOVNNbctl(
-			"--", "--may-exist", "lsp-add", node.Name, "k8s-"+node.Name,
-			"--", "lsp-set-addresses", "k8s-"+node.Name, macAddress+" "+portIP.IP.String())
-	} else {
-		stdout, stderr, err = util.RunOVNNbctl(
-			"--", "--may-exist", "lsp-add", node.Name, "k8s-"+node.Name,
-			"--", "lsp-set-addresses", "k8s-"+node.Name, macAddress+" "+portIP.IP.String(),
-			"--", "--if-exists", "remove", "logical_switch", node.Name, "other-config", "exclude_ips")
-	}
+	stdout, stderr, err := util.RunOVNNbctl(
+		"--", "--may-exist", "lsp-add", node.Name, "k8s-"+node.Name,
+		"--", "lsp-set-addresses", "k8s-"+node.Name, macAddress+" "+portIP.IP.String())
 	if err != nil {
 		logrus.Errorf("Failed to add logical port to switch, stdout: %q, stderr: %q, error: %v", stdout, stderr, err)
 		return err
 	}
 
 	if err := addAllowACLFromNode(node.Name, portIP.IP); err != nil {
+		return err
+	}
+
+	if err := util.UpdateNodeSwitchExcludeIPs(node.Name, subnet); err != nil {
 		return err
 	}
 
@@ -482,7 +478,7 @@ func (oc *Controller) syncGatewayLogicalNetwork(node *kapi.Node, l3GatewayConfig
 
 func addStaticRouteToHost(node *kapi.Node, nicIP string) error {
 	k8sClusterRouter := util.GetK8sClusterRouter()
-	subnet, err := parseNodeHostSubnet(node)
+	subnet, err := ParseNodeHostSubnet(node)
 	if err != nil {
 		return fmt.Errorf("failed to get interface IP address for %s (%v)",
 			util.GetK8sMgmtIntfName(node.Name), err)
@@ -499,7 +495,7 @@ func addStaticRouteToHost(node *kapi.Node, nicIP string) error {
 	return nil
 }
 
-func parseNodeHostSubnet(node *kapi.Node) (*net.IPNet, error) {
+func ParseNodeHostSubnet(node *kapi.Node) (*net.IPNet, error) {
 	sub, ok := node.Annotations[OvnNodeSubnets]
 	if ok {
 		nodeSubnets := make(map[string]string)
@@ -542,9 +538,6 @@ func parseNodeJoinSubnet(node *kapi.Node) (*net.IPNet, error) {
 }
 
 func (oc *Controller) ensureNodeLogicalNetwork(nodeName string, hostsubnet *net.IPNet) error {
-
-	// Get firstIP for gateway.  Skip the second address of the LogicalSwitch's
-	// subnet since we set it aside for the management port on that node.
 	firstIP, secondIP := util.GetNodeWellKnownAddresses(hostsubnet)
 	nodeLRPMac := util.IPAddrToHWAddr(firstIP.IP)
 	clusterRouter := util.GetK8sClusterRouter()
@@ -558,15 +551,35 @@ func (oc *Controller) ensureNodeLogicalNetwork(nodeName string, hostsubnet *net.
 	}
 
 	// Create a logical switch and set its subnet.
-	var stdout string
+	ocSubnet := "other-config:subnet=" + hostsubnet.String()
 	if config.IPv6Mode {
-		stdout, stderr, err = util.RunOVNNbctl("--", "--may-exist", "ls-add", nodeName,
-			"--", "set", "logical_switch", nodeName, "other-config:ipv6_prefix="+hostsubnet.IP.String())
-	} else {
-		stdout, stderr, err = util.RunOVNNbctl("--", "--may-exist", "ls-add", nodeName,
-			"--", "set", "logical_switch", nodeName, "other-config:subnet="+hostsubnet.String(),
-			"other-config:exclude_ips="+secondIP.IP.String())
+		ocSubnet = "other-config:ipv6_prefix=" + hostsubnet.IP.String()
 	}
+	args := []string{
+		"--", "--may-exist", "ls-add", nodeName,
+		"--", "set", "logical_switch", nodeName, ocSubnet,
+	}
+	if !config.IPv6Mode {
+		excludeIPs := "other-config:exclude_ips=" + secondIP.IP.String()
+
+		// If all cluster subnets are big enough (/24 or greater), exclude
+		// the hybrid overlay port IP (even if hybrid overlay is not enabled)
+		// to allow enabling hybrid overlay in a running cluster without
+		// disrupting nodes.
+		excludeHybridOverlayIP := true
+		for _, clusterEntry := range config.Default.ClusterSubnets {
+			if clusterEntry.HostSubnetLength > 24 {
+				excludeHybridOverlayIP = false
+				break
+			}
+		}
+		if excludeHybridOverlayIP {
+			thirdIP := util.NextIP(secondIP.IP)
+			excludeIPs += ".." + thirdIP.String()
+		}
+		args = append(args, excludeIPs)
+	}
+	stdout, stderr, err := util.RunOVNNbctl(args...)
 	if err != nil {
 		logrus.Errorf("Failed to create a logical switch %v, stdout: %q, stderr: %q, error: %v", nodeName, stdout, stderr, err)
 		return err
@@ -678,7 +691,7 @@ func (oc *Controller) addNodeAnnotations(node *kapi.Node, subnet string) error {
 func (oc *Controller) addNode(node *kapi.Node) (hostsubnet *net.IPNet, err error) {
 	oc.clearInitialNodeNetworkUnavailableCondition(node, nil)
 
-	hostsubnet, _ = parseNodeHostSubnet(node)
+	hostsubnet, _ = ParseNodeHostSubnet(node)
 	if hostsubnet != nil {
 		// Update the node's annotation to use the new annotation key and remove the
 		// old annotation key.
