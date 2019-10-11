@@ -18,6 +18,7 @@ import (
 	"github.com/urfave/cli"
 	"gopkg.in/fsnotify/fsnotify.v1"
 
+	hocontroller "github.com/ovn-org/ovn-kubernetes/go-controller/hybrid-overlay/pkg/controller"
 	ovncluster "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/cluster"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/factory"
@@ -99,6 +100,12 @@ func main() {
 	c.Flags = append(c.Flags, config.OvnSBFlags...)
 	c.Flags = append(c.Flags, config.OVNGatewayFlags...)
 	c.Flags = append(c.Flags, config.MasterHAFlags...)
+	c.Flags = append(c.Flags, hocontroller.GetHybridOverlayCLIFlags([]cli.Flag{
+		cli.BoolFlag{
+			Name:  "enable-hybrid-overlay",
+			Usage: "Enables hybrid overlay operation (requires --init-master and/or --init-node)",
+		}})...)
+
 	c.Action = func(c *cli.Context) error {
 		return runOvnKube(c)
 	}
@@ -216,6 +223,19 @@ func runOvnKube(ctx *cli.Context) error {
 		return fmt.Errorf("unable to setup configuration watch: %v", err)
 	}
 
+	enableHybridOverlay := ctx.Bool("enable-hybrid-overlay")
+	if enableHybridOverlay {
+		// Since the third address of every cluster subnet is reserved for
+		// the hybrid overlay, only allow enabling it for HostSubnets that
+		// are a /24 or larger.
+		for _, clusterEntry := range config.Default.ClusterSubnets {
+			if clusterEntry.HostSubnetLength > 24 {
+				return fmt.Errorf("hybrid overlay cannot be used with" +
+					" host subnet prefixes smaller than /24.")
+			}
+		}
+	}
+
 	if master != "" {
 		if runtime.GOOS == "windows" {
 			return fmt.Errorf("Windows is not supported as master node")
@@ -223,8 +243,16 @@ func runOvnKube(ctx *cli.Context) error {
 
 		ovn.RegisterMetrics()
 
+		var hybridOverlayClusterSubnets []config.CIDRNetworkEntry
+		if enableHybridOverlay {
+			hybridOverlayClusterSubnets, err = hocontroller.GetHybridOverlayClusterSubnets(ctx)
+			if err != nil {
+				return err
+			}
+		}
+
 		// run the HA master controller to init the master
-		ovnHAController := ovn.NewHAMasterController(clientset, factory, master, stopChan)
+		ovnHAController := ovn.NewHAMasterController(clientset, factory, master, stopChan, hybridOverlayClusterSubnets)
 		if err := ovnHAController.StartHAMasterController(); err != nil {
 			return err
 		}
@@ -237,6 +265,12 @@ func runOvnKube(ctx *cli.Context) error {
 
 		clusterController := ovncluster.NewClusterController(clientset, factory)
 		if err := clusterController.StartClusterNode(node); err != nil {
+			return err
+		}
+	}
+
+	if enableHybridOverlay {
+		if err := hocontroller.StartHybridOverlay(ctx, master != "", node, clientset, factory); err != nil {
 			return err
 		}
 	}

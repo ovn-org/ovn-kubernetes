@@ -8,7 +8,7 @@ setup_env
 
 cd "${OVN_KUBE_ROOT}"
 
-PKGS="${PKGS:-./cmd/... ./pkg/...}"
+PKGS="${PKGS:-./cmd/... ./pkg/... ./hybrid-overlay/...}"
 
 
 for pkg in $(go list -mod vendor ${PKGS}); do

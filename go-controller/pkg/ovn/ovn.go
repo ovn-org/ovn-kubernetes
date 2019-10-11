@@ -113,6 +113,9 @@ type Controller struct {
 	serviceVIPToName map[ServiceVIPKey]types.NamespacedName
 
 	serviceVIPToNameLock sync.Mutex
+
+	// List of subnets to assign to hybrid overlay entities
+	hybridOverlayClusterSubnets []config.CIDRNetworkEntry
 }
 
 const (
@@ -125,8 +128,8 @@ const (
 
 // NewOvnController creates a new OVN controller for creating logical network
 // infrastructure and policy
-func NewOvnController(kubeClient kubernetes.Interface, wf *factory.WatchFactory) *Controller {
-	return &Controller{
+func NewOvnController(kubeClient kubernetes.Interface, wf *factory.WatchFactory, hybridOverlayClusterSubnets []config.CIDRNetworkEntry) *Controller {
+	oc := &Controller{
 		kube:                     &kube.Kube{KClient: kubeClient},
 		watchFactory:             wf,
 		masterSubnetAllocator:    allocator.NewSubnetAllocator(),
@@ -149,6 +152,8 @@ func NewOvnController(kubeClient kubernetes.Interface, wf *factory.WatchFactory)
 		serviceVIPToName:         make(map[ServiceVIPKey]types.NamespacedName),
 		serviceVIPToNameLock:     sync.Mutex{},
 	}
+	oc.hybridOverlayClusterSubnets = hybridOverlayClusterSubnets
+	return oc
 }
 
 // Run starts the actual watching.
@@ -484,7 +489,7 @@ func (oc *Controller) syncNodeGateway(node *kapi.Node, subnet *net.IPNet) error 
 		return err
 	}
 	if subnet == nil {
-		subnet, _ = parseNodeHostSubnet(node)
+		subnet, _ = ParseNodeHostSubnet(node)
 	}
 	if l3GatewayConfig[OvnNodeGatewayMode] == string(config.GatewayModeDisabled) {
 		if err := util.GatewayCleanup(node.Name, subnet); err != nil {
@@ -577,7 +582,7 @@ func (oc *Controller) WatchNodes() error {
 			klog.V(5).Infof("Delete event for Node %q. Removing the node from "+
 				"various caches", node.Name)
 
-			nodeSubnet, _ := parseNodeHostSubnet(node)
+			nodeSubnet, _ := ParseNodeHostSubnet(node)
 			joinSubnet, _ := parseNodeJoinSubnet(node)
 			err := oc.deleteNode(node.Name, nodeSubnet, joinSubnet)
 			if err != nil {
