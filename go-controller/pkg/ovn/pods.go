@@ -180,6 +180,20 @@ func getRoutesGatewayIP(pod *kapi.Pod, gatewayIPnet *net.IPNet) ([]util.PodRoute
 	} else {
 		gatewayIP = gatewayIPnet.IP
 	}
+
+	if gatewayIP != nil && len(config.HybridOverlay.ClusterSubnets) > 0 {
+		// Add a route for each hybrid overlay subnet via the hybrid
+		// overlay port on the pod's logical switch.
+		second := util.NextIP(gatewayIP)
+		thirdIP := util.NextIP(second)
+		for _, subnet := range config.HybridOverlay.ClusterSubnets {
+			routes = append(routes, util.PodRoute{
+				Dest:    subnet.CIDR,
+				NextHop: thirdIP,
+			})
+		}
+	}
+
 	return routes, gatewayIP, nil
 }
 
