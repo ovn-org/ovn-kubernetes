@@ -50,39 +50,67 @@ func moveIfToNetns(ifname string, netns ns.NetNS) error {
 	return nil
 }
 
-func setupNetwork(link netlink.Link, macAddress, ipAddress, gatewayIP string) error {
-	hwAddr, err := net.ParseMAC(macAddress)
+func setupNetwork(link netlink.Link, ifInfo *PodInterfaceInfo) error {
+	hwAddr, err := net.ParseMAC(ifInfo.MAC)
 	if err != nil {
 		return fmt.Errorf("failed to parse mac address for %s: %v", link.Attrs().Name, err)
 	}
 	err = netlink.LinkSetHardwareAddr(link, hwAddr)
 	if err != nil {
-		return fmt.Errorf("failed to add mac address %s to %s: %v", macAddress, link.Attrs().Name, err)
+		return fmt.Errorf("failed to add mac address %s to %s: %v", ifInfo.MAC, link.Attrs().Name, err)
 	}
-	addr, err := netlink.ParseAddr(ipAddress)
+	addr, err := netlink.ParseAddr(ifInfo.IP)
 	if err != nil {
 		return err
 	}
 	err = netlink.AddrAdd(link, addr)
 	if err != nil {
-		return fmt.Errorf("failed to add IP addr %s to %s: %v", ipAddress, link.Attrs().Name, err)
+		return fmt.Errorf("failed to add IP addr %s to %s: %v", ifInfo.IP, link.Attrs().Name, err)
 	}
 
-	gw := net.ParseIP(gatewayIP)
-	if gw == nil {
-		return fmt.Errorf("parse ip of gateway failed")
+	var foundDefault bool
+	for _, route := range ifInfo.Routes {
+		_, ipnet, err := net.ParseCIDR(route.Dest)
+		if err != nil {
+			return fmt.Errorf("failed to parse pod route %q: %v", route.Dest, err)
+		}
+
+		ipaddr := net.ParseIP(route.NextHop)
+		if ipaddr == nil {
+			return fmt.Errorf("failed to parse pod route gateway %q: %v", route.NextHop, err)
+		}
+
+		if err := ip.AddRoute(ipnet, ipaddr, link); err != nil {
+			return fmt.Errorf("failed to add pod route %s via %s: %v", route.Dest, route.NextHop, err)
+		}
+
+		if ones, _ := ipnet.Mask.Size(); ones == 0 {
+			foundDefault = true
+		}
 	}
-	return ip.AddRoute(nil, gw, link)
+
+	if !foundDefault {
+		// If the pod routes did not include a default route,
+		// add a "default" default route via the pod's gateway, if
+		// one exists
+		if gw := net.ParseIP(ifInfo.GW); gw != nil {
+			if err := ip.AddRoute(nil, gw, link); err != nil {
+				return fmt.Errorf("failed to add gateway route: %v", err)
+			}
+		}
+	}
+
+	return nil
 }
 
-func setupInterface(netns ns.NetNS, containerID, ifName, macAddress, ipAddress, gatewayIP string, mtu int) (*current.Interface, *current.Interface, error) {
+func setupInterface(netns ns.NetNS, containerID, ifName string, ifInfo *PodInterfaceInfo) (*current.Interface, *current.Interface, error) {
 	hostIface := &current.Interface{}
 	contIface := &current.Interface{}
 
 	var oldHostVethName string
 	err := netns.Do(func(hostNS ns.NetNS) error {
 		// create the veth pair in the container and move host end into host netns
-		hostVeth, containerVeth, err := ip.SetupVeth(ifName, mtu, hostNS)
+		hostVeth, containerVeth, err := ip.SetupVeth(ifName, ifInfo.MTU, hostNS)
 		if err != nil {
 			return err
 		}
@@ -94,11 +122,11 @@ func setupInterface(netns ns.NetNS, containerID, ifName, macAddress, ipAddress, 
 			return fmt.Errorf("failed to lookup %s: %v", contIface.Name, err)
 		}
 
-		err = setupNetwork(link, macAddress, ipAddress, gatewayIP)
+		err = setupNetwork(link, ifInfo)
 		if err != nil {
 			return err
 		}
-		contIface.Mac = macAddress
+		contIface.Mac = ifInfo.MAC
 		contIface.Sandbox = netns.Path()
 
 		oldHostVethName = hostVeth.Name
@@ -119,7 +147,7 @@ func setupInterface(netns ns.NetNS, containerID, ifName, macAddress, ipAddress, 
 }
 
 // Setup sriov interface in the pod
-func setupSriovInterface(netns ns.NetNS, containerID, ifName, macAddress, ipAddress, gatewayIP string, mtu int, pciAddrs string) (*current.Interface, *current.Interface, error) {
+func setupSriovInterface(netns ns.NetNS, containerID, ifName string, ifInfo *PodInterfaceInfo, pciAddrs string) (*current.Interface, *current.Interface, error) {
 	hostIface := &current.Interface{}
 	contIface := &current.Interface{}
 
@@ -167,7 +195,7 @@ func setupSriovInterface(netns ns.NetNS, containerID, ifName, macAddress, ipAddr
 	hostIface.Mac = link.Attrs().HardwareAddr.String()
 
 	// 6. set MTU on VF representor
-	if err = netlink.LinkSetMTU(link, mtu); err != nil {
+	if err = netlink.LinkSetMTU(link, ifInfo.MTU); err != nil {
 		return nil, nil, fmt.Errorf("failed to set MTU on %s: %v", hostIface.Name, err)
 	}
 
@@ -187,7 +215,7 @@ func setupSriovInterface(netns ns.NetNS, containerID, ifName, macAddress, ipAddr
 		if err != nil {
 			return err
 		}
-		err = netlink.LinkSetMTU(link, mtu)
+		err = netlink.LinkSetMTU(link, ifInfo.MTU)
 		if err != nil {
 			return err
 		}
@@ -196,12 +224,12 @@ func setupSriovInterface(netns ns.NetNS, containerID, ifName, macAddress, ipAddr
 			return err
 		}
 
-		err = setupNetwork(link, macAddress, ipAddress, gatewayIP)
+		err = setupNetwork(link, ifInfo)
 		if err != nil {
 			return err
 		}
 
-		contIface.Mac = macAddress
+		contIface.Mac = ifInfo.MAC
 		contIface.Sandbox = netns.Path()
 
 		return nil
@@ -214,7 +242,7 @@ func setupSriovInterface(netns ns.NetNS, containerID, ifName, macAddress, ipAddr
 }
 
 // ConfigureInterface sets up the container interface
-func (pr *PodRequest) ConfigureInterface(namespace string, podName string, macAddress string, ipAddress string, gatewayIP string, mtu int, ingress, egress int64) ([]*current.Interface, error) {
+func (pr *PodRequest) ConfigureInterface(namespace string, podName string, ifInfo *PodInterfaceInfo) ([]*current.Interface, error) {
 	netns, err := ns.GetNS(pr.Netns)
 	if err != nil {
 		return nil, fmt.Errorf("failed to open netns %q: %v", pr.Netns, err)
@@ -226,11 +254,11 @@ func (pr *PodRequest) ConfigureInterface(namespace string, podName string, macAd
 	logrus.Debugf("CNI Conf %v", pr.CNIConf)
 	if pr.CNIConf.DeviceID != "" {
 		// SR-IOV Case
-		hostIface, contIface, err = setupSriovInterface(netns, pr.SandboxID, pr.IfName, macAddress, ipAddress, gatewayIP, mtu, pr.CNIConf.DeviceID)
+		hostIface, contIface, err = setupSriovInterface(netns, pr.SandboxID, pr.IfName, ifInfo, pr.CNIConf.DeviceID)
 
 	} else {
 		// General case
-		hostIface, contIface, err = setupInterface(netns, pr.SandboxID, pr.IfName, macAddress, ipAddress, gatewayIP, mtu)
+		hostIface, contIface, err = setupInterface(netns, pr.SandboxID, pr.IfName, ifInfo)
 	}
 	if err != nil {
 		return nil, err
@@ -241,9 +269,9 @@ func (pr *PodRequest) ConfigureInterface(namespace string, podName string, macAd
 	ovsArgs := []string{
 		"add-port", "br-int", hostIface.Name, "--", "set",
 		"interface", hostIface.Name,
-		fmt.Sprintf("external_ids:attached_mac=%s", macAddress),
+		fmt.Sprintf("external_ids:attached_mac=%s", ifInfo.MAC),
 		fmt.Sprintf("external_ids:iface-id=%s", ifaceID),
-		fmt.Sprintf("external_ids:ip_address=%s", ipAddress),
+		fmt.Sprintf("external_ids:ip_address=%s", ifInfo.IP),
 		fmt.Sprintf("external_ids:sandbox=%s", pr.SandboxID),
 	}
 
@@ -255,7 +283,7 @@ func (pr *PodRequest) ConfigureInterface(namespace string, podName string, macAd
 		return nil, err
 	}
 
-	if ingress > 0 || egress > 0 {
+	if ifInfo.Ingress > 0 || ifInfo.Egress > 0 {
 		l, err := netlink.LinkByName(hostIface.Name)
 		if err != nil {
 			return nil, fmt.Errorf("failed to find host veth interface %s: %v", hostIface.Name, err)
@@ -265,7 +293,7 @@ func (pr *PodRequest) ConfigureInterface(namespace string, podName string, macAd
 			return nil, fmt.Errorf("failed to set host veth txqlen: %v", err)
 		}
 
-		if err := setPodBandwidth(pr.SandboxID, hostIface.Name, ingress, egress); err != nil {
+		if err := setPodBandwidth(pr.SandboxID, hostIface.Name, ifInfo.Ingress, ifInfo.Egress); err != nil {
 			return nil, err
 		}
 	}

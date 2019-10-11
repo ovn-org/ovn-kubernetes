@@ -99,18 +99,13 @@ func (pr *PodRequest) cmdAdd() *PodResult {
 		return nil
 	}
 
-	var ovnAnnotatedMap map[string]string
-	err = json.Unmarshal([]byte(ovnAnnotation), &ovnAnnotatedMap)
+	podInfo, err := util.UnmarshalPodAnnotation(ovnAnnotation)
 	if err != nil {
-		logrus.Errorf("unmarshal ovn annotation failed")
+		logrus.Errorf("unmarshal ovn annotation failed: %v", err)
 		return nil
 	}
 
-	ipAddress := ovnAnnotatedMap["ip_address"]
-	macAddress := ovnAnnotatedMap["mac_address"]
-	gatewayIP := ovnAnnotatedMap["gateway_ip"]
-
-	if ipAddress == "" || macAddress == "" || gatewayIP == "" {
+	if podInfo.IP == "" || podInfo.MAC == "" {
 		logrus.Errorf("failed in pod annotation key extract")
 		return nil
 	}
@@ -121,12 +116,10 @@ func (pr *PodRequest) cmdAdd() *PodResult {
 		return nil
 	}
 	podInterfaceInfo := &PodInterfaceInfo{
-		MTU:        config.Default.MTU,
-		MacAddress: macAddress,
-		IPAddress:  ipAddress,
-		GatewayIP:  gatewayIP,
-		Ingress:    ingress,
-		Egress:     egress,
+		PodAnnotation: *podInfo,
+		MTU:           config.Default.MTU,
+		Ingress:       ingress,
+		Egress:        egress,
 	}
 	podResult := &PodResult{}
 	response := &Response{}
@@ -170,19 +163,16 @@ func HandleCNIRequest(request *PodRequest) ([]byte, error) {
 
 // getCNIResult get result from pod interface info.
 func (pr *PodRequest) getCNIResult(podInterfaceInfo *PodInterfaceInfo) *current.Result {
-	var interfacesArray []*current.Interface
-	ipAddress := podInterfaceInfo.IPAddress
-	gatewayIP := podInterfaceInfo.GatewayIP
-	interfacesArray, err := pr.ConfigureInterface(pr.PodNamespace, pr.PodName, podInterfaceInfo.MacAddress, ipAddress, gatewayIP, podInterfaceInfo.MTU, podInterfaceInfo.Ingress, podInterfaceInfo.Egress)
+	interfacesArray, err := pr.ConfigureInterface(pr.PodNamespace, pr.PodName, podInterfaceInfo)
 	if err != nil {
 		logrus.Errorf("Failed to configure interface in pod: %v", err)
 		return nil
 	}
 
 	// Build the result structure to pass back to the runtime
-	addr, addrNet, err := net.ParseCIDR(ipAddress)
+	addr, addrNet, err := net.ParseCIDR(podInterfaceInfo.IP)
 	if err != nil {
-		logrus.Errorf("Failed to parse IP address %q: %v", ipAddress, err)
+		logrus.Errorf("Failed to parse IP address %q: %v", podInterfaceInfo.IP, err)
 		return nil
 	}
 	ipVersion := "6"
@@ -196,7 +186,7 @@ func (pr *PodRequest) getCNIResult(podInterfaceInfo *PodInterfaceInfo) *current.
 				Version:   ipVersion,
 				Interface: current.Int(1),
 				Address:   net.IPNet{IP: addr, Mask: addrNet.Mask},
-				Gateway:   net.ParseIP(gatewayIP),
+				Gateway:   net.ParseIP(podInterfaceInfo.GW),
 			},
 		},
 	}
