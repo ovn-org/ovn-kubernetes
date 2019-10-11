@@ -39,12 +39,15 @@ type HAMasterController struct {
 	isLeader        bool
 	leaderElector   *leaderelection.LeaderElector
 	stopChan        chan struct{}
+	nodeSelector    *metav1.LabelSelector
 }
 
 // NewHAMasterController creates a new HA Master controller
 func NewHAMasterController(kubeClient kubernetes.Interface, wf *factory.WatchFactory,
-	nodeName string, stopChan chan struct{}) *HAMasterController {
-	ovnController := NewOvnController(kubeClient, wf)
+	nodeName string, stopChan chan struct{},
+	hybridOverlayClusterSubnets []config.CIDRNetworkEntry,
+	nodeSelector *metav1.LabelSelector) *HAMasterController {
+	ovnController := NewOvnController(kubeClient, wf, hybridOverlayClusterSubnets)
 	return &HAMasterController{
 		kubeClient:      kubeClient,
 		ovnController:   ovnController,
@@ -53,6 +56,7 @@ func NewHAMasterController(kubeClient kubernetes.Interface, wf *factory.WatchFac
 		isLeader:        false,
 		leaderElector:   nil,
 		stopChan:        stopChan,
+		nodeSelector:    nodeSelector,
 	}
 }
 
@@ -202,7 +206,7 @@ func (hacontroller *HAMasterController) ConfigureAsActive(masterNodeName string)
 		return err
 	}
 
-	return hacontroller.ovnController.Run(hacontroller.stopChan)
+	return hacontroller.ovnController.Run(hacontroller.nodeSelector, hacontroller.stopChan)
 }
 
 //updateOvnDbEndpoints Updates the ovnkube-db endpoints. Should be called
