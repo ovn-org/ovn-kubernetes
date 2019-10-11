@@ -111,14 +111,15 @@ func NewWatchFactory(c kubernetes.Interface, stopChan chan struct{}) (*WatchFact
 	wf.informers[namespaceType] = newInformer(namespaceType, wf.iFactory.Core().V1().Namespaces().Informer())
 	wf.informers[nodeType] = newInformer(nodeType, wf.iFactory.Core().V1().Nodes().Informer())
 
+	for _, informer := range wf.informers {
+		informer.inf.AddEventHandler(wf.newFederatedHandler(informer))
+	}
+
 	wf.iFactory.Start(stopChan)
-	res := wf.iFactory.WaitForCacheSync(stopChan)
-	for oType, synced := range res {
+	for oType, synced := range wf.iFactory.WaitForCacheSync(stopChan) {
 		if !synced {
 			return nil, fmt.Errorf("error in syncing cache for %v informer", oType)
 		}
-		informer := wf.informers[oType]
-		informer.inf.AddEventHandler(wf.newFederatedHandler(informer))
 	}
 
 	return wf, nil
