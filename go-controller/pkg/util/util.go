@@ -4,6 +4,11 @@ import (
 	"encoding/json"
 	"fmt"
 	"net"
+	"strings"
+	"sync"
+
+	houtil "github.com/ovn-org/ovn-kubernetes/go-controller/hybrid-overlay/pkg/util"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
 
 	"github.com/urfave/cli"
 	"k8s.io/klog"
@@ -45,6 +50,72 @@ func GetNodeChassisID() (string, error) {
 	}
 
 	return chassisID, nil
+}
+
+var updateNodeSwitchLock sync.Mutex
+
+// UpdateNodeSwitchExcludeIPs should be called after adding the management port
+// and after adding the hybrid overlay port, and ensures that each port's IP
+// is added to the logical switch's exclude_ips. This prevents ovn-northd log
+// spam about duplicate IP addresses.
+// See https://github.com/ovn-org/ovn-kubernetes/pull/779
+func UpdateNodeSwitchExcludeIPs(nodeName string, subnet *net.IPNet) error {
+	if config.IPv6Mode {
+		// We don't exclude any IPs in IPv6
+		return nil
+	}
+
+	updateNodeSwitchLock.Lock()
+	defer updateNodeSwitchLock.Unlock()
+
+	stdout, stderr, err := RunOVNNbctl("lsp-list", nodeName)
+	if err != nil {
+		return fmt.Errorf("failed to list logical switch %q ports: stderr: %q, error: %v", nodeName, stderr, err)
+	}
+
+	var haveManagementPort, haveHybridOverlayPort bool
+	lines := strings.Split(stdout, "\n")
+	for _, line := range lines {
+		line = strings.TrimSpace(line)
+		if strings.Contains(line, "(k8s-"+nodeName+")") {
+			haveManagementPort = true
+		} else if strings.Contains(line, "("+houtil.GetHybridOverlayPortName(nodeName)+")") {
+			haveHybridOverlayPort = true
+		}
+	}
+
+	_, managementPortCIDR := GetNodeWellKnownAddresses(subnet)
+	var excludeIPs string
+	if config.HybridOverlay.Enabled {
+		hybridOverlayIP := NextIP(managementPortCIDR.IP)
+		if haveHybridOverlayPort && haveManagementPort {
+			// no excluded IPs required
+		} else if !haveHybridOverlayPort && !haveManagementPort {
+			// exclude both
+			excludeIPs = managementPortCIDR.IP.String() + ".." + hybridOverlayIP.String()
+		} else if haveHybridOverlayPort {
+			// exclude management port IP
+			excludeIPs = managementPortCIDR.IP.String()
+		} else if haveManagementPort {
+			// exclude hybrid overlay port IP
+			excludeIPs = hybridOverlayIP.String()
+		}
+	} else if !haveManagementPort {
+		// exclude management port IP
+		excludeIPs = managementPortCIDR.IP.String()
+	}
+
+	args := []string{"--", "--if-exists", "remove", "logical_switch", nodeName, "other-config", "exclude_ips"}
+	if len(excludeIPs) > 0 {
+		args = []string{"--", "--if-exists", "set", "logical_switch", nodeName, "other-config:exclude_ips=" + excludeIPs}
+	}
+
+	_, stderr, err = RunOVNNbctl(args...)
+	if err != nil {
+		return fmt.Errorf("failed to set node %q switch exclude_ips, "+
+			"stderr: %q, error: %v", nodeName, stderr, err)
+	}
+	return nil
 }
 
 const (

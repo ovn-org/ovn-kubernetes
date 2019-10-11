@@ -8,7 +8,7 @@ setup_env
 
 cd "${OVN_KUBE_ROOT}"
 
-PKGS=$(go list -mod vendor -f '{{if len .TestGoFiles}} {{.ImportPath}} {{end}}' ${PKGS:-./cmd/... ./pkg/...} | xargs)
+PKGS=$(go list -mod vendor -f '{{if len .TestGoFiles}} {{.ImportPath}} {{end}}' ${PKGS:-./cmd/... ./pkg/... ./hybrid-overlay/...} | xargs)
 
 function testrun {
     local idx="${1}"

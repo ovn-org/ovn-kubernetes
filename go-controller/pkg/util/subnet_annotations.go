@@ -57,6 +57,12 @@ func SetNodeHostSubnetAnnotation(nodeAnnotator kube.Annotator, defaultSubnet str
 	return nodeAnnotator.Set(ovnNodeSubnets, annotation[ovnNodeSubnets])
 }
 
+// DeleteNodeHostSubnetAnnotation removes a "k8s.ovn.org/node-subnets" annotation
+// using a kube.Annotator
+func DeleteNodeHostSubnetAnnotation(nodeAnnotator kube.Annotator) {
+	nodeAnnotator.Delete(ovnNodeSubnets)
+}
+
 // ParseNodeHostSubnetAnnotation parses the "k8s.ovn.org/node-subnets" annotation
 // on a node and returns the "default" host subnet.
 func ParseNodeHostSubnetAnnotation(node *kapi.Node) (*net.IPNet, error) {

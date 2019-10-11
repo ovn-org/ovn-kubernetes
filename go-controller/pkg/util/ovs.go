@@ -510,7 +510,7 @@ func RawExec(cmdPath string, args ...string) (string, string, error) {
 
 // AddNormalActionOFFlow replaces flows in the bridge with a NORMAL action flow
 func AddNormalActionOFFlow(bridgeName string) (string, string, error) {
-	args := []string{"-O", "OpenFlow13", "replace-flows", bridgeName, "-"}
+	args := []string{"replace-flows", bridgeName, "-"}
 
 	stdin := &bytes.Buffer{}
 	stdin.Write([]byte("table=0,priority=0,actions=NORMAL\n"))

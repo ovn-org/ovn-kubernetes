@@ -20,10 +20,10 @@ GOPATH ?= $(shell go env GOPATH)
 
 
 all build:
-	hack/build-go.sh ovnkube ovn-k8s-cni-overlay ovn-kube-util
+	hack/build-go.sh cmd/ovnkube cmd/ovn-k8s-cni-overlay cmd/ovn-kube-util hybrid-overlay/cmd/hybrid-overlay-node
 
 windows:
-	WINDOWS_BUILD="yes" hack/build-go.sh ovnkube ovn-k8s-cni-overlay
+	WINDOWS_BUILD="yes" hack/build-go.sh cmd/ovnkube cmd/ovn-k8s-cni-overlay hybrid-overlay/cmd/hybrid-overlay-node
 
 check test:
 	hack/test-go.sh ${PKGS}
