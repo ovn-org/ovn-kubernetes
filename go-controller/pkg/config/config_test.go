@@ -545,10 +545,7 @@ var _ = Describe("Config Operations", func() {
 			Expect(OvnSouth.CACert).To(Equal("/client/cacert2"))
 			Expect(OvnSouth.Address).To(Equal("ssl:6.5.4.1:6652"))
 
-			Expect(Gateway.Mode).To(Equal(GatewayModeSpare))
-			Expect(Gateway.Interface).To(Equal("eth5"))
-			Expect(Gateway.NextHop).To(Equal("1.3.5.6"))
-			Expect(Gateway.VLANID).To(Equal(uint(100)))
+			Expect(Gateway.Mode).To(Equal(GatewayModeLocal))
 			Expect(Gateway.NodeportEnable).To(BeTrue())
 			return nil
 		}
@@ -575,10 +572,7 @@ var _ = Describe("Config Operations", func() {
 			"-sb-client-privkey=/client/privkey2",
 			"-sb-client-cert=/client/cert2",
 			"-sb-client-cacert=/client/cacert2",
-			"-gateway-mode=spare",
-			"-gateway-interface=eth5",
-			"-gateway-nexthop=1.3.5.6",
-			"-gateway-vlanid=100",
+			"-gateway-mode=local",
 			"-nodeport",
 		}
 		err = app.Run(cliArgs)
@@ -663,7 +657,7 @@ cluster-subnets=172.18.0.0/24
 
 	It("overrides config file and defaults with CLI legacy --init-gateways option", func() {
 		err := ioutil.WriteFile(cfgFile.Name(), []byte(`[gateway]
-mode=spare
+mode=local
 `), 0644)
 		Expect(err).NotTo(HaveOccurred())
 
@@ -679,30 +673,6 @@ mode=spare
 			app.Name,
 			"-config-file=" + cfgFile.Name(),
 			"-init-gateways",
-		}
-		err = app.Run(cliArgs)
-		Expect(err).NotTo(HaveOccurred())
-	})
-
-	It("overrides config file and defaults with CLI legacy --gateway-spare-interface option", func() {
-		err := ioutil.WriteFile(cfgFile.Name(), []byte(`[gateway]
-mode=shared
-`), 0644)
-		Expect(err).NotTo(HaveOccurred())
-
-		app.Action = func(ctx *cli.Context) error {
-			var cfgPath string
-			cfgPath, err = InitConfig(ctx, kexec.New(), nil)
-			Expect(err).NotTo(HaveOccurred())
-			Expect(cfgPath).To(Equal(cfgFile.Name()))
-			Expect(Gateway.Mode).To(Equal(GatewayModeSpare))
-			return nil
-		}
-		cliArgs := []string{
-			app.Name,
-			"-config-file=" + cfgFile.Name(),
-			"-init-gateways",
-			"-gateway-spare-interface",
 		}
 		err = app.Run(cliArgs)
 		Expect(err).NotTo(HaveOccurred())
@@ -735,7 +705,7 @@ mode=shared
 	It("returns an error when the gateway mode is invalid", func() {
 		app.Action = func(ctx *cli.Context) error {
 			_, err := InitConfig(ctx, kexec.New(), nil)
-			Expect(err).To(MatchError("invalid gateway mode \"adsfasdfaf\": expect one of shared,spare,local"))
+			Expect(err).To(MatchError("invalid gateway mode \"adsfasdfaf\": expect one of shared,local"))
 			return nil
 		}
 		cliArgs := []string{
