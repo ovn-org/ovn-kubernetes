@@ -113,8 +113,8 @@ func NewOvnController(kubeClient kubernetes.Interface, wf *factory.WatchFactory)
 
 // Run starts the actual watching.
 func (oc *Controller) Run() error {
-	for _, f := range []func() error{oc.WatchPods, oc.WatchServices, oc.WatchEndpoints, oc.WatchNamespaces,
-		oc.WatchNetworkPolicy, oc.WatchNodes} {
+	for _, f := range []func() error{oc.WatchNodes, oc.WatchPods, oc.WatchServices, oc.WatchEndpoints,
+		oc.WatchNamespaces, oc.WatchNetworkPolicy} {
 		if err := f(); err != nil {
 			return err
 		}
