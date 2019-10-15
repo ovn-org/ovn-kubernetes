@@ -13,6 +13,7 @@ import (
 	"github.com/coreos/go-iptables/iptables"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/factory"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
 	"github.com/sirupsen/logrus"
 
@@ -108,11 +109,11 @@ func localnetGatewayNAT(ipt util.IPTablesHelper, ifname, ip string) error {
 	return addIptRules(ipt, rules)
 }
 
-func initLocalnetGateway(nodeName string, clusterIPSubnet []string,
-	subnet string, wf *factory.WatchFactory) error {
+func initLocalnetGateway(nodeName string,
+	subnet string, wf *factory.WatchFactory) (map[string]string, error) {
 	ipt, err := util.GetIPTablesHelper(iptables.ProtocolIPv4)
 	if err != nil {
-		return fmt.Errorf("failed to initialize iptables: %v", err)
+		return nil, fmt.Errorf("failed to initialize iptables: %v", err)
 	}
 
 	// Create a localnet OVS bridge.
@@ -120,13 +121,13 @@ func initLocalnetGateway(nodeName string, clusterIPSubnet []string,
 	_, stderr, err := util.RunOVSVsctl("--may-exist", "add-br",
 		localnetBridgeName)
 	if err != nil {
-		return fmt.Errorf("Failed to create localnet bridge %s"+
+		return nil, fmt.Errorf("Failed to create localnet bridge %s"+
 			", stderr:%s (%v)", localnetBridgeName, stderr, err)
 	}
 
 	_, _, err = util.RunIP("link", "set", localnetBridgeName, "up")
 	if err != nil {
-		return fmt.Errorf("failed to up %s (%v)", localnetBridgeName, err)
+		return nil, fmt.Errorf("failed to up %s (%v)", localnetBridgeName, err)
 	}
 
 	// Create a localnet bridge nexthop
@@ -135,18 +136,18 @@ func initLocalnetGateway(nodeName string, clusterIPSubnet []string,
 		localnetBridgeName, localnetBridgeNextHop, "--", "set",
 		"interface", localnetBridgeNextHop, "type=internal")
 	if err != nil {
-		return fmt.Errorf("Failed to create localnet bridge next hop %s"+
+		return nil, fmt.Errorf("Failed to create localnet bridge next hop %s"+
 			", stderr:%s (%v)", localnetBridgeNextHop, stderr, err)
 	}
 	_, _, err = util.RunIP("link", "set", localnetBridgeNextHop, "up")
 	if err != nil {
-		return fmt.Errorf("failed to up %s (%v)", localnetBridgeNextHop, err)
+		return nil, fmt.Errorf("failed to up %s (%v)", localnetBridgeNextHop, err)
 	}
 
 	// Flush IPv4 address of localnetBridgeNextHop.
 	_, _, err = util.RunIP("addr", "flush", "dev", localnetBridgeNextHop)
 	if err != nil {
-		return fmt.Errorf("failed to flush ip address of %s (%v)",
+		return nil, fmt.Errorf("failed to flush ip address of %s (%v)",
 			localnetBridgeNextHop, err)
 	}
 
@@ -155,32 +156,35 @@ func initLocalnetGateway(nodeName string, clusterIPSubnet []string,
 		localnetGatewayNextHopSubnet,
 		"dev", localnetBridgeNextHop)
 	if err != nil {
-		return fmt.Errorf("failed to assign ip address to %s (%v)",
+		return nil, fmt.Errorf("failed to assign ip address to %s (%v)",
 			localnetBridgeNextHop, err)
 	}
 
 	ifaceID, macAddress, err := bridgedGatewayNodeSetup(nodeName, localnetBridgeName, localnetBridgeName, true)
 	if err != nil {
-		return fmt.Errorf("failed to set up shared interface gateway: %v", err)
+		return nil, fmt.Errorf("failed to set up shared interface gateway: %v", err)
 	}
 
-	err = util.GatewayInit(clusterIPSubnet, nodeName, ifaceID, localnetGatewayIP,
-		macAddress, localnetGatewayNextHop, subnet, true, nil)
-	if err != nil {
-		return fmt.Errorf("failed to localnet gateway: %v", err)
+	annotations := map[string]string{
+		ovn.OvnNodeGatewayMode:       string(config.Gateway.Mode),
+		ovn.OvnNodeGatewayVlanID:     string(config.Gateway.VLANID),
+		ovn.OvnNodeGatewayIfaceID:    ifaceID,
+		ovn.OvnNodeGatewayMacAddress: macAddress,
+		ovn.OvnNodeGatewayIP:         localnetGatewayIP,
+		ovn.OvnNodeGatewayNextHop:    localnetGatewayNextHop,
 	}
 
 	err = localnetGatewayNAT(ipt, localnetBridgeNextHop, localnetGatewayIP)
 	if err != nil {
-		return fmt.Errorf("Failed to add NAT rules for localnet gateway (%v)",
+		return nil, fmt.Errorf("Failed to add NAT rules for localnet gateway (%v)",
 			err)
 	}
 
 	if config.Gateway.NodeportEnable {
-		return localnetNodePortWatcher(ipt, wf)
+		err = localnetNodePortWatcher(ipt, wf)
 	}
 
-	return nil
+	return annotations, err
 }
 
 func localnetIptRules(svc *kapi.Service) []iptRule {
@@ -296,6 +300,7 @@ func localnetNodePortWatcher(ipt util.IPTablesHelper, wf *factory.WatchFactory) 
 	return err
 }
 
+// cleanupLocalnetGateway cleans up Localnet Gateway
 func cleanupLocalnetGateway() error {
 	// get bridgeName from ovn-bridge-mappings.
 	stdout, stderr, err := util.RunOVSVsctl("--if-exists", "get", "Open_vSwitch", ".",

@@ -7,6 +7,7 @@ import (
 
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/factory"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
 
 	"github.com/sirupsen/logrus"
@@ -253,31 +254,8 @@ func addDefaultConntrackRules(nodeName, gwBridge, gwIntf string) error {
 	return nil
 }
 
-func addStaticRouteToHost(nodeName, nicIP string) error {
-	k8sClusterRouter, err := util.GetK8sClusterRouter()
-	if err != nil {
-		return err
-	}
-
-	k8sMgmtIntfName := util.GetK8sMgmtIntfName(nodeName)
-	k8sMgmtIntfIPAddress, err := getIPv4Address(k8sMgmtIntfName)
-	if err != nil {
-		return fmt.Errorf("failed to get interface IP address for %s (%v)",
-			k8sMgmtIntfName, err)
-	}
-	prefix := strings.Split(nicIP, "/")[0] + "/32"
-	nexthop := strings.Split(k8sMgmtIntfIPAddress, "/")[0]
-	_, stderr, err := util.RunOVNNbctl("--may-exist", "lr-route-add", k8sClusterRouter, prefix, nexthop)
-	if err != nil {
-		return fmt.Errorf("failed to add static route '%s via %s' for host %q on %s "+
-			"stderr: %q, error: %v", nicIP, k8sMgmtIntfIPAddress, nodeName, k8sClusterRouter, stderr, err)
-	}
-	return nil
-}
-
 func initSharedGateway(
-	nodeName string, clusterIPSubnet []string, subnet,
-	gwNextHop, gwIntf string, wf *factory.WatchFactory) error {
+	nodeName string, subnet, gwNextHop, gwIntf string, wf *factory.WatchFactory) (map[string]string, postReadyFn, error) {
 	var bridgeName string
 	var uplinkName string
 	var brCreated bool
@@ -287,14 +265,14 @@ func initSharedGateway(
 		// This is an OVS bridge's internal port
 		uplinkName, err = util.GetNicName(bridgeName)
 		if err != nil {
-			return err
+			return nil, nil, err
 		}
 	} else if _, _, err := util.RunOVSVsctl("--", "br-exists", gwIntf); err != nil {
 		// This is not a OVS bridge. We need to create a OVS bridge
 		// and add cluster.GatewayIntf as a port of that bridge.
 		bridgeName, err = util.NicToBridge(gwIntf)
 		if err != nil {
-			return fmt.Errorf("failed to convert %s to OVS bridge: %v",
+			return nil, nil, fmt.Errorf("failed to convert %s to OVS bridge: %v",
 				gwIntf, err)
 		}
 		uplinkName = gwIntf
@@ -304,7 +282,7 @@ func initSharedGateway(
 		// gateway interface is an OVS bridge
 		uplinkName, err = getIntfName(gwIntf)
 		if err != nil {
-			return err
+			return nil, nil, err
 		}
 		bridgeName = gwIntf
 	}
@@ -313,51 +291,42 @@ func initSharedGateway(
 	// error out.
 	ipAddress, err := getIPv4Address(gwIntf)
 	if err != nil {
-		return fmt.Errorf("Failed to get interface details for %s (%v)",
+		return nil, nil, fmt.Errorf("Failed to get interface details for %s (%v)",
 			gwIntf, err)
 	}
 	if ipAddress == "" {
-		return fmt.Errorf("%s does not have a ipv4 address", gwIntf)
+		return nil, nil, fmt.Errorf("%s does not have a ipv4 address", gwIntf)
 	}
 
 	ifaceID, macAddress, err := bridgedGatewayNodeSetup(nodeName, bridgeName, gwIntf, brCreated)
 	if err != nil {
-		return fmt.Errorf("failed to set up shared interface gateway: %v", err)
+		return nil, nil, fmt.Errorf("failed to set up shared interface gateway: %v", err)
 	}
 
-	var lspArgs []string
-	if config.Gateway.VLANID > 0 {
-		lspArgs = []string{"--", "set", "logical_switch_port",
-			ifaceID, fmt.Sprintf("tag_request=%d", config.Gateway.VLANID)}
+	annotations := map[string]string{
+		ovn.OvnNodeGatewayMode:       string(config.Gateway.Mode),
+		ovn.OvnNodeGatewayVlanID:     string(config.Gateway.VLANID),
+		ovn.OvnNodeGatewayIfaceID:    ifaceID,
+		ovn.OvnNodeGatewayMacAddress: macAddress,
+		ovn.OvnNodeGatewayIP:         ipAddress,
+		ovn.OvnNodeGatewayNextHop:    gwNextHop,
 	}
 
-	err = util.GatewayInit(clusterIPSubnet, nodeName, ifaceID, ipAddress,
-		macAddress, gwNextHop, subnet, true, lspArgs)
-	if err != nil {
-		return fmt.Errorf("failed to init shared interface gateway: %v", err)
-	}
-
-	// Add static routes to OVN Cluster Router to enable pods on this Node to
-	// reach the host IP
-	err = addStaticRouteToHost(nodeName, ipAddress)
-	if err != nil {
-		return err
-	}
-
-	// Program cluster.GatewayIntf to let non-pod traffic to go to host
-	// stack
-	if err := addDefaultConntrackRules(nodeName, bridgeName, uplinkName); err != nil {
-		return err
-	}
-
-	if config.Gateway.NodeportEnable {
-		// Program cluster.GatewayIntf to let nodePort traffic to go to pods.
-		if err := nodePortWatcher(nodeName, bridgeName, uplinkName, wf); err != nil {
+	return annotations, func() error {
+		// Program cluster.GatewayIntf to let non-pod traffic to go to host
+		// stack
+		if err := addDefaultConntrackRules(nodeName, bridgeName, uplinkName); err != nil {
 			return err
 		}
-	}
 
-	return nil
+		if config.Gateway.NodeportEnable {
+			// Program cluster.GatewayIntf to let nodePort traffic to go to pods.
+			if err := nodePortWatcher(nodeName, bridgeName, uplinkName, wf); err != nil {
+				return err
+			}
+		}
+		return nil
+	}, nil
 }
 
 func cleanupSharedGateway() error {

@@ -23,6 +23,8 @@ import (
 	"k8s.io/client-go/tools/cache"
 )
 
+type postReadyFn func() error
+
 func isOVNControllerReady(name string) (bool, error) {
 	const runDir string = "/var/run/openvswitch/"
 
@@ -133,20 +135,39 @@ func (cluster *OvnClusterController) StartClusterNode(name string) error {
 		return err
 	}
 
-	type readyFunc func(string) (bool, error)
+	type readyFunc func(string, string) (bool, error)
 	var readyFuncs []readyFunc
+	var nodeAnnotations map[string]string
+	var postReady postReadyFn
 
+	// If gateway is enabled, get gateway annotations
+	if config.Gateway.Mode != config.GatewayModeDisabled {
+		nodeAnnotations, postReady, err = cluster.initGateway(node.Name, subnet.String())
+		if err != nil {
+			return err
+		}
+		readyFuncs = append(readyFuncs, GatewayReady)
+	}
+
+	// Get management port annotaitons
 	mgmtPortAnnotations, err := CreateManagementPort(node.Name, subnet, clusterSubnets)
 	if err != nil {
 		return err
 	}
 
 	readyFuncs = append(readyFuncs, ManagementPortReady)
+
+	// Combine mgmtPortAnnotations with any existing gwyAnnotations
+	for k, v := range mgmtPortAnnotations {
+		nodeAnnotations[k] = v
+	}
+
 	wg.Add(len(readyFuncs))
 
-	// Set management port macAddress as annotation
-	if err := cluster.Kube.SetAnnotationsOnNode(node, mgmtPortAnnotations); err != nil {
-		return fmt.Errorf("Failed to set node %s mgmt port macAddress annotation: %v", node.Name, mgmtPortAnnotations)
+	// Set node annotations
+	err = cluster.Kube.SetAnnotationsOnNode(node, nodeAnnotations)
+	if err != nil {
+		return fmt.Errorf("Failed to set node %s annotation: %v", node.Name, nodeAnnotations)
 	}
 
 	portName := "k8s-" + node.Name
@@ -156,7 +177,7 @@ func (cluster *OvnClusterController) StartClusterNode(name string) error {
 		go func(rf readyFunc) {
 			defer wg.Done()
 			err := wait.PollImmediate(500*time.Millisecond, 300*time.Second, func() (bool, error) {
-				return rf(portName)
+				return rf(node.Name, portName)
 			})
 			messages <- err
 		}(f)
@@ -172,8 +193,8 @@ func (cluster *OvnClusterController) StartClusterNode(name string) error {
 		}
 	}
 
-	if config.Gateway.Mode != config.GatewayModeDisabled {
-		err = cluster.initGateway(node.Name, clusterSubnets, subnet.String())
+	if postReady != nil {
+		err = postReady()
 		if err != nil {
 			return err
 		}
