@@ -178,4 +178,6 @@ s,${svc_cidr_repl},${svc_cidr},
 s,${mtu_repl},${OVN_MTU},
 s,${k8s_apiserver_repl},${k8s_apiserver}," ../templates/ovn-setup.yaml.j2 > ../yaml/ovn-setup.yaml
 
+cp ../templates/ovnkube-monitor.yaml.j2 ../yaml/ovnkube-monitor.yaml
+
 exit 0
