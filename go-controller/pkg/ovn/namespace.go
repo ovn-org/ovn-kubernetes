@@ -2,10 +2,11 @@ package ovn
 
 import (
 	"fmt"
-	"github.com/sirupsen/logrus"
-	kapi "k8s.io/api/core/v1"
 	"sync"
 	"time"
+
+	"github.com/sirupsen/logrus"
+	kapi "k8s.io/api/core/v1"
 )
 
 func (oc *Controller) syncNamespaces(namespaces []interface{}) {

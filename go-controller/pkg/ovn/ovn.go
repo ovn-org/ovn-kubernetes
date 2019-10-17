@@ -1,17 +1,18 @@
 package ovn
 
 import (
+	"reflect"
+	"sync"
+
+	"github.com/openshift/origin/pkg/util/netutils"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/factory"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/kube"
-	util "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
 	"github.com/sirupsen/logrus"
 	kapi "k8s.io/api/core/v1"
 	kapisnetworking "k8s.io/api/networking/v1"
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/tools/cache"
-	"reflect"
-	"sync"
 )
 
 // Controller structure is the object which holds the controls for starting
@@ -19,6 +20,11 @@ import (
 type Controller struct {
 	kube         kube.Interface
 	watchFactory *factory.WatchFactory
+
+	masterSubnetAllocatorList []*netutils.SubnetAllocator
+
+	TCPLoadBalancerUUID string
+	UDPLoadBalancerUUID string
 
 	gatewayCache map[string]string
 	// For TCP and UDP type traffic, cache OVN load-balancers used for the
@@ -105,16 +111,10 @@ func NewOvnController(kubeClient kubernetes.Interface, wf *factory.WatchFactory)
 	}
 }
 
-// Run starts the actual watching. Also initializes any local structures needed.
+// Run starts the actual watching.
 func (oc *Controller) Run() error {
-	_, _, err := util.RunOVNNbctl("--columns=_uuid", "list",
-		"port_group")
-	if err == nil {
-		oc.portGroupSupport = true
-	}
-
-	for _, f := range []func() error{oc.WatchPods, oc.WatchServices, oc.WatchEndpoints, oc.WatchNamespaces,
-		oc.WatchNetworkPolicy, oc.WatchNodes} {
+	for _, f := range []func() error{oc.WatchNodes, oc.WatchPods, oc.WatchServices, oc.WatchEndpoints,
+		oc.WatchNamespaces, oc.WatchNetworkPolicy} {
 		if err := f(); err != nil {
 			return err
 		}
@@ -254,10 +254,15 @@ func (oc *Controller) WatchNodes() error {
 	gatewaysHandled := make(map[string]bool)
 	_, err := oc.watchFactory.AddNodeHandler(cache.ResourceEventHandlerFuncs{
 		AddFunc: func(obj interface{}) {
+			node := obj.(*kapi.Node)
+			logrus.Debugf("Added event for Node %q", node.Name)
+			err := oc.addNode(node)
+			if err != nil {
+				logrus.Errorf("error creating subnet for node %s: %v", node.Name, err)
+			}
 			if !config.Gateway.NodeportEnable {
 				return
 			}
-			node := obj.(*kapi.Node)
 			gatewaysHandled[node.Name] = oc.handleNodePortLB(node)
 		},
 		UpdateFunc: func(old, new interface{}) {
@@ -274,6 +279,11 @@ func (oc *Controller) WatchNodes() error {
 			logrus.Debugf("Delete event for Node %q. Removing the node from "+
 				"various caches", node.Name)
 
+			nodeSubnet, _ := parseNodeHostSubnet(node)
+			err := oc.deleteNode(node.Name, nodeSubnet)
+			if err != nil {
+				logrus.Error(err)
+			}
 			oc.lsMutex.Lock()
 			delete(oc.gatewayCache, node.Name)
 			delete(oc.logicalSwitchCache, node.Name)
@@ -286,6 +296,6 @@ func (oc *Controller) WatchNodes() error {
 				oc.handleExternalIPsLB()
 			}
 		},
-	}, nil)
+	}, oc.syncNodes)
 	return err
 }

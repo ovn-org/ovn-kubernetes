@@ -3,11 +3,12 @@ package ovn
 import (
 	"encoding/json"
 	"fmt"
-	util "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
-	"github.com/sirupsen/logrus"
 	"hash/fnv"
 	"strconv"
 	"strings"
+
+	util "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
+	"github.com/sirupsen/logrus"
 )
 
 // hash the provided input to make it a valid addressSet or portGroup name.

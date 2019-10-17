@@ -22,6 +22,7 @@ spec:
     metadata:
       labels:
         app: ovnkube-node
+        name: ovnkube-node
         component: network
         type: infra
         openshift.io/component: network
@@ -207,6 +208,11 @@ spec:
             configMapKeyRef:
               name: ovn-config
               key: k8s_apiserver
+        - name: OVN_MTU
+          valueFrom:
+            configMapKeyRef:
+              name: ovn-config
+              key: mtu
         - name: K8S_NODE
           valueFrom:
             fieldRef:

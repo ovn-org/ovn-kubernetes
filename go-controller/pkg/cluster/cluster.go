@@ -14,20 +14,9 @@ import (
 
 // OvnClusterController is the object holder for utilities meant for cluster management
 type OvnClusterController struct {
-	Kube                      kube.Interface
-	watchFactory              *factory.WatchFactory
-	masterSubnetAllocatorList []*netutils.SubnetAllocator
-
-	TCPLoadBalancerUUID string
-	UDPLoadBalancerUUID string
+	Kube         kube.Interface
+	watchFactory *factory.WatchFactory
 }
-
-const (
-	// OvnHostSubnet is the constant string representing the annotation key
-	OvnHostSubnet = "ovn_host_subnet"
-	// OvnClusterRouter is the name of the distributed router
-	OvnClusterRouter = "ovn_cluster_router"
-)
 
 // NewClusterController creates a new controller for IP subnet allocation to
 // a given resource type (either Namespace or Node)
@@ -83,16 +72,6 @@ func setupOVNNode(nodeName string) error {
 		)
 		if errSet != nil {
 			return fmt.Errorf("error setting OVS encap-port: %v\n  %q", errSet, stderr)
-		}
-	}
-	return nil
-}
-
-func setupOVNMaster(nodeName string) error {
-	// Configure both server and client of OVN databases, since master uses both
-	for _, auth := range []config.OvnAuthConfig{config.OvnNorth, config.OvnSouth} {
-		if err := auth.SetDBAuth(); err != nil {
-			return err
 		}
 	}
 	return nil
