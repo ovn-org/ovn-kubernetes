@@ -101,7 +101,13 @@ func NewWithProtocol(proto Protocol) (*IPTables, error) {
 		return nil, err
 	}
 	vstring, err := getIptablesVersionString(path)
+	if err != nil {
+		return nil, fmt.Errorf("could not get iptables version: %v", err)
+	}
 	v1, v2, v3, mode, err := extractIptablesVersion(vstring)
+	if err != nil {
+		return nil, fmt.Errorf("failed to extract iptables version from [%s]: %v", vstring, err)
+	}
 
 	checkPresent, waitPresent, randomFullyPresent := getIptablesCommandSupport(v1, v2, v3)
 
@@ -348,18 +354,6 @@ func (ipt *IPTables) executeList(args []string) ([]string, error) {
 		rules = rules[:len(rules)-1]
 	}
 
-	// nftables mode doesn't return an error code when listing a non-existent
-	// chain. Patch that up.
-	if len(rules) == 0 && ipt.mode == "nf_tables" {
-		v := 1
-		return nil, &Error{
-			cmd:        exec.Cmd{Args: args},
-			msg:        fmt.Sprintf("%s: No chain/target/match by that name.\n", getIptablesCommand(ipt.proto)),
-			proto:      ipt.proto,
-			exitStatus: &v,
-		}
-	}
-
 	for i, rule := range rules {
 		rules[i] = filterRuleOutput(rule)
 	}
@@ -373,17 +367,12 @@ func (ipt *IPTables) NewChain(table, chain string) error {
 	return ipt.run("-t", table, "-N", chain)
 }
 
+const existsErr = 1
+
 // ClearChain flushed (deletes all rules) in the specified table/chain.
 // If the chain does not exist, a new one will be created
 func (ipt *IPTables) ClearChain(table, chain string) error {
 	err := ipt.NewChain(table, chain)
-
-	// the exit code for "this table already exists" is different for
-	// different iptables modes
-	existsErr := 1
-	if ipt.mode == "nf_tables" {
-		existsErr = 4
-	}
 
 	eerr, eok := err.(*Error)
 	switch {
@@ -442,6 +431,7 @@ func (ipt *IPTables) runWithOutput(args []string, stdout io.Writer) error {
 		}
 		ul, err := fmu.tryLock()
 		if err != nil {
+			syscall.Close(fmu.fd)
 			return err
 		}
 		defer ul.Unlock()
