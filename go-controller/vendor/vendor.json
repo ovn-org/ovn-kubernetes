@@ -197,10 +197,12 @@
 			"versionExact": "v0.8.2"
 		},
 		{
-			"checksumSHA1": "PyPZHCviY7udHpG8gXG2YnROH6U=",
+			"checksumSHA1": "+jazgjXPAJF6cMkd+5AoSPW4lBo=",
 			"path": "github.com/coreos/go-iptables/iptables",
-			"revision": "2ed0620363738459bccd28becb1f22e88ffb379a",
-			"revisionTime": "2019-05-29T11:33:58Z"
+			"revision": "af017ce15ce0adc4beab89d270abfeeb4d262cf1",
+			"revisionTime": "2019-09-17T14:26:20Z",
+			"version": "=v0.4.3",
+			"versionExact": "v0.4.3"
 		},
 		{
 			"checksumSHA1": "CSPbwbyzqA6sfORicn4HFtIhF/c=",
