@@ -2,6 +2,7 @@ package kube
 
 import (
 	"fmt"
+	"strings"
 
 	"github.com/sirupsen/logrus"
 
@@ -17,6 +18,7 @@ import (
 type Interface interface {
 	SetAnnotationOnPod(pod *kapi.Pod, key, value string) error
 	SetAnnotationOnNode(node *kapi.Node, key, value string) error
+	UpdateNodeStatus(node *kapi.Node) error
 	GetAnnotationsOnPod(namespace, name string) (map[string]string, error)
 	GetPod(namespace, name string) (*kapi.Pod, error)
 	GetPods(namespace string) (*kapi.PodList, error)
@@ -36,6 +38,8 @@ type Kube struct {
 // SetAnnotationOnPod takes the pod object and key/value string pair to set it as an annotation
 func (k *Kube) SetAnnotationOnPod(pod *kapi.Pod, key, value string) error {
 	logrus.Infof("Setting annotations %s=%s on pod %s", key, value, pod.Name)
+	// escape double quotes in the annotation value so it can be sent as a JSON patch
+	value = strings.Replace(value, "\"", "\\\"", -1)
 	patchData := fmt.Sprintf(`{"metadata":{"annotations":{"%s":"%s"}}}`, key, value)
 	_, err := k.KClient.CoreV1().Pods(pod.Namespace).Patch(pod.Name, types.MergePatchType, []byte(patchData))
 	if err != nil {
@@ -51,6 +55,16 @@ func (k *Kube) SetAnnotationOnNode(node *kapi.Node, key, value string) error {
 	_, err := k.KClient.CoreV1().Nodes().Patch(node.Name, types.MergePatchType, []byte(patchData))
 	if err != nil {
 		logrus.Errorf("Error in setting annotation on node %s: %v", node.Name, err)
+	}
+	return err
+}
+
+// UpdateNodeStatus takes the node object and sets the provided update status
+func (k *Kube) UpdateNodeStatus(node *kapi.Node) error {
+	logrus.Infof("Updating status on node %s", node.Name)
+	_, err := k.KClient.CoreV1().Nodes().UpdateStatus(node)
+	if err != nil {
+		logrus.Errorf("Error in updating status on node %s: %v", node.Name, err)
 	}
 	return err
 }

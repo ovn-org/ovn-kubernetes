@@ -113,6 +113,7 @@ ovn_gateway_opts=${OVN_GATEWAY_OPTS:-""}
 
 net_cidr=${OVN_NET_CIDR:-10.128.0.0/14/23}
 svc_cidr=${OVN_SVC_CIDR:-172.30.0.0/16}
+mtu=${OVN_MTU:-1400}
 
 ovn_kubernetes_namespace=${OVN_KUBERNETES_NAMESPACE:-ovn-kubernetes}
 
@@ -674,7 +675,8 @@ ovn-master () {
     --nbctl-daemon-mode \
     --loglevel=${ovnkube_loglevel} \
     --pidfile /var/run/openvswitch/ovnkube-master.pid \
-    --logfile /var/log/ovn-kubernetes/ovnkube-master.log &
+    --logfile /var/log/ovn-kubernetes/ovnkube-master.log \
+    --metrics-bind-address "0.0.0.0:9102" &
   echo "=============== ovn-master ========== running"
   wait_for_event attempts=3 process_ready ovnkube-master
   sleep 1
@@ -745,10 +747,12 @@ ovn-node () {
       --cluster-subnets ${net_cidr} --k8s-service-cidr=${svc_cidr} \
       --nb-address=${ovn_nbdb} --sb-address=${ovn_sbdb} \
       --nodeport \
+      --mtu=${mtu} \
       --loglevel=${ovnkube_loglevel} \
       --gateway-mode=${ovn_gateway_mode} ${ovn_gateway_opts}  \
       --pidfile /var/run/openvswitch/ovnkube.pid \
-      --logfile /var/log/ovn-kubernetes/ovnkube.log &
+      --logfile /var/log/ovn-kubernetes/ovnkube.log \
+      --metrics-bind-address "0.0.0.0:9101" &
 
   wait_for_event attempts=3 process_ready ovnkube
   setup_cni

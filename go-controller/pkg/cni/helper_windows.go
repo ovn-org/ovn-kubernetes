@@ -109,13 +109,13 @@ func deleteHNSEndpoint(endpointName string) error {
 // The fact that CNI add should be idempotent on Windows is stated here:
 // https://github.com/kubernetes/kubernetes/blob/master/pkg/kubelet/network/cni/cni_windows.go#L38
 // TODO: add proper MTU config (GetCurrentThreadId/SetCurrentThreadId) or via OVS properties
-func (pr *PodRequest) ConfigureInterface(namespace string, podName string, macAddress string, ipAddress string, gatewayIP string, mtu int, ingress, egress int64) ([]*current.Interface, error) {
+func (pr *PodRequest) ConfigureInterface(namespace string, podName string, ifInfo *PodInterfaceInfo) ([]*current.Interface, error) {
 	conf := pr.CNIConf
 
 	if conf.DeviceID != "" {
 		return nil, fmt.Errorf("failure OVS-Offload is not supported in Windows")
 	}
-	ipAddr, ipNet, err := net.ParseCIDR(ipAddress)
+	ipAddr, ipNet, err := net.ParseCIDR(ifInfo.IP)
 	if err != nil {
 		return nil, err
 	}
@@ -137,7 +137,7 @@ func (pr *PodRequest) ConfigureInterface(namespace string, podName string, macAd
 	}()
 
 	var hnsNetworkId string
-	hnsNetworkId, err = getHNSIdFromConfigOrByGatewayIP(gatewayIP)
+	hnsNetworkId, err = getHNSIdFromConfigOrByGatewayIP(ifInfo.GW)
 	if err != nil {
 		logrus.Infof("Error when detecting the HNS Network Id: %q", err)
 		return nil, err
@@ -151,7 +151,7 @@ func (pr *PodRequest) ConfigureInterface(namespace string, podName string, macAd
 		logrus.Infof("HNS endpoint %q does not exist", endpointName)
 
 		// HNSEndpoint requires the xx-xx-xx-xx-xx-xx format for the MacAddress field
-		macAddressIpFormat := strings.Replace(macAddress, ":", "-", -1)
+		macAddressIpFormat := strings.Replace(ifInfo.MAC, ":", "-", -1)
 
 		hnsEndpoint := &hcsshim.HNSEndpoint{
 			Name:           endpointName,
@@ -194,9 +194,9 @@ func (pr *PodRequest) ConfigureInterface(namespace string, podName string, macAd
 		"--may-exist", "add-port", "br-int", endpointName, "--", "set",
 		"interface", endpointName, "type=internal", "--", "set",
 		"interface", endpointName,
-		fmt.Sprintf("external_ids:attached_mac=%s", macAddress),
+		fmt.Sprintf("external_ids:attached_mac=%s", ifInfo.MAC),
 		fmt.Sprintf("external_ids:iface-id=%s", ifaceID),
-		fmt.Sprintf("external_ids:ip_address=%s", ipAddress),
+		fmt.Sprintf("external_ids:ip_address=%s", ifInfo.IP),
 	}
 	var out []byte
 	out, err = exec.Command("ovs-vsctl", ovsArgs...).CombinedOutput()
@@ -208,7 +208,7 @@ func (pr *PodRequest) ConfigureInterface(namespace string, podName string, macAd
 		"Set-NetIPInterface",
 		"-IncludeAllCompartments",
 		fmt.Sprintf("-InterfaceAlias \"vEthernet (%s)\"", ifaceID),
-		fmt.Sprintf("-NlMtuBytes %d", mtu),
+		fmt.Sprintf("-NlMtuBytes %d", ifInfo.MTU),
 	}
 
 	out, err = exec.Command("powershell", mtuArgs...).CombinedOutput()
