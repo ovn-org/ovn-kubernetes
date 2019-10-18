@@ -23,7 +23,7 @@ ENV PYTHONDONTWRITEBYTECODE yes
 COPY kubernetes.repo /etc/yum.repos.d/kubernetes.repo
 RUN INSTALL_PKGS=" \
 	PyYAML bind-utils procps-ng openssl numactl-libs firewalld-filesystem \
-	libpcap kubernetes-client \
+	libpcap kubectl \
 	iptables iproute strace socat \
 	unbound-libs \
         " && \
