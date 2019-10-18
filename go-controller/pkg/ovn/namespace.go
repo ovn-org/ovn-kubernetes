@@ -50,12 +50,11 @@ func (oc *Controller) waitForNamespaceEvent(namespace string) error {
 }
 
 func (oc *Controller) addPodToNamespaceAddressSet(ns string, ip net.IP) {
-	if oc.namespacePolicies[ns] == nil {
+	mutex := oc.getNamespaceLock(ns)
+	if mutex == nil {
 		return
 	}
-
-	oc.namespaceMutex[ns].Lock()
-	defer oc.namespaceMutex[ns].Unlock()
+	defer mutex.Unlock()
 
 	// If pod has already been added, nothing to do.
 	address := ip.String()
@@ -73,12 +72,15 @@ func (oc *Controller) addPodToNamespaceAddressSet(ns string, ip net.IP) {
 }
 
 func (oc *Controller) deletePodFromNamespaceAddressSet(ns string, ip net.IP) {
-	if ip == nil || oc.namespacePolicies[ns] == nil {
+	if ip == nil {
 		return
 	}
 
-	oc.namespaceMutex[ns].Lock()
-	defer oc.namespaceMutex[ns].Unlock()
+	mutex := oc.getNamespaceLock(ns)
+	if mutex == nil {
+		return
+	}
+	defer mutex.Unlock()
 
 	address := ip.String()
 	if !oc.namespaceAddressSet[ns][address] {
@@ -97,7 +99,7 @@ func (oc *Controller) deletePodFromNamespaceAddressSet(ns string, ip net.IP) {
 // AddNamespace creates corresponding addressset in ovn db
 func (oc *Controller) AddNamespace(ns *kapi.Namespace) {
 	logrus.Debugf("Adding namespace: %s", ns.Name)
-
+	oc.namespaceMutexMutex.Lock()
 	if oc.namespaceMutex[ns.Name] == nil {
 		oc.namespaceMutex[ns.Name] = &sync.Mutex{}
 	}
@@ -106,6 +108,7 @@ func (oc *Controller) AddNamespace(ns *kapi.Namespace) {
 	// with namespace resources like address sets and deny acls.
 	oc.namespaceMutex[ns.Name].Lock()
 	defer oc.namespaceMutex[ns.Name].Unlock()
+	oc.namespaceMutexMutex.Unlock()
 
 	oc.namespaceAddressSet[ns.Name] = make(map[string]bool)
 
@@ -137,17 +140,41 @@ func (oc *Controller) AddNamespace(ns *kapi.Namespace) {
 
 func (oc *Controller) deleteNamespace(ns *kapi.Namespace) {
 	logrus.Debugf("Deleting namespace: %+v", ns.Name)
+	oc.namespaceMutexMutex.Lock()
+	defer oc.namespaceMutexMutex.Unlock()
 
-	if oc.namespacePolicies[ns.Name] == nil {
+	mutex, ok := oc.namespaceMutex[ns.Name]
+	if !ok {
 		return
 	}
-
-	oc.namespaceMutex[ns.Name].Lock()
+	mutex.Lock()
+	defer mutex.Unlock()
 
 	oc.deleteAddressSet(hashedAddressSet(ns.Name))
-	oc.namespacePolicies[ns.Name] = nil
-	oc.namespaceAddressSet[ns.Name] = nil
+	delete(oc.namespacePolicies, ns.Name)
+	delete(oc.namespaceAddressSet, ns.Name)
+	delete(oc.namespaceMutex, ns.Name)
+}
 
-	oc.namespaceMutex[ns.Name].Unlock()
-	oc.namespaceMutex[ns.Name] = nil
+// getNamespaceLock grabs the lock for a particular namespace. If the
+// namespace does not exist, returns nil. Otherwise, returns the held lock.
+func (oc *Controller) getNamespaceLock(ns string) *sync.Mutex {
+	// lock the list of namespaces, get the mutex
+	oc.namespaceMutexMutex.Lock()
+	mutex, ok := oc.namespaceMutex[ns]
+	oc.namespaceMutexMutex.Unlock()
+	if !ok {
+		return nil
+	}
+
+	// lock the individual namespace
+	mutex.Lock()
+
+	// check that the namespace wasn't deleted between getting the two locks
+	if _, ok := oc.namespaceMutex[ns]; !ok {
+		mutex.Unlock()
+		return nil
+	}
+
+	return mutex
 }
