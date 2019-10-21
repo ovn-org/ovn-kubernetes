@@ -85,5 +85,25 @@ func UnmarshalPodAnnotation(annotation string) (*PodAnnotation, error) {
 	if err := json.Unmarshal([]byte(annotation), a); err != nil {
 		return nil, err
 	}
+
+	// Minimal validation
+	if _, _, err := net.ParseCIDR(a.IP); err != nil {
+		return nil, fmt.Errorf("failed to parse pod IP %q: %v", a.IP, err)
+	}
+	if _, err := net.ParseMAC(a.MAC); err != nil {
+		return nil, fmt.Errorf("failed to parse pod MAC %q: %v", a.MAC, err)
+	}
+	if a.GW != "" && net.ParseIP(a.GW) == nil {
+		return nil, fmt.Errorf("failed to parse pod gateway %q", a.GW)
+	}
+	for _, r := range a.Routes {
+		if _, _, err := net.ParseCIDR(r.Dest); err != nil {
+			return nil, fmt.Errorf("failed to parse pod route dest %q: %v", r.Dest, err)
+		}
+		if r.NextHop != "" && net.ParseIP(r.NextHop) == nil {
+			return nil, fmt.Errorf("failed to parse pod route next hop %q", a.GW)
+		}
+	}
+
 	return a, nil
 }
