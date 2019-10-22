@@ -51,9 +51,6 @@ type loadBalancerConf struct {
 type namespaceInfo struct {
 	sync.Mutex
 
-	// map from pod IP address to logical port name for all pods
-	addressSet map[string]string
-
 	// map from NetworkPolicy name to namespacePolicy. You must hold the
 	// namespaceInfo's mutex to add/delete/lookup policies, but must hold the
 	// namespacePolicy's mutex (and not necessarily the namespaceInfo's) to work with
@@ -99,6 +96,10 @@ type Controller struct {
 	// from inside those functions.
 	namespaces      map[string]*namespaceInfo
 	namespacesMutex sync.Mutex
+
+	// A cache of address sets and an associated mutex
+	addressSetCache      map[string]*addressSet
+	addressSetCacheMutex *sync.RWMutex
 
 	// Port group for ingress deny rule
 	portGroupIngressDeny string
@@ -161,6 +162,8 @@ func NewOvnController(kubeClient kubernetes.Interface, wf *factory.WatchFactory,
 		logicalPortCache:         newPortCache(stopChan),
 		namespaces:               make(map[string]*namespaceInfo),
 		namespacesMutex:          sync.Mutex{},
+		addressSetCache:          make(map[string]*addressSet),
+		addressSetCacheMutex:     &sync.RWMutex{},
 		lspIngressDenyCache:      make(map[string]int),
 		lspEgressDenyCache:       make(map[string]int),
 		lspMutex:                 &sync.Mutex{},
@@ -797,4 +800,29 @@ func shouldUpdate(node, oldNode *kapi.Node) (bool, error) {
 	}
 
 	return true, nil
+}
+
+func (oc *Controller) getAddressSetFromCache(name string) *addressSet {
+	oc.addressSetCacheMutex.RLock()
+	defer oc.addressSetCacheMutex.RUnlock()
+	return oc.addressSetCache[name]
+}
+
+func (oc *Controller) addAddressSetToCache(as *addressSet) {
+	oc.addressSetCacheMutex.Lock()
+	defer oc.addressSetCacheMutex.Unlock()
+	oc.addressSetCache[as.name] = as
+}
+
+// deleteAddressSet removes the address set from OVN and if the address set
+// is known to the Controller, removes it from the controller's address set map
+func (oc *Controller) deleteAddressSetFromCache(name string) {
+	oc.addressSetCacheMutex.Lock()
+	defer oc.addressSetCacheMutex.Unlock()
+	if as, ok := oc.addressSetCache[name]; ok {
+		as.Destroy()
+		delete(oc.addressSetCache, name)
+	} else {
+		destroyAddressSet(name)
+	}
 }

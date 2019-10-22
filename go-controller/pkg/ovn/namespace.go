@@ -2,6 +2,7 @@ package ovn
 
 import (
 	"fmt"
+	"net"
 	"time"
 
 	kapi "k8s.io/api/core/v1"
@@ -25,11 +26,10 @@ func (oc *Controller) syncNamespaces(namespaces []interface{}) {
 		expectedNs[ns.Name] = true
 	}
 
-	err := oc.forEachAddressSetUnhashedName(func(addrSetName,
-		namespaceName, nameSuffix string) {
+	err := forEachAddressSetUnhashedName(func(addrSetName, namespaceName, nameSuffix string) {
 		if nameSuffix == "" && !expectedNs[namespaceName] {
 			// delete the address sets for this namespace from OVN
-			deleteAddressSet(hashedAddressSet(addrSetName))
+			oc.deleteAddressSetFromCache(addrSetName)
 		}
 	})
 	if err != nil {
@@ -38,20 +38,17 @@ func (oc *Controller) syncNamespaces(namespaces []interface{}) {
 }
 
 func (oc *Controller) addPodToNamespace(ns string, portInfo *lpInfo) error {
+	if as := oc.getAddressSetFromCache(ns); as != nil {
+		if err := as.AddPort(portInfo.name, portInfo.ip); err != nil {
+			return err
+		}
+	}
+
 	nsInfo := oc.getNamespaceLocked(ns)
 	if nsInfo == nil {
 		return nil
 	}
 	defer nsInfo.Unlock()
-
-	// If pod has already been added, nothing to do.
-	address := portInfo.ip.String()
-	if nsInfo.addressSet[address] != "" {
-		return nil
-	}
-
-	nsInfo.addressSet[address] = portInfo.name
-	addToAddressSet(hashedAddressSet(ns), address)
 
 	// If multicast is allowed and enabled for the namespace, add the port
 	// to the allow policy.
@@ -65,19 +62,17 @@ func (oc *Controller) addPodToNamespace(ns string, portInfo *lpInfo) error {
 }
 
 func (oc *Controller) deletePodFromNamespace(ns string, portInfo *lpInfo) error {
+	if as := oc.getAddressSetFromCache(ns); as != nil {
+		if err := as.DeletePort(portInfo.name); err != nil {
+			return err
+		}
+	}
+
 	nsInfo := oc.getNamespaceLocked(ns)
 	if nsInfo == nil {
 		return nil
 	}
 	defer nsInfo.Unlock()
-
-	address := portInfo.ip.String()
-	if nsInfo.addressSet[address] == "" {
-		return nil
-	}
-
-	delete(nsInfo.addressSet, address)
-	removeFromAddressSet(hashedAddressSet(ns), address)
 
 	// Remove the port from the multicast allow policy.
 	if oc.multicastSupport && nsInfo.multicastEnabled {
@@ -137,23 +132,36 @@ func (oc *Controller) AddNamespace(ns *kapi.Namespace) {
 
 	// Get all the pods in the namespace and append their IP to the
 	// address_set
+	ports := make(map[string]net.IP)
 	existingPods, err := oc.watchFactory.GetPods(ns.Name)
-	addresses := make([]string, 0, len(existingPods))
 	if err != nil {
 		klog.Errorf("Failed to get all the pods (%v)", err)
 	} else {
 		for _, pod := range existingPods {
+			portName := podLogicalPortName(pod)
 			if pod.Status.PodIP != "" && !pod.Spec.HostNetwork {
-				portName := podLogicalPortName(pod)
-				nsInfo.addressSet[pod.Status.PodIP] = portName
-				addresses = append(addresses, pod.Status.PodIP)
+				if ip := net.ParseIP(pod.Status.PodIP); ip != nil {
+					ports[portName] = ip
+				}
 			}
 		}
 	}
 
 	// Create an address_set for the namespace.  All the pods' IP address
 	// in the namespace will be added to the address_set
-	createAddressSet(ns.Name, hashedAddressSet(ns.Name), addresses)
+	addressSet := oc.getAddressSetFromCache(ns.Name)
+	if addressSet != nil {
+		if err := addressSet.ReplacePorts(ports); err != nil {
+			klog.Errorf(err.Error())
+		}
+	} else {
+		addressSet, err := NewAddressSet(ns.Name, ports)
+		if err != nil {
+			klog.Errorf(err.Error())
+		} else {
+			oc.addAddressSetToCache(addressSet)
+		}
+	}
 
 	oc.multicastUpdateNamespace(ns, nsInfo)
 }
@@ -180,8 +188,8 @@ func (oc *Controller) deleteNamespace(ns *kapi.Namespace) {
 	}
 	defer nsInfo.Unlock()
 
-	deleteAddressSet(hashedAddressSet(ns.Name))
 	oc.multicastDeleteNamespace(ns, nsInfo)
+	oc.deleteAddressSetFromCache(ns.Name)
 }
 
 // waitForNamespaceLocked waits up to 10 seconds for a Namespace to be known; use this
@@ -236,7 +244,6 @@ func (oc *Controller) createNamespaceLocked(ns string) *namespaceInfo {
 	defer oc.namespacesMutex.Unlock()
 
 	nsInfo := &namespaceInfo{
-		addressSet:       make(map[string]string),
 		networkPolicies:  make(map[string]*namespacePolicy),
 		multicastEnabled: false,
 	}
