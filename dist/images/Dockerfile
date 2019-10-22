@@ -27,8 +27,9 @@ RUN INSTALL_PKGS=" \
 	iptables iproute strace socat \
 	unbound-libs \
         " && \
-	yum install -y --setopt=tsflags=nodocs --setopt=skip_missing_names_on_install=False $INSTALL_PKGS && \
-	yum clean all && rm -rf /var/cache/yum/*
+	yum install -y --setopt=tsflags=nodocs --setopt=skip_missing_names_on_install=False $INSTALL_PKGS
+
+RUN yum -y update && yum clean all && rm -rf /var/cache/yum/*
 
 # Get a reasonable version of openvswitch (2.9.2 or higher)
 # docker build --build-arg rpmArch=ARCH -f Dockerfile.centos -t some_tag .
