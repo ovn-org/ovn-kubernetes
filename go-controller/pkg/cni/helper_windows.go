@@ -23,10 +23,13 @@ import (
 // attach it to the desired network. This function finds the HNS Id of the
 // network based on the gatewayIP. If more than one suitable network it's found,
 // return an error asking to give the HNS Network Id in config.
-func getHNSIdFromConfigOrByGatewayIP(gatewayIP string) (string, error) {
+func getHNSIdFromConfigOrByGatewayIP(gatewayIP net.IP) (string, error) {
 	if config.CNI.WinHNSNetworkID != "" {
 		logrus.Infof("Using HNS Network Id from config: %v", config.CNI.WinHNSNetworkID)
 		return config.CNI.WinHNSNetworkID, nil
+	}
+	if gatewayIP == nil {
+		return "", fmt.Errorf("no gateway IP and no HNS Network ID given")
 	}
 	hnsNetworkId := ""
 	hnsNetworks, err := hcsshim.HNSListNetworkRequest("GET", "", "")
@@ -35,7 +38,7 @@ func getHNSIdFromConfigOrByGatewayIP(gatewayIP string) (string, error) {
 	}
 	for _, hnsNW := range hnsNetworks {
 		for _, hnsNWSubnet := range hnsNW.Subnets {
-			if strings.Compare(gatewayIP, hnsNWSubnet.GatewayAddress) == 0 {
+			if strings.Compare(gatewayIP.String(), hnsNWSubnet.GatewayAddress) == 0 {
 				if len(hnsNetworkId) == 0 {
 					hnsNetworkId = hnsNW.Id
 				} else {
@@ -115,17 +118,14 @@ func (pr *PodRequest) ConfigureInterface(namespace string, podName string, ifInf
 	if conf.DeviceID != "" {
 		return nil, fmt.Errorf("failure OVS-Offload is not supported in Windows")
 	}
-	ipAddr, ipNet, err := net.ParseCIDR(ifInfo.IP)
-	if err != nil {
-		return nil, err
-	}
-	ipMaskSize, _ := ipNet.Mask.Size()
+	ipMaskSize, _ := ifInfo.IP.Mask.Size()
 	// NOTE(abalutoiu): The endpoint name should not depend on the container ID.
 	// This is for backwards compatibility in kubernetes which calls the CNI
 	// even for containers that are not the infra container.
 	// This is getting fixed by https://github.com/kubernetes/kubernetes/pull/64189
 	endpointName := fmt.Sprintf("%s_%s", namespace, podName)
 
+	var err error
 	defer func() {
 		// Delete the endpoint in case CNI fails
 		if err != nil {
@@ -151,12 +151,12 @@ func (pr *PodRequest) ConfigureInterface(namespace string, podName string, ifInf
 		logrus.Infof("HNS endpoint %q does not exist", endpointName)
 
 		// HNSEndpoint requires the xx-xx-xx-xx-xx-xx format for the MacAddress field
-		macAddressIpFormat := strings.Replace(ifInfo.MAC, ":", "-", -1)
+		macAddressIpFormat := strings.Replace(ifInfo.MAC.String(), ":", "-", -1)
 
 		hnsEndpoint := &hcsshim.HNSEndpoint{
 			Name:           endpointName,
 			VirtualNetwork: hnsNetworkId,
-			IPAddress:      ipAddr,
+			IPAddress:      ifInfo.IP.IP,
 			MacAddress:     macAddressIpFormat,
 			PrefixLength:   uint8(ipMaskSize),
 			DNSServerList:  strings.Join(conf.DNS.Nameservers, ","),

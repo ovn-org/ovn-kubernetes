@@ -2,6 +2,7 @@ package ovn
 
 import (
 	"fmt"
+	"net"
 	"sync"
 	"time"
 
@@ -48,7 +49,7 @@ func (oc *Controller) waitForNamespaceEvent(namespace string) error {
 	return nil
 }
 
-func (oc *Controller) addPodToNamespaceAddressSet(ns, address string) {
+func (oc *Controller) addPodToNamespaceAddressSet(ns string, ip net.IP) {
 	if oc.namespacePolicies[ns] == nil {
 		return
 	}
@@ -57,6 +58,7 @@ func (oc *Controller) addPodToNamespaceAddressSet(ns, address string) {
 	defer oc.namespaceMutex[ns].Unlock()
 
 	// If pod has already been added, nothing to do.
+	address := ip.String()
 	if oc.namespaceAddressSet[ns][address] {
 		return
 	}
@@ -70,14 +72,15 @@ func (oc *Controller) addPodToNamespaceAddressSet(ns, address string) {
 	oc.setAddressSet(hashedAddressSet(ns), addresses)
 }
 
-func (oc *Controller) deletePodFromNamespaceAddressSet(ns, address string) {
-	if address == "" || oc.namespacePolicies[ns] == nil {
+func (oc *Controller) deletePodFromNamespaceAddressSet(ns string, ip net.IP) {
+	if ip == nil || oc.namespacePolicies[ns] == nil {
 		return
 	}
 
 	oc.namespaceMutex[ns].Lock()
 	defer oc.namespaceMutex[ns].Unlock()
 
+	address := ip.String()
 	if !oc.namespaceAddressSet[ns][address] {
 		return
 	}
