@@ -631,10 +631,8 @@ func (oc *Controller) handleLocalPodSelectorOld(
 
 }
 
-func (oc *Controller) handlePeerPodSelectorAddUpdateOld(
-	policy *knet.NetworkPolicy, np *namespacePolicy,
-	addressMap map[string]bool, addressSet string,
-	obj interface{}) {
+func (oc *Controller) handlePeerPodSelectorAddUpdateOld(np *namespacePolicy,
+	addressMap map[string]bool, addressSet string, obj interface{}) {
 
 	pod := obj.(*kapi.Pod)
 	ipAddress := oc.getIPFromOvnAnnotation(pod.Annotations["ovn"])
@@ -656,10 +654,8 @@ func (oc *Controller) handlePeerPodSelectorAddUpdateOld(
 	oc.setAddressSet(addressSet, addresses)
 }
 
-func (oc *Controller) handlePeerPodSelectorDeleteOld(
-	policy *knet.NetworkPolicy, np *namespacePolicy,
-	addressMap map[string]bool, addressSet string,
-	obj interface{}) {
+func (oc *Controller) handlePeerPodSelectorDeleteOld(np *namespacePolicy,
+	addressMap map[string]bool, addressSet string, obj interface{}) {
 
 	pod := obj.(*kapi.Pod)
 
@@ -696,13 +692,13 @@ func (oc *Controller) handlePeerPodSelectorOld(
 		podSelector,
 		cache.ResourceEventHandlerFuncs{
 			AddFunc: func(obj interface{}) {
-				oc.handlePeerPodSelectorAddUpdateOld(policy, np, addressMap, addressSet, obj)
+				oc.handlePeerPodSelectorAddUpdateOld(np, addressMap, addressSet, obj)
 			},
 			DeleteFunc: func(obj interface{}) {
-				oc.handlePeerPodSelectorDeleteOld(policy, np, addressMap, addressSet, obj)
+				oc.handlePeerPodSelectorDeleteOld(np, addressMap, addressSet, obj)
 			},
 			UpdateFunc: func(oldObj, newObj interface{}) {
-				oc.handlePeerPodSelectorAddUpdateOld(policy, np, addressMap, addressSet, newObj)
+				oc.handlePeerPodSelectorAddUpdateOld(np, addressMap, addressSet, newObj)
 			},
 		}, nil)
 	if err != nil {
@@ -721,7 +717,6 @@ func (oc *Controller) handlePeerNamespaceAndPodSelectorOld(
 	podSelector *metav1.LabelSelector,
 	addressSet string,
 	addressMap map[string]bool,
-	gress *gressPolicy,
 	np *namespacePolicy) {
 
 	namespaceHandler, err := oc.watchFactory.AddFilteredNamespaceHandler("",
@@ -742,13 +737,13 @@ func (oc *Controller) handlePeerNamespaceAndPodSelectorOld(
 					podSelector,
 					cache.ResourceEventHandlerFuncs{
 						AddFunc: func(obj interface{}) {
-							oc.handlePeerPodSelectorAddUpdateOld(policy, np, addressMap, addressSet, obj)
+							oc.handlePeerPodSelectorAddUpdateOld(np, addressMap, addressSet, obj)
 						},
 						DeleteFunc: func(obj interface{}) {
-							oc.handlePeerPodSelectorDeleteOld(policy, np, addressMap, addressSet, obj)
+							oc.handlePeerPodSelectorDeleteOld(np, addressMap, addressSet, obj)
 						},
 						UpdateFunc: func(oldObj, newObj interface{}) {
-							oc.handlePeerPodSelectorAddUpdateOld(policy, np, addressMap, addressSet, newObj)
+							oc.handlePeerPodSelectorAddUpdateOld(np, addressMap, addressSet, newObj)
 						},
 					}, nil)
 				if err != nil {
@@ -926,7 +921,7 @@ func (oc *Controller) addNetworkPolicyOld(policy *knet.NetworkPolicy) {
 				// that populates the addressSet
 				oc.handlePeerNamespaceAndPodSelectorOld(policy,
 					fromJSON.NamespaceSelector, fromJSON.PodSelector,
-					hashedLocalAddressSet, peerPodAddressMap, ingress, np)
+					hashedLocalAddressSet, peerPodAddressMap, np)
 
 			} else if fromJSON.NamespaceSelector != nil {
 				// For each peer namespace selector, we create a watcher that
@@ -982,7 +977,7 @@ func (oc *Controller) addNetworkPolicyOld(policy *knet.NetworkPolicy) {
 				// that populates the addressSet
 				oc.handlePeerNamespaceAndPodSelectorOld(policy,
 					toJSON.NamespaceSelector, toJSON.PodSelector,
-					hashedLocalAddressSet, peerPodAddressMap, egress, np)
+					hashedLocalAddressSet, peerPodAddressMap, np)
 			} else if toJSON.NamespaceSelector != nil {
 				// For each peer namespace selector, we create a watcher that
 				// populates egress.peerAddressSets
