@@ -530,8 +530,7 @@ func (oc *Controller) handleLocalPodSelectorAddFuncOld(
 	obj interface{}) {
 	pod := obj.(*kapi.Pod)
 
-	ipAddress := oc.getIPFromOvnAnnotation(pod.Annotations["ovn"])
-	if ipAddress == "" {
+	if _, err := util.UnmarshalPodAnnotation(pod.Annotations["ovn"]); err != nil {
 		return
 	}
 

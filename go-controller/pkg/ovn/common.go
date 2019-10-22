@@ -1,7 +1,6 @@
 package ovn
 
 import (
-	"encoding/json"
 	"fmt"
 	"hash/fnv"
 	"strconv"
@@ -197,28 +196,6 @@ func (oc *Controller) deletePortGroup(hashName string) {
 			hashName, stderr, err)
 		return
 	}
-}
-
-func (oc *Controller) getIPFromOvnAnnotation(ovnAnnotation string) string {
-	if ovnAnnotation == "" {
-		return ""
-	}
-
-	var ovnAnnotationMap map[string]string
-	err := json.Unmarshal([]byte(ovnAnnotation), &ovnAnnotationMap)
-	if err != nil {
-		logrus.Errorf("Error in json unmarshaling ovn annotation "+
-			"(%v)", err)
-		return ""
-	}
-
-	ipAddressMask := strings.Split(ovnAnnotationMap["ip_address"], "/")
-	if len(ipAddressMask) != 2 {
-		logrus.Errorf("Error in splitting ip address")
-		return ""
-	}
-
-	return ipAddressMask[0]
 }
 
 func stringSliceMembership(slice []string, key string) bool {

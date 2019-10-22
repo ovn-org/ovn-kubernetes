@@ -175,8 +175,12 @@ func (oc *Controller) handlePeerPodSelectorAddUpdate(np *namespacePolicy,
 	addressMap map[string]bool, addressSet string, obj interface{}) {
 
 	pod := obj.(*kapi.Pod)
-	ipAddress := oc.getIPFromOvnAnnotation(pod.Annotations["ovn"])
-	if ipAddress == "" || addressMap[ipAddress] {
+	podAnnotation, err := util.UnmarshalPodAnnotation(pod.Annotations["ovn"])
+	if err != nil {
+		return
+	}
+	ipAddress := podAnnotation.IP.IP.String()
+	if addressMap[ipAddress] {
 		return
 	}
 
@@ -202,11 +206,11 @@ func (oc *Controller) handlePeerPodSelectorDelete(np *namespacePolicy,
 	addressMap map[string]bool, addressSet string, obj interface{}) {
 
 	pod := obj.(*kapi.Pod)
-
-	ipAddress := oc.getIPFromOvnAnnotation(pod.Annotations["ovn"])
-	if ipAddress == "" {
+	podAnnotation, err := util.UnmarshalPodAnnotation(pod.Annotations["ovn"])
+	if err != nil {
 		return
 	}
+	ipAddress := podAnnotation.IP.IP.String()
 
 	np.Lock()
 	defer np.Unlock()
