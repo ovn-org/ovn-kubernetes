@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"net"
 
+	"k8s.io/api/core/v1"
 	"k8s.io/klog"
 	utilnet "k8s.io/utils/net"
 )
@@ -209,4 +210,26 @@ func UnmarshalPodAnnotation(annotations map[string]string) (*PodAnnotation, erro
 	}
 
 	return podAnnotation, nil
+}
+
+// GetAllPodIPs returns the pod's IP addresses, first from the OVN annotation
+// and then falling back to the Pod Status IP. This function is intended to
+// also return IPs for HostNetwork and other non-OVN-IPAM-ed pods.
+func GetAllPodIPs(pod *v1.Pod) ([]net.IP, error) {
+	annotation, err := UnmarshalPodAnnotation(pod.Annotations)
+	if annotation != nil {
+		ips := make([]net.IP, 0, len(annotation.IPs))
+		for _, ip := range annotation.IPs {
+			ips = append(ips, ip.IP)
+		}
+		return ips, nil
+	}
+	if pod.Status.PodIP != "" {
+		ip := net.ParseIP(pod.Status.PodIP)
+		if ip == nil {
+			return nil, fmt.Errorf("failed to parse pod IP %s", pod.Status.PodIP)
+		}
+		return []net.IP{ip}, nil
+	}
+	return nil, err
 }

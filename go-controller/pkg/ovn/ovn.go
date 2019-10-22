@@ -51,9 +51,6 @@ type loadBalancerConf struct {
 type namespaceInfo struct {
 	sync.Mutex
 
-	// map from pod IP address to logical port name for all pods
-	addressSet map[string]string
-
 	// map from NetworkPolicy name to namespacePolicy. You must hold the
 	// namespaceInfo's mutex to add/delete/lookup policies, but must hold the
 	// namespacePolicy's mutex (and not necessarily the namespaceInfo's) to work with
@@ -67,6 +64,10 @@ type namespaceInfo struct {
 	portGroupUUID string
 
 	multicastEnabled bool
+
+	// addressSet is the name of an address set that holds the IP addresses
+	// of all pods in the namespace.
+	addressSet AddressSet
 }
 
 // Controller structure is the object which holds the controls for starting
@@ -105,6 +106,9 @@ type Controller struct {
 	// from inside those functions.
 	namespaces      map[string]*namespaceInfo
 	namespacesMutex sync.Mutex
+
+	// An address set factory that creates address sets
+	addressSetFactory AddressSetFactory
 
 	// Port group for ingress deny rule
 	portGroupIngressDeny string
@@ -156,7 +160,11 @@ const (
 
 // NewOvnController creates a new OVN controller for creating logical network
 // infrastructure and policy
-func NewOvnController(kubeClient kubernetes.Interface, wf *factory.WatchFactory, stopChan <-chan struct{}) *Controller {
+func NewOvnController(kubeClient kubernetes.Interface, wf *factory.WatchFactory,
+	stopChan <-chan struct{}, addressSetFactory AddressSetFactory) *Controller {
+	if addressSetFactory == nil {
+		addressSetFactory = NewOvnAddressSetFactory()
+	}
 	return &Controller{
 		kube:                     &kube.Kube{KClient: kubeClient},
 		watchFactory:             wf,
@@ -167,6 +175,7 @@ func NewOvnController(kubeClient kubernetes.Interface, wf *factory.WatchFactory,
 		logicalPortCache:         newPortCache(stopChan),
 		namespaces:               make(map[string]*namespaceInfo),
 		namespacesMutex:          sync.Mutex{},
+		addressSetFactory:        addressSetFactory,
 		lspIngressDenyCache:      make(map[string]int),
 		lspEgressDenyCache:       make(map[string]int),
 		lspMutex:                 &sync.Mutex{},
