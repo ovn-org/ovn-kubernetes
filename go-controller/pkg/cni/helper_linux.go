@@ -266,6 +266,17 @@ func (pr *PodRequest) ConfigureInterface(namespace string, podName string, ifInf
 
 	ifaceID := fmt.Sprintf("%s_%s", namespace, podName)
 
+	// Find and remove any existing OVS port with this iface-id. Pods can
+	// have multiple sandboxes if some are waiting for garbage collection,
+	// but only the latest one should have the iface-id set.
+	uuids, _ := ovsFind("Interface", "_uuid", "external-ids:iface-id="+ifaceID)
+	for _, uuid := range uuids {
+		if out, err := ovsExec("remove", "Interface", uuid, "external-ids", "iface-id"); err != nil {
+			logrus.Warningf("failed to clear stale OVS port %q iface-id %q: %v\n  %q", uuid, ifaceID, err, out)
+		}
+	}
+
+	// Add the new sandbox's OVS port
 	ovsArgs := []string{
 		"add-port", "br-int", hostIface.Name, "--", "set",
 		"interface", hostIface.Name,
