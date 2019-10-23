@@ -199,7 +199,33 @@ func setupSriovInterface(netns ns.NetNS, containerID, ifName string, ifInfo *Pod
 		return nil, nil, fmt.Errorf("failed to set MTU on %s: %v", hostIface.Name, err)
 	}
 
-	// 7. Move VF to Container namespace
+	physlink, err := netlink.LinkByName(uplink)
+	if err != nil {
+		return nil, nil, fmt.Errorf("failed getting link for %s: %v", uplink, err)
+	}
+
+	// 7. Clean up any left over bandwidth configuration, before proceeding.
+	// Probably put this in a function that cleans up/resets other configs too.
+	err = netlink.LinkSetVfTxRate(physlink, vfIndex, 0)
+	if err != nil {
+		logrus.Infof("failed to clean up bandwidth on %s (%s/%d): %v", pciAddrs, physlink, vfIndex, err)
+	}
+
+	// 8. set rate, if any.
+	if ifInfo.Egress > 0 {
+		// Rate in Mbps, LinkSetVfTxRate takes an int, and a value of 0 means no rate limit.
+		if ifInfo.Egress < 1000000 {
+			return nil, nil, fmt.Errorf("rate of %d bps not supported on device %s/%d", ifInfo.Egress, uplink, vfIndex)
+		}
+		// in Mbps
+		egressMbps := int(ifInfo.Egress / 1000000)
+		err = netlink.LinkSetVfTxRate(physlink, vfIndex, egressMbps)
+		if err != nil {
+			return nil, nil, fmt.Errorf("failed setting link bandwidth of %d Mbps on device %s/%d: %v", egressMbps, uplink, vfIndex, err)
+		}
+	}
+
+	// 9. Move VF to Container namespace
 	err = moveIfToNetns(vfNetdevice, netns)
 	if err != nil {
 		return nil, nil, err
