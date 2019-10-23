@@ -13,12 +13,12 @@ arrives to the VF, and a packet sent through the VF is received by its represent
 
 The following manufacturers are known to work:
 
-- Mellanox ConnectX-4 Lx/ConnectX-5 NICs
+- Mellanox ConnectX-5 NIC
 
 ## Prerequisites
 
-- Linux Kernel >= 4.13
-- Open vSwitch >= 2.8
+- Linux Kernel TBD (require connection tracking offload - https://lwn.net/Articles/793082/)
+- Open vSwitch TBD (require connection tracking offload - https://mail.openvswitch.org/pipermail/ovs-dev/2019-July/360376.html)
 - iproute >= 4.12
 - sriov-device-plugin
 - multus-cni
@@ -100,16 +100,12 @@ This configuration file is in json format as shown below:
 
 ```json
 {
-    "resourceList": [{
-            "resourceName": "cx4lx_sriov_switchdev",
-            "selectors": {
-                "vendors": ["15b3"],
-                "devices": ["1016"],
-            },
+    "resourceList": [
+         {
             "resourceName": "cx5_sriov_switchdev",
             "selectors": {
                 "vendors": ["15b3"],
-                "devices": ["1018"],
+                "devices": ["1018"]
             }
         }
     ]
