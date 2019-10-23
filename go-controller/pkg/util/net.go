@@ -47,7 +47,7 @@ func GetPortAddresses(portName string) (net.HardwareAddr, net.IP, error) {
 			return nil, nil, fmt.Errorf("Error while obtaining static addresses for %s: %v", portName, err)
 		}
 	}
-	if out == "[]" {
+	if out == "[]" || out == "[dynamic]" {
 		// No addresses
 		return nil, nil, nil
 	}
