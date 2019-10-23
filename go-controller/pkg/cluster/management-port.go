@@ -54,12 +54,8 @@ func createManagementPortGeneric(nodeName, localSubnet string) (string, string, 
 		return "", "", "", "", "", err
 	}
 
-	// Create this node's management logical port on the node switch.
-	_, portIP, n, err := util.GetNodeWellKnownAddresses(subnet)
-	if err != nil {
-		logrus.Errorf("Failed to add logical port to switch, stdout: %q, stderr: %q, error: %v", stdout, stderr, err)
-		return "", "", "", "", "", err
-	}
+	// The management port is assigned the second IP in the subnet.
+	_, portIP, n := util.GetNodeWellKnownAddresses(subnet)
 	portIPMask := fmt.Sprintf("%s/%d", portIP, n)
 
 	// switch-to-router ports only have MAC address and nothing else.
