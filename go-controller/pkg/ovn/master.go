@@ -213,11 +213,7 @@ func (oc *Controller) syncNodeManagementPort(node *kapi.Node) error {
 		return err
 	}
 
-	_, portIP, _, err := util.GetNodeWellKnownAddresses(subnet)
-	if err != nil {
-		logrus.Errorf("Failed to obtain management port IP address, error: %v", err)
-		return err
-	}
+	_, portIP, _ := util.GetNodeWellKnownAddresses(subnet)
 
 	// Create this node's management logical port on the node switch
 	stdout, stderr, err := util.RunOVNNbctl(
@@ -250,11 +246,7 @@ func (oc *Controller) ensureNodeLogicalNetwork(nodeName string, hostsubnet *net.
 
 	// Get firstIP for gateway.  Skip the second address of the LogicalSwitch's
 	// subnet since we set it aside for the management port on that node.
-	firstIP, secondIP, _, err := util.GetNodeWellKnownAddresses(hostsubnet)
-	if err != nil {
-		logrus.Errorf("Failed to obtain well known IP addresses, error: %v", err)
-		return err
-	}
+	firstIP, secondIP, _ := util.GetNodeWellKnownAddresses(hostsubnet)
 
 	nodeLRPMac, stderr, err := util.RunOVNNbctl("--if-exist", "get", "logical_router_port", "rtos-"+nodeName, "mac")
 	if err != nil {
