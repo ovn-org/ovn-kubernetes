@@ -4,6 +4,7 @@ package cluster
 
 import (
 	"io/ioutil"
+	"net"
 	"os"
 	"path/filepath"
 
@@ -132,7 +133,8 @@ var _ = Describe("Management Port Operations", func() {
 			_, err = config.InitConfig(ctx, fexec, nil)
 			Expect(err).NotTo(HaveOccurred())
 
-			macAddress, err := CreateManagementPort(nodeName, nodeSubnet, []string{clusterCIDR})
+			_, nodeSubnetCIDR, _ := net.ParseCIDR(nodeSubnet)
+			macAddress, err := CreateManagementPort(nodeName, nodeSubnetCIDR, []string{clusterCIDR})
 			Expect(err).NotTo(HaveOccurred())
 			i := 0
 			for k, v := range macAddress {

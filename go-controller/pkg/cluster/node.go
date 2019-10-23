@@ -129,7 +129,7 @@ func (cluster *OvnClusterController) StartClusterNode(name string) error {
 	type readyFunc func(string) (bool, error)
 	var readyFuncs []readyFunc
 
-	mgmtPortAnnotations, err := CreateManagementPort(node.Name, subnet.String(), clusterSubnets)
+	mgmtPortAnnotations, err := CreateManagementPort(node.Name, subnet, clusterSubnets)
 	if err != nil {
 		return err
 	}
