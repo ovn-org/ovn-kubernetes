@@ -93,9 +93,9 @@ func (hacontroller *HAMasterController) StartHAMasterController() error {
 
 	lec := leaderelection.LeaderElectionConfig{
 		Lock:          rl,
-		LeaseDuration: time.Duration(config.MasterHA.HAElectionLeaseDuration) * time.Second,
-		RenewDeadline: time.Duration(config.MasterHA.HAElectionRenewDeadline) * time.Second,
-		RetryPeriod:   time.Duration(config.MasterHA.HAElectionRetryPeriod) * time.Second,
+		LeaseDuration: time.Duration(config.MasterHA.ElectionLeaseDuration) * time.Second,
+		RenewDeadline: time.Duration(config.MasterHA.ElectionRenewDeadline) * time.Second,
+		RetryPeriod:   time.Duration(config.MasterHA.ElectionRetryPeriod) * time.Second,
 		Callbacks: leaderelection.LeaderCallbacks{
 			OnStartedLeading: func(ctx context.Context) {},
 			OnStoppedLeading: hacontrollerOnStoppedLeading,

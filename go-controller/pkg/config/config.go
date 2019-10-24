@@ -71,9 +71,9 @@ var (
 
 	// MasterHA holds master HA related config options.
 	MasterHA = MasterHAConfig{
-		HAElectionLeaseDuration: 60,
-		HAElectionRenewDeadline: 30,
-		HAElectionRetryPeriod:   20,
+		ElectionLeaseDuration: 60,
+		ElectionRenewDeadline: 30,
+		ElectionRetryPeriod:   20,
 	}
 
 	// NbctlDaemon enables ovn-nbctl to run in daemon mode
@@ -191,9 +191,9 @@ type OvnAuthConfig struct {
 // MasterHAConfig holds configuration for master HA
 // configuration.
 type MasterHAConfig struct {
-	HAElectionLeaseDuration int `gcfg:"ha-election-lease-duration"`
-	HAElectionRenewDeadline int `gcfg:"ha-election-renew-deadline"`
-	HAElectionRetryPeriod   int `gcfg:"ha-election-retry-period"`
+	ElectionLeaseDuration int `gcfg:"election-lease-duration"`
+	ElectionRenewDeadline int `gcfg:"election-renew-deadline"`
+	ElectionRetryPeriod   int `gcfg:"election-retry-period"`
 }
 
 // OvnDBScheme describes the OVN database connection transport method
@@ -607,17 +607,17 @@ var MasterHAFlags = []cli.Flag{
 	cli.IntFlag{
 		Name:        "ha-election-lease-duration",
 		Usage:       "Leader election lease duration (in secs) (default: 60)",
-		Destination: &cliConfig.MasterHA.HAElectionLeaseDuration,
+		Destination: &cliConfig.MasterHA.ElectionLeaseDuration,
 	},
 	cli.IntFlag{
 		Name:        "ha-election-renew-deadline",
 		Usage:       "Leader election renew deadline (in secs) (default: 35)",
-		Destination: &cliConfig.MasterHA.HAElectionRenewDeadline,
+		Destination: &cliConfig.MasterHA.ElectionRenewDeadline,
 	},
 	cli.IntFlag{
 		Name:        "ha-election-retry-period",
 		Usage:       "Leader election retry period (in secs) (default: 10)",
-		Destination: &cliConfig.MasterHA.HAElectionRetryPeriod,
+		Destination: &cliConfig.MasterHA.ElectionRetryPeriod,
 	},
 }
 
@@ -810,16 +810,16 @@ func buildMasterHAConfig(ctx *cli.Context, cli, file *config) error {
 	// And CLI overrides over config file and default values
 	overrideFields(&MasterHA, &cli.MasterHA)
 
-	if MasterHA.HAElectionLeaseDuration <= MasterHA.HAElectionRenewDeadline {
+	if MasterHA.ElectionLeaseDuration <= MasterHA.ElectionRenewDeadline {
 		return fmt.Errorf("Invalid HA election lease duration '%d'. "+
 			"It should be greater than HA election renew deadline '%d'",
-			MasterHA.HAElectionLeaseDuration, MasterHA.HAElectionRenewDeadline)
+			MasterHA.ElectionLeaseDuration, MasterHA.ElectionRenewDeadline)
 	}
 
-	if MasterHA.HAElectionRenewDeadline <= MasterHA.HAElectionRetryPeriod {
+	if MasterHA.ElectionRenewDeadline <= MasterHA.ElectionRetryPeriod {
 		return fmt.Errorf("Invalid HA election renew deadline duration '%d'. "+
 			"It should be greater than HA election retry period '%d'",
-			MasterHA.HAElectionRenewDeadline, MasterHA.HAElectionRetryPeriod)
+			MasterHA.ElectionRenewDeadline, MasterHA.ElectionRetryPeriod)
 	}
 	return nil
 }
