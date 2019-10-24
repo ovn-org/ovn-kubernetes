@@ -17,7 +17,7 @@ import (
 // CreateManagementPort creates a management port attached to the node switch
 // that lets the node access its pods via their private IP address. This is used
 // for health checking and other management tasks.
-func CreateManagementPort(nodeName, localSubnet string, clusterSubnet []string) (map[string]string, error) {
+func CreateManagementPort(nodeName string, localSubnet *net.IPNet, clusterSubnet []string) (map[string]string, error) {
 	interfaceName, interfaceIP, macAddress, routerIP, _, err :=
 		createManagementPortGeneric(nodeName, localSubnet)
 	if err != nil {

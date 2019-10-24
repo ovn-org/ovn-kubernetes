@@ -114,7 +114,7 @@ var _ = Describe("Management Port Operations", func() {
 			_, err = config.InitConfig(ctx, fexec, nil)
 			Expect(err).NotTo(HaveOccurred())
 
-			err = CreateManagementPort(nodeName, nodeSubnet, []string{clusterCIDR})
+			_, err = CreateManagementPort(nodeName, nodeSubnet, []string{clusterCIDR})
 			Expect(err).NotTo(HaveOccurred())
 
 			Expect(fexec.CalledMatchesExpected()).To(BeTrue())
