@@ -28,41 +28,30 @@ func isOVNControllerReady(name string) (bool, error) {
 
 	pid, err := ioutil.ReadFile(runDir + "ovn-controller.pid")
 	if err != nil {
-		logrus.Errorf("unknown pid for ovn-controller process: %v", err)
-		return false, err
+		return false, fmt.Errorf("unknown pid for ovn-controller process: %v", err)
 	}
 
-	if err := wait.PollImmediate(500*time.Millisecond,
-		300*time.Second,
-		func() (bool, error) {
-			ctlFile := runDir + fmt.Sprintf("ovn-controller.%s.ctl",
-				strings.TrimSuffix(string(pid), "\n"))
-			ret, _, err := util.RunOVSAppctl("-t", ctlFile,
-				"connection-status")
-			if err == nil {
-				logrus.Infof("node %s connection status = %s",
-					name, ret)
-				return ret == "connected", nil
-			}
-			return false, err
-		}); err != nil {
-		logrus.Errorf("timed out waiting sbdb for node %s: %v", name, err)
+	err = wait.PollImmediate(500*time.Millisecond, 300*time.Second, func() (bool, error) {
+		ctlFile := runDir + fmt.Sprintf("ovn-controller.%s.ctl", strings.TrimSuffix(string(pid), "\n"))
+		ret, _, err := util.RunOVSAppctl("-t", ctlFile, "connection-status")
+		if err == nil {
+			logrus.Infof("node %s connection status = %s", name, ret)
+			return ret == "connected", nil
+		}
 		return false, err
+	})
+	if err != nil {
+		return false, fmt.Errorf("timed out waiting sbdb for node %s: %v", name, err)
 	}
 
-	if err := wait.PollImmediate(500*time.Millisecond,
-		300*time.Second,
-		func() (bool, error) {
-			flows, _, err := util.RunOVSOfctl("dump-flows", "br-int")
-			if err == nil {
-				return len(flows) > 0, nil
-			}
-			return false, err
-		}); err != nil {
-		logrus.Errorf("timed out dumping br-int flow entries for node %s: %v",
-			name, err)
-		return false, err
+	err = wait.PollImmediate(500*time.Millisecond, 300*time.Second, func() (bool, error) {
+		flows, _, err := util.RunOVSOfctl("dump-flows", "br-int")
+		return len(flows) > 0, err
+	})
+	if err != nil {
+		return false, fmt.Errorf("timed out dumping br-int flow entries for node %s: %v", name, err)
 	}
+
 	return true, nil
 }
 
@@ -74,7 +63,6 @@ func (cluster *OvnClusterController) StartClusterNode(name string) error {
 	var subnet *net.IPNet
 	var clusterSubnets []string
 	var cidr string
-	var connected bool
 
 	var wg sync.WaitGroup
 
@@ -85,25 +73,22 @@ func (cluster *OvnClusterController) StartClusterNode(name string) error {
 	messages := make(chan error)
 
 	// First wait for the node logical switch to be created by the Master, timeout is 300s.
-	if err := wait.PollImmediate(500*time.Millisecond, 300*time.Second, func() (bool, error) {
-		node, err = cluster.Kube.GetNode(name)
-		if err != nil {
-			logrus.Errorf("Error starting node %s, no node found - %v", name, err)
-			return false, nil
+	err = wait.PollImmediate(500*time.Millisecond, 300*time.Second, func() (bool, error) {
+		if node, err = cluster.Kube.GetNode(name); err != nil {
+			return false, fmt.Errorf("error retrieving node %s: %v", name, err)
 		}
 		if cidr, _, err = util.RunOVNNbctl("get", "logical_switch", node.Name, "other-config:subnet"); err != nil {
-			return false, nil
+			return false, fmt.Errorf("error retrieving logical switch: %v", err)
 		}
 		return true, nil
-	}); err != nil {
-		logrus.Errorf("timed out waiting for node %q logical switch: %v", name, err)
-		return err
+	})
+	if err != nil {
+		return fmt.Errorf("timed out waiting for node's: %q logical switch: %v", name, err)
 	}
 
 	_, subnet, err = net.ParseCIDR(cidr)
 	if err != nil {
-		logrus.Errorf("Invalid hostsubnet found for node %s - %v", node.Name, err)
-		return err
+		return fmt.Errorf("invalid hostsubnet found for node %s: %v", node.Name, err)
 	}
 
 	logrus.Infof("Node %s ready for ovn initialization with subnet %s", node.Name, subnet.String())
@@ -118,12 +103,8 @@ func (cluster *OvnClusterController) StartClusterNode(name string) error {
 		return err
 	}
 
-	connected, err = isOVNControllerReady(name)
-	if err != nil {
+	if _, err = isOVNControllerReady(name); err != nil {
 		return err
-	}
-	if !connected {
-		return nil
 	}
 
 	type readyFunc func(string) (bool, error)
@@ -138,10 +119,8 @@ func (cluster *OvnClusterController) StartClusterNode(name string) error {
 	wg.Add(len(readyFuncs))
 
 	// Set management port macAddress as annotation
-	err = cluster.Kube.SetAnnotationsOnNode(node, mgmtPortAnnotations)
-	if err != nil {
-		logrus.Errorf("Failed to set node %s mgmt port macAddress annotation: %v", node.Name, mgmtPortAnnotations)
-		return err
+	if err := cluster.Kube.SetAnnotationsOnNode(node, mgmtPortAnnotations); err != nil {
+		return fmt.Errorf("Failed to set node %s mgmt port macAddress annotation: %v", node.Name, mgmtPortAnnotations)
 	}
 
 	portName := "k8s-" + node.Name
@@ -163,8 +142,7 @@ func (cluster *OvnClusterController) StartClusterNode(name string) error {
 
 	for i := range messages {
 		if i != nil {
-			logrus.Errorf("Timeout error while obtaining addresses for %s (%v)", portName, i)
-			return i
+			return fmt.Errorf("Timeout error while obtaining addresses for %s (%v)", portName, i)
 		}
 	}
 
@@ -200,14 +178,15 @@ func validateOVNConfigEndpoint(ep *kapi.Endpoints) bool {
 
 }
 
-func updateOVNConfig(ep *kapi.Endpoints) {
+func updateOVNConfig(ep *kapi.Endpoints) error {
 	if !validateOVNConfigEndpoint(ep) {
-		logrus.Errorf("endpoint %s is not in the right format to configure OVN", ep.Name)
-		return
+		return fmt.Errorf("endpoint %s is not of the right format to configure OVN", ep.Name)
 	}
+
 	var southboundDBPort string
 	var northboundDBPort string
 	var masterIPList []string
+
 	for _, ovnDB := range ep.Subsets[0].Ports {
 		if ovnDB.Name == "south" {
 			southboundDBPort = strconv.Itoa(int(ovnDB.Port))
@@ -216,22 +195,23 @@ func updateOVNConfig(ep *kapi.Endpoints) {
 			northboundDBPort = strconv.Itoa(int(ovnDB.Port))
 		}
 	}
+
 	for _, address := range ep.Subsets[0].Addresses {
 		masterIPList = append(masterIPList, address.IP)
 	}
-	err := config.UpdateOVNNodeAuth(masterIPList, southboundDBPort, northboundDBPort)
-	if err != nil {
-		logrus.Errorf(err.Error())
-		return
+
+	if err := config.UpdateOVNNodeAuth(masterIPList, southboundDBPort, northboundDBPort); err != nil {
+		return err
 	}
+
 	for _, auth := range []config.OvnAuthConfig{config.OvnNorth, config.OvnSouth} {
 		if err := auth.SetDBAuth(); err != nil {
-			logrus.Errorf(err.Error())
-			return
+			return err
 		}
 		logrus.Infof("OVN databases reconfigured, masterIP %s, northbound-db %s, southbound-db %s", ep.Subsets[0].Addresses[0].IP, northboundDBPort, southboundDBPort)
 	}
 
+	return nil
 }
 
 //watchConfigEndpoints starts the watching of Endpoint resource and calls back to the appropriate handler logic
@@ -241,17 +221,19 @@ func (cluster *OvnClusterController) watchConfigEndpoints() error {
 			AddFunc: func(obj interface{}) {
 				ep := obj.(*kapi.Endpoints)
 				if ep.Name == "ovnkube-db" {
-					updateOVNConfig(ep)
-					return
+					if err := updateOVNConfig(ep); err != nil {
+						logrus.Errorf(err.Error())
+					}
 				}
 			},
 			UpdateFunc: func(old, new interface{}) {
 				epNew := new.(*kapi.Endpoints)
 				epOld := old.(*kapi.Endpoints)
 				if !reflect.DeepEqual(epNew.Subsets, epOld.Subsets) && epNew.Name == "ovnkube-db" {
-					updateOVNConfig(epNew)
+					if err := updateOVNConfig(epNew); err != nil {
+						logrus.Errorf(err.Error())
+					}
 				}
-
 			},
 		}, nil)
 	return err
