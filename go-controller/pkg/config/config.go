@@ -274,14 +274,14 @@ func RestoreDefaultConfig() {
 // copy members of struct 'src' into the corresponding field in struct 'dst'
 // if the field in 'src' is a non-zero int or a non-zero-length string. This
 // function should be called with pointers to structs.
-func overrideFields(dst, src interface{}) {
+func overrideFields(dst, src interface{}) error {
 	dstStruct := reflect.ValueOf(dst).Elem()
 	srcStruct := reflect.ValueOf(src).Elem()
 	if dstStruct.Kind() != srcStruct.Kind() || dstStruct.Kind() != reflect.Struct {
-		panic("mismatched value types")
+		return fmt.Errorf("mismatched value types")
 	}
 	if dstStruct.NumField() != srcStruct.NumField() {
-		panic("mismatched struct types")
+		return fmt.Errorf("mismatched struct types")
 	}
 
 	// Iterate over each field in dst/src Type so we can get the tags,
@@ -301,12 +301,10 @@ func overrideFields(dst, src interface{}) {
 		dstField := dstStruct.FieldByName(structField.Name)
 		srcField := srcStruct.FieldByName(structField.Name)
 		if !dstField.IsValid() || !srcField.IsValid() {
-			panic(fmt.Sprintf("invalid struct %q field %q",
-				dstType.Name(), structField.Name))
+			return fmt.Errorf("invalid struct %q field %q", dstType.Name(), structField.Name)
 		}
 		if dstField.Kind() != srcField.Kind() {
-			panic(fmt.Sprintf("mismatched struct %q fields %q",
-				dstType.Name(), structField.Name))
+			return fmt.Errorf("mismatched struct %q fields %q", dstType.Name(), structField.Name)
 		}
 		switch srcField.Kind() {
 		case reflect.String:
@@ -326,14 +324,15 @@ func overrideFields(dst, src interface{}) {
 				dstField.Set(srcField)
 			}
 		default:
-			panic(fmt.Sprintf("unhandled struct %q field %q type %v",
-				dstType.Name(), structField.Name, srcField.Kind()))
+			return fmt.Errorf("unhandled struct %q field %q type %v", dstType.Name(), structField.Name, srcField.Kind())
 		}
 	}
 	if !handled {
 		// No tags found in the struct so we don't know how to override
-		panic(fmt.Sprintf("failed to find 'gcfg' tags in struct %q", dstType.Name()))
+		return fmt.Errorf("failed to find 'gcfg' tags in struct %q", dstType.Name())
 	}
+
+	return nil
 }
 
 var cliConfig config
@@ -700,7 +699,10 @@ func buildKubernetesConfig(exec kexec.Interface, cli, file *config, saPath strin
 	if _, err2 := os.Stat(filepath.Join(saPath, kubeServiceAccountFileCACert)); err2 == nil {
 		saConfig.CACert = filepath.Join(saPath, kubeServiceAccountFileCACert)
 	}
-	overrideFields(&Kubernetes, &saConfig)
+
+	if err := overrideFields(&Kubernetes, &saConfig); err != nil {
+		return err
+	}
 
 	// Grab default values from OVS external IDs
 	if defaults.K8sAPIServer {
@@ -723,12 +725,20 @@ func buildKubernetesConfig(exec kexec.Interface, cli, file *config, saPath strin
 		APIServer:  os.Getenv("K8S_APISERVER"),
 		Token:      os.Getenv("K8S_TOKEN"),
 	}
-	overrideFields(&Kubernetes, &envConfig)
+
+	if err := overrideFields(&Kubernetes, &envConfig); err != nil {
+		return err
+	}
 
 	// Copy config file values over default values
-	overrideFields(&Kubernetes, &file.Kubernetes)
+	if err := overrideFields(&Kubernetes, &file.Kubernetes); err != nil {
+		return err
+	}
+
 	// And CLI overrides over config file and default values
-	overrideFields(&Kubernetes, &cli.Kubernetes)
+	if err := overrideFields(&Kubernetes, &cli.Kubernetes); err != nil {
+		return err
+	}
 
 	if Kubernetes.Kubeconfig != "" && !pathExists(Kubernetes.Kubeconfig) {
 		return fmt.Errorf("kubernetes kubeconfig file %q not found", Kubernetes.Kubeconfig)
@@ -759,7 +769,9 @@ func buildKubernetesConfig(exec kexec.Interface, cli, file *config, saPath strin
 
 func buildGatewayConfig(ctx *cli.Context, cli, file *config) error {
 	// Copy config file values over default values
-	overrideFields(&Gateway, &file.Gateway)
+	if err := overrideFields(&Gateway, &file.Gateway); err != nil {
+		return err
+	}
 
 	cli.Gateway.Mode = GatewayMode(ctx.String("gateway-mode"))
 	if cli.Gateway.Mode == GatewayModeDisabled {
@@ -772,7 +784,9 @@ func buildGatewayConfig(ctx *cli.Context, cli, file *config) error {
 		}
 	}
 	// And CLI overrides over config file and default values
-	overrideFields(&Gateway, &cli.Gateway)
+	if err := overrideFields(&Gateway, &cli.Gateway); err != nil {
+		return err
+	}
 
 	if Gateway.Mode != GatewayModeDisabled {
 		validModes := []string{string(GatewayModeShared), string(GatewayModeLocal)}
@@ -805,10 +819,14 @@ func buildGatewayConfig(ctx *cli.Context, cli, file *config) error {
 
 func buildMasterHAConfig(ctx *cli.Context, cli, file *config) error {
 	// Copy config file values over default values
-	overrideFields(&MasterHA, &file.MasterHA)
+	if err := overrideFields(&MasterHA, &file.MasterHA); err != nil {
+		return err
+	}
 
 	// And CLI overrides over config file and default values
-	overrideFields(&MasterHA, &cli.MasterHA)
+	if err := overrideFields(&MasterHA, &cli.MasterHA); err != nil {
+		return err
+	}
 
 	if MasterHA.ElectionLeaseDuration <= MasterHA.ElectionRenewDeadline {
 		return fmt.Errorf("Invalid HA election lease duration '%d'. "+
@@ -825,8 +843,13 @@ func buildMasterHAConfig(ctx *cli.Context, cli, file *config) error {
 }
 
 func buildDefaultConfig(cli, file *config) error {
-	overrideFields(&Default, &file.Default)
-	overrideFields(&Default, &cli.Default)
+	if err := overrideFields(&Default, &file.Default); err != nil {
+		return err
+	}
+
+	if err := overrideFields(&Default, &cli.Default); err != nil {
+		return err
+	}
 
 	// Legacy cluster-subnet CLI option overrides config file or --cluster-subnets
 	if clusterSubnet != "" {
@@ -885,6 +908,7 @@ func initConfigWithPath(ctx *cli.Context, exec kexec.Interface, saPath string, d
 	var retConfigFile string
 	var configFile string
 	var configFileIsDefault bool
+	var err error
 
 	configFile, configFileIsDefault = getConfigFilePath(ctx)
 
@@ -916,12 +940,21 @@ func initConfigWithPath(ctx *cli.Context, exec kexec.Interface, saPath string, d
 	}
 
 	// Build config that needs no special processing
-	overrideFields(&CNI, &cfg.CNI)
-	overrideFields(&CNI, &cliConfig.CNI)
+	if err = overrideFields(&CNI, &cfg.CNI); err != nil {
+		return "", err
+	}
+	if err = overrideFields(&CNI, &cliConfig.CNI); err != nil {
+		return "", err
+	}
 
 	// Logging setup
-	overrideFields(&Logging, &cfg.Logging)
-	overrideFields(&Logging, &cliConfig.Logging)
+	if err = overrideFields(&Logging, &cfg.Logging); err != nil {
+		return "", err
+	}
+	if err = overrideFields(&Logging, &cliConfig.Logging); err != nil {
+		return "", err
+	}
+
 	logrus.SetLevel(logrus.Level(Logging.Level))
 	if Logging.File != "" {
 		var file *os.File
@@ -1067,9 +1100,14 @@ func buildOvnAuth(exec kexec.Interface, northbound bool, cliAuth, confAuth *OvnA
 		auth.PrivKey = "/etc/openvswitch/ovn" + direction + "-privkey.pem"
 		auth.Cert = "/etc/openvswitch/ovn" + direction + "-cert.pem"
 	}
+
 	// Build the final auth config with overrides from CLI and config file
-	overrideFields(auth, confAuth)
-	overrideFields(auth, cliAuth)
+	if err := overrideFields(auth, confAuth); err != nil {
+		return nil, err
+	}
+	if err := overrideFields(auth, cliAuth); err != nil {
+		return nil, err
+	}
 
 	if address == "" {
 		if auth.PrivKey != "" || auth.Cert != "" || auth.CACert != "" {
