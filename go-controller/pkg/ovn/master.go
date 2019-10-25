@@ -70,14 +70,22 @@ func (oc *Controller) StartClusterMaster(masterNodeName string) error {
 	}
 	oc.masterSubnetAllocatorList = masterSubnetAllocatorList
 
+	if _, _, err := util.RunOVNNbctl("--columns=_uuid", "list", "port_group"); err == nil {
+		oc.portGroupSupport = true
+	}
+
+	// Multicast support requires portGroupSupport
+	if oc.portGroupSupport {
+		if _, _, err := util.RunOVNSbctl("--columns=_uuid", "list", "IGMP_Group"); err == nil {
+			oc.multicastSupport = true
+		}
+	}
+
 	if err := oc.SetupMaster(masterNodeName); err != nil {
 		logrus.Errorf("Failed to setup master (%v)", err)
 		return err
 	}
 
-	if _, _, err := util.RunOVNNbctl("--columns=_uuid", "list", "port_group"); err == nil {
-		oc.portGroupSupport = true
-	}
 	return nil
 }
 
@@ -104,6 +112,27 @@ func (oc *Controller) SetupMaster(masterNodeName string) error {
 		logrus.Errorf("Failed to create a single common distributed router for the cluster, "+
 			"stdout: %q, stderr: %q, error: %v", stdout, stderr, err)
 		return err
+	}
+
+	// If supported, enable IGMP relay on the router to forward multicast
+	// traffic between nodes.
+	if oc.multicastSupport {
+		stdout, stderr, err = util.RunOVNNbctl("--", "set", "logical_router",
+			OvnClusterRouter, "options:mcast_relay=\"true\"")
+		if err != nil {
+			logrus.Errorf("Failed to enable IGMP relay on the cluster router, "+
+				"stdout: %q, stderr: %q, error: %v", stdout, stderr, err)
+			return err
+		}
+
+		// Drop IP multicast globally. Multicast is allowed only if explicitly
+		// enabled in a namespace.
+		err = oc.createDefaultDenyMulticastPolicy()
+		if err != nil {
+			logrus.Errorf("Failed to create default deny multicast policy, error: %v",
+				err)
+			return err
+		}
 	}
 
 	// Create 2 load-balancers for east-west traffic.  One handles UDP and another handles TCP.
@@ -273,6 +302,20 @@ func (oc *Controller) ensureNodeLogicalNetwork(nodeName string, hostsubnet *net.
 	if err != nil {
 		logrus.Errorf("Failed to create a logical switch %v, stdout: %q, stderr: %q, error: %v", nodeName, stdout, stderr, err)
 		return err
+	}
+
+	// If supported, enable IGMP snooping and querier on the node.
+	if oc.multicastSupport {
+		stdout, stderr, err = util.RunOVNNbctl("set", "logical_switch",
+			nodeName, "other-config:mcast_snoop=\"true\"",
+			"other-config:mcast_querier=\"true\"",
+			"other-config:mcast_eth_src=\""+nodeLRPMac+"\"",
+			"other-config:mcast_ip4_src=\""+firstIP.IP.String()+"\"")
+		if err != nil {
+			logrus.Errorf("Failed to enable IGMP on logical switch %v, stdout: %q, stderr: %q, error: %v",
+				nodeName, stdout, stderr, err)
+			return err
+		}
 	}
 
 	// Connect the switch to the router.
