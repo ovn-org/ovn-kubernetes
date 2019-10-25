@@ -205,7 +205,7 @@ func (oc *Controller) WatchNetworkPolicy() error {
 	_, err := oc.watchFactory.AddPolicyHandler(cache.ResourceEventHandlerFuncs{
 		AddFunc: func(obj interface{}) {
 			policy := obj.(*kapisnetworking.NetworkPolicy)
-			oc.AddNetworkPolicy(policy)
+			oc.addNetworkPolicy(policy)
 			return
 		},
 		UpdateFunc: func(old, newer interface{}) {
@@ -213,7 +213,7 @@ func (oc *Controller) WatchNetworkPolicy() error {
 			newPolicy := newer.(*kapisnetworking.NetworkPolicy)
 			if !reflect.DeepEqual(oldPolicy, newPolicy) {
 				oc.deleteNetworkPolicy(oldPolicy)
-				oc.AddNetworkPolicy(newPolicy)
+				oc.addNetworkPolicy(newPolicy)
 			}
 			return
 		},

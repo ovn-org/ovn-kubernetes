@@ -5,7 +5,10 @@ import (
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/factory"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
 	"github.com/sirupsen/logrus"
+	kapi "k8s.io/api/core/v1"
 	knet "k8s.io/api/networking/v1"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/client-go/tools/cache"
 	"net"
 	"sort"
 	"strings"
@@ -165,6 +168,207 @@ func (gp *gressPolicy) delAddressSet(hashedAddressSet string) (string, string, b
 	return oldL3Match, gp.getL3MatchFromAddressSet(), true
 }
 
+// handlePeerPodSelectorAddUpdate adds the IP address of a pod that has been
+// selected as a peer by a NetworkPolicy's ingress/egress section to that
+// ingress/egress address set
+func (oc *Controller) handlePeerPodSelectorAddUpdate(np *namespacePolicy,
+	addressMap map[string]bool, addressSet string, obj interface{}) {
+
+	pod := obj.(*kapi.Pod)
+	podAnnotation, err := util.UnmarshalPodAnnotation(pod.Annotations["ovn"])
+	if err != nil {
+		return
+	}
+	ipAddress := podAnnotation.IP.IP.String()
+	if addressMap[ipAddress] {
+		return
+	}
+
+	np.Lock()
+	defer np.Unlock()
+	if np.deleted {
+		return
+	}
+
+	addressMap[ipAddress] = true
+	addresses := make([]string, 0, len(addressMap))
+	for k := range addressMap {
+		addresses = append(addresses, k)
+	}
+	oc.setAddressSet(addressSet, addresses)
+
+}
+
+// handlePeerPodSelectorDelete removes the IP address of a pod that no longer
+// matches a NetworkPolicy ingress/egress section's selectors from that
+// ingress/egress address set
+func (oc *Controller) handlePeerPodSelectorDelete(np *namespacePolicy,
+	addressMap map[string]bool, addressSet string, obj interface{}) {
+
+	pod := obj.(*kapi.Pod)
+	podAnnotation, err := util.UnmarshalPodAnnotation(pod.Annotations["ovn"])
+	if err != nil {
+		return
+	}
+	ipAddress := podAnnotation.IP.IP.String()
+
+	np.Lock()
+	defer np.Unlock()
+	if np.deleted {
+		return
+	}
+
+	if !addressMap[ipAddress] {
+		return
+	}
+
+	delete(addressMap, ipAddress)
+
+	addresses := make([]string, 0, len(addressMap))
+	for k := range addressMap {
+		addresses = append(addresses, k)
+	}
+	oc.setAddressSet(addressSet, addresses)
+}
+
+func (oc *Controller) handlePeerPodSelector(
+	policy *knet.NetworkPolicy, podSelector *metav1.LabelSelector,
+	addressSet string, addressMap map[string]bool, np *namespacePolicy) {
+
+	h, err := oc.watchFactory.AddFilteredPodHandler(policy.Namespace,
+		podSelector,
+		cache.ResourceEventHandlerFuncs{
+			AddFunc: func(obj interface{}) {
+				oc.handlePeerPodSelectorAddUpdate(np, addressMap, addressSet, obj)
+			},
+			DeleteFunc: func(obj interface{}) {
+				oc.handlePeerPodSelectorDelete(np, addressMap, addressSet, obj)
+			},
+			UpdateFunc: func(oldObj, newObj interface{}) {
+				oc.handlePeerPodSelectorAddUpdate(np, addressMap, addressSet, newObj)
+			},
+		}, nil)
+	if err != nil {
+		logrus.Errorf("error watching peer pods for policy %s in namespace %s: %v",
+			policy.Name, policy.Namespace, err)
+		return
+	}
+
+	np.podHandlerList = append(np.podHandlerList, h)
+}
+
+func (oc *Controller) handlePeerNamespaceAndPodSelector(
+	policy *knet.NetworkPolicy,
+	namespaceSelector *metav1.LabelSelector,
+	podSelector *metav1.LabelSelector,
+	addressSet string,
+	addressMap map[string]bool,
+	np *namespacePolicy) {
+
+	namespaceHandler, err := oc.watchFactory.AddFilteredNamespaceHandler("",
+		namespaceSelector,
+		cache.ResourceEventHandlerFuncs{
+			AddFunc: func(obj interface{}) {
+				namespace := obj.(*kapi.Namespace)
+				np.Lock()
+				alreadyDeleted := np.deleted
+				np.Unlock()
+				if alreadyDeleted {
+					return
+				}
+
+				// The AddFilteredPodHandler call might call handlePeerPodSelectorAddUpdate
+				// on existing pods so we can't be holding the lock at this point
+				podHandler, err := oc.watchFactory.AddFilteredPodHandler(namespace.Name,
+					podSelector,
+					cache.ResourceEventHandlerFuncs{
+						AddFunc: func(obj interface{}) {
+							oc.handlePeerPodSelectorAddUpdate(np, addressMap, addressSet, obj)
+						},
+						DeleteFunc: func(obj interface{}) {
+							oc.handlePeerPodSelectorDelete(np, addressMap, addressSet, obj)
+						},
+						UpdateFunc: func(oldObj, newObj interface{}) {
+							oc.handlePeerPodSelectorAddUpdate(np, addressMap, addressSet, newObj)
+						},
+					}, nil)
+				if err != nil {
+					logrus.Errorf("error watching pods in namespace %s for policy %s: %v", namespace.Name, policy.Name, err)
+					return
+				}
+				np.Lock()
+				defer np.Unlock()
+				if np.deleted {
+					_ = oc.watchFactory.RemovePodHandler(podHandler)
+					return
+				}
+				np.podHandlerList = append(np.podHandlerList, podHandler)
+			},
+			DeleteFunc: func(obj interface{}) {
+				return
+			},
+			UpdateFunc: func(oldObj, newObj interface{}) {
+				return
+			},
+		}, nil)
+	if err != nil {
+		logrus.Errorf("error watching namespaces for policy %s: %v",
+			policy.Name, err)
+		return
+	}
+	np.nsHandlerList = append(np.nsHandlerList, namespaceHandler)
+}
+
+type peerNamespaceSelectorModifyFn func(*gressPolicy, *namespacePolicy, string, string)
+
+func (oc *Controller) handlePeerNamespaceSelector(
+	policy *knet.NetworkPolicy,
+	namespaceSelector *metav1.LabelSelector,
+	gress *gressPolicy, np *namespacePolicy,
+	modifyFn peerNamespaceSelectorModifyFn) {
+
+	h, err := oc.watchFactory.AddFilteredNamespaceHandler("",
+		namespaceSelector,
+		cache.ResourceEventHandlerFuncs{
+			AddFunc: func(obj interface{}) {
+				namespace := obj.(*kapi.Namespace)
+				np.Lock()
+				defer np.Unlock()
+				if np.deleted {
+					return
+				}
+				hashedAddressSet := hashedAddressSet(namespace.Name)
+				oldL3Match, newL3Match, added := gress.addAddressSet(hashedAddressSet)
+				if added {
+					modifyFn(gress, np, oldL3Match, newL3Match)
+				}
+			},
+			DeleteFunc: func(obj interface{}) {
+				namespace := obj.(*kapi.Namespace)
+				np.Lock()
+				defer np.Unlock()
+				if np.deleted {
+					return
+				}
+				hashedAddressSet := hashedAddressSet(namespace.Name)
+				oldL3Match, newL3Match, removed := gress.delAddressSet(hashedAddressSet)
+				if removed {
+					modifyFn(gress, np, oldL3Match, newL3Match)
+				}
+			},
+			UpdateFunc: func(oldObj, newObj interface{}) {
+				return
+			},
+		}, nil)
+	if err != nil {
+		logrus.Errorf("error watching namespaces for policy %s: %v",
+			policy.Name, err)
+		return
+	}
+
+	np.nsHandlerList = append(np.nsHandlerList, h)
+}
+
 const (
 	toLport   = "to-lport"
 	addACL    = "add"
@@ -222,8 +426,9 @@ func (oc *Controller) syncNetworkPolicies(networkPolicies []interface{}) {
 	}
 }
 
-// AddNetworkPolicy adds network policy and create corresponding acl rules
-func (oc *Controller) AddNetworkPolicy(policy *knet.NetworkPolicy) {
+// AddNetworkPolicy creates and applies OVN ACLs to pod logical switch ports
+// from Kubernetes NetworkPolicy objects
+func (oc *Controller) addNetworkPolicy(policy *knet.NetworkPolicy) {
 	if oc.portGroupSupport {
 		oc.addNetworkPolicyPortGroup(policy)
 	} else {

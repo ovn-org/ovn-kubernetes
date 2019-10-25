@@ -164,7 +164,14 @@ func (oc *Controller) deleteLogicalPort(pod *kapi.Pod) {
 			out, stderr, err)
 	}
 
-	ipAddress := oc.getIPFromOvnAnnotation(pod.Annotations["ovn"])
+	var podIP net.IP
+	podAnnotation, err := util.UnmarshalPodAnnotation(pod.Annotations["ovn"])
+	if err != nil {
+		logrus.Errorf("Error in deleting pod logical port; failed "+
+			"to read pod annotation: %v", err)
+	} else {
+		podIP = podAnnotation.IP.IP
+	}
 
 	delete(oc.logicalPortCache, logicalPort)
 
@@ -180,7 +187,7 @@ func (oc *Controller) deleteLogicalPort(pod *kapi.Pod) {
 		oc.deleteACLDenyOld(pod.Namespace, pod.Spec.NodeName, logicalPort,
 			"Egress")
 	}
-	oc.deletePodFromNamespaceAddressSet(pod.Namespace, ipAddress)
+	oc.deletePodFromNamespaceAddressSet(pod.Namespace, podIP)
 	return
 }
 
@@ -294,7 +301,11 @@ func (oc *Controller) addLogicalPort(pod *kapi.Pod) {
 		return
 	}
 
-	annotation, err := util.MarshalPodAnnotation(podCIDR, podMac, gatewayIP.IP, nil)
+	annotation, err := util.MarshalPodAnnotation(&util.PodAnnotation{
+		IP:  podCIDR,
+		MAC: podMac,
+		GW:  gatewayIP.IP,
+	})
 	if err != nil {
 		logrus.Errorf("error creating pod network annotation: %v", err)
 		return
@@ -306,7 +317,7 @@ func (oc *Controller) addLogicalPort(pod *kapi.Pod) {
 	if err != nil {
 		logrus.Errorf("Failed to set annotation on pod %s - %v", pod.Name, err)
 	}
-	oc.addPodToNamespaceAddressSet(pod.Namespace, podIP.String())
+	oc.addPodToNamespaceAddressSet(pod.Namespace, podIP)
 
 	return
 }

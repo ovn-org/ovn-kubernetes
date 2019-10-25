@@ -3,7 +3,6 @@ package cni
 import (
 	"encoding/json"
 	"fmt"
-	"net"
 	"time"
 
 	"github.com/sirupsen/logrus"
@@ -105,11 +104,6 @@ func (pr *PodRequest) cmdAdd() *PodResult {
 		return nil
 	}
 
-	if podInfo.IP == "" || podInfo.MAC == "" {
-		logrus.Errorf("failed in pod annotation key extract")
-		return nil
-	}
-
 	ingress, egress, err := extractPodBandwidthResources(annotation)
 	if err != nil {
 		logrus.Errorf("failed to parse bandwidth request: %v", err)
@@ -170,13 +164,8 @@ func (pr *PodRequest) getCNIResult(podInterfaceInfo *PodInterfaceInfo) *current.
 	}
 
 	// Build the result structure to pass back to the runtime
-	addr, addrNet, err := net.ParseCIDR(podInterfaceInfo.IP)
-	if err != nil {
-		logrus.Errorf("Failed to parse IP address %q: %v", podInterfaceInfo.IP, err)
-		return nil
-	}
 	ipVersion := "6"
-	if addr.To4() != nil {
+	if podInterfaceInfo.IP.IP.To4() != nil {
 		ipVersion = "4"
 	}
 	return &current.Result{
@@ -185,8 +174,8 @@ func (pr *PodRequest) getCNIResult(podInterfaceInfo *PodInterfaceInfo) *current.
 			{
 				Version:   ipVersion,
 				Interface: current.Int(1),
-				Address:   net.IPNet{IP: addr, Mask: addrNet.Mask},
-				Gateway:   net.ParseIP(podInterfaceInfo.GW),
+				Address:   *podInterfaceInfo.IP,
+				Gateway:   podInterfaceInfo.GW,
 			},
 		},
 	}
