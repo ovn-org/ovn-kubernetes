@@ -2,13 +2,14 @@ package ovn
 
 import (
 	"fmt"
+	"strings"
+
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/factory"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
 	"github.com/sirupsen/logrus"
 	kapi "k8s.io/api/core/v1"
 	knet "k8s.io/api/networking/v1"
 	"k8s.io/client-go/tools/cache"
-	"strings"
 )
 
 func (oc *Controller) syncNetworkPoliciesPortGroup(
