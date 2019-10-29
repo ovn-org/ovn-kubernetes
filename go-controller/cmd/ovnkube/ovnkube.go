@@ -6,6 +6,7 @@ import (
 	"io/ioutil"
 	"os"
 	"os/signal"
+	"path/filepath"
 	"runtime"
 	"strings"
 	"syscall"
@@ -14,6 +15,7 @@ import (
 
 	"github.com/sirupsen/logrus"
 	"github.com/urfave/cli"
+	"gopkg.in/fsnotify/fsnotify.v1"
 
 	ovncluster "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/cluster"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
@@ -164,11 +166,12 @@ func runOvnKube(ctx *cli.Context) error {
 	}
 
 	exec := kexec.New()
-	if _, err := config.InitConfig(ctx, exec, nil); err != nil {
+	configFile, err := config.InitConfig(ctx, exec, nil)
+	if err != nil {
 		return err
 	}
 
-	if err := util.SetExec(exec); err != nil {
+	if err = util.SetExec(exec); err != nil {
 		return fmt.Errorf("failed to initialize exec helper: %v", err)
 	}
 
@@ -208,6 +211,12 @@ func runOvnKube(ctx *cli.Context) error {
 		ovncluster.StartMetricsServer(config.Kubernetes.MetricsBindAddress)
 	}
 
+	// Set up a watch on our config file; if it changes, we exit -
+	// (we don't have the ability to dynamically reload config changes).
+	if err := watchForChanges(configFile); err != nil {
+		return fmt.Errorf("unable to setup configuration watch: %v", err)
+	}
+
 	if master != "" {
 		if runtime.GOOS == "windows" {
 			return fmt.Errorf("Windows is not supported as master node")
@@ -233,4 +242,69 @@ func runOvnKube(ctx *cli.Context) error {
 
 	// run forever
 	select {}
+}
+
+// watchForChanges exits if the configuration file changed.
+func watchForChanges(configPath string) error {
+	if configPath == "" {
+		return nil
+	}
+	configPath, err := filepath.Abs(configPath)
+	if err != nil {
+		return err
+	}
+
+	watcher, err := fsnotify.NewWatcher()
+	if err != nil {
+		return err
+	}
+	defer watcher.Close()
+
+	go func() {
+		for {
+			select {
+			case event, ok := <-watcher.Events:
+				if !ok {
+					return
+				}
+				if event.Op&fsnotify.Write == fsnotify.Write {
+					logrus.Infof("Configuration file %s changed, exiting...", event.Name)
+					os.Exit(0)
+					return
+				}
+			case err, ok := <-watcher.Errors:
+				if !ok {
+					return
+				}
+				logrus.Errorf("fsnotify error %v", err)
+			}
+		}
+	}()
+
+	// Watch all symlinks for changes
+	p := configPath
+	maxdepth := 100
+	for depth := 0; depth < maxdepth; depth++ {
+		if err := watcher.Add(p); err != nil {
+			return err
+		}
+		logrus.Infof("Watching config file %s for changes", p)
+
+		stat, err := os.Lstat(p)
+		if err != nil {
+			return err
+		}
+
+		// configmaps are usually symlinks
+		if stat.Mode()&os.ModeSymlink > 0 {
+			p, err = filepath.EvalSymlinks(p)
+			if err != nil {
+				return err
+			}
+		} else {
+			break
+		}
+	}
+
+	return nil
 }
