@@ -193,7 +193,7 @@ func runOvnKube(ctx *cli.Context) error {
 			return fmt.Errorf("cannot specify cleanup-node together with 'init-node or 'init-master'")
 		}
 
-		if err := ovncluster.CleanupClusterNode(cleanupNode); err != nil {
+		if err = ovncluster.CleanupClusterNode(cleanupNode); err != nil {
 			return err
 		}
 		return nil
