@@ -53,6 +53,9 @@ type Controller struct {
 	// For each namespace, a lock to protect critical regions
 	namespaceMutex map[string]*sync.Mutex
 
+	// Need to make calls to namespaceMutex also thread-safe
+	namespaceMutexMutex sync.Mutex
+
 	// For each namespace, a map of policy name to 'namespacePolicy'.
 	namespacePolicies map[string]map[string]*namespacePolicy
 
@@ -101,6 +104,7 @@ func NewOvnController(kubeClient kubernetes.Interface, wf *factory.WatchFactory)
 		namespaceAddressSet:      make(map[string]map[string]bool),
 		namespacePolicies:        make(map[string]map[string]*namespacePolicy),
 		namespaceMutex:           make(map[string]*sync.Mutex),
+		namespaceMutexMutex:      sync.Mutex{},
 		lspIngressDenyCache:      make(map[string]int),
 		lspEgressDenyCache:       make(map[string]int),
 		lspMutex:                 &sync.Mutex{},
