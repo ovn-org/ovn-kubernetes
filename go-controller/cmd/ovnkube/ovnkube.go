@@ -222,6 +222,8 @@ func runOvnKube(ctx *cli.Context) error {
 			return fmt.Errorf("Windows is not supported as master node")
 		}
 
+		ovn.RegisterMetrics()
+
 		// run the HA master controller to init the master
 		ovnHAController := ovn.NewHAMasterController(clientset, factory, master)
 		if err := ovnHAController.StartHAMasterController(); err != nil {
