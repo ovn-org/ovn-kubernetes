@@ -157,7 +157,7 @@ func initLocalnetGateway(nodeName string, clusterIPSubnet []string,
 			localnetBridgeNextHop, err)
 	}
 
-	ifaceID, macAddress, err := bridgedGatewayNodeSetup(nodeName, localnetBridgeName)
+	ifaceID, macAddress, err := bridgedGatewayNodeSetup(nodeName, localnetBridgeName, localnetBridgeName, true)
 	if err != nil {
 		return fmt.Errorf("failed to set up shared interface gateway: %v", err)
 	}
