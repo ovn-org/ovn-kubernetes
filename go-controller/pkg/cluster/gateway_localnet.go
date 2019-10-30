@@ -7,6 +7,8 @@ import (
 	"k8s.io/client-go/tools/cache"
 	"reflect"
 	"strings"
+	"sync"
+	"time"
 
 	"github.com/coreos/go-iptables/iptables"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
@@ -156,6 +158,22 @@ func initLocalnetGateway(nodeName string, clusterIPSubnet []string,
 		return fmt.Errorf("failed to assign ip address to %s (%v)",
 			localnetBridgeNextHop, err)
 	}
+
+	wg := sync.WaitGroup{}
+	wg.Add(1)
+	go func() {
+		wg.Done()
+		for {
+			stdout, _, _ := util.RunIP("addr", "show", localnetBridgeNextHop)
+			if !strings.Contains(stdout, localnetGatewayNextHopSubnet) {
+				_, _, _ = util.RunIP("addr", "add",
+					localnetGatewayNextHopSubnet,
+					"dev", localnetBridgeNextHop)
+			}
+			time.Sleep(5*time.Second)
+		}
+	}()
+	wg.Wait()
 
 	ifaceID, macAddress, err := bridgedGatewayNodeSetup(nodeName, localnetBridgeName)
 	if err != nil {
