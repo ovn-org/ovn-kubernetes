@@ -45,6 +45,17 @@ func isOVNControllerReady(name string) (bool, error) {
 	}
 
 	err = wait.PollImmediate(500*time.Millisecond, 60*time.Second, func() (bool, error) {
+		_, _, err := util.RunOVSVsctl("--", "br-exists", "br-int")
+		if err != nil {
+			return false, nil
+		}
+		return true, nil
+	})
+	if err != nil {
+		return false, fmt.Errorf("timed out checking whether br-int exists or not on node %s: %v", name, err)
+	}
+
+	err = wait.PollImmediate(500*time.Millisecond, 60*time.Second, func() (bool, error) {
 		flows, _, err := util.RunOVSOfctl("dump-flows", "br-int")
 		return len(flows) > 0, err
 	})
