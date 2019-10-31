@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"reflect"
 	"strings"
-	"sync"
 	"time"
 
 	"k8s.io/client-go/tools/cache"
@@ -160,21 +159,15 @@ func initLocalnetGateway(nodeName string, clusterIPSubnet []string,
 			localnetBridgeNextHop, err)
 	}
 
-	wg := sync.WaitGroup{}
-	wg.Add(1)
-	go func() {
-		wg.Done()
-		for {
-			stdout, _, _ := util.RunIP("addr", "show", localnetBridgeNextHop)
-			if !strings.Contains(stdout, localnetGatewayNextHopSubnet) {
-				_, _, _ = util.RunIP("addr", "add",
-					localnetGatewayNextHopSubnet,
-					"dev", localnetBridgeNextHop)
-			}
-			time.Sleep(5 * time.Second)
+	for i := 0; i < 5; i++ {
+		stdout, _, _ := util.RunIP("addr", "show", localnetBridgeNextHop)
+		if !strings.Contains(stdout, localnetGatewayNextHopSubnet) {
+			_, _, _ = util.RunIP("addr", "add",
+				localnetGatewayNextHopSubnet,
+				"dev", localnetBridgeNextHop)
 		}
-	}()
-	wg.Wait()
+		time.Sleep(2 * time.Second)
+	}
 
 	ifaceID, macAddress, err := bridgedGatewayNodeSetup(nodeName, localnetBridgeName, localnetBridgeName, true)
 	if err != nil {
