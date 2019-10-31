@@ -26,6 +26,7 @@ func defaultFakeExec(nodeSubnet, nodeName string) (*ovntest.FakeExec, string, st
 		udpLBUUID  string = "6d3142fc-53e8-4ac1-88e6-46094a5a9957"
 		joinLRPMAC string = "00:00:00:83:25:1C"
 		lrpMAC     string = "00:00:00:05:46:C3"
+		mgmtMAC    string = "01:02:03:04:05:06"
 	)
 
 	fexec := ovntest.NewFakeExec()
@@ -81,6 +82,7 @@ func defaultFakeExec(nodeSubnet, nodeName string) (*ovntest.FakeExec, string, st
 		"ovn-nbctl --timeout=15 -- --may-exist lsp-add " + nodeName + " stor-" + nodeName + " -- set logical_switch_port stor-" + nodeName + " type=router options:router-port=rtos-" + nodeName + " addresses=\"" + lrpMAC + "\"",
 		"ovn-nbctl --timeout=15 set logical_switch " + nodeName + " load_balancer=" + tcpLBUUID,
 		"ovn-nbctl --timeout=15 add logical_switch " + nodeName + " load_balancer " + udpLBUUID,
+		"ovn-nbctl --timeout=15 -- --may-exist lsp-add " + nodeName + " k8s-" + nodeName + " -- lsp-set-addresses " + "k8s-" + nodeName + " " + mgmtMAC + " " + nodeMgmtPortIP + " -- --if-exists remove logical_switch " + nodeName + " other-config exclude_ips",
 	})
 
 	return fexec, tcpLBUUID, udpLBUUID
@@ -106,14 +108,24 @@ var _ = Describe("Master Operations", func() {
 
 		app.Action = func(ctx *cli.Context) error {
 			const (
-				nodeName   string = "node1"
-				nodeSubnet string = "10.1.0.0/24"
+				nodeName    string = "node1"
+				nodeSubnet  string = "10.1.0.0/24"
+				clusterCIDR string = "10.1.0.0/16"
+				mgmtMAC     string = "01:02:03:04:05:06"
 			)
 
 			fexec, tcpLBUUID, udpLBUUID := defaultFakeExec(nodeSubnet, nodeName)
 
+			testNode := v1.Node{ObjectMeta: metav1.ObjectMeta{
+				Name: nodeName,
+				Annotations: map[string]string{
+					OvnNodeManagementPortMacAddress: mgmtMAC,
+					OvnHostSubnet:                   nodeSubnet,
+				},
+			}}
+
 			fakeClient := fake.NewSimpleClientset(&v1.NodeList{
-				Items: []v1.Node{{ObjectMeta: metav1.ObjectMeta{Name: nodeName}}},
+				Items: []v1.Node{testNode},
 			})
 
 			err := util.SetExec(fexec)
@@ -142,6 +154,8 @@ var _ = Describe("Master Operations", func() {
 			updatedNode, err := fakeClient.CoreV1().Nodes().Get(nodeName, metav1.GetOptions{})
 			Expect(err).NotTo(HaveOccurred())
 			Expect(updatedNode.Annotations).To(HaveKeyWithValue(OvnHostSubnet, nodeSubnet))
+			Expect(updatedNode.Annotations).To(HaveKeyWithValue(OvnNodeManagementPortMacAddress, mgmtMAC))
+			Eventually(func() bool { return fexec.CalledMatchesExpected() }, 2).Should(BeTrue())
 			return nil
 		}
 
@@ -160,19 +174,22 @@ var _ = Describe("Master Operations", func() {
 
 		app.Action = func(ctx *cli.Context) error {
 			const (
-				nodeName   string = "node1"
-				nodeSubnet string = "10.1.3.0/24"
+				nodeName    string = "node1"
+				nodeSubnet  string = "10.1.3.0/24"
+				clusterCIDR string = "10.1.0.0/16"
+				mgmtMAC     string = "01:02:03:04:05:06"
 			)
 
-			fakeClient := fake.NewSimpleClientset(&v1.NodeList{
-				Items: []v1.Node{
-					{ObjectMeta: metav1.ObjectMeta{
-						Name: nodeName,
-						Annotations: map[string]string{
-							OvnHostSubnet: nodeSubnet,
-						},
-					}},
+			testNode := v1.Node{ObjectMeta: metav1.ObjectMeta{
+				Name: nodeName,
+				Annotations: map[string]string{
+					OvnNodeManagementPortMacAddress: mgmtMAC,
+					OvnHostSubnet:                   nodeSubnet,
 				},
+			}}
+
+			fakeClient := fake.NewSimpleClientset(&v1.NodeList{
+				Items: []v1.Node{testNode},
 			})
 			fakeClient.PrependReactor("patch", "nodes", func(action kubetesting.Action) (bool, kuberuntime.Object, error) {
 				// Should not be called as the node already has a subnet
@@ -207,6 +224,8 @@ var _ = Describe("Master Operations", func() {
 			updatedNode, err := fakeClient.CoreV1().Nodes().Get(nodeName, metav1.GetOptions{})
 			Expect(err).NotTo(HaveOccurred())
 			Expect(updatedNode.Annotations).To(HaveKeyWithValue(OvnHostSubnet, nodeSubnet))
+			Expect(updatedNode.Annotations).To(HaveKeyWithValue(OvnNodeManagementPortMacAddress, mgmtMAC))
+			Eventually(func() bool { return fexec.CalledMatchesExpected() }, 2).Should(BeTrue())
 			return nil
 		}
 
@@ -232,6 +251,7 @@ var _ = Describe("Master Operations", func() {
 				masterGWCIDR      string = "10.128.2.1/24"
 				masterMgmtPortIP  string = "10.128.2.2"
 				lrpMAC            string = "00:00:00:05:46:C3"
+				masterMgmtPortMAC string = "00:00:00:55:66:77"
 			)
 
 			fexec := ovntest.NewFakeExec()
@@ -296,13 +316,16 @@ subnet=%s
 				"ovn-nbctl --timeout=15 --may-exist lrp-add ovn_cluster_router rtos-" + masterName + " " + lrpMAC + " " + masterGWCIDR,
 				"ovn-nbctl --timeout=15 -- --may-exist ls-add " + masterName + " -- set logical_switch " + masterName + " other-config:subnet=" + masterSubnet + " other-config:exclude_ips=" + masterMgmtPortIP + " external-ids:gateway_ip=" + masterGWCIDR,
 				"ovn-nbctl --timeout=15 -- --may-exist lsp-add " + masterName + " stor-" + masterName + " -- set logical_switch_port stor-" + masterName + " type=router options:router-port=rtos-" + masterName + " addresses=\"" + lrpMAC + "\"",
+
+				"ovn-nbctl --timeout=15 -- --may-exist lsp-add " + masterName + " k8s-" + masterName + " -- lsp-set-addresses " + "k8s-" + masterName + " " + masterMgmtPortMAC + " " + masterMgmtPortIP + " -- --if-exists remove logical_switch " + masterName + " other-config exclude_ips",
 			})
 
 			masterNode := v1.Node{
 				ObjectMeta: metav1.ObjectMeta{
 					Name: masterName,
 					Annotations: map[string]string{
-						OvnHostSubnet: masterSubnet,
+						OvnHostSubnet:                   masterSubnet,
+						OvnNodeManagementPortMacAddress: masterMgmtPortMAC,
 					},
 				},
 				Status: v1.NodeStatus{

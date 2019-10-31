@@ -41,7 +41,10 @@ func getIntfName(gatewayIntf string) (string, error) {
 	// created by us using util.NicToBridge() or it was pre-created by the user.
 
 	// Is intfName a port of gatewayIntf?
-	intfName := util.GetNicName(gatewayIntf)
+	intfName, err := util.GetNicName(gatewayIntf)
+	if err != nil {
+		return "", err
+	}
 	_, stderr, err := util.RunOVSVsctl("--if-exists", "get",
 		"interface", intfName, "ofport")
 	if err != nil {

@@ -21,6 +21,8 @@ const (
 	OvnHostSubnet = "ovn_host_subnet"
 	// OvnClusterRouter is the name of the distributed router
 	OvnClusterRouter = "ovn_cluster_router"
+	// OvnNodeManagementPortMacAddress is the constant string representing the annotation key
+	OvnNodeManagementPortMacAddress = "k8s.ovn.org/node-mgmt-port-mac-address"
 )
 
 // StartClusterMaster runs a subnet IPAM and a controller that watches arrival/departure
@@ -174,6 +176,58 @@ func (oc *Controller) SetupMaster(masterNodeName string) error {
 	return nil
 }
 
+func parseNodeManagementPortMacAddr(node *kapi.Node) (string, error) {
+	macAddress, ok := node.Annotations[OvnNodeManagementPortMacAddress]
+	if !ok {
+		logrus.Errorf("macAddress annotation not found for node %q ", node.Name)
+		return "", nil
+	}
+
+	_, err := net.ParseMAC(macAddress)
+	if err != nil {
+		return "", fmt.Errorf("Error %v in parsing node %v macAddress %v", err, node.Name, macAddress)
+	}
+
+	return macAddress, nil
+}
+
+func (oc *Controller) syncNodeManagementPort(node *kapi.Node) error {
+
+	macAddress, err := parseNodeManagementPortMacAddr(node)
+	if err != nil {
+		return err
+	}
+
+	if macAddress == "" {
+		// When macAddress was removed, delete the switch port
+		stdout, stderr, err := util.RunOVNNbctl("--", "--if-exists", "lsp-del", "k8s-"+node.Name)
+		if err != nil {
+			logrus.Errorf("Failed to delete logical port to switch, stdout: %q, stderr: %q, error: %v", stdout, stderr, err)
+		}
+
+		return nil
+	}
+
+	subnet, err := parseNodeHostSubnet(node)
+	if err != nil {
+		return err
+	}
+
+	_, portIP := util.GetNodeWellKnownAddresses(subnet)
+
+	// Create this node's management logical port on the node switch
+	stdout, stderr, err := util.RunOVNNbctl(
+		"--", "--may-exist", "lsp-add", node.Name, "k8s-"+node.Name,
+		"--", "lsp-set-addresses", "k8s-"+node.Name, macAddress+" "+portIP.IP.String(),
+		"--", "--if-exists", "remove", "logical_switch", node.Name, "other-config", "exclude_ips")
+	if err != nil {
+		logrus.Errorf("Failed to add logical port to switch, stdout: %q, stderr: %q, error: %v", stdout, stderr, err)
+		return err
+	}
+
+	return nil
+}
+
 func parseNodeHostSubnet(node *kapi.Node) (*net.IPNet, error) {
 	sub, ok := node.Annotations[OvnHostSubnet]
 	if !ok {
@@ -189,9 +243,10 @@ func parseNodeHostSubnet(node *kapi.Node) (*net.IPNet, error) {
 }
 
 func (oc *Controller) ensureNodeLogicalNetwork(nodeName string, hostsubnet *net.IPNet) error {
-	ip := util.NextIP(hostsubnet.IP)
-	n, _ := hostsubnet.Mask.Size()
-	firstIP := fmt.Sprintf("%s/%d", ip.String(), n)
+
+	// Get firstIP for gateway.  Skip the second address of the LogicalSwitch's
+	// subnet since we set it aside for the management port on that node.
+	firstIP, secondIP := util.GetNodeWellKnownAddresses(hostsubnet)
 
 	nodeLRPMac, stderr, err := util.RunOVNNbctl("--if-exist", "get", "logical_router_port", "rtos-"+nodeName, "mac")
 	if err != nil {
@@ -203,21 +258,18 @@ func (oc *Controller) ensureNodeLogicalNetwork(nodeName string, hostsubnet *net.
 	}
 
 	// Create a router port and provide it the first address on the node's host subnet
-	_, stderr, err = util.RunOVNNbctl("--may-exist", "lrp-add", OvnClusterRouter, "rtos-"+nodeName, nodeLRPMac, firstIP)
+	_, stderr, err = util.RunOVNNbctl("--may-exist", "lrp-add", OvnClusterRouter, "rtos-"+nodeName,
+		nodeLRPMac, firstIP.String())
 	if err != nil {
 		logrus.Errorf("Failed to add logical port to router, stderr: %q, error: %v", stderr, err)
 		return err
 	}
 
-	// Skip the second address of the LogicalSwitch's subnet since we set it aside for the
-	// management port on that node.
-	secondIP := util.NextIP(ip)
-
 	// Create a logical switch and set its subnet.
 	stdout, stderr, err := util.RunOVNNbctl("--", "--may-exist", "ls-add", nodeName,
 		"--", "set", "logical_switch", nodeName, "other-config:subnet="+hostsubnet.String(),
-		"other-config:exclude_ips="+secondIP.String(),
-		"external-ids:gateway_ip="+firstIP)
+		"other-config:exclude_ips="+secondIP.IP.String(),
+		"external-ids:gateway_ip="+firstIP.String())
 	if err != nil {
 		logrus.Errorf("Failed to create a logical switch %v, stdout: %q, stderr: %q, error: %v", nodeName, stdout, stderr, err)
 		return err

@@ -39,15 +39,22 @@ func intToIP(i *big.Int) net.IP {
 func GetPortAddresses(portName string) (net.HardwareAddr, net.IP, error) {
 	out, _, err := RunOVNNbctl("get", "logical_switch_port", portName, "dynamic_addresses")
 	if err != nil {
-		return nil, nil, fmt.Errorf("Error while obtaining addresses for %s: %v", portName, err)
+		return nil, nil, fmt.Errorf("Error while obtaining dynamic addresses for %s: %v", portName, err)
 	}
 	if out == "[]" {
+		out, _, err = RunOVNNbctl("get", "logical_switch_port", portName, "addresses")
+		if err != nil {
+			return nil, nil, fmt.Errorf("Error while obtaining static addresses for %s: %v", portName, err)
+		}
+	}
+	if out == "[]" || out == "[dynamic]" {
 		// No addresses
 		return nil, nil, nil
 	}
 
-	// dynamic addresses have format "0a:00:00:00:00:01 192.168.1.3".
-	outStr := strings.Trim(out, `"`)
+	// dynamic addresses have format "0a:00:00:00:00:01 192.168.1.3"
+	// static addresses have format ["0a:00:00:00:00:01 192.168.1.3"]
+	outStr := strings.Trim(out, `"[]`)
 	addresses := strings.Split(outStr, " ")
 	if len(addresses) != 2 {
 		return nil, nil, fmt.Errorf("Error while obtaining addresses for %s", portName)
@@ -86,4 +93,12 @@ func GetOVSPortMACAddress(portName string) (string, error) {
 		macAddress = strings.ToLower(strings.Replace(stdout, "-", ":", -1))
 	}
 	return macAddress, nil
+}
+
+// GetNodeWellKnownAddresses returns routerIP, Management Port IP and prefix len
+// for a given subnet
+func GetNodeWellKnownAddresses(subnet *net.IPNet) (*net.IPNet, *net.IPNet) {
+	routerIP := NextIP(subnet.IP)
+	return &net.IPNet{IP: routerIP, Mask: subnet.Mask},
+		&net.IPNet{IP: NextIP(routerIP), Mask: subnet.Mask}
 }

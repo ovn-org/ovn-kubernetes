@@ -164,7 +164,14 @@ func (oc *Controller) deleteLogicalPort(pod *kapi.Pod) {
 			out, stderr, err)
 	}
 
-	ipAddress := oc.getIPFromOvnAnnotation(pod.Annotations["ovn"])
+	var podIP net.IP
+	podAnnotation, err := util.UnmarshalPodAnnotation(pod.Annotations["ovn"])
+	if err != nil {
+		logrus.Errorf("Error in deleting pod logical port; failed "+
+			"to read pod annotation: %v", err)
+	} else {
+		podIP = podAnnotation.IP.IP
+	}
 
 	delete(oc.logicalPortCache, logicalPort)
 
@@ -180,7 +187,7 @@ func (oc *Controller) deleteLogicalPort(pod *kapi.Pod) {
 		oc.deleteACLDenyOld(pod.Namespace, pod.Spec.NodeName, logicalPort,
 			"Egress")
 	}
-	oc.deletePodFromNamespaceAddressSet(pod.Namespace, ipAddress)
+	oc.deletePodFromNamespaceAddressSet(pod.Namespace, podIP)
 	return
 }
 
@@ -238,19 +245,41 @@ func (oc *Controller) addLogicalPort(pod *kapi.Pod) {
 	portName := fmt.Sprintf("%s_%s", pod.Namespace, pod.Name)
 	logrus.Debugf("Creating logical port for %s on switch %s", portName, logicalSwitch)
 
-	out, stderr, err = util.RunOVNNbctl("--wait=sb", "--",
-		"--may-exist", "lsp-add", logicalSwitch, portName,
-		"--", "lsp-set-addresses",
-		portName, "dynamic", "--", "set",
-		"logical_switch_port", portName,
-		"external-ids:namespace="+pod.Namespace,
-		"external-ids:logical_switch="+logicalSwitch,
-		"external-ids:pod=true")
-	if err != nil {
-		logrus.Errorf("Error while creating logical port %s "+
-			"stdout: %q, stderr: %q (%v)",
-			portName, out, stderr, err)
-		return
+	annotation, err := util.UnmarshalPodAnnotation(pod.Annotations["ovn"])
+
+	// If pod already has annotations, just add the lsp with static ip/mac.
+	// Else, create the lsp with dynamic addresses.
+	if err == nil {
+		out, stderr, err = util.RunOVNNbctl("--may-exist", "lsp-add",
+			logicalSwitch, portName, "--", "lsp-set-addresses", portName,
+			fmt.Sprintf("%s %s", annotation.MAC, annotation.IP.IP), "--", "set",
+			"logical_switch_port", portName,
+			"external-ids:namespace="+pod.Namespace,
+			"external-ids:logical_switch="+logicalSwitch,
+			"external-ids:pod=true", "--", "--if-exists",
+			"clear", "logical_switch_port", portName, "dynamic_addresses")
+		if err != nil {
+			logrus.Errorf("Failed to add logical port to switch "+
+				"stdout: %q, stderr: %q (%v)",
+				out, stderr, err)
+			return
+		}
+	} else {
+		out, stderr, err = util.RunOVNNbctl("--wait=sb", "--",
+			"--may-exist", "lsp-add", logicalSwitch, portName,
+			"--", "lsp-set-addresses",
+			portName, "dynamic", "--", "set",
+			"logical_switch_port", portName,
+			"external-ids:namespace="+pod.Namespace,
+			"external-ids:logical_switch="+logicalSwitch,
+			"external-ids:pod=true")
+		if err != nil {
+			logrus.Errorf("Error while creating logical port %s "+
+				"stdout: %q, stderr: %q (%v)",
+				portName, out, stderr, err)
+			return
+		}
+
 	}
 
 	oc.logicalPortCache[portName] = logicalSwitch
@@ -294,7 +323,11 @@ func (oc *Controller) addLogicalPort(pod *kapi.Pod) {
 		return
 	}
 
-	annotation, err := util.MarshalPodAnnotation(podCIDR, podMac, gatewayIP.IP, nil)
+	marshalledAnnotation, err := util.MarshalPodAnnotation(&util.PodAnnotation{
+		IP:  podCIDR,
+		MAC: podMac,
+		GW:  gatewayIP.IP,
+	})
 	if err != nil {
 		logrus.Errorf("error creating pod network annotation: %v", err)
 		return
@@ -302,11 +335,11 @@ func (oc *Controller) addLogicalPort(pod *kapi.Pod) {
 
 	logrus.Debugf("Annotation values: ip=%s ; mac=%s ; gw=%s\nAnnotation=%s",
 		podCIDR, podMac, gatewayIP, annotation)
-	err = oc.kube.SetAnnotationOnPod(pod, "ovn", annotation)
+	err = oc.kube.SetAnnotationOnPod(pod, "ovn", marshalledAnnotation)
 	if err != nil {
 		logrus.Errorf("Failed to set annotation on pod %s - %v", pod.Name, err)
 	}
-	oc.addPodToNamespaceAddressSet(pod.Namespace, podIP.String())
+	oc.addPodToNamespaceAddressSet(pod.Namespace, podIP)
 
 	return
 }

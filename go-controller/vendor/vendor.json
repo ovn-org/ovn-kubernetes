@@ -2921,6 +2921,22 @@
 			"versionExact": "kubernetes-1.14.3"
 		},
 		{
+			"checksumSHA1": "9JDhU/xloq7Qpyt/72TLBKrMjEY=",
+			"path": "k8s.io/client-go/tools/leaderelection",
+			"revision": "b8faab9c5193b482cbf69c78578474b7a40e3e6d",
+			"revisionTime": "2019-06-06T20:45:21Z",
+			"version": "kubernetes-1.14.3",
+			"versionExact": "kubernetes-1.14.3"
+		},
+		{
+			"checksumSHA1": "0Y1Zc7IddzsLjR6SUnJLmfPDvIw=",
+			"path": "k8s.io/client-go/tools/leaderelection/resourcelock",
+			"revision": "b8faab9c5193b482cbf69c78578474b7a40e3e6d",
+			"revisionTime": "2019-06-06T20:45:21Z",
+			"version": "kubernetes-1.14.3",
+			"versionExact": "kubernetes-1.14.3"
+		},
+		{
 			"checksumSHA1": "DrrW127wAVyI/ixPg1+g4qwCt80=",
 			"path": "k8s.io/client-go/tools/metrics",
 			"revision": "b8faab9c5193b482cbf69c78578474b7a40e3e6d",
