@@ -11,7 +11,7 @@ import (
 	"github.com/coreos/go-iptables/iptables"
 	"github.com/urfave/cli"
 
-	"k8s.io/api/core/v1"
+	v1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/client-go/kubernetes/fake"
 
@@ -88,7 +88,7 @@ var _ = Describe("Management Port Operations", func() {
 				Output: mgtPortMAC,
 			})
 			fexec.AddFakeCmd(&ovntest.ExpectedCmd{
-				Cmd:    "ovn-nbctl --timeout=15 lsp-get-addresses stor-" + nodeName,
+				Cmd:    "ovn-nbctl --no-leader-only --timeout=15 lsp-get-addresses stor-" + nodeName,
 				Output: lrpMAC,
 			})
 
@@ -104,7 +104,7 @@ var _ = Describe("Management Port Operations", func() {
 				"ip neigh add " + gwIP + " dev " + mgtPort + " lladdr " + lrpMAC,
 			})
 			fexec.AddFakeCmd(&ovntest.ExpectedCmd{
-				Cmd:    "ovn-nbctl --timeout=15 get logical_switch_port k8s-" + nodeName + " dynamic_addresses",
+				Cmd:    "ovn-nbctl --no-leader-only --timeout=15 get logical_switch_port k8s-" + nodeName + " dynamic_addresses",
 				Output: `"` + mgtPortMAC + " " + mgtPortIP + `"`,
 			})
 

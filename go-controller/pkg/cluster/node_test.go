@@ -86,7 +86,7 @@ var _ = Describe("Node Operations", func() {
 				Output: chassisUUID,
 			})
 			fexec.AddFakeCmd(&ovntest.ExpectedCmd{
-				Cmd: fmt.Sprintf("ovn-sbctl --timeout=15 set encap "+
+				Cmd: fmt.Sprintf("ovn-sbctl --no-leader-only --timeout=15 set encap "+
 					"%s options:dst_port=%d", chassisUUID, encapPort),
 			})
 

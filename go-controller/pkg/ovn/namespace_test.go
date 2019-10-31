@@ -38,11 +38,11 @@ func newNamespace(namespace string) *v1.Namespace {
 
 func (n namespace) baseCmds(fexec *ovntest.FakeExec, namespace v1.Namespace) {
 	fexec.AddFakeCmd(&ovntest.ExpectedCmd{
-		Cmd:    "ovn-nbctl --timeout=15 --data=bare --no-heading --columns=external_ids find address_set",
+		Cmd:    "ovn-nbctl --no-leader-only --timeout=15 --data=bare --no-heading --columns=external_ids find address_set",
 		Output: fmt.Sprintf("name=%s\n", namespace.Name),
 	})
 	fexec.AddFakeCmd(&ovntest.ExpectedCmd{
-		Cmd:    "ovn-nbctl --timeout=15 --data=bare --no-heading --columns=_uuid find address_set name=" + hashedAddressSet(namespace.Name),
+		Cmd:    "ovn-nbctl --no-leader-only --timeout=15 --data=bare --no-heading --columns=_uuid find address_set name=" + hashedAddressSet(namespace.Name),
 		Output: fmt.Sprintf("name=%s\n", namespace.Name),
 	})
 }
@@ -50,20 +50,20 @@ func (n namespace) baseCmds(fexec *ovntest.FakeExec, namespace v1.Namespace) {
 func (n namespace) addCmds(fexec *ovntest.FakeExec, namespace v1.Namespace) {
 	n.baseCmds(fexec, namespace)
 	fexec.AddFakeCmdsNoOutputNoError([]string{
-		fmt.Sprintf("ovn-nbctl --timeout=15 clear address_set %s addresses", hashedAddressSet(namespace.Name)),
+		fmt.Sprintf("ovn-nbctl --no-leader-only --timeout=15 clear address_set %s addresses", hashedAddressSet(namespace.Name)),
 	})
 }
 
 func (n namespace) delCmds(fexec *ovntest.FakeExec, namespace v1.Namespace) {
 	fexec.AddFakeCmdsNoOutputNoError([]string{
-		fmt.Sprintf("ovn-nbctl --timeout=15 --if-exists destroy address_set %s", hashedAddressSet(namespace.Name)),
+		fmt.Sprintf("ovn-nbctl --no-leader-only --timeout=15 --if-exists destroy address_set %s", hashedAddressSet(namespace.Name)),
 	})
 }
 
 func (n namespace) addCmdsWithPods(fexec *ovntest.FakeExec, tP pod, namespace v1.Namespace) {
 	n.baseCmds(fexec, namespace)
 	fexec.AddFakeCmdsNoOutputNoError([]string{
-		fmt.Sprintf("ovn-nbctl --timeout=15 set address_set %s addresses=%s", hashedAddressSet(namespace.Name), tP.podIP),
+		fmt.Sprintf("ovn-nbctl --no-leader-only --timeout=15 set address_set %s addresses=%s", hashedAddressSet(namespace.Name), tP.podIP),
 	})
 }
 

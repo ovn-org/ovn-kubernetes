@@ -43,11 +43,11 @@ func newEndpoints(name, namespace string, addresses []v1.EndpointAddress, ports 
 
 func (e endpoints) addCmds(fexec *ovntest.FakeExec, service v1.Service, endpoint v1.Endpoints) {
 	fexec.AddFakeCmd(&ovntest.ExpectedCmd{
-		Cmd:    "ovn-nbctl --timeout=15 --data=bare --no-heading --columns=_uuid find load_balancer external_ids:k8s-cluster-lb-tcp=yes",
+		Cmd:    "ovn-nbctl --no-leader-only --timeout=15 --data=bare --no-heading --columns=_uuid find load_balancer external_ids:k8s-cluster-lb-tcp=yes",
 		Output: k8sTCPLoadBalancerIP,
 	})
 	fexec.AddFakeCmdsNoOutputNoError([]string{
-		fmt.Sprintf("ovn-nbctl --timeout=15 set load_balancer %s vips:\"%s:%v\"=\"%s:%v\"", k8sTCPLoadBalancerIP, service.Spec.ClusterIP, service.Spec.Ports[0].Port, endpoint.Subsets[0].Addresses[0].IP, endpoint.Subsets[0].Ports[0].Port),
+		fmt.Sprintf("ovn-nbctl --no-leader-only --timeout=15 set load_balancer %s vips:\"%s:%v\"=\"%s:%v\"", k8sTCPLoadBalancerIP, service.Spec.ClusterIP, service.Spec.Ports[0].Port, endpoint.Subsets[0].Addresses[0].IP, endpoint.Subsets[0].Ports[0].Port),
 	})
 }
 
@@ -55,11 +55,11 @@ func (e endpoints) delCmds(fexec *ovntest.FakeExec, service v1.Service, endpoint
 	for _, sPort := range service.Spec.Ports {
 		if sPort.Protocol == v1.ProtocolTCP {
 			fexec.AddFakeCmdsNoOutputNoError([]string{
-				fmt.Sprintf("ovn-nbctl --timeout=15 remove load_balancer %s vips \"%s:%v\"", k8sTCPLoadBalancerIP, service.Spec.ClusterIP, sPort.Port),
+				fmt.Sprintf("ovn-nbctl --no-leader-only --timeout=15 remove load_balancer %s vips \"%s:%v\"", k8sTCPLoadBalancerIP, service.Spec.ClusterIP, sPort.Port),
 			})
 		} else if sPort.Protocol == v1.ProtocolUDP {
 			fexec.AddFakeCmdsNoOutputNoError([]string{
-				fmt.Sprintf("ovn-nbctl --timeout=15 remove load_balancer %s vips \"%s:%v\"", k8sUDPLoadBalancerIP, service.Spec.ClusterIP, sPort.Port),
+				fmt.Sprintf("ovn-nbctl --no-leader-only --timeout=15 remove load_balancer %s vips \"%s:%v\"", k8sUDPLoadBalancerIP, service.Spec.ClusterIP, sPort.Port),
 			})
 		}
 	}

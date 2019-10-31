@@ -258,7 +258,7 @@ func getNbctlArgsAndEnv(timeout int, args ...string) ([]string, []string) {
 	} else if config.OvnNorth.Scheme == config.OvnDBSchemeTCP {
 		cmdArgs = append(cmdArgs, fmt.Sprintf("--db=%s", config.OvnNorth.GetURL()))
 	}
-	cmdArgs = append(cmdArgs, fmt.Sprintf("--timeout=%d", timeout))
+	cmdArgs = append(cmdArgs, fmt.Sprintf("--no-leader-only --timeout=%d", timeout))
 	cmdArgs = append(cmdArgs, args...)
 	return cmdArgs, envVars
 }
@@ -311,7 +311,7 @@ func RunOVNSbctlWithTimeout(timeout int, args ...string) (string, string,
 		}
 	}
 
-	cmdArgs = append(cmdArgs, fmt.Sprintf("--timeout=%d", timeout))
+	cmdArgs = append(cmdArgs, fmt.Sprintf("--no-leader-only --timeout=%d", timeout))
 	cmdArgs = append(cmdArgs, args...)
 	stdout, stderr, err := runOVNretry(runner.sbctlPath, nil, cmdArgs...)
 	return strings.Trim(strings.TrimSpace(stdout.String()), "\""), stderr.String(), err
