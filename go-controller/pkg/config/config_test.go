@@ -51,7 +51,7 @@ func writeConfigFile(cfgFile *os.File, randomOptData bool, args ...string) error
 			section = "ovnsouth"
 			arg = arg[4:]
 		default:
-			panic("shouldn't get here")
+			return fmt.Errorf("unexpected argument passed")
 		}
 
 		if randomOptData {

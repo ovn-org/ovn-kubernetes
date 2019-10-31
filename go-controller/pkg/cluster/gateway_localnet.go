@@ -4,11 +4,12 @@ package cluster
 
 import (
 	"fmt"
-	"k8s.io/client-go/tools/cache"
 	"reflect"
 	"strings"
 	"sync"
 	"time"
+
+	"k8s.io/client-go/tools/cache"
 
 	"github.com/coreos/go-iptables/iptables"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
@@ -170,12 +171,12 @@ func initLocalnetGateway(nodeName string, clusterIPSubnet []string,
 					localnetGatewayNextHopSubnet,
 					"dev", localnetBridgeNextHop)
 			}
-			time.Sleep(5*time.Second)
+			time.Sleep(5 * time.Second)
 		}
 	}()
 	wg.Wait()
 
-	ifaceID, macAddress, err := bridgedGatewayNodeSetup(nodeName, localnetBridgeName)
+	ifaceID, macAddress, err := bridgedGatewayNodeSetup(nodeName, localnetBridgeName, localnetBridgeName, true)
 	if err != nil {
 		return fmt.Errorf("failed to set up shared interface gateway: %v", err)
 	}

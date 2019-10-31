@@ -11,8 +11,6 @@
 apiVersion: v1
 kind: Namespace
 metadata:
-  annotations:
-    openshift.io/node-selector: "beta.kubernetes.io/os=linux"
   name: ovn-kubernetes
 
 ---
@@ -34,63 +32,87 @@ metadata:
   namespace: ovn-kubernetes
 
 ---
+# for now throw in all the privileges to run a pod. we can fine grain it further later.
+
+apiVersion: extensions/v1beta1
+kind: PodSecurityPolicy
+metadata:
+  name: ovn-kubernetes
+  annotations:
+    seccomp.security.alpha.kubernetes.io/allowedProfileNames: '*'
+spec:
+  allowPrivilegeEscalation: true
+  allowedCapabilities:
+  - '*'
+  fsGroup:
+    rule: RunAsAny
+  privileged: true
+  runAsUser:
+    rule: RunAsAny
+  seLinux:
+    rule: RunAsAny
+  supplementalGroups:
+    rule: RunAsAny
+  volumes:
+  - '*'
+  hostPID: true
+  hostIPC: true
+  hostNetwork: true
+  hostPorts:
+  - min: 0
+    max: 65536
+
+---
 apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRole
 metadata:
-  annotations:
-    rbac.authorization.k8s.io/system-only: "true"
-  name: system:ovn-reader
+  name: ovn-kubernetes
 rules:
 - apiGroups:
   - ""
-  - extensions
   resources:
   - pods
   - namespaces
-  - networkpolicies
   - nodes
-  verbs:
-  - get
-  - list
-  - watch
+  - endpoints
+  - services
+  - configmaps
+  verbs: ["get", "list", "watch"]
 - apiGroups:
+  - extensions
   - networking.k8s.io
   resources:
   - networkpolicies
-  verbs:
-  - get
-  - list
-  - watch
+  verbs: ["get", "list", "watch"]
 - apiGroups:
   - ""
   resources:
   - events
-  verbs:
-  - create
-  - patch
-  - update
+  - endpoints
+  - configmaps
+  verbs: ["create", "patch", "update"]
+- apiGroups:
+  - ""
+  resources:
+  - nodes
+  - pods
+  verbs: ["patch", "update"]
+- apiGroups:
+  - extensions
+  - policy
+  resources:
+  - podsecuritypolicies
+  resourceNames:
+  - ovn-kubernetes
+  verbs: ["use"]
 
 ---
 apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRoleBinding
 metadata:
-  name: ovn-reader
+  name: ovn-kubernetes
 roleRef:
-  name: system:ovn-reader
-  kind: ClusterRole
-  apiGroup: rbac.authorization.k8s.io
-subjects:
-- kind: ServiceAccount
-  name: ovn
-  namespace: ovn-kubernetes
-
----
-apiVersion: rbac.authorization.k8s.io/v1
-kind: ClusterRoleBinding
-metadata:
-  name: cluster-admin-0
-roleRef:
-  name: cluster-admin
+  name: ovn-kubernetes
   kind: ClusterRole
   apiGroup: rbac.authorization.k8s.io
 subjects:

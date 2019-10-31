@@ -47,7 +47,14 @@ func setPodBandwidth(sandboxID, ifname string, ingressBPS, egressBPS int64) erro
 	}
 	if egressBPS > 0 {
 		// ingress_policing_rate is in Kbps
-		err := ovsSet("interface", ifname, fmt.Sprintf("ingress_policing_rate=%d", egressBPS/1000))
+		egressKBPS := egressBPS / 1000
+		err := ovsSet("interface", ifname, fmt.Sprintf("ingress_policing_rate=%d", egressKBPS))
+		if err != nil {
+			return err
+		}
+		// Set the ingress_policing_burst too per recommendation in ovsdb schema, i.e
+		// 10% of the rate
+		err = ovsSet("interface", ifname, fmt.Sprintf("ingress_policing_burst=%d", (egressKBPS/10)))
 		if err != nil {
 			return err
 		}

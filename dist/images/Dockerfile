@@ -23,7 +23,7 @@ ENV PYTHONDONTWRITEBYTECODE yes
 COPY kubernetes.repo /etc/yum.repos.d/kubernetes.repo
 RUN INSTALL_PKGS=" \
 	PyYAML bind-utils procps-ng openssl numactl-libs firewalld-filesystem \
-	libpcap kubernetes-client \
+	libpcap kubectl \
 	iptables iproute strace socat \
 	unbound-libs \
         " && \
@@ -34,13 +34,13 @@ RUN INSTALL_PKGS=" \
 # docker build --build-arg rpmArch=ARCH -f Dockerfile.centos -t some_tag .
 # where ARCH can be x86_64 (default), aarch64, or ppc64le
 ARG rpmArch=x86_64
-ARG ovsVer=2.10.1
-ARG ovsSubVer=3.el7
-ARG dpdkVer=17.11
-ARG dpdkSubVer=3.el7
-ARG dpdkRpmUrl=http://cbs.centos.org/kojifiles/packages/dpdk/${dpdkVer}/${dpdkSubVer}/${rpmArch}/dpdk-${dpdkVer}-${dpdkSubVer}.${rpmArch}.rpm
+ARG ovsVer=2.11.0
+ARG ovsSubVer=4.el7
+ARG dpdkVer=18.11.2
+ARG dpdkSubVer=1.el7
+ARG dpdkRpmUrl=http://mirror.centos.org/centos/7/extras/${rpmArch}/Packages/dpdk-${dpdkVer}-${dpdkSubVer}.${rpmArch}.rpm
 
-RUN if [ "$(uname -m)" = "aarch64" ]; then dpdkRpmUrl=https://rpmfind.net/linux/fedora/linux/updates/28/Everything/aarch64/Packages/d/dpdk-17.11.2-1.fc28.aarch64.rpm; fi && rpm -i ${dpdkRpmUrl}
+RUN if [ "$(uname -m)" = "aarch64" ]; then dpdkRpmUrl=http://psw32.psw.net/altarch/7/extras/aarch64/Packages/dpdk-18.11-4.el7_6.aarch64.rpm; fi && rpm -i ${dpdkRpmUrl}
 RUN rpm -i http://cbs.centos.org/kojifiles/packages/openvswitch/${ovsVer}/${ovsSubVer}/${rpmArch}/openvswitch-${ovsVer}-${ovsSubVer}.${rpmArch}.rpm
 RUN rpm -i http://cbs.centos.org/kojifiles/packages/openvswitch/${ovsVer}/${ovsSubVer}/${rpmArch}/openvswitch-ovn-common-${ovsVer}-${ovsSubVer}.${rpmArch}.rpm
 RUN rpm -i http://cbs.centos.org/kojifiles/packages/openvswitch/${ovsVer}/${ovsSubVer}/${rpmArch}/openvswitch-ovn-central-${ovsVer}-${ovsSubVer}.${rpmArch}.rpm

@@ -6,6 +6,7 @@ import (
 	"io/ioutil"
 	"os"
 	"os/signal"
+	"path/filepath"
 	"runtime"
 	"strings"
 	"syscall"
@@ -14,6 +15,7 @@ import (
 
 	"github.com/sirupsen/logrus"
 	"github.com/urfave/cli"
+	"gopkg.in/fsnotify/fsnotify.v1"
 
 	ovncluster "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/cluster"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
@@ -58,6 +60,7 @@ func getFlagsByCategory() map[string][]cli.Flag {
 	m["OVN Northbound DB Options"] = config.OvnNBFlags
 	m["OVN Southbound DB Options"] = config.OvnSBFlags
 	m["OVN Gateway Options"] = config.OVNGatewayFlags
+	m["Master HA Options"] = config.MasterHAFlags
 
 	return m
 }
@@ -96,6 +99,7 @@ func main() {
 	c.Flags = append(c.Flags, config.OvnNBFlags...)
 	c.Flags = append(c.Flags, config.OvnSBFlags...)
 	c.Flags = append(c.Flags, config.OVNGatewayFlags...)
+	c.Flags = append(c.Flags, config.MasterHAFlags...)
 	c.Action = func(c *cli.Context) error {
 		return runOvnKube(c)
 	}
@@ -136,8 +140,7 @@ func setupPIDFile(pidfile string) error {
 		// get the pid and see if it exists
 		pid, err := ioutil.ReadFile(pidfile)
 		if err != nil {
-			logrus.Errorf("pidfile %s exists but can't be read", pidfile)
-			return err
+			return fmt.Errorf("pidfile %s exists but can't be read: %v", pidfile, err)
 		}
 		_, err1 := os.Stat("/proc/" + string(pid[:]) + "/cmdline")
 		if os.IsNotExist(err1) {
@@ -146,8 +149,7 @@ func setupPIDFile(pidfile string) error {
 				logrus.Errorf("failed to write pidfile %s (%v). Ignoring..", pidfile, err)
 			}
 		} else {
-			logrus.Errorf("pidfile %s exists and ovnkube is running", pidfile)
-			os.Exit(1)
+			return fmt.Errorf("pidfile %s exists and ovnkube is running", pidfile)
 		}
 	}
 
@@ -158,32 +160,31 @@ func runOvnKube(ctx *cli.Context) error {
 	pidfile := ctx.String("pidfile")
 	if pidfile != "" {
 		defer delPidfile(pidfile)
-		err := setupPIDFile(pidfile)
-		if err != nil {
+		if err := setupPIDFile(pidfile); err != nil {
 			return err
 		}
 	}
+
 	exec := kexec.New()
-	_, err := config.InitConfig(ctx, exec, nil)
+	configFile, err := config.InitConfig(ctx, exec, nil)
 	if err != nil {
 		return err
 	}
 
 	if err = util.SetExec(exec); err != nil {
-		logrus.Errorf("Failed to initialize exec helper: %v", err)
-		return err
+		return fmt.Errorf("failed to initialize exec helper: %v", err)
 	}
 
 	clientset, err := util.NewClientset(&config.Kubernetes)
 	if err != nil {
-		panic(err.Error())
+		return err
 	}
 
 	// create factory and start the controllers asked for
 	stopChan := make(chan struct{})
 	factory, err := factory.NewWatchFactory(clientset, stopChan)
 	if err != nil {
-		panic(err.Error())
+		return err
 	}
 
 	master := ctx.String("init-master")
@@ -192,14 +193,17 @@ func runOvnKube(ctx *cli.Context) error {
 	cleanupNode := ctx.String("cleanup-node")
 	if cleanupNode != "" {
 		if master != "" || node != "" {
-			panic("Cannot specify cleanup-node together with 'init-node or 'init-master'.")
+			return fmt.Errorf("cannot specify cleanup-node together with 'init-node or 'init-master'")
 		}
 
-		if err := ovncluster.CleanupClusterNode(cleanupNode); err != nil {
-			logrus.Errorf(err.Error())
-			panic(err.Error())
+		if err = ovncluster.CleanupClusterNode(cleanupNode); err != nil {
+			return err
 		}
 		return nil
+	}
+
+	if master == "" && node == "" {
+		return fmt.Errorf("need to run ovnkube in either master and/or node mode")
 	}
 
 	// start the prometheus server
@@ -207,40 +211,100 @@ func runOvnKube(ctx *cli.Context) error {
 		ovncluster.StartMetricsServer(config.Kubernetes.MetricsBindAddress)
 	}
 
-	if master != "" || node != "" {
-		if master != "" {
-			if runtime.GOOS == "windows" {
-				panic("Windows is not supported as master node")
-			}
-			// run the master controller to init the master
-			ovnController := ovn.NewOvnController(clientset, factory)
-			err := ovnController.StartClusterMaster(master)
-			if err != nil {
-				logrus.Errorf(err.Error())
-				panic(err.Error())
-			}
-			// add watchers for relevant resources' events
-			if err := ovnController.Run(); err != nil {
-				logrus.Errorf(err.Error())
-				panic(err.Error())
-			}
-		}
-
-		if node != "" {
-			if config.Kubernetes.Token == "" {
-				panic("Cannot initialize node without service account 'token'. Please provide one with --k8s-token argument")
-			}
-			clusterController := ovncluster.NewClusterController(clientset, factory)
-			err := clusterController.StartClusterNode(node)
-			if err != nil {
-				logrus.Errorf(err.Error())
-				panic(err.Error())
-			}
-		}
-
-		// run forever
-		select {}
+	// Set up a watch on our config file; if it changes, we exit -
+	// (we don't have the ability to dynamically reload config changes).
+	if err := watchForChanges(configFile); err != nil {
+		return fmt.Errorf("unable to setup configuration watch: %v", err)
 	}
 
-	return fmt.Errorf("need to run ovnkube in either master and/or node mode")
+	if master != "" {
+		if runtime.GOOS == "windows" {
+			return fmt.Errorf("Windows is not supported as master node")
+		}
+
+		// run the HA master controller to init the master
+		ovnHAController := ovn.NewHAMasterController(clientset, factory, master)
+		if err := ovnHAController.StartHAMasterController(); err != nil {
+			return err
+		}
+	}
+
+	if node != "" {
+		if config.Kubernetes.Token == "" {
+			return fmt.Errorf("cannot initialize node without service account 'token'. Please provide one with --k8s-token argument")
+		}
+
+		clusterController := ovncluster.NewClusterController(clientset, factory)
+		if err := clusterController.StartClusterNode(node); err != nil {
+			return err
+		}
+	}
+
+	// run forever
+	select {}
+}
+
+// watchForChanges exits if the configuration file changed.
+func watchForChanges(configPath string) error {
+	if configPath == "" {
+		return nil
+	}
+	configPath, err := filepath.Abs(configPath)
+	if err != nil {
+		return err
+	}
+
+	watcher, err := fsnotify.NewWatcher()
+	if err != nil {
+		return err
+	}
+	defer watcher.Close()
+
+	go func() {
+		for {
+			select {
+			case event, ok := <-watcher.Events:
+				if !ok {
+					return
+				}
+				if event.Op&fsnotify.Write == fsnotify.Write {
+					logrus.Infof("Configuration file %s changed, exiting...", event.Name)
+					os.Exit(0)
+					return
+				}
+			case err, ok := <-watcher.Errors:
+				if !ok {
+					return
+				}
+				logrus.Errorf("fsnotify error %v", err)
+			}
+		}
+	}()
+
+	// Watch all symlinks for changes
+	p := configPath
+	maxdepth := 100
+	for depth := 0; depth < maxdepth; depth++ {
+		if err := watcher.Add(p); err != nil {
+			return err
+		}
+		logrus.Infof("Watching config file %s for changes", p)
+
+		stat, err := os.Lstat(p)
+		if err != nil {
+			return err
+		}
+
+		// configmaps are usually symlinks
+		if stat.Mode()&os.ModeSymlink > 0 {
+			p, err = filepath.EvalSymlinks(p)
+			if err != nil {
+				return err
+			}
+		} else {
+			break
+		}
+	}
+
+	return nil
 }

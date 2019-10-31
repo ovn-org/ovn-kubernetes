@@ -1,16 +1,22 @@
 // +build linux
 
-package ovn
+package cluster
 
 import (
 	"io/ioutil"
+	"net"
 	"os"
 	"path/filepath"
 
 	"github.com/coreos/go-iptables/iptables"
 	"github.com/urfave/cli"
 
+	"k8s.io/api/core/v1"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/client-go/kubernetes/fake"
+
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn"
 	ovntest "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/testing"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
 
@@ -82,9 +88,6 @@ var _ = Describe("Management Port Operations", func() {
 				Output: mgtPortMAC,
 			})
 			fexec.AddFakeCmd(&ovntest.ExpectedCmd{
-				Cmd: "ovn-nbctl --timeout=15 -- --may-exist lsp-add " + nodeName + " " + mgtPort + " -- lsp-set-addresses " + mgtPort + " " + mgtPortMAC + " " + mgtPortIP + " -- --if-exists remove logical_switch " + nodeName + " other-config exclude_ips",
-			})
-			fexec.AddFakeCmd(&ovntest.ExpectedCmd{
 				Cmd:    "ovn-nbctl --timeout=15 lsp-get-addresses stor-" + nodeName,
 				Output: lrpMAC,
 			})
@@ -100,6 +103,10 @@ var _ = Describe("Management Port Operations", func() {
 				"ip route add " + serviceCIDR + " via " + gwIP,
 				"ip neigh add " + gwIP + " dev " + mgtPort + " lladdr " + lrpMAC,
 			})
+			fexec.AddFakeCmd(&ovntest.ExpectedCmd{
+				Cmd:    "ovn-nbctl --timeout=15 get logical_switch_port k8s-" + nodeName + " dynamic_addresses",
+				Output: `"` + mgtPortMAC + " " + mgtPortIP + `"`,
+			})
 
 			err := util.SetExec(fexec)
 			Expect(err).NotTo(HaveOccurred())
@@ -112,13 +119,30 @@ var _ = Describe("Management Port Operations", func() {
 			err = fakeipt.NewChain("nat", "OVN-KUBE-SNAT-MGMTPORT")
 			Expect(err).NotTo(HaveOccurred())
 
+			existingNode := v1.Node{ObjectMeta: metav1.ObjectMeta{
+				Name: nodeName,
+				Annotations: map[string]string{
+					ovn.OvnHostSubnet:                   nodeSubnet,
+					ovn.OvnNodeManagementPortMacAddress: mgtPortMAC,
+				},
+			}}
+			fakeClient := fake.NewSimpleClientset(&v1.NodeList{
+				Items: []v1.Node{existingNode},
+			})
+
 			_, err = config.InitConfig(ctx, fexec, nil)
 			Expect(err).NotTo(HaveOccurred())
 
-			err = CreateManagementPort(nodeName, nodeSubnet, []string{clusterCIDR})
+			_, nodeSubnetCIDR, _ := net.ParseCIDR(nodeSubnet)
+			macAddress, err := CreateManagementPort(nodeName, nodeSubnetCIDR, []string{clusterCIDR})
 			Expect(err).NotTo(HaveOccurred())
-
-			Expect(fexec.CalledMatchesExpected()).To(BeTrue())
+			i := 0
+			for k, v := range macAddress {
+				Expect(k).To(Equal(ovn.OvnNodeManagementPortMacAddress))
+				Expect(v).To(Equal(mgtPortMAC))
+				i++
+			}
+			Expect(i).To(Equal(1))
 
 			expectedTables := map[string]util.FakeTable{
 				"filter": {},
@@ -133,6 +157,10 @@ var _ = Describe("Management Port Operations", func() {
 			}
 			err = fakeipt.MatchState(expectedTables)
 			Expect(err).NotTo(HaveOccurred())
+
+			updatedNode, err := fakeClient.CoreV1().Nodes().Get(nodeName, metav1.GetOptions{})
+			Expect(err).NotTo(HaveOccurred())
+			Expect(updatedNode.Annotations).To(HaveKeyWithValue(ovn.OvnNodeManagementPortMacAddress, mgtPortMAC))
 
 			return nil
 		}

@@ -66,6 +66,10 @@ func shareGatewayInterfaceTest(app *cli.App, testNS ns.NetNS,
 
 		fexec := ovntest.NewFakeExec()
 		fexec.AddFakeCmd(&ovntest.ExpectedCmd{
+			Cmd: "ovs-vsctl --timeout=15 -- port-to-br eth0",
+			Err: fmt.Errorf(""),
+		})
+		fexec.AddFakeCmd(&ovntest.ExpectedCmd{
 			Cmd: "ovs-vsctl --timeout=15 -- br-exists eth0",
 			Err: fmt.Errorf(""),
 		})

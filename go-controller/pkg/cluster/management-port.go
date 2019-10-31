@@ -1,4 +1,4 @@
-package ovn
+package cluster
 
 import (
 	"fmt"
@@ -10,14 +10,9 @@ import (
 	"github.com/sirupsen/logrus"
 )
 
-func createManagementPortGeneric(nodeName, localSubnet string, clusterSubnet []string) (string, string, string, string, error) {
-	// Determine the IP of the node switch's logical router port on the cluster router
-	ip, subnet, err := net.ParseCIDR(localSubnet)
-	if err != nil {
-		return "", "", "", "", fmt.Errorf("Failed to parse local subnet %s: %v", localSubnet, err)
-	}
-	ip = util.NextIP(ip)
-	routerIP := ip.String()
+func createManagementPortGeneric(nodeName string, localSubnet *net.IPNet) (string, string, string, string, string, error) {
+	// Retrieve the routerIP and mangementPortIP for a given localSubnet
+	routerIP, portIP := util.GetNodeWellKnownAddresses(localSubnet)
 
 	// Kubernetes emits events when pods are created. The event will contain
 	// only lowercase letters of the hostname even though the kubelet is
@@ -34,7 +29,7 @@ func createManagementPortGeneric(nodeName, localSubnet string, clusterSubnet []s
 	stdout, stderr, err := util.RunOVSVsctl("--", "--may-exist", "add-br", "br-int")
 	if err != nil {
 		logrus.Errorf("Failed to create br-int, stdout: %q, stderr: %q, error: %v", stdout, stderr, err)
-		return "", "", "", "", err
+		return "", "", "", "", "", err
 	}
 
 	// Create a OVS internal interface.
@@ -46,35 +41,34 @@ func createManagementPortGeneric(nodeName, localSubnet string, clusterSubnet []s
 		"external-ids:iface-id=k8s-"+nodeName)
 	if err != nil {
 		logrus.Errorf("Failed to add port to br-int, stdout: %q, stderr: %q, error: %v", stdout, stderr, err)
-		return "", "", "", "", err
+		return "", "", "", "", "", err
 	}
 	macAddress, err := util.GetOVSPortMACAddress(interfaceName)
 	if err != nil {
 		logrus.Errorf("Failed to get management port MAC address: %v", err)
-		return "", "", "", "", err
+		return "", "", "", "", "", err
 	}
 
-	// Create this node's management logical port on the node switch. Now that the second subnet IP is
-	// statically allocated to the management logical port, we can safely remove the other_config:exclude_ips
-	// in the same transaction to avoid "Duplicate IP set" warning messages in ovn-northd.
-	ip = util.NextIP(ip)
-	portIP := ip.String()
-	n, _ := subnet.Mask.Size()
-	portIPMask := fmt.Sprintf("%s/%d", portIP, n)
-	stdout, stderr, err = util.RunOVNNbctl("--", "--may-exist", "lsp-add", nodeName, "k8s-"+nodeName,
-		"--", "lsp-set-addresses", "k8s-"+nodeName, macAddress+" "+portIP,
-		"--", "--if-exists", "remove", "logical_switch", nodeName, "other-config", "exclude_ips")
-	if err != nil {
-		logrus.Errorf("Failed to add logical port to switch, stdout: %q, stderr: %q, error: %v", stdout, stderr, err)
-		return "", "", "", "", err
-	}
 	// switch-to-router ports only have MAC address and nothing else.
 	routerMac, stderr, err := util.RunOVNNbctl("lsp-get-addresses", "stor-"+nodeName)
 	if err != nil {
 		logrus.Errorf("Failed to retrieve the MAC address of the logical port, stderr: %q, error: %v",
 			stderr, err)
-		return "", "", "", "", err
+		return "", "", "", "", "", err
 	}
 
-	return interfaceName, portIPMask, routerIP, routerMac, nil
+	return interfaceName, portIP.String(), macAddress, routerIP.IP.String(), routerMac, nil
+}
+
+// ManagementPortReady will check to see if the portMac was created
+func ManagementPortReady(portName string) (bool, error) {
+	portMac, portIP, err := util.GetPortAddresses(portName)
+	if err != nil {
+		logrus.Errorf("Error while obtaining addresses for %s - %v", portName, err)
+		return false, err
+	}
+	if portMac == nil || portIP == nil {
+		return false, nil
+	}
+	return true, nil
 }
