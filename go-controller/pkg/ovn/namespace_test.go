@@ -63,7 +63,7 @@ func (n namespace) delCmds(fexec *ovntest.FakeExec, namespace v1.Namespace) {
 func (n namespace) addCmdsWithPods(fexec *ovntest.FakeExec, tP pod, namespace v1.Namespace) {
 	n.baseCmds(fexec, namespace)
 	fexec.AddFakeCmdsNoOutputNoError([]string{
-		fmt.Sprintf("ovn-nbctl --timeout=15 set address_set %s addresses=%s", hashedAddressSet(namespace.Name), tP.podIP),
+		fmt.Sprintf(`ovn-nbctl --timeout=15 set address_set %s addresses="%s"`, hashedAddressSet(namespace.Name), tP.podIP),
 	})
 }
 

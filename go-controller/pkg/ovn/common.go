@@ -72,7 +72,7 @@ func (oc *Controller) setAddressSet(hashName string, addresses []string) {
 		return
 	}
 
-	ips := strings.Join(addresses, " ")
+	ips := `"` + strings.Join(addresses, `" "`) + `"`
 	_, stderr, err := util.RunOVNNbctl("set", "address_set",
 		hashName, fmt.Sprintf("addresses=%s", ips))
 	if err != nil {
@@ -104,7 +104,7 @@ func (oc *Controller) createAddressSet(name string, hashName string,
 		return
 	}
 
-	ips := strings.Join(addresses, " ")
+	ips := `"` + strings.Join(addresses, `" "`) + `"`
 
 	// An addressSet has already been created. Just set addresses.
 	if addressSet != "" {
