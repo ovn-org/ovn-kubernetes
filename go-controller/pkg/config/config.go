@@ -144,6 +144,7 @@ type KubernetesConfig struct {
 	ServiceCIDR        string `gcfg:"service-cidr"`
 	OVNConfigNamespace string `gcfg:"ovn-config-namespace"`
 	MetricsBindAddress string `gcfg:"metrics-bind-address"`
+	OVNEmptyLbEvents   bool   `gcfg:"ovn-empty-lb-events"`
 }
 
 // GatewayMode holds the node gateway mode
@@ -497,6 +498,14 @@ var K8sFlags = []cli.Flag{
 		Name:        "metrics-bind-address",
 		Usage:       "The IP address and port for the metrics server to serve on (set to 0.0.0.0 for all IPv4 interfaces)",
 		Destination: &cliConfig.Kubernetes.MetricsBindAddress,
+	},
+	cli.BoolFlag{
+		Name: "ovn-empty-lb-events",
+		Usage: "If set, then load balancers do not get deleted when all backends are removed. " +
+			"Instead, ovn-kubernetes monitors the OVN southbound database for empty lb backends " +
+			"controller events. If one arrives, then a NeedPods event is sent so that Kubernetes " +
+			"will spin up pods for the load balancer to send traffic to.",
+		Destination: &cliConfig.Kubernetes.OVNEmptyLbEvents,
 	},
 }
 

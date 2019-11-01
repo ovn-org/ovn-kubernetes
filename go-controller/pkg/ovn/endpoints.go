@@ -1,7 +1,8 @@
 package ovn
 
 import (
-	"fmt"
+	"net"
+	"strconv"
 
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
 	util "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
@@ -85,6 +86,8 @@ func (ovn *Controller) AddEndpoints(ep *kapi.Endpoints) error {
 						logrus.Errorf("Error in creating Cluster IP for svc %s, target port: %d - %v\n", svc.Name, targetPort, err)
 						continue
 					}
+					vip := net.JoinHostPort(svc.Spec.ClusterIP, strconv.Itoa(int(svcPort.Port)))
+					ovn.AddServiceVIPToName(vip, svcPort.Protocol, svc.Namespace, svc.Name)
 					ovn.handleExternalIPs(svc, svcPort, ips, targetPort)
 				}
 			}
@@ -116,6 +119,8 @@ func (ovn *Controller) AddEndpoints(ep *kapi.Endpoints) error {
 						logrus.Errorf("Error in creating Cluster IP for svc %s, target port: %d - %v\n", svc.Name, targetPort, err)
 						continue
 					}
+					vip := net.JoinHostPort(svc.Spec.ClusterIP, strconv.Itoa(int(svcPort.Port)))
+					ovn.AddServiceVIPToName(vip, svcPort.Protocol, svc.Namespace, svc.Name)
 					ovn.handleExternalIPs(svc, svcPort, ips, targetPort)
 				}
 			}
@@ -278,13 +283,23 @@ func (ovn *Controller) deleteEndpoints(ep *kapi.Endpoints) error {
 				lb, err)
 			continue
 		}
-		key := fmt.Sprintf("\"%s:%d\"", svc.Spec.ClusterIP, svcPort.Port)
-		_, stderr, err := util.RunOVNNbctl("remove", "load_balancer", lb,
-			"vips", key)
-		if err != nil {
-			logrus.Errorf("Error in deleting endpoints for lb %s, "+
-				"stderr: %q (%v)", lb, stderr, err)
+
+		quotedHostPort := "\"" + net.JoinHostPort(svc.Spec.ClusterIP, strconv.Itoa(int(svcPort.Port))) + "\""
+		if config.Kubernetes.OVNEmptyLbEvents {
+			key := "vips:" + quotedHostPort + "=\"\""
+			_, stderr, err := util.RunOVNNbctl("set", "load_balancer", lb, key)
+			if err != nil {
+				logrus.Errorf("Error in deleting endpoints for lb %s, "+
+					"stderr: %q (%v)", lb, stderr, err)
+			}
+		} else {
+			_, stderr, err := util.RunOVNNbctl("remove", "load_balancer", lb,
+				"vips", quotedHostPort)
+			if err != nil {
+				logrus.Errorf("Error in deleting lb %s, stderr: %q (%v)", lb, stderr, err)
+			}
 		}
+
 	}
 	return nil
 }

@@ -225,7 +225,7 @@ func runOvnKube(ctx *cli.Context) error {
 		ovn.RegisterMetrics()
 
 		// run the HA master controller to init the master
-		ovnHAController := ovn.NewHAMasterController(clientset, factory, master)
+		ovnHAController := ovn.NewHAMasterController(clientset, factory, master, stopChan)
 		if err := ovnHAController.StartHAMasterController(); err != nil {
 			return err
 		}
