@@ -211,9 +211,7 @@ func updateOVNConfig(ep *kapi.Endpoints) error {
 		masterIPList = append(masterIPList, address.IP)
 	}
 
-	if err := config.UpdateOVNNodeAuth(masterIPList, southboundDBPort, northboundDBPort); err != nil {
-		return err
-	}
+	config.UpdateOVNNodeAuth(masterIPList, southboundDBPort, northboundDBPort)
 
 	for _, auth := range []config.OvnAuthConfig{config.OvnNorth, config.OvnSouth} {
 		if err := auth.SetDBAuth(); err != nil {

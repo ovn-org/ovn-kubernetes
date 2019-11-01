@@ -989,14 +989,6 @@ mode=shared
 					}
 				})
 
-			generateTests("the OVN URL is a hostname",
-				"OVN DB host \"foobar.org:4444\" must be an IP address, not a DNS name",
-				func() []string {
-					return []string{
-						"address=tcp://foobar.org:4444",
-					}
-				})
-
 			generateTests("certs are provided for the TCP scheme",
 				"certificate or key given; perhaps you mean to use the 'ssl' scheme?",
 				func() []string {
