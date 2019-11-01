@@ -64,9 +64,9 @@ type Controller struct {
 	// A cache of all logical ports and its corresponding uuids.
 	logicalPortUUIDCache map[string]string
 
-	// For each namespace, an address_set that has all the pod IP
-	// address in that namespace
-	namespaceAddressSet map[string]map[string]bool
+	// For each namespace, a map from pod IP address to logical port name
+	// for all pods in that namespace.
+	namespaceAddressSet map[string]map[string]string
 
 	// For each namespace, a lock to protect critical regions
 	namespaceMutex map[string]*sync.Mutex
@@ -98,8 +98,14 @@ type Controller struct {
 	// logicalSwitch information
 	lsMutex *sync.Mutex
 
-	// supports port_group?
+	// Per namespace multicast enabled?
+	multicastEnabled map[string]bool
+
+	// Supports port_group?
 	portGroupSupport bool
+
+	// Supports multicast?
+	multicastSupport bool
 
 	// Map of load balancers to service namespace
 	serviceVIPToName map[ServiceVIPKey]types.NamespacedName
@@ -127,7 +133,7 @@ func NewOvnController(kubeClient kubernetes.Interface, wf *factory.WatchFactory,
 		logicalSwitchCache:          make(map[string]bool),
 		logicalPortCache:            make(map[string]string),
 		logicalPortUUIDCache:        make(map[string]string),
-		namespaceAddressSet:         make(map[string]map[string]bool),
+		namespaceAddressSet:         make(map[string]map[string]string),
 		namespacePolicies:           make(map[string]map[string]*namespacePolicy),
 		namespaceMutex:              make(map[string]*sync.Mutex),
 		namespaceMutexMutex:         sync.Mutex{},
@@ -138,6 +144,7 @@ func NewOvnController(kubeClient kubernetes.Interface, wf *factory.WatchFactory,
 		gatewayCache:                make(map[string]string),
 		loadbalancerClusterCache:    make(map[string]string),
 		loadbalancerGWCache:         make(map[string]string),
+		multicastEnabled:            make(map[string]bool),
 		serviceVIPToName:            make(map[ServiceVIPKey]types.NamespacedName),
 		serviceVIPToNameLock:        sync.Mutex{},
 		hybridOverlayClusterSubnets: hybridOverlayClusterSubnets,
@@ -436,7 +443,8 @@ func (oc *Controller) WatchNamespaces() error {
 			return
 		},
 		UpdateFunc: func(old, newer interface{}) {
-			// We only use namespace's name and that does not get updated.
+			oldNs, newNs := old.(*kapi.Namespace), newer.(*kapi.Namespace)
+			oc.updateNamespace(oldNs, newNs)
 			return
 		},
 		DeleteFunc: func(obj interface{}) {

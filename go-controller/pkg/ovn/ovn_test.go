@@ -46,4 +46,5 @@ func (o *FakeOVN) init() {
 
 	o.controller = NewOvnController(o.fakeClient, o.watcher, nil)
 	o.controller.portGroupSupport = true
+	o.controller.multicastSupport = true
 }
