@@ -44,6 +44,6 @@ func (o *FakeOVN) init() {
 	o.watcher, err = factory.NewWatchFactory(o.fakeClient, make(chan struct{}))
 	Expect(err).NotTo(HaveOccurred())
 
-	o.controller = NewOvnController(o.fakeClient, o.watcher)
+	o.controller = NewOvnController(o.fakeClient, o.watcher, nil)
 	o.controller.portGroupSupport = true
 }

@@ -7,6 +7,7 @@ import (
 
 	"github.com/Microsoft/hcsshim/internal/interop"
 	"github.com/Microsoft/hcsshim/internal/logfields"
+	"github.com/Microsoft/hcsshim/internal/vmcompute"
 	"github.com/sirupsen/logrus"
 )
 
@@ -88,7 +89,7 @@ type notificationChannel chan error
 
 type notifcationWatcherContext struct {
 	channels notificationChannels
-	handle   hcsCallback
+	handle   vmcompute.HcsCallback
 
 	systemID  string
 	processID int
