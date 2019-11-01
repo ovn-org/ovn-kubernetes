@@ -24,7 +24,8 @@ all build:
 windows:
 	export WINDOWS_BUILD="yes"; \
 	hack/build-go.sh cmd/ovnkube/ovnkube.go || exit 1; \
-	hack/build-go.sh cmd/ovn-k8s-cni-overlay/ovn-k8s-cni-overlay.go || exit 1;
+	hack/build-go.sh cmd/ovn-k8s-cni-overlay/ovn-k8s-cni-overlay.go || exit 1; \
+	hack/build-go.sh hybrid-overlay/cmd/hybrid-overlay.go || exit 1;
 
 check test:
 	hack/test-go.sh ${PKGS}

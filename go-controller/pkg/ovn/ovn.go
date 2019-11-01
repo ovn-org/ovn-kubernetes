@@ -3,6 +3,7 @@ package ovn
 import (
 	"encoding/json"
 	"errors"
+	"fmt"
 	"reflect"
 	"sync"
 	"time"
@@ -15,6 +16,7 @@ import (
 	"github.com/sirupsen/logrus"
 	kapi "k8s.io/api/core/v1"
 	kapisnetworking "k8s.io/api/networking/v1"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/kubernetes/scheme"
@@ -63,9 +65,9 @@ type Controller struct {
 	// A cache of all logical ports and its corresponding uuids.
 	logicalPortUUIDCache map[string]string
 
-	// For each namespace, an address_set that has all the pod IP
-	// address in that namespace
-	namespaceAddressSet map[string]map[string]bool
+	// For each namespace, a map from pod IP address to logical port name
+	// for all pods in that namespace.
+	namespaceAddressSet map[string]map[string]string
 
 	// For each namespace, a lock to protect critical regions
 	namespaceMutex map[string]*sync.Mutex
@@ -97,13 +99,22 @@ type Controller struct {
 	// logicalSwitch information
 	lsMutex *sync.Mutex
 
-	// supports port_group?
+	// Per namespace multicast enabled?
+	multicastEnabled map[string]bool
+
+	// Supports port_group?
 	portGroupSupport bool
+
+	// Supports multicast?
+	multicastSupport bool
 
 	// Map of load balancers to service namespace
 	serviceVIPToName map[ServiceVIPKey]types.NamespacedName
 
 	serviceVIPToNameLock sync.Mutex
+
+	// List of subnets to assign to hybrid overlay entities
+	hybridOverlayClusterSubnets []config.CIDRNetworkEntry
 }
 
 const (
@@ -116,37 +127,39 @@ const (
 
 // NewOvnController creates a new OVN controller for creating logical network
 // infrastructure and policy
-func NewOvnController(kubeClient kubernetes.Interface, wf *factory.WatchFactory) *Controller {
+func NewOvnController(kubeClient kubernetes.Interface, wf *factory.WatchFactory, hybridOverlayClusterSubnets []config.CIDRNetworkEntry) *Controller {
 	return &Controller{
-		kube:                     &kube.Kube{KClient: kubeClient},
-		watchFactory:             wf,
-		logicalSwitchCache:       make(map[string]bool),
-		logicalPortCache:         make(map[string]string),
-		logicalPortUUIDCache:     make(map[string]string),
-		namespaceAddressSet:      make(map[string]map[string]bool),
-		namespacePolicies:        make(map[string]map[string]*namespacePolicy),
-		namespaceMutex:           make(map[string]*sync.Mutex),
-		namespaceMutexMutex:      sync.Mutex{},
-		lspIngressDenyCache:      make(map[string]int),
-		lspEgressDenyCache:       make(map[string]int),
-		lspMutex:                 &sync.Mutex{},
-		lsMutex:                  &sync.Mutex{},
-		gatewayCache:             make(map[string]string),
-		loadbalancerClusterCache: make(map[string]string),
-		loadbalancerGWCache:      make(map[string]string),
-		serviceVIPToName:         make(map[ServiceVIPKey]types.NamespacedName),
-		serviceVIPToNameLock:     sync.Mutex{},
+		kube:                        &kube.Kube{KClient: kubeClient},
+		watchFactory:                wf,
+		logicalSwitchCache:          make(map[string]bool),
+		logicalPortCache:            make(map[string]string),
+		logicalPortUUIDCache:        make(map[string]string),
+		namespaceAddressSet:         make(map[string]map[string]string),
+		namespacePolicies:           make(map[string]map[string]*namespacePolicy),
+		namespaceMutex:              make(map[string]*sync.Mutex),
+		namespaceMutexMutex:         sync.Mutex{},
+		lspIngressDenyCache:         make(map[string]int),
+		lspEgressDenyCache:          make(map[string]int),
+		lspMutex:                    &sync.Mutex{},
+		lsMutex:                     &sync.Mutex{},
+		gatewayCache:                make(map[string]string),
+		loadbalancerClusterCache:    make(map[string]string),
+		loadbalancerGWCache:         make(map[string]string),
+		multicastEnabled:            make(map[string]bool),
+		serviceVIPToName:            make(map[ServiceVIPKey]types.NamespacedName),
+		serviceVIPToNameLock:        sync.Mutex{},
+		hybridOverlayClusterSubnets: hybridOverlayClusterSubnets,
 	}
 }
 
 // Run starts the actual watching.
-func (oc *Controller) Run(stopChan chan struct{}) error {
+func (oc *Controller) Run(nodeSelector *metav1.LabelSelector, stopChan chan struct{}) error {
 	startOvnUpdater()
 
 	// WatchNodes must be started first so that its initial Add will
 	// create all node logical switches, which other watches may depend on.
 	// https://github.com/ovn-org/ovn-kubernetes/pull/859
-	if err := oc.WatchNodes(); err != nil {
+	if err := oc.WatchNodes(nodeSelector); err != nil {
 		return err
 	}
 
@@ -431,7 +444,8 @@ func (oc *Controller) WatchNamespaces() error {
 			return
 		},
 		UpdateFunc: func(old, newer interface{}) {
-			// We only use namespace's name and that does not get updated.
+			oldNs, newNs := old.(*kapi.Namespace), newer.(*kapi.Namespace)
+			oc.updateNamespace(oldNs, newNs)
 			return
 		},
 		DeleteFunc: func(obj interface{}) {
@@ -443,11 +457,34 @@ func (oc *Controller) WatchNamespaces() error {
 	return err
 }
 
+func (oc *Controller) handleNodeGateway(node *kapi.Node) error {
+	var gatewayConfigured bool
+	subnet, err := parseNodeHostSubnet(node)
+	if err == nil {
+		mode := node.Annotations[OvnNodeGatewayMode]
+		if mode != string(config.GatewayModeDisabled) {
+			if err = oc.syncGatewayLogicalNetwork(node, mode, subnet.String()); err == nil {
+				gatewayConfigured = true
+			} else {
+				return fmt.Errorf("error creating gateway for node %s: %v", node.Name, err)
+			}
+		}
+	}
+
+	if !gatewayConfigured && subnet != nil {
+		if err := util.GatewayCleanup(node.Name, subnet); err != nil {
+			return fmt.Errorf("error cleaning up gateway for node %s: %v", node.Name, err)
+		}
+	}
+
+	return nil
+}
+
 // WatchNodes starts the watching of node resource and calls
 // back the appropriate handler logic
-func (oc *Controller) WatchNodes() error {
+func (oc *Controller) WatchNodes(nodeSelector *metav1.LabelSelector) error {
 	gatewaysHandled := make(map[string]bool)
-	_, err := oc.watchFactory.AddNodeHandler(cache.ResourceEventHandlerFuncs{
+	_, err := oc.watchFactory.AddFilteredNodeHandler(nodeSelector, cache.ResourceEventHandlerFuncs{
 		AddFunc: func(obj interface{}) {
 			node := obj.(*kapi.Node)
 			logrus.Debugf("Added event for Node %q", node.Name)
@@ -459,10 +496,14 @@ func (oc *Controller) WatchNodes() error {
 			if err != nil {
 				logrus.Errorf("error creating Node Management Port for node %s: %v", node.Name, err)
 			}
-			if !config.Gateway.NodeportEnable {
-				return
+
+			if err := oc.handleNodeGateway(node); err != nil {
+				logrus.Errorf(err.Error())
 			}
-			gatewaysHandled[node.Name] = oc.handleNodePortLB(node)
+
+			if config.Gateway.NodeportEnable {
+				gatewaysHandled[node.Name] = oc.handleNodePortLB(node)
+			}
 		},
 		UpdateFunc: func(old, new interface{}) {
 			oldNode := old.(*kapi.Node)
@@ -476,11 +517,17 @@ func (oc *Controller) WatchNodes() error {
 					logrus.Errorf("error update Node Management Port for node %s: %v", node.Name, err)
 				}
 			}
-			if !config.Gateway.NodeportEnable {
-				return
+
+			if gatewayChanged(oldNode, node) {
+				if err := oc.handleNodeGateway(node); err != nil {
+					logrus.Errorf(err.Error())
+				}
 			}
-			if !gatewaysHandled[node.Name] {
-				gatewaysHandled[node.Name] = oc.handleNodePortLB(node)
+
+			if config.Gateway.NodeportEnable {
+				if !gatewaysHandled[node.Name] {
+					gatewaysHandled[node.Name] = oc.handleNodePortLB(node)
+				}
 			}
 		},
 		DeleteFunc: func(obj interface{}) {
@@ -522,4 +569,34 @@ func (oc *Controller) GetServiceVIPToName(vip string, protocol kapi.Protocol) (t
 	defer oc.serviceVIPToNameLock.Unlock()
 	namespace, ok := oc.serviceVIPToName[ServiceVIPKey{vip, protocol}]
 	return namespace, ok
+}
+
+// gatewayChanged() compares old annotations to new and returns true if something has changed.
+func gatewayChanged(oldNode, newNode *kapi.Node) bool {
+
+	if newNode.Annotations[OvnNodeGatewayMode] != oldNode.Annotations[OvnNodeGatewayMode] {
+		return true
+	}
+
+	if newNode.Annotations[OvnNodeGatewayVlanID] != oldNode.Annotations[OvnNodeGatewayVlanID] {
+		return true
+	}
+
+	if newNode.Annotations[OvnNodeGatewayIfaceID] != oldNode.Annotations[OvnNodeGatewayIfaceID] {
+		return true
+	}
+
+	if newNode.Annotations[OvnNodeGatewayMacAddress] != oldNode.Annotations[OvnNodeGatewayMacAddress] {
+		return true
+	}
+
+	if newNode.Annotations[OvnNodeGatewayIP] != oldNode.Annotations[OvnNodeGatewayIP] {
+		return true
+	}
+
+	if newNode.Annotations[OvnNodeGatewayNextHop] != oldNode.Annotations[OvnNodeGatewayNextHop] {
+		return true
+	}
+
+	return false
 }

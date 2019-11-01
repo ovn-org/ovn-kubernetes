@@ -12,6 +12,11 @@ import (
 	"k8s.io/apimachinery/pkg/util/wait"
 )
 
+// Builds the logical switch port name for a given pod.
+func podLogicalPortName(pod *kapi.Pod) string {
+	return pod.Namespace + "_" + pod.Name
+}
+
 func (oc *Controller) syncPods(pods []interface{}) {
 	// get the list of logical switch ports (equivalent to pods)
 	expectedLogicalPorts := make(map[string]bool)
@@ -21,7 +26,7 @@ func (oc *Controller) syncPods(pods []interface{}) {
 			logrus.Errorf("Spurious object in syncPods: %v", podInterface)
 			continue
 		}
-		logicalPort := fmt.Sprintf("%s_%s", pod.Namespace, pod.Name)
+		logicalPort := podLogicalPortName(pod)
 		expectedLogicalPorts[logicalPort] = true
 	}
 
@@ -155,7 +160,7 @@ func (oc *Controller) deleteLogicalPort(pod *kapi.Pod) {
 	}
 
 	logrus.Infof("Deleting pod: %s", pod.Name)
-	logicalPort := fmt.Sprintf("%s_%s", pod.Namespace, pod.Name)
+	logicalPort := podLogicalPortName(pod)
 	out, stderr, err := util.RunOVNNbctl("--if-exists", "lsp-del",
 		logicalPort)
 	if err != nil {
@@ -187,7 +192,7 @@ func (oc *Controller) deleteLogicalPort(pod *kapi.Pod) {
 		oc.deleteACLDenyOld(pod.Namespace, pod.Spec.NodeName, logicalPort,
 			"Egress")
 	}
-	oc.deletePodFromNamespaceAddressSet(pod.Namespace, podIP)
+	oc.deletePodFromNamespace(pod.Namespace, podIP, logicalPort)
 	return
 }
 
@@ -242,7 +247,7 @@ func (oc *Controller) addLogicalPort(pod *kapi.Pod) {
 		return
 	}
 
-	portName := fmt.Sprintf("%s_%s", pod.Namespace, pod.Name)
+	portName := podLogicalPortName(pod)
 	logrus.Debugf("Creating logical port for %s on switch %s", portName, logicalSwitch)
 
 	annotation, err := util.UnmarshalPodAnnotation(pod.Annotations["ovn"])
@@ -323,10 +328,25 @@ func (oc *Controller) addLogicalPort(pod *kapi.Pod) {
 		return
 	}
 
+	routes := []util.PodRoute{}
+	if gatewayIP != nil && len(oc.hybridOverlayClusterSubnets) > 0 {
+		// Get the 3rd address in the node's subnet; the first is taken
+		// by the k8s-cluster-router port, the second by the management port
+		second := util.NextIP(gatewayIP.IP)
+		thirdIP := util.NextIP(second)
+		for _, subnet := range oc.hybridOverlayClusterSubnets {
+			routes = append(routes, util.PodRoute{
+				Dest:    subnet.CIDR,
+				NextHop: thirdIP,
+			})
+		}
+	}
+
 	marshalledAnnotation, err := util.MarshalPodAnnotation(&util.PodAnnotation{
-		IP:  podCIDR,
-		MAC: podMac,
-		GW:  gatewayIP.IP,
+		IP:     podCIDR,
+		MAC:    podMac,
+		GW:     gatewayIP.IP,
+		Routes: routes,
 	})
 	if err != nil {
 		logrus.Errorf("error creating pod network annotation: %v", err)
@@ -339,7 +359,7 @@ func (oc *Controller) addLogicalPort(pod *kapi.Pod) {
 	if err != nil {
 		logrus.Errorf("Failed to set annotation on pod %s - %v", pod.Name, err)
 	}
-	oc.addPodToNamespaceAddressSet(pod.Namespace, podIP)
+	oc.addPodToNamespace(pod.Namespace, podIP, portName)
 
 	return
 }
