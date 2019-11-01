@@ -358,10 +358,6 @@ subnet=%s
 			clusterController := NewOvnController(fakeClient, f)
 			Expect(clusterController).NotTo(BeNil())
 
-			// Initialize OVS/OVN connection methods
-			err = setupOVNMaster(masterNode.Name)
-			Expect(err).NotTo(HaveOccurred())
-
 			// Let the real code run and ensure OVN database sync
 			err = clusterController.WatchNodes()
 			Expect(err).NotTo(HaveOccurred())
