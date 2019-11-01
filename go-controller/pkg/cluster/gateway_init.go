@@ -74,19 +74,18 @@ loop:
 }
 
 func (cluster *OvnClusterController) initGateway(
-	nodeName string, clusterIPSubnet []string, subnet string) error {
+	nodeName string, subnet string) (map[string]string, error) {
 
 	if config.Gateway.NodeportEnable {
 		err := initLoadBalancerHealthChecker(nodeName, cluster.watchFactory)
 		if err != nil {
-			return err
+			return nil, err
 		}
 	}
 
 	switch config.Gateway.Mode {
 	case config.GatewayModeLocal:
-		return initLocalnetGateway(nodeName, clusterIPSubnet, subnet,
-			cluster.watchFactory)
+		return initLocalnetGateway(nodeName, subnet, cluster.watchFactory)
 	case config.GatewayModeShared:
 		gatewayNextHop := config.Gateway.NextHop
 		gatewayIntf := config.Gateway.Interface
@@ -94,7 +93,7 @@ func (cluster *OvnClusterController) initGateway(
 			// We need to get the interface details from the default gateway.
 			defaultGatewayIntf, defaultGatewayNextHop, err := getDefaultGatewayInterfaceDetails()
 			if err != nil {
-				return err
+				return nil, err
 			}
 
 			if gatewayNextHop == "" {
@@ -105,11 +104,11 @@ func (cluster *OvnClusterController) initGateway(
 				gatewayIntf = defaultGatewayIntf
 			}
 		}
-		return initSharedGateway(nodeName, clusterIPSubnet, subnet,
+		return initSharedGateway(nodeName, subnet,
 			gatewayNextHop, gatewayIntf, cluster.watchFactory)
 	}
 
-	return nil
+	return nil, nil
 }
 
 // CleanupClusterNode cleans up OVS resources on the k8s node on ovnkube-node daemonset deletion.
@@ -140,4 +139,20 @@ func CleanupClusterNode(name string) error {
 	}
 
 	return nil
+}
+
+// GatewayReady will check to see if the gateway was created
+func GatewayReady(nodeName string, portName string) (bool, error) {
+
+	gatewayRouter := "GR_" + nodeName
+	stdout, stderr, err := util.RunOVNNbctl("lsp-get-addresses", "etor-"+gatewayRouter)
+	if err != nil {
+		logrus.Errorf("Error while obtaining gateway router addresses for %s - %v", nodeName, err)
+		return false, err
+	}
+	// Did master create etor-GR_nodeName port on ls?
+	if stdout == "" || stderr != "" {
+		return false, nil
+	}
+	return true, nil
 }
