@@ -102,22 +102,8 @@ func (oc *Controller) StartClusterMaster(masterNodeName string) error {
 	return nil
 }
 
-func setupOVNMaster(nodeName string) error {
-	// Configure both server and client of OVN databases, since master uses both
-	for _, auth := range []config.OvnAuthConfig{config.OvnNorth, config.OvnSouth} {
-		if err := auth.SetDBAuth(); err != nil {
-			return err
-		}
-	}
-	return nil
-}
-
 // SetupMaster creates the central router and load-balancers for the network
 func (oc *Controller) SetupMaster(masterNodeName string) error {
-	if err := setupOVNMaster(masterNodeName); err != nil {
-		return err
-	}
-
 	// Create a single common distributed router for the cluster.
 	stdout, stderr, err := util.RunOVNNbctl("--", "--may-exist", "lr-add", OvnClusterRouter,
 		"--", "set", "logical_router", OvnClusterRouter, "external_ids:k8s-cluster-router=yes")

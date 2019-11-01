@@ -478,10 +478,6 @@ subnet=%s
 			clusterController := NewOvnController(fakeClient, f, nil)
 			Expect(clusterController).NotTo(BeNil())
 
-			// Initialize OVS/OVN connection methods
-			err = setupOVNMaster(masterNode.Name)
-			Expect(err).NotTo(HaveOccurred())
-
 			// Let the real code run and ensure OVN database sync
 			err = clusterController.WatchNodes(nil)
 			Expect(err).NotTo(HaveOccurred())
@@ -666,10 +662,6 @@ GR_openshift-master-node chassis=6a47b33b-89d3-4d65-ac31-b19b549326c7 lb_force_s
 
 			clusterController := NewOvnController(fakeClient, wf, nil)
 			Expect(clusterController).NotTo(BeNil())
-
-			// Initialize OVS/OVN connection methods
-			err = setupOVNMaster(testNode.Name)
-			Expect(err).NotTo(HaveOccurred())
 
 			// Let the real code run and ensure OVN database sync
 			err = clusterController.WatchNodes(nil)
