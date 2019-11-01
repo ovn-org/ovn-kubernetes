@@ -25,11 +25,12 @@ type HAMasterController struct {
 	nodeName      string
 	isLeader      bool
 	leaderElector *leaderelection.LeaderElector
+	stopChan      chan struct{}
 }
 
 // NewHAMasterController creates a new HA Master controller
 func NewHAMasterController(kubeClient kubernetes.Interface, wf *factory.WatchFactory,
-	nodeName string) *HAMasterController {
+	nodeName string, stopChan chan struct{}) *HAMasterController {
 	ovnController := NewOvnController(kubeClient, wf)
 	return &HAMasterController{
 		kubeClient:    kubeClient,
@@ -37,6 +38,7 @@ func NewHAMasterController(kubeClient kubernetes.Interface, wf *factory.WatchFac
 		nodeName:      nodeName,
 		isLeader:      false,
 		leaderElector: nil,
+		stopChan:      stopChan,
 	}
 }
 
@@ -120,5 +122,5 @@ func (hacontroller *HAMasterController) ConfigureAsActive(masterNodeName string)
 		return err
 	}
 
-	return hacontroller.ovnController.Run()
+	return hacontroller.ovnController.Run(hacontroller.stopChan)
 }
