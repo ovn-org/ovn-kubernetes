@@ -1,19 +1,36 @@
 package ovn
 
 import (
+	"encoding/json"
+	"errors"
 	"reflect"
 	"sync"
+	"time"
 
 	"github.com/openshift/origin/pkg/util/netutils"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/factory"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/kube"
+	util "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
 	"github.com/sirupsen/logrus"
 	kapi "k8s.io/api/core/v1"
 	kapisnetworking "k8s.io/api/networking/v1"
+	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/client-go/kubernetes"
+	"k8s.io/client-go/kubernetes/scheme"
+	kv1core "k8s.io/client-go/kubernetes/typed/core/v1"
 	"k8s.io/client-go/tools/cache"
+	"k8s.io/client-go/tools/record"
 )
+
+// ServiceVIPKey is used for looking up service namespace information for a
+// particular load balancer
+type ServiceVIPKey struct {
+	// Load balancer VIP in the form "ip:port"
+	vip string
+	// Protocol used by the load balancer
+	protocol kapi.Protocol
+}
 
 // Controller structure is the object which holds the controls for starting
 // and reacting upon the watched resources (e.g. pods, endpoints)
@@ -82,6 +99,11 @@ type Controller struct {
 
 	// supports port_group?
 	portGroupSupport bool
+
+	// Map of load balancers to service namespace
+	serviceVIPToName map[ServiceVIPKey]types.NamespacedName
+
+	serviceVIPToNameLock sync.Mutex
 }
 
 const (
@@ -112,18 +134,187 @@ func NewOvnController(kubeClient kubernetes.Interface, wf *factory.WatchFactory)
 		gatewayCache:             make(map[string]string),
 		loadbalancerClusterCache: make(map[string]string),
 		loadbalancerGWCache:      make(map[string]string),
+		serviceVIPToName:         make(map[ServiceVIPKey]types.NamespacedName),
+		serviceVIPToNameLock:     sync.Mutex{},
 	}
 }
 
 // Run starts the actual watching.
-func (oc *Controller) Run() error {
-	for _, f := range []func() error{oc.WatchNodes, oc.WatchPods, oc.WatchServices, oc.WatchEndpoints,
+func (oc *Controller) Run(stopChan chan struct{}) error {
+	startOvnUpdater()
+
+	// WatchNodes must be started first so that its initial Add will
+	// create all node logical switches, which other watches may depend on.
+	// https://github.com/ovn-org/ovn-kubernetes/pull/859
+	if err := oc.WatchNodes(); err != nil {
+		return err
+	}
+
+	for _, f := range []func() error{oc.WatchPods, oc.WatchServices, oc.WatchEndpoints,
 		oc.WatchNamespaces, oc.WatchNetworkPolicy} {
 		if err := f(); err != nil {
 			return err
 		}
 	}
+
+	if config.Kubernetes.OVNEmptyLbEvents {
+		go oc.ovnControllerEventChecker(stopChan)
+	}
+
 	return nil
+}
+
+type eventRecord struct {
+	Data     [][]interface{} `json:"Data"`
+	Headings []string        `json:"Headings"`
+}
+
+type emptyLBBackendEvent struct {
+	vip      string
+	protocol kapi.Protocol
+	uuid     string
+}
+
+func extractEmptyLBBackendsEvents(out []byte) ([]emptyLBBackendEvent, error) {
+	events := make([]emptyLBBackendEvent, 0, 4)
+
+	var f eventRecord
+	err := json.Unmarshal(out, &f)
+	if err != nil {
+		return events, err
+	}
+	if len(f.Data) == 0 {
+		return events, nil
+	}
+
+	var eventInfoIndex int
+	var eventTypeIndex int
+	var uuidIndex int
+	for idx, val := range f.Headings {
+		switch val {
+		case "event_info":
+			eventInfoIndex = idx
+		case "event_type":
+			eventTypeIndex = idx
+		case "_uuid":
+			uuidIndex = idx
+		}
+	}
+
+	for _, val := range f.Data {
+		if len(val) <= eventTypeIndex {
+			return events, errors.New("Mismatched Data and Headings in controller event")
+		}
+		if val[eventTypeIndex] != "empty_lb_backends" {
+			continue
+		}
+
+		uuidArray, ok := val[uuidIndex].([]interface{})
+		if !ok {
+			return events, errors.New("Unexpected '_uuid' data in controller event")
+		}
+		if len(uuidArray) < 2 {
+			return events, errors.New("Malformed UUID presented in controller event")
+		}
+		uuid, ok := uuidArray[1].(string)
+		if !ok {
+			return events, errors.New("Failed to parse UUID in controller event")
+		}
+
+		// Unpack the data. There's probably a better way to do this.
+		info, ok := val[eventInfoIndex].([]interface{})
+		if !ok {
+			return events, errors.New("Unexpected 'event_info' data in controller event")
+		}
+		if len(info) < 2 {
+			return events, errors.New("Malformed event_info in controller event")
+		}
+		eventMap, ok := info[1].([]interface{})
+		if !ok {
+			return events, errors.New("'event_info' data is not the expected type")
+		}
+
+		var vip string
+		var protocol kapi.Protocol
+		for _, x := range eventMap {
+			tuple, ok := x.([]interface{})
+			if !ok {
+				return events, errors.New("event map item failed to parse")
+			}
+			if len(tuple) < 2 {
+				return events, errors.New("event map contains malformed data")
+			}
+			switch tuple[0] {
+			case "vip":
+				vip, ok = tuple[1].(string)
+				if !ok {
+					return events, errors.New("Failed to parse vip in controller event")
+				}
+			case "protocol":
+				prot, ok := tuple[1].(string)
+				if !ok {
+					return events, errors.New("Failed to parse protocol in controller event")
+				}
+				if prot == "udp" {
+					protocol = kapi.ProtocolUDP
+				} else {
+					protocol = kapi.ProtocolTCP
+				}
+			}
+		}
+		events = append(events, emptyLBBackendEvent{vip, protocol, uuid})
+	}
+
+	return events, nil
+}
+
+func (oc *Controller) ovnControllerEventChecker(stopChan chan struct{}) {
+	ticker := time.NewTicker(5 * time.Second)
+
+	_, _, err := util.RunOVNNbctl("set", "nb_global", ".", "options:controller_event=true")
+	if err != nil {
+		logrus.Error("Unable to enable controller events. Unidling not possible")
+		return
+	}
+
+	eventBroadcaster := record.NewBroadcaster()
+	eventBroadcaster.StartRecordingToSink(&kv1core.EventSinkImpl{Interface: oc.kube.Events()})
+	recorder := eventBroadcaster.NewRecorder(scheme.Scheme, kapi.EventSource{Component: "kube-proxy"})
+
+	for {
+		select {
+		case <-ticker.C:
+			out, _, err := util.RunOVNSbctl("--format=json", "list", "controller_event")
+			if err != nil {
+				continue
+			}
+
+			events, err := extractEmptyLBBackendsEvents([]byte(out))
+			if err != nil || len(events) == 0 {
+				continue
+			}
+
+			for _, event := range events {
+				_, _, err := util.RunOVNSbctl("destroy", "controller_event", event.uuid)
+				if err != nil {
+					// Don't unidle until we are able to remove the controller event
+					logrus.Errorf("Unable to remove controller event %s", event.uuid)
+					continue
+				}
+				if serviceName, ok := oc.GetServiceVIPToName(event.vip, event.protocol); ok {
+					serviceRef := kapi.ObjectReference{
+						Kind:      "Service",
+						Namespace: serviceName.Namespace,
+						Name:      serviceName.Name,
+					}
+					logrus.Debugf("Sending a NeedPods event for service %s in namespace %s.", serviceName.Name, serviceName.Namespace)
+					recorder.Eventf(&serviceRef, kapi.EventTypeNormal, "NeedPods", "The service %s needs pods", serviceName.Name)
+				}
+			}
+		case <-stopChan:
+			return
+		}
+	}
 }
 
 // WatchPods starts the watching of Pod resource and calls back the appropriate handler logic
@@ -316,4 +507,19 @@ func (oc *Controller) WatchNodes() error {
 		},
 	}, oc.syncNodes)
 	return err
+}
+
+// AddServiceVIPToName associates a k8s service name with a load balancer VIP
+func (oc *Controller) AddServiceVIPToName(vip string, protocol kapi.Protocol, namespace, name string) {
+	oc.serviceVIPToNameLock.Lock()
+	defer oc.serviceVIPToNameLock.Unlock()
+	oc.serviceVIPToName[ServiceVIPKey{vip, protocol}] = types.NamespacedName{namespace, name}
+}
+
+// GetServiceVIPToName retrieves the associated k8s service name for a load balancer VIP
+func (oc *Controller) GetServiceVIPToName(vip string, protocol kapi.Protocol) (types.NamespacedName, bool) {
+	oc.serviceVIPToNameLock.Lock()
+	defer oc.serviceVIPToNameLock.Unlock()
+	namespace, ok := oc.serviceVIPToName[ServiceVIPKey{vip, protocol}]
+	return namespace, ok
 }
