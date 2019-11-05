@@ -246,8 +246,7 @@ func (oc *Controller) syncNodeManagementPort(node *kapi.Node) error {
 	// Create this node's management logical port on the node switch
 	stdout, stderr, err := util.RunOVNNbctl(
 		"--", "--may-exist", "lsp-add", node.Name, "k8s-"+node.Name,
-		"--", "lsp-set-addresses", "k8s-"+node.Name, macAddress+" "+portIP.IP.String(),
-		"--", "--if-exists", "remove", "logical_switch", node.Name, "other-config", "exclude_ips")
+		"--", "lsp-set-addresses", "k8s-"+node.Name, macAddress+" "+portIP.IP.String())
 	if err != nil {
 		logrus.Errorf("Failed to add logical port to switch, stdout: %q, stderr: %q, error: %v", stdout, stderr, err)
 		return err
