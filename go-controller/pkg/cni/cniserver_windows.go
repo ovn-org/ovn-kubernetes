@@ -16,8 +16,8 @@ import (
 // TODO: use HTTPS for better security
 // TODO: even better to use named pipes instead
 // requestFunc will be called to handle pod setup/teardown operations on each
-// request to the Server's HTTP server, and should return a PodResult
-// when the operation has completed.
+// request to the Server's HTTP server, and should return the response bytes,
+// or an error when the operation has completed.
 func (s *Server) Start(requestFunc cniRequestFunc) error {
 	if requestFunc == nil {
 		return fmt.Errorf("no pod request handler")

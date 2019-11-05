@@ -119,9 +119,9 @@ func (p *Plugin) CmdAdd(args *skel.CmdArgs) error {
 		result = response.Result
 	} else {
 		pr, _ := cniRequestToPodRequest(req)
-		result = pr.getCNIResult(response.PodIFInfo)
-		if result == nil {
-			return fmt.Errorf("failed to get CNI Result from pod interface info %v", response.PodIFInfo)
+		result, err = pr.getCNIResult(response.PodIFInfo)
+		if err != nil {
+			return fmt.Errorf("failed to get CNI Result from pod interface info %v: %v", response.PodIFInfo, err)
 		}
 	}
 

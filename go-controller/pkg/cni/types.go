@@ -67,16 +67,6 @@ type PodRequest struct {
 	IfName string
 	// CNI conf obtained from stdin conf
 	CNIConf *types.NetConf
-	// Channel for returning the operation result to the Server
-	Result chan *PodResult
-}
-
-// PodResult of a PodRequest sent through the PodRequest's Result channel.
-type PodResult struct {
-	// Response to be returned to the OVN CNI plugin on success
-	Response []byte
-	// Error to be returned to the OVN CNI plugin on failure
-	Err error
 }
 
 type cniRequestFunc func(request *PodRequest) ([]byte, error)
