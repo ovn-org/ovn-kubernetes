@@ -226,14 +226,14 @@ var _ = Describe("Node Operations", func() {
 			fexec := ovntest.NewFakeExec()
 			fexec.AddFakeCmd(&ovntest.ExpectedCmd{
 				Cmd: fmt.Sprintf("ovs-vsctl --timeout=15 set Open_vSwitch . "+
-					"external_ids:ovn-nb=\"tcp:%s:%d\"",
-					masterAddress, nbPort),
+					"external_ids:ovn-nb=\"tcp:%s\"",
+					util.JoinHostPortInt32(masterAddress, nbPort)),
 			})
 
 			fexec.AddFakeCmd(&ovntest.ExpectedCmd{
 				Cmd: fmt.Sprintf("ovs-vsctl --timeout=15 set Open_vSwitch . "+
-					"external_ids:ovn-remote=\"tcp:%s:%d\"",
-					masterAddress, sbPort),
+					"external_ids:ovn-remote=\"tcp:%s\"",
+					util.JoinHostPortInt32(masterAddress, sbPort)),
 			})
 
 			err := util.SetExec(fexec)
@@ -281,10 +281,10 @@ var _ = Describe("Node Operations", func() {
 			// Kubernetes endpoints should eventually propogate to OvnNorth/OvnSouth
 			Eventually(func() string {
 				return config.OvnNorth.Address
-			}).Should(Equal(fmt.Sprintf("tcp:%s:%d", masterAddress, nbPort)), "Northbound DB Port did not get set by watchConfigEndpoints")
+			}).Should(Equal(fmt.Sprintf("tcp:%s", util.JoinHostPortInt32(masterAddress, nbPort))), "Northbound DB Port did not get set by watchConfigEndpoints")
 			Eventually(func() string {
 				return config.OvnSouth.Address
-			}).Should(Equal(fmt.Sprintf("tcp:%s:%d", masterAddress, sbPort)), "Southbound DBPort did not get set by watchConfigEndpoints")
+			}).Should(Equal(fmt.Sprintf("tcp:%s", util.JoinHostPortInt32(masterAddress, sbPort))), "Southbound DBPort did not get set by watchConfigEndpoints")
 
 			return nil
 		}
@@ -305,14 +305,16 @@ var _ = Describe("Node Operations", func() {
 			fexec := ovntest.NewFakeExec()
 			fexec.AddFakeCmd(&ovntest.ExpectedCmd{
 				Cmd: fmt.Sprintf("ovs-vsctl --timeout=15 set Open_vSwitch . "+
-					"external_ids:ovn-nb=\"tcp:%s:%d,tcp:%s:%d\"",
-					masterAddress1, nbPort, masterAddress2, nbPort),
+					"external_ids:ovn-nb=\"tcp:%s,tcp:%s\"",
+					util.JoinHostPortInt32(masterAddress1, nbPort),
+					util.JoinHostPortInt32(masterAddress2, nbPort)),
 			})
 
 			fexec.AddFakeCmd(&ovntest.ExpectedCmd{
 				Cmd: fmt.Sprintf("ovs-vsctl --timeout=15 set Open_vSwitch . "+
-					"external_ids:ovn-remote=\"tcp:%s:%d,tcp:%s:%d\"",
-					masterAddress1, sbPort, masterAddress2, sbPort),
+					"external_ids:ovn-remote=\"tcp:%s,tcp:%s\"",
+					util.JoinHostPortInt32(masterAddress1, sbPort),
+					util.JoinHostPortInt32(masterAddress2, sbPort)),
 			})
 
 			err := util.SetExec(fexec)
@@ -360,10 +362,10 @@ var _ = Describe("Node Operations", func() {
 			// Kubernetes endpoints should eventually propogate to OvnNorth/OvnSouth
 			Eventually(func() string {
 				return config.OvnNorth.Address
-			}).Should(Equal(fmt.Sprintf("tcp:%s:%d,tcp:%s:%d", masterAddress1, nbPort, masterAddress2, nbPort)), "Northbound DB Port did not get set by watchConfigEndpoints")
+			}).Should(Equal(fmt.Sprintf("tcp:%s,tcp:%s", util.JoinHostPortInt32(masterAddress1, nbPort), util.JoinHostPortInt32(masterAddress2, nbPort))), "Northbound DB Port did not get set by watchConfigEndpoints")
 			Eventually(func() string {
 				return config.OvnSouth.Address
-			}).Should(Equal(fmt.Sprintf("tcp:%s:%d,tcp:%s:%d", masterAddress1, sbPort, masterAddress2, sbPort)), "Southbound DBPort did not get set by watchConfigEndpoints")
+			}).Should(Equal(fmt.Sprintf("tcp:%s,tcp:%s", util.JoinHostPortInt32(masterAddress1, sbPort), util.JoinHostPortInt32(masterAddress2, sbPort))), "Southbound DBPort did not get set by watchConfigEndpoints")
 
 			return nil
 		}
