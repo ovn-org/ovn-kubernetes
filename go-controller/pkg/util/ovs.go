@@ -38,6 +38,12 @@ const (
 	windowsOS         = "windows"
 )
 
+const (
+	nbdbCtlSockPath   = "/var/run/openvswitch/ovnnb_db.ctl"
+	sbdbCtlSockPath   = "/var/run/openvswitch/ovnsb_db.ctl"
+	northdCtlSockPath = "/var/run/openvswitch/ovn-northd.ctl"
+)
+
 func runningPlatform() (string, error) {
 	if runtime.GOOS == windowsOS {
 		return windowsOS, nil
@@ -83,6 +89,7 @@ type execHelper struct {
 	appctlPath     string
 	nbctlPath      string
 	sbctlPath      string
+	ovnctlPath     string
 	ipPath         string
 	powershellPath string
 	netshPath      string
@@ -109,6 +116,7 @@ func SetExec(exec kexec.Interface) error {
 	if err != nil {
 		return err
 	}
+
 	runner.nbctlPath, err = exec.LookPath(ovnNbctlCommand)
 	if err != nil {
 		return err
@@ -117,6 +125,8 @@ func SetExec(exec kexec.Interface) error {
 	if err != nil {
 		return err
 	}
+	runner.ovnctlPath = "/usr/share/openvswitch/scripts/ovn-ctl"
+
 	if runtime.GOOS == windowsOS {
 		runner.powershellPath, err = exec.LookPath(powershellCommand)
 		if err != nil {
@@ -320,6 +330,48 @@ func RunOVNSbctlWithTimeout(timeout int, args ...string) (string, string,
 // RunOVNSbctl runs a command via ovn-sbctl.
 func RunOVNSbctl(args ...string) (string, string, error) {
 	return RunOVNSbctlWithTimeout(ovsCommandTimeout, args...)
+}
+
+// RunOVNCtl runs an ovn-ctl command.
+func RunOVNCtl(args ...string) (string, string, error) {
+	stdout, stderr, err := runOVNretry(runner.ovnctlPath, nil, args...)
+	return strings.Trim(strings.TrimSpace(stdout.String()), "\""), stderr.String(), err
+}
+
+// RunOVNNBAppCtl runs an 'ovs-appctl -t nbdbCtlSockPath command'.
+func RunOVNNBAppCtl(args ...string) (string, string, error) {
+	var cmdArgs []string
+	cmdArgs = []string{
+		"-t",
+		nbdbCtlSockPath,
+	}
+	cmdArgs = append(cmdArgs, args...)
+	stdout, stderr, err := runOVNretry(runner.appctlPath, nil, cmdArgs...)
+	return strings.Trim(strings.TrimSpace(stdout.String()), "\""), stderr.String(), err
+}
+
+// RunOVNSBAppCtl runs an 'ovs-appctl -t sbdbCtlSockPath command'.
+func RunOVNSBAppCtl(args ...string) (string, string, error) {
+	var cmdArgs []string
+	cmdArgs = []string{
+		"-t",
+		sbdbCtlSockPath,
+	}
+	cmdArgs = append(cmdArgs, args...)
+	stdout, stderr, err := runOVNretry(runner.appctlPath, nil, cmdArgs...)
+	return strings.Trim(strings.TrimSpace(stdout.String()), "\""), stderr.String(), err
+}
+
+// RunOVNNorthAppCtl runs an 'ovs-appctl -t ovn-northd command'.
+func RunOVNNorthAppCtl(args ...string) (string, string, error) {
+	var cmdArgs []string
+	cmdArgs = []string{
+		"-t",
+		northdCtlSockPath,
+	}
+	cmdArgs = append(cmdArgs, args...)
+	stdout, stderr, err := runOVNretry(runner.appctlPath, nil, cmdArgs...)
+	return strings.Trim(strings.TrimSpace(stdout.String()), "\""), stderr.String(), err
 }
 
 // RunIP runs a command via the iproute2 "ip" utility
