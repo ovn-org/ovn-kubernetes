@@ -371,6 +371,7 @@ func (oc *Controller) handlePeerNamespaceSelector(
 
 const (
 	toLport   = "to-lport"
+	fromLport = "from-lport"
 	addACL    = "add"
 	deleteACL = "delete"
 	noneMatch = "None"
@@ -380,6 +381,10 @@ const (
 	defaultAllowPriority = "1001"
 	// IP Block except deny acl rule priority
 	ipBlockDenyPriority = "1010"
+	// Default multicast deny acl rule priority
+	defaultMcastDenyPriority = "1011"
+	// Default multicast allow acl rule priority
+	defaultMcastAllowPriority = "1012"
 )
 
 func (oc *Controller) addAllowACLFromNode(logicalSwitch string) error {
