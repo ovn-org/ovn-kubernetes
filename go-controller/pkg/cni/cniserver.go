@@ -86,7 +86,6 @@ func cniRequestToPodRequest(cr *Request) (*PodRequest, error) {
 
 	req := &PodRequest{
 		Command: command(cmd),
-		Result:  make(chan *PodResult),
 	}
 
 	req.SandboxID, ok = cr.Env["CNI_CONTAINERID"]

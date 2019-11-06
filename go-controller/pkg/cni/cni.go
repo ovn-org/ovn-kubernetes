@@ -57,18 +57,16 @@ func extractPodBandwidthResources(podAnnotations map[string]string) (int64, int6
 	return ingress, egress, nil
 }
 
-func (pr *PodRequest) cmdAdd() *PodResult {
+func (pr *PodRequest) cmdAdd() ([]byte, error) {
 	namespace := pr.PodNamespace
 	podName := pr.PodName
 	if namespace == "" || podName == "" {
-		logrus.Errorf("required CNI variable missing")
-		return nil
+		return nil, fmt.Errorf("required CNI variable missing (namespace: %q, name %q)", namespace, podName)
 	}
 
 	clientset, err := util.NewClientset(&config.Kubernetes)
 	if err != nil {
-		logrus.Errorf("Could not create clientset for kubernetes: %v", err)
-		return nil
+		return nil, fmt.Errorf("Could not create kubernetes clientset: %v", err)
 	}
 	kubecli := &kube.Kube{KClient: clientset}
 
@@ -80,7 +78,7 @@ func (pr *PodRequest) cmdAdd() *PodResult {
 		annotation, err = kubecli.GetAnnotationsOnPod(namespace, podName)
 		if err != nil {
 			// TODO: check if err is non recoverable
-			logrus.Warningf("Error while obtaining pod annotations - %v", err)
+			logrus.Warningf("error getting pod annotations: %v", err)
 			return false, nil
 		}
 		if _, ok := annotation["ovn"]; ok {
@@ -88,26 +86,22 @@ func (pr *PodRequest) cmdAdd() *PodResult {
 		}
 		return false, nil
 	}); err != nil {
-		logrus.Errorf("failed to get pod annotation - %v", err)
-		return nil
+		return nil, fmt.Errorf("failed to get pod annotation: %v", err)
 	}
 
 	ovnAnnotation, ok := annotation["ovn"]
 	if !ok {
-		logrus.Errorf("failed to get ovn annotation from pod")
-		return nil
+		return nil, fmt.Errorf("failed to get ovn annotation from pod")
 	}
 
 	podInfo, err := util.UnmarshalPodAnnotation(ovnAnnotation)
 	if err != nil {
-		logrus.Errorf("unmarshal ovn annotation failed: %v", err)
-		return nil
+		return nil, fmt.Errorf("unmarshal ovn annotation failed: %v", err)
 	}
 
 	ingress, egress, err := extractPodBandwidthResources(annotation)
 	if err != nil {
-		logrus.Errorf("failed to parse bandwidth request: %v", err)
-		return nil
+		return nil, fmt.Errorf("failed to parse bandwidth request: %v", err)
 	}
 	podInterfaceInfo := &PodInterfaceInfo{
 		PodAnnotation: *podInfo,
@@ -115,23 +109,20 @@ func (pr *PodRequest) cmdAdd() *PodResult {
 		Ingress:       ingress,
 		Egress:        egress,
 	}
-	podResult := &PodResult{}
 	response := &Response{}
 	if !config.UnprivilegedMode {
 		response.Result = pr.getCNIResult(podInterfaceInfo)
 	} else {
 		response.PodIFInfo = podInterfaceInfo
 	}
-	podResult.Response, _ = json.Marshal(response)
-	return podResult
+	return json.Marshal(response)
 }
 
-func (pr *PodRequest) cmdDel() *PodResult {
-	err := pr.PlatformSpecificCleanup()
-	if err != nil {
-		logrus.Errorf("Teardown error: %v", err)
+func (pr *PodRequest) cmdDel() ([]byte, error) {
+	if err := pr.PlatformSpecificCleanup(); err != nil {
+		return nil, fmt.Errorf("Teardown error: %v", err)
 	}
-	return &PodResult{}
+	return []byte{}, nil
 }
 
 // HandleCNIRequest is the callback for all the requests
@@ -139,20 +130,18 @@ func (pr *PodRequest) cmdDel() *PodResult {
 // Argument '*PodRequest' encapsulates all the necessary information
 // Return value is the actual bytes to be sent back without further processing.
 func HandleCNIRequest(request *PodRequest) ([]byte, error) {
-	logrus.Infof("Dispatching pod network request %v", request)
-	var result *PodResult
+	logrus.Infof("[%s/%s] dispatching pod network request %v", request.PodNamespace, request.PodName, request)
+	var result []byte
+	var err error
 	switch request.Command {
 	case CNIAdd:
-		result = request.cmdAdd()
+		result, err = request.cmdAdd()
 	case CNIDel:
-		result = request.cmdDel()
+		result, err = request.cmdDel()
 	default:
 	}
-	if result == nil {
-		return PodResult{}.Response, fmt.Errorf("Nil response to CNI request")
-	}
-	logrus.Infof("Returning pod network request %v, result %s err %v", request, string(result.Response), result.Err)
-	return result.Response, result.Err
+	logrus.Infof("[%s/%s] CNI request %v, result %q, err %v", request.PodNamespace, request.PodName, request, string(result), err)
+	return result, err
 }
 
 // getCNIResult get result from pod interface info.
