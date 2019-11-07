@@ -56,8 +56,11 @@ func isOVNControllerReady(name string) (bool, error) {
 	}
 
 	err = wait.PollImmediate(500*time.Millisecond, 60*time.Second, func() (bool, error) {
-		flows, _, err := util.RunOVSOfctl("dump-flows", "br-int")
-		return len(flows) > 0, err
+		stdout, _, err := util.RunOVSOfctl("dump-aggregate", "br-int")
+		if err != nil {
+			return false, fmt.Errorf("failed to get aggregate flow statistics: %v", err)
+		}
+		return strings.Index(stdout, "flow_count=0") == -1, nil
 	})
 	if err != nil {
 		return false, fmt.Errorf("timed out dumping br-int flow entries for node %s: %v", name, err)
