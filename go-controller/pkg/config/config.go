@@ -1086,11 +1086,6 @@ func parseAddress(urlString string) (string, OvnDBScheme, error) {
 			return "", "", fmt.Errorf("failed to parse OVN DB host/port %q: %v",
 				hostPort, err)
 		}
-		ip := net.ParseIP(host)
-		if ip == nil {
-			return "", "", fmt.Errorf("OVN DB host %q must be an IP address, "+
-				"not a DNS name", hostPort)
-		}
 
 		if parsedAddress != "" {
 			parsedAddress += ","
@@ -1263,38 +1258,18 @@ func (a *OvnAuthConfig) SetDBAuth() error {
 	return nil
 }
 
-func (a *OvnAuthConfig) updateIP(newIP []string, port string) error {
-	if a.Address != "" {
-		s := strings.Split(a.Address, ":")
-		if len(s) != 3 {
-			return fmt.Errorf("failed to parse OvnAuthConfig address %q", a.Address)
-		}
-		var newPort string
-		if port != "" {
-			newPort = port
-		} else {
-			newPort = s[2]
-		}
-
-		newAddresses := make([]string, 0, len(newIP))
-		for _, ipAddress := range newIP {
-			newAddresses = append(newAddresses, s[0]+":"+ipAddress+":"+newPort)
-		}
-		a.Address = strings.Join(newAddresses, ",")
+func (a *OvnAuthConfig) updateIP(newIPs []string, port string) {
+	newAddresses := make([]string, 0, len(newIPs))
+	for _, ipAddress := range newIPs {
+		newAddresses = append(newAddresses, fmt.Sprintf("%v:%s:%s", a.Scheme, ipAddress, port))
 	}
-	return nil
+	a.Address = strings.Join(newAddresses, ",")
 }
 
 // UpdateOVNNodeAuth updates the host and URL in ClientAuth
 // for both OvnNorth and OvnSouth. It updates them with the new masterIP.
-func UpdateOVNNodeAuth(masterIP []string, southboundDBPort, northboundDBPort string) error {
+func UpdateOVNNodeAuth(masterIP []string, southboundDBPort, northboundDBPort string) {
 	logrus.Debugf("Update OVN node auth with new master ip: %s", masterIP)
-	if err := OvnNorth.updateIP(masterIP, northboundDBPort); err != nil {
-		return fmt.Errorf("failed to update OvnNorth ClientAuth URL: %v", err)
-	}
-
-	if err := OvnSouth.updateIP(masterIP, southboundDBPort); err != nil {
-		return fmt.Errorf("failed to update OvnSouth ClientAuth URL: %v", err)
-	}
-	return nil
+	OvnNorth.updateIP(masterIP, northboundDBPort)
+	OvnSouth.updateIP(masterIP, southboundDBPort)
 }

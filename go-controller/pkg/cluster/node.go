@@ -186,10 +186,7 @@ func updateOVNConfig(ep *kapi.Endpoints) error {
 		return err
 	}
 
-	err = config.UpdateOVNNodeAuth(masterIPList, strconv.Itoa(int(southboundDBPort)), strconv.Itoa(int(northboundDBPort)))
-	if err != nil {
-		return err
-	}
+	config.UpdateOVNNodeAuth(masterIPList, strconv.Itoa(int(southboundDBPort)), strconv.Itoa(int(northboundDBPort)))
 
 	for _, auth := range []config.OvnAuthConfig{config.OvnNorth, config.OvnSouth} {
 		if err := auth.SetDBAuth(); err != nil {
