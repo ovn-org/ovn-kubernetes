@@ -36,22 +36,27 @@ func newNamespace(namespace string) *v1.Namespace {
 	}
 }
 
-func (n namespace) baseCmds(fexec *ovntest.FakeExec, namespace v1.Namespace) {
+func (n namespace) baseCmds(fexec *ovntest.FakeExec, namespaces ...v1.Namespace) {
+	namespacesRes := ""
+	for _, n := range namespaces {
+		namespacesRes += fmt.Sprintf("name=%s\n", n.Name)
+	}
 	fexec.AddFakeCmd(&ovntest.ExpectedCmd{
 		Cmd:    "ovn-nbctl --timeout=15 --data=bare --no-heading --columns=external_ids find address_set",
-		Output: fmt.Sprintf("name=%s\n", namespace.Name),
-	})
-	fexec.AddFakeCmd(&ovntest.ExpectedCmd{
-		Cmd:    "ovn-nbctl --timeout=15 --data=bare --no-heading --columns=_uuid find address_set name=" + hashedAddressSet(namespace.Name),
-		Output: fmt.Sprintf("name=%s\n", namespace.Name),
+		Output: namespacesRes,
 	})
 }
 
-func (n namespace) addCmds(fexec *ovntest.FakeExec, namespace v1.Namespace) {
-	n.baseCmds(fexec, namespace)
-	fexec.AddFakeCmdsNoOutputNoError([]string{
-		fmt.Sprintf("ovn-nbctl --timeout=15 clear address_set %s addresses", hashedAddressSet(namespace.Name)),
-	})
+func (n namespace) addCmds(fexec *ovntest.FakeExec, namespaces ...v1.Namespace) {
+	for _, n := range namespaces {
+		fexec.AddFakeCmd(&ovntest.ExpectedCmd{
+			Cmd:    "ovn-nbctl --timeout=15 --data=bare --no-heading --columns=_uuid find address_set name=" + hashedAddressSet(n.Name),
+			Output: fmt.Sprintf("name=%s\n", n.Name),
+		})
+		fexec.AddFakeCmdsNoOutputNoError([]string{
+			fmt.Sprintf("ovn-nbctl --timeout=15 clear address_set %s addresses", hashedAddressSet(n.Name)),
+		})
+	}
 }
 
 func (n namespace) delCmds(fexec *ovntest.FakeExec, namespace v1.Namespace) {
@@ -61,7 +66,10 @@ func (n namespace) delCmds(fexec *ovntest.FakeExec, namespace v1.Namespace) {
 }
 
 func (n namespace) addCmdsWithPods(fexec *ovntest.FakeExec, tP pod, namespace v1.Namespace) {
-	n.baseCmds(fexec, namespace)
+	fexec.AddFakeCmd(&ovntest.ExpectedCmd{
+		Cmd:    "ovn-nbctl --timeout=15 --data=bare --no-heading --columns=_uuid find address_set name=" + hashedAddressSet(namespace.Name),
+		Output: fmt.Sprintf("name=%s\n", namespace.Name),
+	})
 	fexec.AddFakeCmdsNoOutputNoError([]string{
 		fmt.Sprintf(`ovn-nbctl --timeout=15 set address_set %s addresses="%s"`, hashedAddressSet(namespace.Name), tP.podIP),
 	})

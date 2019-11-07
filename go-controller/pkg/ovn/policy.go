@@ -829,7 +829,7 @@ func (oc *Controller) addNetworkPolicyPortGroup(policy *knet.NetworkPolicy) {
 			} else if toJSON.NamespaceSelector != nil {
 				// For each peer namespace selector, we create a watcher that
 				// populates egress.peerAddressSets
-				go oc.handlePeerNamespaceSelector(policy,
+				oc.handlePeerNamespaceSelector(policy,
 					toJSON.NamespaceSelector, egress, np,
 					oc.handlePeerNamespaceSelectorModify)
 			} else if toJSON.PodSelector != nil {

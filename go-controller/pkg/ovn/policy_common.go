@@ -258,14 +258,7 @@ func (oc *Controller) handlePeerPodSelector(
 	np.podHandlerList = append(np.podHandlerList, h)
 }
 
-func (oc *Controller) handlePeerNamespaceAndPodSelector(
-	policy *knet.NetworkPolicy,
-	namespaceSelector *metav1.LabelSelector,
-	podSelector *metav1.LabelSelector,
-	addressSet string,
-	addressMap map[string]bool,
-	np *namespacePolicy) {
-
+func (oc *Controller) handlePeerNamespaceAndPodSelector(policy *knet.NetworkPolicy, namespaceSelector *metav1.LabelSelector, podSelector *metav1.LabelSelector, addressSet string, addressMap map[string]bool, np *namespacePolicy) {
 	namespaceHandler, err := oc.watchFactory.AddFilteredNamespaceHandler("",
 		namespaceSelector,
 		cache.ResourceEventHandlerFuncs{

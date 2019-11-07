@@ -73,6 +73,13 @@ func newTPod(nodeName, nodeSubnet, nodeMgtIP, nodeGWIP, podName, podIP, podMAC, 
 	return
 }
 
+func (p pod) baseCmds(fexec *ovntest.FakeExec) {
+	fexec.AddFakeCmd(&ovntest.ExpectedCmd{
+		Cmd:    "ovn-nbctl --timeout=15 --data=bare --no-heading --columns=name find logical_switch_port external_ids:pod=true",
+		Output: "\n",
+	})
+}
+
 func (p pod) addNodeSetupCmds(fexec *ovntest.FakeExec) {
 	fexec.AddFakeCmd(&ovntest.ExpectedCmd{
 		Cmd:    "ovn-nbctl --timeout=15 get logical_switch " + p.nodeName + " other-config",
@@ -141,6 +148,20 @@ func (p pod) delCmds(fexec *ovntest.FakeExec) {
 	fexec.AddFakeCmdsNoOutputNoError([]string{
 		"ovn-nbctl --timeout=15 --if-exists lsp-del " + p.portName,
 	})
+}
+func (p pod) delFromNamespaceCmds(fexec *ovntest.FakeExec, pod pod, isMulticastEnabled bool) {
+	fexec.AddFakeCmdsNoOutputNoError([]string{
+		fmt.Sprintf("ovn-nbctl --timeout=15 clear address_set %s addresses", hashedAddressSet(pod.namespace)),
+	})
+	fexec.AddFakeCmd(&ovntest.ExpectedCmd{
+		Cmd:    fmt.Sprintf("ovn-nbctl --timeout=15 --if-exists get logical_switch_port %s _uuid", pod.portName),
+		Output: fakeUUID,
+	})
+	if isMulticastEnabled {
+		fexec.AddFakeCmdsNoOutputNoError([]string{
+			fmt.Sprintf("ovn-nbctl --timeout=15 --if-exists remove port_group mcastPortGroupDeny ports %s", fakeUUID),
+		})
+	}
 }
 
 var _ = Describe("OVN Pod Operations", func() {
