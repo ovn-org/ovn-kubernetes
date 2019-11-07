@@ -463,9 +463,15 @@ func (oc *Controller) WatchNodes() error {
 			if err != nil {
 				logrus.Errorf("error creating subnet for node %s: %v", node.Name, err)
 			}
-			err = oc.syncNodeManagementPort(node)
+			// get the node with the updated annotation set
+			newNode, err := oc.kube.GetNode(node.Name)
 			if err != nil {
-				logrus.Errorf("error creating Node Management Port for node %s: %v", node.Name, err)
+				logrus.Errorf("failed to get the node %s: %v", node.Name, err)
+			} else {
+				err = oc.syncNodeManagementPort(newNode)
+				if err != nil {
+					logrus.Errorf("error creating Node Management Port for node %s: %v", node.Name, err)
+				}
 			}
 			if !config.Gateway.NodeportEnable {
 				return
