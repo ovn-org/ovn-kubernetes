@@ -326,7 +326,8 @@ subnet=%s
 				"ovn-nbctl --timeout=15 --may-exist lrp-add ovn_cluster_router rtos-" + masterName + " " + lrpMAC + " " + masterGWCIDR,
 				"ovn-nbctl --timeout=15 -- --may-exist ls-add " + masterName + " -- set logical_switch " + masterName + " other-config:subnet=" + masterSubnet + " other-config:exclude_ips=" + masterMgmtPortIP + " external-ids:gateway_ip=" + masterGWCIDR,
 				"ovn-nbctl --timeout=15 -- --may-exist lsp-add " + masterName + " stor-" + masterName + " -- set logical_switch_port stor-" + masterName + " type=router options:router-port=rtos-" + masterName + " addresses=\"" + lrpMAC + "\"",
-
+				"ovn-nbctl --timeout=15 set logical_switch " + masterName + " load_balancer=" + tcpLBUUID,
+				"ovn-nbctl --timeout=15 add logical_switch " + masterName + " load_balancer " + udpLBUUID,
 				"ovn-nbctl --timeout=15 -- --may-exist lsp-add " + masterName + " k8s-" + masterName + " -- lsp-set-addresses " + "k8s-" + masterName + " " + masterMgmtPortMAC + " " + masterMgmtPortIP + " -- --if-exists remove logical_switch " + masterName + " other-config exclude_ips",
 			})
 
@@ -367,6 +368,8 @@ subnet=%s
 
 			clusterController := NewOvnController(fakeClient, f)
 			Expect(clusterController).NotTo(BeNil())
+			clusterController.TCPLoadBalancerUUID = tcpLBUUID
+			clusterController.UDPLoadBalancerUUID = udpLBUUID
 
 			// Let the real code run and ensure OVN database sync
 			err = clusterController.WatchNodes()

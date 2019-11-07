@@ -459,11 +459,13 @@ func (oc *Controller) WatchNodes() error {
 		AddFunc: func(obj interface{}) {
 			node := obj.(*kapi.Node)
 			logrus.Debugf("Added event for Node %q", node.Name)
-			err := oc.addNode(node)
+			hostSubnet, err := oc.addNode(node)
 			if err != nil {
 				logrus.Errorf("error creating subnet for node %s: %v", node.Name, err)
+				return
 			}
-			err = oc.syncNodeManagementPort(node)
+
+			err = oc.syncNodeManagementPort(node, hostSubnet)
 			if err != nil {
 				logrus.Errorf("error creating Node Management Port for node %s: %v", node.Name, err)
 			}
@@ -479,7 +481,7 @@ func (oc *Controller) WatchNodes() error {
 			macAddress, _ := node.Annotations[OvnNodeManagementPortMacAddress]
 			logrus.Debugf("Updated event for Node %q", node.Name)
 			if oldMacAddress != macAddress {
-				err := oc.syncNodeManagementPort(node)
+				err := oc.syncNodeManagementPort(node, nil)
 				if err != nil {
 					logrus.Errorf("error update Node Management Port for node %s: %v", node.Name, err)
 				}
