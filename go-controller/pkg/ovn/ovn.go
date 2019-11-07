@@ -16,6 +16,7 @@ import (
 	kapi "k8s.io/api/core/v1"
 	kapisnetworking "k8s.io/api/networking/v1"
 	"k8s.io/apimachinery/pkg/types"
+	"k8s.io/apimachinery/pkg/util/sets"
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/kubernetes/scheme"
 	kv1core "k8s.io/client-go/kubernetes/typed/core/v1"
@@ -324,25 +325,40 @@ func (oc *Controller) ovnControllerEventChecker(stopChan chan struct{}) {
 	}
 }
 
+func podScheduledAndWantsNetwork(pod *kapi.Pod) bool {
+	// Only care about scheduled and networked pods
+	return pod.Spec.NodeName != "" && !pod.Spec.HostNetwork
+}
+
 // WatchPods starts the watching of Pod resource and calls back the appropriate handler logic
 func (oc *Controller) WatchPods() error {
+	handledPods := sets.String{}
 	_, err := oc.watchFactory.AddPodHandler(cache.ResourceEventHandlerFuncs{
 		AddFunc: func(obj interface{}) {
 			pod := obj.(*kapi.Pod)
-			if pod.Spec.NodeName != "" {
-				oc.addLogicalPort(pod)
+			if !podScheduledAndWantsNetwork(pod) {
+				return
+			}
+			if err := oc.addLogicalPort(pod); err != nil {
+				logrus.Errorf(err.Error())
+			} else {
+				handledPods.Insert(string(pod.UID))
 			}
 		},
 		UpdateFunc: func(old, newer interface{}) {
-			podNew := newer.(*kapi.Pod)
-			podOld := old.(*kapi.Pod)
-			if podOld.Spec.NodeName == "" && podNew.Spec.NodeName != "" {
-				oc.addLogicalPort(podNew)
+			pod := newer.(*kapi.Pod)
+			if podScheduledAndWantsNetwork(pod) && !handledPods.Has(string(pod.UID)) {
+				if err := oc.addLogicalPort(pod); err != nil {
+					logrus.Errorf(err.Error())
+				} else {
+					handledPods.Insert(string(pod.UID))
+				}
 			}
 		},
 		DeleteFunc: func(obj interface{}) {
 			pod := obj.(*kapi.Pod)
 			oc.deleteLogicalPort(pod)
+			handledPods.Delete(string(pod.UID))
 		},
 	}, oc.syncPods)
 	return err
