@@ -2,7 +2,6 @@ package hcsshim
 
 import (
 	"io"
-	"sync"
 	"time"
 
 	"github.com/Microsoft/hcsshim/internal/hcs"
@@ -10,10 +9,7 @@ import (
 
 // ContainerError is an error encountered in HCS
 type process struct {
-	p        *hcs.Process
-	waitOnce sync.Once
-	waitCh   chan struct{}
-	waitErr  error
+	p *hcs.Process
 }
 
 // Pid returns the process ID of the process within the container.
@@ -23,14 +19,7 @@ func (process *process) Pid() int {
 
 // Kill signals the process to terminate but does not wait for it to finish terminating.
 func (process *process) Kill() error {
-	found, err := process.p.Kill()
-	if err != nil {
-		return convertProcessError(err, process)
-	}
-	if !found {
-		return &ProcessError{Process: process, Err: ErrElementNotFound, Operation: "hcsshim::Process::Kill"}
-	}
-	return nil
+	return convertProcessError(process.p.Kill(), process)
 }
 
 // Wait waits for the process to exit.
@@ -41,21 +30,7 @@ func (process *process) Wait() error {
 // WaitTimeout waits for the process to exit or the duration to elapse. It returns
 // false if timeout occurs.
 func (process *process) WaitTimeout(timeout time.Duration) error {
-	process.waitOnce.Do(func() {
-		process.waitCh = make(chan struct{})
-		go func() {
-			process.waitErr = process.Wait()
-			close(process.waitCh)
-		}()
-	})
-	t := time.NewTimer(timeout)
-	defer t.Stop()
-	select {
-	case <-t.C:
-		return &ProcessError{Process: process, Err: ErrTimeout, Operation: "hcsshim::Process::Wait"}
-	case <-process.waitCh:
-		return process.waitErr
-	}
+	return convertProcessError(process.p.WaitTimeout(timeout), process)
 }
 
 // ExitCode returns the exit code of the process. The process must have
@@ -77,7 +52,7 @@ func (process *process) ResizeConsole(width, height uint16) error {
 // these pipes does not close the underlying pipes; it should be possible to
 // call this multiple times to get multiple interfaces.
 func (process *process) Stdio() (io.WriteCloser, io.ReadCloser, io.ReadCloser, error) {
-	stdin, stdout, stderr, err := process.p.StdioLegacy()
+	stdin, stdout, stderr, err := process.p.Stdio()
 	if err != nil {
 		err = convertProcessError(err, process)
 	}

@@ -2,15 +2,12 @@ package hcs
 
 import (
 	"encoding/json"
-	"errors"
 	"os"
 	"strconv"
-	"strings"
 	"sync"
 	"syscall"
 	"time"
 
-	"github.com/Microsoft/hcsshim/internal/cow"
 	"github.com/Microsoft/hcsshim/internal/interop"
 	"github.com/Microsoft/hcsshim/internal/logfields"
 	"github.com/Microsoft/hcsshim/internal/schema1"
@@ -46,13 +43,6 @@ type System struct {
 	callbackNumber uintptr
 
 	logctx logrus.Fields
-
-	closedWaitOnce sync.Once
-	waitBlock      chan struct{}
-	waitError      error
-	exitError      error
-
-	os, typ string
 }
 
 func newSystem(id string) *System {
@@ -61,7 +51,6 @@ func newSystem(id string) *System {
 		logctx: logrus.Fields{
 			logfields.ContainerID: id,
 		},
-		waitBlock: make(chan struct{}),
 	}
 }
 
@@ -72,7 +61,13 @@ func (computeSystem *System) logOperationBegin(operation string) {
 }
 
 func (computeSystem *System) logOperationEnd(operation string, err error) {
-	result, err := getOperationLogResult(err)
+	var result string
+	if err == nil {
+		result = "Success"
+	} else {
+		result = "Error"
+	}
+
 	logOperationEnd(
 		computeSystem.logctx,
 		operation+" - End Operation - "+result,
@@ -108,11 +103,6 @@ func CreateComputeSystem(id string, hcsDocumentInterface interface{}) (_ *System
 	})
 
 	if createError == nil || IsPending(createError) {
-		defer func() {
-			if err != nil {
-				computeSystem.Close()
-			}
-		}()
 		if err = computeSystem.registerCallback(); err != nil {
 			// Terminate the compute system if it still exists. We're okay to
 			// ignore a failure here.
@@ -130,10 +120,7 @@ func CreateComputeSystem(id string, hcsDocumentInterface interface{}) (_ *System
 		}
 		return nil, makeSystemError(computeSystem, operation, hcsDocument, err, events)
 	}
-	go computeSystem.waitBackground()
-	if err = computeSystem.getCachedProperties(); err != nil {
-		return nil, err
-	}
+
 	return computeSystem, nil
 }
 
@@ -160,46 +147,14 @@ func OpenComputeSystem(id string) (_ *System, err error) {
 	if err != nil {
 		return nil, makeSystemError(computeSystem, operation, "", err, events)
 	}
+
 	computeSystem.handle = handle
-	defer func() {
-		if err != nil {
-			computeSystem.Close()
-		}
-	}()
+
 	if err = computeSystem.registerCallback(); err != nil {
 		return nil, makeSystemError(computeSystem, operation, "", err, nil)
 	}
-	go computeSystem.waitBackground()
-	if err = computeSystem.getCachedProperties(); err != nil {
-		return nil, err
-	}
+
 	return computeSystem, nil
-}
-
-func (computeSystem *System) getCachedProperties() error {
-	props, err := computeSystem.Properties()
-	if err != nil {
-		return err
-	}
-	computeSystem.typ = strings.ToLower(props.SystemType)
-	computeSystem.os = strings.ToLower(props.RuntimeOSType)
-	if computeSystem.os == "" && computeSystem.typ == "container" {
-		// Pre-RS5 HCS did not return the OS, but it only supported containers
-		// that ran Windows.
-		computeSystem.os = "windows"
-	}
-	return nil
-}
-
-// OS returns the operating system of the compute system, "linux" or "windows".
-func (computeSystem *System) OS() string {
-	return computeSystem.os
-}
-
-// IsOCI returns whether processes in the compute system should be created via
-// OCI.
-func (computeSystem *System) IsOCI() bool {
-	return computeSystem.os == "linux" && computeSystem.typ == "container"
 }
 
 // GetComputeSystems gets a list of the compute systems on the system that match the query
@@ -316,7 +271,8 @@ func (computeSystem *System) ID() string {
 	return computeSystem.id
 }
 
-// Shutdown requests a compute system shutdown.
+// Shutdown requests a compute system shutdown, if IsPending() on the error returned is true,
+// it may not actually be shut down until Wait() succeeds.
 func (computeSystem *System) Shutdown() (err error) {
 	computeSystem.handleLock.RLock()
 	defer computeSystem.handleLock.RUnlock()
@@ -324,11 +280,15 @@ func (computeSystem *System) Shutdown() (err error) {
 	operation := "hcsshim::ComputeSystem::Shutdown"
 	computeSystem.logOperationBegin(operation)
 	defer func() {
-		computeSystem.logOperationEnd(operation, err)
+		if IsAlreadyStopped(err) {
+			computeSystem.logOperationEnd(operation, nil)
+		} else {
+			computeSystem.logOperationEnd(operation, err)
+		}
 	}()
 
 	if computeSystem.handle == 0 {
-		return nil
+		return makeSystemError(computeSystem, "Shutdown", "", ErrAlreadyClosed, nil)
 	}
 
 	var resultp *uint16
@@ -336,15 +296,15 @@ func (computeSystem *System) Shutdown() (err error) {
 		err = hcsShutdownComputeSystem(computeSystem.handle, "", &resultp)
 	})
 	events := processHcsResult(resultp)
-	switch err {
-	case nil, ErrVmcomputeAlreadyStopped, ErrComputeSystemDoesNotExist, ErrVmcomputeOperationPending:
-	default:
+	if err != nil {
 		return makeSystemError(computeSystem, "Shutdown", "", err, events)
 	}
+
 	return nil
 }
 
-// Terminate requests a compute system terminate.
+// Terminate requests a compute system terminate, if IsPending() on the error returned is true,
+// it may not actually be shut down until Wait() succeeds.
 func (computeSystem *System) Terminate() (err error) {
 	computeSystem.handleLock.RLock()
 	defer computeSystem.handleLock.RUnlock()
@@ -352,11 +312,15 @@ func (computeSystem *System) Terminate() (err error) {
 	operation := "hcsshim::ComputeSystem::Terminate"
 	computeSystem.logOperationBegin(operation)
 	defer func() {
-		computeSystem.logOperationEnd(operation, err)
+		if IsPending(err) {
+			computeSystem.logOperationEnd(operation, nil)
+		} else {
+			computeSystem.logOperationEnd(operation, err)
+		}
 	}()
 
 	if computeSystem.handle == 0 {
-		return nil
+		return makeSystemError(computeSystem, "Terminate", "", ErrAlreadyClosed, nil)
 	}
 
 	var resultp *uint16
@@ -364,57 +328,55 @@ func (computeSystem *System) Terminate() (err error) {
 		err = hcsTerminateComputeSystem(computeSystem.handle, "", &resultp)
 	})
 	events := processHcsResult(resultp)
-	switch err {
-	case nil, ErrVmcomputeAlreadyStopped, ErrComputeSystemDoesNotExist, ErrVmcomputeOperationPending:
-	default:
+	if err != nil && err != ErrVmcomputeAlreadyStopped {
 		return makeSystemError(computeSystem, "Terminate", "", err, events)
 	}
+
 	return nil
 }
 
-// waitBackground waits for the compute system exit notification. Once received
-// sets `computeSystem.waitError` (if any) and unblocks all `Wait` calls.
-//
-// This MUST be called exactly once per `computeSystem.handle` but `Wait` is
-// safe to call multiple times.
-func (computeSystem *System) waitBackground() {
-	operation := "hcsshim::ComputeSystem::waitBackground"
-	computeSystem.logOperationBegin(operation)
-	err := waitForNotification(computeSystem.callbackNumber, hcsNotificationSystemExited, nil)
-	switch err {
-	case nil:
-	case ErrVmcomputeUnexpectedExit:
-		logrus.WithFields(computeSystem.logctx).Info(operation + " - unexpected system exit")
-		computeSystem.exitError = makeSystemError(computeSystem, "Wait", "", err, nil)
-		err = nil
-	default:
-		err = makeSystemError(computeSystem, "Wait", "", err, nil)
-	}
-	computeSystem.logOperationEnd(operation, err)
-	computeSystem.closedWaitOnce.Do(func() {
-		computeSystem.waitError = err
-		close(computeSystem.waitBlock)
-	})
-}
-
-// Wait synchronously waits for the compute system to shutdown or terminate. If
-// the compute system has already exited returns the previous error (if any).
+// Wait synchronously waits for the compute system to shutdown or terminate.
 func (computeSystem *System) Wait() (err error) {
-	<-computeSystem.waitBlock
-	return computeSystem.waitError
+	operation := "hcsshim::ComputeSystem::Wait"
+	computeSystem.logOperationBegin(operation)
+	defer func() { computeSystem.logOperationEnd(operation, err) }()
+
+	err = waitForNotification(computeSystem.callbackNumber, hcsNotificationSystemExited, nil)
+	if err != nil {
+		return makeSystemError(computeSystem, "Wait", "", err, nil)
+	}
+
+	return nil
 }
 
-// ExitError returns an error describing the reason the compute system terminated.
-func (computeSystem *System) ExitError() (err error) {
-	select {
-	case <-computeSystem.waitBlock:
-		if computeSystem.waitError != nil {
-			return computeSystem.waitError
-		}
-		return computeSystem.exitError
-	default:
-		return errors.New("container not exited")
+// WaitExpectedError synchronously waits for the compute system to shutdown or
+// terminate, and ignores the passed error if it occurs.
+func (computeSystem *System) WaitExpectedError(expected error) (err error) {
+	operation := "hcsshim::ComputeSystem::WaitExpectedError"
+	computeSystem.logOperationBegin(operation)
+	defer func() { computeSystem.logOperationEnd(operation, err) }()
+
+	err = waitForNotification(computeSystem.callbackNumber, hcsNotificationSystemExited, nil)
+	if err != nil && getInnerError(err) != expected {
+		return makeSystemError(computeSystem, "WaitExpectedError", "", err, nil)
 	}
+
+	return nil
+}
+
+// WaitTimeout synchronously waits for the compute system to terminate or the duration to elapse.
+// If the timeout expires, IsTimeout(err) == true
+func (computeSystem *System) WaitTimeout(timeout time.Duration) (err error) {
+	operation := "hcsshim::ComputeSystem::WaitTimeout"
+	computeSystem.logOperationBegin(operation)
+	defer func() { computeSystem.logOperationEnd(operation, err) }()
+
+	err = waitForNotification(computeSystem.callbackNumber, hcsNotificationSystemExited, &timeout)
+	if err != nil {
+		return makeSystemError(computeSystem, "WaitTimeout", "", err, nil)
+	}
+
+	return nil
 }
 
 func (computeSystem *System) Properties(types ...schema1.PropertyType) (_ *schema1.ContainerProperties, err error) {
@@ -425,19 +387,18 @@ func (computeSystem *System) Properties(types ...schema1.PropertyType) (_ *schem
 	computeSystem.logOperationBegin(operation)
 	defer func() { computeSystem.logOperationEnd(operation, err) }()
 
-	queryBytes, err := json.Marshal(schema1.PropertyQuery{PropertyTypes: types})
+	queryj, err := json.Marshal(schema1.PropertyQuery{types})
 	if err != nil {
 		return nil, makeSystemError(computeSystem, "Properties", "", err, nil)
 	}
 
-	queryString := string(queryBytes)
 	logrus.WithFields(computeSystem.logctx).
-		WithField(logfields.JSON, queryString).
+		WithField(logfields.JSON, queryj).
 		Debug("HCS ComputeSystem Properties Query")
 
 	var resultp, propertiesp *uint16
 	syscallWatcher(computeSystem.logctx, func() {
-		err = hcsGetComputeSystemProperties(computeSystem.handle, string(queryString), &propertiesp, &resultp)
+		err = hcsGetComputeSystemProperties(computeSystem.handle, string(queryj), &propertiesp, &resultp)
 	})
 	events := processHcsResult(resultp)
 	if err != nil {
@@ -506,7 +467,8 @@ func (computeSystem *System) Resume() (err error) {
 	return nil
 }
 
-func (computeSystem *System) createProcess(c interface{}) (_ *Process, _ *hcsProcessInformation, err error) {
+// CreateProcess launches a new process within the computeSystem.
+func (computeSystem *System) CreateProcess(c interface{}) (_ *Process, err error) {
 	computeSystem.handleLock.RLock()
 	defer computeSystem.handleLock.RUnlock()
 
@@ -521,12 +483,12 @@ func (computeSystem *System) createProcess(c interface{}) (_ *Process, _ *hcsPro
 	)
 
 	if computeSystem.handle == 0 {
-		return nil, nil, makeSystemError(computeSystem, "CreateProcess", "", ErrAlreadyClosed, nil)
+		return nil, makeSystemError(computeSystem, "CreateProcess", "", ErrAlreadyClosed, nil)
 	}
 
 	configurationb, err := json.Marshal(c)
 	if err != nil {
-		return nil, nil, makeSystemError(computeSystem, "CreateProcess", "", err, nil)
+		return nil, makeSystemError(computeSystem, "CreateProcess", "", err, nil)
 	}
 
 	configuration := string(configurationb)
@@ -540,66 +502,23 @@ func (computeSystem *System) createProcess(c interface{}) (_ *Process, _ *hcsPro
 	})
 	events := processHcsResult(resultp)
 	if err != nil {
-		return nil, nil, makeSystemError(computeSystem, "CreateProcess", configuration, err, events)
+		return nil, makeSystemError(computeSystem, "CreateProcess", configuration, err, events)
 	}
 
 	logrus.WithFields(computeSystem.logctx).
 		WithField(logfields.ProcessID, processInfo.ProcessId).
 		Debug("HCS ComputeSystem CreateProcess PID")
 
-	return newProcess(processHandle, int(processInfo.ProcessId), computeSystem), &processInfo, nil
-}
-
-// CreateProcessNoStdio launches a new process within the computeSystem. The
-// Stdio handles are not cached on the process struct.
-func (computeSystem *System) CreateProcessNoStdio(c interface{}) (_ cow.Process, err error) {
-	process, processInfo, err := computeSystem.createProcess(c)
-	if err != nil {
-		return nil, err
+	process := newProcess(processHandle, int(processInfo.ProcessId), computeSystem)
+	process.cachedPipes = &cachedPipes{
+		stdIn:  processInfo.StdInput,
+		stdOut: processInfo.StdOutput,
+		stdErr: processInfo.StdError,
 	}
-	defer func() {
-		if err != nil {
-			process.Close()
-		}
-	}()
-
-	// We don't do anything with these handles. Close them so they don't leak.
-	syscall.Close(processInfo.StdInput)
-	syscall.Close(processInfo.StdOutput)
-	syscall.Close(processInfo.StdError)
 
 	if err = process.registerCallback(); err != nil {
 		return nil, makeSystemError(computeSystem, "CreateProcess", "", err, nil)
 	}
-	go process.waitBackground()
-
-	return process, nil
-}
-
-// CreateProcess launches a new process within the computeSystem.
-func (computeSystem *System) CreateProcess(c interface{}) (_ cow.Process, err error) {
-	process, processInfo, err := computeSystem.createProcess(c)
-	if err != nil {
-		return nil, err
-	}
-	defer func() {
-		if err != nil {
-			process.Close()
-		}
-	}()
-
-	pipes, err := makeOpenFiles([]syscall.Handle{processInfo.StdInput, processInfo.StdOutput, processInfo.StdError})
-	if err != nil {
-		return nil, makeSystemError(computeSystem, "CreateProcess", "", err, nil)
-	}
-	process.stdin = pipes[0]
-	process.stdout = pipes[1]
-	process.stderr = pipes[2]
-
-	if err = process.registerCallback(); err != nil {
-		return nil, makeSystemError(computeSystem, "CreateProcess", "", err, nil)
-	}
-	go process.waitBackground()
 
 	return process, nil
 }
@@ -638,7 +557,6 @@ func (computeSystem *System) OpenProcess(pid int) (_ *Process, err error) {
 	if err = process.registerCallback(); err != nil {
 		return nil, makeSystemError(computeSystem, "OpenProcess", "", err, nil)
 	}
-	go process.waitBackground()
 
 	return process, nil
 }
@@ -669,18 +587,13 @@ func (computeSystem *System) Close() (err error) {
 	}
 
 	computeSystem.handle = 0
-	computeSystem.closedWaitOnce.Do(func() {
-		computeSystem.waitError = ErrAlreadyClosed
-		close(computeSystem.waitBlock)
-	})
 
 	return nil
 }
 
 func (computeSystem *System) registerCallback() error {
 	context := &notifcationWatcherContext{
-		channels: newSystemChannels(),
-		systemID: computeSystem.id,
+		channels: newChannels(),
 	}
 
 	callbackMapLock.Lock()
@@ -727,7 +640,7 @@ func (computeSystem *System) unregisterCallback() error {
 	closeChannels(context.channels)
 
 	callbackMapLock.Lock()
-	delete(callbackMap, callbackNumber)
+	callbackMap[callbackNumber] = nil
 	callbackMapLock.Unlock()
 
 	handle = 0

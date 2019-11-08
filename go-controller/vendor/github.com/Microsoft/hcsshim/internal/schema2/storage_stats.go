@@ -11,6 +11,7 @@ package hcsschema
 
 //  Storage runtime statistics
 type StorageStats struct {
+
 	ReadCountNormalized int32 `json:"ReadCountNormalized,omitempty"`
 
 	ReadSizeBytes int32 `json:"ReadSizeBytes,omitempty"`

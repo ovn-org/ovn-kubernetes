@@ -17,17 +17,12 @@ func processAsyncHcsResult(err error, resultp *uint16, callbackNumber uintptr, e
 
 func waitForNotification(callbackNumber uintptr, expectedNotification hcsNotification, timeout *time.Duration) error {
 	callbackMapLock.RLock()
-	if _, ok := callbackMap[callbackNumber]; !ok {
-		callbackMapLock.RUnlock()
-		logrus.WithField("callbackNumber", callbackNumber).Error("failed to waitForNotification: callbackNumber does not exist in callbackMap")
-		return ErrHandleClose
-	}
 	channels := callbackMap[callbackNumber].channels
 	callbackMapLock.RUnlock()
 
 	expectedChannel := channels[expectedNotification]
 	if expectedChannel == nil {
-		logrus.WithField("type", expectedNotification).Error("unknown notification type in waitForNotification")
+		logrus.Errorf("unknown notification type in waitForNotification %x", expectedNotification)
 		return ErrInvalidNotificationType
 	}
 

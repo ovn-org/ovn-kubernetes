@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"syscall"
+	"unsafe"
 
 	"github.com/vishvananda/netlink/nl"
 	"golang.org/x/sys/unix"
@@ -18,35 +19,6 @@ const (
 	TC_U32_VAROFFSET = nl.TC_U32_VAROFFSET
 	TC_U32_EAT       = nl.TC_U32_EAT
 )
-
-// Sel of the U32 filters that contains multiple TcU32Key. This is the type
-// alias and the frontend representation of nl.TcU32Sel. It is serialized into
-// canonical nl.TcU32Sel with the appropriate endianness.
-type TcU32Sel = nl.TcU32Sel
-
-// TcU32Key contained of Sel in the U32 filters. This is the type alias and the
-// frontend representation of nl.TcU32Key. It is serialized into chanonical
-// nl.TcU32Sel with the appropriate endianness.
-type TcU32Key = nl.TcU32Key
-
-// U32 filters on many packet related properties
-type U32 struct {
-	FilterAttrs
-	ClassId    uint32
-	Divisor    uint32 // Divisor MUST be power of 2.
-	Hash       uint32
-	RedirIndex int
-	Sel        *TcU32Sel
-	Actions    []Action
-}
-
-func (filter *U32) Attrs() *FilterAttrs {
-	return &filter.FilterAttrs
-}
-
-func (filter *U32) Type() string {
-	return "u32"
-}
 
 // Fw filter filters on firewall marks
 // NOTE: this is in filter_linux because it refers to nl.TcPolice which
@@ -168,7 +140,8 @@ func (h *Handle) FilterAdd(filter Filter) error {
 
 	switch filter := filter.(type) {
 	case *U32:
-		sel := filter.Sel
+		// Convert TcU32Sel into nl.TcU32Sel as it is without copy.
+		sel := (*nl.TcU32Sel)(unsafe.Pointer(filter.Sel))
 		if sel == nil {
 			// match all
 			sel = &nl.TcU32Sel{
@@ -412,16 +385,6 @@ func EncodeActions(attr *nl.RtAttr, actions []Action) error {
 			}
 			toTcGen(action.Attrs(), &mirred.TcGen)
 			aopts.AddRtAttr(nl.TCA_MIRRED_PARMS, mirred.Serialize())
-		case *ConnmarkAction:
-			table := attr.AddRtAttr(tabIndex, nil)
-			tabIndex++
-			table.AddRtAttr(nl.TCA_ACT_KIND, nl.ZeroTerminated("connmark"))
-			aopts := table.AddRtAttr(nl.TCA_ACT_OPTIONS, nil)
-			connmark := nl.TcConnmark{
-				Zone: action.Zone,
-			}
-			toTcGen(action.Attrs(), &connmark.TcGen)
-			aopts.AddRtAttr(nl.TCA_CONNMARK_PARMS, connmark.Serialize())
 		case *BpfAction:
 			table := attr.AddRtAttr(tabIndex, nil)
 			tabIndex++
@@ -465,8 +428,6 @@ func parseActions(tables []syscall.NetlinkRouteAttr) ([]Action, error) {
 					action = &MirredAction{}
 				case "bpf":
 					action = &BpfAction{}
-				case "connmark":
-					action = &ConnmarkAction{}
 				case "gact":
 					action = &GenericAction{}
 				default:
@@ -483,8 +444,8 @@ func parseActions(tables []syscall.NetlinkRouteAttr) ([]Action, error) {
 						switch adatum.Attr.Type {
 						case nl.TCA_MIRRED_PARMS:
 							mirred := *nl.DeserializeTcMirred(adatum.Value)
-							action.(*MirredAction).ActionAttrs = ActionAttrs{}
 							toAttrs(&mirred.TcGen, action.Attrs())
+							action.(*MirredAction).ActionAttrs = ActionAttrs{}
 							action.(*MirredAction).Ifindex = int(mirred.Ifindex)
 							action.(*MirredAction).MirredAction = MirredAct(mirred.Eaction)
 						}
@@ -497,14 +458,6 @@ func parseActions(tables []syscall.NetlinkRouteAttr) ([]Action, error) {
 							action.(*BpfAction).Fd = int(native.Uint32(adatum.Value[0:4]))
 						case nl.TCA_ACT_BPF_NAME:
 							action.(*BpfAction).Name = string(adatum.Value[:len(adatum.Value)-1])
-						}
-					case "connmark":
-						switch adatum.Attr.Type {
-						case nl.TCA_CONNMARK_PARMS:
-							connmark := *nl.DeserializeTcConnmark(adatum.Value)
-							action.(*ConnmarkAction).ActionAttrs = ActionAttrs{}
-							toAttrs(&connmark.TcGen, action.Attrs())
-							action.(*ConnmarkAction).Zone = connmark.Zone
 						}
 					case "gact":
 						switch adatum.Attr.Type {
@@ -530,7 +483,7 @@ func parseU32Data(filter Filter, data []syscall.NetlinkRouteAttr) (bool, error) 
 		case nl.TCA_U32_SEL:
 			detailed = true
 			sel := nl.DeserializeTcU32Sel(datum.Value)
-			u32.Sel = sel
+			u32.Sel = (*TcU32Sel)(unsafe.Pointer(sel))
 			if native != networkOrder {
 				// Handle the endianness of attributes
 				u32.Sel.Offmask = native.Uint16(htons(sel.Offmask))

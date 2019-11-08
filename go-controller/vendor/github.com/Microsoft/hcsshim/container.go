@@ -3,7 +3,6 @@ package hcsshim
 import (
 	"fmt"
 	"os"
-	"sync"
 	"time"
 
 	"github.com/Microsoft/hcsshim/internal/hcs"
@@ -53,10 +52,7 @@ const (
 type ResourceModificationRequestResponse = schema1.ResourceModificationRequestResponse
 
 type container struct {
-	system   *hcs.System
-	waitOnce sync.Once
-	waitErr  error
-	waitCh   chan struct{}
+	system *hcs.System
 }
 
 // createComputeSystemAdditionalJSON is read from the environment at initialisation
@@ -79,7 +75,7 @@ func CreateContainer(id string, c *ContainerConfig) (Container, error) {
 	if err != nil {
 		return nil, err
 	}
-	return &container{system: system}, err
+	return &container{system}, err
 }
 
 // OpenContainer opens an existing container by ID.
@@ -88,7 +84,7 @@ func OpenContainer(id string) (Container, error) {
 	if err != nil {
 		return nil, err
 	}
-	return &container{system: system}, err
+	return &container{system}, err
 }
 
 // GetContainers gets a list of the containers on the system that match the query
@@ -103,49 +99,23 @@ func (container *container) Start() error {
 
 // Shutdown requests a container shutdown, but it may not actually be shutdown until Wait() succeeds.
 func (container *container) Shutdown() error {
-	err := container.system.Shutdown()
-	if err != nil {
-		return convertSystemError(err, container)
-	}
-	return &ContainerError{Container: container, Err: ErrVmcomputeOperationPending, Operation: "hcsshim::ComputeSystem::Shutdown"}
+	return convertSystemError(container.system.Shutdown(), container)
 }
 
 // Terminate requests a container terminate, but it may not actually be terminated until Wait() succeeds.
 func (container *container) Terminate() error {
-	err := container.system.Terminate()
-	if err != nil {
-		return convertSystemError(err, container)
-	}
-	return &ContainerError{Container: container, Err: ErrVmcomputeOperationPending, Operation: "hcsshim::ComputeSystem::Terminate"}
+	return convertSystemError(container.system.Terminate(), container)
 }
 
 // Waits synchronously waits for the container to shutdown or terminate.
 func (container *container) Wait() error {
-	err := container.system.Wait()
-	if err == nil {
-		err = container.system.ExitError()
-	}
-	return convertSystemError(err, container)
+	return convertSystemError(container.system.Wait(), container)
 }
 
 // WaitTimeout synchronously waits for the container to terminate or the duration to elapse. It
 // returns false if timeout occurs.
-func (container *container) WaitTimeout(timeout time.Duration) error {
-	container.waitOnce.Do(func() {
-		container.waitCh = make(chan struct{})
-		go func() {
-			container.waitErr = container.Wait()
-			close(container.waitCh)
-		}()
-	})
-	t := time.NewTimer(timeout)
-	defer t.Stop()
-	select {
-	case <-t.C:
-		return &ContainerError{Container: container, Err: ErrTimeout, Operation: "hcsshim::ComputeSystem::Wait"}
-	case <-container.waitCh:
-		return container.waitErr
-	}
+func (container *container) WaitTimeout(t time.Duration) error {
+	return convertSystemError(container.system.WaitTimeout(t), container)
 }
 
 // Pause pauses the execution of a container.
@@ -195,11 +165,11 @@ func (container *container) MappedVirtualDisks() (map[int]MappedVirtualDiskContr
 
 // CreateProcess launches a new process within the container.
 func (container *container) CreateProcess(c *ProcessConfig) (Process, error) {
-	p, err := container.system.CreateProcessNoStdio(c)
+	p, err := container.system.CreateProcess(c)
 	if err != nil {
 		return nil, convertSystemError(err, container)
 	}
-	return &process{p: p.(*hcs.Process)}, nil
+	return &process{p}, nil
 }
 
 // OpenProcess gets an interface to an existing process within the container.
@@ -208,7 +178,7 @@ func (container *container) OpenProcess(pid int) (Process, error) {
 	if err != nil {
 		return nil, convertSystemError(err, container)
 	}
-	return &process{p: p}, nil
+	return &process{p}, nil
 }
 
 // Close cleans up any state associated with the container but does not terminate or wait for it.

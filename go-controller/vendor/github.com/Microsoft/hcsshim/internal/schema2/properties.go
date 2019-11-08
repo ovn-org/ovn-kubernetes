@@ -10,6 +10,7 @@
 package hcsschema
 
 type Properties struct {
+
 	Id string `json:"Id,omitempty"`
 
 	SystemType string `json:"SystemType,omitempty"`
