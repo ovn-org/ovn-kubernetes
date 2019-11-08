@@ -48,6 +48,9 @@ func NewClientset(conf *config.KubernetesConfig) (*kubernetes.Clientset, error) 
 		return nil, err
 	}
 
+	kconfig.AcceptContentTypes = "application/vnd.kubernetes.protobuf,application/json"
+	kconfig.ContentType = "application/vnd.kubernetes.protobuf"
+
 	return kubernetes.NewForConfig(kconfig)
 }
 
