@@ -206,7 +206,7 @@ func parseNodeManagementPortMacAddr(node *kapi.Node) (string, error) {
 	return macAddress, nil
 }
 
-func (oc *Controller) syncNodeManagementPort(node *kapi.Node) error {
+func (oc *Controller) syncNodeManagementPort(node *kapi.Node, subnet *net.IPNet) error {
 
 	macAddress, err := parseNodeManagementPortMacAddr(node)
 	if err != nil {
@@ -223,9 +223,11 @@ func (oc *Controller) syncNodeManagementPort(node *kapi.Node) error {
 		return nil
 	}
 
-	subnet, err := parseNodeHostSubnet(node)
-	if err != nil {
-		return err
+	if subnet == nil {
+		subnet, err = parseNodeHostSubnet(node)
+		if err != nil {
+			return err
+		}
 	}
 
 	_, portIP := util.GetNodeWellKnownAddresses(subnet)
@@ -334,13 +336,13 @@ func (oc *Controller) ensureNodeLogicalNetwork(nodeName string, hostsubnet *net.
 	return nil
 }
 
-func (oc *Controller) addNode(node *kapi.Node) (err error) {
+func (oc *Controller) addNode(node *kapi.Node) (hostsubnet *net.IPNet, err error) {
 	oc.clearInitialNodeNetworkUnavailableCondition(node)
 
-	hostsubnet, _ := parseNodeHostSubnet(node)
+	hostsubnet, _ = parseNodeHostSubnet(node)
 	if hostsubnet != nil {
 		// Node already has subnet assigned; ensure its logical network is set up
-		return oc.ensureNodeLogicalNetwork(node.Name, hostsubnet)
+		return hostsubnet, oc.ensureNodeLogicalNetwork(node.Name, hostsubnet)
 	}
 
 	// Node doesn't have a subnet assigned; reserve a new one for it
@@ -352,13 +354,13 @@ func (oc *Controller) addNode(node *kapi.Node) (err error) {
 			// Current subnet exhausted, check next possible subnet
 			continue
 		} else if err != nil {
-			return fmt.Errorf("Error allocating network for node %s: %v", node.Name, err)
+			return nil, fmt.Errorf("Error allocating network for node %s: %v", node.Name, err)
 		}
 		logrus.Infof("Allocated node %s HostSubnet %s", node.Name, hostsubnet.String())
 		break
 	}
 	if err == netutils.ErrSubnetAllocatorFull {
-		return fmt.Errorf("Error allocating network for node %s: %v", node.Name, err)
+		return nil, fmt.Errorf("Error allocating network for node %s: %v", node.Name, err)
 	}
 
 	defer func() {
@@ -371,7 +373,7 @@ func (oc *Controller) addNode(node *kapi.Node) (err error) {
 	// Ensure that the node's logical network has been created
 	err = oc.ensureNodeLogicalNetwork(node.Name, hostsubnet)
 	if err != nil {
-		return err
+		return nil, err
 	}
 
 	// Set the HostSubnet annotation on the node object to signal
@@ -381,10 +383,10 @@ func (oc *Controller) addNode(node *kapi.Node) (err error) {
 	if err != nil {
 		logrus.Errorf("Failed to set node %s host subnet annotation to %q: %v",
 			node.Name, hostsubnet.String(), err)
-		return err
+		return nil, err
 	}
 
-	return nil
+	return hostsubnet, nil
 }
 
 func (oc *Controller) deleteNodeHostSubnet(nodeName string, subnet *net.IPNet) error {
