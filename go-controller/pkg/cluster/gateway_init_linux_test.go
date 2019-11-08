@@ -241,7 +241,7 @@ cookie=0x0, duration=8366.597s, table=1, n_packets=10641, n_bytes=10370087, prio
 		stop := make(chan struct{})
 		wf, err := factory.NewWatchFactory(fakeClient, stop)
 		Expect(err).NotTo(HaveOccurred())
-		defer wf.Shutdown()
+		defer close(stop)
 
 		cluster := OvnClusterController{
 			watchFactory: wf,
@@ -417,7 +417,7 @@ GR_openshift-master-node chassis=6a47b33b-89d3-4d65-ac31-b19b549326c7 lb_force_s
 			stop := make(chan struct{})
 			wf, err := factory.NewWatchFactory(fakeClient, stop)
 			Expect(err).NotTo(HaveOccurred())
-			defer wf.Shutdown()
+			defer close(stop)
 
 			ipt, err := util.NewFakeWithProtocol(iptables.ProtocolIPv4)
 			Expect(err).NotTo(HaveOccurred())
