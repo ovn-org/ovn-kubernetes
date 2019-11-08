@@ -2,6 +2,7 @@ package factory
 
 import (
 	"fmt"
+	"hash/fnv"
 	"reflect"
 	"sync"
 	"sync/atomic"
@@ -56,11 +57,39 @@ func (h *Handler) kill() error {
 	return nil
 }
 
+type eventKind int
+
+const (
+	addEvent eventKind = iota
+	updateEvent
+	deleteEvent
+)
+
+type event struct {
+	obj    interface{}
+	oldObj interface{}
+	kind   eventKind
+}
+
 type informer struct {
-	sync.Mutex
+	sync.RWMutex
 	oType    reflect.Type
 	inf      cache.SharedIndexInformer
 	handlers map[uint64]*Handler
+	events   []chan *event
+}
+
+func (i *informer) forEachQueuedHandler(f func(h *Handler)) {
+	i.RLock()
+	curHandlers := make([]*Handler, 0, len(i.handlers))
+	for _, handler := range i.handlers {
+		curHandlers = append(curHandlers, handler)
+	}
+	i.RUnlock()
+
+	for _, handler := range curHandlers {
+		f(handler)
+	}
 }
 
 func (i *informer) forEachHandler(obj interface{}, f func(h *Handler)) {
@@ -116,6 +145,62 @@ func (i *informer) removeHandler(handler *Handler) error {
 	return nil
 }
 
+func (i *informer) processEvents(events chan *event, stopChan <-chan struct{}) {
+	for {
+		select {
+		case e, ok := <-events:
+			if !ok {
+				return
+			}
+			switch e.kind {
+			case addEvent:
+				i.forEachQueuedHandler(func(h *Handler) {
+					h.OnAdd(e.obj)
+				})
+			case updateEvent:
+				i.forEachQueuedHandler(func(h *Handler) {
+					h.OnUpdate(e.oldObj, e.obj)
+				})
+			case deleteEvent:
+				i.forEachQueuedHandler(func(h *Handler) {
+					h.OnDelete(e.obj)
+				})
+			}
+		case <-stopChan:
+			return
+		}
+	}
+}
+
+func (i *informer) enqueueEvent(oldObj, obj interface{}, kind eventKind) {
+	meta, err := getObjectMeta(i.oType, obj)
+	if err != nil {
+		logrus.Errorf("object has no meta: %v", err)
+		return
+	}
+
+	// Distribute the object to an event queue based on a hash of its
+	// namespaced name, so that all events for a given object are
+	// serialized in one queue.
+	h := fnv.New32()
+	if meta.Namespace != "" {
+		_, _ = h.Write([]byte(meta.Namespace))
+		_, _ = h.Write([]byte("/"))
+	}
+	_, _ = h.Write([]byte(meta.Name))
+	queueIdx := h.Sum32() % uint32(numEventQueues)
+
+	i.RLock()
+	defer i.RUnlock()
+	if i.events[queueIdx] != nil {
+		i.events[queueIdx] <- &event{
+			obj:    obj,
+			oldObj: oldObj,
+			kind:   kind,
+		}
+	}
+}
+
 func ensureObjectOnDelete(obj interface{}, expectedType reflect.Type) (interface{}, error) {
 	if expectedType == reflect.TypeOf(obj) {
 		return obj, nil
@@ -130,6 +215,25 @@ func ensureObjectOnDelete(obj interface{}, expectedType reflect.Type) (interface
 		return nil, fmt.Errorf("expected tombstone object resource type %v but got %v", expectedType, objType)
 	}
 	return obj, nil
+}
+
+func (i *informer) newFederatedQueuedHandler() cache.ResourceEventHandlerFuncs {
+	return cache.ResourceEventHandlerFuncs{
+		AddFunc: func(obj interface{}) {
+			i.enqueueEvent(nil, obj, addEvent)
+		},
+		UpdateFunc: func(oldObj, newObj interface{}) {
+			i.enqueueEvent(oldObj, newObj, updateEvent)
+		},
+		DeleteFunc: func(obj interface{}) {
+			realObj, err := ensureObjectOnDelete(obj, i.oType)
+			if err != nil {
+				logrus.Errorf(err.Error())
+				return
+			}
+			i.enqueueEvent(nil, realObj, deleteEvent)
+		},
+	}
 }
 
 func (i *informer) newFederatedHandler() cache.ResourceEventHandlerFuncs {
@@ -157,6 +261,46 @@ func (i *informer) newFederatedHandler() cache.ResourceEventHandlerFuncs {
 	}
 }
 
+func (i *informer) shutdown() {
+	i.Lock()
+	defer i.Unlock()
+
+	for _, handler := range i.handlers {
+		_ = i.removeHandler(handler)
+	}
+
+	// Close all event channels for queued informers
+	for idx := range i.events {
+		close(i.events[idx])
+		i.events[idx] = nil
+	}
+}
+
+func newBaseInformer(oType reflect.Type, sharedInformer cache.SharedIndexInformer) *informer {
+	return &informer{
+		oType:    oType,
+		inf:      sharedInformer,
+		handlers: make(map[uint64]*Handler),
+	}
+}
+
+func newInformer(oType reflect.Type, sharedInformer cache.SharedIndexInformer) *informer {
+	i := newBaseInformer(oType, sharedInformer)
+	i.inf.AddEventHandler(i.newFederatedHandler())
+	return i
+}
+
+func newQueuedInformer(oType reflect.Type, sharedInformer cache.SharedIndexInformer, stopChan chan struct{}) *informer {
+	i := newBaseInformer(oType, sharedInformer)
+	i.events = make([]chan *event, numEventQueues)
+	for j := range i.events {
+		i.events[j] = make(chan *event, 1)
+		go i.processEvents(i.events[j], stopChan)
+	}
+	i.inf.AddEventHandler(i.newFederatedQueuedHandler())
+	return i
+}
+
 // WatchFactory initializes and manages common kube watches
 type WatchFactory struct {
 	// Must be first member in the struct due to Golang ARM/x86 32-bit
@@ -171,15 +315,8 @@ const (
 	resyncInterval        = 12 * time.Hour
 	handlerAlive   uint32 = 0
 	handlerDead    uint32 = 1
+	numEventQueues int    = 10
 )
-
-func newInformer(oType reflect.Type, sharedInformer cache.SharedIndexInformer) *informer {
-	return &informer{
-		oType:    oType,
-		inf:      sharedInformer,
-		handlers: make(map[uint64]*Handler),
-	}
-}
 
 var (
 	podType       reflect.Type = reflect.TypeOf(&kapi.Pod{})
@@ -208,11 +345,7 @@ func NewWatchFactory(c kubernetes.Interface, stopChan chan struct{}) (*WatchFact
 	wf.informers[endpointsType] = newInformer(endpointsType, wf.iFactory.Core().V1().Endpoints().Informer())
 	wf.informers[policyType] = newInformer(policyType, wf.iFactory.Networking().V1().NetworkPolicies().Informer())
 	wf.informers[namespaceType] = newInformer(namespaceType, wf.iFactory.Core().V1().Namespaces().Informer())
-	wf.informers[nodeType] = newInformer(nodeType, wf.iFactory.Core().V1().Nodes().Informer())
-
-	for _, informer := range wf.informers {
-		informer.inf.AddEventHandler(informer.newFederatedHandler())
-	}
+	wf.informers[nodeType] = newQueuedInformer(nodeType, wf.iFactory.Core().V1().Nodes().Informer(), stopChan)
 
 	wf.iFactory.Start(stopChan)
 	for oType, synced := range wf.iFactory.WaitForCacheSync(stopChan) {
@@ -223,24 +356,14 @@ func NewWatchFactory(c kubernetes.Interface, stopChan chan struct{}) (*WatchFact
 
 	go func() {
 		<-stopChan
-		wf.shutdown()
+
+		// Remove all informer handlers
+		for _, inf := range wf.informers {
+			inf.shutdown()
+		}
 	}()
 
 	return wf, nil
-}
-
-// Shutdown removes all handlers
-func (wf *WatchFactory) shutdown() {
-	for _, inf := range wf.informers {
-		inf.Lock()
-		defer inf.Unlock()
-		for _, handler := range inf.handlers {
-			if err := handler.kill(); err != nil {
-				logrus.Warningf("failed to remove handler: %v", err)
-			}
-			delete(inf.handlers, handler.id)
-		}
-	}
 }
 
 func getObjectMeta(objType reflect.Type, obj interface{}) (*metav1.ObjectMeta, error) {
