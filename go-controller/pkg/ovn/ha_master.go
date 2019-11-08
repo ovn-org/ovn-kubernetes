@@ -62,12 +62,52 @@ func (hacontroller *HAMasterController) StartHAMasterController() error {
 		// Always demote the OVN DBs to backup mode.
 		// After the leader election, the leader will promote the OVN Dbs
 		// to become active.
-		err := hacontroller.DemoteOVNDbs(invalidIPAddress, config.MasterHA.NbPort, config.MasterHA.SbPort)
-		if err != nil {
+		if err := hacontroller.DemoteOVNDbs(invalidIPAddress, config.MasterHA.NbPort, config.MasterHA.SbPort); err != nil {
 			// If we are not able to communicate to the OVN ovsdb-servers,
 			// then it is better to return than continue.
 			// cmd/ovnkube.go will panic if this function returns error.
 			return err
+		}
+	}
+
+	hacontrollerOnStartedLeading := func(ctx context.Context) {
+		logrus.Infof(" I (%s) won the election. In active mode", hacontroller.nodeName)
+		if err := hacontroller.ConfigureAsActive(hacontroller.nodeName); err != nil {
+			if hacontroller.manageDBServers {
+				// Stop ovn-northd before panicking.
+				_, _, _ = util.RunOVNNorthAppCtl("exit")
+			}
+			panic(err.Error())
+		}
+		hacontroller.isLeader = true
+	}
+
+	hacontrollerOnStoppedLeading := func() {
+		//This node was leader and it lost the election.
+		// Whenever the node transitions from leader to follower,
+		// we need to handle the transition properly like clearing
+		// the cache. It is better to exit for now.
+		// kube will restart and this will become a follower.
+		if hacontroller.manageDBServers {
+			// Stop ovn-northd and then exit.
+			_, _, _ = util.RunOVNNorthAppCtl("exit")
+		}
+		logrus.Infof("I (%s) am no longer a leader. Exiting", hacontroller.nodeName)
+		os.Exit(1)
+	}
+
+	hacontrollerNewLeader := func(nodeName string) {
+		if nodeName != hacontroller.nodeName {
+			logrus.Infof(" I (%s) lost the election to %s. In Standby mode", hacontroller.nodeName, nodeName)
+			if ep, err := hacontroller.ovnController.kube.GetEndpoint(config.Kubernetes.OVNConfigNamespace, ovnkubeDbEp); err == nil {
+				if err := hacontroller.ConfigureAsStandby(ep); err != nil {
+					if hacontroller.manageDBServers {
+						// Stop ovn-northd and then exit
+						_, _, _ = util.RunOVNNorthAppCtl("exit")
+					}
+					panic(err.Error())
+				}
+			}
 		}
 	}
 
@@ -82,62 +122,8 @@ func (hacontroller *HAMasterController) StartHAMasterController() error {
 			Identity:      hacontroller.nodeName,
 			EventRecorder: nil,
 		})
-
 	if err != nil {
 		return err
-	}
-
-	hacontrollerOnStoppedLeading := func() {
-		//This node was leader and it lost the election.
-		// Whenever the node transitions from leader to follower,
-		// we need to handle the transition properly like clearing
-		// the cache. It is better to exit for now.
-		// kube will restart and this will become a follower.
-		if hacontroller.manageDBServers {
-			// Stop ovn-northd and then exit.
-			_, _, _ = util.RunOVNNorthAppCtl("exit")
-		}
-		logrus.Infof("I (" + hacontroller.nodeName + ") am no longer a leader. Exiting")
-		os.Exit(1)
-	}
-
-	hacontrollerNewLeader := func(nodeName string) {
-		logrus.Infof(nodeName + " is the new leader")
-		wasLeader := hacontroller.isLeader
-
-		if hacontroller.nodeName == nodeName {
-			// Configure as leader.
-			logrus.Infof(" I (" + hacontroller.nodeName + ") won the election. In active mode")
-			err = hacontroller.ConfigureAsActive(nodeName)
-			if err != nil {
-				logrus.Errorf(err.Error())
-				if hacontroller.manageDBServers {
-					// Stop ovn-northd before panicing.
-					_, _, _ = util.RunOVNNorthAppCtl("exit")
-				}
-				panic(err.Error())
-			}
-			hacontroller.isLeader = true
-		} else if wasLeader {
-			hacontrollerOnStoppedLeading()
-			// should not be reached
-			panic("This should not happen.")
-		} else {
-			// Configure as standby.
-			logrus.Infof(" I (" + hacontroller.nodeName + ") lost the election. In Standby mode")
-			ep, er := hacontroller.ovnController.kube.GetEndpoint(config.Kubernetes.OVNConfigNamespace, ovnkubeDbEp)
-			if er == nil {
-				er = hacontroller.ConfigureAsStandby(ep)
-				if er != nil {
-					logrus.Errorf(er.Error())
-					if hacontroller.manageDBServers {
-						// Stop ovn-northd and then exit
-						_, _, _ = util.RunOVNNorthAppCtl("exit")
-					}
-					panic(er.Error())
-				}
-			}
-		}
 	}
 
 	lec := leaderelection.LeaderElectionConfig{
@@ -146,7 +132,7 @@ func (hacontroller *HAMasterController) StartHAMasterController() error {
 		RenewDeadline: time.Duration(config.MasterHA.ElectionRenewDeadline) * time.Second,
 		RetryPeriod:   time.Duration(config.MasterHA.ElectionRetryPeriod) * time.Second,
 		Callbacks: leaderelection.LeaderCallbacks{
-			OnStartedLeading: func(ctx context.Context) {},
+			OnStartedLeading: hacontrollerOnStartedLeading,
 			OnStoppedLeading: hacontrollerOnStoppedLeading,
 			OnNewLeader:      hacontrollerNewLeader,
 		},

@@ -28,13 +28,6 @@ func NewClusterController(kubeClient kubernetes.Interface, wf *factory.WatchFact
 }
 
 func setupOVNNode(nodeName string) error {
-	// Tell ovn-*bctl how to talk to the database
-	for _, auth := range []config.OvnAuthConfig{config.OvnNorth, config.OvnSouth} {
-		if err := auth.SetDBAuth(); err != nil {
-			return err
-		}
-	}
-
 	var err error
 
 	nodeIP := config.Default.EncapIP

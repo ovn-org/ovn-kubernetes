@@ -168,7 +168,7 @@ var _ = Describe("Node Operations", func() {
 			Expect(config.OvnNorth.Address).To(Equal("tcp:1.1.1.1:6641"), "config.OvnNorth.Address does not equal cli arg")
 			Expect(config.OvnSouth.Address).To(Equal("tcp:1.1.1.1:6642"), "config.OvnSouth.Address does not equal cli arg")
 
-			err = cluster.watchConfigEndpoints()
+			err = cluster.watchConfigEndpoints(make(chan bool, 1))
 			Expect(err).NotTo(HaveOccurred())
 
 			// Kubernetes endpoints should eventually propogate to OvnNorth/OvnSouth
@@ -185,6 +185,7 @@ var _ = Describe("Node Operations", func() {
 		Expect(err).NotTo(HaveOccurred())
 
 	})
+
 	It("test watchConfigEndpoints multiple IPs", func() {
 		app.Action = func(ctx *cli.Context) error {
 
@@ -249,7 +250,7 @@ var _ = Describe("Node Operations", func() {
 			Expect(config.OvnNorth.Address).To(Equal("tcp:1.1.1.1:6641"), "config.OvnNorth.Address does not equal cli arg")
 			Expect(config.OvnSouth.Address).To(Equal("tcp:1.1.1.1:6642"), "config.OvnSouth.Address does not equal cli arg")
 
-			err = cluster.watchConfigEndpoints()
+			err = cluster.watchConfigEndpoints(make(chan bool, 1))
 			Expect(err).NotTo(HaveOccurred())
 
 			// Kubernetes endpoints should eventually propogate to OvnNorth/OvnSouth
