@@ -195,7 +195,6 @@ func (oc *Controller) deleteLogicalPort(pod *kapi.Pod) {
 			"Egress")
 	}
 	oc.deletePodFromNamespace(pod.Namespace, podIP, logicalPort)
-	return
 }
 
 func (oc *Controller) waitForNodeLogicalSwitch(nodeName string) error {

@@ -72,10 +72,8 @@ func printOvnKubeHelp(out io.Writer, templ string, data interface{}, customFunc 
 		"upper":              strings.ToUpper,
 		"getFlagsByCategory": getFlagsByCategory,
 	}
-	if customFunc != nil {
-		for key, value := range customFunc {
-			funcMap[key] = value
-		}
+	for key, value := range customFunc {
+		funcMap[key] = value
 	}
 
 	w := tabwriter.NewWriter(out, 1, 8, 2, ' ', 0)

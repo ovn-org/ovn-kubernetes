@@ -60,7 +60,7 @@ func isOVNControllerReady(name string) (bool, error) {
 		if err != nil {
 			return false, fmt.Errorf("failed to get aggregate flow statistics: %v", err)
 		}
-		return strings.Index(stdout, "flow_count=0") == -1, nil
+		return !strings.Contains(stdout, "flow_count=0"), nil
 	})
 	if err != nil {
 		return false, fmt.Errorf("timed out dumping br-int flow entries for node %s: %v", name, err)

@@ -112,7 +112,7 @@ func (oc *Controller) modifyACLAllow(namespace, policy,
 	if uuid != "" {
 		// We already have an ACL. We will update it.
 		_, stderr, err = util.RunOVNNbctl("set", "acl", uuid,
-			fmt.Sprintf("%s", newMatch))
+			newMatch)
 		if err != nil {
 			logrus.Errorf("failed to modify the allow-from rule for "+
 				"namespace=%s, policy=%s, stderr: %q (%v)",
@@ -166,7 +166,6 @@ func (oc *Controller) addIPBlockACLDeny(np *namespacePolicy,
 		logrus.Errorf("error executing create ACL command, stderr: %q, %+v",
 			stderr, err)
 	}
-	return
 }
 
 func (oc *Controller) getACLMatch(portGroupName, match string,
@@ -848,8 +847,6 @@ func (oc *Controller) addNetworkPolicyPortGroup(policy *knet.NetworkPolicy) {
 	// For all the pods in the local namespace that this policy
 	// effects, add them to the port group.
 	oc.handleLocalPodSelector(policy, np)
-
-	return
 }
 
 func (oc *Controller) deleteNetworkPolicyPortGroup(
@@ -900,6 +897,4 @@ func (oc *Controller) deleteNetworkPolicyPortGroup(
 	oc.deletePortGroup(np.portGroupName)
 
 	oc.namespacePolicies[policy.Namespace][policy.Name] = nil
-
-	return
 }

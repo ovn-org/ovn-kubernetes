@@ -424,7 +424,6 @@ func (oc *Controller) WatchNetworkPolicy() error {
 		AddFunc: func(obj interface{}) {
 			policy := obj.(*kapisnetworking.NetworkPolicy)
 			oc.addNetworkPolicy(policy)
-			return
 		},
 		UpdateFunc: func(old, newer interface{}) {
 			oldPolicy := old.(*kapisnetworking.NetworkPolicy)
@@ -433,12 +432,10 @@ func (oc *Controller) WatchNetworkPolicy() error {
 				oc.deleteNetworkPolicy(oldPolicy)
 				oc.addNetworkPolicy(newPolicy)
 			}
-			return
 		},
 		DeleteFunc: func(obj interface{}) {
 			policy := obj.(*kapisnetworking.NetworkPolicy)
 			oc.deleteNetworkPolicy(policy)
-			return
 		},
 	}, oc.syncNetworkPolicies)
 	return err
@@ -451,17 +448,14 @@ func (oc *Controller) WatchNamespaces() error {
 		AddFunc: func(obj interface{}) {
 			ns := obj.(*kapi.Namespace)
 			oc.AddNamespace(ns)
-			return
 		},
 		UpdateFunc: func(old, newer interface{}) {
 			oldNs, newNs := old.(*kapi.Namespace), newer.(*kapi.Namespace)
 			oc.updateNamespace(oldNs, newNs)
-			return
 		},
 		DeleteFunc: func(obj interface{}) {
 			ns := obj.(*kapi.Namespace)
 			oc.deleteNamespace(ns)
-			return
 		},
 	}, oc.syncNamespaces)
 	return err
@@ -493,8 +487,8 @@ func (oc *Controller) WatchNodes() error {
 		UpdateFunc: func(old, new interface{}) {
 			oldNode := old.(*kapi.Node)
 			node := new.(*kapi.Node)
-			oldMacAddress, _ := oldNode.Annotations[OvnNodeManagementPortMacAddress]
-			macAddress, _ := node.Annotations[OvnNodeManagementPortMacAddress]
+			oldMacAddress := oldNode.Annotations[OvnNodeManagementPortMacAddress]
+			macAddress := node.Annotations[OvnNodeManagementPortMacAddress]
 			logrus.Debugf("Updated event for Node %q", node.Name)
 			if oldMacAddress != macAddress {
 				err := oc.syncNodeManagementPort(node, nil)
@@ -539,7 +533,7 @@ func (oc *Controller) WatchNodes() error {
 func (oc *Controller) AddServiceVIPToName(vip string, protocol kapi.Protocol, namespace, name string) {
 	oc.serviceVIPToNameLock.Lock()
 	defer oc.serviceVIPToNameLock.Unlock()
-	oc.serviceVIPToName[ServiceVIPKey{vip, protocol}] = types.NamespacedName{namespace, name}
+	oc.serviceVIPToName[ServiceVIPKey{vip, protocol}] = types.NamespacedName{Namespace: namespace, Name: name}
 }
 
 // GetServiceVIPToName retrieves the associated k8s service name for a load balancer VIP
