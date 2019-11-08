@@ -7,10 +7,10 @@ import (
 	"sync"
 	"time"
 
-	"github.com/openshift/origin/pkg/util/netutils"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/factory"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/kube"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/allocator"
 	util "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
 	"github.com/sirupsen/logrus"
 	kapi "k8s.io/api/core/v1"
@@ -39,7 +39,7 @@ type Controller struct {
 	kube         kube.Interface
 	watchFactory *factory.WatchFactory
 
-	masterSubnetAllocatorList []*netutils.SubnetAllocator
+	masterSubnetAllocatorList []*allocator.SubnetAllocator
 
 	TCPLoadBalancerUUID string
 	UDPLoadBalancerUUID string

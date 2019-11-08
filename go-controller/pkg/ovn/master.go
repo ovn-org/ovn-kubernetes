@@ -10,9 +10,9 @@ import (
 	"k8s.io/client-go/util/retry"
 
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/allocator"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
 
-	"github.com/openshift/origin/pkg/util/netutils"
 	"github.com/sirupsen/logrus"
 )
 
@@ -47,7 +47,7 @@ func (oc *Controller) StartClusterMaster(masterNodeName string) error {
 			alreadyAllocated = append(alreadyAllocated, hostsubnet)
 		}
 	}
-	masterSubnetAllocatorList := make([]*netutils.SubnetAllocator, 0)
+	masterSubnetAllocatorList := make([]*allocator.SubnetAllocator, 0)
 	// NewSubnetAllocator is a subnet IPAM, which takes a CIDR (first argument)
 	// and gives out subnets of length 'hostSubnetLength' (second argument)
 	// but omitting any that exist in 'subrange' (third argument)
@@ -62,7 +62,7 @@ func (oc *Controller) StartClusterMaster(masterNodeName string) error {
 				subrange = append(subrange, allocatedRange)
 			}
 		}
-		subnetAllocator, err := netutils.NewSubnetAllocator(clusterEntry.CIDR.String(), 32-clusterEntry.HostSubnetLength, subrange)
+		subnetAllocator, err := allocator.NewSubnetAllocator(clusterEntry.CIDR.String(), 32-clusterEntry.HostSubnetLength, subrange)
 		if err != nil {
 			return err
 		}
@@ -346,11 +346,11 @@ func (oc *Controller) addNode(node *kapi.Node) (hostsubnet *net.IPNet, err error
 	}
 
 	// Node doesn't have a subnet assigned; reserve a new one for it
-	var subnetAllocator *netutils.SubnetAllocator
-	err = netutils.ErrSubnetAllocatorFull
+	var subnetAllocator *allocator.SubnetAllocator
+	err = allocator.ErrSubnetAllocatorFull
 	for _, subnetAllocator = range oc.masterSubnetAllocatorList {
 		hostsubnet, err = subnetAllocator.GetNetwork()
-		if err == netutils.ErrSubnetAllocatorFull {
+		if err == allocator.ErrSubnetAllocatorFull {
 			// Current subnet exhausted, check next possible subnet
 			continue
 		} else if err != nil {
@@ -359,7 +359,7 @@ func (oc *Controller) addNode(node *kapi.Node) (hostsubnet *net.IPNet, err error
 		logrus.Infof("Allocated node %s HostSubnet %s", node.Name, hostsubnet.String())
 		break
 	}
-	if err == netutils.ErrSubnetAllocatorFull {
+	if err == allocator.ErrSubnetAllocatorFull {
 		return nil, fmt.Errorf("Error allocating network for node %s: %v", node.Name, err)
 	}
 

@@ -4,7 +4,6 @@ import (
 	"fmt"
 	"net"
 
-	"github.com/openshift/origin/pkg/util/netutils"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/factory"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/kube"
@@ -32,7 +31,7 @@ func setupOVNNode(nodeName string) error {
 
 	nodeIP := config.Default.EncapIP
 	if nodeIP == "" {
-		nodeIP, err = netutils.GetNodeIP(nodeName)
+		nodeIP, err = util.GetNodeIP(nodeName)
 		if err != nil {
 			return fmt.Errorf("failed to obtain local IP from hostname %q: %v", nodeName, err)
 		}
