@@ -434,7 +434,8 @@ subnet=%s
 				"ovn-nbctl --timeout=15 --may-exist lrp-add ovn_cluster_router rtos-" + masterName + " " + lrpMAC + " " + masterGWCIDR,
 				"ovn-nbctl --timeout=15 -- --may-exist ls-add " + masterName + " -- set logical_switch " + masterName + " other-config:subnet=" + masterSubnet + " other-config:exclude_ips=" + masterMgmtPortIP + ".." + masterHOPortIP + " external-ids:gateway_ip=" + masterGWCIDR,
 				"ovn-nbctl --timeout=15 -- --may-exist lsp-add " + masterName + " stor-" + masterName + " -- set logical_switch_port stor-" + masterName + " type=router options:router-port=rtos-" + masterName + " addresses=\"" + lrpMAC + "\"",
-
+				"ovn-nbctl --timeout=15 set logical_switch " + masterName + " load_balancer=" + tcpLBUUID,
+				"ovn-nbctl --timeout=15 add logical_switch " + masterName + " load_balancer " + udpLBUUID,
 				"ovn-nbctl --timeout=15 -- --may-exist lsp-add " + masterName + " k8s-" + masterName + " -- lsp-set-addresses " + "k8s-" + masterName + " " + masterMgmtPortMAC + " " + masterMgmtPortIP,
 			})
 
@@ -477,6 +478,8 @@ subnet=%s
 
 			clusterController := NewOvnController(fakeClient, f, nil)
 			Expect(clusterController).NotTo(BeNil())
+			clusterController.TCPLoadBalancerUUID = tcpLBUUID
+			clusterController.UDPLoadBalancerUUID = udpLBUUID
 
 			// Let the real code run and ensure OVN database sync
 			err = clusterController.WatchNodes(nil)
@@ -590,23 +593,13 @@ var _ = Describe("Gateway Init Operations", func() {
 				"ovn-nbctl --timeout=15 --may-exist lrp-add ovn_cluster_router rtos-" + nodeName + " " + lrpMAC + " " + masterGWCIDR,
 				"ovn-nbctl --timeout=15 -- --may-exist ls-add " + nodeName + " -- set logical_switch " + nodeName + " other-config:subnet=" + nodeSubnet + " other-config:exclude_ips=" + masterMgmtPortIP + ".." + masterHOPortIP + " external-ids:gateway_ip=" + masterGWCIDR,
 				"ovn-nbctl --timeout=15 -- --may-exist lsp-add " + nodeName + " stor-" + nodeName + " -- set logical_switch_port stor-" + nodeName + " type=router options:router-port=rtos-" + nodeName + " addresses=\"" + lrpMAC + "\"",
-
-				"ovn-nbctl --timeout=15 -- --may-exist lsp-add " + nodeName + " k8s-" + nodeName + " -- lsp-set-addresses " + "k8s-" + nodeName + " " + brLocalnetMAC + " " + masterMgmtPortIP,
 			})
-
-			cleanupGateway(fexec, nodeName, nodeSubnet, clusterCIDR, nextHop)
-			cleanupLB(fexec, nodeName)
-
-			fexec.AddFakeCmdsNoOutputNoError([]string{
-				"ovn-nbctl --timeout=15 --data=bare --no-heading --columns=_uuid find load_balancer external_ids:TCP_lb_gateway_router=GR_" + nodeName,
-			})
-
 			fexec.AddFakeCmd(&ovntest.ExpectedCmd{
 				Cmd:    "ovn-nbctl --timeout=15 --data=bare --no-heading --columns=_uuid find logical_router external_ids:k8s-cluster-router=yes",
 				Output: clusterRouterUUID,
 			})
 			fexec.AddFakeCmd(&ovntest.ExpectedCmd{
-				Cmd:    "ovs-vsctl --timeout=15 --if-exists get Open_vSwitch . external_ids:system-id",
+				Cmd:    "ovn-sbctl --timeout=15 --data=bare --no-heading --columns=name find Chassis hostname=node1",
 				Output: systemID,
 			})
 			fexec.AddFakeCmdsNoOutputNoError([]string{

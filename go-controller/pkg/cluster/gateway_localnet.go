@@ -4,6 +4,7 @@ package cluster
 
 import (
 	"fmt"
+	"net"
 	"reflect"
 	"strings"
 	"time"
@@ -211,10 +212,8 @@ func localnetIptRules(svc *kapi.Service) []iptRule {
 		rules = append(rules, iptRule{
 			table: "nat",
 			chain: iptableNodePortChain,
-			args: []string{
-				"-p", string(protocol), "--dport", nodePort,
-				"-j", "DNAT", "--to-destination", destination,
-			},
+			args: []string{"-p", string(protocol), "--dport", nodePort, "-j", "DNAT", "--to-destination",
+				net.JoinHostPort(strings.Split(localnetGatewayIP, "/")[0], nodePort)},
 		})
 		rules = append(rules, iptRule{
 			table: "filter",

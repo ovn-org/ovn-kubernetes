@@ -243,6 +243,12 @@ func (oc *Controller) addLogicalPort(pod *kapi.Pod) {
 		return
 	}
 
+	// Keep track of how long syncs take.
+	start := time.Now()
+	defer func() {
+		logrus.Infof("[%s/%s] addLogicalPort took %v", pod.Namespace, pod.Name, time.Since(start))
+	}()
+
 	if err = oc.waitForNodeLogicalSwitch(pod.Spec.NodeName); err != nil {
 		return
 	}

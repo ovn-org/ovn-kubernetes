@@ -73,15 +73,16 @@ func (pr *PodRequest) cmdAdd() ([]byte, error) {
 	// Get the IP address and MAC address from the API server.
 	// Exponential back off ~32 seconds + 7* t(api call)
 	var annotationBackoff = wait.Backoff{Duration: 1 * time.Second, Steps: 7, Factor: 1.5, Jitter: 0.1}
-	var annotation map[string]string
+	var annotations map[string]string
+	var ovnAnnotation string
 	if err = wait.ExponentialBackoff(annotationBackoff, func() (bool, error) {
-		annotation, err = kubecli.GetAnnotationsOnPod(namespace, podName)
+		annotations, err = kubecli.GetAnnotationsOnPod(namespace, podName)
 		if err != nil {
 			// TODO: check if err is non recoverable
 			logrus.Warningf("error getting pod annotations: %v", err)
 			return false, nil
 		}
-		if _, ok := annotation["ovn"]; ok {
+		if ovnAnnotation = annotations["ovn"]; ovnAnnotation != "" {
 			return true, nil
 		}
 		return false, nil
@@ -89,17 +90,12 @@ func (pr *PodRequest) cmdAdd() ([]byte, error) {
 		return nil, fmt.Errorf("failed to get pod annotation: %v", err)
 	}
 
-	ovnAnnotation, ok := annotation["ovn"]
-	if !ok {
-		return nil, fmt.Errorf("failed to get ovn annotation from pod")
-	}
-
 	podInfo, err := util.UnmarshalPodAnnotation(ovnAnnotation)
 	if err != nil {
-		return nil, fmt.Errorf("unmarshal ovn annotation failed: %v", err)
+		return nil, fmt.Errorf("failed to unmarshal ovn annotation: %v", err)
 	}
 
-	ingress, egress, err := extractPodBandwidthResources(annotation)
+	ingress, egress, err := extractPodBandwidthResources(annotations)
 	if err != nil {
 		return nil, fmt.Errorf("failed to parse bandwidth request: %v", err)
 	}
@@ -111,16 +107,25 @@ func (pr *PodRequest) cmdAdd() ([]byte, error) {
 	}
 	response := &Response{}
 	if !config.UnprivilegedMode {
-		response.Result = pr.getCNIResult(podInterfaceInfo)
+		response.Result, err = pr.getCNIResult(podInterfaceInfo)
+		if err != nil {
+			return nil, err
+		}
 	} else {
 		response.PodIFInfo = podInterfaceInfo
 	}
-	return json.Marshal(response)
+
+	responseBytes, err := json.Marshal(response)
+	if err != nil {
+		return nil, fmt.Errorf("failed to marshal pod request response: %v", err)
+	}
+
+	return responseBytes, nil
 }
 
 func (pr *PodRequest) cmdDel() ([]byte, error) {
 	if err := pr.PlatformSpecificCleanup(); err != nil {
-		return nil, fmt.Errorf("Teardown error: %v", err)
+		return nil, err
 	}
 	return []byte{}, nil
 }
@@ -145,11 +150,10 @@ func HandleCNIRequest(request *PodRequest) ([]byte, error) {
 }
 
 // getCNIResult get result from pod interface info.
-func (pr *PodRequest) getCNIResult(podInterfaceInfo *PodInterfaceInfo) *current.Result {
+func (pr *PodRequest) getCNIResult(podInterfaceInfo *PodInterfaceInfo) (*current.Result, error) {
 	interfacesArray, err := pr.ConfigureInterface(pr.PodNamespace, pr.PodName, podInterfaceInfo)
 	if err != nil {
-		logrus.Errorf("Failed to configure interface in pod: %v", err)
-		return nil
+		return nil, fmt.Errorf("Failed to configure interface in pod: %v", err)
 	}
 
 	// Build the result structure to pass back to the runtime
@@ -167,5 +171,5 @@ func (pr *PodRequest) getCNIResult(podInterfaceInfo *PodInterfaceInfo) *current.
 				Gateway:   podInterfaceInfo.GW,
 			},
 		},
-	}
+	}, nil
 }

@@ -69,6 +69,9 @@ func (ovn *Controller) getLoadBalancerVIPS(
 	if outStr == "" {
 		return nil, nil
 	}
+	// sample outStr:
+	// - {"192.168.0.1:80"="10.1.1.1:80,10.2.2.2:80"}
+	// - {"[fd01::]:80"="[fd02::]:80,[fd03::]:80"}
 	outStrMap := strings.Replace(outStr, "=", ":", -1)
 
 	var raw map[string]interface{}
@@ -95,7 +98,7 @@ func (ovn *Controller) createLoadBalancerVIP(lb string, serviceIP string, port i
 
 	// With service_ip:port as a VIP, create an entry in 'load_balancer'
 	// key is of the form "IP:port" (with quotes around)
-	key := fmt.Sprintf("\"%s:%d\"", serviceIP, port)
+	key := fmt.Sprintf(`"%s"`, util.JoinHostPortInt32(serviceIP, port))
 
 	if len(ips) == 0 {
 		_, _, err := util.RunOVNNbctl("remove", "load_balancer", lb,
@@ -109,9 +112,9 @@ func (ovn *Controller) createLoadBalancerVIP(lb string, serviceIP string, port i
 		if i == 0 {
 			comma = ""
 		}
-		commaSeparatedEndpoints += fmt.Sprintf("%s%s:%d", comma, ep, targetPort)
+		commaSeparatedEndpoints += fmt.Sprintf("%s%s", comma, util.JoinHostPortInt32(ep, targetPort))
 	}
-	target := fmt.Sprintf("vips:\"%s:%d\"=\"%s\"", serviceIP, port, commaSeparatedEndpoints)
+	target := fmt.Sprintf(`vips:"%s"="%s"`, util.JoinHostPortInt32(serviceIP, port), commaSeparatedEndpoints)
 
 	out, stderr, err := util.RunOVNNbctl("set", "load_balancer", lb,
 		target)

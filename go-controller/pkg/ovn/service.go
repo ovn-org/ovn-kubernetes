@@ -2,11 +2,12 @@ package ovn
 
 import (
 	"fmt"
+	"net"
+
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
 	"github.com/sirupsen/logrus"
 	kapi "k8s.io/api/core/v1"
-	"net"
 )
 
 func (ovn *Controller) syncServices(services []interface{}) {
@@ -64,7 +65,7 @@ func (ovn *Controller) syncServices(services []interface{}) {
 				continue
 			}
 
-			key := fmt.Sprintf("%s:%d", service.Spec.ClusterIP, svcPort.Port)
+			key := util.JoinHostPortInt32(service.Spec.ClusterIP, svcPort.Port)
 			if protocol == TCP {
 				clusterServices[TCP] = append(clusterServices[TCP], key)
 			} else {
@@ -75,7 +76,7 @@ func (ovn *Controller) syncServices(services []interface{}) {
 				continue
 			}
 			for _, extIP := range service.Spec.ExternalIPs {
-				key := fmt.Sprintf("%s:%d", extIP, svcPort.Port)
+				key := util.JoinHostPortInt32(extIP, svcPort.Port)
 				if protocol == TCP {
 					lbServices[TCP] = append(lbServices[TCP], key)
 				} else {
@@ -195,7 +196,7 @@ func (ovn *Controller) deleteService(service *kapi.Service) {
 			err := ovn.createGatewaysVIP(string(protocol), port, targetPort, ips)
 			if err != nil {
 				logrus.Errorf("Error in deleting NodePort gateway entry for service "+
-					"%s:%d %+v", service.Name, port, err)
+					"%s %+v", util.JoinHostPortInt32(service.Name, port), err)
 			}
 		}
 		if util.ServiceTypeHasClusterIP(service) {
@@ -210,7 +211,7 @@ func (ovn *Controller) deleteService(service *kapi.Service) {
 				service.Spec.ClusterIP, svcPort.Port, ips, targetPort)
 			if err != nil {
 				logrus.Errorf("Error in deleting load balancer for service "+
-					"%s:%d %+v", service.Name, port, err)
+					"%s %+v", util.JoinHostPortInt32(service.Name, port), err)
 			}
 			ovn.handleExternalIPs(service, svcPort, ips, targetPort)
 		}

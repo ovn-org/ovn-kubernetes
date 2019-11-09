@@ -56,8 +56,11 @@ func isOVNControllerReady(name string) (bool, error) {
 	}
 
 	err = wait.PollImmediate(500*time.Millisecond, 60*time.Second, func() (bool, error) {
-		flows, _, err := util.RunOVSOfctl("dump-flows", "br-int")
-		return len(flows) > 0, err
+		stdout, _, err := util.RunOVSOfctl("dump-aggregate", "br-int")
+		if err != nil {
+			return false, fmt.Errorf("failed to get aggregate flow statistics: %v", err)
+		}
+		return strings.Index(stdout, "flow_count=0") == -1, nil
 	})
 	if err != nil {
 		return false, fmt.Errorf("timed out dumping br-int flow entries for node %s: %v", name, err)
@@ -74,8 +77,30 @@ func (cluster *OvnClusterController) StartClusterNode(name string) error {
 	var subnet *net.IPNet
 	var clusterSubnets []string
 	var cidr string
-
 	var wg sync.WaitGroup
+
+	if config.MasterHA.ManageDBServers {
+		var readyChan = make(chan bool, 1)
+
+		err = cluster.watchConfigEndpoints(readyChan)
+		if err != nil {
+			return err
+		}
+		// Hold until we are certain that the endpoint has been setup.
+		// We risk polling an inactive master if we don't wait while a new leader election is on-going
+		<-readyChan
+	} else {
+		for _, auth := range []config.OvnAuthConfig{config.OvnNorth, config.OvnSouth} {
+			if err := auth.SetDBAuth(); err != nil {
+				return err
+			}
+		}
+	}
+
+	err = setupOVNNode(name)
+	if err != nil {
+		return err
+	}
 
 	for _, clusterSubnet := range config.Default.ClusterSubnets {
 		clusterSubnets = append(clusterSubnets, clusterSubnet.CIDR.String())
@@ -103,16 +128,6 @@ func (cluster *OvnClusterController) StartClusterNode(name string) error {
 	}
 
 	logrus.Infof("Node %s ready for ovn initialization with subnet %s", node.Name, subnet.String())
-
-	err = cluster.watchConfigEndpoints()
-	if err != nil {
-		return err
-	}
-
-	err = setupOVNNode(name)
-	if err != nil {
-		return err
-	}
 
 	if _, err = isOVNControllerReady(name); err != nil {
 		return err
@@ -191,57 +206,34 @@ func (cluster *OvnClusterController) StartClusterNode(name string) error {
 	return err
 }
 
-func validateOVNConfigEndpoint(ep *kapi.Endpoints) bool {
-	if len(ep.Subsets) == 1 && len(ep.Subsets[0].Ports) == 2 {
-		return true
+func updateOVNConfig(ep *kapi.Endpoints, readyChan chan bool) error {
+	masterIPList, southboundDBPort, northboundDBPort, err := util.ExtractDbRemotesFromEndpoint(ep)
+	if err != nil {
+		return err
 	}
 
-	return false
-
-}
-
-func updateOVNConfig(ep *kapi.Endpoints) error {
-	if !validateOVNConfigEndpoint(ep) {
-		return fmt.Errorf("endpoint %s is not of the right format to configure OVN", ep.Name)
-	}
-
-	var southboundDBPort string
-	var northboundDBPort string
-	var masterIPList []string
-
-	for _, ovnDB := range ep.Subsets[0].Ports {
-		if ovnDB.Name == "south" {
-			southboundDBPort = strconv.Itoa(int(ovnDB.Port))
-		}
-		if ovnDB.Name == "north" {
-			northboundDBPort = strconv.Itoa(int(ovnDB.Port))
-		}
-	}
-
-	for _, address := range ep.Subsets[0].Addresses {
-		masterIPList = append(masterIPList, address.IP)
-	}
-
-	config.UpdateOVNNodeAuth(masterIPList, southboundDBPort, northboundDBPort)
+	config.UpdateOVNNodeAuth(masterIPList, strconv.Itoa(int(southboundDBPort)), strconv.Itoa(int(northboundDBPort)))
 
 	for _, auth := range []config.OvnAuthConfig{config.OvnNorth, config.OvnSouth} {
 		if err := auth.SetDBAuth(); err != nil {
 			return err
 		}
-		logrus.Infof("OVN databases reconfigured, masterIP %s, northbound-db %s, southbound-db %s", ep.Subsets[0].Addresses[0].IP, northboundDBPort, southboundDBPort)
 	}
 
+	logrus.Infof("OVN databases reconfigured, masterIPs %v, northbound-db %v, southbound-db %v", masterIPList, northboundDBPort, southboundDBPort)
+
+	readyChan <- true
 	return nil
 }
 
 //watchConfigEndpoints starts the watching of Endpoint resource and calls back to the appropriate handler logic
-func (cluster *OvnClusterController) watchConfigEndpoints() error {
+func (cluster *OvnClusterController) watchConfigEndpoints(readyChan chan bool) error {
 	_, err := cluster.watchFactory.AddFilteredEndpointsHandler(config.Kubernetes.OVNConfigNamespace,
 		cache.ResourceEventHandlerFuncs{
 			AddFunc: func(obj interface{}) {
 				ep := obj.(*kapi.Endpoints)
 				if ep.Name == "ovnkube-db" {
-					if err := updateOVNConfig(ep); err != nil {
+					if err := updateOVNConfig(ep, readyChan); err != nil {
 						logrus.Errorf(err.Error())
 					}
 				}
@@ -250,7 +242,7 @@ func (cluster *OvnClusterController) watchConfigEndpoints() error {
 				epNew := new.(*kapi.Endpoints)
 				epOld := old.(*kapi.Endpoints)
 				if !reflect.DeepEqual(epNew.Subsets, epOld.Subsets) && epNew.Name == "ovnkube-db" {
-					if err := updateOVNConfig(epNew); err != nil {
+					if err := updateOVNConfig(epNew, readyChan); err != nil {
 						logrus.Errorf(err.Error())
 					}
 				}
