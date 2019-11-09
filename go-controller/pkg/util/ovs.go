@@ -128,6 +128,7 @@ func SetExec(exec kexec.Interface) error {
 		return err
 	}
 	runner.ovnctlPath = "/usr/share/openvswitch/scripts/ovn-ctl"
+
 	return nil
 }
 
