@@ -7,7 +7,6 @@ import (
 	"net"
 	"reflect"
 	"strings"
-	"time"
 
 	"k8s.io/client-go/tools/cache"
 
@@ -159,16 +158,6 @@ func initLocalnetGateway(nodeName string,
 	if err != nil {
 		return nil, fmt.Errorf("failed to assign ip address to %s (%v)",
 			localnetBridgeNextHop, err)
-	}
-
-	for i := 0; i < 5; i++ {
-		stdout, _, _ := util.RunIP("addr", "show", localnetBridgeNextHop)
-		if !strings.Contains(stdout, localnetGatewayNextHopSubnet) {
-			_, _, _ = util.RunIP("addr", "add",
-				localnetGatewayNextHopSubnet,
-				"dev", localnetBridgeNextHop)
-		}
-		time.Sleep(2 * time.Second)
 	}
 
 	ifaceID, macAddress, err := bridgedGatewayNodeSetup(nodeName, localnetBridgeName, localnetBridgeName, true)
