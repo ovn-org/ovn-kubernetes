@@ -149,7 +149,13 @@ func (hacontroller *HAMasterController) StartHAMasterController() error {
 
 	go hacontroller.leaderElector.Run(context.Background())
 
-	return hacontroller.WatchOvnDbEndpoints()
+	if hacontroller.manageDBServers {
+		if err = hacontroller.WatchOvnDbEndpoints(); err != nil {
+			return err
+		}
+	}
+
+	return nil
 }
 
 // ConfigureAsActive configures the node as active.
@@ -254,6 +260,9 @@ func (hacontroller *HAMasterController) updateOvnDbEndpoints(ep *kapi.Endpoints,
 		logrus.Debugf("updateOvnDbEndpoints : Updating the endpoint")
 		ovndbEp := ep.DeepCopy()
 		ovndbEp.Subsets = epSubsets
+		if ovndbEp.Annotations == nil {
+			ovndbEp.Annotations = make(map[string]string)
+		}
 		ovndbEp.Annotations[haMasterLeader] = hacontroller.nodeName
 		_, err := hacontroller.ovnController.kube.UpdateEndpoint(config.Kubernetes.OVNConfigNamespace, ovndbEp)
 		if err != nil {
