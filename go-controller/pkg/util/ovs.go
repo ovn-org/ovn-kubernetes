@@ -137,7 +137,6 @@ func SetExecWithoutOVS(exec kexec.Interface) error {
 	var err error
 
 	runner = &execHelper{exec: exec}
-
 	if runtime.GOOS == windowsOS {
 		runner.powershellPath, err = exec.LookPath(powershellCommand)
 		if err != nil {

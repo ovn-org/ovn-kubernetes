@@ -98,8 +98,15 @@ func (info *NetworkInfo) GetHostComputeNetworkConfig() (*hcn.HostComputeNetwork,
 		}
 	}
 
+<<<<<<< HEAD
 	var err error
 	hostComputeNetwork, err := &hcn.HostComputeNetwork{
+		Name:  info.Name,
+		Type:  hcn.NetworkType("Overlay"),
+		Ipams: ipams,
+=======
+	return &hcn.HostComputeNetwork{
+>>>>>>> 24d9b852... Adding host route policy support to allow node to POD communication
 		SchemaVersion: hcn.SchemaVersion{
 			Major: 2,
 			Minor: 0,
