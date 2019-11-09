@@ -41,8 +41,8 @@ spec:
 
       containers:
 
-      # run-ovn-northd - v3
-      - name: run-ovn-northd
+      # ovn-northd - v3
+      - name: ovn-northd
         image: "{{ ovn_image | default('docker.io/ovnkube/ovn-daemonset:latest') }}"
         imagePullPolicy: "{{ ovn_image_pull_policy | default('IfNotPresent') }}"
 
@@ -109,7 +109,7 @@ spec:
         lifecycle:
       # end of container
 
-      - name: run-nbctld
+      - name: nbctl-daemon
         image: "{{ ovn_image | default('docker.io/ovnkube/ovn-daemonset:latest') }}"
         imagePullPolicy: "{{ ovn_image_pull_policy | default('IfNotPresent') }}"
 
