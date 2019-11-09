@@ -20,8 +20,12 @@ import (
 
 const (
 	// Hard-coded constants
-	useAutomaticDns = true               // If true, the Windows host DNS is used to resolve container DNS requests
-	networkName     = "OpenShiftNetwork" // In practice, this is the virtual switch name
+	useAutomaticDns   = true                         // If true, the Windows host DNS is used to resolve container DNS requests
+	networkName       = "OpenShiftNetwork"           // In practice, this is the virtual switch name
+	baseNetworkName   = "BaseOpenShiftNetwork"       // Name of the base network
+	fakeSubnetCIDR    = "11.0.0.0/30"                // We just need a subnet to create the base network. This subnet is actually invisible to the PODs/Nodes.
+	fakeSubnetGateway = "11.0.0.2"                   // Gateway IP for the fake Subnet. This gateway is invisible to the PODs/Nodes.
+	fakeSubnetVNI     = (types.HybridOverlayVNI + 1) // Create a VNI for the fake subnet
 )
 
 // NodeController is the node hybrid overlay controller
@@ -175,15 +179,81 @@ func (n *NodeController) Sync(nodes []*kapi.Node) {
 //  2. Setting back annotations about its VTEP and gateway MAC address to its own node object
 //  3. Initializing every VXLAN tunnels toward other
 func (n *NodeController) InitSelf() {
-	// Create network
-	var networkInfo NetworkInfo
-
 	// Retrieve the host prefix from the annotations
 	hostsubnet, ok := n.thisNode.Annotations[types.HybridOverlayHostSubnet]
 
 	if !ok {
 		logrus.Errorf("Couldn't retreive the host subnet from the '%s' node's annotations", n.thisNode.Name)
 		return
+	}
+
+	baseNetwork := GetExistingNetwork(baseNetworkName, fakeSubnetCIDR, fakeSubnetGateway)
+
+	if baseNetwork == nil {
+		// Host network connectivity is temporarily lost when the first overlay network is created on Windows.
+		// This may cause disruption to other services during boot time. Once the first overlay network exists,
+		// any subsequent overlay network creation reuse the same VMSwitch and therefore don't disrupt the traffic.
+		//
+		// Overlay networks have the ability to be persistent, which means they are still present after node reboot.
+		// Endpoints and other network resources on the other hand have to be cleaned up on every reboot.
+		//
+		// In order to minimize traffic disruption but keep relying on the HNS service to clean up the unnecessary resources,
+		// we create a persistent base overlay network on top of which we create the (non-persistent) OpenShift overlay network.
+		// Endpoints are then attached to the OpenShift overlay network. The OpenShift overlay network is re-created by Hybrid-Overlay
+		// after each node boot while the base network remains accross reboots.
+
+		// Create the base overlay network
+		var baseNetworkInfo NetworkInfo
+
+		baseNetworkInfo.AutomaticDNS = false
+		baseNetworkInfo.IsPersistent = true
+		baseNetworkInfo.Name = baseNetworkName
+
+		_, baseNetworkAddressPrefix, err := net.ParseCIDR(fakeSubnetCIDR)
+		if err != nil {
+			logrus.Error(err)
+			return
+		}
+
+		baseNetworkGatewayAddress := net.ParseIP(fakeSubnetGateway)
+		if err != nil {
+			logrus.Error(err)
+			return
+		}
+
+		baseNetworkInfo.Subnets = []SubnetInfo{
+			{
+				AddressPrefix:  *baseNetworkAddressPrefix,
+				GatewayAddress: baseNetworkGatewayAddress,
+				Vsid:           fakeSubnetVNI,
+			},
+		}
+
+		logrus.Infof("Creating the base overlay network '%s'.", baseNetworkName)
+
+		// Retreive the network schema object
+		var baseNetworkSchema *hcn.HostComputeNetwork
+		baseNetworkSchema, err = baseNetworkInfo.GetHostComputeNetworkConfig()
+		if err != nil {
+			logrus.Errorf("Unable to generate a schema to create a base overlay network, error: %v", err)
+			return
+		}
+
+		logrus.Infof("Base network creation may take up to a minute to complete...")
+		// Create the base network from schema object
+		_, err = baseNetworkSchema.Create()
+		if err != nil {
+			logrus.Errorf("Unable to create the base overlay network, error: %v", err)
+			return
+		}
+
+		// Workaround for a limitation in the Windows HNS service. We need to manually duplicate persistent routes
+		// that used to be on the physical network interface to the newly created host vNIC
+		err = DuplicatePersistentIpRoutes()
+		if err != nil {
+			logrus.Errorf("Unable to refresh the persistent IP routes, error: %v", err)
+			return
+		}
 	}
 
 	_, addressPrefix, err := net.ParseCIDR(hostsubnet)
@@ -199,7 +269,11 @@ func (n *NodeController) InitSelf() {
 	network := GetExistingNetwork(networkName, addressPrefix.String(), gatewayAddress.String())
 
 	if network == nil {
+		// Create the overlay network
+		var networkInfo NetworkInfo
+
 		networkInfo.AutomaticDNS = useAutomaticDns
+		networkInfo.IsPersistent = false
 		networkInfo.Name = networkName
 
 		networkInfo.Subnets = []SubnetInfo{
@@ -225,6 +299,12 @@ func (n *NodeController) InitSelf() {
 		network, err = networkSchema.Create()
 		if err != nil {
 			logrus.Errorf("Unable to create the overlay network, error: %v", err)
+			return
+		}
+
+		err = AddHostRoutePolicy(network)
+		if err != nil {
+			logrus.Errorf("Unable to add host route policy, error: %v", err)
 			return
 		}
 	} else {

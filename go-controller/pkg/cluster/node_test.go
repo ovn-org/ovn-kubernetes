@@ -107,113 +107,6 @@ var _ = Describe("Node Operations", func() {
 		err := app.Run([]string{app.Name})
 		Expect(err).NotTo(HaveOccurred())
 	})
-	It("test validateOVNConfigEndpoint()", func() {
-
-		type testcase struct {
-			name           string
-			subsets        []kapi.EndpointSubset
-			expectedResult bool
-		}
-
-		testcases := []testcase{
-			{
-				name: "valid endpoint",
-				subsets: []kapi.EndpointSubset{
-					{
-						Addresses: []kapi.EndpointAddress{
-							{IP: "10.1.2.3"},
-						},
-						Ports: []kapi.EndpointPort{
-							{
-								Name: "north",
-								Port: 1234,
-							},
-							{
-								Name: "south",
-								Port: 4321,
-							},
-						},
-					},
-				},
-				expectedResult: true,
-			},
-			{
-				name: "valid endpoint, multiple IPs",
-				subsets: []kapi.EndpointSubset{
-					{
-						Addresses: []kapi.EndpointAddress{
-							{IP: "10.1.2.3"}, {IP: "11.1.2.3"},
-						},
-						Ports: []kapi.EndpointPort{
-							{
-								Name: "north",
-								Port: 1234,
-							},
-							{
-								Name: "south",
-								Port: 4321,
-							},
-						},
-					},
-				},
-				expectedResult: true,
-			},
-			{
-				name: "invalid endpoint two few ports",
-				subsets: []kapi.EndpointSubset{
-					{
-						Addresses: []kapi.EndpointAddress{
-							{IP: "10.1.2.3"},
-						},
-						Ports: []kapi.EndpointPort{
-							{
-								Name: "north",
-								Port: 1234,
-							},
-						},
-					},
-				},
-				expectedResult: false,
-			},
-			{
-				name: "invalid endpoint too many ports",
-				subsets: []kapi.EndpointSubset{
-					{
-						Addresses: []kapi.EndpointAddress{
-							{IP: "10.1.2.3"},
-						},
-						Ports: []kapi.EndpointPort{
-							{
-								Name: "north",
-								Port: 1234,
-							},
-							{
-								Name: "south",
-								Port: 4321,
-							},
-							{
-								Name: "east",
-								Port: 7654,
-							},
-						},
-					},
-				},
-				expectedResult: false,
-			},
-			{
-				name:           "invalid endpoint no subsets",
-				subsets:        []kapi.EndpointSubset{},
-				expectedResult: false,
-			},
-		}
-
-		for _, tc := range testcases {
-			test := kapi.Endpoints{
-				Subsets: tc.subsets,
-			}
-			Expect(validateOVNConfigEndpoint(&test)).To(Equal(tc.expectedResult), " test case \"%s\" returned %t instead of %t", tc.name, !tc.expectedResult, tc.expectedResult)
-		}
-	})
 	It("test watchConfigEndpoints single IP", func() {
 		app.Action = func(ctx *cli.Context) error {
 
@@ -226,14 +119,14 @@ var _ = Describe("Node Operations", func() {
 			fexec := ovntest.NewFakeExec()
 			fexec.AddFakeCmd(&ovntest.ExpectedCmd{
 				Cmd: fmt.Sprintf("ovs-vsctl --timeout=15 set Open_vSwitch . "+
-					"external_ids:ovn-nb=\"tcp:%s:%d\"",
-					masterAddress, nbPort),
+					"external_ids:ovn-nb=\"tcp:%s\"",
+					util.JoinHostPortInt32(masterAddress, nbPort)),
 			})
 
 			fexec.AddFakeCmd(&ovntest.ExpectedCmd{
 				Cmd: fmt.Sprintf("ovs-vsctl --timeout=15 set Open_vSwitch . "+
-					"external_ids:ovn-remote=\"tcp:%s:%d\"",
-					masterAddress, sbPort),
+					"external_ids:ovn-remote=\"tcp:%s\"",
+					util.JoinHostPortInt32(masterAddress, sbPort)),
 			})
 
 			err := util.SetExec(fexec)
@@ -275,16 +168,16 @@ var _ = Describe("Node Operations", func() {
 			Expect(config.OvnNorth.Address).To(Equal("tcp:1.1.1.1:6641"), "config.OvnNorth.Address does not equal cli arg")
 			Expect(config.OvnSouth.Address).To(Equal("tcp:1.1.1.1:6642"), "config.OvnSouth.Address does not equal cli arg")
 
-			err = cluster.watchConfigEndpoints()
+			err = cluster.watchConfigEndpoints(make(chan bool, 1))
 			Expect(err).NotTo(HaveOccurred())
 
 			// Kubernetes endpoints should eventually propogate to OvnNorth/OvnSouth
 			Eventually(func() string {
 				return config.OvnNorth.Address
-			}).Should(Equal(fmt.Sprintf("tcp:%s:%d", masterAddress, nbPort)), "Northbound DB Port did not get set by watchConfigEndpoints")
+			}).Should(Equal(fmt.Sprintf("tcp:%s", util.JoinHostPortInt32(masterAddress, nbPort))), "Northbound DB Port did not get set by watchConfigEndpoints")
 			Eventually(func() string {
 				return config.OvnSouth.Address
-			}).Should(Equal(fmt.Sprintf("tcp:%s:%d", masterAddress, sbPort)), "Southbound DBPort did not get set by watchConfigEndpoints")
+			}).Should(Equal(fmt.Sprintf("tcp:%s", util.JoinHostPortInt32(masterAddress, sbPort))), "Southbound DBPort did not get set by watchConfigEndpoints")
 
 			return nil
 		}
@@ -292,6 +185,7 @@ var _ = Describe("Node Operations", func() {
 		Expect(err).NotTo(HaveOccurred())
 
 	})
+
 	It("test watchConfigEndpoints multiple IPs", func() {
 		app.Action = func(ctx *cli.Context) error {
 
@@ -305,14 +199,16 @@ var _ = Describe("Node Operations", func() {
 			fexec := ovntest.NewFakeExec()
 			fexec.AddFakeCmd(&ovntest.ExpectedCmd{
 				Cmd: fmt.Sprintf("ovs-vsctl --timeout=15 set Open_vSwitch . "+
-					"external_ids:ovn-nb=\"tcp:%s:%d,tcp:%s:%d\"",
-					masterAddress1, nbPort, masterAddress2, nbPort),
+					"external_ids:ovn-nb=\"tcp:%s,tcp:%s\"",
+					util.JoinHostPortInt32(masterAddress1, nbPort),
+					util.JoinHostPortInt32(masterAddress2, nbPort)),
 			})
 
 			fexec.AddFakeCmd(&ovntest.ExpectedCmd{
 				Cmd: fmt.Sprintf("ovs-vsctl --timeout=15 set Open_vSwitch . "+
-					"external_ids:ovn-remote=\"tcp:%s:%d,tcp:%s:%d\"",
-					masterAddress1, sbPort, masterAddress2, sbPort),
+					"external_ids:ovn-remote=\"tcp:%s,tcp:%s\"",
+					util.JoinHostPortInt32(masterAddress1, sbPort),
+					util.JoinHostPortInt32(masterAddress2, sbPort)),
 			})
 
 			err := util.SetExec(fexec)
@@ -354,16 +250,16 @@ var _ = Describe("Node Operations", func() {
 			Expect(config.OvnNorth.Address).To(Equal("tcp:1.1.1.1:6641"), "config.OvnNorth.Address does not equal cli arg")
 			Expect(config.OvnSouth.Address).To(Equal("tcp:1.1.1.1:6642"), "config.OvnSouth.Address does not equal cli arg")
 
-			err = cluster.watchConfigEndpoints()
+			err = cluster.watchConfigEndpoints(make(chan bool, 1))
 			Expect(err).NotTo(HaveOccurred())
 
 			// Kubernetes endpoints should eventually propogate to OvnNorth/OvnSouth
 			Eventually(func() string {
 				return config.OvnNorth.Address
-			}).Should(Equal(fmt.Sprintf("tcp:%s:%d,tcp:%s:%d", masterAddress1, nbPort, masterAddress2, nbPort)), "Northbound DB Port did not get set by watchConfigEndpoints")
+			}).Should(Equal(fmt.Sprintf("tcp:%s,tcp:%s", util.JoinHostPortInt32(masterAddress1, nbPort), util.JoinHostPortInt32(masterAddress2, nbPort))), "Northbound DB Port did not get set by watchConfigEndpoints")
 			Eventually(func() string {
 				return config.OvnSouth.Address
-			}).Should(Equal(fmt.Sprintf("tcp:%s:%d,tcp:%s:%d", masterAddress1, sbPort, masterAddress2, sbPort)), "Southbound DBPort did not get set by watchConfigEndpoints")
+			}).Should(Equal(fmt.Sprintf("tcp:%s,tcp:%s", util.JoinHostPortInt32(masterAddress1, sbPort), util.JoinHostPortInt32(masterAddress2, sbPort))), "Southbound DBPort did not get set by watchConfigEndpoints")
 
 			return nil
 		}

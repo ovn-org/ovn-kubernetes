@@ -48,6 +48,9 @@ func NewClientset(conf *config.KubernetesConfig) (*kubernetes.Clientset, error) 
 		return nil, err
 	}
 
+	kconfig.AcceptContentTypes = "application/vnd.kubernetes.protobuf,application/json"
+	kconfig.ContentType = "application/vnd.kubernetes.protobuf"
+
 	return kubernetes.NewForConfig(kconfig)
 }
 
@@ -64,4 +67,32 @@ func ServiceTypeHasClusterIP(service *kapi.Service) bool {
 // ServiceTypeHasNodePort checks if the service has an associated NodePort or not
 func ServiceTypeHasNodePort(service *kapi.Service) bool {
 	return service.Spec.Type == kapi.ServiceTypeNodePort || service.Spec.Type == kapi.ServiceTypeLoadBalancer
+}
+
+func validateOVNConfigEndpoint(ep *kapi.Endpoints) bool {
+	return len(ep.Subsets) == 1 && len(ep.Subsets[0].Ports) == 2 && len(ep.Subsets[0].Addresses) > 0
+}
+
+// ExtractDbRemotesFromEndpoint extracts the DB endpoints
+func ExtractDbRemotesFromEndpoint(ep *kapi.Endpoints) ([]string, int32, int32, error) {
+	var nbDBPort int32
+	var sbDBPort int32
+	var masterIPList []string
+
+	if !validateOVNConfigEndpoint(ep) {
+		return masterIPList, nbDBPort, sbDBPort, fmt.Errorf("endpoint %s is not in the right format to configure OVN", ep.Name)
+	}
+
+	for _, ovnDB := range ep.Subsets[0].Ports {
+		if ovnDB.Name == "south" {
+			sbDBPort = ovnDB.Port
+		} else if ovnDB.Name == "north" {
+			nbDBPort = ovnDB.Port
+		}
+	}
+	for _, address := range ep.Subsets[0].Addresses {
+		masterIPList = append(masterIPList, address.IP)
+	}
+
+	return masterIPList, sbDBPort, nbDBPort, nil
 }

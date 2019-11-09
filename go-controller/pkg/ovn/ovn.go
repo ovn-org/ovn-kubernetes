@@ -466,12 +466,12 @@ func (oc *Controller) handleNodeGateway(node *kapi.Node) error {
 			if err = oc.syncGatewayLogicalNetwork(node, mode, subnet.String()); err == nil {
 				gatewayConfigured = true
 			} else {
-				return fmt.Errorf("error creating gateway for node %s: %v", node.Name, err)
+				logrus.Errorf("error creating gateway for node %s: %v", node.Name, err)
 			}
 		}
 	}
 
-	if !gatewayConfigured && subnet != nil {
+	if !gatewayConfigured {
 		if err := util.GatewayCleanup(node.Name, subnet); err != nil {
 			return fmt.Errorf("error cleaning up gateway for node %s: %v", node.Name, err)
 		}
@@ -488,21 +488,21 @@ func (oc *Controller) WatchNodes(nodeSelector *metav1.LabelSelector) error {
 		AddFunc: func(obj interface{}) {
 			node := obj.(*kapi.Node)
 			logrus.Debugf("Added event for Node %q", node.Name)
-			err := oc.addNode(node)
+			hostSubnet, err := oc.addNode(node)
 			if err != nil {
 				logrus.Errorf("error creating subnet for node %s: %v", node.Name, err)
+				return
 			}
-			err = oc.syncNodeManagementPort(node)
+
+			err = oc.syncNodeManagementPort(node, hostSubnet)
 			if err != nil {
 				logrus.Errorf("error creating Node Management Port for node %s: %v", node.Name, err)
 			}
 
 			if err := oc.handleNodeGateway(node); err != nil {
 				logrus.Errorf(err.Error())
-			}
-
-			if config.Gateway.NodeportEnable {
-				gatewaysHandled[node.Name] = oc.handleNodePortLB(node)
+			} else {
+				gatewaysHandled[node.Name] = true
 			}
 		},
 		UpdateFunc: func(old, new interface{}) {
@@ -512,21 +512,17 @@ func (oc *Controller) WatchNodes(nodeSelector *metav1.LabelSelector) error {
 			macAddress, _ := node.Annotations[OvnNodeManagementPortMacAddress]
 			logrus.Debugf("Updated event for Node %q", node.Name)
 			if oldMacAddress != macAddress {
-				err := oc.syncNodeManagementPort(node)
+				err := oc.syncNodeManagementPort(node, nil)
 				if err != nil {
 					logrus.Errorf("error update Node Management Port for node %s: %v", node.Name, err)
 				}
 			}
 
-			if gatewayChanged(oldNode, node) {
+			if !gatewaysHandled[node.Name] || gatewayChanged(oldNode, node) {
 				if err := oc.handleNodeGateway(node); err != nil {
 					logrus.Errorf(err.Error())
-				}
-			}
-
-			if config.Gateway.NodeportEnable {
-				if !gatewaysHandled[node.Name] {
-					gatewaysHandled[node.Name] = oc.handleNodePortLB(node)
+				} else {
+					gatewaysHandled[node.Name] = true
 				}
 			}
 		},

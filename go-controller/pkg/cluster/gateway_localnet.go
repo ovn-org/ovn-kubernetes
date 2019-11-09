@@ -4,9 +4,9 @@ package cluster
 
 import (
 	"fmt"
+	"net"
 	"reflect"
 	"strings"
-	"time"
 
 	"k8s.io/client-go/tools/cache"
 
@@ -160,16 +160,6 @@ func initLocalnetGateway(nodeName string,
 			localnetBridgeNextHop, err)
 	}
 
-	for i := 0; i < 5; i++ {
-		stdout, _, _ := util.RunIP("addr", "show", localnetBridgeNextHop)
-		if !strings.Contains(stdout, localnetGatewayNextHopSubnet) {
-			_, _, _ = util.RunIP("addr", "add",
-				localnetGatewayNextHopSubnet,
-				"dev", localnetBridgeNextHop)
-		}
-		time.Sleep(2 * time.Second)
-	}
-
 	ifaceID, macAddress, err := bridgedGatewayNodeSetup(nodeName, localnetBridgeName, localnetBridgeName, true)
 	if err != nil {
 		return nil, fmt.Errorf("failed to set up shared interface gateway: %v", err)
@@ -211,10 +201,8 @@ func localnetIptRules(svc *kapi.Service) []iptRule {
 		rules = append(rules, iptRule{
 			table: "nat",
 			chain: iptableNodePortChain,
-			args: []string{
-				"-p", string(protocol), "--dport", nodePort,
-				"-j", "DNAT", "--to-destination", destination,
-			},
+			args: []string{"-p", string(protocol), "--dport", nodePort, "-j", "DNAT", "--to-destination",
+				net.JoinHostPort(strings.Split(localnetGatewayIP, "/")[0], nodePort)},
 		})
 		rules = append(rules, iptRule{
 			table: "filter",

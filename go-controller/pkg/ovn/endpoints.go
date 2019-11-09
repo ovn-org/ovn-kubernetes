@@ -1,9 +1,7 @@
 package ovn
 
 import (
-	"net"
-	"strconv"
-
+	"fmt"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
 	util "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
 	"github.com/sirupsen/logrus"
@@ -86,7 +84,7 @@ func (ovn *Controller) AddEndpoints(ep *kapi.Endpoints) error {
 						logrus.Errorf("Error in creating Cluster IP for svc %s, target port: %d - %v\n", svc.Name, targetPort, err)
 						continue
 					}
-					vip := net.JoinHostPort(svc.Spec.ClusterIP, strconv.Itoa(int(svcPort.Port)))
+					vip := util.JoinHostPortInt32(svc.Spec.ClusterIP, svcPort.Port)
 					ovn.AddServiceVIPToName(vip, svcPort.Protocol, svc.Namespace, svc.Name)
 					ovn.handleExternalIPs(svc, svcPort, ips, targetPort)
 				}
@@ -119,7 +117,7 @@ func (ovn *Controller) AddEndpoints(ep *kapi.Endpoints) error {
 						logrus.Errorf("Error in creating Cluster IP for svc %s, target port: %d - %v\n", svc.Name, targetPort, err)
 						continue
 					}
-					vip := net.JoinHostPort(svc.Spec.ClusterIP, strconv.Itoa(int(svcPort.Port)))
+					vip := util.JoinHostPortInt32(svc.Spec.ClusterIP, svcPort.Port)
 					ovn.AddServiceVIPToName(vip, svcPort.Protocol, svc.Namespace, svc.Name)
 					ovn.handleExternalIPs(svc, svcPort, ips, targetPort)
 				}
@@ -129,25 +127,21 @@ func (ovn *Controller) AddEndpoints(ep *kapi.Endpoints) error {
 	return nil
 }
 
-func (ovn *Controller) handleNodePortLB(node *kapi.Node) bool {
+func (ovn *Controller) handleNodePortLB(node *kapi.Node) error {
 	physicalGateway := "GR_" + node.Name
 	var k8sNSLbTCP, k8sNSLbUDP, physicalIP string
 	if k8sNSLbTCP, _ = ovn.getGatewayLoadBalancer(physicalGateway, TCP); k8sNSLbTCP == "" {
-		logrus.Debugf("TCP load balancer for node %q does not yet exist", node.Name)
-		return false
+		return fmt.Errorf("TCP load balancer for node %q does not yet exist", node.Name)
 	}
 	if k8sNSLbUDP, _ = ovn.getGatewayLoadBalancer(physicalGateway, UDP); k8sNSLbUDP == "" {
-		logrus.Debugf("UDP load balancer for node %q does not yet exist", node.Name)
-		return false
+		return fmt.Errorf("UDP load balancer for node %q does not yet exist", node.Name)
 	}
 	if physicalIP, _ = ovn.getGatewayPhysicalIP(physicalGateway); physicalIP == "" {
-		logrus.Debugf("gateway physical IP for node %q does not yet exist", node.Name)
-		return false
+		return fmt.Errorf("gateway physical IP for node %q does not yet exist", node.Name)
 	}
 	namespaces, err := ovn.kube.GetNamespaces()
 	if err != nil {
-		logrus.Errorf("failed to get k8s namespaces: %v", err)
-		return false
+		return fmt.Errorf("failed to get k8s namespaces: %v", err)
 	}
 	for _, ns := range namespaces.Items {
 		endpoints, err := ovn.kube.GetEndpoints(ns.Name)
@@ -196,7 +190,7 @@ func (ovn *Controller) handleNodePortLB(node *kapi.Node) bool {
 			}
 		}
 	}
-	return true
+	return nil
 }
 
 func (ovn *Controller) handleExternalIPsLB() {
@@ -284,7 +278,7 @@ func (ovn *Controller) deleteEndpoints(ep *kapi.Endpoints) error {
 			continue
 		}
 
-		quotedHostPort := "\"" + net.JoinHostPort(svc.Spec.ClusterIP, strconv.Itoa(int(svcPort.Port))) + "\""
+		quotedHostPort := "\"" + util.JoinHostPortInt32(svc.Spec.ClusterIP, svcPort.Port) + "\""
 		if config.Kubernetes.OVNEmptyLbEvents {
 			key := "vips:" + quotedHostPort + "=\"\""
 			_, stderr, err := util.RunOVNNbctl("set", "load_balancer", lb, key)

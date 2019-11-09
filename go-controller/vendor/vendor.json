@@ -159,6 +159,24 @@
 			"revisionTime": "2019-07-31T12:00:54Z"
 		},
 		{
+			"checksumSHA1": "P8yN9C39/DOGGKFGBLPj1ETLfwA=",
+			"path": "github.com/bhendo/go-powershell",
+			"revision": "219e7fb4e41e15c1a8f68c7f082c4c6df96d6362",
+			"revisionTime": "2019-07-19T16:01:23Z"
+		},
+		{
+			"checksumSHA1": "DuqkKPjecO78eD5CjLFUWnm6NJQ=",
+			"path": "github.com/bhendo/go-powershell/backend",
+			"revision": "219e7fb4e41e15c1a8f68c7f082c4c6df96d6362",
+			"revisionTime": "2019-07-19T16:01:23Z"
+		},
+		{
+			"checksumSHA1": "g8tXmwqU8OgmiLhNpaNBfrwlFyE=",
+			"path": "github.com/bhendo/go-powershell/utils",
+			"revision": "219e7fb4e41e15c1a8f68c7f082c4c6df96d6362",
+			"revisionTime": "2019-07-19T16:01:23Z"
+		},
+		{
 			"checksumSHA1": "wPKiEWFfo1lFKXb7TQW1HffbuP8=",
 			"path": "github.com/containernetworking/cni/pkg/skel",
 			"revision": "4cfb7b568922a3c79a23e438dc52fe537fc9687e",
@@ -425,6 +443,12 @@
 			"path": "github.com/json-iterator/go",
 			"revision": "27518f6661eba504be5a7a9a9f6d9460d892ade3",
 			"revisionTime": "2019-06-21T16:12:01Z"
+		},
+		{
+			"checksumSHA1": "ZNW/6BNt39EIqKYYztz0u4M4sgk=",
+			"path": "github.com/juju/errors",
+			"revision": "d42613fe1ab9e303fc850e7a19fda2e8eeb6516e",
+			"revisionTime": "2019-09-30T11:41:54Z"
 		},
 		{
 			"checksumSHA1": "Aulh7C5SVOA4Jzt5eHNH6197Mbk=",
