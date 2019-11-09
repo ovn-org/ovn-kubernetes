@@ -43,11 +43,13 @@ func GatewayCleanup(nodeName string, nodeSubnet *net.IPNet) error {
 			"ip_prefix=0.0.0.0/0", "nexthop="+routerIP)
 	}
 
-	_, mgtPortIP := GetNodeWellKnownAddresses(nodeSubnet)
-	if mgtPortIP.IP.String() != "" {
-		nextHops = append(nextHops, mgtPortIP.IP.String())
+	if nodeSubnet != nil {
+		_, mgtPortIP := GetNodeWellKnownAddresses(nodeSubnet)
+		if mgtPortIP.IP.String() != "" {
+			nextHops = append(nextHops, mgtPortIP.IP.String())
+		}
+		staticRouteCleanup(clusterRouter, nextHops)
 	}
-	staticRouteCleanup(clusterRouter, nextHops)
 
 	// Remove the patch port that connects join switch to gateway router
 	_, stderr, err = RunOVNNbctl("--if-exist", "lsp-del", "jtor-"+gatewayRouter)

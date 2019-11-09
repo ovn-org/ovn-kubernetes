@@ -150,21 +150,6 @@ func getGatewayLoadBalancers(gatewayRouter string) (string, string, error) {
 	return lbTCP, lbUDP, nil
 }
 
-func getNodeChassisIDFromSBDB(nodeName string) (string, error) {
-	chassisID, stderr, err := RunOVNSbctl("--data=bare", "--no-heading",
-		"--columns=name", "find", "Chassis", "hostname="+nodeName)
-	if err != nil {
-		logrus.Errorf("Failed to find Chassis ID for node %s, "+
-			"stderr: %q, error: %v", nodeName, stderr, err)
-		return "", err
-	}
-	if chassisID == "" {
-		return "", fmt.Errorf("No chassis ID configured for node %s", nodeName)
-	}
-
-	return chassisID, nil
-}
-
 // GatewayInit creates a gateway router for the local chassis.
 func GatewayInit(clusterIPSubnet []string, nodeName, ifaceID, nicIP, nicMacAddress,
 	defaultGW string, rampoutIPSubnet string, localnet bool, lspArgs []string) error {
@@ -187,7 +172,7 @@ func GatewayInit(clusterIPSubnet []string, nodeName, ifaceID, nicIP, nicMacAddre
 		return err
 	}
 
-	systemID, err := getNodeChassisIDFromSBDB(nodeName)
+	systemID, err := getNodeChassisIDFromSB(nodeName)
 	if err != nil {
 		return err
 	}
@@ -409,4 +394,19 @@ func GatewayInit(clusterIPSubnet []string, nodeName, ifaceID, nicIP, nicMacAddre
 	}
 
 	return nil
+}
+
+// getNodeChassisIDFromSB() will return the ChassisID from SBDB
+func getNodeChassisIDFromSB(nodeName string) (string, error) {
+	chassisID, stderr, err := RunOVNSbctl("--data=bare", "--no-heading",
+		"--columns=name", "find", "Chassis", "hostname="+nodeName)
+	if err != nil {
+		return "", fmt.Errorf("Failed to find Chassis ID for node %s, "+
+			"stderr: %q, error: %v", nodeName, stderr, err)
+	}
+	if chassisID == "" {
+		return "", fmt.Errorf("No chassis ID configured for node %s", nodeName)
+	}
+
+	return chassisID, nil
 }

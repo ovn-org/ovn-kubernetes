@@ -362,6 +362,10 @@ func (oc *Controller) syncGatewayLogicalNetwork(node *kapi.Node, mode string, su
 		}
 	}
 
+	if config.Gateway.NodeportEnable {
+		err = oc.handleNodePortLB(node)
+	}
+
 	return err
 }
 

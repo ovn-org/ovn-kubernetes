@@ -23,6 +23,8 @@ import (
 	"k8s.io/client-go/tools/cache"
 )
 
+type postReadyFn func() error
+
 func isOVNControllerReady(name string) (bool, error) {
 	const runDir string = "/var/run/openvswitch/"
 
@@ -136,10 +138,11 @@ func (cluster *OvnClusterController) StartClusterNode(name string) error {
 	type readyFunc func(string, string) (bool, error)
 	var readyFuncs []readyFunc
 	var nodeAnnotations map[string]string
+	var postReady postReadyFn
 
 	// If gateway is enabled, get gateway annotations
 	if config.Gateway.Mode != config.GatewayModeDisabled {
-		nodeAnnotations, err = cluster.initGateway(node.Name, subnet.String())
+		nodeAnnotations, postReady, err = cluster.initGateway(node.Name, subnet.String())
 		if err != nil {
 			return err
 		}
@@ -164,7 +167,7 @@ func (cluster *OvnClusterController) StartClusterNode(name string) error {
 	// Set node annotations
 	err = cluster.Kube.SetAnnotationsOnNode(node, nodeAnnotations)
 	if err != nil {
-		return fmt.Errorf("Failed to set node %s annotation: %v", node.Name, mgmtPortAnnotations)
+		return fmt.Errorf("Failed to set node %s annotation: %v", node.Name, nodeAnnotations)
 	}
 
 	portName := "k8s-" + node.Name
@@ -187,6 +190,13 @@ func (cluster *OvnClusterController) StartClusterNode(name string) error {
 	for i := range messages {
 		if i != nil {
 			return fmt.Errorf("Timeout error while obtaining addresses for %s (%v)", portName, i)
+		}
+	}
+
+	if postReady != nil {
+		err = postReady()
+		if err != nil {
+			return err
 		}
 	}
 

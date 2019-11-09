@@ -183,10 +183,11 @@ cookie=0x0, duration=8366.597s, table=1, n_packets=10641, n_bytes=10370087, prio
 		ipt, err := util.NewFakeWithProtocol(iptables.ProtocolIPv4)
 		Expect(err).NotTo(HaveOccurred())
 
+		var postReady postReadyFn
 		err = testNS.Do(func(ns.NetNS) error {
 			defer GinkgoRecover()
 
-			_, err = cluster.initGateway(nodeName, nodeSubnet)
+			_, postReady, err = cluster.initGateway(nodeName, nodeSubnet)
 			Expect(err).NotTo(HaveOccurred())
 
 			// Verify the code moved eth0's IP address, MAC, and routes
@@ -207,6 +208,10 @@ cookie=0x0, duration=8366.597s, table=1, n_packets=10641, n_bytes=10370087, prio
 			Expect(found).To(BeTrue())
 
 			Expect(l.Attrs().HardwareAddr.String()).To(Equal(eth0MAC))
+
+			Expect(postReady).NotTo(Equal(nil))
+			err = postReady()
+			Expect(err).NotTo(HaveOccurred())
 			return nil
 		})
 
