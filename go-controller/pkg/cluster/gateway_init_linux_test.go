@@ -281,15 +281,6 @@ var _ = Describe("Gateway Init Operations", func() {
 				"ip addr flush dev br-nexthop",
 				"ip addr add 169.254.33.1/24 dev br-nexthop",
 			})
-			for i := 0; i < 5; i++ {
-				fexec.AddFakeCmd(&ovntest.ExpectedCmd{
-					Cmd: "ip addr show br-nexthop",
-					Output: `8: br-nexthop: <BROADCAST,MULTICAST,UP,LOWER_UP> mtu 1500 qdisc noqueue state UNKNOWN group default qlen 1000
-    link/ether ea:99:98:c2:7a:b4 brd ff:ff:ff:ff:ff:ff
-    inet 169.254.33.1/24 scope global br-nexthop
-       valid_lft forever preferred_lft forever`,
-				})
-			}
 			fexec.AddFakeCmd(&ovntest.ExpectedCmd{
 				Cmd:    "ovs-vsctl --timeout=15 --if-exists get interface br-local mac_in_use",
 				Output: brLocalnetMAC,
