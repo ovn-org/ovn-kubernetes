@@ -234,15 +234,6 @@ func (oc *Controller) waitForNodeLogicalSwitch(nodeName string) error {
 func (oc *Controller) addLogicalPort(pod *kapi.Pod) error {
 	var out, stderr string
 	var err error
-	if pod.Spec.HostNetwork {
-		return nil
-	}
-
-	logicalSwitch := pod.Spec.NodeName
-	if logicalSwitch == "" {
-		return fmt.Errorf("Failed to find the logical switch for pod %s/%s",
-			pod.Namespace, pod.Name)
-	}
 
 	// Keep track of how long syncs take.
 	start := time.Now()
@@ -250,6 +241,7 @@ func (oc *Controller) addLogicalPort(pod *kapi.Pod) error {
 		logrus.Infof("[%s/%s] addLogicalPort took %v", pod.Namespace, pod.Name, time.Since(start))
 	}()
 
+	logicalSwitch := pod.Spec.NodeName
 	if err = oc.waitForNodeLogicalSwitch(pod.Spec.NodeName); err != nil {
 		return err
 	}
