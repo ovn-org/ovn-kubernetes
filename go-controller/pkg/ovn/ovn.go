@@ -496,6 +496,11 @@ func (oc *Controller) WatchNodes() error {
 					logrus.Errorf("error update Node Management Port for node %s: %v", node.Name, err)
 				}
 			}
+
+			if !reflect.DeepEqual(oldNode.Status.Conditions, node.Status.Conditions) {
+				oc.clearInitialNodeNetworkUnavailableCondition(node)
+			}
+
 			if !config.Gateway.NodeportEnable {
 				return
 			}
