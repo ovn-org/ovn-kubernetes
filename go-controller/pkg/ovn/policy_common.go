@@ -2,6 +2,11 @@ package ovn
 
 import (
 	"fmt"
+	"net"
+	"sort"
+	"strings"
+	"sync"
+
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/factory"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
 	"github.com/sirupsen/logrus"
@@ -9,10 +14,6 @@ import (
 	knet "k8s.io/api/networking/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/client-go/tools/cache"
-	"net"
-	"sort"
-	"strings"
-	"sync"
 )
 
 type namespacePolicy struct {
@@ -305,10 +306,8 @@ func (oc *Controller) handlePeerNamespaceAndPodSelector(
 				np.podHandlerList = append(np.podHandlerList, podHandler)
 			},
 			DeleteFunc: func(obj interface{}) {
-				return
 			},
 			UpdateFunc: func(oldObj, newObj interface{}) {
-				return
 			},
 		}, nil)
 	if err != nil {
@@ -357,7 +356,6 @@ func (oc *Controller) handlePeerNamespaceSelector(
 				}
 			},
 			UpdateFunc: func(oldObj, newObj interface{}) {
-				return
 			},
 		}, nil)
 	if err != nil {

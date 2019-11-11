@@ -261,7 +261,7 @@ func (e *SEG6Encap) Equal(x Encap) bool {
 	return true
 }
 
-// SEG6LocalEncap definitions
+// SEG6Local definitions
 type SEG6LocalEncap struct {
 	Flags    [nl.SEG6_LOCAL_MAX]bool
 	Action   int

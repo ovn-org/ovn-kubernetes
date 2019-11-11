@@ -2,6 +2,8 @@
 
 OUT_DIR=${OUT_DIR:-_output}
 
+export GO111MODULE=on
+
 # Output Vars:
 #   export GOPATH - A modified GOPATH to our created tree along with extra
 #     stuff.

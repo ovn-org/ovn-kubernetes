@@ -1,7 +1,7 @@
 sudo: required
 language: go
 go:
-      - 1.11.4
+      - "1.12"
 before_install:
     - export GOPATH=$HOME/go
     - export PATH=$HOME/usr/local/go/bin:$GOPATH/bin:$PATH
@@ -9,7 +9,7 @@ before_install:
     - mv $TRAVIS_BUILD_DIR $GOPATH/src/github.com/ovn-org/ovn-kubernetes
     - cd $GOPATH/src/github.com/ovn-org/ovn-kubernetes
 install:
-    - eval "$(gimme 1.11.4)"
+    - eval "$(gimme 1.12)"
 script:
     - pushd go-controller
     -    make
