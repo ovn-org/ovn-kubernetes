@@ -325,40 +325,52 @@ func (oc *Controller) ovnControllerEventChecker(stopChan chan struct{}) {
 	}
 }
 
-func podScheduledAndWantsNetwork(pod *kapi.Pod) bool {
-	// Only care about scheduled and networked pods
-	return pod.Spec.NodeName != "" && !pod.Spec.HostNetwork
+func podWantsNetwork(pod *kapi.Pod) bool {
+	return !pod.Spec.HostNetwork
+}
+
+func podScheduled(pod *kapi.Pod) bool {
+	return pod.Spec.NodeName != ""
 }
 
 // WatchPods starts the watching of Pod resource and calls back the appropriate handler logic
 func (oc *Controller) WatchPods() error {
-	handledPods := sets.String{}
+	retryPods := sets.String{}
 	_, err := oc.watchFactory.AddPodHandler(cache.ResourceEventHandlerFuncs{
 		AddFunc: func(obj interface{}) {
 			pod := obj.(*kapi.Pod)
-			if !podScheduledAndWantsNetwork(pod) {
+			if !podWantsNetwork(pod) {
 				return
 			}
-			if err := oc.addLogicalPort(pod); err != nil {
-				logrus.Errorf(err.Error())
+
+			if podScheduled(pod) {
+				if err := oc.addLogicalPort(pod); err != nil {
+					logrus.Errorf(err.Error())
+					retryPods.Insert(string(pod.UID))
+				}
 			} else {
-				handledPods.Insert(string(pod.UID))
+				// Handle unscheduled pods later in UpdateFunc
+				retryPods.Insert(string(pod.UID))
 			}
 		},
 		UpdateFunc: func(old, newer interface{}) {
 			pod := newer.(*kapi.Pod)
-			if podScheduledAndWantsNetwork(pod) && !handledPods.Has(string(pod.UID)) {
+			if !podWantsNetwork(pod) {
+				return
+			}
+
+			if podScheduled(pod) && retryPods.Has(string(pod.UID)) {
 				if err := oc.addLogicalPort(pod); err != nil {
 					logrus.Errorf(err.Error())
 				} else {
-					handledPods.Insert(string(pod.UID))
+					retryPods.Delete(string(pod.UID))
 				}
 			}
 		},
 		DeleteFunc: func(obj interface{}) {
 			pod := obj.(*kapi.Pod)
 			oc.deleteLogicalPort(pod)
-			handledPods.Delete(string(pod.UID))
+			retryPods.Delete(string(pod.UID))
 		},
 	}, oc.syncPods)
 	return err
