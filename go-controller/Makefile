@@ -5,6 +5,7 @@ BINDIR ?= ${PREFIX}/bin
 CNIBINDIR ?= ${DESTDIR}/opt/cni/bin
 GCFLAGS ?=
 export GCFLAGS
+PKGS ?=
 
 .PHONY: all build check test
 
@@ -17,14 +18,10 @@ export GCFLAGS
 
 
 all build:
-	hack/build-go.sh cmd/ovnkube/ovnkube.go
-	hack/build-go.sh cmd/ovn-kube-util/ovn-kube-util.go
-	hack/build-go.sh cmd/ovn-k8s-cni-overlay/ovn-k8s-cni-overlay.go
+	hack/build-go.sh ovnkube ovn-k8s-cni-overlay ovn-kube-util
 
 windows:
-	export WINDOWS_BUILD="yes"; \
-	hack/build-go.sh cmd/ovnkube/ovnkube.go || exit 1; \
-	hack/build-go.sh cmd/ovn-k8s-cni-overlay/ovn-k8s-cni-overlay.go || exit 1;
+	WINDOWS_BUILD="yes" hack/build-go.sh ovnkube ovn-k8s-cni-overlay
 
 check test:
 	hack/test-go.sh ${PKGS}
