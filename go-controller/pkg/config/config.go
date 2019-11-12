@@ -1058,6 +1058,7 @@ func pathExists(path string) bool {
 
 // parseAddress parses an OVN database address, which can be of form
 // "ssl:1.2.3.4:6641,ssl:1.2.3.5:6641" or "ssl://1.2.3.4:6641,ssl://1.2.3.5:6641"
+// or "ssl:[fd01::1]:6641,ssl:[fd01::2]:6641
 // and returns the validated address(es) and the scheme
 func parseAddress(urlString string) (string, OvnDBScheme, error) {
 	var parsedAddress, scheme string
@@ -1065,11 +1066,10 @@ func parseAddress(urlString string) (string, OvnDBScheme, error) {
 
 	urlString = strings.Replace(urlString, "//", "", -1)
 	for _, ovnAddress := range strings.Split(urlString, ",") {
-		splits := strings.Split(ovnAddress, ":")
-		if len(splits) != 3 {
+		splits := strings.SplitN(ovnAddress, ":", 2)
+		if len(splits) != 2 {
 			return "", "", fmt.Errorf("Failed to parse OVN address %s", urlString)
 		}
-		hostPort := splits[1] + ":" + splits[2]
 
 		if scheme == "" {
 			scheme = splits[0]
@@ -1078,16 +1078,16 @@ func parseAddress(urlString string) (string, OvnDBScheme, error) {
 				urlString)
 		}
 
-		host, port, err := net.SplitHostPort(hostPort)
+		host, port, err := net.SplitHostPort(splits[1])
 		if err != nil {
 			return "", "", fmt.Errorf("failed to parse OVN DB host/port %q: %v",
-				hostPort, err)
+				splits[1], err)
 		}
 
 		if parsedAddress != "" {
 			parsedAddress += ","
 		}
-		parsedAddress += fmt.Sprintf("%s:%s:%s", scheme, host, port)
+		parsedAddress += fmt.Sprintf("%s:%s", scheme, net.JoinHostPort(host, port))
 	}
 
 	switch {
@@ -1258,7 +1258,7 @@ func (a *OvnAuthConfig) SetDBAuth() error {
 func (a *OvnAuthConfig) updateIP(newIPs []string, port string) {
 	newAddresses := make([]string, 0, len(newIPs))
 	for _, ipAddress := range newIPs {
-		newAddresses = append(newAddresses, fmt.Sprintf("%v:%s:%s", a.Scheme, ipAddress, port))
+		newAddresses = append(newAddresses, fmt.Sprintf("%v:%s", a.Scheme, net.JoinHostPort(ipAddress, port)))
 	}
 	a.Address = strings.Join(newAddresses, ",")
 }

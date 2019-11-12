@@ -982,7 +982,7 @@ mode=shared
 				})
 
 			generateTests("the OVN URL has no port",
-				"Failed to parse OVN address tcp:4.3.2.1",
+				"failed to parse OVN DB host/port \"4.3.2.1\": address 4.3.2.1: missing port in address",
 				func() []string {
 					return []string{
 						"address=tcp://4.3.2.1",
