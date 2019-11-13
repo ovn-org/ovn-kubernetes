@@ -23,6 +23,9 @@ const (
 	OvnClusterRouter = "ovn_cluster_router"
 	// OvnNodeManagementPortMacAddress is the constant string representing the annotation key
 	OvnNodeManagementPortMacAddress = "k8s.ovn.org/node-mgmt-port-mac-address"
+	// OvnServiceIdledAt is a constant string representing the Service annotation key
+	// whose value indicates the time stamp in RFC3339 format when a Service was idled
+	OvnServiceIdledAt = "k8s.ovn.org/idled-at"
 )
 
 // StartClusterMaster runs a subnet IPAM and a controller that watches arrival/departure
