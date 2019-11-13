@@ -38,7 +38,7 @@ RUN INSTALL_PKGS=" \
 	containernetworking-plugins yum-utils \
 	" && \
 	yum install -y --setopt=tsflags=nodocs --setopt=skip_missing_names_on_install=False $INSTALL_PKGS && \
-	yumdownloader --enablerepo=rhel-fast-datapath-beta ovn2.11 ovn2.11-central ovn2.11-host ovn2.11-vtep && \
+	yumdownloader ovn2.11 ovn2.11-central ovn2.11-host ovn2.11-vtep && \
 	rpm -Uhv --force --nodeps ovn2.11* && rm -f *.rpm && \
 	yum clean all && rm -rf /var/cache/*
 
