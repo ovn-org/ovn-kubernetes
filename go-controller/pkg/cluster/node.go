@@ -26,7 +26,7 @@ import (
 type postReadyFn func() error
 
 func isOVNControllerReady(name string) (bool, error) {
-	const runDir string = "/var/run/openvswitch/"
+	runDir := util.GetOvnRunDir()
 
 	pid, err := ioutil.ReadFile(runDir + "ovn-controller.pid")
 	if err != nil {
