@@ -1,6 +1,7 @@
 package ovn
 
 import (
+	"fmt"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
 	util "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
 	"github.com/sirupsen/logrus"
@@ -126,25 +127,21 @@ func (ovn *Controller) AddEndpoints(ep *kapi.Endpoints) error {
 	return nil
 }
 
-func (ovn *Controller) handleNodePortLB(node *kapi.Node) bool {
+func (ovn *Controller) handleNodePortLB(node *kapi.Node) error {
 	physicalGateway := "GR_" + node.Name
 	var k8sNSLbTCP, k8sNSLbUDP, physicalIP string
 	if k8sNSLbTCP, _ = ovn.getGatewayLoadBalancer(physicalGateway, TCP); k8sNSLbTCP == "" {
-		logrus.Debugf("TCP load balancer for node %q does not yet exist", node.Name)
-		return false
+		return fmt.Errorf("TCP load balancer for node %q does not yet exist", node.Name)
 	}
 	if k8sNSLbUDP, _ = ovn.getGatewayLoadBalancer(physicalGateway, UDP); k8sNSLbUDP == "" {
-		logrus.Debugf("UDP load balancer for node %q does not yet exist", node.Name)
-		return false
+		return fmt.Errorf("UDP load balancer for node %q does not yet exist", node.Name)
 	}
 	if physicalIP, _ = ovn.getGatewayPhysicalIP(physicalGateway); physicalIP == "" {
-		logrus.Debugf("gateway physical IP for node %q does not yet exist", node.Name)
-		return false
+		return fmt.Errorf("gateway physical IP for node %q does not yet exist", node.Name)
 	}
 	namespaces, err := ovn.kube.GetNamespaces()
 	if err != nil {
-		logrus.Errorf("failed to get k8s namespaces: %v", err)
-		return false
+		return fmt.Errorf("failed to get k8s namespaces: %v", err)
 	}
 	for _, ns := range namespaces.Items {
 		endpoints, err := ovn.kube.GetEndpoints(ns.Name)
@@ -193,7 +190,7 @@ func (ovn *Controller) handleNodePortLB(node *kapi.Node) bool {
 			}
 		}
 	}
-	return true
+	return nil
 }
 
 func (ovn *Controller) handleExternalIPsLB() {

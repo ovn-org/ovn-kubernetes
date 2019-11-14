@@ -172,7 +172,7 @@ func GatewayInit(clusterIPSubnet []string, nodeName, ifaceID, nicIP, nicMacAddre
 		return err
 	}
 
-	systemID, err := GetNodeChassisID()
+	systemID, err := getNodeChassisIDFromSB(nodeName)
 	if err != nil {
 		return err
 	}
@@ -394,4 +394,19 @@ func GatewayInit(clusterIPSubnet []string, nodeName, ifaceID, nicIP, nicMacAddre
 	}
 
 	return nil
+}
+
+// getNodeChassisIDFromSB() will return the ChassisID from SBDB
+func getNodeChassisIDFromSB(nodeName string) (string, error) {
+	chassisID, stderr, err := RunOVNSbctl("--data=bare", "--no-heading",
+		"--columns=name", "find", "Chassis", "hostname="+nodeName)
+	if err != nil {
+		return "", fmt.Errorf("Failed to find Chassis ID for node %s, "+
+			"stderr: %q, error: %v", nodeName, stderr, err)
+	}
+	if chassisID == "" {
+		return "", fmt.Errorf("No chassis ID configured for node %s", nodeName)
+	}
+
+	return chassisID, nil
 }
