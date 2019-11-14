@@ -111,10 +111,12 @@ func (cluster *OvnClusterController) StartClusterNode(name string) error {
 	// First wait for the node logical switch to be created by the Master, timeout is 300s.
 	err = wait.PollImmediate(500*time.Millisecond, 300*time.Second, func() (bool, error) {
 		if node, err = cluster.Kube.GetNode(name); err != nil {
-			return false, fmt.Errorf("error retrieving node %s: %v", name, err)
+			logrus.Errorf("error retrieving node %s: %v", name, err)
+			return false, nil
 		}
 		if cidr, _, err = util.RunOVNNbctl("get", "logical_switch", node.Name, "other-config:subnet"); err != nil {
-			return false, fmt.Errorf("error retrieving logical switch: %v", err)
+			logrus.Errorf("error retrieving logical switch: %v", err)
+			return false, nil
 		}
 		return true, nil
 	})
