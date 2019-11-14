@@ -1,44 +1,50 @@
 #!/bin/bash
+set -e
 
 source "$(dirname "${BASH_SOURCE}")/init.sh"
 
-
-# Build binary targets specified. Should always be run in a sub-shell so we don't leak GOBIN
-#
 # Input:
-#   $@ - targets and go flags.  If no targets are set then all binaries targets
-#     are built.
+#   $@ - targets
 build_binaries() {
     # Check for `go` binary and set ${GOPATH}.
     setup_env
+    cd "${OVN_KUBE_ROOT}"
 
-    local go_pkg_dir="${GOPATH}/src/${OVN_KUBE_GO_PACKAGE}"
-    cd ${go_pkg_dir}
     mkdir -p "${OVN_KUBE_OUTPUT_BINPATH}"
-    export GOBIN="${OVN_KUBE_OUTPUT_BINPATH}"
 
     # Add a buildid to the executable - needed by rpmbuild
-    go install -gcflags "${GCFLAGS}" -ldflags "-B 0x$(head -c20 /dev/urandom|od -An -tx1|tr -d ' \n')" "${OVN_KUBE_BINARIES[@]}";
+    BUILDID=${BUILDID:-0x$(head -c20 /dev/urandom|od -An -tx1|tr -d ' \n')}
+    set -x
+    for bin in "$@"; do
+        go build -v \
+            -mod vendor \
+            -gcflags "${GCFLAGS}" \
+            -ldflags "-B ${BUILDID}" \
+            -o "${OVN_KUBE_OUTPUT_BINPATH}/${bin}"\
+            "./cmd/${bin}"
+    done
 }
 
 build_windows_binaries() {
-    # Check for `go` binary and set ${GOPATH}.
     setup_env
+    cd "${OVN_KUBE_ROOT}"
 
-    local go_pkg_dir="${GOPATH}/src/${OVN_KUBE_GO_PACKAGE}"
-    cd ${go_pkg_dir}
     mkdir -p "${OVN_KUBE_OUTPUT_BINPATH_WINDOWS}"
 
-    GOOS=windows GOARCH=amd64 go build "${OVN_KUBE_BINARIES[0]}"
-
-    _output_filename=$(basename ${OVN_KUBE_BINARIES[0]})
-    output_exe=${_output_filename/go/exe}
-    mv $output_exe "${OVN_KUBE_OUTPUT_BINPATH_WINDOWS}"
+    BUILDID=${BUILDID:-0x$(head -c20 /dev/urandom|od -An -tx1|tr -d ' \n')}
+    set -x
+    for bin in "$@"; do
+        GOOS=windows go build -v \
+            -mod vendor \
+            -gcflags "${GCFLAGS}" \
+            -ldflags "-B ${BUILDID}" \
+            -o "${OVN_KUBE_OUTPUT_BINPATH_WINDOWS}/${bin}"\
+            "./cmd/${bin}"
+    done
 }
 
-OVN_KUBE_BINARIES=("$@")
 if [ -z "${WINDOWS_BUILD}" ]; then
-    build_binaries
+    build_binaries "$@"
 else
-    build_windows_binaries
+    build_windows_binaries "$@"
 fi
