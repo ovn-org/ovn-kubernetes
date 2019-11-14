@@ -209,6 +209,8 @@ gopkg.in/gcfg.v1/token
 gopkg.in/gcfg.v1/types
 # gopkg.in/inf.v0 v0.9.1
 gopkg.in/inf.v0
+# gopkg.in/natefinch/lumberjack.v2 v2.0.0
+gopkg.in/natefinch/lumberjack.v2
 # gopkg.in/tomb.v1 v1.0.0-20141024135613-dd632973f1e7
 gopkg.in/tomb.v1
 # gopkg.in/warnings.v0 v0.1.2
