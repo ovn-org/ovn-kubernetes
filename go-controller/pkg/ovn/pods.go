@@ -249,6 +249,7 @@ func (oc *Controller) addLogicalPort(pod *kapi.Pod) error {
 	logrus.Debugf("Creating logical port for %s on switch %s", portName, logicalSwitch)
 
 	annotation, err := util.UnmarshalPodAnnotation(pod.Annotations["ovn"])
+	annotationsSet := (err == nil)
 
 	// If pod already has annotations, just add the lsp with static ip/mac.
 	// Else, create the lsp with dynamic addresses.
@@ -333,6 +334,12 @@ func (oc *Controller) addLogicalPort(pod *kapi.Pod) error {
 		podCIDR, podMac, gatewayIP, marshalledAnnotation)
 	if err = oc.kube.SetAnnotationOnPod(pod, "ovn", marshalledAnnotation); err != nil {
 		return fmt.Errorf("Failed to set annotation on pod %s - %v", pod.Name, err)
+	}
+
+	// If we're setting the annotation for the first time, observe the creation
+	// latency metric.
+	if !annotationsSet {
+		recordPodCreated(pod)
 	}
 
 	return nil

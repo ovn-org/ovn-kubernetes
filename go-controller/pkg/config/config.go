@@ -21,6 +21,8 @@ import (
 // DefaultEncapPort number used if not supplied
 const DefaultEncapPort = 6081
 
+const MetricNamespace = "ovnkube"
+
 // The following are global config parameters that other modules may access directly
 var (
 	// ovn-kubernetes version, to be changed with every release

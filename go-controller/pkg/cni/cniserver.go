@@ -6,8 +6,11 @@ import (
 	"io/ioutil"
 	"net/http"
 	"strings"
+	"sync"
+	"time"
 
 	"github.com/gorilla/mux"
+	"github.com/prometheus/client_golang/prometheus"
 	"github.com/sirupsen/logrus"
 
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
@@ -38,8 +41,14 @@ import (
 // removed and re-created with 0700 permissions each time ovnkube on the node is
 // started.
 
+var registerMetricsOnce sync.Once
+
 // NewCNIServer creates and returns a new Server object which will listen on a socket in the given path
 func NewCNIServer(rundir string) *Server {
+	registerMetricsOnce.Do(func() {
+		prometheus.MustRegister(metricCNIRequestDuration)
+	})
+
 	if len(rundir) == 0 {
 		rundir = serverRunDir
 	}
@@ -125,10 +134,23 @@ func cniRequestToPodRequest(cr *Request) (*PodRequest, error) {
 	return req, nil
 }
 
+// metricCNIRequestDuration is a prometheus metric that tracks the duration
+// of CNI requests
+var metricCNIRequestDuration = prometheus.NewHistogramVec(prometheus.HistogramOpts{
+	Namespace: config.MetricNamespace,
+	Subsystem: "node",
+	Name:      "cni_request_duration_seconds",
+	Help:      "The duration of CNI server requests",
+	Buckets:   prometheus.ExponentialBuckets(.1, 2, 15)},
+	//labels
+	[]string{"command", "err"},
+)
+
 // Dispatch a pod request to the request handler and return the result to the
 // CNI server client
 func (s *Server) handleCNIRequest(w http.ResponseWriter, r *http.Request) {
 	var cr Request
+	startTime := time.Now()
 	b, _ := ioutil.ReadAll(r.Body)
 	if err := json.Unmarshal(b, &cr); err != nil {
 		http.Error(w, fmt.Sprintf("%v", err), http.StatusBadRequest)
@@ -142,7 +164,9 @@ func (s *Server) handleCNIRequest(w http.ResponseWriter, r *http.Request) {
 
 	logrus.Infof("Waiting for %s result for pod %s/%s", req.Command, req.PodNamespace, req.PodName)
 	result, err := s.requestFunc(req)
+	hasErr := "false"
 	if err != nil {
+		hasErr = "true"
 		http.Error(w, fmt.Sprintf("%v", err), http.StatusBadRequest)
 	} else {
 		// Empty response JSON means success with no body
@@ -151,4 +175,6 @@ func (s *Server) handleCNIRequest(w http.ResponseWriter, r *http.Request) {
 			logrus.Warningf("Error writing %s HTTP response: %v", req.Command, err)
 		}
 	}
+
+	metricCNIRequestDuration.WithLabelValues(string(req.Command), hasErr).Observe(time.Since(startTime).Seconds())
 }
