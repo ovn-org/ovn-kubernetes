@@ -11,7 +11,7 @@ import (
 	"github.com/coreos/go-iptables/iptables"
 	"github.com/urfave/cli"
 
-	"k8s.io/api/core/v1"
+	v1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/client-go/kubernetes/fake"
 
@@ -76,7 +76,7 @@ var _ = Describe("Management Port Operations", func() {
 				lrpMAC        string = "00:00:00:00:00:03"
 			)
 
-			fexec := ovntest.NewFakeExec()
+			fexec := ovntest.NewFakeExec(false)
 
 			// generic setup
 			fexec.AddFakeCmdsNoOutputNoError([]string{

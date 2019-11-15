@@ -9,7 +9,7 @@ import (
 	"syscall"
 
 	"github.com/urfave/cli"
-	"k8s.io/api/core/v1"
+	v1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/client-go/kubernetes/fake"
 
@@ -67,7 +67,7 @@ func shareGatewayInterfaceTest(app *cli.App, testNS ns.NetNS,
 			mgtPortIP         string = "10.1.1.2"
 		)
 
-		fexec := ovntest.NewFakeExec()
+		fexec := ovntest.NewFakeExec(false)
 		fexec.AddFakeCmd(&ovntest.ExpectedCmd{
 			Cmd: "ovs-vsctl --timeout=15 -- port-to-br eth0",
 			Err: fmt.Errorf(""),
@@ -272,7 +272,7 @@ var _ = Describe("Gateway Init Operations", func() {
 				clusterCIDR   string = clusterIPNet + "/16"
 			)
 
-			fexec := ovntest.NewFakeExec()
+			fexec := ovntest.NewFakeExec(false)
 			fexec.AddFakeCmdsNoOutputNoError([]string{
 				"ovs-vsctl --timeout=15 --may-exist add-br br-local",
 				"ip link set br-local up",

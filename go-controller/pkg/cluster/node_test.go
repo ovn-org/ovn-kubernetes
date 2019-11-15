@@ -36,7 +36,7 @@ var _ = Describe("Node Operations", func() {
 				interval int    = 100000
 			)
 
-			fexec := ovntest.NewFakeExec()
+			fexec := ovntest.NewFakeExec(false)
 			fexec.AddFakeCmd(&ovntest.ExpectedCmd{
 				Cmd: fmt.Sprintf("ovs-vsctl --timeout=15 set Open_vSwitch . "+
 					"external_ids:ovn-encap-type=geneve "+
@@ -71,7 +71,7 @@ var _ = Describe("Node Operations", func() {
 				chassisUUID string = "1a3dfc82-2749-4931-9190-c30e7c0ecea3"
 			)
 
-			fexec := ovntest.NewFakeExec()
+			fexec := ovntest.NewFakeExec(false)
 			fexec.AddFakeCmd(&ovntest.ExpectedCmd{
 				Cmd: fmt.Sprintf("ovs-vsctl --timeout=15 set Open_vSwitch . "+
 					"external_ids:ovn-encap-type=geneve "+
@@ -116,7 +116,7 @@ var _ = Describe("Node Operations", func() {
 				sbPort        int32  = 4321
 			)
 
-			fexec := ovntest.NewFakeExec()
+			fexec := ovntest.NewFakeExec(false)
 			fexec.AddFakeCmd(&ovntest.ExpectedCmd{
 				Cmd: fmt.Sprintf("ovs-vsctl --timeout=15 set Open_vSwitch . "+
 					"external_ids:ovn-nb=\"tcp:%s\"",
@@ -196,7 +196,7 @@ var _ = Describe("Node Operations", func() {
 				sbPort         int32  = 4321
 			)
 
-			fexec := ovntest.NewFakeExec()
+			fexec := ovntest.NewFakeExec(false)
 			fexec.AddFakeCmd(&ovntest.ExpectedCmd{
 				Cmd: fmt.Sprintf("ovs-vsctl --timeout=15 set Open_vSwitch . "+
 					"external_ids:ovn-nb=\"tcp:%s,tcp:%s\"",
