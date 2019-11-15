@@ -149,6 +149,26 @@ func SetExec(exec kexec.Interface) error {
 	return nil
 }
 
+// SetSpecificExec validates executable paths for selected commands. It also saves the given
+// exec interface to be used for running selected commands
+func SetSpecificExec(exec kexec.Interface, commands ...string) error {
+	var err error
+
+	runner = &execHelper{exec: exec}
+	for _, command := range commands {
+		switch command {
+		case ovsVsctlCommand:
+			runner.vsctlPath, err = exec.LookPath(ovsVsctlCommand)
+			if err != nil {
+				return err
+			}
+		default:
+			return fmt.Errorf("unknown command: %q", command)
+		}
+	}
+	return nil
+}
+
 // GetExec returns the exec interface which can be used for running commands directly.
 // Only use for passing an exec interface into pkg/config which cannot call this
 // function directly because this module imports pkg/config already.
