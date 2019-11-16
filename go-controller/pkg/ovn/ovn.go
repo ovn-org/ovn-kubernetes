@@ -540,7 +540,6 @@ func (oc *Controller) WatchNodes() error {
 				} else {
 					delete(gatewaysFailed, node.Name)
 				}
-
 			}
 		},
 		DeleteFunc: func(obj interface{}) {

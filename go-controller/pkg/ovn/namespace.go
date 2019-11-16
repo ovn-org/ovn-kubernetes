@@ -213,7 +213,7 @@ func (oc *Controller) updateNamespace(old, newer *kapi.Namespace) {
 }
 
 func (oc *Controller) deleteNamespace(ns *kapi.Namespace) {
-	logrus.Debugf("Deleting namespace: %+v", ns.Name)
+	logrus.Debugf("Deleting namespace: %s", ns.Name)
 	oc.namespaceMutexMutex.Lock()
 	defer oc.namespaceMutexMutex.Unlock()
 

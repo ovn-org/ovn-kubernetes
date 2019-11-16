@@ -98,15 +98,19 @@ func GatewayCleanup(nodeName string, nodeSubnet *net.IPNet) error {
 		if err != nil {
 			return err
 		}
-		_, stderr, err = RunOVNNbctl("lb-del", k8sNSLbTCP)
-		if err != nil {
-			return fmt.Errorf("Failed to delete Gateway router TCP load balancer %s, stderr: %q, "+
-				"error: %v", k8sNSLbTCP, stderr, err)
+		if k8sNSLbTCP != "" {
+			_, stderr, err = RunOVNNbctl("lb-del", k8sNSLbTCP)
+			if err != nil {
+				return fmt.Errorf("Failed to delete Gateway router TCP load balancer %s, stderr: %q, "+
+					"error: %v", k8sNSLbTCP, stderr, err)
+			}
 		}
-		_, stderr, err = RunOVNNbctl("lb-del", k8sNSLbUDP)
-		if err != nil {
-			return fmt.Errorf("Failed to delete Gateway router UDP load balancer %s, stderr: %q, "+
-				"error: %v", k8sNSLbTCP, stderr, err)
+		if k8sNSLbUDP != "" {
+			_, stderr, err = RunOVNNbctl("lb-del", k8sNSLbUDP)
+			if err != nil {
+				return fmt.Errorf("Failed to delete Gateway router UDP load balancer %s, stderr: %q, "+
+					"error: %v", k8sNSLbTCP, stderr, err)
+			}
 		}
 	}
 	return nil
