@@ -329,7 +329,6 @@ func initSharedGateway(
 	}, nil
 }
 
-// cleanupSharedGateway cleans up Localnet Gateway
 func cleanupSharedGateway() error {
 	// NicToBridge() may be created before-hand, only delete the patch port here
 	stdout, stderr, err := util.RunOVSVsctl("--columns=name", "--no-heading", "find", "port",

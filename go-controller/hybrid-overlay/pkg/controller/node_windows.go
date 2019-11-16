@@ -68,7 +68,7 @@ func (n *NodeController) Add(node *kapi.Node) {
 
 	_, ok := node.Annotations[types.HybridOverlayHostSubnet]
 	if !ok {
-		logrus.Debugf("Cannot add node '%s' as the k8s.v1.ovn.org/hybrid-overlay-hostsubnet annotation is missing on that node!", node.Name)
+		logrus.Debugf("Cannot add node '%s' as the k8s.ovn.org/hybrid-overlay-hostsubnet annotation is missing on that node!", node.Name)
 		return
 	}
 
