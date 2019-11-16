@@ -483,9 +483,6 @@ var _ = Describe("Gateway Init Operations", func() {
 		app.Flags = config.Flags
 	})
 
-	AfterEach(func() {
-	})
-
 	It("sets up a localnet gateway", func() {
 		app.Action = func(ctx *cli.Context) error {
 			const (
