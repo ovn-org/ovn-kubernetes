@@ -240,7 +240,7 @@ func updateOVNConfig(ep *kapi.Endpoints, readyChan chan bool) error {
 
 //watchConfigEndpoints starts the watching of Endpoint resource and calls back to the appropriate handler logic
 func (cluster *OvnClusterController) watchConfigEndpoints(readyChan chan bool) error {
-	_, err := cluster.watchFactory.AddFilteredEndpointsHandler(config.Kubernetes.OVNConfigNamespace,
+	_, err := cluster.watchFactory.AddFilteredEndpointsHandler(config.Kubernetes.OVNConfigNamespace, nil,
 		cache.ResourceEventHandlerFuncs{
 			AddFunc: func(obj interface{}) {
 				ep := obj.(*kapi.Endpoints)

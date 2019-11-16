@@ -382,6 +382,7 @@ func (hacontroller *HAMasterController) WatchOvnDbEndpoints() error {
 	}
 
 	_, err := hacontroller.ovnController.watchFactory.AddFilteredEndpointsHandler(config.Kubernetes.OVNConfigNamespace,
+		nil,
 		cache.ResourceEventHandlerFuncs{
 			AddFunc: func(obj interface{}) {
 				ep := obj.(*kapi.Endpoints)
