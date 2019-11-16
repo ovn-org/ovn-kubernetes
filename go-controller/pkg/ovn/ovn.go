@@ -4,14 +4,15 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"net"
 	"reflect"
 	"sync"
 	"time"
 
-	"github.com/openshift/origin/pkg/util/netutils"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/factory"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/kube"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/allocator"
 	util "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
 	"github.com/sirupsen/logrus"
 	kapi "k8s.io/api/core/v1"
@@ -41,7 +42,7 @@ type Controller struct {
 	kube         kube.Interface
 	watchFactory *factory.WatchFactory
 
-	masterSubnetAllocatorList []*netutils.SubnetAllocator
+	masterSubnetAllocatorList []*allocator.SubnetAllocator
 
 	TCPLoadBalancerUUID string
 	UDPLoadBalancerUUID string
@@ -331,40 +332,52 @@ func (oc *Controller) ovnControllerEventChecker(stopChan chan struct{}) {
 	}
 }
 
-func podScheduledAndWantsNetwork(pod *kapi.Pod) bool {
-	// Only care about scheduled and networked pods
-	return pod.Spec.NodeName != "" && !pod.Spec.HostNetwork
+func podWantsNetwork(pod *kapi.Pod) bool {
+	return !pod.Spec.HostNetwork
+}
+
+func podScheduled(pod *kapi.Pod) bool {
+	return pod.Spec.NodeName != ""
 }
 
 // WatchPods starts the watching of Pod resource and calls back the appropriate handler logic
 func (oc *Controller) WatchPods() error {
-	handledPods := sets.String{}
+	retryPods := sets.String{}
 	_, err := oc.watchFactory.AddPodHandler(cache.ResourceEventHandlerFuncs{
 		AddFunc: func(obj interface{}) {
 			pod := obj.(*kapi.Pod)
-			if !podScheduledAndWantsNetwork(pod) {
+			if !podWantsNetwork(pod) {
 				return
 			}
-			if err := oc.addLogicalPort(pod); err != nil {
-				logrus.Errorf(err.Error())
+
+			if podScheduled(pod) {
+				if err := oc.addLogicalPort(pod); err != nil {
+					logrus.Errorf(err.Error())
+					retryPods.Insert(string(pod.UID))
+				}
 			} else {
-				handledPods.Insert(string(pod.UID))
+				// Handle unscheduled pods later in UpdateFunc
+				retryPods.Insert(string(pod.UID))
 			}
 		},
 		UpdateFunc: func(old, newer interface{}) {
 			pod := newer.(*kapi.Pod)
-			if podScheduledAndWantsNetwork(pod) && !handledPods.Has(string(pod.UID)) {
+			if !podWantsNetwork(pod) {
+				return
+			}
+
+			if podScheduled(pod) && retryPods.Has(string(pod.UID)) {
 				if err := oc.addLogicalPort(pod); err != nil {
 					logrus.Errorf(err.Error())
 				} else {
-					handledPods.Insert(string(pod.UID))
+					retryPods.Delete(string(pod.UID))
 				}
 			}
 		},
 		DeleteFunc: func(obj interface{}) {
 			pod := obj.(*kapi.Pod)
 			oc.deleteLogicalPort(pod)
-			handledPods.Delete(string(pod.UID))
+			retryPods.Delete(string(pod.UID))
 		},
 	}, oc.syncPods)
 	return err
@@ -430,7 +443,6 @@ func (oc *Controller) WatchNetworkPolicy() error {
 		AddFunc: func(obj interface{}) {
 			policy := obj.(*kapisnetworking.NetworkPolicy)
 			oc.addNetworkPolicy(policy)
-			return
 		},
 		UpdateFunc: func(old, newer interface{}) {
 			oldPolicy := old.(*kapisnetworking.NetworkPolicy)
@@ -439,12 +451,10 @@ func (oc *Controller) WatchNetworkPolicy() error {
 				oc.deleteNetworkPolicy(oldPolicy)
 				oc.addNetworkPolicy(newPolicy)
 			}
-			return
 		},
 		DeleteFunc: func(obj interface{}) {
 			policy := obj.(*kapisnetworking.NetworkPolicy)
 			oc.deleteNetworkPolicy(policy)
-			return
 		},
 	}, oc.syncNetworkPolicies)
 	return err
@@ -457,49 +467,40 @@ func (oc *Controller) WatchNamespaces() error {
 		AddFunc: func(obj interface{}) {
 			ns := obj.(*kapi.Namespace)
 			oc.AddNamespace(ns)
-			return
 		},
 		UpdateFunc: func(old, newer interface{}) {
 			oldNs, newNs := old.(*kapi.Namespace), newer.(*kapi.Namespace)
 			oc.updateNamespace(oldNs, newNs)
-			return
 		},
 		DeleteFunc: func(obj interface{}) {
 			ns := obj.(*kapi.Namespace)
 			oc.deleteNamespace(ns)
-			return
 		},
 	}, oc.syncNamespaces)
 	return err
 }
 
-func (oc *Controller) handleNodeGateway(node *kapi.Node) error {
-	var gatewayConfigured bool
-	subnet, err := parseNodeHostSubnet(node)
-	if err == nil {
-		mode := node.Annotations[OvnNodeGatewayMode]
-		if mode != string(config.GatewayModeDisabled) {
-			if err = oc.syncGatewayLogicalNetwork(node, mode, subnet.String()); err == nil {
-				gatewayConfigured = true
-			} else {
-				logrus.Errorf("error creating gateway for node %s: %v", node.Name, err)
-			}
-		}
+func (oc *Controller) syncNodeGateway(node *kapi.Node, subnet *net.IPNet) error {
+	if subnet == nil {
+		subnet, _ = parseNodeHostSubnet(node)
 	}
-
-	if !gatewayConfigured {
+	mode := node.Annotations[OvnNodeGatewayMode]
+	if mode == string(config.GatewayModeDisabled) {
 		if err := util.GatewayCleanup(node.Name, subnet); err != nil {
 			return fmt.Errorf("error cleaning up gateway for node %s: %v", node.Name, err)
 		}
+	} else if subnet != nil {
+		if err := oc.syncGatewayLogicalNetwork(node, mode, subnet.String()); err != nil {
+			return fmt.Errorf("error creating gateway for node %s: %v", node.Name, err)
+		}
 	}
-
 	return nil
 }
 
 // WatchNodes starts the watching of node resource and calls
 // back the appropriate handler logic
 func (oc *Controller) WatchNodes(nodeSelector *metav1.LabelSelector) error {
-	gatewaysHandled := make(map[string]bool)
+	gatewaysFailed := make(map[string]bool)
 	_, err := oc.watchFactory.AddFilteredNodeHandler(nodeSelector, cache.ResourceEventHandlerFuncs{
 		AddFunc: func(obj interface{}) {
 			node := obj.(*kapi.Node)
@@ -515,17 +516,16 @@ func (oc *Controller) WatchNodes(nodeSelector *metav1.LabelSelector) error {
 				logrus.Errorf("error creating Node Management Port for node %s: %v", node.Name, err)
 			}
 
-			if err := oc.handleNodeGateway(node); err != nil {
+			if err := oc.syncNodeGateway(node, hostSubnet); err != nil {
+				gatewaysFailed[node.Name] = true
 				logrus.Errorf(err.Error())
-			} else {
-				gatewaysHandled[node.Name] = true
 			}
 		},
 		UpdateFunc: func(old, new interface{}) {
 			oldNode := old.(*kapi.Node)
 			node := new.(*kapi.Node)
-			oldMacAddress, _ := oldNode.Annotations[OvnNodeManagementPortMacAddress]
-			macAddress, _ := node.Annotations[OvnNodeManagementPortMacAddress]
+			oldMacAddress := oldNode.Annotations[OvnNodeManagementPortMacAddress]
+			macAddress := node.Annotations[OvnNodeManagementPortMacAddress]
 			logrus.Debugf("Updated event for Node %q", node.Name)
 			if oldMacAddress != macAddress {
 				err := oc.syncNodeManagementPort(node, nil)
@@ -534,12 +534,18 @@ func (oc *Controller) WatchNodes(nodeSelector *metav1.LabelSelector) error {
 				}
 			}
 
-			if !gatewaysHandled[node.Name] || gatewayChanged(oldNode, node) {
-				if err := oc.handleNodeGateway(node); err != nil {
+			if !reflect.DeepEqual(oldNode.Status.Conditions, node.Status.Conditions) {
+				oc.clearInitialNodeNetworkUnavailableCondition(node)
+			}
+
+			if gatewaysFailed[node.Name] || gatewayChanged(oldNode, node) {
+				if err := oc.syncNodeGateway(node, nil); err != nil {
+					gatewaysFailed[node.Name] = true
 					logrus.Errorf(err.Error())
 				} else {
-					gatewaysHandled[node.Name] = true
+					delete(gatewaysFailed, node.Name)
 				}
+
 			}
 		},
 		DeleteFunc: func(obj interface{}) {
@@ -556,7 +562,7 @@ func (oc *Controller) WatchNodes(nodeSelector *metav1.LabelSelector) error {
 			delete(oc.gatewayCache, node.Name)
 			delete(oc.logicalSwitchCache, node.Name)
 			oc.lsMutex.Unlock()
-			delete(gatewaysHandled, node.Name)
+			delete(gatewaysFailed, node.Name)
 			if oc.defGatewayRouter == "GR_"+node.Name {
 				delete(oc.loadbalancerGWCache, TCP)
 				delete(oc.loadbalancerGWCache, UDP)
@@ -572,7 +578,7 @@ func (oc *Controller) WatchNodes(nodeSelector *metav1.LabelSelector) error {
 func (oc *Controller) AddServiceVIPToName(vip string, protocol kapi.Protocol, namespace, name string) {
 	oc.serviceVIPToNameLock.Lock()
 	defer oc.serviceVIPToNameLock.Unlock()
-	oc.serviceVIPToName[ServiceVIPKey{vip, protocol}] = types.NamespacedName{namespace, name}
+	oc.serviceVIPToName[ServiceVIPKey{vip, protocol}] = types.NamespacedName{Namespace: namespace, Name: name}
 }
 
 // GetServiceVIPToName retrieves the associated k8s service name for a load balancer VIP

@@ -1,6 +1,6 @@
 package wclayer
 
-import "github.com/Microsoft/go-winio/pkg/guid"
+import "github.com/Microsoft/hcsshim/internal/guid"
 
 //go:generate go run ../../mksyscall_windows.go -output zsyscall_windows.go wclayer.go
 

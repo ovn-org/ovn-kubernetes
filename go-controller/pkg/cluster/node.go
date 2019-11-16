@@ -62,7 +62,7 @@ func isOVNControllerReady(name string) (bool, error) {
 		if err != nil {
 			return false, fmt.Errorf("failed to get aggregate flow statistics: %v", err)
 		}
-		return strings.Index(stdout, "flow_count=0") == -1, nil
+		return !strings.Contains(stdout, "flow_count=0"), nil
 	})
 	if err != nil {
 		return false, fmt.Errorf("timed out dumping br-int flow entries for node %s: %v", name, err)
@@ -113,10 +113,12 @@ func (cluster *OvnClusterController) StartClusterNode(name string) error {
 	// First wait for the node logical switch to be created by the Master, timeout is 300s.
 	err = wait.PollImmediate(500*time.Millisecond, 300*time.Second, func() (bool, error) {
 		if node, err = cluster.Kube.GetNode(name); err != nil {
-			return false, fmt.Errorf("error retrieving node %s: %v", name, err)
+			logrus.Errorf("error retrieving node %s: %v", name, err)
+			return false, nil
 		}
 		if cidr, _, err = util.RunOVNNbctl("get", "logical_switch", node.Name, "other-config:subnet"); err != nil {
-			return false, fmt.Errorf("error retrieving logical switch: %v", err)
+			logrus.Errorf("error retrieving logical switch: %v", err)
+			return false, nil
 		}
 		return true, nil
 	})
@@ -149,7 +151,7 @@ func (cluster *OvnClusterController) StartClusterNode(name string) error {
 		readyFuncs = append(readyFuncs, GatewayReady)
 	}
 
-	// Get management port annotaitons
+	// Get management port annotations
 	mgmtPortAnnotations, err := CreateManagementPort(node.Name, subnet, clusterSubnets)
 	if err != nil {
 		return err

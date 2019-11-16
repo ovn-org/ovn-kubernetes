@@ -26,7 +26,7 @@ func (oc *Controller) syncPods(pods []interface{}) {
 			logrus.Errorf("Spurious object in syncPods: %v", podInterface)
 			continue
 		}
-		if podScheduledAndWantsNetwork(pod) {
+		if podScheduled(pod) && podWantsNetwork(pod) {
 			logicalPort := podLogicalPortName(pod)
 			expectedLogicalPorts[logicalPort] = true
 		}
@@ -195,7 +195,6 @@ func (oc *Controller) deleteLogicalPort(pod *kapi.Pod) {
 			"Egress")
 	}
 	oc.deletePodFromNamespace(pod.Namespace, podIP, logicalPort)
-	return
 }
 
 func (oc *Controller) waitForNodeLogicalSwitch(nodeName string) error {
@@ -234,15 +233,6 @@ func (oc *Controller) waitForNodeLogicalSwitch(nodeName string) error {
 func (oc *Controller) addLogicalPort(pod *kapi.Pod) error {
 	var out, stderr string
 	var err error
-	if pod.Spec.HostNetwork {
-		return nil
-	}
-
-	logicalSwitch := pod.Spec.NodeName
-	if logicalSwitch == "" {
-		return fmt.Errorf("Failed to find the logical switch for pod %s/%s",
-			pod.Namespace, pod.Name)
-	}
 
 	// Keep track of how long syncs take.
 	start := time.Now()
@@ -250,6 +240,7 @@ func (oc *Controller) addLogicalPort(pod *kapi.Pod) error {
 		logrus.Infof("[%s/%s] addLogicalPort took %v", pod.Namespace, pod.Name, time.Since(start))
 	}()
 
+	logicalSwitch := pod.Spec.NodeName
 	if err = oc.waitForNodeLogicalSwitch(pod.Spec.NodeName); err != nil {
 		return err
 	}
@@ -258,6 +249,7 @@ func (oc *Controller) addLogicalPort(pod *kapi.Pod) error {
 	logrus.Debugf("Creating logical port for %s on switch %s", portName, logicalSwitch)
 
 	annotation, err := util.UnmarshalPodAnnotation(pod.Annotations["ovn"])
+	annotationsSet := (err == nil)
 
 	// If pod already has annotations, just add the lsp with static ip/mac.
 	// Else, create the lsp with dynamic addresses.
@@ -354,9 +346,15 @@ func (oc *Controller) addLogicalPort(pod *kapi.Pod) error {
 	oc.addPodToNamespace(pod.Namespace, podIP, portName)
 
 	logrus.Debugf("Annotation values: ip=%s ; mac=%s ; gw=%s\nAnnotation=%s",
-		podCIDR, podMac, gatewayIP, annotation)
+		podCIDR, podMac, gatewayIP, marshalledAnnotation)
 	if err = oc.kube.SetAnnotationOnPod(pod, "ovn", marshalledAnnotation); err != nil {
 		return fmt.Errorf("Failed to set annotation on pod %s - %v", pod.Name, err)
+	}
+
+	// If we're setting the annotation for the first time, observe the creation
+	// latency metric.
+	if !annotationsSet {
+		recordPodCreated(pod)
 	}
 
 	return nil

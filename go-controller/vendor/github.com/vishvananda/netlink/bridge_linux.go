@@ -108,5 +108,8 @@ func (h *Handle) bridgeVlanModify(cmd int, link Link, vid uint16, pvid, untagged
 	br.AddRtAttr(nl.IFLA_BRIDGE_VLAN_INFO, vlanInfo.Serialize())
 	req.AddData(br)
 	_, err := req.Execute(unix.NETLINK_ROUTE, 0)
-	return err
+	if err != nil {
+		return err
+	}
+	return nil
 }

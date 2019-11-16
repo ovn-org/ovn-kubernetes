@@ -11,6 +11,7 @@ package hcsschema
 
 //  Memory runtime statistics
 type MemoryStats struct {
+
 	MemoryUsageCommitBytes int32 `json:"MemoryUsageCommitBytes,omitempty"`
 
 	MemoryUsageCommitPeakBytes int32 `json:"MemoryUsageCommitPeakBytes,omitempty"`

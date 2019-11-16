@@ -473,7 +473,6 @@ subnet=%s
 
 var _ = Describe("Gateway Init Operations", func() {
 	var app *cli.App
-	var testNS ns.NetNS
 
 	const (
 		clusterIPNet string = "10.1.0.0"
@@ -481,10 +480,6 @@ var _ = Describe("Gateway Init Operations", func() {
 	)
 
 	BeforeEach(func() {
-		var err error
-		testNS, err = testutils.NewNS()
-		Expect(err).NotTo(HaveOccurred())
-
 		// Restore global default values before each testcase
 		config.RestoreDefaultConfig()
 
@@ -494,7 +489,6 @@ var _ = Describe("Gateway Init Operations", func() {
 	})
 
 	AfterEach(func() {
-		Expect(testNS.Close()).To(Succeed())
 	})
 
 	It("sets up a localnet gateway", func() {

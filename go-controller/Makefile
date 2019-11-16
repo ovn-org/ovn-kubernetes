@@ -5,6 +5,7 @@ BINDIR ?= ${PREFIX}/bin
 CNIBINDIR ?= ${DESTDIR}/opt/cni/bin
 GCFLAGS ?=
 export GCFLAGS
+PKGS ?=
 
 .PHONY: all build check test
 
@@ -17,15 +18,10 @@ export GCFLAGS
 
 
 all build:
-	hack/build-go.sh cmd/ovnkube/ovnkube.go
-	hack/build-go.sh cmd/ovn-kube-util/ovn-kube-util.go
-	hack/build-go.sh cmd/ovn-k8s-cni-overlay/ovn-k8s-cni-overlay.go
+	hack/build-go.sh ovnkube ovn-k8s-cni-overlay ovn-kube-util
 
 windows:
-	export WINDOWS_BUILD="yes"; \
-	hack/build-go.sh cmd/ovnkube/ovnkube.go || exit 1; \
-	hack/build-go.sh cmd/ovn-k8s-cni-overlay/ovn-k8s-cni-overlay.go || exit 1; \
-	hack/build-go.sh hybrid-overlay/cmd/hybrid-overlay.go || exit 1;
+	WINDOWS_BUILD="yes" hack/build-go.sh cmd/ovnkube cmd/ovn-k8s-cni-overlay hybrid-overlay/cmd/hybrid-overlay
 
 check test:
 	hack/test-go.sh ${PKGS}
@@ -46,11 +42,9 @@ ifndef GOPATH
 endif
 
 install.tools: check-gopath
-	go get -u gopkg.in/alecthomas/gometalinter.v1; \
-	$(GOPATH)/bin/gometalinter.v1 --install;
-
+	curl -sfL https://install.goreleaser.com/github.com/golangci/golangci-lint.sh | bash -s -- -b ${GOPATH}/bin
 lint:
-	./hack/lint.sh
+	@./hack/lint.sh
 
 gofmt:
 	@./hack/verify-gofmt.sh
