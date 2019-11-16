@@ -161,21 +161,24 @@ func (oc *Controller) deleteLogicalPort(pod *kapi.Pod) {
 		return
 	}
 
-	logrus.Infof("Deleting pod: %s", pod.Name)
+	podDesc := pod.Namespace + "/" + pod.Name
+	logrus.Infof("Deleting pod: %s", podDesc)
 	logicalPort := podLogicalPortName(pod)
 	out, stderr, err := util.RunOVNNbctl("--if-exists", "lsp-del",
 		logicalPort)
 	if err != nil {
-		logrus.Errorf("Error in deleting pod logical port "+
+		logrus.Errorf("Error in deleting pod %s logical port "+
 			"stdout: %q, stderr: %q, (%v)",
-			out, stderr, err)
+			podDesc, out, stderr, err)
 	}
 
 	var podIP net.IP
 	podAnnotation, err := util.UnmarshalPodAnnotation(pod.Annotations["ovn"])
 	if err != nil {
-		logrus.Errorf("Error in deleting pod logical port; failed "+
-			"to read pod annotation: %v", err)
+		logrus.Debugf("failed to read pod %s annotation when deleting "+
+			"logical port; falling back to PodIP %s: %v",
+			podDesc, pod.Status.PodIP, err)
+		podIP = net.ParseIP(pod.Status.PodIP)
 	} else {
 		podIP = podAnnotation.IP.IP
 	}

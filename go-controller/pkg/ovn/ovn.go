@@ -545,7 +545,6 @@ func (oc *Controller) WatchNodes(nodeSelector *metav1.LabelSelector) error {
 				} else {
 					delete(gatewaysFailed, node.Name)
 				}
-
 			}
 		},
 		DeleteFunc: func(obj interface{}) {
