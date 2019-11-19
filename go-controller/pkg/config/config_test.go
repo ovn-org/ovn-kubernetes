@@ -260,7 +260,7 @@ var _ = Describe("Config Operations", func() {
 
 	It("reads defaults from ovs-vsctl external IDs", func() {
 		app.Action = func(ctx *cli.Context) error {
-			fexec := ovntest.NewFakeExec(false)
+			fexec := ovntest.NewFakeExec()
 
 			// k8s-api-server
 			fexec.AddFakeCmd(&ovntest.ExpectedCmd{
@@ -320,7 +320,7 @@ var _ = Describe("Config Operations", func() {
 
 	It("reads defaults (multiple master) from ovs-vsctl external IDs", func() {
 		app.Action = func(ctx *cli.Context) error {
-			fexec := ovntest.NewFakeExec(false)
+			fexec := ovntest.NewFakeExec()
 
 			// k8s-api-server
 			fexec.AddFakeCmd(&ovntest.ExpectedCmd{
@@ -817,7 +817,7 @@ mode=shared
 		It("configures client northbound SSL correctly", func() {
 			const nbURLOVN string = "ssl:1.2.3.4:6641"
 
-			fexec := ovntest.NewFakeExec(false)
+			fexec := ovntest.NewFakeExec()
 			fexec.AddFakeCmdsNoOutputNoError([]string{
 				"ovn-nbctl --db=" + nbURLOVN + " --timeout=5 --private-key=" + keyFile + " --certificate=" + certFile + " --bootstrap-ca-cert=" + caFile + " list nb_global",
 				"ovs-vsctl --timeout=15 set Open_vSwitch . external_ids:ovn-nb=\"" + nbURLOVN + "\"",
@@ -848,7 +848,7 @@ mode=shared
 		It("configures client southbound SSL correctly", func() {
 			const sbURLOVN string = "ssl:1.2.3.4:6642"
 
-			fexec := ovntest.NewFakeExec(false)
+			fexec := ovntest.NewFakeExec()
 			fexec.AddFakeCmdsNoOutputNoError([]string{
 				"ovn-nbctl --db=" + sbURLOVN + " --timeout=5 --private-key=" + keyFile + " --certificate=" + certFile + " --bootstrap-ca-cert=" + caFile + " list nb_global",
 				"ovs-vsctl --timeout=15 del-ssl",

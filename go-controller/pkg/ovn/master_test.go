@@ -80,7 +80,7 @@ func defaultFakeExec(nodeSubnet, nodeName string) (*ovntest.FakeExec, string, st
 		mgmtMAC    string = "01:02:03:04:05:06"
 	)
 
-	fexec := ovntest.NewFakeExec(false)
+	fexec := ovntest.NewFakeExec()
 	fexec.AddFakeCmdsNoOutputNoError([]string{
 		"ovn-nbctl --timeout=15 --columns=_uuid list port_group",
 		"ovn-sbctl --timeout=15 --columns=_uuid list IGMP_Group",
@@ -338,7 +338,7 @@ var _ = Describe("Master Operations", func() {
 				masterMgmtPortMAC string = "00:00:00:55:66:77"
 			)
 
-			fexec := ovntest.NewFakeExec(false)
+			fexec := ovntest.NewFakeExec()
 			fexec.AddFakeCmd(&ovntest.ExpectedCmd{
 				Cmd: "ovn-nbctl --timeout=15 --data=bare --no-heading --columns=name,other-config find logical_switch other-config:subnet!=_",
 				// Return two nodes
@@ -529,7 +529,7 @@ var _ = Describe("Gateway Init Operations", func() {
 				Items: []v1.Node{testNode},
 			})
 
-			fexec := ovntest.NewFakeExec(false)
+			fexec := ovntest.NewFakeExec()
 			err := util.SetExec(fexec)
 			Expect(err).NotTo(HaveOccurred())
 
@@ -772,7 +772,7 @@ GR_openshift-master-node chassis=6a47b33b-89d3-4d65-ac31-b19b549326c7 lb_force_s
 				Items: []v1.Node{testNode},
 			})
 
-			fexec := ovntest.NewFakeExec(false)
+			fexec := ovntest.NewFakeExec()
 			err := util.SetExec(fexec)
 			Expect(err).NotTo(HaveOccurred())
 

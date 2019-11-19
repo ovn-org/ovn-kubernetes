@@ -193,7 +193,7 @@ var _ = Describe("OVN Pod Operations", func() {
 					"namespace",
 				)
 
-				fExec := ovntest.NewFakeExec(false)
+				fExec := ovntest.NewFakeExec()
 				fExec.AddFakeCmd(&ovntest.ExpectedCmd{
 					Cmd:    "ovn-nbctl --timeout=15 --data=bare --no-heading --columns=name find logical_switch_port external_ids:pod=true",
 					Output: "\n",
@@ -251,7 +251,7 @@ var _ = Describe("OVN Pod Operations", func() {
 					"namespace",
 				)
 
-				fExec := ovntest.NewFakeExec(false)
+				fExec := ovntest.NewFakeExec()
 				t.baseCmds(fExec)
 
 				fakeOvn := FakeOVN{}
@@ -300,7 +300,7 @@ var _ = Describe("OVN Pod Operations", func() {
 					"namespace",
 				)
 
-				fExec := ovntest.NewFakeExec(false)
+				fExec := ovntest.NewFakeExec()
 				fExec.AddFakeCmd(&ovntest.ExpectedCmd{
 					Cmd:    "ovn-nbctl --timeout=15 --data=bare --no-heading --columns=name find logical_switch_port external_ids:pod=true",
 					Output: t.portName + "\n",
@@ -357,7 +357,7 @@ var _ = Describe("OVN Pod Operations", func() {
 					"namespace",
 				)
 
-				fExec := ovntest.NewFakeExec(false)
+				fExec := ovntest.NewFakeExec()
 				fExec.AddFakeCmd(&ovntest.ExpectedCmd{
 					Cmd:    "ovn-nbctl --timeout=15 --data=bare --no-heading --columns=name find logical_switch_port external_ids:pod=true",
 					Output: "\n",
@@ -411,7 +411,7 @@ var _ = Describe("OVN Pod Operations", func() {
 					"namespace",
 				)
 
-				fExec := ovntest.NewFakeExec(false)
+				fExec := ovntest.NewFakeExec()
 				fExec.AddFakeCmd(&ovntest.ExpectedCmd{
 					Cmd:    "ovn-nbctl --timeout=15 --data=bare --no-heading --columns=name find logical_switch_port external_ids:pod=true",
 					Output: t.portName + "\n",
@@ -464,7 +464,7 @@ var _ = Describe("OVN Pod Operations", func() {
 					"namespace",
 				)
 
-				fExec := ovntest.NewFakeExec(false)
+				fExec := ovntest.NewFakeExec()
 				fExec.AddFakeCmd(&ovntest.ExpectedCmd{
 					Cmd:    "ovn-nbctl --timeout=15 --data=bare --no-heading --columns=name find logical_switch_port external_ids:pod=true",
 					Output: t.portName + "\n",
@@ -499,7 +499,7 @@ var _ = Describe("OVN Pod Operations", func() {
 					"namespace",
 				)
 
-				fExec := ovntest.NewFakeExec(false)
+				fExec := ovntest.NewFakeExec()
 				fExec.AddFakeCmd(&ovntest.ExpectedCmd{
 					Cmd:    "ovn-nbctl --timeout=15 --data=bare --no-heading --columns=name find logical_switch_port external_ids:pod=true",
 					Output: "\n",
@@ -547,7 +547,7 @@ var _ = Describe("OVN Pod Operations", func() {
 					"namespace",
 				)
 
-				fExec := ovntest.NewFakeExec(false)
+				fExec := ovntest.NewFakeExec()
 				fExec.AddFakeCmd(&ovntest.ExpectedCmd{
 					Cmd:    "ovn-nbctl --timeout=15 --data=bare --no-heading --columns=name find logical_switch_port external_ids:pod=true",
 					Output: "\n",

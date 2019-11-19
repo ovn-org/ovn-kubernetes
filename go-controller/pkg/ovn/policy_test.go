@@ -232,9 +232,9 @@ var _ = Describe("OVN NetworkPolicy Operations", func() {
 				networkPolicy := *newNetworkPolicy("networkpolicy1", namespace1.Name,
 					metav1.LabelSelector{},
 					[]knet.NetworkPolicyIngressRule{
-						knet.NetworkPolicyIngressRule{
+						{
 							From: []knet.NetworkPolicyPeer{
-								knet.NetworkPolicyPeer{
+								{
 									NamespaceSelector: &metav1.LabelSelector{
 										MatchLabels: map[string]string{
 											"name": namespace2.Name,
@@ -245,9 +245,9 @@ var _ = Describe("OVN NetworkPolicy Operations", func() {
 						},
 					},
 					[]knet.NetworkPolicyEgressRule{
-						knet.NetworkPolicyEgressRule{
+						{
 							To: []knet.NetworkPolicyPeer{
-								knet.NetworkPolicyPeer{
+								{
 									NamespaceSelector: &metav1.LabelSelector{
 										MatchLabels: map[string]string{
 											"name": namespace2.Name,
@@ -258,7 +258,7 @@ var _ = Describe("OVN NetworkPolicy Operations", func() {
 						},
 					})
 
-				fExec := ovntest.NewFakeExec(true)
+				fExec := ovntest.NewLooseCompareFakeExec()
 				nTest.baseCmds(fExec, namespace1, namespace2)
 				nTest.addCmds(fExec, namespace1, namespace2)
 				npTest.addNamespaceSelectorCmds(fExec, networkPolicy, true)
@@ -313,9 +313,9 @@ var _ = Describe("OVN NetworkPolicy Operations", func() {
 				networkPolicy := *newNetworkPolicy("networkpolicy1", namespace1.Name,
 					metav1.LabelSelector{},
 					[]knet.NetworkPolicyIngressRule{
-						knet.NetworkPolicyIngressRule{
+						{
 							From: []knet.NetworkPolicyPeer{
-								knet.NetworkPolicyPeer{
+								{
 									PodSelector: &metav1.LabelSelector{
 										MatchLabels: map[string]string{
 											"name": nPodTest.podName,
@@ -326,9 +326,9 @@ var _ = Describe("OVN NetworkPolicy Operations", func() {
 						},
 					},
 					[]knet.NetworkPolicyEgressRule{
-						knet.NetworkPolicyEgressRule{
+						{
 							To: []knet.NetworkPolicyPeer{
-								knet.NetworkPolicyPeer{
+								{
 									PodSelector: &metav1.LabelSelector{
 										MatchLabels: map[string]string{
 											"name": nPodTest.podName,
@@ -339,7 +339,7 @@ var _ = Describe("OVN NetworkPolicy Operations", func() {
 						},
 					})
 
-				fExec := ovntest.NewFakeExec(true)
+				fExec := ovntest.NewLooseCompareFakeExec()
 				nPodTest.baseCmds(fExec)
 				nPodTest.addNodeSetupCmds(fExec)
 				nPodTest.addCmdsForNonExistingPod(fExec)
@@ -403,9 +403,9 @@ var _ = Describe("OVN NetworkPolicy Operations", func() {
 				networkPolicy := *newNetworkPolicy("networkpolicy1", namespace1.Name,
 					metav1.LabelSelector{},
 					[]knet.NetworkPolicyIngressRule{
-						knet.NetworkPolicyIngressRule{
+						{
 							From: []knet.NetworkPolicyPeer{
-								knet.NetworkPolicyPeer{
+								{
 									PodSelector: &metav1.LabelSelector{
 										MatchLabels: map[string]string{
 											"name": nPodTest.podName,
@@ -421,9 +421,9 @@ var _ = Describe("OVN NetworkPolicy Operations", func() {
 						},
 					},
 					[]knet.NetworkPolicyEgressRule{
-						knet.NetworkPolicyEgressRule{
+						{
 							To: []knet.NetworkPolicyPeer{
-								knet.NetworkPolicyPeer{
+								{
 									PodSelector: &metav1.LabelSelector{
 										MatchLabels: map[string]string{
 											"name": nPodTest.podName,
@@ -439,7 +439,7 @@ var _ = Describe("OVN NetworkPolicy Operations", func() {
 						},
 					})
 
-				fExec := ovntest.NewFakeExec(true)
+				fExec := ovntest.NewLooseCompareFakeExec()
 				nPodTest.baseCmds(fExec)
 				nPodTest.addNodeSetupCmds(fExec)
 				nPodTest.addCmdsForNonExistingPod(fExec)
@@ -482,507 +482,507 @@ var _ = Describe("OVN NetworkPolicy Operations", func() {
 			err := app.Run([]string{app.Name})
 			Expect(err).NotTo(HaveOccurred())
 		})
+	})
 
-		Context("during execution", func() {
+	Context("during execution", func() {
 
-			It("reconciles a deleted namespace referenced by a networkpolicy with a local running pod", func() {
-				app.Action = func(ctx *cli.Context) error {
+		It("reconciles a deleted namespace referenced by a networkpolicy with a local running pod", func() {
+			app.Action = func(ctx *cli.Context) error {
 
-					npTest := networkPolicy{}
-					nTest := namespace{}
+				npTest := networkPolicy{}
+				nTest := namespace{}
 
-					namespace1 := *newNamespace("namespace1")
-					namespace2 := *newNamespace("namespace2")
+				namespace1 := *newNamespace("namespace1")
+				namespace2 := *newNamespace("namespace2")
 
-					nPodTest := newTPod(
-						"node1",
-						"10.128.1.0/24",
-						"10.128.1.2",
-						"10.128.1.1",
-						"myPod",
-						"10.128.1.4",
-						"11:22:33:44:55:66",
-						namespace1.Name,
-					)
+				nPodTest := newTPod(
+					"node1",
+					"10.128.1.0/24",
+					"10.128.1.2",
+					"10.128.1.1",
+					"myPod",
+					"10.128.1.4",
+					"11:22:33:44:55:66",
+					namespace1.Name,
+				)
 
-					networkPolicy := *newNetworkPolicy("networkpolicy1", namespace1.Name,
-						metav1.LabelSelector{},
-						[]knet.NetworkPolicyIngressRule{
-							knet.NetworkPolicyIngressRule{
-								From: []knet.NetworkPolicyPeer{
-									knet.NetworkPolicyPeer{
-										NamespaceSelector: &metav1.LabelSelector{
-											MatchLabels: map[string]string{
-												"name": namespace2.Name,
-											},
+				networkPolicy := *newNetworkPolicy("networkpolicy1", namespace1.Name,
+					metav1.LabelSelector{},
+					[]knet.NetworkPolicyIngressRule{
+						{
+							From: []knet.NetworkPolicyPeer{
+								{
+									NamespaceSelector: &metav1.LabelSelector{
+										MatchLabels: map[string]string{
+											"name": namespace2.Name,
 										},
 									},
 								},
 							},
 						},
-						[]knet.NetworkPolicyEgressRule{
-							knet.NetworkPolicyEgressRule{
-								To: []knet.NetworkPolicyPeer{
-									knet.NetworkPolicyPeer{
-										NamespaceSelector: &metav1.LabelSelector{
-											MatchLabels: map[string]string{
-												"name": namespace2.Name,
-											},
+					},
+					[]knet.NetworkPolicyEgressRule{
+						{
+							To: []knet.NetworkPolicyPeer{
+								{
+									NamespaceSelector: &metav1.LabelSelector{
+										MatchLabels: map[string]string{
+											"name": namespace2.Name,
 										},
 									},
 								},
 							},
-						})
-
-					fExec := ovntest.NewFakeExec(true)
-					nPodTest.baseCmds(fExec)
-					nPodTest.addNodeSetupCmds(fExec)
-					nPodTest.addCmdsForNonExistingPod(fExec)
-					nTest.baseCmds(fExec, namespace1, namespace2)
-					nTest.addCmds(fExec, namespace2)
-					nTest.addCmdsWithPods(fExec, nPodTest, namespace1)
-					npTest.addPodSelectorCmds(fExec, nPodTest, networkPolicy, true, true)
-
-					fakeOvn := FakeOVN{}
-					fakeOvn.start(ctx, fExec,
-						&v1.NamespaceList{
-							Items: []v1.Namespace{
-								namespace1,
-								namespace2,
-							},
 						},
-						&v1.PodList{
-							Items: []v1.Pod{
-								*newPod(nPodTest.namespace, nPodTest.podName, nPodTest.nodeName, nPodTest.podIP),
-							},
-						},
-						&knet.NetworkPolicyList{
-							Items: []knet.NetworkPolicy{
-								networkPolicy,
-							},
-						},
-					)
-
-					fakeOvn.controller.WatchPods()
-					fakeOvn.controller.WatchNamespaces()
-					fakeOvn.controller.WatchNetworkPolicy()
-
-					_, err := fakeOvn.fakeClient.NetworkingV1().NetworkPolicies(networkPolicy.Namespace).Get(networkPolicy.Name, metav1.GetOptions{})
-					Expect(err).NotTo(HaveOccurred())
-					Eventually(fExec.CalledMatchesExpected).Should(BeTrue())
-
-					nTest.delCmds(fExec, namespace2)
-
-					fExec.AddFakeCmd(&ovntest.ExpectedCmd{
-						Cmd:    "ovn-nbctl --timeout=15 --data=bare --no-heading --columns=_uuid find ACL match=\"ip4.src == {$a10148211500778908391, $a6953373268003663638} && outport == @a14195333570786048679\" external-ids:namespace=namespace1 external-ids:policy=networkpolicy1 external-ids:Ingress_num=0 external-ids:policy_type=Ingress",
-						Output: fakeUUID,
-					})
-					fExec.AddFakeCmdsNoOutputNoError([]string{
-						"ovn-nbctl --timeout=15 set acl fake_uuid match=\"ip4.src == {$a10148211500778908391} && outport == @a14195333570786048679\"",
-					})
-					fExec.AddFakeCmdsNoOutputNoError([]string{
-						"ovn-nbctl --timeout=15 --data=bare --no-heading --columns=_uuid find ACL match=\"ip4.dst == {$a6953373268003663638, $a9824637386382239951} && inport == @a14195333570786048679\" external-ids:namespace=namespace1 external-ids:policy=networkpolicy1 external-ids:Egress_num=0 external-ids:policy_type=Egress",
 					})
 
-					err = fakeOvn.fakeClient.CoreV1().Namespaces().Delete(namespace2.Name, metav1.NewDeleteOptions(0))
-					Expect(err).NotTo(HaveOccurred())
-					Eventually(fExec.CalledMatchesExpected).Should(BeTrue())
+				fExec := ovntest.NewLooseCompareFakeExec()
+				nPodTest.baseCmds(fExec)
+				nPodTest.addNodeSetupCmds(fExec)
+				nPodTest.addCmdsForNonExistingPod(fExec)
+				nTest.baseCmds(fExec, namespace1, namespace2)
+				nTest.addCmds(fExec, namespace2)
+				nTest.addCmdsWithPods(fExec, nPodTest, namespace1)
+				npTest.addPodSelectorCmds(fExec, nPodTest, networkPolicy, true, true)
 
-					return nil
-				}
+				fakeOvn := FakeOVN{}
+				fakeOvn.start(ctx, fExec,
+					&v1.NamespaceList{
+						Items: []v1.Namespace{
+							namespace1,
+							namespace2,
+						},
+					},
+					&v1.PodList{
+						Items: []v1.Pod{
+							*newPod(nPodTest.namespace, nPodTest.podName, nPodTest.nodeName, nPodTest.podIP),
+						},
+					},
+					&knet.NetworkPolicyList{
+						Items: []knet.NetworkPolicy{
+							networkPolicy,
+						},
+					},
+				)
 
-				err := app.Run([]string{app.Name})
+				fakeOvn.controller.WatchPods()
+				fakeOvn.controller.WatchNamespaces()
+				fakeOvn.controller.WatchNetworkPolicy()
+
+				_, err := fakeOvn.fakeClient.NetworkingV1().NetworkPolicies(networkPolicy.Namespace).Get(networkPolicy.Name, metav1.GetOptions{})
 				Expect(err).NotTo(HaveOccurred())
-			})
+				Eventually(fExec.CalledMatchesExpected).Should(BeTrue())
 
-			It("reconciles a deleted namespace referenced by a networkpolicy", func() {
-				app.Action = func(ctx *cli.Context) error {
+				nTest.delCmds(fExec, namespace2)
 
-					npTest := networkPolicy{}
-					nTest := namespace{}
+				fExec.AddFakeCmd(&ovntest.ExpectedCmd{
+					Cmd:    "ovn-nbctl --timeout=15 --data=bare --no-heading --columns=_uuid find ACL match=\"ip4.src == {$a10148211500778908391, $a6953373268003663638} && outport == @a14195333570786048679\" external-ids:namespace=namespace1 external-ids:policy=networkpolicy1 external-ids:Ingress_num=0 external-ids:policy_type=Ingress",
+					Output: fakeUUID,
+				})
+				fExec.AddFakeCmdsNoOutputNoError([]string{
+					"ovn-nbctl --timeout=15 set acl fake_uuid match=\"ip4.src == {$a10148211500778908391} && outport == @a14195333570786048679\"",
+				})
+				fExec.AddFakeCmdsNoOutputNoError([]string{
+					"ovn-nbctl --timeout=15 --data=bare --no-heading --columns=_uuid find ACL match=\"ip4.dst == {$a6953373268003663638, $a9824637386382239951} && inport == @a14195333570786048679\" external-ids:namespace=namespace1 external-ids:policy=networkpolicy1 external-ids:Egress_num=0 external-ids:policy_type=Egress",
+				})
 
-					namespace1 := *newNamespace("namespace1")
-					namespace2 := *newNamespace("namespace2")
-					networkPolicy := *newNetworkPolicy("networkpolicy1", namespace1.Name,
-						metav1.LabelSelector{},
-						[]knet.NetworkPolicyIngressRule{
-							knet.NetworkPolicyIngressRule{
-								From: []knet.NetworkPolicyPeer{
-									knet.NetworkPolicyPeer{
-										NamespaceSelector: &metav1.LabelSelector{
-											MatchLabels: map[string]string{
-												"name": namespace2.Name,
-											},
+				err = fakeOvn.fakeClient.CoreV1().Namespaces().Delete(namespace2.Name, metav1.NewDeleteOptions(0))
+				Expect(err).NotTo(HaveOccurred())
+				Eventually(fExec.CalledMatchesExpected).Should(BeTrue())
+
+				return nil
+			}
+
+			err := app.Run([]string{app.Name})
+			Expect(err).NotTo(HaveOccurred())
+		})
+
+		It("reconciles a deleted namespace referenced by a networkpolicy", func() {
+			app.Action = func(ctx *cli.Context) error {
+
+				npTest := networkPolicy{}
+				nTest := namespace{}
+
+				namespace1 := *newNamespace("namespace1")
+				namespace2 := *newNamespace("namespace2")
+				networkPolicy := *newNetworkPolicy("networkpolicy1", namespace1.Name,
+					metav1.LabelSelector{},
+					[]knet.NetworkPolicyIngressRule{
+						{
+							From: []knet.NetworkPolicyPeer{
+								{
+									NamespaceSelector: &metav1.LabelSelector{
+										MatchLabels: map[string]string{
+											"name": namespace2.Name,
 										},
 									},
 								},
 							},
 						},
-						[]knet.NetworkPolicyEgressRule{
-							knet.NetworkPolicyEgressRule{
-								To: []knet.NetworkPolicyPeer{
-									knet.NetworkPolicyPeer{
-										NamespaceSelector: &metav1.LabelSelector{
-											MatchLabels: map[string]string{
-												"name": namespace2.Name,
-											},
+					},
+					[]knet.NetworkPolicyEgressRule{
+						{
+							To: []knet.NetworkPolicyPeer{
+								{
+									NamespaceSelector: &metav1.LabelSelector{
+										MatchLabels: map[string]string{
+											"name": namespace2.Name,
 										},
 									},
 								},
 							},
-						})
-
-					fExec := ovntest.NewFakeExec(true)
-					nTest.baseCmds(fExec, namespace1, namespace2)
-					nTest.addCmds(fExec, namespace1, namespace2)
-					npTest.addNamespaceSelectorCmds(fExec, networkPolicy, true)
-
-					fakeOvn := FakeOVN{}
-					fakeOvn.start(ctx, fExec,
-						&v1.NamespaceList{
-							Items: []v1.Namespace{
-								namespace1,
-								namespace2,
-							},
 						},
-						&knet.NetworkPolicyList{
-							Items: []knet.NetworkPolicy{
-								networkPolicy,
-							},
-						},
-					)
-
-					fakeOvn.controller.WatchNamespaces()
-					fakeOvn.controller.WatchNetworkPolicy()
-
-					_, err := fakeOvn.fakeClient.NetworkingV1().NetworkPolicies(networkPolicy.Namespace).Get(networkPolicy.Name, metav1.GetOptions{})
-					Expect(err).NotTo(HaveOccurred())
-					Eventually(fExec.CalledMatchesExpected).Should(BeTrue())
-
-					nTest.delCmds(fExec, namespace2)
-					fExec.AddFakeCmd(&ovntest.ExpectedCmd{
-						Cmd:    "ovn-nbctl --timeout=15 --data=bare --no-heading --columns=_uuid find ACL match=\"ip4.src == {$a10148211500778908391, $a6953373268003663638} && outport == @a14195333570786048679\" external-ids:namespace=namespace1 external-ids:policy=networkpolicy1 external-ids:Ingress_num=0 external-ids:policy_type=Ingress",
-						Output: fakeUUID,
-					})
-					fExec.AddFakeCmdsNoOutputNoError([]string{
-						"ovn-nbctl --timeout=15 set acl fake_uuid match=\"ip4.src == {$a10148211500778908391} && outport == @a14195333570786048679\"",
-					})
-					fExec.AddFakeCmdsNoOutputNoError([]string{
-						"ovn-nbctl --timeout=15 --data=bare --no-heading --columns=_uuid find ACL match=\"ip4.dst == {$a6953373268003663638, $a9824637386382239951} && inport == @a14195333570786048679\" external-ids:namespace=namespace1 external-ids:policy=networkpolicy1 external-ids:Egress_num=0 external-ids:policy_type=Egress",
 					})
 
-					err = fakeOvn.fakeClient.CoreV1().Namespaces().Delete(namespace2.Name, metav1.NewDeleteOptions(0))
-					Expect(err).NotTo(HaveOccurred())
-					Eventually(fExec.CalledMatchesExpected).Should(BeTrue())
+				fExec := ovntest.NewLooseCompareFakeExec()
+				nTest.baseCmds(fExec, namespace1, namespace2)
+				nTest.addCmds(fExec, namespace1, namespace2)
+				npTest.addNamespaceSelectorCmds(fExec, networkPolicy, true)
 
-					return nil
-				}
+				fakeOvn := FakeOVN{}
+				fakeOvn.start(ctx, fExec,
+					&v1.NamespaceList{
+						Items: []v1.Namespace{
+							namespace1,
+							namespace2,
+						},
+					},
+					&knet.NetworkPolicyList{
+						Items: []knet.NetworkPolicy{
+							networkPolicy,
+						},
+					},
+				)
 
-				err := app.Run([]string{app.Name})
+				fakeOvn.controller.WatchNamespaces()
+				fakeOvn.controller.WatchNetworkPolicy()
+
+				_, err := fakeOvn.fakeClient.NetworkingV1().NetworkPolicies(networkPolicy.Namespace).Get(networkPolicy.Name, metav1.GetOptions{})
 				Expect(err).NotTo(HaveOccurred())
-			})
+				Eventually(fExec.CalledMatchesExpected).Should(BeTrue())
 
-			It("reconciles a deleted pod referenced by a networkpolicy in its own namespace", func() {
-				app.Action = func(ctx *cli.Context) error {
+				nTest.delCmds(fExec, namespace2)
+				fExec.AddFakeCmd(&ovntest.ExpectedCmd{
+					Cmd:    "ovn-nbctl --timeout=15 --data=bare --no-heading --columns=_uuid find ACL match=\"ip4.src == {$a10148211500778908391, $a6953373268003663638} && outport == @a14195333570786048679\" external-ids:namespace=namespace1 external-ids:policy=networkpolicy1 external-ids:Ingress_num=0 external-ids:policy_type=Ingress",
+					Output: fakeUUID,
+				})
+				fExec.AddFakeCmdsNoOutputNoError([]string{
+					"ovn-nbctl --timeout=15 set acl fake_uuid match=\"ip4.src == {$a10148211500778908391} && outport == @a14195333570786048679\"",
+				})
+				fExec.AddFakeCmdsNoOutputNoError([]string{
+					"ovn-nbctl --timeout=15 --data=bare --no-heading --columns=_uuid find ACL match=\"ip4.dst == {$a6953373268003663638, $a9824637386382239951} && inport == @a14195333570786048679\" external-ids:namespace=namespace1 external-ids:policy=networkpolicy1 external-ids:Egress_num=0 external-ids:policy_type=Egress",
+				})
 
-					npTest := networkPolicy{}
-					nTest := namespace{}
-
-					namespace1 := *newNamespace("namespace1")
-
-					nPodTest := newTPod(
-						"node1",
-						"10.128.1.0/24",
-						"10.128.1.2",
-						"10.128.1.1",
-						"myPod",
-						"10.128.1.4",
-						"11:22:33:44:55:66",
-						namespace1.Name,
-					)
-					networkPolicy := *newNetworkPolicy("networkpolicy1", namespace1.Name,
-						metav1.LabelSelector{},
-						[]knet.NetworkPolicyIngressRule{
-							knet.NetworkPolicyIngressRule{
-								From: []knet.NetworkPolicyPeer{
-									knet.NetworkPolicyPeer{
-										PodSelector: &metav1.LabelSelector{
-											MatchLabels: map[string]string{
-												"name": nPodTest.podName,
-											},
-										},
-									},
-								},
-							},
-						},
-						[]knet.NetworkPolicyEgressRule{
-							knet.NetworkPolicyEgressRule{
-								To: []knet.NetworkPolicyPeer{
-									knet.NetworkPolicyPeer{
-										PodSelector: &metav1.LabelSelector{
-											MatchLabels: map[string]string{
-												"name": nPodTest.podName,
-											},
-										},
-									},
-								},
-							},
-						})
-
-					fExec := ovntest.NewFakeExec(true)
-					nPodTest.baseCmds(fExec)
-					nPodTest.addNodeSetupCmds(fExec)
-					nPodTest.addCmdsForNonExistingPod(fExec)
-					nTest.baseCmds(fExec, namespace1)
-					nTest.addCmdsWithPods(fExec, nPodTest, namespace1)
-					npTest.addPodSelectorCmds(fExec, nPodTest, networkPolicy, true, true)
-
-					fakeOvn := FakeOVN{}
-					fakeOvn.start(ctx, fExec,
-						&v1.NamespaceList{
-							Items: []v1.Namespace{
-								namespace1,
-							},
-						},
-						&v1.PodList{
-							Items: []v1.Pod{
-								*newPod(nPodTest.namespace, nPodTest.podName, nPodTest.nodeName, nPodTest.podIP),
-							},
-						},
-						&knet.NetworkPolicyList{
-							Items: []knet.NetworkPolicy{
-								networkPolicy,
-							},
-						},
-					)
-
-					fakeOvn.controller.WatchPods()
-					fakeOvn.controller.WatchNamespaces()
-					fakeOvn.controller.WatchNetworkPolicy()
-
-					_, err := fakeOvn.fakeClient.NetworkingV1().NetworkPolicies(networkPolicy.Namespace).Get(networkPolicy.Name, metav1.GetOptions{})
-					Expect(err).NotTo(HaveOccurred())
-					Eventually(fExec.CalledMatchesExpected).Should(BeTrue())
-
-					nPodTest.delCmds(fExec)
-					nPodTest.delFromNamespaceCmds(fExec, nPodTest, true)
-					npTest.delPodCmds(fExec, networkPolicy, true)
-
-					err = fakeOvn.fakeClient.CoreV1().Pods(nPodTest.namespace).Delete(nPodTest.podName, metav1.NewDeleteOptions(0))
-					Expect(err).NotTo(HaveOccurred())
-					Eventually(fExec.CalledMatchesExpected).Should(BeTrue())
-
-					return nil
-				}
-
-				err := app.Run([]string{app.Name})
+				err = fakeOvn.fakeClient.CoreV1().Namespaces().Delete(namespace2.Name, metav1.NewDeleteOptions(0))
 				Expect(err).NotTo(HaveOccurred())
-			})
+				Eventually(fExec.CalledMatchesExpected).Should(BeTrue())
 
-			It("reconciles a deleted pod referenced by a networkpolicy in another namespace", func() {
-				app.Action = func(ctx *cli.Context) error {
+				return nil
+			}
 
-					npTest := networkPolicy{}
-					nTest := namespace{}
+			err := app.Run([]string{app.Name})
+			Expect(err).NotTo(HaveOccurred())
+		})
 
-					namespace1 := *newNamespace("namespace1")
-					namespace2 := *newNamespace("namespace2")
+		It("reconciles a deleted pod referenced by a networkpolicy in its own namespace", func() {
+			app.Action = func(ctx *cli.Context) error {
 
-					nPodTest := newTPod(
-						"node1",
-						"10.128.1.0/24",
-						"10.128.1.2",
-						"10.128.1.1",
-						"myPod",
-						"10.128.1.4",
-						"11:22:33:44:55:66",
-						namespace2.Name,
-					)
-					networkPolicy := *newNetworkPolicy("networkpolicy1", namespace1.Name,
-						metav1.LabelSelector{},
-						[]knet.NetworkPolicyIngressRule{
-							knet.NetworkPolicyIngressRule{
-								From: []knet.NetworkPolicyPeer{
-									knet.NetworkPolicyPeer{
-										PodSelector: &metav1.LabelSelector{
-											MatchLabels: map[string]string{
-												"name": nPodTest.podName,
-											},
+				npTest := networkPolicy{}
+				nTest := namespace{}
+
+				namespace1 := *newNamespace("namespace1")
+
+				nPodTest := newTPod(
+					"node1",
+					"10.128.1.0/24",
+					"10.128.1.2",
+					"10.128.1.1",
+					"myPod",
+					"10.128.1.4",
+					"11:22:33:44:55:66",
+					namespace1.Name,
+				)
+				networkPolicy := *newNetworkPolicy("networkpolicy1", namespace1.Name,
+					metav1.LabelSelector{},
+					[]knet.NetworkPolicyIngressRule{
+						{
+							From: []knet.NetworkPolicyPeer{
+								{
+									PodSelector: &metav1.LabelSelector{
+										MatchLabels: map[string]string{
+											"name": nPodTest.podName,
 										},
-										NamespaceSelector: &metav1.LabelSelector{
-											MatchLabels: map[string]string{
-												"name": nPodTest.namespace,
-											},
+									},
+								},
+							},
+						},
+					},
+					[]knet.NetworkPolicyEgressRule{
+						{
+							To: []knet.NetworkPolicyPeer{
+								{
+									PodSelector: &metav1.LabelSelector{
+										MatchLabels: map[string]string{
+											"name": nPodTest.podName,
 										},
 									},
 								},
 							},
 						},
-						[]knet.NetworkPolicyEgressRule{
-							knet.NetworkPolicyEgressRule{
-								To: []knet.NetworkPolicyPeer{
-									knet.NetworkPolicyPeer{
-										PodSelector: &metav1.LabelSelector{
-											MatchLabels: map[string]string{
-												"name": nPodTest.podName,
-											},
-										},
-										NamespaceSelector: &metav1.LabelSelector{
-											MatchLabels: map[string]string{
-												"name": nPodTest.namespace,
-											},
-										},
-									},
-								},
-							},
-						})
+					})
 
-					fExec := ovntest.NewFakeExec(true)
-					nPodTest.baseCmds(fExec)
-					nPodTest.addNodeSetupCmds(fExec)
-					nPodTest.addCmdsForNonExistingPod(fExec)
-					nTest.baseCmds(fExec, namespace1, namespace2)
-					nTest.addCmds(fExec, namespace1)
-					nTest.addCmdsWithPods(fExec, nPodTest, namespace2)
-					npTest.addPodSelectorCmds(fExec, nPodTest, networkPolicy, false, false)
+				fExec := ovntest.NewLooseCompareFakeExec()
+				nPodTest.baseCmds(fExec)
+				nPodTest.addNodeSetupCmds(fExec)
+				nPodTest.addCmdsForNonExistingPod(fExec)
+				nTest.baseCmds(fExec, namespace1)
+				nTest.addCmdsWithPods(fExec, nPodTest, namespace1)
+				npTest.addPodSelectorCmds(fExec, nPodTest, networkPolicy, true, true)
 
-					fakeOvn := FakeOVN{}
-					fakeOvn.start(ctx, fExec,
-						&v1.NamespaceList{
-							Items: []v1.Namespace{
-								namespace1,
-								namespace2,
-							},
+				fakeOvn := FakeOVN{}
+				fakeOvn.start(ctx, fExec,
+					&v1.NamespaceList{
+						Items: []v1.Namespace{
+							namespace1,
 						},
-						&v1.PodList{
-							Items: []v1.Pod{
-								*newPod(nPodTest.namespace, nPodTest.podName, nPodTest.nodeName, nPodTest.podIP),
-							},
+					},
+					&v1.PodList{
+						Items: []v1.Pod{
+							*newPod(nPodTest.namespace, nPodTest.podName, nPodTest.nodeName, nPodTest.podIP),
 						},
-						&knet.NetworkPolicyList{
-							Items: []knet.NetworkPolicy{
-								networkPolicy,
-							},
+					},
+					&knet.NetworkPolicyList{
+						Items: []knet.NetworkPolicy{
+							networkPolicy,
 						},
-					)
+					},
+				)
 
-					fakeOvn.controller.WatchPods()
-					fakeOvn.controller.WatchNamespaces()
-					fakeOvn.controller.WatchNetworkPolicy()
+				fakeOvn.controller.WatchPods()
+				fakeOvn.controller.WatchNamespaces()
+				fakeOvn.controller.WatchNetworkPolicy()
 
-					_, err := fakeOvn.fakeClient.NetworkingV1().NetworkPolicies(networkPolicy.Namespace).Get(networkPolicy.Name, metav1.GetOptions{})
-					Expect(err).NotTo(HaveOccurred())
-					Eventually(fExec.CalledMatchesExpected).Should(BeTrue())
-
-					nPodTest.delCmds(fExec)
-					nPodTest.delFromNamespaceCmds(fExec, nPodTest, true)
-					npTest.delPodCmds(fExec, networkPolicy, false)
-
-					err = fakeOvn.fakeClient.CoreV1().Pods(nPodTest.namespace).Delete(nPodTest.podName, metav1.NewDeleteOptions(0))
-					Expect(err).NotTo(HaveOccurred())
-					Eventually(fExec.CalledMatchesExpected).Should(BeTrue())
-
-					return nil
-				}
-
-				err := app.Run([]string{app.Name})
+				_, err := fakeOvn.fakeClient.NetworkingV1().NetworkPolicies(networkPolicy.Namespace).Get(networkPolicy.Name, metav1.GetOptions{})
 				Expect(err).NotTo(HaveOccurred())
-			})
+				Eventually(fExec.CalledMatchesExpected).Should(BeTrue())
 
-			It("reconciles a deleted networkpolicy", func() {
-				app.Action = func(ctx *cli.Context) error {
+				nPodTest.delCmds(fExec)
+				nPodTest.delFromNamespaceCmds(fExec, nPodTest, true)
+				npTest.delPodCmds(fExec, networkPolicy, true)
 
-					npTest := networkPolicy{}
-					nTest := namespace{}
-
-					namespace1 := *newNamespace("namespace1")
-
-					nPodTest := newTPod(
-						"node1",
-						"10.128.1.0/24",
-						"10.128.1.2",
-						"10.128.1.1",
-						"myPod",
-						"10.128.1.4",
-						"11:22:33:44:55:66",
-						namespace1.Name,
-					)
-					networkPolicy := *newNetworkPolicy("networkpolicy1", namespace1.Name,
-						metav1.LabelSelector{},
-						[]knet.NetworkPolicyIngressRule{
-							knet.NetworkPolicyIngressRule{
-								From: []knet.NetworkPolicyPeer{
-									knet.NetworkPolicyPeer{
-										PodSelector: &metav1.LabelSelector{
-											MatchLabels: map[string]string{
-												"name": nPodTest.podName,
-											},
-										},
-									},
-								},
-							},
-						},
-						[]knet.NetworkPolicyEgressRule{
-							knet.NetworkPolicyEgressRule{
-								To: []knet.NetworkPolicyPeer{
-									knet.NetworkPolicyPeer{
-										PodSelector: &metav1.LabelSelector{
-											MatchLabels: map[string]string{
-												"name": nPodTest.podName,
-											},
-										},
-									},
-								},
-							},
-						})
-
-					fExec := ovntest.NewFakeExec(true)
-					nPodTest.baseCmds(fExec)
-					nPodTest.addNodeSetupCmds(fExec)
-					nPodTest.addCmdsForNonExistingPod(fExec)
-					nTest.baseCmds(fExec, namespace1)
-					nTest.addCmdsWithPods(fExec, nPodTest, namespace1)
-					npTest.addPodSelectorCmds(fExec, nPodTest, networkPolicy, true, true)
-
-					fakeOvn := FakeOVN{}
-					fakeOvn.start(ctx, fExec,
-						&v1.NamespaceList{
-							Items: []v1.Namespace{
-								namespace1,
-							},
-						},
-						&v1.PodList{
-							Items: []v1.Pod{
-								*newPod(nPodTest.namespace, nPodTest.podName, nPodTest.nodeName, nPodTest.podIP),
-							},
-						},
-						&knet.NetworkPolicyList{
-							Items: []knet.NetworkPolicy{
-								networkPolicy,
-							},
-						},
-					)
-
-					fakeOvn.controller.WatchPods()
-					fakeOvn.controller.WatchNamespaces()
-					fakeOvn.controller.WatchNetworkPolicy()
-
-					_, err := fakeOvn.fakeClient.NetworkingV1().NetworkPolicies(networkPolicy.Namespace).Get(networkPolicy.Name, metav1.GetOptions{})
-					Expect(err).NotTo(HaveOccurred())
-					Eventually(fExec.CalledMatchesExpected).Should(BeTrue())
-
-					npTest.delCmds(fExec, nPodTest, networkPolicy, true)
-
-					err = fakeOvn.fakeClient.NetworkingV1().NetworkPolicies(networkPolicy.Namespace).Delete(networkPolicy.Name, metav1.NewDeleteOptions(0))
-					Expect(err).NotTo(HaveOccurred())
-					Eventually(fExec.CalledMatchesExpected).Should(BeTrue())
-
-					return nil
-				}
-
-				err := app.Run([]string{app.Name})
+				err = fakeOvn.fakeClient.CoreV1().Pods(nPodTest.namespace).Delete(nPodTest.podName, metav1.NewDeleteOptions(0))
 				Expect(err).NotTo(HaveOccurred())
-			})
+				Eventually(fExec.CalledMatchesExpected).Should(BeTrue())
+
+				return nil
+			}
+
+			err := app.Run([]string{app.Name})
+			Expect(err).NotTo(HaveOccurred())
+		})
+
+		It("reconciles a deleted pod referenced by a networkpolicy in another namespace", func() {
+			app.Action = func(ctx *cli.Context) error {
+
+				npTest := networkPolicy{}
+				nTest := namespace{}
+
+				namespace1 := *newNamespace("namespace1")
+				namespace2 := *newNamespace("namespace2")
+
+				nPodTest := newTPod(
+					"node1",
+					"10.128.1.0/24",
+					"10.128.1.2",
+					"10.128.1.1",
+					"myPod",
+					"10.128.1.4",
+					"11:22:33:44:55:66",
+					namespace2.Name,
+				)
+				networkPolicy := *newNetworkPolicy("networkpolicy1", namespace1.Name,
+					metav1.LabelSelector{},
+					[]knet.NetworkPolicyIngressRule{
+						{
+							From: []knet.NetworkPolicyPeer{
+								{
+									PodSelector: &metav1.LabelSelector{
+										MatchLabels: map[string]string{
+											"name": nPodTest.podName,
+										},
+									},
+									NamespaceSelector: &metav1.LabelSelector{
+										MatchLabels: map[string]string{
+											"name": nPodTest.namespace,
+										},
+									},
+								},
+							},
+						},
+					},
+					[]knet.NetworkPolicyEgressRule{
+						{
+							To: []knet.NetworkPolicyPeer{
+								{
+									PodSelector: &metav1.LabelSelector{
+										MatchLabels: map[string]string{
+											"name": nPodTest.podName,
+										},
+									},
+									NamespaceSelector: &metav1.LabelSelector{
+										MatchLabels: map[string]string{
+											"name": nPodTest.namespace,
+										},
+									},
+								},
+							},
+						},
+					})
+
+				fExec := ovntest.NewLooseCompareFakeExec()
+				nPodTest.baseCmds(fExec)
+				nPodTest.addNodeSetupCmds(fExec)
+				nPodTest.addCmdsForNonExistingPod(fExec)
+				nTest.baseCmds(fExec, namespace1, namespace2)
+				nTest.addCmds(fExec, namespace1)
+				nTest.addCmdsWithPods(fExec, nPodTest, namespace2)
+				npTest.addPodSelectorCmds(fExec, nPodTest, networkPolicy, false, false)
+
+				fakeOvn := FakeOVN{}
+				fakeOvn.start(ctx, fExec,
+					&v1.NamespaceList{
+						Items: []v1.Namespace{
+							namespace1,
+							namespace2,
+						},
+					},
+					&v1.PodList{
+						Items: []v1.Pod{
+							*newPod(nPodTest.namespace, nPodTest.podName, nPodTest.nodeName, nPodTest.podIP),
+						},
+					},
+					&knet.NetworkPolicyList{
+						Items: []knet.NetworkPolicy{
+							networkPolicy,
+						},
+					},
+				)
+
+				fakeOvn.controller.WatchPods()
+				fakeOvn.controller.WatchNamespaces()
+				fakeOvn.controller.WatchNetworkPolicy()
+
+				_, err := fakeOvn.fakeClient.NetworkingV1().NetworkPolicies(networkPolicy.Namespace).Get(networkPolicy.Name, metav1.GetOptions{})
+				Expect(err).NotTo(HaveOccurred())
+				Eventually(fExec.CalledMatchesExpected).Should(BeTrue())
+
+				nPodTest.delCmds(fExec)
+				nPodTest.delFromNamespaceCmds(fExec, nPodTest, true)
+				npTest.delPodCmds(fExec, networkPolicy, false)
+
+				err = fakeOvn.fakeClient.CoreV1().Pods(nPodTest.namespace).Delete(nPodTest.podName, metav1.NewDeleteOptions(0))
+				Expect(err).NotTo(HaveOccurred())
+				Eventually(fExec.CalledMatchesExpected).Should(BeTrue())
+
+				return nil
+			}
+
+			err := app.Run([]string{app.Name})
+			Expect(err).NotTo(HaveOccurred())
+		})
+
+		It("reconciles a deleted networkpolicy", func() {
+			app.Action = func(ctx *cli.Context) error {
+
+				npTest := networkPolicy{}
+				nTest := namespace{}
+
+				namespace1 := *newNamespace("namespace1")
+
+				nPodTest := newTPod(
+					"node1",
+					"10.128.1.0/24",
+					"10.128.1.2",
+					"10.128.1.1",
+					"myPod",
+					"10.128.1.4",
+					"11:22:33:44:55:66",
+					namespace1.Name,
+				)
+				networkPolicy := *newNetworkPolicy("networkpolicy1", namespace1.Name,
+					metav1.LabelSelector{},
+					[]knet.NetworkPolicyIngressRule{
+						{
+							From: []knet.NetworkPolicyPeer{
+								{
+									PodSelector: &metav1.LabelSelector{
+										MatchLabels: map[string]string{
+											"name": nPodTest.podName,
+										},
+									},
+								},
+							},
+						},
+					},
+					[]knet.NetworkPolicyEgressRule{
+						{
+							To: []knet.NetworkPolicyPeer{
+								{
+									PodSelector: &metav1.LabelSelector{
+										MatchLabels: map[string]string{
+											"name": nPodTest.podName,
+										},
+									},
+								},
+							},
+						},
+					})
+
+				fExec := ovntest.NewLooseCompareFakeExec()
+				nPodTest.baseCmds(fExec)
+				nPodTest.addNodeSetupCmds(fExec)
+				nPodTest.addCmdsForNonExistingPod(fExec)
+				nTest.baseCmds(fExec, namespace1)
+				nTest.addCmdsWithPods(fExec, nPodTest, namespace1)
+				npTest.addPodSelectorCmds(fExec, nPodTest, networkPolicy, true, true)
+
+				fakeOvn := FakeOVN{}
+				fakeOvn.start(ctx, fExec,
+					&v1.NamespaceList{
+						Items: []v1.Namespace{
+							namespace1,
+						},
+					},
+					&v1.PodList{
+						Items: []v1.Pod{
+							*newPod(nPodTest.namespace, nPodTest.podName, nPodTest.nodeName, nPodTest.podIP),
+						},
+					},
+					&knet.NetworkPolicyList{
+						Items: []knet.NetworkPolicy{
+							networkPolicy,
+						},
+					},
+				)
+
+				fakeOvn.controller.WatchPods()
+				fakeOvn.controller.WatchNamespaces()
+				fakeOvn.controller.WatchNetworkPolicy()
+
+				_, err := fakeOvn.fakeClient.NetworkingV1().NetworkPolicies(networkPolicy.Namespace).Get(networkPolicy.Name, metav1.GetOptions{})
+				Expect(err).NotTo(HaveOccurred())
+				Eventually(fExec.CalledMatchesExpected).Should(BeTrue())
+
+				npTest.delCmds(fExec, nPodTest, networkPolicy, true)
+
+				err = fakeOvn.fakeClient.NetworkingV1().NetworkPolicies(networkPolicy.Namespace).Delete(networkPolicy.Name, metav1.NewDeleteOptions(0))
+				Expect(err).NotTo(HaveOccurred())
+				Eventually(fExec.CalledMatchesExpected).Should(BeTrue())
+
+				return nil
+			}
+
+			err := app.Run([]string{app.Name})
+			Expect(err).NotTo(HaveOccurred())
 		})
 	})
 })

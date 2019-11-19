@@ -319,9 +319,9 @@ var _ = Describe("OVN NetworkPolicy Operations", func() {
 				networkPolicy := *newNetworkPolicy("networkpolicy1", namespace1.Name,
 					metav1.LabelSelector{},
 					[]knet.NetworkPolicyIngressRule{
-						knet.NetworkPolicyIngressRule{
+						{
 							From: []knet.NetworkPolicyPeer{
-								knet.NetworkPolicyPeer{
+								{
 									NamespaceSelector: &metav1.LabelSelector{
 										MatchLabels: map[string]string{
 											"name": namespace2.Name,
@@ -332,9 +332,9 @@ var _ = Describe("OVN NetworkPolicy Operations", func() {
 						},
 					},
 					[]knet.NetworkPolicyEgressRule{
-						knet.NetworkPolicyEgressRule{
+						{
 							To: []knet.NetworkPolicyPeer{
-								knet.NetworkPolicyPeer{
+								{
 									NamespaceSelector: &metav1.LabelSelector{
 										MatchLabels: map[string]string{
 											"name": namespace2.Name,
@@ -345,7 +345,7 @@ var _ = Describe("OVN NetworkPolicy Operations", func() {
 						},
 					})
 
-				fExec := ovntest.NewFakeExec(true)
+				fExec := ovntest.NewLooseCompareFakeExec()
 				nTest.baseCmds(fExec, namespace1, namespace2)
 				nTest.addCmds(fExec, namespace1, namespace2)
 				npTest.addNamespaceSelectorCmds(fExec, networkPolicy)
@@ -400,9 +400,9 @@ var _ = Describe("OVN NetworkPolicy Operations", func() {
 				networkPolicy := *newNetworkPolicy("networkpolicy1", namespace1.Name,
 					metav1.LabelSelector{},
 					[]knet.NetworkPolicyIngressRule{
-						knet.NetworkPolicyIngressRule{
+						{
 							From: []knet.NetworkPolicyPeer{
-								knet.NetworkPolicyPeer{
+								{
 									PodSelector: &metav1.LabelSelector{
 										MatchLabels: map[string]string{
 											"name": nPodTest.podName,
@@ -413,9 +413,9 @@ var _ = Describe("OVN NetworkPolicy Operations", func() {
 						},
 					},
 					[]knet.NetworkPolicyEgressRule{
-						knet.NetworkPolicyEgressRule{
+						{
 							To: []knet.NetworkPolicyPeer{
-								knet.NetworkPolicyPeer{
+								{
 									PodSelector: &metav1.LabelSelector{
 										MatchLabels: map[string]string{
 											"name": nPodTest.podName,
@@ -426,7 +426,7 @@ var _ = Describe("OVN NetworkPolicy Operations", func() {
 						},
 					})
 
-				fExec := ovntest.NewFakeExec(true)
+				fExec := ovntest.NewLooseCompareFakeExec()
 				nPodTest.baseCmds(fExec)
 				nPodTest.addNodeSetupCmds(fExec)
 				nPodTest.addCmdsForNonExistingPod(fExec)
@@ -490,9 +490,9 @@ var _ = Describe("OVN NetworkPolicy Operations", func() {
 				networkPolicy := *newNetworkPolicy("networkpolicy1", namespace1.Name,
 					metav1.LabelSelector{},
 					[]knet.NetworkPolicyIngressRule{
-						knet.NetworkPolicyIngressRule{
+						{
 							From: []knet.NetworkPolicyPeer{
-								knet.NetworkPolicyPeer{
+								{
 									PodSelector: &metav1.LabelSelector{
 										MatchLabels: map[string]string{
 											"name": nPodTest.podName,
@@ -508,9 +508,9 @@ var _ = Describe("OVN NetworkPolicy Operations", func() {
 						},
 					},
 					[]knet.NetworkPolicyEgressRule{
-						knet.NetworkPolicyEgressRule{
+						{
 							To: []knet.NetworkPolicyPeer{
-								knet.NetworkPolicyPeer{
+								{
 									PodSelector: &metav1.LabelSelector{
 										MatchLabels: map[string]string{
 											"name": nPodTest.podName,
@@ -526,7 +526,7 @@ var _ = Describe("OVN NetworkPolicy Operations", func() {
 						},
 					})
 
-				fExec := ovntest.NewFakeExec(true)
+				fExec := ovntest.NewLooseCompareFakeExec()
 				nPodTest.baseCmds(fExec)
 				nPodTest.addNodeSetupCmds(fExec)
 				nPodTest.addCmdsForNonExistingPod(fExec)
@@ -596,9 +596,9 @@ var _ = Describe("OVN NetworkPolicy Operations", func() {
 				networkPolicy := *newNetworkPolicy("networkpolicy1", namespace1.Name,
 					metav1.LabelSelector{},
 					[]knet.NetworkPolicyIngressRule{
-						knet.NetworkPolicyIngressRule{
+						{
 							From: []knet.NetworkPolicyPeer{
-								knet.NetworkPolicyPeer{
+								{
 									NamespaceSelector: &metav1.LabelSelector{
 										MatchLabels: map[string]string{
 											"name": namespace2.Name,
@@ -609,9 +609,9 @@ var _ = Describe("OVN NetworkPolicy Operations", func() {
 						},
 					},
 					[]knet.NetworkPolicyEgressRule{
-						knet.NetworkPolicyEgressRule{
+						{
 							To: []knet.NetworkPolicyPeer{
-								knet.NetworkPolicyPeer{
+								{
 									NamespaceSelector: &metav1.LabelSelector{
 										MatchLabels: map[string]string{
 											"name": namespace2.Name,
@@ -622,7 +622,7 @@ var _ = Describe("OVN NetworkPolicy Operations", func() {
 						},
 					})
 
-				fExec := ovntest.NewFakeExec(true)
+				fExec := ovntest.NewLooseCompareFakeExec()
 				nPodTest.baseCmds(fExec)
 				nPodTest.addNodeSetupCmds(fExec)
 				nPodTest.addCmdsForNonExistingPod(fExec)
@@ -694,9 +694,9 @@ var _ = Describe("OVN NetworkPolicy Operations", func() {
 				networkPolicy := *newNetworkPolicy("networkpolicy1", namespace1.Name,
 					metav1.LabelSelector{},
 					[]knet.NetworkPolicyIngressRule{
-						knet.NetworkPolicyIngressRule{
+						{
 							From: []knet.NetworkPolicyPeer{
-								knet.NetworkPolicyPeer{
+								{
 									NamespaceSelector: &metav1.LabelSelector{
 										MatchLabels: map[string]string{
 											"name": namespace2.Name,
@@ -707,9 +707,9 @@ var _ = Describe("OVN NetworkPolicy Operations", func() {
 						},
 					},
 					[]knet.NetworkPolicyEgressRule{
-						knet.NetworkPolicyEgressRule{
+						{
 							To: []knet.NetworkPolicyPeer{
-								knet.NetworkPolicyPeer{
+								{
 									NamespaceSelector: &metav1.LabelSelector{
 										MatchLabels: map[string]string{
 											"name": namespace2.Name,
@@ -720,7 +720,7 @@ var _ = Describe("OVN NetworkPolicy Operations", func() {
 						},
 					})
 
-				fExec := ovntest.NewFakeExec(true)
+				fExec := ovntest.NewLooseCompareFakeExec()
 				nTest.baseCmds(fExec, namespace1, namespace2)
 				nTest.addCmds(fExec, namespace1, namespace2)
 				npTest.addNamespaceSelectorCmds(fExec, networkPolicy)
@@ -781,9 +781,9 @@ var _ = Describe("OVN NetworkPolicy Operations", func() {
 				networkPolicy := *newNetworkPolicy("networkpolicy1", namespace1.Name,
 					metav1.LabelSelector{},
 					[]knet.NetworkPolicyIngressRule{
-						knet.NetworkPolicyIngressRule{
+						{
 							From: []knet.NetworkPolicyPeer{
-								knet.NetworkPolicyPeer{
+								{
 									PodSelector: &metav1.LabelSelector{
 										MatchLabels: map[string]string{
 											"name": nPodTest.podName,
@@ -794,9 +794,9 @@ var _ = Describe("OVN NetworkPolicy Operations", func() {
 						},
 					},
 					[]knet.NetworkPolicyEgressRule{
-						knet.NetworkPolicyEgressRule{
+						{
 							To: []knet.NetworkPolicyPeer{
-								knet.NetworkPolicyPeer{
+								{
 									PodSelector: &metav1.LabelSelector{
 										MatchLabels: map[string]string{
 											"name": nPodTest.podName,
@@ -807,7 +807,7 @@ var _ = Describe("OVN NetworkPolicy Operations", func() {
 						},
 					})
 
-				fExec := ovntest.NewFakeExec(true)
+				fExec := ovntest.NewLooseCompareFakeExec()
 				nPodTest.baseCmds(fExec)
 				nPodTest.addNodeSetupCmds(fExec)
 				nPodTest.addCmdsForNonExistingPod(fExec)
@@ -878,9 +878,9 @@ var _ = Describe("OVN NetworkPolicy Operations", func() {
 				networkPolicy := *newNetworkPolicy("networkpolicy1", namespace1.Name,
 					metav1.LabelSelector{},
 					[]knet.NetworkPolicyIngressRule{
-						knet.NetworkPolicyIngressRule{
+						{
 							From: []knet.NetworkPolicyPeer{
-								knet.NetworkPolicyPeer{
+								{
 									PodSelector: &metav1.LabelSelector{
 										MatchLabels: map[string]string{
 											"name": nPodTest.podName,
@@ -896,9 +896,9 @@ var _ = Describe("OVN NetworkPolicy Operations", func() {
 						},
 					},
 					[]knet.NetworkPolicyEgressRule{
-						knet.NetworkPolicyEgressRule{
+						{
 							To: []knet.NetworkPolicyPeer{
-								knet.NetworkPolicyPeer{
+								{
 									PodSelector: &metav1.LabelSelector{
 										MatchLabels: map[string]string{
 											"name": nPodTest.podName,
@@ -914,7 +914,7 @@ var _ = Describe("OVN NetworkPolicy Operations", func() {
 						},
 					})
 
-				fExec := ovntest.NewFakeExec(true)
+				fExec := ovntest.NewLooseCompareFakeExec()
 				nPodTest.baseCmds(fExec)
 				nPodTest.addNodeSetupCmds(fExec)
 				nPodTest.addCmdsForNonExistingPod(fExec)
@@ -954,6 +954,13 @@ var _ = Describe("OVN NetworkPolicy Operations", func() {
 				nPodTest.delCmds(fExec)
 				npTest.delPodCmds(fExec, nPodTest, networkPolicy)
 
+				fExec.AddFakeCmdsNoOutputNoError([]string{
+					"ovn-nbctl --timeout=15 --data=bare --no-heading --columns=_uuid find ACL match=\"outport == \\\"namespace2_myPod\\\"\" action=drop external-ids:default-deny-policy-type=Ingress external-ids:namespace=namespace2 external-ids:logical_switch=node1 external-ids:logical_port=namespace2_myPod",
+				})
+				fExec.AddFakeCmdsNoOutputNoError([]string{
+					"ovn-nbctl --timeout=15 --data=bare --no-heading --columns=_uuid find ACL match=\"inport == \\\"namespace2_myPod\\\"\" action=drop external-ids:default-deny-policy-type=Egress external-ids:namespace=namespace2 external-ids:logical_switch=node1 external-ids:logical_port=namespace2_myPod",
+				})
+
 				err = fakeOvn.fakeClient.CoreV1().Pods(nPodTest.namespace).Delete(nPodTest.podName, metav1.NewDeleteOptions(0))
 				Expect(err).NotTo(HaveOccurred())
 				Eventually(fExec.CalledMatchesExpected).Should(BeTrue())
@@ -986,9 +993,9 @@ var _ = Describe("OVN NetworkPolicy Operations", func() {
 				networkPolicy := *newNetworkPolicy("networkpolicy1", namespace1.Name,
 					metav1.LabelSelector{},
 					[]knet.NetworkPolicyIngressRule{
-						knet.NetworkPolicyIngressRule{
+						{
 							From: []knet.NetworkPolicyPeer{
-								knet.NetworkPolicyPeer{
+								{
 									PodSelector: &metav1.LabelSelector{
 										MatchLabels: map[string]string{
 											"name": nPodTest.podName,
@@ -999,9 +1006,9 @@ var _ = Describe("OVN NetworkPolicy Operations", func() {
 						},
 					},
 					[]knet.NetworkPolicyEgressRule{
-						knet.NetworkPolicyEgressRule{
+						{
 							To: []knet.NetworkPolicyPeer{
-								knet.NetworkPolicyPeer{
+								{
 									PodSelector: &metav1.LabelSelector{
 										MatchLabels: map[string]string{
 											"name": nPodTest.podName,
@@ -1012,7 +1019,7 @@ var _ = Describe("OVN NetworkPolicy Operations", func() {
 						},
 					})
 
-				fExec := ovntest.NewFakeExec(true)
+				fExec := ovntest.NewLooseCompareFakeExec()
 				nPodTest.baseCmds(fExec)
 				nPodTest.addNodeSetupCmds(fExec)
 				nPodTest.addCmdsForNonExistingPod(fExec)

@@ -105,7 +105,7 @@ var _ = Describe("OVN Namespace Operations", func() {
 					namespaceT.Name,
 				)
 
-				tExec := ovntest.NewFakeExec(false)
+				tExec := ovntest.NewFakeExec()
 				test.baseCmds(tExec, namespaceT)
 				test.addCmdsWithPods(tExec, tP, namespaceT)
 
@@ -141,7 +141,7 @@ var _ = Describe("OVN Namespace Operations", func() {
 				test := namespace{}
 				namespaceT := *newNamespace("namespace1")
 
-				tExec := ovntest.NewFakeExec(false)
+				tExec := ovntest.NewFakeExec()
 				test.baseCmds(tExec, namespaceT)
 				test.addCmds(tExec, namespaceT)
 
@@ -174,7 +174,7 @@ var _ = Describe("OVN Namespace Operations", func() {
 				test := namespace{}
 				namespaceT := *newNamespace("namespace1")
 
-				fExec := ovntest.NewFakeExec(false)
+				fExec := ovntest.NewFakeExec()
 				test.baseCmds(fExec, namespaceT)
 				test.addCmds(fExec, namespaceT)
 

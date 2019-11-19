@@ -129,7 +129,7 @@ var _ = Describe("OVN Namespace Operations", func() {
 					v1.ServiceTypeClusterIP,
 				)
 
-				fExec := ovntest.NewFakeExec(false)
+				fExec := ovntest.NewFakeExec()
 				test.baseCmds(fExec, service)
 
 				fakeOvn := FakeOVN{}
@@ -167,7 +167,7 @@ var _ = Describe("OVN Namespace Operations", func() {
 					v1.ServiceTypeClusterIP,
 				)
 
-				fExec := ovntest.NewFakeExec(false)
+				fExec := ovntest.NewFakeExec()
 				test.baseCmds(fExec, service)
 
 				fakeOvn := FakeOVN{}

@@ -26,19 +26,29 @@ type FakeExec struct {
 	// We will in such a case ignore order when comparing all executed commands during the run of a test case.
 	// This is important when defining test cases with multiple resources (or multiple resource watchers) of
 	// the same type and not being able to rely on a deterministic order of incomming watch events.
+	fakeexec.FakeExec
 	looseCompare     bool
 	commandPool      map[string]KCmd
 	expectedCommands []string
-	executedCommnds  []string
-	KFake            fakeexec.FakeExec
+	executedCommands []string
 }
 
-// NewFakeExec returns a new FakeExec with a default LookPathFunc
-func NewFakeExec(looseCompare bool) *FakeExec {
+// NewFakeExec returns a new FakeExec with a strict order compare
+func NewFakeExec() *FakeExec {
+	return newFakeExec(false)
+}
+
+// NewFakeExec returns a new FakeExec with a strict order compare
+func NewLooseCompareFakeExec() *FakeExec {
+	return newFakeExec(true)
+}
+
+// newFakeExec returns a new FakeExec with a default LookPathFunc
+func newFakeExec(looseCompare bool) *FakeExec {
 	return &FakeExec{
 		looseCompare: looseCompare,
 		commandPool:  make(map[string]KCmd),
-		KFake: fakeexec.FakeExec{
+		FakeExec: fakeexec.FakeExec{
 			LookPathFunc: func(file string) (string, error) {
 				return "/fake-bin/" + file, nil
 			},
@@ -48,27 +58,27 @@ func NewFakeExec(looseCompare bool) *FakeExec {
 
 // LookPath is for finding the path of a file
 func (f *FakeExec) LookPath(file string) (string, error) {
-	return f.KFake.LookPathFunc(file)
+	return f.LookPathFunc(file)
 }
 
 // CommandContext wraps arguments into exec.Cmd
 func (f *FakeExec) CommandContext(ctx context.Context, cmd string, args ...string) kexec.Cmd {
-	return f.KFake.Command(cmd, args...)
+	return f.Command(cmd, args...)
 }
 
 func (f *FakeExec) PrintAllCmds() {
 	for i := range f.expectedCommands {
 		logrus.Infof("Expected commands were %v: %v", i, f.expectedCommands[i])
 	}
-	for i := range f.executedCommnds {
-		logrus.Infof("Executed commands were %v: %v", i, f.executedCommnds[i])
+	for i := range f.executedCommands {
+		logrus.Infof("Executed commands were %v: %v", i, f.executedCommands[i])
 	}
 }
 
 // CalledMatchesExpected returns true if the number of commands the code under
 // test called matches the number of expected commands in the FakeExec's list
 func (f *FakeExec) CalledMatchesExpected() bool {
-	if len(f.executedCommnds) != len(f.expectedCommands) {
+	if len(f.executedCommands) != len(f.expectedCommands) {
 		logrus.Infof("Command calls do not match!")
 		f.PrintAllCmds()
 		return false
@@ -94,6 +104,7 @@ type ExpectedCmd struct {
 func getExecutedCommandline(cmd string, args ...string) string {
 	return cmd + " " + strings.Join(args, " ")
 }
+
 func getExpectedCommandline(cmd string) (string, []string) {
 	parts := strings.Split(cmd, " ")
 	expectedCommandline := "/fake-bin/" + strings.Join(parts, " ")
@@ -101,7 +112,7 @@ func getExpectedCommandline(cmd string) (string, []string) {
 }
 
 func (f *FakeExec) Command(cmd string, args ...string) kexec.Cmd {
-	f.executedCommnds = append(f.executedCommnds, getExecutedCommandline(cmd, args...))
+	f.executedCommands = append(f.executedCommands, getExecutedCommandline(cmd, args...))
 	if f.looseCompare {
 		executedCommandline := getExecutedCommandline(cmd, args...)
 		if c, ok := f.commandPool[executedCommandline]; ok {
@@ -110,7 +121,7 @@ func (f *FakeExec) Command(cmd string, args ...string) kexec.Cmd {
 		f.PrintAllCmds()
 		gomega.Expect(executedCommandline).To(gomega.Equal("Did you forget to add this command?"), "Called command is not in the pool of expected fake commands")
 	}
-	return f.KFake.Command(cmd, args...)
+	return f.FakeExec.Command(cmd, args...)
 }
 
 // AddFakeCmd takes the ExpectedCmd and appends its runner function to
@@ -148,7 +159,7 @@ func (f *FakeExec) AddFakeCmd(expected *ExpectedCmd) {
 	if f.looseCompare {
 		f.commandPool[expectedCommandline] = kCmd
 	} else {
-		f.KFake.CommandScript = append(f.KFake.CommandScript, kCmd)
+		f.CommandScript = append(f.CommandScript, kCmd)
 	}
 }
 

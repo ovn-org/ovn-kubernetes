@@ -76,7 +76,7 @@ var _ = Describe("Management Port Operations", func() {
 				lrpMAC        string = "00:00:00:00:00:03"
 			)
 
-			fexec := ovntest.NewFakeExec(false)
+			fexec := ovntest.NewFakeExec()
 
 			// generic setup
 			fexec.AddFakeCmdsNoOutputNoError([]string{
