@@ -36,9 +36,9 @@ spec:
   clusterIP: None
   ports:
   - name: http-metrics
-    port: 9102
+    port: 9409
     protocol: TCP
-    targetPort: 9102
+    targetPort: 9409
 ---
 
 apiVersion: monitoring.coreos.com/v1
@@ -76,6 +76,6 @@ spec:
   clusterIP: None
   ports:
   - name: http-metrics
-    port: 9101
+    port: 9410
     protocol: TCP
-    targetPort: 9101
+    targetPort: 9410
