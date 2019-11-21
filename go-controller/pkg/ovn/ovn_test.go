@@ -59,7 +59,7 @@ func (o *FakeOVN) init() {
 	o.watcher, err = factory.NewWatchFactory(o.fakeClient, o.stopChan)
 	Expect(err).NotTo(HaveOccurred())
 
-	o.controller = NewOvnController(o.fakeClient, o.watcher)
+	o.controller = NewOvnController(o.fakeClient, o.watcher, o.stopChan)
 	o.controller.portGroupSupport = o.portGroups
 	// Multicast depends on port groups
 	o.controller.multicastSupport = o.portGroups
