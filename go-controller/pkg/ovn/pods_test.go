@@ -91,49 +91,55 @@ func (p pod) populateLogicalSwitchCache(fakeOvn *FakeOVN) {
 	fakeOvn.controller.logicalSwitchCache[p.nodeName] = hostsubnet
 }
 
-func (p pod) addCmds(fexec *ovntest.FakeExec, exists, fail bool) {
+func (p pod) addCmds(fexec *ovntest.FakeExec, fail bool) {
 	// pod setup
-	if exists {
-		fexec.AddFakeCmdsNoOutputNoError([]string{
-			fmt.Sprintf("ovn-nbctl --timeout=15 --may-exist lsp-add %s %s -- lsp-set-addresses %s %s %s -- set logical_switch_port %s external-ids:namespace=namespace external-ids:logical_switch=%s external-ids:pod=true -- --if-exists clear logical_switch_port %s dynamic_addresses", p.nodeName, p.portName, p.portName, p.podMAC, p.podIP, p.portName, p.nodeName, p.portName),
-		})
-	} else {
-		fexec.AddFakeCmdsNoOutputNoError([]string{
-			"ovn-nbctl --timeout=15 -- --may-exist lsp-add " + p.nodeName + " " + p.portName + " -- lsp-set-addresses " + p.portName + " dynamic -- set logical_switch_port " + p.portName + " external-ids:namespace=" + p.namespace + " external-ids:logical_switch=" + p.nodeName + " external-ids:pod=true",
-		})
-	}
+	fexec.AddFakeCmdsNoOutputNoError([]string{
+		"ovn-nbctl --timeout=15 --may-exist lsp-add " + p.nodeName + " " + p.portName + " -- lsp-set-addresses " + p.portName + " dynamic -- set logical_switch_port " + p.portName + " external-ids:namespace=" + p.namespace + " external-ids:pod=true",
+	})
 	fexec.AddFakeCmd(&ovntest.ExpectedCmd{
 		Cmd:    "ovn-nbctl --timeout=15 get logical_switch_port " + p.portName + " dynamic_addresses addresses",
 		Output: `"` + p.podMAC + " " + p.podIP + `"` + "\n" + "[]",
 	})
+	fexec.AddFakeCmd(&ovntest.ExpectedCmd{
+		Cmd:    "ovn-nbctl --timeout=15 get logical_switch_port " + p.portName + " _uuid",
+		Output: fakeUUID + "\n",
+	})
 	if fail {
 		fexec.AddFakeCmd(&ovntest.ExpectedCmd{
-			Cmd: "ovn-nbctl --timeout=15 lsp-set-port-security " + p.portName + " " + p.podMAC + " " + p.podIP + "/24",
+			Cmd: "ovn-nbctl --timeout=15 lsp-set-port-security " + p.portName + " " + p.podMAC + " " + p.podIP,
 			Err: fmt.Errorf("adsfadsfasfdasfd"),
 		})
 	} else {
 		fexec.AddFakeCmdsNoOutputNoError([]string{
-			"ovn-nbctl --timeout=15 lsp-set-port-security " + p.portName + " " + p.podMAC + " " + p.podIP + "/24",
+			"ovn-nbctl --timeout=15 lsp-set-port-security " + p.portName + " " + p.podMAC + " " + p.podIP,
 		})
 	}
 }
 
 func (p pod) addCmdsForNonExistingPod(fexec *ovntest.FakeExec) {
-	p.addCmds(fexec, false, false)
+	p.addCmds(fexec, false)
 }
 
-func (p pod) addCmdsForExistingPod(fexec *ovntest.FakeExec) {
+func (p pod) addCmdsForExistingPod(fexec *ovntest.FakeExec, addPort bool) {
 	// pod setup
+	var addPortCmd string
+	if addPort {
+		addPortCmd = fmt.Sprintf("lsp-add %s %s ", p.nodeName, p.portName)
+	}
 	fexec.AddFakeCmdsNoOutputNoError([]string{
-		fmt.Sprintf("ovn-nbctl --timeout=15 --may-exist lsp-add %s %s -- lsp-set-addresses %s %s %s -- set logical_switch_port %s external-ids:namespace=namespace external-ids:logical_switch=%s external-ids:pod=true -- --if-exists clear logical_switch_port %s dynamic_addresses", p.nodeName, p.portName, p.portName, p.podMAC, p.podIP, p.portName, p.nodeName, p.portName),
+		fmt.Sprintf("ovn-nbctl --timeout=15 %s-- lsp-set-addresses %s %s %s -- --if-exists clear logical_switch_port %s dynamic_addresses -- set logical_switch_port %s external-ids:namespace=namespace external-ids:pod=true", addPortCmd, p.portName, p.podMAC, p.podIP, p.portName, p.portName),
+	})
+	fexec.AddFakeCmd(&ovntest.ExpectedCmd{
+		Cmd:    "ovn-nbctl --timeout=15 get logical_switch_port " + p.portName + " _uuid",
+		Output: fakeUUID + "\n",
 	})
 	fexec.AddFakeCmdsNoOutputNoError([]string{
-		"ovn-nbctl --timeout=15 lsp-set-port-security " + p.portName + " " + p.podMAC + " " + p.podIP + "/24",
+		"ovn-nbctl --timeout=15 lsp-set-port-security " + p.portName + " " + p.podMAC + " " + p.podIP,
 	})
 }
 
 func (p pod) addCmdsForNonExistingFailedPod(fexec *ovntest.FakeExec) {
-	p.addCmds(fexec, false, true)
+	p.addCmds(fexec, true)
 }
 
 func (p pod) delCmds(fexec *ovntest.FakeExec) {
@@ -142,45 +148,25 @@ func (p pod) delCmds(fexec *ovntest.FakeExec) {
 		"ovn-nbctl --timeout=15 --if-exists lsp-del " + p.portName,
 	})
 }
+
 func (p pod) delFromNamespaceCmds(fexec *ovntest.FakeExec, pod pod, isMulticastEnabled bool) {
 	fexec.AddFakeCmdsNoOutputNoError([]string{
 		fmt.Sprintf("ovn-nbctl --timeout=15 remove address_set %s addresses %s", hashedAddressSet(pod.namespace), pod.podIP),
 	})
-	fexec.AddFakeCmd(&ovntest.ExpectedCmd{
-		Cmd:    fmt.Sprintf("ovn-nbctl --timeout=15 --if-exists get logical_switch_port %s _uuid", pod.portName),
-		Output: fakeUUID,
-	})
 	if isMulticastEnabled {
 		fexec.AddFakeCmdsNoOutputNoError([]string{
-			fmt.Sprintf("ovn-nbctl --timeout=15 --if-exists remove port_group mcastPortGroupDeny ports %s", fakeUUID),
+			"ovn-nbctl --timeout=15 --if-exists remove port_group mcastPortGroupDeny ports " + fakeUUID,
 		})
 	}
 }
 
-func (p pod) getLogicalPortUUIDCmds(fexec *ovntest.FakeExec) {
-	fexec.AddFakeCmd(&ovntest.ExpectedCmd{
-		Cmd:    "ovn-nbctl --timeout=15 --if-exists get logical_switch_port " + p.portName + " _uuid",
-		Output: fakeUUID,
-	})
-}
-
-func (p pod) addPodDenyMcast(fexec *ovntest.FakeExec, inCache bool) {
-	if !inCache {
-		p.getLogicalPortUUIDCmds(fexec)
-	}
-
+func (p pod) addPodDenyMcast(fexec *ovntest.FakeExec) {
 	fexec.AddFakeCmdsNoOutputNoError([]string{
-		"ovn-nbctl --timeout=15 " +
-			"--if-exists remove port_group mcastPortGroupDeny ports " + fakeUUID + " " +
-			"-- add port_group mcastPortGroupDeny ports " + fakeUUID,
+		"ovn-nbctl --timeout=15 --if-exists remove port_group mcastPortGroupDeny ports " + fakeUUID + " -- add port_group mcastPortGroupDeny ports " + fakeUUID,
 	})
 }
 
-func (p pod) delPodDenyMcast(fexec *ovntest.FakeExec, inCache bool) {
-	if !inCache {
-		p.getLogicalPortUUIDCmds(fexec)
-	}
-
+func (p pod) delPodDenyMcast(fexec *ovntest.FakeExec) {
 	fexec.AddFakeCmdsNoOutputNoError([]string{
 		"ovn-nbctl --timeout=15 --if-exists remove port_group mcastPortGroupDeny ports " + fakeUUID,
 	})
@@ -250,7 +236,7 @@ var _ = Describe("OVN Pod Operations", func() {
 				t.portName = t.namespace + "_" + t.podName
 				t.populateLogicalSwitchCache(fakeOvn)
 				t.addCmdsForNonExistingPod(fExec)
-				t.addPodDenyMcast(fExec, false)
+				t.addPodDenyMcast(fExec)
 
 				_, err = fakeOvn.fakeClient.CoreV1().Pods(t.namespace).Update(newPod(t.namespace, t.podName, t.nodeName, t.podIP))
 				Expect(err).NotTo(HaveOccurred())
@@ -297,7 +283,7 @@ var _ = Describe("OVN Pod Operations", func() {
 				Expect(fExec.CalledMatchesExpected()).To(BeTrue(), fExec.ErrorDesc)
 
 				t.addCmdsForNonExistingPod(fExec)
-				t.addPodDenyMcast(fExec, false)
+				t.addPodDenyMcast(fExec)
 
 				_, err := fakeOvn.fakeClient.CoreV1().Pods(t.namespace).Create(newPod(t.namespace, t.podName, t.nodeName, t.podIP))
 				Expect(err).NotTo(HaveOccurred())
@@ -337,7 +323,7 @@ var _ = Describe("OVN Pod Operations", func() {
 					Output: "\n",
 				})
 				t.addCmdsForNonExistingPod(fExec)
-				t.addPodDenyMcast(fExec, false)
+				t.addPodDenyMcast(fExec)
 
 				fakeOvn.start(ctx, &v1.PodList{
 					Items: []v1.Pod{
@@ -356,8 +342,8 @@ var _ = Describe("OVN Pod Operations", func() {
 				Eventually(fExec.CalledMatchesExpected).Should(BeTrue(), fExec.ErrorDesc)
 
 				// Delete it
+				t.delPodDenyMcast(fExec)
 				t.delCmds(fExec)
-				t.delPodDenyMcast(fExec, false)
 
 				err = fakeOvn.fakeClient.CoreV1().Pods(t.namespace).Delete(t.podName, metav1.NewDeleteOptions(0))
 				Expect(err).NotTo(HaveOccurred())
@@ -406,7 +392,7 @@ var _ = Describe("OVN Pod Operations", func() {
 
 				// Pod creation should be retried on Update event
 				t.addCmdsForNonExistingPod(fExec)
-				t.addPodDenyMcast(fExec, false)
+				t.addPodDenyMcast(fExec)
 				_, err := fakeOvn.fakeClient.CoreV1().Pods(t.namespace).Update(newPod(t.namespace, t.podName, t.nodeName, t.podIP))
 				Expect(err).NotTo(HaveOccurred())
 				Eventually(fExec.CalledMatchesExpected).Should(BeTrue(), fExec.ErrorDesc)
@@ -450,7 +436,7 @@ var _ = Describe("OVN Pod Operations", func() {
 					"ovn-nbctl --timeout=15 --if-exists lsp-del " + t.portName,
 				})
 				t.addCmdsForNonExistingPod(fExec)
-				t.addPodDenyMcast(fExec, false)
+				t.addPodDenyMcast(fExec)
 
 				fakeOvn.start(ctx, &v1.PodList{
 					Items: []v1.Pod{
@@ -534,7 +520,7 @@ var _ = Describe("OVN Pod Operations", func() {
 					Output: "\n",
 				})
 				t.addCmdsForNonExistingPod(fExec)
-				t.addPodDenyMcast(fExec, false)
+				t.addPodDenyMcast(fExec)
 
 				fakeOvn.start(ctx, &v1.PodList{
 					Items: []v1.Pod{
@@ -562,7 +548,7 @@ var _ = Describe("OVN Pod Operations", func() {
 
 	Context("on ovn restart", func() {
 
-		It("reconciles an existing pod", func() {
+		It("reconciles an existing pod without an existing logical switch port", func() {
 			app.Action = func(ctx *cli.Context) error {
 
 				t := newTPod(
@@ -581,7 +567,7 @@ var _ = Describe("OVN Pod Operations", func() {
 					Output: "\n",
 				})
 				t.addCmdsForNonExistingPod(fExec)
-				t.addPodDenyMcast(fExec, false)
+				t.addPodDenyMcast(fExec)
 
 				fakeOvn.start(ctx, &v1.PodList{
 					Items: []v1.Pod{
@@ -605,7 +591,82 @@ var _ = Describe("OVN Pod Operations", func() {
 					Output: "\n",
 				})
 				t.populateLogicalSwitchCache(fakeOvn)
-				t.addCmdsForExistingPod(fExec)
+				fExec.AddFakeCmd(&ovntest.ExpectedCmd{
+					Cmd:    "ovn-nbctl --timeout=15 --if-exists get logical_switch_port namespace_myPod _uuid",
+					Output: "\n",
+				})
+				t.addCmdsForExistingPod(fExec, true)
+				t.addPodDenyMcast(fExec)
+
+				fakeOvn.restart()
+				t.populateLogicalSwitchCache(fakeOvn)
+				fakeOvn.controller.WatchPods()
+
+				pod, err = fakeOvn.fakeClient.CoreV1().Pods(t.namespace).Get(t.podName, metav1.GetOptions{})
+				Expect(err).NotTo(HaveOccurred())
+				Eventually(fExec.CalledMatchesExpected).Should(BeTrue(), fExec.ErrorDesc)
+
+				// Check that pod annotations have been re-written to correct values
+				podAnnotation, ok = pod.Annotations[util.OvnPodAnnotationName]
+				Expect(ok).To(BeTrue())
+				Expect(podAnnotation).To(MatchJSON(`{"default": {"ip_address":"` + t.podIP + `/24", "mac_address":"` + t.podMAC + `", "gateway_ip": "` + t.nodeGWIP + `"}}`))
+
+				return nil
+			}
+
+			err := app.Run([]string{app.Name})
+			Expect(err).NotTo(HaveOccurred())
+		})
+
+		It("reconciles an existing pod with an existing logical switch port", func() {
+			app.Action = func(ctx *cli.Context) error {
+
+				t := newTPod(
+					"node1",
+					"10.128.1.0/24",
+					"10.128.1.2",
+					"10.128.1.1",
+					"myPod",
+					"10.128.1.4",
+					"11:22:33:44:55:66",
+					"namespace",
+				)
+
+				fExec.AddFakeCmd(&ovntest.ExpectedCmd{
+					Cmd:    "ovn-nbctl --timeout=15 --data=bare --no-heading --columns=name find logical_switch_port external_ids:pod=true",
+					Output: "\n",
+				})
+				t.addCmdsForNonExistingPod(fExec)
+				t.addPodDenyMcast(fExec)
+
+				fakeOvn.start(ctx, &v1.PodList{
+					Items: []v1.Pod{
+						*newPod(t.namespace, t.podName, t.nodeName, t.podIP),
+					},
+				})
+				t.populateLogicalSwitchCache(fakeOvn)
+				fakeOvn.controller.WatchPods()
+
+				pod, err := fakeOvn.fakeClient.CoreV1().Pods(t.namespace).Get(t.podName, metav1.GetOptions{})
+				Expect(err).NotTo(HaveOccurred())
+				Expect(fExec.CalledMatchesExpected()).To(BeTrue(), fExec.ErrorDesc)
+
+				podAnnotation, ok := pod.Annotations[util.OvnPodAnnotationName]
+				Expect(ok).To(BeTrue())
+				Expect(podAnnotation).To(MatchJSON(`{"default": {"ip_address":"` + t.podIP + `/24", "mac_address":"` + t.podMAC + `", "gateway_ip": "` + t.nodeGWIP + `"}}`))
+
+				// Simulate an OVN restart with a new IP assignment and verify that the pod annotation is updated.
+				fExec.AddFakeCmd(&ovntest.ExpectedCmd{
+					Cmd:    "ovn-nbctl --timeout=15 --data=bare --no-heading --columns=name find logical_switch_port external_ids:pod=true",
+					Output: "\n",
+				})
+				t.populateLogicalSwitchCache(fakeOvn)
+				fExec.AddFakeCmd(&ovntest.ExpectedCmd{
+					Cmd:    "ovn-nbctl --timeout=15 --if-exists get logical_switch_port namespace_myPod _uuid",
+					Output: fakeUUID + "\n",
+				})
+				t.addCmdsForExistingPod(fExec, false)
+				t.addPodDenyMcast(fExec)
 
 				fakeOvn.restart()
 				t.populateLogicalSwitchCache(fakeOvn)
