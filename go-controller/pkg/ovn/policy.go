@@ -228,33 +228,23 @@ func deleteACLPortGroup(portGroupName, direction, priority, match, action string
 	return nil
 }
 
-func (oc *Controller) addToPortGroup(portGroup, logicalPort string) error {
-	logicalPortUUID, err := oc.getLogicalPortUUID(logicalPort)
-	if err != nil {
-		return err
-	}
-
+func (oc *Controller) addToPortGroup(portGroup string, portInfo *lpInfo) error {
 	_, stderr, err := util.RunOVNNbctl("--if-exists", "remove",
-		"port_group", portGroup, "ports", logicalPortUUID, "--",
-		"add", "port_group", portGroup, "ports", logicalPortUUID)
+		"port_group", portGroup, "ports", portInfo.uuid, "--",
+		"add", "port_group", portGroup, "ports", portInfo.uuid)
 	if err != nil {
 		return fmt.Errorf("failed to add logicalPort %s to portGroup %s "+
-			"stderr: %q (%v)", logicalPort, portGroup, stderr, err)
+			"stderr: %q (%v)", portInfo.name, portGroup, stderr, err)
 	}
 	return nil
 }
 
-func (oc *Controller) deleteFromPortGroup(portGroup, logicalPort string) error {
-	logicalPortUUID, err := oc.getLogicalPortUUID(logicalPort)
-	if err != nil {
-		return err
-	}
-
+func (oc *Controller) deleteFromPortGroup(portGroup string, portInfo *lpInfo) error {
 	_, stderr, err := util.RunOVNNbctl("--if-exists", "remove",
-		"port_group", portGroup, "ports", logicalPortUUID)
+		"port_group", portGroup, "ports", portInfo.uuid)
 	if err != nil {
 		return fmt.Errorf("failed to delete logicalPort %s to portGroup %s "+
-			"stderr: %q (%v)", logicalPort, portGroup, stderr, err)
+			"stderr: %q (%v)", portInfo.name, portGroup, stderr, err)
 	}
 	return nil
 }
@@ -382,7 +372,9 @@ func (oc *Controller) createMulticastAllowPolicy(ns string) error {
 
 	// Add all ports from this namespace to the multicast allow group.
 	for _, portName := range oc.namespaceAddressSet[ns] {
-		if err := oc.podAddAllowMulticastPolicy(ns, portName); err != nil {
+		if portInfo, err := oc.logicalPortCache.get(portName); err != nil {
+			logrus.Errorf(err.Error())
+		} else if err := oc.podAddAllowMulticastPolicy(ns, portInfo); err != nil {
 			logrus.Warningf("failed to add port %s to port group ACL: %v", portName, err)
 		}
 	}
@@ -448,32 +440,32 @@ func createDefaultDenyMulticastPolicy() error {
 	return nil
 }
 
-func (oc *Controller) podAddDefaultDenyMulticastPolicy(logicalPort string) error {
-	if err := oc.addToPortGroup("mcastPortGroupDeny", logicalPort); err != nil {
-		return fmt.Errorf("failed to add port %s to default multicast deny ACL: %v", logicalPort, err)
+func (oc *Controller) podAddDefaultDenyMulticastPolicy(portInfo *lpInfo) error {
+	if err := oc.addToPortGroup("mcastPortGroupDeny", portInfo); err != nil {
+		return fmt.Errorf("failed to add port %s to default multicast deny ACL: %v", portInfo.name, err)
 	}
 	return nil
 }
 
-func (oc *Controller) podDeleteDefaultDenyMulticastPolicy(logicalPort string) error {
-	if err := oc.deleteFromPortGroup("mcastPortGroupDeny", logicalPort); err != nil {
-		return fmt.Errorf("failed to delete port %s from default multicast deny ACL: %v", logicalPort, err)
+func (oc *Controller) podDeleteDefaultDenyMulticastPolicy(portInfo *lpInfo) error {
+	if err := oc.deleteFromPortGroup("mcastPortGroupDeny", portInfo); err != nil {
+		return fmt.Errorf("failed to delete port %s from default multicast deny ACL: %v", portInfo.name, err)
 	}
 	return nil
 }
 
-func (oc *Controller) podAddAllowMulticastPolicy(ns, logicalPort string) error {
+func (oc *Controller) podAddAllowMulticastPolicy(ns string, portInfo *lpInfo) error {
 	_, portGroupHash := getMulticastPortGroup(ns)
-	return oc.addToPortGroup(portGroupHash, logicalPort)
+	return oc.addToPortGroup(portGroupHash, portInfo)
 }
 
-func (oc *Controller) podDeleteAllowMulticastPolicy(ns, logicalPort string) error {
+func (oc *Controller) podDeleteAllowMulticastPolicy(ns string, portInfo *lpInfo) error {
 	_, portGroupHash := getMulticastPortGroup(ns)
-	return oc.deleteFromPortGroup(portGroupHash, logicalPort)
+	return oc.deleteFromPortGroup(portGroupHash, portInfo)
 }
 
 func (oc *Controller) localPodAddDefaultDeny(
-	policy *knet.NetworkPolicy, logicalPort string) {
+	policy *knet.NetworkPolicy, portInfo *lpInfo) {
 	oc.lspMutex.Lock()
 	defer oc.lspMutex.Unlock()
 
@@ -501,37 +493,37 @@ func (oc *Controller) localPodAddDefaultDeny(
 
 	// Handle condition 1 above.
 	if !(len(policy.Spec.PolicyTypes) == 1 && policy.Spec.PolicyTypes[0] == knet.PolicyTypeEgress) {
-		if oc.lspIngressDenyCache[logicalPort] == 0 {
-			if err := oc.addToPortGroup(oc.portGroupIngressDeny, logicalPort); err != nil {
-				logrus.Warningf("failed to add port %s to ingress deny ACL: %v", logicalPort, err)
+		if oc.lspIngressDenyCache[portInfo.name] == 0 {
+			if err := oc.addToPortGroup(oc.portGroupIngressDeny, portInfo); err != nil {
+				logrus.Warningf("failed to add port %s to ingress deny ACL: %v", portInfo.name, err)
 			}
 		}
-		oc.lspIngressDenyCache[logicalPort]++
+		oc.lspIngressDenyCache[portInfo.name]++
 	}
 
 	// Handle condition 2 above.
 	if (len(policy.Spec.PolicyTypes) == 1 && policy.Spec.PolicyTypes[0] == knet.PolicyTypeEgress) ||
 		len(policy.Spec.Egress) > 0 || len(policy.Spec.PolicyTypes) == 2 {
-		if oc.lspEgressDenyCache[logicalPort] == 0 {
-			if err := oc.addToPortGroup(oc.portGroupEgressDeny, logicalPort); err != nil {
-				logrus.Warningf("failed to add port %s to egress deny ACL: %v", logicalPort, err)
+		if oc.lspEgressDenyCache[portInfo.name] == 0 {
+			if err := oc.addToPortGroup(oc.portGroupEgressDeny, portInfo); err != nil {
+				logrus.Warningf("failed to add port %s to egress deny ACL: %v", portInfo.name, err)
 			}
 		}
-		oc.lspEgressDenyCache[logicalPort]++
+		oc.lspEgressDenyCache[portInfo.name]++
 	}
 }
 
 func (oc *Controller) localPodDelDefaultDeny(
-	policy *knet.NetworkPolicy, logicalPort string) {
+	policy *knet.NetworkPolicy, portInfo *lpInfo) {
 	oc.lspMutex.Lock()
 	defer oc.lspMutex.Unlock()
 
 	if !(len(policy.Spec.PolicyTypes) == 1 && policy.Spec.PolicyTypes[0] == knet.PolicyTypeEgress) {
-		if oc.lspIngressDenyCache[logicalPort] > 0 {
-			oc.lspIngressDenyCache[logicalPort]--
-			if oc.lspIngressDenyCache[logicalPort] == 0 {
-				if err := oc.deleteFromPortGroup(oc.portGroupIngressDeny, logicalPort); err != nil {
-					logrus.Warningf("failed to remove port %s from ingress deny ACL: %v", logicalPort, err)
+		if oc.lspIngressDenyCache[portInfo.name] > 0 {
+			oc.lspIngressDenyCache[portInfo.name]--
+			if oc.lspIngressDenyCache[portInfo.name] == 0 {
+				if err := oc.deleteFromPortGroup(oc.portGroupIngressDeny, portInfo); err != nil {
+					logrus.Warningf("failed to remove port %s from ingress deny ACL: %v", portInfo.name, err)
 				}
 			}
 		}
@@ -539,11 +531,11 @@ func (oc *Controller) localPodDelDefaultDeny(
 
 	if (len(policy.Spec.PolicyTypes) == 1 && policy.Spec.PolicyTypes[0] == knet.PolicyTypeEgress) ||
 		len(policy.Spec.Egress) > 0 || len(policy.Spec.PolicyTypes) == 2 {
-		if oc.lspEgressDenyCache[logicalPort] > 0 {
-			oc.lspEgressDenyCache[logicalPort]--
-			if oc.lspEgressDenyCache[logicalPort] == 0 {
-				if err := oc.deleteFromPortGroup(oc.portGroupEgressDeny, logicalPort); err != nil {
-					logrus.Warningf("failed to remove port %s from egress deny ACL: %v", logicalPort, err)
+		if oc.lspEgressDenyCache[portInfo.name] > 0 {
+			oc.lspEgressDenyCache[portInfo.name]--
+			if oc.lspEgressDenyCache[portInfo.name] == 0 {
+				if err := oc.deleteFromPortGroup(oc.portGroupEgressDeny, portInfo); err != nil {
+					logrus.Warningf("failed to remove port %s from egress deny ACL: %v", portInfo.name, err)
 				}
 			}
 		}
@@ -555,17 +547,13 @@ func (oc *Controller) handleLocalPodSelectorAddFunc(
 	obj interface{}) {
 	pod := obj.(*kapi.Pod)
 
-	if _, err := util.UnmarshalPodAnnotation(pod.Annotations); err != nil {
-		return
-	}
-
 	if pod.Spec.NodeName == "" {
 		return
 	}
 
-	// Get the logical port name.
+	// Get the logical port info
 	logicalPort := podLogicalPortName(pod)
-	logicalPortUUID, err := oc.getLogicalPortUUID(logicalPort)
+	portInfo, err := oc.logicalPortCache.get(logicalPort)
 	if err != nil {
 		logrus.Errorf(err.Error())
 		return
@@ -578,25 +566,25 @@ func (oc *Controller) handleLocalPodSelectorAddFunc(
 		return
 	}
 
-	if np.localPods[logicalPort] {
+	if _, ok := np.localPods[logicalPort]; ok {
 		return
 	}
 
-	oc.localPodAddDefaultDeny(policy, logicalPort)
+	oc.localPodAddDefaultDeny(policy, portInfo)
 
 	if np.portGroupUUID == "" {
 		return
 	}
 
 	_, stderr, err := util.RunOVNNbctl("--if-exists", "remove",
-		"port_group", np.portGroupUUID, "ports", logicalPortUUID, "--",
-		"add", "port_group", np.portGroupUUID, "ports", logicalPortUUID)
+		"port_group", np.portGroupUUID, "ports", portInfo.uuid, "--",
+		"add", "port_group", np.portGroupUUID, "ports", portInfo.uuid)
 	if err != nil {
 		logrus.Errorf("Failed to add logicalPort %s to portGroup %s "+
 			"stderr: %q (%v)", logicalPort, np.portGroupUUID, stderr, err)
 	}
 
-	np.localPods[logicalPort] = true
+	np.localPods[logicalPort] = portInfo
 }
 
 func (oc *Controller) handleLocalPodSelectorDelFunc(
@@ -608,9 +596,9 @@ func (oc *Controller) handleLocalPodSelectorDelFunc(
 		return
 	}
 
-	// Get the logical port name.
+	// Get the logical port info
 	logicalPort := podLogicalPortName(pod)
-	logicalPortUUID, err := oc.getLogicalPortUUID(logicalPort)
+	portInfo, err := oc.logicalPortCache.get(logicalPort)
 	if err != nil {
 		logrus.Errorf(err.Error())
 		return
@@ -623,26 +611,26 @@ func (oc *Controller) handleLocalPodSelectorDelFunc(
 		return
 	}
 
-	if !np.localPods[logicalPort] {
+	if _, ok := np.localPods[logicalPort]; !ok {
 		return
 	}
 	delete(np.localPods, logicalPort)
-	oc.localPodDelDefaultDeny(policy, logicalPort)
+	oc.localPodDelDefaultDeny(policy, portInfo)
 
 	oc.lspMutex.Lock()
 	delete(oc.lspIngressDenyCache, logicalPort)
 	delete(oc.lspEgressDenyCache, logicalPort)
 	oc.lspMutex.Unlock()
 
-	if logicalPortUUID == "" || np.portGroupUUID == "" {
+	if np.portGroupUUID == "" {
 		return
 	}
 
 	_, stderr, err := util.RunOVNNbctl("--if-exists", "remove",
-		"port_group", np.portGroupUUID, "ports", logicalPortUUID)
+		"port_group", np.portGroupUUID, "ports", portInfo.uuid)
 	if err != nil {
 		logrus.Errorf("Failed to delete logicalPort %s from portGroup %s "+
-			"stderr: %q (%v)", logicalPort, np.portGroupUUID, stderr, err)
+			"stderr: %q (%v)", portInfo.uuid, np.portGroupUUID, stderr, err)
 	}
 }
 
@@ -901,8 +889,8 @@ func (oc *Controller) deleteNetworkPolicyPortGroup(
 	// We should now stop all the handlers go routines.
 	oc.shutdownHandlers(np)
 
-	for logicalPort := range np.localPods {
-		oc.localPodDelDefaultDeny(policy, logicalPort)
+	for _, portInfo := range np.localPods {
+		oc.localPodDelDefaultDeny(policy, portInfo)
 	}
 
 	// Delete the port group
