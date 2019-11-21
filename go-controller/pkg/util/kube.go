@@ -2,6 +2,7 @@ package util
 
 import (
 	"fmt"
+	"net"
 	"strings"
 
 	kapi "k8s.io/api/core/v1"
@@ -9,6 +10,7 @@ import (
 	"k8s.io/client-go/rest"
 	"k8s.io/client-go/tools/clientcmd"
 	"k8s.io/client-go/util/cert"
+	"k8s.io/klog"
 
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
 )
@@ -95,4 +97,31 @@ func ExtractDbRemotesFromEndpoint(ep *kapi.Endpoints) ([]string, int32, int32, e
 	}
 
 	return masterIPList, sbDBPort, nbDBPort, nil
+}
+
+func GetNodeIP(nodeName string) (string, error) {
+	ip := net.ParseIP(nodeName)
+	if ip == nil {
+		addrs, err := net.LookupIP(nodeName)
+		if err != nil {
+			return "", fmt.Errorf("Failed to lookup IP address for node %s: %v", nodeName, err)
+		}
+		for _, addr := range addrs {
+			// Skip loopback and non IPv4 addrs
+			if addr.IsLoopback() || addr.To4() == nil {
+				klog.V(5).Infof("Skipping loopback/non-IPv4 addr: %q for node %s", addr.String(), nodeName)
+				continue
+			}
+			ip = addr
+			break
+		}
+	} else if ip.IsLoopback() || ip.To4() == nil {
+		klog.V(5).Infof("Skipping loopback/non-IPv4 addr: %q for node %s", ip.String(), nodeName)
+		ip = nil
+	}
+
+	if ip == nil || len(ip.String()) == 0 {
+		return "", fmt.Errorf("Failed to obtain IP address from node name: %s", nodeName)
+	}
+	return ip.String(), nil
 }

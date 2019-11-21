@@ -13,9 +13,9 @@ import (
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/factory"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/kube"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/allocator"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
 
-	"github.com/openshift/origin/pkg/util/netutils"
 	kapi "k8s.io/api/core/v1"
 	"k8s.io/client-go/kubernetes"
 )
@@ -23,7 +23,7 @@ import (
 // MasterController is the master hybrid overlay controller
 type MasterController struct {
 	kube      *kube.Kube
-	allocator []*netutils.SubnetAllocator
+	allocator []*allocator.SubnetAllocator
 }
 
 // NewMaster a new master controller that listens for node events
@@ -46,7 +46,7 @@ func NewMaster(clientset kubernetes.Interface, subnets []config.CIDRNetworkEntry
 		}
 	}
 
-	masterSubnetAllocatorList := make([]*netutils.SubnetAllocator, 0)
+	masterSubnetAllocatorList := make([]*allocator.SubnetAllocator, 0)
 	// NewSubnetAllocator is a subnet IPAM, which takes a CIDR (first argument)
 	// and gives out subnets of length 'hostSubnetLength' (second argument)
 	// but omitting any that exist in 'subrange' (third argument)
@@ -62,7 +62,7 @@ func NewMaster(clientset kubernetes.Interface, subnets []config.CIDRNetworkEntry
 				subrange = append(subrange, allocatedRange)
 			}
 		}
-		subnetAllocator, err := netutils.NewSubnetAllocator(subnet.CIDR.String(), 32-subnet.HostSubnetLength, subrange)
+		subnetAllocator, err := allocator.NewSubnetAllocator(subnet.CIDR.String(), 32-subnet.HostSubnetLength, subrange)
 		if err != nil {
 			return nil, fmt.Errorf("error creating subnet allocator for %q: %v", subnet.CIDR.String(), err)
 		}
@@ -142,7 +142,7 @@ func (m *MasterController) updateNodeAnnotation(node *kapi.Node, annotator kube.
 				}
 			})
 			return nil
-		} else if err != netutils.ErrSubnetAllocatorFull {
+		} else if err != allocator.ErrSubnetAllocatorFull {
 			return err
 		}
 		// Current subnet exhausted, check next possible subnet

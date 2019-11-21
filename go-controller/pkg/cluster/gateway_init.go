@@ -148,7 +148,7 @@ func GatewayReady(nodeName string, portName string) (bool, error) {
 	stdout, stderr, err := util.RunOVNNbctl("lsp-get-addresses", "etor-"+gatewayRouter)
 	if err != nil {
 		logrus.Errorf("Error while obtaining gateway router addresses for %s - %v", nodeName, err)
-		return false, err
+		return false, nil
 	}
 	// Did master create etor-GR_nodeName port on ls?
 	if stdout == "" || stderr != "" {

@@ -305,7 +305,7 @@ func initSharedGateway(
 
 	annotations := map[string]string{
 		ovn.OvnNodeGatewayMode:       string(config.Gateway.Mode),
-		ovn.OvnNodeGatewayVlanID:     string(config.Gateway.VLANID),
+		ovn.OvnNodeGatewayVlanID:     fmt.Sprintf("%d", config.Gateway.VLANID),
 		ovn.OvnNodeGatewayIfaceID:    ifaceID,
 		ovn.OvnNodeGatewayMacAddress: macAddress,
 		ovn.OvnNodeGatewayIP:         ipAddress,
@@ -329,7 +329,6 @@ func initSharedGateway(
 	}, nil
 }
 
-// cleanupSharedGateway cleans up Localnet Gateway
 func cleanupSharedGateway() error {
 	// NicToBridge() may be created before-hand, only delete the patch port here
 	stdout, stderr, err := util.RunOVSVsctl("--columns=name", "--no-heading", "find", "port",

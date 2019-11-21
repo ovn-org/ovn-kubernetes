@@ -14,12 +14,15 @@ import (
 	"github.com/sirupsen/logrus"
 	"github.com/urfave/cli"
 	gcfg "gopkg.in/gcfg.v1"
+	lumberjack "gopkg.in/natefinch/lumberjack.v2"
 
 	kexec "k8s.io/utils/exec"
 )
 
 // DefaultEncapPort number used if not supplied
 const DefaultEncapPort = 6081
+
+const MetricNamespace = "ovnkube"
 
 // The following are global config parameters that other modules may access directly
 var (
@@ -998,19 +1001,13 @@ func initConfigWithPath(ctx *cli.Context, exec kexec.Interface, saPath string, d
 
 	logrus.SetLevel(logrus.Level(Logging.Level))
 	if Logging.File != "" {
-		var file *os.File
-		if _, err = os.Stat(filepath.Dir(Logging.File)); os.IsNotExist(err) {
-			dir := filepath.Dir(Logging.File)
-			if err = os.MkdirAll(dir, 0755); err != nil {
-				logrus.Errorf("failed to create logfile directory %s (%v). Ignoring..", dir, err)
-			}
-		}
-		file, err = os.OpenFile(Logging.File, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0660)
-		if err != nil {
-			logrus.Errorf("failed to open logfile %s (%v). Ignoring..", Logging.File, err)
-		} else {
-			logrus.SetOutput(file)
-		}
+		logrus.SetOutput(&lumberjack.Logger{
+			Filename:   Logging.File,
+			MaxSize:    100, // megabytes
+			MaxBackups: 10,
+			MaxAge:     30, // days
+			Compress:   true,
+		})
 	}
 
 	if err = buildDefaultConfig(&cliConfig, &cfg); err != nil {

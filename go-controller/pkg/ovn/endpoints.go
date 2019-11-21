@@ -256,6 +256,13 @@ func (ovn *Controller) handleExternalIPs(svc *kapi.Service, svcPort kapi.Service
 	}
 }
 
+// keepEmptyLB returns true if empty load-balancer events is enabled and if the
+// service was idled.
+func keepEmptyLB(service *kapi.Service) bool {
+	_, ok := service.Annotations[OvnServiceIdledAt]
+	return config.Kubernetes.OVNEmptyLbEvents && ok
+}
+
 func (ovn *Controller) deleteEndpoints(ep *kapi.Endpoints) error {
 	svc, err := ovn.kube.GetService(ep.Namespace, ep.Name)
 	if err != nil {
@@ -279,7 +286,7 @@ func (ovn *Controller) deleteEndpoints(ep *kapi.Endpoints) error {
 		}
 
 		quotedHostPort := "\"" + util.JoinHostPortInt32(svc.Spec.ClusterIP, svcPort.Port) + "\""
-		if config.Kubernetes.OVNEmptyLbEvents {
+		if keepEmptyLB(svc) {
 			key := "vips:" + quotedHostPort + "=\"\""
 			_, stderr, err := util.RunOVNNbctl("set", "load_balancer", lb, key)
 			if err != nil {

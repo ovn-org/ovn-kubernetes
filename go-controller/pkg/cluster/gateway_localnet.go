@@ -167,7 +167,7 @@ func initLocalnetGateway(nodeName string,
 
 	annotations := map[string]string{
 		ovn.OvnNodeGatewayMode:       string(config.Gateway.Mode),
-		ovn.OvnNodeGatewayVlanID:     string(config.Gateway.VLANID),
+		ovn.OvnNodeGatewayVlanID:     fmt.Sprintf("%d", config.Gateway.VLANID),
 		ovn.OvnNodeGatewayIfaceID:    ifaceID,
 		ovn.OvnNodeGatewayMacAddress: macAddress,
 		ovn.OvnNodeGatewayIP:         localnetGatewayIP,

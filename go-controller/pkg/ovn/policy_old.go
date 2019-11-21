@@ -112,7 +112,7 @@ func (oc *Controller) modifyACLAllowOld(namespace, policy, logicalPort,
 	if uuid != "" {
 		// We already have an ACL. We will update it.
 		_, stderr, err = util.RunOVNNbctl("set", "acl", uuid,
-			fmt.Sprintf("%s", newMatch))
+			newMatch)
 		if err != nil {
 			logrus.Errorf("failed to modify the allow-from rule for "+
 				"namespace=%s, logical_port=%s, stderr: %q (%v)",
@@ -203,7 +203,6 @@ func (oc *Controller) addIPBlockACLDenyOld(namespace, policy, logicalSwitch,
 		logrus.Errorf("error executing create ACL command, stderr: %q, %+v",
 			stderr, err)
 	}
-	return
 }
 
 func (oc *Controller) deleteIPBlockACLDenyOld(namespace, policy,
@@ -245,7 +244,6 @@ func (oc *Controller) deleteIPBlockACLDenyOld(namespace, policy,
 			namespace, logicalPort, stderr, err)
 		return
 	}
-	return
 }
 
 func (oc *Controller) addACLDenyOld(namespace, logicalSwitch, logicalPort,
@@ -288,7 +286,6 @@ func (oc *Controller) addACLDenyOld(namespace, logicalSwitch, logicalPort,
 		logrus.Errorf("error executing create ACL command, stderr: %q, %+v",
 			stderr, err)
 	}
-	return
 }
 
 func (oc *Controller) deleteACLDenyOld(namespace, logicalSwitch, logicalPort string,
@@ -325,7 +322,6 @@ func (oc *Controller) deleteACLDenyOld(namespace, logicalSwitch, logicalPort str
 			namespace, logicalPort, stderr, err)
 		return
 	}
-	return
 }
 
 func (oc *Controller) deleteAclsPolicyOld(namespace, policy string) {
@@ -808,8 +804,6 @@ func (oc *Controller) addNetworkPolicyOld(policy *knet.NetworkPolicy) {
 	// For all the pods in the local namespace that this policy
 	// effects, add ACL rules.
 	oc.handleLocalPodSelectorOld(policy, np)
-
-	return
 }
 
 func (oc *Controller) getLogicalSwitchForLogicalPort(
@@ -882,6 +876,4 @@ func (oc *Controller) deleteNetworkPolicyOld(
 
 	// We should now delete all the ACLs added by this network policy.
 	oc.deleteAclsPolicyOld(policy.Namespace, policy.Name)
-
-	return
 }

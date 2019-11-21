@@ -34,7 +34,7 @@ func GetNicName(brName string) (string, error) {
 	if stdout == "" && strings.HasPrefix(brName, "br") {
 		// This would happen if the bridge was created before the bridge-uplink
 		// changes got integrated.
-		return fmt.Sprintf("%s", brName[len("br"):]), nil
+		return brName[len("br"):], nil
 	}
 	return stdout, nil
 }

@@ -65,7 +65,7 @@ func ManagementPortReady(nodeName string, portName string) (bool, error) {
 	portMac, portIP, err := util.GetPortAddresses(portName)
 	if err != nil {
 		logrus.Errorf("Error while obtaining addresses for %s on node %s - %v", portName, nodeName, err)
-		return false, err
+		return false, nil
 	}
 	if portMac == nil || portIP == nil {
 		return false, nil

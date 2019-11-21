@@ -141,7 +141,19 @@ func (f *FakeIPTables) ClearChain(tableName, chainName string) error {
 // DeleteChain deletes the chain in the specified table.
 // The chain must be empty
 func (f *FakeIPTables) DeleteChain(tableName, chainName string) error {
-	return f.DeleteChain(tableName, chainName)
+	table, err := f.getTable(tableName)
+	if err != nil {
+		return err
+	}
+	if chain, err := table.getChain(chainName); err == nil {
+		if len(chain) != 0 {
+			return fmt.Errorf("chain must be empty")
+		}
+		delete((*table), chainName)
+		return nil
+	} else {
+		return err
+	}
 }
 
 // Exists checks if given rulespec in specified table/chain exists
