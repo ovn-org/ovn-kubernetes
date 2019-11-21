@@ -2,6 +2,7 @@ package ovn
 
 import (
 	"fmt"
+	"net"
 
 	. "github.com/onsi/ginkgo"
 	. "github.com/onsi/gomega"
@@ -17,7 +18,7 @@ import (
 
 type networkPolicyOld struct{}
 
-var fakeUUID = "fake_uuid"
+var fakeUUID = "8a86f6d8-7972-4253-b0bd-ddbef66e9303"
 var fakeLogicalSwitch = "fake_ls"
 
 func newNetworkPolicyOldMeta(name, namespace string) metav1.ObjectMeta {
@@ -212,6 +213,10 @@ func (n networkPolicyOld) delCmds(fexec *ovntest.FakeExec, pod pod, networkPolic
 			fmt.Sprintf("ovn-nbctl --timeout=15 --if-exists destroy address_set %s", hashedOVNName),
 		})
 	}
+	fexec.AddFakeCmd(&ovntest.ExpectedCmd{
+		Cmd:    fmt.Sprintf("ovn-nbctl --timeout=15 get logical_switch_port %s external-ids:logical_switch", pod.portName),
+		Output: pod.nodeName,
+	})
 	fexec.AddFakeCmdsNoOutputNoError([]string{
 		fmt.Sprintf("ovn-nbctl --timeout=15 --data=bare --no-heading --columns=_uuid find ACL match=\"outport == \\\"%s\\\"\" action=drop external-ids:default-deny-policy-type=Ingress external-ids:namespace=%s external-ids:logical_switch=%s external-ids:logical_port=%s", pod.portName, pod.namespace, pod.nodeName, pod.portName),
 	})
@@ -648,7 +653,7 @@ var _ = Describe("OVN NetworkPolicy Operations", func() {
 					Output: fakeUUID,
 				})
 				fExec.AddFakeCmdsNoOutputNoError([]string{
-					fmt.Sprintf("ovn-nbctl --timeout=15 set acl fake_uuid match=\"ip4.src == {$a10148211500778908391} && outport == \\\"%s\\\"\"", nPodTest.portName),
+					fmt.Sprintf("ovn-nbctl --timeout=15 set acl %s match=\"ip4.src == {$a10148211500778908391} && outport == \\\"%s\\\"\"", fakeUUID, nPodTest.portName),
 				})
 				fExec.AddFakeCmdsNoOutputNoError([]string{
 					fmt.Sprintf("ovn-nbctl --timeout=15 --data=bare --no-heading --columns=_uuid find ACL match=\"ip4.dst == {$a6953373268003663638, $a9824637386382239951} && inport == \\\"%s\\\"\" external-ids:namespace=%s external-ids:policy=%s external-ids:Egress_num=0 external-ids:policy_type=Egress external-ids:logical_port=%s", nPodTest.portName, networkPolicy.Namespace, networkPolicy.Name, nPodTest.portName),
@@ -1015,6 +1020,8 @@ var _ = Describe("OVN NetworkPolicy Operations", func() {
 						},
 					},
 				)
+				podMAC, _ := net.ParseMAC("11:22:33:44:55:66")
+				fakeOvn.controller.logicalPortCache.add(nPodTest.nodeName, nPodTest.portName, fakeUUID, podMAC, net.ParseIP(nPodTest.podIP))
 				nPodTest.populateLogicalSwitchCache(fakeOvn)
 				fakeOvn.controller.WatchPods()
 				fakeOvn.controller.WatchNamespaces()

@@ -9,6 +9,8 @@ import (
 	kapi "k8s.io/api/core/v1"
 	knet "k8s.io/api/networking/v1"
 	"k8s.io/client-go/tools/cache"
+
+	. "github.com/onsi/ginkgo"
 )
 
 func (oc *Controller) syncNetworkPoliciesOld(networkPolicies []interface{}) {
@@ -799,9 +801,6 @@ func (oc *Controller) addNetworkPolicyOld(policy *knet.NetworkPolicy) {
 
 func (oc *Controller) getLogicalSwitchForLogicalPort(
 	logicalPort string) string {
-	if oc.logicalPortCache[logicalPort] != "" {
-		return oc.logicalPortCache[logicalPort]
-	}
 
 	logicalSwitch, stderr, err := util.RunOVNNbctl("get",
 		"logical_switch_port", logicalPort, "external-ids:logical_switch")
@@ -822,6 +821,8 @@ func (oc *Controller) deleteNetworkPolicyOld(
 	policy *knet.NetworkPolicy) {
 	logrus.Infof("Deleting network policy %s in namespace %s",
 		policy.Name, policy.Namespace)
+
+	defer GinkgoRecover()
 
 	if oc.namespacePolicies[policy.Namespace] == nil ||
 		oc.namespacePolicies[policy.Namespace][policy.Name] == nil {
