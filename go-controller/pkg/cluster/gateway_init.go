@@ -8,6 +8,7 @@ import (
 	"net"
 
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
 )
 
@@ -106,6 +107,8 @@ func (cluster *OvnClusterController) initGateway(
 			}
 		}
 		return initSharedGateway(nodeName, subnet, gatewayNextHop, gatewayIntf, cluster.watchFactory)
+	case config.GatewayModeDisabled:
+		return map[string]string{ovn.OvnNodeGatewayMode: string(config.GatewayModeDisabled)}, nil, nil
 	}
 
 	return nil, nil, nil
