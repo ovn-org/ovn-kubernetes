@@ -21,7 +21,7 @@ type Interface interface {
 	SetAnnotationOnPod(pod *kapi.Pod, key, value string) error
 	SetAnnotationsOnPod(pod *kapi.Pod, annotations map[string]string) error
 	SetAnnotationOnNode(node *kapi.Node, key, value string) error
-	SetAnnotationsOnNode(node *kapi.Node, annotations map[string]string) error
+	SetAnnotationsOnNode(node *kapi.Node, annotations map[string]interface{}) error
 	UpdateNodeStatus(node *kapi.Node) error
 	GetAnnotationsOnPod(namespace, name string) (map[string]string, error)
 	GetPod(namespace, name string) (*kapi.Pod, error)
@@ -95,7 +95,7 @@ func (k *Kube) SetAnnotationOnNode(node *kapi.Node, key, value string) error {
 }
 
 // SetAnnotationsOnNode takes the node object and map of key/value string pairs to set as annotations
-func (k *Kube) SetAnnotationsOnNode(node *kapi.Node, annotations map[string]string) error {
+func (k *Kube) SetAnnotationsOnNode(node *kapi.Node, annotations map[string]interface{}) error {
 	var err error
 	var patchData []byte
 	patch := struct {
