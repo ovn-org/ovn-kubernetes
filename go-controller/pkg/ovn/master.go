@@ -350,7 +350,7 @@ func (oc *Controller) syncGatewayLogicalNetwork(node *kapi.Node, mode string, su
 	}
 
 	err = util.GatewayInit(clusterSubnets, node.Name, ifaceID, ipAddress,
-		gwMacAddress, gwNextHop, subnet, true, lspArgs)
+		gwMacAddress, gwNextHop, subnet, lspArgs)
 	if err != nil {
 		return fmt.Errorf("failed to init shared interface gateway: %v", err)
 	}
