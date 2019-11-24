@@ -142,14 +142,12 @@ func (cluster *OvnClusterController) StartClusterNode(name string) error {
 	var nodeAnnotations map[string]string
 	var postReady postReadyFn
 
-	// If gateway is enabled, get gateway annotations
-	if config.Gateway.Mode != config.GatewayModeDisabled {
-		nodeAnnotations, postReady, err = cluster.initGateway(node.Name, subnet.String())
-		if err != nil {
-			return err
-		}
-		readyFuncs = append(readyFuncs, GatewayReady)
+	// get gateway annotations
+	nodeAnnotations, postReady, err = cluster.initGateway(node.Name, subnet.String())
+	if err != nil {
+		return err
 	}
+	readyFuncs = append(readyFuncs, GatewayReady)
 
 	// Get management port annotations
 	mgmtPortAnnotations, err := CreateManagementPort(node.Name, subnet, clusterSubnets)
