@@ -139,11 +139,9 @@ func (cluster *OvnClusterController) StartClusterNode(name string) error {
 
 	type readyFunc func(string, string) (bool, error)
 	var readyFuncs []readyFunc
-	var nodeAnnotations map[string]string
-	var postReady postReadyFn
 
 	// get gateway annotations
-	nodeAnnotations, postReady, err = cluster.initGateway(node.Name, subnet.String())
+	gwAnnotations, postReady, err := cluster.initGateway(node.Name, subnet.String())
 	if err != nil {
 		return err
 	}
@@ -154,11 +152,14 @@ func (cluster *OvnClusterController) StartClusterNode(name string) error {
 	if err != nil {
 		return err
 	}
-
 	readyFuncs = append(readyFuncs, ManagementPortReady)
 
-	// Combine mgmtPortAnnotations with any existing gwyAnnotations
+	// Combine mgmtPortAnnotations and gwAnnotations into nodeAnnotations
+	nodeAnnotations := make(map[string]interface{})
 	for k, v := range mgmtPortAnnotations {
+		nodeAnnotations[k] = v
+	}
+	for k, v := range gwAnnotations {
 		nodeAnnotations[k] = v
 	}
 
