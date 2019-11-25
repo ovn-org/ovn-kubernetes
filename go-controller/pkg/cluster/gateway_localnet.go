@@ -177,6 +177,7 @@ func initLocalnetGateway(nodeName string,
 		ovn.OvnNodeGatewayMacAddress: macAddress,
 		ovn.OvnNodeGatewayIP:         localnetGatewayIP,
 		ovn.OvnNodeGatewayNextHop:    localnetGatewayNextHop,
+		ovn.OvnNodePortEnable:        fmt.Sprintf("%t", config.Gateway.NodeportEnable),
 	}
 	annotations := map[string]map[string]string{
 		ovn.OvnDefaultNetworkGateway: l3GatewayConfig,

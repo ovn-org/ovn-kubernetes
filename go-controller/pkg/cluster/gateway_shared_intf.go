@@ -301,6 +301,7 @@ func initSharedGateway(nodeName string, subnet, gwNextHop, gwIntf string,
 		ovn.OvnNodeGatewayMacAddress: macAddress,
 		ovn.OvnNodeGatewayIP:         ipAddress,
 		ovn.OvnNodeGatewayNextHop:    gwNextHop,
+		ovn.OvnNodePortEnable:        fmt.Sprintf("%t", config.Gateway.NodeportEnable),
 	}
 	annotations := map[string]map[string]string{
 		ovn.OvnDefaultNetworkGateway: l3GatewayConfig,

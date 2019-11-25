@@ -44,6 +44,9 @@ const (
 	OvnNodeGatewayIP = "ip-address"
 	// OvnNodeGatewayNextHop is the Next Hop in the l3 gateway annotation
 	OvnNodeGatewayNextHop = "next-hop"
+	// OvnNodePortEnable in the l3 gateway annotation captures whether load balancer needs to
+	// be created or not
+	OvnNodePortEnable = "node-port-enable"
 	// OvnDefaultNetworkGateway captures L3 gateway config for default OVN network interface
 	OvnDefaultNetworkGateway = "default"
 )
@@ -355,6 +358,10 @@ func (oc *Controller) syncGatewayLogicalNetwork(node *kapi.Node, l3GatewayConfig
 	}
 
 	mode := l3GatewayConfig[OvnNodeGatewayMode]
+	nodePortEnable := false
+	if l3GatewayConfig[OvnNodePortEnable] == "true" {
+		nodePortEnable = true
+	}
 	ifaceID, err := parseGatewayIfaceID(l3GatewayConfig)
 	if err != nil {
 		return err
@@ -385,7 +392,7 @@ func (oc *Controller) syncGatewayLogicalNetwork(node *kapi.Node, l3GatewayConfig
 	}
 
 	err = util.GatewayInit(clusterSubnets, systemID, node.Name, ifaceID, ipAddress,
-		gwMacAddress, gwNextHop, subnet, lspArgs)
+		gwMacAddress, gwNextHop, subnet, nodePortEnable, lspArgs)
 	if err != nil {
 		return fmt.Errorf("failed to init shared interface gateway: %v", err)
 	}
@@ -399,7 +406,7 @@ func (oc *Controller) syncGatewayLogicalNetwork(node *kapi.Node, l3GatewayConfig
 		}
 	}
 
-	if config.Gateway.NodeportEnable {
+	if nodePortEnable {
 		err = oc.handleNodePortLB(node)
 	}
 
