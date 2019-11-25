@@ -66,6 +66,14 @@ func cleanupGateway(fexec *ovntest.FakeExec, nodeName string, nodeSubnet string,
 		"ovn-nbctl --timeout=15 --if-exist lr-del GR_" + nodeName,
 		"ovn-nbctl --timeout=15 --if-exist ls-del ext_" + nodeName,
 	})
+	fexec.AddFakeCmd(&ovntest.ExpectedCmd{
+		Cmd:    "ovn-nbctl --timeout=15 --data=bare --no-heading --columns=_uuid find load_balancer external_ids:TCP_lb_gateway_router=GR_" + nodeName,
+		Output: "",
+	})
+	fexec.AddFakeCmd(&ovntest.ExpectedCmd{
+		Cmd:    "ovn-nbctl --timeout=15 --data=bare --no-heading --columns=_uuid find load_balancer external_ids:UDP_lb_gateway_router=GR_" + nodeName,
+		Output: "",
+	})
 }
 
 func defaultFakeExec(nodeSubnet, nodeName string) (*ovntest.FakeExec, string, string) {
@@ -395,6 +403,14 @@ subnet=%s
 				"ovn-nbctl --timeout=15 --if-exist lr-del GR_" + node1Name,
 				"ovn-nbctl --timeout=15 --if-exist ls-del ext_" + node1Name,
 			})
+			fexec.AddFakeCmd(&ovntest.ExpectedCmd{
+				Cmd:    "ovn-nbctl --timeout=15 --data=bare --no-heading --columns=_uuid find load_balancer external_ids:TCP_lb_gateway_router=GR_" + node1Name,
+				Output: "",
+			})
+			fexec.AddFakeCmd(&ovntest.ExpectedCmd{
+				Cmd:    "ovn-nbctl --timeout=15 --data=bare --no-heading --columns=_uuid find load_balancer external_ids:UDP_lb_gateway_router=GR_" + node1Name,
+				Output: "",
+			})
 
 			// Expect the code to re-add the master node (which still exists)
 			// when the factory watch begins and enumerates all existing
@@ -526,6 +542,7 @@ var _ = Describe("Gateway Init Operations", func() {
 				OvnNodeGatewayMacAddress: brLocalnetMAC,
 				OvnNodeGatewayIP:         localnetGatewayIP,
 				OvnNodeGatewayNextHop:    localnetGatewayNextHop,
+				OvnNodePortEnable:        "true",
 			}
 			bytes, err := json.Marshal(map[string]map[string]string{"default": l3GatewayConfig})
 			Expect(err).NotTo(HaveOccurred())
@@ -758,6 +775,7 @@ GR_openshift-master-node chassis=6a47b33b-89d3-4d65-ac31-b19b549326c7 lb_force_s
 				OvnNodeGatewayMacAddress: brLocalnetMAC,
 				OvnNodeGatewayIP:         localnetGatewayIP,
 				OvnNodeGatewayNextHop:    localnetGatewayNextHop,
+				OvnNodePortEnable:        "true",
 			}
 			bytes, err := json.Marshal(map[string]map[string]string{"default": l3GatewayConfig})
 			Expect(err).NotTo(HaveOccurred())

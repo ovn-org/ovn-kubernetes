@@ -668,7 +668,6 @@ ovn-master () {
     --init-master ${ovn_pod_host} \
     --cluster-subnets ${net_cidr} --k8s-service-cidr=${svc_cidr} \
     --nb-address=${ovn_nbdb} --sb-address=${ovn_sbdb} \
-    --nodeport \
     --nbctl-daemon-mode \
     --loglevel=${ovnkube_loglevel} \
     --pidfile /var/run/openvswitch/ovnkube-master.pid \

@@ -6,8 +6,6 @@ import (
 	"strings"
 
 	"github.com/sirupsen/logrus"
-
-	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
 )
 
 // GatewayCleanup removes all the NB DB objects created for a node's gateway
@@ -88,25 +86,23 @@ func GatewayCleanup(nodeName string, nodeSubnet *net.IPNet) error {
 		}
 	}
 
-	if config.Gateway.NodeportEnable {
-		//Remove the TCP, UDP load-balancers created for north-south traffic for gateway router.
-		k8sNSLbTCP, k8sNSLbUDP, err := getGatewayLoadBalancers(gatewayRouter)
+	// If exists, remove the TCP, UDP load-balancers created for north-south traffic for gateway router.
+	k8sNSLbTCP, k8sNSLbUDP, err := getGatewayLoadBalancers(gatewayRouter)
+	if err != nil {
+		return err
+	}
+	if k8sNSLbTCP != "" {
+		_, stderr, err = RunOVNNbctl("lb-del", k8sNSLbTCP)
 		if err != nil {
-			return err
+			return fmt.Errorf("Failed to delete Gateway router TCP load balancer %s, stderr: %q, "+
+				"error: %v", k8sNSLbTCP, stderr, err)
 		}
-		if k8sNSLbTCP != "" {
-			_, stderr, err = RunOVNNbctl("lb-del", k8sNSLbTCP)
-			if err != nil {
-				return fmt.Errorf("Failed to delete Gateway router TCP load balancer %s, stderr: %q, "+
-					"error: %v", k8sNSLbTCP, stderr, err)
-			}
-		}
-		if k8sNSLbUDP != "" {
-			_, stderr, err = RunOVNNbctl("lb-del", k8sNSLbUDP)
-			if err != nil {
-				return fmt.Errorf("Failed to delete Gateway router UDP load balancer %s, stderr: %q, "+
-					"error: %v", k8sNSLbTCP, stderr, err)
-			}
+	}
+	if k8sNSLbUDP != "" {
+		_, stderr, err = RunOVNNbctl("lb-del", k8sNSLbUDP)
+		if err != nil {
+			return fmt.Errorf("Failed to delete Gateway router UDP load balancer %s, stderr: %q, "+
+				"error: %v", k8sNSLbTCP, stderr, err)
 		}
 	}
 	return nil
