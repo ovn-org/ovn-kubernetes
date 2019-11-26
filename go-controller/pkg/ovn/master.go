@@ -444,14 +444,35 @@ func (oc *Controller) ensureNodeLogicalNetwork(nodeName string, hostsubnet *net.
 	// If supported, enable IGMP snooping and querier on the node.
 	if oc.multicastSupport {
 		stdout, stderr, err = util.RunOVNNbctl("set", "logical_switch",
-			nodeName, "other-config:mcast_snoop=\"true\"",
-			"other-config:mcast_querier=\"true\"",
-			"other-config:mcast_eth_src=\""+nodeLRPMac+"\"",
-			"other-config:mcast_ip4_src=\""+firstIP.IP.String()+"\"")
+			nodeName, "other-config:mcast_snoop=\"true\"")
 		if err != nil {
 			logrus.Errorf("Failed to enable IGMP on logical switch %v, stdout: %q, stderr: %q, error: %v",
 				nodeName, stdout, stderr, err)
 			return err
+		}
+
+		// Configure querier only if we have an IPv4 address, otherwise
+		// disable querier.
+		if firstIP.IP.To4() != nil {
+			stdout, stderr, err = util.RunOVNNbctl("set", "logical_switch",
+				nodeName, "other-config:mcast_querier=\"true\"",
+				"other-config:mcast_eth_src=\""+nodeLRPMac+"\"",
+				"other-config:mcast_ip4_src=\""+firstIP.IP.String()+"\"")
+			if err != nil {
+				logrus.Errorf("Failed to enable IGMP Querier on logical switch %v, stdout: %q, stderr: %q, error: %v",
+					nodeName, stdout, stderr, err)
+				return err
+			}
+		} else {
+			stdout, stderr, err = util.RunOVNNbctl("set", "logical_switch",
+				nodeName, "other-config:mcast_querier=\"false\"")
+			if err != nil {
+				logrus.Errorf("Failed to disable IGMP Querier on logical switch %v, stdout: %q, stderr: %q, error: %v",
+					nodeName, stdout, stderr, err)
+				return err
+			}
+			logrus.Infof("Disabled IGMP Querier on logical switch %v (No IPv4 Source IP available)",
+				nodeName)
 		}
 	}
 
