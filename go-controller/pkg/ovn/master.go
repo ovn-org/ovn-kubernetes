@@ -57,7 +57,7 @@ func (oc *Controller) StartClusterMaster(masterNodeName string) error {
 		return err
 	}
 	for _, clusterEntry := range config.Default.ClusterSubnets {
-		err := oc.masterSubnetAllocator.AddNetworkRange(clusterEntry.CIDR.String(), 32-clusterEntry.HostSubnetLength)
+		err := oc.masterSubnetAllocator.AddNetworkRange(clusterEntry.CIDR.String(), clusterEntry.HostBits())
 		if err != nil {
 			return err
 		}
