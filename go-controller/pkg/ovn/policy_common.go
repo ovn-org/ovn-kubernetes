@@ -176,7 +176,7 @@ func (oc *Controller) handlePeerPodSelectorAddUpdate(np *namespacePolicy,
 	addressMap map[string]bool, addressSet string, obj interface{}) {
 
 	pod := obj.(*kapi.Pod)
-	podAnnotation, err := util.UnmarshalPodAnnotation(pod.Annotations["ovn"])
+	podAnnotation, err := util.UnmarshalPodAnnotation(pod.Annotations)
 	if err != nil {
 		return
 	}
@@ -207,7 +207,7 @@ func (oc *Controller) handlePeerPodSelectorDelete(np *namespacePolicy,
 	addressMap map[string]bool, addressSet string, obj interface{}) {
 
 	pod := obj.(*kapi.Pod)
-	podAnnotation, err := util.UnmarshalPodAnnotation(pod.Annotations["ovn"])
+	podAnnotation, err := util.UnmarshalPodAnnotation(pod.Annotations)
 	if err != nil {
 		return
 	}

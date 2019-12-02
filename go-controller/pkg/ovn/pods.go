@@ -173,7 +173,7 @@ func (oc *Controller) deleteLogicalPort(pod *kapi.Pod) {
 	}
 
 	var podIP net.IP
-	podAnnotation, err := util.UnmarshalPodAnnotation(pod.Annotations["ovn"])
+	podAnnotation, err := util.UnmarshalPodAnnotation(pod.Annotations)
 	if err != nil {
 		logrus.Debugf("failed to read pod %s annotation when deleting "+
 			"logical port; falling back to PodIP %s: %v",
@@ -251,9 +251,8 @@ func (oc *Controller) addLogicalPort(pod *kapi.Pod) error {
 	portName := podLogicalPortName(pod)
 	logrus.Debugf("Creating logical port for %s on switch %s", portName, logicalSwitch)
 
-	annotation, err := util.UnmarshalPodAnnotation(pod.Annotations["ovn"])
+	annotation, err := util.UnmarshalPodAnnotation(pod.Annotations)
 	annotationsSet := (err == nil)
-
 	// If pod already has annotations, just add the lsp with static ip/mac.
 	// Else, create the lsp with dynamic addresses.
 	if err == nil {
@@ -335,8 +334,9 @@ func (oc *Controller) addLogicalPort(pod *kapi.Pod) error {
 
 	logrus.Debugf("Annotation values: ip=%s ; mac=%s ; gw=%s\nAnnotation=%s",
 		podCIDR, podMac, gatewayIP, marshalledAnnotation)
-	if err = oc.kube.SetAnnotationOnPod(pod, "ovn", marshalledAnnotation); err != nil {
-		return fmt.Errorf("Failed to set annotation on pod %s - %v", pod.Name, err)
+	err = oc.kube.SetAnnotationsOnPod(pod, marshalledAnnotation)
+	if err != nil {
+		return fmt.Errorf("failed to set annotation on pod %s - %v", pod.Name, err)
 	}
 
 	// If we're setting the annotation for the first time, observe the creation
