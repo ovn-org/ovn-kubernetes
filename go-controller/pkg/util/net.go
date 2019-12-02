@@ -38,14 +38,14 @@ func intToIP(i *big.Int) net.IP {
 
 // GetPortAddresses returns the MAC and IP of the given logical switch port
 func GetPortAddresses(portName string) (net.HardwareAddr, net.IP, error) {
-	out, _, err := RunOVNNbctl("get", "logical_switch_port", portName, "dynamic_addresses")
+	out, stderr, err := RunOVNNbctl("get", "logical_switch_port", portName, "dynamic_addresses")
 	if err != nil {
-		return nil, nil, fmt.Errorf("Error while obtaining dynamic addresses for %s: %v", portName, err)
+		return nil, nil, fmt.Errorf("Error while obtaining dynamic addresses for %s: stdout: %q, stderr: %q, error: %v", portName, out, stderr, err)
 	}
 	if out == "[]" {
-		out, _, err = RunOVNNbctl("get", "logical_switch_port", portName, "addresses")
+		out, stderr, err = RunOVNNbctl("get", "logical_switch_port", portName, "addresses")
 		if err != nil {
-			return nil, nil, fmt.Errorf("Error while obtaining static addresses for %s: %v", portName, err)
+			return nil, nil, fmt.Errorf("Error while obtaining static addresses for %s: stdout: %q, stderr: %q, error: %v", portName, out, stderr, err)
 		}
 	}
 	if out == "[]" || out == "[dynamic]" {
