@@ -1,6 +1,7 @@
 package ovn
 
 import (
+	"encoding/json"
 	"fmt"
 	"net"
 	"strconv"
@@ -18,8 +19,10 @@ import (
 )
 
 const (
-	// OvnHostSubnet is the constant string representing the annotation key
-	OvnHostSubnet = "ovn_host_subnet"
+	// OvnHostSubnetLegacy is the old constant string representing the node subnet annotation key
+	OvnHostSubnetLegacy = "ovn_host_subnet"
+	// OvnNodeSubnets is the constant string representing the node subnets annotation key
+	OvnNodeSubnets = "k8s.ovn.org/node-subnets"
 	// OvnClusterRouter is the name of the distributed router
 	OvnClusterRouter = "ovn_cluster_router"
 	// OvnNodeManagementPortMacAddress is the constant string representing the annotation key
@@ -63,9 +66,9 @@ func (oc *Controller) StartClusterMaster(masterNodeName string) error {
 		}
 	}
 	for _, node := range existingNodes.Items {
-		hostsubnet, ok := node.Annotations[OvnHostSubnet]
-		if ok {
-			err := oc.masterSubnetAllocator.MarkAllocatedNetwork(hostsubnet)
+		hostsubnet, _ := parseNodeHostSubnet(&node)
+		if hostsubnet != nil {
+			err := oc.masterSubnetAllocator.MarkAllocatedNetwork(hostsubnet.String())
 			if err != nil {
 				utilruntime.HandleError(err)
 			}
@@ -381,9 +384,18 @@ func addStaticRouteToHost(node *kapi.Node, nicIP string) error {
 }
 
 func parseNodeHostSubnet(node *kapi.Node) (*net.IPNet, error) {
-	sub, ok := node.Annotations[OvnHostSubnet]
+	sub, ok := node.Annotations[OvnNodeSubnets]
 	if !ok {
-		return nil, fmt.Errorf("Error in obtaining host subnet for node %q for deletion", node.Name)
+		sub, ok = node.Annotations[OvnHostSubnetLegacy]
+	} else {
+		nodeSubnets := make(map[string]string)
+		if err := json.Unmarshal([]byte(sub), &nodeSubnets); err != nil {
+			return nil, fmt.Errorf("error parsing node-subnets annotation: %v", err)
+		}
+		sub, ok = nodeSubnets["default"]
+	}
+	if !ok {
+		return nil, fmt.Errorf("node %q has no subnet annotation", node.Name)
 	}
 
 	_, subnet, err := net.ParseCIDR(sub)
@@ -492,11 +504,49 @@ func (oc *Controller) ensureNodeLogicalNetwork(nodeName string, hostsubnet *net.
 	return nil
 }
 
+// annotate the node with the subnet information assigned to node's logical switch. the
+// new format of the annotation is:
+//
+// k8s.ovn.org/node-subnets: {
+//	  "default": "192.168.2.1",
+// }
+func (oc *Controller) addNodeAnnotations(node *kapi.Node, subnet string) error {
+	// nothing to do if the node already has the annotation key
+	_, ok := node.Annotations[OvnNodeSubnets]
+	if ok {
+		return nil
+	}
+
+	bytes, err := json.Marshal(map[string]string{
+		"default": subnet,
+	})
+	if err != nil {
+		return fmt.Errorf("failed to marshal node %q annotation for subnet %s",
+			node.Name, subnet)
+	}
+	nodeAnnotations := make(map[string]interface{})
+	// if legacy annotation key exists, then remove it
+	nodeAnnotations[OvnHostSubnetLegacy] = nil
+	nodeAnnotations[OvnNodeSubnets] = string(bytes)
+	err = oc.kube.SetAnnotationsOnNode(node, nodeAnnotations)
+	if err != nil {
+		return fmt.Errorf("failed to set node annotation %q on existing node %s to %q: %v",
+			OvnNodeSubnets, node.Name, subnet, err)
+	}
+	return nil
+}
+
 func (oc *Controller) addNode(node *kapi.Node) (hostsubnet *net.IPNet, err error) {
 	oc.clearInitialNodeNetworkUnavailableCondition(node)
 
 	hostsubnet, _ = parseNodeHostSubnet(node)
 	if hostsubnet != nil {
+		// Update the node's annotation to use the new annotation key and remove the
+		// old annotation key.
+		err = oc.addNodeAnnotations(node, hostsubnet.String())
+		if err != nil {
+			return nil, err
+		}
 		// Node already has subnet assigned; ensure its logical network is set up
 		return hostsubnet, oc.ensureNodeLogicalNetwork(node.Name, hostsubnet)
 	}
@@ -529,10 +579,8 @@ func (oc *Controller) addNode(node *kapi.Node) (hostsubnet *net.IPNet, err error
 	// Set the HostSubnet annotation on the node object to signal
 	// to nodes that their logical infrastructure is set up and they can
 	// proceed with their initialization
-	err = oc.kube.SetAnnotationOnNode(node, OvnHostSubnet, hostsubnetStr)
+	err = oc.addNodeAnnotations(node, hostsubnet.String())
 	if err != nil {
-		logrus.Errorf("Failed to set node %s host subnet annotation to %q: %v",
-			node.Name, hostsubnetStr, err)
 		return nil, err
 	}
 

@@ -122,7 +122,7 @@ var _ = Describe("Management Port Operations", func() {
 			existingNode := v1.Node{ObjectMeta: metav1.ObjectMeta{
 				Name: nodeName,
 				Annotations: map[string]string{
-					ovn.OvnHostSubnet:                   nodeSubnet,
+					ovn.OvnNodeSubnets:                  nodeSubnet,
 					ovn.OvnNodeManagementPortMacAddress: mgtPortMAC,
 				},
 			}}

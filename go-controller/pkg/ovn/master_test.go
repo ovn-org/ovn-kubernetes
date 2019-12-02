@@ -235,7 +235,7 @@ var _ = Describe("Master Operations", func() {
 			Expect(fexec.CalledMatchesExpected()).To(BeTrue())
 			updatedNode, err := fakeClient.CoreV1().Nodes().Get(nodeName, metav1.GetOptions{})
 			Expect(err).NotTo(HaveOccurred())
-			Expect(updatedNode.Annotations).To(HaveKeyWithValue(OvnHostSubnet, nodeSubnet))
+			Expect(updatedNode.Annotations[OvnNodeSubnets]).To(MatchJSON(fmt.Sprintf(`{"default": "%s"}`, nodeSubnet)))
 			Expect(updatedNode.Annotations).To(HaveKeyWithValue(OvnNodeManagementPortMacAddress, mgmtMAC))
 			Eventually(func() bool { return fexec.CalledMatchesExpected() }, 2).Should(BeTrue())
 			return nil
@@ -267,7 +267,7 @@ var _ = Describe("Master Operations", func() {
 				Name: nodeName,
 				Annotations: map[string]string{
 					OvnNodeManagementPortMacAddress: mgmtMAC,
-					OvnHostSubnet:                   nodeSubnet,
+					OvnNodeSubnets:                  fmt.Sprintf(`{"default": "%s"}`, nodeSubnet),
 				},
 			}}
 
@@ -307,7 +307,7 @@ var _ = Describe("Master Operations", func() {
 			Expect(fexec.CalledMatchesExpected()).To(BeTrue())
 			updatedNode, err := fakeClient.CoreV1().Nodes().Get(nodeName, metav1.GetOptions{})
 			Expect(err).NotTo(HaveOccurred())
-			Expect(updatedNode.Annotations).To(HaveKeyWithValue(OvnHostSubnet, nodeSubnet))
+			Expect(updatedNode.Annotations[OvnNodeSubnets]).To(MatchJSON(fmt.Sprintf(`{"default": "%s"}`, nodeSubnet)))
 			Expect(updatedNode.Annotations).To(HaveKeyWithValue(OvnNodeManagementPortMacAddress, mgmtMAC))
 			Eventually(func() bool { return fexec.CalledMatchesExpected() }, 2).Should(BeTrue())
 			return nil
@@ -411,7 +411,7 @@ subnet=%s
 				ObjectMeta: metav1.ObjectMeta{
 					Name: masterName,
 					Annotations: map[string]string{
-						OvnHostSubnet:                   masterSubnet,
+						OvnNodeSubnets:                  fmt.Sprintf(`{"default": "%s"}`, masterSubnet),
 						OvnNodeManagementPortMacAddress: masterMgmtPortMAC,
 					},
 				},
@@ -515,7 +515,7 @@ var _ = Describe("Gateway Init Operations", func() {
 				Name: nodeName,
 				Annotations: map[string]string{
 					OvnNodeManagementPortMacAddress: brLocalnetMAC,
-					OvnHostSubnet:                   nodeSubnet,
+					OvnNodeSubnets:                  fmt.Sprintf(`{"default": "%s"}`, nodeSubnet),
 					OvnNodeGatewayMode:              string(config.GatewayModeLocal),
 					OvnNodeGatewayVlanID:            string(config.Gateway.VLANID),
 					OvnNodeGatewayIfaceID:           ifaceID,
@@ -758,7 +758,7 @@ GR_openshift-master-node chassis=6a47b33b-89d3-4d65-ac31-b19b549326c7 lb_force_s
 				Name: nodeName,
 				Annotations: map[string]string{
 					OvnNodeManagementPortMacAddress: brLocalnetMAC,
-					OvnHostSubnet:                   nodeSubnet,
+					OvnNodeSubnets:                  fmt.Sprintf(`{"default": "%s"}`, nodeSubnet),
 					OvnNodeGatewayMode:              string(config.GatewayModeShared),
 					OvnNodeGatewayVlanID:            "1024",
 					OvnNodeGatewayIfaceID:           ifaceID,
