@@ -158,7 +158,7 @@ cookie=0x0, duration=8366.597s, table=1, n_packets=10641, n_bytes=10370087, prio
 		existingNode := v1.Node{ObjectMeta: metav1.ObjectMeta{
 			Name: nodeName,
 			Annotations: map[string]string{
-				ovn.OvnHostSubnet:            nodeSubnet,
+				ovn.OvnNodeSubnets:           nodeSubnet,
 				ovn.OvnNodeGatewayMode:       string(config.Gateway.Mode),
 				ovn.OvnNodeGatewayVlanID:     string(gatewayVLANID),
 				ovn.OvnNodeGatewayIfaceID:    gwRouter,
@@ -299,7 +299,7 @@ var _ = Describe("Gateway Init Operations", func() {
 			existingNode := v1.Node{ObjectMeta: metav1.ObjectMeta{
 				Name: nodeName,
 				Annotations: map[string]string{
-					ovn.OvnHostSubnet:            nodeSubnet,
+					ovn.OvnNodeSubnets:           nodeSubnet,
 					ovn.OvnNodeGatewayMode:       string(config.Gateway.Mode),
 					ovn.OvnNodeGatewayVlanID:     string(0),
 					ovn.OvnNodeGatewayIfaceID:    gwRouter,
