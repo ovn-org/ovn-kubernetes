@@ -541,7 +541,7 @@ func (oc *Controller) handleLocalPodSelectorAddFunc(
 	obj interface{}) {
 	pod := obj.(*kapi.Pod)
 
-	if _, err := util.UnmarshalPodAnnotation(pod.Annotations["ovn"]); err != nil {
+	if _, err := util.UnmarshalPodAnnotation(pod.Annotations); err != nil {
 		return
 	}
 

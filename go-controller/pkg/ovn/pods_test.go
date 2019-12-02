@@ -2,6 +2,7 @@ package ovn
 
 import (
 	"fmt"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
 
 	"github.com/urfave/cli"
 
@@ -190,7 +191,7 @@ var _ = Describe("OVN Pod Operations", func() {
 				Expect(err).NotTo(HaveOccurred())
 				Expect(fExec.CalledMatchesExpected()).To(BeTrue())
 
-				_, ok := pod.Annotations["ovn"]
+				_, ok := pod.Annotations[util.OvnPodAnnotationName]
 				Expect(ok).To(BeFalse())
 
 				// Assign it and perform the update
@@ -205,10 +206,14 @@ var _ = Describe("OVN Pod Operations", func() {
 				pod, err = fakeOvn.fakeClient.CoreV1().Pods(t.namespace).Get(t.podName, metav1.GetOptions{})
 				Expect(err).NotTo(HaveOccurred())
 
-				podAnnotation, ok := pod.Annotations["ovn"]
+				podAnnotation, ok := pod.Annotations[util.OvnPodAnnotationName]
+				Expect(ok).To(BeTrue())
+				Expect(podAnnotation).To(MatchJSON(`{"default": {"ip_address":"` + t.podIP + `/24", "mac_address":"` + t.podMAC + `", "gateway_ip": "` + t.nodeGWIP + `"}}`))
+
+				// check if legacy name exists and has same value has the new name
+				podAnnotation, ok = pod.Annotations[util.OvnPodAnnotationLegacyName]
 				Expect(ok).To(BeTrue())
 				Expect(podAnnotation).To(MatchJSON(`{"ip_address":"` + t.podIP + `/24", "mac_address":"` + t.podMAC + `", "gateway_ip": "` + t.nodeGWIP + `"}`))
-
 				return nil
 			}
 
@@ -256,10 +261,14 @@ var _ = Describe("OVN Pod Operations", func() {
 				pod, err = fakeOvn.fakeClient.CoreV1().Pods(t.namespace).Get(t.podName, metav1.GetOptions{})
 				Expect(err).NotTo(HaveOccurred())
 
-				podAnnotation, ok := pod.Annotations["ovn"]
+				podAnnotation, ok := pod.Annotations[util.OvnPodAnnotationName]
+				Expect(ok).To(BeTrue())
+				Expect(podAnnotation).To(MatchJSON(`{"default": {"ip_address":"` + t.podIP + `/24", "mac_address":"` + t.podMAC + `", "gateway_ip": "` + t.nodeGWIP + `"}}`))
+
+				// check if legacy name exists and has same value has the new name
+				podAnnotation, ok = pod.Annotations[util.OvnPodAnnotationLegacyName]
 				Expect(ok).To(BeTrue())
 				Expect(podAnnotation).To(MatchJSON(`{"ip_address":"` + t.podIP + `/24", "mac_address":"` + t.podMAC + `", "gateway_ip": "` + t.nodeGWIP + `"}`))
-
 				return nil
 			}
 
@@ -301,9 +310,9 @@ var _ = Describe("OVN Pod Operations", func() {
 				pod, err := fakeOvn.fakeClient.CoreV1().Pods(t.namespace).Get(t.podName, metav1.GetOptions{})
 				Expect(err).NotTo(HaveOccurred())
 
-				podAnnotation, ok := pod.Annotations["ovn"]
+				podAnnotation, ok := pod.Annotations[util.OvnPodAnnotationName]
 				Expect(ok).To(BeTrue())
-				Expect(podAnnotation).To(MatchJSON(`{"ip_address":"` + t.podIP + `/24", "mac_address":"` + t.podMAC + `", "gateway_ip": "` + t.nodeGWIP + `"}`))
+				Expect(podAnnotation).To(MatchJSON(`{"default": {"ip_address":"` + t.podIP + `/24", "mac_address":"` + t.podMAC + `", "gateway_ip": "` + t.nodeGWIP + `"}}`))
 				Eventually(fExec.CalledMatchesExpected).Should(BeTrue())
 
 				// Delete it
@@ -365,9 +374,9 @@ var _ = Describe("OVN Pod Operations", func() {
 				pod, err := fakeOvn.fakeClient.CoreV1().Pods(t.namespace).Get(t.podName, metav1.GetOptions{})
 				Expect(err).NotTo(HaveOccurred())
 
-				podAnnotation, ok := pod.Annotations["ovn"]
+				podAnnotation, ok := pod.Annotations[util.OvnPodAnnotationName]
 				Expect(ok).To(BeTrue())
-				Expect(podAnnotation).To(MatchJSON(`{"ip_address":"` + t.podIP + `/24", "mac_address":"` + t.podMAC + `", "gateway_ip": "` + t.nodeGWIP + `"}`))
+				Expect(podAnnotation).To(MatchJSON(`{"default": {"ip_address":"` + t.podIP + `/24", "mac_address":"` + t.podMAC + `", "gateway_ip": "` + t.nodeGWIP + `"}}`))
 
 				return nil
 			}
@@ -412,7 +421,7 @@ var _ = Describe("OVN Pod Operations", func() {
 				Expect(err).NotTo(HaveOccurred())
 				Expect(fExec.CalledMatchesExpected()).To(BeZero())
 
-				_, ok := pod.Annotations["ovn"]
+				_, ok := pod.Annotations[util.OvnPodAnnotationName]
 				Expect(ok).To(BeFalse())
 
 				fakeOvn.controller.WatchPods()
@@ -421,9 +430,9 @@ var _ = Describe("OVN Pod Operations", func() {
 				Expect(err).NotTo(HaveOccurred())
 				Expect(fExec.CalledMatchesExpected()).To(BeTrue())
 
-				podAnnotation, ok := pod.Annotations["ovn"]
+				podAnnotation, ok := pod.Annotations[util.OvnPodAnnotationName]
 				Expect(ok).To(BeTrue())
-				Expect(podAnnotation).To(MatchJSON(`{"ip_address":"` + t.podIP + `/24", "mac_address":"` + t.podMAC + `", "gateway_ip": "` + t.nodeGWIP + `"}`))
+				Expect(podAnnotation).To(MatchJSON(`{"default": {"ip_address":"` + t.podIP + `/24", "mac_address":"` + t.podMAC + `", "gateway_ip": "` + t.nodeGWIP + `"}}`))
 
 				return nil
 			}
@@ -501,9 +510,9 @@ var _ = Describe("OVN Pod Operations", func() {
 				Expect(err).NotTo(HaveOccurred())
 				Expect(fExec.CalledMatchesExpected()).To(BeTrue())
 
-				podAnnotation, ok := pod.Annotations["ovn"]
+				podAnnotation, ok := pod.Annotations[util.OvnPodAnnotationName]
 				Expect(ok).To(BeTrue())
-				Expect(podAnnotation).To(MatchJSON(`{"ip_address":"` + t.podIP + `/24", "mac_address":"` + t.podMAC + `", "gateway_ip": "` + t.nodeGWIP + `"}`))
+				Expect(podAnnotation).To(MatchJSON(`{"default": {"ip_address":"` + t.podIP + `/24", "mac_address":"` + t.podMAC + `", "gateway_ip": "` + t.nodeGWIP + `"}}`))
 
 				return nil
 			}
@@ -549,9 +558,9 @@ var _ = Describe("OVN Pod Operations", func() {
 				Expect(err).NotTo(HaveOccurred())
 				Expect(fExec.CalledMatchesExpected()).To(BeTrue())
 
-				podAnnotation, ok := pod.Annotations["ovn"]
+				podAnnotation, ok := pod.Annotations[util.OvnPodAnnotationName]
 				Expect(ok).To(BeTrue())
-				Expect(podAnnotation).To(MatchJSON(`{"ip_address":"` + t.podIP + `/24", "mac_address":"` + t.podMAC + `", "gateway_ip": "` + t.nodeGWIP + `"}`))
+				Expect(podAnnotation).To(MatchJSON(`{"default": {"ip_address":"` + t.podIP + `/24", "mac_address":"` + t.podMAC + `", "gateway_ip": "` + t.nodeGWIP + `"}}`))
 
 				// Simulate an OVN restart with a new IP assignment and verify that the pod annotation is updated.
 				fExec.AddFakeCmd(&ovntest.ExpectedCmd{
@@ -569,9 +578,9 @@ var _ = Describe("OVN Pod Operations", func() {
 				Eventually(fExec.CalledMatchesExpected).Should(BeTrue())
 
 				// Check that pod annotations have been re-written to correct values
-				podAnnotation, ok = pod.Annotations["ovn"]
+				podAnnotation, ok = pod.Annotations[util.OvnPodAnnotationName]
 				Expect(ok).To(BeTrue())
-				Expect(podAnnotation).To(MatchJSON(`{"ip_address":"` + t.podIP + `/24", "mac_address":"` + t.podMAC + `", "gateway_ip": "` + t.nodeGWIP + `"}`))
+				Expect(podAnnotation).To(MatchJSON(`{"default": {"ip_address":"` + t.podIP + `/24", "mac_address":"` + t.podMAC + `", "gateway_ip": "` + t.nodeGWIP + `"}}`))
 
 				return nil
 			}
