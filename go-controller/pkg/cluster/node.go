@@ -60,7 +60,7 @@ func isOVNControllerReady(name string) (bool, error) {
 	err = wait.PollImmediate(500*time.Millisecond, 60*time.Second, func() (bool, error) {
 		stdout, _, err := util.RunOVSOfctl("dump-aggregate", "br-int")
 		if err != nil {
-			return false, fmt.Errorf("failed to get aggregate flow statistics: %v", err)
+			return false, nil
 		}
 		return !strings.Contains(stdout, "flow_count=0"), nil
 	})
