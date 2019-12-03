@@ -122,7 +122,7 @@ func staticRouteCleanup(clusterRouter string, nextHops []string) {
 		var uuids string
 		uuids, stderr, err := RunOVNNbctl("--data=bare", "--no-heading",
 			"--columns=_uuid", "find", "logical_router_static_route",
-			"nexthop="+nextHop)
+			"nexthop=\""+nextHop+"\"")
 		if err != nil {
 			logrus.Errorf("Failed to fetch all routes with "+
 				"IP %s as nexthop, stderr: %q, "+
