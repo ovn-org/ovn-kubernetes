@@ -3,10 +3,12 @@
 package cluster
 
 import (
+	"fmt"
 	"io/ioutil"
 	"net"
 	"os"
 	"path/filepath"
+	"strings"
 
 	"github.com/coreos/go-iptables/iptables"
 	"github.com/urfave/cli"
@@ -86,6 +88,9 @@ var _ = Describe("Management Port Operations", func() {
 			fexec.AddFakeCmd(&ovntest.ExpectedCmd{
 				Cmd:    "ovs-vsctl --timeout=15 --if-exists get interface " + mgtPort + " mac_in_use",
 				Output: mgtPortMAC,
+			})
+			fexec.AddFakeCmdsNoOutputNoError([]string{
+				"ovs-vsctl --timeout=15 set interface k8s-node1 " + fmt.Sprintf("mac=%s", strings.ReplaceAll(mgtPortMAC, ":", "\\:")),
 			})
 			fexec.AddFakeCmd(&ovntest.ExpectedCmd{
 				Cmd:    "ovn-nbctl --timeout=15 lsp-get-addresses stor-" + nodeName,

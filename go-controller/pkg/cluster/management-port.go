@@ -48,7 +48,14 @@ func createManagementPortGeneric(nodeName string, localSubnet *net.IPNet) (strin
 		logrus.Errorf("Failed to get management port MAC address: %v", err)
 		return "", "", "", "", "", err
 	}
-
+	// persist the MAC address so that upon node reboot we get back the same mac address.
+	_, stderr, err = util.RunOVSVsctl("set", "interface", interfaceName,
+		fmt.Sprintf("mac=%s", strings.ReplaceAll(macAddress, ":", "\\:")))
+	if err != nil {
+		logrus.Errorf("failed to persist MAC address %q for %q: stderr:%s (%v)", macAddress,
+			interfaceName, stderr, err)
+		return "", "", "", "", "", err
+	}
 	// switch-to-router ports only have MAC address and nothing else.
 	routerMac, stderr, err := util.RunOVNNbctl("lsp-get-addresses", "stor-"+nodeName)
 	if err != nil {
