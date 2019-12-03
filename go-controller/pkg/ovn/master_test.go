@@ -203,7 +203,6 @@ var _ = Describe("Master Operations", func() {
 				Name: nodeName,
 				Annotations: map[string]string{
 					OvnNodeManagementPortMacAddress: mgmtMAC,
-					OvnHostSubnet:                   nodeSubnet,
 				},
 			}}
 
