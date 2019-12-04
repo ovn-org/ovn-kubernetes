@@ -76,10 +76,18 @@ func (oc *Controller) StartClusterMaster(masterNodeName string) error {
 		oc.portGroupSupport = true
 	}
 
-	// Multicast support requires portGroupSupport
-	if oc.portGroupSupport {
-		if _, _, err := util.RunOVNSbctl("--columns=_uuid", "list", "IGMP_Group"); err == nil {
-			oc.multicastSupport = true
+	if oc.multicastSupport {
+		// Multicast support requires portGroupSupport
+		if oc.portGroupSupport {
+			if _, _, err := util.RunOVNSbctl("--columns=_uuid", "list", "IGMP_Group"); err != nil {
+				logrus.Warningf("Multicast support enabled, however version of OVN in use does not support IGMP Group. " +
+					"Disabling Multicast Support")
+				oc.multicastSupport = false
+			}
+		} else {
+			logrus.Warningf("Multicast support enabled, however version of OVN in use does not support Port Group. " +
+				"Disabling Multicast Support")
+			oc.multicastSupport = false
 		}
 	}
 
