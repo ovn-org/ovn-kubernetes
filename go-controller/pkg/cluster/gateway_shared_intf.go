@@ -343,5 +343,30 @@ func cleanupSharedGateway() error {
 			return fmt.Errorf("Failed to delete port %s stderr:%s (%v)", port, stderr, err)
 		}
 	}
+
+	// Get the OVS bridge name from ovn-bridge-mappings
+	stdout, stderr, err = util.RunOVSVsctl("--if-exists", "get", "Open_vSwitch", ".",
+		"external_ids:ovn-bridge-mappings")
+	if err != nil {
+		return fmt.Errorf("Failed to get ovn-bridge-mappings stderr:%s (%v)", stderr, err)
+	}
+	// skip the existing mapping setting for the specified physicalNetworkName
+	bridgeName := ""
+	bridgeMappings := strings.Split(stdout, ",")
+	for _, bridgeMapping := range bridgeMappings {
+		m := strings.Split(bridgeMapping, ":")
+		if network := m[0]; network == util.PhysicalNetworkName {
+			bridgeName = m[1]
+			break
+		}
+	}
+	if len(bridgeName) == 0 {
+		return nil
+	}
+
+	_, stderr, err = util.AddNormalActionOFFlow(bridgeName)
+	if err != nil {
+		return fmt.Errorf("Failed to replace-flows on bridge %q stderr:%s (%v)", bridgeName, stderr, err)
+	}
 	return nil
 }
