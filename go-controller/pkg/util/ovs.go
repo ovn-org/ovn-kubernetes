@@ -432,3 +432,16 @@ func RawExec(cmdPath string, args ...string) (string, string, error) {
 	stdout, stderr, err := run(cmdPath, args...)
 	return strings.TrimSpace(stdout.String()), stderr.String(), err
 }
+
+// AddNormalActionOFFlow replaces flows in the bridge with a NORMAL action flow
+func AddNormalActionOFFlow(bridgeName string) (string, string, error) {
+	args := []string{"-O", "OpenFlow13", "replace-flows", bridgeName, "-"}
+
+	stdin := &bytes.Buffer{}
+	stdin.Write([]byte("table=0,priority=0,actions=NORMAL\n"))
+
+	cmd := runner.exec.Command(runner.ofctlPath, args...)
+	cmd.SetStdin(stdin)
+	stdout, stderr, err := runCmd(cmd, runner.ofctlPath, args...)
+	return strings.Trim(stdout.String(), "\" \n"), stderr.String(), err
+}
