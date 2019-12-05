@@ -54,7 +54,7 @@ func cleanupGateway(fexec *ovntest.FakeExec, nodeName string, nodeSubnet string,
 	})
 	fexec.AddFakeCmdsNoOutputNoError([]string{
 		"ovn-nbctl --timeout=15 --if-exist ls-del " + util.JoinSwitchPrefix + nodeName,
-		"ovn-nbctl --timeout=15 --if-exist lr-del " + util.GWRouterPrefix  + nodeName,
+		"ovn-nbctl --timeout=15 --if-exist lr-del " + util.GWRouterPrefix + nodeName,
 		"ovn-nbctl --timeout=15 --if-exist ls-del " + util.ExternalSwitchPrefix + nodeName,
 		"ovn-nbctl --timeout=15 --if-exist lrp-del dtoj-" + nodeName,
 	})
