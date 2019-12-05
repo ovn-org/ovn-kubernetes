@@ -55,7 +55,8 @@ func (e endpoints) delCmds(fexec *ovntest.FakeExec, service v1.Service, endpoint
 	for _, sPort := range service.Spec.Ports {
 		if sPort.Protocol == v1.ProtocolTCP {
 			fexec.AddFakeCmdsNoOutputNoError([]string{
-				fmt.Sprintf("ovn-nbctl --timeout=15 remove load_balancer %s vips \"%s:%v\"", k8sTCPLoadBalancerIP, service.Spec.ClusterIP, sPort.Port),
+				fmt.Sprintf("ovn-nbctl --timeout=15 --data=bare --no-heading --columns=_uuid find Logical_Switch load_balancer{>=}%s", k8sTCPLoadBalancerIP),
+				fmt.Sprintf("ovn-nbctl --timeout=15 set load_balancer %s vips:\"172.124.0.2:8032\"=\"\"", k8sTCPLoadBalancerIP),
 			})
 		} else if sPort.Protocol == v1.ProtocolUDP {
 			fexec.AddFakeCmdsNoOutputNoError([]string{

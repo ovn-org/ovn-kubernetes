@@ -122,7 +122,7 @@ jobs:
         export NODE_NAMES=${MASTER_NAME}
         
         # all tests that don't have P as their sixth letter after the N
-        kubetest --provider=local --deployment=kind --kind-cluster-name=kind-ovn --test --test_args='--ginkgo.focus=\[sig-network\]\s[Nn](.{6}[^Pp].*|.{0,6}$) --disable-log-dump=false --ginkgo.skip=Networking\sIPerf\sIPv[46]|\[Feature:PerformanceDNS\]|\[Feature:IPv6DualStackAlphaFeature\]|NetworkPolicy\sbetween\sserver\sand\sclient.+(ingress\saccess|multiple\segress\spolicies|allow\segress\saccess)|\[Feature:NoSNAT\]|Services.+(ESIPP|hairpin|cleanup\sfinalizer|session\saffinity|rejected\swhen\sno\sendpoints)|\[Feature:Networking-IPv6\]|\[Feature:Federation\]|configMap\snameserver|ClusterDns\s\[Feature:Example\]|(Namespace|Pod)Selector\s\[Feature:NetworkPolicy\]'
+        kubetest --provider=local --deployment=kind --kind-cluster-name=kind-ovn --test --test_args='--ginkgo.focus=\[sig-network\]\s[Nn](.{6}[^Pp].*|.{0,6}$) --disable-log-dump=false --ginkgo.skip=Networking\sIPerf\sIPv[46]|\[Feature:PerformanceDNS\]|\[Feature:IPv6DualStackAlphaFeature\]|NetworkPolicy\sbetween\sserver\sand\sclient.+(ingress\saccess|multiple\segress\spolicies|allow\segress\saccess)|\[Feature:NoSNAT\]|Services.+(ESIPP|hairpin|cleanup\sfinalizer|session\saffinity)|\[Feature:Networking-IPv6\]|\[Feature:Federation\]|configMap\snameserver|ClusterDns\s\[Feature:Example\]|(Namespace|Pod)Selector\s\[Feature:NetworkPolicy\]'
 
     - &step_export_logs
       name: Export logs
@@ -164,7 +164,7 @@ jobs:
         export MASTER_NAME=${KIND_CLUSTER_NAME}-control-plane
         export NODE_NAMES=${MASTER_NAME}
         # all tests that have P as the sixth letter after the N
-        kubetest --provider=local --deployment=kind --kind-cluster-name=kind-ovn --test --test_args='--ginkgo.focus=\[sig-network\]\s[Nn].{6}[Pp].*$ --disable-log-dump=false --ginkgo.skip=Networking\sIPerf\sIPv[46]|\[Feature:PerformanceDNS\]|\[Feature:IPv6DualStackAlphaFeature\]|NetworkPolicy\sbetween\sserver\sand\sclient.+(ingress\saccess|multiple\segress\spolicies|allow\segress\saccess)|\[Feature:NoSNAT\]|Services.+(ESIPP|hairpin|cleanup\sfinalizer|session\saffinity|rejected\swhen\sno\sendpoints)|\[Feature:Networking-IPv6\]|\[Feature:Federation\]|configMap\snameserver|ClusterDns\s\[Feature:Example\]|(Namespace|Pod)Selector\s\[Feature:NetworkPolicy\]'
+        kubetest --provider=local --deployment=kind --kind-cluster-name=kind-ovn --test --test_args='--ginkgo.focus=\[sig-network\]\s[Nn].{6}[Pp].*$ --disable-log-dump=false --ginkgo.skip=Networking\sIPerf\sIPv[46]|\[Feature:PerformanceDNS\]|\[Feature:IPv6DualStackAlphaFeature\]|NetworkPolicy\sbetween\sserver\sand\sclient.+(ingress\saccess|multiple\segress\spolicies|allow\segress\saccess)|\[Feature:NoSNAT\]|Services.+(ESIPP|hairpin|cleanup\sfinalizer|session\saffinity)|\[Feature:Networking-IPv6\]|\[Feature:Federation\]|configMap\snameserver|ClusterDns\s\[Feature:Example\]|(Namespace|Pod)Selector\s\[Feature:NetworkPolicy\]'
 
     - *step_export_logs
     - *step_upload_logs
@@ -192,7 +192,7 @@ jobs:
         export KUBECONFIG=${HOME}/admin.conf
         export MASTER_NAME=${KIND_CLUSTER_NAME}-control-plane
         export NODE_NAMES=${MASTER_NAME}
-        kubetest --provider=local --deployment=kind --kind-cluster-name=kind-ovn --test --test_args='--ginkgo.focus=\[sig-network\]\s[Ss].* --disable-log-dump=false --ginkgo.skip=Networking\sIPerf\sIPv[46]|\[Feature:PerformanceDNS\]|\[Feature:IPv6DualStackAlphaFeature\]|NetworkPolicy\sbetween\sserver\sand\sclient.+(ingress\saccess|multiple\segress\spolicies|allow\segress\saccess)|\[Feature:NoSNAT\]|Services.+(ESIPP|hairpin|cleanup\sfinalizer|session\saffinity|rejected\swhen\sno\sendpoints)|\[Feature:Networking-IPv6\]|\[Feature:Federation\]|configMap\snameserver|ClusterDns\s\[Feature:Example\]|(Namespace|Pod)Selector\s\[Feature:NetworkPolicy\]'
+        kubetest --provider=local --deployment=kind --kind-cluster-name=kind-ovn --test --test_args='--ginkgo.focus=\[sig-network\]\s[Ss].* --disable-log-dump=false --ginkgo.skip=Networking\sIPerf\sIPv[46]|\[Feature:PerformanceDNS\]|\[Feature:IPv6DualStackAlphaFeature\]|NetworkPolicy\sbetween\sserver\sand\sclient.+(ingress\saccess|multiple\segress\spolicies|allow\segress\saccess)|\[Feature:NoSNAT\]|Services.+(ESIPP|hairpin|cleanup\sfinalizer|session\saffinity)|\[Feature:Networking-IPv6\]|\[Feature:Federation\]|configMap\snameserver|ClusterDns\s\[Feature:Example\]|(Namespace|Pod)Selector\s\[Feature:NetworkPolicy\]'
 
     - *step_export_logs
     - *step_upload_logs
@@ -220,7 +220,7 @@ jobs:
         export KUBECONFIG=${HOME}/admin.conf
         export MASTER_NAME=${KIND_CLUSTER_NAME}-control-plane
         export NODE_NAMES=${MASTER_NAME}
-        kubetest --provider=local --deployment=kind --kind-cluster-name=kind-ovn --test --test_args='--ginkgo.focus=\[sig-network\]\s[^NnSs].* --disable-log-dump=false --ginkgo.skip=Networking\sIPerf\sIPv[46]|\[Feature:PerformanceDNS\]|\[Feature:IPv6DualStackAlphaFeature\]|NetworkPolicy\sbetween\sserver\sand\sclient.+(ingress\saccess|multiple\segress\spolicies|allow\segress\saccess)|\[Feature:NoSNAT\]|Services.+(ESIPP|hairpin|cleanup\sfinalizer|session\saffinity|rejected\swhen\sno\sendpoints)|\[Feature:Networking-IPv6\]|\[Feature:Federation\]|configMap\snameserver|ClusterDns\s\[Feature:Example\]|(Namespace|Pod)Selector\s\[Feature:NetworkPolicy\]'
+        kubetest --provider=local --deployment=kind --kind-cluster-name=kind-ovn --test --test_args='--ginkgo.focus=\[sig-network\]\s[^NnSs].* --disable-log-dump=false --ginkgo.skip=Networking\sIPerf\sIPv[46]|\[Feature:PerformanceDNS\]|\[Feature:IPv6DualStackAlphaFeature\]|NetworkPolicy\sbetween\sserver\sand\sclient.+(ingress\saccess|multiple\segress\spolicies|allow\segress\saccess)|\[Feature:NoSNAT\]|Services.+(ESIPP|hairpin|cleanup\sfinalizer|session\saffinity)|\[Feature:Networking-IPv6\]|\[Feature:Federation\]|configMap\snameserver|ClusterDns\s\[Feature:Example\]|(Namespace|Pod)Selector\s\[Feature:NetworkPolicy\]'
 
     - *step_export_logs
     - *step_upload_logs

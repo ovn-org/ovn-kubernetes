@@ -13,7 +13,8 @@ import (
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/factory"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/kube"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/allocator"
-	util "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
+
 	kapi "k8s.io/api/core/v1"
 	kapisnetworking "k8s.io/api/networking/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -34,6 +35,14 @@ type ServiceVIPKey struct {
 	vip string
 	// Protocol used by the load balancer
 	protocol kapi.Protocol
+}
+
+// LoadBalancerConf contains the OVN based config for a LB
+type LoadBalancerConf struct {
+	// List of endpoints as configured in OVN, ip:port
+	Endpoints []string
+	// ACL configured for Rejecting access to the LB
+	RejectACL string
 }
 
 // Controller structure is the object which holds the controls for starting
@@ -113,6 +122,11 @@ type Controller struct {
 	serviceVIPToName map[ServiceVIPKey]types.NamespacedName
 
 	serviceVIPToNameLock sync.Mutex
+
+	// Map of load balancers, each containing a map of VIP to OVN LB Config
+	serviceLBMap map[string]map[string]*LoadBalancerConf
+
+	serviceLBLock sync.Mutex
 }
 
 const (
@@ -148,6 +162,8 @@ func NewOvnController(kubeClient kubernetes.Interface, wf *factory.WatchFactory)
 		multicastSupport:         config.EnableMulticast,
 		serviceVIPToName:         make(map[ServiceVIPKey]types.NamespacedName),
 		serviceVIPToNameLock:     sync.Mutex{},
+		serviceLBMap:             make(map[string]map[string]*LoadBalancerConf),
+		serviceLBLock:            sync.Mutex{},
 	}
 }
 
@@ -385,8 +401,21 @@ func (oc *Controller) WatchPods() error {
 // appropriate handler logic
 func (oc *Controller) WatchServices() error {
 	_, err := oc.watchFactory.AddServiceHandler(cache.ResourceEventHandlerFuncs{
-		AddFunc:    func(obj interface{}) {},
-		UpdateFunc: func(old, new interface{}) {},
+		AddFunc: func(obj interface{}) {
+			service := obj.(*kapi.Service)
+			err := oc.createService(service)
+			if err != nil {
+				klog.Errorf("Error in adding service: %v", err)
+			}
+		},
+		UpdateFunc: func(old, new interface{}) {
+			svcOld := old.(*kapi.Service)
+			svcNew := new.(*kapi.Service)
+			err := oc.updateService(svcOld, svcNew)
+			if err != nil {
+				klog.Errorf("Error while updating service: %v", err)
+			}
+		},
 		DeleteFunc: func(obj interface{}) {
 			service := obj.(*kapi.Service)
 			oc.deleteService(service)
@@ -592,7 +621,7 @@ func (oc *Controller) WatchNodes() error {
 				delete(oc.loadbalancerGWCache, TCP)
 				delete(oc.loadbalancerGWCache, UDP)
 				oc.defGatewayRouter = ""
-				oc.handleExternalIPsLB()
+				oc.handleExternalIPsLB(true)
 			}
 		},
 	}, oc.syncNodes)
@@ -612,6 +641,105 @@ func (oc *Controller) GetServiceVIPToName(vip string, protocol kapi.Protocol) (t
 	defer oc.serviceVIPToNameLock.Unlock()
 	namespace, ok := oc.serviceVIPToName[ServiceVIPKey{vip, protocol}]
 	return namespace, ok
+}
+
+// AddServiceLBToACL associates an empty load balancer with its associated ACL reject rule
+func (oc *Controller) SetServiceACLToLB(lb, vip, acl string) {
+	oc.serviceLBLock.Lock()
+	defer oc.serviceLBLock.Unlock()
+	if _, ok := oc.serviceLBMap[lb]; !ok {
+		oc.serviceLBMap[lb] = make(map[string]*LoadBalancerConf)
+		oc.serviceLBMap[lb][vip] = &LoadBalancerConf{RejectACL: acl}
+		return
+	}
+	if _, ok := oc.serviceLBMap[lb][vip]; !ok {
+		oc.serviceLBMap[lb][vip] = &LoadBalancerConf{RejectACL: acl}
+		return
+	}
+	// This should not happen, the entry should be removed for the VIP when the service is deleted for an existing
+	// entry
+	if oc.serviceLBMap[lb][vip] == nil {
+		klog.Errorf("config for existing load balancer is nil. LB: %s, VIP: %s", lb, vip)
+		oc.serviceLBMap[lb][vip] = &LoadBalancerConf{RejectACL: acl}
+		return
+	}
+	oc.serviceLBMap[lb][vip].RejectACL = acl
+}
+
+// SetServiceEndpointsToLB associates a load balancer with endpoints
+func (oc *Controller) SetServiceEndpointsToLB(lb, vip string, eps []string) {
+	oc.serviceLBLock.Lock()
+	defer oc.serviceLBLock.Unlock()
+	if _, ok := oc.serviceLBMap[lb]; !ok {
+		oc.serviceLBMap[lb] = make(map[string]*LoadBalancerConf)
+		oc.serviceLBMap[lb][vip] = &LoadBalancerConf{Endpoints: eps}
+		return
+	}
+	if _, ok := oc.serviceLBMap[lb][vip]; !ok {
+		oc.serviceLBMap[lb][vip] = &LoadBalancerConf{Endpoints: eps}
+		return
+	}
+	// This should not happen, the entry should be removed for the VIP when the service is deleted
+	if oc.serviceLBMap[lb][vip] == nil {
+		klog.Errorf("config for existing load balancer is nil. LB: %s, VIP: %s", lb, vip)
+		oc.serviceLBMap[lb][vip] = &LoadBalancerConf{Endpoints: eps}
+		return
+	}
+	oc.serviceLBMap[lb][vip].Endpoints = eps
+}
+
+func (oc *Controller) GetServiceLBACL(lb, vip string) (string, bool) {
+	if conf, ok := oc.GetServiceLBConfig(lb, vip); ok {
+		return conf.RejectACL, true
+	}
+	return "", false
+}
+
+func (oc *Controller) GetServiceLBEndpoints(lb, vip string) ([]string, bool) {
+	if conf, ok := oc.GetServiceLBConfig(lb, vip); ok {
+		return conf.Endpoints, true
+	}
+	return []string{}, false
+}
+
+// GetServiceLBConfig retrieves the associated Config for a given load balancer
+func (oc *Controller) GetServiceLBConfig(lb, vip string) (LoadBalancerConf, bool) {
+	oc.serviceLBLock.Lock()
+	defer oc.serviceLBLock.Unlock()
+	conf, ok := oc.serviceLBMap[lb][vip]
+	if conf == nil {
+		conf = &LoadBalancerConf{}
+	}
+	return *conf, ok
+}
+
+// RemoveServiceLB removes the enitre LB entry for a VIP
+func (oc *Controller) RemoveServiceLB(lb, vip string) {
+	oc.serviceLBLock.Lock()
+	defer oc.serviceLBLock.Unlock()
+	delete(oc.serviceLBMap[lb], vip)
+}
+
+// RemoveServiceACL removes a specific ACL associated with a load balancer and ip:port
+func (oc *Controller) RemoveServiceACL(lb, vip string) {
+	oc.serviceLBLock.Lock()
+	defer oc.serviceLBLock.Unlock()
+	if conf, ok := oc.serviceLBMap[lb][vip]; ok {
+		if conf != nil {
+			oc.serviceLBMap[lb][vip].RejectACL = ""
+		}
+	}
+}
+
+// RemoveServiceEndpoints removes a specific ACL associated with a load balancer and ip:port
+func (oc *Controller) RemoveServiceEndpoints(lb, vip string) {
+	oc.serviceLBLock.Lock()
+	defer oc.serviceLBLock.Unlock()
+	if conf, ok := oc.serviceLBMap[lb][vip]; ok {
+		if conf != nil {
+			oc.serviceLBMap[lb][vip].Endpoints = []string{}
+		}
+	}
 }
 
 // gatewayChanged() compares old annotations to new and returns true if something has changed.

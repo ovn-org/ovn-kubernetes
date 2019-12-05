@@ -87,6 +87,9 @@ func (s service) baseCmds(fexec *ovntest.FakeExec, service v1.Service) {
 	fexec.AddFakeCmdsNoOutputNoError([]string{
 		"ovn-nbctl --timeout=15 --if-exists remove load_balancer udp_load_balancer_id_1 vips \"172.30.0.10:53\"",
 	})
+	fexec.AddFakeCmdsNoOutputNoError([]string{
+		fmt.Sprintf("ovn-nbctl --timeout=15 --data=bare --no-heading --columns=_uuid find Logical_Switch load_balancer{>=}k8s_tcp_load_balancer"),
+	})
 }
 
 func (s service) addCmds(fexec *ovntest.FakeExec, service v1.Service) {
@@ -96,7 +99,7 @@ func (s service) addCmds(fexec *ovntest.FakeExec, service v1.Service) {
 func (s service) delCmds(fexec *ovntest.FakeExec, service v1.Service) {
 	for _, port := range service.Spec.Ports {
 		fexec.AddFakeCmdsNoOutputNoError([]string{
-			fmt.Sprintf("ovn-nbctl --timeout=15 remove load_balancer %s vips \"%s:%v\"", k8sTCPLoadBalancerIP, service.Spec.ClusterIP, port.Port),
+			fmt.Sprintf("ovn-nbctl --timeout=15 --if-exists remove load_balancer %s vips \"%s:%v\"", k8sTCPLoadBalancerIP, service.Spec.ClusterIP, port.Port),
 		})
 	}
 }
