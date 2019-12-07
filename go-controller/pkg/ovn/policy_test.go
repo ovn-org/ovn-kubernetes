@@ -214,7 +214,10 @@ func (n networkPolicy) delPodCmds(fexec *ovntest.FakeExec, networkPolicy knet.Ne
 }
 
 var _ = Describe("OVN NetworkPolicy Operations", func() {
-	var app *cli.App
+	var (
+		app     *cli.App
+		fakeOvn *FakeOVN
+	)
 
 	BeforeEach(func() {
 		// Restore global default values before each testcase
@@ -223,6 +226,12 @@ var _ = Describe("OVN NetworkPolicy Operations", func() {
 		app = cli.NewApp()
 		app.Name = "test"
 		app.Flags = config.Flags
+
+		fakeOvn = &FakeOVN{}
+	})
+
+	AfterEach(func() {
+		fakeOvn.shutdown()
 	})
 
 	Context("on startup", func() {
@@ -269,7 +278,6 @@ var _ = Describe("OVN NetworkPolicy Operations", func() {
 				nTest.addCmds(fExec, namespace1, namespace2)
 				npTest.addNamespaceSelectorCmds(fExec, networkPolicy, true)
 
-				fakeOvn := FakeOVN{}
 				fakeOvn.start(ctx, fExec,
 					&v1.NamespaceList{
 						Items: []v1.Namespace{
@@ -353,7 +361,6 @@ var _ = Describe("OVN NetworkPolicy Operations", func() {
 				nTest.addCmdsWithPods(fExec, nPodTest, namespace1)
 				npTest.addPodSelectorCmds(fExec, nPodTest, networkPolicy, true, false)
 
-				fakeOvn := FakeOVN{}
 				fakeOvn.start(ctx, fExec,
 					&v1.NamespaceList{
 						Items: []v1.Namespace{
@@ -454,7 +461,6 @@ var _ = Describe("OVN NetworkPolicy Operations", func() {
 				nTest.addCmdsWithPods(fExec, nPodTest, namespace2)
 				npTest.addPodSelectorCmds(fExec, nPodTest, networkPolicy, false, false)
 
-				fakeOvn := FakeOVN{}
 				fakeOvn.start(ctx, fExec,
 					&v1.NamespaceList{
 						Items: []v1.Namespace{
@@ -551,7 +557,6 @@ var _ = Describe("OVN NetworkPolicy Operations", func() {
 				npTest.addNamespaceSelectorCmds(fExec, networkPolicy, true)
 				npTest.addLocalPodCmds(fExec, nPodTest)
 
-				fakeOvn := FakeOVN{}
 				fakeOvn.start(ctx, fExec,
 					&v1.NamespaceList{
 						Items: []v1.Namespace{
@@ -645,7 +650,6 @@ var _ = Describe("OVN NetworkPolicy Operations", func() {
 				nTest.addCmds(fExec, namespace1, namespace2)
 				npTest.addNamespaceSelectorCmds(fExec, networkPolicy, true)
 
-				fakeOvn := FakeOVN{}
 				fakeOvn.start(ctx, fExec,
 					&v1.NamespaceList{
 						Items: []v1.Namespace{
@@ -745,7 +749,6 @@ var _ = Describe("OVN NetworkPolicy Operations", func() {
 				nTest.addCmdsWithPods(fExec, nPodTest, namespace1)
 				npTest.addPodSelectorCmds(fExec, nPodTest, networkPolicy, true, false)
 
-				fakeOvn := FakeOVN{}
 				fakeOvn.start(ctx, fExec,
 					&v1.NamespaceList{
 						Items: []v1.Namespace{
@@ -854,7 +857,6 @@ var _ = Describe("OVN NetworkPolicy Operations", func() {
 				nTest.addCmdsWithPods(fExec, nPodTest, namespace2)
 				npTest.addPodSelectorCmds(fExec, nPodTest, networkPolicy, false, false)
 
-				fakeOvn := FakeOVN{}
 				fakeOvn.start(ctx, fExec,
 					&v1.NamespaceList{
 						Items: []v1.Namespace{
@@ -952,7 +954,6 @@ var _ = Describe("OVN NetworkPolicy Operations", func() {
 				nTest.addCmdsWithPods(fExec, nPodTest, namespace1)
 				npTest.addPodSelectorCmds(fExec, nPodTest, networkPolicy, true, false)
 
-				fakeOvn := FakeOVN{}
 				fakeOvn.start(ctx, fExec,
 					&v1.NamespaceList{
 						Items: []v1.Namespace{

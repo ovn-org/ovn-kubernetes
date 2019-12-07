@@ -76,7 +76,10 @@ func (n namespace) addCmdsWithPods(fexec *ovntest.FakeExec, tP pod, namespace v1
 }
 
 var _ = Describe("OVN Namespace Operations", func() {
-	var app *cli.App
+	var (
+		app     *cli.App
+		fakeOvn *FakeOVN
+	)
 
 	BeforeEach(func() {
 		// Restore global default values before each testcase
@@ -85,6 +88,12 @@ var _ = Describe("OVN Namespace Operations", func() {
 		app = cli.NewApp()
 		app.Name = "test"
 		app.Flags = config.Flags
+
+		fakeOvn = &FakeOVN{}
+	})
+
+	AfterEach(func() {
+		fakeOvn.shutdown()
 	})
 
 	Context("on startup", func() {
@@ -109,7 +118,6 @@ var _ = Describe("OVN Namespace Operations", func() {
 				test.baseCmds(tExec, namespaceT)
 				test.addCmdsWithPods(tExec, tP, namespaceT)
 
-				fakeOvn := FakeOVN{}
 				fakeOvn.start(ctx, tExec,
 					&v1.NamespaceList{
 						Items: []v1.Namespace{
@@ -145,7 +153,6 @@ var _ = Describe("OVN Namespace Operations", func() {
 				test.baseCmds(tExec, namespaceT)
 				test.addCmds(tExec, namespaceT)
 
-				fakeOvn := FakeOVN{}
 				fakeOvn.start(ctx, tExec, &v1.NamespaceList{
 					Items: []v1.Namespace{
 						namespaceT,
@@ -178,7 +185,6 @@ var _ = Describe("OVN Namespace Operations", func() {
 				test.baseCmds(fExec, namespaceT)
 				test.addCmds(fExec, namespaceT)
 
-				fakeOvn := FakeOVN{}
 				fakeOvn.start(ctx, fExec, &v1.NamespaceList{
 					Items: []v1.Namespace{
 						namespaceT,

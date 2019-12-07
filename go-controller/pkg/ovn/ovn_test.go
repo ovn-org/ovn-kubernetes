@@ -35,8 +35,12 @@ func (o *FakeOVN) start(ctx *cli.Context, fexec *ovntest.FakeExec, objects ...ru
 }
 
 func (o *FakeOVN) restart() {
-	close(o.stopChan)
+	o.shutdown()
 	o.init()
+}
+
+func (o *FakeOVN) shutdown() {
+	close(o.stopChan)
 }
 
 func (o *FakeOVN) init() {
