@@ -106,25 +106,24 @@ func (oc *Controller) deletePodAcls(logicalPort string) {
 	}
 }
 
-func (oc *Controller) getLogicalPortUUID(logicalPort string) string {
+func (oc *Controller) getLogicalPortUUID(logicalPort string) (string, error) {
 	if oc.logicalPortUUIDCache[logicalPort] != "" {
-		return oc.logicalPortUUIDCache[logicalPort]
+		return oc.logicalPortUUIDCache[logicalPort], nil
 	}
 
 	out, stderr, err := util.RunOVNNbctl("--if-exists", "get",
 		"logical_switch_port", logicalPort, "_uuid")
 	if err != nil {
-		logrus.Errorf("Error while getting uuid for logical_switch_port "+
+		return "", fmt.Errorf("Error while getting uuid for logical_switch_port "+
 			"%s, stderr: %q, err: %v", logicalPort, stderr, err)
-		return ""
 	}
 
 	if out == "" {
-		return out
+		return "", fmt.Errorf("empty uuid for logical_switch_port %s", logicalPort)
 	}
 
 	oc.logicalPortUUIDCache[logicalPort] = out
-	return oc.logicalPortUUIDCache[logicalPort]
+	return oc.logicalPortUUIDCache[logicalPort], nil
 }
 
 func (oc *Controller) deleteLogicalPort(pod *kapi.Pod) {
@@ -160,7 +159,9 @@ func (oc *Controller) deleteLogicalPort(pod *kapi.Pod) {
 	delete(oc.logicalPortUUIDCache, logicalPort)
 	oc.lspMutex.Unlock()
 
-	oc.deletePodFromNamespace(pod.Namespace, podIP, logicalPort)
+	if err := oc.deletePodFromNamespace(pod.Namespace, podIP, logicalPort); err != nil {
+		logrus.Errorf(err.Error())
+	}
 }
 
 func (oc *Controller) waitForNodeLogicalSwitch(nodeName string) (*net.IPNet, error) {
@@ -260,8 +261,7 @@ func (oc *Controller) addLogicalPort(pod *kapi.Pod) error {
 				"stdout: %q, stderr: %q (%v)", portName, out, stderr, err)
 		}
 		oc.logicalPortCache[portName] = logicalSwitch
-		oc.addPodToNamespace(pod.Namespace, annotation.IP.IP, portName)
-		return nil
+		return oc.addPodToNamespace(pod.Namespace, annotation.IP.IP, portName)
 	}
 
 	addressStr := "dynamic"
@@ -311,7 +311,9 @@ func (oc *Controller) addLogicalPort(pod *kapi.Pod) error {
 		return fmt.Errorf("error creating pod network annotation: %v", err)
 	}
 
-	oc.addPodToNamespace(pod.Namespace, podIP, portName)
+	if err := oc.addPodToNamespace(pod.Namespace, podIP, portName); err != nil {
+		return err
+	}
 
 	logrus.Debugf("Annotation values: ip=%s ; mac=%s ; gw=%s\nAnnotation=%s",
 		podCIDR, podMac, gatewayIP, marshalledAnnotation)

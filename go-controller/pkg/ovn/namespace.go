@@ -54,22 +54,21 @@ func (oc *Controller) waitForNamespaceEvent(namespace string) error {
 	return nil
 }
 
-func (oc *Controller) addPodToNamespace(ns string, ip net.IP,
-	logicalPort string) {
+func (oc *Controller) addPodToNamespace(ns string, ip net.IP, logicalPort string) error {
 	mutex := oc.getNamespaceLock(ns)
 	if mutex == nil {
-		return
+		return nil
 	}
 	defer mutex.Unlock()
 
 	if oc.namespacePolicies[ns] == nil {
-		return
+		return nil
 	}
 
 	// If pod has already been added, nothing to do.
 	address := ip.String()
 	if oc.namespaceAddressSet[ns][address] != "" {
-		return
+		return nil
 	}
 
 	oc.namespaceAddressSet[ns][address] = logicalPort
@@ -83,28 +82,33 @@ func (oc *Controller) addPodToNamespace(ns string, ip net.IP,
 	// Enforce the default deny multicast policy and, if multicast allowed,
 	// add the pod to the allow policy.
 	if oc.multicastSupport {
-		oc.podAddDefaultDenyMulticastPolicy(logicalPort)
+		if err := oc.podAddDefaultDenyMulticastPolicy(logicalPort); err != nil {
+			return err
+		}
 		if oc.multicastEnabled[ns] {
-			oc.podAddAllowMulticastPolicy(ns, logicalPort)
+			if err := oc.podAddAllowMulticastPolicy(ns, logicalPort); err != nil {
+				return err
+			}
 		}
 	}
+
+	return nil
 }
 
-func (oc *Controller) deletePodFromNamespace(ns string, ip net.IP,
-	logicalPort string) {
+func (oc *Controller) deletePodFromNamespace(ns string, ip net.IP, logicalPort string) error {
 	if ip == nil {
-		return
+		return nil
 	}
 
 	mutex := oc.getNamespaceLock(ns)
 	if mutex == nil {
-		return
+		return nil
 	}
 	defer mutex.Unlock()
 
 	address := ip.String()
 	if oc.namespaceAddressSet[ns][address] == "" {
-		return
+		return nil
 	}
 
 	delete(oc.namespaceAddressSet[ns], address)
@@ -118,11 +122,17 @@ func (oc *Controller) deletePodFromNamespace(ns string, ip net.IP,
 	// Remove the port from the default deny multicast policy and, if
 	// multicast allowed, remove the pod from the allow policy.
 	if oc.multicastSupport {
-		oc.podDeleteDefaultDenyMulticastPolicy(logicalPort)
+		if err := oc.podDeleteDefaultDenyMulticastPolicy(logicalPort); err != nil {
+			return err
+		}
 		if oc.multicastEnabled[ns] {
-			oc.podDeleteAllowMulticastPolicy(ns, logicalPort)
+			if err := oc.podDeleteAllowMulticastPolicy(ns, logicalPort); err != nil {
+				return err
+			}
 		}
 	}
+
+	return nil
 }
 
 // Creates an explicit "allow" policy for multicast traffic within the
@@ -194,7 +204,7 @@ func (oc *Controller) AddNamespace(ns *kapi.Namespace) {
 
 				// Enforce the default deny multicast policy.
 				if oc.multicastSupport {
-					oc.podAddDefaultDenyMulticastPolicy(portName)
+					_ = oc.podAddDefaultDenyMulticastPolicy(portName)
 				}
 			}
 		}
