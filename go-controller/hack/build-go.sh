@@ -35,11 +35,11 @@ build_windows_binaries() {
     set -x
     for bin in "$@"; do
         binbase=$(basename ${bin})
-        GOOS=windows go build -v \
+        GOOS=windows GOARCH=amd64 go build -v \
             -mod vendor \
             -gcflags "${GCFLAGS}" \
             -ldflags "-B ${BUILDID}" \
-            -o "${OVN_KUBE_OUTPUT_BINPATH_WINDOWS}/${binbase}"\
+            -o "${OVN_KUBE_OUTPUT_BINPATH_WINDOWS}/${binbase}.exe"\
             "./${bin}"
     done
 }
