@@ -87,6 +87,9 @@ var (
 
 	// UnprivilegedMode allows ovnkube-node to run without SYS_ADMIN capability, by performing interface setup in the CNI plugin
 	UnprivilegedMode bool
+
+	// EnableMulticast enables multicast support between the pods within the same namespace
+	EnableMulticast bool
 )
 
 const (
@@ -430,7 +433,11 @@ var CommonFlags = []cli.Flag{
 		Usage:       "Run ovnkube-node container in unprivileged mode. Valid only with --init-node option.",
 		Destination: &UnprivilegedMode,
 	},
-
+	cli.BoolFlag{
+		Name:        "enable-multicast",
+		Usage:       "Adds multicast support. Valid only with --init-master option.",
+		Destination: &EnableMulticast,
+	},
 	// Logging options
 	cli.IntFlag{
 		Name:        "loglevel",

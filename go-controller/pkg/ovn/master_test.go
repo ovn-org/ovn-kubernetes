@@ -244,6 +244,7 @@ var _ = Describe("Master Operations", func() {
 		err := app.Run([]string{
 			app.Name,
 			"-cluster-subnets=" + clusterCIDR,
+			"-enable-multicast",
 		})
 		Expect(err).NotTo(HaveOccurred())
 	})
@@ -316,6 +317,7 @@ var _ = Describe("Master Operations", func() {
 		err := app.Run([]string{
 			app.Name,
 			"-cluster-subnets=" + clusterCIDR,
+			"-enable-multicast",
 		})
 		Expect(err).NotTo(HaveOccurred())
 	})
