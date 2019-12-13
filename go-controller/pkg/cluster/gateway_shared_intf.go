@@ -254,8 +254,8 @@ func addDefaultConntrackRules(nodeName, gwBridge, gwIntf string) error {
 	return nil
 }
 
-func initSharedGateway(
-	nodeName string, subnet, gwNextHop, gwIntf string, wf *factory.WatchFactory) (map[string]string, postReadyFn, error) {
+func initSharedGateway(nodeName string, subnet, gwNextHop, gwIntf string,
+	wf *factory.WatchFactory) (map[string]map[string]string, postReadyFn, error) {
 	var bridgeName string
 	var uplinkName string
 	var brCreated bool
@@ -303,13 +303,16 @@ func initSharedGateway(
 		return nil, nil, fmt.Errorf("failed to set up shared interface gateway: %v", err)
 	}
 
-	annotations := map[string]string{
+	l3GatewayConfig := map[string]string{
 		ovn.OvnNodeGatewayMode:       string(config.Gateway.Mode),
 		ovn.OvnNodeGatewayVlanID:     fmt.Sprintf("%d", config.Gateway.VLANID),
 		ovn.OvnNodeGatewayIfaceID:    ifaceID,
 		ovn.OvnNodeGatewayMacAddress: macAddress,
 		ovn.OvnNodeGatewayIP:         ipAddress,
 		ovn.OvnNodeGatewayNextHop:    gwNextHop,
+	}
+	annotations := map[string]map[string]string{
+		ovn.OvnDefaultNetworkGateway: l3GatewayConfig,
 	}
 
 	return annotations, func() error {

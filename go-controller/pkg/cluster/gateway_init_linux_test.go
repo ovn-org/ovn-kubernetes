@@ -4,6 +4,7 @@ package cluster
 
 import (
 	"bytes"
+	"encoding/json"
 	"fmt"
 	"net"
 	"syscall"
@@ -155,16 +156,21 @@ cookie=0x0, duration=8366.597s, table=1, n_packets=10641, n_bytes=10370087, prio
 		_, err = config.InitConfig(ctx, fexec, nil)
 		Expect(err).NotTo(HaveOccurred())
 
+		l3GatewayConfig := map[string]string{
+			ovn.OvnNodeGatewayMode:       string(config.Gateway.Mode),
+			ovn.OvnNodeGatewayVlanID:     string(gatewayVLANID),
+			ovn.OvnNodeGatewayIfaceID:    gwRouter,
+			ovn.OvnNodeGatewayMacAddress: lrpMAC,
+			ovn.OvnNodeGatewayIP:         lrpIP,
+			//ovn.OvnNodeGatewayNextHop:    localnetGatewayNextHop,
+		}
+		byteArr, err := json.Marshal(map[string]map[string]string{ovn.OvnDefaultNetworkGateway: l3GatewayConfig})
+		Expect(err).NotTo(HaveOccurred())
 		existingNode := v1.Node{ObjectMeta: metav1.ObjectMeta{
 			Name: nodeName,
 			Annotations: map[string]string{
-				ovn.OvnNodeSubnets:           nodeSubnet,
-				ovn.OvnNodeGatewayMode:       string(config.Gateway.Mode),
-				ovn.OvnNodeGatewayVlanID:     string(gatewayVLANID),
-				ovn.OvnNodeGatewayIfaceID:    gwRouter,
-				ovn.OvnNodeGatewayMacAddress: lrpMAC,
-				ovn.OvnNodeGatewayIP:         lrpIP,
-				//ovn.OvnNodeGatewayNextHop:    localnetGatewayNextHop,
+				ovn.OvnNodeSubnets:         nodeSubnet,
+				ovn.OvnNodeL3GatewayConfig: string(byteArr),
 			},
 		}}
 		fakeClient := fake.NewSimpleClientset(&v1.NodeList{
@@ -296,16 +302,21 @@ var _ = Describe("Gateway Init Operations", func() {
 			_, err = config.InitConfig(ctx, fexec, nil)
 			Expect(err).NotTo(HaveOccurred())
 
+			l3GatewayConfig := map[string]string{
+				ovn.OvnNodeGatewayMode:       string(config.Gateway.Mode),
+				ovn.OvnNodeGatewayVlanID:     string(0),
+				ovn.OvnNodeGatewayIfaceID:    gwRouter,
+				ovn.OvnNodeGatewayMacAddress: lrpMAC,
+				ovn.OvnNodeGatewayIP:         lrpIP,
+				//ovn.OvnNodeGatewayNextHop:    localnetGatewayNextHop,
+			}
+			byteArr, err := json.Marshal(map[string]map[string]string{ovn.OvnDefaultNetworkGateway: l3GatewayConfig})
+			Expect(err).NotTo(HaveOccurred())
 			existingNode := v1.Node{ObjectMeta: metav1.ObjectMeta{
 				Name: nodeName,
 				Annotations: map[string]string{
-					ovn.OvnNodeSubnets:           nodeSubnet,
-					ovn.OvnNodeGatewayMode:       string(config.Gateway.Mode),
-					ovn.OvnNodeGatewayVlanID:     string(0),
-					ovn.OvnNodeGatewayIfaceID:    gwRouter,
-					ovn.OvnNodeGatewayMacAddress: lrpMAC,
-					ovn.OvnNodeGatewayIP:         lrpIP,
-					//ovn.OvnNodeGatewayNextHop:    localnetGatewayNextHop,
+					ovn.OvnNodeSubnets:         nodeSubnet,
+					ovn.OvnNodeL3GatewayConfig: string(byteArr),
 				},
 			}}
 			fakeClient := fake.NewSimpleClientset(&v1.NodeList{

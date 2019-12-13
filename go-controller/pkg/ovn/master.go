@@ -30,18 +30,22 @@ const (
 	// OvnServiceIdledAt is a constant string representing the Service annotation key
 	// whose value indicates the time stamp in RFC3339 format when a Service was idled
 	OvnServiceIdledAt = "k8s.ovn.org/idled-at"
-	// OvnNodeGatewayMode is the mode of the gateway
-	OvnNodeGatewayMode = "k8s.ovn.org/node-gateway-mode"
-	// OvnNodeGatewayVlanID is the vlanid used by the gateway
-	OvnNodeGatewayVlanID = "k8s.ovn.org/node-gateway-vlan-id"
-	// OvnNodeGatewayIfaceID is the interfaceID of the gateway
-	OvnNodeGatewayIfaceID = "k8s.ovn.org/node-gateway-iface-id"
-	// OvnNodeGatewayMacAddress is the MacAddress of the Gateway interface
-	OvnNodeGatewayMacAddress = "k8s.ovn.org/node-gateway-mac-address"
-	// OvnNodeGatewayIP is the IP address of the Gateway
-	OvnNodeGatewayIP = "k8s.ovn.org/node-gateway-ip"
-	// OvnNodeGatewayNextHop is the Next Hop
-	OvnNodeGatewayNextHop = "k8s.ovn.org/node-gateway-next-hop"
+	// OvnNodeL3GatewayConfig is the constant string representing the l3 gateway annotation key
+	OvnNodeL3GatewayConfig = "k8s.ovn.org/l3-gateway-config"
+	// OvnNodeGatewayMode is the mode of the gateway in the l3 gateway annotation
+	OvnNodeGatewayMode = "mode"
+	// OvnNodeGatewayVlanID is the vlanid used by the gateway in the l3 gateway annotation
+	OvnNodeGatewayVlanID = "vlan-id"
+	// OvnNodeGatewayIfaceID is the interfaceID of the gateway in the l3 gateway annotation
+	OvnNodeGatewayIfaceID = "interface-id"
+	// OvnNodeGatewayMacAddress is the MacAddress of the Gateway interface in the l3 gateway annotation
+	OvnNodeGatewayMacAddress = "mac-address"
+	// OvnNodeGatewayIP is the IP address of the Gateway in the l3 gateway annotation
+	OvnNodeGatewayIP = "ip-address"
+	// OvnNodeGatewayNextHop is the Next Hop in the l3 gateway annotation
+	OvnNodeGatewayNextHop = "next-hop"
+	// OvnDefaultNetworkGateway captures L3 gateway config for default OVN network interface
+	OvnDefaultNetworkGateway = "default"
 )
 
 // StartClusterMaster runs a subnet IPAM and a controller that watches arrival/departure
@@ -258,19 +262,38 @@ func (oc *Controller) syncNodeManagementPort(node *kapi.Node, subnet *net.IPNet)
 	return nil
 }
 
-func parseGatewayIfaceID(node *kapi.Node) (string, error) {
-	ifaceID, ok := node.Annotations[OvnNodeGatewayIfaceID]
+// UnmarshalPodAnnotation returns a the unmarshalled pod annotation
+func UnmarshalNodeL3GatewayAnnotation(node *kapi.Node) (map[string]string, error) {
+	l3GatewayAnnotation, ok := node.Annotations[OvnNodeL3GatewayConfig]
+	if !ok {
+		return nil, fmt.Errorf("%s annotation not found for node %q", OvnNodeL3GatewayConfig, node.Name)
+	}
+
+	l3GatewayConfigMap := map[string]map[string]string{}
+	if err := json.Unmarshal([]byte(l3GatewayAnnotation), &l3GatewayConfigMap); err != nil {
+		return nil, fmt.Errorf("failed to unmarshal l3 gateway config annotation %s for node %q", l3GatewayAnnotation, node.Name)
+	}
+
+	l3GatewayConfig, ok := l3GatewayConfigMap[OvnDefaultNetworkGateway]
+	if !ok {
+		return nil, fmt.Errorf("%s annotation for %s network not found", OvnNodeL3GatewayConfig, OvnDefaultNetworkGateway)
+	}
+	return l3GatewayConfig, nil
+}
+
+func parseGatewayIfaceID(l3GatewayConfig map[string]string) (string, error) {
+	ifaceID, ok := l3GatewayConfig[OvnNodeGatewayIfaceID]
 	if !ok || ifaceID == "" {
-		return "", fmt.Errorf("%s annotation not found or invalid for node %q ", OvnNodeGatewayIfaceID, node.Name)
+		return "", fmt.Errorf("%s annotation not found or invalid", OvnNodeGatewayIfaceID)
 	}
 
 	return ifaceID, nil
 }
 
-func parseGatewayMacAddress(node *kapi.Node) (string, error) {
-	gatewayMacAddress, ok := node.Annotations[OvnNodeGatewayMacAddress]
+func parseGatewayMacAddress(l3GatewayConfig map[string]string) (string, error) {
+	gatewayMacAddress, ok := l3GatewayConfig[OvnNodeGatewayMacAddress]
 	if !ok {
-		return "", fmt.Errorf("%s annotation not found for node %q ", OvnNodeGatewayMacAddress, node.Name)
+		return "", fmt.Errorf("%s annotation not found", OvnNodeGatewayMacAddress)
 	}
 
 	_, err := net.ParseMAC(gatewayMacAddress)
@@ -281,31 +304,31 @@ func parseGatewayMacAddress(node *kapi.Node) (string, error) {
 	return gatewayMacAddress, nil
 }
 
-func parseGatewayLogicalNetwork(node *kapi.Node) (string, string, error) {
-	ipAddress, ok := node.Annotations[OvnNodeGatewayIP]
+func parseGatewayLogicalNetwork(l3GatewayConfig map[string]string) (string, string, error) {
+	ipAddress, ok := l3GatewayConfig[OvnNodeGatewayIP]
 	if !ok {
-		return "", "", fmt.Errorf("%s annotation not found for node %q ", OvnNodeGatewayIP, node.Name)
+		return "", "", fmt.Errorf("%s annotation not found", OvnNodeGatewayIP)
 	}
 
-	gwNextHop, ok := node.Annotations[OvnNodeGatewayNextHop]
+	gwNextHop, ok := l3GatewayConfig[OvnNodeGatewayNextHop]
 	if !ok {
-		return "", "", fmt.Errorf("%s annotation not found for node %q ", OvnNodeGatewayNextHop, node.Name)
+		return "", "", fmt.Errorf("%s annotation not found", OvnNodeGatewayNextHop)
 	}
 
 	return ipAddress, gwNextHop, nil
 }
 
-func parseGatewayVLANID(node *kapi.Node, ifaceID string) ([]string, error) {
+func parseGatewayVLANID(l3GatewayConfig map[string]string, ifaceID string) ([]string, error) {
 
 	var lspArgs []string
-	vID, ok := node.Annotations[OvnNodeGatewayVlanID]
+	vID, ok := l3GatewayConfig[OvnNodeGatewayVlanID]
 	if !ok {
-		return nil, fmt.Errorf("%s annotation not found for node %q ", OvnNodeGatewayVlanID, node.Name)
+		return nil, fmt.Errorf("%s annotation not found", OvnNodeGatewayVlanID)
 	}
 
 	vlanID, errVlan := strconv.Atoi(vID)
 	if errVlan != nil {
-		return nil, fmt.Errorf("%s annotation has an invalid format for node %q ", OvnNodeGatewayVlanID, node.Name)
+		return nil, fmt.Errorf("%s annotation has an invalid format", OvnNodeGatewayVlanID)
 	}
 	if vlanID > 0 {
 		lspArgs = []string{"--", "set", "logical_switch_port",
@@ -315,24 +338,25 @@ func parseGatewayVLANID(node *kapi.Node, ifaceID string) ([]string, error) {
 	return lspArgs, nil
 }
 
-func (oc *Controller) syncGatewayLogicalNetwork(node *kapi.Node, mode string, subnet string) error {
+func (oc *Controller) syncGatewayLogicalNetwork(node *kapi.Node, l3GatewayConfig map[string]string, subnet string) error {
 	var err error
 	var clusterSubnets []string
 	for _, clusterSubnet := range config.Default.ClusterSubnets {
 		clusterSubnets = append(clusterSubnets, clusterSubnet.CIDR.String())
 	}
 
-	ifaceID, err := parseGatewayIfaceID(node)
+	mode := l3GatewayConfig[OvnNodeGatewayMode]
+	ifaceID, err := parseGatewayIfaceID(l3GatewayConfig)
 	if err != nil {
 		return err
 	}
 
-	gwMacAddress, err := parseGatewayMacAddress(node)
+	gwMacAddress, err := parseGatewayMacAddress(l3GatewayConfig)
 	if err != nil {
 		return err
 	}
 
-	ipAddress, gwNextHop, err := parseGatewayLogicalNetwork(node)
+	ipAddress, gwNextHop, err := parseGatewayLogicalNetwork(l3GatewayConfig)
 	if err != nil {
 		return err
 	}
@@ -340,7 +364,7 @@ func (oc *Controller) syncGatewayLogicalNetwork(node *kapi.Node, mode string, su
 	var lspArgs []string
 	var lspErr error
 	if mode == string(config.GatewayModeShared) {
-		lspArgs, lspErr = parseGatewayVLANID(node, ifaceID)
+		lspArgs, lspErr = parseGatewayVLANID(l3GatewayConfig, ifaceID)
 		if lspErr != nil {
 			return lspErr
 		}
