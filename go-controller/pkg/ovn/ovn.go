@@ -478,16 +478,19 @@ func (oc *Controller) WatchNamespaces() error {
 }
 
 func (oc *Controller) syncNodeGateway(node *kapi.Node, subnet *net.IPNet) error {
+	l3GatewayConfig, err := UnmarshalNodeL3GatewayAnnotation(node)
+	if err != nil {
+		return err
+	}
 	if subnet == nil {
 		subnet, _ = parseNodeHostSubnet(node)
 	}
-	mode := node.Annotations[OvnNodeGatewayMode]
-	if mode == string(config.GatewayModeDisabled) {
+	if l3GatewayConfig[OvnNodeGatewayMode] == string(config.GatewayModeDisabled) {
 		if err := util.GatewayCleanup(node.Name, subnet); err != nil {
 			return fmt.Errorf("error cleaning up gateway for node %s: %v", node.Name, err)
 		}
 	} else if subnet != nil {
-		if err := oc.syncGatewayLogicalNetwork(node, mode, subnet.String()); err != nil {
+		if err := oc.syncGatewayLogicalNetwork(node, l3GatewayConfig, subnet.String()); err != nil {
 			return fmt.Errorf("error creating gateway for node %s: %v", node.Name, err)
 		}
 	}
@@ -587,30 +590,12 @@ func (oc *Controller) GetServiceVIPToName(vip string, protocol kapi.Protocol) (t
 
 // gatewayChanged() compares old annotations to new and returns true if something has changed.
 func gatewayChanged(oldNode, newNode *kapi.Node) bool {
+	oldL3GatewayConfig, _ := UnmarshalNodeL3GatewayAnnotation(oldNode)
+	l3GatewayConfig, _ := UnmarshalNodeL3GatewayAnnotation(newNode)
 
-	if newNode.Annotations[OvnNodeGatewayMode] != oldNode.Annotations[OvnNodeGatewayMode] {
-		return true
+	if oldL3GatewayConfig == nil && l3GatewayConfig == nil {
+		return false
 	}
 
-	if newNode.Annotations[OvnNodeGatewayVlanID] != oldNode.Annotations[OvnNodeGatewayVlanID] {
-		return true
-	}
-
-	if newNode.Annotations[OvnNodeGatewayIfaceID] != oldNode.Annotations[OvnNodeGatewayIfaceID] {
-		return true
-	}
-
-	if newNode.Annotations[OvnNodeGatewayMacAddress] != oldNode.Annotations[OvnNodeGatewayMacAddress] {
-		return true
-	}
-
-	if newNode.Annotations[OvnNodeGatewayIP] != oldNode.Annotations[OvnNodeGatewayIP] {
-		return true
-	}
-
-	if newNode.Annotations[OvnNodeGatewayNextHop] != oldNode.Annotations[OvnNodeGatewayNextHop] {
-		return true
-	}
-
-	return false
+	return !reflect.DeepEqual(oldL3GatewayConfig, l3GatewayConfig)
 }
