@@ -62,16 +62,7 @@ func deleteService(service *kapi.Service, inport, gwBridge string) {
 	}
 }
 
-func syncServices(services []interface{}, gwBridge, gwIntf string) {
-	// Get ofport of physical interface
-	inport, stderr, err := util.RunOVSVsctl("--if-exists", "get",
-		"interface", gwIntf, "ofport")
-	if err != nil {
-		logrus.Errorf("Failed to get ofport of %s, stderr: %q, error: %v",
-			gwIntf, stderr, err)
-		return
-	}
-
+func syncServices(services []interface{}, inport, gwBridge string) {
 	nodePorts := make(map[string]bool)
 	for _, serviceInterface := range services {
 		service, ok := serviceInterface.(*kapi.Service)
@@ -179,7 +170,7 @@ func nodePortWatcher(nodeName, gwBridge, gwIntf string, wf *factory.WatchFactory
 			deleteService(service, ofportPhys, gwBridge)
 		},
 	}, func(services []interface{}) {
-		syncServices(services, gwBridge, gwIntf)
+		syncServices(services, ofportPhys, gwBridge)
 	})
 
 	return err
