@@ -116,6 +116,47 @@ func (i *informer) removeHandler(handler *Handler) error {
 	return nil
 }
 
+func ensureObjectOnDelete(obj interface{}, expectedType reflect.Type) (interface{}, error) {
+	if expectedType == reflect.TypeOf(obj) {
+		return obj, nil
+	}
+	tombstone, ok := obj.(cache.DeletedFinalStateUnknown)
+	if !ok {
+		return nil, fmt.Errorf("couldn't get object from tombstone: %+v", obj)
+	}
+	obj = tombstone.Obj
+	objType := reflect.TypeOf(obj)
+	if expectedType != objType {
+		return nil, fmt.Errorf("expected tombstone object resource type %v but got %v", expectedType, objType)
+	}
+	return obj, nil
+}
+
+func (i *informer) newFederatedHandler() cache.ResourceEventHandlerFuncs {
+	return cache.ResourceEventHandlerFuncs{
+		AddFunc: func(obj interface{}) {
+			i.forEachHandler(obj, func(h *Handler) {
+				h.OnAdd(obj)
+			})
+		},
+		UpdateFunc: func(oldObj, newObj interface{}) {
+			i.forEachHandler(newObj, func(h *Handler) {
+				h.OnUpdate(oldObj, newObj)
+			})
+		},
+		DeleteFunc: func(obj interface{}) {
+			realObj, err := ensureObjectOnDelete(obj, i.oType)
+			if err != nil {
+				logrus.Errorf(err.Error())
+				return
+			}
+			i.forEachHandler(realObj, func(h *Handler) {
+				h.OnDelete(realObj)
+			})
+		},
+	}
+}
+
 // WatchFactory initializes and manages common kube watches
 type WatchFactory struct {
 	// Must be first member in the struct due to Golang ARM/x86 32-bit
@@ -172,7 +213,7 @@ func NewWatchFactory(c kubernetes.Interface, stopChan chan struct{}) (*WatchFact
 	wf.informers[nodeType] = newInformer(nodeType, wf.iFactory.Core().V1().Nodes().Informer())
 
 	for _, informer := range wf.informers {
-		informer.inf.AddEventHandler(wf.newFederatedHandler(informer))
+		informer.inf.AddEventHandler(informer.newFederatedHandler())
 	}
 
 	wf.iFactory.Start(stopChan)
@@ -197,39 +238,6 @@ func (wf *WatchFactory) Shutdown() {
 			}
 			delete(inf.handlers, handler.id)
 		}
-	}
-}
-
-func (wf *WatchFactory) newFederatedHandler(inf *informer) cache.ResourceEventHandlerFuncs {
-	return cache.ResourceEventHandlerFuncs{
-		AddFunc: func(obj interface{}) {
-			inf.forEachHandler(obj, func(h *Handler) {
-				h.OnAdd(obj)
-			})
-		},
-		UpdateFunc: func(oldObj, newObj interface{}) {
-			inf.forEachHandler(newObj, func(h *Handler) {
-				h.OnUpdate(oldObj, newObj)
-			})
-		},
-		DeleteFunc: func(obj interface{}) {
-			if inf.oType != reflect.TypeOf(obj) {
-				tombstone, ok := obj.(cache.DeletedFinalStateUnknown)
-				if !ok {
-					logrus.Errorf("couldn't get object from tombstone: %+v", obj)
-					return
-				}
-				obj = tombstone.Obj
-				objType := reflect.TypeOf(obj)
-				if inf.oType != objType {
-					logrus.Errorf("expected tombstone object resource type %v but got %v", inf.oType, objType)
-					return
-				}
-			}
-			inf.forEachHandler(obj, func(h *Handler) {
-				h.OnDelete(obj)
-			})
-		},
 	}
 }
 
