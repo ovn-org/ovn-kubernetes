@@ -20,7 +20,7 @@ import (
 
 // Handler represents an event handler and is private to the factory module
 type Handler struct {
-	cache.FilteringResourceEventHandler
+	base cache.FilteringResourceEventHandler
 
 	id uint64
 	// tombstone is used to track the handler's lifetime. handlerAlive
@@ -29,6 +29,31 @@ type Handler struct {
 	// tombstone should only be set using atomic operations since it is
 	// used from multiple goroutines.
 	tombstone uint32
+}
+
+func (h *Handler) OnAdd(obj interface{}) {
+	if atomic.LoadUint32(&h.tombstone) == handlerAlive {
+		h.base.OnAdd(obj)
+	}
+}
+
+func (h *Handler) OnUpdate(oldObj, newObj interface{}) {
+	if atomic.LoadUint32(&h.tombstone) == handlerAlive {
+		h.base.OnUpdate(oldObj, newObj)
+	}
+}
+
+func (h *Handler) OnDelete(obj interface{}) {
+	if atomic.LoadUint32(&h.tombstone) == handlerAlive {
+		h.base.OnDelete(obj)
+	}
+}
+
+func (h *Handler) kill() error {
+	if !atomic.CompareAndSwapUint32(&h.tombstone, handlerAlive, handlerDead) {
+		return fmt.Errorf("event handler %d already dead", h.id)
+	}
+	return nil
 }
 
 type informer struct {
@@ -49,10 +74,7 @@ func (i *informer) forEachHandler(obj interface{}, f func(h *Handler)) {
 	}
 
 	for _, handler := range i.handlers {
-		// Only run alive handlers
-		if !atomic.CompareAndSwapUint32(&handler.tombstone, handlerDead, handlerDead) {
-			f(handler)
-		}
+		f(handler)
 	}
 }
 
@@ -73,9 +95,8 @@ func (i *informer) addHandler(id uint64, filterFunc func(obj interface{}) bool, 
 }
 
 func (i *informer) removeHandler(handler *Handler) error {
-	if !atomic.CompareAndSwapUint32(&handler.tombstone, handlerAlive, handlerDead) {
-		// Already removed
-		return fmt.Errorf("tried to remove already removed object type %v event handler %d", i.oType, handler.id)
+	if err := handler.kill(); err != nil {
+		return err
 	}
 
 	logrus.Debugf("sending %v event handler %d for removal", i.oType, handler.id)
@@ -171,9 +192,10 @@ func (wf *WatchFactory) Shutdown() {
 		inf.Lock()
 		defer inf.Unlock()
 		for _, handler := range inf.handlers {
-			if atomic.CompareAndSwapUint32(&handler.tombstone, handlerAlive, handlerDead) {
-				delete(inf.handlers, handler.id)
+			if err := handler.kill(); err != nil {
+				logrus.Warningf("failed to remove handler: %v", err)
 			}
+			delete(inf.handlers, handler.id)
 		}
 	}
 }
