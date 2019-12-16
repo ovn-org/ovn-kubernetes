@@ -56,6 +56,45 @@ func (i *informer) forEachHandler(obj interface{}, f func(h *Handler)) {
 	}
 }
 
+func (i *informer) addHandler(id uint64, filterFunc func(obj interface{}) bool, funcs cache.ResourceEventHandler) *Handler {
+	i.Lock()
+	defer i.Unlock()
+
+	handler := &Handler{
+		cache.FilteringResourceEventHandler{
+			FilterFunc: filterFunc,
+			Handler:    funcs,
+		},
+		id,
+		handlerAlive,
+	}
+	i.handlers[id] = handler
+	return handler
+}
+
+func (i *informer) removeHandler(handler *Handler) error {
+	if !atomic.CompareAndSwapUint32(&handler.tombstone, handlerAlive, handlerDead) {
+		// Already removed
+		return fmt.Errorf("tried to remove already removed object type %v event handler %d", i.oType, handler.id)
+	}
+
+	logrus.Debugf("sending %v event handler %d for removal", i.oType, handler.id)
+
+	go func() {
+		i.Lock()
+		defer i.Unlock()
+		if _, ok := i.handlers[handler.id]; ok {
+			// Remove the handler
+			delete(i.handlers, handler.id)
+			logrus.Debugf("removed %v event handler %d", i.oType, handler.id)
+		} else {
+			logrus.Warningf("tried to remove unknown object type %v event handler %d", i.oType, handler.id)
+		}
+	}()
+
+	return nil
+}
+
 // WatchFactory initializes and manages common kube watches
 type WatchFactory struct {
 	// Must be first member in the struct due to Golang ARM/x86 32-bit
@@ -246,57 +285,24 @@ func (wf *WatchFactory) addHandler(objType reflect.Type, namespace string, lsel 
 	}
 
 	handlerID := atomic.AddUint64(&wf.handlerCounter, 1)
-
-	inf.Lock()
-	defer inf.Unlock()
-
-	handler := &Handler{
-		cache.FilteringResourceEventHandler{
-			FilterFunc: filterFunc,
-			Handler:    funcs,
-		},
-		handlerID,
-		handlerAlive,
-	}
-	inf.handlers[handlerID] = handler
-	logrus.Debugf("added %v event handler %d", objType, handlerID)
+	handler := inf.addHandler(handlerID, filterFunc, funcs)
+	logrus.Debugf("added %v event handler %d", objType, handler.id)
 
 	// Send existing items to the handler's add function; informers usually
 	// do this but since we share informers, it's long-since happened so
 	// we must emulate that here
 	for _, obj := range existingItems {
-		inf.handlers[handlerID].OnAdd(obj)
+		handler.OnAdd(obj)
 	}
 
 	return handler, nil
 }
 
 func (wf *WatchFactory) removeHandler(objType reflect.Type, handler *Handler) error {
-	inf, ok := wf.informers[objType]
-	if !ok {
-		return fmt.Errorf("tried to remove unknown object type %v event handler", objType)
+	if inf, ok := wf.informers[objType]; ok {
+		return inf.removeHandler(handler)
 	}
-
-	if !atomic.CompareAndSwapUint32(&handler.tombstone, handlerAlive, handlerDead) {
-		// Already removed
-		return fmt.Errorf("tried to remove already removed object type %v event handler %d", objType, handler.id)
-	}
-
-	logrus.Debugf("sending %v event handler %d for removal", objType, handler.id)
-
-	go func() {
-		inf.Lock()
-		defer inf.Unlock()
-		if _, ok := inf.handlers[handler.id]; ok {
-			// Remove the handler
-			delete(inf.handlers, handler.id)
-			logrus.Debugf("removed %v event handler %d", objType, handler.id)
-		} else {
-			logrus.Warningf("tried to remove unknown object type %v event handler %d", objType, handler.id)
-		}
-	}()
-
-	return nil
+	return fmt.Errorf("tried to remove unknown object type %v event handler", objType)
 }
 
 // AddPodHandler adds a handler function that will be executed on Pod object changes
