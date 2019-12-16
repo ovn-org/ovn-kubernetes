@@ -165,7 +165,6 @@ type WatchFactory struct {
 
 	iFactory  informerfactory.SharedInformerFactory
 	informers map[reflect.Type]*informer
-	stopChan  chan struct{}
 }
 
 const (
@@ -201,7 +200,6 @@ func NewWatchFactory(c kubernetes.Interface, stopChan chan struct{}) (*WatchFact
 	wf := &WatchFactory{
 		iFactory:  informerfactory.NewSharedInformerFactory(c, resyncInterval),
 		informers: make(map[reflect.Type]*informer),
-		stopChan:  stopChan,
 	}
 
 	// Create shared informers we know we'll use
@@ -223,12 +221,16 @@ func NewWatchFactory(c kubernetes.Interface, stopChan chan struct{}) (*WatchFact
 		}
 	}
 
+	go func() {
+		<-stopChan
+		wf.shutdown()
+	}()
+
 	return wf, nil
 }
 
 // Shutdown removes all handlers
-func (wf *WatchFactory) Shutdown() {
-	close(wf.stopChan)
+func (wf *WatchFactory) shutdown() {
 	for _, inf := range wf.informers {
 		inf.Lock()
 		defer inf.Unlock()
