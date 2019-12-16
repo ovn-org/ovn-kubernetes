@@ -4,7 +4,10 @@ package cni
 
 import (
 	"fmt"
+	"io/ioutil"
+	"os"
 	"os/exec"
+	"strconv"
 	"strings"
 
 	"github.com/sirupsen/logrus"
@@ -33,6 +36,10 @@ func renameLink(curName, newName string) error {
 	}
 
 	return nil
+}
+
+func setSysctl(sysctl string, newVal int) error {
+	return ioutil.WriteFile(sysctl, []byte(strconv.Itoa(newVal)), 0640)
 }
 
 func moveIfToNetns(ifname string, netns ns.NetNS) error {
@@ -313,6 +320,19 @@ func (pr *PodRequest) ConfigureInterface(namespace string, podName string, ifInf
 		if err := setPodBandwidth(pr.SandboxID, hostIface.Name, ifInfo.Ingress, ifInfo.Egress); err != nil {
 			return nil, err
 		}
+	}
+
+	err = netns.Do(func(hostNS ns.NetNS) error {
+		if _, err := os.Stat("/proc/sys/net/ipv6/conf/all/dad_transmits"); !os.IsNotExist(err) {
+			err = setSysctl("/proc/sys/net/ipv6/conf/all/dad_transmits", 0)
+			if err != nil {
+				logrus.Warningf("failed to disable IPv6 DAD: %q", err)
+			}
+		}
+		return ip.SettleAddresses(contIface.Name, 10)
+	})
+	if err != nil {
+		logrus.Warningf("failed to settle addresses: %q", err)
 	}
 
 	return []*current.Interface{hostIface, contIface}, nil
