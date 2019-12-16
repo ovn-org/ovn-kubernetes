@@ -13,11 +13,7 @@ import (
 // GatewayCleanup removes all the NB DB objects created for a node's gateway
 func GatewayCleanup(nodeName string, nodeSubnet *net.IPNet) error {
 	// Get the cluster router
-	clusterRouter, err := GetK8sClusterRouter()
-	if err != nil {
-		return fmt.Errorf("failed to get cluster router")
-	}
-
+	clusterRouter := GetK8sClusterRouter()
 	gatewayRouter := fmt.Sprintf("GR_%s", nodeName)
 
 	// Get the gateway router port's IP address (connected to join switch)

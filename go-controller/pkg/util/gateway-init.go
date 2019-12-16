@@ -15,23 +15,16 @@ const (
 	// PhysicalNetworkName is the name that maps to an OVS bridge that provides
 	// access to physical/external network
 	PhysicalNetworkName = "physnet"
+	// OvnClusterRouter is the name of the distributed router
+	OvnClusterRouter = "ovn_cluster_router"
 )
 
-// GetK8sClusterRouter returns back the OVN distibuted router
-func GetK8sClusterRouter() (string, error) {
-	k8sClusterRouter, stderr, err := RunOVNNbctl("--data=bare",
-		"--no-heading", "--columns=_uuid", "find", "logical_router",
-		"external_ids:k8s-cluster-router=yes")
-	if err != nil {
-		logrus.Errorf("Failed to get k8s cluster router, stderr: %q, "+
-			"error: %v", stderr, err)
-		return "", err
-	}
-	if k8sClusterRouter == "" {
-		return "", fmt.Errorf("Failed to get k8s cluster router")
-	}
-
-	return k8sClusterRouter, nil
+// GetK8sClusterRouter returns back the OVN distributed router. This is meant to be used on the
+// master alone. If the worker nodes need to know about distributed cluster router (which they
+// don't need to), then they need to use ovn-nbctl call and shouldn't make any assumption on
+// how the distributed router is named.
+func GetK8sClusterRouter() string {
+	return OvnClusterRouter
 }
 
 // GetDefaultGatewayRouterIP returns the first gateway logical router name
@@ -167,11 +160,7 @@ func GatewayInit(clusterIPSubnet []string, nodeName, ifaceID, nicIP, nicMacAddre
 		defaultGW = defaultgwByte.String()
 	}
 
-	k8sClusterRouter, err := GetK8sClusterRouter()
-	if err != nil {
-		return err
-	}
-
+	k8sClusterRouter := GetK8sClusterRouter()
 	systemID, err := getNodeChassisIDFromSB(nodeName)
 	if err != nil {
 		return err
