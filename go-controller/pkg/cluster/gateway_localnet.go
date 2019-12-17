@@ -111,9 +111,9 @@ func localnetGatewayNAT(ipt util.IPTablesHelper, ifname, ip string) error {
 
 func initLocalnetGateway(nodeName string,
 	subnet string, wf *factory.WatchFactory) (map[string]map[string]string, error) {
-	ipt, err := util.GetIPTablesHelper(iptables.ProtocolIPv4)
+	ipt, err := localnetIPTablesHelper()
 	if err != nil {
-		return nil, fmt.Errorf("failed to initialize iptables: %v", err)
+		return nil, err
 	}
 
 	// Create a localnet OVS bridge.
@@ -214,14 +214,33 @@ func localnetIptRules(svc *kapi.Service) []iptRule {
 	return rules
 }
 
+// localnetIPTablesHelper gets an IPTablesHelper for IPv4 or IPv6 as appropriate
+func localnetIPTablesHelper() (util.IPTablesHelper, error) {
+	ip := net.ParseIP(localnetGatewayNextHop)
+	if ip == nil {
+		return nil, fmt.Errorf("Failed to parse localnet gateway next hop IP '%s'", localnetGatewayNextHop)
+	}
+	var ipt util.IPTablesHelper
+	var err error
+	if ip.To4() != nil {
+		ipt, err = util.GetIPTablesHelper(iptables.ProtocolIPv4)
+	} else {
+		ipt, err = util.GetIPTablesHelper(iptables.ProtocolIPv6)
+	}
+	if err != nil {
+		return nil, fmt.Errorf("failed to initialize iptables: %v", err)
+	}
+	return ipt, nil
+}
+
 // AddService adds service and creates corresponding resources in OVN
 func localnetAddService(svc *kapi.Service) error {
 	if !util.ServiceTypeHasNodePort(svc) {
 		return nil
 	}
-	ipt, err := util.GetIPTablesHelper(iptables.ProtocolIPv4)
+	ipt, err := localnetIPTablesHelper()
 	if err != nil {
-		return fmt.Errorf("failed to initialize iptables: %v", err)
+		return err
 	}
 	rules := localnetIptRules(svc)
 	logrus.Debugf("Add rules %v for service %v", rules, svc.Name)
@@ -232,9 +251,9 @@ func localnetDeleteService(svc *kapi.Service) error {
 	if !util.ServiceTypeHasNodePort(svc) {
 		return nil
 	}
-	ipt, err := util.GetIPTablesHelper(iptables.ProtocolIPv4)
+	ipt, err := localnetIPTablesHelper()
 	if err != nil {
-		return fmt.Errorf("failed to initialize iptables: %v", err)
+		return err
 	}
 	rules := localnetIptRules(svc)
 	logrus.Debugf("Delete rules %v for service %v", rules, svc.Name)
