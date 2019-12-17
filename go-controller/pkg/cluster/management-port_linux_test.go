@@ -104,8 +104,8 @@ var _ = Describe("Management Port Operations", func() {
 				"ip neigh add " + gwIP + " dev " + mgtPort + " lladdr " + lrpMAC,
 			})
 			fexec.AddFakeCmd(&ovntest.ExpectedCmd{
-				Cmd:    "ovn-nbctl --timeout=15 get logical_switch_port k8s-" + nodeName + " dynamic_addresses",
-				Output: `"` + mgtPortMAC + " " + mgtPortIP + `"`,
+				Cmd:    "ovn-nbctl --timeout=15 get logical_switch_port k8s-" + nodeName + " dynamic_addresses addresses",
+				Output: `"` + mgtPortMAC + " " + mgtPortIP + `"` + "\n" + "[]",
 			})
 
 			err := util.SetExec(fexec)
