@@ -63,11 +63,7 @@ func createManagementPortGeneric(nodeName string, localSubnet *net.IPNet) (strin
 // ManagementPortReady will check to see if the portMac was created
 func ManagementPortReady(nodeName string, portName string) (bool, error) {
 	portMac, portIP, err := util.GetPortAddresses(portName)
-	if err != nil {
-		logrus.Errorf("Error while obtaining addresses for %s on node %s - %v", portName, nodeName, err)
-		return false, nil
-	}
-	if portMac == nil || portIP == nil {
+	if err != nil || portMac == nil || portIP == nil {
 		return false, nil
 	}
 	return true, nil

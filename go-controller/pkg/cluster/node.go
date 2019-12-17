@@ -178,6 +178,7 @@ func (cluster *OvnClusterController) StartClusterNode(name string) error {
 
 	portName := "k8s-" + node.Name
 
+	logrus.Infof("Waiting for GatewayReady and ManagementPortReady on node %s", node.Name)
 	// Wait for the portMac to be created
 	for _, f := range readyFuncs {
 		go func(rf readyFunc) {
@@ -192,6 +193,7 @@ func (cluster *OvnClusterController) StartClusterNode(name string) error {
 		wg.Wait()
 		close(messages)
 	}()
+	logrus.Infof("Gateway and ManagementPort are Ready")
 
 	for i := range messages {
 		if i != nil {
