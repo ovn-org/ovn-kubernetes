@@ -87,12 +87,21 @@ func (cluster *OvnClusterController) initGateway(
 	}
 
 	var err error
+	var systemID string
 	var prFn postReadyFn
 	var annotations map[string]map[string]string
 	switch config.Gateway.Mode {
 	case config.GatewayModeLocal:
+		systemID, err = util.GetNodeChassisID()
+		if err != nil {
+			return nil, nil, err
+		}
 		annotations, err = initLocalnetGateway(nodeName, subnet, cluster.watchFactory)
 	case config.GatewayModeShared:
+		systemID, err = util.GetNodeChassisID()
+		if err != nil {
+			return nil, nil, err
+		}
 		gatewayNextHop := config.Gateway.NextHop
 		gatewayIntf := config.Gateway.Interface
 		if gatewayNextHop == "" || gatewayIntf == "" {
@@ -129,7 +138,12 @@ func (cluster *OvnClusterController) initGateway(
 			annotations, nodeName, err)
 	}
 
-	return map[string]string{ovn.OvnNodeL3GatewayConfig: string(bytes)}, prFn, nil
+	nodeAnnotations := map[string]string{ovn.OvnNodeL3GatewayConfig: string(bytes)}
+	if systemID != "" {
+		nodeAnnotations[ovn.OvnNodeChassisID] = systemID
+	}
+
+	return nodeAnnotations, prFn, nil
 }
 
 // CleanupClusterNode cleans up OVS resources on the k8s node on ovnkube-node daemonset deletion.

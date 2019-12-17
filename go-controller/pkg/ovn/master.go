@@ -25,6 +25,8 @@ const (
 	OvnNodeSubnets = "k8s.ovn.org/node-subnets"
 	// OvnNodeManagementPortMacAddress is the constant string representing the annotation key
 	OvnNodeManagementPortMacAddress = "k8s.ovn.org/node-mgmt-port-mac-address"
+	// OvnNodeChassisID is the systemID of the node needed for creating L3 gateway
+	OvnNodeChassisID = "k8s.ovn.org/node-chassis-id"
 	// OvnServiceIdledAt is a constant string representing the Service annotation key
 	// whose value indicates the time stamp in RFC3339 format when a Service was idled
 	OvnServiceIdledAt = "k8s.ovn.org/idled-at"
@@ -337,6 +339,14 @@ func parseGatewayVLANID(l3GatewayConfig map[string]string, ifaceID string) ([]st
 	return lspArgs, nil
 }
 
+func parseNodeChassisID(node *kapi.Node) (string, error) {
+	systemID, ok := node.Annotations[OvnNodeChassisID]
+	if !ok {
+		return "", fmt.Errorf("%s annotation not found", OvnNodeChassisID)
+	}
+	return systemID, nil
+}
+
 func (oc *Controller) syncGatewayLogicalNetwork(node *kapi.Node, l3GatewayConfig map[string]string, subnet string) error {
 	var err error
 	var clusterSubnets []string
@@ -360,6 +370,11 @@ func (oc *Controller) syncGatewayLogicalNetwork(node *kapi.Node, l3GatewayConfig
 		return err
 	}
 
+	systemID, err := parseNodeChassisID(node)
+	if err != nil {
+		return err
+	}
+
 	var lspArgs []string
 	var lspErr error
 	if mode == string(config.GatewayModeShared) {
@@ -369,7 +384,7 @@ func (oc *Controller) syncGatewayLogicalNetwork(node *kapi.Node, l3GatewayConfig
 		}
 	}
 
-	err = util.GatewayInit(clusterSubnets, node.Name, ifaceID, ipAddress,
+	err = util.GatewayInit(clusterSubnets, systemID, node.Name, ifaceID, ipAddress,
 		gwMacAddress, gwNextHop, subnet, lspArgs)
 	if err != nil {
 		return fmt.Errorf("failed to init shared interface gateway: %v", err)
