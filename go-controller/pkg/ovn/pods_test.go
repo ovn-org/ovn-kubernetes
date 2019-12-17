@@ -113,8 +113,8 @@ func (p pod) addCmds(fexec *ovntest.FakeExec, exists, fail, gatewayCached bool) 
 		})
 	}
 	fexec.AddFakeCmd(&ovntest.ExpectedCmd{
-		Cmd:    "ovn-nbctl --timeout=15 get logical_switch_port " + p.portName + " dynamic_addresses",
-		Output: `"` + p.podMAC + " " + p.podIP + `"`,
+		Cmd:    "ovn-nbctl --timeout=15 get logical_switch_port " + p.portName + " dynamic_addresses addresses",
+		Output: `"` + p.podMAC + " " + p.podIP + `"` + "\n" + "[]",
 	})
 	if fail {
 		fexec.AddFakeCmd(&ovntest.ExpectedCmd{
