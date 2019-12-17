@@ -200,6 +200,24 @@ func (oc *Controller) handlePeerPodSelectorAddUpdate(np *namespacePolicy,
 
 }
 
+func (oc *Controller) handlePeerPodSelectorDeleteACLRules(obj interface{}, gress *gressPolicy) {
+	pod := obj.(*kapi.Pod)
+	logicalPort := podLogicalPortName(pod)
+
+	oc.lspMutex.Lock()
+	delete(oc.lspIngressDenyCache, logicalPort)
+	delete(oc.lspEgressDenyCache, logicalPort)
+	oc.lspMutex.Unlock()
+
+	if !oc.portGroupSupport {
+		if gress.policyType == knet.PolicyTypeIngress {
+			oc.deleteACLDenyOld(pod.Namespace, pod.Spec.NodeName, logicalPort, "Ingress")
+		} else {
+			oc.deleteACLDenyOld(pod.Namespace, pod.Spec.NodeName, logicalPort, "Egress")
+		}
+	}
+}
+
 // handlePeerPodSelectorDelete removes the IP address of a pod that no longer
 // matches a NetworkPolicy ingress/egress section's selectors from that
 // ingress/egress address set
@@ -258,14 +276,7 @@ func (oc *Controller) handlePeerPodSelector(
 	np.podHandlerList = append(np.podHandlerList, h)
 }
 
-func (oc *Controller) handlePeerNamespaceAndPodSelector(
-	policy *knet.NetworkPolicy,
-	namespaceSelector *metav1.LabelSelector,
-	podSelector *metav1.LabelSelector,
-	addressSet string,
-	addressMap map[string]bool,
-	np *namespacePolicy) {
-
+func (oc *Controller) handlePeerNamespaceAndPodSelector(policy *knet.NetworkPolicy, gress *gressPolicy, namespaceSelector *metav1.LabelSelector, podSelector *metav1.LabelSelector, addressSet string, addressMap map[string]bool, np *namespacePolicy) {
 	namespaceHandler, err := oc.watchFactory.AddFilteredNamespaceHandler("",
 		namespaceSelector,
 		cache.ResourceEventHandlerFuncs{
@@ -288,6 +299,7 @@ func (oc *Controller) handlePeerNamespaceAndPodSelector(
 						},
 						DeleteFunc: func(obj interface{}) {
 							oc.handlePeerPodSelectorDelete(np, addressMap, addressSet, obj)
+							oc.handlePeerPodSelectorDeleteACLRules(obj, gress)
 						},
 						UpdateFunc: func(oldObj, newObj interface{}) {
 							oc.handlePeerPodSelectorAddUpdate(np, addressMap, addressSet, newObj)

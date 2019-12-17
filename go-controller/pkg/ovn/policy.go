@@ -467,7 +467,6 @@ func (oc *Controller) podDeleteDefaultDenyMulticastPolicy(logicalPort string) {
 
 func (oc *Controller) localPodAddDefaultDeny(
 	policy *knet.NetworkPolicy, logicalPort string) {
-
 	oc.lspMutex.Lock()
 	defer oc.lspMutex.Unlock()
 
@@ -611,6 +610,11 @@ func (oc *Controller) handleLocalPodSelectorDelFunc(
 	}
 	delete(np.localPods, logicalPort)
 	oc.localPodDelDefaultDeny(policy, logicalPort)
+
+	oc.lspMutex.Lock()
+	delete(oc.lspIngressDenyCache, logicalPort)
+	delete(oc.lspEgressDenyCache, logicalPort)
+	oc.lspMutex.Unlock()
 
 	if logicalPortUUID == "" || np.portGroupUUID == "" {
 		return
@@ -761,7 +765,7 @@ func (oc *Controller) addNetworkPolicyPortGroup(policy *knet.NetworkPolicy) {
 				// For each rule that contains both peer namespace selector and
 				// peer pod selector, we create a watcher for each matching namespace
 				// that populates the addressSet
-				oc.handlePeerNamespaceAndPodSelector(policy,
+				oc.handlePeerNamespaceAndPodSelector(policy, ingress,
 					fromJSON.NamespaceSelector, fromJSON.PodSelector,
 					hashedLocalAddressSet, peerPodAddressMap, np)
 
@@ -822,14 +826,14 @@ func (oc *Controller) addNetworkPolicyPortGroup(policy *knet.NetworkPolicy) {
 				// For each rule that contains both peer namespace selector and
 				// peer pod selector, we create a watcher for each matching namespace
 				// that populates the addressSet
-				oc.handlePeerNamespaceAndPodSelector(policy,
+				oc.handlePeerNamespaceAndPodSelector(policy, egress,
 					toJSON.NamespaceSelector, toJSON.PodSelector,
 					hashedLocalAddressSet, peerPodAddressMap, np)
 
 			} else if toJSON.NamespaceSelector != nil {
 				// For each peer namespace selector, we create a watcher that
 				// populates egress.peerAddressSets
-				go oc.handlePeerNamespaceSelector(policy,
+				oc.handlePeerNamespaceSelector(policy,
 					toJSON.NamespaceSelector, egress, np,
 					oc.handlePeerNamespaceSelectorModify)
 			} else if toJSON.PodSelector != nil {
