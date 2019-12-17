@@ -29,7 +29,7 @@ spec:
         name: ovnkube-db
         component: network
         type: infra
-        beta.kubernetes.io/os: "linux"
+        kubernetes.io/os: "linux"
       annotations:
         scheduler.alpha.kubernetes.io/critical-pod: ''
     spec:
@@ -148,7 +148,7 @@ spec:
 
       nodeSelector:
         node-role.kubernetes.io/master: ""
-        beta.kubernetes.io/os: "linux"
+        kubernetes.io/os: "linux"
       volumes:
       - name: host-var-lib-ovs
         hostPath:

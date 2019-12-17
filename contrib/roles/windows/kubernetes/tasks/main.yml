@@ -109,7 +109,7 @@
           image: alinbalutoiu/nanoserver-web:{{windows_container_tag}}
           imagePullPolicy: IfNotPresent
         nodeSelector:
-          beta.kubernetes.io/os: windows
+          kubernetes.io/os: windows
           kubernetes.io/hostname: {{ansible_hostname|lower}}
   delegate_to: "{{ item }}"
   with_items: "{{ groups['kube-master'] }}"
