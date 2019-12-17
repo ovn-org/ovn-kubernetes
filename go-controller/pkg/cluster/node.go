@@ -81,6 +81,11 @@ func (cluster *OvnClusterController) StartClusterNode(name string) error {
 	var cidr string
 	var wg sync.WaitGroup
 
+	// Setting debug log level during node bring up to expose bring up process.
+	// Log level is returned to configured value when bring up is complete.
+	var LogLevel = logrus.GetLevel()
+	logrus.SetLevel(5)
+
 	if config.MasterHA.ManageDBServers {
 		var readyChan = make(chan bool, 1)
 
@@ -200,6 +205,8 @@ func (cluster *OvnClusterController) StartClusterNode(name string) error {
 			return err
 		}
 	}
+
+	logrus.SetLevel(LogLevel)
 
 	confFile := filepath.Join(config.CNI.ConfDir, config.CNIConfFileName)
 	_, err = os.Stat(confFile)
