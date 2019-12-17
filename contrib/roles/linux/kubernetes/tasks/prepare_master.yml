@@ -282,7 +282,7 @@
         - name: apachetwin
           image: fedora/apache
         nodeSelector:
-          beta.kubernetes.io/os: linux
+          kubernetes.io/os: linux
 - name: Create test yamls
   blockinfile:
     path: /root/apache-e-w.yaml
@@ -343,4 +343,4 @@
         - name: nginxtwin
           image: nginx
         nodeSelector:
-          beta.kubernetes.io/os: linux
+          kubernetes.io/os: linux
