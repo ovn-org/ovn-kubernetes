@@ -650,7 +650,7 @@ func (oc *Controller) handleLocalPodSelector(
 		return
 	}
 
-	np.podHandlerList = append(np.podHandlerList, h)
+	np.podHandlerMap[np.namespace] = h
 }
 
 func (oc *Controller) handlePeerNamespaceSelectorModify(
@@ -707,7 +707,7 @@ func (oc *Controller) addNetworkPolicyPortGroup(policy *knet.NetworkPolicy) {
 	np.namespace = policy.Namespace
 	np.ingressPolicies = make([]*gressPolicy, 0)
 	np.egressPolicies = make([]*gressPolicy, 0)
-	np.podHandlerList = make([]*factory.Handler, 0)
+	np.podHandlerMap = make(map[string]*factory.Handler)
 	np.nsHandlerList = make([]*factory.Handler, 0)
 	np.localPods = make(map[string]bool)
 

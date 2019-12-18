@@ -22,7 +22,7 @@ type namespacePolicy struct {
 	namespace       string
 	ingressPolicies []*gressPolicy
 	egressPolicies  []*gressPolicy
-	podHandlerList  []*factory.Handler
+	podHandlerMap   map[string]*factory.Handler
 	nsHandlerList   []*factory.Handler
 	localPods       map[string]bool //pods effected by this policy
 	portGroupUUID   string          //uuid for OVN port_group
@@ -273,7 +273,7 @@ func (oc *Controller) handlePeerPodSelector(
 		return
 	}
 
-	np.podHandlerList = append(np.podHandlerList, h)
+	np.podHandlerMap[np.namespace] = h
 }
 
 func (oc *Controller) handlePeerNamespaceAndPodSelector(policy *knet.NetworkPolicy, gress *gressPolicy, namespaceSelector *metav1.LabelSelector, podSelector *metav1.LabelSelector, addressSet string, addressMap map[string]bool, np *namespacePolicy) {
@@ -315,7 +315,7 @@ func (oc *Controller) handlePeerNamespaceAndPodSelector(policy *knet.NetworkPoli
 					_ = oc.watchFactory.RemovePodHandler(podHandler)
 					return
 				}
-				np.podHandlerList = append(np.podHandlerList, podHandler)
+				np.podHandlerMap[namespace.Name] = podHandler
 			},
 			DeleteFunc: func(obj interface{}) {
 			},
@@ -462,9 +462,11 @@ func (oc *Controller) deleteNetworkPolicy(
 }
 
 func (oc *Controller) shutdownHandlers(np *namespacePolicy) {
-	for _, handler := range np.podHandlerList {
-		_ = oc.watchFactory.RemovePodHandler(handler)
+	for namespace := range np.podHandlerMap {
+		_ = oc.watchFactory.RemovePodHandler(np.podHandlerMap[namespace])
+		delete(np.podHandlerMap, namespace)
 	}
+
 	for _, handler := range np.nsHandlerList {
 		_ = oc.watchFactory.RemoveNamespaceHandler(handler)
 	}
