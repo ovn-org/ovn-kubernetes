@@ -206,7 +206,7 @@ func runOvnKube(ctx *cli.Context) error {
 
 	// start the prometheus server
 	if config.Kubernetes.MetricsBindAddress != "" {
-		ovncluster.StartMetricsServer(config.Kubernetes.MetricsBindAddress)
+		util.StartMetricsServer(config.Kubernetes.MetricsBindAddress, config.Kubernetes.MetricsEnablePprof)
 	}
 
 	// Set up a watch on our config file; if it changes, we exit -
