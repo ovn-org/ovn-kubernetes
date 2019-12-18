@@ -707,6 +707,7 @@ func (oc *Controller) addNetworkPolicyPortGroup(policy *knet.NetworkPolicy) {
 	np.namespace = policy.Namespace
 	np.ingressPolicies = make([]*gressPolicy, 0)
 	np.egressPolicies = make([]*gressPolicy, 0)
+	np.podIPMap = make(map[string]map[string]string)
 	np.podHandlerMap = make(map[string]*factory.Handler)
 	np.nsHandlerList = make([]*factory.Handler, 0)
 	np.localPods = make(map[string]bool)

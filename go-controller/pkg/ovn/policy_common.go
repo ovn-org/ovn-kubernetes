@@ -22,6 +22,7 @@ type namespacePolicy struct {
 	namespace       string
 	ingressPolicies []*gressPolicy
 	egressPolicies  []*gressPolicy
+	podIPMap        map[string]map[string]string
 	podHandlerMap   map[string]*factory.Handler
 	nsHandlerList   []*factory.Handler
 	localPods       map[string]bool //pods effected by this policy
@@ -191,6 +192,11 @@ func (oc *Controller) handlePeerPodSelectorAddUpdate(np *namespacePolicy,
 		return
 	}
 
+	if _, exists := np.podIPMap[pod.Namespace]; !exists {
+		np.podIPMap[pod.Namespace] = make(map[string]string)
+	}
+	np.podIPMap[pod.Namespace][pod.Name] = ipAddress
+
 	addressMap[ipAddress] = true
 	addresses := make([]string, 0, len(addressMap))
 	for k := range addressMap {
@@ -240,6 +246,7 @@ func (oc *Controller) handlePeerPodSelectorDelete(np *namespacePolicy,
 	if !addressMap[ipAddress] {
 		return
 	}
+	delete(np.podIPMap[pod.Namespace], pod.Name)
 
 	delete(addressMap, ipAddress)
 
@@ -318,6 +325,21 @@ func (oc *Controller) handlePeerNamespaceAndPodSelector(policy *knet.NetworkPoli
 				np.podHandlerMap[namespace.Name] = podHandler
 			},
 			DeleteFunc: func(obj interface{}) {
+				namespace := obj.(*kapi.Namespace)
+				pods, _ := oc.kube.GetPodsByLabelSelector(namespace.Name, podSelector)
+				if pods != nil {
+					// Remove all pods from the deleted namesapce fom the list of PeerPods
+					for _, pod := range pods.Items {
+						oc.handlePeerPodSelectorDelete(np, addressMap, addressSet, &pod)
+					}
+					// Remove the associated PodHandler
+					_ = oc.watchFactory.RemovePodHandler(np.podHandlerMap[namespace.Name])
+
+					np.Lock()
+					delete(np.podHandlerMap, namespace.Name)
+					np.Unlock()
+				}
+
 			},
 			UpdateFunc: func(oldObj, newObj interface{}) {
 			},

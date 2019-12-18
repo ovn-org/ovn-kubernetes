@@ -27,6 +27,7 @@ type Interface interface {
 	GetPod(namespace, name string) (*kapi.Pod, error)
 	GetPods(namespace string) (*kapi.PodList, error)
 	GetPodsByLabels(namespace string, selector labels.Selector) (*kapi.PodList, error)
+	GetPodsByLabelSelector(namespace string, selector *metav1.LabelSelector) (*kapi.PodList, error)
 	GetNodes() (*kapi.NodeList, error)
 	GetNode(name string) (*kapi.Node, error)
 	GetService(namespace, name string) (*kapi.Service, error)
@@ -154,6 +155,15 @@ func (k *Kube) GetPods(namespace string) (*kapi.PodList, error) {
 func (k *Kube) GetPodsByLabels(namespace string, selector labels.Selector) (*kapi.PodList, error) {
 	options := metav1.ListOptions{}
 	options.LabelSelector = selector.String()
+	return k.KClient.CoreV1().Pods(namespace).List(options)
+}
+
+// GetPodsByLabelSelector obtains Pod resources from the kubernetes apiserver
+// given the namesoace and a LabelSelector
+func (k *Kube) GetPodsByLabelSelector(namespace string, selector *metav1.LabelSelector) (*kapi.PodList, error) {
+	options := metav1.ListOptions{}
+	sel, _ := metav1.LabelSelectorAsSelector(selector)
+	options.LabelSelector = sel.String()
 	return k.KClient.CoreV1().Pods(namespace).List(options)
 }
 
