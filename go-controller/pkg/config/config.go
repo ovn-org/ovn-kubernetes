@@ -153,6 +153,7 @@ type KubernetesConfig struct {
 	ServiceCIDR        string `gcfg:"service-cidr"`
 	OVNConfigNamespace string `gcfg:"ovn-config-namespace"`
 	MetricsBindAddress string `gcfg:"metrics-bind-address"`
+	MetricsEnablePprof bool   `gcfg:"metrics-enable-pprof"`
 	OVNEmptyLbEvents   bool   `gcfg:"ovn-empty-lb-events"`
 	PodIP              string `gcfg:"pod-ip"`
 }
@@ -515,6 +516,11 @@ var K8sFlags = []cli.Flag{
 		Name:        "metrics-bind-address",
 		Usage:       "The IP address and port for the metrics server to serve on (set to 0.0.0.0 for all IPv4 interfaces)",
 		Destination: &cliConfig.Kubernetes.MetricsBindAddress,
+	},
+	cli.BoolFlag{
+		Name:        "metrics-enable-pprof",
+		Usage:       "If true, then also accept pprof requests on the metrics port.",
+		Destination: &cliConfig.Kubernetes.MetricsEnablePprof,
 	},
 	cli.BoolFlag{
 		Name: "ovn-empty-lb-events",
