@@ -128,11 +128,11 @@ func (oc *Controller) addIPBlockACLDeny(np *namespacePolicy,
 	direction = toLport
 	if policyType == knet.PolicyTypeIngress {
 		lportMatch = fmt.Sprintf("outport == @%s", np.portGroupName)
-		l3Match = fmt.Sprintf("ip4.src == %s", except)
+		l3Match = fmt.Sprintf("%s.src == %s", ipMatch(), except)
 		match = fmt.Sprintf("match=\"%s && %s\"", lportMatch, l3Match)
 	} else {
 		lportMatch = fmt.Sprintf("inport == @%s", np.portGroupName)
-		l3Match = fmt.Sprintf("ip4.dst == %s", except)
+		l3Match = fmt.Sprintf("%s.dst == %s", ipMatch(), except)
 		match = fmt.Sprintf("match=\"%s && %s\"", lportMatch, l3Match)
 	}
 
