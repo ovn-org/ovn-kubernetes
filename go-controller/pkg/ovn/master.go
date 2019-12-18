@@ -100,6 +100,10 @@ func (oc *Controller) StartClusterMaster(masterNodeName string) error {
 				"Disabling Multicast Support")
 			oc.multicastSupport = false
 		}
+		if config.UseIPv6() {
+			logrus.Warningf("Multicast support enabled, but can not be used along with IPv6. Disabling Multicast Support")
+			oc.multicastSupport = false
+		}
 	}
 
 	if err := oc.SetupMaster(masterNodeName); err != nil {
