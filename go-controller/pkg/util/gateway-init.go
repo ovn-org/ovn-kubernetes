@@ -204,8 +204,14 @@ func GatewayInit(clusterIPSubnet []string, systemID, nodeName, ifaceID, nicIP, n
 
 	for _, entry := range clusterIPSubnet {
 		// Add a static route in GR with distributed router as the nexthop.
+		var joinAddr string
+		if config.UseIPv6() {
+			joinAddr = "fd98::1"
+		} else {
+			joinAddr = "100.64.0.1"
+		}
 		stdout, stderr, err = RunOVNNbctl("--may-exist", "lr-route-add",
-			gatewayRouter, entry, "100.64.0.1")
+			gatewayRouter, entry, joinAddr)
 		if err != nil {
 			return fmt.Errorf("Failed to add a static route in GR with distributed "+
 				"router as the nexthop, stdout: %q, stderr: %q, error: %v",
@@ -311,8 +317,14 @@ func GatewayInit(clusterIPSubnet []string, systemID, nodeName, ifaceID, nicIP, n
 
 	// Add a static route in GR with physical gateway as the default next hop.
 	if defaultGW != "" {
+		var allIPs string
+		if config.UseIPv6() {
+			allIPs = "::/0"
+		} else {
+			allIPs = "0.0.0.0/0"
+		}
 		stdout, stderr, err = RunOVNNbctl("--may-exist", "lr-route-add",
-			gatewayRouter, "0.0.0.0/0", defaultGW,
+			gatewayRouter, allIPs, defaultGW,
 			fmt.Sprintf("rtoe-%s", gatewayRouter))
 		if err != nil {
 			return fmt.Errorf("Failed to add a static route in GR with physical "+
