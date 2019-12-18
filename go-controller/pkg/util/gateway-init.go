@@ -3,10 +3,13 @@ package util
 import (
 	"bytes"
 	"fmt"
-	"github.com/sirupsen/logrus"
 	"net"
 	"sort"
 	"strings"
+
+	"github.com/sirupsen/logrus"
+
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
 )
 
 const (
@@ -101,7 +104,7 @@ func ensureGatewayPortAddress(portName string) (net.HardwareAddr, *net.IPNet, er
 
 	// Grab the 'join' switch prefix length to add to our gateway router's IP
 	cidrStr, stderr, err := RunOVNNbctl("--if-exists", "get",
-		"logical_switch", "join", "other-config:subnet")
+		"logical_switch", "join", config.OtherConfigSubnet())
 	if err != nil {
 		return nil, nil, fmt.Errorf("Failed to get 'join' switch external-ids: "+
 			"stderr: %q, %v", stderr, err)

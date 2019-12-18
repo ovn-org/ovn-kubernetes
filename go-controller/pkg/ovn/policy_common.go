@@ -404,10 +404,8 @@ func (oc *Controller) addAllowACLFromNode(logicalSwitch, subnet string) error {
 		return err
 	}
 
-	// K8s only supports IPv4 right now. The second IP address of the
-	// network is the node IP address.
-	ip = ip.To4()
-	ip[3] = ip[3] + 2
+	// The second IP address of the network is the node IP address.
+	ip = util.NextIP(util.NextIP(ip))
 	address := ip.String()
 
 	match := fmt.Sprintf("ip4.src==%s", address)

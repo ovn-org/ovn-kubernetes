@@ -946,6 +946,15 @@ func UseIPv6() bool {
 	return true
 }
 
+// OtherConfigSubnet returns "other-config:subnet" for IPv4 clusers, and
+// "other-config:ipv6_prefix" for IPv6 clusters
+func OtherConfigSubnet() string {
+	if UseIPv6() {
+		return "other-config:ipv6_prefix"
+	}
+	return "other-config:subnet"
+}
+
 // getConfigFilePath returns config file path and 'true' if the config file is
 // the fallback path (eg not given by the user), 'false' if given explicitly
 // by the user
