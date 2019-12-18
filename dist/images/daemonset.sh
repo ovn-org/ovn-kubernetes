@@ -4,7 +4,7 @@
 #Always exit on errors
 set -e
 
-# This is people that are nut using the ansible install.
+# This is for people that are not using the ansible install.
 # The script expands the templates into yaml files in ../yaml
 
 OVN_IMAGE=""
