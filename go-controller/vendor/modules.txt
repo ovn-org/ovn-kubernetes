@@ -101,7 +101,7 @@ github.com/onsi/ginkgo/reporters/stenographer
 github.com/onsi/ginkgo/reporters/stenographer/support/go-colorable
 github.com/onsi/ginkgo/reporters/stenographer/support/go-isatty
 github.com/onsi/ginkgo/types
-# github.com/onsi/gomega v1.7.1
+# github.com/onsi/gomega v1.8.1
 github.com/onsi/gomega
 github.com/onsi/gomega/format
 github.com/onsi/gomega/internal/assertion
@@ -118,6 +118,7 @@ github.com/onsi/gomega/types
 github.com/pkg/errors
 # github.com/prometheus/client_golang v1.2.1
 github.com/prometheus/client_golang/prometheus
+github.com/prometheus/client_golang/prometheus/promhttp
 github.com/prometheus/client_golang/prometheus/internal
 github.com/prometheus/client_golang/prometheus/promhttp
 # github.com/prometheus/client_model v0.0.0-20190812154241-14fe0d1b01d4
@@ -190,6 +191,9 @@ golang.org/x/text/unicode/bidi
 golang.org/x/text/unicode/norm
 # golang.org/x/time v0.0.0-20191024005414-555d28b269f0
 golang.org/x/time/rate
+# golang.org/x/xerrors v0.0.0-20190717185122-a985d3407aa7
+golang.org/x/xerrors
+golang.org/x/xerrors/internal
 # google.golang.org/appengine v1.4.0
 google.golang.org/appengine/internal
 google.golang.org/appengine/internal/base
