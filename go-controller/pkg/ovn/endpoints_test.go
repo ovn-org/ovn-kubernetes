@@ -129,7 +129,7 @@ var _ = Describe("OVN Namespace Operations", func() {
 
 				_, err := fakeOvn.fakeClient.CoreV1().Endpoints(endpointsT.Namespace).Get(endpointsT.Name, metav1.GetOptions{})
 				Expect(err).NotTo(HaveOccurred())
-				Expect(tExec.CalledMatchesExpected()).To(BeTrue())
+				Expect(tExec.CalledMatchesExpected()).To(BeTrue(), tExec.ErrorDesc)
 
 				return nil
 			}
@@ -187,14 +187,14 @@ var _ = Describe("OVN Namespace Operations", func() {
 
 				_, err := fakeOvn.fakeClient.CoreV1().Endpoints(endpointsT.Namespace).Get(endpointsT.Name, metav1.GetOptions{})
 				Expect(err).NotTo(HaveOccurred())
-				Eventually(tExec.CalledMatchesExpected).Should(BeTrue())
+				Eventually(tExec.CalledMatchesExpected).Should(BeTrue(), tExec.ErrorDesc)
 
 				// Delete the endpoint
 				testE.delCmds(tExec, serviceT, endpointsT)
 
 				err = fakeOvn.fakeClient.CoreV1().Endpoints(endpointsT.Namespace).Delete(endpointsT.Name, metav1.NewDeleteOptions(0))
 				Expect(err).NotTo(HaveOccurred())
-				Eventually(tExec.CalledMatchesExpected).Should(BeTrue())
+				Eventually(tExec.CalledMatchesExpected).Should(BeTrue(), tExec.ErrorDesc)
 
 				return nil
 			}

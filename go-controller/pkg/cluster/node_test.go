@@ -55,7 +55,7 @@ var _ = Describe("Node Operations", func() {
 			err = setupOVNNode(nodeName)
 			Expect(err).NotTo(HaveOccurred())
 
-			Expect(fexec.CalledMatchesExpected()).To(BeTrue())
+			Expect(fexec.CalledMatchesExpected()).To(BeTrue(), fexec.ErrorDesc)
 			return nil
 		}
 
@@ -100,7 +100,7 @@ var _ = Describe("Node Operations", func() {
 			err = setupOVNNode(nodeName)
 			Expect(err).NotTo(HaveOccurred())
 
-			Expect(fexec.CalledMatchesExpected()).To(BeTrue())
+			Expect(fexec.CalledMatchesExpected()).To(BeTrue(), fexec.ErrorDesc)
 			return nil
 		}
 

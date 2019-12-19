@@ -126,7 +126,7 @@ var _ = Describe("OVN Namespace Operations", func() {
 
 				_, err := fakeOvn.fakeClient.CoreV1().Namespaces().Get(namespaceT.Name, metav1.GetOptions{})
 				Expect(err).NotTo(HaveOccurred())
-				Expect(tExec.CalledMatchesExpected()).To(BeTrue())
+				Expect(tExec.CalledMatchesExpected()).To(BeTrue(), tExec.ErrorDesc)
 
 				return nil
 			}
@@ -155,7 +155,7 @@ var _ = Describe("OVN Namespace Operations", func() {
 
 				_, err := fakeOvn.fakeClient.CoreV1().Namespaces().Get(namespaceT.Name, metav1.GetOptions{})
 				Expect(err).NotTo(HaveOccurred())
-				Expect(tExec.CalledMatchesExpected()).To(BeTrue())
+				Expect(tExec.CalledMatchesExpected()).To(BeTrue(), tExec.ErrorDesc)
 
 				return nil
 			}
@@ -189,13 +189,13 @@ var _ = Describe("OVN Namespace Operations", func() {
 				namespace, err := fakeOvn.fakeClient.CoreV1().Namespaces().Get(namespaceT.Name, metav1.GetOptions{})
 				Expect(err).NotTo(HaveOccurred())
 				Expect(namespace).NotTo(BeNil())
-				Eventually(fExec.CalledMatchesExpected).Should(BeTrue())
+				Eventually(fExec.CalledMatchesExpected).Should(BeTrue(), fExec.ErrorDesc)
 
 				test.delCmds(fExec, namespaceT)
 
 				err = fakeOvn.fakeClient.CoreV1().Namespaces().Delete(namespaceT.Name, metav1.NewDeleteOptions(1))
 				Expect(err).NotTo(HaveOccurred())
-				Eventually(fExec.CalledMatchesExpected).Should(BeTrue())
+				Eventually(fExec.CalledMatchesExpected).Should(BeTrue(), fExec.ErrorDesc)
 
 				return nil
 			}

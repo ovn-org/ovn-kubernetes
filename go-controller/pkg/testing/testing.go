@@ -2,11 +2,12 @@ package testing
 
 import (
 	"context"
+	"fmt"
 	"strings"
 
-	"github.com/onsi/gomega"
+	. "github.com/onsi/ginkgo"
+	. "github.com/onsi/gomega"
 	"github.com/onsi/gomega/format"
-	"github.com/sirupsen/logrus"
 	kexec "k8s.io/utils/exec"
 	fakeexec "k8s.io/utils/exec/testing"
 )
@@ -20,23 +21,18 @@ func init() {
 // KCmd is a callback spec returning a k8s exec command
 type KCmd func(cmd string, args ...string) kexec.Cmd
 
-type pool struct {
-	cmd  KCmd
-	used bool
-}
-
 // FakeExec is a convenience struct that wraps testing.FakeExec
 type FakeExec struct {
 	// Activate this for a loose comparison of executed OVN commands.
 	// We will in such a case ignore order when comparing all executed commands during the run of a test case.
 	// This is important when defining test cases with multiple resources (or multiple resource watchers) of
 	// the same type and not being able to rely on a deterministic order of incomming watch events.
-	fakeexec.FakeExec
 	looseCompare     bool
-	commandPool      map[string]*pool
-	expectedCommands []string
+	expectedCommands []*ExpectedCmd
 	executedCommands []string
 }
+
+var _ kexec.Interface = &FakeExec{}
 
 // NewFakeExec returns a new FakeExec with a strict order compare
 func NewFakeExec() *FakeExec {
@@ -51,19 +47,16 @@ func NewLooseCompareFakeExec() *FakeExec {
 // newFakeExec returns a new FakeExec with a default LookPathFunc
 func newFakeExec(looseCompare bool) *FakeExec {
 	return &FakeExec{
-		looseCompare: looseCompare,
-		commandPool:  make(map[string]*pool),
-		FakeExec: fakeexec.FakeExec{
-			LookPathFunc: func(file string) (string, error) {
-				return "/fake-bin/" + file, nil
-			},
-		},
+		looseCompare:     looseCompare,
+		expectedCommands: make([]*ExpectedCmd, 0),
 	}
 }
 
+const fakeBinPrefix string = "/fake-bin/"
+
 // LookPath is for finding the path of a file
 func (f *FakeExec) LookPath(file string) (string, error) {
-	return f.LookPathFunc(file)
+	return fakeBinPrefix + file, nil
 }
 
 // CommandContext wraps arguments into exec.Cmd
@@ -71,41 +64,56 @@ func (f *FakeExec) CommandContext(ctx context.Context, cmd string, args ...strin
 	return f.Command(cmd, args...)
 }
 
-func (f *FakeExec) PrintAllCmds() {
-	for i := range f.expectedCommands {
-		v := " "
-		if f.looseCompare {
-			c, ok := f.commandPool[f.expectedCommands[i]]
-			if ok && c.used {
-				v = "*"
-			} else if !ok {
-				v = "-"
+func (f *FakeExec) ErrorDesc() string {
+	if len(f.executedCommands) == len(f.expectedCommands) {
+		return ""
+	}
+
+	desc := "Executed commands do not match expected commands!\n"
+	if f.looseCompare {
+		// For loose compare, mark expected commands that were not
+		// executed with a !
+		for i, exp := range f.expectedCommands {
+			called := " "
+			if !exp.called {
+				called = "!"
+			}
+			desc += fmt.Sprintf("[%02d] %s %s\n", i, called, exp.Cmd)
+		}
+	} else {
+		// For strict compare:
+		// 1) show all expected commands that were executed
+		// 2) mark executed commands that were not matched with +
+		// 3) mark expected commands that were not matched with -
+		max := len(f.expectedCommands)
+		min := max
+		executedLen := len(f.executedCommands)
+		if max < executedLen {
+			max = executedLen
+		}
+		if min > executedLen {
+			min = executedLen
+		}
+		for i := 0; i < max; i++ {
+			if i < min && f.expectedCommands[i].Cmd == f.executedCommands[i] {
+				desc += fmt.Sprintf("[%02d]   %v\n", i, f.expectedCommands[i].Cmd)
+				continue
+			}
+			if i < len(f.executedCommands) {
+				desc += fmt.Sprintf("[%02d] + %v\n", i, f.executedCommands[i])
+			}
+			if i < len(f.expectedCommands) {
+				desc += fmt.Sprintf("[%02d] - %v\n", i, f.expectedCommands[i].Cmd)
 			}
 		}
-		logrus.Infof("Expected commands were %v: %s %v", i, v, f.expectedCommands[i])
 	}
-	for i := range f.executedCommands {
-		logrus.Infof("Executed commands were %v: %v", i, f.executedCommands[i])
-	}
+	return desc
 }
 
 // CalledMatchesExpected returns true if the number of commands the code under
 // test called matches the number of expected commands in the FakeExec's list
 func (f *FakeExec) CalledMatchesExpected() bool {
-	if len(f.executedCommands) != len(f.expectedCommands) {
-		logrus.Infof("Command calls do not match!")
-		f.PrintAllCmds()
-		return false
-	}
-	if f.looseCompare {
-		for k, cmd := range f.commandPool {
-			if !cmd.used {
-				logrus.Infof("Expected command unused: %s", k)
-				return false
-			}
-		}
-	}
-	return true
+	return len(f.executedCommands) == len(f.expectedCommands)
 }
 
 // ExpectedCmd contains properties that the testcase expects a called command
@@ -121,69 +129,66 @@ type ExpectedCmd struct {
 	Err error
 	// Action is run when the fake command is "run"
 	Action func() error
+	// called is set to true when the command is called
+	called bool
 }
 
 func getExecutedCommandline(cmd string, args ...string) string {
 	return cmd + " " + strings.Join(args, " ")
 }
 
-func getExpectedCommandline(cmd string) (string, []string) {
-	parts := strings.Split(cmd, " ")
-	expectedCommandline := "/fake-bin/" + strings.Join(parts, " ")
-	return expectedCommandline, parts
-}
-
 func (f *FakeExec) Command(cmd string, args ...string) kexec.Cmd {
-	f.executedCommands = append(f.executedCommands, getExecutedCommandline(cmd, args...))
-	if f.looseCompare {
-		executedCommandline := getExecutedCommandline(cmd, args...)
-		if c, ok := f.commandPool[executedCommandline]; ok {
-			c.used = true
-			return c.cmd(cmd, args...)
+	defer GinkgoRecover()
+
+	executed := getExecutedCommandline(cmd, args...)
+	f.executedCommands = append(f.executedCommands, executed)
+
+	var expected *ExpectedCmd
+	for _, candidate := range f.expectedCommands {
+		if !candidate.called {
+			if executed == candidate.Cmd {
+				expected = candidate
+				expected.called = true
+				break
+			}
+			if !f.looseCompare {
+				// Fail if the first unused expected command doesn't
+				// match the one that is being executed
+				Expect(executed).To(Equal(candidate.Cmd), f.ErrorDesc)
+			}
 		}
-		f.PrintAllCmds()
-		gomega.Expect(executedCommandline).To(gomega.Equal("Did you forget to add this command?"), "Called command is not in the pool of expected fake commands")
 	}
-	return f.FakeExec.Command(cmd, args...)
+	// Fail if the command being executed could not be found in the
+	// expected command list, or if the expected command list has been
+	// completely used and we are executing more commands
+	Expect(expected).NotTo(BeNil(), "Unexpected command: %s", executed)
+
+	return &fakeexec.FakeCmd{
+		Argv: strings.Split(expected.Cmd, " ")[1:],
+		CombinedOutputScript: []fakeexec.FakeCombinedOutputAction{
+			func() ([]byte, error) {
+				return []byte(expected.Output), expected.Err
+			},
+		},
+		RunScript: []fakeexec.FakeRunAction{
+			func() ([]byte, []byte, error) {
+				if expected.Action != nil {
+					err := expected.Action()
+					Expect(err).NotTo(HaveOccurred())
+				}
+				return []byte(expected.Output), []byte(expected.Stderr), expected.Err
+			},
+		},
+	}
 }
 
 // AddFakeCmd takes the ExpectedCmd and appends its runner function to
 // a fake command action list of the FakeExec
 func (f *FakeExec) AddFakeCmd(expected *ExpectedCmd) {
-	kCmd := func(cmd string, args ...string) kexec.Cmd {
-		expectedCommandline, parts := getExpectedCommandline(expected.Cmd)
-		executedCommandline := getExecutedCommandline(cmd, args...)
-
-		gomega.Expect(len(parts)).To(gomega.BeNumerically(">=", 2))
-
-		// Expect the incoming 'args' to equal the fake/expected command 'parts'
-		gomega.Expect(executedCommandline).To(gomega.Equal(expectedCommandline), "Called command doesn't match expected fake command")
-
-		return &fakeexec.FakeCmd{
-			Argv: parts[1:],
-			CombinedOutputScript: []fakeexec.FakeCombinedOutputAction{
-				func() ([]byte, error) {
-					return []byte(expected.Output), expected.Err
-				},
-			},
-			RunScript: []fakeexec.FakeRunAction{
-				func() ([]byte, []byte, error) {
-					if expected.Action != nil {
-						err := expected.Action()
-						gomega.Expect(err).NotTo(gomega.HaveOccurred())
-					}
-					return []byte(expected.Output), []byte(expected.Stderr), expected.Err
-				},
-			},
-		}
-	}
-	expectedCommandline, _ := getExpectedCommandline(expected.Cmd)
-	f.expectedCommands = append(f.expectedCommands, expectedCommandline)
-	if f.looseCompare {
-		f.commandPool[expectedCommandline] = &pool{kCmd, false}
-	} else {
-		f.CommandScript = append(f.CommandScript, kCmd)
-	}
+	parts := strings.Split(expected.Cmd, " ")
+	Expect(len(parts)).To(BeNumerically(">=", 2))
+	expected.Cmd = fakeBinPrefix + expected.Cmd
+	f.expectedCommands = append(f.expectedCommands, expected)
 }
 
 // AddFakeCmdsNoOutputNoError appends a list of commands to the expected

@@ -220,7 +220,7 @@ cookie=0x0, duration=8366.597s, table=1, n_packets=10641, n_bytes=10370087, prio
 			return nil
 		})
 
-		Expect(fexec.CalledMatchesExpected()).To(BeTrue())
+		Expect(fexec.CalledMatchesExpected()).To(BeTrue(), fexec.ErrorDesc)
 
 		expectedTables := map[string]util.FakeTable{
 			"filter": {},
@@ -335,7 +335,7 @@ var _ = Describe("Gateway Init Operations", func() {
 			_, err = initLocalnetGateway(nodeName, nodeSubnet, wf)
 			Expect(err).NotTo(HaveOccurred())
 
-			Expect(fexec.CalledMatchesExpected()).To(BeTrue())
+			Expect(fexec.CalledMatchesExpected()).To(BeTrue(), fexec.ErrorDesc)
 
 			expectedTables := map[string]util.FakeTable{
 				"filter": {
