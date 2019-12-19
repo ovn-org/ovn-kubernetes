@@ -251,13 +251,6 @@ func (n networkPolicyOld) delPodCmds(fexec *ovntest.FakeExec, pod pod, networkPo
 	fexec.AddFakeCmdsNoOutputNoError([]string{
 		fmt.Sprintf("ovn-nbctl --timeout=15 clear address_set %s addresses", hashedNamespace),
 	})
-	fexec.AddFakeCmd(&ovntest.ExpectedCmd{
-		Cmd:    fmt.Sprintf("ovn-nbctl --timeout=15 --if-exists get logical_switch_port %s _uuid", pod.portName),
-		Output: fakeUUID,
-	})
-	fexec.AddFakeCmdsNoOutputNoError([]string{
-		fmt.Sprintf("ovn-nbctl --timeout=15 --if-exists remove port_group %s ports %s", "mcastPortGroupDeny", fakeUUID),
-	})
 }
 
 func (n networkPolicyOld) delLocalPodCmds(fexec *ovntest.FakeExec, pod pod, networkPolicy knet.NetworkPolicy) {
@@ -284,13 +277,6 @@ func (n networkPolicyOld) delLocalPodCmds(fexec *ovntest.FakeExec, pod pod, netw
 	hashedNamespace := hashedAddressSet(pod.namespace)
 	fexec.AddFakeCmdsNoOutputNoError([]string{
 		fmt.Sprintf("ovn-nbctl --timeout=15 clear address_set %s addresses", hashedNamespace),
-	})
-	fexec.AddFakeCmd(&ovntest.ExpectedCmd{
-		Cmd:    fmt.Sprintf("ovn-nbctl --timeout=15 --if-exists get logical_switch_port %s _uuid", pod.portName),
-		Output: fakeUUID,
-	})
-	fexec.AddFakeCmdsNoOutputNoError([]string{
-		fmt.Sprintf("ovn-nbctl --timeout=15 --if-exists remove port_group %s ports %s", "mcastPortGroupDeny", fakeUUID),
 	})
 }
 
@@ -365,6 +351,7 @@ var _ = Describe("OVN NetworkPolicy Operations", func() {
 					},
 				)
 				fakeOvn.controller.portGroupSupport = false
+				fakeOvn.controller.multicastSupport = false
 				fakeOvn.controller.WatchNamespaces()
 				fakeOvn.controller.WatchNetworkPolicy()
 
@@ -453,6 +440,7 @@ var _ = Describe("OVN NetworkPolicy Operations", func() {
 					},
 				)
 				fakeOvn.controller.portGroupSupport = false
+				fakeOvn.controller.multicastSupport = false
 				fakeOvn.controller.WatchPods()
 				fakeOvn.controller.WatchNamespaces()
 				fakeOvn.controller.WatchNetworkPolicy()
@@ -555,6 +543,7 @@ var _ = Describe("OVN NetworkPolicy Operations", func() {
 					},
 				)
 				fakeOvn.controller.portGroupSupport = false
+				fakeOvn.controller.multicastSupport = false
 				fakeOvn.controller.WatchPods()
 				fakeOvn.controller.WatchNamespaces()
 				fakeOvn.controller.WatchNetworkPolicy()
@@ -651,6 +640,7 @@ var _ = Describe("OVN NetworkPolicy Operations", func() {
 					},
 				)
 				fakeOvn.controller.portGroupSupport = false
+				fakeOvn.controller.multicastSupport = false
 				fakeOvn.controller.WatchPods()
 				fakeOvn.controller.WatchNamespaces()
 				fakeOvn.controller.WatchNetworkPolicy()
@@ -740,6 +730,7 @@ var _ = Describe("OVN NetworkPolicy Operations", func() {
 					},
 				)
 				fakeOvn.controller.portGroupSupport = false
+				fakeOvn.controller.multicastSupport = false
 				fakeOvn.controller.WatchNamespaces()
 				fakeOvn.controller.WatchNetworkPolicy()
 
@@ -834,6 +825,7 @@ var _ = Describe("OVN NetworkPolicy Operations", func() {
 					},
 				)
 				fakeOvn.controller.portGroupSupport = false
+				fakeOvn.controller.multicastSupport = false
 				fakeOvn.controller.WatchPods()
 				fakeOvn.controller.WatchNamespaces()
 				fakeOvn.controller.WatchNetworkPolicy()
@@ -943,6 +935,7 @@ var _ = Describe("OVN NetworkPolicy Operations", func() {
 					},
 				)
 				fakeOvn.controller.portGroupSupport = false
+				fakeOvn.controller.multicastSupport = false
 				fakeOvn.controller.WatchPods()
 				fakeOvn.controller.WatchNamespaces()
 				fakeOvn.controller.WatchNetworkPolicy()
@@ -1046,6 +1039,7 @@ var _ = Describe("OVN NetworkPolicy Operations", func() {
 					},
 				)
 				fakeOvn.controller.portGroupSupport = false
+				fakeOvn.controller.multicastSupport = false
 				fakeOvn.controller.WatchPods()
 				fakeOvn.controller.WatchNamespaces()
 				fakeOvn.controller.WatchNetworkPolicy()
