@@ -1,4 +1,5 @@
 cloud.google.com/go v0.34.0/go.mod h1:aQUYkXzVsufM+DwF1aE+0xfcU+56JwCaLick0ClmMTw=
+github.com/BurntSushi/toml v0.3.1 h1:WXkYYl6Yr3qBf1K79EBnL4mak0OimBfB0XUf9Vl28OQ=
 github.com/BurntSushi/toml v0.3.1/go.mod h1:xHWCNGjB5oqiDr8zfno3MHue2Ht5sIBksp03qcyfWMU=
 github.com/Mellanox/sriovnet v0.0.0-20190516174650-73402dc8fcaa h1:WEKBzcDEIWtOV+w4GTtIIg5x2L8en9Ze61SmYRMu0y0=
 github.com/Mellanox/sriovnet v0.0.0-20190516174650-73402dc8fcaa/go.mod h1:P1tDPkhPZuCRhSaQ2dt1qNwPq7u80nerosqr0hTJ+hc=
