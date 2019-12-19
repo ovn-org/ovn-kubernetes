@@ -66,10 +66,35 @@ func (n networkPolicy) addNamespaceSelectorCmdsForGress(fexec *ovntest.FakeExec,
 	})
 }
 
-func (n networkPolicy) addLocalPodBaseCmds(fexec *ovntest.FakeExec, pod pod) {
+func (n networkPolicy) addLocalPodCmds(fexec *ovntest.FakeExec, pod pod) {
 	fexec.AddFakeCmd(&ovntest.ExpectedCmd{
 		Cmd:    fmt.Sprintf("ovn-nbctl --timeout=15 --if-exists get logical_switch_port %s _uuid", pod.portName),
 		Output: fakeUUID,
+	})
+	fexec.AddFakeCmd(&ovntest.ExpectedCmd{
+		Cmd:    "ovn-nbctl --timeout=15 --data=bare --no-heading --columns=_uuid find port_group name=ingressDefaultDeny",
+		Output: fakeUUID,
+	})
+	fexec.AddFakeCmd(&ovntest.ExpectedCmd{
+		Cmd:    "ovn-nbctl --timeout=15 --data=bare --no-heading --columns=_uuid find ACL match=\"outport == @ingressDefaultDeny\" action=drop external-ids:default-deny-policy-type=Ingress",
+		Output: fakeUUID,
+	})
+	fexec.AddFakeCmd(&ovntest.ExpectedCmd{
+		Cmd:    "ovn-nbctl --timeout=15 --data=bare --no-heading --columns=_uuid find port_group name=egressDefaultDeny",
+		Output: fakeUUID,
+	})
+	fexec.AddFakeCmd(&ovntest.ExpectedCmd{
+		Cmd:    "ovn-nbctl --timeout=15 --data=bare --no-heading --columns=_uuid find ACL match=\"inport == @egressDefaultDeny\" action=drop external-ids:default-deny-policy-type=Egress",
+		Output: fakeUUID,
+	})
+	fexec.AddFakeCmdsNoOutputNoError([]string{
+		"ovn-nbctl --timeout=15 --if-exists remove port_group fake_uuid ports fake_uuid -- add port_group fake_uuid ports fake_uuid",
+	})
+	fexec.AddFakeCmdsNoOutputNoError([]string{
+		"ovn-nbctl --timeout=15 --if-exists remove port_group fake_uuid ports fake_uuid -- add port_group fake_uuid ports fake_uuid",
+	})
+	fexec.AddFakeCmdsNoOutputNoError([]string{
+		"ovn-nbctl --timeout=15 --if-exists remove port_group fake_uuid ports fake_uuid -- add port_group fake_uuid ports fake_uuid",
 	})
 }
 
@@ -88,26 +113,7 @@ func (n networkPolicy) addPodSelectorCmds(fexec *ovntest.FakeExec, pod pod, netw
 		})
 	}
 	if hasLocalPods {
-		n.addLocalPodBaseCmds(fexec, pod)
-		fexec.AddFakeCmd(&ovntest.ExpectedCmd{
-			Cmd:    "ovn-nbctl --timeout=15 --data=bare --no-heading --columns=_uuid find port_group name=ingressDefaultDeny",
-			Output: fakeUUID,
-		})
-		fexec.AddFakeCmd(&ovntest.ExpectedCmd{
-			Cmd:    "ovn-nbctl --timeout=15 --data=bare --no-heading --columns=_uuid find ACL match=\"outport == @ingressDefaultDeny\" action=drop external-ids:default-deny-policy-type=Ingress",
-			Output: fakeUUID,
-		})
-		fexec.AddFakeCmd(&ovntest.ExpectedCmd{
-			Cmd:    "ovn-nbctl --timeout=15 --data=bare --no-heading --columns=_uuid find port_group name=egressDefaultDeny",
-			Output: fakeUUID,
-		})
-		fexec.AddFakeCmd(&ovntest.ExpectedCmd{
-			Cmd:    "ovn-nbctl --timeout=15 --data=bare --no-heading --columns=_uuid find ACL match=\"inport == @egressDefaultDeny\" action=drop external-ids:default-deny-policy-type=Egress",
-			Output: fakeUUID,
-		})
-		fexec.AddFakeCmdsNoOutputNoError([]string{
-			"ovn-nbctl --timeout=15 --if-exists remove port_group fake_uuid ports fake_uuid -- add port_group fake_uuid ports fake_uuid",
-		})
+		n.addLocalPodCmds(fexec, pod)
 	}
 }
 
@@ -345,7 +351,7 @@ var _ = Describe("OVN NetworkPolicy Operations", func() {
 				nPodTest.addCmdsForNonExistingPod(fExec)
 				nTest.baseCmds(fExec, namespace1)
 				nTest.addCmdsWithPods(fExec, nPodTest, namespace1)
-				npTest.addPodSelectorCmds(fExec, nPodTest, networkPolicy, true, true)
+				npTest.addPodSelectorCmds(fExec, nPodTest, networkPolicy, true, false)
 
 				fakeOvn := FakeOVN{}
 				fakeOvn.start(ctx, fExec,
@@ -542,7 +548,8 @@ var _ = Describe("OVN NetworkPolicy Operations", func() {
 				nTest.baseCmds(fExec, namespace1, namespace2)
 				nTest.addCmds(fExec, namespace2)
 				nTest.addCmdsWithPods(fExec, nPodTest, namespace1)
-				npTest.addPodSelectorCmds(fExec, nPodTest, networkPolicy, true, true)
+				npTest.addNamespaceSelectorCmds(fExec, networkPolicy, true)
+				npTest.addLocalPodCmds(fExec, nPodTest)
 
 				fakeOvn := FakeOVN{}
 				fakeOvn.start(ctx, fExec,
@@ -736,7 +743,7 @@ var _ = Describe("OVN NetworkPolicy Operations", func() {
 				nPodTest.addCmdsForNonExistingPod(fExec)
 				nTest.baseCmds(fExec, namespace1)
 				nTest.addCmdsWithPods(fExec, nPodTest, namespace1)
-				npTest.addPodSelectorCmds(fExec, nPodTest, networkPolicy, true, true)
+				npTest.addPodSelectorCmds(fExec, nPodTest, networkPolicy, true, false)
 
 				fakeOvn := FakeOVN{}
 				fakeOvn.start(ctx, fExec,
@@ -943,7 +950,7 @@ var _ = Describe("OVN NetworkPolicy Operations", func() {
 				nPodTest.addCmdsForNonExistingPod(fExec)
 				nTest.baseCmds(fExec, namespace1)
 				nTest.addCmdsWithPods(fExec, nPodTest, namespace1)
-				npTest.addPodSelectorCmds(fExec, nPodTest, networkPolicy, true, true)
+				npTest.addPodSelectorCmds(fExec, nPodTest, networkPolicy, true, false)
 
 				fakeOvn := FakeOVN{}
 				fakeOvn.start(ctx, fExec,
