@@ -70,6 +70,10 @@ func shareGatewayInterfaceTest(app *cli.App, testNS ns.NetNS,
 
 		fexec := ovntest.NewFakeExec()
 		fexec.AddFakeCmd(&ovntest.ExpectedCmd{
+			Cmd:    "ovs-vsctl --timeout=15 --if-exists get Open_vSwitch . external_ids:system-id",
+			Output: systemID,
+		})
+		fexec.AddFakeCmd(&ovntest.ExpectedCmd{
 			Cmd: "ovs-vsctl --timeout=15 -- port-to-br eth0",
 			Err: fmt.Errorf(""),
 		})
@@ -165,6 +169,7 @@ cookie=0x0, duration=8366.597s, table=1, n_packets=10641, n_bytes=10370087, prio
 			Annotations: map[string]string{
 				ovn.OvnNodeSubnets:         nodeSubnet,
 				ovn.OvnNodeL3GatewayConfig: string(byteArr),
+				ovn.OvnNodeChassisID:       systemID,
 			},
 		}}
 		fakeClient := fake.NewSimpleClientset(&v1.NodeList{
@@ -311,6 +316,7 @@ var _ = Describe("Gateway Init Operations", func() {
 				Annotations: map[string]string{
 					ovn.OvnNodeSubnets:         nodeSubnet,
 					ovn.OvnNodeL3GatewayConfig: string(byteArr),
+					ovn.OvnNodeChassisID:       systemID,
 				},
 			}}
 			fakeClient := fake.NewSimpleClientset(&v1.NodeList{
