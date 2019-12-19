@@ -262,6 +262,8 @@ var _ = Describe("Gateway Init Operations", func() {
 	})
 
 	It("sets up a localnet gateway", func() {
+		const mtu string = "1234"
+
 		app.Action = func(ctx *cli.Context) error {
 			const (
 				nodeName      string = "node1"
@@ -281,8 +283,7 @@ var _ = Describe("Gateway Init Operations", func() {
 			fexec.AddFakeCmdsNoOutputNoError([]string{
 				"ovs-vsctl --timeout=15 --may-exist add-br br-local",
 				"ip link set br-local up",
-				"ovs-vsctl --timeout=15 --may-exist add-port br-local br-nexthop -- set interface br-nexthop type=internal " +
-					"-- set interface br-nexthop mac=00\\:00\\:a9\\:fe\\:21\\:01",
+				"ovs-vsctl --timeout=15 --may-exist add-port br-local br-nexthop -- set interface br-nexthop type=internal mtu_request=" + mtu + " mac=00\\:00\\:a9\\:fe\\:21\\:01",
 				"ip link set br-nexthop up",
 				"ip addr flush dev br-nexthop",
 				"ip addr add 169.254.33.1/24 dev br-nexthop",
@@ -371,6 +372,7 @@ var _ = Describe("Gateway Init Operations", func() {
 			"--init-gateways",
 			"--gateway-local",
 			"--nodeport",
+			"--mtu=" + mtu,
 		})
 		Expect(err).NotTo(HaveOccurred())
 	})
