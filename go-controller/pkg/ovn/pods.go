@@ -26,7 +26,8 @@ func (oc *Controller) syncPods(pods []interface{}) {
 			logrus.Errorf("Spurious object in syncPods: %v", podInterface)
 			continue
 		}
-		if podScheduled(pod) && podWantsNetwork(pod) {
+		_, err := util.UnmarshalPodAnnotation(pod.Annotations)
+		if podScheduled(pod) && podWantsNetwork(pod) && err == nil {
 			logicalPort := podLogicalPortName(pod)
 			expectedLogicalPorts[logicalPort] = true
 		}

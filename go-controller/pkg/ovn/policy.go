@@ -550,7 +550,7 @@ func (oc *Controller) handleLocalPodSelectorAddFunc(
 	}
 
 	// Get the logical port name.
-	logicalPort := fmt.Sprintf("%s_%s", pod.Namespace, pod.Name)
+	logicalPort := podLogicalPortName(pod)
 	logicalPortUUID := oc.getLogicalPortUUID(logicalPort)
 	if logicalPortUUID == "" {
 		return
@@ -595,7 +595,7 @@ func (oc *Controller) handleLocalPodSelectorDelFunc(
 	}
 
 	// Get the logical port name.
-	logicalPort := fmt.Sprintf("%s_%s", pod.Namespace, pod.Name)
+	logicalPort := podLogicalPortName(pod)
 	logicalPortUUID := oc.getLogicalPortUUID(logicalPort)
 
 	np.Lock()
