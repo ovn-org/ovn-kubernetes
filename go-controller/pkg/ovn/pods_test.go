@@ -217,6 +217,7 @@ var _ = Describe("OVN Pod Operations", func() {
 
 				// Assign it and perform the update
 				t.nodeName = "node1"
+				t.portName = t.namespace + "_" + t.podName
 				t.addNodeSetupCmds(fExec)
 				t.addCmdsForNonExistingPod(fExec)
 
@@ -312,7 +313,7 @@ var _ = Describe("OVN Pod Operations", func() {
 				fExec := ovntest.NewFakeExec()
 				fExec.AddFakeCmd(&ovntest.ExpectedCmd{
 					Cmd:    "ovn-nbctl --timeout=15 --data=bare --no-heading --columns=name find logical_switch_port external_ids:pod=true",
-					Output: t.portName + "\n",
+					Output: "\n",
 				})
 				t.addNodeSetupCmds(fExec)
 				t.addCmdsForNonExistingPod(fExec)
@@ -424,6 +425,9 @@ var _ = Describe("OVN Pod Operations", func() {
 				fExec.AddFakeCmd(&ovntest.ExpectedCmd{
 					Cmd:    "ovn-nbctl --timeout=15 --data=bare --no-heading --columns=name find logical_switch_port external_ids:pod=true",
 					Output: t.portName + "\n",
+				})
+				fExec.AddFakeCmdsNoOutputNoError([]string{
+					"ovn-nbctl --timeout=15 --if-exists lsp-del " + t.portName,
 				})
 				t.addNodeSetupCmds(fExec)
 				t.addCmdsForNonExistingPod(fExec)

@@ -652,14 +652,14 @@ var _ = Describe("OVN NetworkPolicy Operations", func() {
 				nTest.delCmds(fExec, namespace2)
 
 				fExec.AddFakeCmd(&ovntest.ExpectedCmd{
-					Cmd:    "ovn-nbctl --timeout=15 --data=bare --no-heading --columns=_uuid find ACL match=\"ip4.src == {$a10148211500778908391, $a6953373268003663638} && outport == \\\"namespace1_myPod\\\"\" external-ids:namespace=namespace1 external-ids:policy=networkpolicy1 external-ids:Ingress_num=0 external-ids:policy_type=Ingress external-ids:logical_port=namespace1_myPod",
+					Cmd:    fmt.Sprintf("ovn-nbctl --timeout=15 --data=bare --no-heading --columns=_uuid find ACL match=\"ip4.src == {$a10148211500778908391, $a6953373268003663638} && outport == \\\"%s\\\"\" external-ids:namespace=%s external-ids:policy=%s external-ids:Ingress_num=0 external-ids:policy_type=Ingress external-ids:logical_port=%s", nPodTest.portName, networkPolicy.Namespace, networkPolicy.Name, nPodTest.portName),
 					Output: fakeUUID,
 				})
 				fExec.AddFakeCmdsNoOutputNoError([]string{
-					"ovn-nbctl --timeout=15 set acl fake_uuid match=\"ip4.src == {$a10148211500778908391} && outport == \\\"namespace1_myPod\\\"\"",
+					fmt.Sprintf("ovn-nbctl --timeout=15 set acl fake_uuid match=\"ip4.src == {$a10148211500778908391} && outport == \\\"%s\\\"\"", nPodTest.portName),
 				})
 				fExec.AddFakeCmdsNoOutputNoError([]string{
-					"ovn-nbctl --timeout=15 --data=bare --no-heading --columns=_uuid find ACL match=\"ip4.dst == {$a6953373268003663638, $a9824637386382239951} && inport == \\\"namespace1_myPod\\\"\" external-ids:namespace=namespace1 external-ids:policy=networkpolicy1 external-ids:Egress_num=0 external-ids:policy_type=Egress external-ids:logical_port=namespace1_myPod",
+					fmt.Sprintf("ovn-nbctl --timeout=15 --data=bare --no-heading --columns=_uuid find ACL match=\"ip4.dst == {$a6953373268003663638, $a9824637386382239951} && inport == \\\"%s\\\"\" external-ids:namespace=%s external-ids:policy=%s external-ids:Egress_num=0 external-ids:policy_type=Egress external-ids:logical_port=%s", nPodTest.portName, networkPolicy.Namespace, networkPolicy.Name, nPodTest.portName),
 				})
 
 				err = fakeOvn.fakeClient.CoreV1().Namespaces().Delete(namespace2.Name, metav1.NewDeleteOptions(0))
@@ -948,10 +948,10 @@ var _ = Describe("OVN NetworkPolicy Operations", func() {
 				npTest.delPodCmds(fExec, nPodTest, networkPolicy)
 
 				fExec.AddFakeCmdsNoOutputNoError([]string{
-					"ovn-nbctl --timeout=15 --data=bare --no-heading --columns=_uuid find ACL match=\"outport == \\\"namespace2_myPod\\\"\" action=drop external-ids:default-deny-policy-type=Ingress external-ids:namespace=namespace2 external-ids:logical_switch=node1 external-ids:logical_port=namespace2_myPod",
+					fmt.Sprintf("ovn-nbctl --timeout=15 --data=bare --no-heading --columns=_uuid find ACL match=\"outport == \\\"%s\\\"\" action=drop external-ids:default-deny-policy-type=Ingress external-ids:namespace=%s external-ids:logical_switch=%s external-ids:logical_port=%s", nPodTest.portName, nPodTest.namespace, nPodTest.nodeName, nPodTest.portName),
 				})
 				fExec.AddFakeCmdsNoOutputNoError([]string{
-					"ovn-nbctl --timeout=15 --data=bare --no-heading --columns=_uuid find ACL match=\"inport == \\\"namespace2_myPod\\\"\" action=drop external-ids:default-deny-policy-type=Egress external-ids:namespace=namespace2 external-ids:logical_switch=node1 external-ids:logical_port=namespace2_myPod",
+					fmt.Sprintf("ovn-nbctl --timeout=15 --data=bare --no-heading --columns=_uuid find ACL match=\"inport == \\\"%s\\\"\" action=drop external-ids:default-deny-policy-type=Egress external-ids:namespace=%s external-ids:logical_switch=%s external-ids:logical_port=%s", nPodTest.portName, nPodTest.namespace, nPodTest.nodeName, nPodTest.portName),
 				})
 
 				err = fakeOvn.fakeClient.CoreV1().Pods(nPodTest.namespace).Delete(nPodTest.podName, metav1.NewDeleteOptions(0))

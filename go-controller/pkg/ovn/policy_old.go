@@ -372,7 +372,7 @@ func (oc *Controller) deleteAclsPolicyOld(namespace, policy string) {
 func (oc *Controller) localPodAddOrDelACLOld(addDel string,
 	policy *knet.NetworkPolicy, pod *kapi.Pod, gress *gressPolicy,
 	logicalSwitch string) {
-	logicalPort := fmt.Sprintf("%s_%s", pod.Namespace, pod.Name)
+	logicalPort := podLogicalPortName(pod)
 	l3Match := gress.getL3MatchFromAddressSet()
 
 	var lportMatch, cidrMatch string
@@ -536,7 +536,7 @@ func (oc *Controller) handleLocalPodSelectorAddFuncOld(
 	}
 
 	// Get the logical port name.
-	logicalPort := fmt.Sprintf("%s_%s", pod.Namespace, pod.Name)
+	logicalPort := podLogicalPortName(pod)
 
 	np.Lock()
 	defer np.Unlock()
@@ -574,7 +574,7 @@ func (oc *Controller) handleLocalPodSelectorDelFuncOld(
 	}
 
 	// Get the logical port name.
-	logicalPort := fmt.Sprintf("%s_%s", pod.Namespace, pod.Name)
+	logicalPort := podLogicalPortName(pod)
 
 	np.Lock()
 	defer np.Unlock()
