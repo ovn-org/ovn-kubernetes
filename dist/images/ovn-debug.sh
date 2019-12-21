@@ -4,6 +4,19 @@ set -euo pipefail
 
 # This script helps debug the container.
 
+# Determine the ovn rundir.
+if [[ -f /usr/bin/ovn-appctl ]] ; then
+	# ovn-appctl is present. Use new ovn run dir path.
+	OVN_RUNDIR=/var/run/ovn
+	OVNCTL_PATH=/usr/share/ovn/scripts/ovn-ctl
+	OVN_LOGDIR=/var/log/ovn
+else
+	# ovn-appctl is not present. Use openvswitch run dir path.
+	OVN_RUNDIR=/var/run/openvswitch
+	OVNCTL_PATH=/usr/share/openvswitch/scripts/ovn-ctl
+	OVN_LOGDIR=/var/log/openvswitch
+fi
+
 # ====================
 # Environment variables are used to customize operation
 
@@ -23,7 +36,7 @@ ovn_cidr=${OVN_CIDR:-"10.128.0.0/14"}
 ovn_nbdb=${OVN_TEST_NDB:-"tcp:10.19.188.22:6641"}
 
 # ovn-northd - /etc/sysconfig/ovn-northd
-ovn_northd_opts=${OVN_NORTHD_OPTS:-"--db-nb-sock=/var/run/openvswitch/ovnnb_db.sock --db-sb-sock=/var/run/openvswitch/ovnsb_db.sock"}
+ovn_northd_opts=${OVN_NORTHD_OPTS:-"--db-nb-sock=${OVN_RUNDIR}/ovnnb_db.sock --db-sb-sock=${OVN_RUNDIR}/ovnsb_db.sock"}
 
 # ovn-controller
 #OVN_CONTROLLER_OPTS="--ovn-controller-log=-vconsole:emer --vsyslog:err -vfile:info"
@@ -32,6 +45,7 @@ ovn_controller_opts=${OVN_CONTROLLER_OPTS:-"--ovn-controller-log=-vconsole:emer"
 # set the default values for the daemon and the command to be run for that daemon.
 daemon=${1:-"all"}
 cmd=${2:-"check"}
+
 
 # =========================================
 
@@ -73,15 +87,15 @@ wait_for_northdb () {
 ovn-northd () {
   case $1 in
   "start") echo "ovn-northd - START"
-	 if [ ! -f /var/run/openvswitch/ovn-northd.pid ] ; then
-	   /usr/share/openvswitch/scripts/ovn-ctl start_northd ${ovn_northd_opts}
+	 if [ ! -f ${OVN_RUNDIR}/ovn-northd.pid ] ; then
+	   ${OVNCTL_PATH} start_northd ${ovn_northd_opts}
 	 else
 	   echo "ovn-northd already running"
 	 fi
 	 ;;
   "stop") echo "ovn-northd - STOP"
-	 if [ -f /var/run/openvswitch/ovn-northd.pid ] ; then
-	   /usr/share/openvswitch/scripts/ovn-ctl stop_northd
+	 if [ -f ${OVN_RUNDIR}/ovn-northd.pid ] ; then
+	   ${OVNCTL_PATH} stop_northd
 	 else
 	   echo "ovn-northd already stopped"
 	 fi
@@ -89,7 +103,7 @@ ovn-northd () {
   "reload") echo "ovn-northd - RELOAD"
 	 ;;
   "check")
-	 if [ -f /var/run/openvswitch/ovn-northd.pid ] ; then
+	 if [ -f ${OVN_RUNDIR}/ovn-northd.pid ] ; then
 	   echo "ovn-northd  - running"
 	 else
 	   echo "ovn-northd  - stopped"
@@ -98,20 +112,20 @@ ovn-northd () {
 	 ;;
   "logs") echo "ovn-northd - LOGS"
 	 echo "============ ovsdb-server-nb.log ======================"
-	 cat /var/log/openvswitch/ovsdb-server-nb.log
+	 cat ${OVN_LOGDIR}/ovsdb-server-nb.log
 	 echo "============ ovsdb-server-sb.log ======================"
-	 cat /var/log/openvswitch/ovsdb-server-sb.log
+	 cat ${OVN_LOGDIR}/ovsdb-server-sb.log
 	 echo "============ ovs-northd.log ==========================="
-	 cat /var/log/openvswitch/ovn-northd.log
+	 cat ${OVN_LOGDIR}/ovn-northd.log
 	 ;;
   "debug") echo "ovn-northd - DEBUG"
-	 if [ -f /var/run/openvswitch/ovn-northd.pid ] ; then
+	 if [ -f ${OVN_RUNDIR}/ovn-northd.pid ] ; then
 	   echo -n "ovnnb_db.pid:   "
-	   cat /var/run/openvswitch/ovnnb_db.pid
+	   cat ${OVN_RUNDIR}/ovnnb_db.pid
 	   echo -n "ovnsb_db.pid:   "
-	   cat /var/run/openvswitch/ovnsb_db.pid
+	   cat ${OVN_RUNDIR}/ovnsb_db.pid
 	   echo -n "ovn-northd.pid: "
-	   cat /var/run/openvswitch/ovn-northd.pid
+	   cat ${OVN_RUNDIR}/ovn-northd.pid
 	 fi
 	 echo "============ ovn-northd processes ====================="
 	 ps ax | grep -e ovnnb_db -e ovnsb_db -e ovn-northd | grep -v color=auto
@@ -123,18 +137,18 @@ ovn-northd () {
 ovn-master () {
   case $1 in
   "start") echo "ovn-master - START"
-	 if [ ! -f /var/run/openvswitch/ovnkube-master.pid ] ; then
+	 if [ ! -f ${OVN_RUNDIR}/ovnkube-master.pid ] ; then
 	 /usr/bin/ovnkube \
            --cluster-subnets "${ovn_cidr}" \
            --init-master ${ovn_host} \
-	   --pidfile /var/run/openvswitch/ovnkube-master.pid \
+	   --pidfile ${OVN_RUNDIR}/ovnkube-master.pid \
 	   --logfile /var/log/ovn-kubernetes/ovnkube-master.log &
 	 fi
 	 ;;
   "stop") echo "ovn-master - STOP"
-	 if [ -f /var/run/openvswitch/ovnkube-master.pid ] ; then
+	 if [ -f ${OVN_RUNDIR}/ovnkube-master.pid ] ; then
 	   echo "STOP ovn-master"
-	   kill `cat /var/run/openvswitch/ovnkube-master.pid`
+	   kill `cat ${OVN_RUNDIR}/ovnkube-master.pid`
 	 else
 	   echo "ovn-master already stopped"
 	 fi
@@ -142,7 +156,7 @@ ovn-master () {
   "reload") echo "ovn-master - RELOAD"
 	 ;;
   "check")
-	 if [ -f /var/run/openvswitch/ovnkube-master.pid ] ; then
+	 if [ -f ${OVN_RUNDIR}/ovnkube-master.pid ] ; then
 	   echo "ovn-master  - running"
 	 else
 	   echo "ovn-master  - stopped"
@@ -153,9 +167,9 @@ ovn-master () {
 	 cat /var/log/ovn-kubernetes/ovnkube-master.log
 	 ;;
   "debug") echo "ovn-master - DEBUG"
-	if [ -f /var/run/openvswitch/ovnkube-master.pid ] ; then
+	if [ -f ${OVN_RUNDIR}/ovnkube-master.pid ] ; then
 	 echo -n "ovn-master pid: "
-	 cat /var/run/openvswitch/ovnkube-master.pid
+	 cat ${OVN_RUNDIR}/ovnkube-master.pid
 	fi
 	 echo "============ ovn-master processes ====================="
 	 ;;
@@ -166,16 +180,16 @@ ovn-master () {
 ovn-controller () {
   case $1 in
   "start") echo "ovn-controller - START"
-	 if [ ! -f /var/run/openvswitch/ovn-controller.pid ] ; then
-	 /usr/share/openvswitch/scripts/ovn-ctl --no-monitor \
+	 if [ ! -f ${OVN_RUNDIR}/ovn-controller.pid ] ; then
+	 ${OVNCTL_PATH} --no-monitor \
           start_controller ${ovn_controller_opts}
 	 else
 	   echo "ovn-controller already running"
 	 fi
 	 ;;
   "stop") echo "ovn-controller - STOP"
-	 if [ -f /var/run/openvswitch/ovn-controller.pid ] ; then
-	  /usr/share/openvswitch/scripts/ovn-ctl stop_controller
+	 if [ -f ${OVN_RUNDIR}/ovn-controller.pid ] ; then
+	  ${OVNCTL_PATH} stop_controller
 	 else
 	   echo "ovn-controller already stopped"
 	 fi
@@ -183,7 +197,7 @@ ovn-controller () {
   "reload") # echo "ovn-controller - RELOAD"
 	 ;;
   "check")
-	 if [ -f /var/run/openvswitch/ovn-controller.pid ] ; then
+	 if [ -f ${OVN_RUNDIR}/ovn-controller.pid ] ; then
 	   echo "ovn-controller  - running"
 	 else
 	   echo "ovn-controller  - stopped"
@@ -191,11 +205,11 @@ ovn-controller () {
 	 ;;
   "logs") echo "ovn-controller - LOGS"
 	 echo "============ ovn-controller.log ======================="
-	 cat /var/log/openvswitch/ovn-controller.log
+	 cat ${OVN_LOGDIR}/ovn-controller.log
 	 ;;
   "debug") echo "ovn-controller - DEBUG"
 	 echo "============ ovn-controller processes ================="
-	 cat /var/run/openvswitch/ovn-controller.pid
+	 cat ${OVN_RUNDIR}/ovn-controller.pid
 	 ;;
   *) echo "ovn-controller - unknown arg $1" ; return 1 ;;
   esac
