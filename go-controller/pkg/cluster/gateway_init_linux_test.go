@@ -283,7 +283,7 @@ var _ = Describe("Gateway Init Operations", func() {
 			fexec.AddFakeCmdsNoOutputNoError([]string{
 				"ovs-vsctl --timeout=15 --may-exist add-br br-local",
 				"ip link set br-local up",
-				"ovs-vsctl --timeout=15 --may-exist add-port br-local br-nexthop -- set interface br-nexthop type=internal mtu_request=" + mtu + " mac=00\\:00\\:a9\\:fe\\:21\\:01",
+				"ovs-vsctl --timeout=15 --may-exist add-port br-local br-nexthop -- set interface br-nexthop type=internal mtu_request=" + mtu,
 				"ip link set br-nexthop up",
 				"ip addr flush dev br-nexthop",
 				"ip addr add 169.254.33.1/24 dev br-nexthop",
