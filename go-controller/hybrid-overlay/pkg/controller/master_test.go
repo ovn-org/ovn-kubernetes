@@ -300,7 +300,7 @@ var _ = Describe("Hybrid SDN Master Operations", func() {
 			updatedNode, err := kube.GetNode(nodeName)
 			Expect(err).NotTo(HaveOccurred())
 
-			err = kube.DeleteAnnotationOnNode(updatedNode, ovn.OvnNodeSubnets)
+			err = kube.SetAnnotationsOnNode(updatedNode, map[string]interface{}{ovn.OvnNodeSubnets: nil})
 			Expect(err).NotTo(HaveOccurred())
 
 			Eventually(func() map[string]string {
