@@ -15,6 +15,7 @@ import (
 	"github.com/ovn-org/ovn-kubernetes/go-controller/hybrid-overlay/pkg/types"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/factory"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn"
 	ovntest "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/testing"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
 
@@ -22,12 +23,20 @@ import (
 	. "github.com/onsi/gomega"
 )
 
-func addNodeSetupCmds(fexec *ovntest.FakeExec, nodeName, hybMAC, hybIP, ovsMAC, nodeSubnet string) {
+const (
+	testOVSMAC     string = "11:22:33:44:55:66"
+	testDRMAC      string = "00:00:00:7a:af:04"
+	testNodeSubnet string = "1.2.3.0/24"
+	testNodeIP     string = "1.2.3.3"
+)
+
+// returns a fake node IP and DR MAC
+func addNodeSetupCmds(fexec *ovntest.FakeExec, nodeName string) (string, string) {
 	fexec.AddFakeCmd(&ovntest.ExpectedCmd{
 		Cmd:    "ovn-nbctl --timeout=15 get logical_switch mynode other-config:subnet",
-		Output: nodeSubnet,
+		Output: testNodeSubnet,
 	})
-	addGetPortAddressesCmds(fexec, nodeName, hybMAC, hybIP)
+	addGetPortAddressesCmds(fexec, nodeName, testDRMAC, testNodeIP)
 	fexec.AddFakeCmd(&ovntest.ExpectedCmd{
 		Cmd: "ovs-vsctl --timeout=15 br-exists br-ext",
 		Err: fmt.Errorf("bridge br-ext not found"),
@@ -37,22 +46,23 @@ func addNodeSetupCmds(fexec *ovntest.FakeExec, nodeName, hybMAC, hybIP, ovsMAC, 
 	})
 	fexec.AddFakeCmd(&ovntest.ExpectedCmd{
 		Cmd:    "ovs-vsctl --timeout=15 --if-exists get interface br-ext mac_in_use",
-		Output: ovsMAC,
+		Output: testOVSMAC,
 	})
 	fexec.AddFakeCmdsNoOutputNoError([]string{
-		"ovs-vsctl --timeout=15 set bridge br-ext other-config:hwaddr=" + ovsMAC,
+		"ovs-vsctl --timeout=15 set bridge br-ext other-config:hwaddr=" + testOVSMAC,
 		"ip link set br-ext up",
 		"ovs-vsctl --timeout=15 --may-exist add-port br-int int -- --may-exist add-port br-ext ext -- set Interface int type=patch options:peer=ext external-ids:iface-id=int-" + nodeName + " -- set Interface ext type=patch options:peer=int ofport_request=11",
 		"ovs-ofctl -O openflow13 add-flow br-ext table=0, priority=0, actions=drop",
 	})
-	hybMACRaw := strings.Replace(hybMAC, ":", "", -1)
-	hybIPRaw := getIPAsHexString(net.ParseIP(hybIP))
+	testDRMACRaw := strings.Replace(testDRMAC, ":", "", -1)
+	testNodeIPRaw := getIPAsHexString(net.ParseIP(testNodeIP))
 	fexec.AddFakeCmdsNoOutputNoError([]string{
-		"ovs-ofctl -O openflow13 add-flow br-ext table=0, priority=100, in_port=11, arp, arp_tpa=" + hybIP + ", actions=move:NXM_OF_ETH_SRC[]->NXM_OF_ETH_DST[],mod_dl_src:" + hybMAC + ",load:0x2->NXM_OF_ARP_OP[],move:NXM_NX_ARP_SHA[]->NXM_NX_ARP_THA[],move:NXM_OF_ARP_SPA[]->NXM_OF_ARP_TPA[],load:0x" + hybMACRaw + "->NXM_NX_ARP_SHA[],load:0x" + hybIPRaw + "->NXM_OF_ARP_SPA[],IN_PORT",
+		"ovs-ofctl -O openflow13 add-flow br-ext table=0, priority=100, in_port=11, arp, arp_tpa=" + testNodeIP + ", actions=move:NXM_OF_ETH_SRC[]->NXM_OF_ETH_DST[],mod_dl_src:" + testDRMAC + ",load:0x2->NXM_OF_ARP_OP[],move:NXM_NX_ARP_SHA[]->NXM_NX_ARP_THA[],move:NXM_OF_ARP_SPA[]->NXM_OF_ARP_TPA[],load:0x" + testDRMACRaw + "->NXM_NX_ARP_SHA[],load:0x" + testNodeIPRaw + "->NXM_OF_ARP_SPA[],IN_PORT",
 		`ovs-vsctl --timeout=15 --may-exist add-port br-ext ext-vxlan -- set interface ext-vxlan ofport_request=1 type=vxlan options:remote_ip="flow" options:key="flow"`,
-		"ovs-ofctl -O openflow13 add-flow br-ext table=0, priority=100, in_port=ext-vxlan, ip, nw_dst=" + nodeSubnet + ", dl_dst=" + hybMAC + ", actions=goto_table:10",
+		"ovs-ofctl -O openflow13 add-flow br-ext table=0, priority=100, in_port=ext-vxlan, ip, nw_dst=" + testNodeSubnet + ", dl_dst=" + testDRMAC + ", actions=goto_table:10",
 		"ovs-ofctl -O openflow13 add-flow br-ext table=10, priority=0, actions=drop",
 	})
+	return testNodeIP, testDRMAC
 }
 
 func createNode(name, os, ip string, annotations map[string]string) *v1.Node {
@@ -94,10 +104,12 @@ func createPod(namespace, name, node, podIP, podMAC string) *v1.Pod {
 }
 
 var _ = Describe("Hybrid Overlay Node Linux Operations", func() {
-	var app *cli.App
-	const (
-		thisNode string = "mynode"
+	var (
+		app   *cli.App
+		ipt   *util.FakeIPTables
+		fexec *ovntest.FakeExec
 	)
+	const thisNode string = "mynode"
 
 	BeforeEach(func() {
 		// Restore global default values before each testcase
@@ -106,14 +118,21 @@ var _ = Describe("Hybrid Overlay Node Linux Operations", func() {
 		app = cli.NewApp()
 		app.Name = "test"
 		app.Flags = config.Flags
+
+		var err error
+		ipt, err = util.NewFakeWithProtocol(iptables.ProtocolIPv4)
+		Expect(err).NotTo(HaveOccurred())
+		util.SetIPTablesHelper(iptables.ProtocolIPv4, ipt)
+
+		fexec = ovntest.NewFakeExec()
+		err = util.SetExec(fexec)
+		Expect(err).NotTo(HaveOccurred())
 	})
 
 	It("does not set up tunnels for non-Windows nodes without annotations", func() {
 		app.Action = func(ctx *cli.Context) error {
 			const (
-				node1Name   string = "node1"
-				node1Subnet string = "1.2.4.0/24"
-				node1IP     string = "10.0.0.2"
+				node1Name string = "node1"
 			)
 
 			fakeClient := fake.NewSimpleClientset(&v1.NodeList{
@@ -122,17 +141,14 @@ var _ = Describe("Hybrid Overlay Node Linux Operations", func() {
 				},
 			})
 
-			fexec := ovntest.NewFakeExec()
+			addNodeSetupCmds(fexec, thisNode)
 			fexec.AddFakeCmd(&ovntest.ExpectedCmd{
 				Cmd: "ovs-ofctl dump-flows br-ext table=0",
 				// Assume fresh OVS bridge
 				Output: "",
 			})
 
-			err := util.SetExec(fexec)
-			Expect(err).NotTo(HaveOccurred())
-
-			_, err = config.InitConfig(ctx, fexec, nil)
+			_, err := config.InitConfig(ctx, fexec, nil)
 			Expect(err).NotTo(HaveOccurred())
 
 			stopChan := make(chan struct{})
@@ -146,7 +162,7 @@ var _ = Describe("Hybrid Overlay Node Linux Operations", func() {
 			err = n.startNodeWatch(f)
 			Expect(err).NotTo(HaveOccurred())
 
-			Expect(fexec.CalledMatchesExpected()).To(BeTrue())
+			Expect(fexec.CalledMatchesExpected()).To(BeTrue(), fexec.ErrorDesc)
 			return nil
 		}
 
@@ -165,23 +181,20 @@ var _ = Describe("Hybrid Overlay Node Linux Operations", func() {
 			fakeClient := fake.NewSimpleClientset(&v1.NodeList{
 				Items: []v1.Node{
 					*createNode(node1Name, "linux", node1IP, map[string]string{
-						types.HybridOverlayHostSubnet: node1Subnet,
-						"ovn_host_subnet":             node1Subnet,
+						types.HybridOverlayNodeSubnet: node1Subnet,
+						ovn.OvnNodeSubnets:            fmt.Sprintf(`{"default": "%s"}`, node1Subnet),
 					}),
 				},
 			})
 
-			fexec := ovntest.NewFakeExec()
+			addNodeSetupCmds(fexec, thisNode)
 			fexec.AddFakeCmd(&ovntest.ExpectedCmd{
 				Cmd: "ovs-ofctl dump-flows br-ext table=0",
 				// Assume fresh OVS bridge
 				Output: "",
 			})
 
-			err := util.SetExec(fexec)
-			Expect(err).NotTo(HaveOccurred())
-
-			_, err = config.InitConfig(ctx, fexec, nil)
+			_, err := config.InitConfig(ctx, fexec, nil)
 			Expect(err).NotTo(HaveOccurred())
 
 			stopChan := make(chan struct{})
@@ -195,7 +208,7 @@ var _ = Describe("Hybrid Overlay Node Linux Operations", func() {
 			err = n.startNodeWatch(f)
 			Expect(err).NotTo(HaveOccurred())
 
-			Expect(fexec.CalledMatchesExpected()).To(BeTrue())
+			Expect(fexec.CalledMatchesExpected()).To(BeTrue(), fexec.ErrorDesc)
 			return nil
 		}
 
@@ -206,11 +219,7 @@ var _ = Describe("Hybrid Overlay Node Linux Operations", func() {
 	It("sets up local node hybrid overlay bridge", func() {
 		app.Action = func(ctx *cli.Context) error {
 			const (
-				thisNode   string = "mynode"
-				hybMAC     string = "00:00:00:7a:af:04"
-				hybIP      string = "1.2.3.3"
-				thisSubnet string = "1.2.3.0/24"
-				ovsMAC     string = "11:22:33:44:55:66"
+				thisNode string = "mynode"
 			)
 
 			fakeClient := fake.NewSimpleClientset(&v1.NodeList{
@@ -219,25 +228,15 @@ var _ = Describe("Hybrid Overlay Node Linux Operations", func() {
 				},
 			})
 
-			fexec := ovntest.NewFakeExec()
 			// Node setup from initial node sync
-			addNodeSetupCmds(fexec, thisNode, hybMAC, hybIP, ovsMAC, thisSubnet)
+			addNodeSetupCmds(fexec, thisNode)
 			fexec.AddFakeCmd(&ovntest.ExpectedCmd{
 				Cmd: "ovs-ofctl dump-flows br-ext table=0",
 				// Assume fresh OVS bridge
 				Output: "",
 			})
-			// Second check from node watch Add event
-			addGetPortAddressesCmds(fexec, thisNode, hybMAC, hybIP)
-			fexec.AddFakeCmdsNoOutputNoError([]string{
-				// Bridge now exists
-				"ovs-vsctl --timeout=15 br-exists br-ext",
-			})
 
-			err := util.SetExec(fexec)
-			Expect(err).NotTo(HaveOccurred())
-
-			_, err = config.InitConfig(ctx, fexec, nil)
+			_, err := config.InitConfig(ctx, fexec, nil)
 			Expect(err).NotTo(HaveOccurred())
 
 			stopChan := make(chan struct{})
@@ -245,17 +244,13 @@ var _ = Describe("Hybrid Overlay Node Linux Operations", func() {
 			Expect(err).NotTo(HaveOccurred())
 			defer f.Shutdown()
 
-			ipt, err := util.NewFakeWithProtocol(iptables.ProtocolIPv4)
-			Expect(err).NotTo(HaveOccurred())
-			util.SetIPTablesHelper(iptables.ProtocolIPv4, ipt)
-
 			n, err := NewNode(fakeClient, thisNode)
 			Expect(err).NotTo(HaveOccurred())
 
 			err = n.startNodeWatch(f)
 			Expect(err).NotTo(HaveOccurred())
 
-			Expect(fexec.CalledMatchesExpected()).To(BeTrue())
+			Expect(fexec.CalledMatchesExpected()).To(BeTrue(), fexec.ErrorDesc)
 
 			expectedTables := map[string]util.FakeTable{
 				"filter": {
@@ -276,10 +271,6 @@ var _ = Describe("Hybrid Overlay Node Linux Operations", func() {
 		app.Action = func(ctx *cli.Context) error {
 			const (
 				thisNode    string = "mynode"
-				hybMAC      string = "00:00:00:7a:af:04"
-				hybIP       string = "1.2.3.3"
-				thisSubnet  string = "1.2.3.0/24"
-				ovsMAC      string = "11:22:33:44:55:66"
 				node1Name   string = "node1"
 				node1IP     string = "10.0.0.2"
 				node1DrMAC  string = "22:33:44:55:66:77"
@@ -289,7 +280,7 @@ var _ = Describe("Hybrid Overlay Node Linux Operations", func() {
 			fakeClient := fake.NewSimpleClientset(&v1.NodeList{
 				Items: []v1.Node{
 					*createNode(node1Name, "windows", node1IP, map[string]string{
-						types.HybridOverlayHostSubnet: node1Subnet,
+						types.HybridOverlayNodeSubnet: node1Subnet,
 						types.HybridOverlayDrMac:      node1DrMAC,
 					}),
 				},
@@ -297,7 +288,7 @@ var _ = Describe("Hybrid Overlay Node Linux Operations", func() {
 
 			node1DrMACRaw := strings.Replace(node1DrMAC, ":", "", -1)
 
-			fexec := ovntest.NewFakeExec()
+			addNodeSetupCmds(fexec, thisNode)
 			fexec.AddFakeCmdsNoOutputNoError([]string{
 				"ovs-ofctl dump-flows br-ext table=0",
 				// Adds flows for existing node1
@@ -305,10 +296,7 @@ var _ = Describe("Hybrid Overlay Node Linux Operations", func() {
 				"ovs-ofctl add-flow br-ext cookie=0xca12f31b,table=0,priority=100,ip,nw_dst=5.6.7.0/24,actions=load:4097->NXM_NX_TUN_ID[0..31],set_field:10.0.0.2->tun_dst,set_field:22:33:44:55:66:77->eth_dst,output:1",
 			})
 
-			err := util.SetExec(fexec)
-			Expect(err).NotTo(HaveOccurred())
-
-			_, err = config.InitConfig(ctx, fexec, nil)
+			_, err := config.InitConfig(ctx, fexec, nil)
 			Expect(err).NotTo(HaveOccurred())
 
 			stopChan := make(chan struct{})
@@ -322,7 +310,7 @@ var _ = Describe("Hybrid Overlay Node Linux Operations", func() {
 			err = n.startNodeWatch(f)
 			Expect(err).NotTo(HaveOccurred())
 
-			Expect(fexec.CalledMatchesExpected()).To(BeTrue())
+			Expect(fexec.CalledMatchesExpected()).To(BeTrue(), fexec.ErrorDesc)
 
 			return nil
 		}
@@ -343,7 +331,7 @@ var _ = Describe("Hybrid Overlay Node Linux Operations", func() {
 				Items: []v1.Node{*createNode(node1Name, "linux", node1IP, nil)},
 			})
 
-			fexec := ovntest.NewFakeExec()
+			addNodeSetupCmds(fexec, thisNode)
 			fexec.AddFakeCmd(&ovntest.ExpectedCmd{
 				Cmd: "ovs-ofctl dump-flows br-ext table=0",
 				// Return output for a stale node
@@ -357,10 +345,7 @@ var _ = Describe("Hybrid Overlay Node Linux Operations", func() {
 				"ovs-ofctl del-flows br-ext table=0, cookie=0x1f40e27c/0xffffffff",
 			})
 
-			err := util.SetExec(fexec)
-			Expect(err).NotTo(HaveOccurred())
-
-			_, err = config.InitConfig(ctx, fexec, nil)
+			_, err := config.InitConfig(ctx, fexec, nil)
 			Expect(err).NotTo(HaveOccurred())
 
 			stopChan := make(chan struct{})
@@ -374,7 +359,7 @@ var _ = Describe("Hybrid Overlay Node Linux Operations", func() {
 			err = n.startNodeWatch(f)
 			Expect(err).NotTo(HaveOccurred())
 
-			Expect(fexec.CalledMatchesExpected()).To(BeTrue())
+			Expect(fexec.CalledMatchesExpected()).To(BeTrue(), fexec.ErrorDesc)
 
 			return nil
 		}
@@ -391,7 +376,8 @@ var _ = Describe("Hybrid Overlay Node Linux Operations", func() {
 
 			fakeClient := fake.NewSimpleClientset()
 
-			fexec := ovntest.NewFakeExec()
+			addNodeSetupCmds(fexec, thisNode)
+
 			// Put one live pod and one stale pod into the OVS bridge flows
 			fexec.AddFakeCmd(&ovntest.ExpectedCmd{
 				Cmd: "ovs-ofctl dump-flows br-ext table=10",
@@ -403,10 +389,7 @@ var _ = Describe("Hybrid Overlay Node Linux Operations", func() {
 				"ovs-ofctl del-flows br-ext table=10, cookie=0xaabbccdd/0xffffffff",
 			})
 
-			err := util.SetExec(fexec)
-			Expect(err).NotTo(HaveOccurred())
-
-			_, err = config.InitConfig(ctx, fexec, nil)
+			_, err := config.InitConfig(ctx, fexec, nil)
 			Expect(err).NotTo(HaveOccurred())
 
 			stopChan := make(chan struct{})
@@ -420,7 +403,7 @@ var _ = Describe("Hybrid Overlay Node Linux Operations", func() {
 			err = n.startPodWatch(f)
 			Expect(err).NotTo(HaveOccurred())
 
-			Expect(fexec.CalledMatchesExpected()).To(BeTrue())
+			Expect(fexec.CalledMatchesExpected()).To(BeTrue(), fexec.ErrorDesc)
 
 			return nil
 		}
@@ -433,7 +416,6 @@ var _ = Describe("Hybrid Overlay Node Linux Operations", func() {
 		app.Action = func(ctx *cli.Context) error {
 			const (
 				thisNode  string = "mynode"
-				hybMAC    string = "00:00:00:7a:af:04"
 				node1Name string = "node1"
 				pod1IP    string = "1.2.3.5"
 				pod1CIDR  string = pod1IP + "/24"
@@ -444,7 +426,8 @@ var _ = Describe("Hybrid Overlay Node Linux Operations", func() {
 				createPod("default", "pod1", thisNode, pod1CIDR, pod1MAC),
 			}...)
 
-			fexec := ovntest.NewFakeExec()
+			_, hybMAC := addNodeSetupCmds(fexec, thisNode)
+
 			// Put one live pod and one stale pod into the OVS bridge flows
 			fexec.AddFakeCmd(&ovntest.ExpectedCmd{
 				Cmd: "ovs-ofctl dump-flows br-ext table=10",
@@ -456,10 +439,7 @@ var _ = Describe("Hybrid Overlay Node Linux Operations", func() {
 				"ovs-ofctl add-flow br-ext table=10, cookie=0x7fdcde17, priority=100, ip, nw_dst=" + pod1CIDR + ", actions=set_field:" + hybMAC + "->eth_src,set_field:" + pod1MAC + "->eth_dst,output:ext",
 			})
 
-			err := util.SetExec(fexec)
-			Expect(err).NotTo(HaveOccurred())
-
-			_, err = config.InitConfig(ctx, fexec, nil)
+			_, err := config.InitConfig(ctx, fexec, nil)
 			Expect(err).NotTo(HaveOccurred())
 
 			stopChan := make(chan struct{})
@@ -474,7 +454,7 @@ var _ = Describe("Hybrid Overlay Node Linux Operations", func() {
 			err = n.startPodWatch(f)
 			Expect(err).NotTo(HaveOccurred())
 
-			Expect(fexec.CalledMatchesExpected()).To(BeTrue())
+			Expect(fexec.CalledMatchesExpected()).To(BeTrue(), fexec.ErrorDesc)
 
 			return nil
 		}

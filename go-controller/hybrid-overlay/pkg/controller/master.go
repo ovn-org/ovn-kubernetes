@@ -17,58 +17,46 @@ import (
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
 
 	kapi "k8s.io/api/core/v1"
+	utilruntime "k8s.io/apimachinery/pkg/util/runtime"
 	"k8s.io/client-go/kubernetes"
 )
 
 // MasterController is the master hybrid overlay controller
 type MasterController struct {
 	kube      *kube.Kube
-	allocator []*allocator.SubnetAllocator
+	allocator *allocator.SubnetAllocator
 }
 
 // NewMaster a new master controller that listens for node events
 func NewMaster(clientset kubernetes.Interface, subnets []config.CIDRNetworkEntry) (*MasterController, error) {
 	m := &MasterController{
-		kube: &kube.Kube{KClient: clientset},
+		kube:      &kube.Kube{KClient: clientset},
+		allocator: allocator.NewSubnetAllocator(),
 	}
 
-	alreadyAllocated := make([]string, 0)
+	// Add our hybrid overlay CIDRs to the allocator
+	for _, clusterEntry := range subnets {
+		err := m.allocator.AddNetworkRange(clusterEntry.CIDR.String(), 32-clusterEntry.HostSubnetLength)
+		if err != nil {
+			return nil, err
+		}
+	}
+
+	// Mark existing hostsubnets as already allocated
 	existingNodes, err := m.kube.GetNodes()
 	if err != nil {
 		return nil, fmt.Errorf("Error in initializing/fetching subnets: %v", err)
 	}
 	for _, node := range existingNodes.Items {
 		if houtil.IsWindowsNode(&node) {
-			hostsubnet, ok := node.Annotations[types.HybridOverlayHostSubnet]
+			hostsubnet, ok := node.Annotations[types.HybridOverlayNodeSubnet]
 			if ok {
-				alreadyAllocated = append(alreadyAllocated, hostsubnet)
+				if err := m.allocator.MarkAllocatedNetwork(hostsubnet); err != nil {
+					utilruntime.HandleError(err)
+				}
 			}
 		}
 	}
-
-	masterSubnetAllocatorList := make([]*allocator.SubnetAllocator, 0)
-	// NewSubnetAllocator is a subnet IPAM, which takes a CIDR (first argument)
-	// and gives out subnets of length 'hostSubnetLength' (second argument)
-	// but omitting any that exist in 'subrange' (third argument)
-	for _, subnet := range subnets {
-		subrange := make([]string, 0)
-		for _, allocatedRange := range alreadyAllocated {
-			firstAddress, _, err := net.ParseCIDR(allocatedRange)
-			if err != nil {
-				logrus.Errorf("error parsing already allocated hostsubnet %q: %v", allocatedRange, err)
-				continue
-			}
-			if subnet.CIDR.Contains(firstAddress) {
-				subrange = append(subrange, allocatedRange)
-			}
-		}
-		subnetAllocator, err := allocator.NewSubnetAllocator(subnet.CIDR.String(), 32-subnet.HostSubnetLength, subrange)
-		if err != nil {
-			return nil, fmt.Errorf("error creating subnet allocator for %q: %v", subnet.CIDR.String(), err)
-		}
-		masterSubnetAllocatorList = append(masterSubnetAllocatorList, subnetAllocator)
-	}
-	m.allocator = masterSubnetAllocatorList
 
 	return m, nil
 }
@@ -78,8 +66,8 @@ func (m *MasterController) Start(wf *factory.WatchFactory) error {
 	return houtil.StartNodeWatch(m, wf)
 }
 
-func parseNodeHostSubnet(node *kapi.Node, annotation string) (*net.IPNet, error) {
-	sub, ok := node.Annotations[annotation]
+func parseHybridOverlayNodeHostSubnet(node *kapi.Node) (*net.IPNet, error) {
+	sub, ok := node.Annotations[types.HybridOverlayNodeSubnet]
 	if !ok {
 		return nil, nil
 	}
@@ -87,7 +75,7 @@ func parseNodeHostSubnet(node *kapi.Node, annotation string) (*net.IPNet, error)
 	_, subnet, err := net.ParseCIDR(sub)
 	if err != nil {
 		return nil, fmt.Errorf("error parsing node %s annotation %s value %q: %v",
-			node.Name, annotation, sub, err)
+			node.Name, types.HybridOverlayNodeSubnet, sub, err)
 	}
 
 	return subnet, nil
@@ -108,61 +96,59 @@ func sameCIDR(a, b *net.IPNet) bool {
 // 3) true to add the annotation, false to delete it from the node
 // 4) any error that occurred
 func (m *MasterController) updateNodeAnnotation(node *kapi.Node, annotator kube.Annotator) error {
-	extHostsubnet, _ := parseNodeHostSubnet(node, types.HybridOverlayHostSubnet)
-	ovnHostsubnet, _ := parseNodeHostSubnet(node, ovn.OvnHostSubnet)
+	extNodeSubnet, _ := parseHybridOverlayNodeHostSubnet(node)
+	ovnNodeSubnet, _ := ovn.ParseNodeHostSubnet(node)
 
 	if !houtil.IsWindowsNode(node) {
-		// Sync/remove subnet annotations for Linux nodes
-		if ovnHostsubnet == nil {
-			if extHostsubnet != nil {
-				// remove any HybridOverlayHostSubnet
-				logrus.Infof("Will remove node %s hybrid overlay HostSubnet %s", node.Name, extHostsubnet.String())
-				annotator.Del(types.HybridOverlayHostSubnet)
+		// Sync/remove subnet annotations for Linux nodes.
+		// - if there is no OVN HostSubnet annotation, remove the HybridOverlayHostSubnet annotation
+		// - if the OVN HostSubnet annotation is different than the HybridOverlayHostSubnet annotation,
+		//   copy the OVN one to HybridOverlayHostSubnet
+		if ovnNodeSubnet == nil {
+			if extNodeSubnet != nil {
+				// remove any HybridOverlayNodeSubnet
+				logrus.Infof("Will remove node %s hybrid overlay NodeSubnet %s", node.Name, extNodeSubnet.String())
+				annotator.Del(types.HybridOverlayNodeSubnet)
 			}
-		} else if !sameCIDR(ovnHostsubnet, extHostsubnet) {
-			// sync the HybridHostSubnet with the OVN-assigned one
-			logrus.Infof("will sync node %s hybrid overlay HostSubnet %s", node.Name, ovnHostsubnet.String())
-			annotator.Set(types.HybridOverlayHostSubnet, ovnHostsubnet.String())
+		} else if !sameCIDR(ovnNodeSubnet, extNodeSubnet) {
+			// sync the HybridOverlayNodeSubnet with the OVN-assigned one
+			logrus.Infof("will sync node %s hybrid overlay NodeSubnet %s", node.Name, ovnNodeSubnet.String())
+			annotator.Set(types.HybridOverlayNodeSubnet, ovnNodeSubnet.String())
 		}
 		return nil
 	}
 
 	// Do not allocate a subnet if the node already has one
-	if extHostsubnet != nil {
+	if extNodeSubnet != nil {
 		return nil
 	}
 
 	// No subnet reserved; allocate a new one
-	for _, subnetAllocator := range m.allocator {
-		if subnet, err := subnetAllocator.GetNetwork(); err == nil {
-			logrus.Infof("Allocated node %s hybrid overlay HostSubnet %s", node.Name, subnet.String())
-			annotator.SetWithFailureHandler(types.HybridOverlayHostSubnet, subnet.String(), func(node *kapi.Node, key, val string) {
-				if _, cidr, _ := net.ParseCIDR(val); cidr != nil {
-					_ = m.releaseNodeSubnet(node.Name, cidr)
-				}
-			})
-			return nil
-		} else if err != allocator.ErrSubnetAllocatorFull {
-			return err
-		}
-		// Current subnet exhausted, check next possible subnet
+	hostsubnetStr, err := m.allocator.AllocateNetwork()
+	if err != nil {
+		return fmt.Errorf("Error allocating hybrid overlay HostSubnet for node %s: %v", node.Name, err)
+	}
+	logrus.Infof("Allocated hybrid overlay HostSubnet %s for node %s", hostsubnetStr, node.Name)
+
+	if _, _, err := net.ParseCIDR(hostsubnetStr); err != nil {
+		return fmt.Errorf("Error parsing hostsubnet %s: %v", hostsubnetStr, err)
 	}
 
-	// All subnets exhausted
-	return fmt.Errorf("no available subnets to allocate")
+	annotator.SetWithFailureHandler(types.HybridOverlayNodeSubnet, hostsubnetStr, func(node *kapi.Node, key string, val interface{}) {
+		if _, cidr, _ := net.ParseCIDR(val.(string)); cidr != nil {
+			_ = m.releaseNodeSubnet(node.Name, cidr)
+		}
+	})
+	return nil
 }
 
-func (m *MasterController) releaseNodeSubnet(nodeName string, nodeSubnet *net.IPNet) error {
-	// allocator.network is unexported, so we must iterate all allocators
-	// and attempt to release the subnet for each one. If no allocator
-	// can release the subnet, return an error.
-	for _, possibleSubnet := range m.allocator {
-		if err := possibleSubnet.ReleaseNetwork(nodeSubnet); err == nil {
-			logrus.Infof("Deleted HostSubnet %v for node %s", nodeSubnet, nodeName)
-			return nil
-		}
+func (m *MasterController) releaseNodeSubnet(nodeName string, subnet *net.IPNet) error {
+	err := m.allocator.ReleaseNetwork(subnet.String())
+	if err != nil {
+		return fmt.Errorf("Error deleting hybrid overlay HostSubnet %s for node %q: %s", subnet, nodeName, err)
 	}
-	return fmt.Errorf("failed to delete subnet %s for node %q: subnet not found in any CIDR range or already available", nodeSubnet, nodeName)
+	logrus.Infof("Deleted hybrid overlay HostSubnet %s for node %s", subnet, nodeName)
+	return nil
 }
 
 func (m *MasterController) handleOverlayPort(node *kapi.Node, annotator kube.Annotator) error {
@@ -173,7 +159,7 @@ func (m *MasterController) handleOverlayPort(node *kapi.Node, annotator kube.Ann
 
 	_, haveDRMACAnnotation := node.Annotations[types.HybridOverlayDrMac]
 
-	subnet, err := parseNodeHostSubnet(node, ovn.OvnHostSubnet)
+	subnet, err := ovn.ParseNodeHostSubnet(node)
 	if subnet == nil || err != nil {
 		// No subnet allocated yet; clean up
 		if haveDRMACAnnotation {
@@ -245,7 +231,7 @@ func (m *MasterController) Update(oldNode, newNode *kapi.Node) {
 func (m *MasterController) Delete(node *kapi.Node) {
 	// Run delete for all nodes in case the OS annotation was lost or changed
 
-	if subnet, _ := parseNodeHostSubnet(node, types.HybridOverlayHostSubnet); subnet != nil {
+	if subnet, _ := parseHybridOverlayNodeHostSubnet(node); subnet != nil {
 		if err := m.releaseNodeSubnet(node.Name, subnet); err != nil {
 			logrus.Errorf(err.Error())
 		}
