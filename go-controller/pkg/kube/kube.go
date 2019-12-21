@@ -22,8 +22,9 @@ import (
 // kubernetes resources
 type Interface interface {
 	SetAnnotationOnPod(pod *kapi.Pod, key, value string) error
+	SetAnnotationsOnPod(pod *kapi.Pod, annotations map[string]string) error
 	SetAnnotationOnNode(node *kapi.Node, key, value string) error
-	SetAnnotationsOnNode(node *kapi.Node, annotations map[string]string) error
+	SetAnnotationsOnNode(node *kapi.Node, annotations map[string]interface{}) error
 	UpdateNodeStatus(node *kapi.Node) error
 	DeleteAnnotationOnNode(node *kapi.Node, key string) error
 	DeleteAnnotationsOnNode(node *kapi.Node, keys []string) error
@@ -60,6 +61,33 @@ func (k *Kube) SetAnnotationOnPod(pod *kapi.Pod, key, value string) error {
 	return err
 }
 
+// SetAnnotationsOnPod takes the pod object and map of key/value string pairs to set as annotations
+func (k *Kube) SetAnnotationsOnPod(pod *kapi.Pod, annotations map[string]string) error {
+	var err error
+	var patchData []byte
+	patch := struct {
+		Metadata map[string]interface{} `json:"metadata"`
+	}{
+		Metadata: map[string]interface{}{
+			"annotations": annotations,
+		},
+	}
+
+	podDesc := pod.Namespace + "/" + pod.Name
+	logrus.Infof("Setting annotations %v on pod %s", annotations, podDesc)
+	patchData, err = json.Marshal(&patch)
+	if err != nil {
+		logrus.Errorf("Error in setting annotations on pod %s: %v", podDesc, err)
+		return err
+	}
+
+	_, err = k.KClient.CoreV1().Pods(pod.Namespace).Patch(pod.Name, types.MergePatchType, patchData)
+	if err != nil {
+		logrus.Errorf("Error in setting annotation on pod %s: %v", podDesc, err)
+	}
+	return err
+}
+
 // SetAnnotationOnNode takes the node object and key/value string pair to set it as an annotation
 func (k *Kube) SetAnnotationOnNode(node *kapi.Node, key, value string) error {
 	logrus.Infof("Setting annotations %s=%s on node %s", key, value, node.Name)
@@ -72,7 +100,7 @@ func (k *Kube) SetAnnotationOnNode(node *kapi.Node, key, value string) error {
 }
 
 // SetAnnotationsOnNode takes the node object and map of key/value string pairs to set as annotations
-func (k *Kube) SetAnnotationsOnNode(node *kapi.Node, annotations map[string]string) error {
+func (k *Kube) SetAnnotationsOnNode(node *kapi.Node, annotations map[string]interface{}) error {
 	var err error
 	var patchData []byte
 	patch := struct {

@@ -34,11 +34,12 @@ spec:
     name: ovnkube-master
   type: ClusterIP
   clusterIP: None
+  publishNotReadyAddresses: true
   ports:
   - name: http-metrics
-    port: 9102
+    port: 9409
     protocol: TCP
-    targetPort: 9102
+    targetPort: 9409
 ---
 
 apiVersion: monitoring.coreos.com/v1
@@ -74,8 +75,9 @@ spec:
     name: ovnkube-node
   type: ClusterIP
   clusterIP: None
+  publishNotReadyAddresses: true
   ports:
   - name: http-metrics
-    port: 9101
+    port: 9410
     protocol: TCP
-    targetPort: 9101
+    targetPort: 9410

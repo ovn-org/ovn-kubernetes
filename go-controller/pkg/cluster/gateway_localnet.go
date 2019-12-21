@@ -24,7 +24,10 @@ const (
 	localnetGatewayIP            = "169.254.33.2/24"
 	localnetGatewayNextHop       = "169.254.33.1"
 	localnetGatewayNextHopSubnet = "169.254.33.1/24"
-	iptableNodePortChain         = "OVN-KUBE-NODEPORT"
+	// fixed MAC address for the br-nexthop interface. the last 4 hex bytes
+	// translates to the br-nexthop's IP address
+	localnetGatewayNextHopMac = "00:00:a9:fe:21:01"
+	iptableNodePortChain      = "OVN-KUBE-NODEPORT"
 )
 
 type iptRule struct {
@@ -110,7 +113,7 @@ func localnetGatewayNAT(ipt util.IPTablesHelper, ifname, ip string) error {
 }
 
 func initLocalnetGateway(nodeName string,
-	subnet string, wf *factory.WatchFactory) (map[string]string, error) {
+	subnet string, wf *factory.WatchFactory) (map[string]map[string]string, error) {
 	ipt, err := util.GetIPTablesHelper(iptables.ProtocolIPv4)
 	if err != nil {
 		return nil, fmt.Errorf("failed to initialize iptables: %v", err)
@@ -132,9 +135,11 @@ func initLocalnetGateway(nodeName string,
 
 	// Create a localnet bridge nexthop
 	localnetBridgeNextHop := "br-nexthop"
-	_, stderr, err = util.RunOVSVsctl("--may-exist", "add-port",
-		localnetBridgeName, localnetBridgeNextHop, "--", "set",
-		"interface", localnetBridgeNextHop, "type=internal")
+	_, stderr, err = util.RunOVSVsctl(
+		"--may-exist", "add-port", localnetBridgeName, localnetBridgeNextHop,
+		"--", "set", "interface", localnetBridgeNextHop, "type=internal",
+		"mtu_request="+fmt.Sprintf("%d", config.Default.MTU),
+		fmt.Sprintf("mac=%s", strings.ReplaceAll(localnetGatewayNextHopMac, ":", "\\:")))
 	if err != nil {
 		return nil, fmt.Errorf("Failed to create localnet bridge next hop %s"+
 			", stderr:%s (%v)", localnetBridgeNextHop, stderr, err)
@@ -165,13 +170,17 @@ func initLocalnetGateway(nodeName string,
 		return nil, fmt.Errorf("failed to set up shared interface gateway: %v", err)
 	}
 
-	annotations := map[string]string{
+	l3GatewayConfig := map[string]string{
 		ovn.OvnNodeGatewayMode:       string(config.Gateway.Mode),
 		ovn.OvnNodeGatewayVlanID:     fmt.Sprintf("%d", config.Gateway.VLANID),
 		ovn.OvnNodeGatewayIfaceID:    ifaceID,
 		ovn.OvnNodeGatewayMacAddress: macAddress,
 		ovn.OvnNodeGatewayIP:         localnetGatewayIP,
 		ovn.OvnNodeGatewayNextHop:    localnetGatewayNextHop,
+		ovn.OvnNodePortEnable:        fmt.Sprintf("%t", config.Gateway.NodeportEnable),
+	}
+	annotations := map[string]map[string]string{
+		ovn.OvnDefaultNetworkGateway: l3GatewayConfig,
 	}
 
 	err = localnetGatewayNAT(ipt, localnetBridgeNextHop, localnetGatewayIP)

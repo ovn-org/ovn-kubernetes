@@ -118,8 +118,8 @@ mtu=${OVN_MTU:-1400}
 ovn_kubernetes_namespace=${OVN_KUBERNETES_NAMESPACE:-ovn-kubernetes}
 
 # host on which ovnkube-db POD is running and this POD contains both
-# OVN NB and SB DB running in their own container
-ovn_db_host=""
+# OVN NB and SB DB running in their own container. Ignore IPs in loopback range (127.0.0.0/8)
+ovn_db_host=$(getent ahostsv4 $(hostname) | grep -v "^127\." | head -1 | awk '{ print $1 }')
 
 # OVN_NB_PORT - ovn north db port (default 6641)
 ovn_nb_port=${OVN_NB_PORT:-6641}
@@ -505,8 +505,7 @@ cleanup-ovs-server () {
 # set the ovnkube_db endpoint for other pods to query the OVN DB IP
 set_ovnkube_db_ep () {
   # create a new endpoint for the headless onvkube-db service without selectors
-  # using the current host has the endpoint IP
-  ovn_db_host=$(getent ahosts $(hostname) | head -1 | awk '{ print $1 }')
+  # using the current host has the endpoint IP. Ignore IPs in loopback range (127.0.0.0/8)
   kubectl --server=${K8S_APISERVER} --token=${k8s_token} --certificate-authority=${K8S_CACERT} apply -f - << EOF
 apiVersion: v1
 kind: Endpoints
@@ -550,7 +549,6 @@ nb-ovsdb () {
   echo "=============== nb-ovsdb ========== RUNNING"
   sleep 3
 
-  ovn_db_host=$(getent ahosts $(hostname) | head -1 | awk '{ print $1 }')
   ovn-nbctl set-connection ptcp:${ovn_nb_port}:${ovn_db_host} -- set connection . inactivity_probe=0
 
   tail --follow=name /var/log/openvswitch/ovsdb-server-nb.log &
@@ -580,7 +578,6 @@ sb-ovsdb () {
   echo "=============== sb-ovsdb ========== RUNNING"
   sleep 3
 
-  ovn_db_host=$(getent ahosts $(hostname) | head -1 | awk '{ print $1 }')
   ovn-sbctl set-connection ptcp:${ovn_sb_port}:${ovn_db_host} -- set connection . inactivity_probe=0
 
   # create the ovnkube_db endpoint for other pods to query the OVN DB IP
@@ -682,13 +679,12 @@ ovn-master () {
     --init-master ${ovn_pod_host} \
     --cluster-subnets ${net_cidr} --k8s-service-cidr=${svc_cidr} \
     --nb-address=${ovn_nbdb} --sb-address=${ovn_sbdb} \
-    --nodeport \
     --nbctl-daemon-mode \
     --loglevel=${ovnkube_loglevel} \
     ${hybrid_overlay_flags} \
     --pidfile /var/run/openvswitch/ovnkube-master.pid \
     --logfile /var/log/ovn-kubernetes/ovnkube-master.log \
-    --metrics-bind-address "0.0.0.0:9102" &
+    --metrics-bind-address "0.0.0.0:9409" &
   echo "=============== ovn-master ========== running"
   wait_for_event attempts=3 process_ready ovnkube-master
   sleep 1
@@ -770,7 +766,7 @@ ovn-node () {
       --gateway-mode=${ovn_gateway_mode} ${ovn_gateway_opts}  \
       --pidfile /var/run/openvswitch/ovnkube.pid \
       --logfile /var/log/ovn-kubernetes/ovnkube.log \
-      --metrics-bind-address "0.0.0.0:9101" &
+      --metrics-bind-address "0.0.0.0:9410" &
 
   wait_for_event attempts=3 process_ready ovnkube
   setup_cni

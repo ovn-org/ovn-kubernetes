@@ -333,8 +333,8 @@ func (wf *WatchFactory) AddEndpointsHandler(handlerFuncs cache.ResourceEventHand
 }
 
 // AddFilteredEndpointsHandler adds a handler function that will be executed when Endpoint objects that match the given filters change
-func (wf *WatchFactory) AddFilteredEndpointsHandler(namespace string, handlerFuncs cache.ResourceEventHandler, processExisting func([]interface{})) (*Handler, error) {
-	return wf.addHandler(endpointsType, namespace, nil, handlerFuncs, processExisting)
+func (wf *WatchFactory) AddFilteredEndpointsHandler(namespace string, lsel *metav1.LabelSelector, handlerFuncs cache.ResourceEventHandler, processExisting func([]interface{})) (*Handler, error) {
+	return wf.addHandler(endpointsType, namespace, lsel, handlerFuncs, processExisting)
 }
 
 // RemoveEndpointsHandler removes a Endpoints object event handler function

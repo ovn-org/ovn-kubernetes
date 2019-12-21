@@ -63,7 +63,7 @@ func (na *nodeAnnotator) Del(key string) {
 }
 
 func (na *nodeAnnotator) Run() {
-	adds := make(map[string]string)
+	adds := make(map[string]interface{})
 	for k, act := range na.adds {
 		// Ignore annotations that already exist with the same value
 		if existing := na.node.Annotations[k]; existing != act.val {
