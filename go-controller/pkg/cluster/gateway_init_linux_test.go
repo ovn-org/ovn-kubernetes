@@ -282,11 +282,6 @@ var _ = Describe("Gateway Init Operations", func() {
 			fexec := ovntest.NewFakeExec()
 			fexec.AddFakeCmdsNoOutputNoError([]string{
 				"ovs-vsctl --timeout=15 --may-exist add-br br-local",
-				"ip link set br-local up",
-				"ovs-vsctl --timeout=15 --may-exist add-port br-local br-nexthop -- set interface br-nexthop type=internal mtu_request=" + mtu + " mac=00\\:00\\:a9\\:fe\\:21\\:01",
-				"ip link set br-nexthop up",
-				"ip addr flush dev br-nexthop",
-				"ip addr add 169.254.33.1/24 dev br-nexthop",
 			})
 			fexec.AddFakeCmd(&ovntest.ExpectedCmd{
 				Cmd:    "ovs-vsctl --timeout=15 --if-exists get interface br-local mac_in_use",
@@ -295,6 +290,11 @@ var _ = Describe("Gateway Init Operations", func() {
 			fexec.AddFakeCmdsNoOutputNoError([]string{
 				"ovs-vsctl --timeout=15 set bridge br-local other-config:hwaddr=" + brLocalnetMAC,
 				"ovs-vsctl --timeout=15 set Open_vSwitch . external_ids:ovn-bridge-mappings=" + util.PhysicalNetworkName + ":br-local",
+				"ip link set br-local up",
+				"ovs-vsctl --timeout=15 --may-exist add-port br-local br-nexthop -- set interface br-nexthop type=internal mtu_request=" + mtu + " mac=00\\:00\\:a9\\:fe\\:21\\:01",
+				"ip link set br-nexthop up",
+				"ip addr flush dev br-nexthop",
+				"ip addr add 169.254.33.1/24 dev br-nexthop",
 			})
 
 			err := util.SetExec(fexec)
