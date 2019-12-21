@@ -44,10 +44,6 @@ func cleanupGateway(fexec *ovntest.FakeExec, nodeName string, nodeSubnet string,
 		Output: "[\"100.64.0.3/16\"]",
 	})
 	fexec.AddFakeCmd(&ovntest.ExpectedCmd{
-		Cmd:    "ovn-nbctl --timeout=15 --data=bare --no-heading --columns=_uuid find logical_router_static_route ip_prefix=0.0.0.0/0 nexthop=100.64.0.3",
-		Output: "",
-	})
-	fexec.AddFakeCmd(&ovntest.ExpectedCmd{
 		Cmd:    "ovn-nbctl --timeout=15 --data=bare --no-heading --columns=_uuid find logical_router_static_route nexthop=\"100.64.0.3\"",
 		Output: node1RouteUUID,
 	})
@@ -383,10 +379,6 @@ subnet=%s
 				Output: "[\"100.64.0.3/16\"]",
 			})
 			fexec.AddFakeCmd(&ovntest.ExpectedCmd{
-				Cmd:    "ovn-nbctl --timeout=15 --data=bare --no-heading --columns=_uuid find logical_router_static_route ip_prefix=0.0.0.0/0 nexthop=100.64.0.3",
-				Output: "",
-			})
-			fexec.AddFakeCmd(&ovntest.ExpectedCmd{
 				Cmd:    "ovn-nbctl --timeout=15 --data=bare --no-heading --columns=_uuid find logical_router_static_route nexthop=\"100.64.0.3\"",
 				Output: node1RouteUUID,
 			})
@@ -611,15 +603,6 @@ var _ = Describe("Gateway Init Operations", func() {
 				"ovn-nbctl --timeout=15 set logical_router " + gwRouter + " options:lb_force_snat_ip=" + lrpIP,
 				"ovn-nbctl --timeout=15 --may-exist lr-route-add " + gwRouter + " " + clusterCIDR + " 100.64.0.1",
 			})
-			fexec.AddFakeCmd(&ovntest.ExpectedCmd{
-				Cmd: "ovn-nbctl --timeout=15 --data=bare --format=table --no-heading --columns=name,options find logical_router options:lb_force_snat_ip!=-",
-				Output: fmt.Sprintf(`GR_openshift-node-2      chassis=5befb1e1-b0b1-4277-bb1d-54e8732a39c6 lb_force_snat_ip=%s
-GR_openshift-node-1      chassis=0861e85c-5060-42fd-839e-8c463c7da378 lb_force_snat_ip=100.64.0.5
-GR_openshift-master-node chassis=6a47b33b-89d3-4d65-ac31-b19b549326c7 lb_force_snat_ip=100.64.0.4`, lrpIP),
-			})
-			fexec.AddFakeCmdsNoOutputNoError([]string{
-				"ovn-nbctl --timeout=15 --may-exist lr-route-add " + clusterRouter + " 0.0.0.0/0 " + lrpIP,
-			})
 			addNodeportLBs(fexec, nodeName, tcpLBUUID, udpLBUUID)
 			fexec.AddFakeCmdsNoOutputNoError([]string{
 				"ovn-nbctl --timeout=15 --may-exist ls-add ext_" + nodeName,
@@ -671,15 +654,6 @@ GR_openshift-master-node chassis=6a47b33b-89d3-4d65-ac31-b19b549326c7 lb_force_s
 				"ovn-nbctl --timeout=15 -- --may-exist lrp-add GR_" + nodeName + " rtoj-GR_" + nodeName + " " + lrpMAC + " " + lrpCIDR + " -- set logical_switch_port jtor-GR_" + nodeName + " type=router options:router-port=rtoj-GR_" + nodeName + " addresses=router",
 				"ovn-nbctl --timeout=15 set logical_router " + gwRouter + " options:lb_force_snat_ip=" + lrpIP,
 				"ovn-nbctl --timeout=15 --may-exist lr-route-add " + gwRouter + " " + clusterCIDR + " 100.64.0.1",
-			})
-			fexec.AddFakeCmd(&ovntest.ExpectedCmd{
-				Cmd: "ovn-nbctl --timeout=15 --data=bare --format=table --no-heading --columns=name,options find logical_router options:lb_force_snat_ip!=-",
-				Output: fmt.Sprintf(`GR_openshift-node-2      chassis=5befb1e1-b0b1-4277-bb1d-54e8732a39c6 lb_force_snat_ip=%s
-GR_openshift-node-1      chassis=0861e85c-5060-42fd-839e-8c463c7da378 lb_force_snat_ip=100.64.0.5
-GR_openshift-master-node chassis=6a47b33b-89d3-4d65-ac31-b19b549326c7 lb_force_snat_ip=100.64.0.4`, lrpIP),
-			})
-			fexec.AddFakeCmdsNoOutputNoError([]string{
-				"ovn-nbctl --timeout=15 --may-exist lr-route-add " + clusterRouter + " 0.0.0.0/0 " + lrpIP,
 			})
 			addNodeportLBs(fexec, nodeName, tcpLBUUID, udpLBUUID)
 			fexec.AddFakeCmdsNoOutputNoError([]string{
@@ -844,15 +818,6 @@ GR_openshift-master-node chassis=6a47b33b-89d3-4d65-ac31-b19b549326c7 lb_force_s
 				"ovn-nbctl --timeout=15 set logical_router " + gwRouter + " options:lb_force_snat_ip=" + lrpIP,
 				"ovn-nbctl --timeout=15 --may-exist lr-route-add " + gwRouter + " " + clusterCIDR + " 100.64.0.1",
 			})
-			fexec.AddFakeCmd(&ovntest.ExpectedCmd{
-				Cmd: "ovn-nbctl --timeout=15 --data=bare --format=table --no-heading --columns=name,options find logical_router options:lb_force_snat_ip!=-",
-				Output: fmt.Sprintf(`GR_openshift-node-2      chassis=5befb1e1-b0b1-4277-bb1d-54e8732a39c6 lb_force_snat_ip=%s
-GR_openshift-node-1      chassis=0861e85c-5060-42fd-839e-8c463c7da378 lb_force_snat_ip=100.64.0.5
-GR_openshift-master-node chassis=6a47b33b-89d3-4d65-ac31-b19b549326c7 lb_force_snat_ip=100.64.0.4`, lrpIP),
-			})
-			fexec.AddFakeCmdsNoOutputNoError([]string{
-				"ovn-nbctl --timeout=15 --may-exist lr-route-add " + clusterRouter + " 0.0.0.0/0 " + lrpIP,
-			})
 			addNodeportLBs(fexec, nodeName, tcpLBUUID, udpLBUUID)
 			fexec.AddFakeCmdsNoOutputNoError([]string{
 				"ovn-nbctl --timeout=15 --may-exist ls-add ext_" + nodeName,
@@ -905,15 +870,6 @@ GR_openshift-master-node chassis=6a47b33b-89d3-4d65-ac31-b19b549326c7 lb_force_s
 				"ovn-nbctl --timeout=15 -- --may-exist lrp-add GR_" + nodeName + " rtoj-GR_" + nodeName + " " + lrpMAC + " " + lrpCIDR + " -- set logical_switch_port jtor-GR_" + nodeName + " type=router options:router-port=rtoj-GR_" + nodeName + " addresses=router",
 				"ovn-nbctl --timeout=15 set logical_router " + gwRouter + " options:lb_force_snat_ip=" + lrpIP,
 				"ovn-nbctl --timeout=15 --may-exist lr-route-add " + gwRouter + " " + clusterCIDR + " 100.64.0.1",
-			})
-			fexec.AddFakeCmd(&ovntest.ExpectedCmd{
-				Cmd: "ovn-nbctl --timeout=15 --data=bare --format=table --no-heading --columns=name,options find logical_router options:lb_force_snat_ip!=-",
-				Output: fmt.Sprintf(`GR_openshift-node-2      chassis=5befb1e1-b0b1-4277-bb1d-54e8732a39c6 lb_force_snat_ip=%s
-GR_openshift-node-1      chassis=0861e85c-5060-42fd-839e-8c463c7da378 lb_force_snat_ip=100.64.0.5
-GR_openshift-master-node chassis=6a47b33b-89d3-4d65-ac31-b19b549326c7 lb_force_snat_ip=100.64.0.4`, lrpIP),
-			})
-			fexec.AddFakeCmdsNoOutputNoError([]string{
-				"ovn-nbctl --timeout=15 --may-exist lr-route-add " + clusterRouter + " 0.0.0.0/0 " + lrpIP,
 			})
 			addNodeportLBs(fexec, nodeName, tcpLBUUID, udpLBUUID)
 			fexec.AddFakeCmdsNoOutputNoError([]string{

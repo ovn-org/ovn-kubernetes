@@ -65,9 +65,7 @@ ovn_log_northd=${OVN_LOG_NORTHD:-"-vconsole:info"}
 ovn_log_nb=${OVN_LOG_NB:-"-vconsole:info"}
 ovn_log_sb=${OVN_LOG_SB:-"-vconsole:info"}
 ovn_log_controller=${OVN_LOG_CONTROLLER:-"-vconsole:info"}
-ovn_log_nbctld=${OVN_LOG_NBCTLD:-"/var/log/openvswitch/ovn-nbctl.log"}
 
-logdir=/var/log/openvswitch
 ovnkubelogdir=/var/log/ovn-kubernetes
 
 # ovnkube.sh version (update when API between daemonset and script changes - v.x.y)
@@ -129,13 +127,36 @@ ovn_sb_port=${OVN_SB_PORT:-6642}
 ovn_hybrid_overlay_enable=${OVN_HYBRID_OVERLAY_ENABLE:-}
 ovn_hybrid_overlay_net_cidr=${OVN_HYBRID_OVERLAY_NET_CIDR:-}
 
+# Determine the ovn rundir.
+if [[ -f /usr/bin/ovn-appctl ]] ; then
+	# ovn-appctl is present. Use new ovn run dir path.
+	OVN_RUNDIR=/var/run/ovn
+	OVNCTL_PATH=/usr/share/ovn/scripts/ovn-ctl
+	OVN_LOGDIR=/var/log/ovn
+  OVN_ETCDIR=/etc/ovn
+else
+	# ovn-appctl is not present. Use openvswitch run dir path.
+	OVN_RUNDIR=/var/run/openvswitch
+	OVNCTL_PATH=/usr/share/openvswitch/scripts/ovn-ctl
+	OVN_LOGDIR=/var/log/openvswitch
+  OVN_ETCDIR=/etc/openvswitch
+fi
+
+OVS_RUNDIR=/var/run/openvswitch
+OVS_LOGDIR=/var/log/openvswitch
+
+ovn_log_nbctld=${OVN_LOG_NBCTLD:-"${OVN_LOGDIR}/ovn-nbctl.log"}
+
 # =========================================
 
 setup_ovs_permissions () {
   if [ ${ovs_user_id:-XX} != "XX" ]; then
       chown -R ${ovs_user_id} /etc/openvswitch
-      chown -R ${ovs_user_id} /var/run/openvswitch
-      chown -R ${ovs_user_id} /var/log/openvswitch
+      chown -R ${ovs_user_id} ${OVS_RUNDIR}
+      chown -R ${ovs_user_id} ${OVS_LOGDIR}
+      chown -R ${ovs_user_id} ${OVN_ETCDIR}
+      chown -R ${ovs_user_id} ${OVN_RUNDIR}
+      chown -R ${ovs_user_id} ${OVN_LOGDIR}
   fi
 }
 
@@ -231,7 +252,7 @@ get_ovn_db_vars () {
 # This checks if OVS is up and running
 ovs_ready () {
   for daemon in `echo ovsdb-server ovs-vswitchd` ; do
-    pidfile=/var/run/openvswitch/${daemon}.pid
+    pidfile=${OVS_RUNDIR}/${daemon}.pid
     if [[ -f ${pidfile} ]] ; then
       check_health $daemon $(cat $pidfile)
       if [[ $? == 0 ]] ; then
@@ -248,7 +269,15 @@ ovs_ready () {
 # or by using `ovs-appctl` utility for the processes that support it.
 # $1 is the name of the process
 process_ready () {
-  pidfile=/var/run/openvswitch/${1}.pid
+  case ${1} in
+    "ovsdb-server"|"ovs-vswitchd")
+    pidfile=${OVS_RUNDIR}/${1}.pid
+    ;;
+    *)
+    pidfile=${OVN_RUNDIR}/${1}.pid
+    ;;
+  esac
+
   if [[ -f ${pidfile} ]] ; then
     check_health $1 $(cat $pidfile)
     if [[ $? == 0 ]] ; then
@@ -263,7 +292,15 @@ process_ready () {
 # $1 is the name of the process
 # $2 is the pid of an another process to kill before exiting
 process_healthy () {
-  pid=$(cat /var/run/openvswitch/${1}.pid)
+  case ${1} in
+    "ovsdb-server"|"ovs-vswitchd")
+    pid=$(cat ${OVS_RUNDIR}/${1}.pid)
+    ;;
+    *)
+    pid=$(cat ${OVN_RUNDIR}/${1}.pid)
+    ;;
+  esac
+
   while true; do
     check_health $1 ${pid}
     if [[ $? != 0 ]] ; then
@@ -285,10 +322,10 @@ check_health () {
     "ovnkube"|"ovnkube-master")
     ;;
     "ovnnb_db"|"ovnsb_db")
-    ctl_file=/var/run/openvswitch/${1}.ctl
+    ctl_file=${OVN_RUNDIR}/${1}.ctl
     ;;
     "ovn-northd"|"ovn-controller"|"ovsdb-server"|"ovs-vswitchd"|"ovn-nbctl")
-    ctl_file=/var/run/openvswitch/${1}.${2}.ctl
+    ctl_file=${OVN_RUNDIR}/${1}.${2}.ctl
     ;;
     *)
     echo "Unknown service ${1} specified. Exiting.. "
@@ -329,15 +366,15 @@ display_file () {
 display () {
   echo "==================== display for ${ovn_pod_host}  =================== "
   date
-  display_file "nb-ovsdb" /var/run/openvswitch/ovnnb_db.pid ${logdir}/ovsdb-server-nb.log
-  display_file "sb-ovsdb" /var/run/openvswitch/ovnsb_db.pid ${logdir}/ovsdb-server-sb.log
-  display_file "run-ovn-northd" /var/run/openvswitch/ovn-northd.pid ${logdir}/ovn-northd.log
-  display_file "ovn-master" /var/run/openvswitch/ovnkube-master.pid ${ovnkubelogdir}/ovnkube-master.log
-  display_file "ovs-vswitchd" /var/run/openvswitch/ovs-vswitchd.pid ${logdir}/ovs-vswitchd.log
-  display_file "ovsdb-server" /var/run/openvswitch/ovsdb-server.pid ${logdir}/ovsdb-server.log
-  display_file "ovn-controller" /var/run/openvswitch/ovn-controller.pid ${logdir}/ovn-controller.log
-  display_file "ovnkube" /var/run/openvswitch/ovnkube.pid ${ovnkubelogdir}/ovnkube.log
-  display_file "run-nbctld" /var/run/openvswitch/ovn-nbctl.pid ${logdir}/ovn-nbctl.log
+  display_file "nb-ovsdb" ${OVN_RUNDIR}/ovnnb_db.pid ${OVN_LOGDIR}/ovsdb-server-nb.log
+  display_file "sb-ovsdb" ${OVN_RUNDIR}/ovnsb_db.pid ${OVN_LOGDIR}/ovsdb-server-sb.log
+  display_file "run-ovn-northd" ${OVN_RUNDIR}/ovn-northd.pid ${OVN_LOGDIR}/ovn-northd.log
+  display_file "ovn-master" ${OVN_RUNDIR}/ovnkube-master.pid ${ovnkubelogdir}/ovnkube-master.log
+  display_file "ovs-vswitchd" ${OVS_RUNDIR}/ovs-vswitchd.pid ${OVS_LOGDIR}/ovs-vswitchd.log
+  display_file "ovsdb-server" ${OVS_RUNDIR}/ovsdb-server.pid ${OVS_LOGDIR}/ovsdb-server.log
+  display_file "ovn-controller" ${OVN_RUNDIR}/ovn-controller.pid ${OVN_LOGDIR}/ovn-controller.log
+  display_file "ovnkube" ${OVN_RUNDIR}/ovnkube.pid ${ovnkubelogdir}/ovnkube.log
+  display_file "run-nbctld" ${OVN_RUNDIR}/ovn-nbctl.pid ${OVN_LOGDIR}/ovn-nbctl.log
 }
 
 setup_cni () {
@@ -440,8 +477,8 @@ ovs-server () {
       exit 1
     fi
   done
-  rm -f /var/run/openvswitch/ovs-vswitchd.pid
-  rm -f /var/run/openvswitch/ovsdb-server.pid
+  rm -f ${OVS_RUNDIR}/ovs-vswitchd.pid
+  rm -f ${OVS_RUNDIR}/ovsdb-server.pid
 
   # launch OVS
   function quit {
@@ -474,7 +511,7 @@ ovs-server () {
   # Ensure GENEVE's UDP port isn't firewalled
   /usr/share/openvswitch/scripts/ovs-ctl --protocol=udp --dport=6081 enable-protocol
 
-  tail --follow=name /var/log/openvswitch/ovs-vswitchd.log /var/log/openvswitch/ovsdb-server.log &
+  tail --follow=name ${OVS_LOGDIR}/ovs-vswitchd.log ${OVS_LOGDIR}/ovsdb-server.log &
   ovs_tail_pid=$!
   sleep 10
   while true; do
@@ -491,7 +528,7 @@ cleanup-ovs-server () {
   echo "=============== time: $(date +%d-%m-%H:%M:%S:%N) cleanup-ovs-server (wait for ovn-node to exit) ======="
   retries=0
   while [[ ${retries} -lt 80 ]]; do
-    if [[ ! -e /var/run/openvswitch/ovnkube.pid ]] ; then
+    if [[ ! -e ${OVN_RUNDIR}/ovnkube.pid ]] ; then
       break
     fi
     echo "=============== time: $(date +%d-%m-%H:%M:%S:%N) cleanup-ovs-server ovn-node still running, wait) ======="
@@ -533,7 +570,7 @@ EOF
 nb-ovsdb () {
   trap 'kill $(jobs -p); exit 0' TERM
   check_ovn_daemonset_version "3"
-  rm -f /var/run/openvswitch/ovnnb_db.pid
+  rm -f ${OVN_RUNDIR}/ovnnb_db.pid
 
   # Make sure /var/lib/openvswitch exists
   mkdir -p /var/lib/openvswitch
@@ -542,7 +579,7 @@ nb-ovsdb () {
 
   echo "=============== run nb_ovsdb ========== MASTER ONLY"
   run_as_ovs_user_if_needed \
-      /usr/share/openvswitch/scripts/ovn-ctl run_nb_ovsdb --no-monitor \
+      ${OVNCTL_PATH} run_nb_ovsdb --no-monitor \
       --ovn-nb-log="${ovn_log_nb}" &
 
   wait_for_event attempts=3 process_ready ovnnb_db
@@ -551,7 +588,7 @@ nb-ovsdb () {
 
   ovn-nbctl set-connection ptcp:${ovn_nb_port}:${ovn_db_host} -- set connection . inactivity_probe=0
 
-  tail --follow=name /var/log/openvswitch/ovsdb-server-nb.log &
+  tail --follow=name ${OVN_LOGDIR}/ovsdb-server-nb.log &
   ovn_tail_pid=$!
 
   process_healthy ovnnb_db ${ovn_tail_pid}
@@ -562,7 +599,7 @@ nb-ovsdb () {
 sb-ovsdb () {
   trap 'kill $(jobs -p); exit 0' TERM
   check_ovn_daemonset_version "3"
-  rm -f /var/run/openvswitch/ovnsb_db.pid
+  rm -f ${OVN_RUNDIR}/ovnsb_db.pid
 
   # Make sure /var/lib/openvswitch exists
   mkdir -p /var/lib/openvswitch
@@ -571,7 +608,7 @@ sb-ovsdb () {
 
   echo "=============== run sb_ovsdb ========== MASTER ONLY"
   run_as_ovs_user_if_needed \
-      /usr/share/openvswitch/scripts/ovn-ctl run_sb_ovsdb --no-monitor     \
+      ${OVNCTL_PATH} run_sb_ovsdb --no-monitor     \
       --ovn-sb-log="${ovn_log_sb}" &
 
   wait_for_event attempts=3 process_ready ovnsb_db
@@ -583,7 +620,7 @@ sb-ovsdb () {
   # create the ovnkube_db endpoint for other pods to query the OVN DB IP
   set_ovnkube_db_ep
 
-  tail --follow=name /var/log/openvswitch/ovsdb-server-sb.log &
+  tail --follow=name ${OVN_LOGDIR}/ovsdb-server-sb.log &
   ovn_tail_pid=$!
 
   process_healthy ovnsb_db ${ovn_tail_pid}
@@ -594,8 +631,8 @@ sb-ovsdb () {
 # v3 - Runs northd on master. Does not run nb_ovsdb, and sb_ovsdb
 run-ovn-northd () {
   check_ovn_daemonset_version "3"
-  rm -f /var/run/openvswitch/ovn-northd.pid
-  rm -f /var/run/openvswitch/ovn-northd.*.ctl
+  rm -f ${OVN_RUNDIR}/ovn-northd.pid
+  rm -f ${OVN_RUNDIR}/ovn-northd.*.ctl
 
   # Make sure /var/lib/openvswitch exists
   mkdir -p /var/lib/openvswitch
@@ -616,7 +653,7 @@ run-ovn-northd () {
   ovn_nbdb_i=$(echo ${ovn_nbdb} | sed 's;//;;')
   ovn_sbdb_i=$(echo ${ovn_sbdb} | sed 's;//;;')
   run_as_ovs_user_if_needed \
-      /usr/share/openvswitch/scripts/ovn-ctl start_northd \
+      ${OVNCTL_PATH} start_northd \
       --no-monitor --ovn-manage-ovsdb=no \
       --ovn-northd-nb-db=${ovn_nbdb_i} --ovn-northd-sb-db=${ovn_sbdb_i} \
       --ovn-northd-log="${ovn_log_northd}" \
@@ -626,7 +663,7 @@ run-ovn-northd () {
   echo "=============== run_ovn_northd ========== RUNNING"
   sleep 1
 
-  tail --follow=name /var/log/openvswitch/ovn-northd.log &
+  tail --follow=name ${OVN_LOGDIR}/ovn-northd.log &
   ovn_tail_pid=$!
 
 
@@ -648,7 +685,7 @@ iptables-rules () {
 ovn-master () {
   trap 'kill $(jobs -p); exit 0' TERM
   check_ovn_daemonset_version "3"
-  rm -f /var/run/openvswitch/ovnkube-master.pid
+  rm -f ${OVN_RUNDIR}/ovnkube-master.pid
 
   echo "=============== ovn-master (wait for ready_to_start_node) ========== MASTER ONLY"
   wait_for_event ready_to_start_node
@@ -682,7 +719,7 @@ ovn-master () {
     --nbctl-daemon-mode \
     --loglevel=${ovnkube_loglevel} \
     ${hybrid_overlay_flags} \
-    --pidfile /var/run/openvswitch/ovnkube-master.pid \
+    --pidfile ${OVN_RUNDIR}/ovnkube-master.pid \
     --logfile /var/log/ovn-kubernetes/ovnkube-master.log \
     --metrics-bind-address "0.0.0.0:9409" &
   echo "=============== ovn-master ========== running"
@@ -699,7 +736,7 @@ ovn-master () {
 # ovn-controller - all nodes
 ovn-controller () {
   check_ovn_daemonset_version "3"
-  rm -f /var/run/openvswitch/ovn-controller.pid
+  rm -f ${OVN_RUNDIR}/ovn-controller.pid
 
   echo "=============== ovn-controller - (wait for ovs)"
   wait_for_event ovs_ready
@@ -712,10 +749,10 @@ ovn-controller () {
 
   echo "=============== ovn-controller  start_controller"
   rm -f /var/run/ovn-kubernetes/cni/*
-  rm -f /var/run/openvswitch/ovn-controller.*.ctl
+  rm -f ${OVN_RUNDIR}/ovn-controller.*.ctl
 
   run_as_ovs_user_if_needed \
-      /usr/share/openvswitch/scripts/ovn-ctl --no-monitor start_controller \
+      ${OVNCTL_PATH} --no-monitor start_controller \
                --ovn-controller-log="${ovn_log_controller}" \
                ${ovn_controller_opts}
 
@@ -723,7 +760,7 @@ ovn-controller () {
   echo "=============== ovn-controller ========== running"
 
   sleep 4
-  tail --follow=name /var/log/openvswitch/ovn-controller.log &
+  tail --follow=name ${OVN_LOGDIR}/ovn-controller.log &
   controller_tail_pid=$!
 
   process_healthy ovn-controller ${controller_tail_pid}
@@ -736,7 +773,7 @@ ovn-controller () {
 ovn-node () {
   trap 'kill $(jobs -p) ; rm -f /etc/cni/net.d/10-ovn-kubernetes.conf ; exit 0' TERM
   check_ovn_daemonset_version "3"
-  rm -f /var/run/openvswitch/ovnkube.pid
+  rm -f ${OVN_RUNDIR}/ovnkube.pid
 
   echo "=============== ovn-node - (wait for ovs)"
   wait_for_event ovs_ready
@@ -764,7 +801,7 @@ ovn-node () {
       --loglevel=${ovnkube_loglevel} \
       ${hybrid_overlay_flags} \
       --gateway-mode=${ovn_gateway_mode} ${ovn_gateway_opts}  \
-      --pidfile /var/run/openvswitch/ovnkube.pid \
+      --pidfile ${OVN_RUNDIR}/ovnkube.pid \
       --logfile /var/log/ovn-kubernetes/ovnkube.log \
       --metrics-bind-address "0.0.0.0:9410" &
 
@@ -809,8 +846,8 @@ cleanup-ovn-node () {
 # v3 - Runs ovn-nbctl in daemon mode
 run-nbctld () {
   check_ovn_daemonset_version "3"
-  rm -f /var/run/openvswitch/ovn-nbctl.pid
-  rm -f /var/run/openvswitch/ovn-nbctl.*.ctl
+  rm -f ${OVN_RUNDIR}/ovn-nbctl.pid
+  rm -f ${OVN_RUNDIR}/ovn-nbctl.*.ctl
 
   echo "=============== run-nbctld - (wait for ready_to_start_node)"
   wait_for_event ready_to_start_node
@@ -824,7 +861,7 @@ run-nbctld () {
   wait_for_event attempts=3 process_ready ovn-nbctl
   echo "=============== run_ovn_nbctl ========== RUNNING"
 
-  tail --follow=name /var/log/openvswitch/ovn-nbctl.log &
+  tail --follow=name ${OVN_LOGDIR}/ovn-nbctl.log &
   nbctl_tail_pid=$!
 
   process_healthy ovn-nbctl ${nbctl_tail_pid}

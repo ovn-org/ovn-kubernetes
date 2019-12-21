@@ -106,7 +106,11 @@ spec:
           readOnly: true
         - mountPath: /var/log/openvswitch/
           name: host-var-log-ovs
+        - mountPath: /var/log/ovn/
+          name: host-var-log-ovs
         - mountPath: /var/run/openvswitch/
+          name: host-var-run-ovs
+        - mountPath: /var/run/ovn/
           name: host-var-run-ovs
 
         resources:
@@ -173,6 +177,8 @@ spec:
         - mountPath: /var/log/ovn-kubernetes/
           name: host-var-log-ovnkube
         - mountPath: /var/run/openvswitch/
+          name: host-var-run-ovs
+        - mountPath: /var/run/ovn/
           name: host-var-run-ovs
         # We mount our socket here
         - mountPath: /var/run/ovn-kubernetes

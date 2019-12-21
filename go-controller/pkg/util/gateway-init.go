@@ -210,19 +210,6 @@ func GatewayInit(clusterIPSubnet []string, systemID, nodeName, ifaceID, nicIP, n
 		}
 	}
 
-	// Add a default route in distributed router with first GR as the nexthop.
-	_, defGatewayIP, err := GetDefaultGatewayRouterIP()
-	if err != nil {
-		return err
-	}
-	stdout, stderr, err = RunOVNNbctl("--may-exist", "lr-route-add",
-		k8sClusterRouter, "0.0.0.0/0", defGatewayIP.String())
-	if err != nil {
-		return fmt.Errorf("Failed to add a default route in distributed router "+
-			"with first GR as the nexthop, stdout: %q, stderr: %q, error: %v",
-			stdout, stderr, err)
-	}
-
 	if nodePortEnable {
 		// Create 2 load-balancers for north-south traffic for each gateway
 		// router.  One handles UDP and another handles TCP.
