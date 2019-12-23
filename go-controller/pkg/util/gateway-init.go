@@ -318,16 +318,6 @@ func GatewayInit(clusterIPSubnet []string, systemID, nodeName, ifaceID, nicIP, n
 		}
 	}
 
-	// Default SNAT rules.
-	for _, entry := range clusterIPSubnet {
-		stdout, stderr, err = RunOVNNbctl("--may-exist", "lr-nat-add",
-			gatewayRouter, "snat", physicalIP, entry)
-		if err != nil {
-			return fmt.Errorf("Failed to create default SNAT rules, stdout: %q, "+
-				"stderr: %q, error: %v", stdout, stderr, err)
-		}
-	}
-
 	// We need to add a /32 route to the Gateway router's IP, on the
 	// cluster router, to ensure that the return traffic goes back
 	// to the same gateway router
@@ -357,6 +347,16 @@ func GatewayInit(clusterIPSubnet []string, systemID, nodeName, ifaceID, nicIP, n
 					"routes in distributed router, stdout: %q, "+
 					"stderr: %q, error: %v", stdout, stderr, err)
 			}
+		}
+	}
+
+	// Default SNAT rules.
+	for _, entry := range clusterIPSubnet {
+		stdout, stderr, err = RunOVNNbctl("--may-exist", "lr-nat-add",
+			gatewayRouter, "snat", physicalIP, entry)
+		if err != nil {
+			return fmt.Errorf("Failed to create default SNAT rules, stdout: %q, "+
+				"stderr: %q, error: %v", stdout, stderr, err)
 		}
 	}
 
