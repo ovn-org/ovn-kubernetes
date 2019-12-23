@@ -48,6 +48,8 @@ func setupOVNNode(nodeName string) error {
 		fmt.Sprintf("external_ids:ovn-encap-ip=%s", nodeIP),
 		fmt.Sprintf("external_ids:ovn-remote-probe-interval=%d",
 			config.Default.InactivityProbe),
+		fmt.Sprintf("external_ids:ovn-openflow-probe-interval=%d",
+			config.Default.OpenFlowProbe),
 		fmt.Sprintf("external_ids:hostname=\"%s\"", nodeName),
 	)
 	if err != nil {
