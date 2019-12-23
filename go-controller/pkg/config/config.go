@@ -39,7 +39,8 @@ var (
 		EncapType:         "geneve",
 		EncapIP:           "",
 		EncapPort:         DefaultEncapPort,
-		InactivityProbe:   100000,
+		InactivityProbe:   100000, // in Milliseconds
+		OpenFlowProbe:     180,    // in Seconds
 		RawClusterSubnets: "10.128.0.0/14/23",
 	}
 
@@ -118,6 +119,9 @@ type DefaultConfig struct {
 	// Maximum number of milliseconds of idle time on connection that
 	// ovn-controller waits before it will send a connection health probe.
 	InactivityProbe int `gcfg:"inactivity-probe"`
+	// Maximum number of seconds of idle time on the OpenFlow connection
+	// that ovn-controller will wait before it sends a connection health probe
+	OpenFlowProbe int `gcfg:"openflow-probe"`
 	// RawClusterSubnets holds the unparsed cluster subnets. Should only be
 	// used inside config module.
 	RawClusterSubnets string `gcfg:"cluster-subnets"`
@@ -405,6 +409,12 @@ var CommonFlags = []cli.Flag{
 		Usage: "Maximum number of milliseconds of idle time on " +
 			"connection for ovn-controller before it sends a inactivity probe",
 		Destination: &cliConfig.Default.InactivityProbe,
+	},
+	cli.IntFlag{
+		Name: "openflow-probe",
+		Usage: "Maximum number of seconds of idle time on the openflow " +
+			"connection for ovn-controller before it sends a inactivity probe",
+		Destination: &cliConfig.Default.OpenFlowProbe,
 	},
 	cli.StringFlag{
 		Name:        "cluster-subnet",
