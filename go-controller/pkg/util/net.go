@@ -38,15 +38,17 @@ func intToIP(i *big.Int) net.IP {
 
 // GetPortAddresses returns the MAC and IP of the given logical switch port
 func GetPortAddresses(portName string) (net.HardwareAddr, net.IP, error) {
-	out, _, err := RunOVNNbctl("get", "logical_switch_port", portName, "dynamic_addresses")
+	out, stderr, err := RunOVNNbctl("get", "logical_switch_port", portName, "dynamic_addresses", "addresses")
 	if err != nil {
-		return nil, nil, fmt.Errorf("Error while obtaining dynamic addresses for %s: %v", portName, err)
+		return nil, nil, fmt.Errorf("Error while obtaining dynamic addresses for %s: stdout: %q, stderr: %q, error: %v",
+			portName, out, stderr, err)
 	}
+	// Convert \r\n to \n to support Windows line endings
+	out = strings.Replace(out, "\r\n", "\n", -1)
+	addresses := strings.Split(out, "\n")
+	out = addresses[0]
 	if out == "[]" {
-		out, _, err = RunOVNNbctl("get", "logical_switch_port", portName, "addresses")
-		if err != nil {
-			return nil, nil, fmt.Errorf("Error while obtaining static addresses for %s: %v", portName, err)
-		}
+		out = addresses[1]
 	}
 	if out == "[]" || out == "[dynamic]" {
 		// No addresses
@@ -56,7 +58,7 @@ func GetPortAddresses(portName string) (net.HardwareAddr, net.IP, error) {
 	// dynamic addresses have format "0a:00:00:00:00:01 192.168.1.3"
 	// static addresses have format ["0a:00:00:00:00:01 192.168.1.3"]
 	outStr := strings.Trim(out, `"[]`)
-	addresses := strings.Split(outStr, " ")
+	addresses = strings.Split(outStr, " ")
 	if len(addresses) != 2 {
 		return nil, nil, fmt.Errorf("Error while obtaining addresses for %s", portName)
 	}

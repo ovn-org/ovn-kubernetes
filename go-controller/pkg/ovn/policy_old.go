@@ -460,7 +460,6 @@ func (oc *Controller) localPodAddOrDelACLOld(addDel string,
 func (oc *Controller) localPodAddDefaultDenyOld(
 	policy *knet.NetworkPolicy,
 	logicalPort, logicalSwitch string) {
-
 	oc.lspMutex.Lock()
 	// Default deny rule.
 	// 1. Any pod that matches a network policy should get a default
@@ -527,7 +526,7 @@ func (oc *Controller) handleLocalPodSelectorAddFuncOld(
 	obj interface{}) {
 	pod := obj.(*kapi.Pod)
 
-	if _, err := util.UnmarshalPodAnnotation(pod.Annotations["ovn"]); err != nil {
+	if _, err := util.UnmarshalPodAnnotation(pod.Annotations); err != nil {
 		return
 	}
 
@@ -589,6 +588,11 @@ func (oc *Controller) handleLocalPodSelectorDelFuncOld(
 	}
 	delete(np.localPods, logicalPort)
 	oc.localPodDelDefaultDenyOld(policy, logicalPort, logicalSwitch)
+
+	oc.lspMutex.Lock()
+	delete(oc.lspIngressDenyCache, logicalPort)
+	delete(oc.lspEgressDenyCache, logicalPort)
+	oc.lspMutex.Unlock()
 
 	// For each ingress rule, remove the ACL
 	for _, ingress := range np.ingressPolicies {
@@ -723,7 +727,7 @@ func (oc *Controller) addNetworkPolicyOld(policy *knet.NetworkPolicy) {
 				// For each rule that contains both peer namespace selector and
 				// peer pod selector, we create a watcher for each matching namespace
 				// that populates the addressSet
-				oc.handlePeerNamespaceAndPodSelector(policy,
+				oc.handlePeerNamespaceAndPodSelector(policy, ingress,
 					fromJSON.NamespaceSelector, fromJSON.PodSelector,
 					hashedLocalAddressSet, peerPodAddressMap, np)
 
@@ -780,7 +784,7 @@ func (oc *Controller) addNetworkPolicyOld(policy *knet.NetworkPolicy) {
 				// For each rule that contains both peer namespace selector and
 				// peer pod selector, we create a watcher for each matching namespace
 				// that populates the addressSet
-				oc.handlePeerNamespaceAndPodSelector(policy,
+				oc.handlePeerNamespaceAndPodSelector(policy, egress,
 					toJSON.NamespaceSelector, toJSON.PodSelector,
 					hashedLocalAddressSet, peerPodAddressMap, np)
 			} else if toJSON.NamespaceSelector != nil {

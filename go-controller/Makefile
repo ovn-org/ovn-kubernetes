@@ -6,6 +6,8 @@ CNIBINDIR ?= ${DESTDIR}/opt/cni/bin
 GCFLAGS ?=
 export GCFLAGS
 PKGS ?=
+GOPATH ?= $(shell go env GOPATH)
+
 
 .PHONY: all build check test
 
@@ -34,17 +36,13 @@ install:
 clean:
 	rm -rf ${OUT_DIR}
 
-.PHONY: check-gopath install.tools lint gofmt
+.PHONY: install.tools lint gofmt
 
-check-gopath:
-ifndef GOPATH
-	$(error GOPATH is not set)
-endif
-
-install.tools: check-gopath
+install.tools:
 	curl -sfL https://install.goreleaser.com/github.com/golangci/golangci-lint.sh | bash -s -- -b ${GOPATH}/bin
+
 lint:
-	@./hack/lint.sh
+	@GOPATH=${GOPATH} ./hack/lint.sh
 
 gofmt:
 	@./hack/verify-gofmt.sh

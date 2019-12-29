@@ -3,15 +3,17 @@
 package cluster
 
 import (
+	"fmt"
 	"io/ioutil"
 	"net"
 	"os"
 	"path/filepath"
+	"strings"
 
 	"github.com/coreos/go-iptables/iptables"
 	"github.com/urfave/cli"
 
-	"k8s.io/api/core/v1"
+	v1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/client-go/kubernetes/fake"
 
@@ -87,6 +89,9 @@ var _ = Describe("Management Port Operations", func() {
 				Cmd:    "ovs-vsctl --timeout=15 --if-exists get interface " + mgtPort + " mac_in_use",
 				Output: mgtPortMAC,
 			})
+			fexec.AddFakeCmdsNoOutputNoError([]string{
+				"ovs-vsctl --timeout=15 set interface k8s-node1 " + fmt.Sprintf("mac=%s", strings.ReplaceAll(mgtPortMAC, ":", "\\:")),
+			})
 			fexec.AddFakeCmd(&ovntest.ExpectedCmd{
 				Cmd:    "ovn-nbctl --timeout=15 lsp-get-addresses stor-" + nodeName,
 				Output: lrpMAC,
@@ -104,8 +109,8 @@ var _ = Describe("Management Port Operations", func() {
 				"ip neigh add " + gwIP + " dev " + mgtPort + " lladdr " + lrpMAC,
 			})
 			fexec.AddFakeCmd(&ovntest.ExpectedCmd{
-				Cmd:    "ovn-nbctl --timeout=15 get logical_switch_port k8s-" + nodeName + " dynamic_addresses",
-				Output: `"` + mgtPortMAC + " " + mgtPortIP + `"`,
+				Cmd:    "ovn-nbctl --timeout=15 get logical_switch_port k8s-" + nodeName + " dynamic_addresses addresses",
+				Output: `"` + mgtPortMAC + " " + mgtPortIP + `"` + "\n" + "[]",
 			})
 
 			err := util.SetExec(fexec)
@@ -122,7 +127,7 @@ var _ = Describe("Management Port Operations", func() {
 			existingNode := v1.Node{ObjectMeta: metav1.ObjectMeta{
 				Name: nodeName,
 				Annotations: map[string]string{
-					ovn.OvnHostSubnet:                   nodeSubnet,
+					ovn.OvnNodeSubnets:                  nodeSubnet,
 					ovn.OvnNodeManagementPortMacAddress: mgtPortMAC,
 				},
 			}}

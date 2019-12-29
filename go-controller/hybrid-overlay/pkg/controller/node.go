@@ -31,7 +31,7 @@ func nodeChanged(node1 *kapi.Node, node2 *kapi.Node) bool {
 // 2) the node's first InternalIP
 // 3) the node's distributed router MAC (eg the MAC to which VXLAN packets should be sent)
 func getNodeDetails(node *kapi.Node, queryDrMac bool) (*net.IPNet, net.IP, net.HardwareAddr) {
-	hostsubnet, ok := node.Annotations[types.HybridOverlayHostSubnet]
+	hostsubnet, ok := node.Annotations[types.HybridOverlayNodeSubnet]
 	if !ok {
 		return nil, nil, nil
 	}

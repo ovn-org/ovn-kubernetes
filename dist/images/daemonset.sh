@@ -4,7 +4,7 @@
 #Always exit on errors
 set -e
 
-# This is people that are nut using the ansible install.
+# This is for people that are not using the ansible install.
 # The script expands the templates into yaml files in ../yaml
 
 OVN_IMAGE=""
@@ -23,7 +23,7 @@ OVN_MTU="1400"
 # Parse parameters given as arguments to this script.
 while [ "$1" != "" ]; do
     PARAM=`echo $1 | awk -F= '{print $1}'`
-    VALUE=`echo $1 | awk -F= '{print $2}'`
+    VALUE=`echo $1 | cut -d= -f2-`
     case $PARAM in
         --image)
             OVN_IMAGE=$VALUE

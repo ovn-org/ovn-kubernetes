@@ -8,18 +8,18 @@ import (
 
 // Annotator represents the exported methods for handling node annotations
 type Annotator interface {
-	Set(key, value string)
-	SetWithFailureHandler(key, value string, failFn FailureHandlerFn)
+	Set(key string, value interface{})
+	SetWithFailureHandler(key string, value interface{}, failFn FailureHandlerFn)
 	Del(key string)
 	Run()
 }
 
 // FailureHandlerFn is a function called when adding an annotation fails
-type FailureHandlerFn func(node *kapi.Node, key, val string)
+type FailureHandlerFn func(node *kapi.Node, key string, val interface{})
 
 type action struct {
 	key    string
-	val    string
+	val    interface{}
 	failFn FailureHandlerFn
 }
 
@@ -27,68 +27,60 @@ type nodeAnnotator struct {
 	kube *Kube
 	node *kapi.Node
 
-	adds map[string]*action
-	dels map[string]*action
+	changes map[string]*action
 }
 
 // NewNodeAnnotator returns a new annotator for Node objects
 func NewNodeAnnotator(kube *Kube, node *kapi.Node) Annotator {
 	return &nodeAnnotator{
-		kube: kube,
-		node: node,
-		adds: make(map[string]*action),
-		dels: make(map[string]*action),
+		kube:    kube,
+		node:    node,
+		changes: make(map[string]*action),
 	}
 }
 
-func (na *nodeAnnotator) Set(key, val string) {
+func (na *nodeAnnotator) Set(key string, val interface{}) {
 	na.SetWithFailureHandler(key, val, nil)
 }
 
-func (na *nodeAnnotator) SetWithFailureHandler(key, val string, failFn FailureHandlerFn) {
-	na.adds[key] = &action{
+func (na *nodeAnnotator) SetWithFailureHandler(key string, val interface{}, failFn FailureHandlerFn) {
+	na.changes[key] = &action{
 		key:    key,
 		val:    val,
 		failFn: failFn,
 	}
-	delete(na.dels, key)
 }
 
 func (na *nodeAnnotator) Del(key string) {
-	na.dels[key] = &action{key: key}
-	if act, ok := na.adds[key]; ok {
-		delete(na.adds, key)
-		act.failFn(na.node, act.key, act.val)
-	}
+	na.changes[key] = &action{key: key}
 }
 
 func (na *nodeAnnotator) Run() {
-	adds := make(map[string]string)
-	for k, act := range na.adds {
+	changes := make(map[string]interface{})
+	for k, act := range na.changes {
 		// Ignore annotations that already exist with the same value
-		if existing := na.node.Annotations[k]; existing != act.val {
-			adds[k] = act.val
+		if existing, ok := na.node.Annotations[k]; existing != act.val || !ok {
+			changes[k] = act.val
 		}
 	}
-	if len(adds) > 0 {
-		if err := na.kube.SetAnnotationsOnNode(na.node, adds); err != nil {
-			logrus.Errorf(err.Error())
-			// Let failure handlers clean up
-			for _, act := range na.adds {
-				act.failFn(na.node, act.key, act.val)
-			}
-		}
+	if len(changes) == 0 {
+		return
 	}
 
-	dels := make([]string, 0, len(na.dels))
-	for k := range na.dels {
-		if _, ok := na.node.Annotations[k]; ok {
-			dels = append(dels, k)
+	if err := na.kube.SetAnnotationsOnNode(na.node, changes); err != nil {
+		logrus.Errorf(err.Error())
+		// Let failure handlers clean up
+		for _, act := range na.changes {
+			act.failFn(na.node, act.key, act.val)
 		}
+		return
 	}
-	if len(dels) > 0 {
-		if err := na.kube.DeleteAnnotationsOnNode(na.node, dels); err != nil {
-			logrus.Errorf(err.Error())
+
+	for k, act := range na.changes {
+		if act.val == nil {
+			delete(na.node.Annotations, k)
+		} else {
+			na.node.Annotations[k] = act.val.(string)
 		}
 	}
 }

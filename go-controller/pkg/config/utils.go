@@ -13,6 +13,11 @@ type CIDRNetworkEntry struct {
 	HostSubnetLength uint32
 }
 
+func (e CIDRNetworkEntry) HostBits() uint32 {
+	_, addrLen := e.CIDR.Mask.Size()
+	return uint32(addrLen) - e.HostSubnetLength
+}
+
 // ParseClusterSubnetEntries returns the parsed set of CIDRNetworkEntries passed by the user on the command line
 // These entries define the clusters network space by specifying a set of CIDR and netmasks the SDN can allocate
 // addresses from.

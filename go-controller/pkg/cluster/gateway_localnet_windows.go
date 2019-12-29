@@ -8,7 +8,7 @@ import (
 )
 
 func initLocalnetGateway(nodeName string,
-	subnet string, wf *factory.WatchFactory) (map[string]string, error) {
+	subnet string, wf *factory.WatchFactory) (map[string]map[string]string, error) {
 	// TODO: Implement this
 	return nil, fmt.Errorf("Not implemented yet on Windows")
 }

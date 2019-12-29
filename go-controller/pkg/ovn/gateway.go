@@ -52,13 +52,6 @@ func (ovn *Controller) createGatewaysVIP(protocol string, port, targetPort int32
 	}
 
 	for _, physicalGateway := range physicalGateways {
-		physicalIP, err := ovn.getGatewayPhysicalIP(physicalGateway)
-		if err != nil {
-			logrus.Errorf("physical gateway %s does not have physical ip (%v)",
-				physicalGateway, err)
-			continue
-		}
-
 		loadBalancer, err := ovn.getGatewayLoadBalancer(physicalGateway,
 			protocol)
 		if err != nil {
@@ -69,7 +62,12 @@ func (ovn *Controller) createGatewaysVIP(protocol string, port, targetPort int32
 		if loadBalancer == "" {
 			continue
 		}
-
+		physicalIP, err := ovn.getGatewayPhysicalIP(physicalGateway)
+		if err != nil {
+			logrus.Errorf("physical gateway %s does not have physical ip (%v)",
+				physicalGateway, err)
+			continue
+		}
 		// With the physical_ip:port as the VIP, add an entry in
 		// 'load_balancer'.
 		err = ovn.createLoadBalancerVIP(loadBalancer,

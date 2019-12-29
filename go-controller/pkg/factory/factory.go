@@ -143,13 +143,11 @@ func (wf *WatchFactory) newFederatedHandler(inf *informer) cache.ResourceEventHa
 	return cache.ResourceEventHandlerFuncs{
 		AddFunc: func(obj interface{}) {
 			inf.forEachHandler(obj, func(h *Handler) {
-				logrus.Debugf("running %v ADD event for handler %d", inf.oType, h.id)
 				h.OnAdd(obj)
 			})
 		},
 		UpdateFunc: func(oldObj, newObj interface{}) {
 			inf.forEachHandler(newObj, func(h *Handler) {
-				logrus.Debugf("running %v UPDATE event for handler %d", inf.oType, h.id)
 				h.OnUpdate(oldObj, newObj)
 			})
 		},
@@ -168,7 +166,6 @@ func (wf *WatchFactory) newFederatedHandler(inf *informer) cache.ResourceEventHa
 				}
 			}
 			inf.forEachHandler(obj, func(h *Handler) {
-				logrus.Debugf("running %v DELETE event for handler %d", inf.oType, h.id)
 				h.OnDelete(obj)
 			})
 		},
@@ -333,8 +330,8 @@ func (wf *WatchFactory) AddEndpointsHandler(handlerFuncs cache.ResourceEventHand
 }
 
 // AddFilteredEndpointsHandler adds a handler function that will be executed when Endpoint objects that match the given filters change
-func (wf *WatchFactory) AddFilteredEndpointsHandler(namespace string, handlerFuncs cache.ResourceEventHandler, processExisting func([]interface{})) (*Handler, error) {
-	return wf.addHandler(endpointsType, namespace, nil, handlerFuncs, processExisting)
+func (wf *WatchFactory) AddFilteredEndpointsHandler(namespace string, lsel *metav1.LabelSelector, handlerFuncs cache.ResourceEventHandler, processExisting func([]interface{})) (*Handler, error) {
+	return wf.addHandler(endpointsType, namespace, lsel, handlerFuncs, processExisting)
 }
 
 // RemoveEndpointsHandler removes a Endpoints object event handler function

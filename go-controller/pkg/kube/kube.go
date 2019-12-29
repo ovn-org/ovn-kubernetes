@@ -3,7 +3,6 @@ package kube
 import (
 	"fmt"
 	"strings"
-	"time"
 
 	"encoding/json"
 	"github.com/sirupsen/logrus"
@@ -12,21 +11,18 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/labels"
 	"k8s.io/apimachinery/pkg/types"
-	"k8s.io/apimachinery/pkg/util/wait"
 	"k8s.io/client-go/kubernetes"
 	kv1core "k8s.io/client-go/kubernetes/typed/core/v1"
-	"k8s.io/client-go/util/retry"
 )
 
 // Interface represents the exported methods for dealing with getting/setting
 // kubernetes resources
 type Interface interface {
 	SetAnnotationOnPod(pod *kapi.Pod, key, value string) error
+	SetAnnotationsOnPod(pod *kapi.Pod, annotations map[string]string) error
 	SetAnnotationOnNode(node *kapi.Node, key, value string) error
-	SetAnnotationsOnNode(node *kapi.Node, annotations map[string]string) error
+	SetAnnotationsOnNode(node *kapi.Node, annotations map[string]interface{}) error
 	UpdateNodeStatus(node *kapi.Node) error
-	DeleteAnnotationOnNode(node *kapi.Node, key string) error
-	DeleteAnnotationsOnNode(node *kapi.Node, keys []string) error
 	GetAnnotationsOnPod(namespace, name string) (map[string]string, error)
 	GetPod(namespace, name string) (*kapi.Pod, error)
 	GetPods(namespace string) (*kapi.PodList, error)
@@ -60,6 +56,33 @@ func (k *Kube) SetAnnotationOnPod(pod *kapi.Pod, key, value string) error {
 	return err
 }
 
+// SetAnnotationsOnPod takes the pod object and map of key/value string pairs to set as annotations
+func (k *Kube) SetAnnotationsOnPod(pod *kapi.Pod, annotations map[string]string) error {
+	var err error
+	var patchData []byte
+	patch := struct {
+		Metadata map[string]interface{} `json:"metadata"`
+	}{
+		Metadata: map[string]interface{}{
+			"annotations": annotations,
+		},
+	}
+
+	podDesc := pod.Namespace + "/" + pod.Name
+	logrus.Infof("Setting annotations %v on pod %s", annotations, podDesc)
+	patchData, err = json.Marshal(&patch)
+	if err != nil {
+		logrus.Errorf("Error in setting annotations on pod %s: %v", podDesc, err)
+		return err
+	}
+
+	_, err = k.KClient.CoreV1().Pods(pod.Namespace).Patch(pod.Name, types.MergePatchType, patchData)
+	if err != nil {
+		logrus.Errorf("Error in setting annotation on pod %s: %v", podDesc, err)
+	}
+	return err
+}
+
 // SetAnnotationOnNode takes the node object and key/value string pair to set it as an annotation
 func (k *Kube) SetAnnotationOnNode(node *kapi.Node, key, value string) error {
 	logrus.Infof("Setting annotations %s=%s on node %s", key, value, node.Name)
@@ -72,7 +95,7 @@ func (k *Kube) SetAnnotationOnNode(node *kapi.Node, key, value string) error {
 }
 
 // SetAnnotationsOnNode takes the node object and map of key/value string pairs to set as annotations
-func (k *Kube) SetAnnotationsOnNode(node *kapi.Node, annotations map[string]string) error {
+func (k *Kube) SetAnnotationsOnNode(node *kapi.Node, annotations map[string]interface{}) error {
 	var err error
 	var patchData []byte
 	patch := struct {
@@ -103,50 +126,6 @@ func (k *Kube) UpdateNodeStatus(node *kapi.Node) error {
 	_, err := k.KClient.CoreV1().Nodes().UpdateStatus(node)
 	if err != nil {
 		logrus.Errorf("Error in updating status on node %s: %v", node.Name, err)
-	}
-	return err
-}
-
-// DeleteAnnotationOnNode takes the node object and annotation name to delete
-func (k *Kube) DeleteAnnotationOnNode(node *kapi.Node, key string) error {
-	return k.DeleteAnnotationsOnNode(node, []string{key})
-}
-
-// DeleteAnnotationsOnNode takes the node object and a list of annotation names to delete
-func (k *Kube) DeleteAnnotationsOnNode(node *kapi.Node, keys []string) error {
-	logrus.Infof("Deleting annotation %s on node %s", keys, node.Name)
-
-	var curNode *kapi.Node
-	err := retry.RetryOnConflict(
-		wait.Backoff{
-			Steps:    20,
-			Duration: 50 * time.Millisecond,
-			Jitter:   1.0,
-		},
-		func() error {
-			var err error
-			if curNode == nil {
-				// First time through just use passed-in node
-				curNode = node
-			} else {
-				// Subsequent times we need to re-fetch the node
-				// to get updates that caused the conflict
-				curNode, err = k.KClient.CoreV1().Nodes().Get(node.Name, metav1.GetOptions{})
-				if err != nil {
-					return err
-				}
-			}
-
-			for _, key := range keys {
-				delete(curNode.Annotations, key)
-			}
-			if _, err := k.KClient.CoreV1().Nodes().Update(curNode); err != nil {
-				return err
-			}
-			return nil
-		})
-	if err != nil {
-		logrus.Errorf("Error deleting annotations %s on node %s: %v", keys, node.Name, err)
 	}
 	return err
 }

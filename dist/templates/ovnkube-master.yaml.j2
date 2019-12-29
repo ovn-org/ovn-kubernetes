@@ -29,7 +29,7 @@ spec:
         name: ovnkube-master
         component: network
         type: infra
-        beta.kubernetes.io/os: "linux"
+        kubernetes.io/os: "linux"
       annotations:
         scheduler.alpha.kubernetes.io/critical-pod: ''
     spec:
@@ -59,7 +59,11 @@ spec:
           readOnly: true
         - mountPath: /var/log/openvswitch/
           name: host-var-log-ovs
+        - mountPath: /var/log/ovn/
+          name: host-var-log-ovs
         - mountPath: /var/run/openvswitch/
+          name: host-var-run-ovs
+        - mountPath: /var/run/ovn/
           name: host-var-run-ovs
 
         resources:
@@ -120,7 +124,11 @@ spec:
         volumeMounts:
         - mountPath: /var/log/openvswitch/
           name: host-var-log-ovs
+        - mountPath: /var/log/ovn/
+          name: host-var-log-ovs
         - mountPath: /var/run/openvswitch/
+          name: host-var-run-ovs
+        - mountPath: /var/run/ovn/
           name: host-var-run-ovs
 
         resources:
@@ -166,6 +174,8 @@ spec:
         - mountPath: /var/log/ovn-kubernetes/
           name: host-var-log-ovnkube
         - mountPath: /var/run/openvswitch/
+          name: host-var-run-ovs
+        - mountPath: /var/run/ovn/
           name: host-var-run-ovs
 
         resources:
@@ -221,7 +231,7 @@ spec:
 
       nodeSelector:
         node-role.kubernetes.io/master: ""
-        beta.kubernetes.io/os: "linux"
+        kubernetes.io/os: "linux"
       volumes:
       # TODO: Need to check why we need this?
       - name: host-var-run-dbus

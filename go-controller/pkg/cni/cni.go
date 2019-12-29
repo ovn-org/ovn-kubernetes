@@ -74,7 +74,6 @@ func (pr *PodRequest) cmdAdd() ([]byte, error) {
 	// Exponential back off ~32 seconds + 7* t(api call)
 	var annotationBackoff = wait.Backoff{Duration: 1 * time.Second, Steps: 7, Factor: 1.5, Jitter: 0.1}
 	var annotations map[string]string
-	var ovnAnnotation string
 	if err = wait.ExponentialBackoff(annotationBackoff, func() (bool, error) {
 		annotations, err = kubecli.GetAnnotationsOnPod(namespace, podName)
 		if err != nil {
@@ -82,7 +81,9 @@ func (pr *PodRequest) cmdAdd() ([]byte, error) {
 			logrus.Warningf("error getting pod annotations: %v", err)
 			return false, nil
 		}
-		if ovnAnnotation = annotations["ovn"]; ovnAnnotation != "" {
+		if _, ok := annotations[util.OvnPodAnnotationName]; ok {
+			return true, nil
+		} else if _, ok := annotations[util.OvnPodAnnotationLegacyName]; ok {
 			return true, nil
 		}
 		return false, nil
@@ -90,7 +91,7 @@ func (pr *PodRequest) cmdAdd() ([]byte, error) {
 		return nil, fmt.Errorf("failed to get pod annotation: %v", err)
 	}
 
-	podInfo, err := util.UnmarshalPodAnnotation(ovnAnnotation)
+	podInfo, err := util.UnmarshalPodAnnotation(annotations)
 	if err != nil {
 		return nil, fmt.Errorf("failed to unmarshal ovn annotation: %v", err)
 	}

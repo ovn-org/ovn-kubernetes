@@ -42,7 +42,7 @@ type Controller struct {
 	kube         kube.Interface
 	watchFactory *factory.WatchFactory
 
-	masterSubnetAllocatorList []*allocator.SubnetAllocator
+	masterSubnetAllocator *allocator.SubnetAllocator
 
 	TCPLoadBalancerUUID string
 	UDPLoadBalancerUUID string
@@ -133,6 +133,7 @@ func NewOvnController(kubeClient kubernetes.Interface, wf *factory.WatchFactory,
 	return &Controller{
 		kube:                        &kube.Kube{KClient: kubeClient},
 		watchFactory:                wf,
+		masterSubnetAllocator:       allocator.NewSubnetAllocator(),
 		logicalSwitchCache:          make(map[string]bool),
 		logicalPortCache:            make(map[string]string),
 		logicalPortUUIDCache:        make(map[string]string),
@@ -148,6 +149,7 @@ func NewOvnController(kubeClient kubernetes.Interface, wf *factory.WatchFactory,
 		loadbalancerClusterCache:    make(map[string]string),
 		loadbalancerGWCache:         make(map[string]string),
 		multicastEnabled:            make(map[string]bool),
+		multicastSupport:            config.EnableMulticast,
 		serviceVIPToName:            make(map[ServiceVIPKey]types.NamespacedName),
 		serviceVIPToNameLock:        sync.Mutex{},
 		hybridOverlayClusterSubnets: hybridOverlayClusterSubnets,
@@ -481,16 +483,19 @@ func (oc *Controller) WatchNamespaces() error {
 }
 
 func (oc *Controller) syncNodeGateway(node *kapi.Node, subnet *net.IPNet) error {
-	if subnet == nil {
-		subnet, _ = parseNodeHostSubnet(node)
+	l3GatewayConfig, err := UnmarshalNodeL3GatewayAnnotation(node)
+	if err != nil {
+		return err
 	}
-	mode := node.Annotations[OvnNodeGatewayMode]
-	if mode == string(config.GatewayModeDisabled) {
+	if subnet == nil {
+		subnet, _ = ParseNodeHostSubnet(node)
+	}
+	if l3GatewayConfig[OvnNodeGatewayMode] == string(config.GatewayModeDisabled) {
 		if err := util.GatewayCleanup(node.Name, subnet); err != nil {
 			return fmt.Errorf("error cleaning up gateway for node %s: %v", node.Name, err)
 		}
 	} else if subnet != nil {
-		if err := oc.syncGatewayLogicalNetwork(node, mode, subnet.String()); err != nil {
+		if err := oc.syncGatewayLogicalNetwork(node, l3GatewayConfig, subnet.String()); err != nil {
 			return fmt.Errorf("error creating gateway for node %s: %v", node.Name, err)
 		}
 	}
@@ -552,7 +557,7 @@ func (oc *Controller) WatchNodes(nodeSelector *metav1.LabelSelector) error {
 			logrus.Debugf("Delete event for Node %q. Removing the node from "+
 				"various caches", node.Name)
 
-			nodeSubnet, _ := parseNodeHostSubnet(node)
+			nodeSubnet, _ := ParseNodeHostSubnet(node)
 			err := oc.deleteNode(node.Name, nodeSubnet)
 			if err != nil {
 				logrus.Error(err)
@@ -590,30 +595,12 @@ func (oc *Controller) GetServiceVIPToName(vip string, protocol kapi.Protocol) (t
 
 // gatewayChanged() compares old annotations to new and returns true if something has changed.
 func gatewayChanged(oldNode, newNode *kapi.Node) bool {
+	oldL3GatewayConfig, _ := UnmarshalNodeL3GatewayAnnotation(oldNode)
+	l3GatewayConfig, _ := UnmarshalNodeL3GatewayAnnotation(newNode)
 
-	if newNode.Annotations[OvnNodeGatewayMode] != oldNode.Annotations[OvnNodeGatewayMode] {
-		return true
+	if oldL3GatewayConfig == nil && l3GatewayConfig == nil {
+		return false
 	}
 
-	if newNode.Annotations[OvnNodeGatewayVlanID] != oldNode.Annotations[OvnNodeGatewayVlanID] {
-		return true
-	}
-
-	if newNode.Annotations[OvnNodeGatewayIfaceID] != oldNode.Annotations[OvnNodeGatewayIfaceID] {
-		return true
-	}
-
-	if newNode.Annotations[OvnNodeGatewayMacAddress] != oldNode.Annotations[OvnNodeGatewayMacAddress] {
-		return true
-	}
-
-	if newNode.Annotations[OvnNodeGatewayIP] != oldNode.Annotations[OvnNodeGatewayIP] {
-		return true
-	}
-
-	if newNode.Annotations[OvnNodeGatewayNextHop] != oldNode.Annotations[OvnNodeGatewayNextHop] {
-		return true
-	}
-
-	return false
+	return !reflect.DeepEqual(oldL3GatewayConfig, l3GatewayConfig)
 }

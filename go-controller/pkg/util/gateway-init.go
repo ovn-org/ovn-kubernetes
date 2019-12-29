@@ -7,31 +7,22 @@ import (
 	"net"
 	"sort"
 	"strings"
-
-	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
 )
 
 const (
 	// PhysicalNetworkName is the name that maps to an OVS bridge that provides
 	// access to physical/external network
 	PhysicalNetworkName = "physnet"
+	// OvnClusterRouter is the name of the distributed router
+	OvnClusterRouter = "ovn_cluster_router"
 )
 
-// GetK8sClusterRouter returns back the OVN distibuted router
-func GetK8sClusterRouter() (string, error) {
-	k8sClusterRouter, stderr, err := RunOVNNbctl("--data=bare",
-		"--no-heading", "--columns=_uuid", "find", "logical_router",
-		"external_ids:k8s-cluster-router=yes")
-	if err != nil {
-		logrus.Errorf("Failed to get k8s cluster router, stderr: %q, "+
-			"error: %v", stderr, err)
-		return "", err
-	}
-	if k8sClusterRouter == "" {
-		return "", fmt.Errorf("Failed to get k8s cluster router")
-	}
-
-	return k8sClusterRouter, nil
+// GetK8sClusterRouter returns back the OVN distributed router. This is meant to be used on the
+// master alone. If the worker nodes need to know about distributed cluster router (which they
+// don't need to), then they need to use ovn-nbctl call and shouldn't make any assumption on
+// how the distributed router is named.
+func GetK8sClusterRouter() string {
+	return OvnClusterRouter
 }
 
 // GetDefaultGatewayRouterIP returns the first gateway logical router name
@@ -151,8 +142,8 @@ func getGatewayLoadBalancers(gatewayRouter string) (string, string, error) {
 }
 
 // GatewayInit creates a gateway router for the local chassis.
-func GatewayInit(clusterIPSubnet []string, nodeName, ifaceID, nicIP, nicMacAddress,
-	defaultGW string, rampoutIPSubnet string, localnet bool, lspArgs []string) error {
+func GatewayInit(clusterIPSubnet []string, systemID, nodeName, ifaceID, nicIP, nicMacAddress,
+	defaultGW string, rampoutIPSubnet string, nodePortEnable bool, lspArgs []string) error {
 
 	ip, physicalIPNet, err := net.ParseCIDR(nicIP)
 	if err != nil {
@@ -167,16 +158,7 @@ func GatewayInit(clusterIPSubnet []string, nodeName, ifaceID, nicIP, nicMacAddre
 		defaultGW = defaultgwByte.String()
 	}
 
-	k8sClusterRouter, err := GetK8sClusterRouter()
-	if err != nil {
-		return err
-	}
-
-	systemID, err := getNodeChassisIDFromSB(nodeName)
-	if err != nil {
-		return err
-	}
-
+	k8sClusterRouter := GetK8sClusterRouter()
 	// Create a gateway router.
 	gatewayRouter := "GR_" + nodeName
 	stdout, stderr, err := RunOVNNbctl("--", "--may-exist", "lr-add",
@@ -228,20 +210,7 @@ func GatewayInit(clusterIPSubnet []string, nodeName, ifaceID, nicIP, nicMacAddre
 		}
 	}
 
-	// Add a default route in distributed router with first GR as the nexthop.
-	_, defGatewayIP, err := GetDefaultGatewayRouterIP()
-	if err != nil {
-		return err
-	}
-	stdout, stderr, err = RunOVNNbctl("--may-exist", "lr-route-add",
-		k8sClusterRouter, "0.0.0.0/0", defGatewayIP.String())
-	if err != nil {
-		return fmt.Errorf("Failed to add a default route in distributed router "+
-			"with first GR as the nexthop, stdout: %q, stderr: %q, error: %v",
-			stdout, stderr, err)
-	}
-
-	if config.Gateway.NodeportEnable {
+	if nodePortEnable {
 		// Create 2 load-balancers for north-south traffic for each gateway
 		// router.  One handles UDP and another handles TCP.
 		var k8sNSLbTCP, k8sNSLbUDP string
@@ -299,13 +268,11 @@ func GatewayInit(clusterIPSubnet []string, nodeName, ifaceID, nicIP, nicMacAddre
 	// Add external interface as a logical port to external_switch.
 	// This is a learning switch port with "unknown" address. The external
 	// world is accessed via this port.
-	cmdArgs := []string{"--", "--may-exist", "lsp-add", externalSwitch, ifaceID,
-		"--", "lsp-set-addresses", ifaceID, "unknown"}
-	if localnet {
-		cmdArgs = append(cmdArgs, "--", "lsp-set-type", ifaceID,
-			"localnet", "--", "lsp-set-options", ifaceID,
-			"network_name="+PhysicalNetworkName)
-	}
+	cmdArgs := []string{
+		"--", "--may-exist", "lsp-add", externalSwitch, ifaceID,
+		"--", "lsp-set-addresses", ifaceID, "unknown",
+		"--", "lsp-set-type", ifaceID, "localnet",
+		"--", "lsp-set-options", ifaceID, "network_name=" + PhysicalNetworkName}
 	cmdArgs = append(cmdArgs, lspArgs...)
 	stdout, stderr, err = RunOVNNbctl(cmdArgs...)
 	if err != nil {
@@ -351,16 +318,6 @@ func GatewayInit(clusterIPSubnet []string, nodeName, ifaceID, nicIP, nicMacAddre
 		}
 	}
 
-	// Default SNAT rules.
-	for _, entry := range clusterIPSubnet {
-		stdout, stderr, err = RunOVNNbctl("--may-exist", "lr-nat-add",
-			gatewayRouter, "snat", physicalIP, entry)
-		if err != nil {
-			return fmt.Errorf("Failed to create default SNAT rules, stdout: %q, "+
-				"stderr: %q, error: %v", stdout, stderr, err)
-		}
-	}
-
 	// We need to add a /32 route to the Gateway router's IP, on the
 	// cluster router, to ensure that the return traffic goes back
 	// to the same gateway router
@@ -393,20 +350,15 @@ func GatewayInit(clusterIPSubnet []string, nodeName, ifaceID, nicIP, nicMacAddre
 		}
 	}
 
+	// Default SNAT rules.
+	for _, entry := range clusterIPSubnet {
+		stdout, stderr, err = RunOVNNbctl("--may-exist", "lr-nat-add",
+			gatewayRouter, "snat", physicalIP, entry)
+		if err != nil {
+			return fmt.Errorf("Failed to create default SNAT rules, stdout: %q, "+
+				"stderr: %q, error: %v", stdout, stderr, err)
+		}
+	}
+
 	return nil
-}
-
-// getNodeChassisIDFromSB() will return the ChassisID from SBDB
-func getNodeChassisIDFromSB(nodeName string) (string, error) {
-	chassisID, stderr, err := RunOVNSbctl("--data=bare", "--no-heading",
-		"--columns=name", "find", "Chassis", "hostname="+nodeName)
-	if err != nil {
-		return "", fmt.Errorf("Failed to find Chassis ID for node %s, "+
-			"stderr: %q, error: %v", nodeName, stderr, err)
-	}
-	if chassisID == "" {
-		return "", fmt.Errorf("No chassis ID configured for node %s", nodeName)
-	}
-
-	return chassisID, nil
 }

@@ -173,7 +173,7 @@ func (oc *Controller) deleteLogicalPort(pod *kapi.Pod) {
 	}
 
 	var podIP net.IP
-	podAnnotation, err := util.UnmarshalPodAnnotation(pod.Annotations["ovn"])
+	podAnnotation, err := util.UnmarshalPodAnnotation(pod.Annotations)
 	if err != nil {
 		logrus.Debugf("failed to read pod %s annotation when deleting "+
 			"logical port; falling back to PodIP %s: %v",
@@ -186,17 +186,9 @@ func (oc *Controller) deleteLogicalPort(pod *kapi.Pod) {
 	delete(oc.logicalPortCache, logicalPort)
 
 	oc.lspMutex.Lock()
-	delete(oc.lspIngressDenyCache, logicalPort)
-	delete(oc.lspEgressDenyCache, logicalPort)
 	delete(oc.logicalPortUUIDCache, logicalPort)
 	oc.lspMutex.Unlock()
 
-	if !oc.portGroupSupport {
-		oc.deleteACLDenyOld(pod.Namespace, pod.Spec.NodeName, logicalPort,
-			"Ingress")
-		oc.deleteACLDenyOld(pod.Namespace, pod.Spec.NodeName, logicalPort,
-			"Egress")
-	}
 	oc.deletePodFromNamespace(pod.Namespace, podIP, logicalPort)
 }
 
@@ -212,20 +204,25 @@ func (oc *Controller) waitForNodeLogicalSwitch(nodeName string) error {
 	// Otherwise wait for the node logical switch to be created by the ClusterController.
 	// The node switch will be created very soon after startup so we should
 	// only be waiting here once per node at most.
+	var subnet string
 	if err := wait.PollImmediate(500*time.Millisecond, 30*time.Second, func() (bool, error) {
-		if _, _, err := util.RunOVNNbctl("get", "logical_switch", nodeName, "other-config"); err != nil {
+		var err error
+		if subnet, _, err = util.RunOVNNbctl("get", "logical_switch", nodeName, "other-config:subnet"); err != nil {
+			return false, nil
+		}
+		if subnet == "" {
 			return false, nil
 		}
 		return true, nil
 	}); err != nil {
-		logrus.Errorf("timed out waiting for node %q logical switch: %v", nodeName, err)
+		logrus.Errorf("timed out waiting for logical switch %q other-config:subnet: %v", nodeName, err)
 		return err
 	}
 
 	oc.lsMutex.Lock()
 	defer oc.lsMutex.Unlock()
 	if !oc.logicalSwitchCache[nodeName] {
-		if err := oc.addAllowACLFromNode(nodeName); err != nil {
+		if err := oc.addAllowACLFromNode(nodeName, subnet); err != nil {
 			return err
 		}
 		oc.logicalSwitchCache[nodeName] = true
@@ -251,9 +248,8 @@ func (oc *Controller) addLogicalPort(pod *kapi.Pod) error {
 	portName := podLogicalPortName(pod)
 	logrus.Debugf("Creating logical port for %s on switch %s", portName, logicalSwitch)
 
-	annotation, err := util.UnmarshalPodAnnotation(pod.Annotations["ovn"])
+	annotation, err := util.UnmarshalPodAnnotation(pod.Annotations)
 	annotationsSet := (err == nil)
-
 	// If pod already has annotations, just add the lsp with static ip/mac.
 	// Else, create the lsp with dynamic addresses.
 	if err == nil {
@@ -350,8 +346,9 @@ func (oc *Controller) addLogicalPort(pod *kapi.Pod) error {
 
 	logrus.Debugf("Annotation values: ip=%s ; mac=%s ; gw=%s\nAnnotation=%s",
 		podCIDR, podMac, gatewayIP, marshalledAnnotation)
-	if err = oc.kube.SetAnnotationOnPod(pod, "ovn", marshalledAnnotation); err != nil {
-		return fmt.Errorf("Failed to set annotation on pod %s - %v", pod.Name, err)
+	err = oc.kube.SetAnnotationsOnPod(pod, marshalledAnnotation)
+	if err != nil {
+		return fmt.Errorf("failed to set annotation on pod %s - %v", pod.Name, err)
 	}
 
 	// If we're setting the annotation for the first time, observe the creation

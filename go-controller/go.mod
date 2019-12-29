@@ -19,7 +19,7 @@ require (
 	github.com/json-iterator/go v1.1.8 // indirect
 	github.com/modern-go/reflect2 v1.0.1 // indirect
 	github.com/onsi/ginkgo v1.10.3
-	github.com/onsi/gomega v1.7.1
+	github.com/onsi/gomega v1.8.1
 	github.com/prometheus/client_golang v1.2.1
 	github.com/satori/go.uuid v0.0.0-20181028125025-b2ce2384e17b // indirect
 	github.com/sirupsen/logrus v1.4.2
@@ -34,9 +34,9 @@ require (
 	gopkg.in/inf.v0 v0.9.1 // indirect
 	gopkg.in/natefinch/lumberjack.v2 v2.0.0
 	gopkg.in/warnings.v0 v0.1.2 // indirect
-	k8s.io/api v0.0.0-20190606204050-af9c91bd2759
-	k8s.io/apimachinery v0.0.0-20190404173353-6a84e37a896d
-	k8s.io/client-go v0.0.0-20190606204521-b8faab9c5193
+	k8s.io/api v0.0.0-20190614205929-e4e27c96b39a
+	k8s.io/apimachinery v0.0.0-20190612125636-6a5db36e93ad
+	k8s.io/client-go v0.0.0-20190615005933-5759fedc8dc9
 	k8s.io/klog v1.0.0
 	k8s.io/kube-openapi v0.0.0-20191107075043-30be4d16710a // indirect
 	k8s.io/utils v0.0.0-20191030222137-2b95a09bc58d

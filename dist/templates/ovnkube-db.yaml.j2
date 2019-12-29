@@ -29,7 +29,7 @@ spec:
         name: ovnkube-db
         component: network
         type: infra
-        beta.kubernetes.io/os: "linux"
+        kubernetes.io/os: "linux"
       annotations:
         scheduler.alpha.kubernetes.io/critical-pod: ''
     spec:
@@ -56,10 +56,15 @@ spec:
 
         volumeMounts:
         # ovn db is stored in the pod in /etc/openvswitch
+        # (or in /etc/ovn if OVN from new repository is used)
         # and on the host in /var/lib/openvswitch/
         - mountPath: /etc/openvswitch/
           name: host-var-lib-ovs
+        - mountPath: /etc/ovn/
+          name: host-var-lib-ovs
         - mountPath: /var/log/openvswitch/
+          name: host-var-log-ovs
+        - mountPath: /var/log/ovn/
           name: host-var-log-ovs
 
         resources:
@@ -108,10 +113,15 @@ spec:
 
         volumeMounts:
         # ovn db is stored in the pod in /etc/openvswitch
+        # (or in /etc/ovn if OVN from new repository is used)
         # and on the host in /var/lib/openvswitch/
         - mountPath: /etc/openvswitch/
           name: host-var-lib-ovs
+        - mountPath: /etc/ovn/
+          name: host-var-lib-ovs
         - mountPath: /var/log/openvswitch/
+          name: host-var-log-ovs
+        - mountPath: /var/log/ovn/
           name: host-var-log-ovs
 
         resources:
@@ -148,7 +158,7 @@ spec:
 
       nodeSelector:
         node-role.kubernetes.io/master: ""
-        beta.kubernetes.io/os: "linux"
+        kubernetes.io/os: "linux"
       volumes:
       - name: host-var-lib-ovs
         hostPath:

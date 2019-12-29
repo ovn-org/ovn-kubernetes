@@ -176,7 +176,7 @@ func (oc *Controller) handlePeerPodSelectorAddUpdate(np *namespacePolicy,
 	addressMap map[string]bool, addressSet string, obj interface{}) {
 
 	pod := obj.(*kapi.Pod)
-	podAnnotation, err := util.UnmarshalPodAnnotation(pod.Annotations["ovn"])
+	podAnnotation, err := util.UnmarshalPodAnnotation(pod.Annotations)
 	if err != nil {
 		return
 	}
@@ -200,6 +200,24 @@ func (oc *Controller) handlePeerPodSelectorAddUpdate(np *namespacePolicy,
 
 }
 
+func (oc *Controller) handlePeerPodSelectorDeleteACLRules(obj interface{}, gress *gressPolicy) {
+	pod := obj.(*kapi.Pod)
+	logicalPort := podLogicalPortName(pod)
+
+	oc.lspMutex.Lock()
+	delete(oc.lspIngressDenyCache, logicalPort)
+	delete(oc.lspEgressDenyCache, logicalPort)
+	oc.lspMutex.Unlock()
+
+	if !oc.portGroupSupport {
+		if gress.policyType == knet.PolicyTypeIngress {
+			oc.deleteACLDenyOld(pod.Namespace, pod.Spec.NodeName, logicalPort, "Ingress")
+		} else {
+			oc.deleteACLDenyOld(pod.Namespace, pod.Spec.NodeName, logicalPort, "Egress")
+		}
+	}
+}
+
 // handlePeerPodSelectorDelete removes the IP address of a pod that no longer
 // matches a NetworkPolicy ingress/egress section's selectors from that
 // ingress/egress address set
@@ -207,7 +225,7 @@ func (oc *Controller) handlePeerPodSelectorDelete(np *namespacePolicy,
 	addressMap map[string]bool, addressSet string, obj interface{}) {
 
 	pod := obj.(*kapi.Pod)
-	podAnnotation, err := util.UnmarshalPodAnnotation(pod.Annotations["ovn"])
+	podAnnotation, err := util.UnmarshalPodAnnotation(pod.Annotations)
 	if err != nil {
 		return
 	}
@@ -258,14 +276,7 @@ func (oc *Controller) handlePeerPodSelector(
 	np.podHandlerList = append(np.podHandlerList, h)
 }
 
-func (oc *Controller) handlePeerNamespaceAndPodSelector(
-	policy *knet.NetworkPolicy,
-	namespaceSelector *metav1.LabelSelector,
-	podSelector *metav1.LabelSelector,
-	addressSet string,
-	addressMap map[string]bool,
-	np *namespacePolicy) {
-
+func (oc *Controller) handlePeerNamespaceAndPodSelector(policy *knet.NetworkPolicy, gress *gressPolicy, namespaceSelector *metav1.LabelSelector, podSelector *metav1.LabelSelector, addressSet string, addressMap map[string]bool, np *namespacePolicy) {
 	namespaceHandler, err := oc.watchFactory.AddFilteredNamespaceHandler("",
 		namespaceSelector,
 		cache.ResourceEventHandlerFuncs{
@@ -288,6 +299,7 @@ func (oc *Controller) handlePeerNamespaceAndPodSelector(
 						},
 						DeleteFunc: func(obj interface{}) {
 							oc.handlePeerPodSelectorDelete(np, addressMap, addressSet, obj)
+							oc.handlePeerPodSelectorDeleteACLRules(obj, gress)
 						},
 						UpdateFunc: func(oldObj, newObj interface{}) {
 							oc.handlePeerPodSelectorAddUpdate(np, addressMap, addressSet, newObj)
@@ -385,19 +397,7 @@ const (
 	defaultMcastAllowPriority = "1012"
 )
 
-func (oc *Controller) addAllowACLFromNode(logicalSwitch string) error {
-	subnet, stderr, err := util.RunOVNNbctl("get", "logical_switch",
-		logicalSwitch, "other-config:subnet")
-	if err != nil {
-		logrus.Errorf("failed to get the logical_switch %s subnet, "+
-			"stderr: %q (%v)", logicalSwitch, stderr, err)
-		return err
-	}
-
-	if subnet == "" {
-		return fmt.Errorf("logical_switch %q had no subnet", logicalSwitch)
-	}
-
+func (oc *Controller) addAllowACLFromNode(logicalSwitch, subnet string) error {
 	ip, _, err := net.ParseCIDR(subnet)
 	if err != nil {
 		logrus.Errorf("failed to parse subnet %s", subnet)
@@ -411,7 +411,7 @@ func (oc *Controller) addAllowACLFromNode(logicalSwitch string) error {
 	address := ip.String()
 
 	match := fmt.Sprintf("ip4.src==%s", address)
-	_, stderr, err = util.RunOVNNbctl("--may-exist", "acl-add", logicalSwitch,
+	_, stderr, err := util.RunOVNNbctl("--may-exist", "acl-add", logicalSwitch,
 		"to-lport", defaultAllowPriority, match, "allow-related")
 	if err != nil {
 		logrus.Errorf("failed to create the node acl for "+

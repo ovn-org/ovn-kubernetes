@@ -28,6 +28,7 @@ const (
 	ovsAppctlCommand  = "ovs-appctl"
 	ovnNbctlCommand   = "ovn-nbctl"
 	ovnSbctlCommand   = "ovn-sbctl"
+	ovnAppctlCommand  = "ovn-appctl"
 	ipCommand         = "ip"
 	powershellCommand = "powershell"
 	netshCommand      = "netsh"
@@ -39,9 +40,9 @@ const (
 )
 
 const (
-	nbdbCtlSockPath   = "/var/run/openvswitch/ovnnb_db.ctl"
-	sbdbCtlSockPath   = "/var/run/openvswitch/ovnsb_db.ctl"
-	northdCtlSockPath = "/var/run/openvswitch/ovn-northd.ctl"
+	nbdbCtlSock   = "ovnnb_db.ctl"
+	sbdbCtlSock   = "ovnsb_db.ctl"
+	northdCtlSock = "ovn-northd.ctl"
 )
 
 func runningPlatform() (string, error) {
@@ -87,9 +88,11 @@ type execHelper struct {
 	ofctlPath      string
 	vsctlPath      string
 	appctlPath     string
+	ovnappctlPath  string
 	nbctlPath      string
 	sbctlPath      string
 	ovnctlPath     string
+	ovnRunDir      string
 	ipPath         string
 	powershellPath string
 	netshPath      string
@@ -119,6 +122,21 @@ func SetExec(exec kexec.Interface) error {
 		return err
 	}
 
+	runner.ovnappctlPath, err = exec.LookPath(ovnAppctlCommand)
+	if err != nil {
+		// If ovn-appctl command is not available then fall back to
+		// ovs-appctl. It also means OVN is using the rundir of
+		// openvswitch.
+		runner.ovnappctlPath = runner.appctlPath
+		runner.ovnctlPath = "/usr/share/openvswitch/scripts/ovn-ctl"
+		runner.ovnRunDir = "/var/run/openvswitch/"
+	} else {
+		// If ovn-appctl command is available, it means OVN
+		// has its own separate rundir, logdir, sharedir.
+		runner.ovnctlPath = "/usr/share/ovn/scripts/ovn-ctl"
+		runner.ovnRunDir = "/var/run/ovn/"
+	}
+
 	runner.nbctlPath, err = exec.LookPath(ovnNbctlCommand)
 	if err != nil {
 		return err
@@ -127,7 +145,6 @@ func SetExec(exec kexec.Interface) error {
 	if err != nil {
 		return err
 	}
-	runner.ovnctlPath = "/usr/share/openvswitch/scripts/ovn-ctl"
 
 	return nil
 }
@@ -276,10 +293,10 @@ func getNbctlArgsAndEnv(timeout int, args ...string) ([]string, []string) {
 		// ovn-nbctl running in the background and afterward uses the daemon to execute
 		// operations. The client needs to use the control socket and set the path to the
 		// control socket in environment variable OVN_NB_DAEMON
-		pid, err := ioutil.ReadFile("/var/run/openvswitch/ovn-nbctl.pid")
+		pid, err := ioutil.ReadFile(runner.ovnRunDir + "ovn-nbctl.pid")
 		if err == nil {
 			envVars = append(envVars,
-				fmt.Sprintf("OVN_NB_DAEMON=/var/run/openvswitch/ovn-nbctl.%s.ctl",
+				fmt.Sprintf("OVN_NB_DAEMON=%sovn-nbctl.%s.ctl", runner.ovnRunDir,
 					strings.Trim(string(pid), " \n")))
 			logrus.Debugf("using ovn-nbctl daemon mode at %s", envVars)
 			cmdArgs = append(cmdArgs, fmt.Sprintf("--timeout=%d", timeout))
@@ -374,7 +391,7 @@ func RunOVNNBAppCtl(args ...string) (string, string, error) {
 	var cmdArgs []string
 	cmdArgs = []string{
 		"-t",
-		nbdbCtlSockPath,
+		runner.ovnRunDir + nbdbCtlSock,
 	}
 	cmdArgs = append(cmdArgs, args...)
 	stdout, stderr, err := runOVNretry(runner.appctlPath, nil, cmdArgs...)
@@ -386,7 +403,7 @@ func RunOVNSBAppCtl(args ...string) (string, string, error) {
 	var cmdArgs []string
 	cmdArgs = []string{
 		"-t",
-		sbdbCtlSockPath,
+		runner.ovnRunDir + sbdbCtlSock,
 	}
 	cmdArgs = append(cmdArgs, args...)
 	stdout, stderr, err := runOVNretry(runner.appctlPath, nil, cmdArgs...)
@@ -398,7 +415,7 @@ func RunOVNNorthAppCtl(args ...string) (string, string, error) {
 	var cmdArgs []string
 	cmdArgs = []string{
 		"-t",
-		northdCtlSockPath,
+		runner.ovnRunDir + northdCtlSock,
 	}
 	cmdArgs = append(cmdArgs, args...)
 	stdout, stderr, err := runOVNretry(runner.appctlPath, nil, cmdArgs...)
@@ -442,4 +459,22 @@ func RawExec(cmdPath string, args ...string) (string, string, error) {
 	}
 	stdout, stderr, err := run(cmdPath, args...)
 	return strings.TrimSpace(stdout.String()), stderr.String(), err
+}
+
+// AddNormalActionOFFlow replaces flows in the bridge with a NORMAL action flow
+func AddNormalActionOFFlow(bridgeName string) (string, string, error) {
+	args := []string{"-O", "OpenFlow13", "replace-flows", bridgeName, "-"}
+
+	stdin := &bytes.Buffer{}
+	stdin.Write([]byte("table=0,priority=0,actions=NORMAL\n"))
+
+	cmd := runner.exec.Command(runner.ofctlPath, args...)
+	cmd.SetStdin(stdin)
+	stdout, stderr, err := runCmd(cmd, runner.ofctlPath, args...)
+	return strings.Trim(stdout.String(), "\" \n"), stderr.String(), err
+}
+
+// GetOvnRunDir returns the OVN's rundir.
+func GetOvnRunDir() string {
+	return runner.ovnRunDir
 }

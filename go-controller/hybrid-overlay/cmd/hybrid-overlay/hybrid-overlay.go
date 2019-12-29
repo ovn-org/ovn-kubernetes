@@ -28,7 +28,7 @@ func main() {
 			Name: "node",
 			Usage: "Run in node mode, where actual actions are performed " +
 				"to integrate with rest of the network. Requires the " +
-				"name that node is registered with in kubernetes cluster.",
+				"name of the node in the kubernetes cluster.",
 		}})...)
 	c.Flags = append(c.Flags, config.K8sFlags...)
 	c.Action = func(c *cli.Context) error {

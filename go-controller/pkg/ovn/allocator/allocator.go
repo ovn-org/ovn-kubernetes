@@ -1,39 +1,115 @@
 package allocator
 
 import (
-	"encoding/binary"
 	"fmt"
 	"net"
 	"sync"
 )
 
-var ErrSubnetAllocatorFull = fmt.Errorf("No subnets available.")
+var ErrSubnetAllocatorFull = fmt.Errorf("no subnets available.")
 
 type SubnetAllocator struct {
+	sync.Mutex
+
+	ranges []*subnetAllocatorRange
+}
+
+func NewSubnetAllocator() *SubnetAllocator {
+	return &SubnetAllocator{}
+}
+
+func (sna *SubnetAllocator) AddNetworkRange(network string, hostBits uint32) error {
+	sna.Lock()
+	defer sna.Unlock()
+
+	_, ipnet, err := net.ParseCIDR(network)
+	if err != nil {
+		return err
+	}
+	snr, err := newSubnetAllocatorRange(ipnet, hostBits)
+	if err != nil {
+		return err
+	}
+	sna.ranges = append(sna.ranges, snr)
+	return nil
+}
+
+func (sna *SubnetAllocator) MarkAllocatedNetwork(subnet string) error {
+	sna.Lock()
+	defer sna.Unlock()
+
+	_, ipnet, err := net.ParseCIDR(subnet)
+	if err != nil {
+		return err
+	}
+	for _, snr := range sna.ranges {
+		if snr.markAllocatedNetwork(ipnet) {
+			return nil
+		}
+	}
+	return fmt.Errorf("network %s does not belong to any known range", subnet)
+}
+
+func (sna *SubnetAllocator) AllocateNetwork() (string, error) {
+	sna.Lock()
+	defer sna.Unlock()
+
+	for _, snr := range sna.ranges {
+		sn := snr.allocateNetwork()
+		if sn != nil {
+			return sn.String(), nil
+		}
+	}
+	return "", ErrSubnetAllocatorFull
+}
+
+func (sna *SubnetAllocator) ReleaseNetwork(subnet string) error {
+	sna.Lock()
+	defer sna.Unlock()
+
+	_, ipnet, err := net.ParseCIDR(subnet)
+	if err != nil {
+		return err
+	}
+	for _, snr := range sna.ranges {
+		if snr.releaseNetwork(ipnet) {
+			return nil
+		}
+	}
+	return fmt.Errorf("network %s does not belong to any known range", subnet)
+}
+
+// subnetAllocatorRange handles allocating subnets out of a single CIDR
+type subnetAllocatorRange struct {
 	network    *net.IPNet
 	hostBits   uint32
+	subnetBits uint32
+	next       uint32
+	allocMap   map[string]bool
+
+	// IPv4-only address-alignment hackery; see below
 	leftShift  uint32
 	leftMask   uint32
 	rightShift uint32
 	rightMask  uint32
-	next       uint32
-	allocMap   map[string]bool
-	mutex      sync.Mutex
 }
 
-func NewSubnetAllocator(network string, hostBits uint32, inUse []string) (*SubnetAllocator, error) {
-	_, netIP, err := net.ParseCIDR(network)
-	if err != nil {
-		return nil, fmt.Errorf("Failed to parse network address: %q", network)
-	}
-
-	netMaskSize, _ := netIP.Mask.Size()
+func newSubnetAllocatorRange(network *net.IPNet, hostBits uint32) (*subnetAllocatorRange, error) {
+	netMaskSize, addrLen := network.Mask.Size()
 	if hostBits == 0 {
-		return nil, fmt.Errorf("Host capacity cannot be zero.")
-	} else if hostBits > (32 - uint32(netMaskSize)) {
-		return nil, fmt.Errorf("Subnet capacity cannot be larger than number of networks available.")
+		return nil, fmt.Errorf("host capacity cannot be zero.")
+	} else if hostBits > uint32(addrLen-netMaskSize) {
+		return nil, fmt.Errorf("subnet capacity cannot be larger than number of networks available.")
 	}
-	subnetBits := 32 - uint32(netMaskSize) - hostBits
+	subnetBits := uint32(addrLen-netMaskSize) - hostBits
+
+	snr := &subnetAllocatorRange{
+		network:    network,
+		hostBits:   hostBits,
+		subnetBits: subnetBits,
+		next:       0,
+		allocMap:   make(map[string]bool),
+	}
 
 	// In the simple case, the subnet part of the 32-bit IP address is just the subnet
 	// number shifted hostBits to the left. However, if hostBits isn't a multiple of
@@ -48,99 +124,90 @@ func NewSubnetAllocator(network string, hostBits uint32, inUse []string) (*Subne
 	// 10.1.255.0/26 (just like we would with /24s in the hostBits=8 case), and only
 	// if we use up all of those subnets do we start allocating 10.1.0.64/26,
 	// 10.1.1.64/26, etc.
-	var leftShift, rightShift uint32
-	var leftMask, rightMask uint32
-	if hostBits%8 != 0 && ((hostBits-1)/8 != (hostBits+subnetBits-1)/8) {
-		leftShift = 8 - (hostBits % 8)
-		leftMask = uint32(1)<<(32-uint32(netMaskSize)) - 1
-		rightShift = subnetBits - leftShift
-		rightMask = (uint32(1)<<leftShift - 1) << hostBits
-	} else {
-		leftShift = 0
-		leftMask = 0xFFFFFFFF
-		rightShift = 0
-		rightMask = 0
+	//
+	// (For IPv6 we just don't bother worrying about this.)
+	if addrLen == 32 && hostBits%8 != 0 && ((hostBits-1)/8 != (hostBits+subnetBits-1)/8) {
+		// leftShift is used to move the subnet id left by the number of bits that
+		// the subnet part extends into the overlap octet (which is to say, the
+		// number of bits that the host part ISN'T using in that octet). leftMask
+		// masks out the bits that get shifted left out of the subnet part
+		snr.leftShift = 8 - (hostBits % 8)
+		snr.leftMask = 1<<subnetBits - 1
+		// rightShift and rightMask are used to copy the shifted-out upper bits of
+		// the subnet id back down to the lower bits
+		snr.rightShift = subnetBits - snr.leftShift
+		snr.rightMask = 1<<snr.leftShift - 1
 	}
 
-	amap := make(map[string]bool)
-	for _, netStr := range inUse {
-		_, nIp, err := net.ParseCIDR(netStr)
-		if err != nil {
-			fmt.Println("Failed to parse network address: ", netStr)
-			continue
-		}
-		if !netIP.Contains(nIp.IP) {
-			fmt.Println("Provided subnet doesn't belong to network: ", nIp)
-			continue
-		}
-		amap[nIp.String()] = true
-	}
-	return &SubnetAllocator{
-		network:    netIP,
-		hostBits:   hostBits,
-		leftShift:  leftShift,
-		leftMask:   leftMask,
-		rightShift: rightShift,
-		rightMask:  rightMask,
-		next:       0,
-		allocMap:   amap,
-	}, nil
+	return snr, nil
 }
 
-func (sna *SubnetAllocator) GetNetwork() (*net.IPNet, error) {
-	var (
-		numSubnets    uint32
-		numSubnetBits uint32
-	)
-	sna.mutex.Lock()
-	defer sna.mutex.Unlock()
+// markAllocatedNetwork marks network as being in use, if it is part of snr's range.
+// It returns whether the network was in snr's range.
+func (snr *subnetAllocatorRange) markAllocatedNetwork(network *net.IPNet) bool {
+	str := network.String()
+	if snr.network.Contains(network.IP) {
+		snr.allocMap[str] = true
+	}
+	return snr.allocMap[str]
+}
 
-	baseipu := IPToUint32(sna.network.IP)
-	netMaskSize, _ := sna.network.Mask.Size()
-	numSubnetBits = 32 - uint32(netMaskSize) - sna.hostBits
-	numSubnets = 1 << numSubnetBits
+// allocateNetwork returns a new subnet, or nil if the range is full
+func (snr *subnetAllocatorRange) allocateNetwork() *net.IPNet {
+	netMaskSize, addrLen := snr.network.Mask.Size()
+	numSubnets := uint32(1) << snr.subnetBits
+	if snr.subnetBits > 24 {
+		// We need to make sure that the uint32 math below won't overflow. If
+		// snr.subnetBits > 32 then numSubnets has already overflowed, but also if
+		// numSubnets is between 1<<24 and 1<<32 then "base << (snr.hostBits % 8)"
+		// below could overflow if snr.hostBits%8 is non-0. So we cap numSubnets
+		// at 1<<24. "16M subnets ought to be enough for anybody."
+		numSubnets = 1 << 24
+	}
 
 	var i uint32
 	for i = 0; i < numSubnets; i++ {
-		n := (i + sna.next) % numSubnets
-		shifted := n << sna.hostBits
-		ipu := baseipu | ((shifted << sna.leftShift) & sna.leftMask) | ((shifted >> sna.rightShift) & sna.rightMask)
-		genIp := Uint32ToIP(ipu)
-		genSubnet := &net.IPNet{IP: genIp, Mask: net.CIDRMask(int(numSubnetBits)+netMaskSize, 32)}
-		if !sna.allocMap[genSubnet.String()] {
-			sna.allocMap[genSubnet.String()] = true
-			sna.next = n + 1
-			return genSubnet, nil
+		n := (i + snr.next) % numSubnets
+		base := n
+		if snr.leftShift != 0 {
+			base = ((base << snr.leftShift) & snr.leftMask) | ((base >> snr.rightShift) & snr.rightMask)
+		} else if addrLen == 128 && snr.subnetBits >= 16 {
+			// Skip the 0 subnet (and other subnets with all 0s in the low word)
+			// since the extra 0 word will get compressed out and make the address
+			// look different from addresses on other subnets.
+			if (base & 0xFFFF) == 0 {
+				continue
+			}
+		}
+
+		genIP := append([]byte{}, []byte(snr.network.IP)...)
+		subnetBits := base << (snr.hostBits % 8)
+		b := (uint32(addrLen) - snr.hostBits - 1) / 8
+		for subnetBits != 0 {
+			genIP[b] |= byte(subnetBits)
+			subnetBits >>= 8
+			b--
+		}
+
+		genSubnet := &net.IPNet{IP: genIP, Mask: net.CIDRMask(int(snr.subnetBits)+netMaskSize, addrLen)}
+		if !snr.allocMap[genSubnet.String()] {
+			snr.allocMap[genSubnet.String()] = true
+			snr.next = n + 1
+			return genSubnet
 		}
 	}
 
-	sna.next = 0
-	return nil, ErrSubnetAllocatorFull
-}
-
-func (sna *SubnetAllocator) ReleaseNetwork(ipnet *net.IPNet) error {
-	sna.mutex.Lock()
-	defer sna.mutex.Unlock()
-	if !sna.network.Contains(ipnet.IP) {
-		return fmt.Errorf("Provided subnet %v doesn't belong to the network %v.", ipnet, sna.network)
-	}
-
-	ipnetStr := ipnet.String()
-	if !sna.allocMap[ipnetStr] {
-		return fmt.Errorf("Provided subnet %v is already available.", ipnet)
-	}
-
-	sna.allocMap[ipnetStr] = false
-
+	snr.next = 0
 	return nil
 }
 
-func IPToUint32(ip net.IP) uint32 {
-	return binary.BigEndian.Uint32(ip.To4())
-}
+// releaseNetwork marks network as being not in use, if it is part of snr's range.
+// It returns whether the network was in snr's range.
+func (snr *subnetAllocatorRange) releaseNetwork(network *net.IPNet) bool {
+	if !snr.network.Contains(network.IP) {
+		return false
+	}
 
-func Uint32ToIP(u uint32) net.IP {
-	ip := make([]byte, 4)
-	binary.BigEndian.PutUint32(ip, u)
-	return net.IPv4(ip[0], ip[1], ip[2], ip[3])
+	snr.allocMap[network.String()] = false
+	return true
 }
