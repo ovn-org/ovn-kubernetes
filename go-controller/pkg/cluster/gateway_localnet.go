@@ -128,6 +128,11 @@ func initLocalnetGateway(nodeName string,
 			", stderr:%s (%v)", localnetBridgeName, stderr, err)
 	}
 
+	ifaceID, macAddress, err := bridgedGatewayNodeSetup(nodeName, localnetBridgeName, localnetBridgeName, true)
+	if err != nil {
+		return nil, fmt.Errorf("failed to set up shared interface gateway: %v", err)
+	}
+
 	_, _, err = util.RunIP("link", "set", localnetBridgeName, "up")
 	if err != nil {
 		return nil, fmt.Errorf("failed to up %s (%v)", localnetBridgeName, err)
@@ -163,11 +168,6 @@ func initLocalnetGateway(nodeName string,
 	if err != nil {
 		return nil, fmt.Errorf("failed to assign ip address to %s (%v)",
 			localnetBridgeNextHop, err)
-	}
-
-	ifaceID, macAddress, err := bridgedGatewayNodeSetup(nodeName, localnetBridgeName, localnetBridgeName, true)
-	if err != nil {
-		return nil, fmt.Errorf("failed to set up shared interface gateway: %v", err)
 	}
 
 	l3GatewayConfig := map[string]string{

@@ -397,19 +397,7 @@ const (
 	defaultMcastAllowPriority = "1012"
 )
 
-func (oc *Controller) addAllowACLFromNode(logicalSwitch string) error {
-	subnet, stderr, err := util.RunOVNNbctl("get", "logical_switch",
-		logicalSwitch, "other-config:subnet")
-	if err != nil {
-		logrus.Errorf("failed to get the logical_switch %s subnet, "+
-			"stderr: %q (%v)", logicalSwitch, stderr, err)
-		return err
-	}
-
-	if subnet == "" {
-		return fmt.Errorf("logical_switch %q had no subnet", logicalSwitch)
-	}
-
+func (oc *Controller) addAllowACLFromNode(logicalSwitch, subnet string) error {
 	ip, _, err := net.ParseCIDR(subnet)
 	if err != nil {
 		logrus.Errorf("failed to parse subnet %s", subnet)
@@ -423,7 +411,7 @@ func (oc *Controller) addAllowACLFromNode(logicalSwitch string) error {
 	address := ip.String()
 
 	match := fmt.Sprintf("ip4.src==%s", address)
-	_, stderr, err = util.RunOVNNbctl("--may-exist", "acl-add", logicalSwitch,
+	_, stderr, err := util.RunOVNNbctl("--may-exist", "acl-add", logicalSwitch,
 		"to-lport", defaultAllowPriority, match, "allow-related")
 	if err != nil {
 		logrus.Errorf("failed to create the node acl for "+

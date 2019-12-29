@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"runtime"
+	"strings"
 
 	"net"
 
@@ -176,14 +177,19 @@ func CleanupClusterNode(name string) error {
 	return nil
 }
 
-// GatewayReady will check to see if the gateway was created
+// GatewayReady will check to see if we have successfully added SNAT OpenFlow rules in the L3Gateway Routers
 func GatewayReady(nodeName string, portName string) (bool, error) {
-
-	gatewayRouter := "GR_" + nodeName
-	stdout, stderr, err := util.RunOVNNbctl("lsp-get-addresses", "etor-"+gatewayRouter)
-	// Did master create etor-GR_nodeName port on ls?
-	if err != nil || stdout == "" || stderr != "" {
-		return false, nil
+	// OpenFlow table 41 performs SNATing of packets that are heading to physical network from
+	// logical network.
+	for _, clusterSubnet := range config.Default.ClusterSubnets {
+		stdout, _, err := util.RunOVSOfctl("--no-stats", "--no-names", "dump-flows", "br-int",
+			"table=41,ip,nw_src="+clusterSubnet.CIDR.String())
+		if err != nil {
+			return false, nil
+		}
+		if !strings.Contains(stdout, "nw_src="+clusterSubnet.CIDR.String()) {
+			return false, nil
+		}
 	}
 	return true, nil
 }

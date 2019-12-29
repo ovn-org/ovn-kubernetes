@@ -83,10 +83,6 @@ func (p pod) baseCmds(fexec *ovntest.FakeExec) {
 
 func (p pod) addNodeSetupCmds(fexec *ovntest.FakeExec) {
 	fexec.AddFakeCmd(&ovntest.ExpectedCmd{
-		Cmd:    "ovn-nbctl --timeout=15 get logical_switch " + p.nodeName + " other-config",
-		Output: `{exclude_ips="10.128.1.2", subnet="` + p.nodeSubnet + `"}`,
-	})
-	fexec.AddFakeCmd(&ovntest.ExpectedCmd{
 		Cmd:    "ovn-nbctl --timeout=15 get logical_switch " + p.nodeName + " other-config:subnet",
 		Output: fmt.Sprintf("%q", p.nodeSubnet),
 	})
