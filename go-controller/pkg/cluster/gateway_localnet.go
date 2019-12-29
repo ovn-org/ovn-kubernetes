@@ -24,7 +24,10 @@ const (
 	localnetGatewayIP            = "169.254.33.2/24"
 	localnetGatewayNextHop       = "169.254.33.1"
 	localnetGatewayNextHopSubnet = "169.254.33.1/24"
-	iptableNodePortChain         = "OVN-KUBE-NODEPORT"
+	// fixed MAC address for the br-nexthop interface. the last 4 hex bytes
+	// translates to the br-nexthop's IP address
+	localnetGatewayNextHopMac = "00:00:a9:fe:21:01"
+	iptableNodePortChain      = "OVN-KUBE-NODEPORT"
 )
 
 type iptRule struct {
@@ -135,7 +138,8 @@ func initLocalnetGateway(nodeName string,
 	_, stderr, err = util.RunOVSVsctl(
 		"--may-exist", "add-port", localnetBridgeName, localnetBridgeNextHop,
 		"--", "set", "interface", localnetBridgeNextHop, "type=internal",
-		"mtu_request="+fmt.Sprintf("%d", config.Default.MTU))
+		"mtu_request="+fmt.Sprintf("%d", config.Default.MTU),
+		fmt.Sprintf("mac=%s", strings.ReplaceAll(localnetGatewayNextHopMac, ":", "\\:")))
 	if err != nil {
 		return nil, fmt.Errorf("Failed to create localnet bridge next hop %s"+
 			", stderr:%s (%v)", localnetBridgeNextHop, stderr, err)
