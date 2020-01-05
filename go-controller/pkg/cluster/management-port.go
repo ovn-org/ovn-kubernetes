@@ -13,6 +13,7 @@ import (
 func createManagementPortGeneric(nodeName string, localSubnet *net.IPNet) (string, string, string, string, string, error) {
 	// Retrieve the routerIP and mangementPortIP for a given localSubnet
 	routerIP, portIP := util.GetNodeWellKnownAddresses(localSubnet)
+	routerMac := util.IPAddrToHWAddr(routerIP.IP)
 
 	// Kubernetes emits events when pods are created. The event will contain
 	// only lowercase letters of the hostname even though the kubelet is
@@ -54,13 +55,6 @@ func createManagementPortGeneric(nodeName string, localSubnet *net.IPNet) (strin
 	if err != nil {
 		logrus.Errorf("failed to persist MAC address %q for %q: stderr:%s (%v)", macAddress,
 			interfaceName, stderr, err)
-		return "", "", "", "", "", err
-	}
-	// switch-to-router ports only have MAC address and nothing else.
-	routerMac, stderr, err := util.RunOVNNbctl("lsp-get-addresses", "stor-"+nodeName)
-	if err != nil {
-		logrus.Errorf("Failed to retrieve the MAC address of the logical port, stderr: %q, error: %v",
-			stderr, err)
 		return "", "", "", "", "", err
 	}
 
