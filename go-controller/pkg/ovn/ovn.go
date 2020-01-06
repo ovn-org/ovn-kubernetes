@@ -534,9 +534,7 @@ func (oc *Controller) WatchNodes() error {
 				}
 			}
 
-			if !reflect.DeepEqual(oldNode.Status.Conditions, node.Status.Conditions) {
-				oc.clearInitialNodeNetworkUnavailableCondition(node)
-			}
+			oc.clearInitialNodeNetworkUnavailableCondition(oldNode, node)
 
 			if gatewaysFailed[node.Name] || gatewayChanged(oldNode, node) {
 				if err := oc.syncNodeGateway(node, nil); err != nil {

@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net"
+	"reflect"
 	"strconv"
 	"strings"
 
@@ -587,7 +588,7 @@ func (oc *Controller) addNodeAnnotations(node *kapi.Node, subnet string) error {
 }
 
 func (oc *Controller) addNode(node *kapi.Node) (hostsubnet *net.IPNet, err error) {
-	oc.clearInitialNodeNetworkUnavailableCondition(node)
+	oc.clearInitialNodeNetworkUnavailableCondition(node, nil)
 
 	hostsubnet, _ = parseNodeHostSubnet(node)
 	if hostsubnet != nil {
@@ -688,8 +689,16 @@ func (oc *Controller) deleteNode(nodeName string, nodeSubnet *net.IPNet) error {
 // TODO: make upstream kubelet more flexible with overlays and GCE so this
 // condition doesn't get added for network plugins that don't want it, and then
 // we can remove this function.
-func (oc *Controller) clearInitialNodeNetworkUnavailableCondition(origNode *kapi.Node) {
-	// Informer cache should not be mutated, so get a copy of the object
+func (oc *Controller) clearInitialNodeNetworkUnavailableCondition(origNode, newNode *kapi.Node) {
+	// If it is not a Cloud Provider node, then nothing to do.
+	if origNode.Spec.ProviderID == "" {
+		return
+	}
+	// if newNode is not nil, then we are called from UpdateFunc()
+	if newNode != nil && reflect.DeepEqual(origNode.Status.Conditions, newNode.Status.Conditions) {
+		return
+	}
+
 	cleared := false
 	resultErr := retry.RetryOnConflict(retry.DefaultBackoff, func() error {
 		var err error
@@ -698,7 +707,7 @@ func (oc *Controller) clearInitialNodeNetworkUnavailableCondition(origNode *kapi
 		if err != nil {
 			return err
 		}
-
+		// Informer cache should not be mutated, so get a copy of the object
 		node := oldNode.DeepCopy()
 
 		for i := range node.Status.Conditions {
