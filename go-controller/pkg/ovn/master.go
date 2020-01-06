@@ -461,19 +461,11 @@ func (oc *Controller) ensureNodeLogicalNetwork(nodeName string, hostsubnet *net.
 	// Get firstIP for gateway.  Skip the second address of the LogicalSwitch's
 	// subnet since we set it aside for the management port on that node.
 	firstIP, secondIP := util.GetNodeWellKnownAddresses(hostsubnet)
-
-	nodeLRPMac, stderr, err := util.RunOVNNbctl("--if-exist", "get", "logical_router_port", "rtos-"+nodeName, "mac")
-	if err != nil {
-		logrus.Errorf("Failed to get logical router port,stderr: %q, error: %v", stderr, err)
-		return err
-	}
-	if nodeLRPMac == "" {
-		nodeLRPMac = util.GenerateMac()
-	}
-
+	nodeLRPMac := util.IPAddrToHWAddr(firstIP.IP)
 	clusterRouter := util.GetK8sClusterRouter()
+
 	// Create a router port and provide it the first address on the node's host subnet
-	_, stderr, err = util.RunOVNNbctl("--may-exist", "lrp-add", clusterRouter, "rtos-"+nodeName,
+	_, stderr, err := util.RunOVNNbctl("--may-exist", "lrp-add", clusterRouter, "rtos-"+nodeName,
 		nodeLRPMac, firstIP.String())
 	if err != nil {
 		logrus.Errorf("Failed to add logical port to router, stderr: %q, error: %v", stderr, err)
