@@ -427,6 +427,9 @@ subnet=%s
 						OvnNodeL3GatewayConfig:          getDisabledGwModeAnnotation(),
 					},
 				},
+				Spec: v1.NodeSpec{
+					ProviderID: "gce://openshift-gce-devel-ci/us-east1-b/ci-op-tbtpp-m-0",
+				},
 				Status: v1.NodeStatus{
 					Conditions: []v1.NodeCondition{
 						{
