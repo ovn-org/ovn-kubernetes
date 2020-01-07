@@ -34,11 +34,11 @@ build_windows_binaries() {
     BUILDID=${BUILDID:-0x$(head -c20 /dev/urandom|od -An -tx1|tr -d ' \n')}
     set -x
     for bin in "$@"; do
-        GOOS=windows go build -v \
+        GOOS=windows GOARCH=amd64 go build -v \
             -mod vendor \
             -gcflags "${GCFLAGS}" \
             -ldflags "-B ${BUILDID}" \
-            -o "${OVN_KUBE_OUTPUT_BINPATH_WINDOWS}/${bin}"\
+            -o "${OVN_KUBE_OUTPUT_BINPATH_WINDOWS}/${bin}.exe"\
             "./cmd/${bin}"
     done
 }
