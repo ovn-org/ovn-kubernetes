@@ -46,7 +46,8 @@ RUN INSTALL_PKGS=" \
 RUN mkdir -p /var/run/openvswitch && \
     mkdir -p /etc/cni/net.d && \
     mkdir -p /opt/cni/bin && \
-    mkdir -p /usr/libexec/cni/
+    mkdir -p /usr/libexec/cni/ && \
+    mkdir -p /root/windows/
 
 COPY --from=builder /go-controller/_output/go/bin/ovnkube /usr/bin/
 COPY --from=builder /go-controller/_output/go/bin/ovn-kube-util /usr/bin/
