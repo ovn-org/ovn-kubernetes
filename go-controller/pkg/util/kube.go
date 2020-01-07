@@ -1,6 +1,7 @@
 package util
 
 import (
+	"encoding/json"
 	"fmt"
 	"net"
 	"strings"
@@ -12,6 +13,7 @@ import (
 	"k8s.io/client-go/util/cert"
 	"k8s.io/klog"
 
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/cni/types"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
 )
 
@@ -124,4 +126,47 @@ func GetNodeIP(nodeName string) (string, error) {
 		return "", fmt.Errorf("Failed to obtain IP address from node name: %s", nodeName)
 	}
 	return ip.String(), nil
+}
+
+const (
+	defNetworkAnnotation = "v1.multus-cni.io/default-network"
+)
+
+// GetPodCustomConfig returns the custom MAC (for now) info from default-network's
+// network attachment
+//
+// This function is a simplified version of parsePodNetworkAnnotation() function in multus-cni
+// repository. We need to revisit once there is a library that we can share.
+//
+// Note that the changes below is based on following assumptions, which is true today.
+// - a pod's default network is OVN managed and that
+// - multiple OVN interfaces to a pod is not supported
+// As such, we check for custom configuration in the first network-attachment resource
+// defined in default-network annotation
+func GetPodCustomConfig(pod *kapi.Pod) (*types.NetworkSelectionElement, error) {
+	var networkAnnotation string
+	var networks []*types.NetworkSelectionElement
+
+	networkAnnotation, _ = pod.Annotations[defNetworkAnnotation]
+	if networkAnnotation == "" {
+		// nothing special to do
+		return nil, nil
+	}
+
+	// it is possible the default network is defined in the form of comma-delimited list of
+	// network attachment resource names (i.e. list of <namespace>/<network name>@<ifname>), but
+	// we are only interested in the NetworkSelectionElement json form that has custom MAC/IP
+	if json.Valid([]byte(networkAnnotation)) {
+		if err := json.Unmarshal([]byte(networkAnnotation), &networks); err != nil {
+			return nil, fmt.Errorf("failed to parse pod's net-attach-definition JSON %q: %v", networkAnnotation, err)
+		}
+	} else {
+		// nothing special to do
+		return nil, nil
+	}
+
+	if len(networks) == 1 {
+		return networks[0], nil
+	}
+	return nil, fmt.Errorf("invalid value for %q annotation: %s", defNetworkAnnotation, networkAnnotation)
 }
