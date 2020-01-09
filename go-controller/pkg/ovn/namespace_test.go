@@ -76,7 +76,11 @@ func (n namespace) addCmdsWithPods(fexec *ovntest.FakeExec, tP pod, namespace v1
 }
 
 var _ = Describe("OVN Namespace Operations", func() {
-	var app *cli.App
+	var (
+		app     *cli.App
+		fakeOvn *FakeOVN
+		fExec   *ovntest.FakeExec
+	)
 
 	BeforeEach(func() {
 		// Restore global default values before each testcase
@@ -85,6 +89,13 @@ var _ = Describe("OVN Namespace Operations", func() {
 		app = cli.NewApp()
 		app.Name = "test"
 		app.Flags = config.Flags
+
+		fExec = ovntest.NewFakeExec()
+		fakeOvn = NewFakeOVN(fExec, true)
+	})
+
+	AfterEach(func() {
+		fakeOvn.shutdown()
 	})
 
 	Context("on startup", func() {
@@ -105,12 +116,10 @@ var _ = Describe("OVN Namespace Operations", func() {
 					namespaceT.Name,
 				)
 
-				tExec := ovntest.NewFakeExec()
-				test.baseCmds(tExec, namespaceT)
-				test.addCmdsWithPods(tExec, tP, namespaceT)
+				test.baseCmds(fExec, namespaceT)
+				test.addCmdsWithPods(fExec, tP, namespaceT)
 
-				fakeOvn := FakeOVN{}
-				fakeOvn.start(ctx, tExec,
+				fakeOvn.start(ctx,
 					&v1.NamespaceList{
 						Items: []v1.Namespace{
 							namespaceT,
@@ -126,7 +135,7 @@ var _ = Describe("OVN Namespace Operations", func() {
 
 				_, err := fakeOvn.fakeClient.CoreV1().Namespaces().Get(namespaceT.Name, metav1.GetOptions{})
 				Expect(err).NotTo(HaveOccurred())
-				Expect(tExec.CalledMatchesExpected()).To(BeTrue(), tExec.ErrorDesc)
+				Expect(fExec.CalledMatchesExpected()).To(BeTrue(), fExec.ErrorDesc)
 
 				return nil
 			}
@@ -141,12 +150,10 @@ var _ = Describe("OVN Namespace Operations", func() {
 				test := namespace{}
 				namespaceT := *newNamespace("namespace1")
 
-				tExec := ovntest.NewFakeExec()
-				test.baseCmds(tExec, namespaceT)
-				test.addCmds(tExec, namespaceT)
+				test.baseCmds(fExec, namespaceT)
+				test.addCmds(fExec, namespaceT)
 
-				fakeOvn := FakeOVN{}
-				fakeOvn.start(ctx, tExec, &v1.NamespaceList{
+				fakeOvn.start(ctx, &v1.NamespaceList{
 					Items: []v1.Namespace{
 						namespaceT,
 					},
@@ -155,7 +162,7 @@ var _ = Describe("OVN Namespace Operations", func() {
 
 				_, err := fakeOvn.fakeClient.CoreV1().Namespaces().Get(namespaceT.Name, metav1.GetOptions{})
 				Expect(err).NotTo(HaveOccurred())
-				Expect(tExec.CalledMatchesExpected()).To(BeTrue(), tExec.ErrorDesc)
+				Expect(fExec.CalledMatchesExpected()).To(BeTrue(), fExec.ErrorDesc)
 
 				return nil
 			}
@@ -174,12 +181,10 @@ var _ = Describe("OVN Namespace Operations", func() {
 				test := namespace{}
 				namespaceT := *newNamespace("namespace1")
 
-				fExec := ovntest.NewFakeExec()
 				test.baseCmds(fExec, namespaceT)
 				test.addCmds(fExec, namespaceT)
 
-				fakeOvn := FakeOVN{}
-				fakeOvn.start(ctx, fExec, &v1.NamespaceList{
+				fakeOvn.start(ctx, &v1.NamespaceList{
 					Items: []v1.Namespace{
 						namespaceT,
 					},

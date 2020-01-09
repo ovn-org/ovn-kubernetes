@@ -164,7 +164,7 @@ var _ = Describe("Node Operations", func() {
 			stopChan := make(chan struct{})
 			f, err := factory.NewWatchFactory(fakeClient, stopChan)
 			Expect(err).NotTo(HaveOccurred())
-			defer f.Shutdown()
+			defer close(stopChan)
 
 			cluster := NewClusterController(fakeClient, f)
 			Expect(cluster).NotTo(BeNil())
@@ -246,7 +246,7 @@ var _ = Describe("Node Operations", func() {
 			stopChan := make(chan struct{})
 			f, err := factory.NewWatchFactory(fakeClient, stopChan)
 			Expect(err).NotTo(HaveOccurred())
-			defer f.Shutdown()
+			defer close(stopChan)
 
 			cluster := NewClusterController(fakeClient, f)
 			Expect(cluster).NotTo(BeNil())
