@@ -69,6 +69,7 @@ var _ = Describe("OVN Namespace Operations", func() {
 	var (
 		app     *cli.App
 		fakeOvn *FakeOVN
+		tExec   *ovntest.FakeExec
 	)
 
 	BeforeEach(func() {
@@ -79,7 +80,8 @@ var _ = Describe("OVN Namespace Operations", func() {
 		app.Name = "test"
 		app.Flags = config.Flags
 
-		fakeOvn = &FakeOVN{}
+		tExec = ovntest.NewFakeExec()
+		fakeOvn = NewFakeOVN(tExec, true)
 	})
 
 	AfterEach(func() {
@@ -118,10 +120,9 @@ var _ = Describe("OVN Namespace Operations", func() {
 					v1.ServiceTypeClusterIP,
 				)
 
-				tExec := ovntest.NewFakeExec()
 				testE.addCmds(tExec, serviceT, endpointsT)
 
-				fakeOvn.start(ctx, tExec,
+				fakeOvn.start(ctx,
 					&v1.EndpointsList{
 						Items: []v1.Endpoints{
 							endpointsT,
@@ -175,10 +176,9 @@ var _ = Describe("OVN Namespace Operations", func() {
 					},
 					v1.ServiceTypeClusterIP,
 				)
-				tExec := ovntest.NewFakeExec()
 				testE.addCmds(tExec, serviceT, endpointsT)
 
-				fakeOvn.start(ctx, tExec,
+				fakeOvn.start(ctx,
 					&v1.EndpointsList{
 						Items: []v1.Endpoints{
 							endpointsT,

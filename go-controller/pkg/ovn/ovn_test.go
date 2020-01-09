@@ -21,13 +21,22 @@ type FakeOVN struct {
 	watcher    *factory.WatchFactory
 	controller *Controller
 	stopChan   chan struct{}
+	fakeExec   *ovntest.FakeExec
+	portGroups bool
 }
 
-func (o *FakeOVN) start(ctx *cli.Context, fexec *ovntest.FakeExec, objects ...runtime.Object) {
+func NewFakeOVN(fexec *ovntest.FakeExec, portGroupSupport bool) *FakeOVN {
 	err := util.SetExec(fexec)
 	Expect(err).NotTo(HaveOccurred())
 
-	_, err = config.InitConfig(ctx, fexec, nil)
+	return &FakeOVN{
+		fakeExec:   fexec,
+		portGroups: portGroupSupport,
+	}
+}
+
+func (o *FakeOVN) start(ctx *cli.Context, objects ...runtime.Object) {
+	_, err := config.InitConfig(ctx, o.fakeExec, nil)
 	Expect(err).NotTo(HaveOccurred())
 
 	o.fakeClient = fake.NewSimpleClientset(objects...)
@@ -51,6 +60,7 @@ func (o *FakeOVN) init() {
 	Expect(err).NotTo(HaveOccurred())
 
 	o.controller = NewOvnController(o.fakeClient, o.watcher)
-	o.controller.portGroupSupport = true
-	o.controller.multicastSupport = true
+	o.controller.portGroupSupport = o.portGroups
+	// Multicast depends on port groups
+	o.controller.multicastSupport = o.portGroups
 }
