@@ -43,18 +43,15 @@ func newNetworkPolicyOld(name, namespace string, podSelector metav1.LabelSelecto
 }
 
 func (n networkPolicyOld) baseCmds(fexec *ovntest.FakeExec, networkPolicy knet.NetworkPolicy) {
-	fexec.AddFakeCmd(&ovntest.ExpectedCmd{
-		Cmd:    "ovn-nbctl --timeout=15 --data=bare --no-heading --columns=external_ids find address_set",
-		Output: "",
+	fexec.AddFakeCmdsNoOutputNoError([]string{
+		"ovn-nbctl --timeout=15 --data=bare --no-heading --columns=external_ids find address_set",
 	})
 }
+
 func (n networkPolicyOld) addNamespaceSelectorCmdsForGress(fexec *ovntest.FakeExec, networkPolicy knet.NetworkPolicy, gress string, i int) {
 	hashedOVNName := hashedAddressSet(fmt.Sprintf("%s.%s.%s.%d", networkPolicy.Namespace, networkPolicy.Name, gress, i))
-	fexec.AddFakeCmd(&ovntest.ExpectedCmd{
-		Cmd:    fmt.Sprintf("ovn-nbctl --timeout=15 --data=bare --no-heading --columns=_uuid find address_set name=%s", hashedOVNName),
-		Output: "",
-	})
 	fexec.AddFakeCmdsNoOutputNoError([]string{
+		fmt.Sprintf("ovn-nbctl --timeout=15 --data=bare --no-heading --columns=_uuid find address_set name=%s", hashedOVNName),
 		fmt.Sprintf("ovn-nbctl --timeout=15 create address_set name=%s external-ids:name=%s", hashedOVNName, fmt.Sprintf("%s.%s.%s.%v", networkPolicy.Namespace, networkPolicy.Name, gress, i)),
 	})
 }
