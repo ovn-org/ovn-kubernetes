@@ -275,7 +275,7 @@ func (oc *Controller) addLogicalPort(pod *kapi.Pod) error {
 		return nil
 	}
 
-	out, stderr, err = util.RunOVNNbctl("--wait=sb",
+	out, stderr, err = util.RunOVNNbctl(
 		"--", "--may-exist", "lsp-add", logicalSwitch, portName,
 		"--", "lsp-set-addresses", portName, "dynamic",
 		"--", "set", "logical_switch_port", portName, "external-ids:namespace="+pod.Namespace,
