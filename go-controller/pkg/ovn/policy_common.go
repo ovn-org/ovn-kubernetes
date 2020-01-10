@@ -31,6 +31,19 @@ type namespacePolicy struct {
 	deleted         bool //deleted policy
 }
 
+func NewNamespacePolicy(policy *knet.NetworkPolicy) *namespacePolicy {
+	np := &namespacePolicy{
+		name:            policy.Name,
+		namespace:       policy.Namespace,
+		ingressPolicies: make([]*gressPolicy, 0),
+		egressPolicies:  make([]*gressPolicy, 0),
+		podHandlerList:  make([]*factory.Handler, 0),
+		nsHandlerList:   make([]*factory.Handler, 0),
+		localPods:       make(map[string]bool),
+	}
+	return np
+}
+
 type gressPolicy struct {
 	policyType knet.PolicyType
 	idx        int
