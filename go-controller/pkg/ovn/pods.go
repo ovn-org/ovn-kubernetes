@@ -275,9 +275,18 @@ func (oc *Controller) addLogicalPort(pod *kapi.Pod) error {
 		return nil
 	}
 
+	addressStr := "dynamic"
+	networks, err := util.GetPodNetSelAnnotation(pod, util.DefNetworkAnnotation)
+	if err != nil || (networks != nil && len(networks) != 1) {
+		return fmt.Errorf("error while getting custom MAC config for port %q from "+
+			"default-network's network-attachment: %v", portName, err)
+	} else if networks != nil && networks[0].MacRequest != "" {
+		logrus.Debugf("Pod %s/%s requested custom MAC: %s", pod.Namespace, pod.Name, networks[0].MacRequest)
+		addressStr = networks[0].MacRequest + " dynamic"
+	}
 	out, stderr, err = util.RunOVNNbctl(
 		"--", "--may-exist", "lsp-add", logicalSwitch, portName,
-		"--", "lsp-set-addresses", portName, "dynamic",
+		"--", "lsp-set-addresses", portName, addressStr,
 		"--", "set", "logical_switch_port", portName, "external-ids:namespace="+pod.Namespace,
 		"external-ids:logical_switch="+logicalSwitch, "external-ids:pod=true")
 	if err != nil {
