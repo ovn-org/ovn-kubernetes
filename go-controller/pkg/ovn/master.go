@@ -135,7 +135,7 @@ func (oc *Controller) SetupMaster(masterNodeName string) error {
 
 		// Drop IP multicast globally. Multicast is allowed only if explicitly
 		// enabled in a namespace.
-		err = oc.createDefaultDenyMulticastPolicy()
+		err = createDefaultDenyMulticastPolicy()
 		if err != nil {
 			logrus.Errorf("Failed to create default deny multicast policy, error: %v",
 				err)

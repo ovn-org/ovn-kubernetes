@@ -223,7 +223,7 @@ func (oc *Controller) waitForNodeLogicalSwitch(nodeName string) error {
 	oc.lsMutex.Lock()
 	defer oc.lsMutex.Unlock()
 	if !oc.logicalSwitchCache[nodeName] {
-		if err := oc.addAllowACLFromNode(nodeName, subnet); err != nil {
+		if err := addAllowACLFromNode(nodeName, subnet); err != nil {
 			return err
 		}
 		oc.logicalSwitchCache[nodeName] = true
