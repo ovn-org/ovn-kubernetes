@@ -52,7 +52,7 @@ RUN mkdir -p /var/run/openvswitch && \
 COPY --from=builder /go-controller/_output/go/bin/ovnkube /usr/bin/
 COPY --from=builder /go-controller/_output/go/bin/ovn-kube-util /usr/bin/
 COPY --from=builder /go-controller/_output/go/bin/ovn-k8s-cni-overlay /usr/libexec/cni/ovn-k8s-cni-overlay
-COPY --from=builder /go-controller/_output/go/bin/windows/hybrid-overlay /root/windows/
+COPY --from=builder /go-controller/_output/go/bin/windows/hybrid-overlay.exe /root/windows/
 
 COPY --from=cli /usr/bin/oc /usr/bin/
 RUN ln -s /usr/bin/oc /usr/bin/kubectl
