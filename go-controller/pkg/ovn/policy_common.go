@@ -196,8 +196,7 @@ func (oc *Controller) handlePeerPodSelectorAddUpdate(np *namespacePolicy,
 	for k := range addressMap {
 		addresses = append(addresses, k)
 	}
-	oc.setAddressSet(addressSet, addresses)
-
+	setAddressSet(addressSet, addresses)
 }
 
 func (oc *Controller) handlePeerPodSelectorDeleteACLRules(obj interface{}, gress *gressPolicy) {
@@ -211,9 +210,9 @@ func (oc *Controller) handlePeerPodSelectorDeleteACLRules(obj interface{}, gress
 
 	if !oc.portGroupSupport {
 		if gress.policyType == knet.PolicyTypeIngress {
-			oc.deleteACLDenyOld(pod.Namespace, pod.Spec.NodeName, logicalPort, "Ingress")
+			deleteACLDenyOld(pod.Namespace, pod.Spec.NodeName, logicalPort, "Ingress")
 		} else {
-			oc.deleteACLDenyOld(pod.Namespace, pod.Spec.NodeName, logicalPort, "Egress")
+			deleteACLDenyOld(pod.Namespace, pod.Spec.NodeName, logicalPort, "Egress")
 		}
 	}
 }
@@ -247,7 +246,7 @@ func (oc *Controller) handlePeerPodSelectorDelete(np *namespacePolicy,
 	for k := range addressMap {
 		addresses = append(addresses, k)
 	}
-	oc.setAddressSet(addressSet, addresses)
+	setAddressSet(addressSet, addresses)
 }
 
 func (oc *Controller) handlePeerPodSelector(
@@ -397,7 +396,7 @@ const (
 	defaultMcastAllowPriority = "1012"
 )
 
-func (oc *Controller) addAllowACLFromNode(logicalSwitch, subnet string) error {
+func addAllowACLFromNode(logicalSwitch, subnet string) error {
 	ip, _, err := net.ParseCIDR(subnet)
 	if err != nil {
 		logrus.Errorf("failed to parse subnet %s", subnet)
