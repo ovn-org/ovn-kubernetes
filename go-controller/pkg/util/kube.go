@@ -131,6 +131,9 @@ func GetNodeIP(nodeName string) (string, error) {
 const (
 	// DefNetworkAnnotation is the pod annotation for the cluster-wide default network
 	DefNetworkAnnotation = "v1.multus-cni.io/default-network"
+
+	// NetworkAttachmentAnnotation is the pod annotation for network-attachment-definition
+	NetworkAttachmentAnnotation = "k8s.v1.cni.cncf.io/networks"
 )
 
 // GetPodNetSelAnnotation returns the pod's Network Attachment Selection Annotation either for
