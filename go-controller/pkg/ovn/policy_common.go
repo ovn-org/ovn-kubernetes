@@ -7,6 +7,7 @@ import (
 	"strings"
 	"sync"
 
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/factory"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
 	"github.com/sirupsen/logrus"
@@ -91,6 +92,13 @@ func (gp *gressPolicy) addIPBlock(ipblockJSON *knet.IPBlock) {
 	gp.ipBlockExcept = append(gp.ipBlockExcept, ipblockJSON.Except...)
 }
 
+func ipMatch() string {
+	if config.UseIPv6() {
+		return "ip6"
+	}
+	return "ip4"
+}
+
 func (gp *gressPolicy) getL3MatchFromAddressSet() string {
 	var l3Match, addresses string
 	for _, addressSet := range gp.sortedPeerAddressSets {
@@ -101,12 +109,12 @@ func (gp *gressPolicy) getL3MatchFromAddressSet() string {
 		addresses = fmt.Sprintf("%s, $%s", addresses, addressSet)
 	}
 	if addresses == "" {
-		l3Match = "ip4"
+		l3Match = ipMatch()
 	} else {
 		if gp.policyType == knet.PolicyTypeIngress {
-			l3Match = fmt.Sprintf("ip4.src == {%s}", addresses)
+			l3Match = fmt.Sprintf("%s.src == {%s}", ipMatch(), addresses)
 		} else {
-			l3Match = fmt.Sprintf("ip4.dst == {%s}", addresses)
+			l3Match = fmt.Sprintf("%s.dst == {%s}", ipMatch(), addresses)
 		}
 	}
 	return l3Match
@@ -117,19 +125,19 @@ func (gp *gressPolicy) getMatchFromIPBlock(lportMatch, l4Match string) string {
 	ipBlockCidr := fmt.Sprintf("{%s}", strings.Join(gp.ipBlockCidr, ", "))
 	if gp.policyType == knet.PolicyTypeIngress {
 		if l4Match == noneMatch {
-			match = fmt.Sprintf("match=\"ip4.src == %s && %s\"",
-				ipBlockCidr, lportMatch)
+			match = fmt.Sprintf("match=\"%s.src == %s && %s\"",
+				ipMatch(), ipBlockCidr, lportMatch)
 		} else {
-			match = fmt.Sprintf("match=\"ip4.src == %s && %s && %s\"",
-				ipBlockCidr, l4Match, lportMatch)
+			match = fmt.Sprintf("match=\"%s.src == %s && %s && %s\"",
+				ipMatch(), ipBlockCidr, l4Match, lportMatch)
 		}
 	} else {
 		if l4Match == noneMatch {
-			match = fmt.Sprintf("match=\"ip4.dst == %s && %s\"",
-				ipBlockCidr, lportMatch)
+			match = fmt.Sprintf("match=\"%s.dst == %s && %s\"",
+				ipMatch(), ipBlockCidr, lportMatch)
 		} else {
-			match = fmt.Sprintf("match=\"ip4.dst == %s && %s && %s\"",
-				ipBlockCidr, l4Match, lportMatch)
+			match = fmt.Sprintf("match=\"%s.dst == %s && %s && %s\"",
+				ipMatch(), ipBlockCidr, l4Match, lportMatch)
 		}
 	}
 	return match
@@ -403,13 +411,11 @@ func addAllowACLFromNode(logicalSwitch, subnet string) error {
 		return err
 	}
 
-	// K8s only supports IPv4 right now. The second IP address of the
-	// network is the node IP address.
-	ip = ip.To4()
-	ip[3] = ip[3] + 2
+	// The second IP address of the network is the node IP address.
+	ip = util.NextIP(util.NextIP(ip))
 	address := ip.String()
 
-	match := fmt.Sprintf("ip4.src==%s", address)
+	match := fmt.Sprintf("%s.src==%s", ipMatch(), address)
 	_, stderr, err := util.RunOVNNbctl("--may-exist", "acl-add", logicalSwitch,
 		"to-lport", defaultAllowPriority, match, "allow-related")
 	if err != nil {

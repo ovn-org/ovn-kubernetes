@@ -934,6 +934,27 @@ func buildDefaultConfig(cli, file *config) error {
 	return nil
 }
 
+// UseIPv6 returns true if ovn-kubernetes is configured in IPv6 mode, false for IPv4
+func UseIPv6() bool {
+	if len(Default.ClusterSubnets) < 1 {
+		logrus.Warningf("Unable to determine IPv4 vs IPv6 because no cluster subnets configured")
+		return false
+	}
+	if Default.ClusterSubnets[0].CIDR.IP.To4() != nil {
+		return false
+	}
+	return true
+}
+
+// OtherConfigSubnet returns "other-config:subnet" for IPv4 clusers, and
+// "other-config:ipv6_prefix" for IPv6 clusters
+func OtherConfigSubnet() string {
+	if UseIPv6() {
+		return "other-config:ipv6_prefix"
+	}
+	return "other-config:subnet"
+}
+
 // getConfigFilePath returns config file path and 'true' if the config file is
 // the fallback path (eg not given by the user), 'false' if given explicitly
 // by the user

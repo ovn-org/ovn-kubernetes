@@ -13,6 +13,7 @@ import (
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
+	"github.com/sirupsen/logrus"
 )
 
 const (
@@ -28,6 +29,8 @@ func CreateManagementPort(nodeName string, localSubnet *net.IPNet, clusterSubnet
 	if err != nil {
 		return nil, err
 	}
+
+	// TODO - Migrate to using netlink.
 
 	// Up the interface.
 	_, _, err = util.RunIP("link", "set", interfaceName, "up")
@@ -55,9 +58,14 @@ func CreateManagementPort(nodeName string, localSubnet *net.IPNet, clusterSubnet
 		}
 
 		// Create a route for the entire subnet.
-		_, _, err = util.RunIP("route", "add", subnet, "via", routerIP)
+		_, stderr, err := util.RunIP("route", "add", subnet, "via", routerIP)
 		if err != nil {
-			return nil, err
+			if strings.HasPrefix(stderr, "RTNETLINK answers: File exists") {
+				logrus.Debugf("Ignoring error %s from 'route add %s via %s' - already added via IPv6 RA?",
+					strings.TrimSpace(stderr), subnet, routerIP)
+			} else {
+				return nil, fmt.Errorf("Failed to add route for %s via %s: %s", subnet, routerIP, err)
+			}
 		}
 	}
 
@@ -68,9 +76,14 @@ func CreateManagementPort(nodeName string, localSubnet *net.IPNet, clusterSubnet
 	}
 
 	// Create a route for the services subnet.
-	_, _, err = util.RunIP("route", "add", config.Kubernetes.ServiceCIDR, "via", routerIP)
+	_, stderr, err := util.RunIP("route", "add", config.Kubernetes.ServiceCIDR, "via", routerIP)
 	if err != nil {
-		return nil, err
+		if strings.HasPrefix(stderr, "RTNETLINK answers: File exists") {
+			logrus.Debugf("Ignoring error %s from 'route add %s via %s' - already added via IPv6 RA?",
+				strings.TrimSpace(stderr), config.Kubernetes.ServiceCIDR, routerIP)
+		} else {
+			return nil, fmt.Errorf("Failed to add route for %s via %s: %s", config.Kubernetes.ServiceCIDR, routerIP, err)
+		}
 	}
 
 	// Add a neighbour entry on the K8s node to map routerIP with routerMAC. This is
@@ -93,11 +106,21 @@ func CreateManagementPort(nodeName string, localSubnet *net.IPNet, clusterSubnet
 }
 
 func addMgtPortIptRules(ifname, interfaceIP string) error {
-	ipt, err := util.GetIPTablesHelper(iptables.ProtocolIPv4)
+	interfaceAddr := strings.Split(interfaceIP, "/")
+	ip := net.ParseIP(interfaceAddr[0])
+	if ip == nil {
+		return fmt.Errorf("Failed to parse IP '%s'", interfaceAddr[0])
+	}
+	var ipt util.IPTablesHelper
+	var err error
+	if ip.To4() != nil {
+		ipt, err = util.GetIPTablesHelper(iptables.ProtocolIPv4)
+	} else {
+		ipt, err = util.GetIPTablesHelper(iptables.ProtocolIPv6)
+	}
 	if err != nil {
 		return err
 	}
-	interfaceAddr := strings.Split(interfaceIP, "/")
 	err = ipt.ClearChain("nat", iptableMgmPortChain)
 	if err != nil {
 		return fmt.Errorf("could not set up iptables chain for management port: %v", err)
@@ -121,13 +144,21 @@ func addMgtPortIptRules(ifname, interfaceIP string) error {
 
 //DelMgtPortIptRules delete all the iptable rules for the management port.
 func DelMgtPortIptRules(nodeName string) {
+	// Clean up all iptables and ip6tables remnants that may be left around
 	ipt, err := util.GetIPTablesHelper(iptables.ProtocolIPv4)
+	if err != nil {
+		return
+	}
+	ipt6, err := util.GetIPTablesHelper(iptables.ProtocolIPv6)
 	if err != nil {
 		return
 	}
 	ifname := util.GetK8sMgmtIntfName(nodeName)
 	rule := []string{"-o", ifname, "-j", iptableMgmPortChain}
 	_ = ipt.Delete("nat", "POSTROUTING", rule...)
+	_ = ipt6.Delete("nat", "POSTROUTING", rule...)
 	_ = ipt.ClearChain("nat", iptableMgmPortChain)
+	_ = ipt6.ClearChain("nat", iptableMgmPortChain)
 	_ = ipt.DeleteChain("nat", iptableMgmPortChain)
+	_ = ipt6.DeleteChain("nat", iptableMgmPortChain)
 }
