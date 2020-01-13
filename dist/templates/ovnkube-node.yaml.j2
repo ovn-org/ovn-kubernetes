@@ -165,6 +165,7 @@ spec:
           runAsUser: 0
           capabilities:
             add: ["NET_ADMIN", "SYS_ADMIN", "SYS_PTRACE"]
+          privileged: true
 
         volumeMounts:
         - mountPath: /var/run/dbus/
@@ -182,6 +183,9 @@ spec:
           name: host-opt-cni-bin
         - mountPath: /etc/cni/net.d
           name: host-etc-cni-netd
+        - mountPath: /var/run/netns
+          name: host-netns
+          mountPropagation: Bidirectional
 
         resources:
           requests:
@@ -274,5 +278,8 @@ spec:
       - name: host-config-openvswitch
         hostPath:
           path: /etc/origin/openvswitch
+      - name: host-netns
+        hostPath:
+          path: /var/run/netns
       tolerations:
       - operator: "Exists"
