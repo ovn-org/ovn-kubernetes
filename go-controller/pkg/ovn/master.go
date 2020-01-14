@@ -492,7 +492,7 @@ func (oc *Controller) ensureNodeLogicalNetwork(nodeName string, hostsubnet *net.
 	var excludeIPs string
 	if !config.IPv6Mode {
 		excludeIPs = secondIP.IP.String()
-		excludeIPs = "other-config:exclude_ips="+excludeIPs
+		excludeIPs = "other-config:exclude_ips=" + excludeIPs
 		excludeHybridOverlayIP := true
 		for _, clusterEntry := range config.Default.ClusterSubnets {
 			if clusterEntry.HostSubnetLength > 24 {
