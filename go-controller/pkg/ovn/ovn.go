@@ -506,6 +506,7 @@ func (oc *Controller) syncNodeGateway(node *kapi.Node, subnet *net.IPNet) error 
 // back the appropriate handler logic
 func (oc *Controller) WatchNodes(nodeSelector *metav1.LabelSelector) error {
 	gatewaysFailed := make(map[string]bool)
+	macAddressFailed := make(map[string]bool)
 	_, err := oc.watchFactory.AddFilteredNodeHandler(nodeSelector, cache.ResourceEventHandlerFuncs{
 		AddFunc: func(obj interface{}) {
 			node := obj.(*kapi.Node)
@@ -518,6 +519,7 @@ func (oc *Controller) WatchNodes(nodeSelector *metav1.LabelSelector) error {
 
 			err = oc.syncNodeManagementPort(node, hostSubnet)
 			if err != nil {
+				macAddressFailed[node.Name] = true
 				logrus.Errorf("error creating Node Management Port for node %s: %v", node.Name, err)
 			}
 
@@ -529,19 +531,18 @@ func (oc *Controller) WatchNodes(nodeSelector *metav1.LabelSelector) error {
 		UpdateFunc: func(old, new interface{}) {
 			oldNode := old.(*kapi.Node)
 			node := new.(*kapi.Node)
-			oldMacAddress := oldNode.Annotations[OvnNodeManagementPortMacAddress]
-			macAddress := node.Annotations[OvnNodeManagementPortMacAddress]
 			logrus.Debugf("Updated event for Node %q", node.Name)
-			if oldMacAddress != macAddress {
+			if macAddressFailed[node.Name] || macAddressChanged(oldNode, node) {
 				err := oc.syncNodeManagementPort(node, nil)
 				if err != nil {
+					macAddressFailed[node.Name] = true
 					logrus.Errorf("error update Node Management Port for node %s: %v", node.Name, err)
+				} else {
+					delete(macAddressFailed, node.Name)
 				}
 			}
 
-			if !reflect.DeepEqual(oldNode.Status.Conditions, node.Status.Conditions) {
-				oc.clearInitialNodeNetworkUnavailableCondition(node)
-			}
+			oc.clearInitialNodeNetworkUnavailableCondition(oldNode, node)
 
 			if gatewaysFailed[node.Name] || gatewayChanged(oldNode, node) {
 				if err := oc.syncNodeGateway(node, nil); err != nil {
@@ -603,4 +604,11 @@ func gatewayChanged(oldNode, newNode *kapi.Node) bool {
 	}
 
 	return !reflect.DeepEqual(oldL3GatewayConfig, l3GatewayConfig)
+}
+
+// macAddressChanged() compares old annotations to new and returns true if something has changed.
+func macAddressChanged(oldNode, node *kapi.Node) bool {
+	oldMacAddress := oldNode.Annotations[OvnNodeManagementPortMacAddress]
+	macAddress := node.Annotations[OvnNodeManagementPortMacAddress]
+	return oldMacAddress != macAddress
 }

@@ -20,7 +20,7 @@ import (
 
 // Handler represents an event handler and is private to the factory module
 type Handler struct {
-	cache.FilteringResourceEventHandler
+	base cache.FilteringResourceEventHandler
 
 	id uint64
 	// tombstone is used to track the handler's lifetime. handlerAlive
@@ -29,6 +29,31 @@ type Handler struct {
 	// tombstone should only be set using atomic operations since it is
 	// used from multiple goroutines.
 	tombstone uint32
+}
+
+func (h *Handler) OnAdd(obj interface{}) {
+	if atomic.LoadUint32(&h.tombstone) == handlerAlive {
+		h.base.OnAdd(obj)
+	}
+}
+
+func (h *Handler) OnUpdate(oldObj, newObj interface{}) {
+	if atomic.LoadUint32(&h.tombstone) == handlerAlive {
+		h.base.OnUpdate(oldObj, newObj)
+	}
+}
+
+func (h *Handler) OnDelete(obj interface{}) {
+	if atomic.LoadUint32(&h.tombstone) == handlerAlive {
+		h.base.OnDelete(obj)
+	}
+}
+
+func (h *Handler) kill() error {
+	if !atomic.CompareAndSwapUint32(&h.tombstone, handlerAlive, handlerDead) {
+		return fmt.Errorf("event handler %d already dead", h.id)
+	}
+	return nil
 }
 
 type informer struct {
@@ -49,10 +74,86 @@ func (i *informer) forEachHandler(obj interface{}, f func(h *Handler)) {
 	}
 
 	for _, handler := range i.handlers {
-		// Only run alive handlers
-		if !atomic.CompareAndSwapUint32(&handler.tombstone, handlerDead, handlerDead) {
-			f(handler)
+		f(handler)
+	}
+}
+
+func (i *informer) addHandler(id uint64, filterFunc func(obj interface{}) bool, funcs cache.ResourceEventHandler) *Handler {
+	i.Lock()
+	defer i.Unlock()
+
+	handler := &Handler{
+		cache.FilteringResourceEventHandler{
+			FilterFunc: filterFunc,
+			Handler:    funcs,
+		},
+		id,
+		handlerAlive,
+	}
+	i.handlers[id] = handler
+	return handler
+}
+
+func (i *informer) removeHandler(handler *Handler) error {
+	if err := handler.kill(); err != nil {
+		return err
+	}
+
+	logrus.Debugf("sending %v event handler %d for removal", i.oType, handler.id)
+
+	go func() {
+		i.Lock()
+		defer i.Unlock()
+		if _, ok := i.handlers[handler.id]; ok {
+			// Remove the handler
+			delete(i.handlers, handler.id)
+			logrus.Debugf("removed %v event handler %d", i.oType, handler.id)
+		} else {
+			logrus.Warningf("tried to remove unknown object type %v event handler %d", i.oType, handler.id)
 		}
+	}()
+
+	return nil
+}
+
+func ensureObjectOnDelete(obj interface{}, expectedType reflect.Type) (interface{}, error) {
+	if expectedType == reflect.TypeOf(obj) {
+		return obj, nil
+	}
+	tombstone, ok := obj.(cache.DeletedFinalStateUnknown)
+	if !ok {
+		return nil, fmt.Errorf("couldn't get object from tombstone: %+v", obj)
+	}
+	obj = tombstone.Obj
+	objType := reflect.TypeOf(obj)
+	if expectedType != objType {
+		return nil, fmt.Errorf("expected tombstone object resource type %v but got %v", expectedType, objType)
+	}
+	return obj, nil
+}
+
+func (i *informer) newFederatedHandler() cache.ResourceEventHandlerFuncs {
+	return cache.ResourceEventHandlerFuncs{
+		AddFunc: func(obj interface{}) {
+			i.forEachHandler(obj, func(h *Handler) {
+				h.OnAdd(obj)
+			})
+		},
+		UpdateFunc: func(oldObj, newObj interface{}) {
+			i.forEachHandler(newObj, func(h *Handler) {
+				h.OnUpdate(oldObj, newObj)
+			})
+		},
+		DeleteFunc: func(obj interface{}) {
+			realObj, err := ensureObjectOnDelete(obj, i.oType)
+			if err != nil {
+				logrus.Errorf(err.Error())
+				return
+			}
+			i.forEachHandler(realObj, func(h *Handler) {
+				h.OnDelete(realObj)
+			})
+		},
 	}
 }
 
@@ -64,7 +165,6 @@ type WatchFactory struct {
 
 	iFactory  informerfactory.SharedInformerFactory
 	informers map[reflect.Type]*informer
-	stopChan  chan struct{}
 }
 
 const (
@@ -100,7 +200,6 @@ func NewWatchFactory(c kubernetes.Interface, stopChan chan struct{}) (*WatchFact
 	wf := &WatchFactory{
 		iFactory:  informerfactory.NewSharedInformerFactory(c, resyncInterval),
 		informers: make(map[reflect.Type]*informer),
-		stopChan:  stopChan,
 	}
 
 	// Create shared informers we know we'll use
@@ -112,7 +211,7 @@ func NewWatchFactory(c kubernetes.Interface, stopChan chan struct{}) (*WatchFact
 	wf.informers[nodeType] = newInformer(nodeType, wf.iFactory.Core().V1().Nodes().Informer())
 
 	for _, informer := range wf.informers {
-		informer.inf.AddEventHandler(wf.newFederatedHandler(informer))
+		informer.inf.AddEventHandler(informer.newFederatedHandler())
 	}
 
 	wf.iFactory.Start(stopChan)
@@ -122,53 +221,25 @@ func NewWatchFactory(c kubernetes.Interface, stopChan chan struct{}) (*WatchFact
 		}
 	}
 
+	go func() {
+		<-stopChan
+		wf.shutdown()
+	}()
+
 	return wf, nil
 }
 
 // Shutdown removes all handlers
-func (wf *WatchFactory) Shutdown() {
-	close(wf.stopChan)
+func (wf *WatchFactory) shutdown() {
 	for _, inf := range wf.informers {
 		inf.Lock()
 		defer inf.Unlock()
 		for _, handler := range inf.handlers {
-			if atomic.CompareAndSwapUint32(&handler.tombstone, handlerAlive, handlerDead) {
-				delete(inf.handlers, handler.id)
+			if err := handler.kill(); err != nil {
+				logrus.Warningf("failed to remove handler: %v", err)
 			}
+			delete(inf.handlers, handler.id)
 		}
-	}
-}
-
-func (wf *WatchFactory) newFederatedHandler(inf *informer) cache.ResourceEventHandlerFuncs {
-	return cache.ResourceEventHandlerFuncs{
-		AddFunc: func(obj interface{}) {
-			inf.forEachHandler(obj, func(h *Handler) {
-				h.OnAdd(obj)
-			})
-		},
-		UpdateFunc: func(oldObj, newObj interface{}) {
-			inf.forEachHandler(newObj, func(h *Handler) {
-				h.OnUpdate(oldObj, newObj)
-			})
-		},
-		DeleteFunc: func(obj interface{}) {
-			if inf.oType != reflect.TypeOf(obj) {
-				tombstone, ok := obj.(cache.DeletedFinalStateUnknown)
-				if !ok {
-					logrus.Errorf("couldn't get object from tombstone: %+v", obj)
-					return
-				}
-				obj = tombstone.Obj
-				objType := reflect.TypeOf(obj)
-				if inf.oType != objType {
-					logrus.Errorf("expected tombstone object resource type %v but got %v", inf.oType, objType)
-					return
-				}
-			}
-			inf.forEachHandler(obj, func(h *Handler) {
-				h.OnDelete(obj)
-			})
-		},
 	}
 }
 
@@ -246,57 +317,24 @@ func (wf *WatchFactory) addHandler(objType reflect.Type, namespace string, lsel 
 	}
 
 	handlerID := atomic.AddUint64(&wf.handlerCounter, 1)
-
-	inf.Lock()
-	defer inf.Unlock()
-
-	handler := &Handler{
-		cache.FilteringResourceEventHandler{
-			FilterFunc: filterFunc,
-			Handler:    funcs,
-		},
-		handlerID,
-		handlerAlive,
-	}
-	inf.handlers[handlerID] = handler
-	logrus.Debugf("added %v event handler %d", objType, handlerID)
+	handler := inf.addHandler(handlerID, filterFunc, funcs)
+	logrus.Debugf("added %v event handler %d", objType, handler.id)
 
 	// Send existing items to the handler's add function; informers usually
 	// do this but since we share informers, it's long-since happened so
 	// we must emulate that here
 	for _, obj := range existingItems {
-		inf.handlers[handlerID].OnAdd(obj)
+		handler.OnAdd(obj)
 	}
 
 	return handler, nil
 }
 
 func (wf *WatchFactory) removeHandler(objType reflect.Type, handler *Handler) error {
-	inf, ok := wf.informers[objType]
-	if !ok {
-		return fmt.Errorf("tried to remove unknown object type %v event handler", objType)
+	if inf, ok := wf.informers[objType]; ok {
+		return inf.removeHandler(handler)
 	}
-
-	if !atomic.CompareAndSwapUint32(&handler.tombstone, handlerAlive, handlerDead) {
-		// Already removed
-		return fmt.Errorf("tried to remove already removed object type %v event handler %d", objType, handler.id)
-	}
-
-	logrus.Debugf("sending %v event handler %d for removal", objType, handler.id)
-
-	go func() {
-		inf.Lock()
-		defer inf.Unlock()
-		if _, ok := inf.handlers[handler.id]; ok {
-			// Remove the handler
-			delete(inf.handlers, handler.id)
-			logrus.Debugf("removed %v event handler %d", objType, handler.id)
-		} else {
-			logrus.Warningf("tried to remove unknown object type %v event handler %d", objType, handler.id)
-		}
-	}()
-
-	return nil
+	return fmt.Errorf("tried to remove unknown object type %v event handler", objType)
 }
 
 // AddPodHandler adds a handler function that will be executed on Pod object changes

@@ -91,6 +91,9 @@ var (
 
 	// EnableMulticast enables multicast support between the pods within the same namespace
 	EnableMulticast bool
+
+	// IPv6Mode captures whether we are using IPv6 for OVN logical topology
+	IPv6Mode bool
 )
 
 const (
@@ -934,6 +937,15 @@ func buildDefaultConfig(cli, file *config) error {
 	return nil
 }
 
+// OtherConfigSubnet returns "other-config:subnet" for IPv4 clusters, and
+// "other-config:ipv6_prefix" for IPv6 clusters
+func OtherConfigSubnet() string {
+	if IPv6Mode {
+		return "other-config:ipv6_prefix"
+	}
+	return "other-config:subnet"
+}
+
 // getConfigFilePath returns config file path and 'true' if the config file is
 // the fallback path (eg not given by the user), 'false' if given explicitly
 // by the user
@@ -1060,6 +1072,12 @@ func initConfigWithPath(ctx *cli.Context, exec kexec.Interface, saPath string, d
 		return "", err
 	}
 	OvnSouth = *tmpAuth
+
+	// Determine if ovn-kubernetes is configured to run in IPv6 mode
+	IPv6Mode = false
+	if len(Default.ClusterSubnets) >= 1 && Default.ClusterSubnets[0].CIDR.IP.To4() == nil {
+		IPv6Mode = true
+	}
 
 	logrus.Debugf("Default config: %+v", Default)
 	logrus.Debugf("Logging config: %+v", Logging)

@@ -66,15 +66,26 @@ func (e endpoints) delCmds(fexec *ovntest.FakeExec, service v1.Service, endpoint
 }
 
 var _ = Describe("OVN Namespace Operations", func() {
-	var app *cli.App
+	var (
+		app     *cli.App
+		fakeOvn *FakeOVN
+		tExec   *ovntest.FakeExec
+	)
 
 	BeforeEach(func() {
-		//Restore global default values before each testcase
+		// Restore global default values before each testcase
 		config.RestoreDefaultConfig()
 
 		app = cli.NewApp()
 		app.Name = "test"
 		app.Flags = config.Flags
+
+		tExec = ovntest.NewFakeExec()
+		fakeOvn = NewFakeOVN(tExec, true)
+	})
+
+	AfterEach(func() {
+		fakeOvn.shutdown()
 	})
 
 	Context("on startup", func() {
@@ -109,11 +120,9 @@ var _ = Describe("OVN Namespace Operations", func() {
 					v1.ServiceTypeClusterIP,
 				)
 
-				tExec := ovntest.NewFakeExec()
 				testE.addCmds(tExec, serviceT, endpointsT)
 
-				fakeOvn := FakeOVN{}
-				fakeOvn.start(ctx, tExec,
+				fakeOvn.start(ctx,
 					&v1.EndpointsList{
 						Items: []v1.Endpoints{
 							endpointsT,
@@ -167,11 +176,9 @@ var _ = Describe("OVN Namespace Operations", func() {
 					},
 					v1.ServiceTypeClusterIP,
 				)
-				tExec := ovntest.NewFakeExec()
 				testE.addCmds(tExec, serviceT, endpointsT)
 
-				fakeOvn := FakeOVN{}
-				fakeOvn.start(ctx, tExec,
+				fakeOvn.start(ctx,
 					&v1.EndpointsList{
 						Items: []v1.Endpoints{
 							endpointsT,

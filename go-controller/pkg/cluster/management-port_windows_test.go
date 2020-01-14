@@ -82,10 +82,6 @@ var _ = Describe("Management Port Operations", func() {
 			fexec.AddFakeCmd(&ovntest.ExpectedCmd{
 				Cmd: "ovn-nbctl --timeout=15 -- --may-exist lsp-add " + nodeName + " " + mgtPort + " -- lsp-set-addresses " + mgtPort + " " + mgtPortMAC + " " + mgtPortIP,
 			})
-			fexec.AddFakeCmd(&ovntest.ExpectedCmd{
-				Cmd:    "ovn-nbctl --timeout=15 lsp-get-addresses stor-" + nodeName,
-				Output: lrpMAC,
-			})
 
 			// windows-specific setup
 			fexec.AddFakeCmdsNoOutputNoError([]string{

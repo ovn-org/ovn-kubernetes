@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net"
+	"reflect"
 	"strconv"
 	"strings"
 
@@ -99,6 +100,10 @@ func (oc *Controller) StartClusterMaster(masterNodeName string) error {
 				"Disabling Multicast Support")
 			oc.multicastSupport = false
 		}
+		if config.IPv6Mode {
+			logrus.Warningf("Multicast support enabled, but can not be used along with IPv6. Disabling Multicast Support")
+			oc.multicastSupport = false
+		}
 	}
 
 	if err := oc.SetupMaster(masterNodeName); err != nil {
@@ -134,7 +139,7 @@ func (oc *Controller) SetupMaster(masterNodeName string) error {
 
 		// Drop IP multicast globally. Multicast is allowed only if explicitly
 		// enabled in a namespace.
-		err = oc.createDefaultDenyMulticastPolicy()
+		err = createDefaultDenyMulticastPolicy()
 		if err != nil {
 			logrus.Errorf("Failed to create default deny multicast policy, error: %v",
 				err)
@@ -171,12 +176,22 @@ func (oc *Controller) SetupMaster(masterNodeName string) error {
 	}
 
 	// Create a logical switch called "join" that will be used to connect gateway routers to the distributed router.
-	// The "join" switch will be allocated IP addresses in the range 100.64.0.0/16.
-	const joinSubnet string = "100.64.0.1/16"
+	// The "join" switch will be allocated IP addresses in the range 100.64.0.0/16 or fd98::/64.
+	var joinSubnet string
+	if config.IPv6Mode {
+		joinSubnet = "fd98::1/64"
+	} else {
+		joinSubnet = "100.64.0.1/16"
+	}
 	joinIP, joinCIDR, _ := net.ParseCIDR(joinSubnet)
-	stdout, stderr, err = util.RunOVNNbctl("--may-exist", "ls-add", "join",
-		"--", "set", "logical_switch", "join", fmt.Sprintf("other-config:subnet=%s", joinCIDR.String()),
-		"--", "set", "logical_switch", "join", fmt.Sprintf("other-config:exclude_ips=%s", joinIP.String()))
+	if config.IPv6Mode {
+		stdout, stderr, err = util.RunOVNNbctl("--may-exist", "ls-add", "join",
+			"--", "set", "logical_switch", "join", fmt.Sprintf("%s=%s", config.OtherConfigSubnet(), joinCIDR.String()))
+	} else {
+		stdout, stderr, err = util.RunOVNNbctl("--may-exist", "ls-add", "join",
+			"--", "set", "logical_switch", "join", fmt.Sprintf("%s=%s", config.OtherConfigSubnet(), joinCIDR.String()),
+			"--", "set", "logical_switch", "join", fmt.Sprintf("other-config:exclude_ips=%s", joinIP.String()))
+	}
 	if err != nil {
 		logrus.Errorf("Failed to create logical switch called \"join\", stdout: %q, stderr: %q, error: %v", stdout, stderr, err)
 		return err
@@ -459,19 +474,11 @@ func (oc *Controller) ensureNodeLogicalNetwork(nodeName string, hostsubnet *net.
 	// Get firstIP for gateway.  Skip the second address of the LogicalSwitch's
 	// subnet since we set it aside for the management port on that node.
 	firstIP, secondIP := util.GetNodeWellKnownAddresses(hostsubnet)
-
-	nodeLRPMac, stderr, err := util.RunOVNNbctl("--if-exist", "get", "logical_router_port", "rtos-"+nodeName, "mac")
-	if err != nil {
-		logrus.Errorf("Failed to get logical router port,stderr: %q, error: %v", stderr, err)
-		return err
-	}
-	if nodeLRPMac == "" {
-		nodeLRPMac = util.GenerateMac()
-	}
-
+	nodeLRPMac := util.IPAddrToHWAddr(firstIP.IP)
 	clusterRouter := util.GetK8sClusterRouter()
+
 	// Create a router port and provide it the first address on the node's host subnet
-	_, stderr, err = util.RunOVNNbctl("--may-exist", "lrp-add", clusterRouter, "rtos-"+nodeName,
+	_, stderr, err := util.RunOVNNbctl("--may-exist", "lrp-add", clusterRouter, "rtos-"+nodeName,
 		nodeLRPMac, firstIP.String())
 	if err != nil {
 		logrus.Errorf("Failed to add logical port to router, stderr: %q, error: %v", stderr, err)
@@ -482,21 +489,25 @@ func (oc *Controller) ensureNodeLogicalNetwork(nodeName string, hostsubnet *net.
 	// big enough (/24 or greater), exclude the hybrid overlay port IP (even
 	// if hybrid overlay is not enabled) to allow enabling hybrid overlay
 	// in a running cluster without disrupting nodes.
-	excludeIPs := secondIP.IP.String()
-	excludeHybridOverlayIP := true
-	for _, clusterEntry := range config.Default.ClusterSubnets {
-		if clusterEntry.HostSubnetLength > 24 {
-			excludeHybridOverlayIP = false
-			break
+	var excludeIPs string
+	if !config.IPv6Mode {
+		excludeIPs = secondIP.IP.String()
+		excludeIPs = "other-config:exclude_ips="+excludeIPs
+		excludeHybridOverlayIP := true
+		for _, clusterEntry := range config.Default.ClusterSubnets {
+			if clusterEntry.HostSubnetLength > 24 {
+				excludeHybridOverlayIP = false
+				break
+			}
 		}
-	}
-	if excludeHybridOverlayIP {
-		thirdIP := util.NextIP(secondIP.IP)
-		excludeIPs += ".." + thirdIP.String()
+		if excludeHybridOverlayIP {
+			thirdIP := util.NextIP(secondIP.IP)
+			excludeIPs += ".." + thirdIP.String()
+		}
 	}
 	stdout, stderr, err := util.RunOVNNbctl("--", "--may-exist", "ls-add", nodeName,
 		"--", "set", "logical_switch", nodeName, "other-config:subnet="+hostsubnet.String(),
-		"other-config:exclude_ips="+excludeIPs,
+		excludeIPs,
 		"external-ids:gateway_ip="+firstIP.String())
 	if err != nil {
 		logrus.Errorf("Failed to create a logical switch %v, stdout: %q, stderr: %q, error: %v", nodeName, stdout, stderr, err)
@@ -601,7 +612,7 @@ func (oc *Controller) addNodeAnnotations(node *kapi.Node, subnet string) error {
 }
 
 func (oc *Controller) addNode(node *kapi.Node) (hostsubnet *net.IPNet, err error) {
-	oc.clearInitialNodeNetworkUnavailableCondition(node)
+	oc.clearInitialNodeNetworkUnavailableCondition(node, nil)
 
 	hostsubnet, _ = ParseNodeHostSubnet(node)
 	if hostsubnet != nil {
@@ -702,8 +713,16 @@ func (oc *Controller) deleteNode(nodeName string, nodeSubnet *net.IPNet) error {
 // TODO: make upstream kubelet more flexible with overlays and GCE so this
 // condition doesn't get added for network plugins that don't want it, and then
 // we can remove this function.
-func (oc *Controller) clearInitialNodeNetworkUnavailableCondition(origNode *kapi.Node) {
-	// Informer cache should not be mutated, so get a copy of the object
+func (oc *Controller) clearInitialNodeNetworkUnavailableCondition(origNode, newNode *kapi.Node) {
+	// If it is not a Cloud Provider node, then nothing to do.
+	if origNode.Spec.ProviderID == "" {
+		return
+	}
+	// if newNode is not nil, then we are called from UpdateFunc()
+	if newNode != nil && reflect.DeepEqual(origNode.Status.Conditions, newNode.Status.Conditions) {
+		return
+	}
+
 	cleared := false
 	resultErr := retry.RetryOnConflict(retry.DefaultBackoff, func() error {
 		var err error
@@ -712,7 +731,7 @@ func (oc *Controller) clearInitialNodeNetworkUnavailableCondition(origNode *kapi
 		if err != nil {
 			return err
 		}
-
+		// Informer cache should not be mutated, so get a copy of the object
 		node := oldNode.DeepCopy()
 
 		for i := range node.Status.Conditions {
@@ -755,7 +774,8 @@ func (oc *Controller) syncNodes(nodes []interface{}) {
 	// Note that this list will include the 'join' cluster switch, which we
 	// do not want to delete.
 	nodeSwitches, stderr, err := util.RunOVNNbctl("--data=bare", "--no-heading",
-		"--columns=name,other-config", "find", "logical_switch", "other-config:subnet!=_")
+		"--columns=name,other-config", "find", "logical_switch",
+		fmt.Sprintf("%s!=_", config.OtherConfigSubnet()))
 	if err != nil {
 		logrus.Errorf("Failed to get node logical switches: stderr: %q, error: %v",
 			stderr, err)

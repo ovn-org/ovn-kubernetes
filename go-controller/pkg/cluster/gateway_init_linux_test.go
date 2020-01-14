@@ -125,7 +125,7 @@ func shareGatewayInterfaceTest(app *cli.App, testNS ns.NetNS,
 			"ovs-ofctl add-flow breth0 priority=50, in_port=7, ip, actions=ct(zone=64000, table=1)",
 			"ovs-ofctl add-flow breth0 priority=100, table=1, ct_state=+trk+est, actions=output:5",
 			"ovs-ofctl add-flow breth0 priority=100, table=1, ct_state=+trk+rel, actions=output:5",
-			"ovs-ofctl add-flow breth0 priority=0, table=1, actions=output:LOCAL",
+			"ovs-ofctl add-flow breth0 priority=0, table=1, actions=output:NORMAL",
 		})
 		// nodePortWatcher()
 		fexec.AddFakeCmd(&ovntest.ExpectedCmd{
@@ -179,7 +179,7 @@ cookie=0x0, duration=8366.597s, table=1, n_packets=10641, n_bytes=10370087, prio
 		stop := make(chan struct{})
 		wf, err := factory.NewWatchFactory(fakeClient, stop)
 		Expect(err).NotTo(HaveOccurred())
-		defer wf.Shutdown()
+		defer close(stop)
 
 		cluster := OvnClusterController{
 			watchFactory: wf,
@@ -327,7 +327,7 @@ var _ = Describe("Gateway Init Operations", func() {
 			stop := make(chan struct{})
 			wf, err := factory.NewWatchFactory(fakeClient, stop)
 			Expect(err).NotTo(HaveOccurred())
-			defer wf.Shutdown()
+			defer close(stop)
 
 			ipt, err := util.NewFakeWithProtocol(iptables.ProtocolIPv4)
 			Expect(err).NotTo(HaveOccurred())
