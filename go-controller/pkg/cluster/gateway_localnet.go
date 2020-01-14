@@ -40,21 +40,21 @@ type iptRule struct {
 }
 
 func localnetGatewayIP() string {
-	if config.UseIPv6() {
+	if config.IPv6Mode {
 		return v6localnetGatewayIP
 	}
 	return v4localnetGatewayIP
 }
 
 func localnetGatewayNextHop() string {
-	if config.UseIPv6() {
+	if config.IPv6Mode {
 		return v6localnetGatewayNextHop
 	}
 	return v4localnetGatewayNextHop
 }
 
 func localnetGatewayNextHopSubnet() string {
-	if config.UseIPv6() {
+	if config.IPv6Mode {
 		return v6localnetGatewayNextHopSubnet
 	}
 	return v4localnetGatewayNextHopSubnet
@@ -207,7 +207,7 @@ func initLocalnetGateway(nodeName string,
 		ovn.OvnDefaultNetworkGateway: l3GatewayConfig,
 	}
 
-	if config.UseIPv6() {
+	if config.IPv6Mode {
 		// TODO - IPv6 hack ... for some reason neighbor discovery isn't working here, so hard code a
 		// MAC binding for the gateway IP address for now - need to debug this further
 		_, _, _ = util.RunIP("-6", "neigh", "del", "fd99::2", "dev", "br-nexthop")
@@ -260,7 +260,7 @@ func localnetIptRules(svc *kapi.Service) []iptRule {
 func localnetIPTablesHelper() (util.IPTablesHelper, error) {
 	var ipt util.IPTablesHelper
 	var err error
-	if config.UseIPv6() {
+	if config.IPv6Mode {
 		ipt, err = util.GetIPTablesHelper(iptables.ProtocolIPv6)
 	} else {
 		ipt, err = util.GetIPTablesHelper(iptables.ProtocolIPv4)

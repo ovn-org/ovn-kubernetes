@@ -93,7 +93,7 @@ func (gp *gressPolicy) addIPBlock(ipblockJSON *knet.IPBlock) {
 }
 
 func ipMatch() string {
-	if config.UseIPv6() {
+	if config.IPv6Mode {
 		return "ip6"
 	}
 	return "ip4"

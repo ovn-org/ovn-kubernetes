@@ -244,7 +244,7 @@ var _ = Describe("Config Operations", func() {
 			Expect(Default.ClusterSubnets).To(Equal([]CIDRNetworkEntry{
 				{mustParseCIDR("10.128.0.0/14"), 23},
 			}))
-			Expect(UseIPv6()).To(Equal(false))
+			Expect(IPv6Mode).To(Equal(false))
 
 			for _, a := range []OvnAuthConfig{OvnNorth, OvnSouth} {
 				Expect(a.Scheme).To(Equal(OvnDBSchemeUnix))
@@ -631,7 +631,7 @@ cluster-subnets=172.18.0.0/24
 			Expect(Default.ClusterSubnets).To(Equal([]CIDRNetworkEntry{
 				{mustParseCIDR("fd02::/64"), 24},
 			}))
-			Expect(UseIPv6()).To(Equal(true))
+			Expect(IPv6Mode).To(Equal(true))
 			return nil
 		}
 		cliArgs := []string{
