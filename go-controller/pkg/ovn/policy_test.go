@@ -196,6 +196,93 @@ func (n networkPolicy) delPodCmds(fexec *ovntest.FakeExec, networkPolicy knet.Ne
 	}
 }
 
+type multicastPolicy struct{}
+
+func (p multicastPolicy) enableCmds(fExec *ovntest.FakeExec, ns string) {
+	pg_name, pg_hash := getMulticastPortGroup(ns)
+
+	fExec.AddFakeCmdsNoOutputNoError([]string{
+		"ovn-nbctl --timeout=15 --data=bare --no-heading --columns=_uuid find port_group name=" + pg_hash,
+	})
+	fExec.AddFakeCmd(&ovntest.ExpectedCmd{
+		Cmd:    "ovn-nbctl --timeout=15 create port_group name=" + pg_hash + " external-ids:name=" + pg_name,
+		Output: "fake_uuid",
+	})
+
+	match := getACLMatch(pg_hash, "ip4.mcast", knet.PolicyTypeEgress)
+	fExec.AddFakeCmdsNoOutputNoError([]string{
+		"ovn-nbctl --timeout=15 --data=bare --no-heading --columns=_uuid find ACL " +
+			match + " action=allow external-ids:default-deny-policy-type=Egress",
+	})
+	fExec.AddFakeCmdsNoOutputNoError([]string{
+		"ovn-nbctl --timeout=15 --id=@acl create acl priority=1012 direction=from-lport " +
+			match + " action=allow external-ids:default-deny-policy-type=Egress " +
+			"-- add port_group fake_uuid acls @acl",
+	})
+
+	match = getMulticastACLMatch(ns)
+	match = getACLMatch(pg_hash, match, knet.PolicyTypeIngress)
+	fExec.AddFakeCmdsNoOutputNoError([]string{
+		"ovn-nbctl --timeout=15 --data=bare --no-heading --columns=_uuid find ACL " +
+			match + " action=allow external-ids:default-deny-policy-type=Ingress",
+	})
+	fExec.AddFakeCmdsNoOutputNoError([]string{
+		"ovn-nbctl --timeout=15 --id=@acl create acl priority=1012 direction=to-lport " +
+			match + " action=allow external-ids:default-deny-policy-type=Ingress " +
+			"-- add port_group fake_uuid acls @acl",
+	})
+}
+
+func (p multicastPolicy) disableCmds(fExec *ovntest.FakeExec, ns string) {
+	_, pg_hash := getMulticastPortGroup(ns)
+
+	match := getACLMatch(pg_hash, "ip4.mcast", knet.PolicyTypeEgress)
+	fExec.AddFakeCmd(&ovntest.ExpectedCmd{
+		Cmd: "ovn-nbctl --timeout=15 --data=bare --no-heading --columns=_uuid find ACL " +
+			match + " " + "action=allow external-ids:default-deny-policy-type=Egress",
+		Output: "fake_uuid",
+	})
+	fExec.AddFakeCmdsNoOutputNoError([]string{
+		"ovn-nbctl --timeout=15 remove port_group " + pg_hash + " acls fake_uuid",
+	})
+
+	match = getMulticastACLMatch(ns)
+	match = getACLMatch(pg_hash, match, knet.PolicyTypeIngress)
+	fExec.AddFakeCmd(&ovntest.ExpectedCmd{
+		Cmd: "ovn-nbctl --timeout=15 --data=bare --no-heading --columns=_uuid find ACL " +
+			match + " " + "action=allow external-ids:default-deny-policy-type=Ingress",
+		Output: "fake_uuid",
+	})
+	fExec.AddFakeCmdsNoOutputNoError([]string{
+		"ovn-nbctl --timeout=15 remove port_group " + pg_hash + " acls fake_uuid",
+	})
+
+	fExec.AddFakeCmd(&ovntest.ExpectedCmd{
+		Cmd:    "ovn-nbctl --timeout=15 --data=bare --no-heading --columns=_uuid find port_group name=" + pg_hash,
+		Output: "fake_uuid",
+	})
+	fExec.AddFakeCmdsNoOutputNoError([]string{
+		"ovn-nbctl --timeout=15 --if-exists destroy port_group fake_uuid",
+	})
+}
+
+func (p multicastPolicy) addPodCmds(fExec *ovntest.FakeExec, ns, portUUID string) {
+	_, pg_hash := getMulticastPortGroup(ns)
+	fExec.AddFakeCmdsNoOutputNoError([]string{
+		"ovn-nbctl --timeout=15 " +
+			"--if-exists remove port_group " + pg_hash + " ports " + portUUID + " " +
+			"-- add port_group " + pg_hash + " ports " + portUUID,
+	})
+}
+
+func (p multicastPolicy) delPodCmds(fExec *ovntest.FakeExec, ns, portUUID string) {
+	_, pg_hash := getMulticastPortGroup(ns)
+	fExec.AddFakeCmdsNoOutputNoError([]string{
+		"ovn-nbctl --timeout=15 " +
+			"--if-exists remove port_group " + pg_hash + " ports " + portUUID,
+	})
+}
+
 var _ = Describe("OVN NetworkPolicy Operations", func() {
 	var (
 		app     *cli.App
@@ -341,6 +428,7 @@ var _ = Describe("OVN NetworkPolicy Operations", func() {
 				nPodTest.addNodeSetupCmds(fExec)
 				nPodTest.addCmdsForNonExistingPod(fExec)
 				nTest.baseCmds(fExec, namespace1)
+				nTest.addPodDenyMcast(fExec, nPodTest, true, "fake_uuid")
 				nTest.addCmdsWithPods(fExec, nPodTest, namespace1)
 				npTest.addPodSelectorCmds(fExec, nPodTest, networkPolicy, true, false)
 
@@ -440,6 +528,7 @@ var _ = Describe("OVN NetworkPolicy Operations", func() {
 				nPodTest.addCmdsForNonExistingPod(fExec)
 				nTest.baseCmds(fExec, namespace1, namespace2)
 				nTest.addCmds(fExec, namespace1)
+				nTest.addPodDenyMcast(fExec, nPodTest, false, "fake_uuid")
 				nTest.addCmdsWithPods(fExec, nPodTest, namespace2)
 				npTest.addPodSelectorCmds(fExec, nPodTest, networkPolicy, false, false)
 
@@ -534,6 +623,7 @@ var _ = Describe("OVN NetworkPolicy Operations", func() {
 				nPodTest.addCmdsForNonExistingPod(fExec)
 				nTest.baseCmds(fExec, namespace1, namespace2)
 				nTest.addCmds(fExec, namespace2)
+				nTest.addPodDenyMcast(fExec, nPodTest, true, "fake_uuid")
 				nTest.addCmdsWithPods(fExec, nPodTest, namespace1)
 				npTest.addNamespaceSelectorCmds(fExec, networkPolicy, true)
 				npTest.addLocalPodCmds(fExec, nPodTest)
@@ -725,6 +815,7 @@ var _ = Describe("OVN NetworkPolicy Operations", func() {
 				nPodTest.addNodeSetupCmds(fExec)
 				nPodTest.addCmdsForNonExistingPod(fExec)
 				nTest.baseCmds(fExec, namespace1)
+				nTest.addPodDenyMcast(fExec, nPodTest, true, "fake_uuid")
 				nTest.addCmdsWithPods(fExec, nPodTest, namespace1)
 				npTest.addPodSelectorCmds(fExec, nPodTest, networkPolicy, true, false)
 
@@ -832,6 +923,7 @@ var _ = Describe("OVN NetworkPolicy Operations", func() {
 				nPodTest.addCmdsForNonExistingPod(fExec)
 				nTest.baseCmds(fExec, namespace1, namespace2)
 				nTest.addCmds(fExec, namespace1)
+				nTest.addPodDenyMcast(fExec, nPodTest, false, "fake_uuid")
 				nTest.addCmdsWithPods(fExec, nPodTest, namespace2)
 				npTest.addPodSelectorCmds(fExec, nPodTest, networkPolicy, false, false)
 
@@ -928,6 +1020,7 @@ var _ = Describe("OVN NetworkPolicy Operations", func() {
 				nPodTest.addNodeSetupCmds(fExec)
 				nPodTest.addCmdsForNonExistingPod(fExec)
 				nTest.baseCmds(fExec, namespace1)
+				nTest.addPodDenyMcast(fExec, nPodTest, true, "fake_uuid")
 				nTest.addCmdsWithPods(fExec, nPodTest, namespace1)
 				npTest.addPodSelectorCmds(fExec, nPodTest, networkPolicy, true, false)
 
@@ -963,6 +1056,184 @@ var _ = Describe("OVN NetworkPolicy Operations", func() {
 				Expect(err).NotTo(HaveOccurred())
 				Eventually(fExec.CalledMatchesExpected).Should(BeTrue(), fExec.ErrorDesc)
 
+				return nil
+			}
+
+			err := app.Run([]string{app.Name})
+			Expect(err).NotTo(HaveOccurred())
+		})
+
+		It("tests enabling/disabling multicast in a namespace", func() {
+			app.Action = func(ctx *cli.Context) error {
+				nTest := namespace{}
+				namespace1 := *newNamespace("namespace1")
+
+				fakeOvn.start(ctx,
+					&v1.NamespaceList{
+						Items: []v1.Namespace{
+							namespace1,
+						},
+					},
+				)
+
+				nTest.baseCmds(fExec, namespace1)
+				nTest.addCmds(fExec, namespace1)
+				fakeOvn.controller.WatchNamespaces()
+				ns, err := fakeOvn.fakeClient.CoreV1().Namespaces().Get(
+					namespace1.Name, metav1.GetOptions{})
+				Expect(err).NotTo(HaveOccurred())
+				Expect(ns).NotTo(BeNil())
+
+				// Multicast is denied by default.
+				_, ok := ns.Annotations[nsMulticastAnnotation]
+				Expect(ok).To(BeFalse())
+
+				// Enable multicast in the namespace.
+				mcastPolicy := multicastPolicy{}
+				mcastPolicy.enableCmds(fExec, namespace1.Name)
+				ns.Annotations[nsMulticastAnnotation] = "true"
+				_, err = fakeOvn.fakeClient.CoreV1().Namespaces().Update(ns)
+				Expect(err).NotTo(HaveOccurred())
+				Eventually(fExec.CalledMatchesExpected).Should(BeTrue(), fExec.ErrorDesc)
+
+				// Disable multicast in the namespace.
+				mcastPolicy.disableCmds(fExec, namespace1.Name)
+				ns.Annotations[nsMulticastAnnotation] = "false"
+				_, err = fakeOvn.fakeClient.CoreV1().Namespaces().Update(ns)
+				Expect(err).NotTo(HaveOccurred())
+				Eventually(fExec.CalledMatchesExpected).Should(BeTrue(), fExec.ErrorDesc)
+				return nil
+			}
+
+			err := app.Run([]string{app.Name})
+			Expect(err).NotTo(HaveOccurred())
+		})
+
+		It("tests enabling multicast in a namespace with a pod", func() {
+			app.Action = func(ctx *cli.Context) error {
+				nTest := namespace{}
+				namespace1 := *newNamespace("namespace1")
+
+				nPodTest := newTPod(
+					"node1",
+					"10.128.1.0/24",
+					"10.128.1.2",
+					"10.128.1.1",
+					"myPod",
+					"10.128.1.4",
+					"11:22:33:44:55:66",
+					namespace1.Name,
+				)
+
+				nPodTest.baseCmds(fExec)
+				nPodTest.addNodeSetupCmds(fExec)
+				nPodTest.addCmdsForNonExistingPod(fExec)
+				nTest.baseCmds(fExec, namespace1)
+				nTest.addPodDenyMcast(fExec, nPodTest, false, "fake_uuid")
+				nTest.addCmdsWithPods(fExec, nPodTest, namespace1)
+				fakeOvn.start(ctx,
+					&v1.NamespaceList{
+						Items: []v1.Namespace{
+							namespace1,
+						},
+					},
+					&v1.PodList{
+						Items: []v1.Pod{
+							*newPod(nPodTest.namespace, nPodTest.podName, nPodTest.nodeName, nPodTest.podIP),
+						},
+					},
+				)
+
+				fakeOvn.controller.WatchPods()
+				fakeOvn.controller.WatchNamespaces()
+				ns, err := fakeOvn.fakeClient.CoreV1().Namespaces().Get(
+					namespace1.Name, metav1.GetOptions{})
+				Expect(err).NotTo(HaveOccurred())
+				Expect(ns).NotTo(BeNil())
+
+				// Enable multicast in the namespace
+				mcastPolicy := multicastPolicy{}
+				mcastPolicy.enableCmds(fExec, namespace1.Name)
+				// The pod should be added to the multicast allow port group.
+				mcastPolicy.addPodCmds(fExec, namespace1.Name, "fake_uuid")
+				ns.Annotations[nsMulticastAnnotation] = "true"
+				_, err = fakeOvn.fakeClient.CoreV1().Namespaces().Update(ns)
+				Expect(err).NotTo(HaveOccurred())
+				Eventually(fExec.CalledMatchesExpected).Should(BeTrue(), fExec.ErrorDesc)
+				return nil
+			}
+
+			err := app.Run([]string{app.Name})
+			Expect(err).NotTo(HaveOccurred())
+		})
+
+		It("tests adding a pod to a multicast enabled namespace", func() {
+			app.Action = func(ctx *cli.Context) error {
+				nTest := namespace{}
+				namespace1 := *newNamespace("namespace1")
+
+				nPodTest := newTPod(
+					"node1",
+					"10.128.1.0/24",
+					"10.128.1.2",
+					"10.128.1.1",
+					"myPod",
+					"10.128.1.4",
+					"11:22:33:44:55:66",
+					namespace1.Name,
+				)
+
+				fakeOvn.start(ctx,
+					&v1.NamespaceList{
+						Items: []v1.Namespace{
+							namespace1,
+						},
+					},
+				)
+
+				nPodTest.baseCmds(fExec)
+				nTest.baseCmds(fExec, namespace1)
+				nTest.addCmds(fExec, namespace1)
+				fakeOvn.controller.WatchNamespaces()
+				fakeOvn.controller.WatchPods()
+				ns, err := fakeOvn.fakeClient.CoreV1().Namespaces().Get(
+					namespace1.Name, metav1.GetOptions{})
+				Expect(err).NotTo(HaveOccurred())
+				Expect(ns).NotTo(BeNil())
+
+				// Enable multicast in the namespace.
+				mcastPolicy := multicastPolicy{}
+				mcastPolicy.enableCmds(fExec, namespace1.Name)
+				ns.Annotations[nsMulticastAnnotation] = "true"
+				_, err = fakeOvn.fakeClient.CoreV1().Namespaces().Update(ns)
+				Expect(err).NotTo(HaveOccurred())
+				Eventually(fExec.CalledMatchesExpected).Should(BeTrue(), fExec.ErrorDesc)
+
+				nPodTest.addNodeSetupCmds(fExec)
+				nPodTest.addCmdsForNonExistingPod(fExec)
+				nTest.addPodDenyMcast(fExec, nPodTest, false, "fake_uuid")
+				nTest.addPodCmds(fExec, nPodTest, namespace1)
+
+				// The pod should be added to the multicast allow group.
+				mcastPolicy.addPodCmds(fExec, namespace1.Name, "fake_uuid")
+
+				_, err = fakeOvn.fakeClient.CoreV1().Pods(nPodTest.namespace).Create(newPod(
+					nPodTest.namespace, nPodTest.podName, nPodTest.nodeName, nPodTest.podIP))
+				Expect(err).NotTo(HaveOccurred())
+				Eventually(fExec.CalledMatchesExpected).Should(BeTrue(), fExec.ErrorDesc)
+
+				// Delete the pod from the namespace.
+				mcastPolicy.delPodCmds(fExec, namespace1.Name, "fake_uuid")
+				// The pod should be removed from the multicasts default deny
+				// group and from the multicast allow group.
+				nTest.delPodDenyMcast(fExec, nPodTest, false, "fake_uuid")
+				nTest.delPodCmds(fExec, nPodTest, namespace1)
+				nPodTest.delCmds(fExec)
+
+				err = fakeOvn.fakeClient.CoreV1().Pods(nPodTest.namespace).Delete(
+					nPodTest.podName, metav1.NewDeleteOptions(0))
+				Expect(err).NotTo(HaveOccurred())
+				Eventually(fExec.CalledMatchesExpected).Should(BeTrue(), fExec.ErrorDesc)
 				return nil
 			}
 

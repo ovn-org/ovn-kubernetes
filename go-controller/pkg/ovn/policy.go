@@ -342,6 +342,12 @@ func getMulticastACLMatch(ns string) string {
 	return "ip4.src == $" + nsAddressSet + " && ip4.mcast"
 }
 
+// Returns the multicast port group name and hash for namespace 'ns'.
+func getMulticastPortGroup(ns string) (string, string) {
+	portGroupName := "mcastPortGroup-" + ns
+	return portGroupName, hashedPortGroup(portGroupName)
+}
+
 // Creates a policy to allow multicast traffic within 'ns':
 // - a port group containing all logical ports associated with 'ns'
 // - one "from-lport" ACL allowing egress multicast traffic from the pods
@@ -350,8 +356,7 @@ func getMulticastACLMatch(ns string) string {
 //   This matches only traffic originated by pods in 'ns' (based on the
 //   namespace address set).
 func (oc *Controller) createMulticastAllowPolicy(ns string) error {
-	portGroupName := "mcastPortGroup-" + ns
-	portGroupHash := hashedPortGroup(portGroupName)
+	portGroupName, portGroupHash := getMulticastPortGroup(ns)
 	portGroupUUID, err := createPortGroup(portGroupName, portGroupHash)
 	if err != nil {
 		return fmt.Errorf("Failed to create port_group for %s (%v)",
@@ -376,7 +381,7 @@ func (oc *Controller) createMulticastAllowPolicy(ns string) error {
 
 	// Add all ports from this namespace to the multicast allow group.
 	for _, portName := range oc.namespaceAddressSet[ns] {
-		oc.addToACL(portGroupHash, portName)
+		oc.podAddAllowMulticastPolicy(ns, portName)
 	}
 
 	return nil
@@ -384,8 +389,7 @@ func (oc *Controller) createMulticastAllowPolicy(ns string) error {
 
 // Delete the policy to allow multicast traffic within 'ns'.
 func deleteMulticastAllowPolicy(ns string) error {
-	portGroupName := "mcastPortGroup-" + ns
-	portGroupHash := hashedPortGroup(portGroupName)
+	_, portGroupHash := getMulticastPortGroup(ns)
 
 	err := deleteACLPortGroup(portGroupHash, fromLport,
 		defaultMcastAllowPriority, "ip4.mcast", "allow",
@@ -447,6 +451,16 @@ func (oc *Controller) podAddDefaultDenyMulticastPolicy(logicalPort string) {
 
 func (oc *Controller) podDeleteDefaultDenyMulticastPolicy(logicalPort string) {
 	oc.deleteFromACL("mcastPortGroupDeny", logicalPort)
+}
+
+func (oc *Controller) podAddAllowMulticastPolicy(ns, logicalPort string) {
+	_, portGroupHash := getMulticastPortGroup(ns)
+	oc.addToACL(portGroupHash, logicalPort)
+}
+
+func (oc *Controller) podDeleteAllowMulticastPolicy(ns, logicalPort string) {
+	_, portGroupHash := getMulticastPortGroup(ns)
+	oc.deleteFromACL(portGroupHash, logicalPort)
 }
 
 func (oc *Controller) localPodAddDefaultDeny(
