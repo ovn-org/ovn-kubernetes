@@ -343,7 +343,6 @@ var _ = Describe("Master Operations", func() {
 				masterGWCIDR      string = "10.128.2.1/24"
 				masterMgmtPortIP  string = "10.128.2.2"
 				lrpMAC            string = "0A:58:0A:80:02:01"
-				gwLRPMAC          string = "00:00:00:05:46:C3"
 				masterMgmtPortMAC string = "00:00:00:55:66:77"
 				masterHOPortIP    string = "10.128.2.3"
 			)
@@ -725,7 +724,7 @@ var _ = Describe("Gateway Init Operations", func() {
 				nodeGWIP               string = "10.1.1.1/24"
 				nodeMgmtPortIP         string = "10.1.1.2"
 				nodeMgmtPortMAC        string = "0A:58:0A:01:01:02"
-				masterHOPortIP         string = "10.1.1.3"
+				nodeHOPortIP           string = "10.1.1.3"
 			)
 
 			ifaceID := physicalBridgeName + "_" + nodeName
@@ -767,7 +766,7 @@ var _ = Describe("Gateway Init Operations", func() {
 
 			fexec.AddFakeCmdsNoOutputNoError([]string{
 				"ovn-nbctl --timeout=15 --may-exist lrp-add ovn_cluster_router rtos-" + nodeName + " " + lrpMAC + " " + nodeGWIP,
-				"ovn-nbctl --timeout=15 -- --may-exist ls-add " + nodeName + " -- set logical_switch " + nodeName + " other-config:subnet=" + nodeSubnet + " other-config:exclude_ips=" + nodeMgmtPortIP + ".." + masterHOPortIP + " external-ids:gateway_ip=" + nodeGWIP,
+				"ovn-nbctl --timeout=15 -- --may-exist ls-add " + nodeName + " -- set logical_switch " + nodeName + " other-config:subnet=" + nodeSubnet + " other-config:exclude_ips=" + nodeMgmtPortIP + ".." + nodeHOPortIP + " external-ids:gateway_ip=" + nodeGWIP,
 				"ovn-nbctl --timeout=15 -- --may-exist lsp-add " + nodeName + " stor-" + nodeName + " -- set logical_switch_port stor-" + nodeName + " type=router options:router-port=rtos-" + nodeName + " addresses=\"" + lrpMAC + "\"",
 				"ovn-nbctl --timeout=15 set logical_switch " + nodeName + " load_balancer=" + tcpLBUUID,
 				"ovn-nbctl --timeout=15 add logical_switch " + nodeName + " load_balancer " + udpLBUUID,
