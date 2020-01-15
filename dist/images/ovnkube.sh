@@ -218,7 +218,7 @@ ready_to_start_node () {
       return 1
   fi
   get_ovn_db_vars
-  ovn-nbctl --db=${ovn_nbdb_test} show > /dev/null 2>&1
+  ovsdb-client list-dbs ${ovn_nbdb_test} > /dev/null 2>&1
   if [[ $? != 0 ]] ; then
       return 1
   fi
