@@ -231,6 +231,52 @@ func (oc *Controller) waitForNodeLogicalSwitch(nodeName string) error {
 	return nil
 }
 
+func getPodAddresses(portName string) (net.HardwareAddr, net.IP, bool, error) {
+	podMac, podIP, err := util.GetPortAddresses(portName)
+	if err != nil {
+		return nil, nil, false, err
+	}
+	if podMac == nil || podIP == nil {
+		// wait longer
+		return nil, nil, false, nil
+	}
+	return podMac, podIP, true, nil
+}
+
+func waitForPodAddresses(portName string) (net.HardwareAddr, net.IP, error) {
+	var (
+		podMac net.HardwareAddr
+		podIP  net.IP
+		done   bool
+		err    error
+	)
+
+	// First try to get the pod addresses quickly using exponential backoff,
+	// then after about 2 seconds fall back to polling every second.
+	err = wait.ExponentialBackoff(
+		wait.Backoff{
+			Duration: 50 * time.Millisecond,
+			Steps:    4,
+			Factor:   2.1,
+			Jitter:   0.1},
+		func() (bool, error) {
+			podMac, podIP, done, err = getPodAddresses(portName)
+			return done, err
+		})
+	if err == wait.ErrWaitTimeout {
+		err = wait.PollImmediate(time.Second, 30*time.Second, func() (bool, error) {
+			podMac, podIP, done, err = getPodAddresses(portName)
+			return done, err
+		})
+	}
+
+	if err != nil || podMac == nil || podIP == nil {
+		return nil, nil, fmt.Errorf("Error while obtaining addresses for %s: %v", portName, err)
+	}
+
+	return podMac, podIP, nil
+}
+
 func (oc *Controller) addLogicalPort(pod *kapi.Pod) error {
 	var out, stderr string
 	var err error
@@ -292,23 +338,9 @@ func (oc *Controller) addLogicalPort(pod *kapi.Pod) error {
 		return fmt.Errorf("Error obtaining gateway address for switch %s", logicalSwitch)
 	}
 
-	var podMac net.HardwareAddr
-	var podIP net.IP
-	count := 30
-	for count > 0 {
-		podMac, podIP, err = util.GetPortAddresses(portName)
-		if err == nil && podMac != nil && podIP != nil {
-			break
-		}
-		if err != nil {
-			return fmt.Errorf("Error while obtaining addresses for %s - %v", portName, err)
-		}
-		time.Sleep(time.Second)
-		count--
-	}
-	if count == 0 {
-		return fmt.Errorf("Error while obtaining addresses for %s "+
-			"stdout: %q, stderr: %q, (%v)", portName, out, stderr, err)
+	podMac, podIP, err := waitForPodAddresses(portName)
+	if err != nil {
+		return err
 	}
 
 	podCIDR := &net.IPNet{IP: podIP, Mask: gatewayIP.Mask}
