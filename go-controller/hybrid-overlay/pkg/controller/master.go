@@ -196,6 +196,9 @@ func (m *MasterController) handleOverlayPort(node *kapi.Node, annotator kube.Ann
 				", stderr:%s: %v", node.Name, stderr, err)
 		}
 
+		if err := util.UpdateNodeSwitchExcludeIPs(node.Name, subnet); err != nil {
+			return err
+		}
 	}
 	annotator.Set(types.HybridOverlayDrMac, portMAC.String())
 
