@@ -12,7 +12,7 @@ fi
 sed -i "s/apiServerAddress.*/apiServerAddress: ${API_IP}/" kind.yaml
 
 # Create KIND cluster
-kind create cluster --kubeconfig ${HOME}/admin.conf --image kindest/node:v1.16.4 --config=./kind.yaml
+kind create cluster --name ovn --kubeconfig ${HOME}/admin.conf --image kindest/node:v1.16.4 --config=./kind.yaml
 export KUBECONFIG=${HOME}/admin.conf
 mkdir -p /tmp/kind
 sudo chmod 777 /tmp/kind

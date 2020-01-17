@@ -44,7 +44,7 @@ jobs:
         - pushd $GOPATH/src/k8s.io/kubernetes/
         - export KUBERNETES_CONFORMANCE_TEST=y
         - export KUBECONFIG=${HOME}/admin.conf
-        - kubetest --provider=local --deployment=kind --test --test_args='--ginkgo.focus=\[sig-network\].*Conformance --num-nodes=3'
+        - kubetest --provider=local --deployment=kind --kind-cluster-name=kind-ovn --test --test_args='--ginkgo.focus=\[sig-network\].*Conformance --num-nodes=3'
       after_failure:
         - kind export logs /tmp/kind/logs
         - tar -czvf e2e-kind-ovn-${TRAVIS_COMMIT}-${TRAVIS_JOB_NUMBER}.tar.gz -C /tmp/kind/logs/ ./
