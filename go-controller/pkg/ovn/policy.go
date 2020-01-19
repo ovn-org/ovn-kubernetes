@@ -228,7 +228,7 @@ func deleteACLPortGroup(portGroupName, direction, priority, match, action string
 	return nil
 }
 
-func (oc *Controller) addToACL(portGroup, logicalPort string) error {
+func (oc *Controller) addToPortGroup(portGroup, logicalPort string) error {
 	logicalPortUUID, err := oc.getLogicalPortUUID(logicalPort)
 	if err != nil {
 		return err
@@ -244,7 +244,7 @@ func (oc *Controller) addToACL(portGroup, logicalPort string) error {
 	return nil
 }
 
-func (oc *Controller) deleteFromACL(portGroup, logicalPort string) error {
+func (oc *Controller) deleteFromPortGroup(portGroup, logicalPort string) error {
 	logicalPortUUID, err := oc.getLogicalPortUUID(logicalPort)
 	if err != nil {
 		return err
@@ -449,14 +449,14 @@ func createDefaultDenyMulticastPolicy() error {
 }
 
 func (oc *Controller) podAddDefaultDenyMulticastPolicy(logicalPort string) error {
-	if err := oc.addToACL("mcastPortGroupDeny", logicalPort); err != nil {
+	if err := oc.addToPortGroup("mcastPortGroupDeny", logicalPort); err != nil {
 		return fmt.Errorf("failed to add port %s to default multicast deny ACL: %v", logicalPort, err)
 	}
 	return nil
 }
 
 func (oc *Controller) podDeleteDefaultDenyMulticastPolicy(logicalPort string) error {
-	if err := oc.deleteFromACL("mcastPortGroupDeny", logicalPort); err != nil {
+	if err := oc.deleteFromPortGroup("mcastPortGroupDeny", logicalPort); err != nil {
 		return fmt.Errorf("failed to delete port %s from default multicast deny ACL: %v", logicalPort, err)
 	}
 	return nil
@@ -464,12 +464,12 @@ func (oc *Controller) podDeleteDefaultDenyMulticastPolicy(logicalPort string) er
 
 func (oc *Controller) podAddAllowMulticastPolicy(ns, logicalPort string) error {
 	_, portGroupHash := getMulticastPortGroup(ns)
-	return oc.addToACL(portGroupHash, logicalPort)
+	return oc.addToPortGroup(portGroupHash, logicalPort)
 }
 
 func (oc *Controller) podDeleteAllowMulticastPolicy(ns, logicalPort string) error {
 	_, portGroupHash := getMulticastPortGroup(ns)
-	return oc.deleteFromACL(portGroupHash, logicalPort)
+	return oc.deleteFromPortGroup(portGroupHash, logicalPort)
 }
 
 func (oc *Controller) localPodAddDefaultDeny(
@@ -502,7 +502,7 @@ func (oc *Controller) localPodAddDefaultDeny(
 	// Handle condition 1 above.
 	if !(len(policy.Spec.PolicyTypes) == 1 && policy.Spec.PolicyTypes[0] == knet.PolicyTypeEgress) {
 		if oc.lspIngressDenyCache[logicalPort] == 0 {
-			if err := oc.addToACL(oc.portGroupIngressDeny, logicalPort); err != nil {
+			if err := oc.addToPortGroup(oc.portGroupIngressDeny, logicalPort); err != nil {
 				logrus.Warningf("failed to add port %s to ingress deny ACL: %v", logicalPort, err)
 			}
 		}
@@ -513,7 +513,7 @@ func (oc *Controller) localPodAddDefaultDeny(
 	if (len(policy.Spec.PolicyTypes) == 1 && policy.Spec.PolicyTypes[0] == knet.PolicyTypeEgress) ||
 		len(policy.Spec.Egress) > 0 || len(policy.Spec.PolicyTypes) == 2 {
 		if oc.lspEgressDenyCache[logicalPort] == 0 {
-			if err := oc.addToACL(oc.portGroupEgressDeny, logicalPort); err != nil {
+			if err := oc.addToPortGroup(oc.portGroupEgressDeny, logicalPort); err != nil {
 				logrus.Warningf("failed to add port %s to egress deny ACL: %v", logicalPort, err)
 			}
 		}
@@ -530,7 +530,7 @@ func (oc *Controller) localPodDelDefaultDeny(
 		if oc.lspIngressDenyCache[logicalPort] > 0 {
 			oc.lspIngressDenyCache[logicalPort]--
 			if oc.lspIngressDenyCache[logicalPort] == 0 {
-				if err := oc.deleteFromACL(oc.portGroupIngressDeny, logicalPort); err != nil {
+				if err := oc.deleteFromPortGroup(oc.portGroupIngressDeny, logicalPort); err != nil {
 					logrus.Warningf("failed to remove port %s from ingress deny ACL: %v", logicalPort, err)
 				}
 			}
@@ -542,7 +542,7 @@ func (oc *Controller) localPodDelDefaultDeny(
 		if oc.lspEgressDenyCache[logicalPort] > 0 {
 			oc.lspEgressDenyCache[logicalPort]--
 			if oc.lspEgressDenyCache[logicalPort] == 0 {
-				if err := oc.deleteFromACL(oc.portGroupEgressDeny, logicalPort); err != nil {
+				if err := oc.deleteFromPortGroup(oc.portGroupEgressDeny, logicalPort); err != nil {
 					logrus.Warningf("failed to remove port %s from egress deny ACL: %v", logicalPort, err)
 				}
 			}
