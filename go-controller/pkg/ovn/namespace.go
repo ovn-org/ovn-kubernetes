@@ -79,16 +79,11 @@ func (oc *Controller) addPodToNamespace(ns string, ip net.IP, logicalPort string
 
 	setAddressSet(hashedAddressSet(ns), addresses)
 
-	// Enforce the default deny multicast policy and, if multicast allowed,
-	// add the pod to the allow policy.
-	if oc.multicastSupport {
-		if err := oc.podAddDefaultDenyMulticastPolicy(logicalPort); err != nil {
+	// If multicast is allowed and enabled for the namespace, add the port
+	// to the allow policy.
+	if oc.multicastSupport && oc.multicastEnabled[ns] {
+		if err := oc.podAddAllowMulticastPolicy(ns, logicalPort); err != nil {
 			return err
-		}
-		if oc.multicastEnabled[ns] {
-			if err := oc.podAddAllowMulticastPolicy(ns, logicalPort); err != nil {
-				return err
-			}
 		}
 	}
 
@@ -119,16 +114,10 @@ func (oc *Controller) deletePodFromNamespace(ns string, ip net.IP, logicalPort s
 
 	setAddressSet(hashedAddressSet(ns), addresses)
 
-	// Remove the port from the default deny multicast policy and, if
-	// multicast allowed, remove the pod from the allow policy.
-	if oc.multicastSupport {
-		if err := oc.podDeleteDefaultDenyMulticastPolicy(logicalPort); err != nil {
+	// Remove the port from the multicast allow policy.
+	if oc.multicastSupport && oc.multicastEnabled[ns] {
+		if err := oc.podDeleteAllowMulticastPolicy(ns, logicalPort); err != nil {
 			return err
-		}
-		if oc.multicastEnabled[ns] {
-			if err := oc.podDeleteAllowMulticastPolicy(ns, logicalPort); err != nil {
-				return err
-			}
 		}
 	}
 
@@ -201,11 +190,6 @@ func (oc *Controller) AddNamespace(ns *kapi.Namespace) {
 			if pod.Status.PodIP != "" {
 				portName := podLogicalPortName(&pod)
 				oc.namespaceAddressSet[ns.Name][pod.Status.PodIP] = portName
-
-				// Enforce the default deny multicast policy.
-				if oc.multicastSupport {
-					_ = oc.podAddDefaultDenyMulticastPolicy(portName)
-				}
 			}
 		}
 	}

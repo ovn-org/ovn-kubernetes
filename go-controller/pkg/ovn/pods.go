@@ -159,6 +159,13 @@ func (oc *Controller) deleteLogicalPort(pod *kapi.Pod) {
 	delete(oc.logicalPortUUIDCache, logicalPort)
 	oc.lspMutex.Unlock()
 
+	// Remove the port from the default deny multicast policy
+	if oc.multicastSupport {
+		if err := oc.podDeleteDefaultDenyMulticastPolicy(logicalPort); err != nil {
+			logrus.Errorf(err.Error())
+		}
+	}
+
 	if err := oc.deletePodFromNamespace(pod.Namespace, podIP, logicalPort); err != nil {
 		logrus.Errorf(err.Error())
 	}
@@ -309,6 +316,13 @@ func (oc *Controller) addLogicalPort(pod *kapi.Pod) error {
 	})
 	if err != nil {
 		return fmt.Errorf("error creating pod network annotation: %v", err)
+	}
+
+	// Enforce the default deny multicast policy
+	if oc.multicastSupport {
+		if err := oc.podAddDefaultDenyMulticastPolicy(portName); err != nil {
+			return err
+		}
 	}
 
 	if err := oc.addPodToNamespace(pod.Namespace, podIP, portName); err != nil {

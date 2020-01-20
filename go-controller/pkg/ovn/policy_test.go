@@ -427,8 +427,8 @@ var _ = Describe("OVN NetworkPolicy Operations", func() {
 				nPodTest.baseCmds(fExec)
 				nPodTest.addCmdsForNonExistingPod(fExec)
 				nTest.baseCmds(fExec, namespace1)
-				nTest.addPodDenyMcast(fExec, nPodTest, true, "fake_uuid")
 				nTest.addCmdsWithPods(fExec, nPodTest, namespace1)
+				nPodTest.addPodDenyMcast(fExec, true)
 				npTest.addPodSelectorCmds(fExec, nPodTest, networkPolicy, true, false)
 
 				fakeOvn.start(ctx,
@@ -527,8 +527,8 @@ var _ = Describe("OVN NetworkPolicy Operations", func() {
 				nPodTest.addCmdsForNonExistingPod(fExec)
 				nTest.baseCmds(fExec, namespace1, namespace2)
 				nTest.addCmds(fExec, namespace1)
-				nTest.addPodDenyMcast(fExec, nPodTest, false, "fake_uuid")
 				nTest.addCmdsWithPods(fExec, nPodTest, namespace2)
+				nPodTest.addPodDenyMcast(fExec, false)
 				npTest.addPodSelectorCmds(fExec, nPodTest, networkPolicy, false, false)
 
 				fakeOvn.start(ctx,
@@ -622,8 +622,8 @@ var _ = Describe("OVN NetworkPolicy Operations", func() {
 				nPodTest.addCmdsForNonExistingPod(fExec)
 				nTest.baseCmds(fExec, namespace1, namespace2)
 				nTest.addCmds(fExec, namespace2)
-				nTest.addPodDenyMcast(fExec, nPodTest, true, "fake_uuid")
 				nTest.addCmdsWithPods(fExec, nPodTest, namespace1)
+				nPodTest.addPodDenyMcast(fExec, true)
 				npTest.addNamespaceSelectorCmds(fExec, networkPolicy, true)
 				npTest.addLocalPodCmds(fExec, nPodTest)
 
@@ -814,8 +814,8 @@ var _ = Describe("OVN NetworkPolicy Operations", func() {
 				nPodTest.baseCmds(fExec)
 				nPodTest.addCmdsForNonExistingPod(fExec)
 				nTest.baseCmds(fExec, namespace1)
-				nTest.addPodDenyMcast(fExec, nPodTest, true, "fake_uuid")
 				nTest.addCmdsWithPods(fExec, nPodTest, namespace1)
+				nPodTest.addPodDenyMcast(fExec, true)
 				npTest.addPodSelectorCmds(fExec, nPodTest, networkPolicy, true, false)
 
 				fakeOvn.start(ctx,
@@ -922,8 +922,8 @@ var _ = Describe("OVN NetworkPolicy Operations", func() {
 				nPodTest.addCmdsForNonExistingPod(fExec)
 				nTest.baseCmds(fExec, namespace1, namespace2)
 				nTest.addCmds(fExec, namespace1)
-				nTest.addPodDenyMcast(fExec, nPodTest, false, "fake_uuid")
 				nTest.addCmdsWithPods(fExec, nPodTest, namespace2)
+				nPodTest.addPodDenyMcast(fExec, false)
 				npTest.addPodSelectorCmds(fExec, nPodTest, networkPolicy, false, false)
 
 				fakeOvn.start(ctx,
@@ -1019,8 +1019,8 @@ var _ = Describe("OVN NetworkPolicy Operations", func() {
 				nPodTest.baseCmds(fExec)
 				nPodTest.addCmdsForNonExistingPod(fExec)
 				nTest.baseCmds(fExec, namespace1)
-				nTest.addPodDenyMcast(fExec, nPodTest, true, "fake_uuid")
 				nTest.addCmdsWithPods(fExec, nPodTest, namespace1)
+				nPodTest.addPodDenyMcast(fExec, true)
 				npTest.addPodSelectorCmds(fExec, nPodTest, networkPolicy, true, false)
 
 				fakeOvn.start(ctx,
@@ -1128,9 +1128,8 @@ var _ = Describe("OVN NetworkPolicy Operations", func() {
 				nPodTest.baseCmds(fExec)
 				nPodTest.addCmdsForNonExistingPod(fExec)
 				nTest.baseCmds(fExec, namespace1)
-				nTest.addPodDenyMcast(fExec, nPodTest, false, "fake_uuid")
 				nTest.addCmdsWithPods(fExec, nPodTest, namespace1)
-
+				nPodTest.addPodDenyMcast(fExec, false)
 				fakeOvn.start(ctx,
 					&v1.NamespaceList{
 						Items: []v1.Namespace{
@@ -1212,7 +1211,7 @@ var _ = Describe("OVN NetworkPolicy Operations", func() {
 
 				nPodTest.populateLogicalSwitchCache(fakeOvn)
 				nPodTest.addCmdsForNonExistingPod(fExec)
-				nTest.addPodDenyMcast(fExec, nPodTest, false, "fake_uuid")
+				nPodTest.addPodDenyMcast(fExec, false)
 				nTest.addPodCmds(fExec, nPodTest, namespace1)
 
 				// The pod should be added to the multicast allow group.
@@ -1227,7 +1226,7 @@ var _ = Describe("OVN NetworkPolicy Operations", func() {
 				mcastPolicy.delPodCmds(fExec, namespace1.Name, "fake_uuid")
 				// The pod should be removed from the multicasts default deny
 				// group and from the multicast allow group.
-				nTest.delPodDenyMcast(fExec, nPodTest, false, "fake_uuid")
+				nPodTest.delPodDenyMcast(fExec, false)
 				nTest.delPodCmds(fExec, nPodTest, namespace1)
 				nPodTest.delCmds(fExec)
 
