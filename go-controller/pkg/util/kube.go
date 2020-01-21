@@ -112,24 +112,11 @@ func GetNodeIP(nodeName string) (string, error) {
 				klog.V(5).Infof("Skipping loopback addr: %q for node %s", addr.String(), nodeName)
 				continue
 			}
-			if config.IPv6Mode && addr.To4() != nil {
-				klog.V(5).Infof("Skipping IPv4 addr: %q for node %s", addr.String(), nodeName)
-				continue
-			} else if !config.IPv6Mode && addr.To4() == nil {
-				klog.V(5).Infof("Skipping IPv6 addr: %q for node %s", addr.String(), nodeName)
-				continue
-			}
 			ip = addr
 			break
 		}
 	} else if ip.IsLoopback() {
 		klog.V(5).Infof("Skipping loopback addr: %q for node %s", ip.String(), nodeName)
-		ip = nil
-	} else if config.IPv6Mode && ip.To4() != nil {
-		klog.V(5).Infof("Skipping IPv4 addr: %q for node %s", ip.String(), nodeName)
-		ip = nil
-	} else if !config.IPv6Mode && ip.To4() == nil {
-		klog.V(5).Infof("Skipping IPv6 addr: %q for node %s", ip.String(), nodeName)
 		ip = nil
 	}
 
