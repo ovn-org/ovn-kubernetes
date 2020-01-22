@@ -405,17 +405,14 @@ const (
 )
 
 func addAllowACLFromNode(logicalSwitch, subnet string) error {
-	ip, _, err := net.ParseCIDR(subnet)
+	_, nodeCidr, err := net.ParseCIDR(subnet)
 	if err != nil {
 		logrus.Errorf("failed to parse subnet %s", subnet)
 		return err
 	}
+	_, portIPnet := util.GetNodeWellKnownAddresses(nodeCidr)
 
-	// The second IP address of the network is the node IP address.
-	ip = util.NextIP(util.NextIP(ip))
-	address := ip.String()
-
-	match := fmt.Sprintf("%s.src==%s", ipMatch(), address)
+	match := fmt.Sprintf("%s.src==%s", ipMatch(), portIPnet.IP.String())
 	_, stderr, err := util.RunOVNNbctl("--may-exist", "acl-add", logicalSwitch,
 		"to-lport", defaultAllowPriority, match, "allow-related")
 	if err != nil {

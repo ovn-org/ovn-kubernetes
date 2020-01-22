@@ -107,16 +107,16 @@ func GetNodeIP(nodeName string) (string, error) {
 			return "", fmt.Errorf("Failed to lookup IP address for node %s: %v", nodeName, err)
 		}
 		for _, addr := range addrs {
-			// Skip loopback and non IPv4 addrs
-			if addr.IsLoopback() || addr.To4() == nil {
-				klog.V(5).Infof("Skipping loopback/non-IPv4 addr: %q for node %s", addr.String(), nodeName)
+			// Skip loopback addrs
+			if addr.IsLoopback() {
+				klog.V(5).Infof("Skipping loopback addr: %q for node %s", addr.String(), nodeName)
 				continue
 			}
 			ip = addr
 			break
 		}
-	} else if ip.IsLoopback() || ip.To4() == nil {
-		klog.V(5).Infof("Skipping loopback/non-IPv4 addr: %q for node %s", ip.String(), nodeName)
+	} else if ip.IsLoopback() {
+		klog.V(5).Infof("Skipping loopback addr: %q for node %s", ip.String(), nodeName)
 		ip = nil
 	}
 
