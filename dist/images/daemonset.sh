@@ -5,7 +5,7 @@
 set -e
 
 # This is for people that are not using the ansible install.
-# The script renders j2 templates into yaml files in ../templates/
+# The script renders j2 templates into yaml files in ../yaml/
 
 # ensure j2 renderer installed
 pip freeze | grep j2cli || pip install j2cli[yaml] --user
@@ -126,7 +126,7 @@ ovn_db_vip_image_repl="{{ ovn_db_vip_image | default('docker.io/ovnkube/ovndb-vi
 ovn_db_replicas_repl="{{ ovn_db_replicas | default(3) }}"
 ovn_db_vip_repl="{{ ovn_db_vip }}"
 
-ovn_image=${image} ovn_image_pull_policy=${policy} kind=${KIND} ovn_gateway_mode=${ovn_gateway_mode} ovn_gateway_opts=${ovn_gateway_opts} j2 ../templates/ovnkube-node.yaml.j2 -o ../templates/ovnkube-node.yaml
+ovn_image=${image} ovn_image_pull_policy=${policy} kind=${KIND} ovn_gateway_mode=${ovn_gateway_mode} ovn_gateway_opts=${ovn_gateway_opts} j2 ../templates/ovnkube-node.yaml.j2 -o ../yaml/ovnkube-node.yaml
 
 sed "s,${image_str},${image},
 s,${policy_str},${policy}," ../templates/ovnkube-master.yaml.j2 > ../yaml/ovnkube-master.yaml
