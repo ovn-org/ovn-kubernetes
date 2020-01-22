@@ -9,6 +9,7 @@ import (
 	"os/exec"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/sirupsen/logrus"
 
@@ -17,6 +18,8 @@ import (
 	"github.com/containernetworking/plugins/pkg/ip"
 	"github.com/containernetworking/plugins/pkg/ns"
 	"github.com/vishvananda/netlink"
+
+	"k8s.io/apimachinery/pkg/util/wait"
 )
 
 func renameLink(curName, newName string) error {
@@ -356,6 +359,17 @@ func (pr *PodRequest) ConfigureInterface(namespace string, podName string, ifInf
 	})
 	if err != nil {
 		logrus.Warningf("failed to configure container network namespace: %q", err)
+	}
+
+	err = wait.PollImmediate(100*time.Millisecond, 20*time.Second, func() (bool, error) {
+		stdout, err := ofctlExec("dump-flows", "br-int")
+		if err != nil {
+			return false, nil
+		}
+		return strings.Contains(stdout, ifInfo.IP.IP.String()), nil
+	})
+	if err != nil {
+		return nil, fmt.Errorf("timed out dumping br-int flow entries for sandbox: %v", err)
 	}
 
 	return []*current.Interface{hostIface, contIface}, nil

@@ -154,7 +154,7 @@ var _ = Describe("Hybrid Overlay Node Linux Operations", func() {
 			stopChan := make(chan struct{})
 			f, err := factory.NewWatchFactory(fakeClient, stopChan)
 			Expect(err).NotTo(HaveOccurred())
-			defer f.Shutdown()
+			defer close(stopChan)
 
 			n, err := NewNode(fakeClient, thisNode)
 			Expect(err).NotTo(HaveOccurred())
@@ -200,7 +200,7 @@ var _ = Describe("Hybrid Overlay Node Linux Operations", func() {
 			stopChan := make(chan struct{})
 			f, err := factory.NewWatchFactory(fakeClient, stopChan)
 			Expect(err).NotTo(HaveOccurred())
-			defer f.Shutdown()
+			defer close(stopChan)
 
 			n, err := NewNode(fakeClient, thisNode)
 			Expect(err).NotTo(HaveOccurred())
@@ -242,7 +242,7 @@ var _ = Describe("Hybrid Overlay Node Linux Operations", func() {
 			stopChan := make(chan struct{})
 			f, err := factory.NewWatchFactory(fakeClient, stopChan)
 			Expect(err).NotTo(HaveOccurred())
-			defer f.Shutdown()
+			defer close(stopChan)
 
 			n, err := NewNode(fakeClient, thisNode)
 			Expect(err).NotTo(HaveOccurred())
@@ -302,7 +302,7 @@ var _ = Describe("Hybrid Overlay Node Linux Operations", func() {
 			stopChan := make(chan struct{})
 			f, err := factory.NewWatchFactory(fakeClient, stopChan)
 			Expect(err).NotTo(HaveOccurred())
-			defer f.Shutdown()
+			defer close(stopChan)
 
 			n, err := NewNode(fakeClient, thisNode)
 			Expect(err).NotTo(HaveOccurred())
@@ -351,7 +351,7 @@ var _ = Describe("Hybrid Overlay Node Linux Operations", func() {
 			stopChan := make(chan struct{})
 			f, err := factory.NewWatchFactory(fakeClient, stopChan)
 			Expect(err).NotTo(HaveOccurred())
-			defer f.Shutdown()
+			defer close(stopChan)
 
 			n, err := NewNode(fakeClient, thisNode)
 			Expect(err).NotTo(HaveOccurred())
@@ -395,7 +395,7 @@ var _ = Describe("Hybrid Overlay Node Linux Operations", func() {
 			stopChan := make(chan struct{})
 			f, err := factory.NewWatchFactory(fakeClient, stopChan)
 			Expect(err).NotTo(HaveOccurred())
-			defer f.Shutdown()
+			defer close(stopChan)
 
 			n, err := NewNode(fakeClient, thisNode)
 			Expect(err).NotTo(HaveOccurred())
@@ -445,7 +445,7 @@ var _ = Describe("Hybrid Overlay Node Linux Operations", func() {
 			stopChan := make(chan struct{})
 			f, err := factory.NewWatchFactory(fakeClient, stopChan)
 			Expect(err).NotTo(HaveOccurred())
-			defer f.Shutdown()
+			defer close(stopChan)
 
 			n, err := NewNode(fakeClient, thisNode)
 			Expect(err).NotTo(HaveOccurred())

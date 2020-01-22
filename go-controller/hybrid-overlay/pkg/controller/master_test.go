@@ -101,7 +101,7 @@ var _ = Describe("Hybrid SDN Master Operations", func() {
 			stopChan := make(chan struct{})
 			f, err := factory.NewWatchFactory(fakeClient, stopChan)
 			Expect(err).NotTo(HaveOccurred())
-			defer f.Shutdown()
+			defer close(stopChan)
 
 			m, err := NewMaster(fakeClient, extCIDR)
 			Expect(err).NotTo(HaveOccurred())
@@ -143,7 +143,7 @@ var _ = Describe("Hybrid SDN Master Operations", func() {
 			stopChan := make(chan struct{})
 			f, err := factory.NewWatchFactory(fakeClient, stopChan)
 			Expect(err).NotTo(HaveOccurred())
-			defer f.Shutdown()
+			defer close(stopChan)
 
 			m, err := NewMaster(fakeClient, extCIDR)
 			Expect(err).NotTo(HaveOccurred())
@@ -191,7 +191,7 @@ var _ = Describe("Hybrid SDN Master Operations", func() {
 			stopChan := make(chan struct{})
 			f, err := factory.NewWatchFactory(fakeClient, stopChan)
 			Expect(err).NotTo(HaveOccurred())
-			defer f.Shutdown()
+			defer close(stopChan)
 
 			m, err := NewMaster(fakeClient, extCIDR)
 			Expect(err).NotTo(HaveOccurred())
@@ -238,7 +238,7 @@ var _ = Describe("Hybrid SDN Master Operations", func() {
 			stopChan := make(chan struct{})
 			f, err := factory.NewWatchFactory(fakeClient, stopChan)
 			Expect(err).NotTo(HaveOccurred())
-			defer f.Shutdown()
+			defer close(stopChan)
 
 			m, err := NewMaster(fakeClient, extCIDR)
 			Expect(err).NotTo(HaveOccurred())
@@ -288,7 +288,7 @@ var _ = Describe("Hybrid SDN Master Operations", func() {
 			stopChan := make(chan struct{})
 			f, err := factory.NewWatchFactory(fakeClient, stopChan)
 			Expect(err).NotTo(HaveOccurred())
-			defer f.Shutdown()
+			defer close(stopChan)
 
 			m, err := NewMaster(fakeClient, extCIDR)
 			Expect(err).NotTo(HaveOccurred())

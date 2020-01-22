@@ -235,9 +235,9 @@ func addDefaultConntrackRules(nodeName, gwBridge, gwIntf string) error {
 			"error: %v", gwBridge, stderr, err)
 	}
 
-	// table 1, all other connections go to the bridge interface.
+	// table 1, all other connections do normal processing
 	_, stderr, err = util.RunOVSOfctl("add-flow", gwBridge,
-		"priority=0, table=1, actions=output:LOCAL")
+		"priority=0, table=1, actions=output:NORMAL")
 	if err != nil {
 		return fmt.Errorf("Failed to add openflow flow to %s, stderr: %q, "+
 			"error: %v", gwBridge, stderr, err)

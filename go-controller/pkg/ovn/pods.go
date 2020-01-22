@@ -26,7 +26,8 @@ func (oc *Controller) syncPods(pods []interface{}) {
 			logrus.Errorf("Spurious object in syncPods: %v", podInterface)
 			continue
 		}
-		if podScheduled(pod) && podWantsNetwork(pod) {
+		_, err := util.UnmarshalPodAnnotation(pod.Annotations)
+		if podScheduled(pod) && podWantsNetwork(pod) && err == nil {
 			logicalPort := podLogicalPortName(pod)
 			expectedLogicalPorts[logicalPort] = true
 		}
@@ -222,12 +223,58 @@ func (oc *Controller) waitForNodeLogicalSwitch(nodeName string) error {
 	oc.lsMutex.Lock()
 	defer oc.lsMutex.Unlock()
 	if !oc.logicalSwitchCache[nodeName] {
-		if err := oc.addAllowACLFromNode(nodeName, subnet); err != nil {
+		if err := addAllowACLFromNode(nodeName, subnet); err != nil {
 			return err
 		}
 		oc.logicalSwitchCache[nodeName] = true
 	}
 	return nil
+}
+
+func getPodAddresses(portName string) (net.HardwareAddr, net.IP, bool, error) {
+	podMac, podIP, err := util.GetPortAddresses(portName)
+	if err != nil {
+		return nil, nil, false, err
+	}
+	if podMac == nil || podIP == nil {
+		// wait longer
+		return nil, nil, false, nil
+	}
+	return podMac, podIP, true, nil
+}
+
+func waitForPodAddresses(portName string) (net.HardwareAddr, net.IP, error) {
+	var (
+		podMac net.HardwareAddr
+		podIP  net.IP
+		done   bool
+		err    error
+	)
+
+	// First try to get the pod addresses quickly using exponential backoff,
+	// then after about 2 seconds fall back to polling every second.
+	err = wait.ExponentialBackoff(
+		wait.Backoff{
+			Duration: 50 * time.Millisecond,
+			Steps:    4,
+			Factor:   2.1,
+			Jitter:   0.1},
+		func() (bool, error) {
+			podMac, podIP, done, err = getPodAddresses(portName)
+			return done, err
+		})
+	if err == wait.ErrWaitTimeout {
+		err = wait.PollImmediate(time.Second, 30*time.Second, func() (bool, error) {
+			podMac, podIP, done, err = getPodAddresses(portName)
+			return done, err
+		})
+	}
+
+	if err != nil || podMac == nil || podIP == nil {
+		return nil, nil, fmt.Errorf("Error while obtaining addresses for %s: %v", portName, err)
+	}
+
+	return podMac, podIP, nil
 }
 
 func (oc *Controller) addLogicalPort(pod *kapi.Pod) error {
@@ -249,37 +296,39 @@ func (oc *Controller) addLogicalPort(pod *kapi.Pod) error {
 	logrus.Debugf("Creating logical port for %s on switch %s", portName, logicalSwitch)
 
 	annotation, err := util.UnmarshalPodAnnotation(pod.Annotations)
-	annotationsSet := (err == nil)
 	// If pod already has annotations, just add the lsp with static ip/mac.
 	// Else, create the lsp with dynamic addresses.
 	if err == nil {
-		out, stderr, err = util.RunOVNNbctl("--may-exist", "lsp-add",
-			logicalSwitch, portName, "--", "lsp-set-addresses", portName,
-			fmt.Sprintf("%s %s", annotation.MAC, annotation.IP.IP), "--", "set",
-			"logical_switch_port", portName,
-			"external-ids:namespace="+pod.Namespace,
-			"external-ids:logical_switch="+logicalSwitch,
-			"external-ids:pod=true", "--", "--if-exists",
-			"clear", "logical_switch_port", portName, "dynamic_addresses")
+		out, stderr, err = util.RunOVNNbctl(
+			"--may-exist", "lsp-add", logicalSwitch, portName,
+			"--", "lsp-set-addresses", portName, fmt.Sprintf("%s %s", annotation.MAC, annotation.IP.IP),
+			"--", "set", "logical_switch_port", portName, "external-ids:namespace="+pod.Namespace,
+			"external-ids:logical_switch="+logicalSwitch, "external-ids:pod=true",
+			"--", "--if-exists", "clear", "logical_switch_port", portName, "dynamic_addresses")
 		if err != nil {
 			return fmt.Errorf("Failed to add logical port to switch "+
-				"stdout: %q, stderr: %q (%v)",
-				out, stderr, err)
+				"stdout: %q, stderr: %q (%v)", out, stderr, err)
 		}
-	} else {
-		out, stderr, err = util.RunOVNNbctl("--wait=sb", "--",
-			"--may-exist", "lsp-add", logicalSwitch, portName,
-			"--", "lsp-set-addresses",
-			portName, "dynamic", "--", "set",
-			"logical_switch_port", portName,
-			"external-ids:namespace="+pod.Namespace,
-			"external-ids:logical_switch="+logicalSwitch,
-			"external-ids:pod=true")
+		// now set the port security for the logical switch port
+		out, stderr, err = util.RunOVNNbctl("lsp-set-port-security", portName,
+			fmt.Sprintf("%s %s", annotation.MAC, annotation.IP))
 		if err != nil {
-			return fmt.Errorf("Error while creating logical port %s "+
-				"stdout: %q, stderr: %q (%v)",
-				portName, out, stderr, err)
+			return fmt.Errorf("error while setting port security for logical port %s "+
+				"stdout: %q, stderr: %q (%v)", portName, out, stderr, err)
 		}
+		oc.logicalPortCache[portName] = logicalSwitch
+		oc.addPodToNamespace(pod.Namespace, annotation.IP.IP, portName)
+		return nil
+	}
+
+	out, stderr, err = util.RunOVNNbctl(
+		"--", "--may-exist", "lsp-add", logicalSwitch, portName,
+		"--", "lsp-set-addresses", portName, "dynamic",
+		"--", "set", "logical_switch_port", portName, "external-ids:namespace="+pod.Namespace,
+		"external-ids:logical_switch="+logicalSwitch, "external-ids:pod=true")
+	if err != nil {
+		return fmt.Errorf("Error while creating logical port %s stdout: %q, stderr: %q (%v)",
+			portName, out, stderr, err)
 	}
 
 	oc.logicalPortCache[portName] = logicalSwitch
@@ -289,23 +338,9 @@ func (oc *Controller) addLogicalPort(pod *kapi.Pod) error {
 		return fmt.Errorf("Error obtaining gateway address for switch %s", logicalSwitch)
 	}
 
-	var podMac net.HardwareAddr
-	var podIP net.IP
-	count := 30
-	for count > 0 {
-		podMac, podIP, err = util.GetPortAddresses(portName)
-		if err == nil && podMac != nil && podIP != nil {
-			break
-		}
-		if err != nil {
-			return fmt.Errorf("Error while obtaining addresses for %s - %v", portName, err)
-		}
-		time.Sleep(time.Second)
-		count--
-	}
-	if count == 0 {
-		return fmt.Errorf("Error while obtaining addresses for %s "+
-			"stdout: %q, stderr: %q, (%v)", portName, out, stderr, err)
+	podMac, podIP, err := waitForPodAddresses(portName)
+	if err != nil {
+		return err
 	}
 
 	podCIDR := &net.IPNet{IP: podIP, Mask: gatewayIP.Mask}
@@ -351,11 +386,8 @@ func (oc *Controller) addLogicalPort(pod *kapi.Pod) error {
 		return fmt.Errorf("failed to set annotation on pod %s - %v", pod.Name, err)
 	}
 
-	// If we're setting the annotation for the first time, observe the creation
-	// latency metric.
-	if !annotationsSet {
-		recordPodCreated(pod)
-	}
+	// observe the pod creation latency metric.
+	recordPodCreated(pod)
 
 	return nil
 }

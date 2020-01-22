@@ -60,7 +60,7 @@ func (oc *Controller) forEachAddressSetUnhashedName(iteratorFn func(
 	return nil
 }
 
-func (oc *Controller) setAddressSet(hashName string, addresses []string) {
+func setAddressSet(hashName string, addresses []string) {
 	logrus.Debugf("setAddressSet for %s with %s", hashName, addresses)
 	if len(addresses) == 0 {
 		_, stderr, err := util.RunOVNNbctl("clear", "address_set",
@@ -81,7 +81,7 @@ func (oc *Controller) setAddressSet(hashName string, addresses []string) {
 	}
 }
 
-func (oc *Controller) createAddressSet(name string, hashName string,
+func createAddressSet(name string, hashName string,
 	addresses []string) {
 	logrus.Debugf("createAddressSet with %s and %s", name, addresses)
 	addressSet, stderr, err := util.RunOVNNbctl("--data=bare",
@@ -135,7 +135,7 @@ func (oc *Controller) createAddressSet(name string, hashName string,
 	}
 }
 
-func (oc *Controller) deleteAddressSet(hashName string) {
+func deleteAddressSet(hashName string) {
 	logrus.Debugf("deleteAddressSet %s", hashName)
 
 	_, stderr, err := util.RunOVNNbctl("--if-exists", "destroy",
@@ -147,8 +147,7 @@ func (oc *Controller) deleteAddressSet(hashName string) {
 	}
 }
 
-func (oc *Controller) createPortGroup(name string,
-	hashName string) (string, error) {
+func createPortGroup(name string, hashName string) (string, error) {
 	logrus.Debugf("createPortGroup with %s", name)
 	portGroup, stderr, err := util.RunOVNNbctl("--data=bare",
 		"--no-heading", "--columns=_uuid", "find", "port_group",
@@ -173,7 +172,7 @@ func (oc *Controller) createPortGroup(name string,
 	return portGroup, nil
 }
 
-func (oc *Controller) deletePortGroup(hashName string) {
+func deletePortGroup(hashName string) {
 	logrus.Debugf("deletePortGroup %s", hashName)
 
 	portGroup, stderr, err := util.RunOVNNbctl("--data=bare",

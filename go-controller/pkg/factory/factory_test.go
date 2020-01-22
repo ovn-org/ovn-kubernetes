@@ -1,6 +1,7 @@
 package factory
 
 import (
+	"fmt"
 	"reflect"
 	"testing"
 
@@ -192,7 +193,7 @@ var _ = Describe("Watch Factory Operations", func() {
 			Expect(err).NotTo(HaveOccurred())
 			Expect(h).NotTo(BeNil())
 			wf.removeHandler(objType, h)
-			wf.Shutdown()
+			close(stop)
 		}
 
 		It("is called for each existing pod", func() {
@@ -259,7 +260,7 @@ var _ = Describe("Watch Factory Operations", func() {
 			Expect(err).NotTo(HaveOccurred())
 			Expect(numAdded).To(Equal(2))
 			wf.removeHandler(objType, h)
-			wf.Shutdown()
+			close(stop)
 		}
 
 		It("calls ADD for each existing pod", func() {
@@ -358,7 +359,78 @@ var _ = Describe("Watch Factory Operations", func() {
 		Eventually(func() int { return numDeleted }, 2).Should(Equal(1))
 
 		wf.RemovePodHandler(h)
-		wf.Shutdown()
+		close(stop)
+	})
+
+	It("responds to multiple pod add/update/delete events", func() {
+		wf, err := NewWatchFactory(fakeClient, stop)
+		Expect(err).NotTo(HaveOccurred())
+
+		const nodeName string = "mynode"
+		type opTest struct {
+			pod     *v1.Pod
+			added   int
+			updated int
+			deleted int
+		}
+		testPods := make(map[string]*opTest)
+
+		for i := 0; i < 5; i++ {
+			name := fmt.Sprintf("mypod-%d", i)
+			pod := newPod(name, fmt.Sprintf("namespace-%d", i))
+			testPods[name] = &opTest{pod: pod}
+		}
+
+		h := addHandler(wf, podType, cache.ResourceEventHandlerFuncs{
+			AddFunc: func(obj interface{}) {
+				pod := obj.(*v1.Pod)
+				ot, ok := testPods[pod.Name]
+				Expect(ok).To(BeTrue())
+				Expect(ot.added).To(BeNumerically("<", 2))
+				ot.added++
+			},
+			UpdateFunc: func(old, new interface{}) {
+				newPod := new.(*v1.Pod)
+				ot, ok := testPods[newPod.Name]
+				Expect(ok).To(BeTrue())
+				Expect(ot.updated).To(BeNumerically("<", 2))
+				ot.updated++
+				Expect(newPod.Spec.NodeName).To(Equal(nodeName))
+			},
+			DeleteFunc: func(obj interface{}) {
+				pod := obj.(*v1.Pod)
+				ot, ok := testPods[pod.Name]
+				Expect(ok).To(BeTrue())
+				Expect(ot.deleted).To(BeNumerically("<", 2))
+				ot.deleted++
+			},
+		})
+
+		// Add/Update/Delete each pod twice
+		for i := 0; i < 2; i++ {
+			for _, ot := range testPods {
+				pods = append(pods, ot.pod)
+				podWatch.Add(ot.pod)
+				ot.pod.Spec.NodeName = nodeName
+				podWatch.Modify(ot.pod)
+				pods = pods[:0]
+				podWatch.Delete(ot.pod)
+			}
+		}
+
+		// Ensure total number of each operation is 10; and each
+		// node's individual operation count is 2
+		Eventually(func() int { return numAdded }, 2).Should(Equal(10))
+		Eventually(func() int { return numUpdated }, 2).Should(Equal(10))
+		Eventually(func() int { return numDeleted }, 2).Should(Equal(10))
+		for _, ot := range testPods {
+			Expect(ot.added).Should(Equal(2))
+			Expect(ot.updated).Should(Equal(2))
+			Expect(ot.deleted).Should(Equal(2))
+		}
+
+		wf.removeHandler(podType, h)
+		close(stop)
 	})
 
 	It("responds to namespace add/update/delete events", func() {
@@ -393,7 +465,7 @@ var _ = Describe("Watch Factory Operations", func() {
 		Eventually(func() int { return numDeleted }, 2).Should(Equal(1))
 
 		wf.RemoveNamespaceHandler(h)
-		wf.Shutdown()
+		close(stop)
 	})
 
 	It("responds to node add/update/delete events", func() {
@@ -428,7 +500,77 @@ var _ = Describe("Watch Factory Operations", func() {
 		Eventually(func() int { return numDeleted }, 2).Should(Equal(1))
 
 		wf.removeHandler(nodeType, h)
-		wf.Shutdown()
+		close(stop)
+	})
+
+	It("responds to multiple node add/update/delete events", func() {
+		wf, err := NewWatchFactory(fakeClient, stop)
+		Expect(err).NotTo(HaveOccurred())
+
+		type opTest struct {
+			node    *v1.Node
+			added   int
+			updated int
+			deleted int
+		}
+		testNodes := make(map[string]*opTest)
+
+		for i := 0; i < 5; i++ {
+			name := fmt.Sprintf("mynode-%d", i)
+			node := newNode(name)
+			testNodes[name] = &opTest{node: node}
+		}
+
+		h := addHandler(wf, nodeType, cache.ResourceEventHandlerFuncs{
+			AddFunc: func(obj interface{}) {
+				node := obj.(*v1.Node)
+				ot, ok := testNodes[node.Name]
+				Expect(ok).To(BeTrue())
+				Expect(ot.added).To(BeNumerically("<", 2))
+				ot.added++
+			},
+			UpdateFunc: func(old, new interface{}) {
+				newNode := new.(*v1.Node)
+				ot, ok := testNodes[newNode.Name]
+				Expect(ok).To(BeTrue())
+				Expect(ot.updated).To(BeNumerically("<", 2))
+				ot.updated++
+				Expect(newNode.Status.Phase).To(Equal(v1.NodeTerminated))
+			},
+			DeleteFunc: func(obj interface{}) {
+				node := obj.(*v1.Node)
+				ot, ok := testNodes[node.Name]
+				Expect(ok).To(BeTrue())
+				Expect(ot.deleted).To(BeNumerically("<", 2))
+				ot.deleted++
+			},
+		})
+
+		// Add/Update/Delete each node twice
+		for i := 0; i < 2; i++ {
+			for _, ot := range testNodes {
+				nodes = append(nodes, ot.node)
+				nodeWatch.Add(ot.node)
+				ot.node.Status.Phase = v1.NodeTerminated
+				nodeWatch.Modify(ot.node)
+				nodes = nodes[:0]
+				nodeWatch.Delete(ot.node)
+			}
+		}
+
+		// Ensure total number of each operation is 10; and each
+		// node's individual operation count is 2
+		Eventually(func() int { return numAdded }, 2).Should(Equal(10))
+		Eventually(func() int { return numUpdated }, 2).Should(Equal(10))
+		Eventually(func() int { return numDeleted }, 2).Should(Equal(10))
+		for _, ot := range testNodes {
+			Expect(ot.added).Should(Equal(2))
+			Expect(ot.updated).Should(Equal(2))
+			Expect(ot.deleted).Should(Equal(2))
+		}
+
+		wf.removeHandler(nodeType, h)
+		close(stop)
 	})
 
 	It("responds to policy add/update/delete events", func() {
@@ -463,7 +605,7 @@ var _ = Describe("Watch Factory Operations", func() {
 		Eventually(func() int { return numDeleted }, 2).Should(Equal(1))
 
 		wf.removeHandler(policyType, h)
-		wf.Shutdown()
+		close(stop)
 	})
 
 	It("responds to endpoints add/update/delete events", func() {
@@ -505,7 +647,7 @@ var _ = Describe("Watch Factory Operations", func() {
 		Eventually(func() int { return numDeleted }, 2).Should(Equal(1))
 
 		wf.removeHandler(endpointsType, h)
-		wf.Shutdown()
+		close(stop)
 	})
 
 	It("responds to service add/update/delete events", func() {
@@ -540,7 +682,7 @@ var _ = Describe("Watch Factory Operations", func() {
 		Eventually(func() int { return numDeleted }, 2).Should(Equal(1))
 
 		wf.removeHandler(serviceType, h)
-		wf.Shutdown()
+		close(stop)
 	})
 
 	It("stops processing events after the handler is removed", func() {
@@ -571,7 +713,7 @@ var _ = Describe("Watch Factory Operations", func() {
 		namespaceWatch.Delete(added2)
 		Consistently(func() int { return numDeleted }, 2).Should(Equal(0))
 
-		wf.Shutdown()
+		close(stop)
 	})
 
 	It("filters correctly by label and namespace", func() {
@@ -637,7 +779,7 @@ var _ = Describe("Watch Factory Operations", func() {
 		podWatch.Delete(passesFilter)
 		Eventually(func() int { return numDeleted }, 2).Should(Equal(1))
 
-		wf.Shutdown()
+		close(stop)
 	})
 
 	It("correctly handles object updates that cause filter changes", func() {
@@ -690,6 +832,6 @@ var _ = Describe("Watch Factory Operations", func() {
 		Consistently(func() int { return numUpdated }, 2).Should(Equal(0))
 
 		wf.RemovePodHandler(h)
-		wf.Shutdown()
+		close(stop)
 	})
 })
