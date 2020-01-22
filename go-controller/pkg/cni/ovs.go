@@ -7,6 +7,23 @@ import (
 	"strings"
 )
 
+func ofctlExec(args ...string) (string, error) {
+	args = append([]string{"--timeout=30"}, args...)
+	output, err := exec.Command("ovs-ofctl", args...).CombinedOutput()
+	if err != nil {
+		return "", fmt.Errorf("failed to run 'ovs-ofctl %s': %v\n  %q", strings.Join(args, " "), err, string(output))
+	}
+
+	outStr := string(output)
+	trimmed := strings.TrimSpace(outStr)
+	// If output is a single line, strip the trailing newline
+	if strings.Count(trimmed, "\n") == 0 {
+		outStr = trimmed
+	}
+
+	return outStr, nil
+}
+
 func ovsExec(args ...string) (string, error) {
 	args = append([]string{"--timeout=30"}, args...)
 	output, err := exec.Command("ovs-vsctl", args...).CombinedOutput()
