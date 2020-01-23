@@ -619,7 +619,7 @@ service-cidr=172.18.0.0/24
 
 	It("overrides config file and defaults with CLI legacy cluster-subnet option", func() {
 		err := ioutil.WriteFile(cfgFile.Name(), []byte(`[default]
-cluster-subnets=172.18.0.0/24
+cluster-subnets=172.18.0.0/23
 `), 0644)
 		Expect(err).NotTo(HaveOccurred())
 
@@ -629,15 +629,15 @@ cluster-subnets=172.18.0.0/24
 			Expect(err).NotTo(HaveOccurred())
 			Expect(cfgPath).To(Equal(cfgFile.Name()))
 			Expect(Default.ClusterSubnets).To(Equal([]CIDRNetworkEntry{
-				{mustParseCIDR("fd02::/64"), 24},
+				{mustParseCIDR("172.15.0.0/23"), 24},
 			}))
-			Expect(IPv6Mode).To(Equal(true))
+			Expect(IPv6Mode).To(Equal(false))
 			return nil
 		}
 		cliArgs := []string{
 			app.Name,
 			"-config-file=" + cfgFile.Name(),
-			"-cluster-subnet=fd02::/64",
+			"-cluster-subnet=172.15.0.0/23",
 		}
 		err = app.Run(cliArgs)
 		Expect(err).NotTo(HaveOccurred())
