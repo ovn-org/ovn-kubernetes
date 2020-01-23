@@ -26,7 +26,8 @@ func (oc *Controller) syncPods(pods []interface{}) {
 			logrus.Errorf("Spurious object in syncPods: %v", podInterface)
 			continue
 		}
-		if podScheduled(pod) && podWantsNetwork(pod) {
+		_, err := util.UnmarshalPodAnnotation(pod.Annotations)
+		if podScheduled(pod) && podWantsNetwork(pod) && err == nil {
 			logicalPort := podLogicalPortName(pod)
 			expectedLogicalPorts[logicalPort] = true
 		}
@@ -204,20 +205,25 @@ func (oc *Controller) waitForNodeLogicalSwitch(nodeName string) error {
 	// Otherwise wait for the node logical switch to be created by the ClusterController.
 	// The node switch will be created very soon after startup so we should
 	// only be waiting here once per node at most.
+	var subnet string
 	if err := wait.PollImmediate(500*time.Millisecond, 30*time.Second, func() (bool, error) {
-		if _, _, err := util.RunOVNNbctl("get", "logical_switch", nodeName, "other-config"); err != nil {
+		var err error
+		if subnet, _, err = util.RunOVNNbctl("get", "logical_switch", nodeName, "other-config:subnet"); err != nil {
+			return false, nil
+		}
+		if subnet == "" {
 			return false, nil
 		}
 		return true, nil
 	}); err != nil {
-		logrus.Errorf("timed out waiting for node %q logical switch: %v", nodeName, err)
+		logrus.Errorf("timed out waiting for logical switch %q other-config:subnet: %v", nodeName, err)
 		return err
 	}
 
 	oc.lsMutex.Lock()
 	defer oc.lsMutex.Unlock()
 	if !oc.logicalSwitchCache[nodeName] {
-		if err := oc.addAllowACLFromNode(nodeName); err != nil {
+		if err := addAllowACLFromNode(nodeName, subnet); err != nil {
 			return err
 		}
 		oc.logicalSwitchCache[nodeName] = true
@@ -244,37 +250,39 @@ func (oc *Controller) addLogicalPort(pod *kapi.Pod) error {
 	logrus.Debugf("Creating logical port for %s on switch %s", portName, logicalSwitch)
 
 	annotation, err := util.UnmarshalPodAnnotation(pod.Annotations)
-	annotationsSet := (err == nil)
 	// If pod already has annotations, just add the lsp with static ip/mac.
 	// Else, create the lsp with dynamic addresses.
 	if err == nil {
-		out, stderr, err = util.RunOVNNbctl("--may-exist", "lsp-add",
-			logicalSwitch, portName, "--", "lsp-set-addresses", portName,
-			fmt.Sprintf("%s %s", annotation.MAC, annotation.IP.IP), "--", "set",
-			"logical_switch_port", portName,
-			"external-ids:namespace="+pod.Namespace,
-			"external-ids:logical_switch="+logicalSwitch,
-			"external-ids:pod=true", "--", "--if-exists",
-			"clear", "logical_switch_port", portName, "dynamic_addresses")
+		out, stderr, err = util.RunOVNNbctl(
+			"--may-exist", "lsp-add", logicalSwitch, portName,
+			"--", "lsp-set-addresses", portName, fmt.Sprintf("%s %s", annotation.MAC, annotation.IP.IP),
+			"--", "set", "logical_switch_port", portName, "external-ids:namespace="+pod.Namespace,
+			"external-ids:logical_switch="+logicalSwitch, "external-ids:pod=true",
+			"--", "--if-exists", "clear", "logical_switch_port", portName, "dynamic_addresses")
 		if err != nil {
 			return fmt.Errorf("Failed to add logical port to switch "+
-				"stdout: %q, stderr: %q (%v)",
-				out, stderr, err)
+				"stdout: %q, stderr: %q (%v)", out, stderr, err)
 		}
-	} else {
-		out, stderr, err = util.RunOVNNbctl("--wait=sb", "--",
-			"--may-exist", "lsp-add", logicalSwitch, portName,
-			"--", "lsp-set-addresses",
-			portName, "dynamic", "--", "set",
-			"logical_switch_port", portName,
-			"external-ids:namespace="+pod.Namespace,
-			"external-ids:logical_switch="+logicalSwitch,
-			"external-ids:pod=true")
+		// now set the port security for the logical switch port
+		out, stderr, err = util.RunOVNNbctl("lsp-set-port-security", portName,
+			fmt.Sprintf("%s %s", annotation.MAC, annotation.IP))
 		if err != nil {
-			return fmt.Errorf("Error while creating logical port %s "+
-				"stdout: %q, stderr: %q (%v)",
-				portName, out, stderr, err)
+			return fmt.Errorf("error while setting port security for logical port %s "+
+				"stdout: %q, stderr: %q (%v)", portName, out, stderr, err)
 		}
+		oc.logicalPortCache[portName] = logicalSwitch
+		oc.addPodToNamespace(pod.Namespace, annotation.IP.IP, portName)
+		return nil
+	}
+
+	out, stderr, err = util.RunOVNNbctl(
+		"--", "--may-exist", "lsp-add", logicalSwitch, portName,
+		"--", "lsp-set-addresses", portName, "dynamic",
+		"--", "set", "logical_switch_port", portName, "external-ids:namespace="+pod.Namespace,
+		"external-ids:logical_switch="+logicalSwitch, "external-ids:pod=true")
+	if err != nil {
+		return fmt.Errorf("Error while creating logical port %s stdout: %q, stderr: %q (%v)",
+			portName, out, stderr, err)
 	}
 
 	oc.logicalPortCache[portName] = logicalSwitch
@@ -331,11 +339,8 @@ func (oc *Controller) addLogicalPort(pod *kapi.Pod) error {
 		return fmt.Errorf("failed to set annotation on pod %s - %v", pod.Name, err)
 	}
 
-	// If we're setting the annotation for the first time, observe the creation
-	// latency metric.
-	if !annotationsSet {
-		recordPodCreated(pod)
-	}
+	// observe the pod creation latency metric.
+	recordPodCreated(pod)
 
 	return nil
 }

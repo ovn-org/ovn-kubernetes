@@ -244,6 +244,7 @@ var _ = Describe("Config Operations", func() {
 			Expect(Default.ClusterSubnets).To(Equal([]CIDRNetworkEntry{
 				{mustParseCIDR("10.128.0.0/14"), 23},
 			}))
+			Expect(IPv6Mode).To(Equal(false))
 
 			for _, a := range []OvnAuthConfig{OvnNorth, OvnSouth} {
 				Expect(a.Scheme).To(Equal(OvnDBSchemeUnix))
@@ -294,7 +295,7 @@ var _ = Describe("Config Operations", func() {
 			})
 			Expect(err).NotTo(HaveOccurred())
 			Expect(cfgPath).To(Equal(cfgFile.Name()))
-			Expect(fexec.CalledMatchesExpected()).To(BeTrue())
+			Expect(fexec.CalledMatchesExpected()).To(BeTrue(), fexec.ErrorDesc)
 
 			Expect(Kubernetes.APIServer).To(Equal("https://somewhere.com:8081"))
 			Expect(Kubernetes.CACert).To(Equal(fname))
@@ -358,7 +359,7 @@ var _ = Describe("Config Operations", func() {
 			})
 			Expect(err).NotTo(HaveOccurred())
 			Expect(cfgPath).To(Equal(cfgFile.Name()))
-			Expect(fexec.CalledMatchesExpected()).To(BeTrue())
+			Expect(fexec.CalledMatchesExpected()).To(BeTrue(), fexec.ErrorDesc)
 
 			Expect(Kubernetes.APIServer).To(Equal("https://somewhere.com:8081"))
 			Expect(Kubernetes.CACert).To(Equal(fname))
@@ -628,14 +629,15 @@ cluster-subnets=172.18.0.0/24
 			Expect(err).NotTo(HaveOccurred())
 			Expect(cfgPath).To(Equal(cfgFile.Name()))
 			Expect(Default.ClusterSubnets).To(Equal([]CIDRNetworkEntry{
-				{mustParseCIDR("172.15.0.0/24"), 24},
+				{mustParseCIDR("fd02::/64"), 24},
 			}))
+			Expect(IPv6Mode).To(Equal(true))
 			return nil
 		}
 		cliArgs := []string{
 			app.Name,
 			"-config-file=" + cfgFile.Name(),
-			"-cluster-subnet=172.15.0.0/24",
+			"-cluster-subnet=fd02::/64",
 		}
 		err = app.Run(cliArgs)
 		Expect(err).NotTo(HaveOccurred())
@@ -842,7 +844,7 @@ mode=shared
 			Expect(a.GetURL()).To(Equal(nbURLOVN))
 			err = a.SetDBAuth()
 			Expect(err).NotTo(HaveOccurred())
-			Expect(fexec.CalledMatchesExpected()).To(BeTrue())
+			Expect(fexec.CalledMatchesExpected()).To(BeTrue(), fexec.ErrorDesc)
 		})
 
 		It("configures client southbound SSL correctly", func() {
@@ -875,7 +877,7 @@ mode=shared
 			Expect(a.GetURL()).To(Equal(sbURLOVN))
 			err = a.SetDBAuth()
 			Expect(err).NotTo(HaveOccurred())
-			Expect(fexec.CalledMatchesExpected()).To(BeTrue())
+			Expect(fexec.CalledMatchesExpected()).To(BeTrue(), fexec.ErrorDesc)
 		})
 	})
 

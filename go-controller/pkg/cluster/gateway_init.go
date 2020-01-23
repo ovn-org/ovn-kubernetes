@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"runtime"
+	"strings"
 
 	"net"
 
@@ -87,12 +88,21 @@ func (cluster *OvnClusterController) initGateway(
 	}
 
 	var err error
+	var systemID string
 	var prFn postReadyFn
 	var annotations map[string]map[string]string
 	switch config.Gateway.Mode {
 	case config.GatewayModeLocal:
+		systemID, err = util.GetNodeChassisID()
+		if err != nil {
+			return nil, nil, err
+		}
 		annotations, err = initLocalnetGateway(nodeName, subnet, cluster.watchFactory)
 	case config.GatewayModeShared:
+		systemID, err = util.GetNodeChassisID()
+		if err != nil {
+			return nil, nil, err
+		}
 		gatewayNextHop := config.Gateway.NextHop
 		gatewayIntf := config.Gateway.Interface
 		if gatewayNextHop == "" || gatewayIntf == "" {
@@ -129,7 +139,12 @@ func (cluster *OvnClusterController) initGateway(
 			annotations, nodeName, err)
 	}
 
-	return map[string]string{ovn.OvnNodeL3GatewayConfig: string(bytes)}, prFn, nil
+	nodeAnnotations := map[string]string{ovn.OvnNodeL3GatewayConfig: string(bytes)}
+	if systemID != "" {
+		nodeAnnotations[ovn.OvnNodeChassisID] = systemID
+	}
+
+	return nodeAnnotations, prFn, nil
 }
 
 // CleanupClusterNode cleans up OVS resources on the k8s node on ovnkube-node daemonset deletion.
@@ -162,14 +177,19 @@ func CleanupClusterNode(name string) error {
 	return nil
 }
 
-// GatewayReady will check to see if the gateway was created
+// GatewayReady will check to see if we have successfully added SNAT OpenFlow rules in the L3Gateway Routers
 func GatewayReady(nodeName string, portName string) (bool, error) {
-
-	gatewayRouter := "GR_" + nodeName
-	stdout, stderr, err := util.RunOVNNbctl("lsp-get-addresses", "etor-"+gatewayRouter)
-	// Did master create etor-GR_nodeName port on ls?
-	if err != nil || stdout == "" || stderr != "" {
-		return false, nil
+	// OpenFlow table 41 performs SNATing of packets that are heading to physical network from
+	// logical network.
+	for _, clusterSubnet := range config.Default.ClusterSubnets {
+		stdout, _, err := util.RunOVSOfctl("--no-stats", "--no-names", "dump-flows", "br-int",
+			"table=41,ip,nw_src="+clusterSubnet.CIDR.String())
+		if err != nil {
+			return false, nil
+		}
+		if !strings.Contains(stdout, "nw_src="+clusterSubnet.CIDR.String()) {
+			return false, nil
+		}
 	}
 	return true, nil
 }

@@ -39,7 +39,8 @@ var (
 		EncapType:         "geneve",
 		EncapIP:           "",
 		EncapPort:         DefaultEncapPort,
-		InactivityProbe:   100000,
+		InactivityProbe:   100000, // in Milliseconds
+		OpenFlowProbe:     180,    // in Seconds
 		RawClusterSubnets: "10.128.0.0/14/23",
 	}
 
@@ -90,6 +91,9 @@ var (
 
 	// EnableMulticast enables multicast support between the pods within the same namespace
 	EnableMulticast bool
+
+	// IPv6Mode captures whether we are using IPv6 for OVN logical topology
+	IPv6Mode bool
 )
 
 const (
@@ -118,6 +122,9 @@ type DefaultConfig struct {
 	// Maximum number of milliseconds of idle time on connection that
 	// ovn-controller waits before it will send a connection health probe.
 	InactivityProbe int `gcfg:"inactivity-probe"`
+	// Maximum number of seconds of idle time on the OpenFlow connection
+	// that ovn-controller will wait before it sends a connection health probe
+	OpenFlowProbe int `gcfg:"openflow-probe"`
 	// RawClusterSubnets holds the unparsed cluster subnets. Should only be
 	// used inside config module.
 	RawClusterSubnets string `gcfg:"cluster-subnets"`
@@ -153,6 +160,7 @@ type KubernetesConfig struct {
 	ServiceCIDR        string `gcfg:"service-cidr"`
 	OVNConfigNamespace string `gcfg:"ovn-config-namespace"`
 	MetricsBindAddress string `gcfg:"metrics-bind-address"`
+	MetricsEnablePprof bool   `gcfg:"metrics-enable-pprof"`
 	OVNEmptyLbEvents   bool   `gcfg:"ovn-empty-lb-events"`
 	PodIP              string `gcfg:"pod-ip"`
 }
@@ -405,6 +413,12 @@ var CommonFlags = []cli.Flag{
 			"connection for ovn-controller before it sends a inactivity probe",
 		Destination: &cliConfig.Default.InactivityProbe,
 	},
+	cli.IntFlag{
+		Name: "openflow-probe",
+		Usage: "Maximum number of seconds of idle time on the openflow " +
+			"connection for ovn-controller before it sends a inactivity probe",
+		Destination: &cliConfig.Default.OpenFlowProbe,
+	},
 	cli.StringFlag{
 		Name:        "cluster-subnet",
 		Usage:       "Deprecated alias for cluster-subnets.",
@@ -515,6 +529,11 @@ var K8sFlags = []cli.Flag{
 		Name:        "metrics-bind-address",
 		Usage:       "The IP address and port for the metrics server to serve on (set to 0.0.0.0 for all IPv4 interfaces)",
 		Destination: &cliConfig.Kubernetes.MetricsBindAddress,
+	},
+	cli.BoolFlag{
+		Name:        "metrics-enable-pprof",
+		Usage:       "If true, then also accept pprof requests on the metrics port.",
+		Destination: &cliConfig.Kubernetes.MetricsEnablePprof,
 	},
 	cli.BoolFlag{
 		Name: "ovn-empty-lb-events",
@@ -918,6 +937,15 @@ func buildDefaultConfig(cli, file *config) error {
 	return nil
 }
 
+// OtherConfigSubnet returns "other-config:subnet" for IPv4 clusters, and
+// "other-config:ipv6_prefix" for IPv6 clusters
+func OtherConfigSubnet() string {
+	if IPv6Mode {
+		return "other-config:ipv6_prefix"
+	}
+	return "other-config:subnet"
+}
+
 // getConfigFilePath returns config file path and 'true' if the config file is
 // the fallback path (eg not given by the user), 'false' if given explicitly
 // by the user
@@ -1044,6 +1072,12 @@ func initConfigWithPath(ctx *cli.Context, exec kexec.Interface, saPath string, d
 		return "", err
 	}
 	OvnSouth = *tmpAuth
+
+	// Determine if ovn-kubernetes is configured to run in IPv6 mode
+	IPv6Mode = false
+	if len(Default.ClusterSubnets) >= 1 && Default.ClusterSubnets[0].CIDR.IP.To4() == nil {
+		IPv6Mode = true
+	}
 
 	logrus.Debugf("Default config: %+v", Default)
 	logrus.Debugf("Logging config: %+v", Logging)

@@ -27,7 +27,7 @@ KIND=""
 # Parse parameters given as arguments to this script.
 while [ "$1" != "" ]; do
     PARAM=`echo $1 | awk -F= '{print $1}'`
-    VALUE=`echo $1 | awk -F= '{print $2}'`
+    VALUE=`echo $1 | cut -d= -f2-`
     case $PARAM in
         --image)
             OVN_IMAGE=$VALUE

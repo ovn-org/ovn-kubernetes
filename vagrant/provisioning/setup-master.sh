@@ -210,7 +210,6 @@ if [ "$DAEMONSET" != "true" ]; then
    -logfile="/var/log/ovn-kubernetes/ovnkube.log" \
    -init-master="k8smaster" -cluster-subnets="192.168.0.0/16" \
    -init-node="k8smaster" \
-   -nodeport \
    -nb-address="$ovn_nb" \
    -sb-address="$ovn_sb" \
    -init-gateways -gateway-local \

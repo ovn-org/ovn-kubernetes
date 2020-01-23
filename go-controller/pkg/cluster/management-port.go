@@ -13,6 +13,7 @@ import (
 func createManagementPortGeneric(nodeName string, localSubnet *net.IPNet) (string, string, string, string, string, error) {
 	// Retrieve the routerIP and mangementPortIP for a given localSubnet
 	routerIP, portIP := util.GetNodeWellKnownAddresses(localSubnet)
+	routerMac := util.IPAddrToHWAddr(routerIP.IP)
 
 	// Kubernetes emits events when pods are created. The event will contain
 	// only lowercase letters of the hostname even though the kubelet is
@@ -48,22 +49,36 @@ func createManagementPortGeneric(nodeName string, localSubnet *net.IPNet) (strin
 		logrus.Errorf("Failed to get management port MAC address: %v", err)
 		return "", "", "", "", "", err
 	}
-
-	// switch-to-router ports only have MAC address and nothing else.
-	routerMac, stderr, err := util.RunOVNNbctl("lsp-get-addresses", "stor-"+nodeName)
+	// persist the MAC address so that upon node reboot we get back the same mac address.
+	_, stderr, err = util.RunOVSVsctl("set", "interface", interfaceName,
+		fmt.Sprintf("mac=%s", strings.ReplaceAll(macAddress, ":", "\\:")))
 	if err != nil {
-		logrus.Errorf("Failed to retrieve the MAC address of the logical port, stderr: %q, error: %v",
-			stderr, err)
+		logrus.Errorf("failed to persist MAC address %q for %q: stderr:%s (%v)", macAddress,
+			interfaceName, stderr, err)
 		return "", "", "", "", "", err
 	}
 
 	return interfaceName, portIP.String(), macAddress, routerIP.IP.String(), routerMac, nil
 }
 
-// ManagementPortReady will check to see if the portMac was created
+// ManagementPortReady will check to see if OpenFlow rules for management port has been created
 func ManagementPortReady(nodeName string, portName string) (bool, error) {
-	portMac, portIP, err := util.GetPortAddresses(portName)
-	if err != nil || portMac == nil || portIP == nil {
+	// Get the OVS interface name for the Management Port
+	interfaceName := util.GetK8sMgmtIntfName(nodeName)
+	ofport, _, err := util.RunOVSVsctl("--if-exists", "get", "interface", interfaceName, "ofport")
+	if err != nil {
+		return false, nil
+	}
+
+	// OpenFlow table 65 performs logical-to-physical translation. It matches the packet’s logical
+	// egress  port. Its actions output the packet to the port attached to the OVN integration bridge
+	// that represents that logical  port.
+	stdout, _, err := util.RunOVSOfctl("--no-stats", "--no-names", "dump-flows", "br-int",
+		"table=65,out_port="+ofport)
+	if err != nil {
+		return false, nil
+	}
+	if !strings.Contains(stdout, "actions=output:"+ofport) {
 		return false, nil
 	}
 	return true, nil

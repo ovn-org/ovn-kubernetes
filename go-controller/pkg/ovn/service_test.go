@@ -102,7 +102,11 @@ func (s service) delCmds(fexec *ovntest.FakeExec, service v1.Service) {
 }
 
 var _ = Describe("OVN Namespace Operations", func() {
-	var app *cli.App
+	var (
+		app     *cli.App
+		fakeOvn *FakeOVN
+		fExec   *ovntest.FakeExec
+	)
 
 	BeforeEach(func() {
 		// Restore global default values before each testcase
@@ -111,6 +115,13 @@ var _ = Describe("OVN Namespace Operations", func() {
 		app = cli.NewApp()
 		app.Name = "test"
 		app.Flags = config.Flags
+
+		fExec = ovntest.NewFakeExec()
+		fakeOvn = NewFakeOVN(fExec, true)
+	})
+
+	AfterEach(func() {
+		fakeOvn.shutdown()
 	})
 
 	Context("on startup", func() {
@@ -129,11 +140,9 @@ var _ = Describe("OVN Namespace Operations", func() {
 					v1.ServiceTypeClusterIP,
 				)
 
-				fExec := ovntest.NewFakeExec()
 				test.baseCmds(fExec, service)
 
-				fakeOvn := FakeOVN{}
-				fakeOvn.start(ctx, fExec,
+				fakeOvn.start(ctx,
 					&v1.ServiceList{
 						Items: []v1.Service{
 							service,
@@ -144,7 +153,7 @@ var _ = Describe("OVN Namespace Operations", func() {
 
 				_, err := fakeOvn.fakeClient.CoreV1().Services(service.Namespace).Get(service.Name, metav1.GetOptions{})
 				Expect(err).NotTo(HaveOccurred())
-				Expect(fExec.CalledMatchesExpected()).To(BeTrue())
+				Expect(fExec.CalledMatchesExpected()).To(BeTrue(), fExec.ErrorDesc)
 
 				return nil
 			}
@@ -167,11 +176,9 @@ var _ = Describe("OVN Namespace Operations", func() {
 					v1.ServiceTypeClusterIP,
 				)
 
-				fExec := ovntest.NewFakeExec()
 				test.baseCmds(fExec, service)
 
-				fakeOvn := FakeOVN{}
-				fakeOvn.start(ctx, fExec,
+				fakeOvn.start(ctx,
 					&v1.ServiceList{
 						Items: []v1.Service{
 							service,
@@ -182,12 +189,12 @@ var _ = Describe("OVN Namespace Operations", func() {
 
 				_, err := fakeOvn.fakeClient.CoreV1().Services(service.Namespace).Get(service.Name, metav1.GetOptions{})
 				Expect(err).NotTo(HaveOccurred())
-				Expect(fExec.CalledMatchesExpected()).To(BeTrue())
+				Expect(fExec.CalledMatchesExpected()).To(BeTrue(), fExec.ErrorDesc)
 
 				test.delCmds(fExec, service)
 				err = fakeOvn.fakeClient.CoreV1().Services(service.Namespace).Delete(service.Name, metav1.NewDeleteOptions(0))
 				Expect(err).NotTo(HaveOccurred())
-				Eventually(fExec.CalledMatchesExpected).Should(BeTrue())
+				Eventually(fExec.CalledMatchesExpected).Should(BeTrue(), fExec.ErrorDesc)
 
 				s, err := fakeOvn.fakeClient.CoreV1().Services(service.Namespace).Get(service.Name, metav1.GetOptions{})
 				Expect(err).To(HaveOccurred())

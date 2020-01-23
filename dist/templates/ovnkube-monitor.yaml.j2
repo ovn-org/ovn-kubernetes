@@ -34,6 +34,7 @@ spec:
     name: ovnkube-master
   type: ClusterIP
   clusterIP: None
+  publishNotReadyAddresses: true
   ports:
   - name: http-metrics
     port: 9409
@@ -74,6 +75,7 @@ spec:
     name: ovnkube-node
   type: ClusterIP
   clusterIP: None
+  publishNotReadyAddresses: true
   ports:
   - name: http-metrics
     port: 9410

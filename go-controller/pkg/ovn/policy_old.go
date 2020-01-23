@@ -30,9 +30,9 @@ func (oc *Controller) syncNetworkPoliciesOld(networkPolicies []interface{}) {
 		if policyName != "" &&
 			!expectedPolicies[namespaceName][policyName] {
 			// policy doesn't exist on k8s. Delete acl rules from OVN
-			oc.deleteAclsPolicyOld(namespaceName, policyName)
+			deleteAclsPolicyOld(namespaceName, policyName)
 			// delete the address sets for this policy from OVN
-			oc.deleteAddressSet(hashedAddressSet(addrSetName))
+			deleteAddressSet(hashedAddressSet(addrSetName))
 		}
 	})
 	if err != nil {
@@ -40,9 +40,8 @@ func (oc *Controller) syncNetworkPoliciesOld(networkPolicies []interface{}) {
 	}
 }
 
-func (oc *Controller) addACLAllowOld(namespace, policy, logicalSwitch,
-	logicalPort, match, l4Match string, ipBlockCidr bool, gressNum int,
-	policyType knet.PolicyType) {
+func addACLAllowOld(namespace, policy, logicalSwitch, logicalPort, match, l4Match string,
+	ipBlockCidr bool, gressNum int, policyType knet.PolicyType) {
 	var direction, action string
 	direction = toLport
 	if policyType == knet.PolicyTypeIngress {
@@ -93,8 +92,8 @@ func (oc *Controller) addACLAllowOld(namespace, policy, logicalSwitch,
 	}
 }
 
-func (oc *Controller) modifyACLAllowOld(namespace, policy, logicalPort,
-	oldMatch string, newMatch string, gressNum int, policyType knet.PolicyType) {
+func modifyACLAllowOld(namespace, policy, logicalPort, oldMatch string, newMatch string,
+	gressNum int, policyType knet.PolicyType) {
 	uuid, stderr, err := util.RunOVNNbctl("--data=bare", "--no-heading",
 		"--columns=_uuid", "find", "ACL", oldMatch,
 		fmt.Sprintf("external-ids:namespace=%s", namespace),
@@ -122,9 +121,8 @@ func (oc *Controller) modifyACLAllowOld(namespace, policy, logicalPort,
 	}
 }
 
-func (oc *Controller) deleteACLAllowOld(namespace, policy, logicalSwitch,
-	logicalPort, match, l4Match string, ipBlockCidr bool, gressNum int,
-	policyType knet.PolicyType) {
+func deleteACLAllowOld(namespace, policy, logicalSwitch, logicalPort, match, l4Match string,
+	ipBlockCidr bool, gressNum int, policyType knet.PolicyType) {
 	uuid, stderr, err := util.RunOVNNbctl("--data=bare", "--no-heading",
 		"--columns=_uuid", "find", "ACL",
 		fmt.Sprintf("external-ids:l4Match=\"%s\"", l4Match),
@@ -157,8 +155,8 @@ func (oc *Controller) deleteACLAllowOld(namespace, policy, logicalSwitch,
 	}
 }
 
-func (oc *Controller) addIPBlockACLDenyOld(namespace, policy, logicalSwitch,
-	logicalPort, except, priority string, policyType knet.PolicyType) {
+func addIPBlockACLDenyOld(namespace, policy, logicalSwitch, logicalPort, except, priority string,
+	policyType knet.PolicyType) {
 	var match, l3Match, direction, lportMatch string
 	direction = toLport
 	if policyType == knet.PolicyTypeIngress {
@@ -205,8 +203,8 @@ func (oc *Controller) addIPBlockACLDenyOld(namespace, policy, logicalSwitch,
 	}
 }
 
-func (oc *Controller) deleteIPBlockACLDenyOld(namespace, policy,
-	logicalSwitch, logicalPort, except string, policyType knet.PolicyType) {
+func deleteIPBlockACLDenyOld(namespace, policy, logicalSwitch, logicalPort, except string,
+	policyType knet.PolicyType) {
 	var match, lportMatch, l3Match string
 	if policyType == knet.PolicyTypeIngress {
 		lportMatch = fmt.Sprintf("outport == \\\"%s\\\"", logicalPort)
@@ -246,8 +244,7 @@ func (oc *Controller) deleteIPBlockACLDenyOld(namespace, policy,
 	}
 }
 
-func (oc *Controller) addACLDenyOld(namespace, logicalSwitch, logicalPort,
-	priority string, policyType knet.PolicyType) {
+func addACLDenyOld(namespace, logicalSwitch, logicalPort, priority string, policyType knet.PolicyType) {
 	var match, direction string
 	direction = toLport
 	if policyType == knet.PolicyTypeIngress {
@@ -288,8 +285,7 @@ func (oc *Controller) addACLDenyOld(namespace, logicalSwitch, logicalPort,
 	}
 }
 
-func (oc *Controller) deleteACLDenyOld(namespace, logicalSwitch, logicalPort string,
-	policyType knet.PolicyType) {
+func deleteACLDenyOld(namespace, logicalSwitch, logicalPort string, policyType knet.PolicyType) {
 	var match string
 	if policyType == knet.PolicyTypeIngress {
 		match = fmt.Sprintf("match=\"outport == \\\"%s\\\"\"", logicalPort)
@@ -324,7 +320,7 @@ func (oc *Controller) deleteACLDenyOld(namespace, logicalSwitch, logicalPort str
 	}
 }
 
-func (oc *Controller) deleteAclsPolicyOld(namespace, policy string) {
+func deleteAclsPolicyOld(namespace, policy string) {
 	uuids, stderr, err := util.RunOVNNbctl("--data=bare", "--no-heading",
 		"--columns=_uuid", "find", "ACL",
 		fmt.Sprintf("external-ids:namespace=%s", namespace),
@@ -369,10 +365,9 @@ func (oc *Controller) deleteAclsPolicyOld(namespace, policy string) {
 	}
 }
 
-func (oc *Controller) localPodAddOrDelACLOld(addDel string,
-	policy *knet.NetworkPolicy, pod *kapi.Pod, gress *gressPolicy,
-	logicalSwitch string) {
-	logicalPort := fmt.Sprintf("%s_%s", pod.Namespace, pod.Name)
+func localPodAddOrDelACLOld(addDel string, policy *knet.NetworkPolicy, pod *kapi.Pod,
+	gress *gressPolicy, logicalSwitch string) {
+	logicalPort := podLogicalPortName(pod)
 	l3Match := gress.getL3MatchFromAddressSet()
 
 	var lportMatch, cidrMatch string
@@ -387,10 +382,10 @@ func (oc *Controller) localPodAddOrDelACLOld(addDel string,
 	if len(gress.ipBlockCidr) > 0 && len(gress.ipBlockExcept) > 0 {
 		except := fmt.Sprintf("{%s}", strings.Join(gress.ipBlockExcept, ", "))
 		if addDel == addACL {
-			oc.addIPBlockACLDenyOld(policy.Namespace, policy.Name, logicalSwitch,
+			addIPBlockACLDenyOld(policy.Namespace, policy.Name, logicalSwitch,
 				logicalPort, except, ipBlockDenyPriority, gress.policyType)
 		} else {
-			oc.deleteIPBlockACLDenyOld(policy.Namespace, policy.Name,
+			deleteIPBlockACLDenyOld(policy.Namespace, policy.Name,
 				logicalSwitch, logicalPort, except, gress.policyType)
 		}
 	}
@@ -404,22 +399,22 @@ func (oc *Controller) localPodAddOrDelACLOld(addDel string,
 			if len(gress.ipBlockCidr) > 0 {
 				// Add ACL allow rule for IPBlock CIDR
 				cidrMatch = gress.getMatchFromIPBlock(lportMatch, l4Match)
-				oc.addACLAllowOld(policy.Namespace, policy.Name,
+				addACLAllowOld(policy.Namespace, policy.Name,
 					logicalSwitch, logicalPort, cidrMatch, l4Match,
 					true, gress.idx, gress.policyType)
 			}
-			oc.addACLAllowOld(policy.Namespace, policy.Name,
+			addACLAllowOld(policy.Namespace, policy.Name,
 				logicalSwitch, logicalPort, match, l4Match,
 				false, gress.idx, gress.policyType)
 		} else {
 			if len(gress.ipBlockCidr) > 0 {
 				// Delete ACL allow rule for IPBlock CIDR
 				cidrMatch = gress.getMatchFromIPBlock(lportMatch, l4Match)
-				oc.deleteACLAllowOld(policy.Namespace, policy.Name,
+				deleteACLAllowOld(policy.Namespace, policy.Name,
 					logicalSwitch, logicalPort, cidrMatch, l4Match,
 					true, gress.idx, gress.policyType)
 			}
-			oc.deleteACLAllowOld(policy.Namespace, policy.Name,
+			deleteACLAllowOld(policy.Namespace, policy.Name,
 				logicalSwitch, logicalPort, match, l4Match,
 				false, gress.idx, gress.policyType)
 		}
@@ -435,22 +430,22 @@ func (oc *Controller) localPodAddOrDelACLOld(addDel string,
 			if len(gress.ipBlockCidr) > 0 {
 				// Add ACL allow rule for IPBlock CIDR
 				cidrMatch = gress.getMatchFromIPBlock(lportMatch, l4Match)
-				oc.addACLAllowOld(policy.Namespace, policy.Name,
+				addACLAllowOld(policy.Namespace, policy.Name,
 					logicalSwitch, logicalPort, cidrMatch, l4Match,
 					true, gress.idx, gress.policyType)
 			}
-			oc.addACLAllowOld(policy.Namespace, policy.Name,
+			addACLAllowOld(policy.Namespace, policy.Name,
 				pod.Spec.NodeName, logicalPort, match, l4Match,
 				false, gress.idx, gress.policyType)
 		} else {
 			if len(gress.ipBlockCidr) > 0 {
 				// Delete ACL allow rule for IPBlock CIDR
 				cidrMatch = gress.getMatchFromIPBlock(lportMatch, l4Match)
-				oc.deleteACLAllowOld(policy.Namespace, policy.Name,
+				deleteACLAllowOld(policy.Namespace, policy.Name,
 					logicalSwitch, logicalPort, cidrMatch, l4Match,
 					true, gress.idx, gress.policyType)
 			}
-			oc.deleteACLAllowOld(policy.Namespace, policy.Name,
+			deleteACLAllowOld(policy.Namespace, policy.Name,
 				pod.Spec.NodeName, logicalPort, match, l4Match,
 				false, gress.idx, gress.policyType)
 		}
@@ -475,7 +470,7 @@ func (oc *Controller) localPodAddDefaultDenyOld(
 	// Handle condition 1 above.
 	if !(len(policy.Spec.PolicyTypes) == 1 && policy.Spec.PolicyTypes[0] == knet.PolicyTypeEgress) {
 		if oc.lspIngressDenyCache[logicalPort] == 0 {
-			oc.addACLDenyOld(policy.Namespace, logicalSwitch, logicalPort,
+			addACLDenyOld(policy.Namespace, logicalSwitch, logicalPort,
 				defaultDenyPriority, knet.PolicyTypeIngress)
 		}
 		oc.lspIngressDenyCache[logicalPort]++
@@ -485,7 +480,7 @@ func (oc *Controller) localPodAddDefaultDenyOld(
 	if (len(policy.Spec.PolicyTypes) == 1 && policy.Spec.PolicyTypes[0] == knet.PolicyTypeEgress) ||
 		len(policy.Spec.Egress) > 0 || len(policy.Spec.PolicyTypes) == 2 {
 		if oc.lspEgressDenyCache[logicalPort] == 0 {
-			oc.addACLDenyOld(policy.Namespace, logicalSwitch, logicalPort,
+			addACLDenyOld(policy.Namespace, logicalSwitch, logicalPort,
 				defaultDenyPriority, knet.PolicyTypeEgress)
 		}
 		oc.lspEgressDenyCache[logicalPort]++
@@ -502,7 +497,7 @@ func (oc *Controller) localPodDelDefaultDenyOld(
 		if oc.lspIngressDenyCache[logicalPort] > 0 {
 			oc.lspIngressDenyCache[logicalPort]--
 			if oc.lspIngressDenyCache[logicalPort] == 0 {
-				oc.deleteACLDenyOld(policy.Namespace, logicalSwitch,
+				deleteACLDenyOld(policy.Namespace, logicalSwitch,
 					logicalPort, knet.PolicyTypeIngress)
 			}
 		}
@@ -513,7 +508,7 @@ func (oc *Controller) localPodDelDefaultDenyOld(
 		if oc.lspEgressDenyCache[logicalPort] > 0 {
 			oc.lspEgressDenyCache[logicalPort]--
 			if oc.lspEgressDenyCache[logicalPort] == 0 {
-				oc.deleteACLDenyOld(policy.Namespace, logicalSwitch,
+				deleteACLDenyOld(policy.Namespace, logicalSwitch,
 					logicalPort, knet.PolicyTypeEgress)
 			}
 		}
@@ -536,7 +531,7 @@ func (oc *Controller) handleLocalPodSelectorAddFuncOld(
 	}
 
 	// Get the logical port name.
-	logicalPort := fmt.Sprintf("%s_%s", pod.Namespace, pod.Name)
+	logicalPort := podLogicalPortName(pod)
 
 	np.Lock()
 	defer np.Unlock()
@@ -553,11 +548,11 @@ func (oc *Controller) handleLocalPodSelectorAddFuncOld(
 
 	// For each ingress rule, add a ACL
 	for _, ingress := range np.ingressPolicies {
-		oc.localPodAddOrDelACLOld(addACL, policy, pod, ingress, logicalSwitch)
+		localPodAddOrDelACLOld(addACL, policy, pod, ingress, logicalSwitch)
 	}
 	// For each egress rule, add a ACL
 	for _, egress := range np.egressPolicies {
-		oc.localPodAddOrDelACLOld(addACL, policy, pod, egress, logicalSwitch)
+		localPodAddOrDelACLOld(addACL, policy, pod, egress, logicalSwitch)
 	}
 
 	np.localPods[logicalPort] = true
@@ -574,7 +569,7 @@ func (oc *Controller) handleLocalPodSelectorDelFuncOld(
 	}
 
 	// Get the logical port name.
-	logicalPort := fmt.Sprintf("%s_%s", pod.Namespace, pod.Name)
+	logicalPort := podLogicalPortName(pod)
 
 	np.Lock()
 	defer np.Unlock()
@@ -596,11 +591,11 @@ func (oc *Controller) handleLocalPodSelectorDelFuncOld(
 
 	// For each ingress rule, remove the ACL
 	for _, ingress := range np.ingressPolicies {
-		oc.localPodAddOrDelACLOld(deleteACL, policy, pod, ingress, logicalSwitch)
+		localPodAddOrDelACLOld(deleteACL, policy, pod, ingress, logicalSwitch)
 	}
 	// For each egress rule, remove the ACL
 	for _, egress := range np.egressPolicies {
-		oc.localPodAddOrDelACLOld(deleteACL, policy, pod, egress, logicalSwitch)
+		localPodAddOrDelACLOld(deleteACL, policy, pod, egress, logicalSwitch)
 	}
 }
 
@@ -645,7 +640,7 @@ func (oc *Controller) handlePeerNamespaceSelectorModifyOld(
 				lportMatch)
 			newMatch := fmt.Sprintf("match=\"%s && %s\"", newl3Match,
 				lportMatch)
-			oc.modifyACLAllowOld(np.namespace, np.name, logicalPort,
+			modifyACLAllowOld(np.namespace, np.name, logicalPort,
 				oldMatch, newMatch, gress.idx, gress.policyType)
 		}
 		for _, port := range gress.portPolicies {
@@ -657,7 +652,7 @@ func (oc *Controller) handlePeerNamespaceSelectorModifyOld(
 				oldl3Match, l4Match, lportMatch)
 			newMatch := fmt.Sprintf("match=\"%s && %s && %s\"",
 				newl3Match, l4Match, lportMatch)
-			oc.modifyACLAllowOld(np.namespace, np.name, logicalPort,
+			modifyACLAllowOld(np.namespace, np.name, logicalPort,
 				oldMatch, newMatch, gress.idx, gress.policyType)
 		}
 	}
@@ -713,7 +708,7 @@ func (oc *Controller) addNetworkPolicyOld(policy *knet.NetworkPolicy) {
 				policy.Name, "ingress", i)
 
 			hashedLocalAddressSet = hashedAddressSet(localPeerPods)
-			oc.createAddressSet(localPeerPods, hashedLocalAddressSet, nil)
+			createAddressSet(localPeerPods, hashedLocalAddressSet, nil)
 			ingress.addAddressSet(hashedLocalAddressSet)
 		}
 
@@ -770,7 +765,7 @@ func (oc *Controller) addNetworkPolicyOld(policy *knet.NetworkPolicy) {
 				policy.Name, "egress", i)
 
 			hashedLocalAddressSet = hashedAddressSet(localPeerPods)
-			oc.createAddressSet(localPeerPods, hashedLocalAddressSet, nil)
+			createAddressSet(localPeerPods, hashedLocalAddressSet, nil)
 			egress.addAddressSet(hashedLocalAddressSet)
 		}
 
@@ -857,7 +852,7 @@ func (oc *Controller) deleteNetworkPolicyOld(
 		localPeerPods := fmt.Sprintf("%s.%s.%s.%d", policy.Namespace,
 			policy.Name, "ingress", i)
 		hashedAddressSet := hashedAddressSet(localPeerPods)
-		oc.deleteAddressSet(hashedAddressSet)
+		deleteAddressSet(hashedAddressSet)
 	}
 	// Go through each egress rule.  For each egress rule, delete the
 	// addressSet for the local peer pods.
@@ -865,7 +860,7 @@ func (oc *Controller) deleteNetworkPolicyOld(
 		localPeerPods := fmt.Sprintf("%s.%s.%s.%d", policy.Namespace,
 			policy.Name, "egress", i)
 		hashedAddressSet := hashedAddressSet(localPeerPods)
-		oc.deleteAddressSet(hashedAddressSet)
+		deleteAddressSet(hashedAddressSet)
 	}
 
 	// We should now stop all the handlers go routines.
@@ -879,5 +874,5 @@ func (oc *Controller) deleteNetworkPolicyOld(
 	oc.namespacePolicies[policy.Namespace][policy.Name] = nil
 
 	// We should now delete all the ACLs added by this network policy.
-	oc.deleteAclsPolicyOld(policy.Namespace, policy.Name)
+	deleteAclsPolicyOld(policy.Namespace, policy.Name)
 }
