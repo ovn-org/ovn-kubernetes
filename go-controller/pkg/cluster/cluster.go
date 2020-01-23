@@ -8,6 +8,7 @@ import (
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/factory"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/kube"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
+	kapi "k8s.io/api/core/v1"
 	"k8s.io/client-go/kubernetes"
 )
 
@@ -26,14 +27,19 @@ func NewClusterController(kubeClient kubernetes.Interface, wf *factory.WatchFact
 	}
 }
 
-func setupOVNNode(nodeName string) error {
+func setupOVNNode(node *kapi.Node) error {
 	var err error
+
+	nodeName, err := util.GetNodeHostname(node)
+	if err != nil {
+		return fmt.Errorf("failed to obtain hostname from node %q: %v", node.Name, err)
+	}
 
 	nodeIP := config.Default.EncapIP
 	if nodeIP == "" {
-		nodeIP, err = util.GetNodeIP(nodeName)
+		nodeIP, err = util.GetNodeIP(node)
 		if err != nil {
-			return fmt.Errorf("failed to obtain local IP from hostname %q: %v", nodeName, err)
+			return fmt.Errorf("failed to obtain local IP from node %q: %v", node.Name, err)
 		}
 	} else {
 		if ip := net.ParseIP(nodeIP); ip == nil {

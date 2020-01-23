@@ -3,7 +3,6 @@ package util
 import (
 	"encoding/json"
 	"fmt"
-	"net"
 	"strings"
 
 	kapi "k8s.io/api/core/v1"
@@ -11,7 +10,6 @@ import (
 	"k8s.io/client-go/rest"
 	"k8s.io/client-go/tools/clientcmd"
 	"k8s.io/client-go/util/cert"
-	"k8s.io/klog"
 
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/cni/types"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
@@ -101,31 +99,41 @@ func ExtractDbRemotesFromEndpoint(ep *kapi.Endpoints) ([]string, int32, int32, e
 	return masterIPList, sbDBPort, nbDBPort, nil
 }
 
-func GetNodeIP(nodeName string) (string, error) {
-	ip := net.ParseIP(nodeName)
-	if ip == nil {
-		addrs, err := net.LookupIP(nodeName)
-		if err != nil {
-			return "", fmt.Errorf("Failed to lookup IP address for node %s: %v", nodeName, err)
+// GetNodeIP extracts the ip address from the node status in the  API
+func GetNodeIP(node *kapi.Node) (string, error) {
+	for _, addr := range node.Status.Addresses {
+		if addr.Type == kapi.NodeInternalIP {
+			return addr.Address, nil
 		}
-		for _, addr := range addrs {
-			// Skip loopback addrs
-			if addr.IsLoopback() {
-				klog.V(5).Infof("Skipping loopback addr: %q for node %s", addr.String(), nodeName)
-				continue
-			}
-			ip = addr
-			break
-		}
-	} else if ip.IsLoopback() {
-		klog.V(5).Infof("Skipping loopback addr: %q for node %s", ip.String(), nodeName)
-		ip = nil
 	}
+	for _, addr := range node.Status.Addresses {
+		if addr.Type == kapi.NodeExternalIP {
+			return addr.Address, nil
+		}
+	}
+	return "", fmt.Errorf("%s doesn't have an address with type %s or %s", node.GetName(),
+		kapi.NodeInternalIP, kapi.NodeExternalIP)
+}
 
-	if ip == nil || len(ip.String()) == 0 {
-		return "", fmt.Errorf("Failed to obtain IP address from node name: %s", nodeName)
+// GetNodeHostame extracts the hostname from the node status in the API
+func GetNodeHostname(node *kapi.Node) (string, error) {
+	for _, addr := range node.Status.Addresses {
+		if addr.Type == kapi.NodeHostName {
+			return addr.Address, nil
+		}
 	}
-	return ip.String(), nil
+	for _, addr := range node.Status.Addresses {
+		if addr.Type == kapi.NodeExternalDNS {
+			return addr.Address, nil
+		}
+	}
+	for _, addr := range node.Status.Addresses {
+		if addr.Type == kapi.NodeInternalDNS {
+			return addr.Address, nil
+		}
+	}
+	return "", fmt.Errorf("%s doesn't have an address with type %s, %s or %s", node.GetName(),
+		kapi.NodeHostName, kapi.NodeExternalDNS, kapi.NodeInternalDNS)
 }
 
 const (
