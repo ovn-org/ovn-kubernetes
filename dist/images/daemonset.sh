@@ -120,13 +120,12 @@ echo "ovn_db_vip: ${ovn_db_vip}"
 # Simplified expansion of template 
 image_str="{{ ovn_image | default('docker.io/ovnkube/ovn-daemonset:latest') }}"
 policy_str="{{ ovn_image_pull_policy | default('IfNotPresent') }}"
-ovn_gateway_opts_repl="{{ ovn_gateway_opts }}"
-ovn_gateway_mode_repl="{{ ovn_gateway_mode }}"
 ovn_db_vip_image_repl="{{ ovn_db_vip_image | default('docker.io/ovnkube/ovndb-vip-u:latest') }}"
 ovn_db_replicas_repl="{{ ovn_db_replicas | default(3) }}"
 ovn_db_vip_repl="{{ ovn_db_vip }}"
 
-ovn_image=${image} ovn_image_pull_policy=${policy} kind=${KIND} ovn_gateway_mode=${ovn_gateway_mode} ovn_gateway_opts=${ovn_gateway_opts} j2 ../templates/ovnkube-node.yaml.j2 -o ../yaml/ovnkube-node.yaml
+ovn_image=${image} ovn_image_pull_policy=${policy} kind=${KIND} ovn_gateway_mode=${ovn_gateway_mode} \
+ ovn_gateway_opts=${ovn_gateway_opts} ~/.local/bin/j2 ../templates/ovnkube-node.yaml.j2 -o ../yaml/ovnkube-node.yaml
 
 sed "s,${image_str},${image},
 s,${policy_str},${policy}," ../templates/ovnkube-master.yaml.j2 > ../yaml/ovnkube-master.yaml
