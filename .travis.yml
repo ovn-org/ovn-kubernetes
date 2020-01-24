@@ -46,7 +46,8 @@ jobs:
         - pushd $GOPATH/src/k8s.io/kubernetes/
         - export KUBERNETES_CONFORMANCE_TEST=y
         - export KUBECONFIG=${HOME}/admin.conf
-        - kubetest --ginkgo-parallel=2 --provider=local --deployment=kind --kind-cluster-name=kind-ovn --test --test_args='--ginkgo.focus="\[sig-network\].*Conformance|\[sig-network\].*NetworkPolicy --disable-log-dump=false --ginkgo.skip=ingress\saccess|multiple\segress\spolicies|allow\segress\saccess|\[Serial\]'
+        - kubetest --ginkgo-parallel=2 --provider=local --deployment=kind --kind-cluster-name=kind-ovn --test --test_args='--ginkgo.focus=\[sig-network\].*Conformance --disable-log-dump=false --ginkgo.skip=\[Serial\]'
+        - kubetest --ginkgo-parallel=2 --provider=local --deployment=kind --kind-cluster-name=kind-ovn --test --test_args='--ginkgo.focus=\[sig-network\].*NetworkPolicy --disable-log-dump=false --ginkgo.skip=ingress\saccess|multiple\segress\spolicies|allow\segress\saccess|\[Serial\]'
       after_failure:
         - kind export logs /tmp/kind/logs
         - tar -czvf e2e-kind-ovn-${TRAVIS_COMMIT}-${TRAVIS_JOB_NUMBER}.tar.gz -C /tmp/kind/logs/ ./
