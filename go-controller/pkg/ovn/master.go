@@ -285,6 +285,10 @@ func (oc *Controller) syncNodeManagementPort(node *kapi.Node, subnet *net.IPNet)
 		return err
 	}
 
+	if err := addAllowACLFromNode(node.Name, portIP.IP); err != nil {
+		return err
+	}
+
 	return nil
 }
 

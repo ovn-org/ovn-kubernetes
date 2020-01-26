@@ -417,23 +417,16 @@ const (
 	defaultMcastAllowPriority = "1012"
 )
 
-func addAllowACLFromNode(logicalSwitch, subnet string) error {
-	_, nodeCidr, err := net.ParseCIDR(subnet)
-	if err != nil {
-		logrus.Errorf("failed to parse subnet %s", subnet)
-		return err
-	}
-	_, portIPnet := util.GetNodeWellKnownAddresses(nodeCidr)
-
-	match := fmt.Sprintf("%s.src==%s", ipMatch(), portIPnet.IP.String())
+func addAllowACLFromNode(logicalSwitch string, mgmtPortIP net.IP) error {
+	match := fmt.Sprintf("%s.src==%s", ipMatch(), mgmtPortIP.String())
 	_, stderr, err := util.RunOVNNbctl("--may-exist", "acl-add", logicalSwitch,
 		"to-lport", defaultAllowPriority, match, "allow-related")
 	if err != nil {
-		logrus.Errorf("failed to create the node acl for "+
+		return fmt.Errorf("failed to create the node acl for "+
 			"logical_switch=%s, stderr: %q (%v)", logicalSwitch, stderr, err)
 	}
 
-	return err
+	return nil
 }
 
 func (oc *Controller) syncNetworkPolicies(networkPolicies []interface{}) {

@@ -86,9 +86,6 @@ func (p pod) addNodeSetupCmds(fexec *ovntest.FakeExec) {
 		Cmd:    "ovn-nbctl --timeout=15 get logical_switch " + p.nodeName + " other-config:subnet",
 		Output: fmt.Sprintf("%q", p.nodeSubnet),
 	})
-	fexec.AddFakeCmdsNoOutputNoError([]string{
-		"ovn-nbctl --timeout=15 --may-exist acl-add " + p.nodeName + " to-lport 1001 ip4.src==" + p.nodeMgtIP + " allow-related",
-	})
 }
 
 func (p pod) addCmds(fexec *ovntest.FakeExec, exists, fail, gatewayCached bool) {
