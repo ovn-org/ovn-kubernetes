@@ -425,7 +425,6 @@ var _ = Describe("OVN NetworkPolicy Operations", func() {
 					})
 
 				nPodTest.baseCmds(fExec)
-				nPodTest.addNodeSetupCmds(fExec)
 				nPodTest.addCmdsForNonExistingPod(fExec)
 				nTest.baseCmds(fExec, namespace1)
 				nTest.addPodDenyMcast(fExec, nPodTest, true, "fake_uuid")
@@ -449,6 +448,7 @@ var _ = Describe("OVN NetworkPolicy Operations", func() {
 						},
 					},
 				)
+				nPodTest.populateLogicalSwitchCache(fakeOvn)
 
 				fakeOvn.controller.WatchPods()
 				fakeOvn.controller.WatchNamespaces()
@@ -524,7 +524,6 @@ var _ = Describe("OVN NetworkPolicy Operations", func() {
 					})
 
 				nPodTest.baseCmds(fExec)
-				nPodTest.addNodeSetupCmds(fExec)
 				nPodTest.addCmdsForNonExistingPod(fExec)
 				nTest.baseCmds(fExec, namespace1, namespace2)
 				nTest.addCmds(fExec, namespace1)
@@ -550,6 +549,7 @@ var _ = Describe("OVN NetworkPolicy Operations", func() {
 						},
 					},
 				)
+				nPodTest.populateLogicalSwitchCache(fakeOvn)
 
 				fakeOvn.controller.WatchPods()
 				fakeOvn.controller.WatchNamespaces()
@@ -619,7 +619,6 @@ var _ = Describe("OVN NetworkPolicy Operations", func() {
 					})
 
 				nPodTest.baseCmds(fExec)
-				nPodTest.addNodeSetupCmds(fExec)
 				nPodTest.addCmdsForNonExistingPod(fExec)
 				nTest.baseCmds(fExec, namespace1, namespace2)
 				nTest.addCmds(fExec, namespace2)
@@ -646,6 +645,7 @@ var _ = Describe("OVN NetworkPolicy Operations", func() {
 						},
 					},
 				)
+				nPodTest.populateLogicalSwitchCache(fakeOvn)
 
 				fakeOvn.controller.WatchPods()
 				fakeOvn.controller.WatchNamespaces()
@@ -812,7 +812,6 @@ var _ = Describe("OVN NetworkPolicy Operations", func() {
 					})
 
 				nPodTest.baseCmds(fExec)
-				nPodTest.addNodeSetupCmds(fExec)
 				nPodTest.addCmdsForNonExistingPod(fExec)
 				nTest.baseCmds(fExec, namespace1)
 				nTest.addPodDenyMcast(fExec, nPodTest, true, "fake_uuid")
@@ -836,6 +835,7 @@ var _ = Describe("OVN NetworkPolicy Operations", func() {
 						},
 					},
 				)
+				nPodTest.populateLogicalSwitchCache(fakeOvn)
 
 				fakeOvn.controller.WatchPods()
 				fakeOvn.controller.WatchNamespaces()
@@ -919,7 +919,6 @@ var _ = Describe("OVN NetworkPolicy Operations", func() {
 					})
 
 				nPodTest.baseCmds(fExec)
-				nPodTest.addNodeSetupCmds(fExec)
 				nPodTest.addCmdsForNonExistingPod(fExec)
 				nTest.baseCmds(fExec, namespace1, namespace2)
 				nTest.addCmds(fExec, namespace1)
@@ -945,6 +944,7 @@ var _ = Describe("OVN NetworkPolicy Operations", func() {
 						},
 					},
 				)
+				nPodTest.populateLogicalSwitchCache(fakeOvn)
 
 				fakeOvn.controller.WatchPods()
 				fakeOvn.controller.WatchNamespaces()
@@ -1017,7 +1017,6 @@ var _ = Describe("OVN NetworkPolicy Operations", func() {
 					})
 
 				nPodTest.baseCmds(fExec)
-				nPodTest.addNodeSetupCmds(fExec)
 				nPodTest.addCmdsForNonExistingPod(fExec)
 				nTest.baseCmds(fExec, namespace1)
 				nTest.addPodDenyMcast(fExec, nPodTest, true, "fake_uuid")
@@ -1041,6 +1040,7 @@ var _ = Describe("OVN NetworkPolicy Operations", func() {
 						},
 					},
 				)
+				nPodTest.populateLogicalSwitchCache(fakeOvn)
 
 				fakeOvn.controller.WatchPods()
 				fakeOvn.controller.WatchNamespaces()
@@ -1126,11 +1126,11 @@ var _ = Describe("OVN NetworkPolicy Operations", func() {
 				)
 
 				nPodTest.baseCmds(fExec)
-				nPodTest.addNodeSetupCmds(fExec)
 				nPodTest.addCmdsForNonExistingPod(fExec)
 				nTest.baseCmds(fExec, namespace1)
 				nTest.addPodDenyMcast(fExec, nPodTest, false, "fake_uuid")
 				nTest.addCmdsWithPods(fExec, nPodTest, namespace1)
+
 				fakeOvn.start(ctx,
 					&v1.NamespaceList{
 						Items: []v1.Namespace{
@@ -1143,6 +1143,7 @@ var _ = Describe("OVN NetworkPolicy Operations", func() {
 						},
 					},
 				)
+				nPodTest.populateLogicalSwitchCache(fakeOvn)
 
 				fakeOvn.controller.WatchPods()
 				fakeOvn.controller.WatchNamespaces()
@@ -1209,7 +1210,7 @@ var _ = Describe("OVN NetworkPolicy Operations", func() {
 				Expect(err).NotTo(HaveOccurred())
 				Eventually(fExec.CalledMatchesExpected).Should(BeTrue(), fExec.ErrorDesc)
 
-				nPodTest.addNodeSetupCmds(fExec)
+				nPodTest.populateLogicalSwitchCache(fakeOvn)
 				nPodTest.addCmdsForNonExistingPod(fExec)
 				nTest.addPodDenyMcast(fExec, nPodTest, false, "fake_uuid")
 				nTest.addPodCmds(fExec, nPodTest, namespace1)
