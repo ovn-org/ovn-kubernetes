@@ -9,7 +9,7 @@
 # are built locally and included in the image (instead of the rpm)
 #
 
-FROM fedora:29
+FROM fedora:31
 
 USER root
 
