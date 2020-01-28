@@ -61,7 +61,15 @@ func setupOVNNode(nodeName string) error {
 		if err != nil {
 			return err
 		}
-		_, stderr, errSet := util.RunOVNSbctl("set", "encap", systemID,
+		uuid, _, err := util.RunOVNSbctl("--data=bare", "--no-heading", "--columns=_uuid", "find", "Encap",
+			fmt.Sprintf("chassis_name=%s", systemID))
+		if err != nil {
+			return err
+		}
+		if len(uuid) == 0 {
+			return fmt.Errorf("unable to find encap uuid to set geneve port for chassis %s", systemID)
+		}
+		_, stderr, errSet := util.RunOVNSbctl("set", "encap", uuid,
 			fmt.Sprintf("options:dst_port=%d", config.Default.EncapPort),
 		)
 		if errSet != nil {

@@ -72,6 +72,7 @@ var _ = Describe("Node Operations", func() {
 				interval    int    = 100000
 				ofintval    int    = 180
 				chassisUUID string = "1a3dfc82-2749-4931-9190-c30e7c0ecea3"
+				encapUUID   string = "e4437094-0094-4223-9f14-995d98d5fff8"
 			)
 
 			fexec := ovntest.NewFakeExec()
@@ -90,8 +91,13 @@ var _ = Describe("Node Operations", func() {
 				Output: chassisUUID,
 			})
 			fexec.AddFakeCmd(&ovntest.ExpectedCmd{
+				Cmd: fmt.Sprintf("ovn-sbctl --timeout=15 --data=bare --no-heading --columns=_uuid find "+
+					"Encap chassis_name=%s", chassisUUID),
+				Output: encapUUID,
+			})
+			fexec.AddFakeCmd(&ovntest.ExpectedCmd{
 				Cmd: fmt.Sprintf("ovn-sbctl --timeout=15 set encap "+
-					"%s options:dst_port=%d", chassisUUID, encapPort),
+					"%s options:dst_port=%d", encapUUID, encapPort),
 			})
 
 			err := util.SetExec(fexec)
