@@ -474,10 +474,7 @@ func ParseNodeHostSubnet(node *kapi.Node) (*net.IPNet, error) {
 }
 
 func (oc *Controller) ensureNodeLogicalNetwork(nodeName string, hostsubnet *net.IPNet) error {
-
-	// Get firstIP for gateway.  Skip the second address of the LogicalSwitch's
-	// subnet since we set it aside for the management port on that node.
-	firstIP, _ := util.GetNodeWellKnownAddresses(hostsubnet)
+	firstIP, secondIP := util.GetNodeWellKnownAddresses(hostsubnet)
 	nodeLRPMac := util.IPAddrToHWAddr(firstIP.IP)
 	clusterRouter := util.GetK8sClusterRouter()
 
@@ -489,16 +486,34 @@ func (oc *Controller) ensureNodeLogicalNetwork(nodeName string, hostsubnet *net.
 		return err
 	}
 
+	// Create a logical switch and set its subnet. If all cluster subnets are
+	// big enough (/24 or greater), exclude the hybrid overlay port IP (even
+	// if hybrid overlay is not enabled) to allow enabling hybrid overlay
+	// in a running cluster without disrupting nodes.
+	var excludeIPs string
+	if !config.IPv6Mode {
+		excludeIPs = "other-config:exclude_ips=" + secondIP.IP.String()
+
+		excludeHybridOverlayIP := true
+		for _, clusterEntry := range config.Default.ClusterSubnets {
+			if clusterEntry.HostSubnetLength > 24 {
+				excludeHybridOverlayIP = false
+				break
+			}
+		}
+		if excludeHybridOverlayIP {
+			thirdIP := util.NextIP(secondIP.IP)
+			excludeIPs += ".." + thirdIP.String()
+		}
+	}
+
 	// Create a logical switch and set its subnet.
 	stdout, stderr, err := util.RunOVNNbctl("--", "--may-exist", "ls-add", nodeName,
 		"--", "set", "logical_switch", nodeName, "other-config:subnet="+hostsubnet.String(),
+		excludeIPs,
 		"external-ids:gateway_ip="+firstIP.String())
 	if err != nil {
 		logrus.Errorf("Failed to create a logical switch %v, stdout: %q, stderr: %q, error: %v", nodeName, stdout, stderr, err)
-		return err
-	}
-
-	if err := util.UpdateNodeSwitchExcludeIPs(nodeName, hostsubnet); err != nil {
 		return err
 	}
 
