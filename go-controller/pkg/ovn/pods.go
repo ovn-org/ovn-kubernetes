@@ -106,55 +106,24 @@ func (oc *Controller) deletePodAcls(logicalPort string) {
 	}
 }
 
-func (oc *Controller) getLogicalPortUUID(logicalPort string) string {
+func (oc *Controller) getLogicalPortUUID(logicalPort string) (string, error) {
 	if oc.logicalPortUUIDCache[logicalPort] != "" {
-		return oc.logicalPortUUIDCache[logicalPort]
+		return oc.logicalPortUUIDCache[logicalPort], nil
 	}
 
 	out, stderr, err := util.RunOVNNbctl("--if-exists", "get",
 		"logical_switch_port", logicalPort, "_uuid")
 	if err != nil {
-		logrus.Errorf("Error while getting uuid for logical_switch_port "+
+		return "", fmt.Errorf("Error while getting uuid for logical_switch_port "+
 			"%s, stderr: %q, err: %v", logicalPort, stderr, err)
-		return ""
 	}
 
 	if out == "" {
-		return out
+		return "", fmt.Errorf("empty uuid for logical_switch_port %s", logicalPort)
 	}
 
 	oc.logicalPortUUIDCache[logicalPort] = out
-	return oc.logicalPortUUIDCache[logicalPort]
-}
-
-func (oc *Controller) getGatewayFromSwitch(logicalSwitch string) (*net.IPNet, error) {
-	var gatewayIPMaskStr, stderr string
-	var ok bool
-	var err error
-
-	oc.lsMutex.Lock()
-	defer oc.lsMutex.Unlock()
-	if gatewayIPMaskStr, ok = oc.gatewayCache[logicalSwitch]; !ok {
-		gatewayIPMaskStr, stderr, err = util.RunOVNNbctl("--if-exists",
-			"get", "logical_switch", logicalSwitch,
-			"external_ids:gateway_ip")
-		if err != nil {
-			logrus.Errorf("Failed to get gateway IP:  %s, stderr: %q, %v",
-				gatewayIPMaskStr, stderr, err)
-			return nil, err
-		}
-		if gatewayIPMaskStr == "" {
-			return nil, fmt.Errorf("Empty gateway IP in logical switch %s",
-				logicalSwitch)
-		}
-		oc.gatewayCache[logicalSwitch] = gatewayIPMaskStr
-	}
-	ip, ipnet, err := net.ParseCIDR(gatewayIPMaskStr)
-	if err != nil {
-		return nil, fmt.Errorf("failed to parse gateway IP %q: %v", gatewayIPMaskStr, err)
-	}
-	ipnet.IP = ip
-	return ipnet, nil
+	return oc.logicalPortUUIDCache[logicalPort], nil
 }
 
 func (oc *Controller) deleteLogicalPort(pod *kapi.Pod) {
@@ -190,45 +159,33 @@ func (oc *Controller) deleteLogicalPort(pod *kapi.Pod) {
 	delete(oc.logicalPortUUIDCache, logicalPort)
 	oc.lspMutex.Unlock()
 
-	oc.deletePodFromNamespace(pod.Namespace, podIP, logicalPort)
+	// Remove the port from the default deny multicast policy
+	if oc.multicastSupport {
+		if err := oc.podDeleteDefaultDenyMulticastPolicy(logicalPort); err != nil {
+			logrus.Errorf(err.Error())
+		}
+	}
+
+	if err := oc.deletePodFromNamespace(pod.Namespace, podIP, logicalPort); err != nil {
+		logrus.Errorf(err.Error())
+	}
 }
 
-func (oc *Controller) waitForNodeLogicalSwitch(nodeName string) error {
-	oc.lsMutex.Lock()
-	ok := oc.logicalSwitchCache[nodeName]
-	oc.lsMutex.Unlock()
-	// Fast return if we already have the node switch in our cache
-	if ok {
-		return nil
-	}
-
-	// Otherwise wait for the node logical switch to be created by the ClusterController.
-	// The node switch will be created very soon after startup so we should
-	// only be waiting here once per node at most.
-	var subnet string
-	if err := wait.PollImmediate(500*time.Millisecond, 30*time.Second, func() (bool, error) {
-		var err error
-		if subnet, _, err = util.RunOVNNbctl("get", "logical_switch", nodeName, "other-config:subnet"); err != nil {
-			return false, nil
-		}
-		if subnet == "" {
-			return false, nil
-		}
-		return true, nil
+func (oc *Controller) waitForNodeLogicalSwitch(nodeName string) (*net.IPNet, error) {
+	// Wait for the node logical switch to be created by the ClusterController.
+	// The node switch will be created when the node's logical network infrastructure
+	// is created by the node watch.
+	var subnet *net.IPNet
+	if err := wait.PollImmediate(10*time.Millisecond, 30*time.Second, func() (bool, error) {
+		oc.lsMutex.Lock()
+		defer oc.lsMutex.Unlock()
+		var ok bool
+		subnet, ok = oc.logicalSwitchCache[nodeName]
+		return ok, nil
 	}); err != nil {
-		logrus.Errorf("timed out waiting for logical switch %q other-config:subnet: %v", nodeName, err)
-		return err
+		return nil, fmt.Errorf("timed out waiting for logical switch %q subnet: %v", nodeName, err)
 	}
-
-	oc.lsMutex.Lock()
-	defer oc.lsMutex.Unlock()
-	if !oc.logicalSwitchCache[nodeName] {
-		if err := addAllowACLFromNode(nodeName, subnet); err != nil {
-			return err
-		}
-		oc.logicalSwitchCache[nodeName] = true
-	}
-	return nil
+	return subnet, nil
 }
 
 func getPodAddresses(portName string) (net.HardwareAddr, net.IP, bool, error) {
@@ -281,7 +238,8 @@ func (oc *Controller) addLogicalPort(pod *kapi.Pod) error {
 	}()
 
 	logicalSwitch := pod.Spec.NodeName
-	if err = oc.waitForNodeLogicalSwitch(pod.Spec.NodeName); err != nil {
+	nodeSubnet, err := oc.waitForNodeLogicalSwitch(pod.Spec.NodeName)
+	if err != nil {
 		return err
 	}
 
@@ -310,8 +268,7 @@ func (oc *Controller) addLogicalPort(pod *kapi.Pod) error {
 				"stdout: %q, stderr: %q (%v)", portName, out, stderr, err)
 		}
 		oc.logicalPortCache[portName] = logicalSwitch
-		oc.addPodToNamespace(pod.Namespace, annotation.IP.IP, portName)
-		return nil
+		return oc.addPodToNamespace(pod.Namespace, annotation.IP.IP, portName)
 	}
 
 	addressStr := "dynamic"
@@ -335,10 +292,7 @@ func (oc *Controller) addLogicalPort(pod *kapi.Pod) error {
 
 	oc.logicalPortCache[portName] = logicalSwitch
 
-	gatewayIP, err := oc.getGatewayFromSwitch(logicalSwitch)
-	if err != nil {
-		return fmt.Errorf("Error obtaining gateway address for switch %s", logicalSwitch)
-	}
+	gatewayIP, _ := util.GetNodeWellKnownAddresses(nodeSubnet)
 
 	podMac, podIP, err := waitForPodAddresses(portName)
 	if err != nil {
@@ -364,7 +318,16 @@ func (oc *Controller) addLogicalPort(pod *kapi.Pod) error {
 		return fmt.Errorf("error creating pod network annotation: %v", err)
 	}
 
-	oc.addPodToNamespace(pod.Namespace, podIP, portName)
+	// Enforce the default deny multicast policy
+	if oc.multicastSupport {
+		if err := oc.podAddDefaultDenyMulticastPolicy(portName); err != nil {
+			return err
+		}
+	}
+
+	if err := oc.addPodToNamespace(pod.Namespace, podIP, portName); err != nil {
+		return err
+	}
 
 	logrus.Debugf("Annotation values: ip=%s ; mac=%s ; gw=%s\nAnnotation=%s",
 		podCIDR, podMac, gatewayIP, marshalledAnnotation)

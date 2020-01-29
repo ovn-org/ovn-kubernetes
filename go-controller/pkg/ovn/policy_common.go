@@ -31,6 +31,19 @@ type namespacePolicy struct {
 	deleted         bool //deleted policy
 }
 
+func NewNamespacePolicy(policy *knet.NetworkPolicy) *namespacePolicy {
+	np := &namespacePolicy{
+		name:            policy.Name,
+		namespace:       policy.Namespace,
+		ingressPolicies: make([]*gressPolicy, 0),
+		egressPolicies:  make([]*gressPolicy, 0),
+		podHandlerList:  make([]*factory.Handler, 0),
+		nsHandlerList:   make([]*factory.Handler, 0),
+		localPods:       make(map[string]bool),
+	}
+	return np
+}
+
 type gressPolicy struct {
 	policyType knet.PolicyType
 	idx        int
@@ -404,23 +417,16 @@ const (
 	defaultMcastAllowPriority = "1012"
 )
 
-func addAllowACLFromNode(logicalSwitch, subnet string) error {
-	_, nodeCidr, err := net.ParseCIDR(subnet)
-	if err != nil {
-		logrus.Errorf("failed to parse subnet %s", subnet)
-		return err
-	}
-	_, portIPnet := util.GetNodeWellKnownAddresses(nodeCidr)
-
-	match := fmt.Sprintf("%s.src==%s", ipMatch(), portIPnet.IP.String())
+func addAllowACLFromNode(logicalSwitch string, mgmtPortIP net.IP) error {
+	match := fmt.Sprintf("%s.src==%s", ipMatch(), mgmtPortIP.String())
 	_, stderr, err := util.RunOVNNbctl("--may-exist", "acl-add", logicalSwitch,
 		"to-lport", defaultAllowPriority, match, "allow-related")
 	if err != nil {
-		logrus.Errorf("failed to create the node acl for "+
+		return fmt.Errorf("failed to create the node acl for "+
 			"logical_switch=%s, stderr: %q (%v)", logicalSwitch, stderr, err)
 	}
 
-	return err
+	return nil
 }
 
 func (oc *Controller) syncNetworkPolicies(networkPolicies []interface{}) {

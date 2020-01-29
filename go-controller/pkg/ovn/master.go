@@ -285,6 +285,10 @@ func (oc *Controller) syncNodeManagementPort(node *kapi.Node, subnet *net.IPNet)
 		return err
 	}
 
+	if err := addAllowACLFromNode(node.Name, portIP.IP); err != nil {
+		return err
+	}
+
 	return nil
 }
 
@@ -497,13 +501,11 @@ func (oc *Controller) ensureNodeLogicalNetwork(nodeName string, hostsubnet *net.
 	var stdout string
 	if config.IPv6Mode {
 		stdout, stderr, err = util.RunOVNNbctl("--", "--may-exist", "ls-add", nodeName,
-			"--", "set", "logical_switch", nodeName, config.OtherConfigSubnet()+"="+hostsubnet.String(),
-			"external-ids:gateway_ip="+firstIP.String())
+			"--", "set", "logical_switch", nodeName, config.OtherConfigSubnet()+"="+hostsubnet.String())
 	} else {
 		stdout, stderr, err = util.RunOVNNbctl("--", "--may-exist", "ls-add", nodeName,
 			"--", "set", "logical_switch", nodeName, config.OtherConfigSubnet()+"="+hostsubnet.String(),
-			"other-config:exclude_ips="+secondIP.IP.String(),
-			"external-ids:gateway_ip="+firstIP.String())
+			"other-config:exclude_ips="+secondIP.IP.String())
 	}
 	if err != nil {
 		logrus.Errorf("Failed to create a logical switch %v, stdout: %q, stderr: %q, error: %v", nodeName, stdout, stderr, err)
@@ -571,6 +573,14 @@ func (oc *Controller) ensureNodeLogicalNetwork(nodeName string, hostsubnet *net.
 		logrus.Errorf("Failed to add logical switch %v's loadbalancer, stdout: %q, stderr: %q, error: %v", nodeName, stdout, stderr, err)
 		return err
 	}
+
+	// Add the node to the logical switch cache
+	oc.lsMutex.Lock()
+	defer oc.lsMutex.Unlock()
+	if existing, ok := oc.logicalSwitchCache[nodeName]; ok && !reflect.DeepEqual(existing, hostsubnet) {
+		logrus.Warningf("Node %q logical switch already in cache with subnet %v; replacing with %v", nodeName, existing, hostsubnet)
+	}
+	oc.logicalSwitchCache[nodeName] = hostsubnet
 
 	return nil
 }
