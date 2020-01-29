@@ -1,0 +1,94 @@
+# THIS FILE IS A TEMPLATE: be sure to run render.rb before committing
+
+name: Go
+'on': [push]
+env:
+  K8S_VERSION: v1.16.4
+jobs:
+  build:
+    name: Build
+    runs-on: ubuntu-latest
+    steps:
+    - &step_gosetup
+      name: Set up Go 1.12
+      uses: actions/setup-go@v1
+      with:
+        go-version: 1.12
+      id: go
+
+    - &step_checkout
+      name: Check out code into the Go module directory
+      uses: actions/checkout@v1
+      
+    - &step_environment
+      name: Set up environment
+      run: |
+        export GOPATH=$HOME/go
+        echo "::set-env name=GOPATH::$GOPATH"
+        export PATH=$GOPATH/bin:$PATH
+        echo "::add-path::$GOPATH/bin"
+        mkdir -p $GOPATH/src/github.com/ovn-org
+        mv $GITHUB_WORKSPACE $GOPATH/src/github.com/ovn-org/ovn-kubernetes
+        echo "::set-env name=WORKDIR::$GOPATH/src/github.com/ovn-org/ovn-kubernetes"
+        
+    - name: Build
+      working-directory: ${{ env.WORKDIR }}
+      run: |
+        set -x
+        pushd go-controller
+           make
+           make windows
+           make gofmt
+           make install.tools
+           make lint
+           make check
+        popd
+        pushd dist/images
+           if [ -n "$(git diff --stat origin/master.. | grep dist/images/Dockerfile)" ]; then make all; fi
+        popd
+      
+  e2e:
+    name: e2e-kind-ovn
+    runs-on: ubuntu-latest
+    steps:
+    - *step_gosetup
+    - *step_checkout
+    - *step_environment
+
+    - name: e2e-kind-ovn
+      working-directory: ${{ env.WORKDIR }}
+      run: |
+        set -x
+
+        export GO111MODULE="on"
+        mkdir -p $GOPATH/bin
+        curl -fs https://chunk.io/trozet/ba750701d0af4e2b94b249ab9de27b50 -o $GOPATH/bin/kubetest
+        chmod +x $GOPATH/bin/kubetest
+        git clone --single-branch --branch $K8S_VERSION https://github.com/kubernetes/kubernetes.git $GOPATH/src/k8s.io/kubernetes/
+        pushd $GOPATH/src/k8s.io/kubernetes/
+        make WHAT="test/e2e/e2e.test vendor/github.com/onsi/ginkgo/ginkgo cmd/kubectl"
+        sudo cp ./_output/local/go/bin/kubectl /usr/local/bin/
+        popd
+        
+        GO111MODULE="on" go get sigs.k8s.io/kind@v0.7.0
+        pushd contrib
+        ./kind.sh
+        popd
+        pushd $GOPATH/src/k8s.io/kubernetes/
+        export KUBERNETES_CONFORMANCE_TEST=y
+        export KUBECONFIG=${HOME}/admin.conf
+        kubetest --ginkgo-parallel=2 --provider=local --deployment=kind --kind-cluster-name=kind-ovn --test --test_args='--ginkgo.focus=\[sig-network\].*Conformance --disable-log-dump=false --ginkgo.skip=\[Serial\]'
+        kubetest --ginkgo-parallel=2 --provider=local --deployment=kind --kind-cluster-name=kind-ovn --test --test_args='--ginkgo.focus=\[sig-network\].*NetworkPolicy --disable-log-dump=false --ginkgo.skip=ingress\saccess|multiple\segress\spolicies|allow\segress\saccess|\[Serial\]'
+    
+    - name: Export logs on failure
+      run: |
+        mkdir -p /tmp/kind/logs 
+        kind export logs /tmp/kind/logs
+      working-directory: ${{ env.WORKDIR }}
+      if: failure()
+    - name: Upload logs
+      uses: actions/upload-artifact@v1
+      if: failure()
+      with:
+        name: kind-logs
+        path: /tmp/kind/logs
