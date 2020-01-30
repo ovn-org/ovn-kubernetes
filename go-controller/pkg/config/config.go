@@ -1183,6 +1183,20 @@ func buildOvnAuth(exec kexec.Interface, northbound bool, cliAuth, confAuth *OvnA
 		return nil, err
 	}
 
+	// When instructed to watch-endpoint, just set scheme and obtain address(es) from endpoint
+	if address == "watch-endpoint" {
+		if !MasterHA.ManageDBServers {
+			return nil, fmt.Errorf("watch-endpoint requires --manage-db-servers")
+		}
+		// Set scheme and wait for an endpoint update to provide address/port to use
+		if auth.PrivKey != "" || auth.Cert != "" || auth.CACert != "" {
+			auth.Scheme = OvnDBSchemeSSL
+		} else {
+			auth.Scheme = OvnDBSchemeTCP
+		}
+		return auth, nil
+	}
+
 	if address == "" {
 		if auth.PrivKey != "" || auth.Cert != "" || auth.CACert != "" {
 			return nil, fmt.Errorf("certificate or key given; perhaps you mean to use the 'ssl' scheme?")
