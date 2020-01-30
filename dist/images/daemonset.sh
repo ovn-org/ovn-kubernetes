@@ -9,6 +9,7 @@ set -e
 
 # ensure j2 renderer installed
 pip freeze | grep j2cli || pip install j2cli[yaml] --user
+export PATH=~/.local/bin:$PATH
 
 OVN_IMAGE=""
 OVN_IMAGE_PULL_POLICY=""
@@ -125,7 +126,7 @@ ovn_db_replicas_repl="{{ ovn_db_replicas | default(3) }}"
 ovn_db_vip_repl="{{ ovn_db_vip }}"
 
 ovn_image=${image} ovn_image_pull_policy=${policy} kind=${KIND} ovn_gateway_mode=${ovn_gateway_mode} \
- ovn_gateway_opts=${ovn_gateway_opts} ~/.local/bin/j2 ../templates/ovnkube-node.yaml.j2 -o ../yaml/ovnkube-node.yaml
+ ovn_gateway_opts=${ovn_gateway_opts} j2 ../templates/ovnkube-node.yaml.j2 -o ../yaml/ovnkube-node.yaml
 
 sed "s,${image_str},${image},
 s,${policy_str},${policy}," ../templates/ovnkube-master.yaml.j2 > ../yaml/ovnkube-master.yaml
