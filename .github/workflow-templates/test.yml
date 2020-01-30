@@ -1,7 +1,7 @@
 # THIS FILE IS A TEMPLATE: be sure to run render.rb before committing
 
 name: Go
-'on': [push]
+'on': [push, pull_request]
 env:
   K8S_VERSION: v1.16.4
 jobs:
