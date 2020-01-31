@@ -183,13 +183,13 @@ func (oc *Controller) AddNamespace(ns *kapi.Namespace) {
 
 	// Get all the pods in the namespace and append their IP to the
 	// address_set
-	existingPods, err := oc.kube.GetPods(ns.Name)
+	existingPods, err := oc.watchFactory.GetPods(ns.Name)
 	if err != nil {
 		logrus.Errorf("Failed to get all the pods (%v)", err)
 	} else {
-		for _, pod := range existingPods.Items {
+		for _, pod := range existingPods {
 			if pod.Status.PodIP != "" {
-				portName := podLogicalPortName(&pod)
+				portName := podLogicalPortName(pod)
 				oc.namespaceAddressSet[ns.Name][pod.Status.PodIP] = portName
 
 				// Enforce the default deny multicast policy.
