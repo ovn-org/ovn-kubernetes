@@ -3,11 +3,13 @@ package cni
 import (
 	"encoding/json"
 	"fmt"
+	"net/http"
 	"time"
 
 	"github.com/sirupsen/logrus"
 
 	"github.com/containernetworking/cni/pkg/types/current"
+	"k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/api/resource"
 	"k8s.io/apimachinery/pkg/util/wait"
 
@@ -57,6 +59,11 @@ func extractPodBandwidthResources(podAnnotations map[string]string) (int64, int6
 	return ingress, egress, nil
 }
 
+func isNotFoundError(err error) bool {
+	statusErr, ok := err.(*errors.StatusError)
+	return ok && statusErr.Status().Code == http.StatusNotFound
+}
+
 func (pr *PodRequest) cmdAdd() ([]byte, error) {
 	namespace := pr.PodNamespace
 	podName := pr.PodName
@@ -77,7 +84,10 @@ func (pr *PodRequest) cmdAdd() ([]byte, error) {
 	if err = wait.ExponentialBackoff(annotationBackoff, func() (bool, error) {
 		annotations, err = kubecli.GetAnnotationsOnPod(namespace, podName)
 		if err != nil {
-			// TODO: check if err is non recoverable
+			if isNotFoundError(err) {
+				// Pod not found; don't bother waiting longer
+				return false, err
+			}
 			logrus.Warningf("error getting pod annotations: %v", err)
 			return false, nil
 		}
