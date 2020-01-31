@@ -2,6 +2,7 @@ package ovn
 
 import (
 	"fmt"
+
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
 	util "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
 	"github.com/sirupsen/logrus"
@@ -41,7 +42,7 @@ func (ovn *Controller) getLbEndpoints(ep *kapi.Endpoints, tcpPortMap, udpPortMap
 func (ovn *Controller) AddEndpoints(ep *kapi.Endpoints) error {
 	// get service
 	// TODO: cache the service
-	svc, err := ovn.kube.GetService(ep.Namespace, ep.Name)
+	svc, err := ovn.watchFactory.GetService(ep.Namespace, ep.Name)
 	if err != nil {
 		// This is not necessarily an error. For e.g when there are endpoints
 		// without a corresponding service.
@@ -139,18 +140,18 @@ func (ovn *Controller) handleNodePortLB(node *kapi.Node) error {
 	if physicalIP, _ = ovn.getGatewayPhysicalIP(physicalGateway); physicalIP == "" {
 		return fmt.Errorf("gateway physical IP for node %q does not yet exist", node.Name)
 	}
-	namespaces, err := ovn.kube.GetNamespaces()
+	namespaces, err := ovn.watchFactory.GetNamespaces()
 	if err != nil {
 		return fmt.Errorf("failed to get k8s namespaces: %v", err)
 	}
-	for _, ns := range namespaces.Items {
-		endpoints, err := ovn.kube.GetEndpoints(ns.Name)
+	for _, ns := range namespaces {
+		endpoints, err := ovn.watchFactory.GetEndpoints(ns.Name)
 		if err != nil {
 			logrus.Errorf("failed to get k8s endpoints: %v", err)
 			continue
 		}
-		for _, ep := range endpoints.Items {
-			svc, err := ovn.kube.GetService(ep.Namespace, ep.Name)
+		for _, ep := range endpoints {
+			svc, err := ovn.watchFactory.GetService(ep.Namespace, ep.Name)
 			if err != nil {
 				continue
 			}
@@ -159,7 +160,7 @@ func (ovn *Controller) handleNodePortLB(node *kapi.Node) error {
 			}
 			tcpPortMap := make(map[string]lbEndpoints)
 			udpPortMap := make(map[string]lbEndpoints)
-			ovn.getLbEndpoints(&ep, tcpPortMap, udpPortMap)
+			ovn.getLbEndpoints(ep, tcpPortMap, udpPortMap)
 			for svcPortName, lbEps := range tcpPortMap {
 				ips := lbEps.IPs
 				targetPort := lbEps.Port
@@ -194,19 +195,19 @@ func (ovn *Controller) handleNodePortLB(node *kapi.Node) error {
 }
 
 func (ovn *Controller) handleExternalIPsLB() {
-	namespaces, err := ovn.kube.GetNamespaces()
+	namespaces, err := ovn.watchFactory.GetNamespaces()
 	if err != nil {
 		logrus.Errorf("failed to get k8s namespaces: %v", err)
 		return
 	}
-	for _, ns := range namespaces.Items {
-		endpoints, err := ovn.kube.GetEndpoints(ns.Name)
+	for _, ns := range namespaces {
+		endpoints, err := ovn.watchFactory.GetEndpoints(ns.Name)
 		if err != nil {
 			logrus.Errorf("failed to get k8s endpoints: %v", err)
 			continue
 		}
-		for _, ep := range endpoints.Items {
-			svc, err := ovn.kube.GetService(ep.Namespace, ep.Name)
+		for _, ep := range endpoints {
+			svc, err := ovn.watchFactory.GetService(ep.Namespace, ep.Name)
 			if err != nil {
 				continue
 			}
@@ -215,7 +216,7 @@ func (ovn *Controller) handleExternalIPsLB() {
 			}
 			tcpPortMap := make(map[string]lbEndpoints)
 			udpPortMap := make(map[string]lbEndpoints)
-			ovn.getLbEndpoints(&ep, tcpPortMap, udpPortMap)
+			ovn.getLbEndpoints(ep, tcpPortMap, udpPortMap)
 			for svcPortName, lbEps := range tcpPortMap {
 				ips := lbEps.IPs
 				targetPort := lbEps.Port
@@ -264,7 +265,7 @@ func keepEmptyLB(service *kapi.Service) bool {
 }
 
 func (ovn *Controller) deleteEndpoints(ep *kapi.Endpoints) error {
-	svc, err := ovn.kube.GetService(ep.Namespace, ep.Name)
+	svc, err := ovn.watchFactory.GetService(ep.Namespace, ep.Name)
 	if err != nil {
 		// This is not necessarily an error. For e.g when a service is deleted,
 		// you will get endpoint delete event and the call to fetch service
