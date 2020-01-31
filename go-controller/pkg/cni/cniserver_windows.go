@@ -6,7 +6,7 @@ import (
 	"fmt"
 	"net"
 
-	"github.com/sirupsen/logrus"
+	"k8s.io/klog"
 
 	utilruntime "k8s.io/apimachinery/pkg/util/runtime"
 	utilwait "k8s.io/apimachinery/pkg/util/wait"
@@ -40,6 +40,6 @@ func (s *Server) Start(requestFunc cniRequestFunc) error {
 			utilruntime.HandleError(fmt.Errorf("CNI server Serve() failed: %v", err))
 		}
 	}, 0)
-	logrus.Infof("CNI server started")
+	klog.Infof("CNI server started")
 	return nil
 }

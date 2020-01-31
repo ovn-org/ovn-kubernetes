@@ -5,10 +5,10 @@ import (
 	"strings"
 
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
-	"github.com/sirupsen/logrus"
 	kapi "k8s.io/api/core/v1"
 	knet "k8s.io/api/networking/v1"
 	"k8s.io/client-go/tools/cache"
+	"k8s.io/klog"
 )
 
 func (oc *Controller) syncNetworkPoliciesPortGroup(
@@ -17,7 +17,7 @@ func (oc *Controller) syncNetworkPoliciesPortGroup(
 	for _, npInterface := range networkPolicies {
 		policy, ok := npInterface.(*knet.NetworkPolicy)
 		if !ok {
-			logrus.Errorf("Spurious object in syncNetworkPolicies: %v",
+			klog.Errorf("Spurious object in syncNetworkPolicies: %v",
 				npInterface)
 			continue
 		}
@@ -45,7 +45,7 @@ func (oc *Controller) syncNetworkPoliciesPortGroup(
 		}
 	})
 	if err != nil {
-		logrus.Errorf("Error in syncing network policies: %v", err)
+		klog.Errorf("Error in syncing network policies: %v", err)
 	}
 }
 
@@ -67,7 +67,7 @@ func addACLAllow(np *namespacePolicy, match, l4Match string, ipBlockCidr bool, g
 		fmt.Sprintf("external-ids:%s_num=%d", policyType, gressNum),
 		fmt.Sprintf("external-ids:policy_type=%s", policyType))
 	if err != nil {
-		logrus.Errorf("find failed to get the allow rule for "+
+		klog.Errorf("find failed to get the allow rule for "+
 			"namespace=%s, policy=%s, stderr: %q (%v)",
 			np.namespace, np.name, stderr, err)
 		return
@@ -89,7 +89,7 @@ func addACLAllow(np *namespacePolicy, match, l4Match string, ipBlockCidr bool, g
 		fmt.Sprintf("external-ids:policy_type=%s", policyType),
 		"--", "add", "port_group", np.portGroupUUID, "acls", "@acl")
 	if err != nil {
-		logrus.Errorf("failed to create the acl allow rule for "+
+		klog.Errorf("failed to create the acl allow rule for "+
 			"namespace=%s, policy=%s, stderr: %q (%v)", np.namespace,
 			np.name, stderr, err)
 		return
@@ -104,7 +104,7 @@ func modifyACLAllow(namespace, policy, oldMatch string, newMatch string, gressNu
 		fmt.Sprintf("external-ids:%s_num=%d", policyType, gressNum),
 		fmt.Sprintf("external-ids:policy_type=%s", policyType))
 	if err != nil {
-		logrus.Errorf("find failed to get the allow rule for "+
+		klog.Errorf("find failed to get the allow rule for "+
 			"namespace=%s, policy=%s, stderr: %q (%v)",
 			namespace, policy, stderr, err)
 		return
@@ -115,7 +115,7 @@ func modifyACLAllow(namespace, policy, oldMatch string, newMatch string, gressNu
 		_, stderr, err = util.RunOVNNbctl("set", "acl", uuid,
 			newMatch)
 		if err != nil {
-			logrus.Errorf("failed to modify the allow-from rule for "+
+			klog.Errorf("failed to modify the allow-from rule for "+
 				"namespace=%s, policy=%s, stderr: %q (%v)",
 				namespace, policy, stderr, err)
 		}
@@ -143,7 +143,7 @@ func addIPBlockACLDeny(np *namespacePolicy, except, priority string, gressNum in
 		fmt.Sprintf("external-ids:%s_num=%d", policyType, gressNum),
 		fmt.Sprintf("external-ids:policy=%s", np.name))
 	if err != nil {
-		logrus.Errorf("find failed to get the ipblock default deny rule for "+
+		klog.Errorf("find failed to get the ipblock default deny rule for "+
 			"namespace=%s, policy=%s stderr: %q, (%v)",
 			np.namespace, np.name, stderr, err)
 		return
@@ -163,7 +163,7 @@ func addIPBlockACLDeny(np *namespacePolicy, except, priority string, gressNum in
 		"--", "add", "port_group", np.portGroupUUID,
 		"acls", "@acl")
 	if err != nil {
-		logrus.Errorf("error executing create ACL command, stderr: %q, %+v",
+		klog.Errorf("error executing create ACL command, stderr: %q, %+v",
 			stderr, err)
 	}
 }
@@ -401,7 +401,7 @@ func (oc *Controller) createMulticastAllowPolicy(ns string) error {
 	// Add all ports from this namespace to the multicast allow group.
 	for _, portName := range oc.namespaceAddressSet[ns] {
 		if err := oc.podAddAllowMulticastPolicy(ns, portName); err != nil {
-			logrus.Warningf("failed to add port %s to port group ACL: %v", portName, err)
+			klog.Warningf("failed to add port %s to port group ACL: %v", portName, err)
 		}
 	}
 
@@ -497,12 +497,12 @@ func (oc *Controller) localPodAddDefaultDeny(
 
 	err := oc.createDefaultDenyPortGroup(knet.PolicyTypeIngress)
 	if err != nil {
-		logrus.Errorf(err.Error())
+		klog.Errorf(err.Error())
 		return
 	}
 	err = oc.createDefaultDenyPortGroup(knet.PolicyTypeEgress)
 	if err != nil {
-		logrus.Errorf(err.Error())
+		klog.Errorf(err.Error())
 		return
 	}
 
@@ -521,7 +521,7 @@ func (oc *Controller) localPodAddDefaultDeny(
 	if !(len(policy.Spec.PolicyTypes) == 1 && policy.Spec.PolicyTypes[0] == knet.PolicyTypeEgress) {
 		if oc.lspIngressDenyCache[logicalPort] == 0 {
 			if err := oc.addToPortGroup(oc.portGroupIngressDeny, logicalPort); err != nil {
-				logrus.Warningf("failed to add port %s to ingress deny ACL: %v", logicalPort, err)
+				klog.Warningf("failed to add port %s to ingress deny ACL: %v", logicalPort, err)
 			}
 		}
 		oc.lspIngressDenyCache[logicalPort]++
@@ -532,7 +532,7 @@ func (oc *Controller) localPodAddDefaultDeny(
 		len(policy.Spec.Egress) > 0 || len(policy.Spec.PolicyTypes) == 2 {
 		if oc.lspEgressDenyCache[logicalPort] == 0 {
 			if err := oc.addToPortGroup(oc.portGroupEgressDeny, logicalPort); err != nil {
-				logrus.Warningf("failed to add port %s to egress deny ACL: %v", logicalPort, err)
+				klog.Warningf("failed to add port %s to egress deny ACL: %v", logicalPort, err)
 			}
 		}
 		oc.lspEgressDenyCache[logicalPort]++
@@ -549,7 +549,7 @@ func (oc *Controller) localPodDelDefaultDeny(
 			oc.lspIngressDenyCache[logicalPort]--
 			if oc.lspIngressDenyCache[logicalPort] == 0 {
 				if err := oc.deleteFromPortGroup(oc.portGroupIngressDeny, logicalPort); err != nil {
-					logrus.Warningf("failed to remove port %s from ingress deny ACL: %v", logicalPort, err)
+					klog.Warningf("failed to remove port %s from ingress deny ACL: %v", logicalPort, err)
 				}
 			}
 		}
@@ -561,7 +561,7 @@ func (oc *Controller) localPodDelDefaultDeny(
 			oc.lspEgressDenyCache[logicalPort]--
 			if oc.lspEgressDenyCache[logicalPort] == 0 {
 				if err := oc.deleteFromPortGroup(oc.portGroupEgressDeny, logicalPort); err != nil {
-					logrus.Warningf("failed to remove port %s from egress deny ACL: %v", logicalPort, err)
+					klog.Warningf("failed to remove port %s from egress deny ACL: %v", logicalPort, err)
 				}
 			}
 		}
@@ -585,7 +585,7 @@ func (oc *Controller) handleLocalPodSelectorAddFunc(
 	logicalPort := podLogicalPortName(pod)
 	logicalPortUUID, err := oc.getLogicalPortUUID(logicalPort)
 	if err != nil {
-		logrus.Errorf(err.Error())
+		klog.Errorf(err.Error())
 		return
 	}
 
@@ -610,7 +610,7 @@ func (oc *Controller) handleLocalPodSelectorAddFunc(
 		"port_group", np.portGroupUUID, "ports", logicalPortUUID, "--",
 		"add", "port_group", np.portGroupUUID, "ports", logicalPortUUID)
 	if err != nil {
-		logrus.Errorf("Failed to add logicalPort %s to portGroup %s "+
+		klog.Errorf("Failed to add logicalPort %s to portGroup %s "+
 			"stderr: %q (%v)", logicalPort, np.portGroupUUID, stderr, err)
 	}
 
@@ -649,7 +649,7 @@ func (oc *Controller) handleLocalPodSelectorDelFunc(
 
 	logicalPortUUID, err := oc.getLogicalPortUUID(logicalPort)
 	if err != nil {
-		logrus.Errorf(err.Error())
+		klog.Errorf(err.Error())
 		return
 	}
 	if np.portGroupUUID == "" {
@@ -659,7 +659,7 @@ func (oc *Controller) handleLocalPodSelectorDelFunc(
 	_, stderr, err := util.RunOVNNbctl("--if-exists", "remove",
 		"port_group", np.portGroupUUID, "ports", logicalPortUUID)
 	if err != nil {
-		logrus.Errorf("Failed to delete logicalPort %s from portGroup %s "+
+		klog.Errorf("Failed to delete logicalPort %s from portGroup %s "+
 			"stderr: %q (%v)", logicalPort, np.portGroupUUID, stderr, err)
 	}
 }
@@ -681,7 +681,7 @@ func (oc *Controller) handleLocalPodSelector(
 			},
 		}, nil)
 	if err != nil {
-		logrus.Errorf("error watching local pods for policy %s in namespace %s: %v",
+		klog.Errorf("error watching local pods for policy %s in namespace %s: %v",
 			policy.Name, policy.Namespace, err)
 		return
 	}
@@ -731,7 +731,7 @@ func hasAnyLabelSelector(peers []knet.NetworkPolicyPeer) bool {
 // addNetworkPolicyPortGroup creates and applies OVN ACLs to pod logical switch
 // ports from Kubernetes NetworkPolicy objects using OVN Port Groups
 func (oc *Controller) addNetworkPolicyPortGroup(policy *knet.NetworkPolicy) {
-	logrus.Infof("Adding network policy %s in namespace %s", policy.Name,
+	klog.Infof("Adding network policy %s in namespace %s", policy.Name,
 		policy.Namespace)
 
 	if oc.namespacePolicies[policy.Namespace] != nil &&
@@ -741,7 +741,7 @@ func (oc *Controller) addNetworkPolicyPortGroup(policy *knet.NetworkPolicy) {
 
 	err := oc.waitForNamespaceEvent(policy.Namespace)
 	if err != nil {
-		logrus.Errorf("failed to wait for namespace %s event (%v)",
+		klog.Errorf("failed to wait for namespace %s event (%v)",
 			policy.Namespace, err)
 		return
 	}
@@ -755,7 +755,7 @@ func (oc *Controller) addNetworkPolicyPortGroup(policy *knet.NetworkPolicy) {
 
 	np.portGroupUUID, err = createPortGroup(readableGroupName, np.portGroupName)
 	if err != nil {
-		logrus.Errorf("Failed to create port_group for network policy %s in "+
+		klog.Errorf("Failed to create port_group for network policy %s in "+
 			"namespace %s", policy.Name, policy.Namespace)
 		return
 	}
@@ -763,7 +763,7 @@ func (oc *Controller) addNetworkPolicyPortGroup(policy *knet.NetworkPolicy) {
 	// Go through each ingress rule.  For each ingress rule, create an
 	// addressSet for the peer pods.
 	for i, ingressJSON := range policy.Spec.Ingress {
-		logrus.Debugf("Network policy ingress is %+v", ingressJSON)
+		klog.V(5).Infof("Network policy ingress is %+v", ingressJSON)
 
 		ingress := newGressPolicy(knet.PolicyTypeIngress, i)
 
@@ -824,7 +824,7 @@ func (oc *Controller) addNetworkPolicyPortGroup(policy *knet.NetworkPolicy) {
 	// Go through each egress rule.  For each egress rule, create an
 	// addressSet for the peer pods.
 	for i, egressJSON := range policy.Spec.Egress {
-		logrus.Debugf("Network policy egress is %+v", egressJSON)
+		klog.V(5).Infof("Network policy egress is %+v", egressJSON)
 
 		egress := newGressPolicy(knet.PolicyTypeEgress, i)
 
@@ -891,12 +891,12 @@ func (oc *Controller) addNetworkPolicyPortGroup(policy *knet.NetworkPolicy) {
 
 func (oc *Controller) deleteNetworkPolicyPortGroup(
 	policy *knet.NetworkPolicy) {
-	logrus.Infof("Deleting network policy %s in namespace %s",
+	klog.Infof("Deleting network policy %s in namespace %s",
 		policy.Name, policy.Namespace)
 
 	if oc.namespacePolicies[policy.Namespace] == nil ||
 		oc.namespacePolicies[policy.Namespace][policy.Name] == nil {
-		logrus.Errorf("Delete network policy %s in namespace %s "+
+		klog.Errorf("Delete network policy %s in namespace %s "+
 			"received without getting a create event",
 			policy.Name, policy.Namespace)
 		return

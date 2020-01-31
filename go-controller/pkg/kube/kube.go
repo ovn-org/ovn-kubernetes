@@ -2,7 +2,7 @@ package kube
 
 import (
 	"encoding/json"
-	"github.com/sirupsen/logrus"
+	"k8s.io/klog"
 
 	kapi "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -44,16 +44,16 @@ func (k *Kube) SetAnnotationsOnPod(pod *kapi.Pod, annotations map[string]string)
 	}
 
 	podDesc := pod.Namespace + "/" + pod.Name
-	logrus.Infof("Setting annotations %v on pod %s", annotations, podDesc)
+	klog.Infof("Setting annotations %v on pod %s", annotations, podDesc)
 	patchData, err = json.Marshal(&patch)
 	if err != nil {
-		logrus.Errorf("Error in setting annotations on pod %s: %v", podDesc, err)
+		klog.Errorf("Error in setting annotations on pod %s: %v", podDesc, err)
 		return err
 	}
 
 	_, err = k.KClient.CoreV1().Pods(pod.Namespace).Patch(pod.Name, types.MergePatchType, patchData)
 	if err != nil {
-		logrus.Errorf("Error in setting annotation on pod %s: %v", podDesc, err)
+		klog.Errorf("Error in setting annotation on pod %s: %v", podDesc, err)
 	}
 	return err
 }
@@ -70,26 +70,26 @@ func (k *Kube) SetAnnotationsOnNode(node *kapi.Node, annotations map[string]inte
 		},
 	}
 
-	logrus.Infof("Setting annotations %v on node %s", annotations, node.Name)
+	klog.Infof("Setting annotations %v on node %s", annotations, node.Name)
 	patchData, err = json.Marshal(&patch)
 	if err != nil {
-		logrus.Errorf("Error in setting annotations on node %s: %v", node.Name, err)
+		klog.Errorf("Error in setting annotations on node %s: %v", node.Name, err)
 		return err
 	}
 
 	_, err = k.KClient.CoreV1().Nodes().Patch(node.Name, types.MergePatchType, patchData)
 	if err != nil {
-		logrus.Errorf("Error in setting annotation on node %s: %v", node.Name, err)
+		klog.Errorf("Error in setting annotation on node %s: %v", node.Name, err)
 	}
 	return err
 }
 
 // UpdateNodeStatus takes the node object and sets the provided update status
 func (k *Kube) UpdateNodeStatus(node *kapi.Node) error {
-	logrus.Infof("Updating status on node %s", node.Name)
+	klog.Infof("Updating status on node %s", node.Name)
 	_, err := k.KClient.CoreV1().Nodes().UpdateStatus(node)
 	if err != nil {
-		logrus.Errorf("Error in updating status on node %s: %v", node.Name, err)
+		klog.Errorf("Error in updating status on node %s: %v", node.Name, err)
 	}
 	return err
 }

@@ -7,7 +7,7 @@ import (
 
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
-	"github.com/sirupsen/logrus"
+	"k8s.io/klog"
 )
 
 func createManagementPortGeneric(nodeName string, localSubnet *net.IPNet) (string, string, string, string, string, error) {
@@ -29,7 +29,7 @@ func createManagementPortGeneric(nodeName string, localSubnet *net.IPNet) (strin
 	// Make sure br-int is created.
 	stdout, stderr, err := util.RunOVSVsctl("--", "--may-exist", "add-br", "br-int")
 	if err != nil {
-		logrus.Errorf("Failed to create br-int, stdout: %q, stderr: %q, error: %v", stdout, stderr, err)
+		klog.Errorf("Failed to create br-int, stdout: %q, stderr: %q, error: %v", stdout, stderr, err)
 		return "", "", "", "", "", err
 	}
 
@@ -41,19 +41,19 @@ func createManagementPortGeneric(nodeName string, localSubnet *net.IPNet) (strin
 		"type=internal", "mtu_request="+fmt.Sprintf("%d", config.Default.MTU),
 		"external-ids:iface-id=k8s-"+nodeName)
 	if err != nil {
-		logrus.Errorf("Failed to add port to br-int, stdout: %q, stderr: %q, error: %v", stdout, stderr, err)
+		klog.Errorf("Failed to add port to br-int, stdout: %q, stderr: %q, error: %v", stdout, stderr, err)
 		return "", "", "", "", "", err
 	}
 	macAddress, err := util.GetOVSPortMACAddress(interfaceName)
 	if err != nil {
-		logrus.Errorf("Failed to get management port MAC address: %v", err)
+		klog.Errorf("Failed to get management port MAC address: %v", err)
 		return "", "", "", "", "", err
 	}
 	// persist the MAC address so that upon node reboot we get back the same mac address.
 	_, stderr, err = util.RunOVSVsctl("set", "interface", interfaceName,
 		fmt.Sprintf("mac=%s", strings.ReplaceAll(macAddress, ":", "\\:")))
 	if err != nil {
-		logrus.Errorf("failed to persist MAC address %q for %q: stderr:%s (%v)", macAddress,
+		klog.Errorf("failed to persist MAC address %q for %q: stderr:%s (%v)", macAddress,
 			interfaceName, stderr, err)
 		return "", "", "", "", "", err
 	}

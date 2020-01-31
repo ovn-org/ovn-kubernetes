@@ -5,8 +5,8 @@ import (
 	"net"
 
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
-	"github.com/sirupsen/logrus"
 	kapi "k8s.io/api/core/v1"
+	"k8s.io/klog"
 )
 
 func (ovn *Controller) syncServices(services []interface{}) {
@@ -30,7 +30,7 @@ func (ovn *Controller) syncServices(services []interface{}) {
 	for _, serviceInterface := range services {
 		service, ok := serviceInterface.(*kapi.Service)
 		if !ok {
-			logrus.Errorf("Spurious object in syncServices: %v",
+			klog.Errorf("Spurious object in syncServices: %v",
 				serviceInterface)
 			continue
 		}
@@ -40,7 +40,7 @@ func (ovn *Controller) syncServices(services []interface{}) {
 		}
 
 		if !util.IsClusterIPSet(service) {
-			logrus.Debugf("Skipping service %s due to clusterIP = %q",
+			klog.V(5).Infof("Skipping service %s due to clusterIP = %q",
 				service.Name, service.Spec.ClusterIP)
 			continue
 		}
@@ -90,14 +90,14 @@ func (ovn *Controller) syncServices(services []interface{}) {
 	for _, protocol := range []string{TCP, UDP} {
 		loadBalancer, err := ovn.getLoadBalancer(kapi.Protocol(protocol))
 		if err != nil {
-			logrus.Errorf("Failed to get load-balancer for %s (%v)",
+			klog.Errorf("Failed to get load-balancer for %s (%v)",
 				kapi.Protocol(protocol), err)
 			continue
 		}
 
 		loadBalancerVIPS, err := ovn.getLoadBalancerVIPS(loadBalancer)
 		if err != nil {
-			logrus.Errorf("failed to get load-balancer vips for %s (%v)",
+			klog.Errorf("failed to get load-balancer vips for %s (%v)",
 				loadBalancer, err)
 			continue
 		}
@@ -107,7 +107,7 @@ func (ovn *Controller) syncServices(services []interface{}) {
 
 		for vip := range loadBalancerVIPS {
 			if !stringSliceMembership(clusterServices[protocol], vip) {
-				logrus.Debugf("Deleting stale cluster vip %s in "+
+				klog.V(5).Infof("Deleting stale cluster vip %s in "+
 					"loadbalancer %s", vip, loadBalancer)
 				ovn.deleteLoadBalancerVIP(loadBalancer, vip)
 			}
@@ -118,7 +118,7 @@ func (ovn *Controller) syncServices(services []interface{}) {
 	// 'nodeportServices'.
 	gateways, stderr, err := ovn.getOvnGateways()
 	if err != nil {
-		logrus.Errorf("failed to get ovn gateways. Not syncing nodeport"+
+		klog.Errorf("failed to get ovn gateways. Not syncing nodeport"+
 			"stdout: %q, stderr: %q (%v)", gateways, stderr, err)
 		return
 	}
@@ -127,7 +127,7 @@ func (ovn *Controller) syncServices(services []interface{}) {
 		for _, protocol := range []string{TCP, UDP} {
 			loadBalancer, err := ovn.getGatewayLoadBalancer(gateway, protocol)
 			if err != nil {
-				logrus.Errorf("physical gateway %s does not have "+
+				klog.Errorf("physical gateway %s does not have "+
 					"load_balancer (%v)", gateway, err)
 				continue
 			}
@@ -137,7 +137,7 @@ func (ovn *Controller) syncServices(services []interface{}) {
 
 			loadBalancerVIPS, err := ovn.getLoadBalancerVIPS(loadBalancer)
 			if err != nil {
-				logrus.Errorf("failed to get load-balancer vips for %s (%v)",
+				klog.Errorf("failed to get load-balancer vips for %s (%v)",
 					loadBalancer, err)
 				continue
 			}
@@ -150,13 +150,13 @@ func (ovn *Controller) syncServices(services []interface{}) {
 				if err != nil {
 					// In a OVN load-balancer, we should always have vip:port.
 					// In the unlikely event that it is not the case, skip it.
-					logrus.Errorf("failed to split %s to vip and port (%v)",
+					klog.Errorf("failed to split %s to vip and port (%v)",
 						vip, err)
 					continue
 				}
 
 				if !stringSliceMembership(nodeportServices[protocol], port) && !stringSliceMembership(lbServices[protocol], vip) {
-					logrus.Debugf("Deleting stale nodeport vip %s in "+
+					klog.V(5).Infof("Deleting stale nodeport vip %s in "+
 						"loadbalancer %s", vip, loadBalancer)
 					ovn.deleteLoadBalancerVIP(loadBalancer, vip)
 				}
@@ -194,14 +194,14 @@ func (ovn *Controller) deleteService(service *kapi.Service) {
 			// Delete the 'NodePort' service from a load-balancer instantiated in gateways.
 			err := ovn.createGatewaysVIP(string(protocol), port, targetPort, ips)
 			if err != nil {
-				logrus.Errorf("Error in deleting NodePort gateway entry for service "+
+				klog.Errorf("Error in deleting NodePort gateway entry for service "+
 					"%s %+v", util.JoinHostPortInt32(service.Name, port), err)
 			}
 		}
 		if util.ServiceTypeHasClusterIP(service) {
 			loadBalancer, err := ovn.getLoadBalancer(protocol)
 			if err != nil {
-				logrus.Errorf("Failed to get load-balancer for %s (%v)",
+				klog.Errorf("Failed to get load-balancer for %s (%v)",
 					protocol, err)
 				break
 			}
@@ -209,7 +209,7 @@ func (ovn *Controller) deleteService(service *kapi.Service) {
 			err = ovn.createLoadBalancerVIP(loadBalancer,
 				service.Spec.ClusterIP, svcPort.Port, ips, targetPort)
 			if err != nil {
-				logrus.Errorf("Error in deleting load balancer for service "+
+				klog.Errorf("Error in deleting load balancer for service "+
 					"%s %+v", util.JoinHostPortInt32(service.Name, port), err)
 			}
 			ovn.handleExternalIPs(service, svcPort, ips, targetPort)

@@ -4,15 +4,14 @@ import (
 	"bytes"
 	"fmt"
 	"io/ioutil"
+	"k8s.io/klog"
+	kexec "k8s.io/utils/exec"
 	"path/filepath"
 	"runtime"
 	"strings"
 	"sync/atomic"
 	"time"
 	"unicode"
-
-	"github.com/sirupsen/logrus"
-	kexec "k8s.io/utils/exec"
 
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
 )
@@ -203,13 +202,13 @@ func runCmd(cmd kexec.Cmd, cmdPath string, args ...string) (*bytes.Buffer, *byte
 
 	counter := atomic.AddUint64(&runCounter, 1)
 	logCmd := fmt.Sprintf("%s %s", cmdPath, strings.Join(args, " "))
-	logrus.Debugf("exec(%d): %s", counter, logCmd)
+	klog.V(5).Infof("exec(%d): %s", counter, logCmd)
 
 	err := cmd.Run()
-	logrus.Debugf("exec(%d): stdout: %q", counter, stdout)
-	logrus.Debugf("exec(%d): stderr: %q", counter, stderr)
+	klog.V(5).Infof("exec(%d): stdout: %q", counter, stdout)
+	klog.V(5).Infof("exec(%d): stderr: %q", counter, stderr)
 	if err != nil {
-		logrus.Debugf("exec(%d): err: %v", counter, err)
+		klog.V(5).Infof("exec(%d): err: %v", counter, err)
 	}
 	return stdout, stderr, err
 }
@@ -286,12 +285,12 @@ func getNbctlArgsAndEnv(timeout int, args ...string) ([]string, []string) {
 			envVars = append(envVars,
 				fmt.Sprintf("OVN_NB_DAEMON=%sovn-nbctl.%s.ctl", runner.ovnRunDir,
 					strings.Trim(string(pid), " \n")))
-			logrus.Debugf("using ovn-nbctl daemon mode at %s", envVars)
+			klog.V(5).Infof("using ovn-nbctl daemon mode at %s", envVars)
 			cmdArgs = append(cmdArgs, fmt.Sprintf("--timeout=%d", timeout))
 			cmdArgs = append(cmdArgs, args...)
 			return cmdArgs, envVars
 		}
-		logrus.Warningf("failed to retrieve ovn-nbctl daemon's control socket " +
+		klog.Warningf("failed to retrieve ovn-nbctl daemon's control socket " +
 			"so resorting to non-daemon mode")
 	}
 

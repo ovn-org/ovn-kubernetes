@@ -9,14 +9,15 @@ import (
 	"path/filepath"
 	"reflect"
 	"runtime"
+	"strconv"
 	"strings"
 
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
-	"github.com/sirupsen/logrus"
 	"github.com/urfave/cli"
 	gcfg "gopkg.in/gcfg.v1"
 	lumberjack "gopkg.in/natefinch/lumberjack.v2"
+	"k8s.io/klog"
 
 	kexec "k8s.io/utils/exec"
 )
@@ -460,7 +461,7 @@ var CommonFlags = []cli.Flag{
 	// Logging options
 	cli.IntFlag{
 		Name:        "loglevel",
-		Usage:       "log verbosity and level: 5=debug, 4=info, 3=warn, 2=error, 1=fatal (default: 4)",
+		Usage:       "log verbosity and level: info, warn, fatal, error are always printed no matter the log level. Use 5 for debug (default: 4)",
 		Destination: &cliConfig.Logging.Level,
 		Value:       Logging.Level,
 	},
@@ -737,10 +738,10 @@ func rawExec(exec kexec.Interface, cmd string, args ...string) (string, error) {
 		return "", err
 	}
 
-	logrus.Debugf("exec: %s %s", cmdPath, strings.Join(args, " "))
+	klog.V(5).Infof("exec: %s %s", cmdPath, strings.Join(args, " "))
 	out, err := exec.Command(cmdPath, args...).CombinedOutput()
 	if err != nil {
-		logrus.Debugf("exec: %s %s => %v", cmdPath, strings.Join(args, " "), err)
+		klog.V(5).Infof("exec: %s %s => %v", cmdPath, strings.Join(args, " "), err)
 		return "", err
 	}
 	return strings.TrimSpace(string(out)), nil
@@ -764,7 +765,7 @@ func getOVSExternalID(exec kexec.Interface, name string) string {
 		".",
 		"external_ids:"+name)
 	if err != nil {
-		logrus.Debugf("failed to get OVS external_id %s: %v\n\t%s", name, err, out)
+		klog.V(5).Infof("failed to get OVS external_id %s: %v\n\t%s", name, err, out)
 		return ""
 	}
 	return out
@@ -1033,7 +1034,11 @@ func initConfigWithPath(ctx *cli.Context, exec kexec.Interface, saPath string, d
 
 	configFile, configFileIsDefault = getConfigFilePath(ctx)
 
-	logrus.SetOutput(os.Stderr)
+	var level klog.Level
+	if err := level.Set(strconv.Itoa(ctx.Int("loglevel"))); err != nil {
+		return "", fmt.Errorf("failed to set klog log level %v", err)
+	}
+	klog.SetOutput(os.Stderr)
 
 	if !configFileIsDefault {
 		// Only return explicitly specified config file
@@ -1052,8 +1057,8 @@ func initConfigWithPath(ctx *cli.Context, exec kexec.Interface, saPath string, d
 		if err = gcfg.ReadInto(&cfg, f); err != nil {
 			return "", fmt.Errorf("failed to parse config file %s: %v", f.Name(), err)
 		}
-		logrus.Infof("Parsed config file %s", f.Name())
-		logrus.Infof("Parsed config: %+v", cfg)
+		klog.Infof("Parsed config file %s", f.Name())
+		klog.Infof("Parsed config: %+v", cfg)
 	}
 
 	if defaults == nil {
@@ -1076,9 +1081,8 @@ func initConfigWithPath(ctx *cli.Context, exec kexec.Interface, saPath string, d
 		return "", err
 	}
 
-	logrus.SetLevel(logrus.Level(Logging.Level))
 	if Logging.File != "" {
-		logrus.SetOutput(&lumberjack.Logger{
+		klog.SetOutput(&lumberjack.Logger{
 			Filename:   Logging.File,
 			MaxSize:    100, // megabytes
 			MaxBackups: 10,
@@ -1121,12 +1125,12 @@ func initConfigWithPath(ctx *cli.Context, exec kexec.Interface, saPath string, d
 		IPv6Mode = true
 	}
 
-	logrus.Debugf("Default config: %+v", Default)
-	logrus.Debugf("Logging config: %+v", Logging)
-	logrus.Debugf("CNI config: %+v", CNI)
-	logrus.Debugf("Kubernetes config: %+v", Kubernetes)
-	logrus.Debugf("OVN North config: %+v", OvnNorth)
-	logrus.Debugf("OVN South config: %+v", OvnSouth)
+	klog.V(5).Infof("Default config: %+v", Default)
+	klog.V(5).Infof("Logging config: %+v", Logging)
+	klog.V(5).Infof("CNI config: %+v", CNI)
+	klog.V(5).Infof("Kubernetes config: %+v", Kubernetes)
+	klog.V(5).Infof("OVN North config: %+v", OvnNorth)
+	klog.V(5).Infof("OVN South config: %+v", OvnSouth)
 
 	return retConfigFile, nil
 }
@@ -1298,7 +1302,7 @@ func (a *OvnAuthConfig) ensureCACert() error {
 	args = append(args, "list", "nb_global")
 	_, _ = rawExec(a.exec, "ovn-nbctl", args...)
 	if _, err := os.Stat(a.CACert); os.IsNotExist(err) {
-		logrus.Warnf("bootstrapping %s CA certificate failed", a.CACert)
+		klog.Warningf("bootstrapping %s CA certificate failed", a.CACert)
 	}
 	return nil
 }
@@ -1366,7 +1370,7 @@ func (a *OvnAuthConfig) updateIP(newIPs []string, port string) {
 // UpdateOVNNodeAuth updates the host and URL in ClientAuth
 // for both OvnNorth and OvnSouth. It updates them with the new masterIP.
 func UpdateOVNNodeAuth(masterIP []string, southboundDBPort, northboundDBPort string) {
-	logrus.Debugf("Update OVN node auth with new master ip: %s", masterIP)
+	klog.V(5).Infof("Update OVN node auth with new master ip: %s", masterIP)
 	OvnNorth.updateIP(masterIP, northboundDBPort)
 	OvnSouth.updateIP(masterIP, southboundDBPort)
 }

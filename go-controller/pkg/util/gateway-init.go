@@ -7,7 +7,7 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/sirupsen/logrus"
+	"k8s.io/klog"
 
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
 )
@@ -61,7 +61,7 @@ func GetDefaultGatewayRouterIP() (string, net.IP, error) {
 				if ip := net.ParseIP(ipStr); ip != nil {
 					routers = append(routers, gwRouter{parts[0], ip})
 				} else {
-					logrus.Warnf("failed to parse gateway router %q IP %q", parts[0], ipStr)
+					klog.Warningf("failed to parse gateway router %q IP %q", parts[0], ipStr)
 				}
 			}
 		}

@@ -4,7 +4,7 @@ import (
 	"strings"
 
 	util "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
-	"github.com/sirupsen/logrus"
+	"k8s.io/klog"
 )
 
 func (ovn *Controller) getOvnGateways() ([]string, string, error) {
@@ -42,7 +42,7 @@ func (ovn *Controller) getGatewayLoadBalancer(physicalGateway,
 
 func (ovn *Controller) createGatewaysVIP(protocol string, port, targetPort int32, ips []string) error {
 
-	logrus.Debugf("Creating Gateway VIP - %s, %d, %d, %v", protocol, port, targetPort, ips)
+	klog.V(5).Infof("Creating Gateway VIP - %s, %d, %d, %v", protocol, port, targetPort, ips)
 
 	// Each gateway has a separate load-balancer for N/S traffic
 
@@ -55,7 +55,7 @@ func (ovn *Controller) createGatewaysVIP(protocol string, port, targetPort int32
 		loadBalancer, err := ovn.getGatewayLoadBalancer(physicalGateway,
 			protocol)
 		if err != nil {
-			logrus.Errorf("physical gateway %s does not have load_balancer "+
+			klog.Errorf("physical gateway %s does not have load_balancer "+
 				"(%v)", physicalGateway, err)
 			continue
 		}
@@ -64,7 +64,7 @@ func (ovn *Controller) createGatewaysVIP(protocol string, port, targetPort int32
 		}
 		physicalIP, err := ovn.getGatewayPhysicalIP(physicalGateway)
 		if err != nil {
-			logrus.Errorf("physical gateway %s does not have physical ip (%v)",
+			klog.Errorf("physical gateway %s does not have physical ip (%v)",
 				physicalGateway, err)
 			continue
 		}
@@ -73,7 +73,7 @@ func (ovn *Controller) createGatewaysVIP(protocol string, port, targetPort int32
 		err = ovn.createLoadBalancerVIP(loadBalancer,
 			physicalIP, port, ips, targetPort)
 		if err != nil {
-			logrus.Errorf("Failed to create VIP in load balancer %s - %v", loadBalancer, err)
+			klog.Errorf("Failed to create VIP in load balancer %s - %v", loadBalancer, err)
 			continue
 		}
 	}

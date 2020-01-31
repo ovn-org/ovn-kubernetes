@@ -11,7 +11,7 @@ import (
 	kapi "k8s.io/api/core/v1"
 
 	"github.com/prometheus/client_golang/prometheus"
-	"github.com/sirupsen/logrus"
+	"k8s.io/klog"
 )
 
 const MetricSubsystem = "master"
@@ -59,13 +59,13 @@ func scrapeOvnTimestamp() float64 {
 	output, stderr, err := util.RunOVNSbctl("--if-exists",
 		"get", "SB_Global", ".", "options:e2e_timestamp")
 	if err != nil {
-		logrus.Errorf("failed to scrape timestamp: %s (%v)", stderr, err)
+		klog.Errorf("failed to scrape timestamp: %s (%v)", stderr, err)
 		return 0
 	}
 
 	out, err := strconv.ParseFloat(output, 64)
 	if err != nil {
-		logrus.Errorf("failed to parse timestamp %s: %v", output, err)
+		klog.Errorf("failed to parse timestamp %s: %v", output, err)
 		return 0
 	}
 	return out
@@ -81,7 +81,7 @@ func startOvnUpdater() {
 				_, stderr, err := util.RunOVNNbctl("set", "NB_Global", ".",
 					fmt.Sprintf(`options:e2e_timestamp="%d"`, t))
 				if err != nil {
-					logrus.Errorf("failed to bump timestamp: %s (%v)", stderr, err)
+					klog.Errorf("failed to bump timestamp: %s (%v)", stderr, err)
 				} else {
 					metricE2ETimestamp.Set(float64(t))
 				}
