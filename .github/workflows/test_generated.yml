@@ -7,6 +7,7 @@ name: Go
 - pull_request
 env:
   K8S_VERSION: v1.16.4
+  KIND_CLUSTER_NAME: ovn
 jobs:
   build:
     name: Build
@@ -85,10 +86,13 @@ jobs:
         pushd $GOPATH/src/k8s.io/kubernetes/
         export KUBERNETES_CONFORMANCE_TEST=y
         export KUBECONFIG=${HOME}/admin.conf
-        kubetest --ginkgo-parallel=2 --provider=local --deployment=kind --kind-cluster-name=kind-ovn --test --test_args='--ginkgo.focus=\[sig-network\].*Conformance --disable-log-dump=false --ginkgo.skip=\[Serial\]'
-        kubetest --ginkgo-parallel=2 --provider=local --deployment=kind --kind-cluster-name=kind-ovn --test --test_args='--ginkgo.focus=\[sig-network\].*NetworkPolicy --disable-log-dump=false --ginkgo.skip=ingress\saccess|multiple\segress\spolicies|allow\segress\saccess|\[Serial\]'
+        export MASTER_NAME=${KIND_CLUSTER_NAME}-control-plane
+        export NODE_NAMES=${MASTER_NAME}
+        kubetest --ginkgo-parallel=2 --provider=local --deployment=kind --kind-cluster-name=${KIND_CLUSTER_NAME} --test --test_args='--ginkgo.focus=\[sig-network\].*Conformance --disable-log-dump=false --ginkgo.skip=\[Serial\]'
+        kubetest --ginkgo-parallel=2 --provider=local --deployment=kind --kind-cluster-name=${KIND_CLUSTER_NAME} --test --test_args='--ginkgo.focus=\[sig-network\].*NetworkPolicy --disable-log-dump=false --ginkgo.skip=ingress\saccess|multiple\segress\spolicies|allow\segress\saccess|\[Serial\]'
     - name: Export logs on failure
-      run: "mkdir -p /tmp/kind/logs \nkind export logs /tmp/kind/logs\n"
+      run: "mkdir -p /tmp/kind/logs \nkind export logs --name ${KIND_CLUSTER_NAME}
+        /tmp/kind/logs\n"
       working-directory: "${{ env.WORKDIR }}"
       if: failure()
     - name: Upload logs
