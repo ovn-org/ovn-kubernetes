@@ -498,7 +498,7 @@ func (oc *Controller) syncNodeGateway(node *kapi.Node, subnet *net.IPNet) error 
 // back the appropriate handler logic
 func (oc *Controller) WatchNodes() error {
 	var gatewaysFailed sync.Map
-	macAddressFailed := make(map[string]bool)
+	var mgmtPortFailed sync.Map
 	_, err := oc.watchFactory.AddNodeHandler(cache.ResourceEventHandlerFuncs{
 		AddFunc: func(obj interface{}) {
 			node := obj.(*kapi.Node)
@@ -511,8 +511,8 @@ func (oc *Controller) WatchNodes() error {
 
 			err = oc.syncNodeManagementPort(node, hostSubnet)
 			if err != nil {
-				macAddressFailed[node.Name] = true
-				logrus.Errorf("error creating Node Management Port for node %s: %v", node.Name, err)
+				logrus.Errorf("error creating management port for node %s: %v", node.Name, err)
+				mgmtPortFailed.Store(node.Name, true)
 			}
 
 			if err := oc.syncNodeGateway(node, hostSubnet); err != nil {
@@ -524,19 +524,21 @@ func (oc *Controller) WatchNodes() error {
 			oldNode := old.(*kapi.Node)
 			node := new.(*kapi.Node)
 			logrus.Debugf("Updated event for Node %q", node.Name)
-			if macAddressFailed[node.Name] || macAddressChanged(oldNode, node) {
+
+			_, failed := mgmtPortFailed.Load(node.Name)
+			if failed || macAddressChanged(oldNode, node) {
 				err := oc.syncNodeManagementPort(node, nil)
 				if err != nil {
-					macAddressFailed[node.Name] = true
-					logrus.Errorf("error update Node Management Port for node %s: %v", node.Name, err)
+					logrus.Errorf("error updating management port for node %s: %v", node.Name, err)
+					mgmtPortFailed.Store(node.Name, true)
 				} else {
-					delete(macAddressFailed, node.Name)
+					mgmtPortFailed.Delete(node.Name)
 				}
 			}
 
 			oc.clearInitialNodeNetworkUnavailableCondition(oldNode, node)
 
-			_, failed := gatewaysFailed.Load(node.Name)
+			_, failed = gatewaysFailed.Load(node.Name)
 			if failed || gatewayChanged(oldNode, node) {
 				err := oc.syncNodeGateway(node, nil)
 				if err != nil {
@@ -560,6 +562,7 @@ func (oc *Controller) WatchNodes() error {
 			oc.lsMutex.Lock()
 			delete(oc.logicalSwitchCache, node.Name)
 			oc.lsMutex.Unlock()
+			mgmtPortFailed.Delete(node.Name)
 			gatewaysFailed.Delete(node.Name)
 			if oc.defGatewayRouter == "GR_"+node.Name {
 				delete(oc.loadbalancerGWCache, TCP)
