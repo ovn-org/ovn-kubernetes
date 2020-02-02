@@ -5,6 +5,8 @@ import (
 	"net"
 	"sync"
 	"time"
+
+	"github.com/sirupsen/logrus"
 )
 
 type portCache struct {
@@ -37,6 +39,7 @@ func (c *portCache) get(logicalPort string) (*lpInfo, error) {
 	if info, ok := c.cache[logicalPort]; ok {
 		return info, nil
 	}
+	logrus.Warningf("logical port %s not found in cache", logicalPort)
 	return nil, fmt.Errorf("logical port %s not found in cache", logicalPort)
 }
 
@@ -50,6 +53,7 @@ func (c *portCache) add(logicalSwitch, logicalPort, uuid string, mac net.Hardwar
 		ip:            ip,
 		mac:           mac,
 	}
+	logrus.Warningf("logical port %s (%s %s %s %s) added to cache", logicalPort, logicalSwitch, uuid, mac.String(), ip.String())
 	c.cache[logicalPort] = portInfo
 	return portInfo
 }
@@ -75,6 +79,7 @@ func (c *portCache) remove(logicalPort string) {
 			// have been resurrected if the pod was re-added in the
 			// last 10 seconds
 			if info, ok := c.cache[logicalPort]; ok && info.dead {
+				logrus.Warningf("logical port %s deleted from cache", logicalPort)
 				delete(c.cache, logicalPort)
 			}
 		case <-c.stopChan:
