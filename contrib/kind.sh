@@ -39,7 +39,7 @@ pushd ../dist/images
 sudo cp -f ../../go-controller/_output/go/bin/* .
 echo "ref: $(git rev-parse  --symbolic-full-name HEAD)  commit: $(git rev-parse  HEAD)" > git_info
 docker build -t ovn-daemonset-f:dev -f Dockerfile.fedora .
-./daemonset.sh --image=docker.io/library/ovn-daemonset-f:dev --net-cidr=10.244.0.0/16 --svc-cidr=10.96.0.0/12 --gateway-mode="local" --k8s-apiserver=https://${API_IP}:11337 --kind
+./daemonset.sh --image=docker.io/library/ovn-daemonset-f:dev --net-cidr=10.244.0.0/16 --svc-cidr=10.96.0.0/12 --gateway-mode="local" --k8s-apiserver=https://${API_IP}:11337 --kind --master-loglevel=5
 popd
 kind load docker-image ovn-daemonset-f:dev --name ${CLUSTER_NAME}
 pushd ../dist/yaml
