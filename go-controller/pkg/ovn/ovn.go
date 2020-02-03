@@ -335,36 +335,48 @@ func (oc *Controller) WatchPods() error {
 		AddFunc: func(obj interface{}) {
 			pod := obj.(*kapi.Pod)
 			if !podWantsNetwork(pod) {
+				logrus.Warningf("### ADD: pod %s/%s is hostnetwork", pod.Namespace, pod.Name)
 				return
 			}
 
 			if podScheduled(pod) {
 				if err := oc.addLogicalPort(pod); err != nil {
+					logrus.Warningf("### ADD: pod %s/%s failed err %v", pod.Namespace, pod.Name, err)
 					logrus.Errorf(err.Error())
 					retryPods.Store(pod.UID, true)
+				} else {
+					logrus.Warningf("### ADD: pod %s/%s successfully added", pod.Namespace, pod.Name)
 				}
 			} else {
 				// Handle unscheduled pods later in UpdateFunc
+				logrus.Warningf("### ADD: pod %s/%s not yet scheduled", pod.Namespace, pod.Name)
 				retryPods.Store(pod.UID, true)
 			}
 		},
 		UpdateFunc: func(old, newer interface{}) {
 			pod := newer.(*kapi.Pod)
 			if !podWantsNetwork(pod) {
+				logrus.Warningf("### UPDATE: pod %s/%s is hostnetwork", pod.Namespace, pod.Name)
 				return
 			}
 
 			_, retry := retryPods.Load(pod.UID)
+			logrus.Warningf("### UPDATE: pod %s/%s retry %v", pod.Namespace, pod.Name, retry)
 			if podScheduled(pod) && retry {
 				if err := oc.addLogicalPort(pod); err != nil {
+					logrus.Warningf("### UPDATE: pod %s/%s failed %v", pod.Namespace, pod.Name, err)
 					logrus.Errorf(err.Error())
 				} else {
+					logrus.Warningf("### UPDATE: pod %s/%s successfully added", pod.Namespace, pod.Name)
 					retryPods.Delete(pod.UID)
 				}
+			} else {
+				logrus.Warningf("### UPDATE: pod %s/%s either unscheduled %v or retry %v", pod.Namespace, pod.Name, podScheduled(pod), retry)
 			}
 		},
 		DeleteFunc: func(obj interface{}) {
 			pod := obj.(*kapi.Pod)
+			logrus.Warningf("### DEL: pod %s/%s deleting", pod.Namespace, pod.Name)
 			oc.deleteLogicalPort(pod)
 			retryPods.Delete(pod.UID)
 		},
