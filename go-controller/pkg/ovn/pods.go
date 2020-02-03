@@ -272,15 +272,18 @@ func (oc *Controller) addLogicalPort(pod *kapi.Pod) error {
 	// If the pod has not already been assigned addresses, read them now
 	if podMac == nil || podCIDR == nil {
 		var podIP net.IP
+		logrus.Debugf("[%s] waiting for pod addresses", portName)
 		podMac, podIP, err = waitForPodAddresses(portName)
 		if err != nil {
 			return err
 		}
 		podCIDR = &net.IPNet{IP: podIP, Mask: nodeSubnet.Mask}
 	}
+	logrus.Debugf("[%s] Got pod addresses %s %s", portName, podMac.String(), podCIDR.String())
 
 	// Add the pod's logical switch port to the port cache
 	portInfo := oc.logicalPortCache.add(logicalSwitch, portName, uuid, podMac, podCIDR.IP)
+	logrus.Debugf("[%s] added to port cache", portName)
 
 	// Set the port security for the logical switch port
 	addresses := fmt.Sprintf("%s %s", podMac, podCIDR.IP)
@@ -292,14 +295,18 @@ func (oc *Controller) addLogicalPort(pod *kapi.Pod) error {
 
 	// Enforce the default deny multicast policy
 	if oc.multicastSupport {
+		logrus.Debugf("[%s] about to add to MC deny", portName)
 		if err := oc.podAddDefaultDenyMulticastPolicy(portInfo); err != nil {
 			return err
 		}
+		logrus.Debugf("[%s] DONE adding to MC deny", portName)
 	}
 
+	logrus.Debugf("[%s] about to add to namespace", portName)
 	if err := oc.addPodToNamespace(pod.Namespace, portInfo); err != nil {
 		return err
 	}
+	logrus.Debugf("[%s] DONE adding to namespace", portName)
 
 	if annotation == nil {
 		marshalledAnnotation, err := util.MarshalPodAnnotation(&util.PodAnnotation{
@@ -321,5 +328,6 @@ func (oc *Controller) addLogicalPort(pod *kapi.Pod) error {
 		recordPodCreated(pod)
 	}
 
+	logrus.Debugf("[%s] done with port", portName)
 	return nil
 }
