@@ -24,6 +24,7 @@ OVN_DB_VIP=""
 OVN_DB_REPLICAS=""
 OVN_MTU="1400"
 KIND=""
+MASTER_LOGLEVEL="4"
 
 # Parse parameters given as arguments to this script.
 while [ "$1" != "" ]; do
@@ -65,6 +66,9 @@ while [ "$1" != "" ]; do
             ;;
         --kind)
             KIND=true
+            ;;
+        --master-loglevel)
+            MASTER_LOGLEVEL=$VALUE
             ;;
         *)
             echo "WARNING: unknown parameter \"$PARAM\""
@@ -124,12 +128,14 @@ policy_str="{{ ovn_image_pull_policy | default('IfNotPresent') }}"
 ovn_db_vip_image_repl="{{ ovn_db_vip_image | default('docker.io/ovnkube/ovndb-vip-u:latest') }}"
 ovn_db_replicas_repl="{{ ovn_db_replicas | default(3) }}"
 ovn_db_vip_repl="{{ ovn_db_vip }}"
+ovn_kube_master_log_level_str="{{ ovn_kube_master_log_level }}"
 
 ovn_image=${image} ovn_image_pull_policy=${policy} kind=${KIND} ovn_gateway_mode=${ovn_gateway_mode} \
  ovn_gateway_opts=${ovn_gateway_opts} j2 ../templates/ovnkube-node.yaml.j2 -o ../yaml/ovnkube-node.yaml
 
 sed "s,${image_str},${image},
-s,${policy_str},${policy}," ../templates/ovnkube-master.yaml.j2 > ../yaml/ovnkube-master.yaml
+s,${policy_str},${policy},
+s,${ovn_kube_master_log_level_str},${MASTER_LOGLEVEL}," ../templates/ovnkube-master.yaml.j2 > ../yaml/ovnkube-master.yaml
 
 sed "s,${image_str},${image},
 s,${policy_str},${policy}," ../templates/ovnkube-db.yaml.j2 > ../yaml/ovnkube-db.yaml

@@ -186,7 +186,7 @@ spec:
         - name: OVN_DAEMONSET_VERSION
           value: "3"
         - name: OVNKUBE_LOGLEVEL
-          value: "4"
+          value: "{{ ovn_kube_master_log_level }}"
         - name: OVN_NET_CIDR
           valueFrom:
             configMapKeyRef:

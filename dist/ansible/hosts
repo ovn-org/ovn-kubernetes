@@ -21,6 +21,8 @@ ovn_image="docker.io/ovnkube/ovn-daemonset:latest"
 ovn_image_pull_policy=IfNotPresent
 # ovn_image_pull_policy=Always
 
+ovn_kube_master_log_level=4
+
 # network configuration
 # net_cidr=10.128.0.0/14/23
 # svc_cidr=172.30.0.0/16
