@@ -23,6 +23,7 @@ import (
 const DefaultEncapPort = 6081
 
 const MetricNamespace = "ovnkube"
+const DefaultAPIServer = "http://localhost:8443"
 
 // The following are global config parameters that other modules may access directly
 var (
@@ -59,7 +60,7 @@ var (
 
 	// Kubernetes holds Kubernetes-related parsed config file parameters and command-line overrides
 	Kubernetes = KubernetesConfig{
-		APIServer:          "http://localhost:8080",
+		APIServer:          DefaultAPIServer,
 		ServiceCIDR:        "172.16.1.0/24",
 		OVNConfigNamespace: "ovn-kubernetes",
 	}
@@ -262,7 +263,7 @@ var (
 )
 
 func init() {
-	// Cache original default config values so they can be restored by testcases
+	// Cache original default config values
 	savedDefault = Default
 	savedLogging = Logging
 	savedCNI = CNI
@@ -294,9 +295,9 @@ func RestoreDefaultConfig() {
 }
 
 // copy members of struct 'src' into the corresponding field in struct 'dst'
-// if the field in 'src' is a non-zero int or a non-zero-length string. This
-// function should be called with pointers to structs.
-func overrideFields(dst, src interface{}) error {
+// if the field in 'src' is a non-zero int or a non-zero-length string and
+// does not contain a default value. This function should be called with pointers to structs.
+func overrideFields(dst, src, defaults interface{}) error {
 	dstStruct := reflect.ValueOf(dst).Elem()
 	srcStruct := reflect.ValueOf(src).Elem()
 	if dstStruct.Kind() != srcStruct.Kind() || dstStruct.Kind() != reflect.Struct {
@@ -306,6 +307,10 @@ func overrideFields(dst, src interface{}) error {
 		return fmt.Errorf("mismatched struct types")
 	}
 
+	var defStruct reflect.Value
+	if defaults != nil {
+		defStruct = reflect.ValueOf(defaults).Elem()
+	}
 	// Iterate over each field in dst/src Type so we can get the tags,
 	// and use the field name to retrieve the field's actual value from
 	// the dst/src instance
@@ -322,6 +327,10 @@ func overrideFields(dst, src interface{}) error {
 
 		dstField := dstStruct.FieldByName(structField.Name)
 		srcField := srcStruct.FieldByName(structField.Name)
+		var dv reflect.Value
+		if defStruct.IsValid() {
+			dv = defStruct.FieldByName(structField.Name)
+		}
 		if !dstField.IsValid() || !srcField.IsValid() {
 			return fmt.Errorf("invalid struct %q field %q", dstType.Name(), structField.Name)
 		}
@@ -330,18 +339,34 @@ func overrideFields(dst, src interface{}) error {
 		}
 		switch srcField.Kind() {
 		case reflect.String:
+			// do not override a setting with a default value
+			if dv.IsValid() && dv.String() == srcField.String() {
+				continue
+			}
 			if srcField.String() != "" {
 				dstField.Set(srcField)
 			}
 		case reflect.Int:
+			// do not override a setting with a default value
+			if dv.IsValid() && dv.Int() == srcField.Int() {
+				continue
+			}
 			if srcField.Int() != 0 {
 				dstField.Set(srcField)
 			}
 		case reflect.Uint:
+			// do not override a setting with a default value
+			if dv.IsValid() && dv.Uint() == srcField.Uint() {
+				continue
+			}
 			if srcField.Uint() != 0 {
 				dstField.Set(srcField)
 			}
 		case reflect.Bool:
+			// do not override a setting with a default value
+			if dv.IsValid() && dv.Bool() == srcField.Bool() {
+				continue
+			}
 			if srcField.Bool() {
 				dstField.Set(srcField)
 			}
@@ -381,21 +406,25 @@ var CommonFlags = []cli.Flag{
 	cli.StringFlag{
 		Name:  "config-file",
 		Usage: "configuration file path (default: /etc/openvswitch/ovn_k8s.conf)",
+		//Value: "/etc/openvswitch/ovn_k8s.conf",
 	},
 	cli.IntFlag{
 		Name:        "mtu",
 		Usage:       "MTU value used for the overlay networks (default: 1400)",
 		Destination: &cliConfig.Default.MTU,
+		Value:       Default.MTU,
 	},
 	cli.IntFlag{
 		Name:        "conntrack-zone",
 		Usage:       "For gateway nodes, the conntrack zone used for conntrack flow rules (default: 64000)",
 		Destination: &cliConfig.Default.ConntrackZone,
+		Value:       Default.ConntrackZone,
 	},
 	cli.StringFlag{
 		Name:        "encap-type",
 		Usage:       "The encapsulation protocol to use to transmit packets between hypervisors (default: geneve)",
 		Destination: &cliConfig.Default.EncapType,
+		Value:       Default.EncapType,
 	},
 	cli.StringFlag{
 		Name:        "encap-ip",
@@ -406,18 +435,21 @@ var CommonFlags = []cli.Flag{
 		Name:        "encap-port",
 		Usage:       "The UDP port used by the encapsulation endpoint (default: 6081)",
 		Destination: &cliConfig.Default.EncapPort,
+		Value:       Default.EncapPort,
 	},
 	cli.IntFlag{
 		Name: "inactivity-probe",
 		Usage: "Maximum number of milliseconds of idle time on " +
 			"connection for ovn-controller before it sends a inactivity probe",
 		Destination: &cliConfig.Default.InactivityProbe,
+		Value:       Default.InactivityProbe,
 	},
 	cli.IntFlag{
 		Name: "openflow-probe",
 		Usage: "Maximum number of seconds of idle time on the openflow " +
 			"connection for ovn-controller before it sends a inactivity probe",
 		Destination: &cliConfig.Default.OpenFlowProbe,
+		Value:       Default.OpenFlowProbe,
 	},
 	cli.StringFlag{
 		Name:        "cluster-subnet",
@@ -457,6 +489,7 @@ var CommonFlags = []cli.Flag{
 		Name:        "loglevel",
 		Usage:       "log verbosity and level: 5=debug, 4=info, 3=warn, 2=error, 1=fatal (default: 4)",
 		Destination: &cliConfig.Logging.Level,
+		Value:       Logging.Level,
 	},
 	cli.StringFlag{
 		Name:        "logfile",
@@ -472,11 +505,13 @@ var CNIFlags = []cli.Flag{
 		Name:        "cni-conf-dir",
 		Usage:       "the CNI config directory in which to write the overlay CNI config file (default: /etc/cni/net.d)",
 		Destination: &cliConfig.CNI.ConfDir,
+		Value:       CNI.ConfDir,
 	},
 	cli.StringFlag{
 		Name:        "cni-plugin",
 		Usage:       "the name of the CNI plugin (default: ovn-k8s-cni-overlay)",
 		Destination: &cliConfig.CNI.Plugin,
+		Value:       CNI.Plugin,
 	},
 	cli.StringFlag{
 		Name:        "win-hnsnetwork-id",
@@ -499,6 +534,7 @@ var K8sFlags = []cli.Flag{
 			"provided for kube-apiserver \"-service-cluster-ip-range\" " +
 			"option. (default: 172.16.1.0/24)",
 		Destination: &cliConfig.Kubernetes.ServiceCIDR,
+		Value:       Kubernetes.ServiceCIDR,
 	},
 	cli.StringFlag{
 		Name:        "k8s-kubeconfig",
@@ -509,6 +545,7 @@ var K8sFlags = []cli.Flag{
 		Name:        "k8s-apiserver",
 		Usage:       "URL of the Kubernetes API server (not required if --k8s-kubeconfig is given) (default: http://localhost:8443)",
 		Destination: &cliConfig.Kubernetes.APIServer,
+		Value:       Kubernetes.APIServer,
 	},
 	cli.StringFlag{
 		Name:        "k8s-cacert",
@@ -524,6 +561,7 @@ var K8sFlags = []cli.Flag{
 		Name:        "ovn-config-namespace",
 		Usage:       "specify a namespace which will contain services to config the OVN databases",
 		Destination: &cliConfig.Kubernetes.OVNConfigNamespace,
+		Value:       Kubernetes.OVNConfigNamespace,
 	},
 	cli.StringFlag{
 		Name:        "metrics-bind-address",
@@ -560,18 +598,21 @@ var OvnNBFlags = []cli.Flag{
 		Destination: &cliConfig.OvnNorth.Address,
 	},
 	cli.StringFlag{
-		Name:        "nb-client-privkey",
-		Usage:       "Private key that the client should use for talking to the OVN database.  Leave empty to use local unix socket. (default: /etc/openvswitch/ovnnb-privkey.pem)",
+		Name: "nb-client-privkey",
+		Usage: "Private key that the client should use for talking to the OVN database (default when ssl address is used: /etc/openvswitch/ovnnb-privkey.pem).  " +
+			"Default value for this setting is empty which defaults to use local unix socket.",
 		Destination: &cliConfig.OvnNorth.PrivKey,
 	},
 	cli.StringFlag{
-		Name:        "nb-client-cert",
-		Usage:       "Client certificate that the client should use for talking to the OVN database.  Leave empty to use local unix socket. (default: /etc/openvswitch/ovnnb-cert.pem)",
+		Name: "nb-client-cert",
+		Usage: "Client certificate that the client should use for talking to the OVN database (default when ssl address is used: /etc/openvswitch/ovnnb-cert.pem). " +
+			"Default value for this setting is empty which defaults to use local unix socket.",
 		Destination: &cliConfig.OvnNorth.Cert,
 	},
 	cli.StringFlag{
-		Name:        "nb-client-cacert",
-		Usage:       "CA certificate that the client should use for talking to the OVN database.  Leave empty to use local unix socket. (default: /etc/openvswitch/ovnnb-ca.cert)",
+		Name: "nb-client-cacert",
+		Usage: "CA certificate that the client should use for talking to the OVN database (default when ssl address is used: /etc/openvswitch/ovnnb-ca.cert)." +
+			"Default value for this setting is empty which defaults to use local unix socket.",
 		Destination: &cliConfig.OvnNorth.CACert,
 	},
 }
@@ -586,18 +627,21 @@ var OvnSBFlags = []cli.Flag{
 		Destination: &cliConfig.OvnSouth.Address,
 	},
 	cli.StringFlag{
-		Name:        "sb-client-privkey",
-		Usage:       "Private key that the client should use for talking to the OVN database.  Leave empty to use local unix socket. (default: /etc/openvswitch/ovnsb-privkey.pem)",
+		Name: "sb-client-privkey",
+		Usage: "Private key that the client should use for talking to the OVN database (default when ssl address is used: /etc/openvswitch/ovnsb-privkey.pem)." +
+			"Default value for this setting is empty which defaults to use local unix socket.",
 		Destination: &cliConfig.OvnSouth.PrivKey,
 	},
 	cli.StringFlag{
-		Name:        "sb-client-cert",
-		Usage:       "Client certificate that the client should use for talking to the OVN database.  Leave empty to use local unix socket. (default: /etc/openvswitch/ovnsb-cert.pem)",
+		Name: "sb-client-cert",
+		Usage: "Client certificate that the client should use for talking to the OVN database(default when ssl address is used: /etc/openvswitch/ovnsb-cert.pem).  " +
+			"Default value for this setting is empty which defaults to use local unix socket.",
 		Destination: &cliConfig.OvnSouth.Cert,
 	},
 	cli.StringFlag{
-		Name:        "sb-client-cacert",
-		Usage:       "CA certificate that the client should use for talking to the OVN database.  Leave empty to use local unix socket. (default: /etc/openvswitch/ovnsb-ca.cert)",
+		Name: "sb-client-cacert",
+		Usage: "CA certificate that the client should use for talking to the OVN database (default when ssl address is used /etc/openvswitch/ovnsb-ca.cert). " +
+			"Default value for this setting is empty which defaults to use local unix socket.",
 		Destination: &cliConfig.OvnSouth.CACert,
 	},
 }
@@ -662,26 +706,31 @@ var MasterHAFlags = []cli.Flag{
 		Name:        "nb-port",
 		Usage:       "Port of the OVN northbound DB server to configure (default: 6641)",
 		Destination: &cliConfig.MasterHA.NbPort,
+		Value:       MasterHA.NbPort,
 	},
 	cli.IntFlag{
 		Name:        "sb-port",
 		Usage:       "Port of the OVN southbound DB server to configure (default: 6642)",
 		Destination: &cliConfig.MasterHA.SbPort,
+		Value:       MasterHA.SbPort,
 	},
 	cli.IntFlag{
 		Name:        "ha-election-lease-duration",
 		Usage:       "Leader election lease duration (in secs) (default: 60)",
 		Destination: &cliConfig.MasterHA.ElectionLeaseDuration,
+		Value:       MasterHA.ElectionLeaseDuration,
 	},
 	cli.IntFlag{
 		Name:        "ha-election-renew-deadline",
 		Usage:       "Leader election renew deadline (in secs) (default: 35)",
 		Destination: &cliConfig.MasterHA.ElectionRenewDeadline,
+		Value:       MasterHA.ElectionRenewDeadline,
 	},
 	cli.IntFlag{
 		Name:        "ha-election-retry-period",
 		Usage:       "Leader election retry period (in secs) (default: 10)",
 		Destination: &cliConfig.MasterHA.ElectionRetryPeriod,
+		Value:       MasterHA.ElectionRetryPeriod,
 	},
 }
 
@@ -765,7 +814,32 @@ func buildKubernetesConfig(exec kexec.Interface, cli, file *config, saPath strin
 		saConfig.CACert = filepath.Join(saPath, kubeServiceAccountFileCACert)
 	}
 
-	if err := overrideFields(&Kubernetes, &saConfig); err != nil {
+	if err := overrideFields(&Kubernetes, &saConfig, &savedKubernetes); err != nil {
+		return err
+	}
+
+	// values for token, cacert, kubeconfig, api-server may be found in several places.
+	// Priority order (highest first): OVS config, command line options, config file,
+	// environment variables, service account files
+
+	envConfig := KubernetesConfig{
+		Kubeconfig: os.Getenv("KUBECONFIG"),
+		CACert:     os.Getenv("K8S_CACERT"),
+		APIServer:  os.Getenv("K8S_APISERVER"),
+		Token:      os.Getenv("K8S_TOKEN"),
+	}
+
+	if err := overrideFields(&Kubernetes, &envConfig, &savedKubernetes); err != nil {
+		return err
+	}
+
+	// Copy config file values over default values
+	if err := overrideFields(&Kubernetes, &file.Kubernetes, &savedKubernetes); err != nil {
+		return err
+	}
+
+	// And CLI overrides over config file and default values
+	if err := overrideFields(&Kubernetes, &cli.Kubernetes, &savedKubernetes); err != nil {
 		return err
 	}
 
@@ -778,31 +852,6 @@ func buildKubernetesConfig(exec kexec.Interface, cli, file *config, saPath strin
 	}
 	if defaults.K8sCert {
 		Kubernetes.CACert = getOVSExternalID(exec, "k8s-ca-certificate")
-	}
-
-	// values for token, cacert, kubeconfig, api-server may be found in several places.
-	// Take the first found when looking in this order: command line options, config file,
-	// environment variables, service account files
-
-	envConfig := KubernetesConfig{
-		Kubeconfig: os.Getenv("KUBECONFIG"),
-		CACert:     os.Getenv("K8S_CACERT"),
-		APIServer:  os.Getenv("K8S_APISERVER"),
-		Token:      os.Getenv("K8S_TOKEN"),
-	}
-
-	if err := overrideFields(&Kubernetes, &envConfig); err != nil {
-		return err
-	}
-
-	// Copy config file values over default values
-	if err := overrideFields(&Kubernetes, &file.Kubernetes); err != nil {
-		return err
-	}
-
-	// And CLI overrides over config file and default values
-	if err := overrideFields(&Kubernetes, &cli.Kubernetes); err != nil {
-		return err
 	}
 
 	if Kubernetes.Kubeconfig != "" && !pathExists(Kubernetes.Kubeconfig) {
@@ -839,7 +888,7 @@ func buildKubernetesConfig(exec kexec.Interface, cli, file *config, saPath strin
 
 func buildGatewayConfig(ctx *cli.Context, cli, file *config) error {
 	// Copy config file values over default values
-	if err := overrideFields(&Gateway, &file.Gateway); err != nil {
+	if err := overrideFields(&Gateway, &file.Gateway, &savedGateway); err != nil {
 		return err
 	}
 
@@ -854,7 +903,7 @@ func buildGatewayConfig(ctx *cli.Context, cli, file *config) error {
 		}
 	}
 	// And CLI overrides over config file and default values
-	if err := overrideFields(&Gateway, &cli.Gateway); err != nil {
+	if err := overrideFields(&Gateway, &cli.Gateway, &savedGateway); err != nil {
 		return err
 	}
 
@@ -889,12 +938,12 @@ func buildGatewayConfig(ctx *cli.Context, cli, file *config) error {
 
 func buildMasterHAConfig(ctx *cli.Context, cli, file *config) error {
 	// Copy config file values over default values
-	if err := overrideFields(&MasterHA, &file.MasterHA); err != nil {
+	if err := overrideFields(&MasterHA, &file.MasterHA, &savedMasterHA); err != nil {
 		return err
 	}
 
 	// And CLI overrides over config file and default values
-	if err := overrideFields(&MasterHA, &cli.MasterHA); err != nil {
+	if err := overrideFields(&MasterHA, &cli.MasterHA, &savedMasterHA); err != nil {
 		return err
 	}
 
@@ -913,11 +962,11 @@ func buildMasterHAConfig(ctx *cli.Context, cli, file *config) error {
 }
 
 func buildDefaultConfig(cli, file *config) error {
-	if err := overrideFields(&Default, &file.Default); err != nil {
+	if err := overrideFields(&Default, &file.Default, &savedDefault); err != nil {
 		return err
 	}
 
-	if err := overrideFields(&Default, &cli.Default); err != nil {
+	if err := overrideFields(&Default, &cli.Default, &savedDefault); err != nil {
 		return err
 	}
 
@@ -1019,18 +1068,18 @@ func initConfigWithPath(ctx *cli.Context, exec kexec.Interface, saPath string, d
 	}
 
 	// Build config that needs no special processing
-	if err = overrideFields(&CNI, &cfg.CNI); err != nil {
+	if err = overrideFields(&CNI, &cfg.CNI, &savedCNI); err != nil {
 		return "", err
 	}
-	if err = overrideFields(&CNI, &cliConfig.CNI); err != nil {
+	if err = overrideFields(&CNI, &cliConfig.CNI, &savedCNI); err != nil {
 		return "", err
 	}
 
 	// Logging setup
-	if err = overrideFields(&Logging, &cfg.Logging); err != nil {
+	if err = overrideFields(&Logging, &cfg.Logging, &savedLogging); err != nil {
 		return "", err
 	}
-	if err = overrideFields(&Logging, &cliConfig.Logging); err != nil {
+	if err = overrideFields(&Logging, &cliConfig.Logging, &savedLogging); err != nil {
 		return "", err
 	}
 
@@ -1152,12 +1201,15 @@ func buildOvnAuth(exec kexec.Interface, northbound bool, cliAuth, confAuth *OvnA
 	}
 
 	var direction string
+	var defaultAuth *OvnAuthConfig
 	if northbound {
 		auth.externalID = "ovn-nb"
 		direction = "nb"
+		defaultAuth = &savedOvnNorth
 	} else {
 		auth.externalID = "ovn-remote"
 		direction = "sb"
+		defaultAuth = &savedOvnSouth
 	}
 
 	// Determine final address so we know how to set cert/key defaults
@@ -1176,10 +1228,10 @@ func buildOvnAuth(exec kexec.Interface, northbound bool, cliAuth, confAuth *OvnA
 	}
 
 	// Build the final auth config with overrides from CLI and config file
-	if err := overrideFields(auth, confAuth); err != nil {
+	if err := overrideFields(auth, confAuth, defaultAuth); err != nil {
 		return nil, err
 	}
-	if err := overrideFields(auth, cliAuth); err != nil {
+	if err := overrideFields(auth, cliAuth, defaultAuth); err != nil {
 		return nil, err
 	}
 
