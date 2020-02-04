@@ -97,8 +97,6 @@ func (pr *PodRequest) cmdAdd() ([]byte, error) {
 		}
 		if _, ok := annotations[util.OvnPodAnnotationName]; ok {
 			return true, nil
-		} else if _, ok := annotations[util.OvnPodAnnotationLegacyName]; ok {
-			return true, nil
 		}
 		return false, nil
 	}); err != nil {
