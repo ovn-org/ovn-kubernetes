@@ -563,7 +563,7 @@ var _ = Describe("Gateway Init Operations", func() {
 			joinSwitch := "join_" + nodeName
 			fexec.AddFakeCmdsNoOutputNoError([]string{
 				"ovn-nbctl --timeout=15 -- --may-exist lr-add " + gwRouter + " -- set logical_router " + gwRouter + " options:chassis=" + systemID + " external_ids:physical_ip=169.254.33.2",
-				"ovn-nbctl --timeout=15 -- --may-exist ls-add " + joinSwitch + " -- set logical_switch " + joinSwitch + " other-config:subnet=" + joinSubnet,
+				"ovn-nbctl --timeout=15 -- --may-exist ls-add " + joinSwitch,
 				"ovn-nbctl --timeout=15 -- --may-exist lsp-add " + joinSwitch + " jtor-" + gwRouter + " -- set logical_switch_port jtor-" + gwRouter + " type=router options:router-port=rtoj-" + gwRouter + " addresses=router",
 				"ovn-nbctl --timeout=15 -- --may-exist lrp-add " + gwRouter + " rtoj-" + gwRouter + " " + lrpMAC + " " + lrpIP + "/29",
 				"ovn-nbctl --timeout=15 -- --may-exist lsp-add " + joinSwitch + " jtod-" + nodeName + " -- set logical_switch_port jtod-" + nodeName + " type=router options:router-port=dtoj-" + nodeName + " addresses=router",
@@ -603,7 +603,7 @@ var _ = Describe("Gateway Init Operations", func() {
 			})
 			fexec.AddFakeCmdsNoOutputNoError([]string{
 				"ovn-nbctl --timeout=15 -- --may-exist lr-add " + gwRouter + " -- set logical_router " + gwRouter + " options:chassis=" + systemID + " external_ids:physical_ip=169.254.33.2",
-				"ovn-nbctl --timeout=15 -- --may-exist ls-add " + joinSwitch + " -- set logical_switch " + joinSwitch + " other-config:subnet=" + joinSubnet,
+				"ovn-nbctl --timeout=15 -- --may-exist ls-add " + joinSwitch,
 				"ovn-nbctl --timeout=15 -- --may-exist lsp-add " + joinSwitch + " jtor-" + gwRouter + " -- set logical_switch_port jtor-" + gwRouter + " type=router options:router-port=rtoj-" + gwRouter + " addresses=router",
 				"ovn-nbctl --timeout=15 -- --may-exist lrp-add " + gwRouter + " rtoj-" + gwRouter + " " + lrpMAC + " " + lrpIP + "/29",
 				"ovn-nbctl --timeout=15 -- --may-exist lsp-add " + joinSwitch + " jtod-" + nodeName + " -- set logical_switch_port jtod-" + nodeName + " type=router options:router-port=dtoj-" + nodeName + " addresses=router",
@@ -753,7 +753,7 @@ var _ = Describe("Gateway Init Operations", func() {
 			joinSwitch := "join_" + nodeName
 			fexec.AddFakeCmdsNoOutputNoError([]string{
 				"ovn-nbctl --timeout=15 -- --may-exist lr-add " + gwRouter + " -- set logical_router " + gwRouter + " options:chassis=" + systemID + " external_ids:physical_ip=" + physicalGatewayIP,
-				"ovn-nbctl --timeout=15 -- --may-exist ls-add " + joinSwitch + " -- set logical_switch " + joinSwitch + " other-config:subnet=" + joinSubnet,
+				"ovn-nbctl --timeout=15 -- --may-exist ls-add " + joinSwitch,
 				"ovn-nbctl --timeout=15 -- --may-exist lsp-add " + joinSwitch + " jtor-" + gwRouter + " -- set logical_switch_port jtor-" + gwRouter + " type=router options:router-port=rtoj-" + gwRouter + " addresses=router",
 				"ovn-nbctl --timeout=15 -- --may-exist lrp-add " + gwRouter + " rtoj-" + gwRouter + " " + lrpMAC + " " + lrpIP + "/29",
 				"ovn-nbctl --timeout=15 -- --may-exist lsp-add " + joinSwitch + " jtod-" + nodeName + " -- set logical_switch_port jtod-" + nodeName + " type=router options:router-port=dtoj-" + nodeName + " addresses=router",
@@ -794,7 +794,7 @@ var _ = Describe("Gateway Init Operations", func() {
 			})
 			fexec.AddFakeCmdsNoOutputNoError([]string{
 				"ovn-nbctl --timeout=15 -- --may-exist lr-add " + gwRouter + " -- set logical_router " + gwRouter + " options:chassis=" + systemID + " external_ids:physical_ip=" + physicalGatewayIP,
-				"ovn-nbctl --timeout=15 -- --may-exist ls-add " + joinSwitch + " -- set logical_switch " + joinSwitch + " other-config:subnet=" + joinSubnet,
+				"ovn-nbctl --timeout=15 -- --may-exist ls-add " + joinSwitch,
 				"ovn-nbctl --timeout=15 -- --may-exist lsp-add " + joinSwitch + " jtor-" + gwRouter + " -- set logical_switch_port jtor-" + gwRouter + " type=router options:router-port=rtoj-" + gwRouter + " addresses=router",
 				"ovn-nbctl --timeout=15 -- --may-exist lrp-add " + gwRouter + " rtoj-" + gwRouter + " " + lrpMAC + " " + lrpIP + "/29",
 				"ovn-nbctl --timeout=15 -- --may-exist lsp-add " + joinSwitch + " jtod-" + nodeName + " -- set logical_switch_port jtod-" + nodeName + " type=router options:router-port=dtoj-" + nodeName + " addresses=router",
