@@ -142,12 +142,12 @@ func (cluster *OvnClusterController) StartClusterNode(name string) error {
 	// First wait for the node logical switch to be created by the Master, timeout is 300s.
 	err = wait.PollImmediate(500*time.Millisecond, 300*time.Second, func() (bool, error) {
 		if node, err = cluster.Kube.GetNode(name); err != nil {
-			klog.Errorf("error retrieving node %s: %v", name, err)
+			klog.Infof("waiting to retrieve node %s: %v", name, err)
 			return false, nil
 		}
 		cidr, err = getNodeHostSubnetAnnotation(node)
 		if err != nil {
-			klog.Errorf("Error starting node %s, no annotation found on node for subnet - %v", name, err)
+			klog.Infof("waiting for node %s to start, no annotation found on node for subnet - %v", name, err)
 			return false, nil
 		}
 		return true, nil
