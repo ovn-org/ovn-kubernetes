@@ -135,9 +135,7 @@ func GatewayInit(clusterIPSubnet []string, joinSubnetStr, systemID, nodeName, if
 
 	joinSwitch := "join_" + nodeName
 	// create the per-node join switch
-	stdout, stderr, err = RunOVNNbctl(
-		"--", "--may-exist", "ls-add", joinSwitch,
-		"--", "set", "logical_switch", joinSwitch, fmt.Sprintf("%s=%s", config.OtherConfigSubnet(), joinSubnetStr))
+	stdout, stderr, err = RunOVNNbctl("--", "--may-exist", "ls-add", joinSwitch)
 	if err != nil {
 		return fmt.Errorf("Failed to create logical switch %q, stdout: %q, stderr: %q, error: %v",
 			joinSwitch, stdout, stderr, err)
