@@ -42,14 +42,14 @@ func GatewayCleanup(nodeName string, nodeSubnet *net.IPNet) error {
 	}
 	staticRouteCleanup(clusterRouter, nextHops)
 
-	// Remove the patch port that connects join switch to gateway router
-	_, stderr, err = RunOVNNbctl("--if-exist", "lsp-del", "jtor-"+gatewayRouter)
+	// Remove the join switch that connects ovn_cluster_router to gateway router
+	_, stderr, err = RunOVNNbctl("--if-exist", "ls-del", "join_"+nodeName)
 	if err != nil {
-		return fmt.Errorf("Failed to delete logical switch port jtor-%s, "+
-			"stderr: %q, error: %v", gatewayRouter, stderr, err)
+		return fmt.Errorf("Failed to delete the join logical switch join_%s, "+
+			"stderr: %q, error: %v", nodeName, stderr, err)
 	}
 
-	// Remove any gateway routers associated with nodeName
+	// Remove the gateway router associated with nodeName
 	_, stderr, err = RunOVNNbctl("--if-exist", "lr-del",
 		gatewayRouter)
 	if err != nil {
@@ -64,6 +64,13 @@ func GatewayCleanup(nodeName string, nodeSubnet *net.IPNet) error {
 	if err != nil {
 		return fmt.Errorf("Failed to delete external switch %s, stderr: %q, "+
 			"error: %v", externalSwitch, stderr, err)
+	}
+
+	// Remove the patch port on the distributed router that connects to join switch
+	_, stderr, err = RunOVNNbctl("--if-exist", "lrp-del", "dtoj-"+nodeName)
+	if err != nil {
+		return fmt.Errorf("Failed to delete the patch port dtoj-%s on distributed router "+
+			"stderr: %q, error: %v", nodeName, stderr, err)
 	}
 
 	// If exists, remove the TCP, UDP load-balancers created for north-south traffic for gateway router.
