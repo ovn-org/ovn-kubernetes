@@ -20,8 +20,6 @@ import (
 )
 
 const (
-	// OvnHostSubnetLegacy is the old constant string representing the node subnet annotation key
-	OvnHostSubnetLegacy = "ovn_host_subnet"
 	// OvnNodeSubnets is the constant string representing the node subnets annotation key
 	OvnNodeSubnets = "k8s.ovn.org/node-subnets"
 	// OvnNodeJoinSubnets is the constant string representing the node's join switch subnets annotation key
@@ -503,9 +501,7 @@ func addStaticRouteToHost(node *kapi.Node, nicIP string) error {
 
 func parseNodeHostSubnet(node *kapi.Node) (*net.IPNet, error) {
 	sub, ok := node.Annotations[OvnNodeSubnets]
-	if !ok {
-		sub, ok = node.Annotations[OvnHostSubnetLegacy]
-	} else {
+	if ok {
 		nodeSubnets := make(map[string]string)
 		if err := json.Unmarshal([]byte(sub), &nodeSubnets); err != nil {
 			return nil, fmt.Errorf("error parsing node-subnets annotation: %v", err)
@@ -670,8 +666,6 @@ func (oc *Controller) addNodeAnnotations(node *kapi.Node, subnet string) error {
 			node.Name, subnet)
 	}
 	nodeAnnotations := make(map[string]interface{})
-	// if legacy annotation key exists, then remove it
-	nodeAnnotations[OvnHostSubnetLegacy] = nil
 	nodeAnnotations[OvnNodeSubnets] = string(bytes)
 	err = oc.kube.SetAnnotationsOnNode(node, nodeAnnotations)
 	if err != nil {

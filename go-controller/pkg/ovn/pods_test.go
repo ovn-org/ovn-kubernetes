@@ -263,10 +263,6 @@ var _ = Describe("OVN Pod Operations", func() {
 				Expect(ok).To(BeTrue())
 				Expect(podAnnotation).To(MatchJSON(`{"default": {"ip_address":"` + t.podIP + `/24", "mac_address":"` + t.podMAC + `", "gateway_ip": "` + t.nodeGWIP + `"}}`))
 
-				// check if legacy name exists and has same value has the new name
-				podAnnotation, ok = pod.Annotations[util.OvnPodAnnotationLegacyName]
-				Expect(ok).To(BeTrue())
-				Expect(podAnnotation).To(MatchJSON(`{"ip_address":"` + t.podIP + `/24", "mac_address":"` + t.podMAC + `", "gateway_ip": "` + t.nodeGWIP + `"}`))
 				return nil
 			}
 
@@ -314,10 +310,6 @@ var _ = Describe("OVN Pod Operations", func() {
 				Expect(ok).To(BeTrue())
 				Expect(podAnnotation).To(MatchJSON(`{"default": {"ip_address":"` + t.podIP + `/24", "mac_address":"` + t.podMAC + `", "gateway_ip": "` + t.nodeGWIP + `"}}`))
 
-				// check if legacy name exists and has same value has the new name
-				podAnnotation, ok = pod.Annotations[util.OvnPodAnnotationLegacyName]
-				Expect(ok).To(BeTrue())
-				Expect(podAnnotation).To(MatchJSON(`{"ip_address":"` + t.podIP + `/24", "mac_address":"` + t.podMAC + `", "gateway_ip": "` + t.nodeGWIP + `"}`))
 				return nil
 			}
 

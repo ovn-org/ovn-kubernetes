@@ -44,8 +44,6 @@ func GetNodeChassisID() (string, error) {
 }
 
 const (
-	// OvnPodAnnotationLegacyName is the old POD annotation key string, kept for backward compatibility only
-	OvnPodAnnotationLegacyName = "ovn"
 	// OvnPodAnnotationName is the constant string representing the POD annotation key
 	OvnPodAnnotationName = "k8s.ovn.org/pod-networks"
 	// OvnPodDefaultNetwork is the constant string representing the first OVN interface to the Pod
@@ -109,49 +107,33 @@ func MarshalPodAnnotation(podInfo *PodAnnotation) (map[string]string, error) {
 		})
 	}
 
-	// We need to annotate pod with both the legacy and new annotation name. This is in case
-	// if there are some nodes that have not been upgraded to understand the new Pod annotation
-	bytes, err := json.Marshal(pa)
-	if err != nil {
-		logrus.Errorf("failed marshaling podAnnotation structure %v", pa)
-		return nil, err
-	}
-	legacyValue := string(bytes)
 	podNetworks := map[string]podAnnotation{
 		OvnPodDefaultNetwork: pa,
 	}
-	bytes, err = json.Marshal(podNetworks)
+	bytes, err := json.Marshal(podNetworks)
 	if err != nil {
 		logrus.Errorf("failed marshaling podNetworks map %v", podNetworks)
 		return nil, err
 	}
 	return map[string]string{
-		OvnPodAnnotationLegacyName: legacyValue,
-		OvnPodAnnotationName:       string(bytes),
+		OvnPodAnnotationName: string(bytes),
 	}, nil
 }
 
 // UnmarshalPodAnnotation returns a the unmarshalled pod annotation
 func UnmarshalPodAnnotation(annotations map[string]string) (*PodAnnotation, error) {
-	a := &podAnnotation{}
-
 	ovnAnnotation, ok := annotations[OvnPodAnnotationName]
 	if !ok {
-		ovnAnnotation, ok = annotations[OvnPodAnnotationLegacyName]
-		if !ok {
-			return nil, fmt.Errorf("could not find OVN pod annotation in %v", annotations)
-		}
-		if err := json.Unmarshal([]byte(ovnAnnotation), a); err != nil {
-			return nil, err
-		}
-	} else {
-		podNetworks := make(map[string]podAnnotation)
-		if err := json.Unmarshal([]byte(ovnAnnotation), &podNetworks); err != nil {
-			return nil, err
-		}
-		tempA := podNetworks[OvnPodDefaultNetwork]
-		a = &tempA
+		return nil, fmt.Errorf("could not find OVN pod annotation in %v", annotations)
 	}
+
+	podNetworks := make(map[string]podAnnotation)
+	if err := json.Unmarshal([]byte(ovnAnnotation), &podNetworks); err != nil {
+		return nil, fmt.Errorf("failed to unmarshal ovn pod annotation %q: %v",
+			ovnAnnotation, err)
+	}
+	tempA := podNetworks[OvnPodDefaultNetwork]
+	a := &tempA
 
 	podAnnotation := &PodAnnotation{}
 	// Minimal validation
