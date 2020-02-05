@@ -11,6 +11,8 @@ import (
 	"runtime"
 	"strings"
 
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+
 	"github.com/sirupsen/logrus"
 	"github.com/urfave/cli"
 	gcfg "gopkg.in/gcfg.v1"
@@ -153,16 +155,18 @@ type CNIConfig struct {
 
 // KubernetesConfig holds Kubernetes-related parsed config file parameters and command-line overrides
 type KubernetesConfig struct {
-	Kubeconfig         string `gcfg:"kubeconfig"`
-	CACert             string `gcfg:"cacert"`
-	APIServer          string `gcfg:"apiserver"`
-	Token              string `gcfg:"token"`
-	ServiceCIDR        string `gcfg:"service-cidr"`
-	OVNConfigNamespace string `gcfg:"ovn-config-namespace"`
-	MetricsBindAddress string `gcfg:"metrics-bind-address"`
-	MetricsEnablePprof bool   `gcfg:"metrics-enable-pprof"`
-	OVNEmptyLbEvents   bool   `gcfg:"ovn-empty-lb-events"`
-	PodIP              string `gcfg:"pod-ip"`
+	Kubeconfig           string `gcfg:"kubeconfig"`
+	CACert               string `gcfg:"cacert"`
+	APIServer            string `gcfg:"apiserver"`
+	Token                string `gcfg:"token"`
+	ServiceCIDR          string `gcfg:"service-cidr"`
+	OVNConfigNamespace   string `gcfg:"ovn-config-namespace"`
+	MetricsBindAddress   string `gcfg:"metrics-bind-address"`
+	MetricsEnablePprof   bool   `gcfg:"metrics-enable-pprof"`
+	OVNEmptyLbEvents     bool   `gcfg:"ovn-empty-lb-events"`
+	PodIP                string `gcfg:"pod-ip"`
+	RawNoHostSubnetNodes string `gcfg:"no-hostsubnet-nodes"`
+	NoHostSubnetNodes    *metav1.LabelSelector
 }
 
 // GatewayMode holds the node gateway mode
@@ -548,6 +552,11 @@ var K8sFlags = []cli.Flag{
 		Usage:       "specify the ovnkube pod IP.",
 		Destination: &cliConfig.Kubernetes.PodIP,
 	},
+	cli.StringFlag{
+		Name:        "no-hostsubnet-nodes",
+		Usage:       "Specify a label for nodes that will manage their own hostsubnets",
+		Destination: &cliConfig.Kubernetes.RawNoHostSubnetNodes,
+	},
 }
 
 // OvnNBFlags capture OVN northbound database options
@@ -832,6 +841,14 @@ func buildKubernetesConfig(exec kexec.Interface, cli, file *config, saPath strin
 	if Kubernetes.PodIP != "" {
 		if ip := net.ParseIP(Kubernetes.PodIP); ip == nil {
 			return fmt.Errorf("Pod IP is invalid")
+		}
+	}
+
+	if Kubernetes.RawNoHostSubnetNodes != "" {
+		if nodeSelector, err := metav1.ParseToLabelSelector(Kubernetes.RawNoHostSubnetNodes); err == nil {
+			Kubernetes.NoHostSubnetNodes = nodeSelector
+		} else {
+			return fmt.Errorf("labelSelector \"%s\" is invalid: %v", Kubernetes.RawNoHostSubnetNodes, err)
 		}
 	}
 	return nil

@@ -143,6 +143,7 @@ apiserver=https://1.2.3.4:6443
 token=TG9yZW0gaXBzdW0gZ
 cacert=/path/to/kubeca.crt
 service-cidr=172.18.0.0/24
+no-hostsubnet-nodes=label=another-test-label
 
 [logging]
 loglevel=5
@@ -241,6 +242,7 @@ var _ = Describe("Config Operations", func() {
 			Expect(Kubernetes.Token).To(Equal(""))
 			Expect(Kubernetes.APIServer).To(Equal("http://localhost:8080"))
 			Expect(Kubernetes.ServiceCIDR).To(Equal("172.16.1.0/24"))
+			Expect(Kubernetes.RawNoHostSubnetNodes).To(Equal(""))
 			Expect(Default.ClusterSubnets).To(Equal([]CIDRNetworkEntry{
 				{mustParseCIDR("10.128.0.0/14"), 23},
 			}))
@@ -530,6 +532,7 @@ var _ = Describe("Config Operations", func() {
 			Expect(Kubernetes.Token).To(Equal("asdfasdfasdfasfd"))
 			Expect(Kubernetes.APIServer).To(Equal("https://4.4.3.2:8080"))
 			Expect(Kubernetes.ServiceCIDR).To(Equal("172.15.0.0/24"))
+			Expect(Kubernetes.RawNoHostSubnetNodes).To(Equal("test=pass"))
 			Expect(Default.ClusterSubnets).To(Equal([]CIDRNetworkEntry{
 				{mustParseCIDR("10.130.0.0/15"), 24},
 			}))
@@ -566,6 +569,7 @@ var _ = Describe("Config Operations", func() {
 			"-k8s-token=asdfasdfasdfasfd",
 			"-k8s-service-cidr=172.15.0.0/24",
 			"-nb-address=ssl://6.5.4.3:6651",
+			"-no-hostsubnet-nodes=test=pass",
 			"-nb-client-privkey=/client/privkey",
 			"-nb-client-cert=/client/cert",
 			"-nb-client-cacert=/client/cacert",
@@ -746,6 +750,7 @@ mode=shared
 			Expect(Kubernetes.CACert).To(Equal(kubeCAFile))
 			Expect(Kubernetes.Token).To(Equal("asdfasdfasdfasfd"))
 			Expect(Kubernetes.APIServer).To(Equal("https://4.4.3.2:8080"))
+			Expect(Kubernetes.RawNoHostSubnetNodes).To(Equal("label=another-test-label"))
 			Expect(Kubernetes.ServiceCIDR).To(Equal("172.15.0.0/24"))
 
 			Expect(OvnNorth.Scheme).To(Equal(OvnDBSchemeSSL))
