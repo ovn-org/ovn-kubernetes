@@ -569,9 +569,6 @@ nb-ovsdb () {
   check_ovn_daemonset_version "3"
   rm -f ${OVN_RUNDIR}/ovnnb_db.pid
 
-  # Make sure /var/lib/openvswitch exists
-  mkdir -p /var/lib/openvswitch
-
   iptables-rules ${ovn_nb_port}
 
   echo "=============== run nb_ovsdb ========== MASTER ONLY"
@@ -597,9 +594,6 @@ sb-ovsdb () {
   trap 'kill $(jobs -p); exit 0' TERM
   check_ovn_daemonset_version "3"
   rm -f ${OVN_RUNDIR}/ovnsb_db.pid
-
-  # Make sure /var/lib/openvswitch exists
-  mkdir -p /var/lib/openvswitch
 
   iptables-rules ${ovn_sb_port}
 
@@ -630,9 +624,6 @@ run-ovn-northd () {
   check_ovn_daemonset_version "3"
   rm -f ${OVN_RUNDIR}/ovn-northd.pid
   rm -f ${OVN_RUNDIR}/ovn-northd.*.ctl
-
-  # Make sure /var/lib/openvswitch exists
-  mkdir -p /var/lib/openvswitch
 
   echo "=============== run-ovn-northd (wait for ready_to_start_node)"
   wait_for_event ready_to_start_node
