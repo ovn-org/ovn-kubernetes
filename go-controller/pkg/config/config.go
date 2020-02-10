@@ -337,42 +337,10 @@ func overrideFields(dst, src, defaults interface{}) error {
 		if dstField.Kind() != srcField.Kind() {
 			return fmt.Errorf("mismatched struct %q fields %q", dstType.Name(), structField.Name)
 		}
-		switch srcField.Kind() {
-		case reflect.String:
-			// do not override a setting with a default value
-			if dv.IsValid() && dv.String() == srcField.String() {
-				continue
-			}
-			if srcField.String() != "" {
-				dstField.Set(srcField)
-			}
-		case reflect.Int:
-			// do not override a setting with a default value
-			if dv.IsValid() && dv.Int() == srcField.Int() {
-				continue
-			}
-			if srcField.Int() != 0 {
-				dstField.Set(srcField)
-			}
-		case reflect.Uint:
-			// do not override a setting with a default value
-			if dv.IsValid() && dv.Uint() == srcField.Uint() {
-				continue
-			}
-			if srcField.Uint() != 0 {
-				dstField.Set(srcField)
-			}
-		case reflect.Bool:
-			// do not override a setting with a default value
-			if dv.IsValid() && dv.Bool() == srcField.Bool() {
-				continue
-			}
-			if srcField.Bool() {
-				dstField.Set(srcField)
-			}
-		default:
-			return fmt.Errorf("unhandled struct %q field %q type %v", dstType.Name(), structField.Name, srcField.Kind())
+		if dv.IsValid() && reflect.DeepEqual(dv.Interface(), srcField.Interface()) {
+			continue
 		}
+		dstField.Set(srcField)
 	}
 	if !handled {
 		// No tags found in the struct so we don't know how to override
@@ -458,7 +426,7 @@ var CommonFlags = []cli.Flag{
 	},
 	cli.StringFlag{
 		Name:  "cluster-subnets",
-		Value: "10.128.0.0/14/23",
+		Value: Default.RawClusterSubnets,
 		Usage: "A comma separated set of IP subnets and the associated " +
 			"hostsubnet prefix lengths to use for the cluster (eg, \"10.128.0.0/14/23,10.0.0.0/14/23\"). " +
 			"Each entry is given in the form [IP address/prefix-length/hostsubnet-prefix-length] " +
@@ -806,7 +774,7 @@ func setOVSExternalID(exec kexec.Interface, key, value string) error {
 
 func buildKubernetesConfig(exec kexec.Interface, cli, file *config, saPath string, defaults *Defaults) error {
 	// token adn ca.crt may be from files mounted in container.
-	var saConfig KubernetesConfig
+	saConfig := savedKubernetes
 	if data, err := ioutil.ReadFile(filepath.Join(saPath, kubeServiceAccountFileToken)); err == nil {
 		saConfig.Token = string(data)
 	}
@@ -822,11 +790,17 @@ func buildKubernetesConfig(exec kexec.Interface, cli, file *config, saPath strin
 	// Priority order (highest first): OVS config, command line options, config file,
 	// environment variables, service account files
 
-	envConfig := KubernetesConfig{
-		Kubeconfig: os.Getenv("KUBECONFIG"),
-		CACert:     os.Getenv("K8S_CACERT"),
-		APIServer:  os.Getenv("K8S_APISERVER"),
-		Token:      os.Getenv("K8S_TOKEN"),
+	envConfig := savedKubernetes
+	envVarsMap := map[string]string{
+		"Kubeconfig": "KUBECONFIG",
+		"CACert":     "K8S_CACERT",
+		"APIServer":  "K8S_APISERVER",
+		"Token":      "K8S_TOKEN",
+	}
+	for k, v := range envVarsMap {
+		if x, exists := os.LookupEnv(v); exists && len(x) > 0 {
+			reflect.ValueOf(&envConfig).Elem().FieldByName(k).SetString(x)
+		}
 	}
 
 	if err := overrideFields(&Kubernetes, &envConfig, &savedKubernetes); err != nil {
@@ -1032,11 +1006,21 @@ func InitConfigSa(ctx *cli.Context, exec kexec.Interface, saPath string, default
 // common command-line options and constructs the global config object from
 // them. It returns the config file path (if explicitly specified) or an error
 func initConfigWithPath(ctx *cli.Context, exec kexec.Interface, saPath string, defaults *Defaults) (string, error) {
-	var cfg config
 	var retConfigFile string
 	var configFile string
 	var configFileIsDefault bool
 	var err error
+	// initialize cfg with default values, allow file read to override
+	cfg := config{
+		Default:    savedDefault,
+		Logging:    savedLogging,
+		CNI:        savedCNI,
+		Kubernetes: savedKubernetes,
+		OvnNorth:   savedOvnNorth,
+		OvnSouth:   savedOvnSouth,
+		Gateway:    savedGateway,
+		MasterHA:   savedMasterHA,
+	}
 
 	configFile, configFileIsDefault = getConfigFilePath(ctx)
 
