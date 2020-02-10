@@ -234,7 +234,7 @@ func deleteACLPortGroup(portGroupName, direction, priority, match, action string
 	return nil
 }
 
-func (oc *Controller) addToPortGroup(portGroup string, portInfo *lpInfo) error {
+func addToPortGroup(portGroup string, portInfo *lpInfo) error {
 	_, stderr, err := util.RunOVNNbctl("--if-exists", "remove",
 		"port_group", portGroup, "ports", portInfo.uuid, "--",
 		"add", "port_group", portGroup, "ports", portInfo.uuid)
@@ -245,7 +245,7 @@ func (oc *Controller) addToPortGroup(portGroup string, portInfo *lpInfo) error {
 	return nil
 }
 
-func (oc *Controller) deleteFromPortGroup(portGroup string, portInfo *lpInfo) error {
+func deleteFromPortGroup(portGroup string, portInfo *lpInfo) error {
 	_, stderr, err := util.RunOVNNbctl("--if-exists", "remove",
 		"port_group", portGroup, "ports", portInfo.uuid)
 	if err != nil {
@@ -392,7 +392,7 @@ func (oc *Controller) createMulticastAllowPolicy(ns string) error {
 	for _, portName := range oc.namespaceAddressSet[ns] {
 		if portInfo, err := oc.logicalPortCache.get(portName); err != nil {
 			klog.Errorf(err.Error())
-		} else if err := oc.podAddAllowMulticastPolicy(ns, portInfo); err != nil {
+		} else if err := podAddAllowMulticastPolicy(ns, portInfo); err != nil {
 			klog.Warningf("failed to add port %s to port group ACL: %v", portName, err)
 		}
 	}
@@ -458,28 +458,28 @@ func createDefaultDenyMulticastPolicy() error {
 	return nil
 }
 
-func (oc *Controller) podAddDefaultDenyMulticastPolicy(portInfo *lpInfo) error {
-	if err := oc.addToPortGroup("mcastPortGroupDeny", portInfo); err != nil {
+func podAddDefaultDenyMulticastPolicy(portInfo *lpInfo) error {
+	if err := addToPortGroup("mcastPortGroupDeny", portInfo); err != nil {
 		return fmt.Errorf("failed to add port %s to default multicast deny ACL: %v", portInfo.name, err)
 	}
 	return nil
 }
 
-func (oc *Controller) podDeleteDefaultDenyMulticastPolicy(portInfo *lpInfo) error {
-	if err := oc.deleteFromPortGroup("mcastPortGroupDeny", portInfo); err != nil {
+func podDeleteDefaultDenyMulticastPolicy(portInfo *lpInfo) error {
+	if err := deleteFromPortGroup("mcastPortGroupDeny", portInfo); err != nil {
 		return fmt.Errorf("failed to delete port %s from default multicast deny ACL: %v", portInfo.name, err)
 	}
 	return nil
 }
 
-func (oc *Controller) podAddAllowMulticastPolicy(ns string, portInfo *lpInfo) error {
+func podAddAllowMulticastPolicy(ns string, portInfo *lpInfo) error {
 	_, portGroupHash := getMulticastPortGroup(ns)
-	return oc.addToPortGroup(portGroupHash, portInfo)
+	return addToPortGroup(portGroupHash, portInfo)
 }
 
-func (oc *Controller) podDeleteAllowMulticastPolicy(ns string, portInfo *lpInfo) error {
+func podDeleteAllowMulticastPolicy(ns string, portInfo *lpInfo) error {
 	_, portGroupHash := getMulticastPortGroup(ns)
-	return oc.deleteFromPortGroup(portGroupHash, portInfo)
+	return deleteFromPortGroup(portGroupHash, portInfo)
 }
 
 func (oc *Controller) localPodAddDefaultDeny(
@@ -512,7 +512,7 @@ func (oc *Controller) localPodAddDefaultDeny(
 	// Handle condition 1 above.
 	if !(len(policy.Spec.PolicyTypes) == 1 && policy.Spec.PolicyTypes[0] == knet.PolicyTypeEgress) {
 		if oc.lspIngressDenyCache[portInfo.name] == 0 {
-			if err := oc.addToPortGroup(oc.portGroupIngressDeny, portInfo); err != nil {
+			if err := addToPortGroup(oc.portGroupIngressDeny, portInfo); err != nil {
 				klog.Warningf("failed to add port %s to ingress deny ACL: %v", portInfo.name, err)
 			}
 		}
@@ -523,7 +523,7 @@ func (oc *Controller) localPodAddDefaultDeny(
 	if (len(policy.Spec.PolicyTypes) == 1 && policy.Spec.PolicyTypes[0] == knet.PolicyTypeEgress) ||
 		len(policy.Spec.Egress) > 0 || len(policy.Spec.PolicyTypes) == 2 {
 		if oc.lspEgressDenyCache[portInfo.name] == 0 {
-			if err := oc.addToPortGroup(oc.portGroupEgressDeny, portInfo); err != nil {
+			if err := addToPortGroup(oc.portGroupEgressDeny, portInfo); err != nil {
 				klog.Warningf("failed to add port %s to egress deny ACL: %v", portInfo.name, err)
 			}
 		}
@@ -540,7 +540,7 @@ func (oc *Controller) localPodDelDefaultDeny(
 		if oc.lspIngressDenyCache[portInfo.name] > 0 {
 			oc.lspIngressDenyCache[portInfo.name]--
 			if oc.lspIngressDenyCache[portInfo.name] == 0 {
-				if err := oc.deleteFromPortGroup(oc.portGroupIngressDeny, portInfo); err != nil {
+				if err := deleteFromPortGroup(oc.portGroupIngressDeny, portInfo); err != nil {
 					klog.Warningf("failed to remove port %s from ingress deny ACL: %v", portInfo.name, err)
 				}
 			}
@@ -552,7 +552,7 @@ func (oc *Controller) localPodDelDefaultDeny(
 		if oc.lspEgressDenyCache[portInfo.name] > 0 {
 			oc.lspEgressDenyCache[portInfo.name]--
 			if oc.lspEgressDenyCache[portInfo.name] == 0 {
-				if err := oc.deleteFromPortGroup(oc.portGroupEgressDeny, portInfo); err != nil {
+				if err := deleteFromPortGroup(oc.portGroupEgressDeny, portInfo); err != nil {
 					klog.Warningf("failed to remove port %s from egress deny ACL: %v", portInfo.name, err)
 				}
 			}

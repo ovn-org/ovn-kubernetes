@@ -124,7 +124,7 @@ func (oc *Controller) deleteLogicalPort(pod *kapi.Pod) {
 
 	// Remove the port from the default deny multicast policy
 	if oc.multicastSupport {
-		if err := oc.podDeleteDefaultDenyMulticastPolicy(portInfo); err != nil {
+		if err := podDeleteDefaultDenyMulticastPolicy(portInfo); err != nil {
 			klog.Errorf(err.Error())
 		}
 	}
@@ -346,7 +346,7 @@ func (oc *Controller) addLogicalPort(pod *kapi.Pod) error {
 
 	// Enforce the default deny multicast policy
 	if oc.multicastSupport {
-		if err := oc.podAddDefaultDenyMulticastPolicy(portInfo); err != nil {
+		if err := podAddDefaultDenyMulticastPolicy(portInfo); err != nil {
 			return err
 		}
 	}
