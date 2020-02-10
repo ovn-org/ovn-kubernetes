@@ -5,6 +5,8 @@ import (
 	"net"
 	"sync"
 	"time"
+
+	"github.com/sirupsen/logrus"
 )
 
 type portCache struct {
@@ -35,8 +37,10 @@ func (c *portCache) get(logicalPort string) (*lpInfo, error) {
 	c.RLock()
 	defer c.RUnlock()
 	if info, ok := c.cache[logicalPort]; ok {
+		logrus.Warningf("##### got port %+v from cache", info)
 		return info, nil
 	}
+	logrus.Warningf("##### port %s not found in cache", logicalPort)
 	return nil, fmt.Errorf("logical port %s not found in cache", logicalPort)
 }
 
@@ -51,6 +55,7 @@ func (c *portCache) add(logicalSwitch, logicalPort, uuid string, mac net.Hardwar
 		mac:           mac,
 	}
 	c.cache[logicalPort] = portInfo
+	logrus.Warningf("##### add port %+v to cache", portInfo)
 	return portInfo
 }
 
@@ -62,6 +67,7 @@ func (c *portCache) remove(logicalPort string) {
 		return
 	}
 	info.dead = true
+	logrus.Warningf("##### scheduling port %+v removal from cache", info)
 
 	// Removal must be deferred since, for example, NetworkPolicy pod handlers
 	// may run after the main pod handler and look for items in the cache
