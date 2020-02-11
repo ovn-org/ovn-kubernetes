@@ -132,7 +132,7 @@ func setupDefaultFile() {
 
 	fileContents, err := ioutil.ReadFile(defaultFile)
 	if err != nil {
-		logrus.Errorf("failed to parse file %s (%v)",
+		logrus.Warningf("failed to parse file %s (%v)",
 			defaultFile, err)
 		return
 	}

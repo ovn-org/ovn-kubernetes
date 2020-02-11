@@ -33,7 +33,19 @@ kubectl taint nodes --all node-role.kubernetes.io/master-
 
 Create OVN daemonset and deployment yamls from templates by running the commands below:
 (The $MASTER_IP below is the IP address of the machine where kube-apiserver is
-running)
+running). Note, when specifying the pod CIDR to the command below, daemonset.sh will
+generate a /24 subnet prefix to create per-node CIDRs. Ensure your pod subnet is has a
+prefix less than 24, or edit hte  generated ovn-setup.yaml and specify a host subnet
+prefix. For example, providing a net-cidr of "129.168.1.0/24" would require modifying
+ovn-setup.yaml with a host subnet prefix as follows:
+
+```
+data:
+  net_cidr:      "192.168.1.0/24/25"
+```
+
+Where "/25" is just chosen for this example, but may be any legitimate prefix value greater
+than 24.
 
 ```
 # Clone ovn-kubernetes repo

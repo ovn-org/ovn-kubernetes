@@ -51,5 +51,5 @@ daemonsetyaml:
 BRANCH = $(shell git rev-parse  --symbolic-full-name HEAD)
 COMMIT = $(shell git rev-parse  HEAD)
 bld: ../../go-controller/_output/go/bin/ovnkube
-	cp ../../go-controller/_output/go/bin/* .
+	cp -r ../../go-controller/_output/go/bin/* .
 	echo "ref: ${BRANCH}  commit: ${COMMIT}" > git_info

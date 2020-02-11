@@ -12,7 +12,7 @@ FROM ubuntu:18.04
 
 USER root
 
-RUN apt-get update && apt-get install -y iptables iproute2 curl software-properties-common setpriv
+RUN apt-get update && apt-get install -y iproute2 curl software-properties-common setpriv
 
 # We do not have much control over the exact version of OVS/OVN that can be
 # obtained from upstream Ubuntu. guru@ovn.org maintains more latest versions of
@@ -44,6 +44,14 @@ COPY ovn_k8s.conf /etc/openvswitch/ovn_k8s.conf
 
 # copy git commit number into image
 COPY git_info /root
+
+# iptables wrappers
+COPY ./iptables-scripts/iptables /usr/sbin/
+COPY ./iptables-scripts/iptables-save /usr/sbin/
+COPY ./iptables-scripts/iptables-restore /usr/sbin/
+COPY ./iptables-scripts/ip6tables /usr/sbin/
+COPY ./iptables-scripts/ip6tables-save /usr/sbin/
+COPY ./iptables-scripts/ip6tables-restore /usr/sbin/
 
 LABEL io.k8s.display-name="ovn kubernetes" \
       io.k8s.description="ovnkube ubuntu image" 

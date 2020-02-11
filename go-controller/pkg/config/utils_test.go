@@ -56,6 +56,36 @@ func TestParseClusterSubnetEntries(t *testing.T) {
 			clusterNetworks: nil,
 			expectedErr:     true,
 		},
+		{
+			name:            "HostSubnetLength smaller than cluster subnet",
+			cmdLineArg:      "10.132.0.0/26/24",
+			clusterNetworks: nil,
+			expectedErr:     true,
+		},
+		{
+			name:            "Cluster Subnet length too large",
+			cmdLineArg:      "10.132.0.0/25",
+			clusterNetworks: nil,
+			expectedErr:     true,
+		},
+		{
+			name:            "Cluster Subnet length same as host subnet length",
+			cmdLineArg:      "10.132.0.0/24/24",
+			clusterNetworks: nil,
+			expectedErr:     true,
+		},
+		{
+			name:            "Test that defaulting to hostsubnetlength with 24 bit cluster prefix fails",
+			cmdLineArg:      "10.128.0.0/24",
+			clusterNetworks: nil,
+			expectedErr:     true,
+		},
+		{
+			name:            "Test that legacy behavior does not work for IPv6",
+			cmdLineArg:      "fda6:78cc:acf2:a039::/64",
+			clusterNetworks: nil,
+			expectedErr:     true,
+		},
 	}
 
 	for _, tc := range tests {
