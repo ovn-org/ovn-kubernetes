@@ -109,6 +109,7 @@ func (oc *Controller) deletePodAcls(logicalPort string) {
 
 func (oc *Controller) getLogicalPortUUID(logicalPort string) (string, error) {
 	if oc.logicalPortUUIDCache[logicalPort] != "" {
+		logrus.Warningf("####### port %q found in UUID cache", logicalPort)
 		return oc.logicalPortUUIDCache[logicalPort], nil
 	}
 
@@ -120,9 +121,11 @@ func (oc *Controller) getLogicalPortUUID(logicalPort string) (string, error) {
 	}
 
 	if out == "" {
+		logrus.Warningf("####### port %q NOT found in UUID cache", logicalPort)
 		return "", fmt.Errorf("empty uuid for logical_switch_port %s", logicalPort)
 	}
 
+	logrus.Warningf("####### port %q added to UUID cache", logicalPort)
 	oc.logicalPortUUIDCache[logicalPort] = out
 	return oc.logicalPortUUIDCache[logicalPort], nil
 }
@@ -154,9 +157,11 @@ func (oc *Controller) deleteLogicalPort(pod *kapi.Pod) {
 		podIP = podAnnotation.IP.IP
 	}
 
+	logrus.Warningf("####### deleted port %q from port cache", logicalPort)
 	delete(oc.logicalPortCache, logicalPort)
 
 	oc.lspMutex.Lock()
+	logrus.Warningf("####### deleted port %q from uuid cache", logicalPort)
 	delete(oc.logicalPortUUIDCache, logicalPort)
 	oc.lspMutex.Unlock()
 
@@ -300,6 +305,7 @@ func (oc *Controller) addLogicalPort(pod *kapi.Pod) error {
 				"stdout: %q, stderr: %q (%v)", portName, out, stderr, err)
 		}
 		oc.logicalPortCache[portName] = logicalSwitch
+		logrus.Warningf("####### pod [%s/%s] added to logicalPortCache", pod.Namespace, pod.Name)
 		return oc.addPodToNamespace(pod.Namespace, annotation.IP.IP, portName)
 	}
 
@@ -323,6 +329,7 @@ func (oc *Controller) addLogicalPort(pod *kapi.Pod) error {
 	}
 
 	oc.logicalPortCache[portName] = logicalSwitch
+	logrus.Warningf("####### pod [%s/%s] added to logicalPortCache", pod.Namespace, pod.Name)
 
 	gatewayIPnet, _ := util.GetNodeWellKnownAddresses(nodeSubnet)
 

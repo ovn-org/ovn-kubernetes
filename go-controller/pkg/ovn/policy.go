@@ -230,6 +230,7 @@ func deleteACLPortGroup(portGroupName, direction, priority, match, action string
 
 func (oc *Controller) addToPortGroup(portGroup, logicalPort string) error {
 	logicalPortUUID, err := oc.getLogicalPortUUID(logicalPort)
+	logrus.Warningf("####### addToPortGroup(%s): getLogicalPortUUID(%q) => %s, %v", portGroup, logicalPort, logicalPortUUID, err)
 	if err != nil {
 		return err
 	}
@@ -246,6 +247,7 @@ func (oc *Controller) addToPortGroup(portGroup, logicalPort string) error {
 
 func (oc *Controller) deleteFromPortGroup(portGroup, logicalPort string) error {
 	logicalPortUUID, err := oc.getLogicalPortUUID(logicalPort)
+	logrus.Warningf("####### deleteFromPortGroup(%s): getLogicalPortUUID(%q) => %s, %v", portGroup, logicalPort, logicalPortUUID, err)
 	if err != nil {
 		return err
 	}
@@ -566,10 +568,12 @@ func (oc *Controller) handleLocalPodSelectorAddFunc(
 	// Get the logical port name.
 	logicalPort := podLogicalPortName(pod)
 	logicalPortUUID, err := oc.getLogicalPortUUID(logicalPort)
+	logrus.Warningf("####### handleLocalPodSelectorAddFunc(%s/%s): getLogicalPortUUID(%q) => %s, %v", policy.Namespace, policy.Name, logicalPort, logicalPortUUID, err)
 	if err != nil {
 		logrus.Errorf(err.Error())
 		return
 	}
+	logrus.Warningf("####### NP [%s/%s] got pod %s from cache", policy.Namespace, policy.Name, pod.Name)
 
 	np.Lock()
 	defer np.Unlock()
@@ -582,6 +586,7 @@ func (oc *Controller) handleLocalPodSelectorAddFunc(
 		return
 	}
 
+	logrus.Warningf("####### NP [%s/%s] pod %s selector setup", policy.Namespace, policy.Name, pod.Name)
 	oc.localPodAddDefaultDeny(policy, logicalPort)
 
 	if np.portGroupUUID == "" {
@@ -611,6 +616,7 @@ func (oc *Controller) handleLocalPodSelectorDelFunc(
 	// Get the logical port name.
 	logicalPort := podLogicalPortName(pod)
 	logicalPortUUID, err := oc.getLogicalPortUUID(logicalPort)
+	logrus.Warningf("####### handleLocalPodSelectorDelFunc(%s/%s): getLogicalPortUUID(%q) => %s, %v", policy.Namespace, policy.Name, logicalPort, logicalPortUUID, err)
 	if err != nil {
 		logrus.Errorf(err.Error())
 		return
@@ -653,12 +659,18 @@ func (oc *Controller) handleLocalPodSelector(
 		&policy.Spec.PodSelector,
 		cache.ResourceEventHandlerFuncs{
 			AddFunc: func(obj interface{}) {
+				pod := obj.(*kapi.Pod)
+				logrus.Warningf("####### NP [%s/%s] add pod %s", policy.Namespace, policy.Name, pod.Name)
 				oc.handleLocalPodSelectorAddFunc(policy, np, obj)
 			},
 			DeleteFunc: func(obj interface{}) {
+				pod := obj.(*kapi.Pod)
+				logrus.Warningf("####### NP [%s/%s] del pod %s", policy.Namespace, policy.Name, pod.Name)
 				oc.handleLocalPodSelectorDelFunc(policy, np, obj)
 			},
 			UpdateFunc: func(oldObj, newObj interface{}) {
+				pod := newObj.(*kapi.Pod)
+				logrus.Warningf("####### NP [%s/%s] update pod %s", policy.Namespace, policy.Name, pod.Name)
 				oc.handleLocalPodSelectorAddFunc(policy, np, newObj)
 			},
 		}, nil)
@@ -703,7 +715,7 @@ func (oc *Controller) handlePeerNamespaceSelectorModify(
 // addNetworkPolicyPortGroup creates and applies OVN ACLs to pod logical switch
 // ports from Kubernetes NetworkPolicy objects using OVN Port Groups
 func (oc *Controller) addNetworkPolicyPortGroup(policy *knet.NetworkPolicy) {
-	logrus.Infof("Adding network policy %s in namespace %s", policy.Name,
+	logrus.Warningf("####### Adding network policy %s in namespace %s", policy.Name,
 		policy.Namespace)
 
 	if oc.namespacePolicies[policy.Namespace] != nil &&
@@ -711,12 +723,14 @@ func (oc *Controller) addNetworkPolicyPortGroup(policy *knet.NetworkPolicy) {
 		return
 	}
 
+	logrus.Warningf("####### NP [%s/%s] waiting for namespace event", policy.Namespace, policy.Name)
 	err := oc.waitForNamespaceEvent(policy.Namespace)
 	if err != nil {
 		logrus.Errorf("failed to wait for namespace %s event (%v)",
 			policy.Namespace, err)
 		return
 	}
+	logrus.Warningf("####### NP [%s/%s] got namespace event", policy.Namespace, policy.Name)
 
 	np := NewNamespacePolicy(policy)
 
@@ -731,6 +745,7 @@ func (oc *Controller) addNetworkPolicyPortGroup(policy *knet.NetworkPolicy) {
 			"namespace %s", policy.Name, policy.Namespace)
 		return
 	}
+	logrus.Warningf("####### NP [%s/%s] created portgroup %s", policy.Namespace, policy.Name, np.portGroupUUID)
 
 	// Go through each ingress rule.  For each ingress rule, create an
 	// addressSet for the peer pods.
@@ -792,6 +807,7 @@ func (oc *Controller) addNetworkPolicyPortGroup(policy *knet.NetworkPolicy) {
 		}
 		np.ingressPolicies = append(np.ingressPolicies, ingress)
 	}
+	logrus.Warningf("####### NP [%s/%s] created ingress policies %v", policy.Namespace, policy.Name, np.ingressPolicies)
 
 	// Go through each egress rule.  For each egress rule, create an
 	// addressSet for the peer pods.
@@ -853,17 +869,19 @@ func (oc *Controller) addNetworkPolicyPortGroup(policy *knet.NetworkPolicy) {
 		}
 		np.egressPolicies = append(np.egressPolicies, egress)
 	}
+	logrus.Warningf("####### NP [%s/%s] created egress policies %v", policy.Namespace, policy.Name, np.egressPolicies)
 
 	oc.namespacePolicies[policy.Namespace][policy.Name] = np
 
 	// For all the pods in the local namespace that this policy
 	// effects, add them to the port group.
 	oc.handleLocalPodSelector(policy, np)
+	logrus.Warningf("####### NP [%s/%s] DONE", policy.Namespace, policy.Name)
 }
 
 func (oc *Controller) deleteNetworkPolicyPortGroup(
 	policy *knet.NetworkPolicy) {
-	logrus.Infof("Deleting network policy %s in namespace %s",
+	logrus.Warningf("####### Deleting network policy %s in namespace %s",
 		policy.Name, policy.Namespace)
 
 	if oc.namespacePolicies[policy.Namespace] == nil ||
