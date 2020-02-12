@@ -38,7 +38,7 @@ COPY git_info /root
 # variables to direct operation and configure ovn
 COPY ovnkube.sh /root/
 COPY ovn-debug.sh /root/
-
+COPY ovndb-raft-functions /root/
 
 LABEL io.k8s.display-name="ovn-kubernetes" \
       io.k8s.description="This is a Kubernetes network plugin that provides an overlay network using OVN." \

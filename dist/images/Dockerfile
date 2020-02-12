@@ -62,6 +62,7 @@ COPY ovn-k8s-cni-overlay /usr/libexec/cni/ovn-k8s-cni-overlay
 # variables to direct operation and configure ovn
 COPY ovnkube.sh /root/
 COPY ovn-debug.sh /root/
+COPY ovndb-raft-functions /root/
 # override the rpm's ovn_k8s.conf with this local copy
 COPY ovn_k8s.conf /etc/openvswitch/ovn_k8s.conf
 

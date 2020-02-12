@@ -81,8 +81,10 @@ rules:
 - apiGroups:
   - extensions
   - networking.k8s.io
+  - apps
   resources:
   - networkpolicies
+  - statefulsets
   verbs: ["get", "list", "watch"]
 - apiGroups:
   - ""
@@ -119,27 +121,6 @@ subjects:
 - kind: ServiceAccount
   name: ovn
   namespace: ovn-kubernetes
-
----
-# service to expose the ovnkube-db pod
-apiVersion: v1
-kind: Service
-metadata:
-  name: ovnkube-db
-  namespace: ovn-kubernetes
-spec:
-  ports:
-  - name: north
-    port: 6641
-    protocol: TCP
-    targetPort: 6641
-  - name: south
-    port: 6642
-    protocol: TCP
-    targetPort: 6642
-  sessionAffinity: None
-  clusterIP: None
-  type: ClusterIP
 
 ---
 # The network cidr and service cidr are set in the ovn-config configmap

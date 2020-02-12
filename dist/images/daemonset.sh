@@ -121,6 +121,8 @@ ovn_db_replicas=${OVN_DB_REPLICAS:-3}
 echo "ovn_db_replicas: ${ovn_db_replicas}"
 ovn_db_vip=${OVN_DB_VIP}
 echo "ovn_db_vip: ${ovn_db_vip}"
+ovn_db_minAvailable=$(((${ovn_db_replicas} + 1) / 2))
+echo "ovn_db_minAvailable: ${ovn_db_minAvailable}"
 
 ovn_image=${image} ovn_image_pull_policy=${policy} kind=${KIND} ovn_gateway_mode=${ovn_gateway_mode} \
  ovn_gateway_opts=${ovn_gateway_opts} j2 ../templates/ovnkube-node.yaml.j2 -o ../yaml/ovnkube-node.yaml
@@ -132,6 +134,9 @@ ovn_image=${image} ovn_image_pull_policy=${policy} j2 ../templates/ovnkube-db.ya
 
 ovn_db_vip_image=${ovn_db_vip_image} ovn_image_pull_policy=${policy} ovn_db_replicas=${ovn_db_replicas} \
 ovn_db_vip=${ovn_db_vip} j2 ../templates/ovnkube-db-vip.yaml.j2 -o ../yaml/ovnkube-db-vip.yaml
+
+ovn_image=${image} ovn_image_pull_policy=${policy} ovn_db_replicas=${ovn_db_replicas} \
+ovn_db_minAvailable=${ovn_db_minAvailable} j2 ../templates/ovnkube-db-raft.yaml.j2 > ../yaml/ovnkube-db-raft.yaml
 
 # ovn-setup.yaml
 # net_cidr=10.128.0.0/14/23
