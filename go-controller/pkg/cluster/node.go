@@ -211,13 +211,13 @@ func (cluster *OvnClusterController) StartClusterNode(name string) error {
 		wg.Wait()
 		close(messages)
 	}()
-	logrus.Infof("Gateway and ManagementPort are Ready")
 
 	for i := range messages {
 		if i != nil {
 			return fmt.Errorf("Timeout error while obtaining addresses for %s (%v)", portName, i)
 		}
 	}
+	logrus.Infof("Gateway and ManagementPort are Ready")
 
 	if postReady != nil {
 		err = postReady()
