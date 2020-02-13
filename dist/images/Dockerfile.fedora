@@ -20,6 +20,7 @@ RUN INSTALL_PKGS=" \
 	PyYAML bind-utils procps-ng openssl numactl-libs firewalld-filesystem \
 	libpcap hostname kubernetes-client \
         ovn ovn-central ovn-host \
+        openvswitch \
 	iptables iproute strace socat \
         " && \
 	dnf install --best --refresh -y --setopt=tsflags=nodocs $INSTALL_PKGS && \
