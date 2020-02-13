@@ -6,7 +6,6 @@ import (
 	"strings"
 	"time"
 
-	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
 	util "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
 	"github.com/sirupsen/logrus"
 	kapi "k8s.io/api/core/v1"
@@ -228,37 +227,6 @@ func waitForPodAddresses(portName string) (net.HardwareAddr, net.IP, error) {
 	return podMac, podIP, nil
 }
 
-func getRoutesGatewayIP(pod *kapi.Pod, gatewayIPnet *net.IPNet) ([]util.PodRoute, net.IP, error) {
-	// if there are other network attachments for the pod, then check if those network-attachment's
-	// annotation has default-route key. If present, then we need to skip adding default route for
-	// OVN interface
-	networks, err := util.GetPodNetSelAnnotation(pod, util.NetworkAttachmentAnnotation)
-	if err != nil {
-		return nil, nil, fmt.Errorf("error while getting network attachment definition for [%s/%s]: %v",
-			pod.Namespace, pod.Name, err)
-	}
-	otherDefaultRoute := false
-	for _, network := range networks {
-		if len(network.GatewayRequest) != 0 && network.GatewayRequest[0] != nil {
-			otherDefaultRoute = true
-			break
-		}
-	}
-	var gatewayIP net.IP
-	routes := make([]util.PodRoute, 0)
-	if otherDefaultRoute {
-		for _, clusterSubnet := range config.Default.ClusterSubnets {
-			var route util.PodRoute
-			route.Dest = clusterSubnet.CIDR
-			route.NextHop = gatewayIPnet.IP
-			routes = append(routes, route)
-		}
-	} else {
-		gatewayIP = gatewayIPnet.IP
-	}
-	return routes, gatewayIP, nil
-}
-
 func (oc *Controller) addLogicalPort(pod *kapi.Pod) error {
 	var out, stderr string
 	var err error
@@ -324,14 +292,14 @@ func (oc *Controller) addLogicalPort(pod *kapi.Pod) error {
 
 	oc.logicalPortCache[portName] = logicalSwitch
 
-	gatewayIPnet, _ := util.GetNodeWellKnownAddresses(nodeSubnet)
+	gatewayIP, _ := util.GetNodeWellKnownAddresses(nodeSubnet)
 
 	podMac, podIP, err := waitForPodAddresses(portName)
 	if err != nil {
 		return err
 	}
 
-	podCIDR := &net.IPNet{IP: podIP, Mask: gatewayIPnet.Mask}
+	podCIDR := &net.IPNet{IP: podIP, Mask: gatewayIP.Mask}
 
 	// now set the port security for the logical switch port
 	out, stderr, err = util.RunOVNNbctl("lsp-set-port-security", portName,
@@ -341,15 +309,10 @@ func (oc *Controller) addLogicalPort(pod *kapi.Pod) error {
 			"stdout: %q, stderr: %q (%v)", portName, out, stderr, err)
 	}
 
-	routes, gatewayIP, err := getRoutesGatewayIP(pod, gatewayIPnet)
-	if err != nil {
-		return err
-	}
 	marshalledAnnotation, err := util.MarshalPodAnnotation(&util.PodAnnotation{
-		IP:     podCIDR,
-		MAC:    podMac,
-		GW:     gatewayIP,
-		Routes: routes,
+		IP:  podCIDR,
+		MAC: podMac,
+		GW:  gatewayIP.IP,
 	})
 	if err != nil {
 		return fmt.Errorf("error creating pod network annotation: %v", err)

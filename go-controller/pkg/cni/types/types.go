@@ -2,7 +2,6 @@ package types
 
 import (
 	"github.com/containernetworking/cni/pkg/types"
-	"net"
 )
 
 // NetConf is CNI NetConf with DeviceID
@@ -24,6 +23,4 @@ type NetworkSelectionElement struct {
 	// MacRequest contains an optional requested MAC address for this
 	// network attachment
 	MacRequest string `json:"mac,omitempty"`
-	// GatewayRequest contains default route IP address for the pod
-	GatewayRequest []net.IP `json:"default-route,omitempty"`
 }
