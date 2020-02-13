@@ -101,7 +101,7 @@ ovsdb-raft () {
 
   if [[ "${POD_NAME}" == "ovnkube-db-0" ]]; then
     run_as_ovs_user_if_needed \
-      /usr/share/openvswitch/scripts/ovn-ctl run_${db}_ovsdb --no-monitor \
+      ${OVNCTL_PATH} run_${db}_ovsdb --no-monitor \
       --db-${db}-create-insecure-remote=yes --db-${db}-cluster-local-addr=${local_ip} \
       --ovn-${db}-log="${ovn_log_db}" &
   else
@@ -110,7 +110,7 @@ ovsdb-raft () {
       wait_for_event ready_to_join_cluster ${db} ${port}
     fi
     run_as_ovs_user_if_needed \
-      /usr/share/openvswitch/scripts/ovn-ctl run_${db}_ovsdb --no-monitor \
+      ${OVNCTL_PATH} run_${db}_ovsdb --no-monitor \
       --db-${db}-create-insecure-remote=yes --db-${db}-cluster-local-addr=${local_ip} \
       --db-${db}-cluster-remote-addr=${init_ip} \
       --ovn-${db}-log="${ovn_log_db}" &
@@ -127,7 +127,7 @@ ovsdb-raft () {
     check_and_apply_ovnkube_db_ep ${port}
   fi
 
-  tail --follow=name /var/log/openvswitch/ovsdb-server-${db}.log &
+  tail --follow=name ${OVN_LOGDIR}/ovsdb-server-${db}.log &
   ovn_tail_pid=$!
 
   process_healthy ovn${db}_db ${ovn_tail_pid}
