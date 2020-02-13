@@ -1,25 +1,3 @@
-# service to expose the ovnkube-db pod
-apiVersion: v1
-kind: Service
-metadata:
-  name: ovnkube-db
-  namespace: ovn-kubernetes
-spec:
-  ports:
-  - name: north
-    port: 6641
-    protocol: TCP
-    targetPort: 6641
-  - name: south
-    port: 6642
-    protocol: TCP
-    targetPort: 6642
-  sessionAffinity: None
-  clusterIP: None
-  type: ClusterIP
-
----
-
 # ovnkube-db
 # daemonset version 3
 # starts ovn NB/SB ovsdb daemons, each in a separate container
