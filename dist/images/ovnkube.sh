@@ -851,73 +851,73 @@ run-nbctld () {
 
 echo "================== ovnkube.sh --- version: ${ovnkube_version} ================"
 
-echo " ==================== command: ${cmd}"
-display_version
+  echo " ==================== command: ${cmd}"
+  display_version
 
-# display_env
+  # display_env
 
 # Start the requested daemons
 # daemons come up in order
 # ovs-db-server  - all nodes  -- not done by this script (v3)
 # ovs-vswitchd   - all nodes  -- not done by this script (v3)
-# run-ovn-northd Runs ovn-northd as a process does not run nb_ovsdb or sb_ovsdb (v3)
-# nb-ovsdb       Runs nb_ovsdb as a process (no detach or monitor) (v3)
-# sb-ovsdb       Runs sb_ovsdb as a process (no detach or monitor) (v3)
+#  run-ovn-northd Runs ovn-northd as a process does not run nb_ovsdb or sb_ovsdb (v3)
+#  nb-ovsdb       Runs nb_ovsdb as a process (no detach or monitor) (v3)
+#  sb-ovsdb       Runs sb_ovsdb as a process (no detach or monitor) (v3)
 # ovn-master     - master node only (v3)
 # ovn-controller - all nodes (v3)
 # ovn-node       - all nodes (v3)
 # cleanup-ovn-node - all nodes (v3)
 
-case ${cmd} in
-  "nb-ovsdb")        # pod ovnkube-db container nb-ovsdb
-	  nb-ovsdb
+  case ${cmd} in
+    "nb-ovsdb")        # pod ovnkube-db container nb-ovsdb
+	nb-ovsdb
     ;;
-  "sb-ovsdb")        # pod ovnkube-db container sb-ovsdb
-	  sb-ovsdb
+    "sb-ovsdb")        # pod ovnkube-db container sb-ovsdb
+	sb-ovsdb
     ;;
-  "run-ovn-northd")  # pod ovnkube-master container run-ovn-northd
-	  run-ovn-northd
+    "run-ovn-northd")  # pod ovnkube-master container run-ovn-northd
+	run-ovn-northd
     ;;
-  "ovn-master")      # pod ovnkube-master container ovnkube-master
-	  ovn-master
+    "ovn-master")      # pod ovnkube-master container ovnkube-master
+	ovn-master
     ;;
-  "ovs-server")      # pod ovnkube-node container ovs-daemons
-    ovs-server
+    "ovs-server")      # pod ovnkube-node container ovs-daemons
+        ovs-server
     ;;
-  "ovn-controller")  # pod ovnkube-node container ovn-controller
-	  ovn-controller
+    "ovn-controller")  # pod ovnkube-node container ovn-controller
+	ovn-controller
     ;;
-  "ovn-node")        # pod ovnkube-node container ovn-node
-	  ovn-node
+    "ovn-node")        # pod ovnkube-node container ovn-node
+	ovn-node
     ;;
-  "run-nbctld")   # pod ovnkube-master container run-nbctld
+    "run-nbctld")   # pod ovnkube-master container run-nbctld
     run-nbctld
     ;;
-  "ovn-northd")
-	  ovn-northd
+    "ovn-northd")
+	ovn-northd
     ;;
-  "display_env")
-    display_env
-	  exit 0
+    "display_env")
+        display_env
+	exit 0
     ;;
-  "display")
-	  display
-	  exit 0
+    "display")
+	display
+	exit 0
     ;;
-  "ovn_debug")
-	  ovn_debug
-	  exit 0
+    "ovn_debug")
+	ovn_debug
+	exit 0
     ;;
-  "cleanup-ovs-server")
-	  cleanup-ovs-server
+    "cleanup-ovs-server")
+	cleanup-ovs-server
     ;;
-  "cleanup-ovn-node")
-	  cleanup-ovn-node
+    "cleanup-ovn-node")
+	cleanup-ovn-node
     ;;
-  *)
-	  echo "invalid command ${cmd}"
-	  echo "valid v3 commands: ovs-server nb-ovsdb sb-ovsdb run-ovn-northd ovn-master ovn-controller ovn-node display_env display ovn_debug cleanup-ovs-server cleanup-ovn-node"
-	  exit 0
-esac
+    *)
+	echo "invalid command ${cmd}"
+	echo "valid v3 commands: ovs-server nb-ovsdb sb-ovsdb run-ovn-northd ovn-master ovn-controller ovn-node display_env display ovn_debug cleanup-ovs-server cleanup-ovn-node"
+	exit 0
+  esac
 
 exit 0
