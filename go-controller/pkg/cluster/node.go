@@ -75,7 +75,9 @@ func isOVNControllerReady(name string) (bool, error) {
 
 func getNodeHostSubnetAnnotation(node *kapi.Node) (string, error) {
 	subnet, ok := node.Annotations[ovn.OvnNodeSubnets]
-	if ok {
+	if !ok {
+		subnet, ok = node.Annotations[ovn.OvnHostSubnetLegacy]
+	} else {
 		nodeSubnets := make(map[string]string)
 		if err := json.Unmarshal([]byte(subnet), &nodeSubnets); err != nil {
 			return "", fmt.Errorf("error parsing node-subnets annotation: %v", err)
