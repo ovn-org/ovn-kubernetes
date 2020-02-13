@@ -58,15 +58,21 @@ func (h *Handler) kill() error {
 	return nil
 }
 
+type eventKind int
+
+const (
+	addEvent eventKind = iota
+	updateEvent
+	deleteEvent
+)
+
 type event struct {
-	obj     interface{}
-	oldObj  interface{}
-	process func(*event)
+	obj    interface{}
+	oldObj interface{}
+	kind   eventKind
 }
 
 type listerInterface interface{}
-
-type initialAddFn func(*Handler, []interface{})
 
 type informer struct {
 	sync.RWMutex
@@ -75,9 +81,6 @@ type informer struct {
 	handlers map[uint64]*Handler
 	events   []chan *event
 	lister   listerInterface
-	// initialAddFunc will be called to deliver the initial list of objects
-	// when a handler is added
-	initialAddFunc initialAddFn
 }
 
 func (i *informer) forEachQueuedHandler(f func(h *Handler)) {
@@ -94,8 +97,8 @@ func (i *informer) forEachQueuedHandler(f func(h *Handler)) {
 }
 
 func (i *informer) forEachHandler(obj interface{}, f func(h *Handler)) {
-	i.RLock()
-	defer i.RUnlock()
+	i.Lock()
+	defer i.Unlock()
 
 	objType := reflect.TypeOf(obj)
 	if objType != i.oType {
@@ -108,7 +111,10 @@ func (i *informer) forEachHandler(obj interface{}, f func(h *Handler)) {
 	}
 }
 
-func (i *informer) addHandler(id uint64, filterFunc func(obj interface{}) bool, funcs cache.ResourceEventHandler, existingItems []interface{}) *Handler {
+func (i *informer) addHandler(id uint64, filterFunc func(obj interface{}) bool, funcs cache.ResourceEventHandler) *Handler {
+	i.Lock()
+	defer i.Unlock()
+
 	handler := &Handler{
 		cache.FilteringResourceEventHandler{
 			FilterFunc: filterFunc,
@@ -117,12 +123,6 @@ func (i *informer) addHandler(id uint64, filterFunc func(obj interface{}) bool, 
 		id,
 		handlerAlive,
 	}
-
-	// Send existing items to the handler's add function; informers usually
-	// do this but since we share informers, it's long-since happened so
-	// we must emulate that here
-	i.initialAddFunc(handler, existingItems)
-
 	i.handlers[id] = handler
 	return handler
 }
@@ -156,18 +156,31 @@ func (i *informer) processEvents(events chan *event, stopChan <-chan struct{}) {
 			if !ok {
 				return
 			}
-			e.process(e)
+			switch e.kind {
+			case addEvent:
+				i.forEachQueuedHandler(func(h *Handler) {
+					h.OnAdd(e.obj)
+				})
+			case updateEvent:
+				i.forEachQueuedHandler(func(h *Handler) {
+					h.OnUpdate(e.oldObj, e.obj)
+				})
+			case deleteEvent:
+				i.forEachQueuedHandler(func(h *Handler) {
+					h.OnDelete(e.obj)
+				})
+			}
 		case <-stopChan:
 			return
 		}
 	}
 }
 
-func getQueueNum(oType reflect.Type, obj interface{}) uint32 {
-	meta, err := getObjectMeta(oType, obj)
+func (i *informer) enqueueEvent(oldObj, obj interface{}, kind eventKind) {
+	meta, err := getObjectMeta(i.oType, obj)
 	if err != nil {
 		logrus.Errorf("object has no meta: %v", err)
-		return 0
+		return
 	}
 
 	// Distribute the object to an event queue based on a hash of its
@@ -179,20 +192,15 @@ func getQueueNum(oType reflect.Type, obj interface{}) uint32 {
 		_, _ = h.Write([]byte("/"))
 	}
 	_, _ = h.Write([]byte(meta.Name))
-	return h.Sum32() % uint32(numEventQueues)
-}
+	queueIdx := h.Sum32() % uint32(numEventQueues)
 
-// enqueueEvent adds an event to the queue. Caller must hold at least a read lock
-// on the informer.
-func (i *informer) enqueueEvent(oldObj, obj interface{}, processFunc func(*event)) {
 	i.RLock()
 	defer i.RUnlock()
-	queueIdx := getQueueNum(i.oType, obj)
 	if i.events[queueIdx] != nil {
 		i.events[queueIdx] <- &event{
-			obj:     obj,
-			oldObj:  oldObj,
-			process: processFunc,
+			obj:    obj,
+			oldObj: oldObj,
+			kind:   kind,
 		}
 	}
 }
@@ -216,18 +224,10 @@ func ensureObjectOnDelete(obj interface{}, expectedType reflect.Type) (interface
 func (i *informer) newFederatedQueuedHandler() cache.ResourceEventHandlerFuncs {
 	return cache.ResourceEventHandlerFuncs{
 		AddFunc: func(obj interface{}) {
-			i.enqueueEvent(nil, obj, func(e *event) {
-				i.forEachQueuedHandler(func(h *Handler) {
-					h.OnAdd(e.obj)
-				})
-			})
+			i.enqueueEvent(nil, obj, addEvent)
 		},
 		UpdateFunc: func(oldObj, newObj interface{}) {
-			i.enqueueEvent(oldObj, newObj, func(e *event) {
-				i.forEachQueuedHandler(func(h *Handler) {
-					h.OnUpdate(e.oldObj, e.obj)
-				})
-			})
+			i.enqueueEvent(oldObj, newObj, updateEvent)
 		},
 		DeleteFunc: func(obj interface{}) {
 			realObj, err := ensureObjectOnDelete(obj, i.oType)
@@ -235,11 +235,7 @@ func (i *informer) newFederatedQueuedHandler() cache.ResourceEventHandlerFuncs {
 				logrus.Errorf(err.Error())
 				return
 			}
-			i.enqueueEvent(nil, realObj, func(e *event) {
-				i.forEachQueuedHandler(func(h *Handler) {
-					h.OnDelete(e.obj)
-				})
-			})
+			i.enqueueEvent(nil, realObj, deleteEvent)
 		},
 	}
 }
@@ -323,11 +319,7 @@ func newInformer(oType reflect.Type, sharedInformer cache.SharedIndexInformer) (
 	if err != nil {
 		return nil, err
 	}
-	i.initialAddFunc = func(h *Handler, items []interface{}) {
-		for _, item := range items {
-			h.OnAdd(item)
-		}
-	}
+
 	i.inf.AddEventHandler(i.newFederatedHandler())
 	return i, nil
 }
@@ -341,38 +333,6 @@ func newQueuedInformer(oType reflect.Type, sharedInformer cache.SharedIndexInfor
 	for j := range i.events {
 		i.events[j] = make(chan *event, 1)
 		go i.processEvents(i.events[j], stopChan)
-	}
-	i.initialAddFunc = func(h *Handler, items []interface{}) {
-		// Make a handler-specific channel array across which the
-		// initial add events will be distributed.
-		adds := make([]chan interface{}, numEventQueues)
-		queueWg := &sync.WaitGroup{}
-		queueWg.Add(len(adds))
-		for j := range adds {
-			adds[j] = make(chan interface{}, 1)
-			go func(addChan chan interface{}) {
-				defer queueWg.Done()
-				for {
-					obj, ok := <-addChan
-					if !ok {
-						return
-					}
-					h.OnAdd(obj)
-				}
-			}(adds[j])
-		}
-		// Distribute the existing items into the handler-specific
-		// channel array.
-		for _, obj := range items {
-			queueIdx := getQueueNum(i.oType, obj)
-			adds[queueIdx] <- obj
-		}
-		// Close all the channels
-		for j := range adds {
-			close(adds[j])
-		}
-		// Wait until all the object additions have been processed
-		queueWg.Wait()
 	}
 	i.inf.AddEventHandler(i.newFederatedQueuedHandler())
 	return i, nil
@@ -539,24 +499,30 @@ func (wf *WatchFactory) addHandler(objType reflect.Type, namespace string, lsel 
 		return true
 	}
 
-	inf.Lock()
-	defer inf.Unlock()
-
-	items := make([]interface{}, 0)
-	for _, obj := range inf.inf.GetStore().List() {
-		if filterFunc(obj) {
-			items = append(items, obj)
-		}
-	}
+	// Process existing items as a set so the caller can clean up
+	// after a restart or whatever
+	existingItems := inf.inf.GetStore().List()
 	if processExisting != nil {
-		// Process existing items as a set so the caller can clean up
-		// after a restart or whatever
+		items := make([]interface{}, 0)
+		for _, obj := range existingItems {
+			if filterFunc(obj) {
+				items = append(items, obj)
+			}
+		}
 		processExisting(items)
 	}
 
 	handlerID := atomic.AddUint64(&wf.handlerCounter, 1)
-	handler := inf.addHandler(handlerID, filterFunc, funcs, items)
+	handler := inf.addHandler(handlerID, filterFunc, funcs)
 	logrus.Debugf("added %v event handler %d", objType, handler.id)
+
+	// Send existing items to the handler's add function; informers usually
+	// do this but since we share informers, it's long-since happened so
+	// we must emulate that here
+	for _, obj := range existingItems {
+		handler.OnAdd(obj)
+	}
+
 	return handler, nil
 }
 
