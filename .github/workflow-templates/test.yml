@@ -83,6 +83,8 @@ jobs:
     name: e2e-kind-ovn-shard-n
     runs-on: ubuntu-latest
     needs: k8s
+    env:
+      JOB_NAME: "e2e-shard-n"
     steps:
     - *step_gosetup
     - *step_checkout
@@ -135,13 +137,15 @@ jobs:
       if: always()
       uses: actions/upload-artifact@v1
       with:
-        name: kind-logs
+        name: kind-logs-${{ github.run_id }}-${{ env.JOB_NAME }}
         path: /tmp/kind/logs
 
   e2e-shard-np:
     name: e2e-kind-ovn-shard-np
     runs-on: ubuntu-latest
     needs: k8s
+    env:
+      JOB_NAME: "e2e-shard-np"
     steps:
     - *step_gosetup
     - *step_checkout
@@ -169,6 +173,8 @@ jobs:
     name: e2e-kind-ovn-shard-s
     runs-on: ubuntu-latest
     needs: k8s
+    env:
+      JOB_NAME: "e2e-shard-s"
     steps:
     - *step_gosetup
     - *step_checkout
@@ -195,6 +201,8 @@ jobs:
     name: e2e-kind-ovn-shard-other
     runs-on: ubuntu-latest
     needs: k8s
+    env:
+      JOB_NAME: "e2e-shard-other"
     steps:
     - *step_gosetup
     - *step_checkout
