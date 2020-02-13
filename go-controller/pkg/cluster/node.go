@@ -121,10 +121,7 @@ func (cluster *OvnClusterController) StartClusterNode(name string) error {
 		}
 	}
 
-	if node, err = cluster.Kube.GetNode(name); err != nil {
-		return fmt.Errorf("error retrieving node %s: %v", name, err)
-	}
-	err = setupOVNNode(node)
+	err = setupOVNNode(name)
 	if err != nil {
 		return err
 	}

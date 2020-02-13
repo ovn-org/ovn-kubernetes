@@ -32,25 +32,10 @@ var _ = Describe("Node Operations", func() {
 	It("sets correct OVN external IDs", func() {
 		app.Action = func(ctx *cli.Context) error {
 			const (
-				nodeIP   string = "1.2.5.6"
-				nodeName string = "cannot.be.resolv.ed"
+				nodeName string = "1.2.5.6"
 				interval int    = 100000
 				ofintval int    = 180
 			)
-			node := kapi.Node{
-				Status: kapi.NodeStatus{
-					Addresses: []kapi.NodeAddress{
-						{
-							Type:    kapi.NodeHostName,
-							Address: nodeName,
-						},
-						{
-							Type:    kapi.NodeExternalIP,
-							Address: nodeIP,
-						},
-					},
-				},
-			}
 
 			fexec := ovntest.NewFakeExec()
 			fexec.AddFakeCmd(&ovntest.ExpectedCmd{
@@ -60,7 +45,7 @@ var _ = Describe("Node Operations", func() {
 					"external_ids:ovn-remote-probe-interval=%d "+
 					"external_ids:ovn-openflow-probe-interval=%d "+
 					"external_ids:hostname=\"%s\"",
-					nodeIP, interval, ofintval, nodeName),
+					nodeName, interval, ofintval, nodeName),
 			})
 
 			err := util.SetExec(fexec)
@@ -69,7 +54,7 @@ var _ = Describe("Node Operations", func() {
 			_, err = config.InitConfig(ctx, fexec, nil)
 			Expect(err).NotTo(HaveOccurred())
 
-			err = setupOVNNode(&node)
+			err = setupOVNNode(nodeName)
 			Expect(err).NotTo(HaveOccurred())
 
 			Expect(fexec.CalledMatchesExpected()).To(BeTrue(), fexec.ErrorDesc)
@@ -82,28 +67,13 @@ var _ = Describe("Node Operations", func() {
 	It("sets non-default OVN encap port", func() {
 		app.Action = func(ctx *cli.Context) error {
 			const (
-				nodeIP      string = "1.2.5.6"
-				nodeName    string = "cannot.be.resolv.ed"
+				nodeName    string = "1.2.5.6"
 				encapPort   uint   = 666
 				interval    int    = 100000
 				ofintval    int    = 180
 				chassisUUID string = "1a3dfc82-2749-4931-9190-c30e7c0ecea3"
 				encapUUID   string = "e4437094-0094-4223-9f14-995d98d5fff8"
 			)
-			node := kapi.Node{
-				Status: kapi.NodeStatus{
-					Addresses: []kapi.NodeAddress{
-						{
-							Type:    kapi.NodeHostName,
-							Address: nodeName,
-						},
-						{
-							Type:    kapi.NodeExternalIP,
-							Address: nodeIP,
-						},
-					},
-				},
-			}
 
 			fexec := ovntest.NewFakeExec()
 			fexec.AddFakeCmd(&ovntest.ExpectedCmd{
@@ -113,7 +83,7 @@ var _ = Describe("Node Operations", func() {
 					"external_ids:ovn-remote-probe-interval=%d "+
 					"external_ids:ovn-openflow-probe-interval=%d "+
 					"external_ids:hostname=\"%s\"",
-					nodeIP, interval, ofintval, nodeName),
+					nodeName, interval, ofintval, nodeName),
 			})
 			fexec.AddFakeCmd(&ovntest.ExpectedCmd{
 				Cmd: fmt.Sprintf("ovs-vsctl --timeout=15 " +
@@ -137,7 +107,7 @@ var _ = Describe("Node Operations", func() {
 			Expect(err).NotTo(HaveOccurred())
 			config.Default.EncapPort = encapPort
 
-			err = setupOVNNode(&node)
+			err = setupOVNNode(nodeName)
 			Expect(err).NotTo(HaveOccurred())
 
 			Expect(fexec.CalledMatchesExpected()).To(BeTrue(), fexec.ErrorDesc)
