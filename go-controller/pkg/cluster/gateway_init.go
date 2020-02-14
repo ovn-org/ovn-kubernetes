@@ -163,12 +163,6 @@ func CleanupClusterNode(name string) error {
 		logrus.Errorf("Failed to cleanup Gateway, error: %v", err)
 	}
 
-	// Make sure br-int is deleted, the management internal port is also deleted at the same time.
-	stdout, stderr, err := util.RunOVSVsctl("--", "--if-exists", "del-br", "br-int")
-	if err != nil {
-		logrus.Errorf("Failed to delete bridge br-int, stdout: %q, stderr: %q, error: %v", stdout, stderr, err)
-	}
-
 	// Delete iptable rules for management port on Linux.
 	if runtime.GOOS != "windows" {
 		DelMgtPortIptRules(name)

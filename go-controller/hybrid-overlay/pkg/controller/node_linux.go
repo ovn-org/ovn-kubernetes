@@ -88,6 +88,7 @@ func getPodDetails(pod *kapi.Pod, nodeName string) (string, string) {
 
 	podInfo, err := util.UnmarshalPodAnnotation(pod.Annotations)
 	if err != nil {
+		logrus.Errorf("Unable to unmarshal pod annotations: %v", err)
 		return "", ""
 	}
 	return podInfo.IP.String(), podInfo.MAC.String()

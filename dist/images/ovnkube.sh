@@ -572,9 +572,6 @@ nb-ovsdb () {
   check_ovn_daemonset_version "3"
   rm -f ${OVN_RUNDIR}/ovnnb_db.pid
 
-  # Make sure /var/lib/openvswitch exists
-  mkdir -p /var/lib/openvswitch
-
   iptables-rules ${ovn_nb_port}
 
   echo "=============== run nb_ovsdb ========== MASTER ONLY"
@@ -600,9 +597,6 @@ sb-ovsdb () {
   trap 'kill $(jobs -p); exit 0' TERM
   check_ovn_daemonset_version "3"
   rm -f ${OVN_RUNDIR}/ovnsb_db.pid
-
-  # Make sure /var/lib/openvswitch exists
-  mkdir -p /var/lib/openvswitch
 
   iptables-rules ${ovn_sb_port}
 
@@ -633,9 +627,6 @@ run-ovn-northd () {
   check_ovn_daemonset_version "3"
   rm -f ${OVN_RUNDIR}/ovn-northd.pid
   rm -f ${OVN_RUNDIR}/ovn-northd.*.ctl
-
-  # Make sure /var/lib/openvswitch exists
-  mkdir -p /var/lib/openvswitch
 
   echo "=============== run-ovn-northd (wait for ready_to_start_node)"
   wait_for_event ready_to_start_node
@@ -792,12 +783,19 @@ ovn-node () {
     hybrid_overlay_flags="--enable-hybrid-overlay"
   fi
 
+  OVN_ENCAP_IP=""
+  ovn_encap_ip=`ovs-vsctl --if-exists get Open_vSwitch . external_ids:ovn-encap-ip | tr -d '\"'`
+  if [[ $? == 0 && "${ovn_encap_ip}" != "" ]]; then
+    OVN_ENCAP_IP=$(echo --encap-ip=${ovn_encap_ip})
+  fi
+
   echo "=============== ovn-node   --init-node"
   /usr/bin/ovnkube --init-node ${K8S_NODE} \
       --cluster-subnets ${net_cidr} --k8s-service-cidr=${svc_cidr} \
       --nb-address=${ovn_nbdb} --sb-address=${ovn_sbdb} \
       --nodeport \
       --mtu=${mtu} \
+      ${OVN_ENCAP_IP} \
       --loglevel=${ovnkube_loglevel} \
       ${hybrid_overlay_flags} \
       --gateway-mode=${ovn_gateway_mode} ${ovn_gateway_opts}  \
@@ -870,73 +868,73 @@ run-nbctld () {
 
 echo "================== ovnkube.sh --- version: ${ovnkube_version} ================"
 
-  echo " ==================== command: ${cmd}"
-  display_version
+echo " ==================== command: ${cmd}"
+display_version
 
-  # display_env
+# display_env
 
 # Start the requested daemons
 # daemons come up in order
 # ovs-db-server  - all nodes  -- not done by this script (v3)
 # ovs-vswitchd   - all nodes  -- not done by this script (v3)
-#  run-ovn-northd Runs ovn-northd as a process does not run nb_ovsdb or sb_ovsdb (v3)
-#  nb-ovsdb       Runs nb_ovsdb as a process (no detach or monitor) (v3)
-#  sb-ovsdb       Runs sb_ovsdb as a process (no detach or monitor) (v3)
+# run-ovn-northd Runs ovn-northd as a process does not run nb_ovsdb or sb_ovsdb (v3)
+# nb-ovsdb       Runs nb_ovsdb as a process (no detach or monitor) (v3)
+# sb-ovsdb       Runs sb_ovsdb as a process (no detach or monitor) (v3)
 # ovn-master     - master node only (v3)
 # ovn-controller - all nodes (v3)
 # ovn-node       - all nodes (v3)
 # cleanup-ovn-node - all nodes (v3)
 
-  case ${cmd} in
-    "nb-ovsdb")        # pod ovnkube-db container nb-ovsdb
-	nb-ovsdb
+case ${cmd} in
+  "nb-ovsdb")        # pod ovnkube-db container nb-ovsdb
+	  nb-ovsdb
     ;;
-    "sb-ovsdb")        # pod ovnkube-db container sb-ovsdb
-	sb-ovsdb
+  "sb-ovsdb")        # pod ovnkube-db container sb-ovsdb
+	  sb-ovsdb
     ;;
-    "run-ovn-northd")  # pod ovnkube-master container run-ovn-northd
-	run-ovn-northd
+  "run-ovn-northd")  # pod ovnkube-master container run-ovn-northd
+	  run-ovn-northd
     ;;
-    "ovn-master")      # pod ovnkube-master container ovnkube-master
-	ovn-master
+  "ovn-master")      # pod ovnkube-master container ovnkube-master
+	  ovn-master
     ;;
-    "ovs-server")      # pod ovnkube-node container ovs-daemons
-        ovs-server
+  "ovs-server")      # pod ovnkube-node container ovs-daemons
+    ovs-server
     ;;
-    "ovn-controller")  # pod ovnkube-node container ovn-controller
-	ovn-controller
+  "ovn-controller")  # pod ovnkube-node container ovn-controller
+	  ovn-controller
     ;;
-    "ovn-node")        # pod ovnkube-node container ovn-node
-	ovn-node
+  "ovn-node")        # pod ovnkube-node container ovn-node
+	  ovn-node
     ;;
-    "run-nbctld")   # pod ovnkube-master container run-nbctld
+  "run-nbctld")   # pod ovnkube-master container run-nbctld
     run-nbctld
     ;;
-    "ovn-northd")
-	ovn-northd
+  "ovn-northd")
+	  ovn-northd
     ;;
-    "display_env")
-        display_env
-	exit 0
+  "display_env")
+    display_env
+	  exit 0
     ;;
-    "display")
-	display
-	exit 0
+  "display")
+	  display
+	  exit 0
     ;;
-    "ovn_debug")
-	ovn_debug
-	exit 0
+  "ovn_debug")
+	  ovn_debug
+	  exit 0
     ;;
-    "cleanup-ovs-server")
-	cleanup-ovs-server
+  "cleanup-ovs-server")
+	  cleanup-ovs-server
     ;;
-    "cleanup-ovn-node")
-	cleanup-ovn-node
+  "cleanup-ovn-node")
+	  cleanup-ovn-node
     ;;
-    *)
-	echo "invalid command ${cmd}"
-	echo "valid v3 commands: ovs-server nb-ovsdb sb-ovsdb run-ovn-northd ovn-master ovn-controller ovn-node display_env display ovn_debug cleanup-ovs-server cleanup-ovn-node"
-	exit 0
-  esac
+  *)
+	  echo "invalid command ${cmd}"
+	  echo "valid v3 commands: ovs-server nb-ovsdb sb-ovsdb run-ovn-northd ovn-master ovn-controller ovn-node display_env display ovn_debug cleanup-ovs-server cleanup-ovn-node"
+	  exit 0
+esac
 
 exit 0

@@ -85,7 +85,8 @@ func createNode(name, os, ip string, annotations map[string]string) *v1.Node {
 func createPod(namespace, name, node, podIP, podMAC string) *v1.Pod {
 	annotations := map[string]string{}
 	if podIP != "" || podMAC != "" {
-		annotations["ovn"] = fmt.Sprintf(`{"ip_address":"%s", "mac_address":"%s"}`, podIP, podMAC)
+		annotations[util.OvnPodAnnotationName] = fmt.Sprintf(`{"%s":{"ip_address":"%s", "mac_address":"%s"}}`,
+			util.OvnPodDefaultNetwork, podIP, podMAC)
 	}
 
 	return &v1.Pod{

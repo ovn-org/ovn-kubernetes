@@ -619,7 +619,7 @@ service-cidr=172.18.0.0/24
 
 	It("overrides config file and defaults with CLI legacy cluster-subnet option", func() {
 		err := ioutil.WriteFile(cfgFile.Name(), []byte(`[default]
-cluster-subnets=172.18.0.0/24
+cluster-subnets=172.18.0.0/23
 `), 0644)
 		Expect(err).NotTo(HaveOccurred())
 
@@ -629,15 +629,15 @@ cluster-subnets=172.18.0.0/24
 			Expect(err).NotTo(HaveOccurred())
 			Expect(cfgPath).To(Equal(cfgFile.Name()))
 			Expect(Default.ClusterSubnets).To(Equal([]CIDRNetworkEntry{
-				{mustParseCIDR("fd02::/64"), 24},
+				{mustParseCIDR("172.15.0.0/23"), 24},
 			}))
-			Expect(IPv6Mode).To(Equal(true))
+			Expect(IPv6Mode).To(Equal(false))
 			return nil
 		}
 		cliArgs := []string{
 			app.Name,
 			"-config-file=" + cfgFile.Name(),
-			"-cluster-subnet=fd02::/64",
+			"-cluster-subnet=172.15.0.0/23",
 		}
 		err = app.Run(cliArgs)
 		Expect(err).NotTo(HaveOccurred())
@@ -877,6 +877,31 @@ mode=shared
 			Expect(a.GetURL()).To(Equal(sbURLOVN))
 			err = a.SetDBAuth()
 			Expect(err).NotTo(HaveOccurred())
+			Expect(fexec.CalledMatchesExpected()).To(BeTrue(), fexec.ErrorDesc)
+		})
+
+		It("configures client northbound and southbound Scheme correctly when watch-endpoint specified", func() {
+
+			fexec := ovntest.NewFakeExec()
+
+			cliConfig := &OvnAuthConfig{
+				Address: "watch-endpoint",
+				PrivKey: keyFile,
+				Cert:    certFile,
+				CACert:  caFile,
+			}
+			MasterHA.ManageDBServers = true
+
+			a, err := buildOvnAuth(fexec, false, cliConfig, &OvnAuthConfig{}, false)
+			Expect(err).NotTo(HaveOccurred())
+			Expect(a.Scheme).To(Equal(OvnDBSchemeSSL))
+			Expect(a.PrivKey).To(Equal(keyFile))
+			Expect(a.Cert).To(Equal(certFile))
+			Expect(a.CACert).To(Equal(caFile))
+			Expect(a.Address).To(Equal("watch-endpoint"))
+			Expect(a.northbound).To(BeFalse())
+			Expect(a.externalID).To(Equal("ovn-remote"))
+
 			Expect(fexec.CalledMatchesExpected()).To(BeTrue(), fexec.ErrorDesc)
 		})
 	})

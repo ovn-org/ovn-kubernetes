@@ -16,6 +16,7 @@ import (
 	"k8s.io/apimachinery/pkg/labels"
 	informerfactory "k8s.io/client-go/informers"
 	"k8s.io/client-go/kubernetes"
+	listers "k8s.io/client-go/listers/core/v1"
 	"k8s.io/client-go/tools/cache"
 )
 
@@ -71,12 +72,15 @@ type event struct {
 	kind   eventKind
 }
 
+type listerInterface interface{}
+
 type informer struct {
 	sync.RWMutex
 	oType    reflect.Type
 	inf      cache.SharedIndexInformer
 	handlers map[uint64]*Handler
 	events   []chan *event
+	lister   listerInterface
 }
 
 func (i *informer) forEachQueuedHandler(f func(h *Handler)) {
@@ -276,29 +280,62 @@ func (i *informer) shutdown() {
 	}
 }
 
-func newBaseInformer(oType reflect.Type, sharedInformer cache.SharedIndexInformer) *informer {
+func newInformerLister(oType reflect.Type, sharedInformer cache.SharedIndexInformer) (listerInterface, error) {
+	switch oType {
+	case podType:
+		return listers.NewPodLister(sharedInformer.GetIndexer()), nil
+	case serviceType:
+		return listers.NewServiceLister(sharedInformer.GetIndexer()), nil
+	case endpointsType:
+		return listers.NewEndpointsLister(sharedInformer.GetIndexer()), nil
+	case namespaceType:
+		return listers.NewNamespaceLister(sharedInformer.GetIndexer()), nil
+	case nodeType:
+		return listers.NewNodeLister(sharedInformer.GetIndexer()), nil
+	case policyType:
+		return nil, nil
+	}
+
+	return nil, fmt.Errorf("cannot create lister from type %v", oType)
+}
+
+func newBaseInformer(oType reflect.Type, sharedInformer cache.SharedIndexInformer) (*informer, error) {
+	lister, err := newInformerLister(oType, sharedInformer)
+	if err != nil {
+		logrus.Errorf(err.Error())
+		return nil, err
+	}
+
 	return &informer{
 		oType:    oType,
 		inf:      sharedInformer,
+		lister:   lister,
 		handlers: make(map[uint64]*Handler),
+	}, nil
+}
+
+func newInformer(oType reflect.Type, sharedInformer cache.SharedIndexInformer) (*informer, error) {
+	i, err := newBaseInformer(oType, sharedInformer)
+	if err != nil {
+		return nil, err
 	}
-}
 
-func newInformer(oType reflect.Type, sharedInformer cache.SharedIndexInformer) *informer {
-	i := newBaseInformer(oType, sharedInformer)
 	i.inf.AddEventHandler(i.newFederatedHandler())
-	return i
+	return i, nil
 }
 
-func newQueuedInformer(oType reflect.Type, sharedInformer cache.SharedIndexInformer, stopChan chan struct{}) *informer {
-	i := newBaseInformer(oType, sharedInformer)
+func newQueuedInformer(oType reflect.Type, sharedInformer cache.SharedIndexInformer, stopChan chan struct{}) (*informer, error) {
+	i, err := newBaseInformer(oType, sharedInformer)
+	if err != nil {
+		return nil, err
+	}
 	i.events = make([]chan *event, numEventQueues)
 	for j := range i.events {
 		i.events[j] = make(chan *event, 1)
 		go i.processEvents(i.events[j], stopChan)
 	}
 	i.inf.AddEventHandler(i.newFederatedQueuedHandler())
-	return i
+	return i, nil
 }
 
 // WatchFactory initializes and manages common kube watches
@@ -310,6 +347,24 @@ type WatchFactory struct {
 	iFactory  informerfactory.SharedInformerFactory
 	informers map[reflect.Type]*informer
 }
+
+// ObjectCacheInterface represents the exported methods for getting
+// kubernetes resources from the informer cache
+
+type ObjectCacheInterface interface {
+	GetPod(namespace, name string) (*kapi.Pod, error)
+	GetPods(namespace string) ([]*kapi.Pod, error)
+	GetNodes() ([]*kapi.Node, error)
+	GetNode(name string) (*kapi.Node, error)
+	GetService(namespace, name string) (*kapi.Service, error)
+	GetEndpoints(namespace string) ([]*kapi.Endpoints, error)
+	GetEndpoint(namespace, name string) (*kapi.Endpoints, error)
+	GetNamespaces() ([]*kapi.Namespace, error)
+}
+
+// WatchFactory implements the ObjectCacheInterface interface.
+
+var _ ObjectCacheInterface = &WatchFactory{}
 
 const (
 	resyncInterval        = 12 * time.Hour
@@ -338,14 +393,32 @@ func NewWatchFactory(c kubernetes.Interface, stopChan chan struct{}) (*WatchFact
 		iFactory:  informerfactory.NewSharedInformerFactory(c, resyncInterval),
 		informers: make(map[reflect.Type]*informer),
 	}
-
+	var err error
 	// Create shared informers we know we'll use
-	wf.informers[podType] = newInformer(podType, wf.iFactory.Core().V1().Pods().Informer())
-	wf.informers[serviceType] = newInformer(serviceType, wf.iFactory.Core().V1().Services().Informer())
-	wf.informers[endpointsType] = newInformer(endpointsType, wf.iFactory.Core().V1().Endpoints().Informer())
-	wf.informers[policyType] = newInformer(policyType, wf.iFactory.Networking().V1().NetworkPolicies().Informer())
-	wf.informers[namespaceType] = newInformer(namespaceType, wf.iFactory.Core().V1().Namespaces().Informer())
-	wf.informers[nodeType] = newQueuedInformer(nodeType, wf.iFactory.Core().V1().Nodes().Informer(), stopChan)
+	wf.informers[podType], err = newInformer(podType, wf.iFactory.Core().V1().Pods().Informer())
+	if err != nil {
+		return nil, err
+	}
+	wf.informers[serviceType], err = newInformer(serviceType, wf.iFactory.Core().V1().Services().Informer())
+	if err != nil {
+		return nil, err
+	}
+	wf.informers[endpointsType], err = newInformer(endpointsType, wf.iFactory.Core().V1().Endpoints().Informer())
+	if err != nil {
+		return nil, err
+	}
+	wf.informers[policyType], err = newInformer(policyType, wf.iFactory.Networking().V1().NetworkPolicies().Informer())
+	if err != nil {
+		return nil, err
+	}
+	wf.informers[namespaceType], err = newInformer(namespaceType, wf.iFactory.Core().V1().Namespaces().Informer())
+	if err != nil {
+		return nil, err
+	}
+	wf.informers[nodeType], err = newQueuedInformer(nodeType, wf.iFactory.Core().V1().Nodes().Informer(), stopChan)
+	if err != nil {
+		return nil, err
+	}
 
 	wf.iFactory.Start(stopChan)
 	for oType, synced := range wf.iFactory.WaitForCacheSync(stopChan) {
@@ -538,4 +611,52 @@ func (wf *WatchFactory) AddFilteredNodeHandler(lsel *metav1.LabelSelector, handl
 // RemoveNodeHandler removes a Node object event handler function
 func (wf *WatchFactory) RemoveNodeHandler(handler *Handler) error {
 	return wf.removeHandler(nodeType, handler)
+}
+
+// GetPod returns the pod spec given the namespace and pod name
+func (wf *WatchFactory) GetPod(namespace, name string) (*kapi.Pod, error) {
+	podLister := wf.informers[podType].lister.(listers.PodLister)
+	return podLister.Pods(namespace).Get(name)
+}
+
+// GetPods returns all the pods in a given namespace
+func (wf *WatchFactory) GetPods(namespace string) ([]*kapi.Pod, error) {
+	podLister := wf.informers[podType].lister.(listers.PodLister)
+	return podLister.Pods(namespace).List(labels.Everything())
+}
+
+// GetNodes returns the node specs of all the nodes
+func (wf *WatchFactory) GetNodes() ([]*kapi.Node, error) {
+	nodeLister := wf.informers[nodeType].lister.(listers.NodeLister)
+	return nodeLister.List(labels.Everything())
+}
+
+// GetNode returns the node spec of a given node by name
+func (wf *WatchFactory) GetNode(name string) (*kapi.Node, error) {
+	nodeLister := wf.informers[nodeType].lister.(listers.NodeLister)
+	return nodeLister.Get(name)
+}
+
+// GetService returns the service spec of a service in a given namespace
+func (wf *WatchFactory) GetService(namespace, name string) (*kapi.Service, error) {
+	serviceLister := wf.informers[serviceType].lister.(listers.ServiceLister)
+	return serviceLister.Services(namespace).Get(name)
+}
+
+// GetEndpoints returns the endpoints list in a given namespace
+func (wf *WatchFactory) GetEndpoints(namespace string) ([]*kapi.Endpoints, error) {
+	endpointsLister := wf.informers[endpointsType].lister.(listers.EndpointsLister)
+	return endpointsLister.Endpoints(namespace).List(labels.Everything())
+}
+
+// GetEndpoint returns a specific endpoint in a given namespace
+func (wf *WatchFactory) GetEndpoint(namespace, name string) (*kapi.Endpoints, error) {
+	endpointsLister := wf.informers[endpointsType].lister.(listers.EndpointsLister)
+	return endpointsLister.Endpoints(namespace).Get(name)
+}
+
+//GetNamespaces returns a list of namespaces in the cluster
+func (wf *WatchFactory) GetNamespaces() ([]*kapi.Namespace, error) {
+	namespaceLister := wf.informers[namespaceType].lister.(listers.NamespaceLister)
+	return namespaceLister.List(labels.Everything())
 }

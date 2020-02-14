@@ -66,36 +66,6 @@ func (n namespace) delCmds(fexec *ovntest.FakeExec, namespace v1.Namespace) {
 	})
 }
 
-func (n namespace) getLogicalPortUUIDCmds(fexec *ovntest.FakeExec, port, resultUUID string) {
-	fexec.AddFakeCmd(&ovntest.ExpectedCmd{
-		Cmd:    "ovn-nbctl --timeout=15 --if-exists get logical_switch_port " + port + " _uuid",
-		Output: resultUUID,
-	})
-}
-
-func (n namespace) addPodDenyMcast(fexec *ovntest.FakeExec, tP pod, inCache bool, portUUID string) {
-	if !inCache {
-		n.getLogicalPortUUIDCmds(fexec, tP.portName, portUUID)
-	}
-
-	fexec.AddFakeCmdsNoOutputNoError([]string{
-		"ovn-nbctl --timeout=15 " +
-			"--if-exists remove port_group mcastPortGroupDeny ports " + portUUID + " " +
-			"-- add port_group mcastPortGroupDeny ports " + portUUID,
-	})
-}
-
-func (n namespace) delPodDenyMcast(fexec *ovntest.FakeExec, tP pod, inCache bool, portUUID string) {
-	if !inCache {
-		n.getLogicalPortUUIDCmds(fexec, tP.portName, portUUID)
-	}
-
-	fexec.AddFakeCmdsNoOutputNoError([]string{
-		"ovn-nbctl --timeout=15 " +
-			"--if-exists remove port_group mcastPortGroupDeny ports " + portUUID,
-	})
-}
-
 func (n namespace) addPodCmds(fexec *ovntest.FakeExec, tP pod, namespace v1.Namespace) {
 	fexec.AddFakeCmdsNoOutputNoError([]string{
 		fmt.Sprintf(`ovn-nbctl --timeout=15 set address_set %s addresses="%s"`, hashedAddressSet(namespace.Name), tP.podIP),
@@ -158,7 +128,6 @@ var _ = Describe("OVN Namespace Operations", func() {
 				)
 
 				test.baseCmds(fExec, namespaceT)
-				test.addPodDenyMcast(fExec, tP, false, "fake-uuid")
 				test.addCmdsWithPods(fExec, tP, namespaceT)
 
 				fakeOvn.start(ctx,

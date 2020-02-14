@@ -4,7 +4,6 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/factory"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
 	"github.com/sirupsen/logrus"
 	kapi "k8s.io/api/core/v1"
@@ -676,14 +675,7 @@ func (oc *Controller) addNetworkPolicyOld(policy *knet.NetworkPolicy) {
 		return
 	}
 
-	np := &namespacePolicy{}
-	np.name = policy.Name
-	np.namespace = policy.Namespace
-	np.ingressPolicies = make([]*gressPolicy, 0)
-	np.egressPolicies = make([]*gressPolicy, 0)
-	np.podHandlerList = make([]*factory.Handler, 0)
-	np.nsHandlerList = make([]*factory.Handler, 0)
-	np.localPods = make(map[string]bool)
+	np := NewNamespacePolicy(policy)
 
 	// Go through each ingress rule.  For each ingress rule, create an
 	// addressSet for the peer pods.

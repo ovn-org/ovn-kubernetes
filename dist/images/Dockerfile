@@ -24,7 +24,7 @@ COPY kubernetes.repo /etc/yum.repos.d/kubernetes.repo
 RUN INSTALL_PKGS=" \
 	PyYAML bind-utils procps-ng openssl numactl-libs firewalld-filesystem \
 	libpcap kubectl \
-	iptables iproute strace socat \
+	iproute strace socat \
 	unbound-libs \
         " && \
 	yum install -y --setopt=tsflags=nodocs --setopt=skip_missing_names_on_install=False $INSTALL_PKGS
@@ -68,6 +68,13 @@ COPY ovn_k8s.conf /etc/openvswitch/ovn_k8s.conf
 # copy git commit number into image
 COPY git_info /root
 
+# iptables wrappers
+COPY ./iptables-scripts/iptables /usr/sbin/
+COPY ./iptables-scripts/iptables-save /usr/sbin/
+COPY ./iptables-scripts/iptables-restore /usr/sbin/
+COPY ./iptables-scripts/ip6tables /usr/sbin/
+COPY ./iptables-scripts/ip6tables-save /usr/sbin/
+COPY ./iptables-scripts/ip6tables-restore /usr/sbin/
 
 LABEL io.k8s.display-name="ovn kubernetes" \
       io.k8s.description="This is a component of OpenShift Container Platform that provides an overlay network using ovn." \

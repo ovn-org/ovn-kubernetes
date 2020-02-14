@@ -3,11 +3,13 @@ package cni
 import (
 	"encoding/json"
 	"fmt"
+	"net/http"
 	"time"
 
 	"github.com/sirupsen/logrus"
 
 	"github.com/containernetworking/cni/pkg/types/current"
+	"k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/api/resource"
 	"k8s.io/apimachinery/pkg/util/wait"
 
@@ -57,16 +59,25 @@ func extractPodBandwidthResources(podAnnotations map[string]string) (int64, int6
 	return ingress, egress, nil
 }
 
+func isNotFoundError(err error) bool {
+	statusErr, ok := err.(*errors.StatusError)
+	return ok && statusErr.Status().Code == http.StatusNotFound
+}
+
+func podDescription(pr *PodRequest) string {
+	return fmt.Sprintf("[%s/%s]", pr.PodNamespace, pr.PodName)
+}
+
 func (pr *PodRequest) cmdAdd() ([]byte, error) {
 	namespace := pr.PodNamespace
 	podName := pr.PodName
 	if namespace == "" || podName == "" {
-		return nil, fmt.Errorf("required CNI variable missing (namespace: %q, name %q)", namespace, podName)
+		return nil, fmt.Errorf("required CNI variable missing")
 	}
 
 	clientset, err := util.NewClientset(&config.Kubernetes)
 	if err != nil {
-		return nil, fmt.Errorf("Could not create kubernetes clientset: %v", err)
+		return nil, fmt.Errorf("could not create kubernetes clientset: %v", err)
 	}
 	kubecli := &kube.Kube{KClient: clientset}
 
@@ -77,13 +88,14 @@ func (pr *PodRequest) cmdAdd() ([]byte, error) {
 	if err = wait.ExponentialBackoff(annotationBackoff, func() (bool, error) {
 		annotations, err = kubecli.GetAnnotationsOnPod(namespace, podName)
 		if err != nil {
-			// TODO: check if err is non recoverable
+			if isNotFoundError(err) {
+				// Pod not found; don't bother waiting longer
+				return false, err
+			}
 			logrus.Warningf("error getting pod annotations: %v", err)
 			return false, nil
 		}
 		if _, ok := annotations[util.OvnPodAnnotationName]; ok {
-			return true, nil
-		} else if _, ok := annotations[util.OvnPodAnnotationLegacyName]; ok {
 			return true, nil
 		}
 		return false, nil
@@ -136,7 +148,8 @@ func (pr *PodRequest) cmdDel() ([]byte, error) {
 // Argument '*PodRequest' encapsulates all the necessary information
 // Return value is the actual bytes to be sent back without further processing.
 func HandleCNIRequest(request *PodRequest) ([]byte, error) {
-	logrus.Infof("[%s/%s] dispatching pod network request %v", request.PodNamespace, request.PodName, request)
+	pd := podDescription(request)
+	logrus.Infof("%s dispatching pod network request %v", pd, request)
 	var result []byte
 	var err error
 	switch request.Command {
@@ -146,15 +159,19 @@ func HandleCNIRequest(request *PodRequest) ([]byte, error) {
 		result, err = request.cmdDel()
 	default:
 	}
-	logrus.Infof("[%s/%s] CNI request %v, result %q, err %v", request.PodNamespace, request.PodName, request, string(result), err)
-	return result, err
+	logrus.Infof("%s CNI request %v, result %q, err %v", pd, request, string(result), err)
+	if err != nil {
+		// Prefix errors with pod info for easier failure debugging
+		return nil, fmt.Errorf("%s %v", pd, err)
+	}
+	return result, nil
 }
 
 // getCNIResult get result from pod interface info.
 func (pr *PodRequest) getCNIResult(podInterfaceInfo *PodInterfaceInfo) (*current.Result, error) {
 	interfacesArray, err := pr.ConfigureInterface(pr.PodNamespace, pr.PodName, podInterfaceInfo)
 	if err != nil {
-		return nil, fmt.Errorf("Failed to configure interface in pod: %v", err)
+		return nil, fmt.Errorf("failed to configure pod interface: %v", err)
 	}
 
 	// Build the result structure to pass back to the runtime

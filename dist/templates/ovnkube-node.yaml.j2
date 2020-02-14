@@ -169,8 +169,15 @@ spec:
           runAsUser: 0
           capabilities:
             add: ["NET_ADMIN", "SYS_ADMIN", "SYS_PTRACE"]
+          {% if kind is defined and kind -%}
+          privileged: true
+          {% endif %}
 
         volumeMounts:
+        # for the iptables wrapper
+        - mountPath: /host
+          name: host-slash
+          readOnly: true
         - mountPath: /var/run/dbus/
           name: host-var-run-dbus
           readOnly: true
@@ -188,6 +195,11 @@ spec:
           name: host-opt-cni-bin
         - mountPath: /etc/cni/net.d
           name: host-etc-cni-netd
+        {% if kind is defined and kind -%}
+        - mountPath: /var/run/netns
+          name: host-netns
+          mountPropagation: Bidirectional
+        {% endif %}
 
         resources:
           requests:
@@ -277,8 +289,17 @@ spec:
       - name: host-etc-cni-netd
         hostPath:
           path: /etc/cni/net.d
+      - name: host-slash
+        hostPath:
+          path: /
       - name: host-config-openvswitch
         hostPath:
           path: /etc/origin/openvswitch
+      {% if kind is defined and kind -%}
+      - name: host-netns
+        hostPath:
+          path: /var/run/netns
+      {% endif %}
+
       tolerations:
       - operator: "Exists"

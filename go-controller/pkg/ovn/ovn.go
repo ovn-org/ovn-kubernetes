@@ -42,11 +42,11 @@ type Controller struct {
 	watchFactory *factory.WatchFactory
 
 	masterSubnetAllocator *allocator.SubnetAllocator
+	joinSubnetAllocator   *allocator.SubnetAllocator
 
 	TCPLoadBalancerUUID string
 	UDPLoadBalancerUUID string
 
-	gatewayCache map[string]string
 	// For TCP and UDP type traffic, cache OVN load-balancers used for the
 	// cluster's east-west traffic.
 	loadbalancerClusterCache map[string]string
@@ -56,8 +56,8 @@ type Controller struct {
 	loadbalancerGWCache map[string]string
 	defGatewayRouter    string
 
-	// A cache of all logical switches seen by the watcher
-	logicalSwitchCache map[string]bool
+	// A cache of all logical switches seen by the watcher and their subnets
+	logicalSwitchCache map[string]*net.IPNet
 
 	// A cache of all logical ports seen by the watcher and
 	// its corresponding logical switch
@@ -96,8 +96,7 @@ type Controller struct {
 	// A mutex for lspIngressDenyCache and lspEgressDenyCache
 	lspMutex *sync.Mutex
 
-	// A mutex for gatewayCache and logicalSwitchCache which holds
-	// logicalSwitch information
+	// A mutex for logicalSwitchCache which holds logicalSwitch information
 	lsMutex *sync.Mutex
 
 	// Per namespace multicast enabled?
@@ -133,7 +132,8 @@ func NewOvnController(kubeClient kubernetes.Interface, wf *factory.WatchFactory,
 		kube:                        &kube.Kube{KClient: kubeClient},
 		watchFactory:                wf,
 		masterSubnetAllocator:       allocator.NewSubnetAllocator(),
-		logicalSwitchCache:          make(map[string]bool),
+		logicalSwitchCache:          make(map[string]*net.IPNet),
+		joinSubnetAllocator:         allocator.NewSubnetAllocator(),
 		logicalPortCache:            make(map[string]string),
 		logicalPortUUIDCache:        make(map[string]string),
 		namespaceAddressSet:         make(map[string]map[string]string),
@@ -144,7 +144,6 @@ func NewOvnController(kubeClient kubernetes.Interface, wf *factory.WatchFactory,
 		lspEgressDenyCache:          make(map[string]int),
 		lspMutex:                    &sync.Mutex{},
 		lsMutex:                     &sync.Mutex{},
-		gatewayCache:                make(map[string]string),
 		loadbalancerClusterCache:    make(map[string]string),
 		loadbalancerGWCache:         make(map[string]string),
 		multicastEnabled:            make(map[string]bool),
@@ -506,7 +505,7 @@ func (oc *Controller) syncNodeGateway(node *kapi.Node, subnet *net.IPNet) error 
 // back the appropriate handler logic
 func (oc *Controller) WatchNodes(nodeSelector *metav1.LabelSelector) error {
 	var gatewaysFailed sync.Map
-	macAddressFailed := make(map[string]bool)
+	var mgmtPortFailed sync.Map
 	_, err := oc.watchFactory.AddFilteredNodeHandler(nodeSelector, cache.ResourceEventHandlerFuncs{
 		AddFunc: func(obj interface{}) {
 			node := obj.(*kapi.Node)
@@ -519,8 +518,8 @@ func (oc *Controller) WatchNodes(nodeSelector *metav1.LabelSelector) error {
 
 			err = oc.syncNodeManagementPort(node, hostSubnet)
 			if err != nil {
-				macAddressFailed[node.Name] = true
-				logrus.Errorf("error creating Node Management Port for node %s: %v", node.Name, err)
+				logrus.Errorf("error creating management port for node %s: %v", node.Name, err)
+				mgmtPortFailed.Store(node.Name, true)
 			}
 
 			if err := oc.syncNodeGateway(node, hostSubnet); err != nil {
@@ -532,19 +531,21 @@ func (oc *Controller) WatchNodes(nodeSelector *metav1.LabelSelector) error {
 			oldNode := old.(*kapi.Node)
 			node := new.(*kapi.Node)
 			logrus.Debugf("Updated event for Node %q", node.Name)
-			if macAddressFailed[node.Name] || macAddressChanged(oldNode, node) {
+
+			_, failed := mgmtPortFailed.Load(node.Name)
+			if failed || macAddressChanged(oldNode, node) {
 				err := oc.syncNodeManagementPort(node, nil)
 				if err != nil {
-					macAddressFailed[node.Name] = true
-					logrus.Errorf("error update Node Management Port for node %s: %v", node.Name, err)
+					logrus.Errorf("error updating management port for node %s: %v", node.Name, err)
+					mgmtPortFailed.Store(node.Name, true)
 				} else {
-					delete(macAddressFailed, node.Name)
+					mgmtPortFailed.Delete(node.Name)
 				}
 			}
 
 			oc.clearInitialNodeNetworkUnavailableCondition(oldNode, node)
 
-			_, failed := gatewaysFailed.Load(node.Name)
+			_, failed = gatewaysFailed.Load(node.Name)
 			if failed || gatewayChanged(oldNode, node) {
 				err := oc.syncNodeGateway(node, nil)
 				if err != nil {
@@ -561,14 +562,15 @@ func (oc *Controller) WatchNodes(nodeSelector *metav1.LabelSelector) error {
 				"various caches", node.Name)
 
 			nodeSubnet, _ := ParseNodeHostSubnet(node)
-			err := oc.deleteNode(node.Name, nodeSubnet)
+			joinSubnet, _ := parseNodeJoinSubnet(node)
+			err := oc.deleteNode(node.Name, nodeSubnet, joinSubnet)
 			if err != nil {
 				logrus.Error(err)
 			}
 			oc.lsMutex.Lock()
-			delete(oc.gatewayCache, node.Name)
 			delete(oc.logicalSwitchCache, node.Name)
 			oc.lsMutex.Unlock()
+			mgmtPortFailed.Delete(node.Name)
 			gatewaysFailed.Delete(node.Name)
 			if oc.defGatewayRouter == "GR_"+node.Name {
 				delete(oc.loadbalancerGWCache, TCP)
