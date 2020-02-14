@@ -25,6 +25,9 @@ RUN INSTALL_PKGS=" \
 	dnf install --refresh -y --setopt=tsflags=nodocs $INSTALL_PKGS && \
 	dnf clean all && rm -rf /var/cache/dnf/*
 
+# REMOVE ME when ovn is fixed
+RUN dnf -y downgrade ovn
+
 RUN mkdir -p /var/run/openvswitch && \
     mkdir -p /usr/libexec/cni/
 
