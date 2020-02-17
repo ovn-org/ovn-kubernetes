@@ -246,7 +246,7 @@ func addDefaultConntrackRules(nodeName, gwBridge, gwIntf string) error {
 }
 
 func initSharedGateway(nodeName string, subnet, gwNextHop, gwIntf string,
-	wf *factory.WatchFactory) (map[string]map[string]string, postReadyFn, error) {
+	wf *factory.WatchFactory) (map[string]map[string]string, postWaitFunc, error) {
 	var bridgeName string
 	var uplinkName string
 	var brCreated bool

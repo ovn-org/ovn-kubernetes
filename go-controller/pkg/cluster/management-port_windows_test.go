@@ -51,6 +51,10 @@ var _ = Describe("Management Port Operations", func() {
 	})
 
 	It("sets up the management port", func() {
+		const (
+			clusterIPNet string = "10.1.0.0"
+			clusterCIDR  string = clusterIPNet + "/16"
+		)
 		app.Action = func(ctx *cli.Context) error {
 			const (
 				nodeName      string = "node1"
@@ -59,8 +63,6 @@ var _ = Describe("Management Port Operations", func() {
 				mgtPort       string = "k8s-" + nodeName
 				mgtPortIP     string = "10.1.1.2"
 				mgtPortPrefix string = "24"
-				clusterIPNet  string = "10.1.0.0"
-				clusterCIDR   string = clusterIPNet + "/16"
 				serviceIPNet  string = "172.16.1.0"
 				mtu           string = "1400"
 				gwIP          string = "10.1.1.1"
@@ -103,6 +105,14 @@ var _ = Describe("Management Port Operations", func() {
 				"route print -4 " + serviceIPNet,
 				"route -p add " + serviceIPNet + " mask 255.255.0.0 " + gwIP + " METRIC 2 IF " + ifindex,
 			})
+			fexec.AddFakeCmd(&ovntest.ExpectedCmd{
+				Cmd:    "ovs-vsctl --timeout=15 --if-exists get interface k8s-node1 ofport",
+				Output: "1",
+			})
+			fexec.AddFakeCmd(&ovntest.ExpectedCmd{
+				Cmd:    "ovs-ofctl --no-stats --no-names dump-flows br-int table=65,out_port=1",
+				Output: " table=65, priority=100,reg15=0x2,metadata=0x2 actions=output:1",
+			})
 
 			err := util.SetExec(fexec)
 			Expect(err).NotTo(HaveOccurred())
@@ -110,8 +120,17 @@ var _ = Describe("Management Port Operations", func() {
 			_, err = config.InitConfig(ctx, fexec, nil)
 			Expect(err).NotTo(HaveOccurred())
 
-			_, err = CreateManagementPort(nodeName, nodeSubnet, []string{clusterCIDR})
+			nodeAnnotator := kube.NewNodeAnnotator(&kube.Kube{fakeClient}, &existingNode)
+			wg := &sync.WaitGroup{}
+			waitErrors := make(chan error)
+
+			err = createManagementPort(nodeName, nodeSubnet, nodeAnnotator, wg, waitErrors)
 			Expect(err).NotTo(HaveOccurred())
+
+			err = nodeAnnotator.Run()
+			Expect(err).NotTo(HaveOccurred())
+			wg.Wait()
+			close(waitErrors)
 
 			Expect(fexec.CalledMatchesExpected()).To(BeTrue(), fexec.ErrorDesc)
 			return nil
