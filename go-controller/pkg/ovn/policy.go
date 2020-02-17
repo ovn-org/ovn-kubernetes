@@ -881,6 +881,16 @@ func (oc *Controller) deleteNetworkPolicyPortGroup(
 	// Mark the policy as deleted.
 	np.deleted = true
 
+	// We should now stop all the handlers go routines.
+	oc.shutdownHandlers(np)
+
+	for logicalPort := range np.localPods {
+		oc.localPodDelDefaultDeny(policy, logicalPort)
+	}
+
+	// Delete the port group
+	deletePortGroup(np.portGroupName)
+
 	// Go through each ingress rule.  For each ingress rule, delete the
 	// addressSet for the local peer pods.
 	for i := range np.ingressPolicies {
@@ -897,16 +907,6 @@ func (oc *Controller) deleteNetworkPolicyPortGroup(
 		hashedAddressSet := hashedAddressSet(localPeerPods)
 		deleteAddressSet(hashedAddressSet)
 	}
-
-	// We should now stop all the handlers go routines.
-	oc.shutdownHandlers(np)
-
-	for logicalPort := range np.localPods {
-		oc.localPodDelDefaultDeny(policy, logicalPort)
-	}
-
-	// Delete the port group
-	deletePortGroup(np.portGroupName)
 
 	oc.namespacePolicies[policy.Namespace][policy.Name] = nil
 }
