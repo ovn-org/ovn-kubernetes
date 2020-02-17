@@ -960,15 +960,6 @@ func buildDefaultConfig(cli, file *config) error {
 	return nil
 }
 
-// OtherConfigSubnet returns "other-config:subnet" for IPv4 clusters, and
-// "other-config:ipv6_prefix" for IPv6 clusters
-func OtherConfigSubnet() string {
-	if IPv6Mode {
-		return "other-config:ipv6_prefix"
-	}
-	return "other-config:subnet"
-}
-
 // getConfigFilePath returns config file path and 'true' if the config file is
 // the fallback path (eg not given by the user), 'false' if given explicitly
 // by the user
