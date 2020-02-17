@@ -18,6 +18,7 @@ import (
 	"k8s.io/client-go/kubernetes/fake"
 
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/kube"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn"
 	ovntest "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/testing"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
@@ -60,6 +61,8 @@ var _ = Describe("Management Port Operations", func() {
 	})
 
 	It("sets up the management port", func() {
+		const clusterCIDR string = "10.1.0.0/16"
+
 		app.Action = func(ctx *cli.Context) error {
 			const (
 				nodeName      string = "node1"
@@ -69,8 +72,6 @@ var _ = Describe("Management Port Operations", func() {
 				mgtPortIP     string = "10.1.1.2"
 				mgtPortPrefix string = "24"
 				mgtPortCIDR   string = mgtPortIP + "/" + mgtPortPrefix
-				clusterIPNet  string = "10.1.0.0"
-				clusterCIDR   string = clusterIPNet + "/16"
 				serviceIPNet  string = "172.16.1.0"
 				serviceCIDR   string = serviceIPNet + "/24"
 				mtu           string = "1400"
@@ -105,8 +106,12 @@ var _ = Describe("Management Port Operations", func() {
 				"ip neigh add " + gwIP + " dev " + mgtPort + " lladdr " + lrpMAC,
 			})
 			fexec.AddFakeCmd(&ovntest.ExpectedCmd{
-				Cmd:    "ovn-nbctl --timeout=15 get logical_switch_port k8s-" + nodeName + " dynamic_addresses addresses",
-				Output: `"` + mgtPortMAC + " " + mgtPortIP + `"` + "\n" + "[]",
+				Cmd:    "ovs-vsctl --timeout=15 --if-exists get interface k8s-node1 ofport",
+				Output: "1",
+			})
+			fexec.AddFakeCmd(&ovntest.ExpectedCmd{
+				Cmd:    "ovs-ofctl --no-stats --no-names dump-flows br-int table=65,out_port=1",
+				Output: " table=65, priority=100,reg15=0x2,metadata=0x2 actions=output:1",
 			})
 
 			err := util.SetExec(fexec)
@@ -123,8 +128,7 @@ var _ = Describe("Management Port Operations", func() {
 			existingNode := v1.Node{ObjectMeta: metav1.ObjectMeta{
 				Name: nodeName,
 				Annotations: map[string]string{
-					ovn.OvnNodeSubnets:                  nodeSubnet,
-					ovn.OvnNodeManagementPortMacAddress: mgtPortMAC,
+					ovn.OvnNodeSubnets: nodeSubnet,
 				},
 			}}
 			fakeClient := fake.NewSimpleClientset(&v1.NodeList{
@@ -134,16 +138,17 @@ var _ = Describe("Management Port Operations", func() {
 			_, err = config.InitConfig(ctx, fexec, nil)
 			Expect(err).NotTo(HaveOccurred())
 
+			nodeAnnotator := kube.NewNodeAnnotator(&kube.Kube{fakeClient}, &existingNode)
+			waiter := newStartupWaiter(nodeName)
+
 			_, nodeSubnetCIDR, _ := net.ParseCIDR(nodeSubnet)
-			macAddress, err := CreateManagementPort(nodeName, nodeSubnetCIDR, []string{clusterCIDR})
+			err = createManagementPort(nodeName, nodeSubnetCIDR, nodeAnnotator, waiter)
 			Expect(err).NotTo(HaveOccurred())
-			i := 0
-			for k, v := range macAddress {
-				Expect(k).To(Equal(ovn.OvnNodeManagementPortMacAddress))
-				Expect(v).To(Equal(mgtPortMAC))
-				i++
-			}
-			Expect(i).To(Equal(1))
+
+			err = nodeAnnotator.Run()
+			Expect(err).NotTo(HaveOccurred())
+			err = waiter.Wait()
+			Expect(err).NotTo(HaveOccurred())
 
 			expectedTables := map[string]util.FakeTable{
 				"filter": {},
@@ -163,10 +168,14 @@ var _ = Describe("Management Port Operations", func() {
 			Expect(err).NotTo(HaveOccurred())
 			Expect(updatedNode.Annotations).To(HaveKeyWithValue(ovn.OvnNodeManagementPortMacAddress, mgtPortMAC))
 
+			Expect(fexec.CalledMatchesExpected()).To(BeTrue(), fexec.ErrorDesc)
 			return nil
 		}
 
-		err := app.Run([]string{app.Name})
+		err := app.Run([]string{
+			app.Name,
+			"--cluster-subnets=" + clusterCIDR,
+		})
 		Expect(err).NotTo(HaveOccurred())
 	})
 })

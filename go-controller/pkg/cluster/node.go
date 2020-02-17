@@ -10,13 +10,13 @@ import (
 	"reflect"
 	"strconv"
 	"strings"
-	"sync"
 	"time"
 
 	"k8s.io/klog"
 
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/cni"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/kube"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
 
@@ -24,8 +24,6 @@ import (
 	"k8s.io/apimachinery/pkg/util/wait"
 	"k8s.io/client-go/tools/cache"
 )
-
-type postReadyFn func() error
 
 func isOVNControllerReady(name string) (bool, error) {
 	runDir := util.GetOvnRunDir()
@@ -94,9 +92,7 @@ func (cluster *OvnClusterController) StartClusterNode(name string) error {
 	var err error
 	var node *kapi.Node
 	var subnet *net.IPNet
-	var clusterSubnets []string
 	var cidr string
-	var wg sync.WaitGroup
 
 	// Setting debug log level during node bring up to expose bring up process.
 	// Log level is returned to configured value when bring up is complete.
@@ -133,12 +129,6 @@ func (cluster *OvnClusterController) StartClusterNode(name string) error {
 		return err
 	}
 
-	for _, clusterSubnet := range config.Default.ClusterSubnets {
-		clusterSubnets = append(clusterSubnets, clusterSubnet.CIDR.String())
-	}
-
-	messages := make(chan error)
-
 	// First wait for the node logical switch to be created by the Master, timeout is 300s.
 	err = wait.PollImmediate(500*time.Millisecond, 300*time.Second, func() (bool, error) {
 		if node, err = cluster.Kube.GetNode(name); err != nil {
@@ -167,72 +157,30 @@ func (cluster *OvnClusterController) StartClusterNode(name string) error {
 		return err
 	}
 
-	type readyFunc func(string, string) (bool, error)
-	var readyFuncs []readyFunc
+	nodeAnnotator := kube.NewNodeAnnotator(cluster.Kube, node)
+	waiter := newStartupWaiter(node.Name)
 
-	// get gateway annotations
-	gwAnnotations, postReady, err := cluster.initGateway(node.Name, subnet.String())
-	if err != nil {
+	// Initialize gateway resources on the node
+	if err := cluster.initGateway(node.Name, subnet.String(), nodeAnnotator, waiter); err != nil {
 		return err
 	}
-	readyFuncs = append(readyFuncs, GatewayReady)
 
-	// Get management port annotations
-	mgmtPortAnnotations, err := CreateManagementPort(node.Name, subnet, clusterSubnets)
-	if err != nil {
+	// Initialize management port resources on the node
+	if err := createManagementPort(node.Name, subnet, nodeAnnotator, waiter); err != nil {
 		return err
 	}
-	readyFuncs = append(readyFuncs, ManagementPortReady)
 
-	// Combine mgmtPortAnnotations and gwAnnotations into nodeAnnotations
-	nodeAnnotations := make(map[string]interface{})
-	for k, v := range mgmtPortAnnotations {
-		nodeAnnotations[k] = v
-	}
-	for k, v := range gwAnnotations {
-		nodeAnnotations[k] = v
+	if err := nodeAnnotator.Run(); err != nil {
+		return fmt.Errorf("Failed to set node %s annotations: %v", node.Name, err)
 	}
 
-	wg.Add(len(readyFuncs))
-
-	// Set node annotations
-	err = cluster.Kube.SetAnnotationsOnNode(node, nodeAnnotations)
-	if err != nil {
-		return fmt.Errorf("Failed to set node %s annotation: %v", node.Name, nodeAnnotations)
+	// Wait for management port and gateway resources to be created by the master
+	klog.Infof("Waiting for gateway and management port readiness...")
+	start := time.Now()
+	if err := waiter.Wait(); err != nil {
+		return err
 	}
-
-	portName := "k8s-" + node.Name
-
-	klog.Infof("Waiting for GatewayReady and ManagementPortReady on node %s", node.Name)
-	// Wait for the portMac to be created
-	for _, f := range readyFuncs {
-		go func(rf readyFunc) {
-			defer wg.Done()
-			err := wait.PollImmediate(500*time.Millisecond, 300*time.Second, func() (bool, error) {
-				return rf(node.Name, portName)
-			})
-			messages <- err
-		}(f)
-	}
-	go func() {
-		wg.Wait()
-		close(messages)
-	}()
-
-	for i := range messages {
-		if i != nil {
-			return fmt.Errorf("Timeout error while obtaining addresses for %s (%v)", portName, i)
-		}
-	}
-
-	klog.Infof("Gateway and ManagementPort are Ready")
-
-	if postReady != nil {
-		err = postReady()
-		if err != nil {
-			return err
-		}
-	}
+	klog.Infof("Gateway and management port readiness took %v", time.Since(start))
 
 	if err := level.Set(lastLevel); err != nil {
 		klog.Errorf("reset of initial klog \"loglevel\" failed, err: %v", err)

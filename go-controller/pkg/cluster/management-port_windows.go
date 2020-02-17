@@ -9,25 +9,18 @@ import (
 	"strings"
 
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
-	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
 	"k8s.io/klog"
 )
 
-// CreateManagementPort creates a management port attached to the node switch
+// createPlatformManagementPort creates a management port attached to the node switch
 // that lets the node access its pods via their private IP address. This is used
 // for health checking and other management tasks.
-func CreateManagementPort(nodeName string, localSubnet *net.IPNet, clusterSubnet []string) (map[string]string, error) {
-	interfaceName, interfaceIP, macAddress, routerIP, _, err :=
-		createManagementPortGeneric(nodeName, localSubnet)
-	if err != nil {
-		return nil, err
-	}
-
+func createPlatformManagementPort(interfaceName, interfaceIP, routerIP, routerMAC string) error {
 	// Up the interface.
-	_, _, err = util.RunPowershell("Enable-NetAdapter", "-IncludeHidden", interfaceName)
+	_, _, err := util.RunPowershell("Enable-NetAdapter", "-IncludeHidden", interfaceName)
 	if err != nil {
-		return nil, err
+		return err
 	}
 
 	//check if interface already exists
@@ -38,14 +31,14 @@ func CreateManagementPort(nodeName string, localSubnet *net.IPNet, clusterSubnet
 		klog.V(5).Infof("Interface %s exists, removing.", interfaceName)
 		_, _, err = util.RunPowershell("Remove-NetIPAddress", ifAlias, "-Confirm:$false")
 		if err != nil {
-			return nil, err
+			return err
 		}
 	}
 
 	// Assign IP address to the internal interface.
 	portIP, interfaceIPNet, err := net.ParseCIDR(interfaceIP)
 	if err != nil {
-		return nil, fmt.Errorf("Failed to parse interfaceIP %v : %v", interfaceIP, err)
+		return fmt.Errorf("Failed to parse interfaceIP %v : %v", interfaceIP, err)
 	}
 	portPrefix, _ := interfaceIPNet.Mask.Size()
 	_, _, err = util.RunPowershell("New-NetIPAddress",
@@ -53,7 +46,7 @@ func CreateManagementPort(nodeName string, localSubnet *net.IPNet, clusterSubnet
 		fmt.Sprintf("-PrefixLength %d", portPrefix),
 		ifAlias)
 	if err != nil {
-		return nil, err
+		return err
 	}
 
 	// Set MTU for the interface
@@ -61,7 +54,7 @@ func CreateManagementPort(nodeName string, localSubnet *net.IPNet, clusterSubnet
 		interfaceName, fmt.Sprintf("mtu=%d", config.Default.MTU),
 		"store=persistent")
 	if err != nil {
-		return nil, err
+		return err
 	}
 
 	// Retrieve the interface index
@@ -69,46 +62,40 @@ func CreateManagementPort(nodeName string, localSubnet *net.IPNet, clusterSubnet
 		"{", "$_.Name", "-Match", fmt.Sprintf("\"%s\"", interfaceName), "}).ifIndex")
 	if err != nil {
 		klog.Errorf("Failed to fetch interface index, stderr: %q, error: %v", stderr, err)
-		return nil, err
+		return err
 	}
 	if _, err = strconv.Atoi(stdout); err != nil {
 		klog.Errorf("Failed to parse interface index %q: %v", stdout, err)
-		return nil, err
+		return err
 	}
 	interfaceIndex := stdout
 
-	for _, subnet := range clusterSubnet {
-		var subnetIP net.IP
-		var subnetIPNet *net.IPNet
-		subnetIP, subnetIPNet, err = net.ParseCIDR(subnet)
-		if err != nil {
-			return nil, fmt.Errorf("failed to parse clusterSubnet %v : %v", subnet, err)
-		}
+	for _, subnet := range config.Default.ClusterSubnets {
 		// Checking if the route already exists, in which case it will not be created again
-		stdout, stderr, err = util.RunRoute("print", "-4", subnetIP.String())
+		stdout, stderr, err = util.RunRoute("print", "-4", subnet.CIDR.IP.String())
 		if err != nil {
 			klog.V(5).Infof("Failed to run route print, stderr: %q, error: %v", stderr, err)
 		}
 
-		if strings.Contains(stdout, subnetIP.String()) {
+		if strings.Contains(stdout, subnet.CIDR.IP.String()) {
 			klog.V(5).Infof("Route was found, skipping route add")
 		} else {
 			// Windows route command requires the mask to be specified in the IP format
-			subnetMask := net.IP(subnetIPNet.Mask).String()
+			subnetMask := net.IP(subnet.CIDR.Mask).String()
 			// Create a route for the entire subnet.
 			_, stderr, err = util.RunRoute("-p", "add",
-				subnetIP.String(), "mask", subnetMask,
+				subnet.CIDR.IP.String(), "mask", subnetMask,
 				routerIP, "METRIC", "2", "IF", interfaceIndex)
 			if err != nil {
 				klog.Errorf("failed to run route add, stderr: %q, error: %v", stderr, err)
-				return nil, err
+				return err
 			}
 		}
 	}
 
 	clusterServiceIP, clusterServiceIPNet, err := net.ParseCIDR(config.Kubernetes.ServiceCIDR)
 	if err != nil {
-		return nil, fmt.Errorf("Failed to parse clusterServicesSubnet %v : %v", config.Kubernetes.ServiceCIDR, err)
+		return fmt.Errorf("failed to parse ServiceCIDR %v : %v", config.Kubernetes.ServiceCIDR, err)
 	}
 	// Checking if the route already exists, in which case it will not be created again
 	stdout, stderr, err = util.RunRoute("print", "-4", clusterServiceIP.String())
@@ -127,11 +114,11 @@ func CreateManagementPort(nodeName string, localSubnet *net.IPNet, clusterSubnet
 			routerIP, "METRIC", "2", "IF", interfaceIndex)
 		if err != nil {
 			klog.Errorf("failed to run route add, stderr: %q, error: %v", stderr, err)
-			return nil, err
+			return err
 		}
 	}
 
-	return map[string]string{ovn.OvnNodeManagementPortMacAddress: macAddress}, nil
+	return nil
 }
 
 func DelMgtPortIptRules(nodeName string) {
