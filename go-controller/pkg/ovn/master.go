@@ -50,7 +50,12 @@ const (
 	OvnNodePortEnable = "node-port-enable"
 	// OvnDefaultNetworkGateway captures L3 gateway config for default OVN network interface
 	OvnDefaultNetworkGateway = "default"
+
+	// Number of reserved IPs per subnet in OVN on each node.
+	OvnNumReservedIPs int = 3
 )
+
+var OvnClusterSubnetUsableIPs int = 0
 
 // StartClusterMaster runs a subnet IPAM and a controller that watches arrival/departure
 // of nodes in the cluster
@@ -84,12 +89,19 @@ func (oc *Controller) StartClusterMaster(masterNodeName string) error {
 			return err
 		}
 	}
+
+	var subnetUsableIPsSet = false
 	for _, node := range existingNodes.Items {
 		hostsubnet, _ := parseNodeHostSubnet(&node)
 		if hostsubnet != nil {
 			err := oc.masterSubnetAllocator.MarkAllocatedNetwork(hostsubnet.String())
 			if err != nil {
 				utilruntime.HandleError(err)
+			}
+
+			if !subnetUsableIPsSet {
+				setClusterSubnetUsableIPs(hostsubnet)
+				subnetUsableIPsSet = true
 			}
 		}
 		joinsubnet, _ := parseNodeJoinSubnet(&node)
@@ -637,10 +649,10 @@ func (oc *Controller) ensureNodeLogicalNetwork(nodeName string, hostsubnet *net.
 	// Add the node to the logical switch cache
 	oc.lsMutex.Lock()
 	defer oc.lsMutex.Unlock()
-	if existing, ok := oc.logicalSwitchCache[nodeName]; ok && !reflect.DeepEqual(existing, hostsubnet) {
-		klog.Warningf("Node %q logical switch already in cache with subnet %v; replacing with %v", nodeName, existing, hostsubnet)
+	if existing, ok := oc.logicalSwitchCache[nodeName]; ok && !reflect.DeepEqual(existing.hostSubnet, hostsubnet) {
+		klog.Warningf("Node %q logical switch already in cache with subnet %v; replacing with %v", nodeName, existing.hostSubnet, hostsubnet)
 	}
-	oc.logicalSwitchCache[nodeName] = hostsubnet
+	oc.logicalSwitchCache[nodeName] = logicalSwitchInfo{hostSubnet: hostsubnet, podCount: 0}
 
 	return nil
 }
@@ -908,5 +920,17 @@ func (oc *Controller) syncNodes(nodes []interface{}) {
 		if err := oc.deleteNode(nodeName, nodeSubnets.hostSubnet, nodeSubnets.joinSubnet); err != nil {
 			klog.Error(err)
 		}
+	}
+}
+
+func setClusterSubnetUsableIPs(subnet *net.IPNet) {
+	clusterSubnetPrefixLength, clusterSubnetAddressWidth := subnet.Mask.Size()
+
+	OvnClusterSubnetUsableIPs = 1<<uint16(clusterSubnetAddressWidth-clusterSubnetPrefixLength) - 1
+
+	if OvnClusterSubnetUsableIPs > OvnNumReservedIPs {
+		OvnClusterSubnetUsableIPs = OvnClusterSubnetUsableIPs - OvnNumReservedIPs
+	} else {
+		OvnClusterSubnetUsableIPs = 0
 	}
 }

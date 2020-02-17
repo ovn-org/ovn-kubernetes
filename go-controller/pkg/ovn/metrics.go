@@ -35,6 +35,20 @@ var metricPodCreationLatency = prometheus.NewHistogram(prometheus.HistogramOpts{
 	Buckets:   prometheus.ExponentialBuckets(.1, 2, 15),
 })
 
+// metricNodeIPPoolUtilization is the counter that keeps track of percentage of IPs available
+// per node. This percentage metric is updated everytime a new pod is allocated/deallocated.
+var metricNodeIPPoolUtilization = prometheus.NewGaugeVec(
+	prometheus.GaugeOpts{
+		Namespace: config.MetricNamespace,
+		Subsystem: MetricSubsystem,
+		Name:      "node_ip_pool_utilization",
+		Help:      "The percentage utilization of IPs available in the pool on this node",
+	},
+	[]string{
+		"node_name",
+	},
+)
+
 var registerMetricsOnce sync.Once
 var startUpdaterOnce sync.Once
 
@@ -44,6 +58,7 @@ func RegisterMetrics() {
 	registerMetricsOnce.Do(func() {
 		prometheus.MustRegister(metricE2ETimestamp)
 		prometheus.MustRegister(metricPodCreationLatency)
+		prometheus.MustRegister(metricNodeIPPoolUtilization)
 
 		prometheus.MustRegister(prometheus.NewCounterFunc(
 			prometheus.CounterOpts{
@@ -107,5 +122,13 @@ func recordPodCreated(pod *kapi.Pod) {
 		creationLatency := t.Sub(cond.LastTransitionTime.Time).Seconds()
 		metricPodCreationLatency.Observe(creationLatency)
 		return
+	}
+}
+
+func updateNodeIPPoolUtilization(usedPodCount int, nodeName string) {
+	if OvnClusterSubnetUsableIPs > 0 {
+		metricNodeIPPoolUtilization.WithLabelValues(nodeName).Set(float64(usedPodCount) / float64(OvnClusterSubnetUsableIPs))
+	} else {
+		metricNodeIPPoolUtilization.WithLabelValues(nodeName).Set(1.0)
 	}
 }

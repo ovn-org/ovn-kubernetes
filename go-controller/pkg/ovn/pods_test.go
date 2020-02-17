@@ -88,7 +88,7 @@ func (p pod) populateLogicalSwitchCache(fakeOvn *FakeOVN) {
 	defer fakeOvn.controller.lsMutex.Unlock()
 	_, hostsubnet, err := net.ParseCIDR(p.nodeSubnet)
 	Expect(err).NotTo(HaveOccurred())
-	fakeOvn.controller.logicalSwitchCache[p.nodeName] = hostsubnet
+	fakeOvn.controller.logicalSwitchCache[p.nodeName] = logicalSwitchInfo{hostsubnet, 0}
 }
 
 func (p pod) addCmds(fexec *ovntest.FakeExec, fail bool) {

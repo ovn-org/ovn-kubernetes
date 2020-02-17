@@ -36,6 +36,13 @@ type ServiceVIPKey struct {
 	protocol kapi.Protocol
 }
 
+// logicalSwitchInfo is used to save switch specific information such as subnets,
+// allocated IPs per switch etc.
+type logicalSwitchInfo struct {
+	hostSubnet *net.IPNet
+	podCount   int
+}
+
 // Controller structure is the object which holds the controls for starting
 // and reacting upon the watched resources (e.g. pods, endpoints)
 type Controller struct {
@@ -58,7 +65,7 @@ type Controller struct {
 	defGatewayRouter    string
 
 	// A cache of all logical switches seen by the watcher and their subnets
-	logicalSwitchCache map[string]*net.IPNet
+	logicalSwitchCache map[string]logicalSwitchInfo
 
 	// A cache of all logical ports known to the controller
 	logicalPortCache *portCache
@@ -126,7 +133,7 @@ func NewOvnController(kubeClient kubernetes.Interface, wf *factory.WatchFactory,
 		kube:                     &kube.Kube{KClient: kubeClient},
 		watchFactory:             wf,
 		masterSubnetAllocator:    allocator.NewSubnetAllocator(),
-		logicalSwitchCache:       make(map[string]*net.IPNet),
+		logicalSwitchCache:       make(map[string]logicalSwitchInfo),
 		joinSubnetAllocator:      allocator.NewSubnetAllocator(),
 		logicalPortCache:         newPortCache(stopChan),
 		namespaceAddressSet:      make(map[string]map[string]string),
@@ -506,7 +513,7 @@ func (oc *Controller) WatchNodes() error {
 				oc.lsMutex.Lock()
 				defer oc.lsMutex.Unlock()
 				//setting the value to nil in the cache means it was not assigned a hostSubnet by ovn-kube
-				oc.logicalSwitchCache[node.Name] = nil
+				oc.logicalSwitchCache[node.Name] = logicalSwitchInfo{nil, 0}
 				return
 			}
 

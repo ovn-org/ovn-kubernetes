@@ -141,23 +141,28 @@ func (oc *Controller) deleteLogicalPort(pod *kapi.Pod) {
 	}
 
 	oc.logicalPortCache.remove(logicalPort)
+
+	if err := oc.deleteLogicalSwitchPodCount(pod.Spec.NodeName); err != nil {
+		klog.Errorf(err.Error())
+	}
+
 }
 
-func (oc *Controller) waitForNodeLogicalSwitch(nodeName string) (*net.IPNet, error) {
+func (oc *Controller) waitForNodeLogicalSwitch(nodeName string) (*logicalSwitchInfo, error) {
 	// Wait for the node logical switch to be created by the ClusterController.
 	// The node switch will be created when the node's logical network infrastructure
 	// is created by the node watch.
-	var subnet *net.IPNet
+	var logicalSwitchInfo logicalSwitchInfo
 	if err := wait.PollImmediate(10*time.Millisecond, 30*time.Second, func() (bool, error) {
 		oc.lsMutex.Lock()
 		defer oc.lsMutex.Unlock()
 		var ok bool
-		subnet, ok = oc.logicalSwitchCache[nodeName]
+		logicalSwitchInfo, ok = oc.logicalSwitchCache[nodeName]
 		return ok, nil
 	}); err != nil {
 		return nil, fmt.Errorf("timed out waiting for logical switch %q subnet: %v", nodeName, err)
 	}
-	return subnet, nil
+	return &logicalSwitchInfo, nil
 }
 
 func getPodAddresses(portName string) (net.HardwareAddr, net.IP, bool, error) {
@@ -235,7 +240,7 @@ func (oc *Controller) addLogicalPort(pod *kapi.Pod) error {
 	var err error
 
 	// If a node does node have an assigned hostsubnet don't wait for the logical switch to appear
-	if val, ok := oc.logicalSwitchCache[pod.Spec.NodeName]; ok && val == nil {
+	if val, ok := oc.logicalSwitchCache[pod.Spec.NodeName]; ok && val.hostSubnet == nil {
 		return nil
 	}
 
@@ -246,7 +251,7 @@ func (oc *Controller) addLogicalPort(pod *kapi.Pod) error {
 	}()
 
 	logicalSwitch := pod.Spec.NodeName
-	nodeSubnet, err := oc.waitForNodeLogicalSwitch(pod.Spec.NodeName)
+	logicalSwitchInfo, err := oc.waitForNodeLogicalSwitch(pod.Spec.NodeName)
 	if err != nil {
 		return err
 	}
@@ -282,7 +287,7 @@ func (oc *Controller) addLogicalPort(pod *kapi.Pod) error {
 			"--", "--if-exists", "clear", "logical_switch_port", portName, "dynamic_addresses",
 		)
 	} else {
-		gatewayCIDR, _ = util.GetNodeWellKnownAddresses(nodeSubnet)
+		gatewayCIDR, _ = util.GetNodeWellKnownAddresses(logicalSwitchInfo.hostSubnet)
 
 		addresses := "dynamic"
 		networks, err := util.GetPodNetSelAnnotation(pod, util.DefNetworkAnnotation)
@@ -315,7 +320,7 @@ func (oc *Controller) addLogicalPort(pod *kapi.Pod) error {
 		if err != nil {
 			return err
 		}
-		podCIDR = &net.IPNet{IP: podIP, Mask: nodeSubnet.Mask}
+		podCIDR = &net.IPNet{IP: podIP, Mask: logicalSwitchInfo.hostSubnet.Mask}
 	}
 
 	// UUID must be retrieved separately from the lsp-add transaction since
@@ -380,5 +385,46 @@ func (oc *Controller) addLogicalPort(pod *kapi.Pod) error {
 		recordPodCreated(pod)
 	}
 
+	if err = oc.addLogicalSwitchPodCount(logicalSwitchInfo, logicalSwitch); err != nil {
+		return fmt.Errorf("failed to update pod count for the logical switch %s for pod %s - %v",
+			logicalSwitch, pod.Name, err)
+	}
+
+	return nil
+}
+
+// addLogicalSwitchPodCount updates the per node metric for ip utilization.
+// It also increments the podCount cache for the switch given by nodeName.
+func (oc *Controller) addLogicalSwitchPodCount(lsInfo *logicalSwitchInfo, nodeName string) error {
+	if lsInfo == nil {
+		return fmt.Errorf("Invalid logical switch info while adding pod count for node %s", nodeName)
+	}
+	if nodeName == "" {
+		return fmt.Errorf("Invalid node name provided while incrementing pod count")
+	}
+	lsInfo.podCount = lsInfo.podCount + 1
+	updateNodeIPPoolUtilization(lsInfo.podCount, nodeName)
+	oc.lsMutex.Lock()
+	defer oc.lsMutex.Unlock()
+	oc.logicalSwitchCache[nodeName] = *lsInfo
+	return nil
+}
+
+// deleteLogicalSwitchPodCount updates the per node metric for ip utilization.
+// It also decrements the podCount cache for the switch given by nodeName by one.
+func (oc *Controller) deleteLogicalSwitchPodCount(nodeName string) error {
+	if nodeName == "" {
+		return fmt.Errorf("Invalid node name provided while decrementing pod count")
+	}
+	var lsInfo logicalSwitchInfo
+	var ok bool
+	oc.lsMutex.Lock()
+	defer oc.lsMutex.Unlock()
+	if lsInfo, ok = oc.logicalSwitchCache[nodeName]; !ok {
+		return fmt.Errorf("Cannot find the logical switch info for node %s", nodeName)
+	}
+	lsInfo.podCount = lsInfo.podCount - 1
+	updateNodeIPPoolUtilization(lsInfo.podCount, nodeName)
+	oc.logicalSwitchCache[nodeName] = lsInfo
 	return nil
 }
