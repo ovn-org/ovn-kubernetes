@@ -225,6 +225,12 @@ var _ = Describe("Config Operations", func() {
 	})
 
 	It("uses expected defaults", func() {
+		// Don't pick up defaults from the environment
+		os.Unsetenv("KUBECONFIG")
+		os.Unsetenv("K8S_CACERT")
+		os.Unsetenv("K8S_APISERVER")
+		os.Unsetenv("K8S_TOKEN")
+
 		app.Action = func(ctx *cli.Context) error {
 			cfgPath, err := InitConfigSa(ctx, kexec.New(), tmpDir, nil)
 			Expect(err).NotTo(HaveOccurred())
