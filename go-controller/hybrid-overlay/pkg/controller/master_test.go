@@ -113,12 +113,16 @@ var _ = Describe("Hybrid SDN Master Operations", func() {
 			updatedNode, err := fakeClient.CoreV1().Nodes().Get(nodeName, metav1.GetOptions{})
 			Expect(err).NotTo(HaveOccurred())
 			Expect(updatedNode.Annotations).To(HaveKeyWithValue(types.HybridOverlayNodeSubnet, nodeSubnet))
+			Expect(updatedNode.Annotations).NotTo(HaveKey(ovn.OvnNodeSubnets))
 
 			Expect(fexec.CalledMatchesExpected()).Should(BeTrue())
 			return nil
 		}
 
-		err := app.Run([]string{app.Name})
+		err := app.Run([]string{
+			app.Name,
+			"-no-hostsubnet-nodes=" + v1.LabelOSStable + "=windows",
+		})
 		Expect(err).NotTo(HaveOccurred())
 	})
 

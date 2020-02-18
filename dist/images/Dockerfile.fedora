@@ -25,6 +25,9 @@ RUN INSTALL_PKGS=" \
 	dnf install --refresh -y --setopt=tsflags=nodocs $INSTALL_PKGS && \
 	dnf clean all && rm -rf /var/cache/dnf/*
 
+# REMOVE ME when ovn is fixed
+RUN dnf -y downgrade ovn
+
 RUN mkdir -p /var/run/openvswitch && \
     mkdir -p /usr/libexec/cni/
 
@@ -38,15 +41,7 @@ COPY git_info /root
 # variables to direct operation and configure ovn
 COPY ovnkube.sh /root/
 COPY ovn-debug.sh /root/
-
-# iptables wrappers
-COPY ./iptables-scripts/iptables /usr/sbin/
-COPY ./iptables-scripts/iptables-save /usr/sbin/
-COPY ./iptables-scripts/iptables-restore /usr/sbin/
-COPY ./iptables-scripts/ip6tables /usr/sbin/
-COPY ./iptables-scripts/ip6tables-save /usr/sbin/
-COPY ./iptables-scripts/ip6tables-restore /usr/sbin/
-COPY ./iptables-scripts/iptables /usr/sbin/
+COPY ovndb-raft-functions /root/
 
 LABEL io.k8s.display-name="ovn-kubernetes" \
       io.k8s.description="This is a Kubernetes network plugin that provides an overlay network using OVN." \

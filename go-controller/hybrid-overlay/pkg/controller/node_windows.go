@@ -337,8 +337,11 @@ func (n *NodeController) InitSelf() {
 				logrus.Errorf("Error creating the network: no DRMAC address")
 				return
 			}
-			n.kube.SetAnnotationOnNode(n.thisNode, types.HybridOverlayDrMac, policySettings.Address)
-
+			if err := n.kube.SetAnnotationsOnNode(n.thisNode, map[string]interface{}{
+				types.HybridOverlayDrMac: policySettings.Address,
+			}); err != nil {
+				logrus.Errorf("failed to set DRMAC annotation on node: %v", err)
+			}
 			break
 		}
 	}

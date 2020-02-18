@@ -263,6 +263,11 @@ func (oc *Controller) addLogicalPort(pod *kapi.Pod) error {
 	var out, stderr string
 	var err error
 
+	// If a node does node have an assigned hostsubnet don't wait for the logical switch to appear
+	if val, ok := oc.logicalSwitchCache[pod.Spec.NodeName]; ok && val == nil {
+		return nil
+	}
+
 	// Keep track of how long syncs take.
 	start := time.Now()
 	defer func() {
@@ -341,13 +346,14 @@ func (oc *Controller) addLogicalPort(pod *kapi.Pod) error {
 			"stdout: %q, stderr: %q (%v)", portName, out, stderr, err)
 	}
 
-	routes := []util.PodRoute{}
-	var gatewayIP net.IP
-	if gatewayIPnet != nil && len(oc.hybridOverlayClusterSubnets) > 0 {
-		gatewayIP = gatewayIPnet.IP
+	routes, gatewayIP, err := getRoutesGatewayIP(pod, gatewayIPnet)
+	if err != nil {
+		return err
+	}
+	if gatewayIP != nil && len(oc.hybridOverlayClusterSubnets) > 0 {
 		// Get the 3rd address in the node's subnet; the first is taken
 		// by the k8s-cluster-router port, the second by the management port
-		second := util.NextIP(gatewayIP)
+		second := util.NextIP(gatewayIPnet.IP)
 		thirdIP := util.NextIP(second)
 		for _, subnet := range oc.hybridOverlayClusterSubnets {
 			routes = append(routes, util.PodRoute{
@@ -355,12 +361,8 @@ func (oc *Controller) addLogicalPort(pod *kapi.Pod) error {
 				NextHop: thirdIP,
 			})
 		}
-	} else {
-		routes, gatewayIP, err = getRoutesGatewayIP(pod, gatewayIPnet)
-		if err != nil {
-			return err
-		}
 	}
+
 	marshalledAnnotation, err := util.MarshalPodAnnotation(&util.PodAnnotation{
 		IP:     podCIDR,
 		MAC:    podMac,

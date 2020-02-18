@@ -6,6 +6,9 @@ if [[ "${OVNKUBE_SH_VERBOSE:-}" == "true" ]]; then
   set -x
 fi
 
+# source the functions in ovndb-raft-functions
+. /root/ovndb-raft-functions
+
 # This script is the entrypoint to the image.
 # Supports version 3 daemonsets
 #    $1 is the daemon to start.
@@ -190,19 +193,19 @@ wait_for_event () {
     shift
   fi
   while true; do
-    $1 $2
+    $@
     if [[ $? != 0 ]] ; then
       (( retries += 1 ))
       if [[ "${retries}" -gt ${attempts} ]]; then
-        echo "error: $1 $2 did not come up, exiting"
+        echo "error: $@ did not come up, exiting"
         exit 1
       fi
-      echo "info: Waiting for $1 $2 to come up, waiting ${sleeper}s ..."
+      echo "info: Waiting for $@ to come up, waiting ${sleeper}s ..."
       sleep ${sleeper}
       sleeper=5
     else
       if [[ "${retries}" != 0 ]]; then
-        echo "$1 $2 came up in ${retries} ${sleeper} sec tries"
+        echo "$@ came up in ${retries} ${sleeper} sec tries"
       fi
       break
     fi
@@ -215,13 +218,16 @@ wait_for_event () {
 ready_to_start_node () {
 
   # See if ep is available ...
-  ovn_db_host=$(kubectl --server=${K8S_APISERVER} --token=${k8s_token} --certificate-authority=${K8S_CACERT} \
-    get ep -n ${ovn_kubernetes_namespace} ovnkube-db 2>/dev/null | grep ${ovn_sb_port} | sed 's/:/ /' | awk '/ovnkube-db/{ print $2 }')
-  if [[ ${ovn_db_host} == "" ]] ; then
+  IFS=" " read -a ovn_db_hosts <<< "$(kubectl --server=${K8S_APISERVER} --token=${k8s_token} --certificate-authority=${K8S_CACERT} \
+    get ep -n ovn-kubernetes ovnkube-db -o=jsonpath='{range .subsets[0].addresses[*]}{.ip}{" "}')"
+  if [[ ${#ovn_db_hosts[@]} == 0 ]] ; then
       return 1
   fi
   get_ovn_db_vars
-  ovsdb-client list-dbs ${ovn_nbdb_test} > /dev/null 2>&1
+  # cannot use ovsdb-client in the case of raft, since it will succeed even if one of the
+  # instance of DB is up and running. HOwever, ovn-nbctl always connects to the leader in the clustered
+  # database, so use it.
+  ovn-nbctl --db=${ovn_nbdb_test} list NB_Global > /dev/null 2>&1
   if [[ $? != 0 ]] ; then
       return 1
   fi
@@ -243,9 +249,24 @@ check_ovn_daemonset_version () {
 }
 
 get_ovn_db_vars () {
-  ovn_nbdb=tcp://${ovn_db_host}:${ovn_nb_port}
-  ovn_sbdb=tcp://${ovn_db_host}:${ovn_sb_port}
-  ovn_nbdb_test=$(echo ${ovn_nbdb} | sed 's;//;;')
+  # OVN_NORTH and OVN_SOUTH override derived host
+  # Currently limited to tcp (ssl is not supported yet)
+  ovn_nbdb_str=""
+  ovn_sbdb_str=""
+  for i in ${!ovn_db_hosts[@]}; do
+    if [[ ${i} -ne 0 ]]; then
+      ovn_nbdb_str=${ovn_nbdb_str}","
+      ovn_sbdb_str=${ovn_sbdb_str}","
+    fi
+    ovn_nbdb_str=${ovn_nbdb_str}tcp://${ovn_db_hosts[${i}]}:${ovn_nb_port}
+    ovn_sbdb_str=${ovn_sbdb_str}tcp://${ovn_db_hosts[${i}]}:${ovn_sb_port}
+  done
+  ovn_nbdb=${OVN_NORTH:-$ovn_nbdb_str}
+  ovn_sbdb=${OVN_SOUTH:-$ovn_sbdb_str}
+
+  echo ovn_nbdb=$ovn_nbdb
+  echo ovn_sbdb=$ovn_sbdb
+  ovn_nbdb_test=$(echo ${ovn_nbdb} | sed 's;//;;g')
 }
 
 # OVS must be up before OVN comes up.
@@ -413,7 +434,6 @@ echo ovnkube.sh version ${ovnkube_version}
 }
 
 ovn_debug () {
-  # get ovn_db_host
   ready_to_start_node
   echo "ovn_nbdb ${ovn_nbdb}   ovn_sbdb ${ovn_sbdb}"
   echo "ovn_nbdb_test ${ovn_nbdb_test}"
@@ -443,7 +463,7 @@ ovn_debug () {
   ovs-ofctl dump-flows br-int
   echo " "
   echo "=========== ovn-sbctl show ============="
-  ovn_sbdb_test=$(echo ${ovn_sbdb} | sed 's;//;;')
+  ovn_sbdb_test=$(echo ${ovn_sbdb} | sed 's;//;;g')
   echo "=========== ovn-sbctl --db=${ovn_sbdb_test} show ============="
   ovn-sbctl --db=${ovn_sbdb_test} show
   echo " "
@@ -541,8 +561,10 @@ cleanup-ovs-server () {
 
 # set the ovnkube_db endpoint for other pods to query the OVN DB IP
 set_ovnkube_db_ep () {
+  ips=("$@")
+
+  echo "=============== setting ovnkube-db endpoints to ${ips[@]}"
   # create a new endpoint for the headless onvkube-db service without selectors
-  # using the current host has the endpoint IP. Ignore IPs in loopback range (127.0.0.0/8)
   kubectl --server=${K8S_APISERVER} --token=${k8s_token} --certificate-authority=${K8S_CACERT} apply -f - << EOF
 apiVersion: v1
 kind: Endpoints
@@ -551,7 +573,7 @@ metadata:
   namespace: ${ovn_kubernetes_namespace}
 subsets:
   - addresses:
-      - ip: ${ovn_db_host}
+`for ip in ${ips[@]}; do printf "    - ip: ${ip}\n"; done`
     ports:
     - name: north
       port: ${ovn_nb_port}
@@ -561,7 +583,7 @@ subsets:
       protocol: TCP
 EOF
     if [[ $? != 0 ]] ; then
-        echo "Failed to create endpoint with host ${ovn_db_host} for ovnkube-db service"
+        echo "Failed to create endpoint with host(s) ${ips[@]} for ovnkube-db service"
         exit 1
     fi
 }
@@ -612,7 +634,7 @@ sb-ovsdb () {
   ovn-sbctl set-connection ptcp:${ovn_sb_port}:${ovn_db_host} -- set connection . inactivity_probe=0
 
   # create the ovnkube_db endpoint for other pods to query the OVN DB IP
-  set_ovnkube_db_ep
+  set_ovnkube_db_ep ${ovn_db_host}
 
   tail --follow=name ${OVN_LOGDIR}/ovsdb-server-sb.log &
   ovn_tail_pid=$!
@@ -634,15 +656,14 @@ run-ovn-northd () {
   sleep 1
 
   echo "=============== run_ovn_northd ========== MASTER ONLY"
-  echo "ovn_db_host ${ovn_db_host}"
   echo "ovn_nbdb ${ovn_nbdb}   ovn_sbdb ${ovn_sbdb}"
   echo "ovn_northd_opts=${ovn_northd_opts}"
   echo "ovn_log_northd=${ovn_log_northd}"
 
   # no monitor (and no detach), start northd which connects to the
   # ovnkube-db service
-  ovn_nbdb_i=$(echo ${ovn_nbdb} | sed 's;//;;')
-  ovn_sbdb_i=$(echo ${ovn_sbdb} | sed 's;//;;')
+  ovn_nbdb_i=$(echo ${ovn_nbdb} | sed 's;//;;g')
+  ovn_sbdb_i=$(echo ${ovn_sbdb} | sed 's;//;;g')
   run_as_ovs_user_if_needed \
       ${OVNCTL_PATH} start_northd \
       --no-monitor --ovn-manage-ovsdb=no \
@@ -737,6 +758,10 @@ ovn-controller () {
 
   echo "ovn_nbdb ${ovn_nbdb}   ovn_sbdb ${ovn_sbdb}"
   echo "ovn_nbdb_test ${ovn_nbdb_test}"
+
+  # cleanup any stale ovn-nb and ovn-remote keys in Open_vSwitch table
+  ovs-vsctl remove Open_vSwitch . external_ids ovn-remote
+  ovs-vsctl remove Open_vSwitch . external_ids ovn-nb
 
   echo "=============== ovn-controller  start_controller"
   rm -f /var/run/ovn-kubernetes/cni/*
@@ -931,9 +956,15 @@ case ${cmd} in
   "cleanup-ovn-node")
 	  cleanup-ovn-node
     ;;
+  "nb-ovsdb-raft")
+    ovsdb-raft nb ${ovn_nb_port}
+    ;;
+  "sb-ovsdb-raft")
+    ovsdb-raft sb ${ovn_sb_port}
+    ;;
   *)
-	  echo "invalid command ${cmd}"
-	  echo "valid v3 commands: ovs-server nb-ovsdb sb-ovsdb run-ovn-northd ovn-master ovn-controller ovn-node display_env display ovn_debug cleanup-ovs-server cleanup-ovn-node"
+    echo "invalid command ${cmd}"
+    echo "valid v3 commands: ovs-server nb-ovsdb sb-ovsdb run-ovn-northd ovn-master ovn-controller ovn-node display_env display ovn_debug cleanup-ovs-server cleanup-ovn-node nb-ovsdb-raft sb-ovsdb-raft"
 	  exit 0
 esac
 

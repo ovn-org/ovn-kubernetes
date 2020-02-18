@@ -83,15 +83,15 @@ jobs:
         kubetest --ginkgo-parallel=2 --provider=local --deployment=kind --kind-cluster-name=${KIND_CLUSTER_NAME} --test --test_args='--ginkgo.focus=\[sig-network\].*Conformance --disable-log-dump=false --ginkgo.skip=\[Serial\]'
         kubetest --ginkgo-parallel=2 --provider=local --deployment=kind --kind-cluster-name=${KIND_CLUSTER_NAME} --test --test_args='--ginkgo.focus=\[sig-network\].*NetworkPolicy --disable-log-dump=false --ginkgo.skip=ingress\saccess|multiple\segress\spolicies|allow\segress\saccess|\[Serial\]'
     
-    - name: Export logs on failure
+    - name: Export logs
+      if: always()
       run: |
         mkdir -p /tmp/kind/logs 
         kind export logs --name ${KIND_CLUSTER_NAME} /tmp/kind/logs
       working-directory: ${{ env.WORKDIR }}
-      if: failure()
     - name: Upload logs
+      if: always()
       uses: actions/upload-artifact@v1
-      if: failure()
       with:
         name: kind-logs
         path: /tmp/kind/logs
