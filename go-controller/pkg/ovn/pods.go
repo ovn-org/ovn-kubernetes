@@ -263,6 +263,11 @@ func (oc *Controller) addLogicalPort(pod *kapi.Pod) error {
 	var out, stderr string
 	var err error
 
+	// If a node does node have an assigned hostsubnet don't wait for the logical switch to appear
+	if val, ok := oc.logicalSwitchCache[pod.Spec.NodeName]; ok && val == nil {
+		return nil
+	}
+
 	// Keep track of how long syncs take.
 	start := time.Now()
 	defer func() {
