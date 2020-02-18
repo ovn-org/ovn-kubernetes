@@ -561,10 +561,10 @@ func (oc *Controller) ensureNodeLogicalNetwork(nodeName string, hostsubnet *net.
 	var stdout string
 	if config.IPv6Mode {
 		stdout, stderr, err = util.RunOVNNbctl("--", "--may-exist", "ls-add", nodeName,
-			"--", "set", "logical_switch", nodeName, config.OtherConfigSubnet()+"="+hostsubnet.String())
+			"--", "set", "logical_switch", nodeName, "other-config:ipv6_prefix="+hostsubnet.IP.String())
 	} else {
 		stdout, stderr, err = util.RunOVNNbctl("--", "--may-exist", "ls-add", nodeName,
-			"--", "set", "logical_switch", nodeName, config.OtherConfigSubnet()+"="+hostsubnet.String(),
+			"--", "set", "logical_switch", nodeName, "other-config:subnet="+hostsubnet.String(),
 			"other-config:exclude_ips="+secondIP.IP.String())
 	}
 	if err != nil {
@@ -842,9 +842,15 @@ func (oc *Controller) syncNodes(nodes []interface{}) {
 	// watchNodes() will be called for all existing nodes at startup anyway.
 	// Note that this list will include the 'join' cluster switch, which we
 	// do not want to delete.
+	var subnetAttr string
+	if config.IPv6Mode {
+		subnetAttr = "ipv6_prefix"
+	} else {
+		subnetAttr = "subnet"
+	}
 	nodeSwitches, stderr, err := util.RunOVNNbctl("--data=bare", "--no-heading",
 		"--columns=name,other-config", "find", "logical_switch",
-		fmt.Sprintf("%s!=_", config.OtherConfigSubnet()))
+		"other-config:"+subnetAttr+"!=_")
 	if err != nil {
 		logrus.Errorf("Failed to get node logical switches: stderr: %q, error: %v",
 			stderr, err)
@@ -874,10 +880,13 @@ func (oc *Controller) syncNodes(nodes []interface{}) {
 		}
 
 		var subnet *net.IPNet
-		configs := strings.Fields(items[1])
-		for _, config := range configs {
-			if strings.HasPrefix(config, "subnet=") {
-				subnetStr := strings.TrimPrefix(config, "subnet=")
+		attrs := strings.Fields(items[1])
+		for _, attr := range attrs {
+			if strings.HasPrefix(attr, subnetAttr+"=") {
+				subnetStr := strings.TrimPrefix(attr, subnetAttr+"=")
+				if config.IPv6Mode {
+					subnetStr += "/64"
+				}
 				_, subnet, _ = net.ParseCIDR(subnetStr)
 				break
 			}

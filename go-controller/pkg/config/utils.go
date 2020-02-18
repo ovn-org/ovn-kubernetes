@@ -52,21 +52,22 @@ func ParseClusterSubnetEntries(clusterSubnetCmd string) ([]CIDRNetworkEntry, err
 				return nil, err
 			}
 			parsedClusterEntry.HostSubnetLength = uint32(tmp)
-			if parsedClusterEntry.HostSubnetLength <= uint32(entryMaskLength) {
-				return nil, fmt.Errorf("cannot use a host subnet length mask shorter than or equal to the cluster subnet mask. "+
-					"host subnet length: %d, cluster subnet length: %d", parsedClusterEntry.HostSubnetLength, entryMaskLength)
+
+			if ipv6 && parsedClusterEntry.HostSubnetLength != 64 {
+				return nil, fmt.Errorf("IPv6 only supports /64 host subnets")
 			}
 		} else {
-			// no host subnet prefix provided - default to 24 for ipv4 (legacy behavior), error for ipv6
 			if ipv6 {
-				return nil, fmt.Errorf("host subnet prefix length missing. Required for IPv6")
-			} else if entryMaskLength >= 24 {
-				return nil, fmt.Errorf("cluster subnet prefix length of %d is too long for host subnet prefix"+
-					"length of 24. Please specify host subnet prefix or shorten cluster subnet prefix", entryMaskLength)
+				parsedClusterEntry.HostSubnetLength = 64
 			} else {
-				// default to 24 bit prefix for IPv4
+				// default for backward compatibility
 				parsedClusterEntry.HostSubnetLength = 24
 			}
+		}
+
+		if parsedClusterEntry.HostSubnetLength <= uint32(entryMaskLength) {
+			return nil, fmt.Errorf("cannot use a host subnet length mask shorter than or equal to the cluster subnet mask. "+
+				"host subnet length: %d, cluster subnet length: %d", parsedClusterEntry.HostSubnetLength, entryMaskLength)
 		}
 
 		//check to make sure that no cidrs overlap

@@ -435,10 +435,11 @@ var CommonFlags = []cli.Flag{
 			"hostsubnet prefix lengths to use for the cluster (eg, \"10.128.0.0/14/23,10.0.0.0/14/23\"). " +
 			"Each entry is given in the form [IP address/prefix-length/hostsubnet-prefix-length] " +
 			"and cannot overlap with other entries. The hostsubnet-prefix-length " +
-			"is optional and if unspecified defaults to 24. The " +
-			"hostsubnet-prefix-length defines how many IP addresses " +
-			"are dedicated to each node and may be different for each " +
-			"entry.",
+			"defines how large a subnet is given to each node and may be different " +
+			"for each entry. For IPv6 subnets, it must be 64 (and does not need to " +
+			"be explicitly specified). For IPv4 subnets an explicit " +
+			"hostsubnet-prefix should be specified, but for backward compatibility " +
+			"it defaults to 24 if unspecified.",
 		Destination: &cliConfig.Default.RawClusterSubnets,
 	},
 	cli.BoolFlag{
@@ -975,15 +976,6 @@ func buildDefaultConfig(cli, file *config) error {
 		return fmt.Errorf("cluster subnet invalid: %v", err)
 	}
 	return nil
-}
-
-// OtherConfigSubnet returns "other-config:subnet" for IPv4 clusters, and
-// "other-config:ipv6_prefix" for IPv6 clusters
-func OtherConfigSubnet() string {
-	if IPv6Mode {
-		return "other-config:ipv6_prefix"
-	}
-	return "other-config:subnet"
 }
 
 // getConfigFilePath returns config file path and 'true' if the config file is
