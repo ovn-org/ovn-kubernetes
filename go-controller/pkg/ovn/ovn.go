@@ -158,6 +158,10 @@ func NewOvnController(kubeClient kubernetes.Interface, wf *factory.WatchFactory,
 
 // Run starts the actual watching.
 func (oc *Controller) Run(stopChan chan struct{}) error {
+	// Setting debug log level during node bring up to expose bring up process.
+	// Log level is returned to configured value when bring up is complete.
+	logrus.SetLevel(5)
+
 	startOvnUpdater()
 
 	// WatchNodes must be started first so that its initial Add will
