@@ -706,22 +706,14 @@ func (oc *Controller) handlePeerNamespaceSelectorModify(
 	}
 }
 
-// we do not need to create an address set
-// - if there is 'zero' NetworkPolicyPeer entity
-// - if the number of IPBlock elements is same as the number of NetworkPolicyPeer entities
-// Otherwise, we must always create an address_set
-func mustCreateAddressSet(peers []knet.NetworkPolicyPeer) bool {
-	nPeers := len(peers)
-	if nPeers == 0 {
-		return false
-	}
-	nIPBlocks := 0
+// we only need to create an address set if there is a podSelector or namespaceSelector
+func hasAnyLabelSelector(peers []knet.NetworkPolicyPeer) bool {
 	for _, peer := range peers {
-		if peer.IPBlock != nil {
-			nIPBlocks++
+		if peer.PodSelector != nil || peer.NamespaceSelector != nil {
+			return true
 		}
 	}
-	return nIPBlocks != nPeers
+	return false
 }
 
 // addNetworkPolicyPortGroup creates and applies OVN ACLs to pod logical switch
@@ -772,7 +764,7 @@ func (oc *Controller) addNetworkPolicyPortGroup(policy *knet.NetworkPolicy) {
 		// peerPodAddressMap represents the IP addresses of all the peer pods
 		// for this ingress.
 		peerPodAddressMap := make(map[string]bool)
-		if mustCreateAddressSet(ingressJSON.From) {
+		if hasAnyLabelSelector(ingressJSON.From) {
 			// localPeerPods represents all the peer pods in the same
 			// namespace from which we need to allow traffic.
 			localPeerPods := fmt.Sprintf("%s.%s.%s.%d", policy.Namespace,
@@ -833,7 +825,7 @@ func (oc *Controller) addNetworkPolicyPortGroup(policy *knet.NetworkPolicy) {
 		// peerPodAddressMap represents the IP addresses of all the peer pods
 		// for this egress.
 		peerPodAddressMap := make(map[string]bool)
-		if mustCreateAddressSet(egressJSON.To) {
+		if hasAnyLabelSelector(egressJSON.To) {
 			// localPeerPods represents all the peer pods in the same
 			// namespace to which we need to allow traffic.
 			localPeerPods := fmt.Sprintf("%s.%s.%s.%d", policy.Namespace,
