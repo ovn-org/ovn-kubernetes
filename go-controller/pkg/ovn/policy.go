@@ -286,7 +286,11 @@ func localPodAddACL(np *namespacePolicy, gress *gressPolicy) {
 			cidrMatch = gress.getMatchFromIPBlock(lportMatch, l4Match)
 			addACLAllow(np, cidrMatch, l4Match, true, gress.idx, gress.policyType)
 		}
-		addACLAllow(np, match, l4Match, false, gress.idx, gress.policyType)
+		// if there are pod/namespace selector, then allow packets from/to that address_set or
+		// if the NetworkPolicyPeer is empty, then allow from all sources or to all destinations.
+		if len(gress.sortedPeerAddressSets) > 0 || len(gress.ipBlockCidr) == 0 {
+			addACLAllow(np, match, l4Match, false, gress.idx, gress.policyType)
+		}
 	}
 	for _, port := range gress.portPolicies {
 		l4Match, err := port.getL4Match()
@@ -300,7 +304,9 @@ func localPodAddACL(np *namespacePolicy, gress *gressPolicy) {
 			cidrMatch = gress.getMatchFromIPBlock(lportMatch, l4Match)
 			addACLAllow(np, cidrMatch, l4Match, true, gress.idx, gress.policyType)
 		}
-		addACLAllow(np, match, l4Match, false, gress.idx, gress.policyType)
+		if len(gress.sortedPeerAddressSets) > 0 || len(gress.ipBlockCidr) == 0 {
+			addACLAllow(np, match, l4Match, false, gress.idx, gress.policyType)
+		}
 	}
 }
 
@@ -700,6 +706,16 @@ func (oc *Controller) handlePeerNamespaceSelectorModify(
 	}
 }
 
+// we only need to create an address set if there is a podSelector or namespaceSelector
+func hasAnyLabelSelector(peers []knet.NetworkPolicyPeer) bool {
+	for _, peer := range peers {
+		if peer.PodSelector != nil || peer.NamespaceSelector != nil {
+			return true
+		}
+	}
+	return false
+}
+
 // addNetworkPolicyPortGroup creates and applies OVN ACLs to pod logical switch
 // ports from Kubernetes NetworkPolicy objects using OVN Port Groups
 func (oc *Controller) addNetworkPolicyPortGroup(policy *knet.NetworkPolicy) {
@@ -748,7 +764,7 @@ func (oc *Controller) addNetworkPolicyPortGroup(policy *knet.NetworkPolicy) {
 		// peerPodAddressMap represents the IP addresses of all the peer pods
 		// for this ingress.
 		peerPodAddressMap := make(map[string]bool)
-		if len(ingressJSON.From) != 0 {
+		if hasAnyLabelSelector(ingressJSON.From) {
 			// localPeerPods represents all the peer pods in the same
 			// namespace from which we need to allow traffic.
 			localPeerPods := fmt.Sprintf("%s.%s.%s.%d", policy.Namespace,
@@ -809,7 +825,7 @@ func (oc *Controller) addNetworkPolicyPortGroup(policy *knet.NetworkPolicy) {
 		// peerPodAddressMap represents the IP addresses of all the peer pods
 		// for this egress.
 		peerPodAddressMap := make(map[string]bool)
-		if len(egressJSON.To) != 0 {
+		if hasAnyLabelSelector(egressJSON.To) {
 			// localPeerPods represents all the peer pods in the same
 			// namespace to which we need to allow traffic.
 			localPeerPods := fmt.Sprintf("%s.%s.%s.%d", policy.Namespace,
