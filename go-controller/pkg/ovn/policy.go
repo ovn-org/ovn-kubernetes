@@ -610,11 +610,6 @@ func (oc *Controller) handleLocalPodSelectorDelFunc(
 
 	// Get the logical port name.
 	logicalPort := podLogicalPortName(pod)
-	logicalPortUUID, err := oc.getLogicalPortUUID(logicalPort)
-	if err != nil {
-		logrus.Errorf(err.Error())
-		return
-	}
 
 	np.Lock()
 	defer np.Unlock()
@@ -634,7 +629,12 @@ func (oc *Controller) handleLocalPodSelectorDelFunc(
 	delete(oc.lspEgressDenyCache, logicalPort)
 	oc.lspMutex.Unlock()
 
-	if logicalPortUUID == "" || np.portGroupUUID == "" {
+	logicalPortUUID, err := oc.getLogicalPortUUID(logicalPort)
+	if err != nil {
+		logrus.Errorf(err.Error())
+		return
+	}
+	if np.portGroupUUID == "" {
 		return
 	}
 
