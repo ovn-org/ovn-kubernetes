@@ -120,27 +120,11 @@ spec:
         env:
         - name: OVN_DAEMONSET_VERSION
           value: "3"
-        - name: OVNKUBE_LOGLEVEL
-          value: "4"
-        - name: OVN_NET_CIDR
-          valueFrom:
-            configMapKeyRef:
-              name: ovn-config
-              key: net_cidr
-        - name: OVN_SVC_CIDR
-          valueFrom:
-            configMapKeyRef:
-              name: ovn-config
-              key: svc_cidr
         - name: K8S_APISERVER
           valueFrom:
             configMapKeyRef:
               name: ovn-config
               key: k8s_apiserver
-        - name: K8S_NODE
-          valueFrom:
-            fieldRef:
-              fieldPath: spec.nodeName
         - name: OVN_KUBERNETES_NAMESPACE
           valueFrom:
             fieldRef:
