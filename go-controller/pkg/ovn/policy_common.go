@@ -213,11 +213,7 @@ func (oc *Controller) handlePeerPodSelectorAddUpdate(np *namespacePolicy,
 	}
 
 	addressMap[ipAddress] = true
-	addresses := make([]string, 0, len(addressMap))
-	for k := range addressMap {
-		addresses = append(addresses, k)
-	}
-	setAddressSet(addressSet, addresses)
+	addToAddressSet(addressSet, ipAddress)
 }
 
 func (oc *Controller) handlePeerPodSelectorDeleteACLRules(obj interface{}, gress *gressPolicy) {
@@ -262,12 +258,7 @@ func (oc *Controller) handlePeerPodSelectorDelete(np *namespacePolicy,
 	}
 
 	delete(addressMap, ipAddress)
-
-	addresses := make([]string, 0, len(addressMap))
-	for k := range addressMap {
-		addresses = append(addresses, k)
-	}
-	setAddressSet(addressSet, addresses)
+	removeFromAddressSet(addressSet, ipAddress)
 }
 
 func (oc *Controller) handlePeerPodSelector(

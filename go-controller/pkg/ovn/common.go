@@ -60,24 +60,25 @@ func (oc *Controller) forEachAddressSetUnhashedName(iteratorFn func(
 	return nil
 }
 
-func setAddressSet(hashName string, addresses []string) {
-	logrus.Debugf("setAddressSet for %s with %s", hashName, addresses)
-	if len(addresses) == 0 {
-		_, stderr, err := util.RunOVNNbctl("clear", "address_set",
-			hashName, "addresses")
-		if err != nil {
-			logrus.Errorf("failed to clear address_set, stderr: %q (%v)",
-				stderr, err)
-		}
-		return
-	}
+func addToAddressSet(hashName string, address string) {
+	logrus.Debugf("addToAddressSet for %s with %s", hashName, address)
 
-	ips := `"` + strings.Join(addresses, `" "`) + `"`
-	_, stderr, err := util.RunOVNNbctl("set", "address_set",
-		hashName, fmt.Sprintf("addresses=%s", ips))
+	_, stderr, err := util.RunOVNNbctl("add", "address_set",
+		hashName, "addresses", address)
 	if err != nil {
-		logrus.Errorf("failed to set address_set, stderr: %q (%v)",
-			stderr, err)
+		logrus.Errorf("failed to add an address %q to address_set %q, stderr: %q (%v)",
+			address, hashName, stderr, err)
+	}
+}
+
+func removeFromAddressSet(hashName string, address string) {
+	logrus.Debugf("removeFromAddressSet for %s with %s", hashName, address)
+
+	_, stderr, err := util.RunOVNNbctl("remove", "address_set",
+		hashName, "addresses", address)
+	if err != nil {
+		logrus.Errorf("failed to remove an address %q from address_set %q, stderr: %q (%v)",
+			address, hashName, stderr, err)
 	}
 }
 

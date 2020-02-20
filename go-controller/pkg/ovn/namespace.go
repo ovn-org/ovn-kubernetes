@@ -72,12 +72,7 @@ func (oc *Controller) addPodToNamespace(ns string, ip net.IP, logicalPort string
 	}
 
 	oc.namespaceAddressSet[ns][address] = logicalPort
-	addresses := make([]string, 0)
-	for address := range oc.namespaceAddressSet[ns] {
-		addresses = append(addresses, address)
-	}
-
-	setAddressSet(hashedAddressSet(ns), addresses)
+	addToAddressSet(hashedAddressSet(ns), address)
 
 	// If multicast is allowed and enabled for the namespace, add the port
 	// to the allow policy.
@@ -107,12 +102,7 @@ func (oc *Controller) deletePodFromNamespace(ns string, ip net.IP, logicalPort s
 	}
 
 	delete(oc.namespaceAddressSet[ns], address)
-	addresses := make([]string, 0)
-	for address := range oc.namespaceAddressSet[ns] {
-		addresses = append(addresses, address)
-	}
-
-	setAddressSet(hashedAddressSet(ns), addresses)
+	removeFromAddressSet(hashedAddressSet(ns), address)
 
 	// Remove the port from the multicast allow policy.
 	if oc.multicastSupport && oc.multicastEnabled[ns] {
