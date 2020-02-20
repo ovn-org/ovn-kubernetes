@@ -81,7 +81,7 @@ ovn_daemonset_version=${OVN_DAEMONSET_VERSION:-"3"}
 # hostname is the host's hostname when using host networking,
 # This is useful on the master node
 # otherwise it is the container ID (useful for debugging).
-ovn_pod_host=$(hostname)
+ovn_pod_host=${K8S_NODE:-$(hostname)}
 
 # The ovs user id, by default it is going to be root:root
 ovs_user_id=${OVS_USER_ID:-""}
@@ -714,7 +714,7 @@ ovn-master () {
 
   echo "=============== ovn-master ========== MASTER ONLY"
   /usr/bin/ovnkube \
-    --init-master ${ovn_pod_host} \
+    --init-master ${K8S_NODE} \
     --cluster-subnets ${net_cidr} --k8s-service-cidr=${svc_cidr} \
     --nb-address=${ovn_nbdb} --sb-address=${ovn_sbdb} \
     --nbctl-daemon-mode \
