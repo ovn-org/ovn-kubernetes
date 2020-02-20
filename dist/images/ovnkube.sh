@@ -431,13 +431,12 @@ echo ovnkube.sh version ${ovnkube_version}
 }
 
 ovn_debug () {
-  ready_to_start_node
+  wait_for_event attempts=3 ready_to_start_node
   echo "ovn_nbdb ${ovn_nbdb}   ovn_sbdb ${ovn_sbdb}"
   echo "ovn_nbdb_test ${ovn_nbdb_test}"
 
   # get ovs/ovn info from the node for debug purposes
   echo "=========== ovn_debug   hostname: ${ovn_pod_host} ============="
-  echo "=========== ovn-nbctl show ============="
   echo "=========== ovn-nbctl --db=${ovn_nbdb_test} show ============="
   ovn-nbctl --db=${ovn_nbdb_test} show
   echo " "
@@ -470,8 +469,8 @@ ovn_debug () {
   echo "=========== ovn-sbctl --db=${ovn_sbdb_test} list datapath ============="
   ovn-sbctl --db=${ovn_sbdb_test} list datapath
   echo " "
-  echo "=========== ovn-sbctl --db=${ovn_sbdb_test} list port ============="
-  ovn-sbctl --db=${ovn_sbdb_test} list port
+  echo "=========== ovn-sbctl --db=${ovn_sbdb_test} list port_binding ============="
+  ovn-sbctl --db=${ovn_sbdb_test} list port_binding
 }
 
 ovs-server () {
