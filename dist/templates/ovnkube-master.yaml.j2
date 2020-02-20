@@ -75,16 +75,6 @@ spec:
           value: "3"
         - name: OVN_LOG_NORTHD
           value: "-vconsole:info"
-        - name: OVN_NET_CIDR
-          valueFrom:
-            configMapKeyRef:
-              name: ovn-config
-              key: net_cidr
-        - name: OVN_SVC_CIDR
-          valueFrom:
-            configMapKeyRef:
-              name: ovn-config
-              key: svc_cidr
         - name: K8S_APISERVER
           valueFrom:
             configMapKeyRef:
