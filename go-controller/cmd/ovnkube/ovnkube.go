@@ -24,8 +24,6 @@ import (
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
 
-	"k8s.io/api/core/v1"
-	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	kexec "k8s.io/utils/exec"
 )
 
@@ -244,22 +242,16 @@ func runOvnKube(ctx *cli.Context) error {
 
 		ovn.RegisterMetrics()
 
-		var nodeSelector *metav1.LabelSelector
 		var hybridOverlayClusterSubnets []config.CIDRNetworkEntry
 		if enableHybridOverlay {
 			hybridOverlayClusterSubnets, err = hocontroller.GetHybridOverlayClusterSubnets(ctx)
 			if err != nil {
 				return err
 			}
-
-			nodeSelector = &metav1.LabelSelector{
-				MatchLabels: map[string]string{v1.LabelOSStable: "linux"},
-			}
 		}
 
 		// run the HA master controller to init the master
-		ovnHAController := ovn.NewHAMasterController(clientset, factory, master, stopChan,
-			hybridOverlayClusterSubnets, nodeSelector)
+		ovnHAController := ovn.NewHAMasterController(clientset, factory, master, stopChan, hybridOverlayClusterSubnets)
 		if err := ovnHAController.StartHAMasterController(); err != nil {
 			return err
 		}

@@ -54,13 +54,14 @@ func podToCookie(pod *kapi.Pod) string {
 }
 
 func (n *NodeController) addOrUpdatePod(pod *kapi.Pod) error {
-	podIP, podMAC := getPodDetails(pod, n.nodeName)
-	if podIP == "" || podMAC == "" {
+	podIP, podMAC, err := getPodDetails(pod, n.nodeName)
+	if err != nil {
+		logrus.Debugf("cleaning up hybrid overlay pod %s/%s because %v", pod.Namespace, pod.Name, err)
 		return n.deletePod(pod)
 	}
 
 	cookie := podToCookie(pod)
-	_, _, err := util.RunOVSOfctl("add-flow", extBridgeName,
+	_, _, err = util.RunOVSOfctl("add-flow", extBridgeName,
 		fmt.Sprintf("table=10, cookie=0x%s, priority=100, ip, nw_dst=%s, actions=set_field:%s->eth_src,set_field:%s->eth_dst,output:ext", cookie, podIP, n.drMAC, podMAC))
 	if err != nil {
 		return fmt.Errorf("failed to add flows for pod %s/%s: %v", pod.Namespace, pod.Name, err)
@@ -81,23 +82,22 @@ func (n *NodeController) deletePod(pod *kapi.Pod) error {
 	return nil
 }
 
-func getPodDetails(pod *kapi.Pod, nodeName string) (string, string) {
+func getPodDetails(pod *kapi.Pod, nodeName string) (string, string, error) {
 	if pod.Spec.NodeName != nodeName {
-		return "", ""
+		return "", "", fmt.Errorf("not scheduled")
 	}
 
 	podInfo, err := util.UnmarshalPodAnnotation(pod.Annotations)
 	if err != nil {
-		logrus.Errorf("Unable to unmarshal pod annotations: %v", err)
-		return "", ""
+		return "", "", err
 	}
-	return podInfo.IP.String(), podInfo.MAC.String()
+	return podInfo.IP.String(), podInfo.MAC.String(), nil
 }
 
 // podChanged returns true if any relevant pod attributes changed
 func podChanged(pod1 *kapi.Pod, pod2 *kapi.Pod, nodeName string) bool {
-	podIP1, mac1 := getPodDetails(pod1, nodeName)
-	podIP2, mac2 := getPodDetails(pod2, nodeName)
+	podIP1, mac1, _ := getPodDetails(pod1, nodeName)
+	podIP2, mac2, _ := getPodDetails(pod2, nodeName)
 	return (podIP1 != podIP2 || mac1 != mac2)
 }
 

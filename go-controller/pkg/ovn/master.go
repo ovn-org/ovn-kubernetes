@@ -312,10 +312,11 @@ func (oc *Controller) syncNodeManagementPort(node *kapi.Node, subnet *net.IPNet)
 		return err
 	}
 
-	if err := util.UpdateNodeSwitchExcludeIPs(node.Name, subnet); err != nil {
+	if err := addAllowACLFromNode(node.Name, portIP.IP); err != nil {
 		return err
 	}
-	if err := addAllowACLFromNode(node.Name, portIP.IP); err != nil {
+
+	if err := util.UpdateNodeSwitchExcludeIPs(node.Name, subnet); err != nil {
 		return err
 	}
 
@@ -549,14 +550,22 @@ func (oc *Controller) ensureNodeLogicalNetwork(nodeName string, hostsubnet *net.
 		return err
 	}
 
-	// Create a logical switch and set its subnet. If all cluster subnets are
-	// big enough (/24 or greater), exclude the hybrid overlay port IP (even
-	// if hybrid overlay is not enabled) to allow enabling hybrid overlay
-	// in a running cluster without disrupting nodes.
-	var excludeIPs string
+	// Create a logical switch and set its subnet.
+	ocSubnet := "other-config:subnet=" + hostsubnet.String()
+	if config.IPv6Mode {
+		ocSubnet = "other-config:ipv6_prefix=" + hostsubnet.IP.String()
+	}
+	args := []string{
+		"--", "--may-exist", "ls-add", nodeName,
+		"--", "set", "logical_switch", nodeName, ocSubnet,
+	}
 	if !config.IPv6Mode {
-		excludeIPs = "other-config:exclude_ips=" + secondIP.IP.String()
+		excludeIPs := "other-config:exclude_ips=" + secondIP.IP.String()
 
+		// If all cluster subnets are big enough (/24 or greater), exclude
+		// the hybrid overlay port IP (even if hybrid overlay is not enabled)
+		// to allow enabling hybrid overlay in a running cluster without
+		// disrupting nodes.
 		excludeHybridOverlayIP := true
 		for _, clusterEntry := range config.Default.ClusterSubnets {
 			if clusterEntry.HostSubnetLength > 24 {
@@ -568,13 +577,9 @@ func (oc *Controller) ensureNodeLogicalNetwork(nodeName string, hostsubnet *net.
 			thirdIP := util.NextIP(secondIP.IP)
 			excludeIPs += ".." + thirdIP.String()
 		}
+		args = append(args, excludeIPs)
 	}
-
-	// Create a logical switch and set its subnet.
-	stdout, stderr, err := util.RunOVNNbctl("--", "--may-exist", "ls-add", nodeName,
-		"--", "set", "logical_switch", nodeName, "other-config:subnet="+hostsubnet.String(),
-		excludeIPs,
-		"external-ids:gateway_ip="+firstIP.String())
+	stdout, stderr, err := util.RunOVNNbctl(args...)
 	if err != nil {
 		logrus.Errorf("Failed to create a logical switch %v, stdout: %q, stderr: %q, error: %v", nodeName, stdout, stderr, err)
 		return err
@@ -850,9 +855,15 @@ func (oc *Controller) syncNodes(nodes []interface{}) {
 	// watchNodes() will be called for all existing nodes at startup anyway.
 	// Note that this list will include the 'join' cluster switch, which we
 	// do not want to delete.
+	var subnetAttr string
+	if config.IPv6Mode {
+		subnetAttr = "ipv6_prefix"
+	} else {
+		subnetAttr = "subnet"
+	}
 	nodeSwitches, stderr, err := util.RunOVNNbctl("--data=bare", "--no-heading",
 		"--columns=name,other-config", "find", "logical_switch",
-		fmt.Sprintf("%s!=_", config.OtherConfigSubnet()))
+		"other-config:"+subnetAttr+"!=_")
 	if err != nil {
 		logrus.Errorf("Failed to get node logical switches: stderr: %q, error: %v",
 			stderr, err)
@@ -882,10 +893,13 @@ func (oc *Controller) syncNodes(nodes []interface{}) {
 		}
 
 		var subnet *net.IPNet
-		configs := strings.Fields(items[1])
-		for _, config := range configs {
-			if strings.HasPrefix(config, "subnet=") {
-				subnetStr := strings.TrimPrefix(config, "subnet=")
+		attrs := strings.Fields(items[1])
+		for _, attr := range attrs {
+			if strings.HasPrefix(attr, subnetAttr+"=") {
+				subnetStr := strings.TrimPrefix(attr, subnetAttr+"=")
+				if config.IPv6Mode {
+					subnetStr += "/64"
+				}
 				_, subnet, _ = net.ParseCIDR(subnetStr)
 				break
 			}

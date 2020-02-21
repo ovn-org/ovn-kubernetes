@@ -18,6 +18,7 @@ import (
 	kapi "k8s.io/api/core/v1"
 	kapisnetworking "k8s.io/api/networking/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/labels"
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/kubernetes/scheme"
@@ -128,40 +129,45 @@ const (
 // NewOvnController creates a new OVN controller for creating logical network
 // infrastructure and policy
 func NewOvnController(kubeClient kubernetes.Interface, wf *factory.WatchFactory, hybridOverlayClusterSubnets []config.CIDRNetworkEntry) *Controller {
-	return &Controller{
-		kube:                        &kube.Kube{KClient: kubeClient},
-		watchFactory:                wf,
-		masterSubnetAllocator:       allocator.NewSubnetAllocator(),
-		logicalSwitchCache:          make(map[string]*net.IPNet),
-		joinSubnetAllocator:         allocator.NewSubnetAllocator(),
-		logicalPortCache:            make(map[string]string),
-		logicalPortUUIDCache:        make(map[string]string),
-		namespaceAddressSet:         make(map[string]map[string]string),
-		namespacePolicies:           make(map[string]map[string]*namespacePolicy),
-		namespaceMutex:              make(map[string]*sync.Mutex),
-		namespaceMutexMutex:         sync.Mutex{},
-		lspIngressDenyCache:         make(map[string]int),
-		lspEgressDenyCache:          make(map[string]int),
-		lspMutex:                    &sync.Mutex{},
-		lsMutex:                     &sync.Mutex{},
-		loadbalancerClusterCache:    make(map[string]string),
-		loadbalancerGWCache:         make(map[string]string),
-		multicastEnabled:            make(map[string]bool),
-		multicastSupport:            config.EnableMulticast,
-		serviceVIPToName:            make(map[ServiceVIPKey]types.NamespacedName),
-		serviceVIPToNameLock:        sync.Mutex{},
-		hybridOverlayClusterSubnets: hybridOverlayClusterSubnets,
+	oc := &Controller{
+		kube:                     &kube.Kube{KClient: kubeClient},
+		watchFactory:             wf,
+		masterSubnetAllocator:    allocator.NewSubnetAllocator(),
+		logicalSwitchCache:       make(map[string]*net.IPNet),
+		joinSubnetAllocator:      allocator.NewSubnetAllocator(),
+		logicalPortCache:         make(map[string]string),
+		logicalPortUUIDCache:     make(map[string]string),
+		namespaceAddressSet:      make(map[string]map[string]string),
+		namespacePolicies:        make(map[string]map[string]*namespacePolicy),
+		namespaceMutex:           make(map[string]*sync.Mutex),
+		namespaceMutexMutex:      sync.Mutex{},
+		lspIngressDenyCache:      make(map[string]int),
+		lspEgressDenyCache:       make(map[string]int),
+		lspMutex:                 &sync.Mutex{},
+		lsMutex:                  &sync.Mutex{},
+		loadbalancerClusterCache: make(map[string]string),
+		loadbalancerGWCache:      make(map[string]string),
+		multicastEnabled:         make(map[string]bool),
+		multicastSupport:         config.EnableMulticast,
+		serviceVIPToName:         make(map[ServiceVIPKey]types.NamespacedName),
+		serviceVIPToNameLock:     sync.Mutex{},
 	}
+	oc.hybridOverlayClusterSubnets = hybridOverlayClusterSubnets
+	return oc
 }
 
 // Run starts the actual watching.
-func (oc *Controller) Run(nodeSelector *metav1.LabelSelector, stopChan chan struct{}) error {
+func (oc *Controller) Run(stopChan chan struct{}) error {
+	// Setting debug log level during node bring up to expose bring up process.
+	// Log level is returned to configured value when bring up is complete.
+	logrus.SetLevel(5)
+
 	startOvnUpdater()
 
 	// WatchNodes must be started first so that its initial Add will
 	// create all node logical switches, which other watches may depend on.
 	// https://github.com/ovn-org/ovn-kubernetes/pull/859
-	if err := oc.WatchNodes(nodeSelector); err != nil {
+	if err := oc.WatchNodes(); err != nil {
 		return err
 	}
 
@@ -503,12 +509,21 @@ func (oc *Controller) syncNodeGateway(node *kapi.Node, subnet *net.IPNet) error 
 
 // WatchNodes starts the watching of node resource and calls
 // back the appropriate handler logic
-func (oc *Controller) WatchNodes(nodeSelector *metav1.LabelSelector) error {
+func (oc *Controller) WatchNodes() error {
 	var gatewaysFailed sync.Map
 	var mgmtPortFailed sync.Map
-	_, err := oc.watchFactory.AddFilteredNodeHandler(nodeSelector, cache.ResourceEventHandlerFuncs{
+	_, err := oc.watchFactory.AddNodeHandler(cache.ResourceEventHandlerFuncs{
 		AddFunc: func(obj interface{}) {
 			node := obj.(*kapi.Node)
+
+			if noHostSubnet := noHostSubnet(node); noHostSubnet {
+				oc.lsMutex.Lock()
+				defer oc.lsMutex.Unlock()
+				//setting the value to nil in the cache means it was not assigned a hostSubnet by ovn-kube
+				oc.logicalSwitchCache[node.Name] = nil
+				return
+			}
+
 			logrus.Debugf("Added event for Node %q", node.Name)
 			hostSubnet, err := oc.addNode(node)
 			if err != nil {
@@ -530,6 +545,16 @@ func (oc *Controller) WatchNodes(nodeSelector *metav1.LabelSelector) error {
 		UpdateFunc: func(old, new interface{}) {
 			oldNode := old.(*kapi.Node)
 			node := new.(*kapi.Node)
+
+			shouldUpdate, err := shouldUpdate(node, oldNode)
+			if err != nil {
+				logrus.Errorf(err.Error())
+			}
+			if !shouldUpdate {
+				// the hostsubnet is not assigned by ovn-kubernetes
+				return
+			}
+
 			logrus.Debugf("Updated event for Node %q", node.Name)
 
 			_, failed := mgmtPortFailed.Load(node.Name)
@@ -615,4 +640,33 @@ func macAddressChanged(oldNode, node *kapi.Node) bool {
 	oldMacAddress := oldNode.Annotations[OvnNodeManagementPortMacAddress]
 	macAddress := node.Annotations[OvnNodeManagementPortMacAddress]
 	return oldMacAddress != macAddress
+}
+
+// noHostSubnet() compares the no-hostsubenet-nodes flag with node labels to see if the node is manageing its
+// own network.
+func noHostSubnet(node *kapi.Node) bool {
+	if config.Kubernetes.NoHostSubnetNodes == nil {
+		return false
+	}
+
+	nodeSelector, _ := metav1.LabelSelectorAsSelector(config.Kubernetes.NoHostSubnetNodes)
+	return nodeSelector.Matches(labels.Set(node.Labels))
+}
+
+// shouldUpdate() determines if the ovn-kubernetes plugin should update the state of the node.
+// ovn-kube should not perform an update if it does not assign a hostsubnet, or if you want to change
+// whether or not ovn-kubernetes assigns a hostsubnet
+func shouldUpdate(node, oldNode *kapi.Node) (bool, error) {
+	newNoHostSubnet := noHostSubnet(node)
+	oldNoHostSubnet := noHostSubnet(oldNode)
+
+	if oldNoHostSubnet && newNoHostSubnet {
+		return false, nil
+	} else if oldNoHostSubnet && !newNoHostSubnet {
+		return false, fmt.Errorf("error updating node %s, cannot remove assigned hostsubnet, please delete node and recreate.", node.Name)
+	} else if !oldNoHostSubnet && newNoHostSubnet {
+		return false, fmt.Errorf("error updating node %s, cannot assign a hostsubnet to already created node, please delete node and recreate.", node.Name)
+	}
+
+	return true, nil
 }

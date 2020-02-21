@@ -85,8 +85,9 @@ func createNode(name, os, ip string, annotations map[string]string) *v1.Node {
 func createPod(namespace, name, node, podIP, podMAC string) *v1.Pod {
 	annotations := map[string]string{}
 	if podIP != "" || podMAC != "" {
-		annotations[util.OvnPodAnnotationName] = fmt.Sprintf(`{"%s":{"ip_address":"%s", "mac_address":"%s"}}`,
-			util.OvnPodDefaultNetwork, podIP, podMAC)
+		_, ipn, _ := net.ParseCIDR(podIP)
+		gatewayIP := util.NextIP(ipn.IP)
+		annotations[util.OvnPodAnnotationName] = fmt.Sprintf(`{"default": {"ip_address":"` + podIP + `", "mac_address":"` + podMAC + `", "gateway_ip": "` + gatewayIP.String() + `"}}`)
 	}
 
 	return &v1.Pod{
@@ -416,11 +417,10 @@ var _ = Describe("Hybrid Overlay Node Linux Operations", func() {
 	It("sets up local pod flows", func() {
 		app.Action = func(ctx *cli.Context) error {
 			const (
-				thisNode  string = "mynode"
-				node1Name string = "node1"
-				pod1IP    string = "1.2.3.5"
-				pod1CIDR  string = pod1IP + "/24"
-				pod1MAC   string = "aa:bb:cc:dd:ee:ff"
+				thisNode string = "mynode"
+				pod1IP   string = "1.2.3.5"
+				pod1CIDR string = pod1IP + "/24"
+				pod1MAC  string = "aa:bb:cc:dd:ee:ff"
 			)
 
 			fakeClient := fake.NewSimpleClientset([]runtime.Object{

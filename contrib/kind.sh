@@ -48,6 +48,7 @@ kubectl create -f ovnkube-db.yaml
 kubectl create -f ovnkube-master.yaml
 kubectl create -f ovnkube-node.yaml
 popd
+kubectl -n kube-system delete ds kube-proxy
 kind get clusters
 kind get nodes --name ${CLUSTER_NAME}
 

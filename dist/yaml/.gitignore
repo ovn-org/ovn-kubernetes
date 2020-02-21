@@ -5,4 +5,4 @@ ovnkube-db-vip.yaml
 ovnkube-db.yaml
 ovnkube-node.yaml
 ovnkube-monitor.yaml
-
+ovnkube-db-raft.yaml

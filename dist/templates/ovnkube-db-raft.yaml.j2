@@ -20,31 +20,41 @@ spec:
 
 ---
 
-# ovnkube-db
+# ovndb-raft PodDisruptBudget to prevent majority of ovnkube raft cluster
+# nodes from disruption
+apiVersion: policy/v1beta1
+kind: PodDisruptionBudget
+metadata:
+  name: ovndb-raft-pdb
+  namespace: ovn-kubernetes
+spec:
+  minAvailable: {{ ovn_db_minAvailable | default(2) }}
+  selector:
+    matchLabels:
+      name: ovnkube-db
+
+---
+
+# ovnkube-db raft statefulset
 # daemonset version 3
 # starts ovn NB/SB ovsdb daemons, each in a separate container
-# it is running on master node for now, but does not need to be the case
-kind: Deployment
+#
+kind: StatefulSet
 apiVersion: apps/v1
 metadata:
   name: ovnkube-db
-  # namespace set up by install
   namespace: ovn-kubernetes
   annotations:
     kubernetes.io/description: |
-      This daemonset launches the OVN NB/SB ovsdb service components.
+      This statefulset launches the OVN NB/SB ovsdb components.
 spec:
-  progressDeadlineSeconds: 600
-  replicas: 1
+  serviceName: ovnkube-db
+  podManagementPolicy: "Parallel"
+  replicas: {{ ovn_db_replicas | default(3) }}
   revisionHistoryLimit: 10
   selector:
     matchLabels:
       name: ovnkube-db
-  strategy:
-    rollingUpdate:
-      maxSurge: 25%
-      maxUnavailable: 25%
-    type: RollingUpdate
   template:
     metadata:
       labels:
@@ -55,21 +65,39 @@ spec:
       annotations:
         scheduler.alpha.kubernetes.io/critical-pod: ''
     spec:
-      # Requires fairly broad permissions - ability to read all services and network functions as well
-      # as all pods.
+      terminationGracePeriodSeconds: 30
+      imagePullSecrets:
+        - name: registry-credentials
       serviceAccountName: ovn
       hostNetwork: true
-      containers:
-      # firewall rules for ovn - assumed to be setup
-      # iptables -A OS_FIREWALL_ALLOW -p tcp -m state --state NEW -m tcp --dport 6641 -j ACCEPT
-      # iptables -A OS_FIREWALL_ALLOW -p tcp -m state --state NEW -m tcp --dport 6642 -j ACCEPT
 
+      # required to be scheduled on node with ovn.org/ovnkube-db=true label but can
+      # only have one instance per node
+      affinity:
+        nodeAffinity:
+          requiredDuringSchedulingIgnoredDuringExecution:
+            nodeSelectorTerms:
+            - matchExpressions:
+              - key: ovn.org/ovnkube-db
+                operator: In
+                values:
+                - "true"
+        podAntiAffinity:
+          requiredDuringSchedulingIgnoredDuringExecution:
+          - labelSelector:
+              matchExpressions:
+              - key: name
+                operator: In
+                values:
+                - ovnkube-db
+            topologyKey: kubernetes.io/hostname
+
+      containers:
       # nb-ovsdb - v3
       - name: nb-ovsdb
         image: "{{ ovn_image | default('docker.io/ovnkube/ovn-daemonset:latest') }}"
         imagePullPolicy: "{{ ovn_image_pull_policy | default('IfNotPresent') }}"
-
-        command: ["/root/ovnkube.sh", "nb-ovsdb"]
+        command: ["/root/ovnkube.sh", "nb-ovsdb-raft"]
 
         securityContext:
           runAsUser: 0
@@ -88,6 +116,10 @@ spec:
           name: host-var-log-ovs
         - mountPath: /var/log/ovn/
           name: host-var-log-ovs
+        - mountPath: /var/run/openvswitch/
+          name: host-var-run-ovs
+        - mountPath: /var/run/ovn/
+          name: host-var-run-ovs
 
         resources:
           requests:
@@ -107,6 +139,10 @@ spec:
           valueFrom:
             fieldRef:
               fieldPath: metadata.namespace
+        - name: POD_NAME
+          valueFrom:
+            fieldRef:
+              fieldPath: metadata.name
         ports:
         - name: healthz
           containerPort: 10256
@@ -125,8 +161,7 @@ spec:
       - name: sb-ovsdb
         image: "{{ ovn_image | default('docker.io/ovnkube/ovn-daemonset:latest') }}"
         imagePullPolicy: "{{ ovn_image_pull_policy | default('IfNotPresent') }}"
-
-        command: ["/root/ovnkube.sh", "sb-ovsdb"]
+        command: ["/root/ovnkube.sh", "sb-ovsdb-raft"]
 
         securityContext:
           runAsUser: 0
@@ -145,6 +180,10 @@ spec:
           name: host-var-log-ovs
         - mountPath: /var/log/ovn/
           name: host-var-log-ovs
+        - mountPath: /var/run/openvswitch/
+          name: host-var-run-ovs
+        - mountPath: /var/run/ovn/
+          name: host-var-run-ovs
 
         resources:
           requests:
@@ -164,6 +203,10 @@ spec:
           valueFrom:
             fieldRef:
               fieldPath: metadata.namespace
+        - name: POD_NAME
+          valueFrom:
+            fieldRef:
+              fieldPath: metadata.name
         ports:
         - name: healthz
           containerPort: 10255
@@ -178,15 +221,15 @@ spec:
         lifecycle:
       # end of container
 
-      nodeSelector:
-        node-role.kubernetes.io/master: ""
-        kubernetes.io/os: "linux"
       volumes:
-      - name: host-var-lib-ovs
-        hostPath:
-          path: /var/lib/openvswitch
       - name: host-var-log-ovs
         hostPath:
           path: /var/log/openvswitch
+      - name: host-var-lib-ovs
+        hostPath:
+          path: /var/lib/openvswitch
+      - name: host-var-run-ovs
+        hostPath:
+          path: /var/run/openvswitch
       tolerations:
       - operator: "Exists"

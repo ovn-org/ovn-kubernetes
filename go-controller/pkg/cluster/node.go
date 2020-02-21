@@ -121,7 +121,10 @@ func (cluster *OvnClusterController) StartClusterNode(name string) error {
 		}
 	}
 
-	err = setupOVNNode(name)
+	if node, err = cluster.Kube.GetNode(name); err != nil {
+		return fmt.Errorf("error retrieving node %s: %v", name, err)
+	}
+	err = setupOVNNode(node)
 	if err != nil {
 		return err
 	}
@@ -211,13 +214,13 @@ func (cluster *OvnClusterController) StartClusterNode(name string) error {
 		wg.Wait()
 		close(messages)
 	}()
-	logrus.Infof("Gateway and ManagementPort are Ready")
 
 	for i := range messages {
 		if i != nil {
 			return fmt.Errorf("Timeout error while obtaining addresses for %s (%v)", portName, i)
 		}
 	}
+	logrus.Infof("Gateway and ManagementPort are Ready")
 
 	if postReady != nil {
 		err = postReady()
