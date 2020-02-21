@@ -4,6 +4,17 @@ set -euxo pipefail
 
 K8S_VERSION=${K8S_VERSION:-v1.16.4}
 KIND_INSTALL_INGRESS=${KIND_INSTALL_INGRESS:-false}
+OVNKUBE_USERSPACE=${OVNKUBE_USERSPACE:-false}
+KIND_CONFIG_FILE=${KIND_CONFIG_FILE:-false}
+
+# config file determined automatically
+if [ "$KIND_CONFIG_FILE" == false ]; then
+  if [ "$OVNKUBE_USERSPACE" == true ]; then 
+    KIND_CONFIG_FILE=./kind-multinode.yaml
+  else
+    KIND_CONFIG_FILE=./kind.yaml
+  fi
+fi
 
 # Detect IP to use as API server
 API_IP=$(ip -4 addr | grep -oP '(?<=inet\s)\d+(\.\d+){3}' | grep -v "127.0.0.1" | head -n 1)
@@ -12,11 +23,11 @@ if [ -z "$API_IP" ]; then
   exit 1
 fi
 
-sed -i "s/apiServerAddress.*/apiServerAddress: ${API_IP}/" kind.yaml
+sed -i "s/apiServerAddress.*/apiServerAddress: ${API_IP}/" ${KIND_CONFIG_FILE}
 
 # Create KIND cluster
 CLUSTER_NAME=${CLUSTER_NAME:-ovn}
-kind create cluster --name ${CLUSTER_NAME} --kubeconfig ${HOME}/admin.conf --image kindest/node:${K8S_VERSION} --config=./kind.yaml
+kind create cluster --name ${CLUSTER_NAME} --kubeconfig ${HOME}/admin.conf --image kindest/node:${K8S_VERSION} --config=${KIND_CONFIG_FILE}
 export KUBECONFIG=${HOME}/admin.conf
 mkdir -p /tmp/kind
 sudo chmod 777 /tmp/kind
@@ -33,6 +44,17 @@ do
 done
 kubectl get secrets -o jsonpath='{.items[].data.ca\.crt}' > /tmp/kind/ca.crt
 kubectl get secrets -o jsonpath='{.items[].data.token}' > /tmp/kind/token
+if [ "$OVNKUBE_USERSPACE" == true ]; then
+  echo "Enabling userspace/netdev in KIND deployment."
+  echo "Disabling TX cksum offload"
+  NODES=$(docker ps | grep "kindest/node" | awk '{ print $1 }')
+  for node in $NODES; do
+    peerIdx=$(docker exec "$node" ip link | grep eth0 | awk -F[@:] '{ print $3 }' | cut -c 3-)
+    peerName=$(docker run --net=host antrea/ethtool:latest ip link | grep ^"$peerIdx": | awk -F[:@] '{ print $2 }' | cut -c 2-)
+    echo "Disabling TX checksum offload for node $node ($peerName)"
+    docker run --net=host --privileged antrea/ethtool:latest ethtool -K "$peerName" tx off
+  done
+fi
 pushd ../go-controller
 make
 popd

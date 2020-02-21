@@ -29,7 +29,7 @@ func createManagementPort(nodeName string, localSubnet *net.IPNet, nodeAnnotator
 	nodeName = strings.ToLower(nodeName)
 
 	// Make sure br-int is created.
-	stdout, stderr, err := util.RunOVSVsctl("--", "--may-exist", "add-br", "br-int")
+	stdout, stderr, err := util.RunOVSVsctl(util.WrapNetdev([]string{"--", "--may-exist", "add-br", "br-int"})...)
 	if err != nil {
 		klog.Errorf("Failed to create br-int, stdout: %q, stderr: %q, error: %v", stdout, stderr, err)
 		return err
@@ -46,11 +46,13 @@ func createManagementPort(nodeName string, localSubnet *net.IPNet, nodeAnnotator
 		klog.Errorf("Failed to add port to br-int, stdout: %q, stderr: %q, error: %v", stdout, stderr, err)
 		return err
 	}
+
 	macAddress, err := util.GetOVSPortMACAddress(interfaceName)
 	if err != nil {
 		klog.Errorf("Failed to get management port MAC address: %v", err)
 		return err
 	}
+
 	// persist the MAC address so that upon node reboot we get back the same mac address.
 	_, stderr, err = util.RunOVSVsctl("set", "interface", interfaceName,
 		fmt.Sprintf("mac=%s", strings.ReplaceAll(macAddress, ":", "\\:")))

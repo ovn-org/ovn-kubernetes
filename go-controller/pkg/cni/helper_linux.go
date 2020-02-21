@@ -4,6 +4,7 @@ package cni
 
 import (
 	"fmt"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
 	"io/ioutil"
 	"os"
 	"os/exec"
@@ -103,7 +104,11 @@ func setupInterface(netns ns.NetNS, containerID, ifName string, ifInfo *PodInter
 		}
 		hostIface.Mac = hostVeth.HardwareAddr.String()
 		contIface.Name = containerVeth.Name
-
+		if os.Getenv("OVNKUBE_USERSPACE") == "true" {
+			if err := util.EthtoolTXHWCsumOff(containerVeth.Name); err != nil {
+				return fmt.Errorf("error when disabling TX checksum offload on container veth: %v", err)
+			}
+		}
 		link, err := netlink.LinkByName(contIface.Name)
 		if err != nil {
 			return fmt.Errorf("failed to lookup %s: %v", contIface.Name, err)

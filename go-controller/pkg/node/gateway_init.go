@@ -1,8 +1,10 @@
 package node
 
 import (
+	"errors"
 	"fmt"
 	"net"
+	"os"
 	"runtime"
 	"strings"
 
@@ -97,6 +99,28 @@ func (n *OvnNode) initGateway(subnet string, nodeAnnotator kube.Annotator,
 			return err
 		}
 		annotations, err = initLocalnetGateway(n.name, subnet, n.watchFactory)
+		if os.Getenv("OVNKUBE_USERSPACE") == "true" {
+			var phyIntf string
+			ifaces, err := net.Interfaces()
+			if err != nil {
+				return fmt.Errorf("unable to get interfaces for userspace bridge: %v", err)
+			}
+			for _, i := range ifaces {
+				if strings.HasPrefix(i.Name, "eth0") {
+					phyIntf = i.Name
+					break
+				}
+			}
+			if phyIntf == "" {
+				return errors.New("userspace/netdev mode requested for local gateway type " +
+					"but no gateway interface provided")
+			}
+			bridge, err := util.NicToBridge(phyIntf)
+			if err != nil {
+				return fmt.Errorf("failed to create userspace bridge: %v", err)
+			}
+			klog.Infof("Userspace bridge created: %s", bridge)
+		}
 	case config.GatewayModeShared:
 		systemID, err = util.GetNodeChassisID()
 		if err != nil {

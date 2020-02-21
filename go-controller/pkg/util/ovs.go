@@ -7,6 +7,7 @@ import (
 	"io/ioutil"
 	"k8s.io/klog"
 	kexec "k8s.io/utils/exec"
+	"os"
 	"path/filepath"
 	"runtime"
 	"strings"
@@ -552,4 +553,21 @@ func GetOVNDBServerInfo(timeout int, direction, database string) (*OVNDBServerSt
 	}
 
 	return serverStatus, nil
+}
+
+// WrapNetdev determines whether or not to create a bridge in netdev mode
+func WrapNetdev(cmd []string) []string {
+	var bridgeName string
+	if os.Getenv("OVNKUBE_USERSPACE") == "true" {
+		for i, v := range cmd {
+			if v == "add-br" && len(cmd) > i+1 {
+				bridgeName = cmd[i+1]
+				break
+			}
+		}
+		if len(bridgeName) > 0 {
+			return append(cmd, "--", "set", "bridge", bridgeName, "datapath_type=netdev")
+		}
+	}
+	return cmd
 }

@@ -127,6 +127,8 @@ spec:
             cpu: 100m
             memory: 300Mi
         env:
+        - name: OVNKUBE_USERSPACE
+          value: "{{ OVNKUBE_USERSPACE }}"
         - name: OVN_DAEMONSET_VERSION
           value: "3"
         - name: K8S_APISERVER
@@ -226,6 +228,8 @@ spec:
           value: "{{ ovn_gateway_mode }}"
         - name: OVN_GATEWAY_OPTS
           value: "{{ ovn_gateway_opts }}"
+        - name: OVNKUBE_USERSPACE
+          value: "{{ OVNKUBE_USERSPACE }}"
 
         lifecycle:
           preStop:

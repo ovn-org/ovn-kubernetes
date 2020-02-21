@@ -85,7 +85,13 @@ jobs:
     name: e2e-kind-ovn-shard-n
     runs-on: ubuntu-latest
     needs: k8s
+    strategy:
+      matrix:
+        userspace:
+        - 'false'
+        - 'true'
     env:
+      OVNKUBE_USERSPACE: "${{ matrix.userspace }}"
       JOB_NAME: e2e-shard-n
     steps:
     - name: Set up Go 1.12
@@ -138,6 +144,12 @@ jobs:
         pushd contrib
         ./kind.sh
         popd
+    - name: Upload file
+      if: always()
+      uses: actions/upload-artifact@v1
+      with:
+        name: yaml-${{ github.run_id }}-${{ env.JOB_NAME }}-${{ matrix.userspace }}
+        path: "${{ env.WORKDIR }}/dist/yaml"
     - name: e2e-kind-ovn-shard-n
       working-directory: "${{ env.WORKDIR }}"
       run: |
@@ -148,7 +160,11 @@ jobs:
         export NODE_NAMES=${MASTER_NAME}
 
         # all tests that don't have P as their sixth letter after the N
-        kubetest --provider=local --deployment=kind --kind-cluster-name=kind-ovn --test --test_args='--ginkgo.focus=\[sig-network\]\s[Nn](.{6}[^Pp].*|.{0,6}$) --disable-log-dump=false --ginkgo.skip=Networking\sIPerf\sIPv[46]|\[Feature:PerformanceDNS\]|\[Feature:IPv6DualStackAlphaFeature\]|NetworkPolicy\sbetween\sserver\sand\sclient.+(ingress\saccess|multiple\segress\spolicies|allow\segress\saccess)|\[Feature:NoSNAT\]|Services.+(ESIPP|cleanup\sfinalizer|session\saffinity|rejected\swhen\sno\sendpoints)|\[Feature:Networking-IPv6\]|\[Feature:Federation\]|configMap\snameserver|ClusterDns\s\[Feature:Example\]|(Namespace|Pod)Selector\s\[Feature:NetworkPolicy\]'
+        if [ "$OVNKUBE_USERSPACE" == true ]; then
+          kubetest --provider=local --deployment=kind --kind-cluster-name=kind-ovn --test --test_args='--ginkgo.focus=\[sig-network\]\s[Nn](.{6}[^Pp].*|.{0,6}$) --disable-log-dump=false --ginkgo.skip=Networking\sIPerf\sIPv[46]|\[Feature:PerformanceDNS\]|\[Feature:IPv6DualStackAlphaFeature\]|NetworkPolicy\sbetween\sserver\sand\sclient.+(ingress\saccess|multiple\segress\spolicies|allow\segress\saccess)|\[Feature:NoSNAT\]|Services.+(hairpin|ESIPP|cleanup\sfinalizer|session\saffinity|rejected\swhen\sno\sendpoints)|\[Feature:Networking-IPv6\]|\[Feature:Federation\]|configMap\snameserver|ClusterDns\s\[Feature:Example\]|(Namespace|Pod)Selector\s\[Feature:NetworkPolicy\]'
+        else
+          kubetest --provider=local --deployment=kind --kind-cluster-name=kind-ovn --test --test_args='--ginkgo.focus=\[sig-network\]\s[Nn](.{6}[^Pp].*|.{0,6}$) --disable-log-dump=false --ginkgo.skip=Networking\sIPerf\sIPv[46]|\[Feature:PerformanceDNS\]|\[Feature:IPv6DualStackAlphaFeature\]|NetworkPolicy\sbetween\sserver\sand\sclient.+(ingress\saccess|multiple\segress\spolicies|allow\segress\saccess)|\[Feature:NoSNAT\]|Services.+(ESIPP|cleanup\sfinalizer|session\saffinity|rejected\swhen\sno\sendpoints)|\[Feature:Networking-IPv6\]|\[Feature:Federation\]|configMap\snameserver|ClusterDns\s\[Feature:Example\]|(Namespace|Pod)Selector\s\[Feature:NetworkPolicy\]'
+        fi
     - name: Export logs
       if: always()
       run: "mkdir -p /tmp/kind/logs \nkind export logs --name ${KIND_CLUSTER_NAME}
@@ -158,13 +174,20 @@ jobs:
       if: always()
       uses: actions/upload-artifact@v1
       with:
-        name: kind-logs-${{ github.run_id }}-${{ env.JOB_NAME }}
+        name: kind-logs-${{ github.run_id }}-${{ env.JOB_NAME }}-${{ matrix.userspace
+          }}
         path: "/tmp/kind/logs"
   e2e-shard-np:
     name: e2e-kind-ovn-shard-np
     runs-on: ubuntu-latest
     needs: k8s
+    strategy:
+      matrix:
+        userspace:
+        - 'false'
+        - 'true'
     env:
+      OVNKUBE_USERSPACE: "${{ matrix.userspace }}"
       JOB_NAME: e2e-shard-np
     steps:
     - name: Set up Go 1.12
@@ -226,7 +249,11 @@ jobs:
         export MASTER_NAME=${KIND_CLUSTER_NAME}-control-plane
         export NODE_NAMES=${MASTER_NAME}
         # all tests that have P as the sixth letter after the N
-        kubetest --provider=local --deployment=kind --kind-cluster-name=kind-ovn --test --test_args='--ginkgo.focus=\[sig-network\]\s[Nn].{6}[Pp].*$ --disable-log-dump=false --ginkgo.skip=Networking\sIPerf\sIPv[46]|\[Feature:PerformanceDNS\]|\[Feature:IPv6DualStackAlphaFeature\]|NetworkPolicy\sbetween\sserver\sand\sclient.+(ingress\saccess|multiple\segress\spolicies|allow\segress\saccess)|\[Feature:NoSNAT\]|Services.+(ESIPP|cleanup\sfinalizer|session\saffinity|rejected\swhen\sno\sendpoints)|\[Feature:Networking-IPv6\]|\[Feature:Federation\]|configMap\snameserver|ClusterDns\s\[Feature:Example\]|(Namespace|Pod)Selector\s\[Feature:NetworkPolicy\]'
+        if [ "$OVNKUBE_USERSPACE" == true ]; then
+          kubetest --provider=local --deployment=kind --kind-cluster-name=kind-ovn --test --test_args='--ginkgo.focus=\[sig-network\]\s[Nn].{6}[Pp].*$ --disable-log-dump=false --ginkgo.skip=Networking\sIPerf\sIPv[46]|\[Feature:PerformanceDNS\]|\[Feature:IPv6DualStackAlphaFeature\]|NetworkPolicy\sbetween\sserver\sand\sclient.+(ingress\saccess|multiple\segress\spolicies|allow\segress\saccess)|\[Feature:NoSNAT\]|Services.+(hairpin|ESIPP|cleanup\sfinalizer|session\saffinity|rejected\swhen\sno\sendpoints)|\[Feature:Networking-IPv6\]|\[Feature:Federation\]|configMap\snameserver|ClusterDns\s\[Feature:Example\]|(Namespace|Pod)Selector\s\[Feature:NetworkPolicy\]'
+        else
+          kubetest --provider=local --deployment=kind --kind-cluster-name=kind-ovn --test --test_args='--ginkgo.focus=\[sig-network\]\s[Nn].{6}[Pp].*$ --disable-log-dump=false --ginkgo.skip=Networking\sIPerf\sIPv[46]|\[Feature:PerformanceDNS\]|\[Feature:IPv6DualStackAlphaFeature\]|NetworkPolicy\sbetween\sserver\sand\sclient.+(ingress\saccess|multiple\segress\spolicies|allow\segress\saccess)|\[Feature:NoSNAT\]|Services.+(ESIPP|cleanup\sfinalizer|session\saffinity|rejected\swhen\sno\sendpoints)|\[Feature:Networking-IPv6\]|\[Feature:Federation\]|configMap\snameserver|ClusterDns\s\[Feature:Example\]|(Namespace|Pod)Selector\s\[Feature:NetworkPolicy\]'
+        fi
     - name: Export logs
       if: always()
       run: "mkdir -p /tmp/kind/logs \nkind export logs --name ${KIND_CLUSTER_NAME}
@@ -236,13 +263,20 @@ jobs:
       if: always()
       uses: actions/upload-artifact@v1
       with:
-        name: kind-logs-${{ github.run_id }}-${{ env.JOB_NAME }}
+        name: kind-logs-${{ github.run_id }}-${{ env.JOB_NAME }}-${{ matrix.userspace
+          }}
         path: "/tmp/kind/logs"
   e2e-shard-s:
     name: e2e-kind-ovn-shard-s
     runs-on: ubuntu-latest
     needs: k8s
+    strategy:
+      matrix:
+        userspace:
+        - 'false'
+        - 'true'
     env:
+      OVNKUBE_USERSPACE: "${{ matrix.userspace }}"
       JOB_NAME: e2e-shard-s
     steps:
     - name: Set up Go 1.12
@@ -303,7 +337,11 @@ jobs:
         export KUBECONFIG=${HOME}/admin.conf
         export MASTER_NAME=${KIND_CLUSTER_NAME}-control-plane
         export NODE_NAMES=${MASTER_NAME}
-        kubetest --provider=local --deployment=kind --kind-cluster-name=kind-ovn --test --test_args='--ginkgo.focus=\[sig-network\]\s[Ss].* --disable-log-dump=false --ginkgo.skip=Networking\sIPerf\sIPv[46]|\[Feature:PerformanceDNS\]|\[Feature:IPv6DualStackAlphaFeature\]|NetworkPolicy\sbetween\sserver\sand\sclient.+(ingress\saccess|multiple\segress\spolicies|allow\segress\saccess)|\[Feature:NoSNAT\]|Services.+(ESIPP|cleanup\sfinalizer|session\saffinity|rejected\swhen\sno\sendpoints)|\[Feature:Networking-IPv6\]|\[Feature:Federation\]|configMap\snameserver|ClusterDns\s\[Feature:Example\]|(Namespace|Pod)Selector\s\[Feature:NetworkPolicy\]'
+        if [ "$OVNKUBE_USERSPACE" == true ]; then
+          kubetest --provider=local --deployment=kind --kind-cluster-name=kind-ovn --test --test_args='--ginkgo.focus=\[sig-network\]\s[Ss].* --disable-log-dump=false --ginkgo.skip=Networking\sIPerf\sIPv[46]|\[Feature:PerformanceDNS\]|\[Feature:IPv6DualStackAlphaFeature\]|NetworkPolicy\sbetween\sserver\sand\sclient.+(ingress\saccess|multiple\segress\spolicies|allow\segress\saccess)|\[Feature:NoSNAT\]|Services.+(hairpin|ESIPP|cleanup\sfinalizer|session\saffinity|rejected\swhen\sno\sendpoints)|\[Feature:Networking-IPv6\]|\[Feature:Federation\]|configMap\snameserver|ClusterDns\s\[Feature:Example\]|(Namespace|Pod)Selector\s\[Feature:NetworkPolicy\]'
+        else
+          kubetest --provider=local --deployment=kind --kind-cluster-name=kind-ovn --test --test_args='--ginkgo.focus=\[sig-network\]\s[Ss].* --disable-log-dump=false --ginkgo.skip=Networking\sIPerf\sIPv[46]|\[Feature:PerformanceDNS\]|\[Feature:IPv6DualStackAlphaFeature\]|NetworkPolicy\sbetween\sserver\sand\sclient.+(ingress\saccess|multiple\segress\spolicies|allow\segress\saccess)|\[Feature:NoSNAT\]|Services.+(ESIPP|cleanup\sfinalizer|session\saffinity|rejected\swhen\sno\sendpoints)|\[Feature:Networking-IPv6\]|\[Feature:Federation\]|configMap\snameserver|ClusterDns\s\[Feature:Example\]|(Namespace|Pod)Selector\s\[Feature:NetworkPolicy\]'
+        fi
     - name: Export logs
       if: always()
       run: "mkdir -p /tmp/kind/logs \nkind export logs --name ${KIND_CLUSTER_NAME}
@@ -313,13 +351,20 @@ jobs:
       if: always()
       uses: actions/upload-artifact@v1
       with:
-        name: kind-logs-${{ github.run_id }}-${{ env.JOB_NAME }}
+        name: kind-logs-${{ github.run_id }}-${{ env.JOB_NAME }}-${{ matrix.userspace
+          }}
         path: "/tmp/kind/logs"
   e2e-shard-other:
     name: e2e-kind-ovn-shard-other
     runs-on: ubuntu-latest
     needs: k8s
+    strategy:
+      matrix:
+        userspace:
+        - 'false'
+        - 'true'
     env:
+      OVNKUBE_USERSPACE: "${{ matrix.userspace }}"
       JOB_NAME: e2e-shard-other
     steps:
     - name: Set up Go 1.12
@@ -380,7 +425,11 @@ jobs:
         export KUBECONFIG=${HOME}/admin.conf
         export MASTER_NAME=${KIND_CLUSTER_NAME}-control-plane
         export NODE_NAMES=${MASTER_NAME}
-        kubetest --provider=local --deployment=kind --kind-cluster-name=kind-ovn --test --test_args='--ginkgo.focus=\[sig-network\]\s[^NnSs].* --disable-log-dump=false --ginkgo.skip=Networking\sIPerf\sIPv[46]|\[Feature:PerformanceDNS\]|\[Feature:IPv6DualStackAlphaFeature\]|NetworkPolicy\sbetween\sserver\sand\sclient.+(ingress\saccess|multiple\segress\spolicies|allow\segress\saccess)|\[Feature:NoSNAT\]|Services.+(ESIPP|cleanup\sfinalizer|session\saffinity|rejected\swhen\sno\sendpoints)|\[Feature:Networking-IPv6\]|\[Feature:Federation\]|configMap\snameserver|ClusterDns\s\[Feature:Example\]|(Namespace|Pod)Selector\s\[Feature:NetworkPolicy\]'
+        if [ "$OVNKUBE_USERSPACE" == true ]; then
+          kubetest --provider=local --deployment=kind --kind-cluster-name=kind-ovn --test --test_args='--ginkgo.focus=\[sig-network\]\s[^NnSs].* --disable-log-dump=false --ginkgo.skip=Networking\sIPerf\sIPv[46]|\[Feature:PerformanceDNS\]|\[Feature:IPv6DualStackAlphaFeature\]|NetworkPolicy\sbetween\sserver\sand\sclient.+(ingress\saccess|multiple\segress\spolicies|allow\segress\saccess)|\[Feature:NoSNAT\]|Services.+(hairpin|ESIPP|cleanup\sfinalizer|session\saffinity|rejected\swhen\sno\sendpoints)|\[Feature:Networking-IPv6\]|\[Feature:Federation\]|configMap\snameserver|ClusterDns\s\[Feature:Example\]|(Namespace|Pod)Selector\s\[Feature:NetworkPolicy\]'
+        else
+          kubetest --provider=local --deployment=kind --kind-cluster-name=kind-ovn --test --test_args='--ginkgo.focus=\[sig-network\]\s[^NnSs].* --disable-log-dump=false --ginkgo.skip=Networking\sIPerf\sIPv[46]|\[Feature:PerformanceDNS\]|\[Feature:IPv6DualStackAlphaFeature\]|NetworkPolicy\sbetween\sserver\sand\sclient.+(ingress\saccess|multiple\segress\spolicies|allow\segress\saccess)|\[Feature:NoSNAT\]|Services.+(ESIPP|cleanup\sfinalizer|session\saffinity|rejected\swhen\sno\sendpoints)|\[Feature:Networking-IPv6\]|\[Feature:Federation\]|configMap\snameserver|ClusterDns\s\[Feature:Example\]|(Namespace|Pod)Selector\s\[Feature:NetworkPolicy\]'
+        fi
     - name: Export logs
       if: always()
       run: "mkdir -p /tmp/kind/logs \nkind export logs --name ${KIND_CLUSTER_NAME}
@@ -390,5 +439,6 @@ jobs:
       if: always()
       uses: actions/upload-artifact@v1
       with:
-        name: kind-logs-${{ github.run_id }}-${{ env.JOB_NAME }}
+        name: kind-logs-${{ github.run_id }}-${{ env.JOB_NAME }}-${{ matrix.userspace
+          }}
         path: "/tmp/kind/logs"
