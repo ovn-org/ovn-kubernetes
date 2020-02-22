@@ -126,6 +126,8 @@ ovn_db_host=$(getent ahostsv4 $(hostname) | grep -v "^127\." | head -1 | awk '{ 
 ovn_nb_port=${OVN_NB_PORT:-6641}
 # OVN_SB_PORT - ovn south db port (default 6642)
 ovn_sb_port=${OVN_SB_PORT:-6642}
+# OVN_ENCAP_PORT - GENEVE UDP port (default 6081)
+ovn_encap_port=${OVN_ENCAP_PORT:-6081}
 
 # Determine the ovn rundir.
 if [[ -f /usr/bin/ovn-appctl ]] ; then
@@ -524,9 +526,6 @@ ovs-server () {
   /usr/share/openvswitch/scripts/ovs-ctl start --no-ovsdb-server \
     --system-id=random ${ovs_options} ${USER_ARGS} "$@"
 
-  # Ensure GENEVE's UDP port isn't firewalled
-  /usr/share/openvswitch/scripts/ovs-ctl --protocol=udp --dport=6081 enable-protocol
-
   tail --follow=name ${OVS_LOGDIR}/ovs-vswitchd.log ${OVS_LOGDIR}/ovsdb-server.log &
   ovs_tail_pid=$!
   sleep 10
@@ -789,6 +788,9 @@ ovn-node () {
   echo "=============== ovn-node - (ovn-node  wait for ovn-controller.pid)"
   wait_for_event process_ready ovn-controller
   sleep 1
+
+  # Ensure GENEVE's UDP port isn't firewalled. We support specifying non-default encap port.
+  /usr/share/openvswitch/scripts/ovs-ctl --protocol=udp --dport=${ovn_encap_port} enable-protocol
 
   OVN_ENCAP_IP=""
   ovn_encap_ip=`ovs-vsctl --if-exists get Open_vSwitch . external_ids:ovn-encap-ip | tr -d '\"'`
