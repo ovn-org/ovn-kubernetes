@@ -21,8 +21,14 @@ func (oc *Controller) syncNetworkPoliciesPortGroup(
 				npInterface)
 			continue
 		}
-		expectedPolicies[policy.Namespace] = map[string]bool{
-			policy.Name: true}
+
+		if nsMap, ok := expectedPolicies[policy.Namespace]; ok {
+			nsMap[policy.Name] = true
+		} else {
+			expectedPolicies[policy.Namespace] = map[string]bool{
+				policy.Name: true,
+			}
+		}
 	}
 
 	err := oc.forEachAddressSetUnhashedName(func(addrSetName, namespaceName,
