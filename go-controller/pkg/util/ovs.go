@@ -40,9 +40,8 @@ const (
 )
 
 const (
-	nbdbCtlSock   = "ovnnb_db.ctl"
-	sbdbCtlSock   = "ovnsb_db.ctl"
-	northdCtlSock = "ovn-northd.ctl"
+	nbdbCtlSock = "ovnnb_db.ctl"
+	sbdbCtlSock = "ovnsb_db.ctl"
 )
 
 func runningPlatform() (string, error) {
@@ -383,7 +382,7 @@ func RunOVNNBAppCtl(args ...string) (string, string, error) {
 		runner.ovnRunDir + nbdbCtlSock,
 	}
 	cmdArgs = append(cmdArgs, args...)
-	stdout, stderr, err := runOVNretry(runner.appctlPath, nil, cmdArgs...)
+	stdout, stderr, err := runOVNretry(runner.ovnappctlPath, nil, cmdArgs...)
 	return strings.Trim(strings.TrimSpace(stdout.String()), "\""), stderr.String(), err
 }
 
@@ -395,19 +394,25 @@ func RunOVNSBAppCtl(args ...string) (string, string, error) {
 		runner.ovnRunDir + sbdbCtlSock,
 	}
 	cmdArgs = append(cmdArgs, args...)
-	stdout, stderr, err := runOVNretry(runner.appctlPath, nil, cmdArgs...)
+	stdout, stderr, err := runOVNretry(runner.ovnappctlPath, nil, cmdArgs...)
 	return strings.Trim(strings.TrimSpace(stdout.String()), "\""), stderr.String(), err
 }
 
 // RunOVNNorthAppCtl runs an 'ovs-appctl -t ovn-northd command'.
 func RunOVNNorthAppCtl(args ...string) (string, string, error) {
 	var cmdArgs []string
+
+	pid, err := ioutil.ReadFile(runner.ovnRunDir + "ovn-northd.pid")
+	if err != nil {
+		return "", "", fmt.Errorf("failed to run the command since failed to get ovn-northd's pid: %v", err)
+	}
+
 	cmdArgs = []string{
 		"-t",
-		runner.ovnRunDir + northdCtlSock,
+		runner.ovnRunDir + fmt.Sprintf("ovn-northd.%s.ctl", strings.TrimSpace(string(pid))),
 	}
 	cmdArgs = append(cmdArgs, args...)
-	stdout, stderr, err := runOVNretry(runner.appctlPath, nil, cmdArgs...)
+	stdout, stderr, err := runOVNretry(runner.ovnappctlPath, nil, cmdArgs...)
 	return strings.Trim(strings.TrimSpace(stdout.String()), "\""), stderr.String(), err
 }
 
