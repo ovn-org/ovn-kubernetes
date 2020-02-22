@@ -88,6 +88,10 @@ spec:
           name: host-var-log-ovs
         - mountPath: /var/log/ovn/
           name: host-var-log-ovs
+        # for the iptables wrapper
+        - mountPath: /host
+          name: host-slash
+          readOnly: true
 
         resources:
           requests:
@@ -145,6 +149,10 @@ spec:
           name: host-var-log-ovs
         - mountPath: /var/log/ovn/
           name: host-var-log-ovs
+        # for the iptables wrapper
+        - mountPath: /host
+          name: host-slash
+          readOnly: true
 
         resources:
           requests:
@@ -188,5 +196,8 @@ spec:
       - name: host-var-log-ovs
         hostPath:
           path: /var/log/openvswitch
+      - name: host-slash
+        hostPath:
+          path: /
       tolerations:
       - operator: "Exists"
