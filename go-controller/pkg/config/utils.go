@@ -43,6 +43,16 @@ func ParseClusterSubnetEntries(clusterSubnetCmd string) ([]CIDRNetworkEntry, err
 
 		if parsedClusterEntry.CIDR.IP.To4() == nil {
 			ipv6 = true
+
+			// We require a simple CIDR with only the first 2 bytes set.  This is
+			// because of how we generate MAC addresses in IPAddrToHWAddr() in pkg/util/net.go.
+			var bits byte
+			for i := 2; i < 16; i++ {
+				bits |= parsedClusterEntry.CIDR.IP[i]
+			}
+			if bits != 0 {
+				return nil, fmt.Errorf("IPv6 cluster subnet must only have first 2 bytes set.")
+			}
 		}
 
 		entryMaskLength, _ := parsedClusterEntry.CIDR.Mask.Size()

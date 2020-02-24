@@ -110,6 +110,12 @@ func TestParseClusterSubnetEntries(t *testing.T) {
 			clusterNetworks: nil,
 			expectedErr:     true,
 		},
+		{
+			name:            "IPv6 cluster subnet must only set first 2 bytes",
+			cmdLineArg:      "fda6:1234::/48",
+			clusterNetworks: nil,
+			expectedErr:     true,
+		},
 	}
 
 	for _, tc := range tests {

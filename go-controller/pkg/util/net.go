@@ -112,8 +112,16 @@ func JoinHostPortInt32(host string, port int32) string {
 }
 
 // IPAddrToHWAddr takes the four octets of IPv4 address (aa.bb.cc.dd, for example) and uses them in creating
-// a MAC address (0A:58:AA:BB:CC:DD)
+// a MAC address (0A:58:AA:BB:CC:DD).  For IPv6, we'll use the first two bytes and last two bytes and hope
+// that results in a unique MAC for the scope of where it's used.
 func IPAddrToHWAddr(ip net.IP) string {
-	// safe to use private MAC prefix: 0A:58
-	return fmt.Sprintf("0A:58:%02X:%02X:%02X:%02X", ip[0], ip[1], ip[2], ip[3])
+	// Ensure that for IPv4, we are always working with the IP in 4-byte form.
+	ip4 := ip.To4()
+	if ip4 != nil {
+		// safe to use private MAC prefix: 0A:58
+		return fmt.Sprintf("0A:58:%02X:%02X:%02X:%02X", ip4[0], ip4[1], ip4[2], ip4[3])
+	}
+
+	// IPv6 - use the first two and last two bytes.
+	return fmt.Sprintf("0A:58:%02X:%02X:%02X:%02X", ip[0], ip[1], ip[14], ip[15])
 }

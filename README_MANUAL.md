@@ -115,6 +115,8 @@ Now start the ovnkube utility on the master node.
 The below command expects the user to provide
 * A cluster wide private address range of $CLUSTER_IP_SUBNET
 (e.g: 192.168.0.0/16).  The pods are provided IP address from this range.
+Note that with IPv6, there’s a limitation that the CIDR prefix must only have
+the first two bytes set.  For example: fd01::/48.
 
 * $NODE_NAME should be the same as the one used by kubelet.  kubelet by default
 uses the hostname.  kubelet allows this name to be overridden with
