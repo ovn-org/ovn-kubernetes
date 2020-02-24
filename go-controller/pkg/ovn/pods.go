@@ -108,10 +108,10 @@ func (oc *Controller) deletePodAcls(logicalPort string) {
 }
 
 func (oc *Controller) getLogicalPortUUID(logicalPort string) (string, error) {
-	portInfo, err := oc.logicalPortCache.get(logicalPort)
-	if err == nil {
-		return portInfo.uuid, nil
-	}
+//	portInfo, err := oc.logicalPortCache.get(logicalPort)
+//	if err == nil {
+//		return portInfo.uuid, nil
+//	}
 
 	out, stderr, err := util.RunOVNNbctl("--if-exists", "get",
 		"logical_switch_port", logicalPort, "_uuid")
