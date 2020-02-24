@@ -325,18 +325,23 @@ func (oc *Controller) addLogicalPort(pod *kapi.Pod) error {
 		return fmt.Errorf("invalid logical port %s uuid %q", portName, out)
 	}
 
+	// Add the pod's logical switch port to the port cache
+	var podIP net.IP
+	if podCIDR != nil {
+		podIP = podCIDR.IP
+	}
+	portInfo := oc.logicalPortCache.add(logicalSwitch, portName, uuid, podMac, podIP)
+
 	// If the pod has not already been assigned addresses, read them now
 	if podMac == nil || podCIDR == nil {
-		var podIP net.IP
 		podMac, podIP, err = waitForPodAddresses(portName)
 		if err != nil {
 			return err
 		}
 		podCIDR = &net.IPNet{IP: podIP, Mask: nodeSubnet.Mask}
+		portInfo.ip = podIP
+		portInfo.mac = podMac
 	}
-
-	// Add the pod's logical switch port to the port cache
-	portInfo := oc.logicalPortCache.add(logicalSwitch, portName, uuid, podMac, podCIDR.IP)
 
 	// Set the port security for the logical switch port
 	addresses := fmt.Sprintf("%s %s", podMac, podCIDR.IP)

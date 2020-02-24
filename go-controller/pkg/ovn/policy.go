@@ -583,7 +583,7 @@ func (oc *Controller) handleLocalPodSelectorAddFunc(
 
 	// Get the logical port name.
 	logicalPort := podLogicalPortName(pod)
-	logicalPortUUID, err := oc.getLogicalPortUUID(logicalPort)
+	portInfo, err := oc.logicalPortCache.get(logicalPort)
 	if err != nil {
 		logrus.Errorf(err.Error())
 		return
@@ -609,8 +609,8 @@ func (oc *Controller) handleLocalPodSelectorAddFunc(
 	}
 
 	_, stderr, err := util.RunOVNNbctl("--if-exists", "remove",
-		"port_group", np.portGroupUUID, "ports", logicalPortUUID, "--",
-		"add", "port_group", np.portGroupUUID, "ports", logicalPortUUID)
+		"port_group", np.portGroupUUID, "ports", portInfo.uuid, "--",
+		"add", "port_group", np.portGroupUUID, "ports", portInfo.uuid)
 	if err != nil {
 		logrus.Errorf("Failed to add logicalPort %s to portGroup %s "+
 			"stderr: %q (%v)", logicalPort, np.portGroupUUID, stderr, err)
@@ -649,7 +649,7 @@ func (oc *Controller) handleLocalPodSelectorDelFunc(
 	delete(oc.lspEgressDenyCache, logicalPort)
 	oc.lspMutex.Unlock()
 
-	logicalPortUUID, err := oc.getLogicalPortUUID(logicalPort)
+	portInfo, err := oc.logicalPortCache.get(logicalPort)
 	if err != nil {
 		logrus.Errorf(err.Error())
 		return
@@ -659,7 +659,7 @@ func (oc *Controller) handleLocalPodSelectorDelFunc(
 	}
 
 	_, stderr, err := util.RunOVNNbctl("--if-exists", "remove",
-		"port_group", np.portGroupUUID, "ports", logicalPortUUID)
+		"port_group", np.portGroupUUID, "ports", portInfo.uuid)
 	if err != nil {
 		logrus.Errorf("Failed to delete logicalPort %s from portGroup %s "+
 			"stderr: %q (%v)", logicalPort, np.portGroupUUID, stderr, err)
