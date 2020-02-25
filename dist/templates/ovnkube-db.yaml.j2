@@ -123,6 +123,12 @@ spec:
         #     port: 10256
         #     scheme: HTTP
         lifecycle:
+        readinessProbe:
+          exec:
+            command: ["/usr/bin/ovn-kube-util", "readiness-probe", "-t", "ovnnb-db"]
+          initialDelaySeconds: 30
+          timeoutSeconds: 30
+          periodSeconds: 60
       # end of container
 
       # sb-ovsdb - v3
@@ -184,6 +190,13 @@ spec:
         #     port: 10255
         #     scheme: HTTP
         lifecycle:
+        readinessProbe:
+          exec:
+            command: ["/usr/bin/ovn-kube-util", "readiness-probe", "-t", "ovnsb-db"]
+          initialDelaySeconds: 30
+          timeoutSeconds: 30
+          periodSeconds: 60
+
       # end of container
 
       nodeSelector:
