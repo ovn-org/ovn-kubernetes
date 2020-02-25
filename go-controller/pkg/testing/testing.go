@@ -72,7 +72,10 @@ func (f *FakeExec) ErrorDesc() string {
 	if len(f.executedCommands) == len(f.expectedCommands) {
 		return ""
 	}
+	return f.internalErrorDesc()
+}
 
+func (f *FakeExec) internalErrorDesc() string {
 	desc := "Executed commands do not match expected commands!\n"
 	if f.looseCompare {
 		// For loose compare, mark expected commands that were not
@@ -165,7 +168,7 @@ func (f *FakeExec) Command(cmd string, args ...string) kexec.Cmd {
 	// Fail if the command being executed could not be found in the
 	// expected command list, or if the expected command list has been
 	// completely used and we are executing more commands
-	Expect(expected).NotTo(BeNil(), "Unexpected command: %s", executed)
+	Expect(expected).NotTo(BeNil(), "Unexpected command: %s\n\n%s", executed, f.internalErrorDesc())
 
 	return &fakeexec.FakeCmd{
 		Argv: strings.Split(expected.Cmd, " ")[1:],
