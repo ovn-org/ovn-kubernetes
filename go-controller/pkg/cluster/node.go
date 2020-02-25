@@ -13,7 +13,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/sirupsen/logrus"
+	"k8s.io/klog"
 
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/cni"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
@@ -39,7 +39,7 @@ func isOVNControllerReady(name string) (bool, error) {
 		ctlFile := runDir + fmt.Sprintf("ovn-controller.%s.ctl", strings.TrimSuffix(string(pid), "\n"))
 		ret, _, err := util.RunOVSAppctl("-t", ctlFile, "connection-status")
 		if err == nil {
-			logrus.Infof("node %s connection status = %s", name, ret)
+			klog.Infof("node %s connection status = %s", name, ret)
 			return ret == "connected", nil
 		}
 		return false, err
@@ -100,8 +100,12 @@ func (cluster *OvnClusterController) StartClusterNode(name string) error {
 
 	// Setting debug log level during node bring up to expose bring up process.
 	// Log level is returned to configured value when bring up is complete.
-	var LogLevel = logrus.GetLevel()
-	logrus.SetLevel(5)
+	var level klog.Level
+	lastLevel := fmt.Sprintf("%v", level.Get())
+
+	if err := level.Set("5"); err != nil {
+		klog.Errorf("setting klog \"loglevel\" to 5 failed, err: %v", err)
+	}
 
 	if config.MasterHA.ManageDBServers {
 		var readyChan = make(chan bool, 1)
@@ -138,12 +142,12 @@ func (cluster *OvnClusterController) StartClusterNode(name string) error {
 	// First wait for the node logical switch to be created by the Master, timeout is 300s.
 	err = wait.PollImmediate(500*time.Millisecond, 300*time.Second, func() (bool, error) {
 		if node, err = cluster.Kube.GetNode(name); err != nil {
-			logrus.Errorf("error retrieving node %s: %v", name, err)
+			klog.Infof("waiting to retrieve node %s: %v", name, err)
 			return false, nil
 		}
 		cidr, err = getNodeHostSubnetAnnotation(node)
 		if err != nil {
-			logrus.Errorf("Error starting node %s, no annotation found on node for subnet - %v", name, err)
+			klog.Infof("waiting for node %s to start, no annotation found on node for subnet - %v", name, err)
 			return false, nil
 		}
 		return true, nil
@@ -157,7 +161,7 @@ func (cluster *OvnClusterController) StartClusterNode(name string) error {
 		return fmt.Errorf("invalid hostsubnet found for node %s: %v", node.Name, err)
 	}
 
-	logrus.Infof("Node %s ready for ovn initialization with subnet %s", node.Name, subnet.String())
+	klog.Infof("Node %s ready for ovn initialization with subnet %s", node.Name, subnet.String())
 
 	if _, err = isOVNControllerReady(name); err != nil {
 		return err
@@ -199,7 +203,7 @@ func (cluster *OvnClusterController) StartClusterNode(name string) error {
 
 	portName := "k8s-" + node.Name
 
-	logrus.Infof("Waiting for GatewayReady and ManagementPortReady on node %s", node.Name)
+	klog.Infof("Waiting for GatewayReady and ManagementPortReady on node %s", node.Name)
 	// Wait for the portMac to be created
 	for _, f := range readyFuncs {
 		go func(rf readyFunc) {
@@ -220,7 +224,8 @@ func (cluster *OvnClusterController) StartClusterNode(name string) error {
 			return fmt.Errorf("Timeout error while obtaining addresses for %s (%v)", portName, i)
 		}
 	}
-	logrus.Infof("Gateway and ManagementPort are Ready")
+
+	klog.Infof("Gateway and ManagementPort are Ready")
 
 	if postReady != nil {
 		err = postReady()
@@ -229,7 +234,9 @@ func (cluster *OvnClusterController) StartClusterNode(name string) error {
 		}
 	}
 
-	logrus.SetLevel(LogLevel)
+	if err := level.Set(lastLevel); err != nil {
+		klog.Errorf("reset of initial klog \"loglevel\" failed, err: %v", err)
+	}
 
 	confFile := filepath.Join(config.CNI.ConfDir, config.CNIConfFileName)
 	_, err = os.Stat(confFile)
@@ -261,7 +268,7 @@ func updateOVNConfig(ep *kapi.Endpoints, readyChan chan bool) error {
 		}
 	}
 
-	logrus.Infof("OVN databases reconfigured, masterIPs %v, northbound-db %v, southbound-db %v", masterIPList, northboundDBPort, southboundDBPort)
+	klog.Infof("OVN databases reconfigured, masterIPs %v, northbound-db %v, southbound-db %v", masterIPList, northboundDBPort, southboundDBPort)
 
 	readyChan <- true
 	return nil
@@ -275,7 +282,7 @@ func (cluster *OvnClusterController) watchConfigEndpoints(readyChan chan bool) e
 				ep := obj.(*kapi.Endpoints)
 				if ep.Name == "ovnkube-db" {
 					if err := updateOVNConfig(ep, readyChan); err != nil {
-						logrus.Errorf(err.Error())
+						klog.Errorf(err.Error())
 					}
 				}
 			},
@@ -284,7 +291,7 @@ func (cluster *OvnClusterController) watchConfigEndpoints(readyChan chan bool) e
 				epOld := old.(*kapi.Endpoints)
 				if !reflect.DeepEqual(epNew.Subsets, epOld.Subsets) && epNew.Name == "ovnkube-db" {
 					if err := updateOVNConfig(epNew, readyChan); err != nil {
-						logrus.Errorf(err.Error())
+						klog.Errorf(err.Error())
 					}
 				}
 			},

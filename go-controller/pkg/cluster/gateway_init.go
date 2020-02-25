@@ -8,7 +8,7 @@ import (
 
 	"net"
 
-	"github.com/sirupsen/logrus"
+	"k8s.io/klog"
 
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn"
@@ -152,7 +152,7 @@ func (cluster *OvnClusterController) initGateway(
 func CleanupClusterNode(name string) error {
 	var err error
 
-	logrus.Debugf("Cleaning up gateway resources on node: %q", name)
+	klog.V(5).Infof("Cleaning up gateway resources on node: %q", name)
 	switch config.Gateway.Mode {
 	case config.GatewayModeLocal:
 		err = cleanupLocalnetGateway()
@@ -160,7 +160,7 @@ func CleanupClusterNode(name string) error {
 		err = cleanupSharedGateway()
 	}
 	if err != nil {
-		logrus.Errorf("Failed to cleanup Gateway, error: %v", err)
+		klog.Errorf("Failed to cleanup Gateway, error: %v", err)
 	}
 
 	// Delete iptable rules for management port on Linux.

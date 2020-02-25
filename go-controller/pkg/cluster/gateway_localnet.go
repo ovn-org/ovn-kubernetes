@@ -4,18 +4,17 @@ package cluster
 
 import (
 	"fmt"
+	"k8s.io/client-go/tools/cache"
 	"net"
 	"reflect"
 	"strings"
-
-	"k8s.io/client-go/tools/cache"
 
 	"github.com/coreos/go-iptables/iptables"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/factory"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
-	"github.com/sirupsen/logrus"
+	"k8s.io/klog"
 
 	kapi "k8s.io/api/core/v1"
 )
@@ -96,7 +95,7 @@ func delIptRules(ipt util.IPTablesHelper, rules []iptRule) {
 	for _, r := range rules {
 		err := ipt.Delete(r.table, r.chain, r.args...)
 		if err != nil {
-			logrus.Warningf("failed to delete iptables %s/%s rule %q: %v", r.table, r.chain,
+			klog.Warningf("failed to delete iptables %s/%s rule %q: %v", r.table, r.chain,
 				strings.Join(r.args, " "), err)
 		}
 	}
@@ -213,9 +212,9 @@ func initLocalnetGateway(nodeName string,
 		_, _, _ = util.RunIP("-6", "neigh", "del", "fd99::2", "dev", "br-nexthop")
 		stdout, stderr, err := util.RunIP("-6", "neigh", "add", "fd99::2", "dev", "br-nexthop", "lladdr", macAddress)
 		if err == nil {
-			logrus.Infof("Added MAC binding for fd99::2 on br-nexthop, stdout: '%s', stderr: '%s'", stdout, stderr)
+			klog.Infof("Added MAC binding for fd99::2 on br-nexthop, stdout: '%s', stderr: '%s'", stdout, stderr)
 		} else {
-			logrus.Errorf("Error in adding MAC binding for fd99::2 on br-nexthop: %v", err)
+			klog.Errorf("Error in adding MAC binding for fd99::2 on br-nexthop: %v", err)
 		}
 	}
 
@@ -281,7 +280,7 @@ func localnetAddService(svc *kapi.Service) error {
 		return err
 	}
 	rules := localnetIptRules(svc)
-	logrus.Debugf("Add rules %v for service %v", rules, svc.Name)
+	klog.V(5).Infof("Add rules %v for service %v", rules, svc.Name)
 	return addIptRules(ipt, rules)
 }
 
@@ -294,7 +293,7 @@ func localnetDeleteService(svc *kapi.Service) error {
 		return err
 	}
 	rules := localnetIptRules(svc)
-	logrus.Debugf("Delete rules %v for service %v", rules, svc.Name)
+	klog.V(5).Infof("Delete rules %v for service %v", rules, svc.Name)
 	delIptRules(ipt, rules)
 	return nil
 }
@@ -331,7 +330,7 @@ func localnetNodePortWatcher(ipt util.IPTablesHelper, wf *factory.WatchFactory) 
 			svc := obj.(*kapi.Service)
 			err := localnetAddService(svc)
 			if err != nil {
-				logrus.Errorf("Error in adding service: %v", err)
+				klog.Errorf("Error in adding service: %v", err)
 			}
 		},
 		UpdateFunc: func(old, new interface{}) {
@@ -342,18 +341,18 @@ func localnetNodePortWatcher(ipt util.IPTablesHelper, wf *factory.WatchFactory) 
 			}
 			err := localnetDeleteService(svcOld)
 			if err != nil {
-				logrus.Errorf("Error in deleting service - %v", err)
+				klog.Errorf("Error in deleting service - %v", err)
 			}
 			err = localnetAddService(svcNew)
 			if err != nil {
-				logrus.Errorf("Error in modifying service: %v", err)
+				klog.Errorf("Error in modifying service: %v", err)
 			}
 		},
 		DeleteFunc: func(obj interface{}) {
 			svc := obj.(*kapi.Service)
 			err := localnetDeleteService(svc)
 			if err != nil {
-				logrus.Errorf("Error in deleting service - %v", err)
+				klog.Errorf("Error in deleting service - %v", err)
 			}
 		},
 	}, nil)

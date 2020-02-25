@@ -11,7 +11,7 @@ import (
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
-	"github.com/sirupsen/logrus"
+	"k8s.io/klog"
 )
 
 // CreateManagementPort creates a management port attached to the node switch
@@ -35,7 +35,7 @@ func CreateManagementPort(nodeName string, localSubnet *net.IPNet, clusterSubnet
 	_, _, err = util.RunPowershell("Get-NetIPAddress", ifAlias)
 	if err == nil {
 		//The interface already exists, we should delete the routes and IP
-		logrus.Debugf("Interface %s exists, removing.", interfaceName)
+		klog.V(5).Infof("Interface %s exists, removing.", interfaceName)
 		_, _, err = util.RunPowershell("Remove-NetIPAddress", ifAlias, "-Confirm:$false")
 		if err != nil {
 			return nil, err
@@ -68,11 +68,11 @@ func CreateManagementPort(nodeName string, localSubnet *net.IPNet, clusterSubnet
 	stdout, stderr, err := util.RunPowershell("$(Get-NetAdapter", "-IncludeHidden", "|", "Where",
 		"{", "$_.Name", "-Match", fmt.Sprintf("\"%s\"", interfaceName), "}).ifIndex")
 	if err != nil {
-		logrus.Errorf("Failed to fetch interface index, stderr: %q, error: %v", stderr, err)
+		klog.Errorf("Failed to fetch interface index, stderr: %q, error: %v", stderr, err)
 		return nil, err
 	}
 	if _, err = strconv.Atoi(stdout); err != nil {
-		logrus.Errorf("Failed to parse interface index %q: %v", stdout, err)
+		klog.Errorf("Failed to parse interface index %q: %v", stdout, err)
 		return nil, err
 	}
 	interfaceIndex := stdout
@@ -87,11 +87,11 @@ func CreateManagementPort(nodeName string, localSubnet *net.IPNet, clusterSubnet
 		// Checking if the route already exists, in which case it will not be created again
 		stdout, stderr, err = util.RunRoute("print", "-4", subnetIP.String())
 		if err != nil {
-			logrus.Debugf("Failed to run route print, stderr: %q, error: %v", stderr, err)
+			klog.V(5).Infof("Failed to run route print, stderr: %q, error: %v", stderr, err)
 		}
 
 		if strings.Contains(stdout, subnetIP.String()) {
-			logrus.Debugf("Route was found, skipping route add")
+			klog.V(5).Infof("Route was found, skipping route add")
 		} else {
 			// Windows route command requires the mask to be specified in the IP format
 			subnetMask := net.IP(subnetIPNet.Mask).String()
@@ -100,7 +100,7 @@ func CreateManagementPort(nodeName string, localSubnet *net.IPNet, clusterSubnet
 				subnetIP.String(), "mask", subnetMask,
 				routerIP, "METRIC", "2", "IF", interfaceIndex)
 			if err != nil {
-				logrus.Errorf("failed to run route add, stderr: %q, error: %v", stderr, err)
+				klog.Errorf("failed to run route add, stderr: %q, error: %v", stderr, err)
 				return nil, err
 			}
 		}
@@ -113,11 +113,11 @@ func CreateManagementPort(nodeName string, localSubnet *net.IPNet, clusterSubnet
 	// Checking if the route already exists, in which case it will not be created again
 	stdout, stderr, err = util.RunRoute("print", "-4", clusterServiceIP.String())
 	if err != nil {
-		logrus.Debugf("Failed to run route print, stderr: %q, error: %v", stderr, err)
+		klog.V(5).Infof("Failed to run route print, stderr: %q, error: %v", stderr, err)
 	}
 
 	if strings.Contains(stdout, clusterServiceIP.String()) {
-		logrus.Debugf("Route was found, skipping route add")
+		klog.V(5).Infof("Route was found, skipping route add")
 	} else {
 		// Windows route command requires the mask to be specified in the IP format
 		clusterServiceMask := net.IP(clusterServiceIPNet.Mask).String()
@@ -126,7 +126,7 @@ func CreateManagementPort(nodeName string, localSubnet *net.IPNet, clusterSubnet
 			clusterServiceIP.String(), "mask", clusterServiceMask,
 			routerIP, "METRIC", "2", "IF", interfaceIndex)
 		if err != nil {
-			logrus.Errorf("failed to run route add, stderr: %q, error: %v", stderr, err)
+			klog.Errorf("failed to run route add, stderr: %q, error: %v", stderr, err)
 			return nil, err
 		}
 	}

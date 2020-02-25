@@ -6,8 +6,8 @@ import (
 	"strings"
 
 	util "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
-	"github.com/sirupsen/logrus"
 	kapi "k8s.io/api/core/v1"
+	"k8s.io/klog"
 )
 
 func (ovn *Controller) getLoadBalancer(protocol kapi.Protocol) (string,
@@ -44,7 +44,7 @@ func (ovn *Controller) getDefaultGatewayLoadBalancer(protocol kapi.Protocol) str
 
 	gw, _, err := util.GetDefaultGatewayRouterIP()
 	if err != nil {
-		logrus.Errorf(err.Error())
+		klog.Errorf(err.Error())
 		return ""
 	}
 
@@ -87,14 +87,14 @@ func (ovn *Controller) deleteLoadBalancerVIP(loadBalancer, vip string) {
 	stdout, stderr, err := util.RunOVNNbctl("--if-exists", "remove",
 		"load_balancer", loadBalancer, "vips", vipQuotes)
 	if err != nil {
-		logrus.Errorf("Error in deleting load balancer vip %s for %s"+
+		klog.Errorf("Error in deleting load balancer vip %s for %s"+
 			"stdout: %q, stderr: %q, error: %v",
 			vip, loadBalancer, stdout, stderr, err)
 	}
 }
 
 func (ovn *Controller) createLoadBalancerVIP(lb string, serviceIP string, port int32, ips []string, targetPort int32) error {
-	logrus.Debugf("Creating lb with %s, %s, %d, [%v], %d", lb, serviceIP, port, ips, targetPort)
+	klog.V(5).Infof("Creating lb with %s, %s, %d, [%v], %d", lb, serviceIP, port, ips, targetPort)
 
 	// With service_ip:port as a VIP, create an entry in 'load_balancer'
 	// key is of the form "IP:port" (with quotes around)
@@ -119,7 +119,7 @@ func (ovn *Controller) createLoadBalancerVIP(lb string, serviceIP string, port i
 	out, stderr, err := util.RunOVNNbctl("set", "load_balancer", lb,
 		target)
 	if err != nil {
-		logrus.Errorf("Error in creating load balancer: %s "+
+		klog.Errorf("Error in creating load balancer: %s "+
 			"stdout: %q, stderr: %q, error: %v", lb, out, stderr, err)
 	}
 	return err

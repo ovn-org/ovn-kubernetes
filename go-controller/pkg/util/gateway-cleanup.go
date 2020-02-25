@@ -5,7 +5,7 @@ import (
 	"net"
 	"strings"
 
-	"github.com/sirupsen/logrus"
+	"k8s.io/klog"
 )
 
 // GatewayCleanup removes all the NB DB objects created for a node's gateway
@@ -103,7 +103,7 @@ func staticRouteCleanup(clusterRouter string, nextHops []string) {
 			"--columns=_uuid", "find", "logical_router_static_route",
 			"nexthop=\""+nextHop+"\"")
 		if err != nil {
-			logrus.Errorf("Failed to fetch all routes with "+
+			klog.Errorf("Failed to fetch all routes with "+
 				"IP %s as nexthop, stderr: %q, "+
 				"error: %v", nextHop, stderr, err)
 			continue
@@ -115,7 +115,7 @@ func staticRouteCleanup(clusterRouter string, nextHops []string) {
 			_, stderr, err = RunOVNNbctl("--if-exists", "remove",
 				"logical_router", clusterRouter, "static_routes", route)
 			if err != nil {
-				logrus.Errorf("Failed to delete static route %s"+
+				klog.Errorf("Failed to delete static route %s"+
 					", stderr: %q, err = %v", route, stderr, err)
 				continue
 			}

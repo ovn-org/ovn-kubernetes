@@ -8,9 +8,9 @@ import (
 
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
 	util "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
-	"github.com/sirupsen/logrus"
 	kapi "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/util/wait"
+	"k8s.io/klog"
 )
 
 // Builds the logical switch port name for a given pod.
@@ -24,7 +24,7 @@ func (oc *Controller) syncPods(pods []interface{}) {
 	for _, podInterface := range pods {
 		pod, ok := podInterface.(*kapi.Pod)
 		if !ok {
-			logrus.Errorf("Spurious object in syncPods: %v", podInterface)
+			klog.Errorf("Spurious object in syncPods: %v", podInterface)
 			continue
 		}
 		_, err := util.UnmarshalPodAnnotation(pod.Annotations)
@@ -38,7 +38,7 @@ func (oc *Controller) syncPods(pods []interface{}) {
 	output, stderr, err := util.RunOVNNbctl("--data=bare", "--no-heading",
 		"--columns=name", "find", "logical_switch_port", "external_ids:pod=true")
 	if err != nil {
-		logrus.Errorf("Error in obtaining list of logical ports, "+
+		klog.Errorf("Error in obtaining list of logical ports, "+
 			"stderr: %q, err: %v",
 			stderr, err)
 		return
@@ -47,11 +47,11 @@ func (oc *Controller) syncPods(pods []interface{}) {
 	for _, existingPort := range existingLogicalPorts {
 		if _, ok := expectedLogicalPorts[existingPort]; !ok {
 			// not found, delete this logical port
-			logrus.Infof("Stale logical port found: %s. This logical port will be deleted.", existingPort)
+			klog.Infof("Stale logical port found: %s. This logical port will be deleted.", existingPort)
 			out, stderr, err := util.RunOVNNbctl("--if-exists", "lsp-del",
 				existingPort)
 			if err != nil {
-				logrus.Errorf("Error in deleting pod's logical port "+
+				klog.Errorf("Error in deleting pod's logical port "+
 					"stdout: %q, stderr: %q err: %v",
 					out, stderr, err)
 			}
@@ -68,13 +68,13 @@ func (oc *Controller) deletePodAcls(logicalPort string) {
 		"--columns=_uuid", "find", "ACL",
 		fmt.Sprintf("external_ids:logical_port=%s", logicalPort))
 	if err != nil {
-		logrus.Errorf("Error in getting list of acls "+
+		klog.Errorf("Error in getting list of acls "+
 			"stdout: %q, stderr: %q, error: %v", uuids, stderr, err)
 		return
 	}
 
 	if uuids == "" {
-		logrus.Debugf("deletePodAcls: returning because find " +
+		klog.V(5).Infof("deletePodAcls: returning because find " +
 			"returned no ACLs")
 		return
 	}
@@ -86,7 +86,7 @@ func (oc *Controller) deletePodAcls(logicalPort string) {
 			"--no-heading", "--columns=_uuid", "find", "logical_switch",
 			fmt.Sprintf("acls{>=}%s", uuid))
 		if err != nil {
-			logrus.Errorf("find failed to get the logical_switch of acl "+
+			klog.Errorf("find failed to get the logical_switch of acl "+
 				"uuid=%s, stderr: %q, (%v)", uuid, stderr, err)
 			continue
 		}
@@ -99,7 +99,7 @@ func (oc *Controller) deletePodAcls(logicalPort string) {
 		_, stderr, err = util.RunOVNNbctl("--if-exists", "remove",
 			"logical_switch", logicalSwitch, "acls", uuid)
 		if err != nil {
-			logrus.Errorf("failed to delete the allow-from rule %s for"+
+			klog.Errorf("failed to delete the allow-from rule %s for"+
 				" logical_switch=%s, logical_port=%s, stderr: %q, (%v)",
 				uuid, logicalSwitch, logicalPort, stderr, err)
 			continue
@@ -133,12 +133,12 @@ func (oc *Controller) deleteLogicalPort(pod *kapi.Pod) {
 	}
 
 	podDesc := pod.Namespace + "/" + pod.Name
-	logrus.Infof("Deleting pod: %s", podDesc)
+	klog.Infof("Deleting pod: %s", podDesc)
 	logicalPort := podLogicalPortName(pod)
 	out, stderr, err := util.RunOVNNbctl("--if-exists", "lsp-del",
 		logicalPort)
 	if err != nil {
-		logrus.Errorf("Error in deleting pod %s logical port "+
+		klog.Errorf("Error in deleting pod %s logical port "+
 			"stdout: %q, stderr: %q, (%v)",
 			podDesc, out, stderr, err)
 	}
@@ -146,7 +146,7 @@ func (oc *Controller) deleteLogicalPort(pod *kapi.Pod) {
 	var podIP net.IP
 	podAnnotation, err := util.UnmarshalPodAnnotation(pod.Annotations)
 	if err != nil {
-		logrus.Debugf("failed to read pod %s annotation when deleting "+
+		klog.V(5).Infof("failed to read pod %s annotation when deleting "+
 			"logical port; falling back to PodIP %s: %v",
 			podDesc, pod.Status.PodIP, err)
 		podIP = net.ParseIP(pod.Status.PodIP)
@@ -163,12 +163,12 @@ func (oc *Controller) deleteLogicalPort(pod *kapi.Pod) {
 	// Remove the port from the default deny multicast policy
 	if oc.multicastSupport {
 		if err := oc.podDeleteDefaultDenyMulticastPolicy(logicalPort); err != nil {
-			logrus.Errorf(err.Error())
+			klog.Errorf(err.Error())
 		}
 	}
 
 	if err := oc.deletePodFromNamespace(pod.Namespace, podIP, logicalPort); err != nil {
-		logrus.Errorf(err.Error())
+		klog.Errorf(err.Error())
 	}
 }
 
@@ -271,7 +271,7 @@ func (oc *Controller) addLogicalPort(pod *kapi.Pod) error {
 	// Keep track of how long syncs take.
 	start := time.Now()
 	defer func() {
-		logrus.Infof("[%s/%s] addLogicalPort took %v", pod.Namespace, pod.Name, time.Since(start))
+		klog.Infof("[%s/%s] addLogicalPort took %v", pod.Namespace, pod.Name, time.Since(start))
 	}()
 
 	logicalSwitch := pod.Spec.NodeName
@@ -281,7 +281,7 @@ func (oc *Controller) addLogicalPort(pod *kapi.Pod) error {
 	}
 
 	portName := podLogicalPortName(pod)
-	logrus.Debugf("Creating logical port for %s on switch %s", portName, logicalSwitch)
+	klog.V(5).Infof("Creating logical port for %s on switch %s", portName, logicalSwitch)
 
 	annotation, err := util.UnmarshalPodAnnotation(pod.Annotations)
 	// If pod already has annotations, just add the lsp with static ip/mac.
@@ -314,7 +314,7 @@ func (oc *Controller) addLogicalPort(pod *kapi.Pod) error {
 		return fmt.Errorf("error while getting custom MAC config for port %q from "+
 			"default-network's network-attachment: %v", portName, err)
 	} else if networks != nil && networks[0].MacRequest != "" {
-		logrus.Debugf("Pod %s/%s requested custom MAC: %s", pod.Namespace, pod.Name, networks[0].MacRequest)
+		klog.V(5).Infof("Pod %s/%s requested custom MAC: %s", pod.Namespace, pod.Name, networks[0].MacRequest)
 		addressStr = networks[0].MacRequest + " dynamic"
 	}
 	out, stderr, err = util.RunOVNNbctl(
@@ -371,7 +371,7 @@ func (oc *Controller) addLogicalPort(pod *kapi.Pod) error {
 		return err
 	}
 
-	logrus.Debugf("Annotation values: ip=%s ; mac=%s ; gw=%s\nAnnotation=%s",
+	klog.V(5).Infof("Annotation values: ip=%s ; mac=%s ; gw=%s\nAnnotation=%s",
 		podCIDR, podMac, gatewayIP, marshalledAnnotation)
 	err = oc.kube.SetAnnotationsOnPod(pod, marshalledAnnotation)
 	if err != nil {

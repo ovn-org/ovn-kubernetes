@@ -22,7 +22,7 @@ import (
 	"net/http"
 	"sync"
 
-	"github.com/sirupsen/logrus"
+	"k8s.io/klog"
 
 	"k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/types"
@@ -124,9 +124,9 @@ func (hcs *server) SyncServices(newServices map[types.NamespacedName]uint16) err
 	// Remove any that are not needed any more.
 	for nsn, svc := range hcs.services {
 		if port, found := newServices[nsn]; !found || port != svc.port {
-			logrus.Infof("Closing healthcheck %q on port %d", nsn.String(), svc.port)
+			klog.Infof("Closing healthcheck %q on port %d", nsn.String(), svc.port)
 			if err := svc.listener.Close(); err != nil {
-				logrus.Errorf("Close(%v): %v", svc.listener.Addr(), err)
+				klog.Errorf("Close(%v): %v", svc.listener.Addr(), err)
 			}
 			delete(hcs.services, nsn)
 		}
@@ -135,11 +135,11 @@ func (hcs *server) SyncServices(newServices map[types.NamespacedName]uint16) err
 	// Add any that are needed.
 	for nsn, port := range newServices {
 		if hcs.services[nsn] != nil {
-			logrus.Debugf("Existing healthcheck %q on port %d", nsn.String(), port)
+			klog.V(5).Infof("Existing healthcheck %q on port %d", nsn.String(), port)
 			continue
 		}
 
-		logrus.Infof("Opening healthcheck %q on port %d", nsn.String(), port)
+		klog.Infof("Opening healthcheck %q on port %d", nsn.String(), port)
 		svc := &hcInstance{port: port}
 		addr := fmt.Sprintf(":%d", port)
 		svc.server = hcs.httpFactory.New(addr, hcHandler{name: nsn, hcs: hcs})
@@ -157,19 +157,19 @@ func (hcs *server) SyncServices(newServices map[types.NamespacedName]uint16) err
 						UID:       types.UID(nsn.String()),
 					}, v1.EventTypeWarning, "FailedToStartServiceHealthcheck", msg)
 			}
-			logrus.Error(msg)
+			klog.Error(msg)
 			continue
 		}
 		hcs.services[nsn] = svc
 
 		go func(nsn types.NamespacedName, svc *hcInstance) {
 			// Serve() will exit when the listener is closed.
-			logrus.Debugf("Starting goroutine for healthcheck %q on port %d", nsn.String(), svc.port)
+			klog.V(5).Infof("Starting goroutine for healthcheck %q on port %d", nsn.String(), svc.port)
 			if err := svc.server.Serve(svc.listener); err != nil {
-				logrus.Debugf("Healthcheck %q closed: %v", nsn.String(), err)
+				klog.V(5).Infof("Healthcheck %q closed: %v", nsn.String(), err)
 				return
 			}
-			logrus.Debugf("Healthcheck %q closed", nsn.String())
+			klog.V(5).Infof("Healthcheck %q closed", nsn.String())
 		}(nsn, svc)
 	}
 	return nil
@@ -194,7 +194,7 @@ func (h hcHandler) ServeHTTP(resp http.ResponseWriter, req *http.Request) {
 	svc, ok := h.hcs.services[h.name]
 	if !ok || svc == nil {
 		h.hcs.lock.RUnlock()
-		logrus.Errorf("Received request for closed healthcheck %q", h.name.String())
+		klog.Errorf("Received request for closed healthcheck %q", h.name.String())
 		return
 	}
 	count := svc.endpoints
@@ -216,10 +216,10 @@ func (hcs *server) SyncEndpoints(newEndpoints map[types.NamespacedName]int) erro
 
 	for nsn, count := range newEndpoints {
 		if hcs.services[nsn] == nil {
-			logrus.Debugf("Not saving endpoints for unknown healthcheck %q", nsn.String())
+			klog.V(5).Infof("Not saving endpoints for unknown healthcheck %q", nsn.String())
 			continue
 		}
-		logrus.Debugf("Reporting %d endpoints for healthcheck %q", count, nsn.String())
+		klog.V(5).Infof("Reporting %d endpoints for healthcheck %q", count, nsn.String())
 		hcs.services[nsn].endpoints = count
 	}
 	for nsn, hci := range hcs.services {

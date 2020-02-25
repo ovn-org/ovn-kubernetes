@@ -5,10 +5,10 @@ import (
 	"strings"
 
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
-	"github.com/sirupsen/logrus"
 	kapi "k8s.io/api/core/v1"
 	knet "k8s.io/api/networking/v1"
 	"k8s.io/client-go/tools/cache"
+	"k8s.io/klog"
 )
 
 func (oc *Controller) syncNetworkPoliciesOld(networkPolicies []interface{}) {
@@ -16,7 +16,7 @@ func (oc *Controller) syncNetworkPoliciesOld(networkPolicies []interface{}) {
 	for _, npInterface := range networkPolicies {
 		policy, ok := npInterface.(*knet.NetworkPolicy)
 		if !ok {
-			logrus.Errorf("Spurious object in syncNetworkPolicies: %v",
+			klog.Errorf("Spurious object in syncNetworkPolicies: %v",
 				npInterface)
 			continue
 		}
@@ -35,7 +35,7 @@ func (oc *Controller) syncNetworkPoliciesOld(networkPolicies []interface{}) {
 		}
 	})
 	if err != nil {
-		logrus.Errorf("Error in syncing network policies: %v", err)
+		klog.Errorf("Error in syncing network policies: %v", err)
 	}
 }
 
@@ -60,7 +60,7 @@ func addACLAllowOld(namespace, policy, logicalSwitch, logicalPort, match, l4Matc
 		fmt.Sprintf("external-ids:logical_switch=%s", logicalSwitch),
 		fmt.Sprintf("external-ids:logical_port=%s", logicalPort))
 	if err != nil {
-		logrus.Errorf("find failed to get the allow rule for "+
+		klog.Errorf("find failed to get the allow rule for "+
 			"namespace=%s, logical_port=%s, stderr: %q (%v)",
 			namespace, logicalPort, stderr, err)
 		return
@@ -84,7 +84,7 @@ func addACLAllowOld(namespace, policy, logicalSwitch, logicalPort, match, l4Matc
 		fmt.Sprintf("external-ids:logical_port=%s", logicalPort),
 		"--", "add", "logical_switch", logicalSwitch, "acls", "@acl")
 	if err != nil {
-		logrus.Errorf("failed to create the allow-from rule for "+
+		klog.Errorf("failed to create the allow-from rule for "+
 			"namespace=%s, logical_port=%s, stderr: %q (%v)", namespace,
 			logicalPort, stderr, err)
 		return
@@ -101,7 +101,7 @@ func modifyACLAllowOld(namespace, policy, logicalPort, oldMatch string, newMatch
 		fmt.Sprintf("external-ids:policy_type=%s", policyType),
 		fmt.Sprintf("external-ids:logical_port=%s", logicalPort))
 	if err != nil {
-		logrus.Errorf("find failed to get the allow rule for "+
+		klog.Errorf("find failed to get the allow rule for "+
 			"namespace=%s, logical_port=%s, stderr: %q (%v)",
 			namespace, logicalPort, stderr, err)
 		return
@@ -112,7 +112,7 @@ func modifyACLAllowOld(namespace, policy, logicalPort, oldMatch string, newMatch
 		_, stderr, err = util.RunOVNNbctl("set", "acl", uuid,
 			newMatch)
 		if err != nil {
-			logrus.Errorf("failed to modify the allow-from rule for "+
+			klog.Errorf("failed to modify the allow-from rule for "+
 				"namespace=%s, logical_port=%s, stderr: %q (%v)",
 				namespace, logicalPort, stderr, err)
 		}
@@ -133,21 +133,21 @@ func deleteACLAllowOld(namespace, policy, logicalSwitch, logicalPort, match, l4M
 		fmt.Sprintf("external-ids:logical_switch=%s", logicalSwitch),
 		fmt.Sprintf("external-ids:logical_port=%s", logicalPort))
 	if err != nil {
-		logrus.Errorf("find failed to get the allow rule for "+
+		klog.Errorf("find failed to get the allow rule for "+
 			"namespace=%s, logical_port=%s, stderr: %q, (%v)",
 			namespace, logicalPort, stderr, err)
 		return
 	}
 
 	if uuid == "" {
-		logrus.Infof("deleteACLAllow: returning because find returned empty")
+		klog.Infof("deleteACLAllow: returning because find returned empty")
 		return
 	}
 
 	_, stderr, err = util.RunOVNNbctl("remove", "logical_switch",
 		logicalSwitch, "acls", uuid)
 	if err != nil {
-		logrus.Errorf("remove failed to delete the allow-from rule for "+
+		klog.Errorf("remove failed to delete the allow-from rule for "+
 			"namespace=%s, logical_port=%s, stderr: %q (%v)", namespace,
 			logicalPort, stderr, err)
 		return
@@ -176,7 +176,7 @@ func addIPBlockACLDenyOld(namespace, policy, logicalSwitch, logicalPort, except,
 		fmt.Sprintf("external-ids:logical_switch=%s", logicalSwitch),
 		fmt.Sprintf("external-ids:logical_port=%s", logicalPort))
 	if err != nil {
-		logrus.Errorf("find failed to get the default deny rule for "+
+		klog.Errorf("find failed to get the default deny rule for "+
 			"namespace=%s, logical_port=%s stderr: %q, (%v)",
 			namespace, logicalPort, stderr, err)
 		return
@@ -197,7 +197,7 @@ func addIPBlockACLDenyOld(namespace, policy, logicalSwitch, logicalPort, except,
 		"--", "add", "logical_switch", logicalSwitch,
 		"acls", "@acl")
 	if err != nil {
-		logrus.Errorf("error executing create ACL command, stderr: %q, %+v",
+		klog.Errorf("error executing create ACL command, stderr: %q, %+v",
 			stderr, err)
 	}
 }
@@ -223,7 +223,7 @@ func deleteIPBlockACLDenyOld(namespace, policy, logicalSwitch, logicalPort, exce
 		fmt.Sprintf("external-ids:logical_switch=%s", logicalSwitch),
 		fmt.Sprintf("external-ids:logical_port=%s", logicalPort))
 	if err != nil {
-		logrus.Errorf("find failed to get the default deny rule for "+
+		klog.Errorf("find failed to get the default deny rule for "+
 			"namespace=%s, logical_port=%s, stderr: %q. (%v)",
 			namespace, logicalPort, stderr, err)
 		return
@@ -236,7 +236,7 @@ func deleteIPBlockACLDenyOld(namespace, policy, logicalSwitch, logicalPort, exce
 	_, stderr, err = util.RunOVNNbctl("remove", "logical_switch",
 		logicalSwitch, "acls", uuid)
 	if err != nil {
-		logrus.Errorf("remove failed to delete the deny rule for "+
+		klog.Errorf("remove failed to delete the deny rule for "+
 			"namespace=%s, logical_port=%s, stderr: %q (%v)",
 			namespace, logicalPort, stderr, err)
 		return
@@ -259,7 +259,7 @@ func addACLDenyOld(namespace, logicalSwitch, logicalPort, priority string, polic
 		fmt.Sprintf("external-ids:logical_switch=%s", logicalSwitch),
 		fmt.Sprintf("external-ids:logical_port=%s", logicalPort))
 	if err != nil {
-		logrus.Errorf("find failed to get the default deny rule for "+
+		klog.Errorf("find failed to get the default deny rule for "+
 			"namespace=%s, logical_port=%s, stderr: %q (%v)", namespace,
 			logicalPort, stderr, err)
 		return
@@ -279,7 +279,7 @@ func addACLDenyOld(namespace, logicalSwitch, logicalPort, priority string, polic
 		"--", "add", "logical_switch", logicalSwitch,
 		"acls", "@acl")
 	if err != nil {
-		logrus.Errorf("error executing create ACL command, stderr: %q, %+v",
+		klog.Errorf("error executing create ACL command, stderr: %q, %+v",
 			stderr, err)
 	}
 }
@@ -299,7 +299,7 @@ func deleteACLDenyOld(namespace, logicalSwitch, logicalPort string, policyType k
 		fmt.Sprintf("external-ids:logical_switch=%s", logicalSwitch),
 		fmt.Sprintf("external-ids:logical_port=%s", logicalPort))
 	if err != nil {
-		logrus.Errorf("find failed to get the default deny rule for "+
+		klog.Errorf("find failed to get the default deny rule for "+
 			"namespace=%s, logical_port=%s, stderr: %q, (%v)",
 			namespace, logicalPort, stderr, err)
 		return
@@ -312,7 +312,7 @@ func deleteACLDenyOld(namespace, logicalSwitch, logicalPort string, policyType k
 	_, stderr, err = util.RunOVNNbctl("remove", "logical_switch",
 		logicalSwitch, "acls", uuid)
 	if err != nil {
-		logrus.Errorf("remove failed to delete the deny rule for "+
+		klog.Errorf("remove failed to delete the deny rule for "+
 			"namespace=%s, logical_port=%s, stderr: %q (%v)",
 			namespace, logicalPort, stderr, err)
 		return
@@ -325,14 +325,14 @@ func deleteAclsPolicyOld(namespace, policy string) {
 		fmt.Sprintf("external-ids:namespace=%s", namespace),
 		fmt.Sprintf("external-ids:policy=%s", policy))
 	if err != nil {
-		logrus.Errorf("find failed to get the allow rule for "+
+		klog.Errorf("find failed to get the allow rule for "+
 			"namespace=%s, policy=%s, stderr: %q (%v)",
 			namespace, policy, stderr, err)
 		return
 	}
 
 	if uuids == "" {
-		logrus.Debugf("deleteAclsPolicy: returning because find " +
+		klog.V(5).Infof("deleteAclsPolicy: returning because find " +
 			"returned no ACLs")
 		return
 	}
@@ -344,7 +344,7 @@ func deleteAclsPolicyOld(namespace, policy string) {
 			"--no-heading", "--columns=_uuid", "find", "logical_switch",
 			fmt.Sprintf("acls{>=}%s", uuid))
 		if err != nil {
-			logrus.Errorf("find failed to get the logical_switch of acl"+
+			klog.Errorf("find failed to get the logical_switch of acl"+
 				"uuid=%s, stderr: %q (%v)", uuid, stderr, err)
 			continue
 		}
@@ -356,7 +356,7 @@ func deleteAclsPolicyOld(namespace, policy string) {
 		_, stderr, err = util.RunOVNNbctl("remove", "logical_switch",
 			logicalSwitch, "acls", uuid)
 		if err != nil {
-			logrus.Errorf("remove failed to delete the allow-from rule %s for"+
+			klog.Errorf("remove failed to delete the allow-from rule %s for"+
 				" namespace=%s, policy=%s, logical_switch=%s, stderr: %q (%v)",
 				uuid, namespace, policy, logicalSwitch, stderr, err)
 			continue
@@ -615,7 +615,7 @@ func (oc *Controller) handleLocalPodSelectorOld(
 			},
 		}, nil)
 	if err != nil {
-		logrus.Errorf("error watching local pods for policy %s in namespace %s: %v",
+		klog.Errorf("error watching local pods for policy %s in namespace %s: %v",
 			policy.Name, policy.Namespace, err)
 		return
 	}
@@ -660,7 +660,7 @@ func (oc *Controller) handlePeerNamespaceSelectorModifyOld(
 // addNetworkPolicyOld creates and applies OVN ACLs to pod logical switch
 // ports from Kubernetes NetworkPolicy objects without using OVN Port Groups
 func (oc *Controller) addNetworkPolicyOld(policy *knet.NetworkPolicy) {
-	logrus.Infof("Adding network policy %s in namespace %s", policy.Name,
+	klog.Infof("Adding network policy %s in namespace %s", policy.Name,
 		policy.Namespace)
 
 	if oc.namespacePolicies[policy.Namespace] != nil &&
@@ -670,7 +670,7 @@ func (oc *Controller) addNetworkPolicyOld(policy *knet.NetworkPolicy) {
 
 	err := oc.waitForNamespaceEvent(policy.Namespace)
 	if err != nil {
-		logrus.Errorf("failed to wait for namespace %s event (%v)",
+		klog.Errorf("failed to wait for namespace %s event (%v)",
 			policy.Namespace, err)
 		return
 	}
@@ -680,7 +680,7 @@ func (oc *Controller) addNetworkPolicyOld(policy *knet.NetworkPolicy) {
 	// Go through each ingress rule.  For each ingress rule, create an
 	// addressSet for the peer pods.
 	for i, ingressJSON := range policy.Spec.Ingress {
-		logrus.Debugf("Network policy ingress is %+v", ingressJSON)
+		klog.V(5).Infof("Network policy ingress is %+v", ingressJSON)
 
 		ingress := newGressPolicy(knet.PolicyTypeIngress, i)
 
@@ -737,7 +737,7 @@ func (oc *Controller) addNetworkPolicyOld(policy *knet.NetworkPolicy) {
 	// Go through each egress rule.  For each egress rule, create an
 	// addressSet for the peer pods.
 	for i, egressJSON := range policy.Spec.Egress {
-		logrus.Debugf("Network policy egress is %+v", egressJSON)
+		klog.V(5).Infof("Network policy egress is %+v", egressJSON)
 
 		egress := newGressPolicy(knet.PolicyTypeEgress, i)
 
@@ -806,12 +806,12 @@ func (oc *Controller) getLogicalSwitchForLogicalPort(
 	logicalSwitch, stderr, err := util.RunOVNNbctl("get",
 		"logical_switch_port", logicalPort, "external-ids:logical_switch")
 	if err != nil {
-		logrus.Errorf("Error obtaining logical switch for %s, stderr: %q (%v)",
+		klog.Errorf("Error obtaining logical switch for %s, stderr: %q (%v)",
 			logicalPort, stderr, err)
 		return ""
 	}
 	if logicalSwitch == "" {
-		logrus.Errorf("Error obtaining logical switch for %s",
+		klog.Errorf("Error obtaining logical switch for %s",
 			logicalPort)
 		return ""
 	}
@@ -820,12 +820,12 @@ func (oc *Controller) getLogicalSwitchForLogicalPort(
 
 func (oc *Controller) deleteNetworkPolicyOld(
 	policy *knet.NetworkPolicy) {
-	logrus.Infof("Deleting network policy %s in namespace %s",
+	klog.Infof("Deleting network policy %s in namespace %s",
 		policy.Name, policy.Namespace)
 
 	if oc.namespacePolicies[policy.Namespace] == nil ||
 		oc.namespacePolicies[policy.Namespace][policy.Name] == nil {
-		logrus.Errorf("Delete network policy %s in namespace %s "+
+		klog.Errorf("Delete network policy %s in namespace %s "+
 			"received without getting a create event",
 			policy.Name, policy.Namespace)
 		return

@@ -10,7 +10,7 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/sirupsen/logrus"
+	"k8s.io/klog"
 
 	"github.com/Mellanox/sriovnet"
 	"github.com/containernetworking/cni/pkg/types/current"
@@ -195,7 +195,7 @@ func setupSriovInterface(netns ns.NetNS, containerID, ifName string, ifInfo *Pod
 	// Probably put this in a function that cleans up/resets other configs too.
 	err = netlink.LinkSetVfTxRate(physlink, vfIndex, 0)
 	if err != nil {
-		logrus.Infof("failed to clean up bandwidth on %s (%s/%d): %v", pciAddrs, physlink, vfIndex, err)
+		klog.Infof("failed to clean up bandwidth on %s (%s/%d): %v", pciAddrs, physlink, vfIndex, err)
 	}
 
 	// 8. set rate, if any.
@@ -264,7 +264,7 @@ func (pr *PodRequest) ConfigureInterface(namespace string, podName string, ifInf
 
 	var hostIface, contIface *current.Interface
 
-	logrus.Debugf("CNI Conf %v", pr.CNIConf)
+	klog.V(5).Infof("CNI Conf %v", pr.CNIConf)
 	if pr.CNIConf.DeviceID != "" {
 		// SR-IOV Case
 		hostIface, contIface, err = setupSriovInterface(netns, pr.SandboxID, pr.IfName, ifInfo, pr.CNIConf.DeviceID)
@@ -285,7 +285,7 @@ func (pr *PodRequest) ConfigureInterface(namespace string, podName string, ifInf
 	uuids, _ := ovsFind("Interface", "_uuid", "external-ids:iface-id="+ifaceID)
 	for _, uuid := range uuids {
 		if out, err := ovsExec("remove", "Interface", uuid, "external-ids", "iface-id"); err != nil {
-			logrus.Warningf("failed to clear stale OVS port %q iface-id %q: %v\n  %q", uuid, ifaceID, err, out)
+			klog.Warningf("failed to clear stale OVS port %q iface-id %q: %v\n  %q", uuid, ifaceID, err, out)
 		}
 	}
 
@@ -326,13 +326,13 @@ func (pr *PodRequest) ConfigureInterface(namespace string, podName string, ifInf
 		if _, err := os.Stat("/proc/sys/net/ipv6/conf/all/dad_transmits"); !os.IsNotExist(err) {
 			err = setSysctl("/proc/sys/net/ipv6/conf/all/dad_transmits", 0)
 			if err != nil {
-				logrus.Warningf("failed to disable IPv6 DAD: %q", err)
+				klog.Warningf("failed to disable IPv6 DAD: %q", err)
 			}
 		}
 		return ip.SettleAddresses(contIface.Name, 10)
 	})
 	if err != nil {
-		logrus.Warningf("failed to settle addresses: %q", err)
+		klog.Warningf("failed to settle addresses: %q", err)
 	}
 
 	return []*current.Interface{hostIface, contIface}, nil
@@ -347,7 +347,7 @@ func (pr *PodRequest) PlatformSpecificCleanup() error {
 	out, err := exec.Command("ovs-vsctl", ovsArgs...).CombinedOutput()
 	if err != nil && !strings.Contains(string(out), "no port named") {
 		// DEL should be idempotent; don't return an error just log it
-		logrus.Warningf("failed to delete OVS port %s: %v\n  %q", ifaceName, err, string(out))
+		klog.Warningf("failed to delete OVS port %s: %v\n  %q", ifaceName, err, string(out))
 	}
 
 	_ = clearPodBandwidth(pr.SandboxID)

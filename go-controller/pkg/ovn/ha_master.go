@@ -11,7 +11,6 @@ import (
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/factory"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
-	"github.com/sirupsen/logrus"
 	kapi "k8s.io/api/core/v1"
 	v1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -20,6 +19,7 @@ import (
 	"k8s.io/client-go/tools/cache"
 	"k8s.io/client-go/tools/leaderelection"
 	"k8s.io/client-go/tools/leaderelection/resourcelock"
+	"k8s.io/klog"
 )
 
 const (
@@ -71,7 +71,7 @@ func (hacontroller *HAMasterController) StartHAMasterController() error {
 	}
 
 	hacontrollerOnStartedLeading := func(ctx context.Context) {
-		logrus.Infof(" I (%s) won the election. In active mode", hacontroller.nodeName)
+		klog.Infof(" I (%s) won the election. In active mode", hacontroller.nodeName)
 		if err := hacontroller.ConfigureAsActive(hacontroller.nodeName); err != nil {
 			if hacontroller.manageDBServers {
 				// Stop ovn-northd before panicking.
@@ -92,13 +92,13 @@ func (hacontroller *HAMasterController) StartHAMasterController() error {
 			// Stop ovn-northd and then exit.
 			_, _, _ = util.RunOVNNorthAppCtl("exit")
 		}
-		logrus.Infof("I (%s) am no longer a leader. Exiting", hacontroller.nodeName)
+		klog.Infof("I (%s) am no longer a leader. Exiting", hacontroller.nodeName)
 		os.Exit(1)
 	}
 
 	hacontrollerNewLeader := func(nodeName string) {
 		if nodeName != hacontroller.nodeName {
-			logrus.Infof(" I (%s) lost the election to %s. In Standby mode", hacontroller.nodeName, nodeName)
+			klog.Infof(" I (%s) lost the election to %s. In Standby mode", hacontroller.nodeName, nodeName)
 			if ep, err := hacontroller.ovnController.kube.GetEndpoint(config.Kubernetes.OVNConfigNamespace, ovnkubeDbEp); err == nil {
 				if err := hacontroller.ConfigureAsStandby(ep); err != nil {
 					if hacontroller.manageDBServers {
@@ -237,7 +237,7 @@ func (hacontroller *HAMasterController) updateOvnDbEndpoints(ep *kapi.Endpoints,
 
 	var err error
 	if ep == nil {
-		logrus.Debugf("updateOvnDbEndpoints : Creating the endpoint")
+		klog.V(5).Infof("updateOvnDbEndpoints : Creating the endpoint")
 		// Create the endpoint
 		ovndbEp := v1.Endpoints{
 			ObjectMeta: metav1.ObjectMeta{
@@ -253,7 +253,7 @@ func (hacontroller *HAMasterController) updateOvnDbEndpoints(ep *kapi.Endpoints,
 			return fmt.Errorf("%s Endpoint Create failed", ovnkubeDbEp)
 		}
 	} else {
-		logrus.Debugf("updateOvnDbEndpoints : Updating the endpoint")
+		klog.V(5).Infof("updateOvnDbEndpoints : Updating the endpoint")
 		ovndbEp := ep.DeepCopy()
 		ovndbEp.Subsets = epSubsets
 		if ovndbEp.Annotations == nil {
@@ -280,11 +280,11 @@ func (hacontroller *HAMasterController) ConfigureAsStandby(ep *kapi.Endpoints) e
 	if err != nil {
 		// The db remotes are invalid. Return without doing anything.
 		// Once master updates the endpoints properly we will be notified.
-		logrus.Errorf("ConfigureAsStandby : error in extracting DbRemotes From Endpoint")
+		klog.Errorf("ConfigureAsStandby : error in extracting DbRemotes From Endpoint")
 		return nil
 	}
 
-	logrus.Infof("ConfigureAsStandby: New leader IP is : [%s]", masterIPList[0])
+	klog.Infof("ConfigureAsStandby: New leader IP is : [%s]", masterIPList[0])
 
 	activeServerOutOfSync := func(northbound bool, masterIP string, port int32) (bool, error) {
 		var stdout, detail string
@@ -298,7 +298,7 @@ func (hacontroller *HAMasterController) ConfigureAsStandby(ep *kapi.Endpoints) e
 			stdout, _, err = util.RunOVNSBAppCtl("ovsdb-server/get-active-ovsdb-server")
 		}
 		if err != nil {
-			logrus.Errorf("Getting  active-ovsdb-server of %s ovsdb-server failed", detail)
+			klog.Errorf("Getting  active-ovsdb-server of %s ovsdb-server failed", detail)
 			return true, err
 		}
 
@@ -326,10 +326,10 @@ func (hacontroller *HAMasterController) ConfigureAsStandby(ep *kapi.Endpoints) e
 		}
 	}
 
-	logrus.Debugf("ConfigureAsStandby : active server out of sync..Setting the new active server to : " + masterIPList[0])
+	klog.V(5).Infof("ConfigureAsStandby : active server out of sync..Setting the new active server to : " + masterIPList[0])
 	err = hacontroller.DemoteOVNDbs(masterIPList[0], int(nbDBPort), int(sbDBPort))
 	if err != nil {
-		logrus.Errorf("Demoting OVN ovsdb-servers to standby failed")
+		klog.Errorf("Demoting OVN ovsdb-servers to standby failed")
 	}
 	return err
 }
@@ -375,7 +375,7 @@ func (hacontroller *HAMasterController) WatchOvnDbEndpoints() error {
 		} else {
 			err := hacontroller.ConfigureAsStandby(ep)
 			if err != nil {
-				logrus.Errorf(err.Error())
+				klog.Errorf(err.Error())
 				panic(err.Error())
 			}
 		}
@@ -406,13 +406,13 @@ func (hacontroller *HAMasterController) WatchOvnDbEndpoints() error {
 func (hacontroller *HAMasterController) PromoteOVNDbs(nbDBPort, sbDBPort int) error {
 	_, _, err := util.RunOVNCtl("promote_ovnnb")
 	if err != nil {
-		logrus.Errorf("promoting ovnnb failed")
+		klog.Errorf("promoting ovnnb failed")
 		return err
 	}
 
 	_, _, err = util.RunOVNCtl("promote_ovnsb")
 	if err != nil {
-		logrus.Errorf("promoting ovnsb failed")
+		klog.Errorf("promoting ovnsb failed")
 		return err
 	}
 
@@ -420,14 +420,14 @@ func (hacontroller *HAMasterController) PromoteOVNDbs(nbDBPort, sbDBPort int) er
 	target := "ptcp:" + strconv.Itoa(nbDBPort) + ":" + config.Kubernetes.PodIP
 	_, _, err = util.RunOVNNBAppCtl("ovsdb-server/add-remote", target)
 	if err != nil {
-		logrus.Errorf("Adding remote [%s] to NB ovsdb-server failed", target)
+		klog.Errorf("Adding remote [%s] to NB ovsdb-server failed", target)
 		return err
 	}
 
 	target = "ptcp:" + strconv.Itoa(sbDBPort) + ":" + config.Kubernetes.PodIP
 	_, _, err = util.RunOVNSBAppCtl("ovsdb-server/add-remote", target)
 	if err != nil {
-		logrus.Errorf("Adding remote [%s] to SB ovsdb-server failed", target)
+		klog.Errorf("Adding remote [%s] to SB ovsdb-server failed", target)
 		return err
 	}
 
@@ -444,7 +444,7 @@ func (hacontroller *HAMasterController) DemoteOVNDbs(masterIP string, nbDBPort, 
 	_, _, err := util.RunOVNCtl("demote_ovnnb", "--db-nb-sync-from-addr="+masterIP,
 		"--db-nb-sync-from-port="+strconv.Itoa(nbDBPort))
 	if err != nil {
-		logrus.Errorf("Demoting NB ovsdb-server failed")
+		klog.Errorf("Demoting NB ovsdb-server failed")
 		return err
 	}
 
@@ -452,7 +452,7 @@ func (hacontroller *HAMasterController) DemoteOVNDbs(masterIP string, nbDBPort, 
 		"--db-sb-sync-from-port="+strconv.Itoa(sbDBPort))
 
 	if err != nil {
-		logrus.Errorf("Demoting SB ovsdb-server failed")
+		klog.Errorf("Demoting SB ovsdb-server failed")
 		return err
 	}
 
@@ -479,7 +479,7 @@ func (hacontroller *HAMasterController) syncOvnNorthd() error {
 
 	stdout, _, err := util.RunOVNNbctl("--bare", "--columns", "nb_cfg", "list", "NB_Global")
 	if err != nil {
-		logrus.Errorf("Error in getting NB_Global's nb_cfg column")
+		klog.Errorf("Error in getting NB_Global's nb_cfg column")
 		return err
 	}
 
@@ -487,7 +487,7 @@ func (hacontroller *HAMasterController) syncOvnNorthd() error {
 
 	stdout, _, err = util.RunOVNSbctl("--bare", "--columns", "nb_cfg", "list", "SB_Global")
 	if err != nil {
-		logrus.Errorf("Error in getting SB_Global's nb_cfg column")
+		klog.Errorf("Error in getting SB_Global's nb_cfg column")
 		return err
 	}
 
@@ -502,7 +502,7 @@ func (hacontroller *HAMasterController) syncOvnNorthd() error {
 	_, _, err = util.RunOVNNbctl("set", "NB_Global", ".", nbCfgValue)
 
 	if err != nil {
-		logrus.Errorf("Error in setting NB_Global's nb_cfg column")
+		klog.Errorf("Error in setting NB_Global's nb_cfg column")
 		return err
 	}
 

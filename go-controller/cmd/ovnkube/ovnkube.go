@@ -13,7 +13,8 @@ import (
 	"text/tabwriter"
 	"text/template"
 
-	"github.com/sirupsen/logrus"
+	"k8s.io/klog"
+
 	"github.com/urfave/cli"
 	"gopkg.in/fsnotify/fsnotify.v1"
 
@@ -103,7 +104,7 @@ func main() {
 	}
 
 	if err := c.Run(os.Args); err != nil {
-		logrus.Fatal(err)
+		klog.Exit(err)
 	}
 }
 
@@ -111,7 +112,7 @@ func delPidfile(pidfile string) {
 	if pidfile != "" {
 		if _, err := os.Stat(pidfile); err == nil {
 			if err := os.Remove(pidfile); err != nil {
-				logrus.Errorf("%s delete failed: %v", pidfile, err)
+				klog.Errorf("%s delete failed: %v", pidfile, err)
 			}
 		}
 	}
@@ -132,7 +133,7 @@ func setupPIDFile(pidfile string) error {
 	// Create if it doesn't exist, else exit with error
 	if os.IsNotExist(err) {
 		if err := ioutil.WriteFile(pidfile, []byte(fmt.Sprintf("%d", os.Getpid())), 0644); err != nil {
-			logrus.Errorf("failed to write pidfile %s (%v). Ignoring..", pidfile, err)
+			klog.Errorf("failed to write pidfile %s (%v). Ignoring..", pidfile, err)
 		}
 	} else {
 		// get the pid and see if it exists
@@ -144,7 +145,7 @@ func setupPIDFile(pidfile string) error {
 		if os.IsNotExist(err1) {
 			// Left over pid from dead process
 			if err := ioutil.WriteFile(pidfile, []byte(fmt.Sprintf("%d", os.Getpid())), 0644); err != nil {
-				logrus.Errorf("failed to write pidfile %s (%v). Ignoring..", pidfile, err)
+				klog.Errorf("failed to write pidfile %s (%v). Ignoring..", pidfile, err)
 			}
 		} else {
 			return fmt.Errorf("pidfile %s exists and ovnkube is running", pidfile)
@@ -268,7 +269,7 @@ func watchForChanges(configPath string) error {
 					return
 				}
 				if event.Op&fsnotify.Write == fsnotify.Write {
-					logrus.Infof("Configuration file %s changed, exiting...", event.Name)
+					klog.Infof("Configuration file %s changed, exiting...", event.Name)
 					os.Exit(0)
 					return
 				}
@@ -276,7 +277,7 @@ func watchForChanges(configPath string) error {
 				if !ok {
 					return
 				}
-				logrus.Errorf("fsnotify error %v", err)
+				klog.Errorf("fsnotify error %v", err)
 			}
 		}
 	}()
@@ -288,7 +289,7 @@ func watchForChanges(configPath string) error {
 		if err := watcher.Add(p); err != nil {
 			return err
 		}
-		logrus.Infof("Watching config file %s for changes", p)
+		klog.Infof("Watching config file %s for changes", p)
 
 		stat, err := os.Lstat(p)
 		if err != nil {

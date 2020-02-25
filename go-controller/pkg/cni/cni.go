@@ -6,7 +6,7 @@ import (
 	"net/http"
 	"time"
 
-	"github.com/sirupsen/logrus"
+	"k8s.io/klog"
 
 	"github.com/containernetworking/cni/pkg/types/current"
 	"k8s.io/apimachinery/pkg/api/errors"
@@ -92,7 +92,7 @@ func (pr *PodRequest) cmdAdd() ([]byte, error) {
 				// Pod not found; don't bother waiting longer
 				return false, err
 			}
-			logrus.Warningf("error getting pod annotations: %v", err)
+			klog.Warningf("error getting pod annotations: %v", err)
 			return false, nil
 		}
 		if _, ok := annotations[util.OvnPodAnnotationName]; ok {
@@ -149,7 +149,7 @@ func (pr *PodRequest) cmdDel() ([]byte, error) {
 // Return value is the actual bytes to be sent back without further processing.
 func HandleCNIRequest(request *PodRequest) ([]byte, error) {
 	pd := podDescription(request)
-	logrus.Infof("%s dispatching pod network request %v", pd, request)
+	klog.Infof("%s dispatching pod network request %v", pd, request)
 	var result []byte
 	var err error
 	switch request.Command {
@@ -159,7 +159,7 @@ func HandleCNIRequest(request *PodRequest) ([]byte, error) {
 		result, err = request.cmdDel()
 	default:
 	}
-	logrus.Infof("%s CNI request %v, result %q, err %v", pd, request, string(result), err)
+	klog.Infof("%s CNI request %v, result %q, err %v", pd, request, string(result), err)
 	if err != nil {
 		// Prefix errors with pod info for easier failure debugging
 		return nil, fmt.Errorf("%s %v", pd, err)
