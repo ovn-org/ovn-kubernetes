@@ -1,6 +1,6 @@
 // +build linux
 
-package cluster
+package node
 
 import (
 	"fmt"

@@ -1,4 +1,4 @@
-package cluster
+package node
 
 import (
 	"k8s.io/client-go/tools/cache"

@@ -18,9 +18,9 @@ import (
 	"github.com/urfave/cli"
 	"gopkg.in/fsnotify/fsnotify.v1"
 
-	ovncluster "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/cluster"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/factory"
+	ovnnode "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/node"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
 
@@ -195,7 +195,7 @@ func runOvnKube(ctx *cli.Context) error {
 			return fmt.Errorf("cannot specify cleanup-node together with 'init-node or 'init-master'")
 		}
 
-		if err = ovncluster.CleanupClusterNode(cleanupNode); err != nil {
+		if err = ovnnode.CleanupClusterNode(cleanupNode); err != nil {
 			return err
 		}
 		return nil
@@ -235,8 +235,8 @@ func runOvnKube(ctx *cli.Context) error {
 			return fmt.Errorf("cannot initialize node without service account 'token'. Please provide one with --k8s-token argument")
 		}
 
-		clusterController := ovncluster.NewClusterController(clientset, factory)
-		if err := clusterController.StartClusterNode(node); err != nil {
+		n := ovnnode.NewNode(clientset, factory, node)
+		if err := n.Start(); err != nil {
 			return err
 		}
 	}
