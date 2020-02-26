@@ -8,7 +8,6 @@ import (
 	"time"
 
 	"github.com/coreos/go-iptables/iptables"
-	"github.com/sirupsen/logrus"
 
 	houtil "github.com/ovn-org/ovn-kubernetes/go-controller/hybrid-overlay/pkg/util"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/factory"
@@ -19,6 +18,7 @@ import (
 	"k8s.io/apimachinery/pkg/util/wait"
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/tools/cache"
+	"k8s.io/klog"
 )
 
 const (
@@ -56,7 +56,7 @@ func podToCookie(pod *kapi.Pod) string {
 func (n *NodeController) addOrUpdatePod(pod *kapi.Pod) error {
 	podIP, podMAC, err := getPodDetails(pod, n.nodeName)
 	if err != nil {
-		logrus.Debugf("cleaning up hybrid overlay pod %s/%s because %v", pod.Namespace, pod.Name, err)
+		klog.V(5).Infof("cleaning up hybrid overlay pod %s/%s because %v", pod.Namespace, pod.Name, err)
 		return n.deletePod(pod)
 	}
 
@@ -106,7 +106,7 @@ func (n *NodeController) syncPods(pods []interface{}) {
 	for _, tmp := range pods {
 		pod, ok := tmp.(*kapi.Pod)
 		if !ok {
-			logrus.Errorf("Spurious object in syncPods: %v", tmp)
+			klog.Errorf("Spurious object in syncPods: %v", tmp)
 			continue
 		}
 		kubePods[podToCookie(pod)] = true
@@ -114,7 +114,7 @@ func (n *NodeController) syncPods(pods []interface{}) {
 
 	stdout, stderr, err := util.RunOVSOfctl("dump-flows", extBridgeName, "table=10")
 	if err != nil {
-		logrus.Errorf("failed to dump flows for %s: stderr: %q, error: %v", extBridgeName, stderr, err)
+		klog.Errorf("failed to dump flows for %s: stderr: %q, error: %v", extBridgeName, stderr, err)
 		return
 	}
 
@@ -145,7 +145,7 @@ func (n *NodeController) syncPods(pods []interface{}) {
 	for cookie := range podsToRemove {
 		stderr, _, err = util.RunOVSOfctl("del-flows", extBridgeName, fmt.Sprintf("table=10, cookie=0x%s/0xffffffff", cookie))
 		if err != nil {
-			logrus.Errorf("Failed clean stale hybrid overlay pod flow %q: stderr: %q, error: %v",
+			klog.Errorf("Failed clean stale hybrid overlay pod flow %q: stderr: %q, error: %v",
 				cookie, stderr, err)
 		}
 	}
@@ -165,7 +165,7 @@ func (n *NodeController) startPodWatch(wf *factory.WatchFactory) error {
 		AddFunc: func(obj interface{}) {
 			pod := obj.(*kapi.Pod)
 			if err := n.addOrUpdatePod(pod); err != nil {
-				logrus.Warningf("failed to handle pod %v addition: %v", pod, err)
+				klog.Warningf("failed to handle pod %v addition: %v", pod, err)
 			}
 		},
 		UpdateFunc: func(old, newer interface{}) {
@@ -173,14 +173,14 @@ func (n *NodeController) startPodWatch(wf *factory.WatchFactory) error {
 			podOld := old.(*kapi.Pod)
 			if podChanged(podOld, podNew, n.nodeName) {
 				if err := n.addOrUpdatePod(podNew); err != nil {
-					logrus.Warningf("failed to handle pod %v update: %v", podNew, err)
+					klog.Warningf("failed to handle pod %v update: %v", podNew, err)
 				}
 			}
 		},
 		DeleteFunc: func(obj interface{}) {
 			pod := obj.(*kapi.Pod)
 			if err := n.deletePod(pod); err != nil {
-				logrus.Warningf("failed to handle pod %v deletion: %v", pod, err)
+				klog.Warningf("failed to handle pod %v deletion: %v", pod, err)
 			}
 		},
 	}, n.syncPods)
@@ -238,7 +238,7 @@ func (n *NodeController) windowsNodeAddOrUpdate(node *kapi.Node) error {
 func (n *NodeController) Add(node *kapi.Node) {
 	if node.Name != n.nodeName {
 		if err := n.windowsNodeAddOrUpdate(node); err != nil {
-			logrus.Warning(err)
+			klog.Warning(err)
 		}
 	}
 }
@@ -248,7 +248,7 @@ func (n *NodeController) Update(oldNode, newNode *kapi.Node) {
 	if newNode.Name != n.nodeName {
 		if nodeChanged(oldNode, newNode) {
 			if err := n.windowsNodeAddOrUpdate(newNode); err != nil {
-				logrus.Warning(err)
+				klog.Warning(err)
 			}
 		}
 	}
@@ -269,7 +269,7 @@ func (n *NodeController) Delete(node *kapi.Node) {
 	}
 
 	if err := deleteNodeFlowsByCookie(nameToCookie(node.Name)); err != nil {
-		logrus.Errorf(err.Error())
+		klog.Errorf(err.Error())
 	}
 }
 
@@ -284,7 +284,7 @@ func (n *NodeController) Sync(nodes []*kapi.Node) {
 
 	stdout, stderr, err := util.RunOVSOfctl("dump-flows", extBridgeName, "table=0")
 	if err != nil {
-		logrus.Errorf("failed to dump flows for %s: stderr: %q, error: %v", extBridgeName, stderr, err)
+		klog.Errorf("failed to dump flows for %s: stderr: %q, error: %v", extBridgeName, stderr, err)
 		return
 	}
 
@@ -318,7 +318,7 @@ func (n *NodeController) Sync(nodes []*kapi.Node) {
 
 	for cookie := range nodesToRemove {
 		if err := deleteNodeFlowsByCookie(cookie); err != nil {
-			logrus.Errorf("Failed clean stale hybrid overlay node flow %q: %v", cookie, err)
+			klog.Errorf("Failed clean stale hybrid overlay node flow %q: %v", cookie, err)
 		}
 	}
 }
@@ -342,7 +342,7 @@ func getLocalNodeSubnet(nodeName string) (*net.IPNet, error) {
 		return nil, fmt.Errorf("Invalid hostsubnet found for node %s - %v", nodeName, err)
 	}
 
-	logrus.Infof("found node %s subnet %s", nodeName, subnet.String())
+	klog.Infof("found node %s subnet %s", nodeName, subnet.String())
 	return subnet, nil
 }
 

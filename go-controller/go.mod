@@ -21,7 +21,6 @@ require (
 	github.com/onsi/gomega v1.8.1
 	github.com/prometheus/client_golang v1.2.1
 	github.com/satori/go.uuid v0.0.0-20181028125025-b2ce2384e17b // indirect
-	github.com/sirupsen/logrus v1.4.2
 	github.com/spf13/pflag v1.0.5 // indirect
 	github.com/urfave/cli v1.22.1
 	github.com/vishvananda/netlink v0.0.0-20181108222139-023a6dafdcdf

@@ -4,12 +4,11 @@ import (
 	"bytes"
 	"net"
 
-	"github.com/sirupsen/logrus"
-
 	"github.com/ovn-org/ovn-kubernetes/go-controller/hybrid-overlay/pkg/types"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/hybrid-overlay/pkg/util"
 
 	kapi "k8s.io/api/core/v1"
+	"k8s.io/klog"
 )
 
 // nodeChanged returns true if any relevant node attributes changed
@@ -37,7 +36,7 @@ func getNodeDetails(node *kapi.Node, queryDrMac bool) (*net.IPNet, net.IP, net.H
 	}
 	_, cidr, err := net.ParseCIDR(hostsubnet)
 	if err != nil {
-		logrus.Warningf("error parsing node %q subnet %q: %v", node.Name, hostsubnet, err)
+		klog.Warningf("error parsing node %q subnet %q: %v", node.Name, hostsubnet, err)
 		return nil, nil, nil
 	}
 
@@ -45,20 +44,20 @@ func getNodeDetails(node *kapi.Node, queryDrMac bool) (*net.IPNet, net.IP, net.H
 	if queryDrMac {
 		drMACString, ok := node.Annotations[types.HybridOverlayDrMac]
 		if !ok {
-			logrus.Warningf("missing node %q distributed router MAC annotation", node.Name)
+			klog.Warningf("missing node %q distributed router MAC annotation", node.Name)
 			return nil, nil, nil
 		}
 
 		drMAC, err = net.ParseMAC(drMACString)
 		if err != nil {
-			logrus.Warningf("error parsing node %q distributed router MAC %q: %v", node.Name, drMACString, err)
+			klog.Warningf("error parsing node %q distributed router MAC %q: %v", node.Name, drMACString, err)
 			return nil, nil, nil
 		}
 	}
 
 	nodeIP, err := util.GetNodeInternalIP(node)
 	if err != nil {
-		logrus.Warningf("error getting node %q internal IP: %v", node.Name, err)
+		klog.Warningf("error getting node %q internal IP: %v", node.Name, err)
 		return nil, nil, nil
 	}
 

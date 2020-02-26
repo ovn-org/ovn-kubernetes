@@ -6,9 +6,8 @@ import (
 	"net"
 	"strconv"
 
-	"github.com/sirupsen/logrus"
-
 	"github.com/Microsoft/hcsshim/hcn"
+	"k8s.io/klog"
 
 	ps "github.com/bhendo/go-powershell"
 	psBackend "github.com/bhendo/go-powershell/backend"
@@ -53,7 +52,7 @@ func (subnet *SubnetInfo) GetHostComputeSubnetConfig() (*hcn.Subnet, error) {
 	subnetPolicyJson, err := json.Marshal(subnetPolicy)
 
 	if err != nil {
-		logrus.Error(err)
+		klog.Error(err)
 		return nil, err
 	}
 
@@ -76,7 +75,7 @@ func (info *NetworkInfo) GetHostComputeNetworkConfig() (*hcn.HostComputeNetwork,
 	for _, subnet := range info.Subnets {
 		subnetConfig, err := subnet.GetHostComputeSubnetConfig()
 		if err != nil {
-			logrus.Error(err)
+			klog.Error(err)
 			return nil, err
 		}
 
@@ -149,7 +148,7 @@ func CreateNetworkPolicySetting(networkAdapterName string) (*hcn.NetworkPolicy, 
 	}
 	policyJSON, err := json.Marshal(netAdapterPolicy)
 	if err != nil {
-		logrus.Error(err)
+		klog.Error(err)
 		return nil, err
 	}
 
@@ -164,7 +163,7 @@ func AddRemoteSubnetPolicy(network *hcn.HostComputeNetwork, settings *hcn.Remote
 	rawJSON, err := json.Marshal(settings)
 
 	if err != nil {
-		logrus.Errorf("Failed to marshall settings, error: %v", err)
+		klog.Errorf("Failed to marshall settings, error: %v", err)
 		return err
 	}
 
@@ -186,7 +185,7 @@ func removeOneRemoteSubnetPolicy(network *hcn.HostComputeNetwork, policySettings
 	existingPolicyJson, err := json.Marshal(policySettings)
 
 	if err != nil {
-		logrus.Errorf("Failed to marshal settings, error: %v", err)
+		klog.Errorf("Failed to marshal settings, error: %v", err)
 		return err
 	}
 
@@ -214,7 +213,7 @@ func RemoveRemoteSubnetPolicy(network *hcn.HostComputeNetwork, destinationPrefix
 			err := json.Unmarshal(policy.Settings, &existingPolicySettings)
 
 			if err != nil {
-				logrus.Errorf("Failed to unmarshal settings, error: %v", err)
+				klog.Errorf("Failed to unmarshal settings, error: %v", err)
 				return err
 			}
 
@@ -223,7 +222,7 @@ func RemoveRemoteSubnetPolicy(network *hcn.HostComputeNetwork, destinationPrefix
 				err := removeOneRemoteSubnetPolicy(network, existingPolicySettings)
 
 				if err != nil {
-					logrus.Errorf("Failed to remove remote subnet policy %v, error: %v", existingPolicySettings.DestinationPrefix, err)
+					klog.Errorf("Failed to remove remote subnet policy %v, error: %v", existingPolicySettings.DestinationPrefix, err)
 					return err
 				}
 			}
@@ -242,14 +241,14 @@ func ClearRemoteSubnetPolicies(network *hcn.HostComputeNetwork) error {
 			err := json.Unmarshal(policy.Settings, &existingPolicySettings)
 
 			if err != nil {
-				logrus.Errorf("Failed to unmarshal settings, error: %v", err)
+				klog.Errorf("Failed to unmarshal settings, error: %v", err)
 				return err
 			}
 
 			err = removeOneRemoteSubnetPolicy(network, existingPolicySettings)
 
 			if err != nil {
-				logrus.Errorf("Failed to remove remote subnet policy %v, error: %v", existingPolicySettings.DestinationPrefix, err)
+				klog.Errorf("Failed to remove remote subnet policy %v, error: %v", existingPolicySettings.DestinationPrefix, err)
 				// We don't return the error in this case, we take a best effort approach to clear the remote subnets.
 			}
 		}
@@ -312,7 +311,7 @@ func DuplicatePersistentIpRoutes() error {
 
 	_, stderr, err := shell.Execute(script + "\r\n\r\n")
 	if err != nil {
-		logrus.Errorf("refresh the network persistent routes, %v, error: %v", stderr, err)
+		klog.Errorf("refresh the network persistent routes, %v, error: %v", stderr, err)
 		return err
 	}
 

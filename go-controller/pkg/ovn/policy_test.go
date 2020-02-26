@@ -73,11 +73,19 @@ func (n networkPolicy) addLocalPodCmds(fexec *ovntest.FakeExec, pod pod) {
 		Output: fakeUUID,
 	})
 	fexec.AddFakeCmd(&ovntest.ExpectedCmd{
+		Cmd:    "ovn-nbctl --timeout=15 --data=bare --no-heading --columns=_uuid find ACL match=\"outport == @ingressDefaultDeny && arp\" action=allow external-ids:default-deny-policy-type=Ingress",
+		Output: fakeUUID,
+	})
+	fexec.AddFakeCmd(&ovntest.ExpectedCmd{
 		Cmd:    "ovn-nbctl --timeout=15 --data=bare --no-heading --columns=_uuid find port_group name=egressDefaultDeny",
 		Output: fakeUUID,
 	})
 	fexec.AddFakeCmd(&ovntest.ExpectedCmd{
 		Cmd:    "ovn-nbctl --timeout=15 --data=bare --no-heading --columns=_uuid find ACL match=\"inport == @egressDefaultDeny\" action=drop external-ids:default-deny-policy-type=Egress",
+		Output: fakeUUID,
+	})
+	fexec.AddFakeCmd(&ovntest.ExpectedCmd{
+		Cmd:    "ovn-nbctl --timeout=15 --data=bare --no-heading --columns=_uuid find ACL match=\"inport == @egressDefaultDeny && arp\" action=allow external-ids:default-deny-policy-type=Egress",
 		Output: fakeUUID,
 	})
 	fexec.AddFakeCmdsNoOutputNoError([]string{
@@ -96,13 +104,13 @@ func (n networkPolicy) addPodSelectorCmds(fexec *ovntest.FakeExec, pod pod, netw
 	for i := range networkPolicy.Spec.Ingress {
 		hashedOVNName := hashedAddressSet(fmt.Sprintf("%s.%s.%s.%d", networkPolicy.Namespace, networkPolicy.Name, "ingress", i))
 		fexec.AddFakeCmdsNoOutputNoError([]string{
-			fmt.Sprintf("ovn-nbctl --timeout=15 set address_set %s addresses=\"%s\"", hashedOVNName, pod.podIP),
+			fmt.Sprintf("ovn-nbctl --timeout=15 add address_set %s addresses %s", hashedOVNName, pod.podIP),
 		})
 	}
 	for i := range networkPolicy.Spec.Egress {
 		hashedOVNName := hashedAddressSet(fmt.Sprintf("%s.%s.%s.%d", networkPolicy.Namespace, networkPolicy.Name, "egress", i))
 		fexec.AddFakeCmdsNoOutputNoError([]string{
-			fmt.Sprintf("ovn-nbctl --timeout=15 set address_set %s addresses=\"%s\"", hashedOVNName, pod.podIP),
+			fmt.Sprintf("ovn-nbctl --timeout=15 add address_set %s addresses %s", hashedOVNName, pod.podIP),
 		})
 	}
 	if hasLocalPods {
@@ -168,19 +176,19 @@ func (n networkPolicy) delCmds(fexec *ovntest.FakeExec, pod pod, networkPolicy k
 	})
 }
 
-func (n networkPolicy) delPodCmds(fexec *ovntest.FakeExec, networkPolicy knet.NetworkPolicy, withLocal bool) {
+func (n networkPolicy) delPodCmds(fexec *ovntest.FakeExec, networkPolicy knet.NetworkPolicy, withLocal bool, podIP string) {
 	for i := range networkPolicy.Spec.Ingress {
 		localPeerPods := fmt.Sprintf("%s.%s.%s.%d", networkPolicy.Namespace, networkPolicy.Name, "ingress", i)
 		hashedLocalAddressSet := hashedAddressSet(localPeerPods)
 		fexec.AddFakeCmdsNoOutputNoError([]string{
-			fmt.Sprintf("ovn-nbctl --timeout=15 clear address_set %s addresses", hashedLocalAddressSet),
+			fmt.Sprintf("ovn-nbctl --timeout=15 remove address_set %s addresses %s", hashedLocalAddressSet, podIP),
 		})
 	}
 	for i := range networkPolicy.Spec.Egress {
 		localPeerPods := fmt.Sprintf("%s.%s.%s.%d", networkPolicy.Namespace, networkPolicy.Name, "egress", i)
 		hashedLocalAddressSet := hashedAddressSet(localPeerPods)
 		fexec.AddFakeCmdsNoOutputNoError([]string{
-			fmt.Sprintf("ovn-nbctl --timeout=15 clear address_set %s addresses", hashedLocalAddressSet),
+			fmt.Sprintf("ovn-nbctl --timeout=15 remove address_set %s addresses %s", hashedLocalAddressSet, podIP),
 		})
 	}
 	if withLocal {
@@ -847,7 +855,7 @@ var _ = Describe("OVN NetworkPolicy Operations", func() {
 
 				nPodTest.delCmds(fExec)
 				nPodTest.delFromNamespaceCmds(fExec, nPodTest, true)
-				npTest.delPodCmds(fExec, networkPolicy, true)
+				npTest.delPodCmds(fExec, networkPolicy, true, nPodTest.podIP)
 
 				err = fakeOvn.fakeClient.CoreV1().Pods(nPodTest.namespace).Delete(nPodTest.podName, metav1.NewDeleteOptions(0))
 				Expect(err).NotTo(HaveOccurred())
@@ -956,7 +964,7 @@ var _ = Describe("OVN NetworkPolicy Operations", func() {
 
 				nPodTest.delCmds(fExec)
 				nPodTest.delFromNamespaceCmds(fExec, nPodTest, true)
-				npTest.delPodCmds(fExec, networkPolicy, false)
+				npTest.delPodCmds(fExec, networkPolicy, false, nPodTest.podIP)
 
 				err = fakeOvn.fakeClient.CoreV1().Pods(nPodTest.namespace).Delete(nPodTest.podName, metav1.NewDeleteOptions(0))
 				Expect(err).NotTo(HaveOccurred())
@@ -1212,7 +1220,7 @@ var _ = Describe("OVN NetworkPolicy Operations", func() {
 				nPodTest.populateLogicalSwitchCache(fakeOvn)
 				nPodTest.addCmdsForNonExistingPod(fExec)
 				nPodTest.addPodDenyMcast(fExec, false)
-				nTest.addPodCmds(fExec, nPodTest, namespace1)
+				nTest.addPodCmds(fExec, nPodTest, namespace1, false)
 
 				// The pod should be added to the multicast allow group.
 				mcastPolicy.addPodCmds(fExec, namespace1.Name, "fake_uuid")
@@ -1227,7 +1235,7 @@ var _ = Describe("OVN NetworkPolicy Operations", func() {
 				// The pod should be removed from the multicasts default deny
 				// group and from the multicast allow group.
 				nPodTest.delPodDenyMcast(fExec, false)
-				nTest.delPodCmds(fExec, nPodTest, namespace1)
+				nTest.delPodCmds(fExec, nPodTest, namespace1, false)
 				nPodTest.delCmds(fExec)
 
 				err = fakeOvn.fakeClient.CoreV1().Pods(nPodTest.namespace).Delete(

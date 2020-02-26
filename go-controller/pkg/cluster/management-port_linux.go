@@ -11,60 +11,53 @@ import (
 	"github.com/coreos/go-iptables/iptables"
 
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
-	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
-	"github.com/sirupsen/logrus"
+	"k8s.io/klog"
 )
 
 const (
 	iptableMgmPortChain = "OVN-KUBE-SNAT-MGMTPORT"
 )
 
-// CreateManagementPort creates a management port attached to the node switch
+// createPlatformManagementPort creates a management port attached to the node switch
 // that lets the node access its pods via their private IP address. This is used
 // for health checking and other management tasks.
-func CreateManagementPort(nodeName string, localSubnet *net.IPNet, clusterSubnet []string) (map[string]string, error) {
-	interfaceName, interfaceIP, macAddress, routerIP, routerMAC, err :=
-		createManagementPortGeneric(nodeName, localSubnet)
-	if err != nil {
-		return nil, err
-	}
-
+func createPlatformManagementPort(interfaceName, interfaceIP, routerIP, routerMAC string) error {
 	// TODO - Migrate to using netlink.
 
 	// Up the interface.
-	_, _, err = util.RunIP("link", "set", interfaceName, "up")
+	_, _, err := util.RunIP("link", "set", interfaceName, "up")
 	if err != nil {
-		return nil, err
+		return err
 	}
 
 	// The interface may already exist, in which case delete the routes and IP.
 	_, _, err = util.RunIP("addr", "flush", "dev", interfaceName)
 	if err != nil {
-		return nil, err
+		return err
 	}
 
 	// Assign IP address to the internal interface.
 	_, _, err = util.RunIP("addr", "add", interfaceIP, "dev", interfaceName)
 	if err != nil {
-		return nil, err
+		return err
 	}
 
-	for _, subnet := range clusterSubnet {
+	for _, subnet := range config.Default.ClusterSubnets {
 		// Flush the route for the entire subnet (in case it was added before).
-		_, _, err = util.RunIP("route", "flush", subnet)
+		_, _, err = util.RunIP("route", "flush", subnet.CIDR.String())
 		if err != nil {
-			return nil, err
+			return err
 		}
 
 		// Create a route for the entire subnet.
-		_, stderr, err := util.RunIP("route", "add", subnet, "via", routerIP)
+		_, stderr, err := util.RunIP("route", "add", subnet.CIDR.String(), "via", routerIP)
 		if err != nil {
 			if strings.HasPrefix(stderr, "RTNETLINK answers: File exists") {
-				logrus.Debugf("Ignoring error %s from 'route add %s via %s' - already added via IPv6 RA?",
-					strings.TrimSpace(stderr), subnet, routerIP)
+				klog.V(5).Infof("Ignoring error %s from 'route add %s via %s' - already added via IPv6 RA?",
+					strings.TrimSpace(stderr), subnet.CIDR.String(), routerIP)
 			} else {
-				return nil, fmt.Errorf("Failed to add route for %s via %s: %s", subnet, routerIP, err)
+				return fmt.Errorf("Failed to add route for %s via %s: %s", subnet.CIDR.String(), routerIP, err)
 			}
 		}
 	}
@@ -72,17 +65,17 @@ func CreateManagementPort(nodeName string, localSubnet *net.IPNet, clusterSubnet
 	// Flush the route for the services subnet (in case it was added before).
 	_, _, err = util.RunIP("route", "flush", config.Kubernetes.ServiceCIDR)
 	if err != nil {
-		return nil, err
+		return err
 	}
 
 	// Create a route for the services subnet.
 	_, stderr, err := util.RunIP("route", "add", config.Kubernetes.ServiceCIDR, "via", routerIP)
 	if err != nil {
 		if strings.HasPrefix(stderr, "RTNETLINK answers: File exists") {
-			logrus.Debugf("Ignoring error %s from 'route add %s via %s' - already added via IPv6 RA?",
+			klog.V(5).Infof("Ignoring error %s from 'route add %s via %s' - already added via IPv6 RA?",
 				strings.TrimSpace(stderr), config.Kubernetes.ServiceCIDR, routerIP)
 		} else {
-			return nil, fmt.Errorf("Failed to add route for %s via %s: %s", config.Kubernetes.ServiceCIDR, routerIP, err)
+			return fmt.Errorf("Failed to add route for %s via %s: %s", config.Kubernetes.ServiceCIDR, routerIP, err)
 		}
 	}
 
@@ -93,16 +86,16 @@ func CreateManagementPort(nodeName string, localSubnet *net.IPNet, clusterSubnet
 	// source protocol address to be in the Logical Switch's subnet.
 	_, _, err = util.RunIP("neigh", "add", routerIP, "dev", interfaceName, "lladdr", routerMAC)
 	if err != nil && os.IsNotExist(err) {
-		return nil, err
+		return err
 	}
 
 	// Set up necessary iptables rules
 	err = addMgtPortIptRules(interfaceName, interfaceIP)
 	if err != nil {
-		return nil, err
+		return err
 	}
 
-	return map[string]string{ovn.OvnNodeManagementPortMacAddress: macAddress}, nil
+	return nil
 }
 
 func addMgtPortIptRules(ifname, interfaceIP string) error {

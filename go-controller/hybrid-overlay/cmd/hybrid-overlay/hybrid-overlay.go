@@ -3,7 +3,6 @@ package main
 import (
 	"os"
 
-	"github.com/sirupsen/logrus"
 	"github.com/urfave/cli"
 
 	"github.com/ovn-org/ovn-kubernetes/go-controller/hybrid-overlay/pkg/controller"
@@ -11,6 +10,7 @@ import (
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/factory"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
 
+	"k8s.io/klog"
 	kexec "k8s.io/utils/exec"
 )
 
@@ -39,7 +39,7 @@ func main() {
 	}
 
 	if err := c.Run(os.Args); err != nil {
-		logrus.Fatal(err)
+		klog.Fatal(err)
 	}
 }
 

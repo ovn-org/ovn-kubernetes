@@ -65,7 +65,6 @@ COPY .git/refs/heads/ /root/.git/refs/heads/
 # ovnkube.sh is the entry point. This script examines environment
 # variables to direct operation and configure ovn
 COPY dist/images/ovnkube.sh /root/
-COPY dist/images/ovn-debug.sh /root/
 
 # iptables wrappers
 COPY ./dist/images/iptables-scripts/iptables /usr/sbin/

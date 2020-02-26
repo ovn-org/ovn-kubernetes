@@ -14,7 +14,6 @@ import (
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/kube"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/allocator"
 	util "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
-	"github.com/sirupsen/logrus"
 	kapi "k8s.io/api/core/v1"
 	kapisnetworking "k8s.io/api/networking/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -25,6 +24,7 @@ import (
 	kv1core "k8s.io/client-go/kubernetes/typed/core/v1"
 	"k8s.io/client-go/tools/cache"
 	"k8s.io/client-go/tools/record"
+	"k8s.io/klog"
 )
 
 // ServiceVIPKey is used for looking up service namespace information for a
@@ -158,10 +158,6 @@ func NewOvnController(kubeClient kubernetes.Interface, wf *factory.WatchFactory,
 
 // Run starts the actual watching.
 func (oc *Controller) Run(stopChan chan struct{}) error {
-	// Setting debug log level during node bring up to expose bring up process.
-	// Log level is returned to configured value when bring up is complete.
-	logrus.SetLevel(5)
-
 	startOvnUpdater()
 
 	// WatchNodes must be started first so that its initial Add will
@@ -294,7 +290,7 @@ func (oc *Controller) ovnControllerEventChecker(stopChan chan struct{}) {
 
 	_, _, err := util.RunOVNNbctl("set", "nb_global", ".", "options:controller_event=true")
 	if err != nil {
-		logrus.Error("Unable to enable controller events. Unidling not possible")
+		klog.Error("Unable to enable controller events. Unidling not possible")
 		return
 	}
 
@@ -319,7 +315,7 @@ func (oc *Controller) ovnControllerEventChecker(stopChan chan struct{}) {
 				_, _, err := util.RunOVNSbctl("destroy", "controller_event", event.uuid)
 				if err != nil {
 					// Don't unidle until we are able to remove the controller event
-					logrus.Errorf("Unable to remove controller event %s", event.uuid)
+					klog.Errorf("Unable to remove controller event %s", event.uuid)
 					continue
 				}
 				if serviceName, ok := oc.GetServiceVIPToName(event.vip, event.protocol); ok {
@@ -328,7 +324,7 @@ func (oc *Controller) ovnControllerEventChecker(stopChan chan struct{}) {
 						Namespace: serviceName.Namespace,
 						Name:      serviceName.Name,
 					}
-					logrus.Debugf("Sending a NeedPods event for service %s in namespace %s.", serviceName.Name, serviceName.Namespace)
+					klog.V(5).Infof("Sending a NeedPods event for service %s in namespace %s.", serviceName.Name, serviceName.Namespace)
 					recorder.Eventf(&serviceRef, kapi.EventTypeNormal, "NeedPods", "The service %s needs pods", serviceName.Name)
 				}
 			}
@@ -358,7 +354,7 @@ func (oc *Controller) WatchPods() error {
 
 			if podScheduled(pod) {
 				if err := oc.addLogicalPort(pod); err != nil {
-					logrus.Errorf(err.Error())
+					klog.Errorf(err.Error())
 					retryPods.Store(pod.UID, true)
 				}
 			} else {
@@ -375,7 +371,7 @@ func (oc *Controller) WatchPods() error {
 			_, retry := retryPods.Load(pod.UID)
 			if podScheduled(pod) && retry {
 				if err := oc.addLogicalPort(pod); err != nil {
-					logrus.Errorf(err.Error())
+					klog.Errorf(err.Error())
 				} else {
 					retryPods.Delete(pod.UID)
 				}
@@ -411,7 +407,7 @@ func (oc *Controller) WatchEndpoints() error {
 			ep := obj.(*kapi.Endpoints)
 			err := oc.AddEndpoints(ep)
 			if err != nil {
-				logrus.Errorf("Error in adding load balancer: %v", err)
+				klog.Errorf("Error in adding load balancer: %v", err)
 			}
 		},
 		UpdateFunc: func(old, new interface{}) {
@@ -423,12 +419,12 @@ func (oc *Controller) WatchEndpoints() error {
 			if len(epNew.Subsets) == 0 {
 				err := oc.deleteEndpoints(epNew)
 				if err != nil {
-					logrus.Errorf("Error in deleting endpoints - %v", err)
+					klog.Errorf("Error in deleting endpoints - %v", err)
 				}
 			} else {
 				err := oc.AddEndpoints(epNew)
 				if err != nil {
-					logrus.Errorf("Error in modifying endpoints: %v", err)
+					klog.Errorf("Error in modifying endpoints: %v", err)
 				}
 			}
 		},
@@ -436,7 +432,7 @@ func (oc *Controller) WatchEndpoints() error {
 			ep := obj.(*kapi.Endpoints)
 			err := oc.deleteEndpoints(ep)
 			if err != nil {
-				logrus.Errorf("Error in deleting endpoints - %v", err)
+				klog.Errorf("Error in deleting endpoints - %v", err)
 			}
 		},
 	}, nil)
@@ -524,21 +520,21 @@ func (oc *Controller) WatchNodes() error {
 				return
 			}
 
-			logrus.Debugf("Added event for Node %q", node.Name)
+			klog.V(5).Infof("Added event for Node %q", node.Name)
 			hostSubnet, err := oc.addNode(node)
 			if err != nil {
-				logrus.Errorf("error creating subnet for node %s: %v", node.Name, err)
+				klog.Errorf("error creating subnet for node %s: %v", node.Name, err)
 				return
 			}
 
 			err = oc.syncNodeManagementPort(node, hostSubnet)
 			if err != nil {
-				logrus.Errorf("error creating management port for node %s: %v", node.Name, err)
+				klog.Errorf("error creating management port for node %s: %v", node.Name, err)
 				mgmtPortFailed.Store(node.Name, true)
 			}
 
 			if err := oc.syncNodeGateway(node, hostSubnet); err != nil {
-				logrus.Errorf(err.Error())
+				klog.Errorf(err.Error())
 				gatewaysFailed.Store(node.Name, true)
 			}
 		},
@@ -548,20 +544,20 @@ func (oc *Controller) WatchNodes() error {
 
 			shouldUpdate, err := shouldUpdate(node, oldNode)
 			if err != nil {
-				logrus.Errorf(err.Error())
+				klog.Errorf(err.Error())
 			}
 			if !shouldUpdate {
 				// the hostsubnet is not assigned by ovn-kubernetes
 				return
 			}
 
-			logrus.Debugf("Updated event for Node %q", node.Name)
+			klog.V(5).Infof("Updated event for Node %q", node.Name)
 
 			_, failed := mgmtPortFailed.Load(node.Name)
 			if failed || macAddressChanged(oldNode, node) {
 				err := oc.syncNodeManagementPort(node, nil)
 				if err != nil {
-					logrus.Errorf("error updating management port for node %s: %v", node.Name, err)
+					klog.Errorf("error updating management port for node %s: %v", node.Name, err)
 					mgmtPortFailed.Store(node.Name, true)
 				} else {
 					mgmtPortFailed.Delete(node.Name)
@@ -574,7 +570,7 @@ func (oc *Controller) WatchNodes() error {
 			if failed || gatewayChanged(oldNode, node) {
 				err := oc.syncNodeGateway(node, nil)
 				if err != nil {
-					logrus.Errorf(err.Error())
+					klog.Errorf(err.Error())
 					gatewaysFailed.Store(node.Name, true)
 				} else {
 					gatewaysFailed.Delete(node.Name)
@@ -583,14 +579,14 @@ func (oc *Controller) WatchNodes() error {
 		},
 		DeleteFunc: func(obj interface{}) {
 			node := obj.(*kapi.Node)
-			logrus.Debugf("Delete event for Node %q. Removing the node from "+
+			klog.V(5).Infof("Delete event for Node %q. Removing the node from "+
 				"various caches", node.Name)
 
 			nodeSubnet, _ := ParseNodeHostSubnet(node)
 			joinSubnet, _ := parseNodeJoinSubnet(node)
 			err := oc.deleteNode(node.Name, nodeSubnet, joinSubnet)
 			if err != nil {
-				logrus.Error(err)
+				klog.Error(err)
 			}
 			oc.lsMutex.Lock()
 			delete(oc.logicalSwitchCache, node.Name)
