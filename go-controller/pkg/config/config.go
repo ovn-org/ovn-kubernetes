@@ -1,6 +1,7 @@
 package config
 
 import (
+	"flag"
 	"fmt"
 	"io/ioutil"
 	"net"
@@ -1038,7 +1039,6 @@ func initConfigWithPath(ctx *cli.Context, exec kexec.Interface, saPath string, d
 	if err := level.Set(strconv.Itoa(ctx.Int("loglevel"))); err != nil {
 		return "", fmt.Errorf("failed to set klog log level %v", err)
 	}
-	klog.SetOutput(os.Stderr)
 
 	if !configFileIsDefault {
 		// Only return explicitly specified config file
@@ -1082,6 +1082,14 @@ func initConfigWithPath(ctx *cli.Context, exec kexec.Interface, saPath string, d
 	}
 
 	if Logging.File != "" {
+		klogFlags := flag.NewFlagSet("klog", flag.ExitOnError)
+		klog.InitFlags(klogFlags)
+		if err := klogFlags.Set("logtostderr", "false"); err != nil {
+			klog.Errorf("Error setting klog logtostderr: %v", err)
+		}
+		if err := klogFlags.Set("alsologtostderr", "true"); err != nil {
+			klog.Errorf("Error setting klog alsologtostderr: %v", err)
+		}
 		klog.SetOutput(&lumberjack.Logger{
 			Filename:   Logging.File,
 			MaxSize:    100, // megabytes
