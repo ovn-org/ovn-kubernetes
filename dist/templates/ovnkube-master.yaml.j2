@@ -38,8 +38,32 @@ spec:
       serviceAccountName: ovn
       hostNetwork: true
 
-      containers:
+      # required to be scheduled on a linux node with node-role.kubernetes.io/master label and
+      # only one instance of ovnkube-master pod per node
+      affinity:
+        nodeAffinity:
+          requiredDuringSchedulingIgnoredDuringExecution:
+            nodeSelectorTerms:
+              - matchExpressions:
+                  - key: node-role.kubernetes.io/master
+                    operator: In
+                    values:
+                      - ""
+                  - key: kubernetes.io/os
+                    operator: In
+                    values:
+                      - "linux"
+        podAntiAffinity:
+          requiredDuringSchedulingIgnoredDuringExecution:
+            - labelSelector:
+                matchExpressions:
+                  - key: name
+                    operator: In
+                    values:
+                      - ovnkube-master
+              topologyKey: kubernetes.io/hostname
 
+      containers:
       # ovn-northd - v3
       - name: ovn-northd
         image: "{{ ovn_image | default('docker.io/ovnkube/ovn-daemonset:latest') }}"
@@ -194,9 +218,6 @@ spec:
               fieldPath: status.podIP
       # end of container
 
-      nodeSelector:
-        node-role.kubernetes.io/master: ""
-        kubernetes.io/os: "linux"
       volumes:
       # TODO: Need to check why we need this?
       - name: host-var-run-dbus
