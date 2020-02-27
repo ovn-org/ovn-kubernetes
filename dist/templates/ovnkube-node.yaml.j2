@@ -140,7 +140,6 @@ spec:
         ports:
         - name: healthz
           containerPort: 10258
-        lifecycle:
         readinessProbe:
           exec:
             command: ["/usr/bin/ovn-kube-util", "readiness-probe", "-t", "ovn-controller"]
