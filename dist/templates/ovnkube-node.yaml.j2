@@ -63,6 +63,7 @@ spec:
           # Permission could be reduced by selecting an appropriate SELinux policy
           privileged: true
 
+        terminationMessagePolicy: FallbackToLogsOnError
         volumeMounts:
         - mountPath: /lib/modules
           name: host-modules
@@ -107,6 +108,7 @@ spec:
           capabilities:
             add: ["SYS_NICE"]
 
+        terminationMessagePolicy: FallbackToLogsOnError
         volumeMounts:
         - mountPath: /var/run/dbus/
           name: host-var-run-dbus
@@ -158,6 +160,7 @@ spec:
           privileged: true
           {% endif %}
 
+        terminationMessagePolicy: FallbackToLogsOnError
         volumeMounts:
         # for the iptables wrapper
         - mountPath: /host

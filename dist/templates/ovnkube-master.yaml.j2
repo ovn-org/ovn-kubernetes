@@ -52,6 +52,7 @@ spec:
           capabilities:
             add: ["SYS_NICE"]
 
+        terminationMessagePolicy: FallbackToLogsOnError
         volumeMounts:
         # Run directories where we need to be able to access sockets
         - mountPath: /var/run/dbus/
@@ -101,6 +102,7 @@ spec:
         securityContext:
           runAsUser: 0
 
+        terminationMessagePolicy: FallbackToLogsOnError
         volumeMounts:
         - mountPath: /var/log/openvswitch/
           name: host-var-log-ovs
@@ -130,6 +132,7 @@ spec:
           initialDelaySeconds: 30
           timeoutSeconds: 30
           periodSeconds: 60
+        # end of container
 
       - name: ovnkube-master
         image: "{{ ovn_image | default('docker.io/ovnkube/ovn-daemonset:latest') }}"
@@ -140,6 +143,7 @@ spec:
         securityContext:
           runAsUser: 0
 
+        terminationMessagePolicy: FallbackToLogsOnError
         volumeMounts:
         # Run directories where we need to be able to access sockets
         - mountPath: /var/run/dbus/
