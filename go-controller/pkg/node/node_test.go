@@ -1,4 +1,4 @@
-package cluster
+package node
 
 import (
 	"fmt"
@@ -204,13 +204,13 @@ var _ = Describe("Node Operations", func() {
 			Expect(err).NotTo(HaveOccurred())
 			defer close(stopChan)
 
-			cluster := NewClusterController(fakeClient, f)
-			Expect(cluster).NotTo(BeNil())
+			n := NewNode(fakeClient, f, "foobar")
+			Expect(n).NotTo(BeNil())
 
 			Expect(config.OvnNorth.Address).To(Equal("tcp:1.1.1.1:6641"), "config.OvnNorth.Address does not equal cli arg")
 			Expect(config.OvnSouth.Address).To(Equal("tcp:1.1.1.1:6642"), "config.OvnSouth.Address does not equal cli arg")
 
-			err = cluster.watchConfigEndpoints(make(chan bool, 1))
+			err = n.watchConfigEndpoints(make(chan bool, 1))
 			Expect(err).NotTo(HaveOccurred())
 
 			// Kubernetes endpoints should eventually propogate to OvnNorth/OvnSouth
@@ -286,13 +286,13 @@ var _ = Describe("Node Operations", func() {
 			Expect(err).NotTo(HaveOccurred())
 			defer close(stopChan)
 
-			cluster := NewClusterController(fakeClient, f)
-			Expect(cluster).NotTo(BeNil())
+			n := NewNode(fakeClient, f, "foobar")
+			Expect(n).NotTo(BeNil())
 
 			Expect(config.OvnNorth.Address).To(Equal("tcp:1.1.1.1:6641"), "config.OvnNorth.Address does not equal cli arg")
 			Expect(config.OvnSouth.Address).To(Equal("tcp:1.1.1.1:6642"), "config.OvnSouth.Address does not equal cli arg")
 
-			err = cluster.watchConfigEndpoints(make(chan bool, 1))
+			err = n.watchConfigEndpoints(make(chan bool, 1))
 			Expect(err).NotTo(HaveOccurred())
 
 			// Kubernetes endpoints should eventually propogate to OvnNorth/OvnSouth
@@ -368,15 +368,15 @@ var _ = Describe("Node Operations", func() {
 			Expect(err).NotTo(HaveOccurred())
 			defer close(stopChan)
 
-			cluster := NewClusterController(fakeClient, f)
-			Expect(cluster).NotTo(BeNil())
+			n := NewNode(fakeClient, f, "foobar")
+			Expect(n).NotTo(BeNil())
 
 			Expect(config.OvnNorth.Address).To(Equal("watch-endpoint"), "config.OvnNorth.Address does not equal cli arg")
 			Expect(config.OvnSouth.Address).To(Equal("watch-endpoint"), "config.OvnSouth.Address does not equal cli arg")
 			Expect(config.OvnNorth.Scheme).To(Equal(config.OvnDBSchemeTCP))
 			Expect(config.OvnSouth.Scheme).To(Equal(config.OvnDBSchemeTCP))
 
-			err = cluster.watchConfigEndpoints(make(chan bool, 1))
+			err = n.watchConfigEndpoints(make(chan bool, 1))
 			Expect(err).NotTo(HaveOccurred())
 
 			// Kubernetes endpoints should eventually propogate to OvnNorth/OvnSouth

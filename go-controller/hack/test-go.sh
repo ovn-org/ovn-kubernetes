@@ -13,7 +13,7 @@ PKGS="${PKGS:-./cmd/... ./pkg/...}"
 
 for pkg in $(go list -mod vendor ${PKGS}); do
     # This package requires root
-    if [[ "$USER" != root && "$pkg" == github.com/ovn-org/ovn-kubernetes/go-controller/pkg/cluster ]]; then
+    if [[ "$USER" != root && "$pkg" == github.com/ovn-org/ovn-kubernetes/go-controller/pkg/node ]]; then
         testfile=$(mktemp --tmpdir ovn-test.XXXXXXXX)
         echo "sudo required for ${pkg}, compiling test to ${testfile}"
         go test -mod vendor -c -o "${testfile}" "${pkg}"

@@ -1,4 +1,4 @@
-package cluster
+package node
 
 import (
 	"fmt"
@@ -76,11 +76,11 @@ loop:
 	return ipAddress, nil
 }
 
-func (cluster *OvnClusterController) initGateway(nodeName string, subnet string,
-	nodeAnnotator kube.Annotator, waiter *startupWaiter) error {
+func (n *OvnNode) initGateway(subnet string, nodeAnnotator kube.Annotator,
+	waiter *startupWaiter) error {
 
 	if config.Gateway.NodeportEnable {
-		err := initLoadBalancerHealthChecker(nodeName, cluster.watchFactory)
+		err := initLoadBalancerHealthChecker(n.name, n.watchFactory)
 		if err != nil {
 			return err
 		}
@@ -96,7 +96,7 @@ func (cluster *OvnClusterController) initGateway(nodeName string, subnet string,
 		if err != nil {
 			return err
 		}
-		annotations, err = initLocalnetGateway(nodeName, subnet, cluster.watchFactory)
+		annotations, err = initLocalnetGateway(n.name, subnet, n.watchFactory)
 	case config.GatewayModeShared:
 		systemID, err = util.GetNodeChassisID()
 		if err != nil {
@@ -119,8 +119,8 @@ func (cluster *OvnClusterController) initGateway(nodeName string, subnet string,
 				gatewayIntf = defaultGatewayIntf
 			}
 		}
-		annotations, prFn, err = initSharedGateway(nodeName, subnet, gatewayNextHop, gatewayIntf,
-			cluster.watchFactory)
+		annotations, prFn, err = initSharedGateway(n.name, subnet, gatewayNextHop, gatewayIntf,
+			n.watchFactory)
 	case config.GatewayModeDisabled:
 		annotations = map[string]map[string]string{
 			ovn.OvnDefaultNetworkGateway: {

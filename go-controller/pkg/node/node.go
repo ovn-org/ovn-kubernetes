@@ -1,4 +1,4 @@
-package cluster
+package node
 
 import (
 	"encoding/json"
@@ -16,14 +16,91 @@ import (
 
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/cni"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/factory"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/kube"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
 
 	kapi "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/util/wait"
+	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/tools/cache"
 )
+
+// OvnNode is the object holder for utilities meant for node management
+type OvnNode struct {
+	name         string
+	Kube         kube.Interface
+	watchFactory *factory.WatchFactory
+}
+
+// NewNode creates a new controller for node management
+func NewNode(kubeClient kubernetes.Interface, wf *factory.WatchFactory, name string) *OvnNode {
+	return &OvnNode{
+		name:         name,
+		Kube:         &kube.Kube{KClient: kubeClient},
+		watchFactory: wf,
+	}
+}
+
+func setupOVNNode(node *kapi.Node) error {
+	var err error
+
+	nodeName, err := util.GetNodeHostname(node)
+	if err != nil {
+		return fmt.Errorf("failed to obtain hostname from node %q: %v", node.Name, err)
+	}
+
+	nodeIP := config.Default.EncapIP
+	if nodeIP == "" {
+		nodeIP, err = util.GetNodeIP(node)
+		if err != nil {
+			return fmt.Errorf("failed to obtain local IP from node %q: %v", node.Name, err)
+		}
+	} else {
+		if ip := net.ParseIP(nodeIP); ip == nil {
+			return fmt.Errorf("invalid encapsulation IP provided %q", nodeIP)
+		}
+	}
+
+	_, stderr, err := util.RunOVSVsctl("set",
+		"Open_vSwitch",
+		".",
+		fmt.Sprintf("external_ids:ovn-encap-type=%s", config.Default.EncapType),
+		fmt.Sprintf("external_ids:ovn-encap-ip=%s", nodeIP),
+		fmt.Sprintf("external_ids:ovn-remote-probe-interval=%d",
+			config.Default.InactivityProbe),
+		fmt.Sprintf("external_ids:ovn-openflow-probe-interval=%d",
+			config.Default.OpenFlowProbe),
+		fmt.Sprintf("external_ids:hostname=\"%s\"", nodeName),
+		"external_ids:ovn-monitor-all=true",
+	)
+	if err != nil {
+		return fmt.Errorf("error setting OVS external IDs: %v\n  %q", err, stderr)
+	}
+	// If EncapPort is not the default tell sbdb to use specified port.
+	if config.Default.EncapPort != config.DefaultEncapPort {
+		systemID, err := util.GetNodeChassisID()
+		if err != nil {
+			return err
+		}
+		uuid, _, err := util.RunOVNSbctl("--data=bare", "--no-heading", "--columns=_uuid", "find", "Encap",
+			fmt.Sprintf("chassis_name=%s", systemID))
+		if err != nil {
+			return err
+		}
+		if len(uuid) == 0 {
+			return fmt.Errorf("unable to find encap uuid to set geneve port for chassis %s", systemID)
+		}
+		_, stderr, errSet := util.RunOVNSbctl("set", "encap", uuid,
+			fmt.Sprintf("options:dst_port=%d", config.Default.EncapPort),
+		)
+		if errSet != nil {
+			return fmt.Errorf("error setting OVS encap-port: %v\n  %q", errSet, stderr)
+		}
+	}
+	return nil
+}
 
 func isOVNControllerReady(name string) (bool, error) {
 	runDir := util.GetOvnRunDir()
@@ -86,9 +163,9 @@ func getNodeHostSubnetAnnotation(node *kapi.Node) (string, error) {
 	return subnet, nil
 }
 
-// StartClusterNode learns the subnet assigned to it by the master controller
+// Start learns the subnet assigned to it by the master controller
 // and calls the SetupNode script which establishes the logical switch
-func (cluster *OvnClusterController) StartClusterNode(name string) error {
+func (n *OvnNode) Start() error {
 	var err error
 	var node *kapi.Node
 	var subnet *net.IPNet
@@ -106,7 +183,7 @@ func (cluster *OvnClusterController) StartClusterNode(name string) error {
 	if config.MasterHA.ManageDBServers {
 		var readyChan = make(chan bool, 1)
 
-		err = cluster.watchConfigEndpoints(readyChan)
+		err = n.watchConfigEndpoints(readyChan)
 		if err != nil {
 			return err
 		}
@@ -121,8 +198,8 @@ func (cluster *OvnClusterController) StartClusterNode(name string) error {
 		}
 	}
 
-	if node, err = cluster.Kube.GetNode(name); err != nil {
-		return fmt.Errorf("error retrieving node %s: %v", name, err)
+	if node, err = n.Kube.GetNode(n.name); err != nil {
+		return fmt.Errorf("error retrieving node %s: %v", n.name, err)
 	}
 	err = setupOVNNode(node)
 	if err != nil {
@@ -131,47 +208,47 @@ func (cluster *OvnClusterController) StartClusterNode(name string) error {
 
 	// First wait for the node logical switch to be created by the Master, timeout is 300s.
 	err = wait.PollImmediate(500*time.Millisecond, 300*time.Second, func() (bool, error) {
-		if node, err = cluster.Kube.GetNode(name); err != nil {
-			klog.Infof("waiting to retrieve node %s: %v", name, err)
+		if node, err = n.Kube.GetNode(n.name); err != nil {
+			klog.Infof("waiting to retrieve node %s: %v", n.name, err)
 			return false, nil
 		}
 		cidr, err = getNodeHostSubnetAnnotation(node)
 		if err != nil {
-			klog.Infof("waiting for node %s to start, no annotation found on node for subnet - %v", name, err)
+			klog.Infof("waiting for node %s to start, no annotation found on node for subnet: %v", n.name, err)
 			return false, nil
 		}
 		return true, nil
 	})
 	if err != nil {
-		return fmt.Errorf("timed out waiting for node's: %q logical switch: %v", name, err)
+		return fmt.Errorf("timed out waiting for node's: %q logical switch: %v", n.name, err)
 	}
 
 	_, subnet, err = net.ParseCIDR(cidr)
 	if err != nil {
-		return fmt.Errorf("invalid hostsubnet found for node %s: %v", node.Name, err)
+		return fmt.Errorf("invalid hostsubnet found for node %s: %v", n.name, err)
 	}
 
-	klog.Infof("Node %s ready for ovn initialization with subnet %s", node.Name, subnet.String())
+	klog.Infof("Node %s ready for ovn initialization with subnet %s", n.name, subnet.String())
 
-	if _, err = isOVNControllerReady(name); err != nil {
+	if _, err = isOVNControllerReady(n.name); err != nil {
 		return err
 	}
 
-	nodeAnnotator := kube.NewNodeAnnotator(cluster.Kube, node)
-	waiter := newStartupWaiter(node.Name)
+	nodeAnnotator := kube.NewNodeAnnotator(n.Kube, node)
+	waiter := newStartupWaiter(n.name)
 
 	// Initialize gateway resources on the node
-	if err := cluster.initGateway(node.Name, subnet.String(), nodeAnnotator, waiter); err != nil {
+	if err := n.initGateway(subnet.String(), nodeAnnotator, waiter); err != nil {
 		return err
 	}
 
 	// Initialize management port resources on the node
-	if err := createManagementPort(node.Name, subnet, nodeAnnotator, waiter); err != nil {
+	if err := createManagementPort(n.name, subnet, nodeAnnotator, waiter); err != nil {
 		return err
 	}
 
 	if err := nodeAnnotator.Run(); err != nil {
-		return fmt.Errorf("Failed to set node %s annotations: %v", node.Name, err)
+		return fmt.Errorf("Failed to set node %s annotations: %v", n.name, err)
 	}
 
 	// Wait for management port and gateway resources to be created by the master
@@ -223,8 +300,8 @@ func updateOVNConfig(ep *kapi.Endpoints, readyChan chan bool) error {
 }
 
 //watchConfigEndpoints starts the watching of Endpoint resource and calls back to the appropriate handler logic
-func (cluster *OvnClusterController) watchConfigEndpoints(readyChan chan bool) error {
-	_, err := cluster.watchFactory.AddFilteredEndpointsHandler(config.Kubernetes.OVNConfigNamespace, nil,
+func (n *OvnNode) watchConfigEndpoints(readyChan chan bool) error {
+	_, err := n.watchFactory.AddFilteredEndpointsHandler(config.Kubernetes.OVNConfigNamespace, nil,
 		cache.ResourceEventHandlerFuncs{
 			AddFunc: func(obj interface{}) {
 				ep := obj.(*kapi.Endpoints)

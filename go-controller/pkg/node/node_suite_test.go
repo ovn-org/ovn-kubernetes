@@ -1,4 +1,4 @@
-package cluster
+package node
 
 import (
 	"testing"
@@ -7,7 +7,7 @@ import (
 	. "github.com/onsi/gomega"
 )
 
-func TestClusterSuite(t *testing.T) {
+func TestNodeSuite(t *testing.T) {
 	RegisterFailHandler(Fail)
-	RunSpecs(t, "Cluster Suite")
+	RunSpecs(t, "Node Suite")
 }
