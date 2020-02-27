@@ -104,6 +104,7 @@ spec:
           capabilities:
             add: ["NET_ADMIN"]
 
+        terminationMessagePolicy: FallbackToLogsOnError
         volumeMounts:
         # ovn db is stored in the pod in /etc/openvswitch
         # (or in /etc/ovn if OVN from new repository is used)
@@ -156,6 +157,7 @@ spec:
           capabilities:
             add: ["NET_ADMIN"]
 
+        terminationMessagePolicy: FallbackToLogsOnError
         volumeMounts:
         # ovn db is stored in the pod in /etc/openvswitch
         # (or in /etc/ovn if OVN from new repository is used)
