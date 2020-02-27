@@ -140,14 +140,6 @@ spec:
         ports:
         - name: healthz
           containerPort: 10258
-        # TODO: Temporarily disabled until we determine how to wait for clean default
-        # config
-        # livenessProbe:
-        #   initialDelaySeconds: 10
-        #   httpGet:
-        #     path: /healthz
-        #     port: 10258
-        #     scheme: HTTP
         lifecycle:
         readinessProbe:
           exec:
@@ -239,14 +231,6 @@ spec:
         ports:
         - name: healthz
           containerPort: 10259
-        # TODO: Temporarily disabled until we determine how to wait for clean default
-        # config
-        # livenessProbe:
-        #   initialDelaySeconds: 10
-        #   httpGet:
-        #     path: /healthz
-        #     port: 10259
-        #     scheme: HTTP
         lifecycle:
           preStop:
             exec:
