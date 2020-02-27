@@ -325,7 +325,13 @@ func (oc *Controller) createDefaultDenyPortGroup(policyType knet.PolicyType) err
 	err = addACLPortGroup(portGroupUUID, portGroupName, toLport,
 		defaultDenyPriority, "", "drop", policyType)
 	if err != nil {
-		return fmt.Errorf("Failed to create default deny port group %v", err)
+		return fmt.Errorf("Failed to create default deny ACL for port group %v", err)
+	}
+
+	err = addACLPortGroup(portGroupUUID, portGroupName, toLport,
+		defaultAllowPriority, "arp", "allow", policyType)
+	if err != nil {
+		return fmt.Errorf("Failed to create default allow ARP ACL for port group %v", err)
 	}
 
 	if policyType == knet.PolicyTypeIngress {
