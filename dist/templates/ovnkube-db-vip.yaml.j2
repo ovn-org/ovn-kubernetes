@@ -130,9 +130,6 @@ spec:
               fieldPath: metadata.namespace
         - name: OVN_DB_VIP
           value: "{{ ovn_db_vip }}"
-        ports:
-        - name: healthz
-          containerPort: 10256
       # end of container
 
       volumes:

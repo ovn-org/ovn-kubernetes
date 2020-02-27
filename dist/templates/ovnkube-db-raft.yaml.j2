@@ -143,9 +143,6 @@ spec:
           valueFrom:
             fieldRef:
               fieldPath: metadata.name
-        ports:
-        - name: healthz
-          containerPort: 10256
       # end of container
 
       # sb-ovsdb - v3
@@ -198,9 +195,6 @@ spec:
           valueFrom:
             fieldRef:
               fieldPath: metadata.name
-        ports:
-        - name: healthz
-          containerPort: 10255
       # end of container
 
       volumes:

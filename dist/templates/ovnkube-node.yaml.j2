@@ -137,9 +137,6 @@ spec:
             fieldRef:
               fieldPath: metadata.namespace
 
-        ports:
-        - name: healthz
-          containerPort: 10258
         readinessProbe:
           exec:
             command: ["/usr/bin/ovn-kube-util", "readiness-probe", "-t", "ovn-controller"]
@@ -227,9 +224,6 @@ spec:
         - name: OVN_GATEWAY_OPTS
           value: "{{ ovn_gateway_opts }}"
 
-        ports:
-        - name: healthz
-          containerPort: 10259
         lifecycle:
           preStop:
             exec:
