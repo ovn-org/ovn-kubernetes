@@ -114,7 +114,6 @@ spec:
         ports:
         - name: healthz
           containerPort: 10256
-        lifecycle:
         readinessProbe:
           exec:
             command: ["/usr/bin/ovn-kube-util", "readiness-probe", "-t", "ovnnb-db"]
@@ -173,7 +172,6 @@ spec:
         ports:
         - name: healthz
           containerPort: 10255
-        lifecycle:
         readinessProbe:
           exec:
             command: ["/usr/bin/ovn-kube-util", "readiness-probe", "-t", "ovnsb-db"]
