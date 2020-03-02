@@ -47,7 +47,7 @@ func (w *startupWaiter) Wait() error {
 			err := wait.PollImmediate(500*time.Millisecond, 300*time.Second, func() (bool, error) {
 				return task.waitFn(w.nodeName)
 			})
-			if task.postFn != nil {
+			if err == nil && task.postFn != nil {
 				err = task.postFn()
 			}
 			if err != nil {
