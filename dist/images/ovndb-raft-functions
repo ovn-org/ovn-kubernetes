@@ -24,9 +24,9 @@ ready_to_join_cluster () {
   if [[ $? != 0 ]]; then
     return 1
   fi
-  ovsdb-client list-dbs tcp:${init_ip}:${port} > /dev/null 2>&1
-  if [[ $? != 0 ]] ; then
-      return 1
+  target=$(ovn-${db}ctl --db=tcp:${init_ip}:${port} --data=bare --no-headings --columns=target list connection 2>/dev/null)
+  if [[ "${target}" != "ptcp:${port}" ]] ; then
+    return 1
   fi
   return 0
 }
@@ -89,6 +89,7 @@ ovsdb-raft () {
 
   local db=${1}
   local port=${2}
+  local initialize="false"
 
   ovn_db_pidfile=${OVN_RUNDIR}/ovn${db}_db.pid
   eval ovn_log_db=\$ovn_log_${db}
@@ -99,26 +100,32 @@ ovsdb-raft () {
   local_ip=$(getent ahostsv4 $(hostname) | grep -v "^127\." | head -1 | awk '{ print $1 }')
   echo "=============== run ${db}-ovsdb-raft pod ${POD_NAME} =========="
 
+  if [[ ! -e ${ovn_db_file} ]] || ovsdb-tool db-is-standalone ${ovn_db_file} ; then
+    initialize="true"
+  fi
   if [[ "${POD_NAME}" == "ovnkube-db-0" ]]; then
     run_as_ovs_user_if_needed \
       ${OVNCTL_PATH} run_${db}_ovsdb --no-monitor \
-      --db-${db}-create-insecure-remote=yes --db-${db}-cluster-local-addr=${local_ip} \
-      --ovn-${db}-log="${ovn_log_db}" &
+      --db-${db}-cluster-local-addr=${local_ip} --ovn-${db}-log="${ovn_log_db}" &
   else
     # join the remote cluster node if the DB is not created
-    if [[ ! -e ${ovn_db_file} ]] || ovsdb-tool db-is-standalone ${ovn_db_file} ; then
+    if [[ "${initialize}" == "true" ]]; then
       wait_for_event ready_to_join_cluster ${db} ${port}
     fi
     run_as_ovs_user_if_needed \
       ${OVNCTL_PATH} run_${db}_ovsdb --no-monitor \
-      --db-${db}-create-insecure-remote=yes --db-${db}-cluster-local-addr=${local_ip} \
-      --db-${db}-cluster-remote-addr=${init_ip} \
+      --db-${db}-cluster-local-addr=${local_ip} --db-${db}-cluster-remote-addr=${init_ip} \
       --ovn-${db}-log="${ovn_log_db}" &
   fi
 
   wait_for_event process_ready ovn${db}_db
   echo "=============== ${db}-ovsdb-raft ========== RUNNING"
   sleep 3
+
+  if [[ "${POD_NAME}" == "ovnkube-db-0" && "${initialize}" == "true" ]] ; then
+    # set the connection and disable inactivity probe, this deletes the old connection if any
+    ovn-${db}ctl --inactivity-probe=0 set-connection ptcp:${port}
+  fi
 
   last_node_index=$(expr ${replicas} - 1)
   # Create endpoints only if all ovnkube-db pods have started and are running. We do this
