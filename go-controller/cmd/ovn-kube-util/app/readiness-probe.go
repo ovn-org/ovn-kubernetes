@@ -3,6 +3,7 @@ package app
 import (
 	"fmt"
 	"io/ioutil"
+	"os"
 	"strings"
 
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
@@ -19,6 +20,7 @@ var callbacks = map[string]readinessFunc{
 	"ovn-northd":     ovnNorthdReadiness,
 	"ovn-nbctld":     ovnNbCtldReadiness,
 	"ovs-daemons":    ovsDaemonsReadiness,
+	"ovnkube-node":   ovnNodeReadiness,
 }
 
 func ovnControllerReadiness(target string) error {
@@ -124,6 +126,17 @@ func ovsDaemonsReadiness(target string) error {
 	_, _, err = util.RunOVSAppctlWithTimeout(5, "-t", "ovs-vswitchd", "ofproto/list")
 	if err != nil {
 		return fmt.Errorf("failed to retrieve ofproto instances from ovs-vswitchd: %v", err)
+	}
+	return nil
+}
+
+func ovnNodeReadiness(target string) error {
+	// Inside the pod we always use `/etc/cni/net.d` folder even if kubelet
+	// was started with a different conf directory
+	confFile := "/etc/cni/net.d/10-ovn-kubernetes.conf"
+	_, err := os.Stat(confFile)
+	if os.IsNotExist(err) {
+		return fmt.Errorf("OVN Kubernetes config file %q doesn't exist", confFile)
 	}
 	return nil
 }

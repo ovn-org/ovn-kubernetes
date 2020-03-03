@@ -231,6 +231,12 @@ spec:
           preStop:
             exec:
               command: ["/root/ovnkube.sh", "cleanup-ovn-node"]
+        readinessProbe:
+          exec:
+            command: ["/usr/bin/ovn-kube-util", "readiness-probe", "-t", "ovnkube-node"]
+          initialDelaySeconds: 30
+          timeoutSeconds: 30
+          periodSeconds: 60
 
       nodeSelector:
         kubernetes.io/os: "linux"
