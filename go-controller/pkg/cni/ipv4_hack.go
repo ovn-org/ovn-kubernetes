@@ -1,7 +1,35 @@
 package cni
 
 // cnishim hack to add an IPv4 interface to pods that need IPv4 access
-// in nominally single-stack IPv6 clusters on dual-stack cloud hosts
+// in nominally single-stack IPv6 clusters on dual-stack cloud hosts.
+//
+// Although bare metal is the only supported platform for single-stack
+// IPv6 on OCP, we need to have more-or-less working single-stack IPv6
+// on some cloud platform for CI and developer testing. None of our
+// supported clouds actually support single-stack IPv6 operation though;
+// eg, the Azure and AWS APIs are only available via IPv4 endpoints,
+// which are not accessible to ordinary pods in a single-stack IPv6
+// cluster.
+//
+// This hack uses the CNI "bridge" plugin to add an IPv4 interface to
+// selected pods so that they can reach external IPv4 hosts. (It has the
+// side effect of giving them IPv4 access to other ipv4-hacked pods on
+// the same node as well, but this doesn't get used.) We chose to put
+// the entire hack (including the list of affected pods) in
+// ovn-kubernetes because it was simple; if this hack is going to stay
+// around long term and we end up needing to add more pods then we might
+// want to redesign it somewhat. (Note that changing it to be based on a
+// pod annotation would require having some of the code in cniserver
+// rather than cnishim, and then modifying the API between cniserver and
+// cnishim, creating much more potential for merge conflicts with
+// upstream in the future.)
+//
+// NOTE THAT THE IPV4 BRIDGE CODE IS ONLY USED ON UNSUPPORTED CLUSTERS:
+// on single-stack IPv4 and (eventually) dual-stack clusters,
+// maybeAddIPv4Hack will return right away after examining result.IPs.
+// On single-stack IPv6 bare-metal clusters it will return after parsing
+// /proc/cmdline. The hack is only used for single-stack IPv6 on clouds,
+// which is not supported for customers.
 
 import (
 	"context"
