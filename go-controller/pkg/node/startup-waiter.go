@@ -12,7 +12,6 @@ type startupWaiter struct {
 	nodeName string
 	tasks    []*waitTask
 	wg       *sync.WaitGroup
-	errors   chan error
 }
 
 type waitFunc func(string) (bool, error)
@@ -28,7 +27,6 @@ func newStartupWaiter(nodeName string) *startupWaiter {
 		nodeName: nodeName,
 		tasks:    make([]*waitTask, 0, 2),
 		wg:       &sync.WaitGroup{},
-		errors:   make(chan error),
 	}
 }
 
@@ -40,6 +38,7 @@ func (w *startupWaiter) AddWait(waitFn waitFunc, postFn postWaitFunc) {
 }
 
 func (w *startupWaiter) Wait() error {
+	errors := make(chan error, len(w.tasks))
 	for _, t := range w.tasks {
 		w.wg.Add(1)
 		go func(task *waitTask) {
@@ -47,17 +46,17 @@ func (w *startupWaiter) Wait() error {
 			err := wait.PollImmediate(500*time.Millisecond, 300*time.Second, func() (bool, error) {
 				return task.waitFn(w.nodeName)
 			})
-			if task.postFn != nil {
+			if err == nil && task.postFn != nil {
 				err = task.postFn()
 			}
 			if err != nil {
-				w.errors <- err
+				errors <- err
 			}
 		}(t)
 	}
 	w.wg.Wait()
-	close(w.errors)
-	for err := range w.errors {
+	close(errors)
+	for err := range errors {
 		return fmt.Errorf("error waiting for node readiness: %v", err)
 	}
 	return nil
