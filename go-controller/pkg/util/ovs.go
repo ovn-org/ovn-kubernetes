@@ -2,6 +2,7 @@ package util
 
 import (
 	"bytes"
+	"encoding/json"
 	"fmt"
 	"io/ioutil"
 	"k8s.io/klog"
@@ -21,21 +22,22 @@ const (
 	// adding internal ports on a non Hyper-V enabled host will call
 	// external Powershell commandlets.
 	// TODO: Decrease the timeout once port adding is improved on Windows
-	ovsCommandTimeout = 15
-	ovsVsctlCommand   = "ovs-vsctl"
-	ovsOfctlCommand   = "ovs-ofctl"
-	ovsAppctlCommand  = "ovs-appctl"
-	ovnNbctlCommand   = "ovn-nbctl"
-	ovnSbctlCommand   = "ovn-sbctl"
-	ovnAppctlCommand  = "ovn-appctl"
-	ipCommand         = "ip"
-	powershellCommand = "powershell"
-	netshCommand      = "netsh"
-	routeCommand      = "route"
-	osRelease         = "/etc/os-release"
-	rhel              = "RHEL"
-	ubuntu            = "Ubuntu"
-	windowsOS         = "windows"
+	ovsCommandTimeout  = 15
+	ovsVsctlCommand    = "ovs-vsctl"
+	ovsOfctlCommand    = "ovs-ofctl"
+	ovsAppctlCommand   = "ovs-appctl"
+	ovnNbctlCommand    = "ovn-nbctl"
+	ovnSbctlCommand    = "ovn-sbctl"
+	ovnAppctlCommand   = "ovn-appctl"
+	ovsdbClientCommand = "ovsdb-client"
+	ipCommand          = "ip"
+	powershellCommand  = "powershell"
+	netshCommand       = "netsh"
+	routeCommand       = "route"
+	osRelease          = "/etc/os-release"
+	rhel               = "RHEL"
+	ubuntu             = "Ubuntu"
+	windowsOS          = "windows"
 )
 
 const (
@@ -82,19 +84,20 @@ func runningPlatform() (string, error) {
 
 // Exec runs various OVN and OVS utilities
 type execHelper struct {
-	exec           kexec.Interface
-	ofctlPath      string
-	vsctlPath      string
-	appctlPath     string
-	ovnappctlPath  string
-	nbctlPath      string
-	sbctlPath      string
-	ovnctlPath     string
-	ovnRunDir      string
-	ipPath         string
-	powershellPath string
-	netshPath      string
-	routePath      string
+	exec            kexec.Interface
+	ofctlPath       string
+	vsctlPath       string
+	appctlPath      string
+	ovnappctlPath   string
+	nbctlPath       string
+	sbctlPath       string
+	ovnctlPath      string
+	ovsdbClientPath string
+	ovnRunDir       string
+	ipPath          string
+	powershellPath  string
+	netshPath       string
+	routePath       string
 }
 
 var runner *execHelper
@@ -141,7 +144,10 @@ func SetExec(exec kexec.Interface) error {
 	if err != nil {
 		return err
 	}
-
+	runner.ovsdbClientPath, err = exec.LookPath(ovsdbClientCommand)
+	if err != nil {
+		return err
+	}
 	if runtime.GOOS == windowsOS {
 		runner.powershellPath, err = exec.LookPath(powershellCommand)
 		if err != nil {
@@ -376,6 +382,12 @@ func RunOVNSbctlWithTimeout(timeout int, args ...string) (string, string,
 	return strings.Trim(strings.TrimSpace(stdout.String()), "\""), stderr.String(), err
 }
 
+// RunOVSDBClient runs an 'ovsdb-client [OPTIONS] COMMAND [ARG...] command'.
+func RunOVSDBClient(args ...string) (string, string, error) {
+	stdout, stderr, err := runOVNretry(runner.ovsdbClientPath, nil, args...)
+	return strings.Trim(strings.TrimSpace(stdout.String()), "\""), stderr.String(), err
+}
+
 // RunOVNSbctl runs a command via ovn-sbctl.
 func RunOVNSbctl(args ...string) (string, string, error) {
 	return RunOVNSbctlWithTimeout(ovsCommandTimeout, args...)
@@ -484,4 +496,41 @@ func AddNormalActionOFFlow(bridgeName string) (string, string, error) {
 // GetOvnRunDir returns the OVN's rundir.
 func GetOvnRunDir() string {
 	return runner.ovnRunDir
+}
+
+// ovsdb-server(5) says a clustered database is connected if the server
+// is in contact with a majority of its cluster.
+type OVNDBServerStatus struct {
+	Connected bool `json:"connected"`
+	Leader    bool `json:"leader"`
+	Index     int  `json:"index"`
+}
+
+type queryResult struct {
+	Rows []OVNDBServerStatus `json:"rows"`
+}
+
+func GetOVNDBServerInfo(timeout int, direction, database string) (*OVNDBServerStatus, error) {
+	sockPath := fmt.Sprintf("unix:/var/run/openvswitch/ovn%s_db.sock", direction)
+	transact := fmt.Sprintf(`["_Server", {"op":"select", "table":"Database", "where":[["name", "==", "%s"]], `+
+		`"columns": ["connected", "leader", "index"]}]`, database)
+
+	stdout, stderr, err := RunOVSDBClient(fmt.Sprintf("--timeout=%d", timeout), "query", sockPath, transact)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get %q ovsdb-server status: stderr(%s), err(%v)",
+			direction, stderr, err)
+	}
+
+	var result []queryResult
+	err = json.Unmarshal([]byte(stdout), &result)
+	if err != nil {
+		return nil, fmt.Errorf("failed to parse the json output(%s) from ovsdb-client command for database %q: %v",
+			stdout, database, err)
+	}
+	if len(result) != 1 || len(result[0].Rows) != 1 {
+		return nil, fmt.Errorf("parsed json output for %q ovsdb-server has incorrect status information",
+			direction)
+	}
+
+	return &result[0].Rows[0], nil
 }

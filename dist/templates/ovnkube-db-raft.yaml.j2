@@ -99,6 +99,13 @@ spec:
         imagePullPolicy: "{{ ovn_image_pull_policy | default('IfNotPresent') }}"
         command: ["/root/ovnkube.sh", "nb-ovsdb-raft"]
 
+        readinessProbe:
+          exec:
+            command: ["/usr/bin/ovn-kube-util", "readiness-probe", "-t", "ovnnb-db-raft"]
+          initialDelaySeconds: 30
+          timeoutSeconds: 30
+          periodSeconds: 60
+
         securityContext:
           runAsUser: 0
           capabilities:
@@ -151,6 +158,13 @@ spec:
         image: "{{ ovn_image | default('docker.io/ovnkube/ovn-daemonset:latest') }}"
         imagePullPolicy: "{{ ovn_image_pull_policy | default('IfNotPresent') }}"
         command: ["/root/ovnkube.sh", "sb-ovsdb-raft"]
+
+        readinessProbe:
+          exec:
+            command: ["/usr/bin/ovn-kube-util", "readiness-probe", "-t", "ovnsb-db-raft"]
+          initialDelaySeconds: 30
+          timeoutSeconds: 30
+          periodSeconds: 60
 
         securityContext:
           runAsUser: 0
