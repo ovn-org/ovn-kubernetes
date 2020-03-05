@@ -33,7 +33,7 @@ RUN dnf install ovn --best  --enablerepo=updates-testing --advisory=FEDORA-2020-
 RUN mkdir -p /var/run/openvswitch && \
     mkdir -p /usr/libexec/cni/
 
-COPY ovnkube /usr/bin/
+COPY ovnkube ovn-kube-util /usr/bin/
 COPY ovn-k8s-cni-overlay /usr/libexec/cni/ovn-k8s-cni-overlay
 
 # copy git commit number into image
