@@ -25,11 +25,6 @@ RUN INSTALL_PKGS=" \
 	dnf install --best --refresh -y --setopt=tsflags=nodocs $INSTALL_PKGS && \
 	dnf clean all && rm -rf /var/cache/dnf/*
 
-# ensure we pick up ovn-2.12.1-1.fc31
-# this should have no effect in the future once the
-# advisory repo is gone and can be removed
-RUN dnf install ovn --best  --enablerepo=updates-testing --advisory=FEDORA-2020-34b65e864b1 || true
-
 RUN mkdir -p /var/run/openvswitch && \
     mkdir -p /usr/libexec/cni/
 
