@@ -2,7 +2,7 @@
 
 set -euxo pipefail
 
-K8S_VERSION=${K8S_VERSION:-v1.16.4}
+K8S_VERSION=${K8S_VERSION:-v1.17.2}
 KIND_INSTALL_INGRESS=${KIND_INSTALL_INGRESS:-false}
 KIND_HA=${KIND_HA:-false}
 if [ "$KIND_HA" == true ]; then
