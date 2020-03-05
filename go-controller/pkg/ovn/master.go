@@ -804,6 +804,23 @@ func (oc *Controller) deleteNode(nodeName string, nodeSubnet, joinSubnet *net.IP
 		return fmt.Errorf("Failed to clean up node %s gateway: (%v)", nodeName, err)
 	}
 
+	chassis_name, stderr, err := util.RunOVNSbctl("--data=bare", "--no-heading",
+		"--columns=name", "find", "Chassis",
+		"hostname="+nodeName)
+	if err != nil {
+		klog.Errorf("Failed to get chassis name for logical switch %s: stderr: %q, error: %v",
+			nodeName, stderr, err)
+		return err
+	}
+
+	_, stderr, err = util.RunOVNSbctl("--if-exist", "chassis-del", chassis_name)
+
+	if err != nil {
+		klog.Errorf("Failed to delete chassis with name %s for logical switch %s: stderr: %q, error: %v",
+			chassis_name, nodeName, stderr, err)
+		return err
+	}
+
 	return nil
 }
 
