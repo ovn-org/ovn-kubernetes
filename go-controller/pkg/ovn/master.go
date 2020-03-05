@@ -804,7 +804,7 @@ func (oc *Controller) deleteNode(nodeName string, nodeSubnet, joinSubnet *net.IP
 		return fmt.Errorf("Failed to clean up node %s gateway: (%v)", nodeName, err)
 	}
 
-	chassis_name, stderr, err := util.RunOVNSbctl("--data=bare", "--no-heading",
+	chassisName, stderr, err := util.RunOVNSbctl("--data=bare", "--no-heading",
 		"--columns=name", "find", "Chassis",
 		"hostname="+nodeName)
 	if err != nil {
@@ -813,12 +813,15 @@ func (oc *Controller) deleteNode(nodeName string, nodeSubnet, joinSubnet *net.IP
 		return err
 	}
 
-	_, stderr, err = util.RunOVNSbctl("--if-exist", "chassis-del", chassis_name)
-
-	if err != nil {
-		klog.Errorf("Failed to delete chassis with name %s for logical switch %s: stderr: %q, error: %v",
-			chassis_name, nodeName, stderr, err)
-		return err
+	if chassisName == "" {
+		klog.Warningf("Chassis name is empty for logical switch: %s", nodeName)
+	} else {
+		_, stderr, err = util.RunOVNSbctl("--if-exist", "chassis-del", chassisName)
+		if err != nil {
+			klog.Errorf("Failed to delete chassis with name %s for logical switch %s: stderr: %q, error: %v",
+				chassisName, nodeName, stderr, err)
+			return err
+		}
 	}
 
 	return nil
@@ -897,6 +900,28 @@ func (oc *Controller) syncNodes(nodes []interface{}) {
 	} else {
 		subnetAttr = "subnet"
 	}
+
+	//ChassisMap is a map of hostname (nodeName) to chassis name
+	chassisMap := make(map[string]string)
+
+	chassisData, stderr, err := util.RunOVNSbctl("--data=bare", "--no-heading",
+		"--columns=name,hostname", "list", "Chassis")
+	if err != nil {
+		klog.Errorf("Failed to get chassis list: stderr: %q, error: %v",
+			stderr, err)
+		return
+	}
+	for _, chassis := range strings.Split(chassisData, "\n\n") {
+		items := strings.Split(chassis, "\n")
+		if len(items) != 2 || len(items[1]) == 0 {
+			continue
+		}
+		if _, ok := foundNodes[items[1]]; !ok {
+			//node still exists, don't add it to the chassis map
+			chassisMap[items[1]] = items[0]
+		}
+	}
+
 	nodeSwitches, stderr, err := util.RunOVNNbctl("--data=bare", "--no-heading",
 		"--columns=name,other-config", "find", "logical_switch",
 		"other-config:"+subnetAttr+"!=_")
@@ -956,6 +981,18 @@ func (oc *Controller) syncNodes(nodes []interface{}) {
 	for nodeName, nodeSubnets := range NodeSubnetsMap {
 		if err := oc.deleteNode(nodeName, nodeSubnets.hostSubnet, nodeSubnets.joinSubnet); err != nil {
 			klog.Error(err)
+		}
+		//remove the node from the chassis map so we don't delete it twice
+		delete(chassisMap, nodeName)
+	}
+
+	for nodeName, chassisName := range chassisMap {
+		if chassisName != "" {
+			_, stderr, err = util.RunOVNSbctl("--if-exist", "chassis-del", chassisName)
+			if err != nil {
+				klog.Errorf("Failed to delete chassis with name %s for logical switch %s: stderr: %q, error: %v",
+					chassisName, nodeName, stderr, err)
+			}
 		}
 	}
 }
