@@ -241,13 +241,15 @@ func localnetIptRules(svc *kapi.Service) []iptRule {
 		}
 
 		nodePort := fmt.Sprintf("%d", svcPort.NodePort)
-		destination := strings.Split(localnetGatewayIP(), "/")[0] + ":" + nodePort
+		destination := net.JoinHostPort(strings.Split(localnetGatewayIP(), "/")[0], nodePort)
 
 		rules = append(rules, iptRule{
 			table: "nat",
 			chain: iptableNodePortChain,
-			args: []string{"-p", string(protocol), "--dport", nodePort, "-j", "DNAT", "--to-destination",
-				net.JoinHostPort(strings.Split(localnetGatewayIP(), "/")[0], nodePort)},
+			args: []string{
+				"-p", string(protocol), "--dport", nodePort,
+				"-j", "DNAT", "--to-destination", destination,
+			},
 		})
 		rules = append(rules, iptRule{
 			table: "filter",
