@@ -503,7 +503,6 @@ func GetOvnRunDir() string {
 type OVNDBServerStatus struct {
 	Connected bool `json:"connected"`
 	Leader    bool `json:"leader"`
-	Index     int  `json:"index"`
 }
 
 type queryResult struct {
@@ -513,7 +512,7 @@ type queryResult struct {
 func GetOVNDBServerInfo(timeout int, direction, database string) (*OVNDBServerStatus, error) {
 	sockPath := fmt.Sprintf("unix:/var/run/openvswitch/ovn%s_db.sock", direction)
 	transact := fmt.Sprintf(`["_Server", {"op":"select", "table":"Database", "where":[["name", "==", "%s"]], `+
-		`"columns": ["connected", "leader", "index"]}]`, database)
+		`"columns": ["connected", "leader"]}]`, database)
 
 	stdout, stderr, err := RunOVSDBClient(fmt.Sprintf("--timeout=%d", timeout), "query", sockPath, transact)
 	if err != nil {
