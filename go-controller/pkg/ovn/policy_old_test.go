@@ -150,14 +150,14 @@ func (n networkPolicyOld) addLocalPodSelectorCmds(fexec *ovntest.FakeExec, pod p
 		n.addNamespaceSelectorCmdsForGress(fexec, networkPolicy, "ingress", i)
 		hashedOVNName := hashedAddressSet(fmt.Sprintf("%s.%s.%s.%d", networkPolicy.Namespace, networkPolicy.Name, "ingress", i))
 		fexec.AddFakeCmdsNoOutputNoError([]string{
-			fmt.Sprintf("ovn-nbctl --timeout=15 set address_set %s addresses=\"%s\"", hashedOVNName, pod.podIP),
+			fmt.Sprintf("ovn-nbctl --timeout=15 add address_set %s addresses %s", hashedOVNName, pod.podIP),
 		})
 	}
 	for i := range networkPolicy.Spec.Egress {
 		n.addNamespaceSelectorCmdsForGress(fexec, networkPolicy, "egress", i)
 		hashedOVNName := hashedAddressSet(fmt.Sprintf("%s.%s.%s.%d", networkPolicy.Namespace, networkPolicy.Name, "egress", i))
 		fexec.AddFakeCmdsNoOutputNoError([]string{
-			fmt.Sprintf("ovn-nbctl --timeout=15 set address_set %s addresses=\"%s\"", hashedOVNName, pod.podIP),
+			fmt.Sprintf("ovn-nbctl --timeout=15 add address_set %s addresses %s", hashedOVNName, pod.podIP),
 		})
 	}
 	for i := range networkPolicy.Spec.Ingress {
@@ -187,14 +187,14 @@ func (n networkPolicyOld) addPodAndNamespaceSelectorCmds(fexec *ovntest.FakeExec
 		hashedOVNName := hashedAddressSet(fmt.Sprintf("%s.%s.%s.%d", networkPolicy.Namespace, networkPolicy.Name, "ingress", i))
 		n.addNamespaceSelectorCmdsForGress(fexec, networkPolicy, "ingress", i)
 		fexec.AddFakeCmdsNoOutputNoError([]string{
-			fmt.Sprintf("ovn-nbctl --timeout=15 set address_set %s addresses=\"%s\"", hashedOVNName, pod.podIP),
+			fmt.Sprintf("ovn-nbctl --timeout=15 add address_set %s addresses %s", hashedOVNName, pod.podIP),
 		})
 	}
 	for i := range networkPolicy.Spec.Egress {
 		hashedOVNName := hashedAddressSet(fmt.Sprintf("%s.%s.%s.%d", networkPolicy.Namespace, networkPolicy.Name, "egress", i))
 		n.addNamespaceSelectorCmdsForGress(fexec, networkPolicy, "egress", i)
 		fexec.AddFakeCmdsNoOutputNoError([]string{
-			fmt.Sprintf("ovn-nbctl --timeout=15 set address_set %s addresses=\"%s\"", hashedOVNName, pod.podIP),
+			fmt.Sprintf("ovn-nbctl --timeout=15 add address_set %s addresses %s", hashedOVNName, pod.podIP),
 		})
 	}
 }
@@ -235,18 +235,18 @@ func (n networkPolicyOld) delPodCmds(fexec *ovntest.FakeExec, pod pod, networkPo
 	for i := range networkPolicy.Spec.Ingress {
 		hashedOVNName := hashedAddressSet(fmt.Sprintf("%s.%s.%s.%d", networkPolicy.Namespace, networkPolicy.Name, "ingress", i))
 		fexec.AddFakeCmdsNoOutputNoError([]string{
-			fmt.Sprintf("ovn-nbctl --timeout=15 clear address_set %s addresses", hashedOVNName),
+			fmt.Sprintf("ovn-nbctl --timeout=15 remove address_set %s addresses %s", hashedOVNName, pod.podIP),
 		})
 	}
 	for i := range networkPolicy.Spec.Egress {
 		hashedOVNName := hashedAddressSet(fmt.Sprintf("%s.%s.%s.%d", networkPolicy.Namespace, networkPolicy.Name, "egress", i))
 		fexec.AddFakeCmdsNoOutputNoError([]string{
-			fmt.Sprintf("ovn-nbctl --timeout=15 clear address_set %s addresses", hashedOVNName),
+			fmt.Sprintf("ovn-nbctl --timeout=15 remove address_set %s addresses %s", hashedOVNName, pod.podIP),
 		})
 	}
 	hashedNamespace := hashedAddressSet(pod.namespace)
 	fexec.AddFakeCmdsNoOutputNoError([]string{
-		fmt.Sprintf("ovn-nbctl --timeout=15 clear address_set %s addresses", hashedNamespace),
+		fmt.Sprintf("ovn-nbctl --timeout=15 remove address_set %s addresses %s", hashedNamespace, pod.podIP),
 	})
 }
 
@@ -261,19 +261,19 @@ func (n networkPolicyOld) delLocalPodCmds(fexec *ovntest.FakeExec, pod pod, netw
 		hashedOVNName := hashedAddressSet(fmt.Sprintf("%s.%s.%s.%d", networkPolicy.Namespace, networkPolicy.Name, "ingress", i))
 		n.baseLocalCmdsForGress(fexec, pod, networkPolicy, i, "Ingress", hashedOVNName)
 		fexec.AddFakeCmdsNoOutputNoError([]string{
-			fmt.Sprintf("ovn-nbctl --timeout=15 clear address_set %s addresses", hashedOVNName),
+			fmt.Sprintf("ovn-nbctl --timeout=15 remove address_set %s addresses %s", hashedOVNName, pod.podIP),
 		})
 	}
 	for i := range networkPolicy.Spec.Egress {
 		hashedOVNName := hashedAddressSet(fmt.Sprintf("%s.%s.%s.%d", networkPolicy.Namespace, networkPolicy.Name, "egress", i))
 		n.baseLocalCmdsForGress(fexec, pod, networkPolicy, i, "Egress", hashedOVNName)
 		fexec.AddFakeCmdsNoOutputNoError([]string{
-			fmt.Sprintf("ovn-nbctl --timeout=15 clear address_set %s addresses", hashedOVNName),
+			fmt.Sprintf("ovn-nbctl --timeout=15 remove address_set %s addresses %s", hashedOVNName, pod.podIP),
 		})
 	}
 	hashedNamespace := hashedAddressSet(pod.namespace)
 	fexec.AddFakeCmdsNoOutputNoError([]string{
-		fmt.Sprintf("ovn-nbctl --timeout=15 clear address_set %s addresses", hashedNamespace),
+		fmt.Sprintf("ovn-nbctl --timeout=15 remove address_set %s addresses %s", hashedNamespace, pod.podIP),
 	})
 }
 

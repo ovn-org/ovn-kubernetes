@@ -6,8 +6,8 @@ import (
 	"sync"
 	"time"
 
-	"github.com/sirupsen/logrus"
 	kapi "k8s.io/api/core/v1"
+	"k8s.io/klog"
 )
 
 const (
@@ -20,7 +20,7 @@ func (oc *Controller) syncNamespaces(namespaces []interface{}) {
 	for _, nsInterface := range namespaces {
 		ns, ok := nsInterface.(*kapi.Namespace)
 		if !ok {
-			logrus.Errorf("Spurious object in syncNamespaces: %v", nsInterface)
+			klog.Errorf("Spurious object in syncNamespaces: %v", nsInterface)
 			continue
 		}
 		expectedNs[ns.Name] = true
@@ -34,7 +34,7 @@ func (oc *Controller) syncNamespaces(namespaces []interface{}) {
 		}
 	})
 	if err != nil {
-		logrus.Errorf("Error in syncing namespaces: %v", err)
+		klog.Errorf("Error in syncing namespaces: %v", err)
 	}
 }
 
@@ -72,12 +72,7 @@ func (oc *Controller) addPodToNamespace(ns string, ip net.IP, logicalPort string
 	}
 
 	oc.namespaceAddressSet[ns][address] = logicalPort
-	addresses := make([]string, 0)
-	for address := range oc.namespaceAddressSet[ns] {
-		addresses = append(addresses, address)
-	}
-
-	setAddressSet(hashedAddressSet(ns), addresses)
+	addToAddressSet(hashedAddressSet(ns), address)
 
 	// If multicast is allowed and enabled for the namespace, add the port
 	// to the allow policy.
@@ -107,12 +102,7 @@ func (oc *Controller) deletePodFromNamespace(ns string, ip net.IP, logicalPort s
 	}
 
 	delete(oc.namespaceAddressSet[ns], address)
-	addresses := make([]string, 0)
-	for address := range oc.namespaceAddressSet[ns] {
-		addresses = append(addresses, address)
-	}
-
-	setAddressSet(hashedAddressSet(ns), addresses)
+	removeFromAddressSet(hashedAddressSet(ns), address)
 
 	// Remove the port from the multicast allow policy.
 	if oc.multicastSupport && oc.multicastEnabled[ns] {
@@ -146,7 +136,7 @@ func (oc *Controller) multicastUpdateNamespace(ns *kapi.Namespace) {
 		err = deleteMulticastAllowPolicy(ns.Name)
 	}
 	if err != nil {
-		logrus.Errorf(err.Error())
+		klog.Errorf(err.Error())
 		return
 	}
 
@@ -158,7 +148,7 @@ func (oc *Controller) multicastUpdateNamespace(ns *kapi.Namespace) {
 func (oc *Controller) multicastDeleteNamespace(ns *kapi.Namespace) {
 	if oc.multicastEnabled[ns.Name] {
 		if err := deleteMulticastAllowPolicy(ns.Name); err != nil {
-			logrus.Errorf(err.Error())
+			klog.Errorf(err.Error())
 		}
 	}
 	delete(oc.multicastEnabled, ns.Name)
@@ -166,7 +156,7 @@ func (oc *Controller) multicastDeleteNamespace(ns *kapi.Namespace) {
 
 // AddNamespace creates corresponding addressset in ovn db
 func (oc *Controller) AddNamespace(ns *kapi.Namespace) {
-	logrus.Debugf("Adding namespace: %s", ns.Name)
+	klog.V(5).Infof("Adding namespace: %s", ns.Name)
 	oc.namespaceMutexMutex.Lock()
 	if oc.namespaceMutex[ns.Name] == nil {
 		oc.namespaceMutex[ns.Name] = &sync.Mutex{}
@@ -184,7 +174,7 @@ func (oc *Controller) AddNamespace(ns *kapi.Namespace) {
 	// address_set
 	existingPods, err := oc.watchFactory.GetPods(ns.Name)
 	if err != nil {
-		logrus.Errorf("Failed to get all the pods (%v)", err)
+		klog.Errorf("Failed to get all the pods (%v)", err)
 	} else {
 		for _, pod := range existingPods {
 			if pod.Status.PodIP != "" {
@@ -208,7 +198,7 @@ func (oc *Controller) AddNamespace(ns *kapi.Namespace) {
 }
 
 func (oc *Controller) updateNamespace(old, newer *kapi.Namespace) {
-	logrus.Debugf("Updating namespace: old %s new %s", old.Name, newer.Name)
+	klog.V(5).Infof("Updating namespace: old %s new %s", old.Name, newer.Name)
 
 	// A big fat lock per namespace to prevent race conditions
 	// with namespace resources like address sets and deny acls.
@@ -219,7 +209,7 @@ func (oc *Controller) updateNamespace(old, newer *kapi.Namespace) {
 }
 
 func (oc *Controller) deleteNamespace(ns *kapi.Namespace) {
-	logrus.Debugf("Deleting namespace: %s", ns.Name)
+	klog.V(5).Infof("Deleting namespace: %s", ns.Name)
 	oc.namespaceMutexMutex.Lock()
 	defer oc.namespaceMutexMutex.Unlock()
 

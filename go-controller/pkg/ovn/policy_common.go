@@ -10,11 +10,11 @@ import (
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/factory"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
-	"github.com/sirupsen/logrus"
 	kapi "k8s.io/api/core/v1"
 	knet "k8s.io/api/networking/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/client-go/tools/cache"
+	"k8s.io/klog"
 )
 
 type namespacePolicy struct {
@@ -213,11 +213,7 @@ func (oc *Controller) handlePeerPodSelectorAddUpdate(np *namespacePolicy,
 	}
 
 	addressMap[ipAddress] = true
-	addresses := make([]string, 0, len(addressMap))
-	for k := range addressMap {
-		addresses = append(addresses, k)
-	}
-	setAddressSet(addressSet, addresses)
+	addToAddressSet(addressSet, ipAddress)
 }
 
 func (oc *Controller) handlePeerPodSelectorDeleteACLRules(obj interface{}, gress *gressPolicy) {
@@ -262,12 +258,7 @@ func (oc *Controller) handlePeerPodSelectorDelete(np *namespacePolicy,
 	}
 
 	delete(addressMap, ipAddress)
-
-	addresses := make([]string, 0, len(addressMap))
-	for k := range addressMap {
-		addresses = append(addresses, k)
-	}
-	setAddressSet(addressSet, addresses)
+	removeFromAddressSet(addressSet, ipAddress)
 }
 
 func (oc *Controller) handlePeerPodSelector(
@@ -288,7 +279,7 @@ func (oc *Controller) handlePeerPodSelector(
 			},
 		}, nil)
 	if err != nil {
-		logrus.Errorf("error watching peer pods for policy %s in namespace %s: %v",
+		klog.Errorf("error watching peer pods for policy %s in namespace %s: %v",
 			policy.Name, policy.Namespace, err)
 		return
 	}
@@ -326,7 +317,7 @@ func (oc *Controller) handlePeerNamespaceAndPodSelector(policy *knet.NetworkPoli
 						},
 					}, nil)
 				if err != nil {
-					logrus.Errorf("error watching pods in namespace %s for policy %s: %v", namespace.Name, policy.Name, err)
+					klog.Errorf("error watching pods in namespace %s for policy %s: %v", namespace.Name, policy.Name, err)
 					return
 				}
 				np.Lock()
@@ -343,7 +334,7 @@ func (oc *Controller) handlePeerNamespaceAndPodSelector(policy *knet.NetworkPoli
 			},
 		}, nil)
 	if err != nil {
-		logrus.Errorf("error watching namespaces for policy %s: %v",
+		klog.Errorf("error watching namespaces for policy %s: %v",
 			policy.Name, err)
 		return
 	}
@@ -391,7 +382,7 @@ func (oc *Controller) handlePeerNamespaceSelector(
 			},
 		}, nil)
 	if err != nil {
-		logrus.Errorf("error watching namespaces for policy %s: %v",
+		klog.Errorf("error watching namespaces for policy %s: %v",
 			policy.Name, err)
 		return
 	}

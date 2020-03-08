@@ -7,7 +7,7 @@ import (
 	"strings"
 
 	util "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
-	"github.com/sirupsen/logrus"
+	"k8s.io/klog"
 )
 
 // hash the provided input to make it a valid addressSet or portGroup name.
@@ -15,7 +15,7 @@ func hashForOVN(s string) string {
 	h := fnv.New64a()
 	_, err := h.Write([]byte(s))
 	if err != nil {
-		logrus.Errorf("failed to hash %s", s)
+		klog.Errorf("failed to hash %s", s)
 	}
 	hashString := strconv.FormatUint(h.Sum64(), 10)
 	return fmt.Sprintf("a%s", hashString)
@@ -40,7 +40,7 @@ func (oc *Controller) forEachAddressSetUnhashedName(iteratorFn func(
 	output, stderr, err := util.RunOVNNbctl("--data=bare", "--no-heading",
 		"--columns=external_ids", "find", "address_set")
 	if err != nil {
-		logrus.Errorf("Error in obtaining list of address sets from OVN: "+
+		klog.Errorf("Error in obtaining list of address sets from OVN: "+
 			"stdout: %q, stderr: %q err: %v", output, stderr, err)
 		return err
 	}
@@ -60,35 +60,36 @@ func (oc *Controller) forEachAddressSetUnhashedName(iteratorFn func(
 	return nil
 }
 
-func setAddressSet(hashName string, addresses []string) {
-	logrus.Debugf("setAddressSet for %s with %s", hashName, addresses)
-	if len(addresses) == 0 {
-		_, stderr, err := util.RunOVNNbctl("clear", "address_set",
-			hashName, "addresses")
-		if err != nil {
-			logrus.Errorf("failed to clear address_set, stderr: %q (%v)",
-				stderr, err)
-		}
-		return
-	}
+func addToAddressSet(hashName string, address string) {
+	klog.V(5).Infof("addToAddressSet for %s with %s", hashName, address)
 
-	ips := `"` + strings.Join(addresses, `" "`) + `"`
-	_, stderr, err := util.RunOVNNbctl("set", "address_set",
-		hashName, fmt.Sprintf("addresses=%s", ips))
+	_, stderr, err := util.RunOVNNbctl("add", "address_set",
+		hashName, "addresses", address)
 	if err != nil {
-		logrus.Errorf("failed to set address_set, stderr: %q (%v)",
-			stderr, err)
+		klog.Errorf("failed to add an address %q to address_set %q, stderr: %q (%v)",
+			address, hashName, stderr, err)
+	}
+}
+
+func removeFromAddressSet(hashName string, address string) {
+	klog.V(5).Infof("removeFromAddressSet for %s with %s", hashName, address)
+
+	_, stderr, err := util.RunOVNNbctl("remove", "address_set",
+		hashName, "addresses", address)
+	if err != nil {
+		klog.Errorf("failed to remove an address %q from address_set %q, stderr: %q (%v)",
+			address, hashName, stderr, err)
 	}
 }
 
 func createAddressSet(name string, hashName string,
 	addresses []string) {
-	logrus.Debugf("createAddressSet with %s and %s", name, addresses)
+	klog.V(5).Infof("createAddressSet with %s and %s", name, addresses)
 	addressSet, stderr, err := util.RunOVNNbctl("--data=bare",
 		"--no-heading", "--columns=_uuid", "find", "address_set",
 		fmt.Sprintf("name=%s", hashName))
 	if err != nil {
-		logrus.Errorf("find failed to get address set, stderr: %q (%v)",
+		klog.Errorf("find failed to get address set, stderr: %q (%v)",
 			stderr, err)
 		return
 	}
@@ -98,7 +99,7 @@ func createAddressSet(name string, hashName string,
 		_, stderr, err = util.RunOVNNbctl("clear", "address_set",
 			hashName, "addresses")
 		if err != nil {
-			logrus.Errorf("failed to clear address_set, stderr: %q (%v)",
+			klog.Errorf("failed to clear address_set, stderr: %q (%v)",
 				stderr, err)
 		}
 		return
@@ -112,7 +113,7 @@ func createAddressSet(name string, hashName string,
 		_, stderr, err = util.RunOVNNbctl("set", "address_set",
 			hashName, fmt.Sprintf("addresses=%s", ips))
 		if err != nil {
-			logrus.Errorf("failed to set address_set, stderr: %q (%v)",
+			klog.Errorf("failed to set address_set, stderr: %q (%v)",
 				stderr, err)
 		}
 		return
@@ -130,25 +131,25 @@ func createAddressSet(name string, hashName string,
 			fmt.Sprintf("addresses=%s", ips))
 	}
 	if err != nil {
-		logrus.Errorf("failed to create address_set %s, stderr: %q (%v)",
+		klog.Errorf("failed to create address_set %s, stderr: %q (%v)",
 			name, stderr, err)
 	}
 }
 
 func deleteAddressSet(hashName string) {
-	logrus.Debugf("deleteAddressSet %s", hashName)
+	klog.V(5).Infof("deleteAddressSet %s", hashName)
 
 	_, stderr, err := util.RunOVNNbctl("--if-exists", "destroy",
 		"address_set", hashName)
 	if err != nil {
-		logrus.Errorf("failed to destroy address set %s, stderr: %q, (%v)",
+		klog.Errorf("failed to destroy address set %s, stderr: %q, (%v)",
 			hashName, stderr, err)
 		return
 	}
 }
 
 func createPortGroup(name string, hashName string) (string, error) {
-	logrus.Debugf("createPortGroup with %s", name)
+	klog.V(5).Infof("createPortGroup with %s", name)
 	portGroup, stderr, err := util.RunOVNNbctl("--data=bare",
 		"--no-heading", "--columns=_uuid", "find", "port_group",
 		fmt.Sprintf("name=%s", hashName))
@@ -173,13 +174,13 @@ func createPortGroup(name string, hashName string) (string, error) {
 }
 
 func deletePortGroup(hashName string) {
-	logrus.Debugf("deletePortGroup %s", hashName)
+	klog.V(5).Infof("deletePortGroup %s", hashName)
 
 	portGroup, stderr, err := util.RunOVNNbctl("--data=bare",
 		"--no-heading", "--columns=_uuid", "find", "port_group",
 		fmt.Sprintf("name=%s", hashName))
 	if err != nil {
-		logrus.Errorf("find failed to get port_group, stderr: %q (%v)",
+		klog.Errorf("find failed to get port_group, stderr: %q (%v)",
 			stderr, err)
 		return
 	}
@@ -191,7 +192,7 @@ func deletePortGroup(hashName string) {
 	_, stderr, err = util.RunOVNNbctl("--if-exists", "destroy",
 		"port_group", portGroup)
 	if err != nil {
-		logrus.Errorf("failed to destroy port_group %s, stderr: %q, (%v)",
+		klog.Errorf("failed to destroy port_group %s, stderr: %q, (%v)",
 			hashName, stderr, err)
 		return
 	}

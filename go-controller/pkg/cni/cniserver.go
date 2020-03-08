@@ -11,7 +11,7 @@ import (
 
 	"github.com/gorilla/mux"
 	"github.com/prometheus/client_golang/prometheus"
-	"github.com/sirupsen/logrus"
+	"k8s.io/klog"
 
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
 )
@@ -162,7 +162,7 @@ func (s *Server) handleCNIRequest(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	logrus.Infof("Waiting for %s result for pod %s/%s", req.Command, req.PodNamespace, req.PodName)
+	klog.Infof("Waiting for %s result for pod %s/%s", req.Command, req.PodNamespace, req.PodName)
 	result, err := s.requestFunc(req)
 	hasErr := "false"
 	if err != nil {
@@ -172,7 +172,7 @@ func (s *Server) handleCNIRequest(w http.ResponseWriter, r *http.Request) {
 		// Empty response JSON means success with no body
 		w.Header().Set("Content-Type", "application/json")
 		if _, err := w.Write(result); err != nil {
-			logrus.Warningf("Error writing %s HTTP response: %v", req.Command, err)
+			klog.Warningf("Error writing %s HTTP response: %v", req.Command, err)
 		}
 	}
 

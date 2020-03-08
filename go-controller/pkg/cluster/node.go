@@ -10,13 +10,13 @@ import (
 	"reflect"
 	"strconv"
 	"strings"
-	"sync"
 	"time"
 
-	"github.com/sirupsen/logrus"
+	"k8s.io/klog"
 
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/cni"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/kube"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
 
@@ -24,8 +24,6 @@ import (
 	"k8s.io/apimachinery/pkg/util/wait"
 	"k8s.io/client-go/tools/cache"
 )
-
-type postReadyFn func() error
 
 func isOVNControllerReady(name string) (bool, error) {
 	runDir := util.GetOvnRunDir()
@@ -39,7 +37,7 @@ func isOVNControllerReady(name string) (bool, error) {
 		ctlFile := runDir + fmt.Sprintf("ovn-controller.%s.ctl", strings.TrimSuffix(string(pid), "\n"))
 		ret, _, err := util.RunOVSAppctl("-t", ctlFile, "connection-status")
 		if err == nil {
-			logrus.Infof("node %s connection status = %s", name, ret)
+			klog.Infof("node %s connection status = %s", name, ret)
 			return ret == "connected", nil
 		}
 		return false, err
@@ -94,14 +92,16 @@ func (cluster *OvnClusterController) StartClusterNode(name string) error {
 	var err error
 	var node *kapi.Node
 	var subnet *net.IPNet
-	var clusterSubnets []string
 	var cidr string
-	var wg sync.WaitGroup
 
 	// Setting debug log level during node bring up to expose bring up process.
 	// Log level is returned to configured value when bring up is complete.
-	var LogLevel = logrus.GetLevel()
-	logrus.SetLevel(5)
+	var level klog.Level
+	lastLevel := fmt.Sprintf("%v", level.Get())
+
+	if err := level.Set("5"); err != nil {
+		klog.Errorf("setting klog \"loglevel\" to 5 failed, err: %v", err)
+	}
 
 	if config.MasterHA.ManageDBServers {
 		var readyChan = make(chan bool, 1)
@@ -129,21 +129,15 @@ func (cluster *OvnClusterController) StartClusterNode(name string) error {
 		return err
 	}
 
-	for _, clusterSubnet := range config.Default.ClusterSubnets {
-		clusterSubnets = append(clusterSubnets, clusterSubnet.CIDR.String())
-	}
-
-	messages := make(chan error)
-
 	// First wait for the node logical switch to be created by the Master, timeout is 300s.
 	err = wait.PollImmediate(500*time.Millisecond, 300*time.Second, func() (bool, error) {
 		if node, err = cluster.Kube.GetNode(name); err != nil {
-			logrus.Errorf("error retrieving node %s: %v", name, err)
+			klog.Infof("waiting to retrieve node %s: %v", name, err)
 			return false, nil
 		}
 		cidr, err = getNodeHostSubnetAnnotation(node)
 		if err != nil {
-			logrus.Errorf("Error starting node %s, no annotation found on node for subnet - %v", name, err)
+			klog.Infof("waiting for node %s to start, no annotation found on node for subnet - %v", name, err)
 			return false, nil
 		}
 		return true, nil
@@ -157,79 +151,40 @@ func (cluster *OvnClusterController) StartClusterNode(name string) error {
 		return fmt.Errorf("invalid hostsubnet found for node %s: %v", node.Name, err)
 	}
 
-	logrus.Infof("Node %s ready for ovn initialization with subnet %s", node.Name, subnet.String())
+	klog.Infof("Node %s ready for ovn initialization with subnet %s", node.Name, subnet.String())
 
 	if _, err = isOVNControllerReady(name); err != nil {
 		return err
 	}
 
-	type readyFunc func(string, string) (bool, error)
-	var readyFuncs []readyFunc
+	nodeAnnotator := kube.NewNodeAnnotator(cluster.Kube, node)
+	waiter := newStartupWaiter(node.Name)
 
-	// get gateway annotations
-	gwAnnotations, postReady, err := cluster.initGateway(node.Name, subnet.String())
-	if err != nil {
+	// Initialize gateway resources on the node
+	if err := cluster.initGateway(node.Name, subnet.String(), nodeAnnotator, waiter); err != nil {
 		return err
 	}
-	readyFuncs = append(readyFuncs, GatewayReady)
 
-	// Get management port annotations
-	mgmtPortAnnotations, err := CreateManagementPort(node.Name, subnet, clusterSubnets)
-	if err != nil {
+	// Initialize management port resources on the node
+	if err := createManagementPort(node.Name, subnet, nodeAnnotator, waiter); err != nil {
 		return err
 	}
-	readyFuncs = append(readyFuncs, ManagementPortReady)
 
-	// Combine mgmtPortAnnotations and gwAnnotations into nodeAnnotations
-	nodeAnnotations := make(map[string]interface{})
-	for k, v := range mgmtPortAnnotations {
-		nodeAnnotations[k] = v
-	}
-	for k, v := range gwAnnotations {
-		nodeAnnotations[k] = v
+	if err := nodeAnnotator.Run(); err != nil {
+		return fmt.Errorf("Failed to set node %s annotations: %v", node.Name, err)
 	}
 
-	wg.Add(len(readyFuncs))
-
-	// Set node annotations
-	err = cluster.Kube.SetAnnotationsOnNode(node, nodeAnnotations)
-	if err != nil {
-		return fmt.Errorf("Failed to set node %s annotation: %v", node.Name, nodeAnnotations)
+	// Wait for management port and gateway resources to be created by the master
+	klog.Infof("Waiting for gateway and management port readiness...")
+	start := time.Now()
+	if err := waiter.Wait(); err != nil {
+		return err
 	}
+	klog.Infof("Gateway and management port readiness took %v", time.Since(start))
 
-	portName := "k8s-" + node.Name
-
-	logrus.Infof("Waiting for GatewayReady and ManagementPortReady on node %s", node.Name)
-	// Wait for the portMac to be created
-	for _, f := range readyFuncs {
-		go func(rf readyFunc) {
-			defer wg.Done()
-			err := wait.PollImmediate(500*time.Millisecond, 300*time.Second, func() (bool, error) {
-				return rf(node.Name, portName)
-			})
-			messages <- err
-		}(f)
+	if err := level.Set(lastLevel); err != nil {
+		klog.Errorf("reset of initial klog \"loglevel\" failed, err: %v", err)
 	}
-	go func() {
-		wg.Wait()
-		close(messages)
-	}()
-
-	for i := range messages {
-		if i != nil {
-			return fmt.Errorf("Timeout error while obtaining addresses for %s (%v)", portName, i)
-		}
-	}
-	logrus.Infof("Gateway and ManagementPort are Ready")
-
-	if postReady != nil {
-		err = postReady()
-		if err != nil {
-			return err
-		}
-	}
-
-	logrus.SetLevel(LogLevel)
 
 	confFile := filepath.Join(config.CNI.ConfDir, config.CNIConfFileName)
 	_, err = os.Stat(confFile)
@@ -261,7 +216,7 @@ func updateOVNConfig(ep *kapi.Endpoints, readyChan chan bool) error {
 		}
 	}
 
-	logrus.Infof("OVN databases reconfigured, masterIPs %v, northbound-db %v, southbound-db %v", masterIPList, northboundDBPort, southboundDBPort)
+	klog.Infof("OVN databases reconfigured, masterIPs %v, northbound-db %v, southbound-db %v", masterIPList, northboundDBPort, southboundDBPort)
 
 	readyChan <- true
 	return nil
@@ -275,7 +230,7 @@ func (cluster *OvnClusterController) watchConfigEndpoints(readyChan chan bool) e
 				ep := obj.(*kapi.Endpoints)
 				if ep.Name == "ovnkube-db" {
 					if err := updateOVNConfig(ep, readyChan); err != nil {
-						logrus.Errorf(err.Error())
+						klog.Errorf(err.Error())
 					}
 				}
 			},
@@ -284,7 +239,7 @@ func (cluster *OvnClusterController) watchConfigEndpoints(readyChan chan bool) e
 				epOld := old.(*kapi.Endpoints)
 				if !reflect.DeepEqual(epNew.Subsets, epOld.Subsets) && epNew.Name == "ovnkube-db" {
 					if err := updateOVNConfig(epNew, readyChan); err != nil {
-						logrus.Errorf(err.Error())
+						klog.Errorf(err.Error())
 					}
 				}
 			},

@@ -29,6 +29,7 @@ jobs:
         mkdir -p $GOPATH/src/github.com/ovn-org
         mv $GITHUB_WORKSPACE $GOPATH/src/github.com/ovn-org/ovn-kubernetes
         echo "::set-env name=WORKDIR::$GOPATH/src/github.com/ovn-org/ovn-kubernetes"
+        mkdir -p $GITHUB_WORKSPACE
     - name: Build
       working-directory: "${{ env.WORKDIR }}"
       run: |
@@ -44,9 +45,47 @@ jobs:
         pushd dist/images
            if [ -n "$(git diff --stat origin/master.. | grep dist/images/Dockerfile)" ]; then make all; fi
         popd
-  e2e:
-    name: e2e-kind-ovn
+  k8s:
+    name: Build k8s
     runs-on: ubuntu-latest
+    steps:
+    - name: Set up environment
+      run: |
+        export GOPATH=$HOME/go
+        echo "::set-env name=GOPATH::$GOPATH"
+        export PATH=$GOPATH/bin:$PATH
+        echo "::add-path::$GOPATH/bin"
+        mkdir -p $GOPATH/src/github.com/ovn-org
+        mv $GITHUB_WORKSPACE $GOPATH/src/github.com/ovn-org/ovn-kubernetes
+        echo "::set-env name=WORKDIR::$GOPATH/src/github.com/ovn-org/ovn-kubernetes"
+        mkdir -p $GITHUB_WORKSPACE
+    - name: Cache Kubernetes
+      id: cache-k8s
+      uses: actions/cache@v1
+      with:
+        path: "${{ env.GOPATH }}/src/k8s.io/kubernetes/"
+        key: k8s-go-2-${{ env.K8S_VERSION }}
+    - name: Set up Go 1.12
+      uses: actions/setup-go@v1
+      with:
+        go-version: 1.12
+      id: go
+      if: steps.cache-k8s.outputs.cache-hit != 'true'
+    - name: Build and install Kubernetes
+      working-directory: "${{ env.WORKDIR }}"
+      if: steps.cache-k8s.outputs.cache-hit != 'true'
+      run: |
+        set -x
+        git clone --single-branch --branch $K8S_VERSION https://github.com/kubernetes/kubernetes.git $GOPATH/src/k8s.io/kubernetes/
+        pushd $GOPATH/src/k8s.io/kubernetes/
+        make WHAT="test/e2e/e2e.test vendor/github.com/onsi/ginkgo/ginkgo cmd/kubectl"
+        rm -rf .git
+  e2e-shard-n:
+    name: e2e-kind-ovn-shard-n
+    runs-on: ubuntu-latest
+    needs: k8s
+    env:
+      JOB_NAME: e2e-shard-n
     steps:
     - name: Set up Go 1.12
       uses: actions/setup-go@v1
@@ -64,7 +103,23 @@ jobs:
         mkdir -p $GOPATH/src/github.com/ovn-org
         mv $GITHUB_WORKSPACE $GOPATH/src/github.com/ovn-org/ovn-kubernetes
         echo "::set-env name=WORKDIR::$GOPATH/src/github.com/ovn-org/ovn-kubernetes"
-    - name: e2e-kind-ovn
+        mkdir -p $GITHUB_WORKSPACE
+    - name: Cache Kubernetes
+      id: cache-k8s
+      uses: actions/cache@v1
+      with:
+        path: "${{ env.GOPATH }}/src/k8s.io/kubernetes/"
+        key: k8s-go-2-${{ env.K8S_VERSION }}
+    - name: Build and install Kubernetes
+      working-directory: "${{ env.WORKDIR }}"
+      if: steps.cache-k8s.outputs.cache-hit != 'true'
+      run: |
+        set -x
+        git clone --single-branch --branch $K8S_VERSION https://github.com/kubernetes/kubernetes.git $GOPATH/src/k8s.io/kubernetes/
+        pushd $GOPATH/src/k8s.io/kubernetes/
+        make WHAT="test/e2e/e2e.test vendor/github.com/onsi/ginkgo/ginkgo cmd/kubectl"
+        rm -rf .git
+    - name: kind setup
       working-directory: "${{ env.WORKDIR }}"
       run: |
         set -x
@@ -73,9 +128,8 @@ jobs:
         mkdir -p $GOPATH/bin
         curl -fs https://chunk.io/trozet/ba750701d0af4e2b94b249ab9de27b50 -o $GOPATH/bin/kubetest
         chmod +x $GOPATH/bin/kubetest
-        git clone --single-branch --branch $K8S_VERSION https://github.com/kubernetes/kubernetes.git $GOPATH/src/k8s.io/kubernetes/
+
         pushd $GOPATH/src/k8s.io/kubernetes/
-        make WHAT="test/e2e/e2e.test vendor/github.com/onsi/ginkgo/ginkgo cmd/kubectl"
         sudo cp ./_output/local/go/bin/kubectl /usr/local/bin/
         popd
 
@@ -83,13 +137,17 @@ jobs:
         pushd contrib
         ./kind.sh
         popd
+    - name: e2e-kind-ovn-shard-n
+      working-directory: "${{ env.WORKDIR }}"
+      run: |
         pushd $GOPATH/src/k8s.io/kubernetes/
         export KUBERNETES_CONFORMANCE_TEST=y
         export KUBECONFIG=${HOME}/admin.conf
         export MASTER_NAME=${KIND_CLUSTER_NAME}-control-plane
         export NODE_NAMES=${MASTER_NAME}
-        kubetest --ginkgo-parallel=2 --provider=local --deployment=kind --kind-cluster-name=${KIND_CLUSTER_NAME} --test --test_args='--ginkgo.focus=\[sig-network\].*Conformance --disable-log-dump=false --ginkgo.skip=\[Serial\]'
-        kubetest --ginkgo-parallel=2 --provider=local --deployment=kind --kind-cluster-name=${KIND_CLUSTER_NAME} --test --test_args='--ginkgo.focus=\[sig-network\].*NetworkPolicy --disable-log-dump=false --ginkgo.skip=ingress\saccess|multiple\segress\spolicies|allow\segress\saccess|\[Serial\]'
+
+        # all tests that don't have P as their sixth letter after the N
+        kubetest --provider=local --deployment=kind --kind-cluster-name=kind-ovn --test --test_args='--ginkgo.focus=\[sig-network\]\s[Nn](.{6}[^Pp].*|.{0,6}$) --disable-log-dump=false --ginkgo.skip=Networking\sIPerf\sIPv[46]|\[Feature:PerformanceDNS\]|\[Feature:IPv6DualStackAlphaFeature\]|NetworkPolicy\sbetween\sserver\sand\sclient.+(ingress\saccess|multiple\segress\spolicies|allow\segress\saccess)|\[Feature:NoSNAT\]|Services.+(ESIPP|hairpin|cleanup\sfinalizer|session\saffinity|rejected\swhen\sno\sendpoints)|\[Feature:Networking-IPv6\]|\[Feature:Federation\]|configMap\snameserver|ClusterDns\s\[Feature:Example\]|(Namespace|Pod)Selector\s\[Feature:NetworkPolicy\]'
     - name: Export logs
       if: always()
       run: "mkdir -p /tmp/kind/logs \nkind export logs --name ${KIND_CLUSTER_NAME}
@@ -99,5 +157,237 @@ jobs:
       if: always()
       uses: actions/upload-artifact@v1
       with:
-        name: kind-logs
+        name: kind-logs-${{ github.run_id }}-${{ env.JOB_NAME }}
+        path: "/tmp/kind/logs"
+  e2e-shard-np:
+    name: e2e-kind-ovn-shard-np
+    runs-on: ubuntu-latest
+    needs: k8s
+    env:
+      JOB_NAME: e2e-shard-np
+    steps:
+    - name: Set up Go 1.12
+      uses: actions/setup-go@v1
+      with:
+        go-version: 1.12
+      id: go
+    - name: Check out code into the Go module directory
+      uses: actions/checkout@v1
+    - name: Set up environment
+      run: |
+        export GOPATH=$HOME/go
+        echo "::set-env name=GOPATH::$GOPATH"
+        export PATH=$GOPATH/bin:$PATH
+        echo "::add-path::$GOPATH/bin"
+        mkdir -p $GOPATH/src/github.com/ovn-org
+        mv $GITHUB_WORKSPACE $GOPATH/src/github.com/ovn-org/ovn-kubernetes
+        echo "::set-env name=WORKDIR::$GOPATH/src/github.com/ovn-org/ovn-kubernetes"
+        mkdir -p $GITHUB_WORKSPACE
+    - name: Cache Kubernetes
+      id: cache-k8s
+      uses: actions/cache@v1
+      with:
+        path: "${{ env.GOPATH }}/src/k8s.io/kubernetes/"
+        key: k8s-go-2-${{ env.K8S_VERSION }}
+    - name: Build and install Kubernetes
+      working-directory: "${{ env.WORKDIR }}"
+      if: steps.cache-k8s.outputs.cache-hit != 'true'
+      run: |
+        set -x
+        git clone --single-branch --branch $K8S_VERSION https://github.com/kubernetes/kubernetes.git $GOPATH/src/k8s.io/kubernetes/
+        pushd $GOPATH/src/k8s.io/kubernetes/
+        make WHAT="test/e2e/e2e.test vendor/github.com/onsi/ginkgo/ginkgo cmd/kubectl"
+        rm -rf .git
+    - name: kind setup
+      working-directory: "${{ env.WORKDIR }}"
+      run: |
+        set -x
+
+        export GO111MODULE="on"
+        mkdir -p $GOPATH/bin
+        curl -fs https://chunk.io/trozet/ba750701d0af4e2b94b249ab9de27b50 -o $GOPATH/bin/kubetest
+        chmod +x $GOPATH/bin/kubetest
+
+        pushd $GOPATH/src/k8s.io/kubernetes/
+        sudo cp ./_output/local/go/bin/kubectl /usr/local/bin/
+        popd
+
+        GO111MODULE="on" go get sigs.k8s.io/kind@v0.7.0
+        pushd contrib
+        ./kind.sh
+        popd
+    - name: e2e-kind-ovn-shard-np
+      working-directory: "${{ env.WORKDIR }}"
+      run: |
+        pushd $GOPATH/src/k8s.io/kubernetes/
+        export KUBERNETES_CONFORMANCE_TEST=y
+        export KUBECONFIG=${HOME}/admin.conf
+        export MASTER_NAME=${KIND_CLUSTER_NAME}-control-plane
+        export NODE_NAMES=${MASTER_NAME}
+        # all tests that have P as the sixth letter after the N
+        kubetest --provider=local --deployment=kind --kind-cluster-name=kind-ovn --test --test_args='--ginkgo.focus=\[sig-network\]\s[Nn].{6}[Pp].*$ --disable-log-dump=false --ginkgo.skip=Networking\sIPerf\sIPv[46]|\[Feature:PerformanceDNS\]|\[Feature:IPv6DualStackAlphaFeature\]|NetworkPolicy\sbetween\sserver\sand\sclient.+(ingress\saccess|multiple\segress\spolicies|allow\segress\saccess)|\[Feature:NoSNAT\]|Services.+(ESIPP|hairpin|cleanup\sfinalizer|session\saffinity|rejected\swhen\sno\sendpoints)|\[Feature:Networking-IPv6\]|\[Feature:Federation\]|configMap\snameserver|ClusterDns\s\[Feature:Example\]|(Namespace|Pod)Selector\s\[Feature:NetworkPolicy\]'
+    - name: Export logs
+      if: always()
+      run: "mkdir -p /tmp/kind/logs \nkind export logs --name ${KIND_CLUSTER_NAME}
+        /tmp/kind/logs\n"
+      working-directory: "${{ env.WORKDIR }}"
+    - name: Upload logs
+      if: always()
+      uses: actions/upload-artifact@v1
+      with:
+        name: kind-logs-${{ github.run_id }}-${{ env.JOB_NAME }}
+        path: "/tmp/kind/logs"
+  e2e-shard-s:
+    name: e2e-kind-ovn-shard-s
+    runs-on: ubuntu-latest
+    needs: k8s
+    env:
+      JOB_NAME: e2e-shard-s
+    steps:
+    - name: Set up Go 1.12
+      uses: actions/setup-go@v1
+      with:
+        go-version: 1.12
+      id: go
+    - name: Check out code into the Go module directory
+      uses: actions/checkout@v1
+    - name: Set up environment
+      run: |
+        export GOPATH=$HOME/go
+        echo "::set-env name=GOPATH::$GOPATH"
+        export PATH=$GOPATH/bin:$PATH
+        echo "::add-path::$GOPATH/bin"
+        mkdir -p $GOPATH/src/github.com/ovn-org
+        mv $GITHUB_WORKSPACE $GOPATH/src/github.com/ovn-org/ovn-kubernetes
+        echo "::set-env name=WORKDIR::$GOPATH/src/github.com/ovn-org/ovn-kubernetes"
+        mkdir -p $GITHUB_WORKSPACE
+    - name: Cache Kubernetes
+      id: cache-k8s
+      uses: actions/cache@v1
+      with:
+        path: "${{ env.GOPATH }}/src/k8s.io/kubernetes/"
+        key: k8s-go-2-${{ env.K8S_VERSION }}
+    - name: Build and install Kubernetes
+      working-directory: "${{ env.WORKDIR }}"
+      if: steps.cache-k8s.outputs.cache-hit != 'true'
+      run: |
+        set -x
+        git clone --single-branch --branch $K8S_VERSION https://github.com/kubernetes/kubernetes.git $GOPATH/src/k8s.io/kubernetes/
+        pushd $GOPATH/src/k8s.io/kubernetes/
+        make WHAT="test/e2e/e2e.test vendor/github.com/onsi/ginkgo/ginkgo cmd/kubectl"
+        rm -rf .git
+    - name: kind setup
+      working-directory: "${{ env.WORKDIR }}"
+      run: |
+        set -x
+
+        export GO111MODULE="on"
+        mkdir -p $GOPATH/bin
+        curl -fs https://chunk.io/trozet/ba750701d0af4e2b94b249ab9de27b50 -o $GOPATH/bin/kubetest
+        chmod +x $GOPATH/bin/kubetest
+
+        pushd $GOPATH/src/k8s.io/kubernetes/
+        sudo cp ./_output/local/go/bin/kubectl /usr/local/bin/
+        popd
+
+        GO111MODULE="on" go get sigs.k8s.io/kind@v0.7.0
+        pushd contrib
+        ./kind.sh
+        popd
+    - name: e2e-kind-ovn-shard-s
+      working-directory: "${{ env.WORKDIR }}"
+      run: |
+        pushd $GOPATH/src/k8s.io/kubernetes/
+        export KUBERNETES_CONFORMANCE_TEST=y
+        export KUBECONFIG=${HOME}/admin.conf
+        export MASTER_NAME=${KIND_CLUSTER_NAME}-control-plane
+        export NODE_NAMES=${MASTER_NAME}
+        kubetest --provider=local --deployment=kind --kind-cluster-name=kind-ovn --test --test_args='--ginkgo.focus=\[sig-network\]\s[Ss].* --disable-log-dump=false --ginkgo.skip=Networking\sIPerf\sIPv[46]|\[Feature:PerformanceDNS\]|\[Feature:IPv6DualStackAlphaFeature\]|NetworkPolicy\sbetween\sserver\sand\sclient.+(ingress\saccess|multiple\segress\spolicies|allow\segress\saccess)|\[Feature:NoSNAT\]|Services.+(ESIPP|hairpin|cleanup\sfinalizer|session\saffinity|rejected\swhen\sno\sendpoints)|\[Feature:Networking-IPv6\]|\[Feature:Federation\]|configMap\snameserver|ClusterDns\s\[Feature:Example\]|(Namespace|Pod)Selector\s\[Feature:NetworkPolicy\]'
+    - name: Export logs
+      if: always()
+      run: "mkdir -p /tmp/kind/logs \nkind export logs --name ${KIND_CLUSTER_NAME}
+        /tmp/kind/logs\n"
+      working-directory: "${{ env.WORKDIR }}"
+    - name: Upload logs
+      if: always()
+      uses: actions/upload-artifact@v1
+      with:
+        name: kind-logs-${{ github.run_id }}-${{ env.JOB_NAME }}
+        path: "/tmp/kind/logs"
+  e2e-shard-other:
+    name: e2e-kind-ovn-shard-other
+    runs-on: ubuntu-latest
+    needs: k8s
+    env:
+      JOB_NAME: e2e-shard-other
+    steps:
+    - name: Set up Go 1.12
+      uses: actions/setup-go@v1
+      with:
+        go-version: 1.12
+      id: go
+    - name: Check out code into the Go module directory
+      uses: actions/checkout@v1
+    - name: Set up environment
+      run: |
+        export GOPATH=$HOME/go
+        echo "::set-env name=GOPATH::$GOPATH"
+        export PATH=$GOPATH/bin:$PATH
+        echo "::add-path::$GOPATH/bin"
+        mkdir -p $GOPATH/src/github.com/ovn-org
+        mv $GITHUB_WORKSPACE $GOPATH/src/github.com/ovn-org/ovn-kubernetes
+        echo "::set-env name=WORKDIR::$GOPATH/src/github.com/ovn-org/ovn-kubernetes"
+        mkdir -p $GITHUB_WORKSPACE
+    - name: Cache Kubernetes
+      id: cache-k8s
+      uses: actions/cache@v1
+      with:
+        path: "${{ env.GOPATH }}/src/k8s.io/kubernetes/"
+        key: k8s-go-2-${{ env.K8S_VERSION }}
+    - name: Build and install Kubernetes
+      working-directory: "${{ env.WORKDIR }}"
+      if: steps.cache-k8s.outputs.cache-hit != 'true'
+      run: |
+        set -x
+        git clone --single-branch --branch $K8S_VERSION https://github.com/kubernetes/kubernetes.git $GOPATH/src/k8s.io/kubernetes/
+        pushd $GOPATH/src/k8s.io/kubernetes/
+        make WHAT="test/e2e/e2e.test vendor/github.com/onsi/ginkgo/ginkgo cmd/kubectl"
+        rm -rf .git
+    - name: kind setup
+      working-directory: "${{ env.WORKDIR }}"
+      run: |
+        set -x
+
+        export GO111MODULE="on"
+        mkdir -p $GOPATH/bin
+        curl -fs https://chunk.io/trozet/ba750701d0af4e2b94b249ab9de27b50 -o $GOPATH/bin/kubetest
+        chmod +x $GOPATH/bin/kubetest
+
+        pushd $GOPATH/src/k8s.io/kubernetes/
+        sudo cp ./_output/local/go/bin/kubectl /usr/local/bin/
+        popd
+
+        GO111MODULE="on" go get sigs.k8s.io/kind@v0.7.0
+        pushd contrib
+        ./kind.sh
+        popd
+    - name: e2e-kind-ovn-shard-other
+      working-directory: "${{ env.WORKDIR }}"
+      run: |
+        pushd $GOPATH/src/k8s.io/kubernetes/
+        export KUBERNETES_CONFORMANCE_TEST=y
+        export KUBECONFIG=${HOME}/admin.conf
+        export MASTER_NAME=${KIND_CLUSTER_NAME}-control-plane
+        export NODE_NAMES=${MASTER_NAME}
+        kubetest --provider=local --deployment=kind --kind-cluster-name=kind-ovn --test --test_args='--ginkgo.focus=\[sig-network\]\s[^NnSs].* --disable-log-dump=false --ginkgo.skip=Networking\sIPerf\sIPv[46]|\[Feature:PerformanceDNS\]|\[Feature:IPv6DualStackAlphaFeature\]|NetworkPolicy\sbetween\sserver\sand\sclient.+(ingress\saccess|multiple\segress\spolicies|allow\segress\saccess)|\[Feature:NoSNAT\]|Services.+(ESIPP|hairpin|cleanup\sfinalizer|session\saffinity|rejected\swhen\sno\sendpoints)|\[Feature:Networking-IPv6\]|\[Feature:Federation\]|configMap\snameserver|ClusterDns\s\[Feature:Example\]|(Namespace|Pod)Selector\s\[Feature:NetworkPolicy\]'
+    - name: Export logs
+      if: always()
+      run: "mkdir -p /tmp/kind/logs \nkind export logs --name ${KIND_CLUSTER_NAME}
+        /tmp/kind/logs\n"
+      working-directory: "${{ env.WORKDIR }}"
+    - name: Upload logs
+      if: always()
+      uses: actions/upload-artifact@v1
+      with:
+        name: kind-logs-${{ github.run_id }}-${{ env.JOB_NAME }}
         path: "/tmp/kind/logs"

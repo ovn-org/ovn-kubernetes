@@ -4,15 +4,14 @@ import (
 	"bytes"
 	"fmt"
 	"io/ioutil"
+	"k8s.io/klog"
+	kexec "k8s.io/utils/exec"
 	"path/filepath"
 	"runtime"
 	"strings"
 	"sync/atomic"
 	"time"
 	"unicode"
-
-	"github.com/sirupsen/logrus"
-	kexec "k8s.io/utils/exec"
 
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
 )
@@ -40,9 +39,8 @@ const (
 )
 
 const (
-	nbdbCtlSock   = "ovnnb_db.ctl"
-	sbdbCtlSock   = "ovnsb_db.ctl"
-	northdCtlSock = "ovn-northd.ctl"
+	nbdbCtlSock = "ovnnb_db.ctl"
+	sbdbCtlSock = "ovnsb_db.ctl"
 )
 
 func runningPlatform() (string, error) {
@@ -215,13 +213,13 @@ func runCmd(cmd kexec.Cmd, cmdPath string, args ...string) (*bytes.Buffer, *byte
 
 	counter := atomic.AddUint64(&runCounter, 1)
 	logCmd := fmt.Sprintf("%s %s", cmdPath, strings.Join(args, " "))
-	logrus.Debugf("exec(%d): %s", counter, logCmd)
+	klog.V(5).Infof("exec(%d): %s", counter, logCmd)
 
 	err := cmd.Run()
-	logrus.Debugf("exec(%d): stdout: %q", counter, stdout)
-	logrus.Debugf("exec(%d): stderr: %q", counter, stderr)
+	klog.V(5).Infof("exec(%d): stdout: %q", counter, stdout)
+	klog.V(5).Infof("exec(%d): stderr: %q", counter, stderr)
 	if err != nil {
-		logrus.Debugf("exec(%d): err: %v", counter, err)
+		klog.V(5).Infof("exec(%d): err: %v", counter, err)
 	}
 	return stdout, stderr, err
 }
@@ -251,11 +249,25 @@ func RunOVSVsctl(args ...string) (string, string, error) {
 	return strings.Trim(strings.TrimSpace(stdout.String()), "\""), stderr.String(), err
 }
 
-// RunOVSAppctl runs a command via ovs-appctl.
-func RunOVSAppctl(args ...string) (string, string, error) {
-	cmdArgs := []string{fmt.Sprintf("--timeout=%d", ovsCommandTimeout)}
+// RunOVSAppctlWithTimeout runs a command via ovs-appctl.
+func RunOVSAppctlWithTimeout(timeout int, args ...string) (string, string, error) {
+	cmdArgs := []string{fmt.Sprintf("--timeout=%d", timeout)}
 	cmdArgs = append(cmdArgs, args...)
 	stdout, stderr, err := run(runner.appctlPath, cmdArgs...)
+	return strings.Trim(strings.TrimSpace(stdout.String()), "\""), stderr.String(), err
+}
+
+// RunOVSAppctl runs a command via ovs-appctl.
+func RunOVSAppctl(args ...string) (string, string, error) {
+	return RunOVSAppctlWithTimeout(ovsCommandTimeout, args...)
+}
+
+// RunOVNAppctlWithTimeout runs a command via ovn-appctl. If ovn-appctl is not present, then it
+// falls back to using ovs-appctl.
+func RunOVNAppctlWithTimeout(timeout int, args ...string) (string, string, error) {
+	cmdArgs := []string{fmt.Sprintf("--timeout=%d", timeout)}
+	cmdArgs = append(cmdArgs, args...)
+	stdout, stderr, err := run(runner.ovnappctlPath, cmdArgs...)
 	return strings.Trim(strings.TrimSpace(stdout.String()), "\""), stderr.String(), err
 }
 
@@ -298,12 +310,12 @@ func getNbctlArgsAndEnv(timeout int, args ...string) ([]string, []string) {
 			envVars = append(envVars,
 				fmt.Sprintf("OVN_NB_DAEMON=%sovn-nbctl.%s.ctl", runner.ovnRunDir,
 					strings.Trim(string(pid), " \n")))
-			logrus.Debugf("using ovn-nbctl daemon mode at %s", envVars)
+			klog.V(5).Infof("using ovn-nbctl daemon mode at %s", envVars)
 			cmdArgs = append(cmdArgs, fmt.Sprintf("--timeout=%d", timeout))
 			cmdArgs = append(cmdArgs, args...)
 			return cmdArgs, envVars
 		}
-		logrus.Warningf("failed to retrieve ovn-nbctl daemon's control socket " +
+		klog.Warningf("failed to retrieve ovn-nbctl daemon's control socket " +
 			"so resorting to non-daemon mode")
 	}
 
@@ -394,7 +406,7 @@ func RunOVNNBAppCtl(args ...string) (string, string, error) {
 		runner.ovnRunDir + nbdbCtlSock,
 	}
 	cmdArgs = append(cmdArgs, args...)
-	stdout, stderr, err := runOVNretry(runner.appctlPath, nil, cmdArgs...)
+	stdout, stderr, err := runOVNretry(runner.ovnappctlPath, nil, cmdArgs...)
 	return strings.Trim(strings.TrimSpace(stdout.String()), "\""), stderr.String(), err
 }
 
@@ -406,19 +418,25 @@ func RunOVNSBAppCtl(args ...string) (string, string, error) {
 		runner.ovnRunDir + sbdbCtlSock,
 	}
 	cmdArgs = append(cmdArgs, args...)
-	stdout, stderr, err := runOVNretry(runner.appctlPath, nil, cmdArgs...)
+	stdout, stderr, err := runOVNretry(runner.ovnappctlPath, nil, cmdArgs...)
 	return strings.Trim(strings.TrimSpace(stdout.String()), "\""), stderr.String(), err
 }
 
 // RunOVNNorthAppCtl runs an 'ovs-appctl -t ovn-northd command'.
 func RunOVNNorthAppCtl(args ...string) (string, string, error) {
 	var cmdArgs []string
+
+	pid, err := ioutil.ReadFile(runner.ovnRunDir + "ovn-northd.pid")
+	if err != nil {
+		return "", "", fmt.Errorf("failed to run the command since failed to get ovn-northd's pid: %v", err)
+	}
+
 	cmdArgs = []string{
 		"-t",
-		runner.ovnRunDir + northdCtlSock,
+		runner.ovnRunDir + fmt.Sprintf("ovn-northd.%s.ctl", strings.TrimSpace(string(pid))),
 	}
 	cmdArgs = append(cmdArgs, args...)
-	stdout, stderr, err := runOVNretry(runner.appctlPath, nil, cmdArgs...)
+	stdout, stderr, err := runOVNretry(runner.ovnappctlPath, nil, cmdArgs...)
 	return strings.Trim(strings.TrimSpace(stdout.String()), "\""), stderr.String(), err
 }
 

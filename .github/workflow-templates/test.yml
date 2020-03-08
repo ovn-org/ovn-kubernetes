@@ -31,6 +31,7 @@ jobs:
         mkdir -p $GOPATH/src/github.com/ovn-org
         mv $GITHUB_WORKSPACE $GOPATH/src/github.com/ovn-org/ovn-kubernetes
         echo "::set-env name=WORKDIR::$GOPATH/src/github.com/ovn-org/ovn-kubernetes"
+        mkdir -p $GITHUB_WORKSPACE
         
     - name: Build
       working-directory: ${{ env.WORKDIR }}
@@ -47,16 +48,52 @@ jobs:
         pushd dist/images
            if [ -n "$(git diff --stat origin/master.. | grep dist/images/Dockerfile)" ]; then make all; fi
         popd
-      
-  e2e:
-    name: e2e-kind-ovn
+  
+  k8s:
+    name: Build k8s
     runs-on: ubuntu-latest
+    steps:
+    - *step_environment
+
+    - &step_k8s_cache
+      name: Cache Kubernetes
+      id: cache-k8s
+      uses: actions/cache@v1
+      with:
+        path: ${{ env.GOPATH }}/src/k8s.io/kubernetes/
+        key: k8s-go-2-${{ env.K8S_VERSION }}
+
+    - << : *step_gosetup
+      if: steps.cache-k8s.outputs.cache-hit != 'true'
+
+
+    - &step_k8s_cache_miss
+      name: Build and install Kubernetes
+      working-directory: ${{ env.WORKDIR }}
+      if: steps.cache-k8s.outputs.cache-hit != 'true'
+      run: |
+        set -x
+        git clone --single-branch --branch $K8S_VERSION https://github.com/kubernetes/kubernetes.git $GOPATH/src/k8s.io/kubernetes/
+        pushd $GOPATH/src/k8s.io/kubernetes/
+        make WHAT="test/e2e/e2e.test vendor/github.com/onsi/ginkgo/ginkgo cmd/kubectl"
+        rm -rf .git
+
+      
+  e2e-shard-n:
+    name: e2e-kind-ovn-shard-n
+    runs-on: ubuntu-latest
+    needs: k8s
+    env:
+      JOB_NAME: "e2e-shard-n"
     steps:
     - *step_gosetup
     - *step_checkout
     - *step_environment
+    - *step_k8s_cache
+    - *step_k8s_cache_miss
 
-    - name: e2e-kind-ovn
+    - &step_kind_setup
+      name: kind setup
       working-directory: ${{ env.WORKDIR }}
       run: |
         set -x
@@ -65,9 +102,8 @@ jobs:
         mkdir -p $GOPATH/bin
         curl -fs https://chunk.io/trozet/ba750701d0af4e2b94b249ab9de27b50 -o $GOPATH/bin/kubetest
         chmod +x $GOPATH/bin/kubetest
-        git clone --single-branch --branch $K8S_VERSION https://github.com/kubernetes/kubernetes.git $GOPATH/src/k8s.io/kubernetes/
+
         pushd $GOPATH/src/k8s.io/kubernetes/
-        make WHAT="test/e2e/e2e.test vendor/github.com/onsi/ginkgo/ginkgo cmd/kubectl"
         sudo cp ./_output/local/go/bin/kubectl /usr/local/bin/
         popd
         
@@ -75,23 +111,116 @@ jobs:
         pushd contrib
         ./kind.sh
         popd
+
+    - name: e2e-kind-ovn-shard-n
+      working-directory: ${{ env.WORKDIR }}
+      run: |
         pushd $GOPATH/src/k8s.io/kubernetes/
         export KUBERNETES_CONFORMANCE_TEST=y
         export KUBECONFIG=${HOME}/admin.conf
         export MASTER_NAME=${KIND_CLUSTER_NAME}-control-plane
         export NODE_NAMES=${MASTER_NAME}
-        kubetest --ginkgo-parallel=2 --provider=local --deployment=kind --kind-cluster-name=${KIND_CLUSTER_NAME} --test --test_args='--ginkgo.focus=\[sig-network\].*Conformance --disable-log-dump=false --ginkgo.skip=\[Serial\]'
-        kubetest --ginkgo-parallel=2 --provider=local --deployment=kind --kind-cluster-name=${KIND_CLUSTER_NAME} --test --test_args='--ginkgo.focus=\[sig-network\].*NetworkPolicy --disable-log-dump=false --ginkgo.skip=ingress\saccess|multiple\segress\spolicies|allow\segress\saccess|\[Serial\]'
-    
-    - name: Export logs
+        
+        # all tests that don't have P as their sixth letter after the N
+        kubetest --provider=local --deployment=kind --kind-cluster-name=kind-ovn --test --test_args='--ginkgo.focus=\[sig-network\]\s[Nn](.{6}[^Pp].*|.{0,6}$) --disable-log-dump=false --ginkgo.skip=Networking\sIPerf\sIPv[46]|\[Feature:PerformanceDNS\]|\[Feature:IPv6DualStackAlphaFeature\]|NetworkPolicy\sbetween\sserver\sand\sclient.+(ingress\saccess|multiple\segress\spolicies|allow\segress\saccess)|\[Feature:NoSNAT\]|Services.+(ESIPP|hairpin|cleanup\sfinalizer|session\saffinity|rejected\swhen\sno\sendpoints)|\[Feature:Networking-IPv6\]|\[Feature:Federation\]|configMap\snameserver|ClusterDns\s\[Feature:Example\]|(Namespace|Pod)Selector\s\[Feature:NetworkPolicy\]'
+
+    - &step_export_logs
+      name: Export logs
       if: always()
       run: |
         mkdir -p /tmp/kind/logs 
         kind export logs --name ${KIND_CLUSTER_NAME} /tmp/kind/logs
       working-directory: ${{ env.WORKDIR }}
-    - name: Upload logs
+
+    - &step_upload_logs
+      name: Upload logs
       if: always()
       uses: actions/upload-artifact@v1
       with:
-        name: kind-logs
+        name: kind-logs-${{ github.run_id }}-${{ env.JOB_NAME }}
         path: /tmp/kind/logs
+
+  e2e-shard-np:
+    name: e2e-kind-ovn-shard-np
+    runs-on: ubuntu-latest
+    needs: k8s
+    env:
+      JOB_NAME: "e2e-shard-np"
+    steps:
+    - *step_gosetup
+    - *step_checkout
+    - *step_environment
+    - *step_k8s_cache
+    - *step_k8s_cache_miss
+
+    - *step_kind_setup
+
+    - name: e2e-kind-ovn-shard-np
+      working-directory: ${{ env.WORKDIR }}
+      run: |
+        pushd $GOPATH/src/k8s.io/kubernetes/
+        export KUBERNETES_CONFORMANCE_TEST=y
+        export KUBECONFIG=${HOME}/admin.conf
+        export MASTER_NAME=${KIND_CLUSTER_NAME}-control-plane
+        export NODE_NAMES=${MASTER_NAME}
+        # all tests that have P as the sixth letter after the N
+        kubetest --provider=local --deployment=kind --kind-cluster-name=kind-ovn --test --test_args='--ginkgo.focus=\[sig-network\]\s[Nn].{6}[Pp].*$ --disable-log-dump=false --ginkgo.skip=Networking\sIPerf\sIPv[46]|\[Feature:PerformanceDNS\]|\[Feature:IPv6DualStackAlphaFeature\]|NetworkPolicy\sbetween\sserver\sand\sclient.+(ingress\saccess|multiple\segress\spolicies|allow\segress\saccess)|\[Feature:NoSNAT\]|Services.+(ESIPP|hairpin|cleanup\sfinalizer|session\saffinity|rejected\swhen\sno\sendpoints)|\[Feature:Networking-IPv6\]|\[Feature:Federation\]|configMap\snameserver|ClusterDns\s\[Feature:Example\]|(Namespace|Pod)Selector\s\[Feature:NetworkPolicy\]'
+
+    - *step_export_logs
+    - *step_upload_logs
+  
+  e2e-shard-s:
+    name: e2e-kind-ovn-shard-s
+    runs-on: ubuntu-latest
+    needs: k8s
+    env:
+      JOB_NAME: "e2e-shard-s"
+    steps:
+    - *step_gosetup
+    - *step_checkout
+    - *step_environment
+    - *step_k8s_cache
+    - *step_k8s_cache_miss
+
+    - *step_kind_setup
+
+    - name: e2e-kind-ovn-shard-s
+      working-directory: ${{ env.WORKDIR }}
+      run: |
+        pushd $GOPATH/src/k8s.io/kubernetes/
+        export KUBERNETES_CONFORMANCE_TEST=y
+        export KUBECONFIG=${HOME}/admin.conf
+        export MASTER_NAME=${KIND_CLUSTER_NAME}-control-plane
+        export NODE_NAMES=${MASTER_NAME}
+        kubetest --provider=local --deployment=kind --kind-cluster-name=kind-ovn --test --test_args='--ginkgo.focus=\[sig-network\]\s[Ss].* --disable-log-dump=false --ginkgo.skip=Networking\sIPerf\sIPv[46]|\[Feature:PerformanceDNS\]|\[Feature:IPv6DualStackAlphaFeature\]|NetworkPolicy\sbetween\sserver\sand\sclient.+(ingress\saccess|multiple\segress\spolicies|allow\segress\saccess)|\[Feature:NoSNAT\]|Services.+(ESIPP|hairpin|cleanup\sfinalizer|session\saffinity|rejected\swhen\sno\sendpoints)|\[Feature:Networking-IPv6\]|\[Feature:Federation\]|configMap\snameserver|ClusterDns\s\[Feature:Example\]|(Namespace|Pod)Selector\s\[Feature:NetworkPolicy\]'
+
+    - *step_export_logs
+    - *step_upload_logs
+
+  e2e-shard-other:
+    name: e2e-kind-ovn-shard-other
+    runs-on: ubuntu-latest
+    needs: k8s
+    env:
+      JOB_NAME: "e2e-shard-other"
+    steps:
+    - *step_gosetup
+    - *step_checkout
+    - *step_environment
+    - *step_k8s_cache
+    - *step_k8s_cache_miss
+
+    - *step_kind_setup
+
+    - name: e2e-kind-ovn-shard-other
+      working-directory: ${{ env.WORKDIR }}
+      run: |
+        pushd $GOPATH/src/k8s.io/kubernetes/
+        export KUBERNETES_CONFORMANCE_TEST=y
+        export KUBECONFIG=${HOME}/admin.conf
+        export MASTER_NAME=${KIND_CLUSTER_NAME}-control-plane
+        export NODE_NAMES=${MASTER_NAME}
+        kubetest --provider=local --deployment=kind --kind-cluster-name=kind-ovn --test --test_args='--ginkgo.focus=\[sig-network\]\s[^NnSs].* --disable-log-dump=false --ginkgo.skip=Networking\sIPerf\sIPv[46]|\[Feature:PerformanceDNS\]|\[Feature:IPv6DualStackAlphaFeature\]|NetworkPolicy\sbetween\sserver\sand\sclient.+(ingress\saccess|multiple\segress\spolicies|allow\segress\saccess)|\[Feature:NoSNAT\]|Services.+(ESIPP|hairpin|cleanup\sfinalizer|session\saffinity|rejected\swhen\sno\sendpoints)|\[Feature:Networking-IPv6\]|\[Feature:Federation\]|configMap\snameserver|ClusterDns\s\[Feature:Example\]|(Namespace|Pod)Selector\s\[Feature:NetworkPolicy\]'
+
+    - *step_export_logs
+    - *step_upload_logs

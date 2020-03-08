@@ -16,6 +16,7 @@ import (
 
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/factory"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/kube"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn"
 	ovntest "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/testing"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
@@ -50,6 +51,7 @@ func addNodeportLBs(fexec *ovntest.FakeExec, nodeName, tcpLBUUID, udpLBUUID stri
 
 func shareGatewayInterfaceTest(app *cli.App, testNS ns.NetNS,
 	eth0Name, eth0MAC, eth0IP, eth0GWIP, eth0CIDR string, gatewayVLANID uint) {
+	const clusterCIDR string = "10.1.0.0/16"
 	app.Action = func(ctx *cli.Context) error {
 		const (
 			nodeName          string = "node1"
@@ -62,8 +64,6 @@ func shareGatewayInterfaceTest(app *cli.App, testNS ns.NetNS,
 			udpLBUUID         string = "12832f14-eb0f-44d4-b8db-4cccbc73c792"
 			nodeSubnet        string = "10.1.1.0/24"
 			gwRouter          string = "GR_" + nodeName
-			clusterIPNet      string = "10.1.0.0"
-			clusterCIDR       string = clusterIPNet + "/16"
 			mgtPortName       string = "k8s-" + nodeName
 			mgtPortIP         string = "10.1.1.2"
 		)
@@ -111,6 +111,10 @@ func shareGatewayInterfaceTest(app *cli.App, testNS ns.NetNS,
 		fexec.AddFakeCmdsNoOutputNoError([]string{
 			"ovs-vsctl --timeout=15 set bridge breth0 other-config:hwaddr=" + eth0MAC,
 			"ovs-vsctl --timeout=15 set Open_vSwitch . external_ids:ovn-bridge-mappings=" + util.PhysicalNetworkName + ":breth0",
+		})
+		fexec.AddFakeCmd(&ovntest.ExpectedCmd{
+			Cmd:    "ovs-ofctl --no-stats --no-names dump-flows br-int table=41,ip,nw_src=" + clusterCIDR,
+			Output: ` cookie=0x770ac8a6, table=41, priority=17,ip,metadata=0x3,nw_src=` + clusterCIDR + ` actions=ct(commit,table=42,zone=NXM_NX_REG12[0..15],nat(src=` + eth0IP + `))`,
 		})
 		fexec.AddFakeCmd(&ovntest.ExpectedCmd{
 			Cmd:    "ovs-vsctl --timeout=15 wait-until Interface patch-breth0_node1-to-br-int ofport>0 -- get Interface patch-breth0_node1-to-br-int ofport",
@@ -188,11 +192,18 @@ cookie=0x0, duration=8366.597s, table=1, n_packets=10641, n_bytes=10370087, prio
 		ipt, err := util.NewFakeWithProtocol(iptables.ProtocolIPv4)
 		Expect(err).NotTo(HaveOccurred())
 
-		var postReady postReadyFn
+		nodeAnnotator := kube.NewNodeAnnotator(&kube.Kube{fakeClient}, &existingNode)
+
 		err = testNS.Do(func(ns.NetNS) error {
 			defer GinkgoRecover()
 
-			_, postReady, err = cluster.initGateway(nodeName, nodeSubnet)
+			waiter := newStartupWaiter(nodeName)
+			err = cluster.initGateway(nodeName, nodeSubnet, nodeAnnotator, waiter)
+			Expect(err).NotTo(HaveOccurred())
+
+			err = nodeAnnotator.Run()
+			Expect(err).NotTo(HaveOccurred())
+			err = waiter.Wait()
 			Expect(err).NotTo(HaveOccurred())
 
 			// Verify the code moved eth0's IP address, MAC, and routes
@@ -213,10 +224,6 @@ cookie=0x0, duration=8366.597s, table=1, n_packets=10641, n_bytes=10370087, prio
 			Expect(found).To(BeTrue())
 
 			Expect(l.Attrs().HardwareAddr.String()).To(Equal(eth0MAC))
-
-			Expect(postReady).NotTo(Equal(nil))
-			err = postReady()
-			Expect(err).NotTo(HaveOccurred())
 			return nil
 		})
 
@@ -232,6 +239,7 @@ cookie=0x0, duration=8366.597s, table=1, n_packets=10641, n_bytes=10370087, prio
 
 	err := app.Run([]string{
 		app.Name,
+		"--cluster-subnets=" + clusterCIDR,
 		"--init-gateways",
 		"--gateway-interface=" + eth0Name,
 		"--nodeport",

@@ -8,7 +8,7 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/sirupsen/logrus"
+	"k8s.io/klog"
 
 	kapi "k8s.io/api/core/v1"
 	knet "k8s.io/api/networking/v1"
@@ -99,7 +99,7 @@ func (i *informer) forEachHandler(obj interface{}, f func(h *Handler)) {
 
 	objType := reflect.TypeOf(obj)
 	if objType != i.oType {
-		logrus.Errorf("object type %v did not match expected %v", objType, i.oType)
+		klog.Errorf("object type %v did not match expected %v", objType, i.oType)
 		return
 	}
 
@@ -132,7 +132,7 @@ func (i *informer) removeHandler(handler *Handler) error {
 		return err
 	}
 
-	logrus.Debugf("sending %v event handler %d for removal", i.oType, handler.id)
+	klog.V(5).Infof("sending %v event handler %d for removal", i.oType, handler.id)
 
 	go func() {
 		i.Lock()
@@ -140,9 +140,9 @@ func (i *informer) removeHandler(handler *Handler) error {
 		if _, ok := i.handlers[handler.id]; ok {
 			// Remove the handler
 			delete(i.handlers, handler.id)
-			logrus.Debugf("removed %v event handler %d", i.oType, handler.id)
+			klog.V(5).Infof("removed %v event handler %d", i.oType, handler.id)
 		} else {
-			logrus.Warningf("tried to remove unknown object type %v event handler %d", i.oType, handler.id)
+			klog.Warningf("tried to remove unknown object type %v event handler %d", i.oType, handler.id)
 		}
 	}()
 
@@ -166,7 +166,7 @@ func (i *informer) processEvents(events chan *event, stopChan <-chan struct{}) {
 func getQueueNum(oType reflect.Type, obj interface{}) uint32 {
 	meta, err := getObjectMeta(oType, obj)
 	if err != nil {
-		logrus.Errorf("object has no meta: %v", err)
+		klog.Errorf("object has no meta: %v", err)
 		return 0
 	}
 
@@ -232,7 +232,7 @@ func (i *informer) newFederatedQueuedHandler() cache.ResourceEventHandlerFuncs {
 		DeleteFunc: func(obj interface{}) {
 			realObj, err := ensureObjectOnDelete(obj, i.oType)
 			if err != nil {
-				logrus.Errorf(err.Error())
+				klog.Errorf(err.Error())
 				return
 			}
 			i.enqueueEvent(nil, realObj, func(e *event) {
@@ -259,7 +259,7 @@ func (i *informer) newFederatedHandler() cache.ResourceEventHandlerFuncs {
 		DeleteFunc: func(obj interface{}) {
 			realObj, err := ensureObjectOnDelete(obj, i.oType)
 			if err != nil {
-				logrus.Errorf(err.Error())
+				klog.Errorf(err.Error())
 				return
 			}
 			i.forEachHandler(realObj, func(h *Handler) {
@@ -306,7 +306,7 @@ func newInformerLister(oType reflect.Type, sharedInformer cache.SharedIndexInfor
 func newBaseInformer(oType reflect.Type, sharedInformer cache.SharedIndexInformer) (*informer, error) {
 	lister, err := newInformerLister(oType, sharedInformer)
 	if err != nil {
-		logrus.Errorf(err.Error())
+		klog.Errorf(err.Error())
 		return nil, err
 	}
 
@@ -527,7 +527,7 @@ func (wf *WatchFactory) addHandler(objType reflect.Type, namespace string, lsel 
 		}
 		meta, err := getObjectMeta(objType, obj)
 		if err != nil {
-			logrus.Errorf("watch handler filter error: %v", err)
+			klog.Errorf("watch handler filter error: %v", err)
 			return false
 		}
 		if namespace != "" && meta.Namespace != namespace {
@@ -556,7 +556,7 @@ func (wf *WatchFactory) addHandler(objType reflect.Type, namespace string, lsel 
 
 	handlerID := atomic.AddUint64(&wf.handlerCounter, 1)
 	handler := inf.addHandler(handlerID, filterFunc, funcs, items)
-	logrus.Debugf("added %v event handler %d", objType, handler.id)
+	klog.V(5).Infof("added %v event handler %d", objType, handler.id)
 	return handler, nil
 }
 

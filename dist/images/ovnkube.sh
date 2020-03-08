@@ -81,7 +81,7 @@ ovn_daemonset_version=${OVN_DAEMONSET_VERSION:-"3"}
 # hostname is the host's hostname when using host networking,
 # This is useful on the master node
 # otherwise it is the container ID (useful for debugging).
-ovn_pod_host=$(hostname)
+ovn_pod_host=${K8S_NODE:-$(hostname)}
 
 # The ovs user id, by default it is going to be root:root
 ovs_user_id=${OVS_USER_ID:-""}
@@ -126,6 +126,8 @@ ovn_db_host=$(getent ahostsv4 $(hostname) | grep -v "^127\." | head -1 | awk '{ 
 ovn_nb_port=${OVN_NB_PORT:-6641}
 # OVN_SB_PORT - ovn south db port (default 6642)
 ovn_sb_port=${OVN_SB_PORT:-6642}
+# OVN_ENCAP_PORT - GENEVE UDP port (default 6081)
+ovn_encap_port=${OVN_ENCAP_PORT:-6081}
 
 ovn_hybrid_overlay_enable=${OVN_HYBRID_OVERLAY_ENABLE:-}
 ovn_hybrid_overlay_net_cidr=${OVN_HYBRID_OVERLAY_NET_CIDR:-}
@@ -219,7 +221,7 @@ ready_to_start_node () {
 
   # See if ep is available ...
   IFS=" " read -a ovn_db_hosts <<< "$(kubectl --server=${K8S_APISERVER} --token=${k8s_token} --certificate-authority=${K8S_CACERT} \
-    get ep -n ovn-kubernetes ovnkube-db -o=jsonpath='{range .subsets[0].addresses[*]}{.ip}{" "}')"
+    get ep -n ${ovn_kubernetes_namespace} ovnkube-db -o=jsonpath='{range .subsets[0].addresses[*]}{.ip}{" "}')"
   if [[ ${#ovn_db_hosts[@]} == 0 ]] ; then
       return 1
   fi
@@ -434,13 +436,12 @@ echo ovnkube.sh version ${ovnkube_version}
 }
 
 ovn_debug () {
-  ready_to_start_node
+  wait_for_event attempts=3 ready_to_start_node
   echo "ovn_nbdb ${ovn_nbdb}   ovn_sbdb ${ovn_sbdb}"
   echo "ovn_nbdb_test ${ovn_nbdb_test}"
 
   # get ovs/ovn info from the node for debug purposes
   echo "=========== ovn_debug   hostname: ${ovn_pod_host} ============="
-  echo "=========== ovn-nbctl show ============="
   echo "=========== ovn-nbctl --db=${ovn_nbdb_test} show ============="
   ovn-nbctl --db=${ovn_nbdb_test} show
   echo " "
@@ -473,8 +474,8 @@ ovn_debug () {
   echo "=========== ovn-sbctl --db=${ovn_sbdb_test} list datapath ============="
   ovn-sbctl --db=${ovn_sbdb_test} list datapath
   echo " "
-  echo "=========== ovn-sbctl --db=${ovn_sbdb_test} list port ============="
-  ovn-sbctl --db=${ovn_sbdb_test} list port
+  echo "=========== ovn-sbctl --db=${ovn_sbdb_test} list port_binding ============="
+  ovn-sbctl --db=${ovn_sbdb_test} list port_binding
 }
 
 ovs-server () {
@@ -527,9 +528,6 @@ ovs-server () {
   fi
   /usr/share/openvswitch/scripts/ovs-ctl start --no-ovsdb-server \
     --system-id=random ${ovs_options} ${USER_ARGS} "$@"
-
-  # Ensure GENEVE's UDP port isn't firewalled
-  /usr/share/openvswitch/scripts/ovs-ctl --protocol=udp --dport=6081 enable-protocol
 
   tail --follow=name ${OVS_LOGDIR}/ovs-vswitchd.log ${OVS_LOGDIR}/ovsdb-server.log &
   ovs_tail_pid=$!
@@ -725,7 +723,7 @@ ovn-master () {
 
   echo "=============== ovn-master ========== MASTER ONLY"
   /usr/bin/ovnkube \
-    --init-master ${ovn_pod_host} \
+    --init-master ${K8S_NODE} \
     --cluster-subnets ${net_cidr} --k8s-service-cidr=${svc_cidr} \
     --nb-address=${ovn_nbdb} --sb-address=${ovn_sbdb} \
     --nbctl-daemon-mode \
@@ -802,6 +800,9 @@ ovn-node () {
   echo "=============== ovn-node - (ovn-node  wait for ovn-controller.pid)"
   wait_for_event process_ready ovn-controller
   sleep 1
+
+  # Ensure GENEVE's UDP port isn't firewalled. We support specifying non-default encap port.
+  /usr/share/openvswitch/scripts/ovs-ctl --protocol=udp --dport=${ovn_encap_port} enable-protocol
 
   hybrid_overlay_flags=
   if [[ -n "${ovn_hybrid_overlay_enable}" ]]; then

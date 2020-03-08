@@ -5,8 +5,6 @@ import (
 	"fmt"
 	"net"
 
-	"github.com/sirupsen/logrus"
-
 	"github.com/ovn-org/ovn-kubernetes/go-controller/hybrid-overlay/pkg/types"
 	houtil "github.com/ovn-org/ovn-kubernetes/go-controller/hybrid-overlay/pkg/util"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
@@ -19,6 +17,7 @@ import (
 	kapi "k8s.io/api/core/v1"
 	utilruntime "k8s.io/apimachinery/pkg/util/runtime"
 	"k8s.io/client-go/kubernetes"
+	"k8s.io/klog"
 )
 
 // MasterController is the master hybrid overlay controller
@@ -107,13 +106,15 @@ func (m *MasterController) updateNodeAnnotation(node *kapi.Node, annotator kube.
 		if ovnNodeSubnet == nil {
 			if extNodeSubnet != nil {
 				// remove any HybridOverlayNodeSubnet
-				logrus.Infof("Will remove node %s hybrid overlay NodeSubnet %s", node.Name, extNodeSubnet.String())
-				annotator.Del(types.HybridOverlayNodeSubnet)
+				klog.Infof("Will remove node %s hybrid overlay NodeSubnet %s", node.Name, extNodeSubnet.String())
+				annotator.Delete(types.HybridOverlayNodeSubnet)
 			}
 		} else if !sameCIDR(ovnNodeSubnet, extNodeSubnet) {
 			// sync the HybridOverlayNodeSubnet with the OVN-assigned one
-			logrus.Infof("will sync node %s hybrid overlay NodeSubnet %s", node.Name, ovnNodeSubnet.String())
-			annotator.Set(types.HybridOverlayNodeSubnet, ovnNodeSubnet.String())
+			klog.Infof("will sync node %s hybrid overlay NodeSubnet %s", node.Name, ovnNodeSubnet.String())
+			if err := annotator.Set(types.HybridOverlayNodeSubnet, ovnNodeSubnet.String()); err != nil {
+				klog.Errorf("failed to sync node %s hybrid overlay NodeSubnet annotation: %v", node.Name, err)
+			}
 		}
 		return nil
 	}
@@ -128,17 +129,19 @@ func (m *MasterController) updateNodeAnnotation(node *kapi.Node, annotator kube.
 	if err != nil {
 		return fmt.Errorf("Error allocating hybrid overlay HostSubnet for node %s: %v", node.Name, err)
 	}
-	logrus.Infof("Allocated hybrid overlay HostSubnet %s for node %s", hostsubnetStr, node.Name)
+	klog.Infof("Allocated hybrid overlay HostSubnet %s for node %s", hostsubnetStr, node.Name)
 
 	if _, _, err := net.ParseCIDR(hostsubnetStr); err != nil {
 		return fmt.Errorf("Error parsing hostsubnet %s: %v", hostsubnetStr, err)
 	}
 
-	annotator.SetWithFailureHandler(types.HybridOverlayNodeSubnet, hostsubnetStr, func(node *kapi.Node, key string, val interface{}) {
+	if err := annotator.SetWithFailureHandler(types.HybridOverlayNodeSubnet, hostsubnetStr, func(node *kapi.Node, key string, val interface{}) {
 		if _, cidr, _ := net.ParseCIDR(val.(string)); cidr != nil {
 			_ = m.releaseNodeSubnet(node.Name, cidr)
 		}
-	})
+	}); err != nil {
+		return fmt.Errorf("failed to set node %s hybrid overlay NodeSubnet annotation: %v", node.Name, err)
+	}
 	return nil
 }
 
@@ -147,7 +150,7 @@ func (m *MasterController) releaseNodeSubnet(nodeName string, subnet *net.IPNet)
 	if err != nil {
 		return fmt.Errorf("Error deleting hybrid overlay HostSubnet %s for node %q: %s", subnet, nodeName, err)
 	}
-	logrus.Infof("Deleted hybrid overlay HostSubnet %s for node %s", subnet, nodeName)
+	klog.Infof("Deleted hybrid overlay HostSubnet %s for node %s", subnet, nodeName)
 	return nil
 }
 
@@ -164,7 +167,7 @@ func (m *MasterController) handleOverlayPort(node *kapi.Node, annotator kube.Ann
 		// No subnet allocated yet; clean up
 		if haveDRMACAnnotation {
 			m.deleteOverlayPort(node)
-			annotator.Del(types.HybridOverlayDrMac)
+			annotator.Delete(types.HybridOverlayDrMac)
 		}
 		return nil
 	}
@@ -200,7 +203,9 @@ func (m *MasterController) handleOverlayPort(node *kapi.Node, annotator kube.Ann
 			return err
 		}
 	}
-	annotator.Set(types.HybridOverlayDrMac, portMAC.String())
+	if err := annotator.Set(types.HybridOverlayDrMac, portMAC.String()); err != nil {
+		return fmt.Errorf("failed to set node %s hybrid overlay DRMAC annotation: %v", node.Name, err)
+	}
 
 	return nil
 }
@@ -215,14 +220,16 @@ func (m *MasterController) Add(node *kapi.Node) {
 	annotator := kube.NewNodeAnnotator(m.kube, node)
 
 	if err := m.updateNodeAnnotation(node, annotator); err != nil {
-		logrus.Errorf("failed to update node %q hybrid overlay subnet annotation: %v", node.Name, err)
+		klog.Errorf("failed to update node %q hybrid overlay subnet annotation: %v", node.Name, err)
 	}
 
 	if err := m.handleOverlayPort(node, annotator); err != nil {
-		logrus.Errorf("failed to set up hybrid overlay logical switch port for %s: %v", node.Name, err)
+		klog.Errorf("failed to set up hybrid overlay logical switch port for %s: %v", node.Name, err)
 	}
 
-	annotator.Run()
+	if err := annotator.Run(); err != nil {
+		klog.Errorf("failed to set hybrid overlay annotations for %s: %v", node.Name, err)
+	}
 }
 
 // Update handles node updates
@@ -236,7 +243,7 @@ func (m *MasterController) Delete(node *kapi.Node) {
 
 	if subnet, _ := parseHybridOverlayNodeHostSubnet(node); subnet != nil {
 		if err := m.releaseNodeSubnet(node.Name, subnet); err != nil {
-			logrus.Errorf(err.Error())
+			klog.Errorf(err.Error())
 		}
 	}
 

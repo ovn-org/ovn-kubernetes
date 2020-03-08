@@ -10,8 +10,8 @@ import (
 	houtil "github.com/ovn-org/ovn-kubernetes/go-controller/hybrid-overlay/pkg/util"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
 
-	"github.com/sirupsen/logrus"
 	"github.com/urfave/cli"
+	"k8s.io/klog"
 )
 
 // StringArg gets the named command-line argument or returns an error if it is empty
@@ -37,7 +37,7 @@ func GetNodeChassisID() (string, error) {
 	chassisID, stderr, err := RunOVSVsctl("--if-exists", "get",
 		"Open_vSwitch", ".", "external_ids:system-id")
 	if err != nil {
-		logrus.Errorf("No system-id configured in the local host, "+
+		klog.Errorf("No system-id configured in the local host, "+
 			"stderr: %q, error: %v", stderr, err)
 		return "", err
 	}
@@ -188,7 +188,7 @@ func MarshalPodAnnotation(podInfo *PodAnnotation) (map[string]string, error) {
 	}
 	bytes, err := json.Marshal(podNetworks)
 	if err != nil {
-		logrus.Errorf("failed marshaling podNetworks map %v", podNetworks)
+		klog.Errorf("failed marshaling podNetworks map %v", podNetworks)
 		return nil, err
 	}
 	return map[string]string{
