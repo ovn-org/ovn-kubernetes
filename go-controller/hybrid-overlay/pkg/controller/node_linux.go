@@ -15,6 +15,7 @@ import (
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
 
 	kapi "k8s.io/api/core/v1"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/util/wait"
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/tools/cache"
@@ -54,17 +55,30 @@ func podToCookie(pod *kapi.Pod) string {
 }
 
 func (n *NodeController) addOrUpdatePod(pod *kapi.Pod) error {
-	podIP, podMAC, err := getPodDetails(pod, n.nodeName)
+	podIP, podMAC, podNamespace, err := getPodDetails(pod, n.nodeName)
 	if err != nil {
 		klog.V(5).Infof("cleaning up hybrid overlay pod %s/%s because %v", pod.Namespace, pod.Name, err)
 		return n.deletePod(pod)
 	}
 
 	cookie := podToCookie(pod)
-	_, _, err = util.RunOVSOfctl("add-flow", extBridgeName,
-		fmt.Sprintf("table=10, cookie=0x%s, priority=100, ip, nw_dst=%s, actions=set_field:%s->eth_src,set_field:%s->eth_dst,output:ext", cookie, podIP, n.drMAC, podMAC))
+	namespace, err := n.kube.KClient.CoreV1().Namespaces().Get(podNamespace, metav1.GetOptions{})
 	if err != nil {
-		return fmt.Errorf("failed to add flows for pod %s/%s: %v", pod.Namespace, pod.Name, err)
+		klog.V(5).Infof("unable to get namespace %s annotations", podNamespace)
+	}
+	podExternalGW, ok := namespace.Annotations["namespace-external-gw"]
+	if ok {
+		_, _, err = util.RunOVSOfctl("add-flow", extBridgeName,
+			fmt.Sprintf("table=0, cookie=0x%s, priority=100, ip, nw_src=%s, actions=load:4098->NXM_NX_TUN_ID[0..31],set_field:%s->tun_dst,output:1", cookie, podIP, podExternalGW))
+		if err != nil {
+			return fmt.Errorf("failed to add flows for pod %s/%s: %v", pod.Namespace, pod.Name, err)
+		}
+	} else {
+		_, _, err = util.RunOVSOfctl("add-flow", extBridgeName,
+			fmt.Sprintf("table=10, cookie=0x%s, priority=100, ip, nw_dst=%s, actions=set_field:%s->eth_src,set_field:%s->eth_dst,output:ext", cookie, podIP, n.drMAC, podMAC))
+		if err != nil {
+			return fmt.Errorf("failed to add flows for pod %s/%s: %v", pod.Namespace, pod.Name, err)
+		}
 	}
 	return nil
 }
@@ -82,22 +96,22 @@ func (n *NodeController) deletePod(pod *kapi.Pod) error {
 	return nil
 }
 
-func getPodDetails(pod *kapi.Pod, nodeName string) (string, string, error) {
+func getPodDetails(pod *kapi.Pod, nodeName string) (string, string, string, error) {
 	if pod.Spec.NodeName != nodeName {
-		return "", "", fmt.Errorf("not scheduled")
+		return "", "", "", fmt.Errorf("not scheduled")
 	}
 
 	podInfo, err := util.UnmarshalPodAnnotation(pod.Annotations)
 	if err != nil {
-		return "", "", err
+		return "", "", "", err
 	}
-	return podInfo.IP.String(), podInfo.MAC.String(), nil
+	return podInfo.IP.String(), podInfo.MAC.String(), pod.Namespace, nil
 }
 
 // podChanged returns true if any relevant pod attributes changed
 func podChanged(pod1 *kapi.Pod, pod2 *kapi.Pod, nodeName string) bool {
-	podIP1, mac1, _ := getPodDetails(pod1, nodeName)
-	podIP2, mac2, _ := getPodDetails(pod2, nodeName)
+	podIP1, mac1, _, _ := getPodDetails(pod1, nodeName)
+	podIP2, mac2, _, _ := getPodDetails(pod2, nodeName)
 	return (podIP1 != podIP2 || mac1 != mac2)
 }
 
