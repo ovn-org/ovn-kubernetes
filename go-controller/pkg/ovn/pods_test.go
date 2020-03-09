@@ -362,6 +362,107 @@ var _ = ginkgo.Describe("OVN Pod Operations", func() {
 			gomega.Expect(err).NotTo(gomega.HaveOccurred())
 		})
 
+		ginkgo.It("allows allocation after pods are completed", func() {
+			app.Action = func(ctx *cli.Context) error {
+				namespaceT := *newNamespace("namespace1")
+				t := newTPod(
+					"node1",
+					"10.128.1.0/24",
+					"10.128.1.2",
+					"10.128.1.1",
+					"myPod",
+					"10.128.1.3",
+					"0a:58:0a:80:01:03",
+					namespaceT.Name,
+				)
+
+				fakeOvn.startWithDBSetup(initialDB,
+					&v1.NamespaceList{
+						Items: []v1.Namespace{
+							namespaceT,
+						},
+					},
+					&v1.PodList{
+						Items: []v1.Pod{},
+					},
+				)
+
+				t.populateLogicalSwitchCache(fakeOvn, getLogicalSwitchUUID(fakeOvn.controller.nbClient, "node1"))
+				fakeOvn.controller.WatchNamespaces()
+				fakeOvn.controller.WatchPods()
+
+				pod, _ := fakeOvn.fakeClient.KubeClient.CoreV1().Pods(t.namespace).Get(context.TODO(), t.podName, metav1.GetOptions{})
+				gomega.Expect(pod).To(gomega.BeNil())
+
+				myPod := newPod(t.namespace, t.podName, t.nodeName, t.podIP)
+				_, err := fakeOvn.fakeClient.KubeClient.CoreV1().Pods(t.namespace).Create(context.TODO(),
+					myPod, metav1.CreateOptions{})
+				gomega.Expect(err).NotTo(gomega.HaveOccurred())
+
+				gomega.Eventually(func() string {
+					return getPodAnnotations(fakeOvn.fakeClient.KubeClient, t.namespace, t.podName)
+				}, 2).Should(gomega.MatchJSON(t.getAnnotationsJson()))
+
+				gomega.Eventually(fakeOvn.nbClient).Should(libovsdbtest.HaveData(getExpectedDataPodsAndSwitches([]testPod{t}, []string{"node1"})))
+
+				ginkgo.By("Allocating all of the rest of the node subnet")
+				// allocate all the rest of the IPs in the subnet
+				fakeOvn.controller.lsManager.AllocateUntilFull("node1")
+
+				ginkgo.By("Creating another pod which will fail due to allocation full")
+				t2 := newTPod(
+					"node1",
+					"10.128.1.0/24",
+					"10.128.1.2",
+					"10.128.1.1",
+					"myPod2",
+					"10.128.1.3",
+					"0a:58:0a:80:01:03",
+					namespaceT.Name,
+				)
+
+				myPod2, err := fakeOvn.fakeClient.KubeClient.CoreV1().Pods(t.namespace).Create(context.TODO(),
+					newPod(t2.namespace, t2.podName, t2.nodeName, t2.podIP), metav1.CreateOptions{})
+				gomega.Expect(err).NotTo(gomega.HaveOccurred())
+				gomega.Eventually(func() string {
+					return getPodAnnotations(fakeOvn.fakeClient.KubeClient, t2.namespace, t2.podName)
+				}, 2).Should(gomega.HaveLen(0))
+
+				gomega.Eventually(func() bool {
+					return fakeOvn.controller.hasPodRetryEntry(myPod2)
+				}).Should(gomega.BeTrue())
+
+				ginkgo.By("Marking myPod as completed should free IP")
+				myPod.Status.Phase = v1.PodSucceeded
+
+				_, err = fakeOvn.fakeClient.KubeClient.CoreV1().Pods(t.namespace).UpdateStatus(context.TODO(),
+					myPod, metav1.UpdateOptions{})
+				gomega.Expect(err).NotTo(gomega.HaveOccurred())
+
+				// port should be gone or marked for removal in logical port cache
+				logicalPort := util.GetLogicalPortName(myPod.Namespace, myPod.Name)
+				gomega.Eventually(func() bool {
+					info, err := fakeOvn.controller.logicalPortCache.get(logicalPort)
+					return err != nil || !info.expires.IsZero()
+				}, 2).Should(gomega.BeTrue())
+
+				// there should also be no entry for this pod in the retry cache
+				gomega.Eventually(func() bool {
+					return fakeOvn.controller.getPodRetryEntry(myPod) == nil
+				}, 2).Should(gomega.BeTrue())
+				ginkgo.By("Freed IP should now allow mypod2 to come up")
+				fakeOvn.controller.requestRetryPods()
+				gomega.Eventually(func() string {
+					return getPodAnnotations(fakeOvn.fakeClient.KubeClient, t2.namespace, t2.podName)
+				}, 2).Should(gomega.MatchJSON(t2.getAnnotationsJson()))
+
+				return nil
+			}
+
+			err := app.Run([]string{app.Name})
+			gomega.Expect(err).NotTo(gomega.HaveOccurred())
+		})
+
 		ginkgo.It("retryPod cache operations while adding a new pod", func() {
 			app.Action = func(ctx *cli.Context) error {
 				config.Gateway.DisableSNATMultipleGWs = true

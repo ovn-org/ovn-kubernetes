@@ -592,7 +592,29 @@ func (oc *Controller) WatchPods() {
 				}
 				// deletion was a success; remove delete retry entry
 				oc.removeDeleteRetry(pod)
+			} else if pod.Status.Phase == kapi.PodSucceeded {
+				// pod is in completed state, remove it
+				klog.Infof("Detected completed pod: %s. Will remove.", getPodNamespacedName(pod))
+				oc.initRetryDelPod(pod)
+				oc.removeAddRetry(pod)
+				oc.logicalPortCache.remove(util.GetLogicalPortName(pod.Namespace, pod.Name))
+				retryEntry := oc.getPodRetryEntry(pod)
+				var portInfo *lpInfo
+				if retryEntry != nil {
+					// retryEntry shouldn't be nil since we usually add the pod to retryCache above
+					portInfo = retryEntry.needsDel
+				}
+				if err := oc.removePod(pod, portInfo); err != nil {
+					oc.recordPodEvent(err, pod)
+					klog.Errorf("Failed to delete completed pod %s, error: %v",
+						getPodNamespacedName(pod), err)
+					oc.unSkipRetryPod(pod)
+					return
+				}
+				oc.checkAndDeleteRetryPod(pod)
+				return
 			}
+
 			if err := oc.ensurePod(oldPod, pod, oc.checkAndSkipRetryPod(pod)); err != nil {
 				oc.recordPodEvent(err, pod)
 				klog.Errorf("Failed to update pod %s, error: %v",

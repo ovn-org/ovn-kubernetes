@@ -173,6 +173,8 @@ func (oc *Controller) deleteLogicalPort(pod *kapi.Pod, portInfo *lpInfo) (err er
 		return fmt.Errorf("cannot delete logical switch port %s, %v", logicalPort, err)
 	}
 
+	klog.Infof("Attempting to release IPs for pod: %s/%s, ips: %s", pod.Namespace, pod.Name,
+		util.JoinIPNetIPs(podIfAddrs, " "))
 	if err := oc.lsManager.ReleaseIPs(pod.Spec.NodeName, podIfAddrs); err != nil {
 		return fmt.Errorf("cannot release IPs for pod %s: %w", podDesc, err)
 	}
