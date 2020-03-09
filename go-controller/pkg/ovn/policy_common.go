@@ -77,6 +77,8 @@ func (pp *portPolicy) getL4Match() (string, error) {
 		return fmt.Sprintf("tcp && tcp.dst==%d", pp.port), nil
 	} else if pp.protocol == UDP {
 		return fmt.Sprintf("udp && udp.dst==%d", pp.port), nil
+	} else if pp.protocol == SCTP {
+		return fmt.Sprintf("sctp && sctp.dst==%d", pp.port), nil
 	}
 	return "", fmt.Errorf("unknown port protocol %v", pp.protocol)
 }
