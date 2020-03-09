@@ -117,6 +117,9 @@ const (
 
 	// UDP is the constant string for the string "UDP"
 	UDP = "UDP"
+
+	// SCTP is the constant string for the string "SCTP"
+	SCTP = "SCTP"
 )
 
 // NewOvnController creates a new OVN controller for creating logical network
