@@ -501,18 +501,30 @@ func GetOvnRunDir() string {
 // ovsdb-server(5) says a clustered database is connected if the server
 // is in contact with a majority of its cluster.
 type OVNDBServerStatus struct {
-	Connected bool `json:"connected"`
-	Leader    bool `json:"leader"`
+	Connected bool
+	Leader    bool
+	Index     int
+}
+
+// Internal structure that holds the un-marshaled json output from the
+// ovsdb-client query command. The Index can hold ["set": []] when it is
+// not populated yet, so we need to use `interface{}` type. However, we
+// don't want our callers to worry about all this and we want them to see the
+// Index as an integer and hence we use an exported OVNDBServerStatus for that
+type dbRow struct {
+	Connected bool        `json:"connected"`
+	Leader    bool        `json:"leader"`
+	Index     interface{} `json:"index"`
 }
 
 type queryResult struct {
-	Rows []OVNDBServerStatus `json:"rows"`
+	Rows []dbRow `json:"rows"`
 }
 
 func GetOVNDBServerInfo(timeout int, direction, database string) (*OVNDBServerStatus, error) {
 	sockPath := fmt.Sprintf("unix:/var/run/openvswitch/ovn%s_db.sock", direction)
 	transact := fmt.Sprintf(`["_Server", {"op":"select", "table":"Database", "where":[["name", "==", "%s"]], `+
-		`"columns": ["connected", "leader"]}]`, database)
+		`"columns": ["connected", "leader", "index"]}]`, database)
 
 	stdout, stderr, err := RunOVSDBClient(fmt.Sprintf("--timeout=%d", timeout), "query", sockPath, transact)
 	if err != nil {
@@ -530,6 +542,14 @@ func GetOVNDBServerInfo(timeout int, direction, database string) (*OVNDBServerSt
 		return nil, fmt.Errorf("parsed json output for %q ovsdb-server has incorrect status information",
 			direction)
 	}
+	serverStatus := &OVNDBServerStatus{}
+	serverStatus.Connected = result[0].Rows[0].Connected
+	serverStatus.Leader = result[0].Rows[0].Leader
+	if index, ok := result[0].Rows[0].Index.(float64); ok {
+		serverStatus.Index = int(index)
+	} else {
+		serverStatus.Index = 0
+	}
 
-	return &result[0].Rows[0], nil
+	return serverStatus, nil
 }
