@@ -94,13 +94,8 @@ func main() {
 	c.Usage = "run ovnkube to start master, node, and gateway services"
 	c.Version = config.Version
 	c.CustomAppHelpTemplate = CustomAppHelpTemplate
-	c.Flags = config.CommonFlags
-	c.Flags = append(c.Flags, config.CNIFlags...)
-	c.Flags = append(c.Flags, config.K8sFlags...)
-	c.Flags = append(c.Flags, config.OvnNBFlags...)
-	c.Flags = append(c.Flags, config.OvnSBFlags...)
-	c.Flags = append(c.Flags, config.OVNGatewayFlags...)
-	c.Flags = append(c.Flags, config.MasterHAFlags...)
+	c.Flags = config.GetFlags(nil)
+
 	c.Action = func(c *cli.Context) error {
 		return runOvnKube(c)
 	}

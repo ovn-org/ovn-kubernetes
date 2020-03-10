@@ -729,6 +729,21 @@ var MasterHAFlags = []cli.Flag{
 // own urfave/cli flags and call InitConfig() early in the application.
 var Flags []cli.Flag
 
+// GetFlags returns an array of all command-line flags necessary to configure
+// ovn-kubernetes
+func GetFlags(customFlags []cli.Flag) []cli.Flag {
+	flags := CommonFlags
+	flags = append(flags, CNIFlags...)
+	flags = append(flags, K8sFlags...)
+	flags = append(flags, OvnNBFlags...)
+	flags = append(flags, OvnSBFlags...)
+	flags = append(flags, OVNGatewayFlags...)
+	flags = append(flags, MasterHAFlags...)
+	flags = append(flags, HybridOverlayFlags...)
+	flags = append(flags, customFlags...)
+	return flags
+}
+
 // Defaults are a set of flags to indicate which options should be read from
 // ovs-vsctl and used as default values if option is not found via the config
 // file or command-line
