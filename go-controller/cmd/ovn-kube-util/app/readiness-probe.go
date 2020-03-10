@@ -178,7 +178,9 @@ var ReadinessProbeCommand = cli.Command{
 		if err := util.SetExec(kexec.New()); err != nil {
 			return err
 		}
-
-		return callbacks[target](target)
+		if cbfunc, ok := callbacks[target]; ok {
+			return cbfunc(target)
+		}
+		return fmt.Errorf("incorrect target specified")
 	},
 }
