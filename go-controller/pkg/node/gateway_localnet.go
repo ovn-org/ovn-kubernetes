@@ -221,8 +221,12 @@ func (npw *localPortWatcherData) addService(svc *kapi.Service) error {
 			}
 
 			if gatewayIP != "" {
+				// Fix Azure/GCP LoadBalancers. They will forward traffic directly to the node with the
+				// dest address as the load-balancer ingress IP and port
+				iptRules = append(iptRules, getLoadBalancerIPTRules(svc, port, gatewayIP, port.NodePort)...)
 				iptRules = append(iptRules, getNodePortIPTRules(port, nil, gatewayIP, port.NodePort)...)
-				klog.V(5).Infof("Will add iptables rule for NodePort: %v and protocol: %v", port.NodePort, port.Protocol)
+				klog.V(5).Infof("Will add iptables rule for NodePort and Cloud load balancers: %v and "+
+					"protocol: %v", port.NodePort, port.Protocol)
 			} else {
 				klog.Warningf("No gateway of appropriate IP family for NodePort Service %s/%s %s",
 					svc.Namespace, svc.Name, svc.Spec.ClusterIP)
@@ -282,8 +286,12 @@ func (npw *localPortWatcherData) deleteService(svc *kapi.Service) error {
 	for _, port := range svc.Spec.Ports {
 		if util.ServiceTypeHasNodePort(svc) {
 			if gatewayIP != "" {
+				// Fix Azure/GCP LoadBalancers. They will forward traffic directly to the node with the
+				// dest address as the load-balancer ingress IP and port
+				iptRules = append(iptRules, getLoadBalancerIPTRules(svc, port, gatewayIP, port.NodePort)...)
 				iptRules = append(iptRules, getNodePortIPTRules(port, nil, gatewayIP, port.NodePort)...)
-				klog.V(5).Infof("Will delete iptables rule for NodePort: %v and protocol: %v", port.NodePort, port.Protocol)
+				klog.V(5).Infof("Will delete iptables rule for NodePort and cloud load balancers: %v and "+
+					"protocol: %v", port.NodePort, port.Protocol)
 			}
 		}
 		for _, externalIP := range svc.Spec.ExternalIPs {
@@ -388,7 +396,8 @@ func (n *OvnNode) watchLocalPorts(npw *localPortWatcherData) error {
 		UpdateFunc: func(old, new interface{}) {
 			svcNew := new.(*kapi.Service)
 			svcOld := old.(*kapi.Service)
-			if reflect.DeepEqual(svcNew.Spec, svcOld.Spec) {
+			if reflect.DeepEqual(svcNew.Spec, svcOld.Spec) &&
+				reflect.DeepEqual(svcNew.Status, svcOld.Status) {
 				return
 			}
 			err := npw.deleteService(svcOld)
@@ -430,4 +439,33 @@ func cleanupLocalnetGateway(physnet string) error {
 		}
 	}
 	return err
+}
+
+func getLoadBalancerIPTRules(svc *kapi.Service, svcPort kapi.ServicePort, gatewayIP string, targetPort int32) []iptRule {
+	var rules []iptRule
+	ingPort := fmt.Sprintf("%d", svcPort.Port)
+	for _, ing := range svc.Status.LoadBalancer.Ingress {
+		if ing.IP == "" {
+			continue
+		}
+		rules = append(rules, iptRule{
+			table: "nat",
+			chain: iptableNodePortChain,
+			args: []string{
+				"-d", ing.IP,
+				"-p", string(svcPort.Protocol), "--dport", ingPort,
+				"-j", "DNAT", "--to-destination", util.JoinHostPortInt32(gatewayIP, targetPort),
+			},
+		})
+		rules = append(rules, iptRule{
+			table: "filter",
+			chain: iptableNodePortChain,
+			args: []string{
+				"-d", ing.IP,
+				"-p", string(svcPort.Protocol), "--dport", ingPort,
+				"-j", "ACCEPT",
+			},
+		})
+	}
+	return rules
 }
