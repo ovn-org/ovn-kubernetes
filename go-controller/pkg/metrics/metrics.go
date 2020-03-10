@@ -1,4 +1,4 @@
-package util
+package metrics
 
 import (
 	"fmt"
@@ -10,6 +10,14 @@ import (
 	utilwait "k8s.io/apimachinery/pkg/util/wait"
 
 	"github.com/prometheus/client_golang/prometheus/promhttp"
+)
+
+const (
+	MetricOvnkubeNamespace       = "ovnkube"
+	MetricOvnkubeSubsystemMaster = "master"
+	MetricOvnkubeSubsystemNode   = "node"
+	MetricOvnNamespace           = "ovn"
+	MetricOvnSubsystemDBRaft     = "db_raft"
 )
 
 // StartMetricsServer runs the prometheus listner so that metrics can be collected

@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/metrics"
 	util "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
 	kapi "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/util/wait"
@@ -377,7 +378,7 @@ func (oc *Controller) addLogicalPort(pod *kapi.Pod) error {
 		}
 
 		// observe the pod creation latency metric.
-		recordPodCreated(pod)
+		metrics.RecordPodCreated(pod)
 	}
 
 	return nil
