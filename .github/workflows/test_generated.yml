@@ -8,6 +8,7 @@ name: Go
 env:
   K8S_VERSION: v1.16.4
   KIND_CLUSTER_NAME: ovn
+  KIND_INSTALL_INGRESS: true
 jobs:
   build:
     name: Build
