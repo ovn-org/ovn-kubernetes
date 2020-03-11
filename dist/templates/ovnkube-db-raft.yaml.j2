@@ -213,6 +213,49 @@ spec:
               fieldPath: metadata.name
       # end of container
 
+      # db-metrics-exporter - v3
+      - name: db-metrics-exporter
+        image: "{{ ovn_image | default('docker.io/ovnkube/ovn-daemonset:latest') }}"
+        imagePullPolicy: "{{ ovn_image_pull_policy | default('IfNotPresent') }}"
+        command: ["/root/ovnkube.sh", "db-raft-metrics"]
+
+        securityContext:
+          runAsUser: 0
+          capabilities:
+            add: ["NET_ADMIN"]
+
+        terminationMessagePolicy: FallbackToLogsOnError
+        volumeMounts:
+          # ovn db is stored in the pod in /etc/openvswitch
+          # (or in /etc/ovn if OVN from new repository is used)
+          # and on the host in /var/lib/openvswitch/
+          - mountPath: /etc/openvswitch/
+            name: host-var-lib-ovs
+          - mountPath: /etc/ovn/
+            name: host-var-lib-ovs
+          - mountPath: /var/run/openvswitch/
+            name: host-var-run-ovs
+          - mountPath: /var/run/ovn/
+            name: host-var-run-ovs
+
+        resources:
+          requests:
+            cpu: 100m
+            memory: 300Mi
+        env:
+          - name: OVN_DAEMONSET_VERSION
+            value: "3"
+          - name: K8S_APISERVER
+            valueFrom:
+              configMapKeyRef:
+                name: ovn-config
+                key: k8s_apiserver
+          - name: OVN_KUBERNETES_NAMESPACE
+            valueFrom:
+              fieldRef:
+                fieldPath: metadata.namespace
+      # end of container
+
       volumes:
       - name: host-var-log-ovs
         hostPath:

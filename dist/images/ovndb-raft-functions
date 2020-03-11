@@ -140,3 +140,21 @@ ovsdb-raft () {
   process_healthy ovn${db}_db ${ovn_tail_pid}
   echo "=============== run ${db}_ovsdb-raft ========== terminated"
 }
+
+# v3 - Runs ovn-kube-util in daemon mode to export prometheus metrics related to OVN clustered db
+db-raft-metrics() {
+  check_ovn_daemonset_version "3"
+
+  echo "=============== db-raft-metrics - (wait for ready_to_start_node)"
+  wait_for_event ready_to_start_node
+
+  ovndb_exporter_bind_address=${OVNDB_EXPORTER_BIND_ADDRESS:-"0.0.0.0:9476"}
+
+  /usr/bin/ovn-kube-util \
+    --loglevel=${ovnkube_loglevel} \
+    ovn-db-exporter \
+    --metrics-bind-address ${ovndb_exporter_bind_address}
+
+  echo "=============== db-raft-metrics with pid ${?} terminated ========== "
+  exit 1
+}

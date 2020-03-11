@@ -28,6 +28,7 @@ func main() {
 		app.NicsToBridgeCommand,
 		app.BridgesToNicCommand,
 		app.ReadinessProbeCommand,
+		app.OvnDBExporterCommand,
 	}
 
 	c.Before = func(ctx *cli.Context) error {
