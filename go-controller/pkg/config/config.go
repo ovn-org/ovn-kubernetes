@@ -26,7 +26,6 @@ import (
 // DefaultEncapPort number used if not supplied
 const DefaultEncapPort = 6081
 
-const MetricNamespace = "ovnkube"
 const DefaultAPIServer = "http://localhost:8443"
 
 // The following are global config parameters that other modules may access directly

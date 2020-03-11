@@ -1,4 +1,4 @@
-package ovn
+package metrics
 
 import (
 	"fmt"
@@ -6,7 +6,6 @@ import (
 	"sync"
 	"time"
 
-	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
 	util "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
 	kapi "k8s.io/api/core/v1"
 
@@ -14,41 +13,41 @@ import (
 	"k8s.io/klog"
 )
 
-const MetricSubsystem = "master"
-
 // metricE2ETimestamp is a timestamp value we have persisted to nbdb. We will
 // also export a metric with the same column in sbdb. We will also bump this
 // every 30 seconds, so we can detect a hung northd.
 var metricE2ETimestamp = prometheus.NewGauge(prometheus.GaugeOpts{
-	Namespace: config.MetricNamespace,
-	Subsystem: MetricSubsystem,
+	Namespace: MetricOvnkubeNamespace,
+	Subsystem: MetricOvnkubeSubsystemMaster,
 	Name:      "nb_e2e_timestamp",
 	Help:      "The current e2e-timestamp value as written to the northbound database"})
 
 // metricPodCreationLatency is the time between a pod being scheduled and the
 // ovn controller setting the network annotations.
 var metricPodCreationLatency = prometheus.NewHistogram(prometheus.HistogramOpts{
-	Namespace: config.MetricNamespace,
-	Subsystem: MetricSubsystem,
+	Namespace: MetricOvnkubeNamespace,
+	Subsystem: MetricOvnkubeSubsystemMaster,
 	Name:      "pod_creation_latency_seconds",
 	Help:      "The latency between pod creation and setting the OVN annotations",
 	Buckets:   prometheus.ExponentialBuckets(.1, 2, 15),
 })
 
-var registerMetricsOnce sync.Once
-var startUpdaterOnce sync.Once
+var registerMasterMetricsOnce sync.Once
+var startMasterUpdaterOnce sync.Once
 
-// RegisterMetrics registers some ovn-controller metrics with the Prometheus
+// RegisterMasterMetrics registers some ovnkube master metrics with the Prometheus
 // registry
-func RegisterMetrics() {
-	registerMetricsOnce.Do(func() {
+func RegisterMasterMetrics() {
+	registerMasterMetricsOnce.Do(func() {
 		prometheus.MustRegister(metricE2ETimestamp)
-		prometheus.MustRegister(metricPodCreationLatency)
+		// following go routine is directly responsible for collecting the metric above.
+		startMasterMetricsUpdater()
 
+		prometheus.MustRegister(metricPodCreationLatency)
 		prometheus.MustRegister(prometheus.NewCounterFunc(
 			prometheus.CounterOpts{
-				Namespace: config.MetricNamespace,
-				Subsystem: MetricSubsystem,
+				Namespace: MetricOvnkubeNamespace,
+				Subsystem: MetricOvnkubeSubsystemMaster,
 				Name:      "sb_e2e_timestamp",
 				Help:      "The current e2e-timestamp value as observed in the southbound database",
 			}, scrapeOvnTimestamp))
@@ -71,10 +70,10 @@ func scrapeOvnTimestamp() float64 {
 	return out
 }
 
-// startOvnUpdater adds a goroutine that updates a "timestamp" value in the
+// startMasterMetricsUpdater adds a goroutine that updates a "timestamp" value in the
 // nbdb every 30 seconds. This is so we can determine freshness of the database
-func startOvnUpdater() {
-	startUpdaterOnce.Do(func() {
+func startMasterMetricsUpdater() {
+	startMasterUpdaterOnce.Do(func() {
 		go func() {
 			for {
 				t := time.Now().Unix()
@@ -91,9 +90,9 @@ func startOvnUpdater() {
 	})
 }
 
-// recordPodCreated extracts the scheduled timestamp and records how long it took
+// RecordPodCreated extracts the scheduled timestamp and records how long it took
 // us to notice this and set up the pod's scheduling.
-func recordPodCreated(pod *kapi.Pod) {
+func RecordPodCreated(pod *kapi.Pod) {
 	t := time.Now()
 
 	// Find the scheduled timestamp

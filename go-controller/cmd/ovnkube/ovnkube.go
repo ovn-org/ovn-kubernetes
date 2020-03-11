@@ -20,6 +20,7 @@ import (
 
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/factory"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/metrics"
 	ovnnode "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/node"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
@@ -205,11 +206,6 @@ func runOvnKube(ctx *cli.Context) error {
 		return fmt.Errorf("need to run ovnkube in either master and/or node mode")
 	}
 
-	// start the prometheus server
-	if config.Kubernetes.MetricsBindAddress != "" {
-		util.StartMetricsServer(config.Kubernetes.MetricsBindAddress, config.Kubernetes.MetricsEnablePprof)
-	}
-
 	// Set up a watch on our config file; if it changes, we exit -
 	// (we don't have the ability to dynamically reload config changes).
 	if err := watchForChanges(configFile); err != nil {
@@ -220,14 +216,13 @@ func runOvnKube(ctx *cli.Context) error {
 		if runtime.GOOS == "windows" {
 			return fmt.Errorf("Windows is not supported as master node")
 		}
-
-		ovn.RegisterMetrics()
-
 		// run the HA master controller to init the master
 		ovnHAController := ovn.NewHAMasterController(clientset, factory, master, stopChan)
 		if err := ovnHAController.StartHAMasterController(); err != nil {
 			return err
 		}
+		// register prometheus metrics exported by the master
+		metrics.RegisterMasterMetrics()
 	}
 
 	if node != "" {
@@ -239,6 +234,14 @@ func runOvnKube(ctx *cli.Context) error {
 		if err := n.Start(); err != nil {
 			return err
 		}
+		// register prometheus metrics exported by the node
+		metrics.RegisterNodeMetrics()
+	}
+
+	// now that ovnkube master/node are running, lets expose the metrics HTTP endpoint if configured
+	// start the prometheus server
+	if config.Kubernetes.MetricsBindAddress != "" {
+		metrics.StartMetricsServer(config.Kubernetes.MetricsBindAddress, config.Kubernetes.MetricsEnablePprof)
 	}
 
 	// run forever

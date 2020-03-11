@@ -6,14 +6,13 @@ import (
 	"io/ioutil"
 	"net/http"
 	"strings"
-	"sync"
 	"time"
 
 	"github.com/gorilla/mux"
-	"github.com/prometheus/client_golang/prometheus"
 	"k8s.io/klog"
 
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/metrics"
 )
 
 // *** The Server is PRIVATE API between OVN components and may be
@@ -41,14 +40,8 @@ import (
 // removed and re-created with 0700 permissions each time ovnkube on the node is
 // started.
 
-var registerMetricsOnce sync.Once
-
 // NewCNIServer creates and returns a new Server object which will listen on a socket in the given path
 func NewCNIServer(rundir string) *Server {
-	registerMetricsOnce.Do(func() {
-		prometheus.MustRegister(metricCNIRequestDuration)
-	})
-
 	if len(rundir) == 0 {
 		rundir = serverRunDir
 	}
@@ -134,18 +127,6 @@ func cniRequestToPodRequest(cr *Request) (*PodRequest, error) {
 	return req, nil
 }
 
-// metricCNIRequestDuration is a prometheus metric that tracks the duration
-// of CNI requests
-var metricCNIRequestDuration = prometheus.NewHistogramVec(prometheus.HistogramOpts{
-	Namespace: config.MetricNamespace,
-	Subsystem: "node",
-	Name:      "cni_request_duration_seconds",
-	Help:      "The duration of CNI server requests",
-	Buckets:   prometheus.ExponentialBuckets(.1, 2, 15)},
-	//labels
-	[]string{"command", "err"},
-)
-
 // Dispatch a pod request to the request handler and return the result to the
 // CNI server client
 func (s *Server) handleCNIRequest(w http.ResponseWriter, r *http.Request) {
@@ -176,5 +157,6 @@ func (s *Server) handleCNIRequest(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	metricCNIRequestDuration.WithLabelValues(string(req.Command), hasErr).Observe(time.Since(startTime).Seconds())
+	metrics.MetricCNIRequestDuration.WithLabelValues(string(req.Command), hasErr).Observe(
+		time.Since(startTime).Seconds())
 }
