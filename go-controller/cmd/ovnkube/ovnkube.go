@@ -12,6 +12,7 @@ import (
 	"syscall"
 	"text/tabwriter"
 	"text/template"
+	"time"
 
 	"k8s.io/klog"
 
@@ -217,12 +218,15 @@ func runOvnKube(ctx *cli.Context) error {
 			return fmt.Errorf("Windows is not supported as master node")
 		}
 		// run the HA master controller to init the master
+		start := time.Now()
 		ovnHAController := ovn.NewHAMasterController(clientset, factory, master, stopChan)
 		if err := ovnHAController.StartHAMasterController(); err != nil {
 			return err
 		}
+		end := time.Since(start)
 		// register prometheus metrics exported by the master
 		metrics.RegisterMasterMetrics()
+		metrics.MetricMasterReadyDuration.Set(float64(end))
 	}
 
 	if node != "" {
@@ -230,12 +234,15 @@ func runOvnKube(ctx *cli.Context) error {
 			return fmt.Errorf("cannot initialize node without service account 'token'. Please provide one with --k8s-token argument")
 		}
 
+		start := time.Now()
 		n := ovnnode.NewNode(clientset, factory, node)
 		if err := n.Start(); err != nil {
 			return err
 		}
+		end := time.Since(start)
 		// register prometheus metrics exported by the node
 		metrics.RegisterNodeMetrics()
+		metrics.MetricNodeReadyDuration.Set(float64(end))
 	}
 
 	// now that ovnkube master/node are running, lets expose the metrics HTTP endpoint if configured

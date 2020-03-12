@@ -32,6 +32,13 @@ var metricPodCreationLatency = prometheus.NewHistogram(prometheus.HistogramOpts{
 	Buckets:   prometheus.ExponentialBuckets(.1, 2, 15),
 })
 
+var MetricMasterReadyDuration = prometheus.NewGauge(prometheus.GaugeOpts{
+	Namespace: MetricOvnkubeNamespace,
+	Subsystem: MetricOvnkubeSubsystemMaster,
+	Name:      "ready_duration_seconds",
+	Help:      "The duration for the master to get to ready state",
+})
+
 var registerMasterMetricsOnce sync.Once
 var startMasterUpdaterOnce sync.Once
 
@@ -60,6 +67,7 @@ func RegisterMasterMetrics() {
 			}, func() float64 {
 				return float64(util.SkippedNbctlDaemonCounter)
 			}))
+		prometheus.MustRegister(MetricMasterReadyDuration)
 	})
 }
 
