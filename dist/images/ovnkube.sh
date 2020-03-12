@@ -946,9 +946,14 @@ case ${cmd} in
   "sb-ovsdb-raft")
     ovsdb-raft sb ${ovn_sb_port}
     ;;
+  "db-raft-metrics")
+    db-raft-metrics
+    ;;
   *)
     echo "invalid command ${cmd}"
-    echo "valid v3 commands: ovs-server nb-ovsdb sb-ovsdb run-ovn-northd ovn-master ovn-controller ovn-node display_env display ovn_debug cleanup-ovs-server cleanup-ovn-node nb-ovsdb-raft sb-ovsdb-raft"
+    echo "valid v3 commands: ovs-server nb-ovsdb sb-ovsdb run-ovn-northd ovn-master "\
+      "ovn-controller ovn-node display_env display ovn_debug cleanup-ovs-server "\
+      "cleanup-ovn-node nb-ovsdb-raft sb-ovsdb-raft db-raft-metrics"
 	  exit 0
 esac
 
