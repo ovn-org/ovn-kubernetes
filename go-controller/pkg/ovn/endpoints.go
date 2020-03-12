@@ -129,7 +129,7 @@ func (ovn *Controller) AddEndpoints(ep *kapi.Endpoints) error {
 }
 
 func (ovn *Controller) handleNodePortLB(node *kapi.Node) error {
-	physicalGateway := "GR_" + node.Name
+	physicalGateway := util.GWRouterPrefix + node.Name
 	var k8sNSLbTCP, k8sNSLbUDP, physicalIP string
 	if k8sNSLbTCP, _ = ovn.getGatewayLoadBalancer(physicalGateway, TCP); k8sNSLbTCP == "" {
 		return fmt.Errorf("TCP load balancer for node %q does not yet exist", node.Name)

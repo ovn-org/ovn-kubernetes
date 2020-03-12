@@ -584,7 +584,7 @@ func (oc *Controller) WatchNodes() error {
 			oc.lsMutex.Unlock()
 			mgmtPortFailed.Delete(node.Name)
 			gatewaysFailed.Delete(node.Name)
-			if oc.defGatewayRouter == "GR_"+node.Name {
+			if oc.defGatewayRouter == util.GWRouterPrefix+node.Name {
 				delete(oc.loadbalancerGWCache, TCP)
 				delete(oc.loadbalancerGWCache, UDP)
 				oc.defGatewayRouter = ""
