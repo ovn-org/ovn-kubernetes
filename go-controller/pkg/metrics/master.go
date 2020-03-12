@@ -32,6 +32,13 @@ var metricPodCreationLatency = prometheus.NewHistogram(prometheus.HistogramOpts{
 	Buckets:   prometheus.ExponentialBuckets(.1, 2, 15),
 })
 
+var MetricMasterReadyDuration = prometheus.NewGauge(prometheus.GaugeOpts{
+	Namespace: MetricOvnkubeNamespace,
+	Subsystem: MetricOvnkubeSubsystemMaster,
+	Name:      "ready_duration_seconds",
+	Help:      "The duration for the master to get to ready state",
+})
+
 var registerMasterMetricsOnce sync.Once
 var startMasterUpdaterOnce sync.Once
 
@@ -51,6 +58,16 @@ func RegisterMasterMetrics() {
 				Name:      "sb_e2e_timestamp",
 				Help:      "The current e2e-timestamp value as observed in the southbound database",
 			}, scrapeOvnTimestamp))
+		prometheus.MustRegister(prometheus.NewCounterFunc(
+			prometheus.CounterOpts{
+				Namespace: MetricOvnkubeNamespace,
+				Subsystem: MetricOvnkubeSubsystemMaster,
+				Name:      "skipped_nbctl_daemon_total",
+				Help:      "The number of times we skipped using ovn-nbctl daemon and directly interacted with OVN NB DB",
+			}, func() float64 {
+				return float64(util.SkippedNbctlDaemonCounter)
+			}))
+		prometheus.MustRegister(MetricMasterReadyDuration)
 	})
 }
 

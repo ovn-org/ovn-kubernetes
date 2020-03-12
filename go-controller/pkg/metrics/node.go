@@ -18,10 +18,18 @@ var MetricCNIRequestDuration = prometheus.NewHistogramVec(prometheus.HistogramOp
 	[]string{"command", "err"},
 )
 
+var MetricNodeReadyDuration = prometheus.NewGauge(prometheus.GaugeOpts{
+	Namespace: MetricOvnkubeNamespace,
+	Subsystem: MetricOvnkubeSubsystemNode,
+	Name:      "ready_duration_seconds",
+	Help:      "The duration for the node to get to ready state",
+})
+
 var registerNodeMetricsOnce sync.Once
 
 func RegisterNodeMetrics() {
 	registerNodeMetricsOnce.Do(func() {
 		prometheus.MustRegister(MetricCNIRequestDuration)
+		prometheus.MustRegister(MetricNodeReadyDuration)
 	})
 }
