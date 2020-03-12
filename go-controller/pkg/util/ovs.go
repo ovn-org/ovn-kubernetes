@@ -292,6 +292,8 @@ func runOVNretry(cmdPath string, envVars []string, args ...string) (*bytes.Buffe
 	}
 }
 
+var SkippedNbctlDaemonCounter uint64
+
 func getNbctlArgsAndEnv(timeout int, args ...string) ([]string, []string) {
 	var cmdArgs, envVars []string
 
@@ -312,6 +314,7 @@ func getNbctlArgsAndEnv(timeout int, args ...string) ([]string, []string) {
 		}
 		klog.Warningf("failed to retrieve ovn-nbctl daemon's control socket " +
 			"so resorting to non-daemon mode")
+		atomic.AddUint64(&SkippedNbctlDaemonCounter, 1)
 	}
 
 	if config.OvnNorth.Scheme == config.OvnDBSchemeSSL {
