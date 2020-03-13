@@ -21,8 +21,6 @@ import (
 	"k8s.io/apimachinery/pkg/labels"
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/client-go/kubernetes"
-	"k8s.io/client-go/kubernetes/scheme"
-	kv1core "k8s.io/client-go/kubernetes/typed/core/v1"
 	"k8s.io/client-go/tools/cache"
 	"k8s.io/client-go/tools/record"
 	"k8s.io/klog"
@@ -55,16 +53,18 @@ type Controller struct {
 	masterSubnetAllocator *allocator.SubnetAllocator
 	joinSubnetAllocator   *allocator.SubnetAllocator
 
-	TCPLoadBalancerUUID string
-	UDPLoadBalancerUUID string
+	TCPLoadBalancerUUID  string
+	UDPLoadBalancerUUID  string
+	SCTPLoadBalancerUUID string
+	SCTPSupport          bool
 
-	// For TCP and UDP type traffic, cache OVN load-balancers used for the
+	// For TCP, UDP, and SCTP type traffic, cache OVN load-balancers used for the
 	// cluster's east-west traffic.
-	loadbalancerClusterCache map[string]string
+	loadbalancerClusterCache map[kapi.Protocol]string
 
 	// For TCP and UDP type traffice, cache OVN load balancer that exists on the
 	// default gateway
-	loadbalancerGWCache map[string]string
+	loadbalancerGWCache map[kapi.Protocol]string
 	defGatewayRouter    string
 
 	// A cache of all logical switches seen by the watcher and their subnets
@@ -121,6 +121,9 @@ type Controller struct {
 	serviceLBMap map[string]map[string]*loadBalancerConf
 
 	serviceLBLock sync.Mutex
+
+	// event recorder used to post events to k8s
+	recorder record.EventRecorder
 }
 
 const (
@@ -153,14 +156,15 @@ func NewOvnController(kubeClient kubernetes.Interface, wf *factory.WatchFactory,
 		lspEgressDenyCache:       make(map[string]int),
 		lspMutex:                 &sync.Mutex{},
 		lsMutex:                  &sync.Mutex{},
-		loadbalancerClusterCache: make(map[string]string),
-		loadbalancerGWCache:      make(map[string]string),
+		loadbalancerClusterCache: make(map[kapi.Protocol]string),
+		loadbalancerGWCache:      make(map[kapi.Protocol]string),
 		multicastEnabled:         make(map[string]bool),
 		multicastSupport:         config.EnableMulticast,
 		serviceVIPToName:         make(map[ServiceVIPKey]types.NamespacedName),
 		serviceVIPToNameLock:     sync.Mutex{},
 		serviceLBMap:             make(map[string]map[string]*loadBalancerConf),
 		serviceLBLock:            sync.Mutex{},
+		recorder:                 util.EventRecorder(kubeClient),
 	}
 }
 
@@ -281,6 +285,8 @@ func extractEmptyLBBackendsEvents(out []byte) ([]emptyLBBackendEvent, error) {
 				}
 				if prot == "udp" {
 					protocol = kapi.ProtocolUDP
+				} else if prot == "sctp" {
+					protocol = kapi.ProtocolSCTP
 				} else {
 					protocol = kapi.ProtocolTCP
 				}
@@ -320,10 +326,6 @@ func (oc *Controller) ovnControllerEventChecker() {
 		return
 	}
 
-	eventBroadcaster := record.NewBroadcaster()
-	eventBroadcaster.StartRecordingToSink(&kv1core.EventSinkImpl{Interface: oc.kube.Events()})
-	recorder := eventBroadcaster.NewRecorder(scheme.Scheme, kapi.EventSource{Component: "kube-proxy"})
-
 	for {
 		select {
 		case <-ticker.C:
@@ -351,7 +353,7 @@ func (oc *Controller) ovnControllerEventChecker() {
 						Name:      serviceName.Name,
 					}
 					klog.V(5).Infof("Sending a NeedPods event for service %s in namespace %s.", serviceName.Name, serviceName.Namespace)
-					recorder.Eventf(&serviceRef, kapi.EventTypeNormal, "NeedPods", "The service %s needs pods", serviceName.Name)
+					oc.recorder.Eventf(&serviceRef, kapi.EventTypeNormal, "NeedPods", "The service %s needs pods", serviceName.Name)
 				}
 			}
 		case <-oc.stopChan:
@@ -551,7 +553,6 @@ func (oc *Controller) WatchNodes() error {
 	_, err := oc.watchFactory.AddNodeHandler(cache.ResourceEventHandlerFuncs{
 		AddFunc: func(obj interface{}) {
 			node := obj.(*kapi.Node)
-
 			if noHostSubnet := noHostSubnet(node); noHostSubnet {
 				oc.lsMutex.Lock()
 				defer oc.lsMutex.Unlock()
@@ -635,8 +636,9 @@ func (oc *Controller) WatchNodes() error {
 			gatewaysFailed.Delete(node.Name)
 			// If this node was serving the external IP load balancer for services, migrate to a new node
 			if oc.defGatewayRouter == util.GWRouterPrefix+node.Name {
-				delete(oc.loadbalancerGWCache, TCP)
-				delete(oc.loadbalancerGWCache, UDP)
+				delete(oc.loadbalancerGWCache, kapi.ProtocolTCP)
+				delete(oc.loadbalancerGWCache, kapi.ProtocolUDP)
+				delete(oc.loadbalancerGWCache, kapi.ProtocolSCTP)
 				oc.defGatewayRouter = ""
 				oc.updateExternalIPsLB()
 			}

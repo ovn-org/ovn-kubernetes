@@ -348,6 +348,20 @@ func getNbctlArgsAndEnv(timeout int, args ...string) ([]string, []string) {
 	return cmdArgs, envVars
 }
 
+func getNbOVSDBArgs(command string, args ...string) []string {
+	var cmdArgs []string
+	if config.OvnNorth.Scheme == config.OvnDBSchemeSSL {
+		cmdArgs = append(cmdArgs,
+			fmt.Sprintf("--private-key=%s", config.OvnNorth.PrivKey),
+			fmt.Sprintf("--certificate=%s", config.OvnNorth.Cert),
+			fmt.Sprintf("--bootstrap-ca-cert=%s", config.OvnNorth.CACert))
+	}
+	cmdArgs = append(cmdArgs, command)
+	cmdArgs = append(cmdArgs, config.OvnNorth.GetURL())
+	cmdArgs = append(cmdArgs, args...)
+	return cmdArgs
+}
+
 // RunOVNNbctlUnix runs command via ovn-nbctl, with ovn-nbctl using the unix
 // domain sockets to connect to the ovsdb-server backing the OVN NB database.
 func RunOVNNbctlUnix(args ...string) (string, string, error) {
@@ -413,6 +427,13 @@ func RunOVNSbctlWithTimeout(timeout int, args ...string) (string, string,
 // RunOVSDBClient runs an 'ovsdb-client [OPTIONS] COMMAND [ARG...] command'.
 func RunOVSDBClient(args ...string) (string, string, error) {
 	stdout, stderr, err := runOVNretry(runner.ovsdbClientPath, nil, args...)
+	return strings.Trim(strings.TrimSpace(stdout.String()), "\""), stderr.String(), err
+}
+
+// RunOVSDBClientOVN runs an 'ovsdb-client [OPTIONS] COMMAND [SERVER] [ARG...] command' against OVN NB database.
+func RunOVSDBClientOVNNB(command string, args ...string) (string, string, error) {
+	cmdArgs := getNbOVSDBArgs(command, args...)
+	stdout, stderr, err := runOVNretry(runner.ovsdbClientPath, nil, cmdArgs...)
 	return strings.Trim(strings.TrimSpace(stdout.String()), "\""), stderr.String(), err
 }
 
@@ -580,4 +601,29 @@ func GetOVNDBServerInfo(timeout int, direction, database string) (*OVNDBServerSt
 	}
 
 	return serverStatus, nil
+}
+
+// DetectSCTPSupport checks if OVN supports SCTP for load balancer
+func DetectSCTPSupport() (bool, error) {
+	stdout, stderr, err := RunOVSDBClientOVNNB("list-columns", "--data=bare", "--no-heading",
+		"--format=json", "OVN_Northbound", "Load_Balancer")
+	if err != nil {
+		klog.Errorf("Failed to query OVN NB DB for SCTP support, "+
+			"stdout: %q, stderr: %q, error: %v", stdout, stderr, err)
+		return false, err
+	}
+	type OvsdbData struct {
+		Data [][]interface{}
+	}
+	var lbData OvsdbData
+	err = json.Unmarshal([]byte(stdout), &lbData)
+	if err != nil {
+		return false, err
+	}
+	for _, entry := range lbData.Data {
+		if entry[0].(string) == "protocol" && strings.Contains(fmt.Sprintf("%v", entry[1]), "sctp") {
+			return true, nil
+		}
+	}
+	return false, nil
 }

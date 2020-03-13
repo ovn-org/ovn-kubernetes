@@ -12,10 +12,10 @@ import (
 )
 
 const (
-	k8sTCPLoadBalancerIP = "k8s_tcp_load_balancer"
-	k8sUDPLoadBalancerIP = "k8s_udp_load_balancer"
-
-	fakeUUID = "8a86f6d8-7972-4253-b0bd-ddbef66e9303"
+	k8sTCPLoadBalancerIP  = "k8s_tcp_load_balancer"
+	k8sUDPLoadBalancerIP  = "k8s_udp_load_balancer"
+	k8sSCTPLoadBalancerIP = "k8s_sctp_load_balancer"
+	fakeUUID              = "8a86f6d8-7972-4253-b0bd-ddbef66e9303"
 )
 
 type FakeOVN struct {
