@@ -15,10 +15,12 @@ type startupWaiter struct {
 
 type waitFunc func() (bool, error)
 type postWaitFunc func() error
+type reconcileFunc func() error
 
 type waitTask struct {
-	waitFn waitFunc
-	postFn postWaitFunc
+	waitFn      waitFunc
+	postFn      postWaitFunc
+	reconcileFn reconcileFunc
 }
 
 func newStartupWaiter() *startupWaiter {
@@ -28,10 +30,11 @@ func newStartupWaiter() *startupWaiter {
 	}
 }
 
-func (w *startupWaiter) AddWait(waitFn waitFunc, postFn postWaitFunc) {
+func (w *startupWaiter) AddWait(waitFn waitFunc, postFn postWaitFunc, recFn reconcileFunc) {
 	w.tasks = append(w.tasks, &waitTask{
-		waitFn: waitFn,
-		postFn: postFn,
+		waitFn:      waitFn,
+		postFn:      postFn,
+		reconcileFn: recFn,
 	})
 }
 
@@ -44,6 +47,17 @@ func (w *startupWaiter) Wait() error {
 			err := wait.PollImmediate(500*time.Millisecond, 300*time.Second, func() (bool, error) {
 				return task.waitFn()
 			})
+			if err != nil && task.reconcileFn != nil {
+				err = task.reconcileFn()
+				if err != nil {
+					errors <- err
+					return
+				}
+				// retry the check with half of the original allowed wait time
+				err = wait.PollImmediate(500*time.Millisecond, 150*time.Second, func() (bool, error) {
+					return task.waitFn()
+				})
+			}
 			if err == nil && task.postFn != nil {
 				err = task.postFn()
 			}

@@ -58,7 +58,7 @@ func (n *OvnNode) createManagementPort(hostSubnets []*net.IPNet, nodeAnnotator k
 		return err
 	}
 
-	waiter.AddWait(managementPortReady, nil)
+	waiter.AddWait(managementPortReady, nil, util.ForceOVNRecompute)
 	return nil
 }
 

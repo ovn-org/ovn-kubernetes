@@ -114,7 +114,7 @@ func (n *OvnNode) initGateway(subnet *net.IPNet, nodeAnnotator kube.Annotator,
 	}
 
 	// Wait for gateway resources to be created by the master
-	waiter.AddWait(gatewayReady, prFn)
+	waiter.AddWait(gatewayReady, prFn, util.ForceOVNRecompute)
 	return nil
 }
 
