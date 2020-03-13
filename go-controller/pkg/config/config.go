@@ -1034,11 +1034,6 @@ func initConfigWithPath(ctx *cli.Context, exec kexec.Interface, saPath string, d
 
 	configFile, configFileIsDefault = getConfigFilePath(ctx)
 
-	var level klog.Level
-	if err := level.Set(strconv.Itoa(ctx.Int("loglevel"))); err != nil {
-		return "", fmt.Errorf("failed to set klog log level %v", err)
-	}
-
 	if !configFileIsDefault {
 		// Only return explicitly specified config file
 		retConfigFile = configFile
@@ -1080,6 +1075,10 @@ func initConfigWithPath(ctx *cli.Context, exec kexec.Interface, saPath string, d
 		return "", err
 	}
 
+	var level klog.Level
+	if err := level.Set(strconv.Itoa(Logging.Level)); err != nil {
+		return "", fmt.Errorf("failed to set klog log level %v", err)
+	}
 	if Logging.File != "" {
 		klogFlags := flag.NewFlagSet("klog", flag.ExitOnError)
 		klog.InitFlags(klogFlags)
