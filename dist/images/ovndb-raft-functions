@@ -98,6 +98,10 @@ ovsdb-raft () {
   rm -f ${ovn_db_pidfile}
   verify-ovsdb-raft
   local_ip=$(getent ahostsv4 $(hostname) | grep -v "^127\." | head -1 | awk '{ print $1 }')
+  if [[ ${local_ip} == "" ]] ; then
+      echo "failed to retrieve the IP address of the host $(hostname). Exiting..."
+      exit 1
+  fi
   echo "=============== run ${db}-ovsdb-raft pod ${POD_NAME} =========="
 
   if [[ ! -e ${ovn_db_file} ]] || ovsdb-tool db-is-standalone ${ovn_db_file} ; then

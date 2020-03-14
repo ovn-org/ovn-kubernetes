@@ -589,6 +589,10 @@ nb-ovsdb () {
   check_ovn_daemonset_version "3"
   rm -f ${OVN_RUNDIR}/ovnnb_db.pid
 
+  if [[ ${ovn_db_host} == "" ]] ; then
+      echo "The IP address of the host $(hostname) could not be determined. Exiting..."
+      exit 1
+  fi
   iptables-rules ${ovn_nb_port}
 
   echo "=============== run nb_ovsdb ========== MASTER ONLY"
@@ -615,6 +619,10 @@ sb-ovsdb () {
   check_ovn_daemonset_version "3"
   rm -f ${OVN_RUNDIR}/ovnsb_db.pid
 
+  if [[ ${ovn_db_host} == "" ]] ; then
+      echo "The IP address of the host $(hostname) could not be determined. Exiting..."
+      exit 1
+  fi
   iptables-rules ${ovn_sb_port}
 
   echo "=============== run sb_ovsdb ========== MASTER ONLY"
