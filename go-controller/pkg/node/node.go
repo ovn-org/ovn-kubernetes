@@ -174,8 +174,6 @@ func (n *OvnNode) Start() error {
 	// Setting debug log level during node bring up to expose bring up process.
 	// Log level is returned to configured value when bring up is complete.
 	var level klog.Level
-	lastLevel := fmt.Sprintf("%v", level.Get())
-
 	if err := level.Set("5"); err != nil {
 		klog.Errorf("setting klog \"loglevel\" to 5 failed, err: %v", err)
 	}
@@ -259,7 +257,7 @@ func (n *OvnNode) Start() error {
 	}
 	klog.Infof("Gateway and management port readiness took %v", time.Since(start))
 
-	if err := level.Set(lastLevel); err != nil {
+	if err := level.Set(strconv.Itoa(config.Logging.Level)); err != nil {
 		klog.Errorf("reset of initial klog \"loglevel\" failed, err: %v", err)
 	}
 
