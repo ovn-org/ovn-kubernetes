@@ -1,9 +1,13 @@
 package metrics
 
 import (
+	"strconv"
+	"strings"
 	"sync"
 
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
 	"github.com/prometheus/client_golang/prometheus"
+	"k8s.io/klog"
 )
 
 // MetricCNIRequestDuration is a prometheus metric that tracks the duration
@@ -31,5 +35,26 @@ func RegisterNodeMetrics() {
 	registerNodeMetricsOnce.Do(func() {
 		prometheus.MustRegister(MetricCNIRequestDuration)
 		prometheus.MustRegister(MetricNodeReadyDuration)
+		prometheus.MustRegister(prometheus.NewCounterFunc(
+			prometheus.CounterOpts{
+				Namespace: MetricOvnkubeNamespace,
+				Subsystem: MetricOvnkubeSubsystemNode,
+				Name:      "integration_bridge_openflow_total",
+				Help:      "The total number of OpenFlow flows in the integration bridge",
+			}, func() float64 {
+				stdout, stderr, err := util.RunOVSOfctl("-t", "5", "dump-aggregate", "br-int")
+				if err != nil {
+					klog.Errorf("failed to get flow count for br-int, stderr(%s): (%v)",
+						stderr, err)
+					return 0
+				}
+				for _, kvPair := range strings.Fields(stdout) {
+					if strings.HasPrefix(kvPair, "flow_count=") {
+						count, _ := strconv.ParseFloat(strings.Split(kvPair, "=")[1], 64)
+						return count
+					}
+				}
+				return 0
+			}))
 	})
 }
