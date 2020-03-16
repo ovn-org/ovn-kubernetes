@@ -19,30 +19,30 @@ var _ = Describe("Pod annotation tests", func() {
 			{
 				name: "Single-stack IPv4",
 				in: &PodAnnotation{
-					IP:  mustParseCIDRAddress("192.168.0.5/24"),
-					MAC: mustParseMAC("0A:58:FD:98:00:01"),
-					GW:  net.ParseIP("192.168.0.1"),
+					IPs:      []*net.IPNet{mustParseCIDRAddress("192.168.0.5/24")},
+					MAC:      mustParseMAC("0A:58:FD:98:00:01"),
+					Gateways: []net.IP{net.ParseIP("192.168.0.1")},
 				},
 				out: map[string]string{
-					"k8s.ovn.org/pod-networks": `{"default":{"ip_address":"192.168.0.5/24","mac_address":"0a:58:fd:98:00:01","gateway_ip":"192.168.0.1"}}`,
+					"k8s.ovn.org/pod-networks": `{"default":{"ip_addresses":["192.168.0.5/24"],"mac_address":"0a:58:fd:98:00:01","gateway_ips":["192.168.0.1"],"ip_address":"192.168.0.5/24","gateway_ip":"192.168.0.1"}}`,
 				},
 			},
 			{
 				name: "No GW",
 				in: &PodAnnotation{
-					IP:  mustParseCIDRAddress("192.168.0.5/24"),
+					IPs: []*net.IPNet{mustParseCIDRAddress("192.168.0.5/24")},
 					MAC: mustParseMAC("0A:58:FD:98:00:01"),
 				},
 				out: map[string]string{
-					"k8s.ovn.org/pod-networks": `{"default":{"ip_address":"192.168.0.5/24","mac_address":"0a:58:fd:98:00:01","gateway_ip":""}}`,
+					"k8s.ovn.org/pod-networks": `{"default":{"ip_addresses":["192.168.0.5/24"],"mac_address":"0a:58:fd:98:00:01","ip_address":"192.168.0.5/24"}}`,
 				},
 			},
 			{
 				name: "Routes",
 				in: &PodAnnotation{
-					IP:  mustParseCIDRAddress("192.168.0.5/24"),
-					MAC: mustParseMAC("0A:58:FD:98:00:01"),
-					GW:  net.ParseIP("192.168.0.1"),
+					IPs:      []*net.IPNet{mustParseCIDRAddress("192.168.0.5/24")},
+					MAC:      mustParseMAC("0A:58:FD:98:00:01"),
+					Gateways: []net.IP{net.ParseIP("192.168.0.1")},
 					Routes: []PodRoute{
 						{
 							Dest:    mustParseCIDR("192.168.1.0/24"),
@@ -51,18 +51,35 @@ var _ = Describe("Pod annotation tests", func() {
 					},
 				},
 				out: map[string]string{
-					"k8s.ovn.org/pod-networks": `{"default":{"ip_address":"192.168.0.5/24","mac_address":"0a:58:fd:98:00:01","gateway_ip":"192.168.0.1","routes":[{"dest":"192.168.1.0/24","nextHop":"192.168.1.1"}]}}`,
+					"k8s.ovn.org/pod-networks": `{"default":{"ip_addresses":["192.168.0.5/24"],"mac_address":"0a:58:fd:98:00:01","gateway_ips":["192.168.0.1"],"routes":[{"dest":"192.168.1.0/24","nextHop":"192.168.1.1"}],"ip_address":"192.168.0.5/24","gateway_ip":"192.168.0.1"}}`,
 				},
 			},
 			{
 				name: "Single-stack IPv6",
 				in: &PodAnnotation{
-					IP:  mustParseCIDRAddress("fd01::1234/64"),
-					MAC: mustParseMAC("0A:58:FD:98:00:01"),
-					GW:  net.ParseIP("fd01::1"),
+					IPs:      []*net.IPNet{mustParseCIDRAddress("fd01::1234/64")},
+					MAC:      mustParseMAC("0A:58:FD:98:00:01"),
+					Gateways: []net.IP{net.ParseIP("fd01::1")},
 				},
 				out: map[string]string{
-					"k8s.ovn.org/pod-networks": `{"default":{"ip_address":"fd01::1234/64","mac_address":"0a:58:fd:98:00:01","gateway_ip":"fd01::1"}}`,
+					"k8s.ovn.org/pod-networks": `{"default":{"ip_addresses":["fd01::1234/64"],"mac_address":"0a:58:fd:98:00:01","gateway_ips":["fd01::1"],"ip_address":"fd01::1234/64","gateway_ip":"fd01::1"}}`,
+				},
+			},
+			{
+				name: "Dual-stack",
+				in: &PodAnnotation{
+					IPs: []*net.IPNet{
+						mustParseCIDRAddress("192.168.0.5/24"),
+						mustParseCIDRAddress("fd01::1234/64"),
+					},
+					MAC: mustParseMAC("0A:58:FD:98:00:01"),
+					Gateways: []net.IP{
+						net.ParseIP("192.168.1.0"),
+						net.ParseIP("fd01::1"),
+					},
+				},
+				out: map[string]string{
+					"k8s.ovn.org/pod-networks": `{"default":{"ip_addresses":["192.168.0.5/24","fd01::1234/64"],"mac_address":"0a:58:fd:98:00:01","gateway_ips":["192.168.1.0","fd01::1"]}}`,
 				},
 			},
 		}

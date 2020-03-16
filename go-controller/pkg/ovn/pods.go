@@ -234,7 +234,8 @@ func (oc *Controller) addLogicalPort(pod *kapi.Pod) error {
 	annotation, err := util.UnmarshalPodAnnotation(pod.Annotations)
 	if err == nil {
 		podMac = annotation.MAC
-		podCIDR = annotation.IP
+		// DUAL-STACK FIXME: handle multiple IPs
+		podCIDR = annotation.IPs[0]
 
 		// Check if the pod's logical switch port already exists. If it
 		// does don't re-add the port to OVN as this will change its
@@ -249,7 +250,7 @@ func (oc *Controller) addLogicalPort(pod *kapi.Pod) error {
 		// If the pod already has annotations use the existing static
 		// IP/MAC from the annotation.
 		args = append(args,
-			"--", "lsp-set-addresses", portName, fmt.Sprintf("%s %s", podMac, annotation.IP.IP),
+			"--", "lsp-set-addresses", portName, fmt.Sprintf("%s %s", podMac, podCIDR.IP),
 			"--", "--if-exists", "clear", "logical_switch_port", portName, "dynamic_addresses",
 		)
 	} else {
@@ -331,10 +332,10 @@ func (oc *Controller) addLogicalPort(pod *kapi.Pod) error {
 			return err
 		}
 		marshalledAnnotation, err := util.MarshalPodAnnotation(&util.PodAnnotation{
-			IP:     podCIDR,
-			MAC:    podMac,
-			GW:     gwIP,
-			Routes: routes,
+			IPs:      []*net.IPNet{podCIDR},
+			MAC:      podMac,
+			Gateways: []net.IP{gwIP},
+			Routes:   routes,
 		})
 		if err != nil {
 			return fmt.Errorf("error creating pod network annotation: %v", err)
