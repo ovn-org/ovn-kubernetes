@@ -6,7 +6,37 @@ import (
 	"net"
 
 	"k8s.io/klog"
+	utilnet "k8s.io/utils/net"
 )
+
+// This handles the "k8s.ovn.org/pod-networks" annotation on Pods, used to pass
+// information about networking from the master to the nodes. (The util.PodAnnotation
+// struct is also embedded in the cni.PodInterfaceInfo type that is passed from the
+// cniserver to the CNI shim.)
+//
+// The annotation looks like:
+//
+//   annotations:
+//     k8s.ovn.org/pod-networks: |
+//       {
+//         "default": {
+//           "ip_addresses": ["192.168.0.5/24"],
+//           "mac_address": "0a:58:fd:98:00:01",
+//           "gateway_ips": ["192.168.0.1"]
+//
+//           # for backward compatibility
+//           "ip_address": "192.168.0.5/24",
+//           "gateway_ip": "192.168.0.1"
+//         }
+//       }
+//
+// (With optional additional "routes" also indicated; in particular, if a pod has an
+// additional network attachment that claims the default route, then the "default" network
+// will have explicit routes to the cluster and service subnets.)
+//
+// The "ip_address" and "gateway_ip" fields are deprecated and will eventually go away.
+// (And they are not output when "ip_addresses" or "gateway_ips" contains multiple
+// values.)
 
 const (
 	// OvnPodAnnotationName is the constant string representing the POD annotation key
@@ -15,15 +45,17 @@ const (
 	OvnPodDefaultNetwork = "default"
 )
 
-// PodAnnotation describes the pod's assigned network details
+// PodAnnotation describes the assigned network details for a single pod network. (The
+// actual annotation may include the equivalent of multiple PodAnnotations.)
 type PodAnnotation struct {
-	// IP is the pod's assigned IP address and prefix
-	IP *net.IPNet
+	// IPs are the pod's assigned IP addresses/prefixes
+	IPs []*net.IPNet
 	// MAC is the pod's assigned MAC address
 	MAC net.HardwareAddr
-	// GW is the pod's gateway IP address
-	GW net.IP
-	// Routes are routes to add to the pod's network namespace
+	// Gateways are the pod's gateway IP addresses; note that there may be
+	// fewer Gateways than IPs.
+	Gateways []net.IP
+	// Routes are additional routes to add to the pod's network namespace
 	Routes []PodRoute
 }
 
@@ -35,15 +67,18 @@ type PodRoute struct {
 	NextHop net.IP
 }
 
-// Internal struct used to correctly marshal IPs to JSON
+// Internal struct used to marshal PodAnnotation to the pod annotation
 type podAnnotation struct {
-	IP     string     `json:"ip_address"`
-	MAC    string     `json:"mac_address"`
-	GW     string     `json:"gateway_ip"`
-	Routes []podRoute `json:"routes,omitempty"`
+	IPs      []string   `json:"ip_addresses"`
+	MAC      string     `json:"mac_address"`
+	Gateways []string   `json:"gateway_ips,omitempty"`
+	Routes   []podRoute `json:"routes,omitempty"`
+
+	IP      string `json:"ip_address,omitempty"`
+	Gateway string `json:"gateway_ip,omitempty"`
 }
 
-// Internal struct used to correctly marshal IPs to JSON
+// Internal struct used to marshal PodRoute to the pod annotation
 type podRoute struct {
 	Dest    string `json:"dest"`
 	NextHop string `json:"nextHop"`
@@ -52,15 +87,25 @@ type podRoute struct {
 // MarshalPodAnnotation returns a JSON-formatted annotation describing the pod's
 // network details
 func MarshalPodAnnotation(podInfo *PodAnnotation) (map[string]string, error) {
-	var gw string
-	if podInfo.GW != nil {
-		gw = podInfo.GW.String()
-	}
 	pa := podAnnotation{
-		IP:  podInfo.IP.String(),
 		MAC: podInfo.MAC.String(),
-		GW:  gw,
 	}
+
+	if len(podInfo.IPs) == 1 {
+		pa.IP = podInfo.IPs[0].String()
+		if len(podInfo.Gateways) == 1 {
+			pa.Gateway = podInfo.Gateways[0].String()
+		} else if len(podInfo.Gateways) > 1 {
+			return nil, fmt.Errorf("bad podNetwork data: single-stack network can only have a single gateway")
+		}
+	}
+	for _, ip := range podInfo.IPs {
+		pa.IPs = append(pa.IPs, ip.String())
+	}
+	for _, gw := range podInfo.Gateways {
+		pa.Gateways = append(pa.Gateways, gw.String())
+	}
+
 	for _, r := range podInfo.Routes {
 		if r.Dest.IP.IsUnspecified() {
 			return nil, fmt.Errorf("bad podNetwork data: default route %v should be specified as gateway", r)
@@ -88,7 +133,7 @@ func MarshalPodAnnotation(podInfo *PodAnnotation) (map[string]string, error) {
 	}, nil
 }
 
-// UnmarshalPodAnnotation returns a the unmarshalled pod annotation
+// UnmarshalPodAnnotation returns the default network info from pod.Annotations
 func UnmarshalPodAnnotation(annotations map[string]string) (*PodAnnotation, error) {
 	ovnAnnotation, ok := annotations[OvnPodAnnotationName]
 	if !ok {
@@ -104,24 +149,43 @@ func UnmarshalPodAnnotation(annotations map[string]string) (*PodAnnotation, erro
 	a := &tempA
 
 	podAnnotation := &PodAnnotation{}
-	// Minimal validation
-	ip, ipnet, err := net.ParseCIDR(a.IP)
-	if err != nil {
-		return nil, fmt.Errorf("failed to parse pod IP %q: %v", a.IP, err)
-	}
-	ipnet.IP = ip
-	podAnnotation.IP = ipnet
+	var err error
 
 	podAnnotation.MAC, err = net.ParseMAC(a.MAC)
 	if err != nil {
 		return nil, fmt.Errorf("failed to parse pod MAC %q: %v", a.MAC, err)
 	}
 
-	if a.GW != "" {
-		podAnnotation.GW = net.ParseIP(a.GW)
-		if podAnnotation.GW == nil {
-			return nil, fmt.Errorf("failed to parse pod gateway %q", a.GW)
+	if len(a.IPs) == 0 {
+		if a.IP == "" {
+			return nil, fmt.Errorf("bad annotation data (neither ip_address nor ip_addresses is set)")
 		}
+		a.IPs = append(a.IPs, a.IP)
+	} else if a.IP != "" && a.IP != a.IPs[0] {
+		return nil, fmt.Errorf("bad annotation data (ip_address and ip_addresses conflict)")
+	}
+	for _, ipstr := range a.IPs {
+		ip, ipnet, err := net.ParseCIDR(ipstr)
+		if err != nil {
+			return nil, fmt.Errorf("failed to parse pod IP %q: %v", ipstr, err)
+		}
+		ipnet.IP = ip
+		podAnnotation.IPs = append(podAnnotation.IPs, ipnet)
+	}
+
+	if len(a.Gateways) == 0 {
+		if a.Gateway != "" {
+			a.Gateways = append(a.Gateways, a.Gateway)
+		}
+	} else if a.Gateway != "" && a.Gateway != a.Gateways[0] {
+		return nil, fmt.Errorf("bad annotation data (gateway_ip and gateway_ips conflict)")
+	}
+	for _, gwstr := range a.Gateways {
+		gw := net.ParseIP(gwstr)
+		if err != nil {
+			return nil, fmt.Errorf("failed to parse pod gateway %q", gwstr)
+		}
+		podAnnotation.Gateways = append(podAnnotation.Gateways, gw)
 	}
 
 	for _, r := range a.Routes {
@@ -137,6 +201,8 @@ func UnmarshalPodAnnotation(annotations map[string]string) (*PodAnnotation, erro
 			route.NextHop = net.ParseIP(r.NextHop)
 			if route.NextHop == nil {
 				return nil, fmt.Errorf("failed to parse pod route next hop %q", r.NextHop)
+			} else if utilnet.IsIPv6(route.NextHop) != utilnet.IsIPv6CIDR(route.Dest) {
+				return nil, fmt.Errorf("pod route %s has next hop %s of different family", r.Dest, r.NextHop)
 			}
 		}
 		podAnnotation.Routes = append(podAnnotation.Routes, route)
