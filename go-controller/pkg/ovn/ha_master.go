@@ -10,7 +10,9 @@ import (
 
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/factory"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/metrics"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
+
 	kapi "k8s.io/api/core/v1"
 	v1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -197,12 +199,15 @@ func (hacontroller *HAMasterController) ConfigureAsActive(masterNodeName string)
 	}
 
 	// run the cluster controller to init the master
+	start := time.Now()
 	err := hacontroller.ovnController.StartClusterMaster(hacontroller.nodeName)
 	if err != nil {
 		return err
 	}
-
-	return hacontroller.ovnController.Run(hacontroller.stopChan)
+	err = hacontroller.ovnController.Run(hacontroller.stopChan)
+	end := time.Since(start)
+	metrics.MetricMasterReadyDuration.Set(end.Seconds())
+	return err
 }
 
 //updateOvnDbEndpoints Updates the ovnkube-db endpoints. Should be called

@@ -32,6 +32,18 @@ var metricPodCreationLatency = prometheus.NewHistogram(prometheus.HistogramOpts{
 	Buckets:   prometheus.ExponentialBuckets(.1, 2, 15),
 })
 
+// metricPodCreationLatency is the time between a pod being scheduled and the
+// ovn controller setting the network annotations.
+var metricOvnCliLatency = prometheus.NewHistogramVec(prometheus.HistogramOpts{
+	Namespace: MetricOvnkubeNamespace,
+	Subsystem: MetricOvnkubeSubsystemMaster,
+	Name:      "ovn_cli_latency_seconds",
+	Help:      "The latency of various OVN commands. Currently, ovn-nbctl and ovn-sbctl",
+	Buckets:   prometheus.ExponentialBuckets(.1, 2, 15)},
+	// labels
+	[]string{"command"},
+)
+
 var MetricMasterReadyDuration = prometheus.NewGauge(prometheus.GaugeOpts{
 	Namespace: MetricOvnkubeNamespace,
 	Subsystem: MetricOvnkubeSubsystemMaster,
@@ -68,6 +80,9 @@ func RegisterMasterMetrics() {
 				return float64(util.SkippedNbctlDaemonCounter)
 			}))
 		prometheus.MustRegister(MetricMasterReadyDuration)
+		prometheus.MustRegister(metricOvnCliLatency)
+		// this is to not to create circular import between metrics and util package
+		util.MetricOvnCliLatency = metricOvnCliLatency
 	})
 }
 

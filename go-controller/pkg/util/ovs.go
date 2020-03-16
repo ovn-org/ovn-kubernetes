@@ -15,6 +15,7 @@ import (
 	"unicode"
 
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
+	"github.com/prometheus/client_golang/prometheus"
 )
 
 const (
@@ -44,6 +45,10 @@ const (
 	nbdbCtlSock = "ovnnb_db.ctl"
 	sbdbCtlSock = "ovnsb_db.ctl"
 )
+
+// this metric is set only for the ovnkube in master mode since 99.9% of
+// all the ovn-nbctl/ovn-sbctl calls occur on the master
+var MetricOvnCliLatency *prometheus.HistogramVec
 
 func runningPlatform() (string, error) {
 	if runtime.GOOS == windowsOS {
@@ -343,7 +348,11 @@ func RunOVNNbctlUnix(args ...string) (string, string, error) {
 // RunOVNNbctlWithTimeout runs command via ovn-nbctl with a specific timeout
 func RunOVNNbctlWithTimeout(timeout int, args ...string) (string, string, error) {
 	cmdArgs, envVars := getNbctlArgsAndEnv(timeout, args...)
+	start := time.Now()
 	stdout, stderr, err := runOVNretry(runner.nbctlPath, envVars, cmdArgs...)
+	if MetricOvnCliLatency != nil {
+		MetricOvnCliLatency.WithLabelValues("ovn-nbctl").Observe(time.Since(start).Seconds())
+	}
 	return strings.Trim(strings.TrimSpace(stdout.String()), "\""), stderr.String(), err
 }
 
@@ -381,7 +390,11 @@ func RunOVNSbctlWithTimeout(timeout int, args ...string) (string, string,
 
 	cmdArgs = append(cmdArgs, fmt.Sprintf("--timeout=%d", timeout))
 	cmdArgs = append(cmdArgs, args...)
+	start := time.Now()
 	stdout, stderr, err := runOVNretry(runner.sbctlPath, nil, cmdArgs...)
+	if MetricOvnCliLatency != nil {
+		MetricOvnCliLatency.WithLabelValues("ovn-sbctl").Observe(time.Since(start).Seconds())
+	}
 	return strings.Trim(strings.TrimSpace(stdout.String()), "\""), stderr.String(), err
 }
 
