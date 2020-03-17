@@ -901,25 +901,23 @@ func (oc *Controller) syncNodes(nodes []interface{}) {
 		subnetAttr = "subnet"
 	}
 
-	//ChassisMap is a map of hostname (nodeName) to chassis name
-	chassisMap := make(map[string]string)
-
 	chassisData, stderr, err := util.RunOVNSbctl("--data=bare", "--no-heading",
-		"--columns=name,hostname", "list", "Chassis")
+		"--columns=name,hostname", "--format=json", "list", "Chassis")
 	if err != nil {
 		klog.Errorf("Failed to get chassis list: stderr: %q, error: %v",
 			stderr, err)
 		return
 	}
-	for _, chassis := range strings.Split(chassisData, "\n\n") {
-		items := strings.Split(chassis, "\n")
-		if len(items) != 2 || len(items[1]) == 0 {
-			continue
-		}
-		if _, ok := foundNodes[items[1]]; !ok {
-			//node still exists, don't add it to the chassis map
-			chassisMap[items[1]] = items[0]
-		}
+
+	chassisMap, err := oc.unmarshalChassisDataIntoMap([]byte(chassisData))
+	if err != nil {
+		klog.Errorf("Failed to unmarshal chassis data into chassis map, error: %v", err)
+		return
+	}
+
+	//delete existing nodes from the chassis map.
+	for nodeName, _ := range foundNodes {
+		delete(chassisMap, nodeName)
 	}
 
 	nodeSwitches, stderr, err := util.RunOVNNbctl("--data=bare", "--no-heading",
@@ -995,4 +993,52 @@ func (oc *Controller) syncNodes(nodes []interface{}) {
 			}
 		}
 	}
+}
+
+type chassisData struct {
+	nodeName    string
+	chassisName string
+}
+
+func (oc *Controller) unmarshalChassisDataIntoMap(chData []byte) (map[string]string, error) {
+	//map of node name to chassis name
+	chassisMap := make(map[string]string)
+
+	var mapUnmarshal map[string][]interface{}
+	json.Unmarshal(chData, &mapUnmarshal)
+
+	if data, ok := mapUnmarshal["data"]; !ok {
+		klog.Errorf("Got an error while unmarshaling, no data present")
+		return chassisMap, fmt.Errorf("Error while unmarshaling, no data present")
+	} else {
+		buf, _ := json.Marshal(data)
+		var chassisColl []interface{}
+		if err := json.Unmarshal(buf, &chassisColl); err != nil {
+			klog.Errorf("Got an error while unmarshaling: %s\n", err)
+			return chassisMap, err
+		} else {
+			for _, chassis := range chassisColl {
+				c, _ := json.Marshal(chassis)
+				var cd chassisData
+				if err = json.Unmarshal(c, &cd); err != nil {
+					klog.Errorf("Cannot unmarshal individual chassis: %s, incorrect format", err)
+					continue
+				}
+				chassisMap[cd.nodeName] = cd.chassisName
+			}
+		}
+	}
+	return chassisMap, nil
+}
+
+func (c *chassisData) UnmarshalJSON(buf []byte) error {
+	tmp := []interface{}{&c.chassisName, &c.nodeName}
+	wantLen := len(tmp)
+	if err := json.Unmarshal(buf, &tmp); err != nil {
+		return err
+	}
+	if g, e := len(tmp), wantLen; g != e {
+		return fmt.Errorf("wrong number of fields in Notification: %d != %d", g, e)
+	}
+	return nil
 }
