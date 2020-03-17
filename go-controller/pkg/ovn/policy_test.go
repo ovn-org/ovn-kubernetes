@@ -303,7 +303,7 @@ var _ = Describe("OVN NetworkPolicy Operations", func() {
 		app.Flags = config.Flags
 
 		fExec = ovntest.NewLooseCompareFakeExec()
-		fakeOvn = NewFakeOVN(fExec, true)
+		fakeOvn = NewFakeOVN(fExec)
 	})
 
 	AfterEach(func() {

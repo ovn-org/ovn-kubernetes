@@ -83,7 +83,7 @@ var _ = Describe("OVN Namespace Operations", func() {
 		app.Flags = config.Flags
 
 		tExec = ovntest.NewFakeExec()
-		fakeOvn = NewFakeOVN(tExec, true)
+		fakeOvn = NewFakeOVN(tExec)
 	})
 
 	AfterEach(func() {

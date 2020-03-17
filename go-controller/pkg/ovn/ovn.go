@@ -108,9 +108,6 @@ type Controller struct {
 	// Per namespace multicast enabled?
 	multicastEnabled map[string]bool
 
-	// Supports port_group?
-	portGroupSupport bool
-
 	// Supports multicast?
 	multicastSupport bool
 

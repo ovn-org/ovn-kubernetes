@@ -11,8 +11,7 @@ import (
 	"k8s.io/klog"
 )
 
-func (oc *Controller) syncNetworkPoliciesPortGroup(
-	networkPolicies []interface{}) {
+func (oc *Controller) syncNetworkPolicies(networkPolicies []interface{}) {
 	expectedPolicies := make(map[string]map[string]bool)
 	for _, npInterface := range networkPolicies {
 		policy, ok := npInterface.(*knet.NetworkPolicy)
@@ -716,9 +715,9 @@ func hasAnyLabelSelector(peers []knet.NetworkPolicyPeer) bool {
 	return false
 }
 
-// addNetworkPolicyPortGroup creates and applies OVN ACLs to pod logical switch
+// addNetworkPolicy creates and applies OVN ACLs to pod logical switch
 // ports from Kubernetes NetworkPolicy objects using OVN Port Groups
-func (oc *Controller) addNetworkPolicyPortGroup(policy *knet.NetworkPolicy) {
+func (oc *Controller) addNetworkPolicy(policy *knet.NetworkPolicy) {
 	klog.Infof("Adding network policy %s in namespace %s", policy.Name,
 		policy.Namespace)
 
@@ -877,8 +876,7 @@ func (oc *Controller) addNetworkPolicyPortGroup(policy *knet.NetworkPolicy) {
 	oc.handleLocalPodSelector(policy, np)
 }
 
-func (oc *Controller) deleteNetworkPolicyPortGroup(
-	policy *knet.NetworkPolicy) {
+func (oc *Controller) deleteNetworkPolicy(policy *knet.NetworkPolicy) {
 	klog.Infof("Deleting network policy %s in namespace %s",
 		policy.Name, policy.Namespace)
 

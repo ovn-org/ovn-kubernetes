@@ -226,14 +226,6 @@ func (oc *Controller) handlePeerPodSelectorDeleteACLRules(obj interface{}, gress
 	delete(oc.lspIngressDenyCache, logicalPort)
 	delete(oc.lspEgressDenyCache, logicalPort)
 	oc.lspMutex.Unlock()
-
-	if !oc.portGroupSupport {
-		if gress.policyType == knet.PolicyTypeIngress {
-			deleteACLDenyOld(pod.Namespace, pod.Spec.NodeName, logicalPort, "Ingress")
-		} else {
-			deleteACLDenyOld(pod.Namespace, pod.Spec.NodeName, logicalPort, "Egress")
-		}
-	}
 }
 
 // handlePeerPodSelectorDelete removes the IP address of a pod that no longer
@@ -395,8 +387,6 @@ func (oc *Controller) handlePeerNamespaceSelector(
 const (
 	toLport   = "to-lport"
 	fromLport = "from-lport"
-	addACL    = "add"
-	deleteACL = "delete"
 	noneMatch = "None"
 	// Default deny acl rule priority
 	defaultDenyPriority = "1000"
@@ -420,34 +410,6 @@ func addAllowACLFromNode(logicalSwitch string, mgmtPortIP net.IP) error {
 	}
 
 	return nil
-}
-
-func (oc *Controller) syncNetworkPolicies(networkPolicies []interface{}) {
-	if oc.portGroupSupport {
-		oc.syncNetworkPoliciesPortGroup(networkPolicies)
-	} else {
-		oc.syncNetworkPoliciesOld(networkPolicies)
-	}
-}
-
-// AddNetworkPolicy creates and applies OVN ACLs to pod logical switch ports
-// from Kubernetes NetworkPolicy objects
-func (oc *Controller) addNetworkPolicy(policy *knet.NetworkPolicy) {
-	if oc.portGroupSupport {
-		oc.addNetworkPolicyPortGroup(policy)
-	} else {
-		oc.addNetworkPolicyOld(policy)
-	}
-}
-
-func (oc *Controller) deleteNetworkPolicy(
-	policy *knet.NetworkPolicy) {
-	if oc.portGroupSupport {
-		oc.deleteNetworkPolicyPortGroup(policy)
-	} else {
-		oc.deleteNetworkPolicyOld(policy)
-	}
-
 }
 
 func (oc *Controller) shutdownHandlers(np *namespacePolicy) {

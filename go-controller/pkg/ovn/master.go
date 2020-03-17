@@ -99,20 +99,13 @@ func (oc *Controller) StartClusterMaster(masterNodeName string) error {
 		}
 	}
 
-	if _, _, err := util.RunOVNNbctl("--columns=_uuid", "list", "port_group"); err == nil {
-		oc.portGroupSupport = true
+	if _, _, err := util.RunOVNNbctl("--columns=_uuid", "list", "port_group"); err != nil {
+		klog.Fatal("ovn version too old; does not support port groups")
 	}
 
 	if oc.multicastSupport {
-		// Multicast support requires portGroupSupport
-		if oc.portGroupSupport {
-			if _, _, err := util.RunOVNSbctl("--columns=_uuid", "list", "IGMP_Group"); err != nil {
-				klog.Warningf("Multicast support enabled, however version of OVN in use does not support IGMP Group. " +
-					"Disabling Multicast Support")
-				oc.multicastSupport = false
-			}
-		} else {
-			klog.Warningf("Multicast support enabled, however version of OVN in use does not support Port Group. " +
+		if _, _, err := util.RunOVNSbctl("--columns=_uuid", "list", "IGMP_Group"); err != nil {
+			klog.Warningf("Multicast support enabled, however version of OVN in use does not support IGMP Group. " +
 				"Disabling Multicast Support")
 			oc.multicastSupport = false
 		}

@@ -56,54 +56,6 @@ func (oc *Controller) syncPods(pods []interface{}) {
 					"stdout: %q, stderr: %q err: %v",
 					out, stderr, err)
 			}
-			if !oc.portGroupSupport {
-				oc.deletePodAcls(existingPort)
-			}
-		}
-	}
-}
-
-func (oc *Controller) deletePodAcls(logicalPort string) {
-	// delete the ACL rules on OVN that corresponding pod has been deleted
-	uuids, stderr, err := util.RunOVNNbctl("--data=bare", "--no-heading",
-		"--columns=_uuid", "find", "ACL",
-		fmt.Sprintf("external_ids:logical_port=%s", logicalPort))
-	if err != nil {
-		klog.Errorf("Error in getting list of acls "+
-			"stdout: %q, stderr: %q, error: %v", uuids, stderr, err)
-		return
-	}
-
-	if uuids == "" {
-		klog.V(5).Infof("deletePodAcls: returning because find " +
-			"returned no ACLs")
-		return
-	}
-
-	uuidSlice := strings.Fields(uuids)
-	for _, uuid := range uuidSlice {
-		// Get logical switch
-		out, stderr, err := util.RunOVNNbctl("--data=bare",
-			"--no-heading", "--columns=_uuid", "find", "logical_switch",
-			fmt.Sprintf("acls{>=}%s", uuid))
-		if err != nil {
-			klog.Errorf("find failed to get the logical_switch of acl "+
-				"uuid=%s, stderr: %q, (%v)", uuid, stderr, err)
-			continue
-		}
-
-		if out == "" {
-			continue
-		}
-		logicalSwitch := out
-
-		_, stderr, err = util.RunOVNNbctl("--if-exists", "remove",
-			"logical_switch", logicalSwitch, "acls", uuid)
-		if err != nil {
-			klog.Errorf("failed to delete the allow-from rule %s for"+
-				" logical_switch=%s, logical_port=%s, stderr: %q, (%v)",
-				uuid, logicalSwitch, logicalPort, stderr, err)
-			continue
 		}
 	}
 }
