@@ -25,17 +25,12 @@ jobs:
     - &step_environment
       name: Set up environment
       run: |
-        export GOPATH=$HOME/go
+        export GOPATH=$(go env GOPATH)
         echo "::set-env name=GOPATH::$GOPATH"
         export PATH=$GOPATH/bin:$PATH
         echo "::add-path::$GOPATH/bin"
-        mkdir -p $GOPATH/src/github.com/ovn-org
-        mv $GITHUB_WORKSPACE $GOPATH/src/github.com/ovn-org/ovn-kubernetes
-        echo "::set-env name=WORKDIR::$GOPATH/src/github.com/ovn-org/ovn-kubernetes"
-        mkdir -p $GITHUB_WORKSPACE
         
     - name: Build
-      working-directory: ${{ env.WORKDIR }}
       run: |
         set -x
         pushd go-controller
@@ -70,7 +65,6 @@ jobs:
 
     - &step_k8s_cache_miss
       name: Build and install Kubernetes
-      working-directory: ${{ env.WORKDIR }}
       if: steps.cache-k8s.outputs.cache-hit != 'true'
       run: |
         set -x
@@ -95,7 +89,6 @@ jobs:
 
     - &step_kind_setup
       name: kind setup
-      working-directory: ${{ env.WORKDIR }}
       run: |
         set -x
 
@@ -114,7 +107,6 @@ jobs:
         popd
 
     - name: e2e-kind-ovn-shard-n
-      working-directory: ${{ env.WORKDIR }}
       run: |
         pushd $GOPATH/src/k8s.io/kubernetes/
         export KUBERNETES_CONFORMANCE_TEST=y
@@ -131,7 +123,6 @@ jobs:
       run: |
         mkdir -p /tmp/kind/logs 
         kind export logs --name ${KIND_CLUSTER_NAME} /tmp/kind/logs
-      working-directory: ${{ env.WORKDIR }}
 
     - &step_upload_logs
       name: Upload logs
@@ -157,7 +148,6 @@ jobs:
     - *step_kind_setup
 
     - name: e2e-kind-ovn-shard-np
-      working-directory: ${{ env.WORKDIR }}
       run: |
         pushd $GOPATH/src/k8s.io/kubernetes/
         export KUBERNETES_CONFORMANCE_TEST=y
@@ -186,7 +176,6 @@ jobs:
     - *step_kind_setup
 
     - name: e2e-kind-ovn-shard-s
-      working-directory: ${{ env.WORKDIR }}
       run: |
         pushd $GOPATH/src/k8s.io/kubernetes/
         export KUBERNETES_CONFORMANCE_TEST=y
@@ -214,7 +203,6 @@ jobs:
     - *step_kind_setup
 
     - name: e2e-kind-ovn-shard-other
-      working-directory: ${{ env.WORKDIR }}
       run: |
         pushd $GOPATH/src/k8s.io/kubernetes/
         export KUBERNETES_CONFORMANCE_TEST=y
