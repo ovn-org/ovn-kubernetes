@@ -36,6 +36,8 @@ jobs:
         
     - name: Build
       working-directory: ${{ env.WORKDIR }}
+      env:
+        COVERALLS: 1
       run: |
         set -x
         pushd go-controller
@@ -49,7 +51,21 @@ jobs:
         pushd dist/images
            if [ -n "$(git diff --stat origin/master.. | grep dist/images/Dockerfile)" ]; then make all; fi
         popd
-  
+        
+    - name: Send coverage
+      working-directory: ${{ env.WORKDIR }}
+      env:
+        COVERALLS_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      run: |
+        set -x
+        pushd go-controller
+           GO111MODULE=off go get golang.org/x/tools/cmd/cover
+           GO111MODULE=off go get github.com/modocache/gover
+           GO111MODULE=off go get github.com/mattn/goveralls
+           $(go env GOPATH)/bin/gover
+           $(go env GOPATH)/bin/goveralls -service=github -coverprofile=gover.coverprofile
+        popd
+        
   k8s:
     name: Build k8s
     runs-on: ubuntu-latest

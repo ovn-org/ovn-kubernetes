@@ -1,5 +1,6 @@
 #!/bin/bash
 set -e
+set -x
 
 source "$(dirname "${BASH_SOURCE}")/init.sh"
 
@@ -9,19 +10,34 @@ setup_env
 cd "${OVN_KUBE_ROOT}"
 
 PKGS="${PKGS:-./cmd/... ./pkg/...}"
+TEST_PKGS="$(go list -mod vendor ${PKGS} | xargs)"
 
+function testrun {
+    local idx="${1}"
+    local pkg="${2}"
+    local otherargs="${@:3} "
+    local args=
+    if [ ! -z "${COVERALLS:-}" ]; then
+        args="-covermode set -coverprofile ${idx}.coverprofile "
+    fi
+    args="${args}${otherargs}${pkg}"
 
-for pkg in $(go list -mod vendor ${PKGS}); do
+    go test -mod vendor ${args}
+}
+
+i=0
+for pkg in ${TEST_PKGS}; do
     # This package requires root
     if [[ "$USER" != root && "$pkg" == github.com/ovn-org/ovn-kubernetes/go-controller/pkg/node ]]; then
         testfile=$(mktemp --tmpdir ovn-test.XXXXXXXX)
         echo "sudo required for ${pkg}, compiling test to ${testfile}"
-        go test -mod vendor -c -o "${testfile}" "${pkg}"
+        testrun "${i}" "${pkg}" -c -o "${testfile}"
         echo sudo "${testfile}"
         sudo "${testfile}"
     else
-        go test -mod vendor "${pkg}"
+        testrun "${i}" "${pkg}"
     fi
+    i=$((i+1))
 done
 
 rm -f /tmp/ovn-test.* || true
