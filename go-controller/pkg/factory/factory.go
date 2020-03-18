@@ -411,7 +411,7 @@ const (
 	resyncInterval        = 12 * time.Hour
 	handlerAlive   uint32 = 0
 	handlerDead    uint32 = 1
-	numEventQueues int    = 10
+	numEventQueues int    = 15
 )
 
 var (
@@ -436,7 +436,7 @@ func NewWatchFactory(c kubernetes.Interface, stopChan chan struct{}) (*WatchFact
 	}
 	var err error
 	// Create shared informers we know we'll use
-	wf.informers[podType], err = newInformer(podType, wf.iFactory.Core().V1().Pods().Informer())
+	wf.informers[podType], err = newQueuedInformer(podType, wf.iFactory.Core().V1().Pods().Informer(), stopChan)
 	if err != nil {
 		return nil, err
 	}
