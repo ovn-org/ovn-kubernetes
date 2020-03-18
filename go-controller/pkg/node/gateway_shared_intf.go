@@ -8,7 +8,6 @@ import (
 
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/factory"
-	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
 
 	kapi "k8s.io/api/core/v1"
@@ -302,18 +301,7 @@ func initSharedGateway(nodeName string, subnet, gwNextHop, gwIntf string,
 		return nil, nil, fmt.Errorf("failed to set up shared interface gateway: %v", err)
 	}
 
-	l3GatewayConfig := map[string]string{
-		ovn.OvnNodeGatewayMode:       string(config.Gateway.Mode),
-		ovn.OvnNodeGatewayVlanID:     fmt.Sprintf("%d", config.Gateway.VLANID),
-		ovn.OvnNodeGatewayIfaceID:    ifaceID,
-		ovn.OvnNodeGatewayMacAddress: macAddress,
-		ovn.OvnNodeGatewayIP:         ipAddress,
-		ovn.OvnNodeGatewayNextHop:    gwNextHop,
-		ovn.OvnNodePortEnable:        fmt.Sprintf("%t", config.Gateway.NodeportEnable),
-	}
-	annotations := map[string]map[string]string{
-		ovn.OvnDefaultNetworkGateway: l3GatewayConfig,
-	}
+	annotations := util.CreateL3GatewayConfig(ifaceID, macAddress, ipAddress, gwNextHop)
 
 	return annotations, func() error {
 		// Program cluster.GatewayIntf to let non-pod traffic to go to host

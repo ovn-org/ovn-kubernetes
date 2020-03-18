@@ -17,7 +17,6 @@ import (
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/factory"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/kube"
-	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn"
 	ovntest "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/testing"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
 
@@ -159,21 +158,21 @@ cookie=0x0, duration=8366.597s, table=1, n_packets=10641, n_bytes=10370087, prio
 		Expect(err).NotTo(HaveOccurred())
 
 		l3GatewayConfig := map[string]string{
-			ovn.OvnNodeGatewayMode:       string(config.Gateway.Mode),
-			ovn.OvnNodeGatewayVlanID:     string(gatewayVLANID),
-			ovn.OvnNodeGatewayIfaceID:    gwRouter,
-			ovn.OvnNodeGatewayMacAddress: lrpMAC,
-			ovn.OvnNodeGatewayIP:         lrpIP,
-			//ovn.OvnNodeGatewayNextHop:    localnetGatewayNextHop,
+			util.OvnNodeGatewayMode:       string(config.Gateway.Mode),
+			util.OvnNodeGatewayVlanID:     string(gatewayVLANID),
+			util.OvnNodeGatewayIfaceID:    gwRouter,
+			util.OvnNodeGatewayMacAddress: lrpMAC,
+			util.OvnNodeGatewayIP:         lrpIP,
+			//util.OvnNodeGatewayNextHop:    localnetGatewayNextHop,
 		}
-		byteArr, err := json.Marshal(map[string]map[string]string{ovn.OvnDefaultNetworkGateway: l3GatewayConfig})
+		byteArr, err := json.Marshal(map[string]map[string]string{util.OvnDefaultNetworkGateway: l3GatewayConfig})
 		Expect(err).NotTo(HaveOccurred())
 		existingNode := v1.Node{ObjectMeta: metav1.ObjectMeta{
 			Name: nodeName,
 			Annotations: map[string]string{
-				ovn.OvnNodeSubnets:         nodeSubnet,
-				ovn.OvnNodeL3GatewayConfig: string(byteArr),
-				ovn.OvnNodeChassisID:       systemID,
+				util.OvnNodeSubnets:         nodeSubnet,
+				util.OvnNodeL3GatewayConfig: string(byteArr),
+				util.OvnNodeChassisID:       systemID,
 			},
 		}}
 		fakeClient := fake.NewSimpleClientset(&v1.NodeList{
@@ -331,21 +330,21 @@ var _ = Describe("Gateway Init Operations", func() {
 			Expect(err).NotTo(HaveOccurred())
 
 			l3GatewayConfig := map[string]string{
-				ovn.OvnNodeGatewayMode:       string(config.Gateway.Mode),
-				ovn.OvnNodeGatewayVlanID:     string(0),
-				ovn.OvnNodeGatewayIfaceID:    gwRouter,
-				ovn.OvnNodeGatewayMacAddress: lrpMAC,
-				ovn.OvnNodeGatewayIP:         lrpIP,
-				//ovn.OvnNodeGatewayNextHop:    localnetGatewayNextHop,
+				util.OvnNodeGatewayMode:       string(config.Gateway.Mode),
+				util.OvnNodeGatewayVlanID:     string(0),
+				util.OvnNodeGatewayIfaceID:    gwRouter,
+				util.OvnNodeGatewayMacAddress: lrpMAC,
+				util.OvnNodeGatewayIP:         lrpIP,
+				//util.OvnNodeGatewayNextHop:    localnetGatewayNextHop,
 			}
-			byteArr, err := json.Marshal(map[string]map[string]string{ovn.OvnDefaultNetworkGateway: l3GatewayConfig})
+			byteArr, err := json.Marshal(map[string]map[string]string{util.OvnDefaultNetworkGateway: l3GatewayConfig})
 			Expect(err).NotTo(HaveOccurred())
 			existingNode := v1.Node{ObjectMeta: metav1.ObjectMeta{
 				Name: nodeName,
 				Annotations: map[string]string{
-					ovn.OvnNodeSubnets:         nodeSubnet,
-					ovn.OvnNodeL3GatewayConfig: string(byteArr),
-					ovn.OvnNodeChassisID:       systemID,
+					util.OvnNodeSubnets:         nodeSubnet,
+					util.OvnNodeL3GatewayConfig: string(byteArr),
+					util.OvnNodeChassisID:       systemID,
 				},
 			}}
 			fakeClient := fake.NewSimpleClientset(&v1.NodeList{

@@ -12,7 +12,6 @@ import (
 	"github.com/coreos/go-iptables/iptables"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/factory"
-	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
 	"k8s.io/klog"
 
@@ -184,18 +183,7 @@ func initLocalnetGateway(nodeName string,
 		return nil, err
 	}
 
-	l3GatewayConfig := map[string]string{
-		ovn.OvnNodeGatewayMode:       string(config.Gateway.Mode),
-		ovn.OvnNodeGatewayVlanID:     fmt.Sprintf("%d", config.Gateway.VLANID),
-		ovn.OvnNodeGatewayIfaceID:    ifaceID,
-		ovn.OvnNodeGatewayMacAddress: macAddress,
-		ovn.OvnNodeGatewayIP:         localnetGatewayIP(),
-		ovn.OvnNodeGatewayNextHop:    localnetGatewayNextHop(),
-		ovn.OvnNodePortEnable:        fmt.Sprintf("%t", config.Gateway.NodeportEnable),
-	}
-	annotations := map[string]map[string]string{
-		ovn.OvnDefaultNetworkGateway: l3GatewayConfig,
-	}
+	annotations := util.CreateL3GatewayConfig(ifaceID, macAddress, localnetGatewayIP(), localnetGatewayNextHop())
 
 	if config.IPv6Mode {
 		// TODO - IPv6 hack ... for some reason neighbor discovery isn't working here, so hard code a

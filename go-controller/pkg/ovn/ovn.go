@@ -504,14 +504,14 @@ func (oc *Controller) WatchNamespaces() error {
 }
 
 func (oc *Controller) syncNodeGateway(node *kapi.Node, subnet *net.IPNet) error {
-	l3GatewayConfig, err := UnmarshalNodeL3GatewayAnnotation(node)
+	l3GatewayConfig, err := util.UnmarshalNodeL3GatewayAnnotation(node)
 	if err != nil {
 		return err
 	}
 	if subnet == nil {
-		subnet, _ = parseNodeHostSubnet(node)
+		subnet, _ = util.ParseNodeHostSubnetAnnotation(node)
 	}
-	if l3GatewayConfig[OvnNodeGatewayMode] == string(config.GatewayModeDisabled) {
+	if l3GatewayConfig[util.OvnNodeGatewayMode] == string(config.GatewayModeDisabled) {
 		if err := util.GatewayCleanup(node.Name, subnet); err != nil {
 			return fmt.Errorf("error cleaning up gateway for node %s: %v", node.Name, err)
 		}
@@ -602,8 +602,8 @@ func (oc *Controller) WatchNodes() error {
 			klog.V(5).Infof("Delete event for Node %q. Removing the node from "+
 				"various caches", node.Name)
 
-			nodeSubnet, _ := parseNodeHostSubnet(node)
-			joinSubnet, _ := parseNodeJoinSubnet(node)
+			nodeSubnet, _ := util.ParseNodeHostSubnetAnnotation(node)
+			joinSubnet, _ := util.ParseNodeJoinSubnetAnnotation(node)
 			err := oc.deleteNode(node.Name, nodeSubnet, joinSubnet)
 			if err != nil {
 				klog.Error(err)
@@ -723,8 +723,8 @@ func (oc *Controller) removeServiceEndpoints(lb, vip string) {
 
 // gatewayChanged() compares old annotations to new and returns true if something has changed.
 func gatewayChanged(oldNode, newNode *kapi.Node) bool {
-	oldL3GatewayConfig, _ := UnmarshalNodeL3GatewayAnnotation(oldNode)
-	l3GatewayConfig, _ := UnmarshalNodeL3GatewayAnnotation(newNode)
+	oldL3GatewayConfig, _ := util.UnmarshalNodeL3GatewayAnnotation(oldNode)
+	l3GatewayConfig, _ := util.UnmarshalNodeL3GatewayAnnotation(newNode)
 
 	if oldL3GatewayConfig == nil && l3GatewayConfig == nil {
 		return false
@@ -735,8 +735,8 @@ func gatewayChanged(oldNode, newNode *kapi.Node) bool {
 
 // macAddressChanged() compares old annotations to new and returns true if something has changed.
 func macAddressChanged(oldNode, node *kapi.Node) bool {
-	oldMacAddress := oldNode.Annotations[OvnNodeManagementPortMacAddress]
-	macAddress := node.Annotations[OvnNodeManagementPortMacAddress]
+	oldMacAddress := oldNode.Annotations[util.OvnNodeManagementPortMacAddress]
+	macAddress := node.Annotations[util.OvnNodeManagementPortMacAddress]
 	return oldMacAddress != macAddress
 }
 

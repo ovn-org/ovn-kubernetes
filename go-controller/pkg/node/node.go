@@ -1,7 +1,6 @@
 package node
 
 import (
-	"encoding/json"
 	"fmt"
 	"io/ioutil"
 	"net"
@@ -18,7 +17,6 @@ import (
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/factory"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/kube"
-	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
 
 	kapi "k8s.io/api/core/v1"
@@ -148,28 +146,12 @@ func isOVNControllerReady(name string) (bool, error) {
 	return true, nil
 }
 
-func getNodeHostSubnetAnnotation(node *kapi.Node) (string, error) {
-	subnet, ok := node.Annotations[ovn.OvnNodeSubnets]
-	if ok {
-		nodeSubnets := make(map[string]string)
-		if err := json.Unmarshal([]byte(subnet), &nodeSubnets); err != nil {
-			return "", fmt.Errorf("error parsing node-subnets annotation: %v", err)
-		}
-		subnet, ok = nodeSubnets["default"]
-	}
-	if !ok {
-		return "", fmt.Errorf("node %q has no subnet annotation", node.Name)
-	}
-	return subnet, nil
-}
-
 // Start learns the subnet assigned to it by the master controller
 // and calls the SetupNode script which establishes the logical switch
 func (n *OvnNode) Start() error {
 	var err error
 	var node *kapi.Node
 	var subnet *net.IPNet
-	var cidr string
 
 	// Setting debug log level during node bring up to expose bring up process.
 	// Log level is returned to configured value when bring up is complete.
@@ -210,7 +192,7 @@ func (n *OvnNode) Start() error {
 			klog.Infof("waiting to retrieve node %s: %v", n.name, err)
 			return false, nil
 		}
-		cidr, err = getNodeHostSubnetAnnotation(node)
+		subnet, err = util.ParseNodeHostSubnetAnnotation(node)
 		if err != nil {
 			klog.Infof("waiting for node %s to start, no annotation found on node for subnet: %v", n.name, err)
 			return false, nil
@@ -219,11 +201,6 @@ func (n *OvnNode) Start() error {
 	})
 	if err != nil {
 		return fmt.Errorf("timed out waiting for node's: %q logical switch: %v", n.name, err)
-	}
-
-	_, subnet, err = net.ParseCIDR(cidr)
-	if err != nil {
-		return fmt.Errorf("invalid hostsubnet found for node %s: %v", n.name, err)
 	}
 
 	klog.Infof("Node %s ready for ovn initialization with subnet %s", n.name, subnet.String())

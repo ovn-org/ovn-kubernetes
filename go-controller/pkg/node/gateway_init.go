@@ -10,7 +10,6 @@ import (
 
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/kube"
-	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
 )
 
@@ -122,21 +121,17 @@ func (n *OvnNode) initGateway(subnet string, nodeAnnotator kube.Annotator,
 		annotations, prFn, err = initSharedGateway(n.name, subnet, gatewayNextHop, gatewayIntf,
 			n.watchFactory)
 	case config.GatewayModeDisabled:
-		annotations = map[string]map[string]string{
-			ovn.OvnDefaultNetworkGateway: {
-				ovn.OvnNodeGatewayMode: string(config.GatewayModeDisabled),
-			},
-		}
+		annotations = util.CreateDisabledL3GatewayConfig()
 	}
 	if err != nil {
 		return err
 	}
 
-	if err := nodeAnnotator.Set(ovn.OvnNodeL3GatewayConfig, annotations); err != nil {
+	if err := nodeAnnotator.Set(util.OvnNodeL3GatewayConfig, annotations); err != nil {
 		return err
 	}
 	if systemID != "" {
-		if err := nodeAnnotator.Set(ovn.OvnNodeChassisID, systemID); err != nil {
+		if err := nodeAnnotator.Set(util.OvnNodeChassisID, systemID); err != nil {
 			return err
 		}
 	}
