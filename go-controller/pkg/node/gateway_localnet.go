@@ -14,6 +14,7 @@ import (
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/factory"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
+	"github.com/vishvananda/netlink"
 	"k8s.io/klog"
 
 	kapi "k8s.io/api/core/v1"
@@ -155,10 +156,9 @@ func initLocalnetGateway(nodeName string,
 	if err != nil {
 		return nil, fmt.Errorf("failed to set up shared interface gateway: %v", err)
 	}
-
-	_, _, err = util.RunIP("link", "set", localnetBridgeName, "up")
+	_, err = util.LinkSetUp(localnetBridgeName)
 	if err != nil {
-		return nil, fmt.Errorf("failed to up %s (%v)", localnetBridgeName, err)
+		return nil, err
 	}
 
 	// Create a localnet bridge nexthop
@@ -172,25 +172,15 @@ func initLocalnetGateway(nodeName string,
 		return nil, fmt.Errorf("Failed to create localnet bridge next hop %s"+
 			", stderr:%s (%v)", localnetBridgeNextHop, stderr, err)
 	}
-	_, _, err = util.RunIP("link", "set", localnetBridgeNextHop, "up")
+	link, err := util.LinkSetUp(localnetBridgeNextHop)
 	if err != nil {
-		return nil, fmt.Errorf("failed to up %s (%v)", localnetBridgeNextHop, err)
+		return nil, err
 	}
 
-	// Flush IPv4 address of localnetBridgeNextHop.
-	_, _, err = util.RunIP("addr", "flush", "dev", localnetBridgeNextHop)
+	// Flush IPv4 address of localnetBridgeNextHop and set with an IP address.
+	err = util.LinkAddrAdd(link, localnetGatewayNextHopSubnet())
 	if err != nil {
-		return nil, fmt.Errorf("failed to flush ip address of %s (%v)",
-			localnetBridgeNextHop, err)
-	}
-
-	// Set localnetBridgeNextHop with an IP address.
-	_, _, err = util.RunIP("addr", "add",
-		localnetGatewayNextHopSubnet(),
-		"dev", localnetBridgeNextHop)
-	if err != nil {
-		return nil, fmt.Errorf("failed to assign ip address to %s (%v)",
-			localnetBridgeNextHop, err)
+		return nil, err
 	}
 
 	l3GatewayConfig := map[string]string{
@@ -209,10 +199,9 @@ func initLocalnetGateway(nodeName string,
 	if config.IPv6Mode {
 		// TODO - IPv6 hack ... for some reason neighbor discovery isn't working here, so hard code a
 		// MAC binding for the gateway IP address for now - need to debug this further
-		_, _, _ = util.RunIP("-6", "neigh", "del", "fd99::2", "dev", "br-nexthop")
-		stdout, stderr, err := util.RunIP("-6", "neigh", "add", "fd99::2", "dev", "br-nexthop", "lladdr", macAddress)
+		err = util.LinkNeighAdd(link, "fd99::2", macAddress, netlink.FAMILY_V6)
 		if err == nil {
-			klog.Infof("Added MAC binding for fd99::2 on br-nexthop, stdout: '%s', stderr: '%s'", stdout, stderr)
+			klog.Infof("Added MAC binding for fd99::2 on br-nexthop")
 		} else {
 			klog.Errorf("Error in adding MAC binding for fd99::2 on br-nexthop: %v", err)
 		}

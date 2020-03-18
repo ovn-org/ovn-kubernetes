@@ -3,15 +3,20 @@
 package node
 
 import (
+	"bytes"
 	"fmt"
 	"io/ioutil"
 	"net"
 	"os"
 	"path/filepath"
 	"strings"
+	"syscall"
 
+	"github.com/containernetworking/plugins/pkg/ns"
+	"github.com/containernetworking/plugins/pkg/testutils"
 	"github.com/coreos/go-iptables/iptables"
 	"github.com/urfave/cli"
+	"github.com/vishvananda/netlink"
 
 	v1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -45,6 +50,7 @@ func createTempFile(name string) (string, error) {
 var _ = Describe("Management Port Operations", func() {
 	var tmpErr error
 	var app *cli.App
+	var testNS ns.NetNS
 
 	tmpDir, tmpErr = ioutil.TempDir("", "clusternodetest_certdir")
 	if tmpErr != nil {
@@ -52,12 +58,33 @@ var _ = Describe("Management Port Operations", func() {
 	}
 
 	BeforeEach(func() {
+		var err error
 		// Restore global default values before each testcase
 		config.RestoreDefaultConfig()
 
 		app = cli.NewApp()
 		app.Name = "test"
 		app.Flags = config.Flags
+
+		// Set up a fake k8s-node1
+		testNS, err = testutils.NewNS()
+		Expect(err).NotTo(HaveOccurred())
+		err = testNS.Do(func(ns.NetNS) error {
+			defer GinkgoRecover()
+
+			err := netlink.LinkAdd(&netlink.Dummy{
+				LinkAttrs: netlink.LinkAttrs{
+					Name: "k8s-node1",
+				},
+			})
+			Expect(err).NotTo(HaveOccurred())
+			return nil
+		})
+		Expect(err).NotTo(HaveOccurred())
+	})
+
+	AfterEach(func() {
+		Expect(testNS.Close()).To(Succeed())
 	})
 
 	It("sets up the management port", func() {
@@ -76,7 +103,7 @@ var _ = Describe("Management Port Operations", func() {
 				serviceCIDR   string = serviceIPNet + "/24"
 				mtu           string = "1400"
 				gwIP          string = "10.1.1.1"
-				lrpMAC        string = "0A:58:0A:01:01:01"
+				lrpMAC        string = "0a:58:0a:01:01:01"
 			)
 
 			fexec := ovntest.NewFakeExec()
@@ -94,17 +121,6 @@ var _ = Describe("Management Port Operations", func() {
 				"ovs-vsctl --timeout=15 set interface k8s-node1 " + fmt.Sprintf("mac=%s", strings.ReplaceAll(mgtPortMAC, ":", "\\:")),
 			})
 
-			// linux-specific setup
-			fexec.AddFakeCmdsNoOutputNoError([]string{
-				"ip link set " + mgtPort + " up",
-				"ip addr flush dev " + mgtPort,
-				"ip addr add " + mgtPortCIDR + " dev " + mgtPort,
-				"ip route flush " + clusterCIDR,
-				"ip route add " + clusterCIDR + " via " + gwIP,
-				"ip route flush " + serviceCIDR,
-				"ip route add " + serviceCIDR + " via " + gwIP,
-				"ip neigh add " + gwIP + " dev " + mgtPort + " lladdr " + lrpMAC,
-			})
 			fexec.AddFakeCmd(&ovntest.ExpectedCmd{
 				Cmd:    "ovs-vsctl --timeout=15 --if-exists get interface k8s-node1 ofport",
 				Output: "1",
@@ -141,8 +157,67 @@ var _ = Describe("Management Port Operations", func() {
 			nodeAnnotator := kube.NewNodeAnnotator(&kube.Kube{fakeClient}, &existingNode)
 			waiter := newStartupWaiter(nodeName)
 
-			_, nodeSubnetCIDR, _ := net.ParseCIDR(nodeSubnet)
-			err = createManagementPort(nodeName, nodeSubnetCIDR, nodeAnnotator, waiter)
+			err = testNS.Do(func(ns.NetNS) error {
+				defer GinkgoRecover()
+
+				_, nodeSubnetCIDR, _ := net.ParseCIDR(nodeSubnet)
+				err = createManagementPort(nodeName, nodeSubnetCIDR, nodeAnnotator, waiter)
+				Expect(err).NotTo(HaveOccurred())
+				l, err := netlink.LinkByName(mgtPort)
+				Expect(err).NotTo(HaveOccurred())
+
+				// Check whether IP has been added
+				addrs, err := netlink.AddrList(l, syscall.AF_INET)
+				Expect(err).NotTo(HaveOccurred())
+				var foundAddr bool
+				expectedAddr, err := netlink.ParseAddr(mgtPortCIDR)
+				Expect(err).NotTo(HaveOccurred())
+				for _, a := range addrs {
+					if a.IP.Equal(expectedAddr.IP) && bytes.Equal(a.Mask, expectedAddr.Mask) {
+						foundAddr = true
+						break
+					}
+				}
+				Expect(foundAddr).To(BeTrue())
+
+				// Check whether the route has been added
+				j := 0
+				gatewayIP := net.ParseIP(gwIP)
+				subnets := []string{clusterCIDR, serviceCIDR}
+				for _, subnet := range subnets {
+					foundRoute := false
+					dstIPnet, err := netlink.ParseIPNet(subnet)
+					Expect(err).NotTo(HaveOccurred())
+					route := &netlink.Route{Dst: dstIPnet}
+					filterMask := netlink.RT_FILTER_DST
+					routes, err := netlink.RouteListFiltered(netlink.FAMILY_ALL, route, filterMask)
+					Expect(err).NotTo(HaveOccurred())
+					for _, r := range routes {
+						if r.Gw.Equal(gatewayIP) && r.LinkIndex == l.Attrs().Index {
+							foundRoute = true
+							break
+						}
+					}
+					Expect(foundRoute).To(BeTrue())
+					foundRoute = false
+					j++
+				}
+				Expect(j).To(Equal(2))
+
+				// Check whether router IP has been added in the arp entry for mgmt port
+				neighbours, err := netlink.NeighList(l.Attrs().Index, netlink.FAMILY_ALL)
+				Expect(err).NotTo(HaveOccurred())
+				var foundNeighbour bool
+				for _, neighbour := range neighbours {
+					if neighbour.IP.Equal(gatewayIP) && (neighbour.HardwareAddr.String() == lrpMAC) {
+						foundNeighbour = true
+						break
+					}
+				}
+				Expect(foundNeighbour).To(BeTrue())
+
+				return nil
+			})
 			Expect(err).NotTo(HaveOccurred())
 
 			err = nodeAnnotator.Run()
