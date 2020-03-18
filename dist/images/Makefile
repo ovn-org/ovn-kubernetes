@@ -38,6 +38,12 @@ fedora: bld
 	# docker push docker.io/ovnkube/ovn-daemonset-f:latest
 	./daemonset.sh --image=docker.io/ovnkube/ovn-daemonset-f:latest
 
+fedora-dev: bld
+	docker build -t ovn-kube-f-dev -f Dockerfile.fedora.dev .
+	# docker login -u ovnkube docker.io/ovnkube
+	# docker push docker.io/ovnkube/ovn-daemonset-f:latest
+	./daemonset.sh --image=docker.io/ovnkube/ovn-daemonset-f:latest
+
 # This target expands the daemonset yaml templates into final form
 # It gets the image name from ../ansible/hosts
 daemonsetyaml:
