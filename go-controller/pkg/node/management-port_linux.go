@@ -9,9 +9,9 @@ import (
 	"strings"
 
 	"github.com/coreos/go-iptables/iptables"
-
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
+	"github.com/vishvananda/netlink"
 	"k8s.io/klog"
 )
 
@@ -23,59 +23,34 @@ const (
 // that lets the node access its pods via their private IP address. This is used
 // for health checking and other management tasks.
 func createPlatformManagementPort(interfaceName, interfaceIP, routerIP, routerMAC string) error {
-	// TODO - Migrate to using netlink.
-
-	// Up the interface.
-	_, _, err := util.RunIP("link", "set", interfaceName, "up")
+	link, err := util.LinkSetUp(interfaceName)
+	if err != nil {
+		return err
+	}
+	// Flush any existing IP addresses and assign the new IP
+	err = util.LinkAddrAdd(link, interfaceIP)
 	if err != nil {
 		return err
 	}
 
-	// The interface may already exist, in which case delete the routes and IP.
-	_, _, err = util.RunIP("addr", "flush", "dev", interfaceName)
-	if err != nil {
-		return err
-	}
-
-	// Assign IP address to the internal interface.
-	_, _, err = util.RunIP("addr", "add", interfaceIP, "dev", interfaceName)
-	if err != nil {
-		return err
-	}
-
+	// flush any existing routes and add new route for the cluster subnet
+	var clusterSubnets []string
 	for _, subnet := range config.Default.ClusterSubnets {
-		// Flush the route for the entire subnet (in case it was added before).
-		_, _, err = util.RunIP("route", "flush", subnet.CIDR.String())
-		if err != nil {
-			return err
-		}
-
-		// Create a route for the entire subnet.
-		_, stderr, err := util.RunIP("route", "add", subnet.CIDR.String(), "via", routerIP)
-		if err != nil {
-			if strings.HasPrefix(stderr, "RTNETLINK answers: File exists") {
-				klog.V(5).Infof("Ignoring error %s from 'route add %s via %s' - already added via IPv6 RA?",
-					strings.TrimSpace(stderr), subnet.CIDR.String(), routerIP)
-			} else {
-				return fmt.Errorf("Failed to add route for %s via %s: %s", subnet.CIDR.String(), routerIP, err)
-			}
-		}
+		clusterSubnets = append(clusterSubnets, subnet.CIDR.String())
 	}
-
-	// Flush the route for the services subnet (in case it was added before).
-	_, _, err = util.RunIP("route", "flush", config.Kubernetes.ServiceCIDR)
+	err = util.LinkRouteAdd(link, routerIP, clusterSubnets)
 	if err != nil {
 		return err
 	}
 
-	// Create a route for the services subnet.
-	_, stderr, err := util.RunIP("route", "add", config.Kubernetes.ServiceCIDR, "via", routerIP)
+	// flush any existing routes and add new route for the service subnet
+	err = util.LinkRouteAdd(link, routerIP, []string{config.Kubernetes.ServiceCIDR})
 	if err != nil {
-		if strings.HasPrefix(stderr, "RTNETLINK answers: File exists") {
+		if os.IsExist(err) {
 			klog.V(5).Infof("Ignoring error %s from 'route add %s via %s' - already added via IPv6 RA?",
-				strings.TrimSpace(stderr), config.Kubernetes.ServiceCIDR, routerIP)
+				err.Error(), config.Kubernetes.ServiceCIDR, routerIP)
 		} else {
-			return fmt.Errorf("Failed to add route for %s via %s: %s", config.Kubernetes.ServiceCIDR, routerIP, err)
+			return err
 		}
 	}
 
@@ -84,8 +59,8 @@ func createPlatformManagementPort(interfaceName, interfaceIP, routerIP, routerMA
 	// arrives on OVN Logical Router pipeline with ARP source protocol address set to
 	// K8s Node IP. OVN Logical Router pipeline drops such packets since it expects
 	// source protocol address to be in the Logical Switch's subnet.
-	_, _, err = util.RunIP("neigh", "add", routerIP, "dev", interfaceName, "lladdr", routerMAC)
-	if err != nil && os.IsNotExist(err) {
+	err = util.LinkNeighAdd(link, routerIP, routerMAC, netlink.FAMILY_V4)
+	if err != nil {
 		return err
 	}
 
