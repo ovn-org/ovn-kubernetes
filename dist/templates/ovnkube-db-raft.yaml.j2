@@ -71,14 +71,14 @@ spec:
       serviceAccountName: ovn
       hostNetwork: true
 
-      # required to be scheduled on node with ovn.org/ovnkube-db=true label but can
+      # required to be scheduled on node with k8s.ovn.org/ovnkube-db=true label but can
       # only have one instance per node
       affinity:
         nodeAffinity:
           requiredDuringSchedulingIgnoredDuringExecution:
             nodeSelectorTerms:
             - matchExpressions:
-              - key: ovn.org/ovnkube-db
+              - key: k8s.ovn.org/ovnkube-db
                 operator: In
                 values:
                 - "true"
