@@ -115,7 +115,7 @@ func defaultFakeExec(nodeSubnet, nodeName string) (*ovntest.FakeExec, string, st
 	nodeMgmtPortIP := util.NextIP(cidr.IP).String()
 
 	fexec.AddFakeCmdsNoOutputNoError([]string{
-		"ovn-sbctl --timeout=15 --data=bare --no-heading --columns=name,hostname list Chassis",
+		"ovn-sbctl --timeout=15 --data=bare --no-heading --columns=name,hostname --format=json list Chassis",
 		"ovn-nbctl --timeout=15 --data=bare --no-heading --columns=name,other-config find logical_switch other-config:subnet!=_",
 	})
 	fexec.AddFakeCmdsNoOutputNoError([]string{
@@ -340,7 +340,7 @@ var _ = Describe("Master Operations", func() {
 
 			fexec := ovntest.NewFakeExec()
 			fexec.AddFakeCmdsNoOutputNoError([]string{
-				"ovn-sbctl --timeout=15 --data=bare --no-heading --columns=name,hostname list Chassis",
+				"ovn-sbctl --timeout=15 --data=bare --no-heading --columns=name,hostname --format=json list Chassis",
 			})
 			fexec.AddFakeCmd(&ovntest.ExpectedCmd{
 				Cmd: "ovn-nbctl --timeout=15 --data=bare --no-heading --columns=name,other-config find logical_switch other-config:subnet!=_",
@@ -556,7 +556,7 @@ var _ = Describe("Gateway Init Operations", func() {
 			Expect(err).NotTo(HaveOccurred())
 
 			fexec.AddFakeCmdsNoOutputNoError([]string{
-				"ovn-sbctl --timeout=15 --data=bare --no-heading --columns=name,hostname list Chassis",
+				"ovn-sbctl --timeout=15 --data=bare --no-heading --columns=name,hostname --format=json list Chassis",
 				"ovn-nbctl --timeout=15 --data=bare --no-heading --columns=name,other-config find logical_switch other-config:subnet!=_",
 			})
 
@@ -747,7 +747,7 @@ var _ = Describe("Gateway Init Operations", func() {
 			Expect(err).NotTo(HaveOccurred())
 
 			fexec.AddFakeCmdsNoOutputNoError([]string{
-				"ovn-sbctl --timeout=15 --data=bare --no-heading --columns=name,hostname list Chassis",
+				"ovn-sbctl --timeout=15 --data=bare --no-heading --columns=name,hostname --format=json list Chassis",
 				"ovn-nbctl --timeout=15 --data=bare --no-heading --columns=name,other-config find logical_switch other-config:subnet!=_",
 			})
 

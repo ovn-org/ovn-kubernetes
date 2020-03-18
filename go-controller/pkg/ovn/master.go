@@ -772,24 +772,8 @@ func (oc *Controller) deleteNode(nodeName string, nodeSubnet, joinSubnet *net.IP
 		return fmt.Errorf("Failed to clean up node %s gateway: (%v)", nodeName, err)
 	}
 
-	chassisName, stderr, err := util.RunOVNSbctl("--data=bare", "--no-heading",
-		"--columns=name", "find", "Chassis",
-		"hostname="+nodeName)
-	if err != nil {
-		klog.Errorf("Failed to get chassis name for logical switch %s: stderr: %q, error: %v",
-			nodeName, stderr, err)
+	if err := oc.deleteNodeChassis(nodeName); err != nil {
 		return err
-	}
-
-	if chassisName == "" {
-		klog.Warningf("Chassis name is empty for logical switch: %s", nodeName)
-	} else {
-		_, stderr, err = util.RunOVNSbctl("--if-exist", "chassis-del", chassisName)
-		if err != nil {
-			klog.Errorf("Failed to delete chassis with name %s for logical switch %s: stderr: %q, error: %v",
-				chassisName, nodeName, stderr, err)
-			return err
-		}
 	}
 
 	return nil
@@ -847,6 +831,52 @@ func (oc *Controller) clearInitialNodeNetworkUnavailableCondition(origNode, newN
 	}
 }
 
+// this is the worker function that does the periodic sync of nodes from kube API
+// and sbdb and deletes chassis that are stale
+func (oc *Controller) syncNodesPeriodic() {
+	//node names is a slice of all node names
+	nodes, err := oc.kube.GetNodes()
+	if err != nil {
+		klog.Errorf("Error getting existing nodes from kube API: %v", err)
+		return
+	}
+
+	nodeNames := make([]string, len(nodes.Items))
+
+	for _, node := range nodes.Items {
+		nodeNames = append(nodeNames, node.Name)
+	}
+
+	chassisData, stderr, err := util.RunOVNSbctl("--data=bare", "--no-heading",
+		"--columns=name,hostname", "--format=json", "list", "Chassis")
+	if err != nil {
+		klog.Errorf("Failed to get chassis list: stderr: %s, error: %v",
+			stderr, err)
+		return
+	}
+
+	chassisMap, err := oc.unmarshalChassisDataIntoMap([]byte(chassisData))
+	if err != nil {
+		klog.Errorf("Failed to unmarshal chassis data into chassis map, error: %v: %s", err, chassisData)
+		return
+	}
+
+	//delete existing nodes from the chassis map.
+	for _, nodeName := range nodeNames {
+		delete(chassisMap, nodeName)
+	}
+
+	for nodeName, chassisName := range chassisMap {
+		if chassisName != "" {
+			_, stderr, err = util.RunOVNSbctl("--if-exist", "chassis-del", chassisName)
+			if err != nil {
+				klog.Errorf("Failed to delete chassis with name %s for node %s: stderr: %s, error: %v",
+					chassisName, nodeName, stderr, err)
+			}
+		}
+	}
+}
+
 func (oc *Controller) syncNodes(nodes []interface{}) {
 	foundNodes := make(map[string]*kapi.Node)
 	for _, tmp := range nodes {
@@ -879,12 +909,12 @@ func (oc *Controller) syncNodes(nodes []interface{}) {
 
 	chassisMap, err := oc.unmarshalChassisDataIntoMap([]byte(chassisData))
 	if err != nil {
-		klog.Errorf("Failed to unmarshal chassis data into chassis map, error: %v", err)
+		klog.Errorf("Failed to unmarshal chassis data into chassis map, error: %v: %s", err, chassisData)
 		return
 	}
 
 	//delete existing nodes from the chassis map.
-	for nodeName, _ := range foundNodes {
+	for nodeName := range foundNodes {
 		delete(chassisMap, nodeName)
 	}
 
@@ -963,50 +993,54 @@ func (oc *Controller) syncNodes(nodes []interface{}) {
 	}
 }
 
-type chassisData struct {
-	nodeName    string
-	chassisName string
-}
-
 func (oc *Controller) unmarshalChassisDataIntoMap(chData []byte) (map[string]string, error) {
 	//map of node name to chassis name
 	chassisMap := make(map[string]string)
 
-	var mapUnmarshal map[string][]interface{}
-	json.Unmarshal(chData, &mapUnmarshal)
-
-	if data, ok := mapUnmarshal["data"]; !ok {
-		klog.Errorf("Got an error while unmarshaling, no data present")
-		return chassisMap, fmt.Errorf("Error while unmarshaling, no data present")
-	} else {
-		buf, _ := json.Marshal(data)
-		var chassisColl []interface{}
-		if err := json.Unmarshal(buf, &chassisColl); err != nil {
-			klog.Errorf("Got an error while unmarshaling: %s\n", err)
-			return chassisMap, err
-		} else {
-			for _, chassis := range chassisColl {
-				c, _ := json.Marshal(chassis)
-				var cd chassisData
-				if err = json.Unmarshal(c, &cd); err != nil {
-					klog.Errorf("Cannot unmarshal individual chassis: %s, incorrect format", err)
-					continue
-				}
-				chassisMap[cd.nodeName] = cd.chassisName
-			}
-		}
+	type chassisList struct {
+		Data     [][]string
+		Headings []string
 	}
+	var mapUnmarshal chassisList
+
+	if len(chData) == 0 {
+		return chassisMap, nil
+	}
+
+	err := json.Unmarshal(chData, &mapUnmarshal)
+
+	if err != nil {
+		return nil, fmt.Errorf("Error unmarshaling the chassis data: %s", err)
+	}
+
+	for _, chassis := range mapUnmarshal.Data {
+		if len(chassis) < 2 || chassis[0] == "" || chassis[1] == "" {
+			continue
+		}
+		chassisMap[chassis[1]] = chassis[0]
+	}
+
 	return chassisMap, nil
 }
 
-func (c *chassisData) UnmarshalJSON(buf []byte) error {
-	tmp := []interface{}{&c.chassisName, &c.nodeName}
-	wantLen := len(tmp)
-	if err := json.Unmarshal(buf, &tmp); err != nil {
-		return err
+func (oc *Controller) deleteNodeChassis(nodeName string) error {
+	chassisName, stderr, err := util.RunOVNSbctl("--data=bare", "--no-heading",
+		"--columns=name", "find", "Chassis",
+		"hostname="+nodeName)
+	if err != nil {
+		return fmt.Errorf("Failed to get chassis name for node %s: stderr: %q, error: %v",
+			nodeName, stderr, err)
 	}
-	if g, e := len(tmp), wantLen; g != e {
-		return fmt.Errorf("wrong number of fields in Notification: %d != %d", g, e)
+
+	if chassisName == "" {
+		klog.Warningf("Chassis name is empty for node: %s", nodeName)
+	} else {
+		_, stderr, err = util.RunOVNSbctl("--if-exist", "chassis-del", chassisName)
+		if err != nil {
+			return fmt.Errorf("Failed to delete chassis with name %s for node %s: stderr: %q, error: %v",
+				chassisName, nodeName, stderr, err)
+		}
 	}
+
 	return nil
 }

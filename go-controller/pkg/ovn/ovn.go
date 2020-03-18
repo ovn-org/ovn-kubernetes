@@ -151,6 +151,7 @@ func NewOvnController(kubeClient kubernetes.Interface, wf *factory.WatchFactory,
 
 // Run starts the actual watching.
 func (oc *Controller) Run(stopChan chan struct{}) error {
+	oc.syncPeriodic(stopChan)
 	// WatchNodes must be started first so that its initial Add will
 	// create all node logical switches, which other watches may depend on.
 	// https://github.com/ovn-org/ovn-kubernetes/pull/859
@@ -274,6 +275,25 @@ func extractEmptyLBBackendsEvents(out []byte) ([]emptyLBBackendEvent, error) {
 	}
 
 	return events, nil
+}
+
+// syncPeriodic adds a goroutine that periodically does some work
+// right now there is only one ticker registered
+// for syncNodesPeriodic which deletes chassis records from the sbdb
+// every 5 minutes
+func (oc *Controller) syncPeriodic(stopChan chan struct{}) {
+	go func() {
+		nodeSyncTicker := time.NewTicker(5 * time.Minute)
+		for {
+			select {
+			case <-nodeSyncTicker.C:
+				oc.syncNodesPeriodic()
+			case <-stopChan:
+				return
+			}
+		}
+	}()
+
 }
 
 func (oc *Controller) ovnControllerEventChecker(stopChan chan struct{}) {
