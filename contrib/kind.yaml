@@ -26,12 +26,12 @@ nodes:
 #   extraMounts:
 #     - hostPath: /tmp/kind
 #       containerPath: /var/run/secrets/kubernetes.io/serviceaccount/
-# - role: worker
-#   extraMounts:
-#     - hostPath: /tmp/kind
-#       containerPath: /var/run/secrets/kubernetes.io/serviceaccount/
-# - role: worker
-#   extraMounts:
-#     - hostPath: /tmp/kind
-#       containerPath: /var/run/secrets/kubernetes.io/serviceaccount/
+ - role: worker
+   extraMounts:
+     - hostPath: /tmp/kind
+       containerPath: /var/run/secrets/kubernetes.io/serviceaccount/
+ - role: worker
+   extraMounts:
+     - hostPath: /tmp/kind
+       containerPath: /var/run/secrets/kubernetes.io/serviceaccount/
 
