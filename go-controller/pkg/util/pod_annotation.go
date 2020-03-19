@@ -62,6 +62,9 @@ func MarshalPodAnnotation(podInfo *PodAnnotation) (map[string]string, error) {
 		GW:  gw,
 	}
 	for _, r := range podInfo.Routes {
+		if r.Dest.IP.IsUnspecified() {
+			return nil, fmt.Errorf("bad podNetwork data: default route %v should be specified as gateway", r)
+		}
 		var nh string
 		if r.NextHop != nil {
 			nh = r.NextHop.String()
@@ -126,6 +129,9 @@ func UnmarshalPodAnnotation(annotations map[string]string) (*PodAnnotation, erro
 		_, route.Dest, err = net.ParseCIDR(r.Dest)
 		if err != nil {
 			return nil, fmt.Errorf("failed to parse pod route dest %q: %v", r.Dest, err)
+		}
+		if route.Dest.IP.IsUnspecified() {
+			return nil, fmt.Errorf("bad podNetwork data: default route %v should be specified as gateway", route)
 		}
 		if r.NextHop != "" {
 			route.NextHop = net.ParseIP(r.NextHop)
