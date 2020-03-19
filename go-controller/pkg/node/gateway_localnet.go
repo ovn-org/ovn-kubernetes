@@ -14,7 +14,6 @@ import (
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/factory"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
-	"github.com/vishvananda/netlink"
 	"k8s.io/klog"
 
 	kapi "k8s.io/api/core/v1"
@@ -199,7 +198,7 @@ func initLocalnetGateway(nodeName string,
 	if config.IPv6Mode {
 		// TODO - IPv6 hack ... for some reason neighbor discovery isn't working here, so hard code a
 		// MAC binding for the gateway IP address for now - need to debug this further
-		err = util.LinkNeighAdd(link, "fd99::2", macAddress, netlink.FAMILY_V6)
+		err = util.LinkNeighAdd(link, "fd99::2", macAddress)
 		if err == nil {
 			klog.Infof("Added MAC binding for fd99::2 on br-nexthop")
 		} else {

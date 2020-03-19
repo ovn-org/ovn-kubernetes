@@ -11,7 +11,6 @@ import (
 	"github.com/coreos/go-iptables/iptables"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
-	"github.com/vishvananda/netlink"
 	"k8s.io/klog"
 )
 
@@ -59,7 +58,7 @@ func createPlatformManagementPort(interfaceName, interfaceIP, routerIP, routerMA
 	// arrives on OVN Logical Router pipeline with ARP source protocol address set to
 	// K8s Node IP. OVN Logical Router pipeline drops such packets since it expects
 	// source protocol address to be in the Logical Switch's subnet.
-	err = util.LinkNeighAdd(link, routerIP, routerMAC, netlink.FAMILY_V4)
+	err = util.LinkNeighAdd(link, routerIP, routerMAC)
 	if err != nil {
 		return err
 	}

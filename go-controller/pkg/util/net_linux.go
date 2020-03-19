@@ -94,7 +94,7 @@ func LinkRouteAdd(link netlink.Link, gwIPstr string, subnets []string) error {
 }
 
 // LinkNeighAdd flushes any existing MAC/IP bindings and adds the new neighbour entries
-func LinkNeighAdd(link netlink.Link, neighIPstr, neighMacstr string, family int) error {
+func LinkNeighAdd(link netlink.Link, neighIPstr, neighMacstr string) error {
 	neighIP := net.ParseIP(neighIPstr)
 	if neighIP == nil {
 		return fmt.Errorf("neighbour IP %s is not a valid IPv4 or IPv6 address", neighIPstr)
@@ -104,6 +104,10 @@ func LinkNeighAdd(link netlink.Link, neighIPstr, neighMacstr string, family int)
 		return fmt.Errorf("neighbour MAC address %s is not valid: %v", neighMacstr, err)
 	}
 
+	family := netlink.FAMILY_V4
+	if neighIP.To4() == nil {
+		family = netlink.FAMILY_V6
+	}
 	neigh := &netlink.Neigh{
 		LinkIndex:    link.Attrs().Index,
 		Family:       family,
