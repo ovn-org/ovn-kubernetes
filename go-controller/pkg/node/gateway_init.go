@@ -86,21 +86,11 @@ func (n *OvnNode) initGateway(subnet string, nodeAnnotator kube.Annotator,
 	}
 
 	var err error
-	var systemID string
 	var prFn postWaitFunc
-	var annotations map[string]map[string]string
 	switch config.Gateway.Mode {
 	case config.GatewayModeLocal:
-		systemID, err = util.GetNodeChassisID()
-		if err != nil {
-			return err
-		}
-		annotations, err = initLocalnetGateway(n.name, subnet, n.watchFactory)
+		err = initLocalnetGateway(n.name, subnet, n.watchFactory, nodeAnnotator)
 	case config.GatewayModeShared:
-		systemID, err = util.GetNodeChassisID()
-		if err != nil {
-			return err
-		}
 		gatewayNextHop := config.Gateway.NextHop
 		gatewayIntf := config.Gateway.Interface
 		if gatewayNextHop == "" || gatewayIntf == "" {
@@ -118,22 +108,13 @@ func (n *OvnNode) initGateway(subnet string, nodeAnnotator kube.Annotator,
 				gatewayIntf = defaultGatewayIntf
 			}
 		}
-		annotations, prFn, err = initSharedGateway(n.name, subnet, gatewayNextHop, gatewayIntf,
-			n.watchFactory)
+		prFn, err = initSharedGateway(n.name, subnet, gatewayNextHop, gatewayIntf,
+			n.watchFactory, nodeAnnotator)
 	case config.GatewayModeDisabled:
-		annotations = util.CreateDisabledL3GatewayConfig()
+		err = util.SetDisabledL3GatewayConfig(nodeAnnotator)
 	}
 	if err != nil {
 		return err
-	}
-
-	if err := nodeAnnotator.Set(util.OvnNodeL3GatewayConfig, annotations); err != nil {
-		return err
-	}
-	if systemID != "" {
-		if err := nodeAnnotator.Set(util.OvnNodeChassisID, systemID); err != nil {
-			return err
-		}
 	}
 
 	// Wait for gateway resources to be created by the master

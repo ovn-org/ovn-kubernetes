@@ -63,7 +63,7 @@ func createManagementPort(nodeName string, localSubnet *net.IPNet, nodeAnnotator
 		return nil
 	}
 
-	if err := nodeAnnotator.Set(util.OvnNodeManagementPortMacAddress, macAddress); err != nil {
+	if err := util.SetNodeManagementPortMacAddr(nodeAnnotator, macAddress); err != nil {
 		return err
 	}
 

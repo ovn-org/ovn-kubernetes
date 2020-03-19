@@ -12,6 +12,7 @@ import (
 	"github.com/coreos/go-iptables/iptables"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/factory"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/kube"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
 	"k8s.io/klog"
 
@@ -137,11 +138,10 @@ func localnetGatewayNAT(ipt util.IPTablesHelper, ifname, ip string) error {
 	return addIptRules(ipt, rules)
 }
 
-func initLocalnetGateway(nodeName string,
-	subnet string, wf *factory.WatchFactory) (map[string]map[string]string, error) {
+func initLocalnetGateway(nodeName string, subnet string, wf *factory.WatchFactory, nodeAnnotator kube.Annotator) error {
 	ipt, err := localnetIPTablesHelper()
 	if err != nil {
-		return nil, err
+		return err
 	}
 
 	// Create a localnet OVS bridge.
@@ -149,17 +149,17 @@ func initLocalnetGateway(nodeName string,
 	_, stderr, err := util.RunOVSVsctl("--may-exist", "add-br",
 		localnetBridgeName)
 	if err != nil {
-		return nil, fmt.Errorf("Failed to create localnet bridge %s"+
+		return fmt.Errorf("Failed to create localnet bridge %s"+
 			", stderr:%s (%v)", localnetBridgeName, stderr, err)
 	}
 
 	ifaceID, macAddress, err := bridgedGatewayNodeSetup(nodeName, localnetBridgeName, localnetBridgeName, true)
 	if err != nil {
-		return nil, fmt.Errorf("failed to set up shared interface gateway: %v", err)
+		return fmt.Errorf("failed to set up shared interface gateway: %v", err)
 	}
 	_, err = util.LinkSetUp(localnetBridgeName)
 	if err != nil {
-		return nil, err
+		return err
 	}
 
 	// Create a localnet bridge gateway port
@@ -169,21 +169,26 @@ func initLocalnetGateway(nodeName string,
 		"mtu_request="+fmt.Sprintf("%d", config.Default.MTU),
 		fmt.Sprintf("mac=%s", strings.ReplaceAll(localnetGatewayNextHopMac, ":", "\\:")))
 	if err != nil {
-		return nil, fmt.Errorf("Failed to create localnet bridge gateway port %s"+
+		return fmt.Errorf("Failed to create localnet bridge gateway port %s"+
 			", stderr:%s (%v)", localnetGatewayNextHopPort, stderr, err)
 	}
 	link, err := util.LinkSetUp(localnetGatewayNextHopPort)
 	if err != nil {
-		return nil, err
+		return err
 	}
 
 	// Flush IPv4 address of localnetBridgeNextHop and set with an IP address.
 	err = util.LinkAddrAdd(link, localnetGatewayNextHopSubnet())
 	if err != nil {
-		return nil, err
+		return err
 	}
 
-	annotations := util.CreateL3GatewayConfig(ifaceID, macAddress, localnetGatewayIP(), localnetGatewayNextHop())
+	err = util.SetLocalL3GatewayConfig(nodeAnnotator, ifaceID, macAddress,
+		localnetGatewayIP(), localnetGatewayNextHop(),
+		config.Gateway.NodeportEnable)
+	if err != nil {
+		return err
+	}
 
 	if config.IPv6Mode {
 		// TODO - IPv6 hack ... for some reason neighbor discovery isn't working here, so hard code a
@@ -198,15 +203,14 @@ func initLocalnetGateway(nodeName string,
 
 	err = localnetGatewayNAT(ipt, localnetGatewayNextHopPort, localnetGatewayIP())
 	if err != nil {
-		return nil, fmt.Errorf("Failed to add NAT rules for localnet gateway (%v)",
-			err)
+		return fmt.Errorf("Failed to add NAT rules for localnet gateway (%v)", err)
 	}
 
 	if config.Gateway.NodeportEnable {
 		err = localnetNodePortWatcher(ipt, wf)
 	}
 
-	return annotations, err
+	return err
 }
 
 func localnetIptRules(svc *kapi.Service) []iptRule {

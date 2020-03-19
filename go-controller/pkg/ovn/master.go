@@ -167,13 +167,13 @@ func (oc *Controller) SetupMaster(masterNodeName string) error {
 func (oc *Controller) addNodeJoinSubnetAnnotations(node *kapi.Node, subnet string) error {
 	nodeAnnotations, err := util.CreateNodeJoinSubnetAnnotation(subnet)
 	if err != nil {
-		return fmt.Errorf("failed to marshal node %q annotation %q for subnet %s",
-			node.Name, util.OvnNodeJoinSubnets, subnet)
+		return fmt.Errorf("failed to marshal node %q join subnets annotation for subnet %s",
+			node.Name, subnet)
 	}
 	err = oc.kube.SetAnnotationsOnNode(node, nodeAnnotations)
 	if err != nil {
-		return fmt.Errorf("failed to set node annotation %q on existing node %s to %q: %v",
-			util.OvnNodeJoinSubnets, node.Name, subnet, err)
+		return fmt.Errorf("failed to set node-join-subnets annotation on node %s: %v",
+			node.Name, err)
 	}
 	return nil
 }
@@ -269,45 +269,11 @@ func (oc *Controller) syncNodeManagementPort(node *kapi.Node, subnet *net.IPNet)
 	return nil
 }
 
-func (oc *Controller) syncGatewayLogicalNetwork(node *kapi.Node, l3GatewayConfig map[string]string, subnet string) error {
+func (oc *Controller) syncGatewayLogicalNetwork(node *kapi.Node, l3GatewayConfig *util.L3GatewayConfig, subnet string) error {
 	var err error
 	var clusterSubnets []string
 	for _, clusterSubnet := range config.Default.ClusterSubnets {
 		clusterSubnets = append(clusterSubnets, clusterSubnet.CIDR.String())
-	}
-
-	mode := l3GatewayConfig[util.OvnNodeGatewayMode]
-	nodePortEnable := false
-	if l3GatewayConfig[util.OvnNodePortEnable] == "true" {
-		nodePortEnable = true
-	}
-	ifaceID, err := util.ParseGatewayIfaceID(l3GatewayConfig)
-	if err != nil {
-		return err
-	}
-
-	gwMacAddress, err := util.ParseGatewayMacAddress(l3GatewayConfig)
-	if err != nil {
-		return err
-	}
-
-	ipAddress, gwNextHop, err := util.ParseGatewayLogicalNetwork(l3GatewayConfig)
-	if err != nil {
-		return err
-	}
-
-	systemID, err := util.ParseNodeChassisID(node)
-	if err != nil {
-		return err
-	}
-
-	var lspArgs []string
-	var lspErr error
-	if mode == string(config.GatewayModeShared) {
-		lspArgs, lspErr = util.ParseGatewayVLANID(l3GatewayConfig, ifaceID)
-		if lspErr != nil {
-			return lspErr
-		}
 	}
 
 	// get a subnet for the per-node join switch
@@ -316,22 +282,21 @@ func (oc *Controller) syncGatewayLogicalNetwork(node *kapi.Node, l3GatewayConfig
 		return err
 	}
 
-	err = util.GatewayInit(clusterSubnets, joinSubnet, systemID, node.Name, ifaceID, ipAddress,
-		gwMacAddress, gwNextHop, subnet, nodePortEnable, lspArgs)
+	err = util.GatewayInit(clusterSubnets, subnet, joinSubnet, node.Name, l3GatewayConfig)
 	if err != nil {
 		return fmt.Errorf("failed to init shared interface gateway: %v", err)
 	}
 
-	if mode == string(config.GatewayModeShared) {
+	if l3GatewayConfig.Mode == config.GatewayModeShared {
 		// Add static routes to OVN Cluster Router to enable pods on this Node to
 		// reach the host IP
-		err = addStaticRouteToHost(node, ipAddress)
+		err = addStaticRouteToHost(node, l3GatewayConfig.IPAddress.String())
 		if err != nil {
 			return err
 		}
 	}
 
-	if nodePortEnable {
+	if l3GatewayConfig.NodePortEnable {
 		err = oc.handleNodePortLB(node)
 	} else {
 		// nodePort disabled, delete gateway load balancers for this node.
@@ -499,8 +464,8 @@ func (oc *Controller) addNodeAnnotations(node *kapi.Node, subnet string) error {
 	}
 	err = oc.kube.SetAnnotationsOnNode(node, nodeAnnotations)
 	if err != nil {
-		return fmt.Errorf("failed to set node annotation %q on existing node %s to %q: %v",
-			util.OvnNodeSubnets, node.Name, subnet, err)
+		return fmt.Errorf("failed to set node-subnets annotation on node %s: %v",
+			node.Name, err)
 	}
 	return nil
 }

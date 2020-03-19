@@ -6,6 +6,8 @@ import (
 	"net"
 
 	kapi "k8s.io/api/core/v1"
+
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/kube"
 )
 
 // This handles the annotations related to subnets assigned to a node. The annotations are
@@ -25,10 +27,10 @@ import (
 // is used.)
 
 const (
-	// OvnNodeSubnets is the constant string representing the node subnets annotation key
-	OvnNodeSubnets = "k8s.ovn.org/node-subnets"
-	// OvnNodeJoinSubnets is the constant string representing the node's join switch subnets annotation key
-	OvnNodeJoinSubnets = "k8s.ovn.org/node-join-subnets"
+	// ovnNodeSubnets is the constant string representing the node subnets annotation key
+	ovnNodeSubnets = "k8s.ovn.org/node-subnets"
+	// ovnNodeJoinSubnets is the constant string representing the node's join switch subnets annotation key
+	ovnNodeJoinSubnets = "k8s.ovn.org/node-join-subnets"
 )
 
 // CreateNodeHostSubnetAnnotation creates a "k8s.ovn.org/node-subnets" annotation,
@@ -41,14 +43,24 @@ func CreateNodeHostSubnetAnnotation(defaultSubnet string) (map[string]interface{
 		return nil, err
 	}
 	return map[string]interface{}{
-		OvnNodeSubnets: string(bytes),
+		ovnNodeSubnets: string(bytes),
 	}, nil
+}
+
+// SetNodeHostSubnetAnnotation sets a "k8s.ovn.org/node-subnets" annotation
+// using a kube.Annotator
+func SetNodeHostSubnetAnnotation(nodeAnnotator kube.Annotator, defaultSubnet string) error {
+	annotation, err := CreateNodeHostSubnetAnnotation(defaultSubnet)
+	if err != nil {
+		return err
+	}
+	return nodeAnnotator.Set(ovnNodeSubnets, annotation[ovnNodeSubnets])
 }
 
 // ParseNodeHostSubnetAnnotation parses the "k8s.ovn.org/node-subnets" annotation
 // on a node and returns the "default" host subnet.
 func ParseNodeHostSubnetAnnotation(node *kapi.Node) (*net.IPNet, error) {
-	sub, ok := node.Annotations[OvnNodeSubnets]
+	sub, ok := node.Annotations[ovnNodeSubnets]
 	if ok {
 		nodeSubnets := make(map[string]string)
 		if err := json.Unmarshal([]byte(sub), &nodeSubnets); err != nil {
@@ -78,14 +90,24 @@ func CreateNodeJoinSubnetAnnotation(defaultSubnet string) (map[string]interface{
 		return nil, err
 	}
 	return map[string]interface{}{
-		OvnNodeJoinSubnets: string(bytes),
+		ovnNodeJoinSubnets: string(bytes),
 	}, nil
+}
+
+// SetNodeJoinSubnetAnnotation sets a "k8s.ovn.org/node-join-subnets" annotation
+// using a kube.Annotator
+func SetNodeJoinSubnetAnnotation(nodeAnnotator kube.Annotator, defaultSubnet string) error {
+	annotation, err := CreateNodeJoinSubnetAnnotation(defaultSubnet)
+	if err != nil {
+		return err
+	}
+	return nodeAnnotator.Set(ovnNodeJoinSubnets, annotation[ovnNodeJoinSubnets])
 }
 
 // ParseNodeJoinSubnetAnnotation parses the "k8s.ovn.org/node-join-subnets" annotation on
 // a node and returns the "default" join subnet.
 func ParseNodeJoinSubnetAnnotation(node *kapi.Node) (*net.IPNet, error) {
-	sub, ok := node.Annotations[OvnNodeJoinSubnets]
+	sub, ok := node.Annotations[ovnNodeJoinSubnets]
 	if ok {
 		nodeSubnets := make(map[string]string)
 		if err := json.Unmarshal([]byte(sub), &nodeSubnets); err != nil {
