@@ -65,25 +65,15 @@ func setupNetwork(link netlink.Link, ifInfo *PodInterfaceInfo) error {
 		return fmt.Errorf("failed to add IP addr %s to %s: %v", ifInfo.IP, link.Attrs().Name, err)
 	}
 
-	var foundDefault bool
-	for _, route := range ifInfo.Routes {
-		if err := ip.AddRoute(route.Dest, route.NextHop, link); err != nil {
-			return fmt.Errorf("failed to add pod route %v via %v: %v", route.Dest, route.NextHop, err)
-		}
-
-		if ones, _ := route.Dest.Mask.Size(); ones == 0 {
-			foundDefault = true
+	if ifInfo.GW != nil {
+		if err := ip.AddRoute(nil, ifInfo.GW, link); err != nil {
+			return fmt.Errorf("failed to add gateway route: %v", err)
 		}
 	}
 
-	if !foundDefault {
-		// If the pod routes did not include a default route,
-		// add a "default" default route via the pod's gateway, if
-		// one exists
-		if ifInfo.GW != nil {
-			if err := ip.AddRoute(nil, ifInfo.GW, link); err != nil {
-				return fmt.Errorf("failed to add gateway route: %v", err)
-			}
+	for _, route := range ifInfo.Routes {
+		if err := ip.AddRoute(route.Dest, route.NextHop, link); err != nil {
+			return fmt.Errorf("failed to add pod route %v via %v: %v", route.Dest, route.NextHop, err)
 		}
 	}
 

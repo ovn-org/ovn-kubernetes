@@ -229,14 +229,12 @@ func (oc *Controller) addLogicalPort(pod *kapi.Pod) error {
 
 	var podMac net.HardwareAddr
 	var podCIDR *net.IPNet
-	var gatewayCIDR *net.IPNet
 	var args []string
 
 	annotation, err := util.UnmarshalPodAnnotation(pod.Annotations)
 	if err == nil {
 		podMac = annotation.MAC
 		podCIDR = annotation.IP
-		gatewayCIDR = &net.IPNet{IP: annotation.GW, Mask: annotation.IP.Mask}
 
 		// Check if the pod's logical switch port already exists. If it
 		// does don't re-add the port to OVN as this will change its
@@ -255,8 +253,6 @@ func (oc *Controller) addLogicalPort(pod *kapi.Pod) error {
 			"--", "--if-exists", "clear", "logical_switch_port", portName, "dynamic_addresses",
 		)
 	} else {
-		gatewayCIDR, _ = util.GetNodeWellKnownAddresses(nodeSubnet)
-
 		addresses := "dynamic"
 		networks, err := util.GetPodNetSelAnnotation(pod, util.DefNetworkAnnotation)
 		if err != nil || (networks != nil && len(networks) != 1) {
@@ -329,6 +325,7 @@ func (oc *Controller) addLogicalPort(pod *kapi.Pod) error {
 	}
 
 	if annotation == nil {
+		gatewayCIDR, _ := util.GetNodeWellKnownAddresses(nodeSubnet)
 		routes, gwIP, err := getRoutesGatewayIP(pod, gatewayCIDR)
 		if err != nil {
 			return err
