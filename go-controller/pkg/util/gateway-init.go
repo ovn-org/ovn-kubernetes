@@ -113,10 +113,8 @@ func GatewayInit(clusterIPSubnet []string, joinSubnet *net.IPNet, systemID, node
 	physicalIPMask := fmt.Sprintf("%s/%d", ip.String(), n)
 	physicalIP := ip.String()
 
-	if defaultGW != "" {
-		defaultgwByte := net.ParseIP(defaultGW)
-		defaultGW = defaultgwByte.String()
-	}
+	defaultgwByte := net.ParseIP(defaultGW)
+	defaultGW = defaultgwByte.String()
 
 	k8sClusterRouter := GetK8sClusterRouter()
 	// Create a gateway router.
@@ -301,41 +299,37 @@ func GatewayInit(clusterIPSubnet []string, joinSubnet *net.IPNet, systemID, node
 	}
 
 	// Add a static route in GR with physical gateway as the default next hop.
-	if defaultGW != "" {
-		var allIPs string
-		if config.IPv6Mode {
-			allIPs = "::/0"
-		} else {
-			allIPs = "0.0.0.0/0"
-		}
-		stdout, stderr, err = RunOVNNbctl("--may-exist", "lr-route-add",
-			gatewayRouter, allIPs, defaultGW,
-			fmt.Sprintf("rtoe-%s", gatewayRouter))
-		if err != nil {
-			return fmt.Errorf("Failed to add a static route in GR with physical "+
-				"gateway as the default next hop, stdout: %q, "+
-				"stderr: %q, error: %v", stdout, stderr, err)
-		}
+	var allIPs string
+	if config.IPv6Mode {
+		allIPs = "::/0"
+	} else {
+		allIPs = "0.0.0.0/0"
+	}
+	stdout, stderr, err = RunOVNNbctl("--may-exist", "lr-route-add",
+		gatewayRouter, allIPs, defaultGW,
+		fmt.Sprintf("rtoe-%s", gatewayRouter))
+	if err != nil {
+		return fmt.Errorf("Failed to add a static route in GR with physical "+
+			"gateway as the default next hop, stdout: %q, "+
+			"stderr: %q, error: %v", stdout, stderr, err)
 	}
 
-	if rampoutIPSubnet != "" {
-		rampoutIPSubnets := strings.Split(rampoutIPSubnet, ",")
-		for _, rampoutIPSubnet = range rampoutIPSubnets {
-			_, _, err = net.ParseCIDR(rampoutIPSubnet)
-			if err != nil {
-				continue
-			}
+	rampoutIPSubnets := strings.Split(rampoutIPSubnet, ",")
+	for _, rampoutIPSubnet = range rampoutIPSubnets {
+		_, _, err = net.ParseCIDR(rampoutIPSubnet)
+		if err != nil {
+			continue
+		}
 
-			// Add source IP address based routes in distributed router
-			// for this gateway router.
-			stdout, stderr, err = RunOVNNbctl("--may-exist",
-				"--policy=src-ip", "lr-route-add", k8sClusterRouter,
-				rampoutIPSubnet, gwLRPIp.String())
-			if err != nil {
-				return fmt.Errorf("Failed to add source IP address based "+
-					"routes in distributed router, stdout: %q, "+
-					"stderr: %q, error: %v", stdout, stderr, err)
-			}
+		// Add source IP address based routes in distributed router
+		// for this gateway router.
+		stdout, stderr, err = RunOVNNbctl("--may-exist",
+			"--policy=src-ip", "lr-route-add", k8sClusterRouter,
+			rampoutIPSubnet, gwLRPIp.String())
+		if err != nil {
+			return fmt.Errorf("Failed to add source IP address based "+
+				"routes in distributed router, stdout: %q, "+
+				"stderr: %q, error: %v", stdout, stderr, err)
 		}
 	}
 

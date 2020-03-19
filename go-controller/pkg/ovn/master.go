@@ -200,12 +200,6 @@ func (oc *Controller) SetupMaster(masterNodeName string) error {
 //	  "default": "100.64.0.0/29",
 // }
 func (oc *Controller) addNodeJoinSubnetAnnotations(node *kapi.Node, subnet string) error {
-	// nothing to do if the node already has the annotation key
-	_, ok := node.Annotations[OvnNodeJoinSubnets]
-	if ok {
-		return nil
-	}
-
 	bytes, err := json.Marshal(map[string]string{
 		"default": subnet,
 	})
@@ -685,12 +679,6 @@ func (oc *Controller) ensureNodeLogicalNetwork(nodeName string, hostsubnet *net.
 //	  "default": "192.168.2.1",
 // }
 func (oc *Controller) addNodeAnnotations(node *kapi.Node, subnet string) error {
-	// nothing to do if the node already has the annotation key
-	_, ok := node.Annotations[OvnNodeSubnets]
-	if ok {
-		return nil
-	}
-
 	bytes, err := json.Marshal(map[string]string{
 		"default": subnet,
 	})
@@ -713,12 +701,6 @@ func (oc *Controller) addNode(node *kapi.Node) (hostsubnet *net.IPNet, err error
 
 	hostsubnet, _ = parseNodeHostSubnet(node)
 	if hostsubnet != nil {
-		// Update the node's annotation to use the new annotation key and remove the
-		// old annotation key.
-		err = oc.addNodeAnnotations(node, hostsubnet.String())
-		if err != nil {
-			return nil, err
-		}
 		// Node already has subnet assigned; ensure its logical network is set up
 		return hostsubnet, oc.ensureNodeLogicalNetwork(node.Name, hostsubnet)
 	}
