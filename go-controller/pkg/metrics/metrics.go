@@ -20,6 +20,14 @@ const (
 	MetricOvnSubsystemDBRaft     = "db_raft"
 )
 
+// Build information. Populated at build-time.
+var (
+	Commit    string
+	Branch    string
+	BuildUser string
+	BuildDate string
+)
+
 // StartMetricsServer runs the prometheus listner so that metrics can be collected
 func StartMetricsServer(bindAddress string, enablePprof bool) {
 	mux := http.NewServeMux()
