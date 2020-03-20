@@ -195,3 +195,90 @@ func TestCidrsOverlap(t *testing.T) {
 		}
 	}
 }
+
+func TestJoinSubnetOverlaps(t *testing.T) {
+	tests := []struct {
+		name        string
+		cidrList    []*net.IPNet
+		shouldError bool
+	}{
+		{
+			name:        "empty ipnet entries",
+			cidrList:    nil,
+			shouldError: false,
+		},
+		{
+			name: "non-overlapping V4 ipnet entries",
+			cidrList: []*net.IPNet{
+				returnIPNetPointers("10.132.0.0/26"),
+				returnIPNetPointers("192.168.0.0/16"),
+				returnIPNetPointers("172.16.0.0/16"),
+			},
+			shouldError: false,
+		},
+		{
+			name: "non-overlapping V6 ipnet entries",
+			cidrList: []*net.IPNet{
+				returnIPNetPointers("fd98:8000::/65"),
+				returnIPNetPointers("fd99::/64"),
+				returnIPNetPointers("fd98:1::/64"),
+			},
+			shouldError: false,
+		},
+
+		{
+			name: "ipnet entry equal to V4 joinSubnet value",
+			cidrList: []*net.IPNet{
+				returnIPNetPointers("100.64.0.0/16"),
+			},
+			shouldError: true,
+		},
+		{
+			name: "ipnet entry equal to V6 joinSubnet value",
+			cidrList: []*net.IPNet{
+				returnIPNetPointers("fd98::/64"),
+			},
+			shouldError: true,
+		},
+		{
+			name: "ipnet entry overlapping with V4 joinSubnet value",
+			cidrList: []*net.IPNet{
+				returnIPNetPointers("100.64.128.0/17"),
+			},
+			shouldError: true,
+		},
+		{
+			name: "ipnet entry overlapping with V6 joinSubnet value",
+			cidrList: []*net.IPNet{
+				returnIPNetPointers("fd98::/68"),
+			},
+			shouldError: true,
+		},
+		{
+			name: "ipnet entry encompassing the V4 joinSubnet value",
+			cidrList: []*net.IPNet{
+				returnIPNetPointers("100.0.0.0/8"),
+			},
+			shouldError: true,
+		},
+		{
+			name: "ipnet entry encompassing the V6 joinSubnet value",
+			cidrList: []*net.IPNet{
+				returnIPNetPointers("fd98::/63"),
+			},
+			shouldError: true,
+		},
+	}
+
+	for _, tc := range tests {
+		err := overlapsWithJoinSubnet(tc.cidrList)
+		if err == nil && tc.shouldError {
+			t.Errorf("testcase \"%s\" expected function overlapsWithJoinSubnet to return err, but it did not",
+				tc.name)
+		}
+		if err != nil && !tc.shouldError {
+			t.Errorf("testcase \"%s\" expected function overlapsWithJoinSubnet not to return err, but it did: %v",
+				tc.name, err)
+		}
+	}
+}
