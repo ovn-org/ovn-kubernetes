@@ -108,6 +108,29 @@ func ovnDBMemoryMetricsUpdater(direction, database string) {
 	}
 }
 
+var (
+	ovnDbVersion      string
+	nbDbSchemaVersion string
+	sbDbSchemaVersion string
+)
+
+func getOvnDbVersionInfo() {
+	stdout, _, err := util.RunOVSDBClient("-V")
+	if err == nil && strings.HasPrefix(stdout, "ovsdb-client (Open vSwitch) ") {
+		ovnDbVersion = strings.Fields(stdout)[2]
+	}
+	sockPath := "unix:/var/run/openvswitch/ovnnb_db.sock"
+	stdout, _, err = util.RunOVSDBClient("get-schema-version", sockPath, "OVN_Northbound")
+	if err == nil {
+		nbDbSchemaVersion = strings.TrimSpace(stdout)
+	}
+	sockPath = "unix:/var/run/openvswitch/ovnsb_db.sock"
+	stdout, _, err = util.RunOVSDBClient("get-schema-version", sockPath, "OVN_Southbound")
+	if err == nil {
+		sbDbSchemaVersion = strings.TrimSpace(stdout)
+	}
+}
+
 // ReadinessProbeCommand runs readiness probes against various targets
 var OvnDBExporterCommand = cli.Command{
 	Name:  "ovn-db-exporter",
@@ -130,11 +153,28 @@ var OvnDBExporterCommand = cli.Command{
 		mux := http.NewServeMux()
 		mux.Handle("/metrics", promhttp.Handler())
 
+		// get the ovsdb server version info
+		getOvnDbVersionInfo()
 		// register metrics that will be served off of /metrics path
 		prometheus.MustRegister(metricOVNDBRaftIndex)
 		prometheus.MustRegister(metricOVNDBLeader)
 		prometheus.MustRegister(metricOVNDBMonitor)
 		prometheus.MustRegister(metricOVNDBSessions)
+		prometheus.MustRegister(prometheus.NewGaugeFunc(
+			prometheus.GaugeOpts{
+				Namespace: metrics.MetricOvnNamespace,
+				Subsystem: metrics.MetricOvnSubsystemDBRaft,
+				Name:      "build_info",
+				Help: "A metric with a constant '1' value labeled by ovsdb-server version and " +
+					"NB and SB schema version",
+				ConstLabels: prometheus.Labels{
+					"version":           ovnDbVersion,
+					"nb_schema_version": nbDbSchemaVersion,
+					"sb_schema_version": sbDbSchemaVersion,
+				},
+			},
+			func() float64 { return 1 },
+		))
 
 		// functions responsible for collecting the values and updating the prometheus metrics
 		go func() {
