@@ -28,6 +28,12 @@ const DefaultEncapPort = 6081
 
 const DefaultAPIServer = "http://localhost:8443"
 
+// IP address range from which subnet is allocated for per-node join switch
+const (
+	V4JoinSubnet = "100.64.0.0/16"
+	V6JoinSubnet = "fd98::/64"
+)
+
 // The following are global config parameters that other modules may access directly
 var (
 	// ovn-kubernetes version, to be changed with every release
@@ -859,8 +865,16 @@ func buildKubernetesConfig(exec kexec.Interface, cli, file *config, saPath strin
 	}
 	if Kubernetes.ServiceCIDR == "" {
 		return fmt.Errorf("kubernetes service-cidr is required")
-	} else if _, _, err := net.ParseCIDR(Kubernetes.ServiceCIDR); err != nil {
+	}
+	_, serviceIPNet, err := net.ParseCIDR(Kubernetes.ServiceCIDR)
+	if err != nil {
 		return fmt.Errorf("kubernetes service network CIDR %q invalid: %v", Kubernetes.ServiceCIDR, err)
+	}
+
+	// To check if service-ip-range is in JoinSubnet(100.64.0.0/16 or fd98::/64) range
+	err = overlapsWithJoinSubnet([]*net.IPNet{serviceIPNet})
+	if err != nil {
+		return err
 	}
 
 	if Kubernetes.PodIP != "" {
@@ -975,6 +989,22 @@ func buildDefaultConfig(cli, file *config) error {
 	Default.ClusterSubnets, err = ParseClusterSubnetEntries(Default.RawClusterSubnets)
 	if err != nil {
 		return fmt.Errorf("cluster subnet invalid: %v", err)
+	}
+
+	// Determine if ovn-kubernetes is configured to run in IPv6 mode
+	IPv6Mode = false
+	if len(Default.ClusterSubnets) >= 1 && Default.ClusterSubnets[0].CIDR.IP.To4() == nil {
+		IPv6Mode = true
+	}
+
+	// To check if any of clustersubnets is in JoinSubnet(100.64.0.0/16) range
+	var clustersubnets []*net.IPNet
+	for _, subnet := range Default.ClusterSubnets {
+		clustersubnets = append(clustersubnets, subnet.CIDR)
+	}
+	err = overlapsWithJoinSubnet(clustersubnets)
+	if err != nil {
+		return err
 	}
 	return nil
 }
@@ -1124,12 +1154,6 @@ func initConfigWithPath(ctx *cli.Context, exec kexec.Interface, saPath string, d
 		return "", err
 	}
 	OvnSouth = *tmpAuth
-
-	// Determine if ovn-kubernetes is configured to run in IPv6 mode
-	IPv6Mode = false
-	if len(Default.ClusterSubnets) >= 1 && Default.ClusterSubnets[0].CIDR.IP.To4() == nil {
-		IPv6Mode = true
-	}
 
 	klog.V(5).Infof("Default config: %+v", Default)
 	klog.V(5).Infof("Logging config: %+v", Logging)

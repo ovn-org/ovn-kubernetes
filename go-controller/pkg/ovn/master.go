@@ -65,11 +65,9 @@ func (oc *Controller) StartClusterMaster(masterNodeName string) error {
 	// We need a subnet allocator that allocates subnet for this per-node join switch. Use the 100.64.0.0/16
 	// or fd98::/64 network range with host bits set to 3. The allocator will start allocating subnet that has upto 6
 	// host IPs)
-	var joinSubnet string
+	joinSubnet := config.V4JoinSubnet
 	if config.IPv6Mode {
-		joinSubnet = "fd98::/64"
-	} else {
-		joinSubnet = "100.64.0.0/16"
+		joinSubnet = config.V6JoinSubnet
 	}
 	_ = oc.joinSubnetAllocator.AddNetworkRange(joinSubnet, 3)
 
