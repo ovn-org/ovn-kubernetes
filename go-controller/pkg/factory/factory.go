@@ -399,6 +399,7 @@ type ObjectCacheInterface interface {
 	GetService(namespace, name string) (*kapi.Service, error)
 	GetEndpoints(namespace string) ([]*kapi.Endpoints, error)
 	GetEndpoint(namespace, name string) (*kapi.Endpoints, error)
+	GetNamespace(name string) (*kapi.Namespace, error)
 	GetNamespaces() ([]*kapi.Namespace, error)
 }
 
@@ -682,6 +683,12 @@ func (wf *WatchFactory) GetEndpoints(namespace string) ([]*kapi.Endpoints, error
 func (wf *WatchFactory) GetEndpoint(namespace, name string) (*kapi.Endpoints, error) {
 	endpointsLister := wf.informers[endpointsType].lister.(listers.EndpointsLister)
 	return endpointsLister.Endpoints(namespace).Get(name)
+}
+
+//GetNamespace returns the namespace spec of a given namespace
+func (wf *WatchFactory) GetNamespace(name string) (*kapi.Namespace, error) {
+	namespaceLister := wf.informers[namespaceType].lister.(listers.NamespaceLister)
+	return namespaceLister.Get(name)
 }
 
 //GetNamespaces returns a list of namespaces in the cluster

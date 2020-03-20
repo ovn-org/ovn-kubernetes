@@ -3,6 +3,7 @@ package ovn
 import (
 	"fmt"
 	"net"
+	"reflect"
 	"sort"
 	"strings"
 	"sync"
@@ -13,6 +14,7 @@ import (
 	kapi "k8s.io/api/core/v1"
 	knet "k8s.io/api/networking/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/labels"
 	"k8s.io/client-go/tools/cache"
 	"k8s.io/klog"
 )
@@ -65,6 +67,15 @@ type gressPolicy struct {
 	// except the IP block in the except, which should be dropped.
 	ipBlockCidr   []string
 	ipBlockExcept []string
+
+	hashedLocalAddressSet string
+	peerPodAddressMap     map[string]bool
+	clauses               []*clause
+}
+
+type clause struct {
+	namespaceSelector *metav1.LabelSelector
+	podSelector       *metav1.LabelSelector
 }
 
 type portPolicy struct {
@@ -984,6 +995,9 @@ func (oc *Controller) addNetworkPolicy(policy *knet.NetworkPolicy) {
 			hashedLocalAddressSet = hashedAddressSet(localPeerPods)
 			createAddressSet(localPeerPods, hashedLocalAddressSet, nil)
 			ingress.addAddressSet(hashedLocalAddressSet)
+
+			ingress.hashedLocalAddressSet = hashedLocalAddressSet
+			ingress.peerPodAddressMap = peerPodAddressMap
 		}
 
 		for _, fromJSON := range ingressJSON.From {
@@ -996,29 +1010,13 @@ func (oc *Controller) addNetworkPolicy(policy *knet.NetworkPolicy) {
 		localPodAddACL(np, ingress)
 
 		for _, fromJSON := range ingressJSON.From {
-			if fromJSON.NamespaceSelector != nil && fromJSON.PodSelector != nil {
-				// For each rule that contains both peer namespace selector and
-				// peer pod selector, we create a watcher for each matching namespace
-				// that populates the addressSet
-				oc.handlePeerNamespaceAndPodSelector(policy, ingress,
-					fromJSON.NamespaceSelector, fromJSON.PodSelector,
-					hashedLocalAddressSet, peerPodAddressMap, np)
-
-			} else if fromJSON.NamespaceSelector != nil {
-				// For each peer namespace selector, we create a watcher that
-				// populates ingress.peerAddressSets
-				oc.handlePeerNamespaceSelector(policy,
-					fromJSON.NamespaceSelector, ingress, np,
-					oc.handlePeerNamespaceSelectorModify)
-			} else if fromJSON.PodSelector != nil {
-				// For each peer pod selector, we create a watcher that
-				// populates the addressSet
-				oc.handlePeerPodSelector(policy, fromJSON.PodSelector,
-					hashedLocalAddressSet, peerPodAddressMap, np)
-			}
+			ingress.clauses = append(ingress.clauses, &clause{fromJSON.NamespaceSelector, fromJSON.PodSelector})
 		}
 		np.ingressPolicies = append(np.ingressPolicies, ingress)
 	}
+
+	oc.watchPods(policy, np, np.ingressPolicies)
+	oc.watchNamespaces(policy, np, np.ingressPolicies, oc.handlePeerNamespaceSelectorModify)
 
 	// Go through each egress rule.  For each egress rule, create an
 	// addressSet for the peer pods.
@@ -1027,7 +1025,7 @@ func (oc *Controller) addNetworkPolicy(policy *knet.NetworkPolicy) {
 
 		egress := newGressPolicy(knet.PolicyTypeEgress, i)
 
-		// Each egress rule can have multiple ports to which we allow traffic.
+		// Each egress rule can have qmultiple ports to which we allow traffic.
 		for _, portJSON := range egressJSON.Ports {
 			egress.addPortPolicy(&portJSON)
 		}
@@ -1045,6 +1043,9 @@ func (oc *Controller) addNetworkPolicy(policy *knet.NetworkPolicy) {
 			hashedLocalAddressSet = hashedAddressSet(localPeerPods)
 			createAddressSet(localPeerPods, hashedLocalAddressSet, nil)
 			egress.addAddressSet(hashedLocalAddressSet)
+
+			egress.hashedLocalAddressSet = hashedLocalAddressSet
+			egress.peerPodAddressMap = peerPodAddressMap
 		}
 
 		for _, toJSON := range egressJSON.To {
@@ -1057,29 +1058,13 @@ func (oc *Controller) addNetworkPolicy(policy *knet.NetworkPolicy) {
 		localPodAddACL(np, egress)
 
 		for _, toJSON := range egressJSON.To {
-			if toJSON.NamespaceSelector != nil && toJSON.PodSelector != nil {
-				// For each rule that contains both peer namespace selector and
-				// peer pod selector, we create a watcher for each matching namespace
-				// that populates the addressSet
-				oc.handlePeerNamespaceAndPodSelector(policy, egress,
-					toJSON.NamespaceSelector, toJSON.PodSelector,
-					hashedLocalAddressSet, peerPodAddressMap, np)
-
-			} else if toJSON.NamespaceSelector != nil {
-				// For each peer namespace selector, we create a watcher that
-				// populates egress.peerAddressSets
-				oc.handlePeerNamespaceSelector(policy,
-					toJSON.NamespaceSelector, egress, np,
-					oc.handlePeerNamespaceSelectorModify)
-			} else if toJSON.PodSelector != nil {
-				// For each peer pod selector, we create a watcher that
-				// populates the addressSet
-				oc.handlePeerPodSelector(policy, toJSON.PodSelector,
-					hashedLocalAddressSet, peerPodAddressMap, np)
-			}
+			egress.clauses = append(egress.clauses, &clause{toJSON.NamespaceSelector, toJSON.PodSelector})
 		}
 		np.egressPolicies = append(np.egressPolicies, egress)
 	}
+
+	oc.watchPods(policy, np, np.egressPolicies)
+	oc.watchNamespaces(policy, np, np.egressPolicies, oc.handlePeerNamespaceSelectorModify)
 
 	// For all the pods in the local namespace that this policy
 	// effects, add them to the port group.
@@ -1216,133 +1201,357 @@ func (oc *Controller) handlePeerPodSelectorDelete(np *namespacePolicy,
 	removeFromAddressSet(addressSet, ipAddress)
 }
 
-func (oc *Controller) handlePeerPodSelector(
-	policy *knet.NetworkPolicy, podSelector *metav1.LabelSelector,
-	addressSet string, addressMap map[string]bool, np *namespacePolicy) {
-
-	h, err := oc.watchFactory.AddFilteredPodHandler(policy.Namespace,
-		podSelector,
-		cache.ResourceEventHandlerFuncs{
-			AddFunc: func(obj interface{}) {
-				oc.handlePeerPodSelectorAddUpdate(np, addressMap, addressSet, obj)
-			},
-			DeleteFunc: func(obj interface{}) {
-				oc.handlePeerPodSelectorDelete(np, addressMap, addressSet, obj)
-			},
-			UpdateFunc: func(oldObj, newObj interface{}) {
-				oc.handlePeerPodSelectorAddUpdate(np, addressMap, addressSet, newObj)
-			},
-		}, nil)
+func (oc *Controller) matchNamespaceSelectorAndPodSelector(obj interface{}, podSelector, namespaceSelector *metav1.LabelSelector) (bool, error) {
+	pod := obj.(*kapi.Pod)
+	namespace, err := oc.watchFactory.GetNamespace(pod.Namespace)
 	if err != nil {
-		klog.Errorf("error watching peer pods for policy %s in namespace %s: %v",
-			policy.Name, policy.Namespace, err)
-		return
+		return false, fmt.Errorf("failed to get k8s namespace %s of pod %s: %v", pod.Namespace, pod.Name, err)
 	}
-
-	np.podHandlerList = append(np.podHandlerList, h)
+	namespaceSel, err := metav1.LabelSelectorAsSelector(namespaceSelector)
+	if err != nil {
+		return false, fmt.Errorf("error creating label selector: %v", err)
+	}
+	podSel, err := metav1.LabelSelectorAsSelector(podSelector)
+	if err != nil {
+		klog.Errorf("error creating label selector %v", err)
+	}
+	if namespaceSel.Matches(labels.Set(namespace.Labels)) && podSel.Matches(labels.Set(pod.Labels)) {
+		return true, nil
+	}
+	return false, nil
 }
 
-func (oc *Controller) handlePeerNamespaceAndPodSelector(policy *knet.NetworkPolicy, gress *gressPolicy, namespaceSelector *metav1.LabelSelector, podSelector *metav1.LabelSelector, addressSet string, addressMap map[string]bool, np *namespacePolicy) {
-	namespaceHandler, err := oc.watchFactory.AddFilteredNamespaceHandler("",
-		namespaceSelector,
-		cache.ResourceEventHandlerFuncs{
-			AddFunc: func(obj interface{}) {
-				namespace := obj.(*kapi.Namespace)
-				np.Lock()
-				alreadyDeleted := np.deleted
-				np.Unlock()
-				if alreadyDeleted {
-					return
+func (oc *Controller) watchPods(policy *knet.NetworkPolicy, np *namespacePolicy, gressPolicies []*gressPolicy) {
+	_, err := oc.watchFactory.AddPodHandler(cache.ResourceEventHandlerFuncs{
+		AddFunc: func(obj interface{}) {
+			pod := obj.(*kapi.Pod)
+			for _, gress := range gressPolicies {
+				for _, clause := range gress.clauses {
+					if clause.namespaceSelector != nil && clause.podSelector != nil {
+						//pod and namespace selector are being used
+						match, err := oc.matchNamespaceSelectorAndPodSelector(obj, clause.podSelector, clause.namespaceSelector)
+						if err != nil {
+							klog.Errorf("%v", err)
+							continue
+						}
+						if match {
+							oc.handlePeerPodSelectorAddUpdate(np, gress.peerPodAddressMap, gress.hashedLocalAddressSet, obj)
+						}
+					} else if clause.namespaceSelector != nil {
+						// Changes to a pod should not affect policies that only select on namespaces
+						continue
+					} else if clause.podSelector != nil {
+						//podSelector only
+						podSel, err := metav1.LabelSelectorAsSelector(clause.podSelector)
+						if err != nil {
+							klog.Errorf("error creating label selector %v", err)
+						}
+						if policy.Namespace == pod.Namespace && podSel.Matches(labels.Set(pod.Labels)) {
+							oc.handlePeerPodSelectorAddUpdate(np, gress.peerPodAddressMap, gress.hashedLocalAddressSet, obj)
+						}
+					}
+				}
+			}
+
+		},
+		DeleteFunc: func(obj interface{}) {
+			pod := obj.(*kapi.Pod)
+			for _, gress := range gressPolicies {
+				for _, clause := range gress.clauses {
+					if clause.namespaceSelector != nil && clause.podSelector != nil {
+						//pod and namespace selector are being used
+						match, err := oc.matchNamespaceSelectorAndPodSelector(obj, clause.podSelector, clause.namespaceSelector)
+						if err != nil {
+							klog.Errorf("%v", err)
+							continue
+						}
+						if match {
+							oc.handlePeerPodSelectorDelete(np, gress.peerPodAddressMap, gress.hashedLocalAddressSet, obj)
+							oc.handlePeerPodSelectorDeleteACLRules(obj, gress)
+						}
+
+					} else if clause.namespaceSelector != nil {
+						// Changes to a pod should not affect policies that only select on namespaces
+						continue
+					} else if clause.podSelector != nil {
+						//podSelector only
+						podSel, err := metav1.LabelSelectorAsSelector(clause.podSelector)
+						if err != nil {
+							klog.Errorf("error creating label selector %v", err)
+						}
+						if policy.Namespace == pod.Namespace && podSel.Matches(labels.Set(pod.Labels)) {
+							oc.handlePeerPodSelectorDelete(np, gress.peerPodAddressMap, gress.hashedLocalAddressSet, obj)
+						}
+					}
 				}
 
-				// The AddFilteredPodHandler call might call handlePeerPodSelectorAddUpdate
-				// on existing pods so we can't be holding the lock at this point
-				podHandler, err := oc.watchFactory.AddFilteredPodHandler(namespace.Name,
-					podSelector,
-					cache.ResourceEventHandlerFuncs{
-						AddFunc: func(obj interface{}) {
-							oc.handlePeerPodSelectorAddUpdate(np, addressMap, addressSet, obj)
-						},
-						DeleteFunc: func(obj interface{}) {
-							oc.handlePeerPodSelectorDelete(np, addressMap, addressSet, obj)
-							oc.handlePeerPodSelectorDeleteACLRules(obj, gress)
-						},
-						UpdateFunc: func(oldObj, newObj interface{}) {
-							oc.handlePeerPodSelectorAddUpdate(np, addressMap, addressSet, newObj)
-						},
-					}, nil)
-				if err != nil {
-					klog.Errorf("error watching pods in namespace %s for policy %s: %v", namespace.Name, policy.Name, err)
-					return
+			}
+
+		},
+		UpdateFunc: func(oldObj, newObj interface{}) {
+			newPod := newObj.(*kapi.Pod)
+			oldPod := oldObj.(*kapi.Pod)
+			if reflect.DeepEqual(newPod.Labels, oldPod.Labels) {
+				//the pods labels have not changed so nothing regarding networkpolicy will
+				return
+			}
+
+			for _, gress := range gressPolicies {
+				for _, clause := range gress.clauses {
+					if clause.namespaceSelector != nil && clause.podSelector != nil {
+						//pod and namespace selector are being used
+						newMatch, err := oc.matchNamespaceSelectorAndPodSelector(newObj, clause.podSelector, clause.namespaceSelector)
+						if err != nil {
+							klog.Errorf("%v", err)
+							continue
+						}
+						oldMatch, err := oc.matchNamespaceSelectorAndPodSelector(oldObj, clause.podSelector, clause.namespaceSelector)
+						if err != nil {
+							klog.Errorf("%v", err)
+						}
+						if newMatch && !oldMatch {
+							oc.handlePeerPodSelectorAddUpdate(np, gress.peerPodAddressMap, gress.hashedLocalAddressSet, newObj)
+						}
+						if !newMatch && oldMatch {
+							oc.handlePeerPodSelectorDelete(np, gress.peerPodAddressMap, gress.hashedLocalAddressSet, oldObj)
+						}
+					} else if clause.namespaceSelector != nil {
+						// Changes to a pod should not affect policies that only select on namespaces
+						continue
+					} else if clause.podSelector != nil {
+						//podSelector only
+						podSel, err := metav1.LabelSelectorAsSelector(clause.podSelector)
+						if err != nil {
+							klog.Errorf("error creating label selector %v", err)
+						}
+						if policy.Namespace == newPod.Namespace && podSel.Matches(labels.Set(newPod.Labels)) && !podSel.Matches(labels.Set(oldPod.Labels)) {
+							oc.handlePeerPodSelectorAddUpdate(np, gress.peerPodAddressMap, gress.hashedLocalAddressSet, newObj)
+						}
+						if policy.Namespace == newPod.Namespace &&
+							!podSel.Matches(labels.Set(newPod.Labels)) && podSel.Matches(labels.Set(oldPod.Labels)) {
+							oc.handlePeerPodSelectorDelete(np, gress.peerPodAddressMap, gress.hashedLocalAddressSet, oldObj)
+						}
+					}
 				}
-				np.Lock()
-				defer np.Unlock()
-				if np.deleted {
-					_ = oc.watchFactory.RemovePodHandler(podHandler)
-					return
-				}
-				np.podHandlerList = append(np.podHandlerList, podHandler)
-			},
-			DeleteFunc: func(obj interface{}) {
-			},
-			UpdateFunc: func(oldObj, newObj interface{}) {
-			},
-		}, nil)
+
+			}
+
+		},
+	}, nil)
+
 	if err != nil {
-		klog.Errorf("error watching namespaces for policy %s: %v",
-			policy.Name, err)
-		return
+		klog.Errorf("error watching pods for policy %s in namespace %s: %v", policy.Name, policy.Namespace, err)
 	}
-	np.nsHandlerList = append(np.nsHandlerList, namespaceHandler)
+
 }
 
 type peerNamespaceSelectorModifyFn func(*gressPolicy, *namespacePolicy, string, string)
 
-func (oc *Controller) handlePeerNamespaceSelector(
-	policy *knet.NetworkPolicy,
-	namespaceSelector *metav1.LabelSelector,
-	gress *gressPolicy, np *namespacePolicy,
-	modifyFn peerNamespaceSelectorModifyFn) {
+func (oc *Controller) watchNamespaces(policy *knet.NetworkPolicy, np *namespacePolicy, gressPolicies []*gressPolicy, modifyFn peerNamespaceSelectorModifyFn) {
+	_, err := oc.watchFactory.AddNamespaceHandler(cache.ResourceEventHandlerFuncs{
+		AddFunc: func(obj interface{}) {
+			namespace := obj.(*kapi.Namespace)
+			for _, gress := range gressPolicies {
+				for _, clause := range gress.clauses {
+					if clause.namespaceSelector != nil && clause.podSelector != nil {
+						namespaceSel, err := metav1.LabelSelectorAsSelector(clause.namespaceSelector)
+						if err != nil {
+							klog.Errorf("Error creating label selector")
+						}
+						if namespaceSel.Matches(labels.Set(namespace.Labels)) {
 
-	h, err := oc.watchFactory.AddFilteredNamespaceHandler("",
-		namespaceSelector,
-		cache.ResourceEventHandlerFuncs{
-			AddFunc: func(obj interface{}) {
-				namespace := obj.(*kapi.Namespace)
-				np.Lock()
-				defer np.Unlock()
-				if np.deleted {
-					return
+							pods, err := oc.watchFactory.GetPods(namespace.Name)
+							if err != nil {
+								klog.Errorf("Error grabbing pods for namespace:%s: %v", namespace.Name, err)
+							}
+							for _, pod := range pods {
+								podSel, err := metav1.LabelSelectorAsSelector(clause.podSelector)
+								if err != nil {
+									klog.Errorf("Error creating label selector")
+								}
+								if podSel.Matches(labels.Set(pod.Labels)) {
+									oc.handlePeerPodSelectorAddUpdate(np, gress.peerPodAddressMap, gress.hashedLocalAddressSet, pod)
+								}
+							}
+						}
+
+					} else if clause.namespaceSelector != nil {
+						namespaceSel, err := metav1.LabelSelectorAsSelector(clause.namespaceSelector)
+						if err != nil {
+							klog.Errorf("error creating label selector")
+							continue
+						}
+						if namespaceSel.Matches(labels.Set(namespace.Labels)) {
+							np.Lock()
+							if np.deleted {
+								np.Unlock()
+								continue
+							}
+							hashedAddressSet := hashedAddressSet(namespace.Name)
+							oldL3Match, newL3Match, added := gress.addAddressSet(hashedAddressSet)
+							if added {
+								modifyFn(gress, np, oldL3Match, newL3Match)
+							}
+							np.Unlock()
+						}
+					} else if clause.podSelector != nil {
+						// changes to a namespace will not affect clause that only selects on pods
+						continue
+					}
 				}
-				hashedAddressSet := hashedAddressSet(namespace.Name)
-				oldL3Match, newL3Match, added := gress.addAddressSet(hashedAddressSet)
-				if added {
-					modifyFn(gress, np, oldL3Match, newL3Match)
+			}
+		},
+		DeleteFunc: func(obj interface{}) {
+			namespace := obj.(*kapi.Namespace)
+			for _, gress := range gressPolicies {
+				for _, clause := range gress.clauses {
+					if clause.namespaceSelector != nil && clause.podSelector != nil {
+						namespaceSel, err := metav1.LabelSelectorAsSelector(clause.namespaceSelector)
+						if err != nil {
+							klog.Errorf("Error creating label selector")
+						}
+						if namespaceSel.Matches(labels.Set(namespace.Labels)) {
+							//get all pods
+							pods, err := oc.watchFactory.GetPods(namespace.Name)
+							if err != nil {
+								klog.Errorf("Error grabbing pods for namespace: %s: %v", namespace.Name, err)
+							}
+							for _, pod := range pods {
+								podSel, err := metav1.LabelSelectorAsSelector(clause.podSelector)
+								if err != nil {
+									klog.Errorf("Error creating label selector")
+									continue
+								}
+								if podSel.Matches(labels.Set(pod.Labels)) {
+									oc.handlePeerPodSelectorDelete(np, gress.peerPodAddressMap, gress.hashedLocalAddressSet, pod)
+									oc.handlePeerPodSelectorDeleteACLRules(pod, gress)
+
+								}
+							}
+						}
+					} else if clause.namespaceSelector != nil {
+						namespaceSel, err := metav1.LabelSelectorAsSelector(clause.namespaceSelector)
+						if err != nil {
+							klog.Errorf("error creating label selector")
+						}
+						if namespaceSel.Matches(labels.Set(namespace.Labels)) {
+							np.Lock()
+							if np.deleted {
+								np.Unlock()
+								continue
+							}
+							hashedAddressSet := hashedAddressSet(namespace.Name)
+							oldL3Match, newL3Match, removed := gress.delAddressSet(hashedAddressSet)
+							if removed {
+								modifyFn(gress, np, oldL3Match, newL3Match)
+							}
+							np.Unlock()
+						}
+					} else if clause.podSelector != nil {
+						// changes to a namespace will not affect clause that only selects on pods
+						continue
+					}
 				}
-			},
-			DeleteFunc: func(obj interface{}) {
-				namespace := obj.(*kapi.Namespace)
-				np.Lock()
-				defer np.Unlock()
-				if np.deleted {
-					return
+			}
+		},
+		UpdateFunc: func(old, newer interface{}) {
+			oldNamespace := old.(*kapi.Namespace)
+			newNamespace := newer.(*kapi.Namespace)
+			if reflect.DeepEqual(oldNamespace.Labels, newNamespace.Labels) {
+				//the labels did not change so nothing needs to happen
+				return
+			}
+			for _, gress := range gressPolicies {
+				for _, clause := range gress.clauses {
+					if clause.namespaceSelector != nil && clause.podSelector != nil {
+						namespaceSel, err := metav1.LabelSelectorAsSelector(clause.namespaceSelector)
+						if err != nil {
+							klog.Errorf("error creating label selector")
+							continue
+						}
+						if namespaceSel.Matches(labels.Set(newNamespace.Labels)) &&
+							!namespaceSel.Matches(labels.Set(oldNamespace.Labels)) {
+							//get all pods
+							pods, err := oc.watchFactory.GetPods(newNamespace.Name)
+							if err != nil {
+								klog.Errorf("Error grabbing pods for namespace %s: %v", newNamespace.Name, err)
+							}
+							podSel, err := metav1.LabelSelectorAsSelector(clause.podSelector)
+							if err != nil {
+								klog.Errorf("error creating labelSelector")
+								continue
+							}
+							for _, pod := range pods {
+								if podSel.Matches(labels.Set(pod.Labels)) {
+									oc.handlePeerPodSelectorAddUpdate(np, gress.peerPodAddressMap, gress.hashedLocalAddressSet, pod)
+								}
+							}
+
+						}
+						if !namespaceSel.Matches(labels.Set(newNamespace.Labels)) &&
+							namespaceSel.Matches(labels.Set(oldNamespace.Labels)) {
+							//get all pods
+							pods, err := oc.watchFactory.GetPods(newNamespace.Name)
+							if err != nil {
+								klog.Errorf("Error grabbing pods for namespace %s: %v", newNamespace.Name, err)
+							}
+							podSel, err := metav1.LabelSelectorAsSelector(clause.podSelector)
+							if err != nil {
+								klog.Errorf("error creating labelSelector")
+								continue
+							}
+							for _, pod := range pods {
+								if podSel.Matches(labels.Set(pod.Labels)) {
+									oc.handlePeerPodSelectorDelete(np, gress.peerPodAddressMap, gress.hashedLocalAddressSet, pod)
+									oc.handlePeerPodSelectorDeleteACLRules(pod, gress)
+								}
+							}
+						}
+					} else if clause.namespaceSelector != nil {
+
+						namespaceSel, err := metav1.LabelSelectorAsSelector(clause.namespaceSelector)
+						if err != nil {
+							klog.Errorf("error creating label selector")
+						}
+						if namespaceSel.Matches(labels.Set(newNamespace.Labels)) &&
+							!namespaceSel.Matches(labels.Set(oldNamespace.Labels)) {
+							np.Lock()
+							if np.deleted {
+								np.Unlock()
+								continue
+							}
+							hashedAddressSet := hashedAddressSet(newNamespace.Name)
+							oldL3Match, newL3Match, added := gress.addAddressSet(hashedAddressSet)
+							if added {
+								modifyFn(gress, np, oldL3Match, newL3Match)
+							}
+						} else if !namespaceSel.Matches(labels.Set(newNamespace.Labels)) &&
+							namespaceSel.Matches(labels.Set(oldNamespace.Labels)) {
+							np.Lock()
+							if np.deleted {
+								np.Unlock()
+								continue
+							}
+							hashedAddressSet := hashedAddressSet(oldNamespace.Name)
+							oldL3Match, newL3Match, removed := gress.delAddressSet(hashedAddressSet)
+							if removed {
+								modifyFn(gress, np, oldL3Match, newL3Match)
+							}
+						}
+						np.Unlock()
+					} else if clause.podSelector != nil {
+						// changes to a namespace will not affect clause that only selects on pods
+						continue
+					}
 				}
-				hashedAddressSet := hashedAddressSet(namespace.Name)
-				oldL3Match, newL3Match, removed := gress.delAddressSet(hashedAddressSet)
-				if removed {
-					modifyFn(gress, np, oldL3Match, newL3Match)
-				}
-			},
-			UpdateFunc: func(oldObj, newObj interface{}) {
-			},
-		}, nil)
+			}
+		},
+	}, nil)
 	if err != nil {
 		klog.Errorf("error watching namespaces for policy %s: %v",
 			policy.Name, err)
-		return
 	}
 
-	np.nsHandlerList = append(np.nsHandlerList, h)
 }
 
 func (oc *Controller) shutdownHandlers(np *namespacePolicy) {
