@@ -12,7 +12,7 @@ import (
 func GatewayCleanup(nodeName string, nodeSubnet *net.IPNet) error {
 	// Get the cluster router
 	clusterRouter := GetK8sClusterRouter()
-	gatewayRouter := fmt.Sprintf("GR_%s", nodeName)
+	gatewayRouter := GWRouterPrefix + nodeName
 
 	// Get the gateway router port's IP address (connected to join switch)
 	var routerIP string
@@ -43,10 +43,10 @@ func GatewayCleanup(nodeName string, nodeSubnet *net.IPNet) error {
 	staticRouteCleanup(clusterRouter, nextHops)
 
 	// Remove the join switch that connects ovn_cluster_router to gateway router
-	_, stderr, err = RunOVNNbctl("--if-exist", "ls-del", "join_"+nodeName)
+	_, stderr, err = RunOVNNbctl("--if-exist", "ls-del", JoinSwitchPrefix+nodeName)
 	if err != nil {
-		return fmt.Errorf("Failed to delete the join logical switch join_%s, "+
-			"stderr: %q, error: %v", nodeName, stderr, err)
+		return fmt.Errorf("Failed to delete the join logical switch %s, "+
+			"stderr: %q, error: %v", JoinSwitchPrefix+nodeName, stderr, err)
 	}
 
 	// Remove the gateway router associated with nodeName
@@ -58,7 +58,7 @@ func GatewayCleanup(nodeName string, nodeSubnet *net.IPNet) error {
 	}
 
 	// Remove external switch
-	externalSwitch := "ext_" + nodeName
+	externalSwitch := ExternalSwitchPrefix + nodeName
 	_, stderr, err = RunOVNNbctl("--if-exist", "ls-del",
 		externalSwitch)
 	if err != nil {

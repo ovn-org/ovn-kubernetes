@@ -17,7 +17,10 @@ const (
 	// access to physical/external network
 	PhysicalNetworkName = "physnet"
 	// OvnClusterRouter is the name of the distributed router
-	OvnClusterRouter = "ovn_cluster_router"
+	OvnClusterRouter     = "ovn_cluster_router"
+	JoinSwitchPrefix     = "join_"
+	ExternalSwitchPrefix = "ext_"
+	GWRouterPrefix       = "GR_"
 )
 
 // GetK8sClusterRouter returns back the OVN distributed router. This is meant to be used on the
@@ -117,7 +120,7 @@ func GatewayInit(clusterIPSubnet []string, joinSubnetStr, systemID, nodeName, if
 
 	k8sClusterRouter := GetK8sClusterRouter()
 	// Create a gateway router.
-	gatewayRouter := "GR_" + nodeName
+	gatewayRouter := GWRouterPrefix + nodeName
 	stdout, stderr, err := RunOVNNbctl("--", "--may-exist", "lr-add",
 		gatewayRouter, "--", "set", "logical_router", gatewayRouter,
 		"options:chassis="+systemID, "external_ids:physical_ip="+physicalIP)
@@ -133,7 +136,7 @@ func GatewayInit(clusterIPSubnet []string, joinSubnetStr, systemID, nodeName, if
 	gwLRPMac := IPAddrToHWAddr(gwLRPIp)
 	drLRPMac := IPAddrToHWAddr(drLRPIp)
 
-	joinSwitch := "join_" + nodeName
+	joinSwitch := JoinSwitchPrefix + nodeName
 	// create the per-node join switch
 	stdout, stderr, err = RunOVNNbctl("--", "--may-exist", "ls-add", joinSwitch)
 	if err != nil {
@@ -249,7 +252,7 @@ func GatewayInit(clusterIPSubnet []string, joinSubnetStr, systemID, nodeName, if
 	}
 
 	// Create the external switch for the physical interface to connect to.
-	externalSwitch := "ext_" + nodeName
+	externalSwitch := ExternalSwitchPrefix + nodeName
 	stdout, stderr, err = RunOVNNbctl("--may-exist", "ls-add",
 		externalSwitch)
 	if err != nil {
