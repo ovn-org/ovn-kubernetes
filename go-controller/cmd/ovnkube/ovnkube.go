@@ -230,8 +230,10 @@ func runOvnKube(ctx *cli.Context) error {
 		if config.Kubernetes.Token == "" {
 			return fmt.Errorf("cannot initialize node without service account 'token'. Please provide one with --k8s-token argument")
 		}
-		// register prometheus metrics exported by the node
+		// register ovnkube node specific prometheus metrics exported by the node
 		metrics.RegisterNodeMetrics()
+		// register ovn specific (ovn-controller and ovn-northd) metrics
+		metrics.RegisterOvnMetrics()
 		start := time.Now()
 		n := ovnnode.NewNode(clientset, factory, node)
 		if err := n.Start(); err != nil {

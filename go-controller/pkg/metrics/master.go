@@ -2,6 +2,7 @@ package metrics
 
 import (
 	"fmt"
+	"runtime"
 	"strconv"
 	"sync"
 	"time"
@@ -83,6 +84,24 @@ func RegisterMasterMetrics() {
 		prometheus.MustRegister(metricOvnCliLatency)
 		// this is to not to create circular import between metrics and util package
 		util.MetricOvnCliLatency = metricOvnCliLatency
+		prometheus.MustRegister(prometheus.NewGaugeFunc(
+			prometheus.GaugeOpts{
+				Namespace: MetricOvnkubeNamespace,
+				Subsystem: MetricOvnkubeSubsystemMaster,
+				Name:      "build_info",
+				Help: "A metric with a constant '1' value labeled by version, revision, branch, " +
+					"and go version from which ovnkube was built and when and who built it",
+				ConstLabels: prometheus.Labels{
+					"version":    "0.0",
+					"revision":   Commit,
+					"branch":     Branch,
+					"build_user": BuildUser,
+					"build_date": BuildDate,
+					"goversion":  runtime.Version(),
+				},
+			},
+			func() float64 { return 1 },
+		))
 	})
 }
 
