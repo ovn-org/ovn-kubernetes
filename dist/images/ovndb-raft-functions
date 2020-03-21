@@ -124,7 +124,6 @@ ovsdb-raft () {
 
   wait_for_event process_ready ovn${db}_db
   echo "=============== ${db}-ovsdb-raft ========== RUNNING"
-  sleep 3
 
   if [[ "${POD_NAME}" == "ovnkube-db-0" && "${initialize}" == "true" ]] ; then
     # set the connection and disable inactivity probe, this deletes the old connection if any
