@@ -326,7 +326,9 @@ process_healthy () {
     if [[ $? != 0 ]] ; then
       echo "=============== pid ${pid} terminated ========== "
       # kill the tail -f
-      kill $2
+      if [[ $2 != "" ]] ; then
+        kill $2
+      fi
       exit 6
     fi
     sleep 15
@@ -732,10 +734,7 @@ ovn-master () {
   wait_for_event attempts=3 process_ready ovnkube-master
   sleep 1
 
-  tail --follow=name /var/log/ovn-kubernetes/ovnkube-master.log &
-  kube_tail_pid=$!
-
-  process_healthy ovnkube-master ${kube_tail_pid}
+  process_healthy ovnkube-master
   exit 9
 }
 
@@ -825,10 +824,7 @@ ovn-node () {
   echo "=============== ovn-node ========== running"
 
   sleep 5
-  tail --follow=name /var/log/ovn-kubernetes/ovnkube.log &
-  node_tail_pid=$!
-
-  process_healthy ovnkube ${node_tail_pid}
+  process_healthy ovnkube
   exit 7
 }
 
