@@ -256,7 +256,7 @@ var _ = Describe("Gateway Init Operations", func() {
 		Expect(err).NotTo(HaveOccurred())
 
 		// Restore global default values before each testcase
-		config.RestoreDefaultConfig()
+		config.PrepareTestConfig()
 
 		app = cli.NewApp()
 		app.Name = "test"

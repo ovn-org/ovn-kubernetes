@@ -181,7 +181,7 @@ var _ = Describe("OVN Pod Operations", func() {
 
 	BeforeEach(func() {
 		// Restore global default values before each testcase
-		config.RestoreDefaultConfig()
+		config.PrepareTestConfig()
 
 		app = cli.NewApp()
 		app.Name = "test"

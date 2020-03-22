@@ -292,9 +292,9 @@ func init() {
 	Flags = append(Flags, MasterHAFlags...)
 }
 
-// RestoreDefaultConfig restores default config values. Used by testcases to
+// PrepareTestConfig restores default config values. Used by testcases to
 // provide a pristine environment between tests.
-func RestoreDefaultConfig() {
+func PrepareTestConfig() {
 	Default = savedDefault
 	Logging = savedLogging
 	CNI = savedCNI
@@ -303,6 +303,12 @@ func RestoreDefaultConfig() {
 	OvnSouth = savedOvnSouth
 	Gateway = savedGateway
 	MasterHA = savedMasterHA
+
+	// Don't pick up defaults from the environment
+	os.Unsetenv("KUBECONFIG")
+	os.Unsetenv("K8S_CACERT")
+	os.Unsetenv("K8S_APISERVER")
+	os.Unsetenv("K8S_TOKEN")
 }
 
 // copy members of struct 'src' into the corresponding field in struct 'dst'

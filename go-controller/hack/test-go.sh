@@ -8,10 +8,9 @@ setup_env
 
 cd "${OVN_KUBE_ROOT}"
 
-PKGS="${PKGS:-./cmd/... ./pkg/...}"
+PKGS=$(go list -mod vendor -f '{{if len .TestGoFiles}} {{.ImportPath}} {{end}}' ${PKGS:-./cmd/... ./pkg/...})
 
-
-for pkg in $(go list -mod vendor ${PKGS}); do
+for pkg in ${PKGS}; do
     # This package requires root
     if [[ "$USER" != root && "$pkg" == github.com/ovn-org/ovn-kubernetes/go-controller/pkg/node ]]; then
         testfile=$(mktemp --tmpdir ovn-test.XXXXXXXX)

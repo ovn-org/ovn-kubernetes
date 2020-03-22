@@ -168,7 +168,7 @@ var _ = Describe("Master Operations", func() {
 
 	BeforeEach(func() {
 		// Restore global default values before each testcase
-		config.RestoreDefaultConfig()
+		config.PrepareTestConfig()
 
 		app = cli.NewApp()
 		app.Name = "test"
@@ -476,7 +476,7 @@ var _ = Describe("Gateway Init Operations", func() {
 
 	BeforeEach(func() {
 		// Restore global default values before each testcase
-		config.RestoreDefaultConfig()
+		config.PrepareTestConfig()
 
 		app = cli.NewApp()
 		app.Name = "test"

@@ -222,7 +222,7 @@ var _ = Describe("Management Port Operations", func() {
 	BeforeEach(func() {
 		var err error
 		// Restore global default values before each testcase
-		config.RestoreDefaultConfig()
+		config.PrepareTestConfig()
 
 		app = cli.NewApp()
 		app.Name = "test"
