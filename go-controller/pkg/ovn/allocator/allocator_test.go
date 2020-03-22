@@ -29,15 +29,15 @@ func allocateExpected(sna *SubnetAllocator, n int, expected string) error {
 	if err != nil {
 		return fmt.Errorf("failed to allocate %s (%s): %v", networkID(n), expected, err)
 	}
-	if sn != expected {
-		return fmt.Errorf("failed to allocate %s: expected %s, got %s", networkID(n), expected, sn)
+	if sn.String() != expected {
+		return fmt.Errorf("failed to allocate %s: expected %s, got %s", networkID(n), expected, sn.String())
 	}
 	return nil
 }
 
 func allocateNotExpected(sna *SubnetAllocator, n int) error {
 	if sn, err := sna.AllocateNetwork(); err == nil {
-		return fmt.Errorf("unexpectedly succeeded in allocating %s (sn=%s)", networkID(n), sn)
+		return fmt.Errorf("unexpectedly succeeded in allocating %s (sn=%s)", networkID(n), sn.String())
 	} else if err != ErrSubnetAllocatorFull {
 		return fmt.Errorf("returned error was not ErrSubnetAllocatorFull (%v)", err)
 	}
@@ -287,7 +287,7 @@ func TestMarkAllocatedNetwork(t *testing.T) {
 		t.Fatal("Failed to initialize IP allocator: ", err)
 	}
 
-	allocSubnets := make([]string, 4)
+	allocSubnets := make([]*net.IPNet, 4)
 	for i := 0; i < 4; i++ {
 		if allocSubnets[i], err = sna.AllocateNetwork(); err != nil {
 			t.Fatal("Failed to allocate network: ", err)
@@ -295,24 +295,24 @@ func TestMarkAllocatedNetwork(t *testing.T) {
 	}
 
 	if sn, err := sna.AllocateNetwork(); err == nil {
-		t.Fatalf("Unexpectedly succeeded in allocating network (sn=%s)", sn)
+		t.Fatalf("Unexpectedly succeeded in allocating network (sn=%s)", sn.String())
 	}
 	if err := sna.ReleaseNetwork(allocSubnets[2]); err != nil {
-		t.Fatalf("Failed to release the subnet (allocSubnets[2]=%s): %v", allocSubnets[2], err)
+		t.Fatalf("Failed to release the subnet (allocSubnets[2]=%s): %v", allocSubnets[2].String(), err)
 	}
 	for i := 0; i < 2; i++ {
 		if err := sna.MarkAllocatedNetwork(allocSubnets[2]); err != nil {
-			t.Fatalf("Failed to mark allocated subnet (allocSubnets[2]=%s): %v", allocSubnets[2], err)
+			t.Fatalf("Failed to mark allocated subnet (allocSubnets[2]=%s): %v", allocSubnets[2].String(), err)
 		}
 	}
 	if sn, err := sna.AllocateNetwork(); err == nil {
-		t.Fatalf("Unexpectedly succeeded in allocating network (sn=%s)", sn)
+		t.Fatalf("Unexpectedly succeeded in allocating network (sn=%s)", sn.String())
 	}
 
 	// Test subnet that does not belong to network
-	sn := "10.2.3.4/24"
-	if err := sna.MarkAllocatedNetwork(sn); err == nil {
-		t.Fatalf("Unexpectedly succeeded in marking allocated subnet that doesn't belong to network (sn=%s)", sn)
+	_, subnet, _ := net.ParseCIDR("10.2.3.4/24")
+	if err := sna.MarkAllocatedNetwork(subnet); err == nil {
+		t.Fatalf("Unexpectedly succeeded in marking allocated subnet that doesn't belong to network (sn=%s)", subnet.String())
 	}
 }
 
@@ -322,15 +322,15 @@ func TestAllocateReleaseSubnet(t *testing.T) {
 		t.Fatal("Failed to initialize IP allocator: ", err)
 	}
 
-	var releaseSn string
+	var releaseSn *net.IPNet
 
 	for i := 0; i < 4; i++ {
 		sn, err := sna.AllocateNetwork()
 		if err != nil {
 			t.Fatal("Failed to allocate network: ", err)
 		}
-		if sn != fmt.Sprintf("10.1.%d.0/18", i*64) {
-			t.Fatalf("Did not get expected subnet (i=%d, sn=%s)", i, sn)
+		if sn.String() != fmt.Sprintf("10.1.%d.0/18", i*64) {
+			t.Fatalf("Did not get expected subnet (i=%d, sn=%s)", i, sn.String())
 		}
 		if i == 2 {
 			releaseSn = sn
@@ -339,7 +339,7 @@ func TestAllocateReleaseSubnet(t *testing.T) {
 
 	sn, err := sna.AllocateNetwork()
 	if err == nil {
-		t.Fatalf("Unexpectedly succeeded in allocating network (sn=%s)", sn)
+		t.Fatalf("Unexpectedly succeeded in allocating network (sn=%s)", sn.String())
 	}
 
 	if err := sna.ReleaseNetwork(releaseSn); err != nil {
@@ -350,13 +350,13 @@ func TestAllocateReleaseSubnet(t *testing.T) {
 	if err != nil {
 		t.Fatal("Failed to allocate network: ", err)
 	}
-	if sn != releaseSn {
-		t.Fatalf("Did not get expected subnet (sn=%s)", sn)
+	if sn.String() != releaseSn.String() {
+		t.Fatalf("Did not get expected subnet (sn=%s)", sn.String())
 	}
 
 	sn, err = sna.AllocateNetwork()
 	if err == nil {
-		t.Fatalf("Unexpectedly succeeded in allocating network (sn=%s)", sn)
+		t.Fatalf("Unexpectedly succeeded in allocating network (sn=%s)", sn.String())
 	}
 }
 
@@ -386,11 +386,13 @@ func TestMultipleSubnets(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if err := sna.ReleaseNetwork("10.1.128.0/18"); err != nil {
-		t.Fatalf("Failed to release the subnet 10.1.128.0/18: %v", err)
+	_, sn, _ := net.ParseCIDR("10.1.128.0/18")
+	if err := sna.ReleaseNetwork(sn); err != nil {
+		t.Fatalf("Failed to release the subnet %s: %v", sn.String(), err)
 	}
-	if err := sna.ReleaseNetwork("10.2.128.0/18"); err != nil {
-		t.Fatalf("Failed to release the subnet 10.2.128.0/18: %v", err)
+	_, sn, _ = net.ParseCIDR("10.2.128.0/18")
+	if err := sna.ReleaseNetwork(sn); err != nil {
+		t.Fatalf("Failed to release the subnet %s: %v", sn.String(), err)
 	}
 
 	if err := allocateExpected(sna, -1, "10.1.128.0/18"); err != nil {

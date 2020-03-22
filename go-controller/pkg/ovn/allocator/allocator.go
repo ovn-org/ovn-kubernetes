@@ -34,49 +34,41 @@ func (sna *SubnetAllocator) AddNetworkRange(network string, hostBits uint32) err
 	return nil
 }
 
-func (sna *SubnetAllocator) MarkAllocatedNetwork(subnet string) error {
+func (sna *SubnetAllocator) MarkAllocatedNetwork(subnet *net.IPNet) error {
 	sna.Lock()
 	defer sna.Unlock()
 
-	_, ipnet, err := net.ParseCIDR(subnet)
-	if err != nil {
-		return err
-	}
 	for _, snr := range sna.ranges {
-		if snr.markAllocatedNetwork(ipnet) {
+		if snr.markAllocatedNetwork(subnet) {
 			return nil
 		}
 	}
-	return fmt.Errorf("network %s does not belong to any known range", subnet)
+	return fmt.Errorf("network %s does not belong to any known range", subnet.String())
 }
 
-func (sna *SubnetAllocator) AllocateNetwork() (string, error) {
+func (sna *SubnetAllocator) AllocateNetwork() (*net.IPNet, error) {
 	sna.Lock()
 	defer sna.Unlock()
 
 	for _, snr := range sna.ranges {
 		sn := snr.allocateNetwork()
 		if sn != nil {
-			return sn.String(), nil
+			return sn, nil
 		}
 	}
-	return "", ErrSubnetAllocatorFull
+	return nil, ErrSubnetAllocatorFull
 }
 
-func (sna *SubnetAllocator) ReleaseNetwork(subnet string) error {
+func (sna *SubnetAllocator) ReleaseNetwork(subnet *net.IPNet) error {
 	sna.Lock()
 	defer sna.Unlock()
 
-	_, ipnet, err := net.ParseCIDR(subnet)
-	if err != nil {
-		return err
-	}
 	for _, snr := range sna.ranges {
-		if snr.releaseNetwork(ipnet) {
+		if snr.releaseNetwork(subnet) {
 			return nil
 		}
 	}
-	return fmt.Errorf("network %s does not belong to any known range", subnet)
+	return fmt.Errorf("network %s does not belong to any known range", subnet.String())
 }
 
 // subnetAllocatorRange handles allocating subnets out of a single CIDR
