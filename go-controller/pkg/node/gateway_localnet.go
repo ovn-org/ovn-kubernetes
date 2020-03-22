@@ -26,6 +26,9 @@ const (
 	v6localnetGatewayIP            = "fd99::2/64"
 	v6localnetGatewayNextHop       = "fd99::1"
 	v6localnetGatewayNextHopSubnet = "fd99::1/64"
+	// localnetGatewayNextHopPort is the name of the gateway port on the host to which all
+	// the packets leaving the OVN logical topology will be forwarded
+	localnetGatewayNextHopPort = "ovn-k8s-gw0"
 	// fixed MAC address for the br-nexthop interface. the last 4 hex bytes
 	// translates to the br-nexthop's IP address
 	localnetGatewayNextHopMac = "00:00:a9:fe:21:01"
@@ -160,18 +163,17 @@ func initLocalnetGateway(nodeName string,
 		return nil, err
 	}
 
-	// Create a localnet bridge nexthop
-	localnetBridgeNextHop := "br-nexthop"
+	// Create a localnet bridge gateway port
 	_, stderr, err = util.RunOVSVsctl(
-		"--may-exist", "add-port", localnetBridgeName, localnetBridgeNextHop,
-		"--", "set", "interface", localnetBridgeNextHop, "type=internal",
+		"--may-exist", "add-port", localnetBridgeName, localnetGatewayNextHopPort,
+		"--", "set", "interface", localnetGatewayNextHopPort, "type=internal",
 		"mtu_request="+fmt.Sprintf("%d", config.Default.MTU),
 		fmt.Sprintf("mac=%s", strings.ReplaceAll(localnetGatewayNextHopMac, ":", "\\:")))
 	if err != nil {
-		return nil, fmt.Errorf("Failed to create localnet bridge next hop %s"+
-			", stderr:%s (%v)", localnetBridgeNextHop, stderr, err)
+		return nil, fmt.Errorf("Failed to create localnet bridge gateway port %s"+
+			", stderr:%s (%v)", localnetGatewayNextHopPort, stderr, err)
 	}
-	link, err := util.LinkSetUp(localnetBridgeNextHop)
+	link, err := util.LinkSetUp(localnetGatewayNextHopPort)
 	if err != nil {
 		return nil, err
 	}
@@ -200,13 +202,13 @@ func initLocalnetGateway(nodeName string,
 		// MAC binding for the gateway IP address for now - need to debug this further
 		err = util.LinkNeighAdd(link, "fd99::2", macAddress)
 		if err == nil {
-			klog.Infof("Added MAC binding for fd99::2 on br-nexthop")
+			klog.Infof("Added MAC binding for fd99::2 on %s", localnetGatewayNextHopPort)
 		} else {
-			klog.Errorf("Error in adding MAC binding for fd99::2 on br-nexthop: %v", err)
+			klog.Errorf("Error in adding MAC binding for fd99::2 on %s: %v", localnetGatewayNextHopPort, err)
 		}
 	}
 
-	err = localnetGatewayNAT(ipt, localnetBridgeNextHop, localnetGatewayIP())
+	err = localnetGatewayNAT(ipt, localnetGatewayNextHopPort, localnetGatewayIP())
 	if err != nil {
 		return nil, fmt.Errorf("Failed to add NAT rules for localnet gateway (%v)",
 			err)
