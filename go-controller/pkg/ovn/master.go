@@ -230,10 +230,14 @@ func (oc *Controller) allocateJoinSubnet(node *kapi.Node) (*net.IPNet, error) {
 	}
 
 	// Allocate a new network for the join switch
-	joinSubnet, err = oc.joinSubnetAllocator.AllocateNetwork()
+	joinSubnets, err := oc.joinSubnetAllocator.AllocateNetworks()
 	if err != nil {
-		return nil, fmt.Errorf("Error allocating subnet for join switch for node  %s: %v", node.Name, err)
+		return nil, fmt.Errorf("Error allocating subnet for join switch for node %s: %v", node.Name, err)
 	}
+	if len(joinSubnets) != 1 {
+		return nil, fmt.Errorf("Error allocating subnet for join switch for node %s: multiple subnets returned", node.Name)
+	}
+	joinSubnet = joinSubnets[0]
 
 	defer func() {
 		// Release the allocation on error
@@ -720,10 +724,14 @@ func (oc *Controller) addNode(node *kapi.Node) (hostsubnet *net.IPNet, err error
 	}
 
 	// Node doesn't have a subnet assigned; reserve a new one for it
-	hostsubnet, err = oc.masterSubnetAllocator.AllocateNetwork()
+	hostsubnets, err := oc.masterSubnetAllocator.AllocateNetworks()
 	if err != nil {
 		return nil, fmt.Errorf("Error allocating network for node %s: %v", node.Name, err)
 	}
+	if len(hostsubnets) != 1 {
+		return nil, fmt.Errorf("Error allocating network for node %s: multiple subnets returned", node.Name)
+	}
+	hostsubnet = hostsubnets[0]
 	klog.Infof("Allocated node %s HostSubnet %s", node.Name, hostsubnet.String())
 
 	defer func() {

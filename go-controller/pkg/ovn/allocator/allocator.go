@@ -11,7 +11,8 @@ var ErrSubnetAllocatorFull = fmt.Errorf("no subnets available.")
 type SubnetAllocator struct {
 	sync.Mutex
 
-	ranges []*subnetAllocatorRange
+	v4ranges []*subnetAllocatorRange
+	v6ranges []*subnetAllocatorRange
 }
 
 func NewSubnetAllocator() *SubnetAllocator {
@@ -30,7 +31,12 @@ func (sna *SubnetAllocator) AddNetworkRange(network string, hostBits uint32) err
 	if err != nil {
 		return err
 	}
-	sna.ranges = append(sna.ranges, snr)
+
+	if snr.network.IP.To4() != nil {
+		sna.v4ranges = append(sna.v4ranges, snr)
+	} else {
+		sna.v6ranges = append(sna.v6ranges, snr)
+	}
 	return nil
 }
 
@@ -38,7 +44,12 @@ func (sna *SubnetAllocator) MarkAllocatedNetwork(subnet *net.IPNet) error {
 	sna.Lock()
 	defer sna.Unlock()
 
-	for _, snr := range sna.ranges {
+	for _, snr := range sna.v4ranges {
+		if snr.markAllocatedNetwork(subnet) {
+			return nil
+		}
+	}
+	for _, snr := range sna.v6ranges {
 		if snr.markAllocatedNetwork(subnet) {
 			return nil
 		}
@@ -46,24 +57,47 @@ func (sna *SubnetAllocator) MarkAllocatedNetwork(subnet *net.IPNet) error {
 	return fmt.Errorf("network %s does not belong to any known range", subnet.String())
 }
 
-func (sna *SubnetAllocator) AllocateNetwork() (*net.IPNet, error) {
-	sna.Lock()
-	defer sna.Unlock()
-
-	for _, snr := range sna.ranges {
+func maybeAllocateOneNetwork(ranges []*subnetAllocatorRange, networks []*net.IPNet) ([]*net.IPNet, error) {
+	if len(ranges) == 0 {
+		return networks, nil
+	}
+	for _, snr := range ranges {
 		sn := snr.allocateNetwork()
 		if sn != nil {
-			return sn, nil
+			networks = append(networks, sn)
+			return networks, nil
 		}
 	}
 	return nil, ErrSubnetAllocatorFull
+}
+
+func (sna *SubnetAllocator) AllocateNetworks() ([]*net.IPNet, error) {
+	sna.Lock()
+	defer sna.Unlock()
+
+	var networks []*net.IPNet
+	var err error
+	networks, err = maybeAllocateOneNetwork(sna.v4ranges, networks)
+	if err != nil {
+		return nil, err
+	}
+	networks, err = maybeAllocateOneNetwork(sna.v6ranges, networks)
+	if err != nil {
+		return nil, err
+	}
+	return networks, nil
 }
 
 func (sna *SubnetAllocator) ReleaseNetwork(subnet *net.IPNet) error {
 	sna.Lock()
 	defer sna.Unlock()
 
-	for _, snr := range sna.ranges {
+	for _, snr := range sna.v4ranges {
+		if snr.releaseNetwork(subnet) {
+			return nil
+		}
+	}
+	for _, snr := range sna.v6ranges {
 		if snr.releaseNetwork(subnet) {
 			return nil
 		}
