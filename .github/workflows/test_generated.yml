@@ -23,43 +23,50 @@ jobs:
       uses: actions/checkout@v2
     - name: Set up environment
       run: |
-        export GOPATH=$HOME/go
+        export GOPATH=$(go env GOPATH)
         echo "::set-env name=GOPATH::$GOPATH"
         export PATH=$GOPATH/bin:$PATH
         echo "::add-path::$GOPATH/bin"
-        mkdir -p $GOPATH/src/github.com/ovn-org
-        mv $GITHUB_WORKSPACE $GOPATH/src/github.com/ovn-org/ovn-kubernetes
-        echo "::set-env name=WORKDIR::$GOPATH/src/github.com/ovn-org/ovn-kubernetes"
-        mkdir -p $GITHUB_WORKSPACE
     - name: Build
-      working-directory: "${{ env.WORKDIR }}"
       run: |
         set -x
+        go get golang.org/x/tools/cmd/cover
         pushd go-controller
            make
            make windows
            make gofmt
            make install.tools
            make lint
-           make check
+           COVERALLS=1 make check
         popd
         pushd dist/images
            if [ -n "$(git diff --stat origin/master.. | grep dist/images/Dockerfile)" ]; then make all; fi
         popd
+
+        # Combine separate code coverage profiles into one
+        go get github.com/modocache/gover
+        gover go-controller/ gover.coverprofile
+
+        # Convert coverage profile to LCOV format for coveralls github action
+        go get github.com/jandelgado/gcov2lcov
+        mkdir -p src/github.com/ovn-org
+        ln -sf $(pwd) src/github.com/ovn-org/ovn-kubernetes
+        GOPATH=$(pwd) gcov2lcov -infile gover.coverprofile -outfile coverage.lcov
+    - name: Submit code coverage to Coveralls
+      uses: coverallsapp/github-action@master
+      with:
+        github-token: "${{ secrets.GITHUB_TOKEN }}"
+        path-to-lcov: coverage.lcov
   k8s:
     name: Build k8s
     runs-on: ubuntu-latest
     steps:
     - name: Set up environment
       run: |
-        export GOPATH=$HOME/go
+        export GOPATH=$(go env GOPATH)
         echo "::set-env name=GOPATH::$GOPATH"
         export PATH=$GOPATH/bin:$PATH
         echo "::add-path::$GOPATH/bin"
-        mkdir -p $GOPATH/src/github.com/ovn-org
-        mv $GITHUB_WORKSPACE $GOPATH/src/github.com/ovn-org/ovn-kubernetes
-        echo "::set-env name=WORKDIR::$GOPATH/src/github.com/ovn-org/ovn-kubernetes"
-        mkdir -p $GITHUB_WORKSPACE
     - name: Cache Kubernetes
       id: cache-k8s
       uses: actions/cache@v1
@@ -73,7 +80,6 @@ jobs:
       id: go
       if: steps.cache-k8s.outputs.cache-hit != 'true'
     - name: Build and install Kubernetes
-      working-directory: "${{ env.WORKDIR }}"
       if: steps.cache-k8s.outputs.cache-hit != 'true'
       run: |
         set -x
@@ -97,14 +103,10 @@ jobs:
       uses: actions/checkout@v2
     - name: Set up environment
       run: |
-        export GOPATH=$HOME/go
+        export GOPATH=$(go env GOPATH)
         echo "::set-env name=GOPATH::$GOPATH"
         export PATH=$GOPATH/bin:$PATH
         echo "::add-path::$GOPATH/bin"
-        mkdir -p $GOPATH/src/github.com/ovn-org
-        mv $GITHUB_WORKSPACE $GOPATH/src/github.com/ovn-org/ovn-kubernetes
-        echo "::set-env name=WORKDIR::$GOPATH/src/github.com/ovn-org/ovn-kubernetes"
-        mkdir -p $GITHUB_WORKSPACE
     - name: Cache Kubernetes
       id: cache-k8s
       uses: actions/cache@v1
@@ -112,7 +114,6 @@ jobs:
         path: "${{ env.GOPATH }}/src/k8s.io/kubernetes/"
         key: k8s-go-2-${{ env.K8S_VERSION }}
     - name: Build and install Kubernetes
-      working-directory: "${{ env.WORKDIR }}"
       if: steps.cache-k8s.outputs.cache-hit != 'true'
       run: |
         set -x
@@ -121,7 +122,6 @@ jobs:
         make WHAT="test/e2e/e2e.test vendor/github.com/onsi/ginkgo/ginkgo cmd/kubectl"
         rm -rf .git
     - name: kind setup
-      working-directory: "${{ env.WORKDIR }}"
       run: |
         set -x
 
@@ -139,7 +139,6 @@ jobs:
         ./kind.sh
         popd
     - name: e2e-kind-ovn-shard-n
-      working-directory: "${{ env.WORKDIR }}"
       run: |
         pushd $GOPATH/src/k8s.io/kubernetes/
         export KUBERNETES_CONFORMANCE_TEST=y
@@ -153,7 +152,6 @@ jobs:
       if: always()
       run: "mkdir -p /tmp/kind/logs \nkind export logs --name ${KIND_CLUSTER_NAME}
         /tmp/kind/logs\n"
-      working-directory: "${{ env.WORKDIR }}"
     - name: Upload logs
       if: always()
       uses: actions/upload-artifact@v1
@@ -176,14 +174,10 @@ jobs:
       uses: actions/checkout@v2
     - name: Set up environment
       run: |
-        export GOPATH=$HOME/go
+        export GOPATH=$(go env GOPATH)
         echo "::set-env name=GOPATH::$GOPATH"
         export PATH=$GOPATH/bin:$PATH
         echo "::add-path::$GOPATH/bin"
-        mkdir -p $GOPATH/src/github.com/ovn-org
-        mv $GITHUB_WORKSPACE $GOPATH/src/github.com/ovn-org/ovn-kubernetes
-        echo "::set-env name=WORKDIR::$GOPATH/src/github.com/ovn-org/ovn-kubernetes"
-        mkdir -p $GITHUB_WORKSPACE
     - name: Cache Kubernetes
       id: cache-k8s
       uses: actions/cache@v1
@@ -191,7 +185,6 @@ jobs:
         path: "${{ env.GOPATH }}/src/k8s.io/kubernetes/"
         key: k8s-go-2-${{ env.K8S_VERSION }}
     - name: Build and install Kubernetes
-      working-directory: "${{ env.WORKDIR }}"
       if: steps.cache-k8s.outputs.cache-hit != 'true'
       run: |
         set -x
@@ -200,7 +193,6 @@ jobs:
         make WHAT="test/e2e/e2e.test vendor/github.com/onsi/ginkgo/ginkgo cmd/kubectl"
         rm -rf .git
     - name: kind setup
-      working-directory: "${{ env.WORKDIR }}"
       run: |
         set -x
 
@@ -218,7 +210,6 @@ jobs:
         ./kind.sh
         popd
     - name: e2e-kind-ovn-shard-np
-      working-directory: "${{ env.WORKDIR }}"
       run: |
         pushd $GOPATH/src/k8s.io/kubernetes/
         export KUBERNETES_CONFORMANCE_TEST=y
@@ -231,7 +222,6 @@ jobs:
       if: always()
       run: "mkdir -p /tmp/kind/logs \nkind export logs --name ${KIND_CLUSTER_NAME}
         /tmp/kind/logs\n"
-      working-directory: "${{ env.WORKDIR }}"
     - name: Upload logs
       if: always()
       uses: actions/upload-artifact@v1
@@ -254,14 +244,10 @@ jobs:
       uses: actions/checkout@v2
     - name: Set up environment
       run: |
-        export GOPATH=$HOME/go
+        export GOPATH=$(go env GOPATH)
         echo "::set-env name=GOPATH::$GOPATH"
         export PATH=$GOPATH/bin:$PATH
         echo "::add-path::$GOPATH/bin"
-        mkdir -p $GOPATH/src/github.com/ovn-org
-        mv $GITHUB_WORKSPACE $GOPATH/src/github.com/ovn-org/ovn-kubernetes
-        echo "::set-env name=WORKDIR::$GOPATH/src/github.com/ovn-org/ovn-kubernetes"
-        mkdir -p $GITHUB_WORKSPACE
     - name: Cache Kubernetes
       id: cache-k8s
       uses: actions/cache@v1
@@ -269,7 +255,6 @@ jobs:
         path: "${{ env.GOPATH }}/src/k8s.io/kubernetes/"
         key: k8s-go-2-${{ env.K8S_VERSION }}
     - name: Build and install Kubernetes
-      working-directory: "${{ env.WORKDIR }}"
       if: steps.cache-k8s.outputs.cache-hit != 'true'
       run: |
         set -x
@@ -278,7 +263,6 @@ jobs:
         make WHAT="test/e2e/e2e.test vendor/github.com/onsi/ginkgo/ginkgo cmd/kubectl"
         rm -rf .git
     - name: kind setup
-      working-directory: "${{ env.WORKDIR }}"
       run: |
         set -x
 
@@ -296,7 +280,6 @@ jobs:
         ./kind.sh
         popd
     - name: e2e-kind-ovn-shard-s
-      working-directory: "${{ env.WORKDIR }}"
       run: |
         pushd $GOPATH/src/k8s.io/kubernetes/
         export KUBERNETES_CONFORMANCE_TEST=y
@@ -308,7 +291,6 @@ jobs:
       if: always()
       run: "mkdir -p /tmp/kind/logs \nkind export logs --name ${KIND_CLUSTER_NAME}
         /tmp/kind/logs\n"
-      working-directory: "${{ env.WORKDIR }}"
     - name: Upload logs
       if: always()
       uses: actions/upload-artifact@v1
@@ -331,14 +313,10 @@ jobs:
       uses: actions/checkout@v2
     - name: Set up environment
       run: |
-        export GOPATH=$HOME/go
+        export GOPATH=$(go env GOPATH)
         echo "::set-env name=GOPATH::$GOPATH"
         export PATH=$GOPATH/bin:$PATH
         echo "::add-path::$GOPATH/bin"
-        mkdir -p $GOPATH/src/github.com/ovn-org
-        mv $GITHUB_WORKSPACE $GOPATH/src/github.com/ovn-org/ovn-kubernetes
-        echo "::set-env name=WORKDIR::$GOPATH/src/github.com/ovn-org/ovn-kubernetes"
-        mkdir -p $GITHUB_WORKSPACE
     - name: Cache Kubernetes
       id: cache-k8s
       uses: actions/cache@v1
@@ -346,7 +324,6 @@ jobs:
         path: "${{ env.GOPATH }}/src/k8s.io/kubernetes/"
         key: k8s-go-2-${{ env.K8S_VERSION }}
     - name: Build and install Kubernetes
-      working-directory: "${{ env.WORKDIR }}"
       if: steps.cache-k8s.outputs.cache-hit != 'true'
       run: |
         set -x
@@ -355,7 +332,6 @@ jobs:
         make WHAT="test/e2e/e2e.test vendor/github.com/onsi/ginkgo/ginkgo cmd/kubectl"
         rm -rf .git
     - name: kind setup
-      working-directory: "${{ env.WORKDIR }}"
       run: |
         set -x
 
@@ -373,7 +349,6 @@ jobs:
         ./kind.sh
         popd
     - name: e2e-kind-ovn-shard-other
-      working-directory: "${{ env.WORKDIR }}"
       run: |
         pushd $GOPATH/src/k8s.io/kubernetes/
         export KUBERNETES_CONFORMANCE_TEST=y
@@ -385,7 +360,6 @@ jobs:
       if: always()
       run: "mkdir -p /tmp/kind/logs \nkind export logs --name ${KIND_CLUSTER_NAME}
         /tmp/kind/logs\n"
-      working-directory: "${{ env.WORKDIR }}"
     - name: Upload logs
       if: always()
       uses: actions/upload-artifact@v1
