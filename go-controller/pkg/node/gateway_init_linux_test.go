@@ -262,7 +262,7 @@ var _ = Describe("Gateway Init Operations", func() {
 		app.Name = "test"
 		app.Flags = config.Flags
 
-		// Set up a fake br-local & br-nexthop
+		// Set up a fake br-local & LocalnetGatewayNextHopPort
 		testNS, err = testutils.NewNS()
 		Expect(err).NotTo(HaveOccurred())
 		err = testNS.Do(func(ns.NetNS) error {
@@ -277,7 +277,7 @@ var _ = Describe("Gateway Init Operations", func() {
 
 			err = netlink.LinkAdd(&netlink.Dummy{
 				LinkAttrs: netlink.LinkAttrs{
-					Name: "br-nexthop",
+					Name: localnetGatewayNextHopPort,
 				},
 			})
 			Expect(err).NotTo(HaveOccurred())
@@ -321,7 +321,7 @@ var _ = Describe("Gateway Init Operations", func() {
 			fexec.AddFakeCmdsNoOutputNoError([]string{
 				"ovs-vsctl --timeout=15 set bridge br-local other-config:hwaddr=" + brLocalnetMAC,
 				"ovs-vsctl --timeout=15 set Open_vSwitch . external_ids:ovn-bridge-mappings=" + util.PhysicalNetworkName + ":br-local",
-				"ovs-vsctl --timeout=15 --may-exist add-port br-local br-nexthop -- set interface br-nexthop type=internal mtu_request=" + mtu + " mac=00\\:00\\:a9\\:fe\\:21\\:01",
+				"ovs-vsctl --timeout=15 --may-exist add-port br-local " + localnetGatewayNextHopPort + " -- set interface " + localnetGatewayNextHopPort + " type=internal mtu_request=" + mtu + " mac=00\\:00\\:a9\\:fe\\:21\\:01",
 			})
 
 			err := util.SetExec(fexec)
@@ -365,8 +365,8 @@ var _ = Describe("Gateway Init Operations", func() {
 
 				_, err = initLocalnetGateway(nodeName, nodeSubnet, wf)
 				Expect(err).NotTo(HaveOccurred())
-				// Check if IP has been assigned to br-nexthop
-				link, err := netlink.LinkByName("br-nexthop")
+				// Check if IP has been assigned to LocalnetGatewayNextHopPort
+				link, err := netlink.LinkByName(localnetGatewayNextHopPort)
 				Expect(err).NotTo(HaveOccurred())
 				addrs, err := netlink.AddrList(link, syscall.AF_INET)
 				Expect(err).NotTo(HaveOccurred())
@@ -389,12 +389,12 @@ var _ = Describe("Gateway Init Operations", func() {
 			expectedTables := map[string]util.FakeTable{
 				"filter": {
 					"INPUT": []string{
-						"-i br-nexthop -m comment --comment from OVN to localhost -j ACCEPT",
+						"-i " + localnetGatewayNextHopPort + " -m comment --comment from OVN to localhost -j ACCEPT",
 					},
 					"FORWARD": []string{
 						"-j OVN-KUBE-NODEPORT",
-						"-o br-nexthop -m conntrack --ctstate RELATED,ESTABLISHED -j ACCEPT",
-						"-i br-nexthop -j ACCEPT",
+						"-o " + localnetGatewayNextHopPort + " -m conntrack --ctstate RELATED,ESTABLISHED -j ACCEPT",
+						"-i " + localnetGatewayNextHopPort + " -j ACCEPT",
 					},
 					"OVN-KUBE-NODEPORT": []string{},
 				},
