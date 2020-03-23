@@ -366,3 +366,79 @@ jobs:
       with:
         name: kind-logs-${{ github.run_id }}-${{ env.JOB_NAME }}
         path: "/tmp/kind/logs"
+  e2e-control-plane:
+    name: e2e-control-plane
+    runs-on: ubuntu-latest
+    needs: k8s
+    env:
+      JOB_NAME: e2e-control-plane
+    steps:
+    - name: Set up Go 1.12
+      uses: actions/setup-go@v1
+      with:
+        go-version: 1.12
+      id: go
+    - name: Check out code into the Go module directory
+      uses: actions/checkout@v2
+    - name: Set up environment
+      run: |
+        export GOPATH=$(go env GOPATH)
+        echo "::set-env name=GOPATH::$GOPATH"
+        export PATH=$GOPATH/bin:$PATH
+        echo "::add-path::$GOPATH/bin"
+    - name: Cache Kubernetes
+      id: cache-k8s
+      uses: actions/cache@v1
+      with:
+        path: "${{ env.GOPATH }}/src/k8s.io/kubernetes/"
+        key: k8s-go-2-${{ env.K8S_VERSION }}
+    - name: Build and install Kubernetes
+      if: steps.cache-k8s.outputs.cache-hit != 'true'
+      run: |
+        set -x
+        git clone --single-branch --branch $K8S_VERSION https://github.com/kubernetes/kubernetes.git $GOPATH/src/k8s.io/kubernetes/
+        pushd $GOPATH/src/k8s.io/kubernetes/
+        make WHAT="test/e2e/e2e.test vendor/github.com/onsi/ginkgo/ginkgo cmd/kubectl"
+        rm -rf .git
+    - name: kind setup
+      run: |
+        set -x
+
+        export GO111MODULE="on"
+        mkdir -p $GOPATH/bin
+        curl -fs https://chunk.io/trozet/ba750701d0af4e2b94b249ab9de27b50 -o $GOPATH/bin/kubetest
+        chmod +x $GOPATH/bin/kubetest
+
+        pushd $GOPATH/src/k8s.io/kubernetes/
+        sudo cp ./_output/local/go/bin/kubectl /usr/local/bin/
+        popd
+
+        GO111MODULE="on" go get sigs.k8s.io/kind@v0.7.0
+        pushd contrib
+        ./kind.sh
+        popd
+    - name: e2e-control-plane
+      run: |
+        set -x
+        pushd test/e2e
+        go mod download
+        popd
+        pushd $GOPATH/src/k8s.io/kubernetes/
+        export KUBERNETES_CONFORMANCE_TEST=y
+        export KUBECONFIG=${HOME}/admin.conf
+        export MASTER_NAME=${KIND_CLUSTER_NAME}-control-plane
+        export NODE_NAMES=${MASTER_NAME}
+
+        sed -E -i 's/"\$\{ginkgo\}" "\$\{ginkgo_args\[\@\]\:\+\$\{ginkgo_args\[\@\]\}\}" "\$\{e2e_test\}"/pushd \$GITHUB_WORKSPACE\/test\/e2e\nGO111MODULE=on "\$\{ginkgo\}" "\$\{ginkgo_args\[\@\]\:\+\$\{ginkgo_args\[\@\]\}\}"/' hack/ginkgo-e2e.sh
+
+        kubetest --provider=local --deployment=kind --kind-cluster-name=kind-ovn --test --test_args='--disable-log-dump=false'
+    - name: Export logs
+      if: always()
+      run: "mkdir -p /tmp/kind/logs \nkind export logs --name ${KIND_CLUSTER_NAME}
+        /tmp/kind/logs\n"
+    - name: Upload logs
+      if: always()
+      uses: actions/upload-artifact@v1
+      with:
+        name: kind-logs-${{ github.run_id }}-${{ env.JOB_NAME }}
+        path: "/tmp/kind/logs"
