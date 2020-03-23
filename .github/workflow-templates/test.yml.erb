@@ -50,12 +50,13 @@ jobs:
         go get github.com/modocache/gover
         gover go-controller/ gover.coverprofile
 
-        go tool cover -html=gover.coverprofile -o coverage.html
-        
-        # Convert coverage profile to LCOV format for coveralls github action
-        go get github.com/jandelgado/gcov2lcov
+        # Create pretty local coverage info
         mkdir -p src/github.com/ovn-org
         ln -sf $(pwd) src/github.com/ovn-org/ovn-kubernetes
+        GOPATH=$(pwd) go tool cover -html=gover.coverprofile -o coverage.html
+
+        # Convert coverage profile to LCOV format for coveralls github action
+        go get github.com/jandelgado/gcov2lcov
         GOPATH=$(pwd) gcov2lcov -infile gover.coverprofile -outfile coverage.lcov
         
     - name: Submit code coverage to Coveralls
