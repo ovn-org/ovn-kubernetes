@@ -47,6 +47,8 @@ jobs:
         go get github.com/modocache/gover
         gover go-controller/ gover.coverprofile
 
+        go tool cover -html=gover.coverprofile -o coverage.html
+
         # Convert coverage profile to LCOV format for coveralls github action
         go get github.com/jandelgado/gcov2lcov
         mkdir -p src/github.com/ovn-org
@@ -57,6 +59,11 @@ jobs:
       with:
         github-token: "${{ secrets.GITHUB_TOKEN }}"
         path-to-lcov: coverage.lcov
+    - name: Upload code coverage
+      uses: actions/upload-artifact@v1
+      with:
+        name: coverage-${{ github.run_id }}-${{ env.JOB_NAME }}
+        path: coverage.html
   k8s:
     name: Build k8s
     runs-on: ubuntu-latest
