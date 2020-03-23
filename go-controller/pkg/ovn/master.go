@@ -85,14 +85,14 @@ func (oc *Controller) StartClusterMaster(masterNodeName string) error {
 	for _, node := range existingNodes.Items {
 		hostsubnet, _ := parseNodeHostSubnet(&node)
 		if hostsubnet != nil {
-			err := oc.masterSubnetAllocator.MarkAllocatedNetwork(hostsubnet.String())
+			err := oc.masterSubnetAllocator.MarkAllocatedNetwork(hostsubnet)
 			if err != nil {
 				utilruntime.HandleError(err)
 			}
 		}
 		joinsubnet, _ := parseNodeJoinSubnet(&node)
 		if joinsubnet != nil {
-			err := oc.joinSubnetAllocator.MarkAllocatedNetwork(joinsubnet.String())
+			err := oc.joinSubnetAllocator.MarkAllocatedNetwork(joinsubnet)
 			if err != nil {
 				utilruntime.HandleError(err)
 			}
@@ -223,36 +223,41 @@ func (oc *Controller) addNodeJoinSubnetAnnotations(node *kapi.Node, subnet strin
 	return nil
 }
 
-func (oc *Controller) allocateJoinSubnet(node *kapi.Node) (string, error) {
-	joinSubnet, _ := parseNodeJoinSubnet(node)
-	if joinSubnet != nil {
-		return joinSubnet.String(), nil
+func (oc *Controller) allocateJoinSubnet(node *kapi.Node) (*net.IPNet, error) {
+	joinSubnet, err := parseNodeJoinSubnet(node)
+	if err == nil {
+		return joinSubnet, nil
 	}
 
 	// Allocate a new network for the join switch
-	joinSubnetStr, err := oc.joinSubnetAllocator.AllocateNetwork()
+	joinSubnets, err := oc.joinSubnetAllocator.AllocateNetworks()
 	if err != nil {
-		return "", fmt.Errorf("Error allocating subnet for join switch for node  %s: %v", node.Name, err)
+		return nil, fmt.Errorf("Error allocating subnet for join switch for node %s: %v", node.Name, err)
 	}
+	if len(joinSubnets) != 1 {
+		return nil, fmt.Errorf("Error allocating subnet for join switch for node %s: multiple subnets returned", node.Name)
+	}
+	joinSubnet = joinSubnets[0]
 
 	defer func() {
 		// Release the allocation on error
 		if err != nil {
-			_ = oc.joinSubnetAllocator.ReleaseNetwork(joinSubnetStr)
+			_ = oc.joinSubnetAllocator.ReleaseNetwork(joinSubnet)
 		}
 	}()
+
 	// Set annotation on the node
-	err = oc.addNodeJoinSubnetAnnotations(node, joinSubnetStr)
+	err = oc.addNodeJoinSubnetAnnotations(node, joinSubnet.String())
 	if err != nil {
-		return "", err
+		return nil, err
 	}
 
-	klog.Infof("Allocated join subnet %q for node %q", node.Name, joinSubnetStr)
-	return joinSubnetStr, nil
+	klog.Infof("Allocated join subnet %q for node %q", joinSubnet.String(), node.Name)
+	return joinSubnet, nil
 }
 
 func (oc *Controller) deleteNodeJoinSubnet(nodeName string, subnet *net.IPNet) error {
-	err := oc.joinSubnetAllocator.ReleaseNetwork(subnet.String())
+	err := oc.joinSubnetAllocator.ReleaseNetwork(subnet)
 	if err != nil {
 		return fmt.Errorf("Error deleting join subnet %v for node %q: %s", subnet, nodeName, err)
 	}
@@ -451,12 +456,12 @@ func (oc *Controller) syncGatewayLogicalNetwork(node *kapi.Node, l3GatewayConfig
 	}
 
 	// get a subnet for the per-node join switch
-	joinSubnetStr, err := oc.allocateJoinSubnet(node)
+	joinSubnet, err := oc.allocateJoinSubnet(node)
 	if err != nil {
 		return err
 	}
 
-	err = util.GatewayInit(clusterSubnets, joinSubnetStr, systemID, node.Name, ifaceID, ipAddress,
+	err = util.GatewayInit(clusterSubnets, joinSubnet, systemID, node.Name, ifaceID, ipAddress,
 		gwMacAddress, gwNextHop, subnet, nodePortEnable, lspArgs)
 	if err != nil {
 		return fmt.Errorf("failed to init shared interface gateway: %v", err)
@@ -719,21 +724,20 @@ func (oc *Controller) addNode(node *kapi.Node) (hostsubnet *net.IPNet, err error
 	}
 
 	// Node doesn't have a subnet assigned; reserve a new one for it
-	hostsubnetStr, err := oc.masterSubnetAllocator.AllocateNetwork()
+	hostsubnets, err := oc.masterSubnetAllocator.AllocateNetworks()
 	if err != nil {
 		return nil, fmt.Errorf("Error allocating network for node %s: %v", node.Name, err)
 	}
-	klog.Infof("Allocated node %s HostSubnet %s", node.Name, hostsubnetStr)
-
-	_, hostsubnet, err = net.ParseCIDR(hostsubnetStr)
-	if err != nil {
-		return nil, fmt.Errorf("Error in parsing hostsubnet %s - %v", hostsubnetStr, err)
+	if len(hostsubnets) != 1 {
+		return nil, fmt.Errorf("Error allocating network for node %s: multiple subnets returned", node.Name)
 	}
+	hostsubnet = hostsubnets[0]
+	klog.Infof("Allocated node %s HostSubnet %s", node.Name, hostsubnet.String())
 
 	defer func() {
 		// Release the allocation on error
 		if err != nil {
-			_ = oc.masterSubnetAllocator.ReleaseNetwork(hostsubnetStr)
+			_ = oc.masterSubnetAllocator.ReleaseNetwork(hostsubnet)
 		}
 	}()
 
@@ -755,7 +759,7 @@ func (oc *Controller) addNode(node *kapi.Node) (hostsubnet *net.IPNet, err error
 }
 
 func (oc *Controller) deleteNodeHostSubnet(nodeName string, subnet *net.IPNet) error {
-	err := oc.masterSubnetAllocator.ReleaseNetwork(subnet.String())
+	err := oc.masterSubnetAllocator.ReleaseNetwork(subnet)
 	if err != nil {
 		return fmt.Errorf("Error deleting subnet %v for node %q: %s", subnet, nodeName, err)
 	}

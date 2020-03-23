@@ -102,7 +102,7 @@ func getGatewayLoadBalancers(gatewayRouter string) (string, string, error) {
 }
 
 // GatewayInit creates a gateway router for the local chassis.
-func GatewayInit(clusterIPSubnet []string, joinSubnetStr, systemID, nodeName, ifaceID, nicIP, nicMacAddress,
+func GatewayInit(clusterIPSubnet []string, joinSubnet *net.IPNet, systemID, nodeName, ifaceID, nicIP, nicMacAddress,
 	defaultGW string, rampoutIPSubnet string, nodePortEnable bool, lspArgs []string) error {
 
 	ip, physicalIPNet, err := net.ParseCIDR(nicIP)
@@ -129,7 +129,6 @@ func GatewayInit(clusterIPSubnet []string, joinSubnetStr, systemID, nodeName, if
 			"stderr: %q, error: %v", gatewayRouter, stdout, stderr, err)
 	}
 
-	_, joinSubnet, _ := net.ParseCIDR(joinSubnetStr)
 	prefixLen, _ := joinSubnet.Mask.Size()
 	gwLRPIp := NextIP(joinSubnet.IP)
 	drLRPIp := NextIP(gwLRPIp)
