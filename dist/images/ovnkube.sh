@@ -604,7 +604,6 @@ nb-ovsdb () {
 
   wait_for_event attempts=3 process_ready ovnnb_db
   echo "=============== nb-ovsdb ========== RUNNING"
-  sleep 3
 
   ovn-nbctl set-connection ptcp:${ovn_nb_port}:${ovn_db_host} -- set connection . inactivity_probe=0
 
@@ -634,7 +633,6 @@ sb-ovsdb () {
 
   wait_for_event attempts=3 process_ready ovnsb_db
   echo "=============== sb-ovsdb ========== RUNNING"
-  sleep 3
 
   ovn-sbctl set-connection ptcp:${ovn_sb_port}:${ovn_db_host} -- set connection . inactivity_probe=0
 
@@ -658,8 +656,6 @@ run-ovn-northd () {
   echo "=============== run-ovn-northd (wait for ready_to_start_node)"
   wait_for_event ready_to_start_node
 
-  sleep 1
-
   echo "=============== run_ovn_northd ========== MASTER ONLY"
   echo "ovn_nbdb ${ovn_nbdb}   ovn_sbdb ${ovn_sbdb}"
   echo "ovn_northd_opts=${ovn_northd_opts}"
@@ -678,11 +674,9 @@ run-ovn-northd () {
 
   wait_for_event attempts=3 process_ready ovn-northd
   echo "=============== run_ovn_northd ========== RUNNING"
-  sleep 1
 
   tail --follow=name ${OVN_LOGDIR}/ovn-northd.log &
   ovn_tail_pid=$!
-
 
   process_healthy ovn-northd ${ovn_tail_pid}
   exit 8
@@ -714,8 +708,6 @@ ovn-master () {
   echo "=============== ovn-master (wait for ovn-nbctl daemon) ========== MASTER ONLY"
   wait_for_event process_ready ovn-nbctl
 
-  sleep 5
-
   # wait for ovs-servers to start since ovn-master sets some fields in OVS DB
   echo "=============== ovn-master - (wait for ovs)"
   wait_for_event ovs_ready
@@ -732,7 +724,6 @@ ovn-master () {
     --metrics-bind-address "0.0.0.0:9409" &
   echo "=============== ovn-master ========== running"
   wait_for_event attempts=3 process_ready ovnkube-master
-  sleep 1
 
   process_healthy ovnkube-master
   exit 9
@@ -768,7 +759,6 @@ ovn-controller () {
   wait_for_event attempts=3 process_ready ovn-controller
   echo "=============== ovn-controller ========== running"
 
-  sleep 4
   tail --follow=name ${OVN_LOGDIR}/ovn-controller.log &
   controller_tail_pid=$!
 
@@ -794,7 +784,6 @@ ovn-node () {
 
   echo "=============== ovn-node - (ovn-node  wait for ovn-controller.pid)"
   wait_for_event process_ready ovn-controller
-  sleep 1
 
   # Ensure GENEVE's UDP port isn't firewalled. We support specifying non-default encap port.
   /usr/share/openvswitch/scripts/ovs-ctl --protocol=udp --dport=${ovn_encap_port} enable-protocol
@@ -804,7 +793,6 @@ ovn-node () {
   if [[ $? == 0 && "${ovn_encap_ip}" != "" ]]; then
     OVN_ENCAP_IP=$(echo --encap-ip=${ovn_encap_ip})
   fi
-
 
   echo "=============== ovn-node   --init-node"
   /usr/bin/ovnkube --init-node ${K8S_NODE} \
@@ -823,7 +811,6 @@ ovn-node () {
   setup_cni
   echo "=============== ovn-node ========== running"
 
-  sleep 5
   process_healthy ovnkube
   exit 7
 }
