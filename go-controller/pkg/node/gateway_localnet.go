@@ -28,7 +28,8 @@ const (
 	v6localnetGatewayNextHopSubnet = "fd99::1/64"
 	// localnetGatewayNextHopPort is the name of the gateway port on the host to which all
 	// the packets leaving the OVN logical topology will be forwarded
-	localnetGatewayNextHopPort = "ovn-k8s-gw0"
+	localnetGatewayNextHopPort       = "ovn-k8s-gw0"
+	legacyLocalnetGatewayNextHopPort = "br-nexthop"
 	// fixed MAC address for the br-nexthop interface. the last 4 hex bytes
 	// translates to the br-nexthop's IP address
 	localnetGatewayNextHopMac = "00:00:a9:fe:21:01"
@@ -165,7 +166,8 @@ func initLocalnetGateway(nodeName string,
 
 	// Create a localnet bridge gateway port
 	_, stderr, err = util.RunOVSVsctl(
-		"--may-exist", "add-port", localnetBridgeName, localnetGatewayNextHopPort,
+		"--if-exists", "del-port", localnetBridgeName, legacyLocalnetGatewayNextHopPort,
+		"--", "--may-exist", "add-port", localnetBridgeName, localnetGatewayNextHopPort,
 		"--", "set", "interface", localnetGatewayNextHopPort, "type=internal",
 		"mtu_request="+fmt.Sprintf("%d", config.Default.MTU),
 		fmt.Sprintf("mac=%s", strings.ReplaceAll(localnetGatewayNextHopMac, ":", "\\:")))
