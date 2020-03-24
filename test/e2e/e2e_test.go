@@ -10,8 +10,6 @@ import (
 	"github.com/onsi/ginkgo"
 	. "github.com/onsi/ginkgo"
 
-	// . "github.com/onsi/gomega"
-
 	v1 "k8s.io/api/core/v1"
 	"k8s.io/kubernetes/test/e2e/framework"
 
@@ -19,7 +17,7 @@ import (
 	e2epod "k8s.io/kubernetes/test/e2e/framework/pod"
 )
 
-func checkContinuousConnectivity(f *framework.Framework, nodeName, podName, host string, port, timeout int, readyChan chan int, errChan chan error) {
+func checkContinuousConnectivity(f *framework.Framework, nodeName, podName, host string, port, timeout int, readyChan chan bool, errChan chan error) {
 	contName := fmt.Sprintf("%s-container", podName)
 
 	command := []string{
@@ -50,7 +48,7 @@ func checkContinuousConnectivity(f *framework.Framework, nodeName, podName, host
 		return
 	}
 
-	readyChan <- 0
+	close(readyChan)
 
 	err = e2epod.WaitForPodSuccessInNamespace(f.ClientSet, podName, f.Namespace.Name)
 
@@ -88,7 +86,7 @@ var _ = Describe("e2e control plane", func() {
 	ginkgo.It("should provide Internet connection continuously when ovn-k8s pod is killed", func() {
 		ginkgo.By("Running container which tries to connect to 8.8.8.8 in a loop")
 
-		readyChan, errChan := make(chan int), make(chan error)
+		readyChan, errChan := make(chan bool), make(chan error)
 		go checkContinuousConnectivity(f, "", "connectivity-test-continuous", "8.8.8.8", 53, 30, readyChan, errChan)
 
 		<-readyChan

@@ -1,6 +1,6 @@
 module github.com/ovn-org/ovn-kubernetes/test/e2e
 
-go 1.13
+go 1.12
 
 replace (
 	k8s.io/api => k8s.io/api v0.16.4
