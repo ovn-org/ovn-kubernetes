@@ -24,7 +24,14 @@ OVN_DB_VIP=""
 OVN_DB_REPLICAS=""
 OVN_MTU="1400"
 KIND=""
-MASTER_LOGLEVEL="4"
+MASTER_LOGLEVEL=""
+NODE_LOGLEVEL=""
+OVN_LOG_NORTHD=""
+OVN_LOG_NB=""
+OVN_LOG_SB=""
+OVN_LOG_CONTROLLER=""
+OVN_LOG_NBCTLD=""
+
 
 # Parse parameters given as arguments to this script.
 while [ "$1" != "" ]; do
@@ -69,6 +76,24 @@ while [ "$1" != "" ]; do
             ;;
         --master-loglevel)
             MASTER_LOGLEVEL=$VALUE
+            ;;
+        --node-loglevel)
+            NODE_LOGLEVEL=$VALUE
+            ;;
+        --ovn-log-northd)
+            OVN_LOG_NORTHD=$VALUE
+            ;;
+        --ovn-log-nb)
+            OVN_LOG_NB=$VALUE
+            ;;
+        --ovn-log-sb)
+            OVN_LOG_SB=$VALUE
+            ;;
+        --ovn-log-controller)
+            OVN_LOG_CONTROLLER=$VALUE
+            ;;
+        --ovn-log-nbctld)
+            OVN_LOG_NBCTLD=$VALUE
             ;;
         *)
             echo "WARNING: unknown parameter \"$PARAM\""
@@ -123,20 +148,55 @@ ovn_db_vip=${OVN_DB_VIP}
 echo "ovn_db_vip: ${ovn_db_vip}"
 ovn_db_minAvailable=$(((${ovn_db_replicas} + 1) / 2))
 echo "ovn_db_minAvailable: ${ovn_db_minAvailable}"
+master_loglevel=${MASTER_LOGLEVEL:-"4"}
+echo "master_loglevel: ${master-loglevel}"
+node_loglevel=${NODE_LOGLEVEL:-"4"}
+echo "node_loglevel: ${node-loglevel}"
+ovn_log_northd=${OVN_LOG_NORTHD:-"-vconsole:info -vfile:info"}
+echo "ovn_log_northd: ${ovn_log_northd}"
+ovn_log_nb=${OVN_LOG_NB:-"-vconsole:info -vfile:info"}
+echo "ovn_log_nb: ${ovn_log_nb}"
+ovn_log_sb=${OVN_LOG_SB:-"-vconsole:info -vfile:info"}
+echo "ovn_log_sb: ${ovn_log_sb}"
+ovn_log_controller=${OVN_LOG_CONTROLLER:-"-vconsole:info"}
+echo "ovn_log_controller: ${ovn_log_controller}"
+ovn_log_nbctld=${OVN_LOG_NBCTLD:-"-vconsole:info"}
+echo "ovn_log_nbctld: ${ovn_log_nbctld}"
 
-ovn_image=${image} ovn_image_pull_policy=${policy} kind=${KIND} ovn_gateway_mode=${ovn_gateway_mode} \
- ovn_gateway_opts=${ovn_gateway_opts} j2 ../templates/ovnkube-node.yaml.j2 -o ../yaml/ovnkube-node.yaml
+ovn_image=${image} \
+ovn_image_pull_policy=${policy} \
+kind=${KIND} \
+ovn_gateway_mode=${ovn_gateway_mode} \
+ovn_gateway_opts=${ovn_gateway_opts} \
+ovn_kube_node_log_level=${node_loglevel} \
+ovn_log_controller=${ovn_log_controller} \
+j2 ../templates/ovnkube-node.yaml.j2 -o ../yaml/ovnkube-node.yaml
 
-ovn_image=${image} ovn_image_pull_policy=${policy} ovn_kube_master_log_level=${MASTER_LOGLEVEL} j2 \
-../templates/ovnkube-master.yaml.j2 -o ../yaml/ovnkube-master.yaml
+ovn_image=${image} \
+ovn_image_pull_policy=${policy} \
+ovn_kube_master_log_level=${master_loglevel} \
+ovn_log_northd=${ovn_log_northd} \
+ovn_log_nbctld=${ovn_log_nbctld} \
+j2 ../templates/ovnkube-master.yaml.j2 -o ../yaml/ovnkube-master.yaml
 
-ovn_image=${image} ovn_image_pull_policy=${policy} j2 ../templates/ovnkube-db.yaml.j2 -o ../yaml/ovnkube-db.yaml
+ovn_image=${image} \
+ovn_image_pull_policy=${policy} \
+ovn_log_nb=${ovn_log_nb} \
+ovn_log_sb=${ovn_log_sb} \
+j2 ../templates/ovnkube-db.yaml.j2 -o ../yaml/ovnkube-db.yaml
 
-ovn_db_vip_image=${ovn_db_vip_image} ovn_image_pull_policy=${policy} ovn_db_replicas=${ovn_db_replicas} \
-ovn_db_vip=${ovn_db_vip} j2 ../templates/ovnkube-db-vip.yaml.j2 -o ../yaml/ovnkube-db-vip.yaml
+ovn_db_vip_image=${ovn_db_vip_image} \
+ovn_image_pull_policy=${policy} \
+ovn_db_replicas=${ovn_db_replicas} \
+ovn_db_vip=${ovn_db_vip} ovn_log_nb=${ovn_log_nb} \
+j2 ../templates/ovnkube-db-vip.yaml.j2 -o ../yaml/ovnkube-db-vip.yaml
 
-ovn_image=${image} ovn_image_pull_policy=${policy} ovn_db_replicas=${ovn_db_replicas} \
-ovn_db_minAvailable=${ovn_db_minAvailable} j2 ../templates/ovnkube-db-raft.yaml.j2 > ../yaml/ovnkube-db-raft.yaml
+ovn_image=${image} \
+ovn_image_pull_policy=${policy} \
+ovn_db_replicas=${ovn_db_replicas} \
+ovn_db_minAvailable=${ovn_db_minAvailable} \
+ovn_log_nb=${ovn_log_nb} ovn_log_sb=${ovn_log_sb} \
+j2 ../templates/ovnkube-db-raft.yaml.j2 > ../yaml/ovnkube-db-raft.yaml
 
 # ovn-setup.yaml
 # net_cidr=10.128.0.0/14/23
