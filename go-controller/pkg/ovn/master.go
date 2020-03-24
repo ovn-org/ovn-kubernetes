@@ -358,32 +358,41 @@ func parseGatewayIfaceID(l3GatewayConfig map[string]string) (string, error) {
 	return ifaceID, nil
 }
 
-func parseGatewayMacAddress(l3GatewayConfig map[string]string) (string, error) {
-	gatewayMacAddress, ok := l3GatewayConfig[OvnNodeGatewayMacAddress]
+func parseGatewayMacAddress(l3GatewayConfig map[string]string) (net.HardwareAddr, error) {
+	gwMACStr, ok := l3GatewayConfig[OvnNodeGatewayMacAddress]
 	if !ok {
-		return "", fmt.Errorf("%s annotation not found", OvnNodeGatewayMacAddress)
+		return nil, fmt.Errorf("%s annotation not found", OvnNodeGatewayMacAddress)
 	}
 
-	_, err := net.ParseMAC(gatewayMacAddress)
+	gwMAC, err := net.ParseMAC(gwMACStr)
 	if err != nil {
-		return "", fmt.Errorf("Error %v in parsing node gateway macAddress %v", err, gatewayMacAddress)
+		return nil, fmt.Errorf("%s annotation %q invalid: %v", OvnNodeGatewayMacAddress, gwMACStr, err)
 	}
 
-	return gatewayMacAddress, nil
+	return gwMAC, nil
 }
 
-func parseGatewayLogicalNetwork(l3GatewayConfig map[string]string) (string, string, error) {
-	ipAddress, ok := l3GatewayConfig[OvnNodeGatewayIP]
+func parseGatewayLogicalNetwork(l3GatewayConfig map[string]string) (*net.IPNet, net.IP, error) {
+	gwCIDRStr, ok := l3GatewayConfig[OvnNodeGatewayIP]
 	if !ok {
-		return "", "", fmt.Errorf("%s annotation not found", OvnNodeGatewayIP)
+		return nil, nil, fmt.Errorf("%s annotation not found", OvnNodeGatewayIP)
+	}
+	gwIP, gwCIDR, err := net.ParseCIDR(gwCIDRStr)
+	if err != nil {
+		return nil, nil, fmt.Errorf("%s annotation %q invalid", OvnNodeGatewayIP, gwCIDRStr)
+	}
+	gwCIDR.IP = gwIP
+
+	gwNextHopStr, ok := l3GatewayConfig[OvnNodeGatewayNextHop]
+	if !ok {
+		return nil, nil, fmt.Errorf("%s annotation not found", OvnNodeGatewayNextHop)
+	}
+	gwNextHopIP := net.ParseIP(gwNextHopStr)
+	if gwNextHopIP == nil {
+		return nil, nil, fmt.Errorf("%s annotation %q invalid", OvnNodeGatewayNextHop, gwNextHopStr)
 	}
 
-	gwNextHop, ok := l3GatewayConfig[OvnNodeGatewayNextHop]
-	if !ok {
-		return "", "", fmt.Errorf("%s annotation not found", OvnNodeGatewayNextHop)
-	}
-
-	return ipAddress, gwNextHop, nil
+	return gwCIDR, gwNextHopIP, nil
 }
 
 func parseGatewayVLANID(l3GatewayConfig map[string]string, ifaceID string) ([]string, error) {
@@ -436,7 +445,7 @@ func (oc *Controller) syncGatewayLogicalNetwork(node *kapi.Node, l3GatewayConfig
 		return err
 	}
 
-	ipAddress, gwNextHop, err := parseGatewayLogicalNetwork(l3GatewayConfig)
+	gwCIDR, gwNextHop, err := parseGatewayLogicalNetwork(l3GatewayConfig)
 	if err != nil {
 		return err
 	}
@@ -461,8 +470,8 @@ func (oc *Controller) syncGatewayLogicalNetwork(node *kapi.Node, l3GatewayConfig
 		return err
 	}
 
-	err = util.GatewayInit(clusterSubnets, joinSubnet, systemID, node.Name, ifaceID, ipAddress,
-		gwMacAddress, gwNextHop, subnet, nodePortEnable, lspArgs)
+	err = util.GatewayInit(clusterSubnets, joinSubnet, systemID, node.Name, ifaceID, gwCIDR,
+		gwNextHop, gwMacAddress, subnet, nodePortEnable, lspArgs)
 	if err != nil {
 		return fmt.Errorf("failed to init shared interface gateway: %v", err)
 	}
@@ -470,7 +479,7 @@ func (oc *Controller) syncGatewayLogicalNetwork(node *kapi.Node, l3GatewayConfig
 	if mode == string(config.GatewayModeShared) {
 		// Add static routes to OVN Cluster Router to enable pods on this Node to
 		// reach the host IP
-		err = addStaticRouteToHost(node, ipAddress)
+		err = addStaticRouteToHost(node, gwCIDR)
 		if err != nil {
 			return err
 		}
@@ -495,7 +504,7 @@ func (oc *Controller) syncGatewayLogicalNetwork(node *kapi.Node, l3GatewayConfig
 	return err
 }
 
-func addStaticRouteToHost(node *kapi.Node, nicIP string) error {
+func addStaticRouteToHost(node *kapi.Node, nicCIDR *net.IPNet) error {
 	k8sClusterRouter := util.GetK8sClusterRouter()
 	subnet, err := parseNodeHostSubnet(node)
 	if err != nil {
@@ -503,12 +512,12 @@ func addStaticRouteToHost(node *kapi.Node, nicIP string) error {
 			util.GetK8sMgmtIntfName(node.Name), err)
 	}
 	_, secondIP := util.GetNodeWellKnownAddresses(subnet)
-	prefix := strings.Split(nicIP, "/")[0] + "/32"
+	prefix := nicCIDR.IP.String() + "/32"
 	nexthop := strings.Split(secondIP.String(), "/")[0]
 	_, stderr, err := util.RunOVNNbctl("--may-exist", "lr-route-add", k8sClusterRouter, prefix, nexthop)
 	if err != nil {
 		return fmt.Errorf("failed to add static route '%s via %s' for host %q on %s "+
-			"stderr: %q, error: %v", nicIP, secondIP, node.Name, k8sClusterRouter, stderr, err)
+			"stderr: %q, error: %v", prefix, secondIP, node.Name, k8sClusterRouter, stderr, err)
 	}
 
 	return nil

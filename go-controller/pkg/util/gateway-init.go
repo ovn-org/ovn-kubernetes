@@ -102,28 +102,16 @@ func getGatewayLoadBalancers(gatewayRouter string) (string, string, error) {
 }
 
 // GatewayInit creates a gateway router for the local chassis.
-func GatewayInit(clusterIPSubnet []string, joinSubnet *net.IPNet, systemID, nodeName, ifaceID, nicIP, nicMacAddress,
-	defaultGW string, rampoutIPSubnet string, nodePortEnable bool, lspArgs []string) error {
-
-	ip, physicalIPNet, err := net.ParseCIDR(nicIP)
-	if err != nil {
-		return fmt.Errorf("error parsing %s (%v)", nicIP, err)
-	}
-	n, _ := physicalIPNet.Mask.Size()
-	physicalIPMask := fmt.Sprintf("%s/%d", ip.String(), n)
-	physicalIP := ip.String()
-
-	if defaultGW != "" {
-		defaultgwByte := net.ParseIP(defaultGW)
-		defaultGW = defaultgwByte.String()
-	}
+func GatewayInit(clusterIPSubnet []string, joinSubnet *net.IPNet, systemID, nodeName, ifaceID string,
+	nicCIDR *net.IPNet, defaultGW net.IP, nicMacAddress net.HardwareAddr, rampoutIPSubnet string,
+	nodePortEnable bool, lspArgs []string) error {
 
 	k8sClusterRouter := GetK8sClusterRouter()
 	// Create a gateway router.
 	gatewayRouter := GWRouterPrefix + nodeName
 	stdout, stderr, err := RunOVNNbctl("--", "--may-exist", "lr-add",
 		gatewayRouter, "--", "set", "logical_router", gatewayRouter,
-		"options:chassis="+systemID, "external_ids:physical_ip="+physicalIP)
+		"options:chassis="+systemID, "external_ids:physical_ip="+nicCIDR.IP.String())
 	if err != nil {
 		return fmt.Errorf("Failed to create logical router %v, stdout: %q, "+
 			"stderr: %q, error: %v", gatewayRouter, stdout, stderr, err)
@@ -281,7 +269,7 @@ func GatewayInit(clusterIPSubnet []string, joinSubnet *net.IPNet, systemID, node
 	// has changed. So, we need to delete that port, if it exists, and it back.
 	stdout, stderr, err = RunOVNNbctl(
 		"--", "--if-exists", "lrp-del", "rtoe-"+gatewayRouter,
-		"--", "lrp-add", gatewayRouter, "rtoe-"+gatewayRouter, nicMacAddress, physicalIPMask,
+		"--", "lrp-add", gatewayRouter, "rtoe-"+gatewayRouter, nicMacAddress.String(), nicCIDR.String(),
 		"--", "set", "logical_router_port", "rtoe-"+gatewayRouter,
 		"external-ids:gateway-physical-ip=yes")
 	if err != nil {
@@ -294,28 +282,26 @@ func GatewayInit(clusterIPSubnet []string, joinSubnet *net.IPNet, systemID, node
 		externalSwitch, "etor-"+gatewayRouter, "--", "set",
 		"logical_switch_port", "etor-"+gatewayRouter, "type=router",
 		"options:router-port=rtoe-"+gatewayRouter,
-		"addresses="+"\""+nicMacAddress+"\"")
+		"addresses="+"\""+nicMacAddress.String()+"\"")
 	if err != nil {
 		return fmt.Errorf("Failed to add logical port to router, stdout: %q, "+
 			"stderr: %q, error: %v", stdout, stderr, err)
 	}
 
 	// Add a static route in GR with physical gateway as the default next hop.
-	if defaultGW != "" {
-		var allIPs string
-		if config.IPv6Mode {
-			allIPs = "::/0"
-		} else {
-			allIPs = "0.0.0.0/0"
-		}
-		stdout, stderr, err = RunOVNNbctl("--may-exist", "lr-route-add",
-			gatewayRouter, allIPs, defaultGW,
-			fmt.Sprintf("rtoe-%s", gatewayRouter))
-		if err != nil {
-			return fmt.Errorf("Failed to add a static route in GR with physical "+
-				"gateway as the default next hop, stdout: %q, "+
-				"stderr: %q, error: %v", stdout, stderr, err)
-		}
+	var allIPs string
+	if config.IPv6Mode {
+		allIPs = "::/0"
+	} else {
+		allIPs = "0.0.0.0/0"
+	}
+	stdout, stderr, err = RunOVNNbctl("--may-exist", "lr-route-add",
+		gatewayRouter, allIPs, defaultGW.String(),
+		fmt.Sprintf("rtoe-%s", gatewayRouter))
+	if err != nil {
+		return fmt.Errorf("Failed to add a static route in GR with physical "+
+			"gateway as the default next hop, stdout: %q, "+
+			"stderr: %q, error: %v", stdout, stderr, err)
 	}
 
 	if rampoutIPSubnet != "" {
@@ -342,7 +328,7 @@ func GatewayInit(clusterIPSubnet []string, joinSubnet *net.IPNet, systemID, node
 	// Default SNAT rules.
 	for _, entry := range clusterIPSubnet {
 		stdout, stderr, err = RunOVNNbctl("--may-exist", "lr-nat-add",
-			gatewayRouter, "snat", physicalIP, entry)
+			gatewayRouter, "snat", nicCIDR.IP.String(), entry)
 		if err != nil {
 			return fmt.Errorf("Failed to create default SNAT rules, stdout: %q, "+
 				"stderr: %q, error: %v", stdout, stderr, err)
