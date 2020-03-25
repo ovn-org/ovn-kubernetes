@@ -65,11 +65,11 @@ func (n networkPolicy) addLocalPodCmds(fexec *ovntest.FakeExec, pod pod) {
 		Output: fakeUUID,
 	})
 	fexec.AddFakeCmd(&ovntest.ExpectedCmd{
-		Cmd:    "ovn-nbctl --timeout=15 --data=bare --no-heading --columns=_uuid find ACL match=\"outport == @ingressDefaultDeny\" action=drop external-ids:default-deny-policy-type=Ingress",
+		Cmd:    "ovn-nbctl --timeout=15 --data=bare --no-heading --columns=_uuid find ACL priority=1000 direction=to-lport match=\"outport == @ingressDefaultDeny\" action=drop external-ids:default-deny-policy-type=Ingress",
 		Output: fakeUUID,
 	})
 	fexec.AddFakeCmd(&ovntest.ExpectedCmd{
-		Cmd:    "ovn-nbctl --timeout=15 --data=bare --no-heading --columns=_uuid find ACL match=\"outport == @ingressDefaultDeny && arp\" action=allow external-ids:default-deny-policy-type=Ingress",
+		Cmd:    "ovn-nbctl --timeout=15 --data=bare --no-heading --columns=_uuid find ACL priority=1001 direction=to-lport match=\"outport == @ingressDefaultDeny && arp\" action=allow external-ids:default-deny-policy-type=Ingress",
 		Output: fakeUUID,
 	})
 	fexec.AddFakeCmd(&ovntest.ExpectedCmd{
@@ -77,11 +77,11 @@ func (n networkPolicy) addLocalPodCmds(fexec *ovntest.FakeExec, pod pod) {
 		Output: fakeUUID,
 	})
 	fexec.AddFakeCmd(&ovntest.ExpectedCmd{
-		Cmd:    "ovn-nbctl --timeout=15 --data=bare --no-heading --columns=_uuid find ACL match=\"inport == @egressDefaultDeny\" action=drop external-ids:default-deny-policy-type=Egress",
+		Cmd:    "ovn-nbctl --timeout=15 --data=bare --no-heading --columns=_uuid find ACL priority=1000 direction=from-lport match=\"inport == @egressDefaultDeny\" action=drop external-ids:default-deny-policy-type=Egress",
 		Output: fakeUUID,
 	})
 	fexec.AddFakeCmd(&ovntest.ExpectedCmd{
-		Cmd:    "ovn-nbctl --timeout=15 --data=bare --no-heading --columns=_uuid find ACL match=\"inport == @egressDefaultDeny && arp\" action=allow external-ids:default-deny-policy-type=Egress",
+		Cmd:    "ovn-nbctl --timeout=15 --data=bare --no-heading --columns=_uuid find ACL priority=1001 direction=from-lport match=\"inport == @egressDefaultDeny && arp\" action=allow external-ids:default-deny-policy-type=Egress",
 		Output: fakeUUID,
 	})
 	fexec.AddFakeCmdsNoOutputNoError([]string{
@@ -216,6 +216,7 @@ func (p multicastPolicy) enableCmds(fExec *ovntest.FakeExec, ns string) {
 	match := getACLMatch(pg_hash, "ip4.mcast", knet.PolicyTypeEgress)
 	fExec.AddFakeCmdsNoOutputNoError([]string{
 		"ovn-nbctl --timeout=15 --data=bare --no-heading --columns=_uuid find ACL " +
+			"priority=1012 direction=from-lport " +
 			match + " action=allow external-ids:default-deny-policy-type=Egress",
 	})
 	fExec.AddFakeCmdsNoOutputNoError([]string{
@@ -228,6 +229,7 @@ func (p multicastPolicy) enableCmds(fExec *ovntest.FakeExec, ns string) {
 	match = getACLMatch(pg_hash, match, knet.PolicyTypeIngress)
 	fExec.AddFakeCmdsNoOutputNoError([]string{
 		"ovn-nbctl --timeout=15 --data=bare --no-heading --columns=_uuid find ACL " +
+			"priority=1012 direction=to-lport " +
 			match + " action=allow external-ids:default-deny-policy-type=Ingress",
 	})
 	fExec.AddFakeCmdsNoOutputNoError([]string{
@@ -243,7 +245,8 @@ func (p multicastPolicy) disableCmds(fExec *ovntest.FakeExec, ns string) {
 	match := getACLMatch(pg_hash, "ip4.mcast", knet.PolicyTypeEgress)
 	fExec.AddFakeCmd(&ovntest.ExpectedCmd{
 		Cmd: "ovn-nbctl --timeout=15 --data=bare --no-heading --columns=_uuid find ACL " +
-			match + " " + "action=allow external-ids:default-deny-policy-type=Egress",
+			"priority=1012 direction=from-lport " +
+			match + " action=allow external-ids:default-deny-policy-type=Egress",
 		Output: "fake_uuid",
 	})
 	fExec.AddFakeCmdsNoOutputNoError([]string{
@@ -254,7 +257,8 @@ func (p multicastPolicy) disableCmds(fExec *ovntest.FakeExec, ns string) {
 	match = getACLMatch(pg_hash, match, knet.PolicyTypeIngress)
 	fExec.AddFakeCmd(&ovntest.ExpectedCmd{
 		Cmd: "ovn-nbctl --timeout=15 --data=bare --no-heading --columns=_uuid find ACL " +
-			match + " " + "action=allow external-ids:default-deny-policy-type=Ingress",
+			"priority=1012 direction=to-lport " +
+			match + " action=allow external-ids:default-deny-policy-type=Ingress",
 		Output: "fake_uuid",
 	})
 	fExec.AddFakeCmdsNoOutputNoError([]string{

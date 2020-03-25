@@ -186,7 +186,8 @@ func getACLMatch(portGroupName, match string, policyType knet.PolicyType) string
 func addACLPortGroup(portGroupUUID, portGroupName, direction, priority, match, action string, policyType knet.PolicyType) error {
 	match = getACLMatch(portGroupName, match, policyType)
 	uuid, stderr, err := util.RunOVNNbctl("--data=bare", "--no-heading",
-		"--columns=_uuid", "find", "ACL", match, "action="+action,
+		"--columns=_uuid", "find", "ACL", "priority="+priority,
+		"direction="+direction, match, "action="+action,
 		fmt.Sprintf("external-ids:default-deny-policy-type=%s", policyType))
 	if err != nil {
 		return fmt.Errorf("find failed to get the default deny rule for "+
@@ -213,7 +214,8 @@ func addACLPortGroup(portGroupUUID, portGroupName, direction, priority, match, a
 func deleteACLPortGroup(portGroupName, direction, priority, match, action string, policyType knet.PolicyType) error {
 	match = getACLMatch(portGroupName, match, policyType)
 	uuid, stderr, err := util.RunOVNNbctl("--data=bare", "--no-heading",
-		"--columns=_uuid", "find", "ACL", match, "action="+action,
+		"--columns=_uuid", "find", "ACL", "priority="+priority,
+		"direction="+direction, match, "action="+action,
 		fmt.Sprintf("external-ids:default-deny-policy-type=%s", policyType))
 	if err != nil {
 		return fmt.Errorf("find failed to get the rule for "+
@@ -307,30 +309,32 @@ func localPodAddACL(np *namespacePolicy, gress *gressPolicy) {
 }
 
 func (oc *Controller) createDefaultDenyPortGroup(policyType knet.PolicyType) error {
-	var portGroupName string
+	var portGroupName, direction string
 	if policyType == knet.PolicyTypeIngress {
 		if oc.portGroupIngressDeny != "" {
 			return nil
 		}
 		portGroupName = "ingressDefaultDeny"
+		direction = toLport
 	} else if policyType == knet.PolicyTypeEgress {
 		if oc.portGroupEgressDeny != "" {
 			return nil
 		}
 		portGroupName = "egressDefaultDeny"
+		direction = fromLport
 	}
 	portGroupUUID, err := createPortGroup(portGroupName, portGroupName)
 	if err != nil {
 		return fmt.Errorf("Failed to create port_group for %s (%v)",
 			portGroupName, err)
 	}
-	err = addACLPortGroup(portGroupUUID, portGroupName, toLport,
+	err = addACLPortGroup(portGroupUUID, portGroupName, direction,
 		defaultDenyPriority, "", "drop", policyType)
 	if err != nil {
 		return fmt.Errorf("Failed to create default deny ACL for port group %v", err)
 	}
 
-	err = addACLPortGroup(portGroupUUID, portGroupName, toLport,
+	err = addACLPortGroup(portGroupUUID, portGroupName, direction,
 		defaultAllowPriority, "arp", "allow", policyType)
 	if err != nil {
 		return fmt.Errorf("Failed to create default allow ARP ACL for port group %v", err)
