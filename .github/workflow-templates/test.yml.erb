@@ -37,9 +37,6 @@ jobs:
         pushd go-controller
            make
            make windows
-           make gofmt
-           make install.tools
-           make lint
            COVERALLS=1 make check
         popd
         pushd dist/images
@@ -62,6 +59,22 @@ jobs:
         github-token: ${{ secrets.GITHUB_TOKEN }}
         path-to-lcov: coverage.lcov
   
+  verify:
+    name: Verify
+    runs-on: ubuntu-latest
+    steps:
+    - *step_gosetup
+    - *step_checkout
+    - *step_environment
+
+    - name: Verify
+      run: |
+        pushd go-controller
+           make gofmt
+           make install.tools
+           make lint
+        popd
+
   k8s:
     name: Build k8s
     runs-on: ubuntu-latest
