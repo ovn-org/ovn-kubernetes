@@ -99,7 +99,7 @@ spec:
         - name: OVN_DAEMONSET_VERSION
           value: "3"
         - name: OVN_LOG_NORTHD
-          value: "{{ ovn_log_northd }}"
+          value: "{{ ovn_loglevel_northd }}"
         - name: K8S_APISERVER
           valueFrom:
             configMapKeyRef:
@@ -145,7 +145,7 @@ spec:
         - name: OVN_DAEMONSET_VERSION
           value: "3"
         - name: OVN_LOG_NBCTLD
-          value: "{{ ovn_log_nbctld }}"
+          value: "{{ ovn_loglevel_nbctld }}"
         - name: K8S_APISERVER
           valueFrom:
             configMapKeyRef:
@@ -190,7 +190,7 @@ spec:
         - name: OVN_DAEMONSET_VERSION
           value: "3"
         - name: OVNKUBE_LOGLEVEL
-          value: "{{ ovn_kube_master_log_level }}"
+          value: "{{ ovnkube_master_loglevel }}"
         - name: OVN_NET_CIDR
           valueFrom:
             configMapKeyRef:
