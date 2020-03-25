@@ -64,11 +64,11 @@ list to the above command. Set values are the default values.
 ```
     --master-loglevel="5" \\Log level for ovnkube (master)
     --node-logleve="5" \\ Log level for ovnkube (node)
-    --ovn-log-northd="-vconsole:info -vfile:info" \\ Log config for ovn northd
-    --ovn-log-nb="-vconsole:info -vfile:info" \\ Log config for northbound db
-    --ovn-log-sb="-vconsole:info -vfile:info" \\ Log config for southboudn db
-    --ovn-log-controller="-vconsole:info" \\ Log config for ovn-controller
-    --ovn-log-nbctld="-vconsole:info" \\ Log config for nbctl daemon
+    --ovn-loglevel-northd="-vconsole:info -vfile:info" \\ Log config for ovn northd
+    --ovn-loglevel-nb="-vconsole:info -vfile:info" \\ Log config for northbound db
+    --ovn-loglevel-sb="-vconsole:info -vfile:info" \\ Log config for southboudn db
+    --ovn-loglevel-controller="-vconsole:info" \\ Log config for ovn-controller
+    --ovn-loglevel-nbctld="-vconsole:info" \\ Log config for nbctl daemon
 ```
 
 Apply OVN daemonset and deployment yamls.
