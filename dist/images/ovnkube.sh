@@ -54,7 +54,7 @@ fi
 # OVN_LOG_NB - log level (ovn-ctl default: -vconsole:off -vfile:info) - v3
 # OVN_LOG_SB - log level (ovn-ctl default: -vconsole:off -vfile:info) - v3
 # OVN_LOG_CONTROLLER - log level (ovn-ctl default: -vconsole:off -vfile:info) - v3
-# OVN_LOG_NBCTLD - log file (ovn-nbctl daemon mode default: /var/log/openvswitch/ovn-nbctl.log)
+# OVN_LOG_NBCTLD - log level (ovn-ctl default: -vconsole:off -vfile:info)
 # OVN_NB_PORT - ovn north db port (default 6641)
 # OVN_SB_PORT - ovn south db port (default 6642)
 
@@ -68,6 +68,7 @@ ovn_log_northd=${OVN_LOG_NORTHD:-"-vconsole:info"}
 ovn_log_nb=${OVN_LOG_NB:-"-vconsole:info"}
 ovn_log_sb=${OVN_LOG_SB:-"-vconsole:info"}
 ovn_log_controller=${OVN_LOG_CONTROLLER:-"-vconsole:info"}
+ovn_log_nbctld=${OVN_LOG_NBCTLD:-"-vfile:info"}
 
 ovnkubelogdir=/var/log/ovn-kubernetes
 
@@ -146,8 +147,6 @@ fi
 
 OVS_RUNDIR=/var/run/openvswitch
 OVS_LOGDIR=/var/log/openvswitch
-
-ovn_log_nbctld=${OVN_LOG_NBCTLD:-"${OVN_LOGDIR}/ovn-nbctl.log"}
 
 # =========================================
 
@@ -854,7 +853,7 @@ run-nbctld () {
   echo "ovn_log_nbctld=${ovn_log_nbctld}"
 
   # use unix socket
-  /usr/bin/ovn-nbctl --pidfile --detach --db=${ovn_nbdb_test} --log-file=${ovn_log_nbctld}
+  /usr/bin/ovn-nbctl ${ovn_log_nbctld} --pidfile --db=${ovn_nbdb_test} --log-file=${OVN_LOGDIR}/ovn-nbctl.log --detach
 
   wait_for_event attempts=3 process_ready ovn-nbctl
   echo "=============== run_ovn_nbctl ========== RUNNING"
