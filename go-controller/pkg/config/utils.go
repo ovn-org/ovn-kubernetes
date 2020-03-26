@@ -5,6 +5,8 @@ import (
 	"net"
 	"strconv"
 	"strings"
+
+	utilnet "k8s.io/utils/net"
 )
 
 // CIDRNetworkEntry is the object that holds the definition for a single network CIDR range
@@ -41,7 +43,7 @@ func ParseClusterSubnetEntries(clusterSubnetCmd string) ([]CIDRNetworkEntry, err
 			return nil, err
 		}
 
-		if parsedClusterEntry.CIDR.IP.To4() == nil {
+		if utilnet.IsIPv6(parsedClusterEntry.CIDR.IP) {
 			ipv6 = true
 		}
 

@@ -21,6 +21,7 @@ import (
 	"k8s.io/klog"
 
 	kexec "k8s.io/utils/exec"
+	utilnet "k8s.io/utils/net"
 )
 
 // DefaultEncapPort number used if not supplied
@@ -1078,10 +1079,7 @@ func buildDefaultConfig(cli, file *config) error {
 	}
 
 	// Determine if ovn-kubernetes is configured to run in IPv6 mode
-	IPv6Mode = false
-	if len(Default.ClusterSubnets) >= 1 && Default.ClusterSubnets[0].CIDR.IP.To4() == nil {
-		IPv6Mode = true
-	}
+	IPv6Mode = utilnet.IsIPv6(Default.ClusterSubnets[0].CIDR.IP)
 
 	// To check if any of clustersubnets is in JoinSubnet(100.64.0.0/16) range
 	var clustersubnets []*net.IPNet

@@ -20,6 +20,7 @@ import (
 	v1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/client-go/kubernetes/fake"
+	utilnet "k8s.io/utils/net"
 
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/kube"
@@ -91,7 +92,7 @@ func testManagementPort(ctx *cli.Context, fexec *ovntest.FakeExec, testNS ns.Net
 
 	iptProto := iptables.ProtocolIPv4
 	family := netlink.FAMILY_V4
-	if nsIP.To4() == nil {
+	if utilnet.IsIPv6(nsIP) {
 		iptProto = iptables.ProtocolIPv6
 		family = netlink.FAMILY_V6
 	}

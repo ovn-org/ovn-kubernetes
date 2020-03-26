@@ -9,6 +9,8 @@ import (
 	"strings"
 
 	"github.com/vishvananda/netlink"
+
+	utilnet "k8s.io/utils/net"
 )
 
 // LinkSetUp returns the netlink device with its state marked up
@@ -111,7 +113,7 @@ func LinkRouteExists(link netlink.Link, gwIPstr, subnet string) (bool, error) {
 		return false, fmt.Errorf("gateway IP %s is not a valid IPv4 or IPv6 address", gwIPstr)
 	}
 	family := netlink.FAMILY_V4
-	if gwIP.To4() == nil {
+	if utilnet.IsIPv6(gwIP) {
 		family = netlink.FAMILY_V6
 	}
 
@@ -145,7 +147,7 @@ func LinkNeighAdd(link netlink.Link, neighIPstr, neighMacstr string) error {
 	}
 
 	family := netlink.FAMILY_V4
-	if neighIP.To4() == nil {
+	if utilnet.IsIPv6(neighIP) {
 		family = netlink.FAMILY_V6
 	}
 	neigh := &netlink.Neigh{
@@ -171,7 +173,7 @@ func LinkNeighExists(link netlink.Link, neighIPstr, neighMacstr string) (bool, e
 	}
 
 	family := netlink.FAMILY_V4
-	if neighIP.To4() == nil {
+	if utilnet.IsIPv6(neighIP) {
 		family = netlink.FAMILY_V6
 	}
 
