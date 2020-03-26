@@ -122,7 +122,15 @@ ovsdb-raft () {
       --ovn-${db}-log="${ovn_log_db}" &
   fi
 
-  wait_for_event process_ready ovn${db}_db
+  # Following command waits for the database on server to enter a `connected` state
+  # -- Waits until a database with the given name has been added to server. Then, if database
+  # is clustered, additionally waits until it has joined and connected to its cluster.
+  echo "waiting for ${database} to join and connect to the cluster."
+  /usr/bin/ovsdb-client -t 120 wait unix:${OVN_RUNDIR}/ovn${db}_db.sock ${database} connected
+  if [[ $? != 0 ]]; then
+    echo "the ${database} has not yet joined and connected to its cluster. Exiting..."
+    exit 1
+  fi
   echo "=============== ${db}-ovsdb-raft ========== RUNNING"
 
   if [[ "${POD_NAME}" == "ovnkube-db-0" && "${initialize}" == "true" ]] ; then
