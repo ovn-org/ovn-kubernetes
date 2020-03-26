@@ -2,11 +2,13 @@ package ovn
 
 import (
 	"fmt"
+	"k8s.io/apimachinery/pkg/util/wait"
 	"net"
 	"reflect"
 	"sort"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/factory"
@@ -1145,7 +1147,24 @@ func (oc *Controller) handlePeerPodSelectorAddUpdate(np *namespacePolicy,
 	pod := obj.(*kapi.Pod)
 	podAnnotation, err := util.UnmarshalPodAnnotation(pod.Annotations)
 	if err != nil {
-		return
+		klog.V(5).Infof("Unable to unmarshal pod annotation: %v. Will attempt to fetch annotation in"+
+			"case it has been updated.", pod.Annotations)
+		// annotation must have been updated after we got the event
+		err = wait.PollImmediate(time.Second, 5*time.Second, func() (bool, error) {
+			newPod, err := oc.watchFactory.GetPod(pod.Namespace, pod.Name)
+			if err != nil {
+				return false, nil
+			}
+			podAnnotation, err = util.UnmarshalPodAnnotation(newPod.Annotations)
+			if err != nil {
+				return false, nil
+			}
+			return true, nil
+		})
+		if err != nil {
+			klog.Errorf("Error while trying to poll for updated annotation: %v", err)
+			return
+		}
 	}
 	// DUAL-STACK FIXME: handle multiple IPs
 	ipAddress := podAnnotation.IPs[0].IP.String()
