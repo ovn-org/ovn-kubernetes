@@ -8,8 +8,7 @@ import (
 	"strings"
 
 	"k8s.io/klog"
-
-	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
+	utilnet "k8s.io/utils/net"
 )
 
 const (
@@ -297,7 +296,7 @@ func GatewayInit(clusterIPSubnet []string, hostSubnet string, joinSubnet *net.IP
 
 	// Add a static route in GR with physical gateway as the default next hop.
 	var allIPs string
-	if config.IPv6Mode {
+	if utilnet.IsIPv6(l3GatewayConfig.NextHop) {
 		allIPs = "::/0"
 	} else {
 		allIPs = "0.0.0.0/0"
