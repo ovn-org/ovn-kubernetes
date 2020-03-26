@@ -7,7 +7,6 @@ import (
 
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/kube"
-	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
 	"k8s.io/klog"
 )
@@ -64,7 +63,7 @@ func createManagementPort(nodeName string, localSubnet *net.IPNet, nodeAnnotator
 		return nil
 	}
 
-	if err := nodeAnnotator.Set(ovn.OvnNodeManagementPortMacAddress, macAddress); err != nil {
+	if err := util.SetNodeManagementPortMacAddr(nodeAnnotator, macAddress); err != nil {
 		return err
 	}
 

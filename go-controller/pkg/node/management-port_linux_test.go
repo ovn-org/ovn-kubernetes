@@ -23,7 +23,6 @@ import (
 
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/kube"
-	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn"
 	ovntest "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/testing"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
 
@@ -106,9 +105,6 @@ func testManagementPort(ctx *cli.Context, fexec *ovntest.FakeExec, testNS ns.Net
 
 	existingNode := v1.Node{ObjectMeta: metav1.ObjectMeta{
 		Name: nodeName,
-		Annotations: map[string]string{
-			ovn.OvnNodeSubnets: nodeSubnet,
-		},
 	}}
 	fakeClient := fake.NewSimpleClientset(&v1.NodeList{
 		Items: []v1.Node{existingNode},
@@ -118,6 +114,11 @@ func testManagementPort(ctx *cli.Context, fexec *ovntest.FakeExec, testNS ns.Net
 	Expect(err).NotTo(HaveOccurred())
 
 	nodeAnnotator := kube.NewNodeAnnotator(&kube.Kube{fakeClient}, &existingNode)
+	err = util.SetNodeHostSubnetAnnotation(nodeAnnotator, nodeSubnet)
+	Expect(err).NotTo(HaveOccurred())
+	err = nodeAnnotator.Run()
+	Expect(err).NotTo(HaveOccurred())
+
 	waiter := newStartupWaiter(nodeName)
 
 	err = testNS.Do(func(ns.NetNS) error {
@@ -203,7 +204,10 @@ func testManagementPort(ctx *cli.Context, fexec *ovntest.FakeExec, testNS ns.Net
 
 	updatedNode, err := fakeClient.CoreV1().Nodes().Get(nodeName, metav1.GetOptions{})
 	Expect(err).NotTo(HaveOccurred())
-	Expect(updatedNode.Annotations).To(HaveKeyWithValue(ovn.OvnNodeManagementPortMacAddress, mgtPortMAC))
+
+	macFromAnnotation, err := util.ParseNodeManagementPortMacAddr(updatedNode)
+	Expect(err).NotTo(HaveOccurred())
+	Expect(macFromAnnotation).To(Equal(mgtPortMAC))
 
 	Expect(fexec.CalledMatchesExpected()).To(BeTrue(), fexec.ErrorDesc)
 }

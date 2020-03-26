@@ -4,7 +4,6 @@ package node
 
 import (
 	"bytes"
-	"encoding/json"
 	"fmt"
 	"net"
 	"syscall"
@@ -17,7 +16,6 @@ import (
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/factory"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/kube"
-	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn"
 	ovntest "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/testing"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
 
@@ -70,10 +68,6 @@ func shareGatewayInterfaceTest(app *cli.App, testNS ns.NetNS,
 
 		fexec := ovntest.NewFakeExec()
 		fexec.AddFakeCmd(&ovntest.ExpectedCmd{
-			Cmd:    "ovs-vsctl --timeout=15 --if-exists get Open_vSwitch . external_ids:system-id",
-			Output: systemID,
-		})
-		fexec.AddFakeCmd(&ovntest.ExpectedCmd{
 			Cmd: "ovs-vsctl --timeout=15 -- port-to-br eth0",
 			Err: fmt.Errorf(""),
 		})
@@ -111,6 +105,10 @@ func shareGatewayInterfaceTest(app *cli.App, testNS ns.NetNS,
 		fexec.AddFakeCmdsNoOutputNoError([]string{
 			"ovs-vsctl --timeout=15 set bridge breth0 other-config:hwaddr=" + eth0MAC,
 			"ovs-vsctl --timeout=15 set Open_vSwitch . external_ids:ovn-bridge-mappings=" + util.PhysicalNetworkName + ":breth0",
+		})
+		fexec.AddFakeCmd(&ovntest.ExpectedCmd{
+			Cmd:    "ovs-vsctl --timeout=15 --if-exists get Open_vSwitch . external_ids:system-id",
+			Output: systemID,
 		})
 		fexec.AddFakeCmd(&ovntest.ExpectedCmd{
 			Cmd:    "ovs-ofctl --no-stats --no-names dump-flows br-int table=41,ip,nw_src=" + clusterCIDR,
@@ -158,24 +156,10 @@ cookie=0x0, duration=8366.597s, table=1, n_packets=10641, n_bytes=10370087, prio
 		_, err = config.InitConfig(ctx, fexec, nil)
 		Expect(err).NotTo(HaveOccurred())
 
-		l3GatewayConfig := map[string]string{
-			ovn.OvnNodeGatewayMode:       string(config.Gateway.Mode),
-			ovn.OvnNodeGatewayVlanID:     string(gatewayVLANID),
-			ovn.OvnNodeGatewayIfaceID:    gwRouter,
-			ovn.OvnNodeGatewayMacAddress: lrpMAC,
-			ovn.OvnNodeGatewayIP:         lrpIP,
-			//ovn.OvnNodeGatewayNextHop:    localnetGatewayNextHop,
-		}
-		byteArr, err := json.Marshal(map[string]map[string]string{ovn.OvnDefaultNetworkGateway: l3GatewayConfig})
-		Expect(err).NotTo(HaveOccurred())
 		existingNode := v1.Node{ObjectMeta: metav1.ObjectMeta{
 			Name: nodeName,
-			Annotations: map[string]string{
-				ovn.OvnNodeSubnets:         nodeSubnet,
-				ovn.OvnNodeL3GatewayConfig: string(byteArr),
-				ovn.OvnNodeChassisID:       systemID,
-			},
 		}}
+
 		fakeClient := fake.NewSimpleClientset(&v1.NodeList{
 			Items: []v1.Node{existingNode},
 		})
@@ -191,6 +175,11 @@ cookie=0x0, duration=8366.597s, table=1, n_packets=10641, n_bytes=10370087, prio
 		Expect(err).NotTo(HaveOccurred())
 
 		nodeAnnotator := kube.NewNodeAnnotator(&kube.Kube{fakeClient}, &existingNode)
+
+		err = util.SetNodeHostSubnetAnnotation(nodeAnnotator, nodeSubnet)
+		Expect(err).NotTo(HaveOccurred())
+		err = nodeAnnotator.Run()
+		Expect(err).NotTo(HaveOccurred())
 
 		err = testNS.Do(func(ns.NetNS) error {
 			defer GinkgoRecover()
@@ -324,6 +313,10 @@ var _ = Describe("Gateway Init Operations", func() {
 				"ovs-vsctl --timeout=15 --if-exists del-port br-local " + legacyLocalnetGatewayNextHopPort +
 					" -- --may-exist add-port br-local " + localnetGatewayNextHopPort + " -- set interface " + localnetGatewayNextHopPort + " type=internal mtu_request=" + mtu + " mac=00\\:00\\:a9\\:fe\\:21\\:01",
 			})
+			fexec.AddFakeCmd(&ovntest.ExpectedCmd{
+				Cmd:    "ovs-vsctl --timeout=15 --if-exists get Open_vSwitch . external_ids:system-id",
+				Output: systemID,
+			})
 
 			err := util.SetExec(fexec)
 			Expect(err).NotTo(HaveOccurred())
@@ -331,23 +324,8 @@ var _ = Describe("Gateway Init Operations", func() {
 			_, err = config.InitConfig(ctx, fexec, nil)
 			Expect(err).NotTo(HaveOccurred())
 
-			l3GatewayConfig := map[string]string{
-				ovn.OvnNodeGatewayMode:       string(config.Gateway.Mode),
-				ovn.OvnNodeGatewayVlanID:     string(0),
-				ovn.OvnNodeGatewayIfaceID:    gwRouter,
-				ovn.OvnNodeGatewayMacAddress: lrpMAC,
-				ovn.OvnNodeGatewayIP:         lrpIP,
-				//ovn.OvnNodeGatewayNextHop:    localnetGatewayNextHop,
-			}
-			byteArr, err := json.Marshal(map[string]map[string]string{ovn.OvnDefaultNetworkGateway: l3GatewayConfig})
-			Expect(err).NotTo(HaveOccurred())
 			existingNode := v1.Node{ObjectMeta: metav1.ObjectMeta{
 				Name: nodeName,
-				Annotations: map[string]string{
-					ovn.OvnNodeSubnets:         nodeSubnet,
-					ovn.OvnNodeL3GatewayConfig: string(byteArr),
-					ovn.OvnNodeChassisID:       systemID,
-				},
 			}}
 			fakeClient := fake.NewSimpleClientset(&v1.NodeList{
 				Items: []v1.Node{existingNode},
@@ -361,10 +339,16 @@ var _ = Describe("Gateway Init Operations", func() {
 			Expect(err).NotTo(HaveOccurred())
 			util.SetIPTablesHelper(iptables.ProtocolIPv4, ipt)
 
+			nodeAnnotator := kube.NewNodeAnnotator(&kube.Kube{fakeClient}, &existingNode)
+			err = util.SetNodeHostSubnetAnnotation(nodeAnnotator, nodeSubnet)
+			Expect(err).NotTo(HaveOccurred())
+			err = nodeAnnotator.Run()
+			Expect(err).NotTo(HaveOccurred())
+
 			err = testNS.Do(func(ns.NetNS) error {
 				defer GinkgoRecover()
 
-				_, err = initLocalnetGateway(nodeName, nodeSubnet, wf)
+				err = initLocalnetGateway(nodeName, nodeSubnet, wf, nodeAnnotator)
 				Expect(err).NotTo(HaveOccurred())
 				// Check if IP has been assigned to LocalnetGatewayNextHopPort
 				link, err := netlink.LinkByName(localnetGatewayNextHopPort)

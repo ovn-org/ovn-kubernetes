@@ -4,13 +4,15 @@ package node
 
 import (
 	"fmt"
+
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/factory"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/kube"
 )
 
-func initLocalnetGateway(nodeName string,
-	subnet string, wf *factory.WatchFactory) (map[string]map[string]string, error) {
+func initLocalnetGateway(nodeName string, subnet string,
+	wf *factory.WatchFactory, nodeAnnotator kube.Annotator) error {
 	// TODO: Implement this
-	return nil, fmt.Errorf("Not implemented yet on Windows")
+	return fmt.Errorf("Not implemented yet on Windows")
 }
 
 func cleanupLocalnetGateway() error {
