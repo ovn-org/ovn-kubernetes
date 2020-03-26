@@ -37,7 +37,7 @@ COPY git_info /root
 # ovnkube.sh is the entry point. This script examines environment
 # variables to direct operation and configure ovn
 COPY ovnkube.sh /root/
-COPY ovndb-raft-functions /root/
+COPY ovndb-raft-functions.sh /root/
 
 LABEL io.k8s.display-name="ovn-kubernetes" \
       io.k8s.description="This is a Kubernetes network plugin that provides an overlay network using OVN." \
