@@ -338,21 +338,25 @@ func (oc *Controller) ensureNodeLogicalNetwork(nodeName string, hostsubnet *net.
 	}
 
 	// Create a logical switch and set its subnet.
-	ocSubnet := "other-config:subnet=" + hostsubnet.String()
-	if config.IPv6Mode {
-		ocSubnet = "other-config:ipv6_prefix=" + hostsubnet.IP.String()
-	}
+
 	args := []string{
 		"--", "--may-exist", "ls-add", nodeName,
-		"--", "set", "logical_switch", nodeName, ocSubnet,
+		"--", "set", "logical_switch", nodeName,
 	}
-	if !config.IPv6Mode {
-		excludeIPs := "other-config:exclude_ips=" + secondIP.IP.String()
+	if utilnet.IsIPv6CIDR(hostsubnet) {
+		args = append(args,
+			"other-config:ipv6_prefix="+hostsubnet.IP.String(),
+		)
+	} else {
+		excludeIPs := secondIP.IP.String()
 		if config.HybridOverlay.Enabled {
 			thirdIP := util.NextIP(secondIP.IP)
 			excludeIPs += ".." + thirdIP.String()
 		}
-		args = append(args, excludeIPs)
+		args = append(args,
+			"other-config:subnet="+hostsubnet.String(),
+			"other-config:exclude_ips="+excludeIPs,
+		)
 	}
 	stdout, stderr, err := util.RunOVNNbctl(args...)
 	if err != nil {
@@ -735,12 +739,13 @@ func (oc *Controller) syncNodes(nodes []interface{}) {
 		var subnet *net.IPNet
 		attrs := strings.Fields(items[1])
 		for _, attr := range attrs {
-			if strings.HasPrefix(attr, subnetAttr+"=") {
-				subnetStr := strings.TrimPrefix(attr, subnetAttr+"=")
-				if config.IPv6Mode {
-					subnetStr += "/64"
-				}
+			if strings.HasPrefix(attr, "subnet=") {
+				subnetStr := strings.TrimPrefix(attr, "subnet=")
 				_, subnet, _ = net.ParseCIDR(subnetStr)
+				break
+			} else if strings.HasPrefix(attr, "ipv6_prefix=") {
+				prefixStr := strings.TrimPrefix(attr, "ipv6_prefix=")
+				_, subnet, _ = net.ParseCIDR(prefixStr + "/64")
 				break
 			}
 		}

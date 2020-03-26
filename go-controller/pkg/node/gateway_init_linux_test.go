@@ -385,7 +385,7 @@ var _ = Describe("Gateway Init Operations", func() {
 				},
 				"nat": {
 					"POSTROUTING": []string{
-						"-s 169.254.33.2/24 -j MASQUERADE",
+						"-s 169.254.33.2 -j MASQUERADE",
 					},
 					"PREROUTING": []string{
 						"-j OVN-KUBE-NODEPORT",
