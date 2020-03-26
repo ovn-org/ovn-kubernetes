@@ -12,6 +12,7 @@ import (
 	"k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/api/resource"
 	"k8s.io/apimachinery/pkg/util/wait"
+	utilnet "k8s.io/utils/net"
 
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/kube"
@@ -175,8 +176,10 @@ func (pr *PodRequest) getCNIResult(podInterfaceInfo *PodInterfaceInfo) (*current
 	}
 
 	// Build the result structure to pass back to the runtime
-	ipVersion := "6"
-	if podInterfaceInfo.IP.IP.To4() != nil {
+	var ipVersion string
+	if utilnet.IsIPv6(podInterfaceInfo.IP.IP) {
+		ipVersion = "6"
+	} else {
 		ipVersion = "4"
 	}
 	return &current.Result{

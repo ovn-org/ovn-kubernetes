@@ -11,11 +11,11 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	utilruntime "k8s.io/apimachinery/pkg/util/runtime"
 	"k8s.io/client-go/util/retry"
+	"k8s.io/klog"
+	utilnet "k8s.io/utils/net"
 
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
-
-	"k8s.io/klog"
 )
 
 const (
@@ -372,7 +372,7 @@ func (oc *Controller) ensureNodeLogicalNetwork(nodeName string, hostsubnet *net.
 
 		// Configure querier only if we have an IPv4 address, otherwise
 		// disable querier.
-		if firstIP.IP.To4() != nil {
+		if !utilnet.IsIPv6(firstIP.IP) {
 			stdout, stderr, err = util.RunOVNNbctl("set", "logical_switch",
 				nodeName, "other-config:mcast_querier=\"true\"",
 				"other-config:mcast_eth_src=\""+nodeLRPMac+"\"",

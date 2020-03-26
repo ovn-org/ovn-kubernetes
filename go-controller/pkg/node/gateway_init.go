@@ -7,6 +7,7 @@ import (
 	"strings"
 
 	"k8s.io/klog"
+	utilnet "k8s.io/utils/net"
 
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/kube"
@@ -63,7 +64,7 @@ loop:
 	for _, addr := range addrs {
 		switch ip := addr.(type) {
 		case *net.IPNet:
-			if ip.IP.To4() != nil {
+			if !utilnet.IsIPv6(ip.IP) {
 				ipAddress = ip.String()
 			}
 			// get the first ip address

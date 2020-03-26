@@ -10,6 +10,7 @@ import (
 
 	kapi "k8s.io/api/core/v1"
 	"k8s.io/klog"
+	utilnet "k8s.io/utils/net"
 )
 
 func (ovn *Controller) getLoadBalancer(protocol kapi.Protocol) (string,
@@ -183,10 +184,10 @@ func (ovn *Controller) createLoadBalancerRejectACL(lb string, serviceIP string, 
 	}
 	var aclMatch string
 	var l3Prefix string
-	if ip.To4() != nil {
-		l3Prefix = "ip4"
-	} else {
+	if utilnet.IsIPv6(ip) {
 		l3Prefix = "ip6"
+	} else {
+		l3Prefix = "ip4"
 	}
 	vip := util.JoinHostPortInt32(serviceIP, port)
 	aclName := fmt.Sprintf("%s-%s", lb, vip)

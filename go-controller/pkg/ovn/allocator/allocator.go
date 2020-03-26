@@ -4,6 +4,8 @@ import (
 	"fmt"
 	"net"
 	"sync"
+
+	utilnet "k8s.io/utils/net"
 )
 
 var ErrSubnetAllocatorFull = fmt.Errorf("no subnets available.")
@@ -32,10 +34,10 @@ func (sna *SubnetAllocator) AddNetworkRange(network string, hostBits uint32) err
 		return err
 	}
 
-	if snr.network.IP.To4() != nil {
-		sna.v4ranges = append(sna.v4ranges, snr)
-	} else {
+	if utilnet.IsIPv6(snr.network.IP) {
 		sna.v6ranges = append(sna.v6ranges, snr)
+	} else {
+		sna.v4ranges = append(sna.v4ranges, snr)
 	}
 	return nil
 }
