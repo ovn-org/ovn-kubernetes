@@ -30,7 +30,13 @@ func main() {
 				"to integrate with rest of the network. Requires the " +
 				"name of the node in the kubernetes cluster.",
 		}})...)
+	c.Flags = append(c.Flags, config.CommonFlags...)
+	c.Flags = append(c.Flags, config.CNIFlags...)
 	c.Flags = append(c.Flags, config.K8sFlags...)
+	c.Flags = append(c.Flags, config.OvnNBFlags...)
+	c.Flags = append(c.Flags, config.OvnSBFlags...)
+	c.Flags = append(c.Flags, config.OVNGatewayFlags...)
+	c.Flags = append(c.Flags, config.MasterHAFlags...)
 	c.Action = func(c *cli.Context) error {
 		if err := runHybridOverlay(c); err != nil {
 			panic(err.Error())
