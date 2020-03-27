@@ -27,23 +27,23 @@ func createPlatformManagementPort(interfaceName, interfaceIP, routerIP, routerMA
 		return err
 	}
 	// Flush any existing IP addresses and assign the new IP
-	err = util.LinkAddrAdd(link, interfaceIP)
+	if err = util.LinkAddrFlush(link); err == nil {
+		err = util.LinkAddrAdd(link, interfaceIP)
+	}
 	if err != nil {
 		return err
 	}
 
-	// flush any existing routes and add new route for the cluster subnet
-	var clusterSubnets []string
+	var allSubnets []string
 	for _, subnet := range config.Default.ClusterSubnets {
-		clusterSubnets = append(clusterSubnets, subnet.CIDR.String())
+		allSubnets = append(allSubnets, subnet.CIDR.String())
 	}
-	err = util.LinkRouteAdd(link, routerIP, clusterSubnets)
-	if err != nil {
-		return err
-	}
+	allSubnets = append(allSubnets, config.Kubernetes.ServiceCIDR)
 
-	// flush any existing routes and add new route for the service subnet
-	err = util.LinkRouteAdd(link, routerIP, []string{config.Kubernetes.ServiceCIDR})
+	// delete any existing routes and add new routes
+	if err = util.LinkRoutesDel(link, allSubnets); err == nil {
+		err = util.LinkRoutesAdd(link, routerIP, allSubnets)
+	}
 	if err != nil {
 		if os.IsExist(err) {
 			klog.V(5).Infof("Ignoring error %s from 'route add %s via %s' - already added via IPv6 RA?",
