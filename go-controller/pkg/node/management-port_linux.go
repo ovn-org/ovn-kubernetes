@@ -27,23 +27,23 @@ func createPlatformManagementPort(interfaceName, interfaceIP, routerIP, routerMA
 		return err
 	}
 	// Flush any existing IP addresses and assign the new IP
-	err = util.LinkAddrAdd(link, interfaceIP)
+	if err = util.LinkAddrFlush(link); err == nil {
+		err = util.LinkAddrAdd(link, interfaceIP)
+	}
 	if err != nil {
 		return err
 	}
 
-	// flush any existing routes and add new route for the cluster subnet
-	var clusterSubnets []string
+	var allSubnets []string
 	for _, subnet := range config.Default.ClusterSubnets {
-		clusterSubnets = append(clusterSubnets, subnet.CIDR.String())
+		allSubnets = append(allSubnets, subnet.CIDR.String())
 	}
-	err = util.LinkRouteAdd(link, routerIP, clusterSubnets)
-	if err != nil {
-		return err
-	}
+	allSubnets = append(allSubnets, config.Kubernetes.ServiceCIDR)
 
-	// flush any existing routes and add new route for the service subnet
-	err = util.LinkRouteAdd(link, routerIP, []string{config.Kubernetes.ServiceCIDR})
+	// delete any existing routes and add new routes
+	if err = util.LinkRoutesDel(link, allSubnets); err == nil {
+		err = util.LinkRoutesAdd(link, routerIP, allSubnets)
+	}
 	if err != nil {
 		if os.IsExist(err) {
 			klog.V(5).Infof("Ignoring error %s from 'route add %s via %s' - already added via IPv6 RA?",
@@ -110,7 +110,7 @@ func addMgtPortIptRules(ifname, interfaceIP string) error {
 }
 
 //DelMgtPortIptRules delete all the iptable rules for the management port.
-func DelMgtPortIptRules(nodeName string) {
+func DelMgtPortIptRules() {
 	// Clean up all iptables and ip6tables remnants that may be left around
 	ipt, err := util.GetIPTablesHelper(iptables.ProtocolIPv4)
 	if err != nil {
@@ -120,8 +120,7 @@ func DelMgtPortIptRules(nodeName string) {
 	if err != nil {
 		return
 	}
-	ifname := util.GetK8sMgmtIntfName(nodeName)
-	rule := []string{"-o", ifname, "-j", iptableMgmPortChain}
+	rule := []string{"-o", util.K8sMgmtIntfName, "-j", iptableMgmPortChain}
 	_ = ipt.Delete("nat", "POSTROUTING", rule...)
 	_ = ipt6.Delete("nat", "POSTROUTING", rule...)
 	_ = ipt.ClearChain("nat", iptableMgmPortChain)

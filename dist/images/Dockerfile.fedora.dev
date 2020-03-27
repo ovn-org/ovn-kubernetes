@@ -86,7 +86,7 @@ RUN cat /root/git_info
 # ovnkube.sh is the entry point. This script examines environment
 # variables to direct operation and configure ovn
 COPY ovnkube.sh /root/
-COPY ovndb-raft-functions /root/
+COPY ovndb-raft-functions.sh /root/
 
 LABEL io.k8s.display-name="ovn-kubernetes-master" \
       io.k8s.description="OVN based Kubernetes CNI Plugin stack. Image contains latest code of all the components in the stack (OVN-kubernetes, OVN, OVS)." \

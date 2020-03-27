@@ -198,9 +198,9 @@ func (n *NodeController) hybridOverlayNodeUpdate(node *kapi.Node) error {
 		return nil
 	}
 
-	cidr, nodeIP, drMAC := getNodeDetails(node)
+	cidr, nodeIP, drMAC, err := getNodeDetails(node)
 	if cidr == nil || nodeIP == nil || drMAC == nil {
-		klog.V(5).Infof("cleaning up hybrid overlay tunnel to node %s", node.Name)
+		klog.V(5).Infof("cleaning up hybrid overlay resources for node %q because: %v", node.Name, err)
 		n.Delete(node)
 		return nil
 	}
@@ -214,7 +214,7 @@ func (n *NodeController) hybridOverlayNodeUpdate(node *kapi.Node) error {
 	// Distributed Router MAC ARP responder flow; responds to ARP requests by OVN for
 	// any IP address within this node's assigned subnet and returns our hybrid overlay
 	// port's MAC address.
-	_, _, err := util.RunOVSOfctl("add-flow", extBridgeName,
+	_, _, err = util.RunOVSOfctl("add-flow", extBridgeName,
 		fmt.Sprintf("cookie=0x%s,table=0,priority=100,arp,in_port=ext,arp_tpa=%s,"+
 			"actions=move:NXM_OF_ETH_SRC[]->NXM_OF_ETH_DST[],"+
 			"mod_dl_src:%s,"+

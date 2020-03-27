@@ -48,16 +48,17 @@ func createTempFile(name string) (string, error) {
 func testManagementPort(ctx *cli.Context, fexec *ovntest.FakeExec, testNS ns.NetNS,
 	clusterCIDR, nodeSubnet, mgtPortIP, gwIP, serviceCIDR, lrpMAC string) {
 	const (
-		nodeName   string = "node1"
-		mgtPortMAC string = "00:00:00:55:66:77"
-		mgtPort    string = "k8s-" + nodeName
-		mtu        string = "1400"
+		nodeName      string = "node1"
+		mgtPortMAC    string = "00:00:00:55:66:77"
+		mgtPort       string = util.K8sMgmtIntfName
+		legacyMgtPort string = "k8s-" + nodeName
+		mtu           string = "1400"
 	)
 
 	// generic setup
 	fexec.AddFakeCmdsNoOutputNoError([]string{
 		"ovs-vsctl --timeout=15 -- --may-exist add-br br-int",
-		"ovs-vsctl --timeout=15 -- --may-exist add-port br-int " + mgtPort + " -- set interface " + mgtPort + " type=internal mtu_request=" + mtu + " external-ids:iface-id=" + mgtPort,
+		"ovs-vsctl --timeout=15 -- --if-exists del-port br-int " + legacyMgtPort + " -- --may-exist add-port br-int " + mgtPort + " -- set interface " + mgtPort + " type=internal mtu_request=" + mtu + " external-ids:iface-id=" + legacyMgtPort,
 	})
 	fexec.AddFakeCmd(&ovntest.ExpectedCmd{
 		Cmd:    "ovs-vsctl --timeout=15 --if-exists get interface " + mgtPort + " mac_in_use",
@@ -119,7 +120,7 @@ func testManagementPort(ctx *cli.Context, fexec *ovntest.FakeExec, testNS ns.Net
 	err = nodeAnnotator.Run()
 	Expect(err).NotTo(HaveOccurred())
 
-	waiter := newStartupWaiter(nodeName)
+	waiter := newStartupWaiter()
 
 	err = testNS.Do(func(ns.NetNS) error {
 		defer GinkgoRecover()
@@ -232,7 +233,7 @@ var _ = Describe("Management Port Operations", func() {
 		app.Name = "test"
 		app.Flags = config.Flags
 
-		// Set up a fake k8s-node1
+		// Set up a fake k8sMgmt interface
 		testNS, err = testutils.NewNS()
 		Expect(err).NotTo(HaveOccurred())
 		err = testNS.Do(func(ns.NetNS) error {
@@ -240,7 +241,7 @@ var _ = Describe("Management Port Operations", func() {
 
 			err := netlink.LinkAdd(&netlink.Dummy{
 				LinkAttrs: netlink.LinkAttrs{
-					Name: "k8s-node1",
+					Name: util.K8sMgmtIntfName,
 				},
 			})
 			Expect(err).NotTo(HaveOccurred())

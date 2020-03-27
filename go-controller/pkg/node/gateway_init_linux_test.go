@@ -184,7 +184,7 @@ cookie=0x0, duration=8366.597s, table=1, n_packets=10641, n_bytes=10370087, prio
 		err = testNS.Do(func(ns.NetNS) error {
 			defer GinkgoRecover()
 
-			waiter := newStartupWaiter(nodeName)
+			waiter := newStartupWaiter()
 			err = n.initGateway(nodeSubnet, nodeAnnotator, waiter)
 			Expect(err).NotTo(HaveOccurred())
 

@@ -1,6 +1,7 @@
 package controller
 
 import (
+	"fmt"
 	"net"
 	"reflect"
 
@@ -14,8 +15,8 @@ import (
 
 // nodeChanged returns true if any relevant node attributes changed
 func nodeChanged(node1 *kapi.Node, node2 *kapi.Node) bool {
-	cidr1, nodeIP1, drMAC1 := getNodeDetails(node1)
-	cidr2, nodeIP2, drMAC2 := getNodeDetails(node2)
+	cidr1, nodeIP1, drMAC1, _ := getNodeDetails(node1)
+	cidr2, nodeIP2, drMAC2, _ := getNodeDetails(node2)
 	return !reflect.DeepEqual(cidr1, cidr2) || !reflect.DeepEqual(nodeIP1, nodeIP2) || !reflect.DeepEqual(drMAC1, drMAC2)
 }
 
@@ -51,23 +52,21 @@ func getNodeSubnetAndIP(node *kapi.Node) (*net.IPNet, net.IP) {
 
 // getNodeDetails returns the node's hybrid overlay subnet, first InternalIP,
 // and the distributed router MAC (DRMAC), or nil if any of the addresses are
-// invalid
-func getNodeDetails(node *kapi.Node) (*net.IPNet, net.IP, net.HardwareAddr) {
+// missing or invalid.
+func getNodeDetails(node *kapi.Node) (*net.IPNet, net.IP, net.HardwareAddr, error) {
 	cidr, ip := getNodeSubnetAndIP(node)
 	if cidr == nil || ip == nil {
-		return nil, nil, nil
+		return nil, nil, nil, fmt.Errorf("missing node subnet and/or node IP")
 	}
 
 	drMACString, ok := node.Annotations[types.HybridOverlayDRMAC]
 	if !ok {
-		klog.V(5).Infof("missing node %q distributed router MAC annotation", node.Name)
-		return nil, nil, nil
+		return nil, nil, nil, fmt.Errorf("missing distributed router MAC annotation")
 	}
 	drMAC, err := net.ParseMAC(drMACString)
 	if err != nil {
-		klog.Errorf("error parsing node %q distributed router MAC %q: %v", node.Name, drMACString, err)
-		return nil, nil, nil
+		return nil, nil, nil, fmt.Errorf("invalid distributed router MAC %q: %v", drMACString, err)
 	}
 
-	return cidr, ip, drMAC
+	return cidr, ip, drMAC, nil
 }

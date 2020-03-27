@@ -156,9 +156,9 @@ func (n *NodeController) Add(node *kapi.Node) {
 		return
 	}
 
-	cidr, nodeIP, drMAC := getNodeDetails(node)
+	cidr, nodeIP, drMAC, err := getNodeDetails(node)
 	if cidr == nil || nodeIP == nil || drMAC == nil {
-		klog.V(5).Infof("deleting node %q due to missing annotations or node IP")
+		klog.V(5).Infof("cleaning up hybrid overlay resources for node %q because: %v", node.Name, err)
 		n.Delete(node)
 		return
 	}

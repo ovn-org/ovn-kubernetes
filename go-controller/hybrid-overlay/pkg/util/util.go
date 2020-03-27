@@ -1,7 +1,6 @@
 package util
 
 import (
-	"bytes"
 	"fmt"
 	"net"
 
@@ -47,13 +46,15 @@ func IsHybridOverlayNode(node *kapi.Node) bool {
 	return false
 }
 
+// SameIPNet returns true if both inputs are nil or if both inputs have the
+// same value
 func SameIPNet(a, b *net.IPNet) bool {
-	if a == nil && b == nil {
+	if a == b {
 		return true
-	} else if (a != nil && b == nil) || (a == nil && b != nil) {
+	} else if a == nil || b == nil {
 		return false
 	}
-	return a.IP.Equal(b.IP) && bytes.Equal(a.Mask, b.Mask)
+	return a.String() == b.String()
 }
 
 // GetNodeInternalIP returns the first NodeInternalIP address of the node

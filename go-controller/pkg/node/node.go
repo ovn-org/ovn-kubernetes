@@ -71,7 +71,6 @@ func setupOVNNode(node *kapi.Node) error {
 		fmt.Sprintf("external_ids:ovn-openflow-probe-interval=%d",
 			config.Default.OpenFlowProbe),
 		fmt.Sprintf("external_ids:hostname=\"%s\"", nodeName),
-		"external_ids:ovn-monitor-all=true",
 	)
 	if err != nil {
 		return fmt.Errorf("error setting OVS external IDs: %v\n  %q", err, stderr)
@@ -210,7 +209,7 @@ func (n *OvnNode) Start() error {
 	}
 
 	nodeAnnotator := kube.NewNodeAnnotator(n.Kube, node)
-	waiter := newStartupWaiter(n.name)
+	waiter := newStartupWaiter()
 
 	// Initialize gateway resources on the node
 	if err := n.initGateway(subnet.String(), nodeAnnotator, waiter); err != nil {
