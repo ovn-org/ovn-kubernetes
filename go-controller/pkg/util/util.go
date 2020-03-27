@@ -9,6 +9,11 @@ import (
 	"k8s.io/klog"
 )
 
+// K8sMgmtIntfName name to be used as an OVS internal port on the node
+const (
+	K8sMgmtIntfName = "ovn-k8s-mp0"
+)
+
 // StringArg gets the named command-line argument or returns an error if it is empty
 func StringArg(context *cli.Context, name string) (string, error) {
 	val := context.String(name)
@@ -18,9 +23,8 @@ func StringArg(context *cli.Context, name string) (string, error) {
 	return val, nil
 }
 
-// GetK8sMgmtIntfName returns the correct length interface name to be used
-// as an OVS internal port on the node
-func GetK8sMgmtIntfName(nodeName string) string {
+// GetLegacyK8sMgmtIntfName returns legacy management ovs-port name
+func GetLegacyK8sMgmtIntfName(nodeName string) string {
 	if len(nodeName) > 11 {
 		return "k8s-" + (nodeName[:11])
 	}

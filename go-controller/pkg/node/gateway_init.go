@@ -140,14 +140,14 @@ func CleanupClusterNode(name string) error {
 
 	// Delete iptable rules for management port on Linux.
 	if runtime.GOOS != "windows" {
-		DelMgtPortIptRules(name)
+		DelMgtPortIptRules()
 	}
 
 	return nil
 }
 
 // GatewayReady will check to see if we have successfully added SNAT OpenFlow rules in the L3Gateway Routers
-func gatewayReady(string) (bool, error) {
+func gatewayReady() (bool, error) {
 	// OpenFlow table 41 performs SNATing of packets that are heading to physical network from
 	// logical network.
 	for _, clusterSubnet := range config.Default.ClusterSubnets {

@@ -110,7 +110,7 @@ func addMgtPortIptRules(ifname, interfaceIP string) error {
 }
 
 //DelMgtPortIptRules delete all the iptable rules for the management port.
-func DelMgtPortIptRules(nodeName string) {
+func DelMgtPortIptRules() {
 	// Clean up all iptables and ip6tables remnants that may be left around
 	ipt, err := util.GetIPTablesHelper(iptables.ProtocolIPv4)
 	if err != nil {
@@ -120,8 +120,7 @@ func DelMgtPortIptRules(nodeName string) {
 	if err != nil {
 		return
 	}
-	ifname := util.GetK8sMgmtIntfName(nodeName)
-	rule := []string{"-o", ifname, "-j", iptableMgmPortChain}
+	rule := []string{"-o", util.K8sMgmtIntfName, "-j", iptableMgmPortChain}
 	_ = ipt.Delete("nat", "POSTROUTING", rule...)
 	_ = ipt6.Delete("nat", "POSTROUTING", rule...)
 	_ = ipt.ClearChain("nat", iptableMgmPortChain)

@@ -121,5 +121,5 @@ func createPlatformManagementPort(interfaceName, interfaceIP, routerIP, routerMA
 	return nil
 }
 
-func DelMgtPortIptRules(nodeName string) {
+func DelMgtPortIptRules() {
 }
