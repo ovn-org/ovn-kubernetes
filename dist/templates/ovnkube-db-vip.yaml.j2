@@ -91,6 +91,7 @@ spec:
           capabilities:
             add: ["NET_ADMIN"]
 
+        terminationMessagePolicy: FallbackToLogsOnError
         volumeMounts:
         # ovn db is stored in the pod in /etc/openvswitch
         # (or in /etc/ovn if OVN from new repository is used)
@@ -118,7 +119,7 @@ spec:
         - name: OVN_DAEMONSET_VERSION
           value: "3"
         - name: OVN_LOG_NB
-          value: "-vconsole:info -vfile:info"
+          value: "{{ ovn_loglevel_nb }}"
         - name: K8S_APISERVER
           valueFrom:
             configMapKeyRef:
@@ -130,18 +131,6 @@ spec:
               fieldPath: metadata.namespace
         - name: OVN_DB_VIP
           value: "{{ ovn_db_vip }}"
-        ports:
-        - name: healthz
-          containerPort: 10256
-        # TODO: Temporarily disabled until we determine how to wait for clean default
-        # config
-        # livenessProbe:
-        #   initialDelaySeconds: 10
-        #   httpGet:
-        #     path: /healthz
-        #     port: 10256
-        #     scheme: HTTP
-        lifecycle:
       # end of container
 
       volumes:

@@ -3,6 +3,7 @@ package app
 import (
 	"fmt"
 	"io/ioutil"
+	"os"
 	"strings"
 
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
@@ -19,6 +20,9 @@ var callbacks = map[string]readinessFunc{
 	"ovn-northd":     ovnNorthdReadiness,
 	"ovn-nbctld":     ovnNbCtldReadiness,
 	"ovs-daemons":    ovsDaemonsReadiness,
+	"ovnkube-node":   ovnNodeReadiness,
+	"ovnnb-db-raft":  ovnNBDBRaftReadiness,
+	"ovnsb-db-raft":  ovnSBDBRaftReadiness,
 }
 
 func ovnControllerReadiness(target string) error {
@@ -60,8 +64,7 @@ func ovnNBDBReadiness(target string) error {
 
 	// 1. Check if the OVN NB process is running.
 	// 2. Check if OVN NB process is listening on the port that it is supposed to
-	_, _, err = util.RunOVNAppctlWithTimeout(5, "-t", fmt.Sprintf("%s/ovnnb_db.ctl", util.GetOvnRunDir()),
-		"ovsdb-server/list-dbs")
+	_, _, err = util.RunOVNNBAppCtl("--timeout=5", "ovsdb-server/list-dbs")
 	if err != nil {
 		return fmt.Errorf("failed connecting to %q: (%v)", target, err)
 	}
@@ -83,8 +86,7 @@ func ovnSBDBReadiness(target string) error {
 
 	// 1. Check if the OVN SB process is running.
 	// 2. Check if OVN SB process is listening on the port that it is supposed to
-	_, _, err = util.RunOVNAppctlWithTimeout(5, "-t", fmt.Sprintf("%s/ovnsb_db.ctl", util.GetOvnRunDir()),
-		"ovsdb-server/list-dbs")
+	_, _, err = util.RunOVNSBAppCtl("--timeout=5", "ovsdb-server/list-dbs")
 	if err != nil {
 		return fmt.Errorf("failed connecting to %q: (%v)", target, err)
 	}
@@ -128,6 +130,39 @@ func ovsDaemonsReadiness(target string) error {
 	return nil
 }
 
+func ovnNodeReadiness(target string) error {
+	// Inside the pod we always use `/etc/cni/net.d` folder even if kubelet
+	// was started with a different conf directory
+	confFile := "/etc/cni/net.d/10-ovn-kubernetes.conf"
+	_, err := os.Stat(confFile)
+	if os.IsNotExist(err) {
+		return fmt.Errorf("OVN Kubernetes config file %q doesn't exist", confFile)
+	}
+	return nil
+}
+
+func ovnNBDBRaftReadiness(target string) error {
+	status, err := util.GetOVNDBServerInfo(15, "nb", "OVN_Northbound")
+	if err != nil {
+		return err
+	}
+	if !status.Connected {
+		return fmt.Errorf("this instance of ovsdb-server is not in contact with a majority of its cluster")
+	}
+	return nil
+}
+
+func ovnSBDBRaftReadiness(target string) error {
+	status, err := util.GetOVNDBServerInfo(15, "sb", "OVN_Southbound")
+	if err != nil {
+		return err
+	}
+	if !status.Connected {
+		return fmt.Errorf("this instance of ovsdb-server is not in contact with a majority of its cluster")
+	}
+	return nil
+}
+
 // ReadinessProbeCommand runs readiness probes against various targets
 var ReadinessProbeCommand = cli.Command{
 	Name:  "readiness-probe",
@@ -143,7 +178,9 @@ var ReadinessProbeCommand = cli.Command{
 		if err := util.SetExec(kexec.New()); err != nil {
 			return err
 		}
-
-		return callbacks[target](target)
+		if cbfunc, ok := callbacks[target]; ok {
+			return cbfunc(target)
+		}
+		return fmt.Errorf("incorrect target specified")
 	},
 }

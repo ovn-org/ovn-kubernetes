@@ -2,7 +2,6 @@ package ovn
 
 import (
 	"fmt"
-	"net"
 	"sync"
 	"time"
 
@@ -54,7 +53,7 @@ func (oc *Controller) waitForNamespaceEvent(namespace string) error {
 	return nil
 }
 
-func (oc *Controller) addPodToNamespace(ns string, ip net.IP, logicalPort string) error {
+func (oc *Controller) addPodToNamespace(ns string, portInfo *lpInfo) error {
 	mutex := oc.getNamespaceLock(ns)
 	if mutex == nil {
 		return nil
@@ -66,18 +65,18 @@ func (oc *Controller) addPodToNamespace(ns string, ip net.IP, logicalPort string
 	}
 
 	// If pod has already been added, nothing to do.
-	address := ip.String()
+	address := portInfo.ip.String()
 	if oc.namespaceAddressSet[ns][address] != "" {
 		return nil
 	}
 
-	oc.namespaceAddressSet[ns][address] = logicalPort
+	oc.namespaceAddressSet[ns][address] = portInfo.name
 	addToAddressSet(hashedAddressSet(ns), address)
 
 	// If multicast is allowed and enabled for the namespace, add the port
 	// to the allow policy.
 	if oc.multicastSupport && oc.multicastEnabled[ns] {
-		if err := oc.podAddAllowMulticastPolicy(ns, logicalPort); err != nil {
+		if err := podAddAllowMulticastPolicy(ns, portInfo); err != nil {
 			return err
 		}
 	}
@@ -85,18 +84,14 @@ func (oc *Controller) addPodToNamespace(ns string, ip net.IP, logicalPort string
 	return nil
 }
 
-func (oc *Controller) deletePodFromNamespace(ns string, ip net.IP, logicalPort string) error {
-	if ip == nil {
-		return nil
-	}
-
+func (oc *Controller) deletePodFromNamespace(ns string, portInfo *lpInfo) error {
 	mutex := oc.getNamespaceLock(ns)
 	if mutex == nil {
 		return nil
 	}
 	defer mutex.Unlock()
 
-	address := ip.String()
+	address := portInfo.ip.String()
 	if oc.namespaceAddressSet[ns][address] == "" {
 		return nil
 	}
@@ -106,7 +101,7 @@ func (oc *Controller) deletePodFromNamespace(ns string, ip net.IP, logicalPort s
 
 	// Remove the port from the multicast allow policy.
 	if oc.multicastSupport && oc.multicastEnabled[ns] {
-		if err := oc.podDeleteAllowMulticastPolicy(ns, logicalPort); err != nil {
+		if err := podDeleteAllowMulticastPolicy(ns, portInfo); err != nil {
 			return err
 		}
 	}

@@ -3,6 +3,7 @@
 set -euxo pipefail
 
 K8S_VERSION=${K8S_VERSION:-v1.16.4}
+KIND_INSTALL_INGRESS=${KIND_INSTALL_INGRESS:-false}
 
 # Detect IP to use as API server
 API_IP=$(ip -4 addr | grep -oP '(?<=inet\s)\d+(\.\d+){3}' | grep -v "127.0.0.1" | head -n 1)
@@ -51,5 +52,6 @@ popd
 kubectl -n kube-system delete ds kube-proxy
 kind get clusters
 kind get nodes --name ${CLUSTER_NAME}
-
-
+if [ "$KIND_INSTALL_INGRESS" == true ]; then
+  kubectl create -f https://raw.githubusercontent.com/kubernetes/ingress-nginx/master/deploy/static/mandatory.yaml
+fi

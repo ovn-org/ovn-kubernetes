@@ -63,6 +63,7 @@ spec:
           # Permission could be reduced by selecting an appropriate SELinux policy
           privileged: true
 
+        terminationMessagePolicy: FallbackToLogsOnError
         volumeMounts:
         - mountPath: /lib/modules
           name: host-modules
@@ -95,12 +96,6 @@ spec:
           preStop:
             exec:
               command: ["/root/ovnkube.sh", "cleanup-ovs-server"]
-        readinessProbe:
-          exec:
-            command: ["/usr/bin/ovn-kube-util", "readiness-probe", "-t", "ovs-daemons"]
-          initialDelaySeconds: 30
-          timeoutSeconds: 30
-          periodSeconds: 60
 
       - name: ovn-controller
         image: "{{ ovn_image | default('docker.io/ovnkube/ovn-daemonset:latest') }}"
@@ -113,6 +108,7 @@ spec:
           capabilities:
             add: ["SYS_NICE"]
 
+        terminationMessagePolicy: FallbackToLogsOnError
         volumeMounts:
         - mountPath: /var/run/dbus/
           name: host-var-run-dbus
@@ -133,6 +129,8 @@ spec:
         env:
         - name: OVN_DAEMONSET_VERSION
           value: "3"
+        - name: OVN_LOG_CONTROLLER
+          value: "{{ ovn_loglevel_controller }}"
         - name: K8S_APISERVER
           valueFrom:
             configMapKeyRef:
@@ -143,18 +141,6 @@ spec:
             fieldRef:
               fieldPath: metadata.namespace
 
-        ports:
-        - name: healthz
-          containerPort: 10258
-        # TODO: Temporarily disabled until we determine how to wait for clean default
-        # config
-        # livenessProbe:
-        #   initialDelaySeconds: 10
-        #   httpGet:
-        #     path: /healthz
-        #     port: 10258
-        #     scheme: HTTP
-        lifecycle:
         readinessProbe:
           exec:
             command: ["/usr/bin/ovn-kube-util", "readiness-probe", "-t", "ovn-controller"]
@@ -176,6 +162,7 @@ spec:
           privileged: true
           {% endif %}
 
+        terminationMessagePolicy: FallbackToLogsOnError
         volumeMounts:
         # for the iptables wrapper
         - mountPath: /host
@@ -212,7 +199,7 @@ spec:
         - name: OVN_DAEMONSET_VERSION
           value: "3"
         - name: OVNKUBE_LOGLEVEL
-          value: "5"
+          value: "{{ ovnkube_node_loglevel }}"
         - name: OVN_NET_CIDR
           valueFrom:
             configMapKeyRef:
@@ -242,21 +229,16 @@ spec:
         - name: OVN_GATEWAY_OPTS
           value: "{{ ovn_gateway_opts }}"
 
-        ports:
-        - name: healthz
-          containerPort: 10259
-        # TODO: Temporarily disabled until we determine how to wait for clean default
-        # config
-        # livenessProbe:
-        #   initialDelaySeconds: 10
-        #   httpGet:
-        #     path: /healthz
-        #     port: 10259
-        #     scheme: HTTP
         lifecycle:
           preStop:
             exec:
               command: ["/root/ovnkube.sh", "cleanup-ovn-node"]
+        readinessProbe:
+          exec:
+            command: ["/usr/bin/ovn-kube-util", "readiness-probe", "-t", "ovnkube-node"]
+          initialDelaySeconds: 30
+          timeoutSeconds: 30
+          periodSeconds: 60
 
       nodeSelector:
         kubernetes.io/os: "linux"

@@ -171,6 +171,10 @@ interface=eth1
 next-hop=1.3.4.5
 vlan-id=10
 nodeport=false
+
+[hybridoverlay]
+enabled=true
+cluster-subnets=11.129.0.0/14/23
 `
 
 	var newData string
@@ -210,7 +214,7 @@ var _ = Describe("Config Operations", func() {
 
 	BeforeEach(func() {
 		// Restore global default values before each testcase
-		RestoreDefaultConfig()
+		PrepareTestConfig()
 
 		app = cli.NewApp()
 		app.Name = "test"
@@ -226,12 +230,6 @@ var _ = Describe("Config Operations", func() {
 	})
 
 	It("uses expected defaults", func() {
-		// Don't pick up defaults from the environment
-		os.Unsetenv("KUBECONFIG")
-		os.Unsetenv("K8S_CACERT")
-		os.Unsetenv("K8S_APISERVER")
-		os.Unsetenv("K8S_TOKEN")
-
 		app.Action = func(ctx *cli.Context) error {
 			cfgPath, err := InitConfigSa(ctx, kexec.New(), tmpDir, nil)
 			Expect(err).NotTo(HaveOccurred())
@@ -253,6 +251,7 @@ var _ = Describe("Config Operations", func() {
 				{mustParseCIDR("10.128.0.0/14"), 23},
 			}))
 			Expect(IPv6Mode).To(Equal(false))
+			Expect(HybridOverlay.Enabled).To(Equal(false))
 
 			for _, a := range []OvnAuthConfig{OvnNorth, OvnSouth} {
 				Expect(a.Scheme).To(Equal(OvnDBSchemeUnix))
@@ -503,6 +502,11 @@ var _ = Describe("Config Operations", func() {
 			Expect(Gateway.VLANID).To(Equal(uint(10)))
 			Expect(Gateway.NodeportEnable).To(BeFalse())
 
+			Expect(HybridOverlay.Enabled).To(BeTrue())
+			Expect(HybridOverlay.ClusterSubnets).To(Equal([]CIDRNetworkEntry{
+				{mustParseCIDR("11.129.0.0/14"), 23},
+			}))
+
 			return nil
 		}
 		err = app.Run([]string{app.Name, "-config-file=" + cfgFile.Name()})
@@ -557,6 +561,11 @@ var _ = Describe("Config Operations", func() {
 
 			Expect(Gateway.Mode).To(Equal(GatewayModeLocal))
 			Expect(Gateway.NodeportEnable).To(BeTrue())
+
+			Expect(HybridOverlay.Enabled).To(BeTrue())
+			Expect(HybridOverlay.ClusterSubnets).To(Equal([]CIDRNetworkEntry{
+				{mustParseCIDR("11.130.0.0/14"), 23},
+			}))
 			return nil
 		}
 		cliArgs := []string{
@@ -585,6 +594,8 @@ var _ = Describe("Config Operations", func() {
 			"-sb-client-cacert=/client/cacert2",
 			"-gateway-mode=local",
 			"-nodeport",
+			"-enable-hybrid-overlay",
+			"-hybrid-overlay-cluster-subnets=11.130.0.0/14/23",
 		}
 		err = app.Run(cliArgs)
 		Expect(err).NotTo(HaveOccurred())
@@ -662,6 +673,21 @@ cluster-subnets=172.18.0.0/23
 		cliArgs := []string{
 			app.Name,
 			"-cluster-subnets=adsfasdfaf",
+		}
+		err := app.Run(cliArgs)
+		Expect(err).NotTo(HaveOccurred())
+	})
+
+	It("returns an error when the hybrid overlay cluster-subnets is invalid", func() {
+		app.Action = func(ctx *cli.Context) error {
+			_, err := InitConfig(ctx, kexec.New(), nil)
+			Expect(err).To(MatchError("hybrid overlay cluster subnet invalid: CIDR \"adsfasdfaf\" not properly formatted"))
+			return nil
+		}
+		cliArgs := []string{
+			app.Name,
+			"-hybrid-overlay-cluster-subnets=adsfasdfaf",
+			"-enable-hybrid-overlay",
 		}
 		err := app.Run(cliArgs)
 		Expect(err).NotTo(HaveOccurred())

@@ -54,7 +54,7 @@ fi
 # OVN_LOG_NB - log level (ovn-ctl default: -vconsole:off -vfile:info) - v3
 # OVN_LOG_SB - log level (ovn-ctl default: -vconsole:off -vfile:info) - v3
 # OVN_LOG_CONTROLLER - log level (ovn-ctl default: -vconsole:off -vfile:info) - v3
-# OVN_LOG_NBCTLD - log file (ovn-nbctl daemon mode default: /var/log/openvswitch/ovn-nbctl.log)
+# OVN_LOG_NBCTLD - log level (ovn-ctl default: -vconsole:off -vfile:info)
 # OVN_NB_PORT - ovn north db port (default 6641)
 # OVN_SB_PORT - ovn south db port (default 6642)
 
@@ -68,6 +68,7 @@ ovn_log_northd=${OVN_LOG_NORTHD:-"-vconsole:info"}
 ovn_log_nb=${OVN_LOG_NB:-"-vconsole:info"}
 ovn_log_sb=${OVN_LOG_SB:-"-vconsole:info"}
 ovn_log_controller=${OVN_LOG_CONTROLLER:-"-vconsole:info"}
+ovn_log_nbctld=${OVN_LOG_NBCTLD:-"-vfile:info"}
 
 ovnkubelogdir=/var/log/ovn-kubernetes
 
@@ -149,8 +150,6 @@ fi
 
 OVS_RUNDIR=/var/run/openvswitch
 OVS_LOGDIR=/var/log/openvswitch
-
-ovn_log_nbctld=${OVN_LOG_NBCTLD:-"${OVN_LOGDIR}/ovn-nbctl.log"}
 
 # =========================================
 
@@ -329,7 +328,9 @@ process_healthy () {
     if [[ $? != 0 ]] ; then
       echo "=============== pid ${pid} terminated ========== "
       # kill the tail -f
-      kill $2
+      if [[ $2 != "" ]] ; then
+        kill $2
+      fi
       exit 6
     fi
     sleep 15
@@ -592,6 +593,10 @@ nb-ovsdb () {
   check_ovn_daemonset_version "3"
   rm -f ${OVN_RUNDIR}/ovnnb_db.pid
 
+  if [[ ${ovn_db_host} == "" ]] ; then
+      echo "The IP address of the host $(hostname) could not be determined. Exiting..."
+      exit 1
+  fi
   iptables-rules ${ovn_nb_port}
 
   echo "=============== run nb_ovsdb ========== MASTER ONLY"
@@ -601,7 +606,6 @@ nb-ovsdb () {
 
   wait_for_event attempts=3 process_ready ovnnb_db
   echo "=============== nb-ovsdb ========== RUNNING"
-  sleep 3
 
   ovn-nbctl set-connection ptcp:${ovn_nb_port}:${ovn_db_host} -- set connection . inactivity_probe=0
 
@@ -618,6 +622,10 @@ sb-ovsdb () {
   check_ovn_daemonset_version "3"
   rm -f ${OVN_RUNDIR}/ovnsb_db.pid
 
+  if [[ ${ovn_db_host} == "" ]] ; then
+      echo "The IP address of the host $(hostname) could not be determined. Exiting..."
+      exit 1
+  fi
   iptables-rules ${ovn_sb_port}
 
   echo "=============== run sb_ovsdb ========== MASTER ONLY"
@@ -627,7 +635,6 @@ sb-ovsdb () {
 
   wait_for_event attempts=3 process_ready ovnsb_db
   echo "=============== sb-ovsdb ========== RUNNING"
-  sleep 3
 
   ovn-sbctl set-connection ptcp:${ovn_sb_port}:${ovn_db_host} -- set connection . inactivity_probe=0
 
@@ -651,8 +658,6 @@ run-ovn-northd () {
   echo "=============== run-ovn-northd (wait for ready_to_start_node)"
   wait_for_event ready_to_start_node
 
-  sleep 1
-
   echo "=============== run_ovn_northd ========== MASTER ONLY"
   echo "ovn_nbdb ${ovn_nbdb}   ovn_sbdb ${ovn_sbdb}"
   echo "ovn_northd_opts=${ovn_northd_opts}"
@@ -671,11 +676,9 @@ run-ovn-northd () {
 
   wait_for_event attempts=3 process_ready ovn-northd
   echo "=============== run_ovn_northd ========== RUNNING"
-  sleep 1
 
   tail --follow=name ${OVN_LOGDIR}/ovn-northd.log &
   ovn_tail_pid=$!
-
 
   process_healthy ovn-northd ${ovn_tail_pid}
   exit 8
@@ -707,8 +710,6 @@ ovn-master () {
   echo "=============== ovn-master (wait for ovn-nbctl daemon) ========== MASTER ONLY"
   wait_for_event process_ready ovn-nbctl
 
-  sleep 5
-
   # wait for ovs-servers to start since ovn-master sets some fields in OVS DB
   echo "=============== ovn-master - (wait for ovs)"
   wait_for_event ovs_ready
@@ -734,12 +735,8 @@ ovn-master () {
     --metrics-bind-address "0.0.0.0:9409" &
   echo "=============== ovn-master ========== running"
   wait_for_event attempts=3 process_ready ovnkube-master
-  sleep 1
 
-  tail --follow=name /var/log/ovn-kubernetes/ovnkube-master.log &
-  kube_tail_pid=$!
-
-  process_healthy ovnkube-master ${kube_tail_pid}
+  process_healthy ovnkube-master
   exit 9
 }
 
@@ -773,7 +770,6 @@ ovn-controller () {
   wait_for_event attempts=3 process_ready ovn-controller
   echo "=============== ovn-controller ========== running"
 
-  sleep 4
   tail --follow=name ${OVN_LOGDIR}/ovn-controller.log &
   controller_tail_pid=$!
 
@@ -799,7 +795,6 @@ ovn-node () {
 
   echo "=============== ovn-node - (ovn-node  wait for ovn-controller.pid)"
   wait_for_event process_ready ovn-controller
-  sleep 1
 
   # Ensure GENEVE's UDP port isn't firewalled. We support specifying non-default encap port.
   /usr/share/openvswitch/scripts/ovs-ctl --protocol=udp --dport=${ovn_encap_port} enable-protocol
@@ -807,6 +802,9 @@ ovn-node () {
   hybrid_overlay_flags=
   if [[ -n "${ovn_hybrid_overlay_enable}" ]]; then
     hybrid_overlay_flags="--enable-hybrid-overlay"
+    # Ensure VXLAN's UDP port isn't firewalled. Non-default VXLAN ports for
+    # hybrid overlay are not currently supported.
+    /usr/share/openvswitch/scripts/ovs-ctl --protocol=udp --dport=4789 enable-protocol
   fi
 
   OVN_ENCAP_IP=""
@@ -833,11 +831,7 @@ ovn-node () {
   setup_cni
   echo "=============== ovn-node ========== running"
 
-  sleep 5
-  tail --follow=name /var/log/ovn-kubernetes/ovnkube.log &
-  node_tail_pid=$!
-
-  process_healthy ovnkube ${node_tail_pid}
+  process_healthy ovnkube
   exit 7
 }
 
@@ -880,7 +874,7 @@ run-nbctld () {
   echo "ovn_log_nbctld=${ovn_log_nbctld}"
 
   # use unix socket
-  /usr/bin/ovn-nbctl --pidfile --detach --db=${ovn_nbdb_test} --log-file=${ovn_log_nbctld}
+  /usr/bin/ovn-nbctl ${ovn_log_nbctld} --pidfile --db=${ovn_nbdb_test} --log-file=${OVN_LOGDIR}/ovn-nbctl.log --detach
 
   wait_for_event attempts=3 process_ready ovn-nbctl
   echo "=============== run_ovn_nbctl ========== RUNNING"
@@ -963,9 +957,14 @@ case ${cmd} in
   "sb-ovsdb-raft")
     ovsdb-raft sb ${ovn_sb_port}
     ;;
+  "db-raft-metrics")
+    db-raft-metrics
+    ;;
   *)
     echo "invalid command ${cmd}"
-    echo "valid v3 commands: ovs-server nb-ovsdb sb-ovsdb run-ovn-northd ovn-master ovn-controller ovn-node display_env display ovn_debug cleanup-ovs-server cleanup-ovn-node nb-ovsdb-raft sb-ovsdb-raft"
+    echo "valid v3 commands: ovs-server nb-ovsdb sb-ovsdb run-ovn-northd ovn-master "\
+      "ovn-controller ovn-node display_env display ovn_debug cleanup-ovs-server "\
+      "cleanup-ovn-node nb-ovsdb-raft sb-ovsdb-raft db-raft-metrics"
 	  exit 0
 esac
 

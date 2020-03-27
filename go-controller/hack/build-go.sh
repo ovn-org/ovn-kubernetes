@@ -14,14 +14,24 @@ build_binaries() {
 
     # Add a buildid to the executable - needed by rpmbuild
     BUILDID=${BUILDID:-0x$(head -c20 /dev/urandom|od -An -tx1|tr -d ' \n')}
+    GIT_COMMIT=$(git rev-parse HEAD)
+    GIT_BRANCH=$(git rev-parse --symbolic-full-name --abbrev-ref HEAD)
+    BUILD_USER=$(whoami)
+    BUILD_DATE=$(date +"%Y-%m-%d")
+
     set -x
     for bin in "$@"; do
+        binbase=$(basename ${bin})
         go build -v \
             -mod vendor \
             -gcflags "${GCFLAGS}" \
-            -ldflags "-B ${BUILDID}" \
-            -o "${OVN_KUBE_OUTPUT_BINPATH}/${bin}"\
-            "./cmd/${bin}"
+            -ldflags "-B ${BUILDID} \
+                -X ${OVN_KUBE_GO_PACKAGE}/pkg/metrics.Commit=${GIT_COMMIT} \
+                -X ${OVN_KUBE_GO_PACKAGE}/pkg/metrics.Branch=${GIT_BRANCH} \
+                -X ${OVN_KUBE_GO_PACKAGE}/pkg/metrics.BuildUser=${BUILD_USER} \
+                -X ${OVN_KUBE_GO_PACKAGE}/pkg/metrics.BuildDate=${BUILD_DATE}" \
+            -o "${OVN_KUBE_OUTPUT_BINPATH}/${binbase}"\
+            "./${bin}"
     done
 }
 

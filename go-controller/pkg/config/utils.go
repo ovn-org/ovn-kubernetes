@@ -94,3 +94,18 @@ func cidrsOverlap(cidr *net.IPNet, cidrList []CIDRNetworkEntry) bool {
 	}
 	return false
 }
+
+// joinSubnetOverlap returns an err if joinSubnet range contains the subnet
+func overlapsWithJoinSubnet(subnets []*net.IPNet) error {
+	_, v4JoinIPNet, _ := net.ParseCIDR(V4JoinSubnet)
+	_, v6JoinIPNet, _ := net.ParseCIDR(V6JoinSubnet)
+	for _, subnet := range subnets {
+		for _, ipnet := range []*net.IPNet{v4JoinIPNet, v6JoinIPNet} {
+			if ipnet.Contains(subnet.IP) || subnet.Contains(ipnet.IP) {
+				return fmt.Errorf("%s is a reserved subnet. %s overlaps with this subnet",
+					ipnet.String(), subnet)
+			}
+		}
+	}
+	return nil
+}

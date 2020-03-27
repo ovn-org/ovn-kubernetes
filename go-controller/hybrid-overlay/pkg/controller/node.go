@@ -1,11 +1,12 @@
 package controller
 
 import (
-	"bytes"
 	"net"
+	"reflect"
 
 	"github.com/ovn-org/ovn-kubernetes/go-controller/hybrid-overlay/pkg/types"
-	"github.com/ovn-org/ovn-kubernetes/go-controller/hybrid-overlay/pkg/util"
+	houtil "github.com/ovn-org/ovn-kubernetes/go-controller/hybrid-overlay/pkg/util"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
 
 	kapi "k8s.io/api/core/v1"
 	"k8s.io/klog"
@@ -13,53 +14,60 @@ import (
 
 // nodeChanged returns true if any relevant node attributes changed
 func nodeChanged(node1 *kapi.Node, node2 *kapi.Node) bool {
-	cidr1, nodeIP1, drMAC1 := getNodeDetails(node1, true)
-	cidr2, nodeIP2, drMAC2 := getNodeDetails(node2, true)
-
-	if cidr1 != nil && cidr2 != nil && nodeIP1 != nil && nodeIP2 != nil && drMAC1 != nil && drMAC2 != nil {
-		// The node was updated if either its subnet, its IP or its DRMAC has changed.
-		return (!cidr1.IP.Equal(cidr2.IP) || !bytes.Equal(cidr1.Mask, cidr2.Mask) || !nodeIP1.Equal(nodeIP2) || !bytes.Equal(drMAC1, drMAC2))
-	} else if cidr1 == nil && cidr2 == nil && nodeIP1 == nil && nodeIP2 == nil && drMAC1 == nil && drMAC2 == nil {
-		return false
-	}
-	return true
+	cidr1, nodeIP1, drMAC1 := getNodeDetails(node1)
+	cidr2, nodeIP2, drMAC2 := getNodeDetails(node2)
+	return !reflect.DeepEqual(cidr1, cidr2) || !reflect.DeepEqual(nodeIP1, nodeIP2) || !reflect.DeepEqual(drMAC1, drMAC2)
 }
 
-// getNodeDetails reads and parses relevant node attributes and returns:
-// 1) the node's hybrid overlay hostsubnet
-// 2) the node's first InternalIP
-// 3) the node's distributed router MAC (eg the MAC to which VXLAN packets should be sent)
-func getNodeDetails(node *kapi.Node, queryDrMac bool) (*net.IPNet, net.IP, net.HardwareAddr) {
-	hostsubnet, ok := node.Annotations[types.HybridOverlayNodeSubnet]
-	if !ok {
-		return nil, nil, nil
-	}
-	_, cidr, err := net.ParseCIDR(hostsubnet)
-	if err != nil {
-		klog.Warningf("error parsing node %q subnet %q: %v", node.Name, hostsubnet, err)
-		return nil, nil, nil
-	}
-
-	var drMAC net.HardwareAddr
-	if queryDrMac {
-		drMACString, ok := node.Annotations[types.HybridOverlayDrMac]
+// getNodeSubnetAndIP returns the node's hybrid overlay subnet and the node's
+// first InternalIP, or nil if the subnet or node IP is invalid
+func getNodeSubnetAndIP(node *kapi.Node) (*net.IPNet, net.IP) {
+	// Parse Linux node OVN hostsubnet annotation first
+	cidr, _ := util.ParseNodeHostSubnetAnnotation(node)
+	if cidr == nil {
+		// Otherwise parse the hybrid overlay node subnet annotation
+		subnet, ok := node.Annotations[types.HybridOverlayNodeSubnet]
 		if !ok {
-			klog.Warningf("missing node %q distributed router MAC annotation", node.Name)
-			return nil, nil, nil
-		}
 
-		drMAC, err = net.ParseMAC(drMACString)
+			klog.V(5).Infof("missing node %q node subnet annotation", node.Name)
+			return nil, nil
+		}
+		var err error
+		_, cidr, err = net.ParseCIDR(subnet)
 		if err != nil {
-			klog.Warningf("error parsing node %q distributed router MAC %q: %v", node.Name, drMACString, err)
-			return nil, nil, nil
+			klog.Errorf("error parsing node %q subnet %q: %v", node.Name, subnet, err)
+			return nil, nil
 		}
 	}
 
-	nodeIP, err := util.GetNodeInternalIP(node)
+	nodeIP, err := houtil.GetNodeInternalIP(node)
 	if err != nil {
-		klog.Warningf("error getting node %q internal IP: %v", node.Name, err)
+		klog.Errorf("error getting node %q internal IP: %v", node.Name, err)
+		return nil, nil
+	}
+
+	return cidr, net.ParseIP(nodeIP)
+}
+
+// getNodeDetails returns the node's hybrid overlay subnet, first InternalIP,
+// and the distributed router MAC (DRMAC), or nil if any of the addresses are
+// invalid
+func getNodeDetails(node *kapi.Node) (*net.IPNet, net.IP, net.HardwareAddr) {
+	cidr, ip := getNodeSubnetAndIP(node)
+	if cidr == nil || ip == nil {
 		return nil, nil, nil
 	}
 
-	return cidr, net.ParseIP(nodeIP), drMAC
+	drMACString, ok := node.Annotations[types.HybridOverlayDRMAC]
+	if !ok {
+		klog.V(5).Infof("missing node %q distributed router MAC annotation", node.Name)
+		return nil, nil, nil
+	}
+	drMAC, err := net.ParseMAC(drMACString)
+	if err != nil {
+		klog.Errorf("error parsing node %q distributed router MAC %q: %v", node.Name, drMACString, err)
+		return nil, nil, nil
+	}
+
+	return cidr, ip, drMAC
 }

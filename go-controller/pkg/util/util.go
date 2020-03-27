@@ -50,6 +50,11 @@ func GetNodeChassisID() (string, error) {
 
 var updateNodeSwitchLock sync.Mutex
 
+// UpdateNodeSwitchExcludeIPs should be called after adding the management port
+// and after adding the hybrid overlay port, and ensures that each port's IP
+// is added to the logical switch's exclude_ips. This prevents ovn-northd log
+// spam about duplicate IP addresses.
+// See https://github.com/ovn-org/ovn-kubernetes/pull/779
 func UpdateNodeSwitchExcludeIPs(nodeName string, subnet *net.IPNet) error {
 	if config.IPv6Mode {
 		// We don't exclude any IPs in IPv6
@@ -76,19 +81,9 @@ func UpdateNodeSwitchExcludeIPs(nodeName string, subnet *net.IPNet) error {
 	}
 
 	_, managementPortCIDR := GetNodeWellKnownAddresses(subnet)
-	hybridOverlayIP := NextIP(managementPortCIDR.IP)
-
-	// Only exclude the hybrid overlay IP if host subnets are big enough
-	excludeHybridOverlayIP := true
-	for _, clusterEntry := range config.Default.ClusterSubnets {
-		if clusterEntry.HostSubnetLength > 24 {
-			excludeHybridOverlayIP = false
-			break
-		}
-	}
-
 	var excludeIPs string
-	if excludeHybridOverlayIP {
+	if config.HybridOverlay.Enabled {
+		hybridOverlayIP := NextIP(managementPortCIDR.IP)
 		if haveHybridOverlayPort && haveManagementPort {
 			// no excluded IPs required
 		} else if !haveHybridOverlayPort && !haveManagementPort {

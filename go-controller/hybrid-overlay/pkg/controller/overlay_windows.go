@@ -2,9 +2,8 @@ package controller
 
 import (
 	"encoding/json"
-	"errors"
+	"fmt"
 	"net"
-	"strconv"
 
 	"github.com/Microsoft/hcsshim/hcn"
 	"k8s.io/klog"
@@ -18,25 +17,21 @@ type NetworkInfo struct {
 	ID           string
 	Name         string
 	Subnets      []SubnetInfo
-	Vsid         uint16
+	VSID         uint32
 	AutomaticDNS bool
 	IsPersistent bool
 }
 
 // Datastore for SubnetInfo.
 type SubnetInfo struct {
-	AddressPrefix  net.IPNet
+	AddressPrefix  *net.IPNet
 	GatewayAddress net.IP
-	Vsid           uint16
+	VSID           uint32
 }
 
 // GetHostComputeSubnetConfig converts SubnetInfo into an HCN format.
 func (subnet *SubnetInfo) GetHostComputeSubnetConfig() (*hcn.Subnet, error) {
-	// Check for nil on address objects.
-	ipAddr := ""
-	if subnet.AddressPrefix.IP != nil && subnet.AddressPrefix.Mask != nil {
-		ipAddr = subnet.AddressPrefix.String()
-	}
+	ipAddr := subnet.AddressPrefix.String()
 	gwAddr := ""
 	destPrefix := ""
 	if subnet.GatewayAddress != nil {
@@ -44,16 +39,19 @@ func (subnet *SubnetInfo) GetHostComputeSubnetConfig() (*hcn.Subnet, error) {
 		destPrefix = "0.0.0.0/0"
 	}
 
-	subnetPolicy := hcn.SubnetPolicy{
-		Type:     "VSID",
-		Settings: []byte("{ \"IsolationId\" : " + strconv.FormatUint(uint64(subnet.Vsid), 10) + " }"),
+	vsidJSON, err := json.Marshal(&hcn.VsidPolicySetting{
+		IsolationId: subnet.VSID,
+	})
+	if err != nil {
+		return nil, fmt.Errorf("failed to marshal VSID policy: %v", err)
 	}
 
-	subnetPolicyJson, err := json.Marshal(subnetPolicy)
-
+	subnetPolicyJson, err := json.Marshal(hcn.SubnetPolicy{
+		Type:     "VSID",
+		Settings: vsidJSON,
+	})
 	if err != nil {
-		klog.Error(err)
-		return nil, err
+		return nil, fmt.Errorf("failed to marshal subnet policy: %v", err)
 	}
 
 	return &hcn.Subnet{
@@ -61,8 +59,7 @@ func (subnet *SubnetInfo) GetHostComputeSubnetConfig() (*hcn.Subnet, error) {
 		Routes: []hcn.Route{{
 			NextHop:           gwAddr,
 			DestinationPrefix: destPrefix,
-		},
-		},
+		}},
 		Policies: []json.RawMessage{
 			subnetPolicyJson,
 		},
@@ -75,81 +72,64 @@ func (info *NetworkInfo) GetHostComputeNetworkConfig() (*hcn.HostComputeNetwork,
 	for _, subnet := range info.Subnets {
 		subnetConfig, err := subnet.GetHostComputeSubnetConfig()
 		if err != nil {
-			klog.Error(err)
 			return nil, err
 		}
 
 		subnets = append(subnets, *subnetConfig)
 	}
 
-	hcnPolicies := []hcn.NetworkPolicy{{
-		Type:     hcn.AutomaticDNS,
-		Settings: []byte("{ \"Enable\" : " + strconv.FormatBool(info.AutomaticDNS) + " }"),
-	},
+	dnsJSON, err := json.Marshal(&hcn.AutomaticDNSNetworkPolicySetting{
+		Enable: info.AutomaticDNS,
+	})
+	if err != nil {
+		return nil, fmt.Errorf("failed to marshal automatic DNS policy: %v", err)
 	}
 
-	ipams := []hcn.Ipam{}
+	var ipams []hcn.Ipam
 	if len(subnets) > 0 {
-		ipams = []hcn.Ipam{{
+		ipams = append(ipams, hcn.Ipam{
 			Type:    "Static",
 			Subnets: subnets,
-		},
-		}
+		})
 	}
 
-	var err error
-	hostComputeNetwork, err := &hcn.HostComputeNetwork{
+	var flags hcn.NetworkFlags
+	if !info.IsPersistent {
+		flags = hcn.EnableNonPersistent
+	}
+
+	return &hcn.HostComputeNetwork{
 		SchemaVersion: hcn.SchemaVersion{
 			Major: 2,
 			Minor: 0,
 		},
-		Name:     info.Name,
-		Type:     hcn.NetworkType("Overlay"),
-		Ipams:    ipams,
-		Flags:    hcn.EnableNonPersistent,
-		Policies: hcnPolicies,
+		Name:  info.Name,
+		Type:  hcn.NetworkType("Overlay"),
+		Ipams: ipams,
+		Flags: flags,
+		Policies: []hcn.NetworkPolicy{{
+			Type:     hcn.AutomaticDNS,
+			Settings: dnsJSON,
+		}},
 	}, nil
-
-	if !info.IsPersistent {
-		hostComputeNetwork.Flags = hcn.EnableNonPersistent
-	}
-
-	return hostComputeNetwork, err
 }
 
 func AddHostRoutePolicy(network *hcn.HostComputeNetwork) error {
-	supportedFeatures := hcn.GetSupportedFeatures()
-
-	if supportedFeatures.HostRoute {
-		hostRoutePolicy := hcn.NetworkPolicy{
+	return network.AddPolicy(hcn.PolicyNetworkRequest{
+		Policies: []hcn.NetworkPolicy{{
 			Type:     hcn.HostRoute,
 			Settings: []byte("{}"),
-		}
-
-		addHostRoutePolicyRequest := hcn.PolicyNetworkRequest{
-			Policies: []hcn.NetworkPolicy{hostRoutePolicy},
-		}
-
-		err := network.AddPolicy(addHostRoutePolicyRequest)
-		if err != nil {
-			return err
-		}
-	} else {
-		return errors.New("OS: This version of windows doesn't support HostRoute policies; network communication between this node and its PODs will not work. HostRoute policies is available as a KB update for Windows Server 2019 version 1809 and is availabe out of the box in Windows Server 2019 version 1903.")
-	}
-
-	return nil
+		}},
+	})
 }
 
 // CreateNetworkPolicySetting builds a NetAdapterNameNetworkPolicySetting.
 func CreateNetworkPolicySetting(networkAdapterName string) (*hcn.NetworkPolicy, error) {
-	netAdapterPolicy := hcn.NetAdapterNameNetworkPolicySetting{
+	policyJSON, err := json.Marshal(hcn.NetAdapterNameNetworkPolicySetting{
 		NetworkAdapterName: networkAdapterName,
-	}
-	policyJSON, err := json.Marshal(netAdapterPolicy)
+	})
 	if err != nil {
-		klog.Error(err)
-		return nil, err
+		return nil, fmt.Errorf("failed ot marshal network adapter policy: %v", err)
 	}
 
 	return &hcn.NetworkPolicy{
@@ -160,71 +140,46 @@ func CreateNetworkPolicySetting(networkAdapterName string) (*hcn.NetworkPolicy, 
 
 // AddRemoteSubnetPolicy adds a remote subnet policy
 func AddRemoteSubnetPolicy(network *hcn.HostComputeNetwork, settings *hcn.RemoteSubnetRoutePolicySetting) error {
-	rawJSON, err := json.Marshal(settings)
-
+	json, err := json.Marshal(settings)
 	if err != nil {
-		klog.Errorf("Failed to marshall settings, error: %v", err)
-		return err
+		return fmt.Errorf("failed to marshall remote subnet route policy settings: %v", err)
 	}
 
-	networkPolicy := hcn.NetworkPolicy{
-		Type:     hcn.RemoteSubnetRoute,
-		Settings: rawJSON,
-	}
-
-	policyNetworkRequest := hcn.PolicyNetworkRequest{
-		Policies: []hcn.NetworkPolicy{networkPolicy},
-	}
-
-	network.AddPolicy(policyNetworkRequest)
-
+	network.AddPolicy(hcn.PolicyNetworkRequest{
+		Policies: []hcn.NetworkPolicy{{
+			Type:     hcn.RemoteSubnetRoute,
+			Settings: json,
+		}},
+	})
 	return nil
 }
 
-func removeOneRemoteSubnetPolicy(network *hcn.HostComputeNetwork, policySettings hcn.RemoteSubnetRoutePolicySetting) error {
-	existingPolicyJson, err := json.Marshal(policySettings)
-
-	if err != nil {
-		klog.Errorf("Failed to marshal settings, error: %v", err)
-		return err
-	}
-
-	existingPolicy := hcn.NetworkPolicy{
-		Type:     hcn.RemoteSubnetRoute,
-		Settings: existingPolicyJson,
-	}
-
-	existingPolicyNetworkRequest := hcn.PolicyNetworkRequest{
-		Policies: []hcn.NetworkPolicy{existingPolicy},
-	}
-
-	network.RemovePolicy(existingPolicyNetworkRequest)
-
+func removeOneRemoteSubnetPolicy(network *hcn.HostComputeNetwork, settings []byte) error {
+	network.RemovePolicy(hcn.PolicyNetworkRequest{
+		Policies: []hcn.NetworkPolicy{{
+			Type:     hcn.RemoteSubnetRoute,
+			Settings: settings,
+		}},
+	})
 	return nil
 }
 
 // RemoveRemoteSubnetPolicy removes a remote subnet policy
 func RemoveRemoteSubnetPolicy(network *hcn.HostComputeNetwork, destinationPrefix string) error {
-
 	for _, policy := range network.Policies {
-		if policy.Type == hcn.RemoteSubnetRoute {
-			existingPolicySettings := hcn.RemoteSubnetRoutePolicySetting{}
+		if policy.Type != hcn.RemoteSubnetRoute {
+			continue
+		}
 
-			err := json.Unmarshal(policy.Settings, &existingPolicySettings)
+		existingPolicySettings := hcn.RemoteSubnetRoutePolicySetting{}
+		if err := json.Unmarshal(policy.Settings, &existingPolicySettings); err != nil {
+			return fmt.Errorf("failed to unmarshal remote subnet route policy settings: %v", err)
+		}
 
-			if err != nil {
-				klog.Errorf("Failed to unmarshal settings, error: %v", err)
-				return err
-			}
-
-			if existingPolicySettings.DestinationPrefix == destinationPrefix {
-
-				err := removeOneRemoteSubnetPolicy(network, existingPolicySettings)
-
-				if err != nil {
-					klog.Errorf("Failed to remove remote subnet policy %v, error: %v", existingPolicySettings.DestinationPrefix, err)
-					return err
-				}
+		if existingPolicySettings.DestinationPrefix == destinationPrefix {
+			if err := removeOneRemoteSubnetPolicy(network, policy.Settings); err != nil {
+				return fmt.Errorf("failed to remove remote subnet policy %v: %v",
+					existingPolicySettings.DestinationPrefix, err)
 			}
 		}
 	}
@@ -233,24 +188,21 @@ func RemoveRemoteSubnetPolicy(network *hcn.HostComputeNetwork, destinationPrefix
 }
 
 func ClearRemoteSubnetPolicies(network *hcn.HostComputeNetwork) error {
-
 	for _, policy := range network.Policies {
-		if policy.Type == hcn.RemoteSubnetRoute {
-			existingPolicySettings := hcn.RemoteSubnetRoutePolicySetting{}
+		if policy.Type != hcn.RemoteSubnetRoute {
+			continue
+		}
 
-			err := json.Unmarshal(policy.Settings, &existingPolicySettings)
+		existingPolicySettings := hcn.RemoteSubnetRoutePolicySetting{}
+		if err := json.Unmarshal(policy.Settings, &existingPolicySettings); err != nil {
+			return fmt.Errorf("failed to unmarshal remote subnet route policy settings: %v", err)
+		}
 
-			if err != nil {
-				klog.Errorf("Failed to unmarshal settings, error: %v", err)
-				return err
-			}
-
-			err = removeOneRemoteSubnetPolicy(network, existingPolicySettings)
-
-			if err != nil {
-				klog.Errorf("Failed to remove remote subnet policy %v, error: %v", existingPolicySettings.DestinationPrefix, err)
-				// We don't return the error in this case, we take a best effort approach to clear the remote subnets.
-			}
+		if err := removeOneRemoteSubnetPolicy(network, policy.Settings); err != nil {
+			// We don't return the error in this case, we take a best effort
+			// approach to clear the remote subnets.
+			klog.Errorf("failed to remove remote subnet policy %v: %v",
+				existingPolicySettings.DestinationPrefix, err)
 		}
 	}
 
@@ -263,21 +215,20 @@ func GetGatewayAddress(subnet *hcn.Subnet) string {
 			return route.NextHop
 		}
 	}
-
 	return ""
 }
 
 func GetExistingNetwork(networkName string, expectedAddressPrefix string, expectedGW string) *hcn.HostComputeNetwork {
 	existingNetwork, err := hcn.GetNetworkByName(networkName)
-	if err == nil {
-		if existingNetwork.Type == hcn.Overlay {
-			for _, existingIpams := range existingNetwork.Ipams {
-				for _, existingSubnet := range existingIpams.Subnets {
-					gatewayAddress := GetGatewayAddress(&existingSubnet)
-					if existingSubnet.IpAddressPrefix == expectedAddressPrefix && gatewayAddress == expectedGW {
-						return existingNetwork
-					}
-				}
+	if err != nil || existingNetwork.Type != hcn.Overlay {
+		return nil
+	}
+
+	for _, existingIpams := range existingNetwork.Ipams {
+		for _, existingSubnet := range existingIpams.Subnets {
+			gatewayAddress := GetGatewayAddress(&existingSubnet)
+			if existingSubnet.IpAddressPrefix == expectedAddressPrefix && gatewayAddress == expectedGW {
+				return existingNetwork
 			}
 		}
 	}
@@ -285,14 +236,11 @@ func GetExistingNetwork(networkName string, expectedAddressPrefix string, expect
 	return nil
 }
 
-func DuplicatePersistentIpRoutes() error {
-	backend := &psBackend.Local{}
-
-	shell, err := ps.New(backend)
+func DuplicatePersistentIPRoutes() error {
+	shell, err := ps.New(&psBackend.Local{})
 	if err != nil {
 		return err
 	}
-
 	defer shell.Exit()
 
 	script := `
@@ -309,10 +257,8 @@ func DuplicatePersistentIpRoutes() error {
 	}
 	`
 
-	_, stderr, err := shell.Execute(script + "\r\n\r\n")
-	if err != nil {
-		klog.Errorf("refresh the network persistent routes, %v, error: %v", stderr, err)
-		return err
+	if _, stderr, err := shell.Execute(script + "\r\n\r\n"); err != nil {
+		return fmt.Errorf("falied to refresh the network persistent routes, %v: %v", stderr, err)
 	}
 
 	return nil

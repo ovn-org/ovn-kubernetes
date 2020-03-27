@@ -59,6 +59,18 @@ cd $HOME/work/src/github.com/ovn-org/ovn-kubernetes/dist/images
     --k8s-apiserver=https://$MASTER_IP:6443
 ```
 
+To set specific logging level for OVN components, pass the related parameter from the below mentioned 
+list to the above command. Set values are the default values.
+```
+    --master-loglevel="5" \\Log level for ovnkube (master)
+    --node-logleve="5" \\ Log level for ovnkube (node)
+    --ovn-loglevel-northd="-vconsole:info -vfile:info" \\ Log config for ovn northd
+    --ovn-loglevel-nb="-vconsole:info -vfile:info" \\ Log config for northbound db
+    --ovn-loglevel-sb="-vconsole:info -vfile:info" \\ Log config for southboudn db
+    --ovn-loglevel-controller="-vconsole:info" \\ Log config for ovn-controller
+    --ovn-loglevel-nbctld="-vconsole:info" \\ Log config for nbctl daemon
+```
+
 Apply OVN daemonset and deployment yamls.
 
 ```
