@@ -9,12 +9,11 @@ import (
 )
 
 type startupWaiter struct {
-	nodeName string
-	tasks    []*waitTask
-	wg       *sync.WaitGroup
+	tasks []*waitTask
+	wg    *sync.WaitGroup
 }
 
-type waitFunc func(string) (bool, error)
+type waitFunc func() (bool, error)
 type postWaitFunc func() error
 
 type waitTask struct {
@@ -22,11 +21,10 @@ type waitTask struct {
 	postFn postWaitFunc
 }
 
-func newStartupWaiter(nodeName string) *startupWaiter {
+func newStartupWaiter() *startupWaiter {
 	return &startupWaiter{
-		nodeName: nodeName,
-		tasks:    make([]*waitTask, 0, 2),
-		wg:       &sync.WaitGroup{},
+		tasks: make([]*waitTask, 0, 2),
+		wg:    &sync.WaitGroup{},
 	}
 }
 
@@ -44,7 +42,7 @@ func (w *startupWaiter) Wait() error {
 		go func(task *waitTask) {
 			defer w.wg.Done()
 			err := wait.PollImmediate(500*time.Millisecond, 300*time.Second, func() (bool, error) {
-				return task.waitFn(w.nodeName)
+				return task.waitFn()
 			})
 			if err == nil && task.postFn != nil {
 				err = task.postFn()

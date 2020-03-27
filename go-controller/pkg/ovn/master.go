@@ -314,7 +314,7 @@ func addStaticRouteToHost(node *kapi.Node, nicIP string) error {
 	subnet, err := util.ParseNodeHostSubnetAnnotation(node)
 	if err != nil {
 		return fmt.Errorf("failed to get interface IP address for %s (%v)",
-			util.GetK8sMgmtIntfName(node.Name), err)
+			util.K8sMgmtIntfName, err)
 	}
 	_, secondIP := util.GetNodeWellKnownAddresses(subnet)
 	prefix := strings.Split(nicIP, "/")[0] + "/32"
