@@ -830,7 +830,7 @@ func setOVSExternalID(exec kexec.Interface, key, value string) error {
 	return nil
 }
 
-func buildKubernetesConfig(exec kexec.Interface, cli, file *config, saPath string, defaults *Defaults) error {
+func buildKubernetesConfig(exec kexec.Interface, cli, file *config, saPath string, defaults *Defaults, allSubnets *configSubnets) error {
 	// token adn ca.crt may be from files mounted in container.
 	saConfig := savedKubernetes
 	if data, err := ioutil.ReadFile(filepath.Join(saPath, kubeServiceAccountFileToken)); err == nil {
@@ -911,12 +911,7 @@ func buildKubernetesConfig(exec kexec.Interface, cli, file *config, saPath strin
 	if err != nil {
 		return fmt.Errorf("kubernetes service network CIDR %q invalid: %v", Kubernetes.ServiceCIDR, err)
 	}
-
-	// To check if service-ip-range is in JoinSubnet(100.64.0.0/16 or fd98::/64) range
-	err = overlapsWithJoinSubnet([]*net.IPNet{serviceIPNet})
-	if err != nil {
-		return err
-	}
+	allSubnets.append(configSubnetService, serviceIPNet)
 
 	if Kubernetes.RawNoHostSubnetNodes != "" {
 		if nodeSelector, err := metav1.ParseToLabelSelector(Kubernetes.RawNoHostSubnetNodes); err == nil {
@@ -1003,7 +998,7 @@ func buildMasterHAConfig(ctx *cli.Context, cli, file *config) error {
 	return nil
 }
 
-func buildHybridOverlayConfig(ctx *cli.Context, cli, file *config) error {
+func buildHybridOverlayConfig(ctx *cli.Context, cli, file *config, allSubnets *configSubnets) error {
 	// Copy config file values over default values
 	if err := overrideFields(&HybridOverlay, &file.HybridOverlay, &savedHybridOverlay); err != nil {
 		return err
@@ -1020,12 +1015,15 @@ func buildHybridOverlayConfig(ctx *cli.Context, cli, file *config) error {
 		if err != nil {
 			return fmt.Errorf("hybrid overlay cluster subnet invalid: %v", err)
 		}
+		for _, subnet := range HybridOverlay.ClusterSubnets {
+			allSubnets.append(configSubnetHybrid, subnet.CIDR)
+		}
 	}
 
 	return nil
 }
 
-func buildDefaultConfig(cli, file *config) error {
+func buildDefaultConfig(cli, file *config, allSubnets *configSubnets) error {
 	if err := overrideFields(&Default, &file.Default, &savedDefault); err != nil {
 		return err
 	}
@@ -1047,19 +1045,13 @@ func buildDefaultConfig(cli, file *config) error {
 	if err != nil {
 		return fmt.Errorf("cluster subnet invalid: %v", err)
 	}
+	for _, subnet := range Default.ClusterSubnets {
+		allSubnets.append(configSubnetCluster, subnet.CIDR)
+	}
 
 	// Determine if ovn-kubernetes is configured to run in IPv6 mode
 	IPv6Mode = utilnet.IsIPv6(Default.ClusterSubnets[0].CIDR.IP)
 
-	// To check if any of clustersubnets is in JoinSubnet(100.64.0.0/16) range
-	var clustersubnets []*net.IPNet
-	for _, subnet := range Default.ClusterSubnets {
-		clustersubnets = append(clustersubnets, subnet.CIDR)
-	}
-	err = overlapsWithJoinSubnet(clustersubnets)
-	if err != nil {
-		return err
-	}
 	return nil
 }
 
@@ -1116,6 +1108,10 @@ func initConfigWithPath(ctx *cli.Context, exec kexec.Interface, saPath string, d
 		MasterHA:      savedMasterHA,
 		HybridOverlay: savedHybridOverlay,
 	}
+
+	allSubnets := newConfigSubnets()
+	allSubnets.appendConst(configSubnetJoin, V4JoinSubnet)
+	allSubnets.appendConst(configSubnetJoin, V6JoinSubnet)
 
 	configFile, configFileIsDefault = getConfigFilePath(ctx)
 
@@ -1182,11 +1178,11 @@ func initConfigWithPath(ctx *cli.Context, exec kexec.Interface, saPath string, d
 		})
 	}
 
-	if err = buildDefaultConfig(&cliConfig, &cfg); err != nil {
+	if err = buildDefaultConfig(&cliConfig, &cfg, allSubnets); err != nil {
 		return "", err
 	}
 
-	if err = buildKubernetesConfig(exec, &cliConfig, &cfg, saPath, defaults); err != nil {
+	if err = buildKubernetesConfig(exec, &cliConfig, &cfg, saPath, defaults, allSubnets); err != nil {
 		return "", err
 	}
 
@@ -1198,7 +1194,7 @@ func initConfigWithPath(ctx *cli.Context, exec kexec.Interface, saPath string, d
 		return "", err
 	}
 
-	if err = buildHybridOverlayConfig(ctx, &cliConfig, &cfg); err != nil {
+	if err = buildHybridOverlayConfig(ctx, &cliConfig, &cfg, allSubnets); err != nil {
 		return "", err
 	}
 
@@ -1213,6 +1209,11 @@ func initConfigWithPath(ctx *cli.Context, exec kexec.Interface, saPath string, d
 		return "", err
 	}
 	OvnSouth = *tmpAuth
+
+	err = allSubnets.checkForOverlaps()
+	if err != nil {
+		return "", err
+	}
 
 	klog.V(5).Infof("Default config: %+v", Default)
 	klog.V(5).Infof("Logging config: %+v", Logging)

@@ -133,79 +133,56 @@ func TestParseClusterSubnetEntries(t *testing.T) {
 	}
 }
 
-func TestCidrsOverlap(t *testing.T) {
-	tests := []struct {
-		name           string
-		cidr           *net.IPNet
-		cidrList       []CIDRNetworkEntry
-		expectedOutput bool
-	}{
-		{
-			name:           "empty cidrList",
-			cidr:           returnIPNetPointers("10.132.0.0/26"),
-			cidrList:       nil,
-			expectedOutput: false,
-		},
-		{
-			name: "non-overlapping",
-			cidr: returnIPNetPointers("10.132.0.0/26"),
-			cidrList: []CIDRNetworkEntry{
-				{CIDR: returnIPNetPointers("10.133.0.0/26")},
-			},
-			expectedOutput: false,
-		},
-		{
-			name: "cidr equal to an entry in the list",
-			cidr: returnIPNetPointers("10.132.0.0/26"),
-			cidrList: []CIDRNetworkEntry{
-				{CIDR: returnIPNetPointers("10.132.0.0/26")},
-			},
-			expectedOutput: true,
-		},
-		{
-			name: "proposed cidr is a proper subset of a list entry",
-			cidr: returnIPNetPointers("10.132.0.0/26"),
-			cidrList: []CIDRNetworkEntry{
-				{CIDR: returnIPNetPointers("10.0.0.0/8")},
-			},
-			expectedOutput: true,
-		},
-		{
-			name: "proposed cidr is a proper superset of a list entry",
-			cidr: returnIPNetPointers("10.0.0.0/8"),
-			cidrList: []CIDRNetworkEntry{
-				{CIDR: returnIPNetPointers("10.133.0.0/26")},
-			},
-			expectedOutput: true,
-		},
-		{
-			name: "proposed cidr overlaps a list entry",
-			cidr: returnIPNetPointers("10.1.0.0/14"),
-			cidrList: []CIDRNetworkEntry{
-				{CIDR: returnIPNetPointers("10.0.0.0/15")},
-			},
-			expectedOutput: true,
-		},
-	}
-
-	for _, tc := range tests {
-
-		if result := cidrsOverlap(tc.cidr, tc.cidrList); result != tc.expectedOutput {
-			t.Errorf("testcase \"%s\" expected output %t cidrsOverlap returns %t", tc.name, tc.expectedOutput, result)
-		}
-	}
-}
-
-func TestJoinSubnetOverlaps(t *testing.T) {
+func Test_checkForOverlap(t *testing.T) {
 	tests := []struct {
 		name        string
 		cidrList    []*net.IPNet
 		shouldError bool
 	}{
 		{
-			name:        "empty ipnet entries",
+			name:        "empty cidrList",
 			cidrList:    nil,
 			shouldError: false,
+		},
+		{
+			name: "non-overlapping",
+			cidrList: []*net.IPNet{
+				returnIPNetPointers("10.132.0.0/26"),
+				returnIPNetPointers("10.133.0.0/26"),
+			},
+			shouldError: false,
+		},
+		{
+			name: "duplicate entry",
+			cidrList: []*net.IPNet{
+				returnIPNetPointers("10.132.0.0/26"),
+				returnIPNetPointers("10.132.0.0/26"),
+			},
+			shouldError: true,
+		},
+		{
+			name: "proper subset",
+			cidrList: []*net.IPNet{
+				returnIPNetPointers("10.132.0.0/26"),
+				returnIPNetPointers("10.0.0.0/8"),
+			},
+			shouldError: true,
+		},
+		{
+			name: "proper superset",
+			cidrList: []*net.IPNet{
+				returnIPNetPointers("10.0.0.0/8"),
+				returnIPNetPointers("10.133.0.0/26"),
+			},
+			shouldError: true,
+		},
+		{
+			name: "overlap",
+			cidrList: []*net.IPNet{
+				returnIPNetPointers("10.1.0.0/14"),
+				returnIPNetPointers("10.0.0.0/15"),
+			},
+			shouldError: true,
 		},
 		{
 			name: "non-overlapping V4 ipnet entries",
@@ -271,14 +248,18 @@ func TestJoinSubnetOverlaps(t *testing.T) {
 	}
 
 	for _, tc := range tests {
-		err := overlapsWithJoinSubnet(tc.cidrList)
-		if err == nil && tc.shouldError {
-			t.Errorf("testcase \"%s\" expected function overlapsWithJoinSubnet to return err, but it did not",
-				tc.name)
+		allSubnets := newConfigSubnets()
+		allSubnets.appendConst(configSubnetJoin, V4JoinSubnet)
+		allSubnets.appendConst(configSubnetJoin, V6JoinSubnet)
+		for _, subnet := range tc.cidrList {
+			allSubnets.append(configSubnetCluster, subnet)
 		}
-		if err != nil && !tc.shouldError {
-			t.Errorf("testcase \"%s\" expected function overlapsWithJoinSubnet not to return err, but it did: %v",
-				tc.name, err)
+
+		err := allSubnets.checkForOverlaps()
+		if err == nil && tc.shouldError {
+			t.Errorf("testcase \"%s\" failed to find overlap", tc.name)
+		} else if err != nil && !tc.shouldError {
+			t.Errorf("testcase \"%s\" erroneously found overlap: %v", tc.name, err)
 		}
 	}
 }
