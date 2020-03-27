@@ -142,7 +142,7 @@ kubeconfig=/path/to/kubeconfig
 apiserver=https://1.2.3.4:6443
 token=TG9yZW0gaXBzdW0gZ
 cacert=/path/to/kubeca.crt
-service-cidr=172.18.0.0/24
+service-cidrs=172.18.0.0/24
 no-hostsubnet-nodes=label=another-test-label
 
 [logging]
@@ -245,11 +245,12 @@ var _ = Describe("Config Operations", func() {
 			Expect(Kubernetes.CACert).To(Equal(""))
 			Expect(Kubernetes.Token).To(Equal(""))
 			Expect(Kubernetes.APIServer).To(Equal(DefaultAPIServer))
-			Expect(Kubernetes.ServiceCIDR).To(Equal("172.16.1.0/24"))
+			Expect(Kubernetes.RawServiceCIDRs).To(Equal("172.16.1.0/24"))
 			Expect(Kubernetes.RawNoHostSubnetNodes).To(Equal(""))
 			Expect(Default.ClusterSubnets).To(Equal([]CIDRNetworkEntry{
 				{mustParseCIDR("10.128.0.0/14"), 23},
 			}))
+			Expect(IPv4Mode).To(Equal(true))
 			Expect(IPv6Mode).To(Equal(false))
 			Expect(HybridOverlay.Enabled).To(Equal(false))
 
@@ -479,7 +480,7 @@ var _ = Describe("Config Operations", func() {
 			Expect(Kubernetes.CACert).To(Equal(kubeCAFile))
 			Expect(Kubernetes.Token).To(Equal("TG9yZW0gaXBzdW0gZ"))
 			Expect(Kubernetes.APIServer).To(Equal("https://1.2.3.4:6443"))
-			Expect(Kubernetes.ServiceCIDR).To(Equal("172.18.0.0/24"))
+			Expect(Kubernetes.RawServiceCIDRs).To(Equal("172.18.0.0/24"))
 			Expect(Default.ClusterSubnets).To(Equal([]CIDRNetworkEntry{
 				{mustParseCIDR("10.129.0.0/14"), 23},
 			}))
@@ -541,7 +542,7 @@ var _ = Describe("Config Operations", func() {
 			Expect(Kubernetes.CACert).To(Equal(kubeCAFile))
 			Expect(Kubernetes.Token).To(Equal("asdfasdfasdfasfd"))
 			Expect(Kubernetes.APIServer).To(Equal("https://4.4.3.2:8080"))
-			Expect(Kubernetes.ServiceCIDR).To(Equal("172.15.0.0/24"))
+			Expect(Kubernetes.RawServiceCIDRs).To(Equal("172.15.0.0/24"))
 			Expect(Kubernetes.RawNoHostSubnetNodes).To(Equal("test=pass"))
 			Expect(Default.ClusterSubnets).To(Equal([]CIDRNetworkEntry{
 				{mustParseCIDR("10.130.0.0/15"), 24},
@@ -582,7 +583,7 @@ var _ = Describe("Config Operations", func() {
 			"-k8s-apiserver=https://4.4.3.2:8080",
 			"-k8s-cacert=" + kubeCAFile,
 			"-k8s-token=asdfasdfasdfasfd",
-			"-k8s-service-cidr=172.15.0.0/24",
+			"-k8s-service-cidrs=172.15.0.0/24",
 			"-nb-address=ssl://6.5.4.3:6651",
 			"-no-hostsubnet-nodes=test=pass",
 			"-nb-client-privkey=/client/privkey",
@@ -603,7 +604,7 @@ var _ = Describe("Config Operations", func() {
 
 	It("overrides config file and defaults with CLI legacy service-cluster-ip-range option", func() {
 		err := ioutil.WriteFile(cfgFile.Name(), []byte(`[kubernetes]
-service-cidr=172.18.0.0/24
+service-cidrs=172.18.0.0/24
 `), 0644)
 		Expect(err).NotTo(HaveOccurred())
 
@@ -612,7 +613,7 @@ service-cidr=172.18.0.0/24
 			cfgPath, err = InitConfig(ctx, kexec.New(), nil)
 			Expect(err).NotTo(HaveOccurred())
 			Expect(cfgPath).To(Equal(cfgFile.Name()))
-			Expect(Kubernetes.ServiceCIDR).To(Equal("172.15.0.0/24"))
+			Expect(Kubernetes.RawServiceCIDRs).To(Equal("172.15.0.0/24"))
 			return nil
 		}
 		cliArgs := []string{
@@ -624,7 +625,29 @@ service-cidr=172.18.0.0/24
 		Expect(err).NotTo(HaveOccurred())
 	})
 
-	It("returns an error when the k8s-service-cidr is invalid", func() {
+	It("accepts legacy service-cidr config file option", func() {
+		err := ioutil.WriteFile(cfgFile.Name(), []byte(`[kubernetes]
+service-cidr=172.18.0.0/24
+`), 0644)
+		Expect(err).NotTo(HaveOccurred())
+
+		app.Action = func(ctx *cli.Context) error {
+			var cfgPath string
+			cfgPath, err = InitConfig(ctx, kexec.New(), nil)
+			Expect(err).NotTo(HaveOccurred())
+			Expect(cfgPath).To(Equal(cfgFile.Name()))
+			Expect(Kubernetes.RawServiceCIDRs).To(Equal("172.18.0.0/24"))
+			return nil
+		}
+		cliArgs := []string{
+			app.Name,
+			"-config-file=" + cfgFile.Name(),
+		}
+		err = app.Run(cliArgs)
+		Expect(err).NotTo(HaveOccurred())
+	})
+
+	It("returns an error when the k8s-service-cidrs is invalid", func() {
 		app.Action = func(ctx *cli.Context) error {
 			_, err := InitConfig(ctx, kexec.New(), nil)
 			Expect(err).To(MatchError("kubernetes service network CIDR \"adsfasdfaf\" invalid: invalid CIDR address: adsfasdfaf"))
@@ -652,6 +675,7 @@ cluster-subnets=172.18.0.0/23
 			Expect(Default.ClusterSubnets).To(Equal([]CIDRNetworkEntry{
 				{mustParseCIDR("172.15.0.0/23"), 24},
 			}))
+			Expect(IPv4Mode).To(Equal(true))
 			Expect(IPv6Mode).To(Equal(false))
 			return nil
 		}
@@ -783,7 +807,7 @@ mode=shared
 			Expect(Kubernetes.Token).To(Equal("asdfasdfasdfasfd"))
 			Expect(Kubernetes.APIServer).To(Equal("https://4.4.3.2:8080"))
 			Expect(Kubernetes.RawNoHostSubnetNodes).To(Equal("label=another-test-label"))
-			Expect(Kubernetes.ServiceCIDR).To(Equal("172.15.0.0/24"))
+			Expect(Kubernetes.RawServiceCIDRs).To(Equal("172.15.0.0/24"))
 
 			Expect(OvnNorth.Scheme).To(Equal(OvnDBSchemeSSL))
 			Expect(OvnNorth.PrivKey).To(Equal("/client/privkey"))
@@ -859,7 +883,7 @@ mode=shared
 			Expect(Kubernetes.Kubeconfig).To(Equal(kubeconfigFile))
 			Expect(Kubernetes.CACert).To(Equal(kubeCAFile))
 			Expect(Kubernetes.Token).To(Equal("TG9yZW0gaXBzdW0gZ"))
-			Expect(Kubernetes.ServiceCIDR).To(Equal("172.18.0.0/24"))
+			Expect(Kubernetes.RawServiceCIDRs).To(Equal("172.18.0.0/24"))
 
 			return nil
 		}
@@ -871,6 +895,149 @@ mode=shared
 			"-k8s-cacert=" + kubeCAFile,
 		}
 		err = app.Run(cliArgs)
+		Expect(err).NotTo(HaveOccurred())
+	})
+
+	It("allows configuring a single-stack IPv6 cluster", func() {
+		app.Action = func(ctx *cli.Context) error {
+			_, err := InitConfig(ctx, kexec.New(), nil)
+			Expect(err).NotTo(HaveOccurred())
+			Expect(IPv4Mode).To(Equal(false))
+			Expect(IPv6Mode).To(Equal(true))
+			return nil
+		}
+		cliArgs := []string{
+			app.Name,
+			"-cluster-subnets=fd01::/48/64",
+			"-k8s-service-cidrs=fd02::/112",
+		}
+		err := app.Run(cliArgs)
+		Expect(err).NotTo(HaveOccurred())
+	})
+
+	It("allows configuring a dual-stack cluster", func() {
+		app.Action = func(ctx *cli.Context) error {
+			_, err := InitConfig(ctx, kexec.New(), nil)
+			Expect(err).NotTo(HaveOccurred())
+			Expect(IPv4Mode).To(Equal(true))
+			Expect(IPv6Mode).To(Equal(true))
+			return nil
+		}
+		cliArgs := []string{
+			app.Name,
+			"-cluster-subnets=10.0.0.0/16/24,fd01::/48/64",
+			"-k8s-service-cidrs=172.30.0.0/16,fd02::/112",
+		}
+		err := app.Run(cliArgs)
+		Expect(err).NotTo(HaveOccurred())
+	})
+
+	It("allows configuring a dual-stack cluster with multiple IPv4 cluster subnet ranges", func() {
+		app.Action = func(ctx *cli.Context) error {
+			_, err := InitConfig(ctx, kexec.New(), nil)
+			Expect(err).NotTo(HaveOccurred())
+			Expect(IPv4Mode).To(Equal(true))
+			Expect(IPv6Mode).To(Equal(true))
+			return nil
+		}
+		cliArgs := []string{
+			app.Name,
+			"-cluster-subnets=10.0.0.0/16/24,10.2.0.0/16/24,fd01::/48/64",
+			"-k8s-service-cidrs=172.30.0.0/16,fd02::/112",
+		}
+		err := app.Run(cliArgs)
+		Expect(err).NotTo(HaveOccurred())
+	})
+
+	It("rejects a cluster with IPv4 pods and IPv6 services", func() {
+		app.Action = func(ctx *cli.Context) error {
+			_, err := InitConfig(ctx, kexec.New(), nil)
+			Expect(err).To(MatchError("illegal network configuration: IPv4 cluster subnet, IPv6 service subnet"))
+			return nil
+		}
+		cliArgs := []string{
+			app.Name,
+			"-cluster-subnets=10.0.0.0/16/24",
+			"-k8s-service-cidrs=fd02::/112",
+		}
+		err := app.Run(cliArgs)
+		Expect(err).NotTo(HaveOccurred())
+	})
+
+	It("rejects a cluster with IPv6 pods and IPv4 services", func() {
+		app.Action = func(ctx *cli.Context) error {
+			_, err := InitConfig(ctx, kexec.New(), nil)
+			Expect(err).To(MatchError("illegal network configuration: IPv6 cluster subnet, IPv4 service subnet"))
+			return nil
+		}
+		cliArgs := []string{
+			app.Name,
+			"-cluster-subnets=fd01::/48/64",
+			"-k8s-service-cidrs=172.30.0.0/16",
+		}
+		err := app.Run(cliArgs)
+		Expect(err).NotTo(HaveOccurred())
+	})
+
+	It("rejects a cluster with dual-stack pods and single-stack services", func() {
+		app.Action = func(ctx *cli.Context) error {
+			_, err := InitConfig(ctx, kexec.New(), nil)
+			Expect(err).To(MatchError("illegal network configuration: dual-stack cluster subnet, IPv4 service subnet"))
+			return nil
+		}
+		cliArgs := []string{
+			app.Name,
+			"-cluster-subnets=10.0.0.0/16/24,fd01::/48/64",
+			"-k8s-service-cidrs=172.30.0.0/16",
+		}
+		err := app.Run(cliArgs)
+		Expect(err).NotTo(HaveOccurred())
+	})
+
+	It("rejects a cluster with single-stack pods and dual-stack services", func() {
+		app.Action = func(ctx *cli.Context) error {
+			_, err := InitConfig(ctx, kexec.New(), nil)
+			Expect(err).To(MatchError("illegal network configuration: IPv6 cluster subnet, dual-stack service subnet"))
+			return nil
+		}
+		cliArgs := []string{
+			app.Name,
+			"-cluster-subnets=fd01::/48/64",
+			"-k8s-service-cidrs=172.30.0.0/16,fd02::/112",
+		}
+		err := app.Run(cliArgs)
+		Expect(err).NotTo(HaveOccurred())
+	})
+
+	It("rejects a cluster with multiple single-stack service CIDRs", func() {
+		app.Action = func(ctx *cli.Context) error {
+			_, err := InitConfig(ctx, kexec.New(), nil)
+			Expect(err).To(MatchError("kubernetes service-cidrs must contain either a single CIDR or else an IPv4/IPv6 pair"))
+			return nil
+		}
+		cliArgs := []string{
+			app.Name,
+			"-cluster-subnets=10.0.0.0/16/24",
+			"-k8s-service-cidrs=172.30.0.0/16,172.31.0.0/16",
+		}
+		err := app.Run(cliArgs)
+		Expect(err).NotTo(HaveOccurred())
+	})
+
+	It("rejects a cluster with dual-stack cluster subnets and single-stack hybrid overlap subnets", func() {
+		app.Action = func(ctx *cli.Context) error {
+			_, err := InitConfig(ctx, kexec.New(), nil)
+			Expect(err).To(MatchError("illegal network configuration: dual-stack cluster subnet, dual-stack service subnet, IPv4 hybrid overlay subnet"))
+			return nil
+		}
+		cliArgs := []string{
+			app.Name,
+			"-cluster-subnets=10.0.0.0/16/24,fd01::/48/64",
+			"-k8s-service-cidrs=172.30.0.0/16,fd02::/112",
+			"-enable-hybrid-overlay",
+			"-hybrid-overlay-cluster-subnets=10.132.0.0/14/23",
+		}
+		err := app.Run(cliArgs)
 		Expect(err).NotTo(HaveOccurred())
 	})
 

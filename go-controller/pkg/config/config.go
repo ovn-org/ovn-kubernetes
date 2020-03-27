@@ -71,7 +71,7 @@ var (
 	// Kubernetes holds Kubernetes-related parsed config file parameters and command-line overrides
 	Kubernetes = KubernetesConfig{
 		APIServer:          DefaultAPIServer,
-		ServiceCIDR:        "172.16.1.0/24",
+		RawServiceCIDRs:    "172.16.1.0/24",
 		OVNConfigNamespace: "ovn-kubernetes",
 	}
 
@@ -105,7 +105,10 @@ var (
 	// EnableMulticast enables multicast support between the pods within the same namespace
 	EnableMulticast bool
 
-	// IPv6Mode captures whether we are using IPv6 for OVN logical topology
+	// IPv4Mode captures whether we are using IPv4 for OVN logical topology. (ie, single-stack IPv4 or dual-stack)
+	IPv4Mode bool
+
+	// IPv6Mode captures whether we are using IPv6 for OVN logical topology. (ie, single-stack IPv6 or dual-stack)
 	IPv6Mode bool
 )
 
@@ -170,7 +173,9 @@ type KubernetesConfig struct {
 	CACert               string `gcfg:"cacert"`
 	APIServer            string `gcfg:"apiserver"`
 	Token                string `gcfg:"token"`
-	ServiceCIDR          string `gcfg:"service-cidr"`
+	CompatServiceCIDR    string `gcfg:"service-cidr"`
+	RawServiceCIDRs      string `gcfg:"service-cidrs"`
+	ServiceCIDRs         []*net.IPNet
 	OVNConfigNamespace   string `gcfg:"ovn-config-namespace"`
 	MetricsBindAddress   string `gcfg:"metrics-bind-address"`
 	MetricsEnablePprof   bool   `gcfg:"metrics-enable-pprof"`
@@ -528,17 +533,22 @@ var CNIFlags = []cli.Flag{
 var K8sFlags = []cli.Flag{
 	cli.StringFlag{
 		Name:        "service-cluster-ip-range",
-		Usage:       "Deprecated alias for k8s-service-cidr.",
+		Usage:       "Deprecated alias for k8s-service-cidrs.",
 		Destination: &serviceClusterIPRange,
 	},
 	cli.StringFlag{
-		Name: "k8s-service-cidr",
-		Usage: "A CIDR notation IP range from which k8s assigns " +
-			"service cluster IPs. This should be the same as the one " +
-			"provided for kube-apiserver \"-service-cluster-ip-range\" " +
+		Name:        "k8s-service-cidr",
+		Usage:       "Deprecated alias for k8s-service-cidrs.",
+		Destination: &cliConfig.Kubernetes.CompatServiceCIDR,
+	},
+	cli.StringFlag{
+		Name: "k8s-service-cidrs",
+		Usage: "A comma-separated set of CIDR notation IP ranges from which k8s assigns " +
+			"service cluster IPs. This should be the same as the value " +
+			"provided for kube-apiserver \"--service-cluster-ip-range\" " +
 			"option. (default: 172.16.1.0/24)",
-		Destination: &cliConfig.Kubernetes.ServiceCIDR,
-		Value:       Kubernetes.ServiceCIDR,
+		Destination: &cliConfig.Kubernetes.RawServiceCIDRs,
+		Value:       Kubernetes.RawServiceCIDRs,
 	},
 	cli.StringFlag{
 		Name:        "k8s-kubeconfig",
@@ -900,18 +910,28 @@ func buildKubernetesConfig(exec kexec.Interface, cli, file *config, saPath strin
 		return fmt.Errorf("kubernetes API server URL scheme %q invalid", url.Scheme)
 	}
 
-	// Legacy service-cluster-ip-range CLI option overrides config file or --k8s-service-cidr
+	// Legacy --service-cluster-ip-range or --k8s-service-cidr options override config file or --k8s-service-cidrs.
 	if serviceClusterIPRange != "" {
-		Kubernetes.ServiceCIDR = serviceClusterIPRange
+		Kubernetes.RawServiceCIDRs = serviceClusterIPRange
+	} else if Kubernetes.CompatServiceCIDR != "" {
+		Kubernetes.RawServiceCIDRs = Kubernetes.CompatServiceCIDR
 	}
-	if Kubernetes.ServiceCIDR == "" {
-		return fmt.Errorf("kubernetes service-cidr is required")
+	if Kubernetes.RawServiceCIDRs == "" {
+		return fmt.Errorf("kubernetes service-cidrs is required")
 	}
-	_, serviceIPNet, err := net.ParseCIDR(Kubernetes.ServiceCIDR)
-	if err != nil {
-		return fmt.Errorf("kubernetes service network CIDR %q invalid: %v", Kubernetes.ServiceCIDR, err)
+	for _, cidrString := range strings.Split(Kubernetes.RawServiceCIDRs, ",") {
+		_, serviceCIDR, err := net.ParseCIDR(cidrString)
+		if err != nil {
+			return fmt.Errorf("kubernetes service network CIDR %q invalid: %v", cidrString, err)
+		}
+		Kubernetes.ServiceCIDRs = append(Kubernetes.ServiceCIDRs, serviceCIDR)
+		allSubnets.append(configSubnetService, serviceCIDR)
 	}
-	allSubnets.append(configSubnetService, serviceIPNet)
+	if len(Kubernetes.ServiceCIDRs) > 2 {
+		return fmt.Errorf("kubernetes service-cidrs must contain either a single CIDR or else an IPv4/IPv6 pair")
+	} else if len(Kubernetes.ServiceCIDRs) == 2 && utilnet.IsIPv6CIDR(Kubernetes.ServiceCIDRs[0]) == utilnet.IsIPv6CIDR(Kubernetes.ServiceCIDRs[1]) {
+		return fmt.Errorf("kubernetes service-cidrs must contain either a single CIDR or else an IPv4/IPv6 pair")
+	}
 
 	if Kubernetes.RawNoHostSubnetNodes != "" {
 		if nodeSelector, err := metav1.ParseToLabelSelector(Kubernetes.RawNoHostSubnetNodes); err == nil {
@@ -1048,9 +1068,6 @@ func buildDefaultConfig(cli, file *config, allSubnets *configSubnets) error {
 	for _, subnet := range Default.ClusterSubnets {
 		allSubnets.append(configSubnetCluster, subnet.CIDR)
 	}
-
-	// Determine if ovn-kubernetes is configured to run in IPv6 mode
-	IPv6Mode = utilnet.IsIPv6(Default.ClusterSubnets[0].CIDR.IP)
 
 	return nil
 }
@@ -1211,6 +1228,11 @@ func initConfigWithPath(ctx *cli.Context, exec kexec.Interface, saPath string, d
 	OvnSouth = *tmpAuth
 
 	err = allSubnets.checkForOverlaps()
+	if err != nil {
+		return "", err
+	}
+
+	IPv4Mode, IPv6Mode, err = allSubnets.checkIPFamilies()
 	if err != nil {
 		return "", err
 	}

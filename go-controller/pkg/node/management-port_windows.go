@@ -10,7 +10,9 @@ import (
 
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
+
 	"k8s.io/klog"
+	utilnet "k8s.io/utils/net"
 )
 
 // createPlatformManagementPort creates a management port attached to the node switch
@@ -72,53 +74,48 @@ func createPlatformManagementPort(interfaceName, interfaceIP, routerIP, routerMA
 	interfaceIndex := stdout
 
 	for _, subnet := range config.Default.ClusterSubnets {
-		// Checking if the route already exists, in which case it will not be created again
-		stdout, stderr, err = util.RunRoute("print", "-4", subnet.CIDR.IP.String())
+		err = addRoute(subnet.CIDR, routerIP, interfaceIndex)
 		if err != nil {
-			klog.V(5).Infof("Failed to run route print, stderr: %q, error: %v", stderr, err)
-		}
-
-		if strings.Contains(stdout, subnet.CIDR.IP.String()) {
-			klog.V(5).Infof("Route was found, skipping route add")
-		} else {
-			// Windows route command requires the mask to be specified in the IP format
-			subnetMask := net.IP(subnet.CIDR.Mask).String()
-			// Create a route for the entire subnet.
-			_, stderr, err = util.RunRoute("-p", "add",
-				subnet.CIDR.IP.String(), "mask", subnetMask,
-				routerIP, "METRIC", "2", "IF", interfaceIndex)
-			if err != nil {
-				klog.Errorf("failed to run route add, stderr: %q, error: %v", stderr, err)
-				return err
-			}
+			return err
 		}
 	}
-
-	clusterServiceIP, clusterServiceIPNet, err := net.ParseCIDR(config.Kubernetes.ServiceCIDR)
-	if err != nil {
-		return fmt.Errorf("failed to parse ServiceCIDR %v : %v", config.Kubernetes.ServiceCIDR, err)
-	}
-	// Checking if the route already exists, in which case it will not be created again
-	stdout, stderr, err = util.RunRoute("print", "-4", clusterServiceIP.String())
-	if err != nil {
-		klog.V(5).Infof("Failed to run route print, stderr: %q, error: %v", stderr, err)
-	}
-
-	if strings.Contains(stdout, clusterServiceIP.String()) {
-		klog.V(5).Infof("Route was found, skipping route add")
-	} else {
-		// Windows route command requires the mask to be specified in the IP format
-		clusterServiceMask := net.IP(clusterServiceIPNet.Mask).String()
-		// Create a route for the entire subnet.
-		_, stderr, err = util.RunRoute("-p", "add",
-			clusterServiceIP.String(), "mask", clusterServiceMask,
-			routerIP, "METRIC", "2", "IF", interfaceIndex)
+	for _, subnet := range config.Kubernetes.ServiceCIDRs {
+		err = addRoute(subnet, routerIP, interfaceIndex)
 		if err != nil {
-			klog.Errorf("failed to run route add, stderr: %q, error: %v", stderr, err)
 			return err
 		}
 	}
 
+	return nil
+}
+
+func addRoute(subnet *net.IPNet, routerIP, interfaceIndex string) error {
+	var familyFlag string
+	if utilnet.IsIPv6CIDR(subnet) {
+		familyFlag = "-6"
+	} else {
+		familyFlag = "-4"
+	}
+
+	// If the route already exists, don't create it again
+	stdout, stderr, err := util.RunRoute("print", familyFlag, subnet.IP.String())
+	if err != nil {
+		klog.V(5).Infof("Failed to run route print, stderr: %q, error: %v", stderr, err)
+	}
+	if strings.Contains(stdout, subnet.IP.String()) {
+		klog.V(5).Infof("Route was found, skipping route add")
+		return nil
+	}
+
+	// Windows route command requires the mask to be specified in the IP format
+	subnetMask := net.IP(subnet.Mask).String()
+	// Create a route for the entire subnet.
+	_, stderr, err = util.RunRoute("-p", "add",
+		subnet.IP.String(), "mask", subnetMask,
+		routerIP, "METRIC", "2", "IF", interfaceIndex)
+	if err != nil {
+		return fmt.Errorf("failed to run route add, stderr: %q, error: %v", stderr, err)
+	}
 	return nil
 }
 

@@ -177,6 +177,12 @@ func getRoutesGatewayIP(pod *kapi.Pod, gatewayIPnet *net.IPNet) ([]util.PodRoute
 			route.NextHop = gatewayIPnet.IP
 			routes = append(routes, route)
 		}
+		for _, serviceSubnet := range config.Kubernetes.ServiceCIDRs {
+			var route util.PodRoute
+			route.Dest = serviceSubnet
+			route.NextHop = gatewayIPnet.IP
+			routes = append(routes, route)
+		}
 	} else {
 		gatewayIP = gatewayIPnet.IP
 	}

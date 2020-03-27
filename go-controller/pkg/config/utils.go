@@ -3,6 +3,7 @@ package config
 import (
 	"fmt"
 	"net"
+	"reflect"
 	"strconv"
 	"strings"
 
@@ -99,16 +100,28 @@ type configSubnet struct {
 // configSubnets represets a set of configured subnets (and their names)
 type configSubnets struct {
 	subnets []configSubnet
+	v4      map[configSubnetType]bool
+	v6      map[configSubnetType]bool
 }
 
 // newConfigSubnets returns a new configSubnets
 func newConfigSubnets() *configSubnets {
-	return &configSubnets{}
+	return &configSubnets{
+		v4: make(map[configSubnetType]bool),
+		v6: make(map[configSubnetType]bool),
+	}
 }
 
 // append adds a single subnet to cs
 func (cs *configSubnets) append(subnetType configSubnetType, subnet *net.IPNet) {
 	cs.subnets = append(cs.subnets, configSubnet{subnetType: subnetType, subnet: subnet})
+	if subnetType != configSubnetJoin {
+		if utilnet.IsIPv6CIDR(subnet) {
+			cs.v6[subnetType] = true
+		} else {
+			cs.v4[subnetType] = true
+		}
+	}
 }
 
 // appendConst adds a single subnet to cs; it will panic if subnetStr is not a valid CIDR
@@ -134,4 +147,45 @@ func (cs *configSubnets) checkForOverlaps() error {
 		}
 	}
 	return nil
+}
+
+func (cs *configSubnets) describeSubnetType(subnetType configSubnetType) string {
+	ipv4 := cs.v4[subnetType]
+	ipv6 := cs.v6[subnetType]
+	var familyType string
+	switch {
+	case ipv4 && !ipv6:
+		familyType = "IPv4"
+	case !ipv4 && ipv6:
+		familyType = "IPv6"
+	case ipv4 && ipv6:
+		familyType = "dual-stack"
+	default:
+		familyType = "unknown type"
+	}
+	return familyType + " " + string(subnetType)
+}
+
+// checkIPFamilies determines if cs contains a valid single-stack IPv4 configuration, a
+// valid single-stack IPv6 configuration, a valid dual-stack configuration, or none of the
+// above.
+func (cs *configSubnets) checkIPFamilies() (usingIPv4, usingIPv6 bool, err error) {
+	if len(cs.v6) == 0 {
+		// Single-stack IPv4
+		return true, false, nil
+	} else if len(cs.v4) == 0 {
+		// Single-stack IPv6
+		return false, true, nil
+	} else if reflect.DeepEqual(cs.v4, cs.v6) {
+		// Dual-stack
+		return true, true, nil
+	}
+
+	netConfig := cs.describeSubnetType(configSubnetCluster)
+	netConfig += ", " + cs.describeSubnetType(configSubnetService)
+	if cs.v4[configSubnetHybrid] || cs.v6[configSubnetHybrid] {
+		netConfig += ", " + cs.describeSubnetType(configSubnetHybrid)
+	}
+
+	return false, false, fmt.Errorf("illegal network configuration: %s", netConfig)
 }
