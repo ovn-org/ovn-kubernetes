@@ -94,6 +94,10 @@ ovsdb-raft () {
   ovn_db_pidfile=${OVN_RUNDIR}/ovn${db}_db.pid
   eval ovn_log_db=\$ovn_log_${db}
   ovn_db_file=${OVN_ETCDIR}/ovn${db}_db.db
+  database="OVN_Northbound"
+  if [[ ${db} == "sb" ]]; then
+    database="OVN_Southbound"
+  fi
 
   rm -f ${ovn_db_pidfile}
   verify-ovsdb-raft
