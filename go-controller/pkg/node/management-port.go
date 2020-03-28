@@ -61,7 +61,7 @@ func createManagementPort(nodeName string, localSubnet *net.IPNet, nodeAnnotator
 	}
 
 	if err := createPlatformManagementPort(util.K8sMgmtIntfName, portIP.String(), routerIP.IP.String(), routerMac); err != nil {
-		return nil
+		return err
 	}
 
 	if err := util.SetNodeManagementPortMacAddr(nodeAnnotator, macAddress); err != nil {
