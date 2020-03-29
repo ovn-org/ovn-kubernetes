@@ -83,6 +83,37 @@ check_and_apply_ovnkube_db_ep () {
   fi
 }
 
+# set_connection() will be called for ovnkube-db-0 pod when :
+#    1. it is first started or
+#    2. it restarts after the initial start has failed or
+#    3. subsequent restarts during the lifetime of the pod
+#
+# In the first and second case, the pod is a one-node cluster and hence a leader. In the third case,
+# the pod is a part of mutli-pods cluster and may not be a leader and the connection information should
+# have already been set, so we don't care.
+set_connection () {
+  local port=${1}
+  local target
+  local output
+
+  # this call will fail on non-leader node since we are using unix socket and no --no-leader-only option.
+  output=$(ovn-${db}ctl --data=bare --no-headings --columns=target,inactivity_probe list connection 2>/dev/null)
+  if [[ $? == 0 ]]; then
+    # this instance is a leader, check if we need to make any changes
+    echo "found the current value of target and inactivity probe to be ${output}"
+    target=$(echo "${output}" | awk 'ORS=","')
+    if [[ "${target}" != "ptcp:${port},0," ]]; then
+      ovn-${db}ctl --inactivity-probe=0 set-connection ptcp:${port}
+      if [[ $? != 0 ]]; then
+        echo "Failed to set connection and disable inactivity probe. Exiting...."
+        exit 12
+      fi
+      echo "added port ${port} to connection table and disabled inactivity probe"
+    fi
+  fi
+  return 0
+}
+
 # v3 - create nb_ovsdb/sb_ovsdb cluster in a separate container
 ovsdb-raft () {
   trap 'kill $(jobs -p); exit 0' TERM
@@ -141,9 +172,9 @@ ovsdb-raft () {
   fi
   echo "=============== ${db}-ovsdb-raft ========== RUNNING"
 
-  if [[ "${POD_NAME}" == "ovnkube-db-0" && "${initialize}" == "true" ]] ; then
+  if [[ "${POD_NAME}" == "ovnkube-db-0" ]]; then
     # set the connection and disable inactivity probe, this deletes the old connection if any
-    ovn-${db}ctl --inactivity-probe=0 set-connection ptcp:${port}
+    set_connection ${port}
   fi
 
   last_node_index=$(expr ${replicas} - 1)
