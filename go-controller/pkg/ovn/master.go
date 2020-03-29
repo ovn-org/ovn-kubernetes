@@ -375,7 +375,7 @@ func (oc *Controller) syncGatewayLogicalNetwork(node *kapi.Node, l3GatewayConfig
 	if l3GatewayConfig.Mode == config.GatewayModeShared {
 		// Add static routes to OVN Cluster Router to enable pods on this Node to
 		// reach the host IP
-		err = addStaticRouteToHost(node, l3GatewayConfig.IPAddress)
+		err = addStaticRouteToHost(node, l3GatewayConfig.IPAddresses)
 		if err != nil {
 			return err
 		}
@@ -400,7 +400,7 @@ func (oc *Controller) syncGatewayLogicalNetwork(node *kapi.Node, l3GatewayConfig
 	return err
 }
 
-func addStaticRouteToHost(node *kapi.Node, nicIP *net.IPNet) error {
+func addStaticRouteToHost(node *kapi.Node, nicIPs []*net.IPNet) error {
 	k8sClusterRouter := util.GetK8sClusterRouter()
 	subnet, err := util.ParseNodeHostSubnetAnnotation(node)
 	if err != nil {
@@ -408,12 +408,28 @@ func addStaticRouteToHost(node *kapi.Node, nicIP *net.IPNet) error {
 			util.K8sMgmtIntfName, err)
 	}
 	_, secondIP := util.GetNodeWellKnownAddresses(subnet)
-	prefix := nicIP.IP.String() + "/32"
+	var prefix string
+	for _, nicIP := range nicIPs {
+		if utilnet.IsIPv6CIDR(subnet) {
+			if utilnet.IsIPv6(nicIP.IP) {
+				prefix = nicIP.IP.String() + "/128"
+				break
+			}
+		} else {
+			if !utilnet.IsIPv6(nicIP.IP) {
+				prefix = nicIP.IP.String() + "/32"
+				break
+			}
+		}
+	}
+	if prefix == "" {
+		return fmt.Errorf("configuration error: no NIC IP of same family as hostsubnet")
+	}
 	nexthop := secondIP.IP.String()
 	_, stderr, err := util.RunOVNNbctl("--may-exist", "lr-route-add", k8sClusterRouter, prefix, nexthop)
 	if err != nil {
 		return fmt.Errorf("failed to add static route '%s via %s' for host %q on %s "+
-			"stderr: %q, error: %v", nicIP, secondIP, node.Name, k8sClusterRouter, stderr, err)
+			"stderr: %q, error: %v", prefix, secondIP, node.Name, k8sClusterRouter, stderr, err)
 	}
 
 	return nil

@@ -23,14 +23,22 @@ import (
 //           "mode": "local",
 //           "interface-id": "br-local_ip-10-0-129-64.us-east-2.compute.internal",
 //           "mac-address": "f2:20:a0:3c:26:4c",
-//           "ip-address": "169.254.33.2/24",
-//           "next-hop": "169.254.33.1",
+//           "ip-addresses": ["169.254.33.2/24"],
+//           "next-hops": ["169.254.33.1"],
 //           "node-port-enable": "true",
 //           "vlan-id": "0"
+//
+//           # backward-compat
+//           "ip-address": "169.254.33.2/24",
+//           "next-hop": "169.254.33.1",
 //         }
 //       }
 //     k8s.ovn.org/node-chassis-id: b1f96182-2bdd-42b6-88f9-9a1fc1c85ece
 //     k8s.ovn.org/node-mgmt-port-mac-address: fa:f1:27:f5:54:69
+//
+// The "ip_address" and "next_hop" fields are deprecated and will eventually go away.
+// (And they are not output when "ip_addresses" or "next_hops" contains multiple
+// values.)
 
 const (
 	// ovnNodeL3GatewayConfig is the constant string representing the l3 gateway annotation key
@@ -51,8 +59,8 @@ type L3GatewayConfig struct {
 	ChassisID      string
 	InterfaceID    string
 	MACAddress     net.HardwareAddr
-	IPAddress      *net.IPNet
-	NextHop        net.IP
+	IPAddresses    []*net.IPNet
+	NextHops       []net.IP
 	NodePortEnable bool
 	VLANID         *uint
 }
@@ -61,7 +69,9 @@ type l3GatewayConfigJSON struct {
 	Mode           config.GatewayMode `json:"mode"`
 	InterfaceID    string             `json:"interface-id,omitempty"`
 	MACAddress     string             `json:"mac-address,omitempty"`
+	IPAddresses    []string           `json:"ip-addresses,omitempty"`
 	IPAddress      string             `json:"ip-address,omitempty"`
+	NextHops       []string           `json:"next-hops,omitempty"`
 	NextHop        string             `json:"next-hop,omitempty"`
 	NodePortEnable string             `json:"node-port-enable,omitempty"`
 	VLANID         string             `json:"vlan-id,omitempty"`
@@ -81,8 +91,21 @@ func (cfg *L3GatewayConfig) MarshalJSON() ([]byte, error) {
 	if cfg.VLANID != nil {
 		cfgjson.VLANID = fmt.Sprintf("%d", *cfg.VLANID)
 	}
-	cfgjson.IPAddress = cfg.IPAddress.String()
-	cfgjson.NextHop = cfg.NextHop.String()
+
+	cfgjson.IPAddresses = make([]string, len(cfg.IPAddresses))
+	for i, ip := range cfg.IPAddresses {
+		cfgjson.IPAddresses[i] = ip.String()
+	}
+	if len(cfgjson.IPAddresses) == 1 {
+		cfgjson.IPAddress = cfgjson.IPAddresses[0]
+	}
+	cfgjson.NextHops = make([]string, len(cfg.NextHops))
+	for i, nh := range cfg.NextHops {
+		cfgjson.NextHops[i] = nh.String()
+	}
+	if len(cfgjson.NextHops) == 1 {
+		cfgjson.NextHop = cfgjson.NextHops[0]
+	}
 
 	return json.Marshal(&cfgjson)
 }
@@ -117,15 +140,38 @@ func (cfg *L3GatewayConfig) UnmarshalJSON(bytes []byte) error {
 		return fmt.Errorf("bad 'mac-address' value %q: %v", cfgjson.MACAddress, err)
 	}
 
-	ip, ipnet, err := net.ParseCIDR(cfgjson.IPAddress)
-	if err != nil {
-		return fmt.Errorf("bad 'ip-address' value: %v", err)
+	if len(cfgjson.IPAddresses) == 0 {
+		cfg.IPAddresses = make([]*net.IPNet, 1)
+		ip, ipnet, err := net.ParseCIDR(cfgjson.IPAddress)
+		if err != nil {
+			return fmt.Errorf("bad 'ip-address' value %q: %v", cfgjson.IPAddress, err)
+		}
+		cfg.IPAddresses[0] = &net.IPNet{IP: ip, Mask: ipnet.Mask}
+	} else {
+		cfg.IPAddresses = make([]*net.IPNet, len(cfgjson.IPAddresses))
+		for i, ipStr := range cfgjson.IPAddresses {
+			ip, ipnet, err := net.ParseCIDR(ipStr)
+			if err != nil {
+				return fmt.Errorf("bad 'ip-addresses' value %q: %v", ipStr, err)
+			}
+			cfg.IPAddresses[i] = &net.IPNet{IP: ip, Mask: ipnet.Mask}
+		}
 	}
-	cfg.IPAddress = &net.IPNet{IP: ip, Mask: ipnet.Mask}
 
-	cfg.NextHop = net.ParseIP(cfgjson.NextHop)
-	if cfg.NextHop == nil {
-		return fmt.Errorf("bad 'next-hop' value %q", cfgjson.NextHop)
+	if len(cfgjson.NextHops) == 0 {
+		cfg.NextHops = make([]net.IP, 1)
+		cfg.NextHops[0] = net.ParseIP(cfgjson.NextHop)
+		if cfg.NextHops[0] == nil {
+			return fmt.Errorf("bad 'next-hop' value %q", cfgjson.NextHop)
+		}
+	} else {
+		cfg.NextHops = make([]net.IP, len(cfgjson.NextHops))
+		for i, nextHopStr := range cfgjson.NextHops {
+			cfg.NextHops[i] = net.ParseIP(nextHopStr)
+			if cfg.NextHops[i] == nil {
+				return fmt.Errorf("bad 'next-hops' value %q", nextHopStr)
+			}
+		}
 	}
 
 	return nil

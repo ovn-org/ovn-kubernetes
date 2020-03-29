@@ -1,6 +1,8 @@
 package util
 
 import (
+	"net"
+
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/kube"
 	ovntest "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/testing"
@@ -38,11 +40,11 @@ var _ = Describe("Node annotation tests", func() {
 					ChassisID:      "SYSTEM-ID",
 					InterfaceID:    "INTERFACE-ID",
 					MACAddress:     ovntest.MustParseMAC("11:22:33:44:55:66"),
-					IPAddress:      ovntest.MustParseIPNet("192.168.1.10/24"),
-					NextHop:        ovntest.MustParseIP("192.168.1.1"),
+					IPAddresses:    []*net.IPNet{ovntest.MustParseIPNet("192.168.1.10/24")},
+					NextHops:       []net.IP{ovntest.MustParseIP("192.168.1.1")},
 					NodePortEnable: true,
 				},
-				out: `{"default":{"mode":"local","interface-id":"INTERFACE-ID","mac-address":"11:22:33:44:55:66","ip-address":"192.168.1.10/24","next-hop":"192.168.1.1","node-port-enable":"true"}}`,
+				out: `{"default":{"mode":"local","interface-id":"INTERFACE-ID","mac-address":"11:22:33:44:55:66","ip-addresses":["192.168.1.10/24"],"next-hops":["192.168.1.1"],"ip-address":"192.168.1.10/24","next-hop":"192.168.1.1","node-port-enable":"true"}}`,
 			},
 			{
 				name: "Shared",
@@ -51,12 +53,31 @@ var _ = Describe("Node annotation tests", func() {
 					ChassisID:      "SYSTEM-ID",
 					InterfaceID:    "INTERFACE-ID",
 					MACAddress:     ovntest.MustParseMAC("11:22:33:44:55:66"),
-					IPAddress:      ovntest.MustParseIPNet("192.168.1.10/24"),
-					NextHop:        ovntest.MustParseIP("192.168.1.1"),
+					IPAddresses:    []*net.IPNet{ovntest.MustParseIPNet("192.168.1.10/24")},
+					NextHops:       []net.IP{ovntest.MustParseIP("192.168.1.1")},
 					NodePortEnable: false,
 					VLANID:         &vlanid,
 				},
-				out: `{"default":{"mode":"shared","interface-id":"INTERFACE-ID","mac-address":"11:22:33:44:55:66","ip-address":"192.168.1.10/24","next-hop":"192.168.1.1","node-port-enable":"false","vlan-id":"1024"}}`,
+				out: `{"default":{"mode":"shared","interface-id":"INTERFACE-ID","mac-address":"11:22:33:44:55:66","ip-addresses":["192.168.1.10/24"],"next-hops":["192.168.1.1"],"ip-address":"192.168.1.10/24","next-hop":"192.168.1.1","node-port-enable":"false","vlan-id":"1024"}}`,
+			},
+			{
+				name: "Dual-stack",
+				in: &L3GatewayConfig{
+					Mode:        config.GatewayModeLocal,
+					ChassisID:   "SYSTEM-ID",
+					InterfaceID: "INTERFACE-ID",
+					MACAddress:  ovntest.MustParseMAC("11:22:33:44:55:66"),
+					IPAddresses: []*net.IPNet{
+						ovntest.MustParseIPNet("192.168.1.10/24"),
+						ovntest.MustParseIPNet("fd01::1234/64"),
+					},
+					NextHops: []net.IP{
+						ovntest.MustParseIP("192.168.1.1"),
+						ovntest.MustParseIP("fd01::1"),
+					},
+					NodePortEnable: true,
+				},
+				out: `{"default":{"mode":"local","interface-id":"INTERFACE-ID","mac-address":"11:22:33:44:55:66","ip-addresses":["192.168.1.10/24","fd01::1234/64"],"next-hops":["192.168.1.1","fd01::1"],"node-port-enable":"true"}}`,
 			},
 		}
 
@@ -86,6 +107,44 @@ var _ = Describe("Node annotation tests", func() {
 			l3gc, err := ParseNodeL3GatewayAnnotation(updatedNode)
 			Expect(err).NotTo(HaveOccurred())
 			Expect(l3gc).To(Equal(tc.in))
+		}
+	})
+
+	It("unmarshals legacy l3-gateway-config annotations", func() {
+		type testcase struct {
+			name string
+			in   string
+			out  *L3GatewayConfig
+		}
+
+		testcases := []testcase{
+			{
+				name: "Local (legacy)",
+				in:   `{"default":{"mode":"local","interface-id":"INTERFACE-ID","mac-address":"11:22:33:44:55:66","ip-address":"192.168.1.10/24","next-hop":"192.168.1.1","node-port-enable":"true"}}`,
+				out: &L3GatewayConfig{
+					Mode:           config.GatewayModeLocal,
+					ChassisID:      "SYSTEM-ID",
+					InterfaceID:    "INTERFACE-ID",
+					MACAddress:     ovntest.MustParseMAC("11:22:33:44:55:66"),
+					IPAddresses:    []*net.IPNet{ovntest.MustParseIPNet("192.168.1.10/24")},
+					NextHops:       []net.IP{ovntest.MustParseIP("192.168.1.1")},
+					NodePortEnable: true,
+				},
+			},
+		}
+
+		for _, tc := range testcases {
+			testNode := v1.Node{ObjectMeta: metav1.ObjectMeta{
+				Name: "test-node",
+				Annotations: map[string]string{
+					ovnNodeL3GatewayConfig: tc.in,
+					ovnNodeChassisID:       "SYSTEM-ID",
+				},
+			}}
+
+			l3gc, err := ParseNodeL3GatewayAnnotation(&testNode)
+			Expect(err).NotTo(HaveOccurred())
+			Expect(l3gc).To(Equal(tc.out))
 		}
 	})
 })

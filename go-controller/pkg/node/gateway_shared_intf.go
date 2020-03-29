@@ -344,8 +344,8 @@ func (n *OvnNode) initSharedGateway(subnet *net.IPNet, gwNextHop net.IP, gwIntf 
 		ChassisID:      chassisID,
 		InterfaceID:    ifaceID,
 		MACAddress:     macAddress,
-		IPAddress:      ipAddress,
-		NextHop:        gwNextHop,
+		IPAddresses:    []*net.IPNet{ipAddress},
+		NextHops:       []net.IP{gwNextHop},
 		NodePortEnable: config.Gateway.NodeportEnable,
 		VLANID:         &config.Gateway.VLANID,
 	})
