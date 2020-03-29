@@ -188,8 +188,8 @@ func initLocalnetGateway(nodeName string, subnet *net.IPNet, wf *factory.WatchFa
 		ChassisID:      chassisID,
 		InterfaceID:    ifaceID,
 		MACAddress:     macAddress,
-		IPAddress:      gatewayIPCIDR,
-		NextHop:        gatewayNextHop,
+		IPAddresses:    []*net.IPNet{gatewayIPCIDR},
+		NextHops:       []net.IP{gatewayNextHop},
 		NodePortEnable: config.Gateway.NodeportEnable,
 	})
 	if err != nil {
