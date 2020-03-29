@@ -89,6 +89,7 @@ ovsdb-raft () {
 
   local db=${1}
   local port=${2}
+  local raft_port=${3}
   local initialize="false"
 
   ovn_db_pidfile=${OVN_RUNDIR}/ovn${db}_db.pid
@@ -114,7 +115,9 @@ ovsdb-raft () {
   if [[ "${POD_NAME}" == "ovnkube-db-0" ]]; then
     run_as_ovs_user_if_needed \
       ${OVNCTL_PATH} run_${db}_ovsdb --no-monitor \
-      --db-${db}-cluster-local-addr=${local_ip} --ovn-${db}-log="${ovn_log_db}" &
+      --db-${db}-cluster-local-addr=${local_ip} \
+      --db-${db}-cluster-local-port=${raft_port} \
+      --ovn-${db}-log="${ovn_log_db}" &
   else
     # join the remote cluster node if the DB is not created
     if [[ "${initialize}" == "true" ]]; then
@@ -123,6 +126,7 @@ ovsdb-raft () {
     run_as_ovs_user_if_needed \
       ${OVNCTL_PATH} run_${db}_ovsdb --no-monitor \
       --db-${db}-cluster-local-addr=${local_ip} --db-${db}-cluster-remote-addr=${init_ip} \
+      --db-${db}-cluster-local-port=${raft_port} --db-${db}-cluster-remote-port=${raft_port} \
       --ovn-${db}-log="${ovn_log_db}" &
   fi
 
