@@ -524,7 +524,11 @@ func (oc *Controller) syncNodeGateway(node *kapi.Node, subnet *net.IPNet) error 
 	l3GatewayConfig, err := util.ParseNodeL3GatewayAnnotation(node)
 	if err != nil {
 		return err
+	} else if l3GatewayConfig == nil {
+		klog.V(5).Infof("L3 gateway config annotation not found for node %q", node.Name)
+		return nil
 	}
+
 	if subnet == nil {
 		subnet, _ = util.ParseNodeHostSubnetAnnotation(node)
 	}

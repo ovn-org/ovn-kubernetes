@@ -19,6 +19,7 @@ import (
 	"github.com/urfave/cli"
 	"gopkg.in/fsnotify/fsnotify.v1"
 
+	hocontroller "github.com/ovn-org/ovn-kubernetes/go-controller/hybrid-overlay/pkg/controller"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/factory"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/metrics"
@@ -94,13 +95,8 @@ func main() {
 	c.Usage = "run ovnkube to start master, node, and gateway services"
 	c.Version = config.Version
 	c.CustomAppHelpTemplate = CustomAppHelpTemplate
-	c.Flags = config.CommonFlags
-	c.Flags = append(c.Flags, config.CNIFlags...)
-	c.Flags = append(c.Flags, config.K8sFlags...)
-	c.Flags = append(c.Flags, config.OvnNBFlags...)
-	c.Flags = append(c.Flags, config.OvnSBFlags...)
-	c.Flags = append(c.Flags, config.OVNGatewayFlags...)
-	c.Flags = append(c.Flags, config.MasterHAFlags...)
+	c.Flags = config.GetFlags(nil)
+
 	c.Action = func(c *cli.Context) error {
 		return runOvnKube(c)
 	}
@@ -247,6 +243,12 @@ func runOvnKube(ctx *cli.Context) error {
 	// start the prometheus server
 	if config.Kubernetes.MetricsBindAddress != "" {
 		metrics.StartMetricsServer(config.Kubernetes.MetricsBindAddress, config.Kubernetes.MetricsEnablePprof)
+	}
+
+	if config.HybridOverlay.Enabled {
+		if err := hocontroller.StartHybridOverlay(master != "", node, clientset, factory); err != nil {
+			return err
+		}
 	}
 
 	// run forever

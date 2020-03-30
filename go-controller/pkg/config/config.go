@@ -93,6 +93,11 @@ var (
 		SbPort:                6642,
 	}
 
+	// HybridOverlay holds hybrid overlay feature config options.
+	HybridOverlay = HybridOverlayConfig{
+		RawClusterSubnets: "10.132.0.0/14/23",
+	}
+
 	// NbctlDaemon enables ovn-nbctl to run in daemon mode
 	NbctlDaemonMode bool
 
@@ -230,6 +235,19 @@ type MasterHAConfig struct {
 	SbPort                int  `gcfg:"port"`
 }
 
+// HybridOverlayConfig holds configuration for hybrid overlay
+// configuration.
+type HybridOverlayConfig struct {
+	// Enabled indicates whether hybrid overlay features are enabled or not.
+	Enabled bool `gcfg:"enabled"`
+	// RawClusterSubnets holds the unparsed hybrid overlay cluster subnets.
+	// Should only be used inside config module.
+	RawClusterSubnets string `gcfg:"cluster-subnets"`
+	// ClusterSubnets holds parsed hybrid overlay cluster subnet entries and
+	// may be used outside the config module.
+	ClusterSubnets []CIDRNetworkEntry
+}
+
 // OvnDBScheme describes the OVN database connection transport method
 type OvnDBScheme string
 
@@ -244,25 +262,27 @@ const (
 
 // Config is used to read the structured config file and to cache config in testcases
 type config struct {
-	Default    DefaultConfig
-	Logging    LoggingConfig
-	CNI        CNIConfig
-	Kubernetes KubernetesConfig
-	OvnNorth   OvnAuthConfig
-	OvnSouth   OvnAuthConfig
-	Gateway    GatewayConfig
-	MasterHA   MasterHAConfig
+	Default       DefaultConfig
+	Logging       LoggingConfig
+	CNI           CNIConfig
+	Kubernetes    KubernetesConfig
+	OvnNorth      OvnAuthConfig
+	OvnSouth      OvnAuthConfig
+	Gateway       GatewayConfig
+	MasterHA      MasterHAConfig
+	HybridOverlay HybridOverlayConfig
 }
 
 var (
-	savedDefault    DefaultConfig
-	savedLogging    LoggingConfig
-	savedCNI        CNIConfig
-	savedKubernetes KubernetesConfig
-	savedOvnNorth   OvnAuthConfig
-	savedOvnSouth   OvnAuthConfig
-	savedGateway    GatewayConfig
-	savedMasterHA   MasterHAConfig
+	savedDefault       DefaultConfig
+	savedLogging       LoggingConfig
+	savedCNI           CNIConfig
+	savedKubernetes    KubernetesConfig
+	savedOvnNorth      OvnAuthConfig
+	savedOvnSouth      OvnAuthConfig
+	savedGateway       GatewayConfig
+	savedMasterHA      MasterHAConfig
+	savedHybridOverlay HybridOverlayConfig
 	// legacy service-cluster-ip-range CLI option
 	serviceClusterIPRange string
 	// legacy cluster-subnet CLI option
@@ -283,6 +303,7 @@ func init() {
 	savedOvnSouth = OvnSouth
 	savedGateway = Gateway
 	savedMasterHA = MasterHA
+	savedHybridOverlay = HybridOverlay
 	Flags = append(Flags, CommonFlags...)
 	Flags = append(Flags, CNIFlags...)
 	Flags = append(Flags, K8sFlags...)
@@ -290,6 +311,7 @@ func init() {
 	Flags = append(Flags, OvnSBFlags...)
 	Flags = append(Flags, OVNGatewayFlags...)
 	Flags = append(Flags, MasterHAFlags...)
+	Flags = append(Flags, HybridOverlayFlags...)
 }
 
 // PrepareTestConfig restores default config values. Used by testcases to
@@ -303,6 +325,7 @@ func PrepareTestConfig() {
 	OvnSouth = savedOvnSouth
 	Gateway = savedGateway
 	MasterHA = savedMasterHA
+	HybridOverlay = savedHybridOverlay
 
 	// Don't pick up defaults from the environment
 	os.Unsetenv("KUBECONFIG")
@@ -725,9 +748,44 @@ var MasterHAFlags = []cli.Flag{
 	},
 }
 
+// HybridOverlayFlats capture hybrid overlay feature options
+var HybridOverlayFlags = []cli.Flag{
+	cli.BoolFlag{
+		Name:        "enable-hybrid-overlay",
+		Usage:       "Enables hybrid overlay functionality",
+		Destination: &cliConfig.HybridOverlay.Enabled,
+	},
+	cli.StringFlag{
+		Name:  "hybrid-overlay-cluster-subnets",
+		Value: HybridOverlay.RawClusterSubnets,
+		Usage: "A comma separated set of IP subnets and the associated" +
+			"hostsubnetlengths (eg, \"10.128.0.0/14/23,10.0.0.0/14/23\"). " +
+			"to use with the extended hybrid network. Each entry is given " +
+			"in the form IP address/subnet mask/hostsubnetlength, " +
+			"the hostsubnetlength is optional and if unspecified defaults to 24. The " +
+			"hostsubnetlength defines how many IP addresses are dedicated to each node.",
+		Destination: &cliConfig.HybridOverlay.RawClusterSubnets,
+	},
+}
+
 // Flags are general command-line flags. Apps should add these flags to their
 // own urfave/cli flags and call InitConfig() early in the application.
 var Flags []cli.Flag
+
+// GetFlags returns an array of all command-line flags necessary to configure
+// ovn-kubernetes
+func GetFlags(customFlags []cli.Flag) []cli.Flag {
+	flags := CommonFlags
+	flags = append(flags, CNIFlags...)
+	flags = append(flags, K8sFlags...)
+	flags = append(flags, OvnNBFlags...)
+	flags = append(flags, OvnSBFlags...)
+	flags = append(flags, OVNGatewayFlags...)
+	flags = append(flags, MasterHAFlags...)
+	flags = append(flags, HybridOverlayFlags...)
+	flags = append(flags, customFlags...)
+	return flags
+}
 
 // Defaults are a set of flags to indicate which options should be read from
 // ovs-vsctl and used as default values if option is not found via the config
@@ -974,6 +1032,28 @@ func buildMasterHAConfig(ctx *cli.Context, cli, file *config) error {
 	return nil
 }
 
+func buildHybridOverlayConfig(ctx *cli.Context, cli, file *config) error {
+	// Copy config file values over default values
+	if err := overrideFields(&HybridOverlay, &file.HybridOverlay, &savedHybridOverlay); err != nil {
+		return err
+	}
+
+	// And CLI overrides over config file and default values
+	if err := overrideFields(&HybridOverlay, &cli.HybridOverlay, &savedHybridOverlay); err != nil {
+		return err
+	}
+
+	if HybridOverlay.Enabled {
+		var err error
+		HybridOverlay.ClusterSubnets, err = ParseClusterSubnetEntries(HybridOverlay.RawClusterSubnets)
+		if err != nil {
+			return fmt.Errorf("hybrid overlay cluster subnet invalid: %v", err)
+		}
+	}
+
+	return nil
+}
+
 func buildDefaultConfig(cli, file *config) error {
 	if err := overrideFields(&Default, &file.Default, &savedDefault); err != nil {
 		return err
@@ -1058,14 +1138,15 @@ func initConfigWithPath(ctx *cli.Context, exec kexec.Interface, saPath string, d
 	var err error
 	// initialize cfg with default values, allow file read to override
 	cfg := config{
-		Default:    savedDefault,
-		Logging:    savedLogging,
-		CNI:        savedCNI,
-		Kubernetes: savedKubernetes,
-		OvnNorth:   savedOvnNorth,
-		OvnSouth:   savedOvnSouth,
-		Gateway:    savedGateway,
-		MasterHA:   savedMasterHA,
+		Default:       savedDefault,
+		Logging:       savedLogging,
+		CNI:           savedCNI,
+		Kubernetes:    savedKubernetes,
+		OvnNorth:      savedOvnNorth,
+		OvnSouth:      savedOvnSouth,
+		Gateway:       savedGateway,
+		MasterHA:      savedMasterHA,
+		HybridOverlay: savedHybridOverlay,
 	}
 
 	configFile, configFileIsDefault = getConfigFilePath(ctx)
@@ -1149,6 +1230,10 @@ func initConfigWithPath(ctx *cli.Context, exec kexec.Interface, saPath string, d
 		return "", err
 	}
 
+	if err = buildHybridOverlayConfig(ctx, &cliConfig, &cfg); err != nil {
+		return "", err
+	}
+
 	tmpAuth, err := buildOvnAuth(exec, true, &cliConfig.OvnNorth, &cfg.OvnNorth, defaults.OvnNorthAddress)
 	if err != nil {
 		return "", err
@@ -1167,6 +1252,7 @@ func initConfigWithPath(ctx *cli.Context, exec kexec.Interface, saPath string, d
 	klog.V(5).Infof("Kubernetes config: %+v", Kubernetes)
 	klog.V(5).Infof("OVN North config: %+v", OvnNorth)
 	klog.V(5).Infof("OVN South config: %+v", OvnSouth)
+	klog.V(5).Infof("Hybrid Overlay config: %+v", HybridOverlay)
 
 	return retConfigFile, nil
 }
