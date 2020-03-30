@@ -83,6 +83,41 @@ check_and_apply_ovnkube_db_ep () {
   fi
 }
 
+# election timer can only be at most doubled each time, and it can only be set on the leader
+set_election_timer () {
+  local election_timer=${1}
+  local current_election_timer
+
+  echo "setting election timer for ${database} to ${election_timer} ms"
+
+  current_election_timer=$(ovs-appctl -t ${OVN_RUNDIR}/ovn${db}_db.ctl cluster/status ${database} 2>/dev/null \
+    | grep "Election" | sed "s/.*:[[:space:]]//")
+  if [[ -z "${current_election_timer}" ]]; then
+    echo "Failed to get current election timer value. Exiting..."
+    exit 11
+  fi
+
+  while [[ ${current_election_timer} != ${election_timer} ]]; do
+    max_electinon_timer=$((${current_election_timer} * 2))
+    if [[ ${election_timer} -le ${max_electinon_timer} ]]; then
+      ovs-appctl -t ${OVN_RUNDIR}/ovn${db}_db.ctl cluster/change-election-timer ${database} ${election_timer}
+      if [[ $? != 0 ]]; then
+        echo "Failed to set election timer ${election_timer}. Exiting..."
+        exit 11
+      fi
+      return 0
+    else
+      ovs-appctl -t ${OVN_RUNDIR}/ovn${db}_db.ctl cluster/change-election-timer ${database} ${max_electinon_timer}
+      if [[ $? != 0 ]]; then
+        echo "Failed to set election timer ${max_election_timer}. Exiting..."
+        exit 11
+      fi
+      current_election_timer=${max_electinon_timer}
+    fi
+  done
+  return 0
+}
+
 # set_connection() will be called for ovnkube-db-0 pod when :
 #    1. it is first started or
 #    2. it restarts after the initial start has failed or
@@ -145,6 +180,7 @@ ovsdb-raft () {
   local db=${1}
   local port=${2}
   local raft_port=${3}
+  local election_timer=${4}
   local initialize="false"
 
   ovn_db_pidfile=${OVN_RUNDIR}/ovn${db}_db.pid
@@ -198,6 +234,10 @@ ovsdb-raft () {
   echo "=============== ${db}-ovsdb-raft ========== RUNNING"
 
   if [[ "${POD_NAME}" == "ovnkube-db-0" ]]; then
+    # set the election timer value before other servers join the cluster and it can
+    # only be set on the leader so we must do this in ovnkube-db-0 when it is still
+    # a single-node cluster
+    set_election_timer ${election_timer}
     if [[ ${db} == "nb" ]]; then
       set_northd_probe_interval
     fi
