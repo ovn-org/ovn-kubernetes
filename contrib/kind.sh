@@ -4,6 +4,14 @@ set -euxo pipefail
 
 K8S_VERSION=${K8S_VERSION:-v1.16.4}
 KIND_INSTALL_INGRESS=${KIND_INSTALL_INGRESS:-false}
+KIND_HA=${KIND_HA:-false}
+if [ "$KIND_HA" == true ]; then
+  DEFAULT_KIND_CONFIG=./kind-ha.yaml
+else
+  DEFAULT_KIND_CONFIG=./kind.yaml
+fi
+KIND_CONFIG=${KIND_CONFIG:-$DEFAULT_KIND_CONFIG}
+KIND_REMOVE_TAINT=${KIND_REMOVE_TAINT:-true}
 
 # Detect IP to use as API server
 API_IP=$(ip -4 addr | grep -oP '(?<=inet\s)\d+(\.\d+){3}' | grep -v "127.0.0.1" | head -n 1)
@@ -12,11 +20,11 @@ if [ -z "$API_IP" ]; then
   exit 1
 fi
 
-sed -i "s/apiServerAddress.*/apiServerAddress: ${API_IP}/" kind.yaml
+sed -i "s/apiServerAddress.*/apiServerAddress: ${API_IP}/" ${KIND_CONFIG}
 
 # Create KIND cluster
 CLUSTER_NAME=${CLUSTER_NAME:-ovn}
-kind create cluster --name ${CLUSTER_NAME} --kubeconfig ${HOME}/admin.conf --image kindest/node:${K8S_VERSION} --config=./kind.yaml
+kind create cluster --name ${CLUSTER_NAME} --kubeconfig ${HOME}/admin.conf --image kindest/node:${K8S_VERSION} --config=${KIND_CONFIG}
 export KUBECONFIG=${HOME}/admin.conf
 mkdir -p /tmp/kind
 sudo chmod 777 /tmp/kind
@@ -45,13 +53,25 @@ popd
 kind load docker-image ovn-daemonset-f:dev --name ${CLUSTER_NAME}
 pushd ../dist/yaml
 kubectl create -f ovn-setup.yaml
-kubectl create -f ovnkube-db.yaml
+CONTROL_NODES=$(docker ps -f name=ovn-control | grep -v NAMES | awk '{ print $NF }')
+for n in $CONTROL_NODES; do
+  kubectl label node $n k8s.ovn.org/ovnkube-db=true
+  if [ "$KIND_REMOVE_TAINT" == true ]; then
+    kubectl taint node $n node-role.kubernetes.io/master:NoSchedule-
+  fi
+done
+if [ "$KIND_HA" == true ]; then
+  kubectl create -f ovnkube-db-raft.yaml
+else
+  kubectl create -f ovnkube-db.yaml
+fi
 kubectl create -f ovnkube-master.yaml
 kubectl create -f ovnkube-node.yaml
 popd
 kubectl -n kube-system delete ds kube-proxy
 kind get clusters
 kind get nodes --name ${CLUSTER_NAME}
+kind export kubeconfig --name ovn
 if [ "$KIND_INSTALL_INGRESS" == true ]; then
   kubectl create -f https://raw.githubusercontent.com/kubernetes/ingress-nginx/master/deploy/static/mandatory.yaml
 fi
