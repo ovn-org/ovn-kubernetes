@@ -608,6 +608,8 @@ nb-ovsdb () {
   wait_for_event attempts=3 process_ready ovnnb_db
   echo "=============== nb-ovsdb ========== RUNNING"
 
+  # setting northd probe interval
+  set_northd_probe_interval
   ovn-nbctl set-connection ptcp:${ovn_nb_port}:${ovn_db_host} -- set connection . inactivity_probe=0
 
   tail --follow=name ${OVN_LOGDIR}/ovsdb-server-nb.log &

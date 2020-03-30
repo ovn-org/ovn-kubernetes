@@ -114,6 +114,30 @@ set_connection () {
   return 0
 }
 
+set_northd_probe_interval () {
+  # OVN_NORTHD_PROBE_INTERVAL - probe interval of northd for NB and SB DB
+  # connections in ms (default 5000)
+  northd_probe_interval=${OVN_NORTHD_PROBE_INTERVAL:-5000}
+
+  echo "setting northd probe interval to ${northd_probe_interval} ms"
+
+  # this call will fail on non-leader node since we are using unix socket and no --no-leader-only option.
+  output=$(ovn-nbctl --if-exists get NB_GLOBAL . options:northd_probe_interval)
+  if [[ $? == 0 ]]; then
+    output=$(echo ${output} | tr -d '\"')
+    echo "the current value of northd probe interval is ${output} ms"
+    if [[ "${output}" != "${northd_probe_interval}" ]]; then
+      ovn-nbctl set NB_GLOBAL . options:northd_probe_interval=${northd_probe_interval}
+      if [[ $? != 0 ]]; then
+        echo "Failed to set northd probe interval to ${northd_probe_interval}. Exiting....."
+        exit 13
+      fi
+      echo "successfully set northd probe interval to ${northd_probe_interval} ms"
+    fi
+  fi
+  return 0
+}
+
 # v3 - create nb_ovsdb/sb_ovsdb cluster in a separate container
 ovsdb-raft () {
   trap 'kill $(jobs -p); exit 0' TERM
@@ -132,6 +156,7 @@ ovsdb-raft () {
   fi
 
   rm -f ${ovn_db_pidfile}
+
   verify-ovsdb-raft
   local_ip=$(getent ahostsv4 $(hostname) | grep -v "^127\." | head -1 | awk '{ print $1 }')
   if [[ ${local_ip} == "" ]] ; then
@@ -173,6 +198,9 @@ ovsdb-raft () {
   echo "=============== ${db}-ovsdb-raft ========== RUNNING"
 
   if [[ "${POD_NAME}" == "ovnkube-db-0" ]]; then
+    if [[ ${db} == "nb" ]]; then
+      set_northd_probe_interval
+    fi
     # set the connection and disable inactivity probe, this deletes the old connection if any
     set_connection ${port}
   fi
