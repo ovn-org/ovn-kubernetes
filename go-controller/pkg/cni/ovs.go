@@ -2,14 +2,30 @@ package cni
 
 import (
 	"fmt"
-	"os/exec"
-	"strconv"
 	"strings"
+
+	kexec "k8s.io/utils/exec"
 )
 
+var runner kexec.Interface
+var vsctlPath string
+
+func setExec(r kexec.Interface) error {
+	runner = r
+	var err error
+	vsctlPath, err = r.LookPath("ovs-vsctl")
+	return err
+}
+
 func ovsExec(args ...string) (string, error) {
+	if runner == nil {
+		if err := setExec(kexec.New()); err != nil {
+			return "", err
+		}
+	}
+
 	args = append([]string{"--timeout=30"}, args...)
-	output, err := exec.Command("ovs-vsctl", args...).CombinedOutput()
+	output, err := runner.Command(vsctlPath, args...).CombinedOutput()
 	if err != nil {
 		return "", fmt.Errorf("failed to run 'ovs-vsctl %s': %v\n  %q", strings.Join(args, " "), err, string(output))
 	}
@@ -42,20 +58,11 @@ func ovsSet(table, record string, values ...string) error {
 
 // Returns the given column of records that match the condition
 func ovsFind(table, column, condition string) ([]string, error) {
-	output, err := ovsExec("--no-heading", "--columns="+column, "find", table, condition)
+	output, err := ovsExec("--no-heading", "--format=csv", "--data=bare", "--columns="+column, "find", table, condition)
 	if err != nil {
 		return nil, err
 	}
-	values := strings.Split(output, "\n\n")
-	// We want "bare" values for strings, but we can't pass --bare to ovs-vsctl because
-	// it breaks more complicated types. So try passing each value through Unquote();
-	// if it fails, that means the value wasn't a quoted string, so use it as-is.
-	for i, val := range values {
-		if unquoted, err := strconv.Unquote(val); err == nil {
-			values[i] = unquoted
-		}
-	}
-	return values, nil
+	return strings.Split(strings.TrimSpace(output), "\n"), nil
 }
 
 func ovsClear(table, record string, columns ...string) error {
