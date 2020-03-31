@@ -57,6 +57,10 @@ fi
 # OVN_LOG_NBCTLD - log level (ovn-ctl default: -vconsole:off -vfile:info)
 # OVN_NB_PORT - ovn north db port (default 6641)
 # OVN_SB_PORT - ovn south db port (default 6642)
+# OVN_NB_RAFT_PORT - ovn north db raft port (default 6643)
+# OVN_SB_RAFT_PORT - ovn south db raft port (default 6644)
+# OVN_NB_RAFT_ELECTION_TIMER - ovn north db election timer in ms (default 1000)
+# OVN_SB_RAFT_ELECTION_TIMER - ovn south db election timer in ms (default 1000)
 
 # The argument to the command is the operation to be performed
 # ovn-master ovn-controller ovn-node display display_env ovn_debug
@@ -127,8 +131,16 @@ ovn_db_host=$(getent ahostsv4 $(hostname) | grep -v "^127\." | head -1 | awk '{ 
 ovn_nb_port=${OVN_NB_PORT:-6641}
 # OVN_SB_PORT - ovn south db port (default 6642)
 ovn_sb_port=${OVN_SB_PORT:-6642}
+# OVN_NB_RAFT_PORT - ovn north db port used for raft communication (default 6643)
+ovn_nb_raft_port=${OVN_NB_RAFT_PORT:-6643}
+# OVN_SB_RAFT_PORT - ovn south db port used for raft communication (default 6644)
+ovn_sb_raft_port=${OVN_SB_RAFT_PORT:-6644}
 # OVN_ENCAP_PORT - GENEVE UDP port (default 6081)
 ovn_encap_port=${OVN_ENCAP_PORT:-6081}
+# OVN_NB_RAFT_ELECTION_TIMER - ovn north db election timer in ms (default 1000)
+ovn_nb_raft_election_timer=${OVN_NB_RAFT_ELECTION_TIMER:-1000}
+# OVN_SB_RAFT_ELECTION_TIMER - ovn south db election timer in ms (default 1000)
+ovn_sb_raft_election_timer=${OVN_SB_RAFT_ELECTION_TIMER:-1000}
 
 ovn_hybrid_overlay_enable=${OVN_HYBRID_OVERLAY_ENABLE:-}
 ovn_hybrid_overlay_net_cidr=${OVN_HYBRID_OVERLAY_NET_CIDR:-}
@@ -607,6 +619,8 @@ nb-ovsdb () {
   wait_for_event attempts=3 process_ready ovnnb_db
   echo "=============== nb-ovsdb ========== RUNNING"
 
+  # setting northd probe interval
+  set_northd_probe_interval
   ovn-nbctl set-connection ptcp:${ovn_nb_port}:${ovn_db_host} -- set connection . inactivity_probe=0
 
   tail --follow=name ${OVN_LOGDIR}/ovsdb-server-nb.log &
@@ -952,10 +966,10 @@ case ${cmd} in
 	  cleanup-ovn-node
     ;;
   "nb-ovsdb-raft")
-    ovsdb-raft nb ${ovn_nb_port}
+    ovsdb-raft nb ${ovn_nb_port} ${ovn_nb_raft_port} ${ovn_nb_raft_election_timer}
     ;;
   "sb-ovsdb-raft")
-    ovsdb-raft sb ${ovn_sb_port}
+    ovsdb-raft sb ${ovn_sb_port} ${ovn_sb_raft_port} ${ovn_sb_raft_election_timer}
     ;;
   "db-raft-metrics")
     db-raft-metrics
