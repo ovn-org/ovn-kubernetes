@@ -16,26 +16,20 @@ require (
 	github.com/gorilla/mux v1.7.3
 	github.com/hashicorp/golang-lru v0.5.3 // indirect
 	github.com/imdario/mergo v0.3.8 // indirect
-	github.com/json-iterator/go v1.1.8 // indirect
 	github.com/onsi/ginkgo v1.10.3
 	github.com/onsi/gomega v1.8.1
 	github.com/prometheus/client_golang v1.2.1
 	github.com/satori/go.uuid v0.0.0-20181028125025-b2ce2384e17b // indirect
-	github.com/spf13/pflag v1.0.5 // indirect
 	github.com/urfave/cli v1.22.1
 	github.com/vishvananda/netlink v0.0.0-20181108222139-023a6dafdcdf
-	golang.org/x/crypto v0.0.0-20190618222545-ea8f1a30c443 // indirect
-	golang.org/x/oauth2 v0.0.0-20190604053449-0f29369cfe45 // indirect
 	golang.org/x/time v0.0.0-20191024005414-555d28b269f0 // indirect
 	gopkg.in/fsnotify/fsnotify.v1 v1.4.7
 	gopkg.in/gcfg.v1 v1.2.3
-	gopkg.in/inf.v0 v0.9.1 // indirect
 	gopkg.in/natefinch/lumberjack.v2 v2.0.0
 	gopkg.in/warnings.v0 v0.1.2 // indirect
-	k8s.io/api v0.0.0-20190614205929-e4e27c96b39a
-	k8s.io/apimachinery v0.0.0-20190612125636-6a5db36e93ad
-	k8s.io/client-go v0.0.0-20190615005933-5759fedc8dc9
+	k8s.io/api v0.17.4
+	k8s.io/apimachinery v0.17.4
+	k8s.io/client-go v0.17.4
 	k8s.io/klog v1.0.0
-	k8s.io/kube-openapi v0.0.0-20191107075043-30be4d16710a // indirect
-	k8s.io/utils v0.0.0-20191030222137-2b95a09bc58d
+	k8s.io/utils v0.0.0-20191114184206-e782cd3c129f
 )
