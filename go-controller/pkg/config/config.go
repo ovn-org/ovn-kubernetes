@@ -89,9 +89,6 @@ var (
 		ElectionLeaseDuration: 60,
 		ElectionRenewDeadline: 30,
 		ElectionRetryPeriod:   20,
-		ManageDBServers:       false,
-		NbPort:                6641,
-		SbPort:                6642,
 	}
 
 	// HybridOverlay holds hybrid overlay feature config options.
@@ -178,7 +175,7 @@ type KubernetesConfig struct {
 	MetricsBindAddress   string `gcfg:"metrics-bind-address"`
 	MetricsEnablePprof   bool   `gcfg:"metrics-enable-pprof"`
 	OVNEmptyLbEvents     bool   `gcfg:"ovn-empty-lb-events"`
-	PodIP                string `gcfg:"pod-ip"`
+	PodIP                string `gcfg:"pod-ip"` // UNUSED
 	RawNoHostSubnetNodes string `gcfg:"no-hostsubnet-nodes"`
 	NoHostSubnetNodes    *metav1.LabelSelector
 }
@@ -228,12 +225,9 @@ type OvnAuthConfig struct {
 // MasterHAConfig holds configuration for master HA
 // configuration.
 type MasterHAConfig struct {
-	ElectionLeaseDuration int  `gcfg:"election-lease-duration"`
-	ElectionRenewDeadline int  `gcfg:"election-renew-deadline"`
-	ElectionRetryPeriod   int  `gcfg:"election-retry-period"`
-	ManageDBServers       bool `gcfg:"manage-db-servers"`
-	NbPort                int  `gcfg:"port"`
-	SbPort                int  `gcfg:"port"`
+	ElectionLeaseDuration int `gcfg:"election-lease-duration"`
+	ElectionRenewDeadline int `gcfg:"election-renew-deadline"`
+	ElectionRetryPeriod   int `gcfg:"election-retry-period"`
 }
 
 // HybridOverlayConfig holds configuration for hybrid overlay
@@ -592,9 +586,8 @@ var K8sFlags = []cli.Flag{
 		Destination: &cliConfig.Kubernetes.OVNEmptyLbEvents,
 	},
 	cli.StringFlag{
-		Name:        "pod-ip",
-		Usage:       "specify the ovnkube pod IP.",
-		Destination: &cliConfig.Kubernetes.PodIP,
+		Name:  "pod-ip",
+		Usage: "UNUSED",
 	},
 	cli.StringFlag{
 		Name:        "no-hostsubnet-nodes",
@@ -712,23 +705,6 @@ var OVNGatewayFlags = []cli.Flag{
 
 // MasterHAFlags capture OVN northbound database options
 var MasterHAFlags = []cli.Flag{
-	cli.BoolFlag{
-		Name:        "manage-db-servers",
-		Usage:       "Manages the OVN North and South DB servers in active/passive",
-		Destination: &cliConfig.MasterHA.ManageDBServers,
-	},
-	cli.IntFlag{
-		Name:        "nb-port",
-		Usage:       "Port of the OVN northbound DB server to configure (default: 6641)",
-		Destination: &cliConfig.MasterHA.NbPort,
-		Value:       MasterHA.NbPort,
-	},
-	cli.IntFlag{
-		Name:        "sb-port",
-		Usage:       "Port of the OVN southbound DB server to configure (default: 6642)",
-		Destination: &cliConfig.MasterHA.SbPort,
-		Value:       MasterHA.SbPort,
-	},
 	cli.IntFlag{
 		Name:        "ha-election-lease-duration",
 		Usage:       "Leader election lease duration (in secs) (default: 60)",
@@ -940,12 +916,6 @@ func buildKubernetesConfig(exec kexec.Interface, cli, file *config, saPath strin
 	err = overlapsWithJoinSubnet([]*net.IPNet{serviceIPNet})
 	if err != nil {
 		return err
-	}
-
-	if Kubernetes.PodIP != "" {
-		if ip := net.ParseIP(Kubernetes.PodIP); ip == nil {
-			return fmt.Errorf("Pod IP is invalid")
-		}
 	}
 
 	if Kubernetes.RawNoHostSubnetNodes != "" {
@@ -1352,31 +1322,12 @@ func buildOvnAuth(exec kexec.Interface, northbound bool, cliAuth, confAuth *OvnA
 		return nil, err
 	}
 
-	// When instructed to watch-endpoint, just set scheme and obtain address(es) from endpoint
-	if address == "watch-endpoint" {
-		if !MasterHA.ManageDBServers {
-			return nil, fmt.Errorf("watch-endpoint requires --manage-db-servers")
-		}
-		// Set scheme and wait for an endpoint update to provide address/port to use
-		if auth.PrivKey != "" || auth.Cert != "" || auth.CACert != "" {
-			auth.Scheme = OvnDBSchemeSSL
-		} else {
-			auth.Scheme = OvnDBSchemeTCP
-		}
-		return auth, nil
-	}
-
 	if address == "" {
 		if auth.PrivKey != "" || auth.Cert != "" || auth.CACert != "" {
 			return nil, fmt.Errorf("certificate or key given; perhaps you mean to use the 'ssl' scheme?")
 		}
 		auth.Scheme = OvnDBSchemeUnix
 		return auth, nil
-	} else if MasterHA.ManageDBServers {
-		if northbound {
-			return nil, fmt.Errorf("--nb-address is not allowed with --manage-db-servers")
-		}
-		return nil, fmt.Errorf("--sb-address is not allowed with --manage-db-servers")
 	}
 
 	var err error
