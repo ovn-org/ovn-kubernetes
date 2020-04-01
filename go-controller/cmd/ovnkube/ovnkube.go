@@ -177,6 +177,9 @@ func runOvnKube(ctx *cli.Context) error {
 		return err
 	}
 
+	//create a new ovndb client
+	util.InitOVNDBClient()
+
 	// create factory and start the controllers asked for
 	stopChan := make(chan struct{})
 	factory, err := factory.NewWatchFactory(clientset, stopChan)
