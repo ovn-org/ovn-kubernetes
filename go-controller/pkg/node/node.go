@@ -270,8 +270,13 @@ func (n *OvnNode) Start() error {
 		}
 	}
 
+	kclient, ok := n.Kube.(*kube.Kube)
+	if !ok {
+		return fmt.Errorf("Cannot get kubeclient for starting CNI server")
+	}
+
 	// start the cni server
-	cniServer := cni.NewCNIServer("")
+	cniServer := cni.NewCNIServer("", kclient.KClient)
 	err = cniServer.Start(cni.HandleCNIRequest)
 
 	return err
