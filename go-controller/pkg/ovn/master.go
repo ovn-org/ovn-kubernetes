@@ -1,20 +1,27 @@
 package ovn
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"net"
+	"os"
 	"reflect"
 	"strings"
+	"time"
 
 	kapi "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	utilruntime "k8s.io/apimachinery/pkg/util/runtime"
+	"k8s.io/client-go/kubernetes"
+	"k8s.io/client-go/tools/leaderelection"
+	"k8s.io/client-go/tools/leaderelection/resourcelock"
 	"k8s.io/client-go/util/retry"
 	"k8s.io/klog"
 	utilnet "k8s.io/utils/net"
 
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/metrics"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
 )
 
@@ -23,6 +30,69 @@ const (
 	// whose value indicates the time stamp in RFC3339 format when a Service was idled
 	OvnServiceIdledAt = "k8s.ovn.org/idled-at"
 )
+
+// Start waits until this process is the leader before starting master functions
+func (oc *Controller) Start(kClient kubernetes.Interface, nodeName string) error {
+	// Set up leader election process first
+	rl, err := resourcelock.New(
+		resourcelock.ConfigMapsResourceLock,
+		config.Kubernetes.OVNConfigNamespace,
+		"ovn-kubernetes-master",
+		kClient.CoreV1(),
+		nil,
+		resourcelock.ResourceLockConfig{Identity: nodeName},
+	)
+	if err != nil {
+		return err
+	}
+
+	lec := leaderelection.LeaderElectionConfig{
+		Lock:          rl,
+		LeaseDuration: time.Duration(config.MasterHA.ElectionLeaseDuration) * time.Second,
+		RenewDeadline: time.Duration(config.MasterHA.ElectionRenewDeadline) * time.Second,
+		RetryPeriod:   time.Duration(config.MasterHA.ElectionRetryPeriod) * time.Second,
+		Callbacks: leaderelection.LeaderCallbacks{
+			OnStartedLeading: func(ctx context.Context) {
+				klog.Infof("won leader election; in active mode")
+				// run the cluster controller to init the master
+				start := time.Now()
+				defer func() {
+					end := time.Since(start)
+					metrics.MetricMasterReadyDuration.Set(end.Seconds())
+				}()
+				if err := oc.StartClusterMaster(nodeName); err != nil {
+					panic(err.Error())
+				}
+				if err := oc.Run(oc.stopChan); err != nil {
+					panic(err.Error())
+				}
+			},
+			OnStoppedLeading: func() {
+				//This node was leader and it lost the election.
+				// Whenever the node transitions from leader to follower,
+				// we need to handle the transition properly like clearing
+				// the cache. It is better to exit for now.
+				// kube will restart and this will become a follower.
+				klog.Infof("no longer leader; exiting")
+				os.Exit(1)
+			},
+			OnNewLeader: func(newLeaderName string) {
+				if newLeaderName != nodeName {
+					klog.Infof("lost the election to %s; in standby mode", newLeaderName)
+				}
+			},
+		},
+	}
+
+	leaderElector, err := leaderelection.NewLeaderElector(lec)
+	if err != nil {
+		return err
+	}
+
+	go leaderElector.Run(context.Background())
+
+	return nil
+}
 
 // StartClusterMaster runs a subnet IPAM and a controller that watches arrival/departure
 // of nodes in the cluster

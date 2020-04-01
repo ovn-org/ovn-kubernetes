@@ -50,6 +50,7 @@ type loadBalancerConf struct {
 type Controller struct {
 	kube         kube.Interface
 	watchFactory *factory.WatchFactory
+	stopChan     <-chan struct{}
 
 	masterSubnetAllocator *allocator.SubnetAllocator
 	joinSubnetAllocator   *allocator.SubnetAllocator
@@ -139,6 +140,7 @@ func NewOvnController(kubeClient kubernetes.Interface, wf *factory.WatchFactory,
 	return &Controller{
 		kube:                     &kube.Kube{KClient: kubeClient},
 		watchFactory:             wf,
+		stopChan:                 stopChan,
 		masterSubnetAllocator:    allocator.NewSubnetAllocator(),
 		logicalSwitchCache:       make(map[string]*net.IPNet),
 		joinSubnetAllocator:      allocator.NewSubnetAllocator(),
@@ -163,7 +165,7 @@ func NewOvnController(kubeClient kubernetes.Interface, wf *factory.WatchFactory,
 }
 
 // Run starts the actual watching.
-func (oc *Controller) Run(stopChan chan struct{}) error {
+func (oc *Controller) Run(stopChan <-chan struct{}) error {
 	oc.syncPeriodic(stopChan)
 	// WatchNodes must be started first so that its initial Add will
 	// create all node logical switches, which other watches may depend on.
@@ -294,7 +296,7 @@ func extractEmptyLBBackendsEvents(out []byte) ([]emptyLBBackendEvent, error) {
 // right now there is only one ticker registered
 // for syncNodesPeriodic which deletes chassis records from the sbdb
 // every 5 minutes
-func (oc *Controller) syncPeriodic(stopChan chan struct{}) {
+func (oc *Controller) syncPeriodic(stopChan <-chan struct{}) {
 	go func() {
 		nodeSyncTicker := time.NewTicker(5 * time.Minute)
 		for {
@@ -309,7 +311,7 @@ func (oc *Controller) syncPeriodic(stopChan chan struct{}) {
 
 }
 
-func (oc *Controller) ovnControllerEventChecker(stopChan chan struct{}) {
+func (oc *Controller) ovnControllerEventChecker(stopChan <-chan struct{}) {
 	ticker := time.NewTicker(5 * time.Second)
 
 	_, _, err := util.RunOVNNbctl("set", "nb_global", ".", "options:controller_event=true")

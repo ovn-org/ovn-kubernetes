@@ -215,9 +215,8 @@ func runOvnKube(ctx *cli.Context) error {
 		}
 		// register prometheus metrics exported by the master
 		metrics.RegisterMasterMetrics()
-		// run the HA master controller to init the master
-		ovnHAController := ovn.NewHAMasterController(clientset, factory, master, stopChan)
-		if err := ovnHAController.StartHAMasterController(); err != nil {
+		ovnController := ovn.NewOvnController(clientset, factory, stopChan)
+		if err := ovnController.Start(clientset, master); err != nil {
 			return err
 		}
 	}

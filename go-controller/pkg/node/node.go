@@ -6,7 +6,6 @@ import (
 	"net"
 	"os"
 	"path/filepath"
-	"reflect"
 	"strconv"
 	"strings"
 	"time"
@@ -22,7 +21,6 @@ import (
 	kapi "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/util/wait"
 	"k8s.io/client-go/kubernetes"
-	"k8s.io/client-go/tools/cache"
 )
 
 // OvnNode is the object holder for utilities meant for node management
@@ -160,21 +158,9 @@ func (n *OvnNode) Start() error {
 		klog.Errorf("setting klog \"loglevel\" to 5 failed, err: %v", err)
 	}
 
-	if config.MasterHA.ManageDBServers {
-		var readyChan = make(chan bool, 1)
-
-		err = n.watchConfigEndpoints(readyChan)
-		if err != nil {
+	for _, auth := range []config.OvnAuthConfig{config.OvnNorth, config.OvnSouth} {
+		if err := auth.SetDBAuth(); err != nil {
 			return err
-		}
-		// Hold until we are certain that the endpoint has been setup.
-		// We risk polling an inactive master if we don't wait while a new leader election is on-going
-		<-readyChan
-	} else {
-		for _, auth := range []config.OvnAuthConfig{config.OvnNorth, config.OvnSouth} {
-			if err := auth.SetDBAuth(); err != nil {
-				return err
-			}
 		}
 	}
 
@@ -256,50 +242,5 @@ func (n *OvnNode) Start() error {
 	cniServer := cni.NewCNIServer("", kclient.KClient)
 	err = cniServer.Start(cni.HandleCNIRequest)
 
-	return err
-}
-
-func updateOVNConfig(ep *kapi.Endpoints, readyChan chan bool) error {
-	masterIPList, southboundDBPort, northboundDBPort, err := util.ExtractDbRemotesFromEndpoint(ep)
-	if err != nil {
-		return err
-	}
-
-	config.UpdateOVNNodeAuth(masterIPList, strconv.Itoa(int(southboundDBPort)), strconv.Itoa(int(northboundDBPort)))
-
-	for _, auth := range []config.OvnAuthConfig{config.OvnNorth, config.OvnSouth} {
-		if err := auth.SetDBAuth(); err != nil {
-			return err
-		}
-	}
-
-	klog.Infof("OVN databases reconfigured, masterIPs %v, northbound-db %v, southbound-db %v", masterIPList, northboundDBPort, southboundDBPort)
-
-	readyChan <- true
-	return nil
-}
-
-//watchConfigEndpoints starts the watching of Endpoint resource and calls back to the appropriate handler logic
-func (n *OvnNode) watchConfigEndpoints(readyChan chan bool) error {
-	_, err := n.watchFactory.AddFilteredEndpointsHandler(config.Kubernetes.OVNConfigNamespace, nil,
-		cache.ResourceEventHandlerFuncs{
-			AddFunc: func(obj interface{}) {
-				ep := obj.(*kapi.Endpoints)
-				if ep.Name == "ovnkube-db" {
-					if err := updateOVNConfig(ep, readyChan); err != nil {
-						klog.Errorf(err.Error())
-					}
-				}
-			},
-			UpdateFunc: func(old, new interface{}) {
-				epNew := new.(*kapi.Endpoints)
-				epOld := old.(*kapi.Endpoints)
-				if !reflect.DeepEqual(epNew.Subsets, epOld.Subsets) && epNew.Name == "ovnkube-db" {
-					if err := updateOVNConfig(epNew, readyChan); err != nil {
-						klog.Errorf(err.Error())
-					}
-				}
-			},
-		}, nil)
 	return err
 }
