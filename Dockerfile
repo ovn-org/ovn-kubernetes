@@ -11,12 +11,12 @@
 
 FROM openshift/origin-release:golang-1.12 AS builder
 
-WORKDIR /go-controller
-COPY go-controller/ .
+WORKDIR /go/src/github.com/openshift/ovn-kubernetes
+COPY . .
 
 # build the binaries
-RUN CGO_ENABLED=0 make
-RUN CGO_ENABLED=0 make windows
+RUN cd go-controller; CGO_ENABLED=0 make
+RUN cd go-controller; CGO_ENABLED=0 make windows
 
 FROM openshift/origin-cli AS cli
 
@@ -49,10 +49,10 @@ RUN mkdir -p /var/run/openvswitch && \
     mkdir -p /usr/libexec/cni/ && \
     mkdir -p /root/windows/
 
-COPY --from=builder /go-controller/_output/go/bin/ovnkube /usr/bin/
-COPY --from=builder /go-controller/_output/go/bin/ovn-kube-util /usr/bin/
-COPY --from=builder /go-controller/_output/go/bin/ovn-k8s-cni-overlay /usr/libexec/cni/ovn-k8s-cni-overlay
-COPY --from=builder /go-controller/_output/go/bin/windows/hybrid-overlay.exe /root/windows/
+COPY --from=builder /go/src/github.com/openshift/ovn-kubernetes/go-controller/_output/go/bin/ovnkube /usr/bin/
+COPY --from=builder /go/src/github.com/openshift/ovn-kubernetes/go-controller/_output/go/bin/ovn-kube-util /usr/bin/
+COPY --from=builder /go/src/github.com/openshift/ovn-kubernetes/go-controller/_output/go/bin/ovn-k8s-cni-overlay /usr/libexec/cni/
+COPY --from=builder /go/src/github.com/openshift/ovn-kubernetes/go-controller/_output/go/bin/windows/hybrid-overlay-node.exe /root/windows/
 
 COPY --from=cli /usr/bin/oc /usr/bin/
 RUN ln -s /usr/bin/oc /usr/bin/kubectl
