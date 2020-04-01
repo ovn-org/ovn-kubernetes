@@ -63,7 +63,7 @@ func (oc *Controller) Start(kClient kubernetes.Interface, nodeName string) error
 				if err := oc.StartClusterMaster(nodeName); err != nil {
 					panic(err.Error())
 				}
-				if err := oc.Run(oc.stopChan); err != nil {
+				if err := oc.Run(); err != nil {
 					panic(err.Error())
 				}
 			},
