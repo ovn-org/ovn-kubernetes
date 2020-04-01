@@ -165,8 +165,8 @@ func NewOvnController(kubeClient kubernetes.Interface, wf *factory.WatchFactory,
 }
 
 // Run starts the actual watching.
-func (oc *Controller) Run(stopChan <-chan struct{}) error {
-	oc.syncPeriodic(stopChan)
+func (oc *Controller) Run() error {
+	oc.syncPeriodic()
 	// WatchNodes must be started first so that its initial Add will
 	// create all node logical switches, which other watches may depend on.
 	// https://github.com/ovn-org/ovn-kubernetes/pull/859
@@ -182,7 +182,7 @@ func (oc *Controller) Run(stopChan <-chan struct{}) error {
 	}
 
 	if config.Kubernetes.OVNEmptyLbEvents {
-		go oc.ovnControllerEventChecker(stopChan)
+		go oc.ovnControllerEventChecker()
 	}
 
 	return nil
@@ -296,14 +296,14 @@ func extractEmptyLBBackendsEvents(out []byte) ([]emptyLBBackendEvent, error) {
 // right now there is only one ticker registered
 // for syncNodesPeriodic which deletes chassis records from the sbdb
 // every 5 minutes
-func (oc *Controller) syncPeriodic(stopChan <-chan struct{}) {
+func (oc *Controller) syncPeriodic() {
 	go func() {
 		nodeSyncTicker := time.NewTicker(5 * time.Minute)
 		for {
 			select {
 			case <-nodeSyncTicker.C:
 				oc.syncNodesPeriodic()
-			case <-stopChan:
+			case <-oc.stopChan:
 				return
 			}
 		}
@@ -311,7 +311,7 @@ func (oc *Controller) syncPeriodic(stopChan <-chan struct{}) {
 
 }
 
-func (oc *Controller) ovnControllerEventChecker(stopChan <-chan struct{}) {
+func (oc *Controller) ovnControllerEventChecker() {
 	ticker := time.NewTicker(5 * time.Second)
 
 	_, _, err := util.RunOVNNbctl("set", "nb_global", ".", "options:controller_event=true")
@@ -354,7 +354,7 @@ func (oc *Controller) ovnControllerEventChecker(stopChan <-chan struct{}) {
 					recorder.Eventf(&serviceRef, kapi.EventTypeNormal, "NeedPods", "The service %s needs pods", serviceName.Name)
 				}
 			}
-		case <-stopChan:
+		case <-oc.stopChan:
 			return
 		}
 	}
