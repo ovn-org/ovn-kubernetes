@@ -29,7 +29,6 @@ type FakeOVN struct {
 func NewFakeOVN(fexec *ovntest.FakeExec) *FakeOVN {
 	err := util.SetExec(fexec)
 	Expect(err).NotTo(HaveOccurred())
-
 	return &FakeOVN{
 		fakeExec: fexec,
 	}
@@ -40,6 +39,9 @@ func (o *FakeOVN) start(ctx *cli.Context, objects ...runtime.Object) {
 	Expect(err).NotTo(HaveOccurred())
 
 	o.fakeClient = fake.NewSimpleClientset(objects...)
+	err = util.InitOVNDBClients()
+	Expect(err).NotTo(HaveOccurred())
+
 	o.init()
 }
 

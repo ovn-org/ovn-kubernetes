@@ -177,8 +177,10 @@ func runOvnKube(ctx *cli.Context) error {
 		return err
 	}
 
-	//create a new ovndb client
-	util.InitOVNDBClient()
+	//create new ovndb clients
+	if err = util.InitOVNDBClients(); err != nil {
+		return err
+	}
 
 	// create factory and start the controllers asked for
 	stopChan := make(chan struct{})

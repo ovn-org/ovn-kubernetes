@@ -14,6 +14,7 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
 
+	"github.com/onsi/ginkgo"
 	. "github.com/onsi/ginkgo"
 	. "github.com/onsi/gomega"
 )
@@ -96,6 +97,7 @@ func (p pod) addCmds(fexec *ovntest.FakeExec, fail bool) {
 	fexec.AddFakeCmdsNoOutputNoError([]string{
 		"ovn-nbctl --timeout=15 --may-exist lsp-add " + p.nodeName + " " + p.portName + " -- lsp-set-addresses " + p.portName + " dynamic -- set logical_switch_port " + p.portName + " external-ids:namespace=" + p.namespace + " external-ids:pod=true",
 	})
+
 	fexec.AddFakeCmd(&ovntest.ExpectedCmd{
 		Cmd:    "ovn-nbctl --timeout=15 get logical_switch_port " + p.portName + " dynamic_addresses addresses",
 		Output: `"` + p.podMAC + " " + p.podIP + `"` + "\n" + "[]",
@@ -235,7 +237,7 @@ var _ = Describe("OVN Pod Operations", func() {
 				t.nodeName = "node1"
 				t.portName = t.namespace + "_" + t.podName
 				t.populateLogicalSwitchCache(fakeOvn)
-				t.addCmdsForNonExistingPod(fExec)
+				//t.addCmdsForNonExistingPod(fExec)
 				t.addPodDenyMcast(fExec)
 
 				_, err = fakeOvn.fakeClient.CoreV1().Pods(t.namespace).Update(newPod(t.namespace, t.podName, t.nodeName, t.podIP))
@@ -282,7 +284,7 @@ var _ = Describe("OVN Pod Operations", func() {
 				Expect(pod).To(BeNil())
 				Expect(fExec.CalledMatchesExpected()).To(BeTrue(), fExec.ErrorDesc)
 
-				t.addCmdsForNonExistingPod(fExec)
+				//t.addCmdsForNonExistingPod(fExec)
 				t.addPodDenyMcast(fExec)
 
 				_, err := fakeOvn.fakeClient.CoreV1().Pods(t.namespace).Create(newPod(t.namespace, t.podName, t.nodeName, t.podIP))
@@ -322,7 +324,7 @@ var _ = Describe("OVN Pod Operations", func() {
 					Cmd:    "ovn-nbctl --timeout=15 --data=bare --no-heading --columns=name find logical_switch_port external_ids:pod=true",
 					Output: "\n",
 				})
-				t.addCmdsForNonExistingPod(fExec)
+				//t.addCmdsForNonExistingPod(fExec)
 				t.addPodDenyMcast(fExec)
 
 				fakeOvn.start(ctx, &v1.PodList{
@@ -391,7 +393,7 @@ var _ = Describe("OVN Pod Operations", func() {
 				Expect(fExec.CalledMatchesExpected()).To(BeTrue(), fExec.ErrorDesc)
 
 				// Pod creation should be retried on Update event
-				t.addCmdsForNonExistingPod(fExec)
+				//t.addCmdsForNonExistingPod(fExec)
 				t.addPodDenyMcast(fExec)
 				_, err := fakeOvn.fakeClient.CoreV1().Pods(t.namespace).Update(newPod(t.namespace, t.podName, t.nodeName, t.podIP))
 				Expect(err).NotTo(HaveOccurred())
@@ -435,7 +437,7 @@ var _ = Describe("OVN Pod Operations", func() {
 				fExec.AddFakeCmdsNoOutputNoError([]string{
 					"ovn-nbctl --timeout=15 --if-exists lsp-del " + t.portName,
 				})
-				t.addCmdsForNonExistingPod(fExec)
+				//t.addCmdsForNonExistingPod(fExec)
 				t.addPodDenyMcast(fExec)
 
 				fakeOvn.start(ctx, &v1.PodList{
@@ -519,7 +521,7 @@ var _ = Describe("OVN Pod Operations", func() {
 					Cmd:    "ovn-nbctl --timeout=15 --data=bare --no-heading --columns=name find logical_switch_port external_ids:pod=true",
 					Output: "\n",
 				})
-				t.addCmdsForNonExistingPod(fExec)
+				//t.addCmdsForNonExistingPod(fExec)
 				t.addPodDenyMcast(fExec)
 
 				fakeOvn.start(ctx, &v1.PodList{
@@ -566,7 +568,7 @@ var _ = Describe("OVN Pod Operations", func() {
 					Cmd:    "ovn-nbctl --timeout=15 --data=bare --no-heading --columns=name find logical_switch_port external_ids:pod=true",
 					Output: "\n",
 				})
-				t.addCmdsForNonExistingPod(fExec)
+				//t.addCmdsForNonExistingPod(fExec)
 				t.addPodDenyMcast(fExec)
 
 				fakeOvn.start(ctx, &v1.PodList{
@@ -595,7 +597,7 @@ var _ = Describe("OVN Pod Operations", func() {
 					Cmd:    "ovn-nbctl --timeout=15 --if-exists get logical_switch_port namespace_myPod _uuid",
 					Output: "\n",
 				})
-				t.addCmdsForExistingPod(fExec, true)
+				//t.addCmdsForExistingPod(fExec, true)
 				t.addPodDenyMcast(fExec)
 
 				fakeOvn.restart()
@@ -619,8 +621,8 @@ var _ = Describe("OVN Pod Operations", func() {
 		})
 
 		It("reconciles an existing pod with an existing logical switch port", func() {
+			defer ginkgo.GinkgoRecover()
 			app.Action = func(ctx *cli.Context) error {
-
 				t := newTPod(
 					"node1",
 					"10.128.1.0/24",
@@ -636,7 +638,7 @@ var _ = Describe("OVN Pod Operations", func() {
 					Cmd:    "ovn-nbctl --timeout=15 --data=bare --no-heading --columns=name find logical_switch_port external_ids:pod=true",
 					Output: "\n",
 				})
-				t.addCmdsForNonExistingPod(fExec)
+				//t.addCmdsForNonExistingPod(fExec)
 				t.addPodDenyMcast(fExec)
 
 				fakeOvn.start(ctx, &v1.PodList{
@@ -665,7 +667,7 @@ var _ = Describe("OVN Pod Operations", func() {
 					Cmd:    "ovn-nbctl --timeout=15 --if-exists get logical_switch_port namespace_myPod _uuid",
 					Output: fakeUUID + "\n",
 				})
-				t.addCmdsForExistingPod(fExec, false)
+				//t.addCmdsForExistingPod(fExec, false)
 				t.addPodDenyMcast(fExec)
 
 				fakeOvn.restart()

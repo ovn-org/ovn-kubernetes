@@ -6,9 +6,11 @@ require (
 	github.com/Mellanox/sriovnet v0.0.0-20190516174650-73402dc8fcaa
 	github.com/Microsoft/hcsshim v0.8.7-0.20190909204626-e6890e6c30eb
 	github.com/bhendo/go-powershell v0.0.0-20190719160123-219e7fb4e41e
+	github.com/cenk/hub v1.0.1 // indirect
 	github.com/containernetworking/cni v0.7.1
 	github.com/containernetworking/plugins v0.8.2
 	github.com/coreos/go-iptables v0.4.3
+	github.com/ebay/go-ovn v0.1.0
 	github.com/evanphx/json-patch v4.5.0+incompatible // indirect
 	github.com/gogo/protobuf v1.3.1 // indirect
 	github.com/golang/groupcache v0.0.0-20191027212112-611e8accdfc9 // indirect
@@ -33,3 +35,5 @@ require (
 	k8s.io/klog v1.0.0
 	k8s.io/utils v0.0.0-20191114184206-e782cd3c129f
 )
+
+replace github.com/ebay/go-ovn v0.1.0 => github.com/ebay/go-ovn v0.0.0-20200330151330-20be128
