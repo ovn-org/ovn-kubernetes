@@ -46,7 +46,7 @@ metadata:
   namespace: ovn-kubernetes
   annotations:
     kubernetes.io/description: |
-      This statefulset launches the OVN NB/SB ovsdb components.
+      This statefulset launches the OVN Northbound/Southbound Database raft clusters.
 spec:
   serviceName: ovnkube-db
   podManagementPolicy: "Parallel"
