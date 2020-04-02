@@ -11,7 +11,9 @@ import (
 	"github.com/coreos/go-iptables/iptables"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
+
 	"k8s.io/klog"
+	utilnet "k8s.io/utils/net"
 )
 
 const (
@@ -80,10 +82,10 @@ func addMgtPortIptRules(ifname, interfaceIP string) error {
 	}
 	var ipt util.IPTablesHelper
 	var err error
-	if ip.To4() != nil {
-		ipt, err = util.GetIPTablesHelper(iptables.ProtocolIPv4)
-	} else {
+	if utilnet.IsIPv6(ip) {
 		ipt, err = util.GetIPTablesHelper(iptables.ProtocolIPv6)
+	} else {
+		ipt, err = util.GetIPTablesHelper(iptables.ProtocolIPv4)
 	}
 	if err != nil {
 		return err

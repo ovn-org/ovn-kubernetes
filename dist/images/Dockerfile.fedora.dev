@@ -29,13 +29,12 @@ USER root
 
 ENV PYTHONDONTWRITEBYTECODE yes
 
-ARG KERNEL_VERSION=5.5.8-200.fc31.x86_64
+ARG KERNEL_VERSION
 ARG OVN_BRANCH=master
 ARG OVS_BRANCH=master
 
 #Install tools that is required for building ovs/ovn
 
-#        dnf install "kernel-devel-uname-r == 5.5.8-200.fc31.x86_64" -y && \
 RUN dnf upgrade -y && dnf install --best --refresh -y --setopt=tsflags=nodocs \
 	PyYAML bind-utils procps-ng openssl numactl-libs firewalld-filesystem \
         libpcap hostname kubernetes-client \
@@ -56,8 +55,9 @@ RUN dnf builddep /tmp/ovs.spec -y
 RUN rm -f /tmp/ovs.spec
 
 #Build OVS binaries and install
+RUN echo "Building OVS with kernel version : " $KERNEL_VERSION
 RUN ./boot.sh
-RUN ./configure --prefix=/usr --localstatedir=/var --sysconfdir=/etc --enable-ssl --with-linux=/usr/src/kernels/5.5.8-200.fc31.x86_64/
+RUN ./configure --prefix=/usr --localstatedir=/var --sysconfdir=/etc --enable-ssl --with-linux=/usr/src/kernels/$KERNEL_VERSION/
 RUN make && make install
 RUN ovs-vsctl --version && ovs-ofctl --version
 

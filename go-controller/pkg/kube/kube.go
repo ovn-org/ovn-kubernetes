@@ -22,7 +22,6 @@ type Interface interface {
 	GetNode(name string) (*kapi.Node, error)
 	GetEndpoint(namespace, name string) (*kapi.Endpoints, error)
 	CreateEndpoint(namespace string, ep *kapi.Endpoints) (*kapi.Endpoints, error)
-	UpdateEndpoint(namespace string, ep *kapi.Endpoints) (*kapi.Endpoints, error)
 	Events() kv1core.EventInterface
 }
 
@@ -121,11 +120,6 @@ func (k *Kube) GetEndpoint(namespace, name string) (*kapi.Endpoints, error) {
 // CreateEndpoint creates the Endpoints resource
 func (k *Kube) CreateEndpoint(namespace string, ep *kapi.Endpoints) (*kapi.Endpoints, error) {
 	return k.KClient.CoreV1().Endpoints(namespace).Create(ep)
-}
-
-// UpdateEndpoint updates the Endpoints resource
-func (k *Kube) UpdateEndpoint(namespace string, ep *kapi.Endpoints) (*kapi.Endpoints, error) {
-	return k.KClient.CoreV1().Endpoints(namespace).Update(ep)
 }
 
 // Events returns events to use when creating an EventSinkImpl

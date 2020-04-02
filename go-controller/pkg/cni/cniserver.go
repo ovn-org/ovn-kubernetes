@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/gorilla/mux"
+	"k8s.io/client-go/kubernetes"
 	"k8s.io/klog"
 
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
@@ -41,7 +42,7 @@ import (
 // started.
 
 // NewCNIServer creates and returns a new Server object which will listen on a socket in the given path
-func NewCNIServer(rundir string) *Server {
+func NewCNIServer(rundir string, kclient kubernetes.Interface) *Server {
 	if len(rundir) == 0 {
 		rundir = serverRunDir
 	}
@@ -51,7 +52,8 @@ func NewCNIServer(rundir string) *Server {
 		Server: http.Server{
 			Handler: router,
 		},
-		rundir: rundir,
+		rundir:  rundir,
+		kclient: kclient,
 	}
 	router.NotFoundHandler = http.HandlerFunc(http.NotFound)
 	router.HandleFunc("/", s.handleCNIRequest).Methods("POST")
@@ -144,7 +146,7 @@ func (s *Server) handleCNIRequest(w http.ResponseWriter, r *http.Request) {
 	}
 
 	klog.Infof("Waiting for %s result for pod %s/%s", req.Command, req.PodNamespace, req.PodName)
-	result, err := s.requestFunc(req)
+	result, err := s.requestFunc(req, s.kclient)
 	hasErr := "false"
 	if err != nil {
 		hasErr = "true"

@@ -15,6 +15,8 @@ import (
 	"strings"
 	"testing"
 
+	"k8s.io/client-go/kubernetes"
+	"k8s.io/client-go/kubernetes/fake"
 	utiltesting "k8s.io/client-go/util/testing"
 
 	cnitypes "github.com/containernetworking/cni/pkg/types"
@@ -43,7 +45,7 @@ func clientDoCNI(t *testing.T, client *http.Client, req *Request) ([]byte, int) 
 
 var expectedResult cnitypes.Result
 
-func serverHandleCNI(request *PodRequest) ([]byte, error) {
+func serverHandleCNI(request *PodRequest, kclient kubernetes.Interface) ([]byte, error) {
 	if request.Command == CNIAdd {
 		return json.Marshal(&expectedResult)
 	} else if request.Command == CNIDel {
@@ -61,8 +63,8 @@ func TestCNIServer(t *testing.T) {
 	}
 	defer os.RemoveAll(tmpDir)
 	socketPath := filepath.Join(tmpDir, serverSocketName)
-
-	s := NewCNIServer(tmpDir)
+	fakeClient := fake.NewSimpleClientset()
+	s := NewCNIServer(tmpDir, fakeClient)
 	if err := s.Start(serverHandleCNI); err != nil {
 		t.Fatalf("error starting CNI server: %v", err)
 	}

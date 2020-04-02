@@ -962,31 +962,6 @@ mode=shared
 			Expect(err).NotTo(HaveOccurred())
 			Expect(fexec.CalledMatchesExpected()).To(BeTrue(), fexec.ErrorDesc)
 		})
-
-		It("configures client northbound and southbound Scheme correctly when watch-endpoint specified", func() {
-
-			fexec := ovntest.NewFakeExec()
-
-			cliConfig := &OvnAuthConfig{
-				Address: "watch-endpoint",
-				PrivKey: keyFile,
-				Cert:    certFile,
-				CACert:  caFile,
-			}
-			MasterHA.ManageDBServers = true
-
-			a, err := buildOvnAuth(fexec, false, cliConfig, &OvnAuthConfig{}, false)
-			Expect(err).NotTo(HaveOccurred())
-			Expect(a.Scheme).To(Equal(OvnDBSchemeSSL))
-			Expect(a.PrivKey).To(Equal(keyFile))
-			Expect(a.Cert).To(Equal(certFile))
-			Expect(a.CACert).To(Equal(caFile))
-			Expect(a.Address).To(Equal("watch-endpoint"))
-			Expect(a.northbound).To(BeFalse())
-			Expect(a.externalID).To(Equal("ovn-remote"))
-
-			Expect(fexec.CalledMatchesExpected()).To(BeTrue(), fexec.ErrorDesc)
-		})
 	})
 
 	// This testcase factory function exists only to ensure that 'runType'

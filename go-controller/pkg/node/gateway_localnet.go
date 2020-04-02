@@ -4,7 +4,6 @@ package node
 
 import (
 	"fmt"
-	"k8s.io/client-go/tools/cache"
 	"net"
 	"reflect"
 	"strings"
@@ -17,15 +16,19 @@ import (
 	"k8s.io/klog"
 
 	kapi "k8s.io/api/core/v1"
+	"k8s.io/client-go/tools/cache"
+	utilnet "k8s.io/utils/net"
 )
 
 const (
-	v4localnetGatewayIP            = "169.254.33.2/24"
-	v4localnetGatewayNextHop       = "169.254.33.1"
-	v4localnetGatewayNextHopSubnet = "169.254.33.1/24"
-	v6localnetGatewayIP            = "fd99::2/64"
-	v6localnetGatewayNextHop       = "fd99::1"
-	v6localnetGatewayNextHopSubnet = "fd99::1/64"
+	v4localnetGatewayIP           = "169.254.33.2"
+	v4localnetGatewayNextHop      = "169.254.33.1"
+	v4localnetGatewaySubnetPrefix = "/24"
+
+	v6localnetGatewayIP           = "fd99::2"
+	v6localnetGatewayNextHop      = "fd99::1"
+	v6localnetGatewaySubnetPrefix = "/64"
+
 	// localnetGatewayNextHopPort is the name of the gateway port on the host to which all
 	// the packets leaving the OVN logical topology will be forwarded
 	localnetGatewayNextHopPort       = "ovn-k8s-gw0"
@@ -40,27 +43,6 @@ type iptRule struct {
 	table string
 	chain string
 	args  []string
-}
-
-func localnetGatewayIP() string {
-	if config.IPv6Mode {
-		return v6localnetGatewayIP
-	}
-	return v4localnetGatewayIP
-}
-
-func localnetGatewayNextHop() string {
-	if config.IPv6Mode {
-		return v6localnetGatewayNextHop
-	}
-	return v4localnetGatewayNextHop
-}
-
-func localnetGatewayNextHopSubnet() string {
-	if config.IPv6Mode {
-		return v6localnetGatewayNextHopSubnet
-	}
-	return v4localnetGatewayNextHopSubnet
 }
 
 func ensureChain(ipt util.IPTablesHelper, table, chain string) error {
@@ -140,11 +122,6 @@ func localnetGatewayNAT(ipt util.IPTablesHelper, ifname, ip string) error {
 }
 
 func initLocalnetGateway(nodeName string, subnet string, wf *factory.WatchFactory, nodeAnnotator kube.Annotator) error {
-	ipt, err := localnetIPTablesHelper()
-	if err != nil {
-		return err
-	}
-
 	// Create a localnet OVS bridge.
 	localnetBridgeName := "br-local"
 	_, stderr, err := util.RunOVSVsctl("--may-exist", "add-br",
@@ -179,45 +156,76 @@ func initLocalnetGateway(nodeName string, subnet string, wf *factory.WatchFactor
 		return err
 	}
 
+	var gatewayIP, gatewayNextHop, gatewaySubnetPrefix string
+	if utilnet.IsIPv6CIDRString(subnet) {
+		gatewayIP = v6localnetGatewayIP
+		gatewayNextHop = v6localnetGatewayNextHop
+		gatewaySubnetPrefix = v6localnetGatewaySubnetPrefix
+	} else {
+		gatewayIP = v4localnetGatewayIP
+		gatewayNextHop = v4localnetGatewayNextHop
+		gatewaySubnetPrefix = v4localnetGatewaySubnetPrefix
+	}
+
 	// Flush any addresses on localnetBridgeNextHopPort and add the new IP address.
 	if err = util.LinkAddrFlush(link); err == nil {
-		err = util.LinkAddrAdd(link, localnetGatewayNextHopSubnet())
+		err = util.LinkAddrAdd(link, gatewayNextHop+gatewaySubnetPrefix)
 	}
 	if err != nil {
 		return err
 	}
 
 	err = util.SetLocalL3GatewayConfig(nodeAnnotator, ifaceID, macAddress,
-		localnetGatewayIP(), localnetGatewayNextHop(),
+		gatewayIP+gatewaySubnetPrefix, gatewayNextHop,
 		config.Gateway.NodeportEnable)
 	if err != nil {
 		return err
 	}
 
-	if config.IPv6Mode {
+	if utilnet.IsIPv6CIDRString(subnet) {
 		// TODO - IPv6 hack ... for some reason neighbor discovery isn't working here, so hard code a
 		// MAC binding for the gateway IP address for now - need to debug this further
-		err = util.LinkNeighAdd(link, "fd99::2", macAddress)
+		err = util.LinkNeighAdd(link, gatewayIP, macAddress)
 		if err == nil {
-			klog.Infof("Added MAC binding for fd99::2 on %s", localnetGatewayNextHopPort)
+			klog.Infof("Added MAC binding for %s on %s", gatewayIP, localnetGatewayNextHopPort)
 		} else {
-			klog.Errorf("Error in adding MAC binding for fd99::2 on %s: %v", localnetGatewayNextHopPort, err)
+			klog.Errorf("Error in adding MAC binding for %s on %s: %v", gatewayIP, localnetGatewayNextHopPort, err)
 		}
 	}
 
-	err = localnetGatewayNAT(ipt, localnetGatewayNextHopPort, localnetGatewayIP())
+	ipt, err := localnetIPTablesHelper(subnet)
+	if err != nil {
+		return err
+	}
+
+	err = localnetGatewayNAT(ipt, localnetGatewayNextHopPort, gatewayIP)
 	if err != nil {
 		return fmt.Errorf("Failed to add NAT rules for localnet gateway (%v)", err)
 	}
 
 	if config.Gateway.NodeportEnable {
-		err = localnetNodePortWatcher(ipt, wf)
+		err = localnetNodePortWatcher(ipt, wf, gatewayIP)
 	}
 
 	return err
 }
 
-func localnetIptRules(svc *kapi.Service) []iptRule {
+// localnetIPTablesHelper gets an IPTablesHelper for IPv4 or IPv6 as appropriate
+func localnetIPTablesHelper(subnet string) (util.IPTablesHelper, error) {
+	var ipt util.IPTablesHelper
+	var err error
+	if utilnet.IsIPv6CIDRString(subnet) {
+		ipt, err = util.GetIPTablesHelper(iptables.ProtocolIPv6)
+	} else {
+		ipt, err = util.GetIPTablesHelper(iptables.ProtocolIPv4)
+	}
+	if err != nil {
+		return nil, fmt.Errorf("failed to initialize iptables: %v", err)
+	}
+	return ipt, nil
+}
+
+func localnetIptRules(svc *kapi.Service, gatewayIP string) []iptRule {
 	rules := make([]iptRule, 0)
 	for _, svcPort := range svc.Spec.Ports {
 		protocol := svcPort.Protocol
@@ -226,7 +234,7 @@ func localnetIptRules(svc *kapi.Service) []iptRule {
 		}
 
 		nodePort := fmt.Sprintf("%d", svcPort.NodePort)
-		destination := net.JoinHostPort(strings.Split(localnetGatewayIP(), "/")[0], nodePort)
+		destination := net.JoinHostPort(gatewayIP, nodePort)
 
 		rules = append(rules, iptRule{
 			table: "nat",
@@ -273,50 +281,31 @@ func localnetIptRules(svc *kapi.Service) []iptRule {
 	return rules
 }
 
-// localnetIPTablesHelper gets an IPTablesHelper for IPv4 or IPv6 as appropriate
-func localnetIPTablesHelper() (util.IPTablesHelper, error) {
-	var ipt util.IPTablesHelper
-	var err error
-	if config.IPv6Mode {
-		ipt, err = util.GetIPTablesHelper(iptables.ProtocolIPv6)
-	} else {
-		ipt, err = util.GetIPTablesHelper(iptables.ProtocolIPv4)
-	}
-	if err != nil {
-		return nil, fmt.Errorf("failed to initialize iptables: %v", err)
-	}
-	return ipt, nil
+type localnetNodePortWatcherData struct {
+	ipt       util.IPTablesHelper
+	gatewayIP string
 }
 
-// AddService adds service and creates corresponding resources in OVN
-func localnetAddService(svc *kapi.Service) error {
+func (npw *localnetNodePortWatcherData) addService(svc *kapi.Service) error {
 	if !util.ServiceTypeHasNodePort(svc) {
 		return nil
 	}
-	ipt, err := localnetIPTablesHelper()
-	if err != nil {
-		return err
-	}
-	rules := localnetIptRules(svc)
+	rules := localnetIptRules(svc, npw.gatewayIP)
 	klog.V(5).Infof("Add rules %v for service %v", rules, svc.Name)
-	return addIptRules(ipt, rules)
+	return addIptRules(npw.ipt, rules)
 }
 
-func localnetDeleteService(svc *kapi.Service) error {
+func (npw *localnetNodePortWatcherData) deleteService(svc *kapi.Service) error {
 	if !util.ServiceTypeHasNodePort(svc) {
 		return nil
 	}
-	ipt, err := localnetIPTablesHelper()
-	if err != nil {
-		return err
-	}
-	rules := localnetIptRules(svc)
+	rules := localnetIptRules(svc, npw.gatewayIP)
 	klog.V(5).Infof("Delete rules %v for service %v", rules, svc.Name)
-	delIptRules(ipt, rules)
+	delIptRules(npw.ipt, rules)
 	return nil
 }
 
-func localnetNodePortWatcher(ipt util.IPTablesHelper, wf *factory.WatchFactory) error {
+func localnetNodePortWatcher(ipt util.IPTablesHelper, wf *factory.WatchFactory, gatewayIP string) error {
 	// delete all the existing OVN-NODEPORT rules
 	// TODO: Add a localnetSyncService method to remove the stale entries only
 	_ = ipt.ClearChain("nat", iptableNodePortChain)
@@ -343,10 +332,11 @@ func localnetNodePortWatcher(ipt util.IPTablesHelper, wf *factory.WatchFactory) 
 		return err
 	}
 
+	npw := &localnetNodePortWatcherData{ipt: ipt, gatewayIP: gatewayIP}
 	_, err := wf.AddServiceHandler(cache.ResourceEventHandlerFuncs{
 		AddFunc: func(obj interface{}) {
 			svc := obj.(*kapi.Service)
-			err := localnetAddService(svc)
+			err := npw.addService(svc)
 			if err != nil {
 				klog.Errorf("Error in adding service: %v", err)
 			}
@@ -358,18 +348,18 @@ func localnetNodePortWatcher(ipt util.IPTablesHelper, wf *factory.WatchFactory) 
 				reflect.DeepEqual(svcNew.Status, svcOld.Status) {
 				return
 			}
-			err := localnetDeleteService(svcOld)
+			err := npw.deleteService(svcOld)
 			if err != nil {
 				klog.Errorf("Error in deleting service - %v", err)
 			}
-			err = localnetAddService(svcNew)
+			err = npw.addService(svcNew)
 			if err != nil {
 				klog.Errorf("Error in modifying service: %v", err)
 			}
 		},
 		DeleteFunc: func(obj interface{}) {
 			svc := obj.(*kapi.Service)
-			err := localnetDeleteService(svc)
+			err := npw.deleteService(svc)
 			if err != nil {
 				klog.Errorf("Error in deleting service - %v", err)
 			}

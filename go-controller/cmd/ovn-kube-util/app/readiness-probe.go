@@ -147,7 +147,7 @@ func ovnNBDBRaftReadiness(target string) error {
 		return err
 	}
 	if !status.Connected {
-		return fmt.Errorf("this instance of ovsdb-server is not in contact with a majority of its cluster")
+		return fmt.Errorf("ovsdb-server managing OVN_Northbound is not in contact with a majority of its cluster")
 	}
 	return nil
 }
@@ -158,7 +158,7 @@ func ovnSBDBRaftReadiness(target string) error {
 		return err
 	}
 	if !status.Connected {
-		return fmt.Errorf("this instance of ovsdb-server is not in contact with a majority of its cluster")
+		return fmt.Errorf("ovsdb-server managing OVN_Southbound is not in contact with a majority of its cluster")
 	}
 	return nil
 }

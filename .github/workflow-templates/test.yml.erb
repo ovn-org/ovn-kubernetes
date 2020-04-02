@@ -11,6 +11,10 @@ jobs:
     name: Build
     runs-on: ubuntu-latest
     steps:
+    - &step_cleanup
+      name: Free up disk space
+      run: sudo eatmydata apt-get remove --auto-remove -y aspnetcore-* dotnet-* libmono-* mono-* msbuild php-* php7* ghc-* zulu-*
+
     - &step_gosetup
       name: Set up Go 1.12
       uses: actions/setup-go@v1
@@ -63,6 +67,7 @@ jobs:
     name: Verify
     runs-on: ubuntu-latest
     steps:
+    - *step_cleanup
     - *step_gosetup
     - *step_checkout
     - *step_environment
@@ -111,6 +116,7 @@ jobs:
     env:
       JOB_NAME: "e2e-shard-n"
     steps:
+    - *step_cleanup
     - *step_gosetup
     - *step_checkout
     - *step_environment
@@ -128,7 +134,7 @@ jobs:
         chmod +x $GOPATH/bin/kubetest
 
         pushd $GOPATH/src/k8s.io/kubernetes/
-        sudo cp ./_output/local/go/bin/kubectl /usr/local/bin/
+        sudo ln ./_output/local/go/bin/kubectl /usr/local/bin/kubectl
         popd
         
         GO111MODULE="on" go get sigs.k8s.io/kind@v0.7.0
@@ -169,6 +175,7 @@ jobs:
     env:
       JOB_NAME: "e2e-shard-np"
     steps:
+    - *step_cleanup
     - *step_gosetup
     - *step_checkout
     - *step_environment
@@ -197,6 +204,7 @@ jobs:
     env:
       JOB_NAME: "e2e-shard-s"
     steps:
+    - *step_cleanup
     - *step_gosetup
     - *step_checkout
     - *step_environment
@@ -224,6 +232,7 @@ jobs:
     env:
       JOB_NAME: "e2e-shard-other"
     steps:
+    - *step_cleanup
     - *step_gosetup
     - *step_checkout
     - *step_environment
@@ -251,6 +260,7 @@ jobs:
     env:
       JOB_NAME: "e2e-control-plane"
     steps:
+    - *step_cleanup
     - *step_gosetup
     - *step_checkout
     - *step_environment

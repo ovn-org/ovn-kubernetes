@@ -50,6 +50,7 @@ type loadBalancerConf struct {
 type Controller struct {
 	kube         kube.Interface
 	watchFactory *factory.WatchFactory
+	stopChan     <-chan struct{}
 
 	masterSubnetAllocator *allocator.SubnetAllocator
 	joinSubnetAllocator   *allocator.SubnetAllocator
@@ -139,6 +140,7 @@ func NewOvnController(kubeClient kubernetes.Interface, wf *factory.WatchFactory,
 	return &Controller{
 		kube:                     &kube.Kube{KClient: kubeClient},
 		watchFactory:             wf,
+		stopChan:                 stopChan,
 		masterSubnetAllocator:    allocator.NewSubnetAllocator(),
 		logicalSwitchCache:       make(map[string]*net.IPNet),
 		joinSubnetAllocator:      allocator.NewSubnetAllocator(),
@@ -163,8 +165,8 @@ func NewOvnController(kubeClient kubernetes.Interface, wf *factory.WatchFactory,
 }
 
 // Run starts the actual watching.
-func (oc *Controller) Run(stopChan chan struct{}) error {
-	oc.syncPeriodic(stopChan)
+func (oc *Controller) Run() error {
+	oc.syncPeriodic()
 	// WatchNodes must be started first so that its initial Add will
 	// create all node logical switches, which other watches may depend on.
 	// https://github.com/ovn-org/ovn-kubernetes/pull/859
@@ -180,7 +182,7 @@ func (oc *Controller) Run(stopChan chan struct{}) error {
 	}
 
 	if config.Kubernetes.OVNEmptyLbEvents {
-		go oc.ovnControllerEventChecker(stopChan)
+		go oc.ovnControllerEventChecker()
 	}
 
 	return nil
@@ -294,14 +296,14 @@ func extractEmptyLBBackendsEvents(out []byte) ([]emptyLBBackendEvent, error) {
 // right now there is only one ticker registered
 // for syncNodesPeriodic which deletes chassis records from the sbdb
 // every 5 minutes
-func (oc *Controller) syncPeriodic(stopChan chan struct{}) {
+func (oc *Controller) syncPeriodic() {
 	go func() {
 		nodeSyncTicker := time.NewTicker(5 * time.Minute)
 		for {
 			select {
 			case <-nodeSyncTicker.C:
 				oc.syncNodesPeriodic()
-			case <-stopChan:
+			case <-oc.stopChan:
 				return
 			}
 		}
@@ -309,7 +311,7 @@ func (oc *Controller) syncPeriodic(stopChan chan struct{}) {
 
 }
 
-func (oc *Controller) ovnControllerEventChecker(stopChan chan struct{}) {
+func (oc *Controller) ovnControllerEventChecker() {
 	ticker := time.NewTicker(5 * time.Second)
 
 	_, _, err := util.RunOVNNbctl("set", "nb_global", ".", "options:controller_event=true")
@@ -352,7 +354,7 @@ func (oc *Controller) ovnControllerEventChecker(stopChan chan struct{}) {
 					recorder.Eventf(&serviceRef, kapi.EventTypeNormal, "NeedPods", "The service %s needs pods", serviceName.Name)
 				}
 			}
-		case <-stopChan:
+		case <-oc.stopChan:
 			return
 		}
 	}
@@ -524,9 +526,6 @@ func (oc *Controller) syncNodeGateway(node *kapi.Node, subnet *net.IPNet) error 
 	l3GatewayConfig, err := util.ParseNodeL3GatewayAnnotation(node)
 	if err != nil {
 		return err
-	} else if l3GatewayConfig == nil {
-		klog.V(5).Infof("L3 gateway config annotation not found for node %q", node.Name)
-		return nil
 	}
 
 	if subnet == nil {
