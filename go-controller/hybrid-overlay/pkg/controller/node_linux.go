@@ -406,7 +406,7 @@ func (n *NodeController) ensureHybridOverlayBridge() error {
 	if err != nil {
 		return err
 	}
-	stdout, stderr, err := util.RunOVSVsctl("set", "bridge", extBridgeName, "other-config:hwaddr="+macAddress)
+	stdout, stderr, err := util.RunOVSVsctl("set", "bridge", extBridgeName, "other-config:hwaddr="+macAddress.String())
 	if err != nil {
 		return fmt.Errorf("Failed to set bridge, stdout: %q, stderr: %q, "+
 			"error: %v", stdout, stderr, err)

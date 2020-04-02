@@ -125,7 +125,7 @@ func (m *MasterController) handleOverlayPort(node *kapi.Node, annotator kube.Ann
 			portIP = util.NextIP(second)
 		}
 		if portMAC == nil {
-			portMAC, _ = net.ParseMAC(util.IPAddrToHWAddr(portIP))
+			portMAC = util.IPAddrToHWAddr(portIP)
 		}
 
 		klog.Infof("creating node %s hybrid overlay port", node.Name)

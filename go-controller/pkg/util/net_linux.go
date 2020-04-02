@@ -3,10 +3,10 @@
 package util
 
 import (
+	"bytes"
 	"fmt"
 	"net"
 	"os"
-	"strings"
 
 	"github.com/vishvananda/netlink"
 
@@ -159,14 +159,10 @@ func LinkRouteExists(link netlink.Link, gwIPstr, subnet string) (bool, error) {
 }
 
 // LinkNeighAdd adds MAC/IP bindings for the given link
-func LinkNeighAdd(link netlink.Link, neighIPstr, neighMacstr string) error {
+func LinkNeighAdd(link netlink.Link, neighIPstr string, neighMAC net.HardwareAddr) error {
 	neighIP := net.ParseIP(neighIPstr)
 	if neighIP == nil {
 		return fmt.Errorf("neighbour IP %s is not a valid IPv4 or IPv6 address", neighIPstr)
-	}
-	hwAddr, err := net.ParseMAC(neighMacstr)
-	if err != nil {
-		return fmt.Errorf("neighbour MAC address %s is not valid: %v", neighMacstr, err)
 	}
 
 	family := netlink.FAMILY_V4
@@ -178,9 +174,9 @@ func LinkNeighAdd(link netlink.Link, neighIPstr, neighMacstr string) error {
 		Family:       family,
 		State:        netlink.NUD_PERMANENT,
 		IP:           neighIP,
-		HardwareAddr: hwAddr,
+		HardwareAddr: neighMAC,
 	}
-	err = netlink.NeighSet(neigh)
+	err := netlink.NeighSet(neigh)
 	if err != nil {
 		return fmt.Errorf("failed to add neighbour entry %+v: %v", neigh, err)
 	}
@@ -188,7 +184,7 @@ func LinkNeighAdd(link netlink.Link, neighIPstr, neighMacstr string) error {
 }
 
 // LinkNeighExists checks to see if the given MAC/IP bindings exists
-func LinkNeighExists(link netlink.Link, neighIPstr, neighMacstr string) (bool, error) {
+func LinkNeighExists(link netlink.Link, neighIPstr string, neighMAC net.HardwareAddr) (bool, error) {
 	neighIP := net.ParseIP(neighIPstr)
 	if neighIP == nil {
 		return false, fmt.Errorf("neighbour IP %s is not a valid IPv4 or IPv6 address",
@@ -208,7 +204,7 @@ func LinkNeighExists(link netlink.Link, neighIPstr, neighMacstr string) (bool, e
 
 	for _, neigh := range neighs {
 		if neigh.IP.String() == neighIPstr {
-			if neigh.HardwareAddr.String() == strings.ToLower(neighMacstr) &&
+			if bytes.Equal(neigh.HardwareAddr, neighMAC) &&
 				(neigh.State&netlink.NUD_PERMANENT) == netlink.NUD_PERMANENT {
 				return true, nil
 			}

@@ -15,7 +15,7 @@ func (n *OvnNode) createManagementPort(localSubnet *net.IPNet, nodeAnnotator kub
 	waiter *startupWaiter) error {
 	// Retrieve the routerIP and mangementPortIP for a given localSubnet
 	routerIP, portIP := util.GetNodeWellKnownAddresses(localSubnet)
-	routerMac := util.IPAddrToHWAddr(routerIP.IP)
+	routerMAC := util.IPAddrToHWAddr(routerIP.IP)
 
 	// Kubernetes emits events when pods are created. The event will contain
 	// only lowercase letters of the hostname even though the kubelet is
@@ -54,20 +54,20 @@ func (n *OvnNode) createManagementPort(localSubnet *net.IPNet, nodeAnnotator kub
 	}
 	// persist the MAC address so that upon node reboot we get back the same mac address.
 	_, stderr, err = util.RunOVSVsctl("set", "interface", util.K8sMgmtIntfName,
-		fmt.Sprintf("mac=%s", strings.ReplaceAll(macAddress, ":", "\\:")))
+		fmt.Sprintf("mac=%s", strings.ReplaceAll(macAddress.String(), ":", "\\:")))
 	if err != nil {
-		klog.Errorf("failed to persist MAC address %q for %q: stderr:%s (%v)", macAddress,
+		klog.Errorf("failed to persist MAC address %q for %q: stderr:%s (%v)", macAddress.String(),
 			util.K8sMgmtIntfName, stderr, err)
 		return err
 	}
 
 	err = createPlatformManagementPort(util.K8sMgmtIntfName, portIP.String(), routerIP.IP.String(),
-		routerMac, n.stopChan)
+		routerMAC, n.stopChan)
 	if err != nil {
 		return err
 	}
 
-	if err := util.SetNodeManagementPortMacAddr(nodeAnnotator, macAddress); err != nil {
+	if err := util.SetNodeManagementPortMACAddress(nodeAnnotator, macAddress); err != nil {
 		return err
 	}
 
