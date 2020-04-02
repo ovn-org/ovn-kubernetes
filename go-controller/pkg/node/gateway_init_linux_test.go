@@ -5,7 +5,6 @@ package node
 import (
 	"bytes"
 	"fmt"
-	"net"
 	"syscall"
 
 	"github.com/urfave/cli"
@@ -81,14 +80,11 @@ func shareGatewayInterfaceTest(app *cli.App, testNS ns.NetNS,
 				return testNS.Do(func(ns.NetNS) error {
 					defer GinkgoRecover()
 
-					hwaddr, err := net.ParseMAC(eth0MAC)
-					Expect(err).NotTo(HaveOccurred())
-
 					// Create breth0 as a dummy link
-					err = netlink.LinkAdd(&netlink.Dummy{
+					err := netlink.LinkAdd(&netlink.Dummy{
 						LinkAttrs: netlink.LinkAttrs{
 							Name:         "br" + eth0Name,
-							HardwareAddr: hwaddr,
+							HardwareAddr: ovntest.MustParseMAC(eth0MAC),
 						},
 					})
 					Expect(err).NotTo(HaveOccurred())
@@ -444,15 +440,11 @@ var _ = Describe("Gateway Init Operations", func() {
 				eth0MAC = l.Attrs().HardwareAddr.String()
 
 				// And a default route
-				_, ipn, err := net.ParseCIDR("0.0.0.0/0")
-				Expect(err).NotTo(HaveOccurred())
-				gw := net.ParseIP(eth0GWIP)
-				Expect(err).NotTo(HaveOccurred())
 				err = netlink.RouteAdd(&netlink.Route{
 					LinkIndex: l.Attrs().Index,
 					Scope:     netlink.SCOPE_UNIVERSE,
-					Dst:       ipn,
-					Gw:        gw,
+					Dst:       ovntest.MustParseIPNet("0.0.0.0/0"),
+					Gw:        ovntest.MustParseIP(eth0GWIP),
 				})
 				Expect(err).NotTo(HaveOccurred())
 

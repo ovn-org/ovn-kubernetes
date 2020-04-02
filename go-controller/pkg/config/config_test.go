@@ -3,7 +3,6 @@ package config
 import (
 	"fmt"
 	"io/ioutil"
-	"net"
 	"os"
 	"path/filepath"
 	"strings"
@@ -193,14 +192,6 @@ cluster-subnets=11.132.0.0/14/23
 	return ioutil.WriteFile(path, []byte(newData), 0644)
 }
 
-func mustParseCIDR(cidr string) *net.IPNet {
-	_, net, err := net.ParseCIDR(cidr)
-	if err != nil {
-		panic("bad CIDR string constant " + cidr)
-	}
-	return net
-}
-
 var _ = Describe("Config Operations", func() {
 	var app *cli.App
 	var cfgFile *os.File
@@ -248,7 +239,7 @@ var _ = Describe("Config Operations", func() {
 			Expect(Kubernetes.RawServiceCIDRs).To(Equal("172.16.1.0/24"))
 			Expect(Kubernetes.RawNoHostSubnetNodes).To(Equal(""))
 			Expect(Default.ClusterSubnets).To(Equal([]CIDRNetworkEntry{
-				{mustParseCIDR("10.128.0.0/14"), 23},
+				{ovntest.MustParseIPNet("10.128.0.0/14"), 23},
 			}))
 			Expect(IPv4Mode).To(Equal(true))
 			Expect(IPv6Mode).To(Equal(false))
@@ -482,7 +473,7 @@ var _ = Describe("Config Operations", func() {
 			Expect(Kubernetes.APIServer).To(Equal("https://1.2.3.4:6443"))
 			Expect(Kubernetes.RawServiceCIDRs).To(Equal("172.18.0.0/24"))
 			Expect(Default.ClusterSubnets).To(Equal([]CIDRNetworkEntry{
-				{mustParseCIDR("10.132.0.0/14"), 23},
+				{ovntest.MustParseIPNet("10.132.0.0/14"), 23},
 			}))
 
 			Expect(OvnNorth.Scheme).To(Equal(OvnDBSchemeSSL))
@@ -505,7 +496,7 @@ var _ = Describe("Config Operations", func() {
 
 			Expect(HybridOverlay.Enabled).To(BeTrue())
 			Expect(HybridOverlay.ClusterSubnets).To(Equal([]CIDRNetworkEntry{
-				{mustParseCIDR("11.132.0.0/14"), 23},
+				{ovntest.MustParseIPNet("11.132.0.0/14"), 23},
 			}))
 
 			return nil
@@ -545,7 +536,7 @@ var _ = Describe("Config Operations", func() {
 			Expect(Kubernetes.RawServiceCIDRs).To(Equal("172.15.0.0/24"))
 			Expect(Kubernetes.RawNoHostSubnetNodes).To(Equal("test=pass"))
 			Expect(Default.ClusterSubnets).To(Equal([]CIDRNetworkEntry{
-				{mustParseCIDR("10.130.0.0/15"), 24},
+				{ovntest.MustParseIPNet("10.130.0.0/15"), 24},
 			}))
 
 			Expect(OvnNorth.Scheme).To(Equal(OvnDBSchemeSSL))
@@ -565,7 +556,7 @@ var _ = Describe("Config Operations", func() {
 
 			Expect(HybridOverlay.Enabled).To(BeTrue())
 			Expect(HybridOverlay.ClusterSubnets).To(Equal([]CIDRNetworkEntry{
-				{mustParseCIDR("11.132.0.0/14"), 23},
+				{ovntest.MustParseIPNet("11.132.0.0/14"), 23},
 			}))
 			return nil
 		}
@@ -673,7 +664,7 @@ cluster-subnets=172.18.0.0/23
 			Expect(err).NotTo(HaveOccurred())
 			Expect(cfgPath).To(Equal(cfgFile.Name()))
 			Expect(Default.ClusterSubnets).To(Equal([]CIDRNetworkEntry{
-				{mustParseCIDR("172.15.0.0/23"), 24},
+				{ovntest.MustParseIPNet("172.15.0.0/23"), 24},
 			}))
 			Expect(IPv4Mode).To(Equal(true))
 			Expect(IPv6Mode).To(Equal(false))
@@ -874,7 +865,7 @@ mode=shared
 			Expect(Default.ConntrackZone).To(Equal(64321))
 			Expect(Default.RawClusterSubnets).To(Equal("10.132.0.0/14/23"))
 			Expect(Default.ClusterSubnets).To(Equal([]CIDRNetworkEntry{
-				{mustParseCIDR("10.132.0.0/14"), 23},
+				{ovntest.MustParseIPNet("10.132.0.0/14"), 23},
 			}))
 			Expect(Logging.File).To(Equal("/var/log/ovnkube.log"))
 			Expect(Logging.Level).To(Equal(5))

@@ -1,11 +1,10 @@
 package util
 
 import (
-	"net"
-
 	"github.com/urfave/cli"
 
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
+	ovntest "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/testing"
 
 	. "github.com/onsi/ginkgo"
 	. "github.com/onsi/gomega"
@@ -45,7 +44,7 @@ var _ = Describe("Util tests", func() {
 		}
 
 		for _, tc := range testcases {
-			ip := net.ParseIP(tc.IP)
+			ip := ovntest.MustParseIP(tc.IP)
 			mac := IPAddrToHWAddr(ip)
 			Expect(mac).To(Equal(tc.expectedMAC), " test case \"%s\" returned %s instead of %s from IP %s", tc.name, mac, tc.expectedMAC, ip.String())
 		}
