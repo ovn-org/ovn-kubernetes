@@ -309,12 +309,12 @@ func (oc *Controller) deleteNodeJoinSubnet(nodeName string, subnet *net.IPNet) e
 }
 
 func (oc *Controller) syncNodeManagementPort(node *kapi.Node, subnet *net.IPNet) error {
-	macAddress, err := util.ParseNodeManagementPortMacAddr(node)
+	macAddress, err := util.ParseNodeManagementPortMACAddress(node)
 	if err != nil {
 		return err
 	}
 
-	if macAddress == "" {
+	if macAddress == nil {
 		// When macAddress was removed, delete the switch port
 		stdout, stderr, err := util.RunOVNNbctl("--", "--if-exists", "lsp-del", "k8s-"+node.Name)
 		if err != nil {
@@ -336,7 +336,7 @@ func (oc *Controller) syncNodeManagementPort(node *kapi.Node, subnet *net.IPNet)
 	// Create this node's management logical port on the node switch
 	stdout, stderr, err := util.RunOVNNbctl(
 		"--", "--may-exist", "lsp-add", node.Name, "k8s-"+node.Name,
-		"--", "lsp-set-addresses", "k8s-"+node.Name, macAddress+" "+portIP.IP.String())
+		"--", "lsp-set-addresses", "k8s-"+node.Name, macAddress.String()+" "+portIP.IP.String())
 	if err != nil {
 		klog.Errorf("Failed to add logical port to switch, stdout: %q, stderr: %q, error: %v", stdout, stderr, err)
 		return err
@@ -420,12 +420,12 @@ func addStaticRouteToHost(node *kapi.Node, nicIP string) error {
 
 func (oc *Controller) ensureNodeLogicalNetwork(nodeName string, hostsubnet *net.IPNet) error {
 	firstIP, secondIP := util.GetNodeWellKnownAddresses(hostsubnet)
-	nodeLRPMac := util.IPAddrToHWAddr(firstIP.IP)
+	nodeLRPMAC := util.IPAddrToHWAddr(firstIP.IP)
 	clusterRouter := util.GetK8sClusterRouter()
 
 	// Create a router port and provide it the first address on the node's host subnet
 	_, stderr, err := util.RunOVNNbctl("--may-exist", "lrp-add", clusterRouter, "rtos-"+nodeName,
-		nodeLRPMac, firstIP.String())
+		nodeLRPMAC.String(), firstIP.String())
 	if err != nil {
 		klog.Errorf("Failed to add logical port to router, stderr: %q, error: %v", stderr, err)
 		return err
@@ -473,7 +473,7 @@ func (oc *Controller) ensureNodeLogicalNetwork(nodeName string, hostsubnet *net.
 		if !utilnet.IsIPv6(firstIP.IP) {
 			stdout, stderr, err = util.RunOVNNbctl("set", "logical_switch",
 				nodeName, "other-config:mcast_querier=\"true\"",
-				"other-config:mcast_eth_src=\""+nodeLRPMac+"\"",
+				"other-config:mcast_eth_src=\""+nodeLRPMAC.String()+"\"",
 				"other-config:mcast_ip4_src=\""+firstIP.IP.String()+"\"")
 			if err != nil {
 				klog.Errorf("Failed to enable IGMP Querier on logical switch %v, stdout: %q, stderr: %q, error: %v",
@@ -495,7 +495,7 @@ func (oc *Controller) ensureNodeLogicalNetwork(nodeName string, hostsubnet *net.
 
 	// Connect the switch to the router.
 	stdout, stderr, err = util.RunOVNNbctl("--", "--may-exist", "lsp-add", nodeName, "stor-"+nodeName,
-		"--", "set", "logical_switch_port", "stor-"+nodeName, "type=router", "options:router-port=rtos-"+nodeName, "addresses="+"\""+nodeLRPMac+"\"")
+		"--", "set", "logical_switch_port", "stor-"+nodeName, "type=router", "options:router-port=rtos-"+nodeName, "addresses="+"\""+nodeLRPMAC.String()+"\"")
 	if err != nil {
 		klog.Errorf("Failed to add logical port to switch, stdout: %q, stderr: %q, error: %v", stdout, stderr, err)
 		return err

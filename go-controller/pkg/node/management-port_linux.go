@@ -30,10 +30,10 @@ type managementPortConfig struct {
 	ifIPMask   string
 	ifIP       string
 	routerIP   string
-	routerMAC  string
+	routerMAC  net.HardwareAddr
 }
 
-func newManagementPortConfig(interfaceName, interfaceIP, routerIP, routerMAC string) (*managementPortConfig, error) {
+func newManagementPortConfig(interfaceName, interfaceIP, routerIP string, routerMAC net.HardwareAddr) (*managementPortConfig, error) {
 	var err error
 
 	cfg := &managementPortConfig{}
@@ -126,7 +126,7 @@ func setupManagementPortConfig(cfg *managementPortConfig) ([]string, error) {
 	// source protocol address to be in the Logical Switch's subnet.
 	if exists, err = util.LinkNeighExists(cfg.link, cfg.routerIP, cfg.routerMAC); err == nil && !exists {
 		warnings = append(warnings, fmt.Sprintf("missing arp entry for MAC/IP binding (%s/%s) on link %s",
-			cfg.routerMAC, cfg.routerIP, util.K8sMgmtIntfName))
+			cfg.routerMAC.String(), cfg.routerIP, util.K8sMgmtIntfName))
 		err = util.LinkNeighAdd(cfg.link, cfg.routerIP, cfg.routerMAC)
 	}
 	if err != nil {
@@ -159,7 +159,7 @@ func setupManagementPortConfig(cfg *managementPortConfig) ([]string, error) {
 // createPlatformManagementPort creates a management port attached to the node switch
 // that lets the node access its pods via their private IP address. This is used
 // for health checking and other management tasks.
-func createPlatformManagementPort(interfaceName, interfaceIP, routerIP, routerMAC string,
+func createPlatformManagementPort(interfaceName, interfaceIP, routerIP string, routerMAC net.HardwareAddr,
 	stopChan chan struct{}) error {
 	var cfg *managementPortConfig
 	var err error

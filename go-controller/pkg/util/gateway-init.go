@@ -125,8 +125,8 @@ func GatewayInit(clusterIPSubnet []string, hostSubnet string, joinSubnet *net.IP
 	prefixLen, _ := joinSubnet.Mask.Size()
 	gwLRPIp := NextIP(joinSubnet.IP)
 	drLRPIp := NextIP(gwLRPIp)
-	gwLRPMac := IPAddrToHWAddr(gwLRPIp)
-	drLRPMac := IPAddrToHWAddr(drLRPIp)
+	gwLRPMAC := IPAddrToHWAddr(gwLRPIp)
+	drLRPMAC := IPAddrToHWAddr(drLRPIp)
 
 	joinSwitch := JoinSwitchPrefix + nodeName
 	// create the per-node join switch
@@ -148,7 +148,7 @@ func GatewayInit(clusterIPSubnet []string, hostSubnet string, joinSubnet *net.IP
 	}
 
 	_, stderr, err = RunOVNNbctl(
-		"--", "--may-exist", "lrp-add", gatewayRouter, gwRouterPort, gwLRPMac,
+		"--", "--may-exist", "lrp-add", gatewayRouter, gwRouterPort, gwLRPMAC.String(),
 		fmt.Sprintf("%s/%d", gwLRPIp.String(), prefixLen))
 	if err != nil {
 		return fmt.Errorf("Failed to add logical router port %q, stderr: %q, error: %v", gwRouterPort, stderr, err)
@@ -169,7 +169,7 @@ func GatewayInit(clusterIPSubnet []string, hostSubnet string, joinSubnet *net.IP
 	}
 
 	_, stderr, err = RunOVNNbctl(
-		"--", "--may-exist", "lrp-add", k8sClusterRouter, drRouterPort, drLRPMac,
+		"--", "--may-exist", "lrp-add", k8sClusterRouter, drRouterPort, drLRPMAC.String(),
 		fmt.Sprintf("%s/%d", drLRPIp.String(), prefixLen))
 	if err != nil {
 		return fmt.Errorf("Failed to add logical router port %q, stderr: %q, error: %v", drRouterPort, stderr, err)
