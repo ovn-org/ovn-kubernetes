@@ -43,6 +43,7 @@ func (ovn *Controller) getLbEndpoints(ep *kapi.Endpoints) map[kapi.Protocol]map[
 
 // AddEndpoints adds endpoints and creates corresponding resources in OVN
 func (ovn *Controller) AddEndpoints(ep *kapi.Endpoints) error {
+	klog.V(5).Infof("Adding endpoints: %s for namespace: %s", ep.Name, ep.Namespace)
 	// get service
 	// TODO: cache the service
 	svc, err := ovn.watchFactory.GetService(ep.Namespace, ep.Name)
@@ -58,9 +59,11 @@ func (ovn *Controller) AddEndpoints(ep *kapi.Endpoints) error {
 			svc.Name, svc.Spec.ClusterIP)
 		return nil
 	}
+	klog.V(5).Infof("Matching service %s found for ep: %s, with cluster IP: %s", svc.Name, ep.Name,
+		svc.Spec.ClusterIP)
 
 	protoPortMap := ovn.getLbEndpoints(ep)
-
+	klog.V(5).Infof("Matching service %s ports: %v", svc.Name, svc.Spec.Ports)
 	for proto, portMap := range protoPortMap {
 		for svcPortName, lbEps := range portMap {
 			ips := lbEps.IPs
@@ -227,6 +230,7 @@ func (ovn *Controller) handleExternalIPs(svc *kapi.Service, svcPort kapi.Service
 }
 
 func (ovn *Controller) deleteEndpoints(ep *kapi.Endpoints) error {
+	klog.V(5).Infof("Deleting endpoints: %s for namespace: %s", ep.Name, ep.Namespace)
 	svc, err := ovn.watchFactory.GetService(ep.Namespace, ep.Name)
 	if err != nil {
 		// This is not necessarily an error. For e.g when a service is deleted,
