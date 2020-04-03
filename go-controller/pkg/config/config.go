@@ -71,7 +71,7 @@ var (
 	// Kubernetes holds Kubernetes-related parsed config file parameters and command-line overrides
 	Kubernetes = KubernetesConfig{
 		APIServer:          DefaultAPIServer,
-		ServiceCIDR:        "172.16.1.0/24",
+		RawServiceCIDRs:    "172.16.1.0/24",
 		OVNConfigNamespace: "ovn-kubernetes",
 	}
 
@@ -105,7 +105,10 @@ var (
 	// EnableMulticast enables multicast support between the pods within the same namespace
 	EnableMulticast bool
 
-	// IPv6Mode captures whether we are using IPv6 for OVN logical topology
+	// IPv4Mode captures whether we are using IPv4 for OVN logical topology. (ie, single-stack IPv4 or dual-stack)
+	IPv4Mode bool
+
+	// IPv6Mode captures whether we are using IPv6 for OVN logical topology. (ie, single-stack IPv6 or dual-stack)
 	IPv6Mode bool
 )
 
@@ -170,7 +173,9 @@ type KubernetesConfig struct {
 	CACert               string `gcfg:"cacert"`
 	APIServer            string `gcfg:"apiserver"`
 	Token                string `gcfg:"token"`
-	ServiceCIDR          string `gcfg:"service-cidr"`
+	CompatServiceCIDR    string `gcfg:"service-cidr"`
+	RawServiceCIDRs      string `gcfg:"service-cidrs"`
+	ServiceCIDRs         []*net.IPNet
 	OVNConfigNamespace   string `gcfg:"ovn-config-namespace"`
 	MetricsBindAddress   string `gcfg:"metrics-bind-address"`
 	MetricsEnablePprof   bool   `gcfg:"metrics-enable-pprof"`
@@ -528,17 +533,22 @@ var CNIFlags = []cli.Flag{
 var K8sFlags = []cli.Flag{
 	cli.StringFlag{
 		Name:        "service-cluster-ip-range",
-		Usage:       "Deprecated alias for k8s-service-cidr.",
+		Usage:       "Deprecated alias for k8s-service-cidrs.",
 		Destination: &serviceClusterIPRange,
 	},
 	cli.StringFlag{
-		Name: "k8s-service-cidr",
-		Usage: "A CIDR notation IP range from which k8s assigns " +
-			"service cluster IPs. This should be the same as the one " +
-			"provided for kube-apiserver \"-service-cluster-ip-range\" " +
+		Name:        "k8s-service-cidr",
+		Usage:       "Deprecated alias for k8s-service-cidrs.",
+		Destination: &cliConfig.Kubernetes.CompatServiceCIDR,
+	},
+	cli.StringFlag{
+		Name: "k8s-service-cidrs",
+		Usage: "A comma-separated set of CIDR notation IP ranges from which k8s assigns " +
+			"service cluster IPs. This should be the same as the value " +
+			"provided for kube-apiserver \"--service-cluster-ip-range\" " +
 			"option. (default: 172.16.1.0/24)",
-		Destination: &cliConfig.Kubernetes.ServiceCIDR,
-		Value:       Kubernetes.ServiceCIDR,
+		Destination: &cliConfig.Kubernetes.RawServiceCIDRs,
+		Value:       Kubernetes.RawServiceCIDRs,
 	},
 	cli.StringFlag{
 		Name:        "k8s-kubeconfig",
@@ -830,7 +840,7 @@ func setOVSExternalID(exec kexec.Interface, key, value string) error {
 	return nil
 }
 
-func buildKubernetesConfig(exec kexec.Interface, cli, file *config, saPath string, defaults *Defaults) error {
+func buildKubernetesConfig(exec kexec.Interface, cli, file *config, saPath string, defaults *Defaults, allSubnets *configSubnets) error {
 	// token adn ca.crt may be from files mounted in container.
 	saConfig := savedKubernetes
 	if data, err := ioutil.ReadFile(filepath.Join(saPath, kubeServiceAccountFileToken)); err == nil {
@@ -900,22 +910,27 @@ func buildKubernetesConfig(exec kexec.Interface, cli, file *config, saPath strin
 		return fmt.Errorf("kubernetes API server URL scheme %q invalid", url.Scheme)
 	}
 
-	// Legacy service-cluster-ip-range CLI option overrides config file or --k8s-service-cidr
+	// Legacy --service-cluster-ip-range or --k8s-service-cidr options override config file or --k8s-service-cidrs.
 	if serviceClusterIPRange != "" {
-		Kubernetes.ServiceCIDR = serviceClusterIPRange
+		Kubernetes.RawServiceCIDRs = serviceClusterIPRange
+	} else if Kubernetes.CompatServiceCIDR != "" {
+		Kubernetes.RawServiceCIDRs = Kubernetes.CompatServiceCIDR
 	}
-	if Kubernetes.ServiceCIDR == "" {
-		return fmt.Errorf("kubernetes service-cidr is required")
+	if Kubernetes.RawServiceCIDRs == "" {
+		return fmt.Errorf("kubernetes service-cidrs is required")
 	}
-	_, serviceIPNet, err := net.ParseCIDR(Kubernetes.ServiceCIDR)
-	if err != nil {
-		return fmt.Errorf("kubernetes service network CIDR %q invalid: %v", Kubernetes.ServiceCIDR, err)
+	for _, cidrString := range strings.Split(Kubernetes.RawServiceCIDRs, ",") {
+		_, serviceCIDR, err := net.ParseCIDR(cidrString)
+		if err != nil {
+			return fmt.Errorf("kubernetes service network CIDR %q invalid: %v", cidrString, err)
+		}
+		Kubernetes.ServiceCIDRs = append(Kubernetes.ServiceCIDRs, serviceCIDR)
+		allSubnets.append(configSubnetService, serviceCIDR)
 	}
-
-	// To check if service-ip-range is in JoinSubnet(100.64.0.0/16 or fd98::/64) range
-	err = overlapsWithJoinSubnet([]*net.IPNet{serviceIPNet})
-	if err != nil {
-		return err
+	if len(Kubernetes.ServiceCIDRs) > 2 {
+		return fmt.Errorf("kubernetes service-cidrs must contain either a single CIDR or else an IPv4/IPv6 pair")
+	} else if len(Kubernetes.ServiceCIDRs) == 2 && utilnet.IsIPv6CIDR(Kubernetes.ServiceCIDRs[0]) == utilnet.IsIPv6CIDR(Kubernetes.ServiceCIDRs[1]) {
+		return fmt.Errorf("kubernetes service-cidrs must contain either a single CIDR or else an IPv4/IPv6 pair")
 	}
 
 	if Kubernetes.RawNoHostSubnetNodes != "" {
@@ -1003,7 +1018,7 @@ func buildMasterHAConfig(ctx *cli.Context, cli, file *config) error {
 	return nil
 }
 
-func buildHybridOverlayConfig(ctx *cli.Context, cli, file *config) error {
+func buildHybridOverlayConfig(ctx *cli.Context, cli, file *config, allSubnets *configSubnets) error {
 	// Copy config file values over default values
 	if err := overrideFields(&HybridOverlay, &file.HybridOverlay, &savedHybridOverlay); err != nil {
 		return err
@@ -1020,12 +1035,15 @@ func buildHybridOverlayConfig(ctx *cli.Context, cli, file *config) error {
 		if err != nil {
 			return fmt.Errorf("hybrid overlay cluster subnet invalid: %v", err)
 		}
+		for _, subnet := range HybridOverlay.ClusterSubnets {
+			allSubnets.append(configSubnetHybrid, subnet.CIDR)
+		}
 	}
 
 	return nil
 }
 
-func buildDefaultConfig(cli, file *config) error {
+func buildDefaultConfig(cli, file *config, allSubnets *configSubnets) error {
 	if err := overrideFields(&Default, &file.Default, &savedDefault); err != nil {
 		return err
 	}
@@ -1047,19 +1065,10 @@ func buildDefaultConfig(cli, file *config) error {
 	if err != nil {
 		return fmt.Errorf("cluster subnet invalid: %v", err)
 	}
-
-	// Determine if ovn-kubernetes is configured to run in IPv6 mode
-	IPv6Mode = utilnet.IsIPv6(Default.ClusterSubnets[0].CIDR.IP)
-
-	// To check if any of clustersubnets is in JoinSubnet(100.64.0.0/16) range
-	var clustersubnets []*net.IPNet
 	for _, subnet := range Default.ClusterSubnets {
-		clustersubnets = append(clustersubnets, subnet.CIDR)
+		allSubnets.append(configSubnetCluster, subnet.CIDR)
 	}
-	err = overlapsWithJoinSubnet(clustersubnets)
-	if err != nil {
-		return err
-	}
+
 	return nil
 }
 
@@ -1116,6 +1125,10 @@ func initConfigWithPath(ctx *cli.Context, exec kexec.Interface, saPath string, d
 		MasterHA:      savedMasterHA,
 		HybridOverlay: savedHybridOverlay,
 	}
+
+	allSubnets := newConfigSubnets()
+	allSubnets.appendConst(configSubnetJoin, V4JoinSubnet)
+	allSubnets.appendConst(configSubnetJoin, V6JoinSubnet)
 
 	configFile, configFileIsDefault = getConfigFilePath(ctx)
 
@@ -1182,11 +1195,11 @@ func initConfigWithPath(ctx *cli.Context, exec kexec.Interface, saPath string, d
 		})
 	}
 
-	if err = buildDefaultConfig(&cliConfig, &cfg); err != nil {
+	if err = buildDefaultConfig(&cliConfig, &cfg, allSubnets); err != nil {
 		return "", err
 	}
 
-	if err = buildKubernetesConfig(exec, &cliConfig, &cfg, saPath, defaults); err != nil {
+	if err = buildKubernetesConfig(exec, &cliConfig, &cfg, saPath, defaults, allSubnets); err != nil {
 		return "", err
 	}
 
@@ -1198,7 +1211,7 @@ func initConfigWithPath(ctx *cli.Context, exec kexec.Interface, saPath string, d
 		return "", err
 	}
 
-	if err = buildHybridOverlayConfig(ctx, &cliConfig, &cfg); err != nil {
+	if err = buildHybridOverlayConfig(ctx, &cliConfig, &cfg, allSubnets); err != nil {
 		return "", err
 	}
 
@@ -1213,6 +1226,16 @@ func initConfigWithPath(ctx *cli.Context, exec kexec.Interface, saPath string, d
 		return "", err
 	}
 	OvnSouth = *tmpAuth
+
+	err = allSubnets.checkForOverlaps()
+	if err != nil {
+		return "", err
+	}
+
+	IPv4Mode, IPv6Mode, err = allSubnets.checkIPFamilies()
+	if err != nil {
+		return "", err
+	}
 
 	klog.V(5).Infof("Default config: %+v", Default)
 	klog.V(5).Infof("Logging config: %+v", Logging)

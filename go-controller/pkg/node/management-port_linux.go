@@ -49,7 +49,9 @@ func newManagementPortConfig(interfaceName, interfaceIP, routerIP, routerMAC str
 	for _, subnet := range config.Default.ClusterSubnets {
 		cfg.allSubnets = append(cfg.allSubnets, subnet.CIDR.String())
 	}
-	cfg.allSubnets = append(cfg.allSubnets, config.Kubernetes.ServiceCIDR)
+	for _, subnet := range config.Kubernetes.ServiceCIDRs {
+		cfg.allSubnets = append(cfg.allSubnets, subnet.String())
+	}
 
 	cfg.ifIP = strings.Split(cfg.ifIPMask, "/")[0]
 	if utilnet.IsIPv6(net.ParseIP(cfg.ifIP)) {
@@ -107,7 +109,7 @@ func setupManagementPortConfig(cfg *managementPortConfig) ([]string, error) {
 			if err != nil {
 				if os.IsExist(err) {
 					klog.V(5).Infof("Ignoring error %s from 'route add %s via %s' - already added via IPv6 RA?",
-						err.Error(), config.Kubernetes.ServiceCIDR, cfg.routerIP)
+						err.Error(), subnet, cfg.routerIP)
 					continue
 				}
 			}
