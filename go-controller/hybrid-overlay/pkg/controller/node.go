@@ -16,9 +16,9 @@ import (
 )
 
 // StartNode creates and starts the hybrid overlay node controller
-func StartNode(nodeName string, kube kube.Interface, wf *factory.WatchFactory) error {
+func StartNode(nodeName string, kube kube.Interface, wf *factory.WatchFactory, stopChan <-chan struct{}) error {
 	klog.Infof("Starting hybrid overlay node...")
-	node, err := NewNode(kube, nodeName)
+	node, err := NewNode(kube, nodeName, stopChan)
 	if err != nil {
 		return err
 	}
