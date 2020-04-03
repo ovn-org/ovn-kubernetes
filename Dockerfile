@@ -38,6 +38,7 @@ RUN INSTALL_PKGS=" \
 	openvswitch2.13 openvswitch2.13-devel \
 	ovn2.13 ovn2.13-central ovn2.13-host ovn2.13-vtep \
 	containernetworking-plugins yum-utils \
+	tcpdump \
 	" && \
 	yum install -y --setopt=tsflags=nodocs --setopt=skip_missing_names_on_install=False $INSTALL_PKGS && \
 	yum clean all && rm -rf /var/cache/*
