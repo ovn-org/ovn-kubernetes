@@ -42,6 +42,29 @@ func LinkAddrFlush(link netlink.Link) error {
 	return nil
 }
 
+// LinkAddrExist returns true if the given address is present on the link
+func LinkAddrExist(link netlink.Link, address string) (bool, error) {
+	ipnet, err := netlink.ParseIPNet(address)
+	if err != nil {
+		return false, fmt.Errorf("failed to parse ip %s :%v\n", address, err)
+	}
+	family := netlink.FAMILY_V4
+	if ipnet.IP.To4() == nil {
+		family = netlink.FAMILY_V6
+	}
+	addrs, err := netlink.AddrList(link, family)
+	if err != nil {
+		return false, fmt.Errorf("failed to list addresses for the link %s: %v",
+			link.Attrs().Name, err)
+	}
+	for _, addr := range addrs {
+		if addr.IPNet.String() == address {
+			return true, nil
+		}
+	}
+	return false, nil
+}
+
 // LinkAddrAdd removes existing addresses on the link and adds the new address
 func LinkAddrAdd(link netlink.Link, address string) error {
 	ipnet, err := netlink.ParseIPNet(address)

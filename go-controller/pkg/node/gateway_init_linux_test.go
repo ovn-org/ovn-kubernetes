@@ -169,7 +169,7 @@ cookie=0x0, duration=8366.597s, table=1, n_packets=10641, n_bytes=10370087, prio
 		Expect(err).NotTo(HaveOccurred())
 		defer close(stop)
 
-		n := NewNode(nil, wf, existingNode.Name)
+		n := NewNode(nil, wf, existingNode.Name, stop)
 
 		ipt, err := util.NewFakeWithProtocol(iptables.ProtocolIPv4)
 		Expect(err).NotTo(HaveOccurred())
