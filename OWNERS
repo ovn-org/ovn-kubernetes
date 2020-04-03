@@ -12,3 +12,7 @@ approvers:
   - knobunc
   - pecameron
   - squeed
+
+# Bugzilla info
+component: Networking
+subcomponent: ovn-kubernetes
