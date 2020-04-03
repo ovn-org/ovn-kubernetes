@@ -16,7 +16,8 @@ import (
 // createPlatformManagementPort creates a management port attached to the node switch
 // that lets the node access its pods via their private IP address. This is used
 // for health checking and other management tasks.
-func createPlatformManagementPort(interfaceName, interfaceIP, routerIP, routerMAC string) error {
+func createPlatformManagementPort(interfaceName, interfaceIP, routerIP, routerMAC string,
+	stopChan chan struct{}) error {
 	// Up the interface.
 	_, _, err := util.RunPowershell("Enable-NetAdapter", "-IncludeHidden", interfaceName)
 	if err != nil {
