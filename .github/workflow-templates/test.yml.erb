@@ -120,7 +120,7 @@ jobs:
           - {ha: "true", name: "HA"}
     env:
       KIND_HA: ${{matrix.config.ha}}
-      JOB_NAME: "e2e-shard-n"
+      JOB_NAME: e2e-shard-n-${{ matrix.config.name }}
     steps:
     - *step_cleanup
     - *step_gosetup
@@ -180,7 +180,7 @@ jobs:
     needs: k8s
     strategy: *e2e_strategy
     env:
-      JOB_NAME: "e2e-shard-np"
+      JOB_NAME: e2e-shard-np-${{ matrix.config.name }}
       KIND_HA: ${{matrix.config.ha}}
     steps:
     - *step_cleanup
@@ -211,7 +211,7 @@ jobs:
     needs: k8s
     strategy: *e2e_strategy
     env:
-      JOB_NAME: "e2e-shard-s"
+      JOB_NAME: e2e-shard-s-${{ matrix.config.name }}
       KIND_HA: ${{matrix.config.ha}}
     steps:
     - *step_cleanup
@@ -241,7 +241,7 @@ jobs:
     needs: k8s
     strategy: *e2e_strategy
     env:
-      JOB_NAME: "e2e-shard-other"
+      JOB_NAME: e2e-shard-other-${{ matrix.config.name }}
       KIND_HA: ${{matrix.config.ha}}
     steps:
     - *step_cleanup
@@ -271,7 +271,7 @@ jobs:
     needs: k8s
     strategy: *e2e_strategy
     env:
-      JOB_NAME: "e2e-control-plane"
+      JOB_NAME: e2e-control-plane-${{ matrix.config.name }}
       KIND_HA: ${{matrix.config.ha}}
     steps:
     - *step_cleanup
