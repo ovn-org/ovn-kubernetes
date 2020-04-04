@@ -2,7 +2,6 @@ package ovn
 
 import (
 	"fmt"
-	"net"
 
 	"github.com/urfave/cli"
 	v1 "k8s.io/api/core/v1"
@@ -106,9 +105,8 @@ func defaultFakeExec(nodeSubnet, nodeName string) (*ovntest.FakeExec, string, st
 	})
 
 	// Node-related logical network stuff
-	ip, cidr, err := net.ParseCIDR(nodeSubnet)
-	Expect(err).NotTo(HaveOccurred())
-	cidr.IP = util.NextIP(ip)
+	cidr := ovntest.MustParseIPNet(nodeSubnet)
+	cidr.IP = util.NextIP(cidr.IP)
 	lrpMAC := util.IPAddrToHWAddr(cidr.IP)
 	gwCIDR := cidr.String()
 	gwIP := cidr.IP.String()
@@ -702,8 +700,7 @@ var _ = Describe("Gateway Init Operations", func() {
 			err = clusterController.WatchNodes()
 			Expect(err).NotTo(HaveOccurred())
 
-			_, subnet, err := net.ParseCIDR(nodeSubnet)
-			Expect(err).NotTo(HaveOccurred())
+			subnet := ovntest.MustParseIPNet(nodeSubnet)
 			err = clusterController.syncGatewayLogicalNetwork(updatedNode, l3GatewayConfig, subnet.String())
 			Expect(err).NotTo(HaveOccurred())
 
@@ -909,8 +906,7 @@ var _ = Describe("Gateway Init Operations", func() {
 			err = clusterController.WatchNodes()
 			Expect(err).NotTo(HaveOccurred())
 
-			_, subnet, err := net.ParseCIDR(nodeSubnet)
-			Expect(err).NotTo(HaveOccurred())
+			subnet := ovntest.MustParseIPNet(nodeSubnet)
 			err = clusterController.syncGatewayLogicalNetwork(updatedNode, l3GatewayConfig, subnet.String())
 			Expect(err).NotTo(HaveOccurred())
 
