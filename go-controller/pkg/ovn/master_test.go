@@ -409,7 +409,7 @@ var _ = Describe("Master Operations", func() {
 			Expect(err).NotTo(HaveOccurred())
 			err = util.SetNodeManagementPortMACAddress(nodeAnnotator, ovntest.MustParseMAC(mgmtMAC))
 			Expect(err).NotTo(HaveOccurred())
-			err = util.SetNodeHostSubnetAnnotation(nodeAnnotator, nodeSubnet)
+			err = util.SetNodeHostSubnetAnnotation(nodeAnnotator, ovntest.MustParseIPNet(nodeSubnet))
 			Expect(err).NotTo(HaveOccurred())
 			err = nodeAnnotator.Run()
 			Expect(err).NotTo(HaveOccurred())
@@ -599,7 +599,7 @@ subnet=%s
 			Expect(err).NotTo(HaveOccurred())
 			err = util.SetNodeManagementPortMACAddress(nodeAnnotator, ovntest.MustParseMAC(masterMgmtPortMAC))
 			Expect(err).NotTo(HaveOccurred())
-			err = util.SetNodeHostSubnetAnnotation(nodeAnnotator, masterSubnet)
+			err = util.SetNodeHostSubnetAnnotation(nodeAnnotator, ovntest.MustParseIPNet(masterSubnet))
 			Expect(err).NotTo(HaveOccurred())
 			err = nodeAnnotator.Run()
 			Expect(err).NotTo(HaveOccurred())
@@ -615,7 +615,7 @@ subnet=%s
 			clusterController.UDPLoadBalancerUUID = udpLBUUID
 			clusterController.SCTPLoadBalancerUUID = sctpLBUUID
 			clusterController.SCTPSupport = true
-			_ = clusterController.joinSubnetAllocator.AddNetworkRange("100.64.0.0/16", 3)
+			_ = clusterController.joinSubnetAllocator.AddNetworkRange(ovntest.MustParseIPNet("100.64.0.0/16"), 3)
 
 			// Let the real code run and ensure OVN database sync
 			err = clusterController.WatchNodes()
@@ -706,14 +706,16 @@ var _ = Describe("Gateway Init Operations", func() {
 			nodeAnnotator := kube.NewNodeAnnotator(&kube.Kube{fakeClient}, &testNode)
 			ifaceID := localnetBridgeName + "_" + nodeName
 			err = util.SetLocalL3GatewayConfig(nodeAnnotator, ifaceID,
-				ovntest.MustParseMAC(brLocalnetMAC), localnetGatewayIP, localnetGatewayNextHop,
+				ovntest.MustParseMAC(brLocalnetMAC),
+				ovntest.MustParseIPNet(localnetGatewayIP),
+				ovntest.MustParseIP(localnetGatewayNextHop),
 				true)
 			Expect(err).NotTo(HaveOccurred())
 			err = util.SetNodeManagementPortMACAddress(nodeAnnotator, ovntest.MustParseMAC(brLocalnetMAC))
 			Expect(err).NotTo(HaveOccurred())
-			err = util.SetNodeHostSubnetAnnotation(nodeAnnotator, nodeSubnet)
+			err = util.SetNodeHostSubnetAnnotation(nodeAnnotator, ovntest.MustParseIPNet(nodeSubnet))
 			Expect(err).NotTo(HaveOccurred())
-			err = util.SetNodeJoinSubnetAnnotation(nodeAnnotator, joinSubnet)
+			err = util.SetNodeJoinSubnetAnnotation(nodeAnnotator, ovntest.MustParseIPNet(joinSubnet))
 			Expect(err).NotTo(HaveOccurred())
 			err = nodeAnnotator.Run()
 			Expect(err).NotTo(HaveOccurred())
@@ -812,14 +814,14 @@ var _ = Describe("Gateway Init Operations", func() {
 			clusterController.UDPLoadBalancerUUID = udpLBUUID
 			clusterController.SCTPLoadBalancerUUID = sctpLBUUID
 			clusterController.SCTPSupport = true
-			_ = clusterController.joinSubnetAllocator.AddNetworkRange("100.64.0.0/16", 3)
+			_ = clusterController.joinSubnetAllocator.AddNetworkRange(ovntest.MustParseIPNet("100.64.0.0/16"), 3)
 
 			// Let the real code run and ensure OVN database sync
 			err = clusterController.WatchNodes()
 			Expect(err).NotTo(HaveOccurred())
 
 			subnet := ovntest.MustParseIPNet(nodeSubnet)
-			err = clusterController.syncGatewayLogicalNetwork(updatedNode, l3GatewayConfig, subnet.String())
+			err = clusterController.syncGatewayLogicalNetwork(updatedNode, l3GatewayConfig, subnet)
 			Expect(err).NotTo(HaveOccurred())
 
 			Expect(fexec.CalledMatchesExpected()).To(BeTrue(), fexec.ErrorDesc)
@@ -891,13 +893,14 @@ var _ = Describe("Gateway Init Operations", func() {
 			ifaceID := physicalBridgeName + "_" + nodeName
 			err = util.SetSharedL3GatewayConfig(nodeAnnotator, ifaceID,
 				ovntest.MustParseMAC(physicalBridgeMAC),
-				physicalGatewayIPMask, physicalGatewayNextHop,
+				ovntest.MustParseIPNet(physicalGatewayIPMask),
+				ovntest.MustParseIP(physicalGatewayNextHop),
 				true, 1024)
 			err = util.SetNodeManagementPortMACAddress(nodeAnnotator, ovntest.MustParseMAC(nodeMgmtPortMAC))
 			Expect(err).NotTo(HaveOccurred())
-			err = util.SetNodeHostSubnetAnnotation(nodeAnnotator, nodeSubnet)
+			err = util.SetNodeHostSubnetAnnotation(nodeAnnotator, ovntest.MustParseIPNet(nodeSubnet))
 			Expect(err).NotTo(HaveOccurred())
-			err = util.SetNodeJoinSubnetAnnotation(nodeAnnotator, joinSubnet)
+			err = util.SetNodeJoinSubnetAnnotation(nodeAnnotator, ovntest.MustParseIPNet(joinSubnet))
 			Expect(err).NotTo(HaveOccurred())
 			err = nodeAnnotator.Run()
 			Expect(err).NotTo(HaveOccurred())
@@ -1005,14 +1008,14 @@ var _ = Describe("Gateway Init Operations", func() {
 			clusterController.UDPLoadBalancerUUID = udpLBUUID
 			clusterController.SCTPLoadBalancerUUID = sctpLBUUID
 			clusterController.SCTPSupport = true
-			_ = clusterController.joinSubnetAllocator.AddNetworkRange("100.64.0.0/16", 3)
+			_ = clusterController.joinSubnetAllocator.AddNetworkRange(ovntest.MustParseIPNet("100.64.0.0/16"), 3)
 
 			// Let the real code run and ensure OVN database sync
 			err = clusterController.WatchNodes()
 			Expect(err).NotTo(HaveOccurred())
 
 			subnet := ovntest.MustParseIPNet(nodeSubnet)
-			err = clusterController.syncGatewayLogicalNetwork(updatedNode, l3GatewayConfig, subnet.String())
+			err = clusterController.syncGatewayLogicalNetwork(updatedNode, l3GatewayConfig, subnet)
 			Expect(err).NotTo(HaveOccurred())
 
 			Expect(fexec.CalledMatchesExpected()).To(BeTrue(), fexec.ErrorDesc)

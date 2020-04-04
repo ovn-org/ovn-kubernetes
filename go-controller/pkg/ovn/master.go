@@ -111,7 +111,8 @@ func (oc *Controller) StartClusterMaster(masterNodeName string) error {
 	if config.IPv6Mode {
 		joinSubnet = config.V6JoinSubnet
 	}
-	_ = oc.joinSubnetAllocator.AddNetworkRange(joinSubnet, 3)
+	_, joinSubnetCIDR, _ := net.ParseCIDR(joinSubnet)
+	_ = oc.joinSubnetAllocator.AddNetworkRange(joinSubnetCIDR, 3)
 
 	existingNodes, err := oc.kube.GetNodes()
 	if err != nil {
@@ -119,7 +120,7 @@ func (oc *Controller) StartClusterMaster(masterNodeName string) error {
 		return err
 	}
 	for _, clusterEntry := range config.Default.ClusterSubnets {
-		err := oc.masterSubnetAllocator.AddNetworkRange(clusterEntry.CIDR.String(), clusterEntry.HostBits())
+		err := oc.masterSubnetAllocator.AddNetworkRange(clusterEntry.CIDR, clusterEntry.HostBits())
 		if err != nil {
 			return err
 		}
@@ -252,11 +253,11 @@ func (oc *Controller) SetupMaster(masterNodeName string) error {
 	return nil
 }
 
-func (oc *Controller) addNodeJoinSubnetAnnotations(node *kapi.Node, subnet string) error {
+func (oc *Controller) addNodeJoinSubnetAnnotations(node *kapi.Node, subnet *net.IPNet) error {
 	nodeAnnotations, err := util.CreateNodeJoinSubnetAnnotation(subnet)
 	if err != nil {
 		return fmt.Errorf("failed to marshal node %q join subnets annotation for subnet %s",
-			node.Name, subnet)
+			node.Name, subnet.String())
 	}
 	err = oc.kube.SetAnnotationsOnNode(node, nodeAnnotations)
 	if err != nil {
@@ -290,7 +291,7 @@ func (oc *Controller) allocateJoinSubnet(node *kapi.Node) (*net.IPNet, error) {
 	}()
 
 	// Set annotation on the node
-	err = oc.addNodeJoinSubnetAnnotations(node, joinSubnet.String())
+	err = oc.addNodeJoinSubnetAnnotations(node, joinSubnet)
 	if err != nil {
 		return nil, err
 	}
@@ -353,11 +354,11 @@ func (oc *Controller) syncNodeManagementPort(node *kapi.Node, subnet *net.IPNet)
 	return nil
 }
 
-func (oc *Controller) syncGatewayLogicalNetwork(node *kapi.Node, l3GatewayConfig *util.L3GatewayConfig, subnet string) error {
+func (oc *Controller) syncGatewayLogicalNetwork(node *kapi.Node, l3GatewayConfig *util.L3GatewayConfig, subnet *net.IPNet) error {
 	var err error
-	var clusterSubnets []string
+	var clusterSubnets []*net.IPNet
 	for _, clusterSubnet := range config.Default.ClusterSubnets {
-		clusterSubnets = append(clusterSubnets, clusterSubnet.CIDR.String())
+		clusterSubnets = append(clusterSubnets, clusterSubnet.CIDR)
 	}
 
 	// get a subnet for the per-node join switch
@@ -374,7 +375,7 @@ func (oc *Controller) syncGatewayLogicalNetwork(node *kapi.Node, l3GatewayConfig
 	if l3GatewayConfig.Mode == config.GatewayModeShared {
 		// Add static routes to OVN Cluster Router to enable pods on this Node to
 		// reach the host IP
-		err = addStaticRouteToHost(node, l3GatewayConfig.IPAddress.String())
+		err = addStaticRouteToHost(node, l3GatewayConfig.IPAddress)
 		if err != nil {
 			return err
 		}
@@ -399,7 +400,7 @@ func (oc *Controller) syncGatewayLogicalNetwork(node *kapi.Node, l3GatewayConfig
 	return err
 }
 
-func addStaticRouteToHost(node *kapi.Node, nicIP string) error {
+func addStaticRouteToHost(node *kapi.Node, nicIP *net.IPNet) error {
 	k8sClusterRouter := util.GetK8sClusterRouter()
 	subnet, err := util.ParseNodeHostSubnetAnnotation(node)
 	if err != nil {
@@ -407,8 +408,8 @@ func addStaticRouteToHost(node *kapi.Node, nicIP string) error {
 			util.K8sMgmtIntfName, err)
 	}
 	_, secondIP := util.GetNodeWellKnownAddresses(subnet)
-	prefix := strings.Split(nicIP, "/")[0] + "/32"
-	nexthop := strings.Split(secondIP.String(), "/")[0]
+	prefix := nicIP.IP.String() + "/32"
+	nexthop := secondIP.IP.String()
 	_, stderr, err := util.RunOVNNbctl("--may-exist", "lr-route-add", k8sClusterRouter, prefix, nexthop)
 	if err != nil {
 		return fmt.Errorf("failed to add static route '%s via %s' for host %q on %s "+
@@ -568,11 +569,11 @@ func (oc *Controller) ensureNodeLogicalNetwork(nodeName string, hostsubnet *net.
 	return nil
 }
 
-func (oc *Controller) addNodeAnnotations(node *kapi.Node, subnet string) error {
+func (oc *Controller) addNodeAnnotations(node *kapi.Node, subnet *net.IPNet) error {
 	nodeAnnotations, err := util.CreateNodeHostSubnetAnnotation(subnet)
 	if err != nil {
 		return fmt.Errorf("failed to marshal node %q annotation for subnet %s",
-			node.Name, subnet)
+			node.Name, subnet.String())
 	}
 	err = oc.kube.SetAnnotationsOnNode(node, nodeAnnotations)
 	if err != nil {
@@ -618,7 +619,7 @@ func (oc *Controller) addNode(node *kapi.Node) (hostsubnet *net.IPNet, err error
 	// Set the HostSubnet annotation on the node object to signal
 	// to nodes that their logical infrastructure is set up and they can
 	// proceed with their initialization
-	err = oc.addNodeAnnotations(node, hostsubnet.String())
+	err = oc.addNodeAnnotations(node, hostsubnet)
 	if err != nil {
 		return nil, err
 	}

@@ -109,7 +109,7 @@ func getGatewayLoadBalancers(gatewayRouter string) (string, string, string, erro
 }
 
 // GatewayInit creates a gateway router for the local chassis.
-func GatewayInit(clusterIPSubnet []string, hostSubnet string, joinSubnet *net.IPNet, nodeName string, l3GatewayConfig *L3GatewayConfig, sctpSupport bool) error {
+func GatewayInit(clusterIPSubnet []*net.IPNet, hostSubnet *net.IPNet, joinSubnet *net.IPNet, nodeName string, l3GatewayConfig *L3GatewayConfig, sctpSupport bool) error {
 	k8sClusterRouter := GetK8sClusterRouter()
 	// Create a gateway router.
 	gatewayRouter := GWRouterPrefix + nodeName
@@ -189,7 +189,7 @@ func GatewayInit(clusterIPSubnet []string, hostSubnet string, joinSubnet *net.IP
 	for _, entry := range clusterIPSubnet {
 		// Add a static route in GR with distributed router as the nexthop.
 		stdout, stderr, err = RunOVNNbctl("--may-exist", "lr-route-add",
-			gatewayRouter, entry, drLRPIp.String())
+			gatewayRouter, entry.String(), drLRPIp.String())
 		if err != nil {
 			return fmt.Errorf("Failed to add a static route in GR with distributed "+
 				"router as the nexthop, stdout: %q, stderr: %q, error: %v",
@@ -314,29 +314,21 @@ func GatewayInit(clusterIPSubnet []string, hostSubnet string, joinSubnet *net.IP
 			"stderr: %q, error: %v", stdout, stderr, err)
 	}
 
-	rampoutIPSubnets := strings.Split(hostSubnet, ",")
-	for _, rampoutIPSubnet := range rampoutIPSubnets {
-		_, _, err = net.ParseCIDR(rampoutIPSubnet)
-		if err != nil {
-			continue
-		}
-
-		// Add source IP address based routes in distributed router
-		// for this gateway router.
-		stdout, stderr, err = RunOVNNbctl("--may-exist",
-			"--policy=src-ip", "lr-route-add", k8sClusterRouter,
-			rampoutIPSubnet, gwLRPIp.String())
-		if err != nil {
-			return fmt.Errorf("Failed to add source IP address based "+
-				"routes in distributed router, stdout: %q, "+
-				"stderr: %q, error: %v", stdout, stderr, err)
-		}
+	// Add source IP address based routes in distributed router
+	// for this gateway router.
+	stdout, stderr, err = RunOVNNbctl("--may-exist",
+		"--policy=src-ip", "lr-route-add", k8sClusterRouter,
+		hostSubnet.String(), gwLRPIp.String())
+	if err != nil {
+		return fmt.Errorf("Failed to add source IP address based "+
+			"routes in distributed router, stdout: %q, "+
+			"stderr: %q, error: %v", stdout, stderr, err)
 	}
 
 	// Default SNAT rules.
 	for _, entry := range clusterIPSubnet {
 		stdout, stderr, err = RunOVNNbctl("--may-exist", "lr-nat-add",
-			gatewayRouter, "snat", l3GatewayConfig.IPAddress.IP.String(), entry)
+			gatewayRouter, "snat", l3GatewayConfig.IPAddress.IP.String(), entry.String())
 		if err != nil {
 			return fmt.Errorf("Failed to create default SNAT rules, stdout: %q, "+
 				"stderr: %q, error: %v", stdout, stderr, err)

@@ -36,7 +36,7 @@ func addGetPortAddressesCmds(fexec *ovntest.FakeExec, nodeName, hybMAC, hybIP st
 func newTestNode(name, os, ovnHostSubnet, hybridHostSubnet, drMAC string) v1.Node {
 	annotations := make(map[string]string)
 	if ovnHostSubnet != "" {
-		subnetAnnotations, err := util.CreateNodeHostSubnetAnnotation(ovnHostSubnet)
+		subnetAnnotations, err := util.CreateNodeHostSubnetAnnotation(ovntest.MustParseIPNet(ovnHostSubnet))
 		Expect(err).NotTo(HaveOccurred())
 		for k, v := range subnetAnnotations {
 			annotations[k] = fmt.Sprintf("%s", v)

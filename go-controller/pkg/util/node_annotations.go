@@ -101,15 +101,16 @@ func SetDisabledL3GatewayConfig(nodeAnnotator kube.Annotator) error {
 // SetSharedL3GatewayConfig uses nodeAnnotator set an l3-gateway-config annotation
 // for the "shared interface" gateway mode.
 func SetSharedL3GatewayConfig(nodeAnnotator kube.Annotator,
-	ifaceID string, macAddress net.HardwareAddr, gatewayAddress, nextHop string,
+	ifaceID string, macAddress net.HardwareAddr,
+	gatewayAddress *net.IPNet, nextHop net.IP,
 	nodePortEnable bool, vlanID uint) error {
 	return setAnnotations(nodeAnnotator, map[string]string{
 		ovnNodeGatewayMode:       string(config.GatewayModeShared),
 		ovnNodeGatewayVlanID:     fmt.Sprintf("%d", vlanID),
 		ovnNodeGatewayIfaceID:    ifaceID,
 		ovnNodeGatewayMacAddress: macAddress.String(),
-		ovnNodeGatewayIP:         gatewayAddress,
-		ovnNodeGatewayNextHop:    nextHop,
+		ovnNodeGatewayIP:         gatewayAddress.String(),
+		ovnNodeGatewayNextHop:    nextHop.String(),
 		ovnNodePortEnable:        fmt.Sprintf("%t", nodePortEnable),
 	})
 }
@@ -117,14 +118,15 @@ func SetSharedL3GatewayConfig(nodeAnnotator kube.Annotator,
 // SetSharedL3GatewayConfig uses nodeAnnotator set an l3-gateway-config annotation
 // for the "localnet" gateway mode.
 func SetLocalL3GatewayConfig(nodeAnnotator kube.Annotator,
-	ifaceID string, macAddress net.HardwareAddr, gatewayAddress, nextHop string,
+	ifaceID string, macAddress net.HardwareAddr,
+	gatewayAddress *net.IPNet, nextHop net.IP,
 	nodePortEnable bool) error {
 	return setAnnotations(nodeAnnotator, map[string]string{
 		ovnNodeGatewayMode:       string(config.GatewayModeLocal),
 		ovnNodeGatewayIfaceID:    ifaceID,
 		ovnNodeGatewayMacAddress: macAddress.String(),
-		ovnNodeGatewayIP:         gatewayAddress,
-		ovnNodeGatewayNextHop:    nextHop,
+		ovnNodeGatewayIP:         gatewayAddress.String(),
+		ovnNodeGatewayNextHop:    nextHop.String(),
 		ovnNodePortEnable:        fmt.Sprintf("%t", nodePortEnable),
 	})
 }
@@ -203,16 +205,11 @@ func SetNodeManagementPortMACAddress(nodeAnnotator kube.Annotator, macAddress ne
 }
 
 func ParseNodeManagementPortMACAddress(node *kapi.Node) (net.HardwareAddr, error) {
-	macAddrString, ok := node.Annotations[ovnNodeManagementPortMacAddress]
+	macAddress, ok := node.Annotations[ovnNodeManagementPortMacAddress]
 	if !ok {
 		klog.Errorf("macAddress annotation not found for node %q ", node.Name)
 		return nil, nil
 	}
 
-	macAddress, err := net.ParseMAC(macAddrString)
-	if err != nil {
-		return nil, fmt.Errorf("Error %v in parsing node %v macAddress %v", err, node.Name, macAddrString)
-	}
-
-	return macAddress, nil
+	return net.ParseMAC(macAddress)
 }

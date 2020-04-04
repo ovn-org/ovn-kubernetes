@@ -116,7 +116,7 @@ func testManagementPort(ctx *cli.Context, fexec *ovntest.FakeExec, testNS ns.Net
 	Expect(err).NotTo(HaveOccurred())
 
 	nodeAnnotator := kube.NewNodeAnnotator(&kube.Kube{fakeClient}, &existingNode)
-	err = util.SetNodeHostSubnetAnnotation(nodeAnnotator, nodeSubnet)
+	err = util.SetNodeHostSubnetAnnotation(nodeAnnotator, ovntest.MustParseIPNet(nodeSubnet))
 	Expect(err).NotTo(HaveOccurred())
 	err = nodeAnnotator.Run()
 	Expect(err).NotTo(HaveOccurred())

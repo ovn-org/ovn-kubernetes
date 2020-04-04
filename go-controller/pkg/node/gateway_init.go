@@ -49,34 +49,28 @@ func bridgedGatewayNodeSetup(nodeName, bridgeName, bridgeInterface string, syncB
 }
 
 // getIPv4Address returns the ipv4 address for the network interface 'iface'.
-func getIPv4Address(iface string) (string, error) {
-	var ipAddress string
+func getIPv4Address(iface string) (*net.IPNet, error) {
 	intf, err := net.InterfaceByName(iface)
 	if err != nil {
-		return ipAddress, err
+		return nil, err
 	}
 
 	addrs, err := intf.Addrs()
 	if err != nil {
-		return ipAddress, err
+		return nil, err
 	}
-loop:
 	for _, addr := range addrs {
 		switch ip := addr.(type) {
 		case *net.IPNet:
-			if !utilnet.IsIPv6(ip.IP) {
-				ipAddress = ip.String()
-			}
-			// get the first ip address
-			if ipAddress != "" {
-				break loop
+			if !utilnet.IsIPv6CIDR(ip) {
+				return ip, nil
 			}
 		}
 	}
-	return ipAddress, nil
+	return nil, nil
 }
 
-func (n *OvnNode) initGateway(subnet string, nodeAnnotator kube.Annotator,
+func (n *OvnNode) initGateway(subnet *net.IPNet, nodeAnnotator kube.Annotator,
 	waiter *startupWaiter) error {
 
 	if config.Gateway.NodeportEnable {
@@ -92,16 +86,16 @@ func (n *OvnNode) initGateway(subnet string, nodeAnnotator kube.Annotator,
 	case config.GatewayModeLocal:
 		err = initLocalnetGateway(n.name, subnet, n.watchFactory, nodeAnnotator)
 	case config.GatewayModeShared:
-		gatewayNextHop := config.Gateway.NextHop
+		gatewayNextHop := net.ParseIP(config.Gateway.NextHop)
 		gatewayIntf := config.Gateway.Interface
-		if gatewayNextHop == "" || gatewayIntf == "" {
+		if gatewayNextHop == nil || gatewayIntf == "" {
 			// We need to get the interface details from the default gateway.
 			defaultGatewayIntf, defaultGatewayNextHop, err := getDefaultGatewayInterfaceDetails()
 			if err != nil {
 				return err
 			}
 
-			if gatewayNextHop == "" {
+			if gatewayNextHop == nil {
 				gatewayNextHop = defaultGatewayNextHop
 			}
 

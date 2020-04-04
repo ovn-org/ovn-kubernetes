@@ -182,7 +182,7 @@ cookie=0x0, duration=8366.597s, table=1, n_packets=10641, n_bytes=10370087, prio
 
 		nodeAnnotator := kube.NewNodeAnnotator(&kube.Kube{fakeClient}, &existingNode)
 
-		err = util.SetNodeHostSubnetAnnotation(nodeAnnotator, nodeSubnet)
+		err = util.SetNodeHostSubnetAnnotation(nodeAnnotator, ovntest.MustParseIPNet(nodeSubnet))
 		Expect(err).NotTo(HaveOccurred())
 		err = nodeAnnotator.Run()
 		Expect(err).NotTo(HaveOccurred())
@@ -191,7 +191,7 @@ cookie=0x0, duration=8366.597s, table=1, n_packets=10641, n_bytes=10370087, prio
 			defer GinkgoRecover()
 
 			waiter := newStartupWaiter()
-			err = n.initGateway(nodeSubnet, nodeAnnotator, waiter)
+			err = n.initGateway(ovntest.MustParseIPNet(nodeSubnet), nodeAnnotator, waiter)
 			Expect(err).NotTo(HaveOccurred())
 
 			err = nodeAnnotator.Run()
@@ -347,7 +347,7 @@ var _ = Describe("Gateway Init Operations", func() {
 			util.SetIPTablesHelper(iptables.ProtocolIPv4, ipt)
 
 			nodeAnnotator := kube.NewNodeAnnotator(&kube.Kube{fakeClient}, &existingNode)
-			err = util.SetNodeHostSubnetAnnotation(nodeAnnotator, nodeSubnet)
+			err = util.SetNodeHostSubnetAnnotation(nodeAnnotator, ovntest.MustParseIPNet(nodeSubnet))
 			Expect(err).NotTo(HaveOccurred())
 			err = nodeAnnotator.Run()
 			Expect(err).NotTo(HaveOccurred())
@@ -355,7 +355,7 @@ var _ = Describe("Gateway Init Operations", func() {
 			err = testNS.Do(func(ns.NetNS) error {
 				defer GinkgoRecover()
 
-				err = initLocalnetGateway(nodeName, nodeSubnet, wf, nodeAnnotator)
+				err = initLocalnetGateway(nodeName, ovntest.MustParseIPNet(nodeSubnet), wf, nodeAnnotator)
 				Expect(err).NotTo(HaveOccurred())
 				// Check if IP has been assigned to LocalnetGatewayNextHopPort
 				link, err := netlink.LinkByName(localnetGatewayNextHopPort)
