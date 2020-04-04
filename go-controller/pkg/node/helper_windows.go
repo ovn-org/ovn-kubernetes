@@ -4,6 +4,7 @@ package node
 
 import (
 	"fmt"
+	"net"
 
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
 )
@@ -11,9 +12,9 @@ import (
 // getDefaultGatewayInterfaceDetails returns the interface name on
 // which the default gateway (for route to 0.0.0.0) is configured.
 // It also returns the default gateway itself.
-func getDefaultGatewayInterfaceDetails() (string, string, error) {
+func getDefaultGatewayInterfaceDetails() (string, net.IP, error) {
 	// TODO: Implement this
-	return "", "", fmt.Errorf("Not implemented yet on Windows")
+	return "", nil, fmt.Errorf("Not implemented yet on Windows")
 }
 
 func getIntfName(gatewayIntf string) (string, error) {

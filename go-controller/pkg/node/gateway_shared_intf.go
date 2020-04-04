@@ -2,6 +2,7 @@ package node
 
 import (
 	"fmt"
+	"net"
 	"reflect"
 	"regexp"
 	"strings"
@@ -284,7 +285,7 @@ func addDefaultConntrackRules(nodeName, gwBridge, gwIntf string, stopChan chan s
 	return nil
 }
 
-func (n *OvnNode) initSharedGateway(subnet, gwNextHop, gwIntf string,
+func (n *OvnNode) initSharedGateway(subnet *net.IPNet, gwNextHop net.IP, gwIntf string,
 	nodeAnnotator kube.Annotator) (postWaitFunc, error) {
 	var bridgeName string
 	var uplinkName string
@@ -324,7 +325,7 @@ func (n *OvnNode) initSharedGateway(subnet, gwNextHop, gwIntf string,
 		return nil, fmt.Errorf("Failed to get interface details for %s (%v)",
 			gwIntf, err)
 	}
-	if ipAddress == "" {
+	if ipAddress == nil {
 		return nil, fmt.Errorf("%s does not have a ipv4 address", gwIntf)
 	}
 

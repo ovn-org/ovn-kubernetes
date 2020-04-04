@@ -15,8 +15,8 @@ func GatewayCleanup(nodeName string, nodeSubnet *net.IPNet) error {
 	gatewayRouter := GWRouterPrefix + nodeName
 
 	// Get the gateway router port's IP address (connected to join switch)
-	var routerIP string
-	var nextHops []string
+	var routerIP net.IP
+	var nextHops []net.IP
 	routerIPNetwork, stderr, err := RunOVNNbctl("--if-exist", "get",
 		"logical_router_port", "rtoj-"+gatewayRouter, "networks")
 	if err != nil {
@@ -24,21 +24,21 @@ func GatewayCleanup(nodeName string, nodeSubnet *net.IPNet) error {
 			"error: %v", stderr, err)
 	}
 
+	routerIPNetwork = strings.Trim(routerIPNetwork, "[]\"")
 	if routerIPNetwork != "" {
-		routerIPNetwork = strings.Trim(routerIPNetwork, "[]\"")
-		if routerIPNetwork != "" {
-			routerIP = strings.Split(routerIPNetwork, "/")[0]
+		routerIP, _, err = net.ParseCIDR(routerIPNetwork)
+		if err != nil {
+			return fmt.Errorf("could not parse logical router port %q: %v",
+				routerIPNetwork, err)
 		}
 	}
-	if routerIP != "" {
+	if routerIP != nil {
 		nextHops = append(nextHops, routerIP)
 	}
 
 	if nodeSubnet != nil {
 		_, mgtPortIP := GetNodeWellKnownAddresses(nodeSubnet)
-		if mgtPortIP.IP.String() != "" {
-			nextHops = append(nextHops, mgtPortIP.IP.String())
-		}
+		nextHops = append(nextHops, mgtPortIP.IP)
 	}
 	staticRouteCleanup(clusterRouter, nextHops)
 
@@ -102,17 +102,17 @@ func GatewayCleanup(nodeName string, nodeSubnet *net.IPNet) error {
 	return nil
 }
 
-func staticRouteCleanup(clusterRouter string, nextHops []string) {
+func staticRouteCleanup(clusterRouter string, nextHops []net.IP) {
 	for _, nextHop := range nextHops {
 		// Get a list of all the routes in cluster router with the next hop IP.
 		var uuids string
 		uuids, stderr, err := RunOVNNbctl("--data=bare", "--no-heading",
 			"--columns=_uuid", "find", "logical_router_static_route",
-			"nexthop=\""+nextHop+"\"")
+			"nexthop=\""+nextHop.String()+"\"")
 		if err != nil {
 			klog.Errorf("Failed to fetch all routes with "+
 				"IP %s as nexthop, stderr: %q, "+
-				"error: %v", nextHop, stderr, err)
+				"error: %v", nextHop.String(), stderr, err)
 			continue
 		}
 

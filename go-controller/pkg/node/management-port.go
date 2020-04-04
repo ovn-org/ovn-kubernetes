@@ -61,8 +61,7 @@ func (n *OvnNode) createManagementPort(localSubnet *net.IPNet, nodeAnnotator kub
 		return err
 	}
 
-	err = createPlatformManagementPort(util.K8sMgmtIntfName, portIP.String(), routerIP.IP.String(),
-		routerMAC, n.stopChan)
+	err = createPlatformManagementPort(util.K8sMgmtIntfName, portIP, routerIP.IP, routerMAC, n.stopChan)
 	if err != nil {
 		return err
 	}

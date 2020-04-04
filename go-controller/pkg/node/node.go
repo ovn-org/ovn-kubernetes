@@ -201,7 +201,7 @@ func (n *OvnNode) Start() error {
 	waiter := newStartupWaiter()
 
 	// Initialize gateway resources on the node
-	if err := n.initGateway(subnet.String(), nodeAnnotator, waiter); err != nil {
+	if err := n.initGateway(subnet, nodeAnnotator, waiter); err != nil {
 		return err
 	}
 

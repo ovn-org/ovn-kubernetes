@@ -539,7 +539,7 @@ func (oc *Controller) syncNodeGateway(node *kapi.Node, subnet *net.IPNet) error 
 			return fmt.Errorf("error cleaning up gateway for node %s: %v", node.Name, err)
 		}
 	} else if subnet != nil {
-		if err := oc.syncGatewayLogicalNetwork(node, l3GatewayConfig, subnet.String()); err != nil {
+		if err := oc.syncGatewayLogicalNetwork(node, l3GatewayConfig, subnet); err != nil {
 			return fmt.Errorf("error creating gateway for node %s: %v", node.Name, err)
 		}
 	}
