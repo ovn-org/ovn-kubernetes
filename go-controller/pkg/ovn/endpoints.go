@@ -76,7 +76,7 @@ func (ovn *Controller) AddEndpoints(ep *kapi.Endpoints) error {
 					}
 					if util.ServiceTypeHasNodePort(svc) {
 						klog.V(5).Infof("Creating Gateways IP for NodePort: %d, %v", svcPort.NodePort, ips)
-						err = ovn.createGatewaysVIP(svcPort.Protocol, svcPort.NodePort, targetPort, ips)
+						err = ovn.createGatewayVIPs(svcPort.Protocol, svcPort.NodePort, ips, targetPort)
 						if err != nil {
 							klog.Errorf("Error in creating Node Port for svc %s, node port: %d - %v\n", svc.Name, svcPort.NodePort, err)
 							continue

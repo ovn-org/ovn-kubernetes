@@ -88,17 +88,17 @@ func (ovn *Controller) syncServices(services []interface{}) {
 			continue
 		}
 
-		loadBalancerVIPS, err := ovn.getLoadBalancerVIPS(loadBalancer)
+		loadBalancerVIPs, err := ovn.getLoadBalancerVIPs(loadBalancer)
 		if err != nil {
 			klog.Errorf("failed to get load-balancer vips for %s (%v)",
 				loadBalancer, err)
 			continue
 		}
-		if loadBalancerVIPS == nil {
+		if loadBalancerVIPs == nil {
 			continue
 		}
 
-		for vip := range loadBalancerVIPS {
+		for vip := range loadBalancerVIPs {
 			if !stringSliceMembership(clusterServices[protocol], vip) {
 				klog.V(5).Infof("Deleting stale cluster vip %s in "+
 					"loadbalancer %s", vip, loadBalancer)
@@ -128,17 +128,17 @@ func (ovn *Controller) syncServices(services []interface{}) {
 				continue
 			}
 
-			loadBalancerVIPS, err := ovn.getLoadBalancerVIPS(loadBalancer)
+			loadBalancerVIPs, err := ovn.getLoadBalancerVIPs(loadBalancer)
 			if err != nil {
 				klog.Errorf("failed to get load-balancer vips for %s (%v)",
 					loadBalancer, err)
 				continue
 			}
-			if loadBalancerVIPS == nil {
+			if loadBalancerVIPs == nil {
 				continue
 			}
 
-			for vip := range loadBalancerVIPS {
+			for vip := range loadBalancerVIPs {
 				_, port, err := net.SplitHostPort(vip)
 				if err != nil {
 					// In a OVN load-balancer, we should always have vip:port.
@@ -319,7 +319,7 @@ func (ovn *Controller) deleteService(service *kapi.Service) {
 		var targetPort int32
 		if util.ServiceTypeHasNodePort(service) {
 			// Delete the 'NodePort' service from a load-balancer instantiated in gateways.
-			ovn.deleteGatewaysVIP(protocol, port)
+			ovn.deleteGatewayVIPs(protocol, port)
 		}
 		if util.ServiceTypeHasClusterIP(service) {
 			loadBalancer, err := ovn.getLoadBalancer(protocol)
