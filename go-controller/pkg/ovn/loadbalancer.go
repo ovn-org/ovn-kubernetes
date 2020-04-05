@@ -126,22 +126,34 @@ func (ovn *Controller) configureLoadBalancer(lb, sourceIP string, sourcePort int
 	return nil
 }
 
-// createLoadBalancerVIP either creates or updates a load balancer VIP mapping from
-// sourceIP:sourcePort to targetIP:targetPort for each IP in targetIPs. If targetIPs
-// is non-empty then the reject ACL for the service is removed.
-func (ovn *Controller) createLoadBalancerVIP(lb, sourceIP string, sourcePort int32, targetIPs []string, targetPort int32) error {
-	klog.V(5).Infof("Creating lb with %s, %s, %d, [%v], %d", lb, sourceIP, sourcePort, targetIPs, targetPort)
+// createLoadBalancerVIPs either creates or updates a set of load balancer VIPs mapping
+// from sourcePort on each IP of a given address family in sourceIPs, to targetPort on
+// each IP of the same address family in targetIPs, removing the reject ACL for any
+// source IP that is now in use.
+func (ovn *Controller) createLoadBalancerVIPs(lb string,
+	sourceIPs []string, sourcePort int32,
+	targetIPs []string, targetPort int32) error {
+	klog.V(5).Infof("Creating lb with %s, [%v], %d, [%v], %d", lb, sourceIPs, sourcePort, targetIPs, targetPort)
 
-	var targets []string
-	for _, targetIP := range targetIPs {
-		targets = append(targets, util.JoinHostPortInt32(targetIP, targetPort))
+	for _, sourceIP := range sourceIPs {
+		isIPv6 := utilnet.IsIPv6String(sourceIP)
+
+		var targets []string
+		for _, targetIP := range targetIPs {
+			if utilnet.IsIPv6String(targetIP) == isIPv6 {
+				targets = append(targets, util.JoinHostPortInt32(targetIP, targetPort))
+			}
+		}
+		err := ovn.configureLoadBalancer(lb, sourceIP, sourcePort, targets)
+		if len(targets) > 0 {
+			// ensure the ACL is removed if it exists
+			ovn.deleteLoadBalancerRejectACL(lb, util.JoinHostPortInt32(sourceIP, sourcePort))
+		}
+		if err != nil {
+			return err
+		}
 	}
-	err := ovn.configureLoadBalancer(lb, sourceIP, sourcePort, targets)
-	if len(targets) > 0 {
-		// ensure the ACL is removed if it exists
-		ovn.deleteLoadBalancerRejectACL(lb, util.JoinHostPortInt32(sourceIP, sourcePort))
-	}
-	return err
+	return nil
 }
 
 func (ovn *Controller) getLogicalSwitchesForLoadBalancer(lb string) ([]string, error) {
