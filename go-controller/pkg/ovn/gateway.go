@@ -18,14 +18,14 @@ func (ovn *Controller) getOvnGateways() ([]string, string, error) {
 	return strings.Fields(out), stderr, err
 }
 
-func (ovn *Controller) getGatewayPhysicalIP(physicalGateway string) (string, error) {
+func (ovn *Controller) getGatewayPhysicalIPs(physicalGateway string) ([]string, error) {
 	physicalIP, _, err := util.RunOVNNbctl("get", "logical_router",
 		physicalGateway, "external_ids:physical_ip")
 	if err != nil {
-		return "", err
+		return nil, err
 	}
 
-	return physicalIP, nil
+	return []string{physicalIP}, nil
 }
 
 func (ovn *Controller) getGatewayLoadBalancer(physicalGateway string, protocol kapi.Protocol) (string, error) {
@@ -60,7 +60,7 @@ func (ovn *Controller) createGatewayVIPs(protocol kapi.Protocol, sourcePort int3
 		if loadBalancer == "" {
 			continue
 		}
-		physicalIP, err := ovn.getGatewayPhysicalIP(physicalGateway)
+		physicalIPs, err := ovn.getGatewayPhysicalIPs(physicalGateway)
 		if err != nil {
 			klog.Errorf("physical gateway %s does not have physical ip (%v)",
 				physicalGateway, err)
@@ -68,7 +68,7 @@ func (ovn *Controller) createGatewayVIPs(protocol kapi.Protocol, sourcePort int3
 		}
 		// With the physical_ip:sourcePort as the VIP, add an entry in
 		// 'load_balancer'.
-		err = ovn.createLoadBalancerVIP(loadBalancer, physicalIP, sourcePort, targetIPs, targetPort)
+		err = ovn.createLoadBalancerVIPs(loadBalancer, physicalIPs, sourcePort, targetIPs, targetPort)
 		if err != nil {
 			klog.Errorf("Failed to create VIP in load balancer %s - %v", loadBalancer, err)
 			continue
@@ -95,15 +95,17 @@ func (ovn *Controller) deleteGatewayVIPs(protocol kapi.Protocol, sourcePort int3
 		if loadBalancer == "" {
 			continue
 		}
-		physicalIP, err := ovn.getGatewayPhysicalIP(physicalGateway)
+		physicalIPs, err := ovn.getGatewayPhysicalIPs(physicalGateway)
 		if err != nil {
 			klog.Errorf("physical gateway %s does not have physical ip (%v)",
 				physicalGateway, err)
 			continue
 		}
-		// With the physical_ip:sourcePort as the VIP, delete an entry in 'load_balancer'.
-		vip := util.JoinHostPortInt32(physicalIP, sourcePort)
-		klog.V(5).Infof("Removing gateway VIP: %s from loadbalancer: %s", vip, loadBalancer)
-		ovn.deleteLoadBalancerVIP(loadBalancer, vip)
+		for _, physicalIP := range physicalIPs {
+			// With the physical_ip:sourcePort as the VIP, delete an entry in 'load_balancer'.
+			vip := util.JoinHostPortInt32(physicalIP, sourcePort)
+			klog.V(5).Infof("Removing gateway VIP: %s from loadbalancer: %s", vip, loadBalancer)
+			ovn.deleteLoadBalancerVIP(loadBalancer, vip)
+		}
 	}
 }

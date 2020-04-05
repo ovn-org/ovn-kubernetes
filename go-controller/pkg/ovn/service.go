@@ -214,24 +214,26 @@ func (ovn *Controller) createService(service *kapi.Service) error {
 				if loadBalancer == "" {
 					continue
 				}
-				physicalIP, err := ovn.getGatewayPhysicalIP(physicalGateway)
+				physicalIPs, err := ovn.getGatewayPhysicalIPs(physicalGateway)
 				if err != nil {
 					klog.Errorf("physical gateway %s does not have physical ip (%v)",
 						physicalGateway, err)
 					continue
 				}
-				// With the physical_ip:port as the VIP, add an entry in
-				// 'load_balancer'.
-				vip := util.JoinHostPortInt32(physicalIP, port)
-				// Skip creating LB if endpoints watcher already did it
-				if _, hasEps := ovn.getServiceLBInfo(loadBalancer, vip); hasEps {
-					klog.V(5).Infof("Load Balancer already configured for %s, %s", loadBalancer, vip)
-				} else if ovn.svcQualifiesForReject(service) {
-					aclUUID, err := ovn.createLoadBalancerRejectACL(loadBalancer, physicalIP, port, protocol)
-					if err != nil {
-						return fmt.Errorf("failed to create service ACL")
+				for _, physicalIP := range physicalIPs {
+					// With the physical_ip:port as the VIP, add an entry in
+					// 'load_balancer'.
+					vip := util.JoinHostPortInt32(physicalIP, port)
+					// Skip creating LB if endpoints watcher already did it
+					if _, hasEps := ovn.getServiceLBInfo(loadBalancer, vip); hasEps {
+						klog.V(5).Infof("Load Balancer already configured for %s, %s", loadBalancer, vip)
+					} else if ovn.svcQualifiesForReject(service) {
+						aclUUID, err := ovn.createLoadBalancerRejectACL(loadBalancer, physicalIP, port, protocol)
+						if err != nil {
+							return fmt.Errorf("failed to create service ACL")
+						}
+						klog.V(5).Infof("Service Reject ACL created for physical gateway: %s", aclUUID)
 					}
-					klog.V(5).Infof("Service Reject ACL created for physical gateway: %s", aclUUID)
 				}
 			}
 		}
