@@ -109,8 +109,7 @@ func (n *OvnNode) initGateway(subnet string, nodeAnnotator kube.Annotator,
 				gatewayIntf = defaultGatewayIntf
 			}
 		}
-		prFn, err = initSharedGateway(n.name, subnet, gatewayNextHop, gatewayIntf,
-			n.watchFactory, nodeAnnotator)
+		prFn, err = n.initSharedGateway(subnet, gatewayNextHop, gatewayIntf, nodeAnnotator)
 	case config.GatewayModeDisabled:
 		err = util.SetDisabledL3GatewayConfig(nodeAnnotator)
 	}

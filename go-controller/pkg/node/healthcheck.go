@@ -1,6 +1,8 @@
 package node
 
 import (
+	"fmt"
+	"os"
 	"strings"
 	"time"
 
@@ -110,6 +112,31 @@ func checkForStaleOVSInterfaces(stopChan chan struct{}) {
 					klog.Errorf("failed to delete OVS port/interface %s: stderr: %s (%v)",
 						val, stderr, err)
 				}
+			}
+		case <-stopChan:
+			return
+		}
+	}
+}
+
+// checkDefaultOpenFlow checks for the existence of default OpenFlow rules and
+// exits if the output is not as expected
+func checkDefaultConntrackRules(gwBridge string, nFlows int, stopChan chan struct{}) {
+	flowCount := fmt.Sprintf("flow_count=%d", nFlows)
+	for {
+		select {
+		case <-time.After(30 * time.Second):
+			out, _, err := util.RunOVSOfctl("dump-aggregate", gwBridge,
+				fmt.Sprintf("cookie=%s/-1", defaultOpenFlowCookie))
+			if err != nil {
+				klog.Errorf("failed to dump aggregate statistics of the default OpenFlow rules: %v", err)
+				continue
+			}
+
+			if !strings.Contains(out, flowCount) {
+				klog.Errorf("fatal error: unexpected default OpenFlows count, expect %d output: %v\n",
+					nFlows, out)
+				os.Exit(1)
 			}
 		case <-stopChan:
 			return
