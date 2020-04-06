@@ -3,10 +3,14 @@ package util
 import (
 	"encoding/json"
 	"fmt"
+	"k8s.io/client-go/tools/record"
+	"k8s.io/klog"
 	"strings"
 
 	kapi "k8s.io/api/core/v1"
 	"k8s.io/client-go/kubernetes"
+	"k8s.io/client-go/kubernetes/scheme"
+	typedcorev1 "k8s.io/client-go/kubernetes/typed/core/v1"
 	"k8s.io/client-go/rest"
 	"k8s.io/client-go/tools/clientcmd"
 	"k8s.io/client-go/util/cert"
@@ -59,6 +63,14 @@ func NewClientset(conf *config.KubernetesConfig) (*kubernetes.Clientset, error) 
 // IsClusterIPSet checks if the service is an headless service or not
 func IsClusterIPSet(service *kapi.Service) bool {
 	return service.Spec.ClusterIP != kapi.ClusterIPNone && service.Spec.ClusterIP != ""
+}
+
+// ValidateProtocol checks if the protocol is a valid kapi.Protocol type (TCP, UDP, or SCTP) or returns an error
+func ValidateProtocol(proto kapi.Protocol) (kapi.Protocol, error) {
+	if proto == kapi.ProtocolTCP || proto == kapi.ProtocolUDP || proto == kapi.ProtocolSCTP {
+		return proto, nil
+	}
+	return "", fmt.Errorf("protocol %s is not a valid protocol", proto)
 }
 
 // ServiceTypeHasClusterIP checks if the service has an associated ClusterIP or not
@@ -147,4 +159,18 @@ func GetPodNetSelAnnotation(pod *kapi.Pod, netAttachAnnot string) ([]*types.Netw
 	}
 
 	return networks, nil
+}
+
+// eventRecorder returns an EventRecorder type that can be
+// used to post Events to different object's lifecycles.
+func EventRecorder(kubeClient kubernetes.Interface) record.EventRecorder {
+	eventBroadcaster := record.NewBroadcaster()
+	eventBroadcaster.StartLogging(klog.Infof)
+	eventBroadcaster.StartRecordingToSink(
+		&typedcorev1.EventSinkImpl{
+			Interface: kubeClient.CoreV1().Events("")})
+	recorder := eventBroadcaster.NewRecorder(
+		scheme.Scheme,
+		kapi.EventSource{Component: "controlplane"})
+	return recorder
 }

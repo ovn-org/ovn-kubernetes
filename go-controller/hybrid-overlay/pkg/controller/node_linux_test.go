@@ -2,7 +2,6 @@ package controller
 
 import (
 	"fmt"
-	"net"
 	"strings"
 
 	"github.com/urfave/cli"
@@ -49,7 +48,7 @@ func addNodeSetupCmds(fexec *ovntest.FakeExec, nodeName string) (string, string)
 		"ovs-ofctl add-flow br-ext table=0,priority=0,actions=drop",
 	})
 	testDRMACRaw := strings.Replace(testDRMAC, ":", "", -1)
-	testNodeIPRaw := getIPAsHexString(net.ParseIP(testNodeIP))
+	testNodeIPRaw := getIPAsHexString(ovntest.MustParseIP(testNodeIP))
 	fexec.AddFakeCmdsNoOutputNoError([]string{
 		"ovs-ofctl add-flow br-ext table=0,priority=100,in_port=ext,arp,arp_tpa=" + testNodeIP + ",actions=move:NXM_OF_ETH_SRC[]->NXM_OF_ETH_DST[],mod_dl_src:" + testDRMAC + ",load:0x2->NXM_OF_ARP_OP[],move:NXM_NX_ARP_SHA[]->NXM_NX_ARP_THA[],move:NXM_OF_ARP_SPA[]->NXM_OF_ARP_TPA[],load:0x" + testDRMACRaw + "->NXM_NX_ARP_SHA[],load:0x" + testNodeIPRaw + "->NXM_OF_ARP_SPA[],IN_PORT",
 		`ovs-vsctl --timeout=15 --may-exist add-port br-ext ext-vxlan -- set interface ext-vxlan type=vxlan options:remote_ip="flow" options:key="flow"`,
@@ -79,7 +78,7 @@ func createNode(name, os, ip string, annotations map[string]string) *v1.Node {
 func createPod(namespace, name, node, podIP, podMAC string) *v1.Pod {
 	annotations := map[string]string{}
 	if podIP != "" || podMAC != "" {
-		_, ipn, _ := net.ParseCIDR(podIP)
+		ipn := ovntest.MustParseIPNet(podIP)
 		gatewayIP := util.NextIP(ipn.IP)
 		annotations[util.OvnPodAnnotationName] = fmt.Sprintf(`{"default": {"ip_address":"` + podIP + `", "mac_address":"` + podMAC + `", "gateway_ip": "` + gatewayIP.String() + `"}}`)
 	}

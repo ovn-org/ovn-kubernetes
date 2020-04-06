@@ -2,7 +2,6 @@ package ovn
 
 import (
 	"fmt"
-	"net"
 
 	"github.com/urfave/cli"
 
@@ -86,9 +85,7 @@ func (p pod) populateLogicalSwitchCache(fakeOvn *FakeOVN) {
 	Expect(p.nodeName).NotTo(Equal(""))
 	fakeOvn.controller.lsMutex.Lock()
 	defer fakeOvn.controller.lsMutex.Unlock()
-	_, hostsubnet, err := net.ParseCIDR(p.nodeSubnet)
-	Expect(err).NotTo(HaveOccurred())
-	fakeOvn.controller.logicalSwitchCache[p.nodeName] = hostsubnet
+	fakeOvn.controller.logicalSwitchCache[p.nodeName] = ovntest.MustParseIPNet(p.nodeSubnet)
 }
 
 func (p pod) addCmds(fexec *ovntest.FakeExec, fail bool) {

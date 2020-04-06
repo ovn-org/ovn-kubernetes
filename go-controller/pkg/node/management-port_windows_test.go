@@ -124,7 +124,8 @@ var _ = Describe("Management Port Operations", func() {
 			wg := &sync.WaitGroup{}
 			waitErrors := make(chan error)
 
-			err = createManagementPort(nodeName, nodeSubnet, nodeAnnotator, wg, waitErrors)
+			n := OvnNode{name: nodeName, stopChan: waitErrors}
+			err = n.createManagementPort(nodeSubnet, nodeAnnotator, wg)
 			Expect(err).NotTo(HaveOccurred())
 
 			err = nodeAnnotator.Run()

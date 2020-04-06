@@ -5,7 +5,6 @@ package node
 import (
 	"bytes"
 	"fmt"
-	"net"
 	"syscall"
 
 	"github.com/urfave/cli"
@@ -28,10 +27,11 @@ import (
 	. "github.com/onsi/gomega"
 )
 
-func addNodeportLBs(fexec *ovntest.FakeExec, nodeName, tcpLBUUID, udpLBUUID string) {
+func addNodeportLBs(fexec *ovntest.FakeExec, nodeName, tcpLBUUID, udpLBUUID, sctpLBUUID string) {
 	fexec.AddFakeCmdsNoOutputNoError([]string{
 		"ovn-nbctl --timeout=15 --data=bare --no-heading --columns=_uuid find load_balancer external_ids:TCP_lb_gateway_router=" + util.GWRouterPrefix + nodeName,
 		"ovn-nbctl --timeout=15 --data=bare --no-heading --columns=_uuid find load_balancer external_ids:UDP_lb_gateway_router=" + util.GWRouterPrefix + nodeName,
+		"ovn-nbctl --timeout=15 --data=bare --no-heading --columns=_uuid find load_balancer external_ids:SCTP_lb_gateway_router=" + util.GWRouterPrefix + nodeName,
 	})
 	fexec.AddFakeCmd(&ovntest.ExpectedCmd{
 		Cmd:    "ovn-nbctl --timeout=15 -- create load_balancer external_ids:TCP_lb_gateway_router=" + util.GWRouterPrefix + nodeName + " protocol=tcp",
@@ -41,9 +41,14 @@ func addNodeportLBs(fexec *ovntest.FakeExec, nodeName, tcpLBUUID, udpLBUUID stri
 		Cmd:    "ovn-nbctl --timeout=15 -- create load_balancer external_ids:UDP_lb_gateway_router=" + util.GWRouterPrefix + nodeName + " protocol=udp",
 		Output: udpLBUUID,
 	})
+	fexec.AddFakeCmd(&ovntest.ExpectedCmd{
+		Cmd:    "ovn-nbctl --timeout=15 -- create load_balancer external_ids:SCTP_lb_gateway_router=" + util.GWRouterPrefix + nodeName + " protocol=sctp",
+		Output: sctpLBUUID,
+	})
 	fexec.AddFakeCmdsNoOutputNoError([]string{
 		"ovn-nbctl --timeout=15 set logical_router " + util.GWRouterPrefix + nodeName + " load_balancer=" + tcpLBUUID,
 		"ovn-nbctl --timeout=15 add logical_router " + util.GWRouterPrefix + nodeName + " load_balancer " + udpLBUUID,
+		"ovn-nbctl --timeout=15 add logical_router " + util.GWRouterPrefix + nodeName + " load_balancer " + sctpLBUUID,
 	})
 }
 
@@ -60,6 +65,7 @@ func shareGatewayInterfaceTest(app *cli.App, testNS ns.NetNS,
 			systemID          string = "cb9ec8fa-b409-4ef3-9f42-d9283c47aac6"
 			tcpLBUUID         string = "d2e858b2-cb5a-441b-a670-ed450f79a91f"
 			udpLBUUID         string = "12832f14-eb0f-44d4-b8db-4cccbc73c792"
+			sctpLBUUID        string = "0514c521-a120-4756-aec6-883fe5db7139"
 			nodeSubnet        string = "10.1.1.0/24"
 			gwRouter          string = util.GWRouterPrefix + nodeName
 			mgtPortName       string = "k8s-" + nodeName
@@ -81,14 +87,11 @@ func shareGatewayInterfaceTest(app *cli.App, testNS ns.NetNS,
 				return testNS.Do(func(ns.NetNS) error {
 					defer GinkgoRecover()
 
-					hwaddr, err := net.ParseMAC(eth0MAC)
-					Expect(err).NotTo(HaveOccurred())
-
 					// Create breth0 as a dummy link
-					err = netlink.LinkAdd(&netlink.Dummy{
+					err := netlink.LinkAdd(&netlink.Dummy{
 						LinkAttrs: netlink.LinkAttrs{
 							Name:         "br" + eth0Name,
-							HardwareAddr: hwaddr,
+							HardwareAddr: ovntest.MustParseMAC(eth0MAC),
 						},
 					})
 					Expect(err).NotTo(HaveOccurred())
@@ -123,11 +126,14 @@ func shareGatewayInterfaceTest(app *cli.App, testNS ns.NetNS,
 			Output: "7",
 		})
 		fexec.AddFakeCmdsNoOutputNoError([]string{
-			"ovs-ofctl add-flow breth0 priority=100, in_port=5, ip, actions=ct(commit, zone=64000), output:7",
-			"ovs-ofctl add-flow breth0 priority=50, in_port=7, ip, actions=ct(zone=64000, table=1)",
-			"ovs-ofctl add-flow breth0 priority=100, table=1, ct_state=+trk+est, actions=output:5",
-			"ovs-ofctl add-flow breth0 priority=100, table=1, ct_state=+trk+rel, actions=output:5",
-			"ovs-ofctl add-flow breth0 priority=0, table=1, actions=output:NORMAL",
+			"ovs-ofctl -O OpenFlow13 replace-flows breth0 -",
+		})
+		fexec.AddFakeCmdsNoOutputNoError([]string{
+			"ovs-ofctl add-flow breth0 cookie=0xdeff105, priority=100, in_port=5, ip, actions=ct(commit, zone=64000), output:7",
+			"ovs-ofctl add-flow breth0 cookie=0xdeff105, priority=50, in_port=7, ip, actions=ct(zone=64000, table=1)",
+			"ovs-ofctl add-flow breth0 cookie=0xdeff105, priority=100, table=1, ct_state=+trk+est, actions=output:5",
+			"ovs-ofctl add-flow breth0 cookie=0xdeff105, priority=100, table=1, ct_state=+trk+rel, actions=output:5",
+			"ovs-ofctl add-flow breth0 cookie=0xdeff105, priority=0, table=1, actions=output:NORMAL",
 		})
 		// nodePortWatcher()
 		fexec.AddFakeCmd(&ovntest.ExpectedCmd{
@@ -169,7 +175,7 @@ cookie=0x0, duration=8366.597s, table=1, n_packets=10641, n_bytes=10370087, prio
 		Expect(err).NotTo(HaveOccurred())
 		defer close(stop)
 
-		n := NewNode(nil, wf, existingNode.Name)
+		n := NewNode(nil, wf, existingNode.Name, stop)
 
 		ipt, err := util.NewFakeWithProtocol(iptables.ProtocolIPv4)
 		Expect(err).NotTo(HaveOccurred())
@@ -293,6 +299,7 @@ var _ = Describe("Gateway Init Operations", func() {
 				systemID      string = "cb9ec8fa-b409-4ef3-9f42-d9283c47aac6"
 				tcpLBUUID     string = "d2e858b2-cb5a-441b-a670-ed450f79a91f"
 				udpLBUUID     string = "12832f14-eb0f-44d4-b8db-4cccbc73c792"
+				sctpLBUUID    string = "0514c521-a120-4756-aec6-883fe5db7139"
 				nodeSubnet    string = "10.1.1.0/24"
 				gwRouter      string = util.GWRouterPrefix + nodeName
 				clusterIPNet  string = "10.1.0.0"
@@ -444,15 +451,11 @@ var _ = Describe("Gateway Init Operations", func() {
 				eth0MAC = l.Attrs().HardwareAddr.String()
 
 				// And a default route
-				_, ipn, err := net.ParseCIDR("0.0.0.0/0")
-				Expect(err).NotTo(HaveOccurred())
-				gw := net.ParseIP(eth0GWIP)
-				Expect(err).NotTo(HaveOccurred())
 				err = netlink.RouteAdd(&netlink.Route{
 					LinkIndex: l.Attrs().Index,
 					Scope:     netlink.SCOPE_UNIVERSE,
-					Dst:       ipn,
-					Gw:        gw,
+					Dst:       ovntest.MustParseIPNet("0.0.0.0/0"),
+					Gw:        ovntest.MustParseIP(eth0GWIP),
 				})
 				Expect(err).NotTo(HaveOccurred())
 

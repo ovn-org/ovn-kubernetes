@@ -25,6 +25,11 @@ RUN INSTALL_PKGS=" \
 	dnf install --best --refresh -y --setopt=tsflags=nodocs $INSTALL_PKGS && \
 	dnf clean all && rm -rf /var/cache/dnf/*
 
+# ensure we pick up ovn-20.03.0-2.fc31 for SCTP fixes/support
+# this should have no effect in the future once the
+# RPM has propagated to all stable mirrors and can be removed
+RUN dnf install -y ovn --best --advisory=FEDORA-2020-b570bbc33b || true
+
 RUN mkdir -p /var/run/openvswitch && \
     mkdir -p /usr/libexec/cni/
 

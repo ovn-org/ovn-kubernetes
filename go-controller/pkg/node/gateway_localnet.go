@@ -228,9 +228,10 @@ func localnetIPTablesHelper(subnet string) (util.IPTablesHelper, error) {
 func localnetIptRules(svc *kapi.Service, gatewayIP string) []iptRule {
 	rules := make([]iptRule, 0)
 	for _, svcPort := range svc.Spec.Ports {
-		protocol := svcPort.Protocol
-		if protocol != kapi.ProtocolUDP && protocol != kapi.ProtocolTCP {
-			protocol = kapi.ProtocolTCP
+		protocol, err := util.ValidateProtocol(svcPort.Protocol)
+		if err != nil {
+			klog.Errorf("Invalid service port %s: %v", svcPort.Name, err)
+			continue
 		}
 
 		nodePort := fmt.Sprintf("%d", svcPort.NodePort)

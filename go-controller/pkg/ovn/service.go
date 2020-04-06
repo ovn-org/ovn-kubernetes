@@ -8,24 +8,26 @@ import (
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
 
 	kapi "k8s.io/api/core/v1"
+	"k8s.io/client-go/kubernetes/scheme"
+	"k8s.io/client-go/tools/reference"
 	"k8s.io/klog"
 )
 
 func (ovn *Controller) syncServices(services []interface{}) {
 	// For all clusterIP in k8s, we will populate the below slice with
 	// IP:port. In OVN's database those are the keys. We need to
-	// have separate slice for TCP and UDP load-balancers (hence the dict).
-	clusterServices := make(map[string][]string)
+	// have separate slice for TCP, SCTP, and UDP load-balancers (hence the dict).
+	clusterServices := make(map[kapi.Protocol][]string)
 
 	// For all nodePorts in k8s, we will populate the below slice with
 	// nodePort. In OVN's database, nodeIP:nodePort is the key.
-	// We have separate slice for TCP and UDP nodePort load-balancers.
+	// We have separate slice for TCP, SCTP, and UDP nodePort load-balancers.
 	// We will get nodeIP separately later.
-	nodeportServices := make(map[string][]string)
+	nodeportServices := make(map[kapi.Protocol][]string)
 
 	// For all externalIPs in k8s, we will populate the below map of slices
 	// with loadbalancer type services based on each protocol.
-	lbServices := make(map[string][]string)
+	lbServices := make(map[kapi.Protocol][]string)
 
 	// Go through the k8s services and populate 'clusterServices',
 	// 'nodeportServices' and 'lbServices'
@@ -48,18 +50,15 @@ func (ovn *Controller) syncServices(services []interface{}) {
 		}
 
 		for _, svcPort := range service.Spec.Ports {
-			protocol := svcPort.Protocol
-			if protocol == "" || (protocol != TCP && protocol != UDP) {
-				protocol = TCP
+			protocol, err := util.ValidateProtocol(svcPort.Protocol)
+			if err != nil {
+				klog.Errorf("Error validating protocol for port %s: %v", svcPort.Name, err)
+				continue
 			}
 
 			if util.ServiceTypeHasNodePort(service) {
 				port := fmt.Sprintf("%d", svcPort.NodePort)
-				if protocol == TCP {
-					nodeportServices[TCP] = append(nodeportServices[TCP], port)
-				} else {
-					nodeportServices[UDP] = append(nodeportServices[UDP], port)
-				}
+				nodeportServices[protocol] = append(nodeportServices[protocol], port)
 			}
 
 			if svcPort.Port == 0 {
@@ -67,30 +66,22 @@ func (ovn *Controller) syncServices(services []interface{}) {
 			}
 
 			key := util.JoinHostPortInt32(service.Spec.ClusterIP, svcPort.Port)
-			if protocol == TCP {
-				clusterServices[TCP] = append(clusterServices[TCP], key)
-			} else {
-				clusterServices[UDP] = append(clusterServices[UDP], key)
-			}
+			clusterServices[protocol] = append(clusterServices[protocol], key)
 
 			if len(service.Spec.ExternalIPs) == 0 {
 				continue
 			}
 			for _, extIP := range service.Spec.ExternalIPs {
 				key := util.JoinHostPortInt32(extIP, svcPort.Port)
-				if protocol == TCP {
-					lbServices[TCP] = append(lbServices[TCP], key)
-				} else {
-					lbServices[UDP] = append(lbServices[UDP], key)
-				}
+				lbServices[protocol] = append(lbServices[protocol], key)
 			}
 		}
 	}
 
 	// Get OVN's current cluster load-balancer VIPs and delete them if they
 	// are stale.
-	for _, protocol := range []string{TCP, UDP} {
-		loadBalancer, err := ovn.getLoadBalancer(kapi.Protocol(protocol))
+	for _, protocol := range []kapi.Protocol{kapi.ProtocolTCP, kapi.ProtocolUDP, kapi.ProtocolSCTP} {
+		loadBalancer, err := ovn.getLoadBalancer(protocol)
 		if err != nil {
 			klog.Errorf("Failed to get load-balancer for %s (%v)",
 				kapi.Protocol(protocol), err)
@@ -126,7 +117,7 @@ func (ovn *Controller) syncServices(services []interface{}) {
 	}
 
 	for _, gateway := range gateways {
-		for _, protocol := range []kapi.Protocol{kapi.ProtocolTCP, kapi.ProtocolUDP} {
+		for _, protocol := range []kapi.Protocol{kapi.ProtocolTCP, kapi.ProtocolUDP, kapi.ProtocolSCTP} {
 			loadBalancer, err := ovn.getGatewayLoadBalancer(gateway, protocol)
 			if err != nil {
 				klog.Errorf("physical gateway %s does not have "+
@@ -157,7 +148,7 @@ func (ovn *Controller) syncServices(services []interface{}) {
 					continue
 				}
 
-				if !stringSliceMembership(nodeportServices[string(protocol)], port) && !stringSliceMembership(lbServices[string(protocol)], vip) {
+				if !stringSliceMembership(nodeportServices[protocol], port) && !stringSliceMembership(lbServices[protocol], vip) {
 					klog.V(5).Infof("Deleting stale nodeport vip %s in "+
 						"loadbalancer %s", vip, loadBalancer)
 					ovn.deleteLoadBalancerVIP(loadBalancer, vip)
@@ -188,9 +179,21 @@ func (ovn *Controller) createService(service *kapi.Service) error {
 			continue
 		}
 
-		protocol := svcPort.Protocol
-		if protocol == "" || (protocol != TCP && protocol != UDP) {
-			protocol = TCP
+		protocol, err := util.ValidateProtocol(svcPort.Protocol)
+		if err != nil {
+			return fmt.Errorf("error validating protocol for port %s: %v", svcPort.Name, err)
+		}
+
+		if !ovn.SCTPSupport && protocol == kapi.ProtocolSCTP {
+			ref, err := reference.GetReference(scheme.Scheme, service)
+			if err != nil {
+				klog.Errorf("Could not get reference for pod %v: %v\n", service.Name, err)
+			} else {
+				ovn.recorder.Event(ref, kapi.EventTypeWarning, "Unsupported protocol error",
+					"SCTP protocol is unsupported by this version of OVN")
+			}
+
+			return fmt.Errorf("invalid service port %s: SCTP is unsupported by this version of OVN", svcPort.Name)
 		}
 
 		if util.ServiceTypeHasNodePort(service) {
@@ -306,9 +309,10 @@ func (ovn *Controller) deleteService(service *kapi.Service) {
 			continue
 		}
 
-		protocol := svcPort.Protocol
-		if protocol == "" || (protocol != TCP && protocol != UDP) {
-			protocol = TCP
+		protocol, err := util.ValidateProtocol(svcPort.Protocol)
+		if err != nil {
+			klog.Errorf("Skipping delete for service port %s: %v", svcPort.Name, err)
+			continue
 		}
 
 		// targetPort can be anything, the deletion logic does not use it

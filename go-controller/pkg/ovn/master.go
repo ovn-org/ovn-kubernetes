@@ -177,6 +177,17 @@ func (oc *Controller) SetupMaster(masterNodeName string) error {
 		return err
 	}
 
+	// Determine SCTP support
+	oc.SCTPSupport, err = util.DetectSCTPSupport()
+	if err != nil {
+		return err
+	}
+	if !oc.SCTPSupport {
+		klog.Warningf("SCTP unsupported by this version of OVN. Kubernetes service creation with SCTP will not work ")
+	} else {
+		klog.Info("SCTP support detected in OVN")
+	}
+
 	// If supported, enable IGMP relay on the router to forward multicast
 	// traffic between nodes.
 	if oc.multicastSupport {
@@ -198,7 +209,7 @@ func (oc *Controller) SetupMaster(masterNodeName string) error {
 		}
 	}
 
-	// Create 2 load-balancers for east-west traffic.  One handles UDP and another handles TCP.
+	// Create 3 load-balancers for east-west traffic for UDP, TCP, SCTP
 	oc.TCPLoadBalancerUUID, stderr, err = util.RunOVNNbctl("--data=bare", "--no-heading", "--columns=_uuid", "find", "load_balancer", "external_ids:k8s-cluster-lb-tcp=yes")
 	if err != nil {
 		klog.Errorf("Failed to get tcp load-balancer, stderr: %q, error: %v", stderr, err)
@@ -222,6 +233,19 @@ func (oc *Controller) SetupMaster(masterNodeName string) error {
 		oc.UDPLoadBalancerUUID, stderr, err = util.RunOVNNbctl("--", "create", "load_balancer", "external_ids:k8s-cluster-lb-udp=yes", "protocol=udp")
 		if err != nil {
 			klog.Errorf("Failed to create udp load-balancer, stdout: %q, stderr: %q, error: %v", stdout, stderr, err)
+			return err
+		}
+	}
+
+	oc.SCTPLoadBalancerUUID, stderr, err = util.RunOVNNbctl("--data=bare", "--no-heading", "--columns=_uuid", "find", "load_balancer", "external_ids:k8s-cluster-lb-sctp=yes")
+	if err != nil {
+		klog.Errorf("Failed to get sctp load-balancer, stderr: %q, error: %v", stderr, err)
+		return err
+	}
+	if oc.SCTPLoadBalancerUUID == "" && oc.SCTPSupport {
+		oc.SCTPLoadBalancerUUID, stderr, err = util.RunOVNNbctl("--", "create", "load_balancer", "external_ids:k8s-cluster-lb-sctp=yes", "protocol=sctp")
+		if err != nil {
+			klog.Errorf("Failed to create sctp load-balancer, stdout: %q, stderr: %q, error: %v", stdout, stderr, err)
 			return err
 		}
 	}
@@ -342,7 +366,7 @@ func (oc *Controller) syncGatewayLogicalNetwork(node *kapi.Node, l3GatewayConfig
 		return err
 	}
 
-	err = util.GatewayInit(clusterSubnets, subnet, joinSubnet, node.Name, l3GatewayConfig)
+	err = util.GatewayInit(clusterSubnets, subnet, joinSubnet, node.Name, l3GatewayConfig, oc.SCTPSupport)
 	if err != nil {
 		return fmt.Errorf("failed to init shared interface gateway: %v", err)
 	}
@@ -361,7 +385,7 @@ func (oc *Controller) syncGatewayLogicalNetwork(node *kapi.Node, l3GatewayConfig
 	} else {
 		// nodePort disabled, delete gateway load balancers for this node.
 		physicalGateway := "GR_" + node.Name
-		for _, proto := range []kapi.Protocol{kapi.ProtocolTCP, kapi.ProtocolUDP} {
+		for _, proto := range []kapi.Protocol{kapi.ProtocolTCP, kapi.ProtocolUDP, kapi.ProtocolSCTP} {
 			lbUUID, _ := oc.getGatewayLoadBalancer(physicalGateway, proto)
 			if lbUUID != "" {
 				_, _, err := util.RunOVNNbctl("--if-exists", "destroy", "load_balancer", lbUUID)
@@ -514,6 +538,25 @@ func (oc *Controller) ensureNodeLogicalNetwork(nodeName string, hostsubnet *net.
 		}
 	}
 
+	if oc.SCTPSupport {
+		if oc.SCTPLoadBalancerUUID == "" {
+			return fmt.Errorf("SCTP cluster load balancer not created")
+		}
+		stdout, stderr, err = util.RunOVNNbctl("add", "logical_switch", nodeName, "load_balancer", oc.SCTPLoadBalancerUUID)
+		if err != nil {
+			klog.Errorf("Failed to add logical switch %v's loadbalancer, stdout: %q, stderr: %q, error: %v", nodeName, stdout, stderr, err)
+			return err
+		}
+
+		// Add any service reject ACLs applicable for SCTP LB
+		acls = oc.getAllACLsForServiceLB(oc.SCTPLoadBalancerUUID)
+		if len(acls) > 0 {
+			_, _, err = util.RunOVNNbctl("add", "logical_switch", nodeName, "acls", strings.Join(acls, ","))
+			if err != nil {
+				klog.Warningf("Unable to add SCTP reject ACLs: %s for switch: %s, error %v", acls, nodeName, err)
+			}
+		}
+	}
 	// Add the node to the logical switch cache
 	oc.lsMutex.Lock()
 	defer oc.lsMutex.Unlock()

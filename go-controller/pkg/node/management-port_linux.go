@@ -7,10 +7,12 @@ import (
 	"net"
 	"os"
 	"strings"
+	"time"
 
 	"github.com/coreos/go-iptables/iptables"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
+	"github.com/vishvananda/netlink"
 
 	"k8s.io/klog"
 	utilnet "k8s.io/utils/net"
@@ -20,38 +22,100 @@ const (
 	iptableMgmPortChain = "OVN-KUBE-SNAT-MGMTPORT"
 )
 
-// createPlatformManagementPort creates a management port attached to the node switch
-// that lets the node access its pods via their private IP address. This is used
-// for health checking and other management tasks.
-func createPlatformManagementPort(interfaceName, interfaceIP, routerIP, routerMAC string) error {
-	link, err := util.LinkSetUp(interfaceName)
-	if err != nil {
-		return err
-	}
-	// Flush any existing IP addresses and assign the new IP
-	if err = util.LinkAddrFlush(link); err == nil {
-		err = util.LinkAddrAdd(link, interfaceIP)
-	}
-	if err != nil {
-		return err
+type managementPortConfig struct {
+	link       netlink.Link
+	ipt        util.IPTablesHelper
+	allSubnets []string
+	ifName     string
+	ifIPMask   string
+	ifIP       string
+	routerIP   string
+	routerMAC  string
+}
+
+func newManagementPortConfig(interfaceName, interfaceIP, routerIP, routerMAC string) (*managementPortConfig, error) {
+	var err error
+
+	cfg := &managementPortConfig{}
+	cfg.ifName = interfaceName
+	cfg.ifIPMask = interfaceIP
+	cfg.routerIP = routerIP
+	cfg.routerMAC = routerMAC
+	if cfg.link, err = util.LinkSetUp(cfg.ifName); err != nil {
+		return nil, err
 	}
 
-	var allSubnets []string
+	// capture all the subnets for which we need to add routes through management port
 	for _, subnet := range config.Default.ClusterSubnets {
-		allSubnets = append(allSubnets, subnet.CIDR.String())
+		cfg.allSubnets = append(cfg.allSubnets, subnet.CIDR.String())
 	}
-	allSubnets = append(allSubnets, config.Kubernetes.ServiceCIDR)
+	for _, subnet := range config.Kubernetes.ServiceCIDRs {
+		cfg.allSubnets = append(cfg.allSubnets, subnet.String())
+	}
 
-	// delete any existing routes and add new routes
-	if err = util.LinkRoutesDel(link, allSubnets); err == nil {
-		err = util.LinkRoutesAdd(link, routerIP, allSubnets)
+	cfg.ifIP = strings.Split(cfg.ifIPMask, "/")[0]
+	if utilnet.IsIPv6(net.ParseIP(cfg.ifIP)) {
+		cfg.ipt, err = util.GetIPTablesHelper(iptables.ProtocolIPv6)
+	} else {
+		cfg.ipt, err = util.GetIPTablesHelper(iptables.ProtocolIPv4)
 	}
 	if err != nil {
-		if os.IsExist(err) {
-			klog.V(5).Infof("Ignoring error %s from 'route add %s via %s' - already added via IPv6 RA?",
-				err.Error(), config.Kubernetes.ServiceCIDR, routerIP)
-		} else {
-			return err
+		return nil, err
+	}
+
+	return cfg, nil
+}
+
+func tearDownManagementPortConfig(cfg *managementPortConfig) error {
+	// for the initial setup we need to start from the clean slate, so flush
+	// all addresses on this link, routes through this link, and
+	// finally any IPtable rules for this link.
+	if err := util.LinkAddrFlush(cfg.link); err != nil {
+		return err
+	}
+
+	if err := util.LinkRoutesDel(cfg.link, cfg.allSubnets); err != nil {
+		return err
+	}
+
+	if err := cfg.ipt.ClearChain("nat", iptableMgmPortChain); err != nil {
+		return fmt.Errorf("could not clear the iptables chain for management port: %v", err)
+	}
+	return nil
+}
+
+func setupManagementPortConfig(cfg *managementPortConfig) ([]string, error) {
+	var warnings []string
+	var err error
+	var exists bool
+
+	if exists, err = util.LinkAddrExist(cfg.link, cfg.ifIPMask); err == nil && !exists {
+		// we should log this so that one can debug as to why addresses are
+		// disappearing
+		warnings = append(warnings, fmt.Sprintf("missing IP address %s on the interface %s, adding it...",
+			cfg.ifIPMask, cfg.ifName))
+		err = util.LinkAddrAdd(cfg.link, cfg.ifIPMask)
+	}
+	if err != nil {
+		return warnings, err
+	}
+
+	for _, subnet := range cfg.allSubnets {
+		if exists, err = util.LinkRouteExists(cfg.link, cfg.routerIP, subnet); err == nil && !exists {
+			// we need to warn so that it can be debugged as to why routes are disappearing
+			warnings = append(warnings, fmt.Sprintf("missing route entry for subnet %s via gateway %s on link %v",
+				subnet, cfg.routerIP, cfg.ifName))
+			err = util.LinkRoutesAdd(cfg.link, cfg.routerIP, []string{subnet})
+			if err != nil {
+				if os.IsExist(err) {
+					klog.V(5).Infof("Ignoring error %s from 'route add %s via %s' - already added via IPv6 RA?",
+						err.Error(), subnet, cfg.routerIP)
+					continue
+				}
+			}
+		}
+		if err != nil {
+			return warnings, err
 		}
 	}
 
@@ -60,54 +124,60 @@ func createPlatformManagementPort(interfaceName, interfaceIP, routerIP, routerMA
 	// arrives on OVN Logical Router pipeline with ARP source protocol address set to
 	// K8s Node IP. OVN Logical Router pipeline drops such packets since it expects
 	// source protocol address to be in the Logical Switch's subnet.
-	err = util.LinkNeighAdd(link, routerIP, routerMAC)
+	if exists, err = util.LinkNeighExists(cfg.link, cfg.routerIP, cfg.routerMAC); err == nil && !exists {
+		warnings = append(warnings, fmt.Sprintf("missing arp entry for MAC/IP binding (%s/%s) on link %s",
+			cfg.routerMAC, cfg.routerIP, util.K8sMgmtIntfName))
+		err = util.LinkNeighAdd(cfg.link, cfg.routerIP, cfg.routerMAC)
+	}
 	if err != nil {
-		return err
+		return warnings, err
 	}
 
-	// Set up necessary iptables rules
-	err = addMgtPortIptRules(interfaceName, interfaceIP)
+	rule := []string{"-o", cfg.ifName, "-j", iptableMgmPortChain}
+	if exists, err = cfg.ipt.Exists("nat", "POSTROUTING", rule...); err == nil && !exists {
+		warnings = append(warnings, fmt.Sprintf("missing iptables postrouting nat chain %s, adding it",
+			iptableMgmPortChain))
+		err = cfg.ipt.Insert("nat", "POSTROUTING", 1, rule...)
+	}
 	if err != nil {
-		return err
+		return warnings, fmt.Errorf("could not set up iptables chain rules for management port: %v", err)
+	}
+	rule = []string{"-o", cfg.ifName, "-j", "SNAT", "--to-source", cfg.ifIP,
+		"-m", "comment", "--comment", "OVN SNAT to Management Port"}
+	if exists, err = cfg.ipt.Exists("nat", iptableMgmPortChain, rule...); err == nil && !exists {
+		warnings = append(warnings, fmt.Sprintf("missing management port nat rule in chain %s, adding it",
+			iptableMgmPortChain))
+		err = cfg.ipt.Insert("nat", iptableMgmPortChain, 1, rule...)
+	}
+	if err != nil {
+		return warnings, fmt.Errorf("could not set up iptables rules for management port: %v", err)
 	}
 
-	return nil
+	return warnings, nil
 }
 
-func addMgtPortIptRules(ifname, interfaceIP string) error {
-	interfaceAddr := strings.Split(interfaceIP, "/")
-	ip := net.ParseIP(interfaceAddr[0])
-	if ip == nil {
-		return fmt.Errorf("Failed to parse IP '%s'", interfaceAddr[0])
-	}
-	var ipt util.IPTablesHelper
+// createPlatformManagementPort creates a management port attached to the node switch
+// that lets the node access its pods via their private IP address. This is used
+// for health checking and other management tasks.
+func createPlatformManagementPort(interfaceName, interfaceIP, routerIP, routerMAC string,
+	stopChan chan struct{}) error {
+	var cfg *managementPortConfig
 	var err error
-	if utilnet.IsIPv6(ip) {
-		ipt, err = util.GetIPTablesHelper(iptables.ProtocolIPv6)
-	} else {
-		ipt, err = util.GetIPTablesHelper(iptables.ProtocolIPv4)
-	}
-	if err != nil {
+
+	if cfg, err = newManagementPortConfig(interfaceName, interfaceIP, routerIP, routerMAC); err != nil {
 		return err
 	}
-	err = ipt.ClearChain("nat", iptableMgmPortChain)
-	if err != nil {
-		return fmt.Errorf("could not set up iptables chain for management port: %v", err)
-	}
-	rule := []string{"-o", ifname, "-j", iptableMgmPortChain}
-	exists, err := ipt.Exists("nat", "POSTROUTING", rule...)
-	if err == nil && !exists {
-		err = ipt.Insert("nat", "POSTROUTING", 1, rule...)
-	}
-	if err != nil {
-		return fmt.Errorf("could not set up iptables chain rules for management port: %v", err)
-	}
-	rule = []string{"-o", ifname, "-j", "SNAT", "--to-source", interfaceAddr[0], "-m", "comment", "--comment", "OVN SNAT to Management Port"}
-	err = ipt.Insert("nat", iptableMgmPortChain, 1, rule...)
-	if err != nil {
-		return fmt.Errorf("could not set up iptables rules for management port: %v", err)
+
+	if err = tearDownManagementPortConfig(cfg); err != nil {
+		return err
 	}
 
+	if _, err = setupManagementPortConfig(cfg); err != nil {
+		return err
+	}
+
+	// start the management port health check
+	go checkManagementPortHealth(cfg, stopChan)
 	return nil
 }
 
@@ -129,4 +199,25 @@ func DelMgtPortIptRules() {
 	_ = ipt6.ClearChain("nat", iptableMgmPortChain)
 	_ = ipt.DeleteChain("nat", iptableMgmPortChain)
 	_ = ipt6.DeleteChain("nat", iptableMgmPortChain)
+}
+
+// checks to make sure that following configurations are present on the k8s node
+// 1. route entries to cluster CIDR and service CIDR through management port
+// 2. ARP entry for the node subnet's gateway ip
+// 3. IPtables chain and rule for SNATing packets entering the logical topology
+func checkManagementPortHealth(cfg *managementPortConfig, stopChan chan struct{}) {
+	for {
+		select {
+		case <-time.After(30 * time.Second):
+			warnings, err := setupManagementPortConfig(cfg)
+			for _, warning := range warnings {
+				klog.Warningf(warning)
+			}
+			if err != nil {
+				klog.Errorf(err.Error())
+			}
+		case <-stopChan:
+			return
+		}
+	}
 }

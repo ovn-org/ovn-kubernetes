@@ -110,11 +110,17 @@ jobs:
 
       
   e2e-shard-n:
-    name: e2e-kind-ovn-shard-n
+    name: e2e-kind-ovn-shard-n-${{ matrix.config.name }}
     runs-on: ubuntu-latest
     needs: k8s
+    strategy: &e2e_strategy
+      matrix:
+        config:
+          - {ha: "false", name: "noHA"}
+          - {ha: "true", name: "HA"}
     env:
-      JOB_NAME: "e2e-shard-n"
+      KIND_HA: ${{matrix.config.ha}}
+      JOB_NAME: e2e-shard-n-${{ matrix.config.name }}
     steps:
     - *step_cleanup
     - *step_gosetup
@@ -151,7 +157,7 @@ jobs:
         export NODE_NAMES=${MASTER_NAME}
         
         # all tests that don't have P as their sixth letter after the N
-        kubetest --provider=local --deployment=kind --kind-cluster-name=${KIND_CLUSTER_NAME} --test --test_args='--ginkgo.focus=\[sig-network\]\s[Nn](.{6}[^Pp].*|.{0,6}$) --disable-log-dump=false <%= ginkgo_skip %>'
+        kubetest --provider=local --deployment=kind --kind-cluster-name=${KIND_CLUSTER_NAME} --test --test_args='--num-nodes=3 --ginkgo.focus=\[sig-network\]\s[Nn](.{6}[^Pp].*|.{0,6}$) --disable-log-dump=false <%= ginkgo_skip %>'
 
     - &step_export_logs
       name: Export logs
@@ -169,11 +175,13 @@ jobs:
         path: /tmp/kind/logs
 
   e2e-shard-np:
-    name: e2e-kind-ovn-shard-np
+    name: e2e-kind-ovn-shard-np-${{ matrix.config.name }}
     runs-on: ubuntu-latest
     needs: k8s
+    strategy: *e2e_strategy
     env:
-      JOB_NAME: "e2e-shard-np"
+      JOB_NAME: e2e-shard-np-${{ matrix.config.name }}
+      KIND_HA: ${{matrix.config.ha}}
     steps:
     - *step_cleanup
     - *step_gosetup
@@ -192,17 +200,19 @@ jobs:
         export MASTER_NAME=${KIND_CLUSTER_NAME}-control-plane
         export NODE_NAMES=${MASTER_NAME}
         # all tests that have P as the sixth letter after the N
-        kubetest --provider=local --deployment=kind --kind-cluster-name=${KIND_CLUSTER_NAME} --test --test_args='--ginkgo.focus=\[sig-network\]\s[Nn].{6}[Pp].*$ --disable-log-dump=false <%= ginkgo_skip %>'
+        kubetest --provider=local --deployment=kind --kind-cluster-name=${KIND_CLUSTER_NAME} --test --test_args='--num-nodes=3 --ginkgo.focus=\[sig-network\]\s[Nn].{6}[Pp].*$ --disable-log-dump=false <%= ginkgo_skip %>'
 
     - *step_export_logs
     - *step_upload_logs
   
   e2e-shard-s:
-    name: e2e-kind-ovn-shard-s
+    name: e2e-kind-ovn-shard-s-${{ matrix.config.name }}
     runs-on: ubuntu-latest
     needs: k8s
+    strategy: *e2e_strategy
     env:
-      JOB_NAME: "e2e-shard-s"
+      JOB_NAME: e2e-shard-s-${{ matrix.config.name }}
+      KIND_HA: ${{matrix.config.ha}}
     steps:
     - *step_cleanup
     - *step_gosetup
@@ -220,17 +230,19 @@ jobs:
         export KUBECONFIG=${HOME}/admin.conf
         export MASTER_NAME=${KIND_CLUSTER_NAME}-control-plane
         export NODE_NAMES=${MASTER_NAME}
-        kubetest --provider=local --deployment=kind --kind-cluster-name=${KIND_CLUSTER_NAME} --test --test_args='--ginkgo.focus=\[sig-network\]\s[Ss].* --disable-log-dump=false <%= ginkgo_skip %>'
+        kubetest --provider=local --deployment=kind --kind-cluster-name=${KIND_CLUSTER_NAME} --test --test_args='--num-nodes=3 --ginkgo.focus=\[sig-network\]\s[Ss].* --disable-log-dump=false <%= ginkgo_skip %>'
 
     - *step_export_logs
     - *step_upload_logs
 
   e2e-shard-other:
-    name: e2e-kind-ovn-shard-other
+    name: e2e-kind-ovn-shard-other-${{ matrix.config.name }}
     runs-on: ubuntu-latest
     needs: k8s
+    strategy: *e2e_strategy
     env:
-      JOB_NAME: "e2e-shard-other"
+      JOB_NAME: e2e-shard-other-${{ matrix.config.name }}
+      KIND_HA: ${{matrix.config.ha}}
     steps:
     - *step_cleanup
     - *step_gosetup
@@ -248,17 +260,19 @@ jobs:
         export KUBECONFIG=${HOME}/admin.conf
         export MASTER_NAME=${KIND_CLUSTER_NAME}-control-plane
         export NODE_NAMES=${MASTER_NAME}
-        kubetest --provider=local --deployment=kind --kind-cluster-name=${KIND_CLUSTER_NAME} --test --test_args='--ginkgo.focus=\[sig-network\]\s[^NnSs].* --disable-log-dump=false <%= ginkgo_skip %>'
+        kubetest --provider=local --deployment=kind --kind-cluster-name=${KIND_CLUSTER_NAME} --test --test_args='--num-nodes=3 --ginkgo.focus=\[sig-network\]\s[^NnSs].* --disable-log-dump=false <%= ginkgo_skip %>'
 
     - *step_export_logs
     - *step_upload_logs
   
   e2e-control-plane:
-    name: e2e-control-plane
+    name: e2e-control-plane-${{ matrix.config.name }}
     runs-on: ubuntu-latest
     needs: k8s
+    strategy: *e2e_strategy
     env:
-      JOB_NAME: "e2e-control-plane"
+      JOB_NAME: e2e-control-plane-${{ matrix.config.name }}
+      KIND_HA: ${{matrix.config.ha}}
     steps:
     - *step_cleanup
     - *step_gosetup
@@ -283,7 +297,7 @@ jobs:
 
         sed -E -i 's/"\$\{ginkgo\}" "\$\{ginkgo_args\[\@\]\:\+\$\{ginkgo_args\[\@\]\}\}" "\$\{e2e_test\}"/pushd \$GITHUB_WORKSPACE\/test\/e2e\nGO111MODULE=on "\$\{ginkgo\}" "\$\{ginkgo_args\[\@\]\:\+\$\{ginkgo_args\[\@\]\}\}"/' hack/ginkgo-e2e.sh
 
-        kubetest --provider=local --deployment=kind --kind-cluster-name=kind-ovn --test --test_args='--disable-log-dump=false'
+        kubetest --provider=local --deployment=kind --kind-cluster-name=kind-ovn --test --test_args='--num-nodes=3 --disable-log-dump=false'
 
     - *step_export_logs
     - *step_upload_logs

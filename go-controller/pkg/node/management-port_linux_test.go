@@ -81,18 +81,18 @@ func testManagementPort(ctx *cli.Context, fexec *ovntest.FakeExec, testNS ns.Net
 	err := util.SetExec(fexec)
 	Expect(err).NotTo(HaveOccurred())
 
-	nsIP, nodeSubnetCIDR, err := net.ParseCIDR(nodeSubnet)
+	nodeSubnetCIDR := ovntest.MustParseIPNet(nodeSubnet)
 	Expect(err).NotTo(HaveOccurred())
 
 	mpCIDR := &net.IPNet{
-		IP:   net.ParseIP(mgtPortIP),
+		IP:   ovntest.MustParseIP(mgtPortIP),
 		Mask: nodeSubnetCIDR.Mask,
 	}
 	mgtPortCIDR := mpCIDR.String()
 
 	iptProto := iptables.ProtocolIPv4
 	family := netlink.FAMILY_V4
-	if utilnet.IsIPv6(nsIP) {
+	if utilnet.IsIPv6CIDR(nodeSubnetCIDR) {
 		iptProto = iptables.ProtocolIPv6
 		family = netlink.FAMILY_V6
 	}
@@ -126,7 +126,8 @@ func testManagementPort(ctx *cli.Context, fexec *ovntest.FakeExec, testNS ns.Net
 	err = testNS.Do(func(ns.NetNS) error {
 		defer GinkgoRecover()
 
-		err = createManagementPort(nodeName, nodeSubnetCIDR, nodeAnnotator, waiter)
+		n := OvnNode{name: nodeName, stopChan: make(chan struct{})}
+		err = n.createManagementPort(nodeSubnetCIDR, nodeAnnotator, waiter)
 		Expect(err).NotTo(HaveOccurred())
 		l, err := netlink.LinkByName(mgtPort)
 		Expect(err).NotTo(HaveOccurred())
@@ -147,12 +148,11 @@ func testManagementPort(ctx *cli.Context, fexec *ovntest.FakeExec, testNS ns.Net
 
 		// Check whether the route has been added
 		j := 0
-		gatewayIP := net.ParseIP(gwIP)
+		gatewayIP := ovntest.MustParseIP(gwIP)
 		subnets := []string{clusterCIDR, serviceCIDR}
 		for _, subnet := range subnets {
 			foundRoute := false
-			dstIPnet, err := netlink.ParseIPNet(subnet)
-			Expect(err).NotTo(HaveOccurred())
+			dstIPnet := ovntest.MustParseIPNet(subnet)
 			route := &netlink.Route{Dst: dstIPnet}
 			filterMask := netlink.RT_FILTER_DST
 			routes, err := netlink.RouteListFiltered(netlink.FAMILY_ALL, route, filterMask)
