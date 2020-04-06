@@ -1,10 +1,10 @@
 package controller
 
 import (
-	"bytes"
 	"crypto/sha256"
 	"fmt"
 	"net"
+	"reflect"
 	"strings"
 	"time"
 
@@ -95,7 +95,7 @@ func getPodDetails(pod *kapi.Pod, nodeName string) (*net.IPNet, net.HardwareAddr
 func podChanged(pod1 *kapi.Pod, pod2 *kapi.Pod, nodeName string) bool {
 	podIP1, mac1, _ := getPodDetails(pod1, nodeName)
 	podIP2, mac2, _ := getPodDetails(pod2, nodeName)
-	return podIP1.String() != podIP2.String() || !bytes.Equal(mac1, mac2)
+	return !reflect.DeepEqual(podIP1, podIP2) || !reflect.DeepEqual(mac1, mac2)
 }
 
 func (n *NodeController) syncPods(pods []interface{}) {
