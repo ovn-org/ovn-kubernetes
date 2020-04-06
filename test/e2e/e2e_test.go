@@ -17,7 +17,7 @@ import (
 	e2epod "k8s.io/kubernetes/test/e2e/framework/pod"
 )
 
-func checkContinuousConnectivity(f *framework.Framework, nodeName, podName, host string, port, timeout int, readyChan chan bool, errChan chan error) {
+func checkContinuousConnectivity(f *framework.Framework, nodeName, podName, host string, port, timeout int, podChan chan *v1.Pod, errChan chan error) {
 	contName := fmt.Sprintf("%s-container", podName)
 
 	command := []string{
@@ -48,7 +48,19 @@ func checkContinuousConnectivity(f *framework.Framework, nodeName, podName, host
 		return
 	}
 
-	close(readyChan)
+	err = e2epod.WaitForPodNotPending(f.ClientSet, f.Namespace.Name, podName)
+	if err != nil {
+		errChan <- err
+		return
+	}
+
+	podGet, err := podClient.Get(podName, metav1.GetOptions{})
+	if err != nil {
+		errChan <- err
+		return
+	}
+
+	podChan <- podGet
 
 	err = e2epod.WaitForPodSuccessInNamespace(f.ClientSet, podName, f.Namespace.Name)
 
@@ -86,11 +98,11 @@ var _ = Describe("e2e control plane", func() {
 	ginkgo.It("should provide Internet connection continuously when ovn-k8s pod is killed", func() {
 		ginkgo.By("Running container which tries to connect to 8.8.8.8 in a loop")
 
-		readyChan, errChan := make(chan bool), make(chan error)
-		go checkContinuousConnectivity(f, "", "connectivity-test-continuous", "8.8.8.8", 53, 30, readyChan, errChan)
+		podChan, errChan := make(chan *v1.Pod), make(chan error)
+		go checkContinuousConnectivity(f, "", "connectivity-test-continuous", "8.8.8.8", 53, 30, podChan, errChan)
 
-		<-readyChan
-		framework.Logf("Container is ready, waiting a few seconds")
+		testPod := <-podChan
+		framework.Logf("Test pod running on %q, waiting a few seconds", testPod.Spec.NodeName)
 
 		time.Sleep(10 * time.Second)
 
@@ -99,7 +111,7 @@ var _ = Describe("e2e control plane", func() {
 		podList, _ := podClient.List(metav1.ListOptions{})
 		podName := ""
 		for _, pod := range podList.Items {
-			if strings.HasPrefix(pod.Name, "ovnkube-node") {
+			if strings.HasPrefix(pod.Name, "ovnkube-node") && pod.Spec.NodeName == testPod.Spec.NodeName {
 				podName = pod.Name
 				break
 			}
@@ -108,6 +120,35 @@ var _ = Describe("e2e control plane", func() {
 		err := podClient.Delete(podName, metav1.NewDeleteOptions(0))
 		framework.ExpectNoError(err, "should delete ovnkube-node pod")
 		framework.Logf("Deleted ovnkube-node %q", podName)
+
+		framework.ExpectNoError(<-errChan)
+	})
+
+	ginkgo.It("should provide Internet connection continuously when master is killed", func() {
+		ginkgo.By("Running container which tries to connect to 8.8.8.8 in a loop")
+
+		podChan, errChan := make(chan *v1.Pod), make(chan error)
+		go checkContinuousConnectivity(f, "", "connectivity-test-continuous", "8.8.8.8", 53, 30, podChan, errChan)
+
+		testPod := <-podChan
+		framework.Logf("Test pod running on %q, waiting a few seconds", testPod.Spec.NodeName)
+
+		time.Sleep(10 * time.Second)
+
+		podClient := f.ClientSet.CoreV1().Pods("ovn-kubernetes")
+
+		podList, _ := podClient.List(metav1.ListOptions{})
+		podName := ""
+		for _, pod := range podList.Items {
+			if strings.HasPrefix(pod.Name, "ovnkube-master") {
+				podName = pod.Name
+				break
+			}
+		}
+
+		err := podClient.Delete(podName, metav1.NewDeleteOptions(0))
+		framework.ExpectNoError(err, "should delete ovnkube-master pod")
+		framework.Logf("Deleted ovnkube-master %q", podName)
 
 		framework.ExpectNoError(<-errChan)
 	})
