@@ -22,8 +22,9 @@ func addService(service *kapi.Service, inport, outport, gwBridge string) {
 	}
 
 	for _, svcPort := range service.Spec.Ports {
-		if svcPort.Protocol != kapi.ProtocolTCP &&
-			svcPort.Protocol != kapi.ProtocolUDP {
+		_, err := util.ValidateProtocol(svcPort.Protocol)
+		if err != nil {
+			klog.Errorf("Skipping service add. Invalid service port %s: %v", svcPort.Name, err)
 			continue
 		}
 		protocol := strings.ToLower(string(svcPort.Protocol))
@@ -45,8 +46,9 @@ func deleteService(service *kapi.Service, inport, gwBridge string) {
 	}
 
 	for _, svcPort := range service.Spec.Ports {
-		if svcPort.Protocol != kapi.ProtocolTCP &&
-			svcPort.Protocol != kapi.ProtocolUDP {
+		_, err := util.ValidateProtocol(svcPort.Protocol)
+		if err != nil {
+			klog.Errorf("Skipping service delete. Invalid service port %s: %v", svcPort.Name, err)
 			continue
 		}
 
@@ -84,11 +86,12 @@ func syncServices(services []interface{}, inport, gwBridge string) {
 				continue
 			}
 
-			prot := svcPort.Protocol
-			if prot != kapi.ProtocolTCP && prot != kapi.ProtocolUDP {
+			proto, err := util.ValidateProtocol(svcPort.Protocol)
+			if err != nil {
+				klog.Errorf("syncServices error for service port %s: %v", svcPort.Name, err)
 				continue
 			}
-			protocol := strings.ToLower(string(prot))
+			protocol := strings.ToLower(string(proto))
 			nodePortKey := fmt.Sprintf("%s_%d", protocol, port)
 			nodePorts[nodePortKey] = true
 		}
@@ -119,6 +122,8 @@ func syncServices(services []interface{}, inport, gwBridge string) {
 			key = fmt.Sprintf("tcp_%s", group[1])
 		} else if strings.Contains(flow, "udp") {
 			key = fmt.Sprintf("udp_%s", group[1])
+		} else if strings.Contains(flow, "sctp") {
+			key = fmt.Sprintf("sctp_%s", group[1])
 		} else {
 			continue
 		}

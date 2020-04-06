@@ -15,7 +15,7 @@ import (
 
 func (ovn *Controller) getLoadBalancer(protocol kapi.Protocol) (string,
 	error) {
-	if outStr, ok := ovn.loadbalancerClusterCache[string(protocol)]; ok {
+	if outStr, ok := ovn.loadbalancerClusterCache[protocol]; ok {
 		return outStr, nil
 	}
 
@@ -29,6 +29,10 @@ func (ovn *Controller) getLoadBalancer(protocol kapi.Protocol) (string,
 		out, _, err = util.RunOVNNbctl("--data=bare", "--no-heading",
 			"--columns=_uuid", "find", "load_balancer",
 			"external_ids:k8s-cluster-lb-udp=yes")
+	} else if protocol == kapi.ProtocolSCTP {
+		out, _, err = util.RunOVNNbctl("--data=bare", "--no-heading",
+			"--columns=_uuid", "find", "load_balancer",
+			"external_ids:k8s-cluster-lb-sctp=yes")
 	}
 	if err != nil {
 		return "", err
@@ -36,12 +40,12 @@ func (ovn *Controller) getLoadBalancer(protocol kapi.Protocol) (string,
 	if out == "" {
 		return "", fmt.Errorf("no load-balancer found in the database")
 	}
-	ovn.loadbalancerClusterCache[string(protocol)] = out
+	ovn.loadbalancerClusterCache[protocol] = out
 	return out, nil
 }
 
 func (ovn *Controller) getDefaultGatewayLoadBalancer(protocol kapi.Protocol) string {
-	if outStr, ok := ovn.loadbalancerGWCache[string(protocol)]; ok {
+	if outStr, ok := ovn.loadbalancerGWCache[protocol]; ok {
 		return outStr
 	}
 
@@ -56,7 +60,7 @@ func (ovn *Controller) getDefaultGatewayLoadBalancer(protocol kapi.Protocol) str
 		"--no-heading", "--columns=_uuid", "find", "load_balancer",
 		"external_ids:"+externalIDKey+"="+gw)
 	if len(lb) != 0 {
-		ovn.loadbalancerGWCache[string(protocol)] = lb
+		ovn.loadbalancerGWCache[protocol] = lb
 		ovn.defGatewayRouter = gw
 	}
 	return lb

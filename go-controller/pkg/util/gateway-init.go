@@ -3,6 +3,7 @@ package util
 import (
 	"bytes"
 	"fmt"
+	kapi "k8s.io/api/core/v1"
 	"net"
 	"sort"
 	"strings"
@@ -79,13 +80,13 @@ func GetDefaultGatewayRouterIP() (string, net.IP, error) {
 	return routers[0].name, routers[0].ip, nil
 }
 
-// getGatewayLoadBalancers find TCP UDP load-balancers from gateway router.
-func getGatewayLoadBalancers(gatewayRouter string) (string, string, error) {
+// getGatewayLoadBalancers find TCP, SCTP, UDP load-balancers from gateway router.
+func getGatewayLoadBalancers(gatewayRouter string) (string, string, string, error) {
 	lbTCP, stderr, err := RunOVNNbctl("--data=bare", "--no-heading",
 		"--columns=_uuid", "find", "load_balancer",
 		"external_ids:TCP_lb_gateway_router="+gatewayRouter)
 	if err != nil {
-		return "", "", fmt.Errorf("Failed to get gateway router %q TCP "+
+		return "", "", "", fmt.Errorf("failed to get gateway router %q TCP "+
 			"loadbalancer, stderr: %q, error: %v", gatewayRouter, stderr, err)
 	}
 
@@ -93,15 +94,22 @@ func getGatewayLoadBalancers(gatewayRouter string) (string, string, error) {
 		"--columns=_uuid", "find", "load_balancer",
 		"external_ids:UDP_lb_gateway_router="+gatewayRouter)
 	if err != nil {
-		return "", "", fmt.Errorf("Failed to get gateway router %q UDP "+
+		return "", "", "", fmt.Errorf("failed to get gateway router %q UDP "+
 			"loadbalancer, stderr: %q, error: %v", gatewayRouter, stderr, err)
 	}
 
-	return lbTCP, lbUDP, nil
+	lbSCTP, stderr, err := RunOVNNbctl("--data=bare", "--no-heading",
+		"--columns=_uuid", "find", "load_balancer",
+		"external_ids:SCTP_lb_gateway_router="+gatewayRouter)
+	if err != nil {
+		return "", "", "", fmt.Errorf("failed to get gateway router %q SCTP "+
+			"loadbalancer, stderr: %q, error: %v", gatewayRouter, stderr, err)
+	}
+	return lbTCP, lbUDP, lbSCTP, nil
 }
 
 // GatewayInit creates a gateway router for the local chassis.
-func GatewayInit(clusterIPSubnet []string, hostSubnet string, joinSubnet *net.IPNet, nodeName string, l3GatewayConfig *L3GatewayConfig) error {
+func GatewayInit(clusterIPSubnet []string, hostSubnet string, joinSubnet *net.IPNet, nodeName string, l3GatewayConfig *L3GatewayConfig, sctpSupport bool) error {
 	k8sClusterRouter := GetK8sClusterRouter()
 	// Create a gateway router.
 	gatewayRouter := GWRouterPrefix + nodeName
@@ -190,46 +198,42 @@ func GatewayInit(clusterIPSubnet []string, hostSubnet string, joinSubnet *net.IP
 	}
 
 	if l3GatewayConfig.NodePortEnable {
-		// Create 2 load-balancers for north-south traffic for each gateway
-		// router.  One handles UDP and another handles TCP.
-		var k8sNSLbTCP, k8sNSLbUDP string
-		k8sNSLbTCP, k8sNSLbUDP, err = getGatewayLoadBalancers(gatewayRouter)
+		// Create 3 load-balancers for north-south traffic for each gateway
+		// router: UDP, TCP, SCTP
+		var k8sNSLbTCP, k8sNSLbUDP, k8sNSLbSCTP string
+		k8sNSLbTCP, k8sNSLbUDP, k8sNSLbSCTP, err = getGatewayLoadBalancers(gatewayRouter)
 		if err != nil {
 			return err
 		}
-		if k8sNSLbTCP == "" {
-			k8sNSLbTCP, stderr, err = RunOVNNbctl("--", "create",
-				"load_balancer",
-				"external_ids:TCP_lb_gateway_router="+gatewayRouter,
-				"protocol=tcp")
-			if err != nil {
-				return fmt.Errorf("Failed to create load balancer: "+
-					"stderr: %q, error: %v", stderr, err)
+		protoLBMap := map[kapi.Protocol]string{
+			kapi.ProtocolTCP:  k8sNSLbTCP,
+			kapi.ProtocolUDP:  k8sNSLbUDP,
+			kapi.ProtocolSCTP: k8sNSLbSCTP,
+		}
+		enabledProtos := []kapi.Protocol{kapi.ProtocolTCP, kapi.ProtocolUDP}
+		if sctpSupport {
+			enabledProtos = append(enabledProtos, kapi.ProtocolSCTP)
+		}
+		for _, proto := range enabledProtos {
+			if protoLBMap[proto] == "" {
+				protoLBMap[proto], stderr, err = RunOVNNbctl("--", "create",
+					"load_balancer",
+					fmt.Sprintf("external_ids:%s_lb_gateway_router=%s", proto, gatewayRouter),
+					fmt.Sprintf("protocol=%s", strings.ToLower(string(proto))))
+				if err != nil {
+					return fmt.Errorf("failed to create load balancer for protocol %s: "+
+						"stderr: %q, error: %v", proto, stderr, err)
+				}
 			}
 		}
-		if k8sNSLbUDP == "" {
-			k8sNSLbUDP, stderr, err = RunOVNNbctl("--", "create",
-				"load_balancer",
-				"external_ids:UDP_lb_gateway_router="+gatewayRouter,
-				"protocol=udp")
-			if err != nil {
-				return fmt.Errorf("Failed to create load balancer: "+
-					"stderr: %q, error: %v", stderr, err)
-			}
-		}
-
 		// Add north-south load-balancers to the gateway router.
-		stdout, stderr, err = RunOVNNbctl("set", "logical_router",
-			gatewayRouter, "load_balancer="+k8sNSLbTCP)
-		if err != nil {
-			return fmt.Errorf("Failed to set north-south load-balancers to the "+
-				"gateway router, stdout: %q, stderr: %q, error: %v",
-				stdout, stderr, err)
+		lbString := fmt.Sprintf("%s,%s", protoLBMap[kapi.ProtocolTCP], protoLBMap[kapi.ProtocolUDP])
+		if sctpSupport {
+			lbString = lbString + "," + protoLBMap[kapi.ProtocolSCTP]
 		}
-		stdout, stderr, err = RunOVNNbctl("add", "logical_router",
-			gatewayRouter, "load_balancer", k8sNSLbUDP)
+		stdout, stderr, err = RunOVNNbctl("set", "logical_router", gatewayRouter, "load_balancer="+lbString)
 		if err != nil {
-			return fmt.Errorf("Failed to add north-south load-balancers to the "+
+			return fmt.Errorf("failed to set north-south load-balancers to the "+
 				"gateway router, stdout: %q, stderr: %q, error: %v",
 				stdout, stderr, err)
 		}
@@ -240,7 +244,7 @@ func GatewayInit(clusterIPSubnet []string, hostSubnet string, joinSubnet *net.IP
 	stdout, stderr, err = RunOVNNbctl("--may-exist", "ls-add",
 		externalSwitch)
 	if err != nil {
-		return fmt.Errorf("Failed to create logical switch, stdout: %q, "+
+		return fmt.Errorf("failed to create logical switch, stdout: %q, "+
 			"stderr: %q, error: %v", stdout, stderr, err)
 	}
 
