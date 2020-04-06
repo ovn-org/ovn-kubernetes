@@ -1,7 +1,7 @@
 #!/bin/bash
 #set -euo pipefail
 
-verify-ovsdb-raft () {
+verify-ovsdb-raft() {
   check_ovn_daemonset_version "3"
 
   replicas=$(kubectl --server=${K8S_APISERVER} --token=${k8s_token} --certificate-authority=${K8S_CACERT} \
@@ -14,7 +14,7 @@ verify-ovsdb-raft () {
 
 # OVN DB must be up in the first DB node
 # This waits for ovnkube-db-0 POD to come up
-ready_to_join_cluster () {
+ready_to_join_cluster() {
   # See if ep is available ...
   db=${1}
   port=${2}
@@ -25,31 +25,31 @@ ready_to_join_cluster () {
     return 1
   fi
   target=$(ovn-${db}ctl --db=tcp:${init_ip}:${port} --data=bare --no-headings --columns=target list connection 2>/dev/null)
-  if [[ "${target}" != "ptcp:${port}" ]] ; then
+  if [[ "${target}" != "ptcp:${port}" ]]; then
     return 1
   fi
   return 0
 }
 
-check_ovnkube_db_ep () {
+check_ovnkube_db_ep() {
   local dbaddr=${1}
   local dbport=${2}
 
   # TODO: Right now only checks for NB ovsdb instances
   echo "======= checking ${dbaddr}:${dbport} OVSDB instance ==============="
-  ovsdb-client list-dbs tcp:${dbaddr}:${dbport} > /dev/null 2>&1
-  if [[ $? != 0 ]] ; then
-      return 1
+  ovsdb-client list-dbs tcp:${dbaddr}:${dbport} >/dev/null 2>&1
+  if [[ $? != 0 ]]; then
+    return 1
   fi
   return 0
 }
 
-check_and_apply_ovnkube_db_ep () {
+check_and_apply_ovnkube_db_ep() {
   local port=${1}
 
   # Get IPs of all ovnkube-db PODs
   ips=()
-  for (( i=0; i<${replicas}; i++ )); do
+  for ((i = 0; i < ${replicas}; i++)); do
     ip=$(kubectl --server=${K8S_APISERVER} --token=${k8s_token} --certificate-authority=${K8S_CACERT} \
       get pod -n ${ovn_kubernetes_namespace} ovnkube-db-${i} -o=jsonpath='{.status.podIP}' 2>/dev/null)
     if [[ ${ip} == "" ]]; then
@@ -65,13 +65,13 @@ check_and_apply_ovnkube_db_ep () {
     # times and then give up.
 
     # Get the current set of ovnkube-db endpoints, if any
-    IFS=" " read -a old_ips <<< "$(kubectl --server=${K8S_APISERVER} --token=${k8s_token} --certificate-authority=${K8S_CACERT} \
+    IFS=" " read -a old_ips <<<"$(kubectl --server=${K8S_APISERVER} --token=${k8s_token} --certificate-authority=${K8S_CACERT} \
       get ep -n ${ovn_kubernetes_namespace} ovnkube-db -o=jsonpath='{range .subsets[0].addresses[*]}{.ip}{" "}' 2>/dev/null)"
     if [[ ${#old_ips[@]} -ne 0 ]]; then
       return
     fi
 
-    for ip in ${ips[@]} ; do
+    for ip in ${ips[@]}; do
       wait_for_event attempts=10 check_ovnkube_db_ep ${ip} ${port}
     done
     set_ovnkube_db_ep ${ips[@]}
@@ -84,14 +84,14 @@ check_and_apply_ovnkube_db_ep () {
 }
 
 # election timer can only be at most doubled each time, and it can only be set on the leader
-set_election_timer () {
+set_election_timer() {
   local election_timer=${1}
   local current_election_timer
 
   echo "setting election timer for ${database} to ${election_timer} ms"
 
-  current_election_timer=$(ovs-appctl -t ${OVN_RUNDIR}/ovn${db}_db.ctl cluster/status ${database} 2>/dev/null \
-    | grep "Election" | sed "s/.*:[[:space:]]//")
+  current_election_timer=$(ovs-appctl -t ${OVN_RUNDIR}/ovn${db}_db.ctl cluster/status ${database} 2>/dev/null |
+    grep "Election" | sed "s/.*:[[:space:]]//")
   if [[ -z "${current_election_timer}" ]]; then
     echo "Failed to get current election timer value. Exiting..."
     exit 11
@@ -126,7 +126,7 @@ set_election_timer () {
 # In the first and second case, the pod is a one-node cluster and hence a leader. In the third case,
 # the pod is a part of mutli-pods cluster and may not be a leader and the connection information should
 # have already been set, so we don't care.
-set_connection () {
+set_connection() {
   local port=${1}
   local target
   local output
@@ -149,7 +149,7 @@ set_connection () {
   return 0
 }
 
-set_northd_probe_interval () {
+set_northd_probe_interval() {
   # OVN_NORTHD_PROBE_INTERVAL - probe interval of northd for NB and SB DB
   # connections in ms (default 5000)
   northd_probe_interval=${OVN_NORTHD_PROBE_INTERVAL:-5000}
@@ -174,7 +174,7 @@ set_northd_probe_interval () {
 }
 
 # v3 - create nb_ovsdb/sb_ovsdb cluster in a separate container
-ovsdb-raft () {
+ovsdb-raft() {
   trap 'kill $(jobs -p); exit 0' TERM
 
   local db=${1}
@@ -195,13 +195,13 @@ ovsdb-raft () {
 
   verify-ovsdb-raft
   local_ip=$(getent ahostsv4 $(hostname) | grep -v "^127\." | head -1 | awk '{ print $1 }')
-  if [[ ${local_ip} == "" ]] ; then
-      echo "failed to retrieve the IP address of the host $(hostname). Exiting..."
-      exit 1
+  if [[ ${local_ip} == "" ]]; then
+    echo "failed to retrieve the IP address of the host $(hostname). Exiting..."
+    exit 1
   fi
   echo "=============== run ${db}-ovsdb-raft pod ${POD_NAME} =========="
 
-  if [[ ! -e ${ovn_db_file} ]] || ovsdb-tool db-is-standalone ${ovn_db_file} ; then
+  if [[ ! -e ${ovn_db_file} ]] || ovsdb-tool db-is-standalone ${ovn_db_file}; then
     initialize="true"
   fi
   if [[ "${POD_NAME}" == "ovnkube-db-0" ]]; then
