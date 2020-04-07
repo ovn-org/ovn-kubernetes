@@ -1,6 +1,7 @@
 package ovn
 
 import (
+	"bytes"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -538,7 +539,7 @@ func (oc *Controller) syncNodeGateway(node *kapi.Node, subnet *net.IPNet) error 
 			return fmt.Errorf("error cleaning up gateway for node %s: %v", node.Name, err)
 		}
 	} else if subnet != nil {
-		if err := oc.syncGatewayLogicalNetwork(node, l3GatewayConfig, subnet.String()); err != nil {
+		if err := oc.syncGatewayLogicalNetwork(node, l3GatewayConfig, subnet); err != nil {
 			return fmt.Errorf("error creating gateway for node %s: %v", node.Name, err)
 		}
 	}
@@ -757,9 +758,9 @@ func gatewayChanged(oldNode, newNode *kapi.Node) bool {
 
 // macAddressChanged() compares old annotations to new and returns true if something has changed.
 func macAddressChanged(oldNode, node *kapi.Node) bool {
-	oldMacAddress, _ := util.ParseNodeManagementPortMacAddr(oldNode)
-	macAddress, _ := util.ParseNodeManagementPortMacAddr(node)
-	return oldMacAddress != macAddress
+	oldMacAddress, _ := util.ParseNodeManagementPortMACAddress(oldNode)
+	macAddress, _ := util.ParseNodeManagementPortMACAddress(node)
+	return !bytes.Equal(oldMacAddress, macAddress)
 }
 
 // noHostSubnet() compares the no-hostsubenet-nodes flag with node labels to see if the node is manageing its

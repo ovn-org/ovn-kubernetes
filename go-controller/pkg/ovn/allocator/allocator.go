@@ -21,15 +21,11 @@ func NewSubnetAllocator() *SubnetAllocator {
 	return &SubnetAllocator{}
 }
 
-func (sna *SubnetAllocator) AddNetworkRange(network string, hostBits uint32) error {
+func (sna *SubnetAllocator) AddNetworkRange(network *net.IPNet, hostBits uint32) error {
 	sna.Lock()
 	defer sna.Unlock()
 
-	_, ipnet, err := net.ParseCIDR(network)
-	if err != nil {
-		return err
-	}
-	snr, err := newSubnetAllocatorRange(ipnet, hostBits)
+	snr, err := newSubnetAllocatorRange(network, hostBits)
 	if err != nil {
 		return err
 	}

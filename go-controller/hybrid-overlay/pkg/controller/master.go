@@ -33,7 +33,7 @@ func NewMaster(clientset kubernetes.Interface) (*MasterController, error) {
 
 	// Add our hybrid overlay CIDRs to the allocator
 	for _, clusterEntry := range config.HybridOverlay.ClusterSubnets {
-		err := m.allocator.AddNetworkRange(clusterEntry.CIDR.String(), 32-clusterEntry.HostSubnetLength)
+		err := m.allocator.AddNetworkRange(clusterEntry.CIDR, 32-clusterEntry.HostSubnetLength)
 		if err != nil {
 			return nil, err
 		}
@@ -125,7 +125,7 @@ func (m *MasterController) handleOverlayPort(node *kapi.Node, annotator kube.Ann
 			portIP = util.NextIP(second)
 		}
 		if portMAC == nil {
-			portMAC, _ = net.ParseMAC(util.IPAddrToHWAddr(portIP))
+			portMAC = util.IPAddrToHWAddr(portIP)
 		}
 
 		klog.Infof("creating node %s hybrid overlay port", node.Name)
