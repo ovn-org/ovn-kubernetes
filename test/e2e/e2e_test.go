@@ -5,7 +5,6 @@ import (
 	"net/http"
 	"strconv"
 	"strings"
-	"time"
 
 	"github.com/onsi/ginkgo"
 	. "github.com/onsi/ginkgo"
@@ -102,9 +101,7 @@ var _ = Describe("e2e control plane", func() {
 		go checkContinuousConnectivity(f, "", "connectivity-test-continuous", "8.8.8.8", 53, 30, podChan, errChan)
 
 		testPod := <-podChan
-		framework.Logf("Test pod running on %q, waiting a few seconds", testPod.Spec.NodeName)
-
-		time.Sleep(10 * time.Second)
+		framework.Logf("Test pod running on %q", testPod.Spec.NodeName)
 
 		podClient := f.ClientSet.CoreV1().Pods("ovn-kubernetes")
 
@@ -131,9 +128,7 @@ var _ = Describe("e2e control plane", func() {
 		go checkContinuousConnectivity(f, "", "connectivity-test-continuous", "8.8.8.8", 53, 30, podChan, errChan)
 
 		testPod := <-podChan
-		framework.Logf("Test pod running on %q, waiting a few seconds", testPod.Spec.NodeName)
-
-		time.Sleep(10 * time.Second)
+		framework.Logf("Test pod running on %q", testPod.Spec.NodeName)
 
 		podClient := f.ClientSet.CoreV1().Pods("ovn-kubernetes")
 
