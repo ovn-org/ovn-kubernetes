@@ -123,8 +123,8 @@ mtu=${OVN_MTU:-1400}
 ovn_kubernetes_namespace=${OVN_KUBERNETES_NAMESPACE:-ovn-kubernetes}
 
 # host on which ovnkube-db POD is running and this POD contains both
-# OVN NB and SB DB running in their own container. Ignore IPs in loopback range (127.0.0.0/8)
-ovn_db_host=$(getent ahostsv4 $(hostname) | grep -v "^127\." | head -1 | awk '{ print $1 }')
+# OVN NB and SB DB running in their own container.
+ovn_db_host=${K8S_NODE_IP:-""}
 
 # OVN_NB_PORT - ovn north db port (default 6641)
 ovn_nb_port=${OVN_NB_PORT:-6641}

@@ -194,8 +194,7 @@ ovsdb-raft() {
   rm -f ${ovn_db_pidfile}
 
   verify-ovsdb-raft
-  local_ip=$(getent ahostsv4 $(hostname) | grep -v "^127\." | head -1 | awk '{ print $1 }')
-  if [[ ${local_ip} == "" ]]; then
+  if [[ ${ovn_db_host} == "" ]] ; then
     echo "failed to retrieve the IP address of the host $(hostname). Exiting..."
     exit 1
   fi
@@ -207,7 +206,7 @@ ovsdb-raft() {
   if [[ "${POD_NAME}" == "ovnkube-db-0" ]]; then
     run_as_ovs_user_if_needed \
       ${OVNCTL_PATH} run_${db}_ovsdb --no-monitor \
-      --db-${db}-cluster-local-addr=${local_ip} \
+      --db-${db}-cluster-local-addr=${ovn_db_host} \
       --db-${db}-cluster-local-port=${raft_port} \
       --ovn-${db}-log="${ovn_log_db}" &
   else
@@ -217,7 +216,7 @@ ovsdb-raft() {
     fi
     run_as_ovs_user_if_needed \
       ${OVNCTL_PATH} run_${db}_ovsdb --no-monitor \
-      --db-${db}-cluster-local-addr=${local_ip} --db-${db}-cluster-remote-addr=${init_ip} \
+      --db-${db}-cluster-local-addr=${ovn_db_host} --db-${db}-cluster-remote-addr=${init_ip} \
       --db-${db}-cluster-local-port=${raft_port} --db-${db}-cluster-remote-port=${raft_port} \
       --ovn-${db}-log="${ovn_log_db}" &
   fi
