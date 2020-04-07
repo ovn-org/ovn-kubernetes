@@ -5,8 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io/ioutil"
-	"k8s.io/klog"
-	kexec "k8s.io/utils/exec"
+	"os"
 	"path/filepath"
 	"runtime"
 	"strings"
@@ -16,6 +15,9 @@ import (
 
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
 	"github.com/prometheus/client_golang/prometheus"
+
+	"k8s.io/klog"
+	kexec "k8s.io/utils/exec"
 )
 
 const (
@@ -45,6 +47,22 @@ const (
 	nbdbCtlSock = "ovnnb_db.ctl"
 	sbdbCtlSock = "ovnsb_db.ctl"
 )
+
+var (
+	// These are variables (not constants) so that testcases can modify them
+	ovsRunDir string = "/var/run/openvswitch/"
+	ovnRunDir string = "/var/run/ovn/"
+
+	savedOVSRunDir = ovsRunDir
+	savedOVNRunDir = ovnRunDir
+)
+
+// PrepareTestConfig restores default config values. Used by testcases to
+// provide a pristine environment between tests.
+func PrepareTestConfig() {
+	ovsRunDir = savedOVSRunDir
+	ovnRunDir = savedOVNRunDir
+}
 
 // this metric is set only for the ovnkube in master mode since 99.9% of
 // all the ovn-nbctl/ovn-sbctl calls occur on the master
@@ -135,12 +153,12 @@ func SetExec(exec kexec.Interface) error {
 		// openvswitch.
 		runner.ovnappctlPath = runner.appctlPath
 		runner.ovnctlPath = "/usr/share/openvswitch/scripts/ovn-ctl"
-		runner.ovnRunDir = "/var/run/openvswitch/"
+		runner.ovnRunDir = ovsRunDir
 	} else {
 		// If ovn-appctl command is available, it means OVN
 		// has its own separate rundir, logdir, sharedir.
 		runner.ovnctlPath = "/usr/share/ovn/scripts/ovn-ctl"
-		runner.ovnRunDir = "/var/run/ovn/"
+		runner.ovnRunDir = ovnRunDir
 	}
 
 	runner.nbctlPath, err = exec.LookPath(ovnNbctlCommand)
@@ -311,26 +329,54 @@ func runOVNretry(cmdPath string, envVars []string, args ...string) (*bytes.Buffe
 
 var SkippedNbctlDaemonCounter uint64
 
+// getNbctlSocketPath returns the OVN_NB_DAEMON environment variable to add to
+// the ovn-nbctl child process environment, or an error if the nbctl daemon
+// control socket cannot be found
+func getNbctlSocketPath() (string, error) {
+	// Try already-set OVN_NB_DAEMON environment variable
+	if nbctlSocketPath := os.Getenv("OVN_NB_DAEMON"); nbctlSocketPath != "" {
+		if _, err := os.Stat(nbctlSocketPath); err != nil {
+			return "", fmt.Errorf("OVN_NB_DAEMON ovn-nbctl daemon control socket %s missing: %v",
+				nbctlSocketPath, err)
+		}
+		return "OVN_NB_DAEMON=" + nbctlSocketPath, nil
+	}
+
+	// OVN 2.13 (by mistake?) didn't switch the default nbctl control socket
+	// path from /var/run/openvswitch -> /var/run/ovn. Try both
+	dirs := []string{ovnRunDir, ovsRunDir}
+	for _, runDir := range dirs {
+		// Try autodetecting the socket path based on the nbctl daemon pid
+		pidfile := filepath.Join(runDir, "ovn-nbctl.pid")
+		if pid, err := ioutil.ReadFile(pidfile); err == nil {
+			fname := fmt.Sprintf("ovn-nbctl.%s.ctl", strings.TrimSpace(string(pid)))
+			nbctlSocketPath := filepath.Join(runDir, fname)
+			if _, err := os.Stat(nbctlSocketPath); err == nil {
+				return "OVN_NB_DAEMON=" + nbctlSocketPath, nil
+			}
+		}
+	}
+
+	return "", fmt.Errorf("failed to find ovn-nbctl daemon pidfile/socket in %s", strings.Join(dirs, ","))
+}
+
 func getNbctlArgsAndEnv(timeout int, args ...string) ([]string, []string) {
-	var cmdArgs, envVars []string
+	var cmdArgs []string
 
 	if config.NbctlDaemonMode {
 		// when ovn-nbctl is running in a "daemon mode", the user first starts
 		// ovn-nbctl running in the background and afterward uses the daemon to execute
 		// operations. The client needs to use the control socket and set the path to the
 		// control socket in environment variable OVN_NB_DAEMON
-		pid, err := ioutil.ReadFile(runner.ovnRunDir + "ovn-nbctl.pid")
+		envVar, err := getNbctlSocketPath()
 		if err == nil {
-			envVars = append(envVars,
-				fmt.Sprintf("OVN_NB_DAEMON=%sovn-nbctl.%s.ctl", runner.ovnRunDir,
-					strings.Trim(string(pid), " \n")))
+			envVars := []string{envVar}
 			klog.V(5).Infof("using ovn-nbctl daemon mode at %s", envVars)
 			cmdArgs = append(cmdArgs, fmt.Sprintf("--timeout=%d", timeout))
 			cmdArgs = append(cmdArgs, args...)
 			return cmdArgs, envVars
 		}
-		klog.Warningf("failed to retrieve ovn-nbctl daemon's control socket " +
-			"so resorting to non-daemon mode")
+		klog.Warningf(err.Error() + "; resorting to non-daemon mode")
 		atomic.AddUint64(&SkippedNbctlDaemonCounter, 1)
 	}
 
@@ -345,7 +391,7 @@ func getNbctlArgsAndEnv(timeout int, args ...string) ([]string, []string) {
 	}
 	cmdArgs = append(cmdArgs, fmt.Sprintf("--timeout=%d", timeout))
 	cmdArgs = append(cmdArgs, args...)
-	return cmdArgs, envVars
+	return cmdArgs, []string{}
 }
 
 func getNbOVSDBArgs(command string, args ...string) []string {
