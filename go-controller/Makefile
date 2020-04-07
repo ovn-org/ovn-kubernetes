@@ -28,6 +28,9 @@ windows:
 check test:
 	hack/test-go.sh ${PKGS}
 
+codegen:
+	hack/update-codegen.sh
+
 install:
 	install -D -m 755 ${OUT_DIR}/go/bin/ovnkube ${BINDIR}/
 	install -D -m 755 ${OUT_DIR}/go/bin/ovn-kube-util ${BINDIR}/
