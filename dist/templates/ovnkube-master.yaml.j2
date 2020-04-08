@@ -90,6 +90,9 @@ spec:
           name: host-var-run-ovs
         - mountPath: /var/run/ovn/
           name: host-var-run-ovs
+        - mountPath: /ovn-cert
+          name: host-ovn-cert
+          readOnly: true
 
         resources:
           requests:
@@ -109,6 +112,8 @@ spec:
           valueFrom:
             fieldRef:
               fieldPath: metadata.namespace
+        - name: OVN_SSL_ENABLE
+          value: "{{ ovn_ssl_en }}"
         readinessProbe:
           exec:
             command: ["/usr/bin/ovn-kube-util", "readiness-probe", "-t", "ovn-northd"]
@@ -136,7 +141,9 @@ spec:
           name: host-var-run-ovs
         - mountPath: /var/run/ovn/
           name: host-var-run-ovs
-
+        - mountPath: /ovn-cert
+          name: host-ovn-cert
+          readOnly: true
         resources:
           requests:
             cpu: 100m
@@ -151,6 +158,8 @@ spec:
             configMapKeyRef:
               name: ovn-config
               key: k8s_apiserver
+        - name: OVN_SSL_ENABLE
+          value: "{{ ovn_ssl_en }}"
 
         readinessProbe:
           exec:
@@ -181,6 +190,9 @@ spec:
           name: host-var-run-ovs
         - mountPath: /var/run/ovn/
           name: host-var-run-ovs
+        - mountPath: /ovn-cert
+          name: host-ovn-cert
+          readOnly: true
 
         resources:
           requests:
@@ -218,6 +230,8 @@ spec:
           value: "{{ ovn_hybrid_overlay_enable }}"
         - name: OVN_HYBRID_OVERLAY_NET_CIDR
           value: "{{ ovn_hybrid_overlay_net_cidr }}"
+        - name: OVN_SSL_ENABLE
+          value: "{{ ovn_ssl_en }}"
       # end of container
 
       volumes:
@@ -234,5 +248,9 @@ spec:
       - name: host-var-run-ovs
         hostPath:
           path: /var/run/openvswitch
+      - name: host-ovn-cert
+        hostPath:
+          path: /etc/ovn
+          type: DirectoryOrCreate
       tolerations:
       - operator: "Exists"
