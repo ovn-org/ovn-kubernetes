@@ -269,8 +269,8 @@ get_ovn_db_vars() {
       ovn_nbdb_str=${ovn_nbdb_str}","
       ovn_sbdb_str=${ovn_sbdb_str}","
     fi
-    ovn_nbdb_str=${ovn_nbdb_str}tcp://${ovn_db_hosts[${i}]}:${ovn_nb_port}
-    ovn_sbdb_str=${ovn_sbdb_str}tcp://${ovn_db_hosts[${i}]}:${ovn_sb_port}
+    ovn_nbdb_str=${ovn_nbdb_str}tcp:${ovn_db_hosts[${i}]}:${ovn_nb_port}
+    ovn_sbdb_str=${ovn_sbdb_str}tcp:${ovn_db_hosts[${i}]}:${ovn_sb_port}
   done
   ovn_nbdb=${OVN_NORTH:-$ovn_nbdb_str}
   ovn_sbdb=${OVN_SOUTH:-$ovn_sbdb_str}
