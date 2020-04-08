@@ -10,6 +10,7 @@ import (
 
 	"github.com/vishvananda/netlink"
 
+	"k8s.io/klog"
 	utilnet "k8s.io/utils/net"
 )
 
@@ -98,7 +99,19 @@ func LinkRoutesDel(link netlink.Link, subnets []*net.IPNet) error {
 
 // LinkRoutesAdd adds a new route for given subnets through the gwIPstr
 func LinkRoutesAdd(link netlink.Link, gwIP net.IP, subnets []*net.IPNet) error {
+	gwFamily := netlink.FAMILY_V4
+	if utilnet.IsIPv6(gwIP) {
+		gwFamily = netlink.FAMILY_V6
+	}
+	routeAdded := false
 	for _, subnet := range subnets {
+		subnetFamily := netlink.FAMILY_V4
+		if utilnet.IsIPv6CIDR(subnet) {
+			subnetFamily = netlink.FAMILY_V6
+		}
+		if subnetFamily != gwFamily {
+			continue
+		}
 		route := &netlink.Route{
 			Dst:       subnet,
 			LinkIndex: link.Attrs().Index,
@@ -113,6 +126,13 @@ func LinkRoutesAdd(link netlink.Link, gwIP net.IP, subnets []*net.IPNet) error {
 			return fmt.Errorf("failed to add route for subnet %s via gateway %s: %v",
 				subnet.String(), gwIP.String(), err)
 		}
+		routeAdded = true
+	}
+	if !routeAdded {
+		klog.Infof("LinkRoutesAdd - No route added: failed to add route for subnet(s) %v via gateway %s",
+			subnets, gwIP.String())
+		//return fmt.Errorf("No route added: failed to add route for subnet(s) %v via gateway %s",
+		//      subnets, gwIP.String())
 	}
 	return nil
 }

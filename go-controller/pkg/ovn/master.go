@@ -614,7 +614,9 @@ func (oc *Controller) addNode(node *kapi.Node) (hostsubnet *net.IPNet, err error
 		return nil, fmt.Errorf("Error allocating network for node %s: %v", node.Name, err)
 	}
 	if len(hostsubnets) != 1 {
-		return nil, fmt.Errorf("Error allocating network for node %s: multiple subnets returned", node.Name)
+		//return nil, fmt.Errorf("Error allocating network for node %s: multiple subnets returned", node.Name)
+		klog.Errorf("Error allocating network for node %s: multiple subnets returned: %v", node.Name, hostsubnets)
+		klog.Errorf("Using %v and continuing,", hostsubnets[0])
 	}
 	hostsubnet = hostsubnets[0]
 	klog.Infof("Allocated node %s HostSubnet %s", node.Name, hostsubnet.String())
