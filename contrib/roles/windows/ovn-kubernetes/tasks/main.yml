@@ -1,6 +1,0 @@
----
-- name: ovn-kubernetes | include vars
-  include_vars: "{{ ansible_os_family|lower }}.yml"
-
-- name: ovn-kubernetes | fetch binaries from the master node
-  include_tasks: ./distribute_binaries.yml

@@ -1,7 +1,0 @@
----
-- name: Windows validation | include vars
-  include_vars: "{{ ansible_os_family | lower }}.yml"
-
-- name: Windows validation | Validate the services success state
-  include: "./validate_service.yml service_name={{ item }}"
-  with_items: "{{ service_names }}"
