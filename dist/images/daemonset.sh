@@ -227,10 +227,11 @@ echo "svc_cidr: ${svc_cidr}"
 echo "k8s_apiserver: ${k8s_apiserver}"
 echo "mtu: ${OVN_MTU}"
 
-sed "s,${net_cidr_repl},${net_cidr},
-s,${svc_cidr_repl},${svc_cidr},
-s,${mtu_repl},${OVN_MTU},
-s,${k8s_apiserver_repl},${k8s_apiserver}," ../templates/ovn-setup.yaml.j2 >../yaml/ovn-setup.yaml
+# net_cidr and svc_cidr can contain the following special chars: ./,:
+sed "s@${net_cidr_repl}@${net_cidr}@
+s@${svc_cidr_repl}@${svc_cidr}@
+s@${mtu_repl}@${OVN_MTU}@
+s@${k8s_apiserver_repl}@${k8s_apiserver}@" ../templates/ovn-setup.yaml.j2 >../yaml/ovn-setup.yaml
 
 cp ../templates/ovnkube-monitor.yaml.j2 ../yaml/ovnkube-monitor.yaml
 
