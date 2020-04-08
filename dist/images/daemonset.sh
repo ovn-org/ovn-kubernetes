@@ -157,6 +157,10 @@ ovn_loglevel_controller=${OVN_LOGLEVEL_CONTROLLER:-"-vconsole:info"}
 echo "ovn_loglevel_controller: ${ovn_loglevel_controller}"
 ovn_loglevel_nbctld=${OVN_LOGLEVEL_NBCTLD:-"-vconsole:info"}
 echo "ovn_loglevel_nbctld: ${ovn_loglevel_nbctld}"
+ovn_hybrid_overlay_enable=${OVN_HYBRID_OVERLAY_ENABLE}
+echo "ovn_hybrid_overlay_enable: ${ovn_hybrid_overlay_enable}"
+ovn_hybrid_overlay_net_cidr=${OVN_HYBRID_OVERLAY_NET_CIDR}
+echo "ovn_hybrid_overlay_net_cidr: ${ovn_hybrid_overlay_net_cidr}"
 
 ovn_image=${image} \
   ovn_image_pull_policy=${policy} \
@@ -165,6 +169,8 @@ ovn_image=${image} \
   ovn_gateway_opts=${ovn_gateway_opts} \
   ovnkube_node_loglevel=${node_loglevel} \
   ovn_loglevel_controller=${ovn_loglevel_controller} \
+  ovn_hybrid_overlay_net_cidr=${ovn_hybrid_overlay_net_cidr} \
+  ovn_hybrid_overlay_enable=${ovn_hybrid_overlay_enable} \
   j2 ../templates/ovnkube-node.yaml.j2 -o ../yaml/ovnkube-node.yaml
 
 ovn_image=${image} \
@@ -172,6 +178,8 @@ ovn_image=${image} \
   ovnkube_master_loglevel=${master_loglevel} \
   ovn_loglevel_northd=${ovn_loglevel_northd} \
   ovn_loglevel_nbctld=${ovn_loglevel_nbctld} \
+  ovn_hybrid_overlay_net_cidr=${ovn_hybrid_overlay_net_cidr} \
+  ovn_hybrid_overlay_enable=${ovn_hybrid_overlay_enable} \
   j2 ../templates/ovnkube-master.yaml.j2 -o ../yaml/ovnkube-master.yaml
 
 ovn_image=${image} \
