@@ -109,17 +109,17 @@ jobs:
         rm -rf .git
 
   e2e:
-    name: End-To-End Tests
+    name: e2e
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
       matrix:
         target:
-          - e2e-kind-ovn-shard-n
-          - e2e-kind-ovn-shard-np
-          - e2e-kind-ovn-shard-s
-          - e2e-kind-ovn-shard-other
-          - e2e-control-plane
+          - shard-n
+          - shard-np
+          - shard-s
+          - shard-other
+          - control-plane
         ha:
          - enabled: "true"
            name: "HA"

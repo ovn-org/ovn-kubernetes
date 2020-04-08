@@ -2,10 +2,10 @@
 install-kind:
 	./scripts/install-kind.sh
 
-.PHONY: e2e-kind-ovn-shard-%
-e2e-kind-ovn-shard-%:
+.PHONY: shard-%
+shard-%:
 	./scripts/e2e-kind.sh $@
 
-.PHONY: e2e-control-plane
-e2e-control-plane:
+.PHONY: control-plane
+control-plane:
 	./scripts/e2e-cp.sh
