@@ -98,7 +98,7 @@ spec:
         env:
         - name: OVN_DAEMONSET_VERSION
           value: "3"
-        - name: OVN_LOG_NORTHD
+        - name: OVN_LOGLEVEL_NORTHD
           value: "{{ ovn_loglevel_northd }}"
         - name: K8S_APISERVER
           valueFrom:
@@ -144,7 +144,7 @@ spec:
         env:
         - name: OVN_DAEMONSET_VERSION
           value: "3"
-        - name: OVN_LOG_NBCTLD
+        - name: OVN_LOGLEVEL_NBCTLD
           value: "{{ ovn_loglevel_nbctld }}"
         - name: K8S_APISERVER
           valueFrom:

@@ -50,11 +50,11 @@ fi
 # OVN_GATEWAY_MODE - the gateway mode (shared or local) - v3
 # OVN_GATEWAY_OPTS - the options for the ovn gateway
 # OVNKUBE_LOGLEVEL - log level for ovnkube (0..5, default 4) - v3
-# OVN_LOG_NORTHD - log level (ovn-ctl default: -vconsole:emer -vsyslog:err -vfile:info) - v3
-# OVN_LOG_NB - log level (ovn-ctl default: -vconsole:off -vfile:info) - v3
-# OVN_LOG_SB - log level (ovn-ctl default: -vconsole:off -vfile:info) - v3
-# OVN_LOG_CONTROLLER - log level (ovn-ctl default: -vconsole:off -vfile:info) - v3
-# OVN_LOG_NBCTLD - log level (ovn-ctl default: -vconsole:off -vfile:info)
+# OVN_LOGLEVEL_NORTHD - log level (ovn-ctl default: -vconsole:emer -vsyslog:err -vfile:info) - v3
+# OVN_LOGLEVEL_NB - log level (ovn-ctl default: -vconsole:off -vfile:info) - v3
+# OVN_LOGLEVEL_SB - log level (ovn-ctl default: -vconsole:off -vfile:info) - v3
+# OVN_LOGLEVEL_CONTROLLER - log level (ovn-ctl default: -vconsole:off -vfile:info) - v3
+# OVN_LOGLEVEL_NBCTLD - log level (ovn-ctl default: -vconsole:off -vfile:info) - v3
 # OVN_NB_PORT - ovn north db port (default 6641)
 # OVN_SB_PORT - ovn south db port (default 6642)
 # OVN_NB_RAFT_PORT - ovn north db raft port (default 6643)
@@ -68,11 +68,11 @@ fi
 cmd=${1:-""}
 
 # ovn daemon log levels
-ovn_log_northd=${OVN_LOG_NORTHD:-"-vconsole:info"}
-ovn_log_nb=${OVN_LOG_NB:-"-vconsole:info"}
-ovn_log_sb=${OVN_LOG_SB:-"-vconsole:info"}
-ovn_log_controller=${OVN_LOG_CONTROLLER:-"-vconsole:info"}
-ovn_log_nbctld=${OVN_LOG_NBCTLD:-"-vfile:info"}
+ovn_loglevel_northd=${OVN_LOGLEVEL_NORTHD:-"-vconsole:info"}
+ovn_loglevel_nb=${OVN_LOGLEVEL_NB:-"-vconsole:info"}
+ovn_loglevel_sb=${OVN_LOGLEVEL_SB:-"-vconsole:info"}
+ovn_loglevel_controller=${OVN_LOGLEVEL_CONTROLLER:-"-vconsole:info"}
+ovn_loglevel_nbctld= ${OVN_LOGLEVEL_NBCTLD:"-vconsole:info"}
 
 ovnkubelogdir=/var/log/ovn-kubernetes
 
@@ -430,7 +430,7 @@ display_env() {
   echo OVN_NORTHD_OPTS ${ovn_northd_opts}
   echo OVN_SOUTH ${ovn_sbdb}
   echo OVN_CONTROLLER_OPTS ${ovn_controller_opts}
-  echo OVN_LOG_CONTROLLER ${ovn_log_controller}
+  echo OVN_LOGLEVEL_CONTROLLER ${ovn_loglevel_controller}
   echo OVN_GATEWAY_MODE ${ovn_gateway_mode}
   echo OVN_GATEWAY_OPTS ${ovn_gateway_opts}
   echo OVN_NET_CIDR ${net_cidr}
@@ -610,7 +610,7 @@ nb-ovsdb() {
   echo "=============== run nb_ovsdb ========== MASTER ONLY"
   run_as_ovs_user_if_needed \
     ${OVNCTL_PATH} run_nb_ovsdb --no-monitor \
-    --ovn-nb-log="${ovn_log_nb}" &
+    --ovn-nb-log="${ovn_loglevel_nb}" &
 
   wait_for_event attempts=3 process_ready ovnnb_db
   echo "=============== nb-ovsdb ========== RUNNING"
@@ -641,7 +641,7 @@ sb-ovsdb() {
   echo "=============== run sb_ovsdb ========== MASTER ONLY"
   run_as_ovs_user_if_needed \
     ${OVNCTL_PATH} run_sb_ovsdb --no-monitor \
-    --ovn-sb-log="${ovn_log_sb}" &
+    --ovn-sb-log="${ovn_loglevel_sb}" &
 
   wait_for_event attempts=3 process_ready ovnsb_db
   echo "=============== sb-ovsdb ========== RUNNING"
@@ -670,7 +670,7 @@ run-ovn-northd() {
   echo "=============== run_ovn_northd ========== MASTER ONLY"
   echo "ovn_nbdb ${ovn_nbdb}   ovn_sbdb ${ovn_sbdb}"
   echo "ovn_northd_opts=${ovn_northd_opts}"
-  echo "ovn_log_northd=${ovn_log_northd}"
+  echo "ovn_loglevel_northd=${ovn_loglevel_northd}"
 
   # no monitor (and no detach), start northd which connects to the
   # ovnkube-db service
@@ -680,7 +680,7 @@ run-ovn-northd() {
     ${OVNCTL_PATH} start_northd \
     --no-monitor --ovn-manage-ovsdb=no \
     --ovn-northd-nb-db=${ovn_nbdb_i} --ovn-northd-sb-db=${ovn_sbdb_i} \
-    --ovn-northd-log="${ovn_log_northd}" \
+    --ovn-northd-log="${ovn_loglevel_northd}" \
     ${ovn_northd_opts}
 
   wait_for_event attempts=3 process_ready ovn-northd
@@ -772,7 +772,7 @@ ovn-controller() {
 
   run_as_ovs_user_if_needed \
     ${OVNCTL_PATH} --no-monitor start_controller \
-    --ovn-controller-log="${ovn_log_controller}" \
+    --ovn-controller-log="${ovn_loglevel_controller}" \
     ${ovn_controller_opts}
 
   wait_for_event attempts=3 process_ready ovn-controller
@@ -877,10 +877,10 @@ run-nbctld() {
   wait_for_event ready_to_start_node
 
   echo "ovn_nbdb ${ovn_nbdb}   ovn_sbdb ${ovn_sbdb}  ovn_nbdb_test ${ovn_nbdb_test}"
-  echo "ovn_log_nbctld=${ovn_log_nbctld}"
+  echo "ovn_loglevel_nbctld=${ovn_loglevel_nbctld}"
 
   # use unix socket
-  /usr/bin/ovn-nbctl ${ovn_log_nbctld} --pidfile --db=${ovn_nbdb_test} --log-file=${OVN_LOGDIR}/ovn-nbctl.log --detach
+  /usr/bin/ovn-nbctl ${ovn_loglevel_nbctld} --pidfile --db=${ovn_nbdb_test} --log-file=${OVN_LOGDIR}/ovn-nbctl.log --detach
 
   wait_for_event attempts=3 process_ready ovn-nbctl
   echo "=============== run_ovn_nbctl ========== RUNNING"
