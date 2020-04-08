@@ -3,6 +3,7 @@ package cni
 import (
 	"encoding/json"
 	"fmt"
+	"net"
 	"net/http"
 	"time"
 
@@ -174,22 +175,33 @@ func (pr *PodRequest) getCNIResult(podInterfaceInfo *PodInterfaceInfo) (*current
 		return nil, fmt.Errorf("failed to configure pod interface: %v", err)
 	}
 
-	// Build the result structure to pass back to the runtime
-	var ipVersion string
-	if utilnet.IsIPv6(podInterfaceInfo.IP.IP) {
-		ipVersion = "6"
-	} else {
-		ipVersion = "4"
+	gateways := map[string]net.IP{}
+	for _, gw := range podInterfaceInfo.Gateways {
+		if gw.To4() != nil && gateways["4"] == nil {
+			gateways["4"] = gw
+		} else if gw.To4() == nil && gateways["6"] == nil {
+			gateways["6"] = gw
+		}
 	}
+
+	// Build the result structure to pass back to the runtime
+	ips := []*current.IPConfig{}
+	for _, ipcidr := range podInterfaceInfo.IPs {
+		ip := &current.IPConfig{
+			Interface: current.Int(1),
+			Address:   *ipcidr,
+		}
+		if utilnet.IsIPv6CIDR(ipcidr) {
+			ip.Version = "6"
+		} else {
+			ip.Version = "4"
+		}
+		ip.Gateway = gateways[ip.Version]
+		ips = append(ips, ip)
+	}
+
 	return &current.Result{
 		Interfaces: interfacesArray,
-		IPs: []*current.IPConfig{
-			{
-				Version:   ipVersion,
-				Interface: current.Int(1),
-				Address:   *podInterfaceInfo.IP,
-				Gateway:   podInterfaceInfo.GW,
-			},
-		},
+		IPs:        ips,
 	}, nil
 }

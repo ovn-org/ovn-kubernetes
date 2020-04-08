@@ -23,12 +23,12 @@ import (
 // attach it to the desired network. This function finds the HNS Id of the
 // network based on the gatewayIP. If more than one suitable network it's found,
 // return an error asking to give the HNS Network Id in config.
-func getHNSIdFromConfigOrByGatewayIP(gatewayIP net.IP) (string, error) {
+func getHNSIdFromConfigOrByGatewayIP(gatewayIPs []net.IP) (string, error) {
 	if config.CNI.WinHNSNetworkID != "" {
 		klog.Infof("Using HNS Network Id from config: %v", config.CNI.WinHNSNetworkID)
 		return config.CNI.WinHNSNetworkID, nil
 	}
-	if gatewayIP == nil {
+	if len(gatewayIPs) == 0 {
 		return "", fmt.Errorf("no gateway IP and no HNS Network ID given")
 	}
 	hnsNetworkId := ""
@@ -38,7 +38,7 @@ func getHNSIdFromConfigOrByGatewayIP(gatewayIP net.IP) (string, error) {
 	}
 	for _, hnsNW := range hnsNetworks {
 		for _, hnsNWSubnet := range hnsNW.Subnets {
-			if strings.Compare(gatewayIP.String(), hnsNWSubnet.GatewayAddress) == 0 {
+			if strings.Compare(gatewayIPs[0].String(), hnsNWSubnet.GatewayAddress) == 0 {
 				if len(hnsNetworkId) == 0 {
 					hnsNetworkId = hnsNW.Id
 				} else {
@@ -118,7 +118,11 @@ func (pr *PodRequest) ConfigureInterface(namespace string, podName string, ifInf
 	if conf.DeviceID != "" {
 		return nil, fmt.Errorf("failure OVS-Offload is not supported in Windows")
 	}
-	ipMaskSize, _ := ifInfo.IP.Mask.Size()
+	if len(ifInfo.IPs) != 1 {
+		return nil, fmt.Errorf("dual-stack is not supported in Windows")
+	}
+
+	ipMaskSize, _ := ifInfo.IPs[0].Mask.Size()
 	// NOTE(abalutoiu): The endpoint name should not depend on the container ID.
 	// This is for backwards compatibility in kubernetes which calls the CNI
 	// even for containers that are not the infra container.
@@ -137,7 +141,7 @@ func (pr *PodRequest) ConfigureInterface(namespace string, podName string, ifInf
 	}()
 
 	var hnsNetworkId string
-	hnsNetworkId, err = getHNSIdFromConfigOrByGatewayIP(ifInfo.GW)
+	hnsNetworkId, err = getHNSIdFromConfigOrByGatewayIP(ifInfo.Gateways)
 	if err != nil {
 		klog.Infof("Error when detecting the HNS Network Id: %q", err)
 		return nil, err
@@ -156,7 +160,7 @@ func (pr *PodRequest) ConfigureInterface(namespace string, podName string, ifInf
 		hnsEndpoint := &hcsshim.HNSEndpoint{
 			Name:           endpointName,
 			VirtualNetwork: hnsNetworkId,
-			IPAddress:      ifInfo.IP.IP,
+			IPAddress:      ifInfo.IPs[0].IP,
 			MacAddress:     macAddressIpFormat,
 			PrefixLength:   uint8(ipMaskSize),
 			DNSServerList:  strings.Join(conf.DNS.Nameservers, ","),
@@ -196,7 +200,7 @@ func (pr *PodRequest) ConfigureInterface(namespace string, podName string, ifInf
 		"interface", endpointName,
 		fmt.Sprintf("external_ids:attached_mac=%s", ifInfo.MAC),
 		fmt.Sprintf("external_ids:iface-id=%s", ifaceID),
-		fmt.Sprintf("external_ids:ip_address=%s", ifInfo.IP),
+		fmt.Sprintf("external_ids:ip_address=%s", ifInfo.IPs[0]),
 	}
 	var out []byte
 	out, err = exec.Command("ovs-vsctl", ovsArgs...).CombinedOutput()
