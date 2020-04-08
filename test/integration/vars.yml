@@ -1,7 +1,0 @@
----
-
-# For results.yml Paths use rsync 'source' conventions
-artifacts: "/tmp/artifacts"  # Base-directory for collection
-openshift_dind_kubeconfig: "/tmp/openshift-dind-cluster/openshift/openshift.local.config/master/admin.kubeconfig"
-result_dest_basedir: '{{ lookup("env","WORKSPACE") |
-                         default(playbook_dir, True) }}/artifacts'

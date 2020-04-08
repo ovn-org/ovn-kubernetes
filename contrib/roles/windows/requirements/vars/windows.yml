@@ -1,7 +1,0 @@
----
-ipv6:
-  reg_path: HKLM:\SYSTEM\CurrentControlSet\Services\Tcpip6\Parameters
-  disable_flags_reg_name: DisabledComponents
-  disable_flags_reg_value: 4294967295  # Integer value for: 0xffffffff
-
-ps_tools_link: https://download.sysinternals.com/files/PSTools.zip

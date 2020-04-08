@@ -58,7 +58,7 @@ fedora-dev: bld
                     --ovn-loglevel-nbctld="-vconsole:info"
 
 # This target expands the daemonset yaml templates into final form
-# It gets the image name from ../ansible/hosts
+# Use CLI flags or environment variables to customize its behavior.
 daemonsetyaml:
 	./daemonset.sh
 

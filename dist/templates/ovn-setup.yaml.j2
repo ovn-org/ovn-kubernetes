@@ -130,7 +130,7 @@ metadata:
   name: ovn-config
   namespace: ovn-kubernetes
 data:
-  net_cidr:      "{{ net_cidr | default('10.128.0.0/14/23') }}"
-  svc_cidr:      "{{ svc_cidr | default('172.30.0.0/16') }}"
-  k8s_apiserver: "{{ k8s_apiserver.stdout }}"
+  net_cidr:      "{{ net_cidr }}"
+  svc_cidr:      "{{ svc_cidr }}"
+  k8s_apiserver: "{{ k8s_apiserver }}"
   mtu:           "{{ mtu_value }}"

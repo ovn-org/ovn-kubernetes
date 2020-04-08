@@ -217,10 +217,6 @@ For more control on the options to ovnkube, please read [config.md]
 
 Please read [debugging.md].
 
-## Vagrant
-
-There is a vagrant available to bring up a simple cluster at [vagrant].
-
 ### Overlay mode architecture diagram:
 
 The following digaram represents the internal architecture details
