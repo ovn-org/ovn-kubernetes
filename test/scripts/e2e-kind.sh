@@ -14,18 +14,18 @@ SKIPPED_TESTS='Networking\sIPerf\sIPv[46]|\[Feature:PerformanceDNS\]|\[Feature:I
 GINKGO_ARGS="--num-nodes=3 --ginkgo.skip=${SKIPPED_TESTS} --disable-log-dump=false"
 
 case "$SHARD" in
-	e2e-kind-ovn-shard-n)
+	shard-n)
 		# all tests that don't have P as their sixth letter after the N
 		GINKGO_ARGS="${GINKGO_ARGS} "'--ginkgo.focus=\[sig-network\]\s[Nn](.{6}[^Pp].*|.{0,6}$)'
 		;;
-	e2e-kind-ovn-shard-np)
+	shard-np)
 		# all tests that have P as the sixth letter after the N
 		GINKGO_ARGS="${GINKGO_ARGS} "'--ginkgo.focus=\[sig-network\]\s[Nn].{6}[Pp].*$'
 		;;
-	e2e-kind-ovn-shard-s)
+	shard-s)
 		GINKGO_ARGS="${GINKGO_ARGS} "'--ginkgo.focus=\[sig-network\]\s[Ss].*'
 		;;
-	e2e-kind-ovn-shard-other)
+	shard-other)
 		GINKGO_ARGS="${GINKGO_ARGS} "'--ginkgo.focus=\[sig-network\]\s[^NnSs].*'
 		;;
 	*)
