@@ -3,6 +3,8 @@ package util
 import (
 	"net"
 
+	ovntest "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/testing"
+
 	. "github.com/onsi/ginkgo"
 	. "github.com/onsi/gomega"
 )
@@ -19,8 +21,8 @@ var _ = Describe("Pod annotation tests", func() {
 			{
 				name: "Single-stack IPv4",
 				in: &PodAnnotation{
-					IPs:      []*net.IPNet{mustParseCIDRAddress("192.168.0.5/24")},
-					MAC:      mustParseMAC("0A:58:FD:98:00:01"),
+					IPs:      []*net.IPNet{ovntest.MustParseIPNet("192.168.0.5/24")},
+					MAC:      ovntest.MustParseMAC("0A:58:FD:98:00:01"),
 					Gateways: []net.IP{net.ParseIP("192.168.0.1")},
 				},
 				out: map[string]string{
@@ -30,8 +32,8 @@ var _ = Describe("Pod annotation tests", func() {
 			{
 				name: "No GW",
 				in: &PodAnnotation{
-					IPs: []*net.IPNet{mustParseCIDRAddress("192.168.0.5/24")},
-					MAC: mustParseMAC("0A:58:FD:98:00:01"),
+					IPs: []*net.IPNet{ovntest.MustParseIPNet("192.168.0.5/24")},
+					MAC: ovntest.MustParseMAC("0A:58:FD:98:00:01"),
 				},
 				out: map[string]string{
 					"k8s.ovn.org/pod-networks": `{"default":{"ip_addresses":["192.168.0.5/24"],"mac_address":"0a:58:fd:98:00:01","ip_address":"192.168.0.5/24"}}`,
@@ -40,12 +42,12 @@ var _ = Describe("Pod annotation tests", func() {
 			{
 				name: "Routes",
 				in: &PodAnnotation{
-					IPs:      []*net.IPNet{mustParseCIDRAddress("192.168.0.5/24")},
-					MAC:      mustParseMAC("0A:58:FD:98:00:01"),
+					IPs:      []*net.IPNet{ovntest.MustParseIPNet("192.168.0.5/24")},
+					MAC:      ovntest.MustParseMAC("0A:58:FD:98:00:01"),
 					Gateways: []net.IP{net.ParseIP("192.168.0.1")},
 					Routes: []PodRoute{
 						{
-							Dest:    mustParseCIDR("192.168.1.0/24"),
+							Dest:    ovntest.MustParseIPNet("192.168.1.0/24"),
 							NextHop: net.ParseIP("192.168.1.1"),
 						},
 					},
@@ -57,8 +59,8 @@ var _ = Describe("Pod annotation tests", func() {
 			{
 				name: "Single-stack IPv6",
 				in: &PodAnnotation{
-					IPs:      []*net.IPNet{mustParseCIDRAddress("fd01::1234/64")},
-					MAC:      mustParseMAC("0A:58:FD:98:00:01"),
+					IPs:      []*net.IPNet{ovntest.MustParseIPNet("fd01::1234/64")},
+					MAC:      ovntest.MustParseMAC("0A:58:FD:98:00:01"),
 					Gateways: []net.IP{net.ParseIP("fd01::1")},
 				},
 				out: map[string]string{
@@ -69,10 +71,10 @@ var _ = Describe("Pod annotation tests", func() {
 				name: "Dual-stack",
 				in: &PodAnnotation{
 					IPs: []*net.IPNet{
-						mustParseCIDRAddress("192.168.0.5/24"),
-						mustParseCIDRAddress("fd01::1234/64"),
+						ovntest.MustParseIPNet("192.168.0.5/24"),
+						ovntest.MustParseIPNet("fd01::1234/64"),
 					},
-					MAC: mustParseMAC("0A:58:FD:98:00:01"),
+					MAC: ovntest.MustParseMAC("0A:58:FD:98:00:01"),
 					Gateways: []net.IP{
 						net.ParseIP("192.168.1.0"),
 						net.ParseIP("fd01::1"),
@@ -94,22 +96,3 @@ var _ = Describe("Pod annotation tests", func() {
 		}
 	})
 })
-
-func mustParseCIDRAddress(addr string) *net.IPNet {
-	ip, subnet, err := net.ParseCIDR(addr)
-	Expect(err).NotTo(HaveOccurred())
-	subnet.IP = ip
-	return subnet
-}
-
-func mustParseCIDR(cidr string) *net.IPNet {
-	_, subnet, err := net.ParseCIDR(cidr)
-	Expect(err).NotTo(HaveOccurred())
-	return subnet
-}
-
-func mustParseMAC(mac string) net.HardwareAddr {
-	parsed, err := net.ParseMAC(mac)
-	Expect(err).NotTo(HaveOccurred())
-	return parsed
-}

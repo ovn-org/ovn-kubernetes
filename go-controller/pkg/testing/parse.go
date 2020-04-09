@@ -15,19 +15,29 @@ func MustParseIP(ipStr string) net.IP {
 	return ip
 }
 
-// MustParseIPNet is like netlink.ParseIPNet except that it panics on error; use this for
-// converting compile-time constant strings to net.IPNet. (Note that as compared with
-// net.ParseCIDR, netlink.ParseIPNet returns the full IP from the input string, without
-// masking out any of the bits.)
+// MustParseIPNet is like netlink.ParseIPNet or net.ParseCIDR, except that it panics on
+// error; use this for converting compile-time constant strings to net.IPNet.
 func MustParseIPNet(cidrStr string) *net.IPNet {
 	ip, ipNet, err := net.ParseCIDR(cidrStr)
 	if err != nil {
 		panic(fmt.Sprintf("Could not parse %q as a CIDR: %v", cidrStr, err))
 	}
-	if len(ipNet.IP) == 4 {
-		ipNet.IP = ip.To4()
-	} else {
-		ipNet.IP = ip.To16()
+	// To make this compatible both with code that does
+	//
+	//     _, ipNet, err := net.ParseCIDR(str)
+	//
+	// and code that does
+	//
+	//    ipNet, err := netlink.ParseIPNet(str)
+	//    ipNet.IP = ip
+	//
+	// we replace ipNet.IP with ip only if they aren't already equal. This sounds like
+	// a no-op but it isn't; in particular, when parsing an IPv4 CIDR, net.ParseCIDR()
+	// returns a 4-byte ip but a 16-byte ipNet.IP, so if we just unconditionally
+	// replace the latter with the former, it will no longer compare as byte-for-byte
+	// equal to the original value.
+	if !ipNet.IP.Equal(ip) {
+		ipNet.IP = ip
 	}
 	return ipNet
 }
