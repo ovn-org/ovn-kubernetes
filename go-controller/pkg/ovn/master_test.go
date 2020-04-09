@@ -242,7 +242,7 @@ var _ = Describe("Master Operations", func() {
 			Expect(err).NotTo(HaveOccurred())
 
 			nodeAnnotator := kube.NewNodeAnnotator(&kube.Kube{fakeClient}, &testNode)
-			err = util.SetDisabledL3GatewayConfig(nodeAnnotator)
+			err = util.SetL3GatewayConfig(nodeAnnotator, &util.L3GatewayConfig{Mode: config.GatewayModeDisabled})
 			Expect(err).NotTo(HaveOccurred())
 			err = util.SetNodeManagementPortMACAddress(nodeAnnotator, ovntest.MustParseMAC(mgmtMAC))
 			Expect(err).NotTo(HaveOccurred())
@@ -324,7 +324,7 @@ var _ = Describe("Master Operations", func() {
 			Expect(err).NotTo(HaveOccurred())
 
 			nodeAnnotator := kube.NewNodeAnnotator(&kube.Kube{fakeClient}, &testNode)
-			err = util.SetDisabledL3GatewayConfig(nodeAnnotator)
+			err = util.SetL3GatewayConfig(nodeAnnotator, &util.L3GatewayConfig{Mode: config.GatewayModeDisabled})
 			Expect(err).NotTo(HaveOccurred())
 			err = util.SetNodeManagementPortMACAddress(nodeAnnotator, ovntest.MustParseMAC(mgmtMAC))
 			Expect(err).NotTo(HaveOccurred())
@@ -405,7 +405,7 @@ var _ = Describe("Master Operations", func() {
 			Expect(err).NotTo(HaveOccurred())
 
 			nodeAnnotator := kube.NewNodeAnnotator(&kube.Kube{fakeClient}, &testNode)
-			err = util.SetDisabledL3GatewayConfig(nodeAnnotator)
+			err = util.SetL3GatewayConfig(nodeAnnotator, &util.L3GatewayConfig{Mode: config.GatewayModeDisabled})
 			Expect(err).NotTo(HaveOccurred())
 			err = util.SetNodeManagementPortMACAddress(nodeAnnotator, ovntest.MustParseMAC(mgmtMAC))
 			Expect(err).NotTo(HaveOccurred())
@@ -595,7 +595,7 @@ subnet=%s
 			Expect(err).NotTo(HaveOccurred())
 
 			nodeAnnotator := kube.NewNodeAnnotator(&kube.Kube{fakeClient}, &masterNode)
-			err = util.SetDisabledL3GatewayConfig(nodeAnnotator)
+			err = util.SetL3GatewayConfig(nodeAnnotator, &util.L3GatewayConfig{Mode: config.GatewayModeDisabled})
 			Expect(err).NotTo(HaveOccurred())
 			err = util.SetNodeManagementPortMACAddress(nodeAnnotator, ovntest.MustParseMAC(masterMgmtPortMAC))
 			Expect(err).NotTo(HaveOccurred())
@@ -698,18 +698,17 @@ var _ = Describe("Gateway Init Operations", func() {
 			_, err = config.InitConfig(ctx, fexec, nil)
 			Expect(err).NotTo(HaveOccurred())
 
-			fexec.AddFakeCmd(&ovntest.ExpectedCmd{
-				Cmd:    "ovs-vsctl --timeout=15 --if-exists get Open_vSwitch . external_ids:system-id",
-				Output: systemID,
-			})
-
 			nodeAnnotator := kube.NewNodeAnnotator(&kube.Kube{fakeClient}, &testNode)
 			ifaceID := localnetBridgeName + "_" + nodeName
-			err = util.SetLocalL3GatewayConfig(nodeAnnotator, ifaceID,
-				ovntest.MustParseMAC(brLocalnetMAC),
-				ovntest.MustParseIPNet(localnetGatewayIP),
-				ovntest.MustParseIP(localnetGatewayNextHop),
-				true)
+			err = util.SetL3GatewayConfig(nodeAnnotator, &util.L3GatewayConfig{
+				Mode:           config.GatewayModeLocal,
+				ChassisID:      systemID,
+				InterfaceID:    ifaceID,
+				MACAddress:     ovntest.MustParseMAC(brLocalnetMAC),
+				IPAddress:      ovntest.MustParseIPNet(localnetGatewayIP),
+				NextHop:        ovntest.MustParseIP(localnetGatewayNextHop),
+				NodePortEnable: true,
+			})
 			Expect(err).NotTo(HaveOccurred())
 			err = util.SetNodeManagementPortMACAddress(nodeAnnotator, ovntest.MustParseMAC(brLocalnetMAC))
 			Expect(err).NotTo(HaveOccurred())
@@ -884,18 +883,19 @@ var _ = Describe("Gateway Init Operations", func() {
 			_, err = config.InitConfig(ctx, fexec, nil)
 			Expect(err).NotTo(HaveOccurred())
 
-			fexec.AddFakeCmd(&ovntest.ExpectedCmd{
-				Cmd:    "ovs-vsctl --timeout=15 --if-exists get Open_vSwitch . external_ids:system-id",
-				Output: systemID,
-			})
-
 			nodeAnnotator := kube.NewNodeAnnotator(&kube.Kube{fakeClient}, &testNode)
 			ifaceID := physicalBridgeName + "_" + nodeName
-			err = util.SetSharedL3GatewayConfig(nodeAnnotator, ifaceID,
-				ovntest.MustParseMAC(physicalBridgeMAC),
-				ovntest.MustParseIPNet(physicalGatewayIPMask),
-				ovntest.MustParseIP(physicalGatewayNextHop),
-				true, 1024)
+			vlanID := uint(1024)
+			err = util.SetL3GatewayConfig(nodeAnnotator, &util.L3GatewayConfig{
+				Mode:           config.GatewayModeShared,
+				ChassisID:      systemID,
+				InterfaceID:    ifaceID,
+				MACAddress:     ovntest.MustParseMAC(physicalBridgeMAC),
+				IPAddress:      ovntest.MustParseIPNet(physicalGatewayIPMask),
+				NextHop:        ovntest.MustParseIP(physicalGatewayNextHop),
+				NodePortEnable: true,
+				VLANID:         &vlanID,
+			})
 			err = util.SetNodeManagementPortMACAddress(nodeAnnotator, ovntest.MustParseMAC(nodeMgmtPortMAC))
 			Expect(err).NotTo(HaveOccurred())
 			err = util.SetNodeHostSubnetAnnotation(nodeAnnotator, ovntest.MustParseIPNet(nodeSubnet))
