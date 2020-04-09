@@ -105,7 +105,9 @@ func (n *OvnNode) initGateway(subnet *net.IPNet, nodeAnnotator kube.Annotator,
 		}
 		prFn, err = n.initSharedGateway(subnet, gatewayNextHop, gatewayIntf, nodeAnnotator)
 	case config.GatewayModeDisabled:
-		err = util.SetDisabledL3GatewayConfig(nodeAnnotator)
+		err = util.SetL3GatewayConfig(nodeAnnotator, &util.L3GatewayConfig{
+			Mode: config.GatewayModeDisabled,
+		})
 	}
 	if err != nil {
 		return err
