@@ -95,23 +95,3 @@ for different clusters.
 It is convient to set up a docker registry for the cluster and add it to
 the /etc/containers/registries.conf file on each node in both the
 "registries:" and "insecure_registries:" sections.
-
-============================
-Cluster install:
-
-Follow the directions in the openshift documents to provision the hosts in the
-cluster and install openshift. Make sure the cluster hosts file contains:
-os_sdn_network_plugin_name='cni'
-
-When the install is complete, delete the ovs and openshift-sdn daemonsets.
-
-Run the cluster master:
-$ ansible/scripts/ovn-setup.sh
-script to to set up kubernetes configuration. Next:
-$ kubectl create -f yaml/sdn-ovs.yaml
-$ kubectl create -f yaml/ovskube-master.yaml
-$ kubectl create -f yaml/ovskube.yaml
-
-Verify the install with 
-$ oc get nodes
-All should show Ready.
