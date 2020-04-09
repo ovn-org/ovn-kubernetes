@@ -134,8 +134,8 @@ uses the hostname.  kubelet allows this name to be overridden with
  -nodeport \
  -init-gateways -gateway-local \
  -k8s-token="$TOKEN" \
- -nb-address="tcp://$CENTRAL_IP:6641" \
- -sb-address="tcp://$CENTRAL_IP:6642" 2>&1 &
+ -nb-address="tcp:$CENTRAL_IP:6641" \
+ -sb-address="tcp:$CENTRAL_IP:6642" 2>&1 &
 ```
 
 Note: Make sure to read /var/log/ovn-kubernetes/ovnkube.log to see that there were
@@ -172,8 +172,8 @@ nohup sudo ovnkube -k8s-kubeconfig kubeconfig.yaml -loglevel=4 \
     -k8s-apiserver="http://$CENTRAL_IP:8080" \
     -init-node="$NODE_NAME"  \
     -nodeport \
-    -nb-address="tcp://$CENTRAL_IP:6641" \
-    -sb-address="tcp://$CENTRAL_IP:6642" -k8s-token="$TOKEN" \
+    -nb-address="tcp:$CENTRAL_IP:6641" \
+    -sb-address="tcp:$CENTRAL_IP:6642" -k8s-token="$TOKEN" \
     -init-gateways \
     -k8s-service-cidr=$SERVICE_IP_SUBNET \
     -cluster-subnets=$CLUSTER_IP_SUBNET 2>&1 &

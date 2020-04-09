@@ -83,8 +83,8 @@ IP1="$MASTER1"
 IP2="$MASTER2"
 IP3="$MASTER3"
 
-ovn_nb="tcp://$IP1:6641,tcp://$IP2:6641,tcp://$IP3:6641"
-ovn_sb="tcp://$IP1:6642,tcp://$IP2:6642,tcp://$IP3:6642"
+ovn_nb="tcp:$IP1:6641,tcp:$IP2:6641,tcp:$IP3:6641"
+ovn_sb="tcp:$IP1:6642,tcp:$IP2:6642,tcp:$IP3:6642"
 
 nohup sudo ovnkube -k8s-kubeconfig kubeconfig.yaml \
  -loglevel=4 \
@@ -127,8 +127,8 @@ IP1="$MASTER1"
 IP2="$MASTER2"
 IP3="$MASTER3"
 
-ovn_nb="tcp://$IP1:6641,tcp://$IP2:6641,tcp://$IP3:6641"
-ovn_sb="tcp://$IP1:6642,tcp://$IP2:6642,tcp://$IP3:6642"
+ovn_nb="tcp:$IP1:6641,tcp:$IP2:6641,tcp:$IP3:6641"
+ovn_sb="tcp:$IP1:6642,tcp:$IP2:6642,tcp:$IP3:6642"
 
 nohup sudo ovnkube -k8s-kubeconfig $HOME/kubeconfig.yaml -loglevel=4 \
     -logfile="/var/log/openvswitch/ovnkube.log" \
