@@ -130,7 +130,7 @@ func testManagementPort(ctx *cli.Context, fexec *ovntest.FakeExec, testNS ns.Net
 		defer GinkgoRecover()
 
 		n := OvnNode{name: nodeName, stopChan: make(chan struct{})}
-		err = n.createManagementPort(nodeSubnetCIDRs[0], nodeAnnotator, waiter)
+		err = n.createManagementPort(nodeSubnetCIDRs, nodeAnnotator, waiter)
 		Expect(err).NotTo(HaveOccurred())
 		l, err := netlink.LinkByName(mgtPort)
 		Expect(err).NotTo(HaveOccurred())
@@ -326,6 +326,43 @@ var _ = Describe("Management Port Operations", func() {
 			app.Name,
 			"--cluster-subnets=" + v6clusterCIDR,
 			"--k8s-service-cidr=" + v6serviceCIDR,
+		})
+		Expect(err).NotTo(HaveOccurred())
+	})
+
+	It("sets up the management port for dual-stack clusters", func() {
+		app.Action = func(ctx *cli.Context) error {
+			testManagementPort(ctx, fexec, testNS,
+				[]managementPortTestConfig{
+					{
+						family:   netlink.FAMILY_V4,
+						protocol: iptables.ProtocolIPv4,
+
+						clusterCIDR: v4clusterCIDR,
+						serviceCIDR: v4serviceCIDR,
+						nodeSubnet:  v4nodeSubnet,
+
+						expectedManagementPortIP: v4mgtPortIP,
+						expectedGatewayIP:        v4gwIP,
+					},
+					{
+						family:   netlink.FAMILY_V6,
+						protocol: iptables.ProtocolIPv6,
+
+						clusterCIDR: v6clusterCIDR,
+						serviceCIDR: v6serviceCIDR,
+						nodeSubnet:  v6nodeSubnet,
+
+						expectedManagementPortIP: v6mgtPortIP,
+						expectedGatewayIP:        v6gwIP,
+					},
+				}, v4lrpMAC)
+			return nil
+		}
+		err := app.Run([]string{
+			app.Name,
+			"--cluster-subnets=" + v4clusterCIDR + "," + v6clusterCIDR,
+			"--k8s-service-cidr=" + v4serviceCIDR + "," + v6serviceCIDR,
 		})
 		Expect(err).NotTo(HaveOccurred())
 	})
