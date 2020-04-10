@@ -23,7 +23,7 @@ sudo apt-get install openvswitch-datapath-dkms -y
 sudo apt-get install openvswitch-switch openvswitch-common -y
 ```
 
-On the master node, where you intend to start OVN's central components,
+On the master, where you intend to start OVN's central components,
 run:
 
 ```

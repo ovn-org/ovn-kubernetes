@@ -673,7 +673,7 @@ var OVNGatewayFlags = []cli.Flag{
 	},
 	cli.StringFlag{
 		Name: "gateway-interface",
-		Usage: "The interface in minions that will be the gateway interface. " +
+		Usage: "The interface on nodes that will be the gateway interface. " +
 			"If none specified, then the node's interface on which the " +
 			"default gateway is configured will be used as the gateway " +
 			"interface. Only useful with \"init-gateways\"",

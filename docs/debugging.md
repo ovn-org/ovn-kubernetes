@@ -17,7 +17,7 @@ same system-id for all your VMs - which is a problem.
 
 ### All nodes should register with OVN SB database.
 
-On the master node, run:
+On the master, run:
 
 ```
 ovn-sbctl list chassis
@@ -83,14 +83,14 @@ You can use the following command to achieve it via iptables.
 
 ### Check ovn-northd's log file.
 
-On the master node, look at /var/log/openvswitch/ovn-northd.log to see
+On the master, look at /var/log/openvswitch/ovn-northd.log to see
 for any errors with the setup of the OVN central node.
 
 ## Runtime issues
 
 ### Check the watcher's log file.
 
-On the master node, check whether ovnkube is running by:
+On the master, check whether ovnkube is running by:
 
 ```
 ps -ef | grep ovnkube
@@ -106,7 +106,7 @@ When you create a pod and it gets scheduled on a particular host, the
 OVN CNI plugin on that host, tries to access the pod's information from
 the K8s api server.  Specifically, it tries to get the IP address and
 mac address for that pod.  This information is logged in the OVN CNI log
-file on each minion if you have specified a log file via 
+file on each node if you have specified a log file via
 "/etc/openvswitch/ovn_k8s.conf". You can read how to provide a logfile
 by reading 'man ovn_k8s.conf.5'.
 
