@@ -13,8 +13,7 @@ import (
 	utilnet "k8s.io/utils/net"
 )
 
-func (ovn *Controller) getLoadBalancer(protocol kapi.Protocol) (string,
-	error) {
+func (ovn *Controller) getLoadBalancer(protocol kapi.Protocol) (string, error) {
 	if outStr, ok := ovn.loadbalancerClusterCache[protocol]; ok {
 		return outStr, nil
 	}
@@ -44,6 +43,8 @@ func (ovn *Controller) getLoadBalancer(protocol kapi.Protocol) (string,
 	return out, nil
 }
 
+// getDefaultGatewayLoadBalancer returns the load balancer for the node with the lowest gateway IP.
+// This is used in the implementation of ExternalIPs
 func (ovn *Controller) getDefaultGatewayLoadBalancer(protocol kapi.Protocol) string {
 	if outStr, ok := ovn.loadbalancerGWCache[protocol]; ok {
 		return outStr
@@ -66,8 +67,8 @@ func (ovn *Controller) getDefaultGatewayLoadBalancer(protocol kapi.Protocol) str
 	return lb
 }
 
-func (ovn *Controller) getLoadBalancerVIPS(
-	loadBalancer string) (map[string]interface{}, error) {
+// getLoadBalancerVIPs returns a map whose keys are VIPs (IP:port) on loadBalancer
+func (ovn *Controller) getLoadBalancerVIPs(loadBalancer string) (map[string]interface{}, error) {
 	outStr, _, err := util.RunOVNNbctl("--data=bare", "--no-heading",
 		"get", "load_balancer", loadBalancer, "vips")
 	if err != nil {
@@ -105,39 +106,54 @@ func (ovn *Controller) deleteLoadBalancerVIP(loadBalancer, vip string) {
 	ovn.removeServiceLB(loadBalancer, vip)
 }
 
-func (ovn *Controller) configureLoadBalancer(lb, serviceIP string, port int32, endpoints []string) error {
+// configureLoadBalancer updates the VIP for sourceIP:sourcePort to point to targets (an
+// array of IP:port strings)
+func (ovn *Controller) configureLoadBalancer(lb, sourceIP string, sourcePort int32, targets []string) error {
 	ovn.serviceLBLock.Lock()
 	defer ovn.serviceLBLock.Unlock()
-	commaSeparatedEps := strings.Join(endpoints, ",")
-	target := fmt.Sprintf(`vips:"%s"="%s"`, util.JoinHostPortInt32(serviceIP, port), commaSeparatedEps)
 
-	out, stderr, err := util.RunOVNNbctl("set", "load_balancer", lb, target)
+	vip := util.JoinHostPortInt32(sourceIP, sourcePort)
+	lbTarget := fmt.Sprintf(`vips:"%s"="%s"`, vip, strings.Join(targets, ","))
+
+	out, stderr, err := util.RunOVNNbctl("set", "load_balancer", lb, lbTarget)
 	if err != nil {
 		return fmt.Errorf("error in configuring load balancer: %s "+
 			"stdout: %q, stderr: %q, error: %v", lb, out, stderr, err)
 	}
-	ovn.setServiceEndpointsToLB(lb, util.JoinHostPortInt32(serviceIP, port), endpoints)
-	klog.V(5).Infof("lb entry set for %s, %s, %v", lb, target,
-		ovn.serviceLBMap[lb][util.JoinHostPortInt32(serviceIP, port)])
+	ovn.setServiceEndpointsToLB(lb, vip, targets)
+	klog.V(5).Infof("lb entry set for %s, %s, %v", lb, lbTarget,
+		ovn.serviceLBMap[lb][vip])
 	return nil
 }
 
-// createLoadBalancerVIP either creates or updates a load balancer VIP
-// Calls to this method assume that if ips are passed that those endpoints actually exist
-// and thus the reject ACL is removed
-func (ovn *Controller) createLoadBalancerVIP(lb, serviceIP string, port int32, ips []string, targetPort int32) error {
-	klog.V(5).Infof("Creating lb with %s, %s, %d, [%v], %d", lb, serviceIP, port, ips, targetPort)
+// createLoadBalancerVIPs either creates or updates a set of load balancer VIPs mapping
+// from sourcePort on each IP of a given address family in sourceIPs, to targetPort on
+// each IP of the same address family in targetIPs, removing the reject ACL for any
+// source IP that is now in use.
+func (ovn *Controller) createLoadBalancerVIPs(lb string,
+	sourceIPs []string, sourcePort int32,
+	targetIPs []string, targetPort int32) error {
+	klog.V(5).Infof("Creating lb with %s, [%v], %d, [%v], %d", lb, sourceIPs, sourcePort, targetIPs, targetPort)
 
-	var endpoints []string
-	for _, ip := range ips {
-		endpoints = append(endpoints, util.JoinHostPortInt32(ip, targetPort))
+	for _, sourceIP := range sourceIPs {
+		isIPv6 := utilnet.IsIPv6String(sourceIP)
+
+		var targets []string
+		for _, targetIP := range targetIPs {
+			if utilnet.IsIPv6String(targetIP) == isIPv6 {
+				targets = append(targets, util.JoinHostPortInt32(targetIP, targetPort))
+			}
+		}
+		err := ovn.configureLoadBalancer(lb, sourceIP, sourcePort, targets)
+		if len(targets) > 0 {
+			// ensure the ACL is removed if it exists
+			ovn.deleteLoadBalancerRejectACL(lb, util.JoinHostPortInt32(sourceIP, sourcePort))
+		}
+		if err != nil {
+			return err
+		}
 	}
-	err := ovn.configureLoadBalancer(lb, serviceIP, port, endpoints)
-	if len(ips) > 0 {
-		// ensure the ACL is removed if it exists
-		ovn.deleteLoadBalancerRejectACL(lb, util.JoinHostPortInt32(serviceIP, port))
-	}
-	return err
+	return nil
 }
 
 func (ovn *Controller) getLogicalSwitchesForLoadBalancer(lb string) ([]string, error) {
@@ -169,7 +185,7 @@ func (ovn *Controller) getLogicalSwitchesForLoadBalancer(lb string) ([]string, e
 	return nil, fmt.Errorf("router detected with load balancer that is not a GR")
 }
 
-func (ovn *Controller) createLoadBalancerRejectACL(lb string, serviceIP string, port int32, proto kapi.Protocol) (string, error) {
+func (ovn *Controller) createLoadBalancerRejectACL(lb string, sourceIP string, sourcePort int32, proto kapi.Protocol) (string, error) {
 	ovn.serviceLBLock.Lock()
 	defer ovn.serviceLBLock.Unlock()
 	switches, err := ovn.getLogicalSwitchesForLoadBalancer(lb)
@@ -182,9 +198,9 @@ func (ovn *Controller) createLoadBalancerRejectACL(lb string, serviceIP string, 
 		return "", nil
 	}
 
-	ip := net.ParseIP(serviceIP)
+	ip := net.ParseIP(sourceIP)
 	if ip == nil {
-		return "", fmt.Errorf("cannot create reject ACL, invalid cluster IP: %s", serviceIP)
+		return "", fmt.Errorf("cannot create reject ACL, invalid source IP: %s", sourceIP)
 	}
 	var aclMatch string
 	var l3Prefix string
@@ -193,7 +209,7 @@ func (ovn *Controller) createLoadBalancerRejectACL(lb string, serviceIP string, 
 	} else {
 		l3Prefix = "ip4"
 	}
-	vip := util.JoinHostPortInt32(serviceIP, port)
+	vip := util.JoinHostPortInt32(sourceIP, sourcePort)
 	aclName := fmt.Sprintf("%s-%s", lb, vip)
 	// If ovn-k8s was restarted, we lost the cache, and an ACL may already exist in OVN. In that case we need to check
 	// using ACL name
@@ -210,12 +226,12 @@ func (ovn *Controller) createLoadBalancerRejectACL(lb string, serviceIP string, 
 				klog.Warningf("Unable to add reject ACL: %s for switch: %s", aclUUID, ls)
 			}
 		}
-		ovn.setServiceACLToLB(lb, util.JoinHostPortInt32(serviceIP, port), aclUUID)
+		ovn.setServiceACLToLB(lb, vip, aclUUID)
 		return aclUUID, nil
 	}
 
-	aclMatch = fmt.Sprintf("match=\"%s.dst==%s && %s && %s.dst==%d\"", l3Prefix, serviceIP,
-		strings.ToLower(string(proto)), strings.ToLower(string(proto)), port)
+	aclMatch = fmt.Sprintf("match=\"%s.dst==%s && %s && %s.dst==%d\"", l3Prefix, sourceIP,
+		strings.ToLower(string(proto)), strings.ToLower(string(proto)), sourcePort)
 
 	cmd := []string{"--id=@acl", "create", "acl", "direction=from-lport", "priority=1000", aclMatch, "action=reject",
 		fmt.Sprintf("name=%s", strings.ReplaceAll(aclName, ":", "\\:"))}
@@ -230,7 +246,7 @@ func (ovn *Controller) createLoadBalancerRejectACL(lb string, serviceIP string, 
 	} else {
 		// Associate ACL UUID with load balancer and ip+port so we can remove this ACL if
 		// backends are re-added.
-		ovn.setServiceACLToLB(lb, util.JoinHostPortInt32(serviceIP, port), aclUUID)
+		ovn.setServiceACLToLB(lb, vip, aclUUID)
 	}
 	return aclUUID, nil
 }
