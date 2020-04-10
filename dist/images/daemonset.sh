@@ -7,7 +7,7 @@ set -e
 # The script renders j2 templates into yaml files in ../yaml/
 
 # ensure j2 renderer installed
-pip freeze | grep j2cli || pip install j2cli[yaml] --user
+pip3 install j2cli[yaml] --user
 export PATH=~/.local/bin:$PATH
 
 OVN_IMAGE=""
