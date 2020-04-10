@@ -24,8 +24,7 @@ func (n *OvnNode) createManagementPort(localSubnet *net.IPNet, nodeAnnotator kub
 	// uppercase letters, this causes a mismatch between what the watcher
 	// will try to fetch and what kubernetes provides, thus failing to
 	// create the port on the logical switch.
-	// Until the above is changed, switch to a lowercase hostname for
-	// initMinion.
+	// Until the above is changed, switch to a lowercase hostname
 	nodeName := strings.ToLower(n.name)
 
 	// Make sure br-int is created.

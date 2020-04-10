@@ -24,7 +24,7 @@ to start openvswitch. it must be running for the ovn-daemonsets to
 run.
 
 There are two daemonsets that support ovn. ovnkube-master runs
-on the cluster master node, ovnkube runs on the remaining nodes.
+on the cluster masters, ovnkube runs on all nodes.
 The daemonsets run with hostNetwork: true.
 
 The both daemonsets run the node daemons, ovn-controller and ovn-node.
@@ -32,8 +32,8 @@ In addition the daemonset runs ovn-northd and ovn-master.
 
 The startup sequence requires this startup order:
 - ovs
-- ovnkube-master on the master node
-- ovnkube on the rest of the nodes.
+- ovnkube-master on the masters
+- ovnkube on all nodes.
 
 ===============================
 

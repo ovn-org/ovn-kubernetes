@@ -1,7 +1,7 @@
 # ovnkube-master
 # daemonset version 3
 # starts master daemons, each in a separate container
-# it is run on the master node(s)
+# it is run on the master(s)
 kind: Deployment
 apiVersion: apps/v1
 metadata:
@@ -10,7 +10,7 @@ metadata:
   namespace: ovn-kubernetes
   annotations:
     kubernetes.io/description: |
-      This Deployment launches the ovn-kubernetes master node networking components.
+      This Deployment launches the ovn-kubernetes master networking components.
 spec:
   progressDeadlineSeconds: 600
   replicas: 1
