@@ -542,7 +542,7 @@ subnet=%s
 				"ovn-sbctl --timeout=15 --data=bare --no-heading --columns=name find Chassis hostname=" + node1Name,
 			})
 
-			// Expect the code to re-add the master node (which still exists)
+			// Expect the code to re-add the master (which still exists)
 			// when the factory watch begins and enumerates all existing
 			// Kubernetes API nodes
 			fexec.AddFakeCmdsNoOutputNoError([]string{

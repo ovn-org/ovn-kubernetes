@@ -84,7 +84,7 @@ ovnkube_version="3"
 ovn_daemonset_version=${OVN_DAEMONSET_VERSION:-"3"}
 
 # hostname is the host's hostname when using host networking,
-# This is useful on the master node
+# This is useful on the master
 # otherwise it is the container ID (useful for debugging).
 ovn_pod_host=${K8S_NODE:-$(hostname)}
 
@@ -905,7 +905,7 @@ display_version
 # run-ovn-northd Runs ovn-northd as a process does not run nb_ovsdb or sb_ovsdb (v3)
 # nb-ovsdb       Runs nb_ovsdb as a process (no detach or monitor) (v3)
 # sb-ovsdb       Runs sb_ovsdb as a process (no detach or monitor) (v3)
-# ovn-master     - master node only (v3)
+# ovn-master     - master only (v3)
 # ovn-controller - all nodes (v3)
 # ovn-node       - all nodes (v3)
 # cleanup-ovn-node - all nodes (v3)
