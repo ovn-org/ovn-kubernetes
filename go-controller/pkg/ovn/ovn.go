@@ -542,7 +542,7 @@ func (oc *Controller) syncNodeGateway(node *kapi.Node, subnet *net.IPNet) error 
 		subnet, _ = util.ParseNodeHostSubnetAnnotation(node)
 	}
 	if l3GatewayConfig.Mode == config.GatewayModeDisabled {
-		if err := util.GatewayCleanup(node.Name, subnet); err != nil {
+		if err := util.GatewayCleanup(node.Name, []*net.IPNet{subnet}); err != nil {
 			return fmt.Errorf("error cleaning up gateway for node %s: %v", node.Name, err)
 		}
 	} else if subnet != nil {

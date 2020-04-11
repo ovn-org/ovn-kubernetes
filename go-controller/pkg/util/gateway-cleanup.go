@@ -10,7 +10,7 @@ import (
 )
 
 // GatewayCleanup removes all the NB DB objects created for a node's gateway
-func GatewayCleanup(nodeName string, nodeSubnet *net.IPNet) error {
+func GatewayCleanup(nodeName string, nodeSubnets []*net.IPNet) error {
 	// Get the cluster router
 	clusterRouter := GetK8sClusterRouter()
 	gatewayRouter := GWRouterPrefix + nodeName
@@ -18,26 +18,30 @@ func GatewayCleanup(nodeName string, nodeSubnet *net.IPNet) error {
 	// Get the gateway router port's IP address (connected to join switch)
 	var routerIP net.IP
 	var nextHops []net.IP
-	routerIPNetwork, stderr, err := RunOVNNbctl("--if-exist", "get",
+	routerIPNetworks, stderr, err := RunOVNNbctl("--if-exist", "get",
 		"logical_router_port", "rtoj-"+gatewayRouter, "networks")
 	if err != nil {
 		return fmt.Errorf("failed to get logical router port for gateway router %s, "+
 			"stderr: %q, error: %v", gatewayRouter, stderr, err)
 	}
 
-	routerIPNetwork = strings.Trim(routerIPNetwork, "[]\"")
-	if routerIPNetwork != "" {
-		routerIP, _, err = net.ParseCIDR(routerIPNetwork)
-		if err != nil {
-			return fmt.Errorf("could not parse logical router port %q: %v",
-				routerIPNetwork, err)
+	// eg: `["100.64.1.1/29", "fd98:1::/125"]`
+	routerIPNetworks = strings.Trim(routerIPNetworks, "[]")
+	if routerIPNetworks != "" {
+		for _, routerIPNetwork := range strings.Split(routerIPNetworks, ", ") {
+			routerIPNetwork = strings.Trim(routerIPNetwork, "\"")
+			routerIP, _, err = net.ParseCIDR(routerIPNetwork)
+			if err != nil {
+				return fmt.Errorf("could not parse logical router port %q: %v",
+					routerIPNetwork, err)
+			}
+			if routerIP != nil {
+				nextHops = append(nextHops, routerIP)
+			}
 		}
 	}
-	if routerIP != nil {
-		nextHops = append(nextHops, routerIP)
-	}
 
-	if nodeSubnet != nil {
+	for _, nodeSubnet := range nodeSubnets {
 		mgmtIfAddr := GetNodeManagementIfAddr(nodeSubnet)
 		nextHops = append(nextHops, mgmtIfAddr.IP)
 	}

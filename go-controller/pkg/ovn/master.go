@@ -366,7 +366,7 @@ func (oc *Controller) syncGatewayLogicalNetwork(node *kapi.Node, l3GatewayConfig
 		return err
 	}
 
-	err = util.GatewayInit(clusterSubnets, subnet, joinSubnet, node.Name, l3GatewayConfig, oc.SCTPSupport)
+	err = util.GatewayInit(node.Name, clusterSubnets, []*net.IPNet{subnet}, []*net.IPNet{joinSubnet}, l3GatewayConfig, oc.SCTPSupport)
 	if err != nil {
 		return fmt.Errorf("failed to init shared interface gateway: %v", err)
 	}
@@ -684,7 +684,7 @@ func (oc *Controller) deleteNode(nodeName string, nodeSubnet, joinSubnet *net.IP
 		klog.Errorf("Error deleting node %s logical network: %v", nodeName, err)
 	}
 
-	if err := util.GatewayCleanup(nodeName, nodeSubnet); err != nil {
+	if err := util.GatewayCleanup(nodeName, []*net.IPNet{nodeSubnet}); err != nil {
 		return fmt.Errorf("Failed to clean up node %s gateway: (%v)", nodeName, err)
 	}
 
