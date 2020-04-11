@@ -6,3 +6,6 @@ vagrant/kubeadm.log
 # Ansible specific
 contrib/*.retry
 contrib/tmp
+
+#IDE (GoLand) specific 
+.idea/

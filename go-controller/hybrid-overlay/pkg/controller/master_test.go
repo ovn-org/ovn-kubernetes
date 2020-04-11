@@ -2,7 +2,6 @@ package controller
 
 import (
 	"fmt"
-	"net"
 	"strings"
 
 	"github.com/urfave/cli"
@@ -14,7 +13,6 @@ import (
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/factory"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/kube"
-	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn"
 	ovntest "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/testing"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
 
@@ -22,13 +20,7 @@ import (
 	. "github.com/onsi/gomega"
 )
 
-func mustParseCIDR(cidr string) *net.IPNet {
-	_, net, err := net.ParseCIDR(cidr)
-	if err != nil {
-		panic("bad CIDR string constant " + cidr)
-	}
-	return net
-}
+const hoNodeCliArg string = "-no-hostsubnet-nodes=" + v1.LabelOSStable + "=windows"
 
 func addGetPortAddressesCmds(fexec *ovntest.FakeExec, nodeName, hybMAC, hybIP string) {
 	addresses := hybMAC + " " + hybIP
@@ -41,13 +33,20 @@ func addGetPortAddressesCmds(fexec *ovntest.FakeExec, nodeName, hybMAC, hybIP st
 	})
 }
 
-func newTestNode(name, os, ovnHostSubnet, hybridHostSubnet string) v1.Node {
+func newTestNode(name, os, ovnHostSubnet, hybridHostSubnet, drMAC string) v1.Node {
 	annotations := make(map[string]string)
 	if ovnHostSubnet != "" {
-		annotations[ovn.OvnNodeSubnets] = fmt.Sprintf(`{"default": "%s"}`, ovnHostSubnet)
+		subnetAnnotations, err := util.CreateNodeHostSubnetAnnotation(ovnHostSubnet)
+		Expect(err).NotTo(HaveOccurred())
+		for k, v := range subnetAnnotations {
+			annotations[k] = fmt.Sprintf("%s", v)
+		}
 	}
 	if hybridHostSubnet != "" {
 		annotations[types.HybridOverlayNodeSubnet] = hybridHostSubnet
+	}
+	if drMAC != "" {
+		annotations[types.HybridOverlayDRMAC] = drMAC
 	}
 	return v1.Node{
 		ObjectMeta: metav1.ObjectMeta{
@@ -63,23 +62,16 @@ var _ = Describe("Hybrid SDN Master Operations", func() {
 
 	BeforeEach(func() {
 		// Restore global default values before each testcase
-		config.RestoreDefaultConfig()
+		config.PrepareTestConfig()
 
 		app = cli.NewApp()
 		app.Name = "test"
 		app.Flags = config.Flags
 	})
 
-	const extIPNet string = "11.1.0.0"
+	const hybridOverlayClusterCIDR string = "11.1.0.0/16/24"
 
-	extCIDR := []config.CIDRNetworkEntry{
-		{
-			CIDR:             mustParseCIDR(extIPNet + "/16"),
-			HostSubnetLength: 24,
-		},
-	}
-
-	It("allocates and assigns an hybrid-overlay HostSubnet to a Windows node that doesn't have one", func() {
+	It("allocates and assigns a hybrid-overlay subnet to a Windows node that doesn't have one", func() {
 		app.Action = func(ctx *cli.Context) error {
 			const (
 				nodeName   string = "node1"
@@ -88,7 +80,7 @@ var _ = Describe("Hybrid SDN Master Operations", func() {
 
 			fakeClient := fake.NewSimpleClientset(&v1.NodeList{
 				Items: []v1.Node{
-					newTestNode(nodeName, "windows", "", ""),
+					newTestNode(nodeName, "windows", "", "", ""),
 				},
 			})
 
@@ -103,7 +95,7 @@ var _ = Describe("Hybrid SDN Master Operations", func() {
 			Expect(err).NotTo(HaveOccurred())
 			defer close(stopChan)
 
-			m, err := NewMaster(fakeClient, extCIDR)
+			m, err := NewMaster(fakeClient)
 			Expect(err).NotTo(HaveOccurred())
 
 			err = m.Start(f)
@@ -113,63 +105,23 @@ var _ = Describe("Hybrid SDN Master Operations", func() {
 			updatedNode, err := fakeClient.CoreV1().Nodes().Get(nodeName, metav1.GetOptions{})
 			Expect(err).NotTo(HaveOccurred())
 			Expect(updatedNode.Annotations).To(HaveKeyWithValue(types.HybridOverlayNodeSubnet, nodeSubnet))
-			Expect(updatedNode.Annotations).NotTo(HaveKey(ovn.OvnNodeSubnets))
+			_, err = util.ParseNodeHostSubnetAnnotation(updatedNode)
+			Expect(err).To(MatchError(fmt.Sprintf("node %q has no host subnet annotation", nodeName)))
 
-			Expect(fexec.CalledMatchesExpected()).Should(BeTrue())
+			Expect(fexec.CalledMatchesExpected()).Should(BeTrue(), fexec.ErrorDesc)
 			return nil
 		}
 
 		err := app.Run([]string{
 			app.Name,
 			"-no-hostsubnet-nodes=" + v1.LabelOSStable + "=windows",
+			"-enable-hybrid-overlay",
+			"-hybrid-overlay-cluster-subnets=" + hybridOverlayClusterCIDR,
 		})
 		Expect(err).NotTo(HaveOccurred())
 	})
 
-	It("cleans up a Linux node without an OVN hostsubnet annotation", func() {
-		app.Action = func(ctx *cli.Context) error {
-			const (
-				nodeName string = "node1"
-			)
-
-			fakeClient := fake.NewSimpleClientset(&v1.NodeList{
-				Items: []v1.Node{
-					newTestNode(nodeName, "linux", "", ""),
-				},
-			})
-
-			fexec := ovntest.NewFakeExec()
-			err := util.SetExec(fexec)
-			Expect(err).NotTo(HaveOccurred())
-			_, err = config.InitConfig(ctx, fexec, nil)
-			Expect(err).NotTo(HaveOccurred())
-
-			stopChan := make(chan struct{})
-			f, err := factory.NewWatchFactory(fakeClient, stopChan)
-			Expect(err).NotTo(HaveOccurred())
-			defer close(stopChan)
-
-			m, err := NewMaster(fakeClient, extCIDR)
-			Expect(err).NotTo(HaveOccurred())
-
-			err = m.Start(f)
-			Expect(err).NotTo(HaveOccurred())
-
-			// Linux node (without OVN subnet annotation) should not have an hybrid overlay subnet annotation
-			updatedNode, err := fakeClient.CoreV1().Nodes().Get(nodeName, metav1.GetOptions{})
-			Expect(err).NotTo(HaveOccurred())
-			Expect(updatedNode.Annotations).NotTo(HaveKey(types.HybridOverlayNodeSubnet))
-
-			Consistently(fexec.CalledMatchesExpected()).Should(BeTrue())
-
-			return nil
-		}
-
-		err := app.Run([]string{app.Name})
-		Expect(err).NotTo(HaveOccurred())
-	})
-
-	It("sets up a Linux node with a OVN hostsubnet annotation but without a hybrid overlay hostsubnet annotation", func() {
+	It("sets up and cleans up a Linux node with a OVN hostsubnet annotation", func() {
 		app.Action = func(ctx *cli.Context) error {
 			const (
 				nodeName   string = "node1"
@@ -180,7 +132,7 @@ var _ = Describe("Hybrid SDN Master Operations", func() {
 
 			fakeClient := fake.NewSimpleClientset(&v1.NodeList{
 				Items: []v1.Node{
-					newTestNode(nodeName, "linux", nodeSubnet, ""),
+					newTestNode(nodeName, "linux", nodeSubnet, "", ""),
 				},
 			})
 
@@ -197,26 +149,39 @@ var _ = Describe("Hybrid SDN Master Operations", func() {
 			Expect(err).NotTo(HaveOccurred())
 			defer close(stopChan)
 
-			m, err := NewMaster(fakeClient, extCIDR)
+			m, err := NewMaster(fakeClient)
 			Expect(err).NotTo(HaveOccurred())
 
 			err = m.Start(f)
 			Expect(err).NotTo(HaveOccurred())
 
-			// Linux node #1 should have the same hybrid overlay subnet annotation
+			Eventually(fexec.CalledMatchesExpected, 2).Should(BeTrue(), fexec.ErrorDesc)
+
 			updatedNode, err := fakeClient.CoreV1().Nodes().Get(nodeName, metav1.GetOptions{})
 			Expect(err).NotTo(HaveOccurred())
-			Expect(updatedNode.Annotations).To(HaveKeyWithValue(types.HybridOverlayNodeSubnet, nodeSubnet))
+			Expect(updatedNode.Annotations).To(HaveKeyWithValue(types.HybridOverlayDRMAC, nodeHOMAC))
 
-			Expect(fexec.CalledMatchesExpected()).Should(BeTrue())
+			// Test that deleting the node cleans up the OVN objects
+			fexec.AddFakeCmdsNoOutputNoError([]string{
+				"ovn-nbctl --timeout=15 -- --if-exists lsp-del int-node1",
+			})
+
+			err = fakeClient.CoreV1().Nodes().Delete(nodeName, metav1.NewDeleteOptions(0))
+			Expect(err).NotTo(HaveOccurred())
+
+			Eventually(fexec.CalledMatchesExpected, 2).Should(BeTrue(), fexec.ErrorDesc)
 			return nil
 		}
 
-		err := app.Run([]string{app.Name})
+		err := app.Run([]string{
+			app.Name,
+			"-enable-hybrid-overlay",
+			"-hybrid-overlay-cluster-subnets=" + hybridOverlayClusterCIDR,
+		})
 		Expect(err).NotTo(HaveOccurred())
 	})
 
-	It("leaves a Linux node's matching OVN hostsubnet annotation and hybrid overlay hostsubnet annotation unchanged", func() {
+	It("cleans up a Linux node when the OVN hostsubnet annotation is removed", func() {
 		app.Action = func(ctx *cli.Context) error {
 			const (
 				nodeName   string = "node1"
@@ -227,59 +192,11 @@ var _ = Describe("Hybrid SDN Master Operations", func() {
 
 			fakeClient := fake.NewSimpleClientset(&v1.NodeList{
 				Items: []v1.Node{
-					newTestNode(nodeName, "linux", nodeSubnet, nodeSubnet),
+					newTestNode(nodeName, "linux", nodeSubnet, "", nodeHOMAC),
 				},
 			})
 
 			fexec := ovntest.NewFakeExec()
-			addGetPortAddressesCmds(fexec, nodeName, nodeHOMAC, nodeHOIP)
-
-			err := util.SetExec(fexec)
-			Expect(err).NotTo(HaveOccurred())
-			_, err = config.InitConfig(ctx, fexec, nil)
-			Expect(err).NotTo(HaveOccurred())
-
-			stopChan := make(chan struct{})
-			f, err := factory.NewWatchFactory(fakeClient, stopChan)
-			Expect(err).NotTo(HaveOccurred())
-			defer close(stopChan)
-
-			m, err := NewMaster(fakeClient, extCIDR)
-			Expect(err).NotTo(HaveOccurred())
-
-			err = m.Start(f)
-			Expect(err).NotTo(HaveOccurred())
-
-			// Linux node #1 should have the same hybrid overlay subnet annotation
-			updatedNode, err := fakeClient.CoreV1().Nodes().Get(nodeName, metav1.GetOptions{})
-			Expect(err).NotTo(HaveOccurred())
-			Expect(updatedNode.Annotations).To(HaveKeyWithValue(types.HybridOverlayNodeSubnet, nodeSubnet))
-
-			Expect(fexec.CalledMatchesExpected()).Should(BeTrue())
-			return nil
-		}
-
-		err := app.Run([]string{app.Name})
-		Expect(err).NotTo(HaveOccurred())
-	})
-
-	It("removes a Linux node's hybrid overlay hostsubnet annotation when the OVN hostsubnet annotation disappears", func() {
-		app.Action = func(ctx *cli.Context) error {
-			const (
-				nodeName   string = "node1"
-				nodeSubnet string = "10.1.2.0/24"
-				nodeHOIP   string = "10.1.2.3"
-				nodeHOMAC  string = "00:00:00:52:19:d2"
-			)
-
-			fakeClient := fake.NewSimpleClientset(&v1.NodeList{
-				Items: []v1.Node{
-					newTestNode(nodeName, "linux", nodeSubnet, nodeSubnet),
-				},
-			})
-
-			fexec := ovntest.NewFakeExec()
-			addGetPortAddressesCmds(fexec, nodeName, nodeHOMAC, nodeHOIP)
 			fexec.AddFakeCmdsNoOutputNoError([]string{
 				"ovn-nbctl --timeout=15 -- --if-exists lsp-del int-node1",
 			})
@@ -294,30 +211,34 @@ var _ = Describe("Hybrid SDN Master Operations", func() {
 			Expect(err).NotTo(HaveOccurred())
 			defer close(stopChan)
 
-			m, err := NewMaster(fakeClient, extCIDR)
+			m, err := NewMaster(fakeClient)
 			Expect(err).NotTo(HaveOccurred())
 
 			err = m.Start(f)
 			Expect(err).NotTo(HaveOccurred())
 
-			kube := &kube.Kube{KClient: fakeClient}
-			updatedNode, err := kube.GetNode(nodeName)
+			k := &kube.Kube{KClient: fakeClient}
+			updatedNode, err := k.GetNode(nodeName)
 			Expect(err).NotTo(HaveOccurred())
 
-			err = kube.SetAnnotationsOnNode(updatedNode, map[string]interface{}{ovn.OvnNodeSubnets: nil})
+			nodeAnnotator := kube.NewNodeAnnotator(k, updatedNode)
+			util.DeleteNodeHostSubnetAnnotation(nodeAnnotator)
+			err = nodeAnnotator.Run()
 			Expect(err).NotTo(HaveOccurred())
 
-			Eventually(func() map[string]string {
-				updatedNode, err = kube.GetNode(nodeName)
-				Expect(err).NotTo(HaveOccurred())
-				return updatedNode.Annotations
-			}, 5, 1).ShouldNot(HaveKey(types.HybridOverlayNodeSubnet))
+			Eventually(fexec.CalledMatchesExpected, 2).Should(BeTrue(), fexec.ErrorDesc)
 
-			Expect(fexec.CalledMatchesExpected()).Should(BeTrue())
+			updatedNode, err = k.GetNode(nodeName)
+			Expect(err).NotTo(HaveOccurred())
+			Expect(updatedNode.Annotations).NotTo(HaveKey(types.HybridOverlayDRMAC))
 			return nil
 		}
 
-		err := app.Run([]string{app.Name})
+		err := app.Run([]string{
+			app.Name,
+			"-enable-hybrid-overlay",
+			"-hybrid-overlay-cluster-subnets=" + hybridOverlayClusterCIDR,
+		})
 		Expect(err).NotTo(HaveOccurred())
 	})
 })

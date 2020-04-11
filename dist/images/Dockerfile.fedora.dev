@@ -1,0 +1,96 @@
+#
+# This Dockerfile builds the development image of Kubernetes OVN CNI networking
+# stack. It provides the OVN-Kubernetes CNI plugin (OVN-Kubernetes) and all the
+# required binaries from OVN and OVS. By default OVN and OVS binaries are built
+# using the master branch of the respective projects.
+#
+# NOTE: 
+# 1) Binaries are built using the version specified using OVN-BRANCH,
+# OVS-BRANCH args below in the Dockerfile. By default the branch is set to
+# master, so it will build OVN and OVS binaries from the master branch code.
+# Please change the branch name if image needs to be build with different
+# branch.
+# 
+# 2) User need to make sure that ovs datapath module built with the same
+# kernel is installed and loaded on the host machines for ovs daemons to
+# load properly.
+#
+# 3) User can change the kernel version if binaries needs to be build
+# with different kernel version (need to make sure repo has the respective
+# (kernel-devel) package to install.
+#
+# 4) This image is only for development environment, so please DO NOT DEPLOY
+# this image in any production environment.
+#
+
+FROM fedora:31
+
+USER root
+
+ENV PYTHONDONTWRITEBYTECODE yes
+
+ARG KERNEL_VERSION
+ARG OVN_BRANCH=master
+ARG OVS_BRANCH=master
+
+#Install tools that is required for building ovs/ovn
+
+RUN dnf upgrade -y && dnf install --best --refresh -y --setopt=tsflags=nodocs \
+	PyYAML bind-utils procps-ng openssl numactl-libs firewalld-filesystem \
+        libpcap hostname kubernetes-client \
+        iptables iproute strace socat\
+        "kernel-devel-uname-r == $KERNEL_VERSION" \
+	@'Development Tools' rpm-build dnf-plugins-core kmod && \
+	dnf clean all && rm -rf /var/cache/dnf/*
+
+#Clone OVS Source Code
+WORKDIR /root
+RUN git clone https://github.com/openvswitch/ovs.git
+
+#Build OVS dependency
+WORKDIR /root/ovs
+RUN git fetch && git checkout $OVS_BRANCH && git log -n 1
+RUN sed -e 's/@VERSION@/0.0.1/' rhel/openvswitch-fedora.spec.in > /tmp/ovs.spec
+RUN dnf builddep /tmp/ovs.spec -y
+RUN rm -f /tmp/ovs.spec
+
+#Build OVS binaries and install
+RUN echo "Building OVS with kernel version : " $KERNEL_VERSION
+RUN ./boot.sh
+RUN ./configure --prefix=/usr --localstatedir=/var --sysconfdir=/etc --enable-ssl --with-linux=/usr/src/kernels/$KERNEL_VERSION/
+RUN make && make install
+RUN ovs-vsctl --version && ovs-ofctl --version
+
+#Clone OVN Source Code
+WORKDIR /root
+RUN git clone https://github.com/ovn-org/ovn.git
+
+#Build OVN binaries and install
+WORKDIR /root/ovn/
+RUN git fetch && git checkout $OVN_BRANCH && git log -n 1
+RUN ./boot.sh
+RUN ./configure --prefix=/usr --localstatedir=/var --sysconfdir=/etc --with-ovs-source=/root/ovs/
+RUN make && make install
+RUN ovn-nbctl --version && ovn-sbctl --version
+
+RUN mkdir -p /var/run/openvswitch && \
+    mkdir -p /usr/libexec/cni/
+
+COPY ovnkube ovn-kube-util /usr/bin/
+COPY ovn-k8s-cni-overlay /usr/libexec/cni/ovn-k8s-cni-overlay
+
+# copy git commit number into image
+COPY git_info /root
+RUN cat /root/git_info
+
+# ovnkube.sh is the entry point. This script examines environment
+# variables to direct operation and configure ovn
+COPY ovnkube.sh /root/
+COPY ovndb-raft-functions.sh /root/
+
+LABEL io.k8s.display-name="ovn-kubernetes-master" \
+      io.k8s.description="OVN based Kubernetes CNI Plugin stack. Image contains latest code of all the components in the stack (OVN-kubernetes, OVN, OVS)." \
+      maintainer="Anil Vishnoi (vishnoianil@gmail.com)"
+
+WORKDIR /root
+ENTRYPOINT /root/ovnkube.sh

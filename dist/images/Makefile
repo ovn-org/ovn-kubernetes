@@ -38,6 +38,25 @@ fedora: bld
 	# docker push docker.io/ovnkube/ovn-daemonset-f:latest
 	./daemonset.sh --image=docker.io/ovnkube/ovn-daemonset-f:latest
 
+fedora-dev: bld
+	# To build (OVN Datapath)  with specific kernel version, please override KERNEL_VERSION.
+	# By default it will build with the host machine's kernel version.
+
+	docker build --build-arg KERNEL_VERSION=`uname -r` -t ovn-kube-f-dev -f Dockerfile.fedora.dev .
+	# docker login -u ovnkube docker.io/ovnkube
+	# docker push docker.io/ovnkube/ovn-daemonset-f:latest
+	./daemonset.sh --image=docker.io/ovnkube/ovn-daemonset-f:latest \
+                    --net-cidr=10.244.0.0/16 \
+                    --svc-cidr=10.96.0.0/12 \
+                    --gateway-mode="local" \
+                    --master-loglevel="5" \
+                    --node-loglevel="5" \
+                    --ovn-loglevel-northd="-vconsole:info -vfile:info" \
+                    --ovn-loglevel-nb="-vconsole:info -vfile:info" \
+                    --ovn-loglevel-sb="-vconsole:info -vfile:info" \
+                    --ovn-loglevel-controller="-vconsole:info" \
+                    --ovn-loglevel-nbctld="-vconsole:info"
+
 # This target expands the daemonset yaml templates into final form
 # It gets the image name from ../ansible/hosts
 daemonsetyaml:

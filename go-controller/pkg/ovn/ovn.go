@@ -13,15 +13,14 @@ import (
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/factory"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/kube"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/allocator"
-	util "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
+
 	kapi "k8s.io/api/core/v1"
 	kapisnetworking "k8s.io/api/networking/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/labels"
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/client-go/kubernetes"
-	"k8s.io/client-go/kubernetes/scheme"
-	kv1core "k8s.io/client-go/kubernetes/typed/core/v1"
 	"k8s.io/client-go/tools/cache"
 	"k8s.io/client-go/tools/record"
 	"k8s.io/klog"
@@ -36,36 +35,43 @@ type ServiceVIPKey struct {
 	protocol kapi.Protocol
 }
 
+// loadBalancerConf contains the OVN based config for a LB
+type loadBalancerConf struct {
+	// List of endpoints as configured in OVN, ip:port
+	endpoints []string
+	// ACL configured for Rejecting access to the LB
+	rejectACL string
+}
+
 // Controller structure is the object which holds the controls for starting
 // and reacting upon the watched resources (e.g. pods, endpoints)
 type Controller struct {
 	kube         kube.Interface
 	watchFactory *factory.WatchFactory
+	stopChan     <-chan struct{}
 
 	masterSubnetAllocator *allocator.SubnetAllocator
 	joinSubnetAllocator   *allocator.SubnetAllocator
 
-	TCPLoadBalancerUUID string
-	UDPLoadBalancerUUID string
+	TCPLoadBalancerUUID  string
+	UDPLoadBalancerUUID  string
+	SCTPLoadBalancerUUID string
+	SCTPSupport          bool
 
-	// For TCP and UDP type traffic, cache OVN load-balancers used for the
+	// For TCP, UDP, and SCTP type traffic, cache OVN load-balancers used for the
 	// cluster's east-west traffic.
-	loadbalancerClusterCache map[string]string
+	loadbalancerClusterCache map[kapi.Protocol]string
 
 	// For TCP and UDP type traffice, cache OVN load balancer that exists on the
 	// default gateway
-	loadbalancerGWCache map[string]string
+	loadbalancerGWCache map[kapi.Protocol]string
 	defGatewayRouter    string
 
 	// A cache of all logical switches seen by the watcher and their subnets
 	logicalSwitchCache map[string]*net.IPNet
 
-	// A cache of all logical ports seen by the watcher and
-	// its corresponding logical switch
-	logicalPortCache map[string]string
-
-	// A cache of all logical ports and its corresponding uuids.
-	logicalPortUUIDCache map[string]string
+	// A cache of all logical ports known to the controller
+	logicalPortCache *portCache
 
 	// For each namespace, a map from pod IP address to logical port name
 	// for all pods in that namespace.
@@ -103,9 +109,6 @@ type Controller struct {
 	// Per namespace multicast enabled?
 	multicastEnabled map[string]bool
 
-	// Supports port_group?
-	portGroupSupport bool
-
 	// Supports multicast?
 	multicastSupport bool
 
@@ -114,8 +117,13 @@ type Controller struct {
 
 	serviceVIPToNameLock sync.Mutex
 
-	// List of subnets to assign to hybrid overlay entities
-	hybridOverlayClusterSubnets []config.CIDRNetworkEntry
+	// Map of load balancers, each containing a map of VIP to OVN LB Config
+	serviceLBMap map[string]map[string]*loadBalancerConf
+
+	serviceLBLock sync.Mutex
+
+	// event recorder used to post events to k8s
+	recorder record.EventRecorder
 }
 
 const (
@@ -124,19 +132,22 @@ const (
 
 	// UDP is the constant string for the string "UDP"
 	UDP = "UDP"
+
+	// SCTP is the constant string for the string "SCTP"
+	SCTP = "SCTP"
 )
 
 // NewOvnController creates a new OVN controller for creating logical network
 // infrastructure and policy
-func NewOvnController(kubeClient kubernetes.Interface, wf *factory.WatchFactory, hybridOverlayClusterSubnets []config.CIDRNetworkEntry) *Controller {
-	oc := &Controller{
+func NewOvnController(kubeClient kubernetes.Interface, wf *factory.WatchFactory, stopChan <-chan struct{}) *Controller {
+	return &Controller{
 		kube:                     &kube.Kube{KClient: kubeClient},
 		watchFactory:             wf,
+		stopChan:                 stopChan,
 		masterSubnetAllocator:    allocator.NewSubnetAllocator(),
 		logicalSwitchCache:       make(map[string]*net.IPNet),
 		joinSubnetAllocator:      allocator.NewSubnetAllocator(),
-		logicalPortCache:         make(map[string]string),
-		logicalPortUUIDCache:     make(map[string]string),
+		logicalPortCache:         newPortCache(stopChan),
 		namespaceAddressSet:      make(map[string]map[string]string),
 		namespacePolicies:        make(map[string]map[string]*namespacePolicy),
 		namespaceMutex:           make(map[string]*sync.Mutex),
@@ -145,21 +156,21 @@ func NewOvnController(kubeClient kubernetes.Interface, wf *factory.WatchFactory,
 		lspEgressDenyCache:       make(map[string]int),
 		lspMutex:                 &sync.Mutex{},
 		lsMutex:                  &sync.Mutex{},
-		loadbalancerClusterCache: make(map[string]string),
-		loadbalancerGWCache:      make(map[string]string),
+		loadbalancerClusterCache: make(map[kapi.Protocol]string),
+		loadbalancerGWCache:      make(map[kapi.Protocol]string),
 		multicastEnabled:         make(map[string]bool),
 		multicastSupport:         config.EnableMulticast,
 		serviceVIPToName:         make(map[ServiceVIPKey]types.NamespacedName),
 		serviceVIPToNameLock:     sync.Mutex{},
+		serviceLBMap:             make(map[string]map[string]*loadBalancerConf),
+		serviceLBLock:            sync.Mutex{},
+		recorder:                 util.EventRecorder(kubeClient),
 	}
-	oc.hybridOverlayClusterSubnets = hybridOverlayClusterSubnets
-	return oc
 }
 
 // Run starts the actual watching.
-func (oc *Controller) Run(stopChan chan struct{}) error {
-	startOvnUpdater()
-
+func (oc *Controller) Run() error {
+	oc.syncPeriodic()
 	// WatchNodes must be started first so that its initial Add will
 	// create all node logical switches, which other watches may depend on.
 	// https://github.com/ovn-org/ovn-kubernetes/pull/859
@@ -175,7 +186,7 @@ func (oc *Controller) Run(stopChan chan struct{}) error {
 	}
 
 	if config.Kubernetes.OVNEmptyLbEvents {
-		go oc.ovnControllerEventChecker(stopChan)
+		go oc.ovnControllerEventChecker()
 	}
 
 	return nil
@@ -274,6 +285,8 @@ func extractEmptyLBBackendsEvents(out []byte) ([]emptyLBBackendEvent, error) {
 				}
 				if prot == "udp" {
 					protocol = kapi.ProtocolUDP
+				} else if prot == "sctp" {
+					protocol = kapi.ProtocolSCTP
 				} else {
 					protocol = kapi.ProtocolTCP
 				}
@@ -285,7 +298,26 @@ func extractEmptyLBBackendsEvents(out []byte) ([]emptyLBBackendEvent, error) {
 	return events, nil
 }
 
-func (oc *Controller) ovnControllerEventChecker(stopChan chan struct{}) {
+// syncPeriodic adds a goroutine that periodically does some work
+// right now there is only one ticker registered
+// for syncNodesPeriodic which deletes chassis records from the sbdb
+// every 5 minutes
+func (oc *Controller) syncPeriodic() {
+	go func() {
+		nodeSyncTicker := time.NewTicker(5 * time.Minute)
+		for {
+			select {
+			case <-nodeSyncTicker.C:
+				oc.syncNodesPeriodic()
+			case <-oc.stopChan:
+				return
+			}
+		}
+	}()
+
+}
+
+func (oc *Controller) ovnControllerEventChecker() {
 	ticker := time.NewTicker(5 * time.Second)
 
 	_, _, err := util.RunOVNNbctl("set", "nb_global", ".", "options:controller_event=true")
@@ -293,10 +325,6 @@ func (oc *Controller) ovnControllerEventChecker(stopChan chan struct{}) {
 		klog.Error("Unable to enable controller events. Unidling not possible")
 		return
 	}
-
-	eventBroadcaster := record.NewBroadcaster()
-	eventBroadcaster.StartRecordingToSink(&kv1core.EventSinkImpl{Interface: oc.kube.Events()})
-	recorder := eventBroadcaster.NewRecorder(scheme.Scheme, kapi.EventSource{Component: "kube-proxy"})
 
 	for {
 		select {
@@ -325,10 +353,10 @@ func (oc *Controller) ovnControllerEventChecker(stopChan chan struct{}) {
 						Name:      serviceName.Name,
 					}
 					klog.V(5).Infof("Sending a NeedPods event for service %s in namespace %s.", serviceName.Name, serviceName.Namespace)
-					recorder.Eventf(&serviceRef, kapi.EventTypeNormal, "NeedPods", "The service %s needs pods", serviceName.Name)
+					oc.recorder.Eventf(&serviceRef, kapi.EventTypeNormal, "NeedPods", "The service %s needs pods", serviceName.Name)
 				}
 			}
-		case <-stopChan:
+		case <-oc.stopChan:
 			return
 		}
 	}
@@ -390,8 +418,21 @@ func (oc *Controller) WatchPods() error {
 // appropriate handler logic
 func (oc *Controller) WatchServices() error {
 	_, err := oc.watchFactory.AddServiceHandler(cache.ResourceEventHandlerFuncs{
-		AddFunc:    func(obj interface{}) {},
-		UpdateFunc: func(old, new interface{}) {},
+		AddFunc: func(obj interface{}) {
+			service := obj.(*kapi.Service)
+			err := oc.createService(service)
+			if err != nil {
+				klog.Errorf("Error in adding service: %v", err)
+			}
+		},
+		UpdateFunc: func(old, new interface{}) {
+			svcOld := old.(*kapi.Service)
+			svcNew := new.(*kapi.Service)
+			err := oc.updateService(svcOld, svcNew)
+			if err != nil {
+				klog.Errorf("Error while updating service: %v", err)
+			}
+		},
 		DeleteFunc: func(obj interface{}) {
 			service := obj.(*kapi.Service)
 			oc.deleteService(service)
@@ -484,14 +525,15 @@ func (oc *Controller) WatchNamespaces() error {
 }
 
 func (oc *Controller) syncNodeGateway(node *kapi.Node, subnet *net.IPNet) error {
-	l3GatewayConfig, err := UnmarshalNodeL3GatewayAnnotation(node)
+	l3GatewayConfig, err := util.ParseNodeL3GatewayAnnotation(node)
 	if err != nil {
 		return err
 	}
+
 	if subnet == nil {
-		subnet, _ = ParseNodeHostSubnet(node)
+		subnet, _ = util.ParseNodeHostSubnetAnnotation(node)
 	}
-	if l3GatewayConfig[OvnNodeGatewayMode] == string(config.GatewayModeDisabled) {
+	if l3GatewayConfig.Mode == config.GatewayModeDisabled {
 		if err := util.GatewayCleanup(node.Name, subnet); err != nil {
 			return fmt.Errorf("error cleaning up gateway for node %s: %v", node.Name, err)
 		}
@@ -511,7 +553,6 @@ func (oc *Controller) WatchNodes() error {
 	_, err := oc.watchFactory.AddNodeHandler(cache.ResourceEventHandlerFuncs{
 		AddFunc: func(obj interface{}) {
 			node := obj.(*kapi.Node)
-
 			if noHostSubnet := noHostSubnet(node); noHostSubnet {
 				oc.lsMutex.Lock()
 				defer oc.lsMutex.Unlock()
@@ -582,8 +623,8 @@ func (oc *Controller) WatchNodes() error {
 			klog.V(5).Infof("Delete event for Node %q. Removing the node from "+
 				"various caches", node.Name)
 
-			nodeSubnet, _ := ParseNodeHostSubnet(node)
-			joinSubnet, _ := parseNodeJoinSubnet(node)
+			nodeSubnet, _ := util.ParseNodeHostSubnetAnnotation(node)
+			joinSubnet, _ := util.ParseNodeJoinSubnetAnnotation(node)
 			err := oc.deleteNode(node.Name, nodeSubnet, joinSubnet)
 			if err != nil {
 				klog.Error(err)
@@ -593,11 +634,13 @@ func (oc *Controller) WatchNodes() error {
 			oc.lsMutex.Unlock()
 			mgmtPortFailed.Delete(node.Name)
 			gatewaysFailed.Delete(node.Name)
-			if oc.defGatewayRouter == "GR_"+node.Name {
-				delete(oc.loadbalancerGWCache, TCP)
-				delete(oc.loadbalancerGWCache, UDP)
+			// If this node was serving the external IP load balancer for services, migrate to a new node
+			if oc.defGatewayRouter == util.GWRouterPrefix+node.Name {
+				delete(oc.loadbalancerGWCache, kapi.ProtocolTCP)
+				delete(oc.loadbalancerGWCache, kapi.ProtocolUDP)
+				delete(oc.loadbalancerGWCache, kapi.ProtocolSCTP)
 				oc.defGatewayRouter = ""
-				oc.handleExternalIPsLB()
+				oc.updateExternalIPsLB()
 			}
 		},
 	}, oc.syncNodes)
@@ -619,10 +662,91 @@ func (oc *Controller) GetServiceVIPToName(vip string, protocol kapi.Protocol) (t
 	return namespace, ok
 }
 
+// setServiceLBToACL associates an empty load balancer with its associated ACL reject rule
+func (oc *Controller) setServiceACLToLB(lb, vip, acl string) {
+	if _, ok := oc.serviceLBMap[lb]; !ok {
+		oc.serviceLBMap[lb] = make(map[string]*loadBalancerConf)
+		oc.serviceLBMap[lb][vip] = &loadBalancerConf{rejectACL: acl}
+		return
+	}
+	if _, ok := oc.serviceLBMap[lb][vip]; !ok {
+		oc.serviceLBMap[lb][vip] = &loadBalancerConf{rejectACL: acl}
+		return
+	}
+	oc.serviceLBMap[lb][vip].rejectACL = acl
+}
+
+// setServiceEndpointsToLB associates a load balancer with endpoints
+func (oc *Controller) setServiceEndpointsToLB(lb, vip string, eps []string) {
+	if _, ok := oc.serviceLBMap[lb]; !ok {
+		oc.serviceLBMap[lb] = make(map[string]*loadBalancerConf)
+		oc.serviceLBMap[lb][vip] = &loadBalancerConf{endpoints: eps}
+		return
+	}
+	if _, ok := oc.serviceLBMap[lb][vip]; !ok {
+		oc.serviceLBMap[lb][vip] = &loadBalancerConf{endpoints: eps}
+		return
+	}
+	oc.serviceLBMap[lb][vip].endpoints = eps
+}
+
+// getServiceLBInfo returns the reject ACL and whether the number of endpoints for the service is greater than zero
+func (oc *Controller) getServiceLBInfo(lb, vip string) (string, bool) {
+	oc.serviceLBLock.Lock()
+	defer oc.serviceLBLock.Unlock()
+	conf, ok := oc.serviceLBMap[lb][vip]
+	if !ok {
+		conf = &loadBalancerConf{}
+	}
+	return conf.rejectACL, len(conf.endpoints) > 0
+}
+
+// getAllACLsForServiceLB retrieves all of the ACLs for a given load balancer
+func (oc *Controller) getAllACLsForServiceLB(lb string) []string {
+	oc.serviceLBLock.Lock()
+	defer oc.serviceLBLock.Unlock()
+	confMap, ok := oc.serviceLBMap[lb]
+	if !ok {
+		return nil
+	}
+	var acls []string
+	for _, v := range confMap {
+		if len(v.rejectACL) > 0 {
+			acls = append(acls, v.rejectACL)
+		}
+	}
+	return acls
+}
+
+// removeServiceLB removes the entire LB entry for a VIP
+func (oc *Controller) removeServiceLB(lb, vip string) {
+	oc.serviceLBLock.Lock()
+	defer oc.serviceLBLock.Unlock()
+	delete(oc.serviceLBMap[lb], vip)
+}
+
+// removeServiceACL removes a specific ACL associated with a load balancer and ip:port
+func (oc *Controller) removeServiceACL(lb, vip string) {
+	oc.serviceLBLock.Lock()
+	defer oc.serviceLBLock.Unlock()
+	if _, ok := oc.serviceLBMap[lb][vip]; ok {
+		oc.serviceLBMap[lb][vip].rejectACL = ""
+	}
+}
+
+// removeServiceEndpoints removes endpoints associated with a load balancer and ip:port
+func (oc *Controller) removeServiceEndpoints(lb, vip string) {
+	oc.serviceLBLock.Lock()
+	defer oc.serviceLBLock.Unlock()
+	if _, ok := oc.serviceLBMap[lb][vip]; ok {
+		oc.serviceLBMap[lb][vip].endpoints = []string{}
+	}
+}
+
 // gatewayChanged() compares old annotations to new and returns true if something has changed.
 func gatewayChanged(oldNode, newNode *kapi.Node) bool {
-	oldL3GatewayConfig, _ := UnmarshalNodeL3GatewayAnnotation(oldNode)
-	l3GatewayConfig, _ := UnmarshalNodeL3GatewayAnnotation(newNode)
+	oldL3GatewayConfig, _ := util.ParseNodeL3GatewayAnnotation(oldNode)
+	l3GatewayConfig, _ := util.ParseNodeL3GatewayAnnotation(newNode)
 
 	if oldL3GatewayConfig == nil && l3GatewayConfig == nil {
 		return false
@@ -633,8 +757,8 @@ func gatewayChanged(oldNode, newNode *kapi.Node) bool {
 
 // macAddressChanged() compares old annotations to new and returns true if something has changed.
 func macAddressChanged(oldNode, node *kapi.Node) bool {
-	oldMacAddress := oldNode.Annotations[OvnNodeManagementPortMacAddress]
-	macAddress := node.Annotations[OvnNodeManagementPortMacAddress]
+	oldMacAddress, _ := util.ParseNodeManagementPortMacAddr(oldNode)
+	macAddress, _ := util.ParseNodeManagementPortMacAddr(node)
 	return oldMacAddress != macAddress
 }
 

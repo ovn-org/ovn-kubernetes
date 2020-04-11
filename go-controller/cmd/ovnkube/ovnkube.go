@@ -12,6 +12,7 @@ import (
 	"syscall"
 	"text/tabwriter"
 	"text/template"
+	"time"
 
 	"k8s.io/klog"
 
@@ -19,9 +20,10 @@ import (
 	"gopkg.in/fsnotify/fsnotify.v1"
 
 	hocontroller "github.com/ovn-org/ovn-kubernetes/go-controller/hybrid-overlay/pkg/controller"
-	ovncluster "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/cluster"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/factory"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/metrics"
+	ovnnode "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/node"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
 
@@ -93,18 +95,7 @@ func main() {
 	c.Usage = "run ovnkube to start master, node, and gateway services"
 	c.Version = config.Version
 	c.CustomAppHelpTemplate = CustomAppHelpTemplate
-	c.Flags = config.CommonFlags
-	c.Flags = append(c.Flags, config.CNIFlags...)
-	c.Flags = append(c.Flags, config.K8sFlags...)
-	c.Flags = append(c.Flags, config.OvnNBFlags...)
-	c.Flags = append(c.Flags, config.OvnSBFlags...)
-	c.Flags = append(c.Flags, config.OVNGatewayFlags...)
-	c.Flags = append(c.Flags, config.MasterHAFlags...)
-	c.Flags = append(c.Flags, hocontroller.GetHybridOverlayCLIFlags([]cli.Flag{
-		cli.BoolFlag{
-			Name:  "enable-hybrid-overlay",
-			Usage: "Enables hybrid overlay operation (requires --init-master and/or --init-node)",
-		}})...)
+	c.Flags = config.GetFlags(nil)
 
 	c.Action = func(c *cli.Context) error {
 		return runOvnKube(c)
@@ -202,7 +193,7 @@ func runOvnKube(ctx *cli.Context) error {
 			return fmt.Errorf("cannot specify cleanup-node together with 'init-node or 'init-master'")
 		}
 
-		if err = ovncluster.CleanupClusterNode(cleanupNode); err != nil {
+		if err = ovnnode.CleanupClusterNode(cleanupNode); err != nil {
 			return err
 		}
 		return nil
@@ -212,48 +203,20 @@ func runOvnKube(ctx *cli.Context) error {
 		return fmt.Errorf("need to run ovnkube in either master and/or node mode")
 	}
 
-	// start the prometheus server
-	if config.Kubernetes.MetricsBindAddress != "" {
-		util.StartMetricsServer(config.Kubernetes.MetricsBindAddress, config.Kubernetes.MetricsEnablePprof)
-	}
-
 	// Set up a watch on our config file; if it changes, we exit -
 	// (we don't have the ability to dynamically reload config changes).
 	if err := watchForChanges(configFile); err != nil {
 		return fmt.Errorf("unable to setup configuration watch: %v", err)
 	}
 
-	enableHybridOverlay := ctx.Bool("enable-hybrid-overlay")
-	if enableHybridOverlay {
-		// Since the third address of every cluster subnet is reserved for
-		// the hybrid overlay, only allow enabling it for HostSubnets that
-		// are a /24 or larger.
-		for _, clusterEntry := range config.Default.ClusterSubnets {
-			if clusterEntry.HostSubnetLength > 24 {
-				return fmt.Errorf("hybrid overlay cannot be used with" +
-					" host subnet prefixes smaller than /24.")
-			}
-		}
-	}
-
 	if master != "" {
 		if runtime.GOOS == "windows" {
 			return fmt.Errorf("Windows is not supported as master node")
 		}
-
-		ovn.RegisterMetrics()
-
-		var hybridOverlayClusterSubnets []config.CIDRNetworkEntry
-		if enableHybridOverlay {
-			hybridOverlayClusterSubnets, err = hocontroller.GetHybridOverlayClusterSubnets(ctx)
-			if err != nil {
-				return err
-			}
-		}
-
-		// run the HA master controller to init the master
-		ovnHAController := ovn.NewHAMasterController(clientset, factory, master, stopChan, hybridOverlayClusterSubnets)
-		if err := ovnHAController.StartHAMasterController(); err != nil {
+		// register prometheus metrics exported by the master
+		metrics.RegisterMasterMetrics()
+		ovnController := ovn.NewOvnController(clientset, factory, stopChan)
+		if err := ovnController.Start(clientset, master); err != nil {
 			return err
 		}
 	}
@@ -262,15 +225,27 @@ func runOvnKube(ctx *cli.Context) error {
 		if config.Kubernetes.Token == "" {
 			return fmt.Errorf("cannot initialize node without service account 'token'. Please provide one with --k8s-token argument")
 		}
-
-		clusterController := ovncluster.NewClusterController(clientset, factory)
-		if err := clusterController.StartClusterNode(node); err != nil {
+		// register ovnkube node specific prometheus metrics exported by the node
+		metrics.RegisterNodeMetrics()
+		// register ovn specific (ovn-controller and ovn-northd) metrics
+		metrics.RegisterOvnMetrics()
+		start := time.Now()
+		n := ovnnode.NewNode(clientset, factory, node, stopChan)
+		if err := n.Start(); err != nil {
 			return err
 		}
+		end := time.Since(start)
+		metrics.MetricNodeReadyDuration.Set(end.Seconds())
 	}
 
-	if enableHybridOverlay {
-		if err := hocontroller.StartHybridOverlay(ctx, master != "", node, clientset, factory); err != nil {
+	// now that ovnkube master/node are running, lets expose the metrics HTTP endpoint if configured
+	// start the prometheus server
+	if config.Kubernetes.MetricsBindAddress != "" {
+		metrics.StartMetricsServer(config.Kubernetes.MetricsBindAddress, config.Kubernetes.MetricsEnablePprof)
+	}
+
+	if config.HybridOverlay.Enabled {
+		if err := hocontroller.StartHybridOverlay(master != "", node, clientset, factory); err != nil {
 			return err
 		}
 	}

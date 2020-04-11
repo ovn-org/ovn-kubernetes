@@ -107,14 +107,14 @@ var _ = Describe("OVN Namespace Operations", func() {
 
 	BeforeEach(func() {
 		// Restore global default values before each testcase
-		config.RestoreDefaultConfig()
+		config.PrepareTestConfig()
 
 		app = cli.NewApp()
 		app.Name = "test"
 		app.Flags = config.Flags
 
 		fExec = ovntest.NewFakeExec()
-		fakeOvn = NewFakeOVN(fExec, true)
+		fakeOvn = NewFakeOVN(fExec)
 	})
 
 	AfterEach(func() {
@@ -154,6 +154,8 @@ var _ = Describe("OVN Namespace Operations", func() {
 						},
 					},
 				)
+				podMAC := ovntest.MustParseMAC("11:22:33:44:55:66")
+				fakeOvn.controller.logicalPortCache.add(tP.nodeName, tP.portName, fakeUUID, podMAC, ovntest.MustParseIP(tP.podIP))
 				fakeOvn.controller.WatchNamespaces()
 
 				_, err := fakeOvn.fakeClient.CoreV1().Namespaces().Get(namespaceT.Name, metav1.GetOptions{})

@@ -12,8 +12,10 @@ import (
 )
 
 const (
-	k8sTCPLoadBalancerIP = "k8s_tcp_load_balancer"
-	k8sUDPLoadBalancerIP = "k8s_udp_load_balancer"
+	k8sTCPLoadBalancerIP  = "k8s_tcp_load_balancer"
+	k8sUDPLoadBalancerIP  = "k8s_udp_load_balancer"
+	k8sSCTPLoadBalancerIP = "k8s_sctp_load_balancer"
+	fakeUUID              = "8a86f6d8-7972-4253-b0bd-ddbef66e9303"
 )
 
 type FakeOVN struct {
@@ -22,16 +24,14 @@ type FakeOVN struct {
 	controller *Controller
 	stopChan   chan struct{}
 	fakeExec   *ovntest.FakeExec
-	portGroups bool
 }
 
-func NewFakeOVN(fexec *ovntest.FakeExec, portGroupSupport bool) *FakeOVN {
+func NewFakeOVN(fexec *ovntest.FakeExec) *FakeOVN {
 	err := util.SetExec(fexec)
 	Expect(err).NotTo(HaveOccurred())
 
 	return &FakeOVN{
-		fakeExec:   fexec,
-		portGroups: portGroupSupport,
+		fakeExec: fexec,
 	}
 }
 
@@ -59,8 +59,6 @@ func (o *FakeOVN) init() {
 	o.watcher, err = factory.NewWatchFactory(o.fakeClient, o.stopChan)
 	Expect(err).NotTo(HaveOccurred())
 
-	o.controller = NewOvnController(o.fakeClient, o.watcher, nil)
-	o.controller.portGroupSupport = o.portGroups
-	// Multicast depends on port groups
-	o.controller.multicastSupport = o.portGroups
+	o.controller = NewOvnController(o.fakeClient, o.watcher, o.stopChan)
+	o.controller.multicastSupport = true
 }

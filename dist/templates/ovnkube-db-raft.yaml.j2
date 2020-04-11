@@ -46,7 +46,7 @@ metadata:
   namespace: ovn-kubernetes
   annotations:
     kubernetes.io/description: |
-      This statefulset launches the OVN NB/SB ovsdb components.
+      This statefulset launches the OVN Northbound/Southbound Database raft clusters.
 spec:
   serviceName: ovnkube-db
   podManagementPolicy: "Parallel"
@@ -71,14 +71,14 @@ spec:
       serviceAccountName: ovn
       hostNetwork: true
 
-      # required to be scheduled on node with ovn.org/ovnkube-db=true label but can
+      # required to be scheduled on node with k8s.ovn.org/ovnkube-db=true label but can
       # only have one instance per node
       affinity:
         nodeAffinity:
           requiredDuringSchedulingIgnoredDuringExecution:
             nodeSelectorTerms:
             - matchExpressions:
-              - key: ovn.org/ovnkube-db
+              - key: k8s.ovn.org/ovnkube-db
                 operator: In
                 values:
                 - "true"
@@ -99,11 +99,19 @@ spec:
         imagePullPolicy: "{{ ovn_image_pull_policy | default('IfNotPresent') }}"
         command: ["/root/ovnkube.sh", "nb-ovsdb-raft"]
 
+        readinessProbe:
+          exec:
+            command: ["/usr/bin/ovn-kube-util", "readiness-probe", "-t", "ovnnb-db-raft"]
+          initialDelaySeconds: 30
+          timeoutSeconds: 30
+          periodSeconds: 60
+
         securityContext:
           runAsUser: 0
           capabilities:
             add: ["NET_ADMIN"]
 
+        terminationMessagePolicy: FallbackToLogsOnError
         volumeMounts:
         # ovn db is stored in the pod in /etc/openvswitch
         # (or in /etc/ovn if OVN from new repository is used)
@@ -129,7 +137,7 @@ spec:
         - name: OVN_DAEMONSET_VERSION
           value: "3"
         - name: OVN_LOG_NB
-          value: "-vconsole:info -vfile:info"
+          value: "{{ ovn_loglevel_nb }}"
         - name: K8S_APISERVER
           valueFrom:
             configMapKeyRef:
@@ -143,18 +151,6 @@ spec:
           valueFrom:
             fieldRef:
               fieldPath: metadata.name
-        ports:
-        - name: healthz
-          containerPort: 10256
-        # TODO: Temporarily disabled until we determine how to wait for clean default
-        # config
-        # livenessProbe:
-        #   initialDelaySeconds: 10
-        #   httpGet:
-        #     path: /healthz
-        #     port: 10256
-        #     scheme: HTTP
-        lifecycle:
       # end of container
 
       # sb-ovsdb - v3
@@ -163,11 +159,19 @@ spec:
         imagePullPolicy: "{{ ovn_image_pull_policy | default('IfNotPresent') }}"
         command: ["/root/ovnkube.sh", "sb-ovsdb-raft"]
 
+        readinessProbe:
+          exec:
+            command: ["/usr/bin/ovn-kube-util", "readiness-probe", "-t", "ovnsb-db-raft"]
+          initialDelaySeconds: 30
+          timeoutSeconds: 30
+          periodSeconds: 60
+
         securityContext:
           runAsUser: 0
           capabilities:
             add: ["NET_ADMIN"]
 
+        terminationMessagePolicy: FallbackToLogsOnError
         volumeMounts:
         # ovn db is stored in the pod in /etc/openvswitch
         # (or in /etc/ovn if OVN from new repository is used)
@@ -193,7 +197,7 @@ spec:
         - name: OVN_DAEMONSET_VERSION
           value: "3"
         - name: OVN_LOG_SB
-          value: "-vconsole:info -vfile:info"
+          value: "{{ ovn_loglevel_sb }}"
         - name: K8S_APISERVER
           valueFrom:
             configMapKeyRef:
@@ -207,18 +211,49 @@ spec:
           valueFrom:
             fieldRef:
               fieldPath: metadata.name
-        ports:
-        - name: healthz
-          containerPort: 10255
-        # TODO: Temporarily disabled until we determine how to wait for clean default
-        # config
-        # livenessProbe:
-        #   initialDelaySeconds: 10
-        #   httpGet:
-        #     path: /healthz
-        #     port: 10255
-        #     scheme: HTTP
-        lifecycle:
+      # end of container
+
+      # db-metrics-exporter - v3
+      - name: db-metrics-exporter
+        image: "{{ ovn_image | default('docker.io/ovnkube/ovn-daemonset:latest') }}"
+        imagePullPolicy: "{{ ovn_image_pull_policy | default('IfNotPresent') }}"
+        command: ["/root/ovnkube.sh", "db-raft-metrics"]
+
+        securityContext:
+          runAsUser: 0
+          capabilities:
+            add: ["NET_ADMIN"]
+
+        terminationMessagePolicy: FallbackToLogsOnError
+        volumeMounts:
+          # ovn db is stored in the pod in /etc/openvswitch
+          # (or in /etc/ovn if OVN from new repository is used)
+          # and on the host in /var/lib/openvswitch/
+          - mountPath: /etc/openvswitch/
+            name: host-var-lib-ovs
+          - mountPath: /etc/ovn/
+            name: host-var-lib-ovs
+          - mountPath: /var/run/openvswitch/
+            name: host-var-run-ovs
+          - mountPath: /var/run/ovn/
+            name: host-var-run-ovs
+
+        resources:
+          requests:
+            cpu: 100m
+            memory: 300Mi
+        env:
+          - name: OVN_DAEMONSET_VERSION
+            value: "3"
+          - name: K8S_APISERVER
+            valueFrom:
+              configMapKeyRef:
+                name: ovn-config
+                key: k8s_apiserver
+          - name: OVN_KUBERNETES_NAMESPACE
+            valueFrom:
+              fieldRef:
+                fieldPath: metadata.namespace
       # end of container
 
       volumes:

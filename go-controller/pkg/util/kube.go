@@ -3,10 +3,14 @@ package util
 import (
 	"encoding/json"
 	"fmt"
+	"k8s.io/client-go/tools/record"
+	"k8s.io/klog"
 	"strings"
 
 	kapi "k8s.io/api/core/v1"
 	"k8s.io/client-go/kubernetes"
+	"k8s.io/client-go/kubernetes/scheme"
+	typedcorev1 "k8s.io/client-go/kubernetes/typed/core/v1"
 	"k8s.io/client-go/rest"
 	"k8s.io/client-go/tools/clientcmd"
 	"k8s.io/client-go/util/cert"
@@ -61,6 +65,14 @@ func IsClusterIPSet(service *kapi.Service) bool {
 	return service.Spec.ClusterIP != kapi.ClusterIPNone && service.Spec.ClusterIP != ""
 }
 
+// ValidateProtocol checks if the protocol is a valid kapi.Protocol type (TCP, UDP, or SCTP) or returns an error
+func ValidateProtocol(proto kapi.Protocol) (kapi.Protocol, error) {
+	if proto == kapi.ProtocolTCP || proto == kapi.ProtocolUDP || proto == kapi.ProtocolSCTP {
+		return proto, nil
+	}
+	return "", fmt.Errorf("protocol %s is not a valid protocol", proto)
+}
+
 // ServiceTypeHasClusterIP checks if the service has an associated ClusterIP or not
 func ServiceTypeHasClusterIP(service *kapi.Service) bool {
 	return service.Spec.Type == kapi.ServiceTypeClusterIP || service.Spec.Type == kapi.ServiceTypeNodePort || service.Spec.Type == kapi.ServiceTypeLoadBalancer
@@ -69,34 +81,6 @@ func ServiceTypeHasClusterIP(service *kapi.Service) bool {
 // ServiceTypeHasNodePort checks if the service has an associated NodePort or not
 func ServiceTypeHasNodePort(service *kapi.Service) bool {
 	return service.Spec.Type == kapi.ServiceTypeNodePort || service.Spec.Type == kapi.ServiceTypeLoadBalancer
-}
-
-func validateOVNConfigEndpoint(ep *kapi.Endpoints) bool {
-	return len(ep.Subsets) == 1 && len(ep.Subsets[0].Ports) == 2 && len(ep.Subsets[0].Addresses) > 0
-}
-
-// ExtractDbRemotesFromEndpoint extracts the DB endpoints
-func ExtractDbRemotesFromEndpoint(ep *kapi.Endpoints) ([]string, int32, int32, error) {
-	var nbDBPort int32
-	var sbDBPort int32
-	var masterIPList []string
-
-	if !validateOVNConfigEndpoint(ep) {
-		return masterIPList, nbDBPort, sbDBPort, fmt.Errorf("endpoint %s is not in the right format to configure OVN", ep.Name)
-	}
-
-	for _, ovnDB := range ep.Subsets[0].Ports {
-		if ovnDB.Name == "south" {
-			sbDBPort = ovnDB.Port
-		} else if ovnDB.Name == "north" {
-			nbDBPort = ovnDB.Port
-		}
-	}
-	for _, address := range ep.Subsets[0].Addresses {
-		masterIPList = append(masterIPList, address.IP)
-	}
-
-	return masterIPList, sbDBPort, nbDBPort, nil
 }
 
 // GetNodeIP extracts the ip address from the node status in the  API
@@ -175,4 +159,18 @@ func GetPodNetSelAnnotation(pod *kapi.Pod, netAttachAnnot string) ([]*types.Netw
 	}
 
 	return networks, nil
+}
+
+// eventRecorder returns an EventRecorder type that can be
+// used to post Events to different object's lifecycles.
+func EventRecorder(kubeClient kubernetes.Interface) record.EventRecorder {
+	eventBroadcaster := record.NewBroadcaster()
+	eventBroadcaster.StartLogging(klog.Infof)
+	eventBroadcaster.StartRecordingToSink(
+		&typedcorev1.EventSinkImpl{
+			Interface: kubeClient.CoreV1().Events("")})
+	recorder := eventBroadcaster.NewRecorder(
+		scheme.Scheme,
+		kapi.EventSource{Component: "controlplane"})
+	return recorder
 }

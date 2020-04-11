@@ -21,13 +21,19 @@ import (
 	"k8s.io/klog"
 
 	kexec "k8s.io/utils/exec"
+	utilnet "k8s.io/utils/net"
 )
 
 // DefaultEncapPort number used if not supplied
 const DefaultEncapPort = 6081
 
-const MetricNamespace = "ovnkube"
 const DefaultAPIServer = "http://localhost:8443"
+
+// IP address range from which subnet is allocated for per-node join switch
+const (
+	V4JoinSubnet = "100.64.0.0/16"
+	V6JoinSubnet = "fd98::/64"
+)
 
 // The following are global config parameters that other modules may access directly
 var (
@@ -65,7 +71,7 @@ var (
 	// Kubernetes holds Kubernetes-related parsed config file parameters and command-line overrides
 	Kubernetes = KubernetesConfig{
 		APIServer:          DefaultAPIServer,
-		ServiceCIDR:        "172.16.1.0/24",
+		RawServiceCIDRs:    "172.16.1.0/24",
 		OVNConfigNamespace: "ovn-kubernetes",
 	}
 
@@ -83,9 +89,11 @@ var (
 		ElectionLeaseDuration: 60,
 		ElectionRenewDeadline: 30,
 		ElectionRetryPeriod:   20,
-		ManageDBServers:       false,
-		NbPort:                6641,
-		SbPort:                6642,
+	}
+
+	// HybridOverlay holds hybrid overlay feature config options.
+	HybridOverlay = HybridOverlayConfig{
+		RawClusterSubnets: "10.132.0.0/14/23",
 	}
 
 	// NbctlDaemon enables ovn-nbctl to run in daemon mode
@@ -97,7 +105,10 @@ var (
 	// EnableMulticast enables multicast support between the pods within the same namespace
 	EnableMulticast bool
 
-	// IPv6Mode captures whether we are using IPv6 for OVN logical topology
+	// IPv4Mode captures whether we are using IPv4 for OVN logical topology. (ie, single-stack IPv4 or dual-stack)
+	IPv4Mode bool
+
+	// IPv6Mode captures whether we are using IPv6 for OVN logical topology. (ie, single-stack IPv6 or dual-stack)
 	IPv6Mode bool
 )
 
@@ -162,12 +173,14 @@ type KubernetesConfig struct {
 	CACert               string `gcfg:"cacert"`
 	APIServer            string `gcfg:"apiserver"`
 	Token                string `gcfg:"token"`
-	ServiceCIDR          string `gcfg:"service-cidr"`
+	CompatServiceCIDR    string `gcfg:"service-cidr"`
+	RawServiceCIDRs      string `gcfg:"service-cidrs"`
+	ServiceCIDRs         []*net.IPNet
 	OVNConfigNamespace   string `gcfg:"ovn-config-namespace"`
 	MetricsBindAddress   string `gcfg:"metrics-bind-address"`
 	MetricsEnablePprof   bool   `gcfg:"metrics-enable-pprof"`
 	OVNEmptyLbEvents     bool   `gcfg:"ovn-empty-lb-events"`
-	PodIP                string `gcfg:"pod-ip"`
+	PodIP                string `gcfg:"pod-ip"` // UNUSED
 	RawNoHostSubnetNodes string `gcfg:"no-hostsubnet-nodes"`
 	NoHostSubnetNodes    *metav1.LabelSelector
 }
@@ -217,12 +230,22 @@ type OvnAuthConfig struct {
 // MasterHAConfig holds configuration for master HA
 // configuration.
 type MasterHAConfig struct {
-	ElectionLeaseDuration int  `gcfg:"election-lease-duration"`
-	ElectionRenewDeadline int  `gcfg:"election-renew-deadline"`
-	ElectionRetryPeriod   int  `gcfg:"election-retry-period"`
-	ManageDBServers       bool `gcfg:"manage-db-servers"`
-	NbPort                int  `gcfg:"port"`
-	SbPort                int  `gcfg:"port"`
+	ElectionLeaseDuration int `gcfg:"election-lease-duration"`
+	ElectionRenewDeadline int `gcfg:"election-renew-deadline"`
+	ElectionRetryPeriod   int `gcfg:"election-retry-period"`
+}
+
+// HybridOverlayConfig holds configuration for hybrid overlay
+// configuration.
+type HybridOverlayConfig struct {
+	// Enabled indicates whether hybrid overlay features are enabled or not.
+	Enabled bool `gcfg:"enabled"`
+	// RawClusterSubnets holds the unparsed hybrid overlay cluster subnets.
+	// Should only be used inside config module.
+	RawClusterSubnets string `gcfg:"cluster-subnets"`
+	// ClusterSubnets holds parsed hybrid overlay cluster subnet entries and
+	// may be used outside the config module.
+	ClusterSubnets []CIDRNetworkEntry
 }
 
 // OvnDBScheme describes the OVN database connection transport method
@@ -239,25 +262,27 @@ const (
 
 // Config is used to read the structured config file and to cache config in testcases
 type config struct {
-	Default    DefaultConfig
-	Logging    LoggingConfig
-	CNI        CNIConfig
-	Kubernetes KubernetesConfig
-	OvnNorth   OvnAuthConfig
-	OvnSouth   OvnAuthConfig
-	Gateway    GatewayConfig
-	MasterHA   MasterHAConfig
+	Default       DefaultConfig
+	Logging       LoggingConfig
+	CNI           CNIConfig
+	Kubernetes    KubernetesConfig
+	OvnNorth      OvnAuthConfig
+	OvnSouth      OvnAuthConfig
+	Gateway       GatewayConfig
+	MasterHA      MasterHAConfig
+	HybridOverlay HybridOverlayConfig
 }
 
 var (
-	savedDefault    DefaultConfig
-	savedLogging    LoggingConfig
-	savedCNI        CNIConfig
-	savedKubernetes KubernetesConfig
-	savedOvnNorth   OvnAuthConfig
-	savedOvnSouth   OvnAuthConfig
-	savedGateway    GatewayConfig
-	savedMasterHA   MasterHAConfig
+	savedDefault       DefaultConfig
+	savedLogging       LoggingConfig
+	savedCNI           CNIConfig
+	savedKubernetes    KubernetesConfig
+	savedOvnNorth      OvnAuthConfig
+	savedOvnSouth      OvnAuthConfig
+	savedGateway       GatewayConfig
+	savedMasterHA      MasterHAConfig
+	savedHybridOverlay HybridOverlayConfig
 	// legacy service-cluster-ip-range CLI option
 	serviceClusterIPRange string
 	// legacy cluster-subnet CLI option
@@ -278,6 +303,7 @@ func init() {
 	savedOvnSouth = OvnSouth
 	savedGateway = Gateway
 	savedMasterHA = MasterHA
+	savedHybridOverlay = HybridOverlay
 	Flags = append(Flags, CommonFlags...)
 	Flags = append(Flags, CNIFlags...)
 	Flags = append(Flags, K8sFlags...)
@@ -285,11 +311,12 @@ func init() {
 	Flags = append(Flags, OvnSBFlags...)
 	Flags = append(Flags, OVNGatewayFlags...)
 	Flags = append(Flags, MasterHAFlags...)
+	Flags = append(Flags, HybridOverlayFlags...)
 }
 
-// RestoreDefaultConfig restores default config values. Used by testcases to
+// PrepareTestConfig restores default config values. Used by testcases to
 // provide a pristine environment between tests.
-func RestoreDefaultConfig() {
+func PrepareTestConfig() {
 	Default = savedDefault
 	Logging = savedLogging
 	CNI = savedCNI
@@ -298,6 +325,13 @@ func RestoreDefaultConfig() {
 	OvnSouth = savedOvnSouth
 	Gateway = savedGateway
 	MasterHA = savedMasterHA
+	HybridOverlay = savedHybridOverlay
+
+	// Don't pick up defaults from the environment
+	os.Unsetenv("KUBECONFIG")
+	os.Unsetenv("K8S_CACERT")
+	os.Unsetenv("K8S_APISERVER")
+	os.Unsetenv("K8S_TOKEN")
 }
 
 // copy members of struct 'src' into the corresponding field in struct 'dst'
@@ -499,17 +533,22 @@ var CNIFlags = []cli.Flag{
 var K8sFlags = []cli.Flag{
 	cli.StringFlag{
 		Name:        "service-cluster-ip-range",
-		Usage:       "Deprecated alias for k8s-service-cidr.",
+		Usage:       "Deprecated alias for k8s-service-cidrs.",
 		Destination: &serviceClusterIPRange,
 	},
 	cli.StringFlag{
-		Name: "k8s-service-cidr",
-		Usage: "A CIDR notation IP range from which k8s assigns " +
-			"service cluster IPs. This should be the same as the one " +
-			"provided for kube-apiserver \"-service-cluster-ip-range\" " +
+		Name:        "k8s-service-cidr",
+		Usage:       "Deprecated alias for k8s-service-cidrs.",
+		Destination: &cliConfig.Kubernetes.CompatServiceCIDR,
+	},
+	cli.StringFlag{
+		Name: "k8s-service-cidrs",
+		Usage: "A comma-separated set of CIDR notation IP ranges from which k8s assigns " +
+			"service cluster IPs. This should be the same as the value " +
+			"provided for kube-apiserver \"--service-cluster-ip-range\" " +
 			"option. (default: 172.16.1.0/24)",
-		Destination: &cliConfig.Kubernetes.ServiceCIDR,
-		Value:       Kubernetes.ServiceCIDR,
+		Destination: &cliConfig.Kubernetes.RawServiceCIDRs,
+		Value:       Kubernetes.RawServiceCIDRs,
 	},
 	cli.StringFlag{
 		Name:        "k8s-kubeconfig",
@@ -557,9 +596,8 @@ var K8sFlags = []cli.Flag{
 		Destination: &cliConfig.Kubernetes.OVNEmptyLbEvents,
 	},
 	cli.StringFlag{
-		Name:        "pod-ip",
-		Usage:       "specify the ovnkube pod IP.",
-		Destination: &cliConfig.Kubernetes.PodIP,
+		Name:  "pod-ip",
+		Usage: "UNUSED",
 	},
 	cli.StringFlag{
 		Name:        "no-hostsubnet-nodes",
@@ -677,23 +715,6 @@ var OVNGatewayFlags = []cli.Flag{
 
 // MasterHAFlags capture OVN northbound database options
 var MasterHAFlags = []cli.Flag{
-	cli.BoolFlag{
-		Name:        "manage-db-servers",
-		Usage:       "Manages the OVN North and South DB servers in active/passive",
-		Destination: &cliConfig.MasterHA.ManageDBServers,
-	},
-	cli.IntFlag{
-		Name:        "nb-port",
-		Usage:       "Port of the OVN northbound DB server to configure (default: 6641)",
-		Destination: &cliConfig.MasterHA.NbPort,
-		Value:       MasterHA.NbPort,
-	},
-	cli.IntFlag{
-		Name:        "sb-port",
-		Usage:       "Port of the OVN southbound DB server to configure (default: 6642)",
-		Destination: &cliConfig.MasterHA.SbPort,
-		Value:       MasterHA.SbPort,
-	},
 	cli.IntFlag{
 		Name:        "ha-election-lease-duration",
 		Usage:       "Leader election lease duration (in secs) (default: 60)",
@@ -714,9 +735,44 @@ var MasterHAFlags = []cli.Flag{
 	},
 }
 
+// HybridOverlayFlats capture hybrid overlay feature options
+var HybridOverlayFlags = []cli.Flag{
+	cli.BoolFlag{
+		Name:        "enable-hybrid-overlay",
+		Usage:       "Enables hybrid overlay functionality",
+		Destination: &cliConfig.HybridOverlay.Enabled,
+	},
+	cli.StringFlag{
+		Name:  "hybrid-overlay-cluster-subnets",
+		Value: HybridOverlay.RawClusterSubnets,
+		Usage: "A comma separated set of IP subnets and the associated" +
+			"hostsubnetlengths (eg, \"10.128.0.0/14/23,10.0.0.0/14/23\"). " +
+			"to use with the extended hybrid network. Each entry is given " +
+			"in the form IP address/subnet mask/hostsubnetlength, " +
+			"the hostsubnetlength is optional and if unspecified defaults to 24. The " +
+			"hostsubnetlength defines how many IP addresses are dedicated to each node.",
+		Destination: &cliConfig.HybridOverlay.RawClusterSubnets,
+	},
+}
+
 // Flags are general command-line flags. Apps should add these flags to their
 // own urfave/cli flags and call InitConfig() early in the application.
 var Flags []cli.Flag
+
+// GetFlags returns an array of all command-line flags necessary to configure
+// ovn-kubernetes
+func GetFlags(customFlags []cli.Flag) []cli.Flag {
+	flags := CommonFlags
+	flags = append(flags, CNIFlags...)
+	flags = append(flags, K8sFlags...)
+	flags = append(flags, OvnNBFlags...)
+	flags = append(flags, OvnSBFlags...)
+	flags = append(flags, OVNGatewayFlags...)
+	flags = append(flags, MasterHAFlags...)
+	flags = append(flags, HybridOverlayFlags...)
+	flags = append(flags, customFlags...)
+	return flags
+}
 
 // Defaults are a set of flags to indicate which options should be read from
 // ovs-vsctl and used as default values if option is not found via the config
@@ -784,7 +840,7 @@ func setOVSExternalID(exec kexec.Interface, key, value string) error {
 	return nil
 }
 
-func buildKubernetesConfig(exec kexec.Interface, cli, file *config, saPath string, defaults *Defaults) error {
+func buildKubernetesConfig(exec kexec.Interface, cli, file *config, saPath string, defaults *Defaults, allSubnets *configSubnets) error {
 	// token adn ca.crt may be from files mounted in container.
 	saConfig := savedKubernetes
 	if data, err := ioutil.ReadFile(filepath.Join(saPath, kubeServiceAccountFileToken)); err == nil {
@@ -854,20 +910,27 @@ func buildKubernetesConfig(exec kexec.Interface, cli, file *config, saPath strin
 		return fmt.Errorf("kubernetes API server URL scheme %q invalid", url.Scheme)
 	}
 
-	// Legacy service-cluster-ip-range CLI option overrides config file or --k8s-service-cidr
+	// Legacy --service-cluster-ip-range or --k8s-service-cidr options override config file or --k8s-service-cidrs.
 	if serviceClusterIPRange != "" {
-		Kubernetes.ServiceCIDR = serviceClusterIPRange
+		Kubernetes.RawServiceCIDRs = serviceClusterIPRange
+	} else if Kubernetes.CompatServiceCIDR != "" {
+		Kubernetes.RawServiceCIDRs = Kubernetes.CompatServiceCIDR
 	}
-	if Kubernetes.ServiceCIDR == "" {
-		return fmt.Errorf("kubernetes service-cidr is required")
-	} else if _, _, err := net.ParseCIDR(Kubernetes.ServiceCIDR); err != nil {
-		return fmt.Errorf("kubernetes service network CIDR %q invalid: %v", Kubernetes.ServiceCIDR, err)
+	if Kubernetes.RawServiceCIDRs == "" {
+		return fmt.Errorf("kubernetes service-cidrs is required")
 	}
-
-	if Kubernetes.PodIP != "" {
-		if ip := net.ParseIP(Kubernetes.PodIP); ip == nil {
-			return fmt.Errorf("Pod IP is invalid")
+	for _, cidrString := range strings.Split(Kubernetes.RawServiceCIDRs, ",") {
+		_, serviceCIDR, err := net.ParseCIDR(cidrString)
+		if err != nil {
+			return fmt.Errorf("kubernetes service network CIDR %q invalid: %v", cidrString, err)
 		}
+		Kubernetes.ServiceCIDRs = append(Kubernetes.ServiceCIDRs, serviceCIDR)
+		allSubnets.append(configSubnetService, serviceCIDR)
+	}
+	if len(Kubernetes.ServiceCIDRs) > 2 {
+		return fmt.Errorf("kubernetes service-cidrs must contain either a single CIDR or else an IPv4/IPv6 pair")
+	} else if len(Kubernetes.ServiceCIDRs) == 2 && utilnet.IsIPv6CIDR(Kubernetes.ServiceCIDRs[0]) == utilnet.IsIPv6CIDR(Kubernetes.ServiceCIDRs[1]) {
+		return fmt.Errorf("kubernetes service-cidrs must contain either a single CIDR or else an IPv4/IPv6 pair")
 	}
 
 	if Kubernetes.RawNoHostSubnetNodes != "" {
@@ -955,7 +1018,32 @@ func buildMasterHAConfig(ctx *cli.Context, cli, file *config) error {
 	return nil
 }
 
-func buildDefaultConfig(cli, file *config) error {
+func buildHybridOverlayConfig(ctx *cli.Context, cli, file *config, allSubnets *configSubnets) error {
+	// Copy config file values over default values
+	if err := overrideFields(&HybridOverlay, &file.HybridOverlay, &savedHybridOverlay); err != nil {
+		return err
+	}
+
+	// And CLI overrides over config file and default values
+	if err := overrideFields(&HybridOverlay, &cli.HybridOverlay, &savedHybridOverlay); err != nil {
+		return err
+	}
+
+	if HybridOverlay.Enabled {
+		var err error
+		HybridOverlay.ClusterSubnets, err = ParseClusterSubnetEntries(HybridOverlay.RawClusterSubnets)
+		if err != nil {
+			return fmt.Errorf("hybrid overlay cluster subnet invalid: %v", err)
+		}
+		for _, subnet := range HybridOverlay.ClusterSubnets {
+			allSubnets.append(configSubnetHybrid, subnet.CIDR)
+		}
+	}
+
+	return nil
+}
+
+func buildDefaultConfig(cli, file *config, allSubnets *configSubnets) error {
 	if err := overrideFields(&Default, &file.Default, &savedDefault); err != nil {
 		return err
 	}
@@ -977,6 +1065,10 @@ func buildDefaultConfig(cli, file *config) error {
 	if err != nil {
 		return fmt.Errorf("cluster subnet invalid: %v", err)
 	}
+	for _, subnet := range Default.ClusterSubnets {
+		allSubnets.append(configSubnetCluster, subnet.CIDR)
+	}
+
 	return nil
 }
 
@@ -1023,22 +1115,22 @@ func initConfigWithPath(ctx *cli.Context, exec kexec.Interface, saPath string, d
 	var err error
 	// initialize cfg with default values, allow file read to override
 	cfg := config{
-		Default:    savedDefault,
-		Logging:    savedLogging,
-		CNI:        savedCNI,
-		Kubernetes: savedKubernetes,
-		OvnNorth:   savedOvnNorth,
-		OvnSouth:   savedOvnSouth,
-		Gateway:    savedGateway,
-		MasterHA:   savedMasterHA,
+		Default:       savedDefault,
+		Logging:       savedLogging,
+		CNI:           savedCNI,
+		Kubernetes:    savedKubernetes,
+		OvnNorth:      savedOvnNorth,
+		OvnSouth:      savedOvnSouth,
+		Gateway:       savedGateway,
+		MasterHA:      savedMasterHA,
+		HybridOverlay: savedHybridOverlay,
 	}
+
+	allSubnets := newConfigSubnets()
+	allSubnets.appendConst(configSubnetJoin, V4JoinSubnet)
+	allSubnets.appendConst(configSubnetJoin, V6JoinSubnet)
 
 	configFile, configFileIsDefault = getConfigFilePath(ctx)
-
-	var level klog.Level
-	if err := level.Set(strconv.Itoa(ctx.Int("loglevel"))); err != nil {
-		return "", fmt.Errorf("failed to set klog log level %v", err)
-	}
 
 	if !configFileIsDefault {
 		// Only return explicitly specified config file
@@ -1081,6 +1173,10 @@ func initConfigWithPath(ctx *cli.Context, exec kexec.Interface, saPath string, d
 		return "", err
 	}
 
+	var level klog.Level
+	if err := level.Set(strconv.Itoa(Logging.Level)); err != nil {
+		return "", fmt.Errorf("failed to set klog log level %v", err)
+	}
 	if Logging.File != "" {
 		klogFlags := flag.NewFlagSet("klog", flag.ExitOnError)
 		klog.InitFlags(klogFlags)
@@ -1099,11 +1195,11 @@ func initConfigWithPath(ctx *cli.Context, exec kexec.Interface, saPath string, d
 		})
 	}
 
-	if err = buildDefaultConfig(&cliConfig, &cfg); err != nil {
+	if err = buildDefaultConfig(&cliConfig, &cfg, allSubnets); err != nil {
 		return "", err
 	}
 
-	if err = buildKubernetesConfig(exec, &cliConfig, &cfg, saPath, defaults); err != nil {
+	if err = buildKubernetesConfig(exec, &cliConfig, &cfg, saPath, defaults, allSubnets); err != nil {
 		return "", err
 	}
 
@@ -1112,6 +1208,10 @@ func initConfigWithPath(ctx *cli.Context, exec kexec.Interface, saPath string, d
 	}
 
 	if err = buildMasterHAConfig(ctx, &cliConfig, &cfg); err != nil {
+		return "", err
+	}
+
+	if err = buildHybridOverlayConfig(ctx, &cliConfig, &cfg, allSubnets); err != nil {
 		return "", err
 	}
 
@@ -1127,10 +1227,14 @@ func initConfigWithPath(ctx *cli.Context, exec kexec.Interface, saPath string, d
 	}
 	OvnSouth = *tmpAuth
 
-	// Determine if ovn-kubernetes is configured to run in IPv6 mode
-	IPv6Mode = false
-	if len(Default.ClusterSubnets) >= 1 && Default.ClusterSubnets[0].CIDR.IP.To4() == nil {
-		IPv6Mode = true
+	err = allSubnets.checkForOverlaps()
+	if err != nil {
+		return "", err
+	}
+
+	IPv4Mode, IPv6Mode, err = allSubnets.checkIPFamilies()
+	if err != nil {
+		return "", err
 	}
 
 	klog.V(5).Infof("Default config: %+v", Default)
@@ -1139,6 +1243,7 @@ func initConfigWithPath(ctx *cli.Context, exec kexec.Interface, saPath string, d
 	klog.V(5).Infof("Kubernetes config: %+v", Kubernetes)
 	klog.V(5).Infof("OVN North config: %+v", OvnNorth)
 	klog.V(5).Infof("OVN South config: %+v", OvnSouth)
+	klog.V(5).Infof("Hybrid Overlay config: %+v", HybridOverlay)
 
 	return retConfigFile, nil
 }
@@ -1240,31 +1345,12 @@ func buildOvnAuth(exec kexec.Interface, northbound bool, cliAuth, confAuth *OvnA
 		return nil, err
 	}
 
-	// When instructed to watch-endpoint, just set scheme and obtain address(es) from endpoint
-	if address == "watch-endpoint" {
-		if !MasterHA.ManageDBServers {
-			return nil, fmt.Errorf("watch-endpoint requires --manage-db-servers")
-		}
-		// Set scheme and wait for an endpoint update to provide address/port to use
-		if auth.PrivKey != "" || auth.Cert != "" || auth.CACert != "" {
-			auth.Scheme = OvnDBSchemeSSL
-		} else {
-			auth.Scheme = OvnDBSchemeTCP
-		}
-		return auth, nil
-	}
-
 	if address == "" {
 		if auth.PrivKey != "" || auth.Cert != "" || auth.CACert != "" {
 			return nil, fmt.Errorf("certificate or key given; perhaps you mean to use the 'ssl' scheme?")
 		}
 		auth.Scheme = OvnDBSchemeUnix
 		return auth, nil
-	} else if MasterHA.ManageDBServers {
-		if northbound {
-			return nil, fmt.Errorf("--nb-address is not allowed with --manage-db-servers")
-		}
-		return nil, fmt.Errorf("--sb-address is not allowed with --manage-db-servers")
 	}
 
 	var err error

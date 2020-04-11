@@ -5,6 +5,14 @@ networking:
   disableDefaultCNI: true
   apiServerAddress: 11.12.13.1
   apiServerPort: 11337
+kubeadmConfigPatches:
+- |
+  kind: ClusterConfiguration
+  metadata:
+    name: config
+  apiServer:
+    extraArgs:
+      "feature-gates": "SCTPSupport=true"
 nodes:
  - role: control-plane
    extraMounts:
@@ -18,12 +26,12 @@ nodes:
 #   extraMounts:
 #     - hostPath: /tmp/kind
 #       containerPath: /var/run/secrets/kubernetes.io/serviceaccount/
-# - role: worker
-#   extraMounts:
-#     - hostPath: /tmp/kind
-#       containerPath: /var/run/secrets/kubernetes.io/serviceaccount/
-# - role: worker
-#   extraMounts:
-#     - hostPath: /tmp/kind
-#       containerPath: /var/run/secrets/kubernetes.io/serviceaccount/
+ - role: worker
+   extraMounts:
+     - hostPath: /tmp/kind
+       containerPath: /var/run/secrets/kubernetes.io/serviceaccount/
+ - role: worker
+   extraMounts:
+     - hostPath: /tmp/kind
+       containerPath: /var/run/secrets/kubernetes.io/serviceaccount/
 
