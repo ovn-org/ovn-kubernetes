@@ -1145,7 +1145,8 @@ func (oc *Controller) handlePeerPodSelectorAddUpdate(np *namespacePolicy,
 	if err != nil {
 		return
 	}
-	ipAddress := podAnnotation.IP.IP.String()
+	// DUAL-STACK FIXME: handle multiple IPs
+	ipAddress := podAnnotation.IPs[0].IP.String()
 	if addressMap[ipAddress] {
 		return
 	}
@@ -1181,7 +1182,8 @@ func (oc *Controller) handlePeerPodSelectorDelete(np *namespacePolicy,
 	if err != nil {
 		return
 	}
-	ipAddress := podAnnotation.IP.IP.String()
+	// DUAL-STACK FIXME: handle multiple IPs
+	ipAddress := podAnnotation.IPs[0].IP.String()
 
 	np.Lock()
 	defer np.Unlock()

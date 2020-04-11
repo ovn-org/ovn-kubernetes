@@ -1,3 +1,0 @@
----
-download_info:
-  install_path: "{{install_path | default('C:/kubernetes')}}"

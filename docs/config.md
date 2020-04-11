@@ -94,7 +94,7 @@ This section contains the address and (if the 'ssl' method is used) certificates
 needed to use the OVN northbound database API. Only the the ovn-kubernetes
 master needs to specify the 'server' options.
 ```
-address=ssl://1.2.3.4:6641
+address=ssl:1.2.3.4:6641
 client-privkey=/path/to/private.key
 client-cert=/path/to/client.crt
 client-cacert=/path/to/client-ca.crt
@@ -109,7 +109,7 @@ This section contains the address and (if the 'ssl' method is used) certificates
 needed to use the OVN southbound database API. Only the the ovn-kubernetes
 master needs to specify the 'server' options.
 ```
-address=ssl://1.2.3.4:6642
+address=ssl:1.2.3.4:6642
 client-privkey=/path/to/private.key
 client-cert=/path/to/client.crt
 client-cacert=/path/to/client-ca.crt

@@ -23,7 +23,7 @@ spec:
 # ovnkube-db
 # daemonset version 3
 # starts ovn NB/SB ovsdb daemons, each in a separate container
-# it is running on master node for now, but does not need to be the case
+# it is running on master for now, but does not need to be the case
 kind: Deployment
 apiVersion: apps/v1
 metadata:
@@ -93,6 +93,9 @@ spec:
         - mountPath: /host
           name: host-slash
           readOnly: true
+        - mountPath: /ovn-cert
+          name: host-ovn-cert
+          readOnly: true
 
         resources:
           requests:
@@ -101,7 +104,7 @@ spec:
         env:
         - name: OVN_DAEMONSET_VERSION
           value: "3"
-        - name: OVN_LOG_NB
+        - name: OVN_LOGLEVEL_NB
           value: "{{ ovn_loglevel_nb }}"
         - name: K8S_APISERVER
           valueFrom:
@@ -112,6 +115,12 @@ spec:
           valueFrom:
             fieldRef:
               fieldPath: metadata.namespace
+        - name: K8S_NODE_IP
+          valueFrom:
+            fieldRef:
+              fieldPath: status.hostIP
+        - name: OVN_SSL_ENABLE
+          value: "{{ ovn_ssl_en }}"
         readinessProbe:
           exec:
             command: ["/usr/bin/ovn-kube-util", "readiness-probe", "-t", "ovnnb-db"]
@@ -149,6 +158,9 @@ spec:
         - mountPath: /host
           name: host-slash
           readOnly: true
+        - mountPath: /ovn-cert
+          name: host-ovn-cert
+          readOnly: true
 
         resources:
           requests:
@@ -157,7 +169,7 @@ spec:
         env:
         - name: OVN_DAEMONSET_VERSION
           value: "3"
-        - name: OVN_LOG_SB
+        - name: OVN_LOGLEVEL_SB
           value: "{{ ovn_loglevel_sb }}"
         - name: K8S_APISERVER
           valueFrom:
@@ -168,6 +180,12 @@ spec:
           valueFrom:
             fieldRef:
               fieldPath: metadata.namespace
+        - name: K8S_NODE_IP
+          valueFrom:
+            fieldRef:
+              fieldPath: status.hostIP
+        - name: OVN_SSL_ENABLE
+          value: "{{ ovn_ssl_en }}"
         readinessProbe:
           exec:
             command: ["/usr/bin/ovn-kube-util", "readiness-probe", "-t", "ovnsb-db"]
@@ -190,5 +208,9 @@ spec:
       - name: host-slash
         hostPath:
           path: /
+      - name: host-ovn-cert
+        hostPath:
+          path: /etc/ovn
+          type: DirectoryOrCreate
       tolerations:
       - operator: "Exists"

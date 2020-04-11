@@ -55,17 +55,19 @@ func podToCookie(pod *kapi.Pod) string {
 }
 
 func (n *NodeController) addOrUpdatePod(pod *kapi.Pod) error {
-	podIP, podMAC, err := getPodDetails(pod, n.nodeName)
+	podIPs, podMAC, err := getPodDetails(pod, n.nodeName)
 	if err != nil {
 		klog.V(5).Infof("cleaning up hybrid overlay pod %s/%s because %v", pod.Namespace, pod.Name, err)
 		return n.deletePod(pod)
 	}
 
 	cookie := podToCookie(pod)
-	_, _, err = util.RunOVSOfctl("add-flow", extBridgeName,
-		fmt.Sprintf("table=10,cookie=0x%s,priority=100,ip,nw_dst=%s,actions=set_field:%s->eth_src,set_field:%s->eth_dst,output:ext", cookie, podIP.IP, n.drMAC, podMAC))
-	if err != nil {
-		return fmt.Errorf("failed to add flows for pod %s/%s: %v", pod.Namespace, pod.Name, err)
+	for _, podIP := range podIPs {
+		_, _, err = util.RunOVSOfctl("add-flow", extBridgeName,
+			fmt.Sprintf("table=10,cookie=0x%s,priority=100,ip,nw_dst=%s,actions=set_field:%s->eth_src,set_field:%s->eth_dst,output:ext", cookie, podIP.IP, n.drMAC, podMAC))
+		if err != nil {
+			return fmt.Errorf("failed to add flows for pod %s/%s: %v", pod.Namespace, pod.Name, err)
+		}
 	}
 	return nil
 }
@@ -79,7 +81,7 @@ func (n *NodeController) deletePod(pod *kapi.Pod) error {
 	return nil
 }
 
-func getPodDetails(pod *kapi.Pod, nodeName string) (*net.IPNet, net.HardwareAddr, error) {
+func getPodDetails(pod *kapi.Pod, nodeName string) ([]*net.IPNet, net.HardwareAddr, error) {
 	if pod.Spec.NodeName != nodeName {
 		return nil, nil, fmt.Errorf("not scheduled")
 	}
@@ -88,14 +90,23 @@ func getPodDetails(pod *kapi.Pod, nodeName string) (*net.IPNet, net.HardwareAddr
 	if err != nil {
 		return nil, nil, err
 	}
-	return podInfo.IP, podInfo.MAC, nil
+	return podInfo.IPs, podInfo.MAC, nil
 }
 
 // podChanged returns true if any relevant pod attributes changed
 func podChanged(pod1 *kapi.Pod, pod2 *kapi.Pod, nodeName string) bool {
-	podIP1, mac1, _ := getPodDetails(pod1, nodeName)
-	podIP2, mac2, _ := getPodDetails(pod2, nodeName)
-	return !reflect.DeepEqual(podIP1, podIP2) || !reflect.DeepEqual(mac1, mac2)
+	podIPs1, mac1, _ := getPodDetails(pod1, nodeName)
+	podIPs2, mac2, _ := getPodDetails(pod2, nodeName)
+
+	if len(podIPs1) != len(podIPs2) || !reflect.DeepEqual(mac1, mac2) {
+		return false
+	}
+	for i := range podIPs1 {
+		if podIPs1[i].String() != podIPs2[i].String() {
+			return false
+		}
+	}
+	return true
 }
 
 func (n *NodeController) syncPods(pods []interface{}) {
@@ -406,7 +417,7 @@ func (n *NodeController) ensureHybridOverlayBridge() error {
 	if err != nil {
 		return err
 	}
-	stdout, stderr, err := util.RunOVSVsctl("set", "bridge", extBridgeName, "other-config:hwaddr="+macAddress)
+	stdout, stderr, err := util.RunOVSVsctl("set", "bridge", extBridgeName, "other-config:hwaddr="+macAddress.String())
 	if err != nil {
 		return fmt.Errorf("Failed to set bridge, stdout: %q, stderr: %q, "+
 			"error: %v", stdout, stderr, err)

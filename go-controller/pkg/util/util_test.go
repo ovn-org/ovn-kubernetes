@@ -34,19 +34,19 @@ var _ = Describe("Util tests", func() {
 			{
 				name:        "IPv4 to MAC",
 				IP:          "10.1.2.3",
-				expectedMAC: "0A:58:0A:01:02:03",
+				expectedMAC: "0a:58:0a:01:02:03",
 			},
 			{
 				name:        "IPv6 to MAC",
 				IP:          "fd98::1",
-				expectedMAC: "0A:58:FD:98:00:01",
+				expectedMAC: "0a:58:fd:98:00:01",
 			},
 		}
 
 		for _, tc := range testcases {
 			ip := ovntest.MustParseIP(tc.IP)
 			mac := IPAddrToHWAddr(ip)
-			Expect(mac).To(Equal(tc.expectedMAC), " test case \"%s\" returned %s instead of %s from IP %s", tc.name, mac, tc.expectedMAC, ip.String())
+			Expect(mac.String()).To(Equal(tc.expectedMAC), " test case \"%s\" returned %s instead of %s from IP %s", tc.name, mac.String(), tc.expectedMAC, ip.String())
 		}
 	})
 })

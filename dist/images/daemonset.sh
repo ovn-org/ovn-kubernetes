@@ -4,7 +4,6 @@
 #Always exit on errors
 set -e
 
-# This is for people that are not using the ansible install.
 # The script renders j2 templates into yaml files in ../yaml/
 
 # ensure j2 renderer installed
@@ -18,11 +17,11 @@ OVN_SVC_DIDR=""
 OVN_K8S_APISERVER=""
 OVN_GATEWAY_MODE=""
 OVN_GATEWAY_OPTS=""
-# In the future we will have RAFT based HA support.
 OVN_DB_VIP_IMAGE=""
 OVN_DB_VIP=""
 OVN_DB_REPLICAS=""
-OVN_MTU="1400"
+OVN_MTU=""
+OVN_SSL_ENABLE=""
 KIND=""
 MASTER_LOGLEVEL=""
 NODE_LOGLEVEL=""
@@ -94,6 +93,9 @@ while [ "$1" != "" ]; do
   --ovn-loglevel-nbctld)
     OVN_LOGLEVEL_NBCTLD=$VALUE
     ;;
+  --ssl)
+    OVN_SSL_ENABLE="yes"
+    ;;
   *)
     echo "WARNING: unknown parameter \"$PARAM\""
     exit 1
@@ -102,32 +104,14 @@ while [ "$1" != "" ]; do
   shift
 done
 
-# The options provided on the CLI overrides the values in ../ansible/hosts
-
 # Create the daemonsets with the desired image
-# The image name is from ../ansible/hosts
-# The daemonset.yaml files are templates in ../ansible/templates
 # They are expanded into daemonsets in ../yaml
 
-if [[ ${OVN_IMAGE} == "" ]]; then
-  image=$(awk -F = '/^ovn_image=/{ print $2 }' ../ansible/hosts | sed 's/\"//g')
-  if [[ ${image} == "" ]]; then
-    image="docker.io/ovnkube/ovn-daemonset:latest"
-  fi
-else
-  image=$OVN_IMAGE
-fi
+image=${OVN_IMAGE:-"docker.io/ovnkube/ovn-daemonset:latest"}
 echo "image: ${image}"
 
-if [[ ${OVN_IMAGE_PULL_POLICY} == "" ]]; then
-  policy=$(awk -F = '/^ovn_image_pull_policy/{ print $2 }' ../ansible/hosts)
-  if [[ ${policy} == "" ]]; then
-    policy="IfNotPresent"
-  fi
-else
-  policy=$OVN_IMAGE_PULL_POLICY
-fi
-echo "imagePullPolicy: ${policy}"
+image_pull_policy=${OVN_IMAGE_PULL_POLICY:-"IfNotPresent"}
+echo "imagePullPolicy: ${image_pull_policy}"
 
 ovn_gateway_mode=${OVN_GATEWAY_MODE}
 echo "ovn_gateway_mode: ${ovn_gateway_mode}"
@@ -157,80 +141,71 @@ ovn_loglevel_controller=${OVN_LOGLEVEL_CONTROLLER:-"-vconsole:info"}
 echo "ovn_loglevel_controller: ${ovn_loglevel_controller}"
 ovn_loglevel_nbctld=${OVN_LOGLEVEL_NBCTLD:-"-vconsole:info"}
 echo "ovn_loglevel_nbctld: ${ovn_loglevel_nbctld}"
+ovn_hybrid_overlay_enable=${OVN_HYBRID_OVERLAY_ENABLE}
+echo "ovn_hybrid_overlay_enable: ${ovn_hybrid_overlay_enable}"
+ovn_hybrid_overlay_net_cidr=${OVN_HYBRID_OVERLAY_NET_CIDR}
+echo "ovn_hybrid_overlay_net_cidr: ${ovn_hybrid_overlay_net_cidr}"
+ovn_ssl_en=${OVN_SSL_ENABLE:-"no"}
+echo "ovn_ssl_enable: ${ovn_ssl_en}"
 
 ovn_image=${image} \
-  ovn_image_pull_policy=${policy} \
+  ovn_image_pull_policy=${image_pull_policy} \
   kind=${KIND} \
   ovn_gateway_mode=${ovn_gateway_mode} \
   ovn_gateway_opts=${ovn_gateway_opts} \
   ovnkube_node_loglevel=${node_loglevel} \
   ovn_loglevel_controller=${ovn_loglevel_controller} \
+  ovn_hybrid_overlay_net_cidr=${ovn_hybrid_overlay_net_cidr} \
+  ovn_hybrid_overlay_enable=${ovn_hybrid_overlay_enable} \
+  ovn_ssl_en=${ovn_ssl_en} \
   j2 ../templates/ovnkube-node.yaml.j2 -o ../yaml/ovnkube-node.yaml
 
 ovn_image=${image} \
-  ovn_image_pull_policy=${policy} \
+  ovn_image_pull_policy=${image_pull_policy} \
   ovnkube_master_loglevel=${master_loglevel} \
   ovn_loglevel_northd=${ovn_loglevel_northd} \
   ovn_loglevel_nbctld=${ovn_loglevel_nbctld} \
+  ovn_hybrid_overlay_net_cidr=${ovn_hybrid_overlay_net_cidr} \
+  ovn_hybrid_overlay_enable=${ovn_hybrid_overlay_enable} \
+  ovn_ssl_en=${ovn_ssl_en} \
   j2 ../templates/ovnkube-master.yaml.j2 -o ../yaml/ovnkube-master.yaml
 
 ovn_image=${image} \
-  ovn_image_pull_policy=${policy} \
+  ovn_image_pull_policy=${image_pull_policy} \
   ovn_loglevel_nb=${ovn_loglevel_nb} \
   ovn_loglevel_sb=${ovn_loglevel_sb} \
+  ovn_ssl_en=${ovn_ssl_en} \
   j2 ../templates/ovnkube-db.yaml.j2 -o ../yaml/ovnkube-db.yaml
 
 ovn_db_vip_image=${ovn_db_vip_image} \
-  ovn_image_pull_policy=${policy} \
+  ovn_image_pull_policy=${image_pull_policy} \
   ovn_db_replicas=${ovn_db_replicas} \
   ovn_db_vip=${ovn_db_vip} ovn_loglevel_nb=${ovn_loglevel_nb} \
   j2 ../templates/ovnkube-db-vip.yaml.j2 -o ../yaml/ovnkube-db-vip.yaml
 
 ovn_image=${image} \
-  ovn_image_pull_policy=${policy} \
+  ovn_image_pull_policy=${image_pull_policy} \
   ovn_db_replicas=${ovn_db_replicas} \
   ovn_db_minAvailable=${ovn_db_minAvailable} \
   ovn_loglevel_nb=${ovn_loglevel_nb} ovn_loglevel_sb=${ovn_loglevel_sb} \
+  ovn_ssl_en=${ovn_ssl_en} \
   j2 ../templates/ovnkube-db-raft.yaml.j2 -o ../yaml/ovnkube-db-raft.yaml
 
 # ovn-setup.yaml
-# net_cidr=10.128.0.0/14/23
-# svc_cidr=172.30.0.0/16
-
-if [[ ${OVN_NET_CIDR} == "" ]]; then
-  net_cidr=$(awk -F = '/^net_cidr=/{ print $2 }' ../ansible/hosts)
-  if [[ ${net_cidr} == "" ]]; then
-    net_cidr="10.128.0.0/14/23"
-  fi
-else
-  net_cidr=$OVN_NET_CIDR
-fi
-
-if [[ ${OVN_SVC_CIDR} == "" ]]; then
-  svc_cidr=$(awk -F = '/^svc_cidr=/{ print $2 }' ../ansible/hosts)
-  if [[ ${svc_cidr} == "" ]]; then
-    svc_cidr="172.30.0.0/16"
-  fi
-else
-  svc_cidr=$OVN_SVC_CIDR
-fi
-
-k8s_apiserver=${OVN_K8S_APISERVER:-10.0.2.16:6443}
-
-net_cidr_repl="{{ net_cidr | default('10.128.0.0/14/23') }}"
-svc_cidr_repl="{{ svc_cidr | default('172.30.0.0/16') }}"
-k8s_apiserver_repl="{{ k8s_apiserver.stdout }}"
-mtu_repl="{{ mtu_value }}"
+net_cidr=${OVN_NET_CIDR:-"10.128.0.0/14/23"}
+svc_cidr=${OVN_SVC_CIDR:-"172.30.0.0/16"}
+k8s_apiserver=${OVN_K8S_APISERVER:-"10.0.2.16:6443"}
+mtu=${OVN_MTU:-1400}
 
 echo "net_cidr: ${net_cidr}"
 echo "svc_cidr: ${svc_cidr}"
 echo "k8s_apiserver: ${k8s_apiserver}"
-echo "mtu: ${OVN_MTU}"
+echo "mtu: ${mtu}"
 
-sed "s,${net_cidr_repl},${net_cidr},
-s,${svc_cidr_repl},${svc_cidr},
-s,${mtu_repl},${OVN_MTU},
-s,${k8s_apiserver_repl},${k8s_apiserver}," ../templates/ovn-setup.yaml.j2 >../yaml/ovn-setup.yaml
+sed "s,{{ net_cidr }},${net_cidr},
+s,{{ svc_cidr }},${svc_cidr},
+s,{{ mtu_value }},${mtu},
+s,{{ k8s_apiserver }},${k8s_apiserver}," ../templates/ovn-setup.yaml.j2 >../yaml/ovn-setup.yaml
 
 cp ../templates/ovnkube-monitor.yaml.j2 ../yaml/ovnkube-monitor.yaml
 

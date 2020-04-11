@@ -35,9 +35,9 @@ const (
 
 // CreateNodeHostSubnetAnnotation creates a "k8s.ovn.org/node-subnets" annotation,
 // with a single "default" network, suitable for passing to kube.SetAnnotationsOnNode
-func CreateNodeHostSubnetAnnotation(defaultSubnet string) (map[string]interface{}, error) {
+func CreateNodeHostSubnetAnnotation(defaultSubnet *net.IPNet) (map[string]interface{}, error) {
 	bytes, err := json.Marshal(map[string]string{
-		"default": defaultSubnet,
+		"default": defaultSubnet.String(),
 	})
 	if err != nil {
 		return nil, err
@@ -49,7 +49,7 @@ func CreateNodeHostSubnetAnnotation(defaultSubnet string) (map[string]interface{
 
 // SetNodeHostSubnetAnnotation sets a "k8s.ovn.org/node-subnets" annotation
 // using a kube.Annotator
-func SetNodeHostSubnetAnnotation(nodeAnnotator kube.Annotator, defaultSubnet string) error {
+func SetNodeHostSubnetAnnotation(nodeAnnotator kube.Annotator, defaultSubnet *net.IPNet) error {
 	annotation, err := CreateNodeHostSubnetAnnotation(defaultSubnet)
 	if err != nil {
 		return err
@@ -88,9 +88,9 @@ func ParseNodeHostSubnetAnnotation(node *kapi.Node) (*net.IPNet, error) {
 
 // CreateNodeJoinSubnetAnnotation creates a "k8s.ovn.org/node-join-subnets" annotation
 // with a single "default" network, suitable for passing to kube.SetAnnotationsOnNode
-func CreateNodeJoinSubnetAnnotation(defaultSubnet string) (map[string]interface{}, error) {
+func CreateNodeJoinSubnetAnnotation(defaultSubnet *net.IPNet) (map[string]interface{}, error) {
 	bytes, err := json.Marshal(map[string]string{
-		"default": defaultSubnet,
+		"default": defaultSubnet.String(),
 	})
 	if err != nil {
 		return nil, err
@@ -102,7 +102,7 @@ func CreateNodeJoinSubnetAnnotation(defaultSubnet string) (map[string]interface{
 
 // SetNodeJoinSubnetAnnotation sets a "k8s.ovn.org/node-join-subnets" annotation
 // using a kube.Annotator
-func SetNodeJoinSubnetAnnotation(nodeAnnotator kube.Annotator, defaultSubnet string) error {
+func SetNodeJoinSubnetAnnotation(nodeAnnotator kube.Annotator, defaultSubnet *net.IPNet) error {
 	annotation, err := CreateNodeJoinSubnetAnnotation(defaultSubnet)
 	if err != nil {
 		return err

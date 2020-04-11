@@ -18,8 +18,8 @@ import (
 // createPlatformManagementPort creates a management port attached to the node switch
 // that lets the node access its pods via their private IP address. This is used
 // for health checking and other management tasks.
-func createPlatformManagementPort(interfaceName, interfaceIP, routerIP, routerMAC string,
-	stopChan chan struct{}) error {
+func createPlatformManagementPort(interfaceName string, interfaceIP *net.IPNet, routerIP net.IP,
+	routerMAC net.HardwareAddr, stopChan chan struct{}) error {
 	// Up the interface.
 	_, _, err := util.RunPowershell("Enable-NetAdapter", "-IncludeHidden", interfaceName)
 	if err != nil {
@@ -39,13 +39,9 @@ func createPlatformManagementPort(interfaceName, interfaceIP, routerIP, routerMA
 	}
 
 	// Assign IP address to the internal interface.
-	portIP, interfaceIPNet, err := net.ParseCIDR(interfaceIP)
-	if err != nil {
-		return fmt.Errorf("Failed to parse interfaceIP %v : %v", interfaceIP, err)
-	}
-	portPrefix, _ := interfaceIPNet.Mask.Size()
+	portPrefix, _ := interfaceIP.Mask.Size()
 	_, _, err = util.RunPowershell("New-NetIPAddress",
-		fmt.Sprintf("-IPAddress %s", portIP),
+		fmt.Sprintf("-IPAddress %s", interfaceIP.IP),
 		fmt.Sprintf("-PrefixLength %d", portPrefix),
 		ifAlias)
 	if err != nil {
@@ -89,7 +85,7 @@ func createPlatformManagementPort(interfaceName, interfaceIP, routerIP, routerMA
 	return nil
 }
 
-func addRoute(subnet *net.IPNet, routerIP, interfaceIndex string) error {
+func addRoute(subnet *net.IPNet, routerIP net.IP, interfaceIndex string) error {
 	var familyFlag string
 	if utilnet.IsIPv6CIDR(subnet) {
 		familyFlag = "-6"
@@ -112,7 +108,7 @@ func addRoute(subnet *net.IPNet, routerIP, interfaceIndex string) error {
 	// Create a route for the entire subnet.
 	_, stderr, err = util.RunRoute("-p", "add",
 		subnet.IP.String(), "mask", subnetMask,
-		routerIP, "METRIC", "2", "IF", interfaceIndex)
+		routerIP.String(), "METRIC", "2", "IF", interfaceIndex)
 	if err != nil {
 		return fmt.Errorf("failed to run route add, stderr: %q, error: %v", stderr, err)
 	}

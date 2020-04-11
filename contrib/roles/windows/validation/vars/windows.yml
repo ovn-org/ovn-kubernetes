@@ -1,8 +1,0 @@
----
-service_names:
-  - "Docker"
-  - "kubelet"
-  - "ovn-controller"
-  - "ovn-kubernetes-node"
-  - "ovs-vswitchd"
-  - "ovsdb-server"

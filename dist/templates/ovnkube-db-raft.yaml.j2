@@ -128,6 +128,9 @@ spec:
           name: host-var-run-ovs
         - mountPath: /var/run/ovn/
           name: host-var-run-ovs
+        - mountPath: /ovn-cert
+          name: host-ovn-cert
+          readOnly: true
 
         resources:
           requests:
@@ -136,7 +139,7 @@ spec:
         env:
         - name: OVN_DAEMONSET_VERSION
           value: "3"
-        - name: OVN_LOG_NB
+        - name: OVN_LOGLEVEL_NB
           value: "{{ ovn_loglevel_nb }}"
         - name: K8S_APISERVER
           valueFrom:
@@ -151,6 +154,12 @@ spec:
           valueFrom:
             fieldRef:
               fieldPath: metadata.name
+        - name: K8S_NODE_IP
+          valueFrom:
+            fieldRef:
+              fieldPath: status.hostIP
+        - name: OVN_SSL_ENABLE
+          value: "{{ ovn_ssl_en }}"
       # end of container
 
       # sb-ovsdb - v3
@@ -188,6 +197,9 @@ spec:
           name: host-var-run-ovs
         - mountPath: /var/run/ovn/
           name: host-var-run-ovs
+        - mountPath: /ovn-cert
+          name: host-ovn-cert
+          readOnly: true
 
         resources:
           requests:
@@ -196,7 +208,7 @@ spec:
         env:
         - name: OVN_DAEMONSET_VERSION
           value: "3"
-        - name: OVN_LOG_SB
+        - name: OVN_LOGLEVEL_SB
           value: "{{ ovn_loglevel_sb }}"
         - name: K8S_APISERVER
           valueFrom:
@@ -211,6 +223,12 @@ spec:
           valueFrom:
             fieldRef:
               fieldPath: metadata.name
+        - name: K8S_NODE_IP
+          valueFrom:
+            fieldRef:
+              fieldPath: status.hostIP
+        - name: OVN_SSL_ENABLE
+          value: "{{ ovn_ssl_en }}"
       # end of container
 
       # db-metrics-exporter - v3
@@ -237,6 +255,9 @@ spec:
             name: host-var-run-ovs
           - mountPath: /var/run/ovn/
             name: host-var-run-ovs
+          - mountPath: /ovn-cert
+            name: host-ovn-cert
+            readOnly: true
 
         resources:
           requests:
@@ -254,6 +275,8 @@ spec:
             valueFrom:
               fieldRef:
                 fieldPath: metadata.namespace
+          - name: OVN_SSL_ENABLE
+            value: "{{ ovn_ssl_en }}"
       # end of container
 
       volumes:
@@ -266,5 +289,9 @@ spec:
       - name: host-var-run-ovs
         hostPath:
           path: /var/run/openvswitch
+      - name: host-ovn-cert
+        hostPath:
+          path: /etc/ovn
+          type: DirectoryOrCreate
       tolerations:
       - operator: "Exists"

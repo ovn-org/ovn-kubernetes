@@ -73,18 +73,18 @@ that node over IP address.
   internal interface).
 
 3. All containers should be able to communicate with the k8s daemons running
-in the master node.
+on the master.
 
-  This can be achieved by running OVN gateways in the minion nodes. With
+  This can be achieved by running OVN gateways on the nodes. With
   at least one OVN gateway, the pods can reach the k8s central daemons with
   NAT.
 
-### Master node initialization
+### Master initialization
 
-* Start the central components on a k8s master node.
+* Start the central components on a k8s master.
 
 OVN architecture has a central component which stores your networking intent
-in a database.  Start this central component on one of the nodes where you
+in a database.  Start this central component on one of the hosts where you
 have started your k8s central daemons and which has an IP address of
 $CENTRAL_IP.  (For HA of the central component, please read [HA.md])
 
@@ -110,7 +110,7 @@ Also start ovn-controller on this node.
 /usr/share/openvswitch/scripts/ovn-ctl start_controller
 ```
 
-Now start the ovnkube utility on the master node.
+Now start the ovnkube utility on the master
 
 The below command expects the user to provide
 * A cluster wide private address range of $CLUSTER_IP_SUBNET
@@ -134,26 +134,25 @@ uses the hostname.  kubelet allows this name to be overridden with
  -nodeport \
  -init-gateways -gateway-local \
  -k8s-token="$TOKEN" \
- -nb-address="tcp://$CENTRAL_IP:6641" \
- -sb-address="tcp://$CENTRAL_IP:6642" 2>&1 &
+ -nb-address="tcp:$CENTRAL_IP:6641" \
+ -sb-address="tcp:$CENTRAL_IP:6642" 2>&1 &
 ```
 
 Note: Make sure to read /var/log/ovn-kubernetes/ovnkube.log to see that there were
 no obvious errors with argument passing.  Also, you should only pass
-"-init-node" argument if there is a kubelet running on the master node too.
+"-init-node" argument if there is a kubelet running on the master too.
 
 If you want to use SSL instead of TCP for OVN databases, please read
 [INSTALL.SSL.md].
 
-### Minion node initialization.
+### Node initialization.
 
 On each host, you will need to run the following command once.
 
 The below command expects the user to provide
 * A cluster wide private address range of $CLUSTER_IP_SUBNET
 (e.g: 192.168.0.0/16).  The pods are provided IP address from this range.
-This value should be the same as the one provided to ovnkube in the master
-node.
+This value should be the same as the one provided to ovnkube in the master.
 
 * $NODE_NAME should be the same as the one used by kubelet.  kubelet by default
 uses the hostname.  kubelet allows this name to be overridden with
@@ -172,8 +171,8 @@ nohup sudo ovnkube -k8s-kubeconfig kubeconfig.yaml -loglevel=4 \
     -k8s-apiserver="http://$CENTRAL_IP:8080" \
     -init-node="$NODE_NAME"  \
     -nodeport \
-    -nb-address="tcp://$CENTRAL_IP:6641" \
-    -sb-address="tcp://$CENTRAL_IP:6642" -k8s-token="$TOKEN" \
+    -nb-address="tcp:$CENTRAL_IP:6641" \
+    -sb-address="tcp:$CENTRAL_IP:6642" -k8s-token="$TOKEN" \
     -init-gateways \
     -k8s-service-cidr=$SERVICE_IP_SUBNET \
     -cluster-subnets=$CLUSTER_IP_SUBNET 2>&1 &
@@ -187,10 +186,10 @@ Notes on gateway nodes:
 * Gateway nodes are needed for North-South connectivity in OVN.
 OVN has support for multiple gateway nodes. In the above command,
 since '-init-gateways' has been provided as an option, a OVN
-gateway will be created on each minion.
+gateway will be created on each node.
 
 * Just providing '-init-gateways', will make OVN choose the
-interface in your minion via which the minion's default gateway
+interface in your node via which the node default gateway
 is reached.
 
 * If you want to chose the interface for your gateway, you should
@@ -216,10 +215,6 @@ For more control on the options to ovnkube, please read [config.md]
 ## Debugging
 
 Please read [debugging.md].
-
-## Vagrant
-
-There is a vagrant available to bring up a simple cluster at [vagrant].
 
 ### Overlay mode architecture diagram:
 

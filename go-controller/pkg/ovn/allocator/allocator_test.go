@@ -10,7 +10,7 @@ import (
 
 func newSubnetAllocator(clusterCIDR string, hostBits uint32) (*SubnetAllocator, error) {
 	sna := NewSubnetAllocator()
-	err := sna.AddNetworkRange(clusterCIDR, hostBits)
+	err := sna.AddNetworkRange(ovntest.MustParseIPNet(clusterCIDR), hostBits)
 	return sna, err
 }
 
@@ -279,22 +279,12 @@ func TestAllocateSubnetInvalidHostBitsOrCIDR(t *testing.T) {
 		t.Fatal("Unexpectedly succeeded in initializing subnet allocator")
 	}
 
-	_, err = newSubnetAllocator("10.1.0.0/33", 16)
-	if err == nil {
-		t.Fatal("Unexpectedly succeeded in initializing subnet allocator")
-	}
-
 	_, err = newSubnetAllocator("fd01::/64", 66)
 	if err == nil {
 		t.Fatal("Unexpectedly succeeded in initializing subnet allocator")
 	}
 
 	_, err = newSubnetAllocator("fd01::/64", 0)
-	if err == nil {
-		t.Fatal("Unexpectedly succeeded in initializing subnet allocator")
-	}
-
-	_, err = newSubnetAllocator("fd01::/129", 64)
 	if err == nil {
 		t.Fatal("Unexpectedly succeeded in initializing subnet allocator")
 	}
@@ -384,7 +374,7 @@ func TestMultipleSubnets(t *testing.T) {
 	if err != nil {
 		t.Fatal("Failed to initialize IP allocator: ", err)
 	}
-	err = sna.AddNetworkRange("10.2.0.0/16", 14)
+	err = sna.AddNetworkRange(ovntest.MustParseIPNet("10.2.0.0/16"), 14)
 	if err != nil {
 		t.Fatal("Failed to add network range: ", err)
 	}
@@ -431,11 +421,11 @@ func TestDualStack(t *testing.T) {
 	if err != nil {
 		t.Fatal("Failed to initialize IP allocator: ", err)
 	}
-	err = sna.AddNetworkRange("10.2.0.0/16", 14)
+	err = sna.AddNetworkRange(ovntest.MustParseIPNet("10.2.0.0/16"), 14)
 	if err != nil {
 		t.Fatal("Failed to add network range: ", err)
 	}
-	err = sna.AddNetworkRange("fd01::/48", 64)
+	err = sna.AddNetworkRange(ovntest.MustParseIPNet("fd01::/48"), 64)
 	if err != nil {
 		t.Fatal("Failed to add network range: ", err)
 	}

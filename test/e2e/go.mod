@@ -33,5 +33,4 @@ require (
 	k8s.io/apimachinery v0.16.4
 	k8s.io/kubectl v0.0.0
 	k8s.io/kubernetes v1.16.4
-// k8s.io/kubernetes v0.17.4
 )
