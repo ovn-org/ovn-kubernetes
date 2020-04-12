@@ -44,6 +44,25 @@ type loadBalancerConf struct {
 	rejectACL string
 }
 
+// namespaceInfo contains information related to a Namespace. Use oc.getNamespaceLocked()
+// or oc.waitForNamespaceLocked() to get a locked namespaceInfo for a Namespace, and call
+// nsInfo.Unlock() on it when you are done with it. (No code outside of the code that
+// manages the oc.namespaces map is ever allowed to hold an unlocked namespaceInfo.)
+type namespaceInfo struct {
+	sync.Mutex
+
+	// map from pod IP address to logical port name for all pods
+	addressSet map[string]string
+
+	// map from NetworkPolicy name to namespacePolicy. You must hold the
+	// namespaceInfo's mutex to add/delete/lookup policies, but must hold the
+	// namespacePolicy's mutex (and not necessarily the namespaceInfo's) to work with
+	// the policy itself.
+	networkPolicies map[string]*namespacePolicy
+
+	multicastEnabled bool
+}
+
 // Controller structure is the object which holds the controls for starting
 // and reacting upon the watched resources (e.g. pods, endpoints)
 type Controller struct {
@@ -74,18 +93,12 @@ type Controller struct {
 	// A cache of all logical ports known to the controller
 	logicalPortCache *portCache
 
-	// For each namespace, a map from pod IP address to logical port name
-	// for all pods in that namespace.
-	namespaceAddressSet map[string]map[string]string
-
-	// For each namespace, a lock to protect critical regions
-	namespaceMutex map[string]*sync.Mutex
-
-	// Need to make calls to namespaceMutex also thread-safe
-	namespaceMutexMutex sync.Mutex
-
-	// For each namespace, a map of policy name to 'namespacePolicy'.
-	namespacePolicies map[string]map[string]*namespacePolicy
+	// Info about known namespaces. You must use oc.getNamespaceLocked() or
+	// oc.waitForNamespaceLocked() to read this map, and oc.createNamespaceLocked()
+	// or oc.deleteNamespaceLocked() to modify it. namespacesMutex is only held
+	// from inside those functions.
+	namespaces      map[string]*namespaceInfo
+	namespacesMutex sync.Mutex
 
 	// Port group for ingress deny rule
 	portGroupIngressDeny string
@@ -106,9 +119,6 @@ type Controller struct {
 
 	// A mutex for logicalSwitchCache which holds logicalSwitch information
 	lsMutex *sync.Mutex
-
-	// Per namespace multicast enabled?
-	multicastEnabled map[string]bool
 
 	// Supports multicast?
 	multicastSupport bool
@@ -149,17 +159,14 @@ func NewOvnController(kubeClient kubernetes.Interface, wf *factory.WatchFactory,
 		logicalSwitchCache:       make(map[string]*net.IPNet),
 		joinSubnetAllocator:      allocator.NewSubnetAllocator(),
 		logicalPortCache:         newPortCache(stopChan),
-		namespaceAddressSet:      make(map[string]map[string]string),
-		namespacePolicies:        make(map[string]map[string]*namespacePolicy),
-		namespaceMutex:           make(map[string]*sync.Mutex),
-		namespaceMutexMutex:      sync.Mutex{},
+		namespaces:               make(map[string]*namespaceInfo),
+		namespacesMutex:          sync.Mutex{},
 		lspIngressDenyCache:      make(map[string]int),
 		lspEgressDenyCache:       make(map[string]int),
 		lspMutex:                 &sync.Mutex{},
 		lsMutex:                  &sync.Mutex{},
 		loadbalancerClusterCache: make(map[kapi.Protocol]string),
 		loadbalancerGWCache:      make(map[kapi.Protocol]string),
-		multicastEnabled:         make(map[string]bool),
 		multicastSupport:         config.EnableMulticast,
 		serviceVIPToName:         make(map[ServiceVIPKey]types.NamespacedName),
 		serviceVIPToNameLock:     sync.Mutex{},
