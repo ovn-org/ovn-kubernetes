@@ -116,7 +116,7 @@ func testManagementPort(ctx *cli.Context, fexec *ovntest.FakeExec, testNS ns.Net
 	Expect(err).NotTo(HaveOccurred())
 
 	nodeAnnotator := kube.NewNodeAnnotator(&kube.Kube{fakeClient}, &existingNode)
-	err = util.SetNodeHostSubnetAnnotation(nodeAnnotator, nodeSubnet)
+	err = util.SetNodeHostSubnetAnnotation(nodeAnnotator, ovntest.MustParseIPNet(nodeSubnet))
 	Expect(err).NotTo(HaveOccurred())
 	err = nodeAnnotator.Run()
 	Expect(err).NotTo(HaveOccurred())
@@ -207,9 +207,9 @@ func testManagementPort(ctx *cli.Context, fexec *ovntest.FakeExec, testNS ns.Net
 	updatedNode, err := fakeClient.CoreV1().Nodes().Get(nodeName, metav1.GetOptions{})
 	Expect(err).NotTo(HaveOccurred())
 
-	macFromAnnotation, err := util.ParseNodeManagementPortMacAddr(updatedNode)
+	macFromAnnotation, err := util.ParseNodeManagementPortMACAddress(updatedNode)
 	Expect(err).NotTo(HaveOccurred())
-	Expect(macFromAnnotation).To(Equal(mgtPortMAC))
+	Expect(macFromAnnotation.String()).To(Equal(mgtPortMAC))
 
 	Expect(fexec.CalledMatchesExpected()).To(BeTrue(), fexec.ErrorDesc)
 }

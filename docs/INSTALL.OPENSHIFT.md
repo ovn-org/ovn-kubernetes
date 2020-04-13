@@ -186,8 +186,8 @@ that is needed for ovn to access the cluster apiserver.
 # oc get configmap ovn-config -o yaml
 apiVersion: v1
 data:
-  OvnNorth: tcp://10.19.188.22:6641
-  OvnSouth: tcp://10.19.188.22:6642
+  OvnNorth: tcp:10.19.188.22:6641
+  OvnSouth: tcp:10.19.188.22:6642
   k8s_apiserver: https://wsfd-netdev22.ntdv.lab.eng.bos.redhat.com:8443
   net_cidr: 10.128.0.0/14
   svc_cidr: 172.30.0.0/16

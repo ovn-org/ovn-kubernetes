@@ -1,7 +1,7 @@
 # ovnkube-master
 # daemonset version 3
 # starts master daemons, each in a separate container
-# it is run on the master node(s)
+# it is run on the master(s)
 kind: Deployment
 apiVersion: apps/v1
 metadata:
@@ -10,7 +10,7 @@ metadata:
   namespace: ovn-kubernetes
   annotations:
     kubernetes.io/description: |
-      This Deployment launches the ovn-kubernetes master node networking components.
+      This Deployment launches the ovn-kubernetes master networking components.
 spec:
   progressDeadlineSeconds: 600
   replicas: 1
@@ -90,6 +90,9 @@ spec:
           name: host-var-run-ovs
         - mountPath: /var/run/ovn/
           name: host-var-run-ovs
+        - mountPath: /ovn-cert
+          name: host-ovn-cert
+          readOnly: true
 
         resources:
           requests:
@@ -98,7 +101,7 @@ spec:
         env:
         - name: OVN_DAEMONSET_VERSION
           value: "3"
-        - name: OVN_LOG_NORTHD
+        - name: OVN_LOGLEVEL_NORTHD
           value: "{{ ovn_loglevel_northd }}"
         - name: K8S_APISERVER
           valueFrom:
@@ -109,6 +112,8 @@ spec:
           valueFrom:
             fieldRef:
               fieldPath: metadata.namespace
+        - name: OVN_SSL_ENABLE
+          value: "{{ ovn_ssl_en }}"
         readinessProbe:
           exec:
             command: ["/usr/bin/ovn-kube-util", "readiness-probe", "-t", "ovn-northd"]
@@ -136,7 +141,9 @@ spec:
           name: host-var-run-ovs
         - mountPath: /var/run/ovn/
           name: host-var-run-ovs
-
+        - mountPath: /ovn-cert
+          name: host-ovn-cert
+          readOnly: true
         resources:
           requests:
             cpu: 100m
@@ -144,13 +151,15 @@ spec:
         env:
         - name: OVN_DAEMONSET_VERSION
           value: "3"
-        - name: OVN_LOG_NBCTLD
+        - name: OVN_LOGLEVEL_NBCTLD
           value: "{{ ovn_loglevel_nbctld }}"
         - name: K8S_APISERVER
           valueFrom:
             configMapKeyRef:
               name: ovn-config
               key: k8s_apiserver
+        - name: OVN_SSL_ENABLE
+          value: "{{ ovn_ssl_en }}"
 
         readinessProbe:
           exec:
@@ -181,6 +190,9 @@ spec:
           name: host-var-run-ovs
         - mountPath: /var/run/ovn/
           name: host-var-run-ovs
+        - mountPath: /ovn-cert
+          name: host-ovn-cert
+          readOnly: true
 
         resources:
           requests:
@@ -214,6 +226,12 @@ spec:
           valueFrom:
             fieldRef:
               fieldPath: metadata.namespace
+        - name: OVN_HYBRID_OVERLAY_ENABLE
+          value: "{{ ovn_hybrid_overlay_enable }}"
+        - name: OVN_HYBRID_OVERLAY_NET_CIDR
+          value: "{{ ovn_hybrid_overlay_net_cidr }}"
+        - name: OVN_SSL_ENABLE
+          value: "{{ ovn_ssl_en }}"
       # end of container
 
       volumes:
@@ -230,5 +248,9 @@ spec:
       - name: host-var-run-ovs
         hostPath:
           path: /var/run/openvswitch
+      - name: host-ovn-cert
+        hostPath:
+          path: /etc/ovn
+          type: DirectoryOrCreate
       tolerations:
       - operator: "Exists"

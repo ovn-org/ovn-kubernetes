@@ -63,30 +63,20 @@ func setupNetwork(link netlink.Link, ifInfo *PodInterfaceInfo) error {
 	if err := netlink.LinkSetHardwareAddr(link, ifInfo.MAC); err != nil {
 		return fmt.Errorf("failed to add mac address %s to %s: %v", ifInfo.MAC, link.Attrs().Name, err)
 	}
-	addr := &netlink.Addr{IPNet: ifInfo.IP}
-	if err := netlink.AddrAdd(link, addr); err != nil {
-		return fmt.Errorf("failed to add IP addr %s to %s: %v", ifInfo.IP, link.Attrs().Name, err)
+	for _, ip := range ifInfo.IPs {
+		addr := &netlink.Addr{IPNet: ip}
+		if err := netlink.AddrAdd(link, addr); err != nil {
+			return fmt.Errorf("failed to add IP addr %s to %s: %v", ip, link.Attrs().Name, err)
+		}
 	}
-
-	var foundDefault bool
+	for _, gw := range ifInfo.Gateways {
+		if err := ip.AddRoute(nil, gw, link); err != nil {
+			return fmt.Errorf("failed to add gateway route: %v", err)
+		}
+	}
 	for _, route := range ifInfo.Routes {
 		if err := ip.AddRoute(route.Dest, route.NextHop, link); err != nil {
 			return fmt.Errorf("failed to add pod route %v via %v: %v", route.Dest, route.NextHop, err)
-		}
-
-		if ones, _ := route.Dest.Mask.Size(); ones == 0 {
-			foundDefault = true
-		}
-	}
-
-	if !foundDefault {
-		// If the pod routes did not include a default route,
-		// add a "default" default route via the pod's gateway, if
-		// one exists
-		if ifInfo.GW != nil {
-			if err := ip.AddRoute(nil, ifInfo.GW, link); err != nil {
-				return fmt.Errorf("failed to add gateway route: %v", err)
-			}
 		}
 	}
 
@@ -280,13 +270,18 @@ func (pr *PodRequest) ConfigureInterface(namespace string, podName string, ifInf
 		}
 	}
 
+	ipStrs := make([]string, len(ifInfo.IPs))
+	for i, ip := range ifInfo.IPs {
+		ipStrs[i] = ip.String()
+	}
+
 	// Add the new sandbox's OVS port
 	ovsArgs := []string{
 		"add-port", "br-int", hostIface.Name, "--", "set",
 		"interface", hostIface.Name,
 		fmt.Sprintf("external_ids:attached_mac=%s", ifInfo.MAC),
 		fmt.Sprintf("external_ids:iface-id=%s", ifaceID),
-		fmt.Sprintf("external_ids:ip_address=%s", ifInfo.IP),
+		fmt.Sprintf("external_ids:ip_addresses=%s", strings.Join(ipStrs, ",")),
 		fmt.Sprintf("external_ids:sandbox=%s", pr.SandboxID),
 	}
 
@@ -340,7 +335,7 @@ func (pr *PodRequest) ConfigureInterface(namespace string, podName string, ifInf
 		if err != nil {
 			return false, nil
 		}
-		return strings.Contains(stdout, ifInfo.IP.IP.String()), nil
+		return strings.Contains(stdout, ifInfo.IPs[0].IP.String()), nil
 	})
 	if err != nil {
 		return nil, fmt.Errorf("timed out dumping br-int flow entries for sandbox: %v", err)

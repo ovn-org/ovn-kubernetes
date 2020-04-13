@@ -1,7 +1,0 @@
----
-golang:
-  version: "{{ golang_version | default('1.11.4') }}"
-
-k8s_client_certs:
-  tmp_generate_path: /tmp/k8s_certs
-  directory: /etc/kubernetes/tls

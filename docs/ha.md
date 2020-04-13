@@ -3,14 +3,14 @@
 OVN architecture has two central databases that can be clustered.
 The databases are OVN_Northbound and OVN_Southbound.  This document
 explains how to cluster them and start various daemons for the
-ovn-kubernetes integration.  You will ideally need atleast 3 master
-nodes for a HA cluster. (You will need a miniumum of OVS/OVN 2.9.2
+ovn-kubernetes integration.  You will ideally need at least 3 masters
+for a HA cluster. (You will need a miniumum of OVS/OVN 2.9.2
 for clustering.)
 
-## Master1 node initialization
+## Master1 initialization
 
-To bootstrap your cluster, you need to start on one master node.
-For a lack of better name, lets call it MASTER1 with an IP
+To bootstrap your cluster, you need to start on one master.
+For a lack of better name, let's call it MASTER1 with an IP
 address of $MASTER1
 
 On MASTER1, delete any stale OVN databases and stop any
@@ -23,7 +23,7 @@ sudo rm /etc/openvswitch/ovn*.db
 sudo /usr/share/openvswitch/scripts/ovn-ctl stop_northd
 ```
 
-Start the two databases on that node with:
+Start the two databases on that host with:
 
 ```
 LOCAL_IP=$MASTER1
@@ -35,7 +35,7 @@ sudo /usr/share/openvswitch/scripts/ovn-ctl \
 ```
 
 
-## Master2, Master3... node initialization
+## Master2, Master3... initialization
 
 Delete any stale databases and stop any running ovn-northd
 daemons. e.g:
@@ -47,8 +47,8 @@ sudo rm /etc/openvswitch/ovn*.db
 sudo /usr/share/openvswitch/scripts/ovn-ctl stop_northd
 ```
 
-On master node, with a IP of $LOCAL_IP, start
-the databases and ask it to join $MASTER1
+On master with a IP of $LOCAL_IP, start the databases and ask it to
+join $MASTER1
 
 ```
 LOCAL_IP=$LOCAL_IP
@@ -76,15 +76,15 @@ sudo ovs-appctl -t /var/run/openvswitch/ovnsb_db.ctl \
 
 ## Start 'ovn-kube -init-master'
 
-On any one of the master nodes, we need to start 'ovnkube -init-master'.
+On any one of the masters, we need to start 'ovnkube -init-master'.
 (This should ideally be a daemonset with replica count of 1.)
 
 IP1="$MASTER1"
 IP2="$MASTER2"
 IP3="$MASTER3"
 
-ovn_nb="tcp://$IP1:6641,tcp://$IP2:6641,tcp://$IP3:6641"
-ovn_sb="tcp://$IP1:6642,tcp://$IP2:6642,tcp://$IP3:6642"
+ovn_nb="tcp:$IP1:6641,tcp:$IP2:6641,tcp:$IP3:6641"
+ovn_sb="tcp:$IP1:6642,tcp:$IP2:6642,tcp:$IP3:6642"
 
 nohup sudo ovnkube -k8s-kubeconfig kubeconfig.yaml \
  -loglevel=4 \
@@ -100,8 +100,8 @@ nohup sudo ovnkube -k8s-kubeconfig kubeconfig.yaml \
 
 ## start ovn-northd
 
-On any one of the nodes (ideally via a daemonset with replica count as 1),
-start ovn-northd. Let the 3 master node IPs be $IP1, $IP2 and $IP3.
+On any one of the masters (ideally via a daemonset with replica count as 1),
+start ovn-northd. Let the 3 master IPs be $IP1, $IP2 and $IP3.
 
 ```
 IP1="$MASTER1"
@@ -119,7 +119,7 @@ sudo ovn-northd -vconsole:emer -vsyslog:err -vfile:info \
 
 ## Start 'ovn-kube -init-node'
 
-In all other minions (and if needed on other masters), start ovnkube with
+On all nodes (and if needed on other masters), start ovnkube with
 '-init-node'. For e.g:
 
 ```
@@ -127,13 +127,13 @@ IP1="$MASTER1"
 IP2="$MASTER2"
 IP3="$MASTER3"
 
-ovn_nb="tcp://$IP1:6641,tcp://$IP2:6641,tcp://$IP3:6641"
-ovn_sb="tcp://$IP1:6642,tcp://$IP2:6642,tcp://$IP3:6642"
+ovn_nb="tcp:$IP1:6641,tcp:$IP2:6641,tcp:$IP3:6641"
+ovn_sb="tcp:$IP1:6642,tcp:$IP2:6642,tcp:$IP3:6642"
 
 nohup sudo ovnkube -k8s-kubeconfig $HOME/kubeconfig.yaml -loglevel=4 \
     -logfile="/var/log/openvswitch/ovnkube.log" \
     -k8s-apiserver="http://$K8S_APISERVER_IP:8080" \
-    -init-node="$MINION_NAME"  \
+    -init-node="$NODE_NAME"  \
     -nb-address="${ovn_nb}" \
     -sb-address="${ovn_sb}" \
     -k8s-token="$TOKEN" \

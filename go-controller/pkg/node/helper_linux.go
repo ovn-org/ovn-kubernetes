@@ -4,6 +4,7 @@ package node
 
 import (
 	"fmt"
+	"net"
 	"syscall"
 
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
@@ -14,10 +15,10 @@ import (
 // getDefaultGatewayInterfaceDetails returns the interface name on
 // which the default gateway (for route to 0.0.0.0) is configured.
 // It also returns the default gateway itself.
-func getDefaultGatewayInterfaceDetails() (string, string, error) {
+func getDefaultGatewayInterfaceDetails() (string, net.IP, error) {
 	routes, err := netlink.RouteList(nil, syscall.AF_INET)
 	if err != nil {
-		return "", "", fmt.Errorf("Failed to get routing table in node")
+		return "", nil, fmt.Errorf("Failed to get routing table in node")
 	}
 
 	for i := range routes {
@@ -29,11 +30,11 @@ func getDefaultGatewayInterfaceDetails() (string, string, error) {
 			}
 			intfName := intfLink.Attrs().Name
 			if intfName != "" {
-				return intfName, route.Gw.String(), nil
+				return intfName, route.Gw, nil
 			}
 		}
 	}
-	return "", "", fmt.Errorf("Failed to get default gateway interface")
+	return "", nil, fmt.Errorf("Failed to get default gateway interface")
 }
 
 func getIntfName(gatewayIntf string) (string, error) {

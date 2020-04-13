@@ -17,20 +17,20 @@ import (
 // bridgedGatewayNodeSetup makes the bridge's MAC address permanent (if needed), sets up
 // the physical network name mappings for the bridge, and returns an ifaceID
 // created from the bridge name and the node name
-func bridgedGatewayNodeSetup(nodeName, bridgeName, bridgeInterface string, syncBridgeMac bool) (string, string, error) {
+func bridgedGatewayNodeSetup(nodeName, bridgeName, bridgeInterface string, syncBridgeMAC bool) (string, net.HardwareAddr, error) {
 	// A OVS bridge's mac address can change when ports are added to it.
 	// We cannot let that happen, so make the bridge mac address permanent.
 	macAddress, err := util.GetOVSPortMACAddress(bridgeInterface)
 	if err != nil {
-		return "", "", err
+		return "", nil, err
 	}
-	if syncBridgeMac {
+	if syncBridgeMAC {
 		var err error
 
 		stdout, stderr, err := util.RunOVSVsctl("set", "bridge",
-			bridgeName, "other-config:hwaddr="+macAddress)
+			bridgeName, "other-config:hwaddr="+macAddress.String())
 		if err != nil {
-			return "", "", fmt.Errorf("Failed to set bridge, stdout: %q, stderr: %q, "+
+			return "", nil, fmt.Errorf("Failed to set bridge, stdout: %q, stderr: %q, "+
 				"error: %v", stdout, stderr, err)
 		}
 	}
@@ -40,7 +40,7 @@ func bridgedGatewayNodeSetup(nodeName, bridgeName, bridgeInterface string, syncB
 	_, stderr, err := util.RunOVSVsctl("set", "Open_vSwitch", ".",
 		fmt.Sprintf("external_ids:ovn-bridge-mappings=%s:%s", util.PhysicalNetworkName, bridgeName))
 	if err != nil {
-		return "", "", fmt.Errorf("Failed to set ovn-bridge-mappings for ovs bridge %s"+
+		return "", nil, fmt.Errorf("Failed to set ovn-bridge-mappings for ovs bridge %s"+
 			", stderr:%s (%v)", bridgeName, stderr, err)
 	}
 
@@ -49,34 +49,28 @@ func bridgedGatewayNodeSetup(nodeName, bridgeName, bridgeInterface string, syncB
 }
 
 // getIPv4Address returns the ipv4 address for the network interface 'iface'.
-func getIPv4Address(iface string) (string, error) {
-	var ipAddress string
+func getIPv4Address(iface string) (*net.IPNet, error) {
 	intf, err := net.InterfaceByName(iface)
 	if err != nil {
-		return ipAddress, err
+		return nil, err
 	}
 
 	addrs, err := intf.Addrs()
 	if err != nil {
-		return ipAddress, err
+		return nil, err
 	}
-loop:
 	for _, addr := range addrs {
 		switch ip := addr.(type) {
 		case *net.IPNet:
-			if !utilnet.IsIPv6(ip.IP) {
-				ipAddress = ip.String()
-			}
-			// get the first ip address
-			if ipAddress != "" {
-				break loop
+			if !utilnet.IsIPv6CIDR(ip) {
+				return ip, nil
 			}
 		}
 	}
-	return ipAddress, nil
+	return nil, nil
 }
 
-func (n *OvnNode) initGateway(subnet string, nodeAnnotator kube.Annotator,
+func (n *OvnNode) initGateway(subnet *net.IPNet, nodeAnnotator kube.Annotator,
 	waiter *startupWaiter) error {
 
 	if config.Gateway.NodeportEnable {
@@ -92,16 +86,16 @@ func (n *OvnNode) initGateway(subnet string, nodeAnnotator kube.Annotator,
 	case config.GatewayModeLocal:
 		err = initLocalnetGateway(n.name, subnet, n.watchFactory, nodeAnnotator)
 	case config.GatewayModeShared:
-		gatewayNextHop := config.Gateway.NextHop
+		gatewayNextHop := net.ParseIP(config.Gateway.NextHop)
 		gatewayIntf := config.Gateway.Interface
-		if gatewayNextHop == "" || gatewayIntf == "" {
+		if gatewayNextHop == nil || gatewayIntf == "" {
 			// We need to get the interface details from the default gateway.
 			defaultGatewayIntf, defaultGatewayNextHop, err := getDefaultGatewayInterfaceDetails()
 			if err != nil {
 				return err
 			}
 
-			if gatewayNextHop == "" {
+			if gatewayNextHop == nil {
 				gatewayNextHop = defaultGatewayNextHop
 			}
 

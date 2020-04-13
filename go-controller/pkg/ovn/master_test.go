@@ -134,7 +134,7 @@ func defaultFakeExec(nodeSubnet, nodeName string, sctpSupport bool) (*ovntest.Fa
 	// Node-related logical network stuff
 	cidr := ovntest.MustParseIPNet(nodeSubnet)
 	cidr.IP = util.NextIP(cidr.IP)
-	lrpMAC := util.IPAddrToHWAddr(cidr.IP)
+	lrpMAC := util.IPAddrToHWAddr(cidr.IP).String()
 	gwCIDR := cidr.String()
 	gwIP := cidr.IP.String()
 	nodeMgmtPortIP := util.NextIP(cidr.IP)
@@ -244,7 +244,7 @@ var _ = Describe("Master Operations", func() {
 			nodeAnnotator := kube.NewNodeAnnotator(&kube.Kube{fakeClient}, &testNode)
 			err = util.SetDisabledL3GatewayConfig(nodeAnnotator)
 			Expect(err).NotTo(HaveOccurred())
-			err = util.SetNodeManagementPortMacAddr(nodeAnnotator, mgmtMAC)
+			err = util.SetNodeManagementPortMACAddress(nodeAnnotator, ovntest.MustParseMAC(mgmtMAC))
 			Expect(err).NotTo(HaveOccurred())
 			err = nodeAnnotator.Run()
 			Expect(err).NotTo(HaveOccurred())
@@ -274,9 +274,9 @@ var _ = Describe("Master Operations", func() {
 			Expect(err).NotTo(HaveOccurred())
 			Expect(subnetFromAnnotation.String()).To(Equal(nodeSubnet))
 
-			macFromAnnotation, err := util.ParseNodeManagementPortMacAddr(updatedNode)
+			macFromAnnotation, err := util.ParseNodeManagementPortMACAddress(updatedNode)
 			Expect(err).NotTo(HaveOccurred())
-			Expect(macFromAnnotation).To(Equal(mgmtMAC))
+			Expect(macFromAnnotation.String()).To(Equal(mgmtMAC))
 
 			Eventually(fexec.CalledMatchesExpected, 2).Should(BeTrue(), fexec.ErrorDesc)
 			return nil
@@ -326,7 +326,7 @@ var _ = Describe("Master Operations", func() {
 			nodeAnnotator := kube.NewNodeAnnotator(&kube.Kube{fakeClient}, &testNode)
 			err = util.SetDisabledL3GatewayConfig(nodeAnnotator)
 			Expect(err).NotTo(HaveOccurred())
-			err = util.SetNodeManagementPortMacAddr(nodeAnnotator, mgmtMAC)
+			err = util.SetNodeManagementPortMACAddress(nodeAnnotator, ovntest.MustParseMAC(mgmtMAC))
 			Expect(err).NotTo(HaveOccurred())
 			err = nodeAnnotator.Run()
 			Expect(err).NotTo(HaveOccurred())
@@ -356,9 +356,9 @@ var _ = Describe("Master Operations", func() {
 			Expect(err).NotTo(HaveOccurred())
 			Expect(subnetFromAnnotation.String()).To(Equal(nodeSubnet))
 
-			macFromAnnotation, err := util.ParseNodeManagementPortMacAddr(updatedNode)
+			macFromAnnotation, err := util.ParseNodeManagementPortMACAddress(updatedNode)
 			Expect(err).NotTo(HaveOccurred())
-			Expect(macFromAnnotation).To(Equal(mgmtMAC))
+			Expect(macFromAnnotation.String()).To(Equal(mgmtMAC))
 
 			Eventually(fexec.CalledMatchesExpected, 2).Should(BeTrue(), fexec.ErrorDesc)
 			return nil
@@ -407,9 +407,9 @@ var _ = Describe("Master Operations", func() {
 			nodeAnnotator := kube.NewNodeAnnotator(&kube.Kube{fakeClient}, &testNode)
 			err = util.SetDisabledL3GatewayConfig(nodeAnnotator)
 			Expect(err).NotTo(HaveOccurred())
-			err = util.SetNodeManagementPortMacAddr(nodeAnnotator, mgmtMAC)
+			err = util.SetNodeManagementPortMACAddress(nodeAnnotator, ovntest.MustParseMAC(mgmtMAC))
 			Expect(err).NotTo(HaveOccurred())
-			err = util.SetNodeHostSubnetAnnotation(nodeAnnotator, nodeSubnet)
+			err = util.SetNodeHostSubnetAnnotation(nodeAnnotator, ovntest.MustParseIPNet(nodeSubnet))
 			Expect(err).NotTo(HaveOccurred())
 			err = nodeAnnotator.Run()
 			Expect(err).NotTo(HaveOccurred())
@@ -445,9 +445,9 @@ var _ = Describe("Master Operations", func() {
 			Expect(err).NotTo(HaveOccurred())
 			Expect(subnetFromAnnotation.String()).To(Equal(nodeSubnet))
 
-			macFromAnnotation, err := util.ParseNodeManagementPortMacAddr(updatedNode)
+			macFromAnnotation, err := util.ParseNodeManagementPortMACAddress(updatedNode)
 			Expect(err).NotTo(HaveOccurred())
-			Expect(macFromAnnotation).To(Equal(mgmtMAC))
+			Expect(macFromAnnotation.String()).To(Equal(mgmtMAC))
 
 			Eventually(fexec.CalledMatchesExpected, 2).Should(BeTrue(), fexec.ErrorDesc)
 			return nil
@@ -477,7 +477,7 @@ var _ = Describe("Master Operations", func() {
 				masterSubnet      string = "10.128.2.0/24"
 				masterGWCIDR      string = "10.128.2.1/24"
 				masterMgmtPortIP  string = "10.128.2.2"
-				lrpMAC            string = "0A:58:0A:80:02:01"
+				lrpMAC            string = "0a:58:0a:80:02:01"
 				masterMgmtPortMAC string = "00:00:00:55:66:77"
 			)
 
@@ -542,7 +542,7 @@ subnet=%s
 				"ovn-sbctl --timeout=15 --data=bare --no-heading --columns=name find Chassis hostname=" + node1Name,
 			})
 
-			// Expect the code to re-add the master node (which still exists)
+			// Expect the code to re-add the master (which still exists)
 			// when the factory watch begins and enumerates all existing
 			// Kubernetes API nodes
 			fexec.AddFakeCmdsNoOutputNoError([]string{
@@ -597,9 +597,9 @@ subnet=%s
 			nodeAnnotator := kube.NewNodeAnnotator(&kube.Kube{fakeClient}, &masterNode)
 			err = util.SetDisabledL3GatewayConfig(nodeAnnotator)
 			Expect(err).NotTo(HaveOccurred())
-			err = util.SetNodeManagementPortMacAddr(nodeAnnotator, masterMgmtPortMAC)
+			err = util.SetNodeManagementPortMACAddress(nodeAnnotator, ovntest.MustParseMAC(masterMgmtPortMAC))
 			Expect(err).NotTo(HaveOccurred())
-			err = util.SetNodeHostSubnetAnnotation(nodeAnnotator, masterSubnet)
+			err = util.SetNodeHostSubnetAnnotation(nodeAnnotator, ovntest.MustParseIPNet(masterSubnet))
 			Expect(err).NotTo(HaveOccurred())
 			err = nodeAnnotator.Run()
 			Expect(err).NotTo(HaveOccurred())
@@ -615,7 +615,7 @@ subnet=%s
 			clusterController.UDPLoadBalancerUUID = udpLBUUID
 			clusterController.SCTPLoadBalancerUUID = sctpLBUUID
 			clusterController.SCTPSupport = true
-			_ = clusterController.joinSubnetAllocator.AddNetworkRange("100.64.0.0/16", 3)
+			_ = clusterController.joinSubnetAllocator.AddNetworkRange(ovntest.MustParseIPNet("100.64.0.0/16"), 3)
 
 			// Let the real code run and ensure OVN database sync
 			err = clusterController.WatchNodes()
@@ -657,11 +657,11 @@ var _ = Describe("Gateway Init Operations", func() {
 		app.Action = func(ctx *cli.Context) error {
 			const (
 				nodeName               string = "node1"
-				nodeLRPMAC             string = "0A:58:0A:01:01:01"
+				nodeLRPMAC             string = "0a:58:0a:01:01:01"
 				joinSubnet             string = "100.64.0.0/29"
-				lrpMAC                 string = "0A:58:64:40:00:01"
+				lrpMAC                 string = "0a:58:64:40:00:01"
 				lrpIP                  string = "100.64.0.1"
-				drLrpMAC               string = "0A:58:64:40:00:02"
+				drLrpMAC               string = "0a:58:64:40:00:02"
 				drLrpIP                string = "100.64.0.2"
 				brLocalnetMAC          string = "11:22:33:44:55:66"
 				clusterRouter          string = util.OvnClusterRouter
@@ -706,13 +706,16 @@ var _ = Describe("Gateway Init Operations", func() {
 			nodeAnnotator := kube.NewNodeAnnotator(&kube.Kube{fakeClient}, &testNode)
 			ifaceID := localnetBridgeName + "_" + nodeName
 			err = util.SetLocalL3GatewayConfig(nodeAnnotator, ifaceID,
-				brLocalnetMAC, localnetGatewayIP, localnetGatewayNextHop, true)
+				ovntest.MustParseMAC(brLocalnetMAC),
+				ovntest.MustParseIPNet(localnetGatewayIP),
+				ovntest.MustParseIP(localnetGatewayNextHop),
+				true)
 			Expect(err).NotTo(HaveOccurred())
-			err = util.SetNodeManagementPortMacAddr(nodeAnnotator, brLocalnetMAC)
+			err = util.SetNodeManagementPortMACAddress(nodeAnnotator, ovntest.MustParseMAC(brLocalnetMAC))
 			Expect(err).NotTo(HaveOccurred())
-			err = util.SetNodeHostSubnetAnnotation(nodeAnnotator, nodeSubnet)
+			err = util.SetNodeHostSubnetAnnotation(nodeAnnotator, ovntest.MustParseIPNet(nodeSubnet))
 			Expect(err).NotTo(HaveOccurred())
-			err = util.SetNodeJoinSubnetAnnotation(nodeAnnotator, joinSubnet)
+			err = util.SetNodeJoinSubnetAnnotation(nodeAnnotator, ovntest.MustParseIPNet(joinSubnet))
 			Expect(err).NotTo(HaveOccurred())
 			err = nodeAnnotator.Run()
 			Expect(err).NotTo(HaveOccurred())
@@ -811,14 +814,14 @@ var _ = Describe("Gateway Init Operations", func() {
 			clusterController.UDPLoadBalancerUUID = udpLBUUID
 			clusterController.SCTPLoadBalancerUUID = sctpLBUUID
 			clusterController.SCTPSupport = true
-			_ = clusterController.joinSubnetAllocator.AddNetworkRange("100.64.0.0/16", 3)
+			_ = clusterController.joinSubnetAllocator.AddNetworkRange(ovntest.MustParseIPNet("100.64.0.0/16"), 3)
 
 			// Let the real code run and ensure OVN database sync
 			err = clusterController.WatchNodes()
 			Expect(err).NotTo(HaveOccurred())
 
 			subnet := ovntest.MustParseIPNet(nodeSubnet)
-			err = clusterController.syncGatewayLogicalNetwork(updatedNode, l3GatewayConfig, subnet.String())
+			err = clusterController.syncGatewayLogicalNetwork(updatedNode, l3GatewayConfig, subnet)
 			Expect(err).NotTo(HaveOccurred())
 
 			Expect(fexec.CalledMatchesExpected()).To(BeTrue(), fexec.ErrorDesc)
@@ -839,11 +842,11 @@ var _ = Describe("Gateway Init Operations", func() {
 		app.Action = func(ctx *cli.Context) error {
 			const (
 				nodeName               string = "node1"
-				nodeLRPMAC             string = "0A:58:0A:01:01:01"
+				nodeLRPMAC             string = "0a:58:0a:01:01:01"
 				joinSubnet             string = "100.64.0.0/29"
-				lrpMAC                 string = "0A:58:64:40:00:01"
+				lrpMAC                 string = "0a:58:64:40:00:01"
 				lrpIP                  string = "100.64.0.1"
-				drLrpMAC               string = "0A:58:64:40:00:02"
+				drLrpMAC               string = "0a:58:64:40:00:02"
 				drLrpIP                string = "100.64.0.2"
 				physicalBridgeMAC      string = "11:22:33:44:55:66"
 				lrpCIDR                string = lrpIP + "/16"
@@ -863,7 +866,7 @@ var _ = Describe("Gateway Init Operations", func() {
 				physicalBridgeName     string = "br-eth0"
 				nodeGWIP               string = "10.1.1.1/24"
 				nodeMgmtPortIP         string = "10.1.1.2"
-				nodeMgmtPortMAC        string = "0A:58:0A:01:01:02"
+				nodeMgmtPortMAC        string = "0a:58:0a:01:01:02"
 			)
 
 			testNode := v1.Node{ObjectMeta: metav1.ObjectMeta{
@@ -889,13 +892,15 @@ var _ = Describe("Gateway Init Operations", func() {
 			nodeAnnotator := kube.NewNodeAnnotator(&kube.Kube{fakeClient}, &testNode)
 			ifaceID := physicalBridgeName + "_" + nodeName
 			err = util.SetSharedL3GatewayConfig(nodeAnnotator, ifaceID,
-				physicalBridgeMAC, physicalGatewayIPMask, physicalGatewayNextHop,
+				ovntest.MustParseMAC(physicalBridgeMAC),
+				ovntest.MustParseIPNet(physicalGatewayIPMask),
+				ovntest.MustParseIP(physicalGatewayNextHop),
 				true, 1024)
-			err = util.SetNodeManagementPortMacAddr(nodeAnnotator, nodeMgmtPortMAC)
+			err = util.SetNodeManagementPortMACAddress(nodeAnnotator, ovntest.MustParseMAC(nodeMgmtPortMAC))
 			Expect(err).NotTo(HaveOccurred())
-			err = util.SetNodeHostSubnetAnnotation(nodeAnnotator, nodeSubnet)
+			err = util.SetNodeHostSubnetAnnotation(nodeAnnotator, ovntest.MustParseIPNet(nodeSubnet))
 			Expect(err).NotTo(HaveOccurred())
-			err = util.SetNodeJoinSubnetAnnotation(nodeAnnotator, joinSubnet)
+			err = util.SetNodeJoinSubnetAnnotation(nodeAnnotator, ovntest.MustParseIPNet(joinSubnet))
 			Expect(err).NotTo(HaveOccurred())
 			err = nodeAnnotator.Run()
 			Expect(err).NotTo(HaveOccurred())
@@ -1003,14 +1008,14 @@ var _ = Describe("Gateway Init Operations", func() {
 			clusterController.UDPLoadBalancerUUID = udpLBUUID
 			clusterController.SCTPLoadBalancerUUID = sctpLBUUID
 			clusterController.SCTPSupport = true
-			_ = clusterController.joinSubnetAllocator.AddNetworkRange("100.64.0.0/16", 3)
+			_ = clusterController.joinSubnetAllocator.AddNetworkRange(ovntest.MustParseIPNet("100.64.0.0/16"), 3)
 
 			// Let the real code run and ensure OVN database sync
 			err = clusterController.WatchNodes()
 			Expect(err).NotTo(HaveOccurred())
 
 			subnet := ovntest.MustParseIPNet(nodeSubnet)
-			err = clusterController.syncGatewayLogicalNetwork(updatedNode, l3GatewayConfig, subnet.String())
+			err = clusterController.syncGatewayLogicalNetwork(updatedNode, l3GatewayConfig, subnet)
 			Expect(err).NotTo(HaveOccurred())
 
 			Expect(fexec.CalledMatchesExpected()).To(BeTrue(), fexec.ErrorDesc)

@@ -4,6 +4,11 @@
 verify-ovsdb-raft() {
   check_ovn_daemonset_version "3"
 
+  if [[ ${ovn_db_host} == "" ]]; then
+    echo "failed to retrieve the IP address of the host $(hostname). Exiting..."
+    exit 1
+  fi
+
   replicas=$(kubectl --server=${K8S_APISERVER} --token=${k8s_token} --certificate-authority=${K8S_CACERT} \
     get statefulset -n ${ovn_kubernetes_namespace} ovnkube-db -o=jsonpath='{.spec.replicas}')
   if [[ ${replicas} -lt 3 || $((${replicas} % 2)) -eq 0 ]]; then
@@ -16,16 +21,17 @@ verify-ovsdb-raft() {
 # This waits for ovnkube-db-0 POD to come up
 ready_to_join_cluster() {
   # See if ep is available ...
-  db=${1}
-  port=${2}
+  local db=${1}
+  local port=${2}
 
   init_ip="$(kubectl --server=${K8S_APISERVER} --token=${k8s_token} --certificate-authority=${K8S_CACERT} \
     get pod -n ${ovn_kubernetes_namespace} ovnkube-db-0 -o=jsonpath='{.status.podIP}')"
   if [[ $? != 0 ]]; then
     return 1
   fi
-  target=$(ovn-${db}ctl --db=tcp:${init_ip}:${port} --data=bare --no-headings --columns=target list connection 2>/dev/null)
-  if [[ "${target}" != "ptcp:${port}" ]]; then
+  target=$(ovn-${db}ctl --db=${transport}:${init_ip}:${port} ${ovndb_ctl_ssl_opts} --data=bare --no-headings \
+    --columns=target list connection 2>/dev/null)
+  if [[ "${target}" != "p${transport}:${port}" ]]; then
     return 1
   fi
   return 0
@@ -37,7 +43,7 @@ check_ovnkube_db_ep() {
 
   # TODO: Right now only checks for NB ovsdb instances
   echo "======= checking ${dbaddr}:${dbport} OVSDB instance ==============="
-  ovsdb-client list-dbs tcp:${dbaddr}:${dbport} >/dev/null 2>&1
+  ovsdb-client ${ovndb_ctl_ssl_opts} list-dbs ${transport}:${dbaddr}:${dbport} >/dev/null 2>&1
   if [[ $? != 0 ]]; then
     return 1
   fi
@@ -85,7 +91,8 @@ check_and_apply_ovnkube_db_ep() {
 
 # election timer can only be at most doubled each time, and it can only be set on the leader
 set_election_timer() {
-  local election_timer=${1}
+  local db=${1}
+  local election_timer=${2}
   local current_election_timer
 
   echo "setting election timer for ${database} to ${election_timer} ms"
@@ -127,7 +134,8 @@ set_election_timer() {
 # the pod is a part of mutli-pods cluster and may not be a leader and the connection information should
 # have already been set, so we don't care.
 set_connection() {
-  local port=${1}
+  local db=${1}
+  local port=${2}
   local target
   local output
 
@@ -137,8 +145,8 @@ set_connection() {
     # this instance is a leader, check if we need to make any changes
     echo "found the current value of target and inactivity probe to be ${output}"
     target=$(echo "${output}" | awk 'ORS=","')
-    if [[ "${target}" != "ptcp:${port},0," ]]; then
-      ovn-${db}ctl --inactivity-probe=0 set-connection ptcp:${port}
+    if [[ "${target}" != "p${transport}:${port},0," ]]; then
+      ovn-${db}ctl --inactivity-probe=0 set-connection p${transport}:${port}
       if [[ $? != 0 ]]; then
         echo "Failed to set connection and disable inactivity probe. Exiting...."
         exit 12
@@ -186,29 +194,43 @@ ovsdb-raft() {
   ovn_db_pidfile=${OVN_RUNDIR}/ovn${db}_db.pid
   eval ovn_log_db=\$ovn_log_${db}
   ovn_db_file=${OVN_ETCDIR}/ovn${db}_db.db
-  database="OVN_Northbound"
-  if [[ ${db} == "sb" ]]; then
-    database="OVN_Southbound"
-  fi
 
   rm -f ${ovn_db_pidfile}
 
   verify-ovsdb-raft
-  local_ip=$(getent ahostsv4 $(hostname) | grep -v "^127\." | head -1 | awk '{ print $1 }')
-  if [[ ${local_ip} == "" ]]; then
-    echo "failed to retrieve the IP address of the host $(hostname). Exiting..."
-    exit 1
-  fi
   echo "=============== run ${db}-ovsdb-raft pod ${POD_NAME} =========="
 
   if [[ ! -e ${ovn_db_file} ]] || ovsdb-tool db-is-standalone ${ovn_db_file}; then
     initialize="true"
   fi
+
+  local db_ssl_opts=""
+  if [[ ${db} == "nb" ]]; then
+    database="OVN_Northbound"
+    [[ "yes" == ${OVN_SSL_ENABLE} ]] && {
+      db_ssl_opts="
+            --ovn-nb-db-ssl-key=${ovn_nb_pk}
+            --ovn-nb-db-ssl-cert=${ovn_nb_cert}
+            --ovn-nb-db-ssl-ca-cert=${ovn_ca_cert}
+      "
+    }
+  else
+    database="OVN_Southbound"
+    [[ "yes" == ${OVN_SSL_ENABLE} ]] && {
+      db_ssl_opts="
+            --ovn-sb-db-ssl-key=${ovn_sb_pk}
+            --ovn-sb-db-ssl-cert=${ovn_sb_cert}
+            --ovn-sb-db-ssl-ca-cert=${ovn_ca_cert}
+      "
+    }
+  fi
   if [[ "${POD_NAME}" == "ovnkube-db-0" ]]; then
     run_as_ovs_user_if_needed \
       ${OVNCTL_PATH} run_${db}_ovsdb --no-monitor \
-      --db-${db}-cluster-local-addr=${local_ip} \
+      --db-${db}-cluster-local-addr=${ovn_db_host} \
       --db-${db}-cluster-local-port=${raft_port} \
+      --db-${db}-cluster-local-proto=${transport} \
+      ${db_ssl_opts} \
       --ovn-${db}-log="${ovn_log_db}" &
   else
     # join the remote cluster node if the DB is not created
@@ -217,8 +239,10 @@ ovsdb-raft() {
     fi
     run_as_ovs_user_if_needed \
       ${OVNCTL_PATH} run_${db}_ovsdb --no-monitor \
-      --db-${db}-cluster-local-addr=${local_ip} --db-${db}-cluster-remote-addr=${init_ip} \
+      --db-${db}-cluster-local-addr=${ovn_db_host} --db-${db}-cluster-remote-addr=${init_ip} \
       --db-${db}-cluster-local-port=${raft_port} --db-${db}-cluster-remote-port=${raft_port} \
+      --db-${db}-cluster-local-proto=${transport} --db-${db}-cluster-remote-proto=${transport} \
+      ${db_ssl_opts} \
       --ovn-${db}-log="${ovn_log_db}" &
   fi
 
@@ -237,12 +261,12 @@ ovsdb-raft() {
     # set the election timer value before other servers join the cluster and it can
     # only be set on the leader so we must do this in ovnkube-db-0 when it is still
     # a single-node cluster
-    set_election_timer ${election_timer}
+    set_election_timer ${db} ${election_timer}
     if [[ ${db} == "nb" ]]; then
       set_northd_probe_interval
     fi
     # set the connection and disable inactivity probe, this deletes the old connection if any
-    set_connection ${port}
+    set_connection ${db} ${port}
   fi
 
   last_node_index=$(expr ${replicas} - 1)

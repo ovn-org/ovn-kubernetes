@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"net"
 	"os"
-	"strings"
 	"time"
 
 	"github.com/coreos/go-iptables/iptables"
@@ -25,15 +24,14 @@ const (
 type managementPortConfig struct {
 	link       netlink.Link
 	ipt        util.IPTablesHelper
-	allSubnets []string
+	allSubnets []*net.IPNet
 	ifName     string
-	ifIPMask   string
-	ifIP       string
-	routerIP   string
-	routerMAC  string
+	ifIPMask   *net.IPNet
+	routerIP   net.IP
+	routerMAC  net.HardwareAddr
 }
 
-func newManagementPortConfig(interfaceName, interfaceIP, routerIP, routerMAC string) (*managementPortConfig, error) {
+func newManagementPortConfig(interfaceName string, interfaceIP *net.IPNet, routerIP net.IP, routerMAC net.HardwareAddr) (*managementPortConfig, error) {
 	var err error
 
 	cfg := &managementPortConfig{}
@@ -47,14 +45,11 @@ func newManagementPortConfig(interfaceName, interfaceIP, routerIP, routerMAC str
 
 	// capture all the subnets for which we need to add routes through management port
 	for _, subnet := range config.Default.ClusterSubnets {
-		cfg.allSubnets = append(cfg.allSubnets, subnet.CIDR.String())
+		cfg.allSubnets = append(cfg.allSubnets, subnet.CIDR)
 	}
-	for _, subnet := range config.Kubernetes.ServiceCIDRs {
-		cfg.allSubnets = append(cfg.allSubnets, subnet.String())
-	}
+	cfg.allSubnets = append(cfg.allSubnets, config.Kubernetes.ServiceCIDRs...)
 
-	cfg.ifIP = strings.Split(cfg.ifIPMask, "/")[0]
-	if utilnet.IsIPv6(net.ParseIP(cfg.ifIP)) {
+	if utilnet.IsIPv6CIDR(cfg.ifIPMask) {
 		cfg.ipt, err = util.GetIPTablesHelper(iptables.ProtocolIPv6)
 	} else {
 		cfg.ipt, err = util.GetIPTablesHelper(iptables.ProtocolIPv4)
@@ -105,7 +100,7 @@ func setupManagementPortConfig(cfg *managementPortConfig) ([]string, error) {
 			// we need to warn so that it can be debugged as to why routes are disappearing
 			warnings = append(warnings, fmt.Sprintf("missing route entry for subnet %s via gateway %s on link %v",
 				subnet, cfg.routerIP, cfg.ifName))
-			err = util.LinkRoutesAdd(cfg.link, cfg.routerIP, []string{subnet})
+			err = util.LinkRoutesAdd(cfg.link, cfg.routerIP, []*net.IPNet{subnet})
 			if err != nil {
 				if os.IsExist(err) {
 					klog.V(5).Infof("Ignoring error %s from 'route add %s via %s' - already added via IPv6 RA?",
@@ -126,7 +121,7 @@ func setupManagementPortConfig(cfg *managementPortConfig) ([]string, error) {
 	// source protocol address to be in the Logical Switch's subnet.
 	if exists, err = util.LinkNeighExists(cfg.link, cfg.routerIP, cfg.routerMAC); err == nil && !exists {
 		warnings = append(warnings, fmt.Sprintf("missing arp entry for MAC/IP binding (%s/%s) on link %s",
-			cfg.routerMAC, cfg.routerIP, util.K8sMgmtIntfName))
+			cfg.routerMAC.String(), cfg.routerIP, util.K8sMgmtIntfName))
 		err = util.LinkNeighAdd(cfg.link, cfg.routerIP, cfg.routerMAC)
 	}
 	if err != nil {
@@ -142,7 +137,7 @@ func setupManagementPortConfig(cfg *managementPortConfig) ([]string, error) {
 	if err != nil {
 		return warnings, fmt.Errorf("could not set up iptables chain rules for management port: %v", err)
 	}
-	rule = []string{"-o", cfg.ifName, "-j", "SNAT", "--to-source", cfg.ifIP,
+	rule = []string{"-o", cfg.ifName, "-j", "SNAT", "--to-source", cfg.ifIPMask.IP.String(),
 		"-m", "comment", "--comment", "OVN SNAT to Management Port"}
 	if exists, err = cfg.ipt.Exists("nat", iptableMgmPortChain, rule...); err == nil && !exists {
 		warnings = append(warnings, fmt.Sprintf("missing management port nat rule in chain %s, adding it",
@@ -159,7 +154,7 @@ func setupManagementPortConfig(cfg *managementPortConfig) ([]string, error) {
 // createPlatformManagementPort creates a management port attached to the node switch
 // that lets the node access its pods via their private IP address. This is used
 // for health checking and other management tasks.
-func createPlatformManagementPort(interfaceName, interfaceIP, routerIP, routerMAC string,
+func createPlatformManagementPort(interfaceName string, interfaceIP *net.IPNet, routerIP net.IP, routerMAC net.HardwareAddr,
 	stopChan chan struct{}) error {
 	var cfg *managementPortConfig
 	var err error

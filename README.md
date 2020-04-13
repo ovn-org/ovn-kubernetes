@@ -85,12 +85,3 @@ kubectl create -f $HOME/work/src/github.com/ovn-org/ovn-kubernetes/dist/yaml/ovn
 
 NOTE: You don't need kube-proxy for OVN to work. You can delete that from your
 cluster.
-
-## Manual installation and Vagrant
-
-For Windows, (and to understand what daemonsets run internally), please read
-[MANUAL.md].  For more advanced use cases too (like SSL, HA of databases, and various
-gateway modes supported), please read [MANUAL.md].
-
-[INSTALL.rst]: http://docs.openvswitch.org/en/latest/intro/install
-[MANUAL.md]: README_MANUAL.md

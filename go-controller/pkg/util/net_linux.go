@@ -3,15 +3,23 @@
 package util
 
 import (
+	"bytes"
 	"fmt"
 	"net"
 	"os"
-	"strings"
 
 	"github.com/vishvananda/netlink"
 
 	utilnet "k8s.io/utils/net"
 )
+
+func getFamily(ip net.IP) int {
+	if utilnet.IsIPv6(ip) {
+		return netlink.FAMILY_V6
+	} else {
+		return netlink.FAMILY_V4
+	}
+}
 
 // LinkSetUp returns the netlink device with its state marked up
 func LinkSetUp(interfaceName string) (netlink.Link, error) {
@@ -43,22 +51,14 @@ func LinkAddrFlush(link netlink.Link) error {
 }
 
 // LinkAddrExist returns true if the given address is present on the link
-func LinkAddrExist(link netlink.Link, address string) (bool, error) {
-	ipnet, err := netlink.ParseIPNet(address)
-	if err != nil {
-		return false, fmt.Errorf("failed to parse ip %s :%v\n", address, err)
-	}
-	family := netlink.FAMILY_V4
-	if ipnet.IP.To4() == nil {
-		family = netlink.FAMILY_V6
-	}
-	addrs, err := netlink.AddrList(link, family)
+func LinkAddrExist(link netlink.Link, address *net.IPNet) (bool, error) {
+	addrs, err := netlink.AddrList(link, getFamily(address.IP))
 	if err != nil {
 		return false, fmt.Errorf("failed to list addresses for the link %s: %v",
 			link.Attrs().Name, err)
 	}
 	for _, addr := range addrs {
-		if addr.IPNet.String() == address {
+		if addr.IPNet.String() == address.String() {
 			return true, nil
 		}
 	}
@@ -66,12 +66,8 @@ func LinkAddrExist(link netlink.Link, address string) (bool, error) {
 }
 
 // LinkAddrAdd removes existing addresses on the link and adds the new address
-func LinkAddrAdd(link netlink.Link, address string) error {
-	ipnet, err := netlink.ParseIPNet(address)
-	if err != nil {
-		return fmt.Errorf("failed to parse ip %s :%v\n", address, err)
-	}
-	err = netlink.AddrAdd(link, &netlink.Addr{IPNet: ipnet})
+func LinkAddrAdd(link netlink.Link, address *net.IPNet) error {
+	err := netlink.AddrAdd(link, &netlink.Addr{IPNet: address})
 	if err != nil {
 		return fmt.Errorf("failed to add address %s on link %s: %v", address, link.Attrs().Name, err)
 	}
@@ -79,7 +75,7 @@ func LinkAddrAdd(link netlink.Link, address string) error {
 }
 
 // LinkRoutesDel deletes all the routes for the given subnets via the link
-func LinkRoutesDel(link netlink.Link, subnets []string) error {
+func LinkRoutesDel(link netlink.Link, subnets []*net.IPNet) error {
 	routes, err := netlink.RouteList(link, netlink.FAMILY_ALL)
 	if err != nil {
 		return fmt.Errorf("failed to get all the routes for link %s: %v",
@@ -87,7 +83,7 @@ func LinkRoutesDel(link netlink.Link, subnets []string) error {
 	}
 	for _, subnet := range subnets {
 		for _, route := range routes {
-			if route.Dst.String() == subnet {
+			if route.Dst.String() == subnet.String() {
 				err = netlink.RouteDel(&route)
 				if err != nil {
 					return fmt.Errorf("failed to delete route '%s via %s' for link %s : %v\n",
@@ -101,57 +97,36 @@ func LinkRoutesDel(link netlink.Link, subnets []string) error {
 }
 
 // LinkRoutesAdd adds a new route for given subnets through the gwIPstr
-func LinkRoutesAdd(link netlink.Link, gwIPstr string, subnets []string) error {
-	gwIP := net.ParseIP(gwIPstr)
-	if gwIP == nil {
-		return fmt.Errorf("gateway IP %s is not a valid IPv4 or IPv6 address", gwIPstr)
-	}
+func LinkRoutesAdd(link netlink.Link, gwIP net.IP, subnets []*net.IPNet) error {
 	for _, subnet := range subnets {
-		dstIPnet, err := netlink.ParseIPNet(subnet)
-		if err != nil {
-			return fmt.Errorf("failed to parse subnet %s :%v\n", subnet, err)
-		}
 		route := &netlink.Route{
-			Dst:       dstIPnet,
+			Dst:       subnet,
 			LinkIndex: link.Attrs().Index,
 			Scope:     netlink.SCOPE_UNIVERSE,
 			Gw:        gwIP,
 		}
-		err = netlink.RouteAdd(route)
+		err := netlink.RouteAdd(route)
 		if err != nil {
 			if os.IsExist(err) {
 				return err
 			}
 			return fmt.Errorf("failed to add route for subnet %s via gateway %s: %v",
-				subnet, gwIPstr, err)
+				subnet.String(), gwIP.String(), err)
 		}
 	}
 	return nil
 }
 
 // LinkRouteExists checks for existence of routes for the given subnet through gwIPStr
-func LinkRouteExists(link netlink.Link, gwIPstr, subnet string) (bool, error) {
-	gwIP := net.ParseIP(gwIPstr)
-	if gwIP == nil {
-		return false, fmt.Errorf("gateway IP %s is not a valid IPv4 or IPv6 address", gwIPstr)
-	}
-	family := netlink.FAMILY_V4
-	if utilnet.IsIPv6(gwIP) {
-		family = netlink.FAMILY_V6
-	}
-
-	dstIPnet, err := netlink.ParseIPNet(subnet)
-	if err != nil {
-		return false, fmt.Errorf("failed to parse subnet %s :%v\n", subnet, err)
-	}
-	routeFilter := &netlink.Route{Dst: dstIPnet}
+func LinkRouteExists(link netlink.Link, gwIP net.IP, subnet *net.IPNet) (bool, error) {
+	routeFilter := &netlink.Route{Dst: subnet}
 	filterMask := netlink.RT_FILTER_DST
-	routes, err := netlink.RouteListFiltered(family, routeFilter, filterMask)
+	routes, err := netlink.RouteListFiltered(getFamily(gwIP), routeFilter, filterMask)
 	if err != nil {
-		return false, fmt.Errorf("failed to get routes for subnet %s", subnet)
+		return false, fmt.Errorf("failed to get routes for subnet %s", subnet.String())
 	}
 	for _, route := range routes {
-		if route.Gw.String() == gwIPstr {
+		if route.Gw.Equal(gwIP) {
 			return true, nil
 		}
 	}
@@ -159,28 +134,15 @@ func LinkRouteExists(link netlink.Link, gwIPstr, subnet string) (bool, error) {
 }
 
 // LinkNeighAdd adds MAC/IP bindings for the given link
-func LinkNeighAdd(link netlink.Link, neighIPstr, neighMacstr string) error {
-	neighIP := net.ParseIP(neighIPstr)
-	if neighIP == nil {
-		return fmt.Errorf("neighbour IP %s is not a valid IPv4 or IPv6 address", neighIPstr)
-	}
-	hwAddr, err := net.ParseMAC(neighMacstr)
-	if err != nil {
-		return fmt.Errorf("neighbour MAC address %s is not valid: %v", neighMacstr, err)
-	}
-
-	family := netlink.FAMILY_V4
-	if utilnet.IsIPv6(neighIP) {
-		family = netlink.FAMILY_V6
-	}
+func LinkNeighAdd(link netlink.Link, neighIP net.IP, neighMAC net.HardwareAddr) error {
 	neigh := &netlink.Neigh{
 		LinkIndex:    link.Attrs().Index,
-		Family:       family,
+		Family:       getFamily(neighIP),
 		State:        netlink.NUD_PERMANENT,
 		IP:           neighIP,
-		HardwareAddr: hwAddr,
+		HardwareAddr: neighMAC,
 	}
-	err = netlink.NeighSet(neigh)
+	err := netlink.NeighSet(neigh)
 	if err != nil {
 		return fmt.Errorf("failed to add neighbour entry %+v: %v", neigh, err)
 	}
@@ -188,27 +150,16 @@ func LinkNeighAdd(link netlink.Link, neighIPstr, neighMacstr string) error {
 }
 
 // LinkNeighExists checks to see if the given MAC/IP bindings exists
-func LinkNeighExists(link netlink.Link, neighIPstr, neighMacstr string) (bool, error) {
-	neighIP := net.ParseIP(neighIPstr)
-	if neighIP == nil {
-		return false, fmt.Errorf("neighbour IP %s is not a valid IPv4 or IPv6 address",
-			neighIPstr)
-	}
-
-	family := netlink.FAMILY_V4
-	if utilnet.IsIPv6(neighIP) {
-		family = netlink.FAMILY_V6
-	}
-
-	neighs, err := netlink.NeighList(link.Attrs().Index, family)
+func LinkNeighExists(link netlink.Link, neighIP net.IP, neighMAC net.HardwareAddr) (bool, error) {
+	neighs, err := netlink.NeighList(link.Attrs().Index, getFamily(neighIP))
 	if err != nil {
 		return false, fmt.Errorf("failed to get the list of neighbour entries for link %s",
 			link.Attrs().Name)
 	}
 
 	for _, neigh := range neighs {
-		if neigh.IP.String() == neighIPstr {
-			if neigh.HardwareAddr.String() == strings.ToLower(neighMacstr) &&
+		if neigh.IP.Equal(neighIP) {
+			if bytes.Equal(neigh.HardwareAddr, neighMAC) &&
 				(neigh.State&netlink.NUD_PERMANENT) == netlink.NUD_PERMANENT {
 				return true, nil
 			}

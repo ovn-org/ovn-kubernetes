@@ -64,15 +64,15 @@ func GetPortAddresses(portName string) (net.HardwareAddr, net.IP, error) {
 }
 
 // GetOVSPortMACAddress returns the MAC address of a given OVS port
-func GetOVSPortMACAddress(portName string) (string, error) {
+func GetOVSPortMACAddress(portName string) (net.HardwareAddr, error) {
 	macAddress, stderr, err := RunOVSVsctl("--if-exists", "get",
 		"interface", portName, "mac_in_use")
 	if err != nil {
-		return "", fmt.Errorf("failed to get MAC address for %q, stderr: %q, error: %v",
+		return nil, fmt.Errorf("failed to get MAC address for %q, stderr: %q, error: %v",
 			portName, stderr, err)
 	}
 	if macAddress == "[]" {
-		return "", fmt.Errorf("no mac_address found for %q", portName)
+		return nil, fmt.Errorf("no mac_address found for %q", portName)
 	}
 	if runtime.GOOS == windowsOS && macAddress == "00:00:00:00:00:00" {
 		// There is a known issue with OVS not correctly picking up the
@@ -80,12 +80,11 @@ func GetOVSPortMACAddress(portName string) (string, error) {
 		stdout, stderr, err := RunPowershell("$(Get-NetAdapter", "-IncludeHidden",
 			"-InterfaceAlias", fmt.Sprintf("\"%s\"", portName), ").MacAddress")
 		if err != nil {
-			return "", fmt.Errorf("failed to get mac address of %q, stderr: %q, error: %v", portName, stderr, err)
+			return nil, fmt.Errorf("failed to get mac address of %q, stderr: %q, error: %v", portName, stderr, err)
 		}
-		// Windows returns it in 00-00-00-00-00-00 format, we want ':' instead of '-'
-		macAddress = strings.ToLower(strings.Replace(stdout, "-", ":", -1))
+		macAddress = stdout
 	}
-	return macAddress, nil
+	return net.ParseMAC(macAddress)
 }
 
 // GetNodeWellKnownAddresses returns routerIP, Management Port IP and prefix len
@@ -104,14 +103,14 @@ func JoinHostPortInt32(host string, port int32) string {
 // IPAddrToHWAddr takes the four octets of IPv4 address (aa.bb.cc.dd, for example) and uses them in creating
 // a MAC address (0A:58:AA:BB:CC:DD).  For IPv6, we'll use the first two bytes and last two bytes and hope
 // that results in a unique MAC for the scope of where it's used.
-func IPAddrToHWAddr(ip net.IP) string {
+func IPAddrToHWAddr(ip net.IP) net.HardwareAddr {
 	// Ensure that for IPv4, we are always working with the IP in 4-byte form.
 	ip4 := ip.To4()
 	if ip4 != nil {
 		// safe to use private MAC prefix: 0A:58
-		return fmt.Sprintf("0A:58:%02X:%02X:%02X:%02X", ip4[0], ip4[1], ip4[2], ip4[3])
+		return net.HardwareAddr{0x0A, 0x58, ip4[0], ip4[1], ip4[2], ip4[3]}
 	}
 
 	// IPv6 - use the first two and last two bytes.
-	return fmt.Sprintf("0A:58:%02X:%02X:%02X:%02X", ip[0], ip[1], ip[14], ip[15])
+	return net.HardwareAddr{0x0A, 0x58, ip[0], ip[1], ip[14], ip[15]}
 }

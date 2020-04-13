@@ -24,7 +24,7 @@ to start openvswitch. it must be running for the ovn-daemonsets to
 run.
 
 There are two daemonsets that support ovn. ovnkube-master runs
-on the cluster master node, ovnkube runs on the remaining nodes.
+on the cluster masters, ovnkube runs on all nodes.
 The daemonsets run with hostNetwork: true.
 
 The both daemonsets run the node daemons, ovn-controller and ovn-node.
@@ -32,8 +32,8 @@ In addition the daemonset runs ovn-northd and ovn-master.
 
 The startup sequence requires this startup order:
 - ovs
-- ovnkube-master on the master node
-- ovnkube on the rest of the nodes.
+- ovnkube-master on the masters
+- ovnkube on all nodes.
 
 ===============================
 
@@ -95,23 +95,3 @@ for different clusters.
 It is convient to set up a docker registry for the cluster and add it to
 the /etc/containers/registries.conf file on each node in both the
 "registries:" and "insecure_registries:" sections.
-
-============================
-Cluster install:
-
-Follow the directions in the openshift documents to provision the hosts in the
-cluster and install openshift. Make sure the cluster hosts file contains:
-os_sdn_network_plugin_name='cni'
-
-When the install is complete, delete the ovs and openshift-sdn daemonsets.
-
-Run the cluster master:
-$ ansible/scripts/ovn-setup.sh
-script to to set up kubernetes configuration. Next:
-$ kubectl create -f yaml/sdn-ovs.yaml
-$ kubectl create -f yaml/ovskube-master.yaml
-$ kubectl create -f yaml/ovskube.yaml
-
-Verify the install with 
-$ oc get nodes
-All should show Ready.

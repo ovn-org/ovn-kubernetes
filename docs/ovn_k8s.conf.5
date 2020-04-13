@@ -80,7 +80,7 @@ On openshift, the token can be generated on the cluster master as follows:
 \fBaddress\fR=
 This is the url used to access the northbound database server. The scheme may be ssl or tcp.
 When ssl is used, the certs must be provided. The host must be a host IP address, not name.
-The port, by default, is 6441. E.g., ssl://1.2.3.4:6641
+The port, by default, is 6441. E.g., ssl:1.2.3.4:6641
 .TP
 \fBclient-privkey\fR=/etc/openvswitch/ovnnb-privkey.pem
 .TP
@@ -100,7 +100,7 @@ For example: /etc/openvswitch/ovnnb-ca.cert
 \fBaddress\fR=
 This is the url used to access the southbound database server. The scheme may be ssl or tcp.
 When ssl is used, the certs must be provided. The host must be a host IP address, not name.
-The port, by default, is 6442. E.g., ssl://1.2.3.4:6642
+The port, by default, is 6442. E.g., ssl:1.2.3.4:6642
 .TP
 \fBclient-privkey\fR=/etc/openvswitch/ovnsb-privkey.pem
 .TP

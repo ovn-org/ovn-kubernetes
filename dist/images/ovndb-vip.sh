@@ -31,7 +31,7 @@ ovnkube_version="3"
 ovn_daemonset_version=${OVN_DAEMONSET_VERSION:-"3"}
 
 # hostname is the host's hostname when using host networking,
-# This is useful on the master node
+# This is useful on the master
 # otherwise it is the container ID (useful for debugging).
 ovn_pod_host=$(hostname)
 

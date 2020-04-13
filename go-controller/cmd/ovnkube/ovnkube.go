@@ -211,7 +211,7 @@ func runOvnKube(ctx *cli.Context) error {
 
 	if master != "" {
 		if runtime.GOOS == "windows" {
-			return fmt.Errorf("Windows is not supported as master node")
+			return fmt.Errorf("Windows is not supported as a master")
 		}
 		// register prometheus metrics exported by the master
 		metrics.RegisterMasterMetrics()
