@@ -335,7 +335,7 @@ func (pr *PodRequest) ConfigureInterface(namespace string, podName string, ifInf
 		if err != nil {
 			return false, nil
 		}
-		return strings.Contains(stdout, ifInfo.IP.IP.String()), nil
+		return strings.Contains(stdout, ifInfo.IPs[0].IP.String()), nil
 	})
 	if err != nil {
 		return nil, fmt.Errorf("timed out dumping br-int flow entries for sandbox: %v", err)
