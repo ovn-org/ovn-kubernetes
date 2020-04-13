@@ -174,5 +174,5 @@ jobs:
       if: always()
       uses: actions/upload-artifact@v1
       with:
-        name: kind-logs-${{ github.run_id }}-${{ env.JOB_NAME }}
+        name: kind-logs-${{ env.JOB_NAME }}-${{ github.run_id }}
         path: /tmp/kind/logs
