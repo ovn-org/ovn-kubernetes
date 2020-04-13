@@ -33,10 +33,6 @@ case "$SHARD" in
 		exit 1
 	;;
 esac
-kubetest \
-	--provider=local \
-	--deployment=kind \
-	--kind-cluster-name=${KIND_CLUSTER_NAME} \
-	--test \
-	--test_args="${GINKGO_ARGS}"
+
+e2e.test ${GINKGO_ARGS}
 
