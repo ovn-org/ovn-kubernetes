@@ -23,8 +23,8 @@ fi
 sed -i "s/apiServerAddress.*/apiServerAddress: ${API_IP}/" ${KIND_CONFIG}
 
 # Create KIND cluster
-CLUSTER_NAME=${CLUSTER_NAME:-ovn}
-kind create cluster --name ${CLUSTER_NAME} --kubeconfig ${HOME}/admin.conf --image kindest/node:${K8S_VERSION} --config=${KIND_CONFIG}
+KIND_CLUSTER_NAME=${KIND_CLUSTER_NAME:-ovn}
+kind create cluster --name ${KIND_CLUSTER_NAME} --kubeconfig ${HOME}/admin.conf --image kindest/node:${K8S_VERSION} --config=${KIND_CONFIG}
 export KUBECONFIG=${HOME}/admin.conf
 mkdir -p /tmp/kind
 sudo chmod 777 /tmp/kind
@@ -50,7 +50,7 @@ echo "ref: $(git rev-parse  --symbolic-full-name HEAD)  commit: $(git rev-parse 
 docker build -t ovn-daemonset-f:dev -f Dockerfile.fedora .
 ./daemonset.sh --image=docker.io/library/ovn-daemonset-f:dev --net-cidr=10.244.0.0/16 --svc-cidr=10.96.0.0/12 --gateway-mode="local" --k8s-apiserver=https://${API_IP}:11337 --kind --master-loglevel=5
 popd
-kind load docker-image ovn-daemonset-f:dev --name ${CLUSTER_NAME}
+kind load docker-image ovn-daemonset-f:dev --name ${KIND_CLUSTER_NAME}
 pushd ../dist/yaml
 kubectl create -f ovn-setup.yaml
 CONTROL_NODES=$(docker ps -f name=ovn-control | grep -v NAMES | awk '{ print $NF }')
@@ -70,7 +70,7 @@ kubectl create -f ovnkube-node.yaml
 popd
 kubectl -n kube-system delete ds kube-proxy
 kind get clusters
-kind get nodes --name ${CLUSTER_NAME}
+kind get nodes --name ${KIND_CLUSTER_NAME}
 kind export kubeconfig --name ovn
 if [ "$KIND_INSTALL_INGRESS" == true ]; then
   kubectl create -f https://raw.githubusercontent.com/kubernetes/ingress-nginx/master/deploy/static/mandatory.yaml
