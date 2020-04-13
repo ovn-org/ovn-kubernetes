@@ -611,7 +611,7 @@ var OvnNBFlags = []cli.Flag{
 	cli.StringFlag{
 		Name: "nb-address",
 		Usage: "IP address and port of the OVN northbound API " +
-			"(eg, ssl://1.2.3.4:6641,ssl://1.2.3.5:6642).  Leave empty to " +
+			"(eg, ssl:1.2.3.4:6641,ssl:1.2.3.5:6642).  Leave empty to " +
 			"use a local unix socket.",
 		Destination: &cliConfig.OvnNorth.Address,
 	},
@@ -640,7 +640,7 @@ var OvnSBFlags = []cli.Flag{
 	cli.StringFlag{
 		Name: "sb-address",
 		Usage: "IP address and port of the OVN southbound API " +
-			"(eg, ssl://1.2.3.4:6642,ssl://1.2.3.5:6642).  " +
+			"(eg, ssl:1.2.3.4:6642,ssl:1.2.3.5:6642).  " +
 			"Leave empty to use a local unix socket.",
 		Destination: &cliConfig.OvnSouth.Address,
 	},
@@ -673,7 +673,7 @@ var OVNGatewayFlags = []cli.Flag{
 	},
 	cli.StringFlag{
 		Name: "gateway-interface",
-		Usage: "The interface in minions that will be the gateway interface. " +
+		Usage: "The interface on nodes that will be the gateway interface. " +
 			"If none specified, then the node's interface on which the " +
 			"default gateway is configured will be used as the gateway " +
 			"interface. Only useful with \"init-gateways\"",
@@ -1257,7 +1257,8 @@ func pathExists(path string) bool {
 }
 
 // parseAddress parses an OVN database address, which can be of form
-// "ssl:1.2.3.4:6641,ssl:1.2.3.5:6641" or "ssl://1.2.3.4:6641,ssl://1.2.3.5:6641"
+// "ssl:1.2.3.4:6641,ssl:1.2.3.5:6641" (OVS/OVN format) or
+// "ssl://1.2.3.4:6641,ssl://1.2.3.5:6641" (legacy ovnkube format)
 // or "ssl:[fd01::1]:6641,ssl:[fd01::2]:6641
 // and returns the validated address(es) and the scheme
 func parseAddress(urlString string) (string, OvnDBScheme, error) {

@@ -61,6 +61,7 @@ fi
 # OVN_SB_RAFT_PORT - ovn south db raft port (default 6644)
 # OVN_NB_RAFT_ELECTION_TIMER - ovn north db election timer in ms (default 1000)
 # OVN_SB_RAFT_ELECTION_TIMER - ovn south db election timer in ms (default 1000)
+# OVN_SSL_ENABLE - use SSL transport to NB/SB db and northd (default: no)
 
 # The argument to the command is the operation to be performed
 # ovn-master ovn-controller ovn-node display display_env ovn_debug
@@ -84,7 +85,7 @@ ovnkube_version="3"
 ovn_daemonset_version=${OVN_DAEMONSET_VERSION:-"3"}
 
 # hostname is the host's hostname when using host networking,
-# This is useful on the master node
+# This is useful on the master
 # otherwise it is the container ID (useful for debugging).
 ovn_pod_host=${K8S_NODE:-$(hostname)}
 
@@ -100,7 +101,25 @@ else
   k8s_token=${K8S_TOKEN}
 fi
 
+# certs and private keys for k8s and OVN
 K8S_CACERT=${K8S_CACERT:-/var/run/secrets/kubernetes.io/serviceaccount/ca.crt}
+
+ovn_ca_cert=/ovn-cert/ca-cert.pem
+ovn_nb_pk=/ovn-cert/ovnnb-privkey.pem
+ovn_nb_cert=/ovn-cert/ovnnb-cert.pem
+ovn_sb_pk=/ovn-cert/ovnsb-privkey.pem
+ovn_sb_cert=/ovn-cert/ovnsb-cert.pem
+ovn_northd_pk=/ovn-cert/ovnnorthd-privkey.pem
+ovn_northd_cert=/ovn-cert/ovnnorthd-cert.pem
+ovn_controller_pk=/ovn-cert/ovncontroller-privkey.pem
+ovn_controller_cert=/ovn-cert/ovncontroller-cert.pem
+
+transport="tcp"
+ovndb_ctl_ssl_opts=""
+if [[ "yes" == ${OVN_SSL_ENABLE} ]]; then
+  transport="ssl"
+  ovndb_ctl_ssl_opts="-p ${ovn_controller_pk} -c ${ovn_controller_cert} -C ${ovn_ca_cert}"
+fi
 
 # ovn-northd - /etc/sysconfig/ovn-northd
 ovn_northd_opts=${OVN_NORTHD_OPTS:-""}
@@ -222,7 +241,6 @@ wait_for_event() {
       break
     fi
   done
-
 }
 
 # OVN DBs must be up and initialized before ovn-master and ovn-node PODs can come up
@@ -239,7 +257,7 @@ ready_to_start_node() {
   # cannot use ovsdb-client in the case of raft, since it will succeed even if one of the
   # instance of DB is up and running. HOwever, ovn-nbctl always connects to the leader in the clustered
   # database, so use it.
-  ovn-nbctl --db=${ovn_nbdb_test} list NB_Global >/dev/null 2>&1
+  ovn-nbctl --db=${ovn_nbdb_conn} ${ovndb_ctl_ssl_opts} list NB_Global >/dev/null 2>&1
   if [[ $? != 0 ]]; then
     return 1
   fi
@@ -260,8 +278,6 @@ check_ovn_daemonset_version() {
 }
 
 get_ovn_db_vars() {
-  # OVN_NORTH and OVN_SOUTH override derived host
-  # Currently limited to tcp (ssl is not supported yet)
   ovn_nbdb_str=""
   ovn_sbdb_str=""
   for i in ${!ovn_db_hosts[@]}; do
@@ -269,15 +285,18 @@ get_ovn_db_vars() {
       ovn_nbdb_str=${ovn_nbdb_str}","
       ovn_sbdb_str=${ovn_sbdb_str}","
     fi
-    ovn_nbdb_str=${ovn_nbdb_str}tcp://${ovn_db_hosts[${i}]}:${ovn_nb_port}
-    ovn_sbdb_str=${ovn_sbdb_str}tcp://${ovn_db_hosts[${i}]}:${ovn_sb_port}
+    ovn_nbdb_str=${ovn_nbdb_str}${transport}://${ovn_db_hosts[${i}]}:${ovn_nb_port}
+    ovn_sbdb_str=${ovn_sbdb_str}${transport}://${ovn_db_hosts[${i}]}:${ovn_sb_port}
   done
+  # OVN_NORTH and OVN_SOUTH override derived host
   ovn_nbdb=${OVN_NORTH:-$ovn_nbdb_str}
   ovn_sbdb=${OVN_SOUTH:-$ovn_sbdb_str}
 
   echo ovn_nbdb=$ovn_nbdb
   echo ovn_sbdb=$ovn_sbdb
-  ovn_nbdb_test=$(echo ${ovn_nbdb} | sed 's;//;;g')
+  # ovsdb server connection method <transport>:<host_address>:<port>
+  ovn_nbdb_conn=$(echo ${ovn_nbdb} | sed 's;//;;g')
+  ovn_sbdb_conn=$(echo ${ovn_sbdb} | sed 's;//;;g')
 }
 
 # OVS must be up before OVN comes up.
@@ -446,18 +465,19 @@ display_env() {
 ovn_debug() {
   wait_for_event attempts=3 ready_to_start_node
   echo "ovn_nbdb ${ovn_nbdb}   ovn_sbdb ${ovn_sbdb}"
-  echo "ovn_nbdb_test ${ovn_nbdb_test}"
+  echo "ovn_nbdb_conn ${ovn_nbdb_conn}"
+  echo "ovn_sbdb_conn ${ovn_sbdb_conn}"
 
   # get ovs/ovn info from the node for debug purposes
   echo "=========== ovn_debug   hostname: ${ovn_pod_host} ============="
-  echo "=========== ovn-nbctl --db=${ovn_nbdb_test} show ============="
-  ovn-nbctl --db=${ovn_nbdb_test} show
+  echo "=========== ovn-nbctl --db=${ovn_nbdb_conn} show ============="
+  ovn-nbctl --db=${ovn_nbdb_conn} show
   echo " "
   echo "=========== ovn-nbctl list ACL ============="
-  ovn-nbctl --db=${ovn_nbdb_test} list ACL
+  ovn-nbctl --db=${ovn_nbdb_conn} list ACL
   echo " "
   echo "=========== ovn-nbctl list address_set ============="
-  ovn-nbctl --db=${ovn_nbdb_test} list address_set
+  ovn-nbctl --db=${ovn_nbdb_conn} list address_set
   echo " "
   echo "=========== ovs-vsctl show ============="
   ovs-vsctl show
@@ -471,19 +491,17 @@ ovn_debug() {
   echo "=========== ovs-ofctl dump-flows br-int ============="
   ovs-ofctl dump-flows br-int
   echo " "
-  echo "=========== ovn-sbctl show ============="
-  ovn_sbdb_test=$(echo ${ovn_sbdb} | sed 's;//;;g')
-  echo "=========== ovn-sbctl --db=${ovn_sbdb_test} show ============="
-  ovn-sbctl --db=${ovn_sbdb_test} show
+  echo "=========== ovn-sbctl --db=${ovn_sbdb_conn} show ============="
+  ovn-sbctl --db=${ovn_sbdb_conn} show
   echo " "
-  echo "=========== ovn-sbctl --db=${ovn_sbdb_test} lflow-list ============="
-  ovn-sbctl --db=${ovn_sbdb_test} lflow-list
+  echo "=========== ovn-sbctl --db=${ovn_sbdb_conn} lflow-list ============="
+  ovn-sbctl --db=${ovn_sbdb_conn} lflow-list
   echo " "
-  echo "=========== ovn-sbctl --db=${ovn_sbdb_test} list datapath ============="
-  ovn-sbctl --db=${ovn_sbdb_test} list datapath
+  echo "=========== ovn-sbctl --db=${ovn_sbdb_conn} list datapath ============="
+  ovn-sbctl --db=${ovn_sbdb_conn} list datapath
   echo " "
-  echo "=========== ovn-sbctl --db=${ovn_sbdb_test} list port_binding ============="
-  ovn-sbctl --db=${ovn_sbdb_test} list port_binding
+  echo "=========== ovn-sbctl --db=${ovn_sbdb_conn} list port_binding ============="
+  ovn-sbctl --db=${ovn_sbdb_conn} list port_binding
 }
 
 ovs-server() {
@@ -617,7 +635,11 @@ nb-ovsdb() {
 
   # setting northd probe interval
   set_northd_probe_interval
-  ovn-nbctl set-connection ptcp:${ovn_nb_port}:${ovn_db_host} -- set connection . inactivity_probe=0
+  [[ "yes" == ${OVN_SSL_ENABLE} ]] && {
+    ovn-nbctl set-ssl ${ovn_nb_pk} ${ovn_nb_cert} ${ovn_ca_cert}
+    echo "=============== nb-ovsdb ========== reconfigured for SSL"
+  }
+  ovn-nbctl --inactivity-probe=0 set-connection p${transport}:${ovn_nb_port}:${ovn_db_host}
 
   tail --follow=name ${OVN_LOGDIR}/ovsdb-server-nb.log &
   ovn_tail_pid=$!
@@ -646,7 +668,11 @@ sb-ovsdb() {
   wait_for_event attempts=3 process_ready ovnsb_db
   echo "=============== sb-ovsdb ========== RUNNING"
 
-  ovn-sbctl set-connection ptcp:${ovn_sb_port}:${ovn_db_host} -- set connection . inactivity_probe=0
+  [[ "yes" == ${OVN_SSL_ENABLE} ]] && {
+    ovn-sbctl set-ssl ${ovn_sb_pk} ${ovn_sb_cert} ${ovn_ca_cert}
+    echo "=============== sb-ovsdb ========== reconfigured for SSL"
+  }
+  ovn-sbctl --inactivity-probe=0 set-connection p${transport}:${ovn_sb_port}:${ovn_db_host}
 
   # create the ovnkube_db endpoint for other pods to query the OVN DB IP
   set_ovnkube_db_ep ${ovn_db_host}
@@ -674,12 +700,20 @@ run-ovn-northd() {
 
   # no monitor (and no detach), start northd which connects to the
   # ovnkube-db service
-  ovn_nbdb_i=$(echo ${ovn_nbdb} | sed 's;//;;g')
-  ovn_sbdb_i=$(echo ${ovn_sbdb} | sed 's;//;;g')
+  local ovn_northd_ssl_opts=""
+  [[ "yes" == ${OVN_SSL_ENABLE} ]] && {
+    ovn_northd_ssl_opts="
+        --ovn-northd-ssl-key=${ovn_northd_pk}
+        --ovn-northd-ssl-cert=${ovn_northd_cert}
+        --ovn-northd-ssl-ca-cert=${ovn_ca_cert}
+     "
+  }
+
   run_as_ovs_user_if_needed \
     ${OVNCTL_PATH} start_northd \
     --no-monitor --ovn-manage-ovsdb=no \
-    --ovn-northd-nb-db=${ovn_nbdb_i} --ovn-northd-sb-db=${ovn_sbdb_i} \
+    --ovn-northd-nb-db=${ovn_nbdb_conn} --ovn-northd-sb-db=${ovn_sbdb_conn} \
+    ${ovn_northd_ssl_opts} \
     --ovn-northd-log="${ovn_loglevel_northd}" \
     ${ovn_northd_opts}
 
@@ -729,6 +763,17 @@ ovn-master() {
       hybrid_overlay_flags="${hybrid_overlay_flags} --hybrid-overlay-cluster-subnets=${ovn_hybrid_overlay_net_cidr}"
     fi
   fi
+  local ovn_master_ssl_opts=""
+  [[ "yes" == ${OVN_SSL_ENABLE} ]] && {
+    ovn_master_ssl_opts="
+        --nb-client-privkey ${ovn_controller_pk}
+        --nb-client-cert ${ovn_controller_cert}
+        --nb-client-cacert ${ovn_ca_cert}
+        --sb-client-privkey ${ovn_controller_pk}
+        --sb-client-cert ${ovn_controller_cert}
+        --sb-client-cacert ${ovn_ca_cert}
+      "
+  }
 
   echo "=============== ovn-master ========== MASTER ONLY"
   /usr/bin/ovnkube \
@@ -740,6 +785,7 @@ ovn-master() {
     ${hybrid_overlay_flags} \
     --pidfile ${OVN_RUNDIR}/ovnkube-master.pid \
     --logfile /var/log/ovn-kubernetes/ovnkube-master.log \
+    ${ovn_master_ssl_opts} \
     --metrics-bind-address "0.0.0.0:9409" &
   echo "=============== ovn-master ========== running"
   wait_for_event attempts=3 process_ready ovnkube-master
@@ -760,7 +806,7 @@ ovn-controller() {
   wait_for_event ready_to_start_node
 
   echo "ovn_nbdb ${ovn_nbdb}   ovn_sbdb ${ovn_sbdb}"
-  echo "ovn_nbdb_test ${ovn_nbdb_test}"
+  echo "ovn_nbdb_conn ${ovn_nbdb_conn}"
 
   # cleanup any stale ovn-nb and ovn-remote keys in Open_vSwitch table
   ovs-vsctl remove Open_vSwitch . external_ids ovn-remote
@@ -770,8 +816,17 @@ ovn-controller() {
   rm -f /var/run/ovn-kubernetes/cni/*
   rm -f ${OVN_RUNDIR}/ovn-controller.*.ctl
 
+  local ovn_controller_ssl_opts=""
+  [[ "yes" == ${OVN_SSL_ENABLE} ]] && {
+    ovn_controller_ssl_opts="
+          --ovn-controller-ssl-key=${ovn_controller_pk}
+          --ovn-controller-ssl-cert=${ovn_controller_cert}
+          --ovn-controller-ssl-ca-cert=${ovn_ca_cert}
+      "
+  }
   run_as_ovs_user_if_needed \
     ${OVNCTL_PATH} --no-monitor start_controller \
+    ${ovn_controller_ssl_opts} \
     --ovn-controller-log="${ovn_loglevel_controller}" \
     ${ovn_controller_opts}
 
@@ -797,7 +852,7 @@ ovn-node() {
   echo "=============== ovn-node - (wait for ready_to_start_node)"
   wait_for_event ready_to_start_node
 
-  echo "ovn_nbdb ${ovn_nbdb}   ovn_sbdb ${ovn_sbdb}  ovn_nbdb_test ${ovn_nbdb_test}"
+  echo "ovn_nbdb ${ovn_nbdb}   ovn_sbdb ${ovn_sbdb}  ovn_nbdb_conn ${ovn_nbdb_conn}"
 
   echo "=============== ovn-node - (ovn-node  wait for ovn-controller.pid)"
   wait_for_event process_ready ovn-controller
@@ -819,6 +874,18 @@ ovn-node() {
     OVN_ENCAP_IP=$(echo --encap-ip=${ovn_encap_ip})
   fi
 
+  local ovn_node_ssl_opts=""
+  [[ "yes" == ${OVN_SSL_ENABLE} ]] && {
+    ovn_node_ssl_opts="
+        --nb-client-privkey ${ovn_controller_pk}
+        --nb-client-cert ${ovn_controller_cert}
+        --nb-client-cacert ${ovn_ca_cert}
+        --sb-client-privkey ${ovn_controller_pk}
+        --sb-client-cert ${ovn_controller_cert}
+        --sb-client-cacert ${ovn_ca_cert}
+      "
+  }
+
   echo "=============== ovn-node   --init-node"
   /usr/bin/ovnkube --init-node ${K8S_NODE} \
     --cluster-subnets ${net_cidr} --k8s-service-cidr=${svc_cidr} \
@@ -831,6 +898,7 @@ ovn-node() {
     --gateway-mode=${ovn_gateway_mode} ${ovn_gateway_opts} \
     --pidfile ${OVN_RUNDIR}/ovnkube.pid \
     --logfile /var/log/ovn-kubernetes/ovnkube.log \
+    ${ovn_node_ssl_opts} \
     --metrics-bind-address "0.0.0.0:9410" &
 
   wait_for_event attempts=3 process_ready ovnkube
@@ -876,11 +944,11 @@ run-nbctld() {
   echo "=============== run-nbctld - (wait for ready_to_start_node)"
   wait_for_event ready_to_start_node
 
-  echo "ovn_nbdb ${ovn_nbdb}   ovn_sbdb ${ovn_sbdb}  ovn_nbdb_test ${ovn_nbdb_test}"
+  echo "ovn_nbdb ${ovn_nbdb}   ovn_sbdb ${ovn_sbdb}  ovn_nbdb_conn ${ovn_nbdb_conn}"
   echo "ovn_loglevel_nbctld=${ovn_loglevel_nbctld}"
 
-  # use unix socket
-  /usr/bin/ovn-nbctl ${ovn_loglevel_nbctld} --pidfile --db=${ovn_nbdb_test} --log-file=${OVN_LOGDIR}/ovn-nbctl.log --detach
+  /usr/bin/ovn-nbctl ${ovn_loglevel_nbctld} --pidfile --db=${ovn_nbdb_conn} \
+    --log-file=${OVN_LOGDIR}/ovn-nbctl.log --detach ${ovndb_ctl_ssl_opts}
 
   wait_for_event attempts=3 process_ready ovn-nbctl
   echo "=============== run_ovn_nbctl ========== RUNNING"
@@ -906,7 +974,7 @@ display_version
 # run-ovn-northd Runs ovn-northd as a process does not run nb_ovsdb or sb_ovsdb (v3)
 # nb-ovsdb       Runs nb_ovsdb as a process (no detach or monitor) (v3)
 # sb-ovsdb       Runs sb_ovsdb as a process (no detach or monitor) (v3)
-# ovn-master     - master node only (v3)
+# ovn-master     - master only (v3)
 # ovn-controller - all nodes (v3)
 # ovn-node       - all nodes (v3)
 # cleanup-ovn-node - all nodes (v3)

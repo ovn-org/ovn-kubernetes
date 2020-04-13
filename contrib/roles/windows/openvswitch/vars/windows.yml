@@ -1,4 +1,0 @@
----
-ovs_info:
-  download_link: https://cloudbase.it/downloads/openvswitch-hyperv-2.7.0-certified.msi
-  tmp_dir: C:\\Windows\\Temp

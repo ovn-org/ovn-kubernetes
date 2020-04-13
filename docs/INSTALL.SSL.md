@@ -20,22 +20,22 @@ ovs-pki init --force
 
 The above command creates 2 certificate authorities.  But we are concerned only
 with one of them, i.e the "switch" certificate authority.  We will use this
-certificate authority to sign individual certificates of all the minions.  We
-will then use the same certificate authority's certificate to verify minion's
+certificate authority to sign individual certificates of all the nodes.  We
+will then use the same certificate authority's certificate to verify a node's
 connections to the master.
 
-Copy this certificate to the master node and each of the minion nodes. $CENTRAL_IP
-is the IP address of the master node.
+Copy this certificate to the master and each of the nodes. $CENTRAL_IP
+is the IP address of the master.
 
 ```
 scp /var/lib/openvswitch/pki/switchca/cacert.pem \
     root@$CENTRAL_IP:/etc/openvswitch/.
 ```
 
-### Generate signed certificates for OVN components running on the master node.
+### Generate signed certificates for OVN components running on the master.
 
 #### Generate signed certificates for OVN NB Database
-On the master node, run the following commands.
+On the master, run the following commands.
 
 ```
 cd /etc/openvswitch
@@ -52,7 +52,7 @@ ovs-pki -b sign ovnnb
 ```
 
 The above command will generate ovnnb-cert.pem. Copy over this file back
-to the master node's /etc/openvswitch. The ovnnb-privkey.pem and ovnnb-cert.pem
+to the master's /etc/openvswitch. The ovnnb-privkey.pem and ovnnb-cert.pem
 will be used by the ovsdb-server that fronts the OVN NB database.
 
 Now run the following commands to ask ovsdb-server to use these
@@ -82,7 +82,7 @@ ovs-pki -b sign ovnsb
 ```
 
 The above command will generate ovnsb-cert.pem. Copy over this file back
-to the master node's /etc/openvswitch. The ovnsb-privkey.pem and ovnsb-cert.pem
+to the master's /etc/openvswitch. The ovnsb-privkey.pem and ovnsb-cert.pem
 will be used by the ovsdb-server that fronts the OVN SB database.
 
 Now run the following commands to ask ovsdb-server to use these
@@ -98,24 +98,24 @@ ovn-sbctl set-connection pssl:6642
 
 #### Generate signed certificates for OVN Northd
 
-If you are running ovn-northd on the same node as OVN NB and SB database servers, then
+If you are running ovn-northd on the same host as the OVN NB and SB database servers, then
 there is no need to secure the communication between ovn-northd and OVN NB/SB daemons.
 ovn-northd will communicate using UNIX path.
 
-In case, you still want to secure the commnication or the daemons are running on
-separate nodes, then follow the instructions on this page [OVN-NORTHD.SSL.md]
+In case you still want to secure the communication, or the daemons are running on
+separate hosts, then follow the instructions on this page [OVN-NORTHD.SSL.md]
 
 
-### Generate certificates for the minion.
+### Generate certificates for the nodes
 
-On each minion, create a certificate request.
+On each node, create a certificate request.
 
 ```
 cd /etc/openvswitch
 ovs-pki req ovncontroller
 ```
 
-The above command will create a new private key for the minion called
+The above command will create a new private key for the node called
 ovncontroller-privkey.pem and a certificate request file called
 ovncontroller-req.pem.  Copy this certificate request file to the secure
 machine where you created the certificate authority and from the directory
@@ -125,9 +125,9 @@ where the copied file exists, run:
 ovs-pki -b sign ovncontroller switch
 ```
 
-The above will create the certificate for the minion called
+The above will create the certificate for the node called
 "ovncontroller-cert.pem". You should copy this certificate back to the
-minion's /etc/openvswitch directory.
+node's /etc/openvswitch directory.
 
 ## One time setup.
 
@@ -169,8 +169,8 @@ sudo ovnkube -k8s-kubeconfig kubeconfig.yaml -loglevel=4 \
  -init-master="$NODE_NAME" -cluster-subnets=$CLUSTER_IP_SUBNET \
  -k8s-service-cidr=$SERVICE_IP_SUBNET \
  -nodeport \
- -nb-address="ssl://$CENTRAL_IP:6641" \
- -sb-address="ssl://$CENTRAL_IP:6642" \
+ -nb-address="ssl:$CENTRAL_IP:6641" \
+ -sb-address="ssl:$CENTRAL_IP:6642" \
  -nb-client-privkey /etc/openvswitch/ovncontroller-privkey.pem \
  -nb-client-cert /etc/openvswitch/ovncontroller-cert.pem \
  -nb-client-cacert /etc/openvswitch/cacert.pem \
@@ -185,10 +185,10 @@ certificates to it. For e.g:
 ```
 sudo ovnkube -k8s-kubeconfig $HOME/kubeconfig.yaml -loglevel=4 \
     -k8s-apiserver="http://$CENTRAL_IP:8080" \
-    -init-node="$MINION_NAME"  \
+    -init-node="$NODE_NAME"  \
     -nodeport \
-    -nb-address="ssl://$CENTRAL_IP:6641" \
-    -sb-address="ssl://$CENTRAL_IP:6642" -k8s-token=$TOKEN \
+    -nb-address="ssl:$CENTRAL_IP:6641" \
+    -sb-address="ssl:$CENTRAL_IP:6642" -k8s-token=$TOKEN \
     -nb-client-privkey /etc/openvswitch/ovncontroller-privkey.pem \
     -nb-client-cert /etc/openvswitch/ovncontroller-cert.pem \
     -nb-client-cacert /etc/openvswitch/cacert.pem \

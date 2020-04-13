@@ -11,7 +11,8 @@ pushd $GOPATH/src/k8s.io/kubernetes/
 sudo ln ./_output/local/go/bin/kubectl /usr/local/bin/kubectl
 popd
 
-GO111MODULE="on" go get sigs.k8s.io/kind@v0.7.0
+wget -O $GOPATH/bin/kind https://github.com/kubernetes-sigs/kind/releases/download/v0.7.0/kind-linux-amd64
+chmod +x $GOPATH/bin/kind
 pushd ../contrib
 ./kind.sh
 popd
