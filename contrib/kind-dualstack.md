@@ -13,6 +13,7 @@ Currently, IP dual-stack is not fully supported in:
 ## Kubernetes and Docker with IP dual-stack
 
 ### Update kubectl
+
 Kubernetes has some IP dual-stack support but the feature is not complete.
 Additional changes are constantly being added. This setup is using the latest
 Kubernetes release to test against. Kubernetes is being installed below using
