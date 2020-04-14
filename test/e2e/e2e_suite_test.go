@@ -29,7 +29,8 @@ func handleFlags() {
 
 var viperConfig = flag.String("viper-config", "", "The name of a viper config file (https://github.com/spf13/viper#what-is-viper). All e2e command line parameters can also be configured in such a file. May contain a path and may or may not contain the file suffix. The default is to look for an optional file with `e2e` as base name. If a file is specified explicitly, it must be present.")
 
-func init() {
+// required due to go1.13 issue: https://github.com/onsi/ginkgo/issues/602
+func TestMain(m *testing.M) {
 	// Register test flags, then parse flags.
 	handleFlags()
 
@@ -64,7 +65,7 @@ func init() {
 		Asset:      generated.Asset,
 		AssetNames: generated.AssetNames,
 	})
-
+	os.Exit(m.Run())
 }
 
 func TestE2e(t *testing.T) {
