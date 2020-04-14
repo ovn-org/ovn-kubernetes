@@ -930,15 +930,14 @@ func (oc *Controller) addNetworkPolicy(policy *knet.NetworkPolicy) {
 	klog.Infof("Adding network policy %s in namespace %s", policy.Name,
 		policy.Namespace)
 
-	if oc.namespacePolicies[policy.Namespace] != nil &&
-		oc.namespacePolicies[policy.Namespace][policy.Name] != nil {
+	// accessing namespacePolicies is unsafe without a lock, use ns lock
+	mutex := oc.waitForNamespaceEvent(policy.Namespace)
+	if mutex == nil {
+		klog.Errorf("failed to wait for namespace %s", policy.Namespace)
 		return
 	}
-
-	err := oc.waitForNamespaceEvent(policy.Namespace)
-	if err != nil {
-		klog.Errorf("failed to wait for namespace %s event (%v)",
-			policy.Namespace, err)
+	defer mutex.Unlock()
+	if oc.namespacePolicies[policy.Namespace] != nil && oc.namespacePolicies[policy.Namespace][policy.Name] != nil {
 		return
 	}
 
@@ -949,6 +948,7 @@ func (oc *Controller) addNetworkPolicy(policy *knet.NetworkPolicy) {
 	readableGroupName := fmt.Sprintf("%s_%s", policy.Namespace, policy.Name)
 	np.portGroupName = hashedPortGroup(readableGroupName)
 
+	var err error
 	np.portGroupUUID, err = createPortGroup(readableGroupName, np.portGroupName)
 	if err != nil {
 		klog.Errorf("Failed to create port_group for network policy %s in "+
@@ -1088,6 +1088,14 @@ func (oc *Controller) addNetworkPolicy(policy *knet.NetworkPolicy) {
 func (oc *Controller) deleteNetworkPolicy(policy *knet.NetworkPolicy) {
 	klog.Infof("Deleting network policy %s in namespace %s",
 		policy.Name, policy.Namespace)
+
+	// accessing namespacePolicies is unsafe without a lock, use ns lock
+	mutex := oc.waitForNamespaceEvent(policy.Namespace)
+	if mutex == nil {
+		klog.Errorf("failed to wait for namespace %s", policy.Namespace)
+		return
+	}
+	defer mutex.Unlock()
 
 	if oc.namespacePolicies[policy.Namespace] == nil ||
 		oc.namespacePolicies[policy.Namespace][policy.Name] == nil {

@@ -1,7 +1,6 @@
 package ovn
 
 import (
-	"fmt"
 	"sync"
 	"time"
 
@@ -37,17 +36,23 @@ func (oc *Controller) syncNamespaces(namespaces []interface{}) {
 	}
 }
 
-func (oc *Controller) waitForNamespaceEvent(namespace string) error {
+// wait for a policy to get created for namespace and return the lock
+func (oc *Controller) waitForNamespaceEvent(namespace string) *sync.Mutex {
 	// Wait for 10 seconds to get the namespace event.
 	count := 100
 	for {
-		if oc.namespacePolicies[namespace] != nil {
-			break
+		mutex := oc.getNamespaceLock(namespace)
+		if mutex == nil {
+			continue
 		}
+		if oc.namespacePolicies[namespace] != nil {
+			return mutex
+		}
+		mutex.Unlock()
 		time.Sleep(100 * time.Millisecond)
 		count--
 		if count == 0 {
-			return fmt.Errorf("timeout waiting for namespace event")
+			break
 		}
 	}
 	return nil
