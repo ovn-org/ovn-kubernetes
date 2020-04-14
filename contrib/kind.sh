@@ -98,7 +98,6 @@ fi
 sed -i "s/apiServerAddress.*/apiServerAddress: ${API_IP}/" ${KIND_CONFIG_LCL}
 
 # Create KIND cluster. For additional debug, add '--verbosity <int>': 0 None .. 3 Debug
-CLUSTER_NAME=${CLUSTER_NAME:-ovn}
 kind create cluster --name ${CLUSTER_NAME} --kubeconfig ${HOME}/admin.conf --image kindest/node:${K8S_VERSION} --config=${KIND_CONFIG_LCL}
 export KUBECONFIG=${HOME}/admin.conf
 mkdir -p /tmp/kind
