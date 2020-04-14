@@ -178,8 +178,20 @@ func initLocalnetGateway(nodeName string, subnet *net.IPNet, wf *factory.WatchFa
 		return err
 	}
 
-	err = util.SetLocalL3GatewayConfig(nodeAnnotator, ifaceID, macAddress,
-		gatewayIPCIDR, gatewayNextHop, config.Gateway.NodeportEnable)
+	chassisID, err := util.GetNodeChassisID()
+	if err != nil {
+		return err
+	}
+
+	err = util.SetL3GatewayConfig(nodeAnnotator, &util.L3GatewayConfig{
+		Mode:           config.GatewayModeLocal,
+		ChassisID:      chassisID,
+		InterfaceID:    ifaceID,
+		MACAddress:     macAddress,
+		IPAddresses:    []*net.IPNet{gatewayIPCIDR},
+		NextHops:       []net.IP{gatewayNextHop},
+		NodePortEnable: config.Gateway.NodeportEnable,
+	})
 	if err != nil {
 		return err
 	}

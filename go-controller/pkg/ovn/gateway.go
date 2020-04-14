@@ -19,6 +19,12 @@ func (ovn *Controller) getOvnGateways() ([]string, string, error) {
 }
 
 func (ovn *Controller) getGatewayPhysicalIPs(physicalGateway string) ([]string, error) {
+	physicalIPs, _, err := util.RunOVNNbctl("get", "logical_router",
+		physicalGateway, "external_ids:physical_ips")
+	if err == nil {
+		return strings.Split(physicalIPs, ","), nil
+	}
+
 	physicalIP, _, err := util.RunOVNNbctl("get", "logical_router",
 		physicalGateway, "external_ids:physical_ip")
 	if err != nil {

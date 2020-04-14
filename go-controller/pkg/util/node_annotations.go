@@ -23,14 +23,22 @@ import (
 //           "mode": "local",
 //           "interface-id": "br-local_ip-10-0-129-64.us-east-2.compute.internal",
 //           "mac-address": "f2:20:a0:3c:26:4c",
-//           "ip-address": "169.254.33.2/24",
-//           "next-hop": "169.254.33.1",
+//           "ip-addresses": ["169.254.33.2/24"],
+//           "next-hops": ["169.254.33.1"],
 //           "node-port-enable": "true",
 //           "vlan-id": "0"
+//
+//           # backward-compat
+//           "ip-address": "169.254.33.2/24",
+//           "next-hop": "169.254.33.1",
 //         }
 //       }
 //     k8s.ovn.org/node-chassis-id: b1f96182-2bdd-42b6-88f9-9a1fc1c85ece
 //     k8s.ovn.org/node-mgmt-port-mac-address: fa:f1:27:f5:54:69
+//
+// The "ip_address" and "next_hop" fields are deprecated and will eventually go away.
+// (And they are not output when "ip_addresses" or "next_hops" contains multiple
+// values.)
 
 const (
 	// ovnNodeL3GatewayConfig is the constant string representing the l3 gateway annotation key
@@ -38,22 +46,6 @@ const (
 
 	// OvnDefaultNetworkGateway captures L3 gateway config for default OVN network interface
 	ovnDefaultNetworkGateway = "default"
-
-	// ovnNodeGatewayMode is the mode of the gateway in the l3 gateway annotation
-	ovnNodeGatewayMode = "mode"
-	// ovnNodeGatewayVlanID is the vlanid used by the gateway in the l3 gateway annotation
-	ovnNodeGatewayVlanID = "vlan-id"
-	// ovnNodeGatewayIfaceID is the interfaceID of the gateway in the l3 gateway annotation
-	ovnNodeGatewayIfaceID = "interface-id"
-	// ovnNodeGatewayMacAddress is the MacAddress of the Gateway interface in the l3 gateway annotation
-	ovnNodeGatewayMacAddress = "mac-address"
-	// ovnNodeGatewayIP is the IP address of the Gateway in the l3 gateway annotation
-	ovnNodeGatewayIP = "ip-address"
-	// ovnNodeGatewayNextHop is the Next Hop in the l3 gateway annotation
-	ovnNodeGatewayNextHop = "next-hop"
-	// ovnNodePortEnable in the l3 gateway annotation captures whether load balancer needs to
-	// be created or not
-	ovnNodePortEnable = "node-port-enable"
 
 	// ovnNodeManagementPortMacAddress is the constant string representing the annotation key
 	ovnNodeManagementPortMacAddress = "k8s.ovn.org/node-mgmt-port-mac-address"
@@ -67,68 +59,135 @@ type L3GatewayConfig struct {
 	ChassisID      string
 	InterfaceID    string
 	MACAddress     net.HardwareAddr
-	IPAddress      *net.IPNet
-	NextHop        net.IP
+	IPAddresses    []*net.IPNet
+	NextHops       []net.IP
 	NodePortEnable bool
 	VLANID         *uint
 }
 
-func setAnnotations(nodeAnnotator kube.Annotator, l3GatewayConfig map[string]string) error {
-	gatewayAnnotation := map[string]map[string]string{ovnDefaultNetworkGateway: l3GatewayConfig}
+type l3GatewayConfigJSON struct {
+	Mode           config.GatewayMode `json:"mode"`
+	InterfaceID    string             `json:"interface-id,omitempty"`
+	MACAddress     string             `json:"mac-address,omitempty"`
+	IPAddresses    []string           `json:"ip-addresses,omitempty"`
+	IPAddress      string             `json:"ip-address,omitempty"`
+	NextHops       []string           `json:"next-hops,omitempty"`
+	NextHop        string             `json:"next-hop,omitempty"`
+	NodePortEnable string             `json:"node-port-enable,omitempty"`
+	VLANID         string             `json:"vlan-id,omitempty"`
+}
+
+func (cfg *L3GatewayConfig) MarshalJSON() ([]byte, error) {
+	cfgjson := l3GatewayConfigJSON{
+		Mode: cfg.Mode,
+	}
+	if cfg.Mode == config.GatewayModeDisabled {
+		return json.Marshal(&cfgjson)
+	}
+
+	cfgjson.InterfaceID = cfg.InterfaceID
+	cfgjson.MACAddress = cfg.MACAddress.String()
+	cfgjson.NodePortEnable = fmt.Sprintf("%t", cfg.NodePortEnable)
+	if cfg.VLANID != nil {
+		cfgjson.VLANID = fmt.Sprintf("%d", *cfg.VLANID)
+	}
+
+	cfgjson.IPAddresses = make([]string, len(cfg.IPAddresses))
+	for i, ip := range cfg.IPAddresses {
+		cfgjson.IPAddresses[i] = ip.String()
+	}
+	if len(cfgjson.IPAddresses) == 1 {
+		cfgjson.IPAddress = cfgjson.IPAddresses[0]
+	}
+	cfgjson.NextHops = make([]string, len(cfg.NextHops))
+	for i, nh := range cfg.NextHops {
+		cfgjson.NextHops[i] = nh.String()
+	}
+	if len(cfgjson.NextHops) == 1 {
+		cfgjson.NextHop = cfgjson.NextHops[0]
+	}
+
+	return json.Marshal(&cfgjson)
+}
+
+func (cfg *L3GatewayConfig) UnmarshalJSON(bytes []byte) error {
+	cfgjson := l3GatewayConfigJSON{}
+	if err := json.Unmarshal(bytes, &cfgjson); err != nil {
+		return err
+	}
+
+	cfg.Mode = cfgjson.Mode
+	if cfg.Mode == config.GatewayModeDisabled {
+		return nil
+	} else if cfg.Mode != config.GatewayModeShared && cfg.Mode != config.GatewayModeLocal {
+		return fmt.Errorf("bad 'mode' value %q", cfgjson.Mode)
+	}
+
+	cfg.InterfaceID = cfgjson.InterfaceID
+	cfg.NodePortEnable = cfgjson.NodePortEnable == "true"
+	if cfgjson.VLANID != "" {
+		vlanID64, err := strconv.ParseUint(cfgjson.VLANID, 10, 0)
+		if err != nil {
+			return fmt.Errorf("bad 'vlan-id' value %q: %v", cfgjson.VLANID, err)
+		}
+		vlanID := uint(vlanID64)
+		cfg.VLANID = &vlanID
+	}
+
+	var err error
+	cfg.MACAddress, err = net.ParseMAC(cfgjson.MACAddress)
+	if err != nil {
+		return fmt.Errorf("bad 'mac-address' value %q: %v", cfgjson.MACAddress, err)
+	}
+
+	if len(cfgjson.IPAddresses) == 0 {
+		cfg.IPAddresses = make([]*net.IPNet, 1)
+		ip, ipnet, err := net.ParseCIDR(cfgjson.IPAddress)
+		if err != nil {
+			return fmt.Errorf("bad 'ip-address' value %q: %v", cfgjson.IPAddress, err)
+		}
+		cfg.IPAddresses[0] = &net.IPNet{IP: ip, Mask: ipnet.Mask}
+	} else {
+		cfg.IPAddresses = make([]*net.IPNet, len(cfgjson.IPAddresses))
+		for i, ipStr := range cfgjson.IPAddresses {
+			ip, ipnet, err := net.ParseCIDR(ipStr)
+			if err != nil {
+				return fmt.Errorf("bad 'ip-addresses' value %q: %v", ipStr, err)
+			}
+			cfg.IPAddresses[i] = &net.IPNet{IP: ip, Mask: ipnet.Mask}
+		}
+	}
+
+	if len(cfgjson.NextHops) == 0 {
+		cfg.NextHops = make([]net.IP, 1)
+		cfg.NextHops[0] = net.ParseIP(cfgjson.NextHop)
+		if cfg.NextHops[0] == nil {
+			return fmt.Errorf("bad 'next-hop' value %q", cfgjson.NextHop)
+		}
+	} else {
+		cfg.NextHops = make([]net.IP, len(cfgjson.NextHops))
+		for i, nextHopStr := range cfgjson.NextHops {
+			cfg.NextHops[i] = net.ParseIP(nextHopStr)
+			if cfg.NextHops[i] == nil {
+				return fmt.Errorf("bad 'next-hops' value %q", nextHopStr)
+			}
+		}
+	}
+
+	return nil
+}
+
+func SetL3GatewayConfig(nodeAnnotator kube.Annotator, cfg *L3GatewayConfig) error {
+	gatewayAnnotation := map[string]*L3GatewayConfig{ovnDefaultNetworkGateway: cfg}
 	if err := nodeAnnotator.Set(ovnNodeL3GatewayConfig, gatewayAnnotation); err != nil {
 		return err
 	}
-	if l3GatewayConfig[ovnNodeGatewayMode] != string(config.GatewayModeDisabled) {
-		systemID, err := GetNodeChassisID()
-		if err != nil {
-			return err
-		}
-		if err := nodeAnnotator.Set(ovnNodeChassisID, systemID); err != nil {
+	if cfg.ChassisID != "" {
+		if err := nodeAnnotator.Set(ovnNodeChassisID, cfg.ChassisID); err != nil {
 			return err
 		}
 	}
 	return nil
-}
-
-// SetDisabledL3GatewayConfig uses nodeAnnotator set an l3-gateway-config annotation
-// indicating the gateway is disabled.
-func SetDisabledL3GatewayConfig(nodeAnnotator kube.Annotator) error {
-	return setAnnotations(nodeAnnotator, map[string]string{
-		ovnNodeGatewayMode: string(config.GatewayModeDisabled),
-	})
-}
-
-// SetSharedL3GatewayConfig uses nodeAnnotator set an l3-gateway-config annotation
-// for the "shared interface" gateway mode.
-func SetSharedL3GatewayConfig(nodeAnnotator kube.Annotator,
-	ifaceID string, macAddress net.HardwareAddr,
-	gatewayAddress *net.IPNet, nextHop net.IP,
-	nodePortEnable bool, vlanID uint) error {
-	return setAnnotations(nodeAnnotator, map[string]string{
-		ovnNodeGatewayMode:       string(config.GatewayModeShared),
-		ovnNodeGatewayVlanID:     fmt.Sprintf("%d", vlanID),
-		ovnNodeGatewayIfaceID:    ifaceID,
-		ovnNodeGatewayMacAddress: macAddress.String(),
-		ovnNodeGatewayIP:         gatewayAddress.String(),
-		ovnNodeGatewayNextHop:    nextHop.String(),
-		ovnNodePortEnable:        fmt.Sprintf("%t", nodePortEnable),
-	})
-}
-
-// SetSharedL3GatewayConfig uses nodeAnnotator set an l3-gateway-config annotation
-// for the "localnet" gateway mode.
-func SetLocalL3GatewayConfig(nodeAnnotator kube.Annotator,
-	ifaceID string, macAddress net.HardwareAddr,
-	gatewayAddress *net.IPNet, nextHop net.IP,
-	nodePortEnable bool) error {
-	return setAnnotations(nodeAnnotator, map[string]string{
-		ovnNodeGatewayMode:       string(config.GatewayModeLocal),
-		ovnNodeGatewayIfaceID:    ifaceID,
-		ovnNodeGatewayMacAddress: macAddress.String(),
-		ovnNodeGatewayIP:         gatewayAddress.String(),
-		ovnNodeGatewayNextHop:    nextHop.String(),
-		ovnNodePortEnable:        fmt.Sprintf("%t", nodePortEnable),
-	})
 }
 
 // ParseNodeL3GatewayAnnotation returns the parsed l3-gateway-config annotation
@@ -138,66 +197,24 @@ func ParseNodeL3GatewayAnnotation(node *kapi.Node) (*L3GatewayConfig, error) {
 		return nil, fmt.Errorf("%s annotation not found for node %q", ovnNodeL3GatewayConfig, node.Name)
 	}
 
-	l3GatewayConfigMap := map[string]map[string]string{}
-	if err := json.Unmarshal([]byte(l3GatewayAnnotation), &l3GatewayConfigMap); err != nil {
-		return nil, fmt.Errorf("failed to unmarshal l3 gateway config annotation %s for node %q", l3GatewayAnnotation, node.Name)
+	var cfgs map[string]*L3GatewayConfig
+	if err := json.Unmarshal([]byte(l3GatewayAnnotation), &cfgs); err != nil {
+		return nil, fmt.Errorf("failed to unmarshal l3 gateway config annotation %s for node %q: %v", l3GatewayAnnotation, node.Name, err)
 	}
 
-	configRaw, ok := l3GatewayConfigMap[ovnDefaultNetworkGateway]
+	cfg, ok := cfgs[ovnDefaultNetworkGateway]
 	if !ok {
 		return nil, fmt.Errorf("%s annotation for %s network not found", ovnNodeL3GatewayConfig, ovnDefaultNetworkGateway)
 	}
 
-	l3GatewayConfig := &L3GatewayConfig{}
-	l3GatewayConfig.Mode = config.GatewayMode(configRaw[ovnNodeGatewayMode])
-	if l3GatewayConfig.Mode == config.GatewayModeDisabled {
-		return l3GatewayConfig, nil
-	} else if l3GatewayConfig.Mode != config.GatewayModeShared && l3GatewayConfig.Mode != config.GatewayModeLocal {
-		return nil, fmt.Errorf("bad %q value %q", ovnNodeGatewayMode, l3GatewayConfig.Mode)
-	}
-
-	l3GatewayConfig.ChassisID, ok = node.Annotations[ovnNodeChassisID]
-	if !ok {
-		return nil, fmt.Errorf("%s annotation not found", ovnNodeChassisID)
-	}
-
-	l3GatewayConfig.InterfaceID, ok = configRaw[ovnNodeGatewayIfaceID]
-	if !ok {
-		return nil, fmt.Errorf("%s property not found in %s annotation", ovnNodeGatewayIfaceID, ovnNodeL3GatewayConfig)
-	}
-
-	var err error
-	l3GatewayConfig.MACAddress, err = net.ParseMAC(configRaw[ovnNodeGatewayMacAddress])
-	if err != nil {
-		return nil, fmt.Errorf("bad %q value %q (%v)", ovnNodeGatewayMacAddress, configRaw[ovnNodeGatewayMacAddress], err)
-	}
-
-	ip, ipNet, err := net.ParseCIDR(configRaw[ovnNodeGatewayIP])
-	if err != nil {
-		return nil, fmt.Errorf("bad %q value %q (%v)", ovnNodeGatewayIP, configRaw[ovnNodeGatewayIP], err)
-	}
-	l3GatewayConfig.IPAddress = &net.IPNet{IP: ip, Mask: ipNet.Mask}
-
-	l3GatewayConfig.NextHop = net.ParseIP(configRaw[ovnNodeGatewayNextHop])
-	if l3GatewayConfig.NextHop == nil {
-		return nil, fmt.Errorf("bad %q value %q", ovnNodeGatewayNextHop, configRaw[ovnNodeGatewayNextHop])
-	}
-
-	l3GatewayConfig.NodePortEnable = (configRaw[ovnNodePortEnable] == "true")
-
-	if l3GatewayConfig.Mode == config.GatewayModeShared {
-		vlanIDStr, ok := configRaw[ovnNodeGatewayVlanID]
-		if ok {
-			vlanID64, err := strconv.ParseUint(vlanIDStr, 10, 0)
-			if err != nil {
-				return nil, fmt.Errorf("bad %q value %q (%v)", ovnNodeGatewayVlanID, vlanIDStr, err)
-			}
-			vlanID := uint(vlanID64)
-			l3GatewayConfig.VLANID = &vlanID
+	if cfg.Mode != config.GatewayModeDisabled {
+		cfg.ChassisID, ok = node.Annotations[ovnNodeChassisID]
+		if !ok {
+			return nil, fmt.Errorf("%s annotation not found", ovnNodeChassisID)
 		}
 	}
 
-	return l3GatewayConfig, nil
+	return cfg, nil
 }
 
 func SetNodeManagementPortMACAddress(nodeAnnotator kube.Annotator, macAddress net.HardwareAddr) error {
