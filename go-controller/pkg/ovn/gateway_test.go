@@ -1,10 +1,11 @@
-package util
+package ovn
 
 import (
 	"net"
 
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
 	ovntest "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/testing"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
 
 	. "github.com/onsi/ginkgo"
 	. "github.com/onsi/gomega"
@@ -21,10 +22,10 @@ node1 chassis=d17ddb5a-050d-42ab-ab50-7c6ce79a8f2e lb_force_snat_ip=100.64.0.1
 node4 chassis=912d592c-904c-40cd-9ef1-c2e5b49a33dd lb_force_snat_ip=100.64.0.4`,
 		})
 
-		err := SetExec(fexec)
+		err := util.SetExec(fexec)
 		Expect(err).NotTo(HaveOccurred())
 
-		name, ip, err := GetDefaultGatewayRouterIP()
+		name, ip, err := getDefaultGatewayRouterIP()
 		Expect(err).NotTo(HaveOccurred())
 		Expect(name).To(Equal("node1"))
 		Expect(ip.String()).To(Equal("100.64.0.1"))
@@ -41,10 +42,10 @@ node1 chassis=d17ddb5a-050d-42ab-ab50-7c6ce79a8f2e lb_force_xxxxxxx=100.64.0.1
 node4 chassis=912d592c-904c-40cd-9ef1-c2e5b49a33dd lb_force_snat_ip=100.64.0.4`,
 		})
 
-		err := SetExec(fexec)
+		err := util.SetExec(fexec)
 		Expect(err).NotTo(HaveOccurred())
 
-		name, ip, err := GetDefaultGatewayRouterIP()
+		name, ip, err := getDefaultGatewayRouterIP()
 		Expect(err).NotTo(HaveOccurred())
 		Expect(name).To(Equal("node4"))
 		Expect(ip.String()).To(Equal("100.64.0.4"))
@@ -56,7 +57,7 @@ node4 chassis=912d592c-904c-40cd-9ef1-c2e5b49a33dd lb_force_snat_ip=100.64.0.4`,
 		hostSubnets := []*net.IPNet{ovntest.MustParseIPNet("10.130.0.0/23")}
 		joinSubnets := []*net.IPNet{ovntest.MustParseIPNet("100.64.0.0/29")}
 		nodeName := "test-node"
-		l3GatewayConfig := &L3GatewayConfig{
+		l3GatewayConfig := &util.L3GatewayConfig{
 			Mode:           config.GatewayModeLocal,
 			ChassisID:      "SYSTEM-ID",
 			InterfaceID:    "INTERFACE-ID",
@@ -68,7 +69,7 @@ node4 chassis=912d592c-904c-40cd-9ef1-c2e5b49a33dd lb_force_snat_ip=100.64.0.4`,
 		sctpSupport := false
 
 		fexec := ovntest.NewFakeExec()
-		err := SetExec(fexec)
+		err := util.SetExec(fexec)
 		Expect(err).NotTo(HaveOccurred())
 
 		fexec.AddFakeCmdsNoOutputNoError([]string{
@@ -112,7 +113,7 @@ node4 chassis=912d592c-904c-40cd-9ef1-c2e5b49a33dd lb_force_snat_ip=100.64.0.4`,
 			"ovn-nbctl --timeout=15 --may-exist lr-nat-add GR_test-node snat 169.254.33.2 10.128.0.0/14",
 		})
 
-		err = GatewayInit(nodeName, clusterIPSubnet, hostSubnets, joinSubnets, l3GatewayConfig, sctpSupport)
+		err = gatewayInit(nodeName, clusterIPSubnet, hostSubnets, joinSubnets, l3GatewayConfig, sctpSupport)
 		Expect(err).NotTo(HaveOccurred())
 		Expect(fexec.CalledMatchesExpected()).To(BeTrue())
 	})
@@ -122,7 +123,7 @@ node4 chassis=912d592c-904c-40cd-9ef1-c2e5b49a33dd lb_force_snat_ip=100.64.0.4`,
 		hostSubnets := []*net.IPNet{ovntest.MustParseIPNet("fd01:0:0:2::/64")}
 		joinSubnets := []*net.IPNet{ovntest.MustParseIPNet("fd98::/125")}
 		nodeName := "test-node"
-		l3GatewayConfig := &L3GatewayConfig{
+		l3GatewayConfig := &util.L3GatewayConfig{
 			Mode:           config.GatewayModeLocal,
 			ChassisID:      "SYSTEM-ID",
 			InterfaceID:    "INTERFACE-ID",
@@ -134,7 +135,7 @@ node4 chassis=912d592c-904c-40cd-9ef1-c2e5b49a33dd lb_force_snat_ip=100.64.0.4`,
 		sctpSupport := false
 
 		fexec := ovntest.NewFakeExec()
-		err := SetExec(fexec)
+		err := util.SetExec(fexec)
 		Expect(err).NotTo(HaveOccurred())
 
 		fexec.AddFakeCmdsNoOutputNoError([]string{
@@ -178,7 +179,7 @@ node4 chassis=912d592c-904c-40cd-9ef1-c2e5b49a33dd lb_force_snat_ip=100.64.0.4`,
 			"ovn-nbctl --timeout=15 --may-exist lr-nat-add GR_test-node snat fd99::2 fd01::/48",
 		})
 
-		err = GatewayInit(nodeName, clusterIPSubnet, hostSubnets, joinSubnets, l3GatewayConfig, sctpSupport)
+		err = gatewayInit(nodeName, clusterIPSubnet, hostSubnets, joinSubnets, l3GatewayConfig, sctpSupport)
 		Expect(err).NotTo(HaveOccurred())
 		Expect(fexec.CalledMatchesExpected()).To(BeTrue())
 	})
@@ -197,7 +198,7 @@ node4 chassis=912d592c-904c-40cd-9ef1-c2e5b49a33dd lb_force_snat_ip=100.64.0.4`,
 			ovntest.MustParseIPNet("fd98::/125"),
 		}
 		nodeName := "test-node"
-		l3GatewayConfig := &L3GatewayConfig{
+		l3GatewayConfig := &util.L3GatewayConfig{
 			Mode:        config.GatewayModeLocal,
 			ChassisID:   "SYSTEM-ID",
 			InterfaceID: "INTERFACE-ID",
@@ -215,7 +216,7 @@ node4 chassis=912d592c-904c-40cd-9ef1-c2e5b49a33dd lb_force_snat_ip=100.64.0.4`,
 		sctpSupport := false
 
 		fexec := ovntest.NewFakeExec()
-		err := SetExec(fexec)
+		err := util.SetExec(fexec)
 		Expect(err).NotTo(HaveOccurred())
 
 		fexec.AddFakeCmdsNoOutputNoError([]string{
@@ -263,7 +264,7 @@ node4 chassis=912d592c-904c-40cd-9ef1-c2e5b49a33dd lb_force_snat_ip=100.64.0.4`,
 			"ovn-nbctl --timeout=15 --may-exist lr-nat-add GR_test-node snat fd99::2 fd01::/48",
 		})
 
-		err = GatewayInit(nodeName, clusterIPSubnets, hostSubnets, joinSubnets, l3GatewayConfig, sctpSupport)
+		err = gatewayInit(nodeName, clusterIPSubnets, hostSubnets, joinSubnets, l3GatewayConfig, sctpSupport)
 		Expect(err).NotTo(HaveOccurred())
 		Expect(fexec.CalledMatchesExpected()).To(BeTrue())
 	})
@@ -278,7 +279,7 @@ node4 chassis=912d592c-904c-40cd-9ef1-c2e5b49a33dd lb_force_snat_ip=100.64.0.4`,
 		)
 
 		fexec := ovntest.NewFakeExec()
-		err := SetExec(fexec)
+		err := util.SetExec(fexec)
 		Expect(err).NotTo(HaveOccurred())
 
 		fexec.AddFakeCmd(&ovntest.ExpectedCmd{
@@ -320,7 +321,7 @@ node4 chassis=912d592c-904c-40cd-9ef1-c2e5b49a33dd lb_force_snat_ip=100.64.0.4`,
 			"ovn-nbctl --timeout=15 lb-del " + tcpLBUUID,
 		})
 
-		err = GatewayCleanup(nodeName, []*net.IPNet{hostSubnet})
+		err = gatewayCleanup(nodeName, []*net.IPNet{hostSubnet})
 		Expect(err).NotTo(HaveOccurred())
 		Expect(fexec.CalledMatchesExpected()).To(BeTrue())
 	})
@@ -340,7 +341,7 @@ node4 chassis=912d592c-904c-40cd-9ef1-c2e5b49a33dd lb_force_snat_ip=100.64.0.4`,
 		)
 
 		fexec := ovntest.NewFakeExec()
-		err := SetExec(fexec)
+		err := util.SetExec(fexec)
 		Expect(err).NotTo(HaveOccurred())
 
 		fexec.AddFakeCmd(&ovntest.ExpectedCmd{
@@ -399,7 +400,7 @@ node4 chassis=912d592c-904c-40cd-9ef1-c2e5b49a33dd lb_force_snat_ip=100.64.0.4`,
 			"ovn-nbctl --timeout=15 lb-del " + tcpLBUUID,
 		})
 
-		err = GatewayCleanup(nodeName, hostSubnets)
+		err = gatewayCleanup(nodeName, hostSubnets)
 		Expect(err).NotTo(HaveOccurred())
 		Expect(fexec.CalledMatchesExpected()).To(BeTrue())
 	})
