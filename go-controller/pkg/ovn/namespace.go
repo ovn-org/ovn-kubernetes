@@ -2,6 +2,7 @@ package ovn
 
 import (
 	"fmt"
+	"sync"
 	"time"
 
 	kapi "k8s.io/api/core/v1"
@@ -61,6 +62,14 @@ func (oc *Controller) addPodToNamespace(ns string, portInfo *lpInfo) error {
 		}
 	}
 
+	// if network policy is being created at the same time need to hold until it is done and
+	// ACLs are created before we allow the pod to be added
+	var wg sync.WaitGroup
+	for _, np := range nsInfo.networkPolicies {
+		wg.Add(1)
+		oc.waitForPolicyACL(np, &wg)
+	}
+	wg.Wait()
 	return nil
 }
 

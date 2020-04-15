@@ -2,10 +2,12 @@ package ovn
 
 import (
 	"fmt"
+	utilwait "k8s.io/apimachinery/pkg/util/wait"
 	"net"
 	"sort"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/factory"
@@ -29,6 +31,7 @@ type namespacePolicy struct {
 	portGroupUUID   string             //uuid for OVN port_group
 	portGroupName   string
 	deleted         bool //deleted policy
+	aclCreated      bool //ensure default policy is in place
 }
 
 func NewNamespacePolicy(policy *knet.NetworkPolicy) *namespacePolicy {
@@ -1064,6 +1067,7 @@ func (oc *Controller) addNetworkPolicy(policy *knet.NetworkPolicy) {
 		}
 		np.egressPolicies = append(np.egressPolicies, egress)
 	}
+	np.aclCreated = true
 	np.Unlock()
 	// For all the pods in the local namespace that this policy
 	// effects, add them to the port group.
@@ -1349,5 +1353,20 @@ func (oc *Controller) shutdownHandlers(np *namespacePolicy) {
 	}
 	for _, handler := range np.nsHandlerList {
 		_ = oc.watchFactory.RemoveNamespaceHandler(handler)
+	}
+}
+
+// waits for 10 seconds for ACLs to be created for a network policy
+func (oc *Controller) waitForPolicyACL(policy *namespacePolicy, wg *sync.WaitGroup) {
+	defer wg.Done()
+	err := utilwait.PollImmediate(100*time.Millisecond, 10*time.Second,
+		func() (bool, error) {
+			policy.Lock()
+			defer policy.Unlock()
+			return policy.aclCreated, nil
+		},
+	)
+	if err != nil {
+		klog.Errorf("timeout waiting for policy ACL for policy %s", policy.name)
 	}
 }
