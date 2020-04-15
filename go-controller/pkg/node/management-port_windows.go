@@ -18,15 +18,21 @@ import (
 // createPlatformManagementPort creates a management port attached to the node switch
 // that lets the node access its pods via their private IP address. This is used
 // for health checking and other management tasks.
-func createPlatformManagementPort(interfaceName string, interfaceIP *net.IPNet, routerIP net.IP,
-	routerMAC net.HardwareAddr, stopChan chan struct{}) error {
+func createPlatformManagementPort(interfaceName string, hostSubnets []*net.IPNet, stopChan chan struct{}) error {
+	if len(hostSubnets) != 1 || !utilnet.IsIPv6CIDR(hostSubnets[0]) {
+		klog.Fatal("IPv6/Dual-stack not supported on Windows")
+	}
+
+	routerIPNet, interfaceIP := util.GetNodeWellKnownAddresses(hostSubnets[0])
+	routerIP := routerIPNet.IP
+
 	// Up the interface.
 	_, _, err := util.RunPowershell("Enable-NetAdapter", "-IncludeHidden", interfaceName)
 	if err != nil {
 		return err
 	}
 
-	//check if interface already exists
+	// Check if interface already exists
 	ifAlias := fmt.Sprintf("-InterfaceAlias %s", interfaceName)
 	_, _, err = util.RunPowershell("Get-NetIPAddress", ifAlias)
 	if err == nil {
