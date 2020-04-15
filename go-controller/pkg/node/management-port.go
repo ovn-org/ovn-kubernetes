@@ -11,12 +11,8 @@ import (
 	"k8s.io/klog"
 )
 
-func (n *OvnNode) createManagementPort(localSubnet *net.IPNet, nodeAnnotator kube.Annotator,
+func (n *OvnNode) createManagementPort(hostSubnets []*net.IPNet, nodeAnnotator kube.Annotator,
 	waiter *startupWaiter) error {
-	// Retrieve the routerIP and mangementPortIP for a given localSubnet
-	routerIP, portIP := util.GetNodeWellKnownAddresses(localSubnet)
-	routerMAC := util.IPAddrToHWAddr(routerIP.IP)
-
 	// Kubernetes emits events when pods are created. The event will contain
 	// only lowercase letters of the hostname even though the kubelet is
 	// started with a hostname that contains lowercase and uppercase letters.
@@ -60,7 +56,7 @@ func (n *OvnNode) createManagementPort(localSubnet *net.IPNet, nodeAnnotator kub
 		return err
 	}
 
-	err = createPlatformManagementPort(util.K8sMgmtIntfName, portIP, routerIP.IP, routerMAC, n.stopChan)
+	err = createPlatformManagementPort(util.K8sMgmtIntfName, hostSubnets, n.stopChan)
 	if err != nil {
 		return err
 	}

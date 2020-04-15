@@ -206,7 +206,7 @@ func (n *OvnNode) Start() error {
 	}
 
 	// Initialize management port resources on the node
-	if err := n.createManagementPort(subnet, nodeAnnotator, waiter); err != nil {
+	if err := n.createManagementPort([]*net.IPNet{subnet}, nodeAnnotator, waiter); err != nil {
 		return err
 	}
 

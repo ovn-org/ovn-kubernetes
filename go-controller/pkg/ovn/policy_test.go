@@ -1246,3 +1246,101 @@ var _ = Describe("OVN NetworkPolicy Operations", func() {
 		})
 	})
 })
+
+var _ = Describe("OVN NetworkPolicy Low-Level Operations", func() {
+	It("computes match strings from address sets correctly", func() {
+		gp := newGressPolicy(knet.PolicyTypeIngress, 0)
+
+		one := hashedAddressSet(fmt.Sprintf("testing.policy.ingress.1"))
+		two := hashedAddressSet(fmt.Sprintf("testing.policy.ingress.2"))
+		three := hashedAddressSet(fmt.Sprintf("testing.policy.ingress.3"))
+		four := hashedAddressSet(fmt.Sprintf("testing.policy.ingress.4"))
+		five := hashedAddressSet(fmt.Sprintf("testing.policy.ingress.5"))
+		six := hashedAddressSet(fmt.Sprintf("testing.policy.ingress.6"))
+
+		oldMatch, newMatch, changed := gp.addAddressSet(one)
+		Expect(oldMatch).To(Equal("ip4"))
+		Expect(newMatch).To(Equal("ip4.src == {$a14025386827633950433}"))
+		Expect(changed).To(BeTrue())
+
+		oldMatch, newMatch, changed = gp.addAddressSet(two)
+		Expect(oldMatch).To(Equal("ip4.src == {$a14025386827633950433}"))
+		Expect(newMatch).To(Equal("ip4.src == {$a14025383529099065800, $a14025386827633950433}"))
+		Expect(changed).To(BeTrue())
+
+		// address sets should be alphabetized
+		oldMatch, newMatch, changed = gp.addAddressSet(three)
+		Expect(oldMatch).To(Equal("ip4.src == {$a14025383529099065800, $a14025386827633950433}"))
+		Expect(newMatch).To(Equal("ip4.src == {$a14025383529099065800, $a14025384628610694011, $a14025386827633950433}"))
+		Expect(changed).To(BeTrue())
+
+		// re-adding an existing set is a no-op
+		oldMatch, newMatch, changed = gp.addAddressSet(one)
+		Expect(oldMatch).To(Equal(""))
+		Expect(newMatch).To(Equal(""))
+		Expect(changed).To(BeFalse())
+
+		oldMatch, newMatch, changed = gp.addAddressSet(four)
+		Expect(oldMatch).To(Equal("ip4.src == {$a14025383529099065800, $a14025384628610694011, $a14025386827633950433}"))
+		Expect(newMatch).To(Equal("ip4.src == {$a14025383529099065800, $a14025384628610694011, $a14025386827633950433, $a14025390126168835066}"))
+		Expect(changed).To(BeTrue())
+
+		// now delete a set
+		oldMatch, newMatch, changed = gp.delAddressSet(one)
+		Expect(oldMatch).To(Equal("ip4.src == {$a14025383529099065800, $a14025384628610694011, $a14025386827633950433, $a14025390126168835066}"))
+		Expect(newMatch).To(Equal("ip4.src == {$a14025383529099065800, $a14025384628610694011, $a14025390126168835066}"))
+		Expect(changed).To(BeTrue())
+
+		// deleting again is a no-op
+		oldMatch, newMatch, changed = gp.delAddressSet(one)
+		Expect(oldMatch).To(Equal(""))
+		Expect(newMatch).To(Equal(""))
+		Expect(changed).To(BeFalse())
+
+		// add and delete some more...
+		oldMatch, newMatch, changed = gp.addAddressSet(five)
+		Expect(oldMatch).To(Equal("ip4.src == {$a14025383529099065800, $a14025384628610694011, $a14025390126168835066}"))
+		Expect(newMatch).To(Equal("ip4.src == {$a14025383529099065800, $a14025384628610694011, $a14025390126168835066, $a14025391225680463277}"))
+		Expect(changed).To(BeTrue())
+
+		oldMatch, newMatch, changed = gp.delAddressSet(three)
+		Expect(oldMatch).To(Equal("ip4.src == {$a14025383529099065800, $a14025384628610694011, $a14025390126168835066, $a14025391225680463277}"))
+		Expect(newMatch).To(Equal("ip4.src == {$a14025383529099065800, $a14025390126168835066, $a14025391225680463277}"))
+		Expect(changed).To(BeTrue())
+
+		oldMatch, newMatch, changed = gp.delAddressSet(one)
+		Expect(oldMatch).To(Equal(""))
+		Expect(newMatch).To(Equal(""))
+		Expect(changed).To(BeFalse())
+
+		oldMatch, newMatch, changed = gp.addAddressSet(six)
+		Expect(oldMatch).To(Equal("ip4.src == {$a14025383529099065800, $a14025390126168835066, $a14025391225680463277}"))
+		Expect(newMatch).To(Equal("ip4.src == {$a14025383529099065800, $a14025387927145578644, $a14025390126168835066, $a14025391225680463277}"))
+		Expect(changed).To(BeTrue())
+
+		oldMatch, newMatch, changed = gp.delAddressSet(two)
+		Expect(oldMatch).To(Equal("ip4.src == {$a14025383529099065800, $a14025387927145578644, $a14025390126168835066, $a14025391225680463277}"))
+		Expect(newMatch).To(Equal("ip4.src == {$a14025387927145578644, $a14025390126168835066, $a14025391225680463277}"))
+		Expect(changed).To(BeTrue())
+
+		oldMatch, newMatch, changed = gp.delAddressSet(five)
+		Expect(oldMatch).To(Equal("ip4.src == {$a14025387927145578644, $a14025390126168835066, $a14025391225680463277}"))
+		Expect(newMatch).To(Equal("ip4.src == {$a14025387927145578644, $a14025390126168835066}"))
+		Expect(changed).To(BeTrue())
+
+		oldMatch, newMatch, changed = gp.delAddressSet(six)
+		Expect(oldMatch).To(Equal("ip4.src == {$a14025387927145578644, $a14025390126168835066}"))
+		Expect(newMatch).To(Equal("ip4.src == {$a14025390126168835066}"))
+		Expect(changed).To(BeTrue())
+
+		oldMatch, newMatch, changed = gp.delAddressSet(four)
+		Expect(oldMatch).To(Equal("ip4.src == {$a14025390126168835066}"))
+		Expect(newMatch).To(Equal("ip4"))
+		Expect(changed).To(BeTrue())
+
+		oldMatch, newMatch, changed = gp.delAddressSet(four)
+		Expect(oldMatch).To(Equal(""))
+		Expect(newMatch).To(Equal(""))
+		Expect(changed).To(BeFalse())
+	})
+})
