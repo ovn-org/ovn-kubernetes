@@ -27,49 +27,14 @@ import (
 	. "github.com/onsi/gomega"
 )
 
-func addNodeportLBs(fexec *ovntest.FakeExec, nodeName, tcpLBUUID, udpLBUUID, sctpLBUUID string) {
-	fexec.AddFakeCmdsNoOutputNoError([]string{
-		"ovn-nbctl --timeout=15 --data=bare --no-heading --columns=_uuid find load_balancer external_ids:TCP_lb_gateway_router=" + util.GWRouterPrefix + nodeName,
-		"ovn-nbctl --timeout=15 --data=bare --no-heading --columns=_uuid find load_balancer external_ids:UDP_lb_gateway_router=" + util.GWRouterPrefix + nodeName,
-		"ovn-nbctl --timeout=15 --data=bare --no-heading --columns=_uuid find load_balancer external_ids:SCTP_lb_gateway_router=" + util.GWRouterPrefix + nodeName,
-	})
-	fexec.AddFakeCmd(&ovntest.ExpectedCmd{
-		Cmd:    "ovn-nbctl --timeout=15 -- create load_balancer external_ids:TCP_lb_gateway_router=" + util.GWRouterPrefix + nodeName + " protocol=tcp",
-		Output: tcpLBUUID,
-	})
-	fexec.AddFakeCmd(&ovntest.ExpectedCmd{
-		Cmd:    "ovn-nbctl --timeout=15 -- create load_balancer external_ids:UDP_lb_gateway_router=" + util.GWRouterPrefix + nodeName + " protocol=udp",
-		Output: udpLBUUID,
-	})
-	fexec.AddFakeCmd(&ovntest.ExpectedCmd{
-		Cmd:    "ovn-nbctl --timeout=15 -- create load_balancer external_ids:SCTP_lb_gateway_router=" + util.GWRouterPrefix + nodeName + " protocol=sctp",
-		Output: sctpLBUUID,
-	})
-	fexec.AddFakeCmdsNoOutputNoError([]string{
-		"ovn-nbctl --timeout=15 set logical_router " + util.GWRouterPrefix + nodeName + " load_balancer=" + tcpLBUUID,
-		"ovn-nbctl --timeout=15 add logical_router " + util.GWRouterPrefix + nodeName + " load_balancer " + udpLBUUID,
-		"ovn-nbctl --timeout=15 add logical_router " + util.GWRouterPrefix + nodeName + " load_balancer " + sctpLBUUID,
-	})
-}
-
 func shareGatewayInterfaceTest(app *cli.App, testNS ns.NetNS,
 	eth0Name, eth0MAC, eth0IP, eth0GWIP, eth0CIDR string, gatewayVLANID uint) {
 	const clusterCIDR string = "10.1.0.0/16"
 	app.Action = func(ctx *cli.Context) error {
 		const (
-			nodeName          string = "node1"
-			lrpMAC            string = "00:00:00:05:46:c3"
-			lrpIP             string = "100.64.0.3"
-			lrpCIDR           string = lrpIP + "/16"
-			clusterRouterUUID string = "5cedba03-679f-41f3-b00e-b8ed7437bc6c"
-			systemID          string = "cb9ec8fa-b409-4ef3-9f42-d9283c47aac6"
-			tcpLBUUID         string = "d2e858b2-cb5a-441b-a670-ed450f79a91f"
-			udpLBUUID         string = "12832f14-eb0f-44d4-b8db-4cccbc73c792"
-			sctpLBUUID        string = "0514c521-a120-4756-aec6-883fe5db7139"
-			nodeSubnet        string = "10.1.1.0/24"
-			gwRouter          string = util.GWRouterPrefix + nodeName
-			mgtPortName       string = "k8s-" + nodeName
-			mgtPortIP         string = "10.1.1.2"
+			nodeName   string = "node1"
+			systemID   string = "cb9ec8fa-b409-4ef3-9f42-d9283c47aac6"
+			nodeSubnet string = "10.1.1.0/24"
 		)
 
 		fexec := ovntest.NewFakeExec()
@@ -291,19 +256,11 @@ var _ = Describe("Gateway Init Operations", func() {
 		app.Action = func(ctx *cli.Context) error {
 			const (
 				nodeName      string = "node1"
-				lrpMAC        string = "00:00:00:05:46:c3"
 				brLocalnetMAC string = "11:22:33:44:55:66"
-				lrpIP         string = "100.64.0.3"
 				brNextHopIp   string = "169.254.33.1"
 				brNextHopCIDR string = brNextHopIp + "/24"
 				systemID      string = "cb9ec8fa-b409-4ef3-9f42-d9283c47aac6"
-				tcpLBUUID     string = "d2e858b2-cb5a-441b-a670-ed450f79a91f"
-				udpLBUUID     string = "12832f14-eb0f-44d4-b8db-4cccbc73c792"
-				sctpLBUUID    string = "0514c521-a120-4756-aec6-883fe5db7139"
 				nodeSubnet    string = "10.1.1.0/24"
-				gwRouter      string = util.GWRouterPrefix + nodeName
-				clusterIPNet  string = "10.1.0.0"
-				clusterCIDR   string = clusterIPNet + "/16"
 			)
 
 			fexec := ovntest.NewFakeExec()
