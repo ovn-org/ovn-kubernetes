@@ -147,7 +147,8 @@ func (oc *Controller) AddNamespace(ns *kapi.Namespace) {
 	// Get all the pods in the namespace and append their IP to the
 	// address_set
 	existingPods, err := oc.watchFactory.GetPods(ns.Name)
-	addresses := make([]string, 0, len(existingPods))
+	// addrMap to only hold unique ip addresses
+	addrMap := make(map[string]struct{})
 	if err != nil {
 		klog.Errorf("Failed to get all the pods (%v)", err)
 	} else {
@@ -155,11 +156,15 @@ func (oc *Controller) AddNamespace(ns *kapi.Namespace) {
 			if pod.Status.PodIP != "" {
 				portName := podLogicalPortName(pod)
 				nsInfo.addressSet[pod.Status.PodIP] = portName
-				addresses = append(addresses, pod.Status.PodIP)
+				addrMap[pod.Status.PodIP] = struct{}{}
 			}
 		}
 	}
 
+	addresses := make([]string, 0, len(addrMap))
+	for addr := range addrMap {
+		addresses = append(addresses, addr)
+	}
 	// Create an address_set for the namespace.  All the pods' IP address
 	// in the namespace will be added to the address_set
 	createAddressSet(ns.Name, hashedAddressSet(ns.Name), addresses)
