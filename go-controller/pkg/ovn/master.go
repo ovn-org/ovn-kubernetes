@@ -599,10 +599,10 @@ func (oc *Controller) addNodeAnnotations(node *kapi.Node, subnet *net.IPNet) err
 	return nil
 }
 
-func (oc *Controller) addNode(node *kapi.Node) (hostsubnet *net.IPNet, err error) {
+func (oc *Controller) addNode(node *kapi.Node) (*net.IPNet, error) {
 	oc.clearInitialNodeNetworkUnavailableCondition(node, nil)
 
-	hostsubnet, _ = util.ParseNodeHostSubnetAnnotation(node)
+	hostsubnet, _ := util.ParseNodeHostSubnetAnnotation(node)
 	if hostsubnet != nil {
 		// Node already has subnet assigned; ensure its logical network is set up
 		return hostsubnet, oc.ensureNodeLogicalNetwork(node.Name, hostsubnet)
