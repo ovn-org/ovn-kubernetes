@@ -84,25 +84,25 @@ func UpdateNodeSwitchExcludeIPs(nodeName string, subnet *net.IPNet) error {
 		}
 	}
 
-	_, managementPortCIDR := GetNodeWellKnownAddresses(subnet)
+	mgmtIfAddr := GetNodeManagementIfAddr(subnet)
+	hybridOverlayIfAddr := GetNodeHybridOverlayIfAddr(subnet)
 	var excludeIPs string
 	if config.HybridOverlay.Enabled {
-		hybridOverlayIP := NextIP(managementPortCIDR.IP)
 		if haveHybridOverlayPort && haveManagementPort {
 			// no excluded IPs required
 		} else if !haveHybridOverlayPort && !haveManagementPort {
 			// exclude both
-			excludeIPs = managementPortCIDR.IP.String() + ".." + hybridOverlayIP.String()
+			excludeIPs = mgmtIfAddr.IP.String() + ".." + hybridOverlayIfAddr.IP.String()
 		} else if haveHybridOverlayPort {
 			// exclude management port IP
-			excludeIPs = managementPortCIDR.IP.String()
+			excludeIPs = mgmtIfAddr.IP.String()
 		} else if haveManagementPort {
 			// exclude hybrid overlay port IP
-			excludeIPs = hybridOverlayIP.String()
+			excludeIPs = hybridOverlayIfAddr.IP.String()
 		}
 	} else if !haveManagementPort {
 		// exclude management port IP
-		excludeIPs = managementPortCIDR.IP.String()
+		excludeIPs = mgmtIfAddr.IP.String()
 	}
 
 	args := []string{"--", "--if-exists", "remove", "logical_switch", nodeName, "other-config", "exclude_ips"}

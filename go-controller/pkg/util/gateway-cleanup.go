@@ -37,8 +37,8 @@ func GatewayCleanup(nodeName string, nodeSubnet *net.IPNet) error {
 	}
 
 	if nodeSubnet != nil {
-		_, mgtPortIP := GetNodeWellKnownAddresses(nodeSubnet)
-		nextHops = append(nextHops, mgtPortIP.IP)
+		mgmtIfAddr := GetNodeManagementIfAddr(nodeSubnet)
+		nextHops = append(nextHops, mgmtIfAddr.IP)
 	}
 	staticRouteCleanup(clusterRouter, nextHops)
 
