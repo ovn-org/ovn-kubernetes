@@ -32,37 +32,7 @@ metadata:
   namespace: ovn-kubernetes
 
 ---
-# for now throw in all the privileges to run a pod. we can fine grain it further later.
 
-apiVersion: policy/v1beta1
-kind: PodSecurityPolicy
-metadata:
-  name: ovn-kubernetes
-  annotations:
-    seccomp.security.alpha.kubernetes.io/allowedProfileNames: '*'
-spec:
-  allowPrivilegeEscalation: true
-  allowedCapabilities:
-  - '*'
-  fsGroup:
-    rule: RunAsAny
-  privileged: true
-  runAsUser:
-    rule: RunAsAny
-  seLinux:
-    rule: RunAsAny
-  supplementalGroups:
-    rule: RunAsAny
-  volumes:
-  - '*'
-  hostPID: true
-  hostIPC: true
-  hostNetwork: true
-  hostPorts:
-  - min: 0
-    max: 65536
-
----
 apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRole
 metadata:
@@ -99,14 +69,6 @@ rules:
   - nodes
   - pods
   verbs: ["patch", "update"]
-- apiGroups:
-  - extensions
-  - policy
-  resources:
-  - podsecuritypolicies
-  resourceNames:
-  - ovn-kubernetes
-  verbs: ["use"]
 
 ---
 apiVersion: rbac.authorization.k8s.io/v1
