@@ -332,18 +332,17 @@ func (oc *Controller) syncNodeManagementPort(node *kapi.Node, subnet *net.IPNet)
 		}
 	}
 
-	_, portIP := util.GetNodeWellKnownAddresses(subnet)
-
 	// Create this node's management logical port on the node switch
+	mgmtIfAddr := util.GetNodeManagementIfAddr(subnet)
 	stdout, stderr, err := util.RunOVNNbctl(
 		"--", "--may-exist", "lsp-add", node.Name, "k8s-"+node.Name,
-		"--", "lsp-set-addresses", "k8s-"+node.Name, macAddress.String()+" "+portIP.IP.String())
+		"--", "lsp-set-addresses", "k8s-"+node.Name, macAddress.String()+" "+mgmtIfAddr.IP.String())
 	if err != nil {
 		klog.Errorf("Failed to add logical port to switch, stdout: %q, stderr: %q, error: %v", stdout, stderr, err)
 		return err
 	}
 
-	if err := addAllowACLFromNode(node.Name, portIP.IP); err != nil {
+	if err := addAllowACLFromNode(node.Name, mgmtIfAddr.IP); err != nil {
 		return err
 	}
 
@@ -407,7 +406,6 @@ func addStaticRouteToHost(node *kapi.Node, nicIPs []*net.IPNet) error {
 		return fmt.Errorf("failed to get interface IP address for %s (%v)",
 			util.K8sMgmtIntfName, err)
 	}
-	_, secondIP := util.GetNodeWellKnownAddresses(subnet)
 	var prefix string
 	for _, nicIP := range nicIPs {
 		if utilnet.IsIPv6CIDR(subnet) {
@@ -425,24 +423,26 @@ func addStaticRouteToHost(node *kapi.Node, nicIPs []*net.IPNet) error {
 	if prefix == "" {
 		return fmt.Errorf("configuration error: no NIC IP of same family as hostsubnet")
 	}
-	nexthop := secondIP.IP.String()
-	_, stderr, err := util.RunOVNNbctl("--may-exist", "lr-route-add", k8sClusterRouter, prefix, nexthop)
+	nextHop := util.GetNodeManagementIfAddr(subnet).IP.String()
+	_, stderr, err := util.RunOVNNbctl("--may-exist", "lr-route-add", k8sClusterRouter, prefix, nextHop)
 	if err != nil {
 		return fmt.Errorf("failed to add static route '%s via %s' for host %q on %s "+
-			"stderr: %q, error: %v", prefix, secondIP, node.Name, k8sClusterRouter, stderr, err)
+			"stderr: %q, error: %v", prefix, nextHop, node.Name, k8sClusterRouter, stderr, err)
 	}
 
 	return nil
 }
 
 func (oc *Controller) ensureNodeLogicalNetwork(nodeName string, hostsubnet *net.IPNet) error {
-	firstIP, secondIP := util.GetNodeWellKnownAddresses(hostsubnet)
-	nodeLRPMAC := util.IPAddrToHWAddr(firstIP.IP)
+	gwIfAddr := util.GetNodeGatewayIfAddr(hostsubnet)
+	mgmtIfAddr := util.GetNodeManagementIfAddr(hostsubnet)
+	hybridOverlayIfAddr := util.GetNodeHybridOverlayIfAddr(hostsubnet)
+	nodeLRPMAC := util.IPAddrToHWAddr(gwIfAddr.IP)
 	clusterRouter := util.GetK8sClusterRouter()
 
 	// Create a router port and provide it the first address on the node's host subnet
 	_, stderr, err := util.RunOVNNbctl("--may-exist", "lrp-add", clusterRouter, "rtos-"+nodeName,
-		nodeLRPMAC.String(), firstIP.String())
+		nodeLRPMAC.String(), gwIfAddr.String())
 	if err != nil {
 		klog.Errorf("Failed to add logical port to router, stderr: %q, error: %v", stderr, err)
 		return err
@@ -459,10 +459,9 @@ func (oc *Controller) ensureNodeLogicalNetwork(nodeName string, hostsubnet *net.
 			"other-config:ipv6_prefix="+hostsubnet.IP.String(),
 		)
 	} else {
-		excludeIPs := secondIP.IP.String()
+		excludeIPs := mgmtIfAddr.IP.String()
 		if config.HybridOverlay.Enabled {
-			thirdIP := util.NextIP(secondIP.IP)
-			excludeIPs += ".." + thirdIP.String()
+			excludeIPs += ".." + hybridOverlayIfAddr.IP.String()
 		}
 		args = append(args,
 			"other-config:subnet="+hostsubnet.String(),
@@ -487,11 +486,11 @@ func (oc *Controller) ensureNodeLogicalNetwork(nodeName string, hostsubnet *net.
 
 		// Configure querier only if we have an IPv4 address, otherwise
 		// disable querier.
-		if !utilnet.IsIPv6(firstIP.IP) {
+		if !utilnet.IsIPv6(gwIfAddr.IP) {
 			stdout, stderr, err = util.RunOVNNbctl("set", "logical_switch",
 				nodeName, "other-config:mcast_querier=\"true\"",
 				"other-config:mcast_eth_src=\""+nodeLRPMAC.String()+"\"",
-				"other-config:mcast_ip4_src=\""+firstIP.IP.String()+"\"")
+				"other-config:mcast_ip4_src=\""+gwIfAddr.IP.String()+"\"")
 			if err != nil {
 				klog.Errorf("Failed to enable IGMP Querier on logical switch %v, stdout: %q, stderr: %q, error: %v",
 					nodeName, stdout, stderr, err)

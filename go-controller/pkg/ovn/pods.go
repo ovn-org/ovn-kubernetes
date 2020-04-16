@@ -326,8 +326,8 @@ func (oc *Controller) addLogicalPort(pod *kapi.Pod) error {
 	}
 
 	if annotation == nil {
-		gatewayCIDR, _ := util.GetNodeWellKnownAddresses(nodeSubnet)
-		routes, gwIP, err := getRoutesGatewayIP(pod, gatewayCIDR)
+		gwIfAddr := util.GetNodeGatewayIfAddr(nodeSubnet)
+		routes, gwIP, err := getRoutesGatewayIP(pod, gwIfAddr)
 		if err != nil {
 			return err
 		}

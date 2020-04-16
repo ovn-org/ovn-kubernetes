@@ -24,8 +24,8 @@ const (
 type managementPortIPFamilyConfig struct {
 	ipt        util.IPTablesHelper
 	allSubnets []*net.IPNet
-	ifIPMask   *net.IPNet
-	routerIP   net.IP
+	ifAddr     *net.IPNet
+	gwIP       net.IP
 }
 
 type managementPortConfig struct {
@@ -40,10 +40,10 @@ type managementPortConfig struct {
 func newManagementPortIPFamilyConfig(mpcfg *managementPortConfig, hostSubnet *net.IPNet, isIPv6 bool) (*managementPortIPFamilyConfig, error) {
 	var err error
 
-	cfg := &managementPortIPFamilyConfig{}
-	routerIP, portIP := util.GetNodeWellKnownAddresses(hostSubnet)
-	cfg.ifIPMask = portIP
-	cfg.routerIP = routerIP.IP
+	cfg := &managementPortIPFamilyConfig{
+		ifAddr: util.GetNodeManagementIfAddr(hostSubnet),
+		gwIP:   util.GetNodeGatewayIfAddr(hostSubnet).IP,
+	}
 
 	// capture all the subnets for which we need to add routes through management port
 	for _, subnet := range config.Default.ClusterSubnets {
@@ -57,7 +57,7 @@ func newManagementPortIPFamilyConfig(mpcfg *managementPortConfig, hostSubnet *ne
 		}
 	}
 
-	if utilnet.IsIPv6CIDR(cfg.ifIPMask) {
+	if utilnet.IsIPv6CIDR(cfg.ifAddr) {
 		cfg.ipt, err = util.GetIPTablesHelper(iptables.ProtocolIPv6)
 	} else {
 		cfg.ipt, err = util.GetIPTablesHelper(iptables.ProtocolIPv4)
@@ -114,9 +114,9 @@ func newManagementPortConfig(interfaceName string, hostSubnets []*net.IPNet) (*m
 	}
 
 	if mpcfg.ipv4 != nil {
-		mpcfg.routerMAC = util.IPAddrToHWAddr(mpcfg.ipv4.routerIP)
+		mpcfg.routerMAC = util.IPAddrToHWAddr(mpcfg.ipv4.gwIP)
 	} else if mpcfg.ipv6 != nil {
-		mpcfg.routerMAC = util.IPAddrToHWAddr(mpcfg.ipv6.routerIP)
+		mpcfg.routerMAC = util.IPAddrToHWAddr(mpcfg.ipv6.gwIP)
 	} else {
 		klog.Fatalf("Management port configured with neither IPv4 nor IPv6 subnets")
 	}
@@ -158,27 +158,27 @@ func setupManagementPortIPFamilyConfig(mpcfg *managementPortConfig, cfg *managem
 	var err error
 	var exists bool
 
-	if exists, err = util.LinkAddrExist(mpcfg.link, cfg.ifIPMask); err == nil && !exists {
+	if exists, err = util.LinkAddrExist(mpcfg.link, cfg.ifAddr); err == nil && !exists {
 		// we should log this so that one can debug as to why addresses are
 		// disappearing
 		warnings = append(warnings, fmt.Sprintf("missing IP address %s on the interface %s, adding it...",
-			cfg.ifIPMask, mpcfg.ifName))
-		err = util.LinkAddrAdd(mpcfg.link, cfg.ifIPMask)
+			cfg.ifAddr, mpcfg.ifName))
+		err = util.LinkAddrAdd(mpcfg.link, cfg.ifAddr)
 	}
 	if err != nil {
 		return warnings, err
 	}
 
 	for _, subnet := range cfg.allSubnets {
-		if exists, err = util.LinkRouteExists(mpcfg.link, cfg.routerIP, subnet); err == nil && !exists {
+		if exists, err = util.LinkRouteExists(mpcfg.link, cfg.gwIP, subnet); err == nil && !exists {
 			// we need to warn so that it can be debugged as to why routes are disappearing
 			warnings = append(warnings, fmt.Sprintf("missing route entry for subnet %s via gateway %s on link %v",
-				subnet, cfg.routerIP, mpcfg.ifName))
-			err = util.LinkRoutesAdd(mpcfg.link, cfg.routerIP, []*net.IPNet{subnet})
+				subnet, cfg.gwIP, mpcfg.ifName))
+			err = util.LinkRoutesAdd(mpcfg.link, cfg.gwIP, []*net.IPNet{subnet})
 			if err != nil {
 				if os.IsExist(err) {
 					klog.V(5).Infof("Ignoring error %s from 'route add %s via %s' - already added via IPv6 RA?",
-						err.Error(), subnet, cfg.routerIP)
+						err.Error(), subnet, cfg.gwIP)
 					continue
 				}
 			}
@@ -193,10 +193,10 @@ func setupManagementPortIPFamilyConfig(mpcfg *managementPortConfig, cfg *managem
 	// arrives on OVN Logical Router pipeline with ARP source protocol address set to
 	// K8s Node IP. OVN Logical Router pipeline drops such packets since it expects
 	// source protocol address to be in the Logical Switch's subnet.
-	if exists, err = util.LinkNeighExists(mpcfg.link, cfg.routerIP, mpcfg.routerMAC); err == nil && !exists {
+	if exists, err = util.LinkNeighExists(mpcfg.link, cfg.gwIP, mpcfg.routerMAC); err == nil && !exists {
 		warnings = append(warnings, fmt.Sprintf("missing arp entry for MAC/IP binding (%s/%s) on link %s",
-			mpcfg.routerMAC.String(), cfg.routerIP, util.K8sMgmtIntfName))
-		err = util.LinkNeighAdd(mpcfg.link, cfg.routerIP, mpcfg.routerMAC)
+			mpcfg.routerMAC.String(), cfg.gwIP, util.K8sMgmtIntfName))
+		err = util.LinkNeighAdd(mpcfg.link, cfg.gwIP, mpcfg.routerMAC)
 	}
 	if err != nil {
 		return warnings, err
@@ -211,7 +211,7 @@ func setupManagementPortIPFamilyConfig(mpcfg *managementPortConfig, cfg *managem
 	if err != nil {
 		return warnings, fmt.Errorf("could not set up iptables chain rules for management port: %v", err)
 	}
-	rule = []string{"-o", mpcfg.ifName, "-j", "SNAT", "--to-source", cfg.ifIPMask.IP.String(),
+	rule = []string{"-o", mpcfg.ifName, "-j", "SNAT", "--to-source", cfg.ifAddr.IP.String(),
 		"-m", "comment", "--comment", "OVN SNAT to Management Port"}
 	if exists, err = cfg.ipt.Exists("nat", iptableMgmPortChain, rule...); err == nil && !exists {
 		warnings = append(warnings, fmt.Sprintf("missing management port nat rule in chain %s, adding it",
