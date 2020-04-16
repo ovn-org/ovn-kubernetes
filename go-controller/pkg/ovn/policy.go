@@ -572,7 +572,7 @@ func getMulticastPortGroup(ns string) (string, string) {
 // - one "to-lport" ACL allowing ingress multicast traffic to pods in 'ns'.
 //   This matches only traffic originated by pods in 'ns' (based on the
 //   namespace address set).
-func (oc *Controller) createMulticastAllowPolicy(ns string) error {
+func (oc *Controller) createMulticastAllowPolicy(ns string, nsInfo *namespaceInfo) error {
 	portGroupName, portGroupHash := getMulticastPortGroup(ns)
 	portGroupUUID, err := createPortGroup(portGroupName, portGroupHash)
 	if err != nil {
@@ -597,7 +597,7 @@ func (oc *Controller) createMulticastAllowPolicy(ns string) error {
 	}
 
 	// Add all ports from this namespace to the multicast allow group.
-	for _, portName := range oc.namespaceAddressSet[ns] {
+	for _, portName := range nsInfo.addressSet {
 		if portInfo, err := oc.logicalPortCache.get(portName); err != nil {
 			klog.Errorf(err.Error())
 		} else if err := podAddAllowMulticastPolicy(ns, portInfo); err != nil {
@@ -930,19 +930,22 @@ func (oc *Controller) addNetworkPolicy(policy *knet.NetworkPolicy) {
 	klog.Infof("Adding network policy %s in namespace %s", policy.Name,
 		policy.Namespace)
 
-	if oc.namespacePolicies[policy.Namespace] != nil &&
-		oc.namespacePolicies[policy.Namespace][policy.Name] != nil {
-		return
-	}
-
-	err := oc.waitForNamespaceEvent(policy.Namespace)
+	nsInfo, err := oc.waitForNamespaceLocked(policy.Namespace)
 	if err != nil {
 		klog.Errorf("failed to wait for namespace %s event (%v)",
 			policy.Namespace, err)
 		return
 	}
+	_, alreadyExists := nsInfo.networkPolicies[policy.Name]
+	nsInfo.Unlock()
+	if alreadyExists {
+		return
+	}
 
 	np := NewNamespacePolicy(policy)
+	// FIXME: we ought to lock np (and add it to nsInfo while we still have that
+	// lock), but we can't because the handlePeer*Selector methods used below will
+	// deadlock if we pass an already-locked np to them.
 
 	// Create a port group for the policy. All the pods that this policy
 	// selects will be eventually added to this port group.
@@ -1078,31 +1081,47 @@ func (oc *Controller) addNetworkPolicy(policy *knet.NetworkPolicy) {
 		np.egressPolicies = append(np.egressPolicies, egress)
 	}
 
-	oc.namespacePolicies[policy.Namespace][policy.Name] = np
-
 	// For all the pods in the local namespace that this policy
 	// effects, add them to the port group.
 	oc.handleLocalPodSelector(policy, np)
+
+	nsInfo = oc.getNamespaceLocked(policy.Namespace)
+	if nsInfo == nil {
+		klog.Errorf("Namespace was deleted while we were processing NetworkPolicy; stray state may be left behind")
+		return
+	}
+	nsInfo.networkPolicies[policy.Name] = np
+	nsInfo.Unlock()
+}
+
+// deletes the namespacePolicy for policy and returns it, locked
+func (oc *Controller) deleteNetworkPolicyLocked(policy *knet.NetworkPolicy) *namespacePolicy {
+	nsInfo := oc.getNamespaceLocked(policy.Namespace)
+	if nsInfo == nil {
+		return nil
+	}
+	defer nsInfo.Unlock()
+
+	np := nsInfo.networkPolicies[policy.Name]
+	if np == nil {
+		return nil
+	}
+	np.Lock()
+
+	delete(nsInfo.networkPolicies, policy.Name)
+	np.deleted = true
+	return np
 }
 
 func (oc *Controller) deleteNetworkPolicy(policy *knet.NetworkPolicy) {
 	klog.Infof("Deleting network policy %s in namespace %s",
 		policy.Name, policy.Namespace)
 
-	if oc.namespacePolicies[policy.Namespace] == nil ||
-		oc.namespacePolicies[policy.Namespace][policy.Name] == nil {
-		klog.Errorf("Delete network policy %s in namespace %s "+
-			"received without getting a create event",
-			policy.Name, policy.Namespace)
+	np := oc.deleteNetworkPolicyLocked(policy)
+	if np == nil {
 		return
 	}
-	np := oc.namespacePolicies[policy.Namespace][policy.Name]
-
-	np.Lock()
 	defer np.Unlock()
-
-	// Mark the policy as deleted.
-	np.deleted = true
 
 	// We should now stop all the handlers go routines.
 	oc.shutdownHandlers(np)
@@ -1130,8 +1149,6 @@ func (oc *Controller) deleteNetworkPolicy(policy *knet.NetworkPolicy) {
 		hashedAddressSet := hashedAddressSet(localPeerPods)
 		deleteAddressSet(hashedAddressSet)
 	}
-
-	oc.namespacePolicies[policy.Namespace][policy.Name] = nil
 }
 
 // handlePeerPodSelectorAddUpdate adds the IP address of a pod that has been
