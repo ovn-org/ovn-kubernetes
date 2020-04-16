@@ -2,6 +2,7 @@ package ovn
 
 import (
 	"fmt"
+	"net"
 
 	"github.com/urfave/cli"
 	v1 "k8s.io/api/core/v1"
@@ -242,7 +243,7 @@ var _ = Describe("Master Operations", func() {
 			Expect(err).NotTo(HaveOccurred())
 
 			nodeAnnotator := kube.NewNodeAnnotator(&kube.Kube{fakeClient}, &testNode)
-			err = util.SetDisabledL3GatewayConfig(nodeAnnotator)
+			err = util.SetL3GatewayConfig(nodeAnnotator, &util.L3GatewayConfig{Mode: config.GatewayModeDisabled})
 			Expect(err).NotTo(HaveOccurred())
 			err = util.SetNodeManagementPortMACAddress(nodeAnnotator, ovntest.MustParseMAC(mgmtMAC))
 			Expect(err).NotTo(HaveOccurred())
@@ -324,7 +325,7 @@ var _ = Describe("Master Operations", func() {
 			Expect(err).NotTo(HaveOccurred())
 
 			nodeAnnotator := kube.NewNodeAnnotator(&kube.Kube{fakeClient}, &testNode)
-			err = util.SetDisabledL3GatewayConfig(nodeAnnotator)
+			err = util.SetL3GatewayConfig(nodeAnnotator, &util.L3GatewayConfig{Mode: config.GatewayModeDisabled})
 			Expect(err).NotTo(HaveOccurred())
 			err = util.SetNodeManagementPortMACAddress(nodeAnnotator, ovntest.MustParseMAC(mgmtMAC))
 			Expect(err).NotTo(HaveOccurred())
@@ -405,7 +406,7 @@ var _ = Describe("Master Operations", func() {
 			Expect(err).NotTo(HaveOccurred())
 
 			nodeAnnotator := kube.NewNodeAnnotator(&kube.Kube{fakeClient}, &testNode)
-			err = util.SetDisabledL3GatewayConfig(nodeAnnotator)
+			err = util.SetL3GatewayConfig(nodeAnnotator, &util.L3GatewayConfig{Mode: config.GatewayModeDisabled})
 			Expect(err).NotTo(HaveOccurred())
 			err = util.SetNodeManagementPortMACAddress(nodeAnnotator, ovntest.MustParseMAC(mgmtMAC))
 			Expect(err).NotTo(HaveOccurred())
@@ -595,7 +596,7 @@ subnet=%s
 			Expect(err).NotTo(HaveOccurred())
 
 			nodeAnnotator := kube.NewNodeAnnotator(&kube.Kube{fakeClient}, &masterNode)
-			err = util.SetDisabledL3GatewayConfig(nodeAnnotator)
+			err = util.SetL3GatewayConfig(nodeAnnotator, &util.L3GatewayConfig{Mode: config.GatewayModeDisabled})
 			Expect(err).NotTo(HaveOccurred())
 			err = util.SetNodeManagementPortMACAddress(nodeAnnotator, ovntest.MustParseMAC(masterMgmtPortMAC))
 			Expect(err).NotTo(HaveOccurred())
@@ -698,18 +699,17 @@ var _ = Describe("Gateway Init Operations", func() {
 			_, err = config.InitConfig(ctx, fexec, nil)
 			Expect(err).NotTo(HaveOccurred())
 
-			fexec.AddFakeCmd(&ovntest.ExpectedCmd{
-				Cmd:    "ovs-vsctl --timeout=15 --if-exists get Open_vSwitch . external_ids:system-id",
-				Output: systemID,
-			})
-
 			nodeAnnotator := kube.NewNodeAnnotator(&kube.Kube{fakeClient}, &testNode)
 			ifaceID := localnetBridgeName + "_" + nodeName
-			err = util.SetLocalL3GatewayConfig(nodeAnnotator, ifaceID,
-				ovntest.MustParseMAC(brLocalnetMAC),
-				ovntest.MustParseIPNet(localnetGatewayIP),
-				ovntest.MustParseIP(localnetGatewayNextHop),
-				true)
+			err = util.SetL3GatewayConfig(nodeAnnotator, &util.L3GatewayConfig{
+				Mode:           config.GatewayModeLocal,
+				ChassisID:      systemID,
+				InterfaceID:    ifaceID,
+				MACAddress:     ovntest.MustParseMAC(brLocalnetMAC),
+				IPAddresses:    []*net.IPNet{ovntest.MustParseIPNet(localnetGatewayIP)},
+				NextHops:       []net.IP{ovntest.MustParseIP(localnetGatewayNextHop)},
+				NodePortEnable: true,
+			})
 			Expect(err).NotTo(HaveOccurred())
 			err = util.SetNodeManagementPortMACAddress(nodeAnnotator, ovntest.MustParseMAC(brLocalnetMAC))
 			Expect(err).NotTo(HaveOccurred())
@@ -747,7 +747,7 @@ var _ = Describe("Gateway Init Operations", func() {
 			joinSwitch := util.JoinSwitchPrefix + nodeName
 			fexec.AddFakeCmdsNoOutputNoError([]string{
 				"ovn-nbctl --timeout=15 -- --if-exists remove logical_switch " + nodeName + " other-config exclude_ips",
-				"ovn-nbctl --timeout=15 -- --may-exist lr-add " + gwRouter + " -- set logical_router " + gwRouter + " options:chassis=" + systemID + " external_ids:physical_ip=169.254.33.2",
+				"ovn-nbctl --timeout=15 -- --may-exist lr-add " + gwRouter + " -- set logical_router " + gwRouter + " options:chassis=" + systemID + " external_ids:physical_ip=169.254.33.2 external_ids:physical_ips=169.254.33.2",
 				"ovn-nbctl --timeout=15 -- --may-exist ls-add " + joinSwitch,
 				"ovn-nbctl --timeout=15 -- --may-exist lsp-add " + joinSwitch + " jtor-" + gwRouter + " -- set logical_switch_port jtor-" + gwRouter + " type=router options:router-port=rtoj-" + gwRouter + " addresses=router",
 				"ovn-nbctl --timeout=15 -- --may-exist lrp-add " + gwRouter + " rtoj-" + gwRouter + " " + lrpMAC + " " + lrpIP + "/29",
@@ -771,11 +771,11 @@ var _ = Describe("Gateway Init Operations", func() {
 				"ovn-nbctl --timeout=15 --may-exist lr-nat-add " + gwRouter + " snat 169.254.33.2 " + clusterCIDR,
 			})
 			fexec.AddFakeCmd(&ovntest.ExpectedCmd{
-				Cmd:    "ovn-nbctl --timeout=15 get logical_router " + util.GWRouterPrefix + nodeName + " external_ids:physical_ip",
+				Cmd:    "ovn-nbctl --timeout=15 get logical_router " + util.GWRouterPrefix + nodeName + " external_ids:physical_ips",
 				Output: "169.254.33.2",
 			})
 			fexec.AddFakeCmdsNoOutputNoError([]string{
-				"ovn-nbctl --timeout=15 -- --may-exist lr-add " + gwRouter + " -- set logical_router " + gwRouter + " options:chassis=" + systemID + " external_ids:physical_ip=169.254.33.2",
+				"ovn-nbctl --timeout=15 -- --may-exist lr-add " + gwRouter + " -- set logical_router " + gwRouter + " options:chassis=" + systemID + " external_ids:physical_ip=169.254.33.2 external_ids:physical_ips=169.254.33.2",
 				"ovn-nbctl --timeout=15 -- --may-exist ls-add " + joinSwitch,
 				"ovn-nbctl --timeout=15 -- --may-exist lsp-add " + joinSwitch + " jtor-" + gwRouter + " -- set logical_switch_port jtor-" + gwRouter + " type=router options:router-port=rtoj-" + gwRouter + " addresses=router",
 				"ovn-nbctl --timeout=15 -- --may-exist lrp-add " + gwRouter + " rtoj-" + gwRouter + " " + lrpMAC + " " + lrpIP + "/29",
@@ -799,7 +799,7 @@ var _ = Describe("Gateway Init Operations", func() {
 				"ovn-nbctl --timeout=15 --may-exist lr-nat-add " + gwRouter + " snat 169.254.33.2 " + clusterCIDR,
 			})
 			fexec.AddFakeCmd(&ovntest.ExpectedCmd{
-				Cmd:    "ovn-nbctl --timeout=15 get logical_router " + util.GWRouterPrefix + nodeName + " external_ids:physical_ip",
+				Cmd:    "ovn-nbctl --timeout=15 get logical_router " + util.GWRouterPrefix + nodeName + " external_ids:physical_ips",
 				Output: "169.254.33.2",
 			})
 
@@ -884,18 +884,19 @@ var _ = Describe("Gateway Init Operations", func() {
 			_, err = config.InitConfig(ctx, fexec, nil)
 			Expect(err).NotTo(HaveOccurred())
 
-			fexec.AddFakeCmd(&ovntest.ExpectedCmd{
-				Cmd:    "ovs-vsctl --timeout=15 --if-exists get Open_vSwitch . external_ids:system-id",
-				Output: systemID,
-			})
-
 			nodeAnnotator := kube.NewNodeAnnotator(&kube.Kube{fakeClient}, &testNode)
 			ifaceID := physicalBridgeName + "_" + nodeName
-			err = util.SetSharedL3GatewayConfig(nodeAnnotator, ifaceID,
-				ovntest.MustParseMAC(physicalBridgeMAC),
-				ovntest.MustParseIPNet(physicalGatewayIPMask),
-				ovntest.MustParseIP(physicalGatewayNextHop),
-				true, 1024)
+			vlanID := uint(1024)
+			err = util.SetL3GatewayConfig(nodeAnnotator, &util.L3GatewayConfig{
+				Mode:           config.GatewayModeShared,
+				ChassisID:      systemID,
+				InterfaceID:    ifaceID,
+				MACAddress:     ovntest.MustParseMAC(physicalBridgeMAC),
+				IPAddresses:    []*net.IPNet{ovntest.MustParseIPNet(physicalGatewayIPMask)},
+				NextHops:       []net.IP{ovntest.MustParseIP(physicalGatewayNextHop)},
+				NodePortEnable: true,
+				VLANID:         &vlanID,
+			})
 			err = util.SetNodeManagementPortMACAddress(nodeAnnotator, ovntest.MustParseMAC(nodeMgmtPortMAC))
 			Expect(err).NotTo(HaveOccurred())
 			err = util.SetNodeHostSubnetAnnotation(nodeAnnotator, ovntest.MustParseIPNet(nodeSubnet))
@@ -932,7 +933,7 @@ var _ = Describe("Gateway Init Operations", func() {
 			joinSwitch := util.JoinSwitchPrefix + nodeName
 			fexec.AddFakeCmdsNoOutputNoError([]string{
 				"ovn-nbctl --timeout=15 -- --if-exists remove logical_switch " + nodeName + " other-config exclude_ips",
-				"ovn-nbctl --timeout=15 -- --may-exist lr-add " + gwRouter + " -- set logical_router " + gwRouter + " options:chassis=" + systemID + " external_ids:physical_ip=" + physicalGatewayIP,
+				"ovn-nbctl --timeout=15 -- --may-exist lr-add " + gwRouter + " -- set logical_router " + gwRouter + " options:chassis=" + systemID + " external_ids:physical_ip=" + physicalGatewayIP + " external_ids:physical_ips=" + physicalGatewayIP,
 				"ovn-nbctl --timeout=15 -- --may-exist ls-add " + joinSwitch,
 				"ovn-nbctl --timeout=15 -- --may-exist lsp-add " + joinSwitch + " jtor-" + gwRouter + " -- set logical_switch_port jtor-" + gwRouter + " type=router options:router-port=rtoj-" + gwRouter + " addresses=router",
 				"ovn-nbctl --timeout=15 -- --may-exist lrp-add " + gwRouter + " rtoj-" + gwRouter + " " + lrpMAC + " " + lrpIP + "/29",
@@ -960,11 +961,11 @@ var _ = Describe("Gateway Init Operations", func() {
 				"ovn-nbctl --timeout=15 --may-exist lr-route-add " + clusterRouter + " " + nodeIPMask + " " + nodeMgmtPortIP,
 			})
 			fexec.AddFakeCmd(&ovntest.ExpectedCmd{
-				Cmd:    "ovn-nbctl --timeout=15 get logical_router " + util.GWRouterPrefix + nodeName + " external_ids:physical_ip",
+				Cmd:    "ovn-nbctl --timeout=15 get logical_router " + util.GWRouterPrefix + nodeName + " external_ids:physical_ips",
 				Output: "169.254.33.2",
 			})
 			fexec.AddFakeCmdsNoOutputNoError([]string{
-				"ovn-nbctl --timeout=15 -- --may-exist lr-add " + gwRouter + " -- set logical_router " + gwRouter + " options:chassis=" + systemID + " external_ids:physical_ip=" + physicalGatewayIP,
+				"ovn-nbctl --timeout=15 -- --may-exist lr-add " + gwRouter + " -- set logical_router " + gwRouter + " options:chassis=" + systemID + " external_ids:physical_ip=" + physicalGatewayIP + " external_ids:physical_ips=" + physicalGatewayIP,
 				"ovn-nbctl --timeout=15 -- --may-exist ls-add " + joinSwitch,
 				"ovn-nbctl --timeout=15 -- --may-exist lsp-add " + joinSwitch + " jtor-" + gwRouter + " -- set logical_switch_port jtor-" + gwRouter + " type=router options:router-port=rtoj-" + gwRouter + " addresses=router",
 				"ovn-nbctl --timeout=15 -- --may-exist lrp-add " + gwRouter + " rtoj-" + gwRouter + " " + lrpMAC + " " + lrpIP + "/29",
@@ -993,7 +994,7 @@ var _ = Describe("Gateway Init Operations", func() {
 				"ovn-nbctl --timeout=15 --may-exist lr-route-add " + clusterRouter + " " + nodeIPMask + " " + nodeMgmtPortIP,
 			})
 			fexec.AddFakeCmd(&ovntest.ExpectedCmd{
-				Cmd:    "ovn-nbctl --timeout=15 get logical_router " + util.GWRouterPrefix + nodeName + " external_ids:physical_ip",
+				Cmd:    "ovn-nbctl --timeout=15 get logical_router " + util.GWRouterPrefix + nodeName + " external_ids:physical_ips",
 				Output: "169.254.33.2",
 			})
 

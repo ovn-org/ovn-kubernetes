@@ -202,10 +202,9 @@ echo "svc_cidr: ${svc_cidr}"
 echo "k8s_apiserver: ${k8s_apiserver}"
 echo "mtu: ${mtu}"
 
-sed "s,{{ net_cidr }},${net_cidr},
-s,{{ svc_cidr }},${svc_cidr},
-s,{{ mtu_value }},${mtu},
-s,{{ k8s_apiserver }},${k8s_apiserver}," ../templates/ovn-setup.yaml.j2 >../yaml/ovn-setup.yaml
+net_cidr=${net_cidr} svc_cidr=${svc_cidr} \
+  mtu_value=${mtu} k8s_apiserver=${k8s_apiserver} \
+  j2 ../templates/ovn-setup.yaml.j2 -o ../yaml/ovn-setup.yaml
 
 cp ../templates/ovnkube-monitor.yaml.j2 ../yaml/ovnkube-monitor.yaml
 

@@ -6,8 +6,8 @@ on:
     branches: [ master ]
 
 env:
-  GO_VERSION: 1.12
-  K8S_VERSION: v1.16.4
+  GO_VERSION: 1.13.4
+  K8S_VERSION: v1.17.2
   KIND_CLUSTER_NAME: ovn
   KIND_INSTALL_INGRESS: true
 
@@ -168,11 +168,11 @@ jobs:
       if: always()
       run: |
         mkdir -p /tmp/kind/logs 
-        kind export logs --name ${KIND_CLUSTER_NAME} /tmp/kind/logs
+        kind export logs --name ${KIND_CLUSTER_NAME} --loglevel=debug /tmp/kind/logs
 
     - name: Upload logs
       if: always()
       uses: actions/upload-artifact@v1
       with:
-        name: kind-logs-${{ github.run_id }}-${{ env.JOB_NAME }}
+        name: kind-logs-${{ env.JOB_NAME }}-${{ github.run_id }}
         path: /tmp/kind/logs
