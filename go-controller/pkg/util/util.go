@@ -9,7 +9,7 @@ import (
 	houtil "github.com/ovn-org/ovn-kubernetes/go-controller/hybrid-overlay/pkg/util"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
 
-	"github.com/urfave/cli"
+	"github.com/urfave/cli/v2"
 
 	"k8s.io/klog"
 )
