@@ -86,6 +86,7 @@ jobs:
     
     - name: Cache Kubernetes
       id: cache-k8s
+      if: github.event_name == 'push' || github.event_name == 'pull_request'
       uses: actions/cache@v1
       with:
         path: ${{ env.GOPATH }}/src/k8s.io/kubernetes/
@@ -155,6 +156,18 @@ jobs:
       with:
         path: "${{ env.GOPATH }}/src/k8s.io/kubernetes/"
         key: k8s-go-2-${{ env.K8S_VERSION }}
+
+    # Re-build if kube wasn't in the cache due to
+    # https://github.com/actions/cache/issues/107#issuecomment-598188250
+    # https://github.com/actions/cache/issues/208#issuecomment-596664572
+    - name: Build and install Kubernetes
+      if: steps.cache-k8s.outputs.cache-hit != 'true'
+      run: |
+        set -x
+        git clone --single-branch --branch $K8S_VERSION https://github.com/kubernetes/kubernetes.git $GOPATH/src/k8s.io/kubernetes/
+        pushd $GOPATH/src/k8s.io/kubernetes/
+        make WHAT="test/e2e/e2e.test vendor/github.com/onsi/ginkgo/ginkgo cmd/kubectl"
+        rm -rf .git
     
     - name: kind setup
       run: |
