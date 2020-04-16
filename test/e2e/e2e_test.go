@@ -5,6 +5,7 @@ import (
 	"net/http"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/onsi/ginkgo"
 	. "github.com/onsi/ginkgo"
@@ -103,6 +104,8 @@ var _ = Describe("e2e control plane", func() {
 		testPod := <-podChan
 		framework.Logf("Test pod running on %q", testPod.Spec.NodeName)
 
+		time.Sleep(5 * time.Second)
+
 		podClient := f.ClientSet.CoreV1().Pods("ovn-kubernetes")
 
 		podList, _ := podClient.List(metav1.ListOptions{})
@@ -129,6 +132,8 @@ var _ = Describe("e2e control plane", func() {
 
 		testPod := <-podChan
 		framework.Logf("Test pod running on %q", testPod.Spec.NodeName)
+
+		time.Sleep(5 * time.Second)
 
 		podClient := f.ClientSet.CoreV1().Pods("ovn-kubernetes")
 
