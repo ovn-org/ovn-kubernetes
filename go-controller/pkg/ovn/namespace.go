@@ -143,7 +143,7 @@ func (oc *Controller) AddNamespace(ns *kapi.Namespace) {
 		klog.Errorf("Failed to get all the pods (%v)", err)
 	} else {
 		for _, pod := range existingPods {
-			if pod.Status.PodIP != "" {
+			if pod.Status.PodIP != "" && !pod.Spec.HostNetwork {
 				portName := podLogicalPortName(pod)
 				nsInfo.addressSet[pod.Status.PodIP] = portName
 				addresses = append(addresses, pod.Status.PodIP)
