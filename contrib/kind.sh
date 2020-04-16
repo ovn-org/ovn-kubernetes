@@ -95,3 +95,18 @@ kind export kubeconfig --name ovn
 if [ "$KIND_INSTALL_INGRESS" == true ]; then
   run_kubectl create -f https://raw.githubusercontent.com/kubernetes/ingress-nginx/master/deploy/static/mandatory.yaml
 fi
+
+count=1
+until [ -z "$(kubectl get pod -A -o custom-columns=NAME:metadata.name,STATUS:.status.phase | tail -n +2 | grep -v Running)" ];do
+  if [ $count -gt 15 ]; then
+    echo "Some pods are not running after timeout"
+    exit 1
+  fi
+  echo "All pods not available yet on attempt $count:"
+  kubectl get pod -A
+  count=$((count+1))
+  sleep 10
+done
+echo "Pods are all up, allowing things settle for 30 seconds..."
+sleep 30
+
