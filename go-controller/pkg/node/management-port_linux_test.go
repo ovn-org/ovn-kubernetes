@@ -14,7 +14,7 @@ import (
 	"github.com/containernetworking/plugins/pkg/ns"
 	"github.com/containernetworking/plugins/pkg/testutils"
 	"github.com/coreos/go-iptables/iptables"
-	"github.com/urfave/cli"
+	"github.com/urfave/cli/v2"
 	"github.com/vishvananda/netlink"
 
 	v1 "k8s.io/api/core/v1"
