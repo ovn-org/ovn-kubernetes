@@ -16,6 +16,8 @@ import (
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/allocator"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
 
+	//egressfirewall "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/egressfirewall/v1"
+
 	kapi "k8s.io/api/core/v1"
 	kapisnetworking "k8s.io/api/networking/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -190,7 +192,7 @@ func (oc *Controller) Run() error {
 	}
 
 	for _, f := range []func() error{oc.WatchPods, oc.WatchServices, oc.WatchEndpoints,
-		oc.WatchNamespaces, oc.WatchNetworkPolicy} {
+		oc.WatchNamespaces, oc.WatchNetworkPolicy, oc.WatchEgressFirewall} {
 		if err := f(); err != nil {
 			return err
 		}
@@ -512,6 +514,24 @@ func (oc *Controller) WatchNetworkPolicy() error {
 			oc.deleteNetworkPolicy(policy)
 		},
 	}, oc.syncNetworkPolicies)
+	return err
+}
+
+// WatchEgressFirewall starts the watching of egressfirewall resource and calls
+// back the appropriate handler logic
+func (oc *Controller) WatchEgressFirewall() error {
+	_, err := oc.watchFactory.AddEgressFirewallHandler(cache.ResourceEventHandlerFuncs{
+		AddFunc: func(obj interface{}) {
+			//egressFirewall := obj.(*egressfirewall.EgressFirewall)
+			klog.Errorf("KEYWORD: ADDING NEW EGRESSFIREWALL")
+		},
+		UpdateFunc: func(old, newer interface{}) {
+			klog.Errorf("KEYWORD: UPDAING EXISTING EGRESSFIREWALL")
+		},
+		DeleteFunc: func(obj interface{}) {
+			klog.Errorf("KEYWORD: DELEING EXISTING EGRESSFIREWALL")
+		},
+	}, nil)
 	return err
 }
 

@@ -15,13 +15,15 @@ import (
 	"k8s.io/client-go/tools/clientcmd"
 	"k8s.io/client-go/util/cert"
 
+	egressfirewallclientset "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/egressfirewall/v1/apis/clientset/versioned"
+
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/cni/types"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
 )
 
 // NewClientset creates a Kubernetes clientset from either a kubeconfig,
 // TLS properties, or an apiserver URL
-func NewClientset(conf *config.KubernetesConfig) (*kubernetes.Clientset, error) {
+func NewClientset(conf *config.KubernetesConfig) (*kubernetes.Clientset, *egressfirewallclientset.Clientset, error) {
 	var kconfig *rest.Config
 	var err error
 
@@ -30,7 +32,7 @@ func NewClientset(conf *config.KubernetesConfig) (*kubernetes.Clientset, error) 
 		kconfig, err = clientcmd.BuildConfigFromFlags("", conf.Kubeconfig)
 	} else if strings.HasPrefix(conf.APIServer, "https") {
 		if conf.APIServer == "" || conf.Token == "" {
-			return nil, fmt.Errorf("TLS-secured apiservers require token and CA certificate")
+			return nil, nil, fmt.Errorf("TLS-secured apiservers require token and CA certificate")
 		}
 		kconfig = &rest.Config{
 			Host:        conf.APIServer,
@@ -38,7 +40,7 @@ func NewClientset(conf *config.KubernetesConfig) (*kubernetes.Clientset, error) 
 		}
 		if conf.CACert != "" {
 			if _, err := cert.NewPool(conf.CACert); err != nil {
-				return nil, err
+				return nil, nil, err
 			}
 			kconfig.TLSClientConfig = rest.TLSClientConfig{CAFile: conf.CACert}
 		}
@@ -51,13 +53,22 @@ func NewClientset(conf *config.KubernetesConfig) (*kubernetes.Clientset, error) 
 		kconfig, err = rest.InClusterConfig()
 	}
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 
 	kconfig.AcceptContentTypes = "application/vnd.kubernetes.protobuf,application/json"
 	kconfig.ContentType = "application/vnd.kubernetes.protobuf"
 
-	return kubernetes.NewForConfig(kconfig)
+	kClientset, err := kubernetes.NewForConfig(kconfig)
+	if err != nil {
+		return nil, nil, err
+	}
+	egressFirewallClientset, err := egressfirewallclientset.NewForConfig(kconfig)
+	if err != nil {
+		return nil, nil, err
+	}
+
+	return kClientset, egressFirewallClientset, nil
 }
 
 // IsClusterIPSet checks if the service is an headless service or not

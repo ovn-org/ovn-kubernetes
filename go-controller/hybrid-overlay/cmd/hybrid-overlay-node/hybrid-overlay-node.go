@@ -82,7 +82,7 @@ func runHybridOverlay(ctx *cli.Context) error {
 		return fmt.Errorf("missing node name; use the 'node' flag to provide one")
 	}
 
-	clientset, err := util.NewClientset(&config.Kubernetes)
+	clientset, egressFirewallClientset, err := util.NewClientset(&config.Kubernetes)
 	if err != nil {
 		return err
 	}
@@ -90,7 +90,7 @@ func runHybridOverlay(ctx *cli.Context) error {
 	stopChan := make(chan struct{})
 	defer close(stopChan)
 
-	factory, err := factory.NewWatchFactory(clientset, stopChan)
+	factory, err := factory.NewWatchFactory(clientset, egressFirewallClientset, stopChan)
 	if err != nil {
 		return err
 	}

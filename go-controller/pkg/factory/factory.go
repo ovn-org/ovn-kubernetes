@@ -10,6 +10,12 @@ import (
 
 	"k8s.io/klog"
 
+	egressfirewallapi "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/egressfirewall/v1"
+	egressfirewallclientset "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/egressfirewall/v1/apis/clientset/versioned"
+	egressfirewallscheme "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/egressfirewall/v1/apis/clientset/versioned/scheme"
+	egressfirewallinformerfactory "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/egressfirewall/v1/apis/informers/externalversions"
+	egressfirewalllister "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/egressfirewall/v1/apis/listers/egressfirewall/v1"
+
 	kapi "k8s.io/api/core/v1"
 	knet "k8s.io/api/networking/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -109,6 +115,7 @@ func (i *informer) forEachHandler(obj interface{}, f func(h *Handler)) {
 }
 
 func (i *informer) addHandler(id uint64, filterFunc func(obj interface{}) bool, funcs cache.ResourceEventHandler, existingItems []interface{}) *Handler {
+
 	handler := &Handler{
 		cache.FilteringResourceEventHandler{
 			FilterFunc: filterFunc,
@@ -298,6 +305,8 @@ func newInformerLister(oType reflect.Type, sharedInformer cache.SharedIndexInfor
 		return listers.NewNodeLister(sharedInformer.GetIndexer()), nil
 	case policyType:
 		return nil, nil
+	case egressFirewallType:
+		return egressfirewalllister.NewEgressFirewallLister(sharedInformer.GetIndexer()), nil
 	}
 
 	return nil, fmt.Errorf("cannot create lister from type %v", oType)
@@ -385,6 +394,7 @@ type WatchFactory struct {
 	handlerCounter uint64
 
 	iFactory  informerfactory.SharedInformerFactory
+	efFactory egressfirewallinformerfactory.SharedInformerFactory
 	informers map[reflect.Type]*informer
 }
 
@@ -415,16 +425,18 @@ const (
 )
 
 var (
-	podType       reflect.Type = reflect.TypeOf(&kapi.Pod{})
-	serviceType   reflect.Type = reflect.TypeOf(&kapi.Service{})
-	endpointsType reflect.Type = reflect.TypeOf(&kapi.Endpoints{})
-	policyType    reflect.Type = reflect.TypeOf(&knet.NetworkPolicy{})
-	namespaceType reflect.Type = reflect.TypeOf(&kapi.Namespace{})
-	nodeType      reflect.Type = reflect.TypeOf(&kapi.Node{})
+	podType            reflect.Type = reflect.TypeOf(&kapi.Pod{})
+	serviceType        reflect.Type = reflect.TypeOf(&kapi.Service{})
+	endpointsType      reflect.Type = reflect.TypeOf(&kapi.Endpoints{})
+	policyType         reflect.Type = reflect.TypeOf(&knet.NetworkPolicy{})
+	namespaceType      reflect.Type = reflect.TypeOf(&kapi.Namespace{})
+	nodeType           reflect.Type = reflect.TypeOf(&kapi.Node{})
+	egressFirewallType reflect.Type = reflect.TypeOf(&egressfirewallapi.EgressFirewall{})
 )
 
 // NewWatchFactory initializes a new watch factory
-func NewWatchFactory(c kubernetes.Interface, stopChan chan struct{}) (*WatchFactory, error) {
+func NewWatchFactory(c kubernetes.Interface, ec egressfirewallclientset.Interface, stopChan chan struct{}) (*WatchFactory, error) {
+
 	// resync time is 12 hours, none of the resources being watched in ovn-kubernetes have
 	// any race condition where a resync may be required e.g. cni executable on node watching for
 	// events on pods and assuming that an 'ADD' event will contain the annotations put in by
@@ -432,9 +444,16 @@ func NewWatchFactory(c kubernetes.Interface, stopChan chan struct{}) (*WatchFact
 	// the downside of making it tight (like 10 minutes) is needless spinning on all resources
 	wf := &WatchFactory{
 		iFactory:  informerfactory.NewSharedInformerFactory(c, resyncInterval),
+		efFactory: egressfirewallinformerfactory.NewSharedInformerFactory(ec, resyncInterval),
 		informers: make(map[reflect.Type]*informer),
 	}
 	var err error
+
+	err = egressfirewallapi.AddToScheme(egressfirewallscheme.Scheme)
+	if err != nil {
+		return nil, err
+	}
+
 	// Create shared informers we know we'll use
 	wf.informers[podType], err = newInformer(podType, wf.iFactory.Core().V1().Pods().Informer())
 	if err != nil {
@@ -456,10 +475,15 @@ func NewWatchFactory(c kubernetes.Interface, stopChan chan struct{}) (*WatchFact
 	if err != nil {
 		return nil, err
 	}
+	wf.informers[egressFirewallType], err = newInformer(egressFirewallType, wf.efFactory.K8s().V1().EgressFirewalls().Informer())
+	if err != nil {
+		return nil, err
+	}
 	wf.informers[nodeType], err = newQueuedInformer(nodeType, wf.iFactory.Core().V1().Nodes().Informer(), stopChan)
 	if err != nil {
 		return nil, err
 	}
+	wf.efFactory.Start(stopChan)
 
 	wf.iFactory.Start(stopChan)
 	for oType, synced := range wf.iFactory.WaitForCacheSync(stopChan) {
@@ -505,6 +529,10 @@ func getObjectMeta(objType reflect.Type, obj interface{}) (*metav1.ObjectMeta, e
 	case nodeType:
 		if node, ok := obj.(*kapi.Node); ok {
 			return &node.ObjectMeta, nil
+		}
+	case egressFirewallType:
+		if egressFirewall, ok := obj.(*egressfirewallapi.EgressFirewall); ok {
+			return &egressFirewall.ObjectMeta, nil
 		}
 	}
 	return nil, fmt.Errorf("cannot get ObjectMeta from type %v", objType)
@@ -616,6 +644,16 @@ func (wf *WatchFactory) AddPolicyHandler(handlerFuncs cache.ResourceEventHandler
 // RemovePolicyHandler removes a NetworkPolicy object event handler function
 func (wf *WatchFactory) RemovePolicyHandler(handler *Handler) error {
 	return wf.removeHandler(policyType, handler)
+}
+
+// AddEgressFirewallHandler adds a handler function that will be executed on EgressFirewall object changes
+func (wf *WatchFactory) AddEgressFirewallHandler(handlerFuncs cache.ResourceEventHandler, processExisting func([]interface{})) (*Handler, error) {
+	return wf.addHandler(egressFirewallType, "", nil, handlerFuncs, processExisting)
+}
+
+// RemoveEgressFirewallHandler removes an EgressFirewall object event handler function
+func (wf *WatchFactory) RemoveEgressFirewallHandler(handler *Handler) error {
+	return wf.removeHandler(egressFirewallType, handler)
 }
 
 // AddNamespaceHandler adds a handler function that will be executed on Namespace object changes
