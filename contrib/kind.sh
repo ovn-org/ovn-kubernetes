@@ -103,7 +103,7 @@ until [ -z "$(kubectl get pod -A -o custom-columns=NAME:metadata.name,STATUS:.st
     exit 1
   fi
   echo "All pods not available yet on attempt $count:"
-  kubectl get pod -A
+  kubectl get pod -A || true
   count=$((count+1))
   sleep 10
 done
