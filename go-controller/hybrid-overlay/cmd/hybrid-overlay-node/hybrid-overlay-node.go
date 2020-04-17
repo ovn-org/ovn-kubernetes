@@ -1,8 +1,11 @@
 package main
 
 import (
+	"context"
 	"fmt"
 	"os"
+	"os/signal"
+	"syscall"
 
 	"github.com/urfave/cli/v2"
 
@@ -36,8 +39,32 @@ func main() {
 		return nil
 	}
 
-	if err := c.Run(os.Args); err != nil {
-		klog.Fatal(err)
+	ctx := context.Background()
+
+	// trap SIGHUP, SIGINT, SIGTERM, SIGQUIT and
+	// cancel the context
+	ctx, cancel := context.WithCancel(ctx)
+	exitCh := make(chan os.Signal, 1)
+	signal.Notify(exitCh,
+		syscall.SIGHUP,
+		syscall.SIGINT,
+		syscall.SIGTERM,
+		syscall.SIGQUIT)
+	defer func() {
+		signal.Stop(exitCh)
+		cancel()
+	}()
+	go func() {
+		select {
+		case s := <-exitCh:
+			klog.Infof("Received signal %s. Shutting down", s)
+			cancel()
+		case <-ctx.Done():
+		}
+	}()
+
+	if err := c.RunContext(ctx, os.Args); err != nil {
+		klog.Exit(err)
 	}
 }
 
@@ -73,6 +100,8 @@ func runHybridOverlay(ctx *cli.Context) error {
 		return err
 	}
 
-	// run forever
-	select {}
+	// run until cancelled
+	<-ctx.Context.Done()
+	stopChan <- struct{}{}
+	return nil
 }
