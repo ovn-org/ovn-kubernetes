@@ -45,6 +45,13 @@ type Request struct {
 	Config []byte `json:"config,omitempty"`
 }
 
+// CNIRequestMetrics info to report from CNI shim to CNI server
+type CNIRequestMetrics struct {
+	Command     command `json:"command"`
+	ElapsedTime float64 `json:"elapsedTime"`
+	HasErr      bool    `json:"hasErr"`
+}
+
 // Response sent to the OVN CNI plugin by the Server
 type Response struct {
 	Result    *current.Result

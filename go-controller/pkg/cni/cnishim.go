@@ -14,6 +14,7 @@ import (
 	"os"
 	"runtime"
 	"strings"
+	"time"
 
 	"github.com/containernetworking/cni/pkg/skel"
 	"github.com/containernetworking/cni/pkg/types"
@@ -55,7 +56,7 @@ func newCNIRequest(args *skel.CmdArgs) *Request {
 
 // Send a CNI request to the CNI server via JSON + HTTP over a root-owned unix socket,
 // and return the result
-func (p *Plugin) doCNI(url string, req *Request) ([]byte, error) {
+func (p *Plugin) doCNI(url string, req interface{}) ([]byte, error) {
 	data, err := json.Marshal(req)
 	if err != nil {
 		return nil, fmt.Errorf("failed to marshal CNI request %v: %v", req, err)
@@ -93,8 +94,24 @@ func (p *Plugin) doCNI(url string, req *Request) ([]byte, error) {
 	return body, nil
 }
 
+// report the CNI request processing time to CNI server. This is used for the cni_request_duration_seconds metrics
+func (p *Plugin) postMetrics(startTime time.Time, cmd command, err error) {
+	elapsedTime := time.Since(startTime).Seconds()
+	_, _ = p.doCNI("http://dummy/metrics", &CNIRequestMetrics{
+		Command:     cmd,
+		ElapsedTime: elapsedTime,
+		HasErr:      err != nil,
+	})
+}
+
 // CmdAdd is the callback for 'add' cni calls from skel
 func (p *Plugin) CmdAdd(args *skel.CmdArgs) error {
+	var err error
+
+	startTime := time.Now()
+	defer func() {
+		p.postMetrics(startTime, CNIAdd, err)
+	}()
 
 	// read the config stdin args to obtain cniVersion
 	conf, err := config.ReadCNIConfig(args.StdinData)
@@ -130,7 +147,9 @@ func (p *Plugin) CmdAdd(args *skel.CmdArgs) error {
 
 // CmdDel is the callback for 'teardown' cni calls from skel
 func (p *Plugin) CmdDel(args *skel.CmdArgs) error {
+	startTime := time.Now()
 	_, err := p.doCNI("http://dummy/", newCNIRequest(args))
+	p.postMetrics(startTime, CNIDel, err)
 	return err
 }
 
