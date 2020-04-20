@@ -752,7 +752,7 @@ ovn-master() {
   wait_for_event ovs_ready
 
   hybrid_overlay_flags=
-  if [[ -n "${ovn_hybrid_overlay_enable}" ]]; then
+  if [[ ${ovn_hybrid_overlay_enable} == "true" ]]; then
     hybrid_overlay_flags="--enable-hybrid-overlay"
     if [[ -n "${ovn_hybrid_overlay_net_cidr}" ]]; then
       hybrid_overlay_flags="${hybrid_overlay_flags} --hybrid-overlay-cluster-subnets=${ovn_hybrid_overlay_net_cidr}"

@@ -117,11 +117,16 @@ jobs:
       fail-fast: false
       matrix:
         target:
-          - shard-n
-          - shard-np
-          - shard-s
-          - shard-other
-          - control-plane
+          - shard: shard-n
+            hybrid-overlay: false
+          - shard: shard-np
+            hybrid-overlay: false
+          - shard: shard-s
+            hybrid-overlay: false
+          - shard: shard-other
+            hybrid-overlay: false
+          - shard: control-plane
+            hybrid-overlay: true
         ha:
          - enabled: "true"
            name: "HA"
@@ -129,8 +134,9 @@ jobs:
            name: "noHA"
     needs: k8s
     env:
-      JOB_NAME: "${{ matrix.target }}-${{ matrix.ha.name }}"
+      JOB_NAME: "${{ matrix.target.shard }}-${{ matrix.ha.name }}"
       KIND_HA: "${{ matrix.ha.enabled }}"
+      OVN_HYBRID_OVERLAY_ENABLE: "${{ matrix.target.hybrid-overlay }}"
     steps:
 
     - name: Free up disk space
@@ -178,7 +184,7 @@ jobs:
 
     - name: Run Tests
       run: |
-        make -C test ${{ matrix.target }}
+        make -C test ${{ matrix.target.shard }}
 
     - name: Export logs
       if: always()
