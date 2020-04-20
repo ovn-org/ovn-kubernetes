@@ -87,12 +87,24 @@ func GetOVSPortMACAddress(portName string) (net.HardwareAddr, error) {
 	return net.ParseMAC(macAddress)
 }
 
-// GetNodeWellKnownAddresses returns routerIP, Management Port IP and prefix len
-// for a given subnet
-func GetNodeWellKnownAddresses(subnet *net.IPNet) (*net.IPNet, *net.IPNet) {
-	routerIP := NextIP(subnet.IP)
-	return &net.IPNet{IP: routerIP, Mask: subnet.Mask},
-		&net.IPNet{IP: NextIP(routerIP), Mask: subnet.Mask}
+// GetNodeGatewayIfAddr returns the node logical switch gateway address
+// (the ".1" address)
+func GetNodeGatewayIfAddr(subnet *net.IPNet) *net.IPNet {
+	return &net.IPNet{IP: NextIP(subnet.IP), Mask: subnet.Mask}
+}
+
+// GetNodeManagementIfAddr returns the node logical switch management port address
+// (the ".2" address)
+func GetNodeManagementIfAddr(subnet *net.IPNet) *net.IPNet {
+	gwIfAddr := GetNodeGatewayIfAddr(subnet)
+	return &net.IPNet{IP: NextIP(gwIfAddr.IP), Mask: subnet.Mask}
+}
+
+// GetNodeHybridOverlayIfAddr returns the node logical switch hybrid overlay
+// port address (the ".3" address)
+func GetNodeHybridOverlayIfAddr(subnet *net.IPNet) *net.IPNet {
+	mgmtIfAddr := GetNodeManagementIfAddr(subnet)
+	return &net.IPNet{IP: NextIP(mgmtIfAddr.IP), Mask: subnet.Mask}
 }
 
 // JoinHostPortInt32 is like net.JoinHostPort(), but with an int32 for the port

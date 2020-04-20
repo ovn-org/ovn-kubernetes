@@ -5,6 +5,7 @@ import (
 	"net"
 	"strings"
 
+	kapi "k8s.io/api/core/v1"
 	"k8s.io/klog"
 )
 
@@ -37,8 +38,8 @@ func GatewayCleanup(nodeName string, nodeSubnet *net.IPNet) error {
 	}
 
 	if nodeSubnet != nil {
-		_, mgtPortIP := GetNodeWellKnownAddresses(nodeSubnet)
-		nextHops = append(nextHops, mgtPortIP.IP)
+		mgmtIfAddr := GetNodeManagementIfAddr(nodeSubnet)
+		nextHops = append(nextHops, mgmtIfAddr.IP)
 	}
 	staticRouteCleanup(clusterRouter, nextHops)
 
@@ -78,25 +79,18 @@ func GatewayCleanup(nodeName string, nodeSubnet *net.IPNet) error {
 	if err != nil {
 		return err
 	}
-	if k8sNSLbTCP != "" {
-		_, stderr, err = RunOVNNbctl("lb-del", k8sNSLbTCP)
-		if err != nil {
-			return fmt.Errorf("failed to delete Gateway router %s's TCP load balancer %s, stderr: %q, "+
-				"error: %v", gatewayRouter, k8sNSLbTCP, stderr, err)
-		}
+	protoLBMap := map[kapi.Protocol]string{
+		kapi.ProtocolTCP:  k8sNSLbTCP,
+		kapi.ProtocolUDP:  k8sNSLbUDP,
+		kapi.ProtocolSCTP: k8sNSLbSCTP,
 	}
-	if k8sNSLbUDP != "" {
-		_, stderr, err = RunOVNNbctl("lb-del", k8sNSLbUDP)
-		if err != nil {
-			return fmt.Errorf("failed to delete Gateway router %s's UDP load balancer %s, stderr: %q, "+
-				"error: %v", gatewayRouter, k8sNSLbUDP, stderr, err)
-		}
-	}
-	if k8sNSLbSCTP != "" {
-		_, stderr, err = RunOVNNbctl("lb-del", k8sNSLbSCTP)
-		if err != nil {
-			return fmt.Errorf("failed to delete Gateway router %s's SCTP load balancer %s, stderr: %q, "+
-				"error: %v", gatewayRouter, k8sNSLbSCTP, stderr, err)
+	for proto, uuid := range protoLBMap {
+		if uuid != "" {
+			_, stderr, err = RunOVNNbctl("lb-del", uuid)
+			if err != nil {
+				return fmt.Errorf("failed to delete Gateway router %s's %s load balancer %s, stderr: %q, "+
+					"error: %v", gatewayRouter, proto, uuid, stderr, err)
+			}
 		}
 	}
 	return nil

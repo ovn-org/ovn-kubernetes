@@ -97,7 +97,7 @@ type configSubnet struct {
 	subnet     *net.IPNet
 }
 
-// configSubnets represets a set of configured subnets (and their names)
+// configSubnets represents a set of configured subnets (and their names)
 type configSubnets struct {
 	subnets []configSubnet
 	v4      map[configSubnetType]bool

@@ -118,11 +118,7 @@ func (m *MasterController) handleOverlayPort(node *kapi.Node, annotator kube.Ann
 	portMAC, portIP, _ := util.GetPortAddresses(portName)
 	if portMAC == nil || portIP == nil {
 		if portIP == nil {
-			// Get the 3rd address in the node's subnet; the first is taken
-			// by the k8s-cluster-router port, the second by the management port
-			first := util.NextIP(subnet.IP)
-			second := util.NextIP(first)
-			portIP = util.NextIP(second)
+			portIP = util.GetNodeHybridOverlayIfAddr(subnet).IP
 		}
 		if portMAC == nil {
 			portMAC = util.IPAddrToHWAddr(portIP)
