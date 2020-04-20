@@ -1241,6 +1241,7 @@ func initConfigWithPath(ctx *cli.Context, exec kexec.Interface, saPath string, d
 	klog.V(5).Infof("Logging config: %+v", Logging)
 	klog.V(5).Infof("CNI config: %+v", CNI)
 	klog.V(5).Infof("Kubernetes config: %+v", Kubernetes)
+	klog.V(5).Infof("Gateway config: %+v", Gateway)
 	klog.V(5).Infof("OVN North config: %+v", OvnNorth)
 	klog.V(5).Infof("OVN South config: %+v", OvnSouth)
 	klog.V(5).Infof("Hybrid Overlay config: %+v", HybridOverlay)

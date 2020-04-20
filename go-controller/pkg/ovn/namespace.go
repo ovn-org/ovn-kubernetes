@@ -2,10 +2,10 @@ package ovn
 
 import (
 	"fmt"
-	"sync"
 	"time"
 
 	kapi "k8s.io/api/core/v1"
+	utilwait "k8s.io/apimachinery/pkg/util/wait"
 	"k8s.io/klog"
 )
 
@@ -37,45 +37,25 @@ func (oc *Controller) syncNamespaces(namespaces []interface{}) {
 	}
 }
 
-func (oc *Controller) waitForNamespaceEvent(namespace string) error {
-	// Wait for 10 seconds to get the namespace event.
-	count := 100
-	for {
-		if oc.namespacePolicies[namespace] != nil {
-			break
-		}
-		time.Sleep(100 * time.Millisecond)
-		count--
-		if count == 0 {
-			return fmt.Errorf("timeout waiting for namespace event")
-		}
-	}
-	return nil
-}
-
 func (oc *Controller) addPodToNamespace(ns string, portInfo *lpInfo) error {
-	mutex := oc.getNamespaceLock(ns)
-	if mutex == nil {
+	nsInfo := oc.getNamespaceLocked(ns)
+	if nsInfo == nil {
 		return nil
 	}
-	defer mutex.Unlock()
-
-	if oc.namespacePolicies[ns] == nil {
-		return nil
-	}
+	defer nsInfo.Unlock()
 
 	// If pod has already been added, nothing to do.
 	address := portInfo.ip.String()
-	if oc.namespaceAddressSet[ns][address] != "" {
+	if nsInfo.addressSet[address] != "" {
 		return nil
 	}
 
-	oc.namespaceAddressSet[ns][address] = portInfo.name
+	nsInfo.addressSet[address] = portInfo.name
 	addToAddressSet(hashedAddressSet(ns), address)
 
 	// If multicast is allowed and enabled for the namespace, add the port
 	// to the allow policy.
-	if oc.multicastSupport && oc.multicastEnabled[ns] {
+	if oc.multicastSupport && nsInfo.multicastEnabled {
 		if err := podAddAllowMulticastPolicy(ns, portInfo); err != nil {
 			return err
 		}
@@ -85,22 +65,22 @@ func (oc *Controller) addPodToNamespace(ns string, portInfo *lpInfo) error {
 }
 
 func (oc *Controller) deletePodFromNamespace(ns string, portInfo *lpInfo) error {
-	mutex := oc.getNamespaceLock(ns)
-	if mutex == nil {
+	nsInfo := oc.getNamespaceLocked(ns)
+	if nsInfo == nil {
 		return nil
 	}
-	defer mutex.Unlock()
+	defer nsInfo.Unlock()
 
 	address := portInfo.ip.String()
-	if oc.namespaceAddressSet[ns][address] == "" {
+	if nsInfo.addressSet[address] == "" {
 		return nil
 	}
 
-	delete(oc.namespaceAddressSet[ns], address)
+	delete(nsInfo.addressSet, address)
 	removeFromAddressSet(hashedAddressSet(ns), address)
 
 	// Remove the port from the multicast allow policy.
-	if oc.multicastSupport && oc.multicastEnabled[ns] {
+	if oc.multicastSupport && nsInfo.multicastEnabled {
 		if err := podDeleteAllowMulticastPolicy(ns, portInfo); err != nil {
 			return err
 		}
@@ -112,13 +92,13 @@ func (oc *Controller) deletePodFromNamespace(ns string, portInfo *lpInfo) error 
 // Creates an explicit "allow" policy for multicast traffic within the
 // namespace if multicast is enabled. Otherwise, removes the "allow" policy.
 // Traffic will be dropped by the default multicast deny ACL.
-func (oc *Controller) multicastUpdateNamespace(ns *kapi.Namespace) {
+func (oc *Controller) multicastUpdateNamespace(ns *kapi.Namespace, nsInfo *namespaceInfo) {
 	if !oc.multicastSupport {
 		return
 	}
 
 	enabled := (ns.Annotations[nsMulticastAnnotation] == "true")
-	enabledOld := oc.multicastEnabled[ns.Name]
+	enabledOld := nsInfo.multicastEnabled
 
 	if enabledOld == enabled {
 		return
@@ -126,7 +106,7 @@ func (oc *Controller) multicastUpdateNamespace(ns *kapi.Namespace) {
 
 	var err error
 	if enabled {
-		err = oc.createMulticastAllowPolicy(ns.Name)
+		err = oc.createMulticastAllowPolicy(ns.Name, nsInfo)
 	} else {
 		err = deleteMulticastAllowPolicy(ns.Name)
 	}
@@ -135,112 +115,158 @@ func (oc *Controller) multicastUpdateNamespace(ns *kapi.Namespace) {
 		return
 	}
 
-	oc.multicastEnabled[ns.Name] = enabled
+	nsInfo.multicastEnabled = enabled
 }
 
 // Cleans up the multicast policy for this namespace if multicast was
 // previously allowed.
-func (oc *Controller) multicastDeleteNamespace(ns *kapi.Namespace) {
-	if oc.multicastEnabled[ns.Name] {
+func (oc *Controller) multicastDeleteNamespace(ns *kapi.Namespace, nsInfo *namespaceInfo) {
+	if nsInfo.multicastEnabled {
 		if err := deleteMulticastAllowPolicy(ns.Name); err != nil {
 			klog.Errorf(err.Error())
 		}
 	}
-	delete(oc.multicastEnabled, ns.Name)
+	nsInfo.multicastEnabled = false
 }
 
 // AddNamespace creates corresponding addressset in ovn db
 func (oc *Controller) AddNamespace(ns *kapi.Namespace) {
 	klog.V(5).Infof("Adding namespace: %s", ns.Name)
-	oc.namespaceMutexMutex.Lock()
-	if oc.namespaceMutex[ns.Name] == nil {
-		oc.namespaceMutex[ns.Name] = &sync.Mutex{}
-	}
-
-	// A big fat lock per namespace to prevent race conditions
-	// with namespace resources like address sets and deny acls.
-	oc.namespaceMutex[ns.Name].Lock()
-	defer oc.namespaceMutex[ns.Name].Unlock()
-	oc.namespaceMutexMutex.Unlock()
-
-	oc.namespaceAddressSet[ns.Name] = make(map[string]string)
+	nsInfo := oc.createNamespaceLocked(ns.Name)
+	defer nsInfo.Unlock()
 
 	// Get all the pods in the namespace and append their IP to the
 	// address_set
 	existingPods, err := oc.watchFactory.GetPods(ns.Name)
+	addresses := make([]string, 0, len(existingPods))
 	if err != nil {
 		klog.Errorf("Failed to get all the pods (%v)", err)
 	} else {
 		for _, pod := range existingPods {
-			if pod.Status.PodIP != "" {
+			if pod.Status.PodIP != "" && !pod.Spec.HostNetwork {
 				portName := podLogicalPortName(pod)
-				oc.namespaceAddressSet[ns.Name][pod.Status.PodIP] = portName
+				nsInfo.addressSet[pod.Status.PodIP] = portName
+				addresses = append(addresses, pod.Status.PodIP)
 			}
 		}
-	}
-
-	addresses := make([]string, 0)
-	for address := range oc.namespaceAddressSet[ns.Name] {
-		addresses = append(addresses, address)
 	}
 
 	// Create an address_set for the namespace.  All the pods' IP address
 	// in the namespace will be added to the address_set
 	createAddressSet(ns.Name, hashedAddressSet(ns.Name), addresses)
 
-	oc.namespacePolicies[ns.Name] = make(map[string]*namespacePolicy)
-	oc.multicastUpdateNamespace(ns)
+	oc.multicastUpdateNamespace(ns, nsInfo)
 }
 
 func (oc *Controller) updateNamespace(old, newer *kapi.Namespace) {
-	klog.V(5).Infof("Updating namespace: old %s new %s", old.Name, newer.Name)
+	klog.V(5).Infof("Updating namespace: %s", old.Name)
 
-	// A big fat lock per namespace to prevent race conditions
-	// with namespace resources like address sets and deny acls.
-	oc.namespaceMutex[newer.Name].Lock()
-	defer oc.namespaceMutex[newer.Name].Unlock()
+	nsInfo := oc.getNamespaceLocked(old.Name)
+	if nsInfo == nil {
+		klog.Warningf("Update event for unknown namespace %q", old.Name)
+		return
+	}
+	defer nsInfo.Unlock()
 
-	oc.multicastUpdateNamespace(newer)
+	oc.multicastUpdateNamespace(newer, nsInfo)
 }
 
 func (oc *Controller) deleteNamespace(ns *kapi.Namespace) {
 	klog.V(5).Infof("Deleting namespace: %s", ns.Name)
-	oc.namespaceMutexMutex.Lock()
-	defer oc.namespaceMutexMutex.Unlock()
 
-	mutex, ok := oc.namespaceMutex[ns.Name]
-	if !ok {
+	nsInfo := oc.deleteNamespaceLocked(ns.Name)
+	if nsInfo == nil {
 		return
 	}
-	mutex.Lock()
-	defer mutex.Unlock()
+	defer nsInfo.Unlock()
 
 	deleteAddressSet(hashedAddressSet(ns.Name))
-	oc.multicastDeleteNamespace(ns)
-	delete(oc.namespacePolicies, ns.Name)
-	delete(oc.namespaceAddressSet, ns.Name)
-	delete(oc.namespaceMutex, ns.Name)
+	oc.multicastDeleteNamespace(ns, nsInfo)
 }
 
-// getNamespaceLock grabs the lock for a particular namespace. If the
-// namespace does not exist, returns nil. Otherwise, returns the held lock.
-func (oc *Controller) getNamespaceLock(ns string) *sync.Mutex {
-	// lock the list of namespaces, get the mutex
-	oc.namespaceMutexMutex.Lock()
-	mutex, ok := oc.namespaceMutex[ns]
-	oc.namespaceMutexMutex.Unlock()
-	if !ok {
+// waitForNamespaceLocked waits up to 10 seconds for a Namespace to be known; use this
+// rather than getNamespaceLocked when calling from a thread where you might be processing
+// an event in a namespace before the Namespace factory thread has processed the Namespace
+// addition.
+func (oc *Controller) waitForNamespaceLocked(namespace string) (*namespaceInfo, error) {
+	var nsInfo *namespaceInfo
+
+	err := utilwait.PollImmediate(100*time.Millisecond, 10*time.Second,
+		func() (bool, error) {
+			nsInfo = oc.getNamespaceLocked(namespace)
+			return nsInfo != nil, nil
+		},
+	)
+	if err != nil {
+		return nil, fmt.Errorf("timeout waiting for namespace event")
+	}
+	return nsInfo, nil
+}
+
+// getNamespaceLocked locks namespacesMutex, looks up ns, and (if found), returns it with
+// its mutex locked. If ns is not known, nil will be returned
+func (oc *Controller) getNamespaceLocked(ns string) *namespaceInfo {
+	// Only hold namespacesMutex while reading/modifying oc.namespaces. In particular,
+	// we drop namespacesMutex while trying to claim nsInfo.Mutex, because something
+	// else might have locked the nsInfo and be doing something slow with it, and we
+	// don't want to block all access to oc.namespaces while that's happening.
+	oc.namespacesMutex.Lock()
+	nsInfo := oc.namespaces[ns]
+	oc.namespacesMutex.Unlock()
+
+	if nsInfo == nil {
 		return nil
 	}
+	nsInfo.Lock()
 
-	// lock the individual namespace
-	mutex.Lock()
-
-	// check that the namespace wasn't deleted between getting the two locks
-	if _, ok := oc.namespaceMutex[ns]; !ok {
-		mutex.Unlock()
+	// Check that the namespace wasn't deleted while we were waiting for the lock
+	oc.namespacesMutex.Lock()
+	defer oc.namespacesMutex.Unlock()
+	if nsInfo != oc.namespaces[ns] {
+		nsInfo.Unlock()
 		return nil
 	}
+	return nsInfo
+}
 
-	return mutex
+// createNamespaceLocked locks namespacesMutex, creates an entry for ns, and returns it
+// with its mutex locked.
+func (oc *Controller) createNamespaceLocked(ns string) *namespaceInfo {
+	oc.namespacesMutex.Lock()
+	defer oc.namespacesMutex.Unlock()
+
+	nsInfo := &namespaceInfo{
+		addressSet:       make(map[string]string),
+		networkPolicies:  make(map[string]*namespacePolicy),
+		multicastEnabled: false,
+	}
+	nsInfo.Lock()
+	oc.namespaces[ns] = nsInfo
+
+	return nsInfo
+}
+
+// deleteNamespaceLocked locks namespacesMutex, finds and deletes ns, and returns the
+// namespace, locked.
+func (oc *Controller) deleteNamespaceLocked(ns string) *namespaceInfo {
+	// The locking here is the same as in getNamespaceLocked
+
+	oc.namespacesMutex.Lock()
+	nsInfo := oc.namespaces[ns]
+	oc.namespacesMutex.Unlock()
+
+	if nsInfo == nil {
+		return nil
+	}
+	nsInfo.Lock()
+
+	oc.namespacesMutex.Lock()
+	defer oc.namespacesMutex.Unlock()
+	if nsInfo != oc.namespaces[ns] {
+		nsInfo.Unlock()
+		return nil
+	}
+	delete(oc.namespaces, ns)
+
+	return nsInfo
 }

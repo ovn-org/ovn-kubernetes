@@ -572,7 +572,7 @@ func getMulticastPortGroup(ns string) (string, string) {
 // - one "to-lport" ACL allowing ingress multicast traffic to pods in 'ns'.
 //   This matches only traffic originated by pods in 'ns' (based on the
 //   namespace address set).
-func (oc *Controller) createMulticastAllowPolicy(ns string) error {
+func (oc *Controller) createMulticastAllowPolicy(ns string, nsInfo *namespaceInfo) error {
 	portGroupName, portGroupHash := getMulticastPortGroup(ns)
 	portGroupUUID, err := createPortGroup(portGroupName, portGroupHash)
 	if err != nil {
@@ -597,7 +597,7 @@ func (oc *Controller) createMulticastAllowPolicy(ns string) error {
 	}
 
 	// Add all ports from this namespace to the multicast allow group.
-	for _, portName := range oc.namespaceAddressSet[ns] {
+	for _, portName := range nsInfo.addressSet {
 		if portInfo, err := oc.logicalPortCache.get(portName); err != nil {
 			klog.Errorf(err.Error())
 		} else if err := podAddAllowMulticastPolicy(ns, portInfo); err != nil {
@@ -930,19 +930,22 @@ func (oc *Controller) addNetworkPolicy(policy *knet.NetworkPolicy) {
 	klog.Infof("Adding network policy %s in namespace %s", policy.Name,
 		policy.Namespace)
 
-	if oc.namespacePolicies[policy.Namespace] != nil &&
-		oc.namespacePolicies[policy.Namespace][policy.Name] != nil {
-		return
-	}
-
-	err := oc.waitForNamespaceEvent(policy.Namespace)
+	nsInfo, err := oc.waitForNamespaceLocked(policy.Namespace)
 	if err != nil {
 		klog.Errorf("failed to wait for namespace %s event (%v)",
 			policy.Namespace, err)
 		return
 	}
+	_, alreadyExists := nsInfo.networkPolicies[policy.Name]
+	if alreadyExists {
+		nsInfo.Unlock()
+		return
+	}
 
 	np := NewNamespacePolicy(policy)
+	nsInfo.networkPolicies[policy.Name] = np
+	np.Lock()
+	nsInfo.Unlock()
 
 	// Create a port group for the policy. All the pods that this policy
 	// selects will be eventually added to this port group.
@@ -956,6 +959,14 @@ func (oc *Controller) addNetworkPolicy(policy *knet.NetworkPolicy) {
 		return
 	}
 
+	type policyHandler struct {
+		gress             *gressPolicy
+		namespaceSelector *metav1.LabelSelector
+		podSelector       *metav1.LabelSelector
+		addrSet           string
+		peerMap           map[string]bool
+	}
+	var policyHandlers []policyHandler
 	// Go through each ingress rule.  For each ingress rule, create an
 	// addressSet for the peer pods.
 	for i, ingressJSON := range policy.Spec.Ingress {
@@ -993,26 +1004,14 @@ func (oc *Controller) addNetworkPolicy(policy *knet.NetworkPolicy) {
 		localPodAddACL(np, ingress)
 
 		for _, fromJSON := range ingressJSON.From {
-			if fromJSON.NamespaceSelector != nil && fromJSON.PodSelector != nil {
-				// For each rule that contains both peer namespace selector and
-				// peer pod selector, we create a watcher for each matching namespace
-				// that populates the addressSet
-				oc.handlePeerNamespaceAndPodSelector(policy, ingress,
-					fromJSON.NamespaceSelector, fromJSON.PodSelector,
-					hashedLocalAddressSet, peerPodAddressMap, np)
-
-			} else if fromJSON.NamespaceSelector != nil {
-				// For each peer namespace selector, we create a watcher that
-				// populates ingress.peerAddressSets
-				oc.handlePeerNamespaceSelector(policy,
-					fromJSON.NamespaceSelector, ingress, np,
-					oc.handlePeerNamespaceSelectorModify)
-			} else if fromJSON.PodSelector != nil {
-				// For each peer pod selector, we create a watcher that
-				// populates the addressSet
-				oc.handlePeerPodSelector(policy, fromJSON.PodSelector,
-					hashedLocalAddressSet, peerPodAddressMap, np)
+			ingressPolicyHandler := policyHandler{
+				gress:             ingress,
+				namespaceSelector: fromJSON.NamespaceSelector,
+				podSelector:       fromJSON.PodSelector,
+				addrSet:           hashedLocalAddressSet,
+				peerMap:           peerPodAddressMap,
 			}
+			policyHandlers = append(policyHandlers, ingressPolicyHandler)
 		}
 		np.ingressPolicies = append(np.ingressPolicies, ingress)
 	}
@@ -1054,55 +1053,73 @@ func (oc *Controller) addNetworkPolicy(policy *knet.NetworkPolicy) {
 		localPodAddACL(np, egress)
 
 		for _, toJSON := range egressJSON.To {
-			if toJSON.NamespaceSelector != nil && toJSON.PodSelector != nil {
-				// For each rule that contains both peer namespace selector and
-				// peer pod selector, we create a watcher for each matching namespace
-				// that populates the addressSet
-				oc.handlePeerNamespaceAndPodSelector(policy, egress,
-					toJSON.NamespaceSelector, toJSON.PodSelector,
-					hashedLocalAddressSet, peerPodAddressMap, np)
-
-			} else if toJSON.NamespaceSelector != nil {
-				// For each peer namespace selector, we create a watcher that
-				// populates egress.peerAddressSets
-				oc.handlePeerNamespaceSelector(policy,
-					toJSON.NamespaceSelector, egress, np,
-					oc.handlePeerNamespaceSelectorModify)
-			} else if toJSON.PodSelector != nil {
-				// For each peer pod selector, we create a watcher that
-				// populates the addressSet
-				oc.handlePeerPodSelector(policy, toJSON.PodSelector,
-					hashedLocalAddressSet, peerPodAddressMap, np)
+			egressPolicyHandler := policyHandler{
+				gress:             egress,
+				namespaceSelector: toJSON.NamespaceSelector,
+				podSelector:       toJSON.PodSelector,
+				addrSet:           hashedLocalAddressSet,
+				peerMap:           peerPodAddressMap,
 			}
+			policyHandlers = append(policyHandlers, egressPolicyHandler)
 		}
 		np.egressPolicies = append(np.egressPolicies, egress)
 	}
-
-	oc.namespacePolicies[policy.Namespace][policy.Name] = np
-
+	np.Unlock()
 	// For all the pods in the local namespace that this policy
 	// effects, add them to the port group.
 	oc.handleLocalPodSelector(policy, np)
+
+	for _, handler := range policyHandlers {
+		if handler.namespaceSelector != nil && handler.podSelector != nil {
+			// For each rule that contains both peer namespace selector and
+			// peer pod selector, we create a watcher for each matching namespace
+			// that populates the addressSet
+			oc.handlePeerNamespaceAndPodSelector(policy, handler.gress,
+				handler.namespaceSelector, handler.podSelector,
+				handler.addrSet, handler.peerMap, np)
+		} else if handler.namespaceSelector != nil {
+			// For each peer namespace selector, we create a watcher that
+			// populates ingress.peerAddressSets
+			oc.handlePeerNamespaceSelector(policy,
+				handler.namespaceSelector, handler.gress, np,
+				oc.handlePeerNamespaceSelectorModify)
+		} else if handler.podSelector != nil {
+			// For each peer pod selector, we create a watcher that
+			// populates the addressSet
+			oc.handlePeerPodSelector(policy, handler.podSelector,
+				handler.addrSet, handler.peerMap, np)
+		}
+	}
+}
+
+// deletes the namespacePolicy for policy and returns it, locked
+func (oc *Controller) deleteNetworkPolicyLocked(policy *knet.NetworkPolicy) *namespacePolicy {
+	nsInfo := oc.getNamespaceLocked(policy.Namespace)
+	if nsInfo == nil {
+		return nil
+	}
+	defer nsInfo.Unlock()
+
+	np := nsInfo.networkPolicies[policy.Name]
+	if np == nil {
+		return nil
+	}
+	np.Lock()
+
+	delete(nsInfo.networkPolicies, policy.Name)
+	np.deleted = true
+	return np
 }
 
 func (oc *Controller) deleteNetworkPolicy(policy *knet.NetworkPolicy) {
 	klog.Infof("Deleting network policy %s in namespace %s",
 		policy.Name, policy.Namespace)
 
-	if oc.namespacePolicies[policy.Namespace] == nil ||
-		oc.namespacePolicies[policy.Namespace][policy.Name] == nil {
-		klog.Errorf("Delete network policy %s in namespace %s "+
-			"received without getting a create event",
-			policy.Name, policy.Namespace)
+	np := oc.deleteNetworkPolicyLocked(policy)
+	if np == nil {
 		return
 	}
-	np := oc.namespacePolicies[policy.Namespace][policy.Name]
-
-	np.Lock()
 	defer np.Unlock()
-
-	// Mark the policy as deleted.
-	np.deleted = true
 
 	// We should now stop all the handlers go routines.
 	oc.shutdownHandlers(np)
@@ -1130,8 +1147,6 @@ func (oc *Controller) deleteNetworkPolicy(policy *knet.NetworkPolicy) {
 		hashedAddressSet := hashedAddressSet(localPeerPods)
 		deleteAddressSet(hashedAddressSet)
 	}
-
-	oc.namespacePolicies[policy.Namespace][policy.Name] = nil
 }
 
 // handlePeerPodSelectorAddUpdate adds the IP address of a pod that has been
