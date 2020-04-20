@@ -6,17 +6,16 @@ run_kubectl() {
   local retries=0
   local attempts=10
   while true; do
-    kubectl $@
-    if [[ $? == 0 ]]; then
+    if kubectl "$@"; then
       break
     fi
 
     ((retries += 1))
     if [[ "${retries}" -gt ${attempts} ]]; then
-      echo "error: 'kubectl $@' did not succeed, failing"
+      echo "error: 'kubectl $*' did not succeed, failing"
       exit 1
     fi
-    echo "info: waiting for 'kubectl $@' to succeed..."
+    echo "info: waiting for 'kubectl $*' to succeed..."
     sleep 1
   done
 }
@@ -93,7 +92,8 @@ kind get clusters
 kind get nodes --name ${KIND_CLUSTER_NAME}
 kind export kubeconfig --name ovn
 if [ "$KIND_INSTALL_INGRESS" == true ]; then
-  run_kubectl create -f https://raw.githubusercontent.com/kubernetes/ingress-nginx/master/deploy/static/mandatory.yaml
+  run_kubectl apply -f ingress/mandatory.yaml
+  run_kubectl apply -f ingress/service-nodeport.yaml
 fi
 
 count=1
