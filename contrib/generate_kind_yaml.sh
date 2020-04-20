@@ -64,6 +64,13 @@ nodes:
    extraMounts:
      - hostPath: /tmp/kind
        containerPath: /var/run/secrets/kubernetes.io/serviceaccount/
+   kubeadmConfigPatches:
+   - |
+     kind: InitConfiguration
+     nodeRegistration:
+       kubeletExtraArgs:
+         node-labels: "ingress-ready=true"
+         authorization-mode: "AlwaysAllow"
 EOF
 
 cat <<EOF > $TMPDIR/$WNODEFILE
