@@ -455,7 +455,7 @@ func getOVNDBClusterStatusInfo(timeout int, direction, database string) (cluster
 		stdout, stderr, err = util.RunOVNSBAppCtl(fmt.Sprintf("--timeout=%d", timeout),
 			"cluster/status", database)
 	} else {
-		stdout, stderr, err = util.RunOVNSBAppCtl(fmt.Sprintf("--timeout=%d", timeout),
+		stdout, stderr, err = util.RunOVNNBAppCtl(fmt.Sprintf("--timeout=%d", timeout),
 			"cluster/status", database)
 	}
 	if err != nil {
