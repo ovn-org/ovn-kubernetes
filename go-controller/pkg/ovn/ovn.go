@@ -578,12 +578,12 @@ func (oc *Controller) WatchNodes() error {
 
 			err = oc.syncNodeManagementPort(node, hostSubnet)
 			if err != nil {
-				klog.Errorf("error creating management port for node %s: %v", node.Name, err)
+				klog.Warningf("error creating management port for node %s: %v", node.Name, err)
 				mgmtPortFailed.Store(node.Name, true)
 			}
 
 			if err := oc.syncNodeGateway(node, hostSubnet); err != nil {
-				klog.Errorf(err.Error())
+				klog.Warningf(err.Error())
 				gatewaysFailed.Store(node.Name, true)
 			}
 		},
