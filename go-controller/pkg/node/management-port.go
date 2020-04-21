@@ -23,16 +23,9 @@ func (n *OvnNode) createManagementPort(hostSubnets []*net.IPNet, nodeAnnotator k
 	// Until the above is changed, switch to a lowercase hostname
 	nodeName := strings.ToLower(n.name)
 
-	// Make sure br-int is created.
-	stdout, stderr, err := util.RunOVSVsctl("--", "--may-exist", "add-br", "br-int")
-	if err != nil {
-		klog.Errorf("Failed to create br-int, stdout: %q, stderr: %q, error: %v", stdout, stderr, err)
-		return err
-	}
-
 	// Create a OVS internal interface.
 	legacyMgmtIntfName := util.GetLegacyK8sMgmtIntfName(nodeName)
-	stdout, stderr, err = util.RunOVSVsctl(
+	stdout, stderr, err := util.RunOVSVsctl(
 		"--", "--if-exists", "del-port", "br-int", legacyMgmtIntfName,
 		"--", "--may-exist", "add-port", "br-int", util.K8sMgmtIntfName,
 		"--", "set", "interface", util.K8sMgmtIntfName,

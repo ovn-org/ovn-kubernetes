@@ -74,7 +74,6 @@ var _ = Describe("Management Port Operations", func() {
 
 			// generic setup
 			fexec.AddFakeCmdsNoOutputNoError([]string{
-				"ovs-vsctl --timeout=15 -- --may-exist add-br br-int",
 				"ovs-vsctl --timeout=15 -- --may-exist add-port br-int " + mgtPort + " -- set interface " + mgtPort + " type=internal mtu_request=" + mtu + " external-ids:iface-id=" + mgtPort,
 			})
 			fexec.AddFakeCmd(&ovntest.ExpectedCmd{
