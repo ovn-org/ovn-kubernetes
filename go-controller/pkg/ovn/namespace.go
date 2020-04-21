@@ -44,14 +44,17 @@ func (oc *Controller) addPodToNamespace(ns string, portInfo *lpInfo) error {
 	}
 	defer nsInfo.Unlock()
 
-	// If pod has already been added, nothing to do.
-	address := portInfo.ip.String()
-	if nsInfo.addressSet[address] != "" {
-		return nil
-	}
+	for _, ip := range portInfo.ips {
+		// If pod has already been added, nothing to do. Assumes that
+		// if pod has multiple IPs, they are added at same time.
+		address := ip.String()
+		if nsInfo.addressSet[address] != "" {
+			return nil
+		}
 
-	nsInfo.addressSet[address] = portInfo.name
-	addToAddressSet(hashedAddressSet(ns), address)
+		nsInfo.addressSet[address] = portInfo.name
+		addToAddressSet(hashedAddressSet(ns), address)
+	}
 
 	// If multicast is allowed and enabled for the namespace, add the port
 	// to the allow policy.
@@ -71,13 +74,17 @@ func (oc *Controller) deletePodFromNamespace(ns string, portInfo *lpInfo) error 
 	}
 	defer nsInfo.Unlock()
 
-	address := portInfo.ip.String()
-	if nsInfo.addressSet[address] == "" {
-		return nil
-	}
+	for _, ip := range portInfo.ips {
+		// If pod has already been deleted, nothing to do. Assumes that
+		// if pod has multiple IPs, they are removed at same time.
+		address := ip.String()
+		if nsInfo.addressSet[address] == "" {
+			return nil
+		}
 
-	delete(nsInfo.addressSet, address)
-	removeFromAddressSet(hashedAddressSet(ns), address)
+		delete(nsInfo.addressSet, address)
+		removeFromAddressSet(hashedAddressSet(ns), address)
+	}
 
 	// Remove the port from the multicast allow policy.
 	if oc.multicastSupport && nsInfo.multicastEnabled {

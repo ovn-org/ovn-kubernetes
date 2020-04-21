@@ -304,7 +304,7 @@ func (oc *Controller) addLogicalPort(pod *kapi.Pod) error {
 	}
 
 	// Add the pod's logical switch port to the port cache
-	portInfo := oc.logicalPortCache.add(logicalSwitch, portName, uuid, podMac, podCIDR.IP)
+	portInfo := oc.logicalPortCache.add(logicalSwitch, portName, uuid, podMac, []net.IP{podCIDR.IP})
 
 	// Set the port security for the logical switch port
 	addresses := fmt.Sprintf("%s %s", podMac, podCIDR.IP)
