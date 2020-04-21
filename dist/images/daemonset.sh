@@ -96,6 +96,12 @@ while [ "$1" != "" ]; do
   --ssl)
     OVN_SSL_ENABLE="yes"
     ;;
+  --ovn_nb_raft_election_timer)
+    OVN_NB_RAFT_ELECTION_TIMER=$VALUE
+    ;;
+  --ovn_sb_raft_election_timer)
+    OVN_SB_RAFT_ELECTION_TIMER=$VALUE
+    ;;
   *)
     echo "WARNING: unknown parameter \"$PARAM\""
     exit 1
@@ -147,6 +153,10 @@ ovn_hybrid_overlay_net_cidr=${OVN_HYBRID_OVERLAY_NET_CIDR}
 echo "ovn_hybrid_overlay_net_cidr: ${ovn_hybrid_overlay_net_cidr}"
 ovn_ssl_en=${OVN_SSL_ENABLE:-"no"}
 echo "ovn_ssl_enable: ${ovn_ssl_en}"
+ovn_nb_raft_election_timer=${OVN_NB_RAFT_ELECTION_TIMER:-1000}
+echo "ovn_nb_raft_election_timer: ${ovn_nb_raft_election_timer}"
+ovn_sb_raft_election_timer=${OVN_SB_RAFT_ELECTION_TIMER:-1000}
+echo "ovn_sb_raft_election_timer: ${ovn_sb_raft_election_timer}"
 
 ovn_image=${image} \
   ovn_image_pull_policy=${image_pull_policy} \
@@ -189,6 +199,8 @@ ovn_image=${image} \
   ovn_db_minAvailable=${ovn_db_minAvailable} \
   ovn_loglevel_nb=${ovn_loglevel_nb} ovn_loglevel_sb=${ovn_loglevel_sb} \
   ovn_ssl_en=${ovn_ssl_en} \
+  ovn_nb_raft_election_timer=${ovn_nb_raft_election_timer} \
+  ovn_sb_raft_election_timer=${ovn_sb_raft_election_timer} \
   j2 ../templates/ovnkube-db-raft.yaml.j2 -o ../yaml/ovnkube-db-raft.yaml
 
 # ovn-setup.yaml
