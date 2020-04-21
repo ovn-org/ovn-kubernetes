@@ -152,7 +152,7 @@ func isOVNControllerReady(name string) (bool, error) {
 func (n *OvnNode) Start() error {
 	var err error
 	var node *kapi.Node
-	var subnet *net.IPNet
+	var subnets []*net.IPNet
 
 	// Setting debug log level during node bring up to expose bring up process.
 	// Log level is returned to configured value when bring up is complete.
@@ -181,7 +181,7 @@ func (n *OvnNode) Start() error {
 			klog.Infof("waiting to retrieve node %s: %v", n.name, err)
 			return false, nil
 		}
-		subnet, err = util.ParseNodeHostSubnetAnnotation(node)
+		subnets, err = util.ParseNodeHostSubnetAnnotation(node)
 		if err != nil {
 			klog.Infof("waiting for node %s to start, no annotation found on node for subnet: %v", n.name, err)
 			return false, nil
@@ -192,7 +192,7 @@ func (n *OvnNode) Start() error {
 		return fmt.Errorf("timed out waiting for node's: %q logical switch: %v", n.name, err)
 	}
 
-	klog.Infof("Node %s ready for ovn initialization with subnet %s", n.name, subnet.String())
+	klog.Infof("Node %s ready for ovn initialization with subnet %s", n.name, util.JoinIPNets(subnets, ","))
 
 	if _, err = isOVNControllerReady(n.name); err != nil {
 		return err
@@ -202,12 +202,13 @@ func (n *OvnNode) Start() error {
 	waiter := newStartupWaiter()
 
 	// Initialize gateway resources on the node
-	if err := n.initGateway(subnet, nodeAnnotator, waiter); err != nil {
+	// FIXME DUAL-STACK
+	if err := n.initGateway(subnets[0], nodeAnnotator, waiter); err != nil {
 		return err
 	}
 
 	// Initialize management port resources on the node
-	if err := n.createManagementPort([]*net.IPNet{subnet}, nodeAnnotator, waiter); err != nil {
+	if err := n.createManagementPort(subnets, nodeAnnotator, waiter); err != nil {
 		return err
 	}
 
