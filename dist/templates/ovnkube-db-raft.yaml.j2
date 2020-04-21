@@ -160,6 +160,8 @@ spec:
               fieldPath: status.hostIP
         - name: OVN_SSL_ENABLE
           value: "{{ ovn_ssl_en }}"
+        - name: OVN_NB_RAFT_ELECTION_TIMER
+          value: "{{ ovn_nb_raft_election_timer }}"
       # end of container
 
       # sb-ovsdb - v3
@@ -229,6 +231,8 @@ spec:
               fieldPath: status.hostIP
         - name: OVN_SSL_ENABLE
           value: "{{ ovn_ssl_en }}"
+        - name: OVN_SB_RAFT_ELECTION_TIMER
+          value: "{{ ovn_sb_raft_election_timer }}"
       # end of container
 
       # db-metrics-exporter - v3

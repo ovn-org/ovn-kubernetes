@@ -55,7 +55,9 @@ fedora-dev: bld
                     --ovn-loglevel-nb="-vconsole:info -vfile:info" \
                     --ovn-loglevel-sb="-vconsole:info -vfile:info" \
                     --ovn-loglevel-controller="-vconsole:info" \
-                    --ovn-loglevel-nbctld="-vconsole:info"
+                    --ovn-loglevel-nbctld="-vconsole:info" \
+                    --ovn_nb_raft_election_timer="1000" \
+                    --ovn_sb_raft_election_timer="1000"
 
 # This target expands the daemonset yaml templates into final form
 # Use CLI flags or environment variables to customize its behavior.
