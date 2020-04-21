@@ -7,9 +7,7 @@ import (
 	"github.com/urfave/cli"
 	v1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	kuberuntime "k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/client-go/kubernetes/fake"
-	kubetesting "k8s.io/client-go/testing"
 
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/factory"
@@ -80,7 +78,7 @@ func defaultFakeExec(nodeSubnet, nodeName string, sctpSupport bool) (*ovntest.Fa
 		mgmtMAC    string = "01:02:03:04:05:06"
 	)
 
-	fexec := ovntest.NewFakeExec()
+	fexec := ovntest.NewLooseCompareFakeExec()
 	fexec.AddFakeCmdsNoOutputNoError([]string{
 		"ovn-nbctl --timeout=15 --columns=_uuid list port_group",
 		"ovn-sbctl --timeout=15 --columns=_uuid list IGMP_Group",
@@ -198,6 +196,14 @@ func addNodeportLBs(fexec *ovntest.FakeExec, nodeName, tcpLBUUID, udpLBUUID, sct
 	})
 }
 
+func addGetPortAddressesCmds(fexec *ovntest.FakeExec, nodeName, hybMAC, hybIP string) {
+	fexec.AddFakeCmd(&ovntest.ExpectedCmd{
+		Cmd: "ovn-nbctl --timeout=15 get logical_switch_port int-" + nodeName + " dynamic_addresses addresses",
+		// hybrid overlay ports have static addresses
+		Output: "[]\n[" + hybMAC + " " + hybIP + "]\n",
+	})
+}
+
 var _ = Describe("Master Operations", func() {
 	var app *cli.App
 
@@ -223,10 +229,13 @@ var _ = Describe("Master Operations", func() {
 				clusterCIDR string = "10.1.0.0/16"
 				nextHop     string = "10.1.0.2"
 				mgmtMAC     string = "01:02:03:04:05:06"
+				hybMAC      string = "02:03:04:05:06:07"
+				hybIP       string = "10.1.0.3"
 			)
 
 			fexec, tcpLBUUID, udpLBUUID, sctpLBUUID := defaultFakeExec(nodeSubnet, nodeName, true)
 			cleanupGateway(fexec, nodeName, nodeSubnet, clusterCIDR, nextHop)
+			addGetPortAddressesCmds(fexec, nodeName, hybMAC, hybIP)
 
 			testNode := v1.Node{ObjectMeta: metav1.ObjectMeta{
 				Name: nodeName,
@@ -267,7 +276,7 @@ var _ = Describe("Master Operations", func() {
 			err = clusterController.WatchNodes()
 			Expect(err).NotTo(HaveOccurred())
 
-			Expect(fexec.CalledMatchesExpected()).To(BeTrue(), fexec.ErrorDesc)
+			Eventually(fexec.CalledMatchesExpected, 2).Should(BeTrue(), fexec.ErrorDesc)
 			updatedNode, err := fakeClient.CoreV1().Nodes().Get(nodeName, metav1.GetOptions{})
 			Expect(err).NotTo(HaveOccurred())
 
@@ -305,10 +314,13 @@ var _ = Describe("Master Operations", func() {
 				clusterCIDR string = "10.1.0.0/16"
 				nextHop     string = "10.1.0.2"
 				mgmtMAC     string = "01:02:03:04:05:06"
+				hybMAC      string = "02:03:04:05:06:07"
+				hybIP       string = "10.1.0.3"
 			)
 
 			fexec, tcpLBUUID, udpLBUUID, _ := defaultFakeExec(nodeSubnet, nodeName, false)
 			cleanupGateway(fexec, nodeName, nodeSubnet, clusterCIDR, nextHop)
+			addGetPortAddressesCmds(fexec, nodeName, hybMAC, hybIP)
 
 			testNode := v1.Node{ObjectMeta: metav1.ObjectMeta{
 				Name: nodeName,
@@ -349,7 +361,7 @@ var _ = Describe("Master Operations", func() {
 			err = clusterController.WatchNodes()
 			Expect(err).NotTo(HaveOccurred())
 
-			Expect(fexec.CalledMatchesExpected()).To(BeTrue(), fexec.ErrorDesc)
+			Eventually(fexec.CalledMatchesExpected, 2).Should(BeTrue(), fexec.ErrorDesc)
 			updatedNode, err := fakeClient.CoreV1().Nodes().Get(nodeName, metav1.GetOptions{})
 			Expect(err).NotTo(HaveOccurred())
 
@@ -387,6 +399,8 @@ var _ = Describe("Master Operations", func() {
 				clusterCIDR string = "10.1.0.0/16"
 				nextHop     string = "10.1.3.2"
 				mgmtMAC     string = "01:02:03:04:05:06"
+				hybMAC      string = "02:03:04:05:06:07"
+				hybIP       string = "10.1.0.3"
 			)
 
 			testNode := v1.Node{ObjectMeta: metav1.ObjectMeta{
@@ -401,6 +415,7 @@ var _ = Describe("Master Operations", func() {
 			err := util.SetExec(fexec)
 			Expect(err).NotTo(HaveOccurred())
 			cleanupGateway(fexec, nodeName, nodeSubnet, clusterCIDR, nextHop)
+			addGetPortAddressesCmds(fexec, nodeName, hybMAC, hybIP)
 
 			_, err = config.InitConfig(ctx, fexec, nil)
 			Expect(err).NotTo(HaveOccurred())
@@ -420,12 +435,6 @@ var _ = Describe("Master Operations", func() {
 			Expect(err).NotTo(HaveOccurred())
 			defer close(stopChan)
 
-			fakeClient.PrependReactor("patch", "nodes", func(action kubetesting.Action) (bool, kuberuntime.Object, error) {
-				// Should not be called again as the node already has a subnet
-				Expect(true).To(BeFalse())
-				return true, nil, fmt.Errorf("should not be called")
-			})
-
 			clusterController := NewOvnController(fakeClient, f, stopChan)
 			Expect(clusterController).NotTo(BeNil())
 			clusterController.TCPLoadBalancerUUID = tcpLBUUID
@@ -438,7 +447,7 @@ var _ = Describe("Master Operations", func() {
 			err = clusterController.WatchNodes()
 			Expect(err).NotTo(HaveOccurred())
 
-			Expect(fexec.CalledMatchesExpected()).To(BeTrue(), fexec.ErrorDesc)
+			Eventually(fexec.CalledMatchesExpected, 2).Should(BeTrue(), fexec.ErrorDesc)
 			updatedNode, err := fakeClient.CoreV1().Nodes().Get(nodeName, metav1.GetOptions{})
 			Expect(err).NotTo(HaveOccurred())
 

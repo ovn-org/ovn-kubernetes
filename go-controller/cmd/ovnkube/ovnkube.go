@@ -19,7 +19,6 @@ import (
 	"github.com/urfave/cli"
 	"gopkg.in/fsnotify/fsnotify.v1"
 
-	hocontroller "github.com/ovn-org/ovn-kubernetes/go-controller/hybrid-overlay/pkg/controller"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/factory"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/metrics"
@@ -242,12 +241,6 @@ func runOvnKube(ctx *cli.Context) error {
 	// start the prometheus server
 	if config.Kubernetes.MetricsBindAddress != "" {
 		metrics.StartMetricsServer(config.Kubernetes.MetricsBindAddress, config.Kubernetes.MetricsEnablePprof)
-	}
-
-	if config.HybridOverlay.Enabled {
-		if err := hocontroller.StartHybridOverlay(master != "", node, clientset, factory); err != nil {
-			return err
-		}
 	}
 
 	// run forever

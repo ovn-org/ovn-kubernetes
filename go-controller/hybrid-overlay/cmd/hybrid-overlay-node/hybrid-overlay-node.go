@@ -9,6 +9,7 @@ import (
 	"github.com/ovn-org/ovn-kubernetes/go-controller/hybrid-overlay/pkg/controller"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/factory"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/kube"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
 
 	"k8s.io/klog"
@@ -67,7 +68,8 @@ func runHybridOverlay(ctx *cli.Context) error {
 		return err
 	}
 
-	if err := controller.StartHybridOverlay(false, nodeName, clientset, factory); err != nil {
+	kube := &kube.Kube{KClient: clientset}
+	if err := controller.StartNode(nodeName, kube, factory); err != nil {
 		return err
 	}
 

@@ -13,6 +13,7 @@ import (
 	"github.com/ovn-org/ovn-kubernetes/go-controller/hybrid-overlay/pkg/types"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/factory"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/kube"
 	ovntest "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/testing"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
 
@@ -145,7 +146,7 @@ var _ = Describe("Hybrid Overlay Node Linux Operations", func() {
 			Expect(err).NotTo(HaveOccurred())
 			defer close(stopChan)
 
-			n, err := NewNode(fakeClient, thisNode)
+			n, err := NewNode(&kube.Kube{KClient: fakeClient}, thisNode)
 			Expect(err).NotTo(HaveOccurred())
 
 			err = n.startNodeWatch(f)
@@ -198,7 +199,7 @@ var _ = Describe("Hybrid Overlay Node Linux Operations", func() {
 			Expect(err).NotTo(HaveOccurred())
 			defer close(stopChan)
 
-			n, err := NewNode(fakeClient, thisNode)
+			n, err := NewNode(&kube.Kube{KClient: fakeClient}, thisNode)
 			Expect(err).NotTo(HaveOccurred())
 
 			err = n.startNodeWatch(f)
@@ -243,7 +244,7 @@ var _ = Describe("Hybrid Overlay Node Linux Operations", func() {
 			Expect(err).NotTo(HaveOccurred())
 			defer close(stopChan)
 
-			n, err := NewNode(fakeClient, thisNode)
+			n, err := NewNode(&kube.Kube{KClient: fakeClient}, thisNode)
 			Expect(err).NotTo(HaveOccurred())
 
 			err = n.startNodeWatch(f)
@@ -297,7 +298,7 @@ var _ = Describe("Hybrid Overlay Node Linux Operations", func() {
 			Expect(err).NotTo(HaveOccurred())
 			defer close(stopChan)
 
-			n, err := NewNode(fakeClient, thisNode)
+			n, err := NewNode(&kube.Kube{KClient: fakeClient}, thisNode)
 			Expect(err).NotTo(HaveOccurred())
 
 			err = n.startNodeWatch(f)
@@ -349,7 +350,7 @@ var _ = Describe("Hybrid Overlay Node Linux Operations", func() {
 			Expect(err).NotTo(HaveOccurred())
 			defer close(stopChan)
 
-			n, err := NewNode(fakeClient, thisNode)
+			n, err := NewNode(&kube.Kube{KClient: fakeClient}, thisNode)
 			Expect(err).NotTo(HaveOccurred())
 
 			err = n.startNodeWatch(f)
@@ -396,7 +397,7 @@ var _ = Describe("Hybrid Overlay Node Linux Operations", func() {
 			Expect(err).NotTo(HaveOccurred())
 			defer close(stopChan)
 
-			n, err := NewNode(fakeClient, thisNode)
+			n, err := NewNode(&kube.Kube{KClient: fakeClient}, thisNode)
 			Expect(err).NotTo(HaveOccurred())
 
 			err = n.startPodWatch(f)
@@ -445,7 +446,7 @@ var _ = Describe("Hybrid Overlay Node Linux Operations", func() {
 			Expect(err).NotTo(HaveOccurred())
 			defer close(stopChan)
 
-			n, err := NewNode(fakeClient, thisNode)
+			n, err := NewNode(&kube.Kube{KClient: fakeClient}, thisNode)
 			Expect(err).NotTo(HaveOccurred())
 			n.drMAC = hybMAC
 
