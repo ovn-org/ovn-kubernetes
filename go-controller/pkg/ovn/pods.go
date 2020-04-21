@@ -100,17 +100,18 @@ func (oc *Controller) waitForNodeLogicalSwitch(nodeName string) (*net.IPNet, err
 	// Wait for the node logical switch to be created by the ClusterController.
 	// The node switch will be created when the node's logical network infrastructure
 	// is created by the node watch.
-	var subnet *net.IPNet
+	var subnets []*net.IPNet
 	if err := wait.PollImmediate(10*time.Millisecond, 30*time.Second, func() (bool, error) {
 		oc.lsMutex.Lock()
 		defer oc.lsMutex.Unlock()
 		var ok bool
-		subnet, ok = oc.logicalSwitchCache[nodeName]
+		subnets, ok = oc.logicalSwitchCache[nodeName]
 		return ok, nil
 	}); err != nil {
 		return nil, fmt.Errorf("timed out waiting for logical switch %q subnet: %v", nodeName, err)
 	}
-	return subnet, nil
+	// FIXME DUAL-STACK
+	return subnets[0], nil
 }
 
 func getPodAddresses(portName string) (net.HardwareAddr, net.IP, bool, error) {

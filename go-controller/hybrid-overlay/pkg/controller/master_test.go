@@ -2,6 +2,7 @@ package controller
 
 import (
 	"fmt"
+	"net"
 	"strings"
 
 	"github.com/urfave/cli/v2"
@@ -36,7 +37,7 @@ func addGetPortAddressesCmds(fexec *ovntest.FakeExec, nodeName, hybMAC, hybIP st
 func newTestNode(name, os, ovnHostSubnet, hybridHostSubnet, drMAC string) v1.Node {
 	annotations := make(map[string]string)
 	if ovnHostSubnet != "" {
-		subnetAnnotations, err := util.CreateNodeHostSubnetAnnotation(ovntest.MustParseIPNet(ovnHostSubnet))
+		subnetAnnotations, err := util.CreateNodeHostSubnetAnnotation([]*net.IPNet{ovntest.MustParseIPNet(ovnHostSubnet)})
 		Expect(err).NotTo(HaveOccurred())
 		for k, v := range subnetAnnotations {
 			annotations[k] = fmt.Sprintf("%s", v)
@@ -103,7 +104,7 @@ var _ = Describe("Hybrid SDN Master Operations", func() {
 			Expect(err).NotTo(HaveOccurred())
 			Expect(updatedNode.Annotations).To(HaveKeyWithValue(types.HybridOverlayNodeSubnet, nodeSubnet))
 			_, err = util.ParseNodeHostSubnetAnnotation(updatedNode)
-			Expect(err).To(MatchError(fmt.Sprintf("node %q has no host subnet annotation", nodeName)))
+			Expect(err).To(MatchError(fmt.Sprintf("node %q has no \"k8s.ovn.org/node-subnets\" annotation", nodeName)))
 
 			Expect(fexec.CalledMatchesExpected()).Should(BeTrue(), fexec.ErrorDesc)
 			return nil
