@@ -17,6 +17,8 @@ import (
 	ovntest "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/testing"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
 
+	egressfirewallfake "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/egressfirewall/v1/apis/clientset/versioned/fake"
+
 	. "github.com/onsi/ginkgo"
 	. "github.com/onsi/gomega"
 )
@@ -83,6 +85,7 @@ var _ = Describe("Hybrid SDN Master Operations", func() {
 					newTestNode(nodeName, "windows", "", "", ""),
 				},
 			})
+			egressFirewallFakeClient := &egressfirewallfake.Clientset{}
 
 			fexec := ovntest.NewFakeExec()
 			err := util.SetExec(fexec)
@@ -91,7 +94,7 @@ var _ = Describe("Hybrid SDN Master Operations", func() {
 			Expect(err).NotTo(HaveOccurred())
 
 			stopChan := make(chan struct{})
-			f, err := factory.NewWatchFactory(fakeClient, stopChan)
+			f, err := factory.NewWatchFactory(fakeClient, egressFirewallFakeClient, stopChan)
 			Expect(err).NotTo(HaveOccurred())
 			defer close(stopChan)
 
@@ -132,6 +135,7 @@ var _ = Describe("Hybrid SDN Master Operations", func() {
 					newTestNode(nodeName, "linux", nodeSubnet, "", ""),
 				},
 			})
+			egressFirewallFakeClient := &egressfirewallfake.Clientset{}
 
 			fexec := ovntest.NewFakeExec()
 			addGetPortAddressesCmds(fexec, nodeName, nodeHOMAC, nodeHOIP)
@@ -142,7 +146,7 @@ var _ = Describe("Hybrid SDN Master Operations", func() {
 			Expect(err).NotTo(HaveOccurred())
 
 			stopChan := make(chan struct{})
-			f, err := factory.NewWatchFactory(fakeClient, stopChan)
+			f, err := factory.NewWatchFactory(fakeClient, egressFirewallFakeClient, stopChan)
 			Expect(err).NotTo(HaveOccurred())
 			defer close(stopChan)
 
@@ -189,6 +193,7 @@ var _ = Describe("Hybrid SDN Master Operations", func() {
 					newTestNode(nodeName, "linux", nodeSubnet, "", nodeHOMAC),
 				},
 			})
+			egressFirewallFakeClient := &egressfirewallfake.Clientset{}
 
 			fexec := ovntest.NewFakeExec()
 			fexec.AddFakeCmdsNoOutputNoError([]string{
@@ -201,7 +206,7 @@ var _ = Describe("Hybrid SDN Master Operations", func() {
 			Expect(err).NotTo(HaveOccurred())
 
 			stopChan := make(chan struct{})
-			f, err := factory.NewWatchFactory(fakeClient, stopChan)
+			f, err := factory.NewWatchFactory(fakeClient, egressFirewallFakeClient, stopChan)
 			Expect(err).NotTo(HaveOccurred())
 			defer close(stopChan)
 

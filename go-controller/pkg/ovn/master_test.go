@@ -9,6 +9,8 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/client-go/kubernetes/fake"
 
+	egressfirewallfake "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/egressfirewall/v1/apis/clientset/versioned/fake"
+
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/factory"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/kube"
@@ -243,6 +245,7 @@ var _ = Describe("Master Operations", func() {
 			fakeClient := fake.NewSimpleClientset(&v1.NodeList{
 				Items: []v1.Node{testNode},
 			})
+			egressFirewallFakeClient := &egressfirewallfake.Clientset{}
 
 			err := util.SetExec(fexec)
 			Expect(err).NotTo(HaveOccurred())
@@ -259,7 +262,7 @@ var _ = Describe("Master Operations", func() {
 			Expect(err).NotTo(HaveOccurred())
 
 			stopChan := make(chan struct{})
-			f, err := factory.NewWatchFactory(fakeClient, stopChan)
+			f, err := factory.NewWatchFactory(fakeClient, egressFirewallFakeClient, stopChan)
 			Expect(err).NotTo(HaveOccurred())
 			defer close(stopChan)
 
@@ -328,6 +331,7 @@ var _ = Describe("Master Operations", func() {
 			fakeClient := fake.NewSimpleClientset(&v1.NodeList{
 				Items: []v1.Node{testNode},
 			})
+			egressFirewallFakeClient := &egressfirewallfake.Clientset{}
 
 			err := util.SetExec(fexec)
 			Expect(err).NotTo(HaveOccurred())
@@ -344,7 +348,7 @@ var _ = Describe("Master Operations", func() {
 			Expect(err).NotTo(HaveOccurred())
 
 			stopChan := make(chan struct{})
-			f, err := factory.NewWatchFactory(fakeClient, stopChan)
+			f, err := factory.NewWatchFactory(fakeClient, egressFirewallFakeClient, stopChan)
 			Expect(err).NotTo(HaveOccurred())
 			defer close(stopChan)
 
@@ -409,6 +413,7 @@ var _ = Describe("Master Operations", func() {
 			fakeClient := fake.NewSimpleClientset(&v1.NodeList{
 				Items: []v1.Node{testNode},
 			})
+			egressFirewallFakeClient := &egressfirewallfake.Clientset{}
 
 			fexec, tcpLBUUID, udpLBUUID, sctpLBUUID := defaultFakeExec(nodeSubnet, nodeName, true)
 			err := util.SetExec(fexec)
@@ -430,7 +435,7 @@ var _ = Describe("Master Operations", func() {
 			Expect(err).NotTo(HaveOccurred())
 
 			stopChan := make(chan struct{})
-			f, err := factory.NewWatchFactory(fakeClient, stopChan)
+			f, err := factory.NewWatchFactory(fakeClient, egressFirewallFakeClient, stopChan)
 			Expect(err).NotTo(HaveOccurred())
 			defer close(stopChan)
 
@@ -595,6 +600,7 @@ subnet=%s
 			fakeClient := fake.NewSimpleClientset(&v1.NodeList{
 				Items: []v1.Node{masterNode},
 			})
+			egressFirewallFakeClient := &egressfirewallfake.Clientset{}
 
 			err := util.SetExec(fexec)
 			Expect(err).NotTo(HaveOccurred())
@@ -613,7 +619,7 @@ subnet=%s
 			Expect(err).NotTo(HaveOccurred())
 
 			stopChan := make(chan struct{})
-			f, err := factory.NewWatchFactory(fakeClient, stopChan)
+			f, err := factory.NewWatchFactory(fakeClient, egressFirewallFakeClient, stopChan)
 			Expect(err).NotTo(HaveOccurred())
 			defer close(stopChan)
 
@@ -697,6 +703,7 @@ var _ = Describe("Gateway Init Operations", func() {
 			fakeClient := fake.NewSimpleClientset(&v1.NodeList{
 				Items: []v1.Node{testNode},
 			})
+			egressFirewallFakeClient := &egressfirewallfake.Clientset{}
 
 			fexec := ovntest.NewFakeExec()
 			err := util.SetExec(fexec)
@@ -810,7 +817,7 @@ var _ = Describe("Gateway Init Operations", func() {
 			})
 
 			stop := make(chan struct{})
-			wf, err := factory.NewWatchFactory(fakeClient, stop)
+			wf, err := factory.NewWatchFactory(fakeClient, egressFirewallFakeClient, stop)
 			Expect(err).NotTo(HaveOccurred())
 			defer close(stop)
 
@@ -881,6 +888,7 @@ var _ = Describe("Gateway Init Operations", func() {
 			fakeClient := fake.NewSimpleClientset(&v1.NodeList{
 				Items: []v1.Node{testNode},
 			})
+			egressFirewallFakeClient := &egressfirewallfake.Clientset{}
 
 			fexec := ovntest.NewFakeExec()
 			err := util.SetExec(fexec)
@@ -1004,7 +1012,7 @@ var _ = Describe("Gateway Init Operations", func() {
 			})
 
 			stop := make(chan struct{})
-			wf, err := factory.NewWatchFactory(fakeClient, stop)
+			wf, err := factory.NewWatchFactory(fakeClient, egressFirewallFakeClient, stop)
 			Expect(err).NotTo(HaveOccurred())
 			defer close(stop)
 

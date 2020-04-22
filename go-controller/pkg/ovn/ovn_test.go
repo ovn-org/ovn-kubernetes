@@ -9,6 +9,8 @@ import (
 	"github.com/urfave/cli/v2"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/client-go/kubernetes/fake"
+
+	egressfirewallfake "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/egressfirewall/v1/apis/clientset/versioned/fake"
 )
 
 const (
@@ -56,7 +58,8 @@ func (o *FakeOVN) init() {
 	var err error
 
 	o.stopChan = make(chan struct{})
-	o.watcher, err = factory.NewWatchFactory(o.fakeClient, o.stopChan)
+	egressFirewallFakeClient := &egressfirewallfake.Clientset{}
+	o.watcher, err = factory.NewWatchFactory(o.fakeClient, egressFirewallFakeClient, o.stopChan)
 	Expect(err).NotTo(HaveOccurred())
 
 	o.controller = NewOvnController(o.fakeClient, o.watcher, o.stopChan)
