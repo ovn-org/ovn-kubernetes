@@ -294,8 +294,7 @@ func (pr *PodRequest) ConfigureInterface(namespace string, podName string, ifInf
 	}
 
 	if ifInfo.Ingress > 0 || ifInfo.Egress > 0 {
-		var l netlink.Link
-		l, err = netlink.LinkByName(hostIface.Name)
+		l, err := netlink.LinkByName(hostIface.Name)
 		if err != nil {
 			return nil, fmt.Errorf("failed to find host veth interface %s: %v", hostIface.Name, err)
 		}
