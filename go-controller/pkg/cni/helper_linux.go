@@ -20,6 +20,7 @@ import (
 	"github.com/vishvananda/netlink"
 
 	"k8s.io/apimachinery/pkg/util/wait"
+	utilnet "k8s.io/utils/net"
 )
 
 func renameLink(curName, newName string) error {
@@ -227,7 +228,9 @@ var iptablesCommands = [][]string{
 	{"-A", "OUTPUT", "-p", "tcp", "-m", "tcp", "--dport", "22624", "-j", "REJECT"},
 	{"-A", "FORWARD", "-p", "tcp", "-m", "tcp", "--dport", "22623", "-j", "REJECT"},
 	{"-A", "FORWARD", "-p", "tcp", "-m", "tcp", "--dport", "22624", "-j", "REJECT"},
+}
 
+var iptables4OnlyCommands = [][]string{
 	// Block cloud provider metadata IP except DNS
 	{"-A", "OUTPUT", "-p", "tcp", "-m", "tcp", "-d", "169.254.169.254", "!", "--dport", "53", "-j", "REJECT"},
 	{"-A", "OUTPUT", "-p", "udp", "-m", "udp", "-d", "169.254.169.254", "!", "--dport", "53", "-j", "REJECT"},
@@ -308,15 +311,47 @@ func (pr *PodRequest) ConfigureInterface(namespace string, podName string, ifInf
 		}
 	}
 
+	// Block access to certain things
 	err = netns.Do(func(hostNS ns.NetNS) error {
-		// Block access to certain things
-		for _, args := range iptablesCommands {
-			out, err := exec.Command("iptables", args...).CombinedOutput()
-			if err != nil {
-				return fmt.Errorf("could not set up pod iptables rules: %s", string(out))
+		var hasIPv4, hasIPv6 bool
+		for _, ip := range ifInfo.IPs {
+			if utilnet.IsIPv6CIDR(ip) {
+				hasIPv6 = true
+			} else {
+				hasIPv4 = true
 			}
 		}
 
+		for _, args := range iptablesCommands {
+			if hasIPv4 {
+				out, err := exec.Command("iptables", args...).CombinedOutput()
+				if err != nil {
+					return fmt.Errorf("could not set up pod iptables rules: %s", string(out))
+				}
+			}
+			if hasIPv6 {
+				out, err := exec.Command("ip6tables", args...).CombinedOutput()
+				if err != nil {
+					return fmt.Errorf("could not set up pod iptables rules: %s", string(out))
+				}
+			}
+		}
+		if hasIPv4 {
+			for _, args := range iptables4OnlyCommands {
+				out, err := exec.Command("iptables", args...).CombinedOutput()
+				if err != nil {
+					return fmt.Errorf("could not set up pod iptables rules: %s", string(out))
+				}
+			}
+		}
+
+		return nil
+	})
+	if err != nil {
+		return nil, err
+	}
+
+	err = netns.Do(func(hostNS ns.NetNS) error {
 		if _, err := os.Stat("/proc/sys/net/ipv6/conf/all/dad_transmits"); !os.IsNotExist(err) {
 			err = setSysctl("/proc/sys/net/ipv6/conf/all/dad_transmits", 0)
 			if err != nil {
