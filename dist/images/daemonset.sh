@@ -31,6 +31,7 @@ OVN_LOGLEVEL_SB=""
 OVN_LOGLEVEL_CONTROLLER=""
 OVN_LOGLEVEL_NBCTLD=""
 OVN_MASTER_COUNT=""
+OVN_REMOTE_PROBE_INTERVAL=""
 
 # Parse parameters given as arguments to this script.
 while [ "$1" != "" ]; do
@@ -163,6 +164,8 @@ ovn_sb_raft_election_timer=${OVN_SB_RAFT_ELECTION_TIMER:-1000}
 echo "ovn_sb_raft_election_timer: ${ovn_sb_raft_election_timer}"
 ovn_master_count=${OVN_MASTER_COUNT:-"1"}
 echo "ovn_master_count: ${ovn_master_count}"
+ovn_remote_probe_interval=${OVN_REMOTE_PROBE_INTERVAL:-"100000"}
+echo "ovn_remote_probe_interval: ${ovn_remote_probe_interval}"
 
 ovn_image=${image} \
   ovn_image_pull_policy=${image_pull_policy} \
@@ -174,6 +177,7 @@ ovn_image=${image} \
   ovn_hybrid_overlay_net_cidr=${ovn_hybrid_overlay_net_cidr} \
   ovn_hybrid_overlay_enable=${ovn_hybrid_overlay_enable} \
   ovn_ssl_en=${ovn_ssl_en} \
+  ovn_remote_probe_interval=${ovn_remote_probe_interval} \
   j2 ../templates/ovnkube-node.yaml.j2 -o ../yaml/ovnkube-node.yaml
 
 ovn_image=${image} \
