@@ -7,11 +7,23 @@ import (
 
 	"github.com/ovn-org/ovn-kubernetes/go-controller/hybrid-overlay/pkg/types"
 	houtil "github.com/ovn-org/ovn-kubernetes/go-controller/hybrid-overlay/pkg/util"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/factory"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/kube"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
 
 	kapi "k8s.io/api/core/v1"
 	"k8s.io/klog"
 )
+
+// StartNode creates and starts the hybrid overlay node controller
+func StartNode(nodeName string, kube kube.Interface, wf *factory.WatchFactory) error {
+	klog.Infof("Starting hybrid overlay node...")
+	node, err := NewNode(kube, nodeName)
+	if err != nil {
+		return err
+	}
+	return node.Start(wf)
+}
 
 // nodeChanged returns true if any relevant node attributes changed
 func nodeChanged(node1 *kapi.Node, node2 *kapi.Node) bool {

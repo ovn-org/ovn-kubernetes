@@ -20,6 +20,7 @@ import (
 	"k8s.io/klog"
 	utilnet "k8s.io/utils/net"
 
+	homaster "github.com/ovn-org/ovn-kubernetes/go-controller/hybrid-overlay/pkg/controller"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/metrics"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
@@ -161,6 +162,13 @@ func (oc *Controller) StartClusterMaster(masterNodeName string) error {
 	if err := oc.SetupMaster(masterNodeName); err != nil {
 		klog.Errorf("Failed to setup master (%v)", err)
 		return err
+	}
+
+	if config.HybridOverlay.Enabled {
+		if err := homaster.StartMaster(oc.kube, oc.watchFactory); err != nil {
+			klog.Errorf("Failed to set up hybrid overlay master: %v", err)
+			return err
+		}
 	}
 
 	return nil
