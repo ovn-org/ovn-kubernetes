@@ -205,17 +205,18 @@ func nameToCookie(nodeName string) string {
 // nodes in the cluster
 func (n *NodeController) hybridOverlayNodeUpdate(node *kapi.Node) error {
 	if !houtil.IsHybridOverlayNode(node) {
+		klog.Warningf("#### node %q not a Hybrid Overlay node: %v", node.Name, node.Annotations)
 		return nil
 	}
 
 	cidr, nodeIP, drMAC, err := getNodeDetails(node)
 	if cidr == nil || nodeIP == nil || drMAC == nil {
-		klog.V(5).Infof("cleaning up hybrid overlay resources for node %q because: %v", node.Name, err)
+		klog.Warningf("#### cleaning up hybrid overlay resources for node %q because: %v", node.Name, err)
 		n.Delete(node)
 		return nil
 	}
 
-	klog.Infof("setting up hybrid overlay tunnel to node %s", node.Name)
+	klog.Warningf("#### setting up hybrid overlay tunnel to node %s", node.Name)
 
 	// (re)add flows for the node
 	cookie := nameToCookie(node.Name)
