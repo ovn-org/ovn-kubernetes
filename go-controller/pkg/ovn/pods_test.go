@@ -148,7 +148,7 @@ func (p pod) delCmds(fexec *ovntest.FakeExec) {
 
 func (p pod) delFromNamespaceCmds(fexec *ovntest.FakeExec, pod pod, isMulticastEnabled bool) {
 	fexec.AddFakeCmdsNoOutputNoError([]string{
-		fmt.Sprintf("ovn-nbctl --timeout=15 remove address_set %s addresses %s", hashedAddressSet(pod.namespace), pod.podIP),
+		fmt.Sprintf(`ovn-nbctl --timeout=15 remove address_set %s addresses "%s"`, hashedAddressSet(pod.namespace), pod.podIP),
 	})
 	if isMulticastEnabled {
 		fexec.AddFakeCmdsNoOutputNoError([]string{

@@ -63,8 +63,9 @@ func (oc *Controller) forEachAddressSetUnhashedName(iteratorFn func(
 func addToAddressSet(hashName string, address string) {
 	klog.V(5).Infof("addToAddressSet for %s with %s", hashName, address)
 
+	// IPv6 addresses need to be quoted, IPv4 work either way.
 	_, stderr, err := util.RunOVNNbctl("add", "address_set",
-		hashName, "addresses", address)
+		hashName, "addresses", `"`+address+`"`)
 	if err != nil {
 		klog.Errorf("failed to add an address %q to address_set %q, stderr: %q (%v)",
 			address, hashName, stderr, err)
@@ -74,8 +75,9 @@ func addToAddressSet(hashName string, address string) {
 func removeFromAddressSet(hashName string, address string) {
 	klog.V(5).Infof("removeFromAddressSet for %s with %s", hashName, address)
 
+	// IPv6 addresses need to be quoted, IPv4 work either way.
 	_, stderr, err := util.RunOVNNbctl("remove", "address_set",
-		hashName, "addresses", address)
+		hashName, "addresses", `"`+address+`"`)
 	if err != nil {
 		klog.Errorf("failed to remove an address %q from address_set %q, stderr: %q (%v)",
 			address, hashName, stderr, err)

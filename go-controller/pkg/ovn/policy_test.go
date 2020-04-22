@@ -100,13 +100,13 @@ func (n networkPolicy) addPodSelectorCmds(fexec *ovntest.FakeExec, pod pod, netw
 	for i := range networkPolicy.Spec.Ingress {
 		hashedOVNName := hashedAddressSet(fmt.Sprintf("%s.%s.%s.%d", networkPolicy.Namespace, networkPolicy.Name, "ingress", i))
 		fexec.AddFakeCmdsNoOutputNoError([]string{
-			fmt.Sprintf("ovn-nbctl --timeout=15 add address_set %s addresses %s", hashedOVNName, pod.podIP),
+			fmt.Sprintf(`ovn-nbctl --timeout=15 add address_set %s addresses "%s"`, hashedOVNName, pod.podIP),
 		})
 	}
 	for i := range networkPolicy.Spec.Egress {
 		hashedOVNName := hashedAddressSet(fmt.Sprintf("%s.%s.%s.%d", networkPolicy.Namespace, networkPolicy.Name, "egress", i))
 		fexec.AddFakeCmdsNoOutputNoError([]string{
-			fmt.Sprintf("ovn-nbctl --timeout=15 add address_set %s addresses %s", hashedOVNName, pod.podIP),
+			fmt.Sprintf(`ovn-nbctl --timeout=15 add address_set %s addresses "%s"`, hashedOVNName, pod.podIP),
 		})
 	}
 	if hasLocalPods {
@@ -177,14 +177,14 @@ func (n networkPolicy) delPodCmds(fexec *ovntest.FakeExec, networkPolicy knet.Ne
 		localPeerPods := fmt.Sprintf("%s.%s.%s.%d", networkPolicy.Namespace, networkPolicy.Name, "ingress", i)
 		hashedLocalAddressSet := hashedAddressSet(localPeerPods)
 		fexec.AddFakeCmdsNoOutputNoError([]string{
-			fmt.Sprintf("ovn-nbctl --timeout=15 remove address_set %s addresses %s", hashedLocalAddressSet, podIP),
+			fmt.Sprintf(`ovn-nbctl --timeout=15 remove address_set %s addresses "%s"`, hashedLocalAddressSet, podIP),
 		})
 	}
 	for i := range networkPolicy.Spec.Egress {
 		localPeerPods := fmt.Sprintf("%s.%s.%s.%d", networkPolicy.Namespace, networkPolicy.Name, "egress", i)
 		hashedLocalAddressSet := hashedAddressSet(localPeerPods)
 		fexec.AddFakeCmdsNoOutputNoError([]string{
-			fmt.Sprintf("ovn-nbctl --timeout=15 remove address_set %s addresses %s", hashedLocalAddressSet, podIP),
+			fmt.Sprintf(`ovn-nbctl --timeout=15 remove address_set %s addresses "%s"`, hashedLocalAddressSet, podIP),
 		})
 	}
 	if withLocal {
