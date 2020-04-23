@@ -24,6 +24,8 @@ import (
 	"github.com/coreos/go-iptables/iptables"
 	"github.com/vishvananda/netlink"
 
+	egressfirewallfake "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/egressfirewall/v1/apis/clientset/versioned/fake"
+
 	. "github.com/onsi/ginkgo"
 	. "github.com/onsi/gomega"
 )
@@ -135,9 +137,10 @@ cookie=0x0, duration=8366.597s, table=1, n_packets=10641, n_bytes=10370087, prio
 		fakeClient := fake.NewSimpleClientset(&v1.NodeList{
 			Items: []v1.Node{existingNode},
 		})
+		egressFirewallFakeClient := &egressfirewallfake.Clientset{}
 
 		stop := make(chan struct{})
-		wf, err := factory.NewWatchFactory(fakeClient, stop)
+		wf, err := factory.NewWatchFactory(fakeClient, egressFirewallFakeClient, stop)
 		Expect(err).NotTo(HaveOccurred())
 		defer close(stop)
 
@@ -295,8 +298,10 @@ var _ = Describe("Gateway Init Operations", func() {
 			fakeClient := fake.NewSimpleClientset(&v1.NodeList{
 				Items: []v1.Node{existingNode},
 			})
+			egressFirewallFakeClient := &egressfirewallfake.Clientset{}
+
 			stop := make(chan struct{})
-			wf, err := factory.NewWatchFactory(fakeClient, stop)
+			wf, err := factory.NewWatchFactory(fakeClient, egressFirewallFakeClient, stop)
 			Expect(err).NotTo(HaveOccurred())
 			defer close(stop)
 
