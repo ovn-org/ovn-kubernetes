@@ -4,15 +4,19 @@ import (
 	"crypto/sha256"
 	"fmt"
 	"net"
+	"os"
 	"reflect"
 	"strings"
 	"time"
 
 	hotypes "github.com/ovn-org/ovn-kubernetes/go-controller/hybrid-overlay/pkg/types"
 	houtil "github.com/ovn-org/ovn-kubernetes/go-controller/hybrid-overlay/pkg/util"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/factory"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/kube"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
+
+	"github.com/vishvananda/netlink"
 
 	kapi "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/util/wait"
@@ -82,7 +86,7 @@ func (n *NodeController) deletePod(pod *kapi.Pod) error {
 
 func getPodDetails(pod *kapi.Pod, nodeName string) ([]*net.IPNet, net.HardwareAddr, error) {
 	if pod.Spec.NodeName != nodeName {
-		return nil, nil, fmt.Errorf("not scheduled")
+		return nil, nil, fmt.Errorf("not scheduled on this node")
 	}
 
 	podInfo, err := util.UnmarshalPodAnnotation(pod.Annotations)
@@ -135,16 +139,16 @@ func (n *NodeController) syncPods(pods []interface{}) {
 			continue
 		}
 
-		parts := strings.Split(line, ",")
-		for _, part := range parts {
-			part = strings.TrimSpace(part)
+		fields := strings.Split(line, ",")
+		for _, field := range fields {
+			field = strings.TrimSpace(field)
+			// Ignore non-cookie fields and any flows with the special zero-cookie
 			const cookieTag string = "cookie=0x"
-			if !strings.HasPrefix(part, cookieTag) {
-				continue
-			}
-			cookie := part[len(cookieTag):]
-			if _, ok := kubePods[cookie]; !ok {
-				cookiesToRemove[cookie] = true
+			if strings.HasPrefix(field, cookieTag) && field != "cookie=0x0" {
+				cookie := field[len(cookieTag):]
+				if _, ok := kubePods[cookie]; !ok {
+					cookiesToRemove[cookie] = true
+				}
 			}
 		}
 	}
@@ -403,6 +407,11 @@ func (n *NodeController) ensureHybridOverlayBridge() error {
 		return nil
 	}
 
+	mgmtPortMAC, err := util.GetOVSPortMACAddress(util.K8sMgmtIntfName)
+	if err != nil {
+		return fmt.Errorf("failed to read management port MAC address: %v", mgmtPortMAC)
+	}
+
 	_, stderr, err := util.RunOVSVsctl("--may-exist", "add-br", extBridgeName,
 		"--", "set", "Bridge", extBridgeName, "fail_mode=secure")
 	if err != nil {
@@ -422,7 +431,7 @@ func (n *NodeController) ensureHybridOverlayBridge() error {
 			"error: %v", stdout, stderr, err)
 	}
 
-	if _, _, err = util.RunIP("link", "set", extBridgeName, "up"); err != nil {
+	if _, err := util.LinkSetUp(extBridgeName); err != nil {
 		return fmt.Errorf("failed to up %s: %v", extBridgeName, err)
 	}
 
@@ -488,6 +497,39 @@ func (n *NodeController) ensureHybridOverlayBridge() error {
 	if err != nil {
 		return fmt.Errorf("failed to set up hybrid overlay bridge pod dispatch default drop rule,"+
 			"stderr: %q, error: %v", stderr, err)
+	}
+
+	if len(config.HybridOverlay.ClusterSubnets) > 0 {
+		// Add a route via the hybrid overlay port IP through the management port
+		// interface for each hybrid overlay cluster subnet
+		mgmtPortLink, err := netlink.LinkByName(util.K8sMgmtIntfName)
+		if err != nil {
+			return fmt.Errorf("failed to lookup link %s: %v", util.K8sMgmtIntfName, err)
+		}
+		hybridOverlayIfAddr := util.GetNodeHybridOverlayIfAddr(subnet)
+		for _, clusterEntry := range config.HybridOverlay.ClusterSubnets {
+			route := &netlink.Route{
+				Dst:       clusterEntry.CIDR,
+				LinkIndex: mgmtPortLink.Attrs().Index,
+				Scope:     netlink.SCOPE_UNIVERSE,
+				Gw:        hybridOverlayIfAddr.IP,
+			}
+			err := netlink.RouteAdd(route)
+			if err != nil && !os.IsExist(err) {
+				return fmt.Errorf("failed to add route for subnet %s via gateway %s: %v",
+					route.Dst, route.Gw, err)
+			}
+		}
+
+		// Add a rule to fix up return host-network traffic
+		mgmtIfAddr := util.GetNodeManagementIfAddr(subnet)
+		_, stderr, err = util.RunOVSOfctl("add-flow", extBridgeName,
+			fmt.Sprintf("table=10,priority=100,ip,nw_dst=%s actions=mod_dl_src:%s,mod_dl_dst:%s,output:ext",
+				mgmtIfAddr.IP.String(), portMAC.String(), mgmtPortMAC.String()))
+		if err != nil {
+			return fmt.Errorf("failed to set up hybrid overlay bridge host dispatch reply rule,"+
+				"stderr: %q, error: %v", stderr, err)
+		}
 	}
 
 	n.drMAC = portMAC.String()
