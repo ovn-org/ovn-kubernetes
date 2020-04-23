@@ -30,19 +30,29 @@ RUN INSTALL_PKGS=" \
 # RPM has propagated to all stable mirrors and can be removed
 RUN dnf install -y ovn --best --advisory=FEDORA-2020-b570bbc33b || true
 
-RUN mkdir -p /var/run/openvswitch && \
-    mkdir -p /usr/libexec/cni/
+RUN mkdir -p /var/run/openvswitch
 
+# Built in ../../go_controller, then the binaries are copied here.
+# put things where they are in the pkg
+RUN mkdir -p /usr/libexec/cni/
 COPY ovnkube ovn-kube-util /usr/bin/
 COPY ovn-k8s-cni-overlay /usr/libexec/cni/ovn-k8s-cni-overlay
-
-# copy git commit number into image
-COPY git_info /root
 
 # ovnkube.sh is the entry point. This script examines environment
 # variables to direct operation and configure ovn
 COPY ovnkube.sh /root/
 COPY ovndb-raft-functions.sh /root/
+
+# copy git commit number into image
+COPY git_info /root
+
+# iptables wrappers
+COPY ./iptables-scripts/iptables /usr/sbin/
+COPY ./iptables-scripts/iptables-save /usr/sbin/
+COPY ./iptables-scripts/iptables-restore /usr/sbin/
+COPY ./iptables-scripts/ip6tables /usr/sbin/
+COPY ./iptables-scripts/ip6tables-save /usr/sbin/
+COPY ./iptables-scripts/ip6tables-restore /usr/sbin/
 
 LABEL io.k8s.display-name="ovn-kubernetes" \
       io.k8s.description="This is a Kubernetes network plugin that provides an overlay network using OVN." \
