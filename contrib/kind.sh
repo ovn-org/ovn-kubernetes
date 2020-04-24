@@ -1,6 +1,5 @@
 #!/usr/bin/env bash
 
-
 run_kubectl() {
   local retries=0
   local attempts=10
