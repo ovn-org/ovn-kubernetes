@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 
-#set -euxo pipefail
+set -euxo pipefail
 
 run_kubectl() {
   local retries=0
