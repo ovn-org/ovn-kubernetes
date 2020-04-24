@@ -1,6 +1,5 @@
 #!/usr/bin/env bash
 
-#set -euxo pipefail
 
 run_kubectl() {
   local retries=0
@@ -50,10 +49,10 @@ parse_args()
             -kt | --keep-taint )       KIND_REMOVE_TAINT=false
                                        ;;
             -h | --help )              usage
-                                       exit 0
+                                       exit
                                        ;;
             * )                        usage
-                                       exit 0
+                                       exit 1
         esac
         shift
     done
@@ -70,6 +69,8 @@ print_params()
      echo ""
 }
 
+parse_args $*
+
 K8S_VERSION=${K8S_VERSION:-v1.17.2}
 KIND_INSTALL_INGRESS=${KIND_INSTALL_INGRESS:-false}
 KIND_HA=${KIND_HA:-false}
@@ -81,8 +82,9 @@ fi
 KIND_CONFIG=${KIND_CONFIG:-$DEFAULT_KIND_CONFIG}
 KIND_REMOVE_TAINT=${KIND_REMOVE_TAINT:-true}
 
-parse_args $*
 print_params
+
+set -euxo pipefail
 
 # Detect IP to use as API server
 API_IP=$(ip -4 addr | grep -oP '(?<=inet\s)\d+(\.\d+){3}' | grep -v "127.0.0.1" | head -n 1)
