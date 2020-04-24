@@ -29,13 +29,21 @@ jobs:
 
     - name: Check out code into the Go module directory
       uses: actions/checkout@v2
+<<<<<<< HEAD
       if: github.event_name == 'push' || github.event_name == 'pull_request'
+=======
+      if: github.event_name == push || github.event_name == pull_request
+>>>>>>> .github: Add /retest command
 
     - name: Check out code into the Go module directory
       uses: actions/checkout@v2
       with:
         ref: refs/remotes/pull/${{ github.event.client_payload.pull_request.number }}/merge
+<<<<<<< HEAD
       if: github.event_name == 'repository_dispatch'
+=======
+      if: github.event_name == repository_dispatch
+>>>>>>> .github: Add /retest command
 
     - name: Set up environment
       run: |
@@ -150,6 +158,7 @@ jobs:
         go-version: ${{ env.GO_VERSION }}
       id: go
 
+<<<<<<< HEAD
     - name: Check out code into the Go module directory
       uses: actions/checkout@v2
       if: github.event_name == 'push' || github.event_name == 'pull_request'
@@ -159,6 +168,17 @@ jobs:
       with:
         ref: refs/remotes/pull/${{ github.event.client_payload.pull_request.number }}/merge
       if: github.event_name == 'repository_dispatch'
+=======
+    - name: Check out code into the Go module directory
+      uses: actions/checkout@v2
+      if: github.event_name == push || github.event_name == pull_request
+
+    - name: Check out code into the Go module directory
+      uses: actions/checkout@v2
+      with:
+        ref: refs/remotes/pull/${{ github.event.client_payload.pull_request.number }}/merge
+      if: github.event_name == repository_dispatch
+>>>>>>> .github: Add /retest command
 
     - name: Set up environment
       run: |
