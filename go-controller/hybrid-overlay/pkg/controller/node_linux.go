@@ -99,14 +99,14 @@ func podChanged(pod1 *kapi.Pod, pod2 *kapi.Pod, nodeName string) bool {
 	podIPs2, mac2, _ := getPodDetails(pod2, nodeName)
 
 	if len(podIPs1) != len(podIPs2) || !reflect.DeepEqual(mac1, mac2) {
-		return false
+		return true
 	}
 	for i := range podIPs1 {
 		if podIPs1[i].String() != podIPs2[i].String() {
-			return false
+			return true
 		}
 	}
-	return true
+	return false
 }
 
 func (n *NodeController) syncPods(pods []interface{}) {
