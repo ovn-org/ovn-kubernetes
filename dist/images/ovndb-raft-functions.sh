@@ -181,10 +181,15 @@ set_northd_probe_interval() {
   return 0
 }
 
+ovsdb_cleanup() {
+  local db=${1}
+  ovs-appctl -t ${OVN_RUNDIR}/ovn${db}_db.ctl exit >/dev/null 2>&1
+  kill $(jobs -p) >/dev/null 2>&1
+  exit 0
+}
+
 # v3 - create nb_ovsdb/sb_ovsdb cluster in a separate container
 ovsdb-raft() {
-  trap 'kill $(jobs -p); exit 0' TERM
-
   local db=${1}
   local port=${2}
   local raft_port=${3}
@@ -195,6 +200,7 @@ ovsdb-raft() {
   eval ovn_log_db=\$ovn_log_${db}
   ovn_db_file=${OVN_ETCDIR}/ovn${db}_db.db
 
+  trap 'ovsdb_cleanup ${db}' TERM
   rm -f ${ovn_db_pidfile}
 
   verify-ovsdb-raft
