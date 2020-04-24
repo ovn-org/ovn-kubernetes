@@ -1,5 +1,10 @@
 #!/usr/bin/env bash
 
+
+# ensure j2 renderer installed
+pip freeze | grep j2cli || pip install j2cli[yaml] --user
+export PATH=~/.local/bin:$PATH
+
 run_kubectl() {
   local retries=0
   local attempts=10
@@ -70,18 +75,12 @@ print_params()
 
 parse_args $*
 
-MASTER_COUNT=1
+# Set default values
+KIND_CLUSTER_NAME=${KIND_CLUSTER_NAME:-ovn}
 K8S_VERSION=${K8S_VERSION:-v1.17.2}
 KIND_INSTALL_INGRESS=${KIND_INSTALL_INGRESS:-false}
 KIND_HA=${KIND_HA:-false}
-if [ "$KIND_HA" == true ]; then
-  DEFAULT_KIND_CONFIG=./kind-ha.yaml
-  MASTER_COUNT=`grep -c "^\s-\srole\s*:\s*control-plane" kind-ha.yaml`
-else
-  DEFAULT_KIND_CONFIG=./kind.yaml
-  MASTER_COUNT=`grep -c "^\s-\srole\s*:\s*control-plane" kind.yaml`
-fi
-KIND_CONFIG=${KIND_CONFIG:-$DEFAULT_KIND_CONFIG}
+KIND_CONFIG=${KIND_CONFIG:-./kind.yaml.j2}
 KIND_REMOVE_TAINT=${KIND_REMOVE_TAINT:-true}
 
 print_params
@@ -95,11 +94,17 @@ if [ -z "$API_IP" ]; then
   exit 1
 fi
 
-sed -i "s/apiServerAddress.*/apiServerAddress: ${API_IP}/" ${KIND_CONFIG}
+# Output of the j2 command
+KIND_CONFIG_LCL=./kind.yaml
 
-# Create KIND cluster
-KIND_CLUSTER_NAME=${KIND_CLUSTER_NAME:-ovn}
-kind create cluster --name ${KIND_CLUSTER_NAME} --kubeconfig ${HOME}/admin.conf --image kindest/node:${K8S_VERSION} --config=${KIND_CONFIG}
+ovn_apiServerAddress=${API_IP} \
+  ovn_ha=${KIND_HA} \
+  j2 ${KIND_CONFIG} -o ${KIND_CONFIG_LCL}
+
+MASTER_COUNT=`grep -c "^\s-\srole\s*:\s*control-plane" ${KIND_CONFIG_LCL}`
+
+# Create KIND cluster. For additional debug, add '--verbosity <int>': 0 None .. 3 Debug
+kind create cluster --name ${KIND_CLUSTER_NAME} --kubeconfig ${HOME}/admin.conf --image kindest/node:${K8S_VERSION} --config=${KIND_CONFIG_LCL}
 export KUBECONFIG=${HOME}/admin.conf
 cat ${KUBECONFIG}
 mkdir -p /tmp/kind

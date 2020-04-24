@@ -3,7 +3,7 @@ apiVersion: kind.x-k8s.io/v1alpha4
 networking:
   # the default CNI will not be installed
   disableDefaultCNI: true
-  apiServerAddress: 11.12.13.1
+  apiServerAddress: {{ ovn_apiServerAddress | default('11.12.13.1') }}
   apiServerPort: 11337
 kubeadmConfigPatches:
 - |
@@ -25,6 +25,7 @@ nodes:
        kubeletExtraArgs:
          node-labels: "ingress-ready=true"
          authorization-mode: "AlwaysAllow"
+{%- if ovn_ha is equalto "true" %}
  - role: control-plane
    extraMounts:
      - hostPath: /tmp/kind
@@ -33,12 +34,14 @@ nodes:
    extraMounts:
      - hostPath: /tmp/kind
        containerPath: /var/run/secrets/kubernetes.io/serviceaccount/
-# - role: worker
-#   extraMounts:
-#     - hostPath: /tmp/kind
-#       containerPath: /var/run/secrets/kubernetes.io/serviceaccount/
-# - role: worker
-#   extraMounts:
-#     - hostPath: /tmp/kind
-#       containerPath: /var/run/secrets/kubernetes.io/serviceaccount/
+{%- else %}
+ - role: worker
+   extraMounts:
+     - hostPath: /tmp/kind
+       containerPath: /var/run/secrets/kubernetes.io/serviceaccount/
+ - role: worker
+   extraMounts:
+     - hostPath: /tmp/kind
+       containerPath: /var/run/secrets/kubernetes.io/serviceaccount/
+{%- endif %}
 
