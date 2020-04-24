@@ -165,6 +165,7 @@ jobs:
       if: steps.cache-k8s.outputs.cache-hit != 'true'
       run: |
         set -x
+        rm -rf $GOPATH/src/k8s.io/kubernetes/
         git clone --single-branch --branch $K8S_VERSION https://github.com/kubernetes/kubernetes.git $GOPATH/src/k8s.io/kubernetes/
         pushd $GOPATH/src/k8s.io/kubernetes/
         make WHAT="test/e2e/e2e.test vendor/github.com/onsi/ginkgo/ginkgo cmd/kubectl"
