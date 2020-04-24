@@ -13,7 +13,7 @@ metadata:
       This Deployment launches the ovn-kubernetes master networking components.
 spec:
   progressDeadlineSeconds: 600
-  replicas: 1
+  replicas: {{ ovn_master_count | default(1|int) }}
   revisionHistoryLimit: 10
   selector:
     matchLabels:
