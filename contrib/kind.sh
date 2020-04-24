@@ -20,13 +20,16 @@ run_kubectl() {
   done
 }
 
+MASTER_COUNT=1
 K8S_VERSION=${K8S_VERSION:-v1.17.2}
 KIND_INSTALL_INGRESS=${KIND_INSTALL_INGRESS:-false}
 KIND_HA=${KIND_HA:-false}
 if [ "$KIND_HA" == true ]; then
   DEFAULT_KIND_CONFIG=./kind-ha.yaml
+  MASTER_COUNT=`grep -c "^\s-\srole\s*:\s*control-plane" kind-ha.yaml`
 else
   DEFAULT_KIND_CONFIG=./kind.yaml
+  MASTER_COUNT=`grep -c "^\s-\srole\s*:\s*control-plane" kind.yaml`
 fi
 KIND_CONFIG=${KIND_CONFIG:-$DEFAULT_KIND_CONFIG}
 KIND_REMOVE_TAINT=${KIND_REMOVE_TAINT:-true}
@@ -67,7 +70,7 @@ pushd ../dist/images
 sudo cp -f ../../go-controller/_output/go/bin/* .
 echo "ref: $(git rev-parse  --symbolic-full-name HEAD)  commit: $(git rev-parse  HEAD)" > git_info
 docker build -t ovn-daemonset-f:dev -f Dockerfile.fedora .
-./daemonset.sh --image=docker.io/library/ovn-daemonset-f:dev --net-cidr=10.244.0.0/16 --svc-cidr=10.96.0.0/12 --gateway-mode="local" --k8s-apiserver=https://${API_IP}:11337 --kind --master-loglevel=5
+./daemonset.sh --image=docker.io/library/ovn-daemonset-f:dev --net-cidr=10.244.0.0/16 --svc-cidr=10.96.0.0/12 --gateway-mode="local" --k8s-apiserver=https://${API_IP}:11337 --ovn-master-count=${MASTER_COUNT} --kind --master-loglevel=5
 popd
 kind load docker-image ovn-daemonset-f:dev --name ${KIND_CLUSTER_NAME}
 pushd ../dist/yaml

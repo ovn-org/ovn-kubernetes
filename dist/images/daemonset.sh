@@ -30,6 +30,7 @@ OVN_LOGLEVEL_NB=""
 OVN_LOGLEVEL_SB=""
 OVN_LOGLEVEL_CONTROLLER=""
 OVN_LOGLEVEL_NBCTLD=""
+OVN_MASTER_COUNT=""
 
 # Parse parameters given as arguments to this script.
 while [ "$1" != "" ]; do
@@ -102,6 +103,9 @@ while [ "$1" != "" ]; do
   --ovn_sb_raft_election_timer)
     OVN_SB_RAFT_ELECTION_TIMER=$VALUE
     ;;
+  --ovn-master-count)
+    OVN_MASTER_COUNT=$VALUE
+    ;;
   *)
     echo "WARNING: unknown parameter \"$PARAM\""
     exit 1
@@ -157,6 +161,8 @@ ovn_nb_raft_election_timer=${OVN_NB_RAFT_ELECTION_TIMER:-1000}
 echo "ovn_nb_raft_election_timer: ${ovn_nb_raft_election_timer}"
 ovn_sb_raft_election_timer=${OVN_SB_RAFT_ELECTION_TIMER:-1000}
 echo "ovn_sb_raft_election_timer: ${ovn_sb_raft_election_timer}"
+ovn_master_count=${OVN_MASTER_COUNT:-"1"}
+echo "ovn_master_count: ${ovn_master_count}"
 
 ovn_image=${image} \
   ovn_image_pull_policy=${image_pull_policy} \
@@ -178,6 +184,7 @@ ovn_image=${image} \
   ovn_hybrid_overlay_net_cidr=${ovn_hybrid_overlay_net_cidr} \
   ovn_hybrid_overlay_enable=${ovn_hybrid_overlay_enable} \
   ovn_ssl_en=${ovn_ssl_en} \
+  ovn_master_count=${ovn_master_count} \
   j2 ../templates/ovnkube-master.yaml.j2 -o ../yaml/ovnkube-master.yaml
 
 ovn_image=${image} \
