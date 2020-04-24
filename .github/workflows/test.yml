@@ -4,6 +4,8 @@ on:
   push:
   pull_request:
     branches: [ master ]
+  repository_dispatch:
+    types: [retest-command]
 
 env:
   GO_VERSION: 1.13.4
@@ -27,14 +29,21 @@ jobs:
 
     - name: Check out code into the Go module directory
       uses: actions/checkout@v2
-      
+      if: github.event_name == 'push' || github.event_name == 'pull_request'
+
+    - name: Check out code into the Go module directory
+      uses: actions/checkout@v2
+      with:
+        ref: refs/remotes/pull/${{ github.event.client_payload.pull_request.number }}/merge
+      if: github.event_name == 'repository_dispatch'
+
     - name: Set up environment
       run: |
         export GOPATH=$(go env GOPATH)
         echo "::set-env name=GOPATH::$GOPATH"
         export PATH=$GOPATH/bin:$PATH
         echo "::add-path::$GOPATH/bin"
-    
+
     - name: Verify
       run: |
         pushd go-controller
@@ -55,17 +64,17 @@ jobs:
         pushd dist/images
            if [ -n "$(git diff --stat origin/master.. | grep dist/images/Dockerfile)" ]; then make all; fi
         popd
-        
+
         # Combine separate code coverage profiles into one
         go get github.com/modocache/gover
         gover go-controller/ gover.coverprofile
-        
+
         # Convert coverage profile to LCOV format for coveralls github action
         go get github.com/jandelgado/gcov2lcov
         mkdir -p src/github.com/ovn-org
         ln -sf $(pwd) src/github.com/ovn-org/ovn-kubernetes
         GOPATH=$(pwd) gcov2lcov -infile gover.coverprofile -outfile coverage.lcov
-        
+
     - name: Submit code coverage to Coveralls
       uses: coverallsapp/github-action@master
       with:
@@ -76,14 +85,14 @@ jobs:
     name: Build k8s
     runs-on: ubuntu-latest
     steps:
-    
+
     - name: Set up environment
       run: |
         export GOPATH=$(go env GOPATH)
         echo "::set-env name=GOPATH::$GOPATH"
         export PATH=$GOPATH/bin:$PATH
         echo "::add-path::$GOPATH/bin"
-    
+
     - name: Cache Kubernetes
       id: cache-k8s
       if: github.event_name == 'push' || github.event_name == 'pull_request'
@@ -131,26 +140,33 @@ jobs:
       JOB_NAME: "${{ matrix.target }}-${{ matrix.ha.name }}"
       KIND_HA: "${{ matrix.ha.enabled }}"
     steps:
-    
+
     - name: Free up disk space
       run: sudo eatmydata apt-get remove --auto-remove -y aspnetcore-* dotnet-* libmono-* mono-* msbuild php-* php7* ghc-* zulu-*
-    
+
     - name: Set up Go
       uses: actions/setup-go@v1
       with:
         go-version: ${{ env.GO_VERSION }}
       id: go
-    
+
     - name: Check out code into the Go module directory
       uses: actions/checkout@v2
-    
+      if: github.event_name == 'push' || github.event_name == 'pull_request'
+
+    - name: Check out code into the Go module directory
+      uses: actions/checkout@v2
+      with:
+        ref: refs/remotes/pull/${{ github.event.client_payload.pull_request.number }}/merge
+      if: github.event_name == 'repository_dispatch'
+
     - name: Set up environment
       run: |
         export GOPATH=$(go env GOPATH)
         echo "::set-env name=GOPATH::$GOPATH"
         export PATH=$GOPATH/bin:$PATH
         echo "::add-path::$GOPATH/bin"
-  
+
     - name: Restore Kubernetes from cache
       id: cache-k8s
       uses: actions/cache@v1
@@ -169,7 +185,7 @@ jobs:
         pushd $GOPATH/src/k8s.io/kubernetes/
         make WHAT="test/e2e/e2e.test vendor/github.com/onsi/ginkgo/ginkgo cmd/kubectl"
         rm -rf .git
-    
+
     - name: kind setup
       run: |
         make -C test install-kind
@@ -181,7 +197,7 @@ jobs:
     - name: Export logs
       if: always()
       run: |
-        mkdir -p /tmp/kind/logs 
+        mkdir -p /tmp/kind/logs
         kind export logs --name ${KIND_CLUSTER_NAME} --loglevel=debug /tmp/kind/logs
 
     - name: Upload logs
