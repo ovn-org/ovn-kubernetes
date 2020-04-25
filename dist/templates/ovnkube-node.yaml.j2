@@ -242,6 +242,8 @@ spec:
           value: "{{ ovn_hybrid_overlay_net_cidr }}"
         - name: OVN_SSL_ENABLE
           value: "{{ ovn_ssl_en }}"
+        - name: OVN_REMOTE_PROBE_INTERVAL
+          value: "{{ ovn_remote_probe_interval }}"
 
         lifecycle:
           preStop:
