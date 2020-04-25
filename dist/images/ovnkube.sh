@@ -615,7 +615,7 @@ EOF
 
 # v3 - run nb_ovsdb in a separate container
 nb-ovsdb() {
-  trap 'kill $(jobs -p); exit 0' TERM
+  trap 'ovsdb_cleanup nb' TERM
   check_ovn_daemonset_version "3"
   rm -f ${OVN_RUNDIR}/ovnnb_db.pid
 
@@ -649,7 +649,7 @@ nb-ovsdb() {
 
 # v3 - run sb_ovsdb in a separate container
 sb-ovsdb() {
-  trap 'kill $(jobs -p); exit 0' TERM
+  trap 'ovsdb_cleanup sb' TERM
   check_ovn_daemonset_version "3"
   rm -f ${OVN_RUNDIR}/ovnsb_db.pid
 
