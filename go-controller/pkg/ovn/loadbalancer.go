@@ -50,7 +50,7 @@ func (ovn *Controller) getDefaultGatewayLoadBalancer(protocol kapi.Protocol) str
 		return outStr
 	}
 
-	gw, _, err := util.GetDefaultGatewayRouterIP()
+	gw, _, err := getDefaultGatewayRouterIP()
 	if err != nil {
 		klog.Errorf(err.Error())
 		return ""
@@ -178,9 +178,9 @@ func (ovn *Controller) getLogicalSwitchesForLoadBalancer(lb string) ([]string, e
 	}
 	// if this is a GR we know the corresponding join and external switches, otherwise this is an unhandled
 	// case
-	if strings.HasPrefix(out, util.GWRouterPrefix) {
-		routerName := strings.TrimPrefix(out, util.GWRouterPrefix)
-		return []string{util.JoinSwitchPrefix + routerName, util.ExternalSwitchPrefix + routerName}, nil
+	if strings.HasPrefix(out, gwRouterPrefix) {
+		routerName := strings.TrimPrefix(out, gwRouterPrefix)
+		return []string{joinSwitchPrefix + routerName, externalSwitchPrefix + routerName}, nil
 	}
 	return nil, fmt.Errorf("router detected with load balancer that is not a GR")
 }

@@ -176,10 +176,9 @@ func (oc *Controller) StartClusterMaster(masterNodeName string) error {
 
 // SetupMaster creates the central router and load-balancers for the network
 func (oc *Controller) SetupMaster(masterNodeName string) error {
-	clusterRouter := util.GetK8sClusterRouter()
 	// Create a single common distributed router for the cluster.
-	stdout, stderr, err := util.RunOVNNbctl("--", "--may-exist", "lr-add", clusterRouter,
-		"--", "set", "logical_router", clusterRouter, "external_ids:k8s-cluster-router=yes")
+	stdout, stderr, err := util.RunOVNNbctl("--", "--may-exist", "lr-add", ovnClusterRouter,
+		"--", "set", "logical_router", ovnClusterRouter, "external_ids:k8s-cluster-router=yes")
 	if err != nil {
 		klog.Errorf("Failed to create a single common distributed router for the cluster, "+
 			"stdout: %q, stderr: %q, error: %v", stdout, stderr, err)
@@ -201,7 +200,7 @@ func (oc *Controller) SetupMaster(masterNodeName string) error {
 	// traffic between nodes.
 	if oc.multicastSupport {
 		stdout, stderr, err = util.RunOVNNbctl("--", "set", "logical_router",
-			clusterRouter, "options:mcast_relay=\"true\"")
+			ovnClusterRouter, "options:mcast_relay=\"true\"")
 		if err != nil {
 			klog.Errorf("Failed to enable IGMP relay on the cluster router, "+
 				"stdout: %q, stderr: %q, error: %v", stdout, stderr, err)
@@ -374,7 +373,7 @@ func (oc *Controller) syncGatewayLogicalNetwork(node *kapi.Node, l3GatewayConfig
 		return err
 	}
 
-	err = util.GatewayInit(clusterSubnets, subnet, joinSubnet, node.Name, l3GatewayConfig, oc.SCTPSupport)
+	err = gatewayInit(node.Name, clusterSubnets, []*net.IPNet{subnet}, []*net.IPNet{joinSubnet}, l3GatewayConfig, oc.SCTPSupport)
 	if err != nil {
 		return fmt.Errorf("failed to init shared interface gateway: %v", err)
 	}
@@ -408,7 +407,6 @@ func (oc *Controller) syncGatewayLogicalNetwork(node *kapi.Node, l3GatewayConfig
 }
 
 func addStaticRouteToHost(node *kapi.Node, nicIPs []*net.IPNet) error {
-	k8sClusterRouter := util.GetK8sClusterRouter()
 	subnet, err := util.ParseNodeHostSubnetAnnotation(node)
 	if err != nil {
 		return fmt.Errorf("failed to get interface IP address for %s (%v)",
@@ -432,10 +430,10 @@ func addStaticRouteToHost(node *kapi.Node, nicIPs []*net.IPNet) error {
 		return fmt.Errorf("configuration error: no NIC IP of same family as hostsubnet")
 	}
 	nextHop := util.GetNodeManagementIfAddr(subnet).IP.String()
-	_, stderr, err := util.RunOVNNbctl("--may-exist", "lr-route-add", k8sClusterRouter, prefix, nextHop)
+	_, stderr, err := util.RunOVNNbctl("--may-exist", "lr-route-add", ovnClusterRouter, prefix, nextHop)
 	if err != nil {
 		return fmt.Errorf("failed to add static route '%s via %s' for host %q on %s "+
-			"stderr: %q, error: %v", prefix, nextHop, node.Name, k8sClusterRouter, stderr, err)
+			"stderr: %q, error: %v", prefix, nextHop, node.Name, ovnClusterRouter, stderr, err)
 	}
 
 	return nil
@@ -446,10 +444,9 @@ func (oc *Controller) ensureNodeLogicalNetwork(nodeName string, hostsubnet *net.
 	mgmtIfAddr := util.GetNodeManagementIfAddr(hostsubnet)
 	hybridOverlayIfAddr := util.GetNodeHybridOverlayIfAddr(hostsubnet)
 	nodeLRPMAC := util.IPAddrToHWAddr(gwIfAddr.IP)
-	clusterRouter := util.GetK8sClusterRouter()
 
 	// Create a router port and provide it the first address on the node's host subnet
-	_, stderr, err := util.RunOVNNbctl("--may-exist", "lrp-add", clusterRouter, "rtos-"+nodeName,
+	_, stderr, err := util.RunOVNNbctl("--may-exist", "lrp-add", ovnClusterRouter, "rtos-"+nodeName,
 		nodeLRPMAC.String(), gwIfAddr.String())
 	if err != nil {
 		klog.Errorf("Failed to add logical port to router, stderr: %q, error: %v", stderr, err)
@@ -692,7 +689,7 @@ func (oc *Controller) deleteNode(nodeName string, nodeSubnet, joinSubnet *net.IP
 		klog.Errorf("Error deleting node %s logical network: %v", nodeName, err)
 	}
 
-	if err := util.GatewayCleanup(nodeName, nodeSubnet); err != nil {
+	if err := gatewayCleanup(nodeName, []*net.IPNet{nodeSubnet}); err != nil {
 		return fmt.Errorf("Failed to clean up node %s gateway: (%v)", nodeName, err)
 	}
 
@@ -864,7 +861,7 @@ func (oc *Controller) syncNodes(nodes []interface{}) {
 		}
 		isJoinSwitch := false
 		nodeName := items[0]
-		if strings.HasPrefix(items[0], util.JoinSwitchPrefix) {
+		if strings.HasPrefix(items[0], joinSwitchPrefix) {
 			isJoinSwitch = true
 			nodeName = strings.Split(items[0], "_")[1]
 		}
