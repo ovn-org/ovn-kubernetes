@@ -239,7 +239,7 @@ func (n *OvnNode) Start() error {
 	confFile := filepath.Join(config.CNI.ConfDir, config.CNIConfFileName)
 	_, err = os.Stat(confFile)
 	if os.IsNotExist(err) {
-		err = config.WriteCNIConfig(config.CNI.ConfDir, config.CNIConfFileName)
+		err = config.WriteCNIConfig()
 		if err != nil {
 			return err
 		}
