@@ -57,8 +57,9 @@ var (
 
 	// Logging holds logging-related parsed config file parameters and command-line overrides
 	Logging = LoggingConfig{
-		File:  "", // do not log to a file by default
-		Level: 4,
+		File:    "", // do not log to a file by default
+		CNIFile: "",
+		Level:   4,
 	}
 
 	// CNI holds CNI-related parsed config file parameters and command-line overrides
@@ -153,6 +154,8 @@ type DefaultConfig struct {
 type LoggingConfig struct {
 	// File is the path of the file to log to
 	File string `gcfg:"logfile"`
+	// CNIFile is the path of the file for the CNI shim to log to
+	CNIFile string `gcfg:"cnilogfile"`
 	// Level is the logging verbosity level
 	Level int `gcfg:"loglevel"`
 }
@@ -504,6 +507,12 @@ var CommonFlags = []cli.Flag{
 		Name:        "logfile",
 		Usage:       "path of a file to direct log output to",
 		Destination: &cliConfig.Logging.File,
+	},
+	&cli.StringFlag{
+		Name:        "cnilogfile",
+		Usage:       "path of a file to direct log from cni shim to output to (default: /var/log/ovn-kubernetes/ovn-k8s-cni-overlay.log)",
+		Destination: &cliConfig.Logging.CNIFile,
+		Value:       "/var/log/ovn-kubernetes/ovn-k8s-cni-overlay.log",
 	},
 }
 
