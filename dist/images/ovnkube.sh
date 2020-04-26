@@ -855,9 +855,12 @@ ovn-node() {
   fi
 
   OVN_ENCAP_IP=""
-  ovn_encap_ip=$(ovs-vsctl --if-exists get Open_vSwitch . external_ids:ovn-encap-ip | tr -d '\"')
-  if [[ $? == 0 && "${ovn_encap_ip}" != "" ]]; then
-    OVN_ENCAP_IP=$(echo --encap-ip=${ovn_encap_ip})
+  ovn_encap_ip=$(ovs-vsctl --if-exists get Open_vSwitch . external_ids:ovn-encap-ip)
+  if [[ $? == 0 ]]; then
+    ovn_encap_ip=$(echo ${ovn_encap_ip} | tr -d '\"')
+    if [[ "${ovn_encap_ip}" != "" ]]; then
+      OVN_ENCAP_IP="--encap-ip=${ovn_encap_ip}"
+    fi
   fi
 
   local ovn_node_ssl_opts=""
