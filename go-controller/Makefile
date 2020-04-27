@@ -36,13 +36,17 @@ install:
 clean:
 	rm -rf ${OUT_DIR}
 
-.PHONY: install.tools lint gofmt
+.PHONY: install.tools lint gosec gofmt
 
 install.tools:
 	curl -sfL https://install.goreleaser.com/github.com/golangci/golangci-lint.sh | bash -s -- -b ${GOPATH}/bin
+	curl -sfL https://raw.githubusercontent.com/securego/gosec/master/install.sh | bash -s -- -b ${GOPATH}/bin v2.2.0
 
 lint:
 	@GOPATH=${GOPATH} ./hack/lint.sh
+
+gosec:
+	@GOPATH=${GOPATH} ./hack/gosec.sh
 
 gofmt:
 	@./hack/verify-gofmt.sh

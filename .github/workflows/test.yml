@@ -43,6 +43,14 @@ jobs:
           make lint
         popd
 
+    - name: Source code inspection
+      continue-on-error: true
+      run: |
+        pushd go-controller
+          make install.tools
+          make gosec
+        popd
+
     - name: Build
       run: |
         set -x
