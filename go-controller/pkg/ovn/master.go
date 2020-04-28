@@ -446,8 +446,9 @@ func (oc *Controller) ensureNodeLogicalNetwork(nodeName string, hostsubnet *net.
 	nodeLRPMAC := util.IPAddrToHWAddr(gwIfAddr.IP)
 
 	// Create a router port and provide it the first address on the node's host subnet
-	_, stderr, err := util.RunOVNNbctl("--may-exist", "lrp-add", ovnClusterRouter, "rtos-"+nodeName,
-		nodeLRPMAC.String(), gwIfAddr.String())
+	_, stderr, err := util.RunOVNNbctl(
+		"--if-exists", "lrp-del", "rtos-"+nodeName,
+		"--", "lrp-add", ovnClusterRouter, "rtos-"+nodeName, nodeLRPMAC.String(), gwIfAddr.String())
 	if err != nil {
 		klog.Errorf("Failed to add logical port to router, stderr: %q, error: %v", stderr, err)
 		return err

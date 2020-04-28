@@ -68,7 +68,8 @@ func gatewayInit(nodeName string, clusterIPSubnet []*net.IPNet, hostSubnets []*n
 	}
 
 	args := []string{
-		"--", "--may-exist", "lrp-add", gatewayRouter, gwRouterPort, gwLRPMAC.String(),
+		"--", "--if-exists", "lrp-del", gwRouterPort,
+		"--", "lrp-add", gatewayRouter, gwRouterPort, gwLRPMAC.String(),
 	}
 	args = append(args, gwLRPAddrs...)
 	_, stderr, err = util.RunOVNNbctl(args...)
@@ -92,7 +93,8 @@ func gatewayInit(nodeName string, clusterIPSubnet []*net.IPNet, hostSubnets []*n
 	}
 
 	args = []string{
-		"--", "--may-exist", "lrp-add", ovnClusterRouter, drRouterPort, drLRPMAC.String(),
+		"--", "--if-exists", "lrp-del", drRouterPort,
+		"--", "lrp-add", ovnClusterRouter, drRouterPort, drLRPMAC.String(),
 	}
 	args = append(args, drLRPAddrs...)
 	_, stderr, err = util.RunOVNNbctl(args...)
