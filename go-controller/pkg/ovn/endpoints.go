@@ -250,6 +250,10 @@ func (ovn *Controller) deleteEndpoints(ep *kapi.Endpoints) error {
 		}
 		vip := util.JoinHostPortInt32(svc.Spec.ClusterIP, svcPort.Port)
 		ovn.removeServiceEndpoints(lb, vip)
+
+		if util.ServiceTypeHasNodePort(svc) {
+			ovn.deleteGatewayVIPs(svcPort.Protocol, svcPort.NodePort)
+		}
 	}
 	return nil
 }
