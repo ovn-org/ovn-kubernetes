@@ -281,7 +281,7 @@ func addDefaultConntrackRules(nodeName, gwBridge, gwIntf string, stopChan chan s
 	nFlows++
 
 	// add health check function to check default OpenFlow flows are on the shared gateway bridge
-	go checkDefaultConntrackRules(gwBridge, nFlows, stopChan)
+	go checkDefaultConntrackRules(gwBridge, gwIntf, patchPort, ofportPhys, ofportPatch, nFlows, stopChan)
 	return nil
 }
 
