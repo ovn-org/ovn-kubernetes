@@ -699,3 +699,8 @@ func (wf *WatchFactory) GetNamespaces() ([]*kapi.Namespace, error) {
 	namespaceLister := wf.informers[namespaceType].lister.(listers.NamespaceLister)
 	return namespaceLister.List(labels.Everything())
 }
+
+// GetFactory returns the underlying informer factory
+func (wf *WatchFactory) GetFactory() informerfactory.SharedInformerFactory {
+	return wf.iFactory
+}
