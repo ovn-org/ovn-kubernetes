@@ -1,7 +1,5 @@
 #!/usr/bin/env bash
 
-set -euxo pipefail
-
 run_kubectl() {
   local retries=0
   local attempts=10
@@ -20,6 +18,58 @@ run_kubectl() {
   done
 }
 
+usage()
+{
+    echo "usage: kind.sh [[[-cf|--config-file file ] [-ii|--install-ingress] [-ha|--ha-enabled] [-kt|keep-taint]] | [-h]]"
+    echo ""
+    echo "-cf | --config-file          Name of the KIND configuration file if default files are not sufficient"
+    echo "-ii | --install-ingress      Flag to install Ingress Components"
+    echo "-ha | --ha-enabled           If high availability needs to be enabled by default"
+    echo "-kt | --keep-taint           Do not remove taint components"
+    echo ""
+} 
+
+parse_args()
+{   
+    while [ "$1" != "" ]; do
+        case $1 in
+            -cf | --config-file )      shift
+                                       if test ! -f "$1"; then
+                                          echo "$1 does not  exist"
+                                          usage
+                                          exit 1
+                                       fi
+                                       KIND_CONFIG=$1
+                                       ;;
+            -ii | --install-ingress )  KIND_INSTALL_INGRESS=true
+                                       ;;
+            -ha | --ha-enabled )       KIND_HA=true
+                                       ;;
+            -kt | --keep-taint )       KIND_REMOVE_TAINT=false
+                                       ;;
+            -h | --help )              usage
+                                       exit
+                                       ;;
+            * )                        usage
+                                       exit 1
+        esac
+        shift
+    done
+}
+
+print_params()
+{ 
+     echo "Using these parameters to install KIND"
+     echo ""
+     echo "KIND_INSTALL_INGRESS = $KIND_INSTALL_INGRESS"
+     echo "KIND_HA = $KIND_HA"
+     echo "KIND_CONFIG_FILE = $KIND_CONFIG "
+     echo "KIND_REMOVE_TAINT = $KIND_REMOVE_TAINT"
+     echo ""
+}
+
+parse_args $*
+
 MASTER_COUNT=1
 K8S_VERSION=${K8S_VERSION:-v1.17.2}
 KIND_INSTALL_INGRESS=${KIND_INSTALL_INGRESS:-false}
@@ -33,6 +83,10 @@ else
 fi
 KIND_CONFIG=${KIND_CONFIG:-$DEFAULT_KIND_CONFIG}
 KIND_REMOVE_TAINT=${KIND_REMOVE_TAINT:-true}
+
+print_params
+
+set -euxo pipefail
 
 # Detect IP to use as API server
 API_IP=$(ip -4 addr | grep -oP '(?<=inet\s)\d+(\.\d+){3}' | grep -v "127.0.0.1" | head -n 1)
