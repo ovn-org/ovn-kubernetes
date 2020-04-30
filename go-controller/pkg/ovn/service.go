@@ -3,6 +3,7 @@ package ovn
 import (
 	"fmt"
 	"net"
+	"reflect"
 
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
@@ -285,12 +286,18 @@ func (ovn *Controller) createService(service *kapi.Service) error {
 }
 
 func (ovn *Controller) updateService(oldSvc, newSvc *kapi.Service) error {
-	klog.V(5).Infof("Updating service is a noop: %s", newSvc.Name)
-	// Service update needs to check for port change, protocol, etc and update the ACLs, or and OVN LBs
-	// This only really matters when a service is updated and has no endpoints. If the service has endpoints
-	// the endpoints watcher will handle the OVN config
-	// TODO (trozet) implement this
-	return nil
+	if reflect.DeepEqual(newSvc.Spec.Ports, oldSvc.Spec.Ports) &&
+		reflect.DeepEqual(newSvc.Spec.ExternalIPs, oldSvc.Spec.ExternalIPs) &&
+		reflect.DeepEqual(newSvc.Spec.ClusterIP, oldSvc.Spec.ClusterIP) &&
+		reflect.DeepEqual(newSvc.Spec.Type, oldSvc.Spec.Type) {
+		klog.V(5).Infof("skipping service update for: %s as change does not apply to any of .Spec.Ports, .Spec.ExternalIP, .Spec.ClusterIP, .Spec.Type", newSvc.Name)
+		return nil
+	}
+
+	klog.V(5).Infof("updating service from: %v to: %v", oldSvc, newSvc)
+
+	ovn.deleteService(oldSvc)
+	return ovn.createService(newSvc)
 }
 
 func (ovn *Controller) deleteService(service *kapi.Service) {
