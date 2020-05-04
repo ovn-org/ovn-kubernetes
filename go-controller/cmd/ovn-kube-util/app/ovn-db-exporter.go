@@ -315,7 +315,7 @@ var (
 func getOvnDbVersionInfo() {
 	stdout, _, err := util.RunOVSDBClient("-V")
 	if err == nil && strings.HasPrefix(stdout, "ovsdb-client (Open vSwitch) ") {
-		ovnDbVersion = strings.Fields(stdout)[2]
+		ovnDbVersion = strings.Fields(stdout)[3]
 	}
 	sockPath := "unix:/var/run/openvswitch/ovnnb_db.sock"
 	stdout, _, err = util.RunOVSDBClient("get-schema-version", sockPath, "OVN_Northbound")
