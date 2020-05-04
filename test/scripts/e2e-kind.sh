@@ -10,8 +10,43 @@ export KUBECONFIG=${HOME}/admin.conf
 export MASTER_NAME=${KIND_CLUSTER_NAME}-control-plane
 export NODE_NAMES=${MASTER_NAME}
 
-#REMOVE skip for "ingress access from updated pod" when k8s is updated to 1.18
-SKIPPED_TESTS='Networking\sIPerf\sIPv[46]|\[Feature:PerformanceDNS\]|\[Feature:IPv6DualStackAlphaFeature\]|\[Feature:NoSNAT\]|Services.+(ESIPP|cleanup\sfinalizer|session\saffinity)|\[Feature:Networking-IPv6\]|\[Feature:Federation\]|configMap\snameserver|ClusterDns\s\[Feature:Example\]|kube-proxy|should\sset\sTCP\sCLOSE_WAIT\stimeout|EndpointSlices|named\sport.+\[Feature:NetworkPolicy\]|should\sallow\singress\saccess\sfrom\supdated\spod.+\[Feature:NetworkPolicy\]'
+SKIPPED_TESTS="
+# PERFORMANCE TESTS: NOT WANTED FOR CI
+Networking IPerf IPv[46]
+\[Feature:PerformanceDNS\]
+
+# FEATURES NOT AVAILABLE IN OUR CI ENVIRONMENT
+\[Feature:Networking-IPv6\]
+\[Feature:Federation\]
+
+# TESTS THAT ASSUME KUBE-PROXY
+kube-proxy
+should set TCP CLOSE_WAIT timeout
+
+# TO BE IMPLEMENTED: https://github.com/ovn-org/ovn-kubernetes/issues/1142
+\[Feature:IPv6DualStackAlphaFeature\]
+
+# TO BE IMPLEMENTED: https://github.com/ovn-org/ovn-kubernetes/issues/819
+Services.+session affinity
+
+# TO BE IMPLEMENTED: https://github.com/ovn-org/ovn-kubernetes/issues/1116
+EndpointSlices
+
+# REMOVE when k8s is updated to 1.18
+should allow ingress access from updated pod.+\[Feature:NetworkPolicy\]
+
+# NOT IMPLEMENTED; SEE DISCUSSION IN https://github.com/ovn-org/ovn-kubernetes/pull/1225
+named port.+\[Feature:NetworkPolicy\]
+
+# ???
+\[Feature:NoSNAT\]
+Services.+(ESIPP|cleanup finalizer)
+configMap nameserver
+ClusterDns \[Feature:Example\]
+"
+
+SKIPPED_TESTS=$(echo "${SKIPPED_TESTS}" | sed -e '/^\($\|#\)/d' -e 's/ /\\s/g' | tr '\n' '|' | sed -e 's/|$//')
+
 GINKGO_ARGS="--num-nodes=3 --ginkgo.skip=${SKIPPED_TESTS} --disable-log-dump=false"
 
 case "$SHARD" in
