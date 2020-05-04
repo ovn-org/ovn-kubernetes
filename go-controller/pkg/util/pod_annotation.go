@@ -182,7 +182,7 @@ func UnmarshalPodAnnotation(annotations map[string]string) (*PodAnnotation, erro
 	}
 	for _, gwstr := range a.Gateways {
 		gw := net.ParseIP(gwstr)
-		if err != nil {
+		if gw == nil {
 			return nil, fmt.Errorf("failed to parse pod gateway %q", gwstr)
 		}
 		podAnnotation.Gateways = append(podAnnotation.Gateways, gw)
