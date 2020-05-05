@@ -197,7 +197,7 @@ ovsdb-raft() {
   local initialize="false"
 
   ovn_db_pidfile=${OVN_RUNDIR}/ovn${db}_db.pid
-  eval ovn_log_db=\$ovn_log_${db}
+  eval ovn_loglevel_db=\$ovn_loglevel_${db}
   ovn_db_file=${OVN_ETCDIR}/ovn${db}_db.db
 
   trap 'ovsdb_cleanup ${db}' TERM
@@ -237,7 +237,7 @@ ovsdb-raft() {
       --db-${db}-cluster-local-port=${raft_port} \
       --db-${db}-cluster-local-proto=${transport} \
       ${db_ssl_opts} \
-      --ovn-${db}-log="${ovn_log_db}" &
+      --ovn-${db}-log="${ovn_loglevel_db}" &
   else
     # join the remote cluster node if the DB is not created
     if [[ "${initialize}" == "true" ]]; then
@@ -249,7 +249,7 @@ ovsdb-raft() {
       --db-${db}-cluster-local-port=${raft_port} --db-${db}-cluster-remote-port=${raft_port} \
       --db-${db}-cluster-local-proto=${transport} --db-${db}-cluster-remote-proto=${transport} \
       ${db_ssl_opts} \
-      --ovn-${db}-log="${ovn_log_db}" &
+      --ovn-${db}-log="${ovn_loglevel_db}" &
   fi
 
   # Following command waits for the database on server to enter a `connected` state
