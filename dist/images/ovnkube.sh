@@ -379,8 +379,11 @@ check_health() {
   "ovnnb_db" | "ovnsb_db")
     ctl_file=${OVN_RUNDIR}/${1}.ctl
     ;;
-  "ovn-northd" | "ovn-controller" | "ovsdb-server" | "ovs-vswitchd" | "ovn-nbctl")
+  "ovn-northd" | "ovn-controller" | "ovn-nbctl")
     ctl_file=${OVN_RUNDIR}/${1}.${2}.ctl
+    ;;
+  "ovsdb-server" | "ovs-vswitchd")
+    ctl_file=${OVS_RUNDIR}/${1}.${2}.ctl
     ;;
   *)
     echo "Unknown service ${1} specified. Exiting.. "
