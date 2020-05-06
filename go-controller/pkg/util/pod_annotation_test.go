@@ -1,6 +1,7 @@
 package util
 
 import (
+	"fmt"
 	"net"
 
 	ovntest "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/testing"
@@ -12,9 +13,10 @@ import (
 var _ = Describe("Pod annotation tests", func() {
 	It("marshals network info to pod annotations", func() {
 		type testcase struct {
-			name string
-			in   *PodAnnotation
-			out  map[string]string
+			name         string
+			in           *PodAnnotation
+			out          map[string]string
+			unmarshalErr error
 		}
 
 		testcases := []testcase{
@@ -38,6 +40,18 @@ var _ = Describe("Pod annotation tests", func() {
 				out: map[string]string{
 					"k8s.ovn.org/pod-networks": `{"default":{"ip_addresses":["192.168.0.5/24"],"mac_address":"0a:58:fd:98:00:01","ip_address":"192.168.0.5/24"}}`,
 				},
+			},
+			{
+				name: "Nil entry in GW",
+				in: &PodAnnotation{
+					IPs:      []*net.IPNet{ovntest.MustParseIPNet("192.168.0.5/24")},
+					MAC:      ovntest.MustParseMAC("0A:58:FD:98:00:01"),
+					Gateways: []net.IP{nil},
+				},
+				out: map[string]string{
+					"k8s.ovn.org/pod-networks": `{"default":{"ip_addresses":["192.168.0.5/24"],"mac_address":"0a:58:fd:98:00:01","gateway_ips":["\u003cnil\u003e"],"ip_address":"192.168.0.5/24","gateway_ip":"\u003cnil\u003e"}}`,
+				},
+				unmarshalErr: fmt.Errorf(`failed to parse pod gateway "<nil>"`),
 			},
 			{
 				name: "Routes",
@@ -91,8 +105,12 @@ var _ = Describe("Pod annotation tests", func() {
 			Expect(err).NotTo(HaveOccurred(), "test case %q got unexpected marshalling error", tc.name)
 			Expect(marshalled).To(Equal(tc.out), "test case %q marshalled to wrong value", tc.name)
 			unmarshalled, err := UnmarshalPodAnnotation(marshalled)
-			Expect(err).NotTo(HaveOccurred(), "test case %q got unexpected unmarshalling error", tc.name)
-			Expect(unmarshalled).To(Equal(tc.in), "test case %q unmarshalled to wrong value", tc.name)
+			if tc.unmarshalErr == nil {
+				Expect(err).NotTo(HaveOccurred(), "test case %q got unexpected unmarshalling error", tc.name)
+				Expect(unmarshalled).To(Equal(tc.in), "test case %q unmarshalled to wrong value", tc.name)
+			} else {
+				Expect(err).To(Equal(tc.unmarshalErr))
+			}
 		}
 	})
 })

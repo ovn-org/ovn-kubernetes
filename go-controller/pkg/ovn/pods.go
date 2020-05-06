@@ -331,10 +331,16 @@ func (oc *Controller) addLogicalPort(pod *kapi.Pod) error {
 		if err != nil {
 			return err
 		}
+
+		var gwIPs []net.IP
+		if gwIP != nil {
+			gwIPs = []net.IP{gwIP}
+		}
+
 		marshalledAnnotation, err := util.MarshalPodAnnotation(&util.PodAnnotation{
 			IPs:      []*net.IPNet{podCIDR},
 			MAC:      podMac,
-			Gateways: []net.IP{gwIP},
+			Gateways: gwIPs,
 			Routes:   routes,
 		})
 		if err != nil {
@@ -342,7 +348,7 @@ func (oc *Controller) addLogicalPort(pod *kapi.Pod) error {
 		}
 
 		klog.V(5).Infof("Annotation values: ip=%s ; mac=%s ; gw=%s\nAnnotation=%s",
-			podCIDR, podMac, gwIP, marshalledAnnotation)
+			podCIDR, podMac, gwIPs, marshalledAnnotation)
 		if err = oc.kube.SetAnnotationsOnPod(pod, marshalledAnnotation); err != nil {
 			return fmt.Errorf("failed to set annotation on pod %s: %v", pod.Name, err)
 		}
