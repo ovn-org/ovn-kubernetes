@@ -121,11 +121,12 @@ func checkForStaleOVSInterfaces(stopChan chan struct{}) {
 
 // checkDefaultOpenFlow checks for the existence of default OpenFlow rules and
 // exits if the output is not as expected
-func checkDefaultConntrackRules(gwBridge string, nFlows int, stopChan chan struct{}) {
+func checkDefaultConntrackRules(gwBridge string, physIntf, patchIntf, ofportPhys, ofportPatch string,
+	nFlows int, stopChan chan struct{}) {
 	flowCount := fmt.Sprintf("flow_count=%d", nFlows)
 	for {
 		select {
-		case <-time.After(30 * time.Second):
+		case <-time.After(15 * time.Second):
 			out, _, err := util.RunOVSOfctl("dump-aggregate", gwBridge,
 				fmt.Sprintf("cookie=%s/-1", defaultOpenFlowCookie))
 			if err != nil {
@@ -136,6 +137,32 @@ func checkDefaultConntrackRules(gwBridge string, nFlows int, stopChan chan struc
 			if !strings.Contains(out, flowCount) {
 				klog.Errorf("fatal error: unexpected default OpenFlows count, expect %d output: %v\n",
 					nFlows, out)
+				os.Exit(1)
+			}
+
+			// it could be that the ovn-controller recreated the patch between the host OVS bridge and
+			// the integration bridge, as a result the ofport number changed for that patch interface
+			curOfportPatch, stderr, err := util.RunOVSVsctl("--if-exists", "get", "Interface", patchIntf, "ofport")
+			if err != nil {
+				klog.Errorf("Failed to get ofport of %s, stderr: %q, error: %v", patchIntf, stderr, err)
+				continue
+			}
+			if ofportPatch != curOfportPatch {
+				klog.Errorf("fatal error: ofport of %s has changed from %s to %s",
+					patchIntf, ofportPatch, curOfportPatch)
+				os.Exit(1)
+			}
+
+			// it could be that someone removed the physical interface and added it back on the OVS host
+			// bridge, as a result the ofport number changed for that physical interface
+			curOfportPhys, stderr, err := util.RunOVSVsctl("--if-exists", "get", "interface", physIntf, "ofport")
+			if err != nil {
+				klog.Errorf("Failed to get ofport of %s, stderr: %q, error: %v", physIntf, stderr, err)
+				continue
+			}
+			if ofportPhys != curOfportPhys {
+				klog.Errorf("fatal error: ofport of %s has changed from %s to %s",
+					physIntf, ofportPhys, curOfportPhys)
 				os.Exit(1)
 			}
 		case <-stopChan:
