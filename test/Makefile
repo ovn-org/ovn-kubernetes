@@ -4,7 +4,7 @@ install-kind:
 
 .PHONY: shard-%
 shard-%:
-	./scripts/e2e-kind.sh $@
+	./scripts/e2e-kind.sh $@ $(WHAT) 
 
 .PHONY: control-plane
 control-plane:
