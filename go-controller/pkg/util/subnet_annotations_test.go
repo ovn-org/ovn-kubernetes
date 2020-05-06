@@ -18,8 +18,8 @@ var _ = Describe("subnet annotation tests", func() {
 	It("marshals and unmarshals the node-subnets and node-join-subnets annotations", func() {
 		type testcase struct {
 			name    string
-			hsIn    *net.IPNet
-			joinIn  *net.IPNet
+			hsIn    []*net.IPNet
+			joinIn  []*net.IPNet
 			hsOut   string
 			joinOut string
 		}
@@ -27,17 +27,30 @@ var _ = Describe("subnet annotation tests", func() {
 		testcases := []testcase{
 			{
 				name:    "IPv4",
-				hsIn:    ovntest.MustParseIPNet("10.130.0.0/23"),
+				hsIn:    []*net.IPNet{ovntest.MustParseIPNet("10.130.0.0/23")},
 				hsOut:   `{"default":"10.130.0.0/23"}`,
-				joinIn:  ovntest.MustParseIPNet("100.64.0.0/29"),
+				joinIn:  []*net.IPNet{ovntest.MustParseIPNet("100.64.0.0/29")},
 				joinOut: `{"default":"100.64.0.0/29"}`,
 			},
 			{
 				name:    "IPv6",
-				hsIn:    ovntest.MustParseIPNet("fd02:0:0:2::/64"),
+				hsIn:    []*net.IPNet{ovntest.MustParseIPNet("fd02:0:0:2::/64")},
 				hsOut:   `{"default":"fd02:0:0:2::/64"}`,
-				joinIn:  ovntest.MustParseIPNet("fd98::/64"),
+				joinIn:  []*net.IPNet{ovntest.MustParseIPNet("fd98::/64")},
 				joinOut: `{"default":"fd98::/64"}`,
+			},
+			{
+				name: "Dual Stack",
+				hsIn: []*net.IPNet{
+					ovntest.MustParseIPNet("10.130.0.0/23"),
+					ovntest.MustParseIPNet("fd02:0:0:2::/64"),
+				},
+				hsOut: `{"default":["10.130.0.0/23","fd02:0:0:2::/64"]}`,
+				joinIn: []*net.IPNet{
+					ovntest.MustParseIPNet("100.64.0.0/29"),
+					ovntest.MustParseIPNet("fd98::/64"),
+				},
+				joinOut: `{"default":["100.64.0.0/29","fd98::/64"]}`,
 			},
 		}
 

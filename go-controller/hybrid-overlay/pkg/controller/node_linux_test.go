@@ -2,6 +2,7 @@ package controller
 
 import (
 	"fmt"
+	"net"
 	"strings"
 
 	"github.com/urfave/cli/v2"
@@ -171,7 +172,7 @@ var _ = Describe("Hybrid Overlay Node Linux Operations", func() {
 				node1IP     string = "10.0.0.2"
 			)
 
-			subnetAnnotations, err := util.CreateNodeHostSubnetAnnotation(ovntest.MustParseIPNet(node1Subnet))
+			subnetAnnotations, err := util.CreateNodeHostSubnetAnnotation([]*net.IPNet{ovntest.MustParseIPNet(node1Subnet)})
 			Expect(err).NotTo(HaveOccurred())
 			annotations := make(map[string]string)
 			for k, v := range subnetAnnotations {

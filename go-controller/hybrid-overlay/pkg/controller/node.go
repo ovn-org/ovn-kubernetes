@@ -35,9 +35,14 @@ func nodeChanged(node1 *kapi.Node, node2 *kapi.Node) bool {
 // getNodeSubnetAndIP returns the node's hybrid overlay subnet and the node's
 // first InternalIP, or nil if the subnet or node IP is invalid
 func getNodeSubnetAndIP(node *kapi.Node) (*net.IPNet, net.IP) {
+	var cidr *net.IPNet
+
 	// Parse Linux node OVN hostsubnet annotation first
-	cidr, _ := util.ParseNodeHostSubnetAnnotation(node)
-	if cidr == nil {
+	cidrs, _ := util.ParseNodeHostSubnetAnnotation(node)
+	if cidrs != nil {
+		// FIXME DUAL-STACK
+		cidr = cidrs[0]
+	} else {
 		// Otherwise parse the hybrid overlay node subnet annotation
 		subnet, ok := node.Annotations[types.HybridOverlayNodeSubnet]
 		if !ok {
