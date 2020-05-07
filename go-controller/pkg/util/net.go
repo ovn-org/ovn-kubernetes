@@ -150,3 +150,16 @@ func JoinIPNets(ipnets []*net.IPNet, sep string) string {
 	}
 	return b.String()
 }
+
+// JoinIPNetIPs joins the string forms of an array of *net.IPNet,
+// as with strings.Join, but does not include the IP mask.
+func JoinIPNetIPs(ipnets []*net.IPNet, sep string) string {
+	b := &strings.Builder{}
+	for i, ipnet := range ipnets {
+		if i != 0 {
+			b.WriteString(sep)
+		}
+		b.WriteString(ipnet.IP.String())
+	}
+	return b.String()
+}
