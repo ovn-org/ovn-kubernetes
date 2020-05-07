@@ -12,6 +12,7 @@ import (
 	kapi "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/util/wait"
 	"k8s.io/klog"
+	utilnet "k8s.io/utils/net"
 )
 
 // Builds the logical switch port name for a given pod.
@@ -114,43 +115,43 @@ func (oc *Controller) waitForNodeLogicalSwitch(nodeName string) (*net.IPNet, err
 	return subnets[0], nil
 }
 
-func getPodAddresses(portName string) (net.HardwareAddr, net.IP, bool, error) {
-	podMac, podIP, err := util.GetPortAddresses(portName)
+func getPodAddresses(portName string) (net.HardwareAddr, []net.IP, bool, error) {
+	podMac, podIPs, err := util.GetPortAddresses(portName)
 	if err != nil {
 		return nil, nil, false, err
 	}
-	if podMac == nil || podIP == nil {
+	if podMac == nil || podIPs == nil {
 		// wait longer
 		return nil, nil, false, nil
 	}
-	return podMac, podIP, true, nil
+	return podMac, podIPs, true, nil
 }
 
-func waitForPodAddresses(portName string) (net.HardwareAddr, net.IP, error) {
+func waitForPodAddresses(portName string) (net.HardwareAddr, []net.IP, error) {
 	var (
 		podMac net.HardwareAddr
-		podIP  net.IP
+		podIPs []net.IP
 		done   bool
 		err    error
 	)
 
 	// First try to get the pod addresses quickly then fall back to polling every second.
 	err = wait.PollImmediate(50*time.Millisecond, 300*time.Millisecond, func() (bool, error) {
-		podMac, podIP, done, err = getPodAddresses(portName)
+		podMac, podIPs, done, err = getPodAddresses(portName)
 		return done, err
 	})
 	if err == wait.ErrWaitTimeout {
 		err = wait.PollImmediate(time.Second, 30*time.Second, func() (bool, error) {
-			podMac, podIP, done, err = getPodAddresses(portName)
+			podMac, podIPs, done, err = getPodAddresses(portName)
 			return done, err
 		})
 	}
 
-	if err != nil || podMac == nil || podIP == nil {
+	if err != nil || podMac == nil || podIPs == nil {
 		return nil, nil, fmt.Errorf("Error while obtaining addresses for %s: %v", portName, err)
 	}
 
-	return podMac, podIP, nil
+	return podMac, podIPs, nil
 }
 
 func getRoutesGatewayIP(pod *kapi.Pod, subnet *net.IPNet, hybridOverlayExternalGW net.IP) ([]util.PodRoute, net.IP, error) {
@@ -241,14 +242,14 @@ func (oc *Controller) addLogicalPort(pod *kapi.Pod) error {
 	klog.V(5).Infof("Creating logical port for %s on switch %s", portName, logicalSwitch)
 
 	var podMac net.HardwareAddr
-	var podCIDR *net.IPNet
+	var podIfAddrs []*net.IPNet
 	var args []string
+	var addresses string
 
 	annotation, err := util.UnmarshalPodAnnotation(pod.Annotations)
 	if err == nil {
 		podMac = annotation.MAC
-		// DUAL-STACK FIXME: handle multiple IPs
-		podCIDR = annotation.IPs[0]
+		podIfAddrs = annotation.IPs
 
 		// Check if the pod's logical switch port already exists. If it
 		// does don't re-add the port to OVN as this will change its
@@ -262,12 +263,13 @@ func (oc *Controller) addLogicalPort(pod *kapi.Pod) error {
 
 		// If the pod already has annotations use the existing static
 		// IP/MAC from the annotation.
+		addresses = podMac.String() + " " + util.JoinIPNetIPs(podIfAddrs, " ")
 		args = append(args,
-			"--", "lsp-set-addresses", portName, fmt.Sprintf("%s %s", podMac, podCIDR.IP),
+			"--", "lsp-set-addresses", portName, addresses,
 			"--", "--if-exists", "clear", "logical_switch_port", portName, "dynamic_addresses",
 		)
 	} else {
-		addresses := "dynamic"
+		addresses = "dynamic"
 		networks, err := util.GetPodNetSelAnnotation(pod, util.DefNetworkAnnotation)
 		if err != nil || (networks != nil && len(networks) != 1) {
 			return fmt.Errorf("error while getting custom MAC config for port %q from "+
@@ -292,13 +294,20 @@ func (oc *Controller) addLogicalPort(pod *kapi.Pod) error {
 	}
 
 	// If the pod has not already been assigned addresses, read them now
-	if podMac == nil || podCIDR == nil {
-		var podIP net.IP
-		podMac, podIP, err = waitForPodAddresses(portName)
+	if podMac == nil || podIfAddrs == nil {
+		var podIPs []net.IP
+		podMac, podIPs, err = waitForPodAddresses(portName)
 		if err != nil {
 			return err
 		}
-		podCIDR = &net.IPNet{IP: podIP, Mask: nodeSubnet.Mask}
+		for _, podIP := range podIPs {
+			// DUAL-STACK FIXME: need multiple nodeSubnet.Mask
+			mask := nodeSubnet.Mask
+			if utilnet.IsIPv6(podIP) {
+				mask = net.CIDRMask(64, 128)
+			}
+			podIfAddrs = append(podIfAddrs, &net.IPNet{IP: podIP, Mask: mask})
+		}
 	}
 
 	// UUID must be retrieved separately from the lsp-add transaction since
@@ -317,10 +326,11 @@ func (oc *Controller) addLogicalPort(pod *kapi.Pod) error {
 	}
 
 	// Add the pod's logical switch port to the port cache
-	portInfo := oc.logicalPortCache.add(logicalSwitch, portName, uuid, podMac, podCIDR.IP)
+	// DUAL-STACK FIXME: need PortCache to support multiple IPs
+	portInfo := oc.logicalPortCache.add(logicalSwitch, portName, uuid, podMac, podIfAddrs[0].IP)
 
 	// Set the port security for the logical switch port
-	addresses := fmt.Sprintf("%s %s", podMac, podCIDR.IP)
+	addresses = podMac.String() + " " + util.JoinIPNetIPs(podIfAddrs, " ")
 	out, stderr, err = util.RunOVNNbctl("lsp-set-port-security", portName, addresses)
 	if err != nil {
 		return fmt.Errorf("error while setting port security for logical port %s "+
@@ -357,7 +367,7 @@ func (oc *Controller) addLogicalPort(pod *kapi.Pod) error {
 		}
 
 		marshalledAnnotation, err := util.MarshalPodAnnotation(&util.PodAnnotation{
-			IPs:      []*net.IPNet{podCIDR},
+			IPs:      podIfAddrs,
 			MAC:      podMac,
 			Gateways: gwIPs,
 			Routes:   routes,
@@ -366,8 +376,8 @@ func (oc *Controller) addLogicalPort(pod *kapi.Pod) error {
 			return fmt.Errorf("error creating pod network annotation: %v", err)
 		}
 
-		klog.V(5).Infof("Annotation values: ip=%s ; mac=%s ; gw=%s\nAnnotation=%s",
-			podCIDR, podMac, gwIPs, marshalledAnnotation)
+		klog.V(5).Infof("Annotation values: ip=%v ; mac=%s ; gw=%s\nAnnotation=%s",
+			podIfAddrs, podMac, gwIPs, marshalledAnnotation)
 		if err = oc.kube.SetAnnotationsOnPod(pod, marshalledAnnotation); err != nil {
 			return fmt.Errorf("failed to set annotation on pod %s: %v", pod.Name, err)
 		}

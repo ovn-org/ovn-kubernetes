@@ -27,7 +27,7 @@ func intToIP(i *big.Int) net.IP {
 }
 
 // GetPortAddresses returns the MAC and IP of the given logical switch port
-func GetPortAddresses(portName string) (net.HardwareAddr, net.IP, error) {
+func GetPortAddresses(portName string) (net.HardwareAddr, []net.IP, error) {
 	out, stderr, err := RunOVNNbctl("get", "logical_switch_port", portName, "dynamic_addresses", "addresses")
 	if err != nil {
 		return nil, nil, fmt.Errorf("Error while obtaining dynamic addresses for %s: stdout: %q, stderr: %q, error: %v",
@@ -46,21 +46,26 @@ func GetPortAddresses(portName string) (net.HardwareAddr, net.IP, error) {
 	}
 
 	// dynamic addresses have format "0a:00:00:00:00:01 192.168.1.3"
+	// dynamic addresses dual stack  "0a:00:00:00:00:01 192.168.1.3 ae70::4"
 	// static addresses have format ["0a:00:00:00:00:01 192.168.1.3"]
 	outStr := strings.Trim(out, `"[]`)
 	addresses = strings.Split(outStr, " ")
-	if len(addresses) != 2 {
+	if len(addresses) < 2 {
 		return nil, nil, fmt.Errorf("Error while obtaining addresses for %s", portName)
-	}
-	ip := net.ParseIP(addresses[1])
-	if ip == nil {
-		return nil, nil, fmt.Errorf("failed to parse logical switch port %q IP %q", portName, addresses[1])
 	}
 	mac, err := net.ParseMAC(addresses[0])
 	if err != nil {
 		return nil, nil, fmt.Errorf("failed to parse logical switch port %q MAC %q: %v", portName, addresses[0], err)
 	}
-	return mac, ip, nil
+	var ips []net.IP
+	for _, addr := range addresses[1:] {
+		ip := net.ParseIP(addr)
+		if ip == nil {
+			return nil, nil, fmt.Errorf("failed to parse logical switch port %q IP %q", portName, addr)
+		}
+		ips = append(ips, ip)
+	}
+	return mac, ips, nil
 }
 
 // GetOVSPortMACAddress returns the MAC address of a given OVS port

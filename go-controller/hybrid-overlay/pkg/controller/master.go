@@ -15,6 +15,7 @@ import (
 	kapi "k8s.io/api/core/v1"
 	utilruntime "k8s.io/apimachinery/pkg/util/runtime"
 	"k8s.io/klog"
+	utilnet "k8s.io/utils/net"
 )
 
 // MasterController is the master hybrid overlay controller
@@ -122,13 +123,18 @@ func (m *MasterController) handleOverlayPort(node *kapi.Node, annotator kube.Ann
 	subnet := subnets[0]
 
 	portName := houtil.GetHybridOverlayPortName(node.Name)
-	portMAC, portIP, _ := util.GetPortAddresses(portName)
-	if portMAC == nil || portIP == nil {
-		if portIP == nil {
-			portIP = util.GetNodeHybridOverlayIfAddr(subnet).IP
+	portMAC, portIPs, _ := util.GetPortAddresses(portName)
+	if portMAC == nil || portIPs == nil {
+		if portIPs == nil {
+			portIPs = append(portIPs, util.GetNodeHybridOverlayIfAddr(subnet).IP)
 		}
 		if portMAC == nil {
-			portMAC = util.IPAddrToHWAddr(portIP)
+			for _, ip := range portIPs {
+				portMAC = util.IPAddrToHWAddr(ip)
+				if !utilnet.IsIPv6(ip) {
+					break
+				}
+			}
 		}
 
 		klog.Infof("creating node %s hybrid overlay port", node.Name)
