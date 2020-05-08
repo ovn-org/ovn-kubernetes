@@ -172,7 +172,7 @@ func initLocalnetGateway(nodeName string, subnets []*net.IPNet, wf *factory.Watc
 	// TODO - IPv6 hack ... for some reason neighbor discovery isn't working here, so hard code a
 	// MAC binding for the gateway IP address for now - need to debug this further
 
-	err = ipV6MacBindingWorkaround(link, macAddress, ipData)
+	ipV6MacBindingWorkaround(link, macAddress, ipData)
 
 	// Install gateway NAT rules for dual stack
 	err = localnetGatewayNAT(ipData, localnetGatewayNextHopPort)
@@ -254,7 +254,7 @@ func createLocalnetBridge(localnetBridgeName string) error {
 }
 
 func ipV6MacBindingWorkaround(link netlink.Link, macAddress net.HardwareAddr,
-	localNetdata []*localnetData) error {
+	localNetdata []*localnetData) {
 	for _, lnData := range localNetdata {
 		if lnData.ipVersion == IPv6 {
 			gatewayIP := lnData.gatewayIP
@@ -264,12 +264,8 @@ func ipV6MacBindingWorkaround(link netlink.Link, macAddress net.HardwareAddr,
 			} else {
 				klog.Errorf("Error in adding MAC binding for %s on %s: %v", gatewayIP, localnetGatewayNextHopPort, err)
 			}
-			if err != nil {
-				return err
-			}
 		}
 	}
-	return nil
 }
 
 func setupL3Gateway(nodeAnnotator kube.Annotator, ifaceID string,
