@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"k8s.io/klog"
 	"net/http"
+	"os"
 	"strconv"
 	"strings"
 	"time"
@@ -53,6 +54,16 @@ var metricOVNDBMonitor = prometheus.NewGaugeVec(prometheus.GaugeOpts{
 	Subsystem: metrics.MetricOvnSubsystemDBRaft,
 	Name:      "ovsdb_monitors",
 	Help:      "Number of OVSDB Monitors on the server"},
+	[]string{
+		"db_name",
+	},
+)
+
+var metricDBSize = prometheus.NewGaugeVec(prometheus.GaugeOpts{
+	Namespace: metrics.MetricOvnNamespace,
+	Subsystem: metrics.MetricOvnSubsystemDBRaft,
+	Name:      "db_size",
+	Help:      "The size of the database file associated with the OVN DB component."},
 	[]string{
 		"db_name",
 	},
@@ -269,6 +280,16 @@ func ovnDBStatusMetricsUpdater(direction, database string) {
 	}
 }
 
+func ovnDBSizeMetricsUpdater(direction, database string) {
+	dbFile := fmt.Sprintf("/etc/openvswitch/ovn%s_db.db", direction)
+	fileInfo, err := os.Stat(dbFile)
+	if err != nil {
+		klog.Errorf("Failed to get the DB size for database %s: %v", database, err)
+		return
+	}
+	metricDBSize.WithLabelValues(database).Set(float64(fileInfo.Size()))
+}
+
 func ovnDBMemoryMetricsUpdater(direction, database string) {
 	var stdout, stderr string
 	var err error
@@ -358,6 +379,7 @@ var OvnDBExporterCommand = cli.Command{
 		prometheus.MustRegister(metricOVNDBLeader)
 		prometheus.MustRegister(metricOVNDBMonitor)
 		prometheus.MustRegister(metricOVNDBSessions)
+		prometheus.MustRegister(metricDBSize)
 		prometheus.MustRegister(prometheus.NewGaugeFunc(
 			prometheus.GaugeOpts{
 				Namespace: metrics.MetricOvnNamespace,
@@ -391,17 +413,14 @@ var OvnDBExporterCommand = cli.Command{
 
 		// functions responsible for collecting the values and updating the prometheus metrics
 		go func() {
-			for {
-				ovnDBStatusMetricsUpdater("nb", "OVN_Northbound")
-				ovnDBStatusMetricsUpdater("sb", "OVN_Southbound")
-				time.Sleep(30 * time.Second)
+			dirDbMap := map[string]string{
+				"nb": "OVN_Northbound",
+				"sb": "OVN_Southbound",
 			}
-		}()
-
-		go func() {
-			for {
-				ovnDBMemoryMetricsUpdater("nb", "OVN_Northbound")
-				ovnDBMemoryMetricsUpdater("sb", "OVN_Southbound")
+			for direction, database := range dirDbMap {
+				ovnDBStatusMetricsUpdater(direction, database)
+				ovnDBMemoryMetricsUpdater(direction, database)
+				ovnDBSizeMetricsUpdater(direction, database)
 				time.Sleep(30 * time.Second)
 			}
 		}()

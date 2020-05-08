@@ -202,7 +202,6 @@ func (n *OvnNode) Start() error {
 	waiter := newStartupWaiter()
 
 	// Initialize gateway resources on the node
-	// FIXME DUAL-STACK
 	if err := n.initGateway(subnets, nodeAnnotator, waiter); err != nil {
 		return err
 	}

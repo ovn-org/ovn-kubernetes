@@ -23,10 +23,12 @@ function testrun {
     go test -mod vendor ${args}
 }
 
+# These packages requires root for network namespace maniuplation in unit tests
+root_pkgs=("github.com/ovn-org/ovn-kubernetes/go-controller/pkg/node" "github.com/ovn-org/ovn-kubernetes/go-controller/hybrid-overlay/pkg/controller")
+
 i=0
 for pkg in ${PKGS}; do
-    # This package requires root
-    if [[ "$USER" != root && "$pkg" == github.com/ovn-org/ovn-kubernetes/go-controller/pkg/node ]]; then
+    if [[ "$USER" != root && " ${root_pkgs[@]} " =~ " $pkg " ]]; then
         testfile=$(mktemp --tmpdir ovn-test.XXXXXXXX)
         echo "sudo required for ${pkg}, compiling test to ${testfile}"
         testrun "${i}" "${pkg}" -c -o "${testfile}"
