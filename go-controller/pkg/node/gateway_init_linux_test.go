@@ -5,6 +5,7 @@ package node
 import (
 	"bytes"
 	"fmt"
+	"net"
 	"syscall"
 
 	"github.com/urfave/cli/v2"
@@ -156,7 +157,7 @@ cookie=0x0, duration=8366.597s, table=1, n_packets=10641, n_bytes=10370087, prio
 			defer GinkgoRecover()
 
 			waiter := newStartupWaiter()
-			err = n.initGateway(ovntest.MustParseIPNet(nodeSubnet), nodeAnnotator, waiter)
+			err = n.initGateway(ovntest.MustParseIPNets(nodeSubnet), nodeAnnotator, waiter)
 			Expect(err).NotTo(HaveOccurred())
 
 			err = nodeAnnotator.Run()
@@ -206,6 +207,136 @@ cookie=0x0, duration=8366.597s, table=1, n_packets=10641, n_bytes=10370087, prio
 	Expect(err).NotTo(HaveOccurred())
 }
 
+func localNetInterfaceTest(app *cli.App, testNS ns.NetNS,
+	subnets []*net.IPNet, brNextHopCIDRs []*netlink.Addr, ipts []*util.FakeIPTables,
+	expectedIpTableRules []map[string]util.FakeTable) {
+
+	const mtu string = "1234"
+
+	app.Action = func(ctx *cli.Context) error {
+		const (
+			nodeName      string = "node1"
+			brLocalnetMAC string = "11:22:33:44:55:66"
+			systemID      string = "cb9ec8fa-b409-4ef3-9f42-d9283c47aac6"
+		)
+
+		fexec := ovntest.NewFakeExec()
+		fexec.AddFakeCmdsNoOutputNoError([]string{
+			"ovs-vsctl --timeout=15 --may-exist add-br br-local",
+		})
+		fexec.AddFakeCmd(&ovntest.ExpectedCmd{
+			Cmd:    "ovs-vsctl --timeout=15 --if-exists get interface br-local mac_in_use",
+			Output: brLocalnetMAC,
+		})
+		fexec.AddFakeCmdsNoOutputNoError([]string{
+			"ovs-vsctl --timeout=15 set bridge br-local other-config:hwaddr=" + brLocalnetMAC,
+			"ovs-vsctl --timeout=15 set Open_vSwitch . external_ids:ovn-bridge-mappings=" + util.PhysicalNetworkName + ":br-local",
+			"ovs-vsctl --timeout=15 --if-exists del-port br-local " + legacyLocalnetGatewayNextHopPort +
+				" -- --may-exist add-port br-local " + localnetGatewayNextHopPort + " -- set interface " + localnetGatewayNextHopPort + " type=internal mtu_request=" + mtu + " mac=00\\:00\\:a9\\:fe\\:21\\:01",
+		})
+		fexec.AddFakeCmd(&ovntest.ExpectedCmd{
+			Cmd:    "ovs-vsctl --timeout=15 --if-exists get Open_vSwitch . external_ids:system-id",
+			Output: systemID,
+		})
+
+		err := util.SetExec(fexec)
+		Expect(err).NotTo(HaveOccurred())
+
+		_, err = config.InitConfig(ctx, fexec, nil)
+		Expect(err).NotTo(HaveOccurred())
+
+		existingNode := v1.Node{ObjectMeta: metav1.ObjectMeta{
+			Name: nodeName,
+		}}
+		fakeClient := fake.NewSimpleClientset(&v1.NodeList{
+			Items: []v1.Node{existingNode},
+		})
+		stop := make(chan struct{})
+		wf, err := factory.NewWatchFactory(fakeClient, stop)
+		Expect(err).NotTo(HaveOccurred())
+		defer close(stop)
+
+		nodeAnnotator := kube.NewNodeAnnotator(&kube.Kube{fakeClient}, &existingNode)
+		err = util.SetNodeHostSubnetAnnotation(nodeAnnotator, subnets)
+		Expect(err).NotTo(HaveOccurred())
+		err = nodeAnnotator.Run()
+		Expect(err).NotTo(HaveOccurred())
+
+		err = testNS.Do(func(ns.NetNS) error {
+			defer GinkgoRecover()
+
+			err = initLocalnetGateway(nodeName, subnets, wf, nodeAnnotator)
+			Expect(err).NotTo(HaveOccurred())
+			// Check if IP has been assigned to LocalnetGatewayNextHopPort
+			link, err := netlink.LinkByName(localnetGatewayNextHopPort)
+			Expect(err).NotTo(HaveOccurred())
+			addrs, err := netlink.AddrList(link, 0)
+			Expect(err).NotTo(HaveOccurred())
+
+			var foundAddr bool
+			for _, expectedAddr := range brNextHopCIDRs {
+				foundAddr = false
+				for _, a := range addrs {
+					if a.IP.Equal(expectedAddr.IP) && bytes.Equal(a.Mask, expectedAddr.Mask) {
+						foundAddr = true
+						break
+					}
+				}
+				if !foundAddr {
+					break
+				}
+			}
+			Expect(foundAddr).To(BeTrue())
+			return nil
+		})
+		Expect(err).NotTo(HaveOccurred())
+
+		Expect(fexec.CalledMatchesExpected()).To(BeTrue(), fexec.ErrorDesc)
+
+		for i := 0; i < len(ipts); i++ {
+			Expect(ipts[i].MatchState(expectedIpTableRules[i])).NotTo(HaveOccurred())
+		}
+		return nil
+	}
+
+	err := app.Run([]string{
+		app.Name,
+		"--init-gateways",
+		"--gateway-local",
+		"--nodeport",
+		"--mtu=" + mtu,
+	})
+	Expect(err).NotTo(HaveOccurred())
+}
+
+func constructExpectedIPTableRules(gatewayIP string) map[string]util.FakeTable {
+	return map[string]util.FakeTable{
+		"filter": {
+			"INPUT": []string{
+				"-i " + localnetGatewayNextHopPort + " -m comment --comment from OVN to localhost -j ACCEPT",
+			},
+			"FORWARD": []string{
+				"-j OVN-KUBE-NODEPORT",
+				"-o " + localnetGatewayNextHopPort + " -m conntrack --ctstate RELATED,ESTABLISHED -j ACCEPT",
+				"-i " + localnetGatewayNextHopPort + " -j ACCEPT",
+			},
+			"OVN-KUBE-NODEPORT": []string{},
+		},
+		"nat": {
+			"POSTROUTING": []string{
+				"-s " + gatewayIP + " -j MASQUERADE",
+			},
+			"PREROUTING": []string{
+				"-j OVN-KUBE-NODEPORT",
+			},
+			"OUTPUT": []string{
+				"-j OVN-KUBE-NODEPORT",
+			},
+			"OVN-KUBE-NODEPORT": []string{},
+		},
+	}
+}
+
 var _ = Describe("Gateway Init Operations", func() {
 	var app *cli.App
 	var testNS ns.NetNS
@@ -250,128 +381,79 @@ var _ = Describe("Gateway Init Operations", func() {
 		Expect(testNS.Close()).To(Succeed())
 	})
 
-	It("sets up a localnet gateway", func() {
-		const mtu string = "1234"
+	Context("for localnet operations", func() {
+		const (
+			v4BrNextHopIP       string = "169.254.33.1"
+			v4BrNextHopCIDR            = v4BrNextHopIP + "/24"
+			v4NodeSubnet        string = "10.1.1.0/24"
+			v4localnetGatewayIP string = "169.254.33.2"
 
-		app.Action = func(ctx *cli.Context) error {
-			const (
-				nodeName      string = "node1"
-				brLocalnetMAC string = "11:22:33:44:55:66"
-				brNextHopIp   string = "169.254.33.1"
-				brNextHopCIDR string = brNextHopIp + "/24"
-				systemID      string = "cb9ec8fa-b409-4ef3-9f42-d9283c47aac6"
-				nodeSubnet    string = "10.1.1.0/24"
-			)
+			v6BrNextHopIP       string = "fd99::1"
+			v6BrNextHopCIDR            = v6BrNextHopIP + "/64"
+			v6NodeSubnet        string = "2001:db8:abcd:0012::0/64"
+			v6localnetGatewayIP string = "fd99::2"
+		)
+		var (
+			//subnets              []*net.IPNet
+			brNextHopCIDRs       []*netlink.Addr
+			ipts                 []*util.FakeIPTables
+			v4Ipt, v6Ipt         *util.FakeIPTables
+			expectedIpTableRules []map[string]util.FakeTable
+		)
+		BeforeEach(func() {
+			brNextHopCIDRs = make([]*netlink.Addr, 0)
+			ipts = make([]*util.FakeIPTables, 0)
+			expectedIpTableRules = make([]map[string]util.FakeTable, 0)
 
-			fexec := ovntest.NewFakeExec()
-			fexec.AddFakeCmdsNoOutputNoError([]string{
-				"ovs-vsctl --timeout=15 --may-exist add-br br-local",
-			})
-			fexec.AddFakeCmd(&ovntest.ExpectedCmd{
-				Cmd:    "ovs-vsctl --timeout=15 --if-exists get interface br-local mac_in_use",
-				Output: brLocalnetMAC,
-			})
-			fexec.AddFakeCmdsNoOutputNoError([]string{
-				"ovs-vsctl --timeout=15 set bridge br-local other-config:hwaddr=" + brLocalnetMAC,
-				"ovs-vsctl --timeout=15 set Open_vSwitch . external_ids:ovn-bridge-mappings=" + util.PhysicalNetworkName + ":br-local",
-				"ovs-vsctl --timeout=15 --if-exists del-port br-local " + legacyLocalnetGatewayNextHopPort +
-					" -- --may-exist add-port br-local " + localnetGatewayNextHopPort + " -- set interface " + localnetGatewayNextHopPort + " type=internal mtu_request=" + mtu + " mac=00\\:00\\:a9\\:fe\\:21\\:01",
-			})
-			fexec.AddFakeCmd(&ovntest.ExpectedCmd{
-				Cmd:    "ovs-vsctl --timeout=15 --if-exists get Open_vSwitch . external_ids:system-id",
-				Output: systemID,
-			})
-
-			err := util.SetExec(fexec)
+			var err error
+			v4Ipt, err = util.NewFakeWithProtocol(iptables.ProtocolIPv4)
 			Expect(err).NotTo(HaveOccurred())
+			util.SetIPTablesHelper(iptables.ProtocolIPv4, v4Ipt)
 
-			_, err = config.InitConfig(ctx, fexec, nil)
+			v6Ipt, err = util.NewFakeWithProtocol(iptables.ProtocolIPv6)
 			Expect(err).NotTo(HaveOccurred())
-
-			existingNode := v1.Node{ObjectMeta: metav1.ObjectMeta{
-				Name: nodeName,
-			}}
-			fakeClient := fake.NewSimpleClientset(&v1.NodeList{
-				Items: []v1.Node{existingNode},
-			})
-			stop := make(chan struct{})
-			wf, err := factory.NewWatchFactory(fakeClient, stop)
-			Expect(err).NotTo(HaveOccurred())
-			defer close(stop)
-
-			ipt, err := util.NewFakeWithProtocol(iptables.ProtocolIPv4)
-			Expect(err).NotTo(HaveOccurred())
-			util.SetIPTablesHelper(iptables.ProtocolIPv4, ipt)
-
-			nodeAnnotator := kube.NewNodeAnnotator(&kube.Kube{fakeClient}, &existingNode)
-			err = util.SetNodeHostSubnetAnnotation(nodeAnnotator, ovntest.MustParseIPNets(nodeSubnet))
-			Expect(err).NotTo(HaveOccurred())
-			err = nodeAnnotator.Run()
-			Expect(err).NotTo(HaveOccurred())
-
-			err = testNS.Do(func(ns.NetNS) error {
-				defer GinkgoRecover()
-
-				err = initLocalnetGateway(nodeName, ovntest.MustParseIPNet(nodeSubnet), wf, nodeAnnotator)
-				Expect(err).NotTo(HaveOccurred())
-				// Check if IP has been assigned to LocalnetGatewayNextHopPort
-				link, err := netlink.LinkByName(localnetGatewayNextHopPort)
-				Expect(err).NotTo(HaveOccurred())
-				addrs, err := netlink.AddrList(link, syscall.AF_INET)
-				Expect(err).NotTo(HaveOccurred())
-				var foundAddr bool
-				expectedAddr, err := netlink.ParseAddr(brNextHopCIDR)
-				Expect(err).NotTo(HaveOccurred())
-				for _, a := range addrs {
-					if a.IP.Equal(expectedAddr.IP) && bytes.Equal(a.Mask, expectedAddr.Mask) {
-						foundAddr = true
-						break
-					}
-				}
-				Expect(foundAddr).To(BeTrue())
-				return nil
-			})
-			Expect(err).NotTo(HaveOccurred())
-
-			Expect(fexec.CalledMatchesExpected()).To(BeTrue(), fexec.ErrorDesc)
-
-			expectedTables := map[string]util.FakeTable{
-				"filter": {
-					"INPUT": []string{
-						"-i " + localnetGatewayNextHopPort + " -m comment --comment from OVN to localhost -j ACCEPT",
-					},
-					"FORWARD": []string{
-						"-j OVN-KUBE-NODEPORT",
-						"-o " + localnetGatewayNextHopPort + " -m conntrack --ctstate RELATED,ESTABLISHED -j ACCEPT",
-						"-i " + localnetGatewayNextHopPort + " -j ACCEPT",
-					},
-					"OVN-KUBE-NODEPORT": []string{},
-				},
-				"nat": {
-					"POSTROUTING": []string{
-						"-s 169.254.33.2 -j MASQUERADE",
-					},
-					"PREROUTING": []string{
-						"-j OVN-KUBE-NODEPORT",
-					},
-					"OUTPUT": []string{
-						"-j OVN-KUBE-NODEPORT",
-					},
-					"OVN-KUBE-NODEPORT": []string{},
-				},
-			}
-			Expect(ipt.MatchState(expectedTables)).NotTo(HaveOccurred())
-			return nil
-		}
-
-		err := app.Run([]string{
-			app.Name,
-			"--init-gateways",
-			"--gateway-local",
-			"--nodeport",
-			"--mtu=" + mtu,
+			util.SetIPTablesHelper(iptables.ProtocolIPv6, v6Ipt)
 		})
-		Expect(err).NotTo(HaveOccurred())
+
+		It("sets up a IPv4 localnet gateway", func() {
+			nextHopCIDRIPv4, err := netlink.ParseAddr(v4BrNextHopCIDR)
+			Expect(err).NotTo(HaveOccurred())
+			brNextHopCIDRs = append(brNextHopCIDRs, nextHopCIDRIPv4)
+
+			ipts = append(ipts, v4Ipt)
+			expectedIpTableRules = append(expectedIpTableRules, constructExpectedIPTableRules(v4localnetGatewayIP))
+
+			localNetInterfaceTest(app, testNS, ovntest.MustParseIPNets(v4NodeSubnet), brNextHopCIDRs, ipts, expectedIpTableRules)
+		})
+
+		It("sets up a IPv6 localnet gateway", func() {
+			nextHopCIDRIPv6, err := netlink.ParseAddr(v6BrNextHopCIDR)
+			Expect(err).NotTo(HaveOccurred())
+			brNextHopCIDRs = append(brNextHopCIDRs, nextHopCIDRIPv6)
+
+			ipts = append(ipts, v6Ipt)
+			expectedIpTableRules = append(expectedIpTableRules, constructExpectedIPTableRules(v6localnetGatewayIP))
+
+			localNetInterfaceTest(app, testNS, ovntest.MustParseIPNets(v6NodeSubnet), brNextHopCIDRs, ipts, expectedIpTableRules)
+		})
+
+		It("sets up a dual stack localnet gateway", func() {
+			nextHopCIDRIPv4, err := netlink.ParseAddr(v4BrNextHopCIDR)
+			Expect(err).NotTo(HaveOccurred())
+			brNextHopCIDRs = append(brNextHopCIDRs, nextHopCIDRIPv4)
+			nextHopCIDRIPv6, err := netlink.ParseAddr(v6BrNextHopCIDR)
+			Expect(err).NotTo(HaveOccurred())
+			brNextHopCIDRs = append(brNextHopCIDRs, nextHopCIDRIPv6)
+
+			ipts = append(ipts, v4Ipt)
+			ipts = append(ipts, v6Ipt)
+
+			expectedIpTableRules = append(expectedIpTableRules, constructExpectedIPTableRules(v4localnetGatewayIP))
+			expectedIpTableRules = append(expectedIpTableRules, constructExpectedIPTableRules(v6localnetGatewayIP))
+
+			localNetInterfaceTest(app, testNS, ovntest.MustParseIPNets(v4NodeSubnet, v6NodeSubnet), brNextHopCIDRs,
+				ipts, expectedIpTableRules)
+		})
 	})
 
 	Context("for NIC-based operations", func() {

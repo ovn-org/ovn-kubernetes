@@ -299,7 +299,7 @@ func addDefaultConntrackRules(nodeName, gwBridge, gwIntf string, stopChan chan s
 	return nil
 }
 
-func (n *OvnNode) initSharedGateway(subnet *net.IPNet, gwNextHop net.IP, gwIntf string,
+func (n *OvnNode) initSharedGateway(gwNextHop net.IP, gwIntf string,
 	nodeAnnotator kube.Annotator) (postWaitFunc, error) {
 	var bridgeName string
 	var uplinkName string
