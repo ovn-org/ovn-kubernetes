@@ -468,7 +468,7 @@ func (oc *Controller) ensureNodeLogicalNetwork(nodeName string, hostSubnets []*n
 	}
 
 	lrpArgs := []string{
-		"--if-exists", "lrp-del", "rtos-"+nodeName,
+		"--if-exists", "lrp-del", "rtos-" + nodeName,
 		"--", "lrp-add", ovnClusterRouter, "rtos-" + nodeName,
 		nodeLRPMAC.String(),
 	}

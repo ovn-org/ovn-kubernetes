@@ -133,8 +133,8 @@ func LinkRouteExists(link netlink.Link, gwIP net.IP, subnet *net.IPNet) (bool, e
 	return false, nil
 }
 
-// LinkNeighAdd adds MAC/IP bindings for the given link
-func LinkNeighAdd(link netlink.Link, neighIP net.IP, neighMAC net.HardwareAddr) error {
+// LinkNeighAdd Sets  MAC/IP bindings for the given link
+func LinkNeighSet(link netlink.Link, neighIP net.IP, neighMAC net.HardwareAddr) error {
 	neigh := &netlink.Neigh{
 		LinkIndex:    link.Attrs().Index,
 		Family:       getFamily(neighIP),
@@ -166,4 +166,20 @@ func LinkNeighExists(link netlink.Link, neighIP net.IP, neighMAC net.HardwareAdd
 		}
 	}
 	return false, nil
+}
+
+// LinkNeighAdd adds MAC/IP bindings for the given link
+func LinkNeighAdd(link netlink.Link, neighIP net.IP, neighMAC net.HardwareAddr) error {
+	neigh := &netlink.Neigh{
+		LinkIndex:    link.Attrs().Index,
+		Family:       getFamily(neighIP),
+		State:        netlink.NUD_PERMANENT,
+		IP:           neighIP,
+		HardwareAddr: neighMAC,
+	}
+	err := netlink.NeighAdd(neigh)
+	if err != nil {
+		return fmt.Errorf("failed to append neighbour entry %+v: %v", neigh, err)
+	}
+	return nil
 }
