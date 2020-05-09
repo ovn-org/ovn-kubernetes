@@ -277,8 +277,8 @@ func setupL3Gateway(nodeAnnotator kube.Annotator, ifaceID string,
 		return err
 	}
 
-	ipAddrs := make([]*net.IPNet, len(localNetdata))
-	nextHops := make([]net.IP, len(localNetdata))
+	ipAddrs := make([]*net.IPNet, 0)
+	nextHops := make([]net.IP, 0)
 
 	for _, lnData := range localNetdata {
 		ipAddrs = append(ipAddrs, lnData.gatewayIPCIDR)
@@ -353,7 +353,7 @@ func evaluateInputNetworks(subnets []*net.IPNet) error {
 }
 
 func constructIPData(subnets []*net.IPNet) ([]*localnetData, error) {
-	netData := make([]*localnetData, len(subnets))
+	netData := make([]*localnetData, 0)
 	for _, subnet := range subnets {
 		if utilnet.IsIPv6CIDR(subnet) {
 			data, err := newIPV6Data()
