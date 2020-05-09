@@ -39,10 +39,10 @@ const (
 	// translates to the br-nexthop's IP address
 	localnetGatewayNextHopMac = "00:00:a9:fe:21:01"
 	iptableNodePortChain      = "OVN-KUBE-NODEPORT"
-	IPv4                      = 4
-	IPv6                      = 6
-	TotalSupportedSubnets     = 2
-	SupportedSubnetsPerFamily = 1
+	ipv4                      = 4
+	ipv6                      = 6
+	totalSupportedSubnets     = 2
+	supportedSubnetsPerFamily = 1
 )
 
 type iptRule struct {
@@ -256,7 +256,7 @@ func createLocalnetBridge(localnetBridgeName string) error {
 func ipV6MacBindingWorkaround(link netlink.Link, macAddress net.HardwareAddr,
 	localNetdata []*localnetData) {
 	for _, lnData := range localNetdata {
-		if lnData.ipVersion == IPv6 {
+		if lnData.ipVersion == ipv6 {
 			gatewayIP := lnData.gatewayIP
 			err := util.LinkNeighAdd(link, gatewayIP, macAddress)
 			if err == nil {
@@ -334,8 +334,8 @@ type localnetData struct {
 
 func evaluateInputNetworks(subnets []*net.IPNet) error {
 
-	if len(subnets) > TotalSupportedSubnets {
-		return fmt.Errorf("Number of subnets provided is : %d  which is more than %d", len(subnets), TotalSupportedSubnets)
+	if len(subnets) > totalSupportedSubnets {
+		return fmt.Errorf("Number of subnets provided is : %d  which is more than %d", len(subnets), totalSupportedSubnets)
 	}
 	var ipV4NetworkCount, ipV6NetworkCount int
 	for _, subnet := range subnets {
@@ -345,7 +345,7 @@ func evaluateInputNetworks(subnets []*net.IPNet) error {
 			ipV4NetworkCount++
 		}
 	}
-	if ipV4NetworkCount > SupportedSubnetsPerFamily || ipV6NetworkCount > SupportedSubnetsPerFamily {
+	if ipV4NetworkCount > supportedSubnetsPerFamily || ipV6NetworkCount > supportedSubnetsPerFamily {
 		return fmt.Errorf("Only one IPv4 and/or IPv6 subnets can be specified. Specified %d IP v4 and %d "+
 			"IP v6 subnets", ipV4NetworkCount, ipV6NetworkCount)
 	}
@@ -382,7 +382,7 @@ func newIPV4Data() (*localnetData, error) {
 	gatewayNextHop := net.ParseIP(v4localnetGatewayNextHop)
 	gatewaySubnetMask := net.CIDRMask(v4localnetGatewaySubnetPrefix, 32)
 
-	data := newIPData(IPv4, ipt, gatewayIP, gatewayNextHop, gatewaySubnetMask)
+	data := newIPData(ipv4, ipt, gatewayIP, gatewayNextHop, gatewaySubnetMask)
 	return data, nil
 }
 
@@ -396,7 +396,7 @@ func newIPV6Data() (*localnetData, error) {
 	gatewayNextHop := net.ParseIP(v6localnetGatewayNextHop)
 	gatewaySubnetMask := net.CIDRMask(v6localnetGatewaySubnetPrefix, 128)
 
-	data := newIPData(IPv6, ipt, gatewayIP, gatewayNextHop, gatewaySubnetMask)
+	data := newIPData(ipv6, ipt, gatewayIP, gatewayNextHop, gatewaySubnetMask)
 	return data, nil
 }
 
@@ -469,9 +469,9 @@ func (npw *localnetNodePortWatcherData) deleteService(svc *kapi.Service) error {
 }
 
 func getLocalNetDataForService(localNetdata []*localnetData, svc *kapi.Service) *localnetData {
-	var ipVersion = IPv4
+	var ipVersion = ipv4
 	if utilnet.IsIPv6String(svc.Spec.ClusterIP) {
-		ipVersion = IPv6
+		ipVersion = ipv6
 	}
 	for _, lnData := range localNetdata {
 		if lnData.ipVersion == ipVersion {
