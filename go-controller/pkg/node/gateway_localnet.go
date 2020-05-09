@@ -394,7 +394,7 @@ func newIPV6Data() (*localnetData, error) {
 	}
 	gatewayIP := net.ParseIP(v6localnetGatewayIP)
 	gatewayNextHop := net.ParseIP(v6localnetGatewayNextHop)
-	gatewaySubnetMask := net.CIDRMask(v6localnetGatewaySubnetPrefix, 32)
+	gatewaySubnetMask := net.CIDRMask(v6localnetGatewaySubnetPrefix, 128)
 
 	data := newIPData(IPv6, ipt, gatewayIP, gatewayNextHop, gatewaySubnetMask)
 	return data, nil
