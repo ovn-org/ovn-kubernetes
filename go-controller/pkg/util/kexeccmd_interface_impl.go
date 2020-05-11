@@ -143,7 +143,6 @@ func (cie *kexecUtil) RunCmd(cmd kexec.Cmd, cmdPath string, envVars []string, ar
 	klog.V(5).Infof("exec(%d): %s", counter, logCmd)
 
 	err := cmd.Run()
-	cmd.Output()
 	klog.V(5).Infof("exec(%d): stdout: %q", counter, stdout)
 	klog.V(5).Infof("exec(%d): stderr: %q", counter, stderr)
 	if err != nil {
