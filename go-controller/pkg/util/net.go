@@ -2,6 +2,7 @@ package util
 
 import (
 	"fmt"
+	utilnet "k8s.io/utils/net"
 	"math/big"
 	"net"
 	"runtime"
@@ -167,4 +168,24 @@ func JoinIPNetIPs(ipnets []*net.IPNet, sep string) string {
 		b.WriteString(ipnet.IP.String())
 	}
 	return b.String()
+}
+
+// IPFamilyName returns IP Family string based on input flag.
+func IPFamilyName(isIPv6 bool) string {
+	if isIPv6 {
+		return "IPv6"
+	} else {
+		return "IPv4"
+	}
+}
+
+// MatchIPFamily loops through the array of *net.IPNet and returns the
+// first entry in the list in the same IP Family, based on input flag isIPv6.
+func MatchIPFamily(isIPv6 bool, subnets []*net.IPNet) (*net.IPNet, error) {
+	for _, subnet := range subnets {
+		if utilnet.IsIPv6CIDR(subnet) == isIPv6 {
+			return subnet, nil
+		}
+	}
+	return nil, fmt.Errorf("no %s subnet available", IPFamilyName(isIPv6))
 }

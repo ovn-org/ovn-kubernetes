@@ -97,7 +97,7 @@ func (oc *Controller) deleteLogicalPort(pod *kapi.Pod) {
 	oc.logicalPortCache.remove(logicalPort)
 }
 
-func (oc *Controller) waitForNodeLogicalSwitch(nodeName string) (*net.IPNet, error) {
+func (oc *Controller) waitForNodeLogicalSwitch(nodeName string) ([]*net.IPNet, error) {
 	// Wait for the node logical switch to be created by the ClusterController.
 	// The node switch will be created when the node's logical network infrastructure
 	// is created by the node watch.
@@ -111,8 +111,7 @@ func (oc *Controller) waitForNodeLogicalSwitch(nodeName string) (*net.IPNet, err
 	}); err != nil {
 		return nil, fmt.Errorf("timed out waiting for logical switch %q subnet: %v", nodeName, err)
 	}
-	// FIXME DUAL-STACK
-	return subnets[0], nil
+	return subnets, nil
 }
 
 func getPodAddresses(portName string) (net.HardwareAddr, []net.IP, bool, error) {
@@ -154,13 +153,13 @@ func waitForPodAddresses(portName string) (net.HardwareAddr, []net.IP, error) {
 	return podMac, podIPs, nil
 }
 
-func getRoutesGatewayIP(pod *kapi.Pod, subnet *net.IPNet, hybridOverlayExternalGW net.IP) ([]util.PodRoute, net.IP, error) {
+func (oc *Controller) addRoutesGatewayIP(pod *kapi.Pod, podAnnotation *util.PodAnnotation, nodeSubnets []*net.IPNet) error {
 	// if there are other network attachments for the pod, then check if those network-attachment's
 	// annotation has default-route key. If present, then we need to skip adding default route for
 	// OVN interface
 	networks, err := util.GetPodNetSelAnnotation(pod, util.NetworkAttachmentAnnotation)
 	if err != nil {
-		return nil, nil, fmt.Errorf("error while getting network attachment definition for [%s/%s]: %v",
+		return fmt.Errorf("error while getting network attachment definition for [%s/%s]: %v",
 			pod.Namespace, pod.Name, err)
 	}
 	otherDefaultRoute := false
@@ -170,42 +169,70 @@ func getRoutesGatewayIP(pod *kapi.Pod, subnet *net.IPNet, hybridOverlayExternalG
 			break
 		}
 	}
-	gatewayIPnet := util.GetNodeGatewayIfAddr(subnet)
-	var gatewayIP net.IP
-	routes := make([]util.PodRoute, 0)
-	if otherDefaultRoute || len(hybridOverlayExternalGW) > 0 {
-		for _, clusterSubnet := range config.Default.ClusterSubnets {
-			var route util.PodRoute
-			route.Dest = clusterSubnet.CIDR
-			route.NextHop = gatewayIPnet.IP
-			routes = append(routes, route)
+	// DUALSTACK FIXME: hybridOverlayExternalGW is not Dualstack
+	var hybridOverlayExternalGW net.IP
+	if config.HybridOverlay.Enabled {
+		hybridOverlayExternalGW, err = oc.getHybridOverlayExternalGwAnnotation(pod.Namespace)
+		if err != nil {
+			return err
 		}
-		for _, serviceSubnet := range config.Kubernetes.ServiceCIDRs {
-			var route util.PodRoute
-			route.Dest = serviceSubnet
-			route.NextHop = gatewayIPnet.IP
-			routes = append(routes, route)
-		}
-		if len(hybridOverlayExternalGW) > 0 {
-			gatewayIP = util.GetNodeHybridOverlayIfAddr(subnet).IP
-		}
-	} else {
-		gatewayIP = gatewayIPnet.IP
 	}
 
-	if gatewayIP != nil && len(config.HybridOverlay.ClusterSubnets) > 0 {
-		// Add a route for each hybrid overlay subnet via the hybrid
-		// overlay port on the pod's logical switch.
-		second := util.NextIP(gatewayIP)
-		thirdIP := util.NextIP(second)
-		for _, subnet := range config.HybridOverlay.ClusterSubnets {
-			routes = append(routes, util.PodRoute{
-				Dest:    subnet.CIDR,
-				NextHop: thirdIP,
-			})
+	for _, podIfAddr := range podAnnotation.IPs {
+		isIPv6 := utilnet.IsIPv6CIDR(podIfAddr)
+		nodeSubnet, err := util.MatchIPFamily(isIPv6, nodeSubnets)
+		if err != nil {
+			return err
+		}
+		// DUALSTACK FIXME: hybridOverlayExternalGW is not Dualstack
+		// When oc.getHybridOverlayExternalGwAnnotation() supports dualstack, return error if no match.
+		// If external gateway mode is configured, need to use it for all outgoing traffic, so don't want
+		// to fall back to the default gateway here
+		if hybridOverlayExternalGW != nil && utilnet.IsIPv6(hybridOverlayExternalGW) != isIPv6 {
+			klog.Warningf("Pod %s/%s has no external gateway for %s", pod.Namespace, pod.Name, util.IPFamilyName(isIPv6))
+			continue
+		}
+
+		gatewayIPnet := util.GetNodeGatewayIfAddr(nodeSubnet)
+		var gatewayIP net.IP
+		if otherDefaultRoute || hybridOverlayExternalGW != nil {
+			for _, clusterSubnet := range config.Default.ClusterSubnets {
+				podAnnotation.Routes = append(podAnnotation.Routes, util.PodRoute{
+					Dest:    clusterSubnet.CIDR,
+					NextHop: gatewayIPnet.IP,
+				})
+			}
+			for _, serviceSubnet := range config.Kubernetes.ServiceCIDRs {
+				podAnnotation.Routes = append(podAnnotation.Routes, util.PodRoute{
+					Dest:    serviceSubnet,
+					NextHop: gatewayIPnet.IP,
+				})
+			}
+			if hybridOverlayExternalGW != nil {
+				gatewayIP = util.GetNodeHybridOverlayIfAddr(nodeSubnet).IP
+			}
+		} else {
+			gatewayIP = gatewayIPnet.IP
+		}
+
+		if len(config.HybridOverlay.ClusterSubnets) > 0 {
+			// Add a route for each hybrid overlay subnet via the hybrid
+			// overlay port on the pod's logical switch.
+			nextHop := util.GetNodeHybridOverlayIfAddr(nodeSubnet).IP
+			for _, clusterSubnet := range config.HybridOverlay.ClusterSubnets {
+				if utilnet.IsIPv6CIDR(clusterSubnet.CIDR) == isIPv6 {
+					podAnnotation.Routes = append(podAnnotation.Routes, util.PodRoute{
+						Dest:    clusterSubnet.CIDR,
+						NextHop: nextHop,
+					})
+				}
+			}
+		}
+		if gatewayIP != nil {
+			podAnnotation.Gateways = append(podAnnotation.Gateways, gatewayIP)
 		}
 	}
-	return routes, gatewayIP, nil
+	return nil
 }
 
 func (oc *Controller) getHybridOverlayExternalGwAnnotation(ns string) (net.IP, error) {
@@ -233,7 +260,7 @@ func (oc *Controller) addLogicalPort(pod *kapi.Pod) error {
 	}()
 
 	logicalSwitch := pod.Spec.NodeName
-	nodeSubnet, err := oc.waitForNodeLogicalSwitch(pod.Spec.NodeName)
+	nodeSubnets, err := oc.waitForNodeLogicalSwitch(pod.Spec.NodeName)
 	if err != nil {
 		return err
 	}
@@ -300,13 +327,13 @@ func (oc *Controller) addLogicalPort(pod *kapi.Pod) error {
 		if err != nil {
 			return err
 		}
+		podIfAddrs = nil
 		for _, podIP := range podIPs {
-			// DUAL-STACK FIXME: need multiple nodeSubnet.Mask
-			mask := nodeSubnet.Mask
-			if utilnet.IsIPv6(podIP) {
-				mask = net.CIDRMask(64, 128)
+			subnet, err := util.MatchIPFamily(utilnet.IsIPv6(podIP), nodeSubnets)
+			if err != nil {
+				return err
 			}
-			podIfAddrs = append(podIfAddrs, &net.IPNet{IP: podIP, Mask: mask})
+			podIfAddrs = append(podIfAddrs, &net.IPNet{IP: podIP, Mask: subnet.Mask})
 		}
 	}
 
@@ -349,35 +376,22 @@ func (oc *Controller) addLogicalPort(pod *kapi.Pod) error {
 	}
 
 	if annotation == nil {
-		hybridOverlayExternalGW := net.IP{}
-		if config.HybridOverlay.Enabled {
-			hybridOverlayExternalGW, err = oc.getHybridOverlayExternalGwAnnotation(pod.Namespace)
-			if err != nil {
-				return err
-			}
+		podAnnotation := util.PodAnnotation{
+			IPs: podIfAddrs,
+			MAC: podMac,
 		}
-		routes, gwIP, err := getRoutesGatewayIP(pod, nodeSubnet, hybridOverlayExternalGW)
+		err = oc.addRoutesGatewayIP(pod, &podAnnotation, nodeSubnets)
 		if err != nil {
 			return err
 		}
 
-		var gwIPs []net.IP
-		if gwIP != nil {
-			gwIPs = []net.IP{gwIP}
-		}
-
-		marshalledAnnotation, err := util.MarshalPodAnnotation(&util.PodAnnotation{
-			IPs:      podIfAddrs,
-			MAC:      podMac,
-			Gateways: gwIPs,
-			Routes:   routes,
-		})
+		marshalledAnnotation, err := util.MarshalPodAnnotation(&podAnnotation)
 		if err != nil {
 			return fmt.Errorf("error creating pod network annotation: %v", err)
 		}
 
 		klog.V(5).Infof("Annotation values: ip=%v ; mac=%s ; gw=%s\nAnnotation=%s",
-			podIfAddrs, podMac, gwIPs, marshalledAnnotation)
+			podIfAddrs, podMac, podAnnotation.Gateways, marshalledAnnotation)
 		if err = oc.kube.SetAnnotationsOnPod(pod, marshalledAnnotation); err != nil {
 			return fmt.Errorf("failed to set annotation on pod %s: %v", pod.Name, err)
 		}
