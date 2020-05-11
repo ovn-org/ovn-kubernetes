@@ -18,23 +18,23 @@ type onCallReturnArgs struct {
 func TestKexecUtil_SetExec(t *testing.T) {
 	// kexecUtilsInstance is defined in kexeccmd_interface_impl.go
 	kexecUtilsInstance = &kexecUtil{&mocks.Interface{}}
-	tests := []struct{
-		desc 		string
-		expectedErr	error
-		onRetArgs 	*onCallReturnArgs
-		callTimes	int
+	tests := []struct {
+		desc        string
+		expectedErr error
+		onRetArgs   *onCallReturnArgs
+		callTimes   int
 	}{
 		{
-			desc: 			"positive, SetExecWithoutOVS succeeds",
-			expectedErr: 	nil,
-			onRetArgs:		&onCallReturnArgs{"LookPath", "[]string", []interface{}{"ip", nil}},
-			callTimes: 		8,
+			desc:        "positive, SetExecWithoutOVS succeeds",
+			expectedErr: nil,
+			onRetArgs:   &onCallReturnArgs{"LookPath", "[]string", []interface{}{"ip", nil}},
+			callTimes:   8,
 		},
 		{
-			desc:	"negative, SetExecWithoutOVS returns error",
+			desc:        "negative, SetExecWithoutOVS returns error",
 			expectedErr: fmt.Errorf(`exec: \"ip:\" executable file not found in $PATH`),
-			onRetArgs: &onCallReturnArgs{"LookPath", "[]string", []interface{}{"", fmt.Errorf(`exec: \"ip:\" executable file not found in $PATH`)}},
-			callTimes: 		1,
+			onRetArgs:   &onCallReturnArgs{"LookPath", "[]string", []interface{}{"", fmt.Errorf(`exec: \"ip:\" executable file not found in $PATH`)}},
+			callTimes:   1,
 		},
 	}
 
@@ -56,20 +56,20 @@ func TestKexecUtil_SetExec(t *testing.T) {
 func TestKexecUtil_SetExecWithoutOVS(t *testing.T) {
 	// kexecUtilsInstance is defined in kexeccmd_interface_impl.go
 	kexecUtilsInstance = &kexecUtil{&mocks.Interface{}}
-	tests := []struct{
-		desc 		string
-		expectedErr	error
-		onRetArgs 	*onCallReturnArgs
+	tests := []struct {
+		desc        string
+		expectedErr error
+		onRetArgs   *onCallReturnArgs
 	}{
 		{
-			desc: 			"positive, ip path found",
-			expectedErr: 	nil,
-			onRetArgs:		&onCallReturnArgs{"LookPath", "[]string", []interface{}{"ip", nil}},
+			desc:        "positive, ip path found",
+			expectedErr: nil,
+			onRetArgs:   &onCallReturnArgs{"LookPath", "[]string", []interface{}{"ip", nil}},
 		},
 		{
-			desc:	"negative, ip path not found",
+			desc:        "negative, ip path not found",
 			expectedErr: fmt.Errorf(`exec: \"ip:\" executable file not found in $PATH`),
-			onRetArgs: &onCallReturnArgs{"LookPath", "[]string", []interface{}{"", fmt.Errorf(`exec: \"ip:\" executable file not found in $PATH`)}},
+			onRetArgs:   &onCallReturnArgs{"LookPath", "[]string", []interface{}{"", fmt.Errorf(`exec: \"ip:\" executable file not found in $PATH`)}},
 		},
 	}
 
@@ -91,29 +91,29 @@ func TestKexecUtil_SetExecWithoutOVS(t *testing.T) {
 func TestKexecUtil_SetSpecificExec(t *testing.T) {
 	// kexecUtilsInstance is defined in kexeccmd_interface_impl.go
 	kexecUtilsInstance = &kexecUtil{&mocks.Interface{}}
-	tests := []struct{
-		desc 		string
-		expectedErr	error
-		fnArg		string
-		onRetArgs 	*onCallReturnArgs
+	tests := []struct {
+		desc        string
+		expectedErr error
+		fnArg       string
+		onRetArgs   *onCallReturnArgs
 	}{
 		{
-			desc: 			"positive: ovs-vsctl path found",
-			expectedErr: 	nil,
-			fnArg:			"ovs-vsctl",
-			onRetArgs:		&onCallReturnArgs{"LookPath", "[]string", []interface{}{"ovs-vsctl", nil}},
+			desc:        "positive: ovs-vsctl path found",
+			expectedErr: nil,
+			fnArg:       "ovs-vsctl",
+			onRetArgs:   &onCallReturnArgs{"LookPath", "[]string", []interface{}{"ovs-vsctl", nil}},
 		},
 		{
-			desc:	"negative: ovs-vsctl path not found",
+			desc:        "negative: ovs-vsctl path not found",
 			expectedErr: fmt.Errorf(`exec: \"ovs-vsctl:\" executable file not found in $PATH`),
-			fnArg: 			"ovs-vsctl",
-			onRetArgs: &onCallReturnArgs{"LookPath", "[]string", []interface{}{"", fmt.Errorf(`exec: \"ovs-vsctl:\" executable file not found in $PATH`)}},
+			fnArg:       "ovs-vsctl",
+			onRetArgs:   &onCallReturnArgs{"LookPath", "[]string", []interface{}{"", fmt.Errorf(`exec: \"ovs-vsctl:\" executable file not found in $PATH`)}},
 		},
 		{
-			desc:	"negative: unknown command",
+			desc:        "negative: unknown command",
 			expectedErr: fmt.Errorf(`unknown command: "ovs-appctl"`),
-			fnArg:			"ovs-appctl",
-			onRetArgs: &onCallReturnArgs{"LookPath", "[]string", []interface{}{"", nil}},
+			fnArg:       "ovs-appctl",
+			onRetArgs:   &onCallReturnArgs{"LookPath", "[]string", []interface{}{"", nil}},
 		},
 	}
 
@@ -132,37 +132,37 @@ func TestKexecUtil_SetSpecificExec(t *testing.T) {
 }
 
 func TestKexecUtil_RunCmd(t *testing.T) {
-	tests := []struct{
-		desc 		string
-		expectedErr	error
-		cmd 		kexec.Cmd
-		cmdPath 	string
-		cmdArg		string
-		envArgs		[]string
+	tests := []struct {
+		desc        string
+		expectedErr error
+		cmd         kexec.Cmd
+		cmdPath     string
+		cmdArg      string
+		envArgs     []string
 	}{
 		{
-			desc: 			"positive: run `ip addr` command without envVars",
-			expectedErr: 	nil,
-			cmd:			nil,
-			cmdPath: 		"ip",
-			cmdArg:			"a",
-			envArgs:		nil,
+			desc:        "positive: run `ip addr` command without envVars",
+			expectedErr: nil,
+			cmd:         nil,
+			cmdPath:     "ip",
+			cmdArg:      "a",
+			envArgs:     nil,
 		},
 		{
-			desc: 			"positive: run `ip addr` command with envVars",
-			expectedErr: 	nil,
-			cmd:			nil,
-			cmdPath: 		"ip",
-			cmdArg:			"a",
-			envArgs:		[]string{"OVN_NB_DAEMON=/some/blah/path"},
+			desc:        "positive: run `ip addr` command with envVars",
+			expectedErr: nil,
+			cmd:         nil,
+			cmdPath:     "ip",
+			cmdArg:      "a",
+			envArgs:     []string{"OVN_NB_DAEMON=/some/blah/path"},
 		},
 		{
-			desc: 			"negative: run `ip addr` command",
-			expectedErr: 	fmt.Errorf("executable file not found in $PATH"),
-			cmd:			nil,
-			cmdPath: 		"ips",
-			cmdArg:			"addr",
-			envArgs:		nil,
+			desc:        "negative: run `ip addr` command",
+			expectedErr: fmt.Errorf("executable file not found in $PATH"),
+			cmd:         nil,
+			cmdPath:     "ips",
+			cmdArg:      "addr",
+			envArgs:     nil,
 		},
 	}
 

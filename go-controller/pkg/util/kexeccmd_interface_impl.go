@@ -11,8 +11,7 @@ import (
 )
 
 type kexecUtil struct {
-	kexecDotInterface 	kexec.Interface
-	//kexecDotCmd 		kexec.Cmd
+	kexecDotInterface kexec.Interface
 }
 
 var kexecUtilsInstance *kexecUtil
@@ -107,7 +106,7 @@ func (cie *kexecUtil) SetExecWithoutOVS() error {
 
 // SetSpecificExec validates executable paths for selected commands. It also saves the given
 // exec interface to be used for running selected commands
-func (cie *kexecUtil) SetSpecificExec( commands ...string) error {
+func (cie *kexecUtil) SetSpecificExec(commands ...string) error {
 	var err error
 
 	runner = &execHelper{exec: cie.kexecDotInterface}
@@ -125,7 +124,7 @@ func (cie *kexecUtil) SetSpecificExec( commands ...string) error {
 	return nil
 }
 
-func (cie *kexecUtil) RunCmd( cmd kexec.Cmd, cmdPath string, envVars []string, args ...string) (*bytes.Buffer, *bytes.Buffer, error) {
+func (cie *kexecUtil) RunCmd(cmd kexec.Cmd, cmdPath string, envVars []string, args ...string) (*bytes.Buffer, *bytes.Buffer, error) {
 	if cmd == nil {
 		cmd = cie.kexecDotInterface.Command(cmdPath, args...)
 	}
@@ -195,3 +194,4 @@ func (cie *kexecUtil) RunWithEnvVars(cmdPath string, envVars []string, args ...s
 	return cie.RunCmd(cmdPath, args...)
 }
 */
+
