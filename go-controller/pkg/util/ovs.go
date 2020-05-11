@@ -127,8 +127,8 @@ var runner *execHelper
 
 // SetExec validates executable paths and saves the given exec interface
 // to be used for running various OVS and OVN utilites
-func SetExec(exec kexec.Interface) error {
-	err := SetExecWithoutOVS(exec)
+/*func SetExec(exec kexec.Interface) error {
+	err := GetKexecUtilsInstance().SetExecWithoutOVS()
 	if err != nil {
 		return err
 	}
@@ -175,11 +175,11 @@ func SetExec(exec kexec.Interface) error {
 	}
 
 	return nil
-}
+}*/
 
 // SetExecWithoutOVS validates executable paths excluding OVS/OVN binaries and
 // saves the given exec interface to be used for running various utilites
-func SetExecWithoutOVS(exec kexec.Interface) error {
+/*func SetExecWithoutOVS(exec kexec.Interface) error {
 	var err error
 
 	runner = &execHelper{exec: exec}
@@ -203,11 +203,11 @@ func SetExecWithoutOVS(exec kexec.Interface) error {
 		}
 	}
 	return nil
-}
+}*/
 
 // SetSpecificExec validates executable paths for selected commands. It also saves the given
 // exec interface to be used for running selected commands
-func SetSpecificExec(exec kexec.Interface, commands ...string) error {
+/*func SetSpecificExec(exec kexec.Interface, commands ...string) error {
 	var err error
 
 	runner = &execHelper{exec: exec}
@@ -223,7 +223,7 @@ func SetSpecificExec(exec kexec.Interface, commands ...string) error {
 		}
 	}
 	return nil
-}
+}*/
 
 // GetExec returns the exec interface which can be used for running commands directly.
 // Only use for passing an exec interface into pkg/config which cannot call this
@@ -234,7 +234,7 @@ func GetExec() kexec.Interface {
 
 var runCounter uint64
 
-func runCmd(cmd kexec.Cmd, cmdPath string, args ...string) (*bytes.Buffer, *bytes.Buffer, error) {
+/*func runCmd(cmd kexec.Cmd, cmdPath string, args ...string) (*bytes.Buffer, *bytes.Buffer, error) {
 	stdout := &bytes.Buffer{}
 	stderr := &bytes.Buffer{}
 
@@ -263,11 +263,11 @@ func runWithEnvVars(cmdPath string, envVars []string, args ...string) (*bytes.Bu
 	cmd := runner.exec.Command(cmdPath, args...)
 	cmd.SetEnv(envVars)
 	return runCmd(cmd, cmdPath, args...)
-}
+}*/
 
 // RunOVSOfctl runs a command via ovs-ofctl.
 func RunOVSOfctl(args ...string) (string, string, error) {
-	stdout, stderr, err := run(runner.ofctlPath, args...)
+	stdout, stderr, err := GetKexecUtilsInstance().RunCmd(nil, runner.ofctlPath, nil, args...)
 	return strings.Trim(stdout.String(), "\" \n"), stderr.String(), err
 }
 
@@ -275,7 +275,7 @@ func RunOVSOfctl(args ...string) (string, string, error) {
 func RunOVSVsctl(args ...string) (string, string, error) {
 	cmdArgs := []string{fmt.Sprintf("--timeout=%d", ovsCommandTimeout)}
 	cmdArgs = append(cmdArgs, args...)
-	stdout, stderr, err := run(runner.vsctlPath, cmdArgs...)
+	stdout, stderr, err := GetKexecUtilsInstance().RunCmd(nil, runner.vsctlPath, nil, cmdArgs...)
 	return strings.Trim(strings.TrimSpace(stdout.String()), "\""), stderr.String(), err
 }
 
@@ -283,7 +283,7 @@ func RunOVSVsctl(args ...string) (string, string, error) {
 func RunOVSAppctlWithTimeout(timeout int, args ...string) (string, string, error) {
 	cmdArgs := []string{fmt.Sprintf("--timeout=%d", timeout)}
 	cmdArgs = append(cmdArgs, args...)
-	stdout, stderr, err := run(runner.appctlPath, cmdArgs...)
+	stdout, stderr, err := GetKexecUtilsInstance().RunCmd(nil, runner.appctlPath, nil, cmdArgs...)
 	return strings.Trim(strings.TrimSpace(stdout.String()), "\""), stderr.String(), err
 }
 
@@ -297,7 +297,7 @@ func RunOVSAppctl(args ...string) (string, string, error) {
 func RunOVNAppctlWithTimeout(timeout int, args ...string) (string, string, error) {
 	cmdArgs := []string{fmt.Sprintf("--timeout=%d", timeout)}
 	cmdArgs = append(cmdArgs, args...)
-	stdout, stderr, err := run(runner.ovnappctlPath, cmdArgs...)
+	stdout, stderr, err := GetKexecUtilsInstance().RunCmd(nil, runner.ovnappctlPath, nil, cmdArgs...)
 	return strings.Trim(strings.TrimSpace(stdout.String()), "\""), stderr.String(), err
 }
 
@@ -307,7 +307,7 @@ func runOVNretry(cmdPath string, envVars []string, args ...string) (*bytes.Buffe
 
 	retriesLeft := 200
 	for {
-		stdout, stderr, err := runWithEnvVars(cmdPath, envVars, args...)
+		stdout, stderr, err := GetKexecUtilsInstance().RunCmd(nil, cmdPath, envVars, args...)
 		if err == nil {
 			return stdout, stderr, err
 		}
@@ -537,25 +537,25 @@ func RunOVNNorthAppCtl(args ...string) (string, string, error) {
 
 // RunIP runs a command via the iproute2 "ip" utility
 func RunIP(args ...string) (string, string, error) {
-	stdout, stderr, err := run(runner.ipPath, args...)
+	stdout, stderr, err := GetKexecUtilsInstance().RunCmd(nil, runner.ipPath, nil, args...)
 	return strings.TrimSpace(stdout.String()), stderr.String(), err
 }
 
 // RunPowershell runs a command via the Windows powershell utility
 func RunPowershell(args ...string) (string, string, error) {
-	stdout, stderr, err := run(runner.powershellPath, args...)
+	stdout, stderr, err := GetKexecUtilsInstance().RunCmd(nil, runner.powershellPath, nil, args...)
 	return strings.TrimSpace(stdout.String()), stderr.String(), err
 }
 
 // RunNetsh runs a command via the Windows netsh utility
 func RunNetsh(args ...string) (string, string, error) {
-	stdout, stderr, err := run(runner.netshPath, args...)
+	stdout, stderr, err := GetKexecUtilsInstance().RunCmd(nil, runner.netshPath, nil, args...)
 	return strings.TrimSpace(stdout.String()), stderr.String(), err
 }
 
 // RunRoute runs a command via the Windows route utility
 func RunRoute(args ...string) (string, string, error) {
-	stdout, stderr, err := run(runner.routePath, args...)
+	stdout, stderr, err := GetKexecUtilsInstance().RunCmd(nil, runner.routePath, nil, args...)
 	return strings.TrimSpace(stdout.String()), stderr.String(), err
 }
 
@@ -570,7 +570,7 @@ func RawExec(cmdPath string, args ...string) (string, string, error) {
 			return "", "", err
 		}
 	}
-	stdout, stderr, err := run(cmdPath, args...)
+	stdout, stderr, err := GetKexecUtilsInstance().RunCmd(nil, cmdPath, nil, args...)
 	return strings.TrimSpace(stdout.String()), stderr.String(), err
 }
 
@@ -583,7 +583,7 @@ func AddNormalActionOFFlow(bridgeName string) (string, string, error) {
 
 	cmd := runner.exec.Command(runner.ofctlPath, args...)
 	cmd.SetStdin(stdin)
-	stdout, stderr, err := runCmd(cmd, runner.ofctlPath, args...)
+	stdout, stderr, err := GetKexecUtilsInstance().RunCmd(cmd, runner.ofctlPath, nil, args...)
 	return strings.Trim(stdout.String(), "\" \n"), stderr.String(), err
 }
 

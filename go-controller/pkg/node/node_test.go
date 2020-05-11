@@ -61,7 +61,7 @@ var _ = Describe("Node Operations", func() {
 					nodeIP, interval, ofintval, nodeName),
 			})
 
-			err := util.SetExec(fexec)
+			err := util.GetKexecUtilsInstance().SetExec()
 			Expect(err).NotTo(HaveOccurred())
 
 			_, err = config.InitConfig(ctx, fexec, nil)
@@ -129,7 +129,7 @@ var _ = Describe("Node Operations", func() {
 					"%s options:dst_port=%d", encapUUID, encapPort),
 			})
 
-			err := util.SetExec(fexec)
+			err := util.GetKexecUtilsInstance().SetExec()
 			Expect(err).NotTo(HaveOccurred())
 
 			_, err = config.InitConfig(ctx, fexec, nil)

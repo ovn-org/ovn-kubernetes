@@ -6,7 +6,7 @@ import (
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
 	"github.com/urfave/cli/v2"
 	"k8s.io/apimachinery/pkg/util/errors"
-	kexec "k8s.io/utils/exec"
+	//kexec "k8s.io/utils/exec"
 )
 
 // NicsToBridgeCommand creates ovs bridge for provided nic interfaces.
@@ -20,7 +20,8 @@ var NicsToBridgeCommand = cli.Command{
 			return fmt.Errorf("Please specify list of nic interfaces")
 		}
 
-		if err := util.SetSpecificExec(kexec.New(), "ovs-vsctl"); err != nil {
+		//if err := util.SetSpecificExec(kexec.New(), "ovs-vsctl"); err != nil {
+		if err := util.GetKexecUtilsInstance().SetSpecificExec("ovs-vsctl"); err != nil {
 			return err
 		}
 
@@ -46,7 +47,8 @@ var BridgesToNicCommand = cli.Command{
 			return fmt.Errorf("Please specify list of bridges")
 		}
 
-		if err := util.SetSpecificExec(kexec.New(), "ovs-vsctl"); err != nil {
+		//if err := util.SetSpecificExec(kexec.New(), "ovs-vsctl"); err != nil {
+		if err := util.GetKexecUtilsInstance().SetSpecificExec("ovs-vsctl"); err != nil {
 			return err
 		}
 

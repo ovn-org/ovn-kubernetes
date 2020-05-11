@@ -115,7 +115,7 @@ var _ = Describe("Hybrid Overlay Node Linux Operations", func() {
 		app.Flags = config.Flags
 
 		fexec = ovntest.NewFakeExec()
-		err := util.SetExec(fexec)
+		err := util.GetKexecUtilsInstance().SetExec()
 		Expect(err).NotTo(HaveOccurred())
 	})
 

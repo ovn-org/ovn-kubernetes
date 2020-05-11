@@ -121,7 +121,7 @@ cookie=0x0, duration=8366.597s, table=1, n_packets=10641, n_bytes=10370087, prio
 `,
 		})
 
-		err := util.SetExec(fexec)
+		err := util.GetKexecUtilsInstance().SetExec()
 		Expect(err).NotTo(HaveOccurred())
 
 		_, err = config.InitConfig(ctx, fexec, nil)
@@ -282,7 +282,7 @@ var _ = Describe("Gateway Init Operations", func() {
 				Output: systemID,
 			})
 
-			err := util.SetExec(fexec)
+			err := util.GetKexecUtilsInstance().SetExec()
 			Expect(err).NotTo(HaveOccurred())
 
 			_, err = config.InitConfig(ctx, fexec, nil)

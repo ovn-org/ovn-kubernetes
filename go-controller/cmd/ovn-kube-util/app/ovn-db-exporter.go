@@ -13,7 +13,6 @@ import (
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
 	"github.com/urfave/cli/v2"
-	kexec "k8s.io/utils/exec"
 )
 
 var metricOVNDBRaftIndex = prometheus.NewGaugeVec(prometheus.GaugeOpts{
@@ -345,7 +344,8 @@ var OvnDBExporterCommand = cli.Command{
 			bindAddress = "0.0.0.0:9476"
 		}
 
-		if err := util.SetExec(kexec.New()); err != nil {
+		//if err := util.SetExec(kexec.New()); err != nil {
+		if err := util.GetKexecUtilsInstance().SetExec(); err != nil {
 			return err
 		}
 		mux := http.NewServeMux()

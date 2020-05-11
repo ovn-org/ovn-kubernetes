@@ -68,7 +68,7 @@ var _ = Describe("Util OVS/OVN command tests", func() {
 			Expect(err).NotTo(HaveOccurred())
 
 			app.Action = func(ctx *cli.Context) error {
-				err = SetExec(fexec)
+				err = GetKexecUtilsInstance().SetExec()
 				Expect(err).NotTo(HaveOccurred())
 
 				_, err = config.InitConfig(ctx, fexec, nil)
@@ -94,7 +94,7 @@ var _ = Describe("Util OVS/OVN command tests", func() {
 				err = ioutil.WriteFile(nbctlSock, []byte(""), 0644)
 				Expect(err).NotTo(HaveOccurred())
 
-				err = SetExec(fexec)
+				err = GetKexecUtilsInstance().SetExec()
 				Expect(err).NotTo(HaveOccurred())
 
 				_, err = config.InitConfig(ctx, fexec, nil)
@@ -120,7 +120,7 @@ var _ = Describe("Util OVS/OVN command tests", func() {
 				err = ioutil.WriteFile(nbctlSock, []byte(""), 0644)
 				Expect(err).NotTo(HaveOccurred())
 
-				err = SetExec(fexec)
+				err = GetKexecUtilsInstance().SetExec()
 				Expect(err).NotTo(HaveOccurred())
 
 				_, err = config.InitConfig(ctx, fexec, nil)
@@ -138,7 +138,7 @@ var _ = Describe("Util OVS/OVN command tests", func() {
 
 		It("falls back to non-daemon mode if pidfile cannot be found", func() {
 			app.Action = func(ctx *cli.Context) error {
-				err := SetExec(fexec)
+				err := GetKexecUtilsInstance().SetExec()
 				Expect(err).NotTo(HaveOccurred())
 
 				_, err = config.InitConfig(ctx, fexec, nil)
@@ -160,7 +160,7 @@ var _ = Describe("Util OVS/OVN command tests", func() {
 				err := ioutil.WriteFile(nbctlPidfile, []byte("101"), 0644)
 				Expect(err).NotTo(HaveOccurred())
 
-				err = SetExec(fexec)
+				err = GetKexecUtilsInstance().SetExec()
 				Expect(err).NotTo(HaveOccurred())
 
 				_, err = config.InitConfig(ctx, fexec, nil)

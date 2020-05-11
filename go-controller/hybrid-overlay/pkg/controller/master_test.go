@@ -85,7 +85,7 @@ var _ = Describe("Hybrid SDN Master Operations", func() {
 			})
 
 			fexec := ovntest.NewFakeExec()
-			err := util.SetExec(fexec)
+			err := util.GetKexecUtilsInstance().SetExec()
 			Expect(err).NotTo(HaveOccurred())
 			_, err = config.InitConfig(ctx, fexec, nil)
 			Expect(err).NotTo(HaveOccurred())
@@ -136,7 +136,7 @@ var _ = Describe("Hybrid SDN Master Operations", func() {
 			fexec := ovntest.NewFakeExec()
 			addGetPortAddressesCmds(fexec, nodeName, nodeHOMAC, nodeHOIP)
 
-			err := util.SetExec(fexec)
+			err := util.GetKexecUtilsInstance().SetExec()
 			Expect(err).NotTo(HaveOccurred())
 			_, err = config.InitConfig(ctx, fexec, nil)
 			Expect(err).NotTo(HaveOccurred())
@@ -195,7 +195,7 @@ var _ = Describe("Hybrid SDN Master Operations", func() {
 				"ovn-nbctl --timeout=15 -- --if-exists lsp-del int-node1",
 			})
 
-			err := util.SetExec(fexec)
+			err := util.GetKexecUtilsInstance().SetExec()
 			Expect(err).NotTo(HaveOccurred())
 			_, err = config.InitConfig(ctx, fexec, nil)
 			Expect(err).NotTo(HaveOccurred())
