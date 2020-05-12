@@ -32,19 +32,23 @@ func GetKexecUtilsInstance(p kexec.Interface) *kexecUtil {
 func (cie *kexecUtil) SetExec() error {
 	err := cie.SetExecWithoutOVS()
 	if err != nil {
+		klog.Errorf("command: SetExecWithoutOVS(), err: %v", err)
 		return err
 	}
 
 	runner.ofctlPath, err = cie.kexecDotInterface.LookPath(ovsOfctlCommand)
 	if err != nil {
+		klog.Errorf("command: %q, err: %v", ovsOfctlCommand, err)
 		return err
 	}
 	runner.vsctlPath, err = cie.kexecDotInterface.LookPath(ovsVsctlCommand)
 	if err != nil {
+		klog.Errorf("command: %q, err: %v", ovsVsctlCommand, err)
 		return err
 	}
 	runner.appctlPath, err = cie.kexecDotInterface.LookPath(ovsAppctlCommand)
 	if err != nil {
+		klog.Errorf("command: %q, err: %v", ovsAppctlCommand, err)
 		return err
 	}
 
@@ -56,6 +60,7 @@ func (cie *kexecUtil) SetExec() error {
 		runner.ovnappctlPath = runner.appctlPath
 		runner.ovnctlPath = "/usr/share/openvswitch/scripts/ovn-ctl"
 		runner.ovnRunDir = ovsRunDir
+		klog.Errorf("command: %q, err: %v", ovnAppctlCommand, err)
 	} else {
 		// If ovn-appctl command is available, it means OVN
 		// has its own separate rundir, logdir, sharedir.
@@ -65,14 +70,17 @@ func (cie *kexecUtil) SetExec() error {
 
 	runner.nbctlPath, err = cie.kexecDotInterface.LookPath(ovnNbctlCommand)
 	if err != nil {
+		klog.Errorf("command: %q, err: %v", ovnNbctlCommand, err)
 		return err
 	}
 	runner.sbctlPath, err = cie.kexecDotInterface.LookPath(ovnSbctlCommand)
 	if err != nil {
+		klog.Errorf("command: %q, err: %v", ovnSbctlCommand, err)
 		return err
 	}
 	runner.ovsdbClientPath, err = cie.kexecDotInterface.LookPath(ovsdbClientCommand)
 	if err != nil {
+		klog.Errorf("command: %q, err: %v", ovsdbClientCommand, err)
 		return err
 	}
 
@@ -89,20 +97,23 @@ func (cie *kexecUtil) SetExecWithoutOVS() error {
 	if runtime.GOOS == windowsOS {
 		runner.powershellPath, err = cie.kexecDotInterface.LookPath(powershellCommand)
 		if err != nil {
+			klog.Errorf("command: %q, err: %v", powershellCommand, err)
 			return err
 		}
 		runner.netshPath, err = cie.kexecDotInterface.LookPath(netshCommand)
 		if err != nil {
+			klog.Errorf("command: %q, err: %v", netshCommand, err)
 			return err
 		}
 		runner.routePath, err = cie.kexecDotInterface.LookPath(routeCommand)
 		if err != nil {
+			klog.Errorf("command: %q, err: %v", routeCommand, err)
 			return err
 		}
 	} else {
 		runner.ipPath, err = cie.kexecDotInterface.LookPath(ipCommand)
 		if err != nil {
-			fmt.Println(err)
+			klog.Errorf("command: %q, err: %v", ipCommand, err)
 			return err
 		}
 	}
@@ -120,6 +131,7 @@ func (cie *kexecUtil) SetSpecificExec(commands ...string) error {
 		case ovsVsctlCommand:
 			runner.vsctlPath, err = cie.kexecDotInterface.LookPath(ovsVsctlCommand)
 			if err != nil {
+				klog.Errorf("command: %q, err: %v", ovsVsctlCommand, err)
 				return err
 			}
 		default:
@@ -151,6 +163,7 @@ func (cie *kexecUtil) RunCmd(cmd kexec.Cmd, cmdPath string, envVars []string, ar
 	klog.V(5).Infof("exec(%d): stdout: %q", counter, stdout)
 	klog.V(5).Infof("exec(%d): stderr: %q", counter, stderr)
 	if err != nil {
+		klog.Errorf("exec(%d): stdout: %q, stderr: %q, error: %v", counter, stdout, stderr, err)
 		klog.V(5).Infof("exec(%d): err: %v", counter, err)
 	}
 	return stdout, stderr, err
