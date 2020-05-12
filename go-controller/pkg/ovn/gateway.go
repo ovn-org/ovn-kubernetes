@@ -1,12 +1,25 @@
 package ovn
 
 import (
+	"bytes"
+	"fmt"
+	"net"
+	"sort"
 	"strings"
 
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
 
 	kapi "k8s.io/api/core/v1"
 	"k8s.io/klog"
+)
+
+const (
+	// ovnClusterRouter is the name of the distributed router
+	ovnClusterRouter = "ovn_cluster_router"
+
+	joinSwitchPrefix     = "join_"
+	externalSwitchPrefix = "ext_"
+	gwRouterPrefix       = "GR_"
 )
 
 func (ovn *Controller) getOvnGateways() ([]string, string, error) {
@@ -114,4 +127,81 @@ func (ovn *Controller) deleteGatewayVIPs(protocol kapi.Protocol, sourcePort int3
 			ovn.deleteLoadBalancerVIP(loadBalancer, vip)
 		}
 	}
+}
+
+// getDefaultGatewayRouterIP returns the first gateway logical router name
+// and IP address as listed in the OVN database
+func getDefaultGatewayRouterIP() (string, net.IP, error) {
+	stdout, stderr, err := util.RunOVNNbctl("--data=bare", "--format=table",
+		"--no-heading", "--columns=name,options", "find", "logical_router",
+		"options:lb_force_snat_ip!=-")
+	if err != nil {
+		return "", nil, fmt.Errorf("failed to get logical routers, stdout: %q, "+
+			"stderr: %q, err: %v", stdout, stderr, err)
+	}
+	// Convert \r\n to \n to support Windows line endings
+	stdout = strings.Replace(strings.TrimSpace(stdout), "\r\n", "\n", -1)
+	gatewayRouters := strings.Split(stdout, "\n")
+	if len(gatewayRouters) == 0 {
+		return "", nil, fmt.Errorf("failed to get default gateway router (no routers found)")
+	}
+
+	type gwRouter struct {
+		name string
+		ip   net.IP
+	}
+
+	// Get the list of all gateway router names and IPs
+	routers := make([]gwRouter, 0, len(gatewayRouters))
+	for _, gwRouterLine := range gatewayRouters {
+		parts := strings.Fields(gwRouterLine)
+		for _, p := range parts {
+			const forceTag string = "lb_force_snat_ip="
+			if strings.HasPrefix(p, forceTag) {
+				ipStr := p[len(forceTag):]
+				if ip := net.ParseIP(ipStr); ip != nil {
+					routers = append(routers, gwRouter{parts[0], ip})
+				} else {
+					klog.Warningf("failed to parse gateway router %q IP %q", parts[0], ipStr)
+				}
+			}
+		}
+	}
+	if len(routers) == 0 {
+		return "", nil, fmt.Errorf("failed to parse gateway routers")
+	}
+
+	// Stably sort the list
+	sort.Slice(routers, func(i, j int) bool {
+		return bytes.Compare(routers[i].ip, routers[j].ip) < 0
+	})
+	return routers[0].name, routers[0].ip, nil
+}
+
+// getGatewayLoadBalancers find TCP, SCTP, UDP load-balancers from gateway router.
+func getGatewayLoadBalancers(gatewayRouter string) (string, string, string, error) {
+	lbTCP, stderr, err := util.RunOVNNbctl("--data=bare", "--no-heading",
+		"--columns=_uuid", "find", "load_balancer",
+		"external_ids:TCP_lb_gateway_router="+gatewayRouter)
+	if err != nil {
+		return "", "", "", fmt.Errorf("failed to get gateway router %q TCP "+
+			"loadbalancer, stderr: %q, error: %v", gatewayRouter, stderr, err)
+	}
+
+	lbUDP, stderr, err := util.RunOVNNbctl("--data=bare", "--no-heading",
+		"--columns=_uuid", "find", "load_balancer",
+		"external_ids:UDP_lb_gateway_router="+gatewayRouter)
+	if err != nil {
+		return "", "", "", fmt.Errorf("failed to get gateway router %q UDP "+
+			"loadbalancer, stderr: %q, error: %v", gatewayRouter, stderr, err)
+	}
+
+	lbSCTP, stderr, err := util.RunOVNNbctl("--data=bare", "--no-heading",
+		"--columns=_uuid", "find", "load_balancer",
+		"external_ids:SCTP_lb_gateway_router="+gatewayRouter)
+	if err != nil {
+		return "", "", "", fmt.Errorf("failed to get gateway router %q SCTP "+
+			"loadbalancer, stderr: %q, error: %v", gatewayRouter, stderr, err)
+	}
+	return lbTCP, lbUDP, lbSCTP, nil
 }

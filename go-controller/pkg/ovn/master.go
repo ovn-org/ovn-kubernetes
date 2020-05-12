@@ -20,6 +20,7 @@ import (
 	"k8s.io/klog"
 	utilnet "k8s.io/utils/net"
 
+	homaster "github.com/ovn-org/ovn-kubernetes/go-controller/hybrid-overlay/pkg/controller"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/metrics"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
@@ -126,15 +127,15 @@ func (oc *Controller) StartClusterMaster(masterNodeName string) error {
 		}
 	}
 	for _, node := range existingNodes.Items {
-		hostsubnet, _ := util.ParseNodeHostSubnetAnnotation(&node)
-		if hostsubnet != nil {
-			err := oc.masterSubnetAllocator.MarkAllocatedNetwork(hostsubnet)
+		hostSubnets, _ := util.ParseNodeHostSubnetAnnotation(&node)
+		for _, hostSubnet := range hostSubnets {
+			err := oc.masterSubnetAllocator.MarkAllocatedNetwork(hostSubnet)
 			if err != nil {
 				utilruntime.HandleError(err)
 			}
 		}
-		joinsubnet, _ := util.ParseNodeJoinSubnetAnnotation(&node)
-		if joinsubnet != nil {
+		joinsubnets, _ := util.ParseNodeJoinSubnetAnnotation(&node)
+		for _, joinsubnet := range joinsubnets {
 			err := oc.joinSubnetAllocator.MarkAllocatedNetwork(joinsubnet)
 			if err != nil {
 				utilruntime.HandleError(err)
@@ -163,15 +164,21 @@ func (oc *Controller) StartClusterMaster(masterNodeName string) error {
 		return err
 	}
 
+	if config.HybridOverlay.Enabled {
+		if err := homaster.StartMaster(oc.kube, oc.watchFactory); err != nil {
+			klog.Errorf("Failed to set up hybrid overlay master: %v", err)
+			return err
+		}
+	}
+
 	return nil
 }
 
 // SetupMaster creates the central router and load-balancers for the network
 func (oc *Controller) SetupMaster(masterNodeName string) error {
-	clusterRouter := util.GetK8sClusterRouter()
 	// Create a single common distributed router for the cluster.
-	stdout, stderr, err := util.RunOVNNbctl("--", "--may-exist", "lr-add", clusterRouter,
-		"--", "set", "logical_router", clusterRouter, "external_ids:k8s-cluster-router=yes")
+	stdout, stderr, err := util.RunOVNNbctl("--", "--may-exist", "lr-add", ovnClusterRouter,
+		"--", "set", "logical_router", ovnClusterRouter, "external_ids:k8s-cluster-router=yes")
 	if err != nil {
 		klog.Errorf("Failed to create a single common distributed router for the cluster, "+
 			"stdout: %q, stderr: %q, error: %v", stdout, stderr, err)
@@ -193,7 +200,7 @@ func (oc *Controller) SetupMaster(masterNodeName string) error {
 	// traffic between nodes.
 	if oc.multicastSupport {
 		stdout, stderr, err = util.RunOVNNbctl("--", "set", "logical_router",
-			clusterRouter, "options:mcast_relay=\"true\"")
+			ovnClusterRouter, "options:mcast_relay=\"true\"")
 		if err != nil {
 			klog.Errorf("Failed to enable IGMP relay on the cluster router, "+
 				"stdout: %q, stderr: %q, error: %v", stdout, stderr, err)
@@ -253,11 +260,11 @@ func (oc *Controller) SetupMaster(masterNodeName string) error {
 	return nil
 }
 
-func (oc *Controller) addNodeJoinSubnetAnnotations(node *kapi.Node, subnet *net.IPNet) error {
-	nodeAnnotations, err := util.CreateNodeJoinSubnetAnnotation(subnet)
+func (oc *Controller) addNodeJoinSubnetAnnotations(node *kapi.Node, subnets []*net.IPNet) error {
+	nodeAnnotations, err := util.CreateNodeJoinSubnetAnnotation(subnets)
 	if err != nil {
 		return fmt.Errorf("failed to marshal node %q join subnets annotation for subnet %s",
-			node.Name, subnet.String())
+			node.Name, util.JoinIPNets(subnets, ","))
 	}
 	err = oc.kube.SetAnnotationsOnNode(node, nodeAnnotations)
 	if err != nil {
@@ -267,37 +274,35 @@ func (oc *Controller) addNodeJoinSubnetAnnotations(node *kapi.Node, subnet *net.
 	return nil
 }
 
-func (oc *Controller) allocateJoinSubnet(node *kapi.Node) (*net.IPNet, error) {
-	joinSubnet, err := util.ParseNodeJoinSubnetAnnotation(node)
+func (oc *Controller) allocateJoinSubnet(node *kapi.Node) ([]*net.IPNet, error) {
+	joinSubnets, err := util.ParseNodeJoinSubnetAnnotation(node)
 	if err == nil {
-		return joinSubnet, nil
+		return joinSubnets, nil
 	}
 
 	// Allocate a new network for the join switch
-	joinSubnets, err := oc.joinSubnetAllocator.AllocateNetworks()
+	joinSubnets, err = oc.joinSubnetAllocator.AllocateNetworks()
 	if err != nil {
 		return nil, fmt.Errorf("Error allocating subnet for join switch for node %s: %v", node.Name, err)
 	}
-	if len(joinSubnets) != 1 {
-		return nil, fmt.Errorf("Error allocating subnet for join switch for node %s: multiple subnets returned", node.Name)
-	}
-	joinSubnet = joinSubnets[0]
 
 	defer func() {
 		// Release the allocation on error
 		if err != nil {
-			_ = oc.joinSubnetAllocator.ReleaseNetwork(joinSubnet)
+			for _, joinSubnet := range joinSubnets {
+				_ = oc.joinSubnetAllocator.ReleaseNetwork(joinSubnet)
+			}
 		}
 	}()
 
 	// Set annotation on the node
-	err = oc.addNodeJoinSubnetAnnotations(node, joinSubnet)
+	err = oc.addNodeJoinSubnetAnnotations(node, joinSubnets)
 	if err != nil {
 		return nil, err
 	}
 
-	klog.Infof("Allocated join subnet %q for node %q", joinSubnet.String(), node.Name)
-	return joinSubnet, nil
+	klog.Infof("Allocated join subnet %q for node %q", util.JoinIPNets(joinSubnets, ","), node.Name)
+	return joinSubnets, nil
 }
 
 func (oc *Controller) deleteNodeJoinSubnet(nodeName string, subnet *net.IPNet) error {
@@ -309,7 +314,7 @@ func (oc *Controller) deleteNodeJoinSubnet(nodeName string, subnet *net.IPNet) e
 	return nil
 }
 
-func (oc *Controller) syncNodeManagementPort(node *kapi.Node, subnet *net.IPNet) error {
+func (oc *Controller) syncNodeManagementPort(node *kapi.Node, hostSubnets []*net.IPNet) error {
 	macAddress, err := util.ParseNodeManagementPortMACAddress(node)
 	if err != nil {
 		return err
@@ -325,35 +330,47 @@ func (oc *Controller) syncNodeManagementPort(node *kapi.Node, subnet *net.IPNet)
 		return nil
 	}
 
-	if subnet == nil {
-		subnet, err = util.ParseNodeHostSubnetAnnotation(node)
+	if hostSubnets == nil {
+		hostSubnets, err = util.ParseNodeHostSubnetAnnotation(node)
 		if err != nil {
 			return err
 		}
 	}
 
+	var v4Subnet *net.IPNet
+	addresses := macAddress.String()
+	for _, hostSubnet := range hostSubnets {
+		mgmtIfAddr := util.GetNodeManagementIfAddr(hostSubnet)
+		addresses += " " + mgmtIfAddr.IP.String()
+
+		if err := addAllowACLFromNode(node.Name, mgmtIfAddr.IP); err != nil {
+			return err
+		}
+
+		if !utilnet.IsIPv6CIDR(hostSubnet) {
+			v4Subnet = hostSubnet
+		}
+	}
+
 	// Create this node's management logical port on the node switch
-	mgmtIfAddr := util.GetNodeManagementIfAddr(subnet)
 	stdout, stderr, err := util.RunOVNNbctl(
 		"--", "--may-exist", "lsp-add", node.Name, "k8s-"+node.Name,
-		"--", "lsp-set-addresses", "k8s-"+node.Name, macAddress.String()+" "+mgmtIfAddr.IP.String())
+		"--", "lsp-set-addresses", "k8s-"+node.Name, addresses)
 	if err != nil {
 		klog.Errorf("Failed to add logical port to switch, stdout: %q, stderr: %q, error: %v", stdout, stderr, err)
 		return err
 	}
 
-	if err := addAllowACLFromNode(node.Name, mgmtIfAddr.IP); err != nil {
-		return err
-	}
-
-	if err := util.UpdateNodeSwitchExcludeIPs(node.Name, subnet); err != nil {
-		return err
+	if v4Subnet != nil {
+		if err := util.UpdateNodeSwitchExcludeIPs(node.Name, v4Subnet); err != nil {
+			return err
+		}
 	}
 
 	return nil
 }
 
-func (oc *Controller) syncGatewayLogicalNetwork(node *kapi.Node, l3GatewayConfig *util.L3GatewayConfig, subnet *net.IPNet) error {
+func (oc *Controller) syncGatewayLogicalNetwork(node *kapi.Node, l3GatewayConfig *util.L3GatewayConfig, hostSubnets []*net.IPNet) error {
 	var err error
 	var clusterSubnets []*net.IPNet
 	for _, clusterSubnet := range config.Default.ClusterSubnets {
@@ -361,12 +378,12 @@ func (oc *Controller) syncGatewayLogicalNetwork(node *kapi.Node, l3GatewayConfig
 	}
 
 	// get a subnet for the per-node join switch
-	joinSubnet, err := oc.allocateJoinSubnet(node)
+	joinSubnets, err := oc.allocateJoinSubnet(node)
 	if err != nil {
 		return err
 	}
 
-	err = util.GatewayInit(clusterSubnets, subnet, joinSubnet, node.Name, l3GatewayConfig, oc.SCTPSupport)
+	err = gatewayInit(node.Name, clusterSubnets, hostSubnets, joinSubnets, l3GatewayConfig, oc.SCTPSupport)
 	if err != nil {
 		return fmt.Errorf("failed to init shared interface gateway: %v", err)
 	}
@@ -374,7 +391,7 @@ func (oc *Controller) syncGatewayLogicalNetwork(node *kapi.Node, l3GatewayConfig
 	if l3GatewayConfig.Mode == config.GatewayModeShared {
 		// Add static routes to OVN Cluster Router to enable pods on this Node to
 		// reach the host IP
-		err = addStaticRouteToHost(node, l3GatewayConfig.IPAddresses)
+		err = addStaticRoutesToHost(node, l3GatewayConfig.IPAddresses)
 		if err != nil {
 			return err
 		}
@@ -399,76 +416,103 @@ func (oc *Controller) syncGatewayLogicalNetwork(node *kapi.Node, l3GatewayConfig
 	return err
 }
 
-func addStaticRouteToHost(node *kapi.Node, nicIPs []*net.IPNet) error {
-	k8sClusterRouter := util.GetK8sClusterRouter()
-	subnet, err := util.ParseNodeHostSubnetAnnotation(node)
-	if err != nil {
-		return fmt.Errorf("failed to get interface IP address for %s (%v)",
-			util.K8sMgmtIntfName, err)
-	}
-	var prefix string
-	for _, nicIP := range nicIPs {
-		if utilnet.IsIPv6CIDR(subnet) {
-			if utilnet.IsIPv6(nicIP.IP) {
-				prefix = nicIP.IP.String() + "/128"
-				break
-			}
-		} else {
-			if !utilnet.IsIPv6(nicIP.IP) {
-				prefix = nicIP.IP.String() + "/32"
-				break
+func hostAddrForSubnet(hostIfAddrs []*net.IPNet, subnet *net.IPNet) (string, error) {
+	isIPv6 := utilnet.IsIPv6CIDR(subnet)
+	for _, ifaddr := range hostIfAddrs {
+		if utilnet.IsIPv6CIDR(ifaddr) == isIPv6 {
+			if isIPv6 {
+				return ifaddr.IP.String() + "/128", nil
+			} else {
+				return ifaddr.IP.String() + "/32", nil
 			}
 		}
 	}
-	if prefix == "" {
-		return fmt.Errorf("configuration error: no NIC IP of same family as hostsubnet")
+	if isIPv6 {
+		return "", fmt.Errorf("no IPv6 host address available")
+	} else {
+		return "", fmt.Errorf("no IPv4 host address available")
 	}
-	nextHop := util.GetNodeManagementIfAddr(subnet).IP.String()
-	_, stderr, err := util.RunOVNNbctl("--may-exist", "lr-route-add", k8sClusterRouter, prefix, nextHop)
+}
+
+func addStaticRoutesToHost(node *kapi.Node, hostIfAddrs []*net.IPNet) error {
+	subnets, err := util.ParseNodeHostSubnetAnnotation(node)
 	if err != nil {
-		return fmt.Errorf("failed to add static route '%s via %s' for host %q on %s "+
-			"stderr: %q, error: %v", prefix, nextHop, node.Name, k8sClusterRouter, stderr, err)
+		return fmt.Errorf("failed to get host subnets for %s: %v", node.Name, err)
+	}
+
+	for _, subnet := range subnets {
+		hostAddr, err := hostAddrForSubnet(hostIfAddrs, subnet)
+		if err != nil {
+			return fmt.Errorf("cannot configure static route for %s: %v", subnet.String(), err)
+		}
+		nextHop := util.GetNodeManagementIfAddr(subnet).IP.String()
+		_, stderr, err := util.RunOVNNbctl("--may-exist", "lr-route-add", ovnClusterRouter, hostAddr, nextHop)
+		if err != nil {
+			return fmt.Errorf("failed to add static route '%s via %s' for host %q on %s "+
+				"stderr: %q, error: %v", hostAddr, nextHop, node.Name, ovnClusterRouter, stderr, err)
+		}
 	}
 
 	return nil
 }
 
-func (oc *Controller) ensureNodeLogicalNetwork(nodeName string, hostsubnet *net.IPNet) error {
-	gwIfAddr := util.GetNodeGatewayIfAddr(hostsubnet)
-	mgmtIfAddr := util.GetNodeManagementIfAddr(hostsubnet)
-	hybridOverlayIfAddr := util.GetNodeHybridOverlayIfAddr(hostsubnet)
-	nodeLRPMAC := util.IPAddrToHWAddr(gwIfAddr.IP)
-	clusterRouter := util.GetK8sClusterRouter()
+func (oc *Controller) ensureNodeLogicalNetwork(nodeName string, hostSubnets []*net.IPNet) error {
+	// logical router port MAC is based on IPv4 subnet if there is one, else IPv6
+	var nodeLRPMAC net.HardwareAddr
+	for _, hostSubnet := range hostSubnets {
+		gwIfAddr := util.GetNodeGatewayIfAddr(hostSubnet)
+		nodeLRPMAC = util.IPAddrToHWAddr(gwIfAddr.IP)
+		if !utilnet.IsIPv6CIDR(hostSubnet) {
+			break
+		}
+	}
+
+	lrpArgs := []string{
+		"--if-exists", "lrp-del", "rtos-" + nodeName,
+		"--", "lrp-add", ovnClusterRouter, "rtos-" + nodeName,
+		nodeLRPMAC.String(),
+	}
+
+	lsArgs := []string{
+		"--may-exist",
+		"ls-add", nodeName,
+		"--", "set", "logical_switch", nodeName,
+	}
+
+	var v4Gateway net.IP
+	for _, hostSubnet := range hostSubnets {
+		gwIfAddr := util.GetNodeGatewayIfAddr(hostSubnet)
+		lrpArgs = append(lrpArgs, gwIfAddr.String())
+
+		if utilnet.IsIPv6CIDR(hostSubnet) {
+			lsArgs = append(lsArgs,
+				"other-config:ipv6_prefix="+hostSubnet.IP.String(),
+			)
+		} else {
+			v4Gateway = gwIfAddr.IP
+
+			mgmtIfAddr := util.GetNodeManagementIfAddr(hostSubnet)
+			excludeIPs := mgmtIfAddr.IP.String()
+			if config.HybridOverlay.Enabled {
+				hybridOverlayIfAddr := util.GetNodeHybridOverlayIfAddr(hostSubnet)
+				excludeIPs += ".." + hybridOverlayIfAddr.IP.String()
+			}
+			lsArgs = append(lsArgs,
+				"other-config:subnet="+hostSubnet.String(),
+				"other-config:exclude_ips="+excludeIPs,
+			)
+		}
+	}
 
 	// Create a router port and provide it the first address on the node's host subnet
-	_, stderr, err := util.RunOVNNbctl("--may-exist", "lrp-add", clusterRouter, "rtos-"+nodeName,
-		nodeLRPMAC.String(), gwIfAddr.String())
+	_, stderr, err := util.RunOVNNbctl(lrpArgs...)
 	if err != nil {
 		klog.Errorf("Failed to add logical port to router, stderr: %q, error: %v", stderr, err)
 		return err
 	}
 
 	// Create a logical switch and set its subnet.
-
-	args := []string{
-		"--", "--may-exist", "ls-add", nodeName,
-		"--", "set", "logical_switch", nodeName,
-	}
-	if utilnet.IsIPv6CIDR(hostsubnet) {
-		args = append(args,
-			"other-config:ipv6_prefix="+hostsubnet.IP.String(),
-		)
-	} else {
-		excludeIPs := mgmtIfAddr.IP.String()
-		if config.HybridOverlay.Enabled {
-			excludeIPs += ".." + hybridOverlayIfAddr.IP.String()
-		}
-		args = append(args,
-			"other-config:subnet="+hostsubnet.String(),
-			"other-config:exclude_ips="+excludeIPs,
-		)
-	}
-	stdout, stderr, err := util.RunOVNNbctl(args...)
+	stdout, stderr, err := util.RunOVNNbctl(lsArgs...)
 	if err != nil {
 		klog.Errorf("Failed to create a logical switch %v, stdout: %q, stderr: %q, error: %v", nodeName, stdout, stderr, err)
 		return err
@@ -486,11 +530,11 @@ func (oc *Controller) ensureNodeLogicalNetwork(nodeName string, hostsubnet *net.
 
 		// Configure querier only if we have an IPv4 address, otherwise
 		// disable querier.
-		if !utilnet.IsIPv6(gwIfAddr.IP) {
+		if v4Gateway != nil {
 			stdout, stderr, err = util.RunOVNNbctl("set", "logical_switch",
 				nodeName, "other-config:mcast_querier=\"true\"",
 				"other-config:mcast_eth_src=\""+nodeLRPMAC.String()+"\"",
-				"other-config:mcast_ip4_src=\""+gwIfAddr.IP.String()+"\"")
+				"other-config:mcast_ip4_src=\""+v4Gateway.String()+"\"")
 			if err != nil {
 				klog.Errorf("Failed to enable IGMP Querier on logical switch %v, stdout: %q, stderr: %q, error: %v",
 					nodeName, stdout, stderr, err)
@@ -576,19 +620,20 @@ func (oc *Controller) ensureNodeLogicalNetwork(nodeName string, hostsubnet *net.
 	// Add the node to the logical switch cache
 	oc.lsMutex.Lock()
 	defer oc.lsMutex.Unlock()
-	if existing, ok := oc.logicalSwitchCache[nodeName]; ok && !reflect.DeepEqual(existing, hostsubnet) {
-		klog.Warningf("Node %q logical switch already in cache with subnet %v; replacing with %v", nodeName, existing, hostsubnet)
+	if existing, ok := oc.logicalSwitchCache[nodeName]; ok && !reflect.DeepEqual(existing, hostSubnets) {
+		klog.Warningf("Node %q logical switch already in cache with subnet %s; replacing with %s", nodeName,
+			util.JoinIPNets(existing, ","), util.JoinIPNets(hostSubnets, ","))
 	}
-	oc.logicalSwitchCache[nodeName] = hostsubnet
+	oc.logicalSwitchCache[nodeName] = hostSubnets
 
 	return nil
 }
 
-func (oc *Controller) addNodeAnnotations(node *kapi.Node, subnet *net.IPNet) error {
-	nodeAnnotations, err := util.CreateNodeHostSubnetAnnotation(subnet)
+func (oc *Controller) addNodeAnnotations(node *kapi.Node, hostSubnets []*net.IPNet) error {
+	nodeAnnotations, err := util.CreateNodeHostSubnetAnnotation(hostSubnets)
 	if err != nil {
 		return fmt.Errorf("failed to marshal node %q annotation for subnet %s",
-			node.Name, subnet.String())
+			node.Name, util.JoinIPNets(hostSubnets, ","))
 	}
 	err = oc.kube.SetAnnotationsOnNode(node, nodeAnnotations)
 	if err != nil {
@@ -598,35 +643,33 @@ func (oc *Controller) addNodeAnnotations(node *kapi.Node, subnet *net.IPNet) err
 	return nil
 }
 
-func (oc *Controller) addNode(node *kapi.Node) (*net.IPNet, error) {
+func (oc *Controller) addNode(node *kapi.Node) ([]*net.IPNet, error) {
 	oc.clearInitialNodeNetworkUnavailableCondition(node, nil)
 
-	hostsubnet, _ := util.ParseNodeHostSubnetAnnotation(node)
-	if hostsubnet != nil {
+	hostSubnets, _ := util.ParseNodeHostSubnetAnnotation(node)
+	if hostSubnets != nil {
 		// Node already has subnet assigned; ensure its logical network is set up
-		return hostsubnet, oc.ensureNodeLogicalNetwork(node.Name, hostsubnet)
+		return hostSubnets, oc.ensureNodeLogicalNetwork(node.Name, hostSubnets)
 	}
 
 	// Node doesn't have a subnet assigned; reserve a new one for it
-	hostsubnets, err := oc.masterSubnetAllocator.AllocateNetworks()
+	hostSubnets, err := oc.masterSubnetAllocator.AllocateNetworks()
 	if err != nil {
 		return nil, fmt.Errorf("Error allocating network for node %s: %v", node.Name, err)
 	}
-	if len(hostsubnets) != 1 {
-		return nil, fmt.Errorf("Error allocating network for node %s: multiple subnets returned", node.Name)
-	}
-	hostsubnet = hostsubnets[0]
-	klog.Infof("Allocated node %s HostSubnet %s", node.Name, hostsubnet.String())
+	klog.Infof("Allocated node %s HostSubnet %s", node.Name, util.JoinIPNets(hostSubnets, ","))
 
 	defer func() {
 		// Release the allocation on error
 		if err != nil {
-			_ = oc.masterSubnetAllocator.ReleaseNetwork(hostsubnet)
+			for _, hostSubnet := range hostSubnets {
+				_ = oc.masterSubnetAllocator.ReleaseNetwork(hostSubnet)
+			}
 		}
 	}()
 
 	// Ensure that the node's logical network has been created
-	err = oc.ensureNodeLogicalNetwork(node.Name, hostsubnet)
+	err = oc.ensureNodeLogicalNetwork(node.Name, hostSubnets)
 	if err != nil {
 		return nil, err
 	}
@@ -634,12 +677,12 @@ func (oc *Controller) addNode(node *kapi.Node) (*net.IPNet, error) {
 	// Set the HostSubnet annotation on the node object to signal
 	// to nodes that their logical infrastructure is set up and they can
 	// proceed with their initialization
-	err = oc.addNodeAnnotations(node, hostsubnet)
+	err = oc.addNodeAnnotations(node, hostSubnets)
 	if err != nil {
 		return nil, err
 	}
 
-	return hostsubnet, nil
+	return hostSubnets, nil
 }
 
 func (oc *Controller) deleteNodeHostSubnet(nodeName string, subnet *net.IPNet) error {
@@ -667,14 +710,14 @@ func (oc *Controller) deleteNodeLogicalNetwork(nodeName string) error {
 	return nil
 }
 
-func (oc *Controller) deleteNode(nodeName string, nodeSubnet, joinSubnet *net.IPNet) error {
+func (oc *Controller) deleteNode(nodeName string, hostSubnets, joinSubnets []*net.IPNet) error {
 	// Clean up as much as we can but don't hard error
-	if nodeSubnet != nil {
-		if err := oc.deleteNodeHostSubnet(nodeName, nodeSubnet); err != nil {
-			klog.Errorf("Error deleting node %s HostSubnet %v: %v", nodeName, nodeSubnet, err)
+	for _, hostSubnet := range hostSubnets {
+		if err := oc.deleteNodeHostSubnet(nodeName, hostSubnet); err != nil {
+			klog.Errorf("Error deleting node %s HostSubnet %v: %v", nodeName, hostSubnet, err)
 		}
 	}
-	if joinSubnet != nil {
+	for _, joinSubnet := range joinSubnets {
 		if err := oc.deleteNodeJoinSubnet(nodeName, joinSubnet); err != nil {
 			klog.Errorf("Error deleting node %s JoinSubnet %v: %v", nodeName, joinSubnet, err)
 		}
@@ -684,7 +727,7 @@ func (oc *Controller) deleteNode(nodeName string, nodeSubnet, joinSubnet *net.IP
 		klog.Errorf("Error deleting node %s logical network: %v", nodeName, err)
 	}
 
-	if err := util.GatewayCleanup(nodeName, nodeSubnet); err != nil {
+	if err := gatewayCleanup(nodeName, hostSubnets); err != nil {
 		return fmt.Errorf("Failed to clean up node %s gateway: (%v)", nodeName, err)
 	}
 
@@ -844,8 +887,8 @@ func (oc *Controller) syncNodes(nodes []interface{}) {
 	}
 
 	type NodeSubnets struct {
-		hostSubnet *net.IPNet
-		joinSubnet *net.IPNet
+		hostSubnets []*net.IPNet
+		joinSubnets []*net.IPNet
 	}
 	NodeSubnetsMap := make(map[string]*NodeSubnets)
 	for _, result := range strings.Split(nodeSwitches, "\n\n") {
@@ -856,7 +899,7 @@ func (oc *Controller) syncNodes(nodes []interface{}) {
 		}
 		isJoinSwitch := false
 		nodeName := items[0]
-		if strings.HasPrefix(items[0], util.JoinSwitchPrefix) {
+		if strings.HasPrefix(items[0], joinSwitchPrefix) {
 			isJoinSwitch = true
 			nodeName = strings.Split(items[0], "_")[1]
 		}
@@ -865,17 +908,19 @@ func (oc *Controller) syncNodes(nodes []interface{}) {
 			continue
 		}
 
-		var subnet *net.IPNet
+		var subnets []*net.IPNet
 		attrs := strings.Fields(items[1])
 		for _, attr := range attrs {
+			var subnet *net.IPNet
 			if strings.HasPrefix(attr, "subnet=") {
 				subnetStr := strings.TrimPrefix(attr, "subnet=")
 				_, subnet, _ = net.ParseCIDR(subnetStr)
-				break
 			} else if strings.HasPrefix(attr, "ipv6_prefix=") {
 				prefixStr := strings.TrimPrefix(attr, "ipv6_prefix=")
 				_, subnet, _ = net.ParseCIDR(prefixStr + "/64")
-				break
+			}
+			if subnet != nil {
+				subnets = append(subnets, subnet)
 			}
 		}
 		var tmp NodeSubnets
@@ -885,14 +930,14 @@ func (oc *Controller) syncNodes(nodes []interface{}) {
 			NodeSubnetsMap[nodeName] = nodeSubnets
 		}
 		if isJoinSwitch {
-			nodeSubnets.joinSubnet = subnet
+			nodeSubnets.joinSubnets = subnets
 		} else {
-			nodeSubnets.hostSubnet = subnet
+			nodeSubnets.hostSubnets = subnets
 		}
 	}
 
 	for nodeName, nodeSubnets := range NodeSubnetsMap {
-		if err := oc.deleteNode(nodeName, nodeSubnets.hostSubnet, nodeSubnets.joinSubnet); err != nil {
+		if err := oc.deleteNode(nodeName, nodeSubnets.hostSubnets, nodeSubnets.joinSubnets); err != nil {
 			klog.Error(err)
 		}
 		//remove the node from the chassis map so we don't delete it twice

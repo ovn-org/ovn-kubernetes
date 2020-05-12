@@ -126,3 +126,27 @@ func IPAddrToHWAddr(ip net.IP) net.HardwareAddr {
 	// IPv6 - use the first two and last two bytes.
 	return net.HardwareAddr{0x0A, 0x58, ip[0], ip[1], ip[14], ip[15]}
 }
+
+// JoinIPs joins the string forms of an array of net.IP, as with strings.Join
+func JoinIPs(ips []net.IP, sep string) string {
+	b := &strings.Builder{}
+	for i, ip := range ips {
+		if i != 0 {
+			b.WriteString(sep)
+		}
+		b.WriteString(ip.String())
+	}
+	return b.String()
+}
+
+// JoinIPNets joins the string forms of an array of *net.IPNet, as with strings.Join
+func JoinIPNets(ipnets []*net.IPNet, sep string) string {
+	b := &strings.Builder{}
+	for i, ipnet := range ipnets {
+		if i != 0 {
+			b.WriteString(sep)
+		}
+		b.WriteString(ipnet.String())
+	}
+	return b.String()
+}

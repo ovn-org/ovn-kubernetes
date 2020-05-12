@@ -47,14 +47,7 @@ func ovsExec(args ...string) (string, error) {
 		return "", fmt.Errorf("failed to run 'ovs-vsctl %s': %v\n  %q", strings.Join(args, " "), err, string(output))
 	}
 
-	outStr := string(output)
-	trimmed := strings.TrimSpace(outStr)
-	// If output is a single line, strip the trailing newline
-	if strings.Count(trimmed, "\n") == 0 {
-		outStr = trimmed
-	}
-
-	return outStr, nil
+	return strings.TrimSuffix(string(output), "\n"), nil
 }
 
 func ovsCreate(table string, values ...string) (string, error) {
@@ -79,7 +72,10 @@ func ovsFind(table, column, condition string) ([]string, error) {
 	if err != nil {
 		return nil, err
 	}
-	return strings.Split(strings.TrimSpace(output), "\n"), nil
+	if output == "" {
+		return nil, nil
+	}
+	return strings.Split(output, "\n"), nil
 }
 
 func ovsClear(table, record string, columns ...string) error {

@@ -224,7 +224,7 @@ func SetNodeManagementPortMACAddress(nodeAnnotator kube.Annotator, macAddress ne
 func ParseNodeManagementPortMACAddress(node *kapi.Node) (net.HardwareAddr, error) {
 	macAddress, ok := node.Annotations[ovnNodeManagementPortMacAddress]
 	if !ok {
-		klog.Errorf("macAddress annotation not found for node %q ", node.Name)
+		klog.Warningf("macAddress annotation not found for node %q ", node.Name)
 		return nil, nil
 	}
 

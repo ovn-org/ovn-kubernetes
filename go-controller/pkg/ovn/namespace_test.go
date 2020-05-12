@@ -3,7 +3,7 @@ package ovn
 import (
 	"fmt"
 
-	"github.com/urfave/cli"
+	"github.com/urfave/cli/v2"
 
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
 	ovntest "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/testing"
@@ -73,7 +73,7 @@ func (n namespace) addPodCmds(fexec *ovntest.FakeExec, tP pod, namespace v1.Name
 		})
 	} else {
 		fexec.AddFakeCmdsNoOutputNoError([]string{
-			fmt.Sprintf(`ovn-nbctl --timeout=15 add address_set %s addresses %s`, hashedAddressSet(namespace.Name), tP.podIP),
+			fmt.Sprintf(`ovn-nbctl --timeout=15 add address_set %s addresses "%s"`, hashedAddressSet(namespace.Name), tP.podIP),
 		})
 	}
 }
@@ -85,7 +85,7 @@ func (n namespace) delPodCmds(fexec *ovntest.FakeExec, tP pod, namespace v1.Name
 		})
 	} else {
 		fexec.AddFakeCmdsNoOutputNoError([]string{
-			fmt.Sprintf("ovn-nbctl --timeout=15 remove address_set %s addresses %s", hashedAddressSet(namespace.Name), tP.podIP),
+			fmt.Sprintf(`ovn-nbctl --timeout=15 remove address_set %s addresses "%s"`, hashedAddressSet(namespace.Name), tP.podIP),
 		})
 	}
 }

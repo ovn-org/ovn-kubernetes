@@ -4,7 +4,7 @@ import (
 	"fmt"
 
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
-	"github.com/urfave/cli"
+	"github.com/urfave/cli/v2"
 	"k8s.io/apimachinery/pkg/util/errors"
 	kexec "k8s.io/utils/exec"
 )
@@ -16,7 +16,7 @@ var NicsToBridgeCommand = cli.Command{
 	Flags: []cli.Flag{},
 	Action: func(context *cli.Context) error {
 		args := context.Args()
-		if len(args) == 0 {
+		if args.Len() == 0 {
 			return fmt.Errorf("Please specify list of nic interfaces")
 		}
 
@@ -25,7 +25,7 @@ var NicsToBridgeCommand = cli.Command{
 		}
 
 		var errorList []error
-		for _, nic := range args {
+		for _, nic := range args.Slice() {
 			if _, err := util.NicToBridge(nic); err != nil {
 				errorList = append(errorList, err)
 			}
@@ -42,7 +42,7 @@ var BridgesToNicCommand = cli.Command{
 	Flags: []cli.Flag{},
 	Action: func(context *cli.Context) error {
 		args := context.Args()
-		if len(args) == 0 {
+		if args.Len() == 0 {
 			return fmt.Errorf("Please specify list of bridges")
 		}
 
@@ -51,7 +51,7 @@ var BridgesToNicCommand = cli.Command{
 		}
 
 		var errorList []error
-		for _, bridge := range args {
+		for _, bridge := range args.Slice() {
 			if err := util.BridgeToNic(bridge); err != nil {
 				errorList = append(errorList, err)
 			}

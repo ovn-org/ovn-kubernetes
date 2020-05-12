@@ -2,9 +2,10 @@ package controller
 
 import (
 	"fmt"
+	"net"
 	"strings"
 
-	"github.com/urfave/cli"
+	"github.com/urfave/cli/v2"
 	"k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/client-go/kubernetes/fake"
@@ -36,7 +37,7 @@ func addGetPortAddressesCmds(fexec *ovntest.FakeExec, nodeName, hybMAC, hybIP st
 func newTestNode(name, os, ovnHostSubnet, hybridHostSubnet, drMAC string) v1.Node {
 	annotations := make(map[string]string)
 	if ovnHostSubnet != "" {
-		subnetAnnotations, err := util.CreateNodeHostSubnetAnnotation(ovntest.MustParseIPNet(ovnHostSubnet))
+		subnetAnnotations, err := util.CreateNodeHostSubnetAnnotation([]*net.IPNet{ovntest.MustParseIPNet(ovnHostSubnet)})
 		Expect(err).NotTo(HaveOccurred())
 		for k, v := range subnetAnnotations {
 			annotations[k] = fmt.Sprintf("%s", v)
@@ -95,10 +96,7 @@ var _ = Describe("Hybrid SDN Master Operations", func() {
 			Expect(err).NotTo(HaveOccurred())
 			defer close(stopChan)
 
-			m, err := NewMaster(fakeClient)
-			Expect(err).NotTo(HaveOccurred())
-
-			err = m.Start(f)
+			err = StartMaster(&kube.Kube{KClient: fakeClient}, f)
 			Expect(err).NotTo(HaveOccurred())
 
 			// Windows node should be allocated a subnet
@@ -106,7 +104,7 @@ var _ = Describe("Hybrid SDN Master Operations", func() {
 			Expect(err).NotTo(HaveOccurred())
 			Expect(updatedNode.Annotations).To(HaveKeyWithValue(types.HybridOverlayNodeSubnet, nodeSubnet))
 			_, err = util.ParseNodeHostSubnetAnnotation(updatedNode)
-			Expect(err).To(MatchError(fmt.Sprintf("node %q has no host subnet annotation", nodeName)))
+			Expect(err).To(MatchError(fmt.Sprintf("node %q has no \"k8s.ovn.org/node-subnets\" annotation", nodeName)))
 
 			Expect(fexec.CalledMatchesExpected()).Should(BeTrue(), fexec.ErrorDesc)
 			return nil
@@ -149,10 +147,7 @@ var _ = Describe("Hybrid SDN Master Operations", func() {
 			Expect(err).NotTo(HaveOccurred())
 			defer close(stopChan)
 
-			m, err := NewMaster(fakeClient)
-			Expect(err).NotTo(HaveOccurred())
-
-			err = m.Start(f)
+			err = StartMaster(&kube.Kube{KClient: fakeClient}, f)
 			Expect(err).NotTo(HaveOccurred())
 
 			Eventually(fexec.CalledMatchesExpected, 2).Should(BeTrue(), fexec.ErrorDesc)
@@ -211,10 +206,7 @@ var _ = Describe("Hybrid SDN Master Operations", func() {
 			Expect(err).NotTo(HaveOccurred())
 			defer close(stopChan)
 
-			m, err := NewMaster(fakeClient)
-			Expect(err).NotTo(HaveOccurred())
-
-			err = m.Start(f)
+			err = StartMaster(&kube.Kube{KClient: fakeClient}, f)
 			Expect(err).NotTo(HaveOccurred())
 
 			k := &kube.Kube{KClient: fakeClient}

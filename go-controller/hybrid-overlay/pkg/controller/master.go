@@ -14,20 +14,19 @@ import (
 
 	kapi "k8s.io/api/core/v1"
 	utilruntime "k8s.io/apimachinery/pkg/util/runtime"
-	"k8s.io/client-go/kubernetes"
 	"k8s.io/klog"
 )
 
 // MasterController is the master hybrid overlay controller
 type MasterController struct {
-	kube      *kube.Kube
+	kube      kube.Interface
 	allocator *allocator.SubnetAllocator
 }
 
 // NewMaster a new master controller that listens for node events
-func NewMaster(clientset kubernetes.Interface) (*MasterController, error) {
+func NewMaster(kube kube.Interface) (*MasterController, error) {
 	m := &MasterController{
-		kube:      &kube.Kube{KClient: clientset},
+		kube:      kube,
 		allocator: allocator.NewSubnetAllocator(),
 	}
 
@@ -59,9 +58,14 @@ func NewMaster(clientset kubernetes.Interface) (*MasterController, error) {
 	return m, nil
 }
 
-// Start is the top level function to run hybrid overlay in master mode
-func (m *MasterController) Start(wf *factory.WatchFactory) error {
-	return houtil.StartNodeWatch(m, wf)
+// StartMaster creates and starts the hybrid overlay master controller
+func StartMaster(kube kube.Interface, wf *factory.WatchFactory) error {
+	klog.Infof("Starting hybrid overlay master...")
+	master, err := NewMaster(kube)
+	if err != nil {
+		return err
+	}
+	return houtil.StartNodeWatch(master, wf)
 }
 
 // hybridOverlayNodeEnsureSubnet allocates a subnet and sets the
@@ -99,8 +103,8 @@ func (m *MasterController) releaseNodeSubnet(nodeName string, subnet *net.IPNet)
 func (m *MasterController) handleOverlayPort(node *kapi.Node, annotator kube.Annotator) error {
 	_, haveDRMACAnnotation := node.Annotations[types.HybridOverlayDRMAC]
 
-	subnet, err := util.ParseNodeHostSubnetAnnotation(node)
-	if subnet == nil || err != nil {
+	subnets, err := util.ParseNodeHostSubnetAnnotation(node)
+	if subnets == nil || err != nil {
 		// No subnet allocated yet; clean up
 		if haveDRMACAnnotation {
 			m.deleteOverlayPort(node)
@@ -113,6 +117,9 @@ func (m *MasterController) handleOverlayPort(node *kapi.Node, annotator kube.Ann
 		// already set up; do nothing
 		return nil
 	}
+
+	// FIXME DUAL-STACK
+	subnet := subnets[0]
 
 	portName := houtil.GetHybridOverlayPortName(node.Name)
 	portMAC, portIP, _ := util.GetPortAddresses(portName)

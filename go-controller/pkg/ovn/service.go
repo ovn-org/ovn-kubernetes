@@ -230,7 +230,7 @@ func (ovn *Controller) createService(service *kapi.Service) error {
 					} else if ovn.svcQualifiesForReject(service) {
 						aclUUID, err := ovn.createLoadBalancerRejectACL(loadBalancer, physicalIP, port, protocol)
 						if err != nil {
-							return fmt.Errorf("failed to create service ACL")
+							return fmt.Errorf("failed to create service ACL: %v", err)
 						}
 						klog.V(5).Infof("Service Reject ACL created for physical gateway: %s", aclUUID)
 					}
@@ -253,7 +253,7 @@ func (ovn *Controller) createService(service *kapi.Service) error {
 					aclUUID, err := ovn.createLoadBalancerRejectACL(loadBalancer, service.Spec.ClusterIP,
 						svcPort.Port, protocol)
 					if err != nil {
-						return fmt.Errorf("failed to create service ACL")
+						return fmt.Errorf("failed to create service ACL: %v", err)
 					} else {
 						klog.V(5).Infof("Service Reject ACL created for cluster IP: %s", aclUUID)
 					}

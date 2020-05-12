@@ -30,7 +30,7 @@ ready_to_join_cluster() {
     return 1
   fi
   target=$(ovn-${db}ctl --db=${transport}:${init_ip}:${port} ${ovndb_ctl_ssl_opts} --data=bare --no-headings \
-    --columns=target list connection 2>/dev/null)
+    --columns=target list connection)
   if [[ "${target}" != "p${transport}:${port}" ]]; then
     return 1
   fi
@@ -43,7 +43,7 @@ check_ovnkube_db_ep() {
 
   # TODO: Right now only checks for NB ovsdb instances
   echo "======= checking ${dbaddr}:${dbport} OVSDB instance ==============="
-  ovsdb-client ${ovndb_ctl_ssl_opts} list-dbs ${transport}:${dbaddr}:${dbport} >/dev/null 2>&1
+  ovsdb-client ${ovndb_ctl_ssl_opts} list-dbs ${transport}:${dbaddr}:${dbport} >/dev/null
   if [[ $? != 0 ]]; then
     return 1
   fi
@@ -57,7 +57,7 @@ check_and_apply_ovnkube_db_ep() {
   ips=()
   for ((i = 0; i < ${replicas}; i++)); do
     ip=$(kubectl --server=${K8S_APISERVER} --token=${k8s_token} --certificate-authority=${K8S_CACERT} \
-      get pod -n ${ovn_kubernetes_namespace} ovnkube-db-${i} -o=jsonpath='{.status.podIP}' 2>/dev/null)
+      get pod -n ${ovn_kubernetes_namespace} ovnkube-db-${i} -o=jsonpath='{.status.podIP}')
     if [[ ${ip} == "" ]]; then
       break
     fi
@@ -72,7 +72,7 @@ check_and_apply_ovnkube_db_ep() {
 
     # Get the current set of ovnkube-db endpoints, if any
     IFS=" " read -a old_ips <<<"$(kubectl --server=${K8S_APISERVER} --token=${k8s_token} --certificate-authority=${K8S_CACERT} \
-      get ep -n ${ovn_kubernetes_namespace} ovnkube-db -o=jsonpath='{range .subsets[0].addresses[*]}{.ip}{" "}' 2>/dev/null)"
+      get ep -n ${ovn_kubernetes_namespace} ovnkube-db -o=jsonpath='{range .subsets[0].addresses[*]}{.ip}{" "}')"
     if [[ ${#old_ips[@]} -ne 0 ]]; then
       return
     fi
@@ -97,7 +97,7 @@ set_election_timer() {
 
   echo "setting election timer for ${database} to ${election_timer} ms"
 
-  current_election_timer=$(ovs-appctl -t ${OVN_RUNDIR}/ovn${db}_db.ctl cluster/status ${database} 2>/dev/null |
+  current_election_timer=$(ovs-appctl -t ${OVN_RUNDIR}/ovn${db}_db.ctl cluster/status ${database} |
     grep "Election" | sed "s/.*:[[:space:]]//")
   if [[ -z "${current_election_timer}" ]]; then
     echo "Failed to get current election timer value. Exiting..."
@@ -140,7 +140,7 @@ set_connection() {
   local output
 
   # this call will fail on non-leader node since we are using unix socket and no --no-leader-only option.
-  output=$(ovn-${db}ctl --data=bare --no-headings --columns=target,inactivity_probe list connection 2>/dev/null)
+  output=$(ovn-${db}ctl --data=bare --no-headings --columns=target,inactivity_probe list connection)
   if [[ $? == 0 ]]; then
     # this instance is a leader, check if we need to make any changes
     echo "found the current value of target and inactivity probe to be ${output}"
@@ -181,10 +181,15 @@ set_northd_probe_interval() {
   return 0
 }
 
+ovsdb_cleanup() {
+  local db=${1}
+  ovs-appctl -t ${OVN_RUNDIR}/ovn${db}_db.ctl exit >/dev/null 2>&1
+  kill $(jobs -p) >/dev/null 2>&1
+  exit 0
+}
+
 # v3 - create nb_ovsdb/sb_ovsdb cluster in a separate container
 ovsdb-raft() {
-  trap 'kill $(jobs -p); exit 0' TERM
-
   local db=${1}
   local port=${2}
   local raft_port=${3}
@@ -192,9 +197,10 @@ ovsdb-raft() {
   local initialize="false"
 
   ovn_db_pidfile=${OVN_RUNDIR}/ovn${db}_db.pid
-  eval ovn_log_db=\$ovn_log_${db}
+  eval ovn_loglevel_db=\$ovn_loglevel_${db}
   ovn_db_file=${OVN_ETCDIR}/ovn${db}_db.db
 
+  trap 'ovsdb_cleanup ${db}' TERM
   rm -f ${ovn_db_pidfile}
 
   verify-ovsdb-raft
@@ -231,7 +237,7 @@ ovsdb-raft() {
       --db-${db}-cluster-local-port=${raft_port} \
       --db-${db}-cluster-local-proto=${transport} \
       ${db_ssl_opts} \
-      --ovn-${db}-log="${ovn_log_db}" &
+      --ovn-${db}-log="${ovn_loglevel_db}" &
   else
     # join the remote cluster node if the DB is not created
     if [[ "${initialize}" == "true" ]]; then
@@ -243,7 +249,7 @@ ovsdb-raft() {
       --db-${db}-cluster-local-port=${raft_port} --db-${db}-cluster-remote-port=${raft_port} \
       --db-${db}-cluster-local-proto=${transport} --db-${db}-cluster-remote-proto=${transport} \
       ${db_ssl_opts} \
-      --ovn-${db}-log="${ovn_log_db}" &
+      --ovn-${db}-log="${ovn_loglevel_db}" &
   fi
 
   # Following command waits for the database on server to enter a `connected` state

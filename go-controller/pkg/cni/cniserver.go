@@ -6,7 +6,6 @@ import (
 	"io/ioutil"
 	"net/http"
 	"strings"
-	"time"
 
 	"github.com/gorilla/mux"
 	"k8s.io/client-go/kubernetes"
@@ -57,6 +56,7 @@ func NewCNIServer(rundir string, kclient kubernetes.Interface) *Server {
 	}
 	router.NotFoundHandler = http.HandlerFunc(http.NotFound)
 	router.HandleFunc("/", s.handleCNIRequest).Methods("POST")
+	router.HandleFunc("/metrics", s.handleCNIMetrics).Methods("POST")
 	return s
 }
 
@@ -133,7 +133,6 @@ func cniRequestToPodRequest(cr *Request) (*PodRequest, error) {
 // CNI server client
 func (s *Server) handleCNIRequest(w http.ResponseWriter, r *http.Request) {
 	var cr Request
-	startTime := time.Now()
 	b, _ := ioutil.ReadAll(r.Body)
 	if err := json.Unmarshal(b, &cr); err != nil {
 		http.Error(w, fmt.Sprintf("%v", err), http.StatusBadRequest)
@@ -147,9 +146,7 @@ func (s *Server) handleCNIRequest(w http.ResponseWriter, r *http.Request) {
 
 	klog.Infof("Waiting for %s result for pod %s/%s", req.Command, req.PodNamespace, req.PodName)
 	result, err := s.requestFunc(req, s.kclient)
-	hasErr := "false"
 	if err != nil {
-		hasErr = "true"
 		http.Error(w, fmt.Sprintf("%v", err), http.StatusBadRequest)
 	} else {
 		// Empty response JSON means success with no body
@@ -158,7 +155,22 @@ func (s *Server) handleCNIRequest(w http.ResponseWriter, r *http.Request) {
 			klog.Warningf("Error writing %s HTTP response: %v", req.Command, err)
 		}
 	}
+}
 
-	metrics.MetricCNIRequestDuration.WithLabelValues(string(req.Command), hasErr).Observe(
-		time.Since(startTime).Seconds())
+func (s *Server) handleCNIMetrics(w http.ResponseWriter, r *http.Request) {
+	var cm CNIRequestMetrics
+
+	b, _ := ioutil.ReadAll(r.Body)
+	if err := json.Unmarshal(b, &cm); err != nil {
+		klog.Warningf("Failed to unmarshal JSON (%s) to CNIRequestMetrics struct: %v",
+			string(b), err)
+	} else {
+		hasErr := fmt.Sprintf("%t", cm.HasErr)
+		metrics.MetricCNIRequestDuration.WithLabelValues(string(cm.Command), hasErr).Observe(cm.ElapsedTime)
+	}
+	// Empty response JSON means success with no body
+	w.Header().Set("Content-Type", "application/json")
+	if _, err := w.Write([]byte{}); err != nil {
+		klog.Warningf("Error writing %s HTTP response for metrics post", err)
+	}
 }

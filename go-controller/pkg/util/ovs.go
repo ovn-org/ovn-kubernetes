@@ -371,7 +371,6 @@ func getNbctlArgsAndEnv(timeout int, args ...string) ([]string, []string) {
 		envVar, err := getNbctlSocketPath()
 		if err == nil {
 			envVars := []string{envVar}
-			klog.V(5).Infof("using ovn-nbctl daemon mode at %s", envVars)
 			cmdArgs = append(cmdArgs, fmt.Sprintf("--timeout=%d", timeout))
 			cmdArgs = append(cmdArgs, args...)
 			return cmdArgs, envVars

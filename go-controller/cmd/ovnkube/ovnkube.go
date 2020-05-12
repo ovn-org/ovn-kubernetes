@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"fmt"
 	"io"
 	"io/ioutil"
@@ -16,10 +17,9 @@ import (
 
 	"k8s.io/klog"
 
-	"github.com/urfave/cli"
+	"github.com/urfave/cli/v2"
 	"gopkg.in/fsnotify/fsnotify.v1"
 
-	hocontroller "github.com/ovn-org/ovn-kubernetes/go-controller/hybrid-overlay/pkg/controller"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/factory"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/metrics"
@@ -101,7 +101,31 @@ func main() {
 		return runOvnKube(c)
 	}
 
-	if err := c.Run(os.Args); err != nil {
+	ctx := context.Background()
+
+	// trap SIGHUP, SIGINT, SIGTERM, SIGQUIT and
+	// cancel the context
+	ctx, cancel := context.WithCancel(ctx)
+	exitCh := make(chan os.Signal, 1)
+	signal.Notify(exitCh,
+		syscall.SIGHUP,
+		syscall.SIGINT,
+		syscall.SIGTERM,
+		syscall.SIGQUIT)
+	defer func() {
+		signal.Stop(exitCh)
+		cancel()
+	}()
+	go func() {
+		select {
+		case s := <-exitCh:
+			klog.Infof("Received signal %s. Shutting down", s)
+			cancel()
+		case <-ctx.Done():
+		}
+	}()
+
+	if err := c.RunContext(ctx, os.Args); err != nil {
 		klog.Exit(err)
 	}
 }
@@ -117,14 +141,6 @@ func delPidfile(pidfile string) {
 }
 
 func setupPIDFile(pidfile string) error {
-	c := make(chan os.Signal, 2)
-	signal.Notify(c, os.Interrupt, syscall.SIGTERM)
-	go func() {
-		<-c
-		delPidfile(pidfile)
-		os.Exit(1)
-	}()
-
 	// need to test if already there
 	_, err := os.Stat(pidfile)
 
@@ -244,14 +260,10 @@ func runOvnKube(ctx *cli.Context) error {
 		metrics.StartMetricsServer(config.Kubernetes.MetricsBindAddress, config.Kubernetes.MetricsEnablePprof)
 	}
 
-	if config.HybridOverlay.Enabled {
-		if err := hocontroller.StartHybridOverlay(master != "", node, clientset, factory); err != nil {
-			return err
-		}
-	}
-
-	// run forever
-	select {}
+	// run until cancelled
+	<-ctx.Context.Done()
+	stopChan <- struct{}{}
+	return nil
 }
 
 // watchForChanges exits if the configuration file changed.

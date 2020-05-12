@@ -50,7 +50,7 @@ func (ovn *Controller) getDefaultGatewayLoadBalancer(protocol kapi.Protocol) str
 		return outStr
 	}
 
-	gw, _, err := util.GetDefaultGatewayRouterIP()
+	gw, _, err := getDefaultGatewayRouterIP()
 	if err != nil {
 		klog.Errorf(err.Error())
 		return ""
@@ -178,9 +178,9 @@ func (ovn *Controller) getLogicalSwitchesForLoadBalancer(lb string) ([]string, e
 	}
 	// if this is a GR we know the corresponding join and external switches, otherwise this is an unhandled
 	// case
-	if strings.HasPrefix(out, util.GWRouterPrefix) {
-		routerName := strings.TrimPrefix(out, util.GWRouterPrefix)
-		return []string{util.JoinSwitchPrefix + routerName, util.ExternalSwitchPrefix + routerName}, nil
+	if strings.HasPrefix(out, gwRouterPrefix) {
+		routerName := strings.TrimPrefix(out, gwRouterPrefix)
+		return []string{joinSwitchPrefix + routerName, externalSwitchPrefix + routerName}, nil
 	}
 	return nil, fmt.Errorf("router detected with load balancer that is not a GR")
 }
@@ -210,7 +210,8 @@ func (ovn *Controller) createLoadBalancerRejectACL(lb string, sourceIP string, s
 		l3Prefix = "ip4"
 	}
 	vip := util.JoinHostPortInt32(sourceIP, sourcePort)
-	aclName := fmt.Sprintf("%s-%s", lb, vip)
+	// NOTE: doesn't use vip, to avoid having brackets in the name with IPv6
+	aclName := fmt.Sprintf("%s-%s:%d", lb, sourceIP, sourcePort)
 	// If ovn-k8s was restarted, we lost the cache, and an ACL may already exist in OVN. In that case we need to check
 	// using ACL name
 	aclUUID, stderr, err := util.RunOVNNbctl("--data=bare", "--no-heading", "--columns=_uuid", "find", "acl",
