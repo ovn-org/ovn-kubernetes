@@ -344,7 +344,6 @@ var OvnDBExporterCommand = cli.Command{
 			bindAddress = "0.0.0.0:9476"
 		}
 
-		//if err := util.SetExec(kexec.New()); err != nil {
 		if err := util.GetKexecUtilsInstance().SetExec(); err != nil {
 			return err
 		}

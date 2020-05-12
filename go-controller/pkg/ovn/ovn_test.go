@@ -27,7 +27,7 @@ type FakeOVN struct {
 }
 
 func NewFakeOVN(fexec *ovntest.FakeExec) *FakeOVN {
-	err := util.GetKexecUtilsInstance().SetExec()
+	err := util.GetKexecUtilsInstance(fexec).SetExec()
 	Expect(err).NotTo(HaveOccurred())
 
 	return &FakeOVN{

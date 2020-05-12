@@ -184,7 +184,6 @@ func runOvnKube(ctx *cli.Context) error {
 		return err
 	}
 
-	//if err := util.SetExec(kexec.New()); err != nil {
 	if err := util.GetKexecUtilsInstance().SetExec(); err != nil {
 		return fmt.Errorf("failed to initialize exec helper: %v", err)
 	}

@@ -244,7 +244,7 @@ var _ = Describe("Master Operations", func() {
 				Items: []v1.Node{testNode},
 			})
 
-			err := util.GetKexecUtilsInstance().SetExec()
+			err := util.GetKexecUtilsInstance(fexec).SetExec()
 			Expect(err).NotTo(HaveOccurred())
 
 			_, err = config.InitConfig(ctx, fexec, nil)
@@ -329,7 +329,7 @@ var _ = Describe("Master Operations", func() {
 				Items: []v1.Node{testNode},
 			})
 
-			err := util.GetKexecUtilsInstance().SetExec()
+			err := util.GetKexecUtilsInstance(fexec).SetExec()
 			Expect(err).NotTo(HaveOccurred())
 
 			_, err = config.InitConfig(ctx, fexec, nil)
@@ -411,7 +411,7 @@ var _ = Describe("Master Operations", func() {
 			})
 
 			fexec, tcpLBUUID, udpLBUUID, sctpLBUUID := defaultFakeExec(nodeSubnet, nodeName, true)
-			err := util.GetKexecUtilsInstance().SetExec()
+			err := util.GetKexecUtilsInstance(fexec).SetExec()
 			Expect(err).NotTo(HaveOccurred())
 			cleanupGateway(fexec, nodeName, nodeSubnet, clusterCIDR, nextHop)
 			addGetPortAddressesCmds(fexec, nodeName, hybMAC, hybIP)
@@ -596,7 +596,7 @@ subnet=%s
 				Items: []v1.Node{masterNode},
 			})
 
-			err := util.GetKexecUtilsInstance().SetExec()
+			err := util.GetKexecUtilsInstance(fexec).SetExec()
 			Expect(err).NotTo(HaveOccurred())
 
 			_, err = config.InitConfig(ctx, fexec, nil)
@@ -699,7 +699,7 @@ var _ = Describe("Gateway Init Operations", func() {
 			})
 
 			fexec := ovntest.NewFakeExec()
-			err := util.GetKexecUtilsInstance().SetExec()
+			err := util.GetKexecUtilsInstance(fexec).SetExec()
 			Expect(err).NotTo(HaveOccurred())
 
 			_, err = config.InitConfig(ctx, fexec, nil)
@@ -883,7 +883,7 @@ var _ = Describe("Gateway Init Operations", func() {
 			})
 
 			fexec := ovntest.NewFakeExec()
-			err := util.GetKexecUtilsInstance().SetExec()
+			err := util.GetKexecUtilsInstance(fexec).SetExec()
 			Expect(err).NotTo(HaveOccurred())
 
 			_, err = config.InitConfig(ctx, fexec, nil)

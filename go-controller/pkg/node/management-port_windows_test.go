@@ -113,7 +113,7 @@ var _ = Describe("Management Port Operations", func() {
 				Output: " table=65, priority=100,reg15=0x2,metadata=0x2 actions=output:1",
 			})
 
-			err := util.GetKexecUtilsInstance().SetExec()
+			err := util.GetKexecUtilsInstance(fexec).SetExec()
 			Expect(err).NotTo(HaveOccurred())
 
 			_, err = config.InitConfig(ctx, fexec, nil)

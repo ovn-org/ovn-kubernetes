@@ -16,9 +16,14 @@ type kexecUtil struct {
 
 var kexecUtilsInstance *kexecUtil
 
-func GetKexecUtilsInstance() *kexecUtil {
-	iface := kexec.New()
-	kexecUtilsInstance = &kexecUtil{iface}
+func GetKexecUtilsInstance(p kexec.Interface) *kexecUtil {
+	if p == nil {
+		kexecUtilsInstance = &kexecUtil{kexec.New()}
+	} else {
+		kexecUtilsInstance = &kexecUtil{p}
+	}
+	//iface := kexec.New()
+	//kexecUtilsInstance = &kexecUtil{iface}
 	return kexecUtilsInstance
 }
 

@@ -74,8 +74,7 @@ func runHybridOverlay(ctx *cli.Context) error {
 		return err
 	}
 
-	//if err := util.SetExecWithoutOVS(exec); err != nil {
-	if err := util.GetKexecUtilsInstance().SetExecWithoutOVS(); err != nil {
+	if err := util.GetKexecUtilsInstance(exec).SetExecWithoutOVS(); err != nil {
 		return err
 	}
 

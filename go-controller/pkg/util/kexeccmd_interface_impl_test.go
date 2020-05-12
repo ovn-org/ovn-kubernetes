@@ -168,7 +168,7 @@ func TestKexecUtil_RunCmd(t *testing.T) {
 
 	for i, tc := range tests {
 		t.Run(fmt.Sprintf("%d:%s", i, tc.desc), func(t *testing.T) {
-			_, _, e := GetKexecUtilsInstance().RunCmd(tc.cmd, tc.cmdPath, tc.envArgs, tc.cmdArg)
+			_, _, e := GetKexecUtilsInstance(nil).RunCmd(tc.cmd, tc.cmdPath, tc.envArgs, tc.cmdArg)
 			assert.Equal(t, e, tc.expectedErr)
 		})
 

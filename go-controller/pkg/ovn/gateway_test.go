@@ -22,7 +22,7 @@ node1 chassis=d17ddb5a-050d-42ab-ab50-7c6ce79a8f2e lb_force_snat_ip=100.64.0.1
 node4 chassis=912d592c-904c-40cd-9ef1-c2e5b49a33dd lb_force_snat_ip=100.64.0.4`,
 		})
 
-		err := util.GetKexecUtilsInstance().SetExec()
+		err := util.GetKexecUtilsInstance(fexec).SetExec()
 		Expect(err).NotTo(HaveOccurred())
 
 		name, ip, err := getDefaultGatewayRouterIP()
@@ -42,7 +42,7 @@ node1 chassis=d17ddb5a-050d-42ab-ab50-7c6ce79a8f2e lb_force_xxxxxxx=100.64.0.1
 node4 chassis=912d592c-904c-40cd-9ef1-c2e5b49a33dd lb_force_snat_ip=100.64.0.4`,
 		})
 
-		err := util.GetKexecUtilsInstance().SetExec()
+		err := util.GetKexecUtilsInstance(fexec).SetExec()
 		Expect(err).NotTo(HaveOccurred())
 
 		name, ip, err := getDefaultGatewayRouterIP()
@@ -69,7 +69,7 @@ node4 chassis=912d592c-904c-40cd-9ef1-c2e5b49a33dd lb_force_snat_ip=100.64.0.4`,
 		sctpSupport := false
 
 		fexec := ovntest.NewFakeExec()
-		err := util.GetKexecUtilsInstance().SetExec()
+		err := util.GetKexecUtilsInstance(fexec).SetExec()
 		Expect(err).NotTo(HaveOccurred())
 
 		fexec.AddFakeCmdsNoOutputNoError([]string{
@@ -135,7 +135,7 @@ node4 chassis=912d592c-904c-40cd-9ef1-c2e5b49a33dd lb_force_snat_ip=100.64.0.4`,
 		sctpSupport := false
 
 		fexec := ovntest.NewFakeExec()
-		err := util.GetKexecUtilsInstance().SetExec()
+		err := util.GetKexecUtilsInstance(fexec).SetExec()
 		Expect(err).NotTo(HaveOccurred())
 
 		fexec.AddFakeCmdsNoOutputNoError([]string{
@@ -216,7 +216,7 @@ node4 chassis=912d592c-904c-40cd-9ef1-c2e5b49a33dd lb_force_snat_ip=100.64.0.4`,
 		sctpSupport := false
 
 		fexec := ovntest.NewFakeExec()
-		err := util.GetKexecUtilsInstance().SetExec()
+		err := util.GetKexecUtilsInstance(fexec).SetExec()
 		Expect(err).NotTo(HaveOccurred())
 
 		fexec.AddFakeCmdsNoOutputNoError([]string{
@@ -279,7 +279,7 @@ node4 chassis=912d592c-904c-40cd-9ef1-c2e5b49a33dd lb_force_snat_ip=100.64.0.4`,
 		)
 
 		fexec := ovntest.NewFakeExec()
-		err := util.GetKexecUtilsInstance().SetExec()
+		err := util.GetKexecUtilsInstance(fexec).SetExec()
 		Expect(err).NotTo(HaveOccurred())
 
 		fexec.AddFakeCmd(&ovntest.ExpectedCmd{
@@ -341,7 +341,7 @@ node4 chassis=912d592c-904c-40cd-9ef1-c2e5b49a33dd lb_force_snat_ip=100.64.0.4`,
 		)
 
 		fexec := ovntest.NewFakeExec()
-		err := util.GetKexecUtilsInstance().SetExec()
+		err := util.GetKexecUtilsInstance(fexec).SetExec()
 		Expect(err).NotTo(HaveOccurred())
 
 		fexec.AddFakeCmd(&ovntest.ExpectedCmd{
