@@ -19,7 +19,7 @@ var NicsToBridgeCommand = cli.Command{
 			return fmt.Errorf("Please specify list of nic interfaces")
 		}
 
-		if err := util.GetKexecUtilsInstance().SetSpecificExec("ovs-vsctl"); err != nil {
+		if err := util.GetKexecUtilsInstance(nil).SetSpecificExec("ovs-vsctl"); err != nil {
 			return err
 		}
 
@@ -45,7 +45,7 @@ var BridgesToNicCommand = cli.Command{
 			return fmt.Errorf("Please specify list of bridges")
 		}
 
-		if err := util.GetKexecUtilsInstance().SetSpecificExec("ovs-vsctl"); err != nil {
+		if err := util.GetKexecUtilsInstance(nil).SetSpecificExec("ovs-vsctl"); err != nil {
 			return err
 		}
 

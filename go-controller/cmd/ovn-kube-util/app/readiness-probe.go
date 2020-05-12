@@ -175,7 +175,7 @@ var ReadinessProbeCommand = cli.Command{
 	},
 	Action: func(ctx *cli.Context) error {
 		target := ctx.String("target")
-		if err := util.GetKexecUtilsInstance().SetExec(); err != nil {
+		if err := util.GetKexecUtilsInstance(nil).SetExec(); err != nil {
 			return err
 		}
 		if cbfunc, ok := callbacks[target]; ok {
