@@ -1,9 +1,52 @@
-# Running OVN-Kubernetes with IPv6 or Dual-stack In KIND
+# OVN kubernetes KIND Setup
 
-The [KIND](https://github.com/kubernetes-sigs/kind) deployment is used for
-reproducing an OpenShift networking environment with upstream K8S. The value
-proposition is really for developers who want to reproduce an issue or test a
-fix in an environment that can be brought up locally and within a few minutes.
+KIND deployment of OVN kubernetes is a fast and easy means to quickly install and test kubernetes with OVN kubernetes CNI.  The value proposition is really for developers who want to reproduce an issue or test a fix in an environment that can be brought up locally and within a few minutes.
+
+### Prerequisites
+
+- 20 GB of free space in root file system
+- Docker run time
+- KIND  ( https://kubernetes.io/docs/setup/learning-environment/kind/ )
+- kubectl ( https://kubernetes.io/docs/tasks/tools/install-kubectl/ )
+- Python and pip
+
+**NOTE :**  In certain operating systems such as CentOS 8.x, pip2 and pip3 binaries are installed instead of pip. In such situations create a softlink for "pip" that points to "pip2".
+
+### Installation
+
+For OVN kubernetes KIND deployment, use the kind.sh script. 
+
+To see all the options, you can use the  --help/-h command line option.
+
+```
+./kind.sh --help
+
+usage: kind.sh [[[-cf|--config-file <file>] [-kt|keep-taint] [-ha|--ha-enabled]
+                 [-ii|--install-ingress] [-n4|--no-ipv4] [-i6|--ipv6]] | [-h]]
+
+-cf | --config-file          Name of the KIND J2 configuration file.
+                             DEFAULT: ./kind.yaml.j2
+-kt | --keep-taint           Do not remove taint components.
+                             DEFAULT: Remove taint components.
+-ha | --ha-enabled           Enable high availability. DEFAULT: HA Disabled.
+-ii | --install-ingress      Flag to install Ingress Components.
+                             DEFAULT: Don't install ingress components.
+-n4 | --no-ipv4              Disable IPv4. DEFAULT: IPv4 Enabled.
+-i6 | --ipv6                 Enable IPv6. DEFAULT: IPv6 Disabled.
+
+```
+As seen above if you do not specify any options script will assume the default values. 
+
+You can create your own KIND J2 configuration file if the default one is not sufficient.
+
+You can also specify these values as environment variables. Command line parameters will override the environment variables.
+
+After deploying the KIND cluster, you can manage the cluster with regular KIND and kubectl commands.
+
+
+## Running OVN-Kubernetes with IPv6 or Dual-stack In KIND
+
+This section describes the configuration needed for IPv6 and dual-stack environments.
 
 ## KIND with IPv6
 
