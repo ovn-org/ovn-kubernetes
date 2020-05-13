@@ -238,7 +238,6 @@ func TestRunWithEnvVars(t *testing.T) {
 	}
 }
 
-
 func TestRunOVSOfctl(t *testing.T) {
 	mockKexecIface := new(mocks.Interface)
 	mockCmd := new(mocks.Cmd)
@@ -246,17 +245,17 @@ func TestRunOVSOfctl(t *testing.T) {
 	runner = &ExecHelper{exec: mockKexecIface}
 
 	tests := []struct {
-		desc        		string
-		expectedErr 		error
-		cmdArg      		string
-		onRetArgsIface  	*onCallReturnArgs
-		onRetArgsCmdList	[]onCallReturnArgs
+		desc             string
+		expectedErr      error
+		cmdArg           string
+		onRetArgsIface   *onCallReturnArgs
+		onRetArgsCmdList []onCallReturnArgs
 	}{
 		{
-			desc:        "negative: run `ovs-ofctl` command",
-			expectedErr: fmt.Errorf("executable file not found in $PATH"),
-			cmdArg:      "",
-			onRetArgsIface:	&onCallReturnArgs{"Command", "string", []interface{}{mockCmd}},
+			desc:           "negative: run `ovs-ofctl` command",
+			expectedErr:    fmt.Errorf("executable file not found in $PATH"),
+			cmdArg:         "",
+			onRetArgsIface: &onCallReturnArgs{"Command", "string", []interface{}{mockCmd}},
 			onRetArgsCmdList: []onCallReturnArgs{
 				{"Run", "", []interface{}{fmt.Errorf("executable file not found in $PATH")}},
 				{"SetStdout", "*bytes.Buffer", nil},
@@ -264,14 +263,14 @@ func TestRunOVSOfctl(t *testing.T) {
 			},
 		},
 		{
-			desc:        			"positive: run `ovs-ofctl` ",
-			expectedErr: 			nil,
-			cmdArg:		 			"",
-			onRetArgsIface:			&onCallReturnArgs{ "Command", "string",[]interface{}{mockCmd}},
-			onRetArgsCmdList: 		[]onCallReturnArgs{
-				{"Run", "", []interface{}{ nil}},
+			desc:           "positive: run `ovs-ofctl` ",
+			expectedErr:    nil,
+			cmdArg:         "",
+			onRetArgsIface: &onCallReturnArgs{"Command", "string", []interface{}{mockCmd}},
+			onRetArgsCmdList: []onCallReturnArgs{
+				{"Run", "", []interface{}{nil}},
 				{"SetStdout", "*bytes.Buffer", nil},
-				{ "SetStderr", "*bytes.Buffer", nil},
+				{"SetStderr", "*bytes.Buffer", nil},
 			},
 		},
 	}
