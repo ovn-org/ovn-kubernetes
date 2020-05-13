@@ -15,7 +15,7 @@ import (
 
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
-	"github.com/urfave/cli"
+	"github.com/urfave/cli/v2"
 	gcfg "gopkg.in/gcfg.v1"
 	lumberjack "gopkg.in/natefinch/lumberjack.v2"
 	"k8s.io/klog"
@@ -57,8 +57,9 @@ var (
 
 	// Logging holds logging-related parsed config file parameters and command-line overrides
 	Logging = LoggingConfig{
-		File:  "", // do not log to a file by default
-		Level: 4,
+		File:    "", // do not log to a file by default
+		CNIFile: "",
+		Level:   4,
 	}
 
 	// CNI holds CNI-related parsed config file parameters and command-line overrides
@@ -153,6 +154,8 @@ type DefaultConfig struct {
 type LoggingConfig struct {
 	// File is the path of the file to log to
 	File string `gcfg:"logfile"`
+	// CNIFile is the path of the file for the CNI shim to log to
+	CNIFile string `gcfg:"cnilogfile"`
 	// Level is the logging verbosity level
 	Level int `gcfg:"loglevel"`
 }
@@ -395,76 +398,76 @@ var cliConfig config
 //CommonFlags capture general options.
 var CommonFlags = []cli.Flag{
 	// Mode flags
-	cli.StringFlag{
+	&cli.StringFlag{
 		Name:  "init-master",
 		Usage: "initialize master, requires the hostname as argument",
 	},
-	cli.StringFlag{
+	&cli.StringFlag{
 		Name:  "init-node",
 		Usage: "initialize node, requires the name that node is registered with in kubernetes cluster",
 	},
-	cli.StringFlag{
+	&cli.StringFlag{
 		Name:  "cleanup-node",
 		Usage: "cleanup node, requires the name that node is registered with in kubernetes cluster",
 	},
-	cli.StringFlag{
+	&cli.StringFlag{
 		Name:  "pidfile",
 		Usage: "Name of file that will hold the ovnkube pid (optional)",
 	},
-	cli.StringFlag{
+	&cli.StringFlag{
 		Name:  "config-file",
 		Usage: "configuration file path (default: /etc/openvswitch/ovn_k8s.conf)",
 		//Value: "/etc/openvswitch/ovn_k8s.conf",
 	},
-	cli.IntFlag{
+	&cli.IntFlag{
 		Name:        "mtu",
 		Usage:       "MTU value used for the overlay networks (default: 1400)",
 		Destination: &cliConfig.Default.MTU,
 		Value:       Default.MTU,
 	},
-	cli.IntFlag{
+	&cli.IntFlag{
 		Name:        "conntrack-zone",
 		Usage:       "For gateway nodes, the conntrack zone used for conntrack flow rules (default: 64000)",
 		Destination: &cliConfig.Default.ConntrackZone,
 		Value:       Default.ConntrackZone,
 	},
-	cli.StringFlag{
+	&cli.StringFlag{
 		Name:        "encap-type",
 		Usage:       "The encapsulation protocol to use to transmit packets between hypervisors (default: geneve)",
 		Destination: &cliConfig.Default.EncapType,
 		Value:       Default.EncapType,
 	},
-	cli.StringFlag{
+	&cli.StringFlag{
 		Name:        "encap-ip",
 		Usage:       "The IP address of the encapsulation endpoint (default: Node IP address resolved from Node hostname)",
 		Destination: &cliConfig.Default.EncapIP,
 	},
-	cli.UintFlag{
+	&cli.UintFlag{
 		Name:        "encap-port",
 		Usage:       "The UDP port used by the encapsulation endpoint (default: 6081)",
 		Destination: &cliConfig.Default.EncapPort,
 		Value:       Default.EncapPort,
 	},
-	cli.IntFlag{
+	&cli.IntFlag{
 		Name: "inactivity-probe",
 		Usage: "Maximum number of milliseconds of idle time on " +
 			"connection for ovn-controller before it sends a inactivity probe",
 		Destination: &cliConfig.Default.InactivityProbe,
 		Value:       Default.InactivityProbe,
 	},
-	cli.IntFlag{
+	&cli.IntFlag{
 		Name: "openflow-probe",
 		Usage: "Maximum number of seconds of idle time on the openflow " +
 			"connection for ovn-controller before it sends a inactivity probe",
 		Destination: &cliConfig.Default.OpenFlowProbe,
 		Value:       Default.OpenFlowProbe,
 	},
-	cli.StringFlag{
+	&cli.StringFlag{
 		Name:        "cluster-subnet",
 		Usage:       "Deprecated alias for cluster-subnets.",
 		Destination: &clusterSubnet,
 	},
-	cli.StringFlag{
+	&cli.StringFlag{
 		Name:  "cluster-subnets",
 		Value: Default.RawClusterSubnets,
 		Usage: "A comma separated set of IP subnets and the associated " +
@@ -478,51 +481,57 @@ var CommonFlags = []cli.Flag{
 			"it defaults to 24 if unspecified.",
 		Destination: &cliConfig.Default.RawClusterSubnets,
 	},
-	cli.BoolFlag{
+	&cli.BoolFlag{
 		Name:        "nbctl-daemon-mode",
 		Usage:       "Run ovn-nbctl in daemon mode to improve performance in large clusters",
 		Destination: &NbctlDaemonMode,
 	},
-	cli.BoolFlag{
+	&cli.BoolFlag{
 		Name:        "unprivileged-mode",
 		Usage:       "Run ovnkube-node container in unprivileged mode. Valid only with --init-node option.",
 		Destination: &UnprivilegedMode,
 	},
-	cli.BoolFlag{
+	&cli.BoolFlag{
 		Name:        "enable-multicast",
 		Usage:       "Adds multicast support. Valid only with --init-master option.",
 		Destination: &EnableMulticast,
 	},
 	// Logging options
-	cli.IntFlag{
+	&cli.IntFlag{
 		Name:        "loglevel",
 		Usage:       "log verbosity and level: info, warn, fatal, error are always printed no matter the log level. Use 5 for debug (default: 4)",
 		Destination: &cliConfig.Logging.Level,
 		Value:       Logging.Level,
 	},
-	cli.StringFlag{
+	&cli.StringFlag{
 		Name:        "logfile",
 		Usage:       "path of a file to direct log output to",
 		Destination: &cliConfig.Logging.File,
+	},
+	&cli.StringFlag{
+		Name:        "cnilogfile",
+		Usage:       "path of a file to direct log from cni shim to output to (default: /var/log/ovn-kubernetes/ovn-k8s-cni-overlay.log)",
+		Destination: &cliConfig.Logging.CNIFile,
+		Value:       "/var/log/ovn-kubernetes/ovn-k8s-cni-overlay.log",
 	},
 }
 
 // CNIFlags capture CNI-related options
 var CNIFlags = []cli.Flag{
 	// CNI options
-	cli.StringFlag{
+	&cli.StringFlag{
 		Name:        "cni-conf-dir",
 		Usage:       "the CNI config directory in which to write the overlay CNI config file (default: /etc/cni/net.d)",
 		Destination: &cliConfig.CNI.ConfDir,
 		Value:       CNI.ConfDir,
 	},
-	cli.StringFlag{
+	&cli.StringFlag{
 		Name:        "cni-plugin",
 		Usage:       "the name of the CNI plugin (default: ovn-k8s-cni-overlay)",
 		Destination: &cliConfig.CNI.Plugin,
 		Value:       CNI.Plugin,
 	},
-	cli.StringFlag{
+	&cli.StringFlag{
 		Name:        "win-hnsnetwork-id",
 		Usage:       "the ID of the HNS network to which containers will be attached (default: not set)",
 		Destination: &cliConfig.CNI.WinHNSNetworkID,
@@ -531,17 +540,17 @@ var CNIFlags = []cli.Flag{
 
 // K8sFlags capture Kubernetes-related options
 var K8sFlags = []cli.Flag{
-	cli.StringFlag{
+	&cli.StringFlag{
 		Name:        "service-cluster-ip-range",
 		Usage:       "Deprecated alias for k8s-service-cidrs.",
 		Destination: &serviceClusterIPRange,
 	},
-	cli.StringFlag{
+	&cli.StringFlag{
 		Name:        "k8s-service-cidr",
 		Usage:       "Deprecated alias for k8s-service-cidrs.",
 		Destination: &cliConfig.Kubernetes.CompatServiceCIDR,
 	},
-	cli.StringFlag{
+	&cli.StringFlag{
 		Name: "k8s-service-cidrs",
 		Usage: "A comma-separated set of CIDR notation IP ranges from which k8s assigns " +
 			"service cluster IPs. This should be the same as the value " +
@@ -550,44 +559,44 @@ var K8sFlags = []cli.Flag{
 		Destination: &cliConfig.Kubernetes.RawServiceCIDRs,
 		Value:       Kubernetes.RawServiceCIDRs,
 	},
-	cli.StringFlag{
+	&cli.StringFlag{
 		Name:        "k8s-kubeconfig",
 		Usage:       "absolute path to the Kubernetes kubeconfig file (not required if the --k8s-apiserver, --k8s-ca-cert, and --k8s-token are given)",
 		Destination: &cliConfig.Kubernetes.Kubeconfig,
 	},
-	cli.StringFlag{
+	&cli.StringFlag{
 		Name:        "k8s-apiserver",
 		Usage:       "URL of the Kubernetes API server (not required if --k8s-kubeconfig is given) (default: http://localhost:8443)",
 		Destination: &cliConfig.Kubernetes.APIServer,
 		Value:       Kubernetes.APIServer,
 	},
-	cli.StringFlag{
+	&cli.StringFlag{
 		Name:        "k8s-cacert",
 		Usage:       "the absolute path to the Kubernetes API CA certificate (not required if --k8s-kubeconfig is given)",
 		Destination: &cliConfig.Kubernetes.CACert,
 	},
-	cli.StringFlag{
+	&cli.StringFlag{
 		Name:        "k8s-token",
 		Usage:       "the Kubernetes API authentication token (not required if --k8s-kubeconfig is given)",
 		Destination: &cliConfig.Kubernetes.Token,
 	},
-	cli.StringFlag{
+	&cli.StringFlag{
 		Name:        "ovn-config-namespace",
 		Usage:       "specify a namespace which will contain services to config the OVN databases",
 		Destination: &cliConfig.Kubernetes.OVNConfigNamespace,
 		Value:       Kubernetes.OVNConfigNamespace,
 	},
-	cli.StringFlag{
+	&cli.StringFlag{
 		Name:        "metrics-bind-address",
 		Usage:       "The IP address and port for the metrics server to serve on (set to 0.0.0.0 for all IPv4 interfaces)",
 		Destination: &cliConfig.Kubernetes.MetricsBindAddress,
 	},
-	cli.BoolFlag{
+	&cli.BoolFlag{
 		Name:        "metrics-enable-pprof",
 		Usage:       "If true, then also accept pprof requests on the metrics port.",
 		Destination: &cliConfig.Kubernetes.MetricsEnablePprof,
 	},
-	cli.BoolFlag{
+	&cli.BoolFlag{
 		Name: "ovn-empty-lb-events",
 		Usage: "If set, then load balancers do not get deleted when all backends are removed. " +
 			"Instead, ovn-kubernetes monitors the OVN southbound database for empty lb backends " +
@@ -595,11 +604,11 @@ var K8sFlags = []cli.Flag{
 			"will spin up pods for the load balancer to send traffic to.",
 		Destination: &cliConfig.Kubernetes.OVNEmptyLbEvents,
 	},
-	cli.StringFlag{
+	&cli.StringFlag{
 		Name:  "pod-ip",
 		Usage: "UNUSED",
 	},
-	cli.StringFlag{
+	&cli.StringFlag{
 		Name:        "no-hostsubnet-nodes",
 		Usage:       "Specify a label for nodes that will manage their own hostsubnets",
 		Destination: &cliConfig.Kubernetes.RawNoHostSubnetNodes,
@@ -608,26 +617,26 @@ var K8sFlags = []cli.Flag{
 
 // OvnNBFlags capture OVN northbound database options
 var OvnNBFlags = []cli.Flag{
-	cli.StringFlag{
+	&cli.StringFlag{
 		Name: "nb-address",
 		Usage: "IP address and port of the OVN northbound API " +
 			"(eg, ssl:1.2.3.4:6641,ssl:1.2.3.5:6642).  Leave empty to " +
 			"use a local unix socket.",
 		Destination: &cliConfig.OvnNorth.Address,
 	},
-	cli.StringFlag{
+	&cli.StringFlag{
 		Name: "nb-client-privkey",
 		Usage: "Private key that the client should use for talking to the OVN database (default when ssl address is used: /etc/openvswitch/ovnnb-privkey.pem).  " +
 			"Default value for this setting is empty which defaults to use local unix socket.",
 		Destination: &cliConfig.OvnNorth.PrivKey,
 	},
-	cli.StringFlag{
+	&cli.StringFlag{
 		Name: "nb-client-cert",
 		Usage: "Client certificate that the client should use for talking to the OVN database (default when ssl address is used: /etc/openvswitch/ovnnb-cert.pem). " +
 			"Default value for this setting is empty which defaults to use local unix socket.",
 		Destination: &cliConfig.OvnNorth.Cert,
 	},
-	cli.StringFlag{
+	&cli.StringFlag{
 		Name: "nb-client-cacert",
 		Usage: "CA certificate that the client should use for talking to the OVN database (default when ssl address is used: /etc/openvswitch/ovnnb-ca.cert)." +
 			"Default value for this setting is empty which defaults to use local unix socket.",
@@ -637,26 +646,26 @@ var OvnNBFlags = []cli.Flag{
 
 //OvnSBFlags capture OVN southbound database options
 var OvnSBFlags = []cli.Flag{
-	cli.StringFlag{
+	&cli.StringFlag{
 		Name: "sb-address",
 		Usage: "IP address and port of the OVN southbound API " +
 			"(eg, ssl:1.2.3.4:6642,ssl:1.2.3.5:6642).  " +
 			"Leave empty to use a local unix socket.",
 		Destination: &cliConfig.OvnSouth.Address,
 	},
-	cli.StringFlag{
+	&cli.StringFlag{
 		Name: "sb-client-privkey",
 		Usage: "Private key that the client should use for talking to the OVN database (default when ssl address is used: /etc/openvswitch/ovnsb-privkey.pem)." +
 			"Default value for this setting is empty which defaults to use local unix socket.",
 		Destination: &cliConfig.OvnSouth.PrivKey,
 	},
-	cli.StringFlag{
+	&cli.StringFlag{
 		Name: "sb-client-cert",
 		Usage: "Client certificate that the client should use for talking to the OVN database(default when ssl address is used: /etc/openvswitch/ovnsb-cert.pem).  " +
 			"Default value for this setting is empty which defaults to use local unix socket.",
 		Destination: &cliConfig.OvnSouth.Cert,
 	},
-	cli.StringFlag{
+	&cli.StringFlag{
 		Name: "sb-client-cacert",
 		Usage: "CA certificate that the client should use for talking to the OVN database (default when ssl address is used /etc/openvswitch/ovnsb-ca.cert). " +
 			"Default value for this setting is empty which defaults to use local unix socket.",
@@ -666,12 +675,12 @@ var OvnSBFlags = []cli.Flag{
 
 //OVNGatewayFlags capture L3 Gateway related flags
 var OVNGatewayFlags = []cli.Flag{
-	cli.StringFlag{
+	&cli.StringFlag{
 		Name: "gateway-mode",
 		Usage: "Sets the cluster gateway mode. One of \"shared\", " +
 			"or \"local\". If not given, gateway functionality is disabled.",
 	},
-	cli.StringFlag{
+	&cli.StringFlag{
 		Name: "gateway-interface",
 		Usage: "The interface on nodes that will be the gateway interface. " +
 			"If none specified, then the node's interface on which the " +
@@ -679,7 +688,7 @@ var OVNGatewayFlags = []cli.Flag{
 			"interface. Only useful with \"init-gateways\"",
 		Destination: &cliConfig.Gateway.Interface,
 	},
-	cli.StringFlag{
+	&cli.StringFlag{
 		Name: "gateway-nexthop",
 		Usage: "The external default gateway which is used as a next hop by " +
 			"OVN gateway.  This is many times just the default gateway " +
@@ -688,25 +697,25 @@ var OVNGatewayFlags = []cli.Flag{
 			"\"init-gateways\"",
 		Destination: &cliConfig.Gateway.NextHop,
 	},
-	cli.UintFlag{
+	&cli.UintFlag{
 		Name: "gateway-vlanid",
 		Usage: "The VLAN on which the external network is available. " +
 			"Valid only for Shared Gateway interface mode.",
 		Destination: &cliConfig.Gateway.VLANID,
 	},
-	cli.BoolFlag{
+	&cli.BoolFlag{
 		Name:        "nodeport",
 		Usage:       "Setup nodeport based ingress on gateways.",
 		Destination: &cliConfig.Gateway.NodeportEnable,
 	},
 
 	// Deprecated CLI options
-	cli.BoolFlag{
+	&cli.BoolFlag{
 		Name:        "init-gateways",
 		Usage:       "DEPRECATED; use --gateway-mode instead",
 		Destination: &initGateways,
 	},
-	cli.BoolFlag{
+	&cli.BoolFlag{
 		Name:        "gateway-local",
 		Usage:       "DEPRECATED; use --gateway-mode instead",
 		Destination: &gatewayLocal,
@@ -715,19 +724,19 @@ var OVNGatewayFlags = []cli.Flag{
 
 // MasterHAFlags capture OVN northbound database options
 var MasterHAFlags = []cli.Flag{
-	cli.IntFlag{
+	&cli.IntFlag{
 		Name:        "ha-election-lease-duration",
 		Usage:       "Leader election lease duration (in secs) (default: 60)",
 		Destination: &cliConfig.MasterHA.ElectionLeaseDuration,
 		Value:       MasterHA.ElectionLeaseDuration,
 	},
-	cli.IntFlag{
+	&cli.IntFlag{
 		Name:        "ha-election-renew-deadline",
 		Usage:       "Leader election renew deadline (in secs) (default: 35)",
 		Destination: &cliConfig.MasterHA.ElectionRenewDeadline,
 		Value:       MasterHA.ElectionRenewDeadline,
 	},
-	cli.IntFlag{
+	&cli.IntFlag{
 		Name:        "ha-election-retry-period",
 		Usage:       "Leader election retry period (in secs) (default: 10)",
 		Destination: &cliConfig.MasterHA.ElectionRetryPeriod,
@@ -737,12 +746,12 @@ var MasterHAFlags = []cli.Flag{
 
 // HybridOverlayFlats capture hybrid overlay feature options
 var HybridOverlayFlags = []cli.Flag{
-	cli.BoolFlag{
+	&cli.BoolFlag{
 		Name:        "enable-hybrid-overlay",
 		Usage:       "Enables hybrid overlay functionality",
 		Destination: &cliConfig.HybridOverlay.Enabled,
 	},
-	cli.StringFlag{
+	&cli.StringFlag{
 		Name:  "hybrid-overlay-cluster-subnets",
 		Value: HybridOverlay.RawClusterSubnets,
 		Usage: "A comma separated set of IP subnets and the associated" +

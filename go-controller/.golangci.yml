@@ -1,0 +1,22 @@
+run:
+  skip-dirs:
+    - vendor
+
+  skip-files:
+    - ".*\\_test.go$"
+
+linters:
+  disable-all: true
+  enable:
+    - gofmt
+    - deadcode
+    - errcheck
+    - gofmt
+    - gosimple
+    - govet
+    - ineffassign
+    - staticcheck
+    - structcheck
+    - typecheck
+    - unused
+    - varcheck

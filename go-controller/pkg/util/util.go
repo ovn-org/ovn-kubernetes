@@ -9,14 +9,19 @@ import (
 	houtil "github.com/ovn-org/ovn-kubernetes/go-controller/hybrid-overlay/pkg/util"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
 
-	"github.com/urfave/cli"
+	"github.com/urfave/cli/v2"
 
 	"k8s.io/klog"
+	utilnet "k8s.io/utils/net"
 )
 
-// K8sMgmtIntfName name to be used as an OVS internal port on the node
 const (
+	// K8sMgmtIntfName name to be used as an OVS internal port on the node
 	K8sMgmtIntfName = "ovn-k8s-mp0"
+
+	// PhysicalNetworkName is the name that maps to an OVS bridge that provides
+	// access to physical/external network
+	PhysicalNetworkName = "physnet"
 )
 
 // StringArg gets the named command-line argument or returns an error if it is empty
@@ -60,7 +65,7 @@ var updateNodeSwitchLock sync.Mutex
 // spam about duplicate IP addresses.
 // See https://github.com/ovn-org/ovn-kubernetes/pull/779
 func UpdateNodeSwitchExcludeIPs(nodeName string, subnet *net.IPNet) error {
-	if config.IPv6Mode {
+	if utilnet.IsIPv6CIDR(subnet) {
 		// We don't exclude any IPs in IPv6
 		return nil
 	}

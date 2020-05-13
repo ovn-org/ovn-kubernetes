@@ -12,7 +12,6 @@ import (
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
 
 	kapi "k8s.io/api/core/v1"
-	"k8s.io/client-go/kubernetes"
 	"k8s.io/klog"
 
 	"github.com/Microsoft/hcsshim/hcn"
@@ -25,7 +24,7 @@ const (
 
 // NodeController is the node hybrid overlay controller
 type NodeController struct {
-	kube            *kube.Kube
+	kube            kube.Interface
 	machineID       string
 	networkID       string
 	localNodeCIDR   *net.IPNet
@@ -35,7 +34,7 @@ type NodeController struct {
 
 // NewNode returns a node handler that listens for node events
 // so that Add/Update/Delete events are appropriately handled.
-func NewNode(clientset kubernetes.Interface, nodeName string) (*NodeController, error) {
+func NewNode(kube kube.Interface, nodeName string) (*NodeController, error) {
 	supportedFeatures := hcn.GetSupportedFeatures()
 	if !supportedFeatures.HostRoute {
 		return nil, fmt.Errorf("This version of windows does not support HostRoute " +
@@ -45,7 +44,6 @@ func NewNode(clientset kubernetes.Interface, nodeName string) (*NodeController, 
 			"Windows Server 2019 version 1903.")
 	}
 
-	kube := &kube.Kube{KClient: clientset}
 	node, err := kube.GetNode(nodeName)
 	if err != nil {
 		return nil, err

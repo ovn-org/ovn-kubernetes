@@ -9,7 +9,11 @@ import (
 type NetConf struct {
 	types.NetConf
 	// PciAddrs in case of using sriov
-	DeviceID string `json:"deviceID"`
+	DeviceID string `json:"deviceID,omitempty"`
+	// LogFile to log all the messages from cni shim binary to
+	LogFile string `json:"logFile,omitempty"`
+	// Level is the logging verbosity level
+	LogLevel string `json:"logLevel,omitempty"`
 }
 
 // NetworkSelectionElement represents one element of the JSON format

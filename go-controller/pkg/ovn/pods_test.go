@@ -2,8 +2,9 @@ package ovn
 
 import (
 	"fmt"
+	"net"
 
-	"github.com/urfave/cli"
+	"github.com/urfave/cli/v2"
 
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
 	ovntest "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/testing"
@@ -85,7 +86,7 @@ func (p pod) populateLogicalSwitchCache(fakeOvn *FakeOVN) {
 	Expect(p.nodeName).NotTo(Equal(""))
 	fakeOvn.controller.lsMutex.Lock()
 	defer fakeOvn.controller.lsMutex.Unlock()
-	fakeOvn.controller.logicalSwitchCache[p.nodeName] = ovntest.MustParseIPNet(p.nodeSubnet)
+	fakeOvn.controller.logicalSwitchCache[p.nodeName] = []*net.IPNet{ovntest.MustParseIPNet(p.nodeSubnet)}
 }
 
 func (p pod) addCmds(fexec *ovntest.FakeExec, fail bool) {
@@ -148,7 +149,7 @@ func (p pod) delCmds(fexec *ovntest.FakeExec) {
 
 func (p pod) delFromNamespaceCmds(fexec *ovntest.FakeExec, pod pod, isMulticastEnabled bool) {
 	fexec.AddFakeCmdsNoOutputNoError([]string{
-		fmt.Sprintf("ovn-nbctl --timeout=15 remove address_set %s addresses %s", hashedAddressSet(pod.namespace), pod.podIP),
+		fmt.Sprintf(`ovn-nbctl --timeout=15 remove address_set %s addresses "%s"`, hashedAddressSet(pod.namespace), pod.podIP),
 	})
 	if isMulticastEnabled {
 		fexec.AddFakeCmdsNoOutputNoError([]string{

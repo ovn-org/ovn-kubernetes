@@ -7,7 +7,7 @@ import (
 
 	"github.com/ovn-org/ovn-kubernetes/go-controller/cmd/ovn-kube-util/app"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
-	"github.com/urfave/cli"
+	"github.com/urfave/cli/v2"
 	"k8s.io/klog"
 )
 
@@ -17,18 +17,18 @@ func main() {
 	c.Usage = "Utils for kubernetes ovn"
 	c.Version = config.Version
 	c.Flags = []cli.Flag{
-		cli.IntFlag{
+		&cli.IntFlag{
 			Name: "loglevel",
 			Usage: "klog verbosity level (default: 4). Info, warn, fatal, error are always printed. " +
 				"For debug messages, use 5. ",
 			Value: 0,
 		},
 	}
-	c.Commands = []cli.Command{
-		app.NicsToBridgeCommand,
-		app.BridgesToNicCommand,
-		app.ReadinessProbeCommand,
-		app.OvnDBExporterCommand,
+	c.Commands = []*cli.Command{
+		&app.NicsToBridgeCommand,
+		&app.BridgesToNicCommand,
+		&app.ReadinessProbeCommand,
+		&app.OvnDBExporterCommand,
 	}
 
 	c.Before = func(ctx *cli.Context) error {

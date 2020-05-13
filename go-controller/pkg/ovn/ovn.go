@@ -88,7 +88,7 @@ type Controller struct {
 	defGatewayRouter    string
 
 	// A cache of all logical switches seen by the watcher and their subnets
-	logicalSwitchCache map[string]*net.IPNet
+	logicalSwitchCache map[string][]*net.IPNet
 
 	// A cache of all logical ports known to the controller
 	logicalPortCache *portCache
@@ -156,7 +156,7 @@ func NewOvnController(kubeClient kubernetes.Interface, wf *factory.WatchFactory,
 		watchFactory:             wf,
 		stopChan:                 stopChan,
 		masterSubnetAllocator:    allocator.NewSubnetAllocator(),
-		logicalSwitchCache:       make(map[string]*net.IPNet),
+		logicalSwitchCache:       make(map[string][]*net.IPNet),
 		joinSubnetAllocator:      allocator.NewSubnetAllocator(),
 		logicalPortCache:         newPortCache(stopChan),
 		namespaces:               make(map[string]*namespaceInfo),
@@ -532,21 +532,21 @@ func (oc *Controller) WatchNamespaces() error {
 	return err
 }
 
-func (oc *Controller) syncNodeGateway(node *kapi.Node, subnet *net.IPNet) error {
+func (oc *Controller) syncNodeGateway(node *kapi.Node, hostSubnets []*net.IPNet) error {
 	l3GatewayConfig, err := util.ParseNodeL3GatewayAnnotation(node)
 	if err != nil {
 		return err
 	}
 
-	if subnet == nil {
-		subnet, _ = util.ParseNodeHostSubnetAnnotation(node)
+	if hostSubnets == nil {
+		hostSubnets, _ = util.ParseNodeHostSubnetAnnotation(node)
 	}
 	if l3GatewayConfig.Mode == config.GatewayModeDisabled {
-		if err := util.GatewayCleanup(node.Name, subnet); err != nil {
+		if err := gatewayCleanup(node.Name, hostSubnets); err != nil {
 			return fmt.Errorf("error cleaning up gateway for node %s: %v", node.Name, err)
 		}
-	} else if subnet != nil {
-		if err := oc.syncGatewayLogicalNetwork(node, l3GatewayConfig, subnet); err != nil {
+	} else if hostSubnets != nil {
+		if err := oc.syncGatewayLogicalNetwork(node, l3GatewayConfig, hostSubnets); err != nil {
 			return fmt.Errorf("error creating gateway for node %s: %v", node.Name, err)
 		}
 	}
@@ -570,20 +570,20 @@ func (oc *Controller) WatchNodes() error {
 			}
 
 			klog.V(5).Infof("Added event for Node %q", node.Name)
-			hostSubnet, err := oc.addNode(node)
+			hostSubnets, err := oc.addNode(node)
 			if err != nil {
 				klog.Errorf("error creating subnet for node %s: %v", node.Name, err)
 				return
 			}
 
-			err = oc.syncNodeManagementPort(node, hostSubnet)
+			err = oc.syncNodeManagementPort(node, hostSubnets)
 			if err != nil {
-				klog.Errorf("error creating management port for node %s: %v", node.Name, err)
+				klog.Warningf("error creating management port for node %s: %v", node.Name, err)
 				mgmtPortFailed.Store(node.Name, true)
 			}
 
-			if err := oc.syncNodeGateway(node, hostSubnet); err != nil {
-				klog.Errorf(err.Error())
+			if err := oc.syncNodeGateway(node, hostSubnets); err != nil {
+				klog.Warningf(err.Error())
 				gatewaysFailed.Store(node.Name, true)
 			}
 		},
@@ -631,9 +631,9 @@ func (oc *Controller) WatchNodes() error {
 			klog.V(5).Infof("Delete event for Node %q. Removing the node from "+
 				"various caches", node.Name)
 
-			nodeSubnet, _ := util.ParseNodeHostSubnetAnnotation(node)
-			joinSubnet, _ := util.ParseNodeJoinSubnetAnnotation(node)
-			err := oc.deleteNode(node.Name, nodeSubnet, joinSubnet)
+			nodeSubnets, _ := util.ParseNodeHostSubnetAnnotation(node)
+			joinSubnets, _ := util.ParseNodeJoinSubnetAnnotation(node)
+			err := oc.deleteNode(node.Name, nodeSubnets, joinSubnets)
 			if err != nil {
 				klog.Error(err)
 			}
@@ -643,7 +643,7 @@ func (oc *Controller) WatchNodes() error {
 			mgmtPortFailed.Delete(node.Name)
 			gatewaysFailed.Delete(node.Name)
 			// If this node was serving the external IP load balancer for services, migrate to a new node
-			if oc.defGatewayRouter == util.GWRouterPrefix+node.Name {
+			if oc.defGatewayRouter == gwRouterPrefix+node.Name {
 				delete(oc.loadbalancerGWCache, kapi.ProtocolTCP)
 				delete(oc.loadbalancerGWCache, kapi.ProtocolUDP)
 				delete(oc.loadbalancerGWCache, kapi.ProtocolSCTP)

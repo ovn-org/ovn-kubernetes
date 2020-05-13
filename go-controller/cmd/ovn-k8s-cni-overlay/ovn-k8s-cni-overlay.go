@@ -8,7 +8,7 @@ import (
 	"github.com/containernetworking/cni/pkg/version"
 	bv "github.com/containernetworking/plugins/pkg/utils/buildversion"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/cni"
-	"github.com/urfave/cli"
+	"github.com/urfave/cli/v2"
 )
 
 func main() {

@@ -5,8 +5,7 @@ import (
 	"fmt"
 	"strings"
 
-	. "github.com/onsi/ginkgo"
-	. "github.com/onsi/gomega"
+	"k8s.io/klog"
 	kexec "k8s.io/utils/exec"
 	fakeexec "k8s.io/utils/exec/testing"
 )
@@ -134,8 +133,6 @@ func getExecutedCommandline(cmd string, args ...string) string {
 }
 
 func (f *FakeExec) Command(cmd string, args ...string) kexec.Cmd {
-	defer GinkgoRecover()
-
 	executed := getExecutedCommandline(cmd, args...)
 	f.executedCommands = append(f.executedCommands, executed)
 
@@ -150,14 +147,18 @@ func (f *FakeExec) Command(cmd string, args ...string) kexec.Cmd {
 			if !f.looseCompare {
 				// Fail if the first unused expected command doesn't
 				// match the one that is being executed
-				Expect(executed).To(Equal(candidate.Cmd), f.ErrorDesc)
+				if executed != candidate.Cmd {
+					klog.Fatal(f.ErrorDesc())
+				}
 			}
 		}
 	}
 	// Fail if the command being executed could not be found in the
 	// expected command list, or if the expected command list has been
 	// completely used and we are executing more commands
-	Expect(expected).NotTo(BeNil(), "Unexpected command: %s\n\n%s", executed, f.internalErrorDesc())
+	if expected == nil {
+		klog.Fatalf("Unexpected command: %s\n\n%s", executed, f.internalErrorDesc())
+	}
 
 	return &fakeexec.FakeCmd{
 		Argv: strings.Split(expected.Cmd, " ")[1:],
@@ -170,7 +171,9 @@ func (f *FakeExec) Command(cmd string, args ...string) kexec.Cmd {
 			func() ([]byte, []byte, error) {
 				if expected.Action != nil {
 					err := expected.Action()
-					Expect(err).NotTo(HaveOccurred())
+					if err != nil {
+						klog.Fatalf("Unexpected error running command %q: %v", expected.Cmd, err)
+					}
 				}
 				return []byte(expected.Output), []byte(expected.Stderr), expected.Err
 			},
@@ -181,8 +184,6 @@ func (f *FakeExec) Command(cmd string, args ...string) kexec.Cmd {
 // AddFakeCmd takes the ExpectedCmd and appends its runner function to
 // a fake command action list of the FakeExec
 func (f *FakeExec) AddFakeCmd(expected *ExpectedCmd) {
-	parts := strings.Split(expected.Cmd, " ")
-	Expect(len(parts)).To(BeNumerically(">=", 2))
 	expected.Cmd = fakeBinPrefix + expected.Cmd
 	f.expectedCommands = append(f.expectedCommands, expected)
 }

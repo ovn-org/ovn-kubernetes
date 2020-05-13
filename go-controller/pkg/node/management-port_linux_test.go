@@ -14,7 +14,7 @@ import (
 	"github.com/containernetworking/plugins/pkg/ns"
 	"github.com/containernetworking/plugins/pkg/testutils"
 	"github.com/coreos/go-iptables/iptables"
-	"github.com/urfave/cli"
+	"github.com/urfave/cli/v2"
 	"github.com/vishvananda/netlink"
 
 	v1 "k8s.io/api/core/v1"
@@ -69,7 +69,6 @@ func testManagementPort(ctx *cli.Context, fexec *ovntest.FakeExec, testNS ns.Net
 
 	// generic setup
 	fexec.AddFakeCmdsNoOutputNoError([]string{
-		"ovs-vsctl --timeout=15 -- --may-exist add-br br-int",
 		"ovs-vsctl --timeout=15 -- --if-exists del-port br-int " + legacyMgtPort + " -- --may-exist add-port br-int " + mgtPort + " -- set interface " + mgtPort + " type=internal mtu_request=" + mtu + " external-ids:iface-id=" + legacyMgtPort,
 	})
 	fexec.AddFakeCmd(&ovntest.ExpectedCmd{

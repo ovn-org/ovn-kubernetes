@@ -62,6 +62,7 @@ fi
 # OVN_NB_RAFT_ELECTION_TIMER - ovn north db election timer in ms (default 1000)
 # OVN_SB_RAFT_ELECTION_TIMER - ovn south db election timer in ms (default 1000)
 # OVN_SSL_ENABLE - use SSL transport to NB/SB db and northd (default: no)
+# OVN_REMOTE_PROBE_INTERVAL - ovn remote probe interval in ms (default 100000)
 
 # The argument to the command is the operation to be performed
 # ovn-master ovn-controller ovn-node display display_env ovn_debug
@@ -162,6 +163,8 @@ ovn_sb_raft_election_timer=${OVN_SB_RAFT_ELECTION_TIMER:-1000}
 
 ovn_hybrid_overlay_enable=${OVN_HYBRID_OVERLAY_ENABLE:-}
 ovn_hybrid_overlay_net_cidr=${OVN_HYBRID_OVERLAY_NET_CIDR:-}
+#OVN_REMOTE_PROBE_INTERVAL - ovn remote probe interval in ms (default 100000)
+ovn_remote_probe_interval=${OVN_REMOTE_PROBE_INTERVAL:-100000}
 
 # Determine the ovn rundir.
 if [[ -f /usr/bin/ovn-appctl ]]; then
@@ -257,7 +260,7 @@ ready_to_start_node() {
   # cannot use ovsdb-client in the case of raft, since it will succeed even if one of the
   # instance of DB is up and running. HOwever, ovn-nbctl always connects to the leader in the clustered
   # database, so use it.
-  ovn-nbctl --db=${ovn_nbdb_conn} ${ovndb_ctl_ssl_opts} list NB_Global >/dev/null 2>&1
+  ovn-nbctl --db=${ovn_nbdb_conn} ${ovndb_ctl_ssl_opts} list NB_Global >/dev/null
   if [[ $? != 0 ]]; then
     return 1
   fi
@@ -376,8 +379,11 @@ check_health() {
   "ovnnb_db" | "ovnsb_db")
     ctl_file=${OVN_RUNDIR}/${1}.ctl
     ;;
-  "ovn-northd" | "ovn-controller" | "ovsdb-server" | "ovs-vswitchd" | "ovn-nbctl")
+  "ovn-northd" | "ovn-controller" | "ovn-nbctl")
     ctl_file=${OVN_RUNDIR}/${1}.${2}.ctl
+    ;;
+  "ovsdb-server" | "ovs-vswitchd")
+    ctl_file=${OVS_RUNDIR}/${1}.${2}.ctl
     ;;
   *)
     echo "Unknown service ${1} specified. Exiting.. "
@@ -394,7 +400,7 @@ check_health() {
     fi
   else
     # use ovs-appctl to do the check
-    ovs-appctl -t ${ctl_file} version &>/dev/null
+    ovs-appctl -t ${ctl_file} version >/dev/null
     if [[ $? == 0 ]]; then
       return 0
     fi
@@ -512,7 +518,7 @@ ovs-server() {
   trap 'kill $(jobs -p); exit 0' TERM
   retries=0
   while true; do
-    if /usr/share/openvswitch/scripts/ovs-ctl status &>/dev/null; then
+    if /usr/share/openvswitch/scripts/ovs-ctl status >/dev/null; then
       echo "warning: Another process is currently managing OVS, waiting 10s ..." 2>&1
       sleep 10 &
       wait
@@ -560,7 +566,7 @@ ovs-server() {
   ovs_tail_pid=$!
   sleep 10
   while true; do
-    if ! /usr/share/openvswitch/scripts/ovs-ctl status &>/dev/null; then
+    if ! /usr/share/openvswitch/scripts/ovs-ctl status >/dev/null; then
       echo "OVS seems to have crashed, exiting"
       kill ${ovs_tail_pid}
       quit
@@ -615,7 +621,7 @@ EOF
 
 # v3 - run nb_ovsdb in a separate container
 nb-ovsdb() {
-  trap 'kill $(jobs -p); exit 0' TERM
+  trap 'ovsdb_cleanup nb' TERM
   check_ovn_daemonset_version "3"
   rm -f ${OVN_RUNDIR}/ovnnb_db.pid
 
@@ -623,7 +629,6 @@ nb-ovsdb() {
     echo "The IP address of the host $(hostname) could not be determined. Exiting..."
     exit 1
   fi
-  iptables-rules ${ovn_nb_port}
 
   echo "=============== run nb_ovsdb ========== MASTER ONLY"
   run_as_ovs_user_if_needed \
@@ -650,7 +655,7 @@ nb-ovsdb() {
 
 # v3 - run sb_ovsdb in a separate container
 sb-ovsdb() {
-  trap 'kill $(jobs -p); exit 0' TERM
+  trap 'ovsdb_cleanup sb' TERM
   check_ovn_daemonset_version "3"
   rm -f ${OVN_RUNDIR}/ovnsb_db.pid
 
@@ -658,7 +663,6 @@ sb-ovsdb() {
     echo "The IP address of the host $(hostname) could not be determined. Exiting..."
     exit 1
   fi
-  iptables-rules ${ovn_sb_port}
 
   echo "=============== run sb_ovsdb ========== MASTER ONLY"
   run_as_ovs_user_if_needed \
@@ -725,15 +729,6 @@ run-ovn-northd() {
 
   process_healthy ovn-northd ${ovn_tail_pid}
   exit 8
-}
-
-# make sure the specified dport is open
-iptables-rules() {
-  dport=$1
-  iptables -C INPUT -p tcp -m tcp --dport $dport -m conntrack --ctstate NEW -j ACCEPT
-  if [[ $? != 0 ]]; then
-    iptables -I INPUT -p tcp -m tcp --dport $dport -m conntrack --ctstate NEW -j ACCEPT
-  fi
 }
 
 # v3 - run ovnkube --master
@@ -857,21 +852,18 @@ ovn-node() {
   echo "=============== ovn-node - (ovn-node  wait for ovn-controller.pid)"
   wait_for_event process_ready ovn-controller
 
-  # Ensure GENEVE's UDP port isn't firewalled. We support specifying non-default encap port.
-  /usr/share/openvswitch/scripts/ovs-ctl --protocol=udp --dport=${ovn_encap_port} enable-protocol
-
   hybrid_overlay_flags=
   if [[ -n "${ovn_hybrid_overlay_enable}" ]]; then
     hybrid_overlay_flags="--enable-hybrid-overlay"
-    # Ensure VXLAN's UDP port isn't firewalled. Non-default VXLAN ports for
-    # hybrid overlay are not currently supported.
-    /usr/share/openvswitch/scripts/ovs-ctl --protocol=udp --dport=4789 enable-protocol
   fi
 
   OVN_ENCAP_IP=""
-  ovn_encap_ip=$(ovs-vsctl --if-exists get Open_vSwitch . external_ids:ovn-encap-ip | tr -d '\"')
-  if [[ $? == 0 && "${ovn_encap_ip}" != "" ]]; then
-    OVN_ENCAP_IP=$(echo --encap-ip=${ovn_encap_ip})
+  ovn_encap_ip=$(ovs-vsctl --if-exists get Open_vSwitch . external_ids:ovn-encap-ip)
+  if [[ $? == 0 ]]; then
+    ovn_encap_ip=$(echo ${ovn_encap_ip} | tr -d '\"')
+    if [[ "${ovn_encap_ip}" != "" ]]; then
+      OVN_ENCAP_IP="--encap-ip=${ovn_encap_ip}"
+    fi
   fi
 
   local ovn_node_ssl_opts=""
@@ -899,6 +891,7 @@ ovn-node() {
     --pidfile ${OVN_RUNDIR}/ovnkube.pid \
     --logfile /var/log/ovn-kubernetes/ovnkube.log \
     ${ovn_node_ssl_opts} \
+    --inactivity-probe=${ovn_remote_probe_interval} \
     --metrics-bind-address "0.0.0.0:9410" &
 
   wait_for_event attempts=3 process_ready ovnkube
