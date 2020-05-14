@@ -26,7 +26,8 @@ run_kubectl() {
 usage()
 {
     echo "usage: kind.sh [[[-cf|--config-file <file>] [-kt|keep-taint] [-ha|--ha-enabled]"
-    echo "                 [-ii|--install-ingress] [-n4|--no-ipv4] [-i6|--ipv6]] | [-h]]"
+    echo "                 [-ii|--install-ingress] [-n4|--no-ipv4] [-i6|--ipv6]"
+    echo "                 [-wk|--num-workers <num>]] | [-h]]"
     echo ""
     echo "-cf | --config-file          Name of the KIND J2 configuration file."
     echo "                             DEFAULT: ./kind.yaml.j2"
@@ -37,6 +38,8 @@ usage()
     echo "                             DEFAULT: Don't install ingress components."
     echo "-n4 | --no-ipv4              Disable IPv4. DEFAULT: IPv4 Enabled."
     echo "-i6 | --ipv6                 Enable IPv6. DEFAULT: IPv6 Disabled."
+    echo "-wk | --num-workers          Number of worker nodes. DEFAULT: HA - 2 worker"
+    echo "                             nodes and no HA - 0 worker nodes."
     echo ""
 } 
 
@@ -62,6 +65,14 @@ parse_args()
                                        ;;
             -i6 | --ipv6 )             KIND_IPV6_SUPPORT=true
                                        ;;
+            -wk | --num-workers )      shift
+                                       if ! [[ "$1" =~ ^[0-9]+$ ]]; then
+                                          echo "Invalid num-workers: $1"
+                                          usage
+                                          exit 1
+                                       fi
+                                       KIND_NUM_WORKER=$1
+                                       ;;
             -h | --help )              usage
                                        exit
                                        ;;
@@ -82,6 +93,7 @@ print_params()
      echo "KIND_REMOVE_TAINT = $KIND_REMOVE_TAINT"
      echo "KIND_IPV4_SUPPORT = $KIND_IPV4_SUPPORT"
      echo "KIND_IPV6_SUPPORT = $KIND_IPV6_SUPPORT"
+     echo "KIND_NUM_WORKER = $KIND_NUM_WORKER"
      echo ""
 }
 
@@ -105,6 +117,14 @@ NET_CIDR_IPV4=${NET_CIDR_IPV4:-10.244.0.0/16}
 SVC_CIDR_IPV4=${SVC_CIDR_IPV4:-10.96.0.0/12}
 NET_CIDR_IPV6=${NET_CIDR_IPV6:-fd00:10:244::/48}
 SVC_CIDR_IPV6=${SVC_CIDR_IPV6:-fd00:10:96::/64}
+
+KIND_NUM_MASTER=1
+if [ "$KIND_HA" == true ]; then
+  KIND_NUM_MASTER=3
+  KIND_NUM_WORKER=${KIND_NUM_WORKER:-0}
+else
+  KIND_NUM_WORKER=${KIND_NUM_WORKER:-2}
+fi
 
 print_params
 
@@ -172,9 +192,9 @@ KIND_CONFIG_LCL=./kind.yaml
 ovn_apiServerAddress=${API_IP} \
   ovn_ip_family=${IP_FAMILY} \
   ovn_ha=${KIND_HA} \
+  ovn_num_master=${KIND_NUM_MASTER} \
+  ovn_num_worker=${KIND_NUM_WORKER} \
   j2 ${KIND_CONFIG} -o ${KIND_CONFIG_LCL}
-
-MASTER_COUNT=`grep -c "^\s-\srole\s*:\s*control-plane" ${KIND_CONFIG_LCL}`
 
 # Create KIND cluster. For additional debug, add '--verbosity <int>': 0 None .. 3 Debug
 kind create cluster --name ${KIND_CLUSTER_NAME} --kubeconfig ${HOME}/admin.conf --image kindest/node:${K8S_VERSION} --config=${KIND_CONFIG_LCL}
@@ -202,7 +222,7 @@ pushd ../dist/images
 sudo cp -f ../../go-controller/_output/go/bin/* .
 echo "ref: $(git rev-parse  --symbolic-full-name HEAD)  commit: $(git rev-parse  HEAD)" > git_info
 docker build -t ovn-daemonset-f:dev -f Dockerfile.fedora .
-./daemonset.sh --image=docker.io/library/ovn-daemonset-f:dev --net-cidr=${NET_CIDR} --svc-cidr=${SVC_CIDR} --gateway-mode="local" --k8s-apiserver=https://[${API_IP}]:11337 --ovn-master-count=${MASTER_COUNT} --kind --master-loglevel=5
+./daemonset.sh --image=docker.io/library/ovn-daemonset-f:dev --net-cidr=${NET_CIDR} --svc-cidr=${SVC_CIDR} --gateway-mode="local" --k8s-apiserver=https://[${API_IP}]:11337 --ovn-master-count=${KIND_NUM_MASTER} --kind --master-loglevel=5
 popd
 kind load docker-image ovn-daemonset-f:dev --name ${KIND_CLUSTER_NAME}
 pushd ../dist/yaml
