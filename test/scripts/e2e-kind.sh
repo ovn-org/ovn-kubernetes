@@ -70,5 +70,7 @@ case "$SHARD" in
 	;;
 esac
 
+echo Running e2e.test version: $(e2e.test -version)
+
 e2e.test ${GINKGO_ARGS}
 
