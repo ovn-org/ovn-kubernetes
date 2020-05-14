@@ -1562,3 +1562,220 @@ func TestRunOVNNorthAppCtl(t *testing.T) {
 	}
 }
 */
+
+func TestAddNormalActionOFFlow(t *testing.T) {
+	mockKexecIface := new(mocks.Interface)
+	mockCmd := new(mocks.Cmd)
+	// note runner is defined in ovs.go file
+	runner = &ExecHelper{exec: mockKexecIface}
+
+	tests := []struct {
+		desc             string
+		expectedErr      error
+		cmdPath          string
+		cmdArg           string
+		onRetArgsIface   *onCallReturnArgs
+		onRetArgsCmdList []onCallReturnArgs
+	}{
+		{
+			desc:           "negative: run `ovs-ofctl` command",
+			expectedErr:    fmt.Errorf("executable file not found in $PATH"),
+			cmdPath:        "ips",
+			cmdArg:         "addr",
+			onRetArgsIface: &onCallReturnArgs{"Command", []string{"string", "string", "string", "string", "string", "string"}, []interface{}{mockCmd}},
+			onRetArgsCmdList: []onCallReturnArgs{
+				{"Run", []string{}, []interface{}{fmt.Errorf("executable file not found in $PATH")}},
+				{"SetStdout", []string{"*bytes.Buffer"}, nil},
+				{"SetStderr", []string{"*bytes.Buffer"}, nil},
+				{"SetStdin", []string{"*bytes.Buffer"}, nil},
+			},
+		},
+		{
+			desc:           "positive: run `ovs-ofctl` command",
+			expectedErr:    nil,
+			cmdPath:        "ip",
+			cmdArg:         "a",
+			onRetArgsIface: &onCallReturnArgs{"Command", []string{"string", "string", "string", "string", "string", "string"}, []interface{}{mockCmd}},
+			onRetArgsCmdList: []onCallReturnArgs{
+				{"Run", []string{}, []interface{}{nil}},
+				{"SetStdout", []string{"*bytes.Buffer"}, nil},
+				{"SetStderr", []string{"*bytes.Buffer"}, nil},
+				{"SetStdin", []string{"*bytes.Buffer"}, nil},
+			},
+		},
+	}
+
+	for i, tc := range tests {
+		t.Run(fmt.Sprintf("%d:%s", i, tc.desc), func(t *testing.T) {
+
+			for _, item := range tc.onRetArgsCmdList {
+				cmdCall := mockCmd.On(item.onCallMethodName)
+				for _, arg := range item.onCallMethodArgType {
+					cmdCall.Arguments = append(cmdCall.Arguments, mock.AnythingOfType(arg))
+				}
+
+				for _, e := range item.retArgList {
+					cmdCall.ReturnArguments = append(cmdCall.ReturnArguments, e)
+				}
+				cmdCall.Once()
+			}
+
+			ifaceCall := mockKexecIface.On(tc.onRetArgsIface.onCallMethodName, mock.Anything)
+			for _, arg := range tc.onRetArgsIface.onCallMethodArgType {
+				ifaceCall.Arguments = append(ifaceCall.Arguments, mock.AnythingOfType(arg))
+			}
+			for _, item := range tc.onRetArgsIface.retArgList {
+				ifaceCall.ReturnArguments = append(ifaceCall.ReturnArguments, item)
+			}
+			ifaceCall.Once()
+
+			_, _, e := AddNormalActionOFFlow("somename")
+
+			assert.Equal(t, e, tc.expectedErr)
+			mockCmd.AssertExpectations(t)
+			mockKexecIface.AssertExpectations(t)
+		})
+	}
+}
+
+func TestGetOVNDBServerInfo(t *testing.T) {
+	mockKexecIface := new(mocks.Interface)
+	mockCmd := new(mocks.Cmd)
+	// note runner is defined in ovs.go file
+	runner = &ExecHelper{exec: mockKexecIface}
+
+	tests := []struct {
+		desc             string
+		expectedErr      bool
+		onRetArgsIface   *onCallReturnArgs
+		onRetArgsCmdList []onCallReturnArgs
+	}{
+		{
+			desc:           "positive: run `ovsdb-client` command",
+			expectedErr:    false,
+			onRetArgsIface: &onCallReturnArgs{"Command", []string{"string", "string", "string", "string", "string"}, []interface{}{mockCmd}},
+			onRetArgsCmdList: []onCallReturnArgs{
+				{"Run", []string{}, []interface{}{nil}},
+				{"SetStdout", []string{"*bytes.Buffer"}, nil},
+				{"SetStderr", []string{"*bytes.Buffer"}, nil},
+				{"SetEnv", []string{"[]string"}, nil},
+			},
+		},
+		{
+			desc:           "negative: run `ovsdb-client` command",
+			expectedErr:    true,
+			onRetArgsIface: &onCallReturnArgs{"Command", []string{"string", "string", "string", "string", "string"}, []interface{}{mockCmd}},
+			onRetArgsCmdList: []onCallReturnArgs{
+				{"Run", []string{}, []interface{}{fmt.Errorf("executable file not found in $PATH")}},
+				{"SetStdout", []string{"*bytes.Buffer"}, nil},
+				{"SetStderr", []string{"*bytes.Buffer"}, nil},
+				{"SetEnv", []string{"[]string"}, nil},
+			},
+		},
+	}
+
+	for i, tc := range tests {
+		t.Run(fmt.Sprintf("%d:%s", i, tc.desc), func(t *testing.T) {
+
+			for _, item := range tc.onRetArgsCmdList {
+				cmdCall := mockCmd.On(item.onCallMethodName)
+				for _, arg := range item.onCallMethodArgType {
+					cmdCall.Arguments = append(cmdCall.Arguments, mock.AnythingOfType(arg))
+				}
+
+				for _, e := range item.retArgList {
+					cmdCall.ReturnArguments = append(cmdCall.ReturnArguments, e)
+				}
+				cmdCall.Once()
+			}
+
+			ifaceCall := mockKexecIface.On(tc.onRetArgsIface.onCallMethodName, mock.Anything)
+			for _, arg := range tc.onRetArgsIface.onCallMethodArgType {
+				ifaceCall.Arguments = append(ifaceCall.Arguments, mock.AnythingOfType(arg))
+			}
+			for _, item := range tc.onRetArgsIface.retArgList {
+				ifaceCall.ReturnArguments = append(ifaceCall.ReturnArguments, item)
+			}
+			ifaceCall.Once()
+
+			_, e := GetOVNDBServerInfo(10, "direction", "dbstring")
+
+			if tc.expectedErr {
+				assert.Error(t, e)
+			}
+			mockCmd.AssertExpectations(t)
+			mockKexecIface.AssertExpectations(t)
+		})
+	}
+}
+
+func TestDetectSCTPSupport(t *testing.T) {
+	mockKexecIface := new(mocks.Interface)
+	mockCmd := new(mocks.Cmd)
+	// note runner is defined in ovs.go file
+	runner = &ExecHelper{exec: mockKexecIface}
+
+	tests := []struct {
+		desc             string
+		expectedErr      bool
+		onRetArgsIface   *onCallReturnArgs
+		onRetArgsCmdList []onCallReturnArgs
+	}{
+		{
+			desc:           "positive: run `ovsdb-client` command against OVN NB database",
+			expectedErr:    false,
+			onRetArgsIface: &onCallReturnArgs{"Command", []string{"string", "string", "string", "string", "string", "string", "string", "string"}, []interface{}{mockCmd}},
+			onRetArgsCmdList: []onCallReturnArgs{
+				{"Run", []string{}, []interface{}{nil}},
+				{"SetStdout", []string{"*bytes.Buffer"}, nil},
+				{"SetStderr", []string{"*bytes.Buffer"}, nil},
+				{"SetEnv", []string{"[]string"}, nil},
+			},
+		},
+		{
+			desc:           "negative: run `ovsdb-client` command against OVN NB database",
+			expectedErr:    true,
+			onRetArgsIface: &onCallReturnArgs{"Command", []string{"string", "string", "string", "string", "string", "string", "string", "string"}, []interface{}{mockCmd}},
+			onRetArgsCmdList: []onCallReturnArgs{
+				{"Run", []string{}, []interface{}{fmt.Errorf("executable file not found in $PATH")}},
+				{"SetStdout", []string{"*bytes.Buffer"}, nil},
+				{"SetStderr", []string{"*bytes.Buffer"}, nil},
+				{"SetEnv", []string{"[]string"}, nil},
+			},
+		},
+	}
+
+	for i, tc := range tests {
+		t.Run(fmt.Sprintf("%d:%s", i, tc.desc), func(t *testing.T) {
+
+			for _, item := range tc.onRetArgsCmdList {
+				cmdCall := mockCmd.On(item.onCallMethodName)
+				for _, arg := range item.onCallMethodArgType {
+					cmdCall.Arguments = append(cmdCall.Arguments, mock.AnythingOfType(arg))
+				}
+
+				for _, e := range item.retArgList {
+					cmdCall.ReturnArguments = append(cmdCall.ReturnArguments, e)
+				}
+				cmdCall.Once()
+			}
+
+			ifaceCall := mockKexecIface.On(tc.onRetArgsIface.onCallMethodName, mock.Anything)
+			for _, arg := range tc.onRetArgsIface.onCallMethodArgType {
+				ifaceCall.Arguments = append(ifaceCall.Arguments, mock.AnythingOfType(arg))
+			}
+			for _, item := range tc.onRetArgsIface.retArgList {
+				ifaceCall.ReturnArguments = append(ifaceCall.ReturnArguments, item)
+			}
+			ifaceCall.Once()
+
+			_, e := DetectSCTPSupport()
+
+			if tc.expectedErr {
+				assert.Error(t, e)
+			}
+			mockCmd.AssertExpectations(t)
+			mockKexecIface.AssertExpectations(t)
+		})
+	}
+}
