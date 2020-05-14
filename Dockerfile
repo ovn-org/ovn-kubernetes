@@ -35,11 +35,11 @@ RUN yum install -y  \
 RUN INSTALL_PKGS=" \
 	PyYAML openssl firewalld-filesystem \
 	libpcap iproute strace \
-	openvswitch2.13 openvswitch2.13-devel \
 	containernetworking-plugins yum-utils \
 	tcpdump \
 	" && \
 	yum install -y --setopt=tsflags=nodocs --setopt=skip_missing_names_on_install=False $INSTALL_PKGS && \
+	yum install -y --setopt=tsflags=nodocs --setopt=skip_missing_names_on_install=False openvswitch2.13-2.13.0-10.el7fdp openvswitch2.13-devel-2.13.0-10.el7fdp && \
 	yum install -y --setopt=tsflags=nodocs --setopt=skip_missing_names_on_install=False "ovn2.13 >= 2.13.0-30" ovn2.13-central ovn2.13-host ovn2.13-vtep && \
 	yum clean all && rm -rf /var/cache/*
 
