@@ -71,6 +71,7 @@ type NodeController struct {
 func NewNode(kube kube.Interface, nodeName string, stopChan <-chan struct{}) (*NodeController, error) {
 	node := &NodeController{
 		kube:       kube,
+		wf:         &factory.WatchFactory{},
 		nodeName:   nodeName,
 		nsMap:      make(map[string]*nsInfo),
 		nsMapMutex: sync.RWMutex{},
@@ -260,20 +261,12 @@ func (n *NodeController) Start(wf *factory.WatchFactory) error {
 		}
 	}()
 
-	if err := n.startNodeWatch(wf); err != nil {
-		return err
-	}
-
-	if err := n.startNamespaceWatch(wf); err != nil {
-		return err
-	}
-
-	return n.startPodWatch(wf)
+	n.wf = wf
+	return n.startNodeWatch()
 }
 
-func (n *NodeController) startPodWatch(wf *factory.WatchFactory) error {
-	n.wf = wf
-	_, err := wf.AddPodHandler(cache.ResourceEventHandlerFuncs{
+func (n *NodeController) startPodWatch() error {
+	_, err := n.wf.AddPodHandler(cache.ResourceEventHandlerFuncs{
 		AddFunc: func(obj interface{}) {
 			pod := obj.(*kapi.Pod)
 			if err := n.addOrUpdatePod(pod, false); err != nil {
@@ -339,9 +332,8 @@ func (n *NodeController) addNamespace(ns *kapi.Namespace) {
 	n.updateFlowCacheEntry(nsEntry.cookie, []string{nsFlow}, false)
 }
 
-func (n *NodeController) startNamespaceWatch(wf *factory.WatchFactory) error {
-	n.wf = wf
-	_, err := wf.AddNamespaceHandler(cache.ResourceEventHandlerFuncs{
+func (n *NodeController) startNamespaceWatch() error {
+	_, err := n.wf.AddNamespaceHandler(cache.ResourceEventHandlerFuncs{
 		AddFunc: func(obj interface{}) {
 			n.nsMapMutex.Lock()
 			defer n.nsMapMutex.Unlock()
@@ -379,8 +371,8 @@ func (n *NodeController) Sync(objs []*kapi.Node) {
 	//just needed to implement the interface
 }
 
-func (n *NodeController) startNodeWatch(wf *factory.WatchFactory) error {
-	return houtil.StartNodeWatch(n, wf)
+func (n *NodeController) startNodeWatch() error {
+	return houtil.StartNodeWatch(n, n.wf)
 }
 
 func nameToCookie(nodeName string) string {
@@ -679,7 +671,13 @@ func (n *NodeController) ensureHybridOverlayBridge(node *kapi.Node) error {
 	n.requestFlowSync()
 	n.initialized = true
 	klog.Infof("hybrid overlay setup complete for node %s", node.Name)
-	return nil
+
+	// Now that we're all initialized, start handling namespaces and pods
+	if err := n.startNamespaceWatch(); err != nil {
+		return err
+	}
+
+	return n.startPodWatch()
 }
 
 func (n *NodeController) syncFlows() {

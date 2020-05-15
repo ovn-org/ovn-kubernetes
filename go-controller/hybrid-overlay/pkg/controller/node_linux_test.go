@@ -229,14 +229,13 @@ var _ = Describe("Hybrid Overlay Node Linux Operations", func() {
 			Expect(err).NotTo(HaveOccurred())
 
 			stopChan := make(chan struct{})
-			f, err := factory.NewWatchFactory(fakeClient, stopChan)
 			Expect(err).NotTo(HaveOccurred())
 			defer close(stopChan)
 
 			n, err := NewNode(&kube.Kube{KClient: fakeClient}, thisNode, stopChan)
 			Expect(err).NotTo(HaveOccurred())
 
-			err = n.startNodeWatch(f)
+			err = n.startNodeWatch()
 			Expect(err).NotTo(HaveOccurred())
 
 			//FIXME
@@ -278,14 +277,13 @@ var _ = Describe("Hybrid Overlay Node Linux Operations", func() {
 			Expect(err).NotTo(HaveOccurred())
 
 			stopChan := make(chan struct{})
-			f, err := factory.NewWatchFactory(fakeClient, stopChan)
 			Expect(err).NotTo(HaveOccurred())
 			defer close(stopChan)
 
 			n, err := NewNode(&kube.Kube{KClient: fakeClient}, thisNode, stopChan)
 			Expect(err).NotTo(HaveOccurred())
 
-			err = n.startNodeWatch(f)
+			err = n.startNodeWatch()
 			Expect(err).NotTo(HaveOccurred())
 
 			//FIXME
@@ -320,14 +318,13 @@ var _ = Describe("Hybrid Overlay Node Linux Operations", func() {
 			Expect(err).NotTo(HaveOccurred())
 
 			stopChan := make(chan struct{})
-			f, err := factory.NewWatchFactory(fakeClient, stopChan)
 			Expect(err).NotTo(HaveOccurred())
 			defer close(stopChan)
 
 			n, err := NewNode(&kube.Kube{KClient: fakeClient}, thisNode, stopChan)
 			Expect(err).NotTo(HaveOccurred())
 
-			err = n.startNodeWatch(f)
+			err = n.startNodeWatch()
 			Expect(err).NotTo(HaveOccurred())
 
 			//FIXME
@@ -370,14 +367,13 @@ var _ = Describe("Hybrid Overlay Node Linux Operations", func() {
 			Expect(err).NotTo(HaveOccurred())
 
 			stopChan := make(chan struct{})
-			f, err := factory.NewWatchFactory(fakeClient, stopChan)
 			Expect(err).NotTo(HaveOccurred())
 			defer close(stopChan)
 
 			n, err := NewNode(&kube.Kube{KClient: fakeClient}, thisNode, stopChan)
 			Expect(err).NotTo(HaveOccurred())
 
-			err = n.startNodeWatch(f)
+			err = n.startNodeWatch()
 			Expect(err).NotTo(HaveOccurred())
 
 			//FIXME
@@ -418,14 +414,13 @@ var _ = Describe("Hybrid Overlay Node Linux Operations", func() {
 			Expect(err).NotTo(HaveOccurred())
 
 			stopChan := make(chan struct{})
-			f, err := factory.NewWatchFactory(fakeClient, stopChan)
 			Expect(err).NotTo(HaveOccurred())
 			defer close(stopChan)
 
 			n, err := NewNode(&kube.Kube{KClient: fakeClient}, thisNode, stopChan)
 			Expect(err).NotTo(HaveOccurred())
 
-			err = n.startNodeWatch(f)
+			err = n.startNodeWatch()
 			Expect(err).NotTo(HaveOccurred())
 			//FIXME
 			//Expect(fexec.CalledMatchesExpected()).To(BeTrue(), fexec.ErrorDesc)
