@@ -74,7 +74,7 @@ ovn_loglevel_northd=${OVN_LOGLEVEL_NORTHD:-"-vconsole:info"}
 ovn_loglevel_nb=${OVN_LOGLEVEL_NB:-"-vconsole:info"}
 ovn_loglevel_sb=${OVN_LOGLEVEL_SB:-"-vconsole:info"}
 ovn_loglevel_controller=${OVN_LOGLEVEL_CONTROLLER:-"-vconsole:info"}
-ovn_loglevel_nbctld= ${OVN_LOGLEVEL_NBCTLD:"-vconsole:info"}
+ovn_loglevel_nbctld=${OVN_LOGLEVEL_NBCTLD:"-vconsole:info"}
 
 ovnkubelogdir=/var/log/ovn-kubernetes
 
@@ -764,6 +764,12 @@ ovn-master() {
   }
 
   echo "=============== ovn-master ========== MASTER ONLY"
+  ovn_metrics_bind_address="0.0.0.0"
+  if [[ "${net_cidr}" == *":"* ]]; then
+    ovn_metrics_bind_address="::"
+  fi
+  echo "BILLY: ovn_metrics_bind_address=${ovn_metrics_bind_address} net_cidr=${net_cidr} svc_cidr=${svc_cidr} ovn_nbdb=${ovn_nbdb}"
+
   /usr/bin/ovnkube \
     --init-master ${K8S_NODE} \
     --cluster-subnets ${net_cidr} --k8s-service-cidr=${svc_cidr} \
@@ -775,7 +781,7 @@ ovn-master() {
     --pidfile ${OVN_RUNDIR}/ovnkube-master.pid \
     --logfile /var/log/ovn-kubernetes/ovnkube-master.log \
     ${ovn_master_ssl_opts} \
-    --metrics-bind-address "0.0.0.0:9409" &
+    --metrics-bind-address "${ovn_metrics_bind_address}:9409" &
   echo "=============== ovn-master ========== running"
   wait_for_event attempts=3 process_ready ovnkube-master
 
@@ -873,6 +879,11 @@ ovn-node() {
   }
 
   echo "=============== ovn-node   --init-node"
+  ovn_metrics_bind_address="0.0.0.0"
+  if [[ "${net_cidr}" == *":"* ]]; then
+    ovn_metrics_bind_address="[::]"
+  fi
+  echo "BILLY: ovn_metrics_bind_address=${ovn_metrics_bind_address} net_cidr=${net_cidr} svc_cidr=${svc_cidr} ovn_nbdb=${ovn_nbdb}"
   /usr/bin/ovnkube --init-node ${K8S_NODE} \
     --cluster-subnets ${net_cidr} --k8s-service-cidr=${svc_cidr} \
     --nb-address=${ovn_nbdb} --sb-address=${ovn_sbdb} \
@@ -886,7 +897,7 @@ ovn-node() {
     --logfile /var/log/ovn-kubernetes/ovnkube.log \
     ${ovn_node_ssl_opts} \
     --inactivity-probe=${ovn_remote_probe_interval} \
-    --metrics-bind-address "0.0.0.0:9410" &
+    --metrics-bind-address "${ovn_metrics_bind_address}:9410" &
 
   wait_for_event attempts=3 process_ready ovnkube
   setup_cni

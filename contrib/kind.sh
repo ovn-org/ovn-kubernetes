@@ -104,6 +104,8 @@ print_params()
      echo "KIND_IPV6_SUPPORT = $KIND_IPV6_SUPPORT"
      echo "KIND_NUM_WORKER = $KIND_NUM_WORKER"
      echo "OVN_GATEWAY_MODE = $OVN_GATEWAY_MODE"
+     echo "KIND_UPDATE_SYSTEM = $KIND_UPDATE_SYSTEM"
+     echo "KIND_HOST_INTERFACE = $KIND_HOST_INTERFACE"
      echo ""
 }
 
@@ -119,6 +121,8 @@ KIND_CONFIG=${KIND_CONFIG:-./kind.yaml.j2}
 KIND_REMOVE_TAINT=${KIND_REMOVE_TAINT:-true}
 KIND_IPV4_SUPPORT=${KIND_IPV4_SUPPORT:-true}
 KIND_IPV6_SUPPORT=${KIND_IPV6_SUPPORT:-false}
+KIND_UPDATE_SYSTEM=${KIND_UPDATE_SYSTEM:-false}
+KIND_HOST_INTERFACE=${KIND_HOST_INTERFACE:-""}
 
 # Input not currently validated. Modify outside script at your own risk.
 # These are the same values defaulted to in KIND code (kind/default.go).
@@ -158,17 +162,147 @@ fi
 
 API_IPV6=""
 if [ "$KIND_IPV6_SUPPORT" == true ]; then
+  # Collect additional IPv6 data on test environment
+  # TEST-BEGIN
+  ERROR_FOUND=false
+  RESTART_DOCKER=false
+  TMPVAR=`sysctl net.ipv6.conf.all.forwarding | awk '{print $3}'`
+  echo "net.ipv6.conf.all.forwarding is equal to $TMPVAR"
+  if [ "$TMPVAR" != 1 ]; then
+    if [ "$KIND_UPDATE_SYSTEM" == true ]; then
+      sudo sysctl -w net.ipv6.conf.all.forwarding=1
+    else
+      echo "RUN: 'sudo sysctl -w net.ipv6.conf.all.forwarding=1' to use IPv6."
+      ERROR_FOUND=true
+    fi
+  fi
+  TMPVAR=`sysctl net.ipv6.conf.all.disable_ipv6 | awk '{print $3}'`
+  echo "net.ipv6.conf.all.disable_ipv6 is equal to $TMPVAR"
+  if [ "$TMPVAR" != 0 ]; then
+    if [ "$KIND_UPDATE_SYSTEM" == true ]; then
+      sudo sysctl -w net.ipv6.conf.all.disable_ipv6=0
+    else
+      echo "RUN: 'sudo sysctl -w net.ipv6.conf.all.disable_ipv6=0' to use IPv6."
+      ERROR_FOUND=true
+    fi
+  fi
+
+  DOCKER_DAEMON_FILE=/etc/docker/daemon.json
+  if [ -f $DOCKER_DAEMON_FILE ]; then
+    DOCKER_APPEND_STR=""
+    if ! grep -q "\"ipv6\": true" $DOCKER_DAEMON_FILE; then
+      echo "'\"ipv6\": true' NOT found!"
+      DOCKER_APPEND_STR="${DOCKER_APPEND_STR} \"ipv6\": true,"
+    fi
+    if ! grep -q "\"fixed-cidr-v6\":" $DOCKER_DAEMON_FILE ; then
+      echo "'\"fixed-cidr-v6\":' NOT found!"
+      DOCKER_APPEND_STR="${DOCKER_APPEND_STR} \"fixed-cidr-v6\": \"2001:db8:1::/64\","
+    fi
+
+    if [ "$DOCKER_APPEND_STR" != "" ]; then
+      if [ "$KIND_UPDATE_SYSTEM" == true ]; then
+        echo "Updating '$DOCKER_DAEMON_FILE' with DOCKER_APPEND_STR=$DOCKER_APPEND_STR"
+        RESTART_DOCKER=true
+        # The awk command:
+        #   Matches on '{' at the beginning of a line via: /^{/
+        #   On a match: 
+        #     Copy the first field (the '{') to awk variable out via: out=$1;
+        #     Then copy the generated string which is in awk variable DCKSTR to awk variable out via: out=out DCKSTR;
+        #     Then copy remaining fields to awk variable out via: for(i=2;i<=NF;i++) out=out" "$i;
+        #     Then print the awk variable out: print out;
+        #     Then move to the next input string
+        #   On NO match, perform default action of print line via: }1
+        # Write output to a temp file and move that file back to original.
+        sudo awk -v DCKSTR="$DOCKER_APPEND_STR" \
+           '/^{/{out=$1; out=out DCKSTR; for(i=2;i<=NF;i++) out=out" "$i; print out; next}1' $DOCKER_DAEMON_FILE > kind.tmp && \
+           sudo mv kind.tmp $DOCKER_DAEMON_FILE
+        echo "Dumping edited $DOCKER_DAEMON_FILE"
+        sudo cat $DOCKER_DAEMON_FILE
+      else
+        ERROR_FOUND=true
+        echo "Add: '$DOCKER_APPEND_STR' to '$DOCKER_DAEMON_FILE' to use IPv6."
+      fi
+    else
+      echo "'$DOCKER_DAEMON_FILE' NOT updated."
+     fi
+
+  else
+    if [ "$KIND_UPDATE_SYSTEM" == true ]; then
+      RESTART_DOCKER=true
+      cat << EOF | sudo tee -a "${DOCKER_DAEMON_FILE}" >/dev/null
+{
+  "ipv6": true,
+  "fixed-cidr-v6": "2001:db8:1::/64"
+}
+EOF
+    else
+      ERROR_FOUND=true
+      echo "Create '$DOCKER_DAEMON_FILE' with '{ \"ipv6\": true, \"fixed-cidr-v6\": \"2001:db8:1::/64\" }' to use IPv6."
+    fi
+  fi
+  if [ "$ERROR_FOUND" == true ]; then
+    exit 1
+  fi
+  if [ "$RESTART_DOCKER" == true ]; then
+    echo "Restarting Docker"
+    sudo systemctl restart docker
+    LOOPCNT=5
+    while true
+    do
+      echo "$LOOPCNT"
+      sudo systemctl status docker | grep -q "Active: active (running)"
+      if [ $? -eq 0 ] ; then
+         break
+      fi
+      let "LOOPCNT--"
+      if [ $LOOPCNT == 0 ] ; then
+        echo "Docker NOT restarting. Exiting ..."
+        exit 1
+      fi
+      sleep 1
+    done
+  fi
+
+  # REMOVE: Verify docker has ipv6 enabled
+  docker run --rm busybox ip a
+
+
+  echo ""
+  echo "Running: ip a"
+  ip a
+
+  echo ""
+  echo "Running: Check for /proc/net/if_inet6"
+  [ -f /proc/net/if_inet6 ] && echo '  IPv6 ready system!' || echo '  No IPv6 support found! Compile the kernel!!'
+
+  echo ""
+  echo "Running: lsmod"
+  lsmod | grep -qw ipv6 && echo "IPv6 kernel driver loaded and configured." || echo "IPv6 not configured and/or driver loaded on the system."
+
+  # TEST-END
+
   # ip -6 addr -> Run ip command for IPv6
   # grep "inet6" -> Use only the lines with the IPv6 Address
   # sed 's@/.*@@g' -> Strip off the trailing subnet mask, /xx
   # grep -v "^::1$" -> Remove local host
   # sed '/^fe80:/ d' -> Remove Link-Local Addresses
   # head -n 1 -> Of the remaining, use first entry
-  API_IPV6=$(ip -6 addr  | grep "inet6" | awk -F' ' '{print $2}' | \
+  if [[ ${KIND_HOST_INTERFACE} != "" ]]; then
+    KIND_HOST_INTERFACE="show dev ${KIND_HOST_INTERFACE}"
+  fi
+  echo "KIND_HOST_INTERFACE=${KIND_HOST_INTERFACE}"
+  API_IPV6=$(ip -6 addr ${KIND_HOST_INTERFACE} | grep "inet6" | awk -F' ' '{print $2}' | \
              sed 's@/.*@@g' | grep -v "^::1$" | sed '/^fe80:/ d' | head -n 1)
   if [ -z "$API_IPV6" ]; then
-    echo "Error detecting machine IPv6 to use as API server"
-    exit 1
+    # No IPv6 global addresses, Repeat but allow local address
+    API_IPV6=$(ip -6 addr ${KIND_HOST_INTERFACE} | grep "inet6" | awk -F' ' '{print $2}' | \
+               sed 's@/.*@@g' | grep -v "^::1$" | head -n 1)
+    if [ -z "$API_IPV6" ]; then
+      echo "Error detecting machine IPv6 to use as API server"
+      exit 1
+    else
+      echo "Using IPv6 LOCAL for API_IPV6"
+    fi
   fi
 fi
 
@@ -208,7 +342,7 @@ ovn_apiServerAddress=${API_IP} \
   j2 ${KIND_CONFIG} -o ${KIND_CONFIG_LCL}
 
 # Create KIND cluster. For additional debug, add '--verbosity <int>': 0 None .. 3 Debug
-kind create cluster --name ${KIND_CLUSTER_NAME} --kubeconfig ${HOME}/admin.conf --image kindest/node:${K8S_VERSION} --config=${KIND_CONFIG_LCL}
+kind create cluster --name ${KIND_CLUSTER_NAME} --verbosity 5 --kubeconfig ${HOME}/admin.conf --image kindest/node:${K8S_VERSION} --config=${KIND_CONFIG_LCL}
 export KUBECONFIG=${HOME}/admin.conf
 cat ${KUBECONFIG}
 mkdir -p /tmp/kind
@@ -226,6 +360,35 @@ do
 done
 kubectl get secrets -o jsonpath='{.items[].data.ca\.crt}' > /tmp/kind/ca.crt
 kubectl get secrets -o jsonpath='{.items[].data.token}' > /tmp/kind/token
+
+if [[ "$IP_FAMILY" == "ipv6" ]]; then
+  echo "BILLY: IPv6 Only - UPDATE CoreDNS"
+  # IPv6 clusters need some CoreDNS changes in order to work in k8s CI:
+  # 1. k8s CI doesn´t offer IPv6 connectivity, so CoreDNS should be configured
+  # to work in an offline environment:
+  # https://github.com/coredns/coredns/issues/2494#issuecomment-457215452
+  # 2. k8s CI adds following domains to resolv.conf search field:
+  # c.k8s-prow-builds.internal google.internal.
+  # CoreDNS should handle those domains and answer with NXDOMAIN instead of SERVFAIL
+  # otherwise pods stops trying to resolve the domain.
+  # Get the current config
+  original_coredns=$(kubectl get -oyaml -n=kube-system configmap/coredns)
+  echo "Original CoreDNS config:"
+  echo "${original_coredns}"
+  # Patch it
+  fixed_coredns=$(
+    printf '%s' "${original_coredns}" | sed \
+      -e 's/^.*kubernetes cluster\.local/& internal/' \
+      -e '/^.*upstream$/d' \
+      -e '/^.*fallthrough.*$/d' \
+      -e '/^.*forward . \/etc\/resolv.conf$/d' \
+      -e '/^.*loop$/d' \
+  )
+  echo "Patched CoreDNS config:"
+  echo "${fixed_coredns}"
+  printf '%s' "${fixed_coredns}" | kubectl apply -f -
+fi
+
 pushd ../go-controller
 make
 popd
