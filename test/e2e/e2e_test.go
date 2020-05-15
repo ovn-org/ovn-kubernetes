@@ -301,6 +301,35 @@ var _ = Describe("e2e control plane", func() {
 
 		framework.ExpectNoError(<-errChan)
 	})
+
+	ginkgo.It("should provide Internet connection continuously when all pods on master node are killed", func() {
+		ginkgo.By("Running container which tries to connect to 8.8.8.8 in a loop")
+
+		podChan, errChan := make(chan *v1.Pod), make(chan error)
+		go checkContinuousConnectivity(f, "", "connectivity-test-continuous", "8.8.8.8", 53, 30, podChan, errChan)
+
+		testPod := <-podChan
+		framework.Logf("Test pod running on %q", testPod.Spec.NodeName)
+
+		time.Sleep(5 * time.Second)
+
+		podClient := f.ClientSet.CoreV1().Pods("")
+
+		podList, _ := podClient.List(metav1.ListOptions{})
+		for _, pod := range podList.Items {
+			if pod.Spec.NodeName == "ovn-control-plane" && pod.Name != "connectivity-test-continuous" {
+				framework.Logf("%q", pod.Namespace)
+				podClient2 := f.ClientSet.CoreV1().Pods(pod.Namespace)
+				err := podClient2.Delete(pod.Name, metav1.NewDeleteOptions(0))
+				framework.ExpectNoError(err, "should delete control plane pod")
+				framework.Logf("Deleted control plane pod %q", pod.Name)
+			}
+		}
+
+		framework.Logf("Killed all pods running on node ovn-control-plane")
+
+		framework.ExpectNoError(<-errChan)
+	})
 })
 
 // Test e2e hybrid sdn inter-node connectivity between worker nodes and validate pods do not traverse the external gateway
