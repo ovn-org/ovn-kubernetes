@@ -135,7 +135,7 @@ func (m *MasterController) handleOverlayPort(node *kapi.Node, annotator kube.Ann
 
 		var stderr string
 		_, stderr, err = util.RunOVNNbctl("--", "--may-exist", "lsp-add", node.Name, portName,
-			"--", "lsp-set-addresses", portName, portMAC.String()+" "+portIP.String())
+			"--", "lsp-set-addresses", portName, portMAC.String())
 		if err != nil {
 			return fmt.Errorf("failed to add hybrid overlay port for node %s"+
 				", stderr:%s: %v", node.Name, stderr, err)

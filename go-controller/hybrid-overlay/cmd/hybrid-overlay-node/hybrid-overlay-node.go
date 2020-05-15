@@ -96,7 +96,7 @@ func runHybridOverlay(ctx *cli.Context) error {
 	}
 
 	kube := &kube.Kube{KClient: clientset}
-	if err := controller.StartNode(nodeName, kube, factory); err != nil {
+	if err := controller.StartNode(nodeName, kube, factory, stopChan); err != nil {
 		return err
 	}
 

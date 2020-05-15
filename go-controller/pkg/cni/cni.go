@@ -4,7 +4,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"net"
-	"net/http"
 	"time"
 
 	"k8s.io/client-go/kubernetes"
@@ -62,11 +61,6 @@ func extractPodBandwidthResources(podAnnotations map[string]string) (int64, int6
 	return ingress, egress, nil
 }
 
-func isNotFoundError(err error) bool {
-	statusErr, ok := err.(*errors.StatusError)
-	return ok && statusErr.Status().Code == http.StatusNotFound
-}
-
 func podDescription(pr *PodRequest) string {
 	return fmt.Sprintf("[%s/%s]", pr.PodNamespace, pr.PodName)
 }
@@ -88,7 +82,7 @@ func (pr *PodRequest) cmdAdd(kclient kubernetes.Interface) ([]byte, error) {
 	if err = wait.ExponentialBackoff(annotationBackoff, func() (bool, error) {
 		annotations, err = kubecli.GetAnnotationsOnPod(namespace, podName)
 		if err != nil {
-			if isNotFoundError(err) {
+			if errors.IsNotFound(err) {
 				// Pod not found; don't bother waiting longer
 				return false, err
 			}
