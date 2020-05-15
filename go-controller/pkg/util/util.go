@@ -6,7 +6,6 @@ import (
 	"strings"
 	"sync"
 
-	houtil "github.com/ovn-org/ovn-kubernetes/go-controller/hybrid-overlay/pkg/util"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
 
 	"github.com/urfave/cli/v2"
@@ -78,15 +77,12 @@ func UpdateNodeSwitchExcludeIPs(nodeName string, subnet *net.IPNet) error {
 		return fmt.Errorf("failed to list logical switch %q ports: stderr: %q, error: %v", nodeName, stderr, err)
 	}
 
-	var haveManagementPort, haveHybridOverlayPort bool
+	var haveManagementPort bool
 	lines := strings.Split(stdout, "\n")
 	for _, line := range lines {
 		line = strings.TrimSpace(line)
 		if strings.Contains(line, "(k8s-"+nodeName+")") {
 			haveManagementPort = true
-		} else if strings.Contains(line, "("+houtil.GetHybridOverlayPortName(nodeName)+")") {
-			// we always need to set to false because we do not reserve the IP on the LSP for HO
-			haveHybridOverlayPort = false
 		}
 	}
 
@@ -94,17 +90,13 @@ func UpdateNodeSwitchExcludeIPs(nodeName string, subnet *net.IPNet) error {
 	hybridOverlayIfAddr := GetNodeHybridOverlayIfAddr(subnet)
 	var excludeIPs string
 	if config.HybridOverlay.Enabled {
-		if haveHybridOverlayPort && haveManagementPort {
-			// no excluded IPs required
-		} else if !haveHybridOverlayPort && !haveManagementPort {
-			// exclude both
-			excludeIPs = mgmtIfAddr.IP.String() + ".." + hybridOverlayIfAddr.IP.String()
-		} else if haveHybridOverlayPort {
-			// exclude management port IP
-			excludeIPs = mgmtIfAddr.IP.String()
-		} else if haveManagementPort {
-			// exclude hybrid overlay port IP
+		if haveManagementPort {
+			// only exclude hybrid overlay port IP
 			excludeIPs = hybridOverlayIfAddr.IP.String()
+		} else {
+			// exclude both so the IPs aren't taken before the
+			// ports are created
+			excludeIPs = mgmtIfAddr.IP.String() + ".." + hybridOverlayIfAddr.IP.String()
 		}
 	} else if !haveManagementPort {
 		// exclude management port IP

@@ -153,7 +153,7 @@ func waitForPodAddresses(portName string) (net.HardwareAddr, net.IP, error) {
 	return podMac, podIP, nil
 }
 
-func getRoutesGatewayIP(pod *kapi.Pod, subnet *net.IPNet, hybridOverlayExternalGW net.IP) ([]util.PodRoute, net.IP, error) {
+func (oc *Controller) getRoutesGatewayIP(pod *kapi.Pod, subnet *net.IPNet) ([]util.PodRoute, net.IP, error) {
 	// if there are other network attachments for the pod, then check if those network-attachment's
 	// annotation has default-route key. If present, then we need to skip adding default route for
 	// OVN interface
@@ -172,7 +172,13 @@ func getRoutesGatewayIP(pod *kapi.Pod, subnet *net.IPNet, hybridOverlayExternalG
 	gatewayIPnet := util.GetNodeGatewayIfAddr(subnet)
 	var gatewayIP net.IP
 	routes := make([]util.PodRoute, 0)
-	if otherDefaultRoute || len(hybridOverlayExternalGW) > 0 {
+
+	hasHybridOverlayExternalGW, err := oc.hasHybridOverlayExternalGwAnnotation(pod.Namespace)
+	if err != nil {
+		return nil, nil, err
+	}
+
+	if otherDefaultRoute || hasHybridOverlayExternalGW {
 		for _, clusterSubnet := range config.Default.ClusterSubnets {
 			var route util.PodRoute
 			route.Dest = clusterSubnet.CIDR
@@ -185,7 +191,7 @@ func getRoutesGatewayIP(pod *kapi.Pod, subnet *net.IPNet, hybridOverlayExternalG
 			route.NextHop = gatewayIPnet.IP
 			routes = append(routes, route)
 		}
-		if len(hybridOverlayExternalGW) > 0 {
+		if hasHybridOverlayExternalGW {
 			gatewayIP = util.GetNodeHybridOverlayIfAddr(subnet).IP
 		}
 	} else {
@@ -207,13 +213,17 @@ func getRoutesGatewayIP(pod *kapi.Pod, subnet *net.IPNet, hybridOverlayExternalG
 	return routes, gatewayIP, nil
 }
 
-func (oc *Controller) getHybridOverlayExternalGwAnnotation(ns string) (net.IP, error) {
+func (oc *Controller) hasHybridOverlayExternalGwAnnotation(ns string) (bool, error) {
+	if !config.HybridOverlay.Enabled {
+		return false, nil
+	}
+
 	nsInfo, err := oc.waitForNamespaceLocked(ns)
 	if err != nil {
-		return nil, err
+		return false, err
 	}
 	defer nsInfo.Unlock()
-	return nsInfo.hybridOverlayExternalGW, nil
+	return nsInfo.hasHybridOverlayExternalGW, nil
 }
 
 func (oc *Controller) addLogicalPort(pod *kapi.Pod) error {
@@ -339,14 +349,7 @@ func (oc *Controller) addLogicalPort(pod *kapi.Pod) error {
 	}
 
 	if annotation == nil {
-		hybridOverlayExternalGW := net.IP{}
-		if config.HybridOverlay.Enabled {
-			hybridOverlayExternalGW, err = oc.getHybridOverlayExternalGwAnnotation(pod.Namespace)
-			if err != nil {
-				return err
-			}
-		}
-		routes, gwIP, err := getRoutesGatewayIP(pod, nodeSubnet, hybridOverlayExternalGW)
+		routes, gwIP, err := oc.getRoutesGatewayIP(pod, nodeSubnet)
 		if err != nil {
 			return err
 		}

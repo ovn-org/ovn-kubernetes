@@ -131,6 +131,16 @@ func (oc *Controller) multicastDeleteNamespace(ns *kapi.Namespace, nsInfo *names
 	nsInfo.multicastEnabled = false
 }
 
+func updateHybridOverlayAnnotations(nsInfo *namespaceInfo, ns *kapi.Namespace) {
+	if annotation := ns.Annotations[hotypes.HybridOverlayExternalGw]; annotation != "" {
+		if ip := net.ParseIP(annotation); ip != nil {
+			nsInfo.hasHybridOverlayExternalGW = true
+		} else {
+			klog.Errorf("Could not parse hybrid overlay external gw annotation")
+		}
+	}
+}
+
 // AddNamespace creates corresponding addressset in ovn db
 func (oc *Controller) AddNamespace(ns *kapi.Namespace) {
 	klog.V(5).Infof("Adding namespace: %s", ns.Name)
@@ -153,24 +163,7 @@ func (oc *Controller) AddNamespace(ns *kapi.Namespace) {
 		}
 	}
 
-	annotation := ns.Annotations[hotypes.HybridOverlayExternalGw]
-	if annotation != "" {
-		parsedAnnotation := net.ParseIP(annotation)
-		if parsedAnnotation == nil {
-			klog.Errorf("Could not parse hybrid overlay external gw annotation")
-		} else {
-			nsInfo.hybridOverlayExternalGW = parsedAnnotation
-		}
-	}
-	annotation = ns.Annotations[hotypes.HybridOverlayVTEP]
-	if annotation != "" {
-		parsedAnnotation := net.ParseIP(annotation)
-		if parsedAnnotation == nil {
-			klog.Errorf("Could not parse hybrid overlay VTEP annotation")
-		} else {
-			nsInfo.hybridOverlayVTEP = parsedAnnotation
-		}
-	}
+	updateHybridOverlayAnnotations(nsInfo, ns)
 
 	// Create an address_set for the namespace.  All the pods' IP address
 	// in the namespace will be added to the address_set
@@ -189,24 +182,7 @@ func (oc *Controller) updateNamespace(old, newer *kapi.Namespace) {
 	}
 	defer nsInfo.Unlock()
 
-	annotation := newer.Annotations[hotypes.HybridOverlayExternalGw]
-	if annotation != "" {
-		parsedAnnotation := net.ParseIP(annotation)
-		if parsedAnnotation == nil {
-			klog.Errorf("Could not parse hybrid overlay external gw annotation")
-		} else {
-			nsInfo.hybridOverlayExternalGW = parsedAnnotation
-		}
-	}
-	annotation = newer.Annotations[hotypes.HybridOverlayVTEP]
-	if annotation != "" {
-		parsedAnnotation := net.ParseIP(annotation)
-		if parsedAnnotation == nil {
-			klog.Errorf("Could not parse hybrid overlay VTEP annotation")
-		} else {
-			nsInfo.hybridOverlayVTEP = parsedAnnotation
-		}
-	}
+	updateHybridOverlayAnnotations(nsInfo, newer)
 	oc.multicastUpdateNamespace(newer, nsInfo)
 }
 
