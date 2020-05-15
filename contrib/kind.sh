@@ -130,11 +130,11 @@ if [ "$KIND_IPV6_SUPPORT" == true ]; then
   # ip -6 addr -> Run ip command for IPv6
   # grep "inet6" -> Use only the lines with the IPv6 Address
   # sed 's@/.*@@g' -> Strip off the trailing subnet mask, /xx
-  # grep -v "::1" -> Remove local host
+  # grep -v "^::1$" -> Remove local host
   # sed '/^fe80:/ d' -> Remove Link-Local Addresses
   # head -n 1 -> Of the remaining, use first entry
   API_IPV6=$(ip -6 addr  | grep "inet6" | awk -F' ' '{print $2}' | \
-             sed 's@/.*@@g' | grep -v "::1" | sed '/^fe80:/ d' | head -n 1)
+             sed 's@/.*@@g' | grep -v "^::1$" | sed '/^fe80:/ d' | head -n 1)
   if [ -z "$API_IPV6" ]; then
     echo "Error detecting machine IPv6 to use as API server"
     exit 1
