@@ -85,7 +85,8 @@ func UpdateNodeSwitchExcludeIPs(nodeName string, subnet *net.IPNet) error {
 		if strings.Contains(line, "(k8s-"+nodeName+")") {
 			haveManagementPort = true
 		} else if strings.Contains(line, "("+houtil.GetHybridOverlayPortName(nodeName)+")") {
-			haveHybridOverlayPort = true
+			// we always need to set to false because we do not reserve the IP on the LSP for HO
+			haveHybridOverlayPort = false
 		}
 	}
 

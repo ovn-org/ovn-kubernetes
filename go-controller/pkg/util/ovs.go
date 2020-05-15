@@ -587,6 +587,18 @@ func AddNormalActionOFFlow(bridgeName string) (string, string, error) {
 	return strings.Trim(stdout.String(), "\" \n"), stderr.String(), err
 }
 
+// ReplaceOFFlows replaces flows in the bridge with a slice of flows
+func ReplaceOFFlows(bridgeName string, flows []string) (string, string, error) {
+	args := []string{"-O", "OpenFlow13", "--bundle", "replace-flows", bridgeName, "-"}
+	stdin := &bytes.Buffer{}
+	stdin.Write([]byte(strings.Join(flows, "\n")))
+
+	cmd := runner.exec.Command(runner.ofctlPath, args...)
+	cmd.SetStdin(stdin)
+	stdout, stderr, err := runCmd(cmd, runner.ofctlPath, args...)
+	return strings.Trim(stdout.String(), "\" \n"), stderr.String(), err
+}
+
 // GetOvnRunDir returns the OVN's rundir.
 func GetOvnRunDir() string {
 	return runner.ovnRunDir
