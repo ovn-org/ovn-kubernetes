@@ -8,6 +8,7 @@ verify-ovsdb-raft() {
     echo "failed to retrieve the IP address of the host $(hostname). Exiting..."
     exit 1
   fi
+  echo "BILLY: ovn_db_host=${ovn_db_host} K8S_APISERVER=${K8S_APISERVER}"
 
   replicas=$(kubectl --server=${K8S_APISERVER} --token=${k8s_token} --certificate-authority=${K8S_CACERT} \
     get statefulset -n ${ovn_kubernetes_namespace} ovnkube-db -o=jsonpath='{.spec.replicas}')
@@ -26,12 +27,15 @@ ready_to_join_cluster() {
 
   init_ip="$(kubectl --server=${K8S_APISERVER} --token=${k8s_token} --certificate-authority=${K8S_CACERT} \
     get pod -n ${ovn_kubernetes_namespace} ovnkube-db-0 -o=jsonpath='{.status.podIP}')"
+  echo "BILLY: ready_to_join_cluster()  init_ip=${init_ip} K8S_APISERVER=${K8S_APISERVER}"
   if [[ $? != 0 ]]; then
     return 1
   fi
-  target=$(ovn-${db}ctl --db=${transport}:${init_ip}:${port} ${ovndb_ctl_ssl_opts} --data=bare --no-headings \
+  echo "BILLY: ready_to_join_cluster() Call  ovn-${db}ctl --db=${transport}:[${init_ip}]:${port} ${ovndb_ctl_ssl_opts} .. list connection"
+  target=$(ovn-${db}ctl --db=${transport}:[${init_ip}]:${port} ${ovndb_ctl_ssl_opts} --data=bare --no-headings \
     --columns=target list connection)
-  if [[ "${target}" != "p${transport}:${port}" ]]; then
+  echo "BILLY: ready_to_join_cluster() target=${target} vs p${transport}:${port}${ovn_raft_conn_ip}"
+  if [[ "${target}" != "p${transport}:${port}${ovn_raft_conn_ip}" ]]; then
     return 1
   fi
   return 0
@@ -42,8 +46,8 @@ check_ovnkube_db_ep() {
   local dbport=${2}
 
   # TODO: Right now only checks for NB ovsdb instances
-  echo "======= checking ${dbaddr}:${dbport} OVSDB instance ==============="
-  ovsdb-client ${ovndb_ctl_ssl_opts} list-dbs ${transport}:${dbaddr}:${dbport} >/dev/null
+  echo "======= checking [${dbaddr}]:${dbport} OVSDB instance ==============="
+  ovsdb-client ${ovndb_ctl_ssl_opts} list-dbs ${transport}:[${dbaddr}]:${dbport} >/dev/null
   if [[ $? != 0 ]]; then
     return 1
   fi
@@ -58,6 +62,7 @@ check_and_apply_ovnkube_db_ep() {
   for ((i = 0; i < ${replicas}; i++)); do
     ip=$(kubectl --server=${K8S_APISERVER} --token=${k8s_token} --certificate-authority=${K8S_CACERT} \
       get pod -n ${ovn_kubernetes_namespace} ovnkube-db-${i} -o=jsonpath='{.status.podIP}')
+    echo "BILLY: check_and_apply_ovnkube_db_ep() ip=${ip}"
     if [[ ${ip} == "" ]]; then
       break
     fi
@@ -139,14 +144,15 @@ set_connection() {
   local target
   local output
 
+  echo "BILLY: set_connection() - ovn_raft_conn_ip=${ovn_raft_conn_ip}"
   # this call will fail on non-leader node since we are using unix socket and no --no-leader-only option.
   output=$(ovn-${db}ctl --data=bare --no-headings --columns=target,inactivity_probe list connection)
   if [[ $? == 0 ]]; then
     # this instance is a leader, check if we need to make any changes
     echo "found the current value of target and inactivity probe to be ${output}"
     target=$(echo "${output}" | awk 'ORS=","')
-    if [[ "${target}" != "p${transport}:${port},0," ]]; then
-      ovn-${db}ctl --inactivity-probe=0 set-connection p${transport}:${port}
+    if [[ "${target}" != "p${transport}:${port}${ovn_raft_conn_ip},0," ]]; then
+      ovn-${db}ctl --inactivity-probe=0 set-connection p${transport}:${port}${ovn_raft_conn_ip}
       if [[ $? != 0 ]]; then
         echo "Failed to set connection and disable inactivity probe. Exiting...."
         exit 12
@@ -214,6 +220,7 @@ ovsdb-raft() {
   if [[ ${db} == "nb" ]]; then
     database="OVN_Northbound"
     [[ "yes" == ${OVN_SSL_ENABLE} ]] && {
+      echo "BILLY: NB SSL Enabled"
       db_ssl_opts="
             --ovn-nb-db-ssl-key=${ovn_nb_pk}
             --ovn-nb-db-ssl-cert=${ovn_nb_cert}
@@ -223,6 +230,7 @@ ovsdb-raft() {
   else
     database="OVN_Southbound"
     [[ "yes" == ${OVN_SSL_ENABLE} ]] && {
+      echo "BILLY: SB SSL Enabled"
       db_ssl_opts="
             --ovn-sb-db-ssl-key=${ovn_sb_pk}
             --ovn-sb-db-ssl-cert=${ovn_sb_cert}
@@ -230,22 +238,36 @@ ovsdb-raft() {
       "
     }
   fi
+
+  # 'ovn-${db}ctl set-connection' called in ovsdb-raft() defaults to IPv4.
+  # For IPv6, overwrite with ":[::]"
+  ovn_raft_conn_ip=""
+  if [[ "${ovn_db_host}" == *":"* ]]; then
+    ovn_raft_conn_ip=":[::]"
+  fi
+  echo "BILLY: Search ovn_db_host=${ovn_db_host} for : -- ovn_raft_conn_ip=${ovn_raft_conn_ip}"
+
+
   if [[ "${POD_NAME}" == "ovnkube-db-0" ]]; then
+    echo "BILLY: ovnkube-db-0 - ovn_db_host=${ovn_db_host} db_ssl_opts=${db_ssl_opts}"
     run_as_ovs_user_if_needed \
       ${OVNCTL_PATH} run_${db}_ovsdb --no-monitor \
-      --db-${db}-cluster-local-addr=${ovn_db_host} \
+      --db-${db}-cluster-local-addr=[${ovn_db_host}] \
       --db-${db}-cluster-local-port=${raft_port} \
       --db-${db}-cluster-local-proto=${transport} \
       ${db_ssl_opts} \
       --ovn-${db}-log="${ovn_loglevel_db}" &
   else
+    echo "BILLY: ${POD_NAME} - ovn_db_host=${ovn_db_host} db_ssl_opts=${db_ssl_opts} init_ip=${init_ip} initialize=${initialize}"
     # join the remote cluster node if the DB is not created
     if [[ "${initialize}" == "true" ]]; then
+      echo "BILLY: wait_for_event ENTER"
       wait_for_event ready_to_join_cluster ${db} ${port}
+      echo "BILLY: wait_for_event EXIT"
     fi
     run_as_ovs_user_if_needed \
       ${OVNCTL_PATH} run_${db}_ovsdb --no-monitor \
-      --db-${db}-cluster-local-addr=${ovn_db_host} --db-${db}-cluster-remote-addr=${init_ip} \
+      --db-${db}-cluster-local-addr=[${ovn_db_host}] --db-${db}-cluster-remote-addr=[${init_ip}] \
       --db-${db}-cluster-local-port=${raft_port} --db-${db}-cluster-remote-port=${raft_port} \
       --db-${db}-cluster-local-proto=${transport} --db-${db}-cluster-remote-proto=${transport} \
       ${db_ssl_opts} \

@@ -45,6 +45,27 @@ should set default value on new IngressClass
 should prevent Ingress creation if more than 1 IngressClass marked as default
 "
 
+IPV4_ONLY_TESTS="
+# shard-n Tests
+Network.+should resolve connrection reset issue
+\[Feature:Networking-IPv4\]
+
+# shard-np Tests
+NetworkPolicy.+should allow egress access to server in CIDR block
+
+# shard-s Tests
+Services.+should create endpoints for unready pods
+
+# shard-other Tests
+DNS.+should provide DNS
+DNS.+should resolve DNS
+DNS.+should provide /etc/hosts entries
+"
+
+if [ "$SHARD" != shard-ipv4 ]; then
+	SKIPPED_TESTS=$SKIPPED_TESTS$IPV4_ONLY_TESTS
+fi
+
 SKIPPED_TESTS=$(echo "${SKIPPED_TESTS}" | sed -e '/^\($\|#\)/d' -e 's/ /\\s/g' | tr '\n' '|' | sed -e 's/|$//')
 
 GINKGO_ARGS="--num-nodes=3 --ginkgo.skip=${SKIPPED_TESTS} --disable-log-dump=false"
@@ -57,6 +78,10 @@ case "$SHARD" in
 	shard-np)
 		# all tests that have P as the sixth letter after the N
 		GINKGO_ARGS="${GINKGO_ARGS} "'--ginkgo.focus=\[sig-network\]\s[Nn].{6}[Pp].*$'
+		;;
+	shard-ipv4)
+		IPV4_ONLY_TESTS=$(echo "${IPV4_ONLY_TESTS}" | sed -e '/^\($\|#\)/d' -e 's/ /\\s/g' | tr '\n' '|' | sed -e 's/|$//')
+		GINKGO_ARGS="${GINKGO_ARGS} "'--ginkgo.focus=\[sig-network\].*'$IPV4_ONLY_TESTS'.*'
 		;;
 	shard-test)
 		TEST_REGEX_REPR=$(echo ${@:2} | sed 's/ /\\s/g')

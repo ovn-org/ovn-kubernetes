@@ -7,6 +7,7 @@ import (
 	"strconv"
 	"strings"
 
+	"k8s.io/klog"
 	utilnet "k8s.io/utils/net"
 )
 
@@ -186,6 +187,6 @@ func (cs *configSubnets) checkIPFamilies() (usingIPv4, usingIPv6 bool, err error
 	if cs.v4[configSubnetHybrid] || cs.v6[configSubnetHybrid] {
 		netConfig += ", " + cs.describeSubnetType(configSubnetHybrid)
 	}
-
+	klog.Errorf("BILLY: checkIPFamilies() - configSubnetHybrid  v4=%v  v6=%v", cs.v4[configSubnetHybrid], cs.v6[configSubnetHybrid])
 	return false, false, fmt.Errorf("illegal network configuration: %s", netConfig)
 }

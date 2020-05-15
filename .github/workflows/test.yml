@@ -11,6 +11,8 @@ env:
   K8S_VERSION: v1.18.2
   KIND_CLUSTER_NAME: ovn
   KIND_INSTALL_INGRESS: true
+  KIND_UPDATE_SYSTEM: true
+  #KIND_HOST_INTERFACE: "eth0"
 
 jobs:
   build:
@@ -121,6 +123,8 @@ jobs:
             hybrid-overlay: false
           - shard: shard-np
             hybrid-overlay: false
+          - shard: shard-ipv4
+            hybrid-overlay: false
           - shard: control-plane
             hybrid-overlay: true
         ha:
@@ -129,10 +133,38 @@ jobs:
          - enabled: "false"
            name: "noHA"
         gateway-mode: [local, shared]
+        ipfamily:
+         - ip: ipv4
+           name: "IPv4"
+           ipv4: true
+           ipv6: false
+         - ip: ipv6
+           name: "IPv6"
+           ipv4: false
+           ipv6: true
+         - ip: dualstack
+           name: "Dualstack"
+           ipv4: true
+           ipv6: true
+        exclude:
+         - {"ipfamily": {"ip": dualstack}}
+         - {"ipfamily": {"ip": ipv6}, "target": {"shard": shard-ipv4}}
+         - {"ipfamily": {"ip": ipv4}, "ha": {"enabled": "true"}, "gateway-mode": shared}
+         - {"ipfamily": {"ip": ipv4}, "ha": {"enabled": "false"}, "gateway-mode": local}
+         - {"ipfamily": {"ip": ipv4}, "ha": {"enabled": "true"}, "gateway-mode": local, "target": {"shard": shard-np}}
+         - {"ipfamily": {"ip": ipv4}, "ha": {"enabled": "false"}, "gateway-mode": shared, "target": {"shard": shard-n-other}}
+         - {"ipfamily": {"ip": ipv6}, "ha": {"enabled": "false"}, "gateway-mode": shared}
+         - {"ipfamily": {"ip": ipv6}, "ha": {"enabled": "true"}, "gateway-mode": local}
+         - {"ipfamily": {"ip": ipv6}, "ha": {"enabled": "false"}, "gateway-mode": local, "target": {"shard": shard-n-other}}
+         - {"ipfamily": {"ip": ipv6}, "ha": {"enabled": "true"}, "gateway-mode": shared, "target": {"shard": shard-np}}
+         - {"ipfamily": {"ip": ipv4}, "target": {"shard": shard-ipv4}}
+         - {"target": {"shard": control-plane}}
     needs: k8s
     env:
-      JOB_NAME: "${{ matrix.target.shard }}-${{ matrix.ha.name }}-${{ matrix.gateway-mode }}"
+      JOB_NAME: "${{ matrix.target.shard }}-${{ matrix.ha.name }}-${{ matrix.gateway-mode }}-${{ matrix.ipfamily.name }}"
       KIND_HA: "${{ matrix.ha.enabled }}"
+      KIND_IPV4_SUPPORT: "${{ matrix.ipfamily.ipv4 }}"
+      KIND_IPV6_SUPPORT: "${{ matrix.ipfamily.ipv6 }}"
       OVN_HYBRID_OVERLAY_ENABLE: "${{ matrix.target.hybrid-overlay }}"
       OVN_GATEWAY_MODE: "${{ matrix.gateway-mode }}"
     steps:
@@ -155,6 +187,11 @@ jobs:
         echo "::set-env name=GOPATH::$GOPATH"
         export PATH=$GOPATH/bin:$PATH
         echo "::add-path::$GOPATH/bin"
+  
+    - name: IPv6 Disable firewall
+      if: matrix.ipfamily.ipv6 == true && matrix.ipfamily.ipv4 == false
+      run: |
+        sudo ufw disable
 
     - name: Restore Kubernetes from cache
       id: cache-k8s
