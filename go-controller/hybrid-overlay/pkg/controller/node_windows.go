@@ -34,7 +34,7 @@ type NodeController struct {
 
 // NewNode returns a node handler that listens for node events
 // so that Add/Update/Delete events are appropriately handled.
-func NewNode(kube kube.Interface, nodeName string) (*NodeController, error) {
+func NewNode(kube kube.Interface, nodeName string, stopChan <-chan struct{}) (*NodeController, error) {
 	supportedFeatures := hcn.GetSupportedFeatures()
 	if !supportedFeatures.HostRoute {
 		return nil, fmt.Errorf("This version of windows does not support HostRoute " +

@@ -1,5 +1,10 @@
 #!/usr/bin/env bash
 
+
+# ensure j2 renderer installed
+pip freeze | grep j2cli || pip install j2cli[yaml] --user
+export PATH=~/.local/bin:$PATH
+
 run_kubectl() {
   local retries=0
   local attempts=10
@@ -20,12 +25,18 @@ run_kubectl() {
 
 usage()
 {
-    echo "usage: kind.sh [[[-cf|--config-file file ] [-ii|--install-ingress] [-ha|--ha-enabled] [-kt|keep-taint]] | [-h]]"
+    echo "usage: kind.sh [[[-cf|--config-file <file>] [-kt|keep-taint] [-ha|--ha-enabled]"
+    echo "                 [-ii|--install-ingress] [-n4|--no-ipv4] [-i6|--ipv6]] | [-h]]"
     echo ""
-    echo "-cf | --config-file          Name of the KIND configuration file if default files are not sufficient"
-    echo "-ii | --install-ingress      Flag to install Ingress Components"
-    echo "-ha | --ha-enabled           If high availability needs to be enabled by default"
-    echo "-kt | --keep-taint           Do not remove taint components"
+    echo "-cf | --config-file          Name of the KIND J2 configuration file."
+    echo "                             DEFAULT: ./kind.yaml.j2"
+    echo "-kt | --keep-taint           Do not remove taint components."
+    echo "                             DEFAULT: Remove taint components."
+    echo "-ha | --ha-enabled           Enable high availability. DEFAULT: HA Disabled."
+    echo "-ii | --install-ingress      Flag to install Ingress Components."
+    echo "                             DEFAULT: Don't install ingress components."
+    echo "-n4 | --no-ipv4              Disable IPv4. DEFAULT: IPv4 Enabled."
+    echo "-i6 | --ipv6                 Enable IPv6. DEFAULT: IPv6 Disabled."
     echo ""
 } 
 
@@ -47,6 +58,10 @@ parse_args()
                                        ;;
             -kt | --keep-taint )       KIND_REMOVE_TAINT=false
                                        ;;
+            -n4 | --no-ipv4 )          KIND_IPV4_SUPPORT=false
+                                       ;;
+            -i6 | --ipv6 )             KIND_IPV6_SUPPORT=true
+                                       ;;
             -h | --help )              usage
                                        exit
                                        ;;
@@ -65,41 +80,111 @@ print_params()
      echo "KIND_HA = $KIND_HA"
      echo "KIND_CONFIG_FILE = $KIND_CONFIG "
      echo "KIND_REMOVE_TAINT = $KIND_REMOVE_TAINT"
+     echo "KIND_IPV4_SUPPORT = $KIND_IPV4_SUPPORT"
+     echo "KIND_IPV6_SUPPORT = $KIND_IPV6_SUPPORT"
      echo ""
 }
 
 parse_args $*
 
-MASTER_COUNT=1
+# Set default values
+KIND_CLUSTER_NAME=${KIND_CLUSTER_NAME:-ovn}
 K8S_VERSION=${K8S_VERSION:-v1.17.2}
 KIND_INSTALL_INGRESS=${KIND_INSTALL_INGRESS:-false}
 KIND_HA=${KIND_HA:-false}
-if [ "$KIND_HA" == true ]; then
-  DEFAULT_KIND_CONFIG=./kind-ha.yaml
-  MASTER_COUNT=`grep -c "^\s-\srole\s*:\s*control-plane" kind-ha.yaml`
-else
-  DEFAULT_KIND_CONFIG=./kind.yaml
-  MASTER_COUNT=`grep -c "^\s-\srole\s*:\s*control-plane" kind.yaml`
-fi
-KIND_CONFIG=${KIND_CONFIG:-$DEFAULT_KIND_CONFIG}
+KIND_CONFIG=${KIND_CONFIG:-./kind.yaml.j2}
 KIND_REMOVE_TAINT=${KIND_REMOVE_TAINT:-true}
+KIND_IPV4_SUPPORT=${KIND_IPV4_SUPPORT:-true}
+KIND_IPV6_SUPPORT=${KIND_IPV6_SUPPORT:-false}
+
+# Input not currently validated. Modify outside script at your own risk.
+# These are the same values defaulted to in KIND code (kind/default.go).
+# NOTE: Upstream KIND IPv6 masks are different (currently rejected by ParseClusterSubnetEntries()):
+#  Upstream - NET_CIDR_IPV6=fd00:10:244::/64 SVC_CIDR_IPV6=fd00:10:96::/112
+NET_CIDR_IPV4=${NET_CIDR_IPV4:-10.244.0.0/16}
+SVC_CIDR_IPV4=${SVC_CIDR_IPV4:-10.96.0.0/12}
+NET_CIDR_IPV6=${NET_CIDR_IPV6:-fd00:10:244::/48}
+SVC_CIDR_IPV6=${SVC_CIDR_IPV6:-fd00:10:96::/64}
 
 print_params
 
 set -euxo pipefail
 
 # Detect IP to use as API server
-API_IP=$(ip -4 addr | grep -oP '(?<=inet\s)\d+(\.\d+){3}' | grep -v "127.0.0.1" | head -n 1)
-if [ -z "$API_IP" ]; then
-  echo "Error detecting machine IP to use as API server"
+API_IPV4=""
+if [ "$KIND_IPV4_SUPPORT" == true ]; then
+  # ip -4 addr -> Run ip command for IPv4
+  # grep -oP '(?<=inet\s)\d+(\.\d+){3}' -> Use only the lines with the
+  #   IPv4 Addresses and strip off the trailing subnet mask, /xx
+  # grep -v "127.0.0.1" -> Remove local host
+  # head -n 1 -> Of the remaining, use first entry
+  API_IPV4=$(ip -4 addr | grep -oP '(?<=inet\s)\d+(\.\d+){3}' | grep -v "127.0.0.1" | head -n 1)
+  if [ -z "$API_IPV4" ]; then
+    echo "Error detecting machine IPv4 to use as API server"
+    exit 1
+  fi
+fi
+
+API_IPV6=""
+if [ "$KIND_IPV6_SUPPORT" == true ]; then
+  # ip -6 addr -> Run ip command for IPv6
+  # grep "inet6" -> Use only the lines with the IPv6 Address
+  # sed 's@/.*@@g' -> Strip off the trailing subnet mask, /xx
+  # grep -v "::1" -> Remove local host
+  # sed '/^fe80:/ d' -> Remove Link-Local Addresses
+  # head -n 1 -> Of the remaining, use first entry
+  API_IPV6=$(ip -6 addr  | grep "inet6" | awk -F' ' '{print $2}' | \
+             sed 's@/.*@@g' | grep -v "::1" | sed '/^fe80:/ d' | head -n 1)
+  if [ -z "$API_IPV6" ]; then
+    echo "Error detecting machine IPv6 to use as API server"
+    exit 1
+  fi
+fi
+
+if [ "$KIND_IPV4_SUPPORT" == true ] && [ "$KIND_IPV6_SUPPORT" == false ]; then
+  API_IP=${API_IPV4}
+  IP_FAMILY=""
+  NET_CIDR=$NET_CIDR_IPV4
+  SVC_CIDR=$SVC_CIDR_IPV4
+  echo "IPv4 Only Support: API_IP=$API_IP --net-cidr=$NET_CIDR --svc-cidr=$SVC_CIDR"
+elif [ "$KIND_IPV4_SUPPORT" == false ] && [ "$KIND_IPV6_SUPPORT" == true ]; then
+  API_IP=${API_IPV6}
+  IP_FAMILY="ipv6"
+  NET_CIDR=$NET_CIDR_IPV6
+  SVC_CIDR=$SVC_CIDR_IPV6
+  echo "IPv6 Only Support: API_IP=$API_IP --net-cidr=$NET_CIDR --svc-cidr=$SVC_CIDR"
+elif [ "$KIND_IPV4_SUPPORT" == true ] && [ "$KIND_IPV6_SUPPORT" == true ]; then
+  #REMOVEME when default CI K8s version > 1.18.0
+  K8S_VERSION_MIN=v1.18.0
+  if [[ "$K8S_VERSION" < "$K8S_VERSION_MIN" ]]; then
+    echo "Dual Stack Support requires minimum Kubernetes $K8S_VERSION_MIN. Use 'K8S_VERSION=v1.18.0 ./kind.sh'."
+    exit 1
+  fi
+
+  #TODO DUALSTACK: Multiple IP Addresses for APIServer not currently supported.
+  #API_IP=${API_IPV4},${API_IPV6}
+  API_IP=${API_IPV4}
+  IP_FAMILY="DualStack"
+  NET_CIDR=$NET_CIDR_IPV4,$NET_CIDR_IPV6
+  SVC_CIDR=$SVC_CIDR_IPV4,$SVC_CIDR_IPV6
+  echo "Dual Stack Support: API_IP=$API_IP --net-cidr=$NET_CIDR --svc-cidr=$SVC_CIDR"
+else
+  echo "Invalid setup. KIND_IPV4_SUPPORT and/or KIND_IPV6_SUPPORT must be true."
   exit 1
 fi
 
-sed -i "s/apiServerAddress.*/apiServerAddress: ${API_IP}/" ${KIND_CONFIG}
+# Output of the j2 command
+KIND_CONFIG_LCL=./kind.yaml
 
-# Create KIND cluster
-KIND_CLUSTER_NAME=${KIND_CLUSTER_NAME:-ovn}
-kind create cluster --name ${KIND_CLUSTER_NAME} --kubeconfig ${HOME}/admin.conf --image kindest/node:${K8S_VERSION} --config=${KIND_CONFIG}
+ovn_apiServerAddress=${API_IP} \
+  ovn_ip_family=${IP_FAMILY} \
+  ovn_ha=${KIND_HA} \
+  j2 ${KIND_CONFIG} -o ${KIND_CONFIG_LCL}
+
+MASTER_COUNT=`grep -c "^\s-\srole\s*:\s*control-plane" ${KIND_CONFIG_LCL}`
+
+# Create KIND cluster. For additional debug, add '--verbosity <int>': 0 None .. 3 Debug
+kind create cluster --name ${KIND_CLUSTER_NAME} --kubeconfig ${HOME}/admin.conf --image kindest/node:${K8S_VERSION} --config=${KIND_CONFIG_LCL}
 export KUBECONFIG=${HOME}/admin.conf
 cat ${KUBECONFIG}
 mkdir -p /tmp/kind
@@ -124,7 +209,7 @@ pushd ../dist/images
 sudo cp -f ../../go-controller/_output/go/bin/* .
 echo "ref: $(git rev-parse  --symbolic-full-name HEAD)  commit: $(git rev-parse  HEAD)" > git_info
 docker build -t ovn-daemonset-f:dev -f Dockerfile.fedora .
-./daemonset.sh --image=docker.io/library/ovn-daemonset-f:dev --net-cidr=10.244.0.0/16 --svc-cidr=10.96.0.0/12 --gateway-mode="local" --k8s-apiserver=https://${API_IP}:11337 --ovn-master-count=${MASTER_COUNT} --kind --master-loglevel=5
+./daemonset.sh --image=docker.io/library/ovn-daemonset-f:dev --net-cidr=${NET_CIDR} --svc-cidr=${SVC_CIDR} --gateway-mode="local" --k8s-apiserver=https://[${API_IP}]:11337 --ovn-master-count=${MASTER_COUNT} --kind --master-loglevel=5
 popd
 kind load docker-image ovn-daemonset-f:dev --name ${KIND_CLUSTER_NAME}
 pushd ../dist/yaml

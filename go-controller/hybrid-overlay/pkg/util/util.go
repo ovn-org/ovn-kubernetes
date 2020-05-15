@@ -83,13 +83,6 @@ func StartNodeWatch(h types.NodeHandler, wf *factory.WatchFactory) error {
 			node := obj.(*kapi.Node)
 			h.Delete(node)
 		},
-	}, func(objs []interface{}) {
-		nodeList := make([]*kapi.Node, 0, len(objs))
-		for _, obj := range objs {
-			node := obj.(*kapi.Node)
-			nodeList = append(nodeList, node)
-		}
-		h.Sync(nodeList)
-	})
+	}, nil)
 	return err
 }

@@ -288,8 +288,8 @@ get_ovn_db_vars() {
       ovn_nbdb_str=${ovn_nbdb_str}","
       ovn_sbdb_str=${ovn_sbdb_str}","
     fi
-    ovn_nbdb_str=${ovn_nbdb_str}${transport}://${ovn_db_hosts[${i}]}:${ovn_nb_port}
-    ovn_sbdb_str=${ovn_sbdb_str}${transport}://${ovn_db_hosts[${i}]}:${ovn_sb_port}
+    ovn_nbdb_str=${ovn_nbdb_str}${transport}://[${ovn_db_hosts[${i}]}]:${ovn_nb_port}
+    ovn_sbdb_str=${ovn_sbdb_str}${transport}://[${ovn_db_hosts[${i}]}]:${ovn_sb_port}
   done
   # OVN_NORTH and OVN_SOUTH override derived host
   ovn_nbdb=${OVN_NORTH:-$ovn_nbdb_str}
@@ -644,7 +644,7 @@ nb-ovsdb() {
     ovn-nbctl set-ssl ${ovn_nb_pk} ${ovn_nb_cert} ${ovn_ca_cert}
     echo "=============== nb-ovsdb ========== reconfigured for SSL"
   }
-  ovn-nbctl --inactivity-probe=0 set-connection p${transport}:${ovn_nb_port}:${ovn_db_host}
+  ovn-nbctl --inactivity-probe=0 set-connection p${transport}:${ovn_nb_port}:[${ovn_db_host}]
 
   tail --follow=name ${OVN_LOGDIR}/ovsdb-server-nb.log &
   ovn_tail_pid=$!
@@ -676,7 +676,7 @@ sb-ovsdb() {
     ovn-sbctl set-ssl ${ovn_sb_pk} ${ovn_sb_cert} ${ovn_ca_cert}
     echo "=============== sb-ovsdb ========== reconfigured for SSL"
   }
-  ovn-sbctl --inactivity-probe=0 set-connection p${transport}:${ovn_sb_port}:${ovn_db_host}
+  ovn-sbctl --inactivity-probe=0 set-connection p${transport}:${ovn_sb_port}:[${ovn_db_host}]
 
   # create the ovnkube_db endpoint for other pods to query the OVN DB IP
   set_ovnkube_db_ep ${ovn_db_host}

@@ -71,7 +71,6 @@ var _ = Describe("Hybrid SDN Master Operations", func() {
 	})
 
 	const hybridOverlayClusterCIDR string = "11.1.0.0/16/24"
-
 	It("allocates and assigns a hybrid-overlay subnet to a Windows node that doesn't have one", func() {
 		app.Action = func(ctx *cli.Context) error {
 			const (
