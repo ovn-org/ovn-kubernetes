@@ -106,7 +106,7 @@ func runningPlatform() (string, error) {
 }
 
 // Exec runs various OVN and OVS utilities
-type ExecHelper struct {
+type execHelper struct {
 	exec            kexec.Interface
 	ofctlPath       string
 	vsctlPath       string
@@ -123,7 +123,7 @@ type ExecHelper struct {
 	routePath       string
 }
 
-var runner *ExecHelper
+var runner *execHelper
 
 // SetExec validates executable paths and saves the given exec interface
 // to be used for running various OVS and OVN utilites
@@ -182,7 +182,7 @@ func SetExec(exec kexec.Interface) error {
 func SetExecWithoutOVS(exec kexec.Interface) error {
 	var err error
 
-	runner = &ExecHelper{exec: exec}
+	runner = &execHelper{exec: exec}
 	if runtime.GOOS == windowsOS {
 		runner.powershellPath, err = exec.LookPath(powershellCommand)
 		if err != nil {
@@ -210,7 +210,7 @@ func SetExecWithoutOVS(exec kexec.Interface) error {
 func SetSpecificExec(exec kexec.Interface, commands ...string) error {
 	var err error
 
-	runner = &ExecHelper{exec: exec}
+	runner = &execHelper{exec: exec}
 	for _, command := range commands {
 		switch command {
 		case ovsVsctlCommand:
@@ -234,7 +234,7 @@ func GetExec() kexec.Interface {
 
 var runCounter uint64
 
-func RunCmd(cmd kexec.Cmd, cmdPath string, args ...string) (*bytes.Buffer, *bytes.Buffer, error) {
+func runCmd(cmd kexec.Cmd, cmdPath string, args ...string) (*bytes.Buffer, *bytes.Buffer, error) {
 	stdout := &bytes.Buffer{}
 	stderr := &bytes.Buffer{}
 
@@ -254,20 +254,20 @@ func RunCmd(cmd kexec.Cmd, cmdPath string, args ...string) (*bytes.Buffer, *byte
 	return stdout, stderr, err
 }
 
-func Run(cmdPath string, args ...string) (*bytes.Buffer, *bytes.Buffer, error) {
+func run(cmdPath string, args ...string) (*bytes.Buffer, *bytes.Buffer, error) {
 	cmd := runner.exec.Command(cmdPath, args...)
-	return RunCmd(cmd, cmdPath, args...)
+	return runCmd(cmd, cmdPath, args...)
 }
 
-func RunWithEnvVars(cmdPath string, envVars []string, args ...string) (*bytes.Buffer, *bytes.Buffer, error) {
+func runWithEnvVars(cmdPath string, envVars []string, args ...string) (*bytes.Buffer, *bytes.Buffer, error) {
 	cmd := runner.exec.Command(cmdPath, args...)
 	cmd.SetEnv(envVars)
-	return RunCmd(cmd, cmdPath, args...)
+	return runCmd(cmd, cmdPath, args...)
 }
 
 // RunOVSOfctl runs a command via ovs-ofctl.
 func RunOVSOfctl(args ...string) (string, string, error) {
-	stdout, stderr, err := Run(runner.ofctlPath, args...)
+	stdout, stderr, err := run(runner.ofctlPath, args...)
 	return strings.Trim(stdout.String(), "\" \n"), stderr.String(), err
 }
 
@@ -275,7 +275,7 @@ func RunOVSOfctl(args ...string) (string, string, error) {
 func RunOVSVsctl(args ...string) (string, string, error) {
 	cmdArgs := []string{fmt.Sprintf("--timeout=%d", ovsCommandTimeout)}
 	cmdArgs = append(cmdArgs, args...)
-	stdout, stderr, err := Run(runner.vsctlPath, cmdArgs...)
+	stdout, stderr, err := run(runner.vsctlPath, cmdArgs...)
 	return strings.Trim(strings.TrimSpace(stdout.String()), "\""), stderr.String(), err
 }
 
@@ -283,7 +283,7 @@ func RunOVSVsctl(args ...string) (string, string, error) {
 func RunOVSAppctlWithTimeout(timeout int, args ...string) (string, string, error) {
 	cmdArgs := []string{fmt.Sprintf("--timeout=%d", timeout)}
 	cmdArgs = append(cmdArgs, args...)
-	stdout, stderr, err := Run(runner.appctlPath, cmdArgs...)
+	stdout, stderr, err := run(runner.appctlPath, cmdArgs...)
 	return strings.Trim(strings.TrimSpace(stdout.String()), "\""), stderr.String(), err
 }
 
@@ -297,7 +297,7 @@ func RunOVSAppctl(args ...string) (string, string, error) {
 func RunOVNAppctlWithTimeout(timeout int, args ...string) (string, string, error) {
 	cmdArgs := []string{fmt.Sprintf("--timeout=%d", timeout)}
 	cmdArgs = append(cmdArgs, args...)
-	stdout, stderr, err := Run(runner.ovnappctlPath, cmdArgs...)
+	stdout, stderr, err := run(runner.ovnappctlPath, cmdArgs...)
 	return strings.Trim(strings.TrimSpace(stdout.String()), "\""), stderr.String(), err
 }
 
@@ -307,7 +307,7 @@ func runOVNretry(cmdPath string, envVars []string, args ...string) (*bytes.Buffe
 
 	retriesLeft := 200
 	for {
-		stdout, stderr, err := RunWithEnvVars(cmdPath, envVars, args...)
+		stdout, stderr, err := runWithEnvVars(cmdPath, envVars, args...)
 		if err == nil {
 			return stdout, stderr, err
 		}
@@ -537,25 +537,25 @@ func RunOVNNorthAppCtl(args ...string) (string, string, error) {
 
 // RunIP runs a command via the iproute2 "ip" utility
 func RunIP(args ...string) (string, string, error) {
-	stdout, stderr, err := Run(runner.ipPath, args...)
+	stdout, stderr, err := run(runner.ipPath, args...)
 	return strings.TrimSpace(stdout.String()), stderr.String(), err
 }
 
 // RunPowershell runs a command via the Windows powershell utility
 func RunPowershell(args ...string) (string, string, error) {
-	stdout, stderr, err := Run(runner.powershellPath, args...)
+	stdout, stderr, err := run(runner.powershellPath, args...)
 	return strings.TrimSpace(stdout.String()), stderr.String(), err
 }
 
 // RunNetsh runs a command via the Windows netsh utility
 func RunNetsh(args ...string) (string, string, error) {
-	stdout, stderr, err := Run(runner.netshPath, args...)
+	stdout, stderr, err := run(runner.netshPath, args...)
 	return strings.TrimSpace(stdout.String()), stderr.String(), err
 }
 
 // RunRoute runs a command via the Windows route utility
 func RunRoute(args ...string) (string, string, error) {
-	stdout, stderr, err := Run(runner.routePath, args...)
+	stdout, stderr, err := run(runner.routePath, args...)
 	return strings.TrimSpace(stdout.String()), stderr.String(), err
 }
 
@@ -570,7 +570,7 @@ func RawExec(cmdPath string, args ...string) (string, string, error) {
 			return "", "", err
 		}
 	}
-	stdout, stderr, err := Run(cmdPath, args...)
+	stdout, stderr, err := run(cmdPath, args...)
 	return strings.TrimSpace(stdout.String()), stderr.String(), err
 }
 
@@ -583,7 +583,7 @@ func AddNormalActionOFFlow(bridgeName string) (string, string, error) {
 
 	cmd := runner.exec.Command(runner.ofctlPath, args...)
 	cmd.SetStdin(stdin)
-	stdout, stderr, err := RunCmd(cmd, runner.ofctlPath, args...)
+	stdout, stderr, err := runCmd(cmd, runner.ofctlPath, args...)
 	return strings.Trim(stdout.String(), "\" \n"), stderr.String(), err
 }
 
