@@ -622,7 +622,7 @@ func (oc *Controller) addNetworkPolicy(policy *knet.NetworkPolicy) {
 	for i, ingressJSON := range policy.Spec.Ingress {
 		klog.V(5).Infof("Network policy ingress is %+v", ingressJSON)
 
-		ingress := newGressPolicy(knet.PolicyTypeIngress, i)
+		ingress := newGressPolicy(knet.PolicyTypeIngress, i, policy.Namespace, policy.Name)
 
 		// Each ingress rule can have multiple ports to which we allow traffic.
 		for _, portJSON := range ingressJSON.Ports {
@@ -651,7 +651,7 @@ func (oc *Controller) addNetworkPolicy(policy *knet.NetworkPolicy) {
 			}
 		}
 
-		localPodAddACL(np, ingress)
+		ingress.localPodAddACL(np.portGroupName, np.portGroupUUID)
 
 		for _, fromJSON := range ingressJSON.From {
 			ingressPolicyHandler := policyHandler{
@@ -671,7 +671,7 @@ func (oc *Controller) addNetworkPolicy(policy *knet.NetworkPolicy) {
 	for i, egressJSON := range policy.Spec.Egress {
 		klog.V(5).Infof("Network policy egress is %+v", egressJSON)
 
-		egress := newGressPolicy(knet.PolicyTypeEgress, i)
+		egress := newGressPolicy(knet.PolicyTypeEgress, i, policy.Namespace, policy.Name)
 
 		// Each egress rule can have multiple ports to which we allow traffic.
 		for _, portJSON := range egressJSON.Ports {
@@ -700,7 +700,7 @@ func (oc *Controller) addNetworkPolicy(policy *knet.NetworkPolicy) {
 			}
 		}
 
-		localPodAddACL(np, egress)
+		egress.localPodAddACL(np.portGroupName, np.portGroupUUID)
 
 		for _, toJSON := range egressJSON.To {
 			egressPolicyHandler := policyHandler{
@@ -731,8 +731,7 @@ func (oc *Controller) addNetworkPolicy(policy *knet.NetworkPolicy) {
 			// For each peer namespace selector, we create a watcher that
 			// populates ingress.peerAddressSets
 			oc.handlePeerNamespaceSelector(policy,
-				handler.namespaceSelector, handler.gress, np,
-				oc.handlePeerNamespaceSelectorModify)
+				handler.namespaceSelector, handler.gress, np)
 		} else if handler.podSelector != nil {
 			// For each peer pod selector, we create a watcher that
 			// populates the addressSet
@@ -944,13 +943,10 @@ func (oc *Controller) handlePeerNamespaceAndPodSelector(policy *knet.NetworkPoli
 	np.nsHandlerList = append(np.nsHandlerList, namespaceHandler)
 }
 
-type peerNamespaceSelectorModifyFn func(*gressPolicy, *namespacePolicy, string, string)
-
 func (oc *Controller) handlePeerNamespaceSelector(
 	policy *knet.NetworkPolicy,
 	namespaceSelector *metav1.LabelSelector,
-	gress *gressPolicy, np *namespacePolicy,
-	modifyFn peerNamespaceSelectorModifyFn) {
+	gress *gressPolicy, np *namespacePolicy) {
 
 	h, err := oc.watchFactory.AddFilteredNamespaceHandler("",
 		namespaceSelector,
@@ -965,7 +961,7 @@ func (oc *Controller) handlePeerNamespaceSelector(
 				hashedAddressSet := hashedAddressSet(namespace.Name)
 				oldL3Match, newL3Match, added := gress.addAddressSet(hashedAddressSet)
 				if added {
-					modifyFn(gress, np, oldL3Match, newL3Match)
+					gress.localPodUpdateACL(oldL3Match, newL3Match, np.portGroupName)
 				}
 			},
 			DeleteFunc: func(obj interface{}) {
@@ -978,7 +974,7 @@ func (oc *Controller) handlePeerNamespaceSelector(
 				hashedAddressSet := hashedAddressSet(namespace.Name)
 				oldL3Match, newL3Match, removed := gress.delAddressSet(hashedAddressSet)
 				if removed {
-					modifyFn(gress, np, oldL3Match, newL3Match)
+					gress.localPodUpdateACL(oldL3Match, newL3Match, np.portGroupName)
 				}
 			},
 			UpdateFunc: func(oldObj, newObj interface{}) {

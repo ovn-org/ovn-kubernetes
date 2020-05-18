@@ -1249,7 +1249,12 @@ var _ = Describe("OVN NetworkPolicy Operations", func() {
 
 var _ = Describe("OVN NetworkPolicy Low-Level Operations", func() {
 	It("computes match strings from address sets correctly", func() {
-		gp := newGressPolicy(knet.PolicyTypeIngress, 0)
+		const (
+			pgUUID string = "pg-uuid"
+			pgName string = "pg-name"
+		)
+
+		gp := newGressPolicy(knet.PolicyTypeIngress, 0, "testing", "policy")
 
 		one := hashedAddressSet(fmt.Sprintf("testing.policy.ingress.1"))
 		two := hashedAddressSet(fmt.Sprintf("testing.policy.ingress.2"))
