@@ -800,7 +800,7 @@ func (oc *Controller) syncNodesPeriodic() {
 		return
 	}
 
-	nodeNames := make([]string, len(nodes.Items))
+	nodeNames := make([]string, 0, len(nodes.Items))
 
 	for _, node := range nodes.Items {
 		nodeNames = append(nodeNames, node.Name)
