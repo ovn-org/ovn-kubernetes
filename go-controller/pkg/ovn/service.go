@@ -3,6 +3,7 @@ package ovn
 import (
 	"fmt"
 	"net"
+	"reflect"
 
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
@@ -168,6 +169,21 @@ func (ovn *Controller) createService(service *kapi.Service) error {
 		return nil
 	}
 
+	// We can end up in a situation where the endpoint creation is triggered before the service creation,
+	// we should not be creating the reject ACLs if this endpoint exists, because that would result in an unreachable service
+	// eventough the endpoint exists.
+	// NOTE: we can also end up in a situation where a service matching no pods is created. Such a service still has an endpoint, but with no subsets.
+	// make sure to treat that service as an ACL reject.
+	ep, err := ovn.watchFactory.GetEndpoint(service.Namespace, service.Name)
+	if err == nil {
+		if len(ep.Subsets) > 0 {
+			klog.V(5).Infof("service: %s has endpoint, will create loadbalancer VIPs", service.Name)
+		} else {
+			klog.V(5).Infof("service: %s has empty endpoint", service.Name)
+			ep = nil
+		}
+	}
+
 	for _, svcPort := range service.Spec.Ports {
 		var port int32
 		if util.ServiceTypeHasNodePort(service) {
@@ -227,6 +243,10 @@ func (ovn *Controller) createService(service *kapi.Service) error {
 					// Skip creating LB if endpoints watcher already did it
 					if _, hasEps := ovn.getServiceLBInfo(loadBalancer, vip); hasEps {
 						klog.V(5).Infof("Load Balancer already configured for %s, %s", loadBalancer, vip)
+					} else if ep != nil {
+						if err := ovn.AddEndpoints(ep); err != nil {
+							return err
+						}
 					} else if ovn.svcQualifiesForReject(service) {
 						aclUUID, err := ovn.createLoadBalancerRejectACL(loadBalancer, physicalIP, port, protocol)
 						if err != nil {
@@ -249,6 +269,10 @@ func (ovn *Controller) createService(service *kapi.Service) error {
 				// Skip creating LB if endpoints watcher already did it
 				if _, hasEps := ovn.getServiceLBInfo(loadBalancer, vip); hasEps {
 					klog.V(5).Infof("Load Balancer already configured for %s, %s", loadBalancer, vip)
+				} else if ep != nil {
+					if err := ovn.AddEndpoints(ep); err != nil {
+						return err
+					}
 				} else {
 					aclUUID, err := ovn.createLoadBalancerRejectACL(loadBalancer, service.Spec.ClusterIP,
 						svcPort.Port, protocol)
@@ -269,6 +293,10 @@ func (ovn *Controller) createService(service *kapi.Service) error {
 					// Skip creating LB if endpoints watcher already did it
 					if _, hasEps := ovn.getServiceLBInfo(loadBalancer, vip); hasEps {
 						klog.V(5).Infof("Load Balancer already configured for %s, %s", loadBalancer, vip)
+					} else if ep != nil {
+						if err := ovn.AddEndpoints(ep); err != nil {
+							return err
+						}
 					} else {
 						aclUUID, err := ovn.createLoadBalancerRejectACL(exLoadBalancer, extIP, svcPort.Port, protocol)
 						if err != nil {
@@ -285,12 +313,18 @@ func (ovn *Controller) createService(service *kapi.Service) error {
 }
 
 func (ovn *Controller) updateService(oldSvc, newSvc *kapi.Service) error {
-	klog.V(5).Infof("Updating service is a noop: %s", newSvc.Name)
-	// Service update needs to check for port change, protocol, etc and update the ACLs, or and OVN LBs
-	// This only really matters when a service is updated and has no endpoints. If the service has endpoints
-	// the endpoints watcher will handle the OVN config
-	// TODO (trozet) implement this
-	return nil
+	if reflect.DeepEqual(newSvc.Spec.Ports, oldSvc.Spec.Ports) &&
+		reflect.DeepEqual(newSvc.Spec.ExternalIPs, oldSvc.Spec.ExternalIPs) &&
+		reflect.DeepEqual(newSvc.Spec.ClusterIP, oldSvc.Spec.ClusterIP) &&
+		reflect.DeepEqual(newSvc.Spec.Type, oldSvc.Spec.Type) {
+		klog.V(5).Infof("skipping service update for: %s as change does not apply to any of .Spec.Ports, .Spec.ExternalIP, .Spec.ClusterIP, .Spec.Type", newSvc.Name)
+		return nil
+	}
+
+	klog.V(5).Infof("updating service from: %v to: %v", oldSvc, newSvc)
+
+	ovn.deleteService(oldSvc)
+	return ovn.createService(newSvc)
 }
 
 func (ovn *Controller) deleteService(service *kapi.Service) {
