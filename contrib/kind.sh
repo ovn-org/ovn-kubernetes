@@ -89,7 +89,7 @@ parse_args $*
 
 # Set default values
 KIND_CLUSTER_NAME=${KIND_CLUSTER_NAME:-ovn}
-K8S_VERSION=${K8S_VERSION:-v1.17.2}
+K8S_VERSION=${K8S_VERSION:-v1.18.2}
 KIND_INSTALL_INGRESS=${KIND_INSTALL_INGRESS:-false}
 KIND_HA=${KIND_HA:-false}
 KIND_CONFIG=${KIND_CONFIG:-./kind.yaml.j2}
@@ -154,13 +154,6 @@ elif [ "$KIND_IPV4_SUPPORT" == false ] && [ "$KIND_IPV6_SUPPORT" == true ]; then
   SVC_CIDR=$SVC_CIDR_IPV6
   echo "IPv6 Only Support: API_IP=$API_IP --net-cidr=$NET_CIDR --svc-cidr=$SVC_CIDR"
 elif [ "$KIND_IPV4_SUPPORT" == true ] && [ "$KIND_IPV6_SUPPORT" == true ]; then
-  #REMOVEME when default CI K8s version > 1.18.0
-  K8S_VERSION_MIN=v1.18.0
-  if [[ "$K8S_VERSION" < "$K8S_VERSION_MIN" ]]; then
-    echo "Dual Stack Support requires minimum Kubernetes $K8S_VERSION_MIN. Use 'K8S_VERSION=v1.18.0 ./kind.sh'."
-    exit 1
-  fi
-
   #TODO DUALSTACK: Multiple IP Addresses for APIServer not currently supported.
   #API_IP=${API_IPV4},${API_IPV6}
   API_IP=${API_IPV4}
@@ -240,7 +233,7 @@ fi
 
 count=1
 until [ -z "$(kubectl get pod -A -o custom-columns=NAME:metadata.name,STATUS:.status.phase | tail -n +2 | grep -v Running)" ];do
-  if [ $count -gt 15 ]; then
+  if [ $count -gt 20 ]; then
     echo "Some pods are not running after timeout"
     exit 1
   fi
