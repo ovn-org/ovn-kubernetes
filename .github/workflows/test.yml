@@ -100,7 +100,6 @@ jobs:
       if: steps.cache-k8s.outputs.cache-hit != 'true'
 
     - name: Build and install Kubernetes
-      if: steps.cache-k8s.outputs.cache-hit != 'true'
       run: |
         set -x
         rm -rf $GOPATH/src/k8s.io/kubernetes
@@ -162,7 +161,6 @@ jobs:
     # https://github.com/actions/cache/issues/107#issuecomment-598188250
     # https://github.com/actions/cache/issues/208#issuecomment-596664572
     - name: Build and install Kubernetes
-      if: steps.cache-k8s.outputs.cache-hit != 'true'
       run: |
         set -x
         rm -rf $GOPATH/src/k8s.io/kubernetes/
