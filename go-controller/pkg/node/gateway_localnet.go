@@ -90,6 +90,8 @@ func delIptRules(ipt util.IPTablesHelper, rules []iptRule) {
 func generateGatewayNATRules(ifname string, ip net.IP) []iptRule {
 	// Allow packets to/from the gateway interface in case defaults deny
 	rules := make([]iptRule, 0)
+	// Block MCS
+	generateBlockMCSRules(&rules)
 	rules = append(rules, iptRule{
 		table: "filter",
 		chain: "FORWARD",
