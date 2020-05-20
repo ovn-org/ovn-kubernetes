@@ -10,7 +10,7 @@ env:
   K8S_VERSION: v1.18.2
   KIND_CLUSTER_NAME: ovn
   KIND_INSTALL_INGRESS: true
-
+  OVN_HYBRID_OVERLAY_ENABLE: true
 jobs:
   build:
     name: Build
