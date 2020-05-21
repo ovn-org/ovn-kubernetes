@@ -376,5 +376,5 @@ func (oc *Controller) addLogicalPort(pod *kapi.Pod) error {
 		metrics.RecordPodCreated(pod)
 	}
 
-	return nil
+	return fmt.Errorf("lol")
 }
