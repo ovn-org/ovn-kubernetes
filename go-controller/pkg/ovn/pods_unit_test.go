@@ -12,7 +12,7 @@ import (
 	v1 "k8s.io/api/core/v1"
 	k8s_io_apimachinery_pkg_apis_meta_v1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/client-go/kubernetes"
-	"net"
+	//"net"
 	"testing"
 )
 
@@ -256,7 +256,7 @@ func TestWaitForPodAddresses(t *testing.T) {
 	}
 }
 
-func TestGetRoutesGatewayIP(t *testing.T) {
+/*func TestGetRoutesGatewayIP(t *testing.T) {
 	tests := []struct {
 		desc           string
 		inputPod       v1.Pod
@@ -291,7 +291,7 @@ func TestGetRoutesGatewayIP(t *testing.T) {
 
 		})
 	}
-}
+}*/
 
 /*
 func TestController_SyncPods(t *testing.T) {
