@@ -29,22 +29,17 @@ nodes:
          node-labels: "ingress-ready=true"
          authorization-mode: "AlwaysAllow"
 {%- if ovn_ha is equalto "true" %}
+{%- for _ in range(1, ovn_num_master | int) %}
  - role: control-plane
    extraMounts:
      - hostPath: /tmp/kind
        containerPath: /var/run/secrets/kubernetes.io/serviceaccount/
- - role: control-plane
-   extraMounts:
-     - hostPath: /tmp/kind
-       containerPath: /var/run/secrets/kubernetes.io/serviceaccount/
-{%- else %}
- - role: worker
-   extraMounts:
-     - hostPath: /tmp/kind
-       containerPath: /var/run/secrets/kubernetes.io/serviceaccount/
- - role: worker
-   extraMounts:
-     - hostPath: /tmp/kind
-       containerPath: /var/run/secrets/kubernetes.io/serviceaccount/
+{%- endfor %}
 {%- endif %}
+{%- for _ in range(ovn_num_worker | int) %}
+ - role: worker
+   extraMounts:
+     - hostPath: /tmp/kind
+       containerPath: /var/run/secrets/kubernetes.io/serviceaccount/
+{%- endfor %}
 
