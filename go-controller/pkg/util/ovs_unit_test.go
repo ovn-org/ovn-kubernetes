@@ -2,9 +2,10 @@ package util
 
 import (
 	"fmt"
-	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/testing/mocks"
+	mock_k8s_io_utils_exec "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/testing/mocks/k8s.io/utils/exec"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
+	kexec "k8s.io/utils/exec"
 	"testing"
 )
 
@@ -14,8 +15,75 @@ type onCallReturnArgs struct {
 	retArgList          []interface{}
 }
 
-func TestSetExec(t *testing.T) {
-	mockKexecIface := new(mocks.Interface)
+func TestExecUtilRunSvcImplStruct_RunCmd(t *testing.T) {
+	mockCmd := new(mock_k8s_io_utils_exec.Cmd)
+	execUtilsSvcInst := ExecUtilRunSvcImplStruct{}
+
+	tests := []struct {
+		desc             string
+		expectedErr      error
+		cmd              kexec.Cmd
+		cmdPath          string
+		cmdArg           string
+		envVars          []string
+		onRetArgsCmdList []onCallReturnArgs
+	}{
+		{
+			desc:        "negative: set cmd parameter to be nil",
+			expectedErr: fmt.Errorf("cmd object cannot be nil"),
+			cmd:         nil,
+		},
+		{
+			desc:        "set envars and ensure cmd.SetEnv is invoked",
+			expectedErr: nil,
+			cmd:         mockCmd,
+			envVars:     []string{"OVN_NB_DAEMON=/some/blah/path"},
+			onRetArgsCmdList: []onCallReturnArgs{
+				{"Run", []string{}, []interface{}{nil}},
+				{"SetStdout", []string{"*bytes.Buffer"}, nil},
+				{"SetStderr", []string{"*bytes.Buffer"}, nil},
+				{"SetEnv", []string{"[]string"}, nil},
+			},
+		},
+		{
+			desc:        "cmd.Run returns error test",
+			expectedErr: fmt.Errorf("mock error"),
+			cmd:         mockCmd,
+			onRetArgsCmdList: []onCallReturnArgs{
+				{"Run", []string{}, []interface{}{fmt.Errorf("mock error")}},
+				{"SetStdout", []string{"*bytes.Buffer"}, nil},
+				{"SetStderr", []string{"*bytes.Buffer"}, nil},
+			},
+		},
+	}
+
+	for i, tc := range tests {
+		t.Run(fmt.Sprintf("%d:%s", i, tc.desc), func(t *testing.T) {
+			if tc.cmd != nil {
+				for _, item := range tc.onRetArgsCmdList {
+					cmdCall := tc.cmd.(*mock_k8s_io_utils_exec.Cmd).On(item.onCallMethodName)
+					for _, arg := range item.onCallMethodArgType {
+						cmdCall.Arguments = append(cmdCall.Arguments, mock.AnythingOfType(arg))
+					}
+
+					for _, e := range item.retArgList {
+						cmdCall.ReturnArguments = append(cmdCall.ReturnArguments, e)
+					}
+					cmdCall.Once()
+				}
+			}
+			_, _, e := execUtilsSvcInst.RunCmd(tc.cmd, tc.cmdPath, tc.envVars, tc.cmdArg)
+
+			assert.Equal(t, e, tc.expectedErr)
+			mockCmd.AssertExpectations(t)
+		})
+	}
+}
+
+func TestExecUtilRunSvcImplStruct_SetExec(t *testing.T) {
+	mockKexecIface := new(mock_k8s_io_utils_exec.Interface)
+	execUtilsSvcInst := ExecUtilRunSvcImplStruct{}
+
 	tests := []struct {
 		desc        string
 		expectedErr error
@@ -23,15 +91,15 @@ func TestSetExec(t *testing.T) {
 		fnCallTimes int
 	}{
 		{
-			desc:        "positive, SetExecWithoutOVS succeeds",
+			desc:        "tests to ensure that the LookPath method succeeds without error",
 			expectedErr: nil,
-			onRetArgs:   &onCallReturnArgs{"LookPath", []string{"string"}, []interface{}{"ip", nil}},
-			fnCallTimes: 8,
+			onRetArgs:   &onCallReturnArgs{"LookPath", []string{"string"}, []interface{}{"someexec", nil}},
+			fnCallTimes: 8, //number of LookPath calls made to return success
 		},
 		{
-			desc:        "negative, SetExecWithoutOVS returns error",
-			expectedErr: fmt.Errorf(`exec: \"ip:\" executable file not found in $PATH`),
-			onRetArgs:   &onCallReturnArgs{"LookPath", []string{"string"}, []interface{}{"", fmt.Errorf(`exec: \"ip:\" executable file not found in $PATH`)}},
+			desc:        "tests that an error is returned when the first LookPath method is executed",
+			expectedErr: fmt.Errorf(`exec: executable file not found in $PATH`),
+			onRetArgs:   &onCallReturnArgs{"LookPath", []string{"string"}, []interface{}{"", fmt.Errorf(`exec: executable file not found in $PATH`)}},
 			fnCallTimes: 1,
 		},
 	}
@@ -46,6 +114,139 @@ func TestSetExec(t *testing.T) {
 				call.ReturnArguments = append(call.ReturnArguments, elem)
 			}
 			call.Times(tc.fnCallTimes)
+			e := execUtilsSvcInst.SetExec(mockKexecIface)
+			assert.Equal(t, e, tc.expectedErr)
+			mockKexecIface.AssertExpectations(t)
+		})
+	}
+}
+
+func TestExecUtilRunSvcImplStruct_SetExecWithoutOVS(t *testing.T) {
+	mockKexecIface := new(mock_k8s_io_utils_exec.Interface)
+	execUtilsSvcInst := ExecUtilRunSvcImplStruct{}
+
+	tests := []struct {
+		desc        string
+		expectedErr error
+		onRetArgs   *onCallReturnArgs
+	}{
+		{
+			desc:        "tests to ensure that the LookPath method succeeds without error",
+			expectedErr: nil,
+			onRetArgs:   &onCallReturnArgs{"LookPath", []string{"string"}, []interface{}{"ip", nil}},
+		},
+		{
+			desc:        "tests that an error is returned when the LookPath method is executed",
+			expectedErr: fmt.Errorf(`exec: \"ip:\" executable file not found in $PATH`),
+			onRetArgs:   &onCallReturnArgs{"LookPath", []string{"string"}, []interface{}{"", fmt.Errorf(`exec: \"ip:\" executable file not found in $PATH`)}},
+		},
+	}
+	for i, tc := range tests {
+		t.Run(fmt.Sprintf("%d:%s", i, tc.desc), func(t *testing.T) {
+			call := mockKexecIface.On(tc.onRetArgs.onCallMethodName)
+			for _, arg := range tc.onRetArgs.onCallMethodArgType {
+				call.Arguments = append(call.Arguments, mock.AnythingOfType(arg))
+			}
+			for _, elem := range tc.onRetArgs.retArgList {
+				call.ReturnArguments = append(call.ReturnArguments, elem)
+			}
+			call.Once()
+			e := execUtilsSvcInst.SetExecWithoutOVS(mockKexecIface)
+			assert.Equal(t, e, tc.expectedErr)
+			mockKexecIface.AssertExpectations(t)
+		})
+	}
+}
+
+func TestExecUtilRunSvcImplStruct_SetSpecificExec(t *testing.T) {
+	mockKexecIface := new(mock_k8s_io_utils_exec.Interface)
+	execUtilsSvcInst := ExecUtilRunSvcImplStruct{}
+	tests := []struct {
+		desc        string
+		expectedErr error
+		fnArg       string
+		onRetArgs   *onCallReturnArgs
+		fnCallTimes int
+	}{
+		{
+			desc:        "tests to ensure that the LookPath method succeeds without error",
+			expectedErr: nil,
+			fnArg:       "ovs-vsctl",
+			onRetArgs:   &onCallReturnArgs{"LookPath", []string{"string"}, []interface{}{"ovs-vsctl", nil}},
+			fnCallTimes: 1,
+		},
+		{
+			desc:        "tests that an error is returned when the LookPath method is executed",
+			expectedErr: fmt.Errorf(`exec: \"ovs-vsctl:\" executable file not found in $PATH`),
+			fnArg:       "ovs-vsctl",
+			onRetArgs:   &onCallReturnArgs{"LookPath", []string{"string"}, []interface{}{"", fmt.Errorf(`exec: \"ovs-vsctl:\" executable file not found in $PATH`)}},
+			fnCallTimes: 1,
+		},
+		{
+			desc:        "negative: unknown command",
+			expectedErr: fmt.Errorf(`unknown command: "ovs-appctl"`),
+			fnArg:       "ovs-appctl",
+			onRetArgs:   &onCallReturnArgs{"LookPath", []string{"string"}, []interface{}{"ovs-appctl", nil}},
+			fnCallTimes: 0,
+		},
+	}
+
+	for i, tc := range tests {
+		t.Run(fmt.Sprintf("%d:%s", i, tc.desc), func(t *testing.T) {
+			call := mockKexecIface.On(tc.onRetArgs.onCallMethodName)
+			for _, arg := range tc.onRetArgs.onCallMethodArgType {
+				call.Arguments = append(call.Arguments, mock.AnythingOfType(arg))
+			}
+			for _, elem := range tc.onRetArgs.retArgList {
+				call.ReturnArguments = append(call.ReturnArguments, elem)
+			}
+			call.Times(tc.fnCallTimes)
+			e := execUtilsSvcInst.SetSpecificExec(mockKexecIface, tc.fnArg)
+			assert.Equal(t, e, tc.expectedErr)
+			mockKexecIface.AssertExpectations(t)
+		})
+	}
+}
+
+func TestSetExec(t *testing.T) {
+	mockKexecIface := new(mock_k8s_io_utils_exec.Interface)
+	tests := []struct {
+		desc         string
+		expectedErr  error
+		onRetArgs    *onCallReturnArgs
+		fnCallTimes  int
+		setRunnerNil bool
+	}{
+		{
+			desc:         "positive, test when 'runner' is nil",
+			expectedErr:  nil,
+			onRetArgs:    &onCallReturnArgs{"LookPath", []string{"string"}, []interface{}{"ip", nil}},
+			fnCallTimes:  8,
+			setRunnerNil: true,
+		},
+		{
+			desc:         "positive, test when 'runner' is not nil",
+			expectedErr:  nil,
+			onRetArgs:    &onCallReturnArgs{"LookPath", []string{"string"}, []interface{}{"", nil}},
+			fnCallTimes:  8,
+			setRunnerNil: false,
+		},
+	}
+
+	for i, tc := range tests {
+		t.Run(fmt.Sprintf("%d:%s", i, tc.desc), func(t *testing.T) {
+			call := mockKexecIface.On(tc.onRetArgs.onCallMethodName)
+			for _, arg := range tc.onRetArgs.onCallMethodArgType {
+				call.Arguments = append(call.Arguments, mock.AnythingOfType(arg))
+			}
+			for _, elem := range tc.onRetArgs.retArgList {
+				call.ReturnArguments = append(call.ReturnArguments, elem)
+			}
+			call.Times(tc.fnCallTimes)
+			if tc.setRunnerNil == false {
+				// note runner is defined in ovs.go file
+				runner = &execHelper{exec: mockKexecIface}
+			}
 			e := SetExec(mockKexecIface)
 			assert.Equal(t, e, tc.expectedErr)
 			mockKexecIface.AssertExpectations(t)
@@ -54,7 +255,7 @@ func TestSetExec(t *testing.T) {
 }
 
 func TestSetExecWithoutOVS(t *testing.T) {
-	mockKexecIface := new(mocks.Interface)
+	mockKexecIface := new(mock_k8s_io_utils_exec.Interface)
 	tests := []struct {
 		desc        string
 		expectedErr error
@@ -90,7 +291,7 @@ func TestSetExecWithoutOVS(t *testing.T) {
 }
 
 func TestSetSpecificExec(t *testing.T) {
-	mockKexecIface := new(mocks.Interface)
+	mockKexecIface := new(mock_k8s_io_utils_exec.Interface)
 	tests := []struct {
 		desc        string
 		expectedErr error
@@ -139,7 +340,7 @@ func TestSetSpecificExec(t *testing.T) {
 }
 
 func TestRunCmd(t *testing.T) {
-	mockCmd := new(mocks.Cmd)
+	mockCmd := new(mock_k8s_io_utils_exec.Cmd)
 
 	tests := []struct {
 		desc             string
@@ -195,8 +396,8 @@ func TestRunCmd(t *testing.T) {
 }
 
 func TestRun(t *testing.T) {
-	mockKexecIface := new(mocks.Interface)
-	mockCmd := new(mocks.Cmd)
+	mockKexecIface := new(mock_k8s_io_utils_exec.Interface)
+	mockCmd := new(mock_k8s_io_utils_exec.Cmd)
 	// note runner is defined in ovs.go file
 	runner = &execHelper{exec: mockKexecIface}
 
@@ -268,8 +469,8 @@ func TestRun(t *testing.T) {
 }
 
 func TestRunWithEnvVars(t *testing.T) {
-	mockKexecIface := new(mocks.Interface)
-	mockCmd := new(mocks.Cmd)
+	mockKexecIface := new(mock_k8s_io_utils_exec.Interface)
+	mockCmd := new(mock_k8s_io_utils_exec.Cmd)
 	// note runner is defined in ovs.go file
 	runner = &execHelper{exec: mockKexecIface}
 
@@ -293,7 +494,6 @@ func TestRunWithEnvVars(t *testing.T) {
 				{"Run", []string{}, []interface{}{nil}},
 				{"SetStdout", []string{"*bytes.Buffer"}, nil},
 				{"SetStderr", []string{"*bytes.Buffer"}, nil},
-				{"SetEnv", []string{"[]string"}, nil},
 			},
 		},
 		{
@@ -321,7 +521,6 @@ func TestRunWithEnvVars(t *testing.T) {
 				{"Run", []string{}, []interface{}{fmt.Errorf("executable file not found in $PATH")}},
 				{"SetStdout", []string{"*bytes.Buffer"}, nil},
 				{"SetStderr", []string{"*bytes.Buffer"}, nil},
-				{"SetEnv", []string{"[]string"}, nil},
 			},
 		},
 	}
@@ -360,8 +559,8 @@ func TestRunWithEnvVars(t *testing.T) {
 }
 
 func TestRunOVSOfctl(t *testing.T) {
-	mockKexecIface := new(mocks.Interface)
-	mockCmd := new(mocks.Cmd)
+	mockKexecIface := new(mock_k8s_io_utils_exec.Interface)
+	mockCmd := new(mock_k8s_io_utils_exec.Cmd)
 	// note runner is defined in ovs.go file
 	runner = &execHelper{exec: mockKexecIface}
 
@@ -427,8 +626,8 @@ func TestRunOVSOfctl(t *testing.T) {
 }
 
 func TestRunOVSVsctl(t *testing.T) {
-	mockKexecIface := new(mocks.Interface)
-	mockCmd := new(mocks.Cmd)
+	mockKexecIface := new(mock_k8s_io_utils_exec.Interface)
+	mockCmd := new(mock_k8s_io_utils_exec.Cmd)
 	// note runner is defined in ovs.go file
 	runner = &execHelper{exec: mockKexecIface}
 
@@ -494,8 +693,8 @@ func TestRunOVSVsctl(t *testing.T) {
 }
 
 func TestRunOVSAppctlWithTimeout(t *testing.T) {
-	mockKexecIface := new(mocks.Interface)
-	mockCmd := new(mocks.Cmd)
+	mockKexecIface := new(mock_k8s_io_utils_exec.Interface)
+	mockCmd := new(mock_k8s_io_utils_exec.Cmd)
 	// note runner is defined in ovs.go file
 	runner = &execHelper{exec: mockKexecIface}
 
@@ -564,8 +763,8 @@ func TestRunOVSAppctlWithTimeout(t *testing.T) {
 }
 
 func TestRunOVSAppctl(t *testing.T) {
-	mockKexecIface := new(mocks.Interface)
-	mockCmd := new(mocks.Cmd)
+	mockKexecIface := new(mock_k8s_io_utils_exec.Interface)
+	mockCmd := new(mock_k8s_io_utils_exec.Cmd)
 	// note runner is defined in ovs.go file
 	runner = &execHelper{exec: mockKexecIface}
 
@@ -631,8 +830,8 @@ func TestRunOVSAppctl(t *testing.T) {
 }
 
 func TestRunOVNAppctlWithTimeout(t *testing.T) {
-	mockKexecIface := new(mocks.Interface)
-	mockCmd := new(mocks.Cmd)
+	mockKexecIface := new(mock_k8s_io_utils_exec.Interface)
+	mockCmd := new(mock_k8s_io_utils_exec.Cmd)
 	// note runner is defined in ovs.go file
 	runner = &execHelper{exec: mockKexecIface}
 
@@ -701,8 +900,8 @@ func TestRunOVNAppctlWithTimeout(t *testing.T) {
 }
 
 func TestRunOVNNbctlUnix(t *testing.T) {
-	mockKexecIface := new(mocks.Interface)
-	mockCmd := new(mocks.Cmd)
+	mockKexecIface := new(mock_k8s_io_utils_exec.Interface)
+	mockCmd := new(mock_k8s_io_utils_exec.Cmd)
 	// note runner is defined in ovs.go file
 	runner = &execHelper{exec: mockKexecIface}
 
@@ -713,25 +912,23 @@ func TestRunOVNNbctlUnix(t *testing.T) {
 		onRetArgsCmdList []onCallReturnArgs
 	}{
 		{
-			desc:           "positive: run `ovn-nbctl` command",
+			desc:           "positive: run `ovn-nbctl` command with no env vars generated",
 			expectedErr:    false,
 			onRetArgsIface: &onCallReturnArgs{"Command", []string{"string"}, []interface{}{mockCmd}},
 			onRetArgsCmdList: []onCallReturnArgs{
 				{"Run", []string{}, []interface{}{nil}},
 				{"SetStdout", []string{"*bytes.Buffer"}, nil},
 				{"SetStderr", []string{"*bytes.Buffer"}, nil},
-				{"SetEnv", []string{"[]string"}, nil},
 			},
 		},
 		{
-			desc:           "negative: run `ovn-nbctl` command",
+			desc:           "negative: run `ovn-nbctl` command with no env vars generated",
 			expectedErr:    true,
 			onRetArgsIface: &onCallReturnArgs{"Command", []string{"string"}, []interface{}{mockCmd}},
 			onRetArgsCmdList: []onCallReturnArgs{
 				{"Run", []string{}, []interface{}{fmt.Errorf("executable file not found in $PATH")}},
 				{"SetStdout", []string{"*bytes.Buffer"}, nil},
 				{"SetStderr", []string{"*bytes.Buffer"}, nil},
-				{"SetEnv", []string{"[]string"}, nil},
 			},
 		},
 	}
@@ -772,8 +969,8 @@ func TestRunOVNNbctlUnix(t *testing.T) {
 }
 
 func TestRunOVNNbctlWithTimeout(t *testing.T) {
-	mockKexecIface := new(mocks.Interface)
-	mockCmd := new(mocks.Cmd)
+	mockKexecIface := new(mock_k8s_io_utils_exec.Interface)
+	mockCmd := new(mock_k8s_io_utils_exec.Cmd)
 	// note runner is defined in ovs.go file
 	runner = &execHelper{exec: mockKexecIface}
 
@@ -793,7 +990,6 @@ func TestRunOVNNbctlWithTimeout(t *testing.T) {
 				{"Run", []string{}, []interface{}{nil}},
 				{"SetStdout", []string{"*bytes.Buffer"}, nil},
 				{"SetStderr", []string{"*bytes.Buffer"}, nil},
-				{"SetEnv", []string{"[]string"}, nil},
 			},
 		},
 		{
@@ -805,7 +1001,6 @@ func TestRunOVNNbctlWithTimeout(t *testing.T) {
 				{"Run", []string{}, []interface{}{fmt.Errorf("executable file not found in $PATH")}},
 				{"SetStdout", []string{"*bytes.Buffer"}, nil},
 				{"SetStderr", []string{"*bytes.Buffer"}, nil},
-				{"SetEnv", []string{"[]string"}, nil},
 			},
 		},
 	}
@@ -846,8 +1041,8 @@ func TestRunOVNNbctlWithTimeout(t *testing.T) {
 }
 
 func TestRunOVNNbctl(t *testing.T) {
-	mockKexecIface := new(mocks.Interface)
-	mockCmd := new(mocks.Cmd)
+	mockKexecIface := new(mock_k8s_io_utils_exec.Interface)
+	mockCmd := new(mock_k8s_io_utils_exec.Cmd)
 	// note runner is defined in ovs.go file
 	runner = &execHelper{exec: mockKexecIface}
 
@@ -867,7 +1062,6 @@ func TestRunOVNNbctl(t *testing.T) {
 				{"Run", []string{}, []interface{}{nil}},
 				{"SetStdout", []string{"*bytes.Buffer"}, nil},
 				{"SetStderr", []string{"*bytes.Buffer"}, nil},
-				{"SetEnv", []string{"[]string"}, nil},
 			},
 		},
 		{
@@ -879,7 +1073,6 @@ func TestRunOVNNbctl(t *testing.T) {
 				{"Run", []string{}, []interface{}{fmt.Errorf("executable file not found in $PATH")}},
 				{"SetStdout", []string{"*bytes.Buffer"}, nil},
 				{"SetStderr", []string{"*bytes.Buffer"}, nil},
-				{"SetEnv", []string{"[]string"}, nil},
 			},
 		},
 	}
@@ -920,8 +1113,8 @@ func TestRunOVNNbctl(t *testing.T) {
 }
 
 func TestRunOVNSbctlUnix(t *testing.T) {
-	mockKexecIface := new(mocks.Interface)
-	mockCmd := new(mocks.Cmd)
+	mockKexecIface := new(mock_k8s_io_utils_exec.Interface)
+	mockCmd := new(mock_k8s_io_utils_exec.Cmd)
 	// note runner is defined in ovs.go file
 	runner = &execHelper{exec: mockKexecIface}
 
@@ -939,7 +1132,6 @@ func TestRunOVNSbctlUnix(t *testing.T) {
 				{"Run", []string{}, []interface{}{nil}},
 				{"SetStdout", []string{"*bytes.Buffer"}, nil},
 				{"SetStderr", []string{"*bytes.Buffer"}, nil},
-				{"SetEnv", []string{"[]string"}, nil},
 			},
 		},
 		{
@@ -950,7 +1142,6 @@ func TestRunOVNSbctlUnix(t *testing.T) {
 				{"Run", []string{}, []interface{}{fmt.Errorf("executable file not found in $PATH")}},
 				{"SetStdout", []string{"*bytes.Buffer"}, nil},
 				{"SetStderr", []string{"*bytes.Buffer"}, nil},
-				{"SetEnv", []string{"[]string"}, nil},
 			},
 		},
 	}
@@ -991,8 +1182,8 @@ func TestRunOVNSbctlUnix(t *testing.T) {
 }
 
 func TestRunOVNSbctlWithTimeout(t *testing.T) {
-	mockKexecIface := new(mocks.Interface)
-	mockCmd := new(mocks.Cmd)
+	mockKexecIface := new(mock_k8s_io_utils_exec.Interface)
+	mockCmd := new(mock_k8s_io_utils_exec.Cmd)
 	// note runner is defined in ovs.go file
 	runner = &execHelper{exec: mockKexecIface}
 
@@ -1012,7 +1203,6 @@ func TestRunOVNSbctlWithTimeout(t *testing.T) {
 				{"Run", []string{}, []interface{}{nil}},
 				{"SetStdout", []string{"*bytes.Buffer"}, nil},
 				{"SetStderr", []string{"*bytes.Buffer"}, nil},
-				{"SetEnv", []string{"[]string"}, nil},
 			},
 		},
 		{
@@ -1024,7 +1214,6 @@ func TestRunOVNSbctlWithTimeout(t *testing.T) {
 				{"Run", []string{}, []interface{}{fmt.Errorf("executable file not found in $PATH")}},
 				{"SetStdout", []string{"*bytes.Buffer"}, nil},
 				{"SetStderr", []string{"*bytes.Buffer"}, nil},
-				{"SetEnv", []string{"[]string"}, nil},
 			},
 		},
 	}
@@ -1065,8 +1254,8 @@ func TestRunOVNSbctlWithTimeout(t *testing.T) {
 }
 
 func TestRunOVNSbctl(t *testing.T) {
-	mockKexecIface := new(mocks.Interface)
-	mockCmd := new(mocks.Cmd)
+	mockKexecIface := new(mock_k8s_io_utils_exec.Interface)
+	mockCmd := new(mock_k8s_io_utils_exec.Cmd)
 	// note runner is defined in ovs.go file
 	runner = &execHelper{exec: mockKexecIface}
 
@@ -1084,7 +1273,6 @@ func TestRunOVNSbctl(t *testing.T) {
 				{"Run", []string{}, []interface{}{nil}},
 				{"SetStdout", []string{"*bytes.Buffer"}, nil},
 				{"SetStderr", []string{"*bytes.Buffer"}, nil},
-				{"SetEnv", []string{"[]string"}, nil},
 			},
 		},
 		{
@@ -1095,7 +1283,6 @@ func TestRunOVNSbctl(t *testing.T) {
 				{"Run", []string{}, []interface{}{fmt.Errorf("executable file not found in $PATH")}},
 				{"SetStdout", []string{"*bytes.Buffer"}, nil},
 				{"SetStderr", []string{"*bytes.Buffer"}, nil},
-				{"SetEnv", []string{"[]string"}, nil},
 			},
 		},
 	}
@@ -1136,8 +1323,8 @@ func TestRunOVNSbctl(t *testing.T) {
 }
 
 func TestRunOVSDBClient(t *testing.T) {
-	mockKexecIface := new(mocks.Interface)
-	mockCmd := new(mocks.Cmd)
+	mockKexecIface := new(mock_k8s_io_utils_exec.Interface)
+	mockCmd := new(mock_k8s_io_utils_exec.Cmd)
 	// note runner is defined in ovs.go file
 	runner = &execHelper{exec: mockKexecIface}
 
@@ -1155,7 +1342,6 @@ func TestRunOVSDBClient(t *testing.T) {
 				{"Run", []string{}, []interface{}{nil}},
 				{"SetStdout", []string{"*bytes.Buffer"}, nil},
 				{"SetStderr", []string{"*bytes.Buffer"}, nil},
-				{"SetEnv", []string{"[]string"}, nil},
 			},
 		},
 		{
@@ -1166,7 +1352,6 @@ func TestRunOVSDBClient(t *testing.T) {
 				{"Run", []string{}, []interface{}{fmt.Errorf("executable file not found in $PATH")}},
 				{"SetStdout", []string{"*bytes.Buffer"}, nil},
 				{"SetStderr", []string{"*bytes.Buffer"}, nil},
-				{"SetEnv", []string{"[]string"}, nil},
 			},
 		},
 	}
@@ -1207,8 +1392,8 @@ func TestRunOVSDBClient(t *testing.T) {
 }
 
 func TestRunOVSDBClientOVNNB(t *testing.T) {
-	mockKexecIface := new(mocks.Interface)
-	mockCmd := new(mocks.Cmd)
+	mockKexecIface := new(mock_k8s_io_utils_exec.Interface)
+	mockCmd := new(mock_k8s_io_utils_exec.Cmd)
 	// note runner is defined in ovs.go file
 	runner = &execHelper{exec: mockKexecIface}
 
@@ -1226,7 +1411,6 @@ func TestRunOVSDBClientOVNNB(t *testing.T) {
 				{"Run", []string{}, []interface{}{nil}},
 				{"SetStdout", []string{"*bytes.Buffer"}, nil},
 				{"SetStderr", []string{"*bytes.Buffer"}, nil},
-				{"SetEnv", []string{"[]string"}, nil},
 			},
 		},
 		{
@@ -1237,7 +1421,6 @@ func TestRunOVSDBClientOVNNB(t *testing.T) {
 				{"Run", []string{}, []interface{}{fmt.Errorf("executable file not found in $PATH")}},
 				{"SetStdout", []string{"*bytes.Buffer"}, nil},
 				{"SetStderr", []string{"*bytes.Buffer"}, nil},
-				{"SetEnv", []string{"[]string"}, nil},
 			},
 		},
 	}
@@ -1278,8 +1461,8 @@ func TestRunOVSDBClientOVNNB(t *testing.T) {
 }
 
 func TestRunOVNCtl(t *testing.T) {
-	mockKexecIface := new(mocks.Interface)
-	mockCmd := new(mocks.Cmd)
+	mockKexecIface := new(mock_k8s_io_utils_exec.Interface)
+	mockCmd := new(mock_k8s_io_utils_exec.Cmd)
 	// note runner is defined in ovs.go file
 	runner = &execHelper{exec: mockKexecIface}
 
@@ -1297,7 +1480,6 @@ func TestRunOVNCtl(t *testing.T) {
 				{"Run", []string{}, []interface{}{nil}},
 				{"SetStdout", []string{"*bytes.Buffer"}, nil},
 				{"SetStderr", []string{"*bytes.Buffer"}, nil},
-				{"SetEnv", []string{"[]string"}, nil},
 			},
 		},
 		{
@@ -1308,7 +1490,6 @@ func TestRunOVNCtl(t *testing.T) {
 				{"Run", []string{}, []interface{}{fmt.Errorf("executable file not found in $PATH")}},
 				{"SetStdout", []string{"*bytes.Buffer"}, nil},
 				{"SetStderr", []string{"*bytes.Buffer"}, nil},
-				{"SetEnv", []string{"[]string"}, nil},
 			},
 		},
 	}
@@ -1349,8 +1530,8 @@ func TestRunOVNCtl(t *testing.T) {
 }
 
 func TestRunOVNNBAppCtl(t *testing.T) {
-	mockKexecIface := new(mocks.Interface)
-	mockCmd := new(mocks.Cmd)
+	mockKexecIface := new(mock_k8s_io_utils_exec.Interface)
+	mockCmd := new(mock_k8s_io_utils_exec.Cmd)
 	// note runner is defined in ovs.go file
 	runner = &execHelper{exec: mockKexecIface}
 
@@ -1368,7 +1549,6 @@ func TestRunOVNNBAppCtl(t *testing.T) {
 				{"Run", []string{}, []interface{}{nil}},
 				{"SetStdout", []string{"*bytes.Buffer"}, nil},
 				{"SetStderr", []string{"*bytes.Buffer"}, nil},
-				{"SetEnv", []string{"[]string"}, nil},
 			},
 		},
 		{
@@ -1379,7 +1559,6 @@ func TestRunOVNNBAppCtl(t *testing.T) {
 				{"Run", []string{}, []interface{}{fmt.Errorf("executable file not found in $PATH")}},
 				{"SetStdout", []string{"*bytes.Buffer"}, nil},
 				{"SetStderr", []string{"*bytes.Buffer"}, nil},
-				{"SetEnv", []string{"[]string"}, nil},
 			},
 		},
 	}
@@ -1420,8 +1599,8 @@ func TestRunOVNNBAppCtl(t *testing.T) {
 }
 
 func TestRunOVNSBAppCtl(t *testing.T) {
-	mockKexecIface := new(mocks.Interface)
-	mockCmd := new(mocks.Cmd)
+	mockKexecIface := new(mock_k8s_io_utils_exec.Interface)
+	mockCmd := new(mock_k8s_io_utils_exec.Cmd)
 	// note runner is defined in ovs.go file
 	runner = &execHelper{exec: mockKexecIface}
 
@@ -1439,7 +1618,6 @@ func TestRunOVNSBAppCtl(t *testing.T) {
 				{"Run", []string{}, []interface{}{nil}},
 				{"SetStdout", []string{"*bytes.Buffer"}, nil},
 				{"SetStderr", []string{"*bytes.Buffer"}, nil},
-				{"SetEnv", []string{"[]string"}, nil},
 			},
 		},
 		{
@@ -1450,7 +1628,6 @@ func TestRunOVNSBAppCtl(t *testing.T) {
 				{"Run", []string{}, []interface{}{fmt.Errorf("executable file not found in $PATH")}},
 				{"SetStdout", []string{"*bytes.Buffer"}, nil},
 				{"SetStderr", []string{"*bytes.Buffer"}, nil},
-				{"SetEnv", []string{"[]string"}, nil},
 			},
 		},
 	}
@@ -1564,8 +1741,8 @@ func TestRunOVNNorthAppCtl(t *testing.T) {
 */
 
 func TestAddNormalActionOFFlow(t *testing.T) {
-	mockKexecIface := new(mocks.Interface)
-	mockCmd := new(mocks.Cmd)
+	mockKexecIface := new(mock_k8s_io_utils_exec.Interface)
+	mockCmd := new(mock_k8s_io_utils_exec.Cmd)
 	// note runner is defined in ovs.go file
 	runner = &execHelper{exec: mockKexecIface}
 
@@ -1639,8 +1816,8 @@ func TestAddNormalActionOFFlow(t *testing.T) {
 }
 
 func TestGetOVNDBServerInfo(t *testing.T) {
-	mockKexecIface := new(mocks.Interface)
-	mockCmd := new(mocks.Cmd)
+	mockKexecIface := new(mock_k8s_io_utils_exec.Interface)
+	mockCmd := new(mock_k8s_io_utils_exec.Cmd)
 	// note runner is defined in ovs.go file
 	runner = &execHelper{exec: mockKexecIface}
 
@@ -1658,7 +1835,6 @@ func TestGetOVNDBServerInfo(t *testing.T) {
 				{"Run", []string{}, []interface{}{nil}},
 				{"SetStdout", []string{"*bytes.Buffer"}, nil},
 				{"SetStderr", []string{"*bytes.Buffer"}, nil},
-				{"SetEnv", []string{"[]string"}, nil},
 			},
 		},
 		{
@@ -1669,7 +1845,6 @@ func TestGetOVNDBServerInfo(t *testing.T) {
 				{"Run", []string{}, []interface{}{fmt.Errorf("executable file not found in $PATH")}},
 				{"SetStdout", []string{"*bytes.Buffer"}, nil},
 				{"SetStderr", []string{"*bytes.Buffer"}, nil},
-				{"SetEnv", []string{"[]string"}, nil},
 			},
 		},
 	}
@@ -1710,8 +1885,8 @@ func TestGetOVNDBServerInfo(t *testing.T) {
 }
 
 func TestDetectSCTPSupport(t *testing.T) {
-	mockKexecIface := new(mocks.Interface)
-	mockCmd := new(mocks.Cmd)
+	mockKexecIface := new(mock_k8s_io_utils_exec.Interface)
+	mockCmd := new(mock_k8s_io_utils_exec.Cmd)
 	// note runner is defined in ovs.go file
 	runner = &execHelper{exec: mockKexecIface}
 
@@ -1740,7 +1915,6 @@ func TestDetectSCTPSupport(t *testing.T) {
 				{"Run", []string{}, []interface{}{fmt.Errorf("executable file not found in $PATH")}},
 				{"SetStdout", []string{"*bytes.Buffer"}, nil},
 				{"SetStderr", []string{"*bytes.Buffer"}, nil},
-				{"SetEnv", []string{"[]string"}, nil},
 			},
 		},
 	}
