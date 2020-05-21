@@ -12,6 +12,8 @@ import (
 	v1 "k8s.io/api/core/v1"
 	k8s_io_apimachinery_pkg_apis_meta_v1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/client-go/kubernetes"
+	"net"
+
 	//"net"
 	"testing"
 )
@@ -256,11 +258,12 @@ func TestWaitForPodAddresses(t *testing.T) {
 	}
 }
 
-/*func TestGetRoutesGatewayIP(t *testing.T) {
+func TestGetRoutesGatewayIP(t *testing.T) {
 	tests := []struct {
 		desc           string
 		inputPod       v1.Pod
 		inputGwIpnet   string
+		inputHybGwIp   net.IP
 		matchResult    bool
 		expectedResult string
 	}{
@@ -274,6 +277,7 @@ func TestWaitForPodAddresses(t *testing.T) {
 				},
 			},
 			inputGwIpnet:   "10.0.0.1/24",
+			inputHybGwIp: 	[]byte("100.64.0.1"),
 			matchResult:    true,
 			expectedResult: "ovn-kubernetes_mypod",
 		},
@@ -285,13 +289,13 @@ func TestWaitForPodAddresses(t *testing.T) {
 			if e != nil {
 				t.FailNow()
 			}
-			podRoute, ip, e := getRoutesGatewayIP(&tc.inputPod, ipnet)
+			podRoute, ip, e := getRoutesGatewayIP(&tc.inputPod, ipnet, ip )
 			t.Log(podRoute, ip, e)
 			t.Log(tc.expectedResult)
 
 		})
 	}
-}*/
+}
 
 /*
 func TestController_SyncPods(t *testing.T) {
