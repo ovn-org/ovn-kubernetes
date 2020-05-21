@@ -129,7 +129,7 @@ func TestGetPodAddresses(t *testing.T) {
 			onRetArgsIface: &onCallReturnArgs{"LookPath", []string{"string"}, []interface{}{"", nil}, 8},
 			onRetArgsExecUtilRunSvc: []onCallReturnArgs{
 				{"SetExec", []string{"*mock_k8s_io_utils_exec.Interface"}, []interface{}{nil}, 1},
-				{"RunWithEnvVars", []string{"string","[]string","string","string","string","string","string","string"}, []interface{}{ "22:e9:ac:f4:00:04 10.244.0.3\n[dynamic]", "", nil}, 1},
+				{"RunWithEnvVars", []string{"string", "[]string", "string", "string", "string", "string", "string", "string"}, []interface{}{"22:e9:ac:f4:00:04 10.244.0.3\n[dynamic]", "", nil}, 1},
 			},
 		},
 		{
@@ -138,7 +138,7 @@ func TestGetPodAddresses(t *testing.T) {
 			expectedErr:    true,
 			onRetArgsIface: &onCallReturnArgs{"RunCmd", []string{"kexec.Cmd", "string", "[]string"}, []interface{}{[]byte(""), []byte(""), nil}, 1},
 			onRetArgsExecUtilRunSvc: []onCallReturnArgs{
-				{"RunWithEnvVars", []string{"kexec.Cmd", "string", "[]string", "string", "string", "string", "string", "string", "string"}, []interface{}{ "", "", fmt.Errorf("Error while obtaining pod addressess")}, 1},
+				{"RunWithEnvVars", []string{"kexec.Cmd", "string", "[]string", "string", "string", "string", "string", "string", "string"}, []interface{}{"", "", fmt.Errorf("Error while obtaining pod addressess")}, 1},
 				{"SetExec", []string{"*mocks.Interface"}, []interface{}{nil}, 1},
 			},
 		},
@@ -171,7 +171,7 @@ func TestGetPodAddresses(t *testing.T) {
 
 			util.SetExec(mockKexecIface)
 			hw, ip, done, e := getPodAddresses(tc.inpPortName)
-			t.Log( hw, ip, done, e)
+			t.Log(hw, ip, done, e)
 			if tc.expectedErr {
 				assert.Error(t, e)
 			} else {
@@ -201,7 +201,7 @@ func TestWaitForPodAddresses(t *testing.T) {
 			expectedErr:    false,
 			onRetArgsIface: &onCallReturnArgs{"LookPath", []string{"string"}, []interface{}{"", nil}, 8},
 			onRetArgsExecUtilRunSvc: []onCallReturnArgs{
-				{"RunWithEnvVars", []string{"kexec.Cmd", "string", "[]string", "string", "string", "string", "string", "string", "string"}, []interface{}{ "22:e9:ac:f4:00:04 10.244.0.3\n[dynamic]", "", nil}, 1},
+				{"RunWithEnvVars", []string{"kexec.Cmd", "string", "[]string", "string", "string", "string", "string", "string", "string"}, []interface{}{"22:e9:ac:f4:00:04 10.244.0.3\n[dynamic]", "", nil}, 1},
 				{"SetExec", []string{"*mocks.Interface"}, []interface{}{nil}, 1},
 			},
 		},
@@ -211,7 +211,7 @@ func TestWaitForPodAddresses(t *testing.T) {
 			expectedErr:    true,
 			onRetArgsIface: &onCallReturnArgs{"RunCmd", []string{"kexec.Cmd", "string", "[]string"}, []interface{}{[]byte(""), []byte(""), nil}, 1},
 			onRetArgsExecUtilRunSvc: []onCallReturnArgs{
-				{"RunWithEnvVars", []string{"kexec.Cmd", "string", "[]string", "string", "string", "string", "string", "string", "string"}, []interface{}{ "", "", fmt.Errorf("Error while obtaining pod addressess")}, 1},
+				{"RunWithEnvVars", []string{"kexec.Cmd", "string", "[]string", "string", "string", "string", "string", "string", "string"}, []interface{}{"", "", fmt.Errorf("Error while obtaining pod addressess")}, 1},
 				{"SetExec", []string{"*mocks.Interface"}, []interface{}{nil}, 1},
 			},
 		},
@@ -244,7 +244,7 @@ func TestWaitForPodAddresses(t *testing.T) {
 
 			util.SetExec(mockKexecIface)
 			hw, ip, e := waitForPodAddresses(tc.inpPortName)
-			t.Log( hw, ip, e)
+			t.Log(hw, ip, e)
 			if tc.expectedErr {
 				assert.Error(t, e)
 			} else {
@@ -268,12 +268,12 @@ func TestGetRoutesGatewayIP(t *testing.T) {
 			desc: "postive case, pod with text annotation",
 			inputPod: v1.Pod{
 				ObjectMeta: k8s_io_apimachinery_pkg_apis_meta_v1.ObjectMeta{
-					Namespace: "ovn-kubernetes",
-					Name:      "mypod",
-					Annotations: map[string]string{"k8s.v1.cni.cncf.io/networks":"ovn-kubernetes/macvlan-conf-1, ovn-kubernetes/macvlan-conf-2"},
+					Namespace:   "ovn-kubernetes",
+					Name:        "mypod",
+					Annotations: map[string]string{"k8s.v1.cni.cncf.io/networks": "ovn-kubernetes/macvlan-conf-1, ovn-kubernetes/macvlan-conf-2"},
 				},
 			},
-			inputGwIpnet: "10.0.0.1/24",
+			inputGwIpnet:   "10.0.0.1/24",
 			matchResult:    true,
 			expectedResult: "ovn-kubernetes_mypod",
 		},
@@ -292,6 +292,7 @@ func TestGetRoutesGatewayIP(t *testing.T) {
 		})
 	}
 }
+
 /*
 func TestController_SyncPods(t *testing.T) {
 	controller := getMockController()
