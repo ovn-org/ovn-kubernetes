@@ -35,8 +35,6 @@ type flowCacheEntry struct {
 	flows []string
 	// special table 20 flow if it has been learned from the switch
 	learnedFlow string
-	// ignore learn on next flow sync for this entry
-	ignoreLearn bool
 }
 
 // NodeController is the node hybrid overlay controller
@@ -107,7 +105,7 @@ func (n *NodeController) waitForNamespace(name string) (*kapi.Namespace, error) 
 	return namespace, nil
 }
 
-func (n *NodeController) addOrUpdatePod(pod *kapi.Pod, ignoreLearn bool) error {
+func (n *NodeController) addOrUpdatePod(pod *kapi.Pod) error {
 	podIPs, podMAC, err := getPodDetails(pod, n.nodeName)
 	if err != nil {
 		klog.V(5).Infof("cleaning up hybrid overlay pod %s/%s because %v", pod.Namespace, pod.Name, err)
@@ -149,7 +147,7 @@ func (n *NodeController) addOrUpdatePod(pod *kapi.Pod, ignoreLearn bool) error {
 		if namespaceExternalGw == "" || namespaceVTEP == "" {
 			klog.Infof("Hybrid Overlay Gateway mode not enabled for pod %s, namespace does not have hybrid"+
 				"annotations, external gw: %s, VTEP: %s", pod.Name, namespaceExternalGw, namespaceVTEP)
-			n.updateFlowCacheEntry(cookie, flows, ignoreLearn)
+			n.updateFlowCacheEntry(cookie, flows)
 			continue
 		}
 
@@ -188,7 +186,7 @@ func (n *NodeController) addOrUpdatePod(pod *kapi.Pod, ignoreLearn bool) error {
 		tunFlow := fmt.Sprintf("table=0,cookie=0x%s,priority=120,in_port=%s,arp,arp_spa=%s,tun_src=%s,"+
 			"actions=%s,resubmit(,2)",
 			tunCookie, extVXLANName, namespaceExternalGw, namespaceVTEP, learnActions)
-		n.updateFlowCacheEntry(tunCookie, []string{tunFlow}, false)
+		n.updateFlowCacheEntry(tunCookie, []string{tunFlow})
 		n.tunMapMutex.Unlock()
 
 		// add flow to table 0 to match on incoming traffic from pods, send to table 20
@@ -216,7 +214,7 @@ func (n *NodeController) addOrUpdatePod(pod *kapi.Pod, ignoreLearn bool) error {
 				"output:%s",
 				cookie, podIP.IP, n.drMAC.String(), n.drMAC.String(), n.drIP, namespaceExternalGw, hotypes.HybridOverlayVNI,
 				namespaceVTEP, extVXLANName))
-		n.updateFlowCacheEntry(cookie, flows, ignoreLearn)
+		n.updateFlowCacheEntry(cookie, flows)
 	}
 	n.requestFlowSync()
 	klog.Infof("Pod %s wired for Hybrid Overlay", pod.Name)
@@ -341,7 +339,7 @@ func (n *NodeController) startPodWatch(wf *factory.WatchFactory) error {
 	_, err := wf.AddPodHandler(cache.ResourceEventHandlerFuncs{
 		AddFunc: func(obj interface{}) {
 			pod := obj.(*kapi.Pod)
-			if err := n.addOrUpdatePod(pod, false); err != nil {
+			if err := n.addOrUpdatePod(pod); err != nil {
 				klog.Warningf("failed to handle pod %v addition: %v", pod, err)
 			}
 		},
@@ -349,7 +347,7 @@ func (n *NodeController) startPodWatch(wf *factory.WatchFactory) error {
 			podNew := newer.(*kapi.Pod)
 			podOld := old.(*kapi.Pod)
 			if podChanged(podOld, podNew, n.nodeName) {
-				if err := n.addOrUpdatePod(podNew, false); err != nil {
+				if err := n.addOrUpdatePod(podNew); err != nil {
 					klog.Warningf("failed to handle pod %v update: %v", podNew, err)
 				}
 			}
@@ -388,7 +386,7 @@ func (n *NodeController) startNamespaceWatch(wf *factory.WatchFactory) error {
 					// we need to ignore learning cookie flow from table 20 during this pod update
 					// this is because the VTEP/GW may have changed, and now we need to get rid of the
 					// corresponding table 20 flow and not cache it
-					if err := n.addOrUpdatePod(pod, true); err != nil {
+					if err := n.addOrUpdatePod(pod); err != nil {
 						klog.Warningf("failed to handle pod %v update: %v", pod, err)
 					}
 				}
@@ -401,9 +399,8 @@ func (n *NodeController) startNamespaceWatch(wf *factory.WatchFactory) error {
 	return err
 }
 
-func (n *NodeController) Sync(objs []*kapi.Node) {
-	//just needed to implement the interface
-}
+// Sync is not used and is just needed to implement the interface
+func (n *NodeController) Sync(objs []*kapi.Node) {}
 
 func (n *NodeController) startNodeWatch(wf *factory.WatchFactory) error {
 	return houtil.StartNodeWatch(n, wf)
@@ -461,7 +458,7 @@ func (n *NodeController) hybridOverlayNodeUpdate(node *kapi.Node) error {
 			"output:"+extVXLANName,
 			cookie, cidr.String(), hotypes.HybridOverlayVNI, nodeIP.String(), drMAC.String()))
 
-	n.updateFlowCacheEntry(cookie, flows, false)
+	n.updateFlowCacheEntry(cookie, flows)
 	n.requestFlowSync()
 	return nil
 }
@@ -701,7 +698,7 @@ func (n *NodeController) ensureHybridOverlayBridge(node *kapi.Node) error {
 				mgmtIfAddr.IP.String(), portMAC.String(), mgmtPortMAC.String()))
 	}
 
-	n.updateFlowCacheEntry("0x0", flows, false)
+	n.updateFlowCacheEntry("0x0", flows)
 	n.requestFlowSync()
 	n.initialized = true
 	klog.Infof("hybrid overlay setup complete for node %s", node.Name)
@@ -735,15 +732,17 @@ func (n *NodeController) syncFlows() {
 			cookie = "0" + cookie
 		}
 		if cacheEntry, ok := n.flowCache[cookie]; ok {
-			// we ignore certain cookies for learning to avoid a case where a NS was updated with a new vtep
-			// and we accidentally pick up the old vtep flow and cache it. This should only ever happen on a pod update
-			// with an NS annotation VTEP change. We only need to ignore it for one iteration of sync.
-			if cacheEntry.ignoreLearn {
-				klog.V(5).Infof("Ignoring learned flow to add to hybrid cache for this iteration: %s", line)
-				cacheEntry.ignoreLearn = false
-				cacheEntry.learnedFlow = ""
-				continue
-			}
+			/*
+				// we ignore certain cookies for learning to avoid a case where a NS was updated with a new vtep
+				// and we accidentally pick up the old vtep flow and cache it. This should only ever happen on a pod update
+				// with an NS annotation VTEP change. We only need to ignore it for one iteration of sync.
+				if cacheEntry.ignoreLearn {
+					klog.V(5).Infof("Ignoring learned flow to add to hybrid cache for this iteration: %s", line)
+					cacheEntry.ignoreLearn = false
+					cacheEntry.learnedFlow = ""
+					continue
+				}
+			*/
 			// we only ever have one learned flow per pod IP
 			if cacheEntry.learnedFlow != line {
 				cacheEntry.learnedFlow = line
@@ -776,9 +775,8 @@ func (n *NodeController) requestFlowSync() {
 	}
 }
 
-func (n *NodeController) updateFlowCacheEntry(cookie string, flows []string, ignoreLearn bool) {
+func (n *NodeController) updateFlowCacheEntry(cookie string, flows []string) {
 	n.flowMutex.Lock()
 	defer n.flowMutex.Unlock()
 	n.flowCache[cookie] = &flowCacheEntry{flows: flows}
-	n.flowCache[cookie].ignoreLearn = ignoreLearn
 }
