@@ -165,16 +165,16 @@ func (runsvc *ExecUtilRunSvcImplStruct) RunCmd(cmd kexec.Cmd, cmdPath string, en
 	}
 	return strings.Trim(stdout.String(), "\" \n"), stderr.String(), err
 	/*return strings.Trim(strings.TrimFunc(stdout.String(), unicode.IsSpace), "\""),
-		stderr.String(), err*/
+	stderr.String(), err*/
 }
 
-func (runsvc *ExecUtilRunSvcImplStruct) Run(cmdPath string, args ...string) (string, string, error){
+func (runsvc *ExecUtilRunSvcImplStruct) Run(cmdPath string, args ...string) (string, string, error) {
 	cmd := runner.exec.Command(cmdPath, args...)
 	stdout, stderr, err := RunCmdExecSvcInst.RunCmd(cmd, cmdPath, []string{}, args...)
 	return stdout, stderr, err
 }
 
-func (runsvc *ExecUtilRunSvcImplStruct) RunWithEnvVars(cmdPath string, envVars []string, args ...string) (string, string, error){
+func (runsvc *ExecUtilRunSvcImplStruct) RunWithEnvVars(cmdPath string, envVars []string, args ...string) (string, string, error) {
 	cmd := runner.exec.Command(cmdPath, args...)
 	stdout, stderr, err := RunCmdExecSvcInst.RunCmd(cmd, cmdPath, envVars, args...)
 	return stdout, stderr, err
