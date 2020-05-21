@@ -20,7 +20,6 @@ import (
 	"github.com/vishvananda/netlink"
 
 	kapi "k8s.io/api/core/v1"
-	"k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/util/wait"
 	"k8s.io/client-go/tools/cache"
 	"k8s.io/klog"
@@ -86,54 +85,32 @@ func podIPToCookie(podIP net.IP) string {
 	return fmt.Sprintf("%02x%02x%02x%02x", ip4[0], ip4[1], ip4[2], ip4[3])
 }
 
-func (n *NodeController) waitForNamespace(name string) (*kapi.Namespace, error) {
-	var namespaceBackoff = wait.Backoff{Duration: 1 * time.Second, Steps: 7, Factor: 1.5, Jitter: 0.1}
-	var namespace *kapi.Namespace
-	if err := wait.ExponentialBackoff(namespaceBackoff, func() (bool, error) {
-		var err error
-		namespace, err = n.wf.GetNamespace(name)
-		if err != nil {
-			if errors.IsNotFound(err) {
-				// Namespace not found; retry
-				return false, nil
-			}
-			klog.Warningf("error getting namespace: %v", err)
-			return false, err
-		}
-		return true, nil
-	}); err != nil {
-		return nil, fmt.Errorf("failed to get namespace object: %v", err)
-	}
-	return namespace, nil
-}
-
-func (n *NodeController) addOrUpdatePod(pod *kapi.Pod, ignoreLearn bool) error {
+func (n *NodeController) addOrUpdatePod(pod *kapi.Pod) error {
 	podIPs, podMAC, err := getPodDetails(pod, n.nodeName)
 	if err != nil {
 		klog.V(5).Infof("cleaning up hybrid overlay pod %s/%s because %v", pod.Namespace, pod.Name, err)
 		return n.deletePod(pod)
 	}
 
-	namespace, err := n.waitForNamespace(pod.Namespace)
-	if err != nil {
-		return err
-	}
-	namespaceExternalGwRaw := namespace.GetAnnotations()[hotypes.HybridOverlayExternalGw]
+	externalGw := pod.Annotations[hotypes.HybridOverlayExternalGw]
 	// validate the external gateway is a valid IP address
-	namespaceExternalGwIP := net.ParseIP(namespaceExternalGwRaw)
-	if namespaceExternalGwIP == nil {
-		klog.Warningf("failed parse a valid external gateway ip address from %v: %v", namespaceExternalGwRaw, err)
-		return fmt.Errorf("failed to validate a valid external gateway ip address %s: %v", namespaceExternalGwRaw, err)
+	if ip := net.ParseIP(externalGw); ip == nil {
+		klog.Warningf("failed parse a valid external gateway ip address from %v: %v", externalGw, err)
+		return fmt.Errorf("failed to validate a valid external gateway ip address %s: %v", externalGw, err)
 	}
-	namespaceExternalGw := namespaceExternalGwIP.String()
-	namespaceVTEPRaw := namespace.GetAnnotations()[hotypes.HybridOverlayVTEP]
-	// validate the vtep is a valid IP address
-	namespaceVTEPIP := net.ParseIP(namespaceVTEPRaw)
-	if namespaceVTEPIP == nil {
-		klog.Warningf("failed parse a valid vtep ip address from %v: %v", namespaceVTEPRaw, err)
-		return fmt.Errorf("failed to validate a valid vtep ip address %s: %v", namespaceVTEPRaw, err)
+
+	VTEP := pod.Annotations[hotypes.HybridOverlayVTEP]
+	// validate the VTEP is a valid IP address
+	VTEPIP := net.ParseIP(VTEP)
+	if VTEPIP == nil {
+		klog.Warningf("failed parse a valid vtep ip address from %v: %v", VTEP, err)
+		return fmt.Errorf("failed to validate a valid vtep ip address %s: %v", VTEP, err)
 	}
-	namespaceVTEP := namespaceVTEPIP.String()
+
+	// It's always safe to ignore the learn flow as we only process and add or update
+	// if the IP/MAC or Annotations have changed
+	ignoreLearn := true
+
 	if !n.initialized {
 		node, err := n.wf.GetNode(n.nodeName)
 		if err != nil {
@@ -160,23 +137,23 @@ func (n *NodeController) addOrUpdatePod(pod *kapi.Pod, ignoreLearn bool) error {
 				"actions=set_field:%s->eth_src,set_field:%s->eth_dst,output:ext",
 			cookie, podIP.IP, n.drMAC.String(), podMAC))
 
-		if namespaceExternalGwRaw == "" || namespaceVTEPRaw == "" {
+		if externalGw == "" || VTEP == "" {
 			klog.Infof("Hybrid Overlay Gateway mode not enabled for pod %s, namespace does not have hybrid"+
-				"annotations, external gw: %s, VTEP: %s", pod.Name, namespaceVTEPRaw, namespaceVTEPRaw)
+				"annotations, external gw: %s, VTEP: %s", pod.Name, externalGw, VTEP)
 			n.updateFlowCacheEntry(cookie, flows, ignoreLearn)
 			continue
 		}
 
 		portMACRaw := strings.Replace(n.drMAC.String(), ":", "", -1)
-		vtepIPRaw := getIPAsHexString(namespaceVTEPIP)
+		vtepIPRaw := getIPAsHexString(VTEPIP)
 
 		// update map for tun to pod
 		n.tunMapMutex.Lock()
-		n.tunMap[podIP.IP.String()] = namespaceVTEP
+		n.tunMap[podIP.IP.String()] = VTEP
 		// iterate and find all pods that belong to this VTEP and create learn actions
 		learnActions := ""
 		for pod, tun := range n.tunMap {
-			if tun == namespaceVTEP {
+			if tun == VTEP {
 				if len(learnActions) > 0 {
 					learnActions += ","
 				}
@@ -198,10 +175,10 @@ func (n *NodeController) addOrUpdatePod(pod *kapi.Pod, ignoreLearn bool) error {
 		// so need proper locking around tunMap
 		// after learning actions, we need to resubmit the flow to the gw arp response table (2) so that we can respond
 		// back if this was an arp request
-		tunCookie := podIPToCookie(namespaceVTEPIP)
+		tunCookie := podIPToCookie(VTEPIP)
 		tunFlow := fmt.Sprintf("table=0,cookie=0x%s,priority=120,in_port=%s,arp,arp_spa=%s,tun_src=%s,"+
 			"actions=%s,resubmit(,2)",
-			tunCookie, extVXLANName, namespaceExternalGw, namespaceVTEP, learnActions)
+			tunCookie, extVXLANName, externalGw, VTEP, learnActions)
 		n.updateFlowCacheEntry(tunCookie, []string{tunFlow}, false)
 		n.tunMapMutex.Unlock()
 
@@ -228,8 +205,8 @@ func (n *NodeController) addOrUpdatePod(pod *kapi.Pod, ignoreLearn bool) error {
 				"load:%d->NXM_NX_TUN_ID[0..31],"+
 				"set_field:%s->tun_dst,"+
 				"output:%s",
-				cookie, podIP.IP, n.drMAC.String(), n.drMAC.String(), n.drIP, namespaceExternalGw, hotypes.HybridOverlayVNI,
-				namespaceVTEP, extVXLANName))
+				cookie, podIP.IP, n.drMAC.String(), n.drMAC.String(), n.drIP, externalGw, hotypes.HybridOverlayVNI,
+				VTEP, extVXLANName))
 		n.updateFlowCacheEntry(cookie, flows, ignoreLearn)
 	}
 	n.requestFlowSync()
@@ -297,27 +274,18 @@ func getPodDetails(pod *kapi.Pod, nodeName string) ([]*net.IPNet, net.HardwareAd
 func podChanged(pod1 *kapi.Pod, pod2 *kapi.Pod, nodeName string) bool {
 	podIPs1, mac1, _ := getPodDetails(pod1, nodeName)
 	podIPs2, mac2, _ := getPodDetails(pod2, nodeName)
+	podExGw1 := pod1.Annotations[hotypes.HybridOverlayExternalGw]
+	podVTEP1 := pod1.Annotations[hotypes.HybridOverlayVTEP]
+	podExGw2 := pod2.Annotations[hotypes.HybridOverlayExternalGw]
+	podVTEP2 := pod2.Annotations[hotypes.HybridOverlayVTEP]
 
-	if len(podIPs1) != len(podIPs2) || !reflect.DeepEqual(mac1, mac2) {
+	if len(podIPs1) != len(podIPs2) || !reflect.DeepEqual(mac1, mac2) || !reflect.DeepEqual(podExGw1, podExGw2) || !reflect.DeepEqual(podVTEP1, podVTEP2) {
 		return true
 	}
 	for i := range podIPs1 {
 		if podIPs1[i].String() != podIPs2[i].String() {
 			return true
 		}
-	}
-	return false
-}
-
-// nsHybridAnnotationChanged returns true if any relevant NS attributes changed
-func nsHybridAnnotationChanged(ns1 *kapi.Namespace, ns2 *kapi.Namespace) bool {
-	nsExGw1 := ns1.GetAnnotations()[hotypes.HybridOverlayExternalGw]
-	nsVTEP1 := ns1.GetAnnotations()[hotypes.HybridOverlayVTEP]
-	nsExGw2 := ns2.GetAnnotations()[hotypes.HybridOverlayExternalGw]
-	nsVTEP2 := ns2.GetAnnotations()[hotypes.HybridOverlayVTEP]
-
-	if nsExGw1 != nsExGw2 || nsVTEP1 != nsVTEP2 {
-		return true
 	}
 	return false
 }
@@ -355,7 +323,7 @@ func (n *NodeController) startPodWatch(wf *factory.WatchFactory) error {
 	_, err := wf.AddPodHandler(cache.ResourceEventHandlerFuncs{
 		AddFunc: func(obj interface{}) {
 			pod := obj.(*kapi.Pod)
-			if err := n.addOrUpdatePod(pod, false); err != nil {
+			if err := n.addOrUpdatePod(pod); err != nil {
 				klog.Warningf("failed to handle pod %v addition: %v", pod, err)
 			}
 		},
@@ -363,7 +331,7 @@ func (n *NodeController) startPodWatch(wf *factory.WatchFactory) error {
 			podNew := newer.(*kapi.Pod)
 			podOld := old.(*kapi.Pod)
 			if podChanged(podOld, podNew, n.nodeName) {
-				if err := n.addOrUpdatePod(podNew, false); err != nil {
+				if err := n.addOrUpdatePod(podNew); err != nil {
 					klog.Warningf("failed to handle pod %v update: %v", podNew, err)
 				}
 			}
@@ -382,30 +350,18 @@ func (n *NodeController) startNamespaceWatch(wf *factory.WatchFactory) error {
 	n.wf = wf
 	_, err := wf.AddNamespaceHandler(cache.ResourceEventHandlerFuncs{
 		AddFunc: func(obj interface{}) {
-			// dont care about namespace addition, we already wait for the annotation
+			// don't care about namespace add, masters controllers will update annotations
 		},
 		UpdateFunc: func(old, newer interface{}) {
 			nsNew := newer.(*kapi.Namespace)
 			nsOld := old.(*kapi.Namespace)
-
 			if nsHybridAnnotationChanged(nsOld, nsNew) {
 				// tunnel is unique per NS, if there is an annotation change, delete old tunnel flow
 				oldTunCookie := podIPToCookie(net.ParseIP(nsOld.Annotations[hotypes.HybridOverlayVTEP]))
 				if len(oldTunCookie) > 0 {
 					n.deleteFlowsByCookie(oldTunCookie)
 				}
-				pods, err := wf.GetPods(nsNew.Namespace)
-				if err != nil {
-					klog.Errorf("failed to get pods for NS update in hybrid overlay: %v", err)
-				}
-				for _, pod := range pods {
-					// we need to ignore learning cookie flow from table 20 during this pod update
-					// this is because the VTEP/GW may have changed, and now we need to get rid of the
-					// corresponding table 20 flow and not cache it
-					if err := n.addOrUpdatePod(pod, true); err != nil {
-						klog.Warningf("failed to handle pod %v update: %v", pod, err)
-					}
-				}
+				// master controllers will update annotations, pod updates will get picked up later
 			}
 		},
 		DeleteFunc: func(obj interface{}) {
@@ -415,9 +371,8 @@ func (n *NodeController) startNamespaceWatch(wf *factory.WatchFactory) error {
 	return err
 }
 
-func (n *NodeController) Sync(objs []*kapi.Node) {
-	//just needed to implement the interface
-}
+// Sync is not needed but must be implemented to fulfill the interface
+func (n *NodeController) Sync(objs []*kapi.Node) {}
 
 func (n *NodeController) startNodeWatch(wf *factory.WatchFactory) error {
 	return houtil.StartNodeWatch(n, wf)
