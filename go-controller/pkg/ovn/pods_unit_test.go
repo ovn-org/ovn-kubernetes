@@ -277,7 +277,7 @@ func TestGetRoutesGatewayIP(t *testing.T) {
 				},
 			},
 			inputGwIpnet:   "10.0.0.1/24",
-			inputHybGwIp: 	[]byte("100.64.0.1"),
+			inputHybGwIp:   []byte("100.64.0.1"),
 			matchResult:    true,
 			expectedResult: "ovn-kubernetes_mypod",
 		},
@@ -289,7 +289,7 @@ func TestGetRoutesGatewayIP(t *testing.T) {
 			if e != nil {
 				t.FailNow()
 			}
-			podRoute, ip, e := getRoutesGatewayIP(&tc.inputPod, ipnet, ip )
+			podRoute, ip, e := getRoutesGatewayIP(&tc.inputPod, ipnet, ip)
 			t.Log(podRoute, ip, e)
 			t.Log(tc.expectedResult)
 
