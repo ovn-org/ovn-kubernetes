@@ -62,6 +62,10 @@ case "$SHARD" in
 	shard-other)
 		GINKGO_ARGS="${GINKGO_ARGS} "'--ginkgo.focus=\[sig-network\]\s[^NnSs].*'
 		;;
+	shard-test)
+		TEST_REGEX_REPR=$(echo ${@:2} | sed 's/ /\\s/g')
+		GINKGO_ARGS="${GINKGO_ARGS} "'--ginkgo.focus=\[sig-network\].*'$TEST_REGEX_REPR'.*'
+		;;
 	*)
 		echo "unknown shard"
 		exit 1
