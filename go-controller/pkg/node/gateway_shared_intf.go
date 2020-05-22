@@ -23,7 +23,7 @@ const (
 	defaultOpenFlowCookie = "0xdeff105"
 )
 
-func addService(service *kapi.Service, inport, outport, gwBridge string) {
+func addService(service *kapi.Service, inport, outport, gwBridge string, nodeIP *net.IPNet) {
 	if !util.ServiceTypeHasNodePort(service) {
 		return
 	}
@@ -45,9 +45,11 @@ func addService(service *kapi.Service, inport, outport, gwBridge string) {
 				svcPort.NodePort, stderr, err)
 		}
 	}
+
+	addSharedGatewayIptRules(service, nodeIP)
 }
 
-func deleteService(service *kapi.Service, inport, gwBridge string) {
+func deleteService(service *kapi.Service, inport, gwBridge string, nodeIP *net.IPNet) {
 	if !util.ServiceTypeHasNodePort(service) {
 		return
 	}
@@ -70,6 +72,8 @@ func deleteService(service *kapi.Service, inport, gwBridge string) {
 				svcPort.NodePort, stderr, err)
 		}
 	}
+
+	delSharedGatewayIptRules(service, nodeIP)
 }
 
 func syncServices(services []interface{}, inport, gwBridge string) {
@@ -151,7 +155,7 @@ func syncServices(services []interface{}, inport, gwBridge string) {
 	}
 }
 
-func nodePortWatcher(nodeName, gwBridge, gwIntf string, wf *factory.WatchFactory) error {
+func nodePortWatcher(nodeName, gwBridge, gwIntf string, nodeIP []*net.IPNet, wf *factory.WatchFactory) error {
 	// the name of the patch port created by ovn-controller is of the form
 	// patch-<logical_port_name_of_localnet_port>-to-br-int
 	patchPort := "patch-" + gwBridge + "_" + nodeName + "-to-br-int"
@@ -171,10 +175,20 @@ func nodePortWatcher(nodeName, gwBridge, gwIntf string, wf *factory.WatchFactory
 			gwIntf, stderr, err)
 	}
 
+	// In the shared gateway mode, the NodePort service is handled by the OpenFlow flows configured
+	// on the OVS bridge in the host. These flows act only on the packets coming in from outside
+	// of the node. If someone on the node is trying to access the NodePort service, those packets
+	// will not be processed by the OpenFlow flows, so we need to add iptable rules that DNATs the
+	// NodePortIP:NodePort to ClusterServiceIP:Port.
+	err = createNodePortIptableChain()
+	if err != nil {
+		return err
+	}
+
 	_, err = wf.AddServiceHandler(cache.ResourceEventHandlerFuncs{
 		AddFunc: func(obj interface{}) {
 			service := obj.(*kapi.Service)
-			addService(service, ofportPhys, ofportPatch, gwBridge)
+			addService(service, ofportPhys, ofportPatch, gwBridge, nodeIP[0])
 		},
 		UpdateFunc: func(old, new interface{}) {
 			svcNew := new.(*kapi.Service)
@@ -182,12 +196,12 @@ func nodePortWatcher(nodeName, gwBridge, gwIntf string, wf *factory.WatchFactory
 			if reflect.DeepEqual(svcNew.Spec, svcOld.Spec) {
 				return
 			}
-			deleteService(svcOld, ofportPhys, gwBridge)
-			addService(svcNew, ofportPhys, ofportPatch, gwBridge)
+			deleteService(svcOld, ofportPhys, gwBridge, nodeIP[0])
+			addService(svcNew, ofportPhys, ofportPatch, gwBridge, nodeIP[0])
 		},
 		DeleteFunc: func(obj interface{}) {
 			service := obj.(*kapi.Service)
-			deleteService(service, ofportPhys, gwBridge)
+			deleteService(service, ofportPhys, gwBridge, nodeIP[0])
 		},
 	}, func(services []interface{}) {
 		syncServices(services, ofportPhys, gwBridge)
@@ -362,7 +376,8 @@ func (n *OvnNode) initSharedGateway(subnet *net.IPNet, gwNextHop net.IP, gwIntf 
 
 		if config.Gateway.NodeportEnable {
 			// Program cluster.GatewayIntf to let nodePort traffic to go to pods.
-			if err := nodePortWatcher(n.name, bridgeName, uplinkName, n.watchFactory); err != nil {
+			if err := nodePortWatcher(n.name, bridgeName, uplinkName, []*net.IPNet{ipAddress},
+				n.watchFactory); err != nil {
 				return err
 			}
 		}
@@ -409,5 +424,7 @@ func cleanupSharedGateway() error {
 	if err != nil {
 		return fmt.Errorf("Failed to replace-flows on bridge %q stderr:%s (%v)", bridgeName, stderr, err)
 	}
+
+	deleteNodePortIptableChain()
 	return nil
 }
