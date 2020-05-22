@@ -20,21 +20,11 @@ import (
 	kapisnetworking "k8s.io/api/networking/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/labels"
-	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/tools/cache"
 	"k8s.io/client-go/tools/record"
 	"k8s.io/klog"
 )
-
-// ServiceVIPKey is used for looking up service namespace information for a
-// particular load balancer
-type ServiceVIPKey struct {
-	// Load balancer VIP in the form "ip:port"
-	vip string
-	// Protocol used by the load balancer
-	protocol kapi.Protocol
-}
 
 // loadBalancerConf contains the OVN based config for a LB
 type loadBalancerConf struct {
@@ -126,11 +116,6 @@ type Controller struct {
 	// Supports multicast?
 	multicastSupport bool
 
-	// Map of load balancers to service namespace
-	serviceVIPToName map[ServiceVIPKey]types.NamespacedName
-
-	serviceVIPToNameLock sync.Mutex
-
 	// Map of load balancers, each containing a map of VIP to OVN LB Config
 	serviceLBMap map[string]map[string]*loadBalancerConf
 
@@ -171,8 +156,6 @@ func NewOvnController(kubeClient kubernetes.Interface, wf *factory.WatchFactory,
 		loadbalancerClusterCache: make(map[kapi.Protocol]string),
 		loadbalancerGWCache:      make(map[kapi.Protocol]string),
 		multicastSupport:         config.EnableMulticast,
-		serviceVIPToName:         make(map[ServiceVIPKey]types.NamespacedName),
-		serviceVIPToNameLock:     sync.Mutex{},
 		serviceLBMap:             make(map[string]map[string]*loadBalancerConf),
 		serviceLBLock:            sync.Mutex{},
 		recorder:                 util.EventRecorder(kubeClient),
@@ -356,15 +339,6 @@ func (oc *Controller) ovnControllerEventChecker() {
 					// Don't unidle until we are able to remove the controller event
 					klog.Errorf("Unable to remove controller event %s", event.uuid)
 					continue
-				}
-				if serviceName, ok := oc.GetServiceVIPToName(event.vip, event.protocol); ok {
-					serviceRef := kapi.ObjectReference{
-						Kind:      "Service",
-						Namespace: serviceName.Namespace,
-						Name:      serviceName.Name,
-					}
-					klog.V(5).Infof("Sending a NeedPods event for service %s in namespace %s.", serviceName.Name, serviceName.Namespace)
-					oc.recorder.Eventf(&serviceRef, kapi.EventTypeNormal, "NeedPods", "The service %s needs pods", serviceName.Name)
 				}
 			}
 		case <-oc.stopChan:
@@ -656,21 +630,6 @@ func (oc *Controller) WatchNodes() error {
 		},
 	}, oc.syncNodes)
 	return err
-}
-
-// AddServiceVIPToName associates a k8s service name with a load balancer VIP
-func (oc *Controller) AddServiceVIPToName(vip string, protocol kapi.Protocol, namespace, name string) {
-	oc.serviceVIPToNameLock.Lock()
-	defer oc.serviceVIPToNameLock.Unlock()
-	oc.serviceVIPToName[ServiceVIPKey{vip, protocol}] = types.NamespacedName{Namespace: namespace, Name: name}
-}
-
-// GetServiceVIPToName retrieves the associated k8s service name for a load balancer VIP
-func (oc *Controller) GetServiceVIPToName(vip string, protocol kapi.Protocol) (types.NamespacedName, bool) {
-	oc.serviceVIPToNameLock.Lock()
-	defer oc.serviceVIPToNameLock.Unlock()
-	namespace, ok := oc.serviceVIPToName[ServiceVIPKey{vip, protocol}]
-	return namespace, ok
 }
 
 // setServiceLBToACL associates an empty load balancer with its associated ACL reject rule

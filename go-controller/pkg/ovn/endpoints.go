@@ -92,7 +92,6 @@ func (ovn *Controller) AddEndpoints(ep *kapi.Endpoints) error {
 				continue
 			}
 			vip := util.JoinHostPortInt32(svc.Spec.ClusterIP, svcPort.Port)
-			ovn.AddServiceVIPToName(vip, svcPort.Protocol, svc.Namespace, svc.Name)
 			ovn.handleExternalIPs(svc, svcPort, lbEps.IPs, lbEps.Port, false)
 		}
 	}
