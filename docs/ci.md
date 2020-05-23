@@ -45,7 +45,7 @@ list of skipped tests is defined in
 [ovn-kubernetes/test/scripts/e2e-kind.sh](https://github.com/ovn-org/ovn-kubernetes/blob/master/test/scripts/e2e-kind.sh).
 
 The local tests are controlled in
-[test/scripts/e2e-kind.sh](https://github.com/ovn-org/ovn-kubernetes/blob/master/test/scripts/e2e-kind.sh)
+[test/scripts/e2e-cp.sh](https://github.com/ovn-org/ovn-kubernetes/blob/master/test/scripts/e2e-cp.sh)
 and the actual tests are defined in the directory
 [ovn-kubernetes/test/e2e/](https://github.com/ovn-org/ovn-kubernetes/tree/master/test/e2e).
 
@@ -150,7 +150,7 @@ Launch the KIND Deployment.
 
 ```
 $ pushd contrib
-$ KUBECONFIG=/home/$USER/admin.conf
+$ KUBECONFIG=${HOME}/admin.conf
 $ KIND_INSTALL_INGRESS=true ./kind.sh
 $ popd
 ```
