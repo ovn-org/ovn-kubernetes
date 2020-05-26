@@ -170,18 +170,18 @@ func (runsvc *ExecUtilRunSvcImplStruct) RunCmd(cmd kexec.Cmd, cmdPath string, en
 
 func (runsvc *ExecUtilRunSvcImplStruct) Run(cmdPath string, args ...string) (string, string, error) {
 	cmd := runner.exec.Command(cmdPath, args...)
-	stdout, stderr, err := RunCmdExecSvcInst.RunCmd(cmd, cmdPath, []string{}, args...)
+	stdout, stderr, err := GetExecUtilRunSvc().RunCmd(cmd, cmdPath, []string{}, args...)
 	return stdout, stderr, err
 }
 
 func (runsvc *ExecUtilRunSvcImplStruct) RunWithEnvVars(cmdPath string, envVars []string, args ...string) (string, string, error) {
 	cmd := runner.exec.Command(cmdPath, args...)
-	stdout, stderr, err := RunCmdExecSvcInst.RunCmd(cmd, cmdPath, envVars, args...)
+	stdout, stderr, err := GetExecUtilRunSvc().RunCmd(cmd, cmdPath, envVars, args...)
 	return stdout, stderr, err
 }
 
 func (runsvc *ExecUtilRunSvcImplStruct) SetExec(exec kexec.Interface) error {
-	err := RunCmdExecSvcInst.SetExecWithoutOVS(exec)
+	err := GetExecUtilRunSvc().SetExecWithoutOVS(exec)
 	if err != nil {
 		return err
 	}
@@ -274,11 +274,16 @@ func (runsvc *ExecUtilRunSvcImplStruct) SetSpecificExec(exec kexec.Interface, co
 	return nil
 }
 
-func NewExecUtilRunSvc() ExecUtilRunSvc {
-	return &ExecUtilRunSvcImplStruct{}
+func GetExecUtilRunSvc() ExecUtilRunSvc {
+	if RunCmdExecSvcInst == nil {
+		return &ExecUtilRunSvcImplStruct{}
+	}
+	return RunCmdExecSvcInst
 }
 
-var RunCmdExecSvcInst = NewExecUtilRunSvc()
+var RunCmdExecSvcInst ExecUtilRunSvc
+
+//RunCmdExecSvcInst = GetExecUtilRunSvc()
 
 // SetExec validates executable paths and saves the given exec interface
 // to be used for running various OVS and OVN utilites
@@ -286,7 +291,7 @@ func SetExec(exec kexec.Interface) error {
 	if runner == nil {
 		runner = &execHelper{exec: exec}
 	}
-	return RunCmdExecSvcInst.SetExec(exec)
+	return GetExecUtilRunSvc().SetExec(exec)
 }
 
 // SetExecWithoutOVS validates executable paths excluding OVS/OVN binaries and
@@ -295,7 +300,7 @@ func SetExecWithoutOVS(exec kexec.Interface) error {
 	if runner == nil {
 		runner = &execHelper{exec: exec}
 	}
-	return RunCmdExecSvcInst.SetExecWithoutOVS(exec)
+	return GetExecUtilRunSvc().SetExecWithoutOVS(exec)
 }
 
 // SetSpecificExec validates executable paths for selected commands. It also saves the given
@@ -304,7 +309,7 @@ func SetSpecificExec(exec kexec.Interface, commands ...string) error {
 	if runner == nil {
 		runner = &execHelper{exec: exec}
 	}
-	return RunCmdExecSvcInst.SetSpecificExec(exec, commands...)
+	return GetExecUtilRunSvc().SetSpecificExec(exec, commands...)
 }
 
 // GetExec returns the exec interface which can be used for running commands directly.
@@ -317,19 +322,19 @@ func GetExec() kexec.Interface {
 var runCounter uint64
 
 func runCmd(cmd kexec.Cmd, cmdPath string, args ...string) (*bytes.Buffer, *bytes.Buffer, error) {
-	stdout, stderr, err := RunCmdExecSvcInst.RunCmd(cmd, cmdPath, []string{}, args...)
+	stdout, stderr, err := GetExecUtilRunSvc().RunCmd(cmd, cmdPath, []string{}, args...)
 	return bytes.NewBufferString(stdout), bytes.NewBufferString(stderr), err
 }
 
 func run(cmdPath string, args ...string) (*bytes.Buffer, *bytes.Buffer, error) {
 	//cmd := runner.exec.Command(cmdPath, args...)
-	stdout, stderr, err := RunCmdExecSvcInst.Run(cmdPath, args...)
+	stdout, stderr, err := GetExecUtilRunSvc().Run(cmdPath, args...)
 	return bytes.NewBufferString(stdout), bytes.NewBufferString(stderr), err
 }
 
 func runWithEnvVars(cmdPath string, envVars []string, args ...string) (*bytes.Buffer, *bytes.Buffer, error) {
 	//cmd := runner.exec.Command(cmdPath, args...)
-	stdout, stderr, err := RunCmdExecSvcInst.RunWithEnvVars(cmdPath, envVars, args...)
+	stdout, stderr, err := GetExecUtilRunSvc().RunWithEnvVars(cmdPath, envVars, args...)
 	return bytes.NewBufferString(stdout), bytes.NewBufferString(stderr), err
 }
 

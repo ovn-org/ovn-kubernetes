@@ -18,7 +18,7 @@ type onCallReturnArgs struct {
 
 func TestExecUtilRunSvcImplStruct_RunCmd(t *testing.T) {
 	mockCmd := new(mock_k8s_io_utils_exec.Cmd)
-	execUtilsSvcInst := ExecUtilRunSvcImplStruct{}
+	//execUtilsSvcInst := ExecUtilRunSvcImplStruct{}
 
 	tests := []struct {
 		desc             string
@@ -73,7 +73,7 @@ func TestExecUtilRunSvcImplStruct_RunCmd(t *testing.T) {
 					cmdCall.Once()
 				}
 			}
-			_, _, e := execUtilsSvcInst.RunCmd(tc.cmd, tc.cmdPath, tc.envVars, tc.cmdArg)
+			_, _, e := GetExecUtilRunSvc().RunCmd(tc.cmd, tc.cmdPath, tc.envVars, tc.cmdArg)
 
 			assert.Equal(t, e, tc.expectedErr)
 			mockCmd.AssertExpectations(t)
@@ -83,7 +83,7 @@ func TestExecUtilRunSvcImplStruct_RunCmd(t *testing.T) {
 
 func TestExecUtilRunSvcImplStruct_SetExec(t *testing.T) {
 	mockKexecIface := new(mock_k8s_io_utils_exec.Interface)
-	execUtilsSvcInst := ExecUtilRunSvcImplStruct{}
+	//execUtilsSvcInst := ExecUtilRunSvcImplStruct{}
 
 	tests := []struct {
 		desc        string
@@ -115,7 +115,7 @@ func TestExecUtilRunSvcImplStruct_SetExec(t *testing.T) {
 				call.ReturnArguments = append(call.ReturnArguments, elem)
 			}
 			call.Times(tc.fnCallTimes)
-			e := execUtilsSvcInst.SetExec(mockKexecIface)
+			e := GetExecUtilRunSvc().SetExec(mockKexecIface)
 			assert.Equal(t, e, tc.expectedErr)
 			mockKexecIface.AssertExpectations(t)
 		})
@@ -124,7 +124,7 @@ func TestExecUtilRunSvcImplStruct_SetExec(t *testing.T) {
 
 func TestExecUtilRunSvcImplStruct_SetExecWithoutOVS(t *testing.T) {
 	mockKexecIface := new(mock_k8s_io_utils_exec.Interface)
-	execUtilsSvcInst := ExecUtilRunSvcImplStruct{}
+	//execUtilsSvcInst := ExecUtilRunSvcImplStruct{}
 
 	tests := []struct {
 		desc        string
@@ -152,7 +152,7 @@ func TestExecUtilRunSvcImplStruct_SetExecWithoutOVS(t *testing.T) {
 				call.ReturnArguments = append(call.ReturnArguments, elem)
 			}
 			call.Once()
-			e := execUtilsSvcInst.SetExecWithoutOVS(mockKexecIface)
+			e := GetExecUtilRunSvc().SetExecWithoutOVS(mockKexecIface)
 			assert.Equal(t, e, tc.expectedErr)
 			mockKexecIface.AssertExpectations(t)
 		})
@@ -161,7 +161,7 @@ func TestExecUtilRunSvcImplStruct_SetExecWithoutOVS(t *testing.T) {
 
 func TestExecUtilRunSvcImplStruct_SetSpecificExec(t *testing.T) {
 	mockKexecIface := new(mock_k8s_io_utils_exec.Interface)
-	execUtilsSvcInst := ExecUtilRunSvcImplStruct{}
+	//execUtilsSvcInst := ExecUtilRunSvcImplStruct{}
 	tests := []struct {
 		desc        string
 		expectedErr error
@@ -202,7 +202,7 @@ func TestExecUtilRunSvcImplStruct_SetSpecificExec(t *testing.T) {
 				call.ReturnArguments = append(call.ReturnArguments, elem)
 			}
 			call.Times(tc.fnCallTimes)
-			e := execUtilsSvcInst.SetSpecificExec(mockKexecIface, tc.fnArg)
+			e := GetExecUtilRunSvc().SetSpecificExec(mockKexecIface, tc.fnArg)
 			assert.Equal(t, e, tc.expectedErr)
 			mockKexecIface.AssertExpectations(t)
 		})
