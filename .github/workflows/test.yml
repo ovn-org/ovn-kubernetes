@@ -88,7 +88,7 @@ jobs:
     - name: Cache Kubernetes
       id: cache-k8s
       if: github.event_name == 'push' || github.event_name == 'pull_request'
-      uses: actions/cache@v1
+      uses: actions/cache@v2
       with:
         path: ${{ env.GOPATH }}/src/k8s.io/kubernetes/
         key: k8s-go-2-${{ env.K8S_VERSION }}
@@ -154,7 +154,7 @@ jobs:
 
     - name: Restore Kubernetes from cache
       id: cache-k8s
-      uses: actions/cache@v1
+      uses: actions/cache@v2
       with:
         path: "${{ env.GOPATH }}/src/k8s.io/kubernetes/"
         key: k8s-go-2-${{ env.K8S_VERSION }}
