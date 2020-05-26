@@ -181,7 +181,7 @@ func (runsvc *ExecUtilRunSvcImplStruct) RunWithEnvVars(cmdPath string, envVars [
 }
 
 func (runsvc *ExecUtilRunSvcImplStruct) SetExec(exec kexec.Interface) error {
-	err := runsvc.SetExecWithoutOVS(exec)
+	err := RunCmdExecSvcInst.SetExecWithoutOVS(exec)
 	if err != nil {
 		return err
 	}
