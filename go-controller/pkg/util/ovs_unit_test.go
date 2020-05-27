@@ -1721,7 +1721,9 @@ func TestDetectSCTPSupport(t *testing.T) {
 		onRetArgsIface   *onCallReturnArgs
 		onRetArgsCmdList []onCallReturnArgs
 	}{
-		/*{
+		/* NOTE/TODO : Positive test case will remain commented out until we are able to group the run, runCmd, runCmdWithEnvVars into
+		a separate interface and mocks are generated.
+		{
 			desc:           "positive: run `ovsdb-client` command against OVN NB database",
 			expectedErr:    false,
 			onRetArgsIface: &onCallReturnArgs{"Command", []string{"string", "string", "string", "string", "string", "string", "string", "string"}, []interface{}{mockCmd}},
