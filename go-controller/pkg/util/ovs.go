@@ -170,13 +170,13 @@ func (runsvc *ExecUtilRunSvcImplStruct) RunCmd(cmd kexec.Cmd, cmdPath string, en
 
 func (runsvc *ExecUtilRunSvcImplStruct) Run(cmdPath string, args ...string) (string, string, error) {
 	cmd := runner.exec.Command(cmdPath, args...)
-	stdout, stderr, err := GetExecUtilRunSvc().RunCmd(cmd, cmdPath, []string{}, args...)
+	stdout, stderr, err := runsvc.RunCmd(cmd, cmdPath, []string{}, args...)
 	return stdout, stderr, err
 }
 
 func (runsvc *ExecUtilRunSvcImplStruct) RunWithEnvVars(cmdPath string, envVars []string, args ...string) (string, string, error) {
 	cmd := runner.exec.Command(cmdPath, args...)
-	stdout, stderr, err := GetExecUtilRunSvc().RunCmd(cmd, cmdPath, envVars, args...)
+	stdout, stderr, err := runsvc.RunCmd(cmd, cmdPath, envVars, args...)
 	return stdout, stderr, err
 }
 
@@ -274,6 +274,8 @@ func (runsvc *ExecUtilRunSvcImplStruct) SetSpecificExec(exec kexec.Interface, co
 	return nil
 }
 
+var RunCmdExecSvcInst ExecUtilRunSvc
+
 func GetExecUtilRunSvc() ExecUtilRunSvc {
 	if RunCmdExecSvcInst == nil {
 		return &ExecUtilRunSvcImplStruct{}
@@ -281,35 +283,116 @@ func GetExecUtilRunSvc() ExecUtilRunSvc {
 	return RunCmdExecSvcInst
 }
 
-var RunCmdExecSvcInst ExecUtilRunSvc
-
-//RunCmdExecSvcInst = GetExecUtilRunSvc()
-
 // SetExec validates executable paths and saves the given exec interface
 // to be used for running various OVS and OVN utilites
 func SetExec(exec kexec.Interface) error {
-	if runner == nil {
+	/*if runner == nil {
 		runner = &execHelper{exec: exec}
 	}
-	return GetExecUtilRunSvc().SetExec(exec)
+	return GetExecUtilRunSvc().SetExec(exec)*/
+	err := SetExecWithoutOVS(exec)
+	if err != nil {
+		return err
+	}
+
+	runner.ofctlPath, err = exec.LookPath(ovsOfctlCommand)
+	if err != nil {
+		return err
+	}
+	runner.vsctlPath, err = exec.LookPath(ovsVsctlCommand)
+	if err != nil {
+		return err
+	}
+	runner.appctlPath, err = exec.LookPath(ovsAppctlCommand)
+	if err != nil {
+		return err
+	}
+
+	runner.ovnappctlPath, err = exec.LookPath(ovnAppctlCommand)
+	if err != nil {
+		// If ovn-appctl command is not available then fall back to
+		// ovs-appctl. It also means OVN is using the rundir of
+		// openvswitch.
+		runner.ovnappctlPath = runner.appctlPath
+		runner.ovnctlPath = "/usr/share/openvswitch/scripts/ovn-ctl"
+		runner.ovnRunDir = ovsRunDir
+	} else {
+		// If ovn-appctl command is available, it means OVN
+		// has its own separate rundir, logdir, sharedir.
+		runner.ovnctlPath = "/usr/share/ovn/scripts/ovn-ctl"
+		runner.ovnRunDir = ovnRunDir
+	}
+
+	runner.nbctlPath, err = exec.LookPath(ovnNbctlCommand)
+	if err != nil {
+		return err
+	}
+	runner.sbctlPath, err = exec.LookPath(ovnSbctlCommand)
+	if err != nil {
+		return err
+	}
+	runner.ovsdbClientPath, err = exec.LookPath(ovsdbClientCommand)
+	if err != nil {
+		return err
+	}
+
+	return nil
 }
 
 // SetExecWithoutOVS validates executable paths excluding OVS/OVN binaries and
 // saves the given exec interface to be used for running various utilites
 func SetExecWithoutOVS(exec kexec.Interface) error {
-	if runner == nil {
+	/*if runner == nil {
 		runner = &execHelper{exec: exec}
 	}
-	return GetExecUtilRunSvc().SetExecWithoutOVS(exec)
+	return GetExecUtilRunSvc().SetExecWithoutOVS(exec)*/
+	var err error
+
+	runner = &execHelper{exec: exec}
+	if runtime.GOOS == windowsOS {
+		runner.powershellPath, err = exec.LookPath(powershellCommand)
+		if err != nil {
+			return err
+		}
+		runner.netshPath, err = exec.LookPath(netshCommand)
+		if err != nil {
+			return err
+		}
+		runner.routePath, err = exec.LookPath(routeCommand)
+		if err != nil {
+			return err
+		}
+	} else {
+		runner.ipPath, err = exec.LookPath(ipCommand)
+		if err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 // SetSpecificExec validates executable paths for selected commands. It also saves the given
 // exec interface to be used for running selected commands
 func SetSpecificExec(exec kexec.Interface, commands ...string) error {
-	if runner == nil {
+	/*if runner == nil {
 		runner = &execHelper{exec: exec}
 	}
-	return GetExecUtilRunSvc().SetSpecificExec(exec, commands...)
+	return GetExecUtilRunSvc().SetSpecificExec(exec, commands...)*/
+	var err error
+
+	runner = &execHelper{exec: exec}
+	for _, command := range commands {
+		switch command {
+		case ovsVsctlCommand:
+			runner.vsctlPath, err = exec.LookPath(ovsVsctlCommand)
+			if err != nil {
+				return err
+			}
+		default:
+			return fmt.Errorf("unknown command: %q", command)
+		}
+	}
+	return nil
 }
 
 // GetExec returns the exec interface which can be used for running commands directly.

@@ -130,18 +130,19 @@ func TestGetPodAddresses(t *testing.T) {
 			expectedErr:    false,
 			onRetArgsIface: &onCallReturnArgs{"LookPath", []string{"string"}, []interface{}{"", nil}, 8},
 			onRetArgsExecUtilRunSvc: []onCallReturnArgs{
-				{"SetExec", []string{"*mock_k8s_io_utils_exec.Interface"}, []interface{}{nil}, 1},
+				//{"SetExec", []string{"*mock_k8s_io_utils_exec.Interface"}, []interface{}{nil}, 1},
 				{"RunWithEnvVars", []string{"string", "[]string", "string", "string", "string", "string", "string", "string"}, []interface{}{"22:e9:ac:f4:00:04 10.244.0.3\n[dynamic]", "", nil}, 1},
 			},
 		},
 		{
-			desc:           "negative, invalid portname",
-			inpPortName:    "invalid",
-			expectedErr:    true,
-			onRetArgsIface: &onCallReturnArgs{"RunCmd", []string{"kexec.Cmd", "string", "[]string"}, []interface{}{[]byte(""), []byte(""), nil}, 1},
+			desc:        "negative, invalid portname",
+			inpPortName: "invalid",
+			expectedErr: true,
+			//onRetArgsIface: &onCallReturnArgs{"RunCmd", []string{"kexec.Cmd", "string", "[]string"}, []interface{}{[]byte(""), []byte(""), nil}, 1},
+			onRetArgsIface: &onCallReturnArgs{"LookPath", []string{"string"}, []interface{}{"", nil}, 8},
 			onRetArgsExecUtilRunSvc: []onCallReturnArgs{
 				{"RunWithEnvVars", []string{"kexec.Cmd", "string", "[]string", "string", "string", "string", "string", "string", "string"}, []interface{}{"", "", fmt.Errorf("Error while obtaining pod addressess")}, 1},
-				{"SetExec", []string{"*mocks.Interface"}, []interface{}{nil}, 1},
+				//{"SetExec", []string{"*mocks.Interface"}, []interface{}{nil}, 1},
 			},
 		},
 	}
@@ -204,17 +205,18 @@ func TestWaitForPodAddresses(t *testing.T) {
 			onRetArgsIface: &onCallReturnArgs{"LookPath", []string{"string"}, []interface{}{"", nil}, 8},
 			onRetArgsExecUtilRunSvc: []onCallReturnArgs{
 				{"RunWithEnvVars", []string{"kexec.Cmd", "string", "[]string", "string", "string", "string", "string", "string", "string"}, []interface{}{"22:e9:ac:f4:00:04 10.244.0.3\n[dynamic]", "", nil}, 1},
-				{"SetExec", []string{"*mocks.Interface"}, []interface{}{nil}, 1},
+				//{"SetExec", []string{"*mocks.Interface"}, []interface{}{nil}, 1},
 			},
 		},
 		{
-			desc:           "negative, invalid portname",
-			inpPortName:    "invalid",
-			expectedErr:    true,
-			onRetArgsIface: &onCallReturnArgs{"RunCmd", []string{"kexec.Cmd", "string", "[]string"}, []interface{}{[]byte(""), []byte(""), nil}, 1},
+			desc:        "negative, invalid portname",
+			inpPortName: "invalid",
+			expectedErr: true,
+			//onRetArgsIface: &onCallReturnArgs{"RunCmd", []string{"kexec.Cmd", "string", "[]string"}, []interface{}{[]byte(""), []byte(""), nil}, 1},
+			onRetArgsIface: &onCallReturnArgs{"LookPath", []string{"string"}, []interface{}{"", nil}, 8},
 			onRetArgsExecUtilRunSvc: []onCallReturnArgs{
 				{"RunWithEnvVars", []string{"kexec.Cmd", "string", "[]string", "string", "string", "string", "string", "string", "string"}, []interface{}{"", "", fmt.Errorf("Error while obtaining pod addressess")}, 1},
-				{"SetExec", []string{"*mocks.Interface"}, []interface{}{nil}, 1},
+				//{"SetExec", []string{"*mocks.Interface"}, []interface{}{nil}, 1},
 			},
 		},
 	}

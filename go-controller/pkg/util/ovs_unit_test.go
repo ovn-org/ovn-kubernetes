@@ -18,7 +18,6 @@ type onCallReturnArgs struct {
 
 func TestExecUtilRunSvcImplStruct_RunCmd(t *testing.T) {
 	mockCmd := new(mock_k8s_io_utils_exec.Cmd)
-	//execUtilsSvcInst := ExecUtilRunSvcImplStruct{}
 
 	tests := []struct {
 		desc             string
@@ -83,7 +82,6 @@ func TestExecUtilRunSvcImplStruct_RunCmd(t *testing.T) {
 
 func TestExecUtilRunSvcImplStruct_SetExec(t *testing.T) {
 	mockKexecIface := new(mock_k8s_io_utils_exec.Interface)
-	//execUtilsSvcInst := ExecUtilRunSvcImplStruct{}
 
 	tests := []struct {
 		desc        string
@@ -124,7 +122,6 @@ func TestExecUtilRunSvcImplStruct_SetExec(t *testing.T) {
 
 func TestExecUtilRunSvcImplStruct_SetExecWithoutOVS(t *testing.T) {
 	mockKexecIface := new(mock_k8s_io_utils_exec.Interface)
-	//execUtilsSvcInst := ExecUtilRunSvcImplStruct{}
 
 	tests := []struct {
 		desc        string
@@ -161,7 +158,6 @@ func TestExecUtilRunSvcImplStruct_SetExecWithoutOVS(t *testing.T) {
 
 func TestExecUtilRunSvcImplStruct_SetSpecificExec(t *testing.T) {
 	mockKexecIface := new(mock_k8s_io_utils_exec.Interface)
-	//execUtilsSvcInst := ExecUtilRunSvcImplStruct{}
 	tests := []struct {
 		desc        string
 		expectedErr error
