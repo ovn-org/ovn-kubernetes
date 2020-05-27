@@ -180,4 +180,47 @@ var _ = Describe("Util tests", func() {
 			Expect(result).To(Equal(tc.out), " test case \"%s\" returned wrong results for %#v", tc.name, tc.cidrs)
 		}
 	})
+
+	It("test NextIP", func() {
+		type testCase struct {
+			testIP     string
+			expectedIP string
+		}
+		for _, tc := range []testCase{
+			{
+				testIP:     "192.168.126.125",
+				expectedIP: "192.168.126.126",
+			},
+			{
+				testIP:     "0.0.0.0",
+				expectedIP: "0.0.0.1",
+			},
+			{
+				testIP:     "0:0:1:0:0:feff:c0a8:8e56",
+				expectedIP: "0:0:1:0:0:feff:c0a8:8e57",
+			},
+			{
+				testIP:     "0:0:0:0:0:feff:c0a8:8e56",
+				expectedIP: "0:0:0:0:0:feff:c0a8:8e57",
+			},
+			{
+				testIP:     "d:0:0:0:0:feff:c0a8:8e56",
+				expectedIP: "d:0:0:0:0:feff:c0a8:8e57",
+			},
+			{
+				testIP:     "::feff:c0a8:8e54",
+				expectedIP: "::feff:c0a8:8e55",
+			},
+			{
+				testIP:     "f::feff:c0a8:8e54",
+				expectedIP: "f::feff:c0a8:8e55",
+			},
+		} {
+			ip := net.ParseIP(tc.testIP)
+			actualIP := NextIP(ip)
+			expectedIP := net.ParseIP(tc.expectedIP)
+			Expect(actualIP.String()).To(Equal(expectedIP.String()))
+		}
+	})
+
 })

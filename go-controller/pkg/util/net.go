@@ -12,19 +12,19 @@ import (
 
 // NextIP returns IP incremented by 1
 func NextIP(ip net.IP) net.IP {
-	i := ipToInt(ip)
-	return intToIP(i.Add(i, big.NewInt(1)))
-}
-
-func ipToInt(ip net.IP) *big.Int {
-	if v := ip.To4(); v != nil {
-		return big.NewInt(0).SetBytes(v)
+	byteSize := 0
+	v := ip.To4()
+	if v != nil {
+		byteSize = 4
+	} else {
+		v = ip.To16()
+		byteSize = 16
 	}
-	return big.NewInt(0).SetBytes(ip.To16())
-}
-
-func intToIP(i *big.Int) net.IP {
-	return net.IP(i.Bytes())
+	i := big.NewInt(0).SetBytes(v)
+	i.Add(i, big.NewInt(1))
+	bytes := make([]byte, byteSize)
+	copy(bytes[len(bytes)-len(i.Bytes()):], i.Bytes())
+	return net.IP(bytes)
 }
 
 // GetPortAddresses returns the MAC and IP of the given logical switch port
