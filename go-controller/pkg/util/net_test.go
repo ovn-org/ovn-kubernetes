@@ -137,4 +137,47 @@ var _ = Describe("Util tests", func() {
 			Expect(result).To(Equal(tc.out), " test case \"%s\" returned wrong results for %#v", tc.name, tc.cidrs)
 		}
 	})
+
+	It("test JoinIPNetIPs", func() {
+		type testcase struct {
+			name  string
+			cidrs []*net.IPNet
+			out   string
+		}
+
+		testcases := []testcase{
+			{
+				name:  "empty list",
+				cidrs: nil,
+				out:   "",
+			},
+			{
+				name:  "single CIDR",
+				cidrs: []*net.IPNet{ovntest.MustParseIPNet("10.1.2.3/24")},
+				out:   "10.1.2.3",
+			},
+			{
+				name: "two CIDRs",
+				cidrs: []*net.IPNet{
+					ovntest.MustParseIPNet("10.1.2.3/24"),
+					ovntest.MustParseIPNet("10.4.5.6/24"),
+				},
+				out: "10.1.2.3, 10.4.5.6",
+			},
+			{
+				name: "three CIDRs, mixed families",
+				cidrs: []*net.IPNet{
+					ovntest.MustParseIPNet("10.1.2.3/24"),
+					ovntest.MustParseIPNet("fd01::1234/64"),
+					ovntest.MustParseIPNet("10.4.5.6/24"),
+				},
+				out: "10.1.2.3, fd01::1234, 10.4.5.6",
+			},
+		}
+
+		for _, tc := range testcases {
+			result := JoinIPNetIPs(tc.cidrs, ", ")
+			Expect(result).To(Equal(tc.out), " test case \"%s\" returned wrong results for %#v", tc.name, tc.cidrs)
+		}
+	})
 })
