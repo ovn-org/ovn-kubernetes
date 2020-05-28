@@ -51,6 +51,10 @@ type loadBalancerConf struct {
 type namespaceInfo struct {
 	sync.Mutex
 
+	// addressSet is an address set object that holds the IP addresses
+	// of all pods in the namespace.
+	addressSet AddressSet
+
 	// map from NetworkPolicy name to namespacePolicy. You must hold the
 	// namespaceInfo's mutex to add/delete/lookup policies, but must hold the
 	// namespacePolicy's mutex (and not necessarily the namespaceInfo's) to work with
@@ -64,10 +68,6 @@ type namespaceInfo struct {
 	portGroupUUID string
 
 	multicastEnabled bool
-
-	// addressSet is the name of an address set that holds the IP addresses
-	// of all pods in the namespace.
-	addressSet AddressSet
 }
 
 // Controller structure is the object which holds the controls for starting

@@ -44,6 +44,9 @@ func newPod(namespace, name, node, podIP string) *v1.Pod {
 		Status: v1.PodStatus{
 			Phase: v1.PodRunning,
 			PodIP: podIP,
+			PodIPs: []v1.PodIP{
+				{IP: podIP},
+			},
 		},
 	}
 }

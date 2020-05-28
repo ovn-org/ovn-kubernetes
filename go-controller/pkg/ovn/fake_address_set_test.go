@@ -1,8 +1,6 @@
 package ovn
 
 import (
-	"fmt"
-	"hash/fnv"
 	"net"
 	"strings"
 	"sync"
@@ -26,7 +24,7 @@ type fakeAddressSetFactory struct {
 var _ AddressSetFactory = &fakeAddressSetFactory{}
 
 // NewAddressSet returns a new address set object
-func (f *fakeAddressSetFactory) NewAddressSet(name string, ips []net.IP) (AddressSet, error) {
+func (f *fakeAddressSetFactory) NewAddressSet(name string, ips []*net.IP) (AddressSet, error) {
 	f.Lock()
 	defer f.Unlock()
 	_, ok := f.sets[name]
@@ -46,6 +44,11 @@ func (f *fakeAddressSetFactory) ForEachAddressSet(iteratorFn AddressSetIterFunc)
 		}
 		iteratorFn(name, addrSetNamespace, nameSuffix)
 	}
+	return nil
+}
+
+func (f *fakeAddressSetFactory) DestroyAddressSetInBackingStore(name string) error {
+	f.removeAddressSet(name)
 	return nil
 }
 
@@ -102,12 +105,13 @@ func (f *fakeAddressSetFactory) EventuallyExpectNoAddressSet(name string) {
 	}).Should(BeFalse())
 }
 
+type removeFunc func(string)
+
 type fakeAddressSet struct {
 	sync.Mutex
 	name      string
 	hashName  string
-	uuid      string
-	ips       map[string]net.IP
+	ips       map[string]*net.IP
 	destroyed bool
 	removeFn  removeFunc
 }
@@ -115,21 +119,11 @@ type fakeAddressSet struct {
 // fakeAddressSet implements the AddressSet interface
 var _ AddressSet = &fakeAddressSet{}
 
-func newUUID(name string) string {
-	h := fnv.New128a()
-	_, err := h.Write([]byte(name))
-	Expect(err).NotTo(HaveOccurred())
-	b := make([]byte, 0, 32)
-	h.Sum(b)
-	return fmt.Sprintf("%08s-%04s-%04s-%04s-%12s", b[0:8], b[8:12], b[12:16], b[16:20], b[20:32])
-}
-
-func newFakeAddressSet(name string, ips []net.IP, removeFn removeFunc) *fakeAddressSet {
+func newFakeAddressSet(name string, ips []*net.IP, removeFn removeFunc) *fakeAddressSet {
 	as := &fakeAddressSet{
 		name:     name,
-		uuid:     newUUID(name),
 		hashName: hashedAddressSet(name),
-		ips:      make(map[string]net.IP),
+		ips:      make(map[string]*net.IP),
 		removeFn: removeFn,
 	}
 	for _, ip := range ips {
@@ -154,7 +148,7 @@ func (as *fakeAddressSet) AddIP(ip net.IP) error {
 	defer as.Unlock()
 	ipStr := ip.String()
 	if _, ok := as.ips[ipStr]; !ok {
-		as.ips[ip.String()] = ip
+		as.ips[ip.String()] = &ip
 	}
 	return nil
 }
@@ -173,9 +167,10 @@ func (as *fakeAddressSet) destroyInternal() {
 	as.removeFn(as.name)
 }
 
-func (as *fakeAddressSet) Destroy() {
+func (as *fakeAddressSet) Destroy() error {
 	Expect(as.destroyed).To(BeFalse())
 	as.Lock()
 	defer as.Unlock()
 	as.destroyInternal()
+	return nil
 }

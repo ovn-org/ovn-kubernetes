@@ -83,11 +83,9 @@ func (oc *Controller) syncNetworkPolicies(networkPolicies []interface{}) {
 			hashedLocalPortGroup := hashedPortGroup(portGroupName)
 			deletePortGroup(hashedLocalPortGroup)
 
-			// delete the address sets for this policy from OVN
-			_, stderr, err := util.RunOVNNbctl("--if-exists", "destroy", "address_set", hashedAddrSetName)
-			if err != nil {
-				klog.Errorf("failed to destroy address set %q, stderr: %q, (%v)",
-					hashedAddrSetName, stderr, err)
+			// delete the address sets for this old policy from OVN
+			if err := oc.addressSetFactory.DestroyAddressSetInBackingStore(hashedAddrSetName); err != nil {
+				klog.Errorf(err.Error())
 			}
 		}
 	})
@@ -324,6 +322,7 @@ func deleteMulticastAllowPolicy(ns string, nsInfo *namespaceInfo) error {
 //   protect OVN controller from processing IP multicast reports from nodes
 //   that are not allowed to receive multicast raffic.
 // - one ACL dropping ingress multicast traffic to all pods.
+// Caller must hold the namespace's namespaceInfo object lock.
 func createDefaultDenyMulticastPolicy() error {
 	portGroupName := "mcastPortGroupDeny"
 	portGroupUUID, err := createPortGroup(portGroupName, portGroupName)
@@ -367,10 +366,16 @@ func podDeleteDefaultDenyMulticastPolicy(portInfo *lpInfo) error {
 	return nil
 }
 
+// podAddAllowMulticastPolicy adds the pod's logical switch port to the namespace's
+// multicast port group. Caller must hold the namespace's namespaceInfo object
+// lock.
 func podAddAllowMulticastPolicy(ns string, portInfo *lpInfo) error {
 	return addToPortGroup(hashedPortGroup(ns), portInfo)
 }
 
+// podDeleteAllowMulticastPolicy removes the pod's logical switch port from the
+// namespace's multicast port group. Caller must hold the namespace's
+// namespaceInfo object lock.
 func podDeleteAllowMulticastPolicy(ns string, portInfo *lpInfo) error {
 	return deleteFromPortGroup(hashedPortGroup(ns), portInfo)
 }
@@ -759,10 +764,14 @@ func (oc *Controller) deleteNetworkPolicy(policy *knet.NetworkPolicy) {
 
 	// Delete ingress/egress address sets
 	for _, policy := range np.ingressPolicies {
-		policy.destroy()
+		if err := policy.destroy(); err != nil {
+			klog.Errorf(err.Error())
+		}
 	}
 	for _, policy := range np.egressPolicies {
-		policy.destroy()
+		if err := policy.destroy(); err != nil {
+			klog.Errorf(err.Error())
+		}
 	}
 }
 

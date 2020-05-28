@@ -17,12 +17,27 @@ type AddressSetDoFunc func(as AddressSet) error
 
 // AddressSetFactory is an interface for managing address set objects
 type AddressSetFactory interface {
-	// NewAddressSet returns a new object that implements NewAddressSet
+	// NewAddressSet returns a new object that implements AddressSet
 	// and contains the given IPs, or an error
-	NewAddressSet(name string, ips []net.IP) (AddressSet, error)
+	NewAddressSet(name string, ips []*net.IP) (AddressSet, error)
 	// ForEachAddressSet calls the given function for each address set
 	// known to the factory
 	ForEachAddressSet(iteratorFn AddressSetIterFunc) error
+	// DestroyAddressSetInBackingStore deletes an address set from the
+	// factory's backing store. SHOULD NOT BE CALLED for any address set
+	// for which an AddressSet object has been created.
+	DestroyAddressSetInBackingStore(name string) error
+}
+
+// AddressSet is an interface for address set objects
+type AddressSet interface {
+	// GetHashName returns the hashed name of the address set
+	GetHashName() string
+	// GetName returns the descriptive name of the address set
+	GetName() string
+	AddIP(ip net.IP) error
+	DeleteIP(ip net.IP) error
+	Destroy() error
 }
 
 type ovnAddressSetFactory struct{}
@@ -37,7 +52,7 @@ func NewOvnAddressSetFactory() AddressSetFactory {
 var _ AddressSetFactory = &ovnAddressSetFactory{}
 
 // NewAddressSet returns a new address set object
-func (asf *ovnAddressSetFactory) NewAddressSet(name string, ips []net.IP) (AddressSet, error) {
+func (asf *ovnAddressSetFactory) NewAddressSet(name string, ips []*net.IP) (AddressSet, error) {
 	return newOvnAddressSet(name, ips)
 }
 
@@ -53,7 +68,6 @@ func (asf *ovnAddressSetFactory) ForEachAddressSet(iteratorFn AddressSetIterFunc
 			"stdout: %q, stderr: %q err: %v", output, stderr, err)
 	}
 	for _, line := range strings.Split(output, "\n") {
-		fmt.Printf("#### %q\n", line)
 		parts := strings.Split(line, ",")
 		if len(parts) != 2 {
 			continue
@@ -77,25 +91,22 @@ func (asf *ovnAddressSetFactory) ForEachAddressSet(iteratorFn AddressSetIterFunc
 	return nil
 }
 
-// AddressSet is an interface for address set objects
-type AddressSet interface {
-	// GetHashName returns the hashed name of the address set
-	GetHashName() string
-	// GetName returns the descriptive name of the address set
-	GetName() string
-	AddIP(ip net.IP) error
-	DeleteIP(ip net.IP) error
-	Destroy()
+func (asf *ovnAddressSetFactory) DestroyAddressSetInBackingStore(name string) error {
+	hashName := hashedAddressSet(name)
+	_, stderr, err := util.RunOVNNbctl("--if-exists", "destroy", "address_set", hashName)
+	if err != nil {
+		return fmt.Errorf("failed to destroy address set %q, stderr: %q, (%v)",
+			hashName, stderr, err)
+	}
+	return nil
 }
-
-type removeFunc func(string)
 
 type ovnAddressSet struct {
 	sync.RWMutex
 	name     string
 	hashName string
 	uuid     string
-	ips      map[string]net.IP
+	ips      map[string]*net.IP
 }
 
 // ovnAddressSet implements the AddressSet interface
@@ -110,11 +121,11 @@ func asDetail(as *ovnAddressSet) string {
 	return fmt.Sprintf("%s/%s/%s", as.uuid, as.name, as.hashName)
 }
 
-func newOvnAddressSet(name string, ips []net.IP) (*ovnAddressSet, error) {
+func newOvnAddressSet(name string, ips []*net.IP) (*ovnAddressSet, error) {
 	as := &ovnAddressSet{
 		name:     name,
 		hashName: hashedAddressSet(name),
-		ips:      make(map[string]net.IP),
+		ips:      make(map[string]*net.IP),
 	}
 	for _, ip := range ips {
 		as.ips[ip.String()] = ip
@@ -213,7 +224,7 @@ func (as *ovnAddressSet) AddIP(ip net.IP) error {
 			ip, asDetail(as), stderr, err)
 	}
 
-	as.ips[ip.String()] = ip
+	as.ips[ip.String()] = &ip
 	return nil
 }
 
@@ -238,13 +249,15 @@ func (as *ovnAddressSet) DeleteIP(ip net.IP) error {
 	return nil
 }
 
-func (as *ovnAddressSet) Destroy() {
+func (as *ovnAddressSet) Destroy() error {
 	as.Lock()
 	defer as.Unlock()
 	klog.V(5).Infof("Destroy(%s)", asDetail(as))
 	_, stderr, err := util.RunOVNNbctl("--if-exists", "destroy", "address_set", as.uuid)
 	if err != nil {
-		klog.Errorf("failed to destroy address set %q, stderr: %q, (%v)",
+		return fmt.Errorf("failed to destroy address set %q, stderr: %q, (%v)",
 			asDetail(as), stderr, err)
 	}
+	as.ips = nil
+	return nil
 }

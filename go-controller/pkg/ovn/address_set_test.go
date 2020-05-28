@@ -53,9 +53,19 @@ var _ = Describe("OVN Address Set operations", func() {
 				Expect(err).NotTo(HaveOccurred())
 
 				namespaces := []testAddressSetName{
-					{"ns1", "foo", "bar"},
-					{"ns2", "test", "test2"},
-					{namespace: "ns3"},
+					{
+						namespace: "ns1",
+						suffix1:   "foo",
+						suffix2:   "bar",
+					},
+					{
+						namespace: "ns2",
+						suffix1:   "test",
+						suffix2:   "test2",
+					},
+					{
+						namespace: "ns3",
+					},
 				}
 
 				var namespacesRes string
@@ -114,7 +124,9 @@ var _ = Describe("OVN Address Set operations", func() {
 					`ovn-nbctl --timeout=15 set address_set ` + fakeUUID + ` addresses="` + addr1 + `" "` + addr2 + `"`,
 				})
 
-				_, err = asFactory.NewAddressSet("foobar", []net.IP{net.ParseIP(addr1), net.ParseIP(addr2)})
+				ip1 := net.ParseIP(addr1)
+				ip2 := net.ParseIP(addr2)
+				_, err = asFactory.NewAddressSet("foobar", []*net.IP{&ip1, &ip2})
 				Expect(err).NotTo(HaveOccurred())
 				Expect(fexec.CalledMatchesExpected()).To(BeTrue(), fexec.ErrorDesc)
 				return nil
@@ -165,7 +177,9 @@ var _ = Describe("OVN Address Set operations", func() {
 					Output: fakeUUID,
 				})
 
-				_, err = asFactory.NewAddressSet("foobar", []net.IP{net.ParseIP(addr1), net.ParseIP(addr2)})
+				ip1 := net.ParseIP(addr1)
+				ip2 := net.ParseIP(addr2)
+				_, err = asFactory.NewAddressSet("foobar", []*net.IP{&ip1, &ip2})
 				Expect(err).NotTo(HaveOccurred())
 				Expect(fexec.CalledMatchesExpected()).To(BeTrue(), fexec.ErrorDesc)
 				return nil
@@ -193,7 +207,8 @@ var _ = Describe("OVN Address Set operations", func() {
 			as, err := asFactory.NewAddressSet("foobar", nil)
 			Expect(err).NotTo(HaveOccurred())
 
-			as.Destroy()
+			err = as.Destroy()
+			Expect(err).NotTo(HaveOccurred())
 			Expect(fexec.CalledMatchesExpected()).To(BeTrue(), fexec.ErrorDesc)
 			return nil
 		}
@@ -257,7 +272,8 @@ var _ = Describe("OVN Address Set operations", func() {
 					`ovn-nbctl --timeout=15 remove address_set ` + fakeUUID + ` addresses "` + addr1 + `"`,
 				})
 
-				as, err := asFactory.NewAddressSet("foobar", []net.IP{net.ParseIP(addr1)})
+				ip1 := net.ParseIP(addr1)
+				as, err := asFactory.NewAddressSet("foobar", []*net.IP{&ip1})
 				Expect(err).NotTo(HaveOccurred())
 
 				err = as.DeleteIP(net.ParseIP(addr1))

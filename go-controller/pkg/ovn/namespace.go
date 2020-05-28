@@ -30,11 +30,8 @@ func (oc *Controller) syncNamespaces(namespaces []interface{}) {
 
 	err := oc.addressSetFactory.ForEachAddressSet(func(hashedAddrSetName, namespaceName, nameSuffix string) {
 		if nameSuffix == "" && !expectedNs[namespaceName] {
-			// delete the address sets for this policy from OVN
-			_, stderr, err := util.RunOVNNbctl("--if-exists", "destroy", "address_set", hashedAddrSetName)
-			if err != nil {
-				klog.Errorf("failed to destroy address set %q, stderr: %q, (%v)",
-					hashedAddrSetName, stderr, err)
+			if err := oc.addressSetFactory.DestroyAddressSetInBackingStore(hashedAddrSetName); err != nil {
+				klog.Errorf(err.Error())
 			}
 		}
 	})
@@ -156,16 +153,21 @@ func (oc *Controller) AddNamespace(ns *kapi.Namespace) {
 
 	// Get all the pods in the namespace and append their IP to the
 	// address_set
-	var ips []net.IP
+	var ips []*net.IP
 	existingPods, err := oc.watchFactory.GetPods(ns.Name)
 	if err != nil {
 		klog.Errorf("Failed to get all the pods (%v)", err)
 	} else {
-		ips = make([]net.IP, 0, len(existingPods))
+		ips = make([]*net.IP, 0, len(existingPods))
 		for _, pod := range existingPods {
 			if pod.Status.PodIP != "" && !pod.Spec.HostNetwork {
-				if ip := net.ParseIP(pod.Status.PodIP); ip != nil {
-					ips = append(ips, ip)
+				podIPs, err := util.GetAllPodIPs(pod)
+				if err != nil {
+					klog.Warningf(err.Error())
+					continue
+				}
+				for _, ip := range podIPs {
+					ips = append(ips, &ip)
 				}
 			}
 		}
@@ -322,7 +324,9 @@ func (oc *Controller) deleteNamespaceLocked(ns string) *namespaceInfo {
 		nsInfo.Unlock()
 		return nil
 	}
-	nsInfo.addressSet.Destroy()
+	if err := nsInfo.addressSet.Destroy(); err != nil {
+		klog.Errorf(err.Error())
+	}
 	delete(oc.namespaces, ns)
 
 	return nsInfo

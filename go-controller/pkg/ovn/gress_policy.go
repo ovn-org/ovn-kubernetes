@@ -92,6 +92,7 @@ func (gp *gressPolicy) addPeerPod(pod *v1.Pod) error {
 	if err != nil {
 		return err
 	}
+	// FIXME dual-stack
 	return gp.peerAddressSet.AddIP(ips[0])
 }
 
@@ -100,6 +101,7 @@ func (gp *gressPolicy) deletePeerPod(pod *v1.Pod) error {
 	if err != nil {
 		return err
 	}
+	// FIXME dual-stack
 	return gp.peerAddressSet.DeleteIP(ips[0])
 }
 
@@ -411,7 +413,12 @@ func (gp *gressPolicy) localPodUpdateACL(oldl3Match, newl3Match, portGroupName s
 	}
 }
 
-func (gp *gressPolicy) destroy() {
-	gp.peerAddressSet.Destroy()
-	gp.peerAddressSet = nil
+func (gp *gressPolicy) destroy() error {
+	if gp.peerAddressSet != nil {
+		if err := gp.peerAddressSet.Destroy(); err != nil {
+			return err
+		}
+		gp.peerAddressSet = nil
+	}
+	return nil
 }
