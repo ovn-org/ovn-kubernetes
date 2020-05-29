@@ -63,6 +63,9 @@ type namespaceInfo struct {
 	hybridOverlayExternalGW net.IP
 	hybridOverlayVTEP       net.IP
 
+	// The UUID of the namespace-wide port group that contains all the pods in the namespace.
+	portGroupUUID string
+
 	multicastEnabled bool
 }
 

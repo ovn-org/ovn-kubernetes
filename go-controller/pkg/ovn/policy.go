@@ -238,12 +238,6 @@ func getMulticastACLMatch(ns string) string {
 	return "ip4.src == $" + nsAddressSet + " && ip4.mcast"
 }
 
-// Returns the multicast port group name and hash for namespace 'ns'.
-func getMulticastPortGroup(ns string) (string, string) {
-	portGroupName := "mcastPortGroup-" + ns
-	return portGroupName, hashedPortGroup(portGroupName)
-}
-
 // Creates a policy to allow multicast traffic within 'ns':
 // - a port group containing all logical ports associated with 'ns'
 // - one "from-lport" ACL allowing egress multicast traffic from the pods
@@ -252,14 +246,12 @@ func getMulticastPortGroup(ns string) (string, string) {
 //   This matches only traffic originated by pods in 'ns' (based on the
 //   namespace address set).
 func (oc *Controller) createMulticastAllowPolicy(ns string, nsInfo *namespaceInfo) error {
-	portGroupName, portGroupHash := getMulticastPortGroup(ns)
-	portGroupUUID, err := createPortGroup(portGroupName, portGroupHash)
+	err := nsInfo.updateNamespacePortGroup(ns)
 	if err != nil {
-		return fmt.Errorf("Failed to create port_group for %s (%v)",
-			portGroupName, err)
+		return err
 	}
 
-	err = addACLPortGroup(portGroupUUID, portGroupHash, fromLport,
+	err = addACLPortGroup(nsInfo.portGroupUUID, hashedPortGroup(ns), fromLport,
 		defaultMcastAllowPriority, "ip4.mcast", "allow",
 		knet.PolicyTypeEgress)
 	if err != nil {
@@ -267,7 +259,7 @@ func (oc *Controller) createMulticastAllowPolicy(ns string, nsInfo *namespaceInf
 			ns, err)
 	}
 
-	err = addACLPortGroup(portGroupUUID, portGroupHash, toLport,
+	err = addACLPortGroup(nsInfo.portGroupUUID, hashedPortGroup(ns), toLport,
 		defaultMcastAllowPriority, getMulticastACLMatch(ns), "allow",
 		knet.PolicyTypeIngress)
 	if err != nil {
@@ -287,10 +279,7 @@ func (oc *Controller) createMulticastAllowPolicy(ns string, nsInfo *namespaceInf
 	return nil
 }
 
-// Delete the policy to allow multicast traffic within 'ns'.
-func deleteMulticastAllowPolicy(ns string) error {
-	_, portGroupHash := getMulticastPortGroup(ns)
-
+func deleteMulticastACLs(ns, portGroupHash string) error {
 	err := deleteACLPortGroup(portGroupHash, fromLport,
 		defaultMcastAllowPriority, "ip4.mcast", "allow",
 		knet.PolicyTypeEgress)
@@ -307,7 +296,19 @@ func deleteMulticastAllowPolicy(ns string) error {
 			ns, err)
 	}
 
-	deletePortGroup(portGroupHash)
+	return nil
+}
+
+// Delete the policy to allow multicast traffic within 'ns'.
+func deleteMulticastAllowPolicy(ns string, nsInfo *namespaceInfo) error {
+	portGroupHash := hashedPortGroup(ns)
+
+	err := deleteMulticastACLs(ns, portGroupHash)
+	if err != nil {
+		return err
+	}
+
+	_ = nsInfo.updateNamespacePortGroup(ns)
 	return nil
 }
 
@@ -360,13 +361,11 @@ func podDeleteDefaultDenyMulticastPolicy(portInfo *lpInfo) error {
 }
 
 func podAddAllowMulticastPolicy(ns string, portInfo *lpInfo) error {
-	_, portGroupHash := getMulticastPortGroup(ns)
-	return addToPortGroup(portGroupHash, portInfo)
+	return addToPortGroup(hashedPortGroup(ns), portInfo)
 }
 
 func podDeleteAllowMulticastPolicy(ns string, portInfo *lpInfo) error {
-	_, portGroupHash := getMulticastPortGroup(ns)
-	return deleteFromPortGroup(portGroupHash, portInfo)
+	return deleteFromPortGroup(hashedPortGroup(ns), portInfo)
 }
 
 func (oc *Controller) localPodAddDefaultDeny(

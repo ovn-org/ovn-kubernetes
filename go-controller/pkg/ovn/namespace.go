@@ -107,28 +107,50 @@ func (oc *Controller) multicastUpdateNamespace(ns *kapi.Namespace, nsInfo *names
 	}
 
 	var err error
+	nsInfo.multicastEnabled = enabled
 	if enabled {
 		err = oc.createMulticastAllowPolicy(ns.Name, nsInfo)
 	} else {
-		err = deleteMulticastAllowPolicy(ns.Name)
+		err = deleteMulticastAllowPolicy(ns.Name, nsInfo)
 	}
 	if err != nil {
 		klog.Errorf(err.Error())
 		return
 	}
-
-	nsInfo.multicastEnabled = enabled
 }
 
 // Cleans up the multicast policy for this namespace if multicast was
 // previously allowed.
 func (oc *Controller) multicastDeleteNamespace(ns *kapi.Namespace, nsInfo *namespaceInfo) {
 	if nsInfo.multicastEnabled {
-		if err := deleteMulticastAllowPolicy(ns.Name); err != nil {
+		nsInfo.multicastEnabled = false
+		if err := deleteMulticastAllowPolicy(ns.Name, nsInfo); err != nil {
 			klog.Errorf(err.Error())
 		}
 	}
-	nsInfo.multicastEnabled = false
+}
+
+// updateNamepacePortGroup updates the port_group applied to the namespace. Multiple objects
+// that apply network configuration to all pods in a namespace will use the same port group.
+// This function ensures that the namespace wide port group will only be created once and
+// cleaned up when no object that relies on it exists.
+func (nsInfo *namespaceInfo) updateNamespacePortGroup(ns string) error {
+	if nsInfo.multicastEnabled {
+		if nsInfo.portGroupUUID != "" {
+			// Multicast is enabled and the port group exists so there is nothing to do.
+			return nil
+		}
+
+		// The port group should exist but doesn't so create it
+		portGroupUUID, err := createPortGroup(ns, hashedPortGroup(ns))
+		if err != nil {
+			return fmt.Errorf("Failed to create port_group for %s (%v)", ns, err)
+		}
+		nsInfo.portGroupUUID = portGroupUUID
+	} else {
+		deletePortGroup(hashedPortGroup(ns))
+	}
+	return nil
 }
 
 // AddNamespace creates corresponding addressset in ovn db

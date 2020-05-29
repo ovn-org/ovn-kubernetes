@@ -212,7 +212,8 @@ func (n networkPolicy) delPodCmds(fexec *ovntest.FakeExec, networkPolicy *knet.N
 type multicastPolicy struct{}
 
 func (p multicastPolicy) enableCmds(fExec *ovntest.FakeExec, ns string) {
-	pg_name, pg_hash := getMulticastPortGroup(ns)
+	pg_name := ns
+	pg_hash := hashedPortGroup(ns)
 
 	fExec.AddFakeCmdsNoOutputNoError([]string{
 		"ovn-nbctl --timeout=15 --data=bare --no-heading --columns=_uuid find port_group name=" + pg_hash,
@@ -247,7 +248,7 @@ func (p multicastPolicy) enableCmds(fExec *ovntest.FakeExec, ns string) {
 }
 
 func (p multicastPolicy) disableCmds(fExec *ovntest.FakeExec, ns string) {
-	_, pg_hash := getMulticastPortGroup(ns)
+	pg_hash := hashedPortGroup(ns)
 
 	match := getACLMatch(pg_hash, "ip4.mcast", knet.PolicyTypeEgress)
 	fExec.AddFakeCmd(&ovntest.ExpectedCmd{
@@ -280,7 +281,7 @@ func (p multicastPolicy) disableCmds(fExec *ovntest.FakeExec, ns string) {
 }
 
 func (p multicastPolicy) addPodCmds(fExec *ovntest.FakeExec, ns string) {
-	_, pg_hash := getMulticastPortGroup(ns)
+	pg_hash := hashedPortGroup(ns)
 	fExec.AddFakeCmdsNoOutputNoError([]string{
 		"ovn-nbctl --timeout=15 " +
 			"--if-exists remove port_group " + pg_hash + " ports " + fakeUUID + " " +
@@ -289,7 +290,7 @@ func (p multicastPolicy) addPodCmds(fExec *ovntest.FakeExec, ns string) {
 }
 
 func (p multicastPolicy) delPodCmds(fExec *ovntest.FakeExec, ns string) {
-	_, pg_hash := getMulticastPortGroup(ns)
+	pg_hash := hashedPortGroup(ns)
 	fExec.AddFakeCmdsNoOutputNoError([]string{
 		"ovn-nbctl --timeout=15 " +
 			"--if-exists remove port_group " + pg_hash + " ports " + fakeUUID,
