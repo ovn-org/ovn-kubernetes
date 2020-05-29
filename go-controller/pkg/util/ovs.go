@@ -125,6 +125,44 @@ type execHelper struct {
 
 var runner *execHelper
 
+type ExecRunner interface {
+	RunCmd(cmd kexec.Cmd, cmdPath string, envVars []string, args ...string) (*bytes.Buffer, *bytes.Buffer, error)
+}
+
+// defaultExecRunner implements the methods defined in the ExecRunner interface
+type defaultExecRunner struct {
+}
+
+// RunCmd invokes the methods of the Cmd interfaces defined in k8s.io/utils/exec to execute commands
+// Note: the cmdPath and args parameter are used only for logging and is not processed
+func (runsvc *defaultExecRunner) RunCmd(cmd kexec.Cmd, cmdPath string, envVars []string, args ...string) (*bytes.Buffer, *bytes.Buffer, error) {
+	if cmd == nil {
+		return &bytes.Buffer{}, &bytes.Buffer{}, fmt.Errorf("cmd object cannot be nil")
+	}
+	if len(envVars) != 0 {
+		cmd.SetEnv(envVars)
+	}
+	stdout := &bytes.Buffer{}
+	stderr := &bytes.Buffer{}
+
+	cmd.SetStdout(stdout)
+	cmd.SetStderr(stderr)
+
+	counter := atomic.AddUint64(&runCounter, 1)
+	logCmd := fmt.Sprintf("%s %s", cmdPath, strings.Join(args, " "))
+	klog.V(5).Infof("exec(%d): %s", counter, logCmd)
+
+	err := cmd.Run()
+	klog.V(5).Infof("exec(%d): stdout: %q", counter, stdout)
+	klog.V(5).Infof("exec(%d): stderr: %q", counter, stderr)
+	if err != nil {
+		klog.V(5).Infof("exec(%d): err: %v", counter, err)
+	}
+	return stdout, stderr, err
+}
+
+var runCmdExecRunner ExecRunner = &defaultExecRunner{}
+
 // SetExec validates executable paths and saves the given exec interface
 // to be used for running various OVS and OVN utilites
 func SetExec(exec kexec.Interface) error {
@@ -235,34 +273,17 @@ func GetExec() kexec.Interface {
 var runCounter uint64
 
 func runCmd(cmd kexec.Cmd, cmdPath string, args ...string) (*bytes.Buffer, *bytes.Buffer, error) {
-	stdout := &bytes.Buffer{}
-	stderr := &bytes.Buffer{}
-
-	cmd.SetStdout(stdout)
-	cmd.SetStderr(stderr)
-
-	counter := atomic.AddUint64(&runCounter, 1)
-	logCmd := fmt.Sprintf("%s %s", cmdPath, strings.Join(args, " "))
-	klog.V(5).Infof("exec(%d): %s", counter, logCmd)
-
-	err := cmd.Run()
-	klog.V(5).Infof("exec(%d): stdout: %q", counter, stdout)
-	klog.V(5).Infof("exec(%d): stderr: %q", counter, stderr)
-	if err != nil {
-		klog.V(5).Infof("exec(%d): err: %v", counter, err)
-	}
-	return stdout, stderr, err
+	return runCmdExecRunner.RunCmd(cmd, cmdPath, []string{}, args...)
 }
 
 func run(cmdPath string, args ...string) (*bytes.Buffer, *bytes.Buffer, error) {
 	cmd := runner.exec.Command(cmdPath, args...)
-	return runCmd(cmd, cmdPath, args...)
+	return runCmdExecRunner.RunCmd(cmd, cmdPath, []string{}, args...)
 }
 
 func runWithEnvVars(cmdPath string, envVars []string, args ...string) (*bytes.Buffer, *bytes.Buffer, error) {
 	cmd := runner.exec.Command(cmdPath, args...)
-	cmd.SetEnv(envVars)
-	return runCmd(cmd, cmdPath, args...)
+	return runCmdExecRunner.RunCmd(cmd, cmdPath, envVars, args...)
 }
 
 // RunOVSOfctl runs a command via ovs-ofctl.
@@ -518,6 +539,7 @@ func RunOVNSBAppCtl(args ...string) (string, string, error) {
 }
 
 // RunOVNNorthAppCtl runs an 'ovs-appctl -t ovn-northd command'.
+// TODO: Currently no module is invoking this function, will need to consider adding an unit test when actively used
 func RunOVNNorthAppCtl(args ...string) (string, string, error) {
 	var cmdArgs []string
 
@@ -556,21 +578,6 @@ func RunNetsh(args ...string) (string, string, error) {
 // RunRoute runs a command via the Windows route utility
 func RunRoute(args ...string) (string, string, error) {
 	stdout, stderr, err := run(runner.routePath, args...)
-	return strings.TrimSpace(stdout.String()), stderr.String(), err
-}
-
-// RawExec runs the given command via the exec interface. Should only be used
-// for early calls before configuration is read.
-func RawExec(cmdPath string, args ...string) (string, string, error) {
-	// If the command is not a path to a binary, try finding it
-	if filepath.Base(cmdPath) == cmdPath {
-		var err error
-		cmdPath, err = runner.exec.LookPath(cmdPath)
-		if err != nil {
-			return "", "", err
-		}
-	}
-	stdout, stderr, err := run(cmdPath, args...)
 	return strings.TrimSpace(stdout.String()), stderr.String(), err
 }
 
