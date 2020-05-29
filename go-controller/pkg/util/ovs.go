@@ -125,6 +125,67 @@ type execHelper struct {
 
 var runner *execHelper
 
+type ExecUtilRunSvc interface {
+	RunCmd(cmd kexec.Cmd, cmdPath string, envVars []string, args ...string) (string, string, error)
+	Run(cmdPath string, args ...string) (string, string, error)
+	RunWithEnvVars(cmdPath string, envVars []string, args ...string) (string, string, error)
+}
+
+// ExecUtilRunSvcImplStruct implements the methods defined in the ExecUtilRunSvc interface
+type ExecUtilRunSvcImplStruct struct {
+}
+
+// RunCmd invokes the methods of the Cmd interfaces defined in k8s.io/utils/exec to execute commands
+// Note: the cmdPath and args parameter are used only for logging and is not processed
+func (runsvc *ExecUtilRunSvcImplStruct) RunCmd(cmd kexec.Cmd, cmdPath string, envVars []string, args ...string) (string, string, error) {
+	if cmd == nil {
+		return "", "", fmt.Errorf("cmd object cannot be nil")
+	}
+	if len(envVars) != 0 {
+		klog.V(5).Info("setting cmdSetEnv")
+		cmd.SetEnv(envVars)
+	}
+	stdout := &bytes.Buffer{}
+	stderr := &bytes.Buffer{}
+
+	cmd.SetStdout(stdout)
+	cmd.SetStderr(stderr)
+
+	counter := atomic.AddUint64(&runCounter, 1)
+	logCmd := fmt.Sprintf("%s %s", cmdPath, strings.Join(args, " "))
+	klog.V(5).Infof("exec(%d): %s", counter, logCmd)
+
+	err := cmd.Run()
+	klog.V(5).Infof("exec(%d): stdout: %q", counter, stdout)
+	klog.V(5).Infof("exec(%d): stderr: %q", counter, stderr)
+	if err != nil {
+		klog.V(5).Infof("exec(%d): err: %v", counter, err)
+	}
+	return strings.Trim(strings.TrimFunc(stdout.String(), unicode.IsSpace), "\" \n"),
+		stderr.String(), err
+}
+
+func (runsvc *ExecUtilRunSvcImplStruct) Run(cmdPath string, args ...string) (string, string, error) {
+	cmd := runner.exec.Command(cmdPath, args...)
+	stdout, stderr, err := runsvc.RunCmd(cmd, cmdPath, []string{}, args...)
+	return stdout, stderr, err
+}
+
+func (runsvc *ExecUtilRunSvcImplStruct) RunWithEnvVars(cmdPath string, envVars []string, args ...string) (string, string, error) {
+	cmd := runner.exec.Command(cmdPath, args...)
+	stdout, stderr, err := runsvc.RunCmd(cmd, cmdPath, envVars, args...)
+	return stdout, stderr, err
+}
+
+var RunCmdExecSvcInst ExecUtilRunSvc
+
+func GetExecUtilRunSvc() ExecUtilRunSvc {
+	if RunCmdExecSvcInst == nil {
+		return &ExecUtilRunSvcImplStruct{}
+	}
+	return RunCmdExecSvcInst
+}
+
 // SetExec validates executable paths and saves the given exec interface
 // to be used for running various OVS and OVN utilites
 func SetExec(exec kexec.Interface) error {
@@ -235,34 +296,18 @@ func GetExec() kexec.Interface {
 var runCounter uint64
 
 func runCmd(cmd kexec.Cmd, cmdPath string, args ...string) (*bytes.Buffer, *bytes.Buffer, error) {
-	stdout := &bytes.Buffer{}
-	stderr := &bytes.Buffer{}
-
-	cmd.SetStdout(stdout)
-	cmd.SetStderr(stderr)
-
-	counter := atomic.AddUint64(&runCounter, 1)
-	logCmd := fmt.Sprintf("%s %s", cmdPath, strings.Join(args, " "))
-	klog.V(5).Infof("exec(%d): %s", counter, logCmd)
-
-	err := cmd.Run()
-	klog.V(5).Infof("exec(%d): stdout: %q", counter, stdout)
-	klog.V(5).Infof("exec(%d): stderr: %q", counter, stderr)
-	if err != nil {
-		klog.V(5).Infof("exec(%d): err: %v", counter, err)
-	}
-	return stdout, stderr, err
+	stdout, stderr, err := GetExecUtilRunSvc().RunCmd(cmd, cmdPath, []string{}, args...)
+	return bytes.NewBufferString(stdout), bytes.NewBufferString(stderr), err
 }
 
 func run(cmdPath string, args ...string) (*bytes.Buffer, *bytes.Buffer, error) {
-	cmd := runner.exec.Command(cmdPath, args...)
-	return runCmd(cmd, cmdPath, args...)
+	stdout, stderr, err := GetExecUtilRunSvc().Run(cmdPath, args...)
+	return bytes.NewBufferString(stdout), bytes.NewBufferString(stderr), err
 }
 
 func runWithEnvVars(cmdPath string, envVars []string, args ...string) (*bytes.Buffer, *bytes.Buffer, error) {
-	cmd := runner.exec.Command(cmdPath, args...)
-	cmd.SetEnv(envVars)
-	return runCmd(cmd, cmdPath, args...)
+	stdout, stderr, err := GetExecUtilRunSvc().RunWithEnvVars(cmdPath, envVars, args...)
+	return bytes.NewBufferString(stdout), bytes.NewBufferString(stderr), err
 }
 
 // RunOVSOfctl runs a command via ovs-ofctl.
@@ -518,6 +563,7 @@ func RunOVNSBAppCtl(args ...string) (string, string, error) {
 }
 
 // RunOVNNorthAppCtl runs an 'ovs-appctl -t ovn-northd command'.
+// TODO: Currently no module is invoking this function, will need to consider adding an unit test when actively used
 func RunOVNNorthAppCtl(args ...string) (string, string, error) {
 	var cmdArgs []string
 
@@ -561,6 +607,7 @@ func RunRoute(args ...string) (string, string, error) {
 
 // RawExec runs the given command via the exec interface. Should only be used
 // for early calls before configuration is read.
+// TODO: Currently no module is invoking this function, will need to consider adding an unit test when actively used
 func RawExec(cmdPath string, args ...string) (string, string, error) {
 	// If the command is not a path to a binary, try finding it
 	if filepath.Base(cmdPath) == cmdPath {
