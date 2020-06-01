@@ -24,7 +24,7 @@ type fakeAddressSetFactory struct {
 var _ AddressSetFactory = &fakeAddressSetFactory{}
 
 // NewAddressSet returns a new address set object
-func (f *fakeAddressSetFactory) NewAddressSet(name string, ips []*net.IP) (AddressSet, error) {
+func (f *fakeAddressSetFactory) NewAddressSet(name string, ips []net.IP) (AddressSet, error) {
 	f.Lock()
 	defer f.Unlock()
 	_, ok := f.sets[name]
@@ -111,7 +111,7 @@ type fakeAddressSet struct {
 	sync.Mutex
 	name      string
 	hashName  string
-	ips       map[string]*net.IP
+	ips       map[string]net.IP
 	destroyed bool
 	removeFn  removeFunc
 }
@@ -119,11 +119,11 @@ type fakeAddressSet struct {
 // fakeAddressSet implements the AddressSet interface
 var _ AddressSet = &fakeAddressSet{}
 
-func newFakeAddressSet(name string, ips []*net.IP, removeFn removeFunc) *fakeAddressSet {
+func newFakeAddressSet(name string, ips []net.IP, removeFn removeFunc) *fakeAddressSet {
 	as := &fakeAddressSet{
 		name:     name,
 		hashName: hashedAddressSet(name),
-		ips:      make(map[string]*net.IP),
+		ips:      make(map[string]net.IP),
 		removeFn: removeFn,
 	}
 	for _, ip := range ips {
@@ -148,7 +148,7 @@ func (as *fakeAddressSet) AddIP(ip net.IP) error {
 	defer as.Unlock()
 	ipStr := ip.String()
 	if _, ok := as.ips[ipStr]; !ok {
-		as.ips[ip.String()] = &ip
+		as.ips[ip.String()] = ip
 	}
 	return nil
 }

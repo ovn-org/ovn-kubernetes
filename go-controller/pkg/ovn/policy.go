@@ -76,7 +76,7 @@ func (oc *Controller) syncNetworkPolicies(networkPolicies []interface{}) {
 		}
 	}
 
-	err := oc.addressSetFactory.ForEachAddressSet(func(hashedAddrSetName, namespaceName, policyName string) {
+	err := oc.addressSetFactory.ForEachAddressSet(func(addrSetName, namespaceName, policyName string) {
 		if policyName != "" && !expectedPolicies[namespaceName][policyName] {
 			// policy doesn't exist on k8s. Delete the port group
 			portGroupName := fmt.Sprintf("%s_%s", namespaceName, policyName)
@@ -84,7 +84,7 @@ func (oc *Controller) syncNetworkPolicies(networkPolicies []interface{}) {
 			deletePortGroup(hashedLocalPortGroup)
 
 			// delete the address sets for this old policy from OVN
-			if err := oc.addressSetFactory.DestroyAddressSetInBackingStore(hashedAddrSetName); err != nil {
+			if err := oc.addressSetFactory.DestroyAddressSetInBackingStore(addrSetName); err != nil {
 				klog.Errorf(err.Error())
 			}
 		}

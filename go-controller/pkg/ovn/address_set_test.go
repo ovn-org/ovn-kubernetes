@@ -74,16 +74,15 @@ var _ = Describe("OVN Address Set operations", func() {
 					namespacesRes += fmt.Sprintf("%s,name=%s\n", hashedAddressSet(name), name)
 				}
 				fexec.AddFakeCmd(&ovntest.ExpectedCmd{
-					Cmd:    "ovn-nbctl --timeout=15 --format=csv --data=bare --no-heading --columns=name,external_ids find address_set",
+					Cmd:    "ovn-nbctl --timeout=15 --format=csv --data=bare --no-heading --columns=external_ids find address_set",
 					Output: namespacesRes,
 				})
 
-				err = asFactory.ForEachAddressSet(func(hashedAddrSetName, namespaceName, nameSuffix string) {
+				err = asFactory.ForEachAddressSet(func(addrSetName, namespaceName, nameSuffix string) {
 					found := false
-					fmt.Printf("%q %q %q\n", hashedAddrSetName, namespaceName, nameSuffix)
 					for _, n := range namespaces {
 						name := n.makeName()
-						if hashedAddrSetName == hashedAddressSet(name) {
+						if addrSetName == name {
 							found = true
 							Expect(namespaceName).To(Equal(n.namespace))
 							if n.suffix1 != "" {
@@ -124,9 +123,7 @@ var _ = Describe("OVN Address Set operations", func() {
 					`ovn-nbctl --timeout=15 set address_set ` + fakeUUID + ` addresses="` + addr1 + `" "` + addr2 + `"`,
 				})
 
-				ip1 := net.ParseIP(addr1)
-				ip2 := net.ParseIP(addr2)
-				_, err = asFactory.NewAddressSet("foobar", []*net.IP{&ip1, &ip2})
+				_, err = asFactory.NewAddressSet("foobar", []net.IP{net.ParseIP(addr1), net.ParseIP(addr2)})
 				Expect(err).NotTo(HaveOccurred())
 				Expect(fexec.CalledMatchesExpected()).To(BeTrue(), fexec.ErrorDesc)
 				return nil
@@ -177,9 +174,7 @@ var _ = Describe("OVN Address Set operations", func() {
 					Output: fakeUUID,
 				})
 
-				ip1 := net.ParseIP(addr1)
-				ip2 := net.ParseIP(addr2)
-				_, err = asFactory.NewAddressSet("foobar", []*net.IP{&ip1, &ip2})
+				_, err = asFactory.NewAddressSet("foobar", []net.IP{net.ParseIP(addr1), net.ParseIP(addr2)})
 				Expect(err).NotTo(HaveOccurred())
 				Expect(fexec.CalledMatchesExpected()).To(BeTrue(), fexec.ErrorDesc)
 				return nil
@@ -272,8 +267,7 @@ var _ = Describe("OVN Address Set operations", func() {
 					`ovn-nbctl --timeout=15 remove address_set ` + fakeUUID + ` addresses "` + addr1 + `"`,
 				})
 
-				ip1 := net.ParseIP(addr1)
-				as, err := asFactory.NewAddressSet("foobar", []*net.IP{&ip1})
+				as, err := asFactory.NewAddressSet("foobar", []net.IP{net.ParseIP(addr1)})
 				Expect(err).NotTo(HaveOccurred())
 
 				err = as.DeleteIP(net.ParseIP(addr1))

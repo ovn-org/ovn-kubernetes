@@ -28,9 +28,9 @@ func (oc *Controller) syncNamespaces(namespaces []interface{}) {
 		expectedNs[ns.Name] = true
 	}
 
-	err := oc.addressSetFactory.ForEachAddressSet(func(hashedAddrSetName, namespaceName, nameSuffix string) {
+	err := oc.addressSetFactory.ForEachAddressSet(func(addrSetName, namespaceName, nameSuffix string) {
 		if nameSuffix == "" && !expectedNs[namespaceName] {
-			if err := oc.addressSetFactory.DestroyAddressSetInBackingStore(hashedAddrSetName); err != nil {
+			if err := oc.addressSetFactory.DestroyAddressSetInBackingStore(addrSetName); err != nil {
 				klog.Errorf(err.Error())
 			}
 		}
@@ -153,12 +153,12 @@ func (oc *Controller) AddNamespace(ns *kapi.Namespace) {
 
 	// Get all the pods in the namespace and append their IP to the
 	// address_set
-	var ips []*net.IP
+	var ips []net.IP
 	existingPods, err := oc.watchFactory.GetPods(ns.Name)
 	if err != nil {
 		klog.Errorf("Failed to get all the pods (%v)", err)
 	} else {
-		ips = make([]*net.IP, 0, len(existingPods))
+		ips = make([]net.IP, 0, len(existingPods))
 		for _, pod := range existingPods {
 			if pod.Status.PodIP != "" && !pod.Spec.HostNetwork {
 				podIPs, err := util.GetAllPodIPs(pod)
@@ -166,9 +166,7 @@ func (oc *Controller) AddNamespace(ns *kapi.Namespace) {
 					klog.Warningf(err.Error())
 					continue
 				}
-				for _, ip := range podIPs {
-					ips = append(ips, &ip)
-				}
+				ips = append(ips, podIPs...)
 			}
 		}
 	}

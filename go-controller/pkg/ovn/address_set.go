@@ -19,11 +19,11 @@ type AddressSetDoFunc func(as AddressSet) error
 type AddressSetFactory interface {
 	// NewAddressSet returns a new object that implements AddressSet
 	// and contains the given IPs, or an error
-	NewAddressSet(name string, ips []*net.IP) (AddressSet, error)
+	NewAddressSet(name string, ips []net.IP) (AddressSet, error)
 	// ForEachAddressSet calls the given function for each address set
 	// known to the factory
 	ForEachAddressSet(iteratorFn AddressSetIterFunc) error
-	// DestroyAddressSetInBackingStore deletes an address set from the
+	// DestroyAddressSetInBackingStore deletes the named address set from the
 	// factory's backing store. SHOULD NOT BE CALLED for any address set
 	// for which an AddressSet object has been created.
 	DestroyAddressSetInBackingStore(name string) error
@@ -52,17 +52,16 @@ func NewOvnAddressSetFactory() AddressSetFactory {
 var _ AddressSetFactory = &ovnAddressSetFactory{}
 
 // NewAddressSet returns a new address set object
-func (asf *ovnAddressSetFactory) NewAddressSet(name string, ips []*net.IP) (AddressSet, error) {
+func (asf *ovnAddressSetFactory) NewAddressSet(name string, ips []net.IP) (AddressSet, error) {
 	return newOvnAddressSet(name, ips)
 }
 
-// ForEachAddressSet will pass the hashedName, namespaceName and
-// the first suffix in the name to the 'iteratorFn' for every address_set in
-// OVN. (Each unhashed name for an ovnAddressSet can be of the form
-// namespaceName.suffix1.suffix2. .suffixN)
+// ForEachAddressSet will pass the unhashed address set name, namespace name
+// and the first suffix in the name to the 'iteratorFn' for every address_set in
+// OVN. (Unhashed address set names are of the form namespaceName[.suffix1.suffix2. .suffixN])
 func (asf *ovnAddressSetFactory) ForEachAddressSet(iteratorFn AddressSetIterFunc) error {
 	output, stderr, err := util.RunOVNNbctl("--format=csv", "--data=bare", "--no-heading",
-		"--columns=name,external_ids", "find", "address_set")
+		"--columns=external_ids", "find", "address_set")
 	if err != nil {
 		return fmt.Errorf("error reading address sets: "+
 			"stdout: %q, stderr: %q err: %v", output, stderr, err)
@@ -72,7 +71,6 @@ func (asf *ovnAddressSetFactory) ForEachAddressSet(iteratorFn AddressSetIterFunc
 		if len(parts) != 2 {
 			continue
 		}
-		hashedName := parts[0]
 		for _, externalID := range strings.Fields(parts[1]) {
 			if !strings.HasPrefix(externalID, "name=") {
 				continue
@@ -84,7 +82,7 @@ func (asf *ovnAddressSetFactory) ForEachAddressSet(iteratorFn AddressSetIterFunc
 			if len(names) >= 2 {
 				nameSuffix = names[1]
 			}
-			iteratorFn(hashedName, addrSetNamespace, nameSuffix)
+			iteratorFn(addrSetName, addrSetNamespace, nameSuffix)
 			break
 		}
 	}
@@ -106,7 +104,7 @@ type ovnAddressSet struct {
 	name     string
 	hashName string
 	uuid     string
-	ips      map[string]*net.IP
+	ips      map[string]net.IP
 }
 
 // ovnAddressSet implements the AddressSet interface
@@ -121,11 +119,11 @@ func asDetail(as *ovnAddressSet) string {
 	return fmt.Sprintf("%s/%s/%s", as.uuid, as.name, as.hashName)
 }
 
-func newOvnAddressSet(name string, ips []*net.IP) (*ovnAddressSet, error) {
+func newOvnAddressSet(name string, ips []net.IP) (*ovnAddressSet, error) {
 	as := &ovnAddressSet{
 		name:     name,
 		hashName: hashedAddressSet(name),
-		ips:      make(map[string]*net.IP),
+		ips:      make(map[string]net.IP),
 	}
 	for _, ip := range ips {
 		as.ips[ip.String()] = ip
@@ -224,7 +222,7 @@ func (as *ovnAddressSet) AddIP(ip net.IP) error {
 			ip, asDetail(as), stderr, err)
 	}
 
-	as.ips[ip.String()] = &ip
+	as.ips[ip.String()] = ip
 	return nil
 }
 
