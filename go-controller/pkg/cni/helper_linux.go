@@ -20,7 +20,6 @@ import (
 	"github.com/vishvananda/netlink"
 
 	"k8s.io/apimachinery/pkg/util/wait"
-	utilnet "k8s.io/utils/net"
 )
 
 func renameLink(curName, newName string) error {
@@ -222,22 +221,6 @@ func setupSriovInterface(netns ns.NetNS, containerID, ifName string, ifInfo *Pod
 	return hostIface, contIface, nil
 }
 
-var iptablesCommands = [][]string{
-	// Block MCS
-	{"-A", "OUTPUT", "-p", "tcp", "-m", "tcp", "--dport", "22623", "-j", "REJECT"},
-	{"-A", "OUTPUT", "-p", "tcp", "-m", "tcp", "--dport", "22624", "-j", "REJECT"},
-	{"-A", "FORWARD", "-p", "tcp", "-m", "tcp", "--dport", "22623", "-j", "REJECT"},
-	{"-A", "FORWARD", "-p", "tcp", "-m", "tcp", "--dport", "22624", "-j", "REJECT"},
-}
-
-var iptables4OnlyCommands = [][]string{
-	// Block cloud provider metadata IP except DNS
-	{"-A", "OUTPUT", "-p", "tcp", "-m", "tcp", "-d", "169.254.169.254", "!", "--dport", "53", "-j", "REJECT"},
-	{"-A", "OUTPUT", "-p", "udp", "-m", "udp", "-d", "169.254.169.254", "!", "--dport", "53", "-j", "REJECT"},
-	{"-A", "FORWARD", "-p", "tcp", "-m", "tcp", "-d", "169.254.169.254", "!", "--dport", "53", "-j", "REJECT"},
-	{"-A", "FORWARD", "-p", "udp", "-m", "udp", "-d", "169.254.169.254", "!", "--dport", "53", "-j", "REJECT"},
-}
-
 // ConfigureInterface sets up the container interface
 func (pr *PodRequest) ConfigureInterface(namespace string, podName string, ifInfo *PodInterfaceInfo) ([]*current.Interface, error) {
 	netns, err := ns.GetNS(pr.Netns)
@@ -312,41 +295,7 @@ func (pr *PodRequest) ConfigureInterface(namespace string, podName string, ifInf
 	}
 
 	// Block access to certain things
-	err = netns.Do(func(hostNS ns.NetNS) error {
-		var hasIPv4, hasIPv6 bool
-		for _, ip := range ifInfo.IPs {
-			if utilnet.IsIPv6CIDR(ip) {
-				hasIPv6 = true
-			} else {
-				hasIPv4 = true
-			}
-		}
-
-		for _, args := range iptablesCommands {
-			if hasIPv4 {
-				out, err := exec.Command("iptables", args...).CombinedOutput()
-				if err != nil {
-					return fmt.Errorf("could not set up pod iptables rules: %s", string(out))
-				}
-			}
-			if hasIPv6 {
-				out, err := exec.Command("ip6tables", args...).CombinedOutput()
-				if err != nil {
-					return fmt.Errorf("could not set up pod iptables rules: %s", string(out))
-				}
-			}
-		}
-		if hasIPv4 {
-			for _, args := range iptables4OnlyCommands {
-				out, err := exec.Command("iptables", args...).CombinedOutput()
-				if err != nil {
-					return fmt.Errorf("could not set up pod iptables rules: %s", string(out))
-				}
-			}
-		}
-
-		return nil
-	})
+	err = setupIPTablesBlocks(netns, ifInfo)
 	if err != nil {
 		return nil, err
 	}
