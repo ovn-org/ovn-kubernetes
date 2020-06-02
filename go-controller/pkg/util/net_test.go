@@ -67,25 +67,18 @@ var _ = Describe("Util tests", func() {
 			},
 			{
 				name: "single IP",
-				ips:  []net.IP{ovntest.MustParseIP("10.1.2.3")},
+				ips:  ovntest.MustParseIPs("10.1.2.3"),
 				out:  "10.1.2.3",
 			},
 			{
 				name: "two IPs",
-				ips: []net.IP{
-					ovntest.MustParseIP("10.1.2.3"),
-					ovntest.MustParseIP("10.4.5.6"),
-				},
-				out: "10.1.2.3, 10.4.5.6",
+				ips:  ovntest.MustParseIPs("10.1.2.3", "10.4.5.6"),
+				out:  "10.1.2.3, 10.4.5.6",
 			},
 			{
 				name: "three IPs, mixed families",
-				ips: []net.IP{
-					ovntest.MustParseIP("10.1.2.3"),
-					ovntest.MustParseIP("fd01::1234"),
-					ovntest.MustParseIP("10.4.5.6"),
-				},
-				out: "10.1.2.3, fd01::1234, 10.4.5.6",
+				ips:  ovntest.MustParseIPs("10.1.2.3", "fd01::1234", "10.4.5.6"),
+				out:  "10.1.2.3, fd01::1234, 10.4.5.6",
 			},
 		}
 
@@ -110,25 +103,18 @@ var _ = Describe("Util tests", func() {
 			},
 			{
 				name:  "single CIDR",
-				cidrs: []*net.IPNet{ovntest.MustParseIPNet("10.1.2.3/24")},
+				cidrs: ovntest.MustParseIPNets("10.1.2.3/24"),
 				out:   "10.1.2.3/24",
 			},
 			{
-				name: "two CIDRs",
-				cidrs: []*net.IPNet{
-					ovntest.MustParseIPNet("10.1.2.3/24"),
-					ovntest.MustParseIPNet("10.4.5.6/24"),
-				},
-				out: "10.1.2.3/24, 10.4.5.6/24",
+				name:  "two CIDRs",
+				cidrs: ovntest.MustParseIPNets("10.1.2.3/24", "10.4.5.6/24"),
+				out:   "10.1.2.3/24, 10.4.5.6/24",
 			},
 			{
-				name: "three CIDRs, mixed families",
-				cidrs: []*net.IPNet{
-					ovntest.MustParseIPNet("10.1.2.3/24"),
-					ovntest.MustParseIPNet("fd01::1234/64"),
-					ovntest.MustParseIPNet("10.4.5.6/24"),
-				},
-				out: "10.1.2.3/24, fd01::1234/64, 10.4.5.6/24",
+				name:  "three CIDRs, mixed families",
+				cidrs: ovntest.MustParseIPNets("10.1.2.3/24", "fd01::1234/64", "10.4.5.6/24"),
+				out:   "10.1.2.3/24, fd01::1234/64, 10.4.5.6/24",
 			},
 		}
 
@@ -153,25 +139,18 @@ var _ = Describe("Util tests", func() {
 			},
 			{
 				name:  "single CIDR",
-				cidrs: []*net.IPNet{ovntest.MustParseIPNet("10.1.2.3/24")},
+				cidrs: ovntest.MustParseIPNets("10.1.2.3/24"),
 				out:   "10.1.2.3",
 			},
 			{
-				name: "two CIDRs",
-				cidrs: []*net.IPNet{
-					ovntest.MustParseIPNet("10.1.2.3/24"),
-					ovntest.MustParseIPNet("10.4.5.6/24"),
-				},
-				out: "10.1.2.3, 10.4.5.6",
+				name:  "two CIDRs",
+				cidrs: ovntest.MustParseIPNets("10.1.2.3/24", "10.4.5.6/24"),
+				out:   "10.1.2.3, 10.4.5.6",
 			},
 			{
-				name: "three CIDRs, mixed families",
-				cidrs: []*net.IPNet{
-					ovntest.MustParseIPNet("10.1.2.3/24"),
-					ovntest.MustParseIPNet("fd01::1234/64"),
-					ovntest.MustParseIPNet("10.4.5.6/24"),
-				},
-				out: "10.1.2.3, fd01::1234, 10.4.5.6",
+				name:  "three CIDRs, mixed families",
+				cidrs: ovntest.MustParseIPNets("10.1.2.3/24", "fd01::1234/64", "10.4.5.6/24"),
+				out:   "10.1.2.3, fd01::1234, 10.4.5.6",
 			},
 		}
 

@@ -15,6 +15,15 @@ func MustParseIP(ipStr string) net.IP {
 	return ip
 }
 
+// MustParseIPs is like MustParseIP but returns an array of net.IP
+func MustParseIPs(ipStrs ...string) []net.IP {
+	ips := make([]net.IP, len(ipStrs))
+	for i := range ipStrs {
+		ips[i] = MustParseIP(ipStrs[i])
+	}
+	return ips
+}
+
 // MustParseIPNet is like netlink.ParseIPNet or net.ParseCIDR, except that it panics on
 // error; use this for converting compile-time constant strings to net.IPNet.
 func MustParseIPNet(cidrStr string) *net.IPNet {
@@ -40,6 +49,15 @@ func MustParseIPNet(cidrStr string) *net.IPNet {
 		ipNet.IP = ip
 	}
 	return ipNet
+}
+
+// MustParseIPNets is like MustParseIPNet but returns an array of *net.IPNet
+func MustParseIPNets(ipNetStrs ...string) []*net.IPNet {
+	ipNets := make([]*net.IPNet, len(ipNetStrs))
+	for i := range ipNetStrs {
+		ipNets[i] = MustParseIPNet(ipNetStrs[i])
+	}
+	return ipNets
 }
 
 // MustParseMAC is like net.ParseMAC but it panics on error; use this for converting
