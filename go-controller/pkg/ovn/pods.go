@@ -270,6 +270,7 @@ func (oc *Controller) addLogicalPort(pod *kapi.Pod) error {
 
 	var podMac net.HardwareAddr
 	var podIfAddrs []*net.IPNet
+	var podIPs []net.IP
 	var args []string
 	var addresses string
 
@@ -277,6 +278,9 @@ func (oc *Controller) addLogicalPort(pod *kapi.Pod) error {
 	if err == nil {
 		podMac = annotation.MAC
 		podIfAddrs = annotation.IPs
+		for _, podIfAddr := range podIfAddrs {
+			podIPs = append(podIPs, podIfAddr.IP)
+		}
 
 		// Check if the pod's logical switch port already exists. If it
 		// does don't re-add the port to OVN as this will change its
@@ -322,7 +326,6 @@ func (oc *Controller) addLogicalPort(pod *kapi.Pod) error {
 
 	// If the pod has not already been assigned addresses, read them now
 	if podMac == nil || podIfAddrs == nil {
-		var podIPs []net.IP
 		podMac, podIPs, err = waitForPodAddresses(portName)
 		if err != nil {
 			return err
@@ -353,8 +356,7 @@ func (oc *Controller) addLogicalPort(pod *kapi.Pod) error {
 	}
 
 	// Add the pod's logical switch port to the port cache
-	// DUAL-STACK FIXME: need PortCache to support multiple IPs
-	portInfo := oc.logicalPortCache.add(logicalSwitch, portName, uuid, podMac, podIfAddrs[0].IP)
+	portInfo := oc.logicalPortCache.add(logicalSwitch, portName, uuid, podMac, podIPs)
 
 	// Set the port security for the logical switch port
 	addresses = podMac.String() + " " + util.JoinIPNetIPs(podIfAddrs, " ")

@@ -1,6 +1,8 @@
 package ovn
 
 import (
+	"net"
+
 	"github.com/urfave/cli/v2"
 
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
@@ -83,7 +85,7 @@ var _ = Describe("OVN Namespace Operations", func() {
 					},
 				)
 				podMAC := ovntest.MustParseMAC(tP.podMAC)
-				fakeOvn.controller.logicalPortCache.add(tP.nodeName, tP.portName, fakeUUID, podMAC, ovntest.MustParseIP(tP.podIP))
+				fakeOvn.controller.logicalPortCache.add(tP.nodeName, tP.portName, fakeUUID, podMAC, []net.IP{ovntest.MustParseIP(tP.podIP)})
 				fakeOvn.controller.WatchNamespaces()
 
 				_, err := fakeOvn.fakeClient.CoreV1().Namespaces().Get(namespaceT.Name, metav1.GetOptions{})
