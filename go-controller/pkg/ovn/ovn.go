@@ -13,7 +13,7 @@ import (
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/factory"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/kube"
-	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/allocator"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/subnetallocator"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
 
 	kapi "k8s.io/api/core/v1"
@@ -77,8 +77,8 @@ type Controller struct {
 	watchFactory *factory.WatchFactory
 	stopChan     <-chan struct{}
 
-	masterSubnetAllocator *allocator.SubnetAllocator
-	joinSubnetAllocator   *allocator.SubnetAllocator
+	masterSubnetAllocator *subnetallocator.SubnetAllocator
+	joinSubnetAllocator   *subnetallocator.SubnetAllocator
 
 	TCPLoadBalancerUUID  string
 	UDPLoadBalancerUUID  string
@@ -169,9 +169,9 @@ func NewOvnController(kubeClient kubernetes.Interface, wf *factory.WatchFactory,
 		kube:                     &kube.Kube{KClient: kubeClient},
 		watchFactory:             wf,
 		stopChan:                 stopChan,
-		masterSubnetAllocator:    allocator.NewSubnetAllocator(),
+		masterSubnetAllocator:    subnetallocator.NewSubnetAllocator(),
 		logicalSwitchCache:       make(map[string][]*net.IPNet),
-		joinSubnetAllocator:      allocator.NewSubnetAllocator(),
+		joinSubnetAllocator:      subnetallocator.NewSubnetAllocator(),
 		logicalPortCache:         newPortCache(stopChan),
 		namespaces:               make(map[string]*namespaceInfo),
 		namespacesMutex:          sync.Mutex{},

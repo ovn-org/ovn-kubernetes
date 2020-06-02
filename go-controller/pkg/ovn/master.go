@@ -105,8 +105,8 @@ func (oc *Controller) Start(kClient kubernetes.Interface, nodeName string) error
 //  If true, then either quit or perform a complete reconfiguration of the cluster (recreate switches/routers with new subnet values)
 func (oc *Controller) StartClusterMaster(masterNodeName string) error {
 	// The gateway router need to be connected to the distributed router via a per-node join switch.
-	// We need a subnet allocator that allocates subnet for this per-node join switch. Use the 100.64.0.0/16
-	// or fd98::/64 network range with host bits set to 3. The allocator will start allocating subnet that has upto 6
+	// We need a subnetallocator that allocates subnet for this per-node join switch. Use the 100.64.0.0/16
+	// or fd98::/64 network range with host bits set to 3. The subnetallocator will start allocating subnet that has upto 6
 	// host IPs)
 	joinSubnet := config.V4JoinSubnet
 	if config.IPv6Mode {

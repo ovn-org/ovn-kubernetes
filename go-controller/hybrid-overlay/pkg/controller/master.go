@@ -9,7 +9,7 @@ import (
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/factory"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/kube"
-	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/allocator"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/subnetallocator"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
 
 	kapi "k8s.io/api/core/v1"
@@ -21,17 +21,17 @@ import (
 // MasterController is the master hybrid overlay controller
 type MasterController struct {
 	kube      kube.Interface
-	allocator *allocator.SubnetAllocator
+	allocator *subnetallocator.SubnetAllocator
 }
 
 // NewMaster a new master controller that listens for node events
 func NewMaster(kube kube.Interface) (*MasterController, error) {
 	m := &MasterController{
 		kube:      kube,
-		allocator: allocator.NewSubnetAllocator(),
+		allocator: subnetallocator.NewSubnetAllocator(),
 	}
 
-	// Add our hybrid overlay CIDRs to the allocator
+	// Add our hybrid overlay CIDRs to the subnetallocator
 	for _, clusterEntry := range config.HybridOverlay.ClusterSubnets {
 		err := m.allocator.AddNetworkRange(clusterEntry.CIDR, 32-clusterEntry.HostSubnetLength)
 		if err != nil {
