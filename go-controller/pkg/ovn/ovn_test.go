@@ -24,6 +24,7 @@ type FakeOVN struct {
 	controller *Controller
 	stopChan   chan struct{}
 	fakeExec   *ovntest.FakeExec
+	asf        *fakeAddressSetFactory
 }
 
 func NewFakeOVN(fexec *ovntest.FakeExec) *FakeOVN {
@@ -32,6 +33,7 @@ func NewFakeOVN(fexec *ovntest.FakeExec) *FakeOVN {
 
 	return &FakeOVN{
 		fakeExec: fexec,
+		asf:      newFakeAddressSetFactory(),
 	}
 }
 
@@ -59,6 +61,6 @@ func (o *FakeOVN) init() {
 	o.watcher, err = factory.NewWatchFactory(o.fakeClient, o.stopChan)
 	Expect(err).NotTo(HaveOccurred())
 
-	o.controller = NewOvnController(o.fakeClient, o.watcher, o.stopChan)
+	o.controller = NewOvnController(o.fakeClient, o.watcher, o.stopChan, o.asf)
 	o.controller.multicastSupport = true
 }

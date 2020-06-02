@@ -263,7 +263,7 @@ var _ = Describe("Master Operations", func() {
 			Expect(err).NotTo(HaveOccurred())
 			defer close(stopChan)
 
-			clusterController := NewOvnController(fakeClient, f, stopChan)
+			clusterController := NewOvnController(fakeClient, f, stopChan, newFakeAddressSetFactory())
 			Expect(clusterController).NotTo(BeNil())
 			clusterController.TCPLoadBalancerUUID = tcpLBUUID
 			clusterController.UDPLoadBalancerUUID = udpLBUUID
@@ -348,7 +348,7 @@ var _ = Describe("Master Operations", func() {
 			Expect(err).NotTo(HaveOccurred())
 			defer close(stopChan)
 
-			clusterController := NewOvnController(fakeClient, f, stopChan)
+			clusterController := NewOvnController(fakeClient, f, stopChan, newFakeAddressSetFactory())
 			Expect(clusterController).NotTo(BeNil())
 			clusterController.TCPLoadBalancerUUID = tcpLBUUID
 			clusterController.UDPLoadBalancerUUID = udpLBUUID
@@ -434,7 +434,7 @@ var _ = Describe("Master Operations", func() {
 			Expect(err).NotTo(HaveOccurred())
 			defer close(stopChan)
 
-			clusterController := NewOvnController(fakeClient, f, stopChan)
+			clusterController := NewOvnController(fakeClient, f, stopChan, newFakeAddressSetFactory())
 			Expect(clusterController).NotTo(BeNil())
 			clusterController.TCPLoadBalancerUUID = tcpLBUUID
 			clusterController.UDPLoadBalancerUUID = udpLBUUID
@@ -617,7 +617,7 @@ subnet=%s
 			Expect(err).NotTo(HaveOccurred())
 			defer close(stopChan)
 
-			clusterController := NewOvnController(fakeClient, f, stopChan)
+			clusterController := NewOvnController(fakeClient, f, stopChan, newFakeAddressSetFactory())
 			Expect(clusterController).NotTo(BeNil())
 			clusterController.TCPLoadBalancerUUID = tcpLBUUID
 			clusterController.UDPLoadBalancerUUID = udpLBUUID
@@ -814,7 +814,7 @@ var _ = Describe("Gateway Init Operations", func() {
 			Expect(err).NotTo(HaveOccurred())
 			defer close(stop)
 
-			clusterController := NewOvnController(fakeClient, wf, stop)
+			clusterController := NewOvnController(fakeClient, wf, stop, newFakeAddressSetFactory())
 			Expect(clusterController).NotTo(BeNil())
 			clusterController.TCPLoadBalancerUUID = tcpLBUUID
 			clusterController.UDPLoadBalancerUUID = udpLBUUID
@@ -1008,7 +1008,7 @@ var _ = Describe("Gateway Init Operations", func() {
 			Expect(err).NotTo(HaveOccurred())
 			defer close(stop)
 
-			clusterController := NewOvnController(fakeClient, wf, stop)
+			clusterController := NewOvnController(fakeClient, wf, stop, newFakeAddressSetFactory())
 			Expect(clusterController).NotTo(BeNil())
 			clusterController.TCPLoadBalancerUUID = tcpLBUUID
 			clusterController.UDPLoadBalancerUUID = udpLBUUID

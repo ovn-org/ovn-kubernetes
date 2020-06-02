@@ -7,7 +7,9 @@ import (
 
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
+	"k8s.io/api/core/v1"
 	knet "k8s.io/api/networking/v1"
+	"k8s.io/apimachinery/pkg/util/sets"
 	"k8s.io/klog"
 )
 
@@ -17,11 +19,12 @@ type gressPolicy struct {
 	policyType      knet.PolicyType
 	idx             int
 
-	// peerAddressSets points to all the addressSets that hold
-	// the peer pod's IP addresses. We will have one addressSet for
-	// local pods and multiple addressSets that each represent a
-	// peer namespace
-	peerAddressSets map[string]bool
+	// peerAddressSet points to the addressSet that holds all peer pod
+	// IP addresess.
+	peerAddressSet AddressSet
+
+	// nsAddressSets holds the names of all namespace address sets
+	nsAddressSets sets.String
 
 	// sortedPeerAddressSets has the sorted peerAddressSets
 	sortedPeerAddressSets []string
@@ -58,12 +61,48 @@ func newGressPolicy(policyType knet.PolicyType, idx int, namespace, name string)
 		policyName:            name,
 		policyType:            policyType,
 		idx:                   idx,
-		peerAddressSets:       make(map[string]bool),
+		nsAddressSets:         sets.String{},
 		sortedPeerAddressSets: make([]string, 0),
 		portPolicies:          make([]*portPolicy, 0),
 		ipBlockCidr:           make([]string, 0),
 		ipBlockExcept:         make([]string, 0),
 	}
+}
+
+func (gp *gressPolicy) ensurePeerAddressSet(factory AddressSetFactory) error {
+	if gp.peerAddressSet != nil {
+		return nil
+	}
+
+	direction := strings.ToLower(string(gp.policyType))
+	asName := fmt.Sprintf("%s.%s.%s.%d", gp.policyNamespace, gp.policyName, direction, gp.idx)
+	as, err := factory.NewAddressSet(asName, nil)
+	if err != nil {
+		return err
+	}
+
+	gp.peerAddressSet = as
+	gp.sortedPeerAddressSets = append(gp.sortedPeerAddressSets, as.GetHashName())
+	sort.Strings(gp.sortedPeerAddressSets)
+	return nil
+}
+
+func (gp *gressPolicy) addPeerPod(pod *v1.Pod) error {
+	ips, err := util.GetAllPodIPs(pod)
+	if err != nil {
+		return err
+	}
+	// FIXME dual-stack
+	return gp.peerAddressSet.AddIP(ips[0])
+}
+
+func (gp *gressPolicy) deletePeerPod(pod *v1.Pod) error {
+	ips, err := util.GetAllPodIPs(pod)
+	if err != nil {
+		return err
+	}
+	// FIXME dual-stack
+	return gp.peerAddressSet.DeleteIP(ips[0])
 }
 
 func (gp *gressPolicy) addPortPolicy(portJSON *knet.NetworkPolicyPort) {
@@ -86,17 +125,16 @@ func ipMatch() string {
 }
 
 func (gp *gressPolicy) getL3MatchFromAddressSet() string {
-	var l3Match, addresses string
-	for _, addressSet := range gp.sortedPeerAddressSets {
-		if addresses == "" {
-			addresses = fmt.Sprintf("$%s", addressSet)
-			continue
-		}
-		addresses = fmt.Sprintf("%s, $%s", addresses, addressSet)
+	addressSets := make([]string, 0, len(gp.sortedPeerAddressSets))
+	for _, hashName := range gp.sortedPeerAddressSets {
+		addressSets = append(addressSets, fmt.Sprintf("$%s", hashName))
 	}
-	if addresses == "" {
+
+	var l3Match string
+	if len(addressSets) == 0 {
 		l3Match = ipMatch()
 	} else {
+		addresses := strings.Join(addressSets, ", ")
 		if gp.policyType == knet.PolicyTypeIngress {
 			l3Match = fmt.Sprintf("%s.src == {%s}", ipMatch(), addresses)
 		} else {
@@ -129,40 +167,38 @@ func (gp *gressPolicy) getMatchFromIPBlock(lportMatch, l4Match string) string {
 	return match
 }
 
-// addAddressSet adds a new peer or namespace address set to the gress policy
-func (gp *gressPolicy) addAddressSet(hashedAddressSet string) (string, string, bool) {
-	if gp.peerAddressSets[hashedAddressSet] {
-		return "", "", false
+// addNamespaceAddressSet adds a new namespace address set to the gress policy
+func (gp *gressPolicy) addNamespaceAddressSet(name, portGroupName string) {
+	hashName := hashedAddressSet(name)
+	if gp.nsAddressSets.Has(hashName) {
+		return
 	}
 
 	oldL3Match := gp.getL3MatchFromAddressSet()
-
-	gp.sortedPeerAddressSets = append(gp.sortedPeerAddressSets, hashedAddressSet)
+	gp.nsAddressSets.Insert(hashName)
+	gp.sortedPeerAddressSets = append(gp.sortedPeerAddressSets, hashName)
 	sort.Strings(gp.sortedPeerAddressSets)
-	gp.peerAddressSets[hashedAddressSet] = true
-
-	return oldL3Match, gp.getL3MatchFromAddressSet(), true
+	gp.localPodUpdateACL(oldL3Match, gp.getL3MatchFromAddressSet(), portGroupName)
 }
 
-// delAddressSet removes a peer or namespace address set from the gress policy
-func (gp *gressPolicy) delAddressSet(hashedAddressSet string) (string, string, bool) {
-	if !gp.peerAddressSets[hashedAddressSet] {
-		return "", "", false
+// delNamespaceAddressSet removes a namespace address set from the gress policy
+func (gp *gressPolicy) delNamespaceAddressSet(name, portGroupName string) {
+	hashName := hashedAddressSet(name)
+	if !gp.nsAddressSets.Has(hashName) {
+		return
 	}
 
 	oldL3Match := gp.getL3MatchFromAddressSet()
-
 	for i, addressSet := range gp.sortedPeerAddressSets {
-		if addressSet == hashedAddressSet {
+		if addressSet == hashName {
 			gp.sortedPeerAddressSets = append(
 				gp.sortedPeerAddressSets[:i],
 				gp.sortedPeerAddressSets[i+1:]...)
 			break
 		}
 	}
-	delete(gp.peerAddressSets, hashedAddressSet)
-
-	return oldL3Match, gp.getL3MatchFromAddressSet(), true
+	gp.nsAddressSets.Delete(hashName)
+	gp.localPodUpdateACL(oldL3Match, gp.getL3MatchFromAddressSet(), portGroupName)
 }
 
 // localPodAddACL adds an ACL that implements the gress policy's rules to the
@@ -375,4 +411,14 @@ func (gp *gressPolicy) localPodUpdateACL(oldl3Match, newl3Match, portGroupName s
 			klog.Warningf(err.Error())
 		}
 	}
+}
+
+func (gp *gressPolicy) destroy() error {
+	if gp.peerAddressSet != nil {
+		if err := gp.peerAddressSet.Destroy(); err != nil {
+			return err
+		}
+		gp.peerAddressSet = nil
+	}
+	return nil
 }

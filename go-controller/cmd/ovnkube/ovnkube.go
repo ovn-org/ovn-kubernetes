@@ -231,7 +231,7 @@ func runOvnKube(ctx *cli.Context) error {
 		}
 		// register prometheus metrics exported by the master
 		metrics.RegisterMasterMetrics()
-		ovnController := ovn.NewOvnController(clientset, factory, stopChan)
+		ovnController := ovn.NewOvnController(clientset, factory, stopChan, nil)
 		if err := ovnController.Start(clientset, master); err != nil {
 			return err
 		}

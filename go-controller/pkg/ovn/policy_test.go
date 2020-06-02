@@ -2,12 +2,15 @@ package ovn
 
 import (
 	"fmt"
+	"sort"
+	"strings"
 
 	. "github.com/onsi/ginkgo"
 	. "github.com/onsi/gomega"
 
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
 	ovntest "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/testing"
+	util "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
 	"github.com/urfave/cli/v2"
 	v1 "k8s.io/api/core/v1"
 	knet "k8s.io/api/networking/v1"
@@ -44,7 +47,6 @@ func (n networkPolicy) baseCmds(fexec *ovntest.FakeExec, networkPolicy *knet.Net
 	readableGroupName := fmt.Sprintf("%s_%s", networkPolicy.Namespace, networkPolicy.Name)
 	hashedGroupName := hashedPortGroup(readableGroupName)
 	fexec.AddFakeCmdsNoOutputNoError([]string{
-		"ovn-nbctl --timeout=15 --data=bare --no-heading --columns=external_ids find address_set",
 		fmt.Sprintf("ovn-nbctl --timeout=15 --data=bare --no-heading --columns=_uuid find port_group name=%s", hashedGroupName),
 	})
 	fexec.AddFakeCmd(&ovntest.ExpectedCmd{
@@ -52,13 +54,6 @@ func (n networkPolicy) baseCmds(fexec *ovntest.FakeExec, networkPolicy *knet.Net
 		Output: readableGroupName,
 	})
 	return readableGroupName
-}
-func (n networkPolicy) addNamespaceSelectorCmdsForGress(fexec *ovntest.FakeExec, networkPolicy *knet.NetworkPolicy, gress string, i int) {
-	hashedOVNName := hashedAddressSet(fmt.Sprintf("%s.%s.%s.%d", networkPolicy.Namespace, networkPolicy.Name, gress, i))
-	fexec.AddFakeCmdsNoOutputNoError([]string{
-		fmt.Sprintf("ovn-nbctl --timeout=15 --data=bare --no-heading --columns=_uuid find address_set name=%s", hashedOVNName),
-		fmt.Sprintf("ovn-nbctl --timeout=15 create address_set name=%s external-ids:name=%s", hashedOVNName, fmt.Sprintf("%s.%s.%s.%v", networkPolicy.Namespace, networkPolicy.Name, gress, i)),
-	})
 }
 
 const (
@@ -105,26 +100,9 @@ func (n networkPolicy) addLocalPodCmds(fexec *ovntest.FakeExec, networkPolicy *k
 	}
 }
 
-func (n networkPolicy) addPodSelectorCmds(fexec *ovntest.FakeExec, pod pod, networkPolicy *knet.NetworkPolicy, findAgain bool) {
-	n.addNamespaceSelectorCmds(fexec, networkPolicy, findAgain)
-	for i := range networkPolicy.Spec.Ingress {
-		hashedOVNName := hashedAddressSet(fmt.Sprintf("%s.%s.%s.%d", networkPolicy.Namespace, networkPolicy.Name, "ingress", i))
-		fexec.AddFakeCmdsNoOutputNoError([]string{
-			fmt.Sprintf(`ovn-nbctl --timeout=15 add address_set %s addresses "%s"`, hashedOVNName, pod.podIP),
-		})
-	}
-	for i := range networkPolicy.Spec.Egress {
-		hashedOVNName := hashedAddressSet(fmt.Sprintf("%s.%s.%s.%d", networkPolicy.Namespace, networkPolicy.Name, "egress", i))
-		fexec.AddFakeCmdsNoOutputNoError([]string{
-			fmt.Sprintf(`ovn-nbctl --timeout=15 add address_set %s addresses "%s"`, hashedOVNName, pod.podIP),
-		})
-	}
-}
-
 func (n networkPolicy) addNamespaceSelectorCmds(fexec *ovntest.FakeExec, networkPolicy *knet.NetworkPolicy, findAgain bool) {
 	readableGroupName := n.baseCmds(fexec, networkPolicy)
 	for i := range networkPolicy.Spec.Ingress {
-		n.addNamespaceSelectorCmdsForGress(fexec, networkPolicy, "ingress", i)
 		fexec.AddFakeCmdsNoOutputNoError([]string{
 			fmt.Sprintf("ovn-nbctl --timeout=15 --data=bare --no-heading --columns=_uuid find ACL external-ids:l4Match=\"None\" external-ids:ipblock_cidr=false external-ids:namespace=%s external-ids:policy=%s external-ids:Ingress_num=%v external-ids:policy_type=Ingress", networkPolicy.Namespace, networkPolicy.Name, i),
 			"ovn-nbctl --timeout=15 --id=@acl create acl priority=1001 direction=to-lport match=\"ip4.src == {$a10148211500778908391} && outport == @a14195333570786048679\" action=allow-related external-ids:l4Match=\"None\" external-ids:ipblock_cidr=false external-ids:namespace=namespace1 external-ids:policy=networkpolicy1 external-ids:Ingress_num=0 external-ids:policy_type=Ingress -- add port_group " + readableGroupName + " acls @acl",
@@ -136,7 +114,6 @@ func (n networkPolicy) addNamespaceSelectorCmds(fexec *ovntest.FakeExec, network
 		}
 	}
 	for i := range networkPolicy.Spec.Egress {
-		n.addNamespaceSelectorCmdsForGress(fexec, networkPolicy, "egress", i)
 		fexec.AddFakeCmdsNoOutputNoError([]string{
 			fmt.Sprintf("ovn-nbctl --timeout=15 --data=bare --no-heading --columns=_uuid find ACL external-ids:l4Match=\"None\" external-ids:ipblock_cidr=false external-ids:namespace=%s external-ids:policy=%s external-ids:Egress_num=%v external-ids:policy_type=Egress", networkPolicy.Namespace, networkPolicy.Name, i),
 			"ovn-nbctl --timeout=15 --id=@acl create acl priority=1001 direction=to-lport match=\"ip4.dst == {$a9824637386382239951} && inport == @a14195333570786048679\" action=allow external-ids:l4Match=\"None\" external-ids:ipblock_cidr=false external-ids:namespace=namespace1 external-ids:policy=networkpolicy1 external-ids:Egress_num=0 external-ids:policy_type=Egress -- add port_group " + readableGroupName + " acls @acl",
@@ -149,19 +126,45 @@ func (n networkPolicy) addNamespaceSelectorCmds(fexec *ovntest.FakeExec, network
 	}
 }
 
-func (n networkPolicy) delCmds(fexec *ovntest.FakeExec, pod pod, networkPolicy *knet.NetworkPolicy, withLocal bool) {
+func getAddressSetName(namespace, name string, policyType knet.PolicyType, idx int) string {
+	direction := strings.ToLower(string(policyType))
+	return fmt.Sprintf("%s.%s.%s.%d", namespace, name, direction, idx)
+}
+
+func eventuallyExpectNoAddressSets(fakeOvn *FakeOVN, networkPolicy *knet.NetworkPolicy) {
 	for i := range networkPolicy.Spec.Ingress {
-		hashedOVNName := hashedAddressSet(fmt.Sprintf("%s.%s.%s.%d", networkPolicy.Namespace, networkPolicy.Name, "ingress", i))
-		fexec.AddFakeCmdsNoOutputNoError([]string{
-			fmt.Sprintf("ovn-nbctl --timeout=15 --if-exists destroy address_set %s", hashedOVNName),
-		})
+		asName := getAddressSetName(networkPolicy.Namespace, networkPolicy.Name, knet.PolicyTypeIngress, i)
+		fakeOvn.asf.EventuallyExpectNoAddressSet(asName)
 	}
 	for i := range networkPolicy.Spec.Egress {
-		hashedOVNName := hashedAddressSet(fmt.Sprintf("%s.%s.%s.%d", networkPolicy.Namespace, networkPolicy.Name, "egress", i))
-		fexec.AddFakeCmdsNoOutputNoError([]string{
-			fmt.Sprintf("ovn-nbctl --timeout=15 --if-exists destroy address_set %s", hashedOVNName),
-		})
+		asName := getAddressSetName(networkPolicy.Namespace, networkPolicy.Name, knet.PolicyTypeEgress, i)
+		fakeOvn.asf.EventuallyExpectNoAddressSet(asName)
 	}
+}
+
+func expectAddressSetsWithIP(fakeOvn *FakeOVN, networkPolicy *knet.NetworkPolicy, ip string) {
+	for i := range networkPolicy.Spec.Ingress {
+		asName := getAddressSetName(networkPolicy.Namespace, networkPolicy.Name, knet.PolicyTypeIngress, i)
+		fakeOvn.asf.ExpectAddressSetWithIPs(asName, []string{ip})
+	}
+	for i := range networkPolicy.Spec.Egress {
+		asName := getAddressSetName(networkPolicy.Namespace, networkPolicy.Name, knet.PolicyTypeEgress, i)
+		fakeOvn.asf.ExpectAddressSetWithIPs(asName, []string{ip})
+	}
+}
+
+func eventuallyExpectEmptyAddressSets(fakeOvn *FakeOVN, networkPolicy *knet.NetworkPolicy) {
+	for i := range networkPolicy.Spec.Ingress {
+		asName := getAddressSetName(networkPolicy.Namespace, networkPolicy.Name, knet.PolicyTypeIngress, i)
+		fakeOvn.asf.EventuallyExpectEmptyAddressSet(asName)
+	}
+	for i := range networkPolicy.Spec.Egress {
+		asName := getAddressSetName(networkPolicy.Namespace, networkPolicy.Name, knet.PolicyTypeEgress, i)
+		fakeOvn.asf.EventuallyExpectEmptyAddressSet(asName)
+	}
+}
+
+func (n networkPolicy) delCmds(fexec *ovntest.FakeExec, pod pod, networkPolicy *knet.NetworkPolicy, withLocal bool) {
 	if withLocal {
 		fexec.AddFakeCmdsNoOutputNoError([]string{
 			"ovn-nbctl --timeout=15 --if-exists remove port_group " + ingressDenyPG + " ports " + fakeUUID,
@@ -180,33 +183,17 @@ func (n networkPolicy) delCmds(fexec *ovntest.FakeExec, pod pod, networkPolicy *
 	})
 }
 
-func (n networkPolicy) delPodCmds(fexec *ovntest.FakeExec, networkPolicy *knet.NetworkPolicy, withLocal bool, podIP string) {
-	for i := range networkPolicy.Spec.Ingress {
-		localPeerPods := fmt.Sprintf("%s.%s.%s.%d", networkPolicy.Namespace, networkPolicy.Name, "ingress", i)
-		hashedLocalAddressSet := hashedAddressSet(localPeerPods)
-		fexec.AddFakeCmdsNoOutputNoError([]string{
-			fmt.Sprintf(`ovn-nbctl --timeout=15 remove address_set %s addresses "%s"`, hashedLocalAddressSet, podIP),
-		})
-	}
-	for i := range networkPolicy.Spec.Egress {
-		localPeerPods := fmt.Sprintf("%s.%s.%s.%d", networkPolicy.Namespace, networkPolicy.Name, "egress", i)
-		hashedLocalAddressSet := hashedAddressSet(localPeerPods)
-		fexec.AddFakeCmdsNoOutputNoError([]string{
-			fmt.Sprintf(`ovn-nbctl --timeout=15 remove address_set %s addresses "%s"`, hashedLocalAddressSet, podIP),
-		})
-	}
-	if withLocal {
-		fexec.AddFakeCmdsNoOutputNoError([]string{
-			"ovn-nbctl --timeout=15 --if-exists remove port_group " + ingressDenyPG + " ports " + fakeUUID,
-		})
-		fexec.AddFakeCmdsNoOutputNoError([]string{
-			"ovn-nbctl --timeout=15 --if-exists remove port_group " + egressDenyPG + " ports " + fakeUUID,
-		})
-		readableGroupName := fmt.Sprintf("%s_%s", networkPolicy.Namespace, networkPolicy.Name)
-		fexec.AddFakeCmdsNoOutputNoError([]string{
-			"ovn-nbctl --timeout=15 --if-exists remove port_group " + readableGroupName + " ports " + fakeUUID,
-		})
-	}
+func (n networkPolicy) delPodCmds(fexec *ovntest.FakeExec, networkPolicy *knet.NetworkPolicy) {
+	fexec.AddFakeCmdsNoOutputNoError([]string{
+		"ovn-nbctl --timeout=15 --if-exists remove port_group " + ingressDenyPG + " ports " + fakeUUID,
+	})
+	fexec.AddFakeCmdsNoOutputNoError([]string{
+		"ovn-nbctl --timeout=15 --if-exists remove port_group " + egressDenyPG + " ports " + fakeUUID,
+	})
+	readableGroupName := fmt.Sprintf("%s_%s", networkPolicy.Namespace, networkPolicy.Name)
+	fexec.AddFakeCmdsNoOutputNoError([]string{
+		"ovn-nbctl --timeout=15 --if-exists remove port_group " + readableGroupName + " ports " + fakeUUID,
+	})
 }
 
 type multicastPolicy struct{}
@@ -326,7 +313,6 @@ var _ = Describe("OVN NetworkPolicy Operations", func() {
 			app.Action = func(ctx *cli.Context) error {
 
 				npTest := networkPolicy{}
-				nTest := namespace{}
 
 				namespace1 := *newNamespace("namespace1")
 				namespace2 := *newNamespace("namespace2")
@@ -359,8 +345,6 @@ var _ = Describe("OVN NetworkPolicy Operations", func() {
 						},
 					})
 
-				nTest.baseCmds(fExec, namespace1, namespace2)
-				nTest.addCmds(fExec, namespace1, namespace2)
 				npTest.addNamespaceSelectorCmds(fExec, networkPolicy, true)
 
 				fakeOvn.start(ctx,
@@ -380,6 +364,10 @@ var _ = Describe("OVN NetworkPolicy Operations", func() {
 				fakeOvn.controller.WatchNamespaces()
 				fakeOvn.controller.WatchNetworkPolicy()
 
+				fakeOvn.asf.ExpectEmptyAddressSet(namespace1.Name)
+				fakeOvn.asf.ExpectEmptyAddressSet(namespace2.Name)
+				eventuallyExpectEmptyAddressSets(fakeOvn, networkPolicy)
+
 				_, err := fakeOvn.fakeClient.NetworkingV1().NetworkPolicies(networkPolicy.Namespace).Get(networkPolicy.Name, metav1.GetOptions{})
 				Expect(err).NotTo(HaveOccurred())
 				Eventually(fExec.CalledMatchesExpected).Should(BeTrue(), fExec.ErrorDesc)
@@ -395,7 +383,6 @@ var _ = Describe("OVN NetworkPolicy Operations", func() {
 			app.Action = func(ctx *cli.Context) error {
 
 				npTest := networkPolicy{}
-				nTest := namespace{}
 
 				namespace1 := *newNamespace("namespace1")
 
@@ -440,10 +427,7 @@ var _ = Describe("OVN NetworkPolicy Operations", func() {
 
 				nPodTest.baseCmds(fExec)
 				nPodTest.addCmdsForNonExistingPod(fExec)
-				nTest.baseCmds(fExec, namespace1)
-				nTest.addCmdsWithPods(fExec, nPodTest, namespace1)
-				nPodTest.addPodDenyMcast(fExec)
-				npTest.addPodSelectorCmds(fExec, nPodTest, networkPolicy, false)
+				npTest.addNamespaceSelectorCmds(fExec, networkPolicy, false)
 				npTest.addLocalPodCmds(fExec, networkPolicy)
 
 				fakeOvn.start(ctx,
@@ -469,6 +453,9 @@ var _ = Describe("OVN NetworkPolicy Operations", func() {
 				fakeOvn.controller.WatchNamespaces()
 				fakeOvn.controller.WatchNetworkPolicy()
 
+				expectAddressSetsWithIP(fakeOvn, networkPolicy, nPodTest.podIP)
+				fakeOvn.asf.ExpectAddressSetWithIPs(namespace1.Name, []string{nPodTest.podIP})
+
 				_, err := fakeOvn.fakeClient.NetworkingV1().NetworkPolicies(networkPolicy.Namespace).Get(networkPolicy.Name, metav1.GetOptions{})
 				Expect(err).NotTo(HaveOccurred())
 				Eventually(fExec.CalledMatchesExpected).Should(BeTrue(), fExec.ErrorDesc)
@@ -484,7 +471,6 @@ var _ = Describe("OVN NetworkPolicy Operations", func() {
 			app.Action = func(ctx *cli.Context) error {
 
 				npTest := networkPolicy{}
-				nTest := namespace{}
 
 				namespace1 := *newNamespace("namespace1")
 				namespace2 := *newNamespace("namespace2")
@@ -540,11 +526,7 @@ var _ = Describe("OVN NetworkPolicy Operations", func() {
 
 				nPodTest.baseCmds(fExec)
 				nPodTest.addCmdsForNonExistingPod(fExec)
-				nTest.baseCmds(fExec, namespace1, namespace2)
-				nTest.addCmds(fExec, namespace1)
-				nTest.addCmdsWithPods(fExec, nPodTest, namespace2)
-				nPodTest.addPodDenyMcast(fExec)
-				npTest.addPodSelectorCmds(fExec, nPodTest, networkPolicy, false)
+				npTest.addNamespaceSelectorCmds(fExec, networkPolicy, false)
 
 				fakeOvn.start(ctx,
 					&v1.NamespaceList{
@@ -570,6 +552,10 @@ var _ = Describe("OVN NetworkPolicy Operations", func() {
 				fakeOvn.controller.WatchNamespaces()
 				fakeOvn.controller.WatchNetworkPolicy()
 
+				fakeOvn.asf.ExpectEmptyAddressSet(namespace1.Name)
+				expectAddressSetsWithIP(fakeOvn, networkPolicy, nPodTest.podIP)
+				fakeOvn.asf.ExpectAddressSetWithIPs(namespace2.Name, []string{nPodTest.podIP})
+
 				_, err := fakeOvn.fakeClient.NetworkingV1().NetworkPolicies(networkPolicy.Namespace).Get(networkPolicy.Name, metav1.GetOptions{})
 				Expect(err).NotTo(HaveOccurred())
 				Eventually(fExec.CalledMatchesExpected).Should(BeTrue(), fExec.ErrorDesc)
@@ -587,7 +573,6 @@ var _ = Describe("OVN NetworkPolicy Operations", func() {
 		It("correctly creates a networkpolicy allowing a port to a local pod", func() {
 			app.Action = func(ctx *cli.Context) error {
 				npTest := networkPolicy{}
-				nTest := namespace{}
 
 				namespace1 := *newNamespace("namespace1")
 				nPodTest := newTPod(
@@ -632,9 +617,6 @@ var _ = Describe("OVN NetworkPolicy Operations", func() {
 
 				nPodTest.baseCmds(fExec)
 				nPodTest.addCmdsForNonExistingPod(fExec)
-				nTest.baseCmds(fExec, namespace1)
-				nTest.addCmdsWithPods(fExec, nPodTest, namespace1)
-				nPodTest.addPodDenyMcast(fExec)
 				npTest.baseCmds(fExec, networkPolicy)
 				npTest.addLocalPodCmds(fExec, networkPolicy)
 
@@ -666,6 +648,7 @@ var _ = Describe("OVN NetworkPolicy Operations", func() {
 				_, err := fakeOvn.fakeClient.NetworkingV1().NetworkPolicies(networkPolicy.Namespace).Get(networkPolicy.Name, metav1.GetOptions{})
 				Expect(err).NotTo(HaveOccurred())
 				Eventually(fExec.CalledMatchesExpected).Should(BeTrue(), fExec.ErrorDesc)
+				fakeOvn.asf.ExpectAddressSetWithIPs(namespace1.Name, []string{nPodTest.podIP})
 
 				return nil
 			}
@@ -678,7 +661,6 @@ var _ = Describe("OVN NetworkPolicy Operations", func() {
 			app.Action = func(ctx *cli.Context) error {
 
 				npTest := networkPolicy{}
-				nTest := namespace{}
 
 				namespace1 := *newNamespace("namespace1")
 				namespace2 := *newNamespace("namespace2")
@@ -725,10 +707,6 @@ var _ = Describe("OVN NetworkPolicy Operations", func() {
 
 				nPodTest.baseCmds(fExec)
 				nPodTest.addCmdsForNonExistingPod(fExec)
-				nTest.baseCmds(fExec, namespace1, namespace2)
-				nTest.addCmds(fExec, namespace2)
-				nTest.addCmdsWithPods(fExec, nPodTest, namespace1)
-				nPodTest.addPodDenyMcast(fExec)
 				npTest.addNamespaceSelectorCmds(fExec, networkPolicy, true)
 				npTest.addLocalPodCmds(fExec, networkPolicy)
 
@@ -759,8 +737,7 @@ var _ = Describe("OVN NetworkPolicy Operations", func() {
 				_, err := fakeOvn.fakeClient.NetworkingV1().NetworkPolicies(networkPolicy.Namespace).Get(networkPolicy.Name, metav1.GetOptions{})
 				Expect(err).NotTo(HaveOccurred())
 				Eventually(fExec.CalledMatchesExpected).Should(BeTrue(), fExec.ErrorDesc)
-
-				nTest.delCmds(fExec, namespace2)
+				fakeOvn.asf.ExpectAddressSetWithIPs(namespace1.Name, []string{nPodTest.podIP})
 
 				fExec.AddFakeCmd(&ovntest.ExpectedCmd{
 					Cmd:    "ovn-nbctl --timeout=15 --data=bare --no-heading --columns=_uuid find ACL match=\"ip4.src == {$a10148211500778908391, $a6953373268003663638} && outport == @a14195333570786048679\" external-ids:namespace=namespace1 external-ids:policy=networkpolicy1 external-ids:Ingress_num=0 external-ids:policy_type=Ingress",
@@ -776,6 +753,7 @@ var _ = Describe("OVN NetworkPolicy Operations", func() {
 				err = fakeOvn.fakeClient.CoreV1().Namespaces().Delete(namespace2.Name, metav1.NewDeleteOptions(0))
 				Expect(err).NotTo(HaveOccurred())
 				Eventually(fExec.CalledMatchesExpected).Should(BeTrue(), fExec.ErrorDesc)
+				fakeOvn.asf.EventuallyExpectNoAddressSet(namespace2.Name)
 
 				return nil
 			}
@@ -788,7 +766,6 @@ var _ = Describe("OVN NetworkPolicy Operations", func() {
 			app.Action = func(ctx *cli.Context) error {
 
 				npTest := networkPolicy{}
-				nTest := namespace{}
 
 				namespace1 := *newNamespace("namespace1")
 				namespace2 := *newNamespace("namespace2")
@@ -821,8 +798,6 @@ var _ = Describe("OVN NetworkPolicy Operations", func() {
 						},
 					})
 
-				nTest.baseCmds(fExec, namespace1, namespace2)
-				nTest.addCmds(fExec, namespace1, namespace2)
 				npTest.addNamespaceSelectorCmds(fExec, networkPolicy, true)
 
 				fakeOvn.start(ctx,
@@ -846,7 +821,6 @@ var _ = Describe("OVN NetworkPolicy Operations", func() {
 				Expect(err).NotTo(HaveOccurred())
 				Eventually(fExec.CalledMatchesExpected).Should(BeTrue(), fExec.ErrorDesc)
 
-				nTest.delCmds(fExec, namespace2)
 				fExec.AddFakeCmd(&ovntest.ExpectedCmd{
 					Cmd:    "ovn-nbctl --timeout=15 --data=bare --no-heading --columns=_uuid find ACL match=\"ip4.src == {$a10148211500778908391, $a6953373268003663638} && outport == @a14195333570786048679\" external-ids:namespace=namespace1 external-ids:policy=networkpolicy1 external-ids:Ingress_num=0 external-ids:policy_type=Ingress",
 					Output: fakeUUID,
@@ -861,6 +835,7 @@ var _ = Describe("OVN NetworkPolicy Operations", func() {
 				err = fakeOvn.fakeClient.CoreV1().Namespaces().Delete(namespace2.Name, metav1.NewDeleteOptions(0))
 				Expect(err).NotTo(HaveOccurred())
 				Eventually(fExec.CalledMatchesExpected).Should(BeTrue(), fExec.ErrorDesc)
+				fakeOvn.asf.EventuallyExpectNoAddressSet(namespace2.Name)
 
 				return nil
 			}
@@ -873,7 +848,6 @@ var _ = Describe("OVN NetworkPolicy Operations", func() {
 			app.Action = func(ctx *cli.Context) error {
 
 				npTest := networkPolicy{}
-				nTest := namespace{}
 
 				namespace1 := *newNamespace("namespace1")
 
@@ -918,10 +892,7 @@ var _ = Describe("OVN NetworkPolicy Operations", func() {
 
 				nPodTest.baseCmds(fExec)
 				nPodTest.addCmdsForNonExistingPod(fExec)
-				nTest.baseCmds(fExec, namespace1)
-				nTest.addCmdsWithPods(fExec, nPodTest, namespace1)
-				nPodTest.addPodDenyMcast(fExec)
-				npTest.addPodSelectorCmds(fExec, nPodTest, networkPolicy, false)
+				npTest.addNamespaceSelectorCmds(fExec, networkPolicy, false)
 				npTest.addLocalPodCmds(fExec, networkPolicy)
 
 				fakeOvn.start(ctx,
@@ -947,17 +918,22 @@ var _ = Describe("OVN NetworkPolicy Operations", func() {
 				fakeOvn.controller.WatchNamespaces()
 				fakeOvn.controller.WatchNetworkPolicy()
 
+				expectAddressSetsWithIP(fakeOvn, networkPolicy, nPodTest.podIP)
+				fakeOvn.asf.ExpectAddressSetWithIPs(namespace1.Name, []string{nPodTest.podIP})
+
 				_, err := fakeOvn.fakeClient.NetworkingV1().NetworkPolicies(networkPolicy.Namespace).Get(networkPolicy.Name, metav1.GetOptions{})
 				Expect(err).NotTo(HaveOccurred())
 				Eventually(fExec.CalledMatchesExpected).Should(BeTrue(), fExec.ErrorDesc)
 
 				nPodTest.delCmds(fExec)
-				nPodTest.delFromNamespaceCmds(fExec, nPodTest, true)
-				npTest.delPodCmds(fExec, networkPolicy, true, nPodTest.podIP)
+				npTest.delPodCmds(fExec, networkPolicy)
 
 				err = fakeOvn.fakeClient.CoreV1().Pods(nPodTest.namespace).Delete(nPodTest.podName, metav1.NewDeleteOptions(0))
 				Expect(err).NotTo(HaveOccurred())
 				Eventually(fExec.CalledMatchesExpected).Should(BeTrue(), fExec.ErrorDesc)
+
+				eventuallyExpectEmptyAddressSets(fakeOvn, networkPolicy)
+				fakeOvn.asf.EventuallyExpectEmptyAddressSet(namespace1.Name)
 
 				return nil
 			}
@@ -970,7 +946,6 @@ var _ = Describe("OVN NetworkPolicy Operations", func() {
 			app.Action = func(ctx *cli.Context) error {
 
 				npTest := networkPolicy{}
-				nTest := namespace{}
 
 				namespace1 := *newNamespace("namespace1")
 				namespace2 := *newNamespace("namespace2")
@@ -1026,11 +1001,7 @@ var _ = Describe("OVN NetworkPolicy Operations", func() {
 
 				nPodTest.baseCmds(fExec)
 				nPodTest.addCmdsForNonExistingPod(fExec)
-				nTest.baseCmds(fExec, namespace1, namespace2)
-				nTest.addCmds(fExec, namespace1)
-				nTest.addCmdsWithPods(fExec, nPodTest, namespace2)
-				nPodTest.addPodDenyMcast(fExec)
-				npTest.addPodSelectorCmds(fExec, nPodTest, networkPolicy, false)
+				npTest.addNamespaceSelectorCmds(fExec, networkPolicy, false)
 
 				fakeOvn.start(ctx,
 					&v1.NamespaceList{
@@ -1056,17 +1027,23 @@ var _ = Describe("OVN NetworkPolicy Operations", func() {
 				fakeOvn.controller.WatchNamespaces()
 				fakeOvn.controller.WatchNetworkPolicy()
 
+				fakeOvn.asf.ExpectEmptyAddressSet(namespace1.Name)
+				expectAddressSetsWithIP(fakeOvn, networkPolicy, nPodTest.podIP)
+				fakeOvn.asf.ExpectAddressSetWithIPs(namespace2.Name, []string{nPodTest.podIP})
+
 				_, err := fakeOvn.fakeClient.NetworkingV1().NetworkPolicies(networkPolicy.Namespace).Get(networkPolicy.Name, metav1.GetOptions{})
 				Expect(err).NotTo(HaveOccurred())
 				Eventually(fExec.CalledMatchesExpected).Should(BeTrue(), fExec.ErrorDesc)
 
 				nPodTest.delCmds(fExec)
-				nPodTest.delFromNamespaceCmds(fExec, nPodTest, true)
-				npTest.delPodCmds(fExec, networkPolicy, false, nPodTest.podIP)
 
 				err = fakeOvn.fakeClient.CoreV1().Pods(nPodTest.namespace).Delete(nPodTest.podName, metav1.NewDeleteOptions(0))
 				Expect(err).NotTo(HaveOccurred())
 				Eventually(fExec.CalledMatchesExpected).Should(BeTrue(), fExec.ErrorDesc)
+
+				// After deleting the pod all address sets should be empty
+				eventuallyExpectEmptyAddressSets(fakeOvn, networkPolicy)
+				fakeOvn.asf.EventuallyExpectEmptyAddressSet(namespace1.Name)
 
 				return nil
 			}
@@ -1079,7 +1056,6 @@ var _ = Describe("OVN NetworkPolicy Operations", func() {
 			app.Action = func(ctx *cli.Context) error {
 
 				npTest := networkPolicy{}
-				nTest := namespace{}
 
 				namespace1 := *newNamespace("namespace1")
 
@@ -1124,10 +1100,7 @@ var _ = Describe("OVN NetworkPolicy Operations", func() {
 
 				nPodTest.baseCmds(fExec)
 				nPodTest.addCmdsForNonExistingPod(fExec)
-				nTest.baseCmds(fExec, namespace1)
-				nTest.addCmdsWithPods(fExec, nPodTest, namespace1)
-				nPodTest.addPodDenyMcast(fExec)
-				npTest.addPodSelectorCmds(fExec, nPodTest, networkPolicy, false)
+				npTest.addNamespaceSelectorCmds(fExec, networkPolicy, false)
 				npTest.addLocalPodCmds(fExec, networkPolicy)
 
 				fakeOvn.start(ctx,
@@ -1156,12 +1129,14 @@ var _ = Describe("OVN NetworkPolicy Operations", func() {
 				_, err := fakeOvn.fakeClient.NetworkingV1().NetworkPolicies(networkPolicy.Namespace).Get(networkPolicy.Name, metav1.GetOptions{})
 				Expect(err).NotTo(HaveOccurred())
 				Eventually(fExec.CalledMatchesExpected).Should(BeTrue(), fExec.ErrorDesc)
+				fakeOvn.asf.ExpectAddressSetWithIPs(namespace1.Name, []string{nPodTest.podIP})
 
 				npTest.delCmds(fExec, nPodTest, networkPolicy, true)
 
 				err = fakeOvn.fakeClient.NetworkingV1().NetworkPolicies(networkPolicy.Namespace).Delete(networkPolicy.Name, metav1.NewDeleteOptions(0))
 				Expect(err).NotTo(HaveOccurred())
 				Eventually(fExec.CalledMatchesExpected).Should(BeTrue(), fExec.ErrorDesc)
+				eventuallyExpectNoAddressSets(fakeOvn, networkPolicy)
 
 				return nil
 			}
@@ -1172,7 +1147,6 @@ var _ = Describe("OVN NetworkPolicy Operations", func() {
 
 		It("tests enabling/disabling multicast in a namespace", func() {
 			app.Action = func(ctx *cli.Context) error {
-				nTest := namespace{}
 				namespace1 := *newNamespace("namespace1")
 
 				fakeOvn.start(ctx,
@@ -1183,8 +1157,6 @@ var _ = Describe("OVN NetworkPolicy Operations", func() {
 					},
 				)
 
-				nTest.baseCmds(fExec, namespace1)
-				nTest.addCmds(fExec, namespace1)
 				fakeOvn.controller.WatchNamespaces()
 				ns, err := fakeOvn.fakeClient.CoreV1().Namespaces().Get(
 					namespace1.Name, metav1.GetOptions{})
@@ -1218,7 +1190,6 @@ var _ = Describe("OVN NetworkPolicy Operations", func() {
 
 		It("tests enabling multicast in a namespace with a pod", func() {
 			app.Action = func(ctx *cli.Context) error {
-				nTest := namespace{}
 				namespace1 := *newNamespace("namespace1")
 
 				nPodTest := newTPod(
@@ -1234,9 +1205,6 @@ var _ = Describe("OVN NetworkPolicy Operations", func() {
 
 				nPodTest.baseCmds(fExec)
 				nPodTest.addCmdsForNonExistingPod(fExec)
-				nTest.baseCmds(fExec, namespace1)
-				nTest.addCmdsWithPods(fExec, nPodTest, namespace1)
-				nPodTest.addPodDenyMcast(fExec)
 				fakeOvn.start(ctx,
 					&v1.NamespaceList{
 						Items: []v1.Namespace{
@@ -1267,6 +1235,7 @@ var _ = Describe("OVN NetworkPolicy Operations", func() {
 				_, err = fakeOvn.fakeClient.CoreV1().Namespaces().Update(ns)
 				Expect(err).NotTo(HaveOccurred())
 				Eventually(fExec.CalledMatchesExpected).Should(BeTrue(), fExec.ErrorDesc)
+				fakeOvn.asf.ExpectAddressSetWithIPs(namespace1.Name, []string{nPodTest.podIP})
 				return nil
 			}
 
@@ -1276,7 +1245,6 @@ var _ = Describe("OVN NetworkPolicy Operations", func() {
 
 		It("tests adding a pod to a multicast enabled namespace", func() {
 			app.Action = func(ctx *cli.Context) error {
-				nTest := namespace{}
 				namespace1 := *newNamespace("namespace1")
 
 				nPodTest := newTPod(
@@ -1299,8 +1267,6 @@ var _ = Describe("OVN NetworkPolicy Operations", func() {
 				)
 
 				nPodTest.baseCmds(fExec)
-				nTest.baseCmds(fExec, namespace1)
-				nTest.addCmds(fExec, namespace1)
 				fakeOvn.controller.WatchNamespaces()
 				fakeOvn.controller.WatchPods()
 				ns, err := fakeOvn.fakeClient.CoreV1().Namespaces().Get(
@@ -1318,8 +1284,6 @@ var _ = Describe("OVN NetworkPolicy Operations", func() {
 
 				nPodTest.populateLogicalSwitchCache(fakeOvn)
 				nPodTest.addCmdsForNonExistingPod(fExec)
-				nPodTest.addPodDenyMcast(fExec)
-				nTest.addPodCmds(fExec, nPodTest, namespace1, false)
 
 				// The pod should be added to the multicast allow group.
 				mcastPolicy.addPodCmds(fExec, namespace1.Name)
@@ -1328,19 +1292,19 @@ var _ = Describe("OVN NetworkPolicy Operations", func() {
 					nPodTest.namespace, nPodTest.podName, nPodTest.nodeName, nPodTest.podIP))
 				Expect(err).NotTo(HaveOccurred())
 				Eventually(fExec.CalledMatchesExpected).Should(BeTrue(), fExec.ErrorDesc)
+				fakeOvn.asf.ExpectAddressSetWithIPs(namespace1.Name, []string{nPodTest.podIP})
 
 				// Delete the pod from the namespace.
 				mcastPolicy.delPodCmds(fExec, namespace1.Name)
 				// The pod should be removed from the multicasts default deny
 				// group and from the multicast allow group.
-				nPodTest.delPodDenyMcast(fExec)
-				nTest.delPodCmds(fExec, nPodTest, namespace1, false)
 				nPodTest.delCmds(fExec)
 
 				err = fakeOvn.fakeClient.CoreV1().Pods(nPodTest.namespace).Delete(
 					nPodTest.podName, metav1.NewDeleteOptions(0))
 				Expect(err).NotTo(HaveOccurred())
 				Eventually(fExec.CalledMatchesExpected).Should(BeTrue(), fExec.ErrorDesc)
+				fakeOvn.asf.ExpectEmptyAddressSet(namespace1.Name)
 				return nil
 			}
 
@@ -1350,105 +1314,148 @@ var _ = Describe("OVN NetworkPolicy Operations", func() {
 	})
 })
 
+func asMatch(addressSets []string) string {
+	hashedNames := make([]string, 0, len(addressSets))
+	for _, as := range addressSets {
+		hashedNames = append(hashedNames, hashedAddressSet(as))
+	}
+	sort.Strings(hashedNames)
+	var match string
+	for i, n := range hashedNames {
+		if i > 0 {
+			match += ", "
+		}
+		match += fmt.Sprintf("$%s", n)
+	}
+	return match
+}
+
+func addExpectedGressCmds(fExec *ovntest.FakeExec, gp *gressPolicy, pgName string, oldAS, newAS []string) []string {
+	const uuid string = "94407fe0-2c15-4a63-baea-ab4af0ea5bb8"
+
+	oldMatch := asMatch(oldAS)
+	newMatch := asMatch(newAS)
+
+	gpDirection := string(knet.PolicyTypeIngress)
+	fExec.AddFakeCmd(&ovntest.ExpectedCmd{
+		Cmd: fmt.Sprintf("ovn-nbctl --timeout=15 --data=bare --no-heading --columns=_uuid find ACL match=\"ip4.src == {%s} && outport == @%s\" external-ids:namespace=%s external-ids:policy=%s external-ids:%s_num=%d external-ids:policy_type=%s",
+			oldMatch, pgName, gp.policyNamespace, gp.policyName, gpDirection, gp.idx, gpDirection),
+		Output: uuid,
+	})
+	fExec.AddFakeCmdsNoOutputNoError([]string{
+		fmt.Sprintf("ovn-nbctl --timeout=15 set acl %s match=\"ip4.src == {%s} && outport == @%s\"",
+			uuid, newMatch, pgName),
+	})
+	return newAS
+}
+
 var _ = Describe("OVN NetworkPolicy Low-Level Operations", func() {
+	var (
+		fExec     *ovntest.FakeExec
+		asFactory *fakeAddressSetFactory
+	)
+
+	BeforeEach(func() {
+		// Restore global default values before each testcase
+		config.PrepareTestConfig()
+		fExec = ovntest.NewLooseCompareFakeExec()
+		err := util.SetExec(fExec)
+		Expect(err).NotTo(HaveOccurred())
+
+		asFactory = newFakeAddressSetFactory()
+	})
+
 	It("computes match strings from address sets correctly", func() {
 		const (
 			pgUUID string = "pg-uuid"
 			pgName string = "pg-name"
 		)
 
-		gp := newGressPolicy(knet.PolicyTypeIngress, 0, "testing", "policy")
+		policy := &knet.NetworkPolicy{
+			ObjectMeta: metav1.ObjectMeta{
+				UID:       types.UID("testing"),
+				Name:      "policy",
+				Namespace: "testing",
+			},
+		}
 
-		one := hashedAddressSet(fmt.Sprintf("testing.policy.ingress.1"))
-		two := hashedAddressSet(fmt.Sprintf("testing.policy.ingress.2"))
-		three := hashedAddressSet(fmt.Sprintf("testing.policy.ingress.3"))
-		four := hashedAddressSet(fmt.Sprintf("testing.policy.ingress.4"))
-		five := hashedAddressSet(fmt.Sprintf("testing.policy.ingress.5"))
-		six := hashedAddressSet(fmt.Sprintf("testing.policy.ingress.6"))
+		gp := newGressPolicy(knet.PolicyTypeIngress, 0, policy.Namespace, policy.Name)
+		err := gp.ensurePeerAddressSet(asFactory)
+		Expect(err).NotTo(HaveOccurred())
+		asName := gp.peerAddressSet.GetName()
 
-		oldMatch, newMatch, changed := gp.addAddressSet(one)
-		Expect(oldMatch).To(Equal("ip4"))
-		Expect(newMatch).To(Equal("ip4.src == {$a14025386827633950433}"))
-		Expect(changed).To(BeTrue())
+		one := fmt.Sprintf("testing.policy.ingress.1")
+		two := fmt.Sprintf("testing.policy.ingress.2")
+		three := fmt.Sprintf("testing.policy.ingress.3")
+		four := fmt.Sprintf("testing.policy.ingress.4")
+		five := fmt.Sprintf("testing.policy.ingress.5")
+		six := fmt.Sprintf("testing.policy.ingress.6")
 
-		oldMatch, newMatch, changed = gp.addAddressSet(two)
-		Expect(oldMatch).To(Equal("ip4.src == {$a14025386827633950433}"))
-		Expect(newMatch).To(Equal("ip4.src == {$a14025383529099065800, $a14025386827633950433}"))
-		Expect(changed).To(BeTrue())
+		cur := addExpectedGressCmds(fExec, gp, pgName, []string{asName}, []string{asName, one})
+		gp.addNamespaceAddressSet(one, pgName)
+		Expect(fExec.CalledMatchesExpected()).To(BeTrue(), fExec.ErrorDesc)
+
+		cur = addExpectedGressCmds(fExec, gp, pgName, cur, []string{asName, one, two})
+		gp.addNamespaceAddressSet(two, pgName)
+		Expect(fExec.CalledMatchesExpected()).To(BeTrue(), fExec.ErrorDesc)
 
 		// address sets should be alphabetized
-		oldMatch, newMatch, changed = gp.addAddressSet(three)
-		Expect(oldMatch).To(Equal("ip4.src == {$a14025383529099065800, $a14025386827633950433}"))
-		Expect(newMatch).To(Equal("ip4.src == {$a14025383529099065800, $a14025384628610694011, $a14025386827633950433}"))
-		Expect(changed).To(BeTrue())
+		cur = addExpectedGressCmds(fExec, gp, pgName, cur, []string{asName, one, two, three})
+		gp.addNamespaceAddressSet(three, pgName)
+		Expect(fExec.CalledMatchesExpected()).To(BeTrue(), fExec.ErrorDesc)
 
 		// re-adding an existing set is a no-op
-		oldMatch, newMatch, changed = gp.addAddressSet(one)
-		Expect(oldMatch).To(Equal(""))
-		Expect(newMatch).To(Equal(""))
-		Expect(changed).To(BeFalse())
+		gp.addNamespaceAddressSet(one, pgName)
+		Expect(fExec.CalledMatchesExpected()).To(BeTrue(), fExec.ErrorDesc)
 
-		oldMatch, newMatch, changed = gp.addAddressSet(four)
-		Expect(oldMatch).To(Equal("ip4.src == {$a14025383529099065800, $a14025384628610694011, $a14025386827633950433}"))
-		Expect(newMatch).To(Equal("ip4.src == {$a14025383529099065800, $a14025384628610694011, $a14025386827633950433, $a14025390126168835066}"))
-		Expect(changed).To(BeTrue())
+		cur = addExpectedGressCmds(fExec, gp, pgName, cur, []string{asName, one, two, three, four})
+		gp.addNamespaceAddressSet(four, pgName)
+		Expect(fExec.CalledMatchesExpected()).To(BeTrue(), fExec.ErrorDesc)
 
 		// now delete a set
-		oldMatch, newMatch, changed = gp.delAddressSet(one)
-		Expect(oldMatch).To(Equal("ip4.src == {$a14025383529099065800, $a14025384628610694011, $a14025386827633950433, $a14025390126168835066}"))
-		Expect(newMatch).To(Equal("ip4.src == {$a14025383529099065800, $a14025384628610694011, $a14025390126168835066}"))
-		Expect(changed).To(BeTrue())
+		cur = addExpectedGressCmds(fExec, gp, pgName, cur, []string{asName, two, three, four})
+		gp.delNamespaceAddressSet(one, pgName)
+		Expect(fExec.CalledMatchesExpected()).To(BeTrue(), fExec.ErrorDesc)
 
 		// deleting again is a no-op
-		oldMatch, newMatch, changed = gp.delAddressSet(one)
-		Expect(oldMatch).To(Equal(""))
-		Expect(newMatch).To(Equal(""))
-		Expect(changed).To(BeFalse())
+		gp.delNamespaceAddressSet(one, pgName)
+		Expect(fExec.CalledMatchesExpected()).To(BeTrue(), fExec.ErrorDesc)
 
 		// add and delete some more...
-		oldMatch, newMatch, changed = gp.addAddressSet(five)
-		Expect(oldMatch).To(Equal("ip4.src == {$a14025383529099065800, $a14025384628610694011, $a14025390126168835066}"))
-		Expect(newMatch).To(Equal("ip4.src == {$a14025383529099065800, $a14025384628610694011, $a14025390126168835066, $a14025391225680463277}"))
-		Expect(changed).To(BeTrue())
+		cur = addExpectedGressCmds(fExec, gp, pgName, cur, []string{asName, two, three, four, five})
+		gp.addNamespaceAddressSet(five, pgName)
+		Expect(fExec.CalledMatchesExpected()).To(BeTrue(), fExec.ErrorDesc)
 
-		oldMatch, newMatch, changed = gp.delAddressSet(three)
-		Expect(oldMatch).To(Equal("ip4.src == {$a14025383529099065800, $a14025384628610694011, $a14025390126168835066, $a14025391225680463277}"))
-		Expect(newMatch).To(Equal("ip4.src == {$a14025383529099065800, $a14025390126168835066, $a14025391225680463277}"))
-		Expect(changed).To(BeTrue())
+		cur = addExpectedGressCmds(fExec, gp, pgName, cur, []string{asName, two, four, five})
+		gp.delNamespaceAddressSet(three, pgName)
+		Expect(fExec.CalledMatchesExpected()).To(BeTrue(), fExec.ErrorDesc)
 
-		oldMatch, newMatch, changed = gp.delAddressSet(one)
-		Expect(oldMatch).To(Equal(""))
-		Expect(newMatch).To(Equal(""))
-		Expect(changed).To(BeFalse())
+		// deleting again is no-op
+		gp.delNamespaceAddressSet(one, pgName)
+		Expect(fExec.CalledMatchesExpected()).To(BeTrue(), fExec.ErrorDesc)
 
-		oldMatch, newMatch, changed = gp.addAddressSet(six)
-		Expect(oldMatch).To(Equal("ip4.src == {$a14025383529099065800, $a14025390126168835066, $a14025391225680463277}"))
-		Expect(newMatch).To(Equal("ip4.src == {$a14025383529099065800, $a14025387927145578644, $a14025390126168835066, $a14025391225680463277}"))
-		Expect(changed).To(BeTrue())
+		cur = addExpectedGressCmds(fExec, gp, pgName, cur, []string{asName, two, four, five, six})
+		gp.addNamespaceAddressSet(six, pgName)
+		Expect(fExec.CalledMatchesExpected()).To(BeTrue(), fExec.ErrorDesc)
 
-		oldMatch, newMatch, changed = gp.delAddressSet(two)
-		Expect(oldMatch).To(Equal("ip4.src == {$a14025383529099065800, $a14025387927145578644, $a14025390126168835066, $a14025391225680463277}"))
-		Expect(newMatch).To(Equal("ip4.src == {$a14025387927145578644, $a14025390126168835066, $a14025391225680463277}"))
-		Expect(changed).To(BeTrue())
+		cur = addExpectedGressCmds(fExec, gp, pgName, cur, []string{asName, four, five, six})
+		gp.delNamespaceAddressSet(two, pgName)
+		Expect(fExec.CalledMatchesExpected()).To(BeTrue(), fExec.ErrorDesc)
 
-		oldMatch, newMatch, changed = gp.delAddressSet(five)
-		Expect(oldMatch).To(Equal("ip4.src == {$a14025387927145578644, $a14025390126168835066, $a14025391225680463277}"))
-		Expect(newMatch).To(Equal("ip4.src == {$a14025387927145578644, $a14025390126168835066}"))
-		Expect(changed).To(BeTrue())
+		cur = addExpectedGressCmds(fExec, gp, pgName, cur, []string{asName, four, six})
+		gp.delNamespaceAddressSet(five, pgName)
+		Expect(fExec.CalledMatchesExpected()).To(BeTrue(), fExec.ErrorDesc)
 
-		oldMatch, newMatch, changed = gp.delAddressSet(six)
-		Expect(oldMatch).To(Equal("ip4.src == {$a14025387927145578644, $a14025390126168835066}"))
-		Expect(newMatch).To(Equal("ip4.src == {$a14025390126168835066}"))
-		Expect(changed).To(BeTrue())
+		cur = addExpectedGressCmds(fExec, gp, pgName, cur, []string{asName, four})
+		gp.delNamespaceAddressSet(six, pgName)
+		Expect(fExec.CalledMatchesExpected()).To(BeTrue(), fExec.ErrorDesc)
 
-		oldMatch, newMatch, changed = gp.delAddressSet(four)
-		Expect(oldMatch).To(Equal("ip4.src == {$a14025390126168835066}"))
-		Expect(newMatch).To(Equal("ip4"))
-		Expect(changed).To(BeTrue())
+		cur = addExpectedGressCmds(fExec, gp, pgName, cur, []string{asName})
+		gp.delNamespaceAddressSet(four, pgName)
+		Expect(fExec.CalledMatchesExpected()).To(BeTrue(), fExec.ErrorDesc)
 
-		oldMatch, newMatch, changed = gp.delAddressSet(four)
-		Expect(oldMatch).To(Equal(""))
-		Expect(newMatch).To(Equal(""))
-		Expect(changed).To(BeFalse())
+		// deleting again is no-op
+		gp.delNamespaceAddressSet(four, pgName)
+		Expect(fExec.CalledMatchesExpected()).To(BeTrue(), fExec.ErrorDesc)
 	})
 })
