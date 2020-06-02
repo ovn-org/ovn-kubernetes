@@ -27,7 +27,7 @@ func intToIP(i *big.Int) net.IP {
 	return net.IP(i.Bytes())
 }
 
-// GetPortAddresses returns the MAC and IP of the given logical switch port
+// GetPortAddresses returns the MAC and IPs of the given logical switch port
 func GetPortAddresses(portName string) (net.HardwareAddr, []net.IP, error) {
 	out, stderr, err := RunOVNNbctl("get", "logical_switch_port", portName, "dynamic_addresses", "addresses")
 	if err != nil {
