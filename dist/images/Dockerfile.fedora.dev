@@ -30,7 +30,9 @@ USER root
 ENV PYTHONDONTWRITEBYTECODE yes
 
 ARG KERNEL_VERSION
+ARG OVN_REPO=https://github.com/ovn-org/ovn.git
 ARG OVN_BRANCH=master
+ARG OVS_REPO=https://github.com/openvswitch/ovs.git
 ARG OVS_BRANCH=master
 
 #Install tools that is required for building ovs/ovn
@@ -45,7 +47,7 @@ RUN dnf upgrade -y && dnf install --best --refresh -y --setopt=tsflags=nodocs \
 
 #Clone OVS Source Code
 WORKDIR /root
-RUN git clone https://github.com/openvswitch/ovs.git
+RUN git clone $OVS_REPO
 
 #Build OVS dependency
 WORKDIR /root/ovs
@@ -63,7 +65,7 @@ RUN ovs-vsctl --version && ovs-ofctl --version
 
 #Clone OVN Source Code
 WORKDIR /root
-RUN git clone https://github.com/ovn-org/ovn.git
+RUN git clone $OVN_REPO
 
 #Build OVN binaries and install
 WORKDIR /root/ovn/
@@ -83,10 +85,20 @@ COPY ovn-k8s-cni-overlay /usr/libexec/cni/ovn-k8s-cni-overlay
 COPY git_info /root
 RUN cat /root/git_info
 
+# iptables wrappers
+COPY ./iptables-scripts/iptables /usr/sbin/
+COPY ./iptables-scripts/iptables-save /usr/sbin/
+COPY ./iptables-scripts/iptables-restore /usr/sbin/
+COPY ./iptables-scripts/ip6tables /usr/sbin/
+COPY ./iptables-scripts/ip6tables-save /usr/sbin/
+COPY ./iptables-scripts/ip6tables-restore /usr/sbin/
+
 # ovnkube.sh is the entry point. This script examines environment
 # variables to direct operation and configure ovn
-COPY ovnkube.sh /root/
-COPY ovndb-raft-functions.sh /root/
+COPY ovnkube.sh ovndb-raft-functions.sh /root/
+
+RUN getent group openvswitch >/dev/null || groupadd -r openvswitch
+RUN getent passwd openvswitch >/dev/null || useradd -r -g openvswitch -d / -s /sbin/nologin -c "Open vSwitch Daemons" openvswitch
 
 LABEL io.k8s.display-name="ovn-kubernetes-master" \
       io.k8s.description="OVN based Kubernetes CNI Plugin stack. Image contains latest code of all the components in the stack (OVN-kubernetes, OVN, OVS)." \
