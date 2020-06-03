@@ -2,6 +2,7 @@ package ovn
 
 import (
 	"fmt"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
 	"net"
 	"sync"
 
@@ -892,7 +893,15 @@ func (oc *Controller) handlePeerNamespaceSelector(
 				np.Lock()
 				defer np.Unlock()
 				if !np.deleted {
-					gress.addNamespaceAddressSet(namespace.Name, np.portGroupName)
+					//FIXME :  Dual stack . We need to first fix ACL generation in case of dual stack
+					// Then we will remove the if logic and add both address sets.
+					// Will be fixed in next set of PRs
+
+					if config.IPv6Mode {
+						gress.addNamespaceAddressSet(getIPv6AddressSetName(namespace.Name), np.portGroupName)
+					} else {
+						gress.addNamespaceAddressSet(getIPv4AddressSetName(namespace.Name), np.portGroupName)
+					}
 				}
 			},
 			DeleteFunc: func(obj interface{}) {
@@ -900,7 +909,15 @@ func (oc *Controller) handlePeerNamespaceSelector(
 				np.Lock()
 				defer np.Unlock()
 				if !np.deleted {
-					gress.delNamespaceAddressSet(namespace.Name, np.portGroupName)
+					//FIXME :  Dual stack . We need to first fix ACL generation in case of dual stack
+					// Then we will remove the if logic and delete both address sets.
+					// Will be fixed in next set of PRs
+
+					if config.IPv6Mode {
+						gress.delNamespaceAddressSet(getIPv6AddressSetName(namespace.Name), np.portGroupName)
+					} else {
+						gress.delNamespaceAddressSet(getIPv4AddressSetName(namespace.Name), np.portGroupName)
+					}
 				}
 			},
 			UpdateFunc: func(oldObj, newObj interface{}) {

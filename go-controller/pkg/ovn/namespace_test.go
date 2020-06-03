@@ -36,6 +36,10 @@ func newNamespace(namespace string) *v1.Namespace {
 }
 
 var _ = Describe("OVN Namespace Operations", func() {
+	const (
+		namespaceName    = "namespace1"
+		v4AddressSetName = namespaceName + iPv4AddressSetSuffix
+	)
 	var (
 		app     *cli.App
 		fakeOvn *FakeOVN
@@ -60,7 +64,7 @@ var _ = Describe("OVN Namespace Operations", func() {
 
 		It("reconciles an existing namespace with pods", func() {
 			app.Action = func(ctx *cli.Context) error {
-				namespaceT := *newNamespace("namespace1")
+				namespaceT := *newNamespace(namespaceName)
 				tP := newTPod(
 					"node1",
 					"10.128.1.0/24",
@@ -91,7 +95,7 @@ var _ = Describe("OVN Namespace Operations", func() {
 				_, err := fakeOvn.fakeClient.CoreV1().Namespaces().Get(namespaceT.Name, metav1.GetOptions{})
 				Expect(err).NotTo(HaveOccurred())
 
-				fakeOvn.asf.ExpectAddressSetWithIPs(namespaceT.Name, []string{tP.podIP})
+				fakeOvn.asf.ExpectAddressSetWithIPs(v4AddressSetName, []string{tP.podIP})
 
 				return nil
 			}
@@ -102,7 +106,6 @@ var _ = Describe("OVN Namespace Operations", func() {
 
 		It("creates an empty address set for the namespace without pods", func() {
 			app.Action = func(ctx *cli.Context) error {
-				const namespaceName string = "namespace1"
 				fakeOvn.start(ctx, &v1.NamespaceList{
 					Items: []v1.Namespace{
 						*newNamespace("namespace1"),
@@ -113,7 +116,7 @@ var _ = Describe("OVN Namespace Operations", func() {
 				_, err := fakeOvn.fakeClient.CoreV1().Namespaces().Get(namespaceName, metav1.GetOptions{})
 				Expect(err).NotTo(HaveOccurred())
 
-				fakeOvn.asf.ExpectEmptyAddressSet(namespaceName)
+				fakeOvn.asf.ExpectEmptyAddressSet(v4AddressSetName)
 
 				return nil
 			}
@@ -126,18 +129,17 @@ var _ = Describe("OVN Namespace Operations", func() {
 	Context("during execution", func() {
 		It("deletes an empty namespace's resources", func() {
 			app.Action = func(ctx *cli.Context) error {
-				const namespaceName string = "namespace1"
 				fakeOvn.start(ctx, &v1.NamespaceList{
 					Items: []v1.Namespace{
 						*newNamespace(namespaceName),
 					},
 				})
 				fakeOvn.controller.WatchNamespaces()
-				fakeOvn.asf.ExpectEmptyAddressSet(namespaceName)
+				fakeOvn.asf.ExpectEmptyAddressSet(v4AddressSetName)
 
 				err := fakeOvn.fakeClient.CoreV1().Namespaces().Delete(namespaceName, metav1.NewDeleteOptions(1))
 				Expect(err).NotTo(HaveOccurred())
-				fakeOvn.asf.EventuallyExpectNoAddressSet(namespaceName)
+				fakeOvn.asf.EventuallyExpectNoAddressSet(v4AddressSetName)
 				return nil
 			}
 

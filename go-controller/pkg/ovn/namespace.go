@@ -7,14 +7,18 @@ import (
 
 	hotypes "github.com/ovn-org/ovn-kubernetes/go-controller/hybrid-overlay/pkg/types"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
+
 	kapi "k8s.io/api/core/v1"
 	utilwait "k8s.io/apimachinery/pkg/util/wait"
 	"k8s.io/klog"
+	utilnet "k8s.io/utils/net"
 )
 
 const (
 	// Annotation used to enable/disable multicast in the namespace
 	nsMulticastAnnotation = "k8s.ovn.org/multicast-enabled"
+	iPv4AddressSetSuffix  = "_v4"
+	iPv6AddressSetSuffix  = "_v6"
 )
 
 func (oc *Controller) syncNamespaces(namespaces []interface{}) {
@@ -47,9 +51,16 @@ func (oc *Controller) addPodToNamespace(ns string, portInfo *lpInfo) error {
 	}
 	defer nsInfo.Unlock()
 
-	// DUAL-STACK FIXME: handle multiple IPs
-	if err := nsInfo.addressSet.AddIP(portInfo.ips[0]); err != nil {
-		return err
+	for _, ip := range portInfo.ips {
+		var err error
+		if utilnet.IsIPv6(ip) {
+			err = nsInfo.v6AddressSet.AddIP(ip)
+		} else {
+			err = nsInfo.v4AddressSet.AddIP(ip)
+		}
+		if err != nil {
+			return err
+		}
 	}
 
 	// If multicast is allowed and enabled for the namespace, add the port
@@ -70,9 +81,16 @@ func (oc *Controller) deletePodFromNamespace(ns string, portInfo *lpInfo) error 
 	}
 	defer nsInfo.Unlock()
 
-	// DUAL-STACK FIXME: handle multiple IPs
-	if err := nsInfo.addressSet.DeleteIP(portInfo.ips[0]); err != nil {
-		return err
+	for _, ip := range portInfo.ips {
+		var err error
+		if utilnet.IsIPv6(ip) {
+			err = nsInfo.v6AddressSet.DeleteIP(ip)
+		} else {
+			err = nsInfo.v4AddressSet.DeleteIP(ip)
+		}
+		if err != nil {
+			return err
+		}
 	}
 
 	// Remove the port from the multicast allow policy.
@@ -155,12 +173,13 @@ func (oc *Controller) AddNamespace(ns *kapi.Namespace) {
 
 	// Get all the pods in the namespace and append their IP to the
 	// address_set
-	var ips []net.IP
+	var v4Ips []net.IP = make([]net.IP, 0)
+	var v6Ips []net.IP = make([]net.IP, 0)
+
 	existingPods, err := oc.watchFactory.GetPods(ns.Name)
 	if err != nil {
 		klog.Errorf("Failed to get all the pods (%v)", err)
 	} else {
-		ips = make([]net.IP, 0, len(existingPods))
 		for _, pod := range existingPods {
 			if pod.Status.PodIP != "" && !pod.Spec.HostNetwork {
 				podIPs, err := util.GetAllPodIPs(pod)
@@ -168,7 +187,13 @@ func (oc *Controller) AddNamespace(ns *kapi.Namespace) {
 					klog.Warningf(err.Error())
 					continue
 				}
-				ips = append(ips, podIPs...)
+				for _, podIp := range podIPs {
+					if utilnet.IsIPv6(podIp) {
+						v6Ips = append(v6Ips, podIp)
+					} else {
+						v4Ips = append(v4Ips, podIp)
+					}
+				}
 			}
 		}
 	}
@@ -192,12 +217,24 @@ func (oc *Controller) AddNamespace(ns *kapi.Namespace) {
 		}
 	}
 
-	nsInfo.addressSet, err = oc.addressSetFactory.NewAddressSet(ns.Name, ips)
+	nsInfo.v4AddressSet, err = oc.addressSetFactory.NewAddressSet(getIPv4AddressSetName(ns.Name), v4Ips)
 	if err != nil {
-		klog.Errorf(err.Error())
+		klog.Errorf("Error adding IPv4 address set for Namespace %s. Error is %s", ns.Name, err.Error())
+	}
+	nsInfo.v6AddressSet, err = oc.addressSetFactory.NewAddressSet(getIPv6AddressSetName(ns.Name), v6Ips)
+	if err != nil {
+		klog.Errorf("Error adding IPv6 address set for Namespace %s. Error is %s", ns.Name, err.Error())
 	}
 
 	oc.multicastUpdateNamespace(ns, nsInfo)
+}
+
+func getIPv4AddressSetName(namespaceName string) string {
+	return namespaceName + iPv4AddressSetSuffix
+}
+
+func getIPv6AddressSetName(namespaceName string) string {
+	return namespaceName + iPv6AddressSetSuffix
 }
 
 func (oc *Controller) updateNamespace(old, newer *kapi.Namespace) {
@@ -324,7 +361,10 @@ func (oc *Controller) deleteNamespaceLocked(ns string) *namespaceInfo {
 		nsInfo.Unlock()
 		return nil
 	}
-	if err := nsInfo.addressSet.Destroy(); err != nil {
+	if err := nsInfo.v4AddressSet.Destroy(); err != nil {
+		klog.Errorf(err.Error())
+	}
+	if err := nsInfo.v6AddressSet.Destroy(); err != nil {
 		klog.Errorf(err.Error())
 	}
 	delete(oc.namespaces, ns)
