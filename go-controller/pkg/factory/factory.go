@@ -182,14 +182,13 @@ func getQueueNum(oType reflect.Type, obj interface{}) uint32 {
 	return h.Sum32() % uint32(numEventQueues)
 }
 
-// enqueueEvent adds an event to the queue. Caller must hold at least a read lock
-// on the informer.
+// enqueueEvent adds an event to the queue.
 func (i *informer) enqueueEvent(oldObj, obj interface{}, processFunc func(*event)) {
 	i.RLock()
-	defer i.RUnlock()
-	queueIdx := getQueueNum(i.oType, obj)
-	if i.events[queueIdx] != nil {
-		i.events[queueIdx] <- &event{
+	queue := i.events[getQueueNum(i.oType, obj)]
+	i.RUnlock()
+	if queue != nil {
+		queue <- &event{
 			obj:     obj,
 			oldObj:  oldObj,
 			process: processFunc,
@@ -339,7 +338,7 @@ func newQueuedInformer(oType reflect.Type, sharedInformer cache.SharedIndexInfor
 	}
 	i.events = make([]chan *event, numEventQueues)
 	for j := range i.events {
-		i.events[j] = make(chan *event, 1)
+		i.events[j] = make(chan *event, 10)
 		go i.processEvents(i.events[j], stopChan)
 	}
 	i.initialAddFunc = func(h *Handler, items []interface{}) {
@@ -349,7 +348,7 @@ func newQueuedInformer(oType reflect.Type, sharedInformer cache.SharedIndexInfor
 		queueWg := &sync.WaitGroup{}
 		queueWg.Add(len(adds))
 		for j := range adds {
-			adds[j] = make(chan interface{}, 1)
+			adds[j] = make(chan interface{}, 10)
 			go func(addChan chan interface{}) {
 				defer queueWg.Done()
 				for {
