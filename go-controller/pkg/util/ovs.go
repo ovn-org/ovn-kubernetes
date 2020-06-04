@@ -161,6 +161,7 @@ func (runsvc *ExecUtilRunSvcImplStruct) RunCmd(cmd kexec.Cmd, cmdPath string, en
 	if err != nil {
 		klog.V(5).Infof("exec(%d): err: %v", counter, err)
 	}
+
 	return strings.Trim(strings.TrimFunc(stdout.String(), unicode.IsSpace), "\" \n"),
 		stderr.String(), err
 }
