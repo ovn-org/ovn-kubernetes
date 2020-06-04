@@ -226,8 +226,13 @@ func GetAllPodIPs(pod *v1.Pod) ([]net.IP, error) {
 		return ips, nil
 	}
 
+	// return error if there are no IPs in pod status
 	if len(pod.Status.PodIPs) == 0 {
-		return nil, err
+		if pod.Status.PodIP == "" {
+			return nil, fmt.Errorf("no pod IPs found on pod %s: %v", pod.Name, err)
+		}
+		// Kubelets < 1.16 only set podIP
+		return []net.IP{net.ParseIP(pod.Status.PodIP)}, nil
 	}
 
 	// Otherwise if the annotation is not valid try to use Kube API pod IPs
