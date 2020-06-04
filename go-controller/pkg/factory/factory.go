@@ -78,6 +78,7 @@ type informer struct {
 	// initialAddFunc will be called to deliver the initial list of objects
 	// when a handler is added
 	initialAddFunc initialAddFn
+	shutdownWg     sync.WaitGroup
 }
 
 func (i *informer) forEachQueuedHandler(f func(h *Handler)) {
@@ -150,6 +151,7 @@ func (i *informer) removeHandler(handler *Handler) error {
 }
 
 func (i *informer) processEvents(events chan *event, stopChan <-chan struct{}) {
+	defer i.shutdownWg.Done()
 	for {
 		select {
 		case e, ok := <-events:
@@ -182,18 +184,12 @@ func getQueueNum(oType reflect.Type, obj interface{}) uint32 {
 	return h.Sum32() % uint32(numEventQueues)
 }
 
-// enqueueEvent adds an event to the queue. Caller must hold at least a read lock
-// on the informer.
+// enqueueEvent adds an event to the appropriate queue for the object
 func (i *informer) enqueueEvent(oldObj, obj interface{}, processFunc func(*event)) {
-	i.RLock()
-	defer i.RUnlock()
-	queueIdx := getQueueNum(i.oType, obj)
-	if i.events[queueIdx] != nil {
-		i.events[queueIdx] <- &event{
-			obj:     obj,
-			oldObj:  oldObj,
-			process: processFunc,
-		}
+	i.events[getQueueNum(i.oType, obj)] <- &event{
+		obj:     obj,
+		oldObj:  oldObj,
+		process: processFunc,
 	}
 }
 
@@ -269,19 +265,19 @@ func (i *informer) newFederatedHandler() cache.ResourceEventHandlerFuncs {
 	}
 }
 
-func (i *informer) shutdown() {
+func (i *informer) removeAllHandlers() {
 	i.Lock()
 	defer i.Unlock()
-
 	for _, handler := range i.handlers {
 		_ = i.removeHandler(handler)
 	}
+}
 
-	// Close all event channels for queued informers
-	for idx := range i.events {
-		close(i.events[idx])
-		i.events[idx] = nil
-	}
+func (i *informer) shutdown() {
+	i.removeAllHandlers()
+
+	// Wait for all event processors to finish
+	i.shutdownWg.Wait()
 }
 
 func newInformerLister(oType reflect.Type, sharedInformer cache.SharedIndexInformer) (listerInterface, error) {
@@ -311,10 +307,11 @@ func newBaseInformer(oType reflect.Type, sharedInformer cache.SharedIndexInforme
 	}
 
 	return &informer{
-		oType:    oType,
-		inf:      sharedInformer,
-		lister:   lister,
-		handlers: make(map[uint64]*Handler),
+		oType:      oType,
+		inf:        sharedInformer,
+		lister:     lister,
+		handlers:   make(map[uint64]*Handler),
+		shutdownWg: sync.WaitGroup{},
 	}, nil
 }
 
@@ -338,13 +335,16 @@ func newQueuedInformer(oType reflect.Type, sharedInformer cache.SharedIndexInfor
 		return nil, err
 	}
 	i.events = make([]chan *event, numEventQueues)
+	i.shutdownWg.Add(len(i.events))
 	for j := range i.events {
 		i.events[j] = make(chan *event, 1)
 		go i.processEvents(i.events[j], stopChan)
 	}
 	i.initialAddFunc = func(h *Handler, items []interface{}) {
 		// Make a handler-specific channel array across which the
-		// initial add events will be distributed.
+		// initial add events will be distributed. When a new handler
+		// is added, only that handler should receive events for all
+		// existing objects.
 		adds := make([]chan interface{}, numEventQueues)
 		queueWg := &sync.WaitGroup{}
 		queueWg.Add(len(adds))
@@ -386,6 +386,8 @@ type WatchFactory struct {
 
 	iFactory  informerfactory.SharedInformerFactory
 	informers map[reflect.Type]*informer
+
+	stopChan chan struct{}
 }
 
 // ObjectCacheInterface represents the exported methods for getting
@@ -424,7 +426,7 @@ var (
 )
 
 // NewWatchFactory initializes a new watch factory
-func NewWatchFactory(c kubernetes.Interface, stopChan chan struct{}) (*WatchFactory, error) {
+func NewWatchFactory(c kubernetes.Interface) (*WatchFactory, error) {
 	// resync time is 12 hours, none of the resources being watched in ovn-kubernetes have
 	// any race condition where a resync may be required e.g. cni executable on node watching for
 	// events on pods and assuming that an 'ADD' event will contain the annotations put in by
@@ -433,10 +435,11 @@ func NewWatchFactory(c kubernetes.Interface, stopChan chan struct{}) (*WatchFact
 	wf := &WatchFactory{
 		iFactory:  informerfactory.NewSharedInformerFactory(c, resyncInterval),
 		informers: make(map[reflect.Type]*informer),
+		stopChan:  make(chan struct{}),
 	}
 	var err error
 	// Create shared informers we know we'll use
-	wf.informers[podType], err = newQueuedInformer(podType, wf.iFactory.Core().V1().Pods().Informer(), stopChan)
+	wf.informers[podType], err = newQueuedInformer(podType, wf.iFactory.Core().V1().Pods().Informer(), wf.stopChan)
 	if err != nil {
 		return nil, err
 	}
@@ -456,28 +459,28 @@ func NewWatchFactory(c kubernetes.Interface, stopChan chan struct{}) (*WatchFact
 	if err != nil {
 		return nil, err
 	}
-	wf.informers[nodeType], err = newQueuedInformer(nodeType, wf.iFactory.Core().V1().Nodes().Informer(), stopChan)
+	wf.informers[nodeType], err = newQueuedInformer(nodeType, wf.iFactory.Core().V1().Nodes().Informer(), wf.stopChan)
 	if err != nil {
 		return nil, err
 	}
 
-	wf.iFactory.Start(stopChan)
-	for oType, synced := range wf.iFactory.WaitForCacheSync(stopChan) {
+	wf.iFactory.Start(wf.stopChan)
+	for oType, synced := range wf.iFactory.WaitForCacheSync(wf.stopChan) {
 		if !synced {
 			return nil, fmt.Errorf("error in syncing cache for %v informer", oType)
 		}
 	}
 
-	go func() {
-		<-stopChan
-
-		// Remove all informer handlers
-		for _, inf := range wf.informers {
-			inf.shutdown()
-		}
-	}()
-
 	return wf, nil
+}
+
+func (wf *WatchFactory) Shutdown() {
+	close(wf.stopChan)
+
+	// Remove all informer handlers
+	for _, inf := range wf.informers {
+		inf.shutdown()
+	}
 }
 
 func getObjectMeta(objType reflect.Type, obj interface{}) (*metav1.ObjectMeta, error) {

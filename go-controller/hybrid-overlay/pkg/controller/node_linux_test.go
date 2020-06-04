@@ -171,9 +171,11 @@ func appRun(app *cli.App, netns ns.NetNS) {
 
 var _ = Describe("Hybrid Overlay Node Linux Operations", func() {
 	var (
-		app   *cli.App
-		fexec *ovntest.FakeExec
-		netns ns.NetNS
+		app      *cli.App
+		fexec    *ovntest.FakeExec
+		netns    ns.NetNS
+		f        *factory.WatchFactory
+		stopChan chan struct{}
 	)
 	const thisNode string = "mynode"
 
@@ -184,6 +186,8 @@ var _ = Describe("Hybrid Overlay Node Linux Operations", func() {
 		app = cli.NewApp()
 		app.Name = "test"
 		app.Flags = config.Flags
+
+		stopChan = make(chan struct{})
 
 		fexec = ovntest.NewLooseCompareFakeExec()
 		err := util.SetExec(fexec)
@@ -202,6 +206,8 @@ var _ = Describe("Hybrid Overlay Node Linux Operations", func() {
 	})
 
 	AfterEach(func() {
+		close(stopChan)
+		f.Shutdown()
 		Expect(netns.Close()).To(Succeed())
 		Expect(testutils.UnmountNS(netns)).To(Succeed())
 	})
@@ -228,10 +234,8 @@ var _ = Describe("Hybrid Overlay Node Linux Operations", func() {
 			_, err := config.InitConfig(ctx, fexec, nil)
 			Expect(err).NotTo(HaveOccurred())
 
-			stopChan := make(chan struct{})
-			f, err := factory.NewWatchFactory(fakeClient, stopChan)
+			f, err = factory.NewWatchFactory(fakeClient)
 			Expect(err).NotTo(HaveOccurred())
-			defer close(stopChan)
 
 			n, err := NewNode(&kube.Kube{KClient: fakeClient}, thisNode, stopChan)
 			Expect(err).NotTo(HaveOccurred())
@@ -277,10 +281,8 @@ var _ = Describe("Hybrid Overlay Node Linux Operations", func() {
 			_, err = config.InitConfig(ctx, fexec, nil)
 			Expect(err).NotTo(HaveOccurred())
 
-			stopChan := make(chan struct{})
-			f, err := factory.NewWatchFactory(fakeClient, stopChan)
+			f, err = factory.NewWatchFactory(fakeClient)
 			Expect(err).NotTo(HaveOccurred())
-			defer close(stopChan)
 
 			n, err := NewNode(&kube.Kube{KClient: fakeClient}, thisNode, stopChan)
 			Expect(err).NotTo(HaveOccurred())
@@ -319,10 +321,8 @@ var _ = Describe("Hybrid Overlay Node Linux Operations", func() {
 			_, err := config.InitConfig(ctx, fexec, nil)
 			Expect(err).NotTo(HaveOccurred())
 
-			stopChan := make(chan struct{})
-			f, err := factory.NewWatchFactory(fakeClient, stopChan)
+			f, err = factory.NewWatchFactory(fakeClient)
 			Expect(err).NotTo(HaveOccurred())
-			defer close(stopChan)
 
 			n, err := NewNode(&kube.Kube{KClient: fakeClient}, thisNode, stopChan)
 			Expect(err).NotTo(HaveOccurred())
@@ -369,10 +369,8 @@ var _ = Describe("Hybrid Overlay Node Linux Operations", func() {
 			_, err := config.InitConfig(ctx, fexec, nil)
 			Expect(err).NotTo(HaveOccurred())
 
-			stopChan := make(chan struct{})
-			f, err := factory.NewWatchFactory(fakeClient, stopChan)
+			f, err = factory.NewWatchFactory(fakeClient)
 			Expect(err).NotTo(HaveOccurred())
-			defer close(stopChan)
 
 			n, err := NewNode(&kube.Kube{KClient: fakeClient}, thisNode, stopChan)
 			Expect(err).NotTo(HaveOccurred())
@@ -417,10 +415,8 @@ var _ = Describe("Hybrid Overlay Node Linux Operations", func() {
 			_, err := config.InitConfig(ctx, fexec, nil)
 			Expect(err).NotTo(HaveOccurred())
 
-			stopChan := make(chan struct{})
-			f, err := factory.NewWatchFactory(fakeClient, stopChan)
+			f, err = factory.NewWatchFactory(fakeClient)
 			Expect(err).NotTo(HaveOccurred())
-			defer close(stopChan)
 
 			n, err := NewNode(&kube.Kube{KClient: fakeClient}, thisNode, stopChan)
 			Expect(err).NotTo(HaveOccurred())
@@ -459,10 +455,8 @@ var _ = Describe("Hybrid Overlay Node Linux Operations", func() {
 			_, err := config.InitConfig(ctx, fexec, nil)
 			Expect(err).NotTo(HaveOccurred())
 
-			stopChan := make(chan struct{})
-			f, err := factory.NewWatchFactory(fakeClient, stopChan)
+			f, err = factory.NewWatchFactory(fakeClient)
 			Expect(err).NotTo(HaveOccurred())
-			defer close(stopChan)
 
 			n, err := NewNode(&kube.Kube{KClient: fakeClient}, thisNode, stopChan)
 			Expect(err).NotTo(HaveOccurred())
@@ -514,10 +508,8 @@ var _ = Describe("Hybrid Overlay Node Linux Operations", func() {
 			_, err := config.InitConfig(ctx, fexec, nil)
 			Expect(err).NotTo(HaveOccurred())
 
-			stopChan := make(chan struct{})
-			f, err := factory.NewWatchFactory(fakeClient, stopChan)
+			f, err = factory.NewWatchFactory(fakeClient)
 			Expect(err).NotTo(HaveOccurred())
-			defer close(stopChan)
 
 			n, err := NewNode(&kube.Kube{KClient: fakeClient}, thisNode, stopChan)
 			Expect(err).NotTo(HaveOccurred())

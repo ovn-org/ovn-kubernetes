@@ -52,13 +52,14 @@ func (o *FakeOVN) restart() {
 
 func (o *FakeOVN) shutdown() {
 	close(o.stopChan)
+	o.watcher.Shutdown()
 }
 
 func (o *FakeOVN) init() {
 	var err error
 
 	o.stopChan = make(chan struct{})
-	o.watcher, err = factory.NewWatchFactory(o.fakeClient, o.stopChan)
+	o.watcher, err = factory.NewWatchFactory(o.fakeClient)
 	Expect(err).NotTo(HaveOccurred())
 
 	o.controller = NewOvnController(o.fakeClient, o.watcher, o.stopChan, o.asf)

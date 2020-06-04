@@ -194,8 +194,7 @@ func runOvnKube(ctx *cli.Context) error {
 	}
 
 	// create factory and start the controllers asked for
-	stopChan := make(chan struct{})
-	factory, err := factory.NewWatchFactory(clientset, stopChan)
+	factory, err := factory.NewWatchFactory(clientset)
 	if err != nil {
 		return err
 	}
@@ -224,6 +223,8 @@ func runOvnKube(ctx *cli.Context) error {
 	if err := watchForChanges(configFile); err != nil {
 		return fmt.Errorf("unable to setup configuration watch: %v", err)
 	}
+
+	stopChan := make(chan struct{})
 
 	if master != "" {
 		if runtime.GOOS == "windows" {
@@ -262,7 +263,8 @@ func runOvnKube(ctx *cli.Context) error {
 
 	// run until cancelled
 	<-ctx.Context.Done()
-	stopChan <- struct{}{}
+	close(stopChan)
+	factory.Shutdown()
 	return nil
 }
 

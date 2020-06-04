@@ -59,7 +59,11 @@ func newTestNode(name, os, ovnHostSubnet, hybridHostSubnet, drMAC string) v1.Nod
 }
 
 var _ = Describe("Hybrid SDN Master Operations", func() {
-	var app *cli.App
+	var (
+		app      *cli.App
+		f        *factory.WatchFactory
+		stopChan chan struct{}
+	)
 
 	BeforeEach(func() {
 		// Restore global default values before each testcase
@@ -68,6 +72,13 @@ var _ = Describe("Hybrid SDN Master Operations", func() {
 		app = cli.NewApp()
 		app.Name = "test"
 		app.Flags = config.Flags
+
+		stopChan = make(chan struct{})
+	})
+
+	AfterEach(func() {
+		close(stopChan)
+		f.Shutdown()
 	})
 
 	const hybridOverlayClusterCIDR string = "11.1.0.0/16/24"
@@ -90,10 +101,8 @@ var _ = Describe("Hybrid SDN Master Operations", func() {
 			_, err = config.InitConfig(ctx, fexec, nil)
 			Expect(err).NotTo(HaveOccurred())
 
-			stopChan := make(chan struct{})
-			f, err := factory.NewWatchFactory(fakeClient, stopChan)
+			f, err = factory.NewWatchFactory(fakeClient)
 			Expect(err).NotTo(HaveOccurred())
-			defer close(stopChan)
 
 			err = StartMaster(&kube.Kube{KClient: fakeClient}, f)
 			Expect(err).NotTo(HaveOccurred())
@@ -141,10 +150,8 @@ var _ = Describe("Hybrid SDN Master Operations", func() {
 			_, err = config.InitConfig(ctx, fexec, nil)
 			Expect(err).NotTo(HaveOccurred())
 
-			stopChan := make(chan struct{})
-			f, err := factory.NewWatchFactory(fakeClient, stopChan)
+			f, err = factory.NewWatchFactory(fakeClient)
 			Expect(err).NotTo(HaveOccurred())
-			defer close(stopChan)
 
 			err = StartMaster(&kube.Kube{KClient: fakeClient}, f)
 			Expect(err).NotTo(HaveOccurred())
@@ -200,10 +207,8 @@ var _ = Describe("Hybrid SDN Master Operations", func() {
 			_, err = config.InitConfig(ctx, fexec, nil)
 			Expect(err).NotTo(HaveOccurred())
 
-			stopChan := make(chan struct{})
-			f, err := factory.NewWatchFactory(fakeClient, stopChan)
+			f, err = factory.NewWatchFactory(fakeClient)
 			Expect(err).NotTo(HaveOccurred())
-			defer close(stopChan)
 
 			err = StartMaster(&kube.Kube{KClient: fakeClient}, f)
 			Expect(err).NotTo(HaveOccurred())
