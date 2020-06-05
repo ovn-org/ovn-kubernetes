@@ -375,11 +375,11 @@ func TestGetPodNetSelAnnotation(t *testing.T) {
 		inpPod           v1.Pod
 		inpNetAnnotation string
 		expErr           bool
-		expOutput 		 []*types.NetworkSelectionElement
+		expOutput        []*types.NetworkSelectionElement
 	}{
 		{
-			desc: 	"empty annotation string input",
-			inpPod: v1.Pod{},
+			desc:             "empty annotation string input",
+			inpPod:           v1.Pod{},
 			inpNetAnnotation: "",
 		},
 		{
@@ -390,7 +390,7 @@ func TestGetPodNetSelAnnotation(t *testing.T) {
 				},
 			},
 			inpNetAnnotation: "k8s.ovn.org/pod-networks",
-			expErr: true,
+			expErr:           true,
 		},
 	}
 	for i, tc := range tests {
