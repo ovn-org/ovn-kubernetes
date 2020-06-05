@@ -26,9 +26,9 @@ var _ = Describe("Pod annotation tests", func() {
 			{
 				name: "Single-stack IPv4",
 				in: &PodAnnotation{
-					IPs:      []*net.IPNet{ovntest.MustParseIPNet("192.168.0.5/24")},
+					IPs:      ovntest.MustParseIPNets("192.168.0.5/24"),
 					MAC:      ovntest.MustParseMAC("0A:58:FD:98:00:01"),
-					Gateways: []net.IP{net.ParseIP("192.168.0.1")},
+					Gateways: ovntest.MustParseIPs("192.168.0.1"),
 				},
 				out: map[string]string{
 					"k8s.ovn.org/pod-networks": `{"default":{"ip_addresses":["192.168.0.5/24"],"mac_address":"0a:58:fd:98:00:01","gateway_ips":["192.168.0.1"],"ip_address":"192.168.0.5/24","gateway_ip":"192.168.0.1"}}`,
@@ -37,7 +37,7 @@ var _ = Describe("Pod annotation tests", func() {
 			{
 				name: "No GW",
 				in: &PodAnnotation{
-					IPs: []*net.IPNet{ovntest.MustParseIPNet("192.168.0.5/24")},
+					IPs: ovntest.MustParseIPNets("192.168.0.5/24"),
 					MAC: ovntest.MustParseMAC("0A:58:FD:98:00:01"),
 				},
 				out: map[string]string{
@@ -47,7 +47,7 @@ var _ = Describe("Pod annotation tests", func() {
 			{
 				name: "Nil entry in GW",
 				in: &PodAnnotation{
-					IPs:      []*net.IPNet{ovntest.MustParseIPNet("192.168.0.5/24")},
+					IPs:      ovntest.MustParseIPNets("192.168.0.5/24"),
 					MAC:      ovntest.MustParseMAC("0A:58:FD:98:00:01"),
 					Gateways: []net.IP{nil},
 				},
@@ -59,9 +59,9 @@ var _ = Describe("Pod annotation tests", func() {
 			{
 				name: "Routes",
 				in: &PodAnnotation{
-					IPs:      []*net.IPNet{ovntest.MustParseIPNet("192.168.0.5/24")},
+					IPs:      ovntest.MustParseIPNets("192.168.0.5/24"),
 					MAC:      ovntest.MustParseMAC("0A:58:FD:98:00:01"),
-					Gateways: []net.IP{net.ParseIP("192.168.0.1")},
+					Gateways: ovntest.MustParseIPs("192.168.0.1"),
 					Routes: []PodRoute{
 						{
 							Dest:    ovntest.MustParseIPNet("192.168.1.0/24"),
@@ -76,9 +76,9 @@ var _ = Describe("Pod annotation tests", func() {
 			{
 				name: "Single-stack IPv6",
 				in: &PodAnnotation{
-					IPs:      []*net.IPNet{ovntest.MustParseIPNet("fd01::1234/64")},
+					IPs:      ovntest.MustParseIPNets("fd01::1234/64"),
 					MAC:      ovntest.MustParseMAC("0A:58:FD:98:00:01"),
-					Gateways: []net.IP{net.ParseIP("fd01::1")},
+					Gateways: ovntest.MustParseIPs("fd01::1"),
 				},
 				out: map[string]string{
 					"k8s.ovn.org/pod-networks": `{"default":{"ip_addresses":["fd01::1234/64"],"mac_address":"0a:58:fd:98:00:01","gateway_ips":["fd01::1"],"ip_address":"fd01::1234/64","gateway_ip":"fd01::1"}}`,
@@ -87,15 +87,9 @@ var _ = Describe("Pod annotation tests", func() {
 			{
 				name: "Dual-stack",
 				in: &PodAnnotation{
-					IPs: []*net.IPNet{
-						ovntest.MustParseIPNet("192.168.0.5/24"),
-						ovntest.MustParseIPNet("fd01::1234/64"),
-					},
-					MAC: ovntest.MustParseMAC("0A:58:FD:98:00:01"),
-					Gateways: []net.IP{
-						net.ParseIP("192.168.1.0"),
-						net.ParseIP("fd01::1"),
-					},
+					IPs:      ovntest.MustParseIPNets("192.168.0.5/24", "fd01::1234/64"),
+					MAC:      ovntest.MustParseMAC("0A:58:FD:98:00:01"),
+					Gateways: ovntest.MustParseIPs("192.168.1.0", "fd01::1"),
 				},
 				out: map[string]string{
 					"k8s.ovn.org/pod-networks": `{"default":{"ip_addresses":["192.168.0.5/24","fd01::1234/64"],"mac_address":"0a:58:fd:98:00:01","gateway_ips":["192.168.1.0","fd01::1"]}}`,

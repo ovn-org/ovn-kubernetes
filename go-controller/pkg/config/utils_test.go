@@ -142,104 +142,69 @@ func Test_checkForOverlap(t *testing.T) {
 			shouldError: false,
 		},
 		{
-			name: "non-overlapping",
-			cidrList: []*net.IPNet{
-				ovntest.MustParseIPNet("10.132.0.0/26"),
-				ovntest.MustParseIPNet("10.133.0.0/26"),
-			},
+			name:        "non-overlapping",
+			cidrList:    ovntest.MustParseIPNets("10.132.0.0/26", "10.133.0.0/26"),
 			shouldError: false,
 		},
 		{
-			name: "duplicate entry",
-			cidrList: []*net.IPNet{
-				ovntest.MustParseIPNet("10.132.0.0/26"),
-				ovntest.MustParseIPNet("10.132.0.0/26"),
-			},
+			name:        "duplicate entry",
+			cidrList:    ovntest.MustParseIPNets("10.132.0.0/26", "10.132.0.0/26"),
 			shouldError: true,
 		},
 		{
-			name: "proper subset",
-			cidrList: []*net.IPNet{
-				ovntest.MustParseIPNet("10.132.0.0/26"),
-				ovntest.MustParseIPNet("10.0.0.0/8"),
-			},
+			name:        "proper subset",
+			cidrList:    ovntest.MustParseIPNets("10.132.0.0/26", "10.0.0.0/8"),
 			shouldError: true,
 		},
 		{
-			name: "proper superset",
-			cidrList: []*net.IPNet{
-				ovntest.MustParseIPNet("10.0.0.0/8"),
-				ovntest.MustParseIPNet("10.133.0.0/26"),
-			},
+			name:        "proper superset",
+			cidrList:    ovntest.MustParseIPNets("10.0.0.0/8", "10.133.0.0/26"),
 			shouldError: true,
 		},
 		{
-			name: "overlap",
-			cidrList: []*net.IPNet{
-				ovntest.MustParseIPNet("10.1.0.0/14"),
-				ovntest.MustParseIPNet("10.0.0.0/15"),
-			},
+			name:        "overlap",
+			cidrList:    ovntest.MustParseIPNets("10.1.0.0/14", "10.0.0.0/15"),
 			shouldError: true,
 		},
 		{
-			name: "non-overlapping V4 ipnet entries",
-			cidrList: []*net.IPNet{
-				ovntest.MustParseIPNet("10.132.0.0/26"),
-				ovntest.MustParseIPNet("192.168.0.0/16"),
-				ovntest.MustParseIPNet("172.16.0.0/16"),
-			},
+			name:        "non-overlapping V4 ipnet entries",
+			cidrList:    ovntest.MustParseIPNets("10.132.0.0/26", "192.168.0.0/16", "172.16.0.0/16"),
 			shouldError: false,
 		},
 		{
-			name: "non-overlapping V6 ipnet entries",
-			cidrList: []*net.IPNet{
-				ovntest.MustParseIPNet("fd98:8000::/65"),
-				ovntest.MustParseIPNet("fd99::/64"),
-				ovntest.MustParseIPNet("fd98:1::/64"),
-			},
+			name:        "non-overlapping V6 ipnet entries",
+			cidrList:    ovntest.MustParseIPNets("fd98:8000::/65", "fd99::/64", "fd98:1::/64"),
 			shouldError: false,
 		},
 
 		{
-			name: "ipnet entry equal to V4 joinSubnet value",
-			cidrList: []*net.IPNet{
-				ovntest.MustParseIPNet("100.64.0.0/16"),
-			},
+			name:        "ipnet entry equal to V4 joinSubnet value",
+			cidrList:    ovntest.MustParseIPNets("100.64.0.0/16"),
 			shouldError: true,
 		},
 		{
-			name: "ipnet entry equal to V6 joinSubnet value",
-			cidrList: []*net.IPNet{
-				ovntest.MustParseIPNet("fd98::/64"),
-			},
+			name:        "ipnet entry equal to V6 joinSubnet value",
+			cidrList:    ovntest.MustParseIPNets("fd98::/64"),
 			shouldError: true,
 		},
 		{
-			name: "ipnet entry overlapping with V4 joinSubnet value",
-			cidrList: []*net.IPNet{
-				ovntest.MustParseIPNet("100.64.128.0/17"),
-			},
+			name:        "ipnet entry overlapping with V4 joinSubnet value",
+			cidrList:    ovntest.MustParseIPNets("100.64.128.0/17"),
 			shouldError: true,
 		},
 		{
-			name: "ipnet entry overlapping with V6 joinSubnet value",
-			cidrList: []*net.IPNet{
-				ovntest.MustParseIPNet("fd98::/68"),
-			},
+			name:        "ipnet entry overlapping with V6 joinSubnet value",
+			cidrList:    ovntest.MustParseIPNets("fd98::/68"),
 			shouldError: true,
 		},
 		{
-			name: "ipnet entry encompassing the V4 joinSubnet value",
-			cidrList: []*net.IPNet{
-				ovntest.MustParseIPNet("100.0.0.0/8"),
-			},
+			name:        "ipnet entry encompassing the V4 joinSubnet value",
+			cidrList:    ovntest.MustParseIPNets("100.0.0.0/8"),
 			shouldError: true,
 		},
 		{
-			name: "ipnet entry encompassing the V6 joinSubnet value",
-			cidrList: []*net.IPNet{
-				ovntest.MustParseIPNet("fd98::/63"),
-			},
+			name:        "ipnet entry encompassing the V6 joinSubnet value",
+			cidrList:    ovntest.MustParseIPNets("fd98::/63"),
 			shouldError: true,
 		},
 	}

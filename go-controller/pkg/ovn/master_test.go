@@ -424,7 +424,7 @@ var _ = Describe("Master Operations", func() {
 			Expect(err).NotTo(HaveOccurred())
 			err = util.SetNodeManagementPortMACAddress(nodeAnnotator, ovntest.MustParseMAC(mgmtMAC))
 			Expect(err).NotTo(HaveOccurred())
-			err = util.SetNodeHostSubnetAnnotation(nodeAnnotator, []*net.IPNet{ovntest.MustParseIPNet(nodeSubnet)})
+			err = util.SetNodeHostSubnetAnnotation(nodeAnnotator, ovntest.MustParseIPNets(nodeSubnet))
 			Expect(err).NotTo(HaveOccurred())
 			err = nodeAnnotator.Run()
 			Expect(err).NotTo(HaveOccurred())
@@ -607,7 +607,7 @@ subnet=%s
 			Expect(err).NotTo(HaveOccurred())
 			err = util.SetNodeManagementPortMACAddress(nodeAnnotator, ovntest.MustParseMAC(masterMgmtPortMAC))
 			Expect(err).NotTo(HaveOccurred())
-			err = util.SetNodeHostSubnetAnnotation(nodeAnnotator, []*net.IPNet{ovntest.MustParseIPNet(masterSubnet)})
+			err = util.SetNodeHostSubnetAnnotation(nodeAnnotator, ovntest.MustParseIPNets(masterSubnet))
 			Expect(err).NotTo(HaveOccurred())
 			err = nodeAnnotator.Run()
 			Expect(err).NotTo(HaveOccurred())
@@ -712,16 +712,16 @@ var _ = Describe("Gateway Init Operations", func() {
 				ChassisID:      systemID,
 				InterfaceID:    ifaceID,
 				MACAddress:     ovntest.MustParseMAC(brLocalnetMAC),
-				IPAddresses:    []*net.IPNet{ovntest.MustParseIPNet(localnetGatewayIP)},
-				NextHops:       []net.IP{ovntest.MustParseIP(localnetGatewayNextHop)},
+				IPAddresses:    ovntest.MustParseIPNets(localnetGatewayIP),
+				NextHops:       ovntest.MustParseIPs(localnetGatewayNextHop),
 				NodePortEnable: true,
 			})
 			Expect(err).NotTo(HaveOccurred())
 			err = util.SetNodeManagementPortMACAddress(nodeAnnotator, ovntest.MustParseMAC(brLocalnetMAC))
 			Expect(err).NotTo(HaveOccurred())
-			err = util.SetNodeHostSubnetAnnotation(nodeAnnotator, []*net.IPNet{ovntest.MustParseIPNet(nodeSubnet)})
+			err = util.SetNodeHostSubnetAnnotation(nodeAnnotator, ovntest.MustParseIPNets(nodeSubnet))
 			Expect(err).NotTo(HaveOccurred())
-			err = util.SetNodeJoinSubnetAnnotation(nodeAnnotator, []*net.IPNet{ovntest.MustParseIPNet(joinSubnet)})
+			err = util.SetNodeJoinSubnetAnnotation(nodeAnnotator, ovntest.MustParseIPNets(joinSubnet))
 			Expect(err).NotTo(HaveOccurred())
 			err = nodeAnnotator.Run()
 			Expect(err).NotTo(HaveOccurred())
@@ -897,16 +897,16 @@ var _ = Describe("Gateway Init Operations", func() {
 				ChassisID:      systemID,
 				InterfaceID:    ifaceID,
 				MACAddress:     ovntest.MustParseMAC(physicalBridgeMAC),
-				IPAddresses:    []*net.IPNet{ovntest.MustParseIPNet(physicalGatewayIPMask)},
-				NextHops:       []net.IP{ovntest.MustParseIP(physicalGatewayNextHop)},
+				IPAddresses:    ovntest.MustParseIPNets(physicalGatewayIPMask),
+				NextHops:       ovntest.MustParseIPs(physicalGatewayNextHop),
 				NodePortEnable: true,
 				VLANID:         &vlanID,
 			})
 			err = util.SetNodeManagementPortMACAddress(nodeAnnotator, ovntest.MustParseMAC(nodeMgmtPortMAC))
 			Expect(err).NotTo(HaveOccurred())
-			err = util.SetNodeHostSubnetAnnotation(nodeAnnotator, []*net.IPNet{ovntest.MustParseIPNet(nodeSubnet)})
+			err = util.SetNodeHostSubnetAnnotation(nodeAnnotator, ovntest.MustParseIPNets(nodeSubnet))
 			Expect(err).NotTo(HaveOccurred())
-			err = util.SetNodeJoinSubnetAnnotation(nodeAnnotator, []*net.IPNet{ovntest.MustParseIPNet(joinSubnet)})
+			err = util.SetNodeJoinSubnetAnnotation(nodeAnnotator, ovntest.MustParseIPNets(joinSubnet))
 			Expect(err).NotTo(HaveOccurred())
 			err = nodeAnnotator.Run()
 			Expect(err).NotTo(HaveOccurred())
