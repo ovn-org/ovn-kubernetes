@@ -275,28 +275,54 @@ var _ = Describe("e2e control plane", func() {
 
 // Test e2e hybrid sdn inter-node connectivity between worker nodes and validate pods do not traverse the external gateway
 var _ = Describe("test e2e inter-node connectivity between worker nodes hybrid overlay on separate worker nodes", func() {
-	var haMode bool
-	svcname := "internode-hyb-sdn-e2e"
-	pingTarget := "172.17.0.250"
-	ovnNs := "ovn-kubernetes"
-	ovnWorkerNode := "ovn-worker"
-	ovnWorkerNode2 := "ovn-worker2"
-	ovnHaWorkerNode2 := "ovn-control-plane2"
-	ovnHaWorkerNode3 := "ovn-control-plane3"
-	ovnContainer := "ovnkube-node"
-	ovnNsFlag := fmt.Sprintf("--namespace=%s", ovnNs)
-	labelFlag := fmt.Sprintf("name=%s", ovnContainer)
-	jsonFlag := "-o=jsonpath='{.items..metadata.name}'"
+	const (
+		svcname          string = "internode-hyb-sdn-e2e"
+		pingTarget       string = "172.17.0.250"
+		ovnNs            string = "ovn-kubernetes"
+		ovnWorkerNode    string = "ovn-worker"
+		ovnWorkerNode2   string = "ovn-worker2"
+		ovnHaWorkerNode2 string = "ovn-control-plane2"
+		ovnHaWorkerNode3 string = "ovn-control-plane3"
+		ovnContainer     string = "ovnkube-node"
+		gwContainerName  string = "gw-test-container"
+		jsonFlag         string = "-o=jsonpath='{.items..metadata.name}'"
+	)
+	var (
+		haMode    bool
+		ovnNsFlag = fmt.Sprintf("--namespace=%s", ovnNs)
+		labelFlag = fmt.Sprintf("name=%s", ovnContainer)
+	)
+
 	f := framework.NewDefaultFramework(svcname)
 
 	// Determine what mode the CI is running in and get relevant endpoint information for the tests
 	BeforeEach(func() {
 		fieldSelectorFlag := fmt.Sprintf("--field-selector=spec.nodeName=%s", ovnWorkerNode)
 		fieldSelectorHaFlag := fmt.Sprintf("--field-selector=spec.nodeName=%s", ovnHaWorkerNode2)
-		annotationFlag := fmt.Sprintf("k8s.ovn.org/hybrid-overlay-external-gw=%s", pingTarget)
+
+		// start the container that will act as an external gateway
+		_, err := runCommand("docker", "run", "-itd", "--privileged", "--name", gwContainerName, "centos")
+		if err != nil {
+			framework.Failf("failed to start external gateway test container: %v", err)
+		}
+		exVtepIP, err := runCommand("docker", "inspect", "-f", "{{ .NetworkSettings.IPAddress }}", gwContainerName)
+		if err != nil {
+			framework.Failf("failed to start external gateway test container: %v", err)
+		}
+		// trim newline from the inspect output >:|
+		exVtepIP = strings.TrimSuffix(exVtepIP, "\n")
+		framework.Logf("The external gateway IP is %s", exVtepIP)
+
+		annotateArgs := []string{
+			"annotate",
+			"namespace",
+			f.Namespace.Name,
+			fmt.Sprintf("k8s.ovn.org/hybrid-overlay-external-gw=%s", pingTarget),
+			fmt.Sprintf("k8s.ovn.org/hybrid-overlay-vtep=%s", exVtepIP),
+		}
 		// Annotate the pods to route pods to hybrid-sdn bridge br-ext
 		framework.Logf("Annotating the external gateway test namespace")
-		framework.RunKubectlOrDie("annotate", "namespace", f.Namespace.Name, annotationFlag)
+		framework.RunKubectlOrDie(annotateArgs...)
 
 		// Attempt to retrieve the pod name that will run the external interface for e2e control-plane non-ha mode
 		kubectlOut, err := framework.RunKubectl("get", "pods", ovnNsFlag, "-l", labelFlag, jsonFlag, fieldSelectorFlag)
@@ -389,17 +415,23 @@ var _ = Describe("test e2e inter-node connectivity between worker nodes hybrid o
 
 // Test e2e inter-node connectivity over br-int
 var _ = Describe("test e2e inter-node connectivity between worker nodes", func() {
-	var haMode bool
-	svcname := "inter-node-e2e"
-	ovnNs := "ovn-kubernetes"
-	ovnWorkerNode := "ovn-worker"
-	ovnWorkerNode2 := "ovn-worker2"
-	ovnHaWorkerNode2 := "ovn-control-plane2"
-	ovnHaWorkerNode3 := "ovn-control-plane3"
-	ovnContainer := "ovnkube-node"
-	ovnNsFlag := fmt.Sprintf("--namespace=%s", ovnNs)
-	labelFlag := fmt.Sprintf("name=%s", ovnContainer)
-	jsonFlag := "-o=jsonpath='{.items..metadata.name}'"
+	const (
+		svcname          string = "inter-node-e2e"
+		ovnNs            string = "ovn-kubernetes"
+		ovnWorkerNode    string = "ovn-worker"
+		ovnWorkerNode2   string = "ovn-worker2"
+		ovnHaWorkerNode2 string = "ovn-control-plane2"
+		ovnHaWorkerNode3 string = "ovn-control-plane3"
+		ovnContainer     string = "ovnkube-node"
+		jsonFlag         string = "-o=jsonpath='{.items..metadata.name}'"
+	)
+
+	var (
+		haMode    bool
+		ovnNsFlag = fmt.Sprintf("--namespace=%s", ovnNs)
+		labelFlag = fmt.Sprintf("name=%s", ovnContainer)
+	)
+
 	f := framework.NewDefaultFramework(svcname)
 
 	// Determine which KIND environment is running by querying the running nodes
@@ -475,16 +507,21 @@ var _ = Describe("test e2e inter-node connectivity between worker nodes", func()
 // Verify pods in the namespace annotated with an external-gateway traverse the vxlan
 // overlay and reach the intended external gateway vtep and gateway end to end
 var _ = Describe("e2e external gateway validation", func() {
-	const extGW = "10.249.0.1"
-	var haMode bool
-	svcname := "externalgw"
-	ovnNs := "ovn-kubernetes"
-	extGWCidr := fmt.Sprintf("%s/24", extGW)
-	gwContainerName := "gw-test-container"
-	ovnWorkerNode := "ovn-worker"
-	ovnHaWorkerNode := "ovn-control-plane2"
-	ovnContainer := "ovnkube-node"
-	ovnNsFlag := fmt.Sprintf("--namespace=%s", ovnNs)
+	const (
+		svcname         string = "externalgw"
+		ovnNs           string = "ovn-kubernetes"
+		extGW           string = "10.249.0.1"
+		gwContainerName string = "gw-test-container"
+		ovnWorkerNode   string = "ovn-worker"
+		ovnHaWorkerNode string = "ovn-control-plane2"
+		ovnContainer    string = "ovnkube-node"
+	)
+
+	var (
+		haMode    bool
+		extGWCidr = fmt.Sprintf("%s/24", extGW)
+		ovnNsFlag = fmt.Sprintf("--namespace=%s", ovnNs)
+	)
 	f := framework.NewDefaultFramework(svcname)
 
 	// Determine what mode the CI is running in and get relevant endpoint information for the tests
@@ -510,11 +547,17 @@ var _ = Describe("e2e external gateway validation", func() {
 		}
 		framework.Logf("The external gateway IP is %s", exVtepIP)
 		// annotate the test namespace
-		annotationFlag := fmt.Sprintf("k8s.ovn.org/hybrid-overlay-external-gw=%s", extGW)
-		annotationVtepFlag := fmt.Sprintf("k8s.ovn.org/hybrid-overlay-vtep=%s", exVtepIP)
+
+		annotateArgs := []string{
+			"annotate",
+			"namespace",
+			f.Namespace.Name,
+			fmt.Sprintf("k8s.ovn.org/hybrid-overlay-external-gw=%s", extGW),
+			fmt.Sprintf("k8s.ovn.org/hybrid-overlay-vtep=%s", exVtepIP),
+		}
+
 		framework.Logf("Annotating the external gateway test namespace")
-		framework.RunKubectlOrDie("annotate", "namespace", f.Namespace.Name, annotationFlag)
-		framework.RunKubectlOrDie("annotate", "namespace", f.Namespace.Name, annotationVtepFlag)
+		framework.RunKubectlOrDie(annotateArgs...)
 		// attempt to retrieve the pod name that will source the tunnel test in non-HA mode
 		kubectlOut, err := framework.RunKubectl("get", "pods", ovnNsFlag, "-l", labelFlag, jsonFlag, fieldSelectorFlag)
 		if err != nil {
@@ -671,11 +714,15 @@ var _ = Describe("e2e multiple external gateway update validation", func() {
 			framework.Failf("Unable to retrieve a valid address from container %s with inspect output of %s", gwContainerNameAlt1, exVtepIpAlt1)
 		}
 		// annotate the test namespace
-		annotationFlag := fmt.Sprintf("k8s.ovn.org/hybrid-overlay-external-gw=%s", extGwAlt1)
-		annotationVtepFlag := fmt.Sprintf("k8s.ovn.org/hybrid-overlay-vtep=%s", exVtepIpAlt1)
+		annotateArgs := []string{
+			"annotate",
+			"namespace",
+			f.Namespace.Name,
+			fmt.Sprintf("k8s.ovn.org/hybrid-overlay-external-gw=%s", extGwAlt1),
+			fmt.Sprintf("k8s.ovn.org/hybrid-overlay-vtep=%s", exVtepIpAlt1),
+		}
 		framework.Logf("Annotating the external gateway test namespace to a new container vtep:%s gw:%s ", exVtepIpAlt1, extGwAlt1)
-		framework.RunKubectlOrDie("annotate", "namespace", f.Namespace.Name, annotationFlag)
-		framework.RunKubectlOrDie("annotate", "namespace", f.Namespace.Name, annotationVtepFlag)
+		framework.RunKubectlOrDie(annotateArgs...)
 		// non-ha ci mode runs a set of kind nodes prefixed with ovn-worker
 		ciWorkerNodeSrc := ovnWorkerNode
 		if haMode {
@@ -767,11 +814,16 @@ var _ = Describe("e2e multiple external gateway update validation", func() {
 			framework.Failf("Unable to retrieve a valid address from container %s with inspect output of %s", gwContainerNameAlt2, localVtepIP)
 		}
 		// override the annotation in the test namespace with the new vtep and gateway
-		annotationFlagAlt := fmt.Sprintf("k8s.ovn.org/hybrid-overlay-external-gw=%s", extGwAlt2)
-		annotationVtepFlagAlt := fmt.Sprintf("k8s.ovn.org/hybrid-overlay-vtep=%s", exVtepIpAlt2)
+		annotateArgs = []string{
+			"annotate",
+			"namespace",
+			f.Namespace.Name,
+			fmt.Sprintf("k8s.ovn.org/hybrid-overlay-external-gw=%s", extGwAlt2),
+			fmt.Sprintf("k8s.ovn.org/hybrid-overlay-vtep=%s", exVtepIpAlt2),
+			"--overwrite",
+		}
 		framework.Logf("Annotating the external gateway test namespace to a new container vtep:%s gw:%s ", exVtepIpAlt2, extGwAlt2)
-		framework.RunKubectlOrDie("annotate", "namespace", f.Namespace.Name, annotationFlagAlt, "--overwrite")
-		framework.RunKubectlOrDie("annotate", "namespace", f.Namespace.Name, annotationVtepFlagAlt, "--overwrite")
+		framework.RunKubectlOrDie(annotateArgs...)
 		// setup the new container to emulate a gateway with routes, vtep and a loopback interface acting as the gateway
 		_, err = runCommand("docker", "exec", gwContainerNameAlt2, "ip", "link", "add", "vxlan0", "type", "vxlan", "dev",
 			"eth0", "id", "4097", "dstport", vxlanPort, "remote", localVtepIP)
