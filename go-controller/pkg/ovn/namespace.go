@@ -47,7 +47,8 @@ func (oc *Controller) addPodToNamespace(ns string, portInfo *lpInfo) error {
 	}
 	defer nsInfo.Unlock()
 
-	if err := nsInfo.addressSet.AddIP(portInfo.ip); err != nil {
+	// DUAL-STACK FIXME: handle multiple IPs
+	if err := nsInfo.addressSet.AddIP(portInfo.ips[0]); err != nil {
 		return err
 	}
 
@@ -69,7 +70,8 @@ func (oc *Controller) deletePodFromNamespace(ns string, portInfo *lpInfo) error 
 	}
 	defer nsInfo.Unlock()
 
-	if err := nsInfo.addressSet.DeleteIP(portInfo.ip); err != nil {
+	// DUAL-STACK FIXME: handle multiple IPs
+	if err := nsInfo.addressSet.DeleteIP(portInfo.ips[0]); err != nil {
 		return err
 	}
 
