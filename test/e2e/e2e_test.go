@@ -20,6 +20,11 @@ import (
 	e2epod "k8s.io/kubernetes/test/e2e/framework/pod"
 )
 
+const (
+	// IANA assigned VXLAN UDP port - rfc7348
+	vxlanPort = "4789"
+)
+
 func checkContinuousConnectivity(f *framework.Framework, nodeName, podName, host string, port, timeout int, podChan chan *v1.Pod, errChan chan error) {
 	contName := fmt.Sprintf("%s-container", podName)
 
@@ -92,14 +97,12 @@ const (
 // Place the workload on the specified node to test external connectivity
 func checkConnectivityPingToHost(f *framework.Framework, nodeName, podName, host string, pingCmd pingCommand, timeout int) error {
 	contName := fmt.Sprintf("%s-container", podName)
-
-	command := []string{
-		string(pingCmd),
-		"-c", "3", // send 3 pings
-		"-W", "2", // wait at most 2 seconds for a reply
-		"-w", strconv.Itoa(timeout),
-		host,
-	}
+	// Ping options are:
+	// -c sends 3 pings
+	// -W wait at most 2 seconds for a reply
+	// -w timeout
+	command := []string{"/bin/sh", "-c"}
+	args := []string{fmt.Sprintf("sleep 20; %s -c 3 -W 2 -w %s %s", string(pingCmd), strconv.Itoa(timeout), host)}
 
 	pod := &v1.Pod{
 		ObjectMeta: metav1.ObjectMeta{
@@ -111,6 +114,7 @@ func checkConnectivityPingToHost(f *framework.Framework, nodeName, podName, host
 					Name:    contName,
 					Image:   framework.AgnHostImage,
 					Command: command,
+					Args:    args,
 				},
 			},
 			NodeName:      nodeName,
@@ -299,7 +303,6 @@ var _ = Describe("test e2e inter-node connectivity between worker nodes hybrid o
 		if err != nil {
 			framework.Failf("Expected container %s running on %s error %v", ovnContainer, ovnWorkerNode, err)
 		}
-		haMode = false
 		// Attempt to retrieve the pod name that will run the external interface for e2e control-plane ha mode
 		if kubectlOut == "''" {
 			haMode = true
@@ -409,7 +412,6 @@ var _ = Describe("test e2e inter-node connectivity between worker nodes", func()
 		if err != nil {
 			framework.Failf("Expected container %s running on %s error %v", ovnContainer, ovnWorkerNode, err)
 		}
-		haMode = false
 		if kubectlOut == "''" {
 			haMode = true
 			kubectlOut, err = framework.RunKubectl("get", "pods", ovnNsFlag, "-l", labelFlag, jsonFlag, fieldSelectorHaFlag)
@@ -473,11 +475,10 @@ var _ = Describe("test e2e inter-node connectivity between worker nodes", func()
 // Verify pods in the namespace annotated with an external-gateway traverse the vxlan
 // overlay and reach the intended external gateway vtep and gateway end to end
 var _ = Describe("e2e external gateway validation", func() {
+	const extGW = "10.249.0.1"
 	var haMode bool
-	vxlanPort := "4789"
 	svcname := "externalgw"
 	ovnNs := "ovn-kubernetes"
-	extGW := "10.249.0.1"
 	extGWCidr := fmt.Sprintf("%s/24", extGW)
 	gwContainerName := "gw-test-container"
 	ovnWorkerNode := "ovn-worker"
@@ -504,6 +505,9 @@ var _ = Describe("e2e external gateway validation", func() {
 		}
 		// trim newline from the inspect output >:|
 		exVtepIP = strings.TrimSuffix(exVtepIP, "\n")
+		if ip := net.ParseIP(exVtepIP); ip == nil {
+			framework.Failf("Unable to retrieve a valid address from container %s with inspect output of %s", gwContainerName, exVtepIP)
+		}
 		framework.Logf("The external gateway IP is %s", exVtepIP)
 		// annotate the test namespace
 		annotationFlag := fmt.Sprintf("k8s.ovn.org/hybrid-overlay-external-gw=%s", extGW)
@@ -516,7 +520,6 @@ var _ = Describe("e2e external gateway validation", func() {
 		if err != nil {
 			framework.Failf("Expected container %s running on %s error %v", ovnContainer, ovnWorkerNode, err)
 		}
-		haMode = false
 		// attempt to retrieve the pod name that will source the tunnel test in HA mode
 		if kubectlOut == "''" {
 			haMode = true
@@ -542,11 +545,14 @@ var _ = Describe("e2e external gateway validation", func() {
 			// ha ci mode runs a named set of nodes with a prefix of ovn-control-plane
 			ciWorkerNodeSrc = ovnHaWorkerNode
 		}
-		cmdOut, err := runCommand("docker", "inspect", "-f", "{{ .NetworkSettings.IPAddress }}", ciWorkerNodeSrc)
+		localVtepIP, err := runCommand("docker", "inspect", "-f", "{{ .NetworkSettings.IPAddress }}", ciWorkerNodeSrc)
 		if err != nil {
 			framework.Failf("failed to get the node ip address from node %s %v", ciWorkerNodeSrc, err)
 		}
-		localVtepIP := strings.TrimSuffix(cmdOut, "\n")
+		localVtepIP = strings.TrimSuffix(localVtepIP, "\n")
+		if ip := net.ParseIP(localVtepIP); ip == nil {
+			framework.Failf("Unable to retrieve a valid address from container %s with inspect output of %s", gwContainerName, localVtepIP)
+		}
 		framework.Logf("the pod side vtep node is %s and the ip %s", ciWorkerNodeSrc, localVtepIP)
 		// retrieve the pod cidr for the worker node
 		jsonFlag := "jsonpath='{.metadata.annotations.k8s\\.ovn\\.org/node-subnets}'"
@@ -581,10 +587,215 @@ var _ = Describe("e2e external gateway validation", func() {
 			framework.Failf("failed to add the pod route on the test container: %v", err)
 		}
 		// give the container time to come up and stabilize
-		time.Sleep(time.Second * 30)
+		time.Sleep(time.Second * 10)
 		By(fmt.Sprintf("Creating a container on %s and testing end to end traffic to an external gateway", ciWorkerNodeSrc))
 		framework.ExpectNoError(
 			// generate traffic that will being encapsulated and sent to the external gateway.
 			checkConnectivityPingToHost(f, ciWorkerNodeSrc, "external-gateway-e2e", extGW, ipv4PingCommand, 30))
+	})
+})
+
+// Validate pods can reach the initial gateway and then update the namespace
+// annotation to point to a second container also emulating the external gateway
+var _ = Describe("e2e multiple external gateway update validation", func() {
+	var haMode bool
+	svcname := "multiple-externalgw"
+	ovnNs := "ovn-kubernetes"
+	ovnWorkerNode := "ovn-worker"
+	ovnHaWorkerNode := "ovn-control-plane2"
+	ovnContainer := "ovnkube-node"
+	gwContainerNameAlt1 := "gw-test-container-alt"
+	gwContainerNameAlt2 := "gw-test-container-alt2"
+	ovnNsFlag := fmt.Sprintf("--namespace=%s", ovnNs)
+	f := framework.NewDefaultFramework(svcname)
+
+	// Determine what mode the CI is running in and get relevant endpoint information for the tests
+	BeforeEach(func() {
+		labelFlag := fmt.Sprintf("name=%s", ovnContainer)
+		jsonFlag := "-o=jsonpath='{.items..metadata.name}'"
+		fieldSelectorFlag := fmt.Sprintf("--field-selector=spec.nodeName=%s", ovnWorkerNode)
+		fieldSelectorHaFlag := fmt.Sprintf("--field-selector=spec.nodeName=%s", ovnHaWorkerNode)
+		// start the container that will act as an external gateway
+		kubectlOut, err := framework.RunKubectl("get", "pods", ovnNsFlag, "-l", labelFlag, jsonFlag, fieldSelectorFlag)
+		if err != nil {
+			framework.Failf("Expected container %s running on %s error %v", ovnContainer, ovnWorkerNode, err)
+		}
+		// attempt to retrieve the pod name that will source the tunnel test in HA mode
+		if kubectlOut == "''" {
+			haMode = true
+			kubectlOut, err = framework.RunKubectl("get", "pods", ovnNsFlag, "-l", labelFlag, jsonFlag, fieldSelectorHaFlag)
+			if err != nil {
+				framework.Failf("Expected container %s running on %s error %v", ovnContainer, ovnHaWorkerNode, err)
+			}
+		}
+	})
+
+	AfterEach(func() {
+		// tear down the containers simulating the gateways
+		_, err := runCommand("docker", "rm", "-f", gwContainerNameAlt1)
+		if err != nil {
+			framework.Failf("failed to delete the gateway test container %s %v", gwContainerNameAlt1, err)
+		}
+		_, err = runCommand("docker", "rm", "-f", gwContainerNameAlt2)
+		if err != nil {
+			framework.Failf("failed to delete the gateway test container %s %v", gwContainerNameAlt2, err)
+		}
+	})
+
+	It("Should validate connectivity before and after updating the namespace annotation to a new vtep and external gateway", func() {
+		const extGwAlt1 = "10.249.1.1"
+		const extGwAlt2 = "10.249.2.1"
+		var pingSrc string
+		var validIP net.IP
+		getPodIPRetry := 15
+		extGWCidrAlt1 := fmt.Sprintf("%s/24", extGwAlt1)
+		extGWCidrAlt2 := fmt.Sprintf("%s/24", extGwAlt2)
+		srcPingPodName := "e2e-exgw-src-ping-pod"
+		command := []string{"bash", "-c", "sleep 20000"}
+		frameworkNsFlag := fmt.Sprintf("--namespace=%s", f.Namespace.Name)
+		testContainer := fmt.Sprintf("%s-container", srcPingPodName)
+		testContainerFlag := fmt.Sprintf("--container=%s", testContainer)
+		// start the container that will act as an external gateway
+		_, err := runCommand("docker", "run", "-itd", "--privileged", "--name", gwContainerNameAlt1, "centos")
+		if err != nil {
+			framework.Failf("failed to start external gateway test container %s: %v", gwContainerNameAlt1, err)
+		}
+		// retrieve the container ip of the external gateway container
+		exVtepIpAlt1, err := runCommand("docker", "inspect", "-f", "{{ .NetworkSettings.IPAddress }}", gwContainerNameAlt1)
+		if err != nil {
+			framework.Failf("failed to start external gateway test container: %v", err)
+		}
+		// trim newline from the inspect output
+		exVtepIpAlt1 = strings.TrimSuffix(exVtepIpAlt1, "\n")
+		if ip := net.ParseIP(exVtepIpAlt1); ip == nil {
+			framework.Failf("Unable to retrieve a valid address from container %s with inspect output of %s", gwContainerNameAlt1, exVtepIpAlt1)
+		}
+		// annotate the test namespace
+		annotationFlag := fmt.Sprintf("k8s.ovn.org/hybrid-overlay-external-gw=%s", extGwAlt1)
+		annotationVtepFlag := fmt.Sprintf("k8s.ovn.org/hybrid-overlay-vtep=%s", exVtepIpAlt1)
+		framework.Logf("Annotating the external gateway test namespace to a new container vtep:%s gw:%s ", exVtepIpAlt1, extGwAlt1)
+		framework.RunKubectlOrDie("annotate", "namespace", f.Namespace.Name, annotationFlag)
+		framework.RunKubectlOrDie("annotate", "namespace", f.Namespace.Name, annotationVtepFlag)
+		// non-ha ci mode runs a set of kind nodes prefixed with ovn-worker
+		ciWorkerNodeSrc := ovnWorkerNode
+		if haMode {
+			// ha ci mode runs a named set of nodes with a prefix of ovn-control-plane
+			ciWorkerNodeSrc = ovnHaWorkerNode
+		}
+		localVtepIP, err := runCommand("docker", "inspect", "-f", "{{ .NetworkSettings.IPAddress }}", ciWorkerNodeSrc)
+		if err != nil {
+			framework.Failf("failed to get the node ip address from node %s %v", ciWorkerNodeSrc, err)
+		}
+		localVtepIP = strings.TrimSuffix(localVtepIP, "\n")
+		if ip := net.ParseIP(localVtepIP); ip == nil {
+			framework.Failf("Unable to retrieve a valid address from container %s with inspect output of %s", ciWorkerNodeSrc, localVtepIP)
+		}
+		framework.Logf("the pod side vtep node is %s and the ip %s", ciWorkerNodeSrc, localVtepIP)
+		// retrieve the pod cidr for the worker node
+		jsonFlag := "jsonpath='{.metadata.annotations.k8s\\.ovn\\.org/node-subnets}'"
+		kubectlOut, err := framework.RunKubectl("get", "node", ciWorkerNodeSrc, "-o", jsonFlag)
+		if err != nil {
+			framework.Failf("Error retrieving the pod cidr from %s %v", ciWorkerNodeSrc, err)
+		}
+		// strip the apostrophe from stdout and parse the pod cidr
+		annotation := strings.Replace(kubectlOut, "'", "", -1)
+		defaultSubnet := make(map[string]string)
+		if err := json.Unmarshal([]byte(annotation), &defaultSubnet); err != nil {
+			framework.Failf("Error parsing the pod cidr from %s %v", ciWorkerNodeSrc, err)
+		}
+		podCIDR := defaultSubnet["default"]
+		framework.Logf("the pod cidr for node %s is %s", ciWorkerNodeSrc, podCIDR)
+		// setup the new container to emulate a gateway with routes, vtep and a loopback interface acting as the gateway
+		_, err = runCommand("docker", "exec", gwContainerNameAlt1, "ip", "link", "add", "vxlan0", "type", "vxlan", "dev",
+			"eth0", "id", "4097", "dstport", vxlanPort, "remote", localVtepIP)
+		if err != nil {
+			framework.Failf("failed to create the vxlan interface on the test container: %v", err)
+		}
+		_, err = runCommand("docker", "exec", gwContainerNameAlt1, "ip", "link", "set", "vxlan0", "up")
+		if err != nil {
+			framework.Failf("failed to enable the vxlan interface on the test container: %v", err)
+		}
+		_, err = runCommand("docker", "exec", gwContainerNameAlt1, "ip", "address", "add", extGWCidrAlt1, "dev", "lo")
+		if err != nil {
+			framework.Failf("failed to add the external gateway ip to dev lo on the test container: %v", err)
+		}
+		_, err = runCommand("docker", "exec", gwContainerNameAlt1, "ip", "route", "add", podCIDR, "dev", "vxlan0")
+		if err != nil {
+			framework.Failf("failed to add the pod route on the test container: %v", err)
+		}
+		// Create the pod that will be used as the source for the connectivity test
+		createGenericPod(f, srcPingPodName, ciWorkerNodeSrc, command)
+		// There is a condition with e2e WaitForPodNotPending that returns ready
+		// before calling for the IP address will succeed. This simply adds some retries.
+		for i := 1; i < getPodIPRetry; i++ {
+			pingSrc, err = getPodAddress(srcPingPodName, f.Namespace.Name)
+			if err != nil {
+				framework.Logf("Warning unable to query the test pod on node %s %v", ciWorkerNodeSrc, err)
+			}
+			validIP = net.ParseIP(pingSrc)
+			if validIP != nil {
+				framework.Logf("Source pod is %s is %s", srcPingPodName, pingSrc)
+				break
+			}
+			time.Sleep(time.Second * 3)
+			framework.Logf("Retry attempt %d to get pod IP from initializing pod %s", i, srcPingPodName)
+		}
+		// Fail the test if no address is ever retrieved
+		if validIP == nil {
+			framework.Failf("Warning: Failed to get an IP for the source pod %s, test will fail", srcPingPodName)
+		}
+		time.Sleep(time.Second * 15)
+		// Verify the initial gateway is reachable from the new pod
+		By(fmt.Sprintf("Verifying connectivity to the updated annotation and initial external gateway %s and vtep %s", extGwAlt1, exVtepIpAlt1))
+		kubectlOut, err = framework.RunKubectl("exec", srcPingPodName, frameworkNsFlag, testContainerFlag, "--", "ping", "-w", "40", extGwAlt1)
+		if err != nil {
+			framework.Failf("Failed to ping the first gateway %s from container %s on node %s: %v", extGwAlt1, ovnContainer, ovnWorkerNode, err)
+		}
+		// start the container that will act as a new external gateway that the tests will be updated to use
+		_, err = runCommand("docker", "run", "-itd", "--privileged", "--name", gwContainerNameAlt2, "centos")
+		if err != nil {
+			framework.Failf("failed to start external gateway test container %s: %v", gwContainerNameAlt2, err)
+		}
+		// retrieve the container ip of the external gateway container
+		exVtepIpAlt2, err := runCommand("docker", "inspect", "-f", "{{ .NetworkSettings.IPAddress }}", gwContainerNameAlt2)
+		if err != nil {
+			framework.Failf("failed to start external gateway test container: %v", err)
+		}
+		// trim newline from the inspect output
+		exVtepIpAlt2 = strings.TrimSuffix(exVtepIpAlt2, "\n")
+		if ip := net.ParseIP(localVtepIP); ip == nil {
+			framework.Failf("Unable to retrieve a valid address from container %s with inspect output of %s", gwContainerNameAlt2, localVtepIP)
+		}
+		// override the annotation in the test namespace with the new vtep and gateway
+		annotationFlagAlt := fmt.Sprintf("k8s.ovn.org/hybrid-overlay-external-gw=%s", extGwAlt2)
+		annotationVtepFlagAlt := fmt.Sprintf("k8s.ovn.org/hybrid-overlay-vtep=%s", exVtepIpAlt2)
+		framework.Logf("Annotating the external gateway test namespace to a new container vtep:%s gw:%s ", exVtepIpAlt2, extGwAlt2)
+		framework.RunKubectlOrDie("annotate", "namespace", f.Namespace.Name, annotationFlagAlt, "--overwrite")
+		framework.RunKubectlOrDie("annotate", "namespace", f.Namespace.Name, annotationVtepFlagAlt, "--overwrite")
+		// setup the new container to emulate a gateway with routes, vtep and a loopback interface acting as the gateway
+		_, err = runCommand("docker", "exec", gwContainerNameAlt2, "ip", "link", "add", "vxlan0", "type", "vxlan", "dev",
+			"eth0", "id", "4097", "dstport", vxlanPort, "remote", localVtepIP)
+		if err != nil {
+			framework.Failf("failed to create the vxlan interface on the test container: %v", err)
+		}
+		_, err = runCommand("docker", "exec", gwContainerNameAlt2, "ip", "link", "set", "vxlan0", "up")
+		if err != nil {
+			framework.Failf("failed to enable the vxlan interface on the test container: %v", err)
+		}
+		_, err = runCommand("docker", "exec", gwContainerNameAlt2, "ip", "address", "add", extGWCidrAlt2, "dev", "lo")
+		if err != nil {
+			framework.Failf("failed to add the external gateway ip to dev lo on the test container: %v", err)
+		}
+		_, err = runCommand("docker", "exec", gwContainerNameAlt2, "ip", "route", "add", podCIDR, "dev", "vxlan0")
+		if err != nil {
+			framework.Failf("failed to add the pod route on the test container: %v", err)
+		}
+		time.Sleep(time.Second * 40)
+		// Verify the updated gateway is reachable from the initial pod
+		By(fmt.Sprintf("Verifying connectivity to the updated annotation and new external gateway %s and vtep %s", extGwAlt2, exVtepIpAlt2))
+		kubectlOut, err = framework.RunKubectl("exec", srcPingPodName, frameworkNsFlag, testContainerFlag, "--", "ping", "-w", "40", extGwAlt2)
+		if err != nil {
+			framework.Failf("Failed to ping the second gateway %s from container %s on node %s: %v", extGwAlt2, ovnContainer, ovnWorkerNode, err)
+		}
 	})
 })
