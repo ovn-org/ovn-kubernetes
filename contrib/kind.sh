@@ -27,7 +27,7 @@ usage()
 {
     echo "usage: kind.sh [[[-cf|--config-file <file>] [-kt|keep-taint] [-ha|--ha-enabled]"
     echo "                 [-ii|--install-ingress] [-n4|--no-ipv4] [-i6|--ipv6]"
-    echo "                 [-wk|--num-workers <num>]] | [-h]]"
+    echo "                 [-wk|--num-workers <num>]] [-sm|--shared-mode] | [-h]]"
     echo ""
     echo "-cf | --config-file          Name of the KIND J2 configuration file."
     echo "                             DEFAULT: ./kind.yaml.j2"
@@ -40,6 +40,7 @@ usage()
     echo "-i6 | --ipv6                 Enable IPv6. DEFAULT: IPv6 Disabled."
     echo "-wk | --num-workers          Number of worker nodes. DEFAULT: HA - 2 worker"
     echo "                             nodes and no HA - 0 worker nodes."
+    echo "-sm | --shared-mode          Enable shared gateway mode. DEFAULT: local."
     echo ""
 } 
 
@@ -73,6 +74,8 @@ parse_args()
                                        fi
                                        KIND_NUM_WORKER=$1
                                        ;;
+            -sm | --shared-mode )      OVN_SHARED_GATEWAY_MODE=true
+                                       ;;
             -h | --help )              usage
                                        exit
                                        ;;
@@ -94,6 +97,7 @@ print_params()
      echo "KIND_IPV4_SUPPORT = $KIND_IPV4_SUPPORT"
      echo "KIND_IPV6_SUPPORT = $KIND_IPV6_SUPPORT"
      echo "KIND_NUM_WORKER = $KIND_NUM_WORKER"
+     echo "OVN_SHARED_GATEWAY_MODE = $OVN_SHARED_GATEWAY_MODE"
      echo ""
 }
 
@@ -102,6 +106,7 @@ parse_args $*
 # Set default values
 KIND_CLUSTER_NAME=${KIND_CLUSTER_NAME:-ovn}
 K8S_VERSION=${K8S_VERSION:-v1.18.2}
+OVN_SHARED_GATEWAY_MODE=${OVN_SHARED_GATEWAY_MODE:-false}
 KIND_INSTALL_INGRESS=${KIND_INSTALL_INGRESS:-false}
 KIND_HA=${KIND_HA:-false}
 KIND_CONFIG=${KIND_CONFIG:-./kind.yaml.j2}
@@ -186,6 +191,11 @@ else
   exit 1
 fi
 
+OVN_GATEWAY_MODE="local"
+if [ "$OVN_SHARED_GATEWAY_MODE" == true ]; then
+  OVN_GATEWAY_MODE="shared"
+fi
+
 # Output of the j2 command
 KIND_CONFIG_LCL=./kind.yaml
 
@@ -222,7 +232,7 @@ pushd ../dist/images
 sudo cp -f ../../go-controller/_output/go/bin/* .
 echo "ref: $(git rev-parse  --symbolic-full-name HEAD)  commit: $(git rev-parse  HEAD)" > git_info
 docker build -t ovn-daemonset-f:dev -f Dockerfile.fedora .
-./daemonset.sh --image=docker.io/library/ovn-daemonset-f:dev --net-cidr=${NET_CIDR} --svc-cidr=${SVC_CIDR} --gateway-mode="local" --k8s-apiserver=https://[${API_IP}]:11337 --ovn-master-count=${KIND_NUM_MASTER} --kind --master-loglevel=5
+./daemonset.sh --image=docker.io/library/ovn-daemonset-f:dev --net-cidr=${NET_CIDR} --svc-cidr=${SVC_CIDR} --gateway-mode=${OVN_GATEWAY_MODE} --k8s-apiserver=https://[${API_IP}]:11337 --ovn-master-count=${KIND_NUM_MASTER} --kind --master-loglevel=5
 popd
 kind load docker-image ovn-daemonset-f:dev --name ${KIND_CLUSTER_NAME}
 pushd ../dist/yaml

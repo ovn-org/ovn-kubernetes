@@ -132,11 +132,17 @@ jobs:
            name: "HA"
          - enabled: "false"
            name: "noHA"
+        shared-gateway-mode:
+         - enabled: "true"
+           name: "shared"
+         - enabled: "false"
+           name: "local"
     needs: k8s
     env:
-      JOB_NAME: "${{ matrix.target.shard }}-${{ matrix.ha.name }}"
+      JOB_NAME: "${{ matrix.target.shard }}-${{ matrix.ha.name }}-${{ matrix.shared-gateway-mode.name }}"
       KIND_HA: "${{ matrix.ha.enabled }}"
       OVN_HYBRID_OVERLAY_ENABLE: "${{ matrix.target.hybrid-overlay }}"
+      OVN_SHARED_GATEWAY_MODE: "${{ matrix.shared-gateway-mode.enabled }}"
     steps:
 
     - name: Free up disk space
