@@ -143,6 +143,7 @@ func (nsInfo *namespaceInfo) updateNamespacePortGroup(ns string) error {
 		nsInfo.portGroupUUID = portGroupUUID
 	} else {
 		deletePortGroup(hashedPortGroup(ns))
+		nsInfo.portGroupUUID = ""
 	}
 	return nil
 }
