@@ -284,8 +284,9 @@ var _ = Describe("test e2e inter-node connectivity between worker nodes hybrid o
 		ovnHaWorkerNode2 string = "ovn-control-plane2"
 		ovnHaWorkerNode3 string = "ovn-control-plane3"
 		ovnContainer     string = "ovnkube-node"
-		gwContainerName  string = "gw-test-container"
+		gwContainerName  string = "gw-test-container-internode"
 		jsonFlag         string = "-o=jsonpath='{.items..metadata.name}'"
+		getPodIPRetry    int    = 20
 	)
 	var (
 		haMode    bool
@@ -343,6 +344,14 @@ var _ = Describe("test e2e inter-node connectivity between worker nodes hybrid o
 		}
 	})
 
+	AfterEach(func() {
+		// tear down the container simulating the gateway
+		_, err := runCommand("docker", "rm", "-f", gwContainerName)
+		if err != nil {
+			framework.Failf("failed to delete the gateway test container %v", err)
+		}
+	})
+
 	It("Should validate connectivity between pods with hybrid overlay on separate worker nodes and ensure br-ext is not traversed", func() {
 		var err error
 		var validIP net.IP
@@ -350,7 +359,6 @@ var _ = Describe("test e2e inter-node connectivity between worker nodes hybrid o
 		var ciWorkerNodeSrc string
 		var ciWorkerNodeDst string
 		dstPingPodName := "e2e-dst-ping-pod"
-		getPodIPRetry := 15
 		command := []string{"bash", "-c", "sleep 20000"}
 
 		// non-ha ci mode runs a named set of nodes with a prefix of ovn-worker
@@ -424,6 +432,7 @@ var _ = Describe("test e2e inter-node connectivity between worker nodes", func()
 		ovnHaWorkerNode3 string = "ovn-control-plane3"
 		ovnContainer     string = "ovnkube-node"
 		jsonFlag         string = "-o=jsonpath='{.items..metadata.name}'"
+		getPodIPRetry    int    = 20
 	)
 
 	var (
@@ -464,7 +473,6 @@ var _ = Describe("test e2e inter-node connectivity between worker nodes", func()
 		var ciWorkerNodeSrc string
 		var ciWorkerNodeDst string
 		dstPingPodName := "e2e-dst-ping-pod"
-		getPodIPRetry := 15
 		command := []string{"bash", "-c", "sleep 20000"}
 		// non-ha ci mode runs a named set of nodes with a prefix of ovn-worker
 		ciWorkerNodeSrc = ovnWorkerNode
@@ -641,14 +649,20 @@ var _ = Describe("e2e external gateway validation", func() {
 // Validate pods can reach the initial gateway and then update the namespace
 // annotation to point to a second container also emulating the external gateway
 var _ = Describe("e2e multiple external gateway update validation", func() {
+	const (
+		svcname             string = "multiple-externalgw"
+		extGwAlt1           string = "10.249.1.1"
+		extGwAlt2           string = "10.249.2.1"
+		ovnNs               string = "ovn-kubernetes"
+		ovnWorkerNode       string = "ovn-worker"
+		ovnHaWorkerNode     string = "ovn-control-plane2"
+		ovnContainer        string = "ovnkube-node"
+		gwContainerNameAlt1 string = "gw-test-container-alt"
+		gwContainerNameAlt2 string = "gw-test-container-alt2"
+		getPodIPRetry       int    = 20
+	)
+
 	var haMode bool
-	svcname := "multiple-externalgw"
-	ovnNs := "ovn-kubernetes"
-	ovnWorkerNode := "ovn-worker"
-	ovnHaWorkerNode := "ovn-control-plane2"
-	ovnContainer := "ovnkube-node"
-	gwContainerNameAlt1 := "gw-test-container-alt"
-	gwContainerNameAlt2 := "gw-test-container-alt2"
 	ovnNsFlag := fmt.Sprintf("--namespace=%s", ovnNs)
 	f := framework.NewDefaultFramework(svcname)
 
@@ -686,11 +700,9 @@ var _ = Describe("e2e multiple external gateway update validation", func() {
 	})
 
 	It("Should validate connectivity before and after updating the namespace annotation to a new vtep and external gateway", func() {
-		const extGwAlt1 = "10.249.1.1"
-		const extGwAlt2 = "10.249.2.1"
+
 		var pingSrc string
 		var validIP net.IP
-		getPodIPRetry := 15
 		extGWCidrAlt1 := fmt.Sprintf("%s/24", extGwAlt1)
 		extGWCidrAlt2 := fmt.Sprintf("%s/24", extGwAlt2)
 		srcPingPodName := "e2e-exgw-src-ping-pod"
