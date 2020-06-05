@@ -565,13 +565,8 @@ func (n *NodeController) ensureHybridOverlayBridge(node *kapi.Node) error {
 	n.drMAC = portMAC
 
 	// n.drIP is always 3rd address in the subnet
-	// TODO add support for ipv6 later
-	portIP := subnet.IP.To4()
-	if portIP == nil {
-		return fmt.Errorf("failed to parse local node subnet: %s", subnet.IP)
-	}
-	portIP[3] += 3
-	n.drIP = portIP
+	hybridOverlayIfAddr := util.GetNodeHybridOverlayIfAddr(subnet)
+	n.drIP = hybridOverlayIfAddr.IP
 
 	_, stderr, err := util.RunOVSVsctl("--may-exist", "add-br", extBridgeName,
 		"--", "set", "Bridge", extBridgeName, "fail_mode=secure")
@@ -678,13 +673,12 @@ func (n *NodeController) ensureHybridOverlayBridge(node *kapi.Node) error {
 			return fmt.Errorf("failed to lookup link %s: %v", util.K8sMgmtIntfName, err)
 		}
 		mgmtPortMAC := mgmtPortLink.Attrs().HardwareAddr
-		hybridOverlayIfAddr := util.GetNodeHybridOverlayIfAddr(subnet)
 		for _, clusterEntry := range config.HybridOverlay.ClusterSubnets {
 			route := &netlink.Route{
 				Dst:       clusterEntry.CIDR,
 				LinkIndex: mgmtPortLink.Attrs().Index,
 				Scope:     netlink.SCOPE_UNIVERSE,
-				Gw:        hybridOverlayIfAddr.IP,
+				Gw:        n.drIP,
 			}
 			err := netlink.RouteAdd(route)
 			if err != nil && !os.IsExist(err) {
