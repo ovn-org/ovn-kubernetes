@@ -7,6 +7,7 @@ import (
 
 	hotypes "github.com/ovn-org/ovn-kubernetes/go-controller/hybrid-overlay/pkg/types"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
+
 	kapi "k8s.io/api/core/v1"
 	utilwait "k8s.io/apimachinery/pkg/util/wait"
 	"k8s.io/klog"
@@ -47,8 +48,7 @@ func (oc *Controller) addPodToNamespace(ns string, portInfo *lpInfo) error {
 	}
 	defer nsInfo.Unlock()
 
-	// DUAL-STACK FIXME: handle multiple IPs
-	if err := nsInfo.addressSet.AddIP(portInfo.ips[0]); err != nil {
+	if err := nsInfo.addressSet.AddIPs(portInfo.ips); err != nil {
 		return err
 	}
 
@@ -70,8 +70,7 @@ func (oc *Controller) deletePodFromNamespace(ns string, portInfo *lpInfo) error 
 	}
 	defer nsInfo.Unlock()
 
-	// DUAL-STACK FIXME: handle multiple IPs
-	if err := nsInfo.addressSet.DeleteIP(portInfo.ips[0]); err != nil {
+	if err := nsInfo.addressSet.DeleteIPs(portInfo.ips); err != nil {
 		return err
 	}
 
