@@ -57,8 +57,8 @@ func gatewayInit(nodeName string, clusterIPSubnet []*net.IPNet, hostSubnets []*n
 			joinSwitch, stdout, stderr, err)
 	}
 
-	gwSwitchPort := "jtor-" + gatewayRouter
-	gwRouterPort := "rtoj-" + gatewayRouter
+	gwSwitchPort := joinSwitchToGwRouterPrefix + gatewayRouter
+	gwRouterPort := gwRouterToJoinSwitchPrefix + gatewayRouter
 	stdout, stderr, err = util.RunOVNNbctl(
 		"--", "--may-exist", "lsp-add", joinSwitch, gwSwitchPort,
 		"--", "set", "logical_switch_port", gwSwitchPort, "type=router", "options:router-port="+gwRouterPort,
@@ -80,8 +80,8 @@ func gatewayInit(nodeName string, clusterIPSubnet []*net.IPNet, hostSubnets []*n
 	}
 
 	// jtod/dtoj - patch ports that connect the per-node join switch to distributed router
-	drSwitchPort := "jtod-" + nodeName
-	drRouterPort := "dtoj-" + nodeName
+	drSwitchPort := joinSwitchToDistRouterPrefix + nodeName
+	drRouterPort := distRouterToJoinSwitchPrefix + nodeName
 
 	// Connect the per-node join switch to the distributed router.
 	stdout, stderr, err = util.RunOVNNbctl(
@@ -216,15 +216,15 @@ func gatewayInit(nodeName string, clusterIPSubnet []*net.IPNet, hostSubnets []*n
 	// direct addition of logical_router_port with --may-exists will not work since the MAC
 	// has changed. So, we need to delete that port, if it exists, and it back.
 	cmdArgs = []string{
-		"--", "--if-exists", "lrp-del", "rtoe-" + gatewayRouter,
-		"--", "lrp-add", gatewayRouter, "rtoe-" + gatewayRouter,
+		"--", "--if-exists", "lrp-del", gwRouterToExtSwitchPrefix + gatewayRouter,
+		"--", "lrp-add", gatewayRouter, gwRouterToExtSwitchPrefix + gatewayRouter,
 		l3GatewayConfig.MACAddress.String(),
 	}
 	for _, ip := range l3GatewayConfig.IPAddresses {
 		cmdArgs = append(cmdArgs, ip.String())
 	}
 	cmdArgs = append(cmdArgs,
-		"--", "set", "logical_router_port", "rtoe-"+gatewayRouter,
+		"--", "set", "logical_router_port", gwRouterToExtSwitchPrefix+gatewayRouter,
 		"external-ids:gateway-physical-ip=yes")
 
 	stdout, stderr, err = util.RunOVNNbctl(cmdArgs...)
@@ -235,9 +235,9 @@ func gatewayInit(nodeName string, clusterIPSubnet []*net.IPNet, hostSubnets []*n
 
 	// Connect the external_switch to the router.
 	stdout, stderr, err = util.RunOVNNbctl("--", "--may-exist", "lsp-add",
-		externalSwitch, "etor-"+gatewayRouter, "--", "set",
-		"logical_switch_port", "etor-"+gatewayRouter, "type=router",
-		"options:router-port=rtoe-"+gatewayRouter,
+		externalSwitch, extSwitchToGwRouterPrefix+gatewayRouter, "--", "set",
+		"logical_switch_port", extSwitchToGwRouterPrefix+gatewayRouter, "type=router",
+		"options:router-port="+gwRouterToExtSwitchPrefix+gatewayRouter,
 		"addresses="+"\""+l3GatewayConfig.MACAddress.String()+"\"")
 	if err != nil {
 		return fmt.Errorf("failed to add logical port to router %s, stdout: %q, "+
@@ -312,7 +312,7 @@ func addDistributedGWPort() error {
 	}
 
 	// add a distributed gateway port to the distributed router
-	dgpName := "rtos-" + nodeLocalSwitch
+	dgpName := routerToSwitchPrefix + nodeLocalSwitch
 	dgpIP := net.ParseIP(util.V4NodeLocalDistributedGwPortIP)
 	nbctlArgs := []string{
 		"--may-exist", "lrp-add", ovnClusterRouter, dgpName, util.IPAddrToHWAddr(dgpIP).String(),
@@ -442,7 +442,7 @@ func (oc *Controller) addNodeLocalNatEntries(node *kapi.Node, mgmtPortMAC, mgmtP
 		}()
 	}
 
-	mgmtPortName := "k8s-" + node.Name
+	mgmtPortName := util.K8sPrefix + node.Name
 	stdout, stderr, err := util.RunOVNNbctl("--may-exist", "lr-nat-add", ovnClusterRouter, "dnat_and_snat",
 		externalIP.String(), mgmtPortIP, mgmtPortName, mgmtPortMAC)
 	if err != nil {

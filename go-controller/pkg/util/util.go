@@ -16,6 +16,7 @@ import (
 )
 
 const (
+	K8sPrefix = "k8s-"
 	// K8sMgmtIntfName name to be used as an OVS internal port on the node
 	K8sMgmtIntfName = "ovn-k8s-mp0"
 
@@ -51,9 +52,9 @@ func StringArg(context *cli.Context, name string) (string, error) {
 // GetLegacyK8sMgmtIntfName returns legacy management ovs-port name
 func GetLegacyK8sMgmtIntfName(nodeName string) string {
 	if len(nodeName) > 11 {
-		return "k8s-" + (nodeName[:11])
+		return K8sPrefix + (nodeName[:11])
 	}
-	return "k8s-" + nodeName
+	return K8sPrefix + nodeName
 }
 
 // GetNodeChassisID returns the machine's OVN chassis ID
@@ -97,7 +98,7 @@ func UpdateNodeSwitchExcludeIPs(nodeName string, subnet *net.IPNet) error {
 	lines := strings.Split(stdout, "\n")
 	for _, line := range lines {
 		line = strings.TrimSpace(line)
-		if strings.Contains(line, "(k8s-"+nodeName+")") {
+		if strings.Contains(line, "("+K8sPrefix+nodeName+")") {
 			haveManagementPort = true
 		} else if strings.Contains(line, "("+houtil.GetHybridOverlayPortName(nodeName)+")") {
 			// we always need to set to false because we do not reserve the IP on the LSP for HO
