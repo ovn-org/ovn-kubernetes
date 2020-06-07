@@ -17,9 +17,17 @@ const (
 	// ovnClusterRouter is the name of the distributed router
 	ovnClusterRouter = "ovn_cluster_router"
 
-	joinSwitchPrefix     = "join_"
-	externalSwitchPrefix = "ext_"
-	gwRouterPrefix       = "GR_"
+	joinSwitchPrefix             = "join_"
+	externalSwitchPrefix         = "ext_"
+	gwRouterPrefix               = "GR_"
+	routerToSwitchPrefix         = "rtos-"
+	switchToRouterPrefix         = "stor-"
+	joinSwitchToGwRouterPrefix   = "jtor-"
+	gwRouterToJoinSwitchPrefix   = "rtoj-"
+	distRouterToJoinSwitchPrefix = "dtoj-"
+	joinSwitchToDistRouterPrefix = "jtod-"
+	extSwitchToGwRouterPrefix    = "etor-"
+	gwRouterToExtSwitchPrefix    = "rtoe-"
 
 	nodeLocalSwitch          = "node_local_switch"
 	nodeSubnetPolicyPriority = "1004"
