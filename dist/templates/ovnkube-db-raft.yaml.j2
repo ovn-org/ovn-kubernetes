@@ -7,13 +7,13 @@ metadata:
 spec:
   ports:
   - name: north
-    port: 6641
+    port: {{ ovn_nb_port }}
     protocol: TCP
-    targetPort: 6641
+    targetPort: {{ ovn_nb_port }}
   - name: south
-    port: 6642
+    port: {{ ovn_sb_port }}
     protocol: TCP
-    targetPort: 6642
+    targetPort: {{ ovn_sb_port }}
   sessionAffinity: None
   clusterIP: None
   type: ClusterIP
@@ -162,6 +162,10 @@ spec:
           value: "{{ ovn_ssl_en }}"
         - name: OVN_NB_RAFT_ELECTION_TIMER
           value: "{{ ovn_nb_raft_election_timer }}"
+        - name: OVN_NB_PORT
+          value: "{{ ovn_nb_port }}"
+        - name: OVN_NB_RAFT_PORT
+          value: "{{ ovn_nb_raft_port }}"
       # end of container
 
       # sb-ovsdb - v3
@@ -233,6 +237,10 @@ spec:
           value: "{{ ovn_ssl_en }}"
         - name: OVN_SB_RAFT_ELECTION_TIMER
           value: "{{ ovn_sb_raft_election_timer }}"
+        - name: OVN_SB_PORT
+          value: "{{ ovn_sb_port }}"
+        - name: OVN_SB_RAFT_PORT
+          value: "{{ ovn_sb_raft_port }}"
       # end of container
 
       # db-metrics-exporter - v3
