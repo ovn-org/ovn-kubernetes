@@ -58,11 +58,8 @@ case "$SHARD" in
 		# all tests that have P as the sixth letter after the N
 		GINKGO_ARGS="${GINKGO_ARGS} "'--ginkgo.focus=\[sig-network\]\s[Nn].{6}[Pp].*$'
 		;;
-	shard-s)
-		GINKGO_ARGS="${GINKGO_ARGS} "'--ginkgo.focus=\[sig-network\]\s[Ss].*'
-		;;
 	shard-other)
-		GINKGO_ARGS="${GINKGO_ARGS} "'--ginkgo.focus=\[sig-network\]\s[^NnSs].*'
+		GINKGO_ARGS="${GINKGO_ARGS} "'--ginkgo.focus=\[sig-network\]\s[^Nn].*'
 		;;
 	shard-test)
 		TEST_REGEX_REPR=$(echo ${@:2} | sed 's/ /\\s/g')

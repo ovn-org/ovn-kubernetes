@@ -29,9 +29,6 @@ the shards (which may change in the future):
   - All E2E tests that match `[sig-network] N` and DO have a P as their sixth
   letter after the N. (i.e. Roughly all `[sig-network] NetworkPolicy ...`
   tests.)
-- shard-s
-  - All E2E tests that match `[sig-network] S`. (i.e. Roughly all
-  `[sig-network] Services ...` tests.)
 - shard-other
   - All remaining E2E tests that didn't match above.
 - shard-test
@@ -207,7 +204,6 @@ $ cd $GOPATH/src/github.com/ovn-org/ovn-kubernetes
 $ pushd test
 $ make shard-n
 $ make shard-np
-$ make shard-s
 $ make shard-other
 $ GITHUB_WORKSPACE=$GOPATH/src/github.com/ovn-org/ovn-kubernetes make control-plane
 $ popd
