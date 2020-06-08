@@ -107,6 +107,18 @@ while [ "$1" != "" ]; do
   --ovn-master-count)
     OVN_MASTER_COUNT=$VALUE
     ;;
+  --ovn-nb-port)
+    OVN_NB_PORT=$VALUE
+    ;;
+  --ovn-sb-port)
+    OVN_SB_PORT=$VALUE
+    ;;
+  --ovn-nb-raft-port)
+    OVN_NB_RAFT_PORT=$VALUE
+    ;;
+  --ovn-sb-raft-port)
+    OVN_SB_RAFT_PORT=$VALUE
+    ;;
   *)
     echo "WARNING: unknown parameter \"$PARAM\""
     exit 1
@@ -166,6 +178,14 @@ ovn_master_count=${OVN_MASTER_COUNT:-"1"}
 echo "ovn_master_count: ${ovn_master_count}"
 ovn_remote_probe_interval=${OVN_REMOTE_PROBE_INTERVAL:-"100000"}
 echo "ovn_remote_probe_interval: ${ovn_remote_probe_interval}"
+ovn_nb_port=${OVN_NB_PORT:-6641}
+echo "ovn_nb_port: ${ovn_nb_port}"
+ovn_sb_port=${OVN_SB_PORT:-6642}
+echo "ovn_sb_port: ${ovn_sb_port}"
+ovn_nb_raft_port=${OVN_NB_RAFT_PORT:-6643}
+echo "ovn_nb_raft_port: ${ovn_nb_raft_port}"
+ovn_sb_raft_port=${OVN_SB_RAFT_PORT:-6644}
+echo "ovn_sb_raft_port: ${ovn_sb_raft_port}"
 
 ovn_image=${image} \
   ovn_image_pull_policy=${image_pull_policy} \
@@ -196,6 +216,8 @@ ovn_image=${image} \
   ovn_loglevel_nb=${ovn_loglevel_nb} \
   ovn_loglevel_sb=${ovn_loglevel_sb} \
   ovn_ssl_en=${ovn_ssl_en} \
+  ovn_nb_port=${ovn_nb_port} \
+  ovn_sb_port=${ovn_sb_port} \
   j2 ../templates/ovnkube-db.yaml.j2 -o ../yaml/ovnkube-db.yaml
 
 ovn_db_vip_image=${ovn_db_vip_image} \
@@ -212,6 +234,10 @@ ovn_image=${image} \
   ovn_ssl_en=${ovn_ssl_en} \
   ovn_nb_raft_election_timer=${ovn_nb_raft_election_timer} \
   ovn_sb_raft_election_timer=${ovn_sb_raft_election_timer} \
+  ovn_nb_port=${ovn_nb_port} \
+  ovn_sb_port=${ovn_sb_port} \
+  ovn_nb_raft_port=${ovn_nb_raft_port} \
+  ovn_sb_raft_port=${ovn_sb_raft_port} \
   j2 ../templates/ovnkube-db-raft.yaml.j2 -o ../yaml/ovnkube-db-raft.yaml
 
 # ovn-setup.yaml

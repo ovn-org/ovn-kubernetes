@@ -7,13 +7,13 @@ metadata:
 spec:
   ports:
   - name: north
-    port: 6641
+    port: {{ ovn_nb_port }}
     protocol: TCP
-    targetPort: 6641
+    targetPort: {{ ovn_nb_port }}
   - name: south
-    port: 6642
+    port: {{ ovn_sb_port }}
     protocol: TCP
-    targetPort: 6642
+    targetPort: {{ ovn_sb_port }}
   sessionAffinity: None
   clusterIP: None
   type: ClusterIP
@@ -117,6 +117,8 @@ spec:
               fieldPath: status.hostIP
         - name: OVN_SSL_ENABLE
           value: "{{ ovn_ssl_en }}"
+        - name: OVN_NB_PORT
+          value: "{{ ovn_nb_port }}"
         readinessProbe:
           exec:
             command: ["/usr/bin/ovn-kube-util", "readiness-probe", "-t", "ovnnb-db"]
@@ -178,6 +180,8 @@ spec:
               fieldPath: status.hostIP
         - name: OVN_SSL_ENABLE
           value: "{{ ovn_ssl_en }}"
+        - name: OVN_SB_PORT
+          value: "{{ ovn_sb_port }}"
         readinessProbe:
           exec:
             command: ["/usr/bin/ovn-kube-util", "readiness-probe", "-t", "ovnsb-db"]
