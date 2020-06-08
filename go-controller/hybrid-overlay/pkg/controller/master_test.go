@@ -20,8 +20,6 @@ import (
 	. "github.com/onsi/gomega"
 )
 
-const hoNodeCliArg string = "-no-hostsubnet-nodes=" + v1.LabelOSStable + "=windows"
-
 func addGetPortAddressesCmds(fexec *ovntest.FakeExec, nodeName, hybMAC, hybIP string) {
 	addresses := hybMAC + " " + hybIP
 	addresses = strings.TrimSpace(addresses)
