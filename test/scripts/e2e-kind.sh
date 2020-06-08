@@ -50,16 +50,13 @@ SKIPPED_TESTS=$(echo "${SKIPPED_TESTS}" | sed -e '/^\($\|#\)/d' -e 's/ /\\s/g' |
 GINKGO_ARGS="--num-nodes=3 --ginkgo.skip=${SKIPPED_TESTS} --disable-log-dump=false"
 
 case "$SHARD" in
-	shard-n)
-		# all tests that don't have P as their sixth letter after the N
-		GINKGO_ARGS="${GINKGO_ARGS} "'--ginkgo.focus=\[sig-network\]\s[Nn](.{6}[^Pp].*|.{0,6}$)'
+	shard-n-other)
+		# all tests that don't have P as their sixth letter after the N, and all other tests
+		GINKGO_ARGS="${GINKGO_ARGS} "'--ginkgo.focus=\[sig-network\]\s([Nn](.{6}[^Pp].*|.{0,6}$)|[^Nn].*)'
 		;;
 	shard-np)
 		# all tests that have P as the sixth letter after the N
 		GINKGO_ARGS="${GINKGO_ARGS} "'--ginkgo.focus=\[sig-network\]\s[Nn].{6}[Pp].*$'
-		;;
-	shard-other)
-		GINKGO_ARGS="${GINKGO_ARGS} "'--ginkgo.focus=\[sig-network\]\s[^Nn].*'
 		;;
 	shard-test)
 		TEST_REGEX_REPR=$(echo ${@:2} | sed 's/ /\\s/g')

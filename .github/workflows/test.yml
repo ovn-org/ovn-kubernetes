@@ -117,11 +117,9 @@ jobs:
       fail-fast: false
       matrix:
         target:
-          - shard: shard-n
+          - shard: shard-n-other
             hybrid-overlay: false
           - shard: shard-np
-            hybrid-overlay: false
-          - shard: shard-other
             hybrid-overlay: false
           - shard: control-plane
             hybrid-overlay: true
