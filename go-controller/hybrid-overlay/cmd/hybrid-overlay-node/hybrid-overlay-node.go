@@ -87,14 +87,12 @@ func runHybridOverlay(ctx *cli.Context) error {
 		return err
 	}
 
-	stopChan := make(chan struct{})
-	defer close(stopChan)
-
-	factory, err := factory.NewWatchFactory(clientset, stopChan)
+	factory, err := factory.NewWatchFactory(clientset)
 	if err != nil {
 		return err
 	}
 
+	stopChan := make(chan struct{})
 	kube := &kube.Kube{KClient: clientset}
 	if err := controller.StartNode(nodeName, kube, factory, stopChan); err != nil {
 		return err
@@ -102,6 +100,7 @@ func runHybridOverlay(ctx *cli.Context) error {
 
 	// run until cancelled
 	<-ctx.Context.Done()
-	stopChan <- struct{}{}
+	close(stopChan)
+	factory.Shutdown()
 	return nil
 }

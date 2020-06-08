@@ -204,7 +204,11 @@ func addGetPortAddressesCmds(fexec *ovntest.FakeExec, nodeName, hybMAC, hybIP st
 }
 
 var _ = Describe("Master Operations", func() {
-	var app *cli.App
+	var (
+		app      *cli.App
+		f        *factory.WatchFactory
+		stopChan chan struct{}
+	)
 
 	BeforeEach(func() {
 		// Restore global default values before each testcase
@@ -213,6 +217,13 @@ var _ = Describe("Master Operations", func() {
 		app = cli.NewApp()
 		app.Name = "test"
 		app.Flags = config.Flags
+
+		stopChan = make(chan struct{})
+	})
+
+	AfterEach(func() {
+		close(stopChan)
+		f.Shutdown()
 	})
 
 	It("creates logical network elements for a 2-node cluster", func() {
@@ -258,10 +269,8 @@ var _ = Describe("Master Operations", func() {
 			err = nodeAnnotator.Run()
 			Expect(err).NotTo(HaveOccurred())
 
-			stopChan := make(chan struct{})
-			f, err := factory.NewWatchFactory(fakeClient, stopChan)
+			f, err = factory.NewWatchFactory(fakeClient)
 			Expect(err).NotTo(HaveOccurred())
-			defer close(stopChan)
 
 			clusterController := NewOvnController(fakeClient, f, stopChan, newFakeAddressSetFactory())
 			Expect(clusterController).NotTo(BeNil())
@@ -343,10 +352,8 @@ var _ = Describe("Master Operations", func() {
 			err = nodeAnnotator.Run()
 			Expect(err).NotTo(HaveOccurred())
 
-			stopChan := make(chan struct{})
-			f, err := factory.NewWatchFactory(fakeClient, stopChan)
+			f, err = factory.NewWatchFactory(fakeClient)
 			Expect(err).NotTo(HaveOccurred())
-			defer close(stopChan)
 
 			clusterController := NewOvnController(fakeClient, f, stopChan, newFakeAddressSetFactory())
 			Expect(clusterController).NotTo(BeNil())
@@ -429,10 +436,8 @@ var _ = Describe("Master Operations", func() {
 			err = nodeAnnotator.Run()
 			Expect(err).NotTo(HaveOccurred())
 
-			stopChan := make(chan struct{})
-			f, err := factory.NewWatchFactory(fakeClient, stopChan)
+			f, err = factory.NewWatchFactory(fakeClient)
 			Expect(err).NotTo(HaveOccurred())
-			defer close(stopChan)
 
 			clusterController := NewOvnController(fakeClient, f, stopChan, newFakeAddressSetFactory())
 			Expect(clusterController).NotTo(BeNil())
@@ -612,10 +617,8 @@ subnet=%s
 			err = nodeAnnotator.Run()
 			Expect(err).NotTo(HaveOccurred())
 
-			stopChan := make(chan struct{})
-			f, err := factory.NewWatchFactory(fakeClient, stopChan)
+			f, err = factory.NewWatchFactory(fakeClient)
 			Expect(err).NotTo(HaveOccurred())
-			defer close(stopChan)
 
 			clusterController := NewOvnController(fakeClient, f, stopChan, newFakeAddressSetFactory())
 			Expect(clusterController).NotTo(BeNil())
@@ -645,7 +648,11 @@ subnet=%s
 })
 
 var _ = Describe("Gateway Init Operations", func() {
-	var app *cli.App
+	var (
+		app      *cli.App
+		f        *factory.WatchFactory
+		stopChan chan struct{}
+	)
 
 	const (
 		clusterIPNet string = "10.1.0.0"
@@ -659,6 +666,13 @@ var _ = Describe("Gateway Init Operations", func() {
 		app = cli.NewApp()
 		app.Name = "test"
 		app.Flags = config.Flags
+
+		stopChan = make(chan struct{})
+	})
+
+	AfterEach(func() {
+		close(stopChan)
+		f.Shutdown()
 	})
 
 	It("sets up a localnet gateway", func() {
@@ -809,12 +823,10 @@ var _ = Describe("Gateway Init Operations", func() {
 				Output: "169.254.33.2",
 			})
 
-			stop := make(chan struct{})
-			wf, err := factory.NewWatchFactory(fakeClient, stop)
+			f, err = factory.NewWatchFactory(fakeClient)
 			Expect(err).NotTo(HaveOccurred())
-			defer close(stop)
 
-			clusterController := NewOvnController(fakeClient, wf, stop, newFakeAddressSetFactory())
+			clusterController := NewOvnController(fakeClient, f, stopChan, newFakeAddressSetFactory())
 			Expect(clusterController).NotTo(BeNil())
 			clusterController.TCPLoadBalancerUUID = tcpLBUUID
 			clusterController.UDPLoadBalancerUUID = udpLBUUID
@@ -1003,12 +1015,10 @@ var _ = Describe("Gateway Init Operations", func() {
 				Output: "169.254.33.2",
 			})
 
-			stop := make(chan struct{})
-			wf, err := factory.NewWatchFactory(fakeClient, stop)
+			f, err = factory.NewWatchFactory(fakeClient)
 			Expect(err).NotTo(HaveOccurred())
-			defer close(stop)
 
-			clusterController := NewOvnController(fakeClient, wf, stop, newFakeAddressSetFactory())
+			clusterController := NewOvnController(fakeClient, f, stopChan, newFakeAddressSetFactory())
 			Expect(clusterController).NotTo(BeNil())
 			clusterController.TCPLoadBalancerUUID = tcpLBUUID
 			clusterController.UDPLoadBalancerUUID = udpLBUUID
