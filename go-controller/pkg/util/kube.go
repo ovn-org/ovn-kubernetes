@@ -29,6 +29,7 @@ func NewClientset(conf *config.KubernetesConfig) (*kubernetes.Clientset, error) 
 		// uses the current context in kubeconfig
 		kconfig, err = clientcmd.BuildConfigFromFlags("", conf.Kubeconfig)
 	} else if strings.HasPrefix(conf.APIServer, "https") {
+		// TODO: Looks like the check conf.APIServer is redundant and can be removed
 		if conf.APIServer == "" || conf.Token == "" {
 			return nil, fmt.Errorf("TLS-secured apiservers require token and CA certificate")
 		}
