@@ -118,8 +118,22 @@ func (n *NodeController) addOrUpdatePod(pod *kapi.Pod, ignoreLearn bool) error {
 	if err != nil {
 		return err
 	}
-	namespaceExternalGw := namespace.GetAnnotations()[hotypes.HybridOverlayExternalGw]
-	namespaceVTEP := namespace.GetAnnotations()[hotypes.HybridOverlayVTEP]
+	namespaceExternalGwRaw := namespace.GetAnnotations()[hotypes.HybridOverlayExternalGw]
+	// validate the external gateway is a valid IP address
+	namespaceExternalGwIP := net.ParseIP(namespaceExternalGwRaw)
+	if namespaceExternalGwIP == nil {
+		klog.Warningf("failed parse a valid external gateway ip address from %v: %v", namespaceExternalGwRaw, err)
+		return fmt.Errorf("failed to validate a valid external gateway ip address %s: %v", namespaceExternalGwRaw, err)
+	}
+	namespaceExternalGw := namespaceExternalGwIP.String()
+	namespaceVTEPRaw := namespace.GetAnnotations()[hotypes.HybridOverlayVTEP]
+	// validate the vtep is a valid IP address
+	namespaceVTEPIP := net.ParseIP(namespaceVTEPRaw)
+	if namespaceVTEPIP == nil {
+		klog.Warningf("failed parse a valid vtep ip address from %v: %v", namespaceVTEPRaw, err)
+		return fmt.Errorf("failed to validate a valid vtep ip address %s: %v", namespaceVTEPRaw, err)
+	}
+	namespaceVTEP := namespaceVTEPIP.String()
 	if !n.initialized {
 		node, err := n.wf.GetNode(n.nodeName)
 		if err != nil {
@@ -146,15 +160,15 @@ func (n *NodeController) addOrUpdatePod(pod *kapi.Pod, ignoreLearn bool) error {
 				"actions=set_field:%s->eth_src,set_field:%s->eth_dst,output:ext",
 			cookie, podIP.IP, n.drMAC.String(), podMAC))
 
-		if namespaceExternalGw == "" || namespaceVTEP == "" {
+		if namespaceExternalGwRaw == "" || namespaceVTEPRaw == "" {
 			klog.Infof("Hybrid Overlay Gateway mode not enabled for pod %s, namespace does not have hybrid"+
-				"annotations, external gw: %s, VTEP: %s", pod.Name, namespaceExternalGw, namespaceVTEP)
+				"annotations, external gw: %s, VTEP: %s", pod.Name, namespaceVTEPRaw, namespaceVTEPRaw)
 			n.updateFlowCacheEntry(cookie, flows, ignoreLearn)
 			continue
 		}
 
 		portMACRaw := strings.Replace(n.drMAC.String(), ":", "", -1)
-		vtepIPRaw := getIPAsHexString(net.ParseIP(namespaceVTEP))
+		vtepIPRaw := getIPAsHexString(namespaceVTEPIP)
 
 		// update map for tun to pod
 		n.tunMapMutex.Lock()
@@ -184,7 +198,7 @@ func (n *NodeController) addOrUpdatePod(pod *kapi.Pod, ignoreLearn bool) error {
 		// so need proper locking around tunMap
 		// after learning actions, we need to resubmit the flow to the gw arp response table (2) so that we can respond
 		// back if this was an arp request
-		tunCookie := podIPToCookie(net.ParseIP(namespaceVTEP))
+		tunCookie := podIPToCookie(namespaceVTEPIP)
 		tunFlow := fmt.Sprintf("table=0,cookie=0x%s,priority=120,in_port=%s,arp,arp_spa=%s,tun_src=%s,"+
 			"actions=%s,resubmit(,2)",
 			tunCookie, extVXLANName, namespaceExternalGw, namespaceVTEP, learnActions)
