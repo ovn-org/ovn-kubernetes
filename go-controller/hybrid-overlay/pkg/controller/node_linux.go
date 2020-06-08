@@ -86,10 +86,9 @@ func podIPToCookie(podIP net.IP) string {
 }
 
 func (n *NodeController) addOrUpdatePod(pod *kapi.Pod) error {
-	podIPs, podMAC, err := getPodDetails(pod, n.nodeName)
+	podIPs, podMAC, err := getPodDetails(pod)
 	if err != nil {
-		klog.V(5).Infof("cleaning up hybrid overlay pod %s/%s because %v", pod.Namespace, pod.Name, err)
-		return n.deletePod(pod)
+		return fmt.Errorf("pod %s does not contain OVN annotations", pod.Name)
 	}
 
 	externalGw := pod.Annotations[hotypes.HybridOverlayExternalGw]
@@ -215,54 +214,48 @@ func (n *NodeController) addOrUpdatePod(pod *kapi.Pod) error {
 }
 
 func (n *NodeController) deletePod(pod *kapi.Pod) error {
-	if pod.Spec.NodeName == n.nodeName {
-		podIPs, _, err := getPodDetails(pod, n.nodeName)
-		if err != nil {
-			return fmt.Errorf("error getting pod details: %v", err)
-		}
-		tunIPs := make(map[string]struct{})
-		n.tunMapMutex.Lock()
-		for _, podIP := range podIPs {
-			// need to check if any pods in the tunMap still correspond to a tunnel
-			// store the tunIP so we can delete cookie later
-			tunIPs[n.tunMap[podIP.IP.String()]] = struct{}{}
-			delete(n.tunMap, podIP.IP.String())
-		}
-		for tunIP := range tunIPs {
-			if len(tunIP) > 0 {
-				// check if any pods still belong to this tunnel so we can clean up the flow if not
-				tunStillActive := false
-				for _, tun := range n.tunMap {
-					if tunIP == tun {
-						tunStillActive = true
-						break
-					}
+	podIPs, _, err := getPodDetails(pod)
+	if err != nil {
+		return fmt.Errorf("error getting pod details: %v", err)
+	}
+	tunIPs := make(map[string]struct{})
+	n.tunMapMutex.Lock()
+	for _, podIP := range podIPs {
+		// need to check if any pods in the tunMap still correspond to a tunnel
+		// store the tunIP so we can delete cookie later
+		tunIPs[n.tunMap[podIP.IP.String()]] = struct{}{}
+		delete(n.tunMap, podIP.IP.String())
+	}
+	for tunIP := range tunIPs {
+		if len(tunIP) > 0 {
+			// check if any pods still belong to this tunnel so we can clean up the flow if not
+			tunStillActive := false
+			for _, tun := range n.tunMap {
+				if tunIP == tun {
+					tunStillActive = true
+					break
 				}
-				if !tunStillActive {
-					cookie := podIPToCookie(net.ParseIP(tunIP))
-					if cookie != "" {
-						n.deleteFlowsByCookie(cookie)
-					}
+			}
+			if !tunStillActive {
+				cookie := podIPToCookie(net.ParseIP(tunIP))
+				if cookie != "" {
+					n.deleteFlowsByCookie(cookie)
 				}
 			}
 		}
-		n.tunMapMutex.Unlock()
-		for _, podIP := range podIPs {
-			cookie := podIPToCookie(podIP.IP)
-			if cookie == "" {
-				continue
-			}
-			n.deleteFlowsByCookie(cookie)
+	}
+	n.tunMapMutex.Unlock()
+	for _, podIP := range podIPs {
+		cookie := podIPToCookie(podIP.IP)
+		if cookie == "" {
+			continue
 		}
+		n.deleteFlowsByCookie(cookie)
 	}
 	return nil
 }
 
-func getPodDetails(pod *kapi.Pod, nodeName string) ([]*net.IPNet, net.HardwareAddr, error) {
-	if pod.Spec.NodeName != nodeName {
-		return nil, nil, fmt.Errorf("not scheduled on this node")
-	}
-
+func getPodDetails(pod *kapi.Pod) ([]*net.IPNet, net.HardwareAddr, error) {
 	podInfo, err := util.UnmarshalPodAnnotation(pod.Annotations)
 	if err != nil {
 		return nil, nil, err
@@ -271,9 +264,9 @@ func getPodDetails(pod *kapi.Pod, nodeName string) ([]*net.IPNet, net.HardwareAd
 }
 
 // podChanged returns true if any relevant pod attributes changed
-func podChanged(pod1 *kapi.Pod, pod2 *kapi.Pod, nodeName string) bool {
-	podIPs1, mac1, _ := getPodDetails(pod1, nodeName)
-	podIPs2, mac2, _ := getPodDetails(pod2, nodeName)
+func podChanged(pod1 *kapi.Pod, pod2 *kapi.Pod) bool {
+	podIPs1, mac1, _ := getPodDetails(pod1)
+	podIPs2, mac2, _ := getPodDetails(pod2)
 	podExGw1 := pod1.Annotations[hotypes.HybridOverlayExternalGw]
 	podVTEP1 := pod1.Annotations[hotypes.HybridOverlayVTEP]
 	podExGw2 := pod2.Annotations[hotypes.HybridOverlayExternalGw]
@@ -323,23 +316,32 @@ func (n *NodeController) startPodWatch(wf *factory.WatchFactory) error {
 	_, err := wf.AddPodHandler(cache.ResourceEventHandlerFuncs{
 		AddFunc: func(obj interface{}) {
 			pod := obj.(*kapi.Pod)
+			if pod.Spec.NodeName != n.nodeName {
+				return
+			}
 			if err := n.addOrUpdatePod(pod); err != nil {
-				klog.Warningf("failed to handle pod %v addition: %v", pod, err)
+				klog.Warningf("failed to handle pod %s addition: %s", pod.Name, err)
 			}
 		},
 		UpdateFunc: func(old, newer interface{}) {
 			podNew := newer.(*kapi.Pod)
 			podOld := old.(*kapi.Pod)
-			if podChanged(podOld, podNew, n.nodeName) {
+			if podNew.Spec.NodeName != n.nodeName {
+				return
+			}
+			if podChanged(podOld, podNew) {
 				if err := n.addOrUpdatePod(podNew); err != nil {
-					klog.Warningf("failed to handle pod %v update: %v", podNew, err)
+					klog.Warningf("failed to handle pod %s update: %s", podNew.Name, err)
 				}
 			}
 		},
 		DeleteFunc: func(obj interface{}) {
 			pod := obj.(*kapi.Pod)
+			if pod.Spec.NodeName != n.nodeName {
+				return
+			}
 			if err := n.deletePod(pod); err != nil {
-				klog.Warningf("failed to handle pod %v deletion: %v", pod, err)
+				klog.Warningf("failed to handle pod %s deletion: %s", pod.Name, err)
 			}
 		},
 	}, nil)
