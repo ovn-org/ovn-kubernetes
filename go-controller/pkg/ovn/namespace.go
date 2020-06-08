@@ -219,6 +219,8 @@ func (oc *Controller) updateNamespace(old, newer *kapi.Namespace) {
 		} else {
 			nsInfo.hybridOverlayExternalGW = parsedAnnotation
 		}
+	} else {
+		nsInfo.hybridOverlayExternalGW = nil
 	}
 	annotation = newer.Annotations[hotypes.HybridOverlayVTEP]
 	if annotation != "" {
@@ -228,6 +230,8 @@ func (oc *Controller) updateNamespace(old, newer *kapi.Namespace) {
 		} else {
 			nsInfo.hybridOverlayVTEP = parsedAnnotation
 		}
+	} else {
+		nsInfo.hybridOverlayVTEP = nil
 	}
 	oc.multicastUpdateNamespace(newer, nsInfo)
 }

@@ -2,6 +2,8 @@ package ovn
 
 import (
 	"fmt"
+	hotypes "github.com/ovn-org/ovn-kubernetes/go-controller/hybrid-overlay/pkg/types"
+	"net"
 
 	"github.com/urfave/cli/v2"
 
@@ -658,6 +660,87 @@ var _ = Describe("OVN Pod Operations", func() {
 			}
 
 			err := app.Run([]string{app.Name})
+			Expect(err).NotTo(HaveOccurred())
+		})
+	})
+
+	Context("with hybrid overlay gw mode", func() {
+		It("resets the hybrid annotations on update", func() {
+			app.Action = func(ctx *cli.Context) error {
+				namespaceT := *newNamespace("namespace1")
+				namespaceT.Annotations[hotypes.HybridOverlayVTEP] = "1.1.1.1"
+				namespaceT.Annotations[hotypes.HybridOverlayExternalGw] = "2.2.2.2"
+				tP := newTPod(
+					"node1",
+					"10.128.1.0/24",
+					"10.128.1.2",
+					"10.128.1.3",
+					"myPod",
+					"10.128.1.4",
+					"11:22:33:44:55:66",
+					namespaceT.Name,
+				)
+
+				fakeOvn.start(ctx,
+					&v1.NamespaceList{
+						Items: []v1.Namespace{
+							namespaceT,
+						},
+					},
+					&v1.PodList{
+						Items: []v1.Pod{
+							*newPod(namespaceT.Name, tP.podName, tP.nodeName, tP.podIP),
+						},
+					},
+				)
+				podMAC := ovntest.MustParseMAC(tP.podMAC)
+				fakeOvn.controller.logicalPortCache.add(tP.nodeName, tP.portName, fakeUUID, podMAC, []net.IP{ovntest.MustParseIP(tP.podIP)})
+				fExec.AddFakeCmd(&ovntest.ExpectedCmd{
+					Cmd:    "ovn-nbctl --timeout=15 --data=bare --no-heading --columns=name find logical_switch_port external_ids:pod=true",
+					Output: "\n",
+				})
+				tP.addCmdsForNonExistingPod(fExec)
+				tP.populateLogicalSwitchCache(fakeOvn)
+				fakeOvn.controller.WatchNamespaces()
+				fakeOvn.controller.WatchPods()
+				_, err := fakeOvn.fakeClient.CoreV1().Namespaces().Get(namespaceT.Name, metav1.GetOptions{})
+				Expect(err).NotTo(HaveOccurred())
+				pod, err := fakeOvn.fakeClient.CoreV1().Pods(tP.namespace).Get(tP.podName, metav1.GetOptions{})
+				Expect(err).NotTo(HaveOccurred())
+				podAnnotation, ok := pod.Annotations[util.OvnPodAnnotationName]
+				Expect(ok).To(BeTrue())
+				Expect(podAnnotation).To(ContainSubstring(`"gateway_ip":"10.128.1.3"`))
+				// Update namespace to remove annotation
+				namespaceT.Annotations = nil
+				_, err = fakeOvn.fakeClient.CoreV1().Namespaces().Update(&namespaceT)
+				// Create new pod
+				tP = newTPod(
+					"node1",
+					"10.128.1.0/24",
+					"10.128.1.2",
+					"10.128.1.1",
+					"myPod2",
+					"10.128.1.5",
+					"11:22:33:44:55:66",
+					namespaceT.Name,
+				)
+				tP.addCmdsForNonExistingPod(fExec)
+				pod, err = fakeOvn.fakeClient.CoreV1().Pods(tP.namespace).Create(newPod(namespaceT.Name, tP.podName, tP.nodeName, tP.podIP))
+				Expect(err).NotTo(HaveOccurred())
+				var annotation string
+				Eventually(func() string {
+					pod, err = fakeOvn.fakeClient.CoreV1().Pods(tP.namespace).Get(tP.podName, metav1.GetOptions{})
+					annotation = pod.Annotations[util.OvnPodAnnotationName]
+					return pod.Annotations[util.OvnPodAnnotationName]
+				}).ShouldNot(BeEmpty())
+				Expect(annotation).To(ContainSubstring(`"gateway_ip":"10.128.1.1"`))
+				return nil
+			}
+
+			err := app.Run([]string{
+				app.Name,
+				"-enable-hybrid-overlay",
+			})
 			Expect(err).NotTo(HaveOccurred())
 		})
 	})
