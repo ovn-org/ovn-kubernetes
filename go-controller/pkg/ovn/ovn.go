@@ -13,6 +13,7 @@ import (
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/factory"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/kube"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/ipallocator"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/subnetallocator"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
 
@@ -77,8 +78,9 @@ type Controller struct {
 	watchFactory *factory.WatchFactory
 	stopChan     <-chan struct{}
 
-	masterSubnetAllocator *subnetallocator.SubnetAllocator
-	joinSubnetAllocator   *subnetallocator.SubnetAllocator
+	masterSubnetAllocator   *subnetallocator.SubnetAllocator
+	joinSubnetAllocator     *subnetallocator.SubnetAllocator
+	nodeLocalNatIPAllocator *ipallocator.Range
 
 	TCPLoadBalancerUUID  string
 	UDPLoadBalancerUUID  string
@@ -170,6 +172,7 @@ func NewOvnController(kubeClient kubernetes.Interface, wf *factory.WatchFactory,
 		watchFactory:             wf,
 		stopChan:                 stopChan,
 		masterSubnetAllocator:    subnetallocator.NewSubnetAllocator(),
+		nodeLocalNatIPAllocator:  &ipallocator.Range{},
 		logicalSwitchCache:       make(map[string][]*net.IPNet),
 		joinSubnetAllocator:      subnetallocator.NewSubnetAllocator(),
 		logicalPortCache:         newPortCache(stopChan),
@@ -557,7 +560,7 @@ func (oc *Controller) syncNodeGateway(node *kapi.Node, hostSubnets []*net.IPNet)
 		hostSubnets, _ = util.ParseNodeHostSubnetAnnotation(node)
 	}
 	if l3GatewayConfig.Mode == config.GatewayModeDisabled {
-		if err := gatewayCleanup(node.Name, hostSubnets); err != nil {
+		if err := gatewayCleanup(node.Name); err != nil {
 			return fmt.Errorf("error cleaning up gateway for node %s: %v", node.Name, err)
 		}
 	} else if hostSubnets != nil {
@@ -648,7 +651,8 @@ func (oc *Controller) WatchNodes() error {
 
 			nodeSubnets, _ := util.ParseNodeHostSubnetAnnotation(node)
 			joinSubnets, _ := util.ParseNodeJoinSubnetAnnotation(node)
-			err := oc.deleteNode(node.Name, nodeSubnets, joinSubnets)
+			dnatSnatIPs, _ := util.ParseNodeLocalNatIPAnnotation(node)
+			err := oc.deleteNode(node.Name, nodeSubnets, joinSubnets, dnatSnatIPs)
 			if err != nil {
 				klog.Error(err)
 			}

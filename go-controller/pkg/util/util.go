@@ -22,6 +22,21 @@ const (
 	// PhysicalNetworkName is the name that maps to an OVS bridge that provides
 	// access to physical/external network
 	PhysicalNetworkName = "physnet"
+
+	// LocalNetworkName is the name that maps to an OVS bridge that provides
+	// access to local service
+	LocalNetworkName = "locnet"
+
+	// FIXME DUAL-STACK
+	V6NodeLocalNatSubnet           = "fd99::/64"
+	V6NodeLocalNatSubnetPrefix     = 64
+	V6NodeLocalNatSubnetNextHop    = "fd99::1"
+	V6NodeLocalDistributedGwPortIP = "fd99::2"
+
+	V4NodeLocalNatSubnet           = "169.254.0.0/20"
+	V4NodeLocalNatSubnetPrefix     = 20
+	V4NodeLocalNatSubnetNextHop    = "169.254.0.1"
+	V4NodeLocalDistributedGwPortIP = "169.254.0.2"
 )
 
 // StringArg gets the named command-line argument or returns an error if it is empty

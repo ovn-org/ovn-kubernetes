@@ -768,6 +768,7 @@ ovn-master() {
     --init-master ${K8S_NODE} \
     --cluster-subnets ${net_cidr} --k8s-service-cidr=${svc_cidr} \
     --nb-address=${ovn_nbdb} --sb-address=${ovn_sbdb} \
+    --gateway-mode=${ovn_gateway_mode} \
     --nbctl-daemon-mode \
     --loglevel=${ovnkube_loglevel} \
     ${hybrid_overlay_flags} \

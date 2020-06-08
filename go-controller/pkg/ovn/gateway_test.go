@@ -258,9 +258,8 @@ node4 chassis=912d592c-904c-40cd-9ef1-c2e5b49a33dd lb_force_snat_ip=100.64.0.4`,
 		nodeName := "test-node"
 		hostSubnet := ovntest.MustParseIPNet("10.130.0.0/23")
 		const (
-			nodeRouteUUID    string = "0cac12cf-3e0f-4682-b028-5ea2e0001962"
-			nodemgtRouteUUID string = "0cac12cf-3e0f-4682-b028-5ea2e0001963"
-			tcpLBUUID        string = "1a3dfc82-2749-4931-9190-c30e7c0ecea3"
+			nodeRouteUUID string = "0cac12cf-3e0f-4682-b028-5ea2e0001962"
+			tcpLBUUID     string = "1a3dfc82-2749-4931-9190-c30e7c0ecea3"
 		)
 
 		fexec := ovntest.NewFakeExec()
@@ -278,12 +277,7 @@ node4 chassis=912d592c-904c-40cd-9ef1-c2e5b49a33dd lb_force_snat_ip=100.64.0.4`,
 		fexec.AddFakeCmdsNoOutputNoError([]string{
 			"ovn-nbctl --timeout=15 --if-exists remove logical_router ovn_cluster_router static_routes " + nodeRouteUUID,
 		})
-		fexec.AddFakeCmd(&ovntest.ExpectedCmd{
-			Cmd:    "ovn-nbctl --timeout=15 --data=bare --no-heading --columns=_uuid find logical_router_static_route nexthop=\"10.130.0.2\"",
-			Output: nodemgtRouteUUID,
-		})
 		fexec.AddFakeCmdsNoOutputNoError([]string{
-			"ovn-nbctl --timeout=15 --if-exists remove logical_router ovn_cluster_router static_routes " + nodemgtRouteUUID,
 			"ovn-nbctl --timeout=15 --if-exist ls-del join_test-node",
 			"ovn-nbctl --timeout=15 --if-exist lr-del GR_test-node",
 			"ovn-nbctl --timeout=15 --if-exist ls-del ext_test-node",
@@ -305,8 +299,9 @@ node4 chassis=912d592c-904c-40cd-9ef1-c2e5b49a33dd lb_force_snat_ip=100.64.0.4`,
 		fexec.AddFakeCmdsNoOutputNoError([]string{
 			"ovn-nbctl --timeout=15 lb-del " + tcpLBUUID,
 		})
+		cleanupPBRandNATRules(fexec, nodeName, []*net.IPNet{hostSubnet})
 
-		err = gatewayCleanup(nodeName, []*net.IPNet{hostSubnet})
+		err = gatewayCleanup(nodeName)
 		Expect(err).NotTo(HaveOccurred())
 		Expect(fexec.CalledMatchesExpected()).To(BeTrue())
 	})
@@ -344,20 +339,6 @@ node4 chassis=912d592c-904c-40cd-9ef1-c2e5b49a33dd lb_force_snat_ip=100.64.0.4`,
 		fexec.AddFakeCmdsNoOutputNoError([]string{
 			"ovn-nbctl --timeout=15 --if-exists remove logical_router ovn_cluster_router static_routes " + v6RouteUUID,
 		})
-		fexec.AddFakeCmd(&ovntest.ExpectedCmd{
-			Cmd:    "ovn-nbctl --timeout=15 --data=bare --no-heading --columns=_uuid find logical_router_static_route nexthop=\"10.130.0.2\"",
-			Output: v4mgtRouteUUID,
-		})
-		fexec.AddFakeCmdsNoOutputNoError([]string{
-			"ovn-nbctl --timeout=15 --if-exists remove logical_router ovn_cluster_router static_routes " + v4mgtRouteUUID,
-		})
-		fexec.AddFakeCmd(&ovntest.ExpectedCmd{
-			Cmd:    "ovn-nbctl --timeout=15 --data=bare --no-heading --columns=_uuid find logical_router_static_route nexthop=\"fd01:0:0:2::2\"",
-			Output: v6mgtRouteUUID,
-		})
-		fexec.AddFakeCmdsNoOutputNoError([]string{
-			"ovn-nbctl --timeout=15 --if-exists remove logical_router ovn_cluster_router static_routes " + v6mgtRouteUUID,
-		})
 
 		fexec.AddFakeCmdsNoOutputNoError([]string{
 			"ovn-nbctl --timeout=15 --if-exist ls-del join_test-node",
@@ -381,8 +362,9 @@ node4 chassis=912d592c-904c-40cd-9ef1-c2e5b49a33dd lb_force_snat_ip=100.64.0.4`,
 		fexec.AddFakeCmdsNoOutputNoError([]string{
 			"ovn-nbctl --timeout=15 lb-del " + tcpLBUUID,
 		})
+		cleanupPBRandNATRules(fexec, nodeName, hostSubnets)
 
-		err = gatewayCleanup(nodeName, hostSubnets)
+		err = gatewayCleanup(nodeName)
 		Expect(err).NotTo(HaveOccurred())
 		Expect(fexec.CalledMatchesExpected()).To(BeTrue())
 	})
