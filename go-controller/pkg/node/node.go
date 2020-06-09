@@ -6,6 +6,7 @@ import (
 	"net"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strconv"
 	"strings"
 	"time"
@@ -22,6 +23,7 @@ import (
 	kapi "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/util/wait"
 	"k8s.io/client-go/kubernetes"
+	"k8s.io/client-go/tools/cache"
 )
 
 // OvnNode is the object holder for utilities meant for node management
@@ -250,10 +252,53 @@ func (n *OvnNode) Start() error {
 	if !ok {
 		return fmt.Errorf("Cannot get kubeclient for starting CNI server")
 	}
+	err = n.WatchEndpoints()
+	if err != nil {
+		return err
+	}
 
 	// start the cni server
 	cniServer := cni.NewCNIServer("", kclient.KClient)
 	err = cniServer.Start(cni.HandleCNIRequest)
 
 	return err
+}
+
+func (n *OvnNode) WatchEndpoints() error {
+	_, err := n.watchFactory.AddEndpointsHandler(cache.ResourceEventHandlerFuncs{
+		UpdateFunc: func(old, new interface{}) {
+			epNew := new.(*kapi.Endpoints)
+			epOld := old.(*kapi.Endpoints)
+			if reflect.DeepEqual(epNew.Subsets, epOld.Subsets) {
+				return
+			}
+			newEndpointAddressMap := buildEndpointAddressMap(epNew.Subsets)
+			for _, subset := range epOld.Subsets {
+				for _, address := range subset.Addresses {
+					if _, ok := newEndpointAddressMap[address.IP]; !ok {
+						deleteConntrack(address.IP)
+					}
+				}
+			}
+		},
+		DeleteFunc: func(obj interface{}) {
+			ep := obj.(*kapi.Endpoints)
+			for _, subset := range ep.Subsets {
+				for _, address := range subset.Addresses {
+					deleteConntrack(address.IP)
+				}
+			}
+		},
+	}, nil)
+	return err
+}
+
+func buildEndpointAddressMap(epSubsets []kapi.EndpointSubset) map[string]struct{} {
+	addressMap := make(map[string]struct{})
+	for _, subset := range epSubsets {
+		for _, address := range subset.Addresses {
+			addressMap[address.IP] = struct{}{}
+		}
+	}
+	return addressMap
 }
