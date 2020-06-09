@@ -20,6 +20,10 @@ const (
 	joinSwitchPrefix     = "join_"
 	externalSwitchPrefix = "ext_"
 	gwRouterPrefix       = "GR_"
+
+	nodeLocalSwitch          = "node_local_switch"
+	nodeSubnetPolicyPriority = "1004"
+	mgmtPortPolicyPriority   = "1005"
 )
 
 func (ovn *Controller) getOvnGateways() ([]string, string, error) {

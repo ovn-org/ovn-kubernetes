@@ -23,6 +23,7 @@ import (
 	homaster "github.com/ovn-org/ovn-kubernetes/go-controller/hybrid-overlay/pkg/controller"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/metrics"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/ipallocator"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
 )
 
@@ -115,6 +116,14 @@ func (oc *Controller) StartClusterMaster(masterNodeName string) error {
 	_, joinSubnetCIDR, _ := net.ParseCIDR(joinSubnet)
 	_ = oc.joinSubnetAllocator.AddNetworkRange(joinSubnetCIDR, 3)
 
+	// FIXME DUAL-STACK SUPPORT
+	// initialize the subnet required for DNAT and SNAT ip for the shared gateway mode
+	_, nodeLocalNatSubnetCIDR, _ := net.ParseCIDR(util.V4NodeLocalNatSubnet)
+	oc.nodeLocalNatIPAllocator, _ = ipallocator.NewCIDRRange(nodeLocalNatSubnetCIDR)
+	// set aside the first two IPs for the nextHop on the host and for distributed gateway port
+	_ = oc.nodeLocalNatIPAllocator.Allocate(net.ParseIP(util.V4NodeLocalNatSubnetNextHop))
+	_ = oc.nodeLocalNatIPAllocator.Allocate(net.ParseIP(util.V4NodeLocalDistributedGwPortIP))
+
 	existingNodes, err := oc.kube.GetNodes()
 	if err != nil {
 		klog.Errorf("Error in initializing/fetching subnets: %v", err)
@@ -137,6 +146,13 @@ func (oc *Controller) StartClusterMaster(masterNodeName string) error {
 		joinsubnets, _ := util.ParseNodeJoinSubnetAnnotation(&node)
 		for _, joinsubnet := range joinsubnets {
 			err := oc.joinSubnetAllocator.MarkAllocatedNetwork(joinsubnet)
+			if err != nil {
+				utilruntime.HandleError(err)
+			}
+		}
+		nodeLocalNatIPs, _ := util.ParseNodeLocalNatIPAnnotation(&node)
+		for _, nodeLocalNatIP := range nodeLocalNatIPs {
+			err := oc.nodeLocalNatIPAllocator.Allocate(nodeLocalNatIP)
 			if err != nil {
 				utilruntime.HandleError(err)
 			}
@@ -183,6 +199,12 @@ func (oc *Controller) SetupMaster(masterNodeName string) error {
 		klog.Errorf("Failed to create a single common distributed router for the cluster, "+
 			"stdout: %q, stderr: %q, error: %v", stdout, stderr, err)
 		return err
+	}
+
+	if config.Gateway.Mode == config.GatewayModeShared {
+		if err := addDistributedGWPort(); err != nil {
+			return err
+		}
 	}
 
 	// Determine SCTP support
@@ -389,10 +411,26 @@ func (oc *Controller) syncGatewayLogicalNetwork(node *kapi.Node, l3GatewayConfig
 	}
 
 	if l3GatewayConfig.Mode == config.GatewayModeShared {
-		// Add static routes to OVN Cluster Router to enable pods on this Node to
-		// reach the host IP
-		err = addStaticRoutesToHost(node, l3GatewayConfig.IPAddresses)
+		// in the case of shared gateway mode, we need to setup
+		// 1. two policy based routes to steer traffic to the k8s node IP
+		// 	  - from the management port via the node_local_switch's localnet port
+		//    - from the hostsubnet via management port
+		// 2. a dnat_and_snat nat entry to SNAT the traffic from the management port
+		subnets, err := util.ParseNodeHostSubnetAnnotation(node)
 		if err != nil {
+			return fmt.Errorf("failed to get host subnets for %s: %v", node.Name, err)
+		}
+		mpMAC, err := util.ParseNodeManagementPortMACAddress(node)
+		if err != nil {
+			return err
+		}
+		mpIP := util.GetNodeManagementIfAddr(subnets[0]).IP.String()
+
+		if err := addPolicyBasedRoutes(node.Name, mpIP, l3GatewayConfig.IPAddresses); err != nil {
+			return err
+		}
+
+		if err := oc.addNodeLocalNatEntries(node, mpMAC.String(), mpIP); err != nil {
 			return err
 		}
 	}
@@ -414,46 +452,6 @@ func (oc *Controller) syncGatewayLogicalNetwork(node *kapi.Node, l3GatewayConfig
 	}
 
 	return err
-}
-
-func hostAddrForSubnet(hostIfAddrs []*net.IPNet, subnet *net.IPNet) (string, error) {
-	isIPv6 := utilnet.IsIPv6CIDR(subnet)
-	for _, ifaddr := range hostIfAddrs {
-		if utilnet.IsIPv6CIDR(ifaddr) == isIPv6 {
-			if isIPv6 {
-				return ifaddr.IP.String() + "/128", nil
-			} else {
-				return ifaddr.IP.String() + "/32", nil
-			}
-		}
-	}
-	if isIPv6 {
-		return "", fmt.Errorf("no IPv6 host address available")
-	} else {
-		return "", fmt.Errorf("no IPv4 host address available")
-	}
-}
-
-func addStaticRoutesToHost(node *kapi.Node, hostIfAddrs []*net.IPNet) error {
-	subnets, err := util.ParseNodeHostSubnetAnnotation(node)
-	if err != nil {
-		return fmt.Errorf("failed to get host subnets for %s: %v", node.Name, err)
-	}
-
-	for _, subnet := range subnets {
-		hostAddr, err := hostAddrForSubnet(hostIfAddrs, subnet)
-		if err != nil {
-			return fmt.Errorf("cannot configure static route for %s: %v", subnet.String(), err)
-		}
-		nextHop := util.GetNodeManagementIfAddr(subnet).IP.String()
-		_, stderr, err := util.RunOVNNbctl("--may-exist", "lr-route-add", ovnClusterRouter, hostAddr, nextHop)
-		if err != nil {
-			return fmt.Errorf("failed to add static route '%s via %s' for host %q on %s "+
-				"stderr: %q, error: %v", hostAddr, nextHop, node.Name, ovnClusterRouter, stderr, err)
-		}
-	}
-
-	return nil
 }
 
 func (oc *Controller) ensureNodeLogicalNetwork(nodeName string, hostSubnets []*net.IPNet) error {
@@ -710,7 +708,8 @@ func (oc *Controller) deleteNodeLogicalNetwork(nodeName string) error {
 	return nil
 }
 
-func (oc *Controller) deleteNode(nodeName string, hostSubnets, joinSubnets []*net.IPNet) error {
+func (oc *Controller) deleteNode(nodeName string, hostSubnets, joinSubnets []*net.IPNet,
+	nodeLocalNatIPs []net.IP) error {
 	// Clean up as much as we can but don't hard error
 	for _, hostSubnet := range hostSubnets {
 		if err := oc.deleteNodeHostSubnet(nodeName, hostSubnet); err != nil {
@@ -722,12 +721,17 @@ func (oc *Controller) deleteNode(nodeName string, hostSubnets, joinSubnets []*ne
 			klog.Errorf("Error deleting node %s JoinSubnet %v: %v", nodeName, joinSubnet, err)
 		}
 	}
+	if len(nodeLocalNatIPs) > 0 {
+		if err := oc.nodeLocalNatIPAllocator.Release(nodeLocalNatIPs[0]); err != nil {
+			klog.Errorf("Error deleting node %s's node local NAT IP %v: %v", nodeName, nodeLocalNatIPs, err)
+		}
+	}
 
 	if err := oc.deleteNodeLogicalNetwork(nodeName); err != nil {
 		klog.Errorf("Error deleting node %s logical network: %v", nodeName, err)
 	}
 
-	if err := gatewayCleanup(nodeName, hostSubnets); err != nil {
+	if err := gatewayCleanup(nodeName); err != nil {
 		return fmt.Errorf("Failed to clean up node %s gateway: (%v)", nodeName, err)
 	}
 
@@ -937,7 +941,7 @@ func (oc *Controller) syncNodes(nodes []interface{}) {
 	}
 
 	for nodeName, nodeSubnets := range NodeSubnetsMap {
-		if err := oc.deleteNode(nodeName, nodeSubnets.hostSubnets, nodeSubnets.joinSubnets); err != nil {
+		if err := oc.deleteNode(nodeName, nodeSubnets.hostSubnets, nodeSubnets.joinSubnets, nil); err != nil {
 			klog.Error(err)
 		}
 		//remove the node from the chassis map so we don't delete it twice
