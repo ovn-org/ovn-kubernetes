@@ -5,8 +5,10 @@ import (
 	"strings"
 
 	"github.com/urfave/cli/v2"
-	"k8s.io/api/core/v1"
+	v1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/runtime"
+	k8stypes "k8s.io/apimachinery/pkg/types"
 	"k8s.io/client-go/kubernetes/fake"
 
 	"github.com/ovn-org/ovn-kubernetes/go-controller/hybrid-overlay/pkg/types"
@@ -224,6 +226,151 @@ var _ = Describe("Hybrid SDN Master Operations", func() {
 			updatedNode, err = k.GetNode(nodeName)
 			Expect(err).NotTo(HaveOccurred())
 			Expect(updatedNode.Annotations).NotTo(HaveKey(types.HybridOverlayDRMAC))
+			return nil
+		}
+
+		err := app.Run([]string{
+			app.Name,
+			"-enable-hybrid-overlay",
+			"-hybrid-overlay-cluster-subnets=" + hybridOverlayClusterCIDR,
+		})
+		Expect(err).NotTo(HaveOccurred())
+	})
+
+	It("copies namespace annotations when a pod is added", func() {
+		app.Action = func(ctx *cli.Context) error {
+			const (
+				nsName     string = "nstest"
+				nsVTEP            = "1.1.1.1"
+				nsExGw            = "2.2.2.2"
+				nodeName   string = "node1"
+				nodeSubnet string = "10.1.2.0/24"
+				nodeHOMAC  string = "00:00:00:52:19:d2"
+				pod1Name   string = "pod1"
+				pod1IP     string = "1.2.3.5"
+				pod1CIDR   string = pod1IP + "/24"
+				pod1MAC    string = "aa:bb:cc:dd:ee:ff"
+			)
+
+			ns := &v1.Namespace{
+				ObjectMeta: metav1.ObjectMeta{
+					UID:  k8stypes.UID(nsName),
+					Name: nsName,
+					Annotations: map[string]string{
+						types.HybridOverlayVTEP:       nsVTEP,
+						types.HybridOverlayExternalGw: nsExGw,
+					},
+				},
+				Spec:   v1.NamespaceSpec{},
+				Status: v1.NamespaceStatus{},
+			}
+			fakeClient := fake.NewSimpleClientset([]runtime.Object{
+				ns,
+				createPod(nsName, pod1Name, nodeName, pod1CIDR, pod1MAC),
+				&v1.NodeList{Items: []v1.Node{newTestNode(nodeName, "linux", nodeSubnet, "", nodeHOMAC)}},
+			}...)
+
+			_, err := config.InitConfig(ctx, nil, nil)
+			Expect(err).NotTo(HaveOccurred())
+
+			f, err = factory.NewWatchFactory(fakeClient)
+			Expect(err).NotTo(HaveOccurred())
+
+			err = StartMaster(&kube.Kube{KClient: fakeClient}, f)
+			Expect(err).NotTo(HaveOccurred())
+
+			Eventually(func() error {
+				pod, err := fakeClient.CoreV1().Pods(nsName).Get(pod1Name, metav1.GetOptions{})
+				if err != nil {
+					return err
+				}
+				if pod.Annotations[types.HybridOverlayVTEP] != nsVTEP {
+					return fmt.Errorf("error with annotation %s. expected: %s, got: %s", types.HybridOverlayVTEP, nsVTEP, pod.Annotations[types.HybridOverlayVTEP])
+				}
+				if pod.Annotations[types.HybridOverlayExternalGw] != nsExGw {
+					return fmt.Errorf("error with annotation %s. expected: %s, got: %s", types.HybridOverlayVTEP, nsExGw, pod.Annotations[types.HybridOverlayExternalGw])
+				}
+				return nil
+			}, 2).Should(Succeed())
+
+			return nil
+		}
+
+		err := app.Run([]string{
+			app.Name,
+			"-enable-hybrid-overlay",
+			"-hybrid-overlay-cluster-subnets=" + hybridOverlayClusterCIDR,
+		})
+		Expect(err).NotTo(HaveOccurred())
+	})
+
+	It("update pod annotations when a namespace is updated", func() {
+		app.Action = func(ctx *cli.Context) error {
+			const (
+				nsName        string = "nstest"
+				nsVTEP        string = "1.1.1.1"
+				nsVTEPUpdated string = "3.3.3.3"
+				nsExGw        string = "2.2.2.2"
+				nsExGwUpdated string = "4.4.4.4"
+				nodeName      string = "node1"
+				nodeSubnet    string = "10.1.2.0/24"
+				nodeHOMAC     string = "00:00:00:52:19:d2"
+				pod1Name      string = "pod1"
+				pod1IP        string = "1.2.3.5"
+				pod1CIDR      string = pod1IP + "/24"
+				pod1MAC       string = "aa:bb:cc:dd:ee:ff"
+			)
+
+			ns := &v1.Namespace{
+				ObjectMeta: metav1.ObjectMeta{
+					UID:  k8stypes.UID(nsName),
+					Name: nsName,
+					Annotations: map[string]string{
+						types.HybridOverlayVTEP:       nsVTEP,
+						types.HybridOverlayExternalGw: nsExGw,
+					},
+				},
+				Spec:   v1.NamespaceSpec{},
+				Status: v1.NamespaceStatus{},
+			}
+			fakeClient := fake.NewSimpleClientset([]runtime.Object{
+				ns,
+				&v1.NodeList{Items: []v1.Node{newTestNode(nodeName, "linux", nodeSubnet, "", nodeHOMAC)}},
+				createPod(nsName, pod1Name, nodeName, pod1CIDR, pod1MAC),
+			}...)
+
+			_, err := config.InitConfig(ctx, nil, nil)
+			Expect(err).NotTo(HaveOccurred())
+
+			f, err = factory.NewWatchFactory(fakeClient)
+			Expect(err).NotTo(HaveOccurred())
+
+			k := &kube.Kube{KClient: fakeClient}
+			err = StartMaster(k, f)
+			Expect(err).NotTo(HaveOccurred())
+
+			updatedNs, err := fakeClient.CoreV1().Namespaces().Get(nsName, metav1.GetOptions{})
+			Expect(err).NotTo(HaveOccurred())
+			nsAnnotator := kube.NewNamespaceAnnotator(k, updatedNs)
+			nsAnnotator.Set(types.HybridOverlayVTEP, nsVTEPUpdated)
+			nsAnnotator.Set(types.HybridOverlayExternalGw, nsExGwUpdated)
+			err = nsAnnotator.Run()
+			Expect(err).NotTo(HaveOccurred())
+
+			Eventually(func() error {
+				pod, err := fakeClient.CoreV1().Pods(nsName).Get(pod1Name, metav1.GetOptions{})
+				if err != nil {
+					return err
+				}
+				if pod.Annotations[types.HybridOverlayVTEP] != nsVTEP {
+					return fmt.Errorf("error with annotation %s. expected: %s, got: %s", types.HybridOverlayVTEP, nsVTEPUpdated, pod.Annotations[types.HybridOverlayVTEP])
+				}
+				if pod.Annotations[types.HybridOverlayExternalGw] != nsExGw {
+					return fmt.Errorf("error with annotation %s. expected: %s, got: %s", types.HybridOverlayVTEP, nsExGwUpdated, pod.Annotations[types.HybridOverlayExternalGw])
+				}
+				return nil
+			}, 2).Should(Succeed())
+
 			return nil
 		}
 
