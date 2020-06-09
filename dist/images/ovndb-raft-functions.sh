@@ -29,7 +29,7 @@ ready_to_join_cluster() {
   if [[ $? != 0 ]]; then
     return 1
   fi
-  target=$(ovn-${db}ctl --db=${transport}:${init_ip}:${port} ${ovndb_ctl_ssl_opts} --data=bare --no-headings \
+  target=$(ovn-${db}ctl --db=${transport}:[${init_ip}]:${port} ${ovndb_ctl_ssl_opts} --data=bare --no-headings \
     --columns=target list connection)
   if [[ "${target}" != "p${transport}:${port}" ]]; then
     return 1
@@ -43,7 +43,7 @@ check_ovnkube_db_ep() {
 
   # TODO: Right now only checks for NB ovsdb instances
   echo "======= checking ${dbaddr}:${dbport} OVSDB instance ==============="
-  ovsdb-client ${ovndb_ctl_ssl_opts} list-dbs ${transport}:${dbaddr}:${dbport} >/dev/null
+  ovsdb-client ${ovndb_ctl_ssl_opts} list-dbs ${transport}:[${dbaddr}]:${dbport} >/dev/null
   if [[ $? != 0 ]]; then
     return 1
   fi
