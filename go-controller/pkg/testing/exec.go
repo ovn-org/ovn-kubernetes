@@ -57,9 +57,6 @@ func (f *FakeExec) CommandContext(ctx context.Context, cmd string, args ...strin
 }
 
 func (f *FakeExec) ErrorDesc() string {
-	if len(f.executedCommands) == len(f.expectedCommands) {
-		return ""
-	}
 	return f.internalErrorDesc()
 }
 
