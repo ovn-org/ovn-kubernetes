@@ -22,18 +22,14 @@ tests locally.
 The tests are broken into a set of shards, which is just a grouping of tests,
 and each shard is run in a separate job in parallel. Below is an example of
 the shards (which may change in the future):
-- shard-n
+- shard-n-other
   - All E2E tests that match `[sig-network] N` and do NOT have P as their sixth
-  letter after the N (i.e. Roughly all `[sig-network] Networking ...` tests.)
+  letter after the N (i.e. Roughly all `[sig-network] Networking ...` tests.), and all other tests
+  that don't match the rule below
 - shard-np
   - All E2E tests that match `[sig-network] N` and DO have a P as their sixth
   letter after the N. (i.e. Roughly all `[sig-network] NetworkPolicy ...`
   tests.)
-- shard-s
-  - All E2E tests that match `[sig-network] S`. (i.e. Roughly all
-  `[sig-network] Services ...` tests.)
-- shard-other
-  - All remaining E2E tests that didn't match above.
 - shard-test
   - Single E2E test that matches the name of the test specified with a regex. See bottom of this document for an example.
 - control-plane
@@ -205,10 +201,8 @@ run):
 $ cd $GOPATH/src/github.com/ovn-org/ovn-kubernetes
 
 $ pushd test
-$ make shard-n
+$ make shard-n-other
 $ make shard-np
-$ make shard-s
-$ make shard-other
 $ GITHUB_WORKSPACE=$GOPATH/src/github.com/ovn-org/ovn-kubernetes make control-plane
 $ popd
 ```
