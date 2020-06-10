@@ -386,7 +386,7 @@ var _ = Describe("test e2e inter-node connectivity between worker nodes hybrid o
 				framework.Logf("Destination ping target for %s is %s", dstPingPodName, pingTarget)
 				break
 			}
-			time.Sleep(time.Second * 3)
+			time.Sleep(time.Second * 4)
 			framework.Logf("Retry attempt %d to get pod IP from initializing pod %s", i, dstPingPodName)
 		}
 		// Fail the test if no address is ever retrieved
@@ -499,7 +499,7 @@ var _ = Describe("test e2e inter-node connectivity between worker nodes", func()
 				framework.Logf("Destination ping target for %s is %s", dstPingPodName, pingTarget)
 				break
 			}
-			time.Sleep(time.Second * 3)
+			time.Sleep(time.Second * 4)
 			framework.Logf("Retry attempt %d to get pod IP from initializing pod %s", i, dstPingPodName)
 		}
 		// Fail the test if no address is ever retrieved
@@ -523,12 +523,14 @@ var _ = Describe("e2e external gateway validation", func() {
 		ovnWorkerNode   string = "ovn-worker"
 		ovnHaWorkerNode string = "ovn-control-plane2"
 		ovnContainer    string = "ovnkube-node"
+		ovnControlNode  string = "ovn-control-plane"
 	)
-
 	var (
-		haMode    bool
-		extGWCidr = fmt.Sprintf("%s/24", extGW)
-		ovnNsFlag = fmt.Sprintf("--namespace=%s", ovnNs)
+		haMode        bool
+		ciNetworkName string
+		ciNetworkFlag string
+		extGWCidr     = fmt.Sprintf("%s/24", extGW)
+		ovnNsFlag     = fmt.Sprintf("--namespace=%s", ovnNs)
 	)
 	f := framework.NewDefaultFramework(svcname)
 
@@ -538,13 +540,27 @@ var _ = Describe("e2e external gateway validation", func() {
 		jsonFlag := "-o=jsonpath='{.items..metadata.name}'"
 		fieldSelectorFlag := fmt.Sprintf("--field-selector=spec.nodeName=%s", ovnWorkerNode)
 		fieldSelectorHaFlag := fmt.Sprintf("--field-selector=spec.nodeName=%s", ovnHaWorkerNode)
+		ciNetworkName = "kind"
+		ciNetworkFlag = "{{ .NetworkSettings.Networks.kind.IPAddress }}"
+		// Determine which network the kind install is using. KIND 7 and before use the default network name of 'bridge'
+		controlNodeIP, err := runCommand("docker", "inspect", "-f", ciNetworkFlag, ovnControlNode)
+		if err != nil {
+			framework.Failf("Failed to inspect the container %s: %v", ovnWorkerNode, err)
+		}
+		// trim newline from the inspect output
+		controlNodeIP = strings.TrimSuffix(controlNodeIP, "\n")
+		if ip := net.ParseIP(controlNodeIP); ip == nil {
+			// set values for kind v7 and earlier
+			ciNetworkName = "bridge"
+			ciNetworkFlag = "{{ .NetworkSettings.IPAddress }}"
+		}
 		// start the container that will act as an external gateway
-		_, err := runCommand("docker", "run", "-itd", "--privileged", "--name", gwContainerName, "centos")
+		_, err = runCommand("docker", "run", "-itd", "--privileged", "--network", ciNetworkName, "--name", gwContainerName, "centos")
 		if err != nil {
 			framework.Failf("failed to start external gateway test container: %v", err)
 		}
 		// retrieve the container ip of the external gateway container
-		exVtepIP, err := runCommand("docker", "inspect", "-f", "{{ .NetworkSettings.IPAddress }}", gwContainerName)
+		exVtepIP, err := runCommand("docker", "inspect", "-f", ciNetworkFlag, gwContainerName)
 		if err != nil {
 			framework.Failf("failed to start external gateway test container: %v", err)
 		}
@@ -596,7 +612,7 @@ var _ = Describe("e2e external gateway validation", func() {
 			// ha ci mode runs a named set of nodes with a prefix of ovn-control-plane
 			ciWorkerNodeSrc = ovnHaWorkerNode
 		}
-		localVtepIP, err := runCommand("docker", "inspect", "-f", "{{ .NetworkSettings.IPAddress }}", ciWorkerNodeSrc)
+		localVtepIP, err := runCommand("docker", "inspect", "-f", ciNetworkFlag, ciWorkerNodeSrc)
 		if err != nil {
 			framework.Failf("failed to get the node ip address from node %s %v", ciWorkerNodeSrc, err)
 		}
@@ -659,11 +675,15 @@ var _ = Describe("e2e multiple external gateway update validation", func() {
 		ovnContainer        string = "ovnkube-node"
 		gwContainerNameAlt1 string = "gw-test-container-alt"
 		gwContainerNameAlt2 string = "gw-test-container-alt2"
+		ovnControlNode      string = "ovn-control-plane"
 		getPodIPRetry       int    = 20
 	)
-
-	var haMode bool
-	ovnNsFlag := fmt.Sprintf("--namespace=%s", ovnNs)
+	var (
+		haMode        bool
+		ciNetworkName string
+		ciNetworkFlag string
+		ovnNsFlag     = fmt.Sprintf("--namespace=%s", ovnNs)
+	)
 	f := framework.NewDefaultFramework(svcname)
 
 	// Determine what mode the CI is running in and get relevant endpoint information for the tests
@@ -672,7 +692,21 @@ var _ = Describe("e2e multiple external gateway update validation", func() {
 		jsonFlag := "-o=jsonpath='{.items..metadata.name}'"
 		fieldSelectorFlag := fmt.Sprintf("--field-selector=spec.nodeName=%s", ovnWorkerNode)
 		fieldSelectorHaFlag := fmt.Sprintf("--field-selector=spec.nodeName=%s", ovnHaWorkerNode)
-		// start the container that will act as an external gateway
+		ciNetworkName = "kind"
+		ciNetworkFlag = "{{ .NetworkSettings.Networks.kind.IPAddress }}"
+		// Determine which network bridge the kind install is using. KIND 7 and before use the default network name of 'bridge'
+		controlNodeIP, err := runCommand("docker", "inspect", "-f", ciNetworkFlag, ovnControlNode)
+		if err != nil {
+			framework.Failf("Failed to inspect the container %s: %v", ovnWorkerNode, err)
+		}
+		// trim newline from the inspect output
+		controlNodeIP = strings.TrimSuffix(controlNodeIP, "\n")
+		if ip := net.ParseIP(controlNodeIP); ip == nil {
+			// set values for kind v7 and earlier
+			ciNetworkName = "bridge"
+			ciNetworkFlag = "{{ .NetworkSettings.IPAddress }}"
+		}
+		// attempt to retrieve the pod name that will source the tunnel test in non-HA mode
 		kubectlOut, err := framework.RunKubectl("get", "pods", ovnNsFlag, "-l", labelFlag, jsonFlag, fieldSelectorFlag)
 		if err != nil {
 			framework.Failf("Expected container %s running on %s error %v", ovnContainer, ovnWorkerNode, err)
@@ -711,12 +745,12 @@ var _ = Describe("e2e multiple external gateway update validation", func() {
 		testContainer := fmt.Sprintf("%s-container", srcPingPodName)
 		testContainerFlag := fmt.Sprintf("--container=%s", testContainer)
 		// start the container that will act as an external gateway
-		_, err := runCommand("docker", "run", "-itd", "--privileged", "--name", gwContainerNameAlt1, "centos")
+		_, err := runCommand("docker", "run", "-itd", "--privileged", "--network", ciNetworkName, "--name", gwContainerNameAlt1, "centos")
 		if err != nil {
 			framework.Failf("failed to start external gateway test container %s: %v", gwContainerNameAlt1, err)
 		}
 		// retrieve the container ip of the external gateway container
-		exVtepIpAlt1, err := runCommand("docker", "inspect", "-f", "{{ .NetworkSettings.IPAddress }}", gwContainerNameAlt1)
+		exVtepIpAlt1, err := runCommand("docker", "inspect", "-f", ciNetworkFlag, gwContainerNameAlt1)
 		if err != nil {
 			framework.Failf("failed to start external gateway test container: %v", err)
 		}
@@ -741,7 +775,7 @@ var _ = Describe("e2e multiple external gateway update validation", func() {
 			// ha ci mode runs a named set of nodes with a prefix of ovn-control-plane
 			ciWorkerNodeSrc = ovnHaWorkerNode
 		}
-		localVtepIP, err := runCommand("docker", "inspect", "-f", "{{ .NetworkSettings.IPAddress }}", ciWorkerNodeSrc)
+		localVtepIP, err := runCommand("docker", "inspect", "-f", ciNetworkFlag, ciWorkerNodeSrc)
 		if err != nil {
 			framework.Failf("failed to get the node ip address from node %s %v", ciWorkerNodeSrc, err)
 		}
@@ -796,7 +830,7 @@ var _ = Describe("e2e multiple external gateway update validation", func() {
 				framework.Logf("Source pod is %s is %s", srcPingPodName, pingSrc)
 				break
 			}
-			time.Sleep(time.Second * 3)
+			time.Sleep(time.Second * 4)
 			framework.Logf("Retry attempt %d to get pod IP from initializing pod %s", i, srcPingPodName)
 		}
 		// Fail the test if no address is ever retrieved
@@ -811,12 +845,12 @@ var _ = Describe("e2e multiple external gateway update validation", func() {
 			framework.Failf("Failed to ping the first gateway %s from container %s on node %s: %v", extGwAlt1, ovnContainer, ovnWorkerNode, err)
 		}
 		// start the container that will act as a new external gateway that the tests will be updated to use
-		_, err = runCommand("docker", "run", "-itd", "--privileged", "--name", gwContainerNameAlt2, "centos")
+		_, err = runCommand("docker", "run", "-itd", "--privileged", "--network", ciNetworkName, "--name", gwContainerNameAlt2, "centos")
 		if err != nil {
 			framework.Failf("failed to start external gateway test container %s: %v", gwContainerNameAlt2, err)
 		}
 		// retrieve the container ip of the external gateway container
-		exVtepIpAlt2, err := runCommand("docker", "inspect", "-f", "{{ .NetworkSettings.IPAddress }}", gwContainerNameAlt2)
+		exVtepIpAlt2, err := runCommand("docker", "inspect", "-f", ciNetworkFlag, gwContainerNameAlt2)
 		if err != nil {
 			framework.Failf("failed to start external gateway test container: %v", err)
 		}
