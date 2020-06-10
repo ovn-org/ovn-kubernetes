@@ -32,6 +32,7 @@ OVN_LOGLEVEL_CONTROLLER=""
 OVN_LOGLEVEL_NBCTLD=""
 OVN_MASTER_COUNT=""
 OVN_REMOTE_PROBE_INTERVAL=""
+OVN_HYBRID_OVERLAY_ENABLE=""
 
 # Parse parameters given as arguments to this script.
 while [ "$1" != "" ]; do
@@ -118,6 +119,9 @@ while [ "$1" != "" ]; do
     ;;
   --ovn-sb-raft-port)
     OVN_SB_RAFT_PORT=$VALUE
+    ;;
+  --hybrid-enabled)
+    OVN_HYBRID_OVERLAY_ENABLE=$VALUE
     ;;
   *)
     echo "WARNING: unknown parameter \"$PARAM\""

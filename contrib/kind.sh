@@ -26,7 +26,7 @@ run_kubectl() {
 usage()
 {
     echo "usage: kind.sh [[[-cf|--config-file <file>] [-kt|keep-taint] [-ha|--ha-enabled]"
-    echo "                 [-ii|--install-ingress] [-n4|--no-ipv4] [-i6|--ipv6]"
+    echo "                 [-ho|--hybrid-enabled] [-ii|--install-ingress] [-n4|--no-ipv4] [-i6|--ipv6]"
     echo "                 [-wk|--num-workers <num>]] [-gm|--gateway-mode <mode>] | [-h]]"
     echo ""
     echo "-cf | --config-file          Name of the KIND J2 configuration file."
@@ -34,6 +34,7 @@ usage()
     echo "-kt | --keep-taint           Do not remove taint components."
     echo "                             DEFAULT: Remove taint components."
     echo "-ha | --ha-enabled           Enable high availability. DEFAULT: HA Disabled."
+    echo "-ho | --hybrid-enabled       Enable hybrid overlay. DEFAULT: Disabled."
     echo "-ii | --install-ingress      Flag to install Ingress Components."
     echo "                             DEFAULT: Don't install ingress components."
     echo "-n4 | --no-ipv4              Disable IPv4. DEFAULT: IPv4 Enabled."
@@ -42,10 +43,10 @@ usage()
     echo "                             nodes and no HA - 0 worker nodes."
     echo "-gm | --gateway-mode         Enable 'shared' or 'local' gateway mode. DEFAULT: local."
     echo ""
-} 
+}
 
 parse_args()
-{   
+{
     while [ "$1" != "" ]; do
         case $1 in
             -cf | --config-file )      shift
@@ -59,6 +60,8 @@ parse_args()
             -ii | --install-ingress )  KIND_INSTALL_INGRESS=true
                                        ;;
             -ha | --ha-enabled )       KIND_HA=true
+                                       ;;
+            -ho | --hybrid-enabled )   OVN_HYBRID_OVERLAY_ENABLE=true
                                        ;;
             -kt | --keep-taint )       KIND_REMOVE_TAINT=false
                                        ;;
@@ -93,17 +96,18 @@ parse_args()
 }
 
 print_params()
-{ 
+{
      echo "Using these parameters to install KIND"
      echo ""
      echo "KIND_INSTALL_INGRESS = $KIND_INSTALL_INGRESS"
      echo "KIND_HA = $KIND_HA"
-     echo "KIND_CONFIG_FILE = $KIND_CONFIG "
+     echo "KIND_CONFIG_FILE = $KIND_CONFIG"
      echo "KIND_REMOVE_TAINT = $KIND_REMOVE_TAINT"
      echo "KIND_IPV4_SUPPORT = $KIND_IPV4_SUPPORT"
      echo "KIND_IPV6_SUPPORT = $KIND_IPV6_SUPPORT"
      echo "KIND_NUM_WORKER = $KIND_NUM_WORKER"
      echo "OVN_GATEWAY_MODE = $OVN_GATEWAY_MODE"
+     echo "OVN_HYBRID_OVERLAY_ENABLE = $OVN_HYBRID_OVERLAY_ENABLE"
      echo ""
 }
 
@@ -119,6 +123,7 @@ KIND_CONFIG=${KIND_CONFIG:-./kind.yaml.j2}
 KIND_REMOVE_TAINT=${KIND_REMOVE_TAINT:-true}
 KIND_IPV4_SUPPORT=${KIND_IPV4_SUPPORT:-true}
 KIND_IPV6_SUPPORT=${KIND_IPV6_SUPPORT:-false}
+OVN_HYBRID_OVERLAY_ENABLE=${OVN_HYBRID_OVERLAY_ENABLE:-false}
 
 # Input not currently validated. Modify outside script at your own risk.
 # These are the same values defaulted to in KIND code (kind/default.go).
@@ -233,7 +238,16 @@ pushd ../dist/images
 sudo cp -f ../../go-controller/_output/go/bin/* .
 echo "ref: $(git rev-parse  --symbolic-full-name HEAD)  commit: $(git rev-parse  HEAD)" > git_info
 docker build -t ovn-daemonset-f:dev -f Dockerfile.fedora .
-./daemonset.sh --image=docker.io/library/ovn-daemonset-f:dev --net-cidr=${NET_CIDR} --svc-cidr=${SVC_CIDR} --gateway-mode=${OVN_GATEWAY_MODE} --k8s-apiserver=https://[${API_IP}]:11337 --ovn-master-count=${KIND_NUM_MASTER} --kind --master-loglevel=5
+./daemonset.sh \
+  --image=docker.io/library/ovn-daemonset-f:dev \
+  --net-cidr=${NET_CIDR} \
+  --svc-cidr=${SVC_CIDR} \
+  --gateway-mode=${OVN_GATEWAY_MODE} \
+  --hybrid-enabled=${OVN_HYBRID_OVERLAY_ENABLE} \
+  --k8s-apiserver=https://[${API_IP}]:11337 \
+  --ovn-master-count=${KIND_NUM_MASTER} \
+  --kind \
+  --master-loglevel=5
 popd
 kind load docker-image ovn-daemonset-f:dev --name ${KIND_CLUSTER_NAME}
 pushd ../dist/yaml
