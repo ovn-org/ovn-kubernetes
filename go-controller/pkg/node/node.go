@@ -138,9 +138,16 @@ func isOVNControllerReady(name string) (bool, error) {
 	err = wait.PollImmediate(500*time.Millisecond, 60*time.Second, func() (bool, error) {
 		stdout, _, err := util.RunOVSOfctl("dump-aggregate", "br-int")
 		if err != nil {
+			klog.V(5).Infof("Error dumping aggregate flows: %v "+
+				"for node: %s", err, name)
 			return false, nil
 		}
-		return !strings.Contains(stdout, "flow_count=0"), nil
+		ret := strings.Contains(stdout, "flow_count=0")
+		if ret {
+			klog.V(5).Infof("Got a flow count of 0 when "+
+				"dumping flows for node: %s", name)
+		}
+		return !ret, nil
 	})
 	if err != nil {
 		return false, fmt.Errorf("timed out dumping br-int flow entries for node %s: %v", name, err)
