@@ -121,43 +121,15 @@ jobs:
         target:
           - shard: shard-n-other
             hybrid-overlay: false
-          - shard: shard-np
-            hybrid-overlay: false
-          - shard: shard-ipv4
-            hybrid-overlay: false
-          - shard: control-plane
-            hybrid-overlay: true
         ha:
-         - enabled: "true"
-           name: "HA"
          - enabled: "false"
            name: "noHA"
-        gateway-mode: [local, shared]
+        gateway-mode: [local]
         ipfamily:
-         - ip: ipv4
-           name: "IPv4"
-           ipv4: true
-           ipv6: false
          - ip: ipv6
            name: "IPv6"
            ipv4: false
            ipv6: true
-         - ip: dualstack
-           name: "Dualstack"
-           ipv4: true
-           ipv6: true
-        exclude:
-         - {"ipfamily": {"ip": dualstack}}
-         - {"ipfamily": {"ip": ipv6}, "target": {"shard": shard-ipv4}}
-         - {"ipfamily": {"ip": ipv4}, "ha": {"enabled": "true"}, "gateway-mode": shared}
-         - {"ipfamily": {"ip": ipv4}, "ha": {"enabled": "false"}, "gateway-mode": local}
-         - {"ipfamily": {"ip": ipv4}, "ha": {"enabled": "true"}, "gateway-mode": local, "target": {"shard": shard-np}}
-         - {"ipfamily": {"ip": ipv4}, "ha": {"enabled": "false"}, "gateway-mode": shared, "target": {"shard": shard-s-other}}
-         - {"ipfamily": {"ip": ipv6}, "ha": {"enabled": "false"}, "gateway-mode": shared}
-         - {"ipfamily": {"ip": ipv6}, "ha": {"enabled": "true"}, "gateway-mode": local}
-         - {"ipfamily": {"ip": ipv6}, "ha": {"enabled": "false"}, "gateway-mode": local, "target": {"shard": shard-s-other}}
-         - {"ipfamily": {"ip": ipv6}, "ha": {"enabled": "true"}, "gateway-mode": shared, "target": {"shard": shard-np}}
-         - {"target": {"shard": control-plane}}
     needs: k8s
     env:
       JOB_NAME: "${{ matrix.target.shard }}-${{ matrix.ha.name }}-${{ matrix.gateway-mode }}-${{ matrix.ipfamily.name }}"

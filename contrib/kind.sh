@@ -280,30 +280,9 @@ EOF
   lsmod | grep -qw ipv6 && echo "IPv6 kernel driver loaded and configured." || echo "IPv6 not configured and/or driver loaded on the system."
 
   # TEST-END
-
-  # ip -6 addr -> Run ip command for IPv6
-  # grep "inet6" -> Use only the lines with the IPv6 Address
-  # sed 's@/.*@@g' -> Strip off the trailing subnet mask, /xx
-  # grep -v "^::1$" -> Remove local host
-  # sed '/^fe80:/ d' -> Remove Link-Local Addresses
-  # head -n 1 -> Of the remaining, use first entry
-  if [[ ${KIND_HOST_INTERFACE} != "" ]]; then
-    KIND_HOST_INTERFACE="show dev ${KIND_HOST_INTERFACE}"
-  fi
-  echo "KIND_HOST_INTERFACE=${KIND_HOST_INTERFACE}"
-  API_IPV6=$(ip -6 addr ${KIND_HOST_INTERFACE} | grep "inet6" | awk -F' ' '{print $2}' | \
-             sed 's@/.*@@g' | grep -v "^::1$" | sed '/^fe80:/ d' | head -n 1)
-  if [ -z "$API_IPV6" ]; then
-    # No IPv6 global addresses, Repeat but allow local address
-    API_IPV6=$(ip -6 addr ${KIND_HOST_INTERFACE} | grep "inet6" | awk -F' ' '{print $2}' | \
-               sed 's@/.*@@g' | grep -v "^::1$" | head -n 1)
-    if [ -z "$API_IPV6" ]; then
-      echo "Error detecting machine IPv6 to use as API server"
-      exit 1
-    else
-      echo "Using IPv6 LOCAL for API_IPV6"
-    fi
-  fi
+  # We can use our own IPv6 address internally
+  ip addr add fd00:1234:1234:1234::1/127 dev lo
+  API_IPV6=fd00:1234:1234:1234::1/127
 fi
 
 if [ "$KIND_IPV4_SUPPORT" == true ] && [ "$KIND_IPV6_SUPPORT" == false ]; then
