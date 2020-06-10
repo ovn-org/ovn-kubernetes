@@ -272,11 +272,24 @@ func (n *OvnNode) WatchEndpoints() error {
 			if reflect.DeepEqual(epNew.Subsets, epOld.Subsets) {
 				return
 			}
-			newEndpointAddressMap := buildEndpointAddressMap(epNew.Subsets)
-			for _, subset := range epOld.Subsets {
-				for _, address := range subset.Addresses {
-					if _, ok := newEndpointAddressMap[address.IP]; !ok {
-						deleteConntrack(address.IP)
+			if len(epOld.Subsets) == 0 {
+				svc, err := n.watchFactory.GetService(epOld.Namespace, epOld.Name)
+				if err != nil {
+					klog.V(5).Infof("no service found for endpoint %s in namespace %s",
+						epOld.Name, epOld.Namespace)
+					return
+				}
+				if svc.Spec.ClusterIP != "" {
+					deleteConntrack(svc.Spec.ClusterIP)
+				}
+
+			} else {
+				newEndpointAddressMap := buildEndpointAddressMap(epNew.Subsets)
+				for _, subset := range epOld.Subsets {
+					for _, address := range subset.Addresses {
+						if _, ok := newEndpointAddressMap[address.IP]; !ok {
+							deleteConntrack(address.IP)
+						}
 					}
 				}
 			}
