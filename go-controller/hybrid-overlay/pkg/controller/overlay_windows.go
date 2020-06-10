@@ -10,6 +10,7 @@ import (
 
 	ps "github.com/bhendo/go-powershell"
 	psBackend "github.com/bhendo/go-powershell/backend"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
 )
 
 // Datastore for NetworkInfo.
@@ -20,6 +21,7 @@ type NetworkInfo struct {
 	VSID         uint32
 	AutomaticDNS bool
 	IsPersistent bool
+	VXLANPort    uint16
 }
 
 // Datastore for SubnetInfo.
@@ -98,19 +100,40 @@ func (info *NetworkInfo) GetHostComputeNetworkConfig() (*hcn.HostComputeNetwork,
 		flags = hcn.EnableNonPersistent
 	}
 
+	policies := []hcn.NetworkPolicy{{
+		Type:     hcn.AutomaticDNS,
+		Settings: dnsJSON,
+	}}
+
+	// Only configure the VXLAN UDP port if the port is not
+	// the default port.
+	// Note: the calling code is responsible for making sure non-default
+	// ports are only passed to this function if the underlying platform
+	// supports it.
+	if info.VXLANPort != config.DefaultVXLANPort {
+		vxlanPortJSON, err := json.Marshal(&hcn.VxlanPortPolicySetting{
+			Port: info.VXLANPort,
+		})
+		if err != nil {
+			return nil, fmt.Errorf("failed to marshal the VXLAN port policy: %v", err)
+		}
+
+		policies = append(policies, hcn.NetworkPolicy{
+			Type:     hcn.VxlanPort,
+			Settings: vxlanPortJSON,
+		})
+	}
+
 	return &hcn.HostComputeNetwork{
 		SchemaVersion: hcn.SchemaVersion{
 			Major: 2,
 			Minor: 0,
 		},
-		Name:  info.Name,
-		Type:  hcn.NetworkType("Overlay"),
-		Ipams: ipams,
-		Flags: flags,
-		Policies: []hcn.NetworkPolicy{{
-			Type:     hcn.AutomaticDNS,
-			Settings: dnsJSON,
-		}},
+		Name:     info.Name,
+		Type:     hcn.NetworkType("Overlay"),
+		Ipams:    ipams,
+		Flags:    flags,
+		Policies: policies,
 	}, nil
 }
 

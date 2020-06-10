@@ -7,6 +7,7 @@ import (
 
 	"github.com/ovn-org/ovn-kubernetes/go-controller/hybrid-overlay/pkg/types"
 	houtil "github.com/ovn-org/ovn-kubernetes/go-controller/hybrid-overlay/pkg/util"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/kube"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
 
@@ -46,6 +47,11 @@ func newNodeController(kube kube.Interface,
 			"will not work. HostRoute policies are available as a KB update " +
 			"for Windows Server 2019 version 1809 and out of the box in " +
 			"Windows Server 2019 version 1903.")
+	}
+
+	if config.HybridOverlay.VXLANPort != config.DefaultVXLANPort && !supportedFeatures.VxlanPort {
+		return nil, fmt.Errorf("This version of windows does not support setting the VXLAN " +
+			"UDP port. Please make sure you install all the KB updates on your system.")
 	}
 
 	node, err := kube.GetNode(nodeName)
@@ -100,6 +106,10 @@ func ensureBaseNetwork() error {
 		return nil
 	}
 
+	if config.HybridOverlay.VXLANPort > 65535 {
+		return fmt.Errorf("The hybrid overlay VXLAN port cannot be greater than 65535. Current value: %v", config.HybridOverlay.VXLANPort)
+	}
+
 	baseNetworkInfo := NetworkInfo{
 		AutomaticDNS: false,
 		IsPersistent: true,
@@ -109,9 +119,10 @@ func ensureBaseNetwork() error {
 			GatewayAddress: fakeSubnetGateway,
 			VSID:           fakeSubnetVNI,
 		}},
+		VXLANPort: uint16(config.HybridOverlay.VXLANPort),
 	}
 
-	klog.Infof("Creating the base overlay network '%s'.", baseNetworkName)
+	klog.Infof("Creating the base overlay network '%s' (VXLAN port = %d).", baseNetworkName, config.HybridOverlay.VXLANPort)
 
 	// Retrieve the network schema object
 	baseNetworkSchema, err := baseNetworkInfo.GetHostComputeNetworkConfig()
@@ -139,7 +150,7 @@ func ensureBaseNetwork() error {
 // For a windows node, this means watching for all nodes and programming the routing
 func (n *NodeController) AddNode(node *kapi.Node) error {
 	if node.Status.NodeInfo.MachineID == n.machineID {
-		// Initialize or the local node (or reconfigure it if the addresses
+		// Initialize the local node (or reconfigure it if the addresses
 		// have changed) by creating the network object and setting up
 		// all the VXLAN tunnels towards other nodes
 		cidr, nodeIP := getNodeSubnetAndIP(node)
@@ -150,6 +161,11 @@ func (n *NodeController) AddNode(node *kapi.Node) error {
 				return fmt.Errorf("failed to initialize node: %v", err)
 			}
 		}
+		return nil
+	}
+
+	if n.networkID == "" {
+		// Just silently return, we cannot configure routes on a non-initialized network
 		return nil
 	}
 
@@ -166,8 +182,8 @@ func (n *NodeController) AddNode(node *kapi.Node) error {
 		return fmt.Errorf("error getting HCN network: %v", err)
 	}
 
-	klog.Infof("Adding a remote subnet route for CIDR '%s' (remote node address: %s, distributed router MAC: %s, VNI: %v).",
-		cidr.String(), nodeIP.String(), drMAC.String(), types.HybridOverlayVNI)
+	klog.Infof("Adding a remote subnet route for CIDR '%s' (node: '%s', remote node address: %s, distributed router MAC: %s, VNI: %v).",
+		cidr.String(), node.Name, nodeIP.String(), drMAC.String(), types.HybridOverlayVNI)
 	networkPolicySettings := hcn.RemoteSubnetRoutePolicySetting{
 		// VXLAN virtual network Identifier. Is expected to be 4097 or higher on Windows
 		IsolationId: types.HybridOverlayVNI,
@@ -237,6 +253,10 @@ func (n *NodeController) initSelf(node *kapi.Node, nodeSubnet *net.IPNet) error 
 	// as to what this gateway address should be.
 	gatewayAddress := util.NextIP(nodeSubnet.IP)
 
+	if config.HybridOverlay.VXLANPort > 65535 {
+		return fmt.Errorf("The hybrid overlay VXLAN port cannot be greater than 65535. Current value: %v", config.HybridOverlay.VXLANPort)
+	}
+
 	network := GetExistingNetwork(networkName, nodeSubnet.String(), gatewayAddress.String())
 	if network == nil {
 		// Create the overlay network
@@ -249,6 +269,7 @@ func (n *NodeController) initSelf(node *kapi.Node, nodeSubnet *net.IPNet) error 
 				GatewayAddress: gatewayAddress,
 				VSID:           types.HybridOverlayVNI,
 			}},
+			VXLANPort: uint16(config.HybridOverlay.VXLANPort),
 		}
 		klog.Infof("Creating overlay network '%s' (address prefix %v) with gateway address: %v", networkName, nodeSubnet, gatewayAddress)
 
@@ -270,8 +291,8 @@ func (n *NodeController) initSelf(node *kapi.Node, nodeSubnet *net.IPNet) error 
 			return fmt.Errorf("Unable to add host route policy, error: %v", err)
 		}
 	} else {
-		klog.Infof("Reusing existing overlay network '%s' (address prefix %v) with gateway address: %v.",
-			networkName, nodeSubnet, gatewayAddress)
+		klog.Infof("Reusing existing overlay network '%s' (address prefix %v, VXLAN port = %d) with gateway address: %v.",
+			networkName, nodeSubnet, config.HybridOverlay.VXLANPort, gatewayAddress)
 
 		// TODO: there is a better approach than clearing all the remote
 		// subnet policies, and then re-creating the ones still applicable.
