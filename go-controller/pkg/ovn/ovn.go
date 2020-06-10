@@ -618,8 +618,6 @@ func (oc *Controller) WatchNodes() error {
 				return
 			}
 
-			klog.V(5).Infof("Updated event for Node %q", node.Name)
-
 			_, failed := mgmtPortFailed.Load(node.Name)
 			if failed || macAddressChanged(oldNode, node) {
 				err := oc.syncNodeManagementPort(node, nil)
