@@ -576,6 +576,7 @@ func (oc *Controller) syncNodeGateway(node *kapi.Node, hostSubnets []*net.IPNet)
 func (oc *Controller) WatchNodes() error {
 	var gatewaysFailed sync.Map
 	var mgmtPortFailed sync.Map
+	var addNodeFailed sync.Map
 	_, err := oc.watchFactory.AddNodeHandler(cache.ResourceEventHandlerFuncs{
 		AddFunc: func(obj interface{}) {
 			node := obj.(*kapi.Node)
@@ -590,7 +591,10 @@ func (oc *Controller) WatchNodes() error {
 			klog.V(5).Infof("Added event for Node %q", node.Name)
 			hostSubnets, err := oc.addNode(node)
 			if err != nil {
-				klog.Errorf("error creating subnet for node %s: %v", node.Name, err)
+				klog.Errorf("NodeAdd: error creating subnet for node %s: %v", node.Name, err)
+				addNodeFailed.Store(node.Name, true)
+				mgmtPortFailed.Store(node.Name, true)
+				gatewaysFailed.Store(node.Name, true)
 				return
 			}
 
@@ -618,9 +622,20 @@ func (oc *Controller) WatchNodes() error {
 				return
 			}
 
-			_, failed := mgmtPortFailed.Load(node.Name)
+			var hostSubnets []*net.IPNet
+			_, failed := addNodeFailed.Load(node.Name)
+			if failed {
+				hostSubnets, err = oc.addNode(node)
+				if err != nil {
+					klog.Errorf("NodeUpdate: error creating subnet for node %s: %v", node.Name, err)
+					return
+				}
+				addNodeFailed.Delete(node.Name)
+			}
+
+			_, failed = mgmtPortFailed.Load(node.Name)
 			if failed || macAddressChanged(oldNode, node) {
-				err := oc.syncNodeManagementPort(node, nil)
+				err := oc.syncNodeManagementPort(node, hostSubnets)
 				if err != nil {
 					klog.Errorf("error updating management port for node %s: %v", node.Name, err)
 					mgmtPortFailed.Store(node.Name, true)
@@ -657,6 +672,7 @@ func (oc *Controller) WatchNodes() error {
 			oc.lsMutex.Lock()
 			delete(oc.logicalSwitchCache, node.Name)
 			oc.lsMutex.Unlock()
+			addNodeFailed.Delete(node.Name)
 			mgmtPortFailed.Delete(node.Name)
 			gatewaysFailed.Delete(node.Name)
 			// If this node was serving the external IP load balancer for services, migrate to a new node
