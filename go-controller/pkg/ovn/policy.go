@@ -95,7 +95,7 @@ func (oc *Controller) syncNetworkPolicies(networkPolicies []interface{}) {
 }
 
 func addAllowACLFromNode(logicalSwitch string, mgmtPortIP net.IP) error {
-	match := fmt.Sprintf("%s.src==%s", ipMatch(), mgmtPortIP.String())
+	match := fmt.Sprintf("%s.src==%s", ipMatch(mgmtPortIP), mgmtPortIP.String())
 	_, stderr, err := util.RunOVNNbctl("--may-exist", "acl-add", logicalSwitch,
 		"to-lport", defaultAllowPriority, match, "allow-related")
 	if err != nil {
