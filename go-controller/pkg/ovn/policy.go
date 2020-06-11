@@ -2,7 +2,6 @@ package ovn
 
 import (
 	"fmt"
-	"net"
 	"sync"
 
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/factory"
@@ -92,18 +91,6 @@ func (oc *Controller) syncNetworkPolicies(networkPolicies []interface{}) {
 	if err != nil {
 		klog.Errorf("Error in syncing network policies: %v", err)
 	}
-}
-
-func addAllowACLFromNode(logicalSwitch string, mgmtPortIP net.IP) error {
-	match := fmt.Sprintf("%s.src==%s", ipMatch(), mgmtPortIP.String())
-	_, stderr, err := util.RunOVNNbctl("--may-exist", "acl-add", logicalSwitch,
-		"to-lport", defaultAllowPriority, match, "allow-related")
-	if err != nil {
-		return fmt.Errorf("failed to create the node acl for "+
-			"logical_switch=%s, stderr: %q (%v)", logicalSwitch, stderr, err)
-	}
-
-	return nil
 }
 
 func getACLMatch(portGroupName, match string, policyType knet.PolicyType) string {

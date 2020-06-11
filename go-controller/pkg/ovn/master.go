@@ -386,15 +386,15 @@ func (oc *Controller) syncNodeManagementPort(node *kapi.Node, hostSubnets []*net
 		}
 	}
 
+	txn := util.NewNBTxn()
+
 	var v4Subnet *net.IPNet
 	addresses := macAddress.String()
 	for _, hostSubnet := range hostSubnets {
 		mgmtIfAddr := util.GetNodeManagementIfAddr(hostSubnet)
 		addresses += " " + mgmtIfAddr.IP.String()
-
-		if err := addAllowACLFromNode(node.Name, mgmtIfAddr.IP); err != nil {
-			return err
-		}
+		match := fmt.Sprintf("%s.src==%s", ipMatch(), mgmtIfAddr.IP.String())
+		txn.Add("--may-exist", "acl-add", node.Name, "to-lport", defaultAllowPriority, match, "allow-related")
 
 		if !utilnet.IsIPv6CIDR(hostSubnet) {
 			v4Subnet = hostSubnet
@@ -402,11 +402,11 @@ func (oc *Controller) syncNodeManagementPort(node *kapi.Node, hostSubnets []*net
 	}
 
 	// Create this node's management logical port on the node switch
-	stdout, stderr, err := util.RunOVNNbctl(
-		"--", "--may-exist", "lsp-add", node.Name, util.K8sPrefix+node.Name,
-		"--", "lsp-set-addresses", util.K8sPrefix+node.Name, addresses)
-	if err != nil {
-		klog.Errorf("Failed to add logical port to switch, stdout: %q, stderr: %q, error: %v", stdout, stderr, err)
+	txn.Add("--may-exist", "lsp-add", node.Name, util.K8sPrefix+node.Name)
+	txn.Add("lsp-set-addresses", util.K8sPrefix+node.Name, addresses)
+
+	if stdout, stderr, err := txn.Commit(); err != nil {
+		klog.Errorf("Failed to set up node %q management port, stdout: %q, stderr: %q, error: %v", node.Name, stdout, stderr, err)
 		return err
 	}
 
