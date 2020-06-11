@@ -149,16 +149,7 @@ jobs:
         exclude:
          - {"ipfamily": {"ip": dualstack}}
          - {"ipfamily": {"ip": ipv6}, "target": {"shard": shard-ipv4}}
-         - {"ipfamily": {"ip": ipv4}, "ha": {"enabled": "true"}, "gateway-mode": shared}
-         - {"ipfamily": {"ip": ipv4}, "ha": {"enabled": "false"}, "gateway-mode": local}
-         - {"ipfamily": {"ip": ipv4}, "ha": {"enabled": "true"}, "gateway-mode": local, "target": {"shard": shard-np}}
-         - {"ipfamily": {"ip": ipv4}, "ha": {"enabled": "false"}, "gateway-mode": shared, "target": {"shard": shard-n-other}}
-         - {"ipfamily": {"ip": ipv6}, "ha": {"enabled": "false"}, "gateway-mode": shared}
-         - {"ipfamily": {"ip": ipv6}, "ha": {"enabled": "true"}, "gateway-mode": local}
-         - {"ipfamily": {"ip": ipv6}, "ha": {"enabled": "false"}, "gateway-mode": local, "target": {"shard": shard-n-other}}
-         - {"ipfamily": {"ip": ipv6}, "ha": {"enabled": "true"}, "gateway-mode": shared, "target": {"shard": shard-np}}
-         - {"ipfamily": {"ip": ipv4}, "target": {"shard": shard-ipv4}}
-         - {"target": {"shard": control-plane}}
+         - {"ipfamily": {"ip": ipv6}, "ha": {"enabled": "true"}}
     needs: k8s
     env:
       JOB_NAME: "${{ matrix.target.shard }}-${{ matrix.ha.name }}-${{ matrix.gateway-mode }}-${{ matrix.ipfamily.name }}"
