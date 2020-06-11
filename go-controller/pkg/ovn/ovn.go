@@ -167,8 +167,8 @@ func (oc *Controller) Run(stopChan chan struct{}) error {
 		return err
 	}
 
-	for _, f := range []func() error{oc.WatchPods, oc.WatchServices, oc.WatchEndpoints,
-		oc.WatchNamespaces, oc.WatchNetworkPolicy} {
+	for _, f := range []func() error{oc.WatchPods, oc.WatchNamespaces, oc.WatchServices,
+		oc.WatchEndpoints, oc.WatchNetworkPolicy} {
 		if err := f(); err != nil {
 			return err
 		}
