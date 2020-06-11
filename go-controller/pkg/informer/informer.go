@@ -22,6 +22,7 @@ import (
 type EventHandler interface {
 	Run(threadiness int, stopChan <-chan struct{}) error
 	GetIndexer() cache.Indexer
+	Synced() bool
 }
 
 type eventHandler struct {
@@ -85,10 +86,12 @@ func NewDefaultEventHandler(
 	}
 	informer.AddEventHandler(cache.ResourceEventHandlerFuncs{
 		AddFunc: func(obj interface{}) {
+			fmt.Println("got add from cache")
 			// always enqueue adds
 			e.enqueue(obj)
 		},
 		UpdateFunc: func(old, new interface{}) {
+			fmt.Println("got update from cache")
 			oldObj := old.(metav1.Object)
 			newObj := new.(metav1.Object)
 			// Make sure object is not set for deletion and was actually changed
@@ -101,6 +104,7 @@ func NewDefaultEventHandler(
 			}
 		},
 		DeleteFunc: func(obj interface{}) {
+			fmt.Println("got delete from cache")
 			// dispatch to enqueueDelete to ensure deleted items are handled properly
 			e.enqueueDelete(obj)
 		},
@@ -113,6 +117,10 @@ func NewDefaultEventHandler(
 // this wrapper to create Listers
 func (e *eventHandler) GetIndexer() cache.Indexer {
 	return e.informer.GetIndexer()
+}
+
+func (e *eventHandler) Synced() bool {
+	return e.informer.HasSynced()
 }
 
 // Run starts event processing for the eventHandler.
