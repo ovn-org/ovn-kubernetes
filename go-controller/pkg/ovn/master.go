@@ -627,15 +627,7 @@ func (oc *Controller) ensureNodeLogicalNetwork(nodeName string, hostSubnets []*n
 		}
 	}
 	// Add the node to the logical switch cache
-	oc.lsMutex.Lock()
-	defer oc.lsMutex.Unlock()
-	if existing, ok := oc.logicalSwitchCache[nodeName]; ok && !reflect.DeepEqual(existing, hostSubnets) {
-		klog.Warningf("Node %q logical switch already in cache with subnet %s; replacing with %s", nodeName,
-			util.JoinIPNets(existing, ","), util.JoinIPNets(hostSubnets, ","))
-	}
-	oc.logicalSwitchCache[nodeName] = hostSubnets
-
-	return nil
+	return oc.lsManager.AddNode(nodeName, hostSubnets)
 }
 
 func (oc *Controller) addNodeAnnotations(node *kapi.Node, hostSubnets []*net.IPNet) error {

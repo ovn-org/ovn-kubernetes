@@ -2,12 +2,14 @@ package util
 
 import (
 	"fmt"
-	utilnet "k8s.io/utils/net"
 	"math/big"
 	"net"
 	"runtime"
 	"strconv"
 	"strings"
+
+	"k8s.io/klog"
+	utilnet "k8s.io/utils/net"
 )
 
 // NextIP returns IP incremented by 1
@@ -29,10 +31,16 @@ func intToIP(i *big.Int) net.IP {
 
 // GetPortAddresses returns the MAC and IPs of the given logical switch port
 func GetPortAddresses(portName string) (net.HardwareAddr, []net.IP, error) {
-	out, stderr, err := RunOVNNbctl("get", "logical_switch_port", portName, "dynamic_addresses", "addresses")
+	out, stderr, err := RunOVNNbctl("--if-exists", "get", "logical_switch_port", portName, "dynamic_addresses", "addresses")
 	if err != nil {
 		return nil, nil, fmt.Errorf("Error while obtaining dynamic addresses for %s: stdout: %q, stderr: %q, error: %v",
 			portName, out, stderr, err)
+	}
+
+	if out == "" {
+		klog.V(5).Infof("Port %s doesn't exist in the nbdb while fetching"+
+			" port addresses", portName)
+		return nil, nil, nil
 	}
 	// Convert \r\n to \n to support Windows line endings
 	out = strings.Replace(out, "\r\n", "\n", -1)

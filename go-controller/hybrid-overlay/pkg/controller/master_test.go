@@ -29,7 +29,7 @@ func addGetPortAddressesCmds(fexec *ovntest.FakeExec, nodeName, hybMAC, hybIP st
 	addresses = strings.TrimSpace(addresses)
 
 	fexec.AddFakeCmd(&ovntest.ExpectedCmd{
-		Cmd: "ovn-nbctl --timeout=15 get logical_switch_port int-" + nodeName + " dynamic_addresses addresses",
+		Cmd: "ovn-nbctl --timeout=15 --if-exists get logical_switch_port int-" + nodeName + " dynamic_addresses addresses",
 		// hybrid overlay ports have static addresses
 		Output: "[]\n[" + addresses + "]\n",
 	})

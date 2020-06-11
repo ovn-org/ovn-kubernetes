@@ -392,8 +392,8 @@ var _ = Describe("OVN NetworkPolicy Operations", func() {
 					"10.128.1.2",
 					"10.128.1.1",
 					"myPod",
-					"10.128.1.4",
-					"11:22:33:44:55:66",
+					"10.128.1.3",
+					"0a:58:0a:80:01:03",
 					namespace1.Name,
 				)
 				networkPolicy := newNetworkPolicy("networkpolicy1", namespace1.Name,
@@ -481,8 +481,8 @@ var _ = Describe("OVN NetworkPolicy Operations", func() {
 					"10.128.1.2",
 					"10.128.1.1",
 					"myPod",
-					"10.128.1.4",
-					"11:22:33:44:55:66",
+					"10.128.1.3",
+					"0a:58:0a:80:01:03",
 					namespace2.Name,
 				)
 				networkPolicy := newNetworkPolicy("networkpolicy1", namespace1.Name,
@@ -581,8 +581,8 @@ var _ = Describe("OVN NetworkPolicy Operations", func() {
 					"10.128.1.2",
 					"10.128.1.1",
 					"myPod",
-					"10.128.1.4",
-					"11:22:33:44:55:66",
+					"10.128.1.3",
+					"0a:58:0a:80:01:03",
 					namespace1.Name,
 				)
 				nPod := newPod(nPodTest.namespace, nPodTest.podName, nPodTest.nodeName, nPodTest.podIP)
@@ -671,8 +671,8 @@ var _ = Describe("OVN NetworkPolicy Operations", func() {
 					"10.128.1.2",
 					"10.128.1.1",
 					"myPod",
-					"10.128.1.4",
-					"11:22:33:44:55:66",
+					"10.128.1.3",
+					"0a:58:0a:80:01:03",
 					namespace1.Name,
 				)
 
@@ -857,8 +857,8 @@ var _ = Describe("OVN NetworkPolicy Operations", func() {
 					"10.128.1.2",
 					"10.128.1.1",
 					"myPod",
-					"10.128.1.4",
-					"11:22:33:44:55:66",
+					"10.128.1.3",
+					"0a:58:0a:80:01:03",
 					namespace1.Name,
 				)
 				networkPolicy := newNetworkPolicy("networkpolicy1", namespace1.Name,
@@ -956,8 +956,8 @@ var _ = Describe("OVN NetworkPolicy Operations", func() {
 					"10.128.1.2",
 					"10.128.1.1",
 					"myPod",
-					"10.128.1.4",
-					"11:22:33:44:55:66",
+					"10.128.1.3",
+					"0a:58:0a:80:01:03",
 					namespace2.Name,
 				)
 				networkPolicy := newNetworkPolicy("networkpolicy1", namespace1.Name,
@@ -1065,8 +1065,8 @@ var _ = Describe("OVN NetworkPolicy Operations", func() {
 					"10.128.1.2",
 					"10.128.1.1",
 					"myPod",
-					"10.128.1.4",
-					"11:22:33:44:55:66",
+					"10.128.1.3",
+					"0a:58:0a:80:01:03",
 					namespace1.Name,
 				)
 				networkPolicy := newNetworkPolicy("networkpolicy1", namespace1.Name,
@@ -1198,8 +1198,8 @@ var _ = Describe("OVN NetworkPolicy Operations", func() {
 					"10.128.1.2",
 					"10.128.1.1",
 					"myPod",
-					"10.128.1.4",
-					"11:22:33:44:55:66",
+					"10.128.1.3",
+					"0a:58:0a:80:01:03",
 					namespace1.Name,
 				)
 
@@ -1253,8 +1253,8 @@ var _ = Describe("OVN NetworkPolicy Operations", func() {
 					"10.128.1.2",
 					"10.128.1.1",
 					"myPod",
-					"10.128.1.4",
-					"11:22:33:44:55:66",
+					"10.128.1.3",
+					"0a:58:0a:80:01:03",
 					namespace1.Name,
 				)
 

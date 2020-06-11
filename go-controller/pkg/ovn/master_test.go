@@ -251,7 +251,7 @@ func addNodeportLBs(fexec *ovntest.FakeExec, nodeName, tcpLBUUID, udpLBUUID, sct
 
 func addGetPortAddressesCmds(fexec *ovntest.FakeExec, nodeName, hybMAC, hybIP string) {
 	fexec.AddFakeCmd(&ovntest.ExpectedCmd{
-		Cmd: "ovn-nbctl --timeout=15 get logical_switch_port int-" + nodeName + " dynamic_addresses addresses",
+		Cmd: "ovn-nbctl --timeout=15 --if-exists get logical_switch_port int-" + nodeName + " dynamic_addresses addresses",
 		// hybrid overlay ports have static addresses
 		Output: "[]\n[" + hybMAC + " " + hybIP + "]\n",
 	})
@@ -644,6 +644,7 @@ subnet=%s
 			clusterController.UDPLoadBalancerUUID = udpLBUUID
 			clusterController.SCTPLoadBalancerUUID = sctpLBUUID
 			clusterController.SCTPSupport = true
+
 			_ = clusterController.joinSubnetAllocator.AddNetworkRange(ovntest.MustParseIPNet("100.64.0.0/16"), 3)
 
 			// Let the real code run and ensure OVN database sync
@@ -864,6 +865,7 @@ var _ = Describe("Gateway Init Operations", func() {
 			clusterController.UDPLoadBalancerUUID = udpLBUUID
 			clusterController.SCTPLoadBalancerUUID = sctpLBUUID
 			clusterController.SCTPSupport = true
+
 			_ = clusterController.joinSubnetAllocator.AddNetworkRange(ovntest.MustParseIPNet("100.64.0.0/16"), 3)
 
 			// Let the real code run and ensure OVN database sync
@@ -1055,6 +1057,7 @@ var _ = Describe("Gateway Init Operations", func() {
 			clusterController.UDPLoadBalancerUUID = udpLBUUID
 			clusterController.SCTPLoadBalancerUUID = sctpLBUUID
 			clusterController.SCTPSupport = true
+
 			_ = clusterController.joinSubnetAllocator.AddNetworkRange(ovntest.MustParseIPNet("100.64.0.0/16"), 3)
 			clusterController.nodeLocalNatIPAllocator, _ = ipallocator.NewCIDRRange(ovntest.MustParseIPNet(util.V4NodeLocalNatSubnet))
 

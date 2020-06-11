@@ -2,8 +2,10 @@ package ovn
 
 import (
 	"fmt"
-	hotypes "github.com/ovn-org/ovn-kubernetes/go-controller/hybrid-overlay/pkg/types"
 	"net"
+	"strings"
+
+	hotypes "github.com/ovn-org/ovn-kubernetes/go-controller/hybrid-overlay/pkg/types"
 
 	"github.com/urfave/cli/v2"
 
@@ -88,37 +90,39 @@ func (p pod) baseCmds(fexec *ovntest.FakeExec) {
 
 func (p pod) populateLogicalSwitchCache(fakeOvn *FakeOVN) {
 	Expect(p.nodeName).NotTo(Equal(""))
-	fakeOvn.controller.lsMutex.Lock()
-	defer fakeOvn.controller.lsMutex.Unlock()
-	fakeOvn.controller.logicalSwitchCache[p.nodeName] = ovntest.MustParseIPNets(p.nodeSubnet)
+	fakeOvn.controller.lsManager.AddNode(p.nodeName, []*net.IPNet{ovntest.MustParseIPNet(p.nodeSubnet)})
 }
 
 func (p pod) addCmds(fexec *ovntest.FakeExec, fail bool) {
 	// pod setup
-	fexec.AddFakeCmdsNoOutputNoError([]string{
-		"ovn-nbctl --timeout=15 --may-exist lsp-add " + p.nodeName + " " + p.portName + " -- lsp-set-addresses " + p.portName + " dynamic -- set logical_switch_port " + p.portName + " external-ids:namespace=" + p.namespace + " external-ids:pod=true",
-	})
-	fexec.AddFakeCmd(&ovntest.ExpectedCmd{
-		Cmd:    "ovn-nbctl --timeout=15 get logical_switch_port " + p.portName + " dynamic_addresses addresses",
-		Output: `"` + p.podMAC + " " + p.podIP + `"` + "\n" + "[]",
-	})
-	fexec.AddFakeCmd(&ovntest.ExpectedCmd{
-		Cmd:    "ovn-nbctl --timeout=15 get logical_switch_port " + p.portName + " _uuid",
-		Output: fakeUUID + "\n",
-	})
-	if fail {
-		fexec.AddFakeCmd(&ovntest.ExpectedCmd{
-			Cmd: "ovn-nbctl --timeout=15 lsp-set-port-security " + p.portName + " " + p.podMAC + " " + p.podIP,
-			Err: fmt.Errorf("adsfadsfasfdasfd"),
-		})
-	} else {
+	if !fail {
 		fexec.AddFakeCmdsNoOutputNoError([]string{
-			"ovn-nbctl --timeout=15 lsp-set-port-security " + p.portName + " " + p.podMAC + " " + p.podIP,
+			"ovn-nbctl --timeout=15 --if-exists get logical_switch_port" + " " + p.portName + " dynamic_addresses addresses",
+		})
+
+		fexec.AddFakeCmdsNoOutputNoError([]string{
+			"ovn-nbctl --timeout=15 --may-exist lsp-add " + p.nodeName + " " + p.portName + " -- lsp-set-addresses " + p.portName + " " + p.podMAC + " " + p.podIP + " -- set logical_switch_port " + p.portName + " external-ids:namespace=" + p.namespace + " external-ids:pod=true -- lsp-set-port-security " + p.portName + " " + p.podMAC + " " + p.podIP,
+		})
+		fexec.AddFakeCmd(&ovntest.ExpectedCmd{
+			Cmd:    "ovn-nbctl --timeout=15 get logical_switch_port " + p.portName + " _uuid",
+			Output: fakeUUID + "\n",
 		})
 		fexec.AddFakeCmdsNoOutputNoError([]string{
 			"ovn-nbctl --timeout=15 --if-exists remove port_group mcastPortGroupDeny ports " + fakeUUID + " -- add port_group mcastPortGroupDeny ports " + fakeUUID,
 		})
+
+	} else {
+		fexec.AddFakeCmdsNoOutputNoError([]string{
+			"ovn-nbctl --timeout=15 --if-exists get logical_switch_port" + " " + p.portName + " dynamic_addresses addresses",
+		})
+		fexec.AddFakeCmd(&ovntest.ExpectedCmd{
+			Cmd: strings.Join([]string{
+				"ovn-nbctl --timeout=15 --may-exist lsp-add " + p.nodeName + " " + p.portName + " -- lsp-set-addresses " + p.portName + " " + p.podMAC + " " + p.podIP + " -- set logical_switch_port " + p.portName + " external-ids:namespace=" + p.namespace + " external-ids:pod=true -- lsp-set-port-security " + p.portName + " " + p.podMAC + " " + p.podIP,
+			}, " "),
+			Err: fmt.Errorf("adsfadsfasfdasfd"),
+		})
 	}
+
 }
 
 func (p pod) addCmdsForNonExistingPod(fexec *ovntest.FakeExec) {
@@ -132,14 +136,11 @@ func (p pod) addCmdsForExistingPod(fexec *ovntest.FakeExec, addPort bool) {
 		addPortCmd = fmt.Sprintf("lsp-add %s %s ", p.nodeName, p.portName)
 	}
 	fexec.AddFakeCmdsNoOutputNoError([]string{
-		fmt.Sprintf("ovn-nbctl --timeout=15 %s-- lsp-set-addresses %s %s %s -- --if-exists clear logical_switch_port %s dynamic_addresses -- set logical_switch_port %s external-ids:namespace=namespace external-ids:pod=true", addPortCmd, p.portName, p.podMAC, p.podIP, p.portName, p.portName),
+		fmt.Sprintf("ovn-nbctl --timeout=15 %s-- lsp-set-addresses %s %s %s -- --if-exists clear logical_switch_port %s dynamic_addresses -- set logical_switch_port %s external-ids:namespace=namespace external-ids:pod=true -- lsp-set-port-security %s %s %s", addPortCmd, p.portName, p.podMAC, p.podIP, p.portName, p.portName, p.portName, p.podMAC, p.podIP),
 	})
 	fexec.AddFakeCmd(&ovntest.ExpectedCmd{
 		Cmd:    "ovn-nbctl --timeout=15 get logical_switch_port " + p.portName + " _uuid",
 		Output: fakeUUID + "\n",
-	})
-	fexec.AddFakeCmdsNoOutputNoError([]string{
-		"ovn-nbctl --timeout=15 lsp-set-port-security " + p.portName + " " + p.podMAC + " " + p.podIP,
 	})
 	fexec.AddFakeCmdsNoOutputNoError([]string{
 		"ovn-nbctl --timeout=15 --if-exists remove port_group mcastPortGroupDeny ports " + fakeUUID + " -- add port_group mcastPortGroupDeny ports " + fakeUUID,
@@ -194,8 +195,8 @@ var _ = Describe("OVN Pod Operations", func() {
 					"10.128.1.2",
 					"10.128.1.1",
 					"myPod",
-					"10.128.1.4",
-					"11:22:33:44:55:66",
+					"10.128.1.3",
+					"0a:58:0a:80:01:03",
 					"namespace",
 				)
 
@@ -251,8 +252,8 @@ var _ = Describe("OVN Pod Operations", func() {
 					"10.128.1.2",
 					"10.128.1.1",
 					"myPod",
-					"10.128.1.4",
-					"11:22:33:44:55:66",
+					"10.128.1.3",
+					"0a:58:0a:80:01:03",
 					"namespace",
 				)
 
@@ -298,8 +299,8 @@ var _ = Describe("OVN Pod Operations", func() {
 					"10.128.1.2",
 					"10.128.1.1",
 					"myPod",
-					"10.128.1.4",
-					"11:22:33:44:55:66",
+					"10.128.1.3",
+					"0a:58:0a:80:01:03",
 					"namespace",
 				)
 
@@ -353,8 +354,8 @@ var _ = Describe("OVN Pod Operations", func() {
 					"10.128.1.2",
 					"10.128.1.1",
 					"myPod",
-					"10.128.1.4",
-					"11:22:33:44:55:66",
+					"10.128.1.3",
+					"0a:58:0a:80:01:03",
 					"namespace",
 				)
 
@@ -362,6 +363,7 @@ var _ = Describe("OVN Pod Operations", func() {
 					Cmd:    "ovn-nbctl --timeout=15 --data=bare --no-heading --columns=name find logical_switch_port external_ids:pod=true",
 					Output: "\n",
 				})
+
 				t.addCmdsForNonExistingFailedPod(fExec)
 
 				fakeOvn.start(ctx, &v1.PodList{
@@ -405,8 +407,8 @@ var _ = Describe("OVN Pod Operations", func() {
 					"10.128.1.2",
 					"10.128.1.1",
 					"myPod",
-					"10.128.1.4",
-					"11:22:33:44:55:66",
+					"10.128.1.3",
+					"0a:58:0a:80:01:03",
 					"namespace",
 				)
 
@@ -458,8 +460,8 @@ var _ = Describe("OVN Pod Operations", func() {
 					"10.128.1.2",
 					"10.128.1.1",
 					"myPod",
-					"10.128.1.4",
-					"11:22:33:44:55:66",
+					"10.128.1.3",
+					"0a:58:0a:80:01:03",
 					"namespace",
 				)
 
@@ -490,8 +492,8 @@ var _ = Describe("OVN Pod Operations", func() {
 					"10.128.1.2",
 					"10.128.1.1",
 					"myPod",
-					"10.128.1.4",
-					"11:22:33:44:55:66",
+					"10.128.1.3",
+					"0a:58:0a:80:01:03",
 					"namespace",
 				)
 
@@ -536,8 +538,8 @@ var _ = Describe("OVN Pod Operations", func() {
 					"10.128.1.2",
 					"10.128.1.1",
 					"myPod",
-					"10.128.1.4",
-					"11:22:33:44:55:66",
+					"10.128.1.3",
+					"0a:58:0a:80:01:03",
 					"namespace",
 				)
 
@@ -604,8 +606,8 @@ var _ = Describe("OVN Pod Operations", func() {
 					"10.128.1.2",
 					"10.128.1.1",
 					"myPod",
-					"10.128.1.4",
-					"11:22:33:44:55:66",
+					"10.128.1.3",
+					"0a:58:0a:80:01:03",
 					"namespace",
 				)
 
@@ -677,7 +679,7 @@ var _ = Describe("OVN Pod Operations", func() {
 					"10.128.1.3",
 					"myPod",
 					"10.128.1.4",
-					"11:22:33:44:55:66",
+					"0a:58:0a:80:01:04",
 					namespaceT.Name,
 				)
 
@@ -694,7 +696,7 @@ var _ = Describe("OVN Pod Operations", func() {
 					},
 				)
 				podMAC := ovntest.MustParseMAC(tP.podMAC)
-				fakeOvn.controller.logicalPortCache.add(tP.nodeName, tP.portName, fakeUUID, podMAC, []net.IP{ovntest.MustParseIP(tP.podIP)})
+				fakeOvn.controller.logicalPortCache.add(tP.nodeName, tP.portName, fakeUUID, podMAC, []*net.IPNet{ovntest.MustParseIPNet(tP.nodeSubnet)})
 				fExec.AddFakeCmd(&ovntest.ExpectedCmd{
 					Cmd:    "ovn-nbctl --timeout=15 --data=bare --no-heading --columns=name find logical_switch_port external_ids:pod=true",
 					Output: "\n",
@@ -721,7 +723,7 @@ var _ = Describe("OVN Pod Operations", func() {
 					"10.128.1.1",
 					"myPod2",
 					"10.128.1.5",
-					"11:22:33:44:55:66",
+					"0a:58:0a:80:01:05",
 					namespaceT.Name,
 				)
 				tP.addCmdsForNonExistingPod(fExec)

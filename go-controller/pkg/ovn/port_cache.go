@@ -19,7 +19,7 @@ type lpInfo struct {
 	name          string
 	uuid          string
 	logicalSwitch string
-	ips           []net.IP
+	ips           []*net.IPNet
 	mac           net.HardwareAddr
 	// expires, if non-nil, indicates that this object is scheduled to be
 	// removed at the given time
@@ -42,7 +42,7 @@ func (c *portCache) get(logicalPort string) (*lpInfo, error) {
 	return nil, fmt.Errorf("logical port %s not found in cache", logicalPort)
 }
 
-func (c *portCache) add(logicalSwitch, logicalPort, uuid string, mac net.HardwareAddr, ips []net.IP) *lpInfo {
+func (c *portCache) add(logicalSwitch, logicalPort, uuid string, mac net.HardwareAddr, ips []*net.IPNet) *lpInfo {
 	c.Lock()
 	defer c.Unlock()
 	portInfo := &lpInfo{

@@ -67,7 +67,7 @@ var _ = Describe("OVN Namespace Operations", func() {
 					"10.128.1.2",
 					"10.128.1.1",
 					"myPod",
-					"10.128.1.4",
+					"10.128.1.3",
 					"11:22:33:44:55:66",
 					namespaceT.Name,
 				)
@@ -85,7 +85,8 @@ var _ = Describe("OVN Namespace Operations", func() {
 					},
 				)
 				podMAC := ovntest.MustParseMAC(tP.podMAC)
-				fakeOvn.controller.logicalPortCache.add(tP.nodeName, tP.portName, fakeUUID, podMAC, []net.IP{ovntest.MustParseIP(tP.podIP)})
+				podIPNets := []*net.IPNet{ovntest.MustParseIPNet(tP.podIP + "/24")}
+				fakeOvn.controller.logicalPortCache.add(tP.nodeName, tP.portName, fakeUUID, podMAC, podIPNets)
 				fakeOvn.controller.WatchNamespaces()
 
 				_, err := fakeOvn.fakeClient.CoreV1().Namespaces().Get(namespaceT.Name, metav1.GetOptions{})
