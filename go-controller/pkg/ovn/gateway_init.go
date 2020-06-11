@@ -20,15 +20,13 @@ func gatewayInit(nodeName string, clusterIPSubnet []*net.IPNet, hostSubnets []*n
 	for i, ip := range l3GatewayConfig.IPAddresses {
 		physicalIPs[i] = ip.IP.String()
 	}
-	stdout, stderr, err := util.RunOVNNbctl("--", "--may-exist", "lr-add",
-		gatewayRouter, "--", "set", "logical_router", gatewayRouter,
+
+	txn := util.NewNBTxn()
+	txn.Add("--may-exist", "lr-add", gatewayRouter)
+	txn.Add("set", "logical_router", gatewayRouter,
 		"options:chassis="+l3GatewayConfig.ChassisID,
 		"external_ids:physical_ip="+physicalIPs[0],
 		"external_ids:physical_ips="+strings.Join(physicalIPs, ","))
-	if err != nil {
-		return fmt.Errorf("failed to create logical router %v, stdout: %q, "+
-			"stderr: %q, error: %v", gatewayRouter, stdout, stderr, err)
-	}
 
 	var gwLRPMAC, drLRPMAC net.HardwareAddr
 	var gwLRPIPs, drLRPIPs []net.IP
@@ -51,58 +49,29 @@ func gatewayInit(nodeName string, clusterIPSubnet []*net.IPNet, hostSubnets []*n
 
 	joinSwitch := joinSwitchPrefix + nodeName
 	// create the per-node join switch
-	stdout, stderr, err = util.RunOVNNbctl("--", "--may-exist", "ls-add", joinSwitch)
-	if err != nil {
-		return fmt.Errorf("failed to create logical switch %q, stdout: %q, stderr: %q, error: %v",
-			joinSwitch, stdout, stderr, err)
-	}
+	txn.Add("--may-exist", "ls-add", joinSwitch)
 
 	gwSwitchPort := joinSwitchToGwRouterPrefix + gatewayRouter
 	gwRouterPort := gwRouterToJoinSwitchPrefix + gatewayRouter
-	stdout, stderr, err = util.RunOVNNbctl(
-		"--", "--may-exist", "lsp-add", joinSwitch, gwSwitchPort,
-		"--", "set", "logical_switch_port", gwSwitchPort, "type=router", "options:router-port="+gwRouterPort,
-		"addresses=router")
-	if err != nil {
-		return fmt.Errorf("failed to add port %q to logical switch %q, "+
-			"stdout: %q, stderr: %q, error: %v", gwSwitchPort, joinSwitch, stdout, stderr, err)
-	}
-
-	args := []string{
-		"--", "--if-exists", "lrp-del", gwRouterPort,
-		"--", "lrp-add", gatewayRouter, gwRouterPort, gwLRPMAC.String(),
-	}
-	args = append(args, gwLRPAddrs...)
-	_, stderr, err = util.RunOVNNbctl(args...)
-	if err != nil {
-		return fmt.Errorf("failed to add logical router port %q for gateway router %s, "+
-			"stderr: %q, error: %v", gwRouterPort, gatewayRouter, stderr, err)
-	}
+	txn.Add("--may-exist", "lsp-add", joinSwitch, gwSwitchPort)
+	txn.Add("set", "logical_switch_port", gwSwitchPort, "type=router", "options:router-port="+gwRouterPort, "addresses=router")
+	txn.Add("--if-exists", "lrp-del", gwRouterPort)
+	cmdArgs := []string{"lrp-add", gatewayRouter, gwRouterPort, gwLRPMAC.String()}
+	cmdArgs = append(cmdArgs, gwLRPAddrs...)
+	txn.Add(cmdArgs...)
 
 	// jtod/dtoj - patch ports that connect the per-node join switch to distributed router
 	drSwitchPort := joinSwitchToDistRouterPrefix + nodeName
 	drRouterPort := distRouterToJoinSwitchPrefix + nodeName
 
 	// Connect the per-node join switch to the distributed router.
-	stdout, stderr, err = util.RunOVNNbctl(
-		"--", "--may-exist", "lsp-add", joinSwitch, drSwitchPort,
-		"--", "set", "logical_switch_port", drSwitchPort, "type=router", "options:router-port="+drRouterPort,
-		"addresses=router")
-	if err != nil {
-		return fmt.Errorf("failed to add port %q to logical switch %q, "+
-			"stdout: %q, stderr: %q, error: %v", drSwitchPort, joinSwitch, stdout, stderr, err)
-	}
+	txn.Add("--may-exist", "lsp-add", joinSwitch, drSwitchPort)
+	txn.Add("set", "logical_switch_port", drSwitchPort, "type=router", "options:router-port="+drRouterPort, "addresses=router")
 
-	args = []string{
-		"--", "--if-exists", "lrp-del", drRouterPort,
-		"--", "lrp-add", ovnClusterRouter, drRouterPort, drLRPMAC.String(),
-	}
-	args = append(args, drLRPAddrs...)
-	_, stderr, err = util.RunOVNNbctl(args...)
-	if err != nil {
-		return fmt.Errorf("failed to add logical router port %q to %s, "+
-			"stderr: %q, error: %v", drRouterPort, ovnClusterRouter, stderr, err)
-	}
+	txn.Add("--if-exists", "lrp-del", drRouterPort)
+	cmdArgs = []string{"lrp-add", ovnClusterRouter, drRouterPort, drLRPMAC.String()}
+	cmdArgs = append(cmdArgs, drLRPAddrs...)
+	txn.Add(cmdArgs...)
 
 	// When there are multiple gateway routers (which would be the likely
 	// default for any sane deployment), we need to SNAT traffic
@@ -111,12 +80,7 @@ func gatewayInit(nodeName string, clusterIPSubnet []*net.IPNet, hostSubnets []*n
 
 	// FIXME DUAL-STACK: There doesn't seem to be any way to configure multiple
 	// lb_force_snat_ip values. (https://bugzilla.redhat.com/show_bug.cgi?id=1823003)
-	stdout, stderr, err = util.RunOVNNbctl("set", "logical_router",
-		gatewayRouter, "options:lb_force_snat_ip="+gwLRPIPs[0].String())
-	if err != nil {
-		return fmt.Errorf("failed to set logical router %s's lb_force_snat_ip option, "+
-			"stdout: %q, stderr: %q, error: %v", gatewayRouter, stdout, stderr, err)
-	}
+	txn.Add("set", "logical_router", gatewayRouter, "options:lb_force_snat_ip="+gwLRPIPs[0].String())
 
 	for _, entry := range clusterIPSubnet {
 		drLRPIP, err := gatewayForSubnet(drLRPIPs, entry)
@@ -127,20 +91,18 @@ func gatewayInit(nodeName string, clusterIPSubnet []*net.IPNet, hostSubnets []*n
 		}
 
 		// Add a static route in GR with distributed router as the nexthop.
-		stdout, stderr, err = util.RunOVNNbctl("--may-exist", "lr-route-add",
-			gatewayRouter, entry.String(), drLRPIP.String())
-		if err != nil {
-			return fmt.Errorf("failed to add a static route in GR %s with distributed "+
-				"router as the nexthop, stdout: %q, stderr: %q, error: %v",
-				gatewayRouter, stdout, stderr, err)
-		}
+		txn.Add("--may-exist", "lr-route-add", gatewayRouter, entry.String(), drLRPIP.String())
+	}
+
+	if stdout, stderr, err := txn.Commit(); err != nil {
+		return fmt.Errorf("failed to set up node %q gateway join switch/router resources, "+
+			"stdout: %q, stderr: %q, error: %v", nodeName, stdout, stderr, err)
 	}
 
 	if l3GatewayConfig.NodePortEnable {
 		// Create 3 load-balancers for north-south traffic for each gateway
 		// router: UDP, TCP, SCTP
-		var k8sNSLbTCP, k8sNSLbUDP, k8sNSLbSCTP string
-		k8sNSLbTCP, k8sNSLbUDP, k8sNSLbSCTP, err = getGatewayLoadBalancers(gatewayRouter)
+		k8sNSLbTCP, k8sNSLbUDP, k8sNSLbSCTP, err := getGatewayLoadBalancers(gatewayRouter)
 		if err != nil {
 			return err
 		}
@@ -153,6 +115,7 @@ func gatewayInit(nodeName string, clusterIPSubnet []*net.IPNet, hostSubnets []*n
 		if sctpSupport {
 			enabledProtos = append(enabledProtos, kapi.ProtocolSCTP)
 		}
+		var stdout, stderr string
 		for _, proto := range enabledProtos {
 			if protoLBMap[proto] == "" {
 				protoLBMap[proto], stderr, err = util.RunOVNNbctl("--", "create",
@@ -178,36 +141,23 @@ func gatewayInit(nodeName string, clusterIPSubnet []*net.IPNet, hostSubnets []*n
 		}
 	}
 
+	txn = util.NewNBTxn()
+
 	// Create the external switch for the physical interface to connect to.
 	externalSwitch := externalSwitchPrefix + nodeName
-	stdout, stderr, err = util.RunOVNNbctl("--may-exist", "ls-add",
-		externalSwitch)
-	if err != nil {
-		return fmt.Errorf("failed to create logical switch %s, stdout: %q, "+
-			"stderr: %q, error: %v", externalSwitch, stdout, stderr, err)
-	}
+	txn.Add("--may-exist", "ls-add", externalSwitch)
 
 	// Add external interface as a logical port to external_switch.
 	// This is a learning switch port with "unknown" address. The external
 	// world is accessed via this port.
-	cmdArgs := []string{
-		"--", "--may-exist", "lsp-add", externalSwitch, l3GatewayConfig.InterfaceID,
-		"--", "lsp-set-addresses", l3GatewayConfig.InterfaceID, "unknown",
-		"--", "lsp-set-type", l3GatewayConfig.InterfaceID, "localnet",
-		"--", "lsp-set-options", l3GatewayConfig.InterfaceID, "network_name=" + util.PhysicalNetworkName}
+	txn.Add("--may-exist", "lsp-add", externalSwitch, l3GatewayConfig.InterfaceID)
+	txn.Add("lsp-set-addresses", l3GatewayConfig.InterfaceID, "unknown")
+	txn.Add("lsp-set-type", l3GatewayConfig.InterfaceID, "localnet")
+	txn.Add("lsp-set-options", l3GatewayConfig.InterfaceID, "network_name="+util.PhysicalNetworkName)
 
 	if l3GatewayConfig.VLANID != nil {
-		lspArgs := []string{
-			"--", "set", "logical_switch_port", l3GatewayConfig.InterfaceID,
-			fmt.Sprintf("tag_request=%d", *l3GatewayConfig.VLANID),
-		}
-		cmdArgs = append(cmdArgs, lspArgs...)
-	}
-
-	stdout, stderr, err = util.RunOVNNbctl(cmdArgs...)
-	if err != nil {
-		return fmt.Errorf("failed to add logical port to switch %s, stdout: %q, "+
-			"stderr: %q, error: %v", externalSwitch, stdout, stderr, err)
+		txn.Add("set", "logical_switch_port", l3GatewayConfig.InterfaceID,
+			fmt.Sprintf("tag_request=%d", *l3GatewayConfig.VLANID))
 	}
 
 	// Connect GR to external_switch with mac address of external interface
@@ -215,34 +165,21 @@ func gatewayInit(nodeName string, clusterIPSubnet []*net.IPNet, hostSubnets []*n
 	// restarts a new br-local bridge will be created with a new `nicMacAddress`. As a result,
 	// direct addition of logical_router_port with --may-exists will not work since the MAC
 	// has changed. So, we need to delete that port, if it exists, and it back.
+	txn.Add("--if-exists", "lrp-del", gwRouterToExtSwitchPrefix+gatewayRouter)
 	cmdArgs = []string{
-		"--", "--if-exists", "lrp-del", gwRouterToExtSwitchPrefix + gatewayRouter,
-		"--", "lrp-add", gatewayRouter, gwRouterToExtSwitchPrefix + gatewayRouter,
-		l3GatewayConfig.MACAddress.String(),
+		"lrp-add", gatewayRouter, gwRouterToExtSwitchPrefix + gatewayRouter, l3GatewayConfig.MACAddress.String(),
 	}
 	for _, ip := range l3GatewayConfig.IPAddresses {
 		cmdArgs = append(cmdArgs, ip.String())
 	}
-	cmdArgs = append(cmdArgs,
-		"--", "set", "logical_router_port", gwRouterToExtSwitchPrefix+gatewayRouter,
-		"external-ids:gateway-physical-ip=yes")
-
-	stdout, stderr, err = util.RunOVNNbctl(cmdArgs...)
-	if err != nil {
-		return fmt.Errorf("failed to add logical port to router %s, stdout: %q, "+
-			"stderr: %q, error: %v", gatewayRouter, stdout, stderr, err)
-	}
+	txn.Add(cmdArgs...)
+	txn.Add("set", "logical_router_port", gwRouterToExtSwitchPrefix+gatewayRouter, "external-ids:gateway-physical-ip=yes")
 
 	// Connect the external_switch to the router.
-	stdout, stderr, err = util.RunOVNNbctl("--", "--may-exist", "lsp-add",
-		externalSwitch, extSwitchToGwRouterPrefix+gatewayRouter, "--", "set",
-		"logical_switch_port", extSwitchToGwRouterPrefix+gatewayRouter, "type=router",
+	txn.Add("--may-exist", "lsp-add", externalSwitch, extSwitchToGwRouterPrefix+gatewayRouter)
+	txn.Add("set", "logical_switch_port", extSwitchToGwRouterPrefix+gatewayRouter, "type=router",
 		"options:router-port="+gwRouterToExtSwitchPrefix+gatewayRouter,
 		"addresses="+"\""+l3GatewayConfig.MACAddress.String()+"\"")
-	if err != nil {
-		return fmt.Errorf("failed to add logical port to router %s, stdout: %q, "+
-			"stderr: %q, error: %v", gatewayRouter, stdout, stderr, err)
-	}
 
 	// Add static routes in GR with gateway router as the default next hop.
 	for _, nextHop := range l3GatewayConfig.NextHops {
@@ -252,14 +189,9 @@ func gatewayInit(nodeName string, clusterIPSubnet []*net.IPNet, hostSubnets []*n
 		} else {
 			allIPs = "0.0.0.0/0"
 		}
-		stdout, stderr, err = util.RunOVNNbctl("--may-exist", "lr-route-add",
+		txn.Add("--may-exist", "lr-route-add",
 			gatewayRouter, allIPs, nextHop.String(),
-			fmt.Sprintf("rtoe-%s", gatewayRouter))
-		if err != nil {
-			return fmt.Errorf("failed to add a static route in GR %s with physical "+
-				"gateway as the default next hop, stdout: %q, "+
-				"stderr: %q, error: %v", gatewayRouter, stdout, stderr, err)
-		}
+			fmt.Sprintf("%s%s", gwRouterToExtSwitchPrefix, gatewayRouter))
 	}
 
 	// Add source IP address based routes in distributed router
@@ -272,14 +204,8 @@ func gatewayInit(nodeName string, clusterIPSubnet []*net.IPNet, hostSubnets []*n
 				ovnClusterRouter, err)
 		}
 
-		stdout, stderr, err = util.RunOVNNbctl("--may-exist",
-			"--policy=src-ip", "lr-route-add", ovnClusterRouter,
+		txn.Add("--may-exist", "--policy=src-ip", "lr-route-add", ovnClusterRouter,
 			hostSubnet.String(), gwLRPIP.String())
-		if err != nil {
-			return fmt.Errorf("failed to add source IP address based "+
-				"routes in distributed router %s, stdout: %q, "+
-				"stderr: %q, error: %v", ovnClusterRouter, stdout, stderr, err)
-		}
 	}
 
 	// Default SNAT rules.
@@ -294,12 +220,13 @@ func gatewayInit(nodeName string, clusterIPSubnet []*net.IPNet, hostSubnets []*n
 				gatewayRouter, err)
 		}
 
-		stdout, stderr, err = util.RunOVNNbctl("--may-exist", "lr-nat-add",
-			gatewayRouter, "snat", externalIP.String(), entry.String())
-		if err != nil {
-			return fmt.Errorf("failed to create default SNAT rules for gateway router %s, "+
-				"stdout: %q, stderr: %q, error: %v", gatewayRouter, stdout, stderr, err)
-		}
+		txn.Add("--may-exist", "lr-nat-add", gatewayRouter, "snat",
+			externalIP.String(), entry.String())
+	}
+
+	if stdout, stderr, err := txn.Commit(); err != nil {
+		return fmt.Errorf("failed to set up node %q gateway router/external resources, "+
+			"stdout: %q, stderr: %q, error: %v", nodeName, stdout, stderr, err)
 	}
 
 	return nil
