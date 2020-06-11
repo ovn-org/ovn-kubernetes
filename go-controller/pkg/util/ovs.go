@@ -453,6 +453,38 @@ func RunOVNNbctl(args ...string) (string, string, error) {
 	return RunOVNNbctlWithTimeout(ovsCommandTimeout, args...)
 }
 
+// NBTxn hold parts of an ovn-nbctl transaction request
+type NBTxn struct {
+	args    []string
+	txnArgs []string
+	env     []string
+}
+
+// NewNBTxn returns a new ovn-nbctl transaction request object
+func NewNBTxn() *NBTxn {
+	args, env := getNbctlArgsAndEnv(ovsCommandTimeout, []string{}...)
+	return &NBTxn{
+		args: args,
+		env:  env,
+	}
+}
+
+// Add adds a new request to the transaction
+func (t *NBTxn) Add(args ...string) {
+	t.txnArgs = append(t.txnArgs, "--")
+	t.txnArgs = append(t.txnArgs, args...)
+}
+
+// Commit commits all parts of the transaction and returns output and errors
+func (t *NBTxn) Commit() (string, string, error) {
+	if len(t.txnArgs) == 0 {
+		return "", "", nil
+	}
+	allArgs := append(t.args, t.txnArgs...)
+	stdout, stderr, err := runOVNretry(runner.nbctlPath, t.env, allArgs...)
+	return strings.Trim(strings.TrimSpace(stdout.String()), "\""), stderr.String(), err
+}
+
 // RunOVNSbctlUnix runs command via ovn-sbctl, with ovn-sbctl using the unix
 // domain sockets to connect to the ovsdb-server backing the OVN NB database.
 func RunOVNSbctlUnix(args ...string) (string, string, error) {

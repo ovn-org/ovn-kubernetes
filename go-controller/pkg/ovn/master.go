@@ -529,120 +529,75 @@ func (oc *Controller) ensureNodeLogicalNetwork(nodeName string, hostSubnets []*n
 		}
 	}
 
-	// Create a router port and provide it the first address on the node's host subnet
-	_, stderr, err := util.RunOVNNbctl(lrpArgs...)
-	if err != nil {
-		klog.Errorf("Failed to add logical port to router, stderr: %q, error: %v", stderr, err)
-		return err
-	}
+	txn := util.NewNBTxn()
 
+	// Create a router port and provide it the first address on the node's host subnet
+	txn.Add(lrpArgs...)
 	// Create a logical switch and set its subnet.
-	stdout, stderr, err := util.RunOVNNbctl(lsArgs...)
-	if err != nil {
-		klog.Errorf("Failed to create a logical switch %v, stdout: %q, stderr: %q, error: %v", nodeName, stdout, stderr, err)
-		return err
-	}
+	txn.Add(lsArgs...)
 
 	// If supported, enable IGMP snooping and querier on the node.
 	if oc.multicastSupport {
-		stdout, stderr, err = util.RunOVNNbctl("set", "logical_switch",
-			nodeName, "other-config:mcast_snoop=\"true\"")
-		if err != nil {
-			klog.Errorf("Failed to enable IGMP on logical switch %v, stdout: %q, stderr: %q, error: %v",
-				nodeName, stdout, stderr, err)
-			return err
-		}
+		txn.Add("set", "logical_switch", nodeName, "other-config:mcast_snoop=\"true\"")
 
 		// Configure querier only if we have an IPv4 address, otherwise
 		// disable querier.
 		if v4Gateway != nil {
-			stdout, stderr, err = util.RunOVNNbctl("set", "logical_switch",
-				nodeName, "other-config:mcast_querier=\"true\"",
+			txn.Add("set", "logical_switch", nodeName, "other-config:mcast_querier=\"true\"",
 				"other-config:mcast_eth_src=\""+nodeLRPMAC.String()+"\"",
 				"other-config:mcast_ip4_src=\""+v4Gateway.String()+"\"")
-			if err != nil {
-				klog.Errorf("Failed to enable IGMP Querier on logical switch %v, stdout: %q, stderr: %q, error: %v",
-					nodeName, stdout, stderr, err)
-				return err
-			}
 		} else {
-			stdout, stderr, err = util.RunOVNNbctl("set", "logical_switch",
-				nodeName, "other-config:mcast_querier=\"false\"")
-			if err != nil {
-				klog.Errorf("Failed to disable IGMP Querier on logical switch %v, stdout: %q, stderr: %q, error: %v",
-					nodeName, stdout, stderr, err)
-				return err
-			}
-			klog.Infof("Disabled IGMP Querier on logical switch %v (No IPv4 Source IP available)",
-				nodeName)
+			txn.Add("set", "logical_switch", nodeName, "other-config:mcast_querier=\"false\"")
+			klog.Infof("Disabled IGMP Querier on logical switch %v (No IPv4 Source IP available)", nodeName)
 		}
 	}
 
 	// Connect the switch to the router.
-	stdout, stderr, err = util.RunOVNNbctl("--", "--may-exist", "lsp-add", nodeName, switchToRouterPrefix+nodeName,
-		"--", "set", "logical_switch_port", switchToRouterPrefix+nodeName, "type=router",
-		"options:router-port="+routerToSwitchPrefix+nodeName, "addresses="+"\""+nodeLRPMAC.String()+"\"")
-	if err != nil {
-		klog.Errorf("Failed to add logical port to switch, stdout: %q, stderr: %q, error: %v", stdout, stderr, err)
-		return err
-	}
+	txn.Add("--may-exist", "lsp-add", nodeName, switchToRouterPrefix+nodeName)
+	txn.Add("set", "logical_switch_port", switchToRouterPrefix+nodeName, "type=router", "options:router-port="+routerToSwitchPrefix+nodeName, "addresses="+"\""+nodeLRPMAC.String()+"\"")
 
 	// Add our cluster TCP and UDP load balancers to the node switch
 	if oc.TCPLoadBalancerUUID == "" {
 		return fmt.Errorf("TCP cluster load balancer not created")
 	}
-	stdout, stderr, err = util.RunOVNNbctl("set", "logical_switch", nodeName, "load_balancer="+oc.TCPLoadBalancerUUID)
-	if err != nil {
-		klog.Errorf("Failed to set logical switch %v's load balancer, stdout: %q, stderr: %q, error: %v", nodeName, stdout, stderr, err)
-		return err
-	}
+	txn.Add("set", "logical_switch", nodeName, "load_balancer="+oc.TCPLoadBalancerUUID)
 
 	// Add any service reject ACLs applicable for TCP LB
 	acls := oc.getAllACLsForServiceLB(oc.TCPLoadBalancerUUID)
 	if len(acls) > 0 {
-		_, _, err = util.RunOVNNbctl("add", "logical_switch", nodeName, "acls", strings.Join(acls, ","))
-		if err != nil {
-			klog.Warningf("Unable to add TCP reject ACLs: %s for switch: %s, error: %v", acls, nodeName, err)
-		}
+		txn.Add("add", "logical_switch", nodeName, "acls", strings.Join(acls, ","))
 	}
 
 	if oc.UDPLoadBalancerUUID == "" {
 		return fmt.Errorf("UDP cluster load balancer not created")
 	}
-	stdout, stderr, err = util.RunOVNNbctl("add", "logical_switch", nodeName, "load_balancer", oc.UDPLoadBalancerUUID)
-	if err != nil {
-		klog.Errorf("Failed to add logical switch %v's load balancer, stdout: %q, stderr: %q, error: %v", nodeName, stdout, stderr, err)
-		return err
-	}
+	txn.Add("add", "logical_switch", nodeName, "load_balancer", oc.UDPLoadBalancerUUID)
 
 	// Add any service reject ACLs applicable for UDP LB
 	acls = oc.getAllACLsForServiceLB(oc.UDPLoadBalancerUUID)
 	if len(acls) > 0 {
-		_, _, err = util.RunOVNNbctl("add", "logical_switch", nodeName, "acls", strings.Join(acls, ","))
-		if err != nil {
-			klog.Warningf("Unable to add UDP reject ACLs: %s for switch: %s, error %v", acls, nodeName, err)
-		}
+		txn.Add("add", "logical_switch", nodeName, "acls", strings.Join(acls, ","))
 	}
 
 	if oc.SCTPSupport {
 		if oc.SCTPLoadBalancerUUID == "" {
 			return fmt.Errorf("SCTP cluster load balancer not created")
 		}
-		stdout, stderr, err = util.RunOVNNbctl("add", "logical_switch", nodeName, "load_balancer", oc.SCTPLoadBalancerUUID)
-		if err != nil {
-			klog.Errorf("Failed to add logical switch %v's load balancer, stdout: %q, stderr: %q, error: %v", nodeName, stdout, stderr, err)
-			return err
-		}
+		txn.Add("add", "logical_switch", nodeName, "load_balancer", oc.SCTPLoadBalancerUUID)
 
 		// Add any service reject ACLs applicable for SCTP LB
 		acls = oc.getAllACLsForServiceLB(oc.SCTPLoadBalancerUUID)
 		if len(acls) > 0 {
-			_, _, err = util.RunOVNNbctl("add", "logical_switch", nodeName, "acls", strings.Join(acls, ","))
-			if err != nil {
-				klog.Warningf("Unable to add SCTP reject ACLs: %s for switch: %s, error %v", acls, nodeName, err)
-			}
+			txn.Add("add", "logical_switch", nodeName, "acls", strings.Join(acls, ","))
 		}
 	}
+
+	// Commit the transaction to set up the node's logical resources
+	if stdout, stderr, err := txn.Commit(); err != nil {
+		klog.Errorf("Failed to set up node %q logical network, stdout: %q, stderr: %q, error: %v", nodeName, stdout, stderr, err)
+		return err
+	}
+
 	// Add the node to the logical switch cache
 	return oc.lsManager.AddNode(nodeName, hostSubnets)
 }

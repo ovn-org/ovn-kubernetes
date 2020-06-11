@@ -165,20 +165,20 @@ func defaultFakeExec(nodeSubnet, nodeName string, sctpSupport bool) (*ovntest.Fa
 		"ovn-sbctl --timeout=15 --data=bare --no-heading --columns=name,hostname --format=json list Chassis",
 		"ovn-nbctl --timeout=15 --data=bare --no-heading --columns=name,other-config find logical_switch other-config:subnet!=_",
 	})
-	fexec.AddFakeCmdsNoOutputNoError([]string{
-		"ovn-nbctl --timeout=15 --if-exists lrp-del " + routerToSwitchPrefix + nodeName + " -- lrp-add ovn_cluster_router " + routerToSwitchPrefix + nodeName + " " + lrpMAC + " " + gwCIDR,
-		"ovn-nbctl --timeout=15 --may-exist ls-add " + nodeName + " -- set logical_switch " + nodeName + " other-config:subnet=" + nodeSubnet + " other-config:exclude_ips=" + nodeMgmtPortIP.String() + ".." + hybridOverlayIP.String(),
-		"ovn-nbctl --timeout=15 set logical_switch " + nodeName + " other-config:mcast_snoop=\"true\"",
-		"ovn-nbctl --timeout=15 set logical_switch " + nodeName + " other-config:mcast_querier=\"true\" other-config:mcast_eth_src=\"" + lrpMAC + "\" other-config:mcast_ip4_src=\"" + gwIP + "\"",
-		"ovn-nbctl --timeout=15 -- --may-exist lsp-add " + nodeName + " " + switchToRouterPrefix + nodeName + " -- set logical_switch_port " + switchToRouterPrefix + nodeName + " type=router options:router-port=" + routerToSwitchPrefix + nodeName + " addresses=\"" + lrpMAC + "\"",
-		"ovn-nbctl --timeout=15 set logical_switch " + nodeName + " load_balancer=" + tcpLBUUID,
-		"ovn-nbctl --timeout=15 add logical_switch " + nodeName + " load_balancer " + udpLBUUID,
-	})
+	cmd := "ovn-nbctl --timeout=15 -- --if-exists lrp-del " + routerToSwitchPrefix + nodeName +
+		" -- lrp-add ovn_cluster_router " + routerToSwitchPrefix + nodeName + " " + lrpMAC + " " + gwCIDR +
+		" -- --may-exist ls-add " + nodeName +
+		" -- set logical_switch " + nodeName + " other-config:subnet=" + nodeSubnet + " other-config:exclude_ips=" + nodeMgmtPortIP.String() + ".." + hybridOverlayIP.String() +
+		" -- set logical_switch " + nodeName + " other-config:mcast_snoop=\"true\"" +
+		" -- set logical_switch " + nodeName + " other-config:mcast_querier=\"true\" other-config:mcast_eth_src=\"" + lrpMAC + "\" other-config:mcast_ip4_src=\"" + gwIP + "\"" +
+		" -- --may-exist lsp-add " + nodeName + " " + switchToRouterPrefix + nodeName + " -- set logical_switch_port " + switchToRouterPrefix + nodeName + " type=router options:router-port=" + routerToSwitchPrefix + nodeName + " addresses=\"" + lrpMAC + "\"" +
+		" -- set logical_switch " + nodeName + " load_balancer=" + tcpLBUUID +
+		" -- add logical_switch " + nodeName + " load_balancer " + udpLBUUID
 	if sctpSupport {
-		fexec.AddFakeCmdsNoOutputNoError([]string{
-			"ovn-nbctl --timeout=15 add logical_switch " + nodeName + " load_balancer " + sctpLBUUID,
-		})
+		cmd = cmd + " -- add logical_switch " + nodeName + " load_balancer " + sctpLBUUID
 	}
+	fexec.AddFakeCmdsNoOutputNoError([]string{cmd})
+
 	fexec.AddFakeCmdsNoOutputNoError([]string{
 		"ovn-nbctl --timeout=15 --may-exist acl-add " + nodeName + " to-lport 1001 ip4.src==" + nodeMgmtPortIP.String() + " allow-related",
 		"ovn-nbctl --timeout=15 -- --may-exist lsp-add " + nodeName + " " + util.K8sPrefix + nodeName + " -- lsp-set-addresses " + util.K8sPrefix + nodeName + " " + mgmtMAC + " " + nodeMgmtPortIP.String(),
@@ -543,12 +543,15 @@ subnet=%s
 			// when the factory watch begins and enumerates all existing
 			// Kubernetes API nodes
 			fexec.AddFakeCmdsNoOutputNoError([]string{
-				"ovn-nbctl --timeout=15 --if-exists lrp-del " + routerToSwitchPrefix + masterName + " -- lrp-add ovn_cluster_router " + routerToSwitchPrefix + masterName + " " + lrpMAC + " " + masterGWCIDR,
-				"ovn-nbctl --timeout=15 --may-exist ls-add " + masterName + " -- set logical_switch " + masterName + " other-config:subnet=" + masterSubnet + " other-config:exclude_ips=" + masterMgmtPortIP,
-				"ovn-nbctl --timeout=15 -- --may-exist lsp-add " + masterName + " " + switchToRouterPrefix + masterName + " -- set logical_switch_port " + switchToRouterPrefix + masterName + " type=router options:router-port=" + routerToSwitchPrefix + masterName + " addresses=\"" + lrpMAC + "\"",
-				"ovn-nbctl --timeout=15 set logical_switch " + masterName + " load_balancer=" + tcpLBUUID,
-				"ovn-nbctl --timeout=15 add logical_switch " + masterName + " load_balancer " + udpLBUUID,
-				"ovn-nbctl --timeout=15 add logical_switch " + masterName + " load_balancer " + sctpLBUUID,
+				"ovn-nbctl --timeout=15 -- --if-exists lrp-del " + routerToSwitchPrefix + masterName +
+					" -- lrp-add ovn_cluster_router " + routerToSwitchPrefix + masterName + " " + lrpMAC + " " + masterGWCIDR +
+					" -- --may-exist ls-add " + masterName + " -- set logical_switch " + masterName + " other-config:subnet=" + masterSubnet + " other-config:exclude_ips=" + masterMgmtPortIP +
+					" -- --may-exist lsp-add " + masterName + " " + switchToRouterPrefix + masterName + " -- set logical_switch_port " + switchToRouterPrefix + masterName + " type=router options:router-port=" + routerToSwitchPrefix + masterName + " addresses=\"" + lrpMAC + "\"" +
+					" -- set logical_switch " + masterName + " load_balancer=" + tcpLBUUID +
+					" -- add logical_switch " + masterName + " load_balancer " + udpLBUUID +
+					" -- add logical_switch " + masterName + " load_balancer " + sctpLBUUID,
+			})
+			fexec.AddFakeCmdsNoOutputNoError([]string{
 				"ovn-nbctl --timeout=15 --may-exist acl-add " + masterName + " to-lport 1001 ip4.src==" + masterMgmtPortIP + " allow-related",
 				"ovn-nbctl --timeout=15 -- --may-exist lsp-add " + masterName + " " + util.K8sPrefix + masterName + " -- lsp-set-addresses " + util.K8sPrefix + masterName + " " + masterMgmtPortMAC + " " + masterMgmtPortIP,
 			})
@@ -750,12 +753,15 @@ var _ = Describe("Gateway Init Operations", func() {
 			})
 
 			fexec.AddFakeCmdsNoOutputNoError([]string{
-				"ovn-nbctl --timeout=15 --if-exists lrp-del " + routerToSwitchPrefix + nodeName + " -- lrp-add ovn_cluster_router " + routerToSwitchPrefix + nodeName + " " + nodeLRPMAC + " " + masterGWCIDR,
-				"ovn-nbctl --timeout=15 --may-exist ls-add " + nodeName + " -- set logical_switch " + nodeName + " other-config:subnet=" + nodeSubnet + " other-config:exclude_ips=" + masterMgmtPortIP,
-				"ovn-nbctl --timeout=15 -- --may-exist lsp-add " + nodeName + " " + switchToRouterPrefix + nodeName + " -- set logical_switch_port " + switchToRouterPrefix + nodeName + " type=router options:router-port=" + routerToSwitchPrefix + nodeName + " addresses=\"" + nodeLRPMAC + "\"",
-				"ovn-nbctl --timeout=15 set logical_switch " + nodeName + " load_balancer=" + tcpLBUUID,
-				"ovn-nbctl --timeout=15 add logical_switch " + nodeName + " load_balancer " + udpLBUUID,
-				"ovn-nbctl --timeout=15 add logical_switch " + nodeName + " load_balancer " + sctpLBUUID,
+				"ovn-nbctl --timeout=15 -- --if-exists lrp-del " + routerToSwitchPrefix + nodeName +
+					" -- lrp-add ovn_cluster_router " + routerToSwitchPrefix + nodeName + " " + nodeLRPMAC + " " + masterGWCIDR +
+					" -- --may-exist ls-add " + nodeName + " -- set logical_switch " + nodeName + " other-config:subnet=" + nodeSubnet + " other-config:exclude_ips=" + masterMgmtPortIP +
+					" -- --may-exist lsp-add " + nodeName + " " + switchToRouterPrefix + nodeName + " -- set logical_switch_port " + switchToRouterPrefix + nodeName + " type=router options:router-port=" + routerToSwitchPrefix + nodeName + " addresses=\"" + nodeLRPMAC + "\"" +
+					" -- set logical_switch " + nodeName + " load_balancer=" + tcpLBUUID +
+					" -- add logical_switch " + nodeName + " load_balancer " + udpLBUUID +
+					" -- add logical_switch " + nodeName + " load_balancer " + sctpLBUUID,
+			})
+			fexec.AddFakeCmdsNoOutputNoError([]string{
 				"ovn-nbctl --timeout=15 --may-exist acl-add " + nodeName + " to-lport 1001 ip4.src==" + masterMgmtPortIP + " allow-related",
 				"ovn-nbctl --timeout=15 -- --may-exist lsp-add " + nodeName + " " + util.K8sPrefix + nodeName + " -- lsp-set-addresses " + util.K8sPrefix + nodeName + " " + brLocalnetMAC + " " + masterMgmtPortIP,
 			})
@@ -935,12 +941,15 @@ var _ = Describe("Gateway Init Operations", func() {
 			})
 
 			fexec.AddFakeCmdsNoOutputNoError([]string{
-				"ovn-nbctl --timeout=15 --if-exists lrp-del " + routerToSwitchPrefix + nodeName + " -- lrp-add ovn_cluster_router " + routerToSwitchPrefix + nodeName + " " + nodeLRPMAC + " " + nodeGWIP,
-				"ovn-nbctl --timeout=15 --may-exist ls-add " + nodeName + " -- set logical_switch " + nodeName + " other-config:subnet=" + nodeSubnet + " other-config:exclude_ips=" + nodeMgmtPortIP,
-				"ovn-nbctl --timeout=15 -- --may-exist lsp-add " + nodeName + " " + switchToRouterPrefix + nodeName + " -- set logical_switch_port " + switchToRouterPrefix + nodeName + " type=router options:router-port=" + routerToSwitchPrefix + nodeName + " addresses=\"" + nodeLRPMAC + "\"",
-				"ovn-nbctl --timeout=15 set logical_switch " + nodeName + " load_balancer=" + tcpLBUUID,
-				"ovn-nbctl --timeout=15 add logical_switch " + nodeName + " load_balancer " + udpLBUUID,
-				"ovn-nbctl --timeout=15 add logical_switch " + nodeName + " load_balancer " + sctpLBUUID,
+				"ovn-nbctl --timeout=15 -- --if-exists lrp-del " + routerToSwitchPrefix + nodeName +
+					" -- lrp-add ovn_cluster_router " + routerToSwitchPrefix + nodeName + " " + nodeLRPMAC + " " + nodeGWIP +
+					" -- --may-exist ls-add " + nodeName + " -- set logical_switch " + nodeName + " other-config:subnet=" + nodeSubnet + " other-config:exclude_ips=" + nodeMgmtPortIP +
+					" -- --may-exist lsp-add " + nodeName + " " + switchToRouterPrefix + nodeName + " -- set logical_switch_port " + switchToRouterPrefix + nodeName + " type=router options:router-port=" + routerToSwitchPrefix + nodeName + " addresses=\"" + nodeLRPMAC + "\"" +
+					" -- set logical_switch " + nodeName + " load_balancer=" + tcpLBUUID +
+					" -- add logical_switch " + nodeName + " load_balancer " + udpLBUUID +
+					" -- add logical_switch " + nodeName + " load_balancer " + sctpLBUUID,
+			})
+			fexec.AddFakeCmdsNoOutputNoError([]string{
 				"ovn-nbctl --timeout=15 --may-exist acl-add " + nodeName + " to-lport 1001 ip4.src==" + nodeMgmtPortIP + " allow-related",
 				"ovn-nbctl --timeout=15 -- --may-exist lsp-add " + nodeName + " " + util.K8sPrefix + nodeName + " -- lsp-set-addresses " + util.K8sPrefix + nodeName + " " + nodeMgmtPortMAC + " " + nodeMgmtPortIP,
 			})
