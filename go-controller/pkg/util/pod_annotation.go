@@ -241,6 +241,7 @@ func GetAllPodIPs(pod *v1.Pod) ([]net.IP, error) {
 		ip := net.ParseIP(podIP.IP)
 		if ip == nil {
 			klog.Warningf("failed to parse pod IP %q", podIP)
+			continue
 		}
 		ips = append(ips, ip)
 	}
