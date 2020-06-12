@@ -63,7 +63,7 @@ func testManagementPort(ctx *cli.Context, fexec *ovntest.FakeExec, testNS ns.Net
 		nodeName      string = "node1"
 		mgtPortMAC    string = "00:00:00:55:66:77"
 		mgtPort       string = util.K8sMgmtIntfName
-		legacyMgtPort string = "k8s-" + nodeName
+		legacyMgtPort string = util.K8sPrefix + nodeName
 		mtu           string = "1400"
 	)
 

@@ -30,7 +30,7 @@ func (n *OvnNode) createManagementPort(hostSubnets []*net.IPNet, nodeAnnotator k
 		"--", "--may-exist", "add-port", "br-int", util.K8sMgmtIntfName,
 		"--", "set", "interface", util.K8sMgmtIntfName,
 		"type=internal", "mtu_request="+fmt.Sprintf("%d", config.Default.MTU),
-		"external-ids:iface-id=k8s-"+nodeName)
+		"external-ids:iface-id="+util.K8sPrefix+nodeName)
 	if err != nil {
 		klog.Errorf("Failed to add port to br-int, stdout: %q, stderr: %q, error: %v", stdout, stderr, err)
 		return err

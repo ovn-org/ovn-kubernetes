@@ -19,7 +19,7 @@ func gatewayCleanup(nodeName string) error {
 	var routerIP net.IP
 	var nextHops []net.IP
 	routerIPNetworks, stderr, err := util.RunOVNNbctl("--if-exist", "get",
-		"logical_router_port", "rtoj-"+gatewayRouter, "networks")
+		"logical_router_port", gwRouterToJoinSwitchPrefix+gatewayRouter, "networks")
 	if err != nil {
 		return fmt.Errorf("failed to get logical router port for gateway router %s, "+
 			"stderr: %q, error: %v", gatewayRouter, stderr, err)
@@ -68,7 +68,7 @@ func gatewayCleanup(nodeName string) error {
 	}
 
 	// Remove the patch port on the distributed router that connects to join switch
-	_, stderr, err = util.RunOVNNbctl("--if-exist", "lrp-del", "dtoj-"+nodeName)
+	_, stderr, err = util.RunOVNNbctl("--if-exist", "lrp-del", distRouterToJoinSwitchPrefix+nodeName)
 	if err != nil {
 		return fmt.Errorf("failed to delete the patch port dtoj-%s on distributed router "+
 			"stderr: %q, error: %v", nodeName, stderr, err)
@@ -104,7 +104,7 @@ func delPbrAndNatRules(nodeName string) {
 	// delete the dnat_and_snat entry that we added for the management port IP
 	// Note: we don't need to delete any MAC bindings that are dynamically learned from OVN SB DB
 	// because there will be none since this NAT is only for outbound traffic and not for inbound
-	mgmtPortName := "k8s-" + nodeName
+	mgmtPortName := util.K8sPrefix + nodeName
 	externalIP, stderr, err := util.RunOVNNbctl("--data=bare", "--no-heading",
 		"--columns=external_ip", "find", "nat", fmt.Sprintf("logical_port=%s", mgmtPortName))
 	if err != nil {
