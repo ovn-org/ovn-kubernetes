@@ -237,7 +237,7 @@ popd
 pushd ../dist/images
 sudo cp -f ../../go-controller/_output/go/bin/* .
 echo "ref: $(git rev-parse  --symbolic-full-name HEAD)  commit: $(git rev-parse  HEAD)" > git_info
-docker build -t ovn-daemonset-f:dev -f Dockerfile.fedora .
+docker build -t ovn-daemonset-f:dev -f Dockerfile.fedora.kind .
 ./daemonset.sh \
   --image=docker.io/library/ovn-daemonset-f:dev \
   --net-cidr=${NET_CIDR} \
