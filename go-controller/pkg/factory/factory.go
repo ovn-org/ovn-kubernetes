@@ -8,7 +8,7 @@ import (
 	"sync/atomic"
 	"time"
 
-	"k8s.io/klog"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/metrics"
 
 	kapi "k8s.io/api/core/v1"
 	knet "k8s.io/api/networking/v1"
@@ -18,6 +18,7 @@ import (
 	"k8s.io/client-go/kubernetes"
 	listers "k8s.io/client-go/listers/core/v1"
 	"k8s.io/client-go/tools/cache"
+	"k8s.io/klog"
 )
 
 // Handler represents an event handler and is private to the factory module
@@ -219,6 +220,7 @@ func (i *informer) newFederatedQueuedHandler() cache.ResourceEventHandlerFuncs {
 			})
 		},
 		UpdateFunc: func(oldObj, newObj interface{}) {
+			metrics.MetricResourceUpdateCount.WithLabelValues(i.oType.Elem().Name()).Inc()
 			i.enqueueEvent(oldObj, newObj, func(e *event) {
 				i.forEachQueuedHandler(func(h *Handler) {
 					h.OnUpdate(e.oldObj, e.obj)
@@ -248,6 +250,7 @@ func (i *informer) newFederatedHandler() cache.ResourceEventHandlerFuncs {
 			})
 		},
 		UpdateFunc: func(oldObj, newObj interface{}) {
+			metrics.MetricResourceUpdateCount.WithLabelValues(i.oType.Elem().Name()).Inc()
 			i.forEachHandler(newObj, func(h *Handler) {
 				h.OnUpdate(oldObj, newObj)
 			})
