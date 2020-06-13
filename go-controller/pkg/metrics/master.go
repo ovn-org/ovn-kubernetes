@@ -8,9 +8,9 @@ import (
 	"time"
 
 	util "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
-	kapi "k8s.io/api/core/v1"
-
 	"github.com/prometheus/client_golang/prometheus"
+
+	kapi "k8s.io/api/core/v1"
 	"k8s.io/klog"
 )
 
@@ -43,6 +43,17 @@ var metricOvnCliLatency = prometheus.NewHistogramVec(prometheus.HistogramOpts{
 	Buckets:   prometheus.ExponentialBuckets(.1, 2, 15)},
 	// labels
 	[]string{"command"},
+)
+
+// metricResourceUpdateCount is the number of times a particular resource's UpdateFunc has been called.
+var MetricResourceUpdateCount = prometheus.NewCounterVec(prometheus.CounterOpts{
+	Namespace: MetricOvnkubeNamespace,
+	Subsystem: MetricOvnkubeSubsystemMaster,
+	Name:      "resource_update_total",
+	Help:      "A metric that captures the number of times a particular resource's UpdateFunc has been called"},
+	[]string{
+		"resource_name",
+	},
 )
 
 var MetricMasterReadyDuration = prometheus.NewGauge(prometheus.GaugeOpts{
@@ -84,6 +95,7 @@ func RegisterMasterMetrics() {
 		prometheus.MustRegister(metricOvnCliLatency)
 		// this is to not to create circular import between metrics and util package
 		util.MetricOvnCliLatency = metricOvnCliLatency
+		prometheus.MustRegister(MetricResourceUpdateCount)
 		prometheus.MustRegister(prometheus.NewGaugeFunc(
 			prometheus.GaugeOpts{
 				Namespace: MetricOvnkubeNamespace,
