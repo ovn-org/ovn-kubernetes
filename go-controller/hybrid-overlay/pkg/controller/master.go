@@ -137,7 +137,7 @@ func (m *MasterController) handleOverlayPort(node *kapi.Node, annotator kube.Ann
 	// FIXME DUAL-STACK
 	subnet := subnets[0]
 
-	portName := houtil.GetHybridOverlayPortName(node.Name)
+	portName := util.GetHybridOverlayPortName(node.Name)
 	portMAC, portIPs, _ := util.GetPortAddresses(portName)
 	if portMAC == nil || portIPs == nil {
 		if portIPs == nil {
@@ -175,7 +175,7 @@ func (m *MasterController) handleOverlayPort(node *kapi.Node, annotator kube.Ann
 
 func (m *MasterController) deleteOverlayPort(node *kapi.Node) {
 	klog.Infof("removing node %s hybrid overlay port", node.Name)
-	portName := houtil.GetHybridOverlayPortName(node.Name)
+	portName := util.GetHybridOverlayPortName(node.Name)
 	_, _, _ = util.RunOVNNbctl("--", "--if-exists", "lsp-del", portName)
 }
 

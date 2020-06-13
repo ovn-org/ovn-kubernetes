@@ -520,7 +520,7 @@ func (n *NodeController) ensureHybridOverlayBridge(node *kapi.Node) error {
 		return err
 	}
 
-	portName := houtil.GetHybridOverlayPortName(n.nodeName)
+	portName := util.GetHybridOverlayPortName(n.nodeName)
 	portMACString, haveDRMACAnnotation := node.Annotations[hotypes.HybridOverlayDRMAC]
 	if !haveDRMACAnnotation {
 		klog.Infof("node %s does not have DRMAC annotation yet, failed to ensure hybrid overlay"+

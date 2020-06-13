@@ -31,12 +31,6 @@ func ParseHybridOverlayHostSubnet(node *kapi.Node) (*net.IPNet, error) {
 	return subnet, nil
 }
 
-// GetHybridOverlayPortName returns the name of the hybrid overlay switch port
-// for a given node
-func GetHybridOverlayPortName(nodeName string) string {
-	return "int-" + nodeName
-}
-
 // IsHybridOverlayNode returns true if the node has been labeled as a
 // node which does not participate in the ovn-kubernetes overlay network
 func IsHybridOverlayNode(node *kapi.Node) bool {
