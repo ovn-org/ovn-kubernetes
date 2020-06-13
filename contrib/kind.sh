@@ -251,7 +251,7 @@ docker build -t ovn-daemonset-f:dev -f Dockerfile.fedora .
 popd
 kind load docker-image ovn-daemonset-f:dev --name ${KIND_CLUSTER_NAME}
 pushd ../dist/yaml
-run_kubectl create -f ovn-setup.yaml
+run_kubectl apply -f ovn-setup.yaml
 CONTROL_NODES=$(docker ps -f name=ovn-control | grep -v NAMES | awk '{ print $NF }')
 for n in $CONTROL_NODES; do
   run_kubectl label node $n k8s.ovn.org/ovnkube-db=true
@@ -260,12 +260,12 @@ for n in $CONTROL_NODES; do
   fi
 done
 if [ "$KIND_HA" == true ]; then
-  run_kubectl create -f ovnkube-db-raft.yaml
+  run_kubectl apply -f ovnkube-db-raft.yaml
 else
-  run_kubectl create -f ovnkube-db.yaml
+  run_kubectl apply -f ovnkube-db.yaml
 fi
-run_kubectl create -f ovnkube-master.yaml
-run_kubectl create -f ovnkube-node.yaml
+run_kubectl apply -f ovnkube-master.yaml
+run_kubectl apply -f ovnkube-node.yaml
 popd
 run_kubectl -n kube-system delete ds kube-proxy
 kind get clusters
