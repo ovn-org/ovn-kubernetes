@@ -62,6 +62,9 @@ func (oc *Controller) Start(kClient kubernetes.Interface, nodeName string) error
 					end := time.Since(start)
 					metrics.MetricMasterReadyDuration.Set(end.Seconds())
 				}()
+				// run the End-to-end timestamp metric updater only on the
+				// active master node.
+				metrics.StartE2ETimeStampMetricUpdater()
 				if err := oc.StartClusterMaster(nodeName); err != nil {
 					panic(err.Error())
 				}
