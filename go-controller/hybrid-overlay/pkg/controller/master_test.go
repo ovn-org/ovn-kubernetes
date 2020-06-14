@@ -2,6 +2,7 @@ package controller
 
 import (
 	"fmt"
+	"reflect"
 	"strings"
 
 	"github.com/urfave/cli/v2"
@@ -9,11 +10,12 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	k8stypes "k8s.io/apimachinery/pkg/types"
+	"k8s.io/client-go/informers"
 	"k8s.io/client-go/kubernetes/fake"
 
 	"github.com/ovn-org/ovn-kubernetes/go-controller/hybrid-overlay/pkg/types"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
-	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/factory"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/informer"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/kube"
 	ovntest "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/testing"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
@@ -60,7 +62,6 @@ func newTestNode(name, os, ovnHostSubnet, hybridHostSubnet, drMAC string) v1.Nod
 var _ = Describe("Hybrid SDN Master Operations", func() {
 	var (
 		app      *cli.App
-		f        *factory.WatchFactory
 		stopChan chan struct{}
 	)
 
@@ -77,7 +78,6 @@ var _ = Describe("Hybrid SDN Master Operations", func() {
 
 	AfterEach(func() {
 		close(stopChan)
-		f.Shutdown()
 	})
 
 	const hybridOverlayClusterCIDR string = "11.1.0.0/16/24"
@@ -100,20 +100,38 @@ var _ = Describe("Hybrid SDN Master Operations", func() {
 			_, err = config.InitConfig(ctx, fexec, nil)
 			Expect(err).NotTo(HaveOccurred())
 
-			f, err = factory.NewWatchFactory(fakeClient)
+			f := informers.NewSharedInformerFactory(fakeClient, informer.DefaultResyncInterval)
+
+			m, err := NewMaster(
+				&kube.Kube{KClient: fakeClient},
+				f.Core().V1().Nodes().Informer(),
+				f.Core().V1().Namespaces().Informer(),
+				f.Core().V1().Pods().Informer(),
+			)
 			Expect(err).NotTo(HaveOccurred())
 
-			err = StartMaster(&kube.Kube{KClient: fakeClient}, f)
-			Expect(err).NotTo(HaveOccurred())
+			f.Start(stopChan)
+			go m.Run(stopChan)
 
 			// Windows node should be allocated a subnet
-			updatedNode, err := fakeClient.CoreV1().Nodes().Get(nodeName, metav1.GetOptions{})
-			Expect(err).NotTo(HaveOccurred())
-			Expect(updatedNode.Annotations).To(HaveKeyWithValue(types.HybridOverlayNodeSubnet, nodeSubnet))
-			_, err = util.ParseNodeHostSubnetAnnotation(updatedNode)
-			Expect(err).To(MatchError(fmt.Sprintf("node %q has no \"k8s.ovn.org/node-subnets\" annotation", nodeName)))
+			Eventually(func() (map[string]string, error) {
+				updatedNode, err := fakeClient.CoreV1().Nodes().Get(nodeName, metav1.GetOptions{})
+				if err != nil {
+					return nil, err
+				}
+				return updatedNode.Annotations, nil
+			}, 2).Should(HaveKeyWithValue(types.HybridOverlayNodeSubnet, nodeSubnet))
 
-			Expect(fexec.CalledMatchesExpected()).Should(BeTrue(), fexec.ErrorDesc)
+			Eventually(func() error {
+				updatedNode, err := fakeClient.CoreV1().Nodes().Get(nodeName, metav1.GetOptions{})
+				if err != nil {
+					return err
+				}
+				_, err = util.ParseNodeHostSubnetAnnotation(updatedNode)
+				return err
+			}, 2).Should(MatchError(fmt.Sprintf("node %q has no \"k8s.ovn.org/node-subnets\" annotation", nodeName)))
+
+			Eventually(fexec.CalledMatchesExpected, 2).Should(BeTrue(), fexec.ErrorDesc)
 			return nil
 		}
 
@@ -149,17 +167,26 @@ var _ = Describe("Hybrid SDN Master Operations", func() {
 			_, err = config.InitConfig(ctx, fexec, nil)
 			Expect(err).NotTo(HaveOccurred())
 
-			f, err = factory.NewWatchFactory(fakeClient)
+			f := informers.NewSharedInformerFactory(fakeClient, informer.DefaultResyncInterval)
+
+			m, err := NewMaster(
+				&kube.Kube{KClient: fakeClient},
+				f.Core().V1().Nodes().Informer(),
+				f.Core().V1().Namespaces().Informer(),
+				f.Core().V1().Pods().Informer(),
+			)
 			Expect(err).NotTo(HaveOccurred())
 
-			err = StartMaster(&kube.Kube{KClient: fakeClient}, f)
-			Expect(err).NotTo(HaveOccurred())
+			f.Start(stopChan)
+			go m.Run(stopChan)
 
-			Eventually(fexec.CalledMatchesExpected, 2).Should(BeTrue(), fexec.ErrorDesc)
-
-			updatedNode, err := fakeClient.CoreV1().Nodes().Get(nodeName, metav1.GetOptions{})
-			Expect(err).NotTo(HaveOccurred())
-			Expect(updatedNode.Annotations).To(HaveKeyWithValue(types.HybridOverlayDRMAC, nodeHOMAC))
+			Eventually(func() (map[string]string, error) {
+				updatedNode, err := fakeClient.CoreV1().Nodes().Get(nodeName, metav1.GetOptions{})
+				if err != nil {
+					return nil, err
+				}
+				return updatedNode.Annotations, nil
+			}, 2).Should(HaveKeyWithValue(types.HybridOverlayDRMAC, nodeHOMAC))
 
 			// Test that deleting the node cleans up the OVN objects
 			fexec.AddFakeCmdsNoOutputNoError([]string{
@@ -206,11 +233,18 @@ var _ = Describe("Hybrid SDN Master Operations", func() {
 			_, err = config.InitConfig(ctx, fexec, nil)
 			Expect(err).NotTo(HaveOccurred())
 
-			f, err = factory.NewWatchFactory(fakeClient)
+			f := informers.NewSharedInformerFactory(fakeClient, informer.DefaultResyncInterval)
+
+			m, err := NewMaster(
+				&kube.Kube{KClient: fakeClient},
+				f.Core().V1().Nodes().Informer(),
+				f.Core().V1().Namespaces().Informer(),
+				f.Core().V1().Pods().Informer(),
+			)
 			Expect(err).NotTo(HaveOccurred())
 
-			err = StartMaster(&kube.Kube{KClient: fakeClient}, f)
-			Expect(err).NotTo(HaveOccurred())
+			f.Start(stopChan)
+			go m.Run(stopChan)
 
 			k := &kube.Kube{KClient: fakeClient}
 			updatedNode, err := k.GetNode(nodeName)
@@ -221,11 +255,15 @@ var _ = Describe("Hybrid SDN Master Operations", func() {
 			err = nodeAnnotator.Run()
 			Expect(err).NotTo(HaveOccurred())
 
-			Eventually(fexec.CalledMatchesExpected, 2).Should(BeTrue(), fexec.ErrorDesc)
+			Eventually(func() (map[string]string, error) {
+				updatedNode, err = k.GetNode(nodeName)
+				if err != nil {
+					return nil, err
+				}
+				return updatedNode.Annotations, nil
+			}, 2).ShouldNot(HaveKey(types.HybridOverlayDRMAC))
 
-			updatedNode, err = k.GetNode(nodeName)
-			Expect(err).NotTo(HaveOccurred())
-			Expect(updatedNode.Annotations).NotTo(HaveKey(types.HybridOverlayDRMAC))
+			Eventually(fexec.CalledMatchesExpected, 2).Should(BeTrue(), fexec.ErrorDesc)
 			return nil
 		}
 
@@ -273,11 +311,18 @@ var _ = Describe("Hybrid SDN Master Operations", func() {
 			_, err := config.InitConfig(ctx, nil, nil)
 			Expect(err).NotTo(HaveOccurred())
 
-			f, err = factory.NewWatchFactory(fakeClient)
+			f := informers.NewSharedInformerFactory(fakeClient, informer.DefaultResyncInterval)
+
+			m, err := NewMaster(
+				&kube.Kube{KClient: fakeClient},
+				f.Core().V1().Nodes().Informer(),
+				f.Core().V1().Namespaces().Informer(),
+				f.Core().V1().Pods().Informer(),
+			)
 			Expect(err).NotTo(HaveOccurred())
 
-			err = StartMaster(&kube.Kube{KClient: fakeClient}, f)
-			Expect(err).NotTo(HaveOccurred())
+			f.Start(stopChan)
+			go m.Run(stopChan)
 
 			Eventually(func() error {
 				pod, err := fakeClient.CoreV1().Pods(nsName).Get(pod1Name, metav1.GetOptions{})
@@ -341,13 +386,20 @@ var _ = Describe("Hybrid SDN Master Operations", func() {
 
 			_, err := config.InitConfig(ctx, nil, nil)
 			Expect(err).NotTo(HaveOccurred())
-
-			f, err = factory.NewWatchFactory(fakeClient)
-			Expect(err).NotTo(HaveOccurred())
+			f := informers.NewSharedInformerFactory(fakeClient, informer.DefaultResyncInterval)
 
 			k := &kube.Kube{KClient: fakeClient}
-			err = StartMaster(k, f)
+
+			m, err := NewMaster(
+				k,
+				f.Core().V1().Nodes().Informer(),
+				f.Core().V1().Namespaces().Informer(),
+				f.Core().V1().Pods().Informer(),
+			)
 			Expect(err).NotTo(HaveOccurred())
+
+			f.Start(stopChan)
+			go m.Run(stopChan)
 
 			updatedNs, err := fakeClient.CoreV1().Namespaces().Get(nsName, metav1.GetOptions{})
 			Expect(err).NotTo(HaveOccurred())
@@ -362,11 +414,11 @@ var _ = Describe("Hybrid SDN Master Operations", func() {
 				if err != nil {
 					return err
 				}
-				if pod.Annotations[types.HybridOverlayVTEP] != nsVTEP {
+				if reflect.DeepEqual(pod.Annotations[types.HybridOverlayVTEP], nsVTEP) {
 					return fmt.Errorf("error with annotation %s. expected: %s, got: %s", types.HybridOverlayVTEP, nsVTEPUpdated, pod.Annotations[types.HybridOverlayVTEP])
 				}
-				if pod.Annotations[types.HybridOverlayExternalGw] != nsExGw {
-					return fmt.Errorf("error with annotation %s. expected: %s, got: %s", types.HybridOverlayVTEP, nsExGwUpdated, pod.Annotations[types.HybridOverlayExternalGw])
+				if reflect.DeepEqual(pod.Annotations[types.HybridOverlayExternalGw], nsExGw) {
+					return fmt.Errorf("error with annotation %s. expected: %s, got: %s", types.HybridOverlayExternalGw, nsExGwUpdated, pod.Annotations[types.HybridOverlayExternalGw])
 				}
 				return nil
 			}, 2).Should(Succeed())

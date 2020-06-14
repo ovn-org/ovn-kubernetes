@@ -234,9 +234,23 @@ func (n *OvnNode) Start() error {
 	klog.Infof("Gateway and management port readiness took %v", time.Since(start))
 
 	if config.HybridOverlay.Enabled {
-		if err := honode.StartNode(n.name, n.Kube, n.watchFactory, n.stopChan); err != nil {
+		factory := n.watchFactory.GetFactory()
+		nodeController, err := honode.NewNode(
+			n.Kube,
+			n.name,
+			factory.Core().V1().Nodes().Informer(),
+			factory.Core().V1().Pods().Informer(),
+			factory.Core().V1().Namespaces().Informer(),
+		)
+		if err != nil {
 			return err
 		}
+		go func() {
+			err := nodeController.Run(n.stopChan)
+			if err != nil {
+				klog.Error(err)
+			}
+		}()
 	}
 
 	if err := level.Set(strconv.Itoa(config.Logging.Level)); err != nil {

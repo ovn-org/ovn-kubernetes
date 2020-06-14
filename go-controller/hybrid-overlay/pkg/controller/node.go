@@ -6,30 +6,191 @@ import (
 	"reflect"
 
 	"github.com/ovn-org/ovn-kubernetes/go-controller/hybrid-overlay/pkg/types"
+	hotypes "github.com/ovn-org/ovn-kubernetes/go-controller/hybrid-overlay/pkg/types"
 	houtil "github.com/ovn-org/ovn-kubernetes/go-controller/hybrid-overlay/pkg/util"
-	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/factory"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/informer"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/kube"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
-
 	kapi "k8s.io/api/core/v1"
+
+	utilruntime "k8s.io/apimachinery/pkg/util/runtime"
+	listers "k8s.io/client-go/listers/core/v1"
+	"k8s.io/client-go/tools/cache"
 	"k8s.io/klog"
 )
 
-// StartNode creates and starts the hybrid overlay node controller
-func StartNode(nodeName string, kube kube.Interface, wf *factory.WatchFactory, stopChan <-chan struct{}) error {
-	klog.Infof("Starting hybrid overlay node...")
-	node, err := NewNode(kube, nodeName, stopChan)
-	if err != nil {
-		return err
-	}
-	return node.Start(wf)
+// The nodeController interface is implemented by the os-specific code
+type nodeController interface {
+	AddPod(*kapi.Pod) error
+	DeletePod(*kapi.Pod) error
+	AddNode(*kapi.Node) error
+	DeleteNode(*kapi.Node) error
+	AddNamespace(*kapi.Namespace) error
+	RunFlowSync(<-chan struct{})
+	EnsureHybridOverlayBridge(node *kapi.Node) error
 }
 
-// nodeChanged returns true if any relevant node attributes changed
-func nodeChanged(node1 *kapi.Node, node2 *kapi.Node) bool {
-	cidr1, nodeIP1, drMAC1, _ := getNodeDetails(node1)
-	cidr2, nodeIP2, drMAC2, _ := getNodeDetails(node2)
-	return !reflect.DeepEqual(cidr1, cidr2) || !reflect.DeepEqual(nodeIP1, nodeIP2) || !reflect.DeepEqual(drMAC1, drMAC2)
+// Node is a node controller and it's informers
+type Node struct {
+	ready                 bool
+	controller            nodeController
+	nodeEventHandler      informer.EventHandler
+	podEventHandler       informer.EventHandler
+	namespaceEventHandler informer.EventHandler
+}
+
+func nodeChanged(old, new interface{}) bool {
+	oldNode := old.(*kapi.Node)
+	newNode := new.(*kapi.Node)
+
+	oldCidr, oldNodeIP, oldDrMAC, _ := getNodeDetails(oldNode)
+	newCidr, newNodeIP, newDrMAC, _ := getNodeDetails(newNode)
+	return !reflect.DeepEqual(oldCidr, newCidr) || !reflect.DeepEqual(oldNodeIP, newNodeIP) || !reflect.DeepEqual(oldDrMAC, newDrMAC)
+}
+
+// podChanged returns true if any relevant pod attributes changed
+func podChanged(old, new interface{}) bool {
+	oldPod := old.(*kapi.Pod)
+	newPod := new.(*kapi.Pod)
+
+	oldIPs, oldMAC, _ := getPodDetails(oldPod)
+	newIPs, newMAC, _ := getPodDetails(newPod)
+	oldExGw := oldPod.Annotations[hotypes.HybridOverlayExternalGw]
+	oldVTEP := oldPod.Annotations[hotypes.HybridOverlayVTEP]
+	newExGw := newPod.Annotations[hotypes.HybridOverlayExternalGw]
+	newVTEP := newPod.Annotations[hotypes.HybridOverlayVTEP]
+
+	if len(oldIPs) != len(newIPs) || !reflect.DeepEqual(oldMAC, newMAC) || !reflect.DeepEqual(oldExGw, newExGw) || !reflect.DeepEqual(oldVTEP, newVTEP) {
+		return true
+	}
+	for i := range oldIPs {
+		if oldIPs[i].String() != newIPs[i].String() {
+			return true
+		}
+	}
+	return false
+}
+
+// nsHybridAnnotationChanged returns true if any relevant NS attributes changed
+func nsHybridAnnotationChanged(old, new interface{}) bool {
+	oldNs := old.(*kapi.Namespace)
+	newNs := new.(*kapi.Namespace)
+
+	nsExGwOld := oldNs.GetAnnotations()[hotypes.HybridOverlayExternalGw]
+	nsVTEPOld := oldNs.GetAnnotations()[hotypes.HybridOverlayVTEP]
+	nsExGwNew := newNs.GetAnnotations()[hotypes.HybridOverlayExternalGw]
+	nsVTEPNew := newNs.GetAnnotations()[hotypes.HybridOverlayVTEP]
+	if nsExGwOld != nsExGwNew || nsVTEPOld != nsVTEPNew {
+		return true
+	}
+	return false
+}
+
+// NewNode Returns a new Node
+func NewNode(
+	kube kube.Interface,
+	nodeName string,
+	nodeInformer cache.SharedIndexInformer,
+	podInformer cache.SharedIndexInformer,
+	namespaceInformer cache.SharedIndexInformer,
+) (*Node, error) {
+
+	nodeLister := listers.NewNodeLister(nodeInformer.GetIndexer())
+	podLister := listers.NewPodLister(podInformer.GetIndexer())
+
+	controller, err := newNodeController(kube, nodeName, nodeLister, podLister)
+	if err != nil {
+		return nil, err
+	}
+	n := &Node{controller: controller}
+	n.nodeEventHandler = informer.NewDefaultEventHandler("node", nodeInformer,
+		func(obj interface{}) error {
+			node, ok := obj.(*kapi.Node)
+			if !ok {
+				return fmt.Errorf("object is not a node")
+			}
+			return n.controller.AddNode(node)
+		},
+		func(obj interface{}) error {
+			node, ok := obj.(*kapi.Node)
+			if !ok {
+				return fmt.Errorf("object is not a node")
+			}
+			return n.controller.DeleteNode(node)
+		},
+		nodeChanged,
+	)
+	n.podEventHandler = informer.NewDefaultEventHandler("pod", podInformer,
+		func(obj interface{}) error {
+			pod, ok := obj.(*kapi.Pod)
+			if !ok {
+				return fmt.Errorf("object is not a pod")
+			}
+			if pod.Spec.NodeName != nodeName {
+				return nil
+			}
+			return n.controller.AddPod(pod)
+		},
+		func(obj interface{}) error {
+			pod, ok := obj.(*kapi.Pod)
+			if pod.Spec.NodeName != nodeName {
+				return nil
+			}
+			if !ok {
+				return fmt.Errorf("object is not a pod")
+			}
+			return n.controller.DeletePod(pod)
+		},
+		podChanged,
+	)
+	n.namespaceEventHandler = informer.NewDefaultEventHandler("namespace", namespaceInformer,
+		func(obj interface{}) error {
+			ns, ok := obj.(*kapi.Namespace)
+			if !ok {
+				return fmt.Errorf("object is not a namespace")
+			}
+			return n.controller.AddNamespace(ns)
+		},
+		func(obj interface{}) error {
+			return nil
+		},
+		nsHybridAnnotationChanged,
+	)
+	return n, nil
+}
+
+// Run starts the controller
+func (n *Node) Run(stopCh <-chan struct{}) error {
+	defer utilruntime.HandleCrash()
+	klog.Info("Starting Hybrid Overlay Node Controller")
+
+	klog.Info("Starting workers")
+	go func() {
+		err := n.nodeEventHandler.Run(informer.DefaultNodeInformerThreadiness, stopCh)
+		if err != nil {
+			klog.Error(err)
+		}
+	}()
+	go func() {
+		err := n.podEventHandler.Run(informer.DefaultInformerThreadiness, stopCh)
+		if err != nil {
+			klog.Error(err)
+		}
+	}()
+	go func() {
+		err := n.namespaceEventHandler.Run(informer.DefaultInformerThreadiness, stopCh)
+		if err != nil {
+			klog.Error(err)
+		}
+	}()
+
+	go n.controller.RunFlowSync(stopCh)
+
+	klog.Info("Started workers")
+	n.ready = true
+	<-stopCh
+	klog.Info("Shutting down workers")
+	return nil
 }
 
 // getNodeSubnetAndIP returns the node's hybrid overlay subnet and the node's
@@ -86,4 +247,12 @@ func getNodeDetails(node *kapi.Node) (*net.IPNet, net.IP, net.HardwareAddr, erro
 	}
 
 	return cidr, ip, drMAC, nil
+}
+
+func getPodDetails(pod *kapi.Pod) ([]*net.IPNet, net.HardwareAddr, error) {
+	podInfo, err := util.UnmarshalPodAnnotation(pod.Annotations)
+	if err != nil {
+		return nil, nil, err
+	}
+	return podInfo.IPs, podInfo.MAC, nil
 }
