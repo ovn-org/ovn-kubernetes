@@ -97,7 +97,7 @@ type Controller struct {
 	defGatewayRouter    string
 
 	// A cache of all logical switches seen by the watcher and their subnets
-	logicalSwitchCache map[string][]*net.IPNet
+	lsManager *logicalSwitchManager
 
 	// A cache of all logical ports known to the controller
 	logicalPortCache *portCache
@@ -128,9 +128,6 @@ type Controller struct {
 
 	// A mutex for lspIngressDenyCache and lspEgressDenyCache
 	lspMutex *sync.Mutex
-
-	// A mutex for logicalSwitchCache which holds logicalSwitch information
-	lsMutex *sync.Mutex
 
 	// Supports multicast?
 	multicastSupport bool
@@ -173,7 +170,7 @@ func NewOvnController(kubeClient kubernetes.Interface, wf *factory.WatchFactory,
 		stopChan:                 stopChan,
 		masterSubnetAllocator:    subnetallocator.NewSubnetAllocator(),
 		nodeLocalNatIPAllocator:  &ipallocator.Range{},
-		logicalSwitchCache:       make(map[string][]*net.IPNet),
+		lsManager:                newLogicalSwitchManager(),
 		joinSubnetAllocator:      subnetallocator.NewSubnetAllocator(),
 		logicalPortCache:         newPortCache(stopChan),
 		namespaces:               make(map[string]*namespaceInfo),
@@ -182,7 +179,6 @@ func NewOvnController(kubeClient kubernetes.Interface, wf *factory.WatchFactory,
 		lspIngressDenyCache:      make(map[string]int),
 		lspEgressDenyCache:       make(map[string]int),
 		lspMutex:                 &sync.Mutex{},
-		lsMutex:                  &sync.Mutex{},
 		loadbalancerClusterCache: make(map[kapi.Protocol]string),
 		loadbalancerGWCache:      make(map[kapi.Protocol]string),
 		multicastSupport:         config.EnableMulticast,
@@ -581,10 +577,10 @@ func (oc *Controller) WatchNodes() error {
 		AddFunc: func(obj interface{}) {
 			node := obj.(*kapi.Node)
 			if noHostSubnet := noHostSubnet(node); noHostSubnet {
-				oc.lsMutex.Lock()
-				defer oc.lsMutex.Unlock()
-				//setting the value to nil in the cache means it was not assigned a hostSubnet by ovn-kube
-				oc.logicalSwitchCache[node.Name] = nil
+				err := oc.lsManager.AddNoHostSubnetNode(node.Name)
+				if err != nil {
+					klog.Errorf("error creating logical switch cache for node %s: %v", node.Name, err)
+				}
 				return
 			}
 
@@ -669,9 +665,7 @@ func (oc *Controller) WatchNodes() error {
 			if err != nil {
 				klog.Error(err)
 			}
-			oc.lsMutex.Lock()
-			delete(oc.logicalSwitchCache, node.Name)
-			oc.lsMutex.Unlock()
+			oc.lsManager.DeleteNode(node.Name)
 			addNodeFailed.Delete(node.Name)
 			mgmtPortFailed.Delete(node.Name)
 			gatewaysFailed.Delete(node.Name)

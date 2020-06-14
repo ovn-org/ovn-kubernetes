@@ -47,9 +47,11 @@ func (oc *Controller) addPodToNamespace(ns string, portInfo *lpInfo) error {
 	}
 	defer nsInfo.Unlock()
 
-	// DUAL-STACK FIXME: handle multiple IPs
-	if err := nsInfo.addressSet.AddIP(portInfo.ips[0]); err != nil {
-		return err
+	//FIXME DUAL-STACK
+	if len(portInfo.ips) > 0 {
+		if err := nsInfo.addressSet.AddIP(portInfo.ips[0].IP); err != nil {
+			return err
+		}
 	}
 
 	// If multicast is allowed and enabled for the namespace, add the port
@@ -70,9 +72,11 @@ func (oc *Controller) deletePodFromNamespace(ns string, portInfo *lpInfo) error 
 	}
 	defer nsInfo.Unlock()
 
-	// DUAL-STACK FIXME: handle multiple IPs
-	if err := nsInfo.addressSet.DeleteIP(portInfo.ips[0]); err != nil {
-		return err
+	//FIXME DUAL-STACK
+	if len(portInfo.ips) > 0 {
+		if err := nsInfo.addressSet.DeleteIP(portInfo.ips[0].IP); err != nil {
+			return err
+		}
 	}
 
 	// Remove the port from the multicast allow policy.
