@@ -15,6 +15,7 @@ kubeadmConfigPatches:
     name: config
   apiServer:
     extraArgs:
+      "etcd-servers": "https://ovn-control-plane:2379"
       "feature-gates": "SCTPSupport=true"
 nodes:
  - role: control-plane
