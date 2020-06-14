@@ -16,11 +16,16 @@ kubeadmConfigPatches:
   apiServer:
     extraArgs:
       "feature-gates": "SCTPSupport=true"
+  etcd:
+    local:
+      dataDir: "/var/lib/etcd"
 nodes:
  - role: control-plane
    extraMounts:
      - hostPath: /tmp/kind
        containerPath: /var/run/secrets/kubernetes.io/serviceaccount/
+     - hostPath: /tmp/etcd
+       containerPath: /var/lib/etcd
    kubeadmConfigPatches:
    - |
      kind: InitConfiguration
@@ -34,6 +39,8 @@ nodes:
    extraMounts:
      - hostPath: /tmp/kind
        containerPath: /var/run/secrets/kubernetes.io/serviceaccount/
+     - hostPath: /tmp/etcd
+       containerPath: /var/lib/etcd
 {%- endfor %}
 {%- endif %}
 {%- for _ in range(ovn_num_worker | int) %}

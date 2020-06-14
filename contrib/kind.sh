@@ -212,6 +212,10 @@ ovn_apiServerAddress=${API_IP} \
   ovn_num_worker=${KIND_NUM_WORKER} \
   j2 ${KIND_CONFIG} -o ${KIND_CONFIG_LCL}
 
+# use memory storage for etcd
+sudo mkdir /tmp/etcd
+sudo mount -t tmpfs /tmp/etcd /tmp/etcd
+
 # Create KIND cluster. For additional debug, add '--verbosity <int>': 0 None .. 3 Debug
 kind create cluster --name ${KIND_CLUSTER_NAME} --kubeconfig ${HOME}/admin.conf --image kindest/node:${K8S_VERSION} --config=${KIND_CONFIG_LCL}
 export KUBECONFIG=${HOME}/admin.conf
