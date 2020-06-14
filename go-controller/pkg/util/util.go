@@ -6,7 +6,6 @@ import (
 	"strings"
 	"sync"
 
-	houtil "github.com/ovn-org/ovn-kubernetes/go-controller/hybrid-overlay/pkg/util"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
 
 	"github.com/urfave/cli/v2"
@@ -100,7 +99,7 @@ func UpdateNodeSwitchExcludeIPs(nodeName string, subnet *net.IPNet) error {
 		line = strings.TrimSpace(line)
 		if strings.Contains(line, "("+K8sPrefix+nodeName+")") {
 			haveManagementPort = true
-		} else if strings.Contains(line, "("+houtil.GetHybridOverlayPortName(nodeName)+")") {
+		} else if strings.Contains(line, "("+GetHybridOverlayPortName(nodeName)+")") {
 			// we always need to set to false because we do not reserve the IP on the LSP for HO
 			haveHybridOverlayPort = false
 		}
@@ -138,4 +137,10 @@ func UpdateNodeSwitchExcludeIPs(nodeName string, subnet *net.IPNet) error {
 			"stderr: %q, error: %v", nodeName, stderr, err)
 	}
 	return nil
+}
+
+// GetHybridOverlayPortName returns the name of the hybrid overlay switch port
+// for a given node
+func GetHybridOverlayPortName(nodeName string) string {
+	return "int-" + nodeName
 }
