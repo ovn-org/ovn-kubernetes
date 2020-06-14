@@ -193,6 +193,8 @@ func NewOvnController(kubeClient kubernetes.Interface, wf *factory.WatchFactory,
 // Run starts the actual watching.
 func (oc *Controller) Run() error {
 	oc.syncPeriodic()
+	klog.Infof("Starting all the Watchers...")
+	start := time.Now()
 	// WatchNodes must be started first so that its initial Add will
 	// create all node logical switches, which other watches may depend on.
 	// https://github.com/ovn-org/ovn-kubernetes/pull/859
@@ -206,6 +208,7 @@ func (oc *Controller) Run() error {
 			return err
 		}
 	}
+	klog.Infof("Completing all the Watchers took %v", time.Since(start))
 
 	if config.Kubernetes.OVNEmptyLbEvents {
 		go oc.ovnControllerEventChecker()
@@ -395,6 +398,8 @@ func podScheduled(pod *kapi.Pod) bool {
 // WatchPods starts the watching of Pod resource and calls back the appropriate handler logic
 func (oc *Controller) WatchPods() error {
 	var retryPods sync.Map
+
+	start := time.Now()
 	_, err := oc.watchFactory.AddPodHandler(cache.ResourceEventHandlerFuncs{
 		AddFunc: func(obj interface{}) {
 			pod := obj.(*kapi.Pod)
@@ -433,12 +438,17 @@ func (oc *Controller) WatchPods() error {
 			retryPods.Delete(pod.UID)
 		},
 	}, oc.syncPods)
+	if err == nil {
+		klog.Infof("Bootstrapping existing pods and cleaning stale pods took %v",
+			time.Since(start))
+	}
 	return err
 }
 
 // WatchServices starts the watching of Service resource and calls back the
 // appropriate handler logic
 func (oc *Controller) WatchServices() error {
+	start := time.Now()
 	_, err := oc.watchFactory.AddServiceHandler(cache.ResourceEventHandlerFuncs{
 		AddFunc: func(obj interface{}) {
 			service := obj.(*kapi.Service)
@@ -460,11 +470,16 @@ func (oc *Controller) WatchServices() error {
 			oc.deleteService(service)
 		},
 	}, oc.syncServices)
+	if err == nil {
+		klog.Infof("Bootstrapping existing services and cleaning stale services took %v",
+			time.Since(start))
+	}
 	return err
 }
 
 // WatchEndpoints starts the watching of Endpoint resource and calls back the appropriate handler logic
 func (oc *Controller) WatchEndpoints() error {
+	start := time.Now()
 	_, err := oc.watchFactory.AddEndpointsHandler(cache.ResourceEventHandlerFuncs{
 		AddFunc: func(obj interface{}) {
 			ep := obj.(*kapi.Endpoints)
@@ -499,12 +514,17 @@ func (oc *Controller) WatchEndpoints() error {
 			}
 		},
 	}, nil)
+	if err == nil {
+		klog.Infof("Bootstrapping existing endpoints and cleaning stale endpoints took %v",
+			time.Since(start))
+	}
 	return err
 }
 
 // WatchNetworkPolicy starts the watching of network policy resource and calls
 // back the appropriate handler logic
 func (oc *Controller) WatchNetworkPolicy() error {
+	start := time.Now()
 	_, err := oc.watchFactory.AddPolicyHandler(cache.ResourceEventHandlerFuncs{
 		AddFunc: func(obj interface{}) {
 			policy := obj.(*kapisnetworking.NetworkPolicy)
@@ -523,12 +543,17 @@ func (oc *Controller) WatchNetworkPolicy() error {
 			oc.deleteNetworkPolicy(policy)
 		},
 	}, oc.syncNetworkPolicies)
+	if err == nil {
+		klog.Infof("Bootstrapping existing policies and cleaning stale policies took %v",
+			time.Since(start))
+	}
 	return err
 }
 
 // WatchNamespaces starts the watching of namespace resource and calls
 // back the appropriate handler logic
 func (oc *Controller) WatchNamespaces() error {
+	start := time.Now()
 	_, err := oc.watchFactory.AddNamespaceHandler(cache.ResourceEventHandlerFuncs{
 		AddFunc: func(obj interface{}) {
 			ns := obj.(*kapi.Namespace)
@@ -543,6 +568,10 @@ func (oc *Controller) WatchNamespaces() error {
 			oc.deleteNamespace(ns)
 		},
 	}, oc.syncNamespaces)
+	if err == nil {
+		klog.Infof("Bootstrapping existing namespaces and cleaning stale namespaces took %v",
+			time.Since(start))
+	}
 	return err
 }
 
@@ -573,6 +602,8 @@ func (oc *Controller) WatchNodes() error {
 	var gatewaysFailed sync.Map
 	var mgmtPortFailed sync.Map
 	var addNodeFailed sync.Map
+
+	start := time.Now()
 	_, err := oc.watchFactory.AddNodeHandler(cache.ResourceEventHandlerFuncs{
 		AddFunc: func(obj interface{}) {
 			node := obj.(*kapi.Node)
@@ -679,6 +710,10 @@ func (oc *Controller) WatchNodes() error {
 			}
 		},
 	}, oc.syncNodes)
+	if err == nil {
+		klog.Infof("Bootstrapping existing nodes and cleaning stale nodes took %v",
+			time.Since(start))
+	}
 	return err
 }
 
