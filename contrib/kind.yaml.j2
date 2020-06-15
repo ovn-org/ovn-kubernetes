@@ -16,6 +16,9 @@ kubeadmConfigPatches:
   apiServer:
     extraArgs:
       "feature-gates": "SCTPSupport=true"
+  etcd:
+    local:
+      dataDir: "/tmp/lib/etcd"
 nodes:
  - role: control-plane
    extraMounts:
