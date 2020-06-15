@@ -234,12 +234,12 @@ func (oc *Controller) addLogicalPort(pod *kapi.Pod) error {
 	portName := podLogicalPortName(pod)
 	klog.V(5).Infof("Creating logical port for %s on switch %s", portName, logicalSwitch)
 
+	txn := util.NewNBTxn()
+
 	var podMac net.HardwareAddr
 	var podIfAddrs []*net.IPNet
-	var args []string
 	var addresses string
 	annotation, err := util.UnmarshalPodAnnotation(pod.Annotations)
-
 	if err == nil {
 		podMac = annotation.MAC
 		podIfAddrs = annotation.IPs
@@ -251,16 +251,14 @@ func (oc *Controller) addLogicalPort(pod *kapi.Pod) error {
 		out, _, err = util.RunOVNNbctl("--if-exists", "get", "logical_switch_port", portName, "_uuid")
 		if err != nil || !strings.Contains(out, "-") {
 			// Pod's logical switch port does not yet exist
-			args = []string{"lsp-add", logicalSwitch, portName}
+			txn.Add("lsp-add", logicalSwitch, portName)
 		}
 
 		// If the pod already has annotations use the existing static
 		// IP/MAC from the annotation.
 		addresses = podMac.String() + " " + util.JoinIPNetIPs(podIfAddrs, " ")
-		args = append(args,
-			"--", "lsp-set-addresses", portName, addresses,
-			"--", "--if-exists", "clear", "logical_switch_port", portName, "dynamic_addresses",
-		)
+		txn.Add("lsp-set-addresses", portName, addresses)
+		txn.Add("--if-exists", "clear", "logical_switch_port", portName, "dynamic_addresses")
 	} else {
 		podMac, podIfAddrs, err = oc.getPortAddresses(logicalSwitch, portName)
 		if err != nil {
@@ -320,15 +318,13 @@ func (oc *Controller) addLogicalPort(pod *kapi.Pod) error {
 		}
 
 		addresses = podMac.String() + " " + util.JoinIPNetIPs(podIfAddrs, " ")
-		args = []string{
-			"--may-exist", "lsp-add", logicalSwitch, portName,
-			"--", "lsp-set-addresses", portName, addresses,
-		}
+		txn.Add("--may-exist", "lsp-add", logicalSwitch, portName)
+		txn.Add("lsp-set-addresses", portName, addresses)
 	}
-	args = append(args, "--", "set", "logical_switch_port", portName, "external-ids:namespace="+pod.Namespace, "external-ids:pod=true")
-	args = append(args, "--", "lsp-set-port-security", portName, addresses)
+	txn.Add("set", "logical_switch_port", portName, "external-ids:namespace="+pod.Namespace, "external-ids:pod=true")
+	txn.Add("lsp-set-port-security", portName, addresses)
 
-	out, stderr, err = util.RunOVNNbctl(args...)
+	out, stderr, err = txn.Commit()
 	if err != nil {
 		return fmt.Errorf("error while creating logical port %s stdout: %q, stderr: %q (%v)",
 			portName, out, stderr, err)

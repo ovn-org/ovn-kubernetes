@@ -102,7 +102,7 @@ func (p pod) addCmds(fexec *ovntest.FakeExec, fail bool) {
 		})
 
 		fexec.AddFakeCmdsNoOutputNoError([]string{
-			"ovn-nbctl --timeout=15 --may-exist lsp-add " + p.nodeName + " " + p.portName + " -- lsp-set-addresses " + p.portName + " " + p.podMAC + " " + p.podIP + " -- set logical_switch_port " + p.portName + " external-ids:namespace=" + p.namespace + " external-ids:pod=true -- lsp-set-port-security " + p.portName + " " + p.podMAC + " " + p.podIP,
+			"ovn-nbctl --timeout=15 -- --may-exist lsp-add " + p.nodeName + " " + p.portName + " -- lsp-set-addresses " + p.portName + " " + p.podMAC + " " + p.podIP + " -- set logical_switch_port " + p.portName + " external-ids:namespace=" + p.namespace + " external-ids:pod=true -- lsp-set-port-security " + p.portName + " " + p.podMAC + " " + p.podIP,
 		})
 		fexec.AddFakeCmd(&ovntest.ExpectedCmd{
 			Cmd:    "ovn-nbctl --timeout=15 get logical_switch_port " + p.portName + " _uuid",
@@ -118,7 +118,7 @@ func (p pod) addCmds(fexec *ovntest.FakeExec, fail bool) {
 		})
 		fexec.AddFakeCmd(&ovntest.ExpectedCmd{
 			Cmd: strings.Join([]string{
-				"ovn-nbctl --timeout=15 --may-exist lsp-add " + p.nodeName + " " + p.portName + " -- lsp-set-addresses " + p.portName + " " + p.podMAC + " " + p.podIP + " -- set logical_switch_port " + p.portName + " external-ids:namespace=" + p.namespace + " external-ids:pod=true -- lsp-set-port-security " + p.portName + " " + p.podMAC + " " + p.podIP,
+				"ovn-nbctl --timeout=15 -- --may-exist lsp-add " + p.nodeName + " " + p.portName + " -- lsp-set-addresses " + p.portName + " " + p.podMAC + " " + p.podIP + " -- set logical_switch_port " + p.portName + " external-ids:namespace=" + p.namespace + " external-ids:pod=true -- lsp-set-port-security " + p.portName + " " + p.podMAC + " " + p.podIP,
 			}, " "),
 			Err: fmt.Errorf("adsfadsfasfdasfd"),
 		})
@@ -134,7 +134,7 @@ func (p pod) addCmdsForExistingPod(fexec *ovntest.FakeExec, addPort bool) {
 	// pod setup
 	var addPortCmd string
 	if addPort {
-		addPortCmd = fmt.Sprintf("lsp-add %s %s ", p.nodeName, p.portName)
+		addPortCmd = fmt.Sprintf("-- lsp-add %s %s ", p.nodeName, p.portName)
 	}
 	fexec.AddFakeCmdsNoOutputNoError([]string{
 		fmt.Sprintf("ovn-nbctl --timeout=15 %s-- lsp-set-addresses %s %s %s -- --if-exists clear logical_switch_port %s dynamic_addresses -- set logical_switch_port %s external-ids:namespace=namespace external-ids:pod=true -- lsp-set-port-security %s %s %s", addPortCmd, p.portName, p.podMAC, p.podIP, p.portName, p.portName, p.portName, p.podMAC, p.podIP),
