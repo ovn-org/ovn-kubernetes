@@ -1,16 +1,23 @@
 reviewers:
+  - abhat
   - alexanderConstantinescu
+  - aojea
+  - danielmellado
   - danwinship
   - dcbw
   - JacobTanenbaum
+  - juanluisvaladas
   - pecameron
   - rcarrillocruz
   - squeed
+  - tssurya
 approvers:
+  - abhat
   - danwinship
   - dcbw
   - knobunc
   - pecameron
+  - rcarrillocruz
   - squeed
 
 # Bugzilla info
