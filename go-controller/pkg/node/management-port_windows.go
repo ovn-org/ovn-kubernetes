@@ -18,7 +18,7 @@ import (
 // createPlatformManagementPort creates a management port attached to the node switch
 // that lets the node access its pods via their private IP address. This is used
 // for health checking and other management tasks.
-func createPlatformManagementPort(interfaceName string, hostSubnets []*net.IPNet, stopChan chan struct{}) error {
+func createPlatformManagementPort(interfaceName string, hostSubnets []*net.IPNet) (mgmtPortHealtCheckFn, error) {
 	if len(hostSubnets) != 1 || !utilnet.IsIPv6CIDR(hostSubnets[0]) {
 		klog.Fatal("IPv6/Dual-stack not supported on Windows")
 	}
@@ -29,7 +29,7 @@ func createPlatformManagementPort(interfaceName string, hostSubnets []*net.IPNet
 	// Up the interface.
 	_, _, err := util.RunPowershell("Enable-NetAdapter", "-IncludeHidden", interfaceName)
 	if err != nil {
-		return err
+		return nil, err
 	}
 
 	// Check if interface already exists
@@ -40,7 +40,7 @@ func createPlatformManagementPort(interfaceName string, hostSubnets []*net.IPNet
 		klog.V(5).Infof("Interface %s exists, removing.", interfaceName)
 		_, _, err = util.RunPowershell("Remove-NetIPAddress", ifAlias, "-Confirm:$false")
 		if err != nil {
-			return err
+			return nil, err
 		}
 	}
 
@@ -51,7 +51,7 @@ func createPlatformManagementPort(interfaceName string, hostSubnets []*net.IPNet
 		fmt.Sprintf("-PrefixLength %d", portPrefix),
 		ifAlias)
 	if err != nil {
-		return err
+		return nil, err
 	}
 
 	// Set MTU for the interface
@@ -59,7 +59,7 @@ func createPlatformManagementPort(interfaceName string, hostSubnets []*net.IPNet
 		interfaceName, fmt.Sprintf("mtu=%d", config.Default.MTU),
 		"store=persistent")
 	if err != nil {
-		return err
+		return nil, err
 	}
 
 	// Retrieve the interface index
@@ -67,28 +67,28 @@ func createPlatformManagementPort(interfaceName string, hostSubnets []*net.IPNet
 		"{", "$_.Name", "-Match", fmt.Sprintf("\"%s\"", interfaceName), "}).ifIndex")
 	if err != nil {
 		klog.Errorf("Failed to fetch interface index, stderr: %q, error: %v", stderr, err)
-		return err
+		return nil, err
 	}
 	if _, err = strconv.Atoi(stdout); err != nil {
 		klog.Errorf("Failed to parse interface index %q: %v", stdout, err)
-		return err
+		return nil, err
 	}
 	interfaceIndex := stdout
 
 	for _, subnet := range config.Default.ClusterSubnets {
 		err = addRoute(subnet.CIDR, gwIfAddr.IP, interfaceIndex)
 		if err != nil {
-			return err
+			return nil, err
 		}
 	}
 	for _, subnet := range config.Kubernetes.ServiceCIDRs {
 		err = addRoute(subnet, gwIfAddr.IP, interfaceIndex)
 		if err != nil {
-			return err
+			return nil, err
 		}
 	}
 
-	return nil
+	return nil, nil
 }
 
 func addRoute(subnet *net.IPNet, routerIP net.IP, interfaceIndex string) error {

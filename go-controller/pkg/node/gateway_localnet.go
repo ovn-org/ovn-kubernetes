@@ -5,18 +5,15 @@ package node
 import (
 	"fmt"
 	"net"
-	"reflect"
 	"strings"
 
 	"github.com/coreos/go-iptables/iptables"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
-	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/factory"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/kube"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
 	"k8s.io/klog"
 
 	kapi "k8s.io/api/core/v1"
-	"k8s.io/client-go/tools/cache"
 	utilnet "k8s.io/utils/net"
 )
 
@@ -121,7 +118,7 @@ func localnetGatewayNAT(ipt util.IPTablesHelper, ifname string, ip net.IP) error
 	return addIptRules(ipt, rules)
 }
 
-func initLocalnetGateway(nodeName string, subnet *net.IPNet, wf *factory.WatchFactory, nodeAnnotator kube.Annotator) error {
+func (n *OvnNode) initLocalnetGateway(nodeName string, subnet *net.IPNet, nodeAnnotator kube.Annotator) error {
 	// Create a localnet OVS bridge.
 	localnetBridgeName := "br-local"
 	_, stderr, err := util.RunOVSVsctl("--may-exist", "add-br",
@@ -219,7 +216,7 @@ func initLocalnetGateway(nodeName string, subnet *net.IPNet, wf *factory.WatchFa
 	}
 
 	if config.Gateway.NodeportEnable {
-		err = localnetNodePortWatcher(ipt, wf, gatewayIP)
+		err = n.localnetNodePortWatcher(ipt, gatewayIP)
 	}
 
 	return err
@@ -275,7 +272,7 @@ type localnetNodePortWatcherData struct {
 	gatewayIP string
 }
 
-func (npw *localnetNodePortWatcherData) addService(svc *kapi.Service) error {
+func (npw *localnetNodePortWatcherData) AddService(svc *kapi.Service) error {
 	if !util.ServiceTypeHasNodePort(svc) {
 		return nil
 	}
@@ -284,7 +281,7 @@ func (npw *localnetNodePortWatcherData) addService(svc *kapi.Service) error {
 	return addIptRules(npw.ipt, rules)
 }
 
-func (npw *localnetNodePortWatcherData) deleteService(svc *kapi.Service) error {
+func (npw *localnetNodePortWatcherData) DeleteService(svc *kapi.Service) error {
 	if !util.ServiceTypeHasNodePort(svc) {
 		return nil
 	}
@@ -294,7 +291,7 @@ func (npw *localnetNodePortWatcherData) deleteService(svc *kapi.Service) error {
 	return nil
 }
 
-func localnetNodePortWatcher(ipt util.IPTablesHelper, wf *factory.WatchFactory, gatewayIP net.IP) error {
+func (n *OvnNode) localnetNodePortWatcher(ipt util.IPTablesHelper, gatewayIP net.IP) error {
 	// delete all the existing OVN-NODEPORT rules
 	// TODO: Add a localnetSyncService method to remove the stale entries only
 	_ = ipt.ClearChain("nat", iptableNodePortChain)
@@ -321,39 +318,8 @@ func localnetNodePortWatcher(ipt util.IPTablesHelper, wf *factory.WatchFactory, 
 		return err
 	}
 
-	npw := &localnetNodePortWatcherData{ipt: ipt, gatewayIP: gatewayIP.String()}
-	_, err := wf.AddServiceHandler(cache.ResourceEventHandlerFuncs{
-		AddFunc: func(obj interface{}) {
-			svc := obj.(*kapi.Service)
-			err := npw.addService(svc)
-			if err != nil {
-				klog.Errorf("Error in adding service: %v", err)
-			}
-		},
-		UpdateFunc: func(old, new interface{}) {
-			svcNew := new.(*kapi.Service)
-			svcOld := old.(*kapi.Service)
-			if reflect.DeepEqual(svcNew.Spec, svcOld.Spec) {
-				return
-			}
-			err := npw.deleteService(svcOld)
-			if err != nil {
-				klog.Errorf("Error in deleting service - %v", err)
-			}
-			err = npw.addService(svcNew)
-			if err != nil {
-				klog.Errorf("Error in modifying service: %v", err)
-			}
-		},
-		DeleteFunc: func(obj interface{}) {
-			svc := obj.(*kapi.Service)
-			err := npw.deleteService(svc)
-			if err != nil {
-				klog.Errorf("Error in deleting service - %v", err)
-			}
-		},
-	}, nil)
-	return err
+	n.npw = &localnetNodePortWatcherData{ipt: ipt, gatewayIP: gatewayIP.String()}
+	return nil
 }
 
 // cleanupLocalnetGateway cleans up Localnet Gateway

@@ -20,8 +20,10 @@ import (
 	"github.com/urfave/cli/v2"
 	"gopkg.in/fsnotify/fsnotify.v1"
 
+	honode "github.com/ovn-org/ovn-kubernetes/go-controller/hybrid-overlay/pkg/controller"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/factory"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/kube"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/metrics"
 	ovnnode "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/node"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn"
@@ -199,6 +201,8 @@ func runOvnKube(ctx *cli.Context) error {
 		return err
 	}
 
+	informerFactory := factory.GetFactory()
+
 	master := ctx.String("init-master")
 	node := ctx.String("init-node")
 
@@ -238,6 +242,7 @@ func runOvnKube(ctx *cli.Context) error {
 		}
 	}
 
+	errChan := make(chan error, 1)
 	if node != "" {
 		if config.Kubernetes.Token == "" {
 			return fmt.Errorf("cannot initialize node without service account 'token'. Please provide one with --k8s-token argument")
@@ -247,10 +252,40 @@ func runOvnKube(ctx *cli.Context) error {
 		// register ovn specific (ovn-controller and ovn-northd) metrics
 		metrics.RegisterOvnMetrics()
 		start := time.Now()
-		n := ovnnode.NewNode(clientset, factory, node, stopChan)
-		if err := n.Start(); err != nil {
-			return err
+		n := ovnnode.NewNode(
+			clientset,
+			node,
+			informerFactory.Core().V1().Endpoints().Informer(),
+			informerFactory.Core().V1().Services().Informer(),
+		)
+
+		// TODO: Unpick the node controller startup and split between
+		// Init methods, that can fail + Run which cannot
+		go func() {
+			err := n.Run(stopChan)
+			if err != nil {
+				errChan <- err
+			}
+		}()
+
+		if config.HybridOverlay.Enabled {
+			nodeController, err := honode.NewNode(
+				&kube.Kube{KClient: clientset},
+				node,
+				informerFactory.Core().V1().Nodes().Informer(),
+				informerFactory.Core().V1().Pods().Informer(),
+			)
+			if err != nil {
+				return err
+			}
+			go func() {
+				err := nodeController.Run(stopChan)
+				if err != nil {
+					klog.Error(err)
+				}
+			}()
 		}
+
 		end := time.Since(start)
 		metrics.MetricNodeReadyDuration.Set(end.Seconds())
 	}
@@ -261,8 +296,13 @@ func runOvnKube(ctx *cli.Context) error {
 		metrics.StartMetricsServer(config.Kubernetes.MetricsBindAddress, config.Kubernetes.MetricsEnablePprof)
 	}
 
-	// run until cancelled
-	<-ctx.Context.Done()
+	// run until cancelled or error received
+	select {
+	case err := <-errChan:
+		klog.Error(err)
+	case <-ctx.Context.Done():
+		// noop
+	}
 	close(stopChan)
 	factory.Shutdown()
 	return nil

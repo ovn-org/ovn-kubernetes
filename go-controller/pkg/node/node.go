@@ -7,41 +7,181 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"runtime"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
+
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/informer"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/kube/healthcheck"
 
 	"k8s.io/klog"
 
-	honode "github.com/ovn-org/ovn-kubernetes/go-controller/hybrid-overlay/pkg/controller"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/cni"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
-	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/factory"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/kube"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
 
 	kapi "k8s.io/api/core/v1"
+	ktypes "k8s.io/apimachinery/pkg/types"
+	utilruntime "k8s.io/apimachinery/pkg/util/runtime"
 	"k8s.io/apimachinery/pkg/util/wait"
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/tools/cache"
 )
 
+type endpointAddressMap map[string]struct{}
+
+type mgmtPortHealtCheckFn func(stop <-chan struct{})
+
+type nodePortWatcher interface {
+	AddService(svc *kapi.Service) error
+	DeleteService(svc *kapi.Service) error
+}
+
 // OvnNode is the object holder for utilities meant for node management
 type OvnNode struct {
-	name         string
-	Kube         kube.Interface
-	watchFactory *factory.WatchFactory
-	stopChan     chan struct{}
+	name                 string
+	Kube                 kube.Interface
+	endpointEventHandler informer.EventHandler
+	serviceEventHandler  informer.EventHandler
+
+	// map of endpoint name to address maps
+	endpointAddressMap map[string]endpointAddressMap
+	// mutex to pretect endpoint address map
+	endpointAddressMapMutex sync.Mutex
+
+	// local gateway healthcheck
+	server    healthcheck.Server
+	services  map[ktypes.NamespacedName]uint16
+	endpoints map[ktypes.NamespacedName]int
+
+	// shared gateway healtcheck
+	sharedGatewayHealthcheck *sharedGatewayHealthcheck
+
+	// node port watcher
+	npw nodePortWatcher
+
+	// mgmt port config
+	mgmtPortHealtCheck mgmtPortHealtCheckFn
+}
+
+func endpointChanged(old, new interface{}) bool {
+	epNew := new.(*kapi.Endpoints)
+	epOld := old.(*kapi.Endpoints)
+	return !reflect.DeepEqual(epNew.Subsets, epOld.Subsets)
+}
+
+func serviceChanged(old, new interface{}) bool {
+	svcNew := new.(*kapi.Service)
+	svcOld := old.(*kapi.Service)
+	return !reflect.DeepEqual(svcNew.Spec, svcOld.Spec)
 }
 
 // NewNode creates a new controller for node management
-func NewNode(kubeClient kubernetes.Interface, wf *factory.WatchFactory, name string, stopChan chan struct{}) *OvnNode {
-	return &OvnNode{
-		name:         name,
-		Kube:         &kube.Kube{KClient: kubeClient},
-		watchFactory: wf,
-		stopChan:     stopChan,
+func NewNode(
+	kubeClient kubernetes.Interface,
+	name string,
+	endpointInformer cache.SharedIndexInformer,
+	serviceInformer cache.SharedIndexInformer,
+) *OvnNode {
+	o := &OvnNode{
+		name:               name,
+		Kube:               &kube.Kube{KClient: kubeClient},
+		server:             healthcheck.NewServer(name, nil, nil, nil),
+		endpointAddressMap: make(map[string]endpointAddressMap),
+		services:           make(map[ktypes.NamespacedName]uint16),
+		endpoints:          make(map[ktypes.NamespacedName]int),
+		npw:                nil,
+		mgmtPortHealtCheck: nil,
 	}
+	o.endpointEventHandler = informer.NewDefaultEventHandler(
+		"endpoints",
+		endpointInformer,
+		func(obj interface{}) error {
+			ep, ok := obj.(*kapi.Endpoints)
+			if !ok {
+				return fmt.Errorf("%s is not an endpoint", obj)
+			}
+			if config.Gateway.NodeportEnable {
+				name := ktypes.NamespacedName{Namespace: ep.Namespace, Name: ep.Name}
+				if _, exists := o.services[name]; exists {
+					o.endpoints[name] = countLocalEndpoints(ep, o.name)
+					_ = o.server.SyncEndpoints(o.endpoints)
+				}
+			}
+			o.endpointAddressMapMutex.Lock()
+			defer o.endpointAddressMapMutex.Unlock()
+
+			newEndpointAddressMap := buildEndpointAddressMap(ep.Subsets)
+			// compute addressMap for adds
+			if _, ok := o.endpointAddressMap[ep.Name]; !ok {
+				o.endpointAddressMap[ep.Name] = newEndpointAddressMap
+				return nil
+			}
+			// compare addressMap with existing for updates
+			for ip := range newEndpointAddressMap {
+				if _, ok := o.endpointAddressMap[ep.Name][ip]; !ok {
+					deleteConntrack(ip)
+				}
+			}
+			o.endpointAddressMap[ep.Name] = newEndpointAddressMap
+			return nil
+		},
+		func(obj interface{}) error {
+			ep, ok := obj.(*kapi.Endpoints)
+			if !ok {
+				return fmt.Errorf("%s is not an endpoint", obj)
+			}
+			if config.Gateway.NodeportEnable {
+				name := ktypes.NamespacedName{Namespace: ep.Namespace, Name: ep.Name}
+				delete(o.endpoints, name)
+				_ = o.server.SyncEndpoints(o.endpoints)
+			}
+			for ip := range o.endpointAddressMap[ep.Name] {
+				deleteConntrack(ip)
+			}
+			return nil
+		},
+		endpointChanged,
+	)
+
+	o.serviceEventHandler = informer.NewDefaultEventHandler(
+		"services",
+		serviceInformer,
+		func(obj interface{}) error {
+			if !config.Gateway.NodeportEnable {
+				return nil
+			}
+			svc, ok := obj.(*kapi.Service)
+			if !ok {
+				return fmt.Errorf("object %s is not a service", obj)
+			}
+			if svc.Spec.HealthCheckNodePort != 0 {
+				name := ktypes.NamespacedName{Namespace: svc.Namespace, Name: svc.Name}
+				o.services[name] = uint16(svc.Spec.HealthCheckNodePort)
+				_ = o.server.SyncServices(o.services)
+			}
+			return o.npw.AddService(svc)
+		},
+		func(obj interface{}) error {
+			if !config.Gateway.NodeportEnable {
+				return nil
+			}
+			svc := obj.(*kapi.Service)
+			if svc.Spec.HealthCheckNodePort != 0 {
+				name := ktypes.NamespacedName{Namespace: svc.Namespace, Name: svc.Name}
+				delete(o.services, name)
+				// this was copied verbatim but doesn't seem right
+				delete(o.endpoints, name)
+				_ = o.server.SyncServices(o.services)
+			}
+			return o.npw.DeleteService(svc)
+		},
+		serviceChanged,
+	)
+	return o
 }
 
 func setupOVNNode(node *kapi.Node) error {
@@ -156,9 +296,14 @@ func isOVNControllerReady(name string) (bool, error) {
 	return true, nil
 }
 
-// Start learns the subnet assigned to it by the master controller
+// Run learns the subnet assigned to it by the master controller
 // and calls the SetupNode script which establishes the logical switch
-func (n *OvnNode) Start() error {
+// It then spawns the endpoint worker threads and blocks until the
+// stop channel is closed
+func (n *OvnNode) Run(stopChan <-chan struct{}) error {
+	defer utilruntime.HandleCrash()
+	klog.Info("Starting OVN Node Controller")
+
 	var err error
 	var node *kapi.Node
 	var subnets []*net.IPNet
@@ -233,23 +378,22 @@ func (n *OvnNode) Start() error {
 	}
 	klog.Infof("Gateway and management port readiness took %v", time.Since(start))
 
-	if config.HybridOverlay.Enabled {
-		factory := n.watchFactory.GetFactory()
-		nodeController, err := honode.NewNode(
-			n.Kube,
-			n.name,
-			factory.Core().V1().Nodes().Informer(),
-			factory.Core().V1().Pods().Informer(),
-		)
-		if err != nil {
-			return err
+	if config.Gateway.Mode == config.GatewayModeShared {
+		if n.sharedGatewayHealthcheck == nil {
+			return fmt.Errorf("shared gateway healtcheck is not populated")
 		}
-		go func() {
-			err := nodeController.Run(n.stopChan)
-			if err != nil {
-				klog.Error(err)
-			}
-		}()
+		klog.Infof("Starting conntrack healtcheck thread")
+		// add health check function to check default OpenFlow flows are on the shared gateway bridge
+		go checkDefaultConntrackRules(n.sharedGatewayHealthcheck, stopChan)
+	}
+
+	// start the management port health check
+	if runtime.GOOS != "windows" {
+		if n.mgmtPortHealtCheck == nil {
+			return fmt.Errorf("mgmt port check is not populated")
+		}
+		klog.Infof("Starting management port healtcheck thread")
+		go n.mgmtPortHealtCheck(stopChan)
 	}
 
 	if err := level.Set(strconv.Itoa(config.Logging.Level)); err != nil {
@@ -257,7 +401,8 @@ func (n *OvnNode) Start() error {
 	}
 
 	// start health check to ensure there are no stale OVS internal ports
-	go checkForStaleOVSInterfaces(n.stopChan)
+	klog.Infof("Starting stale OVS interface thread")
+	go checkForStaleOVSInterfaces(stopChan)
 
 	confFile := filepath.Join(config.CNI.ConfDir, config.CNIConfFileName)
 	_, err = os.Stat(confFile)
@@ -272,45 +417,29 @@ func (n *OvnNode) Start() error {
 	if !ok {
 		return fmt.Errorf("Cannot get kubeclient for starting CNI server")
 	}
-	err = n.WatchEndpoints()
-	if err != nil {
+
+	klog.Infof("Starting workqueue worker threads")
+	go func() {
+		if err := n.endpointEventHandler.Run(informer.DefaultInformerThreadiness, stopChan); err != nil {
+			klog.Error(err)
+		}
+	}()
+	go func() {
+		if err := n.serviceEventHandler.Run(informer.DefaultInformerThreadiness, stopChan); err != nil {
+			klog.Error(err)
+		}
+	}()
+
+	// start the cni server
+	klog.Infof("Starting CNI server")
+	cniServer := cni.NewCNIServer("", kclient.KClient)
+	if err := cniServer.Start(cni.HandleCNIRequest); err != nil {
 		return err
 	}
 
-	// start the cni server
-	cniServer := cni.NewCNIServer("", kclient.KClient)
-	err = cniServer.Start(cni.HandleCNIRequest)
+	<-stopChan
 
-	return err
-}
-
-func (n *OvnNode) WatchEndpoints() error {
-	_, err := n.watchFactory.AddEndpointsHandler(cache.ResourceEventHandlerFuncs{
-		UpdateFunc: func(old, new interface{}) {
-			epNew := new.(*kapi.Endpoints)
-			epOld := old.(*kapi.Endpoints)
-			if reflect.DeepEqual(epNew.Subsets, epOld.Subsets) {
-				return
-			}
-			newEndpointAddressMap := buildEndpointAddressMap(epNew.Subsets)
-			for _, subset := range epOld.Subsets {
-				for _, address := range subset.Addresses {
-					if _, ok := newEndpointAddressMap[address.IP]; !ok {
-						deleteConntrack(address.IP)
-					}
-				}
-			}
-		},
-		DeleteFunc: func(obj interface{}) {
-			ep := obj.(*kapi.Endpoints)
-			for _, subset := range ep.Subsets {
-				for _, address := range subset.Addresses {
-					deleteConntrack(address.IP)
-				}
-			}
-		},
-	}, nil)
-	return err
+	return nil
 }
 
 func buildEndpointAddressMap(epSubsets []kapi.EndpointSubset) map[string]struct{} {

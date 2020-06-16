@@ -49,7 +49,7 @@ func (n *OvnNode) createManagementPort(hostSubnets []*net.IPNet, nodeAnnotator k
 		return err
 	}
 
-	err = createPlatformManagementPort(util.K8sMgmtIntfName, hostSubnets, n.stopChan)
+	n.mgmtPortHealtCheck, err = createPlatformManagementPort(util.K8sMgmtIntfName, hostSubnets)
 	if err != nil {
 		return err
 	}

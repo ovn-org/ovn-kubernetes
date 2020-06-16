@@ -98,18 +98,11 @@ func getIPv4Address(iface string) (*net.IPNet, error) {
 func (n *OvnNode) initGateway(subnet *net.IPNet, nodeAnnotator kube.Annotator,
 	waiter *startupWaiter) error {
 
-	if config.Gateway.NodeportEnable {
-		err := initLoadBalancerHealthChecker(n.name, n.watchFactory)
-		if err != nil {
-			return err
-		}
-	}
-
 	var err error
 	var prFn postWaitFunc
 	switch config.Gateway.Mode {
 	case config.GatewayModeLocal:
-		err = initLocalnetGateway(n.name, subnet, n.watchFactory, nodeAnnotator)
+		err = n.initLocalnetGateway(n.name, subnet, nodeAnnotator)
 	case config.GatewayModeShared:
 		gatewayNextHop := net.ParseIP(config.Gateway.NextHop)
 		gatewayIntf := config.Gateway.Interface
