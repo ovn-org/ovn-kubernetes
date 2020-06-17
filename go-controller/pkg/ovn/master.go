@@ -33,6 +33,22 @@ const (
 	OvnServiceIdledAt = "k8s.ovn.org/idled-at"
 )
 
+type ovnkubeMasterLeaderMetrics struct{}
+
+func (ovnkubeMasterLeaderMetrics) On(string) {
+	metrics.MetricMasterLeader.Set(1)
+}
+
+func (ovnkubeMasterLeaderMetrics) Off(string) {
+	metrics.MetricMasterLeader.Set(0)
+}
+
+type ovnkubeMasterLeaderMetricsProvider struct{}
+
+func (_ ovnkubeMasterLeaderMetricsProvider) NewLeaderMetric() leaderelection.SwitchMetric {
+	return ovnkubeMasterLeaderMetrics{}
+}
+
 // Start waits until this process is the leader before starting master functions
 func (oc *Controller) Start(kClient kubernetes.Interface, nodeName string) error {
 	// Set up leader election process first
@@ -89,6 +105,7 @@ func (oc *Controller) Start(kClient kubernetes.Interface, nodeName string) error
 		},
 	}
 
+	leaderelection.SetProvider(ovnkubeMasterLeaderMetricsProvider{})
 	leaderElector, err := leaderelection.NewLeaderElector(lec)
 	if err != nil {
 		return err

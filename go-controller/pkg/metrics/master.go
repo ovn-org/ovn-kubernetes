@@ -74,6 +74,14 @@ var MetricMasterReadyDuration = prometheus.NewGauge(prometheus.GaugeOpts{
 	Help:      "The duration for the master to get to ready state",
 })
 
+// MetricMasterLeader identifies whether this instance of ovnkube-master is a leader or not
+var MetricMasterLeader = prometheus.NewGauge(prometheus.GaugeOpts{
+	Namespace: MetricOvnkubeNamespace,
+	Subsystem: MetricOvnkubeSubsystemMaster,
+	Name:      "leader",
+	Help:      "Identifies whether the instance of ovnkube-master is a leader(1) or not(0).",
+})
+
 var registerMasterMetricsOnce sync.Once
 var startE2ETimeStampUpdaterOnce sync.Once
 
@@ -85,6 +93,7 @@ func RegisterMasterMetrics() {
 		// following go routine is directly responsible for collecting the metric above.
 		StartE2ETimeStampMetricUpdater()
 
+		prometheus.MustRegister(MetricMasterLeader)
 		prometheus.MustRegister(metricPodCreationLatency)
 		prometheus.MustRegister(prometheus.NewCounterFunc(
 			prometheus.CounterOpts{
