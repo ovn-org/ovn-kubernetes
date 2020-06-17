@@ -53,9 +53,6 @@ jobs:
            make windows
            COVERALLS=1 make check
         popd
-        pushd dist/images
-           if [ -n "$(git diff --stat origin/master.. | grep dist/images/Dockerfile)" ]; then make all; fi
-        popd
 
         # Combine separate code coverage profiles into one
         go get github.com/modocache/gover
