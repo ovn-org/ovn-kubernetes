@@ -90,9 +90,6 @@ var startE2ETimeStampUpdaterOnce sync.Once
 func RegisterMasterMetrics() {
 	registerMasterMetricsOnce.Do(func() {
 		prometheus.MustRegister(metricE2ETimestamp)
-		// following go routine is directly responsible for collecting the metric above.
-		StartE2ETimeStampMetricUpdater()
-
 		prometheus.MustRegister(MetricMasterLeader)
 		prometheus.MustRegister(metricPodCreationLatency)
 		prometheus.MustRegister(prometheus.NewCounterFunc(
