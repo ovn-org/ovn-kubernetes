@@ -174,6 +174,7 @@ func DeleteConntrack(ip string) {
 	ipAddress := net.ParseIP(ip)
 	if ipAddress == nil {
 		klog.Errorf("Value \"%s\" passed to DeleteConntrack is not an IP address", ipAddress)
+		return
 	}
 
 	filter := &netlink.ConntrackFilter{}
