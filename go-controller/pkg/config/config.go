@@ -35,6 +35,9 @@ const (
 	V6JoinSubnet = "fd98::/64"
 )
 
+// Default IANA-assigned UDP port number for VXLAN
+const DefaultVXLANPort = 4789
+
 // The following are global config parameters that other modules may access directly
 var (
 	// ovn-kubernetes version, to be changed with every release
@@ -95,6 +98,7 @@ var (
 	// HybridOverlay holds hybrid overlay feature config options.
 	HybridOverlay = HybridOverlayConfig{
 		RawClusterSubnets: "10.132.0.0/14/23",
+		VXLANPort:         DefaultVXLANPort,
 	}
 
 	// NbctlDaemon enables ovn-nbctl to run in daemon mode
@@ -249,6 +253,8 @@ type HybridOverlayConfig struct {
 	// ClusterSubnets holds parsed hybrid overlay cluster subnet entries and
 	// may be used outside the config module.
 	ClusterSubnets []CIDRNetworkEntry
+	// VXLANPort holds the VXLAN tunnel UDP port number.
+	VXLANPort uint `gcfg:"hybrid-overlay-vxlan-port"`
 }
 
 // OvnDBScheme describes the OVN database connection transport method
@@ -762,6 +768,12 @@ var HybridOverlayFlags = []cli.Flag{
 			"hostsubnetlength defines how many IP addresses are dedicated to each node.",
 		Destination: &cliConfig.HybridOverlay.RawClusterSubnets,
 	},
+	&cli.UintFlag{
+		Name:        "hybrid-overlay-vxlan-port",
+		Value:       HybridOverlay.VXLANPort,
+		Usage:       "The UDP port used by the VXLAN protocol for hybrid networks.",
+		Destination: &cliConfig.HybridOverlay.VXLANPort,
+	},
 }
 
 // Flags are general command-line flags. Apps should add these flags to their
@@ -1046,6 +1058,10 @@ func buildHybridOverlayConfig(ctx *cli.Context, cli, file *config, allSubnets *c
 		}
 		for _, subnet := range HybridOverlay.ClusterSubnets {
 			allSubnets.append(configSubnetHybrid, subnet.CIDR)
+		}
+
+		if HybridOverlay.VXLANPort > 65535 {
+			return fmt.Errorf("hybrid overlay vxlan port is invalid. The port cannot be larger than 65535")
 		}
 	}
 
