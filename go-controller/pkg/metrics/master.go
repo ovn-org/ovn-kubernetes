@@ -45,15 +45,26 @@ var metricOvnCliLatency = prometheus.NewHistogramVec(prometheus.HistogramOpts{
 	[]string{"command"},
 )
 
-// metricResourceUpdateCount is the number of times a particular resource's UpdateFunc has been called.
+// MetricResourceUpdateCount is the number of times a particular resource's UpdateFunc has been called.
 var MetricResourceUpdateCount = prometheus.NewCounterVec(prometheus.CounterOpts{
 	Namespace: MetricOvnkubeNamespace,
 	Subsystem: MetricOvnkubeSubsystemMaster,
 	Name:      "resource_update_total",
 	Help:      "A metric that captures the number of times a particular resource's UpdateFunc has been called"},
 	[]string{
-		"resource_name",
+		"name",
 	},
+)
+
+// MetricResourceUpdateLatency is the time taken to complete resource update by an handler.
+// This measures the latency for all of the handlers for a given resource.
+var MetricResourceUpdateLatency = prometheus.NewHistogramVec(prometheus.HistogramOpts{
+	Namespace: MetricOvnkubeNamespace,
+	Subsystem: MetricOvnkubeSubsystemMaster,
+	Name:      "resource_update_latency_seconds",
+	Help:      "The latency of various update handlers for a given resource",
+	Buckets:   prometheus.ExponentialBuckets(.1, 2, 15)},
+	[]string{"name"},
 )
 
 var MetricMasterReadyDuration = prometheus.NewGauge(prometheus.GaugeOpts{
@@ -96,6 +107,7 @@ func RegisterMasterMetrics() {
 		// this is to not to create circular import between metrics and util package
 		util.MetricOvnCliLatency = metricOvnCliLatency
 		prometheus.MustRegister(MetricResourceUpdateCount)
+		prometheus.MustRegister(MetricResourceUpdateLatency)
 		prometheus.MustRegister(prometheus.NewGaugeFunc(
 			prometheus.GaugeOpts{
 				Namespace: MetricOvnkubeNamespace,

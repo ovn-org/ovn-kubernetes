@@ -250,9 +250,12 @@ func (i *informer) newFederatedHandler() cache.ResourceEventHandlerFuncs {
 			})
 		},
 		UpdateFunc: func(oldObj, newObj interface{}) {
-			metrics.MetricResourceUpdateCount.WithLabelValues(i.oType.Elem().Name()).Inc()
+			name := i.oType.Elem().Name()
+			metrics.MetricResourceUpdateCount.WithLabelValues(name).Inc()
 			i.forEachHandler(newObj, func(h *Handler) {
+				start := time.Now()
 				h.OnUpdate(oldObj, newObj)
+				metrics.MetricResourceUpdateLatency.WithLabelValues(name).Observe(time.Since(start).Seconds())
 			})
 		},
 		DeleteFunc: func(obj interface{}) {
