@@ -246,10 +246,9 @@ wait_for_event() {
   done
 }
 
-# OVN DBs must be up and initialized before ovn-master and ovn-node PODs can come up
-# This waits for ovnkube-db POD to come up
+# The ovnkube-db kubernetes service must be populated with OVN DB service endpoints
+# before various OVN K8s containers can come up. This functions checks for that.
 ready_to_start_node() {
-
   # See if ep is available ...
   IFS=" " read -a ovn_db_hosts <<<"$(kubectl --server=${K8S_APISERVER} --token=${k8s_token} --certificate-authority=${K8S_CACERT} \
     get ep -n ${ovn_kubernetes_namespace} ovnkube-db -o=jsonpath='{range .subsets[0].addresses[*]}{.ip}{" "}')"
@@ -257,13 +256,6 @@ ready_to_start_node() {
     return 1
   fi
   get_ovn_db_vars
-  # cannot use ovsdb-client in the case of raft, since it will succeed even if one of the
-  # instance of DB is up and running. HOwever, ovn-nbctl always connects to the leader in the clustered
-  # database, so use it.
-  ovn-nbctl --db=${ovn_nbdb_conn} ${ovndb_ctl_ssl_opts} list NB_Global >/dev/null
-  if [[ $? != 0 ]]; then
-    return 1
-  fi
   return 0
 }
 # wait_for_event ready_to_start_node
@@ -678,7 +670,8 @@ sb-ovsdb() {
   }
   ovn-sbctl --inactivity-probe=0 set-connection p${transport}:${ovn_sb_port}:[${ovn_db_host}]
 
-  # create the ovnkube_db endpoint for other pods to query the OVN DB IP
+  # create the ovnkube-db endpoints
+  wait_for_event attempts=10 check_ovnkube_db_ep ${ovn_db_host} ${ovn_nb_port}
   set_ovnkube_db_ep ${ovn_db_host}
 
   tail --follow=name ${OVN_LOGDIR}/ovsdb-server-sb.log &
@@ -752,7 +745,7 @@ ovn-master() {
   wait_for_event ovs_ready
 
   hybrid_overlay_flags=
-  if [[ -n "${ovn_hybrid_overlay_enable}" ]]; then
+  if [[ ${ovn_hybrid_overlay_enable} == "true" ]]; then
     hybrid_overlay_flags="--enable-hybrid-overlay"
     if [[ -n "${ovn_hybrid_overlay_net_cidr}" ]]; then
       hybrid_overlay_flags="${hybrid_overlay_flags} --hybrid-overlay-cluster-subnets=${ovn_hybrid_overlay_net_cidr}"
@@ -775,6 +768,7 @@ ovn-master() {
     --init-master ${K8S_NODE} \
     --cluster-subnets ${net_cidr} --k8s-service-cidr=${svc_cidr} \
     --nb-address=${ovn_nbdb} --sb-address=${ovn_sbdb} \
+    --gateway-mode=${ovn_gateway_mode} \
     --nbctl-daemon-mode \
     --loglevel=${ovnkube_loglevel} \
     ${hybrid_overlay_flags} \
@@ -853,8 +847,11 @@ ovn-node() {
   wait_for_event process_ready ovn-controller
 
   hybrid_overlay_flags=
-  if [[ -n "${ovn_hybrid_overlay_enable}" ]]; then
+  if [[ ${ovn_hybrid_overlay_enable} == "true" ]]; then
     hybrid_overlay_flags="--enable-hybrid-overlay"
+    if [[ -n "${ovn_hybrid_overlay_net_cidr}" ]]; then
+      hybrid_overlay_flags="${hybrid_overlay_flags} --hybrid-overlay-cluster-subnets=${ovn_hybrid_overlay_net_cidr}"
+    fi
   fi
 
   OVN_ENCAP_IP=""

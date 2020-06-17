@@ -16,7 +16,7 @@ func initLocalnetGateway(nodeName string, subnet *net.IPNet,
 	return fmt.Errorf("Not implemented yet on Windows")
 }
 
-func cleanupLocalnetGateway() error {
+func cleanupLocalnetGateway(string) error {
 	// TODO: Implement this
 	return fmt.Errorf("Not implemented yet on Windows")
 }

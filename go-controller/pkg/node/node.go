@@ -6,6 +6,7 @@ import (
 	"net"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strconv"
 	"strings"
 	"time"
@@ -22,6 +23,7 @@ import (
 	kapi "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/util/wait"
 	"k8s.io/client-go/kubernetes"
+	"k8s.io/client-go/tools/cache"
 )
 
 // OvnNode is the object holder for utilities meant for node management
@@ -136,9 +138,16 @@ func isOVNControllerReady(name string) (bool, error) {
 	err = wait.PollImmediate(500*time.Millisecond, 60*time.Second, func() (bool, error) {
 		stdout, _, err := util.RunOVSOfctl("dump-aggregate", "br-int")
 		if err != nil {
+			klog.V(5).Infof("Error dumping aggregate flows: %v "+
+				"for node: %s", err, name)
 			return false, nil
 		}
-		return !strings.Contains(stdout, "flow_count=0"), nil
+		ret := strings.Contains(stdout, "flow_count=0")
+		if ret {
+			klog.V(5).Infof("Got a flow count of 0 when "+
+				"dumping flows for node: %s", name)
+		}
+		return !ret, nil
 	})
 	if err != nil {
 		return false, fmt.Errorf("timed out dumping br-int flow entries for node %s: %v", name, err)
@@ -225,9 +234,23 @@ func (n *OvnNode) Start() error {
 	klog.Infof("Gateway and management port readiness took %v", time.Since(start))
 
 	if config.HybridOverlay.Enabled {
-		if err := honode.StartNode(n.name, n.Kube, n.watchFactory, n.stopChan); err != nil {
+		factory := n.watchFactory.GetFactory()
+		nodeController, err := honode.NewNode(
+			n.Kube,
+			n.name,
+			factory.Core().V1().Nodes().Informer(),
+			factory.Core().V1().Pods().Informer(),
+			factory.Core().V1().Namespaces().Informer(),
+		)
+		if err != nil {
 			return err
 		}
+		go func() {
+			err := nodeController.Run(n.stopChan)
+			if err != nil {
+				klog.Error(err)
+			}
+		}()
 	}
 
 	if err := level.Set(strconv.Itoa(config.Logging.Level)); err != nil {
@@ -250,10 +273,53 @@ func (n *OvnNode) Start() error {
 	if !ok {
 		return fmt.Errorf("Cannot get kubeclient for starting CNI server")
 	}
+	err = n.WatchEndpoints()
+	if err != nil {
+		return err
+	}
 
 	// start the cni server
 	cniServer := cni.NewCNIServer("", kclient.KClient)
 	err = cniServer.Start(cni.HandleCNIRequest)
 
 	return err
+}
+
+func (n *OvnNode) WatchEndpoints() error {
+	_, err := n.watchFactory.AddEndpointsHandler(cache.ResourceEventHandlerFuncs{
+		UpdateFunc: func(old, new interface{}) {
+			epNew := new.(*kapi.Endpoints)
+			epOld := old.(*kapi.Endpoints)
+			if reflect.DeepEqual(epNew.Subsets, epOld.Subsets) {
+				return
+			}
+			newEndpointAddressMap := buildEndpointAddressMap(epNew.Subsets)
+			for _, subset := range epOld.Subsets {
+				for _, address := range subset.Addresses {
+					if _, ok := newEndpointAddressMap[address.IP]; !ok {
+						deleteConntrack(address.IP)
+					}
+				}
+			}
+		},
+		DeleteFunc: func(obj interface{}) {
+			ep := obj.(*kapi.Endpoints)
+			for _, subset := range ep.Subsets {
+				for _, address := range subset.Addresses {
+					deleteConntrack(address.IP)
+				}
+			}
+		},
+	}, nil)
+	return err
+}
+
+func buildEndpointAddressMap(epSubsets []kapi.EndpointSubset) map[string]struct{} {
+	addressMap := make(map[string]struct{})
+	for _, subset := range epSubsets {
+		for _, address := range subset.Addresses {
+			addressMap[address.IP] = struct{}{}
+		}
+	}
+	return addressMap
 }

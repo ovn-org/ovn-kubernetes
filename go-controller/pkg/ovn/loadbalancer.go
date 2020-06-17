@@ -221,10 +221,14 @@ func (ovn *Controller) createLoadBalancerRejectACL(lb string, sourceIP string, s
 	} else if len(aclUUID) > 0 {
 		klog.Infof("Existing Service Reject ACL found: %s for %s", aclUUID, aclName)
 		// If we found the ACL exists we need to ensure it applies to all logical switches
+		cmd := []string{}
 		for _, ls := range switches {
-			_, _, err := util.RunOVNNbctl("add", "logical_switch", ls, "acls", aclUUID)
+			cmd = append(cmd, "--", "add", "logical_switch", ls, "acls", aclUUID)
+		}
+		if len(cmd) > 0 {
+			_, _, err = util.RunOVNNbctl(cmd...)
 			if err != nil {
-				klog.Warningf("Unable to add reject ACL: %s for switch: %s", aclUUID, ls)
+				klog.Warningf("Unable to add reject ACL: %s for switches: %s", aclUUID, switches)
 			}
 		}
 		ovn.setServiceACLToLB(lb, vip, aclUUID)
@@ -264,12 +268,18 @@ func (ovn *Controller) deleteLoadBalancerRejectACL(lb, vip string) {
 		klog.Errorf("Could not retrieve logical switches associated with load balancer %s", lb)
 		return
 	}
+
+	args := []string{}
 	for _, ls := range switches {
-		_, _, err := util.RunOVNNbctl("--if-exists", "remove", "logical_switch", ls, "acl", acl)
+		args = append(args, "--", "--if-exists", "remove", "logical_switch", ls, "acl", acl)
+	}
+
+	if len(args) > 0 {
+		_, _, err = util.RunOVNNbctl(args...)
 		if err != nil {
-			klog.Errorf("Error while removing ACL: %s, from switch %s, error: %v", acl, ls, err)
+			klog.Errorf("Error while removing ACL: %s, from switches, error: %v", acl, err)
 		} else {
-			klog.V(5).Infof("ACL: %s, removed from switch: %s", acl, ls)
+			klog.V(5).Infof("ACL: %s, removed from switches: %s", acl, switches)
 		}
 	}
 

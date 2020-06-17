@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"net"
 	"os"
-	"reflect"
 	"strings"
 	"sync"
 	"time"
@@ -13,16 +12,15 @@ import (
 	hotypes "github.com/ovn-org/ovn-kubernetes/go-controller/hybrid-overlay/pkg/types"
 	houtil "github.com/ovn-org/ovn-kubernetes/go-controller/hybrid-overlay/pkg/util"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
-	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/factory"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/kube"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
 
 	"github.com/vishvananda/netlink"
 
 	kapi "k8s.io/api/core/v1"
-	"k8s.io/apimachinery/pkg/api/errors"
+	"k8s.io/apimachinery/pkg/labels"
 	"k8s.io/apimachinery/pkg/util/wait"
-	"k8s.io/client-go/tools/cache"
+	listers "k8s.io/client-go/listers/core/v1"
 	"k8s.io/klog"
 )
 
@@ -42,7 +40,6 @@ type flowCacheEntry struct {
 // NodeController is the node hybrid overlay controller
 type NodeController struct {
 	kube        kube.Interface
-	wf          *factory.WatchFactory
 	nodeName    string
 	initialized bool
 	drMAC       net.HardwareAddr
@@ -55,15 +52,22 @@ type NodeController struct {
 	flowMutex sync.Mutex
 	// channel to indicate we need to update flows immediately
 	flowChan chan struct{}
-	stopChan <-chan struct{}
+
+	nodeLister listers.NodeLister
+	podLister  listers.PodLister
 }
 
-// NewNode returns a node handler that listens for node events
+// newNodeController returns a node handler that listens for node events
 // so that Add/Update/Delete events are appropriately handled.
 // It initializes the node it is currently running on. On Linux, this means:
 //  1. Setting up a VXLAN gateway and hooking to the OVN gateway
 //  2. Setting back annotations about its VTEP and gateway MAC address to its own object
-func NewNode(kube kube.Interface, nodeName string, stopChan <-chan struct{}) (*NodeController, error) {
+func newNodeController(
+	kube kube.Interface,
+	nodeName string,
+	nodeLister listers.NodeLister,
+	podLister listers.PodLister,
+) (nodeController, error) {
 	node := &NodeController{
 		kube:        kube,
 		nodeName:    nodeName,
@@ -72,7 +76,8 @@ func NewNode(kube kube.Interface, nodeName string, stopChan <-chan struct{}) (*N
 		flowCache:   make(map[string]*flowCacheEntry),
 		flowMutex:   sync.Mutex{},
 		flowChan:    make(chan struct{}, 1),
-		stopChan:    stopChan,
+		nodeLister:  nodeLister,
+		podLister:   podLister,
 	}
 	return node, nil
 }
@@ -86,47 +91,40 @@ func podIPToCookie(podIP net.IP) string {
 	return fmt.Sprintf("%02x%02x%02x%02x", ip4[0], ip4[1], ip4[2], ip4[3])
 }
 
-func (n *NodeController) waitForNamespace(name string) (*kapi.Namespace, error) {
-	var namespaceBackoff = wait.Backoff{Duration: 1 * time.Second, Steps: 7, Factor: 1.5, Jitter: 0.1}
-	var namespace *kapi.Namespace
-	if err := wait.ExponentialBackoff(namespaceBackoff, func() (bool, error) {
-		var err error
-		namespace, err = n.wf.GetNamespace(name)
-		if err != nil {
-			if errors.IsNotFound(err) {
-				// Namespace not found; retry
-				return false, nil
-			}
-			klog.Warningf("error getting namespace: %v", err)
-			return false, err
-		}
-		return true, nil
-	}); err != nil {
-		return nil, fmt.Errorf("failed to get namespace object: %v", err)
-	}
-	return namespace, nil
-}
-
-func (n *NodeController) addOrUpdatePod(pod *kapi.Pod, ignoreLearn bool) error {
-	podIPs, podMAC, err := getPodDetails(pod, n.nodeName)
+// AddPod handles the pod add event
+func (n *NodeController) AddPod(pod *kapi.Pod) error {
+	podIPs, podMAC, err := getPodDetails(pod)
 	if err != nil {
 		klog.V(5).Infof("cleaning up hybrid overlay pod %s/%s because %v", pod.Namespace, pod.Name, err)
-		return n.deletePod(pod)
+		return n.DeletePod(pod)
 	}
 
-	namespace, err := n.waitForNamespace(pod.Namespace)
-	if err != nil {
-		return err
+	externalGw := pod.Annotations[hotypes.HybridOverlayExternalGw]
+	// validate the external gateway is a valid IP address
+	if ip := net.ParseIP(externalGw); ip == nil {
+		klog.Warningf("failed parse a valid external gateway ip address from %v: %v", externalGw, err)
+		return fmt.Errorf("failed to validate a valid external gateway ip address %s: %v", externalGw, err)
 	}
-	namespaceExternalGw := namespace.GetAnnotations()[hotypes.HybridOverlayExternalGw]
-	namespaceVTEP := namespace.GetAnnotations()[hotypes.HybridOverlayVTEP]
+
+	VTEP := pod.Annotations[hotypes.HybridOverlayVTEP]
+	// validate the VTEP is a valid IP address
+	VTEPIP := net.ParseIP(VTEP)
+	if VTEPIP == nil {
+		klog.Warningf("failed parse a valid vtep ip address from %v: %v", VTEP, err)
+		return fmt.Errorf("failed to validate a valid vtep ip address %s: %v", VTEP, err)
+	}
+
+	// It's always safe to ignore the learn flow as we only process and add or update
+	// if the IP/MAC or Annotations have changed
+	ignoreLearn := true
+
 	if !n.initialized {
-		node, err := n.wf.GetNode(n.nodeName)
+		node, err := n.nodeLister.Get(n.nodeName)
 		if err != nil {
 			return fmt.Errorf("hybrid overlay not initialized on %s, and failed to get node data: %v",
 				n.nodeName, err)
 		}
-		if err = n.ensureHybridOverlayBridge(node); err != nil {
+		if err = n.EnsureHybridOverlayBridge(node); err != nil {
 			return fmt.Errorf("failed to ensure hybrid overlay in pod handler: %v", err)
 		}
 	}
@@ -146,23 +144,23 @@ func (n *NodeController) addOrUpdatePod(pod *kapi.Pod, ignoreLearn bool) error {
 				"actions=set_field:%s->eth_src,set_field:%s->eth_dst,output:ext",
 			cookie, podIP.IP, n.drMAC.String(), podMAC))
 
-		if namespaceExternalGw == "" || namespaceVTEP == "" {
+		if externalGw == "" || VTEP == "" {
 			klog.Infof("Hybrid Overlay Gateway mode not enabled for pod %s, namespace does not have hybrid"+
-				"annotations, external gw: %s, VTEP: %s", pod.Name, namespaceExternalGw, namespaceVTEP)
+				"annotations, external gw: %s, VTEP: %s", pod.Name, externalGw, VTEP)
 			n.updateFlowCacheEntry(cookie, flows, ignoreLearn)
 			continue
 		}
 
 		portMACRaw := strings.Replace(n.drMAC.String(), ":", "", -1)
-		vtepIPRaw := getIPAsHexString(net.ParseIP(namespaceVTEP))
+		vtepIPRaw := getIPAsHexString(VTEPIP)
 
 		// update map for tun to pod
 		n.tunMapMutex.Lock()
-		n.tunMap[podIP.IP.String()] = namespaceVTEP
+		n.tunMap[podIP.IP.String()] = VTEP
 		// iterate and find all pods that belong to this VTEP and create learn actions
 		learnActions := ""
 		for pod, tun := range n.tunMap {
-			if tun == namespaceVTEP {
+			if tun == VTEP {
 				if len(learnActions) > 0 {
 					learnActions += ","
 				}
@@ -184,10 +182,10 @@ func (n *NodeController) addOrUpdatePod(pod *kapi.Pod, ignoreLearn bool) error {
 		// so need proper locking around tunMap
 		// after learning actions, we need to resubmit the flow to the gw arp response table (2) so that we can respond
 		// back if this was an arp request
-		tunCookie := podIPToCookie(net.ParseIP(namespaceVTEP))
+		tunCookie := podIPToCookie(VTEPIP)
 		tunFlow := fmt.Sprintf("table=0,cookie=0x%s,priority=120,in_port=%s,arp,arp_spa=%s,tun_src=%s,"+
 			"actions=%s,resubmit(,2)",
-			tunCookie, extVXLANName, namespaceExternalGw, namespaceVTEP, learnActions)
+			tunCookie, extVXLANName, externalGw, VTEP, learnActions)
 		n.updateFlowCacheEntry(tunCookie, []string{tunFlow}, false)
 		n.tunMapMutex.Unlock()
 
@@ -214,8 +212,8 @@ func (n *NodeController) addOrUpdatePod(pod *kapi.Pod, ignoreLearn bool) error {
 				"load:%d->NXM_NX_TUN_ID[0..31],"+
 				"set_field:%s->tun_dst,"+
 				"output:%s",
-				cookie, podIP.IP, n.drMAC.String(), n.drMAC.String(), n.drIP, namespaceExternalGw, hotypes.HybridOverlayVNI,
-				namespaceVTEP, extVXLANName))
+				cookie, podIP.IP, n.drMAC.String(), n.drMAC.String(), n.drIP, externalGw, hotypes.HybridOverlayVNI,
+				VTEP, extVXLANName))
 		n.updateFlowCacheEntry(cookie, flows, ignoreLearn)
 	}
 	n.requestFlowSync()
@@ -223,191 +221,51 @@ func (n *NodeController) addOrUpdatePod(pod *kapi.Pod, ignoreLearn bool) error {
 	return nil
 }
 
-func (n *NodeController) deletePod(pod *kapi.Pod) error {
-	if pod.Spec.NodeName == n.nodeName {
-		podIPs, _, err := getPodDetails(pod, n.nodeName)
-		if err != nil {
-			return fmt.Errorf("error getting pod details: %v", err)
-		}
-		tunIPs := make(map[string]struct{})
-		n.tunMapMutex.Lock()
-		for _, podIP := range podIPs {
-			// need to check if any pods in the tunMap still correspond to a tunnel
-			// store the tunIP so we can delete cookie later
-			tunIPs[n.tunMap[podIP.IP.String()]] = struct{}{}
-			delete(n.tunMap, podIP.IP.String())
-		}
-		for tunIP := range tunIPs {
-			if len(tunIP) > 0 {
-				// check if any pods still belong to this tunnel so we can clean up the flow if not
-				tunStillActive := false
-				for _, tun := range n.tunMap {
-					if tunIP == tun {
-						tunStillActive = true
-						break
-					}
+// DeletePod handles the pod delete event
+func (n *NodeController) DeletePod(pod *kapi.Pod) error {
+	podIPs, _, err := getPodDetails(pod)
+	if err != nil {
+		return fmt.Errorf("error getting pod details: %v", err)
+	}
+	tunIPs := make(map[string]struct{})
+	n.tunMapMutex.Lock()
+	for _, podIP := range podIPs {
+		// need to check if any pods in the tunMap still correspond to a tunnel
+		// store the tunIP so we can delete cookie later
+		tunIPs[n.tunMap[podIP.IP.String()]] = struct{}{}
+		delete(n.tunMap, podIP.IP.String())
+	}
+	for tunIP := range tunIPs {
+		if len(tunIP) > 0 {
+			// check if any pods still belong to this tunnel so we can clean up the flow if not
+			tunStillActive := false
+			for _, tun := range n.tunMap {
+				if tunIP == tun {
+					tunStillActive = true
+					break
 				}
-				if !tunStillActive {
-					cookie := podIPToCookie(net.ParseIP(tunIP))
-					if cookie != "" {
-						n.deleteFlowsByCookie(cookie)
-					}
+			}
+			if !tunStillActive {
+				cookie := podIPToCookie(net.ParseIP(tunIP))
+				if cookie != "" {
+					n.deleteFlowsByCookie(cookie)
 				}
 			}
 		}
-		n.tunMapMutex.Unlock()
-		for _, podIP := range podIPs {
-			cookie := podIPToCookie(podIP.IP)
-			if cookie == "" {
-				continue
-			}
-			n.deleteFlowsByCookie(cookie)
+	}
+	n.tunMapMutex.Unlock()
+	for _, podIP := range podIPs {
+		cookie := podIPToCookie(podIP.IP)
+		if cookie == "" {
+			continue
 		}
+		n.deleteFlowsByCookie(cookie)
 	}
 	return nil
 }
 
-func getPodDetails(pod *kapi.Pod, nodeName string) ([]*net.IPNet, net.HardwareAddr, error) {
-	if pod.Spec.NodeName != nodeName {
-		return nil, nil, fmt.Errorf("not scheduled on this node")
-	}
-
-	podInfo, err := util.UnmarshalPodAnnotation(pod.Annotations)
-	if err != nil {
-		return nil, nil, err
-	}
-	return podInfo.IPs, podInfo.MAC, nil
-}
-
-// podChanged returns true if any relevant pod attributes changed
-func podChanged(pod1 *kapi.Pod, pod2 *kapi.Pod, nodeName string) bool {
-	podIPs1, mac1, _ := getPodDetails(pod1, nodeName)
-	podIPs2, mac2, _ := getPodDetails(pod2, nodeName)
-
-	if len(podIPs1) != len(podIPs2) || !reflect.DeepEqual(mac1, mac2) {
-		return true
-	}
-	for i := range podIPs1 {
-		if podIPs1[i].String() != podIPs2[i].String() {
-			return true
-		}
-	}
-	return false
-}
-
-// nsHybridAnnotationChanged returns true if any relevant NS attributes changed
-func nsHybridAnnotationChanged(ns1 *kapi.Namespace, ns2 *kapi.Namespace) bool {
-	nsExGw1 := ns1.GetAnnotations()[hotypes.HybridOverlayExternalGw]
-	nsVTEP1 := ns1.GetAnnotations()[hotypes.HybridOverlayVTEP]
-	nsExGw2 := ns2.GetAnnotations()[hotypes.HybridOverlayExternalGw]
-	nsVTEP2 := ns2.GetAnnotations()[hotypes.HybridOverlayVTEP]
-
-	if nsExGw1 != nsExGw2 || nsVTEP1 != nsVTEP2 {
-		return true
-	}
-	return false
-}
-
-// Start is the top level function to run hybrid-sdn in node mode
-func (n *NodeController) Start(wf *factory.WatchFactory) error {
-	// sync flows
-	go func() {
-		klog.Info("Started hybrid overlay OpenFlow sync thread")
-		for {
-			select {
-			case <-time.After(30 * time.Second):
-				n.syncFlows()
-			case <-n.flowChan:
-				n.syncFlows()
-			case <-n.stopChan:
-				break
-			}
-		}
-	}()
-
-	if err := n.startNodeWatch(wf); err != nil {
-		return err
-	}
-
-	if err := n.startNamespaceWatch(wf); err != nil {
-		return err
-	}
-
-	return n.startPodWatch(wf)
-}
-
-func (n *NodeController) startPodWatch(wf *factory.WatchFactory) error {
-	n.wf = wf
-	_, err := wf.AddPodHandler(cache.ResourceEventHandlerFuncs{
-		AddFunc: func(obj interface{}) {
-			pod := obj.(*kapi.Pod)
-			if err := n.addOrUpdatePod(pod, false); err != nil {
-				klog.Warningf("failed to handle pod %v addition: %v", pod, err)
-			}
-		},
-		UpdateFunc: func(old, newer interface{}) {
-			podNew := newer.(*kapi.Pod)
-			podOld := old.(*kapi.Pod)
-			if podChanged(podOld, podNew, n.nodeName) {
-				if err := n.addOrUpdatePod(podNew, false); err != nil {
-					klog.Warningf("failed to handle pod %v update: %v", podNew, err)
-				}
-			}
-		},
-		DeleteFunc: func(obj interface{}) {
-			pod := obj.(*kapi.Pod)
-			if err := n.deletePod(pod); err != nil {
-				klog.Warningf("failed to handle pod %v deletion: %v", pod, err)
-			}
-		},
-	}, nil)
-	return err
-}
-
-func (n *NodeController) startNamespaceWatch(wf *factory.WatchFactory) error {
-	n.wf = wf
-	_, err := wf.AddNamespaceHandler(cache.ResourceEventHandlerFuncs{
-		AddFunc: func(obj interface{}) {
-			// dont care about namespace addition, we already wait for the annotation
-		},
-		UpdateFunc: func(old, newer interface{}) {
-			nsNew := newer.(*kapi.Namespace)
-			nsOld := old.(*kapi.Namespace)
-
-			if nsHybridAnnotationChanged(nsOld, nsNew) {
-				// tunnel is unique per NS, if there is an annotation change, delete old tunnel flow
-				oldTunCookie := podIPToCookie(net.ParseIP(nsOld.Annotations[hotypes.HybridOverlayVTEP]))
-				if len(oldTunCookie) > 0 {
-					n.deleteFlowsByCookie(oldTunCookie)
-				}
-				pods, err := wf.GetPods(nsNew.Namespace)
-				if err != nil {
-					klog.Errorf("failed to get pods for NS update in hybrid overlay: %v", err)
-				}
-				for _, pod := range pods {
-					// we need to ignore learning cookie flow from table 20 during this pod update
-					// this is because the VTEP/GW may have changed, and now we need to get rid of the
-					// corresponding table 20 flow and not cache it
-					if err := n.addOrUpdatePod(pod, true); err != nil {
-						klog.Warningf("failed to handle pod %v update: %v", pod, err)
-					}
-				}
-			}
-		},
-		DeleteFunc: func(obj interface{}) {
-			// dont care about namespace delete, pod flows will be deleted upon pod deletion
-		},
-	}, nil)
-	return err
-}
-
-func (n *NodeController) Sync(objs []*kapi.Node) {
-	//just needed to implement the interface
-}
-
-func (n *NodeController) startNodeWatch(wf *factory.WatchFactory) error {
-	return houtil.StartNodeWatch(n, wf)
-}
+// Sync is not needed but must be implemented to fulfill the interface
+func (n *NodeController) Sync(objs []*kapi.Node) {}
 
 func nameToCookie(nodeName string) string {
 	hash := sha256.Sum256([]byte(nodeName))
@@ -424,8 +282,7 @@ func (n *NodeController) hybridOverlayNodeUpdate(node *kapi.Node) error {
 	cidr, nodeIP, drMAC, err := getNodeDetails(node)
 	if cidr == nil || nodeIP == nil || drMAC == nil {
 		klog.V(5).Infof("cleaning up hybrid overlay resources for node %q because: %v", node.Name, err)
-		n.Delete(node)
-		return nil
+		return n.DeleteNode(node)
 	}
 
 	klog.Infof("setting up hybrid overlay tunnel to node %s", node.Name)
@@ -466,28 +323,17 @@ func (n *NodeController) hybridOverlayNodeUpdate(node *kapi.Node) error {
 	return nil
 }
 
-// Add handles node additions and updates
-func (n *NodeController) Add(node *kapi.Node) {
+// AddNode handles node additions and updates
+func (n *NodeController) AddNode(node *kapi.Node) error {
 	var err error
 	if node.Name == n.nodeName {
 		// Retry hybrid overlay initialization if the master was
 		// slow to add the hybrid overlay logical network elements
-		err = n.ensureHybridOverlayBridge(node)
+		err = n.EnsureHybridOverlayBridge(node)
 	} else {
 		err = n.hybridOverlayNodeUpdate(node)
 	}
-
-	if err != nil {
-		klog.Warning(err)
-	}
-}
-
-// Update handles node updates
-func (n *NodeController) Update(oldNode, newNode *kapi.Node) {
-	if nodeChanged(oldNode, newNode) {
-		n.Delete(newNode)
-		n.Add(newNode)
-	}
+	return err
 }
 
 func (n *NodeController) deleteFlowsByCookie(cookie string) {
@@ -496,13 +342,14 @@ func (n *NodeController) deleteFlowsByCookie(cookie string) {
 	delete(n.flowCache, cookie)
 }
 
-// Delete handles node deletions
-func (n *NodeController) Delete(node *kapi.Node) {
+// DeleteNode handles node deletions
+func (n *NodeController) DeleteNode(node *kapi.Node) error {
 	if node.Name == n.nodeName || !houtil.IsHybridOverlayNode(node) {
-		return
+		return nil
 	}
 
 	n.deleteFlowsByCookie(nameToCookie(node.Name))
+	return nil
 }
 
 func getLocalNodeSubnet(nodeName string) (*net.IPNet, error) {
@@ -539,7 +386,8 @@ func getIPAsHexString(ip net.IP) string {
 	return asHex
 }
 
-func (n *NodeController) ensureHybridOverlayBridge(node *kapi.Node) error {
+// EnsureHybridOverlayBridge sets up the hybrid overlay bridge
+func (n *NodeController) EnsureHybridOverlayBridge(node *kapi.Node) error {
 	if n.initialized {
 		return nil
 	}
@@ -549,7 +397,7 @@ func (n *NodeController) ensureHybridOverlayBridge(node *kapi.Node) error {
 		return err
 	}
 
-	portName := houtil.GetHybridOverlayPortName(n.nodeName)
+	portName := util.GetHybridOverlayPortName(n.nodeName)
 	portMACString, haveDRMACAnnotation := node.Annotations[hotypes.HybridOverlayDRMAC]
 	if !haveDRMACAnnotation {
 		klog.Infof("node %s does not have DRMAC annotation yet, failed to ensure hybrid overlay"+
@@ -565,13 +413,8 @@ func (n *NodeController) ensureHybridOverlayBridge(node *kapi.Node) error {
 	n.drMAC = portMAC
 
 	// n.drIP is always 3rd address in the subnet
-	// TODO add support for ipv6 later
-	portIP := subnet.IP.To4()
-	if portIP == nil {
-		return fmt.Errorf("failed to parse local node subnet: %s", subnet.IP)
-	}
-	portIP[3] += 3
-	n.drIP = portIP
+	hybridOverlayIfAddr := util.GetNodeHybridOverlayIfAddr(subnet)
+	n.drIP = hybridOverlayIfAddr.IP
 
 	_, stderr, err := util.RunOVSVsctl("--may-exist", "add-br", extBridgeName,
 		"--", "set", "Bridge", extBridgeName, "fail_mode=secure")
@@ -678,13 +521,12 @@ func (n *NodeController) ensureHybridOverlayBridge(node *kapi.Node) error {
 			return fmt.Errorf("failed to lookup link %s: %v", util.K8sMgmtIntfName, err)
 		}
 		mgmtPortMAC := mgmtPortLink.Attrs().HardwareAddr
-		hybridOverlayIfAddr := util.GetNodeHybridOverlayIfAddr(subnet)
 		for _, clusterEntry := range config.HybridOverlay.ClusterSubnets {
 			route := &netlink.Route{
 				Dst:       clusterEntry.CIDR,
 				LinkIndex: mgmtPortLink.Attrs().Index,
 				Scope:     netlink.SCOPE_UNIVERSE,
-				Gw:        hybridOverlayIfAddr.IP,
+				Gw:        n.drIP,
 			}
 			err := netlink.RouteAdd(route)
 			if err != nil && !os.IsExist(err) {
@@ -706,6 +548,28 @@ func (n *NodeController) ensureHybridOverlayBridge(node *kapi.Node) error {
 	n.initialized = true
 	klog.Infof("hybrid overlay setup complete for node %s", node.Name)
 	return nil
+}
+
+// RunFlowSync runs flow synchronization
+// It runs once when the controller is started.
+// It will block until the stopCh is closed, running the sync periodically,
+// or when signalled via the flowChan
+func (n *NodeController) RunFlowSync(stopCh <-chan struct{}) {
+	klog.Info("Starting hybrid overlay OpenFlow sync thread")
+	klog.Info("Running initial OpenFlow sync")
+	n.syncFlows()
+
+	for {
+		select {
+		case <-time.After(30 * time.Second):
+			n.syncFlows()
+		case <-n.flowChan:
+			n.syncFlows()
+		case <-stopCh:
+			klog.Info("Shutting down OpenFlow sync thread")
+			return
+		}
+	}
 }
 
 func (n *NodeController) syncFlows() {
@@ -781,4 +645,18 @@ func (n *NodeController) updateFlowCacheEntry(cookie string, flows []string, ign
 	defer n.flowMutex.Unlock()
 	n.flowCache[cookie] = &flowCacheEntry{flows: flows}
 	n.flowCache[cookie].ignoreLearn = ignoreLearn
+}
+
+// AddNamespace handles the namespace add event
+func (n *NodeController) AddNamespace(ns *kapi.Namespace) error {
+	pods, err := n.podLister.Pods(ns.Namespace).List(labels.Everything())
+	if err != nil {
+		klog.Errorf("failed to get pods for NS update in hybrid overlay: %v", err)
+	}
+	for _, pod := range pods {
+		if err := n.AddPod(pod); err != nil {
+			klog.Warningf("failed to handle pod %v update: %v", pod, err)
+		}
+	}
+	return nil
 }

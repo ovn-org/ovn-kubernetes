@@ -8,9 +8,9 @@ import (
 	"time"
 
 	util "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
-	kapi "k8s.io/api/core/v1"
-
 	"github.com/prometheus/client_golang/prometheus"
+
+	kapi "k8s.io/api/core/v1"
 	"k8s.io/klog"
 )
 
@@ -45,6 +45,17 @@ var metricOvnCliLatency = prometheus.NewHistogramVec(prometheus.HistogramOpts{
 	[]string{"command"},
 )
 
+// metricResourceUpdateCount is the number of times a particular resource's UpdateFunc has been called.
+var MetricResourceUpdateCount = prometheus.NewCounterVec(prometheus.CounterOpts{
+	Namespace: MetricOvnkubeNamespace,
+	Subsystem: MetricOvnkubeSubsystemMaster,
+	Name:      "resource_update_total",
+	Help:      "A metric that captures the number of times a particular resource's UpdateFunc has been called"},
+	[]string{
+		"resource_name",
+	},
+)
+
 var MetricMasterReadyDuration = prometheus.NewGauge(prometheus.GaugeOpts{
 	Namespace: MetricOvnkubeNamespace,
 	Subsystem: MetricOvnkubeSubsystemMaster,
@@ -53,7 +64,7 @@ var MetricMasterReadyDuration = prometheus.NewGauge(prometheus.GaugeOpts{
 })
 
 var registerMasterMetricsOnce sync.Once
-var startMasterUpdaterOnce sync.Once
+var startE2ETimeStampUpdaterOnce sync.Once
 
 // RegisterMasterMetrics registers some ovnkube master metrics with the Prometheus
 // registry
@@ -61,7 +72,7 @@ func RegisterMasterMetrics() {
 	registerMasterMetricsOnce.Do(func() {
 		prometheus.MustRegister(metricE2ETimestamp)
 		// following go routine is directly responsible for collecting the metric above.
-		startMasterMetricsUpdater()
+		StartE2ETimeStampMetricUpdater()
 
 		prometheus.MustRegister(metricPodCreationLatency)
 		prometheus.MustRegister(prometheus.NewCounterFunc(
@@ -84,6 +95,7 @@ func RegisterMasterMetrics() {
 		prometheus.MustRegister(metricOvnCliLatency)
 		// this is to not to create circular import between metrics and util package
 		util.MetricOvnCliLatency = metricOvnCliLatency
+		prometheus.MustRegister(MetricResourceUpdateCount)
 		prometheus.MustRegister(prometheus.NewGaugeFunc(
 			prometheus.GaugeOpts{
 				Namespace: MetricOvnkubeNamespace,
@@ -121,10 +133,10 @@ func scrapeOvnTimestamp() float64 {
 	return out
 }
 
-// startMasterMetricsUpdater adds a goroutine that updates a "timestamp" value in the
+// StartE2ETimeStampMetricUpdater adds a goroutine that updates a "timestamp" value in the
 // nbdb every 30 seconds. This is so we can determine freshness of the database
-func startMasterMetricsUpdater() {
-	startMasterUpdaterOnce.Do(func() {
+func StartE2ETimeStampMetricUpdater() {
+	startE2ETimeStampUpdaterOnce.Do(func() {
 		go func() {
 			for {
 				t := time.Now().Unix()

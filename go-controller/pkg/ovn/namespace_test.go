@@ -1,7 +1,7 @@
 package ovn
 
 import (
-	"fmt"
+	"net"
 
 	"github.com/urfave/cli/v2"
 
@@ -15,8 +15,6 @@ import (
 	. "github.com/onsi/ginkgo"
 	. "github.com/onsi/gomega"
 )
-
-type namespace struct{}
 
 func newNamespaceMeta(namespace string) metav1.ObjectMeta {
 	return metav1.ObjectMeta{
@@ -37,72 +35,10 @@ func newNamespace(namespace string) *v1.Namespace {
 	}
 }
 
-func (n namespace) baseCmds(fexec *ovntest.FakeExec, namespaces ...v1.Namespace) {
-	namespacesRes := ""
-	for _, n := range namespaces {
-		namespacesRes += fmt.Sprintf("name=%s\n", n.Name)
-	}
-	fexec.AddFakeCmd(&ovntest.ExpectedCmd{
-		Cmd:    "ovn-nbctl --timeout=15 --data=bare --no-heading --columns=external_ids find address_set",
-		Output: namespacesRes,
-	})
-}
-
-func (n namespace) addCmds(fexec *ovntest.FakeExec, namespaces ...v1.Namespace) {
-	for _, n := range namespaces {
-		fexec.AddFakeCmd(&ovntest.ExpectedCmd{
-			Cmd:    "ovn-nbctl --timeout=15 --data=bare --no-heading --columns=_uuid find address_set name=" + hashedAddressSet(n.Name),
-			Output: fakeUUID,
-		})
-		fexec.AddFakeCmdsNoOutputNoError([]string{
-			fmt.Sprintf("ovn-nbctl --timeout=15 clear address_set %s addresses", hashedAddressSet(n.Name)),
-		})
-	}
-}
-
-func (n namespace) delCmds(fexec *ovntest.FakeExec, namespace v1.Namespace) {
-	fexec.AddFakeCmdsNoOutputNoError([]string{
-		fmt.Sprintf("ovn-nbctl --timeout=15 --if-exists destroy address_set %s", hashedAddressSet(namespace.Name)),
-	})
-}
-
-func (n namespace) addPodCmds(fexec *ovntest.FakeExec, tP pod, namespace v1.Namespace, set bool) {
-	if set {
-		fexec.AddFakeCmdsNoOutputNoError([]string{
-			fmt.Sprintf(`ovn-nbctl --timeout=15 set address_set %s addresses="%s"`, hashedAddressSet(namespace.Name), tP.podIP),
-		})
-	} else {
-		fexec.AddFakeCmdsNoOutputNoError([]string{
-			fmt.Sprintf(`ovn-nbctl --timeout=15 add address_set %s addresses "%s"`, hashedAddressSet(namespace.Name), tP.podIP),
-		})
-	}
-}
-
-func (n namespace) delPodCmds(fexec *ovntest.FakeExec, tP pod, namespace v1.Namespace, clear bool) {
-	if clear {
-		fexec.AddFakeCmdsNoOutputNoError([]string{
-			fmt.Sprintf("ovn-nbctl --timeout=15 clear address_set %s addresses", hashedAddressSet(namespace.Name)),
-		})
-	} else {
-		fexec.AddFakeCmdsNoOutputNoError([]string{
-			fmt.Sprintf(`ovn-nbctl --timeout=15 remove address_set %s addresses "%s"`, hashedAddressSet(namespace.Name), tP.podIP),
-		})
-	}
-}
-
-func (n namespace) addCmdsWithPods(fexec *ovntest.FakeExec, tP pod, namespace v1.Namespace) {
-	fexec.AddFakeCmd(&ovntest.ExpectedCmd{
-		Cmd:    "ovn-nbctl --timeout=15 --data=bare --no-heading --columns=_uuid find address_set name=" + hashedAddressSet(namespace.Name),
-		Output: fmt.Sprintf("name=%s\n", namespace.Name),
-	})
-	n.addPodCmds(fexec, tP, namespace, true)
-}
-
 var _ = Describe("OVN Namespace Operations", func() {
 	var (
 		app     *cli.App
 		fakeOvn *FakeOVN
-		fExec   *ovntest.FakeExec
 	)
 
 	BeforeEach(func() {
@@ -113,8 +49,7 @@ var _ = Describe("OVN Namespace Operations", func() {
 		app.Name = "test"
 		app.Flags = config.Flags
 
-		fExec = ovntest.NewFakeExec()
-		fakeOvn = NewFakeOVN(fExec)
+		fakeOvn = NewFakeOVN(ovntest.NewFakeExec())
 	})
 
 	AfterEach(func() {
@@ -125,8 +60,6 @@ var _ = Describe("OVN Namespace Operations", func() {
 
 		It("reconciles an existing namespace with pods", func() {
 			app.Action = func(ctx *cli.Context) error {
-
-				test := namespace{}
 				namespaceT := *newNamespace("namespace1")
 				tP := newTPod(
 					"node1",
@@ -134,13 +67,10 @@ var _ = Describe("OVN Namespace Operations", func() {
 					"10.128.1.2",
 					"10.128.1.1",
 					"myPod",
-					"10.128.1.4",
+					"10.128.1.3",
 					"11:22:33:44:55:66",
 					namespaceT.Name,
 				)
-
-				test.baseCmds(fExec, namespaceT)
-				test.addCmdsWithPods(fExec, tP, namespaceT)
 
 				fakeOvn.start(ctx,
 					&v1.NamespaceList{
@@ -154,13 +84,15 @@ var _ = Describe("OVN Namespace Operations", func() {
 						},
 					},
 				)
-				podMAC := ovntest.MustParseMAC("11:22:33:44:55:66")
-				fakeOvn.controller.logicalPortCache.add(tP.nodeName, tP.portName, fakeUUID, podMAC, ovntest.MustParseIP(tP.podIP))
+				podMAC := ovntest.MustParseMAC(tP.podMAC)
+				podIPNets := []*net.IPNet{ovntest.MustParseIPNet(tP.podIP + "/24")}
+				fakeOvn.controller.logicalPortCache.add(tP.nodeName, tP.portName, fakeUUID, podMAC, podIPNets)
 				fakeOvn.controller.WatchNamespaces()
 
 				_, err := fakeOvn.fakeClient.CoreV1().Namespaces().Get(namespaceT.Name, metav1.GetOptions{})
 				Expect(err).NotTo(HaveOccurred())
-				Expect(fExec.CalledMatchesExpected()).To(BeTrue(), fExec.ErrorDesc)
+
+				fakeOvn.asf.ExpectAddressSetWithIPs(namespaceT.Name, []string{tP.podIP})
 
 				return nil
 			}
@@ -169,25 +101,20 @@ var _ = Describe("OVN Namespace Operations", func() {
 			Expect(err).NotTo(HaveOccurred())
 		})
 
-		It("reconciles an existing namespace without pods", func() {
+		It("creates an empty address set for the namespace without pods", func() {
 			app.Action = func(ctx *cli.Context) error {
-
-				test := namespace{}
-				namespaceT := *newNamespace("namespace1")
-
-				test.baseCmds(fExec, namespaceT)
-				test.addCmds(fExec, namespaceT)
-
+				const namespaceName string = "namespace1"
 				fakeOvn.start(ctx, &v1.NamespaceList{
 					Items: []v1.Namespace{
-						namespaceT,
+						*newNamespace("namespace1"),
 					},
 				})
 				fakeOvn.controller.WatchNamespaces()
 
-				_, err := fakeOvn.fakeClient.CoreV1().Namespaces().Get(namespaceT.Name, metav1.GetOptions{})
+				_, err := fakeOvn.fakeClient.CoreV1().Namespaces().Get(namespaceName, metav1.GetOptions{})
 				Expect(err).NotTo(HaveOccurred())
-				Expect(fExec.CalledMatchesExpected()).To(BeTrue(), fExec.ErrorDesc)
+
+				fakeOvn.asf.ExpectEmptyAddressSet(namespaceName)
 
 				return nil
 			}
@@ -195,44 +122,28 @@ var _ = Describe("OVN Namespace Operations", func() {
 			err := app.Run([]string{app.Name})
 			Expect(err).NotTo(HaveOccurred())
 		})
-
 	})
 
 	Context("during execution", func() {
-
-		It("reconciles a deleted namespace without pods", func() {
+		It("deletes an empty namespace's resources", func() {
 			app.Action = func(ctx *cli.Context) error {
-
-				test := namespace{}
-				namespaceT := *newNamespace("namespace1")
-
-				test.baseCmds(fExec, namespaceT)
-				test.addCmds(fExec, namespaceT)
-
+				const namespaceName string = "namespace1"
 				fakeOvn.start(ctx, &v1.NamespaceList{
 					Items: []v1.Namespace{
-						namespaceT,
+						*newNamespace(namespaceName),
 					},
 				})
 				fakeOvn.controller.WatchNamespaces()
+				fakeOvn.asf.ExpectEmptyAddressSet(namespaceName)
 
-				namespace, err := fakeOvn.fakeClient.CoreV1().Namespaces().Get(namespaceT.Name, metav1.GetOptions{})
+				err := fakeOvn.fakeClient.CoreV1().Namespaces().Delete(namespaceName, metav1.NewDeleteOptions(1))
 				Expect(err).NotTo(HaveOccurred())
-				Expect(namespace).NotTo(BeNil())
-				Eventually(fExec.CalledMatchesExpected).Should(BeTrue(), fExec.ErrorDesc)
-
-				test.delCmds(fExec, namespaceT)
-
-				err = fakeOvn.fakeClient.CoreV1().Namespaces().Delete(namespaceT.Name, metav1.NewDeleteOptions(1))
-				Expect(err).NotTo(HaveOccurred())
-				Eventually(fExec.CalledMatchesExpected).Should(BeTrue(), fExec.ErrorDesc)
-
+				fakeOvn.asf.EventuallyExpectNoAddressSet(namespaceName)
 				return nil
 			}
 
 			err := app.Run([]string{app.Name})
 			Expect(err).NotTo(HaveOccurred())
 		})
-
 	})
 })

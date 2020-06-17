@@ -2,6 +2,7 @@ package kube
 
 import (
 	"encoding/json"
+
 	"k8s.io/klog"
 
 	kapi "k8s.io/api/core/v1"
@@ -16,6 +17,7 @@ import (
 type Interface interface {
 	SetAnnotationsOnPod(pod *kapi.Pod, annotations map[string]string) error
 	SetAnnotationsOnNode(node *kapi.Node, annotations map[string]interface{}) error
+	SetAnnotationsOnNamespace(namespace *kapi.Namespace, annotations map[string]string) error
 	UpdateNodeStatus(node *kapi.Node) error
 	GetAnnotationsOnPod(namespace, name string) (map[string]string, error)
 	GetNodes() (*kapi.NodeList, error)
@@ -79,6 +81,32 @@ func (k *Kube) SetAnnotationsOnNode(node *kapi.Node, annotations map[string]inte
 	_, err = k.KClient.CoreV1().Nodes().Patch(node.Name, types.MergePatchType, patchData)
 	if err != nil {
 		klog.Errorf("Error in setting annotation on node %s: %v", node.Name, err)
+	}
+	return err
+}
+
+// SetAnnotationsOnNamespace takes the namespace object and map of key/value string pairs to set as annotations
+func (k *Kube) SetAnnotationsOnNamespace(namespace *kapi.Namespace, annotations map[string]string) error {
+	var err error
+	var patchData []byte
+	patch := struct {
+		Metadata map[string]interface{} `json:"metadata"`
+	}{
+		Metadata: map[string]interface{}{
+			"annotations": annotations,
+		},
+	}
+
+	klog.Infof("Setting annotations %v on namespace %s", annotations, namespace.Name)
+	patchData, err = json.Marshal(&patch)
+	if err != nil {
+		klog.Errorf("Error in setting annotations on namespace %s: %v", namespace.Name, err)
+		return err
+	}
+
+	_, err = k.KClient.CoreV1().Namespaces().Patch(namespace.Name, types.MergePatchType, patchData)
+	if err != nil {
+		klog.Errorf("Error in setting annotation on namespace %s: %v", namespace.Name, err)
 	}
 	return err
 }

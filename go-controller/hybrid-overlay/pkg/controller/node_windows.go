@@ -7,11 +7,11 @@ import (
 
 	"github.com/ovn-org/ovn-kubernetes/go-controller/hybrid-overlay/pkg/types"
 	houtil "github.com/ovn-org/ovn-kubernetes/go-controller/hybrid-overlay/pkg/util"
-	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/factory"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/kube"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
 
 	kapi "k8s.io/api/core/v1"
+	listers "k8s.io/client-go/listers/core/v1"
 	"k8s.io/klog"
 
 	"github.com/Microsoft/hcsshim/hcn"
@@ -32,9 +32,13 @@ type NodeController struct {
 	remoteSubnetMap map[string]string // Maps a remote node to its remote subnet
 }
 
-// NewNode returns a node handler that listens for node events
+// newNodeController returns a node handler that listens for node events
 // so that Add/Update/Delete events are appropriately handled.
-func NewNode(kube kube.Interface, nodeName string, stopChan <-chan struct{}) (*NodeController, error) {
+func newNodeController(kube kube.Interface,
+	nodeName string,
+	nodeLister listers.NodeLister,
+	podLister listers.PodLister,
+) (nodeController, error) {
 	supportedFeatures := hcn.GetSupportedFeatures()
 	if !supportedFeatures.HostRoute {
 		return nil, fmt.Errorf("This version of windows does not support HostRoute " +
@@ -131,14 +135,9 @@ func ensureBaseNetwork() error {
 	return nil
 }
 
-// Start is the top level function to run hybrid-sdn in node mode
-func (n *NodeController) Start(wf *factory.WatchFactory) error {
-	return houtil.StartNodeWatch(n, wf)
-}
-
 // Add sets up VXLAN tunnels to other nodes
 // For a windows node, this means watching for all nodes and programming the routing
-func (n *NodeController) Add(node *kapi.Node) {
+func (n *NodeController) AddNode(node *kapi.Node) error {
 	if node.Status.NodeInfo.MachineID == n.machineID {
 		// Initialize or the local node (or reconfigure it if the addresses
 		// have changed) by creating the network object and setting up
@@ -148,24 +147,23 @@ func (n *NodeController) Add(node *kapi.Node) {
 			n.localNodeCIDR = cidr
 			n.localNodeIP = nodeIP
 			if err := n.initSelf(node, cidr); err != nil {
-				klog.Errorf("failed to initialize node: %v", err)
+				return fmt.Errorf("failed to initialize node: %v", err)
 			}
 		}
-		return
+		return nil
 	}
 
 	cidr, nodeIP, drMAC, err := getNodeDetails(node)
 	if cidr == nil || nodeIP == nil || drMAC == nil {
 		klog.V(5).Infof("cleaning up hybrid overlay resources for node %q because: %v", node.Name, err)
-		n.Delete(node)
-		return
+		n.DeleteNode(node)
+		return err
 	}
 
 	// For remote nodes, just set up the VXLAN tunnel to it
 	network, err := hcn.GetNetworkByID(n.networkID)
 	if err != nil {
-		klog.Error("error getting HCN network: %v", err)
-		return
+		return fmt.Errorf("error getting HCN network: %v", err)
 	}
 
 	klog.Infof("Adding a remote subnet route for CIDR '%s' (remote node address: %s, distributed router MAC: %s, VNI: %v).",
@@ -183,22 +181,11 @@ func (n *NodeController) Add(node *kapi.Node) {
 
 	n.remoteSubnetMap[node.Status.NodeInfo.MachineID] = cidr.String()
 
-	if err = AddRemoteSubnetPolicy(network, &networkPolicySettings); err != nil {
-		klog.Error("error adding remote subnet policy: %v", err)
-	}
-}
-
-// Update handles node updates
-func (n *NodeController) Update(oldNode, newNode *kapi.Node) {
-	// Only modify the node if relevant annotations have changed
-	if nodeChanged(oldNode, newNode) {
-		n.Delete(oldNode)
-		n.Add(newNode)
-	}
+	return AddRemoteSubnetPolicy(network, &networkPolicySettings)
 }
 
 // Delete handles node deletions
-func (n *NodeController) Delete(node *kapi.Node) {
+func (n *NodeController) DeleteNode(node *kapi.Node) error {
 	// Treat the local node differently than other nodes
 	// If the local node is removed, we want to delete the network object
 	// and remove all the VXLAN plumbing towards other existing nodes. If
@@ -207,41 +194,36 @@ func (n *NodeController) Delete(node *kapi.Node) {
 
 	if node.Status.NodeInfo.MachineID == n.machineID {
 		if err := n.uninitSelf(node); err != nil {
-			klog.Errorf("failed to uninitialize node: %v", err)
+			return fmt.Errorf("failed to uninitialize node: %v", err)
 		}
-		return
+		return nil
 	}
 
 	if n.networkID == "" {
 		// Just silently return, no need to clean up a non-initialized network
-		return
+		return nil
 	}
 
 	network, err := hcn.GetNetworkByID(n.networkID)
 	if err != nil {
 		if _, isNotExist := err.(hcn.NetworkNotFoundError); !isNotExist {
-			klog.Errorf("Couldn't retrieve network with ID '%s' on node '%s'", n.networkID, node.Name)
+			return fmt.Errorf("Couldn't retrieve network with ID '%s' on node '%s'", n.networkID, node.Name)
 		}
-		return
+		return nil
 	}
 
 	nodeSubnet, ok := n.remoteSubnetMap[node.Status.NodeInfo.MachineID]
 	if !ok {
-		klog.Errorf("Can't retrieve the host subnet from the '%s' node's annotations", node.Name)
-		return
+		return fmt.Errorf("can't retrieve the host subnet from the '%s' node's annotations", node.Name)
 	}
 
 	if err := RemoveRemoteSubnetPolicy(network, nodeSubnet); err != nil {
-		klog.Errorf("Error removing subnet policy '%s' node's annotations from network '%s' on node '%s'. Error: %v",
+		return fmt.Errorf("error removing subnet policy '%s' node's annotations from network '%s' on node '%s'. Error: %v",
 			nodeSubnet, n.networkID, node.Name, err)
-		return
 	}
 
 	delete(n.remoteSubnetMap, node.Status.NodeInfo.MachineID)
-}
-
-// Sync handles synchronizing the initial node list
-func (n *NodeController) Sync(nodes []*kapi.Node) {
+	return nil
 }
 
 // initSelf initializes the node it is currently running on. This means:
@@ -334,7 +316,7 @@ func (n *NodeController) initSelf(node *kapi.Node, nodeSubnet *net.IPNet) error 
 	for _, node := range nodes.Items {
 		// Add VXLAN tunnel to the remote nodes
 		if node.Status.NodeInfo.MachineID != n.machineID {
-			n.Add(&node)
+			n.AddNode(&node)
 		}
 	}
 
@@ -358,7 +340,7 @@ func (n *NodeController) uninitSelf(node *kapi.Node) error {
 	// Delete VXLAN tunnel to the remote nodes
 	for _, node := range nodes.Items {
 		if node.Status.NodeInfo.MachineID != n.machineID {
-			n.Delete(&node)
+			n.DeleteNode(&node)
 		}
 	}
 
@@ -369,5 +351,23 @@ func (n *NodeController) uninitSelf(node *kapi.Node) error {
 	}
 
 	network.Delete()
+	return nil
+}
+
+func (n *NodeController) AddPod(pod *kapi.Pod) error {
+	return nil
+}
+
+func (n *NodeController) DeletePod(pod *kapi.Pod) error {
+	return nil
+}
+
+func (n *NodeController) AddNamespace(ns *kapi.Namespace) error {
+	return nil
+}
+
+func (n *NodeController) RunFlowSync(stopCh <-chan struct{}) {}
+
+func (n *NodeController) EnsureHybridOverlayBridge(node *kapi.Node) error {
 	return nil
 }
