@@ -123,7 +123,7 @@ jobs:
          - enabled: "false"
            name: "noHA"
         gateway-mode: [local, shared]
-    needs: k8s
+    needs: [build, k8s]
     env:
       JOB_NAME: "${{ matrix.target.shard }}-${{ matrix.ha.name }}-${{ matrix.gateway-mode }}"
       KIND_HA: "${{ matrix.ha.enabled }}"

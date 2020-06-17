@@ -4,7 +4,7 @@ on:
   push:
   pull_request:
     branches: [ master ]
-    paths: [ "dist/images/Dockerfile"]
+    paths: [ "dist/images/Dockerfile*"]
 
 env:
   GO_VERSION: 1.13.4
@@ -32,3 +32,4 @@ jobs:
 
     - name: Build images
         make -C dist/images all
+
