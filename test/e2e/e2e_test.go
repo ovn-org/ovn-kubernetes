@@ -599,9 +599,10 @@ var _ = Describe("e2e external gateway validation", func() {
 
 	AfterEach(func() {
 		// tear down the container simulating the gateway
-		_, err := runCommand("docker", "rm", "-f", gwContainerName)
-		if err != nil {
-			framework.Failf("failed to delete the gateway test container %v", err)
+		if cid, _ := runCommand("docker", "ps", "-qaf", fmt.Sprintf("name=%s",gwContainerName)); cid != "" {
+			if _, err := runCommand("docker", "rm", "-f", gwContainerName); err != nil {
+				framework.Logf("failed to delete the gateway test container %s %v", gwContainerName, err)
+			}
 		}
 	})
 
@@ -723,13 +724,15 @@ var _ = Describe("e2e multiple external gateway update validation", func() {
 
 	AfterEach(func() {
 		// tear down the containers simulating the gateways
-		_, err := runCommand("docker", "rm", "-f", gwContainerNameAlt1)
-		if err != nil {
-			framework.Failf("failed to delete the gateway test container %s %v", gwContainerNameAlt1, err)
+		if cid, _ := runCommand("docker", "ps", "-qaf", fmt.Sprintf("name=%s",gwContainerNameAlt1)); cid != "" {
+			if _, err := runCommand("docker", "rm", "-f", gwContainerNameAlt1); err != nil {
+				framework.Logf("failed to delete the gateway test container %s %v", gwContainerNameAlt1, err)
+			}
 		}
-		_, err = runCommand("docker", "rm", "-f", gwContainerNameAlt2)
-		if err != nil {
-			framework.Failf("failed to delete the gateway test container %s %v", gwContainerNameAlt2, err)
+		if cid, _ := runCommand("docker", "ps", "-qaf", fmt.Sprintf("name=%s",gwContainerNameAlt2)); cid != "" {
+			if _, err := runCommand("docker", "rm", "-f", gwContainerNameAlt2); err != nil {
+				framework.Logf("failed to delete the gateway test container %s %v", gwContainerNameAlt2, err)
+			}
 		}
 	})
 
