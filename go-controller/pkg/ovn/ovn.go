@@ -202,8 +202,8 @@ func (oc *Controller) Run() error {
 		return err
 	}
 
-	for _, f := range []func() error{oc.WatchPods, oc.WatchServices, oc.WatchEndpoints,
-		oc.WatchNamespaces, oc.WatchNetworkPolicy} {
+	for _, f := range []func() error{oc.WatchNamespaces, oc.WatchPods, oc.WatchServices,
+		oc.WatchEndpoints, oc.WatchNetworkPolicy} {
 		if err := f(); err != nil {
 			return err
 		}
