@@ -383,10 +383,6 @@ func (n *NodeController) DeletePod(pod *kapi.Pod) error {
 	return nil
 }
 
-func (n *NodeController) AddNamespace(ns *kapi.Namespace) error {
-	return nil
-}
-
 func (n *NodeController) RunFlowSync(stopCh <-chan struct{}) {}
 
 func (n *NodeController) EnsureHybridOverlayBridge(node *kapi.Node) error {
