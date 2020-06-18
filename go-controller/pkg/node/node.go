@@ -240,7 +240,6 @@ func (n *OvnNode) Start() error {
 			n.name,
 			factory.Core().V1().Nodes().Informer(),
 			factory.Core().V1().Pods().Informer(),
-			factory.Core().V1().Namespaces().Informer(),
 		)
 		if err != nil {
 			return err

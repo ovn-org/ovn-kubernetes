@@ -18,7 +18,6 @@ import (
 	"github.com/vishvananda/netlink"
 
 	kapi "k8s.io/api/core/v1"
-	"k8s.io/apimachinery/pkg/labels"
 	"k8s.io/apimachinery/pkg/util/wait"
 	listers "k8s.io/client-go/listers/core/v1"
 	"k8s.io/klog"
@@ -645,18 +644,4 @@ func (n *NodeController) updateFlowCacheEntry(cookie string, flows []string, ign
 	defer n.flowMutex.Unlock()
 	n.flowCache[cookie] = &flowCacheEntry{flows: flows}
 	n.flowCache[cookie].ignoreLearn = ignoreLearn
-}
-
-// AddNamespace handles the namespace add event
-func (n *NodeController) AddNamespace(ns *kapi.Namespace) error {
-	pods, err := n.podLister.Pods(ns.Namespace).List(labels.Everything())
-	if err != nil {
-		klog.Errorf("failed to get pods for NS update in hybrid overlay: %v", err)
-	}
-	for _, pod := range pods {
-		if err := n.AddPod(pod); err != nil {
-			klog.Warningf("failed to handle pod %v update: %v", pod, err)
-		}
-	}
-	return nil
 }

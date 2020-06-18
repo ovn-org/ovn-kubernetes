@@ -346,3 +346,18 @@ func (m *MasterController) AddPod(pod *kapi.Pod) error {
 	}
 	return nil
 }
+
+// nsHybridAnnotationChanged returns true if any relevant NS attributes changed
+func nsHybridAnnotationChanged(old, new interface{}) bool {
+	oldNs := old.(*kapi.Namespace)
+	newNs := new.(*kapi.Namespace)
+
+	nsExGwOld := oldNs.GetAnnotations()[hotypes.HybridOverlayExternalGw]
+	nsVTEPOld := oldNs.GetAnnotations()[hotypes.HybridOverlayVTEP]
+	nsExGwNew := newNs.GetAnnotations()[hotypes.HybridOverlayExternalGw]
+	nsVTEPNew := newNs.GetAnnotations()[hotypes.HybridOverlayVTEP]
+	if nsExGwOld != nsExGwNew || nsVTEPOld != nsVTEPNew {
+		return true
+	}
+	return false
+}
