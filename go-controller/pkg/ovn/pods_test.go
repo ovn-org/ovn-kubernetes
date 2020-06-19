@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"net"
 	"strings"
+	"time"
 
 	hotypes "github.com/ovn-org/ovn-kubernetes/go-controller/hybrid-overlay/pkg/types"
 
@@ -723,6 +724,7 @@ var _ = Describe("OVN Pod Operations", func() {
 					}
 					return updatedNs.Annotations
 				}).Should(BeEmpty())
+				time.Sleep(time.Second)
 				// Create new pod
 				tP = newTPod(
 					"node1",
