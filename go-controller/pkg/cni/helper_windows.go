@@ -42,7 +42,7 @@ func getHNSIdFromConfigOrByGatewayIP(gatewayIPs []net.IP) (string, error) {
 				if len(hnsNetworkId) == 0 {
 					hnsNetworkId = hnsNW.Id
 				} else {
-					return "", fmt.Errorf("Found more than one network suitable for containers, " +
+					return "", fmt.Errorf("found more than one network suitable for containers, " +
 						"please specify win-hnsnetwork-id in config")
 				}
 			}
@@ -52,7 +52,7 @@ func getHNSIdFromConfigOrByGatewayIP(gatewayIPs []net.IP) (string, error) {
 		klog.Infof("HNS Network Id found: %v", hnsNetworkId)
 		return hnsNetworkId, nil
 	}
-	return "", fmt.Errorf("Could not find any suitable network to attach the container")
+	return "", fmt.Errorf("could not find any suitable network to attach the container")
 }
 
 // createHNSEndpoint creates the HNS endpoint with the given configuration.

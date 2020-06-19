@@ -102,7 +102,7 @@ func runningPlatform() (string, error) {
 	} else if strings.Contains(platform, "VMware") {
 		return "Photon", nil
 	}
-	return "", fmt.Errorf("Unknown platform")
+	return "", fmt.Errorf("unknown platform")
 }
 
 // Exec runs various OVN and OVS utilities

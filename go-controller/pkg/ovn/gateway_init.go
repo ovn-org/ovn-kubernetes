@@ -256,7 +256,7 @@ func gatewayInit(nodeName string, clusterIPSubnet []*net.IPNet, hostSubnets []*n
 			gatewayRouter, allIPs, nextHop.String(),
 			fmt.Sprintf("rtoe-%s", gatewayRouter))
 		if err != nil {
-			return fmt.Errorf("Failed to add a static route in GR %s with physical "+
+			return fmt.Errorf("failed to add a static route in GR %s with physical "+
 				"gateway as the default next hop, stdout: %q, "+
 				"stderr: %q, error: %v", gatewayRouter, stdout, stderr, err)
 		}
@@ -308,7 +308,7 @@ func gatewayInit(nodeName string, clusterIPSubnet []*net.IPNet, hostSubnets []*n
 func addDistributedGWPort() error {
 	masterChassisID, err := util.GetNodeChassisID()
 	if err != nil {
-		return fmt.Errorf("Failed to get master's chassis ID error: %v", err)
+		return fmt.Errorf("failed to get master's chassis ID error: %v", err)
 	}
 
 	// add a distributed gateway port to the distributed router
@@ -325,7 +325,7 @@ func addDistributedGWPort() error {
 		"--", "set", "logical_router_port", dgpName, "gateway_chassis=@gw")
 	stdout, stderr, err := util.RunOVNNbctl(nbctlArgs...)
 	if err != nil {
-		return fmt.Errorf("Failed to set gateway chassis %s for distributed gateway port %s: "+
+		return fmt.Errorf("failed to set gateway chassis %s for distributed gateway port %s: "+
 			"stdout: %q, stderr: %q, error: %v", masterChassisID, dgpName, stdout, stderr, err)
 	}
 
@@ -432,7 +432,7 @@ func (oc *Controller) addNodeLocalNatEntries(node *kapi.Node, mgmtPortMAC, mgmtP
 	} else {
 		externalIP, err = oc.nodeLocalNatIPAllocator.AllocateNext()
 		if err != nil {
-			return fmt.Errorf("Error allocating node local NAT IP for node %s: %v", node.Name, err)
+			return fmt.Errorf("error allocating node local NAT IP for node %s: %v", node.Name, err)
 		}
 		defer func() {
 			// Release the allocation on error
@@ -446,7 +446,7 @@ func (oc *Controller) addNodeLocalNatEntries(node *kapi.Node, mgmtPortMAC, mgmtP
 	stdout, stderr, err := util.RunOVNNbctl("--may-exist", "lr-nat-add", ovnClusterRouter, "dnat_and_snat",
 		externalIP.String(), mgmtPortIP, mgmtPortName, mgmtPortMAC)
 	if err != nil {
-		return fmt.Errorf("Failed to add dnat_and_snat entry for the management port on node %s, "+
+		return fmt.Errorf("failed to add dnat_and_snat entry for the management port on node %s, "+
 			"stdout: %s, stderr: %q, error: %v", node.Name, stdout, stderr, err)
 	}
 

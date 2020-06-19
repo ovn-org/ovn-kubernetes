@@ -142,7 +142,7 @@ func (nsInfo *namespaceInfo) updateNamespacePortGroup(ns string) error {
 		// The port group should exist but doesn't so create it
 		portGroupUUID, err := createPortGroup(ns, hashedPortGroup(ns))
 		if err != nil {
-			return fmt.Errorf("Failed to create port_group for %s (%v)", ns, err)
+			return fmt.Errorf("failed to create port_group for %s (%v)", ns, err)
 		}
 		nsInfo.portGroupUUID = portGroupUUID
 	} else {

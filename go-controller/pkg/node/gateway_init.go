@@ -31,7 +31,7 @@ func bridgedGatewayNodeSetup(nodeName, bridgeName, bridgeInterface, physicalNetw
 		stdout, stderr, err := util.RunOVSVsctl("set", "bridge",
 			bridgeName, "other-config:hwaddr="+macAddress.String())
 		if err != nil {
-			return "", nil, fmt.Errorf("Failed to set bridge, stdout: %q, stderr: %q, "+
+			return "", nil, fmt.Errorf("failed to set bridge, stdout: %q, stderr: %q, "+
 				"error: %v", stdout, stderr, err)
 		}
 	}
@@ -65,7 +65,7 @@ func bridgedGatewayNodeSetup(nodeName, bridgeName, bridgeInterface, physicalNetw
 	_, stderr, err = util.RunOVSVsctl("set", "Open_vSwitch", ".",
 		fmt.Sprintf("external_ids:ovn-bridge-mappings=%s", mapString))
 	if err != nil {
-		return "", nil, fmt.Errorf("Failed to set ovn-bridge-mappings for ovs bridge %s"+
+		return "", nil, fmt.Errorf("failed to set ovn-bridge-mappings for ovs bridge %s"+
 			", stderr:%s (%v)", bridgeName, stderr, err)
 	}
 

@@ -228,7 +228,7 @@ func runOvnKube(ctx *cli.Context) error {
 
 	if master != "" {
 		if runtime.GOOS == "windows" {
-			return fmt.Errorf("Windows is not supported as a master")
+			return fmt.Errorf("master nodes cannot be of OS type: Windows")
 		}
 		// register prometheus metrics exported by the master
 		metrics.RegisterMasterMetrics()
@@ -300,7 +300,7 @@ func watchForChanges(configPath string) error {
 				if !ok {
 					return
 				}
-				klog.Errorf("Fsnotify error %v", err)
+				klog.Errorf("Error watching for changes to configmap: %s, err: %v", configPath, err)
 			}
 		}
 	}()

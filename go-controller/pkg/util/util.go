@@ -66,7 +66,7 @@ func GetNodeChassisID() (string, error) {
 		return "", err
 	}
 	if chassisID == "" {
-		return "", fmt.Errorf("No system-id configured in the local host")
+		return "", fmt.Errorf("no system-id configured in the local host")
 	}
 
 	return chassisID, nil

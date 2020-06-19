@@ -28,7 +28,7 @@ func GetNicName(brName string) (string, error) {
 	stdout, stderr, err := RunOVSVsctl(
 		"br-get-external-id", brName, "bridge-uplink")
 	if err != nil {
-		return "", fmt.Errorf("Failed to get the bridge-uplink for the bridge %q:, stderr: %q, error: %v",
+		return "", fmt.Errorf("failed to get the bridge-uplink for the bridge %q:, stderr: %q, error: %v",
 			brName, stderr, err)
 	}
 	if stdout == "" && strings.HasPrefix(brName, "br") {

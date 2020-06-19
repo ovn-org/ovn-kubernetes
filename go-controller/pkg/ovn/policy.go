@@ -208,19 +208,19 @@ func (oc *Controller) createDefaultDenyPortGroup(policyType knet.PolicyType) err
 	}
 	portGroupUUID, err := createPortGroup(portGroupName, portGroupName)
 	if err != nil {
-		return fmt.Errorf("Failed to create port_group for %s (%v)",
+		return fmt.Errorf("failed to create port_group for %s (%v)",
 			portGroupName, err)
 	}
 	err = addACLPortGroup(portGroupUUID, portGroupName, toLport,
 		defaultDenyPriority, "", "drop", policyType)
 	if err != nil {
-		return fmt.Errorf("Failed to create default deny ACL for port group %v", err)
+		return fmt.Errorf("failed to create default deny ACL for port group %v", err)
 	}
 
 	err = addACLPortGroup(portGroupUUID, portGroupName, toLport,
 		defaultAllowPriority, "arp", "allow", policyType)
 	if err != nil {
-		return fmt.Errorf("Failed to create default allow ARP ACL for port group %v", err)
+		return fmt.Errorf("failed to create default allow ARP ACL for port group %v", err)
 	}
 
 	if policyType == knet.PolicyTypeIngress {
@@ -255,7 +255,7 @@ func (oc *Controller) createMulticastAllowPolicy(ns string, nsInfo *namespaceInf
 		defaultMcastAllowPriority, "ip4.mcast", "allow",
 		knet.PolicyTypeEgress)
 	if err != nil {
-		return fmt.Errorf("Failed to create allow egress multicast ACL for %s (%v)",
+		return fmt.Errorf("failed to create allow egress multicast ACL for %s (%v)",
 			ns, err)
 	}
 
@@ -263,7 +263,7 @@ func (oc *Controller) createMulticastAllowPolicy(ns string, nsInfo *namespaceInf
 		defaultMcastAllowPriority, getMulticastACLMatch(ns), "allow",
 		knet.PolicyTypeIngress)
 	if err != nil {
-		return fmt.Errorf("Failed to create allow ingress multicast ACL for %s (%v)",
+		return fmt.Errorf("failed to create allow ingress multicast ACL for %s (%v)",
 			ns, err)
 	}
 
@@ -289,7 +289,7 @@ func deleteMulticastACLs(ns, portGroupHash string) error {
 		defaultMcastAllowPriority, "ip4.mcast", "allow",
 		knet.PolicyTypeEgress)
 	if err != nil {
-		return fmt.Errorf("Failed to delete allow egress multicast ACL for %s (%v)",
+		return fmt.Errorf("failed to delete allow egress multicast ACL for %s (%v)",
 			ns, err)
 	}
 
@@ -297,7 +297,7 @@ func deleteMulticastACLs(ns, portGroupHash string) error {
 		defaultMcastAllowPriority, getMulticastACLMatch(ns), "allow",
 		knet.PolicyTypeIngress)
 	if err != nil {
-		return fmt.Errorf("Failed to delete allow ingress multicast ACL for %s (%v)",
+		return fmt.Errorf("failed to delete allow ingress multicast ACL for %s (%v)",
 			ns, err)
 	}
 
@@ -327,7 +327,7 @@ func createDefaultDenyMulticastPolicy() error {
 	portGroupName := "mcastPortGroupDeny"
 	portGroupUUID, err := createPortGroup(portGroupName, portGroupName)
 	if err != nil {
-		return fmt.Errorf("Failed to create port_group for %s (%v)",
+		return fmt.Errorf("failed to create port_group for %s (%v)",
 			portGroupName, err)
 	}
 
@@ -337,7 +337,7 @@ func createDefaultDenyMulticastPolicy() error {
 	err = addACLPortGroup(portGroupUUID, portGroupName, fromLport,
 		defaultMcastDenyPriority, "ip4.mcast", "drop", knet.PolicyTypeEgress)
 	if err != nil {
-		return fmt.Errorf("Failed to create default deny multicast egress ACL (%v)",
+		return fmt.Errorf("failed to create default deny multicast egress ACL (%v)",
 			err)
 	}
 
@@ -345,7 +345,7 @@ func createDefaultDenyMulticastPolicy() error {
 	err = addACLPortGroup(portGroupUUID, portGroupName, toLport,
 		defaultMcastDenyPriority, "ip4.mcast", "drop", knet.PolicyTypeIngress)
 	if err != nil {
-		return fmt.Errorf("Failed to create default deny multicast ingress ACL (%v)",
+		return fmt.Errorf("failed to create default deny multicast ingress ACL (%v)",
 			err)
 	}
 

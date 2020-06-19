@@ -222,7 +222,7 @@ func (n *OvnNode) Start() error {
 	}
 
 	if err := nodeAnnotator.Run(); err != nil {
-		return fmt.Errorf("Failed to set node %s annotations: %v", n.name, err)
+		return fmt.Errorf("failed to set node %s annotations: %v", n.name, err)
 	}
 
 	// Wait for management port and gateway resources to be created by the master
@@ -270,7 +270,7 @@ func (n *OvnNode) Start() error {
 
 	kclient, ok := n.Kube.(*kube.Kube)
 	if !ok {
-		return fmt.Errorf("Cannot get kubeclient for starting CNI server")
+		return fmt.Errorf("cannot get kubeclient for starting CNI server")
 	}
 	err = n.WatchEndpoints()
 	if err != nil {
