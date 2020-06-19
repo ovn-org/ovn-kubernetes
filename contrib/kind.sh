@@ -26,8 +26,10 @@ run_kubectl() {
 usage()
 {
     echo "usage: kind.sh [[[-cf|--config-file <file>] [-kt|keep-taint] [-ha|--ha-enabled]"
-    echo "                 [-ho|--hybrid-enabled] [-ii|--install-ingress] [-n4|--no-ipv4] [-i6|--ipv6]"
-    echo "                 [-wk|--num-workers <num>]] [-gm|--gateway-mode <mode>] | [-h]]"
+    echo "                 [-ho|--hybrid-enabled] [-ii|--install-ingress] [-n4|--no-ipv4]"
+    echo "                 [-i6|--ipv6] [-wk|--num-workers <num>]"
+    echo "                 [-sw|--allow-system-writes] [-gm|--gateway-mode <mode>]] |"
+    echo "                [-h]]"
     echo ""
     echo "-cf | --config-file          Name of the KIND J2 configuration file."
     echo "                             DEFAULT: ./kind.yaml.j2"
@@ -41,7 +43,11 @@ usage()
     echo "-i6 | --ipv6                 Enable IPv6. DEFAULT: IPv6 Disabled."
     echo "-wk | --num-workers          Number of worker nodes. DEFAULT: HA - 2 worker"
     echo "                             nodes and no HA - 0 worker nodes."
-    echo "-gm | --gateway-mode         Enable 'shared' or 'local' gateway mode. DEFAULT: local."
+    echo "-sw | --allow-system-writes  Allow script to update system. Intended to allow"
+    echo "                             github CI to be updated with IPv6 settings."
+    echo "                             DEFAULT: Don't allow."
+    echo "-gm | --gateway-mode         Enable 'shared' or 'local' gateway mode."
+    echo "                             DEFAULT: local."
     echo ""
 }
 
@@ -49,49 +55,51 @@ parse_args()
 {
     while [ "$1" != "" ]; do
         case $1 in
-            -cf | --config-file )      shift
-                                       if test ! -f "$1"; then
-                                          echo "$1 does not  exist"
-                                          usage
+            -cf | --config-file )         shift
+                                          if test ! -f "$1"; then
+                                             echo "$1 does not  exist"
+                                             usage
+                                             exit 1
+                                          fi
+                                          KIND_CONFIG=$1
+                                          ;;
+            -ii | --install-ingress )     KIND_INSTALL_INGRESS=true
+                                          ;;
+            -ha | --ha-enabled )          KIND_HA=true
+                                          ;;
+            -me | --multicast-enabled)    OVN_MULTICAST_ENABLE=true
+                                          ;;
+            -ho | --hybrid-enabled )      OVN_HYBRID_OVERLAY_ENABLE=true
+                                          ;;
+            -kt | --keep-taint )          KIND_REMOVE_TAINT=false
+                                          ;;
+            -n4 | --no-ipv4 )             KIND_IPV4_SUPPORT=false
+                                          ;;
+            -i6 | --ipv6 )                KIND_IPV6_SUPPORT=true
+                                          ;;
+            -wk | --num-workers )         shift
+                                          if ! [[ "$1" =~ ^[0-9]+$ ]]; then
+                                             echo "Invalid num-workers: $1"
+                                             usage
+                                             exit 1
+                                          fi
+                                          KIND_NUM_WORKER=$1
+                                          ;;
+            -sw | --allow-system-writes ) KIND_ALLOW_SYSTEM_WRITES=true
+                                          ;;
+            -gm | --gateway-mode )        shift
+                                          if [ "$1" != "local" ] && [ "$1" != "shared" ]; then
+                                             echo "Invalid gateway mode: $1"
+                                             usage
+                                             exit 1
+                                          fi
+                                          OVN_GATEWAY_MODE=$1
+                                          ;;
+            -h | --help )                 usage
+                                          exit
+                                          ;;
+            * )                           usage
                                           exit 1
-                                       fi
-                                       KIND_CONFIG=$1
-                                       ;;
-            -ii | --install-ingress )  KIND_INSTALL_INGRESS=true
-                                       ;;
-            -ha | --ha-enabled )       KIND_HA=true
-                                       ;;
-            -me | --multicast-enabled) OVN_MULTICAST_ENABLE=true
-                                       ;;
-            -ho | --hybrid-enabled )   OVN_HYBRID_OVERLAY_ENABLE=true
-                                       ;;
-            -kt | --keep-taint )       KIND_REMOVE_TAINT=false
-                                       ;;
-            -n4 | --no-ipv4 )          KIND_IPV4_SUPPORT=false
-                                       ;;
-            -i6 | --ipv6 )             KIND_IPV6_SUPPORT=true
-                                       ;;
-            -wk | --num-workers )      shift
-                                       if ! [[ "$1" =~ ^[0-9]+$ ]]; then
-                                          echo "Invalid num-workers: $1"
-                                          usage
-                                          exit 1
-                                       fi
-                                       KIND_NUM_WORKER=$1
-                                       ;;
-            -gm | --gateway-mode )     shift
-                                       if [ "$1" != "local" ] && [ "$1" != "shared" ]; then
-                                          echo "Invalid gateway mode: $1"
-                                          usage
-                                          exit 1
-                                       fi
-                                       OVN_GATEWAY_MODE=$1
-                                       ;;
-            -h | --help )              usage
-                                       exit
-                                       ;;
-            * )                        usage
-                                       exit 1
         esac
         shift
     done
@@ -108,6 +116,7 @@ print_params()
      echo "KIND_IPV4_SUPPORT = $KIND_IPV4_SUPPORT"
      echo "KIND_IPV6_SUPPORT = $KIND_IPV6_SUPPORT"
      echo "KIND_NUM_WORKER = $KIND_NUM_WORKER"
+     echo "KIND_ALLOW_SYSTEM_WRITES = $KIND_ALLOW_SYSTEM_WRITES"
      echo "OVN_GATEWAY_MODE = $OVN_GATEWAY_MODE"
      echo "OVN_HYBRID_OVERLAY_ENABLE = $OVN_HYBRID_OVERLAY_ENABLE"
      echo "OVN_MULTICAST_ENABLE = $OVN_MULTICAST_ENABLE"
@@ -128,6 +137,7 @@ KIND_IPV4_SUPPORT=${KIND_IPV4_SUPPORT:-true}
 KIND_IPV6_SUPPORT=${KIND_IPV6_SUPPORT:-false}
 OVN_HYBRID_OVERLAY_ENABLE=${OVN_HYBRID_OVERLAY_ENABLE:-false}
 OVN_MULTICAST_ENABLE=${OVN_MULTICAST_ENABLE:-false}
+KIND_ALLOW_SYSTEM_WRITES=${KIND_ALLOW_SYSTEM_WRITES:-false}
 
 # Input not currently validated. Modify outside script at your own risk.
 # These are the same values defaulted to in KIND code (kind/default.go).
@@ -166,6 +176,44 @@ API_IP=$(ip -4 addr | grep -oP '(?<=inet\s)\d+(\.\d+){3}' | grep -v "127.0.0.1" 
 if [ -z "$API_IP" ]; then
   echo "Error detecting machine IPv4 to use as API server. Default to 0.0.0.0."
   API_IP=0.0.0.0
+fi
+
+check_ipv6() {
+  # Collect additional IPv6 data on test environment
+  ERROR_FOUND=false
+  TMPVAR=`sysctl net.ipv6.conf.all.forwarding | awk '{print $3}'`
+  echo "net.ipv6.conf.all.forwarding is equal to $TMPVAR"
+  if [ "$TMPVAR" != 1 ]; then
+    if [ "$KIND_ALLOW_SYSTEM_WRITES" == true ]; then
+      sudo sysctl -w net.ipv6.conf.all.forwarding=1
+    else
+      echo "RUN: 'sudo sysctl -w net.ipv6.conf.all.forwarding=1' to use IPv6."
+      ERROR_FOUND=true
+    fi
+  fi
+  TMPVAR=`sysctl net.ipv6.conf.all.disable_ipv6 | awk '{print $3}'`
+  echo "net.ipv6.conf.all.disable_ipv6 is equal to $TMPVAR"
+  if [ "$TMPVAR" != 0 ]; then
+    if [ "$KIND_ALLOW_SYSTEM_WRITES" == true ]; then
+      sudo sysctl -w net.ipv6.conf.all.disable_ipv6=0
+    else
+      echo "RUN: 'sudo sysctl -w net.ipv6.conf.all.disable_ipv6=0' to use IPv6."
+      ERROR_FOUND=true
+    fi
+  fi
+  if [ -f /proc/net/if_inet6 ]; then
+    echo "/proc/net/if_inet6 exists so IPv6 supported in kernel."
+  else
+    echo "/proc/net/if_inet6 does not exists so no IPv6 support found! Compile the kernel!!"
+    ERROR_FOUND=true
+  fi
+  if "$ERROR_FOUND"; then 
+    exit 2
+  fi  
+}
+
+if [ "$KIND_IPV6_SUPPORT" == true ]; then
+  check_ipv6
 fi
 
 if [ "$KIND_IPV4_SUPPORT" == true ] && [ "$KIND_IPV6_SUPPORT" == false ]; then
