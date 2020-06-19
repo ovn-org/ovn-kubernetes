@@ -126,6 +126,21 @@ func (ovn *Controller) configureLoadBalancer(lb, sourceIP string, sourcePort int
 	return nil
 }
 
+// configureLoadBalancerClientIPSessionAffinity updates the load balancer with the specified session
+// timeoutSeconds is a noop until it is implemented in OVN
+func (ovn *Controller) configureLoadBalancerClientIPSessionAffinity(lb string, timeoutSeconds int) error {
+	ovn.serviceLBLock.Lock()
+	defer ovn.serviceLBLock.Unlock()
+
+	out, stderr, err := util.RunOVNNbctl("set", "load_balancer", lb, `selection_fields="ip_src"`)
+	if err != nil {
+		return fmt.Errorf("error in configuring load balancer: %s "+
+			"stdout: %q, stderr: %q, error: %v", lb, out, stderr, err)
+	}
+	klog.V(5).Infof("lb session affinity set for %s", lb)
+	return nil
+}
+
 // createLoadBalancerVIPs either creates or updates a set of load balancer VIPs mapping
 // from sourcePort on each IP of a given address family in sourceIPs, to targetPort on
 // each IP of the same address family in targetIPs, removing the reject ACL for any

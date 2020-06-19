@@ -94,6 +94,14 @@ func (ovn *Controller) AddEndpoints(ep *kapi.Endpoints) error {
 			vip := util.JoinHostPortInt32(svc.Spec.ClusterIP, svcPort.Port)
 			ovn.AddServiceVIPToName(vip, svcPort.Protocol, svc.Namespace, svc.Name)
 			ovn.handleExternalIPs(svc, svcPort, lbEps.IPs, lbEps.Port, false)
+			// Configure ClientIP Session Affinity
+			if svc.Spec.SessionAffinity == kapi.ServiceAffinityClientIP {
+				stickyMaxAgeSeconds := int(*svc.Spec.SessionAffinityConfig.ClientIP.TimeoutSeconds)
+				if err = ovn.configureLoadBalancerClientIPSessionAffinity(loadBalancer, stickyMaxAgeSeconds); err != nil {
+					klog.Errorf("Error in setting Client session affinity for svc %s, target port: %d - %v\n", svc.Name, lbEps.Port, err)
+					continue
+				}
+			}
 		}
 	}
 	return nil

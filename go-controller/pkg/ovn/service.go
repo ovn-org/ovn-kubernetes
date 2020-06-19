@@ -316,8 +316,9 @@ func (ovn *Controller) updateService(oldSvc, newSvc *kapi.Service) error {
 	if reflect.DeepEqual(newSvc.Spec.Ports, oldSvc.Spec.Ports) &&
 		reflect.DeepEqual(newSvc.Spec.ExternalIPs, oldSvc.Spec.ExternalIPs) &&
 		reflect.DeepEqual(newSvc.Spec.ClusterIP, oldSvc.Spec.ClusterIP) &&
+		reflect.DeepEqual(newSvc.Spec.SessionAffinity, oldSvc.Spec.SessionAffinity) &&
 		reflect.DeepEqual(newSvc.Spec.Type, oldSvc.Spec.Type) {
-		klog.V(5).Infof("skipping service update for: %s as change does not apply to any of .Spec.Ports, .Spec.ExternalIP, .Spec.ClusterIP, .Spec.Type", newSvc.Name)
+		klog.V(5).Infof("skipping service update for: %s as change does not apply to any of .Spec.Ports, .Spec.ExternalIP, .Spec.ClusterIP, .Spec.SessionAffinity, .Spec.Type", newSvc.Name)
 		return nil
 	}
 
