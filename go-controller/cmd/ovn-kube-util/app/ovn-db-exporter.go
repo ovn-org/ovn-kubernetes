@@ -17,28 +17,6 @@ import (
 	kexec "k8s.io/utils/exec"
 )
 
-var metricOVNDBRaftIndex = prometheus.NewGaugeVec(prometheus.GaugeOpts{
-	Namespace: metrics.MetricOvnNamespace,
-	Subsystem: metrics.MetricOvnSubsystemDBRaft,
-	Name:      "log_entry_index",
-	Help: "The index of log entry currently exposed to clients. " +
-		"This value on all the instances of db should be close to " +
-		"each other otherwise they are said to lagging with eaxch other."},
-	[]string{
-		"db_name",
-	},
-)
-
-var metricOVNDBLeader = prometheus.NewGaugeVec(prometheus.GaugeOpts{
-	Namespace: metrics.MetricOvnNamespace,
-	Subsystem: metrics.MetricOvnSubsystemDBRaft,
-	Name:      "cluster_leader",
-	Help:      "Identifies whether this pod is a leader for given database"},
-	[]string{
-		"db_name",
-	},
-)
-
 var metricOVNDBSessions = prometheus.NewGaugeVec(prometheus.GaugeOpts{
 	Namespace: metrics.MetricOvnNamespace,
 	Subsystem: metrics.MetricOvnSubsystemDBRaft,
@@ -266,19 +244,15 @@ var metricDBClusterConnOutErr = prometheus.NewGaugeVec(prometheus.GaugeOpts{
 	},
 )
 
-func ovnDBStatusMetricsUpdater(direction, database string) {
-	status, err := util.GetOVNDBServerInfo(5, direction, database)
-	if err != nil {
-		klog.Errorf(err.Error())
-		return
-	}
-	metricOVNDBRaftIndex.WithLabelValues(database).Set(float64(status.Index))
-	if status.Leader {
-		metricOVNDBLeader.WithLabelValues(database).Set(1)
-	} else {
-		metricOVNDBLeader.WithLabelValues(database).Set(0)
-	}
-}
+var metricDBE2eTimestamp = prometheus.NewGaugeVec(prometheus.GaugeOpts{
+	Namespace: metrics.MetricOvnNamespace,
+	Subsystem: metrics.MetricOvnSubsystemDBRaft,
+	Name:      "e2e_timestamp",
+	Help:      "The current e2e-timestamp value as observed in this instance of the database"},
+	[]string{
+		"db_name",
+	},
+)
 
 func ovnDBSizeMetricsUpdater(direction, database string) {
 	dbFile := fmt.Sprintf("/etc/openvswitch/ovn%s_db.db", direction)
@@ -288,6 +262,30 @@ func ovnDBSizeMetricsUpdater(direction, database string) {
 		return
 	}
 	metricDBSize.WithLabelValues(database).Set(float64(fileInfo.Size()))
+}
+
+func ovnE2eTimeStampUpdater(direction, database string) {
+	var stdout, stderr string
+	var err error
+
+	if direction == "sb" {
+		stdout, stderr, err = util.RunOVNSbctl("--if-exists", "--no-leader-only",
+			"get", "SB_Global", ".", "options:e2e_timestamp")
+	} else {
+		stdout, stderr, err = util.RunOVNNbctl("--if-exists", "--no-leader-only",
+			"get", "NB_Global", ".", "options:e2e_timestamp")
+	}
+	if err != nil {
+		klog.Errorf("Failed to scrape timestamp for database %s: "+
+			"stderr (%s) (%v)", database, stderr, err)
+		return
+	}
+	if value, err := strconv.ParseFloat(stdout, 64); err == nil {
+		metricDBE2eTimestamp.WithLabelValues(database).Set(value)
+	} else {
+		klog.Errorf("Failed to parse %s e2e-timestamp value to float64 :(%v)",
+			database, err)
+	}
 }
 
 func ovnDBMemoryMetricsUpdater(direction, database string) {
@@ -375,8 +373,6 @@ var OvnDBExporterCommand = cli.Command{
 		// get the ovsdb server version info
 		getOvnDbVersionInfo()
 		// register metrics that will be served off of /metrics path
-		prometheus.MustRegister(metricOVNDBRaftIndex)
-		prometheus.MustRegister(metricOVNDBLeader)
 		prometheus.MustRegister(metricOVNDBMonitor)
 		prometheus.MustRegister(metricOVNDBSessions)
 		prometheus.MustRegister(metricDBSize)
@@ -410,6 +406,7 @@ var OvnDBExporterCommand = cli.Command{
 		prometheus.MustRegister(metricDBClusterConnOut)
 		prometheus.MustRegister(metricDBClusterConnInErr)
 		prometheus.MustRegister(metricDBClusterConnOutErr)
+		prometheus.MustRegister(metricDBE2eTimestamp)
 
 		// functions responsible for collecting the values and updating the prometheus metrics
 		go func() {
@@ -417,25 +414,20 @@ var OvnDBExporterCommand = cli.Command{
 				"nb": "OVN_Northbound",
 				"sb": "OVN_Southbound",
 			}
-			for direction, database := range dirDbMap {
-				ovnDBStatusMetricsUpdater(direction, database)
-				ovnDBMemoryMetricsUpdater(direction, database)
-				ovnDBSizeMetricsUpdater(direction, database)
-				time.Sleep(30 * time.Second)
-			}
-		}()
-
-		go func() {
 			for {
-				ovnDBClusterStatusMetricsUpdater("nb", "OVN_Northbound")
-				ovnDBClusterStatusMetricsUpdater("sb", "OVN_Southbound")
+				for direction, database := range dirDbMap {
+					ovnDBClusterStatusMetricsUpdater(direction, database)
+					ovnDBMemoryMetricsUpdater(direction, database)
+					ovnDBSizeMetricsUpdater(direction, database)
+					ovnE2eTimeStampUpdater(direction, database)
+				}
 				time.Sleep(30 * time.Second)
 			}
 		}()
 
 		err := http.ListenAndServe(bindAddress, mux)
 		if err != nil {
-			klog.Exitf("starting metrics server failed: %v", err)
+			klog.Exitf("Starting metrics server failed: %v", err)
 		}
 		return nil
 	},
