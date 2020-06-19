@@ -151,52 +151,34 @@ print_params
 set -euxo pipefail
 
 # Detect IP to use as API server
-API_IPV4=""
-if [ "$KIND_IPV4_SUPPORT" == true ]; then
-  # ip -4 addr -> Run ip command for IPv4
-  # grep -oP '(?<=inet\s)\d+(\.\d+){3}' -> Use only the lines with the
-  #   IPv4 Addresses and strip off the trailing subnet mask, /xx
-  # grep -v "127.0.0.1" -> Remove local host
-  # head -n 1 -> Of the remaining, use first entry
-  API_IPV4=$(ip -4 addr | grep -oP '(?<=inet\s)\d+(\.\d+){3}' | grep -v "127.0.0.1" | head -n 1)
-  if [ -z "$API_IPV4" ]; then
-    echo "Error detecting machine IPv4 to use as API server"
-    exit 1
-  fi
-fi
-
-API_IPV6=""
-if [ "$KIND_IPV6_SUPPORT" == true ]; then
-  # ip -6 addr -> Run ip command for IPv6
-  # grep "inet6" -> Use only the lines with the IPv6 Address
-  # sed 's@/.*@@g' -> Strip off the trailing subnet mask, /xx
-  # grep -v "^::1$" -> Remove local host
-  # sed '/^fe80:/ d' -> Remove Link-Local Addresses
-  # head -n 1 -> Of the remaining, use first entry
-  API_IPV6=$(ip -6 addr  | grep "inet6" | awk -F' ' '{print $2}' | \
-             sed 's@/.*@@g' | grep -v "^::1$" | sed '/^fe80:/ d' | head -n 1)
-  if [ -z "$API_IPV6" ]; then
-    echo "Error detecting machine IPv6 to use as API server"
-    exit 1
-  fi
+#
+# You can't use an IPv6 address for the external API, docker does not support
+# IPv6 port mapping. Always use the IPv4 host address for the API Server field.
+# This will keep compatibility and people will be able to connect with kubectl
+# from outside
+#
+# ip -4 addr -> Run ip command for IPv4
+# grep -oP '(?<=inet\s)\d+(\.\d+){3}' -> Use only the lines with the
+#   IPv4 Addresses and strip off the trailing subnet mask, /xx
+# grep -v "127.0.0.1" -> Remove local host
+# head -n 1 -> Of the remaining, use first entry
+API_IP=$(ip -4 addr | grep -oP '(?<=inet\s)\d+(\.\d+){3}' | grep -v "127.0.0.1" | head -n 1)
+if [ -z "$API_IP" ]; then
+  echo "Error detecting machine IPv4 to use as API server. Default to 0.0.0.0."
+  API_IP=0.0.0.0
 fi
 
 if [ "$KIND_IPV4_SUPPORT" == true ] && [ "$KIND_IPV6_SUPPORT" == false ]; then
-  API_IP=${API_IPV4}
   IP_FAMILY=""
   NET_CIDR=$NET_CIDR_IPV4
   SVC_CIDR=$SVC_CIDR_IPV4
   echo "IPv4 Only Support: API_IP=$API_IP --net-cidr=$NET_CIDR --svc-cidr=$SVC_CIDR"
 elif [ "$KIND_IPV4_SUPPORT" == false ] && [ "$KIND_IPV6_SUPPORT" == true ]; then
-  API_IP=${API_IPV6}
   IP_FAMILY="ipv6"
   NET_CIDR=$NET_CIDR_IPV6
   SVC_CIDR=$SVC_CIDR_IPV6
   echo "IPv6 Only Support: API_IP=$API_IP --net-cidr=$NET_CIDR --svc-cidr=$SVC_CIDR"
 elif [ "$KIND_IPV4_SUPPORT" == true ] && [ "$KIND_IPV6_SUPPORT" == true ]; then
-  #TODO DUALSTACK: Multiple IP Addresses for APIServer not currently supported.
-  #API_IP=${API_IPV4},${API_IPV6}
-  API_IP=${API_IPV4}
   IP_FAMILY="DualStack"
   NET_CIDR=$NET_CIDR_IPV4,$NET_CIDR_IPV6
   SVC_CIDR=$SVC_CIDR_IPV4,$SVC_CIDR_IPV6
@@ -220,21 +202,8 @@ ovn_apiServerAddress=${API_IP} \
 kind create cluster --name ${KIND_CLUSTER_NAME} --kubeconfig ${HOME}/admin.conf --image kindest/node:${K8S_VERSION} --config=${KIND_CONFIG_LCL}
 export KUBECONFIG=${HOME}/admin.conf
 cat ${KUBECONFIG}
-mkdir -p /tmp/kind
-sudo chmod 777 /tmp/kind
-count=0
-until kubectl get secrets -o jsonpath='{.items[].data.ca\.crt}'
-do
-  if [ $count -gt 10 ]; then
-    echo "Failed to get k8s crt/token"
-    exit 1
-  fi
-  count=$((count+1))
-  echo "secrets not available on attempt $count"
-  sleep 5
-done
-kubectl get secrets -o jsonpath='{.items[].data.ca\.crt}' > /tmp/kind/ca.crt
-kubectl get secrets -o jsonpath='{.items[].data.token}' > /tmp/kind/token
+
+# Build the ovn-kube controller
 pushd ../go-controller
 make
 popd
@@ -266,10 +235,22 @@ if [ "${GITHUB_ACTIONS:-false}" == "true" ]; then
   printf '%s' "${fixed_coredns}" | kubectl apply -f -
 fi
 
+# Create the ovn-kube image
 pushd ../dist/images
 sudo cp -f ../../go-controller/_output/go/bin/* .
 echo "ref: $(git rev-parse  --symbolic-full-name HEAD)  commit: $(git rev-parse  HEAD)" > git_info
 docker build -t ovn-daemonset-f:dev -f Dockerfile.fedora .
+
+# Detect API IP address for OVN
+
+# Despite OVN run in pod they will only obtain the VIRTUAL apiserver address
+# and since OVN has to provide the connectivity to service
+# it can not be bootstrapped
+
+# This is the address of the node with the control-plane
+API_URL=$(kind get kubeconfig --internal --name ${KIND_CLUSTER_NAME} | grep server | awk '{ print $2 }')
+
+# Create ovn-kube manifests
 ./daemonset.sh \
   --image=docker.io/library/ovn-daemonset-f:dev \
   --net-cidr=${NET_CIDR} \
@@ -277,12 +258,16 @@ docker build -t ovn-daemonset-f:dev -f Dockerfile.fedora .
   --gateway-mode=${OVN_GATEWAY_MODE} \
   --hybrid-enabled=${OVN_HYBRID_OVERLAY_ENABLE} \
   --multicast-enabled=${OVN_MULTICAST_ENABLE} \
-  --k8s-apiserver=https://[${API_IP}]:11337 \
+  --k8s-apiserver=${API_URL} \
   --ovn-master-count=${KIND_NUM_MASTER} \
   --kind \
   --master-loglevel=5
 popd
+
+# Preload ovn-kube images in the kind cluster
 kind load docker-image ovn-daemonset-f:dev --name ${KIND_CLUSTER_NAME}
+
+# Deploy ovn-kube
 pushd ../dist/yaml
 run_kubectl apply -f ovn-setup.yaml
 CONTROL_NODES=$(docker ps -f name=ovn-control | grep -v NAMES | awk '{ print $NF }')
@@ -300,25 +285,33 @@ fi
 run_kubectl apply -f ovnkube-master.yaml
 run_kubectl apply -f ovnkube-node.yaml
 popd
+
+# Delete kube-proxy
 run_kubectl -n kube-system delete ds kube-proxy
 kind get clusters
 kind get nodes --name ${KIND_CLUSTER_NAME}
-kind export kubeconfig --name ovn
+kind export kubeconfig --name ${KIND_CLUSTER_NAME}
 if [ "$KIND_INSTALL_INGRESS" == true ]; then
   run_kubectl apply -f ingress/mandatory.yaml
   run_kubectl apply -f ingress/service-nodeport.yaml
 fi
 
-count=1
-until [ -z "$(kubectl get pod -A -o custom-columns=NAME:metadata.name,STATUS:.status.phase | tail -n +2 | grep -v Running)" ];do
-  if [ $count -gt 20 ]; then
-    echo "Some pods are not running after timeout"
-    exit 1
-  fi
-  echo "All pods not available yet on attempt $count:"
-  kubectl get pod -A || true
-  count=$((count+1))
-  sleep 10
-done
+# Check that everything is fine and running. IPv6 cluster seems to take a little
+# longer to come up, so extend the wait time.
+OVN_TIMEOUT=300s
+if [ "$KIND_IPV6_SUPPORT" == true ]; then
+  OVN_TIMEOUT=480s
+fi
+if ! kubectl wait -n ovn-kubernetes --for=condition=ready pods --all --timeout=${OVN_TIMEOUT} ; then
+  echo "some pods in OVN Kubernetes are not running"
+  kubectl get pods -A -o wide || true
+  exit 1
+fi
+if ! kubectl wait -n kube-system --for=condition=ready pods --all --timeout=300s ; then
+  echo "some pods in the system are not running"
+  kubectl get pods -A -o wide || true
+  exit 1
+fi
+
 echo "Pods are all up, allowing things settle for 30 seconds..."
 sleep 30
