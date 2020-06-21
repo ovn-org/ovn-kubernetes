@@ -14,7 +14,6 @@ import (
 	"net"
 	"net/http"
 	"os"
-	"path/filepath"
 	"runtime"
 	"strings"
 	"time"
@@ -22,6 +21,7 @@ import (
 	"github.com/containernetworking/cni/pkg/skel"
 	"github.com/containernetworking/cni/pkg/types"
 	"github.com/containernetworking/cni/pkg/types/current"
+	lumberjack "gopkg.in/natefinch/lumberjack.v2"
 
 	ovntypes "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/cni/types"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
@@ -108,20 +108,6 @@ func setupLogging(conf *ovntypes.NetConf) {
 		}
 	}
 	if conf.LogFile != "" {
-		var file *os.File
-
-		if _, err = os.Stat(filepath.Dir(conf.LogFile)); os.IsNotExist(err) {
-			dir := filepath.Dir(conf.LogFile)
-			if err = os.MkdirAll(dir, 0755); err != nil {
-				klog.Warningf("Failed to create logfile directory %s (%v).", dir, err)
-				return
-			}
-		}
-		file, err = os.OpenFile(conf.LogFile, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0660)
-		if err != nil {
-			klog.Warningf("Failed to open logfile %s (%v).", conf.LogFile, err)
-			return
-		}
 		klogFlags := flag.NewFlagSet("klog", flag.ExitOnError)
 		klog.InitFlags(klogFlags)
 		if err := klogFlags.Set("logtostderr", "false"); err != nil {
@@ -130,7 +116,13 @@ func setupLogging(conf *ovntypes.NetConf) {
 		if err := klogFlags.Set("alsologtostderr", "true"); err != nil {
 			klog.Warningf("Error setting klog alsologtostderr: %v", err)
 		}
-		klog.SetOutput(file)
+		klog.SetOutput(&lumberjack.Logger{
+			Filename:   conf.LogFile,
+			MaxSize:    conf.LogFileMaxSize, // megabytes
+			MaxBackups: conf.LogFileMaxBackups,
+			MaxAge:     conf.LogFileMaxAge, // days
+			Compress:   true,
+		})
 	}
 }
 

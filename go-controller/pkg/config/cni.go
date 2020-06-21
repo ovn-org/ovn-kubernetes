@@ -21,8 +21,11 @@ func WriteCNIConfig() error {
 			Name:       "ovn-kubernetes",
 			Type:       CNI.Plugin,
 		},
-		LogFile:  Logging.CNIFile,
-		LogLevel: fmt.Sprintf("%d", Logging.Level),
+		LogFile:           Logging.CNIFile,
+		LogLevel:          fmt.Sprintf("%d", Logging.Level),
+		LogFileMaxSize:    Logging.LogFileMaxSize,
+		LogFileMaxBackups: Logging.LogFileMaxBackups,
+		LogFileMaxAge:     Logging.LogFileMaxAge,
 	}
 
 	bytes, err := json.Marshal(netConf)

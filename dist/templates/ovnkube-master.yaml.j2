@@ -203,6 +203,12 @@ spec:
           value: "3"
         - name: OVNKUBE_LOGLEVEL
           value: "{{ ovnkube_master_loglevel }}"
+        - name: OVNKUBE_LOGFILE_MAXSIZE
+          value: "{{ ovnkube_logfile_maxsize }}"
+        - name: OVNKUBE_LOGFILE_MAXBACKUPS
+          value: "{{ ovnkube_logfile_maxbackups }}"
+        - name: OVNKUBE_LOGFILE_MAXAGE
+          value: "{{ ovnkube_logfile_maxage }}"
         - name: OVN_NET_CIDR
           valueFrom:
             configMapKeyRef:
