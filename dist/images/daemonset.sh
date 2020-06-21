@@ -30,6 +30,9 @@ OVN_LOGLEVEL_NB=""
 OVN_LOGLEVEL_SB=""
 OVN_LOGLEVEL_CONTROLLER=""
 OVN_LOGLEVEL_NBCTLD=""
+OVNKUBE_LOGFILE_MAXSIZE=""
+OVNKUBE_LOGFILE_MAXBACKUPS=""
+OVNKUBE_LOGFILE_MAXAGE=""
 OVN_MASTER_COUNT=""
 OVN_REMOTE_PROBE_INTERVAL=""
 OVN_HYBRID_OVERLAY_ENABLE=""
@@ -95,6 +98,15 @@ while [ "$1" != "" ]; do
     ;;
   --ovn-loglevel-nbctld)
     OVN_LOGLEVEL_NBCTLD=$VALUE
+    ;;
+  --ovnkube-logfile-maxsize)
+    OVNKUBE_LOGFILE_MAXSIZE=$VALUE
+    ;;
+  --ovnkube-logfile-maxbackups)
+    OVNKUBE_LOGFILE_MAXBACKUPS=$VALUE
+    ;;
+  --ovnkube-logfile-maxage)
+    OVNKUBE_LOGFILE_MAXAGE=$VALUE
     ;;
   --ssl)
     OVN_SSL_ENABLE="yes"
@@ -168,6 +180,12 @@ ovn_loglevel_controller=${OVN_LOGLEVEL_CONTROLLER:-"-vconsole:info"}
 echo "ovn_loglevel_controller: ${ovn_loglevel_controller}"
 ovn_loglevel_nbctld=${OVN_LOGLEVEL_NBCTLD:-"-vconsole:info"}
 echo "ovn_loglevel_nbctld: ${ovn_loglevel_nbctld}"
+ovnkube_logfile_maxsize=${OVNKUBE_LOGFILE_MAXSIZE:-"100"}
+echo "ovnkube_logfile_maxsize: ${ovnkube_logfile_maxsize}"
+ovnkube_logfile_maxbackups=${OVNKUBE_LOGFILE_MAXBACKUPS:-"5"}
+echo "ovnkube_logfile_maxbackups: ${ovnkube_logfile_maxbackups}"
+ovnkube_logfile_maxage=${OVNKUBE_LOGFILE_MAXAGE:-"5"}
+echo "ovnkube_logfile_maxage: ${ovnkube_logfile_maxage}"
 ovn_hybrid_overlay_enable=${OVN_HYBRID_OVERLAY_ENABLE}
 echo "ovn_hybrid_overlay_enable: ${ovn_hybrid_overlay_enable}"
 ovn_hybrid_overlay_net_cidr=${OVN_HYBRID_OVERLAY_NET_CIDR}
@@ -198,6 +216,9 @@ ovn_image=${image} \
   ovn_gateway_opts=${ovn_gateway_opts} \
   ovnkube_node_loglevel=${node_loglevel} \
   ovn_loglevel_controller=${ovn_loglevel_controller} \
+  ovnkube_logfile_maxsize=${ovnkube_logfile_maxsize} \
+  ovnkube_logfile_maxbackups=${ovnkube_logfile_maxbackups} \
+  ovnkube_logfile_maxage=${ovnkube_logfile_maxage} \
   ovn_hybrid_overlay_net_cidr=${ovn_hybrid_overlay_net_cidr} \
   ovn_hybrid_overlay_enable=${ovn_hybrid_overlay_enable} \
   ovn_ssl_en=${ovn_ssl_en} \
@@ -209,6 +230,9 @@ ovn_image=${image} \
   ovnkube_master_loglevel=${master_loglevel} \
   ovn_loglevel_northd=${ovn_loglevel_northd} \
   ovn_loglevel_nbctld=${ovn_loglevel_nbctld} \
+  ovnkube_logfile_maxsize=${ovnkube_logfile_maxsize} \
+  ovnkube_logfile_maxbackups=${ovnkube_logfile_maxbackups} \
+  ovnkube_logfile_maxage=${ovnkube_logfile_maxage} \
   ovn_hybrid_overlay_net_cidr=${ovn_hybrid_overlay_net_cidr} \
   ovn_hybrid_overlay_enable=${ovn_hybrid_overlay_enable} \
   ovn_ssl_en=${ovn_ssl_en} \
