@@ -10,6 +10,7 @@ import (
 	"sync"
 	"time"
 
+	goovn "github.com/ebay/go-ovn"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/factory"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/kube"
@@ -139,6 +140,12 @@ type Controller struct {
 
 	// event recorder used to post events to k8s
 	recorder record.EventRecorder
+
+	// go-ovn northbound client interface
+	ovnNBClient goovn.Client
+
+	// go-ovn southbound client interface
+	ovnSBClient goovn.Client
 }
 
 const (
@@ -155,10 +162,12 @@ const (
 // NewOvnController creates a new OVN controller for creating logical network
 // infrastructure and policy
 func NewOvnController(kubeClient kubernetes.Interface, wf *factory.WatchFactory,
-	stopChan <-chan struct{}, addressSetFactory AddressSetFactory) *Controller {
+	stopChan <-chan struct{}, addressSetFactory AddressSetFactory, ovnNBClient goovn.Client, ovnSBClient goovn.Client) *Controller {
+
 	if addressSetFactory == nil {
 		addressSetFactory = NewOvnAddressSetFactory()
 	}
+
 	return &Controller{
 		kube:                     &kube.Kube{KClient: kubeClient},
 		watchFactory:             wf,
@@ -181,6 +190,8 @@ func NewOvnController(kubeClient kubernetes.Interface, wf *factory.WatchFactory,
 		serviceLBMap:             make(map[string]map[string]*loadBalancerConf),
 		serviceLBLock:            sync.Mutex{},
 		recorder:                 util.EventRecorder(kubeClient),
+		ovnNBClient:              ovnNBClient,
+		ovnSBClient:              ovnSBClient,
 	}
 }
 

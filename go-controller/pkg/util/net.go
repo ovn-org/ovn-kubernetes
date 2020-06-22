@@ -8,7 +8,7 @@ import (
 	"strconv"
 	"strings"
 
-	"k8s.io/klog"
+	goovn "github.com/ebay/go-ovn"
 	utilnet "k8s.io/utils/net"
 )
 
@@ -30,37 +30,32 @@ func intToIP(i *big.Int) net.IP {
 }
 
 // GetPortAddresses returns the MAC and IPs of the given logical switch port
-func GetPortAddresses(portName string) (net.HardwareAddr, []net.IP, error) {
-	out, stderr, err := RunOVNNbctl("--if-exists", "get", "logical_switch_port", portName, "dynamic_addresses", "addresses")
-	if err != nil {
-		return nil, nil, fmt.Errorf("error while obtaining dynamic addresses for %s: stdout: %q, stderr: %q, error: %v",
-			portName, out, stderr, err)
+func GetPortAddresses(portName string, ovnNBClient goovn.Client) (net.HardwareAddr, []net.IP, error) {
+	lsp, err := ovnNBClient.LSPGet(portName)
+	if err != nil || lsp == nil {
+		// --if-exists handling in goovn
+		if err == goovn.ErrorSchema || err == goovn.ErrorNotFound {
+			return nil, nil, nil
+		}
+		return nil, nil, err
 	}
 
-	if out == "" {
-		klog.V(5).Infof("Port %s doesn't exist in the nbdb while fetching"+
-			" port addresses", portName)
-		return nil, nil, nil
+	var addresses []string
+
+	if lsp.DynamicAddresses == "" {
+		addresses = lsp.Addresses
+	} else {
+		// dynamic addresses have format "0a:00:00:00:00:01 192.168.1.3"
+		// static addresses have format ["0a:00:00:00:00:01 192.168.1.3"]
+		addresses = strings.Split(lsp.DynamicAddresses, " ")
 	}
-	// Convert \r\n to \n to support Windows line endings
-	out = strings.Replace(out, "\r\n", "\n", -1)
-	addresses := strings.Split(out, "\n")
-	out = addresses[0]
-	if out == "[]" {
-		out = addresses[1]
-	}
-	if out == "[]" || out == "[dynamic]" {
-		// No addresses
+
+	if len(addresses) == 0 || addresses[0] == "dynamic" {
 		return nil, nil, nil
 	}
 
-	// dynamic addresses have format "0a:00:00:00:00:01 192.168.1.3"
-	// dynamic addresses dual stack  "0a:00:00:00:00:01 192.168.1.3 ae70::4"
-	// static addresses have format ["0a:00:00:00:00:01 192.168.1.3"]
-	outStr := strings.Trim(out, `"[]`)
-	addresses = strings.Split(outStr, " ")
 	if len(addresses) < 2 {
-		return nil, nil, fmt.Errorf("error while obtaining addresses for %s", portName)
+		return nil, nil, fmt.Errorf("error while obtaining addresses for %s: %v", portName, addresses)
 	}
 	mac, err := net.ParseMAC(addresses[0])
 	if err != nil {

@@ -680,8 +680,8 @@ var OvnNBFlags = []cli.Flag{
 	},
 	&cli.StringFlag{
 		Name: "nb-cert-common-name",
-		Usage: "Common Name of the certificate used for TLS server certificate verification" +
-			"In cases where the certificate doesn't have any SAN Extensions, this parameter" +
+		Usage: "Common Name of the certificate used for TLS server certificate verification. " +
+			"In cases where the certificate doesn't have any SAN Extensions, this parameter " +
 			"should match the DNS(hostname) of the server. In case the certificate has a " +
 			"SAN extension, this parameter should match one of the SAN fields.",
 		Destination: &cliConfig.OvnNorth.CertCommonName,
@@ -717,8 +717,8 @@ var OvnSBFlags = []cli.Flag{
 	},
 	&cli.StringFlag{
 		Name: "sb-cert-common-name",
-		Usage: "Common Name of the certificate used for TLS server certificate verification" +
-			"In cases where the certificate doesn't have any SAN Extensions, this parameter" +
+		Usage: "Common Name of the certificate used for TLS server certificate verification. " +
+			"In cases where the certificate doesn't have any SAN Extensions, this parameter " +
 			"should match the DNS(hostname) of the server. In case the certificate has a " +
 			"SAN extension, this parameter should match one of the SAN fields.",
 		Destination: &cliConfig.OvnSouth.CertCommonName,
