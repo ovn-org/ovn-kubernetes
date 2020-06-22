@@ -16,18 +16,23 @@ func gatewayCleanup(nodeName string) error {
 	gatewayRouter := util.GwRouterPrefix + nodeName
 
 	// Get the gateway router port's IP address (connected to join switch)
-	nextHops, err := util.GetNodeGatewayRouterIPs(nodeName)
+	var nextHops []net.IP
+
+	gwIPAddrs, err := util.GetLRPAddrs(util.GwRouterToJoinSwitchPrefix + gatewayRouter)
 	if err != nil {
-		return fmt.Errorf("failed to get logical router port for gateway router %s, error: %v", gatewayRouter, err)
+		return err
 	}
 
+	for _, gwIPAddr := range gwIPAddrs {
+		nextHops = append(nextHops, gwIPAddr.IP)
+	}
 	staticRouteCleanup(nextHops)
 
-	// Remove the join switch that connects ovn_cluster_router to gateway router
-	_, stderr, err := util.RunOVNNbctl("--if-exist", "ls-del", util.JoinSwitchPrefix+nodeName)
+	// Remove the patch port that connects join switch to gateway router
+	_, stderr, err := util.RunOVNNbctl("--if-exist", "lsp-del", util.JoinSwitchToGwRouterPrefix+gatewayRouter)
 	if err != nil {
-		return fmt.Errorf("failed to delete the join logical switch %s, "+
-			"stderr: %q, error: %v", util.JoinSwitchPrefix+nodeName, stderr, err)
+		return fmt.Errorf("failed to delete logical switch port %s%s: "+
+			"stderr: %q, error: %v", util.JoinSwitchToGwRouterPrefix, gatewayRouter, stderr, err)
 	}
 
 	// Remove the gateway router associated with nodeName
@@ -45,13 +50,6 @@ func gatewayCleanup(nodeName string) error {
 	if err != nil {
 		return fmt.Errorf("failed to delete external switch %s, stderr: %q, "+
 			"error: %v", externalSwitch, stderr, err)
-	}
-
-	// Remove the patch port on the distributed router that connects to join switch
-	_, stderr, err = util.RunOVNNbctl("--if-exist", "lrp-del", util.DistRouterToJoinSwitchPrefix+nodeName)
-	if err != nil {
-		return fmt.Errorf("failed to delete the patch port %s%s on distributed router "+
-			"stderr: %q, error: %v", util.DistRouterToJoinSwitchPrefix, nodeName, stderr, err)
 	}
 
 	// If exists, remove the TCP, UDP load-balancers created for north-south traffic for gateway router.

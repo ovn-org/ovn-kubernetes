@@ -583,16 +583,16 @@ func (e *egressIPController) deletePodEgressIP(eIP *egressipv1.EgressIP, pod *ka
 }
 
 func (e *egressIPController) getGatewayRouterJoinIP(node string, wantsIPv6 bool) (net.IP, error) {
-	var gatewayIPs []net.IP
+	var gatewayIPs []*net.IPNet
 	if item, exists := e.gatewayIPCache.Load(node); exists {
 		var ok bool
-		if gatewayIPs, ok = item.([]net.IP); !ok {
+		if gatewayIPs, ok = item.([]*net.IPNet); !ok {
 			return nil, fmt.Errorf("unable to cast node: %s gatewayIP cache item to correct type", node)
 		}
 	} else {
 		err := utilwait.ExponentialBackoff(retry.DefaultRetry, func() (bool, error) {
 			var err error
-			gatewayIPs, err = util.GetNodeGatewayRouterIPs(node)
+			gatewayIPs, err = util.GetLRPAddrs(util.GwRouterToJoinSwitchPrefix + util.GwRouterPrefix + node)
 			if err != nil {
 				klog.Errorf("Attempt at finding node gateway router network information failed, err: %v", err)
 			}
@@ -604,8 +604,8 @@ func (e *egressIPController) getGatewayRouterJoinIP(node string, wantsIPv6 bool)
 		e.gatewayIPCache.Store(node, gatewayIPs)
 	}
 
-	if ip, err := util.MatchIPFamily(wantsIPv6, gatewayIPs); ip != nil {
-		return ip, nil
+	if gatewayIP, err := util.MatchIPNetFamily(wantsIPv6, gatewayIPs); gatewayIP != nil {
+		return gatewayIP.IP, nil
 	} else {
 		return nil, fmt.Errorf("could not find node %s gateway router: %v", node, err)
 	}

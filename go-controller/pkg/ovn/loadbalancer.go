@@ -156,7 +156,7 @@ func (ovn *Controller) getLogicalSwitchesForLoadBalancer(lb string) ([]string, e
 	// case
 	if strings.HasPrefix(out, util.GwRouterPrefix) {
 		routerName := strings.TrimPrefix(out, util.GwRouterPrefix)
-		return []string{util.JoinSwitchPrefix + routerName, util.ExternalSwitchPrefix + routerName}, nil
+		return []string{util.OVNJoinSwitch, util.ExternalSwitchPrefix + routerName}, nil
 	}
 	return nil, fmt.Errorf("router detected with load balancer that is not a GR")
 }

@@ -237,7 +237,7 @@ var _ = Describe("OVN master EgressIP Operations", func() {
 
 				fakeOvn.fakeExec.AddFakeCmd(
 					&ovntest.ExpectedCmd{
-						Cmd:    fmt.Sprintf("ovn-nbctl --timeout=15 --format=table --data=bare --no-heading --columns=networks find logical_router_port name=rtoj-GR_%s", node2.Name),
+						Cmd:    fmt.Sprintf("ovn-nbctl --timeout=15 --if-exist get logical_router_port rtoj-GR_%s networks", node2.Name),
 						Output: nodeLogicalRouterIfAddrV4,
 					},
 				)
@@ -352,7 +352,7 @@ var _ = Describe("OVN master EgressIP Operations", func() {
 
 				fakeOvn.fakeExec.AddFakeCmd(
 					&ovntest.ExpectedCmd{
-						Cmd:    fmt.Sprintf("ovn-nbctl --timeout=15 --format=table --data=bare --no-heading --columns=networks find logical_router_port name=rtoj-GR_%s", node2.Name),
+						Cmd:    fmt.Sprintf("ovn-nbctl --timeout=15 --if-exist get logical_router_port rtoj-GR_%s networks", node2.Name),
 						Output: nodeLogicalRouterIfAddrV4,
 					},
 				)
@@ -424,7 +424,7 @@ var _ = Describe("OVN master EgressIP Operations", func() {
 
 				fakeOvn.fakeExec.AddFakeCmd(
 					&ovntest.ExpectedCmd{
-						Cmd:    fmt.Sprintf("ovn-nbctl --timeout=15 --format=table --data=bare --no-heading --columns=networks find logical_router_port name=rtoj-GR_%s", node2.name),
+						Cmd:    fmt.Sprintf("ovn-nbctl --timeout=15 --if-exist get logical_router_port rtoj-GR_%s networks", node2.name),
 						Output: nodeLogicalRouterIfAddrV6,
 					},
 				)
@@ -525,7 +525,7 @@ var _ = Describe("OVN master EgressIP Operations", func() {
 
 				fakeOvn.fakeExec.AddFakeCmd(
 					&ovntest.ExpectedCmd{
-						Cmd:    fmt.Sprintf("ovn-nbctl --timeout=15 --format=table --data=bare --no-heading --columns=networks find logical_router_port name=rtoj-GR_%s", node2.name),
+						Cmd:    fmt.Sprintf("ovn-nbctl --timeout=15 --if-exist get logical_router_port rtoj-GR_%s networks", node2.name),
 						Output: nodeLogicalRouterIfAddrV6,
 					},
 				)
@@ -621,7 +621,7 @@ var _ = Describe("OVN master EgressIP Operations", func() {
 
 				fakeOvn.fakeExec.AddFakeCmd(
 					&ovntest.ExpectedCmd{
-						Cmd:    fmt.Sprintf("ovn-nbctl --timeout=15 --format=table --data=bare --no-heading --columns=networks find logical_router_port name=rtoj-GR_%s", node2.name),
+						Cmd:    fmt.Sprintf("ovn-nbctl --timeout=15 --if-exist get logical_router_port rtoj-GR_%s networks", node2.name),
 						Output: nodeLogicalRouterIfAddrV6,
 					},
 				)
@@ -747,7 +747,7 @@ var _ = Describe("OVN master EgressIP Operations", func() {
 
 				fakeOvn.fakeExec.AddFakeCmd(
 					&ovntest.ExpectedCmd{
-						Cmd:    fmt.Sprintf("ovn-nbctl --timeout=15 --format=table --data=bare --no-heading --columns=networks find logical_router_port name=rtoj-GR_%s", node2.name),
+						Cmd:    fmt.Sprintf("ovn-nbctl --timeout=15 --if-exist get logical_router_port rtoj-GR_%s networks", node2.name),
 						Output: nodeLogicalRouterIfAddrV6,
 					},
 				)
@@ -912,7 +912,7 @@ var _ = Describe("OVN master EgressIP Operations", func() {
 
 				fakeOvn.fakeExec.AddFakeCmd(
 					&ovntest.ExpectedCmd{
-						Cmd:    fmt.Sprintf("ovn-nbctl --timeout=15 --format=table --data=bare --no-heading --columns=networks find logical_router_port name=rtoj-GR_%s", node2.name),
+						Cmd:    fmt.Sprintf("ovn-nbctl --timeout=15 --if-exist get logical_router_port rtoj-GR_%s networks", node2.name),
 						Output: nodeLogicalRouterIfAddrV6,
 					},
 				)
@@ -1036,7 +1036,7 @@ var _ = Describe("OVN master EgressIP Operations", func() {
 
 				fakeOvn.fakeExec.AddFakeCmd(
 					&ovntest.ExpectedCmd{
-						Cmd:    fmt.Sprintf("ovn-nbctl --timeout=15 --format=table --data=bare --no-heading --columns=networks find logical_router_port name=rtoj-GR_%s", node2.name),
+						Cmd:    fmt.Sprintf("ovn-nbctl --timeout=15 --if-exist get logical_router_port rtoj-GR_%s networks", node2.name),
 						Output: nodeLogicalRouterIfAddrV6,
 					},
 				)
