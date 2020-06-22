@@ -122,6 +122,7 @@ ovn_northd_pk=/ovn-cert/ovnnorthd-privkey.pem
 ovn_northd_cert=/ovn-cert/ovnnorthd-cert.pem
 ovn_controller_pk=/ovn-cert/ovncontroller-privkey.pem
 ovn_controller_cert=/ovn-cert/ovncontroller-cert.pem
+ovn_controller_cname="ovncontroller"
 
 transport="tcp"
 ovndb_ctl_ssl_opts=""
@@ -766,9 +767,11 @@ ovn-master() {
         --nb-client-privkey ${ovn_controller_pk}
         --nb-client-cert ${ovn_controller_cert}
         --nb-client-cacert ${ovn_ca_cert}
+        --nb-cert-common-name ${ovn_controller_cname}
         --sb-client-privkey ${ovn_controller_pk}
         --sb-client-cert ${ovn_controller_cert}
         --sb-client-cacert ${ovn_ca_cert}
+        --sb-cert-common-name ${ovn_controller_cname}
       "
   }
 
@@ -881,9 +884,11 @@ ovn-node() {
         --nb-client-privkey ${ovn_controller_pk}
         --nb-client-cert ${ovn_controller_cert}
         --nb-client-cacert ${ovn_ca_cert}
+        --nb-cert-common-name ${ovn_controller_cname}
         --sb-client-privkey ${ovn_controller_pk}
         --sb-client-cert ${ovn_controller_cert}
         --sb-client-cacert ${ovn_ca_cert}
+        --sb-cert-common-name ${ovn_controller_cname}
       "
   }
 

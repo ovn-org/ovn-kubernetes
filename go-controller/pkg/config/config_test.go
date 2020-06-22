@@ -157,12 +157,14 @@ address=ssl:1.2.3.4:6641
 client-privkey=/path/to/nb-client-private.key
 client-cert=/path/to/nb-client.crt
 client-cacert=/path/to/nb-client-ca.crt
+cert-common-name=cfg-nbcommonname
 
 [ovnsouth]
 address=ssl:1.2.3.4:6642
 client-privkey=/path/to/sb-client-private.key
 client-cert=/path/to/sb-client.crt
 client-cacert=/path/to/sb-client-ca.crt
+cert-common-name=cfg-sbcommonname
 
 [gateway]
 mode=shared
@@ -251,6 +253,7 @@ var _ = Describe("Config Operations", func() {
 				Expect(a.Cert).To(Equal(""))
 				Expect(a.CACert).To(Equal(""))
 				Expect(a.Address).To(Equal(""))
+				Expect(a.CertCommonName).To(Equal(""))
 			}
 			return nil
 		}
@@ -305,12 +308,14 @@ var _ = Describe("Config Operations", func() {
 			Expect(OvnNorth.Cert).To(Equal(""))
 			Expect(OvnNorth.CACert).To(Equal(""))
 			Expect(OvnNorth.Address).To(Equal("tcp:1.1.1.1:6441"))
+			Expect(OvnNorth.CertCommonName).To(Equal(""))
 
 			Expect(OvnSouth.Scheme).To(Equal(OvnDBSchemeUnix))
 			Expect(OvnSouth.PrivKey).To(Equal(""))
 			Expect(OvnSouth.Cert).To(Equal(""))
 			Expect(OvnSouth.CACert).To(Equal(""))
 			Expect(OvnSouth.Address).To(Equal(""))
+			Expect(OvnSouth.CertCommonName).To(Equal(""))
 
 			return nil
 		}
@@ -370,12 +375,14 @@ var _ = Describe("Config Operations", func() {
 			Expect(OvnNorth.CACert).To(Equal(""))
 			Expect(OvnNorth.Address).To(
 				Equal("tcp:1.1.1.1:6441,tcp:1.1.1.2:6641,tcp:1.1.1.3:6641"))
+			Expect(OvnNorth.CertCommonName).To(Equal(""))
 
 			Expect(OvnSouth.Scheme).To(Equal(OvnDBSchemeUnix))
 			Expect(OvnSouth.PrivKey).To(Equal(""))
 			Expect(OvnSouth.Cert).To(Equal(""))
 			Expect(OvnSouth.CACert).To(Equal(""))
 			Expect(OvnSouth.Address).To(Equal(""))
+			Expect(OvnSouth.CertCommonName).To(Equal(""))
 
 			return nil
 		}
@@ -481,12 +488,14 @@ var _ = Describe("Config Operations", func() {
 			Expect(OvnNorth.Cert).To(Equal("/path/to/nb-client.crt"))
 			Expect(OvnNorth.CACert).To(Equal("/path/to/nb-client-ca.crt"))
 			Expect(OvnNorth.Address).To(Equal("ssl:1.2.3.4:6641"))
+			Expect(OvnNorth.CertCommonName).To(Equal("cfg-nbcommonname"))
 
 			Expect(OvnSouth.Scheme).To(Equal(OvnDBSchemeSSL))
 			Expect(OvnSouth.PrivKey).To(Equal("/path/to/sb-client-private.key"))
 			Expect(OvnSouth.Cert).To(Equal("/path/to/sb-client.crt"))
 			Expect(OvnSouth.CACert).To(Equal("/path/to/sb-client-ca.crt"))
 			Expect(OvnSouth.Address).To(Equal("ssl:1.2.3.4:6642"))
+			Expect(OvnSouth.CertCommonName).To(Equal("cfg-sbcommonname"))
 
 			Expect(Gateway.Mode).To(Equal(GatewayModeShared))
 			Expect(Gateway.Interface).To(Equal("eth1"))
@@ -544,12 +553,14 @@ var _ = Describe("Config Operations", func() {
 			Expect(OvnNorth.Cert).To(Equal("/client/cert"))
 			Expect(OvnNorth.CACert).To(Equal("/client/cacert"))
 			Expect(OvnNorth.Address).To(Equal("ssl:6.5.4.3:6651"))
+			Expect(OvnNorth.CertCommonName).To(Equal("testnbcommonname"))
 
 			Expect(OvnSouth.Scheme).To(Equal(OvnDBSchemeSSL))
 			Expect(OvnSouth.PrivKey).To(Equal("/client/privkey2"))
 			Expect(OvnSouth.Cert).To(Equal("/client/cert2"))
 			Expect(OvnSouth.CACert).To(Equal("/client/cacert2"))
 			Expect(OvnSouth.Address).To(Equal("ssl:6.5.4.1:6652"))
+			Expect(OvnSouth.CertCommonName).To(Equal("testsbcommonname"))
 
 			Expect(Gateway.Mode).To(Equal(GatewayModeLocal))
 			Expect(Gateway.NodeportEnable).To(BeTrue())
@@ -580,10 +591,12 @@ var _ = Describe("Config Operations", func() {
 			"-nb-client-privkey=/client/privkey",
 			"-nb-client-cert=/client/cert",
 			"-nb-client-cacert=/client/cacert",
+			"-nb-cert-common-name=testnbcommonname",
 			"-sb-address=ssl:6.5.4.1:6652",
 			"-sb-client-privkey=/client/privkey2",
 			"-sb-client-cert=/client/cert2",
 			"-sb-client-cacert=/client/cacert2",
+			"-sb-cert-common-name=testsbcommonname",
 			"-gateway-mode=local",
 			"-nodeport",
 			"-enable-hybrid-overlay",
@@ -806,6 +819,7 @@ mode=shared
 			Expect(OvnNorth.CACert).To(Equal("/client/cacert"))
 			Expect(OvnNorth.Address).To(
 				Equal("ssl:6.5.4.3:6651,ssl:6.5.4.4:6651,ssl:6.5.4.5:6651"))
+			Expect(OvnNorth.CertCommonName).To(Equal("testnbcommonname"))
 
 			Expect(OvnSouth.Scheme).To(Equal(OvnDBSchemeSSL))
 			Expect(OvnSouth.PrivKey).To(Equal("/client/privkey2"))
@@ -813,6 +827,7 @@ mode=shared
 			Expect(OvnSouth.CACert).To(Equal("/client/cacert2"))
 			Expect(OvnSouth.Address).To(
 				Equal("ssl:6.5.4.1:6652,ssl:6.5.4.2:6652,ssl:6.5.4.3:6652"))
+			Expect(OvnSouth.CertCommonName).To(Equal("testsbcommonname"))
 
 			return nil
 		}
@@ -834,10 +849,12 @@ mode=shared
 			"-nb-client-privkey=/client/privkey",
 			"-nb-client-cert=/client/cert",
 			"-nb-client-cacert=/client/cacert",
+			"-nb-cert-common-name=testnbcommonname",
 			"-sb-address=ssl:6.5.4.1:6652,ssl:6.5.4.2:6652,ssl:6.5.4.3:6652",
 			"-sb-client-privkey=/client/privkey2",
 			"-sb-client-cert=/client/cert2",
 			"-sb-client-cacert=/client/cacert2",
+			"-sb-cert-common-name=testsbcommonname",
 		}
 		err = app.Run(cliArgs)
 		Expect(err).NotTo(HaveOccurred())
@@ -1053,8 +1070,10 @@ mode=shared
 		})
 
 		const (
-			nbURL string = "ssl:1.2.3.4:6641"
-			sbURL string = "ssl:1.2.3.4:6642"
+			nbURL             string = "ssl:1.2.3.4:6641"
+			sbURL             string = "ssl:1.2.3.4:6642"
+			nbDummyCommonName        = "cfg-nbcommonname"
+			sbDummyCommonName        = "cfg-sbcommonname"
 		)
 
 		It("configures client northbound SSL correctly", func() {
@@ -1065,10 +1084,11 @@ mode=shared
 			})
 
 			cliConfig := &OvnAuthConfig{
-				Address: nbURL,
-				PrivKey: keyFile,
-				Cert:    certFile,
-				CACert:  caFile,
+				Address:        nbURL,
+				PrivKey:        keyFile,
+				Cert:           certFile,
+				CACert:         caFile,
+				CertCommonName: nbDummyCommonName,
 			}
 			a, err := buildOvnAuth(fexec, true, cliConfig, &OvnAuthConfig{}, true)
 			Expect(err).NotTo(HaveOccurred())
@@ -1077,6 +1097,7 @@ mode=shared
 			Expect(a.Cert).To(Equal(certFile))
 			Expect(a.CACert).To(Equal(caFile))
 			Expect(a.Address).To(Equal(nbURL))
+			Expect(a.CertCommonName).To(Equal(nbDummyCommonName))
 			Expect(a.northbound).To(BeTrue())
 			Expect(a.externalID).To(Equal("ovn-nb"))
 
@@ -1096,10 +1117,11 @@ mode=shared
 			})
 
 			cliConfig := &OvnAuthConfig{
-				Address: sbURL,
-				PrivKey: keyFile,
-				Cert:    certFile,
-				CACert:  caFile,
+				Address:        sbURL,
+				PrivKey:        keyFile,
+				Cert:           certFile,
+				CACert:         caFile,
+				CertCommonName: sbDummyCommonName,
 			}
 			a, err := buildOvnAuth(fexec, false, cliConfig, &OvnAuthConfig{}, false)
 			Expect(err).NotTo(HaveOccurred())
@@ -1108,6 +1130,7 @@ mode=shared
 			Expect(a.Cert).To(Equal(certFile))
 			Expect(a.CACert).To(Equal(caFile))
 			Expect(a.Address).To(Equal(sbURL))
+			Expect(a.CertCommonName).To(Equal(sbDummyCommonName))
 			Expect(a.northbound).To(BeFalse())
 			Expect(a.externalID).To(Equal("ovn-remote"))
 
@@ -1294,6 +1317,7 @@ mode=shared
 						"address=ssl:1.2.3.4:444",
 						"client-privkey=" + keyFile,
 						"client-cert=" + certFile,
+						"cert-common-name=foobar",
 						"client-cacert=/foo/bar/baz",
 					}
 				})
@@ -1305,6 +1329,7 @@ mode=shared
 						"client-privkey=/foo/bar/baz",
 						"client-cert=" + certFile,
 						"client-cacert=" + caFile,
+						"cert-common-name=foobar",
 					}
 				})
 
@@ -1315,6 +1340,7 @@ mode=shared
 						"client-privkey=" + keyFile,
 						"client-cert=/foo/bar/baz",
 						"client-cacert=" + caFile,
+						"cert-common-name=foobar",
 					}
 				})
 		})
