@@ -171,7 +171,7 @@ func (n *NodeController) AddNode(node *kapi.Node) error {
 
 	cidr, nodeIP, drMAC, err := getNodeDetails(node)
 	if cidr == nil || nodeIP == nil || drMAC == nil {
-		klog.V(5).Infof("cleaning up hybrid overlay resources for node %q because: %v", node.Name, err)
+		klog.V(5).Infof("Cleaning up hybrid overlay resources for node %q because: %v", node.Name, err)
 		n.DeleteNode(node)
 		return err
 	}
@@ -322,7 +322,7 @@ func (n *NodeController) initSelf(node *kapi.Node, nodeSubnet *net.IPNet) error 
 			if err := n.kube.SetAnnotationsOnNode(node, map[string]interface{}{
 				types.HybridOverlayDRMAC: policySettings.Address,
 			}); err != nil {
-				klog.Errorf("failed to set DRMAC annotation on node: %v", err)
+				klog.Errorf("Failed to set DRMAC annotation on node: %v", err)
 			}
 			break
 		}

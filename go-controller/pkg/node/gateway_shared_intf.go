@@ -118,7 +118,7 @@ func syncServices(services []interface{}, inport, gwBridge string) {
 
 	re, err := regexp.Compile(`tp_dst=(.*?)[, ]`)
 	if err != nil {
-		klog.Errorf("regexp compile failed: %v", err)
+		klog.Errorf("Regexp compile failed: %v", err)
 		return
 	}
 

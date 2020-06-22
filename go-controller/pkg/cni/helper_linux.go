@@ -251,7 +251,7 @@ func (pr *PodRequest) ConfigureInterface(namespace string, podName string, ifInf
 	uuids, _ := ovsFind("Interface", "_uuid", "external-ids:iface-id="+ifaceID)
 	for _, uuid := range uuids {
 		if out, err := ovsExec("remove", "Interface", uuid, "external-ids", "iface-id"); err != nil {
-			klog.Warningf("failed to clear stale OVS port %q iface-id %q: %v\n  %q", uuid, ifaceID, err, out)
+			klog.Warningf("Failed to clear stale OVS port %q iface-id %q: %v\n  %q", uuid, ifaceID, err, out)
 		}
 	}
 
@@ -297,13 +297,13 @@ func (pr *PodRequest) ConfigureInterface(namespace string, podName string, ifInf
 		if _, err := os.Stat("/proc/sys/net/ipv6/conf/all/dad_transmits"); !os.IsNotExist(err) {
 			err = setSysctl("/proc/sys/net/ipv6/conf/all/dad_transmits", 0)
 			if err != nil {
-				klog.Warningf("failed to disable IPv6 DAD: %q", err)
+				klog.Warningf("Failed to disable IPv6 DAD: %q", err)
 			}
 		}
 		return ip.SettleAddresses(contIface.Name, 10)
 	})
 	if err != nil {
-		klog.Warningf("failed to settle addresses: %q", err)
+		klog.Warningf("Failed to settle addresses: %q", err)
 	}
 
 	return []*current.Interface{hostIface, contIface}, nil
@@ -315,7 +315,7 @@ func (pr *PodRequest) deletePodConntrack() {
 	}
 	result, err := current.NewResultFromResult(pr.CNIConf.PrevResult)
 	if err != nil {
-		klog.Warningf("could not convert result to current version: %v", err)
+		klog.Warningf("Could not convert result to current version: %v", err)
 		return
 	}
 
@@ -341,7 +341,7 @@ func (pr *PodRequest) PlatformSpecificCleanup() error {
 	out, err := exec.Command("ovs-vsctl", ovsArgs...).CombinedOutput()
 	if err != nil && !strings.Contains(string(out), "no port named") {
 		// DEL should be idempotent; don't return an error just log it
-		klog.Warningf("failed to delete OVS port %s: %v\n  %q", ifaceName, err, string(out))
+		klog.Warningf("Failed to delete OVS port %s: %v\n  %q", ifaceName, err, string(out))
 	}
 
 	_ = clearPodBandwidth(pr.SandboxID)

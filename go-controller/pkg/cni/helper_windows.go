@@ -238,7 +238,7 @@ func (pr *PodRequest) PlatformSpecificCleanup() error {
 	namespace := pr.PodNamespace
 	podName := pr.PodName
 	if namespace == "" || podName == "" {
-		klog.Warningf("cleanup failed, required CNI variable missing from args: %v", pr)
+		klog.Warningf("Cleanup failed, required CNI variable missing from args: %v", pr)
 		return nil
 	}
 
@@ -249,10 +249,10 @@ func (pr *PodRequest) PlatformSpecificCleanup() error {
 	out, err := exec.Command("ovs-vsctl", ovsArgs...).CombinedOutput()
 	if err != nil && !strings.Contains(string(out), "no port named") {
 		// DEL should be idempotent; don't return an error just log it
-		klog.Warningf("failed to delete OVS port %s: %v  %q", endpointName, err, string(out))
+		klog.Warningf("Failed to delete OVS port %s: %v  %q", endpointName, err, string(out))
 	}
 	if err = deleteHNSEndpoint(endpointName); err != nil {
-		klog.Warningf("failed to delete HNSEndpoint %v: %v", endpointName, err)
+		klog.Warningf("Failed to delete HNSEndpoint %v: %v", endpointName, err)
 	}
 	// TODO: uncomment when OVS QoS is supported on Windows
 	// _ = clearPodBandwidth(args.ContainerID)

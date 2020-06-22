@@ -84,7 +84,7 @@ func (ovn *Controller) createGatewayVIPs(protocol kapi.Protocol, sourcePort int3
 	for _, physicalGateway := range physicalGateways {
 		loadBalancer, err := ovn.getGatewayLoadBalancer(physicalGateway, protocol)
 		if err != nil {
-			klog.Errorf("physical gateway %s does not have load_balancer (%v)",
+			klog.Errorf("Physical gateway %s does not have load_balancer (%v)",
 				physicalGateway, err)
 			continue
 		}
@@ -93,7 +93,7 @@ func (ovn *Controller) createGatewayVIPs(protocol kapi.Protocol, sourcePort int3
 		}
 		physicalIPs, err := ovn.getGatewayPhysicalIPs(physicalGateway)
 		if err != nil {
-			klog.Errorf("physical gateway %s does not have physical ip (%v)",
+			klog.Errorf("Physical gateway %s does not have physical ip (%v)",
 				physicalGateway, err)
 			continue
 		}
@@ -119,7 +119,7 @@ func (ovn *Controller) deleteGatewayVIPs(protocol kapi.Protocol, sourcePort int3
 	for _, physicalGateway := range physicalGateways {
 		loadBalancer, err := ovn.getGatewayLoadBalancer(physicalGateway, protocol)
 		if err != nil {
-			klog.Errorf("physical gateway %s does not have load_balancer (%v)",
+			klog.Errorf("Physical gateway %s does not have load_balancer (%v)",
 				physicalGateway, err)
 			continue
 		}
@@ -128,7 +128,7 @@ func (ovn *Controller) deleteGatewayVIPs(protocol kapi.Protocol, sourcePort int3
 		}
 		physicalIPs, err := ovn.getGatewayPhysicalIPs(physicalGateway)
 		if err != nil {
-			klog.Errorf("physical gateway %s does not have physical ip (%v)",
+			klog.Errorf("Physical gateway %s does not have physical ip (%v)",
 				physicalGateway, err)
 			continue
 		}
@@ -174,7 +174,7 @@ func getDefaultGatewayRouterIP() (string, net.IP, error) {
 				if ip := net.ParseIP(ipStr); ip != nil {
 					routers = append(routers, gwRouter{parts[0], ip})
 				} else {
-					klog.Warningf("failed to parse gateway router %q IP %q", parts[0], ipStr)
+					klog.Warningf("Failed to parse gateway router %q IP %q", parts[0], ipStr)
 				}
 			}
 		}

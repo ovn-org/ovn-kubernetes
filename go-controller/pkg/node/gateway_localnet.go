@@ -81,7 +81,7 @@ func delIptRules(ipt util.IPTablesHelper, rules []iptRule) {
 	for _, r := range rules {
 		err := ipt.Delete(r.table, r.chain, r.args...)
 		if err != nil {
-			klog.Warningf("failed to delete iptables %s/%s rule %q: %v", r.table, r.chain,
+			klog.Warningf("Failed to delete iptables %s/%s rule %q: %v", r.table, r.chain,
 				strings.Join(r.args, " "), err)
 		}
 	}

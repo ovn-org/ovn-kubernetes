@@ -111,7 +111,7 @@ func NewMaster(kube kube.Interface,
 		if err != nil {
 			klog.Warningf(err.Error())
 		} else if hostsubnet != nil {
-			klog.V(5).Infof("marking existing node %s hybrid overlay NodeSubnet %s as allocated", node.Name, hostsubnet)
+			klog.V(5).Infof("Marking existing node %s hybrid overlay NodeSubnet %s as allocated", node.Name, hostsubnet)
 			if err := m.allocator.MarkAllocatedNetwork(hostsubnet); err != nil {
 				utilruntime.HandleError(err)
 			}
@@ -187,7 +187,7 @@ func (m *MasterController) handleOverlayPort(node *kapi.Node, annotator kube.Ann
 	subnets, err := util.ParseNodeHostSubnetAnnotation(node)
 	if subnets == nil || err != nil {
 		// No subnet allocated yet; clean up
-		klog.V(5).Infof("no subnet allocation yet for %s", node.Name)
+		klog.V(5).Infof("No subnet allocation yet for %s", node.Name)
 		if haveDRMACAnnotation {
 			m.deleteOverlayPort(node)
 			annotator.Delete(types.HybridOverlayDRMAC)
@@ -197,7 +197,7 @@ func (m *MasterController) handleOverlayPort(node *kapi.Node, annotator kube.Ann
 
 	if haveDRMACAnnotation {
 		// already set up; do nothing
-		klog.V(5).Infof("annotation already exists on %s. doing nothing", node.Name)
+		klog.V(5).Infof("Annotation already exists on %s. doing nothing", node.Name)
 		return nil
 	}
 
@@ -219,7 +219,7 @@ func (m *MasterController) handleOverlayPort(node *kapi.Node, annotator kube.Ann
 			}
 		}
 
-		klog.Infof("creating node %s hybrid overlay port", node.Name)
+		klog.Infof("Creating node %s hybrid overlay port", node.Name)
 
 		var stderr string
 		_, stderr, err = util.RunOVNNbctl("--", "--may-exist", "lsp-add", node.Name, portName,
@@ -241,7 +241,7 @@ func (m *MasterController) handleOverlayPort(node *kapi.Node, annotator kube.Ann
 }
 
 func (m *MasterController) deleteOverlayPort(node *kapi.Node) {
-	klog.Infof("removing node %s hybrid overlay port", node.Name)
+	klog.Infof("Removing node %s hybrid overlay port", node.Name)
 	portName := util.GetHybridOverlayPortName(node.Name)
 	_, _, _ = util.RunOVNNbctl("--", "--if-exists", "lsp-del", portName)
 }
@@ -315,7 +315,7 @@ func (m *MasterController) waitForNamespace(name string) (*kapi.Namespace, error
 				// Namespace not found; retry
 				return false, nil
 			}
-			klog.Warningf("error getting namespace: %v", err)
+			klog.Warningf("Error getting namespace: %v", err)
 			return false, err
 		}
 		return true, nil

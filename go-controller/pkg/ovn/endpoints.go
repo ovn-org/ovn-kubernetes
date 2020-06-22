@@ -50,7 +50,7 @@ func (ovn *Controller) AddEndpoints(ep *kapi.Endpoints) error {
 	if err != nil {
 		// This is not necessarily an error. For e.g when there are endpoints
 		// without a corresponding service.
-		klog.V(5).Infof("no service found for endpoint %s in namespace %s",
+		klog.V(5).Infof("No service found for endpoint %s in namespace %s",
 			ep.Name, ep.Namespace)
 		return nil
 	}
@@ -112,7 +112,7 @@ func (ovn *Controller) handleNodePortLB(node *kapi.Node) error {
 	for _, ns := range namespaces {
 		endpoints, err := ovn.watchFactory.GetEndpoints(ns.Name)
 		if err != nil {
-			klog.Errorf("failed to get k8s endpoints: %v", err)
+			klog.Errorf("Failed to get k8s endpoints: %v", err)
 			continue
 		}
 		for _, ep := range endpoints {
@@ -135,7 +135,7 @@ func (ovn *Controller) handleNodePortLB(node *kapi.Node) error {
 				}
 				err = ovn.createLoadBalancerVIPs(k8sNSLb, physicalIPs, svcPort.NodePort, lbEps.IPs, lbEps.Port)
 				if err != nil {
-					klog.Errorf("failed to create VIP in load balancer %s - %v", k8sNSLb, err)
+					klog.Errorf("Failed to create VIP in load balancer %s - %v", k8sNSLb, err)
 					continue
 				}
 			}
@@ -149,13 +149,13 @@ func (ovn *Controller) handleNodePortLB(node *kapi.Node) error {
 func (ovn *Controller) updateExternalIPsLB() {
 	namespaces, err := ovn.watchFactory.GetNamespaces()
 	if err != nil {
-		klog.Errorf("failed to get k8s namespaces: %v", err)
+		klog.Errorf("Failed to get k8s namespaces: %v", err)
 		return
 	}
 	for _, ns := range namespaces {
 		endpoints, err := ovn.watchFactory.GetEndpoints(ns.Name)
 		if err != nil {
-			klog.Errorf("failed to get k8s endpoints: %v", err)
+			klog.Errorf("Failed to get k8s endpoints: %v", err)
 			continue
 		}
 		for _, ep := range endpoints {
@@ -189,7 +189,7 @@ func (ovn *Controller) updateExternalIPsLB() {
 // the behavior changes to remove the load balancer VIP for services with external ips
 func (ovn *Controller) handleExternalIPs(svc *kapi.Service, svcPort kapi.ServicePort, ips []string, targetPort int32,
 	removeLoadBalancerVIP bool) {
-	klog.V(5).Infof("handling external IPs for svc %v", svc.Name)
+	klog.V(5).Infof("Handling external IPs for svc %v", svc.Name)
 	if len(svc.Spec.ExternalIPs) == 0 {
 		return
 	}
@@ -220,7 +220,7 @@ func (ovn *Controller) deleteEndpoints(ep *kapi.Endpoints) error {
 		// This is not necessarily an error. For e.g when a service is deleted,
 		// you will get endpoint delete event and the call to fetch service
 		// will fail.
-		klog.V(5).Infof("no service found for endpoint %s in namespace %s", ep.Name, ep.Namespace)
+		klog.V(5).Infof("No service found for endpoint %s in namespace %s", ep.Name, ep.Namespace)
 		return nil
 	}
 	if !util.IsClusterIPSet(svc) {

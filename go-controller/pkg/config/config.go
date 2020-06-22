@@ -843,7 +843,7 @@ func getOVSExternalID(exec kexec.Interface, name string) string {
 		".",
 		"external_ids:"+name)
 	if err != nil {
-		klog.V(5).Infof("failed to get OVS external_id %s: %v\n\t%s", name, err, out)
+		klog.V(5).Infof("Failed to get OVS external_id %s: %v\n\t%s", name, err, out)
 		return ""
 	}
 	return out
@@ -1423,7 +1423,7 @@ func (a *OvnAuthConfig) ensureCACert() error {
 	args = append(args, "list", "nb_global")
 	_, _ = rawExec(a.exec, "ovn-nbctl", args...)
 	if _, err := os.Stat(a.CACert); os.IsNotExist(err) {
-		klog.Warningf("bootstrapping %s CA certificate failed", a.CACert)
+		klog.Warningf("Bootstrapping %s CA certificate failed", a.CACert)
 	}
 	return nil
 }

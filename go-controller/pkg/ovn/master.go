@@ -71,7 +71,7 @@ func (oc *Controller) Start(kClient kubernetes.Interface, nodeName string) error
 		RetryPeriod:   time.Duration(config.MasterHA.ElectionRetryPeriod) * time.Second,
 		Callbacks: leaderelection.LeaderCallbacks{
 			OnStartedLeading: func(ctx context.Context) {
-				klog.Infof("won leader election; in active mode")
+				klog.Infof("Won leader election; in active mode")
 				// run the cluster controller to init the master
 				start := time.Now()
 				defer func() {
@@ -94,12 +94,12 @@ func (oc *Controller) Start(kClient kubernetes.Interface, nodeName string) error
 				// we need to handle the transition properly like clearing
 				// the cache. It is better to exit for now.
 				// kube will restart and this will become a follower.
-				klog.Infof("no longer leader; exiting")
+				klog.Infof("No longer leader; exiting")
 				os.Exit(1)
 			},
 			OnNewLeader: func(newLeaderName string) {
 				if newLeaderName != nodeName {
-					klog.Infof("lost the election to %s; in standby mode", newLeaderName)
+					klog.Infof("Lost the election to %s; in standby mode", newLeaderName)
 				}
 			},
 		},
@@ -180,7 +180,7 @@ func (oc *Controller) StartClusterMaster(masterNodeName string) error {
 	}
 
 	if _, _, err := util.RunOVNNbctl("--columns=_uuid", "list", "port_group"); err != nil {
-		klog.Fatal("ovn version too old; does not support port groups")
+		klog.Fatal("OVN version too old; does not support port groups")
 	}
 
 	if oc.multicastSupport {
@@ -472,7 +472,7 @@ func (oc *Controller) syncGatewayLogicalNetwork(node *kapi.Node, l3GatewayConfig
 			if lbUUID != "" {
 				_, _, err := util.RunOVNNbctl("--if-exists", "destroy", "load_balancer", lbUUID)
 				if err != nil {
-					klog.Errorf("failed to destroy %s load balancer for gateway %s: %v", proto, physicalGateway, err)
+					klog.Errorf("Failed to destroy %s load balancer for gateway %s: %v", proto, physicalGateway, err)
 				}
 			}
 		}
@@ -808,7 +808,7 @@ func (oc *Controller) clearInitialNodeNetworkUnavailableCondition(origNode, newN
 		return err
 	})
 	if resultErr != nil {
-		klog.Errorf("status update failed for local node %s: %v", origNode.Name, resultErr)
+		klog.Errorf("Status update failed for local node %s: %v", origNode.Name, resultErr)
 	} else if cleared {
 		klog.Infof("Cleared node NetworkUnavailable/NoRouteCreated condition for %s", origNode.Name)
 	}

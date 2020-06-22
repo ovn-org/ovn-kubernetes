@@ -101,7 +101,7 @@ func (i *informer) forEachHandler(obj interface{}, f func(h *Handler)) {
 
 	objType := reflect.TypeOf(obj)
 	if objType != i.oType {
-		klog.Errorf("object type %v did not match expected %v", objType, i.oType)
+		klog.Errorf("Object type %v did not match expected %v", objType, i.oType)
 		return
 	}
 
@@ -134,7 +134,7 @@ func (i *informer) removeHandler(handler *Handler) error {
 		return err
 	}
 
-	klog.V(5).Infof("sending %v event handler %d for removal", i.oType, handler.id)
+	klog.V(5).Infof("Sending %v event handler %d for removal", i.oType, handler.id)
 
 	go func() {
 		i.Lock()
@@ -142,9 +142,9 @@ func (i *informer) removeHandler(handler *Handler) error {
 		if _, ok := i.handlers[handler.id]; ok {
 			// Remove the handler
 			delete(i.handlers, handler.id)
-			klog.V(5).Infof("removed %v event handler %d", i.oType, handler.id)
+			klog.V(5).Infof("Removed %v event handler %d", i.oType, handler.id)
 		} else {
-			klog.Warningf("tried to remove unknown object type %v event handler %d", i.oType, handler.id)
+			klog.Warningf("Tried to remove unknown object type %v event handler %d", i.oType, handler.id)
 		}
 	}()
 
@@ -169,7 +169,7 @@ func (i *informer) processEvents(events chan *event, stopChan <-chan struct{}) {
 func getQueueNum(oType reflect.Type, obj interface{}) uint32 {
 	meta, err := getObjectMeta(oType, obj)
 	if err != nil {
-		klog.Errorf("object has no meta: %v", err)
+		klog.Errorf("Object has no meta: %v", err)
 		return 0
 	}
 
@@ -537,7 +537,7 @@ func (wf *WatchFactory) addHandler(objType reflect.Type, namespace string, lsel 
 		}
 		meta, err := getObjectMeta(objType, obj)
 		if err != nil {
-			klog.Errorf("watch handler filter error: %v", err)
+			klog.Errorf("Watch handler filter error: %v", err)
 			return false
 		}
 		if namespace != "" && meta.Namespace != namespace {
@@ -566,7 +566,7 @@ func (wf *WatchFactory) addHandler(objType reflect.Type, namespace string, lsel 
 
 	handlerID := atomic.AddUint64(&wf.handlerCounter, 1)
 	handler := inf.addHandler(handlerID, filterFunc, funcs, items)
-	klog.V(5).Infof("added %v event handler %d", objType, handler.id)
+	klog.V(5).Infof("Added %v event handler %d", objType, handler.id)
 	return handler, nil
 }
 

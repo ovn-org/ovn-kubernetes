@@ -98,7 +98,7 @@ func checkForStaleOVSInterfaces(stopChan chan struct{}) {
 			stdout, _, err := util.RunOVSVsctl("--data=bare", "--no-headings", "--columns=name", "find",
 				"interface", "ofport=-1")
 			if err != nil {
-				klog.Errorf("failed to list OVS interfaces with ofport set to -1")
+				klog.Errorf("Failed to list OVS interfaces with ofport set to -1")
 				continue
 			}
 			if len(stdout) == 0 {
@@ -106,10 +106,10 @@ func checkForStaleOVSInterfaces(stopChan chan struct{}) {
 			}
 			values := strings.Split(stdout, "\n\n")
 			for _, val := range values {
-				klog.Warningf("found stale interface %s, so deleting it", val)
+				klog.Warningf("Found stale interface %s, so deleting it", val)
 				_, stderr, err := util.RunOVSVsctl("--if-exists", "--with-iface", "del-port", val)
 				if err != nil {
-					klog.Errorf("failed to delete OVS port/interface %s: stderr: %s (%v)",
+					klog.Errorf("Failed to delete OVS port/interface %s: stderr: %s (%v)",
 						val, stderr, err)
 				}
 			}
@@ -130,12 +130,12 @@ func checkDefaultConntrackRules(gwBridge string, physIntf, patchIntf, ofportPhys
 			out, _, err := util.RunOVSOfctl("dump-aggregate", gwBridge,
 				fmt.Sprintf("cookie=%s/-1", defaultOpenFlowCookie))
 			if err != nil {
-				klog.Errorf("failed to dump aggregate statistics of the default OpenFlow rules: %v", err)
+				klog.Errorf("Failed to dump aggregate statistics of the default OpenFlow rules: %v", err)
 				continue
 			}
 
 			if !strings.Contains(out, flowCount) {
-				klog.Errorf("fatal error: unexpected default OpenFlows count, expect %d output: %v\n",
+				klog.Errorf("Fatal error: unexpected default OpenFlows count, expect %d output: %v\n",
 					nFlows, out)
 				os.Exit(1)
 			}
@@ -148,7 +148,7 @@ func checkDefaultConntrackRules(gwBridge string, physIntf, patchIntf, ofportPhys
 				continue
 			}
 			if ofportPatch != curOfportPatch {
-				klog.Errorf("fatal error: ofport of %s has changed from %s to %s",
+				klog.Errorf("Fatal error: ofport of %s has changed from %s to %s",
 					patchIntf, ofportPatch, curOfportPatch)
 				os.Exit(1)
 			}
@@ -161,7 +161,7 @@ func checkDefaultConntrackRules(gwBridge string, physIntf, patchIntf, ofportPhys
 				continue
 			}
 			if ofportPhys != curOfportPhys {
-				klog.Errorf("fatal error: ofport of %s has changed from %s to %s",
+				klog.Errorf("Fatal error: ofport of %s has changed from %s to %s",
 					physIntf, ofportPhys, curOfportPhys)
 				os.Exit(1)
 			}
