@@ -33,6 +33,11 @@ github.com/beorn7/perks/quantile
 github.com/bhendo/go-powershell
 github.com/bhendo/go-powershell/backend
 github.com/bhendo/go-powershell/utils
+# github.com/cenkalti/hub v1.0.1-0.20160527103212-11382a9960d3
+github.com/cenkalti/hub
+# github.com/cenkalti/rpc2 v0.0.0-20170726070524-c51a77e5f664
+github.com/cenkalti/rpc2
+github.com/cenkalti/rpc2/jsonrpc
 # github.com/cespare/xxhash/v2 v2.1.0
 github.com/cespare/xxhash/v2
 # github.com/containerd/cgroups v0.0.0-20200531161412-0dbf7f05ba59
@@ -57,6 +62,10 @@ github.com/coreos/go-iptables/iptables
 github.com/cpuguy83/go-md2man/v2/md2man
 # github.com/davecgh/go-spew v1.1.1
 github.com/davecgh/go-spew/spew
+# github.com/ebay/go-ovn v0.1.0 => github.com/ebay/go-ovn v0.0.0-20200604055416-fff9cdb
+github.com/ebay/go-ovn
+# github.com/ebay/libovsdb v0.0.0-20190718202342-e49b8c4e1142
+github.com/ebay/libovsdb
 # github.com/evanphx/json-patch v4.5.0+incompatible
 github.com/evanphx/json-patch
 # github.com/gogo/protobuf v1.3.1
@@ -80,6 +89,8 @@ github.com/google/go-cmp/cmp/internal/function
 github.com/google/go-cmp/cmp/internal/value
 # github.com/google/gofuzz v1.1.0
 github.com/google/gofuzz
+# github.com/google/uuid v1.1.1
+github.com/google/uuid
 # github.com/googleapis/gnostic v0.3.1
 github.com/googleapis/gnostic/OpenAPIv2
 github.com/googleapis/gnostic/compiler
@@ -174,8 +185,8 @@ github.com/spf13/pflag
 # github.com/stretchr/objx v0.1.1
 github.com/stretchr/objx
 # github.com/stretchr/testify v1.4.0
-github.com/stretchr/testify/assert
 github.com/stretchr/testify/mock
+github.com/stretchr/testify/assert
 # github.com/urfave/cli/v2 v2.2.0
 github.com/urfave/cli/v2
 # github.com/vishvananda/netlink v0.0.0-20200625175047-bca67dfc8220
@@ -488,6 +499,11 @@ k8s.io/client-go/kubernetes/typed/storage/v1alpha1
 k8s.io/client-go/kubernetes/typed/storage/v1alpha1/fake
 k8s.io/client-go/kubernetes/typed/storage/v1beta1
 k8s.io/client-go/kubernetes/typed/storage/v1beta1/fake
+k8s.io/client-go/pkg/apis/clientauthentication
+k8s.io/client-go/pkg/apis/clientauthentication/v1alpha1
+k8s.io/client-go/pkg/apis/clientauthentication/v1beta1
+k8s.io/client-go/util/connrotation
+k8s.io/client-go/tools/clientcmd/api/v1
 k8s.io/client-go/listers/admissionregistration/v1
 k8s.io/client-go/listers/admissionregistration/v1beta1
 k8s.io/client-go/listers/apps/v1
@@ -524,36 +540,6 @@ k8s.io/client-go/listers/settings/v1alpha1
 k8s.io/client-go/listers/storage/v1
 k8s.io/client-go/listers/storage/v1alpha1
 k8s.io/client-go/listers/storage/v1beta1
-k8s.io/client-go/pkg/apis/clientauthentication
-k8s.io/client-go/pkg/apis/clientauthentication/v1alpha1
-k8s.io/client-go/pkg/apis/clientauthentication/v1beta1
-k8s.io/client-go/pkg/version
-k8s.io/client-go/plugin/pkg/client/auth/exec
-k8s.io/client-go/rest
-k8s.io/client-go/rest/watch
-k8s.io/client-go/testing
-k8s.io/client-go/tools/auth
-k8s.io/client-go/tools/cache
-k8s.io/client-go/tools/clientcmd
-k8s.io/client-go/tools/clientcmd/api
-k8s.io/client-go/tools/clientcmd/api/latest
-k8s.io/client-go/tools/clientcmd/api/v1
-k8s.io/client-go/tools/leaderelection
-k8s.io/client-go/tools/leaderelection/resourcelock
-k8s.io/client-go/tools/metrics
-k8s.io/client-go/tools/pager
-k8s.io/client-go/tools/record
-k8s.io/client-go/tools/record/util
-k8s.io/client-go/tools/reference
-k8s.io/client-go/transport
-k8s.io/client-go/util/cert
-k8s.io/client-go/util/connrotation
-k8s.io/client-go/util/flowcontrol
-k8s.io/client-go/util/homedir
-k8s.io/client-go/util/keyutil
-k8s.io/client-go/util/retry
-k8s.io/client-go/util/testing
-k8s.io/client-go/util/workqueue
 # k8s.io/klog v1.0.0
 k8s.io/klog
 # k8s.io/kube-openapi v0.0.0-20200410145947-61e04a5be9a6
