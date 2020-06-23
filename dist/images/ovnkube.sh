@@ -683,6 +683,7 @@ sb-ovsdb() {
 
 # v3 - Runs northd on master. Does not run nb_ovsdb, and sb_ovsdb
 run-ovn-northd() {
+  trap 'ovs-appctl -t ovn-northd exit >/dev/null 2>&1; exit 0' TERM
   check_ovn_daemonset_version "3"
   rm -f ${OVN_RUNDIR}/ovn-northd.pid
   rm -f ${OVN_RUNDIR}/ovn-northd.*.ctl
@@ -927,6 +928,7 @@ cleanup-ovn-node() {
 
 # v3 - Runs ovn-nbctl in daemon mode
 run-nbctld() {
+  trap 'ovs-appctl -t ovn-nbctl exit >/dev/null 2>&1; exit 0' TERM
   check_ovn_daemonset_version "3"
   rm -f ${OVN_RUNDIR}/ovn-nbctl.pid
   rm -f ${OVN_RUNDIR}/ovn-nbctl.*.ctl
