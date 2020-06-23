@@ -115,11 +115,11 @@ func NewNode(
 		},
 		func(obj interface{}) error {
 			pod, ok := obj.(*kapi.Pod)
-			if pod.Spec.NodeName != nodeName {
-				return nil
-			}
 			if !ok {
 				return fmt.Errorf("object is not a pod")
+			}
+			if pod.Spec.NodeName != nodeName {
+				return nil
 			}
 			return n.controller.DeletePod(pod)
 		},
