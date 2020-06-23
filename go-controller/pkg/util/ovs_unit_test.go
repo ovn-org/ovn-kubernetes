@@ -19,6 +19,9 @@ type onCallReturnArgs struct {
 
 func TestDefaultExecRunner_RunCmd(t *testing.T) {
 	mockCmd := new(mock_k8s_io_utils_exec.Cmd)
+	// tests in other files in the package would set runCmdExecRunner to mocks.ExecRunner,
+	// for this test we want to ensure the non-mock instance is used
+	runCmdExecRunner = &defaultExecRunner{}
 
 	tests := []struct {
 		desc             string
