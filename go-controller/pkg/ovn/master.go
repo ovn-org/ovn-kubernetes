@@ -71,7 +71,7 @@ func (oc *Controller) Start(kClient kubernetes.Interface, nodeName string) error
 		RetryPeriod:   time.Duration(config.MasterHA.ElectionRetryPeriod) * time.Second,
 		Callbacks: leaderelection.LeaderCallbacks{
 			OnStartedLeading: func(ctx context.Context) {
-				klog.Infof("won leader election; in active mode")
+				klog.Infof("Won leader election; in active mode")
 				// run the cluster controller to init the master
 				start := time.Now()
 				defer func() {
@@ -94,12 +94,12 @@ func (oc *Controller) Start(kClient kubernetes.Interface, nodeName string) error
 				// we need to handle the transition properly like clearing
 				// the cache. It is better to exit for now.
 				// kube will restart and this will become a follower.
-				klog.Infof("no longer leader; exiting")
+				klog.Infof("No longer leader; exiting")
 				os.Exit(1)
 			},
 			OnNewLeader: func(newLeaderName string) {
 				if newLeaderName != nodeName {
-					klog.Infof("lost the election to %s; in standby mode", newLeaderName)
+					klog.Infof("Lost the election to %s; in standby mode", newLeaderName)
 				}
 			},
 		},
@@ -180,7 +180,7 @@ func (oc *Controller) StartClusterMaster(masterNodeName string) error {
 	}
 
 	if _, _, err := util.RunOVNNbctl("--columns=_uuid", "list", "port_group"); err != nil {
-		klog.Fatal("ovn version too old; does not support port groups")
+		klog.Fatal("OVN version too old; does not support port groups")
 	}
 
 	if oc.multicastSupport {
@@ -209,7 +209,7 @@ func (oc *Controller) StartClusterMaster(masterNodeName string) error {
 			factory.Core().V1().Pods().Informer(),
 		)
 		if err != nil {
-			return fmt.Errorf("Failed to set up hybrid overlay master: %v", err)
+			return fmt.Errorf("failed to set up hybrid overlay master: %v", err)
 		}
 		go nodeMaster.Run(oc.stopChan)
 	}
@@ -332,7 +332,7 @@ func (oc *Controller) allocateJoinSubnet(node *kapi.Node) ([]*net.IPNet, error) 
 	// Allocate a new network for the join switch
 	joinSubnets, err = oc.joinSubnetAllocator.AllocateNetworks()
 	if err != nil {
-		return nil, fmt.Errorf("Error allocating subnet for join switch for node %s: %v", node.Name, err)
+		return nil, fmt.Errorf("error allocating subnet for join switch for node %s: %v", node.Name, err)
 	}
 
 	defer func() {
@@ -357,7 +357,7 @@ func (oc *Controller) allocateJoinSubnet(node *kapi.Node) ([]*net.IPNet, error) 
 func (oc *Controller) deleteNodeJoinSubnet(nodeName string, subnet *net.IPNet) error {
 	err := oc.joinSubnetAllocator.ReleaseNetwork(subnet)
 	if err != nil {
-		return fmt.Errorf("Error deleting join subnet %v for node %q: %s", subnet, nodeName, err)
+		return fmt.Errorf("error deleting join subnet %v for node %q: %s", subnet, nodeName, err)
 	}
 	klog.Infof("Deleted JoinSubnet %v for node %s", subnet, nodeName)
 	return nil
@@ -472,7 +472,7 @@ func (oc *Controller) syncGatewayLogicalNetwork(node *kapi.Node, l3GatewayConfig
 			if lbUUID != "" {
 				_, _, err := util.RunOVNNbctl("--if-exists", "destroy", "load_balancer", lbUUID)
 				if err != nil {
-					klog.Errorf("failed to destroy %s load balancer for gateway %s: %v", proto, physicalGateway, err)
+					klog.Errorf("Failed to destroy %s load balancer for gateway %s: %v", proto, physicalGateway, err)
 				}
 			}
 		}
@@ -673,7 +673,7 @@ func (oc *Controller) addNode(node *kapi.Node) ([]*net.IPNet, error) {
 	// Node doesn't have a subnet assigned; reserve a new one for it
 	hostSubnets, err := oc.masterSubnetAllocator.AllocateNetworks()
 	if err != nil {
-		return nil, fmt.Errorf("Error allocating network for node %s: %v", node.Name, err)
+		return nil, fmt.Errorf("error allocating network for node %s: %v", node.Name, err)
 	}
 	klog.Infof("Allocated node %s HostSubnet %s", node.Name, util.JoinIPNets(hostSubnets, ","))
 
@@ -706,7 +706,7 @@ func (oc *Controller) addNode(node *kapi.Node) ([]*net.IPNet, error) {
 func (oc *Controller) deleteNodeHostSubnet(nodeName string, subnet *net.IPNet) error {
 	err := oc.masterSubnetAllocator.ReleaseNetwork(subnet)
 	if err != nil {
-		return fmt.Errorf("Error deleting subnet %v for node %q: %s", subnet, nodeName, err)
+		return fmt.Errorf("error deleting subnet %v for node %q: %s", subnet, nodeName, err)
 	}
 	klog.Infof("Deleted HostSubnet %v for node %s", subnet, nodeName)
 	return nil
@@ -715,13 +715,13 @@ func (oc *Controller) deleteNodeHostSubnet(nodeName string, subnet *net.IPNet) e
 func (oc *Controller) deleteNodeLogicalNetwork(nodeName string) error {
 	// Remove the logical switch associated with the node
 	if _, stderr, err := util.RunOVNNbctl("--if-exist", "ls-del", nodeName); err != nil {
-		return fmt.Errorf("Failed to delete logical switch %s, "+
+		return fmt.Errorf("failed to delete logical switch %s, "+
 			"stderr: %q, error: %v", nodeName, stderr, err)
 	}
 
 	// Remove the patch port that connects distributed router to node's logical switch
 	if _, stderr, err := util.RunOVNNbctl("--if-exist", "lrp-del", routerToSwitchPrefix+nodeName); err != nil {
-		return fmt.Errorf("Failed to delete logical router port rtos-%s, "+
+		return fmt.Errorf("failed to delete logical router port rtos-%s, "+
 			"stderr: %q, error: %v", nodeName, stderr, err)
 	}
 
@@ -752,7 +752,7 @@ func (oc *Controller) deleteNode(nodeName string, hostSubnets, joinSubnets []*ne
 	}
 
 	if err := gatewayCleanup(nodeName); err != nil {
-		return fmt.Errorf("Failed to clean up node %s gateway: (%v)", nodeName, err)
+		return fmt.Errorf("failed to clean up node %s gateway: (%v)", nodeName, err)
 	}
 
 	if err := oc.deleteNodeChassis(nodeName); err != nil {
@@ -808,7 +808,7 @@ func (oc *Controller) clearInitialNodeNetworkUnavailableCondition(origNode, newN
 		return err
 	})
 	if resultErr != nil {
-		klog.Errorf("status update failed for local node %s: %v", origNode.Name, resultErr)
+		klog.Errorf("Status update failed for local node %s: %v", origNode.Name, resultErr)
 	} else if cleared {
 		klog.Infof("Cleared node NetworkUnavailable/NoRouteCreated condition for %s", origNode.Name)
 	}
@@ -996,7 +996,7 @@ func (oc *Controller) unmarshalChassisDataIntoMap(chData []byte) (map[string]str
 	err := json.Unmarshal(chData, &mapUnmarshal)
 
 	if err != nil {
-		return nil, fmt.Errorf("Error unmarshaling the chassis data: %s", err)
+		return nil, fmt.Errorf("error unmarshaling the chassis data: %s", err)
 	}
 
 	for _, chassis := range mapUnmarshal.Data {
@@ -1014,7 +1014,7 @@ func (oc *Controller) deleteNodeChassis(nodeName string) error {
 		"--columns=name", "find", "Chassis",
 		"hostname="+nodeName)
 	if err != nil {
-		return fmt.Errorf("Failed to get chassis name for node %s: stderr: %q, error: %v",
+		return fmt.Errorf("failed to get chassis name for node %s: stderr: %q, error: %v",
 			nodeName, stderr, err)
 	}
 
@@ -1023,7 +1023,7 @@ func (oc *Controller) deleteNodeChassis(nodeName string) error {
 	} else {
 		_, stderr, err = util.RunOVNSbctl("--if-exist", "chassis-del", chassisName)
 		if err != nil {
-			return fmt.Errorf("Failed to delete chassis with name %s for node %s: stderr: %q, error: %v",
+			return fmt.Errorf("failed to delete chassis with name %s for node %s: stderr: %q, error: %v",
 				chassisName, nodeName, stderr, err)
 		}
 	}

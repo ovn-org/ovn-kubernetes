@@ -17,7 +17,7 @@ var NicsToBridgeCommand = cli.Command{
 	Action: func(context *cli.Context) error {
 		args := context.Args()
 		if args.Len() == 0 {
-			return fmt.Errorf("Please specify list of nic interfaces")
+			return fmt.Errorf("please specify list of nic interfaces")
 		}
 
 		if err := util.SetSpecificExec(kexec.New(), "ovs-vsctl"); err != nil {
@@ -43,7 +43,7 @@ var BridgesToNicCommand = cli.Command{
 	Action: func(context *cli.Context) error {
 		args := context.Args()
 		if args.Len() == 0 {
-			return fmt.Errorf("Please specify list of bridges")
+			return fmt.Errorf("please specify list of bridges")
 		}
 
 		if err := util.SetSpecificExec(kexec.New(), "ovs-vsctl"); err != nil {

@@ -298,7 +298,7 @@ func ovnDBMemoryMetricsUpdater(direction, database string) {
 		stdout, stderr, err = util.RunOVNNBAppCtl("--timeout=5", "memory/show")
 	}
 	if err != nil {
-		klog.Errorf("failed retrieving memory/show output for %q, stderr: %s, err: (%v)",
+		klog.Errorf("Failed retrieving memory/show output for %q, stderr: %s, err: (%v)",
 			strings.ToUpper(database), stderr, err)
 		return
 	}
@@ -309,7 +309,7 @@ func ovnDBMemoryMetricsUpdater(direction, database string) {
 			if value, err := strconv.ParseFloat(fields[1], 64); err == nil {
 				metricOVNDBMonitor.WithLabelValues(database).Set(value)
 			} else {
-				klog.Errorf("failed to parse the monitor's value %s to float64: err(%v)",
+				klog.Errorf("Failed to parse the monitor's value %s to float64: err(%v)",
 					fields[1], err)
 			}
 		} else if strings.HasPrefix(kvPair, "sessions:") {
@@ -318,7 +318,7 @@ func ovnDBMemoryMetricsUpdater(direction, database string) {
 			if value, err := strconv.ParseFloat(fields[1], 64); err == nil {
 				metricOVNDBSessions.WithLabelValues(database).Set(value)
 			} else {
-				klog.Errorf("failed to parse the sessions' value %s to float64: err(%v)",
+				klog.Errorf("Failed to parse the sessions' value %s to float64: err(%v)",
 					fields[1], err)
 			}
 		}
@@ -470,7 +470,7 @@ func getOVNDBClusterStatusInfo(timeout int, direction, database string) (cluster
 			"cluster/status", database)
 	}
 	if err != nil {
-		klog.Errorf("failed to retrieve cluster/status info for database %q, stderr: %s, err: (%v)",
+		klog.Errorf("Failed to retrieve cluster/status info for database %q, stderr: %s, err: (%v)",
 			database, stderr, err)
 		return nil, err
 	}

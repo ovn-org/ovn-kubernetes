@@ -45,7 +45,7 @@ func RegisterNodeMetrics() {
 			}, func() float64 {
 				stdout, stderr, err := util.RunOVSOfctl("-t", "5", "dump-aggregate", "br-int")
 				if err != nil {
-					klog.Errorf("failed to get flow count for br-int, stderr(%s): (%v)",
+					klog.Errorf("Failed to get flow count for br-int, stderr(%s): (%v)",
 						stderr, err)
 					return 0
 				}

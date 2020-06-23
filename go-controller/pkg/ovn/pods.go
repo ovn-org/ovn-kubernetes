@@ -287,7 +287,7 @@ func (oc *Controller) addLogicalPort(pod *kapi.Pod) error {
 		} else {
 			if len(podIfAddrs) > 0 {
 				if err = oc.lsManager.AllocateIPs(logicalSwitch, podIfAddrs); err != nil {
-					klog.Errorf("failed to block off already allocated IPs: %s for pod %s on node: %s"+
+					klog.Errorf("Failed to block off already allocated IPs: %s for pod %s on node: %s"+
 						" error: %v", util.JoinIPNetIPs(podIfAddrs, " "), portName,
 						logicalSwitch, err)
 					return fmt.Errorf("failed to block off already allocated IPs %s: for node: %s, error: %v",

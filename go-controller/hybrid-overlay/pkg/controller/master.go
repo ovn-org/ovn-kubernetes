@@ -104,14 +104,14 @@ func NewMaster(kube kube.Interface,
 	// Mark existing hostsubnets as already allocated
 	existingNodes, err := m.kube.GetNodes()
 	if err != nil {
-		return nil, fmt.Errorf("Error in initializing/fetching subnets: %v", err)
+		return nil, fmt.Errorf("error in initializing/fetching subnets: %v", err)
 	}
 	for _, node := range existingNodes.Items {
 		hostsubnet, err := houtil.ParseHybridOverlayHostSubnet(&node)
 		if err != nil {
 			klog.Warningf(err.Error())
 		} else if hostsubnet != nil {
-			klog.V(5).Infof("marking existing node %s hybrid overlay NodeSubnet %s as allocated", node.Name, hostsubnet)
+			klog.V(5).Infof("Marking existing node %s hybrid overlay NodeSubnet %s as allocated", node.Name, hostsubnet)
 			if err := m.allocator.MarkAllocatedNetwork(hostsubnet); err != nil {
 				utilruntime.HandleError(err)
 			}
@@ -161,7 +161,7 @@ func (m *MasterController) hybridOverlayNodeEnsureSubnet(node *kapi.Node, annota
 	// Allocate a new host subnet for this node
 	hostsubnets, err := m.allocator.AllocateNetworks()
 	if err != nil {
-		return nil, fmt.Errorf("Error allocating hybrid overlay HostSubnet for node %s: %v", node.Name, err)
+		return nil, fmt.Errorf("error allocating hybrid overlay HostSubnet for node %s: %v", node.Name, err)
 	}
 
 	if err := annotator.Set(types.HybridOverlayNodeSubnet, hostsubnets[0].String()); err != nil {
@@ -175,7 +175,7 @@ func (m *MasterController) hybridOverlayNodeEnsureSubnet(node *kapi.Node, annota
 
 func (m *MasterController) releaseNodeSubnet(nodeName string, subnet *net.IPNet) error {
 	if err := m.allocator.ReleaseNetwork(subnet); err != nil {
-		return fmt.Errorf("Error deleting hybrid overlay HostSubnet %s for node %q: %s", subnet, nodeName, err)
+		return fmt.Errorf("error deleting hybrid overlay HostSubnet %s for node %q: %s", subnet, nodeName, err)
 	}
 	klog.Infof("Deleted hybrid overlay HostSubnet %s for node %s", subnet, nodeName)
 	return nil
@@ -187,7 +187,7 @@ func (m *MasterController) handleOverlayPort(node *kapi.Node, annotator kube.Ann
 	subnets, err := util.ParseNodeHostSubnetAnnotation(node)
 	if subnets == nil || err != nil {
 		// No subnet allocated yet; clean up
-		klog.V(5).Infof("no subnet allocation yet for %s", node.Name)
+		klog.V(5).Infof("No subnet allocation yet for %s", node.Name)
 		if haveDRMACAnnotation {
 			m.deleteOverlayPort(node)
 			annotator.Delete(types.HybridOverlayDRMAC)
@@ -197,7 +197,7 @@ func (m *MasterController) handleOverlayPort(node *kapi.Node, annotator kube.Ann
 
 	if haveDRMACAnnotation {
 		// already set up; do nothing
-		klog.V(5).Infof("annotation already exists on %s. doing nothing", node.Name)
+		klog.V(5).Infof("Annotation already exists on %s. doing nothing", node.Name)
 		return nil
 	}
 
@@ -219,7 +219,7 @@ func (m *MasterController) handleOverlayPort(node *kapi.Node, annotator kube.Ann
 			}
 		}
 
-		klog.Infof("creating node %s hybrid overlay port", node.Name)
+		klog.Infof("Creating node %s hybrid overlay port", node.Name)
 
 		var stderr string
 		_, stderr, err = util.RunOVNNbctl("--", "--may-exist", "lsp-add", node.Name, portName,
@@ -241,7 +241,7 @@ func (m *MasterController) handleOverlayPort(node *kapi.Node, annotator kube.Ann
 }
 
 func (m *MasterController) deleteOverlayPort(node *kapi.Node) {
-	klog.Infof("removing node %s hybrid overlay port", node.Name)
+	klog.Infof("Removing node %s hybrid overlay port", node.Name)
 	portName := util.GetHybridOverlayPortName(node.Name)
 	_, _, _ = util.RunOVNNbctl("--", "--if-exists", "lsp-del", portName)
 }
@@ -315,7 +315,7 @@ func (m *MasterController) waitForNamespace(name string) (*kapi.Namespace, error
 				// Namespace not found; retry
 				return false, nil
 			}
-			klog.Warningf("error getting namespace: %v", err)
+			klog.Warningf("Error getting namespace: %v", err)
 			return false, err
 		}
 		return true, nil

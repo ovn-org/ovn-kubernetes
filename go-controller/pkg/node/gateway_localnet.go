@@ -81,7 +81,7 @@ func delIptRules(ipt util.IPTablesHelper, rules []iptRule) {
 	for _, r := range rules {
 		err := ipt.Delete(r.table, r.chain, r.args...)
 		if err != nil {
-			klog.Warningf("failed to delete iptables %s/%s rule %q: %v", r.table, r.chain,
+			klog.Warningf("Failed to delete iptables %s/%s rule %q: %v", r.table, r.chain,
 				strings.Join(r.args, " "), err)
 		}
 	}
@@ -127,7 +127,7 @@ func initLocalnetGateway(nodeName string, subnet *net.IPNet, wf *factory.WatchFa
 	_, stderr, err := util.RunOVSVsctl("--may-exist", "add-br",
 		localnetBridgeName)
 	if err != nil {
-		return fmt.Errorf("Failed to create localnet bridge %s"+
+		return fmt.Errorf("failed to create localnet bridge %s"+
 			", stderr:%s (%v)", localnetBridgeName, stderr, err)
 	}
 
@@ -149,7 +149,7 @@ func initLocalnetGateway(nodeName string, subnet *net.IPNet, wf *factory.WatchFa
 		"mtu_request="+fmt.Sprintf("%d", config.Default.MTU),
 		fmt.Sprintf("mac=%s", strings.ReplaceAll(localnetGatewayNextHopMac, ":", "\\:")))
 	if err != nil {
-		return fmt.Errorf("Failed to create localnet bridge gateway port %s"+
+		return fmt.Errorf("failed to create localnet bridge gateway port %s"+
 			", stderr:%s (%v)", localnetGatewayNextHopPort, stderr, err)
 	}
 	link, err := util.LinkSetUp(localnetGatewayNextHopPort)
@@ -215,7 +215,7 @@ func initLocalnetGateway(nodeName string, subnet *net.IPNet, wf *factory.WatchFa
 
 	err = localnetGatewayNAT(ipt, localnetGatewayNextHopPort, gatewayIP)
 	if err != nil {
-		return fmt.Errorf("Failed to add NAT rules for localnet gateway (%v)", err)
+		return fmt.Errorf("failed to add NAT rules for localnet gateway (%v)", err)
 	}
 
 	if config.Gateway.NodeportEnable {
@@ -362,7 +362,7 @@ func cleanupLocalnetGateway(physnet string) error {
 	stdout, stderr, err := util.RunOVSVsctl("--if-exists", "get", "Open_vSwitch", ".",
 		"external_ids:ovn-bridge-mappings")
 	if err != nil {
-		return fmt.Errorf("Failed to get ovn-bridge-mappings stderr:%s (%v)", stderr, err)
+		return fmt.Errorf("failed to get ovn-bridge-mappings stderr:%s (%v)", stderr, err)
 	}
 	bridgeMappings := strings.Split(stdout, ",")
 	for _, bridgeMapping := range bridgeMappings {
@@ -371,7 +371,7 @@ func cleanupLocalnetGateway(physnet string) error {
 			bridgeName := m[1]
 			_, stderr, err = util.RunOVSVsctl("--", "--if-exists", "del-br", bridgeName)
 			if err != nil {
-				return fmt.Errorf("Failed to ovs-vsctl del-br %s stderr:%s (%v)", bridgeName, stderr, err)
+				return fmt.Errorf("failed to ovs-vsctl del-br %s stderr:%s (%v)", bridgeName, stderr, err)
 			}
 			break
 		}

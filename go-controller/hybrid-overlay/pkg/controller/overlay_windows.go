@@ -224,7 +224,7 @@ func ClearRemoteSubnetPolicies(network *hcn.HostComputeNetwork) error {
 		if err := removeOneRemoteSubnetPolicy(network, policy.Settings); err != nil {
 			// We don't return the error in this case, we take a best effort
 			// approach to clear the remote subnets.
-			klog.Errorf("failed to remove remote subnet policy %v: %v",
+			klog.Errorf("Failed to remove remote subnet policy %v: %v",
 				existingPolicySettings.DestinationPrefix, err)
 		}
 	}

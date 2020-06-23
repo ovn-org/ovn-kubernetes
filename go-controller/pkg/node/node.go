@@ -115,7 +115,7 @@ func isOVNControllerReady(name string) (bool, error) {
 		ctlFile := runDir + fmt.Sprintf("ovn-controller.%s.ctl", strings.TrimSuffix(string(pid), "\n"))
 		ret, _, err := util.RunOVSAppctl("-t", ctlFile, "connection-status")
 		if err == nil {
-			klog.Infof("node %s connection status = %s", name, ret)
+			klog.Infof("Node %s connection status = %s", name, ret)
 			return ret == "connected", nil
 		}
 		return false, err
@@ -167,7 +167,7 @@ func (n *OvnNode) Start() error {
 	// Log level is returned to configured value when bring up is complete.
 	var level klog.Level
 	if err := level.Set("5"); err != nil {
-		klog.Errorf("setting klog \"loglevel\" to 5 failed, err: %v", err)
+		klog.Errorf("Setting klog \"loglevel\" to 5 failed, err: %v", err)
 	}
 
 	for _, auth := range []config.OvnAuthConfig{config.OvnNorth, config.OvnSouth} {
@@ -187,12 +187,12 @@ func (n *OvnNode) Start() error {
 	// First wait for the node logical switch to be created by the Master, timeout is 300s.
 	err = wait.PollImmediate(500*time.Millisecond, 300*time.Second, func() (bool, error) {
 		if node, err = n.Kube.GetNode(n.name); err != nil {
-			klog.Infof("waiting to retrieve node %s: %v", n.name, err)
+			klog.Infof("Waiting to retrieve node %s: %v", n.name, err)
 			return false, nil
 		}
 		subnets, err = util.ParseNodeHostSubnetAnnotation(node)
 		if err != nil {
-			klog.Infof("waiting for node %s to start, no annotation found on node for subnet: %v", n.name, err)
+			klog.Infof("Waiting for node %s to start, no annotation found on node for subnet: %v", n.name, err)
 			return false, nil
 		}
 		return true, nil
@@ -222,7 +222,7 @@ func (n *OvnNode) Start() error {
 	}
 
 	if err := nodeAnnotator.Run(); err != nil {
-		return fmt.Errorf("Failed to set node %s annotations: %v", n.name, err)
+		return fmt.Errorf("failed to set node %s annotations: %v", n.name, err)
 	}
 
 	// Wait for management port and gateway resources to be created by the master
@@ -253,7 +253,7 @@ func (n *OvnNode) Start() error {
 	}
 
 	if err := level.Set(strconv.Itoa(config.Logging.Level)); err != nil {
-		klog.Errorf("reset of initial klog \"loglevel\" failed, err: %v", err)
+		klog.Errorf("Reset of initial klog \"loglevel\" failed, err: %v", err)
 	}
 
 	// start health check to ensure there are no stale OVS internal ports
@@ -270,7 +270,7 @@ func (n *OvnNode) Start() error {
 
 	kclient, ok := n.Kube.(*kube.Kube)
 	if !ok {
-		return fmt.Errorf("Cannot get kubeclient for starting CNI server")
+		return fmt.Errorf("cannot get kubeclient for starting CNI server")
 	}
 	err = n.WatchEndpoints()
 	if err != nil {

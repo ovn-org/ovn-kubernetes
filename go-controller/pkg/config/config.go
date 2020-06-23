@@ -843,7 +843,7 @@ func getOVSExternalID(exec kexec.Interface, name string) string {
 		".",
 		"external_ids:"+name)
 	if err != nil {
-		klog.V(5).Infof("failed to get OVS external_id %s: %v\n\t%s", name, err, out)
+		klog.V(5).Infof("Failed to get OVS external_id %s: %v\n\t%s", name, err, out)
 		return ""
 	}
 	return out
@@ -856,7 +856,7 @@ func setOVSExternalID(exec kexec.Interface, key, value string) error {
 		".",
 		fmt.Sprintf("external_ids:%s=%s", key, value))
 	if err != nil {
-		return fmt.Errorf("Error setting OVS external ID '%s=%s': %v\n  %q", key, value, err, out)
+		return fmt.Errorf("error setting OVS external ID '%s=%s': %v\n  %q", key, value, err, out)
 	}
 	return nil
 }
@@ -1026,13 +1026,13 @@ func buildMasterHAConfig(ctx *cli.Context, cli, file *config) error {
 	}
 
 	if MasterHA.ElectionLeaseDuration <= MasterHA.ElectionRenewDeadline {
-		return fmt.Errorf("Invalid HA election lease duration '%d'. "+
+		return fmt.Errorf("invalid HA election lease duration '%d'. "+
 			"It should be greater than HA election renew deadline '%d'",
 			MasterHA.ElectionLeaseDuration, MasterHA.ElectionRenewDeadline)
 	}
 
 	if MasterHA.ElectionRenewDeadline <= MasterHA.ElectionRetryPeriod {
-		return fmt.Errorf("Invalid HA election renew deadline duration '%d'. "+
+		return fmt.Errorf("invalid HA election renew deadline duration '%d'. "+
 			"It should be greater than HA election retry period '%d'",
 			MasterHA.ElectionRenewDeadline, MasterHA.ElectionRetryPeriod)
 	}
@@ -1295,13 +1295,13 @@ func parseAddress(urlString string) (string, OvnDBScheme, error) {
 	for _, ovnAddress := range strings.Split(urlString, ",") {
 		splits := strings.SplitN(ovnAddress, ":", 2)
 		if len(splits) != 2 {
-			return "", "", fmt.Errorf("Failed to parse OVN address %s", urlString)
+			return "", "", fmt.Errorf("failed to parse OVN address %s", urlString)
 		}
 
 		if scheme == "" {
 			scheme = splits[0]
 		} else if scheme != splits[0] {
-			return "", "", fmt.Errorf("Invalid protocols in OVN address %s",
+			return "", "", fmt.Errorf("invalid protocols in OVN address %s",
 				urlString)
 		}
 
@@ -1423,7 +1423,7 @@ func (a *OvnAuthConfig) ensureCACert() error {
 	args = append(args, "list", "nb_global")
 	_, _ = rawExec(a.exec, "ovn-nbctl", args...)
 	if _, err := os.Stat(a.CACert); os.IsNotExist(err) {
-		klog.Warningf("bootstrapping %s CA certificate failed", a.CACert)
+		klog.Warningf("Bootstrapping %s CA certificate failed", a.CACert)
 	}
 	return nil
 }

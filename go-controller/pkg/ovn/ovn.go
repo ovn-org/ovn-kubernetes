@@ -610,7 +610,7 @@ func (oc *Controller) WatchNodes() error {
 			if noHostSubnet := noHostSubnet(node); noHostSubnet {
 				err := oc.lsManager.AddNoHostSubnetNode(node.Name)
 				if err != nil {
-					klog.Errorf("error creating logical switch cache for node %s: %v", node.Name, err)
+					klog.Errorf("Error creating logical switch cache for node %s: %v", node.Name, err)
 				}
 				return
 			}
@@ -627,7 +627,7 @@ func (oc *Controller) WatchNodes() error {
 
 			err = oc.syncNodeManagementPort(node, hostSubnets)
 			if err != nil {
-				klog.Warningf("error creating management port for node %s: %v", node.Name, err)
+				klog.Warningf("Error creating management port for node %s: %v", node.Name, err)
 				mgmtPortFailed.Store(node.Name, true)
 			}
 
@@ -664,7 +664,7 @@ func (oc *Controller) WatchNodes() error {
 			if failed || macAddressChanged(oldNode, node) {
 				err := oc.syncNodeManagementPort(node, hostSubnets)
 				if err != nil {
-					klog.Errorf("error updating management port for node %s: %v", node.Name, err)
+					klog.Errorf("Error updating management port for node %s: %v", node.Name, err)
 					mgmtPortFailed.Store(node.Name, true)
 				} else {
 					mgmtPortFailed.Delete(node.Name)

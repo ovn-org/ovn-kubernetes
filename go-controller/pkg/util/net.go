@@ -33,7 +33,7 @@ func intToIP(i *big.Int) net.IP {
 func GetPortAddresses(portName string) (net.HardwareAddr, []net.IP, error) {
 	out, stderr, err := RunOVNNbctl("--if-exists", "get", "logical_switch_port", portName, "dynamic_addresses", "addresses")
 	if err != nil {
-		return nil, nil, fmt.Errorf("Error while obtaining dynamic addresses for %s: stdout: %q, stderr: %q, error: %v",
+		return nil, nil, fmt.Errorf("error while obtaining dynamic addresses for %s: stdout: %q, stderr: %q, error: %v",
 			portName, out, stderr, err)
 	}
 
@@ -60,7 +60,7 @@ func GetPortAddresses(portName string) (net.HardwareAddr, []net.IP, error) {
 	outStr := strings.Trim(out, `"[]`)
 	addresses = strings.Split(outStr, " ")
 	if len(addresses) < 2 {
-		return nil, nil, fmt.Errorf("Error while obtaining addresses for %s", portName)
+		return nil, nil, fmt.Errorf("error while obtaining addresses for %s", portName)
 	}
 	mac, err := net.ParseMAC(addresses[0])
 	if err != nil {
