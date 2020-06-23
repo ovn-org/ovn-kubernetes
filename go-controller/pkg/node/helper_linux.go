@@ -54,7 +54,3 @@ func getIntfName(gatewayIntf string) (string, error) {
 	}
 	return intfName, nil
 }
-
-func deleteConntrack(ip string) {
-	util.DeleteConntrack(ip)
-}
