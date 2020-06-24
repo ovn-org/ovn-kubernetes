@@ -27,7 +27,6 @@ const (
 	// access to local service
 	LocalNetworkName = "locnet"
 
-	// FIXME DUAL-STACK
 	V6NodeLocalNatSubnet           = "fd99::/64"
 	V6NodeLocalNatSubnetPrefix     = 64
 	V6NodeLocalNatSubnetNextHop    = "fd99::1"

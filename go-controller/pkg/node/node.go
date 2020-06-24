@@ -157,7 +157,7 @@ func isOVNControllerReady(name string) (bool, error) {
 	return true, nil
 }
 
-// Start learns the subnet assigned to it by the master controller
+// Start learns the subnets assigned to it by the master controller
 // and calls the SetupNode script which establishes the logical switch
 func (n *OvnNode) Start() error {
 	var err error
