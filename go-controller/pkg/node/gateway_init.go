@@ -95,7 +95,7 @@ func getIPv4Address(iface string) (*net.IPNet, error) {
 	return nil, nil
 }
 
-func (n *OvnNode) initGateway(subnet *net.IPNet, nodeAnnotator kube.Annotator,
+func (n *OvnNode) initGateway(subnets []*net.IPNet, nodeAnnotator kube.Annotator,
 	waiter *startupWaiter) error {
 
 	if config.Gateway.NodeportEnable {
@@ -111,7 +111,7 @@ func (n *OvnNode) initGateway(subnet *net.IPNet, nodeAnnotator kube.Annotator,
 	var prFn postWaitFunc
 	switch config.Gateway.Mode {
 	case config.GatewayModeLocal:
-		err = n.initLocalnetGateway(subnet, nodeAnnotator)
+		err = n.initLocalnetGateway(subnets, nodeAnnotator)
 	case config.GatewayModeShared:
 		gatewayNextHop := net.ParseIP(config.Gateway.NextHop)
 		gatewayIntf := config.Gateway.Interface
@@ -130,7 +130,7 @@ func (n *OvnNode) initGateway(subnet *net.IPNet, nodeAnnotator kube.Annotator,
 				gatewayIntf = defaultGatewayIntf
 			}
 		}
-		prFn, err = n.initSharedGateway(subnet, gatewayNextHop, gatewayIntf, nodeAnnotator)
+		prFn, err = n.initSharedGateway(subnets, gatewayNextHop, gatewayIntf, nodeAnnotator)
 	case config.GatewayModeDisabled:
 		err = util.SetL3GatewayConfig(nodeAnnotator, &util.L3GatewayConfig{
 			Mode: config.GatewayModeDisabled,

@@ -19,7 +19,7 @@ import (
 // appropriate IP and MAC address on it. All the traffic from this node's hostNetwork
 // Pod towards cluster service ip whose backend is the node itself is forwarded to the
 // ovn-k8s-gw0 port after SNATing by the OVN's distributed gateway port.
-func setupLocalNodeAccessBridge(nodeName string, subnet *net.IPNet) error {
+func setupLocalNodeAccessBridge(nodeName string, subnets []*net.IPNet) error {
 	localBridgeName := "br-local"
 	_, stderr, err := util.RunOVSVsctl("--may-exist", "add-br", localBridgeName)
 	if err != nil {
@@ -54,23 +54,30 @@ func setupLocalNodeAccessBridge(nodeName string, subnet *net.IPNet) error {
 		return err
 	}
 
-	var gatewayNextHop net.IP
-	var gatewaySubnetMask net.IPMask
-	isSubnetIPv6 := utilnet.IsIPv6CIDR(subnet)
-	if isSubnetIPv6 {
-		gatewayNextHop = net.ParseIP(util.V6NodeLocalNatSubnetNextHop)
-		gatewaySubnetMask = net.CIDRMask(util.V6NodeLocalNatSubnetPrefix, 128)
-	} else {
-		gatewayNextHop = net.ParseIP(util.V4NodeLocalNatSubnetNextHop)
-		gatewaySubnetMask = net.CIDRMask(util.V4NodeLocalNatSubnetPrefix, 32)
+	// Flush all IP addresses on the nexthop port and add the new IP address(es)
+	if err = util.LinkAddrFlush(link); err != nil {
+		return err
 	}
-	gatewayNextHopCIDR := &net.IPNet{IP: gatewayNextHop, Mask: gatewaySubnetMask}
 
-	// Flush all IP addresses on the nexthop port and add the new IP address
-	if err = util.LinkAddrFlush(link); err == nil {
-		err = util.LinkAddrAdd(link, gatewayNextHopCIDR)
+	for _, subnet := range subnets {
+		var gatewayNextHop net.IP
+		var gatewaySubnetMask net.IPMask
+		isSubnetIPv6 := utilnet.IsIPv6CIDR(subnet)
+		if isSubnetIPv6 {
+			gatewayNextHop = net.ParseIP(util.V6NodeLocalNatSubnetNextHop)
+			gatewaySubnetMask = net.CIDRMask(util.V6NodeLocalNatSubnetPrefix, 128)
+		} else {
+			gatewayNextHop = net.ParseIP(util.V4NodeLocalNatSubnetNextHop)
+			gatewaySubnetMask = net.CIDRMask(util.V4NodeLocalNatSubnetPrefix, 32)
+		}
+		gatewayNextHopCIDR := &net.IPNet{IP: gatewayNextHop, Mask: gatewaySubnetMask}
+
+		if err = util.LinkAddrAdd(link, gatewayNextHopCIDR); err != nil {
+			return err
+		}
 	}
-	return err
+
+	return nil
 }
 
 func addSharedGatewayIptRules(service *kapi.Service, nodeIP *net.IPNet) {

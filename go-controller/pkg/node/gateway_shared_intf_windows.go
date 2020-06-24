@@ -22,6 +22,6 @@ func delSharedGatewayIptRules(service *kapi.Service, nodeIP *net.IPNet) {
 func syncSharedGatewayIptRules(services []interface{}, nodeIP *net.IPNet) {
 }
 
-func setupLocalNodeAccessBridge(nodeName string, subnet *net.IPNet) error {
+func setupLocalNodeAccessBridge(nodeName string, subnets []*net.IPNet) error {
 	return nil
 }
