@@ -557,6 +557,22 @@ func RunOVNNorthAppCtl(args ...string) (string, string, error) {
 	return strings.Trim(strings.TrimSpace(stdout.String()), "\""), stderr.String(), err
 }
 
+// RunOVNControllerAppCtl runs an 'ovs-appctl -t ovn-controller.pid.ctl command'.
+func RunOVNControllerAppCtl(args ...string) (string, string, error) {
+	var cmdArgs []string
+	pid, err := ioutil.ReadFile(runner.ovnRunDir + "ovn-controller.pid")
+	if err != nil {
+		return "", "", fmt.Errorf("failed to get ovn-controller pid : %v", err)
+	}
+	cmdArgs = []string{
+		"-t",
+		runner.ovnRunDir + fmt.Sprintf("ovn-controller.%s.ctl", strings.TrimSpace(string(pid))),
+	}
+	cmdArgs = append(cmdArgs, args...)
+	stdout, stderr, err := runOVNretry(runner.ovnappctlPath, nil, cmdArgs...)
+	return strings.Trim(strings.TrimSpace(stdout.String()), "\""), stderr.String(), err
+}
+
 // RunIP runs a command via the iproute2 "ip" utility
 func RunIP(args ...string) (string, string, error) {
 	stdout, stderr, err := run(runner.ipPath, args...)

@@ -23,8 +23,10 @@ const (
 	MetricOvnNamespace           = "ovn"
 	MetricOvnSubsystemDBRaft     = "db_raft"
 	MetricOvnSubsystemNorthd     = "northd"
+	MetricOvnSubsystemController = "controller"
 
-	ovnNorthd = "ovn-northd"
+	ovnNorthd     = "ovn-northd"
+	ovnController = "ovn-controller"
 )
 
 // Build information. Populated at build-time.
@@ -83,10 +85,13 @@ func getCoverageShowOutputMap(component string) (map[string]string, error) {
 		}
 	}()
 
-	if component == ovnNorthd {
+	if component == ovnController {
+		stdout, stderr, err = util.RunOVNControllerAppCtl("coverage/show")
+	} else if component == ovnNorthd {
 		stdout, stderr, err = util.RunOVNNorthAppCtl("coverage/show")
 	} else {
-		err = fmt.Errorf("component is unknown, and it isn't %s", ovnNorthd)
+		err = fmt.Errorf("component is unknown, and it isn't %s or %s",
+			ovnNorthd, ovnController)
 	}
 	if err != nil {
 		return nil, fmt.Errorf("failed to get coverage/show output for %s "+
@@ -116,6 +121,9 @@ func coverageShowMetricsUpdater(component string) {
 		}
 		coverageShowMetricsMap := componentCoverageShowMetricsMap[component]
 		for metricName, metricInfo := range coverageShowMetricsMap {
+			if metricName == "packet_in" {
+				metricName = "flow_extract"
+			}
 			if value, ok := coverageShowOutputMap[metricName]; ok {
 				count := parseMetricToFloat(component, metricName, value)
 				metricInfo.metric.Set(count)
