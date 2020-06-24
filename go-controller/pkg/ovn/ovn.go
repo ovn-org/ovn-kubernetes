@@ -13,7 +13,8 @@ import (
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/factory"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/kube"
-	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/allocator"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/ipallocator"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/subnetallocator"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
 
 	kapi "k8s.io/api/core/v1"
@@ -51,8 +52,9 @@ type loadBalancerConf struct {
 type namespaceInfo struct {
 	sync.Mutex
 
-	// map from pod IP address to logical port name for all pods
-	addressSet map[string]string
+	// addressSet is an address set object that holds the IP addresses
+	// of all pods in the namespace.
+	addressSet AddressSet
 
 	// map from NetworkPolicy name to namespacePolicy. You must hold the
 	// namespaceInfo's mutex to add/delete/lookup policies, but must hold the
@@ -62,6 +64,9 @@ type namespaceInfo struct {
 
 	hybridOverlayExternalGW net.IP
 	hybridOverlayVTEP       net.IP
+
+	// The UUID of the namespace-wide port group that contains all the pods in the namespace.
+	portGroupUUID string
 
 	multicastEnabled bool
 }
@@ -73,8 +78,9 @@ type Controller struct {
 	watchFactory *factory.WatchFactory
 	stopChan     <-chan struct{}
 
-	masterSubnetAllocator *allocator.SubnetAllocator
-	joinSubnetAllocator   *allocator.SubnetAllocator
+	masterSubnetAllocator   *subnetallocator.SubnetAllocator
+	joinSubnetAllocator     *subnetallocator.SubnetAllocator
+	nodeLocalNatIPAllocator *ipallocator.Range
 
 	TCPLoadBalancerUUID  string
 	UDPLoadBalancerUUID  string
@@ -91,7 +97,7 @@ type Controller struct {
 	defGatewayRouter    string
 
 	// A cache of all logical switches seen by the watcher and their subnets
-	logicalSwitchCache map[string][]*net.IPNet
+	lsManager *logicalSwitchManager
 
 	// A cache of all logical ports known to the controller
 	logicalPortCache *portCache
@@ -102,6 +108,9 @@ type Controller struct {
 	// from inside those functions.
 	namespaces      map[string]*namespaceInfo
 	namespacesMutex sync.Mutex
+
+	// An address set factory that creates address sets
+	addressSetFactory AddressSetFactory
 
 	// Port group for ingress deny rule
 	portGroupIngressDeny string
@@ -119,9 +128,6 @@ type Controller struct {
 
 	// A mutex for lspIngressDenyCache and lspEgressDenyCache
 	lspMutex *sync.Mutex
-
-	// A mutex for logicalSwitchCache which holds logicalSwitch information
-	lsMutex *sync.Mutex
 
 	// Supports multicast?
 	multicastSupport bool
@@ -153,21 +159,26 @@ const (
 
 // NewOvnController creates a new OVN controller for creating logical network
 // infrastructure and policy
-func NewOvnController(kubeClient kubernetes.Interface, wf *factory.WatchFactory, stopChan <-chan struct{}) *Controller {
+func NewOvnController(kubeClient kubernetes.Interface, wf *factory.WatchFactory,
+	stopChan <-chan struct{}, addressSetFactory AddressSetFactory) *Controller {
+	if addressSetFactory == nil {
+		addressSetFactory = NewOvnAddressSetFactory()
+	}
 	return &Controller{
 		kube:                     &kube.Kube{KClient: kubeClient},
 		watchFactory:             wf,
 		stopChan:                 stopChan,
-		masterSubnetAllocator:    allocator.NewSubnetAllocator(),
-		logicalSwitchCache:       make(map[string][]*net.IPNet),
-		joinSubnetAllocator:      allocator.NewSubnetAllocator(),
+		masterSubnetAllocator:    subnetallocator.NewSubnetAllocator(),
+		nodeLocalNatIPAllocator:  &ipallocator.Range{},
+		lsManager:                newLogicalSwitchManager(),
+		joinSubnetAllocator:      subnetallocator.NewSubnetAllocator(),
 		logicalPortCache:         newPortCache(stopChan),
 		namespaces:               make(map[string]*namespaceInfo),
 		namespacesMutex:          sync.Mutex{},
+		addressSetFactory:        addressSetFactory,
 		lspIngressDenyCache:      make(map[string]int),
 		lspEgressDenyCache:       make(map[string]int),
 		lspMutex:                 &sync.Mutex{},
-		lsMutex:                  &sync.Mutex{},
 		loadbalancerClusterCache: make(map[kapi.Protocol]string),
 		loadbalancerGWCache:      make(map[kapi.Protocol]string),
 		multicastSupport:         config.EnableMulticast,
@@ -182,6 +193,8 @@ func NewOvnController(kubeClient kubernetes.Interface, wf *factory.WatchFactory,
 // Run starts the actual watching.
 func (oc *Controller) Run() error {
 	oc.syncPeriodic()
+	klog.Infof("Starting all the Watchers...")
+	start := time.Now()
 	// WatchNodes must be started first so that its initial Add will
 	// create all node logical switches, which other watches may depend on.
 	// https://github.com/ovn-org/ovn-kubernetes/pull/859
@@ -195,6 +208,7 @@ func (oc *Controller) Run() error {
 			return err
 		}
 	}
+	klog.Infof("Completing all the Watchers took %v", time.Since(start))
 
 	if config.Kubernetes.OVNEmptyLbEvents {
 		go oc.ovnControllerEventChecker()
@@ -384,6 +398,8 @@ func podScheduled(pod *kapi.Pod) bool {
 // WatchPods starts the watching of Pod resource and calls back the appropriate handler logic
 func (oc *Controller) WatchPods() error {
 	var retryPods sync.Map
+
+	start := time.Now()
 	_, err := oc.watchFactory.AddPodHandler(cache.ResourceEventHandlerFuncs{
 		AddFunc: func(obj interface{}) {
 			pod := obj.(*kapi.Pod)
@@ -422,12 +438,17 @@ func (oc *Controller) WatchPods() error {
 			retryPods.Delete(pod.UID)
 		},
 	}, oc.syncPods)
+	if err == nil {
+		klog.Infof("Bootstrapping existing pods and cleaning stale pods took %v",
+			time.Since(start))
+	}
 	return err
 }
 
 // WatchServices starts the watching of Service resource and calls back the
 // appropriate handler logic
 func (oc *Controller) WatchServices() error {
+	start := time.Now()
 	_, err := oc.watchFactory.AddServiceHandler(cache.ResourceEventHandlerFuncs{
 		AddFunc: func(obj interface{}) {
 			service := obj.(*kapi.Service)
@@ -449,11 +470,16 @@ func (oc *Controller) WatchServices() error {
 			oc.deleteService(service)
 		},
 	}, oc.syncServices)
+	if err == nil {
+		klog.Infof("Bootstrapping existing services and cleaning stale services took %v",
+			time.Since(start))
+	}
 	return err
 }
 
 // WatchEndpoints starts the watching of Endpoint resource and calls back the appropriate handler logic
 func (oc *Controller) WatchEndpoints() error {
+	start := time.Now()
 	_, err := oc.watchFactory.AddEndpointsHandler(cache.ResourceEventHandlerFuncs{
 		AddFunc: func(obj interface{}) {
 			ep := obj.(*kapi.Endpoints)
@@ -488,12 +514,17 @@ func (oc *Controller) WatchEndpoints() error {
 			}
 		},
 	}, nil)
+	if err == nil {
+		klog.Infof("Bootstrapping existing endpoints and cleaning stale endpoints took %v",
+			time.Since(start))
+	}
 	return err
 }
 
 // WatchNetworkPolicy starts the watching of network policy resource and calls
 // back the appropriate handler logic
 func (oc *Controller) WatchNetworkPolicy() error {
+	start := time.Now()
 	_, err := oc.watchFactory.AddPolicyHandler(cache.ResourceEventHandlerFuncs{
 		AddFunc: func(obj interface{}) {
 			policy := obj.(*kapisnetworking.NetworkPolicy)
@@ -512,12 +543,17 @@ func (oc *Controller) WatchNetworkPolicy() error {
 			oc.deleteNetworkPolicy(policy)
 		},
 	}, oc.syncNetworkPolicies)
+	if err == nil {
+		klog.Infof("Bootstrapping existing policies and cleaning stale policies took %v",
+			time.Since(start))
+	}
 	return err
 }
 
 // WatchNamespaces starts the watching of namespace resource and calls
 // back the appropriate handler logic
 func (oc *Controller) WatchNamespaces() error {
+	start := time.Now()
 	_, err := oc.watchFactory.AddNamespaceHandler(cache.ResourceEventHandlerFuncs{
 		AddFunc: func(obj interface{}) {
 			ns := obj.(*kapi.Namespace)
@@ -532,6 +568,10 @@ func (oc *Controller) WatchNamespaces() error {
 			oc.deleteNamespace(ns)
 		},
 	}, oc.syncNamespaces)
+	if err == nil {
+		klog.Infof("Bootstrapping existing namespaces and cleaning stale namespaces took %v",
+			time.Since(start))
+	}
 	return err
 }
 
@@ -545,7 +585,7 @@ func (oc *Controller) syncNodeGateway(node *kapi.Node, hostSubnets []*net.IPNet)
 		hostSubnets, _ = util.ParseNodeHostSubnetAnnotation(node)
 	}
 	if l3GatewayConfig.Mode == config.GatewayModeDisabled {
-		if err := gatewayCleanup(node.Name, hostSubnets); err != nil {
+		if err := gatewayCleanup(node.Name); err != nil {
 			return fmt.Errorf("error cleaning up gateway for node %s: %v", node.Name, err)
 		}
 	} else if hostSubnets != nil {
@@ -561,21 +601,27 @@ func (oc *Controller) syncNodeGateway(node *kapi.Node, hostSubnets []*net.IPNet)
 func (oc *Controller) WatchNodes() error {
 	var gatewaysFailed sync.Map
 	var mgmtPortFailed sync.Map
+	var addNodeFailed sync.Map
+
+	start := time.Now()
 	_, err := oc.watchFactory.AddNodeHandler(cache.ResourceEventHandlerFuncs{
 		AddFunc: func(obj interface{}) {
 			node := obj.(*kapi.Node)
 			if noHostSubnet := noHostSubnet(node); noHostSubnet {
-				oc.lsMutex.Lock()
-				defer oc.lsMutex.Unlock()
-				//setting the value to nil in the cache means it was not assigned a hostSubnet by ovn-kube
-				oc.logicalSwitchCache[node.Name] = nil
+				err := oc.lsManager.AddNoHostSubnetNode(node.Name)
+				if err != nil {
+					klog.Errorf("error creating logical switch cache for node %s: %v", node.Name, err)
+				}
 				return
 			}
 
 			klog.V(5).Infof("Added event for Node %q", node.Name)
 			hostSubnets, err := oc.addNode(node)
 			if err != nil {
-				klog.Errorf("error creating subnet for node %s: %v", node.Name, err)
+				klog.Errorf("NodeAdd: error creating subnet for node %s: %v", node.Name, err)
+				addNodeFailed.Store(node.Name, true)
+				mgmtPortFailed.Store(node.Name, true)
+				gatewaysFailed.Store(node.Name, true)
 				return
 			}
 
@@ -603,11 +649,20 @@ func (oc *Controller) WatchNodes() error {
 				return
 			}
 
-			klog.V(5).Infof("Updated event for Node %q", node.Name)
+			var hostSubnets []*net.IPNet
+			_, failed := addNodeFailed.Load(node.Name)
+			if failed {
+				hostSubnets, err = oc.addNode(node)
+				if err != nil {
+					klog.Errorf("NodeUpdate: error creating subnet for node %s: %v", node.Name, err)
+					return
+				}
+				addNodeFailed.Delete(node.Name)
+			}
 
-			_, failed := mgmtPortFailed.Load(node.Name)
+			_, failed = mgmtPortFailed.Load(node.Name)
 			if failed || macAddressChanged(oldNode, node) {
-				err := oc.syncNodeManagementPort(node, nil)
+				err := oc.syncNodeManagementPort(node, hostSubnets)
 				if err != nil {
 					klog.Errorf("error updating management port for node %s: %v", node.Name, err)
 					mgmtPortFailed.Store(node.Name, true)
@@ -636,13 +691,13 @@ func (oc *Controller) WatchNodes() error {
 
 			nodeSubnets, _ := util.ParseNodeHostSubnetAnnotation(node)
 			joinSubnets, _ := util.ParseNodeJoinSubnetAnnotation(node)
-			err := oc.deleteNode(node.Name, nodeSubnets, joinSubnets)
+			dnatSnatIPs, _ := util.ParseNodeLocalNatIPAnnotation(node)
+			err := oc.deleteNode(node.Name, nodeSubnets, joinSubnets, dnatSnatIPs)
 			if err != nil {
 				klog.Error(err)
 			}
-			oc.lsMutex.Lock()
-			delete(oc.logicalSwitchCache, node.Name)
-			oc.lsMutex.Unlock()
+			oc.lsManager.DeleteNode(node.Name)
+			addNodeFailed.Delete(node.Name)
 			mgmtPortFailed.Delete(node.Name)
 			gatewaysFailed.Delete(node.Name)
 			// If this node was serving the external IP load balancer for services, migrate to a new node
@@ -655,6 +710,10 @@ func (oc *Controller) WatchNodes() error {
 			}
 		},
 	}, oc.syncNodes)
+	if err == nil {
+		klog.Infof("Bootstrapping existing nodes and cleaning stale nodes took %v",
+			time.Since(start))
+	}
 	return err
 }
 

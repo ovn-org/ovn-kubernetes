@@ -11,10 +11,11 @@ import (
 
 	"github.com/ovn-org/ovn-kubernetes/go-controller/hybrid-overlay/pkg/controller"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
-	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/factory"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/informer"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/kube"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
 
+	"k8s.io/client-go/informers"
 	"k8s.io/klog"
 	kexec "k8s.io/utils/exec"
 )
@@ -89,19 +90,29 @@ func runHybridOverlay(ctx *cli.Context) error {
 
 	stopChan := make(chan struct{})
 	defer close(stopChan)
+	f := informers.NewSharedInformerFactory(clientset, informer.DefaultResyncInterval)
 
-	factory, err := factory.NewWatchFactory(clientset, stopChan)
+	n, err := controller.NewNode(
+		&kube.Kube{KClient: clientset},
+		nodeName,
+		f.Core().V1().Nodes().Informer(),
+		f.Core().V1().Pods().Informer(),
+		f.Core().V1().Namespaces().Informer(),
+	)
 	if err != nil {
 		return err
 	}
 
-	kube := &kube.Kube{KClient: clientset}
-	if err := controller.StartNode(nodeName, kube, factory, stopChan); err != nil {
-		return err
-	}
+	f.Start(stopChan)
+	go func() {
+		err := n.Run(stopChan)
+		if err != nil {
+			klog.Error(err)
+		}
+	}()
 
 	// run until cancelled
 	<-ctx.Context.Done()
-	stopChan <- struct{}{}
+	close(stopChan)
 	return nil
 }

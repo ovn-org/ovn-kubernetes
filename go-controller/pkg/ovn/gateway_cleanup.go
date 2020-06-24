@@ -12,14 +12,14 @@ import (
 )
 
 // gatewayCleanup removes all the NB DB objects created for a node's gateway
-func gatewayCleanup(nodeName string, nodeSubnets []*net.IPNet) error {
+func gatewayCleanup(nodeName string) error {
 	gatewayRouter := gwRouterPrefix + nodeName
 
 	// Get the gateway router port's IP address (connected to join switch)
 	var routerIP net.IP
 	var nextHops []net.IP
 	routerIPNetworks, stderr, err := util.RunOVNNbctl("--if-exist", "get",
-		"logical_router_port", "rtoj-"+gatewayRouter, "networks")
+		"logical_router_port", gwRouterToJoinSwitchPrefix+gatewayRouter, "networks")
 	if err != nil {
 		return fmt.Errorf("failed to get logical router port for gateway router %s, "+
 			"stderr: %q, error: %v", gatewayRouter, stderr, err)
@@ -41,10 +41,6 @@ func gatewayCleanup(nodeName string, nodeSubnets []*net.IPNet) error {
 		}
 	}
 
-	for _, nodeSubnet := range nodeSubnets {
-		mgmtIfAddr := util.GetNodeManagementIfAddr(nodeSubnet)
-		nextHops = append(nextHops, mgmtIfAddr.IP)
-	}
 	staticRouteCleanup(nextHops)
 
 	// Remove the join switch that connects ovn_cluster_router to gateway router
@@ -72,7 +68,7 @@ func gatewayCleanup(nodeName string, nodeSubnets []*net.IPNet) error {
 	}
 
 	// Remove the patch port on the distributed router that connects to join switch
-	_, stderr, err = util.RunOVNNbctl("--if-exist", "lrp-del", "dtoj-"+nodeName)
+	_, stderr, err = util.RunOVNNbctl("--if-exist", "lrp-del", distRouterToJoinSwitchPrefix+nodeName)
 	if err != nil {
 		return fmt.Errorf("failed to delete the patch port dtoj-%s on distributed router "+
 			"stderr: %q, error: %v", nodeName, stderr, err)
@@ -97,7 +93,57 @@ func gatewayCleanup(nodeName string, nodeSubnets []*net.IPNet) error {
 			}
 		}
 	}
+
+	// We don't know the gateway mode as this is running in the master, try to delete the additional local
+	// gateway for the shared gateway mode. it will be no op if this is done for other gateway modes.
+	delPbrAndNatRules(nodeName)
 	return nil
+}
+
+func delPbrAndNatRules(nodeName string) {
+	// delete the dnat_and_snat entry that we added for the management port IP
+	// Note: we don't need to delete any MAC bindings that are dynamically learned from OVN SB DB
+	// because there will be none since this NAT is only for outbound traffic and not for inbound
+	mgmtPortName := util.K8sPrefix + nodeName
+	externalIP, stderr, err := util.RunOVNNbctl("--data=bare", "--no-heading",
+		"--columns=external_ip", "find", "nat", fmt.Sprintf("logical_port=%s", mgmtPortName))
+	if err != nil {
+		klog.Errorf("Failed to fetch the dnat_and_snat entry for the management port %s "+
+			"stderr: %s, error: %v", mgmtPortName, stderr, err)
+		externalIP = ""
+	}
+	if externalIP != "" {
+		_, stderr, err = util.RunOVNNbctl("--if-exists", "lr-nat-del", ovnClusterRouter, "dnat_and_snat", externalIP)
+		if err != nil {
+			klog.Errorf("Failed to delete the dnat_and_snat ip %s associated with the management "+
+				"port %s: stderr: %s, error: %v", externalIP, mgmtPortName, stderr, err)
+		}
+	}
+
+	// find the pbr rules associated with the node and delete them
+	matches, stderr, err := util.RunOVNNbctl("--data=bare", "--no-heading", "--columns=match",
+		"find", "logical_router_policy")
+	if err != nil {
+		klog.Errorf("Failed to fetch the policy route for the node subnet "+
+			"stdout: %s, stderr: %s, error: %v", matches, stderr, err)
+		matches = ""
+	}
+	nodeSubnetMatchSubStr := fmt.Sprintf("rtos-%s", nodeName)
+	for _, match := range strings.Split(matches, "\n\n") {
+		var priority string
+		if strings.Contains(match, nodeSubnetMatchSubStr) {
+			priority = nodeSubnetPolicyPriority
+		} else if strings.Contains(match, nodeName) {
+			priority = mgmtPortPolicyPriority
+		} else {
+			continue
+		}
+		_, stderr, err = util.RunOVNNbctl("lr-policy-del", ovnClusterRouter, priority, match)
+		if err != nil {
+			klog.Errorf("Failed to remove the policy routes (%s, %s) associated with the node %s: stderr: %s, error: %v",
+				priority, match, nodeName, stderr, err)
+		}
+	}
 }
 
 func staticRouteCleanup(nextHops []net.IP) {

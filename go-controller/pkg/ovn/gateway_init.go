@@ -8,6 +8,7 @@ import (
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
 
 	kapi "k8s.io/api/core/v1"
+	"k8s.io/klog"
 	utilnet "k8s.io/utils/net"
 )
 
@@ -56,8 +57,8 @@ func gatewayInit(nodeName string, clusterIPSubnet []*net.IPNet, hostSubnets []*n
 			joinSwitch, stdout, stderr, err)
 	}
 
-	gwSwitchPort := "jtor-" + gatewayRouter
-	gwRouterPort := "rtoj-" + gatewayRouter
+	gwSwitchPort := joinSwitchToGwRouterPrefix + gatewayRouter
+	gwRouterPort := gwRouterToJoinSwitchPrefix + gatewayRouter
 	stdout, stderr, err = util.RunOVNNbctl(
 		"--", "--may-exist", "lsp-add", joinSwitch, gwSwitchPort,
 		"--", "set", "logical_switch_port", gwSwitchPort, "type=router", "options:router-port="+gwRouterPort,
@@ -79,8 +80,8 @@ func gatewayInit(nodeName string, clusterIPSubnet []*net.IPNet, hostSubnets []*n
 	}
 
 	// jtod/dtoj - patch ports that connect the per-node join switch to distributed router
-	drSwitchPort := "jtod-" + nodeName
-	drRouterPort := "dtoj-" + nodeName
+	drSwitchPort := joinSwitchToDistRouterPrefix + nodeName
+	drRouterPort := distRouterToJoinSwitchPrefix + nodeName
 
 	// Connect the per-node join switch to the distributed router.
 	stdout, stderr, err = util.RunOVNNbctl(
@@ -215,15 +216,15 @@ func gatewayInit(nodeName string, clusterIPSubnet []*net.IPNet, hostSubnets []*n
 	// direct addition of logical_router_port with --may-exists will not work since the MAC
 	// has changed. So, we need to delete that port, if it exists, and it back.
 	cmdArgs = []string{
-		"--", "--if-exists", "lrp-del", "rtoe-" + gatewayRouter,
-		"--", "lrp-add", gatewayRouter, "rtoe-" + gatewayRouter,
+		"--", "--if-exists", "lrp-del", gwRouterToExtSwitchPrefix + gatewayRouter,
+		"--", "lrp-add", gatewayRouter, gwRouterToExtSwitchPrefix + gatewayRouter,
 		l3GatewayConfig.MACAddress.String(),
 	}
 	for _, ip := range l3GatewayConfig.IPAddresses {
 		cmdArgs = append(cmdArgs, ip.String())
 	}
 	cmdArgs = append(cmdArgs,
-		"--", "set", "logical_router_port", "rtoe-"+gatewayRouter,
+		"--", "set", "logical_router_port", gwRouterToExtSwitchPrefix+gatewayRouter,
 		"external-ids:gateway-physical-ip=yes")
 
 	stdout, stderr, err = util.RunOVNNbctl(cmdArgs...)
@@ -234,9 +235,9 @@ func gatewayInit(nodeName string, clusterIPSubnet []*net.IPNet, hostSubnets []*n
 
 	// Connect the external_switch to the router.
 	stdout, stderr, err = util.RunOVNNbctl("--", "--may-exist", "lsp-add",
-		externalSwitch, "etor-"+gatewayRouter, "--", "set",
-		"logical_switch_port", "etor-"+gatewayRouter, "type=router",
-		"options:router-port=rtoe-"+gatewayRouter,
+		externalSwitch, extSwitchToGwRouterPrefix+gatewayRouter, "--", "set",
+		"logical_switch_port", extSwitchToGwRouterPrefix+gatewayRouter, "type=router",
+		"options:router-port="+gwRouterToExtSwitchPrefix+gatewayRouter,
 		"addresses="+"\""+l3GatewayConfig.MACAddress.String()+"\"")
 	if err != nil {
 		return fmt.Errorf("failed to add logical port to router %s, stdout: %q, "+
@@ -301,6 +302,168 @@ func gatewayInit(nodeName string, clusterIPSubnet []*net.IPNet, hostSubnets []*n
 		}
 	}
 
+	return nil
+}
+
+func addDistributedGWPort() error {
+	masterChassisID, err := util.GetNodeChassisID()
+	if err != nil {
+		return fmt.Errorf("Failed to get master's chassis ID error: %v", err)
+	}
+
+	// add a distributed gateway port to the distributed router
+	dgpName := routerToSwitchPrefix + nodeLocalSwitch
+	dgpIP := net.ParseIP(util.V4NodeLocalDistributedGwPortIP)
+	nbctlArgs := []string{
+		"--may-exist", "lrp-add", ovnClusterRouter, dgpName, util.IPAddrToHWAddr(dgpIP).String(),
+		fmt.Sprintf("%s/%d", dgpIP.String(), util.V4NodeLocalNatSubnetPrefix),
+	}
+	// set gateway chassis (the current master node) for distributed gateway port)
+	nbctlArgs = append(nbctlArgs,
+		"--", "--id=@gw", "create", "gateway_chassis", "chassis_name="+masterChassisID, "external_ids:dgp_name="+dgpName,
+		fmt.Sprintf("name=%s_%s", dgpName, masterChassisID), "priority=100",
+		"--", "set", "logical_router_port", dgpName, "gateway_chassis=@gw")
+	stdout, stderr, err := util.RunOVNNbctl(nbctlArgs...)
+	if err != nil {
+		return fmt.Errorf("Failed to set gateway chassis %s for distributed gateway port %s: "+
+			"stdout: %q, stderr: %q, error: %v", masterChassisID, dgpName, stdout, stderr, err)
+	}
+
+	// connect the distributed gateway port to logical switch configured with localnet port
+	nbctlArgs = []string{
+		"--may-exist", "ls-add", nodeLocalSwitch,
+	}
+	// add localnet port to the logical switch
+	lclNetPortname := "lnet-" + nodeLocalSwitch
+	nbctlArgs = append(nbctlArgs,
+		"--", "--may-exist", "lsp-add", nodeLocalSwitch, lclNetPortname,
+		"--", "set", "logical_switch_port", lclNetPortname, "addresses=unknown", "type=localnet",
+		"options:network_name="+util.LocalNetworkName)
+	// connect the switch to the distributed router
+	lspName := "ltos-" + nodeLocalSwitch
+	nbctlArgs = append(nbctlArgs,
+		"--", "--may-exist", "lsp-add", nodeLocalSwitch, lspName,
+		"--", "set", "logical_switch_port", lspName, "type=router", "addresses=router",
+		"options:nat-addresses=router", "options:router-port="+dgpName)
+	stdout, stderr, err = util.RunOVNNbctl(nbctlArgs...)
+	if err != nil {
+		return fmt.Errorf("failed creating logical switch %s and its ports (%s, %s) "+
+			"stdout: %q, stderr: %q, error: %v", nodeLocalSwitch, lclNetPortname, lspName, stdout, stderr, err)
+	}
+	// finally add an entry to the OVN SB MAC_Binding table, if not present, to capture the
+	// MAC-IP binding of util.V4NodeLocalNatSubnetNextHop address to its MAC. Normally, this will
+	// be learnt and added by the chassis to which the distributed gateway port (DGP) is
+	// bound. However, in our case we don't send any traffic out with the DGP port's IP
+	// as source IP, so that binding will never be learnt and we need to seed it.
+	dnatSnatNextHopMac := util.IPAddrToHWAddr(net.ParseIP(util.V4NodeLocalNatSubnetNextHop)).String()
+	stdout, stderr, err = util.RunOVNSbctl("--data=bare", "--no-heading", "--columns=_uuid", "find", "MAC_Binding",
+		"logical_port="+dgpName, fmt.Sprintf(`mac="%s"`, dnatSnatNextHopMac))
+	if err != nil {
+		return fmt.Errorf("failed to check existence of MAC_Binding entry of (%s, %s) for distributed router port %s "+
+			"stderr: %q, error: %v", util.V4NodeLocalNatSubnetNextHop, dnatSnatNextHopMac, dgpName, stderr, err)
+	}
+	if stdout != "" {
+		klog.Infof("The MAC_Binding entry of (%s, %s) exists on distributed router port %s with uuid %s",
+			util.V4NodeLocalNatSubnetNextHop, dnatSnatNextHopMac, dgpName, stdout)
+		return nil
+	}
+
+	datapath, stderr, err := util.RunOVNSbctl("--data=bare", "--no-heading", "--columns=_uuid", "find", "datapath",
+		"external_ids:name="+ovnClusterRouter)
+	if err != nil {
+		return fmt.Errorf("failed to get the datapatah UUID of %s from OVN SB "+
+			"stdout: %q, stderr: %q, error: %v", ovnClusterRouter, datapath, stderr, err)
+	}
+
+	_, stderr, err = util.RunOVNSbctl("create", "mac_binding", "datapath="+datapath, "ip="+util.V4NodeLocalNatSubnetNextHop,
+		"logical_port="+dgpName, fmt.Sprintf(`mac="%s"`, dnatSnatNextHopMac))
+	if err != nil {
+		return fmt.Errorf("failed to create a MAC_Binding entry of (%s, %s) for distributed router port %s "+
+			"stderr: %q, error: %v", util.V4NodeLocalNatSubnetNextHop, dnatSnatNextHopMac, dgpName, stderr, err)
+	}
+
+	return nil
+}
+
+func addPolicyBasedRoutes(nodeName, mgmtPortIP string, hostIfAddrs []*net.IPNet) error {
+	var l3Prefix string
+	if utilnet.IsIPv6(hostIfAddrs[0].IP) {
+		l3Prefix = "ip6"
+	} else {
+		l3Prefix = "ip4"
+	}
+	// embed nodeName as comment so that it is easier to delete these rules later on.
+	// logical router policy doesn't support external_ids to stash metadata
+	matchStr := fmt.Sprintf(`inport == "rtos-%s" && %s.dst == %s /* %s */`,
+		nodeName, l3Prefix, hostIfAddrs[0].IP.String(), nodeName)
+	_, stderr, err := util.RunOVNNbctl("lr-policy-add", ovnClusterRouter, nodeSubnetPolicyPriority, matchStr, "reroute",
+		mgmtPortIP)
+	if err != nil {
+		// TODO: lr-policy-add doesn't support --may-exist, resort to this workaround for now.
+		// Have raised an issue against ovn repository (https://github.com/ovn-org/ovn/issues/49)
+		if !strings.Contains(stderr, "already existed") {
+			return fmt.Errorf("failed to add policy route '%s' for host %q on %s "+
+				"stderr: %s, error: %v", matchStr, nodeName, ovnClusterRouter, stderr, err)
+		}
+	}
+
+	matchStr = fmt.Sprintf("%s.src == %s && %s.dst == %s /* %s */",
+		l3Prefix, mgmtPortIP, l3Prefix, hostIfAddrs[0].IP.String(), nodeName)
+	_, stderr, err = util.RunOVNNbctl("lr-policy-add", ovnClusterRouter, mgmtPortPolicyPriority, matchStr,
+		"reroute", util.V4NodeLocalNatSubnetNextHop)
+	if err != nil {
+		if !strings.Contains(stderr, "already existed") {
+			return fmt.Errorf("failed to add policy route '%s' for host %q on %s "+
+				"stderr: %s, error: %v", matchStr, nodeName, ovnClusterRouter, stderr, err)
+		}
+	}
+	return nil
+}
+
+func (oc *Controller) addNodeLocalNatEntries(node *kapi.Node, mgmtPortMAC, mgmtPortIP string) error {
+	var externalIP net.IP
+
+	annotationPresent := false
+	externalIPs, err := util.ParseNodeLocalNatIPAnnotation(node)
+	if err == nil {
+		klog.V(5).Infof("Found node local NAT IP %s for the node %s, so reusing it", externalIPs, node.Name)
+		annotationPresent = true
+		externalIP = externalIPs[0]
+	} else {
+		externalIP, err = oc.nodeLocalNatIPAllocator.AllocateNext()
+		if err != nil {
+			return fmt.Errorf("Error allocating node local NAT IP for node %s: %v", node.Name, err)
+		}
+		defer func() {
+			// Release the allocation on error
+			if err != nil {
+				_ = oc.nodeLocalNatIPAllocator.Release(externalIP)
+			}
+		}()
+	}
+
+	mgmtPortName := util.K8sPrefix + node.Name
+	stdout, stderr, err := util.RunOVNNbctl("--may-exist", "lr-nat-add", ovnClusterRouter, "dnat_and_snat",
+		externalIP.String(), mgmtPortIP, mgmtPortName, mgmtPortMAC)
+	if err != nil {
+		return fmt.Errorf("Failed to add dnat_and_snat entry for the management port on node %s, "+
+			"stdout: %s, stderr: %q, error: %v", node.Name, stdout, stderr, err)
+	}
+
+	if annotationPresent {
+		return nil
+	}
+	// capture the node local NAT IP as a node annotation so that we can re-create it on onvkube-restart
+	nodeAnnotations, err := util.CreateNodeLocalNatAnnotation([]net.IP{externalIP})
+	if err != nil {
+		return fmt.Errorf("failed to marshal node %q annotation for node local NAT IP %s",
+			node.Name, externalIP.String())
+	}
+	err = oc.kube.SetAnnotationsOnNode(node, nodeAnnotations)
+	if err != nil {
+		return fmt.Errorf("failed to set node local NAT IP annotation on node %s: %v",
+			node.Name, err)
+	}
 	return nil
 }
 

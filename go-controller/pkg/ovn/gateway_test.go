@@ -53,17 +53,17 @@ node4 chassis=912d592c-904c-40cd-9ef1-c2e5b49a33dd lb_force_snat_ip=100.64.0.4`,
 	})
 
 	It("creates an IPv4 gateway in OVN", func() {
-		clusterIPSubnet := []*net.IPNet{ovntest.MustParseIPNet("10.128.0.0/14")}
-		hostSubnets := []*net.IPNet{ovntest.MustParseIPNet("10.130.0.0/23")}
-		joinSubnets := []*net.IPNet{ovntest.MustParseIPNet("100.64.0.0/29")}
+		clusterIPSubnets := ovntest.MustParseIPNets("10.128.0.0/14")
+		hostSubnets := ovntest.MustParseIPNets("10.130.0.0/23")
+		joinSubnets := ovntest.MustParseIPNets("100.64.0.0/29")
 		nodeName := "test-node"
 		l3GatewayConfig := &util.L3GatewayConfig{
 			Mode:           config.GatewayModeLocal,
 			ChassisID:      "SYSTEM-ID",
 			InterfaceID:    "INTERFACE-ID",
 			MACAddress:     ovntest.MustParseMAC("11:22:33:44:55:66"),
-			IPAddresses:    []*net.IPNet{ovntest.MustParseIPNet("169.254.33.2/24")},
-			NextHops:       []net.IP{ovntest.MustParseIP("169.254.33.1")},
+			IPAddresses:    ovntest.MustParseIPNets("169.254.33.2/24"),
+			NextHops:       ovntest.MustParseIPs("169.254.33.1"),
 			NodePortEnable: true,
 		}
 		sctpSupport := false
@@ -113,23 +113,23 @@ node4 chassis=912d592c-904c-40cd-9ef1-c2e5b49a33dd lb_force_snat_ip=100.64.0.4`,
 			"ovn-nbctl --timeout=15 --may-exist lr-nat-add GR_test-node snat 169.254.33.2 10.128.0.0/14",
 		})
 
-		err = gatewayInit(nodeName, clusterIPSubnet, hostSubnets, joinSubnets, l3GatewayConfig, sctpSupport)
+		err = gatewayInit(nodeName, clusterIPSubnets, hostSubnets, joinSubnets, l3GatewayConfig, sctpSupport)
 		Expect(err).NotTo(HaveOccurred())
 		Expect(fexec.CalledMatchesExpected()).To(BeTrue())
 	})
 
 	It("creates an IPv6 gateway in OVN", func() {
-		clusterIPSubnet := []*net.IPNet{ovntest.MustParseIPNet("fd01::/48")}
-		hostSubnets := []*net.IPNet{ovntest.MustParseIPNet("fd01:0:0:2::/64")}
-		joinSubnets := []*net.IPNet{ovntest.MustParseIPNet("fd98::/125")}
+		clusterIPSubnets := ovntest.MustParseIPNets("fd01::/48")
+		hostSubnets := ovntest.MustParseIPNets("fd01:0:0:2::/64")
+		joinSubnets := ovntest.MustParseIPNets("fd98::/125")
 		nodeName := "test-node"
 		l3GatewayConfig := &util.L3GatewayConfig{
 			Mode:           config.GatewayModeLocal,
 			ChassisID:      "SYSTEM-ID",
 			InterfaceID:    "INTERFACE-ID",
 			MACAddress:     ovntest.MustParseMAC("11:22:33:44:55:66"),
-			IPAddresses:    []*net.IPNet{ovntest.MustParseIPNet("fd99::2/64")},
-			NextHops:       []net.IP{ovntest.MustParseIP("fd99::1")},
+			IPAddresses:    ovntest.MustParseIPNets("fd99::2/64"),
+			NextHops:       ovntest.MustParseIPs("fd99::1"),
 			NodePortEnable: true,
 		}
 		sctpSupport := false
@@ -179,38 +179,23 @@ node4 chassis=912d592c-904c-40cd-9ef1-c2e5b49a33dd lb_force_snat_ip=100.64.0.4`,
 			"ovn-nbctl --timeout=15 --may-exist lr-nat-add GR_test-node snat fd99::2 fd01::/48",
 		})
 
-		err = gatewayInit(nodeName, clusterIPSubnet, hostSubnets, joinSubnets, l3GatewayConfig, sctpSupport)
+		err = gatewayInit(nodeName, clusterIPSubnets, hostSubnets, joinSubnets, l3GatewayConfig, sctpSupport)
 		Expect(err).NotTo(HaveOccurred())
 		Expect(fexec.CalledMatchesExpected()).To(BeTrue())
 	})
 
 	It("creates a dual-stack gateway in OVN", func() {
-		clusterIPSubnets := []*net.IPNet{
-			ovntest.MustParseIPNet("10.128.0.0/14"),
-			ovntest.MustParseIPNet("fd01::/48"),
-		}
-		hostSubnets := []*net.IPNet{
-			ovntest.MustParseIPNet("10.130.0.0/23"),
-			ovntest.MustParseIPNet("fd01:0:0:2::/64"),
-		}
-		joinSubnets := []*net.IPNet{
-			ovntest.MustParseIPNet("100.64.0.0/29"),
-			ovntest.MustParseIPNet("fd98::/125"),
-		}
+		clusterIPSubnets := ovntest.MustParseIPNets("10.128.0.0/14", "fd01::/48")
+		hostSubnets := ovntest.MustParseIPNets("10.130.0.0/23", "fd01:0:0:2::/64")
+		joinSubnets := ovntest.MustParseIPNets("100.64.0.0/29", "fd98::/125")
 		nodeName := "test-node"
 		l3GatewayConfig := &util.L3GatewayConfig{
-			Mode:        config.GatewayModeLocal,
-			ChassisID:   "SYSTEM-ID",
-			InterfaceID: "INTERFACE-ID",
-			MACAddress:  ovntest.MustParseMAC("11:22:33:44:55:66"),
-			IPAddresses: []*net.IPNet{
-				ovntest.MustParseIPNet("169.254.33.2/24"),
-				ovntest.MustParseIPNet("fd99::2/64"),
-			},
-			NextHops: []net.IP{
-				ovntest.MustParseIP("169.254.33.1"),
-				ovntest.MustParseIP("fd99::1"),
-			},
+			Mode:           config.GatewayModeLocal,
+			ChassisID:      "SYSTEM-ID",
+			InterfaceID:    "INTERFACE-ID",
+			MACAddress:     ovntest.MustParseMAC("11:22:33:44:55:66"),
+			IPAddresses:    ovntest.MustParseIPNets("169.254.33.2/24", "fd99::2/64"),
+			NextHops:       ovntest.MustParseIPs("169.254.33.1", "fd99::1"),
 			NodePortEnable: true,
 		}
 		sctpSupport := false
@@ -273,9 +258,8 @@ node4 chassis=912d592c-904c-40cd-9ef1-c2e5b49a33dd lb_force_snat_ip=100.64.0.4`,
 		nodeName := "test-node"
 		hostSubnet := ovntest.MustParseIPNet("10.130.0.0/23")
 		const (
-			nodeRouteUUID    string = "0cac12cf-3e0f-4682-b028-5ea2e0001962"
-			nodemgtRouteUUID string = "0cac12cf-3e0f-4682-b028-5ea2e0001963"
-			tcpLBUUID        string = "1a3dfc82-2749-4931-9190-c30e7c0ecea3"
+			nodeRouteUUID string = "0cac12cf-3e0f-4682-b028-5ea2e0001962"
+			tcpLBUUID     string = "1a3dfc82-2749-4931-9190-c30e7c0ecea3"
 		)
 
 		fexec := ovntest.NewFakeExec()
@@ -293,12 +277,7 @@ node4 chassis=912d592c-904c-40cd-9ef1-c2e5b49a33dd lb_force_snat_ip=100.64.0.4`,
 		fexec.AddFakeCmdsNoOutputNoError([]string{
 			"ovn-nbctl --timeout=15 --if-exists remove logical_router ovn_cluster_router static_routes " + nodeRouteUUID,
 		})
-		fexec.AddFakeCmd(&ovntest.ExpectedCmd{
-			Cmd:    "ovn-nbctl --timeout=15 --data=bare --no-heading --columns=_uuid find logical_router_static_route nexthop=\"10.130.0.2\"",
-			Output: nodemgtRouteUUID,
-		})
 		fexec.AddFakeCmdsNoOutputNoError([]string{
-			"ovn-nbctl --timeout=15 --if-exists remove logical_router ovn_cluster_router static_routes " + nodemgtRouteUUID,
 			"ovn-nbctl --timeout=15 --if-exist ls-del join_test-node",
 			"ovn-nbctl --timeout=15 --if-exist lr-del GR_test-node",
 			"ovn-nbctl --timeout=15 --if-exist ls-del ext_test-node",
@@ -320,18 +299,16 @@ node4 chassis=912d592c-904c-40cd-9ef1-c2e5b49a33dd lb_force_snat_ip=100.64.0.4`,
 		fexec.AddFakeCmdsNoOutputNoError([]string{
 			"ovn-nbctl --timeout=15 lb-del " + tcpLBUUID,
 		})
+		cleanupPBRandNATRules(fexec, nodeName, []*net.IPNet{hostSubnet})
 
-		err = gatewayCleanup(nodeName, []*net.IPNet{hostSubnet})
+		err = gatewayCleanup(nodeName)
 		Expect(err).NotTo(HaveOccurred())
 		Expect(fexec.CalledMatchesExpected()).To(BeTrue())
 	})
 
 	It("cleans up a dual-stack gateway in OVN", func() {
 		nodeName := "test-node"
-		hostSubnets := []*net.IPNet{
-			ovntest.MustParseIPNet("10.130.0.0/23"),
-			ovntest.MustParseIPNet("fd01:0:0:2::/64"),
-		}
+		hostSubnets := ovntest.MustParseIPNets("10.130.0.0/23", "fd01:0:0:2::/64")
 		const (
 			v4RouteUUID    string = "0cac12cf-3e0f-4682-b028-5ea2e0001962"
 			v6RouteUUID    string = "0cac12cf-4682-3e0f-b028-5ea2e0001962"
@@ -362,20 +339,6 @@ node4 chassis=912d592c-904c-40cd-9ef1-c2e5b49a33dd lb_force_snat_ip=100.64.0.4`,
 		fexec.AddFakeCmdsNoOutputNoError([]string{
 			"ovn-nbctl --timeout=15 --if-exists remove logical_router ovn_cluster_router static_routes " + v6RouteUUID,
 		})
-		fexec.AddFakeCmd(&ovntest.ExpectedCmd{
-			Cmd:    "ovn-nbctl --timeout=15 --data=bare --no-heading --columns=_uuid find logical_router_static_route nexthop=\"10.130.0.2\"",
-			Output: v4mgtRouteUUID,
-		})
-		fexec.AddFakeCmdsNoOutputNoError([]string{
-			"ovn-nbctl --timeout=15 --if-exists remove logical_router ovn_cluster_router static_routes " + v4mgtRouteUUID,
-		})
-		fexec.AddFakeCmd(&ovntest.ExpectedCmd{
-			Cmd:    "ovn-nbctl --timeout=15 --data=bare --no-heading --columns=_uuid find logical_router_static_route nexthop=\"fd01:0:0:2::2\"",
-			Output: v6mgtRouteUUID,
-		})
-		fexec.AddFakeCmdsNoOutputNoError([]string{
-			"ovn-nbctl --timeout=15 --if-exists remove logical_router ovn_cluster_router static_routes " + v6mgtRouteUUID,
-		})
 
 		fexec.AddFakeCmdsNoOutputNoError([]string{
 			"ovn-nbctl --timeout=15 --if-exist ls-del join_test-node",
@@ -399,8 +362,9 @@ node4 chassis=912d592c-904c-40cd-9ef1-c2e5b49a33dd lb_force_snat_ip=100.64.0.4`,
 		fexec.AddFakeCmdsNoOutputNoError([]string{
 			"ovn-nbctl --timeout=15 lb-del " + tcpLBUUID,
 		})
+		cleanupPBRandNATRules(fexec, nodeName, hostSubnets)
 
-		err = gatewayCleanup(nodeName, hostSubnets)
+		err = gatewayCleanup(nodeName)
 		Expect(err).NotTo(HaveOccurred())
 		Expect(fexec.CalledMatchesExpected()).To(BeTrue())
 	})

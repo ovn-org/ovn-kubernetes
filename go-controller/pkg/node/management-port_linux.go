@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"net"
 	"os"
+	"strings"
 	"time"
 
 	"github.com/coreos/go-iptables/iptables"
@@ -37,7 +38,7 @@ type managementPortConfig struct {
 	ipv6 *managementPortIPFamilyConfig
 }
 
-func newManagementPortIPFamilyConfig(mpcfg *managementPortConfig, hostSubnet *net.IPNet, isIPv6 bool) (*managementPortIPFamilyConfig, error) {
+func newManagementPortIPFamilyConfig(hostSubnet *net.IPNet, isIPv6 bool) (*managementPortIPFamilyConfig, error) {
 	var err error
 
 	cfg := &managementPortIPFamilyConfig{
@@ -97,7 +98,7 @@ func newManagementPortConfig(interfaceName string, hostSubnets []*net.IPNet) (*m
 			family = "IPv4"
 		}
 
-		cfg, err := newManagementPortIPFamilyConfig(mpcfg, hostSubnet, isIPv6)
+		cfg, err := newManagementPortIPFamilyConfig(hostSubnet, isIPv6)
 		if err != nil {
 			return nil, err
 		}
@@ -202,6 +203,15 @@ func setupManagementPortIPFamilyConfig(mpcfg *managementPortConfig, cfg *managem
 		return warnings, err
 	}
 
+	if _, err = cfg.ipt.List("nat", iptableMgmPortChain); err != nil {
+		warnings = append(warnings, fmt.Sprintf("missing iptables chain %s in the nat table, adding it",
+			iptableMgmPortChain))
+		err = cfg.ipt.NewChain("nat", iptableMgmPortChain)
+	}
+	if err != nil {
+		return warnings, fmt.Errorf("could not create iptables nat chain %q for management port: %v",
+			iptableMgmPortChain, err)
+	}
 	rule := []string{"-o", mpcfg.ifName, "-j", iptableMgmPortChain}
 	if exists, err = cfg.ipt.Exists("nat", "POSTROUTING", rule...); err == nil && !exists {
 		warnings = append(warnings, fmt.Sprintf("missing iptables postrouting nat chain %s, adding it",
@@ -209,7 +219,8 @@ func setupManagementPortIPFamilyConfig(mpcfg *managementPortConfig, cfg *managem
 		err = cfg.ipt.Insert("nat", "POSTROUTING", 1, rule...)
 	}
 	if err != nil {
-		return warnings, fmt.Errorf("could not set up iptables chain rules for management port: %v", err)
+		return warnings, fmt.Errorf("could not insert iptables rule %q for management port: %v",
+			strings.Join(rule, " "), err)
 	}
 	rule = []string{"-o", mpcfg.ifName, "-j", "SNAT", "--to-source", cfg.ifAddr.IP.String(),
 		"-m", "comment", "--comment", "OVN SNAT to Management Port"}
@@ -219,7 +230,8 @@ func setupManagementPortIPFamilyConfig(mpcfg *managementPortConfig, cfg *managem
 		err = cfg.ipt.Insert("nat", iptableMgmPortChain, 1, rule...)
 	}
 	if err != nil {
-		return warnings, fmt.Errorf("could not set up iptables rules for management port: %v", err)
+		return warnings, fmt.Errorf("could not insert iptable rule %q for management port: %v",
+			strings.Join(rule, " "), err)
 	}
 
 	return warnings, nil

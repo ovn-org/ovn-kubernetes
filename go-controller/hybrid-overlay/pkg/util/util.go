@@ -7,6 +7,7 @@ import (
 	"github.com/ovn-org/ovn-kubernetes/go-controller/hybrid-overlay/pkg/types"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/factory"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/kube"
 
 	kapi "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -28,12 +29,6 @@ func ParseHybridOverlayHostSubnet(node *kapi.Node) (*net.IPNet, error) {
 			node.Name, types.HybridOverlayNodeSubnet, sub, err)
 	}
 	return subnet, nil
-}
-
-// GetHybridOverlayPortName returns the name of the hybrid overlay switch port
-// for a given node
-func GetHybridOverlayPortName(nodeName string) string {
-	return "int-" + nodeName
 }
 
 // IsHybridOverlayNode returns true if the node has been labeled as a
@@ -85,4 +80,18 @@ func StartNodeWatch(h types.NodeHandler, wf *factory.WatchFactory) error {
 		},
 	}, nil)
 	return err
+}
+
+// CopyNamespaceAnnotationsToPod copies annotations from a namespace to a pod
+func CopyNamespaceAnnotationsToPod(k kube.Interface, ns *kapi.Namespace, pod *kapi.Pod) error {
+	nsGw := ns.Annotations[types.HybridOverlayExternalGw]
+	nsVTEP := ns.Annotations[types.HybridOverlayVTEP]
+	annotator := kube.NewPodAnnotator(k, pod)
+	if err := annotator.Set(types.HybridOverlayExternalGw, nsGw); err != nil {
+		return err
+	}
+	if err := annotator.Set(types.HybridOverlayVTEP, nsVTEP); err != nil {
+		return err
+	}
+	return annotator.Run()
 }

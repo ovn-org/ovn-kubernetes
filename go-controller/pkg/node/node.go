@@ -136,9 +136,16 @@ func isOVNControllerReady(name string) (bool, error) {
 	err = wait.PollImmediate(500*time.Millisecond, 60*time.Second, func() (bool, error) {
 		stdout, _, err := util.RunOVSOfctl("dump-aggregate", "br-int")
 		if err != nil {
+			klog.V(5).Infof("Error dumping aggregate flows: %v "+
+				"for node: %s", err, name)
 			return false, nil
 		}
-		return !strings.Contains(stdout, "flow_count=0"), nil
+		ret := strings.Contains(stdout, "flow_count=0")
+		if ret {
+			klog.V(5).Infof("Got a flow count of 0 when "+
+				"dumping flows for node: %s", name)
+		}
+		return !ret, nil
 	})
 	if err != nil {
 		return false, fmt.Errorf("timed out dumping br-int flow entries for node %s: %v", name, err)
@@ -225,9 +232,23 @@ func (n *OvnNode) Start() error {
 	klog.Infof("Gateway and management port readiness took %v", time.Since(start))
 
 	if config.HybridOverlay.Enabled {
-		if err := honode.StartNode(n.name, n.Kube, n.watchFactory, n.stopChan); err != nil {
+		factory := n.watchFactory.GetFactory()
+		nodeController, err := honode.NewNode(
+			n.Kube,
+			n.name,
+			factory.Core().V1().Nodes().Informer(),
+			factory.Core().V1().Pods().Informer(),
+			factory.Core().V1().Namespaces().Informer(),
+		)
+		if err != nil {
 			return err
 		}
+		go func() {
+			err := nodeController.Run(n.stopChan)
+			if err != nil {
+				klog.Error(err)
+			}
+		}()
 	}
 
 	if err := level.Set(strconv.Itoa(config.Logging.Level)); err != nil {

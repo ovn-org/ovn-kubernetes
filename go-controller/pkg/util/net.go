@@ -7,6 +7,9 @@ import (
 	"runtime"
 	"strconv"
 	"strings"
+
+	"k8s.io/klog"
+	utilnet "k8s.io/utils/net"
 )
 
 // NextIP returns IP incremented by 1
@@ -26,12 +29,18 @@ func intToIP(i *big.Int) net.IP {
 	return net.IP(i.Bytes())
 }
 
-// GetPortAddresses returns the MAC and IP of the given logical switch port
-func GetPortAddresses(portName string) (net.HardwareAddr, net.IP, error) {
-	out, stderr, err := RunOVNNbctl("get", "logical_switch_port", portName, "dynamic_addresses", "addresses")
+// GetPortAddresses returns the MAC and IPs of the given logical switch port
+func GetPortAddresses(portName string) (net.HardwareAddr, []net.IP, error) {
+	out, stderr, err := RunOVNNbctl("--if-exists", "get", "logical_switch_port", portName, "dynamic_addresses", "addresses")
 	if err != nil {
 		return nil, nil, fmt.Errorf("Error while obtaining dynamic addresses for %s: stdout: %q, stderr: %q, error: %v",
 			portName, out, stderr, err)
+	}
+
+	if out == "" {
+		klog.V(5).Infof("Port %s doesn't exist in the nbdb while fetching"+
+			" port addresses", portName)
+		return nil, nil, nil
 	}
 	// Convert \r\n to \n to support Windows line endings
 	out = strings.Replace(out, "\r\n", "\n", -1)
@@ -46,21 +55,26 @@ func GetPortAddresses(portName string) (net.HardwareAddr, net.IP, error) {
 	}
 
 	// dynamic addresses have format "0a:00:00:00:00:01 192.168.1.3"
+	// dynamic addresses dual stack  "0a:00:00:00:00:01 192.168.1.3 ae70::4"
 	// static addresses have format ["0a:00:00:00:00:01 192.168.1.3"]
 	outStr := strings.Trim(out, `"[]`)
 	addresses = strings.Split(outStr, " ")
-	if len(addresses) != 2 {
+	if len(addresses) < 2 {
 		return nil, nil, fmt.Errorf("Error while obtaining addresses for %s", portName)
-	}
-	ip := net.ParseIP(addresses[1])
-	if ip == nil {
-		return nil, nil, fmt.Errorf("failed to parse logical switch port %q IP %q", portName, addresses[1])
 	}
 	mac, err := net.ParseMAC(addresses[0])
 	if err != nil {
 		return nil, nil, fmt.Errorf("failed to parse logical switch port %q MAC %q: %v", portName, addresses[0], err)
 	}
-	return mac, ip, nil
+	var ips []net.IP
+	for _, addr := range addresses[1:] {
+		ip := net.ParseIP(addr)
+		if ip == nil {
+			return nil, nil, fmt.Errorf("failed to parse logical switch port %q IP %q", portName, addr)
+		}
+		ips = append(ips, ip)
+	}
+	return mac, ips, nil
 }
 
 // GetOVSPortMACAddress returns the MAC address of a given OVS port
@@ -149,4 +163,37 @@ func JoinIPNets(ipnets []*net.IPNet, sep string) string {
 		b.WriteString(ipnet.String())
 	}
 	return b.String()
+}
+
+// JoinIPNetIPs joins the string forms of an array of *net.IPNet,
+// as with strings.Join, but does not include the IP mask.
+func JoinIPNetIPs(ipnets []*net.IPNet, sep string) string {
+	b := &strings.Builder{}
+	for i, ipnet := range ipnets {
+		if i != 0 {
+			b.WriteString(sep)
+		}
+		b.WriteString(ipnet.IP.String())
+	}
+	return b.String()
+}
+
+// IPFamilyName returns IP Family string based on input flag.
+func IPFamilyName(isIPv6 bool) string {
+	if isIPv6 {
+		return "IPv6"
+	} else {
+		return "IPv4"
+	}
+}
+
+// MatchIPFamily loops through the array of *net.IPNet and returns the
+// first entry in the list in the same IP Family, based on input flag isIPv6.
+func MatchIPFamily(isIPv6 bool, subnets []*net.IPNet) (*net.IPNet, error) {
+	for _, subnet := range subnets {
+		if utilnet.IsIPv6CIDR(subnet) == isIPv6 {
+			return subnet, nil
+		}
+	}
+	return nil, fmt.Errorf("no %s subnet available", IPFamilyName(isIPv6))
 }

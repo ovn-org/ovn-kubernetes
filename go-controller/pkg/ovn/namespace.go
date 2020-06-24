@@ -6,6 +6,7 @@ import (
 	"time"
 
 	hotypes "github.com/ovn-org/ovn-kubernetes/go-controller/hybrid-overlay/pkg/types"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
 	kapi "k8s.io/api/core/v1"
 	utilwait "k8s.io/apimachinery/pkg/util/wait"
 	"k8s.io/klog"
@@ -27,11 +28,11 @@ func (oc *Controller) syncNamespaces(namespaces []interface{}) {
 		expectedNs[ns.Name] = true
 	}
 
-	err := oc.forEachAddressSetUnhashedName(func(addrSetName,
-		namespaceName, nameSuffix string) {
+	err := oc.addressSetFactory.ForEachAddressSet(func(addrSetName, namespaceName, nameSuffix string) {
 		if nameSuffix == "" && !expectedNs[namespaceName] {
-			// delete the address sets for this namespace from OVN
-			deleteAddressSet(hashedAddressSet(addrSetName))
+			if err := oc.addressSetFactory.DestroyAddressSetInBackingStore(addrSetName); err != nil {
+				klog.Errorf(err.Error())
+			}
 		}
 	})
 	if err != nil {
@@ -46,14 +47,12 @@ func (oc *Controller) addPodToNamespace(ns string, portInfo *lpInfo) error {
 	}
 	defer nsInfo.Unlock()
 
-	// If pod has already been added, nothing to do.
-	address := portInfo.ip.String()
-	if nsInfo.addressSet[address] != "" {
-		return nil
+	//FIXME DUAL-STACK
+	if len(portInfo.ips) > 0 {
+		if err := nsInfo.addressSet.AddIP(portInfo.ips[0].IP); err != nil {
+			return err
+		}
 	}
-
-	nsInfo.addressSet[address] = portInfo.name
-	addToAddressSet(hashedAddressSet(ns), address)
 
 	// If multicast is allowed and enabled for the namespace, add the port
 	// to the allow policy.
@@ -73,13 +72,12 @@ func (oc *Controller) deletePodFromNamespace(ns string, portInfo *lpInfo) error 
 	}
 	defer nsInfo.Unlock()
 
-	address := portInfo.ip.String()
-	if nsInfo.addressSet[address] == "" {
-		return nil
+	//FIXME DUAL-STACK
+	if len(portInfo.ips) > 0 {
+		if err := nsInfo.addressSet.DeleteIP(portInfo.ips[0].IP); err != nil {
+			return err
+		}
 	}
-
-	delete(nsInfo.addressSet, address)
-	removeFromAddressSet(hashedAddressSet(ns), address)
 
 	// Remove the port from the multicast allow policy.
 	if oc.multicastSupport && nsInfo.multicastEnabled {
@@ -107,28 +105,51 @@ func (oc *Controller) multicastUpdateNamespace(ns *kapi.Namespace, nsInfo *names
 	}
 
 	var err error
+	nsInfo.multicastEnabled = enabled
 	if enabled {
 		err = oc.createMulticastAllowPolicy(ns.Name, nsInfo)
 	} else {
-		err = deleteMulticastAllowPolicy(ns.Name)
+		err = deleteMulticastAllowPolicy(ns.Name, nsInfo)
 	}
 	if err != nil {
 		klog.Errorf(err.Error())
 		return
 	}
-
-	nsInfo.multicastEnabled = enabled
 }
 
 // Cleans up the multicast policy for this namespace if multicast was
 // previously allowed.
 func (oc *Controller) multicastDeleteNamespace(ns *kapi.Namespace, nsInfo *namespaceInfo) {
 	if nsInfo.multicastEnabled {
-		if err := deleteMulticastAllowPolicy(ns.Name); err != nil {
+		nsInfo.multicastEnabled = false
+		if err := deleteMulticastAllowPolicy(ns.Name, nsInfo); err != nil {
 			klog.Errorf(err.Error())
 		}
 	}
-	nsInfo.multicastEnabled = false
+}
+
+// updateNamepacePortGroup updates the port_group applied to the namespace. Multiple objects
+// that apply network configuration to all pods in a namespace will use the same port group.
+// This function ensures that the namespace wide port group will only be created once and
+// cleaned up when no object that relies on it exists.
+func (nsInfo *namespaceInfo) updateNamespacePortGroup(ns string) error {
+	if nsInfo.multicastEnabled {
+		if nsInfo.portGroupUUID != "" {
+			// Multicast is enabled and the port group exists so there is nothing to do.
+			return nil
+		}
+
+		// The port group should exist but doesn't so create it
+		portGroupUUID, err := createPortGroup(ns, hashedPortGroup(ns))
+		if err != nil {
+			return fmt.Errorf("Failed to create port_group for %s (%v)", ns, err)
+		}
+		nsInfo.portGroupUUID = portGroupUUID
+	} else {
+		deletePortGroup(hashedPortGroup(ns))
+		nsInfo.portGroupUUID = ""
+	}
+	return nil
 }
 
 // AddNamespace creates corresponding addressset in ovn db
@@ -139,16 +160,20 @@ func (oc *Controller) AddNamespace(ns *kapi.Namespace) {
 
 	// Get all the pods in the namespace and append their IP to the
 	// address_set
+	var ips []net.IP
 	existingPods, err := oc.watchFactory.GetPods(ns.Name)
-	addresses := make([]string, 0, len(existingPods))
 	if err != nil {
 		klog.Errorf("Failed to get all the pods (%v)", err)
 	} else {
+		ips = make([]net.IP, 0, len(existingPods))
 		for _, pod := range existingPods {
 			if pod.Status.PodIP != "" && !pod.Spec.HostNetwork {
-				portName := podLogicalPortName(pod)
-				nsInfo.addressSet[pod.Status.PodIP] = portName
-				addresses = append(addresses, pod.Status.PodIP)
+				podIPs, err := util.GetAllPodIPs(pod)
+				if err != nil {
+					klog.Warningf(err.Error())
+					continue
+				}
+				ips = append(ips, podIPs...)
 			}
 		}
 	}
@@ -172,9 +197,10 @@ func (oc *Controller) AddNamespace(ns *kapi.Namespace) {
 		}
 	}
 
-	// Create an address_set for the namespace.  All the pods' IP address
-	// in the namespace will be added to the address_set
-	createAddressSet(ns.Name, hashedAddressSet(ns.Name), addresses)
+	nsInfo.addressSet, err = oc.addressSetFactory.NewAddressSet(ns.Name, ips)
+	if err != nil {
+		klog.Errorf(err.Error())
+	}
 
 	oc.multicastUpdateNamespace(ns, nsInfo)
 }
@@ -197,6 +223,8 @@ func (oc *Controller) updateNamespace(old, newer *kapi.Namespace) {
 		} else {
 			nsInfo.hybridOverlayExternalGW = parsedAnnotation
 		}
+	} else {
+		nsInfo.hybridOverlayExternalGW = nil
 	}
 	annotation = newer.Annotations[hotypes.HybridOverlayVTEP]
 	if annotation != "" {
@@ -206,6 +234,8 @@ func (oc *Controller) updateNamespace(old, newer *kapi.Namespace) {
 		} else {
 			nsInfo.hybridOverlayVTEP = parsedAnnotation
 		}
+	} else {
+		nsInfo.hybridOverlayVTEP = nil
 	}
 	oc.multicastUpdateNamespace(newer, nsInfo)
 }
@@ -219,7 +249,6 @@ func (oc *Controller) deleteNamespace(ns *kapi.Namespace) {
 	}
 	defer nsInfo.Unlock()
 
-	deleteAddressSet(hashedAddressSet(ns.Name))
 	oc.multicastDeleteNamespace(ns, nsInfo)
 }
 
@@ -275,7 +304,6 @@ func (oc *Controller) createNamespaceLocked(ns string) *namespaceInfo {
 	defer oc.namespacesMutex.Unlock()
 
 	nsInfo := &namespaceInfo{
-		addressSet:       make(map[string]string),
 		networkPolicies:  make(map[string]*namespacePolicy),
 		multicastEnabled: false,
 	}
@@ -304,6 +332,9 @@ func (oc *Controller) deleteNamespaceLocked(ns string) *namespaceInfo {
 	if nsInfo != oc.namespaces[ns] {
 		nsInfo.Unlock()
 		return nil
+	}
+	if err := nsInfo.addressSet.Destroy(); err != nil {
+		klog.Errorf(err.Error())
 	}
 	delete(oc.namespaces, ns)
 

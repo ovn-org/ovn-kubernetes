@@ -142,7 +142,7 @@ func LinkNeighAdd(link netlink.Link, neighIP net.IP, neighMAC net.HardwareAddr) 
 		IP:           neighIP,
 		HardwareAddr: neighMAC,
 	}
-	err := netlink.NeighSet(neigh)
+	err := netlink.NeighAdd(neigh)
 	if err != nil {
 		return fmt.Errorf("failed to add neighbour entry %+v: %v", neigh, err)
 	}

@@ -1,4 +1,4 @@
-package allocator
+package subnetallocator
 
 import (
 	"fmt"
@@ -293,7 +293,7 @@ func TestAllocateSubnetInvalidHostBitsOrCIDR(t *testing.T) {
 func TestMarkAllocatedNetwork(t *testing.T) {
 	sna, err := newSubnetAllocator("10.1.0.0/16", 14)
 	if err != nil {
-		t.Fatal("Failed to initialize IP allocator: ", err)
+		t.Fatal("Failed to initialize subnet allocator: ", err)
 	}
 
 	allocSubnets := make([]*net.IPNet, 4)
@@ -328,7 +328,7 @@ func TestMarkAllocatedNetwork(t *testing.T) {
 func TestAllocateReleaseSubnet(t *testing.T) {
 	sna, err := newSubnetAllocator("10.1.0.0/16", 14)
 	if err != nil {
-		t.Fatal("Failed to initialize IP allocator: ", err)
+		t.Fatal("Failed to initialize subnet allocator: ", err)
 	}
 
 	var releaseSn *net.IPNet
@@ -372,7 +372,7 @@ func TestAllocateReleaseSubnet(t *testing.T) {
 func TestMultipleSubnets(t *testing.T) {
 	sna, err := newSubnetAllocator("10.1.0.0/16", 14)
 	if err != nil {
-		t.Fatal("Failed to initialize IP allocator: ", err)
+		t.Fatal("Failed to initialize subnet allocator: ", err)
 	}
 	err = sna.AddNetworkRange(ovntest.MustParseIPNet("10.2.0.0/16"), 14)
 	if err != nil {
@@ -419,7 +419,7 @@ func TestMultipleSubnets(t *testing.T) {
 func TestDualStack(t *testing.T) {
 	sna, err := newSubnetAllocator("10.1.0.0/16", 14)
 	if err != nil {
-		t.Fatal("Failed to initialize IP allocator: ", err)
+		t.Fatal("Failed to initialize subnet allocator: ", err)
 	}
 	err = sna.AddNetworkRange(ovntest.MustParseIPNet("10.2.0.0/16"), 14)
 	if err != nil {
@@ -468,8 +468,8 @@ func TestDualStack(t *testing.T) {
 		t.Fatalf("Failed to release the subnet %s: %v", sn.String(), err)
 	}
 
-	// The IPv4 allocator will now reuse the freed subnets (since they're all it has
-	// left), but the IPv6 allocator will continue allocating new ones.
+	// The IPv4 subnetallocator will now reuse the freed subnets (since they're all it has
+	// left), but the IPv6 subnetallocator will continue allocating new ones.
 	if err := allocateExpected(sna, -1, "10.1.128.0/18", "fd01:0:0:9::/64"); err != nil {
 		t.Fatal(err)
 	}
