@@ -244,7 +244,7 @@ func runOvnKube(ctx *cli.Context) error {
 		}
 		// register ovnkube node specific prometheus metrics exported by the node
 		metrics.RegisterNodeMetrics()
-		// register ovn specific (ovn-controller and ovn-northd) metrics
+		// register ovn specific (ovn-controller) metrics
 		metrics.RegisterOvnMetrics()
 		start := time.Now()
 		n := ovnnode.NewNode(clientset, factory, node, stopChan, util.EventRecorder(clientset))

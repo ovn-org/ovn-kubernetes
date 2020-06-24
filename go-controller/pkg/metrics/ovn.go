@@ -1,10 +1,89 @@
 package metrics
 
 import (
+	"fmt"
+	"k8s.io/klog"
 	"strings"
+	"time"
 
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
 	"github.com/prometheus/client_golang/prometheus"
+)
+
+// ovnController Configuration metrics
+var metricRemoteProbeInterval = prometheus.NewGauge(prometheus.GaugeOpts{
+	Namespace: MetricOvnNamespace,
+	Subsystem: MetricOvnSubsystemController,
+	Name:      "remote_probe_interval",
+	Help: "The maximum number of milliseconds of idle time on connection to " +
+		"the OVN SB DB before sending an inactivity probe message.",
+})
+
+var metricOpenFlowProbeInterval = prometheus.NewGauge(prometheus.GaugeOpts{
+	Namespace: MetricOvnNamespace,
+	Subsystem: MetricOvnSubsystemController,
+	Name:      "openflow_probe_interval",
+	Help: "The maximum number of milliseconds of idle time on OpenFlow connection " +
+		"to the OVS bridge before sending an inactivity probe message.",
+})
+
+var metricMonitorAll = prometheus.NewGauge(prometheus.GaugeOpts{
+	Namespace: MetricOvnNamespace,
+	Subsystem: MetricOvnSubsystemController,
+	Name:      "monitor_all",
+	Help: "Specifies if ovn-controller should monitor all records of tables in OVN SB DB. " +
+		"If set to false, it will conditionally monitor the records that " +
+		"is needed in the current chassis. Values are false(0), true(1).",
+})
+
+var metricEncapIP = prometheus.NewGaugeVec(prometheus.GaugeOpts{
+	Namespace: MetricOvnNamespace,
+	Subsystem: MetricOvnSubsystemController,
+	Name:      "encap_ip",
+	Help: "A metric with a constant '1' value labeled by ipadress that " +
+		"specifies the encapsulation ip address configured on that node.",
+},
+	[]string{
+		"ipaddress",
+	},
+)
+
+var metricSbConnectionMethod = prometheus.NewGaugeVec(prometheus.GaugeOpts{
+	Namespace: MetricOvnNamespace,
+	Subsystem: MetricOvnSubsystemController,
+	Name:      "sb_connection_method",
+	Help: "A metric with a constant '1' value labeled by connection_method that " +
+		"specifies the ovn-remote value configured on that node.",
+},
+	[]string{
+		"connection_method",
+	},
+)
+
+var metricEncapType = prometheus.NewGaugeVec(prometheus.GaugeOpts{
+	Namespace: MetricOvnNamespace,
+	Subsystem: MetricOvnSubsystemController,
+	Name:      "encap_type",
+	Help: "A metric with a constant '1' value labeled by type that " +
+		"specifies the encapsulation type a chassis should use to " +
+		"connect to this node.",
+},
+	[]string{
+		"type",
+	},
+)
+
+var metricBridgeMappings = prometheus.NewGaugeVec(prometheus.GaugeOpts{
+	Namespace: MetricOvnNamespace,
+	Subsystem: MetricOvnSubsystemController,
+	Name:      "bridge_mappings",
+	Help: "A metric with a constant '1' value labeled by mapping that " +
+		"specifies list of key-value pairs that map a physical network name " +
+		"to a local ovs bridge that provides connectivity to that network.",
+},
+	[]string{
+		"mapping",
+	},
 )
 
 var (
@@ -35,6 +114,188 @@ func getOvnVersionInfo() {
 	}
 }
 
+var ovnControllerCoverageShowMetricsMap = map[string]*metricDetails{
+	"lflow_run": {
+		help: "Number of times ovn-controller has translated " +
+			"the Logical_Flow table in the OVN " +
+			"SB database into OpenFlow flows.",
+	},
+	"rconn_sent": {
+		help: "Specifies the number of messages " +
+			"that have been sent to the underlying virtual " +
+			"connection (unix, tcp, or ssl) to OpenFlow devices.",
+	},
+	"rconn_queued": {
+		help: "Specifies the number of messages that have been " +
+			"queued because it couldn’t be sent using the " +
+			"underlying virtual connection to OpenFlow devices.",
+	},
+	"rconn_discarded": {
+		help: "Specifies the number of messages that " +
+			"have been dropped because the send queue " +
+			"had to be flushed because of reconnection.",
+	},
+	"rconn_overflow": {
+		help: "Specifies the number of messages that have " +
+			"been dropped because of the queue overflow.",
+	},
+	"vconn_open": {
+		help: "Specifies the number of attempts to connect " +
+			"to an OpenFlow Device.",
+	},
+	"vconn_sent": {
+		help: "Specifies the number of messages sent " +
+			"to the OpenFlow Device.",
+	},
+	"vconn_received": {
+		help: "Specifies the number of messages received " +
+			"from the OpenFlow Device.",
+	},
+	"stream_open": {
+		help: "Specifies the number of attempts to connect " +
+			"to a remote peer (active connection).",
+	},
+	"txn_success": {
+		help: "Specifies the number of times the OVSDB " +
+			"transaction has successfully completed.",
+	},
+	"txn_error": {
+		help: "Specifies the number of times the OVSDB " +
+			"transaction has errored out.",
+	},
+	"txn_uncommitted": {
+		help: "Specifies the number of times the OVSDB " +
+			"transaction were uncommitted.",
+	},
+	"txn_unchanged": {
+		help: "Specifies the number of times the OVSDB transaction " +
+			"resulted in no change to the database.",
+	},
+	"txn_incomplete": {
+		help: "Specifies the number of times the OVSDB transaction " +
+			"did not complete and the client had to re-try.",
+	},
+	"txn_aborted": {
+		help: "Specifies the number of times the OVSDB " +
+			" transaction has been aborted.",
+	},
+	"txn_try_again": {
+		help: "Specifies the number of times the OVSDB " +
+			"transaction failed and the client had to re-try.",
+	},
+	"netlink_sent": {
+		help: "Number of netlink message sent to the kernel.",
+	},
+	"netlink_received": {
+		help: "Number of netlink messages received by the kernel.",
+	},
+	"netlink_recv_jumbo": {
+		help: "Number of netlink messages that were received from" +
+			"the kernel were more than the allocated buffer.",
+	},
+	"netlink_overflow": {
+		help: "Netlink messages dropped by the daemon due " +
+			"to buffer overflow.",
+	},
+	"packet_in": {
+		help: "Specifies the number of times ovn-controller has " +
+			"handled the packet-ins from ovs-vswitchd.",
+	},
+}
+
+// setOvnControllerConfigurationMetrics updates ovn-controller configuration
+// values (ovn-openflow-probe-interval, ovn-remote-probe-interval, ovn-monitor-all,
+// ovn-encap-ip, ovn-encap-type, ovn-remote) through
+// "ovs-vsctl list --columns=external_ids Open_vSwitch ."
+func setOvnControllerConfigurationMetrics() (err error) {
+	var stdout, stderr string
+
+	defer func() {
+		if r := recover(); r != nil {
+			err = fmt.Errorf("recovering from panic while parsing the "+
+				"Open_vSwitch table's external_ids column - %v", r)
+		}
+	}()
+
+	stdout, stderr, err = util.RunOVSVsctl("--no-headings", "--data=bare",
+		"--columns=external_ids", "list", "Open_vSwitch", ".")
+	if err != nil {
+		return fmt.Errorf("failed to get Open_vSwitch table's external_ids column "+
+			"stderr(%s) : %v", stderr, err)
+	}
+
+	var ovnNodePortValue = 1
+	for _, kvPair := range strings.Fields(stdout) {
+		elem := strings.Split(kvPair, "=")
+		if len(elem) != 2 {
+			continue
+		}
+		fieldType := elem[0]
+		fieldValue := elem[1]
+		switch fieldType {
+		case "ovn-openflow-probe-interval":
+			metricValue := parseMetricToFloat(MetricOvnSubsystemController, "ovn-openflow-probe-interval", fieldValue)
+			metricOpenFlowProbeInterval.Set(metricValue)
+		case "ovn-remote-probe-interval":
+			metricValue := parseMetricToFloat(MetricOvnSubsystemController, "ovn-remote-probe-interval", fieldValue)
+			metricRemoteProbeInterval.Set(metricValue)
+		case "ovn-monitor-all":
+			var ovnMonitorValue float64
+			if fieldValue == "true" {
+				ovnMonitorValue = 1
+			}
+			metricMonitorAll.Set(ovnMonitorValue)
+		case "ovn-encap-ip":
+			metricEncapIP.WithLabelValues(fieldValue).Set(1)
+		case "ovn-remote":
+			metricSbConnectionMethod.WithLabelValues(fieldValue).Set(1)
+		case "ovn-encap-type":
+			metricEncapType.WithLabelValues(fieldValue).Set(1)
+		case "ovn-k8s-node-port":
+			if fieldValue == "false" {
+				ovnNodePortValue = 0
+			}
+		case "ovn-bridge-mappings":
+			metricBridgeMappings.WithLabelValues(fieldValue).Set(1)
+		}
+	}
+	metricOvnNodePortEnabled.Set(float64(ovnNodePortValue))
+	return nil
+}
+
+func ovnControllerConfigurationMetricsUpdater() {
+	for {
+		err := setOvnControllerConfigurationMetrics()
+		if err != nil {
+			klog.Errorf("%s", err.Error())
+		}
+		time.Sleep(30 * time.Second)
+	}
+}
+
+func getPortCount(portType string) float64 {
+	var portCount float64
+	stdout, stderr, err := util.RunOVSVsctl("--no-headings", "--data=bare", "--format=csv",
+		"--columns=name", "find", "interface", "type="+portType)
+	if err != nil {
+		klog.Errorf("Failed to get %s interface count, stderr(%s): (%v)", portType, stderr, err)
+		return 0
+	}
+	portNames := strings.Split(stdout, "\n")
+	switch portType {
+	case "patch":
+		for _, portName := range portNames {
+			if strings.Contains(portName, "br-int") {
+				portCount++
+			}
+		}
+	default:
+		portCount = float64(len(portNames))
+	}
+
+	return portCount
+}
+
 func RegisterOvnMetrics() {
 	getOvnVersionInfo()
 	prometheus.MustRegister(prometheus.NewGaugeFunc(
@@ -50,4 +311,95 @@ func RegisterOvnMetrics() {
 		},
 		func() float64 { return 1 },
 	))
+
+	// ovn-controller metrics
+	prometheus.MustRegister(prometheus.NewCounterFunc(
+		prometheus.CounterOpts{
+			Namespace: MetricOvnNamespace,
+			Subsystem: MetricOvnSubsystemController,
+			Name:      "integration_bridge_openflow_total",
+			Help:      "The total number of OpenFlow flows in the integration bridge.",
+		}, func() float64 {
+			stdout, stderr, err := util.RunOVSOfctl("-t", "5", "dump-aggregate", "br-int")
+			if err != nil {
+				klog.Errorf("Failed to get flow count for br-int, stderr(%s): (%v)",
+					stderr, err)
+				return 0
+			}
+			for _, kvPair := range strings.Fields(stdout) {
+				if strings.HasPrefix(kvPair, "flow_count=") {
+					value := strings.Split(kvPair, "=")[1]
+					return parseMetricToFloat(MetricOvnSubsystemController, "integration_bridge_openflow_total",
+						value)
+				}
+			}
+			return 0
+		}))
+	prometheus.MustRegister(prometheus.NewGaugeFunc(
+		prometheus.GaugeOpts{
+			Namespace: MetricOvnNamespace,
+			Subsystem: MetricOvnSubsystemController,
+			Name:      "packet_in_drop",
+			Help: "Specifies the number of times the ovn-controller has dropped the " +
+				"packet-ins from ovs-vswitchd due to resource constraints",
+		}, func() float64 {
+			coverageShowOutputMap, err := getCoverageShowOutputMap(ovnController)
+			if err != nil {
+				klog.Errorf("%s", err.Error())
+				return 0
+			}
+
+			packetInDropMetrics := []string{
+				"pinctrl_drop_put_mac_binding",
+				"pinctrl_drop_buffered_packets_map",
+				"pinctrl_drop_controller_event",
+				"pinctrl_drop_put_vport_binding",
+			}
+			var packetInDropMetricValue float64
+			for _, metricName := range packetInDropMetrics {
+				if value, ok := coverageShowOutputMap[metricName]; ok {
+					packetInDropMetricValue += parseMetricToFloat(MetricOvnSubsystemController,
+						metricName, value)
+				}
+			}
+			return packetInDropMetricValue
+		}))
+	prometheus.MustRegister(prometheus.NewGaugeFunc(
+		prometheus.GaugeOpts{
+			Namespace: MetricOvnNamespace,
+			Subsystem: MetricOvnSubsystemController,
+			Name:      "integration_bridge_patch_ports_total",
+			Help: "Captures the number of patch ports that connect br-int OVS " +
+				"bridge to physical OVS bridge and br-local OVS bridge.",
+		},
+		func() float64 {
+			return getPortCount("patch")
+		}))
+	prometheus.MustRegister(prometheus.NewGaugeFunc(
+		prometheus.GaugeOpts{
+			Namespace: MetricOvnNamespace,
+			Subsystem: MetricOvnSubsystemController,
+			Name:      "integration_bridge_geneve_ports_total",
+			Help:      "Captures the number of geneve ports that are on br-int OVS bridge.",
+		},
+		func() float64 {
+			return getPortCount("geneve")
+		}))
+
+	// register ovn-controller configuration metrics
+	prometheus.MustRegister(metricRemoteProbeInterval)
+	prometheus.MustRegister(metricOpenFlowProbeInterval)
+	prometheus.MustRegister(metricMonitorAll)
+	prometheus.MustRegister(metricEncapIP)
+	prometheus.MustRegister(metricSbConnectionMethod)
+	prometheus.MustRegister(metricEncapType)
+	prometheus.MustRegister(metricBridgeMappings)
+	// Register the ovn-controller coverage/show metrics
+	componentCoverageShowMetricsMap[ovnController] = ovnControllerCoverageShowMetricsMap
+	registerCoverageShowMetrics(ovnController, MetricOvnNamespace, MetricOvnSubsystemController)
+
+	// ovn-controller configuration metrics updater
+	go ovnControllerConfigurationMetricsUpdater()
+	// ovn-controller coverage show metrics updater
+	go coverageShowMetricsUpdater(ovnController)
 }
