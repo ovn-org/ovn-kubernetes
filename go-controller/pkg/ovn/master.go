@@ -877,12 +877,6 @@ func (oc *Controller) syncNodes(nodes []interface{}) {
 	// watchNodes() will be called for all existing nodes at startup anyway.
 	// Note that this list will include the 'join' cluster switch, which we
 	// do not want to delete.
-	var subnetAttr string
-	if config.IPv6Mode {
-		subnetAttr = "ipv6_prefix"
-	} else {
-		subnetAttr = "subnet"
-	}
 
 	chassisData, stderr, err := util.RunOVNSbctl("--data=bare", "--no-heading",
 		"--columns=name,hostname", "--format=json", "list", "Chassis")
@@ -904,8 +898,7 @@ func (oc *Controller) syncNodes(nodes []interface{}) {
 	}
 
 	nodeSwitches, stderr, err := util.RunOVNNbctl("--data=bare", "--no-heading",
-		"--columns=name,other-config", "find", "logical_switch",
-		"other-config:"+subnetAttr+"!=_")
+		"--columns=name,other-config", "find", "logical_switch")
 	if err != nil {
 		klog.Errorf("Failed to get node logical switches: stderr: %q, error: %v",
 			stderr, err)
@@ -949,6 +942,10 @@ func (oc *Controller) syncNodes(nodes []interface{}) {
 				subnets = append(subnets, subnet)
 			}
 		}
+		if len(subnets) == 0 {
+			continue
+		}
+
 		var tmp NodeSubnets
 		nodeSubnets, ok := NodeSubnetsMap[nodeName]
 		if !ok {
