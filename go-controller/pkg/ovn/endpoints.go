@@ -50,17 +50,15 @@ func (ovn *Controller) AddEndpoints(ep *kapi.Endpoints) error {
 	if err != nil {
 		// This is not necessarily an error. For e.g when there are endpoints
 		// without a corresponding service.
-		klog.V(5).Infof("No service found for endpoint %s in namespace %s",
-			ep.Name, ep.Namespace)
+		klog.V(5).Infof("No service found for endpoint %s in namespace %s", ep.Name, ep.Namespace)
 		return nil
 	}
 	if !util.IsClusterIPSet(svc) {
-		klog.V(5).Infof("Skipping service %s due to clusterIP = %q",
-			svc.Name, svc.Spec.ClusterIP)
+		klog.V(5).Infof("Skipping service %s due to clusterIP = %q", svc.Name, svc.Spec.ClusterIP)
 		return nil
 	}
-	klog.V(5).Infof("Matching service %s found for ep: %s, with cluster IP: %s", svc.Name, ep.Name,
-		svc.Spec.ClusterIP)
+
+	klog.V(5).Infof("Matching service %s found for ep: %s, with cluster IP: %s", svc.Name, ep.Name, svc.Spec.ClusterIP)
 
 	protoPortMap := ovn.getLbEndpoints(ep)
 	klog.V(5).Infof("Matching service %s ports: %v", svc.Name, svc.Spec.Ports)
@@ -74,8 +72,7 @@ func (ovn *Controller) AddEndpoints(ep *kapi.Endpoints) error {
 			continue
 		}
 		if util.ServiceTypeHasNodePort(svc) {
-			err = ovn.createGatewayVIPs(svcPort.Protocol, svcPort.NodePort, lbEps.IPs, lbEps.Port)
-			if err != nil {
+			if err := ovn.createGatewayVIPs(svcPort.Protocol, svcPort.NodePort, lbEps.IPs, lbEps.Port); err != nil {
 				klog.Errorf("Error in creating Node Port for svc %s, node port: %d - %v\n", svc.Name, svcPort.NodePort, err)
 				continue
 			}
@@ -101,11 +98,7 @@ func (ovn *Controller) AddEndpoints(ep *kapi.Endpoints) error {
 				for _, gateway := range gateways {
 					loadBalancer, err := ovn.getGatewayLoadBalancer(gateway, svcPort.Protocol)
 					if err != nil {
-						klog.Errorf("Physical gateway %s does not have load_balancer "+
-							"(%v)", gateway, err)
-						continue
-					}
-					if loadBalancer == "" {
+						klog.Errorf("Physical gateway %s does not have load_balancer (%v)", gateway, err)
 						continue
 					}
 					if err = ovn.createLoadBalancerVIPs(loadBalancer, svc.Spec.ExternalIPs, svcPort.Port, lbEps.IPs, lbEps.Port); err != nil {
