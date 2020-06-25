@@ -98,7 +98,6 @@ func defaultFakeExec(nodeSubnet, nodeName string, sctpSupport bool) (*ovntest.Fa
 		udpLBUUID  string = "6d3142fc-53e8-4ac1-88e6-46094a5a9957"
 		sctpLBUUID string = "0514c521-a120-4756-aec6-883fe5db7139"
 		mgmtMAC    string = "01:02:03:04:05:06"
-		dgpName    string = routerToSwitchPrefix + nodeLocalSwitch
 	)
 
 	fexec := ovntest.NewLooseCompareFakeExec()
@@ -107,36 +106,6 @@ func defaultFakeExec(nodeSubnet, nodeName string, sctpSupport bool) (*ovntest.Fa
 		"ovn-sbctl --timeout=15 --columns=_uuid list IGMP_Group",
 		"ovn-nbctl --timeout=15 -- --may-exist lr-add ovn_cluster_router -- set logical_router ovn_cluster_router external_ids:k8s-cluster-router=yes",
 	})
-	fexec.AddFakeCmd(&ovntest.ExpectedCmd{
-		Cmd:    "ovs-vsctl --timeout=15 --if-exists get Open_vSwitch . external_ids:system-id",
-		Output: "master-chassis-id",
-	})
-	dgpIP := ovntest.MustParseIP(util.V4NodeLocalDistributedGwPortIP)
-	dgPMAC := util.IPAddrToHWAddr(dgpIP).String()
-	nextHopMAC := util.IPAddrToHWAddr(ovntest.MustParseIP(util.V4NodeLocalNatSubnetNextHop)).String()
-	dgpIPCIDR := fmt.Sprintf("%s/%d", dgpIP.String(), util.V4NodeLocalNatSubnetPrefix)
-	fexec.AddFakeCmdsNoOutputNoError([]string{
-		"ovn-nbctl --timeout=15 --may-exist lrp-add " + ovnClusterRouter + " " + dgpName + " " + dgPMAC + " " + dgpIPCIDR +
-			" -- --id=@gw create gateway_chassis chassis_name=master-chassis-id external_ids:dgp_name=" + dgpName + " name=" + dgpName + "_master-chassis-id priority=100" +
-			" -- set logical_router_port " + dgpName + " gateway_chassis=@gw",
-		"ovn-nbctl --timeout=15 --may-exist ls-add " + nodeLocalSwitch +
-			" -- --may-exist lsp-add " + nodeLocalSwitch + " lnet-" + nodeLocalSwitch +
-			" -- set logical_switch_port lnet-" + nodeLocalSwitch + " addresses=unknown type=localnet options:network_name=locnet" +
-			" -- --may-exist lsp-add " + nodeLocalSwitch + " " + switchToRouterPrefix + nodeLocalSwitch +
-			" -- set logical_switch_port " + switchToRouterPrefix + nodeLocalSwitch + " type=router addresses=router options:nat-addresses=router options:router-port=" + dgpName,
-	})
-	fexec.AddFakeCmd(&ovntest.ExpectedCmd{
-		Cmd:    "ovn-sbctl --timeout=15 --data=bare --no-heading --columns=_uuid find MAC_Binding logical_port=" + dgpName + " mac=\"" + nextHopMAC + "\"",
-		Output: "",
-	})
-	fexec.AddFakeCmd(&ovntest.ExpectedCmd{
-		Cmd:    "ovn-sbctl --timeout=15 --data=bare --no-heading --columns=_uuid find datapath external_ids:name=" + ovnClusterRouter,
-		Output: "ovn_cluster_router_uuid",
-	})
-	fexec.AddFakeCmdsNoOutputNoError([]string{
-		"ovn-sbctl --timeout=15 create mac_binding datapath=ovn_cluster_router_uuid ip=" + util.V4NodeLocalNatSubnetNextHop + " logical_port=" + dgpName + " mac=\"" + nextHopMAC + "\"",
-	})
-
 	if sctpSupport {
 		fexec.AddFakeCmd(&ovntest.ExpectedCmd{
 			Cmd:    "ovsdb-client list-columns  --data=bare --no-heading --format=json OVN_Northbound Load_Balancer",
@@ -313,7 +282,6 @@ var _ = Describe("Master Operations", func() {
 
 			_, err = config.InitConfig(ctx, fexec, nil)
 			Expect(err).NotTo(HaveOccurred())
-			config.Gateway.Mode = config.GatewayModeShared
 
 			nodeAnnotator := kube.NewNodeAnnotator(&kube.Kube{fakeClient}, &testNode)
 			err = util.SetL3GatewayConfig(nodeAnnotator, &util.L3GatewayConfig{Mode: config.GatewayModeDisabled})
@@ -396,7 +364,6 @@ var _ = Describe("Master Operations", func() {
 
 			_, err = config.InitConfig(ctx, fexec, nil)
 			Expect(err).NotTo(HaveOccurred())
-			config.Gateway.Mode = config.GatewayModeShared
 
 			nodeAnnotator := kube.NewNodeAnnotator(&kube.Kube{fakeClient}, &testNode)
 			err = util.SetL3GatewayConfig(nodeAnnotator, &util.L3GatewayConfig{Mode: config.GatewayModeDisabled})
@@ -479,7 +446,6 @@ var _ = Describe("Master Operations", func() {
 
 			_, err = config.InitConfig(ctx, fexec, nil)
 			Expect(err).NotTo(HaveOccurred())
-			config.Gateway.Mode = config.GatewayModeShared
 
 			nodeAnnotator := kube.NewNodeAnnotator(&kube.Kube{fakeClient}, &testNode)
 			err = util.SetL3GatewayConfig(nodeAnnotator, &util.L3GatewayConfig{Mode: config.GatewayModeDisabled})
