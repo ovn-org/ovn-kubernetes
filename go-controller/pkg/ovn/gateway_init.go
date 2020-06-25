@@ -244,7 +244,7 @@ func gatewayInit(nodeName string, clusterIPSubnet []*net.IPNet, hostSubnets []*n
 			"stderr: %q, error: %v", gatewayRouter, stdout, stderr, err)
 	}
 
-	// Add static routes in GR with physical gateway as the default next hop.
+	// Add static routes in GR with gateway router as the default next hop.
 	for _, nextHop := range l3GatewayConfig.NextHops {
 		var allIPs string
 		if utilnet.IsIPv6(nextHop) {

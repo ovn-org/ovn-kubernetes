@@ -81,7 +81,7 @@ func (ovn *Controller) AddEndpoints(ep *kapi.Endpoints) error {
 			var loadBalancer string
 			loadBalancer, err = ovn.getLoadBalancer(svcPort.Protocol)
 			if err != nil {
-				klog.Errorf("Failed to get loadbalancer for %s (%v)", svcPort.Protocol, err)
+				klog.Errorf("Failed to get load balancer for %s (%v)", svcPort.Protocol, err)
 				continue
 			}
 			if err = ovn.createLoadBalancerVIPs(loadBalancer, []string{svc.Spec.ClusterIP}, svcPort.Port, lbEps.IPs, lbEps.Port); err != nil {
@@ -98,7 +98,7 @@ func (ovn *Controller) AddEndpoints(ep *kapi.Endpoints) error {
 				for _, gateway := range gateways {
 					loadBalancer, err := ovn.getGatewayLoadBalancer(gateway, svcPort.Protocol)
 					if err != nil {
-						klog.Errorf("Physical gateway %s does not have load_balancer (%v)", gateway, err)
+						klog.Errorf("Gateway router %s does not have load balancer (%v)", gateway, err)
 						continue
 					}
 					if err = ovn.createLoadBalancerVIPs(loadBalancer, svc.Spec.ExternalIPs, svcPort.Port, lbEps.IPs, lbEps.Port); err != nil {
@@ -112,9 +112,9 @@ func (ovn *Controller) AddEndpoints(ep *kapi.Endpoints) error {
 }
 
 func (ovn *Controller) handleNodePortLB(node *kapi.Node) error {
-	physicalGateway := gwRouterPrefix + node.Name
+	gatewayRouter := gwRouterPrefix + node.Name
 	var physicalIPs []string
-	if physicalIPs, _ = ovn.getGatewayPhysicalIPs(physicalGateway); physicalIPs == nil {
+	if physicalIPs, _ = ovn.getGatewayPhysicalIPs(gatewayRouter); physicalIPs == nil {
 		return fmt.Errorf("gateway physical IP for node %q does not yet exist", node.Name)
 	}
 	namespaces, err := ovn.watchFactory.GetNamespaces()
@@ -141,7 +141,7 @@ func (ovn *Controller) handleNodePortLB(node *kapi.Node) error {
 				if !isFound {
 					continue
 				}
-				k8sNSLb, _ := ovn.getGatewayLoadBalancer(physicalGateway, svcPort.Protocol)
+				k8sNSLb, _ := ovn.getGatewayLoadBalancer(gatewayRouter, svcPort.Protocol)
 				if k8sNSLb == "" {
 					return fmt.Errorf("%s load balancer for node %q does not yet exist", svcPort.Protocol, node.Name)
 				}
@@ -173,7 +173,7 @@ func (ovn *Controller) deleteEndpoints(ep *kapi.Endpoints) error {
 		var lb string
 		lb, err = ovn.getLoadBalancer(svcPort.Protocol)
 		if err != nil {
-			klog.Errorf("Failed to get load-balancer for %s (%v)", lb, err)
+			klog.Errorf("Failed to get load balancer for %s (%v)", lb, err)
 			continue
 		}
 
