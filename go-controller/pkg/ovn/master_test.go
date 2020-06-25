@@ -122,8 +122,8 @@ func defaultFakeExec(nodeSubnet, nodeName string, sctpSupport bool) (*ovntest.Fa
 		"ovn-nbctl --timeout=15 --may-exist ls-add " + nodeLocalSwitch +
 			" -- --may-exist lsp-add " + nodeLocalSwitch + " lnet-" + nodeLocalSwitch +
 			" -- set logical_switch_port lnet-" + nodeLocalSwitch + " addresses=unknown type=localnet options:network_name=locnet" +
-			" -- --may-exist lsp-add " + nodeLocalSwitch + " ltos-" + nodeLocalSwitch +
-			" -- set logical_switch_port ltos-" + nodeLocalSwitch + " type=router addresses=router options:nat-addresses=router options:router-port=" + dgpName,
+			" -- --may-exist lsp-add " + nodeLocalSwitch + " " + switchToRouterPrefix + nodeLocalSwitch +
+			" -- set logical_switch_port " + switchToRouterPrefix + nodeLocalSwitch + " type=router addresses=router options:nat-addresses=router options:router-port=" + dgpName,
 	})
 	fexec.AddFakeCmd(&ovntest.ExpectedCmd{
 		Cmd:    "ovn-sbctl --timeout=15 --data=bare --no-heading --columns=_uuid find MAC_Binding logical_port=" + dgpName + " mac=\"" + nextHopMAC + "\"",

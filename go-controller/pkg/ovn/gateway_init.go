@@ -340,7 +340,7 @@ func addDistributedGWPort() error {
 		"--", "set", "logical_switch_port", lclNetPortname, "addresses=unknown", "type=localnet",
 		"options:network_name="+util.LocalNetworkName)
 	// connect the switch to the distributed router
-	lspName := "ltos-" + nodeLocalSwitch
+	lspName := switchToRouterPrefix + nodeLocalSwitch
 	nbctlArgs = append(nbctlArgs,
 		"--", "--may-exist", "lsp-add", nodeLocalSwitch, lspName,
 		"--", "set", "logical_switch_port", lspName, "type=router", "addresses=router",
