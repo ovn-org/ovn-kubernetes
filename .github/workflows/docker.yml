@@ -31,5 +31,5 @@ jobs:
         echo "::add-path::$GOPATH/bin"
 
     - name: Build images
+      run: |
         make -C dist/images all
-
