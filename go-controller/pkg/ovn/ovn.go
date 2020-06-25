@@ -91,11 +91,6 @@ type Controller struct {
 	// cluster's east-west traffic.
 	loadbalancerClusterCache map[kapi.Protocol]string
 
-	// For TCP and UDP type traffice, cache OVN load balancer that exists on the
-	// default gateway
-	loadbalancerGWCache map[kapi.Protocol]string
-	defGatewayRouter    string
-
 	// A cache of all logical switches seen by the watcher and their subnets
 	lsManager *logicalSwitchManager
 
@@ -180,7 +175,6 @@ func NewOvnController(kubeClient kubernetes.Interface, wf *factory.WatchFactory,
 		lspEgressDenyCache:       make(map[string]int),
 		lspMutex:                 &sync.Mutex{},
 		loadbalancerClusterCache: make(map[kapi.Protocol]string),
-		loadbalancerGWCache:      make(map[kapi.Protocol]string),
 		multicastSupport:         config.EnableMulticast,
 		serviceVIPToName:         make(map[ServiceVIPKey]types.NamespacedName),
 		serviceVIPToNameLock:     sync.Mutex{},
@@ -700,14 +694,6 @@ func (oc *Controller) WatchNodes() error {
 			addNodeFailed.Delete(node.Name)
 			mgmtPortFailed.Delete(node.Name)
 			gatewaysFailed.Delete(node.Name)
-			// If this node was serving the external IP load balancer for services, migrate to a new node
-			if oc.defGatewayRouter == gwRouterPrefix+node.Name {
-				delete(oc.loadbalancerGWCache, kapi.ProtocolTCP)
-				delete(oc.loadbalancerGWCache, kapi.ProtocolUDP)
-				delete(oc.loadbalancerGWCache, kapi.ProtocolSCTP)
-				oc.defGatewayRouter = ""
-				oc.updateExternalIPsLB()
-			}
 		},
 	}, oc.syncNodes)
 	if err == nil {
