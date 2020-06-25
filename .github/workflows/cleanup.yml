@@ -1,0 +1,17 @@
+name: cleanup
+on:
+  schedule:
+    - cron:  '*/15 * * * *'
+
+jobs:
+  cleanup:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out code
+        uses: actions/checkout@v2
+
+      - name: Cleanup
+        uses: ./.github/actions/cleanup-action
+        with:
+          token: ${{ secrets.REPO_ACCESS_TOKEN }}
+          workflow_id: 926245
