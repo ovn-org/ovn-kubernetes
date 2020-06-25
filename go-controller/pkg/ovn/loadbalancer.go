@@ -51,7 +51,7 @@ func (ovn *Controller) getLoadBalancerVIPs(loadBalancer string) (map[string]inte
 		return nil, err
 	}
 	if outStr == "" {
-		return nil, nil
+		return nil, fmt.Errorf("loadBalancer vips in OVN DB is an empty string")
 	}
 	// sample outStr:
 	// - {"192.168.0.1:80"="10.1.1.1:80,10.2.2.2:80"}
