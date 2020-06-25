@@ -8,6 +8,8 @@ import (
 	"net"
 	"os"
 
+	"k8s.io/klog"
+
 	"github.com/vishvananda/netlink"
 
 	utilnet "k8s.io/utils/net"
@@ -166,4 +168,26 @@ func LinkNeighExists(link netlink.Link, neighIP net.IP, neighMAC net.HardwareAdd
 		}
 	}
 	return false, nil
+}
+
+func DeleteConntrack(ip string) {
+	ipAddress := net.ParseIP(ip)
+	if ipAddress == nil {
+		klog.Errorf("Value \"%s\" passed to DeleteConntrack is not an IP address", ipAddress)
+	}
+
+	filter := &netlink.ConntrackFilter{}
+	err := filter.AddIP(netlink.ConntrackReplyAnyIP, ipAddress)
+	if err != nil {
+		klog.Warningf("could not add IP: %s to conntrack filter: %v", ipAddress, err)
+		return
+	}
+	if ipAddress.To4() != nil {
+		_, err = netlink.ConntrackDeleteFilter(netlink.ConntrackTable, netlink.FAMILY_V4, filter)
+	} else {
+		_, err = netlink.ConntrackDeleteFilter(netlink.ConntrackTable, netlink.FAMILY_V6, filter)
+	}
+	if err != nil {
+		klog.Errorf("failed to delete Conntrack entry: %v", err)
+	}
 }
