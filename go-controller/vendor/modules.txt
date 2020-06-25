@@ -176,10 +176,10 @@ github.com/stretchr/testify/assert
 github.com/stretchr/testify/mock
 # github.com/urfave/cli/v2 v2.2.0
 github.com/urfave/cli/v2
-# github.com/vishvananda/netlink v0.0.0-20181108222139-023a6dafdcdf
+# github.com/vishvananda/netlink v0.0.0-20200625175047-bca67dfc8220
 github.com/vishvananda/netlink
 github.com/vishvananda/netlink/nl
-# github.com/vishvananda/netns v0.0.0-20180720170159-13995c7128cc
+# github.com/vishvananda/netns v0.0.0-20191106174202-0a2b9b5464df
 github.com/vishvananda/netns
 # go.opencensus.io v0.22.0
 go.opencensus.io
@@ -202,7 +202,7 @@ golang.org/x/net/idna
 # golang.org/x/oauth2 v0.0.0-20190604053449-0f29369cfe45
 golang.org/x/oauth2
 golang.org/x/oauth2/internal
-# golang.org/x/sys v0.0.0-20200120151820-655fe14d7479
+# golang.org/x/sys v0.0.0-20200121082415-34d275377bf9
 golang.org/x/sys/unix
 golang.org/x/sys/windows
 golang.org/x/sys/windows/registry
