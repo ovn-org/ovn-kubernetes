@@ -8,6 +8,7 @@ import (
 	"syscall"
 
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
+	kapi "k8s.io/api/core/v1"
 
 	"github.com/vishvananda/netlink"
 )
@@ -55,6 +56,6 @@ func getIntfName(gatewayIntf string) (string, error) {
 	return intfName, nil
 }
 
-func deleteConntrack(ip string) {
-	util.DeleteConntrack(ip)
+func deleteConntrack(ip string, port int32, protocol kapi.Protocol) error {
+	return util.DeleteConntrack(ip, port, protocol)
 }

@@ -8,7 +8,7 @@ import (
 	"net"
 	"os"
 
-	"k8s.io/klog"
+	kapi "k8s.io/api/core/v1"
 
 	"github.com/vishvananda/netlink"
 
@@ -170,25 +170,40 @@ func LinkNeighExists(link netlink.Link, neighIP net.IP, neighMAC net.HardwareAdd
 	return false, nil
 }
 
-func DeleteConntrack(ip string) {
+func DeleteConntrack(ip string, port int32, protocol kapi.Protocol) error {
 	ipAddress := net.ParseIP(ip)
 	if ipAddress == nil {
-		klog.Errorf("Value \"%s\" passed to DeleteConntrack is not an IP address", ipAddress)
-		return
+		return fmt.Errorf("value %q passed to DeleteConntrack is not an IP address", ipAddress)
 	}
 
 	filter := &netlink.ConntrackFilter{}
-	err := filter.AddIP(netlink.ConntrackReplyAnyIP, ipAddress)
-	if err != nil {
-		klog.Warningf("Could not add IP: %s to conntrack filter: %v", ipAddress, err)
-		return
+	if protocol == kapi.ProtocolUDP {
+		// 17 = UDP protocol
+		if err := filter.AddProtocol(17); err != nil {
+			return fmt.Errorf("could not add Protocol UDP to conntrack filter %v", err)
+		}
+	} else if protocol == kapi.ProtocolSCTP {
+		// 132 = SCTP protocol
+		if err := filter.AddProtocol(132); err != nil {
+			return fmt.Errorf("could not add Protocol SCTP to conntrack filter %v", err)
+		}
+	}
+	if port > 0 {
+		if err := filter.AddPort(netlink.ConntrackOrigDstPort, uint16(port)); err != nil {
+			return fmt.Errorf("could not add port %d to conntrack filter: %v", port, err)
+		}
+	}
+	if err := filter.AddIP(netlink.ConntrackReplyAnyIP, ipAddress); err != nil {
+		return fmt.Errorf("could not add IP: %s to conntrack filter: %v", ipAddress, err)
 	}
 	if ipAddress.To4() != nil {
-		_, err = netlink.ConntrackDeleteFilter(netlink.ConntrackTable, netlink.FAMILY_V4, filter)
+		if _, err := netlink.ConntrackDeleteFilter(netlink.ConntrackTable, netlink.FAMILY_V4, filter); err != nil {
+			return err
+		}
 	} else {
-		_, err = netlink.ConntrackDeleteFilter(netlink.ConntrackTable, netlink.FAMILY_V6, filter)
+		if _, err := netlink.ConntrackDeleteFilter(netlink.ConntrackTable, netlink.FAMILY_V6, filter); err != nil {
+			return err
+		}
 	}
-	if err != nil {
-		klog.Errorf("Failed to delete Conntrack entry: %v", err)
-	}
+	return nil
 }
