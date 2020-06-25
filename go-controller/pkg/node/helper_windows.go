@@ -31,7 +31,3 @@ func getIntfName(gatewayIntf string) (string, error) {
 	}
 	return intfName, nil
 }
-
-func deleteConntrack(ip string) {
-	//conntrack deletion not supported in windows
-}
