@@ -1,10 +1,7 @@
 package ovn
 
 import (
-	"bytes"
 	"fmt"
-	"net"
-	"sort"
 	"strings"
 
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
@@ -141,53 +138,29 @@ func (ovn *Controller) deleteGatewayVIPs(protocol kapi.Protocol, sourcePort int3
 	}
 }
 
-// getDefaultGatewayRouterIP returns the first gateway logical router name
-// and IP address as listed in the OVN database
-func getDefaultGatewayRouterIP() (string, net.IP, error) {
-	stdout, stderr, err := util.RunOVNNbctl("--data=bare", "--format=table",
-		"--no-heading", "--columns=name,options", "find", "logical_router",
-		"options:lb_force_snat_ip!=-")
+func (ovn *Controller) deleteExternalVIPs(service *kapi.Service, svcPort kapi.ServicePort) error {
+	if len(service.Spec.ExternalIPs) == 0 {
+		return nil
+	}
+	gateways, stderr, err := ovn.getOvnGateways()
 	if err != nil {
-		return "", nil, fmt.Errorf("failed to get logical routers, stdout: %q, "+
-			"stderr: %q, err: %v", stdout, stderr, err)
+		return fmt.Errorf("error: failed to get ovn gateways, stderr: %s, err: %v)", stderr, err)
 	}
-	// Convert \r\n to \n to support Windows line endings
-	stdout = strings.Replace(strings.TrimSpace(stdout), "\r\n", "\n", -1)
-	gatewayRouters := strings.Split(stdout, "\n")
-	if len(gatewayRouters) == 0 {
-		return "", nil, fmt.Errorf("failed to get default gateway router (no routers found)")
-	}
-
-	type gwRouter struct {
-		name string
-		ip   net.IP
-	}
-
-	// Get the list of all gateway router names and IPs
-	routers := make([]gwRouter, 0, len(gatewayRouters))
-	for _, gwRouterLine := range gatewayRouters {
-		parts := strings.Fields(gwRouterLine)
-		for _, p := range parts {
-			const forceTag string = "lb_force_snat_ip="
-			if strings.HasPrefix(p, forceTag) {
-				ipStr := p[len(forceTag):]
-				if ip := net.ParseIP(ipStr); ip != nil {
-					routers = append(routers, gwRouter{parts[0], ip})
-				} else {
-					klog.Warningf("Failed to parse gateway router %q IP %q", parts[0], ipStr)
-				}
+	for _, extIP := range service.Spec.ExternalIPs {
+		klog.V(5).Infof("Searching to remove ExternalIP VIPs - %s, %d", svcPort.Protocol, svcPort.Port)
+		for _, gateway := range gateways {
+			loadBalancer, err := ovn.getGatewayLoadBalancer(gateway, svcPort.Protocol)
+			if err != nil {
+				klog.Errorf("Physical gateway: %s does not have load balancer, err: %v", gateway, err)
+				continue
+			}
+			vip := util.JoinHostPortInt32(extIP, svcPort.Port)
+			if err := ovn.deleteLoadBalancerVIP(loadBalancer, vip); err != nil {
+				klog.Error(err)
 			}
 		}
 	}
-	if len(routers) == 0 {
-		return "", nil, fmt.Errorf("failed to parse gateway routers")
-	}
-
-	// Stably sort the list
-	sort.Slice(routers, func(i, j int) bool {
-		return bytes.Compare(routers[i].ip, routers[j].ip) < 0
-	})
-	return routers[0].name, routers[0].ip, nil
+	return nil
 }
 
 // getGatewayLoadBalancers find TCP, SCTP, UDP load-balancers from gateway router.

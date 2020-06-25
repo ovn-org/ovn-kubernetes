@@ -27,13 +27,14 @@ func newServiceMeta(name, namespace string) metav1.ObjectMeta {
 	}
 }
 
-func newService(name, namespace, ip string, ports []v1.ServicePort, serviceType v1.ServiceType) *v1.Service {
+func newService(name, namespace, ip string, ports []v1.ServicePort, serviceType v1.ServiceType, externalIPs []string) *v1.Service {
 	return &v1.Service{
 		ObjectMeta: newServiceMeta(name, namespace),
 		Spec: v1.ServiceSpec{
-			ClusterIP: ip,
-			Ports:     ports,
-			Type:      serviceType,
+			ClusterIP:   ip,
+			Ports:       ports,
+			Type:        serviceType,
+			ExternalIPs: externalIPs,
 		},
 	}
 }
@@ -165,6 +166,7 @@ var _ = Describe("OVN Namespace Operations", func() {
 						},
 					},
 					v1.ServiceTypeClusterIP,
+					nil,
 				)
 
 				test.baseCmds(fExec, service)
@@ -202,6 +204,7 @@ var _ = Describe("OVN Namespace Operations", func() {
 						},
 					},
 					v1.ServiceTypeClusterIP,
+					nil,
 				)
 
 				test.baseCmds(fExec, service)

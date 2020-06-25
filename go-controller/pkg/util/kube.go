@@ -3,9 +3,10 @@ package util
 import (
 	"encoding/json"
 	"fmt"
+	"strings"
+
 	"k8s.io/client-go/tools/record"
 	"k8s.io/klog"
-	"strings"
 
 	kapi "k8s.io/api/core/v1"
 	"k8s.io/client-go/kubernetes"
@@ -66,12 +67,20 @@ func IsClusterIPSet(service *kapi.Service) bool {
 	return service.Spec.ClusterIP != kapi.ClusterIPNone && service.Spec.ClusterIP != ""
 }
 
-// ValidateProtocol checks if the protocol is a valid kapi.Protocol type (TCP, UDP, or SCTP) or returns an error
-func ValidateProtocol(proto kapi.Protocol) (kapi.Protocol, error) {
-	if proto == kapi.ProtocolTCP || proto == kapi.ProtocolUDP || proto == kapi.ProtocolSCTP {
-		return proto, nil
+// ValidatePort checks if the port is non-zero and port protocol is valid
+func ValidatePort(proto kapi.Protocol, port int32) error {
+	if port <= 0 || port > 65535 {
+		return fmt.Errorf("invalid port number: %v", port)
 	}
-	return "", fmt.Errorf("protocol %s is not a valid protocol", proto)
+	return ValidateProtocol(proto)
+}
+
+// ValidateProtocol checks if the protocol is a valid kapi.Protocol type (TCP, UDP, or SCTP) or returns an error
+func ValidateProtocol(proto kapi.Protocol) error {
+	if proto == kapi.ProtocolTCP || proto == kapi.ProtocolUDP || proto == kapi.ProtocolSCTP {
+		return nil
+	}
+	return fmt.Errorf("protocol %s is not a valid protocol", proto)
 }
 
 // ServiceTypeHasClusterIP checks if the service has an associated ClusterIP or not
