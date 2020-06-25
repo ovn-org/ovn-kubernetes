@@ -13,10 +13,10 @@ import (
 func initLocalnetGateway(nodeName string, subnet *net.IPNet,
 	wf *factory.WatchFactory, nodeAnnotator kube.Annotator) error {
 	// TODO: Implement this
-	return fmt.Errorf("Not implemented yet on Windows")
+	return fmt.Errorf("not implemented yet on Windows")
 }
 
 func cleanupLocalnetGateway(string) error {
 	// TODO: Implement this
-	return fmt.Errorf("Not implemented yet on Windows")
+	return fmt.Errorf("not implemented yet on Windows")
 }

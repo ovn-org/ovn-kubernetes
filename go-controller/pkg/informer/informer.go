@@ -86,12 +86,10 @@ func NewDefaultEventHandler(
 	}
 	informer.AddEventHandler(cache.ResourceEventHandlerFuncs{
 		AddFunc: func(obj interface{}) {
-			fmt.Println("got add from cache")
 			// always enqueue adds
 			e.enqueue(obj)
 		},
 		UpdateFunc: func(old, new interface{}) {
-			fmt.Println("got update from cache")
 			oldObj := old.(metav1.Object)
 			newObj := new.(metav1.Object)
 			// Make sure object is not set for deletion and was actually changed
@@ -104,7 +102,6 @@ func NewDefaultEventHandler(
 			}
 		},
 		DeleteFunc: func(obj interface{}) {
-			fmt.Println("got delete from cache")
 			// dispatch to enqueueDelete to ensure deleted items are handled properly
 			e.enqueueDelete(obj)
 		},
@@ -131,24 +128,24 @@ func (e *eventHandler) Run(threadiness int, stopCh <-chan struct{}) error {
 	defer utilruntime.HandleCrash()
 	defer e.workqueue.ShutDown()
 
-	klog.Infof("starting %s informer queue", e.name)
+	klog.Infof("Starting %s informer queue", e.name)
 
-	klog.Infof("waiting for %s informer caches to sync", e.name)
+	klog.Infof("Waiting for %s informer caches to sync", e.name)
 	// wait for caches to be in sync before we start the workers
 	if ok := cache.WaitForCacheSync(stopCh, e.informer.HasSynced); !ok {
 		return fmt.Errorf("failed to wait for %s caches to sync", e.name)
 	}
 
-	klog.Infof("starting %d %s queue workers", threadiness, e.name)
+	klog.Infof("Starting %d %s queue workers", threadiness, e.name)
 	// start our worker threads
 	for j := 0; j < threadiness; j++ {
 		go wait.Until(e.runWorker, time.Second, stopCh)
 	}
 
-	klog.Infof("started %s queue workers", e.name)
+	klog.Infof("Started %s queue workers", e.name)
 	// wait until the channel is closed
 	<-stopCh
-	klog.Infof("shutting down %s queue workers", e.name)
+	klog.Infof("Shutting down %s queue workers", e.name)
 
 	return nil
 }
@@ -234,7 +231,7 @@ func (e *eventHandler) processNextWorkItem() bool {
 		// Finally, if no error occurs we Forget this item so it does not
 		// get queued again until another change happens.
 		e.workqueue.Forget(obj)
-		klog.Infof("successfully synced '%s'", key)
+		klog.Infof("Successfully synced '%s'", key)
 
 		return nil
 	}(obj)

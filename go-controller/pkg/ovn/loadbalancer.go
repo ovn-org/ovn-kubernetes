@@ -121,7 +121,7 @@ func (ovn *Controller) configureLoadBalancer(lb, sourceIP string, sourcePort int
 			"stdout: %q, stderr: %q, error: %v", lb, out, stderr, err)
 	}
 	ovn.setServiceEndpointsToLB(lb, vip, targets)
-	klog.V(5).Infof("lb entry set for %s, %s, %v", lb, lbTarget,
+	klog.V(5).Infof("LB entry set for %s, %s, %v", lb, lbTarget,
 		ovn.serviceLBMap[lb][vip])
 	return nil
 }

@@ -25,18 +25,16 @@ type nodeController interface {
 	DeletePod(*kapi.Pod) error
 	AddNode(*kapi.Node) error
 	DeleteNode(*kapi.Node) error
-	AddNamespace(*kapi.Namespace) error
 	RunFlowSync(<-chan struct{})
 	EnsureHybridOverlayBridge(node *kapi.Node) error
 }
 
 // Node is a node controller and it's informers
 type Node struct {
-	ready                 bool
-	controller            nodeController
-	nodeEventHandler      informer.EventHandler
-	podEventHandler       informer.EventHandler
-	namespaceEventHandler informer.EventHandler
+	ready            bool
+	controller       nodeController
+	nodeEventHandler informer.EventHandler
+	podEventHandler  informer.EventHandler
 }
 
 func nodeChanged(old, new interface{}) bool {
@@ -71,28 +69,12 @@ func podChanged(old, new interface{}) bool {
 	return false
 }
 
-// nsHybridAnnotationChanged returns true if any relevant NS attributes changed
-func nsHybridAnnotationChanged(old, new interface{}) bool {
-	oldNs := old.(*kapi.Namespace)
-	newNs := new.(*kapi.Namespace)
-
-	nsExGwOld := oldNs.GetAnnotations()[hotypes.HybridOverlayExternalGw]
-	nsVTEPOld := oldNs.GetAnnotations()[hotypes.HybridOverlayVTEP]
-	nsExGwNew := newNs.GetAnnotations()[hotypes.HybridOverlayExternalGw]
-	nsVTEPNew := newNs.GetAnnotations()[hotypes.HybridOverlayVTEP]
-	if nsExGwOld != nsExGwNew || nsVTEPOld != nsVTEPNew {
-		return true
-	}
-	return false
-}
-
 // NewNode Returns a new Node
 func NewNode(
 	kube kube.Interface,
 	nodeName string,
 	nodeInformer cache.SharedIndexInformer,
 	podInformer cache.SharedIndexInformer,
-	namespaceInformer cache.SharedIndexInformer,
 ) (*Node, error) {
 
 	nodeLister := listers.NewNodeLister(nodeInformer.GetIndexer())
@@ -133,28 +115,15 @@ func NewNode(
 		},
 		func(obj interface{}) error {
 			pod, ok := obj.(*kapi.Pod)
-			if pod.Spec.NodeName != nodeName {
-				return nil
-			}
 			if !ok {
 				return fmt.Errorf("object is not a pod")
+			}
+			if pod.Spec.NodeName != nodeName {
+				return nil
 			}
 			return n.controller.DeletePod(pod)
 		},
 		podChanged,
-	)
-	n.namespaceEventHandler = informer.NewDefaultEventHandler("namespace", namespaceInformer,
-		func(obj interface{}) error {
-			ns, ok := obj.(*kapi.Namespace)
-			if !ok {
-				return fmt.Errorf("object is not a namespace")
-			}
-			return n.controller.AddNamespace(ns)
-		},
-		func(obj interface{}) error {
-			return nil
-		},
-		nsHybridAnnotationChanged,
 	)
 	return n, nil
 }
@@ -173,12 +142,6 @@ func (n *Node) Run(stopCh <-chan struct{}) error {
 	}()
 	go func() {
 		err := n.podEventHandler.Run(informer.DefaultInformerThreadiness, stopCh)
-		if err != nil {
-			klog.Error(err)
-		}
-	}()
-	go func() {
-		err := n.namespaceEventHandler.Run(informer.DefaultInformerThreadiness, stopCh)
 		if err != nil {
 			klog.Error(err)
 		}
@@ -208,20 +171,20 @@ func getNodeSubnetAndIP(node *kapi.Node) (*net.IPNet, net.IP) {
 		subnet, ok := node.Annotations[types.HybridOverlayNodeSubnet]
 		if !ok {
 
-			klog.V(5).Infof("missing node %q node subnet annotation", node.Name)
+			klog.V(5).Infof("Missing node %q node subnet annotation", node.Name)
 			return nil, nil
 		}
 		var err error
 		_, cidr, err = net.ParseCIDR(subnet)
 		if err != nil {
-			klog.Errorf("error parsing node %q subnet %q: %v", node.Name, subnet, err)
+			klog.Errorf("Error parsing node %q subnet %q: %v", node.Name, subnet, err)
 			return nil, nil
 		}
 	}
 
 	nodeIP, err := houtil.GetNodeInternalIP(node)
 	if err != nil {
-		klog.Errorf("error getting node %q internal IP: %v", node.Name, err)
+		klog.Errorf("Error getting node %q internal IP: %v", node.Name, err)
 		return nil, nil
 	}
 

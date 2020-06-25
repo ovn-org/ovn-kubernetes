@@ -174,12 +174,13 @@ func DeleteConntrack(ip string) {
 	ipAddress := net.ParseIP(ip)
 	if ipAddress == nil {
 		klog.Errorf("Value \"%s\" passed to DeleteConntrack is not an IP address", ipAddress)
+		return
 	}
 
 	filter := &netlink.ConntrackFilter{}
 	err := filter.AddIP(netlink.ConntrackReplyAnyIP, ipAddress)
 	if err != nil {
-		klog.Warningf("could not add IP: %s to conntrack filter: %v", ipAddress, err)
+		klog.Warningf("Could not add IP: %s to conntrack filter: %v", ipAddress, err)
 		return
 	}
 	if ipAddress.To4() != nil {
@@ -188,6 +189,6 @@ func DeleteConntrack(ip string) {
 		_, err = netlink.ConntrackDeleteFilter(netlink.ConntrackTable, netlink.FAMILY_V6, filter)
 	}
 	if err != nil {
-		klog.Errorf("failed to delete Conntrack entry: %v", err)
+		klog.Errorf("Failed to delete Conntrack entry: %v", err)
 	}
 }

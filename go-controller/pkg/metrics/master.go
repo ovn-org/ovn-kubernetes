@@ -45,15 +45,26 @@ var metricOvnCliLatency = prometheus.NewHistogramVec(prometheus.HistogramOpts{
 	[]string{"command"},
 )
 
-// metricResourceUpdateCount is the number of times a particular resource's UpdateFunc has been called.
+// MetricResourceUpdateCount is the number of times a particular resource's UpdateFunc has been called.
 var MetricResourceUpdateCount = prometheus.NewCounterVec(prometheus.CounterOpts{
 	Namespace: MetricOvnkubeNamespace,
 	Subsystem: MetricOvnkubeSubsystemMaster,
 	Name:      "resource_update_total",
 	Help:      "A metric that captures the number of times a particular resource's UpdateFunc has been called"},
 	[]string{
-		"resource_name",
+		"name",
 	},
+)
+
+// MetricResourceUpdateLatency is the time taken to complete resource update by an handler.
+// This measures the latency for all of the handlers for a given resource.
+var MetricResourceUpdateLatency = prometheus.NewHistogramVec(prometheus.HistogramOpts{
+	Namespace: MetricOvnkubeNamespace,
+	Subsystem: MetricOvnkubeSubsystemMaster,
+	Name:      "resource_update_latency_seconds",
+	Help:      "The latency of various update handlers for a given resource",
+	Buckets:   prometheus.ExponentialBuckets(.1, 2, 15)},
+	[]string{"name"},
 )
 
 var MetricMasterReadyDuration = prometheus.NewGauge(prometheus.GaugeOpts{
@@ -61,6 +72,14 @@ var MetricMasterReadyDuration = prometheus.NewGauge(prometheus.GaugeOpts{
 	Subsystem: MetricOvnkubeSubsystemMaster,
 	Name:      "ready_duration_seconds",
 	Help:      "The duration for the master to get to ready state",
+})
+
+// MetricMasterLeader identifies whether this instance of ovnkube-master is a leader or not
+var MetricMasterLeader = prometheus.NewGauge(prometheus.GaugeOpts{
+	Namespace: MetricOvnkubeNamespace,
+	Subsystem: MetricOvnkubeSubsystemMaster,
+	Name:      "leader",
+	Help:      "Identifies whether the instance of ovnkube-master is a leader(1) or not(0).",
 })
 
 var registerMasterMetricsOnce sync.Once
@@ -71,9 +90,7 @@ var startE2ETimeStampUpdaterOnce sync.Once
 func RegisterMasterMetrics() {
 	registerMasterMetricsOnce.Do(func() {
 		prometheus.MustRegister(metricE2ETimestamp)
-		// following go routine is directly responsible for collecting the metric above.
-		StartE2ETimeStampMetricUpdater()
-
+		prometheus.MustRegister(MetricMasterLeader)
 		prometheus.MustRegister(metricPodCreationLatency)
 		prometheus.MustRegister(prometheus.NewCounterFunc(
 			prometheus.CounterOpts{
@@ -96,6 +113,7 @@ func RegisterMasterMetrics() {
 		// this is to not to create circular import between metrics and util package
 		util.MetricOvnCliLatency = metricOvnCliLatency
 		prometheus.MustRegister(MetricResourceUpdateCount)
+		prometheus.MustRegister(MetricResourceUpdateLatency)
 		prometheus.MustRegister(prometheus.NewGaugeFunc(
 			prometheus.GaugeOpts{
 				Namespace: MetricOvnkubeNamespace,
@@ -121,13 +139,13 @@ func scrapeOvnTimestamp() float64 {
 	output, stderr, err := util.RunOVNSbctl("--if-exists",
 		"get", "SB_Global", ".", "options:e2e_timestamp")
 	if err != nil {
-		klog.Errorf("failed to scrape timestamp: %s (%v)", stderr, err)
+		klog.Errorf("Failed to scrape timestamp: %s (%v)", stderr, err)
 		return 0
 	}
 
 	out, err := strconv.ParseFloat(output, 64)
 	if err != nil {
-		klog.Errorf("failed to parse timestamp %s: %v", output, err)
+		klog.Errorf("Failed to parse timestamp %s: %v", output, err)
 		return 0
 	}
 	return out
@@ -143,7 +161,7 @@ func StartE2ETimeStampMetricUpdater() {
 				_, stderr, err := util.RunOVNNbctl("set", "NB_Global", ".",
 					fmt.Sprintf(`options:e2e_timestamp="%d"`, t))
 				if err != nil {
-					klog.Errorf("failed to bump timestamp: %s (%v)", stderr, err)
+					klog.Errorf("Failed to bump timestamp: %s (%v)", stderr, err)
 				} else {
 					metricE2ETimestamp.Set(float64(t))
 				}

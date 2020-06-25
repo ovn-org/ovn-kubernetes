@@ -232,6 +232,8 @@ spec:
           value: "{{ ovn_hybrid_overlay_net_cidr }}"
         - name: OVN_SSL_ENABLE
           value: "{{ ovn_ssl_en }}"
+        - name: OVN_GATEWAY_MODE
+          value: "{{ ovn_gateway_mode }}"
       # end of container
 
       volumes:

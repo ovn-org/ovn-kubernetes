@@ -91,7 +91,7 @@ func (ovn *Controller) syncServices(services []interface{}) {
 
 		loadBalancerVIPs, err := ovn.getLoadBalancerVIPs(loadBalancer)
 		if err != nil {
-			klog.Errorf("failed to get load-balancer vips for %s (%v)",
+			klog.Errorf("Failed to get load-balancer vips for %s (%v)",
 				loadBalancer, err)
 			continue
 		}
@@ -112,7 +112,7 @@ func (ovn *Controller) syncServices(services []interface{}) {
 	// 'nodeportServices'.
 	gateways, stderr, err := ovn.getOvnGateways()
 	if err != nil {
-		klog.Errorf("failed to get ovn gateways. Not syncing nodeport"+
+		klog.Errorf("Failed to get ovn gateways. Not syncing nodeport "+
 			"stdout: %q, stderr: %q (%v)", gateways, stderr, err)
 		return
 	}
@@ -121,7 +121,7 @@ func (ovn *Controller) syncServices(services []interface{}) {
 		for _, protocol := range []kapi.Protocol{kapi.ProtocolTCP, kapi.ProtocolUDP, kapi.ProtocolSCTP} {
 			loadBalancer, err := ovn.getGatewayLoadBalancer(gateway, protocol)
 			if err != nil {
-				klog.Errorf("physical gateway %s does not have "+
+				klog.Errorf("Physical gateway %s does not have "+
 					"load_balancer (%v)", gateway, err)
 				continue
 			}
@@ -131,7 +131,7 @@ func (ovn *Controller) syncServices(services []interface{}) {
 
 			loadBalancerVIPs, err := ovn.getLoadBalancerVIPs(loadBalancer)
 			if err != nil {
-				klog.Errorf("failed to get load-balancer vips for %s (%v)",
+				klog.Errorf("Failed to get load-balancer vips for %s (%v)",
 					loadBalancer, err)
 				continue
 			}
@@ -144,7 +144,7 @@ func (ovn *Controller) syncServices(services []interface{}) {
 				if err != nil {
 					// In a OVN load-balancer, we should always have vip:port.
 					// In the unlikely event that it is not the case, skip it.
-					klog.Errorf("failed to split %s to vip and port (%v)",
+					klog.Errorf("Failed to split %s to vip and port (%v)",
 						vip, err)
 					continue
 				}
@@ -223,7 +223,7 @@ func (ovn *Controller) createService(service *kapi.Service) error {
 			for _, physicalGateway := range physicalGateways {
 				loadBalancer, err := ovn.getGatewayLoadBalancer(physicalGateway, protocol)
 				if err != nil {
-					klog.Errorf("physical gateway %s does not have load_balancer "+
+					klog.Errorf("Physical gateway %s does not have load_balancer "+
 						"(%v)", physicalGateway, err)
 					continue
 				}
@@ -232,7 +232,7 @@ func (ovn *Controller) createService(service *kapi.Service) error {
 				}
 				physicalIPs, err := ovn.getGatewayPhysicalIPs(physicalGateway)
 				if err != nil {
-					klog.Errorf("physical gateway %s does not have physical ip (%v)",
+					klog.Errorf("Physical gateway %s does not have physical ip (%v)",
 						physicalGateway, err)
 					continue
 				}
@@ -317,11 +317,11 @@ func (ovn *Controller) updateService(oldSvc, newSvc *kapi.Service) error {
 		reflect.DeepEqual(newSvc.Spec.ExternalIPs, oldSvc.Spec.ExternalIPs) &&
 		reflect.DeepEqual(newSvc.Spec.ClusterIP, oldSvc.Spec.ClusterIP) &&
 		reflect.DeepEqual(newSvc.Spec.Type, oldSvc.Spec.Type) {
-		klog.V(5).Infof("skipping service update for: %s as change does not apply to any of .Spec.Ports, .Spec.ExternalIP, .Spec.ClusterIP, .Spec.Type", newSvc.Name)
+		klog.V(5).Infof("Skipping service update for: %s as change does not apply to any of .Spec.Ports, .Spec.ExternalIP, .Spec.ClusterIP, .Spec.Type", newSvc.Name)
 		return nil
 	}
 
-	klog.V(5).Infof("updating service from: %v to: %v", oldSvc, newSvc)
+	klog.V(5).Infof("Updating service from: %v to: %v", oldSvc, newSvc)
 
 	ovn.deleteService(oldSvc)
 	return ovn.createService(newSvc)

@@ -265,7 +265,6 @@ var _ = Describe("Hybrid Overlay Node Linux Operations", func() {
 				thisNode,
 				f.Core().V1().Nodes().Informer(),
 				f.Core().V1().Pods().Informer(),
-				f.Core().V1().Namespaces().Informer(),
 			)
 			Expect(err).NotTo(HaveOccurred())
 
@@ -311,7 +310,6 @@ var _ = Describe("Hybrid Overlay Node Linux Operations", func() {
 				thisNode,
 				f.Core().V1().Nodes().Informer(),
 				f.Core().V1().Pods().Informer(),
-				f.Core().V1().Namespaces().Informer(),
 			)
 			Expect(err).NotTo(HaveOccurred())
 
@@ -356,7 +354,6 @@ var _ = Describe("Hybrid Overlay Node Linux Operations", func() {
 				thisNode,
 				f.Core().V1().Nodes().Informer(),
 				f.Core().V1().Pods().Informer(),
-				f.Core().V1().Namespaces().Informer(),
 			)
 			Expect(err).NotTo(HaveOccurred())
 
@@ -409,7 +406,6 @@ var _ = Describe("Hybrid Overlay Node Linux Operations", func() {
 				thisNode,
 				f.Core().V1().Nodes().Informer(),
 				f.Core().V1().Pods().Informer(),
-				f.Core().V1().Namespaces().Informer(),
 			)
 			Expect(err).NotTo(HaveOccurred())
 
@@ -458,7 +454,6 @@ var _ = Describe("Hybrid Overlay Node Linux Operations", func() {
 				thisNode,
 				f.Core().V1().Nodes().Informer(),
 				f.Core().V1().Pods().Informer(),
-				f.Core().V1().Namespaces().Informer(),
 			)
 			Expect(err).NotTo(HaveOccurred())
 
@@ -506,7 +501,6 @@ var _ = Describe("Hybrid Overlay Node Linux Operations", func() {
 				thisNode,
 				f.Core().V1().Nodes().Informer(),
 				f.Core().V1().Pods().Informer(),
-				f.Core().V1().Namespaces().Informer(),
 			)
 			Expect(err).NotTo(HaveOccurred())
 
@@ -576,7 +570,6 @@ var _ = Describe("Hybrid Overlay Node Linux Operations", func() {
 				thisNode,
 				f.Core().V1().Nodes().Informer(),
 				f.Core().V1().Pods().Informer(),
-				f.Core().V1().Namespaces().Informer(),
 			)
 			Expect(err).NotTo(HaveOccurred())
 			// FIXME: DT Why are these needed?

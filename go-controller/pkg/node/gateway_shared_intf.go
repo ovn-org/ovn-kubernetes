@@ -118,7 +118,7 @@ func syncServices(services []interface{}, inport, gwBridge string) {
 
 	re, err := regexp.Compile(`tp_dst=(.*?)[, ]`)
 	if err != nil {
-		klog.Errorf("regexp compile failed: %v", err)
+		klog.Errorf("Regexp compile failed: %v", err)
 		return
 	}
 
@@ -163,7 +163,7 @@ func nodePortWatcher(nodeName, gwBridge, gwIntf string, nodeIP []*net.IPNet, wf 
 	ofportPatch, stderr, err := util.RunOVSVsctl("--if-exists", "get",
 		"interface", patchPort, "ofport")
 	if err != nil {
-		return fmt.Errorf("Failed to get ofport of %s, stderr: %q, error: %v",
+		return fmt.Errorf("failed to get ofport of %s, stderr: %q, error: %v",
 			patchPort, stderr, err)
 	}
 
@@ -171,7 +171,7 @@ func nodePortWatcher(nodeName, gwBridge, gwIntf string, nodeIP []*net.IPNet, wf 
 	ofportPhys, stderr, err := util.RunOVSVsctl("--if-exists", "get",
 		"interface", gwIntf, "ofport")
 	if err != nil {
-		return fmt.Errorf("Failed to get ofport of %s, stderr: %q, error: %v",
+		return fmt.Errorf("failed to get ofport of %s, stderr: %q, error: %v",
 			gwIntf, stderr, err)
 	}
 
@@ -224,7 +224,7 @@ func addDefaultConntrackRules(nodeName, gwBridge, gwIntf string, stopChan chan s
 	ofportPatch, stderr, err := util.RunOVSVsctl("wait-until", "Interface", patchPort, "ofport>0",
 		"--", "get", "Interface", patchPort, "ofport")
 	if err != nil {
-		return fmt.Errorf("Failed while waiting on patch port %q to be created by ovn-controller and "+
+		return fmt.Errorf("failed while waiting on patch port %q to be created by ovn-controller and "+
 			"while getting ofport. stderr: %q, error: %v", patchPort, stderr, err)
 	}
 
@@ -232,7 +232,7 @@ func addDefaultConntrackRules(nodeName, gwBridge, gwIntf string, stopChan chan s
 	ofportPhys, stderr, err := util.RunOVSVsctl("--if-exists", "get",
 		"interface", gwIntf, "ofport")
 	if err != nil {
-		return fmt.Errorf("Failed to get ofport of %s, stderr: %q, error: %v",
+		return fmt.Errorf("failed to get ofport of %s, stderr: %q, error: %v",
 			gwIntf, stderr, err)
 	}
 
@@ -250,7 +250,7 @@ func addDefaultConntrackRules(nodeName, gwBridge, gwIntf string, stopChan chan s
 			"actions=ct(commit, zone=%d), output:%s",
 			defaultOpenFlowCookie, ofportPatch, config.Default.ConntrackZone, ofportPhys))
 	if err != nil {
-		return fmt.Errorf("Failed to add openflow flow to %s, stderr: %q, "+
+		return fmt.Errorf("failed to add openflow flow to %s, stderr: %q, "+
 			"error: %v", gwBridge, stderr, err)
 	}
 	nFlows++
@@ -261,7 +261,7 @@ func addDefaultConntrackRules(nodeName, gwBridge, gwIntf string, stopChan chan s
 		fmt.Sprintf("cookie=%s, priority=50, in_port=%s, ip, "+
 			"actions=ct(zone=%d, table=1)", defaultOpenFlowCookie, ofportPhys, config.Default.ConntrackZone))
 	if err != nil {
-		return fmt.Errorf("Failed to add openflow flow to %s, stderr: %q, "+
+		return fmt.Errorf("failed to add openflow flow to %s, stderr: %q, "+
 			"error: %v", gwBridge, stderr, err)
 	}
 	nFlows++
@@ -271,7 +271,7 @@ func addDefaultConntrackRules(nodeName, gwBridge, gwIntf string, stopChan chan s
 		fmt.Sprintf("cookie=%s, priority=100, table=1, ct_state=+trk+est, "+
 			"actions=output:%s", defaultOpenFlowCookie, ofportPatch))
 	if err != nil {
-		return fmt.Errorf("Failed to add openflow flow to %s, stderr: %q, "+
+		return fmt.Errorf("failed to add openflow flow to %s, stderr: %q, "+
 			"error: %v", gwBridge, stderr, err)
 	}
 	nFlows++
@@ -280,7 +280,7 @@ func addDefaultConntrackRules(nodeName, gwBridge, gwIntf string, stopChan chan s
 		fmt.Sprintf("cookie=%s, priority=100, table=1, ct_state=+trk+rel, "+
 			"actions=output:%s", defaultOpenFlowCookie, ofportPatch))
 	if err != nil {
-		return fmt.Errorf("Failed to add openflow flow to %s, stderr: %q, "+
+		return fmt.Errorf("failed to add openflow flow to %s, stderr: %q, "+
 			"error: %v", gwBridge, stderr, err)
 	}
 	nFlows++
@@ -289,7 +289,7 @@ func addDefaultConntrackRules(nodeName, gwBridge, gwIntf string, stopChan chan s
 	_, stderr, err = util.RunOVSOfctl("add-flow", gwBridge,
 		fmt.Sprintf("cookie=%s, priority=0, table=1, actions=output:NORMAL", defaultOpenFlowCookie))
 	if err != nil {
-		return fmt.Errorf("Failed to add openflow flow to %s, stderr: %q, "+
+		return fmt.Errorf("failed to add openflow flow to %s, stderr: %q, "+
 			"error: %v", gwBridge, stderr, err)
 	}
 	nFlows++
@@ -336,7 +336,7 @@ func (n *OvnNode) initSharedGateway(subnet *net.IPNet, gwNextHop net.IP, gwIntf 
 	// error out.
 	ipAddress, err := getIPv4Address(gwIntf)
 	if err != nil {
-		return nil, fmt.Errorf("Failed to get interface details for %s (%v)",
+		return nil, fmt.Errorf("failed to get interface details for %s (%v)",
 			gwIntf, err)
 	}
 	if ipAddress == nil {
@@ -395,13 +395,13 @@ func cleanupSharedGateway() error {
 	stdout, stderr, err := util.RunOVSVsctl("--columns=name", "--no-heading", "find", "port",
 		"external_ids:ovn-localnet-port!=_")
 	if err != nil {
-		return fmt.Errorf("Failed to get ovn-localnet-port port stderr:%s (%v)", stderr, err)
+		return fmt.Errorf("failed to get ovn-localnet-port port stderr:%s (%v)", stderr, err)
 	}
 	ports := strings.Fields(strings.Trim(stdout, "\""))
 	for _, port := range ports {
 		_, stderr, err := util.RunOVSVsctl("--if-exists", "del-port", strings.Trim(port, "\""))
 		if err != nil {
-			return fmt.Errorf("Failed to delete port %s stderr:%s (%v)", port, stderr, err)
+			return fmt.Errorf("failed to delete port %s stderr:%s (%v)", port, stderr, err)
 		}
 	}
 
@@ -409,7 +409,7 @@ func cleanupSharedGateway() error {
 	stdout, stderr, err = util.RunOVSVsctl("--if-exists", "get", "Open_vSwitch", ".",
 		"external_ids:ovn-bridge-mappings")
 	if err != nil {
-		return fmt.Errorf("Failed to get ovn-bridge-mappings stderr:%s (%v)", stderr, err)
+		return fmt.Errorf("failed to get ovn-bridge-mappings stderr:%s (%v)", stderr, err)
 	}
 	// skip the existing mapping setting for the specified physicalNetworkName
 	bridgeName := ""
@@ -427,7 +427,7 @@ func cleanupSharedGateway() error {
 
 	_, stderr, err = util.AddNormalActionOFFlow(bridgeName)
 	if err != nil {
-		return fmt.Errorf("Failed to replace-flows on bridge %q stderr:%s (%v)", bridgeName, stderr, err)
+		return fmt.Errorf("failed to replace-flows on bridge %q stderr:%s (%v)", bridgeName, stderr, err)
 	}
 
 	deleteNodePortIptableChain()

@@ -97,7 +97,6 @@ func runHybridOverlay(ctx *cli.Context) error {
 		nodeName,
 		f.Core().V1().Nodes().Informer(),
 		f.Core().V1().Pods().Informer(),
-		f.Core().V1().Namespaces().Informer(),
 	)
 	if err != nil {
 		return err
