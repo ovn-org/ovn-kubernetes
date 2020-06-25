@@ -1,11 +1,14 @@
+E2E_REPORT_DIR:=$(CURDIR)/_artifacts
+JOB_NAME?="$@"
+
 .PHONY: install-kind
 install-kind:
 	./scripts/install-kind.sh
 
 .PHONY: shard-%
 shard-%:
-	./scripts/e2e-kind.sh $@ $(WHAT) 
+	E2E_REPORT_DIR=$(E2E_REPORT_DIR) E2E_REPORT_PREFIX=$(JOB_NAME)_ ./scripts/e2e-kind.sh $@ $(WHAT)
 
 .PHONY: control-plane
 control-plane:
-	./scripts/e2e-cp.sh
+	E2E_REPORT_DIR=$(E2E_REPORT_DIR) E2E_REPORT_PREFIX=$(JOB_NAME)_ ./scripts/e2e-cp.sh
