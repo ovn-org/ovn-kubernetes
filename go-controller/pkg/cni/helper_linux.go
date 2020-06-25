@@ -365,7 +365,11 @@ func (pr *PodRequest) deletePodConntrack() {
 				continue
 			}
 		}
-		util.DeleteConntrack(ip.Address.IP.String())
+		err = util.DeleteConntrack(ip.Address.IP.String(), 0, "")
+		if err != nil {
+			klog.Errorf("Failed to delete Conntrack Entry for %s: %v", ip.Address.IP.String(), err)
+			continue
+		}
 	}
 }
 

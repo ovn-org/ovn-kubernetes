@@ -6,6 +6,8 @@ import (
 	"fmt"
 	"net"
 
+	kapi "k8s.io/api/core/v1"
+
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
 )
 
@@ -32,6 +34,7 @@ func getIntfName(gatewayIntf string) (string, error) {
 	return intfName, nil
 }
 
-func deleteConntrack(ip string) {
+func deleteConntrack(ip string, port int32, protocol kapi.Protocol) error {
 	//conntrack deletion not supported in windows
+	return nil
 }
