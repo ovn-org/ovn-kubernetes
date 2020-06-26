@@ -17,8 +17,6 @@ OVN_SVC_DIDR=""
 OVN_K8S_APISERVER=""
 OVN_GATEWAY_MODE=""
 OVN_GATEWAY_OPTS=""
-OVN_DB_VIP_IMAGE=""
-OVN_DB_VIP=""
 OVN_DB_REPLICAS=""
 OVN_MTU=""
 OVN_SSL_ENABLE=""
@@ -63,14 +61,8 @@ while [ "$1" != "" ]; do
   --k8s-apiserver)
     OVN_K8S_APISERVER=$VALUE
     ;;
-  --db-vip-image)
-    OVN_DB_VIP_IMAGE=$VALUE
-    ;;
   --db-replicas)
     OVN_DB_REPLICAS=$VALUE
-    ;;
-  --db-vip)
-    OVN_DB_VIP=$VALUE
     ;;
   --mtu)
     OVN_MTU=$VALUE
@@ -158,12 +150,8 @@ echo "ovn_gateway_mode: ${ovn_gateway_mode}"
 ovn_gateway_opts=${OVN_GATEWAY_OPTS}
 echo "ovn_gateway_opts: ${ovn_gateway_opts}"
 
-ovn_db_vip_image=${OVN_DB_VIP_IMAGE:-"docker.io/ovnkube/ovndb-vip-u:latest"}
-echo "ovn_db_vip_image: ${ovn_db_vip_image}"
 ovn_db_replicas=${OVN_DB_REPLICAS:-3}
 echo "ovn_db_replicas: ${ovn_db_replicas}"
-ovn_db_vip=${OVN_DB_VIP}
-echo "ovn_db_vip: ${ovn_db_vip}"
 ovn_db_minAvailable=$(((${ovn_db_replicas} + 1) / 2))
 echo "ovn_db_minAvailable: ${ovn_db_minAvailable}"
 master_loglevel=${MASTER_LOGLEVEL:-"4"}
@@ -248,12 +236,6 @@ ovn_image=${image} \
   ovn_nb_port=${ovn_nb_port} \
   ovn_sb_port=${ovn_sb_port} \
   j2 ../templates/ovnkube-db.yaml.j2 -o ../yaml/ovnkube-db.yaml
-
-ovn_db_vip_image=${ovn_db_vip_image} \
-  ovn_image_pull_policy=${image_pull_policy} \
-  ovn_db_replicas=${ovn_db_replicas} \
-  ovn_db_vip=${ovn_db_vip} ovn_loglevel_nb=${ovn_loglevel_nb} \
-  j2 ../templates/ovnkube-db-vip.yaml.j2 -o ../yaml/ovnkube-db-vip.yaml
 
 ovn_image=${image} \
   ovn_image_pull_policy=${image_pull_policy} \
