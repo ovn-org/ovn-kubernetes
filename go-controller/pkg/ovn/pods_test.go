@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"net"
 	"strings"
+	"time"
 
 	hotypes "github.com/ovn-org/ovn-kubernetes/go-controller/hybrid-overlay/pkg/types"
 
@@ -715,6 +716,15 @@ var _ = Describe("OVN Pod Operations", func() {
 				// Update namespace to remove annotation
 				namespaceT.Annotations = nil
 				_, err = fakeOvn.fakeClient.CoreV1().Namespaces().Update(&namespaceT)
+				Expect(err).NotTo(HaveOccurred())
+				Eventually(func() map[string]string {
+					updatedNs, err := fakeOvn.fakeClient.CoreV1().Namespaces().Get(namespaceT.Name, metav1.GetOptions{})
+					if err != nil {
+						return map[string]string{"ns": "error"}
+					}
+					return updatedNs.Annotations
+				}).Should(BeEmpty())
+				time.Sleep(time.Second)
 				// Create new pod
 				tP = newTPod(
 					"node1",

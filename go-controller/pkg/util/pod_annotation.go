@@ -126,7 +126,7 @@ func MarshalPodAnnotation(podInfo *PodAnnotation) (map[string]string, error) {
 	}
 	bytes, err := json.Marshal(podNetworks)
 	if err != nil {
-		klog.Errorf("failed marshaling podNetworks map %v", podNetworks)
+		klog.Errorf("Failed marshaling podNetworks map %v", podNetworks)
 		return nil, err
 	}
 	return map[string]string{
@@ -240,7 +240,7 @@ func GetAllPodIPs(pod *v1.Pod) ([]net.IP, error) {
 	for _, podIP := range pod.Status.PodIPs {
 		ip := net.ParseIP(podIP.IP)
 		if ip == nil {
-			klog.Warningf("failed to parse pod IP %q", podIP)
+			klog.Warningf("Failed to parse pod IP %q", podIP)
 			continue
 		}
 		ips = append(ips, ip)

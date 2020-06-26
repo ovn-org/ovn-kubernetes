@@ -7,6 +7,7 @@ import (
 
 	"github.com/ovn-org/ovn-kubernetes/go-controller/hybrid-overlay/pkg/types"
 	houtil "github.com/ovn-org/ovn-kubernetes/go-controller/hybrid-overlay/pkg/util"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/kube"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
 
@@ -41,11 +42,16 @@ func newNodeController(kube kube.Interface,
 ) (nodeController, error) {
 	supportedFeatures := hcn.GetSupportedFeatures()
 	if !supportedFeatures.HostRoute {
-		return nil, fmt.Errorf("This version of windows does not support HostRoute " +
+		return nil, fmt.Errorf("this version of Windows does not support HostRoute " +
 			"policies; network communication between this node and its pods " +
 			"will not work. HostRoute policies are available as a KB update " +
 			"for Windows Server 2019 version 1809 and out of the box in " +
 			"Windows Server 2019 version 1903.")
+	}
+
+	if config.HybridOverlay.VXLANPort != config.DefaultVXLANPort && !supportedFeatures.VxlanPort {
+		return nil, fmt.Errorf("this version of Windows does not support setting the VXLAN " +
+			"UDP port. Please make sure you install all the KB updates on your system.")
 	}
 
 	node, err := kube.GetNode(nodeName)
@@ -100,6 +106,10 @@ func ensureBaseNetwork() error {
 		return nil
 	}
 
+	if config.HybridOverlay.VXLANPort > 65535 {
+		return fmt.Errorf("the hybrid overlay VXLAN port cannot be greater than 65535. Current value: %v", config.HybridOverlay.VXLANPort)
+	}
+
 	baseNetworkInfo := NetworkInfo{
 		AutomaticDNS: false,
 		IsPersistent: true,
@@ -109,27 +119,28 @@ func ensureBaseNetwork() error {
 			GatewayAddress: fakeSubnetGateway,
 			VSID:           fakeSubnetVNI,
 		}},
+		VXLANPort: uint16(config.HybridOverlay.VXLANPort),
 	}
 
-	klog.Infof("Creating the base overlay network '%s'.", baseNetworkName)
+	klog.Infof("Creating the base overlay network '%s' (VXLAN port = %d).", baseNetworkName, config.HybridOverlay.VXLANPort)
 
 	// Retrieve the network schema object
 	baseNetworkSchema, err := baseNetworkInfo.GetHostComputeNetworkConfig()
 	if err != nil {
-		return fmt.Errorf("Unable to generate a schema to create a base overlay network, error: %v", err)
+		return fmt.Errorf("unable to generate a schema to create a base overlay network, error: %v", err)
 	}
 
 	klog.Infof("Base network creation may take up to a minute to complete...")
 	// Create the base network from schema object
 	if _, err = baseNetworkSchema.Create(); err != nil {
-		return fmt.Errorf("Unable to create the base overlay network, error: %v", err)
+		return fmt.Errorf("unable to create the base overlay network, error: %v", err)
 	}
 
 	// Workaround for a limitation in the Windows HNS service. We need
 	// to manually duplicate persistent routes that used to be on the
 	// physical network interface to the newly created host vNIC
 	if err = DuplicatePersistentIPRoutes(); err != nil {
-		return fmt.Errorf("Unable to refresh the persistent IP routes, error: %v", err)
+		return fmt.Errorf("unable to refresh the persistent IP routes, error: %v", err)
 	}
 
 	return nil
@@ -139,7 +150,7 @@ func ensureBaseNetwork() error {
 // For a windows node, this means watching for all nodes and programming the routing
 func (n *NodeController) AddNode(node *kapi.Node) error {
 	if node.Status.NodeInfo.MachineID == n.machineID {
-		// Initialize or the local node (or reconfigure it if the addresses
+		// Initialize the local node (or reconfigure it if the addresses
 		// have changed) by creating the network object and setting up
 		// all the VXLAN tunnels towards other nodes
 		cidr, nodeIP := getNodeSubnetAndIP(node)
@@ -153,9 +164,14 @@ func (n *NodeController) AddNode(node *kapi.Node) error {
 		return nil
 	}
 
+	if n.networkID == "" {
+		// Just silently return, we cannot configure routes on a non-initialized network
+		return nil
+	}
+
 	cidr, nodeIP, drMAC, err := getNodeDetails(node)
 	if cidr == nil || nodeIP == nil || drMAC == nil {
-		klog.V(5).Infof("cleaning up hybrid overlay resources for node %q because: %v", node.Name, err)
+		klog.V(5).Infof("Cleaning up hybrid overlay resources for node %q because: %v", node.Name, err)
 		n.DeleteNode(node)
 		return err
 	}
@@ -166,8 +182,8 @@ func (n *NodeController) AddNode(node *kapi.Node) error {
 		return fmt.Errorf("error getting HCN network: %v", err)
 	}
 
-	klog.Infof("Adding a remote subnet route for CIDR '%s' (remote node address: %s, distributed router MAC: %s, VNI: %v).",
-		cidr.String(), nodeIP.String(), drMAC.String(), types.HybridOverlayVNI)
+	klog.Infof("Adding a remote subnet route for CIDR '%s' (node: '%s', remote node address: %s, distributed router MAC: %s, VNI: %v).",
+		cidr.String(), node.Name, nodeIP.String(), drMAC.String(), types.HybridOverlayVNI)
 	networkPolicySettings := hcn.RemoteSubnetRoutePolicySetting{
 		// VXLAN virtual network Identifier. Is expected to be 4097 or higher on Windows
 		IsolationId: types.HybridOverlayVNI,
@@ -237,6 +253,10 @@ func (n *NodeController) initSelf(node *kapi.Node, nodeSubnet *net.IPNet) error 
 	// as to what this gateway address should be.
 	gatewayAddress := util.NextIP(nodeSubnet.IP)
 
+	if config.HybridOverlay.VXLANPort > 65535 {
+		return fmt.Errorf("the hybrid overlay VXLAN port cannot be greater than 65535. Current value: %v", config.HybridOverlay.VXLANPort)
+	}
+
 	network := GetExistingNetwork(networkName, nodeSubnet.String(), gatewayAddress.String())
 	if network == nil {
 		// Create the overlay network
@@ -249,29 +269,30 @@ func (n *NodeController) initSelf(node *kapi.Node, nodeSubnet *net.IPNet) error 
 				GatewayAddress: gatewayAddress,
 				VSID:           types.HybridOverlayVNI,
 			}},
+			VXLANPort: uint16(config.HybridOverlay.VXLANPort),
 		}
 		klog.Infof("Creating overlay network '%s' (address prefix %v) with gateway address: %v", networkName, nodeSubnet, gatewayAddress)
 
 		// Retrieve the network schema object
 		networkSchema, err := networkInfo.GetHostComputeNetworkConfig()
 		if err != nil {
-			return fmt.Errorf("Unable to generate a schema to create an overlay network, error: %v", err)
+			return fmt.Errorf("unable to generate a schema to create an overlay network, error: %v", err)
 		}
 
 		klog.Infof("Network creation may take up to a minute to complete...")
 		// Create the actual network from schema object
 		network, err = networkSchema.Create()
 		if err != nil {
-			return fmt.Errorf("Unable to create the overlay network, error: %v", err)
+			return fmt.Errorf("unable to create the overlay network, error: %v", err)
 		}
 
 		err = AddHostRoutePolicy(network)
 		if err != nil {
-			return fmt.Errorf("Unable to add host route policy, error: %v", err)
+			return fmt.Errorf("unable to add host route policy, error: %v", err)
 		}
 	} else {
-		klog.Infof("Reusing existing overlay network '%s' (address prefix %v) with gateway address: %v.",
-			networkName, nodeSubnet, gatewayAddress)
+		klog.Infof("Reusing existing overlay network '%s' (address prefix %v, VXLAN port = %d) with gateway address: %v.",
+			networkName, nodeSubnet, config.HybridOverlay.VXLANPort, gatewayAddress)
 
 		// TODO: there is a better approach than clearing all the remote
 		// subnet policies, and then re-creating the ones still applicable.
@@ -292,16 +313,16 @@ func (n *NodeController) initSelf(node *kapi.Node, nodeSubnet *net.IPNet) error 
 			policySettings := hcn.DrMacAddressNetworkPolicySetting{}
 
 			if err := json.Unmarshal(policy.Settings, &policySettings); err != nil {
-				return fmt.Errorf("Unable to unmarshall the DRMAC policy setting, error: %v", err)
+				return fmt.Errorf("unable to unmarshall the DRMAC policy setting, error: %v", err)
 			}
 
 			if len(policySettings.Address) == 0 {
-				return fmt.Errorf("Error creating the network: no DRMAC address")
+				return fmt.Errorf("error creating the network: no DRMAC address")
 			}
 			if err := n.kube.SetAnnotationsOnNode(node, map[string]interface{}{
 				types.HybridOverlayDRMAC: policySettings.Address,
 			}); err != nil {
-				klog.Errorf("failed to set DRMAC annotation on node: %v", err)
+				klog.Errorf("Failed to set DRMAC annotation on node: %v", err)
 			}
 			break
 		}
@@ -310,7 +331,7 @@ func (n *NodeController) initSelf(node *kapi.Node, nodeSubnet *net.IPNet) error 
 	// Add existing nodes
 	nodes, err := n.kube.GetNodes()
 	if err != nil {
-		return fmt.Errorf("Error in initializing/fetching nodes: %v", err)
+		return fmt.Errorf("error in initializing/fetching nodes: %v", err)
 	}
 
 	for _, node := range nodes.Items {
@@ -359,10 +380,6 @@ func (n *NodeController) AddPod(pod *kapi.Pod) error {
 }
 
 func (n *NodeController) DeletePod(pod *kapi.Pod) error {
-	return nil
-}
-
-func (n *NodeController) AddNamespace(ns *kapi.Namespace) error {
 	return nil
 }
 

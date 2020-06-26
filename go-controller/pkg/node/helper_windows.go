@@ -14,7 +14,7 @@ import (
 // It also returns the default gateway itself.
 func getDefaultGatewayInterfaceDetails() (string, net.IP, error) {
 	// TODO: Implement this
-	return "", nil, fmt.Errorf("Not implemented yet on Windows")
+	return "", nil, fmt.Errorf("not implemented yet on Windows")
 }
 
 func getIntfName(gatewayIntf string) (string, error) {

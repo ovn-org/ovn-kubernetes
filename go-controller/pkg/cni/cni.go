@@ -86,7 +86,7 @@ func (pr *PodRequest) cmdAdd(kclient kubernetes.Interface) ([]byte, error) {
 				// Pod not found; don't bother waiting longer
 				return false, err
 			}
-			klog.Warningf("error getting pod annotations: %v", err)
+			klog.Warningf("Error getting pod annotations: %v", err)
 			return false, nil
 		}
 		if _, ok := annotations[util.OvnPodAnnotationName]; ok {

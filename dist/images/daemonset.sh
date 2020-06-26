@@ -213,6 +213,7 @@ ovn_image=${image} \
   ovn_hybrid_overlay_enable=${ovn_hybrid_overlay_enable} \
   ovn_ssl_en=${ovn_ssl_en} \
   ovn_master_count=${ovn_master_count} \
+  ovn_gateway_mode=${ovn_gateway_mode} \
   j2 ../templates/ovnkube-master.yaml.j2 -o ../yaml/ovnkube-master.yaml
 
 ovn_image=${image} \

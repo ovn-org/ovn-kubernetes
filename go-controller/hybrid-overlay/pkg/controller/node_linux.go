@@ -18,7 +18,6 @@ import (
 	"github.com/vishvananda/netlink"
 
 	kapi "k8s.io/api/core/v1"
-	"k8s.io/apimachinery/pkg/labels"
 	"k8s.io/apimachinery/pkg/util/wait"
 	listers "k8s.io/client-go/listers/core/v1"
 	"k8s.io/klog"
@@ -95,14 +94,14 @@ func podIPToCookie(podIP net.IP) string {
 func (n *NodeController) AddPod(pod *kapi.Pod) error {
 	podIPs, podMAC, err := getPodDetails(pod)
 	if err != nil {
-		klog.V(5).Infof("cleaning up hybrid overlay pod %s/%s because %v", pod.Namespace, pod.Name, err)
+		klog.V(5).Infof("Cleaning up hybrid overlay pod %s/%s because %v", pod.Namespace, pod.Name, err)
 		return n.DeletePod(pod)
 	}
 
 	externalGw := pod.Annotations[hotypes.HybridOverlayExternalGw]
 	// validate the external gateway is a valid IP address
 	if ip := net.ParseIP(externalGw); ip == nil {
-		klog.Warningf("failed parse a valid external gateway ip address from %v: %v", externalGw, err)
+		klog.Warningf("Failed parse a valid external gateway ip address from %v: %v", externalGw, err)
 		return fmt.Errorf("failed to validate a valid external gateway ip address %s: %v", externalGw, err)
 	}
 
@@ -110,7 +109,7 @@ func (n *NodeController) AddPod(pod *kapi.Pod) error {
 	// validate the VTEP is a valid IP address
 	VTEPIP := net.ParseIP(VTEP)
 	if VTEPIP == nil {
-		klog.Warningf("failed parse a valid vtep ip address from %v: %v", VTEP, err)
+		klog.Warningf("Failed parse a valid vtep ip address from %v: %v", VTEP, err)
 		return fmt.Errorf("failed to validate a valid vtep ip address %s: %v", VTEP, err)
 	}
 
@@ -281,11 +280,11 @@ func (n *NodeController) hybridOverlayNodeUpdate(node *kapi.Node) error {
 
 	cidr, nodeIP, drMAC, err := getNodeDetails(node)
 	if cidr == nil || nodeIP == nil || drMAC == nil {
-		klog.V(5).Infof("cleaning up hybrid overlay resources for node %q because: %v", node.Name, err)
+		klog.V(5).Infof("Cleaning up hybrid overlay resources for node %q because: %v", node.Name, err)
 		return n.DeleteNode(node)
 	}
 
-	klog.Infof("setting up hybrid overlay tunnel to node %s", node.Name)
+	klog.Infof("Setting up hybrid overlay tunnel to node %s", node.Name)
 
 	// (re)add flows for the node
 	cookie := nameToCookie(node.Name)
@@ -371,7 +370,7 @@ func getLocalNodeSubnet(nodeName string) (*net.IPNet, error) {
 		return nil, fmt.Errorf("invalid hostsubnet found for node %s - %v", nodeName, err)
 	}
 
-	klog.Infof("found node %s subnet %s", nodeName, subnet.String())
+	klog.Infof("Found node %s subnet %s", nodeName, subnet.String())
 	return subnet, nil
 }
 
@@ -400,7 +399,7 @@ func (n *NodeController) EnsureHybridOverlayBridge(node *kapi.Node) error {
 	portName := util.GetHybridOverlayPortName(n.nodeName)
 	portMACString, haveDRMACAnnotation := node.Annotations[hotypes.HybridOverlayDRMAC]
 	if !haveDRMACAnnotation {
-		klog.Infof("node %s does not have DRMAC annotation yet, failed to ensure hybrid overlay"+
+		klog.Infof("Node %s does not have DRMAC annotation yet, failed to ensure hybrid overlay"+
 			"and will retry later", n.nodeName)
 		// node must not be annotated yet, retry later
 		return nil
@@ -546,7 +545,7 @@ func (n *NodeController) EnsureHybridOverlayBridge(node *kapi.Node) error {
 	n.updateFlowCacheEntry("0x0", flows, false)
 	n.requestFlowSync()
 	n.initialized = true
-	klog.Infof("hybrid overlay setup complete for node %s", node.Name)
+	klog.Infof("Hybrid overlay setup complete for node %s", node.Name)
 	return nil
 }
 
@@ -579,7 +578,7 @@ func (n *NodeController) syncFlows() {
 	// current pod in the cache
 	stdout, stderr, err := util.RunOVSOfctl("dump-flows", "--no-stats", extBridgeName, "table=20")
 	if err != nil {
-		klog.Errorf("failed to dump flows for flow sync, stderr: %q, error: %v", stderr, err)
+		klog.Errorf("Failed to dump flows for flow sync, stderr: %q, error: %v", stderr, err)
 		return
 	}
 	lines := strings.Split(stdout, "\n")
@@ -627,16 +626,16 @@ func (n *NodeController) syncFlows() {
 	}
 	_, _, err = util.ReplaceOFFlows(extBridgeName, flows)
 	if err != nil {
-		klog.Errorf("failed to add flows, error: %v, flows: %s", err, flows)
+		klog.Errorf("Failed to add flows, error: %v, flows: %s", err, flows)
 	}
 }
 
 func (n *NodeController) requestFlowSync() {
 	select {
 	case n.flowChan <- struct{}{}:
-		klog.V(5).Infof("flow sync requested")
+		klog.V(5).Infof("Flow sync requested")
 	default:
-		klog.V(5).Infof("sync already requested for flows")
+		klog.V(5).Infof("Sync already requested for flows")
 	}
 }
 
@@ -645,18 +644,4 @@ func (n *NodeController) updateFlowCacheEntry(cookie string, flows []string, ign
 	defer n.flowMutex.Unlock()
 	n.flowCache[cookie] = &flowCacheEntry{flows: flows}
 	n.flowCache[cookie].ignoreLearn = ignoreLearn
-}
-
-// AddNamespace handles the namespace add event
-func (n *NodeController) AddNamespace(ns *kapi.Namespace) error {
-	pods, err := n.podLister.Pods(ns.Namespace).List(labels.Everything())
-	if err != nil {
-		klog.Errorf("failed to get pods for NS update in hybrid overlay: %v", err)
-	}
-	for _, pod := range pods {
-		if err := n.AddPod(pod); err != nil {
-			klog.Warningf("failed to handle pod %v update: %v", pod, err)
-		}
-	}
-	return nil
 }

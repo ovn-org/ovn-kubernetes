@@ -28,7 +28,7 @@ func GetNicName(brName string) (string, error) {
 	stdout, stderr, err := RunOVSVsctl(
 		"br-get-external-id", brName, "bridge-uplink")
 	if err != nil {
-		return "", fmt.Errorf("Failed to get the bridge-uplink for the bridge %q:, stderr: %q, error: %v",
+		return "", fmt.Errorf("failed to get the bridge-uplink for the bridge %q:, stderr: %q, error: %v",
 			brName, stderr, err)
 	}
 	if stdout == "" && strings.HasPrefix(brName, "br") {
@@ -132,7 +132,7 @@ func setupDefaultFile() {
 
 	fileContents, err := ioutil.ReadFile(defaultFile)
 	if err != nil {
-		klog.Warningf("failed to parse file %s (%v)",
+		klog.Warningf("Failed to parse file %s (%v)",
 			defaultFile, err)
 		return
 	}
@@ -149,13 +149,13 @@ func setupDefaultFile() {
 	// We should set it.
 	f, err := os.OpenFile(defaultFile, os.O_APPEND|os.O_WRONLY, 0644)
 	if err != nil {
-		klog.Errorf("failed to open %s to write (%v)", defaultFile, err)
+		klog.Errorf("Failed to open %s to write (%v)", defaultFile, err)
 		return
 	}
 	defer f.Close()
 
 	if _, err = f.WriteString(text); err != nil {
-		klog.Errorf("failed to write to %s (%v)",
+		klog.Errorf("Failed to write to %s (%v)",
 			defaultFile, err)
 		return
 	}

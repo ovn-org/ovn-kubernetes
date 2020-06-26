@@ -147,7 +147,7 @@ func setupPIDFile(pidfile string) error {
 	// Create if it doesn't exist, else exit with error
 	if os.IsNotExist(err) {
 		if err := ioutil.WriteFile(pidfile, []byte(fmt.Sprintf("%d", os.Getpid())), 0644); err != nil {
-			klog.Errorf("failed to write pidfile %s (%v). Ignoring..", pidfile, err)
+			klog.Errorf("Failed to write pidfile %s (%v). Ignoring..", pidfile, err)
 		}
 	} else {
 		// get the pid and see if it exists
@@ -159,7 +159,7 @@ func setupPIDFile(pidfile string) error {
 		if os.IsNotExist(err1) {
 			// Left over pid from dead process
 			if err := ioutil.WriteFile(pidfile, []byte(fmt.Sprintf("%d", os.Getpid())), 0644); err != nil {
-				klog.Errorf("failed to write pidfile %s (%v). Ignoring..", pidfile, err)
+				klog.Errorf("Failed to write pidfile %s (%v). Ignoring..", pidfile, err)
 			}
 		} else {
 			return fmt.Errorf("pidfile %s exists and ovnkube is running", pidfile)
@@ -228,7 +228,7 @@ func runOvnKube(ctx *cli.Context) error {
 
 	if master != "" {
 		if runtime.GOOS == "windows" {
-			return fmt.Errorf("Windows is not supported as a master")
+			return fmt.Errorf("master nodes cannot be of OS type: Windows")
 		}
 		// register prometheus metrics exported by the master
 		metrics.RegisterMasterMetrics()
@@ -300,7 +300,7 @@ func watchForChanges(configPath string) error {
 				if !ok {
 					return
 				}
-				klog.Errorf("fsnotify error %v", err)
+				klog.Errorf("Error watching for changes to configmap: %s, err: %v", configPath, err)
 			}
 		}
 	}()

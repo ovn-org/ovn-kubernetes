@@ -14,7 +14,7 @@ func hashForOVN(s string) string {
 	h := fnv.New64a()
 	_, err := h.Write([]byte(s))
 	if err != nil {
-		klog.Errorf("failed to hash %s", s)
+		klog.Errorf("Failed to hash %s", s)
 	}
 	hashString := strconv.FormatUint(h.Sum64(), 10)
 	return fmt.Sprintf("a%s", hashString)
@@ -57,7 +57,7 @@ func deletePortGroup(hashName string) {
 		"--no-heading", "--columns=_uuid", "find", "port_group",
 		fmt.Sprintf("name=%s", hashName))
 	if err != nil {
-		klog.Errorf("find failed to get port_group, stderr: %q (%v)",
+		klog.Errorf("Find failed to get port_group, stderr: %q (%v)",
 			stderr, err)
 		return
 	}
@@ -69,7 +69,7 @@ func deletePortGroup(hashName string) {
 	_, stderr, err = util.RunOVNNbctl("--if-exists", "destroy",
 		"port_group", portGroup)
 	if err != nil {
-		klog.Errorf("failed to destroy port_group %s, stderr: %q, (%v)",
+		klog.Errorf("Failed to destroy port_group %s, stderr: %q, (%v)",
 			hashName, stderr, err)
 		return
 	}

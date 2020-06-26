@@ -18,5 +18,5 @@ func GetNicName(brName string) (string, error) {
 }
 
 func NicToBridge(iface string) (string, error) {
-	return "", fmt.Errorf("Not implemented yet on Windows")
+	return "", fmt.Errorf("not implemented yet on Windows")
 }

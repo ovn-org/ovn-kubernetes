@@ -104,7 +104,7 @@ func setupLogging(conf *ovntypes.NetConf) {
 
 	if conf.LogLevel != "" {
 		if err = level.Set(conf.LogLevel); err != nil {
-			klog.Warningf("failed to set klog log level to %s: %v", conf.LogLevel, err)
+			klog.Warningf("Failed to set klog log level to %s: %v", conf.LogLevel, err)
 		}
 	}
 	if conf.LogFile != "" {
@@ -113,13 +113,13 @@ func setupLogging(conf *ovntypes.NetConf) {
 		if _, err = os.Stat(filepath.Dir(conf.LogFile)); os.IsNotExist(err) {
 			dir := filepath.Dir(conf.LogFile)
 			if err = os.MkdirAll(dir, 0755); err != nil {
-				klog.Warningf("failed to create logfile directory %s (%v).", dir, err)
+				klog.Warningf("Failed to create logfile directory %s (%v).", dir, err)
 				return
 			}
 		}
 		file, err = os.OpenFile(conf.LogFile, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0660)
 		if err != nil {
-			klog.Warningf("failed to open logfile %s (%v).", conf.LogFile, err)
+			klog.Warningf("Failed to open logfile %s (%v).", conf.LogFile, err)
 			return
 		}
 		klogFlags := flag.NewFlagSet("klog", flag.ExitOnError)

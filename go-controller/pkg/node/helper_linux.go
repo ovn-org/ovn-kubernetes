@@ -18,7 +18,7 @@ import (
 func getDefaultGatewayInterfaceDetails() (string, net.IP, error) {
 	routes, err := netlink.RouteList(nil, syscall.AF_INET)
 	if err != nil {
-		return "", nil, fmt.Errorf("Failed to get routing table in node")
+		return "", nil, fmt.Errorf("failed to get routing table in node")
 	}
 
 	for i := range routes {
@@ -34,7 +34,7 @@ func getDefaultGatewayInterfaceDetails() (string, net.IP, error) {
 			}
 		}
 	}
-	return "", nil, fmt.Errorf("Failed to get default gateway interface")
+	return "", nil, fmt.Errorf("failed to get default gateway interface")
 }
 
 func getIntfName(gatewayIntf string) (string, error) {
