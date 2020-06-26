@@ -17,14 +17,6 @@ ubuntu: bld
 	# docker push docker.io/ovnkube/ovn-daemonset-u:latest
 	./daemonset.sh --image=docker.io/ovnkube/ovn-daemonset-u:latest
 
-ovndb-vip: bld
-	docker build -t ovn-kube-u -f Dockerfile.ubuntu .
-	docker build -t ovndb-vip-u -f Dockerfile-ovndb-vip.ubuntu .
-	# Note: the built yaml files from the template files is incomplete since the
-	# user needs to provide the VirtualIP address for the Corosync/Pacemaker setup.
-	./daemonset.sh --image=docker.io/ovnkube/ovn-daemonset-u:latest \
-	--db-vip-image=docker.io/ovnkube/ovndb-vip-u:latest
-
 centos: bld
 	docker build -t ovn-daemonset .
 	docker tag ovn-daemonset docker.io/ovnkube/ovn-daemonset:latest
