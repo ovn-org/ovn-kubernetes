@@ -221,20 +221,6 @@ func setupSriovInterface(netns ns.NetNS, containerID, ifName string, ifInfo *Pod
 	return hostIface, contIface, nil
 }
 
-var iptablesCommands = [][]string{
-	// Block MCS
-	{"-A", "OUTPUT", "-p", "tcp", "-m", "tcp", "--dport", "22623", "-j", "REJECT"},
-	{"-A", "OUTPUT", "-p", "tcp", "-m", "tcp", "--dport", "22624", "-j", "REJECT"},
-	{"-A", "FORWARD", "-p", "tcp", "-m", "tcp", "--dport", "22623", "-j", "REJECT"},
-	{"-A", "FORWARD", "-p", "tcp", "-m", "tcp", "--dport", "22624", "-j", "REJECT"},
-
-	// Block cloud provider metadata IP except DNS
-	{"-A", "OUTPUT", "-p", "tcp", "-m", "tcp", "-d", "169.254.169.254", "!", "--dport", "53", "-j", "REJECT"},
-	{"-A", "OUTPUT", "-p", "udp", "-m", "udp", "-d", "169.254.169.254", "!", "--dport", "53", "-j", "REJECT"},
-	{"-A", "FORWARD", "-p", "tcp", "-m", "tcp", "-d", "169.254.169.254", "!", "--dport", "53", "-j", "REJECT"},
-	{"-A", "FORWARD", "-p", "udp", "-m", "udp", "-d", "169.254.169.254", "!", "--dport", "53", "-j", "REJECT"},
-}
-
 // ConfigureInterface sets up the container interface
 func (pr *PodRequest) ConfigureInterface(namespace string, podName string, ifInfo *PodInterfaceInfo) ([]*current.Interface, error) {
 	netns, err := ns.GetNS(pr.Netns)
@@ -294,8 +280,7 @@ func (pr *PodRequest) ConfigureInterface(namespace string, podName string, ifInf
 	}
 
 	if ifInfo.Ingress > 0 || ifInfo.Egress > 0 {
-		var l netlink.Link
-		l, err = netlink.LinkByName(hostIface.Name)
+		l, err := netlink.LinkByName(hostIface.Name)
 		if err != nil {
 			return nil, fmt.Errorf("failed to find host veth interface %s: %v", hostIface.Name, err)
 		}
@@ -309,15 +294,13 @@ func (pr *PodRequest) ConfigureInterface(namespace string, podName string, ifInf
 		}
 	}
 
-	err = netns.Do(func(hostNS ns.NetNS) error {
-		// Block access to certain things
-		for _, args := range iptablesCommands {
-			out, err := exec.Command("iptables", args...).CombinedOutput()
-			if err != nil {
-				return fmt.Errorf("could not set up pod iptables rules: %s", string(out))
-			}
-		}
+	// Block access to certain things
+	err = setupIPTablesBlocks(netns, ifInfo)
+	if err != nil {
+		return nil, err
+	}
 
+	err = netns.Do(func(hostNS ns.NetNS) error {
 		if _, err := os.Stat("/proc/sys/net/ipv6/conf/all/dad_transmits"); !os.IsNotExist(err) {
 			err = setSysctl("/proc/sys/net/ipv6/conf/all/dad_transmits", 0)
 			if err != nil {
