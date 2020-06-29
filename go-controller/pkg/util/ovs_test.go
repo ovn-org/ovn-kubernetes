@@ -53,6 +53,7 @@ var _ = Describe("Util OVS/OVN command tests", func() {
 		AfterEach(func() {
 			err := os.Unsetenv("OVN_NB_DAEMON")
 			Expect(err).NotTo(HaveOccurred())
+			os.RemoveAll(tmpDir)
 		})
 
 		It("returns the right ovn-nbctl daemon args and environment when OVN_NB_DAEMON is set", func() {
