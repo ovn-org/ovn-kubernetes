@@ -13,6 +13,8 @@ import (
 
 	"k8s.io/klog"
 
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
+
 	"github.com/Mellanox/sriovnet"
 	"github.com/containernetworking/cni/pkg/types/current"
 	"github.com/containernetworking/plugins/pkg/ip"
@@ -327,6 +329,33 @@ func (pr *PodRequest) ConfigureInterface(namespace string, podName string, ifInf
 	return []*current.Interface{hostIface, contIface}, nil
 }
 
+func (pr *PodRequest) deletePodConntrack() {
+	if pr.CNIConf.PrevResult == nil {
+		return
+	}
+	result, err := current.NewResultFromResult(pr.CNIConf.PrevResult)
+	if err != nil {
+		klog.Warningf("Could not convert result to current version: %v", err)
+		return
+	}
+
+	for _, ip := range result.IPs {
+		// Skip known non-sandbox interfaces
+		if ip.Interface != nil {
+			intIdx := *ip.Interface
+			if intIdx >= 0 &&
+				intIdx < len(result.Interfaces) && result.Interfaces[intIdx].Sandbox == "" {
+				continue
+			}
+		}
+		err = util.DeleteConntrack(ip.Address.IP.String(), 0, "")
+		if err != nil {
+			klog.Errorf("Failed to delete Conntrack Entry for %s: %v", ip.Address.IP.String(), err)
+			continue
+		}
+	}
+}
+
 // PlatformSpecificCleanup deletes the OVS port
 func (pr *PodRequest) PlatformSpecificCleanup() error {
 	ifaceName := pr.SandboxID[:15]
@@ -340,6 +369,7 @@ func (pr *PodRequest) PlatformSpecificCleanup() error {
 	}
 
 	_ = clearPodBandwidth(pr.SandboxID)
+	pr.deletePodConntrack()
 
 	return nil
 }

@@ -6,6 +6,7 @@ import (
 	"net"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strconv"
 	"strings"
 	"time"
@@ -22,6 +23,7 @@ import (
 	kapi "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/util/wait"
 	"k8s.io/client-go/kubernetes"
+	"k8s.io/client-go/tools/cache"
 )
 
 // OvnNode is the object holder for utilities meant for node management
@@ -270,10 +272,72 @@ func (n *OvnNode) Start() error {
 	if !ok {
 		return fmt.Errorf("cannot get kubeclient for starting CNI server")
 	}
+	err = n.WatchEndpoints()
+	if err != nil {
+		return err
+	}
 
 	// start the cni server
 	cniServer := cni.NewCNIServer("", kclient.KClient)
 	err = cniServer.Start(cni.HandleCNIRequest)
 
 	return err
+}
+
+func (n *OvnNode) WatchEndpoints() error {
+	_, err := n.watchFactory.AddEndpointsHandler(cache.ResourceEventHandlerFuncs{
+		UpdateFunc: func(old, new interface{}) {
+			epNew := new.(*kapi.Endpoints)
+			epOld := old.(*kapi.Endpoints)
+			if reflect.DeepEqual(epNew.Subsets, epOld.Subsets) {
+				return
+			}
+			newEpAddressMap := buildEndpointAddressMap(epNew.Subsets)
+			for item := range buildEndpointAddressMap(epOld.Subsets) {
+				if _, ok := newEpAddressMap[item]; !ok {
+					err := deleteConntrack(item.ip, item.port, item.protocol)
+					if err != nil {
+						klog.Errorf("Failed to delete conntrack entry for %s: %v", item.ip, err)
+					}
+				}
+			}
+		},
+		DeleteFunc: func(obj interface{}) {
+			ep := obj.(*kapi.Endpoints)
+			for item := range buildEndpointAddressMap(ep.Subsets) {
+				err := deleteConntrack(item.ip, item.port, item.protocol)
+				if err != nil {
+					klog.Errorf("Failed to delete conntrack entry for %s: %v", item.ip, err)
+				}
+
+			}
+		},
+	}, nil)
+	return err
+}
+
+type epAddressItem struct {
+	ip       string
+	port     int32
+	protocol kapi.Protocol
+}
+
+//buildEndpointAddressMap builds a map of all UDP and SCTP ports in the endpoint subset along with that port's IP address
+func buildEndpointAddressMap(epSubsets []kapi.EndpointSubset) map[epAddressItem]struct{} {
+	epMap := make(map[epAddressItem]struct{})
+	for _, subset := range epSubsets {
+		for _, address := range subset.Addresses {
+			for _, port := range subset.Ports {
+				if port.Protocol == kapi.ProtocolUDP || port.Protocol == kapi.ProtocolSCTP {
+					epMap[epAddressItem{
+						ip:       address.IP,
+						port:     port.Port,
+						protocol: port.Protocol,
+					}] = struct{}{}
+				}
+			}
+		}
+	}
+
+	return epMap
 }
