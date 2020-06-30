@@ -293,33 +293,52 @@ func (n *OvnNode) WatchEndpoints() error {
 			if reflect.DeepEqual(epNew.Subsets, epOld.Subsets) {
 				return
 			}
-			newEndpointAddressMap := buildEndpointAddressMap(epNew.Subsets)
-			for _, subset := range epOld.Subsets {
-				for _, address := range subset.Addresses {
-					if _, ok := newEndpointAddressMap[address.IP]; !ok {
-						deleteConntrack(address.IP)
+			newEpAddressMap := buildEndpointAddressMap(epNew.Subsets)
+			for item := range buildEndpointAddressMap(epOld.Subsets) {
+				if _, ok := newEpAddressMap[item]; !ok {
+					err := deleteConntrack(item.ip, item.port, item.protocol)
+					if err != nil {
+						klog.Errorf("Failed to delete conntrack entry for %s: %v", item.ip, err)
 					}
 				}
 			}
 		},
 		DeleteFunc: func(obj interface{}) {
 			ep := obj.(*kapi.Endpoints)
-			for _, subset := range ep.Subsets {
-				for _, address := range subset.Addresses {
-					deleteConntrack(address.IP)
+			for item := range buildEndpointAddressMap(ep.Subsets) {
+				err := deleteConntrack(item.ip, item.port, item.protocol)
+				if err != nil {
+					klog.Errorf("Failed to delete conntrack entry for %s: %v", item.ip, err)
 				}
+
 			}
 		},
 	}, nil)
 	return err
 }
 
-func buildEndpointAddressMap(epSubsets []kapi.EndpointSubset) map[string]struct{} {
-	addressMap := make(map[string]struct{})
+type epAddressItem struct {
+	ip       string
+	port     int32
+	protocol kapi.Protocol
+}
+
+//buildEndpointAddressMap builds a map of all UDP and SCTP ports in the endpoint subset along with that port's IP address
+func buildEndpointAddressMap(epSubsets []kapi.EndpointSubset) map[epAddressItem]struct{} {
+	epMap := make(map[epAddressItem]struct{})
 	for _, subset := range epSubsets {
 		for _, address := range subset.Addresses {
-			addressMap[address.IP] = struct{}{}
+			for _, port := range subset.Ports {
+				if port.Protocol == kapi.ProtocolUDP || port.Protocol == kapi.ProtocolSCTP {
+					epMap[epAddressItem{
+						ip:       address.IP,
+						port:     port.Port,
+						protocol: port.Protocol,
+					}] = struct{}{}
+				}
+			}
 		}
 	}
-	return addressMap
+
+	return epMap
 }
