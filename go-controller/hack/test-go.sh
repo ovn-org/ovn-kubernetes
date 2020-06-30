@@ -15,12 +15,18 @@ function testrun {
     local pkg="${2}"
     local otherargs="${@:3} "
     local args=
+    local ginkgoargs=
+    local path=${pkg#github.com/ovn-org/ovn-kubernetes/go-controller}
     if [ ! -z "${COVERALLS:-}" ]; then
         args="-covermode set -coverprofile ${idx}.coverprofile "
     fi
+    if [ -n "${TEST_REPORT_DIR}" ] && grep -q -r "ginkgo" .${path}; then
+	prefix=$( echo ${path} | cut -c 2- | sed 's,/,_,g')
+	ginkgoargs="-ginkgo.reportFile ${TEST_REPORT_DIR}/junit-${prefix}.xml"
+    fi
     args="${args}${otherargs}${pkg}"
 
-    go test -mod vendor ${args}
+    go test -mod vendor ${args} ${ginkgoargs}
 }
 
 # These packages requires root for network namespace maniuplation in unit tests

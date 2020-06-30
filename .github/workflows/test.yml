@@ -61,6 +61,13 @@ jobs:
         ln -sf $(pwd) src/github.com/ovn-org/ovn-kubernetes
         GOPATH=$(pwd) gcov2lcov -infile gover.coverprofile -outfile coverage.lcov
 
+    - name: Upload Junit Reports
+      if: always()
+      uses: actions/upload-artifact@v2
+      with:
+        name: junit-${{ github.run_id }}
+        path: '**/_artifacts/**.xml'
+
     - name: Submit code coverage to Coveralls
       uses: coverallsapp/github-action@master
       with:
@@ -178,6 +185,13 @@ jobs:
       run: |
         make -C test ${{ matrix.target.shard }}
 
+    - name: Upload Junit Reports
+      if: always()
+      uses: actions/upload-artifact@v2
+      with:
+        name: kind-junit-${{ env.JOB_NAME }}-${{ github.run_id }}
+        path: '**/_artifacts/**.xml'
+
     - name: Export logs
       if: always()
       run: |
@@ -186,7 +200,7 @@ jobs:
 
     - name: Upload logs
       if: always()
-      uses: actions/upload-artifact@v1
+      uses: actions/upload-artifact@v2
       with:
         name: kind-logs-${{ env.JOB_NAME }}-${{ github.run_id }}
         path: /tmp/kind/logs
