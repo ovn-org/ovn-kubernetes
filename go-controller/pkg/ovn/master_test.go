@@ -12,6 +12,8 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/client-go/kubernetes/fake"
 
+	egressfirewallfake "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/egressfirewall/v1/apis/clientset/versioned/fake"
+
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/factory"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/kube"
@@ -284,6 +286,7 @@ var _ = Describe("Master Operations", func() {
 			fakeClient := fake.NewSimpleClientset(&v1.NodeList{
 				Items: []v1.Node{testNode},
 			})
+			egressFirewallFakeClient := &egressfirewallfake.Clientset{}
 
 			err := util.SetExec(fexec)
 			Expect(err).NotTo(HaveOccurred())
@@ -295,7 +298,7 @@ var _ = Describe("Master Operations", func() {
 			mockOVNSBClient := ovntest.NewMockOVNClient(goovn.DBSB)
 
 			populatePortAddresses(nodeName, hybMAC, hybIP, mockOVNNBClient)
-			nodeAnnotator := kube.NewNodeAnnotator(&kube.Kube{fakeClient}, &testNode)
+			nodeAnnotator := kube.NewNodeAnnotator(&kube.Kube{fakeClient, egressFirewallFakeClient}, &testNode)
 			err = util.SetL3GatewayConfig(nodeAnnotator, &util.L3GatewayConfig{Mode: config.GatewayModeDisabled})
 			Expect(err).NotTo(HaveOccurred())
 			err = util.SetNodeManagementPortMACAddress(nodeAnnotator, ovntest.MustParseMAC(mgmtMAC))
@@ -303,10 +306,10 @@ var _ = Describe("Master Operations", func() {
 			err = nodeAnnotator.Run()
 			Expect(err).NotTo(HaveOccurred())
 
-			f, err = factory.NewWatchFactory(fakeClient)
+			f, err = factory.NewWatchFactory(fakeClient, egressFirewallFakeClient)
 			Expect(err).NotTo(HaveOccurred())
 
-			clusterController := NewOvnController(fakeClient, f, stopChan,
+			clusterController := NewOvnController(fakeClient, egressFirewallFakeClient, f, stopChan,
 				newFakeAddressSetFactory(),
 				mockOVNNBClient,
 				mockOVNSBClient)
@@ -374,6 +377,7 @@ var _ = Describe("Master Operations", func() {
 			fakeClient := fake.NewSimpleClientset(&v1.NodeList{
 				Items: []v1.Node{testNode},
 			})
+			egressFirewallFakeClient := &egressfirewallfake.Clientset{}
 
 			err := util.SetExec(fexec)
 			Expect(err).NotTo(HaveOccurred())
@@ -385,7 +389,7 @@ var _ = Describe("Master Operations", func() {
 			mockOVNSBClient := ovntest.NewMockOVNClient(goovn.DBSB)
 
 			populatePortAddresses(nodeName, hybMAC, hybIP, mockOVNNBClient)
-			nodeAnnotator := kube.NewNodeAnnotator(&kube.Kube{fakeClient}, &testNode)
+			nodeAnnotator := kube.NewNodeAnnotator(&kube.Kube{fakeClient, egressFirewallFakeClient}, &testNode)
 			err = util.SetL3GatewayConfig(nodeAnnotator, &util.L3GatewayConfig{Mode: config.GatewayModeDisabled})
 			Expect(err).NotTo(HaveOccurred())
 			err = util.SetNodeManagementPortMACAddress(nodeAnnotator, ovntest.MustParseMAC(mgmtMAC))
@@ -393,10 +397,10 @@ var _ = Describe("Master Operations", func() {
 			err = nodeAnnotator.Run()
 			Expect(err).NotTo(HaveOccurred())
 
-			f, err = factory.NewWatchFactory(fakeClient)
+			f, err = factory.NewWatchFactory(fakeClient, egressFirewallFakeClient)
 			Expect(err).NotTo(HaveOccurred())
 
-			clusterController := NewOvnController(fakeClient, f, stopChan,
+			clusterController := NewOvnController(fakeClient, egressFirewallFakeClient, f, stopChan,
 				newFakeAddressSetFactory(), mockOVNNBClient,
 				mockOVNSBClient)
 
@@ -460,6 +464,7 @@ var _ = Describe("Master Operations", func() {
 			fakeClient := fake.NewSimpleClientset(&v1.NodeList{
 				Items: []v1.Node{testNode},
 			})
+			egressFirewallFakeClient := &egressfirewallfake.Clientset{}
 
 			fexec, tcpLBUUID, udpLBUUID, sctpLBUUID := defaultFakeExec(nodeSubnet, nodeName, true)
 			err := util.SetExec(fexec)
@@ -471,7 +476,7 @@ var _ = Describe("Master Operations", func() {
 			mockOVNNBClient := ovntest.NewMockOVNClient(goovn.DBNB)
 			mockOVNSBClient := ovntest.NewMockOVNClient(goovn.DBSB)
 			populatePortAddresses(nodeName, hybMAC, hybIP, mockOVNNBClient)
-			nodeAnnotator := kube.NewNodeAnnotator(&kube.Kube{fakeClient}, &testNode)
+			nodeAnnotator := kube.NewNodeAnnotator(&kube.Kube{fakeClient, egressFirewallFakeClient}, &testNode)
 			err = util.SetL3GatewayConfig(nodeAnnotator, &util.L3GatewayConfig{Mode: config.GatewayModeDisabled})
 			Expect(err).NotTo(HaveOccurred())
 			err = util.SetNodeManagementPortMACAddress(nodeAnnotator, ovntest.MustParseMAC(mgmtMAC))
@@ -481,10 +486,10 @@ var _ = Describe("Master Operations", func() {
 			err = nodeAnnotator.Run()
 			Expect(err).NotTo(HaveOccurred())
 
-			f, err = factory.NewWatchFactory(fakeClient)
+			f, err = factory.NewWatchFactory(fakeClient, egressFirewallFakeClient)
 			Expect(err).NotTo(HaveOccurred())
 
-			clusterController := NewOvnController(fakeClient, f, stopChan,
+			clusterController := NewOvnController(fakeClient, egressFirewallFakeClient, f, stopChan,
 				newFakeAddressSetFactory(), mockOVNNBClient, mockOVNSBClient)
 			Expect(clusterController).NotTo(BeNil())
 			clusterController.TCPLoadBalancerUUID = tcpLBUUID
@@ -609,6 +614,7 @@ subnet=%s
 			fakeClient := fake.NewSimpleClientset(&v1.NodeList{
 				Items: []v1.Node{masterNode},
 			})
+			egressFirewallFakeClient := &egressfirewallfake.Clientset{}
 
 			err := util.SetExec(fexec)
 			Expect(err).NotTo(HaveOccurred())
@@ -616,7 +622,7 @@ subnet=%s
 			_, err = config.InitConfig(ctx, fexec, nil)
 			Expect(err).NotTo(HaveOccurred())
 
-			nodeAnnotator := kube.NewNodeAnnotator(&kube.Kube{fakeClient}, &masterNode)
+			nodeAnnotator := kube.NewNodeAnnotator(&kube.Kube{fakeClient, egressFirewallFakeClient}, &masterNode)
 			err = util.SetL3GatewayConfig(nodeAnnotator, &util.L3GatewayConfig{Mode: config.GatewayModeDisabled})
 			Expect(err).NotTo(HaveOccurred())
 			err = util.SetNodeManagementPortMACAddress(nodeAnnotator, ovntest.MustParseMAC(masterMgmtPortMAC))
@@ -626,10 +632,10 @@ subnet=%s
 			err = nodeAnnotator.Run()
 			Expect(err).NotTo(HaveOccurred())
 
-			f, err = factory.NewWatchFactory(fakeClient)
+			f, err = factory.NewWatchFactory(fakeClient, egressFirewallFakeClient)
 			Expect(err).NotTo(HaveOccurred())
 
-			clusterController := NewOvnController(fakeClient, f, stopChan,
+			clusterController := NewOvnController(fakeClient, egressFirewallFakeClient, f, stopChan,
 				newFakeAddressSetFactory(), ovntest.NewMockOVNClient(goovn.DBNB),
 				ovntest.NewMockOVNClient(goovn.DBSB))
 			Expect(clusterController).NotTo(BeNil())
@@ -736,6 +742,7 @@ var _ = Describe("Gateway Init Operations", func() {
 			fakeClient := fake.NewSimpleClientset(&v1.NodeList{
 				Items: []v1.Node{testNode},
 			})
+			egressFirewallFakeClient := &egressfirewallfake.Clientset{}
 
 			fexec := ovntest.NewFakeExec()
 			err := util.SetExec(fexec)
@@ -744,7 +751,7 @@ var _ = Describe("Gateway Init Operations", func() {
 			_, err = config.InitConfig(ctx, fexec, nil)
 			Expect(err).NotTo(HaveOccurred())
 
-			nodeAnnotator := kube.NewNodeAnnotator(&kube.Kube{fakeClient}, &testNode)
+			nodeAnnotator := kube.NewNodeAnnotator(&kube.Kube{fakeClient, egressFirewallFakeClient}, &testNode)
 			ifaceID := localnetBridgeName + "_" + nodeName
 			err = util.SetL3GatewayConfig(nodeAnnotator, &util.L3GatewayConfig{
 				Mode:           config.GatewayModeLocal,
@@ -848,10 +855,10 @@ var _ = Describe("Gateway Init Operations", func() {
 				Output: "169.254.33.2",
 			})
 
-			f, err = factory.NewWatchFactory(fakeClient)
+			f, err = factory.NewWatchFactory(fakeClient, egressFirewallFakeClient)
 			Expect(err).NotTo(HaveOccurred())
 
-			clusterController := NewOvnController(fakeClient, f, stopChan, newFakeAddressSetFactory(),
+			clusterController := NewOvnController(fakeClient, egressFirewallFakeClient, f, stopChan, newFakeAddressSetFactory(),
 				ovntest.NewMockOVNClient(goovn.DBNB),
 				ovntest.NewMockOVNClient(goovn.DBSB))
 			Expect(clusterController).NotTo(BeNil())
@@ -920,6 +927,7 @@ var _ = Describe("Gateway Init Operations", func() {
 			fakeClient := fake.NewSimpleClientset(&v1.NodeList{
 				Items: []v1.Node{testNode},
 			})
+			egressFirewallFakeClient := &egressfirewallfake.Clientset{}
 
 			fexec := ovntest.NewFakeExec()
 			err := util.SetExec(fexec)
@@ -928,7 +936,7 @@ var _ = Describe("Gateway Init Operations", func() {
 			_, err = config.InitConfig(ctx, fexec, nil)
 			Expect(err).NotTo(HaveOccurred())
 
-			nodeAnnotator := kube.NewNodeAnnotator(&kube.Kube{fakeClient}, &testNode)
+			nodeAnnotator := kube.NewNodeAnnotator(&kube.Kube{fakeClient, egressFirewallFakeClient}, &testNode)
 			ifaceID := physicalBridgeName + "_" + nodeName
 			vlanID := uint(1024)
 			err = util.SetL3GatewayConfig(nodeAnnotator, &util.L3GatewayConfig{
@@ -1042,10 +1050,10 @@ var _ = Describe("Gateway Init Operations", func() {
 				Output: "169.254.33.2",
 			})
 
-			f, err = factory.NewWatchFactory(fakeClient)
+			f, err = factory.NewWatchFactory(fakeClient, egressFirewallFakeClient)
 			Expect(err).NotTo(HaveOccurred())
 
-			clusterController := NewOvnController(fakeClient, f, stopChan,
+			clusterController := NewOvnController(fakeClient, egressFirewallFakeClient, f, stopChan,
 				newFakeAddressSetFactory(), ovntest.NewMockOVNClient(goovn.DBNB),
 				ovntest.NewMockOVNClient(goovn.DBSB))
 			Expect(clusterController).NotTo(BeNil())

@@ -10,15 +10,18 @@ import (
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/client-go/kubernetes/fake"
 	"k8s.io/client-go/tools/record"
+
+	egressfirewallfake "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/egressfirewall/v1/apis/clientset/versioned/fake"
 )
 
 type FakeOVNNode struct {
-	node       *OvnNode
-	watcher    *factory.WatchFactory
-	stopChan   chan struct{}
-	recorder   *record.FakeRecorder
-	fakeClient *fake.Clientset
-	fakeExec   *ovntest.FakeExec
+	node             *OvnNode
+	watcher          *factory.WatchFactory
+	stopChan         chan struct{}
+	recorder         *record.FakeRecorder
+	fakeClient       *fake.Clientset
+	fakeEgressClient *egressfirewallfake.Clientset
+	fakeExec         *ovntest.FakeExec
 }
 
 func NewFakeOVNNode(fexec *ovntest.FakeExec) *FakeOVNNode {
@@ -35,6 +38,7 @@ func (o *FakeOVNNode) start(ctx *cli.Context, objects ...runtime.Object) {
 	_, err := config.InitConfig(ctx, o.fakeExec, nil)
 	Expect(err).NotTo(HaveOccurred())
 
+	o.fakeEgressClient = egressfirewallfake.NewSimpleClientset()
 	o.fakeClient = fake.NewSimpleClientset(objects...)
 	o.init()
 }
@@ -52,7 +56,8 @@ func (o *FakeOVNNode) init() {
 	var err error
 
 	o.stopChan = make(chan struct{})
-	o.watcher, err = factory.NewWatchFactory(o.fakeClient)
+
+	o.watcher, err = factory.NewWatchFactory(o.fakeClient, o.fakeEgressClient)
 	Expect(err).NotTo(HaveOccurred())
 
 	o.node = NewNode(o.fakeClient, o.watcher, "node", o.stopChan, o.recorder)

@@ -11,6 +11,8 @@ import (
 	"github.com/urfave/cli/v2"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/client-go/kubernetes/fake"
+
+	egressfirewallfake "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/egressfirewall/v1/apis/clientset/versioned/fake"
 )
 
 const (
@@ -22,14 +24,15 @@ const (
 )
 
 type FakeOVN struct {
-	fakeClient  *fake.Clientset
-	watcher     *factory.WatchFactory
-	controller  *Controller
-	stopChan    chan struct{}
-	fakeExec    *ovntest.FakeExec
-	asf         *fakeAddressSetFactory
-	ovnNBClient goovn.Client
-	ovnSBClient goovn.Client
+	fakeClient       *fake.Clientset
+	fakeEgressClient *egressfirewallfake.Clientset
+	watcher          *factory.WatchFactory
+	controller       *Controller
+	stopChan         chan struct{}
+	fakeExec         *ovntest.FakeExec
+	asf              *fakeAddressSetFactory
+	ovnNBClient      goovn.Client
+	ovnSBClient      goovn.Client
 }
 
 func NewFakeOVN(fexec *ovntest.FakeExec) *FakeOVN {
@@ -67,11 +70,11 @@ func (o *FakeOVN) init() {
 	var err error
 
 	o.stopChan = make(chan struct{})
-	o.watcher, err = factory.NewWatchFactory(o.fakeClient)
+	o.watcher, err = factory.NewWatchFactory(o.fakeClient, o.fakeEgressClient)
 	Expect(err).NotTo(HaveOccurred())
 	o.ovnNBClient = ovntest.NewMockOVNClient(goovn.DBNB)
 	o.ovnSBClient = ovntest.NewMockOVNClient(goovn.DBSB)
-	o.controller = NewOvnController(o.fakeClient, o.watcher,
+	o.controller = NewOvnController(o.fakeClient, o.fakeEgressClient, o.watcher,
 		o.stopChan, o.asf, o.ovnNBClient,
 		o.ovnSBClient)
 	o.controller.multicastSupport = true

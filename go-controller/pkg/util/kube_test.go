@@ -10,7 +10,7 @@ import (
 	"testing"
 )
 
-func TestNewClientset(t *testing.T) {
+func TestNewClientsets(t *testing.T) {
 	tests := []struct {
 		desc        string
 		inpConfig   config.KubernetesConfig
@@ -61,12 +61,13 @@ func TestNewClientset(t *testing.T) {
 
 	for i, tc := range tests {
 		t.Run(fmt.Sprintf("%d:%s", i, tc.desc), func(t *testing.T) {
-			res, e := NewClientset(&tc.inpConfig)
+			res, egressFirewall, e := NewClientsets(&tc.inpConfig)
 			t.Log(res, e)
 			if tc.errExpected {
 				assert.Error(t, e)
 			} else {
 				assert.NotNil(t, res)
+				assert.NotNil(t, egressFirewall)
 			}
 
 		})
