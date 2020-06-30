@@ -98,17 +98,17 @@ func (n *NodeController) AddPod(pod *kapi.Pod) error {
 		return n.DeletePod(pod)
 	}
 
-	externalGw := pod.Annotations[hotypes.HybridOverlayExternalGw]
-	// validate the external gateway is a valid IP address
-	if ip := net.ParseIP(externalGw); ip == nil {
+	externalGw, ok := pod.Annotations[hotypes.HybridOverlayExternalGw]
+	// validate the external gateway (if any) is a valid IP address
+	if ip := net.ParseIP(externalGw); ok && ip == nil {
 		klog.Warningf("Failed parse a valid external gateway ip address from %v: %v", externalGw, err)
 		return fmt.Errorf("failed to validate a valid external gateway ip address %s: %v", externalGw, err)
 	}
 
-	VTEP := pod.Annotations[hotypes.HybridOverlayVTEP]
-	// validate the VTEP is a valid IP address
+	VTEP, ok := pod.Annotations[hotypes.HybridOverlayVTEP]
+	// validate the VTEP (if any) is a valid IP address
 	VTEPIP := net.ParseIP(VTEP)
-	if VTEPIP == nil {
+	if ok && VTEPIP == nil {
 		klog.Warningf("Failed parse a valid vtep ip address from %v: %v", VTEP, err)
 		return fmt.Errorf("failed to validate a valid vtep ip address %s: %v", VTEP, err)
 	}
