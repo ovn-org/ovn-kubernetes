@@ -15,6 +15,74 @@ import (
 	utilnet "k8s.io/utils/net"
 )
 
+type NetLinkOps interface {
+	LinkByName(ifaceName string) (netlink.Link, error)
+	LinkSetup(link netlink.Link) error
+	AddrList(link netlink.Link, family int) ([]netlink.Addr, error)
+	AddrDel(link netlink.Link, addr *netlink.Addr) error
+	AddrAdd(link netlink.Link, addr *netlink.Addr) error
+	RouteList(link netlink.Link, family int) ([]netlink.Route, error)
+	RouteDel(route *netlink.Route) error
+	RouteAdd(route *netlink.Route) error
+	RouteListFiltered(family int, filter *netlink.Route, filterMask uint64) ([]netlink.Route, error)
+	NeighAdd(neigh *netlink.Neigh) error
+	NeighList(linkIndex, family int) ([]netlink.Neigh, error)
+	ConntrackDeleteFilter(table netlink.ConntrackTableType, family netlink.InetFamily, filter netlink.CustomConntrackFilter) (uint, error)
+}
+
+type defaultNetLinkOps struct {
+}
+
+var netLinkOps NetLinkOps = &defaultNetLinkOps{}
+
+func (defaultNetLinkOps) LinkByName(ifaceName string) (netlink.Link, error) {
+	return netlink.LinkByName(ifaceName)
+}
+
+func (defaultNetLinkOps) LinkSetup(link netlink.Link) error {
+	return netlink.LinkSetUp(link)
+}
+
+func (defaultNetLinkOps) AddrList(link netlink.Link, family int) ([]netlink.Addr, error) {
+	return netlink.AddrList(link, family)
+}
+
+func (defaultNetLinkOps) AddrDel(link netlink.Link, addr *netlink.Addr) error {
+	return netlink.AddrDel(link, addr)
+}
+
+func (defaultNetLinkOps) AddrAdd(link netlink.Link, addr *netlink.Addr) error {
+	return netlink.AddrAdd(link, addr)
+}
+
+func (defaultNetLinkOps) RouteList(link netlink.Link, family int) ([]netlink.Route, error) {
+	return netlink.RouteList(link, family)
+}
+
+func (defaultNetLinkOps) RouteDel(route *netlink.Route) error {
+	return netlink.RouteDel(route)
+}
+
+func (defaultNetLinkOps) RouteAdd(route *netlink.Route) error {
+	return netlink.RouteAdd(route)
+}
+
+func (defaultNetLinkOps) RouteListFiltered(family int, filter *netlink.Route, filterMask uint64) ([]netlink.Route, error) {
+	return netlink.RouteListFiltered(family, filter, filterMask)
+}
+
+func (defaultNetLinkOps) NeighAdd(neigh *netlink.Neigh) error {
+	return netlink.NeighAdd(neigh)
+}
+
+func (defaultNetLinkOps) NeighList(linkIndex, family int) ([]netlink.Neigh, error) {
+	return netlink.NeighList(linkIndex, family)
+}
+
+func (defaultNetLinkOps) ConntrackDeleteFilter(table netlink.ConntrackTableType, family netlink.InetFamily, filter netlink.CustomConntrackFilter) (uint, error) {
+	return netlink.ConntrackDeleteFilter(table, family, filter)
+}
+
 func getFamily(ip net.IP) int {
 	if utilnet.IsIPv6(ip) {
 		return netlink.FAMILY_V6
@@ -25,11 +93,11 @@ func getFamily(ip net.IP) int {
 
 // LinkSetUp returns the netlink device with its state marked up
 func LinkSetUp(interfaceName string) (netlink.Link, error) {
-	link, err := netlink.LinkByName(interfaceName)
+	link, err := netLinkOps.LinkByName(interfaceName)
 	if err != nil {
 		return nil, fmt.Errorf("failed to lookup link %s: %v", interfaceName, err)
 	}
-	err = netlink.LinkSetUp(link)
+	err = netLinkOps.LinkSetup(link)
 	if err != nil {
 		return nil, fmt.Errorf("failed to set the link %s up: %v", interfaceName, err)
 	}
@@ -38,12 +106,12 @@ func LinkSetUp(interfaceName string) (netlink.Link, error) {
 
 // LinkAddrFlush flushes all the addresses on the given link
 func LinkAddrFlush(link netlink.Link) error {
-	addrs, err := netlink.AddrList(link, netlink.FAMILY_ALL)
+	addrs, err := netLinkOps.AddrList(link, netlink.FAMILY_ALL)
 	if err != nil {
 		return fmt.Errorf("failed to list addresses for the link %s: %v", link.Attrs().Name, err)
 	}
 	for _, addr := range addrs {
-		err = netlink.AddrDel(link, &addr)
+		err = netLinkOps.AddrDel(link, &addr)
 		if err != nil {
 			return fmt.Errorf("failed to delete address %s on link %s: %v",
 				addr.IP.String(), link.Attrs().Name, err)
@@ -54,7 +122,7 @@ func LinkAddrFlush(link netlink.Link) error {
 
 // LinkAddrExist returns true if the given address is present on the link
 func LinkAddrExist(link netlink.Link, address *net.IPNet) (bool, error) {
-	addrs, err := netlink.AddrList(link, getFamily(address.IP))
+	addrs, err := netLinkOps.AddrList(link, getFamily(address.IP))
 	if err != nil {
 		return false, fmt.Errorf("failed to list addresses for the link %s: %v",
 			link.Attrs().Name, err)
@@ -69,7 +137,7 @@ func LinkAddrExist(link netlink.Link, address *net.IPNet) (bool, error) {
 
 // LinkAddrAdd removes existing addresses on the link and adds the new address
 func LinkAddrAdd(link netlink.Link, address *net.IPNet) error {
-	err := netlink.AddrAdd(link, &netlink.Addr{IPNet: address})
+	err := netLinkOps.AddrAdd(link, &netlink.Addr{IPNet: address})
 	if err != nil {
 		return fmt.Errorf("failed to add address %s on link %s: %v", address, link.Attrs().Name, err)
 	}
@@ -78,7 +146,7 @@ func LinkAddrAdd(link netlink.Link, address *net.IPNet) error {
 
 // LinkRoutesDel deletes all the routes for the given subnets via the link
 func LinkRoutesDel(link netlink.Link, subnets []*net.IPNet) error {
-	routes, err := netlink.RouteList(link, netlink.FAMILY_ALL)
+	routes, err := netLinkOps.RouteList(link, netlink.FAMILY_ALL)
 	if err != nil {
 		return fmt.Errorf("failed to get all the routes for link %s: %v",
 			link.Attrs().Name, err)
@@ -86,7 +154,7 @@ func LinkRoutesDel(link netlink.Link, subnets []*net.IPNet) error {
 	for _, subnet := range subnets {
 		for _, route := range routes {
 			if route.Dst.String() == subnet.String() {
-				err = netlink.RouteDel(&route)
+				err = netLinkOps.RouteDel(&route)
 				if err != nil {
 					return fmt.Errorf("failed to delete route '%s via %s' for link %s : %v\n",
 						route.Dst.String(), route.Gw.String(), link.Attrs().Name, err)
@@ -107,7 +175,7 @@ func LinkRoutesAdd(link netlink.Link, gwIP net.IP, subnets []*net.IPNet) error {
 			Scope:     netlink.SCOPE_UNIVERSE,
 			Gw:        gwIP,
 		}
-		err := netlink.RouteAdd(route)
+		err := netLinkOps.RouteAdd(route)
 		if err != nil {
 			if os.IsExist(err) {
 				return err
@@ -123,7 +191,7 @@ func LinkRoutesAdd(link netlink.Link, gwIP net.IP, subnets []*net.IPNet) error {
 func LinkRouteExists(link netlink.Link, gwIP net.IP, subnet *net.IPNet) (bool, error) {
 	routeFilter := &netlink.Route{Dst: subnet}
 	filterMask := netlink.RT_FILTER_DST
-	routes, err := netlink.RouteListFiltered(getFamily(gwIP), routeFilter, filterMask)
+	routes, err := netLinkOps.RouteListFiltered(getFamily(gwIP), routeFilter, filterMask)
 	if err != nil {
 		return false, fmt.Errorf("failed to get routes for subnet %s", subnet.String())
 	}
@@ -144,7 +212,7 @@ func LinkNeighAdd(link netlink.Link, neighIP net.IP, neighMAC net.HardwareAddr) 
 		IP:           neighIP,
 		HardwareAddr: neighMAC,
 	}
-	err := netlink.NeighAdd(neigh)
+	err := netLinkOps.NeighAdd(neigh)
 	if err != nil {
 		return fmt.Errorf("failed to add neighbour entry %+v: %v", neigh, err)
 	}
@@ -153,7 +221,7 @@ func LinkNeighAdd(link netlink.Link, neighIP net.IP, neighMAC net.HardwareAddr) 
 
 // LinkNeighExists checks to see if the given MAC/IP bindings exists
 func LinkNeighExists(link netlink.Link, neighIP net.IP, neighMAC net.HardwareAddr) (bool, error) {
-	neighs, err := netlink.NeighList(link.Attrs().Index, getFamily(neighIP))
+	neighs, err := netLinkOps.NeighList(link.Attrs().Index, getFamily(neighIP))
 	if err != nil {
 		return false, fmt.Errorf("failed to get the list of neighbour entries for link %s",
 			link.Attrs().Name)
@@ -197,11 +265,11 @@ func DeleteConntrack(ip string, port int32, protocol kapi.Protocol) error {
 		return fmt.Errorf("could not add IP: %s to conntrack filter: %v", ipAddress, err)
 	}
 	if ipAddress.To4() != nil {
-		if _, err := netlink.ConntrackDeleteFilter(netlink.ConntrackTable, netlink.FAMILY_V4, filter); err != nil {
+		if _, err := netLinkOps.ConntrackDeleteFilter(netlink.ConntrackTable, netlink.FAMILY_V4, filter); err != nil {
 			return err
 		}
 	} else {
-		if _, err := netlink.ConntrackDeleteFilter(netlink.ConntrackTable, netlink.FAMILY_V6, filter); err != nil {
+		if _, err := netLinkOps.ConntrackDeleteFilter(netlink.ConntrackTable, netlink.FAMILY_V6, filter); err != nil {
 			return err
 		}
 	}
