@@ -367,6 +367,56 @@ var _ = Describe("Hybrid Overlay Node Linux Operations", func() {
 		}
 		appRun(app, netns)
 	})
+	It("sets up local linux pod", func() {
+		app.Action = func(ctx *cli.Context) error {
+			const (
+				thisDrMAC string = "22:33:44:55:66:77"
+				pod1IP    string = "1.2.3.5"
+				pod1CIDR  string = pod1IP + "/24"
+				pod1MAC   string = "aa:bb:cc:dd:ee:ff"
+			)
+
+			annotations := createNodeAnnotationsForSubnet(thisSubnet)
+			annotations[types.HybridOverlayDRMAC] = thisDrMAC
+			node := createNode(thisNode, "linux", "10.0.0.1", annotations)
+			testPod := createPod("test", "pod1", thisNode, pod1CIDR, pod1MAC)
+			fakeClient := fake.NewSimpleClientset(&v1.NodeList{
+				Items: []v1.Node{*node},
+			})
+
+			// Node setup from initial node sync
+			addNodeSetupCmds(fexec, thisNode)
+			fexec.AddFakeCmd(&ovntest.ExpectedCmd{
+				Cmd: "ovs-ofctl dump-flows br-ext table=0",
+				// Assume fresh OVS bridge
+				Output: "",
+			})
+
+			_, err := config.InitConfig(ctx, fexec, nil)
+			Expect(err).NotTo(HaveOccurred())
+
+			f := informers.NewSharedInformerFactory(fakeClient, informer.DefaultResyncInterval)
+
+			n, err := NewNode(
+				&kube.Kube{KClient: fakeClient},
+				thisNode,
+				f.Core().V1().Nodes().Informer(),
+				f.Core().V1().Pods().Informer(),
+			)
+			Expect(err).NotTo(HaveOccurred())
+
+			err = n.controller.EnsureHybridOverlayBridge(node)
+			Expect(err).NotTo(HaveOccurred())
+
+			// FIXME
+			// Eventually(fexec.CalledMatchesExpected, 2).Should(BeTrue(), fexec.ErrorDesc)
+			validateNetlinkState(thisSubnet)
+			err = n.controller.AddPod(testPod)
+			Expect(err).NotTo(HaveOccurred())
+			return nil
+		}
+		appRun(app, netns)
+	})
 
 	It("sets up tunnels for Windows nodes", func() {
 		app.Action = func(ctx *cli.Context) error {

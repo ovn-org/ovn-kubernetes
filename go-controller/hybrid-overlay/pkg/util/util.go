@@ -84,14 +84,18 @@ func StartNodeWatch(h types.NodeHandler, wf *factory.WatchFactory) error {
 
 // CopyNamespaceAnnotationsToPod copies annotations from a namespace to a pod
 func CopyNamespaceAnnotationsToPod(k kube.Interface, ns *kapi.Namespace, pod *kapi.Pod) error {
-	nsGw := ns.Annotations[types.HybridOverlayExternalGw]
-	nsVTEP := ns.Annotations[types.HybridOverlayVTEP]
+	nsGw, nsGwExists := ns.Annotations[types.HybridOverlayExternalGw]
+	nsVTEP, nsVTEPExists := ns.Annotations[types.HybridOverlayVTEP]
 	annotator := kube.NewPodAnnotator(k, pod)
-	if err := annotator.Set(types.HybridOverlayExternalGw, nsGw); err != nil {
-		return err
+	if nsGwExists {
+		if err := annotator.Set(types.HybridOverlayExternalGw, nsGw); err != nil {
+			return err
+		}
 	}
-	if err := annotator.Set(types.HybridOverlayVTEP, nsVTEP); err != nil {
-		return err
+	if nsVTEPExists {
+		if err := annotator.Set(types.HybridOverlayVTEP, nsVTEP); err != nil {
+			return err
+		}
 	}
 	return annotator.Run()
 }
