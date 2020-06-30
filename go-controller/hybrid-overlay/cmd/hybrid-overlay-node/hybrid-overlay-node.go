@@ -95,7 +95,7 @@ func runHybridOverlay(ctx *cli.Context) error {
 		klog.Infof("Error initializing Windows service: %v", err)
 	}
 
-	clientset, _, _, err := util.NewClientsets(&config.Kubernetes)
+	clientset, _, _, _, err := util.NewClientsets(&config.Kubernetes)
 	if err != nil {
 		return err
 	}

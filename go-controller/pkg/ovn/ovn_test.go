@@ -13,6 +13,7 @@ import (
 	"k8s.io/client-go/kubernetes/fake"
 
 	egressfirewallfake "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/egressfirewall/v1/apis/clientset/versioned/fake"
+	egressipfake "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/egressip/v1/apis/clientset/versioned/fake"
 	apiextensionsfake "k8s.io/apiextensions-apiserver/pkg/client/clientset/clientset/fake"
 )
 
@@ -76,7 +77,8 @@ func (o *FakeOVN) init() {
 	var err error
 
 	o.stopChan = make(chan struct{})
-	o.watcher, err = factory.NewWatchFactory(o.fakeClient, o.fakeEgressClient, o.fakeCRDClient)
+	egressIPFakeClient := &egressipfake.Clientset{}
+	o.watcher, err = factory.NewWatchFactory(o.fakeClient, egressIPFakeClient, o.fakeEgressClient, o.fakeCRDClient)
 	if o.fakeEgressClient != nil {
 		o.watcher.InitializeEgressFirewallWatchFactory()
 	}
