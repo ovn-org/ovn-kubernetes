@@ -4,12 +4,12 @@ package node
 
 import (
 	"fmt"
-	"os/exec"
 	"reflect"
 	"strings"
 	"time"
 
 	egressipv1 "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/egressip/v1"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
 	"github.com/vishvananda/netlink"
 	"k8s.io/client-go/tools/cache"
 	"k8s.io/klog"
@@ -192,13 +192,15 @@ func (e *egressIPLocal) notifyClusterNodes(egressIP string) {
 		klog.Errorf("Unable to get link for primary interface: %s, err: %v", e.defaultGatewayIntf, err)
 		return
 	}
-	out, err := exec.Command("/sbin/arping", "-q", "-A", "-c", "1", "-I", primaryLink.Attrs().Name, egressIP).CombinedOutput()
+	_, stderr, err := util.RunArping("-q", "-A", "-c", "1", "-I", primaryLink.Attrs().Name, egressIP)
 	if err != nil {
-		klog.Warningf("Failed to send GARP claim for egress IP %q: %v (%s)", egressIP, err, string(out))
+		klog.Warningf("Failed to send GARP claim for egress IP %q: %v (%s)", egressIP, err, string(stderr))
 		return
 	}
 	time.Sleep(2 * time.Second)
-	_ = exec.Command("/sbin/arping", "-q", "-U", "-c", "1", "-I", primaryLink.Attrs().Name, egressIP).Run()
+	if _, stderr, err := util.RunArping("-q", "-U", "-c", "1", "-I", primaryLink.Attrs().Name, egressIP); err != nil {
+		klog.Warningf("Failed to GARP for egress IP %q: %v (%s)", egressIP, err, string(stderr))
+	}
 }
 
 func (e *egressIPLocal) handleEgressIPLink(egressIP string, handler func(link netlink.Link, ip string) error) error {
