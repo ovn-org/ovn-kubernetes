@@ -1,6 +1,7 @@
 package ovn
 
 import (
+	"context"
 	"fmt"
 	"net"
 
@@ -307,7 +308,7 @@ var _ = Describe("Master Operations", func() {
 			Expect(err).NotTo(HaveOccurred())
 
 			Eventually(fexec.CalledMatchesExpected, 2).Should(BeTrue(), fexec.ErrorDesc)
-			updatedNode, err := fakeClient.CoreV1().Nodes().Get(nodeName, metav1.GetOptions{})
+			updatedNode, err := fakeClient.CoreV1().Nodes().Get(context.TODO(), nodeName, metav1.GetOptions{})
 			Expect(err).NotTo(HaveOccurred())
 
 			subnetsFromAnnotation, err := util.ParseNodeHostSubnetAnnotation(updatedNode)
@@ -389,7 +390,7 @@ var _ = Describe("Master Operations", func() {
 			Expect(err).NotTo(HaveOccurred())
 
 			Eventually(fexec.CalledMatchesExpected, 2).Should(BeTrue(), fexec.ErrorDesc)
-			updatedNode, err := fakeClient.CoreV1().Nodes().Get(nodeName, metav1.GetOptions{})
+			updatedNode, err := fakeClient.CoreV1().Nodes().Get(context.TODO(), nodeName, metav1.GetOptions{})
 			Expect(err).NotTo(HaveOccurred())
 
 			subnetsFromAnnotation, err := util.ParseNodeHostSubnetAnnotation(updatedNode)
@@ -473,7 +474,7 @@ var _ = Describe("Master Operations", func() {
 			Expect(err).NotTo(HaveOccurred())
 
 			Eventually(fexec.CalledMatchesExpected, 2).Should(BeTrue(), fexec.ErrorDesc)
-			updatedNode, err := fakeClient.CoreV1().Nodes().Get(nodeName, metav1.GetOptions{})
+			updatedNode, err := fakeClient.CoreV1().Nodes().Get(context.TODO(), nodeName, metav1.GetOptions{})
 			Expect(err).NotTo(HaveOccurred())
 
 			subnetsFromAnnotation, err := util.ParseNodeHostSubnetAnnotation(updatedNode)
@@ -619,7 +620,7 @@ subnet=%s
 
 			Expect(fexec.CalledMatchesExpected()).To(BeTrue(), fexec.ErrorDesc)
 
-			node, err := fakeClient.CoreV1().Nodes().Get(masterNode.Name, metav1.GetOptions{})
+			node, err := fakeClient.CoreV1().Nodes().Get(context.TODO(), masterNode.Name, metav1.GetOptions{})
 			Expect(err).NotTo(HaveOccurred())
 			Expect(len(node.Status.Conditions)).To(BeIdenticalTo(1))
 			Expect(node.Status.Conditions[0].Message).To(BeIdenticalTo("ovn-kube cleared kubelet-set NoRouteCreated"))
@@ -739,7 +740,7 @@ var _ = Describe("Gateway Init Operations", func() {
 			err = nodeAnnotator.Run()
 			Expect(err).NotTo(HaveOccurred())
 
-			updatedNode, err := fakeClient.CoreV1().Nodes().Get(testNode.Name, metav1.GetOptions{})
+			updatedNode, err := fakeClient.CoreV1().Nodes().Get(context.TODO(), testNode.Name, metav1.GetOptions{})
 			Expect(err).NotTo(HaveOccurred())
 			l3GatewayConfig, err := util.ParseNodeL3GatewayAnnotation(updatedNode)
 			Expect(err).NotTo(HaveOccurred())
@@ -924,7 +925,7 @@ var _ = Describe("Gateway Init Operations", func() {
 			err = nodeAnnotator.Run()
 			Expect(err).NotTo(HaveOccurred())
 
-			updatedNode, err := fakeClient.CoreV1().Nodes().Get(testNode.Name, metav1.GetOptions{})
+			updatedNode, err := fakeClient.CoreV1().Nodes().Get(context.TODO(), testNode.Name, metav1.GetOptions{})
 			Expect(err).NotTo(HaveOccurred())
 			l3GatewayConfig, err := util.ParseNodeL3GatewayAnnotation(updatedNode)
 			Expect(err).NotTo(HaveOccurred())

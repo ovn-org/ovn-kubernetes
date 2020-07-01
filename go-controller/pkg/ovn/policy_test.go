@@ -1,6 +1,7 @@
 package ovn
 
 import (
+	"context"
 	"fmt"
 	"sort"
 	"strings"
@@ -368,7 +369,7 @@ var _ = Describe("OVN NetworkPolicy Operations", func() {
 				fakeOvn.asf.ExpectEmptyAddressSet(namespace2.Name)
 				eventuallyExpectEmptyAddressSets(fakeOvn, networkPolicy)
 
-				_, err := fakeOvn.fakeClient.NetworkingV1().NetworkPolicies(networkPolicy.Namespace).Get(networkPolicy.Name, metav1.GetOptions{})
+				_, err := fakeOvn.fakeClient.NetworkingV1().NetworkPolicies(networkPolicy.Namespace).Get(context.TODO(), networkPolicy.Name, metav1.GetOptions{})
 				Expect(err).NotTo(HaveOccurred())
 				Eventually(fExec.CalledMatchesExpected).Should(BeTrue(), fExec.ErrorDesc)
 
@@ -456,7 +457,7 @@ var _ = Describe("OVN NetworkPolicy Operations", func() {
 				expectAddressSetsWithIP(fakeOvn, networkPolicy, nPodTest.podIP)
 				fakeOvn.asf.ExpectAddressSetWithIPs(namespace1.Name, []string{nPodTest.podIP})
 
-				_, err := fakeOvn.fakeClient.NetworkingV1().NetworkPolicies(networkPolicy.Namespace).Get(networkPolicy.Name, metav1.GetOptions{})
+				_, err := fakeOvn.fakeClient.NetworkingV1().NetworkPolicies(networkPolicy.Namespace).Get(context.TODO(), networkPolicy.Name, metav1.GetOptions{})
 				Expect(err).NotTo(HaveOccurred())
 				Eventually(fExec.CalledMatchesExpected).Should(BeTrue(), fExec.ErrorDesc)
 
@@ -556,7 +557,7 @@ var _ = Describe("OVN NetworkPolicy Operations", func() {
 				expectAddressSetsWithIP(fakeOvn, networkPolicy, nPodTest.podIP)
 				fakeOvn.asf.ExpectAddressSetWithIPs(namespace2.Name, []string{nPodTest.podIP})
 
-				_, err := fakeOvn.fakeClient.NetworkingV1().NetworkPolicies(networkPolicy.Namespace).Get(networkPolicy.Name, metav1.GetOptions{})
+				_, err := fakeOvn.fakeClient.NetworkingV1().NetworkPolicies(networkPolicy.Namespace).Get(context.TODO(), networkPolicy.Name, metav1.GetOptions{})
 				Expect(err).NotTo(HaveOccurred())
 				Eventually(fExec.CalledMatchesExpected).Should(BeTrue(), fExec.ErrorDesc)
 
@@ -645,7 +646,7 @@ var _ = Describe("OVN NetworkPolicy Operations", func() {
 				fakeOvn.controller.WatchNamespaces()
 				fakeOvn.controller.WatchNetworkPolicy()
 
-				_, err := fakeOvn.fakeClient.NetworkingV1().NetworkPolicies(networkPolicy.Namespace).Get(networkPolicy.Name, metav1.GetOptions{})
+				_, err := fakeOvn.fakeClient.NetworkingV1().NetworkPolicies(networkPolicy.Namespace).Get(context.TODO(), networkPolicy.Name, metav1.GetOptions{})
 				Expect(err).NotTo(HaveOccurred())
 				Eventually(fExec.CalledMatchesExpected).Should(BeTrue(), fExec.ErrorDesc)
 				fakeOvn.asf.ExpectAddressSetWithIPs(namespace1.Name, []string{nPodTest.podIP})
@@ -734,7 +735,7 @@ var _ = Describe("OVN NetworkPolicy Operations", func() {
 				fakeOvn.controller.WatchNamespaces()
 				fakeOvn.controller.WatchNetworkPolicy()
 
-				_, err := fakeOvn.fakeClient.NetworkingV1().NetworkPolicies(networkPolicy.Namespace).Get(networkPolicy.Name, metav1.GetOptions{})
+				_, err := fakeOvn.fakeClient.NetworkingV1().NetworkPolicies(networkPolicy.Namespace).Get(context.TODO(), networkPolicy.Name, metav1.GetOptions{})
 				Expect(err).NotTo(HaveOccurred())
 				Eventually(fExec.CalledMatchesExpected).Should(BeTrue(), fExec.ErrorDesc)
 				fakeOvn.asf.ExpectAddressSetWithIPs(namespace1.Name, []string{nPodTest.podIP})
@@ -750,7 +751,7 @@ var _ = Describe("OVN NetworkPolicy Operations", func() {
 					"ovn-nbctl --timeout=15 --data=bare --no-heading --columns=_uuid find ACL match=\"ip4.dst == {$a6953373268003663638, $a9824637386382239951} && inport == @a14195333570786048679\" external-ids:namespace=namespace1 external-ids:policy=networkpolicy1 external-ids:Egress_num=0 external-ids:policy_type=Egress",
 				})
 
-				err = fakeOvn.fakeClient.CoreV1().Namespaces().Delete(namespace2.Name, metav1.NewDeleteOptions(0))
+				err = fakeOvn.fakeClient.CoreV1().Namespaces().Delete(context.TODO(), namespace2.Name, *metav1.NewDeleteOptions(0))
 				Expect(err).NotTo(HaveOccurred())
 				Eventually(fExec.CalledMatchesExpected).Should(BeTrue(), fExec.ErrorDesc)
 				fakeOvn.asf.EventuallyExpectNoAddressSet(namespace2.Name)
@@ -817,7 +818,7 @@ var _ = Describe("OVN NetworkPolicy Operations", func() {
 				fakeOvn.controller.WatchNamespaces()
 				fakeOvn.controller.WatchNetworkPolicy()
 
-				_, err := fakeOvn.fakeClient.NetworkingV1().NetworkPolicies(networkPolicy.Namespace).Get(networkPolicy.Name, metav1.GetOptions{})
+				_, err := fakeOvn.fakeClient.NetworkingV1().NetworkPolicies(networkPolicy.Namespace).Get(context.TODO(), networkPolicy.Name, metav1.GetOptions{})
 				Expect(err).NotTo(HaveOccurred())
 				Eventually(fExec.CalledMatchesExpected).Should(BeTrue(), fExec.ErrorDesc)
 
@@ -832,7 +833,7 @@ var _ = Describe("OVN NetworkPolicy Operations", func() {
 					"ovn-nbctl --timeout=15 --data=bare --no-heading --columns=_uuid find ACL match=\"ip4.dst == {$a6953373268003663638, $a9824637386382239951} && inport == @a14195333570786048679\" external-ids:namespace=namespace1 external-ids:policy=networkpolicy1 external-ids:Egress_num=0 external-ids:policy_type=Egress",
 				})
 
-				err = fakeOvn.fakeClient.CoreV1().Namespaces().Delete(namespace2.Name, metav1.NewDeleteOptions(0))
+				err = fakeOvn.fakeClient.CoreV1().Namespaces().Delete(context.TODO(), namespace2.Name, *metav1.NewDeleteOptions(0))
 				Expect(err).NotTo(HaveOccurred())
 				Eventually(fExec.CalledMatchesExpected).Should(BeTrue(), fExec.ErrorDesc)
 				fakeOvn.asf.EventuallyExpectNoAddressSet(namespace2.Name)
@@ -921,14 +922,14 @@ var _ = Describe("OVN NetworkPolicy Operations", func() {
 				expectAddressSetsWithIP(fakeOvn, networkPolicy, nPodTest.podIP)
 				fakeOvn.asf.ExpectAddressSetWithIPs(namespace1.Name, []string{nPodTest.podIP})
 
-				_, err := fakeOvn.fakeClient.NetworkingV1().NetworkPolicies(networkPolicy.Namespace).Get(networkPolicy.Name, metav1.GetOptions{})
+				_, err := fakeOvn.fakeClient.NetworkingV1().NetworkPolicies(networkPolicy.Namespace).Get(context.TODO(), networkPolicy.Name, metav1.GetOptions{})
 				Expect(err).NotTo(HaveOccurred())
 				Eventually(fExec.CalledMatchesExpected).Should(BeTrue(), fExec.ErrorDesc)
 
 				nPodTest.delCmds(fExec)
 				npTest.delPodCmds(fExec, networkPolicy)
 
-				err = fakeOvn.fakeClient.CoreV1().Pods(nPodTest.namespace).Delete(nPodTest.podName, metav1.NewDeleteOptions(0))
+				err = fakeOvn.fakeClient.CoreV1().Pods(nPodTest.namespace).Delete(context.TODO(), nPodTest.podName, *metav1.NewDeleteOptions(0))
 				Expect(err).NotTo(HaveOccurred())
 				Eventually(fExec.CalledMatchesExpected).Should(BeTrue(), fExec.ErrorDesc)
 
@@ -1031,13 +1032,13 @@ var _ = Describe("OVN NetworkPolicy Operations", func() {
 				expectAddressSetsWithIP(fakeOvn, networkPolicy, nPodTest.podIP)
 				fakeOvn.asf.ExpectAddressSetWithIPs(namespace2.Name, []string{nPodTest.podIP})
 
-				_, err := fakeOvn.fakeClient.NetworkingV1().NetworkPolicies(networkPolicy.Namespace).Get(networkPolicy.Name, metav1.GetOptions{})
+				_, err := fakeOvn.fakeClient.NetworkingV1().NetworkPolicies(networkPolicy.Namespace).Get(context.TODO(), networkPolicy.Name, metav1.GetOptions{})
 				Expect(err).NotTo(HaveOccurred())
 				Eventually(fExec.CalledMatchesExpected).Should(BeTrue(), fExec.ErrorDesc)
 
 				nPodTest.delCmds(fExec)
 
-				err = fakeOvn.fakeClient.CoreV1().Pods(nPodTest.namespace).Delete(nPodTest.podName, metav1.NewDeleteOptions(0))
+				err = fakeOvn.fakeClient.CoreV1().Pods(nPodTest.namespace).Delete(context.TODO(), nPodTest.podName, *metav1.NewDeleteOptions(0))
 				Expect(err).NotTo(HaveOccurred())
 				Eventually(fExec.CalledMatchesExpected).Should(BeTrue(), fExec.ErrorDesc)
 
@@ -1126,14 +1127,14 @@ var _ = Describe("OVN NetworkPolicy Operations", func() {
 				fakeOvn.controller.WatchNamespaces()
 				fakeOvn.controller.WatchNetworkPolicy()
 
-				_, err := fakeOvn.fakeClient.NetworkingV1().NetworkPolicies(networkPolicy.Namespace).Get(networkPolicy.Name, metav1.GetOptions{})
+				_, err := fakeOvn.fakeClient.NetworkingV1().NetworkPolicies(networkPolicy.Namespace).Get(context.TODO(), networkPolicy.Name, metav1.GetOptions{})
 				Expect(err).NotTo(HaveOccurred())
 				Eventually(fExec.CalledMatchesExpected).Should(BeTrue(), fExec.ErrorDesc)
 				fakeOvn.asf.ExpectAddressSetWithIPs(namespace1.Name, []string{nPodTest.podIP})
 
 				npTest.delCmds(fExec, nPodTest, networkPolicy, true)
 
-				err = fakeOvn.fakeClient.NetworkingV1().NetworkPolicies(networkPolicy.Namespace).Delete(networkPolicy.Name, metav1.NewDeleteOptions(0))
+				err = fakeOvn.fakeClient.NetworkingV1().NetworkPolicies(networkPolicy.Namespace).Delete(context.TODO(), networkPolicy.Name, *metav1.NewDeleteOptions(0))
 				Expect(err).NotTo(HaveOccurred())
 				Eventually(fExec.CalledMatchesExpected).Should(BeTrue(), fExec.ErrorDesc)
 				eventuallyExpectNoAddressSets(fakeOvn, networkPolicy)
@@ -1159,7 +1160,7 @@ var _ = Describe("OVN NetworkPolicy Operations", func() {
 
 				fakeOvn.controller.WatchNamespaces()
 				ns, err := fakeOvn.fakeClient.CoreV1().Namespaces().Get(
-					namespace1.Name, metav1.GetOptions{})
+					context.TODO(), namespace1.Name, metav1.GetOptions{})
 				Expect(err).NotTo(HaveOccurred())
 				Expect(ns).NotTo(BeNil())
 
@@ -1171,14 +1172,14 @@ var _ = Describe("OVN NetworkPolicy Operations", func() {
 				mcastPolicy := multicastPolicy{}
 				mcastPolicy.enableCmds(fExec, namespace1.Name)
 				ns.Annotations[nsMulticastAnnotation] = "true"
-				_, err = fakeOvn.fakeClient.CoreV1().Namespaces().Update(ns)
+				_, err = fakeOvn.fakeClient.CoreV1().Namespaces().Update(context.TODO(), ns, metav1.UpdateOptions{})
 				Expect(err).NotTo(HaveOccurred())
 				Eventually(fExec.CalledMatchesExpected).Should(BeTrue(), fExec.ErrorDesc)
 
 				// Disable multicast in the namespace.
 				mcastPolicy.disableCmds(fExec, namespace1.Name)
 				ns.Annotations[nsMulticastAnnotation] = "false"
-				_, err = fakeOvn.fakeClient.CoreV1().Namespaces().Update(ns)
+				_, err = fakeOvn.fakeClient.CoreV1().Namespaces().Update(context.TODO(), ns, metav1.UpdateOptions{})
 				Expect(err).NotTo(HaveOccurred())
 				Eventually(fExec.CalledMatchesExpected).Should(BeTrue(), fExec.ErrorDesc)
 				return nil
@@ -1222,7 +1223,7 @@ var _ = Describe("OVN NetworkPolicy Operations", func() {
 				fakeOvn.controller.WatchPods()
 				fakeOvn.controller.WatchNamespaces()
 				ns, err := fakeOvn.fakeClient.CoreV1().Namespaces().Get(
-					namespace1.Name, metav1.GetOptions{})
+					context.TODO(), namespace1.Name, metav1.GetOptions{})
 				Expect(err).NotTo(HaveOccurred())
 				Expect(ns).NotTo(BeNil())
 
@@ -1232,7 +1233,7 @@ var _ = Describe("OVN NetworkPolicy Operations", func() {
 				// The pod should be added to the multicast allow port group.
 				mcastPolicy.addPodCmds(fExec, namespace1.Name)
 				ns.Annotations[nsMulticastAnnotation] = "true"
-				_, err = fakeOvn.fakeClient.CoreV1().Namespaces().Update(ns)
+				_, err = fakeOvn.fakeClient.CoreV1().Namespaces().Update(context.TODO(), ns, metav1.UpdateOptions{})
 				Expect(err).NotTo(HaveOccurred())
 				Eventually(fExec.CalledMatchesExpected).Should(BeTrue(), fExec.ErrorDesc)
 				fakeOvn.asf.ExpectAddressSetWithIPs(namespace1.Name, []string{nPodTest.podIP})
@@ -1270,7 +1271,7 @@ var _ = Describe("OVN NetworkPolicy Operations", func() {
 				fakeOvn.controller.WatchNamespaces()
 				fakeOvn.controller.WatchPods()
 				ns, err := fakeOvn.fakeClient.CoreV1().Namespaces().Get(
-					namespace1.Name, metav1.GetOptions{})
+					context.TODO(), namespace1.Name, metav1.GetOptions{})
 				Expect(err).NotTo(HaveOccurred())
 				Expect(ns).NotTo(BeNil())
 
@@ -1278,7 +1279,7 @@ var _ = Describe("OVN NetworkPolicy Operations", func() {
 				mcastPolicy := multicastPolicy{}
 				mcastPolicy.enableCmds(fExec, namespace1.Name)
 				ns.Annotations[nsMulticastAnnotation] = "true"
-				_, err = fakeOvn.fakeClient.CoreV1().Namespaces().Update(ns)
+				_, err = fakeOvn.fakeClient.CoreV1().Namespaces().Update(context.TODO(), ns, metav1.UpdateOptions{})
 				Expect(err).NotTo(HaveOccurred())
 				Eventually(fExec.CalledMatchesExpected).Should(BeTrue(), fExec.ErrorDesc)
 
@@ -1288,8 +1289,8 @@ var _ = Describe("OVN NetworkPolicy Operations", func() {
 				// The pod should be added to the multicast allow group.
 				mcastPolicy.addPodCmds(fExec, namespace1.Name)
 
-				_, err = fakeOvn.fakeClient.CoreV1().Pods(nPodTest.namespace).Create(newPod(
-					nPodTest.namespace, nPodTest.podName, nPodTest.nodeName, nPodTest.podIP))
+				_, err = fakeOvn.fakeClient.CoreV1().Pods(nPodTest.namespace).Create(context.TODO(), newPod(
+					nPodTest.namespace, nPodTest.podName, nPodTest.nodeName, nPodTest.podIP), metav1.CreateOptions{})
 				Expect(err).NotTo(HaveOccurred())
 				Eventually(fExec.CalledMatchesExpected).Should(BeTrue(), fExec.ErrorDesc)
 				fakeOvn.asf.ExpectAddressSetWithIPs(namespace1.Name, []string{nPodTest.podIP})
@@ -1300,8 +1301,8 @@ var _ = Describe("OVN NetworkPolicy Operations", func() {
 				// group and from the multicast allow group.
 				nPodTest.delCmds(fExec)
 
-				err = fakeOvn.fakeClient.CoreV1().Pods(nPodTest.namespace).Delete(
-					nPodTest.podName, metav1.NewDeleteOptions(0))
+				err = fakeOvn.fakeClient.CoreV1().Pods(nPodTest.namespace).Delete(context.TODO(),
+					nPodTest.podName, *metav1.NewDeleteOptions(0))
 				Expect(err).NotTo(HaveOccurred())
 				Eventually(fExec.CalledMatchesExpected).Should(BeTrue(), fExec.ErrorDesc)
 				fakeOvn.asf.ExpectEmptyAddressSet(namespace1.Name)

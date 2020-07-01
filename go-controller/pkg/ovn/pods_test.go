@@ -1,6 +1,7 @@
 package ovn
 
 import (
+	"context"
 	"fmt"
 	"net"
 	"strings"
@@ -213,7 +214,7 @@ var _ = Describe("OVN Pod Operations", func() {
 				})
 				fakeOvn.controller.WatchPods()
 
-				pod, err := fakeOvn.fakeClient.CoreV1().Pods(t.namespace).Get(t.podName, metav1.GetOptions{})
+				pod, err := fakeOvn.fakeClient.CoreV1().Pods(t.namespace).Get(context.TODO(), t.podName, metav1.GetOptions{})
 				Expect(err).NotTo(HaveOccurred())
 				Expect(fExec.CalledMatchesExpected()).To(BeTrue(), fExec.ErrorDesc)
 
@@ -226,11 +227,11 @@ var _ = Describe("OVN Pod Operations", func() {
 				t.populateLogicalSwitchCache(fakeOvn)
 				t.addCmdsForNonExistingPod(fExec)
 
-				_, err = fakeOvn.fakeClient.CoreV1().Pods(t.namespace).Update(newPod(t.namespace, t.podName, t.nodeName, t.podIP))
+				_, err = fakeOvn.fakeClient.CoreV1().Pods(t.namespace).Update(context.TODO(), newPod(t.namespace, t.podName, t.nodeName, t.podIP), metav1.UpdateOptions{})
 				Expect(err).NotTo(HaveOccurred())
 				Eventually(fExec.CalledMatchesExpected).Should(BeTrue(), fExec.ErrorDesc)
 
-				pod, err = fakeOvn.fakeClient.CoreV1().Pods(t.namespace).Get(t.podName, metav1.GetOptions{})
+				pod, err = fakeOvn.fakeClient.CoreV1().Pods(t.namespace).Get(context.TODO(), t.podName, metav1.GetOptions{})
 				Expect(err).NotTo(HaveOccurred())
 
 				podAnnotation, ok := pod.Annotations[util.OvnPodAnnotationName]
@@ -266,17 +267,17 @@ var _ = Describe("OVN Pod Operations", func() {
 				t.populateLogicalSwitchCache(fakeOvn)
 				fakeOvn.controller.WatchPods()
 
-				pod, _ := fakeOvn.fakeClient.CoreV1().Pods(t.namespace).Get(t.podName, metav1.GetOptions{})
+				pod, _ := fakeOvn.fakeClient.CoreV1().Pods(t.namespace).Get(context.TODO(), t.podName, metav1.GetOptions{})
 				Expect(pod).To(BeNil())
 				Expect(fExec.CalledMatchesExpected()).To(BeTrue(), fExec.ErrorDesc)
 
 				t.addCmdsForNonExistingPod(fExec)
 
-				_, err := fakeOvn.fakeClient.CoreV1().Pods(t.namespace).Create(newPod(t.namespace, t.podName, t.nodeName, t.podIP))
+				_, err := fakeOvn.fakeClient.CoreV1().Pods(t.namespace).Create(context.TODO(), newPod(t.namespace, t.podName, t.nodeName, t.podIP), metav1.CreateOptions{})
 				Expect(err).NotTo(HaveOccurred())
 				Eventually(fExec.CalledMatchesExpected).Should(BeTrue(), fExec.ErrorDesc)
 
-				pod, err = fakeOvn.fakeClient.CoreV1().Pods(t.namespace).Get(t.podName, metav1.GetOptions{})
+				pod, err = fakeOvn.fakeClient.CoreV1().Pods(t.namespace).Get(context.TODO(), t.podName, metav1.GetOptions{})
 				Expect(err).NotTo(HaveOccurred())
 
 				podAnnotation, ok := pod.Annotations[util.OvnPodAnnotationName]
@@ -319,7 +320,7 @@ var _ = Describe("OVN Pod Operations", func() {
 				t.populateLogicalSwitchCache(fakeOvn)
 				fakeOvn.controller.WatchPods()
 
-				pod, err := fakeOvn.fakeClient.CoreV1().Pods(t.namespace).Get(t.podName, metav1.GetOptions{})
+				pod, err := fakeOvn.fakeClient.CoreV1().Pods(t.namespace).Get(context.TODO(), t.podName, metav1.GetOptions{})
 				Expect(err).NotTo(HaveOccurred())
 
 				podAnnotation, ok := pod.Annotations[util.OvnPodAnnotationName]
@@ -330,11 +331,11 @@ var _ = Describe("OVN Pod Operations", func() {
 				// Delete it
 				t.delCmds(fExec)
 
-				err = fakeOvn.fakeClient.CoreV1().Pods(t.namespace).Delete(t.podName, metav1.NewDeleteOptions(0))
+				err = fakeOvn.fakeClient.CoreV1().Pods(t.namespace).Delete(context.TODO(), t.podName, *metav1.NewDeleteOptions(0))
 				Expect(err).NotTo(HaveOccurred())
 				Eventually(fExec.CalledMatchesExpected).Should(BeTrue(), fExec.ErrorDesc)
 
-				pod, err = fakeOvn.fakeClient.CoreV1().Pods(t.namespace).Get(t.podName, metav1.GetOptions{})
+				pod, err = fakeOvn.fakeClient.CoreV1().Pods(t.namespace).Get(context.TODO(), t.podName, metav1.GetOptions{})
 				Expect(err).To(HaveOccurred())
 				Expect(pod).To(BeNil())
 
@@ -378,11 +379,11 @@ var _ = Describe("OVN Pod Operations", func() {
 
 				// Pod creation should be retried on Update event
 				t.addCmdsForNonExistingPod(fExec)
-				_, err := fakeOvn.fakeClient.CoreV1().Pods(t.namespace).Update(newPod(t.namespace, t.podName, t.nodeName, t.podIP))
+				_, err := fakeOvn.fakeClient.CoreV1().Pods(t.namespace).Update(context.TODO(), newPod(t.namespace, t.podName, t.nodeName, t.podIP), metav1.UpdateOptions{})
 				Expect(err).NotTo(HaveOccurred())
 				Eventually(fExec.CalledMatchesExpected).Should(BeTrue(), fExec.ErrorDesc)
 
-				pod, err := fakeOvn.fakeClient.CoreV1().Pods(t.namespace).Get(t.podName, metav1.GetOptions{})
+				pod, err := fakeOvn.fakeClient.CoreV1().Pods(t.namespace).Get(context.TODO(), t.podName, metav1.GetOptions{})
 				Expect(err).NotTo(HaveOccurred())
 
 				podAnnotation, ok := pod.Annotations[util.OvnPodAnnotationName]
@@ -429,7 +430,7 @@ var _ = Describe("OVN Pod Operations", func() {
 				})
 				t.populateLogicalSwitchCache(fakeOvn)
 
-				pod, err := fakeOvn.fakeClient.CoreV1().Pods(t.namespace).Get(t.podName, metav1.GetOptions{})
+				pod, err := fakeOvn.fakeClient.CoreV1().Pods(t.namespace).Get(context.TODO(), t.podName, metav1.GetOptions{})
 				Expect(err).NotTo(HaveOccurred())
 
 				_, ok := pod.Annotations[util.OvnPodAnnotationName]
@@ -437,7 +438,7 @@ var _ = Describe("OVN Pod Operations", func() {
 
 				fakeOvn.controller.WatchPods()
 
-				pod, err = fakeOvn.fakeClient.CoreV1().Pods(t.namespace).Get(t.podName, metav1.GetOptions{})
+				pod, err = fakeOvn.fakeClient.CoreV1().Pods(t.namespace).Get(context.TODO(), t.podName, metav1.GetOptions{})
 				Expect(err).NotTo(HaveOccurred())
 				Expect(fExec.CalledMatchesExpected()).To(BeTrue(), fExec.ErrorDesc)
 
@@ -512,7 +513,7 @@ var _ = Describe("OVN Pod Operations", func() {
 				t.populateLogicalSwitchCache(fakeOvn)
 				fakeOvn.controller.WatchPods()
 
-				pod, err := fakeOvn.fakeClient.CoreV1().Pods(t.namespace).Get(t.podName, metav1.GetOptions{})
+				pod, err := fakeOvn.fakeClient.CoreV1().Pods(t.namespace).Get(context.TODO(), t.podName, metav1.GetOptions{})
 				Expect(err).NotTo(HaveOccurred())
 				Expect(fExec.CalledMatchesExpected()).To(BeTrue(), fExec.ErrorDesc)
 
@@ -558,7 +559,7 @@ var _ = Describe("OVN Pod Operations", func() {
 				t.populateLogicalSwitchCache(fakeOvn)
 				fakeOvn.controller.WatchPods()
 
-				pod, err := fakeOvn.fakeClient.CoreV1().Pods(t.namespace).Get(t.podName, metav1.GetOptions{})
+				pod, err := fakeOvn.fakeClient.CoreV1().Pods(t.namespace).Get(context.TODO(), t.podName, metav1.GetOptions{})
 				Expect(err).NotTo(HaveOccurred())
 				Expect(fExec.CalledMatchesExpected()).To(BeTrue(), fExec.ErrorDesc)
 
@@ -582,7 +583,7 @@ var _ = Describe("OVN Pod Operations", func() {
 				t.populateLogicalSwitchCache(fakeOvn)
 				fakeOvn.controller.WatchPods()
 
-				pod, err = fakeOvn.fakeClient.CoreV1().Pods(t.namespace).Get(t.podName, metav1.GetOptions{})
+				pod, err = fakeOvn.fakeClient.CoreV1().Pods(t.namespace).Get(context.TODO(), t.podName, metav1.GetOptions{})
 				Expect(err).NotTo(HaveOccurred())
 				Eventually(fExec.CalledMatchesExpected).Should(BeTrue(), fExec.ErrorDesc)
 
@@ -626,7 +627,7 @@ var _ = Describe("OVN Pod Operations", func() {
 				t.populateLogicalSwitchCache(fakeOvn)
 				fakeOvn.controller.WatchPods()
 
-				pod, err := fakeOvn.fakeClient.CoreV1().Pods(t.namespace).Get(t.podName, metav1.GetOptions{})
+				pod, err := fakeOvn.fakeClient.CoreV1().Pods(t.namespace).Get(context.TODO(), t.podName, metav1.GetOptions{})
 				Expect(err).NotTo(HaveOccurred())
 				Expect(fExec.CalledMatchesExpected()).To(BeTrue(), fExec.ErrorDesc)
 
@@ -650,7 +651,7 @@ var _ = Describe("OVN Pod Operations", func() {
 				t.populateLogicalSwitchCache(fakeOvn)
 				fakeOvn.controller.WatchPods()
 
-				pod, err = fakeOvn.fakeClient.CoreV1().Pods(t.namespace).Get(t.podName, metav1.GetOptions{})
+				pod, err = fakeOvn.fakeClient.CoreV1().Pods(t.namespace).Get(context.TODO(), t.podName, metav1.GetOptions{})
 				Expect(err).NotTo(HaveOccurred())
 				Eventually(fExec.CalledMatchesExpected).Should(BeTrue(), fExec.ErrorDesc)
 
@@ -706,19 +707,19 @@ var _ = Describe("OVN Pod Operations", func() {
 				tP.populateLogicalSwitchCache(fakeOvn)
 				fakeOvn.controller.WatchNamespaces()
 				fakeOvn.controller.WatchPods()
-				_, err := fakeOvn.fakeClient.CoreV1().Namespaces().Get(namespaceT.Name, metav1.GetOptions{})
+				_, err := fakeOvn.fakeClient.CoreV1().Namespaces().Get(context.TODO(), namespaceT.Name, metav1.GetOptions{})
 				Expect(err).NotTo(HaveOccurred())
-				pod, err := fakeOvn.fakeClient.CoreV1().Pods(tP.namespace).Get(tP.podName, metav1.GetOptions{})
+				pod, err := fakeOvn.fakeClient.CoreV1().Pods(tP.namespace).Get(context.TODO(), tP.podName, metav1.GetOptions{})
 				Expect(err).NotTo(HaveOccurred())
 				podAnnotation, ok := pod.Annotations[util.OvnPodAnnotationName]
 				Expect(ok).To(BeTrue())
 				Expect(podAnnotation).To(ContainSubstring(`"gateway_ip":"10.128.1.3"`))
 				// Update namespace to remove annotation
 				namespaceT.Annotations = nil
-				_, err = fakeOvn.fakeClient.CoreV1().Namespaces().Update(&namespaceT)
+				_, err = fakeOvn.fakeClient.CoreV1().Namespaces().Update(context.TODO(), &namespaceT, metav1.UpdateOptions{})
 				Expect(err).NotTo(HaveOccurred())
 				Eventually(func() map[string]string {
-					updatedNs, err := fakeOvn.fakeClient.CoreV1().Namespaces().Get(namespaceT.Name, metav1.GetOptions{})
+					updatedNs, err := fakeOvn.fakeClient.CoreV1().Namespaces().Get(context.TODO(), namespaceT.Name, metav1.GetOptions{})
 					if err != nil {
 						return map[string]string{"ns": "error"}
 					}
@@ -737,11 +738,11 @@ var _ = Describe("OVN Pod Operations", func() {
 					namespaceT.Name,
 				)
 				tP.addCmdsForNonExistingPod(fExec)
-				pod, err = fakeOvn.fakeClient.CoreV1().Pods(tP.namespace).Create(newPod(namespaceT.Name, tP.podName, tP.nodeName, tP.podIP))
+				pod, err = fakeOvn.fakeClient.CoreV1().Pods(tP.namespace).Create(context.TODO(), newPod(namespaceT.Name, tP.podName, tP.nodeName, tP.podIP), metav1.CreateOptions{})
 				Expect(err).NotTo(HaveOccurred())
 				var annotation string
 				Eventually(func() string {
-					pod, err = fakeOvn.fakeClient.CoreV1().Pods(tP.namespace).Get(tP.podName, metav1.GetOptions{})
+					pod, err = fakeOvn.fakeClient.CoreV1().Pods(tP.namespace).Get(context.TODO(), tP.podName, metav1.GetOptions{})
 					annotation = pod.Annotations[util.OvnPodAnnotationName]
 					return pod.Annotations[util.OvnPodAnnotationName]
 				}).ShouldNot(BeEmpty())

@@ -162,12 +162,12 @@ func (f *FakeExec) Command(cmd string, args ...string) kexec.Cmd {
 
 	return &fakeexec.FakeCmd{
 		Argv: strings.Split(expected.Cmd, " ")[1:],
-		CombinedOutputScript: []fakeexec.FakeCombinedOutputAction{
-			func() ([]byte, error) {
-				return []byte(expected.Output), expected.Err
+		CombinedOutputScript: []fakeexec.FakeAction{
+			func() ([]byte, []byte, error) {
+				return []byte(expected.Output), []byte(expected.Stderr), expected.Err
 			},
 		},
-		RunScript: []fakeexec.FakeRunAction{
+		RunScript: []fakeexec.FakeAction{
 			func() ([]byte, []byte, error) {
 				if expected.Action != nil {
 					err := expected.Action()
