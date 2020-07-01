@@ -259,13 +259,7 @@ var _ = Describe("Management Port Operations", func() {
 		Expect(err).NotTo(HaveOccurred())
 		err = testNS.Do(func(ns.NetNS) error {
 			defer GinkgoRecover()
-
-			err := netlink.LinkAdd(&netlink.Dummy{
-				LinkAttrs: netlink.LinkAttrs{
-					Name: util.K8sMgmtIntfName,
-				},
-			})
-			Expect(err).NotTo(HaveOccurred())
+			ovntest.AddLink(util.K8sMgmtIntfName)
 			return nil
 		})
 		Expect(err).NotTo(HaveOccurred())

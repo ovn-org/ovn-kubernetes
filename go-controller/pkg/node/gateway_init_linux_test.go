@@ -487,19 +487,9 @@ var _ = Describe("Gateway Init Operations", func() {
 		err = testNS.Do(func(ns.NetNS) error {
 			defer GinkgoRecover()
 
-			err := netlink.LinkAdd(&netlink.Dummy{
-				LinkAttrs: netlink.LinkAttrs{
-					Name: "br-local",
-				},
-			})
-			Expect(err).NotTo(HaveOccurred())
+			ovntest.AddLink("br-local")
+			ovntest.AddLink(localnetGatewayNextHopPort)
 
-			err = netlink.LinkAdd(&netlink.Dummy{
-				LinkAttrs: netlink.LinkAttrs{
-					Name: localnetGatewayNextHopPort,
-				},
-			})
-			Expect(err).NotTo(HaveOccurred())
 			return nil
 		})
 		Expect(err).NotTo(HaveOccurred())
@@ -584,12 +574,8 @@ var _ = Describe("Gateway Init Operations", func() {
 			err := testNS.Do(func(ns.NetNS) error {
 				defer GinkgoRecover()
 
-				err := netlink.LinkAdd(&netlink.Dummy{
-					LinkAttrs: netlink.LinkAttrs{
-						Name: eth0Name,
-					},
-				})
-				Expect(err).NotTo(HaveOccurred())
+				ovntest.AddLink(eth0Name)
+
 				l, err := netlink.LinkByName(eth0Name)
 				Expect(err).NotTo(HaveOccurred())
 				err = netlink.LinkSetUp(l)

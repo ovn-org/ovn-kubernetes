@@ -112,20 +112,6 @@ func createPod(namespace, name, node, podIP, podMAC string) *v1.Pod {
 	}
 }
 
-func addLink(name string) netlink.Link {
-	err := netlink.LinkAdd(&netlink.Dummy{
-		LinkAttrs: netlink.LinkAttrs{
-			Name: name,
-		},
-	})
-	Expect(err).NotTo(HaveOccurred())
-	origLink, err := netlink.LinkByName(name)
-	Expect(err).NotTo(HaveOccurred())
-	err = netlink.LinkSetUp(origLink)
-	Expect(err).NotTo(HaveOccurred())
-	return origLink
-}
-
 func expectRouteForSubnet(routes []netlink.Route, subnet *net.IPNet, hoIfAddr net.IP) {
 	found := false
 	for _, route := range routes {
@@ -216,10 +202,10 @@ var _ = Describe("Hybrid Overlay Node Linux Operations", func() {
 		// prepare br-ext and ovn-k8s-mp0 in original namespace
 		_ = netns.Do(func(ns.NetNS) error {
 			defer GinkgoRecover()
-			addLink(extBridgeName)
+			ovntest.AddLink(extBridgeName)
 
 			// Set up management interface with its address
-			link := addLink(util.K8sMgmtIntfName)
+			link := ovntest.AddLink(util.K8sMgmtIntfName)
 			_, thisNet, err := net.ParseCIDR(thisSubnet)
 			Expect(err).NotTo(HaveOccurred())
 			mgmtIfAddr := util.GetNodeManagementIfAddr(thisNet)
