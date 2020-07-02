@@ -24,9 +24,12 @@ const (
 	MetricOvnSubsystemDBRaft     = "db_raft"
 	MetricOvnSubsystemNorthd     = "northd"
 	MetricOvnSubsystemController = "controller"
+	MetricOvsNamespace           = "ovs"
+	MetricOvsSubsystemVswitchd   = "vswitchd"
 
 	ovnNorthd     = "ovn-northd"
 	ovnController = "ovn-controller"
+	ovsVswitchd   = "ovs-vswitchd"
 )
 
 // Build information. Populated at build-time.
@@ -89,9 +92,11 @@ func getCoverageShowOutputMap(component string) (map[string]string, error) {
 		stdout, stderr, err = util.RunOVNControllerAppCtl("coverage/show")
 	} else if component == ovnNorthd {
 		stdout, stderr, err = util.RunOVNNorthAppCtl("coverage/show")
+	} else if component == ovsVswitchd {
+		stdout, stderr, err = util.RunOvsVswitchdAppCtl("coverage/show")
 	} else {
-		err = fmt.Errorf("component is unknown, and it isn't %s or %s",
-			ovnNorthd, ovnController)
+		return nil, fmt.Errorf("component is unknown, and it isn't %s, %s, or %s",
+			ovnNorthd, ovnController, ovsVswitchd)
 	}
 	if err != nil {
 		return nil, fmt.Errorf("failed to get coverage/show output for %s "+
@@ -110,7 +115,7 @@ func getCoverageShowOutputMap(component string) (map[string]string, error) {
 }
 
 // coverageShowMetricsUpdater updates the metric
-// by obtaining values from getCoverageShowOutputMap for specified target.
+// by obtaining values from getCoverageShowOutputMap for specified component.
 func coverageShowMetricsUpdater(component string) {
 	for {
 		time.Sleep(30 * time.Second)
