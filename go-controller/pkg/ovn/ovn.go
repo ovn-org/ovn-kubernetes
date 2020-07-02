@@ -213,7 +213,7 @@ const (
 // NewOvnController creates a new OVN controller for creating logical network
 // infrastructure and policy
 func NewOvnController(kubeClient kubernetes.Interface, egressIPClient egressipapi.Interface, egressFirewallClient egressfirewallclientset.Interface, wf *factory.WatchFactory,
-	stopChan <-chan struct{}, addressSetFactory AddressSetFactory, ovnNBClient goovn.Client, ovnSBClient goovn.Client) *Controller {
+	stopChan <-chan struct{}, addressSetFactory AddressSetFactory, ovnNBClient goovn.Client, ovnSBClient goovn.Client, recorder record.EventRecorder) *Controller {
 
 	if addressSetFactory == nil {
 		addressSetFactory = NewOvnAddressSetFactory()
@@ -251,7 +251,7 @@ func NewOvnController(kubeClient kubernetes.Interface, egressIPClient egressipap
 		serviceVIPToNameLock:          sync.Mutex{},
 		serviceLBMap:                  make(map[string]map[string]*loadBalancerConf),
 		serviceLBLock:                 sync.Mutex{},
-		recorder:                      util.EventRecorder(kubeClient),
+		recorder:                      recorder,
 		ovnNBClient:                   ovnNBClient,
 		ovnSBClient:                   ovnSBClient,
 	}

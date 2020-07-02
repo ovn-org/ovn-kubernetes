@@ -245,6 +245,11 @@ func (oc *Controller) assignEgressIPs(eIP *egressipv1.EgressIP) error {
 	}()
 	if len(oc.eIPAllocator) == 0 {
 		oc.egressAssignmentRetry.Store(eIP.Name, true)
+		eIPRef := kapi.ObjectReference{
+			Kind: "EgressIP",
+			Name: eIP.Name,
+		}
+		oc.recorder.Eventf(&eIPRef, kapi.EventTypeWarning, "NoMatchingNodeFound", "no assignable nodes for EgressIP: %s, please tag at least one node with label: %s", eIP.Name, util.GetNodeEgressLabel())
 		return fmt.Errorf("no assignable nodes")
 	}
 	eNodes, existingAllocations := oc.getSortedEgressData()
@@ -253,6 +258,11 @@ func (oc *Controller) assignEgressIPs(eIP *egressipv1.EgressIP) error {
 		klog.V(5).Infof("Will attempt assignment for egress IP: %s", egressIP)
 		eIPC := net.ParseIP(egressIP)
 		if eIPC == nil {
+			eIPRef := kapi.ObjectReference{
+				Kind: "EgressIP",
+				Name: eIP.Name,
+			}
+			oc.recorder.Eventf(&eIPRef, kapi.EventTypeWarning, "InvalidEgressIP", "egress IP: %s for object EgressIP: %s is not a valid IP address", egressIP, eIP.Name)
 			klog.Errorf("Unable to parse provided EgressIP: %s, invalid", egressIP)
 			continue
 		}
@@ -280,6 +290,11 @@ func (oc *Controller) assignEgressIPs(eIP *egressipv1.EgressIP) error {
 	}
 	if len(assignments) == 0 {
 		oc.egressAssignmentRetry.Store(eIP.Name, true)
+		eIPRef := kapi.ObjectReference{
+			Kind: "EgressIP",
+			Name: eIP.Name,
+		}
+		oc.recorder.Eventf(&eIPRef, kapi.EventTypeWarning, "NoMatchingNodeFound", "No matching nodes found, which can host any of the egress IPs: %v for object EgressIP: %s", eIP.Spec.EgressIPs, eIP.Name)
 		return fmt.Errorf("no matching host found")
 	}
 	return nil
