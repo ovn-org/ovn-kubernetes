@@ -35,6 +35,7 @@ OVN_MASTER_COUNT=""
 OVN_REMOTE_PROBE_INTERVAL=""
 OVN_HYBRID_OVERLAY_ENABLE=""
 OVN_MULTICAST_ENABLE=""
+OVN_EGRESSIP_ENABLE=
 
 # Parse parameters given as arguments to this script.
 while [ "$1" != "" ]; do
@@ -131,6 +132,9 @@ while [ "$1" != "" ]; do
   --multicast-enabled)
     OVN_MULTICAST_ENABLE=$VALUE
     ;;
+  --egress-ip-enable)
+    OVN_EGRESSIP_ENABLE=$VALUE
+    ;;
   *)
     echo "WARNING: unknown parameter \"$PARAM\""
     exit 1
@@ -180,6 +184,8 @@ ovnkube_logfile_maxage=${OVNKUBE_LOGFILE_MAXAGE:-"5"}
 echo "ovnkube_logfile_maxage: ${ovnkube_logfile_maxage}"
 ovn_hybrid_overlay_enable=${OVN_HYBRID_OVERLAY_ENABLE}
 echo "ovn_hybrid_overlay_enable: ${ovn_hybrid_overlay_enable}"
+ovn_egress_ip_enable=${OVN_EGRESSIP_ENABLE}
+echo "ovn_egress_ip_enable: ${ovn_egress_ip_enable}"
 ovn_hybrid_overlay_net_cidr=${OVN_HYBRID_OVERLAY_NET_CIDR}
 echo "ovn_hybrid_overlay_net_cidr: ${ovn_hybrid_overlay_net_cidr}"
 ovn_ssl_en=${OVN_SSL_ENABLE:-"no"}
@@ -216,6 +222,7 @@ ovn_image=${image} \
   ovn_hybrid_overlay_net_cidr=${ovn_hybrid_overlay_net_cidr} \
   ovn_hybrid_overlay_enable=${ovn_hybrid_overlay_enable} \
   ovn_multicast_enable=${ovn_multicast_enable} \
+  ovn_egress_ip_enable=${ovn_egress_ip_enable} \
   ovn_ssl_en=${ovn_ssl_en} \
   ovn_remote_probe_interval=${ovn_remote_probe_interval} \
   j2 ../templates/ovnkube-node.yaml.j2 -o ../yaml/ovnkube-node.yaml
@@ -231,6 +238,7 @@ ovn_image=${image} \
   ovn_hybrid_overlay_net_cidr=${ovn_hybrid_overlay_net_cidr} \
   ovn_hybrid_overlay_enable=${ovn_hybrid_overlay_enable} \
   ovn_multicast_enable=${ovn_multicast_enable} \
+  ovn_egress_ip_enable=${ovn_egress_ip_enable} \
   ovn_ssl_en=${ovn_ssl_en} \
   ovn_master_count=${ovn_master_count} \
   ovn_gateway_mode=${ovn_gateway_mode} \
@@ -276,5 +284,6 @@ net_cidr=${net_cidr} svc_cidr=${svc_cidr} \
 
 cp ../templates/ovnkube-monitor.yaml.j2 ../yaml/ovnkube-monitor.yaml
 cp ../templates/k8s.ovn.org_egressfirewalls.yaml.j2 ../yaml/k8s.ovn.org_egressfirewalls.yaml
+cp ../templates/k8s.ovn.org_egressips.yaml.j2 ../yaml/k8s.ovn.org_egressips.yaml
 
 exit 0
