@@ -967,6 +967,23 @@ run-nbctld() {
   echo "=============== run_ovn_nbctl ========== terminated"
 }
 
+# v3 - Runs ovn-kube-util in daemon mode to export prometheus metrics related to OVS.
+ovs-metrics() {
+  check_ovn_daemonset_version "3"
+
+  echo "=============== ovs-metrics - (wait for ovs_ready)"
+  wait_for_event ovs_ready
+
+  ovs_exporter_bind_address=${OVS_EXPORTER_BIND_ADDRESS:-"0.0.0.0:9310"}
+  /usr/bin/ovn-kube-util \
+    --loglevel=${ovnkube_loglevel} \
+    ovs-exporter \
+    --metrics-bind-address ${ovs_exporter_bind_address}
+
+  echo "=============== ovs-metrics with pid ${?} terminated ========== "
+  exit 1
+}
+
 echo "================== ovnkube.sh --- version: ${ovnkube_version} ================"
 
 echo " ==================== command: ${cmd}"
@@ -1040,6 +1057,9 @@ case ${cmd} in
   ;;
 "db-raft-metrics")
   db-raft-metrics
+  ;;
+"ovs-metrics")
+  ovs-metrics
   ;;
 *)
   echo "invalid command ${cmd}"
