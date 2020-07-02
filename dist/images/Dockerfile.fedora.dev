@@ -40,7 +40,7 @@ ARG OVS_BRANCH=master
 RUN dnf upgrade -y && dnf install --best --refresh -y --setopt=tsflags=nodocs \
 	PyYAML bind-utils procps-ng openssl numactl-libs firewalld-filesystem \
         libpcap hostname kubernetes-client \
-        iptables iproute strace socat\
+        iptables iproute iputils strace socat\
         "kernel-devel-uname-r == $KERNEL_VERSION" \
 	@'Development Tools' rpm-build dnf-plugins-core kmod && \
 	dnf clean all && rm -rf /var/cache/dnf/*
