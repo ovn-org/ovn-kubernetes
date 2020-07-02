@@ -1,6 +1,7 @@
 package util
 
 import (
+	"context"
 	"net"
 
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
@@ -96,7 +97,7 @@ var _ = Describe("Node annotation tests", func() {
 			err = nodeAnnotator.Run()
 			Expect(err).NotTo(HaveOccurred())
 
-			updatedNode, err := fakeClient.CoreV1().Nodes().Get(testNode.Name, metav1.GetOptions{})
+			updatedNode, err := fakeClient.CoreV1().Nodes().Get(context.TODO(), testNode.Name, metav1.GetOptions{})
 			Expect(err).NotTo(HaveOccurred())
 
 			Expect(updatedNode.Annotations[ovnNodeL3GatewayConfig]).To(MatchJSON(tc.out))

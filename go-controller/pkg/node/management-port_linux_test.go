@@ -4,6 +4,7 @@ package node
 
 import (
 	"bytes"
+	"context"
 	"fmt"
 	"io/ioutil"
 	"net"
@@ -220,7 +221,7 @@ func testManagementPort(ctx *cli.Context, fexec *ovntest.FakeExec, testNS ns.Net
 		}
 	}
 
-	updatedNode, err := fakeClient.CoreV1().Nodes().Get(nodeName, metav1.GetOptions{})
+	updatedNode, err := fakeClient.CoreV1().Nodes().Get(context.TODO(), nodeName, metav1.GetOptions{})
 	Expect(err).NotTo(HaveOccurred())
 
 	macFromAnnotation, err := util.ParseNodeManagementPortMACAddress(updatedNode)

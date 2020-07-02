@@ -1,6 +1,7 @@
 package ovn
 
 import (
+	"context"
 	"net"
 
 	"github.com/urfave/cli/v2"
@@ -89,7 +90,7 @@ var _ = Describe("OVN Namespace Operations", func() {
 				fakeOvn.controller.logicalPortCache.add(tP.nodeName, tP.portName, fakeUUID, podMAC, podIPNets)
 				fakeOvn.controller.WatchNamespaces()
 
-				_, err := fakeOvn.fakeClient.CoreV1().Namespaces().Get(namespaceT.Name, metav1.GetOptions{})
+				_, err := fakeOvn.fakeClient.CoreV1().Namespaces().Get(context.TODO(), namespaceT.Name, metav1.GetOptions{})
 				Expect(err).NotTo(HaveOccurred())
 
 				fakeOvn.asf.ExpectAddressSetWithIPs(namespaceT.Name, []string{tP.podIP})
@@ -111,7 +112,7 @@ var _ = Describe("OVN Namespace Operations", func() {
 				})
 				fakeOvn.controller.WatchNamespaces()
 
-				_, err := fakeOvn.fakeClient.CoreV1().Namespaces().Get(namespaceName, metav1.GetOptions{})
+				_, err := fakeOvn.fakeClient.CoreV1().Namespaces().Get(context.TODO(), namespaceName, metav1.GetOptions{})
 				Expect(err).NotTo(HaveOccurred())
 
 				fakeOvn.asf.ExpectEmptyAddressSet(namespaceName)
@@ -136,7 +137,7 @@ var _ = Describe("OVN Namespace Operations", func() {
 				fakeOvn.controller.WatchNamespaces()
 				fakeOvn.asf.ExpectEmptyAddressSet(namespaceName)
 
-				err := fakeOvn.fakeClient.CoreV1().Namespaces().Delete(namespaceName, metav1.NewDeleteOptions(1))
+				err := fakeOvn.fakeClient.CoreV1().Namespaces().Delete(context.TODO(), namespaceName, *metav1.NewDeleteOptions(1))
 				Expect(err).NotTo(HaveOccurred())
 				fakeOvn.asf.EventuallyExpectNoAddressSet(namespaceName)
 				return nil

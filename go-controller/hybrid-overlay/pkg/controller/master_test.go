@@ -1,6 +1,7 @@
 package controller
 
 import (
+	"context"
 	"fmt"
 	"reflect"
 	"strings"
@@ -115,7 +116,7 @@ var _ = Describe("Hybrid SDN Master Operations", func() {
 
 			// Windows node should be allocated a subnet
 			Eventually(func() (map[string]string, error) {
-				updatedNode, err := fakeClient.CoreV1().Nodes().Get(nodeName, metav1.GetOptions{})
+				updatedNode, err := fakeClient.CoreV1().Nodes().Get(context.TODO(), nodeName, metav1.GetOptions{})
 				if err != nil {
 					return nil, err
 				}
@@ -123,7 +124,7 @@ var _ = Describe("Hybrid SDN Master Operations", func() {
 			}, 2).Should(HaveKeyWithValue(types.HybridOverlayNodeSubnet, nodeSubnet))
 
 			Eventually(func() error {
-				updatedNode, err := fakeClient.CoreV1().Nodes().Get(nodeName, metav1.GetOptions{})
+				updatedNode, err := fakeClient.CoreV1().Nodes().Get(context.TODO(), nodeName, metav1.GetOptions{})
 				if err != nil {
 					return err
 				}
@@ -181,7 +182,7 @@ var _ = Describe("Hybrid SDN Master Operations", func() {
 			go m.Run(stopChan)
 
 			Eventually(func() (map[string]string, error) {
-				updatedNode, err := fakeClient.CoreV1().Nodes().Get(nodeName, metav1.GetOptions{})
+				updatedNode, err := fakeClient.CoreV1().Nodes().Get(context.TODO(), nodeName, metav1.GetOptions{})
 				if err != nil {
 					return nil, err
 				}
@@ -193,7 +194,7 @@ var _ = Describe("Hybrid SDN Master Operations", func() {
 				"ovn-nbctl --timeout=15 -- --if-exists lsp-del int-node1",
 			})
 
-			err = fakeClient.CoreV1().Nodes().Delete(nodeName, metav1.NewDeleteOptions(0))
+			err = fakeClient.CoreV1().Nodes().Delete(context.TODO(), nodeName, *metav1.NewDeleteOptions(0))
 			Expect(err).NotTo(HaveOccurred())
 
 			Eventually(fexec.CalledMatchesExpected, 2).Should(BeTrue(), fexec.ErrorDesc)
@@ -325,7 +326,7 @@ var _ = Describe("Hybrid SDN Master Operations", func() {
 			go m.Run(stopChan)
 
 			Eventually(func() error {
-				pod, err := fakeClient.CoreV1().Pods(nsName).Get(pod1Name, metav1.GetOptions{})
+				pod, err := fakeClient.CoreV1().Pods(nsName).Get(context.TODO(), pod1Name, metav1.GetOptions{})
 				if err != nil {
 					return err
 				}
@@ -401,7 +402,7 @@ var _ = Describe("Hybrid SDN Master Operations", func() {
 			f.Start(stopChan)
 			go m.Run(stopChan)
 
-			updatedNs, err := fakeClient.CoreV1().Namespaces().Get(nsName, metav1.GetOptions{})
+			updatedNs, err := fakeClient.CoreV1().Namespaces().Get(context.TODO(), nsName, metav1.GetOptions{})
 			Expect(err).NotTo(HaveOccurred())
 			nsAnnotator := kube.NewNamespaceAnnotator(k, updatedNs)
 			nsAnnotator.Set(types.HybridOverlayVTEP, nsVTEPUpdated)
@@ -410,7 +411,7 @@ var _ = Describe("Hybrid SDN Master Operations", func() {
 			Expect(err).NotTo(HaveOccurred())
 
 			Eventually(func() error {
-				pod, err := fakeClient.CoreV1().Pods(nsName).Get(pod1Name, metav1.GetOptions{})
+				pod, err := fakeClient.CoreV1().Pods(nsName).Get(context.TODO(), pod1Name, metav1.GetOptions{})
 				if err != nil {
 					return err
 				}

@@ -1,6 +1,7 @@
 package informer
 
 import (
+	"context"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -101,7 +102,7 @@ var _ = Describe("Informer Event Handler Tests", func() {
 		)
 
 		Eventually(func() (bool, error) {
-			ns, err := k.CoreV1().Namespaces().Get(namespace, metav1.GetOptions{})
+			ns, err := k.CoreV1().Namespaces().Get(context.TODO(), namespace, metav1.GetOptions{})
 			if err != nil {
 				return false, err
 			}
@@ -109,7 +110,7 @@ var _ = Describe("Informer Event Handler Tests", func() {
 		}, 2).Should(BeTrue())
 
 		pod := newPod("foo", namespace)
-		_, err := k.CoreV1().Pods(namespace).Create(pod)
+		_, err := k.CoreV1().Pods(namespace).Create(context.TODO(), pod, metav1.CreateOptions{})
 		Expect(err).NotTo(HaveOccurred())
 
 		Consistently(deletes).Should(Equal(int32(0)), "deletes")
@@ -166,7 +167,7 @@ var _ = Describe("Informer Event Handler Tests", func() {
 		)
 
 		Eventually(func() (bool, error) {
-			ns, err := k.CoreV1().Namespaces().Get(namespace, metav1.GetOptions{})
+			ns, err := k.CoreV1().Namespaces().Get(context.TODO(), namespace, metav1.GetOptions{})
 			if err != nil {
 				return false, err
 			}
@@ -176,7 +177,7 @@ var _ = Describe("Informer Event Handler Tests", func() {
 		pod.Annotations = map[string]string{"bar": "baz"}
 		pod.ResourceVersion = "11"
 
-		_, err := k.CoreV1().Pods(namespace).Update(pod)
+		_, err := k.CoreV1().Pods(namespace).Update(context.TODO(), pod, metav1.UpdateOptions{})
 		Expect(err).NotTo(HaveOccurred())
 
 		// no deletes
@@ -234,14 +235,14 @@ var _ = Describe("Informer Event Handler Tests", func() {
 		)
 
 		Eventually(func() (bool, error) {
-			ns, err := k.CoreV1().Namespaces().Get(namespace, metav1.GetOptions{})
+			ns, err := k.CoreV1().Namespaces().Get(context.TODO(), namespace, metav1.GetOptions{})
 			if err != nil {
 				return false, err
 			}
 			return ns != nil, nil
 		}, 2).Should(BeTrue())
 
-		err := k.CoreV1().Pods(namespace).Delete("foo", metav1.NewDeleteOptions(0))
+		err := k.CoreV1().Pods(namespace).Delete(context.TODO(), "foo", *metav1.NewDeleteOptions(0))
 		Expect(err).NotTo(HaveOccurred())
 
 		// initial add from the cache
@@ -300,7 +301,7 @@ var _ = Describe("Informer Event Handler Tests", func() {
 		)
 
 		Eventually(func() (bool, error) {
-			ns, err := k.CoreV1().Namespaces().Get(namespace, metav1.GetOptions{})
+			ns, err := k.CoreV1().Namespaces().Get(context.TODO(), namespace, metav1.GetOptions{})
 			if err != nil {
 				return false, err
 			}
@@ -309,7 +310,7 @@ var _ = Describe("Informer Event Handler Tests", func() {
 
 		pod.Annotations = map[string]string{"bar": "baz"}
 		pod.ResourceVersion = "1"
-		_, err := k.CoreV1().Pods(namespace).Update(pod)
+		_, err := k.CoreV1().Pods(namespace).Update(context.TODO(), pod, metav1.UpdateOptions{})
 		Expect(err).NotTo(HaveOccurred())
 
 		// no deletes
