@@ -1185,7 +1185,7 @@ mode=shared
 			}
 			err := runInit(app, runType, cfgFile, finalArgs...)
 			if match != "" {
-				Expect(err).To(MatchError(match))
+				Expect(err.Error()).To(ContainSubstring(match))
 			} else {
 				Expect(err).NotTo(HaveOccurred())
 			}
@@ -1224,7 +1224,7 @@ mode=shared
 				"-k8s-apiserver=gggggg://localhost:8443")
 
 			generateTestsSimple("apiserver URL is invalid",
-				"kubernetes API server address \"http://a b.com/\" invalid: parse http://a b.com/: invalid character \" \" in host name",
+				"invalid character \" \" in host name",
 				"-k8s-apiserver=http://a b.com/")
 
 			generateTestsSimple("kubeconfig file does not exist",
