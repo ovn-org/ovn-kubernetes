@@ -240,7 +240,7 @@ func TestServiceTypeHasNodePort(t *testing.T) {
 	}
 }
 
-func TestGetNodeIP(t *testing.T) {
+func TestGetNodePrimaryIP(t *testing.T) {
 	tests := []struct {
 		desc   string
 		inp    v1.Node
@@ -287,7 +287,7 @@ func TestGetNodeIP(t *testing.T) {
 	}
 	for i, tc := range tests {
 		t.Run(fmt.Sprintf("%d:%s", i, tc.desc), func(t *testing.T) {
-			res, e := GetNodeIP(&tc.inp)
+			res, e := GetNodePrimaryIP(&tc.inp)
 			t.Log(res, e)
 			if tc.expErr {
 				assert.Error(t, e)

@@ -93,8 +93,8 @@ func ServiceTypeHasNodePort(service *kapi.Service) bool {
 	return service.Spec.Type == kapi.ServiceTypeNodePort || service.Spec.Type == kapi.ServiceTypeLoadBalancer
 }
 
-// GetNodeIP extracts the ip address from the node status in the  API
-func GetNodeIP(node *kapi.Node) (string, error) {
+// GetNodePrimaryIP extracts the primary IP address from the node status in the  API
+func GetNodePrimaryIP(node *kapi.Node) (string, error) {
 	for _, addr := range node.Status.Addresses {
 		if addr.Type == kapi.NodeInternalIP {
 			return addr.Address, nil
