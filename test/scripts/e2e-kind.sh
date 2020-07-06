@@ -47,7 +47,7 @@ should prevent Ingress creation if more than 1 IngressClass marked as default
 
 SKIPPED_TESTS=$(echo "${SKIPPED_TESTS}" | sed -e '/^\($\|#\)/d' -e 's/ /\\s/g' | tr '\n' '|' | sed -e 's/|$//')
 
-GINKGO_ARGS="--num-nodes=3 --ginkgo.skip=${SKIPPED_TESTS} --disable-log-dump=false --report-dir=${E2E_REPORT_DIR} --report-prefix=${E2E_REPORT_PREFIX}"
+GINKGO_ARGS="--num-nodes=2 --ginkgo.skip=${SKIPPED_TESTS} --disable-log-dump=false --report-dir=${E2E_REPORT_DIR} --report-prefix=${E2E_REPORT_PREFIX}"
 
 case "$SHARD" in
 	shard-n-other)
