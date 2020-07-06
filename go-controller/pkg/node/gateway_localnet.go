@@ -39,7 +39,7 @@ const (
 	localnetGatewayExternalIDTable = "6"
 )
 
-func (n *OvnNode) initLocalnetGateway(hostSubnets []*net.IPNet, nodeAnnotator kube.Annotator) error {
+func (n *OvnNode) initLocalnetGateway(hostSubnets []*net.IPNet, nodeAnnotator kube.Annotator, defaultGatewayIntf string) error {
 	// Create a localnet OVS bridge.
 	localnetBridgeName := "br-local"
 	_, stderr, err := util.RunOVSVsctl("--may-exist", "add-br",
@@ -115,6 +115,10 @@ func (n *OvnNode) initLocalnetGateway(hostSubnets []*net.IPNet, nodeAnnotator ku
 		}
 	}
 
+	if err := n.initLocalEgressIP(gatewayIfAddrs, defaultGatewayIntf); err != nil {
+		return err
+	}
+
 	chassisID, err := util.GetNodeChassisID()
 	if err != nil {
 		return err
@@ -156,14 +160,7 @@ func (n *OvnNode) initLocalnetGateway(hostSubnets []*net.IPNet, nodeAnnotator ku
 	return nil
 }
 
-type localPortWatcherData struct {
-	recorder     record.EventRecorder
-	gatewayIPv4  string
-	gatewayIPv6  string
-	localAddrSet map[string]net.IPNet
-}
-
-func newLocalPortWatcherData(gatewayIfAddrs []*net.IPNet, recorder record.EventRecorder, localAddrSet map[string]net.IPNet) *localPortWatcherData {
+func getGatewayFamilyAddrs(gatewayIfAddrs []*net.IPNet) (string, string) {
 	var gatewayIPv4, gatewayIPv6 string
 	for _, gatewayIfAddr := range gatewayIfAddrs {
 		if utilnet.IsIPv6(gatewayIfAddr.IP) {
@@ -172,6 +169,32 @@ func newLocalPortWatcherData(gatewayIfAddrs []*net.IPNet, recorder record.EventR
 			gatewayIPv4 = gatewayIfAddr.IP.String()
 		}
 	}
+	return gatewayIPv4, gatewayIPv6
+}
+
+func (n *OvnNode) initLocalEgressIP(gatewayIfAddrs []*net.IPNet, defaultGatewayIntf string) error {
+	gatewayIPv4, gatewayIPv6 := getGatewayFamilyAddrs(gatewayIfAddrs)
+	egressIPLocal := &egressIPLocal{
+		gatewayIPv4:        gatewayIPv4,
+		gatewayIPv6:        gatewayIPv6,
+		nodeName:           n.name,
+		defaultGatewayIntf: defaultGatewayIntf,
+	}
+	if err := n.watchEgressIP(egressIPLocal); err != nil {
+		return err
+	}
+	return nil
+}
+
+type localPortWatcherData struct {
+	recorder     record.EventRecorder
+	gatewayIPv4  string
+	gatewayIPv6  string
+	localAddrSet map[string]net.IPNet
+}
+
+func newLocalPortWatcherData(gatewayIfAddrs []*net.IPNet, recorder record.EventRecorder, localAddrSet map[string]net.IPNet) *localPortWatcherData {
+	gatewayIPv4, gatewayIPv6 := getGatewayFamilyAddrs(gatewayIfAddrs)
 	return &localPortWatcherData{
 		gatewayIPv4:  gatewayIPv4,
 		gatewayIPv6:  gatewayIPv6,

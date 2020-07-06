@@ -49,10 +49,12 @@ func getDefaultIfAddr(defaultGatewayIntf string) (*net.IPNet, *net.IPNet, error)
 		return nil, nil, fmt.Errorf("error: unable to list addresses for default interface, err: %v", err)
 	}
 	for _, addr := range addrs {
-		if utilnet.IsIPv6(addr.IP) {
-			v6IfAddr = addr.IPNet
-		} else {
-			v4IfAddr = addr.IPNet
+		if addr.Label != getEgressLabel(defaultGatewayIntf) {
+			if utilnet.IsIPv6(addr.IP) {
+				v6IfAddr = addr.IPNet
+			} else {
+				v4IfAddr = addr.IPNet
+			}
 		}
 	}
 	return v4IfAddr, v6IfAddr, nil
