@@ -149,9 +149,6 @@ jobs:
       OVN_GATEWAY_MODE: "${{ matrix.gateway-mode }}"
     steps:
 
-    - name: Free up disk space
-      run: sudo eatmydata apt-get remove --auto-remove -y aspnetcore-* dotnet-* libmono-* mono-* msbuild php-* php7* ghc-* zulu-*
-
     - name: Set up Go
       uses: actions/setup-go@v1
       with:
