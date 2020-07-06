@@ -267,3 +267,8 @@ func ParseNodePrimaryIfAddr(node *kapi.Node) (string, string, error) {
 	}
 	return nodeIfAddr.IPv4, nodeIfAddr.IPv6, nil
 }
+
+// GetNodeEgressLabel returns label annotation needed for marking nodes as egress assignable
+func GetNodeEgressLabel() string {
+	return ovnNodeEgressLabel
+}
