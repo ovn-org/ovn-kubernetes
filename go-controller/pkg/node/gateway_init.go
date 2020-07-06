@@ -6,12 +6,11 @@ import (
 	"runtime"
 	"strings"
 
-	"k8s.io/klog"
-	utilnet "k8s.io/utils/net"
-
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/kube"
-	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
+	util "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
+	"k8s.io/klog"
+	utilnet "k8s.io/utils/net"
 )
 
 // bridgedGatewayNodeSetup makes the bridge's MAC address permanent (if needed), sets up
@@ -107,29 +106,33 @@ func (n *OvnNode) initGateway(subnets []*net.IPNet, nodeAnnotator kube.Annotator
 		}
 	}
 
-	var err error
+	gatewayNextHop := net.ParseIP(config.Gateway.NextHop)
+	gatewayIntf := config.Gateway.Interface
+	if gatewayNextHop == nil || gatewayIntf == "" {
+		defaultGatewayIntf, defaultGatewayNextHop, err := getDefaultGatewayInterfaceDetails()
+		if err != nil {
+			return err
+		}
+		if gatewayNextHop == nil {
+			gatewayNextHop = defaultGatewayNextHop
+		}
+		if gatewayIntf == "" {
+			gatewayIntf = defaultGatewayIntf
+		}
+	}
+
+	v4IfAddr, v6IfAddr, err := getDefaultIfAddr(gatewayIntf)
+	if err == nil {
+		if err := util.SetNodePrimaryIfAddr(nodeAnnotator, v4IfAddr, v6IfAddr); err != nil {
+			klog.Errorf("Unable to set primary IP net label on node, err: %v", err)
+		}
+	}
+
 	var prFn postWaitFunc
 	switch config.Gateway.Mode {
 	case config.GatewayModeLocal:
 		err = n.initLocalnetGateway(subnets, nodeAnnotator)
 	case config.GatewayModeShared:
-		gatewayNextHop := net.ParseIP(config.Gateway.NextHop)
-		gatewayIntf := config.Gateway.Interface
-		if gatewayNextHop == nil || gatewayIntf == "" {
-			// We need to get the interface details from the default gateway.
-			defaultGatewayIntf, defaultGatewayNextHop, err := getDefaultGatewayInterfaceDetails()
-			if err != nil {
-				return err
-			}
-
-			if gatewayNextHop == nil {
-				gatewayNextHop = defaultGatewayNextHop
-			}
-
-			if gatewayIntf == "" {
-				gatewayIntf = defaultGatewayIntf
-			}
-		}
 		prFn, err = n.initSharedGateway(subnets, gatewayNextHop, gatewayIntf, nodeAnnotator)
 	case config.GatewayModeDisabled:
 		err = util.SetL3GatewayConfig(nodeAnnotator, &util.L3GatewayConfig{
