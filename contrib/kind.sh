@@ -42,6 +42,7 @@ usage()
     echo "-wk | --num-workers          Number of worker nodes. DEFAULT: HA - 2 worker"
     echo "                             nodes and no HA - 0 worker nodes."
     echo "-gm | --gateway-mode         Enable 'shared' or 'local' gateway mode. DEFAULT: local."
+    echo "-ov | --ovn-image            Use the specified docker image instead of building locally. DEFAULT: local build."
     echo ""
 }
 
@@ -85,6 +86,9 @@ parse_args()
                                        fi
                                        OVN_GATEWAY_MODE=$1
                                        ;;
+            -ov | --ovn-image )        shift
+                                       OVN_IMAGE=$1
+                                       ;;
             -h | --help )              usage
                                        exit
                                        ;;
@@ -108,6 +112,7 @@ print_params()
      echo "KIND_NUM_WORKER = $KIND_NUM_WORKER"
      echo "OVN_GATEWAY_MODE = $OVN_GATEWAY_MODE"
      echo "OVN_HYBRID_OVERLAY_ENABLE = $OVN_HYBRID_OVERLAY_ENABLE"
+     echo "OVN_IMAGE = $OVN_IMAGE"
      echo ""
 }
 
@@ -124,6 +129,7 @@ KIND_REMOVE_TAINT=${KIND_REMOVE_TAINT:-true}
 KIND_IPV4_SUPPORT=${KIND_IPV4_SUPPORT:-true}
 KIND_IPV6_SUPPORT=${KIND_IPV6_SUPPORT:-false}
 OVN_HYBRID_OVERLAY_ENABLE=${OVN_HYBRID_OVERLAY_ENABLE:-false}
+OVN_IMAGE=${OVN_IMAGE:-local}
 
 # Input not currently validated. Modify outside script at your own risk.
 # These are the same values defaulted to in KIND code (kind/default.go).
@@ -231,15 +237,28 @@ do
 done
 kubectl get secrets -o jsonpath='{.items[].data.ca\.crt}' > /tmp/kind/ca.crt
 kubectl get secrets -o jsonpath='{.items[].data.token}' > /tmp/kind/token
-pushd ../go-controller
-make
-popd
+
+if [ "$OVN_IMAGE" == local ]; then
+  # Build ovn docker image
+  pushd ../go-controller
+  make
+  popd
+
+  # Build ovn kube image
+  pushd ../dist/images
+  sudo cp -f ../../go-controller/_output/go/bin/* .
+  echo "ref: $(git rev-parse  --symbolic-full-name HEAD)  commit: $(git rev-parse  HEAD)" > git_info
+  docker build -t ovn-daemonset-f:dev -f Dockerfile.fedora .
+  OVN_IMAGE=ovn-daemonset-f:dev
+  popd
+else
+  docker pull ${OVN_IMAGE}
+fi
+
+# Create ovn kube manifests
 pushd ../dist/images
-sudo cp -f ../../go-controller/_output/go/bin/* .
-echo "ref: $(git rev-parse  --symbolic-full-name HEAD)  commit: $(git rev-parse  HEAD)" > git_info
-docker build -t ovn-daemonset-f:dev -f Dockerfile.fedora .
 ./daemonset.sh \
-  --image=docker.io/library/ovn-daemonset-f:dev \
+  --image=${OVN_IMAGE} \
   --net-cidr=${NET_CIDR} \
   --svc-cidr=${SVC_CIDR} \
   --gateway-mode=${OVN_GATEWAY_MODE} \
@@ -249,7 +268,9 @@ docker build -t ovn-daemonset-f:dev -f Dockerfile.fedora .
   --kind \
   --master-loglevel=5
 popd
-kind load docker-image ovn-daemonset-f:dev --name ${KIND_CLUSTER_NAME}
+
+kind load docker-image ${OVN_IMAGE} --name ${KIND_CLUSTER_NAME}
+
 pushd ../dist/yaml
 run_kubectl apply -f ovn-setup.yaml
 CONTROL_NODES=$(docker ps -f name=ovn-control | grep -v NAMES | awk '{ print $NF }')

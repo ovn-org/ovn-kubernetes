@@ -61,6 +61,17 @@ jobs:
         ln -sf $(pwd) src/github.com/ovn-org/ovn-kubernetes
         GOPATH=$(pwd) gcov2lcov -infile gover.coverprofile -outfile coverage.lcov
 
+    - name: Build docker image
+      run: |
+        echo ${{ secrets.GITHUB_TOKEN }} | docker login docker.pkg.github.com -u $GITHUB_ACTOR --password-stdin
+        pushd dist/images
+          sudo cp -f ../../go-controller/_output/go/bin/ovn* .
+          echo "ref: $(git rev-parse  --symbolic-full-name HEAD)  commit: $(git rev-parse  HEAD)" > git_info
+          docker build -t docker.pkg.github.com/${GITHUB_REPOSITORY}/ovn-daemonset-f:dev -f Dockerfile.fedora .
+          docker push docker.pkg.github.com/${GITHUB_REPOSITORY}/ovn-daemonset-f:dev
+        popd
+
+
     - name: Upload Junit Reports
       if: always()
       uses: actions/upload-artifact@v2
@@ -179,6 +190,8 @@ jobs:
 
     - name: kind setup
       run: |
+        export OVN_IMAGE="docker.pkg.github.com/${GITHUB_REPOSITORY}/ovn-daemonset-f:dev"
+        echo ${{ secrets.GITHUB_TOKEN }} | docker login docker.pkg.github.com -u $GITHUB_ACTOR --password-stdin
         make -C test install-kind
 
     - name: Run Tests
