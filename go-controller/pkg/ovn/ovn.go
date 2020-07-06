@@ -12,6 +12,7 @@ import (
 
 	goovn "github.com/ebay/go-ovn"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
+	egressipapi "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/egressip/v1/apis/clientset/versioned"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/factory"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/kube"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/ipallocator"
@@ -176,7 +177,7 @@ const (
 
 // NewOvnController creates a new OVN controller for creating logical network
 // infrastructure and policy
-func NewOvnController(kubeClient kubernetes.Interface, egressFirewallClient egressfirewallclientset.Interface, wf *factory.WatchFactory,
+func NewOvnController(kubeClient kubernetes.Interface, egressIPClient egressipapi.Interface, egressFirewallClient egressfirewallclientset.Interface, wf *factory.WatchFactory,
 	stopChan <-chan struct{}, addressSetFactory AddressSetFactory, ovnNBClient goovn.Client, ovnSBClient goovn.Client) *Controller {
 
 	if addressSetFactory == nil {
@@ -184,7 +185,11 @@ func NewOvnController(kubeClient kubernetes.Interface, egressFirewallClient egre
 	}
 
 	return &Controller{
-		kube:                     &kube.Kube{KClient: kubeClient, EgressFirewallClient: egressFirewallClient},
+		kube: &kube.Kube{
+			KClient:              kubeClient,
+			EIPClient:            egressIPClient,
+			EgressFirewallClient: egressFirewallClient,
+		},
 		watchFactory:             wf,
 		stopChan:                 stopChan,
 		masterSubnetAllocator:    subnetallocator.NewSubnetAllocator(),
