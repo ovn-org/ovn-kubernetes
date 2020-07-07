@@ -138,6 +138,10 @@ var _ = Describe("Node Operations", func() {
 				err := f4.MatchState(expectedTables)
 				Expect(err).NotTo(HaveOccurred())
 
+				expectedTables = map[string]util.FakeTable{
+					"filter": {},
+					"nat":    {},
+				}
 				f6 := iptV6.(*util.FakeIPTables)
 				err = f6.MatchState(expectedTables)
 				Expect(err).NotTo(HaveOccurred())

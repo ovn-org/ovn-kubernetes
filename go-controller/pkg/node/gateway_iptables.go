@@ -8,6 +8,7 @@ import (
 	"strings"
 
 	"github.com/coreos/go-iptables/iptables"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
 	kapi "k8s.io/api/core/v1"
 	"k8s.io/klog"
@@ -18,6 +19,17 @@ const (
 	iptableNodePortChain   = "OVN-KUBE-NODEPORT"
 	iptableExternalIPChain = "OVN-KUBE-EXTERNALIP"
 )
+
+func clusterIPTablesProtocols() []iptables.Protocol {
+	var protocols []iptables.Protocol
+	if config.IPv4Mode {
+		protocols = append(protocols, iptables.ProtocolIPv4)
+	}
+	if config.IPv6Mode {
+		protocols = append(protocols, iptables.ProtocolIPv6)
+	}
+	return protocols
+}
 
 type iptRule struct {
 	table    string
@@ -249,10 +261,10 @@ func initLocalGatewayNATRules(ifname string, ip net.IP) error {
 	return addIptRules(getLocalGatewayNATRules(ifname, ip))
 }
 
-func initGatewayIPTTables(genGatewayChainRules func(chain string, proto iptables.Protocol) []iptRule) error {
+func initGatewayIPTables(genGatewayChainRules func(chain string, proto iptables.Protocol) []iptRule) error {
 	rules := make([]iptRule, 0)
 	for _, chain := range []string{iptableNodePortChain, iptableExternalIPChain} {
-		for _, proto := range []iptables.Protocol{iptables.ProtocolIPv4, iptables.ProtocolIPv6} {
+		for _, proto := range clusterIPTablesProtocols() {
 			ipt, err := util.GetIPTablesHelper(proto)
 			if err != nil {
 				return err
@@ -273,14 +285,14 @@ func initGatewayIPTTables(genGatewayChainRules func(chain string, proto iptables
 }
 
 func initSharedGatewayIPTables() error {
-	if err := initGatewayIPTTables(getSharedGatewayInitRules); err != nil {
+	if err := initGatewayIPTables(getSharedGatewayInitRules); err != nil {
 		return err
 	}
 	return nil
 }
 
 func initLocalGatewayIPTables() error {
-	if err := initGatewayIPTTables(getLocalGatewayInitRules); err != nil {
+	if err := initGatewayIPTables(getLocalGatewayInitRules); err != nil {
 		return err
 	}
 	return nil
@@ -288,6 +300,7 @@ func initLocalGatewayIPTables() error {
 
 func cleanupSharedGatewayIPTChains() {
 	for _, chain := range []string{iptableNodePortChain, iptableExternalIPChain} {
+		// We clean up both IPv4 and IPv6, regardless of what is currently in use
 		for _, proto := range []iptables.Protocol{iptables.ProtocolIPv4, iptables.ProtocolIPv6} {
 			ipt, err := util.GetIPTablesHelper(proto)
 			if err != nil {
@@ -302,7 +315,7 @@ func cleanupSharedGatewayIPTChains() {
 }
 
 func recreateIPTRules(table, chain string, keepIPTRules []iptRule) {
-	for _, proto := range []iptables.Protocol{iptables.ProtocolIPv4, iptables.ProtocolIPv6} {
+	for _, proto := range clusterIPTablesProtocols() {
 		ipt, _ := util.GetIPTablesHelper(proto)
 		if err := ipt.ClearChain(table, chain); err != nil {
 			klog.Errorf("Error clearing chain: %s in table: %s, err: %v", chain, table, err)
