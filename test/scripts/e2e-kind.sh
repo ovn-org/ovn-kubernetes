@@ -18,6 +18,7 @@ Networking IPerf IPv[46]
 # FEATURES NOT AVAILABLE IN OUR CI ENVIRONMENT
 \[Feature:Networking-IPv6\]
 \[Feature:Federation\]
+GCE
 
 # TESTS THAT ASSUME KUBE-PROXY
 kube-proxy
