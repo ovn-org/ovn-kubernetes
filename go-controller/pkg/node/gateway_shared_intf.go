@@ -343,6 +343,50 @@ func (npw *nodePortWatcher) SyncServices(services []interface{}) {
 	}
 }
 
+// validateDefaultOpenFlowCnt validates numbers of default OpenFlows
+func validateDefaultOpenFlowCnt(gwBridge string, nFlows int) error {
+	out, _, err := util.RunOVSOfctl("dump-aggregate", gwBridge,
+		fmt.Sprintf("cookie=%s/-1", defaultOpenFlowCookie))
+	if err != nil {
+		return fmt.Errorf("failed to dump aggregate statistics of the default OpenFlow rules: %v", err)
+	}
+
+	if !strings.Contains(out, fmt.Sprintf("flow_count=%d", nFlows)) {
+		return fmt.Errorf("error: unexpected default OpenFlows count, expect %d output: %v\n", nFlows, out)
+	}
+	return nil
+}
+
+// validateDefaultOpenFlow validates existing default OpenFlows. First check if numbers of them are as expected,
+// then check specific OpenFlow to see if associated port number is obsolete (could be recreated by ovn-controller)
+func validateDefaultOpenFlow(gwBridge, ofportPatch, ofportPhys string, nFlows int) error {
+	err := validateDefaultOpenFlowCnt(gwBridge, nFlows)
+	if err != nil {
+		return err
+	}
+
+	// just pick one default OpenFlow and check the ofportPatch and ofportPhys have not changed.
+	// Note this might be IPv6 only or IPv4 only or both, we only need to check one of them
+	key := fmt.Sprintf("cookie=%s/-1, table=0, in_port=%s, ipv6", defaultOpenFlowCookie, ofportPatch)
+	if config.IPv4Mode {
+		key = fmt.Sprintf("cookie=%s/-1, table=0, in_port=%s, ip", defaultOpenFlowCookie, ofportPatch)
+	}
+	actions := fmt.Sprintf("output:%s", ofportPhys)
+
+	output, _, err := util.RunOVSOfctl("dump-flows", "--no-stat", "--no-names", gwBridge, key)
+	if err != nil {
+		return fmt.Errorf("failed to get OpenFlow flow %s", key)
+	}
+	flows := strings.Split(output, "\n")
+	if len(flows) != 1 {
+		return fmt.Errorf("error: unexpected number of OpenFlow flows %s", key)
+	}
+	if !strings.Contains(flows[0], actions) {
+		return fmt.Errorf("error: OpenFlow flow %s does not contain expected actions %s", key, actions)
+	}
+	return nil
+}
+
 // since we share the host's k8s node IP, add OpenFlow flows
 // -- to steer the NodePort traffic arriving on the host to the OVN logical topology and
 // -- to also connection track the outbound north-south traffic through l3 gateway so that
@@ -369,13 +413,48 @@ func newSharedGatewayOpenFlowManager(nodeName, macAddress, gwBridge, gwIntf stri
 			gwIntf, stderr, err)
 	}
 
+	// Validate the numbers of the default OpenFlow rules and the port number of the associated ports, if they are
+	// we assume the OpenFlow rules are intact. Do nothing so ongoing network traffic won't be interrupted;
+	// Otherwise, flush existing OpenFlows and recreate default OpenFlows.
+	//
+	// Note that the numbers of default OpenFlows may be different depends on the IPv4/IPv6 mode or the other
+	// OVN k8s configurations
+
+	// One table 0 and four table 1 flows
+	nFlows := 5
+	// two table 0 IPv4 flows
+	if config.IPv4Mode {
+		nFlows += 2
+	}
+	// 2 table 0 IPv6 flows
+	if config.IPv6Mode {
+		nFlows += 2
+	}
+	if config.Gateway.DisableSNATMultipleGWs {
+		// table 1, flow to pod subnet go directly to OVN
+		for range config.Default.ClusterSubnets {
+			nFlows++
+		}
+	}
+	if config.IPv6Mode {
+		// two table 1 flow to flood icmpv6 Route Advertisement and Neighbor Advertisement traffic
+		nFlows += 2
+	}
+
+	// if the numbers of the default OpenFlow rules are correct, directly return
+	err = validateDefaultOpenFlow(gwBridge, ofportPatch, ofportPhys, nFlows)
+	if err == nil {
+		return &openflowManager{
+			gwBridge, gwIntf, patchPort, ofportPhys, ofportPatch, nFlows,
+		}, nil
+	}
+
 	// replace the left over OpenFlow flows with the NORMAL action flow
 	_, stderr, err = util.AddOFFlowWithSpecificAction(gwBridge, util.NormalAction)
 	if err != nil {
 		return nil, fmt.Errorf("failed to replace-flows on bridge %q stderr:%s (%v)", gwBridge, stderr, err)
 	}
 
-	nFlows := 0
 	// table 0, we check to see if this dest mac is the shared mac, if so flood to both ports
 	_, stderr, err = util.RunOVSOfctl("add-flow", gwBridge,
 		fmt.Sprintf("cookie=%s, priority=10, table=0, in_port=%s, dl_dst=%s, actions=output:%s,output:LOCAL",
@@ -383,7 +462,6 @@ func newSharedGatewayOpenFlowManager(nodeName, macAddress, gwBridge, gwIntf stri
 	if err != nil {
 		return nil, fmt.Errorf("failed to add openflow flow to %s, stderr: %q, error: %v", gwBridge, stderr, err)
 	}
-	nFlows++
 
 	if config.IPv4Mode {
 		// table 0, packets coming from pods headed externally. Commit connections
@@ -396,7 +474,6 @@ func newSharedGatewayOpenFlowManager(nodeName, macAddress, gwBridge, gwIntf stri
 			return nil, fmt.Errorf("failed to add openflow flow to %s, stderr: %q, "+
 				"error: %v", gwBridge, stderr, err)
 		}
-		nFlows++
 
 		// table 0, packets coming from external. Send it through conntrack and
 		// resubmit to table 1 to know the state of the connection.
@@ -407,7 +484,6 @@ func newSharedGatewayOpenFlowManager(nodeName, macAddress, gwBridge, gwIntf stri
 			return nil, fmt.Errorf("failed to add openflow flow to %s, stderr: %q, "+
 				"error: %v", gwBridge, stderr, err)
 		}
-		nFlows++
 	}
 	if config.IPv6Mode {
 		// table 0, packets coming from pods headed externally. Commit connections
@@ -420,7 +496,6 @@ func newSharedGatewayOpenFlowManager(nodeName, macAddress, gwBridge, gwIntf stri
 			return nil, fmt.Errorf("failed to add openflow flow to %s, stderr: %q, "+
 				"error: %v", gwBridge, stderr, err)
 		}
-		nFlows++
 
 		// table 0, packets coming from external. Send it through conntrack and
 		// resubmit to table 1 to know the state of the connection.
@@ -431,7 +506,6 @@ func newSharedGatewayOpenFlowManager(nodeName, macAddress, gwBridge, gwIntf stri
 			return nil, fmt.Errorf("failed to add openflow flow to %s, stderr: %q, "+
 				"error: %v", gwBridge, stderr, err)
 		}
-		nFlows++
 	}
 
 	// table 1, established and related connections go to pod
@@ -442,7 +516,6 @@ func newSharedGatewayOpenFlowManager(nodeName, macAddress, gwBridge, gwIntf stri
 		return nil, fmt.Errorf("failed to add openflow flow to %s, stderr: %q, "+
 			"error: %v", gwBridge, stderr, err)
 	}
-	nFlows++
 
 	_, stderr, err = util.RunOVSOfctl("add-flow", gwBridge,
 		fmt.Sprintf("cookie=%s, priority=100, table=1, ct_state=+trk+rel, "+
@@ -451,7 +524,6 @@ func newSharedGatewayOpenFlowManager(nodeName, macAddress, gwBridge, gwIntf stri
 		return nil, fmt.Errorf("failed to add openflow flow to %s, stderr: %q, "+
 			"error: %v", gwBridge, stderr, err)
 	}
-	nFlows++
 
 	if config.Gateway.DisableSNATMultipleGWs {
 		// table 1, traffic to pod subnet go directly to OVN
@@ -470,7 +542,6 @@ func newSharedGatewayOpenFlowManager(nodeName, macAddress, gwBridge, gwIntf stri
 				return nil, fmt.Errorf("failed to add openflow flow to %s, stderr: %q, "+
 					"error: %v", gwBridge, stderr, err)
 			}
-			nFlows++
 		}
 	}
 
@@ -481,7 +552,6 @@ func newSharedGatewayOpenFlowManager(nodeName, macAddress, gwBridge, gwIntf stri
 	if err != nil {
 		return nil, fmt.Errorf("failed to add openflow flow to %s, stderr: %q, error: %v", gwBridge, stderr, err)
 	}
-	nFlows++
 
 	if config.IPv6Mode {
 		// REMOVEME(trozet) when https://bugzilla.kernel.org/show_bug.cgi?id=11797 is resolved
@@ -494,7 +564,6 @@ func newSharedGatewayOpenFlowManager(nodeName, macAddress, gwBridge, gwIntf stri
 				return nil, fmt.Errorf("failed to add openflow flow to %s, stderr: %q, "+
 					"error: %v", gwBridge, stderr, err)
 			}
-			nFlows++
 		}
 	}
 
@@ -505,7 +574,6 @@ func newSharedGatewayOpenFlowManager(nodeName, macAddress, gwBridge, gwIntf stri
 		return nil, fmt.Errorf("failed to add openflow flow to %s, stderr: %q, "+
 			"error: %v", gwBridge, stderr, err)
 	}
-	nFlows++
 
 	// add health check function to check default OpenFlow flows are on the shared gateway bridge
 	return &openflowManager{

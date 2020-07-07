@@ -151,6 +151,10 @@ func shareGatewayInterfaceTest(app *cli.App, testNS ns.NetNS,
 			Cmd:    "ovs-vsctl --timeout=15 get interface eth0 ofport",
 			Output: "7",
 		})
+		fexec.AddFakeCmd(&ovntest.ExpectedCmd{
+			Cmd:    "ovs-ofctl dump-aggregate breth0 cookie=0xdeff105/-1",
+			Output: "",
+		})
 		fexec.AddFakeCmdsNoOutputNoError([]string{
 			"ovs-ofctl -O OpenFlow13 replace-flows breth0 -",
 		})

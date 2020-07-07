@@ -1,7 +1,6 @@
 package node
 
 import (
-	"fmt"
 	"os"
 	"strings"
 	"time"
@@ -134,21 +133,12 @@ type openflowManager struct {
 // checkDefaultOpenFlow checks for the existence of default OpenFlow rules and
 // exits if the output is not as expected
 func (c *openflowManager) Run(stopChan <-chan struct{}) {
-	flowCount := fmt.Sprintf("flow_count=%d", c.nFlows)
 	for {
 		select {
 		case <-time.After(15 * time.Second):
-			out, _, err := util.RunOVSOfctl("dump-aggregate", c.gwBridge,
-				fmt.Sprintf("cookie=%s/-1", defaultOpenFlowCookie))
+			err := validateDefaultOpenFlowCnt(c.gwBridge, c.nFlows)
 			if err != nil {
-				klog.Errorf("Failed to dump aggregate statistics of the default OpenFlow rules: %v", err)
-				continue
-			}
-
-			if !strings.Contains(out, flowCount) {
-				klog.Errorf("Fatal error: unexpected default OpenFlows count, expect %d output: %v\n",
-					c.nFlows, out)
-				os.Exit(1)
+				klog.Fatal(err)
 			}
 
 			// it could be that the ovn-controller recreated the patch between the host OVS bridge and
