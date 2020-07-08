@@ -30,7 +30,7 @@ func validateBandwidthIsReasonable(rsrc *resource.Quantity) error {
 	return nil
 }
 
-func extractPodBandwidthResources(podAnnotations map[string]string) (int64, int64, error) {
+func ExtractPodBandwidthResources(podAnnotations map[string]string) (int64, int64, error) {
 	ingress := int64(-1)
 	egress := int64(-1)
 	str, found := podAnnotations["kubernetes.io/ingress-bandwidth"]
@@ -81,7 +81,7 @@ func (pr *PodRequest) cmdAdd(kclient kubernetes.Interface) ([]byte, error) {
 		return nil, fmt.Errorf("failed to unmarshal ovn annotation: %v", err)
 	}
 
-	ingress, egress, err := extractPodBandwidthResources(annotations)
+	ingress, egress, err := ExtractPodBandwidthResources(annotations)
 	if err != nil {
 		return nil, fmt.Errorf("failed to parse bandwidth request: %v", err)
 	}

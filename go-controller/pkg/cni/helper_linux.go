@@ -350,7 +350,7 @@ func (pr *PodRequest) ConfigureInterface(namespace string, podName string, ifInf
 		return nil, fmt.Errorf("failure in plugging pod interface: %v\n  %q", err, out)
 	}
 
-	if err := clearPodBandwidth(pr.SandboxID); err != nil {
+	if err := ClearPodBandwidth(pr.SandboxID); err != nil {
 		return nil, err
 	}
 
@@ -364,7 +364,7 @@ func (pr *PodRequest) ConfigureInterface(namespace string, podName string, ifInf
 			return nil, fmt.Errorf("failed to set host veth txqlen: %v", err)
 		}
 
-		if err := setPodBandwidth(pr.SandboxID, hostIface.Name, ifInfo.Ingress, ifInfo.Egress); err != nil {
+		if err := SetPodBandwidth(pr.SandboxID, hostIface.Name, ifInfo.Ingress, ifInfo.Egress); err != nil {
 			return nil, err
 		}
 	}
@@ -439,7 +439,7 @@ func (pr *PodRequest) PlatformSpecificCleanup() error {
 		klog.Warningf("Failed to delete OVS port %s: %v\n  %q", ifaceName, err, string(out))
 	}
 
-	_ = clearPodBandwidth(pr.SandboxID)
+	_ = ClearPodBandwidth(pr.SandboxID)
 	pr.deletePodConntrack()
 
 	return nil
