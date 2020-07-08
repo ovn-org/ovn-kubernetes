@@ -82,6 +82,8 @@ func (oc *Controller) deleteLogicalPort(pod *kapi.Pod) {
 		return
 	}
 
+	// FIXME: if any of these steps fails we need to stop and try again later...
+
 	// Remove the port from the default deny multicast policy
 	if oc.multicastSupport {
 		if err := podDeleteDefaultDenyMulticastPolicy(portInfo); err != nil {
@@ -93,15 +95,15 @@ func (oc *Controller) deleteLogicalPort(pod *kapi.Pod) {
 		klog.Errorf(err.Error())
 	}
 
-	if err := oc.lsManager.ReleaseIPs(portInfo.logicalSwitch, portInfo.ips); err != nil {
-		klog.Errorf(err.Error())
-	}
-
 	out, stderr, err := util.RunOVNNbctl("--if-exists", "lsp-del", logicalPort)
 	if err != nil {
 		klog.Errorf("Error in deleting pod %s logical port "+
 			"stdout: %q, stderr: %q, (%v)",
 			podDesc, out, stderr, err)
+	}
+
+	if err := oc.lsManager.ReleaseIPs(portInfo.logicalSwitch, portInfo.ips); err != nil {
+		klog.Errorf(err.Error())
 	}
 
 	oc.logicalPortCache.remove(logicalPort)
