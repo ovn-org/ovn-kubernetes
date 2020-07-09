@@ -387,7 +387,7 @@ func localNetInterfaceTest(app *cli.App, testNS ns.NetNS,
 				}
 			}
 
-			err = fakeOvnNode.node.initLocalnetGateway(subnets, nodeAnnotator, "")
+			err = fakeOvnNode.node.initLocalnetGateway(subnets, nodeAnnotator, primaryLinkName)
 			Expect(err).NotTo(HaveOccurred())
 			// Check if IP has been assigned to LocalnetGatewayNextHopPort
 			link, err := netlink.LinkByName(localnetGatewayNextHopPort)
