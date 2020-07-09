@@ -31,20 +31,46 @@ func getPodAnnotations(fakeClient *fake.Clientset, namespace, name string) strin
 	return pod.Annotations[util.OvnPodAnnotationName]
 }
 
-func newPodMeta(namespace, name string) metav1.ObjectMeta {
+func newPodMeta(namespace, name string, additionalLabels map[string]string) metav1.ObjectMeta {
+	labels := map[string]string{
+		"name": name,
+	}
+	for k, v := range additionalLabels {
+		labels[k] = v
+	}
 	return metav1.ObjectMeta{
 		Name:      name,
 		UID:       types.UID(name),
 		Namespace: namespace,
-		Labels: map[string]string{
-			"name": name,
+		Labels:    labels,
+	}
+}
+
+func newPodWithLabels(namespace, name, node, podIP string, additionalLabels map[string]string) *v1.Pod {
+	return &v1.Pod{
+		ObjectMeta: newPodMeta(namespace, name, additionalLabels),
+		Spec: v1.PodSpec{
+			Containers: []v1.Container{
+				{
+					Name:  "containerName",
+					Image: "containerImage",
+				},
+			},
+			NodeName: node,
+		},
+		Status: v1.PodStatus{
+			Phase: v1.PodRunning,
+			PodIP: podIP,
+			PodIPs: []v1.PodIP{
+				{IP: podIP},
+			},
 		},
 	}
 }
 
 func newPod(namespace, name, node, podIP string) *v1.Pod {
 	return &v1.Pod{
-		ObjectMeta: newPodMeta(namespace, name),
+		ObjectMeta: newPodMeta(namespace, name, nil),
 		Spec: v1.PodSpec{
 			Containers: []v1.Container{
 				{
