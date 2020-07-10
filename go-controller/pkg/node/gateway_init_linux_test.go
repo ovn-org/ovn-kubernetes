@@ -199,7 +199,7 @@ cookie=0x0, duration=8366.597s, table=1, n_packets=10641, n_bytes=10370087, prio
 			defer GinkgoRecover()
 
 			waiter := newStartupWaiter()
-			err = n.initGateway(ovntest.MustParseIPNet(nodeSubnet), nodeAnnotator, waiter)
+			err = n.initGateway(ovntest.MustParseIPNets(nodeSubnet), nodeAnnotator, waiter)
 			Expect(err).NotTo(HaveOccurred())
 
 			// check if IP adress have assigned to localnetGatewayNextHopPort interface
@@ -275,6 +275,11 @@ cookie=0x0, duration=8366.597s, table=1, n_packets=10641, n_bytes=10370087, prio
 		f4 := iptV4.(*util.FakeIPTables)
 		err = f4.MatchState(expectedTables)
 		Expect(err).NotTo(HaveOccurred())
+
+		expectedTables = map[string]util.FakeTable{
+			"filter": {},
+			"nat":    {},
+		}
 		f6 := iptV6.(*util.FakeIPTables)
 		err = f6.MatchState(expectedTables)
 		Expect(err).NotTo(HaveOccurred())
@@ -415,7 +420,7 @@ var _ = Describe("Gateway Init Operations", func() {
 			err = testNS.Do(func(ns.NetNS) error {
 				defer GinkgoRecover()
 
-				err = fakeOvnNode.node.initLocalnetGateway(ovntest.MustParseIPNet(nodeSubnet), nodeAnnotator)
+				err = fakeOvnNode.node.initLocalnetGateway(ovntest.MustParseIPNets(nodeSubnet), nodeAnnotator)
 				Expect(err).NotTo(HaveOccurred())
 				// Check if IP has been assigned to LocalnetGatewayNextHopPort
 				link, err := netlink.LinkByName(localnetGatewayNextHopPort)

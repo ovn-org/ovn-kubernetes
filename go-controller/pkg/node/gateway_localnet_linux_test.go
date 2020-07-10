@@ -41,7 +41,7 @@ func initFakeNodePortWatcher(fakeOvnNode *FakeOVNNode, iptV4, iptV6 util.IPTable
 
 	fNPW := localPortWatcherData{
 		recorder:     fakeOvnNode.recorder,
-		gatewayIP:    v4localnetGatewayIP,
+		gatewayIPv4:  v4localnetGatewayIP,
 		localAddrSet: getFakeLocalAddrs(),
 	}
 	return &fNPW
@@ -138,6 +138,10 @@ var _ = Describe("Node Operations", func() {
 				err := f4.MatchState(expectedTables)
 				Expect(err).NotTo(HaveOccurred())
 
+				expectedTables = map[string]util.FakeTable{
+					"filter": {},
+					"nat":    {},
+				}
 				f6 := iptV6.(*util.FakeIPTables)
 				err = f6.MatchState(expectedTables)
 				Expect(err).NotTo(HaveOccurred())

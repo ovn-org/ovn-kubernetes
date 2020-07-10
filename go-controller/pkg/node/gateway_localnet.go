@@ -39,7 +39,7 @@ const (
 	localnetGatewayExternalIDTable = "6"
 )
 
-func (n *OvnNode) initLocalnetGateway(subnet *net.IPNet, nodeAnnotator kube.Annotator) error {
+func (n *OvnNode) initLocalnetGateway(hostSubnets []*net.IPNet, nodeAnnotator kube.Annotator) error {
 	// Create a localnet OVS bridge.
 	localnetBridgeName := "br-local"
 	_, stderr, err := util.RunOVSVsctl("--may-exist", "add-br",
@@ -74,27 +74,45 @@ func (n *OvnNode) initLocalnetGateway(subnet *net.IPNet, nodeAnnotator kube.Anno
 	if err != nil {
 		return err
 	}
-
-	var gatewayIP, gatewayNextHop net.IP
-	var gatewaySubnetMask net.IPMask
-	if utilnet.IsIPv6CIDR(subnet) {
-		gatewayIP = net.ParseIP(v6localnetGatewayIP)
-		gatewayNextHop = net.ParseIP(v6localnetGatewayNextHop)
-		gatewaySubnetMask = net.CIDRMask(v6localnetGatewaySubnetPrefix, 128)
-	} else {
-		gatewayIP = net.ParseIP(v4localnetGatewayIP)
-		gatewayNextHop = net.ParseIP(v4localnetGatewayNextHop)
-		gatewaySubnetMask = net.CIDRMask(v4localnetGatewaySubnetPrefix, 32)
-	}
-	gatewayIPCIDR := &net.IPNet{IP: gatewayIP, Mask: gatewaySubnetMask}
-	gatewayNextHopCIDR := &net.IPNet{IP: gatewayNextHop, Mask: gatewaySubnetMask}
-
-	// Flush any addresses on localnetBridgeNextHopPort and add the new IP address.
-	if err = util.LinkAddrFlush(link); err == nil {
-		err = util.LinkAddrAdd(link, gatewayNextHopCIDR)
-	}
-	if err != nil {
+	// Flush any addresses on localnetGatewayNextHopPort first
+	if err := util.LinkAddrFlush(link); err != nil {
 		return err
+	}
+
+	var gatewayIfAddrs []*net.IPNet
+	var nextHops []net.IP
+	for _, hostSubnet := range hostSubnets {
+		var gatewayIP, gatewayNextHop net.IP
+		var gatewaySubnetMask net.IPMask
+		if utilnet.IsIPv6CIDR(hostSubnet) {
+			gatewayIP = net.ParseIP(v6localnetGatewayIP)
+			gatewayNextHop = net.ParseIP(v6localnetGatewayNextHop)
+			gatewaySubnetMask = net.CIDRMask(v6localnetGatewaySubnetPrefix, 128)
+		} else {
+			gatewayIP = net.ParseIP(v4localnetGatewayIP)
+			gatewayNextHop = net.ParseIP(v4localnetGatewayNextHop)
+			gatewaySubnetMask = net.CIDRMask(v4localnetGatewaySubnetPrefix, 32)
+		}
+		gatewayIfAddr := &net.IPNet{IP: gatewayIP, Mask: gatewaySubnetMask}
+		gatewayNextHopIfAddr := &net.IPNet{IP: gatewayNextHop, Mask: gatewaySubnetMask}
+		gatewayIfAddrs = append(gatewayIfAddrs, gatewayIfAddr)
+		nextHops = append(nextHops, gatewayNextHop)
+
+		if err = util.LinkAddrAdd(link, gatewayNextHopIfAddr); err != nil {
+			return err
+		}
+		if utilnet.IsIPv6CIDR(hostSubnet) {
+			// TODO - IPv6 hack ... for some reason neighbor discovery isn't working here, so hard code a
+			// MAC binding for the gateway IP address for now - need to debug this further
+			if exists, _ := util.LinkNeighExists(link, gatewayIP, macAddress); !exists {
+				err = util.LinkNeighAdd(link, gatewayIP, macAddress)
+				if err == nil {
+					klog.Infof("Added MAC binding for %s on %s", gatewayIP, localnetGatewayNextHopPort)
+				} else {
+					klog.Errorf("Error in adding MAC binding for %s on %s: %v", gatewayIP, localnetGatewayNextHopPort, err)
+				}
+			}
+		}
 	}
 
 	chassisID, err := util.GetNodeChassisID()
@@ -107,28 +125,19 @@ func (n *OvnNode) initLocalnetGateway(subnet *net.IPNet, nodeAnnotator kube.Anno
 		ChassisID:      chassisID,
 		InterfaceID:    ifaceID,
 		MACAddress:     macAddress,
-		IPAddresses:    []*net.IPNet{gatewayIPCIDR},
-		NextHops:       []net.IP{gatewayNextHop},
+		IPAddresses:    gatewayIfAddrs,
+		NextHops:       nextHops,
 		NodePortEnable: config.Gateway.NodeportEnable,
 	})
 	if err != nil {
 		return err
 	}
 
-	if utilnet.IsIPv6CIDR(subnet) {
-		// TODO - IPv6 hack ... for some reason neighbor discovery isn't working here, so hard code a
-		// MAC binding for the gateway IP address for now - need to debug this further
-		err = util.LinkNeighAdd(link, gatewayIP, macAddress)
-		if err == nil {
-			klog.Infof("Added MAC binding for %s on %s", gatewayIP, localnetGatewayNextHopPort)
-		} else {
-			klog.Errorf("Error in adding MAC binding for %s on %s: %v", gatewayIP, localnetGatewayNextHopPort, err)
+	for _, ifaddr := range gatewayIfAddrs {
+		err = initLocalGatewayNATRules(localnetGatewayNextHopPort, ifaddr.IP)
+		if err != nil {
+			return fmt.Errorf("failed to add NAT rules for localnet gateway (%v)", err)
 		}
-	}
-
-	err = initLocalGatewayNATRules(localnetGatewayNextHopPort, gatewayIP)
-	if err != nil {
-		return fmt.Errorf("failed to add NAT rules for localnet gateway (%v)", err)
 	}
 
 	if config.Gateway.NodeportEnable {
@@ -137,25 +146,35 @@ func (n *OvnNode) initLocalnetGateway(subnet *net.IPNet, nodeAnnotator kube.Anno
 			return err
 		}
 		err = n.watchLocalPorts(
-			newLocalPortWatcherData(gatewayIP, n.recorder, localAddrSet),
+			newLocalPortWatcherData(gatewayIfAddrs, n.recorder, localAddrSet),
 		)
 		if err != nil {
 			return err
 		}
 	}
 
-	return err
+	return nil
 }
 
 type localPortWatcherData struct {
 	recorder     record.EventRecorder
-	gatewayIP    string
+	gatewayIPv4  string
+	gatewayIPv6  string
 	localAddrSet map[string]net.IPNet
 }
 
-func newLocalPortWatcherData(gatewayIP net.IP, recorder record.EventRecorder, localAddrSet map[string]net.IPNet) *localPortWatcherData {
+func newLocalPortWatcherData(gatewayIfAddrs []*net.IPNet, recorder record.EventRecorder, localAddrSet map[string]net.IPNet) *localPortWatcherData {
+	var gatewayIPv4, gatewayIPv6 string
+	for _, gatewayIfAddr := range gatewayIfAddrs {
+		if utilnet.IsIPv6(gatewayIfAddr.IP) {
+			gatewayIPv6 = gatewayIfAddr.IP.String()
+		} else {
+			gatewayIPv4 = gatewayIfAddr.IP.String()
+		}
+	}
 	return &localPortWatcherData{
-		gatewayIP:    gatewayIP.String(),
+		gatewayIPv4:  gatewayIPv4,
+		gatewayIPv6:  gatewayIPv6,
 		recorder:     recorder,
 		localAddrSet: localAddrSet,
 	}
@@ -189,19 +208,35 @@ func (npw *localPortWatcherData) networkHasAddress(ip net.IP) bool {
 
 func (npw *localPortWatcherData) addService(svc *kapi.Service) error {
 	iptRules := []iptRule{}
+	isIPv6Service := utilnet.IsIPv6String(svc.Spec.ClusterIP)
+	gatewayIP := npw.gatewayIPv4
+	if isIPv6Service {
+		gatewayIP = npw.gatewayIPv6
+	}
 	for _, port := range svc.Spec.Ports {
 		if util.ServiceTypeHasNodePort(svc) {
 			if err := util.ValidatePort(port.Protocol, port.NodePort); err != nil {
 				klog.Warningf("Invalid service node port %s, err: %v", port.Name, err)
 				continue
 			}
-			iptRules = append(iptRules, getNodePortIPTRules(port, nil, npw.gatewayIP, port.NodePort)...)
-			klog.V(5).Infof("Will add iptables rule for NodePort: %v and protocol: %v", port.NodePort, port.Protocol)
+
+			if gatewayIP != "" {
+				iptRules = append(iptRules, getNodePortIPTRules(port, nil, gatewayIP, port.NodePort)...)
+				klog.V(5).Infof("Will add iptables rule for NodePort: %v and protocol: %v", port.NodePort, port.Protocol)
+			} else {
+				klog.Warningf("No gateway of appropriate IP family for NodePort Service %s/%s %s",
+					svc.Namespace, svc.Name, svc.Spec.ClusterIP)
+			}
 		}
 		for _, externalIP := range svc.Spec.ExternalIPs {
 			if err := util.ValidatePort(port.Protocol, port.Port); err != nil {
 				klog.Warningf("Invalid service port %s, err: %v", port.Name, err)
 				break
+			}
+			if utilnet.IsIPv6String(externalIP) != isIPv6Service {
+				klog.Warningf("Invalid ExternalIP %s for Service %s/%s with ClusterIP %s",
+					externalIP, svc.Namespace, svc.Name, svc.Spec.ClusterIP)
+				continue
 			}
 			if _, exists := npw.localAddrSet[externalIP]; exists {
 				if !util.IsClusterIPSet(svc) {
@@ -219,10 +254,15 @@ func (npw *localPortWatcherData) addService(svc *kapi.Service) error {
 			} else if npw.networkHasAddress(net.ParseIP(externalIP)) {
 				klog.V(5).Infof("ExternalIP: %s is reachable through one of the interfaces on this node, will skip setup", externalIP)
 			} else {
-				if stdout, stderr, err := util.RunIP("route", "replace", externalIP, "via", npw.gatewayIP, "dev", localnetGatewayNextHopPort, "table", localnetGatewayExternalIDTable); err != nil {
-					klog.Errorf("Error adding routing table entry for ExternalIP %s: stdout: %s, stderr: %s, err: %v", externalIP, stdout, stderr, err)
+				if gatewayIP != "" {
+					if stdout, stderr, err := util.RunIP("route", "replace", externalIP, "via", gatewayIP, "dev", localnetGatewayNextHopPort, "table", localnetGatewayExternalIDTable); err != nil {
+						klog.Errorf("Error adding routing table entry for ExternalIP %s: stdout: %s, stderr: %s, err: %v", externalIP, stdout, stderr, err)
+					} else {
+						klog.V(5).Infof("Successfully added route for ExternalIP: %s", externalIP)
+					}
 				} else {
-					klog.V(5).Infof("Successfully added route for ExternalIP: %s", externalIP)
+					klog.Warningf("No gateway of appropriate IP family for ExternalIP %s for Service %s/%s",
+						externalIP, svc.Namespace, svc.Name)
 				}
 			}
 		}
@@ -233,22 +273,35 @@ func (npw *localPortWatcherData) addService(svc *kapi.Service) error {
 
 func (npw *localPortWatcherData) deleteService(svc *kapi.Service) error {
 	iptRules := []iptRule{}
+	isIPv6Service := utilnet.IsIPv6String(svc.Spec.ClusterIP)
+	gatewayIP := npw.gatewayIPv4
+	if isIPv6Service {
+		gatewayIP = npw.gatewayIPv6
+	}
+	// Note that unlike with addService we just silently ignore IPv4/IPv6 mismatches here
 	for _, port := range svc.Spec.Ports {
 		if util.ServiceTypeHasNodePort(svc) {
-			iptRules = append(iptRules, getNodePortIPTRules(port, nil, npw.gatewayIP, port.NodePort)...)
-			klog.V(5).Infof("Will delete iptables rule for NodePort: %v and protocol: %v", port.NodePort, port.Protocol)
+			if gatewayIP != "" {
+				iptRules = append(iptRules, getNodePortIPTRules(port, nil, gatewayIP, port.NodePort)...)
+				klog.V(5).Infof("Will delete iptables rule for NodePort: %v and protocol: %v", port.NodePort, port.Protocol)
+			}
 		}
 		for _, externalIP := range svc.Spec.ExternalIPs {
+			if utilnet.IsIPv6String(externalIP) != isIPv6Service {
+				continue
+			}
 			if _, exists := npw.localAddrSet[externalIP]; exists {
 				iptRules = append(iptRules, getExternalIPTRules(port, externalIP, svc.Spec.ClusterIP)...)
 				klog.V(5).Infof("Will delete iptables rule for ExternalIP: %s", externalIP)
 			} else if npw.networkHasAddress(net.ParseIP(externalIP)) {
 				klog.V(5).Infof("ExternalIP: %s is reachable through one of the interfaces on this node, will skip cleanup", externalIP)
 			} else {
-				if stdout, stderr, err := util.RunIP("route", "del", externalIP, "via", npw.gatewayIP, "dev", localnetGatewayNextHopPort, "table", localnetGatewayExternalIDTable); err != nil {
-					klog.Errorf("Error delete routing table entry for ExternalIP %s: stdout: %s, stderr: %s, err: %v", externalIP, stdout, stderr, err)
-				} else {
-					klog.V(5).Infof("Successfully deleted route for ExternalIP: %s", externalIP)
+				if gatewayIP != "" {
+					if stdout, stderr, err := util.RunIP("route", "del", externalIP, "via", gatewayIP, "dev", localnetGatewayNextHopPort, "table", localnetGatewayExternalIDTable); err != nil {
+						klog.Errorf("Error delete routing table entry for ExternalIP %s: stdout: %s, stderr: %s, err: %v", externalIP, stdout, stderr, err)
+					} else {
+						klog.V(5).Infof("Successfully deleted route for ExternalIP: %s", externalIP)
+					}
 				}
 			}
 		}
@@ -288,7 +341,13 @@ func (npw *localPortWatcherData) syncServices(serviceInterface []interface{}) {
 			klog.Errorf("Spurious object in syncServices: %v", serviceInterface)
 			continue
 		}
-		keepIPTRules = append(keepIPTRules, getGatewayIPTRules(svc, npw.gatewayIP, nil)...)
+		gatewayIP := npw.gatewayIPv4
+		if utilnet.IsIPv6String(svc.Spec.ClusterIP) {
+			gatewayIP = npw.gatewayIPv6
+		}
+		if gatewayIP != "" {
+			keepIPTRules = append(keepIPTRules, getGatewayIPTRules(svc, gatewayIP, nil)...)
+		}
 		keepRoutes = append(keepRoutes, svc.Spec.ExternalIPs...)
 	}
 	for _, chain := range []string{iptableNodePortChain, iptableExternalIPChain} {
