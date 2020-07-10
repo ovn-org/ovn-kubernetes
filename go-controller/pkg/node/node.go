@@ -53,15 +53,15 @@ func setupOVNNode(node *kapi.Node) error {
 		return fmt.Errorf("failed to obtain hostname from node %q: %v", node.Name, err)
 	}
 
-	nodeIP := config.Default.EncapIP
-	if nodeIP == "" {
-		nodeIP, err = util.GetNodeIP(node)
+	encapIP := config.Default.EncapIP
+	if encapIP == "" {
+		encapIP, err = util.GetNodePrimaryIP(node)
 		if err != nil {
 			return fmt.Errorf("failed to obtain local IP from node %q: %v", node.Name, err)
 		}
 	} else {
-		if ip := net.ParseIP(nodeIP); ip == nil {
-			return fmt.Errorf("invalid encapsulation IP provided %q", nodeIP)
+		if ip := net.ParseIP(encapIP); ip == nil {
+			return fmt.Errorf("invalid encapsulation IP provided %q", encapIP)
 		}
 	}
 
@@ -69,7 +69,7 @@ func setupOVNNode(node *kapi.Node) error {
 		"Open_vSwitch",
 		".",
 		fmt.Sprintf("external_ids:ovn-encap-type=%s", config.Default.EncapType),
-		fmt.Sprintf("external_ids:ovn-encap-ip=%s", nodeIP),
+		fmt.Sprintf("external_ids:ovn-encap-ip=%s", encapIP),
 		fmt.Sprintf("external_ids:ovn-remote-probe-interval=%d",
 			config.Default.InactivityProbe),
 		fmt.Sprintf("external_ids:ovn-openflow-probe-interval=%d",
@@ -157,7 +157,7 @@ func isOVNControllerReady(name string) (bool, error) {
 	return true, nil
 }
 
-// Start learns the subnet assigned to it by the master controller
+// Start learns the subnets assigned to it by the master controller
 // and calls the SetupNode script which establishes the logical switch
 func (n *OvnNode) Start() error {
 	var err error

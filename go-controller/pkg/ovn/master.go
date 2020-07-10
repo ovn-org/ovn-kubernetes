@@ -127,14 +127,16 @@ func (oc *Controller) Start(kClient kubernetes.Interface, nodeName string) error
 func (oc *Controller) StartClusterMaster(masterNodeName string) error {
 	// The gateway router need to be connected to the distributed router via a per-node join switch.
 	// We need a subnet allocator that allocates subnet for this per-node join switch. Use the 100.64.0.0/16
-	// or fd98::/64 network range with host bits set to 3. The subnetallocator will start allocating subnet that has upto 6
-	// host IPs)
-	joinSubnet := config.V4JoinSubnet
-	if config.IPv6Mode {
-		joinSubnet = config.V6JoinSubnet
+	// or fd98::/64 network range with host bits set to 3. The subnetallocator will allocate a subnet that
+	// has up to 6 host IPs)
+	if config.IPv4Mode {
+		_, joinSubnetCIDR, _ := net.ParseCIDR(config.V4JoinSubnet)
+		_ = oc.joinSubnetAllocator.AddNetworkRange(joinSubnetCIDR, 3)
 	}
-	_, joinSubnetCIDR, _ := net.ParseCIDR(joinSubnet)
-	_ = oc.joinSubnetAllocator.AddNetworkRange(joinSubnetCIDR, 3)
+	if config.IPv6Mode {
+		_, joinSubnetCIDR, _ := net.ParseCIDR(config.V6JoinSubnet)
+		_ = oc.joinSubnetAllocator.AddNetworkRange(joinSubnetCIDR, 3)
+	}
 
 	// FIXME DUAL-STACK SUPPORT
 	// initialize the subnet required for DNAT and SNAT ip for the shared gateway mode
@@ -875,12 +877,6 @@ func (oc *Controller) syncNodes(nodes []interface{}) {
 	// watchNodes() will be called for all existing nodes at startup anyway.
 	// Note that this list will include the 'join' cluster switch, which we
 	// do not want to delete.
-	var subnetAttr string
-	if config.IPv6Mode {
-		subnetAttr = "ipv6_prefix"
-	} else {
-		subnetAttr = "subnet"
-	}
 
 	chassisData, stderr, err := util.RunOVNSbctl("--data=bare", "--no-heading",
 		"--columns=name,hostname", "--format=json", "list", "Chassis")
@@ -902,8 +898,7 @@ func (oc *Controller) syncNodes(nodes []interface{}) {
 	}
 
 	nodeSwitches, stderr, err := util.RunOVNNbctl("--data=bare", "--no-heading",
-		"--columns=name,other-config", "find", "logical_switch",
-		"other-config:"+subnetAttr+"!=_")
+		"--columns=name,other-config", "find", "logical_switch")
 	if err != nil {
 		klog.Errorf("Failed to get node logical switches: stderr: %q, error: %v",
 			stderr, err)
@@ -947,6 +942,10 @@ func (oc *Controller) syncNodes(nodes []interface{}) {
 				subnets = append(subnets, subnet)
 			}
 		}
+		if len(subnets) == 0 {
+			continue
+		}
+
 		var tmp NodeSubnets
 		nodeSubnets, ok := NodeSubnetsMap[nodeName]
 		if !ok {

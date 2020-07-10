@@ -164,7 +164,7 @@ func defaultFakeExec(nodeSubnet, nodeName string, sctpSupport bool) (*ovntest.Fa
 
 	fexec.AddFakeCmdsNoOutputNoError([]string{
 		"ovn-sbctl --timeout=15 --data=bare --no-heading --columns=name,hostname --format=json list Chassis",
-		"ovn-nbctl --timeout=15 --data=bare --no-heading --columns=name,other-config find logical_switch other-config:subnet!=_",
+		"ovn-nbctl --timeout=15 --data=bare --no-heading --columns=name,other-config find logical_switch",
 	})
 	fexec.AddFakeCmdsNoOutputNoError([]string{
 		"ovn-nbctl --timeout=15 --if-exists lrp-del " + routerToSwitchPrefix + nodeName + " -- lrp-add ovn_cluster_router " + routerToSwitchPrefix + nodeName + " " + lrpMAC + " " + gwCIDR,
@@ -520,7 +520,7 @@ var _ = Describe("Master Operations", func() {
 				"ovn-sbctl --timeout=15 --data=bare --no-heading --columns=name,hostname --format=json list Chassis",
 			})
 			fexec.AddFakeCmd(&ovntest.ExpectedCmd{
-				Cmd: "ovn-nbctl --timeout=15 --data=bare --no-heading --columns=name,other-config find logical_switch other-config:subnet!=_",
+				Cmd: "ovn-nbctl --timeout=15 --data=bare --no-heading --columns=name,other-config find logical_switch",
 				// Return two nodes
 				Output: fmt.Sprintf(`%s
 subnet=%s
@@ -747,7 +747,7 @@ var _ = Describe("Gateway Init Operations", func() {
 
 			fexec.AddFakeCmdsNoOutputNoError([]string{
 				"ovn-sbctl --timeout=15 --data=bare --no-heading --columns=name,hostname --format=json list Chassis",
-				"ovn-nbctl --timeout=15 --data=bare --no-heading --columns=name,other-config find logical_switch other-config:subnet!=_",
+				"ovn-nbctl --timeout=15 --data=bare --no-heading --columns=name,other-config find logical_switch",
 			})
 
 			fexec.AddFakeCmdsNoOutputNoError([]string{
@@ -932,7 +932,7 @@ var _ = Describe("Gateway Init Operations", func() {
 
 			fexec.AddFakeCmdsNoOutputNoError([]string{
 				"ovn-sbctl --timeout=15 --data=bare --no-heading --columns=name,hostname --format=json list Chassis",
-				"ovn-nbctl --timeout=15 --data=bare --no-heading --columns=name,other-config find logical_switch other-config:subnet!=_",
+				"ovn-nbctl --timeout=15 --data=bare --no-heading --columns=name,other-config find logical_switch",
 			})
 
 			fexec.AddFakeCmdsNoOutputNoError([]string{
