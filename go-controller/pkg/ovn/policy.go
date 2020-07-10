@@ -12,6 +12,7 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/client-go/tools/cache"
 	"k8s.io/klog"
+	utilnet "k8s.io/utils/net"
 )
 
 type namespacePolicy struct {
@@ -95,7 +96,11 @@ func (oc *Controller) syncNetworkPolicies(networkPolicies []interface{}) {
 }
 
 func addAllowACLFromNode(logicalSwitch string, mgmtPortIP net.IP) error {
-	match := fmt.Sprintf("%s.src==%s", ipMatch(), mgmtPortIP.String())
+	ipFamily := "ip4"
+	if utilnet.IsIPv6(mgmtPortIP) {
+		ipFamily = "ip6"
+	}
+	match := fmt.Sprintf("%s.src==%s", ipFamily, mgmtPortIP.String())
 	_, stderr, err := util.RunOVNNbctl("--may-exist", "acl-add", logicalSwitch,
 		"to-lport", defaultAllowPriority, match, "allow-related")
 	if err != nil {
