@@ -426,6 +426,18 @@ var _ = Describe("Gateway Init Operations", func() {
 					"OVN-KUBE-NODEPORT": []string{},
 				},
 			}
+
+			// OCP HACK: Block MCS Access. https://github.com/openshift/ovn-kubernetes/pull/170
+			expectedTables["filter"]["FORWARD"] = append(expectedTables["filter"]["FORWARD"],
+				"-p tcp -m tcp --dport 22624 -j REJECT",
+				"-p tcp -m tcp --dport 22623 -j REJECT",
+			)
+			expectedTables["filter"]["OUTPUT"] = append(expectedTables["filter"]["OUTPUT"],
+				"-p tcp -m tcp --dport 22624 -j REJECT",
+				"-p tcp -m tcp --dport 22623 -j REJECT",
+			)
+			// END OCP HACK
+
 			Expect(ipt.MatchState(expectedTables)).NotTo(HaveOccurred())
 			return nil
 		}
