@@ -32,7 +32,7 @@ const DefaultAPIServer = "http://localhost:8443"
 // IP address range from which subnet is allocated for per-node join switch
 const (
 	V4JoinSubnet = "100.64.0.0/16"
-	V6JoinSubnet = "fd98::/64"
+	V6JoinSubnet = "fd98::/48"
 )
 
 // Default IANA-assigned UDP port number for VXLAN

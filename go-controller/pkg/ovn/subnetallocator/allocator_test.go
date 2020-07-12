@@ -8,9 +8,9 @@ import (
 	ovntest "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/testing"
 )
 
-func newSubnetAllocator(clusterCIDR string, hostBits uint32) (*SubnetAllocator, error) {
+func newSubnetAllocator(clusterCIDR string, hostSubnetLen int) (*SubnetAllocator, error) {
 	sna := NewSubnetAllocator()
-	err := sna.AddNetworkRange(ovntest.MustParseIPNet(clusterCIDR), hostBits)
+	err := sna.AddNetworkRange(ovntest.MustParseIPNet(clusterCIDR), hostSubnetLen)
 	return sna, err
 }
 
@@ -65,7 +65,7 @@ func allocateNotExpected(sna *SubnetAllocator, n int) error {
 
 // 10.1.ssssssss.hhhhhhhh
 func TestAllocateSubnetIPv4(t *testing.T) {
-	sna, err := newSubnetAllocator("10.1.0.0/16", 8)
+	sna, err := newSubnetAllocator("10.1.0.0/16", 24)
 	if err != nil {
 		t.Fatal("Failed to initialize subnet allocator: ", err)
 	}
@@ -110,7 +110,7 @@ func TestAllocateSubnetIPv6(t *testing.T) {
 
 // 10.1.sssssshh.hhhhhhhh
 func TestAllocateSubnetLargeHostBitsIPv4(t *testing.T) {
-	sna, err := newSubnetAllocator("10.1.0.0/16", 10)
+	sna, err := newSubnetAllocator("10.1.0.0/16", 22)
 	if err != nil {
 		t.Fatal("Failed to initialize subnet allocator: ", err)
 	}
@@ -127,7 +127,7 @@ func TestAllocateSubnetLargeHostBitsIPv4(t *testing.T) {
 
 // fd01:0:0:SSSH:HHHH:HHHH:HHHH:HHHH
 func TestAllocateSubnetLargeHostBitsIPv6(t *testing.T) {
-	sna, err := newSubnetAllocator("fd01::/48", 68)
+	sna, err := newSubnetAllocator("fd01::/48", 60)
 	if err != nil {
 		t.Fatal("Failed to initialize subnet allocator: ", err)
 	}
@@ -143,7 +143,7 @@ func TestAllocateSubnetLargeHostBitsIPv6(t *testing.T) {
 
 // 10.1.ssssssss.sshhhhhh
 func TestAllocateSubnetLargeSubnetBitsIPv4(t *testing.T) {
-	sna, err := newSubnetAllocator("10.1.0.0/16", 6)
+	sna, err := newSubnetAllocator("10.1.0.0/16", 26)
 	if err != nil {
 		t.Fatal("Failed to initialize subnet allocator: ", err)
 	}
@@ -176,7 +176,7 @@ func TestAllocateSubnetLargeSubnetBitsIPv4(t *testing.T) {
 
 // fd01:0:0:SSSS:SSSS:SHHH:HHHH:HHHH
 func TestAllocateSubnetLargeSubnetBitsIPv6(t *testing.T) {
-	sna, err := newSubnetAllocator("fd01::/48", 44)
+	sna, err := newSubnetAllocator("fd01::/48", 84)
 	if err != nil {
 		t.Fatal("Failed to initialize subnet allocator: ", err)
 	}
@@ -207,7 +207,7 @@ func TestAllocateSubnetLargeSubnetBitsIPv6(t *testing.T) {
 
 // 10.000000ss.sssssshh.hhhhhhhh
 func TestAllocateSubnetOverlappingIPv4(t *testing.T) {
-	sna, err := newSubnetAllocator("10.0.0.0/14", 10)
+	sna, err := newSubnetAllocator("10.0.0.0/14", 22)
 	if err != nil {
 		t.Fatal("Failed to initialize subnet allocator: ", err)
 	}
@@ -269,29 +269,29 @@ func TestAllocateSubnetNoSubnetBitsIPv6(t *testing.T) {
 }
 
 func TestAllocateSubnetInvalidHostBitsOrCIDR(t *testing.T) {
-	_, err := newSubnetAllocator("10.1.0.0/16", 18)
+	_, err := newSubnetAllocator("10.1.0.0/16", 14)
 	if err == nil {
 		t.Fatal("Unexpectedly succeeded in initializing subnet allocator")
 	}
 
-	_, err = newSubnetAllocator("10.1.0.0/16", 0)
+	_, err = newSubnetAllocator("10.1.0.0/16", 32)
 	if err == nil {
 		t.Fatal("Unexpectedly succeeded in initializing subnet allocator")
 	}
 
-	_, err = newSubnetAllocator("fd01::/64", 66)
+	_, err = newSubnetAllocator("fd01::/64", 62)
 	if err == nil {
 		t.Fatal("Unexpectedly succeeded in initializing subnet allocator")
 	}
 
-	_, err = newSubnetAllocator("fd01::/64", 0)
+	_, err = newSubnetAllocator("fd01::/64", 128)
 	if err == nil {
 		t.Fatal("Unexpectedly succeeded in initializing subnet allocator")
 	}
 }
 
 func TestMarkAllocatedNetwork(t *testing.T) {
-	sna, err := newSubnetAllocator("10.1.0.0/16", 14)
+	sna, err := newSubnetAllocator("10.1.0.0/16", 18)
 	if err != nil {
 		t.Fatal("Failed to initialize subnet allocator: ", err)
 	}
@@ -326,7 +326,7 @@ func TestMarkAllocatedNetwork(t *testing.T) {
 }
 
 func TestAllocateReleaseSubnet(t *testing.T) {
-	sna, err := newSubnetAllocator("10.1.0.0/16", 14)
+	sna, err := newSubnetAllocator("10.1.0.0/16", 18)
 	if err != nil {
 		t.Fatal("Failed to initialize subnet allocator: ", err)
 	}
@@ -370,11 +370,11 @@ func TestAllocateReleaseSubnet(t *testing.T) {
 }
 
 func TestMultipleSubnets(t *testing.T) {
-	sna, err := newSubnetAllocator("10.1.0.0/16", 14)
+	sna, err := newSubnetAllocator("10.1.0.0/16", 18)
 	if err != nil {
 		t.Fatal("Failed to initialize subnet allocator: ", err)
 	}
-	err = sna.AddNetworkRange(ovntest.MustParseIPNet("10.2.0.0/16"), 14)
+	err = sna.AddNetworkRange(ovntest.MustParseIPNet("10.2.0.0/16"), 18)
 	if err != nil {
 		t.Fatal("Failed to add network range: ", err)
 	}
@@ -417,11 +417,11 @@ func TestMultipleSubnets(t *testing.T) {
 }
 
 func TestDualStack(t *testing.T) {
-	sna, err := newSubnetAllocator("10.1.0.0/16", 14)
+	sna, err := newSubnetAllocator("10.1.0.0/16", 18)
 	if err != nil {
 		t.Fatal("Failed to initialize subnet allocator: ", err)
 	}
-	err = sna.AddNetworkRange(ovntest.MustParseIPNet("10.2.0.0/16"), 14)
+	err = sna.AddNetworkRange(ovntest.MustParseIPNet("10.2.0.0/16"), 18)
 	if err != nil {
 		t.Fatal("Failed to add network range: ", err)
 	}
