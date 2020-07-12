@@ -194,11 +194,17 @@ func newFakeAddressSet(name string, ips []net.IP, removeFn removeFunc) *fakeAddr
 }
 
 func (as *fakeAddressSets) GetIPv4HashName() string {
-	return as.ipv4.getHashName()
+	if as.ipv4 != nil {
+		return as.ipv4.getHashName()
+	}
+	return ""
 }
 
 func (as *fakeAddressSets) GetIPv6HashName() string {
-	return as.ipv6.getHashName()
+	if as.ipv6 != nil {
+		return as.ipv6.getHashName()
+	}
+	return ""
 }
 
 func (as *fakeAddressSets) GetName() string {
