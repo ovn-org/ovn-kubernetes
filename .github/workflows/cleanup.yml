@@ -5,6 +5,7 @@ on:
 
 jobs:
   cleanup:
+    if: github.repository == 'ovn-org/ovn-kubernetes'
     runs-on: ubuntu-latest
     steps:
       - name: Check out code
