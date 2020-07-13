@@ -167,11 +167,11 @@ var _ = Describe("Informer Event Handler Tests", func() {
 		)
 
 		Eventually(func() (bool, error) {
-			ns, err := k.CoreV1().Namespaces().Get(context.TODO(), namespace, metav1.GetOptions{})
+			pod, err := k.CoreV1().Pods(namespace).Get(context.TODO(), "foo", metav1.GetOptions{})
 			if err != nil {
 				return false, err
 			}
-			return ns != nil, nil
+			return pod != nil, nil
 		}, 2).Should(BeTrue())
 
 		pod.Annotations = map[string]string{"bar": "baz"}
@@ -235,11 +235,11 @@ var _ = Describe("Informer Event Handler Tests", func() {
 		)
 
 		Eventually(func() (bool, error) {
-			ns, err := k.CoreV1().Namespaces().Get(context.TODO(), namespace, metav1.GetOptions{})
+			pod, err := k.CoreV1().Pods(namespace).Get(context.TODO(), "foo", metav1.GetOptions{})
 			if err != nil {
 				return false, err
 			}
-			return ns != nil, nil
+			return pod != nil, nil
 		}, 2).Should(BeTrue())
 
 		err := k.CoreV1().Pods(namespace).Delete(context.TODO(), "foo", *metav1.NewDeleteOptions(0))
@@ -301,11 +301,11 @@ var _ = Describe("Informer Event Handler Tests", func() {
 		)
 
 		Eventually(func() (bool, error) {
-			ns, err := k.CoreV1().Namespaces().Get(context.TODO(), namespace, metav1.GetOptions{})
+			pod, err := k.CoreV1().Pods(namespace).Get(context.TODO(), "foo", metav1.GetOptions{})
 			if err != nil {
 				return false, err
 			}
-			return ns != nil, nil
+			return pod != nil, nil
 		}, 2).Should(BeTrue())
 
 		pod.Annotations = map[string]string{"bar": "baz"}
