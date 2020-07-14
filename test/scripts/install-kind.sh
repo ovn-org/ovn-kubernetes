@@ -5,13 +5,23 @@ set -ex
 export GO111MODULE="on"
 
 pushd $GOPATH/src/k8s.io/kubernetes/
-sudo ln ./_output/local/go/bin/kubectl /usr/local/bin/kubectl
-sudo ln ./_output/local/go/bin/e2e.test /usr/local/bin/e2e.test
+if [[ ! -f /usr/local/bin/kubectl ]]; then
+  sudo ln ./_output/local/go/bin/kubectl /usr/local/bin/kubectl
+fi
+if [[ ! -f /usr/local/bin/e2e.test ]]; then
+  sudo ln ./_output/local/go/bin/e2e.test /usr/local/bin/e2e.test
+fi
 popd
 
-mkdir -p $GOPATH/bin
-wget -O $GOPATH/bin/kind https://github.com/kubernetes-sigs/kind/releases/download/v0.7.0/kind-linux-amd64
-chmod +x $GOPATH/bin/kind
+if [[ -n "$(go env GOBIN)" ]]; then
+  INSTALL_PATH=$(go env GOBIN)
+else
+  mkdir -p $GOPATH/bin
+  INSTALL_PATH=$GOPATH/bin
+fi
+
+curl -Lo $INSTALL_PATH/kind https://github.com/kubernetes-sigs/kind/releases/download/v0.7.0/kind-linux-amd64
+chmod +x $INSTALL_PATH/kind
 pushd ../contrib
 ./kind.sh
 popd
