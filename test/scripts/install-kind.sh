@@ -20,7 +20,7 @@ else
   INSTALL_PATH=$GOPATH/bin
 fi
 
-curl -Lo $INSTALL_PATH/kind https://github.com/kubernetes-sigs/kind/releases/download/v0.7.0/kind-linux-amd64
+curl -Lo $INSTALL_PATH/kind https://github.com/kubernetes-sigs/kind/releases/download/v0.8.1/kind-linux-amd64
 chmod +x $INSTALL_PATH/kind
 pushd ../contrib
 ./kind.sh
