@@ -126,16 +126,17 @@ func (oc *Controller) Start(kClient kubernetes.Interface, nodeName string) error
 //  If true, then either quit or perform a complete reconfiguration of the cluster (recreate switches/routers with new subnet values)
 func (oc *Controller) StartClusterMaster(masterNodeName string) error {
 	// The gateway router need to be connected to the distributed router via a per-node join switch.
-	// We need a subnet allocator that allocates subnet for this per-node join switch. Use the 100.64.0.0/16
-	// or fd98::/64 network range with host bits set to 3. The subnetallocator will allocate a subnet that
-	// has up to 6 host IPs)
+	// We need a subnet allocator that allocates subnet for this per-node join switch.
 	if config.IPv4Mode {
+		// Use 100.64.0.0/16 with /29 subnets, allowing 8192 nodes with 6 IPs on each. (The join
+		// switches currently only have 2 IPs on them, so this leaves some room for expansion.)
 		_, joinSubnetCIDR, _ := net.ParseCIDR(config.V4JoinSubnet)
-		_ = oc.joinSubnetAllocator.AddNetworkRange(joinSubnetCIDR, 3)
+		_ = oc.joinSubnetAllocator.AddNetworkRange(joinSubnetCIDR, 29)
 	}
 	if config.IPv6Mode {
+		// Use fd98::/48 with /64 subnets
 		_, joinSubnetCIDR, _ := net.ParseCIDR(config.V6JoinSubnet)
-		_ = oc.joinSubnetAllocator.AddNetworkRange(joinSubnetCIDR, 3)
+		_ = oc.joinSubnetAllocator.AddNetworkRange(joinSubnetCIDR, 64)
 	}
 
 	// FIXME DUAL-STACK SUPPORT
@@ -152,7 +153,7 @@ func (oc *Controller) StartClusterMaster(masterNodeName string) error {
 		return err
 	}
 	for _, clusterEntry := range config.Default.ClusterSubnets {
-		err := oc.masterSubnetAllocator.AddNetworkRange(clusterEntry.CIDR, clusterEntry.HostBits())
+		err := oc.masterSubnetAllocator.AddNetworkRange(clusterEntry.CIDR, clusterEntry.HostSubnetLength)
 		if err != nil {
 			return err
 		}

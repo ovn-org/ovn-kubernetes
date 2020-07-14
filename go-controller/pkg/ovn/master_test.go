@@ -612,7 +612,7 @@ subnet=%s
 			clusterController.SCTPLoadBalancerUUID = sctpLBUUID
 			clusterController.SCTPSupport = true
 
-			_ = clusterController.joinSubnetAllocator.AddNetworkRange(ovntest.MustParseIPNet("100.64.0.0/16"), 3)
+			_ = clusterController.joinSubnetAllocator.AddNetworkRange(ovntest.MustParseIPNet("100.64.0.0/16"), 29)
 
 			// Let the real code run and ensure OVN database sync
 			err = clusterController.WatchNodes()
@@ -833,7 +833,7 @@ var _ = Describe("Gateway Init Operations", func() {
 			clusterController.SCTPLoadBalancerUUID = sctpLBUUID
 			clusterController.SCTPSupport = true
 
-			_ = clusterController.joinSubnetAllocator.AddNetworkRange(ovntest.MustParseIPNet("100.64.0.0/16"), 3)
+			_ = clusterController.joinSubnetAllocator.AddNetworkRange(ovntest.MustParseIPNet("100.64.0.0/16"), 29)
 
 			// Let the real code run and ensure OVN database sync
 			err = clusterController.WatchNodes()
@@ -1025,7 +1025,7 @@ var _ = Describe("Gateway Init Operations", func() {
 			clusterController.SCTPLoadBalancerUUID = sctpLBUUID
 			clusterController.SCTPSupport = true
 
-			_ = clusterController.joinSubnetAllocator.AddNetworkRange(ovntest.MustParseIPNet("100.64.0.0/16"), 3)
+			_ = clusterController.joinSubnetAllocator.AddNetworkRange(ovntest.MustParseIPNet("100.64.0.0/16"), 29)
 			clusterController.nodeLocalNatIPAllocator, _ = ipallocator.NewCIDRRange(ovntest.MustParseIPNet(util.V4NodeLocalNatSubnet))
 
 			// Let the real code run and ensure OVN database sync

@@ -21,11 +21,11 @@ func NewSubnetAllocator() *SubnetAllocator {
 	return &SubnetAllocator{}
 }
 
-func (sna *SubnetAllocator) AddNetworkRange(network *net.IPNet, hostBits uint32) error {
+func (sna *SubnetAllocator) AddNetworkRange(network *net.IPNet, hostSubnetLen int) error {
 	sna.Lock()
 	defer sna.Unlock()
 
-	snr, err := newSubnetAllocatorRange(network, hostBits)
+	snr, err := newSubnetAllocatorRange(network, hostSubnetLen)
 	if err != nil {
 		return err
 	}
@@ -118,14 +118,15 @@ type subnetAllocatorRange struct {
 	rightMask  uint32
 }
 
-func newSubnetAllocatorRange(network *net.IPNet, hostBits uint32) (*subnetAllocatorRange, error) {
-	netMaskSize, addrLen := network.Mask.Size()
-	if hostBits == 0 {
+func newSubnetAllocatorRange(network *net.IPNet, hostSubnetLen int) (*subnetAllocatorRange, error) {
+	clusterCIDRLen, addrLen := network.Mask.Size()
+	if hostSubnetLen >= addrLen {
 		return nil, fmt.Errorf("host capacity cannot be zero.")
-	} else if hostBits > uint32(addrLen-netMaskSize) {
+	} else if hostSubnetLen < clusterCIDRLen {
 		return nil, fmt.Errorf("subnet capacity cannot be larger than number of networks available.")
 	}
-	subnetBits := uint32(addrLen-netMaskSize) - hostBits
+	hostBits := uint32(addrLen - hostSubnetLen)
+	subnetBits := uint32(hostSubnetLen - clusterCIDRLen)
 
 	snr := &subnetAllocatorRange{
 		network:    network,

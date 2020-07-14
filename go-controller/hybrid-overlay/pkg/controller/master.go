@@ -95,7 +95,7 @@ func NewMaster(kube kube.Interface,
 
 	// Add our hybrid overlay CIDRs to the subnetallocator
 	for _, clusterEntry := range config.HybridOverlay.ClusterSubnets {
-		err := m.allocator.AddNetworkRange(clusterEntry.CIDR, 32-clusterEntry.HostSubnetLength)
+		err := m.allocator.AddNetworkRange(clusterEntry.CIDR, clusterEntry.HostSubnetLength)
 		if err != nil {
 			return nil, err
 		}
