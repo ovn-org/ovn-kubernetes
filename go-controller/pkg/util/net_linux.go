@@ -189,8 +189,8 @@ func LinkRoutesAdd(link netlink.Link, gwIP net.IP, subnets []*net.IPNet) error {
 
 // LinkRouteExists checks for existence of routes for the given subnet through gwIPStr
 func LinkRouteExists(link netlink.Link, gwIP net.IP, subnet *net.IPNet) (bool, error) {
-	routeFilter := &netlink.Route{Dst: subnet}
-	filterMask := netlink.RT_FILTER_DST
+	routeFilter := &netlink.Route{Dst: subnet, LinkIndex: link.Attrs().Index}
+	filterMask := netlink.RT_FILTER_DST | netlink.RT_FILTER_OIF
 	routes, err := netLinkOps.RouteListFiltered(getFamily(gwIP), routeFilter, filterMask)
 	if err != nil {
 		return false, fmt.Errorf("failed to get routes for subnet %s", subnet.String())
