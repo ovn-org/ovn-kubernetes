@@ -50,7 +50,7 @@ func addNodeSetupCmds(fexec *ovntest.FakeExec, nodeName string) (string, string)
 		Output: testMgmtMAC,
 	})
 	fexec.AddFakeCmdsNoOutputNoError([]string{
-		"ovs-vsctl --timeout=15 --may-exist add-br br-ext -- set Bridge br-ext fail_mode=secure",
+		"ovs-vsctl --timeout=15 --may-exist add-br br-ext -- set Bridge br-ext fail_mode=secure -- set Interface br-ext mtu_request=1400",
 	})
 	fexec.AddFakeCmd(&ovntest.ExpectedCmd{
 		Cmd:    "ovs-vsctl --timeout=15 --if-exists get interface br-ext mac_in_use",
