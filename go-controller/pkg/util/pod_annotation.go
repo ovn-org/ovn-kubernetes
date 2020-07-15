@@ -138,7 +138,7 @@ func MarshalPodAnnotation(podInfo *PodAnnotation) (map[string]string, error) {
 func UnmarshalPodAnnotation(annotations map[string]string) (*PodAnnotation, error) {
 	ovnAnnotation, ok := annotations[OvnPodAnnotationName]
 	if !ok {
-		return nil, fmt.Errorf("could not find OVN pod annotation in %v", annotations)
+		return nil, newAnnotationNotSetError("could not find OVN pod annotation in %v", annotations)
 	}
 
 	podNetworks := make(map[string]podAnnotation)

@@ -621,12 +621,16 @@ func (oc *Controller) WatchNodes() error {
 
 			err = oc.syncNodeManagementPort(node, hostSubnets)
 			if err != nil {
-				klog.Warningf("Error creating management port for node %s: %v", node.Name, err)
+				if !util.IsAnnotationNotSetError(err) {
+					klog.Warningf("Error creating management port for node %s: %v", node.Name, err)
+				}
 				mgmtPortFailed.Store(node.Name, true)
 			}
 
 			if err := oc.syncNodeGateway(node, hostSubnets); err != nil {
-				klog.Warningf(err.Error())
+				if !util.IsAnnotationNotSetError(err) {
+					klog.Warningf(err.Error())
+				}
 				gatewaysFailed.Store(node.Name, true)
 			}
 		},
@@ -658,7 +662,9 @@ func (oc *Controller) WatchNodes() error {
 			if failed || macAddressChanged(oldNode, node) {
 				err := oc.syncNodeManagementPort(node, hostSubnets)
 				if err != nil {
-					klog.Errorf("Error updating management port for node %s: %v", node.Name, err)
+					if !util.IsAnnotationNotSetError(err) {
+						klog.Errorf("Error updating management port for node %s: %v", node.Name, err)
+					}
 					mgmtPortFailed.Store(node.Name, true)
 				} else {
 					mgmtPortFailed.Delete(node.Name)
@@ -671,7 +677,9 @@ func (oc *Controller) WatchNodes() error {
 			if failed || gatewayChanged(oldNode, node) {
 				err := oc.syncNodeGateway(node, nil)
 				if err != nil {
-					klog.Errorf(err.Error())
+					if !util.IsAnnotationNotSetError(err) {
+						klog.Errorf(err.Error())
+					}
 					gatewaysFailed.Store(node.Name, true)
 				} else {
 					gatewaysFailed.Delete(node.Name)

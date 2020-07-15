@@ -148,4 +148,34 @@ var _ = Describe("Node annotation tests", func() {
 			Expect(l3gc).To(Equal(tc.out))
 		}
 	})
+
+	It("returns a distinguishable error when a node annotation is not set", func() {
+		testNode := &v1.Node{ObjectMeta: metav1.ObjectMeta{
+			Name:        "test-node",
+			Annotations: make(map[string]string),
+		}}
+
+		cfg, err := ParseNodeL3GatewayAnnotation(testNode)
+		Expect(cfg).To(BeNil())
+		Expect(err).To(HaveOccurred())
+		Expect(IsAnnotationNotSetError(err)).To(BeTrue())
+
+		mac, err := ParseNodeManagementPortMACAddress(testNode)
+		Expect(mac).To(BeNil())
+		Expect(err).To(HaveOccurred())
+		Expect(IsAnnotationNotSetError(err)).To(BeTrue())
+
+		testNode.Annotations[ovnNodeL3GatewayConfig] = "blah"
+		testNode.Annotations[ovnNodeManagementPortMacAddress] = "blah"
+
+		cfg, err = ParseNodeL3GatewayAnnotation(testNode)
+		Expect(cfg).To(BeNil())
+		Expect(err).To(HaveOccurred())
+		Expect(IsAnnotationNotSetError(err)).To(BeFalse())
+
+		mac, err = ParseNodeManagementPortMACAddress(testNode)
+		Expect(mac).To(BeNil())
+		Expect(err).To(HaveOccurred())
+		Expect(IsAnnotationNotSetError(err)).To(BeFalse())
+	})
 })
