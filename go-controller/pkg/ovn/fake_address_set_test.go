@@ -283,6 +283,8 @@ func (as *fakeAddressSet) addIP(ip net.IP) error {
 }
 
 func (as *fakeAddressSet) deleteIP(ip net.IP) error {
+	as.Lock()
+	defer as.Unlock()
 	Expect(as.destroyed).To(BeFalse())
 	delete(as.ips, ip.String())
 	return nil
