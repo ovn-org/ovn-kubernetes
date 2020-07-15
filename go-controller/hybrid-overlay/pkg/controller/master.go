@@ -201,14 +201,13 @@ func (m *MasterController) handleOverlayPort(node *kapi.Node, annotator kube.Ann
 		return nil
 	}
 
-	// FIXME DUAL-STACK
-	subnet := subnets[0]
-
 	portName := util.GetHybridOverlayPortName(node.Name)
 	portMAC, portIPs, _ := util.GetPortAddresses(portName)
 	if portMAC == nil || portIPs == nil {
 		if portIPs == nil {
-			portIPs = append(portIPs, util.GetNodeHybridOverlayIfAddr(subnet).IP)
+			for _, subnet := range subnets {
+				portIPs = append(portIPs, util.GetNodeHybridOverlayIfAddr(subnet).IP)
+			}
 		}
 		if portMAC == nil {
 			for _, ip := range portIPs {
@@ -228,9 +227,10 @@ func (m *MasterController) handleOverlayPort(node *kapi.Node, annotator kube.Ann
 			return fmt.Errorf("failed to add hybrid overlay port for node %s"+
 				", stderr:%s: %v", node.Name, stderr, err)
 		}
-
-		if err := util.UpdateNodeSwitchExcludeIPs(node.Name, subnet); err != nil {
-			return err
+		for _, subnet := range subnets {
+			if err := util.UpdateNodeSwitchExcludeIPs(node.Name, subnet); err != nil {
+				return err
+			}
 		}
 	}
 	if err := annotator.Set(types.HybridOverlayDRMAC, portMAC.String()); err != nil {
