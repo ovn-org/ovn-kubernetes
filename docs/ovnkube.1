@@ -111,6 +111,9 @@ Client certificate that the client should use for talking to the OVN database.  
 \fB\--nb-client-cacert\fR string
 CA certificate that the client should use for talking to the OVN database.  Leave empty to use local unix socket.
 .TP
+\fB\--nb-cert-common-name\fR string
+The Common Name of the certificate used for TLS server certificate verification.
+.TP
 \fB\--sb-address\fR string
 IP address and port of the OVN southbound database (eg, ssl:1.2.3.4:6642).  Leave empty to use a local unix socket.
 .TP
@@ -122,6 +125,9 @@ Client certificate that the client should use for talking to the OVN database.  
 .TP
 \fB\--sb-client-cacert\fR string
 CA certificate that the client should use for talking to the OVN database.  Leave empty to use local unix socket.
+.TP
+\fB\--sb-cert-common-name\fR string
+The Common Name of the certificate used for TLS server certificate verification.
 .TP
 \fB\--help\fR, \fB\-h\fR
 Show help.

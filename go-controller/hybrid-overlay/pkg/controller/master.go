@@ -5,6 +5,7 @@ import (
 	"net"
 	"time"
 
+	goovn "github.com/ebay/go-ovn"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/hybrid-overlay/pkg/types"
 	hotypes "github.com/ovn-org/ovn-kubernetes/go-controller/hybrid-overlay/pkg/types"
 	houtil "github.com/ovn-org/ovn-kubernetes/go-controller/hybrid-overlay/pkg/util"
@@ -32,6 +33,8 @@ type MasterController struct {
 	nodeEventHandler      informer.EventHandler
 	namespaceEventHandler informer.EventHandler
 	podEventHandler       informer.EventHandler
+	ovnNBClient           goovn.Client
+	ovnSBClient           goovn.Client
 }
 
 // NewMaster a new master controller that listens for node events
@@ -39,10 +42,15 @@ func NewMaster(kube kube.Interface,
 	nodeInformer cache.SharedIndexInformer,
 	namespaceInformer cache.SharedIndexInformer,
 	podInformer cache.SharedIndexInformer,
+	ovnNBClient goovn.Client,
+	ovnSBClient goovn.Client,
 ) (*MasterController, error) {
+
 	m := &MasterController{
-		kube:      kube,
-		allocator: subnetallocator.NewSubnetAllocator(),
+		kube:        kube,
+		allocator:   subnetallocator.NewSubnetAllocator(),
+		ovnNBClient: ovnNBClient,
+		ovnSBClient: ovnSBClient,
 	}
 
 	m.nodeEventHandler = informer.NewDefaultEventHandler("node", nodeInformer,
@@ -202,7 +210,7 @@ func (m *MasterController) handleOverlayPort(node *kapi.Node, annotator kube.Ann
 	}
 
 	portName := util.GetHybridOverlayPortName(node.Name)
-	portMAC, portIPs, _ := util.GetPortAddresses(portName)
+	portMAC, portIPs, _ := util.GetPortAddresses(portName, m.ovnNBClient)
 	if portMAC == nil || portIPs == nil {
 		if portIPs == nil {
 			for _, subnet := range subnets {

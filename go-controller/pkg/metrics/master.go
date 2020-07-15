@@ -7,6 +7,7 @@ import (
 	"sync"
 	"time"
 
+	goovn "github.com/ebay/go-ovn"
 	util "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
 	"github.com/prometheus/client_golang/prometheus"
 
@@ -126,12 +127,26 @@ var ovnNorthdCoverageShowMetricsMap = map[string]*metricDetails{
 
 // RegisterMasterMetrics registers some ovnkube master metrics with the Prometheus
 // registry
-func RegisterMasterMetrics() {
+func RegisterMasterMetrics(nbClient, sbClient goovn.Client) {
 	registerMasterMetricsOnce.Do(func() {
 		// ovnkube-master metrics
+		// the updater for this metric is activated
+		// after leader election
 		prometheus.MustRegister(metricE2ETimestamp)
 		prometheus.MustRegister(MetricMasterLeader)
 		prometheus.MustRegister(metricPodCreationLatency)
+
+		scrapeOvnTimestamp := func() float64 {
+			options, err := sbClient.SBGlobalGetOptions()
+			if err != nil {
+				klog.Errorf("Failed to get global options for the SB_Global table")
+				return 0
+			}
+			if val, ok := options["e2e_timestamp"]; ok {
+				return parseMetricToFloat(MetricOvnkubeSubsystemMaster, "sb_e2e_timestamp", val)
+			}
+			return 0
+		}
 		prometheus.MustRegister(prometheus.NewCounterFunc(
 			prometheus.CounterOpts{
 				Namespace: MetricOvnkubeNamespace,
@@ -227,31 +242,36 @@ func RegisterMasterMetrics() {
 	})
 }
 
-func scrapeOvnTimestamp() float64 {
-	output, stderr, err := util.RunOVNSbctl("--if-exists",
-		"get", "SB_Global", ".", "options:e2e_timestamp")
-	if err != nil {
-		klog.Errorf("Failed to scrape timestamp: %s (%v)", stderr, err)
-		return 0
-	}
-	return parseMetricToFloat(MetricOvnkubeSubsystemMaster, "sb_e2e_timestamp", output)
-}
-
 // StartE2ETimeStampMetricUpdater adds a goroutine that updates a "timestamp" value in the
 // nbdb every 30 seconds. This is so we can determine freshness of the database
-func StartE2ETimeStampMetricUpdater() {
+func StartE2ETimeStampMetricUpdater(stopChan <-chan struct{}, ovnNBClient goovn.Client) {
 	startE2ETimeStampUpdaterOnce.Do(func() {
 		go func() {
+			tsUpdateTicker := time.NewTicker(30 * time.Second)
 			for {
-				t := time.Now().Unix()
-				_, stderr, err := util.RunOVNNbctl("set", "NB_Global", ".",
-					fmt.Sprintf(`options:e2e_timestamp="%d"`, t))
-				if err != nil {
-					klog.Errorf("Failed to bump timestamp: %s (%v)", stderr, err)
-				} else {
-					metricE2ETimestamp.Set(float64(t))
+				select {
+				case <-tsUpdateTicker.C:
+					options, err := ovnNBClient.NBGlobalGetOptions()
+					if err != nil {
+						klog.Errorf("Can't get existing NB Global Options for updating timestamps")
+						continue
+					}
+					t := time.Now().Unix()
+					options["e2e_timestamp"] = fmt.Sprintf("%d", t)
+					cmd, err := ovnNBClient.NBGlobalSetOptions(options)
+					if err != nil {
+						klog.Errorf("Failed to bump timestamp: %v", err)
+					} else {
+						err = cmd.Execute()
+						if err != nil {
+							klog.Errorf("Failed to set timestamp: %v", err)
+						} else {
+							metricE2ETimestamp.Set(float64(t))
+						}
+					}
+				case <-stopChan:
+					return
 				}
-				time.Sleep(30 * time.Second)
 			}
 		}()
 	})

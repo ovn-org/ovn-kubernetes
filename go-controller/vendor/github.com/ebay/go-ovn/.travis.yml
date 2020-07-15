@@ -1,0 +1,29 @@
+language: go
+
+go:
+  - 1.11.x
+  - 1.12.x
+
+os:
+  - linux
+
+addons:
+  apt:
+    packages:
+      - bc
+      - gcc-multilib
+      - libssl-dev
+      - llvm-dev
+      - libjemalloc1
+      - libjemalloc-dev
+      - libnuma-dev
+      - python-sphinx
+      - libelf-dev
+      - selinux-policy-dev
+      - libunbound-dev
+      - libunbound-dev:i386
+
+before_script: export PATH=$PATH:$HOME/bin
+
+script: ./.travis/test.sh
+

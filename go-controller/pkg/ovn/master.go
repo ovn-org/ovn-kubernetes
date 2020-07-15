@@ -80,7 +80,7 @@ func (oc *Controller) Start(kClient kubernetes.Interface, nodeName string) error
 				}()
 				// run the End-to-end timestamp metric updater only on the
 				// active master node.
-				metrics.StartE2ETimeStampMetricUpdater()
+				metrics.StartE2ETimeStampMetricUpdater(oc.stopChan, oc.ovnNBClient)
 				if err := oc.StartClusterMaster(nodeName); err != nil {
 					panic(err.Error())
 				}
@@ -210,6 +210,8 @@ func (oc *Controller) StartClusterMaster(masterNodeName string) error {
 			factory.Core().V1().Nodes().Informer(),
 			factory.Core().V1().Namespaces().Informer(),
 			factory.Core().V1().Pods().Informer(),
+			oc.ovnNBClient,
+			oc.ovnSBClient,
 		)
 		if err != nil {
 			return fmt.Errorf("failed to set up hybrid overlay master: %v", err)

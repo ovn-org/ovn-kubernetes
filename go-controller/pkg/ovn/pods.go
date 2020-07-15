@@ -6,6 +6,7 @@ import (
 	"strings"
 	"time"
 
+	goovn "github.com/ebay/go-ovn"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/cni/types"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/metrics"
@@ -213,7 +214,6 @@ func (oc *Controller) getHybridOverlayExternalGwAnnotation(ns string) (net.IP, e
 }
 
 func (oc *Controller) addLogicalPort(pod *kapi.Pod) error {
-	var out, stderr string
 	var err error
 
 	// If a node does node have an assigned hostsubnet don't wait for the logical switch to appear
@@ -238,31 +238,40 @@ func (oc *Controller) addLogicalPort(pod *kapi.Pod) error {
 
 	var podMac net.HardwareAddr
 	var podIfAddrs []*net.IPNet
-	var args []string
-	var addresses string
+	var cmds []*goovn.OvnCommand
+	var addresses []string
+	var cmd *goovn.OvnCommand
+
+	// Check if the pod's logical switch port already exists. If it
+	// does don't re-add the port to OVN as this will change its
+	// UUID and and the port cache, address sets, and port groups
+	// will still have the old UUID.
+	lsp, err := oc.ovnNBClient.LSPGet(portName)
+	if err != nil && err != goovn.ErrorNotFound && err != goovn.ErrorSchema {
+		return fmt.Errorf("unable to get the lsp: %s from the nbdb: %s", portName, err)
+	}
+
+	if lsp == nil {
+		cmd, err = oc.ovnNBClient.LSPAdd(logicalSwitch, portName)
+		if err != nil {
+			return fmt.Errorf("unable to create the LSPAdd command for port: %s from the nbdb", portName)
+		}
+		cmds = append(cmds, cmd)
+	}
+
 	annotation, err := util.UnmarshalPodAnnotation(pod.Annotations)
 
 	if err == nil {
 		podMac = annotation.MAC
 		podIfAddrs = annotation.IPs
 
-		// Check if the pod's logical switch port already exists. If it
-		// does don't re-add the port to OVN as this will change its
-		// UUID and and the port cache, address sets, and port groups
-		// will still have the old UUID.
-		out, _, err = util.RunOVNNbctl("--if-exists", "get", "logical_switch_port", portName, "_uuid")
-		if err != nil || !strings.Contains(out, "-") {
-			// Pod's logical switch port does not yet exist
-			args = []string{"lsp-add", logicalSwitch, portName}
-		}
-
 		// If the pod already has annotations use the existing static
 		// IP/MAC from the annotation.
-		addresses = podMac.String() + " " + util.JoinIPNetIPs(podIfAddrs, " ")
-		args = append(args,
-			"--", "lsp-set-addresses", portName, addresses,
-			"--", "--if-exists", "clear", "logical_switch_port", portName, "dynamic_addresses",
-		)
+		cmd, err = oc.ovnNBClient.LSPSetDynamicAddresses(portName, "")
+		if err != nil {
+			return fmt.Errorf("unable to create LSPSetDynamicAddresses command for port: %s", portName)
+		}
+		cmds = append(cmds, cmd)
 	} else {
 		podMac, podIfAddrs, err = oc.getPortAddresses(logicalSwitch, portName)
 		if err != nil {
@@ -321,38 +330,49 @@ func (oc *Controller) addLogicalPort(pod *kapi.Pod) error {
 			}
 		}
 
-		addresses = podMac.String() + " " + util.JoinIPNetIPs(podIfAddrs, " ")
-		args = []string{
-			"--may-exist", "lsp-add", logicalSwitch, portName,
-			"--", "lsp-set-addresses", portName, addresses,
-		}
-	}
-	args = append(args, "--", "set", "logical_switch_port", portName, "external-ids:namespace="+pod.Namespace, "external-ids:pod=true")
-	args = append(args, "--", "lsp-set-port-security", portName, addresses)
-
-	out, stderr, err = util.RunOVNNbctl(args...)
-	if err != nil {
-		return fmt.Errorf("error while creating logical port %s stdout: %q, stderr: %q (%v)",
-			portName, out, stderr, err)
 	}
 
-	// UUID must be retrieved separately from the lsp-add transaction since
-	// (as of OVN 2.12) a bogus UUID is returned if they are part of the same
-	// transaction.
-	// FIXME: move to the lsp-add transaction once https://bugzilla.redhat.com/show_bug.cgi?id=1806788
-	// is resolved.
-	var uuid string
-	uuid, _, err = util.RunOVNNbctl("get", "logical_switch_port", portName, "_uuid")
-	if err != nil {
-		return fmt.Errorf("error while getting UUID for logical port %s "+
-			"stdout: %q, stderr: %q (%v)", portName, uuid, stderr, err)
+	// set addresses on the port
+	addresses = make([]string, len(podIfAddrs)+1)
+	addresses[0] = podMac.String()
+	for idx, podIfAddr := range podIfAddrs {
+		addresses[idx+1] = podIfAddr.IP.String()
 	}
-	if !strings.Contains(uuid, "-") {
-		return fmt.Errorf("invalid logical port %s uuid %q", portName, uuid)
+	cmd, err = oc.ovnNBClient.LSPSetAddress(portName, addresses...)
+	if err != nil {
+		return fmt.Errorf("unable to create LSPSetAddress command for port: %s", portName)
+	}
+	cmds = append(cmds, cmd)
+
+	// add external ids
+	extIds := map[string]string{"namespace": pod.Namespace, "pod": "true"}
+	cmd, err = oc.ovnNBClient.LSPSetExternalIds(portName, extIds)
+	if err != nil {
+		return fmt.Errorf("unable to create LSPSetAddress command for port: %s", portName)
+	}
+	cmds = append(cmds, cmd)
+
+	// add port security addresses
+	cmd, err = oc.ovnNBClient.LSPSetPortSecurity(portName, addresses...)
+	if err != nil {
+		return fmt.Errorf("unable to create LSPSetPortSecurity command for port: %s", portName)
+	}
+	cmds = append(cmds, cmd)
+
+	// execute all the commands together.
+	err = oc.ovnNBClient.Execute(cmds...)
+	if err != nil {
+		return fmt.Errorf("error while creating logical port %s error: %v",
+			portName, err)
+	}
+
+	lsp, err = oc.ovnNBClient.LSPGet(portName)
+	if err != nil || lsp == nil {
+		return fmt.Errorf("failed to get the logical switch port: %s from the ovn client, error: %s", portName, err)
 	}
 
 	// Add the pod's logical switch port to the port cache
-	portInfo := oc.logicalPortCache.add(logicalSwitch, portName, uuid, podMac, podIfAddrs)
+	portInfo := oc.logicalPortCache.add(logicalSwitch, portName, lsp.UUID, podMac, podIfAddrs)
 
 	// Enforce the default deny multicast policy
 	if oc.multicastSupport {
@@ -419,7 +439,7 @@ func (oc *Controller) assignPodAddresses(nodeName string) (net.HardwareAddr, []*
 // Given a pod and the node on which it is scheduled, get all addresses currently assigned
 // to it from the nbdb.
 func (oc *Controller) getPortAddresses(nodeName, portName string) (net.HardwareAddr, []*net.IPNet, error) {
-	podMac, podIPs, err := util.GetPortAddresses(portName)
+	podMac, podIPs, err := util.GetPortAddresses(portName, oc.ovnNBClient)
 	if err != nil {
 		return nil, nil, err
 	}
