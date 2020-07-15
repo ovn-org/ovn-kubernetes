@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"strings"
+	"sync"
 
 	"k8s.io/klog"
 	kexec "k8s.io/utils/exec"
@@ -22,6 +23,7 @@ type FakeExec struct {
 	looseCompare     bool
 	expectedCommands []*ExpectedCmd
 	executedCommands []string
+	mu               sync.Mutex
 }
 
 var _ kexec.Interface = &FakeExec{}
@@ -57,6 +59,8 @@ func (f *FakeExec) CommandContext(ctx context.Context, cmd string, args ...strin
 }
 
 func (f *FakeExec) ErrorDesc() string {
+	f.mu.Lock()
+	defer f.mu.Unlock()
 	if len(f.executedCommands) == len(f.expectedCommands) {
 		return ""
 	}
@@ -108,6 +112,8 @@ func (f *FakeExec) internalErrorDesc() string {
 // CalledMatchesExpected returns true if the number of commands the code under
 // test called matches the number of expected commands in the FakeExec's list
 func (f *FakeExec) CalledMatchesExpected() bool {
+	f.mu.Lock()
+	defer f.mu.Unlock()
 	return len(f.executedCommands) == len(f.expectedCommands)
 }
 
@@ -134,6 +140,8 @@ func getExecutedCommandline(cmd string, args ...string) string {
 
 func (f *FakeExec) Command(cmd string, args ...string) kexec.Cmd {
 	executed := getExecutedCommandline(cmd, args...)
+	f.mu.Lock()
+	defer f.mu.Unlock()
 	f.executedCommands = append(f.executedCommands, executed)
 
 	var expected *ExpectedCmd
@@ -185,6 +193,8 @@ func (f *FakeExec) Command(cmd string, args ...string) kexec.Cmd {
 // a fake command action list of the FakeExec
 func (f *FakeExec) AddFakeCmd(expected *ExpectedCmd) {
 	expected.Cmd = fakeBinPrefix + expected.Cmd
+	f.mu.Lock()
+	defer f.mu.Unlock()
 	f.expectedCommands = append(f.expectedCommands, expected)
 }
 
