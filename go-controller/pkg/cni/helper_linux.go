@@ -5,6 +5,7 @@ package cni
 import (
 	"fmt"
 	"io/ioutil"
+	"net"
 	"os"
 	"os/exec"
 	"strconv"
@@ -21,19 +22,63 @@ import (
 	"github.com/vishvananda/netlink"
 )
 
+type CNIPluginLibOps interface {
+	AddRoute(ipn *net.IPNet, gw net.IP, dev netlink.Link) error
+	SetupVeth(contVethName string, mtu int, hostNS ns.NetNS) (net.Interface, net.Interface, error)
+}
+
+type defaultCNIPluginLibOps struct{}
+
+var cniPluginLibOps CNIPluginLibOps = &defaultCNIPluginLibOps{}
+
+func (defaultCNIPluginLibOps) AddRoute(ipn *net.IPNet, gw net.IP, dev netlink.Link) error {
+	return ip.AddRoute(ipn, gw, dev)
+}
+
+func (defaultCNIPluginLibOps) SetupVeth(contVethName string, mtu int, hostNS ns.NetNS) (net.Interface, net.Interface, error) {
+	return ip.SetupVeth(contVethName, mtu, hostNS)
+}
+
+type SriovNetLibOps interface {
+	GetNetDevicesFromPci(pciAddress string) ([]string, error)
+	GetUplinkRepresentor(vfPciAddress string) (string, error)
+	GetVfIndexByPciAddress(vfPciAddress string) (int, error)
+	GetVfRepresentor(uplink string, vfIndex int) (string, error)
+}
+
+type defaultSRIOVLibOps struct{}
+
+var sriovLibOps SriovNetLibOps = &defaultSRIOVLibOps{}
+
+func (defaultSRIOVLibOps) GetNetDevicesFromPci(pciAddress string) ([]string, error) {
+	return sriovnet.GetNetDevicesFromPci(pciAddress)
+}
+
+func (defaultSRIOVLibOps) GetUplinkRepresentor(vfPciAddress string) (string, error) {
+	return sriovnet.GetUplinkRepresentor(vfPciAddress)
+}
+
+func (defaultSRIOVLibOps) GetVfIndexByPciAddress(vfPciAddress string) (int, error) {
+	return sriovnet.GetVfIndexByPciAddress(vfPciAddress)
+}
+
+func (defaultSRIOVLibOps) GetVfRepresentor(uplink string, vfIndex int) (string, error) {
+	return sriovnet.GetVfRepresentor(uplink, vfIndex)
+}
+
 func renameLink(curName, newName string) error {
-	link, err := netlink.LinkByName(curName)
+	link, err := util.GetNetLinkOps().LinkByName(curName)
 	if err != nil {
 		return err
 	}
 
-	if err := netlink.LinkSetDown(link); err != nil {
+	if err := util.GetNetLinkOps().LinkSetDown(link); err != nil {
 		return err
 	}
-	if err := netlink.LinkSetName(link, newName); err != nil {
+	if err := util.GetNetLinkOps().LinkSetName(link, newName); err != nil {
 		return err
 	}
-	if err := netlink.LinkSetUp(link); err != nil {
+	if err := util.GetNetLinkOps().LinkSetUp(link); err != nil {
 		return err
 	}
 
@@ -45,13 +90,13 @@ func setSysctl(sysctl string, newVal int) error {
 }
 
 func moveIfToNetns(ifname string, netns ns.NetNS) error {
-	vfDev, err := netlink.LinkByName(ifname)
+	vfDev, err := util.GetNetLinkOps().LinkByName(ifname)
 	if err != nil {
 		return fmt.Errorf("failed to lookup vf device %v: %q", ifname, err)
 	}
 
 	// move VF device to ns
-	if err = netlink.LinkSetNsFd(vfDev, int(netns.Fd())); err != nil {
+	if err = util.GetNetLinkOps().LinkSetNsFd(vfDev, int(netns.Fd())); err != nil {
 		return fmt.Errorf("failed to move device %+v to netns: %q", ifname, err)
 	}
 
@@ -59,22 +104,22 @@ func moveIfToNetns(ifname string, netns ns.NetNS) error {
 }
 
 func setupNetwork(link netlink.Link, ifInfo *PodInterfaceInfo) error {
-	if err := netlink.LinkSetHardwareAddr(link, ifInfo.MAC); err != nil {
+	if err := util.GetNetLinkOps().LinkSetHardwareAddr(link, ifInfo.MAC); err != nil {
 		return fmt.Errorf("failed to add mac address %s to %s: %v", ifInfo.MAC, link.Attrs().Name, err)
 	}
 	for _, ip := range ifInfo.IPs {
 		addr := &netlink.Addr{IPNet: ip}
-		if err := netlink.AddrAdd(link, addr); err != nil {
+		if err := util.GetNetLinkOps().AddrAdd(link, addr); err != nil {
 			return fmt.Errorf("failed to add IP addr %s to %s: %v", ip, link.Attrs().Name, err)
 		}
 	}
 	for _, gw := range ifInfo.Gateways {
-		if err := ip.AddRoute(nil, gw, link); err != nil {
+		if err := cniPluginLibOps.AddRoute(nil, gw, link); err != nil {
 			return fmt.Errorf("failed to add gateway route: %v", err)
 		}
 	}
 	for _, route := range ifInfo.Routes {
-		if err := ip.AddRoute(route.Dest, route.NextHop, link); err != nil {
+		if err := cniPluginLibOps.AddRoute(route.Dest, route.NextHop, link); err != nil {
 			return fmt.Errorf("failed to add pod route %v via %v: %v", route.Dest, route.NextHop, err)
 		}
 	}
@@ -89,14 +134,14 @@ func setupInterface(netns ns.NetNS, containerID, ifName string, ifInfo *PodInter
 	var oldHostVethName string
 	err := netns.Do(func(hostNS ns.NetNS) error {
 		// create the veth pair in the container and move host end into host netns
-		hostVeth, containerVeth, err := ip.SetupVeth(ifName, ifInfo.MTU, hostNS)
+		hostVeth, containerVeth, err := cniPluginLibOps.SetupVeth(ifName, ifInfo.MTU, hostNS)
 		if err != nil {
 			return err
 		}
 		hostIface.Mac = hostVeth.HardwareAddr.String()
 		contIface.Name = containerVeth.Name
 
-		link, err := netlink.LinkByName(contIface.Name)
+		link, err := util.GetNetLinkOps().LinkByName(contIface.Name)
 		if err != nil {
 			return fmt.Errorf("failed to lookup %s: %v", contIface.Name, err)
 		}
@@ -131,7 +176,7 @@ func setupSriovInterface(netns ns.NetNS, containerID, ifName string, ifInfo *Pod
 	contIface := &current.Interface{}
 
 	// 1. get VF netdevice from PCI
-	vfNetdevices, err := sriovnet.GetNetDevicesFromPci(pciAddrs)
+	vfNetdevices, err := sriovLibOps.GetNetDevicesFromPci(pciAddrs)
 	if err != nil {
 		return nil, nil, err
 
@@ -144,19 +189,19 @@ func setupSriovInterface(netns ns.NetNS, containerID, ifName string, ifInfo *Pod
 	vfNetdevice := vfNetdevices[0]
 
 	// 2. get Uplink netdevice
-	uplink, err := sriovnet.GetUplinkRepresentor(pciAddrs)
+	uplink, err := sriovLibOps.GetUplinkRepresentor(pciAddrs)
 	if err != nil {
 		return nil, nil, err
 	}
 
 	// 3. get VF index from PCI
-	vfIndex, err := sriovnet.GetVfIndexByPciAddress(pciAddrs)
+	vfIndex, err := sriovLibOps.GetVfIndexByPciAddress(pciAddrs)
 	if err != nil {
 		return nil, nil, err
 	}
 
 	// 4. lookup representor
-	rep, err := sriovnet.GetVfRepresentor(uplink, vfIndex)
+	rep, err := sriovLibOps.GetVfRepresentor(uplink, vfIndex)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -167,14 +212,14 @@ func setupSriovInterface(netns ns.NetNS, containerID, ifName string, ifInfo *Pod
 	if err = renameLink(oldHostRepName, hostIface.Name); err != nil {
 		return nil, nil, fmt.Errorf("failed to rename %s to %s: %v", oldHostRepName, hostIface.Name, err)
 	}
-	link, err := netlink.LinkByName(hostIface.Name)
+	link, err := util.GetNetLinkOps().LinkByName(hostIface.Name)
 	if err != nil {
 		return nil, nil, err
 	}
 	hostIface.Mac = link.Attrs().HardwareAddr.String()
 
 	// 6. set MTU on VF representor
-	if err = netlink.LinkSetMTU(link, ifInfo.MTU); err != nil {
+	if err = util.GetNetLinkOps().LinkSetMTU(link, ifInfo.MTU); err != nil {
 		return nil, nil, fmt.Errorf("failed to set MTU on %s: %v", hostIface.Name, err)
 	}
 
@@ -190,15 +235,15 @@ func setupSriovInterface(netns ns.NetNS, containerID, ifName string, ifInfo *Pod
 		if err != nil {
 			return err
 		}
-		link, err = netlink.LinkByName(contIface.Name)
+		link, err = util.GetNetLinkOps().LinkByName(contIface.Name)
 		if err != nil {
 			return err
 		}
-		err = netlink.LinkSetMTU(link, ifInfo.MTU)
+		err = util.GetNetLinkOps().LinkSetMTU(link, ifInfo.MTU)
 		if err != nil {
 			return err
 		}
-		err = netlink.LinkSetUp(link)
+		err = util.GetNetLinkOps().LinkSetUp(link)
 		if err != nil {
 			return err
 		}

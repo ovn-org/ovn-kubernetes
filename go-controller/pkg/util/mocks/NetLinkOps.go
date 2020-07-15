@@ -3,7 +3,10 @@
 package mocks
 
 import (
+	net "net"
+
 	mock "github.com/stretchr/testify/mock"
+
 	netlink "github.com/vishvananda/netlink"
 )
 
@@ -107,8 +110,92 @@ func (_m *NetLinkOps) LinkByName(ifaceName string) (netlink.Link, error) {
 	return r0, r1
 }
 
-// LinkSetup provides a mock function with given fields: link
-func (_m *NetLinkOps) LinkSetup(link netlink.Link) error {
+// LinkSetDown provides a mock function with given fields: link
+func (_m *NetLinkOps) LinkSetDown(link netlink.Link) error {
+	ret := _m.Called(link)
+
+	var r0 error
+	if rf, ok := ret.Get(0).(func(netlink.Link) error); ok {
+		r0 = rf(link)
+	} else {
+		r0 = ret.Error(0)
+	}
+
+	return r0
+}
+
+// LinkSetHardwareAddr provides a mock function with given fields: link, hwaddr
+func (_m *NetLinkOps) LinkSetHardwareAddr(link netlink.Link, hwaddr net.HardwareAddr) error {
+	ret := _m.Called(link, hwaddr)
+
+	var r0 error
+	if rf, ok := ret.Get(0).(func(netlink.Link, net.HardwareAddr) error); ok {
+		r0 = rf(link, hwaddr)
+	} else {
+		r0 = ret.Error(0)
+	}
+
+	return r0
+}
+
+// LinkSetMTU provides a mock function with given fields: link, mtu
+func (_m *NetLinkOps) LinkSetMTU(link netlink.Link, mtu int) error {
+	ret := _m.Called(link, mtu)
+
+	var r0 error
+	if rf, ok := ret.Get(0).(func(netlink.Link, int) error); ok {
+		r0 = rf(link, mtu)
+	} else {
+		r0 = ret.Error(0)
+	}
+
+	return r0
+}
+
+// LinkSetName provides a mock function with given fields: link, newName
+func (_m *NetLinkOps) LinkSetName(link netlink.Link, newName string) error {
+	ret := _m.Called(link, newName)
+
+	var r0 error
+	if rf, ok := ret.Get(0).(func(netlink.Link, string) error); ok {
+		r0 = rf(link, newName)
+	} else {
+		r0 = ret.Error(0)
+	}
+
+	return r0
+}
+
+// LinkSetNsFd provides a mock function with given fields: link, fd
+func (_m *NetLinkOps) LinkSetNsFd(link netlink.Link, fd int) error {
+	ret := _m.Called(link, fd)
+
+	var r0 error
+	if rf, ok := ret.Get(0).(func(netlink.Link, int) error); ok {
+		r0 = rf(link, fd)
+	} else {
+		r0 = ret.Error(0)
+	}
+
+	return r0
+}
+
+// LinkSetTxQLen provides a mock function with given fields: link, qlen
+func (_m *NetLinkOps) LinkSetTxQLen(link netlink.Link, qlen int) error {
+	ret := _m.Called(link, qlen)
+
+	var r0 error
+	if rf, ok := ret.Get(0).(func(netlink.Link, int) error); ok {
+		r0 = rf(link, qlen)
+	} else {
+		r0 = ret.Error(0)
+	}
+
+	return r0
+}
+
+// LinkSetUp provides a mock function with given fields: link
+func (_m *NetLinkOps) LinkSetUp(link netlink.Link) error {
 	ret := _m.Called(link)
 
 	var r0 error
