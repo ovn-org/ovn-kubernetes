@@ -583,6 +583,7 @@ func TestLinkRoutesAdd(t *testing.T) {
 
 func TestLinkRouteExists(t *testing.T) {
 	mockNetLinkOps := new(mocks.NetLinkOps)
+	mockLink := new(netlink_mocks.Link)
 	// below is defined in net_linux.go
 	netLinkOps = mockNetLinkOps
 
@@ -594,9 +595,11 @@ func TestLinkRouteExists(t *testing.T) {
 		errExp                   bool
 		outBoolFlag              bool
 		onRetArgsNetLinkLibOpers []onCallReturnArgs
+		onRetArgsLinkIfaceOpers  []onCallReturnArgs
 	}{
 		{
 			desc:        "tests code path when RouteListFiltered() returns error",
+			inputLink:   mockLink,
 			inputGwIP:   ovntest.MustParseIP("192.168.0.1"),
 			inputSubnet: ovntest.MustParseIPNet("192.168.0.0/24"),
 			errExp:      true,
@@ -604,25 +607,37 @@ func TestLinkRouteExists(t *testing.T) {
 			onRetArgsNetLinkLibOpers: []onCallReturnArgs{
 				{"RouteListFiltered", []string{"int", "*netlink.Route", "uint64"}, []interface{}{[]netlink.Route{}, fmt.Errorf("mock error")}},
 			},
+			onRetArgsLinkIfaceOpers: []onCallReturnArgs{
+				{"Attrs", []string{}, []interface{}{&netlink.LinkAttrs{Name: "testIfaceName", Index: 1}}},
+			},
 		},
 		{
 			desc:        "tests code path when RouteListFiltered() returns empty routes list",
+			inputLink:   mockLink,
 			inputGwIP:   ovntest.MustParseIP("192.168.0.1"),
 			inputSubnet: ovntest.MustParseIPNet("192.168.0.0/24"),
 			outBoolFlag: false,
 			onRetArgsNetLinkLibOpers: []onCallReturnArgs{
 				{"RouteListFiltered", []string{"int", "*netlink.Route", "uint64"}, []interface{}{[]netlink.Route{}, nil}},
 			},
+			onRetArgsLinkIfaceOpers: []onCallReturnArgs{
+				{"Attrs", []string{}, []interface{}{&netlink.LinkAttrs{Name: "testIfaceName", Index: 1}}},
+			},
 		},
 		{
 			desc:        "gateway IP input is nil",
+			inputLink:   mockLink,
 			inputSubnet: ovntest.MustParseIPNet("192.168.0.0/24"),
 			onRetArgsNetLinkLibOpers: []onCallReturnArgs{
 				{"RouteListFiltered", []string{"int", "*netlink.Route", "uint64"}, []interface{}{[]netlink.Route{}, nil}},
 			},
+			onRetArgsLinkIfaceOpers: []onCallReturnArgs{
+				{"Attrs", []string{}, []interface{}{&netlink.LinkAttrs{Name: "testIfaceName", Index: 1}}},
+			},
 		},
 		{
 			desc:        "tests code path where route GW IP DOES NOT MATCH with input GW IP",
+			inputLink:   mockLink,
 			inputGwIP:   ovntest.MustParseIP("192.168.0.1"),
 			inputSubnet: ovntest.MustParseIPNet("192.168.0.0/24"),
 			onRetArgsNetLinkLibOpers: []onCallReturnArgs{
@@ -630,9 +645,13 @@ func TestLinkRouteExists(t *testing.T) {
 					{Gw: ovntest.MustParseIP("192.168.1.1")},
 				}, nil}},
 			},
+			onRetArgsLinkIfaceOpers: []onCallReturnArgs{
+				{"Attrs", []string{}, []interface{}{&netlink.LinkAttrs{Name: "testIfaceName", Index: 1}}},
+			},
 		},
 		{
 			desc:        "tests code path where route GW IP MATCHES with input GW IP",
+			inputLink:   mockLink,
 			inputGwIP:   ovntest.MustParseIP("192.168.0.1"),
 			inputSubnet: ovntest.MustParseIPNet("192.168.0.0/24"),
 			outBoolFlag: true,
@@ -641,6 +660,9 @@ func TestLinkRouteExists(t *testing.T) {
 					{Gw: ovntest.MustParseIP("192.168.0.1")},
 				}, nil}},
 			},
+			onRetArgsLinkIfaceOpers: []onCallReturnArgs{
+				{"Attrs", []string{}, []interface{}{&netlink.LinkAttrs{Name: "testIfaceName", Index: 1}}},
+			},
 		},
 	}
 	for i, tc := range tests {
@@ -648,6 +670,17 @@ func TestLinkRouteExists(t *testing.T) {
 
 			for _, item := range tc.onRetArgsNetLinkLibOpers {
 				call := mockNetLinkOps.On(item.onCallMethodName)
+				for _, arg := range item.onCallMethodArgType {
+					call.Arguments = append(call.Arguments, mock.AnythingOfType(arg))
+				}
+				for _, ret := range item.retArgList {
+					call.ReturnArguments = append(call.ReturnArguments, ret)
+				}
+				call.Once()
+			}
+
+			for _, item := range tc.onRetArgsLinkIfaceOpers {
+				call := mockLink.On(item.onCallMethodName)
 				for _, arg := range item.onCallMethodArgType {
 					call.Arguments = append(call.Arguments, mock.AnythingOfType(arg))
 				}
@@ -668,6 +701,7 @@ func TestLinkRouteExists(t *testing.T) {
 				assert.True(t, flag)
 			}
 			mockNetLinkOps.AssertExpectations(t)
+			mockLink.AssertExpectations(t)
 		})
 	}
 }
