@@ -7,7 +7,7 @@ import (
 	"sync/atomic"
 	"testing"
 
-	"k8s.io/api/core/v1"
+	v1 "k8s.io/api/core/v1"
 	knet "k8s.io/api/networking/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
@@ -378,6 +378,7 @@ var _ = Describe("Watch Factory Operations", func() {
 
 		const nodeName string = "mynode"
 		type opTest struct {
+			mu      sync.Mutex
 			pod     *v1.Pod
 			added   int
 			updated int
@@ -396,6 +397,8 @@ var _ = Describe("Watch Factory Operations", func() {
 				pod := obj.(*v1.Pod)
 				ot, ok := testPods[pod.Name]
 				Expect(ok).To(BeTrue())
+				ot.mu.Lock()
+				defer ot.mu.Unlock()
 				Expect(ot.added).To(BeNumerically("<", 2))
 				ot.added++
 			},
@@ -403,6 +406,8 @@ var _ = Describe("Watch Factory Operations", func() {
 				newPod := new.(*v1.Pod)
 				ot, ok := testPods[newPod.Name]
 				Expect(ok).To(BeTrue())
+				ot.mu.Lock()
+				defer ot.mu.Unlock()
 				Expect(ot.updated).To(BeNumerically("<", 2))
 				ot.updated++
 				Expect(newPod.Spec.NodeName).To(Equal(nodeName))
@@ -411,6 +416,8 @@ var _ = Describe("Watch Factory Operations", func() {
 				pod := obj.(*v1.Pod)
 				ot, ok := testPods[pod.Name]
 				Expect(ok).To(BeTrue())
+				ot.mu.Lock()
+				defer ot.mu.Unlock()
 				Expect(ot.deleted).To(BeNumerically("<", 2))
 				ot.deleted++
 			},
@@ -421,7 +428,9 @@ var _ = Describe("Watch Factory Operations", func() {
 			for _, ot := range testPods {
 				pods = append(pods, ot.pod)
 				podWatch.Add(ot.pod)
+				ot.mu.Lock()
 				ot.pod.Spec.NodeName = nodeName
+				ot.mu.Unlock()
 				podWatch.Modify(ot.pod)
 				pods = pods[:0]
 				podWatch.Delete(ot.pod)
@@ -434,9 +443,11 @@ var _ = Describe("Watch Factory Operations", func() {
 		Eventually(c.getUpdated, 2).Should(Equal(10))
 		Eventually(c.getDeleted, 2).Should(Equal(10))
 		for _, ot := range testPods {
+			ot.mu.Lock()
 			Expect(ot.added).Should(Equal(2))
 			Expect(ot.updated).Should(Equal(2))
 			Expect(ot.deleted).Should(Equal(2))
+			ot.mu.Unlock()
 		}
 
 		wf.RemovePodHandler(h)
@@ -515,6 +526,7 @@ var _ = Describe("Watch Factory Operations", func() {
 		Expect(err).NotTo(HaveOccurred())
 
 		type opTest struct {
+			mu      sync.Mutex
 			node    *v1.Node
 			added   int
 			updated int
@@ -533,6 +545,8 @@ var _ = Describe("Watch Factory Operations", func() {
 				node := obj.(*v1.Node)
 				ot, ok := testNodes[node.Name]
 				Expect(ok).To(BeTrue())
+				ot.mu.Lock()
+				defer ot.mu.Unlock()
 				Expect(ot.added).To(BeNumerically("<", 2))
 				ot.added++
 			},
@@ -540,6 +554,8 @@ var _ = Describe("Watch Factory Operations", func() {
 				newNode := new.(*v1.Node)
 				ot, ok := testNodes[newNode.Name]
 				Expect(ok).To(BeTrue())
+				ot.mu.Lock()
+				defer ot.mu.Unlock()
 				Expect(ot.updated).To(BeNumerically("<", 2))
 				ot.updated++
 				Expect(newNode.Status.Phase).To(Equal(v1.NodeTerminated))
@@ -548,8 +564,10 @@ var _ = Describe("Watch Factory Operations", func() {
 				node := obj.(*v1.Node)
 				ot, ok := testNodes[node.Name]
 				Expect(ok).To(BeTrue())
+				ot.mu.Lock()
 				Expect(ot.deleted).To(BeNumerically("<", 2))
 				ot.deleted++
+				ot.mu.Unlock()
 			},
 		})
 
@@ -558,7 +576,9 @@ var _ = Describe("Watch Factory Operations", func() {
 			for _, ot := range testNodes {
 				nodes = append(nodes, ot.node)
 				nodeWatch.Add(ot.node)
+				ot.mu.Lock()
 				ot.node.Status.Phase = v1.NodeTerminated
+				ot.mu.Unlock()
 				nodeWatch.Modify(ot.node)
 				nodes = nodes[:0]
 				nodeWatch.Delete(ot.node)
@@ -571,9 +591,11 @@ var _ = Describe("Watch Factory Operations", func() {
 		Eventually(c.getUpdated, 2).Should(Equal(10))
 		Eventually(c.getDeleted, 2).Should(Equal(10))
 		for _, ot := range testNodes {
+			ot.mu.Lock()
 			Expect(ot.added).Should(Equal(2))
 			Expect(ot.updated).Should(Equal(2))
 			Expect(ot.deleted).Should(Equal(2))
+			ot.mu.Unlock()
 		}
 
 		wf.RemoveNodeHandler(h)
@@ -581,6 +603,7 @@ var _ = Describe("Watch Factory Operations", func() {
 
 	It("correctly orders queued informer initial add events and subsequent update events", func() {
 		type opTest struct {
+			mu      sync.Mutex
 			node    *v1.Node
 			added   int
 			updated int
@@ -619,6 +642,8 @@ var _ = Describe("Watch Factory Operations", func() {
 				node := obj.(*v1.Node)
 				ot, ok := testNodes[node.Name]
 				Expect(ok).To(BeTrue())
+				ot.mu.Lock()
+				defer ot.mu.Unlock()
 				Expect(ot.added).To(Equal(0), "add for node %s already run", node.Name)
 				ot.added++
 			},
@@ -628,6 +653,8 @@ var _ = Describe("Watch Factory Operations", func() {
 				ot, ok := testNodes[newNode.Name]
 				Expect(ok).To(BeTrue())
 				// Expect updates to be processed after Add
+				ot.mu.Lock()
+				defer ot.mu.Unlock()
 				Expect(ot.added).To(Equal(1), "update for node %s processed before initial add!", newNode.Name)
 				Expect(ot.updated).To(Equal(0))
 				ot.updated++
@@ -639,14 +666,18 @@ var _ = Describe("Watch Factory Operations", func() {
 
 		// Adds are done synchronously at handler addition time
 		for _, ot := range testNodes {
+			ot.mu.Lock()
 			Expect(ot.added).To(Equal(1), "missing add for node %s", ot.node.Name)
+			ot.mu.Unlock()
 		}
 		Expect(c.getAdded()).To(Equal(len(testNodes)))
 
 		// Updates are async and may take a bit longer to finish
 		Eventually(c.getUpdated, 10).Should(Equal(len(testNodes)))
 		for _, ot := range testNodes {
+			ot.mu.Lock()
 			Expect(ot.updated).To(Equal(1), "missing update for node %s", ot.node.Name)
+			ot.mu.Unlock()
 		}
 
 		wf.RemoveNodeHandler(h)
@@ -654,6 +685,7 @@ var _ = Describe("Watch Factory Operations", func() {
 
 	It("correctly orders serialized informer initial add events and subsequent update events", func() {
 		type opTest struct {
+			mu        sync.Mutex
 			namespace *v1.Namespace
 			added     int
 			updated   int
@@ -692,6 +724,8 @@ var _ = Describe("Watch Factory Operations", func() {
 				namespace := obj.(*v1.Namespace)
 				ot, ok := testNamespaces[namespace.Name]
 				Expect(ok).To(BeTrue())
+				ot.mu.Lock()
+				defer ot.mu.Unlock()
 				Expect(ot.added).To(Equal(0))
 				ot.added++
 			},
@@ -701,6 +735,8 @@ var _ = Describe("Watch Factory Operations", func() {
 				ot, ok := testNamespaces[newNamespace.Name]
 				Expect(ok).To(BeTrue())
 				// Expect updates to be processed after Add
+				ot.mu.Lock()
+				defer ot.mu.Unlock()
 				Expect(ot.added).To(Equal(1), "update for namespace %s processed before initial add!", newNamespace.Name)
 				Expect(ot.updated).To(Equal(0))
 				ot.updated++
@@ -712,14 +748,18 @@ var _ = Describe("Watch Factory Operations", func() {
 
 		// Adds are done synchronously at handler addition time
 		for _, ot := range testNamespaces {
+			ot.mu.Lock()
 			Expect(ot.added).To(Equal(1), "missing add for namespace %s", ot.namespace.Name)
+			ot.mu.Unlock()
 		}
 		Expect(c.getAdded()).To(Equal(len(testNamespaces)))
 
 		// Updates are async and may take a bit longer to finish
 		Eventually(c.getUpdated, 10).Should(Equal(len(testNamespaces)))
 		for _, ot := range testNamespaces {
+			ot.mu.Lock()
 			Expect(ot.updated).To(Equal(1), "missing update for namespace %s", ot.namespace.Name)
+			ot.mu.Unlock()
 		}
 
 		wf.RemoveNamespaceHandler(h)
