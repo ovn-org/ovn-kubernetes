@@ -17,7 +17,13 @@ import (
 
 type NetLinkOps interface {
 	LinkByName(ifaceName string) (netlink.Link, error)
-	LinkSetup(link netlink.Link) error
+	LinkSetDown(link netlink.Link) error
+	LinkSetName(link netlink.Link, newName string) error
+	LinkSetUp(link netlink.Link) error
+	LinkSetNsFd(link netlink.Link, fd int) error
+	LinkSetHardwareAddr(link netlink.Link, hwaddr net.HardwareAddr) error
+	LinkSetMTU(link netlink.Link, mtu int) error
+	LinkSetTxQLen(link netlink.Link, qlen int) error
 	AddrList(link netlink.Link, family int) ([]netlink.Addr, error)
 	AddrDel(link netlink.Link, addr *netlink.Addr) error
 	AddrAdd(link netlink.Link, addr *netlink.Addr) error
@@ -35,12 +41,46 @@ type defaultNetLinkOps struct {
 
 var netLinkOps NetLinkOps = &defaultNetLinkOps{}
 
+// SetNetLinkOpMockInst method would be used by unit tests in other packages
+func SetNetLinkOpMockInst(mockInst NetLinkOps) {
+	netLinkOps = mockInst
+}
+
+// GetNetLinkOps will be invoked by functions in other packages that would need access to the netlink library methods.
+func GetNetLinkOps() NetLinkOps {
+	return netLinkOps
+}
+
 func (defaultNetLinkOps) LinkByName(ifaceName string) (netlink.Link, error) {
 	return netlink.LinkByName(ifaceName)
 }
 
-func (defaultNetLinkOps) LinkSetup(link netlink.Link) error {
+func (defaultNetLinkOps) LinkSetDown(link netlink.Link) error {
+	return netlink.LinkSetDown(link)
+}
+
+func (defaultNetLinkOps) LinkSetUp(link netlink.Link) error {
 	return netlink.LinkSetUp(link)
+}
+
+func (defaultNetLinkOps) LinkSetName(link netlink.Link, newName string) error {
+	return netlink.LinkSetName(link, newName)
+}
+
+func (defaultNetLinkOps) LinkSetNsFd(link netlink.Link, fd int) error {
+	return netlink.LinkSetNsFd(link, fd)
+}
+
+func (defaultNetLinkOps) LinkSetHardwareAddr(link netlink.Link, hwaddr net.HardwareAddr) error {
+	return netlink.LinkSetHardwareAddr(link, hwaddr)
+}
+
+func (defaultNetLinkOps) LinkSetMTU(link netlink.Link, mtu int) error {
+	return netlink.LinkSetMTU(link, mtu)
+}
+
+func (defaultNetLinkOps) LinkSetTxQLen(link netlink.Link, qlen int) error {
+	return netlink.LinkSetTxQLen(link, qlen)
 }
 
 func (defaultNetLinkOps) AddrList(link netlink.Link, family int) ([]netlink.Addr, error) {
@@ -97,7 +137,7 @@ func LinkSetUp(interfaceName string) (netlink.Link, error) {
 	if err != nil {
 		return nil, fmt.Errorf("failed to lookup link %s: %v", interfaceName, err)
 	}
-	err = netLinkOps.LinkSetup(link)
+	err = netLinkOps.LinkSetUp(link)
 	if err != nil {
 		return nil, fmt.Errorf("failed to set the link %s up: %v", interfaceName, err)
 	}

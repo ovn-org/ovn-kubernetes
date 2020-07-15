@@ -67,7 +67,7 @@ func TestLinkSetUp(t *testing.T) {
 			errExp: true,
 			onRetArgsNetLinkLibOpers: []onCallReturnArgs{
 				{"LinkByName", []string{"string"}, []interface{}{mockLink, nil}},
-				{"LinkSetup", []string{"*mocks.Link"}, []interface{}{fmt.Errorf("mock error")}},
+				{"LinkSetUp", []string{"*mocks.Link"}, []interface{}{fmt.Errorf("mock error")}},
 			},
 		},
 		{
@@ -75,7 +75,7 @@ func TestLinkSetUp(t *testing.T) {
 			input: "testIfaceName",
 			onRetArgsNetLinkLibOpers: []onCallReturnArgs{
 				{"LinkByName", []string{"string"}, []interface{}{mockLink, nil}},
-				{"LinkSetup", []string{"*mocks.Link"}, []interface{}{nil}},
+				{"LinkSetUp", []string{"*mocks.Link"}, []interface{}{nil}},
 			},
 		},
 	}
