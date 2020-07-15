@@ -84,6 +84,19 @@ func NewContiguousAllocationMap(max int, rangeSpec string) *AllocationBitmap {
 	return &a
 }
 
+// NewRoundRobinAllocationMap creates an allocation bitmap using the round-robin
+// scan strategy.
+func NewRoundRobinAllocationMap(max int, rangeSpec string) *AllocationBitmap {
+	a := AllocationBitmap{
+		strategy:  &roundRobinScanStrategy{},
+		allocated: big.NewInt(0),
+		count:     0,
+		max:       max,
+		rangeSpec: rangeSpec,
+	}
+	return &a
+}
+
 // Allocate attempts to reserve the provided item.
 // Returns true if it was allocated, false if it was already in use
 func (r *AllocationBitmap) Allocate(offset int) (bool, error) {
@@ -234,3 +247,27 @@ func (contiguousScanStrategy) AllocateBit(allocated *big.Int, max, count int) (i
 }
 
 var _ bitAllocator = contiguousScanStrategy{}
+
+// roundRobinScanStrategy tries to allocate starting at 0 and scans forward looking for
+// the next available address, wrapping the range if necessary. It caches the
+// last allocation and will try to allocate all other addresses before re-allocating
+// the most recently allocated address.
+type roundRobinScanStrategy struct {
+	lastAllocated int
+}
+
+func (wss *roundRobinScanStrategy) AllocateBit(allocated *big.Int, max, count int) (int, bool) {
+	if count >= max {
+		return 0, false
+	}
+	for i := 0; i < max; i++ {
+		at := (wss.lastAllocated + i) % max
+		if allocated.Bit(at) == 0 {
+			wss.lastAllocated = at
+			return at, true
+		}
+	}
+	return 0, false
+}
+
+var _ bitAllocator = &roundRobinScanStrategy{}
