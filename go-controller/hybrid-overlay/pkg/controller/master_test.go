@@ -279,7 +279,7 @@ var _ = Describe("Hybrid SDN Master Operations", func() {
 					return nil, err
 				}
 				return updatedNode.Annotations, nil
-			}, 2).ShouldNot(HaveKey(types.HybridOverlayDRMAC))
+			}, 5).ShouldNot(HaveKey(types.HybridOverlayDRMAC))
 
 			Eventually(fexec.CalledMatchesExpected, 2).Should(BeTrue(), fexec.ErrorDesc)
 			return nil

@@ -419,9 +419,10 @@ func (n *NodeController) EnsureHybridOverlayBridge(node *kapi.Node) error {
 	n.drIP = hybridOverlayIfAddr.IP
 
 	_, stderr, err := util.RunOVSVsctl("--may-exist", "add-br", extBridgeName,
-		"--", "set", "Bridge", extBridgeName, "fail_mode=secure")
+		"--", "set", "Bridge", extBridgeName, "fail_mode=secure",
+		"--", "set", "Interface", extBridgeName, "mtu_request="+fmt.Sprintf("%d", config.Default.MTU))
 	if err != nil {
-		return fmt.Errorf("failed to create localnet bridge %s"+
+		return fmt.Errorf("failed to create hybrid-overlay bridge %s"+
 			", stderr:%s: %v", extBridgeName, stderr, err)
 	}
 
