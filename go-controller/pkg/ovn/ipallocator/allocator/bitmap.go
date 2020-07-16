@@ -253,7 +253,8 @@ var _ bitAllocator = contiguousScanStrategy{}
 // last allocation and will try to allocate all other addresses before re-allocating
 // the most recently allocated address.
 type roundRobinScanStrategy struct {
-	lastAllocated int
+	// holds the offset of the next bit to attempt to allocate
+	nextAlloc int
 }
 
 func (wss *roundRobinScanStrategy) AllocateBit(allocated *big.Int, max, count int) (int, bool) {
@@ -261,9 +262,9 @@ func (wss *roundRobinScanStrategy) AllocateBit(allocated *big.Int, max, count in
 		return 0, false
 	}
 	for i := 0; i < max; i++ {
-		at := (wss.lastAllocated + i) % max
+		at := (wss.nextAlloc + i) % max
 		if allocated.Bit(at) == 0 {
-			wss.lastAllocated = at
+			wss.nextAlloc = (at + 1) % max
 			return at, true
 		}
 	}
