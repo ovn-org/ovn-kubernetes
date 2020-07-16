@@ -81,4 +81,34 @@ var _ = Describe("subnet annotation tests", func() {
 			Expect(subnet).To(Equal(tc.joinIn))
 		}
 	})
+
+	It("returns a distinguishable error when the node-subnets or node-join-subnets annotation is not set", func() {
+		testNode := &v1.Node{ObjectMeta: metav1.ObjectMeta{
+			Name:        "test-node",
+			Annotations: make(map[string]string),
+		}}
+
+		subnets, err := ParseNodeHostSubnetAnnotation(testNode)
+		Expect(subnets).To(BeNil())
+		Expect(err).To(HaveOccurred())
+		Expect(IsAnnotationNotSetError(err)).To(BeTrue())
+
+		subnets, err = ParseNodeJoinSubnetAnnotation(testNode)
+		Expect(subnets).To(BeNil())
+		Expect(err).To(HaveOccurred())
+		Expect(IsAnnotationNotSetError(err)).To(BeTrue())
+
+		testNode.Annotations[ovnNodeSubnets] = "blah"
+		testNode.Annotations[ovnNodeJoinSubnets] = "blah"
+
+		subnets, err = ParseNodeHostSubnetAnnotation(testNode)
+		Expect(subnets).To(BeNil())
+		Expect(err).To(HaveOccurred())
+		Expect(IsAnnotationNotSetError(err)).To(BeFalse())
+
+		subnets, err = ParseNodeJoinSubnetAnnotation(testNode)
+		Expect(subnets).To(BeNil())
+		Expect(err).To(HaveOccurred())
+		Expect(IsAnnotationNotSetError(err)).To(BeFalse())
+	})
 })

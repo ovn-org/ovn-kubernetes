@@ -143,3 +143,22 @@ func UpdateNodeSwitchExcludeIPs(nodeName string, subnet *net.IPNet) error {
 func GetHybridOverlayPortName(nodeName string) string {
 	return "int-" + nodeName
 }
+
+type annotationNotSetError struct {
+	msg string
+}
+
+func (anse annotationNotSetError) Error() string {
+	return anse.msg
+}
+
+// newAnnotationNotSetError returns an error for an annotation that is not set
+func newAnnotationNotSetError(format string, args ...interface{}) error {
+	return annotationNotSetError{msg: fmt.Sprintf(format, args...)}
+}
+
+// IsAnnotationNotSetError returns true if the error indicates that an annotation is not set
+func IsAnnotationNotSetError(err error) bool {
+	_, ok := err.(annotationNotSetError)
+	return ok
+}

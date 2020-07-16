@@ -374,16 +374,6 @@ func (oc *Controller) syncNodeManagementPort(node *kapi.Node, hostSubnets []*net
 		return err
 	}
 
-	if macAddress == nil {
-		// When macAddress was removed, delete the switch port
-		stdout, stderr, err := util.RunOVNNbctl("--", "--if-exists", "lsp-del", util.K8sPrefix+node.Name)
-		if err != nil {
-			klog.Errorf("Failed to delete logical port to switch, stdout: %q, stderr: %q, error: %v", stdout, stderr, err)
-		}
-
-		return nil
-	}
-
 	if hostSubnets == nil {
 		hostSubnets, err = util.ParseNodeHostSubnetAnnotation(node)
 		if err != nil {

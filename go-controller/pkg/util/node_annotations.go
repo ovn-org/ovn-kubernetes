@@ -7,7 +7,6 @@ import (
 	"strconv"
 
 	kapi "k8s.io/api/core/v1"
-	"k8s.io/klog"
 
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/kube"
@@ -194,7 +193,7 @@ func SetL3GatewayConfig(nodeAnnotator kube.Annotator, cfg *L3GatewayConfig) erro
 func ParseNodeL3GatewayAnnotation(node *kapi.Node) (*L3GatewayConfig, error) {
 	l3GatewayAnnotation, ok := node.Annotations[ovnNodeL3GatewayConfig]
 	if !ok {
-		return nil, fmt.Errorf("%s annotation not found for node %q", ovnNodeL3GatewayConfig, node.Name)
+		return nil, newAnnotationNotSetError("%s annotation not found for node %q", ovnNodeL3GatewayConfig, node.Name)
 	}
 
 	var cfgs map[string]*L3GatewayConfig
@@ -224,8 +223,7 @@ func SetNodeManagementPortMACAddress(nodeAnnotator kube.Annotator, macAddress ne
 func ParseNodeManagementPortMACAddress(node *kapi.Node) (net.HardwareAddr, error) {
 	macAddress, ok := node.Annotations[ovnNodeManagementPortMacAddress]
 	if !ok {
-		klog.Warningf("macAddress annotation not found for node %q ", node.Name)
-		return nil, nil
+		return nil, newAnnotationNotSetError("macAddress annotation not found for node %q ", node.Name)
 	}
 
 	return net.ParseMAC(macAddress)
