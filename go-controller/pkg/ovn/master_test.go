@@ -226,13 +226,12 @@ func addNodeportLBs(fexec *ovntest.FakeExec, nodeName, tcpLBUUID, udpLBUUID, sct
 	})
 }
 
-func populatePortAddresses(nodeName, hybMAC, hybIP string, ovnClient goovn.Client) {
-	lsp := "int-" + nodeName
+func populatePortAddresses(nodeName, lsp, mac, ips string, ovnClient goovn.Client) {
 	cmd, err := ovnClient.LSPAdd(nodeName, lsp)
 	Expect(err).NotTo(HaveOccurred())
 	err = cmd.Execute()
 	Expect(err).NotTo(HaveOccurred())
-	addresses := hybMAC + " " + hybIP
+	addresses := mac + " " + ips
 	addresses = strings.TrimSpace(addresses)
 	cmd, err = ovnClient.LSPSetDynamicAddresses(lsp, addresses)
 	Expect(err).NotTo(HaveOccurred())
@@ -301,8 +300,8 @@ var _ = Describe("Master Operations", func() {
 
 			mockOVNNBClient := ovntest.NewMockOVNClient(goovn.DBNB)
 			mockOVNSBClient := ovntest.NewMockOVNClient(goovn.DBSB)
-
-			populatePortAddresses(nodeName, hybMAC, hybIP, mockOVNNBClient)
+			lsp := "int-" + nodeName
+			populatePortAddresses(nodeName, lsp, hybMAC, hybIP, mockOVNNBClient)
 			nodeAnnotator := kube.NewNodeAnnotator(&kube.Kube{fakeClient, egressIPFakeClient, egressFirewallFakeClient}, &testNode)
 			err = util.SetL3GatewayConfig(nodeAnnotator, &util.L3GatewayConfig{Mode: config.GatewayModeDisabled})
 			Expect(err).NotTo(HaveOccurred())
@@ -394,8 +393,8 @@ var _ = Describe("Master Operations", func() {
 
 			mockOVNNBClient := ovntest.NewMockOVNClient(goovn.DBNB)
 			mockOVNSBClient := ovntest.NewMockOVNClient(goovn.DBSB)
-
-			populatePortAddresses(nodeName, hybMAC, hybIP, mockOVNNBClient)
+			lsp := "int-" + nodeName
+			populatePortAddresses(nodeName, lsp, hybMAC, hybIP, mockOVNNBClient)
 			nodeAnnotator := kube.NewNodeAnnotator(&kube.Kube{fakeClient, egressIPFakeClient, egressFirewallFakeClient}, &testNode)
 			err = util.SetL3GatewayConfig(nodeAnnotator, &util.L3GatewayConfig{Mode: config.GatewayModeDisabled})
 			Expect(err).NotTo(HaveOccurred())
@@ -484,7 +483,8 @@ var _ = Describe("Master Operations", func() {
 			Expect(err).NotTo(HaveOccurred())
 			mockOVNNBClient := ovntest.NewMockOVNClient(goovn.DBNB)
 			mockOVNSBClient := ovntest.NewMockOVNClient(goovn.DBSB)
-			populatePortAddresses(nodeName, hybMAC, hybIP, mockOVNNBClient)
+			lsp := "int-" + nodeName
+			populatePortAddresses(nodeName, lsp, hybMAC, hybIP, mockOVNNBClient)
 			nodeAnnotator := kube.NewNodeAnnotator(&kube.Kube{fakeClient, egressIPFakeClient, egressFirewallFakeClient}, &testNode)
 			err = util.SetL3GatewayConfig(nodeAnnotator, &util.L3GatewayConfig{Mode: config.GatewayModeDisabled})
 			Expect(err).NotTo(HaveOccurred())
