@@ -11,6 +11,7 @@ require (
 	github.com/containernetworking/plugins v0.8.6
 	github.com/coreos/go-iptables v0.4.5
 	github.com/ebay/go-ovn v0.1.0
+	github.com/ebay/libovsdb v0.0.0-20190718202342-e49b8c4e1142
 	github.com/evanphx/json-patch v4.5.0+incompatible // indirect
 	github.com/golang/groupcache v0.0.0-20191027212112-611e8accdfc9 // indirect
 	github.com/googleapis/gnostic v0.3.1 // indirect
