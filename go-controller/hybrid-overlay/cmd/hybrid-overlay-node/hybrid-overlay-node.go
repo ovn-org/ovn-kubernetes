@@ -21,10 +21,13 @@ import (
 )
 
 var nodeName string
+var runAsWindowsService bool
+
+const appName = "hybrid-overlay-node"
 
 func main() {
 	c := cli.NewApp()
-	c.Name = "hybrid-overlay-node"
+	c.Name = appName
 	c.Usage = "a node controller to integrate disparate networks with VXLAN tunnels"
 	c.Version = config.Version
 	c.Flags = config.GetFlags([]cli.Flag{
@@ -32,6 +35,11 @@ func main() {
 			Name:        "node",
 			Usage:       "The name of this node in the Kubernetes cluster.",
 			Destination: &nodeName,
+		},
+		&cli.BoolFlag{
+			Name:        "windows-service",
+			Usage:       "Enables hybrid overlay to run as a Windows service. Ignored on Linux.",
+			Destination: &runAsWindowsService,
 		}})
 	c.Action = func(c *cli.Context) error {
 		if err := runHybridOverlay(c); err != nil {
@@ -81,6 +89,10 @@ func runHybridOverlay(ctx *cli.Context) error {
 
 	if nodeName == "" {
 		return fmt.Errorf("missing node name; use the 'node' flag to provide one")
+	}
+
+	if err := initForOS(runAsWindowsService); err != nil {
+		klog.Infof("Error initializing Windows service: %v", err)
 	}
 
 	clientset, _, _, err := util.NewClientsets(&config.Kubernetes)
