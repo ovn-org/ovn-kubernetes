@@ -61,6 +61,8 @@ parse_args()
                                        ;;
             -ha | --ha-enabled )       KIND_HA=true
                                        ;;
+            -me | --multicast-enabled) OVN_MULTICAST_ENABLE=true
+                                       ;;
             -ho | --hybrid-enabled )   OVN_HYBRID_OVERLAY_ENABLE=true
                                        ;;
             -kt | --keep-taint )       KIND_REMOVE_TAINT=false
@@ -108,6 +110,7 @@ print_params()
      echo "KIND_NUM_WORKER = $KIND_NUM_WORKER"
      echo "OVN_GATEWAY_MODE = $OVN_GATEWAY_MODE"
      echo "OVN_HYBRID_OVERLAY_ENABLE = $OVN_HYBRID_OVERLAY_ENABLE"
+     echo "OVN_MULTICAST_ENABLE = $OVN_MULTICAST_ENABLE"
      echo ""
 }
 
@@ -124,6 +127,7 @@ KIND_REMOVE_TAINT=${KIND_REMOVE_TAINT:-true}
 KIND_IPV4_SUPPORT=${KIND_IPV4_SUPPORT:-true}
 KIND_IPV6_SUPPORT=${KIND_IPV6_SUPPORT:-false}
 OVN_HYBRID_OVERLAY_ENABLE=${OVN_HYBRID_OVERLAY_ENABLE:-false}
+OVN_MULTICAST_ENABLE=${OVN_MULTICAST_ENABLE:-false}
 
 # Input not currently validated. Modify outside script at your own risk.
 # These are the same values defaulted to in KIND code (kind/default.go).
@@ -244,6 +248,7 @@ docker build -t ovn-daemonset-f:dev -f Dockerfile.fedora .
   --svc-cidr=${SVC_CIDR} \
   --gateway-mode=${OVN_GATEWAY_MODE} \
   --hybrid-enabled=${OVN_HYBRID_OVERLAY_ENABLE} \
+  --multicast-enabled=${OVN_MULTICAST_ENABLE} \
   --k8s-apiserver=https://[${API_IP}]:11337 \
   --ovn-master-count=${KIND_NUM_MASTER} \
   --kind \

@@ -250,6 +250,8 @@ spec:
           value: "{{ ovn_ssl_en }}"
         - name: OVN_REMOTE_PROBE_INTERVAL
           value: "{{ ovn_remote_probe_interval }}"
+        - name: OVN_MULTICAST_ENABLE
+          value: "{{ ovn_multicast_enable }}"
 
         lifecycle:
           preStop:

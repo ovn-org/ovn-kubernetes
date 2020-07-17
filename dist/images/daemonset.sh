@@ -34,6 +34,7 @@ OVNKUBE_LOGFILE_MAXAGE=""
 OVN_MASTER_COUNT=""
 OVN_REMOTE_PROBE_INTERVAL=""
 OVN_HYBRID_OVERLAY_ENABLE=""
+OVN_MULTICAST_ENABLE=""
 
 # Parse parameters given as arguments to this script.
 while [ "$1" != "" ]; do
@@ -127,6 +128,9 @@ while [ "$1" != "" ]; do
   --hybrid-enabled)
     OVN_HYBRID_OVERLAY_ENABLE=$VALUE
     ;;
+  --multicast-enabled)
+    OVN_MULTICAST_ENABLE=$VALUE
+    ;;
   *)
     echo "WARNING: unknown parameter \"$PARAM\""
     exit 1
@@ -196,6 +200,8 @@ ovn_nb_raft_port=${OVN_NB_RAFT_PORT:-6643}
 echo "ovn_nb_raft_port: ${ovn_nb_raft_port}"
 ovn_sb_raft_port=${OVN_SB_RAFT_PORT:-6644}
 echo "ovn_sb_raft_port: ${ovn_sb_raft_port}"
+ovn_multicast_enable=${OVN_MULTICAST_ENABLE}
+echo "ovn_multicast_enable: ${ovn_multicast_enable}"
 
 ovn_image=${image} \
   ovn_image_pull_policy=${image_pull_policy} \
@@ -209,6 +215,7 @@ ovn_image=${image} \
   ovnkube_logfile_maxage=${ovnkube_logfile_maxage} \
   ovn_hybrid_overlay_net_cidr=${ovn_hybrid_overlay_net_cidr} \
   ovn_hybrid_overlay_enable=${ovn_hybrid_overlay_enable} \
+  ovn_multicast_enable=${ovn_multicast_enable} \
   ovn_ssl_en=${ovn_ssl_en} \
   ovn_remote_probe_interval=${ovn_remote_probe_interval} \
   j2 ../templates/ovnkube-node.yaml.j2 -o ../yaml/ovnkube-node.yaml
@@ -223,6 +230,7 @@ ovn_image=${image} \
   ovnkube_logfile_maxage=${ovnkube_logfile_maxage} \
   ovn_hybrid_overlay_net_cidr=${ovn_hybrid_overlay_net_cidr} \
   ovn_hybrid_overlay_enable=${ovn_hybrid_overlay_enable} \
+  ovn_multicast_enable=${ovn_multicast_enable} \
   ovn_ssl_en=${ovn_ssl_en} \
   ovn_master_count=${ovn_master_count} \
   ovn_gateway_mode=${ovn_gateway_mode} \
