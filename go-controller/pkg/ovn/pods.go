@@ -213,9 +213,7 @@ func (oc *Controller) getHybridOverlayExternalGwAnnotation(ns string) (net.IP, e
 	return nsInfo.hybridOverlayExternalGW, nil
 }
 
-func (oc *Controller) addLogicalPort(pod *kapi.Pod) error {
-	var err error
-
+func (oc *Controller) addLogicalPort(pod *kapi.Pod) (err error) {
 	// If a node does node have an assigned hostsubnet don't wait for the logical switch to appear
 	if oc.lsManager.IsNonHostSubnetSwitch(pod.Spec.NodeName) {
 		return nil
@@ -241,6 +239,7 @@ func (oc *Controller) addLogicalPort(pod *kapi.Pod) error {
 	var cmds []*goovn.OvnCommand
 	var addresses []string
 	var cmd *goovn.OvnCommand
+	var releaseIPs bool
 
 	// Check if the pod's logical switch port already exists. If it
 	// does don't re-add the port to OVN as this will change its
@@ -260,6 +259,25 @@ func (oc *Controller) addLogicalPort(pod *kapi.Pod) error {
 	}
 
 	annotation, err := util.UnmarshalPodAnnotation(pod.Annotations)
+
+	// the IPs we allocate in this function need to be released back to the
+	// IPAM pool if there is some error in any step of addLogicalPort past
+	// the point the IPs were assigned via the IPAM manager.
+	// this needs to be done only when releaseIPs is set to true (the case where
+	// we truly have assigned podIPs in this call) AND when there is no error in
+	// the rest of the functionality of addLogicalPort. It is important to use a
+	// named return variable for defer to work correctly.
+
+	defer func() {
+		if releaseIPs && err != nil {
+			if relErr := oc.lsManager.ReleaseIPs(logicalSwitch, podIfAddrs); relErr != nil {
+				klog.Errorf("Error when releasing IPs for node: %s, err: %q",
+					logicalSwitch, relErr)
+			} else {
+				klog.V(5).Infof("Released IPs: %s for node: %s", util.JoinIPNetIPs(podIfAddrs, " "), logicalSwitch)
+			}
+		}
+	}()
 
 	if err == nil {
 		podMac = annotation.MAC
@@ -284,17 +302,7 @@ func (oc *Controller) addLogicalPort(pod *kapi.Pod) error {
 				return fmt.Errorf("failed to assign pod addresses for pod %s on node: %s, err: %v",
 					portName, logicalSwitch, err)
 			}
-
-			defer func(nodeName string) {
-				if err != nil {
-					if relErr := oc.lsManager.ReleaseIPs(nodeName, podIfAddrs); relErr != nil {
-						klog.Errorf("Error when releasing IPs for node: %s, err: %q",
-							nodeName, relErr)
-					} else {
-						klog.V(5).Infof("Released IPs: %s for node: %s", util.JoinIPNetIPs(podIfAddrs, " "), nodeName)
-					}
-				}
-			}(logicalSwitch)
+			releaseIPs = true
 		} else {
 			if len(podIfAddrs) > 0 {
 				if err = oc.lsManager.AllocateIPs(logicalSwitch, podIfAddrs); err != nil {
@@ -399,8 +407,8 @@ func (oc *Controller) addLogicalPort(pod *kapi.Pod) error {
 		if err != nil {
 			return err
 		}
-
-		marshalledAnnotation, err := util.MarshalPodAnnotation(&podAnnotation)
+		var marshalledAnnotation map[string]string
+		marshalledAnnotation, err = util.MarshalPodAnnotation(&podAnnotation)
 		if err != nil {
 			return fmt.Errorf("error creating pod network annotation: %v", err)
 		}
