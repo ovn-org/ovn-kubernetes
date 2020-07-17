@@ -238,6 +238,34 @@ kubectl get secrets -o jsonpath='{.items[].data.token}' > /tmp/kind/token
 pushd ../go-controller
 make
 popd
+
+if [ "${GITHUB_ACTIONS:-false}" == "true" ]; then
+  # Patch CoreDNS to work in Github CI
+  # 1. Github CI doesn´t offer IPv6 connectivity, so CoreDNS should be configured
+  # to work in an offline environment:
+  # https://github.com/coredns/coredns/issues/2494#issuecomment-457215452
+  # 2. Github CI adds following domains to resolv.conf search field:
+  # .net.
+  # CoreDNS should handle those domains and answer with NXDOMAIN instead of SERVFAIL
+  # otherwise pods stops trying to resolve the domain.
+  # Get the current config
+  original_coredns=$(kubectl get -oyaml -n=kube-system configmap/coredns)
+  echo "Original CoreDNS config:"
+  echo "${original_coredns}"
+  # Patch it
+  fixed_coredns=$(
+    printf '%s' "${original_coredns}" | sed \
+      -e 's/^.*kubernetes cluster\.local/& net/' \
+      -e '/^.*upstream$/d' \
+      -e '/^.*fallthrough.*$/d' \
+      -e '/^.*forward . \/etc\/resolv.conf$/d' \
+      -e '/^.*loop$/d' \
+  )
+  echo "Patched CoreDNS config:"
+  echo "${fixed_coredns}"
+  printf '%s' "${fixed_coredns}" | kubectl apply -f -
+fi
+
 pushd ../dist/images
 sudo cp -f ../../go-controller/_output/go/bin/* .
 echo "ref: $(git rev-parse  --symbolic-full-name HEAD)  commit: $(git rev-parse  HEAD)" > git_info
@@ -294,4 +322,3 @@ until [ -z "$(kubectl get pod -A -o custom-columns=NAME:metadata.name,STATUS:.st
 done
 echo "Pods are all up, allowing things settle for 30 seconds..."
 sleep 30
-
