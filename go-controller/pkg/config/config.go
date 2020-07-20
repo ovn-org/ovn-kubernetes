@@ -237,6 +237,8 @@ type GatewayConfig struct {
 	VLANID uint `gcfg:"vlan-id"`
 	// NodeportEnable sets whether to provide Kubernetes NodePort service or not
 	NodeportEnable bool `gcfg:"nodeport"`
+	// DisableSNATMultipleGws sets whether to disable SNAT of egress traffic in namespaces annotated with routing-external-gws
+	DisableSNATMultipleGWs bool `gcfg:"disable-snat-multiple-gws"`
 }
 
 // OvnAuthConfig holds client authentication and location details for
@@ -790,6 +792,11 @@ var OVNGatewayFlags = []cli.Flag{
 		Name:        "nodeport",
 		Usage:       "Setup nodeport based ingress on gateways.",
 		Destination: &cliConfig.Gateway.NodeportEnable,
+	},
+	&cli.BoolFlag{
+		Name:        "disable-snat-multiple-gws",
+		Usage:       "Disable SNAT for egress traffic with multiple gateways.",
+		Destination: &cliConfig.Gateway.DisableSNATMultipleGWs,
 	},
 
 	// Deprecated CLI options
