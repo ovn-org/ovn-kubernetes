@@ -107,6 +107,43 @@ func (oc *Controller) deleteLogicalPort(pod *kapi.Pod) {
 		klog.Errorf(err.Error())
 	}
 
+	for _, podIPNet := range portInfo.ips {
+		// delete src-ip cached route to GR
+		nsInfo, err := oc.waitForNamespaceLocked(pod.Namespace)
+		if err != nil {
+			klog.Errorf(err.Error())
+		}
+		podIP := podIPNet.IP.String()
+		if gwToGr, ok := nsInfo.podExternalRoutes[podIP]; ok {
+			var mask string
+			if utilnet.IsIPv6(net.ParseIP(podIP)) {
+				mask = "/128"
+			} else {
+				mask = "/32"
+			}
+			for gw, gr := range gwToGr {
+				_, stderr, err = util.RunOVNNbctl("--", "--if-exists", "--policy=src-ip",
+					"lr-route-del", gr, podIP+mask, gw)
+				if err != nil {
+					klog.Errorf("Unable to delete external gw ecmp route to GR router, stderr:%q, err:%v", stderr, err)
+				} else {
+					delete(nsInfo.podExternalRoutes, pod.Status.PodIP)
+				}
+			}
+		}
+		if config.Gateway.DisableSNATMultipleGWs && nsInfo.routingExternalGWs == nil {
+			nodeName := pod.Spec.NodeName
+			gr := "GR_" + nodeName
+			stdout, stderr, err := util.RunOVNNbctl("--", "--if-exists", "lr-nat-del",
+				gr, "snat", podIP)
+			if err != nil {
+				klog.Errorf("failed to delete SNAT rule for pod on gateway router %s, "+
+					"stdout: %q, stderr: %q, error: %v", gr, stdout, stderr, err)
+			}
+		}
+		nsInfo.Unlock()
+	}
+
 	oc.logicalPortCache.remove(logicalPort)
 }
 
@@ -202,6 +239,15 @@ func (oc *Controller) addRoutesGatewayIP(pod *kapi.Pod, podAnnotation *util.PodA
 		}
 	}
 	return nil
+}
+
+func (oc *Controller) getRoutingExternalGWs(ns string) ([]net.IP, error) {
+	nsInfo, err := oc.waitForNamespaceLocked(ns)
+	if err != nil {
+		return nil, err
+	}
+	defer nsInfo.Unlock()
+	return nsInfo.routingExternalGWs, nil
 }
 
 func (oc *Controller) getHybridOverlayExternalGwAnnotation(ns string) (net.IP, error) {
@@ -387,6 +433,71 @@ func (oc *Controller) addLogicalPort(pod *kapi.Pod) (err error) {
 	if oc.multicastSupport {
 		if err = podAddDefaultDenyMulticastPolicy(portInfo); err != nil {
 			return err
+		}
+	}
+
+	// add src-ip routes to GR if external gw annotation is set
+	routingExternalGWs, err := oc.getRoutingExternalGWs(pod.Namespace)
+	if err != nil {
+		return err
+	}
+	if routingExternalGWs != nil {
+		gr := "GR_" + pod.Spec.NodeName
+		for _, v := range routingExternalGWs {
+			var mask string
+			gw := v.String()
+			for _, podIPNet := range podIfAddrs {
+				podIP := podIPNet.IP.String()
+				if utilnet.IsIPv6(net.ParseIP(podIP)) {
+					mask = "/128"
+				} else {
+					mask = "/32"
+				}
+				_, stderr, err := util.RunOVNNbctl("--", "--may-exist", "--policy=src-ip", "--ecmp",
+					"lr-route-add", gr, podIP+mask, gw)
+				if err != nil {
+					return fmt.Errorf("unable to add external gw src-ip route to GR router, stderr:%q, err:%v", stderr, err)
+				}
+				nsInfo, err := oc.waitForNamespaceLocked(pod.Namespace)
+				if err != nil {
+					return err
+				}
+				if nsInfo.podExternalRoutes[podIP] == nil {
+					nsInfo.podExternalRoutes[podIP] = make(map[string]string)
+				}
+				nsInfo.podExternalRoutes[podIP][gw] = gr
+				nsInfo.Unlock()
+			}
+		}
+	}
+	if config.Gateway.DisableSNATMultipleGWs && routingExternalGWs == nil {
+		nodeName := pod.Spec.NodeName
+		node, err := oc.watchFactory.GetNode(nodeName)
+		if err != nil {
+			return fmt.Errorf("failed to get node %s: %v", nodeName, err)
+		}
+		l3GWConfig, err := util.ParseNodeL3GatewayAnnotation(node)
+		if err != nil {
+			return fmt.Errorf("unable to parse node L3 gw annotation: %v", err)
+		}
+		gr := "GR_" + nodeName
+		for _, gwIPNet := range l3GWConfig.IPAddresses {
+			for _, podIPNet := range podIfAddrs {
+				gwIP := gwIPNet.IP.String()
+				podIP := podIPNet.IP.String()
+				var mask string
+				if utilnet.IsIPv6(net.ParseIP(podIP)) {
+					mask = "/128"
+				} else {
+					mask = "/32"
+				}
+				stdout, stderr, err := util.RunOVNNbctl("--may-exist", "lr-nat-add",
+					gr, "snat", gwIP, podIP+mask)
+				if err != nil {
+					return fmt.Errorf("failed to create SNAT rule for pod on gateway router %s, "+
+						"stdout: %q, stderr: %q, error: %v", gr, stdout, stderr, err)
+				}
+			}
 		}
 	}
 

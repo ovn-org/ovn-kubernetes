@@ -34,6 +34,7 @@ OVNKUBE_LOGFILE_MAXAGE=""
 OVN_MASTER_COUNT=""
 OVN_REMOTE_PROBE_INTERVAL=""
 OVN_HYBRID_OVERLAY_ENABLE=""
+OVN_DISABLE_SNAT_MULTIPLE_GWS=""
 OVN_MULTICAST_ENABLE=""
 
 # Parse parameters given as arguments to this script.
@@ -128,6 +129,9 @@ while [ "$1" != "" ]; do
   --hybrid-enabled)
     OVN_HYBRID_OVERLAY_ENABLE=$VALUE
     ;;
+  --disable-snat-multiple-gws)
+    OVN_DISABLE_SNAT_MULTIPLE_GWS=$VALUE
+    ;;
   --multicast-enabled)
     OVN_MULTICAST_ENABLE=$VALUE
     ;;
@@ -182,6 +186,8 @@ ovn_hybrid_overlay_enable=${OVN_HYBRID_OVERLAY_ENABLE}
 echo "ovn_hybrid_overlay_enable: ${ovn_hybrid_overlay_enable}"
 ovn_hybrid_overlay_net_cidr=${OVN_HYBRID_OVERLAY_NET_CIDR}
 echo "ovn_hybrid_overlay_net_cidr: ${ovn_hybrid_overlay_net_cidr}"
+ovn_disable_snat_multiple_gws=${OVN_DISABLE_SNAT_MULTIPLE_GWS}
+echo "ovn_disable_snat_multiple_gws: ${ovn_disable_snat_multiple_gws}"
 ovn_ssl_en=${OVN_SSL_ENABLE:-"no"}
 echo "ovn_ssl_enable: ${ovn_ssl_en}"
 ovn_nb_raft_election_timer=${OVN_NB_RAFT_ELECTION_TIMER:-1000}
@@ -215,6 +221,7 @@ ovn_image=${image} \
   ovnkube_logfile_maxage=${ovnkube_logfile_maxage} \
   ovn_hybrid_overlay_net_cidr=${ovn_hybrid_overlay_net_cidr} \
   ovn_hybrid_overlay_enable=${ovn_hybrid_overlay_enable} \
+  ovn_disable_snat_multiple_gws=${ovn_disable_snat_multiple_gws} \
   ovn_multicast_enable=${ovn_multicast_enable} \
   ovn_ssl_en=${ovn_ssl_en} \
   ovn_remote_probe_interval=${ovn_remote_probe_interval} \
@@ -230,6 +237,7 @@ ovn_image=${image} \
   ovnkube_logfile_maxage=${ovnkube_logfile_maxage} \
   ovn_hybrid_overlay_net_cidr=${ovn_hybrid_overlay_net_cidr} \
   ovn_hybrid_overlay_enable=${ovn_hybrid_overlay_enable} \
+  ovn_disable_snat_multiple_gws=${ovn_disable_snat_multiple_gws} \
   ovn_multicast_enable=${ovn_multicast_enable} \
   ovn_ssl_en=${ovn_ssl_en} \
   ovn_master_count=${ovn_master_count} \

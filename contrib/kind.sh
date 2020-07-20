@@ -39,29 +39,30 @@ usage()
 {
     echo "usage: kind.sh [[[-cf|--config-file <file>] [-kt|keep-taint] [-ha|--ha-enabled]"
     echo "                 [-ho|--hybrid-enabled] [-ii|--install-ingress] [-n4|--no-ipv4]"
-    echo "                 [-i6|--ipv6] [-wk|--num-workers <num>]"
+    echo "                 [-i6|--ipv6] [-wk|--num-workers <num>] [-ds|--disable-snat-multiple-gws]"
     echo "                 [-sw|--allow-system-writes] [-gm|--gateway-mode <mode>]] |"
     echo "                [-h]]"
     echo ""
-    echo "-cf | --config-file          Name of the KIND J2 configuration file."
-    echo "                             DEFAULT: ./kind.yaml.j2"
-    echo "-kt | --keep-taint           Do not remove taint components."
-    echo "                             DEFAULT: Remove taint components."
-    echo "-ha | --ha-enabled           Enable high availability. DEFAULT: HA Disabled."
-    echo "-ho | --hybrid-enabled       Enable hybrid overlay. DEFAULT: Disabled."
-    echo "-ii | --install-ingress      Flag to install Ingress Components."
-    echo "                             DEFAULT: Don't install ingress components."
-    echo "-n4 | --no-ipv4              Disable IPv4. DEFAULT: IPv4 Enabled."
-    echo "-i6 | --ipv6                 Enable IPv6. DEFAULT: IPv6 Disabled."
-    echo "-wk | --num-workers          Number of worker nodes. DEFAULT: HA - 2 worker"
-    echo "                             nodes and no HA - 0 worker nodes."
-    echo "-sw | --allow-system-writes  Allow script to update system. Intended to allow"
-    echo "                             github CI to be updated with IPv6 settings."
-    echo "                             DEFAULT: Don't allow."
-    echo "-gm | --gateway-mode         Enable 'shared' or 'local' gateway mode."
-    echo "                             DEFAULT: local."
-    echo "-ov | --ovn-image            Use the specified docker image instead of building locally. DEFAULT: local build."
-    echo "--delete                     Delete current cluster"
+    echo "-cf | --config-file               Name of the KIND J2 configuration file."
+    echo "                                  DEFAULT: ./kind.yaml.j2"
+    echo "-kt | --keep-taint                Do not remove taint components."
+    echo "                                  DEFAULT: Remove taint components."
+    echo "-ha | --ha-enabled                Enable high availability. DEFAULT: HA Disabled."
+    echo "-ho | --hybrid-enabled            Enable hybrid overlay. DEFAULT: Disabled."
+    echo "-ds | --disable-snat-multiple-gws Disable SNAT for multiple gws. DEFAULT: Disabled."
+    echo "-ii | --install-ingress           Flag to install Ingress Components."
+    echo "                                  DEFAULT: Don't install ingress components."
+    echo "-n4 | --no-ipv4                   Disable IPv4. DEFAULT: IPv4 Enabled."
+    echo "-i6 | --ipv6                      Enable IPv6. DEFAULT: IPv6 Disabled."
+    echo "-wk | --num-workers               Number of worker nodes. DEFAULT: HA - 2 worker"
+    echo "                                  nodes and no HA - 0 worker nodes."
+    echo "-sw | --allow-system-writes       Allow script to update system. Intended to allow"
+    echo "                                  github CI to be updated with IPv6 settings."
+    echo "                                  DEFAULT: Don't allow."
+    echo "-gm | --gateway-mode              Enable 'shared' or 'local' gateway mode."
+    echo "                                  DEFAULT: local."
+    echo "-ov | --ovn-image            	    Use the specified docker image instead of building locally. DEFAULT: local build."
+    echo "--delete                     	    Delete current cluster"
     echo ""
 }
 
@@ -69,57 +70,59 @@ parse_args()
 {
     while [ "$1" != "" ]; do
         case $1 in
-            -cf | --config-file )         shift
-                                          if test ! -f "$1"; then
-                                             echo "$1 does not  exist"
-                                             usage
-                                             exit 1
-                                          fi
-                                          KIND_CONFIG=$1
-                                          ;;
-            -ii | --install-ingress )     KIND_INSTALL_INGRESS=true
-                                          ;;
-            -ha | --ha-enabled )          KIND_HA=true
-                                          ;;
-            -me | --multicast-enabled)    OVN_MULTICAST_ENABLE=true
-                                          ;;
-            -ho | --hybrid-enabled )      OVN_HYBRID_OVERLAY_ENABLE=true
-                                          ;;
-            -kt | --keep-taint )          KIND_REMOVE_TAINT=false
-                                          ;;
-            -n4 | --no-ipv4 )             KIND_IPV4_SUPPORT=false
-                                          ;;
-            -i6 | --ipv6 )                KIND_IPV6_SUPPORT=true
-                                          ;;
-            -wk | --num-workers )         shift
-                                          if ! [[ "$1" =~ ^[0-9]+$ ]]; then
-                                             echo "Invalid num-workers: $1"
-                                             usage
-                                             exit 1
-                                          fi
-                                          KIND_NUM_WORKER=$1
-                                          ;;
-            -sw | --allow-system-writes ) KIND_ALLOW_SYSTEM_WRITES=true
-                                          ;;
-            -gm | --gateway-mode )        shift
-                                          if [ "$1" != "local" ] && [ "$1" != "shared" ]; then
-                                             echo "Invalid gateway mode: $1"
-                                             usage
-                                             exit 1
-                                          fi
-                                          OVN_GATEWAY_MODE=$1
-                                          ;;
-            -ov | --ovn-image )           shift
-                                          OVN_IMAGE=$1
-                                          ;;
-            --delete )                    delete
-                                          exit
-                                          ;;
-            -h | --help )                 usage
-                                          exit
-                                          ;;
-            * )                           usage
-                                          exit 1
+            -cf | --config-file )               shift
+                                                if test ! -f "$1"; then
+                                                    echo "$1 does not  exist"
+                                                    usage
+                                                    exit 1
+                                                fi
+                                                KIND_CONFIG=$1
+                                                ;;
+            -ii | --install-ingress )           KIND_INSTALL_INGRESS=true
+                                                ;;
+            -ha | --ha-enabled )                KIND_HA=true
+                                                ;;
+            -me | --multicast-enabled)          OVN_MULTICAST_ENABLE=true
+                                                ;;
+            -ho | --hybrid-enabled )            OVN_HYBRID_OVERLAY_ENABLE=true
+                                                ;;
+            -ds | --disable-snat-multiple-gws ) OVN_DISABLE_SNAT_MULTIPLE_GWS=true
+                                                ;;
+            -kt | --keep-taint )                KIND_REMOVE_TAINT=false
+                                                ;;
+            -n4 | --no-ipv4 )                   KIND_IPV4_SUPPORT=false
+                                                ;;
+            -i6 | --ipv6 )                      KIND_IPV6_SUPPORT=true
+                                                ;;
+            -wk | --num-workers )               shift
+                                                if ! [[ "$1" =~ ^[0-9]+$ ]]; then
+                                                    echo "Invalid num-workers: $1"
+                                                    usage
+                                                    exit 1
+                                                fi
+                                                KIND_NUM_WORKER=$1
+                                                ;;
+            -sw | --allow-system-writes )       KIND_ALLOW_SYSTEM_WRITES=true
+                                                ;;
+            -gm | --gateway-mode )              shift
+                                                if [ "$1" != "local" ] && [ "$1" != "shared" ]; then
+                                                    echo "Invalid gateway mode: $1"
+                                                    usage
+                                                    exit 1
+                                                fi
+                                                OVN_GATEWAY_MODE=$1
+                                                ;;
+            -ov | --ovn-image )           	shift
+                                          	OVN_IMAGE=$1
+                                          	;;
+            --delete )                    	delete
+                                          	exit
+                                          	;;
+            -h | --help )                       usage
+                                                exit
+                                                ;;
+            * )                                 usage
+                                                exit 1
         esac
         shift
     done
@@ -139,6 +142,7 @@ print_params()
      echo "KIND_ALLOW_SYSTEM_WRITES = $KIND_ALLOW_SYSTEM_WRITES"
      echo "OVN_GATEWAY_MODE = $OVN_GATEWAY_MODE"
      echo "OVN_HYBRID_OVERLAY_ENABLE = $OVN_HYBRID_OVERLAY_ENABLE"
+     echo "OVN_DISABLE_SNAT_MULTIPLE_GWS = $OVN_DISABLE_SNAT_MULTIPLE_GWS"
      echo "OVN_MULTICAST_ENABLE = $OVN_MULTICAST_ENABLE"
      echo "OVN_IMAGE = $OVN_IMAGE"
      echo ""
@@ -157,6 +161,7 @@ KIND_REMOVE_TAINT=${KIND_REMOVE_TAINT:-true}
 KIND_IPV4_SUPPORT=${KIND_IPV4_SUPPORT:-true}
 KIND_IPV6_SUPPORT=${KIND_IPV6_SUPPORT:-false}
 OVN_HYBRID_OVERLAY_ENABLE=${OVN_HYBRID_OVERLAY_ENABLE:-false}
+OVN_DISABLE_SNAT_MULTIPLE_GWS=${OVN_DISABLE_SNAT_MULTIPLE_GWS:-false}
 OVN_MULTICAST_ENABLE=${OVN_MULTICAST_ENABLE:-false}
 KIND_ALLOW_SYSTEM_WRITES=${KIND_ALLOW_SYSTEM_WRITES:-false}
 OVN_IMAGE=${OVN_IMAGE:-local}
@@ -332,6 +337,7 @@ pushd ../dist/images
   --svc-cidr=${SVC_CIDR} \
   --gateway-mode=${OVN_GATEWAY_MODE} \
   --hybrid-enabled=${OVN_HYBRID_OVERLAY_ENABLE} \
+  --disable-snat-multiple-gws=${OVN_DISABLE_SNAT_MULTIPLE_GWS} \
   --multicast-enabled=${OVN_MULTICAST_ENABLE} \
   --k8s-apiserver=${API_URL} \
   --ovn-master-count=${KIND_NUM_MASTER} \

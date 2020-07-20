@@ -2,10 +2,11 @@ package util
 
 import (
 	"fmt"
-	"github.com/stretchr/testify/mock"
 	"net"
 	"reflect"
 	"testing"
+
+	"github.com/stretchr/testify/mock"
 
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/kube"
@@ -33,7 +34,7 @@ func TestL3GatewayConfig_MarshalJSON(t *testing.T) {
 			inpL3GwCfg: &L3GatewayConfig{
 				Mode: config.GatewayModeLocal,
 			},
-			expOutput: []byte(`{"mode":"local","node-port-enable":"false"}`),
+			expOutput: []byte(`{"mode":"local","node-port-enable":"false","disable-snat-multiple-gws":"false"}`),
 		},
 		{
 			desc: "test VLANID not nil",
@@ -41,7 +42,7 @@ func TestL3GatewayConfig_MarshalJSON(t *testing.T) {
 				Mode:   config.GatewayModeShared,
 				VLANID: &vlanid,
 			},
-			expOutput: []byte(`{"mode":"shared","node-port-enable":"false","vlan-id":"1024"}`),
+			expOutput: []byte(`{"mode":"shared","node-port-enable":"false","disable-snat-multiple-gws":"false","vlan-id":"1024"}`),
 		},
 		{
 			desc: "test single IP address and single next hop path",
@@ -51,7 +52,7 @@ func TestL3GatewayConfig_MarshalJSON(t *testing.T) {
 				IPAddresses: []*net.IPNet{ovntest.MustParseIPNet("192.168.1.10/24")},
 				NextHops:    []net.IP{ovntest.MustParseIP("192.168.1.1")},
 			},
-			expOutput: []byte(`{"mode":"local","ip-addresses":["192.168.1.10/24"],"ip-address":"192.168.1.10/24","next-hops":["192.168.1.1"],"next-hop":"192.168.1.1","node-port-enable":"false","vlan-id":"1024"}`),
+			expOutput: []byte(`{"mode":"local","ip-addresses":["192.168.1.10/24"],"ip-address":"192.168.1.10/24","next-hops":["192.168.1.1"],"next-hop":"192.168.1.1","node-port-enable":"false","disable-snat-multiple-gws":"false","vlan-id":"1024"}`),
 		},
 		{
 			desc: "test multiple IP address and multiple next hop paths",
@@ -69,7 +70,7 @@ func TestL3GatewayConfig_MarshalJSON(t *testing.T) {
 					ovntest.MustParseIP("fd01::1"),
 				},
 			},
-			expOutput: []byte(`{"mode":"local","interface-id":"INTERFACE-ID","mac-address":"11:22:33:44:55:66","ip-addresses":["192.168.1.10/24","fd01::1234/64"],"next-hops":["192.168.1.1","fd01::1"],"node-port-enable":"false","vlan-id":"1024"}`),
+			expOutput: []byte(`{"mode":"local","interface-id":"INTERFACE-ID","mac-address":"11:22:33:44:55:66","ip-addresses":["192.168.1.10/24","fd01::1234/64"],"next-hops":["192.168.1.1","fd01::1"],"node-port-enable":"false","disable-snat-multiple-gws":"false","vlan-id":"1024"}`),
 		},
 	}
 	for i, tc := range tests {

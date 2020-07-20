@@ -68,6 +68,14 @@ type namespaceInfo struct {
 	hybridOverlayExternalGW net.IP
 	hybridOverlayVTEP       net.IP
 
+	// routingExternalGWs is a slice of net.IP containing the values parsed from
+	// annotation k8s.ovn.org/routing-external-gws
+	routingExternalGWs []net.IP
+	// podExternalRoutes is a cache keeping the LR routes added to the GRs when
+	// the k8s.ovn.org/routing-external-gws annotation is used. The first map key
+	// is the podIP, the second the GW and the third the GR
+	podExternalRoutes map[string]map[string]string
+
 	// The UUID of the namespace-wide port group that contains all the pods in the namespace.
 	portGroupUUID string
 
