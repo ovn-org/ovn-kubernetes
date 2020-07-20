@@ -113,6 +113,15 @@ func TestL3GatewayConfig_UnmarshalJSON(t *testing.T) {
 			errMatch:   fmt.Errorf("bad 'vlan-id' value"),
 		},
 		{
+			desc:       "success: test valid VLANID input",
+			inputParam: []byte(`{"mode":"shared","vlan-id":"223"}`),
+			expOut: L3GatewayConfig{
+				Mode:           "shared",
+				NodePortEnable: false,
+				VLANID:         &[]uint{223}[0],
+			},
+		},
+		{
 			desc:       "test bad MAC address value",
 			inputParam: []byte(`{"mode":"local","mac-address":"BADMAC"}`),
 			errMatch:   fmt.Errorf("bad 'mac-address' value"),
@@ -126,6 +135,17 @@ func TestL3GatewayConfig_UnmarshalJSON(t *testing.T) {
 			desc:       "test bad 'IP addresses' value",
 			inputParam: []byte(`{"mode":"local","mac-address":"11:22:33:44:55:66","ip-addresses":["192.168.1/24","fd01::1234/64"]}`),
 			errMatch:   fmt.Errorf("bad 'ip-addresses' value"),
+		},
+		{
+			desc:       "test valid 'IP addresses' value",
+			inputParam: []byte(`{"mode":"local","mac-address":"11:22:33:44:55:66","ip-addresses":["192.168.1.5/24","fd01::1234/64"]}`),
+			expOut: L3GatewayConfig{
+				Mode:           "local",
+				MACAddress:     ovntest.MustParseMAC("11:22:33:44:55:66"),
+				NodePortEnable: false,
+				IPAddresses:    ovntest.MustParseIPNets("192.168.1.5/24", "fd01::1234/64"),
+				NextHops:       []net.IP{nil},
+			},
 		},
 		{
 			desc:       "test bad 'next-hop' value",
