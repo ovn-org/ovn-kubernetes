@@ -46,12 +46,13 @@ var (
 	connectionsMutex = &sync.RWMutex{}
 )
 
+// Constants defined for libovsdb
 const (
 	defaultTCPAddress  = "127.0.0.1:6640"
 	defaultUnixAddress = "/var/run/openvswitch/ovnnb_db.sock"
-	SSL             = "ssl"
-	TCP             = "tcp"
-	UNIX            = "unix"
+	SSL                = "ssl"
+	TCP                = "tcp"
+	UNIX               = "unix"
 )
 
 // Connect to ovn, using endpoint in format ovsdb Connection Methods
@@ -65,13 +66,11 @@ func Connect(endpoints string, tlsConfig *tls.Config) (*OvsdbClient, error) {
 		if u, err = url.Parse(endpoint); err != nil {
 			return nil, err
 		}
-		var host string
-		endPointStr := strings.Split(endpoint, ":")
-		if len(endPointStr) > 2 {
-			host = fmt.Sprintf("%s:%s", endPointStr[1], endPointStr[2])
-			if len(host) == 0 {
-				host = defaultTCPAddress
-			}
+		// u.Opaque contains the original endPoint with the leading protocol stripped
+		// off. For example: endPoint is "tcp:127.0.0.1:6640" and u.Opaque is "127.0.0.1:6640"
+		host := u.Opaque
+		if len(host) == 0 {
+			host = defaultTCPAddress
 		}
 		switch u.Scheme {
 		case UNIX:
@@ -250,7 +249,7 @@ func (ovs OvsdbClient) Transact(database string, operation ...Operation) ([]Oper
 	var reply []OperationResult
 	db, ok := ovs.Schema[database]
 	if !ok {
-		return nil, errors.New("invalid Database Schema")
+		return nil, fmt.Errorf("invalid Database %q Schema", database)
 	}
 
 	if ok := db.validateOperations(operation...); !ok {
@@ -269,7 +268,7 @@ func (ovs OvsdbClient) Transact(database string, operation ...Operation) ([]Oper
 func (ovs OvsdbClient) MonitorAll(database string, jsonContext interface{}) (*TableUpdates, error) {
 	schema, ok := ovs.Schema[database]
 	if !ok {
-		return nil, errors.New("invalid Database Schema")
+		return nil, fmt.Errorf("invalid Database %q Schema", database)
 	}
 
 	requests := make(map[string]MonitorRequest)
@@ -358,5 +357,4 @@ func handleDisconnectNotification(c *rpc2.Client) {
 // Disconnect will close the OVSDB connection
 func (ovs OvsdbClient) Disconnect() {
 	ovs.rpcClient.Close()
-	clearConnection(ovs.rpcClient)
 }
