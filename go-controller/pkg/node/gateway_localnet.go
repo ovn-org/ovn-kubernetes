@@ -90,8 +90,9 @@ func delIptRules(ipt util.IPTablesHelper, rules []iptRule) {
 func generateGatewayNATRules(ifname string, ip net.IP) []iptRule {
 	// Allow packets to/from the gateway interface in case defaults deny
 	rules := make([]iptRule, 0)
-	// Block MCS
+	// OCP HACK: Block MCS Access. https://github.com/openshift/ovn-kubernetes/pull/170
 	generateBlockMCSRules(&rules)
+	// END OCP HACK
 	rules = append(rules, iptRule{
 		table: "filter",
 		chain: "FORWARD",
@@ -252,14 +253,13 @@ func localnetIptRules(svc *kapi.Service, gatewayIP string) []iptRule {
 		}
 
 		nodePort := fmt.Sprintf("%d", svcPort.NodePort)
-		destination := net.JoinHostPort(gatewayIP, nodePort)
 
 		rules = append(rules, iptRule{
 			table: "nat",
 			chain: iptableNodePortChain,
 			args: []string{
 				"-p", string(protocol), "--dport", nodePort,
-				"-j", "DNAT", "--to-destination", destination,
+				"-j", "DNAT", "--to-destination", net.JoinHostPort(gatewayIP, nodePort),
 			},
 		})
 		rules = append(rules, iptRule{
@@ -271,30 +271,9 @@ func localnetIptRules(svc *kapi.Service, gatewayIP string) []iptRule {
 			},
 		})
 
-		ingPort := fmt.Sprintf("%d", svcPort.Port)
-		for _, ing := range svc.Status.LoadBalancer.Ingress {
-			if ing.IP == "" {
-				continue
-			}
-			rules = append(rules, iptRule{
-				table: "nat",
-				chain: iptableNodePortChain,
-				args: []string{
-					"-d", ing.IP,
-					"-p", string(protocol), "--dport", ingPort,
-					"-j", "DNAT", "--to-destination", destination,
-				},
-			})
-			rules = append(rules, iptRule{
-				table: "filter",
-				chain: iptableNodePortChain,
-				args: []string{
-					"-d", ing.IP,
-					"-p", string(protocol), "--dport", ingPort,
-					"-j", "ACCEPT",
-				},
-			})
-		}
+		// OCP HACK: Fix Azure/GCP LoadBalancers. https://github.com/openshift/ovn-kubernetes/pull/112
+		rules = append(rules, getLoadBalancerIPTRules(svc, svcPort, gatewayIP, svcPort.NodePort)...)
+		// END OCP HACK
 	}
 	return rules
 }
@@ -362,10 +341,12 @@ func localnetNodePortWatcher(ipt util.IPTablesHelper, wf *factory.WatchFactory, 
 		UpdateFunc: func(old, new interface{}) {
 			svcNew := new.(*kapi.Service)
 			svcOld := old.(*kapi.Service)
+			// OCP HACK: Fix Azure/GCP LoadBalancers. https://github.com/openshift/ovn-kubernetes/pull/112
 			if reflect.DeepEqual(svcNew.Spec, svcOld.Spec) &&
 				reflect.DeepEqual(svcNew.Status, svcOld.Status) {
 				return
 			}
+			// END OCP HACK
 			err := npw.deleteService(svcOld)
 			if err != nil {
 				klog.Errorf("Error in deleting service - %v", err)

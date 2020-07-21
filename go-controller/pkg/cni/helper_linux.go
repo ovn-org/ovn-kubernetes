@@ -9,7 +9,6 @@ import (
 	"os/exec"
 	"strconv"
 	"strings"
-	"time"
 
 	"k8s.io/klog"
 
@@ -20,8 +19,6 @@ import (
 	"github.com/containernetworking/plugins/pkg/ip"
 	"github.com/containernetworking/plugins/pkg/ns"
 	"github.com/vishvananda/netlink"
-
-	"k8s.io/apimachinery/pkg/util/wait"
 )
 
 func renameLink(curName, newName string) error {
@@ -296,11 +293,12 @@ func (pr *PodRequest) ConfigureInterface(namespace string, podName string, ifInf
 		}
 	}
 
-	// Block access to certain things
+	// OCP HACK: block access to MCS/metadata; https://github.com/openshift/ovn-kubernetes/pull/19
 	err = setupIPTablesBlocks(netns, ifInfo)
 	if err != nil {
 		return nil, err
 	}
+	// END OCP HACK
 
 	err = netns.Do(func(hostNS ns.NetNS) error {
 		if _, err := os.Stat("/proc/sys/net/ipv6/conf/all/dad_transmits"); !os.IsNotExist(err) {
@@ -315,16 +313,11 @@ func (pr *PodRequest) ConfigureInterface(namespace string, podName string, ifInf
 		klog.Warningf("Failed to settle addresses: %q", err)
 	}
 
-	err = wait.PollImmediate(100*time.Millisecond, 20*time.Second, func() (bool, error) {
-		stdout, err := ofctlExec("dump-flows", "br-int")
-		if err != nil {
-			return false, nil
-		}
-		return strings.Contains(stdout, ifInfo.IPs[0].IP.String()), nil
-	})
-	if err != nil {
+	// OCP HACK: wait for OVN to fully process the new pod
+	if err = waitForBrIntFlows(ifInfo.IPs[0].IP.String()); err != nil {
 		return nil, fmt.Errorf("timed out dumping br-int flow entries for sandbox: %v", err)
 	}
+	// END OCP HACK
 
 	return []*current.Interface{hostIface, contIface}, nil
 }
