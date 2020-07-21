@@ -3,6 +3,7 @@ package util
 import (
 	"bytes"
 	"fmt"
+	"net"
 	"testing"
 
 	goovn "github.com/ebay/go-ovn"
@@ -275,6 +276,174 @@ func TestMatchIPFamily(t *testing.T) {
 			} else {
 				assert.Error(t, err)
 			}
+		})
+	}
+}
+
+func TestJoinHostPortInt32(t *testing.T) {
+	tests := []struct {
+		desc    string
+		inpHost string
+		inpPort int32
+		outExp  string
+	}{
+		{
+			desc:    "empty string for host name and a negative port number",
+			inpPort: -25,
+			outExp:  ":-25",
+		},
+		{
+			desc:    "valid non-zero length string for host name",
+			inpHost: "hostname",
+			inpPort: 22,
+			outExp:  "hostname:22",
+		},
+		{
+			desc:    "valid IPv4 address as host name",
+			inpHost: "192.168.1.15",
+			inpPort: 22,
+			outExp:  "192.168.1.15:22",
+		},
+		{
+			desc:    "valid IPv6 address as host name",
+			inpHost: "fd01::1234",
+			inpPort: 22,
+			outExp:  "[fd01::1234]:22",
+		},
+	}
+	for i, tc := range tests {
+		t.Run(fmt.Sprintf("%d:%s", i, tc.desc), func(t *testing.T) {
+			res := JoinHostPortInt32(tc.inpHost, tc.inpPort)
+			t.Log(res)
+			assert.Equal(t, res, tc.outExp)
+		})
+	}
+}
+
+func TestIPAddrToHWAddr(t *testing.T) {
+	tests := []struct {
+		desc   string
+		inpIP  net.IP
+		outExp net.HardwareAddr
+	}{
+		{
+			desc:   "test IPv4 instance of net.IP",
+			inpIP:  ovntest.MustParseIP("192.168.1.5"),
+			outExp: ovntest.MustParseMAC("0a:58:c0:a8:01:05"),
+		},
+		{
+			desc:   "test IPv6 instance of net.IP",
+			inpIP:  ovntest.MustParseIP("fd01::1234"),
+			outExp: ovntest.MustParseMAC("0a:58:fd:01:12:34"),
+		},
+	}
+	for i, tc := range tests {
+		t.Run(fmt.Sprintf("%d:%s", i, tc.desc), func(t *testing.T) {
+			res := IPAddrToHWAddr(tc.inpIP)
+			t.Log(res)
+			assert.Equal(t, res, tc.outExp)
+		})
+	}
+}
+
+func TestJoinIPs(t *testing.T) {
+	tests := []struct {
+		desc         string
+		inpIPList    []net.IP
+		inpSeparator string
+		outExp       string
+	}{
+		{
+			desc:         "an empty net.IPNet list with ',' separator",
+			inpSeparator: ",",
+			outExp:       "",
+		},
+		{
+			desc:         "single item in net.IPNet list with `;` separator",
+			inpIPList:    ovntest.MustParseIPs("192.168.1.5"),
+			inpSeparator: ";",
+			outExp:       "192.168.1.5",
+		},
+		{
+			desc:         "two items in net.IPNet list with `;` separator",
+			inpIPList:    ovntest.MustParseIPs("192.168.1.5", "192.168.1.6"),
+			inpSeparator: ";",
+			outExp:       "192.168.1.5;192.168.1.6",
+		},
+	}
+	for i, tc := range tests {
+		t.Run(fmt.Sprintf("%d:%s", i, tc.desc), func(t *testing.T) {
+			res := JoinIPs(tc.inpIPList, tc.inpSeparator)
+			t.Log(res)
+			assert.Equal(t, res, tc.outExp)
+		})
+	}
+}
+
+func TestJoinIPNets(t *testing.T) {
+	tests := []struct {
+		desc         string
+		inpIPNetList []*net.IPNet
+		inpSeparator string
+		outExp       string
+	}{
+		{
+			desc:         "an empty net.IPNet list with ',' separator",
+			inpSeparator: ",",
+			outExp:       "",
+		},
+		{
+			desc:         "single item in net.IPNet list with `;` separator",
+			inpIPNetList: ovntest.MustParseIPNets("192.168.1.5/24"),
+			inpSeparator: ";",
+			outExp:       "192.168.1.5/24",
+		},
+		{
+			desc:         "two items in net.IPNet list with `;` separator",
+			inpIPNetList: ovntest.MustParseIPNets("192.168.1.5/24", "192.168.1.6/24"),
+			inpSeparator: ";",
+			outExp:       "192.168.1.5/24;192.168.1.6/24",
+		},
+	}
+	for i, tc := range tests {
+		t.Run(fmt.Sprintf("%d:%s", i, tc.desc), func(t *testing.T) {
+			res := JoinIPNets(tc.inpIPNetList, tc.inpSeparator)
+			t.Log(res)
+			assert.Equal(t, res, tc.outExp)
+		})
+	}
+}
+
+func TestJoinIPNetIPs(t *testing.T) {
+	tests := []struct {
+		desc         string
+		inpIPNetList []*net.IPNet
+		inpSeparator string
+		outExp       string
+	}{
+		{
+			desc:         "an empty net.IPNet list with ',' separator",
+			inpSeparator: ",",
+			outExp:       "",
+		},
+		{
+			desc:         "single item in net.IPNet list with `;` separator",
+			inpIPNetList: ovntest.MustParseIPNets("192.168.1.5/24"),
+			inpSeparator: ";",
+			outExp:       "192.168.1.5",
+		},
+		{
+			desc:         "two items in net.IPNet list with `;` separator",
+			inpIPNetList: ovntest.MustParseIPNets("192.168.1.5/24", "192.168.1.6/24"),
+			inpSeparator: ";",
+			outExp:       "192.168.1.5;192.168.1.6",
+		},
+	}
+	for i, tc := range tests {
+		t.Run(fmt.Sprintf("%d:%s", i, tc.desc), func(t *testing.T) {
+			res := JoinIPNetIPs(tc.inpIPNetList, tc.inpSeparator)
+			t.Log(res)
+			assert.Equal(t, res, tc.outExp)
 		})
 	}
 }
