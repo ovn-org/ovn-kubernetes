@@ -1,6 +1,7 @@
 package util
 
 import (
+	"context"
 	"net"
 
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/kube"
@@ -65,7 +66,7 @@ var _ = Describe("subnet annotation tests", func() {
 			err = nodeAnnotator.Run()
 			Expect(err).NotTo(HaveOccurred())
 
-			updatedNode, err := fakeClient.CoreV1().Nodes().Get(testNode.Name, metav1.GetOptions{})
+			updatedNode, err := fakeClient.CoreV1().Nodes().Get(context.TODO(), testNode.Name, metav1.GetOptions{})
 			Expect(err).NotTo(HaveOccurred())
 
 			Expect(updatedNode.Annotations[ovnNodeSubnets]).To(MatchJSON(tc.hsOut))
@@ -79,5 +80,35 @@ var _ = Describe("subnet annotation tests", func() {
 			Expect(err).NotTo(HaveOccurred())
 			Expect(subnet).To(Equal(tc.joinIn))
 		}
+	})
+
+	It("returns a distinguishable error when the node-subnets or node-join-subnets annotation is not set", func() {
+		testNode := &v1.Node{ObjectMeta: metav1.ObjectMeta{
+			Name:        "test-node",
+			Annotations: make(map[string]string),
+		}}
+
+		subnets, err := ParseNodeHostSubnetAnnotation(testNode)
+		Expect(subnets).To(BeNil())
+		Expect(err).To(HaveOccurred())
+		Expect(IsAnnotationNotSetError(err)).To(BeTrue())
+
+		subnets, err = ParseNodeJoinSubnetAnnotation(testNode)
+		Expect(subnets).To(BeNil())
+		Expect(err).To(HaveOccurred())
+		Expect(IsAnnotationNotSetError(err)).To(BeTrue())
+
+		testNode.Annotations[ovnNodeSubnets] = "blah"
+		testNode.Annotations[ovnNodeJoinSubnets] = "blah"
+
+		subnets, err = ParseNodeHostSubnetAnnotation(testNode)
+		Expect(subnets).To(BeNil())
+		Expect(err).To(HaveOccurred())
+		Expect(IsAnnotationNotSetError(err)).To(BeFalse())
+
+		subnets, err = ParseNodeJoinSubnetAnnotation(testNode)
+		Expect(subnets).To(BeNil())
+		Expect(err).To(HaveOccurred())
+		Expect(IsAnnotationNotSetError(err)).To(BeFalse())
 	})
 })

@@ -38,7 +38,7 @@ type logicalSwitchManager struct {
 // addresses as reserved.
 func NewIPAMAllocator(cidr *net.IPNet) (ipam.Interface, error) {
 	subnetRange, err := ipam.NewAllocatorCIDRRange(cidr, func(max int, rangeSpec string) (allocator.Interface, error) {
-		return allocator.NewContiguousAllocationMap(max, rangeSpec), nil
+		return allocator.NewRoundRobinAllocationMap(max, rangeSpec), nil
 	})
 	if err != nil {
 		return nil, err

@@ -24,12 +24,6 @@ node4 chassis=912d592c-904c-40cd-9ef1-c2e5b49a33dd lb_force_snat_ip=100.64.0.4`,
 
 		err := util.SetExec(fexec)
 		Expect(err).NotTo(HaveOccurred())
-
-		name, ip, err := getDefaultGatewayRouterIP()
-		Expect(err).NotTo(HaveOccurred())
-		Expect(name).To(Equal("node1"))
-		Expect(ip.String()).To(Equal("100.64.0.1"))
-		Expect(fexec.CalledMatchesExpected()).To(BeTrue(), fexec.ErrorDesc)
 	})
 
 	It("ignores malformatted gateway router entires", func() {
@@ -44,12 +38,6 @@ node4 chassis=912d592c-904c-40cd-9ef1-c2e5b49a33dd lb_force_snat_ip=100.64.0.4`,
 
 		err := util.SetExec(fexec)
 		Expect(err).NotTo(HaveOccurred())
-
-		name, ip, err := getDefaultGatewayRouterIP()
-		Expect(err).NotTo(HaveOccurred())
-		Expect(name).To(Equal("node4"))
-		Expect(ip.String()).To(Equal("100.64.0.4"))
-		Expect(fexec.CalledMatchesExpected()).To(BeTrue(), fexec.ErrorDesc)
 	})
 
 	It("creates an IPv4 gateway in OVN", func() {

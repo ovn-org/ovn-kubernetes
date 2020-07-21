@@ -4,24 +4,27 @@ import (
 	"flag"
 	"fmt"
 	"os"
+	"path"
 	"testing"
 
+	"github.com/onsi/ginkgo"
+	"github.com/onsi/ginkgo/config"
+	"github.com/onsi/ginkgo/reporters"
+	"github.com/onsi/gomega"
+	"k8s.io/klog"
 	"k8s.io/kubectl/pkg/generated"
 	"k8s.io/kubernetes/test/e2e/framework"
-	"k8s.io/kubernetes/test/e2e/framework/config"
+	e2econfig "k8s.io/kubernetes/test/e2e/framework/config"
 	"k8s.io/kubernetes/test/e2e/framework/testfiles"
 	"k8s.io/kubernetes/test/e2e/framework/viperconfig"
 	"k8s.io/kubernetes/test/utils/image"
-
-	. "github.com/onsi/ginkgo"
-	. "github.com/onsi/gomega"
 )
 
 // https://github.com/kubernetes/kubernetes/blob/v1.16.4/test/e2e/e2e_test.go#L62
 
 // handleFlags sets up all flags and parses the command line.
 func handleFlags() {
-	config.CopyFlags(config.Flags, flag.CommandLine)
+	e2econfig.CopyFlags(e2econfig.Flags, flag.CommandLine)
 	framework.RegisterCommonFlags(flag.CommandLine)
 	framework.RegisterClusterFlags(flag.CommandLine)
 	flag.Parse()
@@ -69,6 +72,18 @@ func TestMain(m *testing.M) {
 }
 
 func TestE2e(t *testing.T) {
-	RegisterFailHandler(Fail)
-	RunSpecs(t, "E2e Suite")
+	// Run tests through the Ginkgo runner with output to console + JUnit for reporting
+	var r []ginkgo.Reporter
+	if framework.TestContext.ReportDir != "" {
+		klog.Infof("Saving reports to %s", framework.TestContext.ReportDir)
+		// TODO: we should probably only be trying to create this directory once
+		// rather than once-per-Ginkgo-node.
+		if err := os.MkdirAll(framework.TestContext.ReportDir, 0755); err != nil {
+			klog.Errorf("Failed creating report directory: %v", err)
+		} else {
+			r = append(r, reporters.NewJUnitReporter(path.Join(framework.TestContext.ReportDir, fmt.Sprintf("junit_%v%02d.xml", framework.TestContext.ReportPrefix, config.GinkgoConfig.ParallelNode))))
+		}
+	}
+	gomega.RegisterFailHandler(framework.Fail)
+	ginkgo.RunSpecsWithDefaultAndCustomReporters(t, "E2e Suite", r)
 }

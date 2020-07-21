@@ -1,6 +1,7 @@
 package util
 
 import (
+	"context"
 	"net"
 
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
@@ -96,7 +97,7 @@ var _ = Describe("Node annotation tests", func() {
 			err = nodeAnnotator.Run()
 			Expect(err).NotTo(HaveOccurred())
 
-			updatedNode, err := fakeClient.CoreV1().Nodes().Get(testNode.Name, metav1.GetOptions{})
+			updatedNode, err := fakeClient.CoreV1().Nodes().Get(context.TODO(), testNode.Name, metav1.GetOptions{})
 			Expect(err).NotTo(HaveOccurred())
 
 			Expect(updatedNode.Annotations[ovnNodeL3GatewayConfig]).To(MatchJSON(tc.out))
@@ -146,5 +147,35 @@ var _ = Describe("Node annotation tests", func() {
 			Expect(err).NotTo(HaveOccurred())
 			Expect(l3gc).To(Equal(tc.out))
 		}
+	})
+
+	It("returns a distinguishable error when a node annotation is not set", func() {
+		testNode := &v1.Node{ObjectMeta: metav1.ObjectMeta{
+			Name:        "test-node",
+			Annotations: make(map[string]string),
+		}}
+
+		cfg, err := ParseNodeL3GatewayAnnotation(testNode)
+		Expect(cfg).To(BeNil())
+		Expect(err).To(HaveOccurred())
+		Expect(IsAnnotationNotSetError(err)).To(BeTrue())
+
+		mac, err := ParseNodeManagementPortMACAddress(testNode)
+		Expect(mac).To(BeNil())
+		Expect(err).To(HaveOccurred())
+		Expect(IsAnnotationNotSetError(err)).To(BeTrue())
+
+		testNode.Annotations[ovnNodeL3GatewayConfig] = "blah"
+		testNode.Annotations[ovnNodeManagementPortMacAddress] = "blah"
+
+		cfg, err = ParseNodeL3GatewayAnnotation(testNode)
+		Expect(cfg).To(BeNil())
+		Expect(err).To(HaveOccurred())
+		Expect(IsAnnotationNotSetError(err)).To(BeFalse())
+
+		mac, err = ParseNodeManagementPortMACAddress(testNode)
+		Expect(mac).To(BeNil())
+		Expect(err).To(HaveOccurred())
+		Expect(IsAnnotationNotSetError(err)).To(BeFalse())
 	})
 })

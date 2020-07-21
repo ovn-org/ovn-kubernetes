@@ -89,7 +89,7 @@ func setSubnetAnnotation(nodeAnnotator kube.Annotator, annotationName string, de
 func parseSubnetAnnotation(node *kapi.Node, annotationName string) ([]*net.IPNet, error) {
 	annotation, ok := node.Annotations[annotationName]
 	if !ok {
-		return nil, fmt.Errorf("node %q has no %q annotation", node.Name, annotationName)
+		return nil, newAnnotationNotSetError("node %q has no %q annotation", node.Name, annotationName)
 	}
 
 	var subnets []string
@@ -194,7 +194,7 @@ func SetNodeLocalNatAnnotation(nodeAnnotator kube.Annotator, defaultNodeLocalNat
 func ParseNodeLocalNatIPAnnotation(node *kapi.Node) ([]net.IP, error) {
 	annotationJson, ok := node.Annotations[ovnNodeLocalNatIP]
 	if !ok {
-		return nil, fmt.Errorf("node %q has no %q annotation", node.Name, ovnNodeLocalNatIP)
+		return nil, newAnnotationNotSetError("node %q has no %q annotation", node.Name, ovnNodeLocalNatIP)
 	}
 
 	annotationMap := make(map[string][]string)

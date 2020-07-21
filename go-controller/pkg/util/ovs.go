@@ -28,6 +28,7 @@ const (
 	ovsCommandTimeout  = 15
 	ovsVsctlCommand    = "ovs-vsctl"
 	ovsOfctlCommand    = "ovs-ofctl"
+	ovsDpctlCommand    = "ovs-dpctl"
 	ovsAppctlCommand   = "ovs-appctl"
 	ovnNbctlCommand    = "ovn-nbctl"
 	ovnSbctlCommand    = "ovn-sbctl"
@@ -110,6 +111,7 @@ type execHelper struct {
 	exec            kexec.Interface
 	ofctlPath       string
 	vsctlPath       string
+	dpctlPath       string
 	appctlPath      string
 	ovnappctlPath   string
 	nbctlPath       string
@@ -176,6 +178,10 @@ func SetExec(exec kexec.Interface) error {
 		return err
 	}
 	runner.vsctlPath, err = exec.LookPath(ovsVsctlCommand)
+	if err != nil {
+		return err
+	}
+	runner.dpctlPath, err = exec.LookPath(ovsDpctlCommand)
 	if err != nil {
 		return err
 	}
@@ -290,6 +296,12 @@ func runWithEnvVars(cmdPath string, envVars []string, args ...string) (*bytes.Bu
 func RunOVSOfctl(args ...string) (string, string, error) {
 	stdout, stderr, err := run(runner.ofctlPath, args...)
 	return strings.Trim(stdout.String(), "\" \n"), stderr.String(), err
+}
+
+// RunOVSDpctl runs a command via ovs-dpctl.
+func RunOVSDpctl(args ...string) (string, string, error) {
+	stdout, stderr, err := run(runner.dpctlPath, args...)
+	return strings.Trim(strings.TrimSpace(stdout.String()), "\""), stderr.String(), err
 }
 
 // RunOVSVsctl runs a command via ovs-vsctl.
@@ -554,6 +566,38 @@ func RunOVNNorthAppCtl(args ...string) (string, string, error) {
 	}
 	cmdArgs = append(cmdArgs, args...)
 	stdout, stderr, err := runOVNretry(runner.ovnappctlPath, nil, cmdArgs...)
+	return strings.Trim(strings.TrimSpace(stdout.String()), "\""), stderr.String(), err
+}
+
+// RunOVNControllerAppCtl runs an 'ovs-appctl -t ovn-controller.pid.ctl command'.
+func RunOVNControllerAppCtl(args ...string) (string, string, error) {
+	var cmdArgs []string
+	pid, err := ioutil.ReadFile(runner.ovnRunDir + "ovn-controller.pid")
+	if err != nil {
+		return "", "", fmt.Errorf("failed to get ovn-controller pid : %v", err)
+	}
+	cmdArgs = []string{
+		"-t",
+		runner.ovnRunDir + fmt.Sprintf("ovn-controller.%s.ctl", strings.TrimSpace(string(pid))),
+	}
+	cmdArgs = append(cmdArgs, args...)
+	stdout, stderr, err := runOVNretry(runner.ovnappctlPath, nil, cmdArgs...)
+	return strings.Trim(strings.TrimSpace(stdout.String()), "\""), stderr.String(), err
+}
+
+// RunOvsVswitchdAppCtl runs an 'ovs-appctl -t /var/run/openvsiwthc/ovs-vswitchd.pid.ctl command'
+func RunOvsVswitchdAppCtl(args ...string) (string, string, error) {
+	var cmdArgs []string
+	pid, err := ioutil.ReadFile(savedOVSRunDir + "ovs-vswitchd.pid")
+	if err != nil {
+		return "", "", fmt.Errorf("failed to get ovs-vswitch pid : %v", err)
+	}
+	cmdArgs = []string{
+		"-t",
+		savedOVSRunDir + fmt.Sprintf("ovs-vswitchd.%s.ctl", strings.TrimSpace(string(pid))),
+	}
+	cmdArgs = append(cmdArgs, args...)
+	stdout, stderr, err := runOVNretry(runner.appctlPath, nil, cmdArgs...)
 	return strings.Trim(strings.TrimSpace(stdout.String()), "\""), stderr.String(), err
 }
 

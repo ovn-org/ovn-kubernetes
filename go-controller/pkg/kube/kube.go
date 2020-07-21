@@ -1,6 +1,7 @@
 package kube
 
 import (
+	"context"
 	"encoding/json"
 
 	"k8s.io/klog"
@@ -52,7 +53,7 @@ func (k *Kube) SetAnnotationsOnPod(pod *kapi.Pod, annotations map[string]string)
 		return err
 	}
 
-	_, err = k.KClient.CoreV1().Pods(pod.Namespace).Patch(pod.Name, types.MergePatchType, patchData)
+	_, err = k.KClient.CoreV1().Pods(pod.Namespace).Patch(context.TODO(), pod.Name, types.MergePatchType, patchData, metav1.PatchOptions{})
 	if err != nil {
 		klog.Errorf("Error in setting annotation on pod %s: %v", podDesc, err)
 	}
@@ -78,7 +79,7 @@ func (k *Kube) SetAnnotationsOnNode(node *kapi.Node, annotations map[string]inte
 		return err
 	}
 
-	_, err = k.KClient.CoreV1().Nodes().Patch(node.Name, types.MergePatchType, patchData)
+	_, err = k.KClient.CoreV1().Nodes().Patch(context.TODO(), node.Name, types.MergePatchType, patchData, metav1.PatchOptions{})
 	if err != nil {
 		klog.Errorf("Error in setting annotation on node %s: %v", node.Name, err)
 	}
@@ -104,7 +105,7 @@ func (k *Kube) SetAnnotationsOnNamespace(namespace *kapi.Namespace, annotations 
 		return err
 	}
 
-	_, err = k.KClient.CoreV1().Namespaces().Patch(namespace.Name, types.MergePatchType, patchData)
+	_, err = k.KClient.CoreV1().Namespaces().Patch(context.TODO(), namespace.Name, types.MergePatchType, patchData, metav1.PatchOptions{})
 	if err != nil {
 		klog.Errorf("Error in setting annotation on namespace %s: %v", namespace.Name, err)
 	}
@@ -114,7 +115,7 @@ func (k *Kube) SetAnnotationsOnNamespace(namespace *kapi.Namespace, annotations 
 // UpdateNodeStatus takes the node object and sets the provided update status
 func (k *Kube) UpdateNodeStatus(node *kapi.Node) error {
 	klog.Infof("Updating status on node %s", node.Name)
-	_, err := k.KClient.CoreV1().Nodes().UpdateStatus(node)
+	_, err := k.KClient.CoreV1().Nodes().UpdateStatus(context.TODO(), node, metav1.UpdateOptions{})
 	if err != nil {
 		klog.Errorf("Error in updating status on node %s: %v", node.Name, err)
 	}
@@ -123,7 +124,7 @@ func (k *Kube) UpdateNodeStatus(node *kapi.Node) error {
 
 // GetAnnotationsOnPod obtains the pod annotations from kubernetes apiserver, given the name and namespace
 func (k *Kube) GetAnnotationsOnPod(namespace, name string) (map[string]string, error) {
-	pod, err := k.KClient.CoreV1().Pods(namespace).Get(name, metav1.GetOptions{})
+	pod, err := k.KClient.CoreV1().Pods(namespace).Get(context.TODO(), name, metav1.GetOptions{})
 	if err != nil {
 		return nil, err
 	}
@@ -132,22 +133,22 @@ func (k *Kube) GetAnnotationsOnPod(namespace, name string) (map[string]string, e
 
 // GetNodes returns the list of all Node objects from kubernetes
 func (k *Kube) GetNodes() (*kapi.NodeList, error) {
-	return k.KClient.CoreV1().Nodes().List(metav1.ListOptions{})
+	return k.KClient.CoreV1().Nodes().List(context.TODO(), metav1.ListOptions{})
 }
 
 // GetNode returns the Node resource from kubernetes apiserver, given its name
 func (k *Kube) GetNode(name string) (*kapi.Node, error) {
-	return k.KClient.CoreV1().Nodes().Get(name, metav1.GetOptions{})
+	return k.KClient.CoreV1().Nodes().Get(context.TODO(), name, metav1.GetOptions{})
 }
 
 // GetEndpoint returns the Endpoints resource
 func (k *Kube) GetEndpoint(namespace, name string) (*kapi.Endpoints, error) {
-	return k.KClient.CoreV1().Endpoints(namespace).Get(name, metav1.GetOptions{})
+	return k.KClient.CoreV1().Endpoints(namespace).Get(context.TODO(), name, metav1.GetOptions{})
 }
 
 // CreateEndpoint creates the Endpoints resource
 func (k *Kube) CreateEndpoint(namespace string, ep *kapi.Endpoints) (*kapi.Endpoints, error) {
-	return k.KClient.CoreV1().Endpoints(namespace).Create(ep)
+	return k.KClient.CoreV1().Endpoints(namespace).Create(context.TODO(), ep, metav1.CreateOptions{})
 }
 
 // Events returns events to use when creating an EventSinkImpl

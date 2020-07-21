@@ -7,7 +7,8 @@ GCFLAGS ?=
 export GCFLAGS
 PKGS ?=
 GOPATH ?= $(shell go env GOPATH)
-
+TEST_REPORT_DIR?=$(CURDIR)/_artifacts
+export TEST_REPORT_DIR
 
 .PHONY: all build check test
 
@@ -38,6 +39,7 @@ install:
 
 clean:
 	rm -rf ${OUT_DIR}
+	rm -rf ${TEST_REPORT_DIR}
 
 .PHONY: install.tools lint gofmt
 

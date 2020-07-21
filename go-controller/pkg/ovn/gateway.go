@@ -1,10 +1,7 @@
 package ovn
 
 import (
-	"bytes"
 	"fmt"
-	"net"
-	"sort"
 	"strings"
 
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
@@ -43,15 +40,15 @@ func (ovn *Controller) getOvnGateways() ([]string, string, error) {
 	return strings.Fields(out), stderr, err
 }
 
-func (ovn *Controller) getGatewayPhysicalIPs(physicalGateway string) ([]string, error) {
+func (ovn *Controller) getGatewayPhysicalIPs(gatewayRouter string) ([]string, error) {
 	physicalIPs, _, err := util.RunOVNNbctl("get", "logical_router",
-		physicalGateway, "external_ids:physical_ips")
+		gatewayRouter, "external_ids:physical_ips")
 	if err == nil {
 		return strings.Split(physicalIPs, ","), nil
 	}
 
 	physicalIP, _, err := util.RunOVNNbctl("get", "logical_router",
-		physicalGateway, "external_ids:physical_ip")
+		gatewayRouter, "external_ids:physical_ip")
 	if err != nil {
 		return nil, err
 	}
@@ -59,14 +56,17 @@ func (ovn *Controller) getGatewayPhysicalIPs(physicalGateway string) ([]string, 
 	return []string{physicalIP}, nil
 }
 
-func (ovn *Controller) getGatewayLoadBalancer(physicalGateway string, protocol kapi.Protocol) (string, error) {
+func (ovn *Controller) getGatewayLoadBalancer(gatewayRouter string, protocol kapi.Protocol) (string, error) {
 	externalIDKey := string(protocol) + "_lb_gateway_router"
 	loadBalancer, _, err := util.RunOVNNbctl("--data=bare", "--no-heading",
 		"--columns=_uuid", "find", "load_balancer",
 		"external_ids:"+externalIDKey+"="+
-			physicalGateway)
+			gatewayRouter)
 	if err != nil {
 		return "", err
+	}
+	if loadBalancer == "" {
+		return "", fmt.Errorf("load balancer item in OVN DB is an empty string")
 	}
 	return loadBalancer, nil
 }
@@ -76,25 +76,21 @@ func (ovn *Controller) createGatewayVIPs(protocol kapi.Protocol, sourcePort int3
 
 	// Each gateway has a separate load-balancer for N/S traffic
 
-	physicalGateways, _, err := ovn.getOvnGateways()
+	gatewayRouters, _, err := ovn.getOvnGateways()
 	if err != nil {
 		return err
 	}
 
-	for _, physicalGateway := range physicalGateways {
-		loadBalancer, err := ovn.getGatewayLoadBalancer(physicalGateway, protocol)
+	for _, gatewayRouter := range gatewayRouters {
+		loadBalancer, err := ovn.getGatewayLoadBalancer(gatewayRouter, protocol)
 		if err != nil {
-			klog.Errorf("Physical gateway %s does not have load_balancer (%v)",
-				physicalGateway, err)
+			klog.Errorf("Gateway router %s does not have load balancer (%v)",
+				gatewayRouter, err)
 			continue
 		}
-		if loadBalancer == "" {
-			continue
-		}
-		physicalIPs, err := ovn.getGatewayPhysicalIPs(physicalGateway)
+		physicalIPs, err := ovn.getGatewayPhysicalIPs(gatewayRouter)
 		if err != nil {
-			klog.Errorf("Physical gateway %s does not have physical ip (%v)",
-				physicalGateway, err)
+			klog.Errorf("Gateway router %s does not have physical ip (%v)", gatewayRouter, err)
 			continue
 		}
 		// With the physical_ip:sourcePort as the VIP, add an entry in
@@ -110,84 +106,57 @@ func (ovn *Controller) createGatewayVIPs(protocol kapi.Protocol, sourcePort int3
 
 func (ovn *Controller) deleteGatewayVIPs(protocol kapi.Protocol, sourcePort int32) {
 	klog.V(5).Infof("Searching to remove Gateway VIPs - %s, %d", protocol, sourcePort)
-	physicalGateways, _, err := ovn.getOvnGateways()
+	gatewayRouters, _, err := ovn.getOvnGateways()
 	if err != nil {
 		klog.Errorf("Error while searching for gateways: %v", err)
 		return
 	}
 
-	for _, physicalGateway := range physicalGateways {
-		loadBalancer, err := ovn.getGatewayLoadBalancer(physicalGateway, protocol)
+	for _, gatewayRouter := range gatewayRouters {
+		loadBalancer, err := ovn.getGatewayLoadBalancer(gatewayRouter, protocol)
 		if err != nil {
-			klog.Errorf("Physical gateway %s does not have load_balancer (%v)",
-				physicalGateway, err)
+			klog.Errorf("Gateway router %s does not have load balancer (%v)", gatewayRouter, err)
 			continue
 		}
-		if loadBalancer == "" {
-			continue
-		}
-		physicalIPs, err := ovn.getGatewayPhysicalIPs(physicalGateway)
+		physicalIPs, err := ovn.getGatewayPhysicalIPs(gatewayRouter)
 		if err != nil {
-			klog.Errorf("Physical gateway %s does not have physical ip (%v)",
-				physicalGateway, err)
+			klog.Errorf("Gateway router %s does not have physical ip (%v)", gatewayRouter, err)
 			continue
 		}
 		for _, physicalIP := range physicalIPs {
 			// With the physical_ip:sourcePort as the VIP, delete an entry in 'load_balancer'.
 			vip := util.JoinHostPortInt32(physicalIP, sourcePort)
-			klog.V(5).Infof("Removing gateway VIP: %s from loadbalancer: %s", vip, loadBalancer)
-			ovn.deleteLoadBalancerVIP(loadBalancer, vip)
+			klog.V(5).Infof("Removing gateway VIP: %s from load balancer: %s", vip, loadBalancer)
+			if err := ovn.deleteLoadBalancerVIP(loadBalancer, vip); err != nil {
+				klog.Error(err)
+			}
 		}
 	}
 }
 
-// getDefaultGatewayRouterIP returns the first gateway logical router name
-// and IP address as listed in the OVN database
-func getDefaultGatewayRouterIP() (string, net.IP, error) {
-	stdout, stderr, err := util.RunOVNNbctl("--data=bare", "--format=table",
-		"--no-heading", "--columns=name,options", "find", "logical_router",
-		"options:lb_force_snat_ip!=-")
+func (ovn *Controller) deleteExternalVIPs(service *kapi.Service, svcPort kapi.ServicePort) error {
+	if len(service.Spec.ExternalIPs) == 0 {
+		return nil
+	}
+	gateways, stderr, err := ovn.getOvnGateways()
 	if err != nil {
-		return "", nil, fmt.Errorf("failed to get logical routers, stdout: %q, "+
-			"stderr: %q, err: %v", stdout, stderr, err)
+		return fmt.Errorf("error: failed to get ovn gateways, stderr: %s, err: %v)", stderr, err)
 	}
-	// Convert \r\n to \n to support Windows line endings
-	stdout = strings.Replace(strings.TrimSpace(stdout), "\r\n", "\n", -1)
-	gatewayRouters := strings.Split(stdout, "\n")
-	if len(gatewayRouters) == 0 {
-		return "", nil, fmt.Errorf("failed to get default gateway router (no routers found)")
-	}
-
-	type gwRouter struct {
-		name string
-		ip   net.IP
-	}
-
-	// Get the list of all gateway router names and IPs
-	routers := make([]gwRouter, 0, len(gatewayRouters))
-	for _, gwRouterLine := range gatewayRouters {
-		parts := strings.Fields(gwRouterLine)
-		for _, p := range parts {
-			const forceTag string = "lb_force_snat_ip="
-			if strings.HasPrefix(p, forceTag) {
-				ipStr := p[len(forceTag):]
-				if ip := net.ParseIP(ipStr); ip != nil {
-					routers = append(routers, gwRouter{parts[0], ip})
-				} else {
-					klog.Warningf("Failed to parse gateway router %q IP %q", parts[0], ipStr)
-				}
+	for _, extIP := range service.Spec.ExternalIPs {
+		klog.V(5).Infof("Searching to remove ExternalIP VIPs - %s, %d", svcPort.Protocol, svcPort.Port)
+		for _, gateway := range gateways {
+			loadBalancer, err := ovn.getGatewayLoadBalancer(gateway, svcPort.Protocol)
+			if err != nil {
+				klog.Errorf("Gateway router: %s does not have load balancer, err: %v", gateway, err)
+				continue
+			}
+			vip := util.JoinHostPortInt32(extIP, svcPort.Port)
+			if err := ovn.deleteLoadBalancerVIP(loadBalancer, vip); err != nil {
+				klog.Error(err)
 			}
 		}
 	}
-	if len(routers) == 0 {
-		return "", nil, fmt.Errorf("failed to parse gateway routers")
-	}
-
-	// Stably sort the list
-	sort.Slice(routers, func(i, j int) bool {
-		return bytes.Compare(routers[i].ip, routers[j].ip) < 0
-	})
-	return routers[0].name, routers[0].ip, nil
+	return nil
 }
 
 // getGatewayLoadBalancers find TCP, SCTP, UDP load-balancers from gateway router.
@@ -197,7 +166,7 @@ func getGatewayLoadBalancers(gatewayRouter string) (string, string, string, erro
 		"external_ids:TCP_lb_gateway_router="+gatewayRouter)
 	if err != nil {
 		return "", "", "", fmt.Errorf("failed to get gateway router %q TCP "+
-			"loadbalancer, stderr: %q, error: %v", gatewayRouter, stderr, err)
+			"load balancer, stderr: %q, error: %v", gatewayRouter, stderr, err)
 	}
 
 	lbUDP, stderr, err := util.RunOVNNbctl("--data=bare", "--no-heading",
@@ -205,7 +174,7 @@ func getGatewayLoadBalancers(gatewayRouter string) (string, string, string, erro
 		"external_ids:UDP_lb_gateway_router="+gatewayRouter)
 	if err != nil {
 		return "", "", "", fmt.Errorf("failed to get gateway router %q UDP "+
-			"loadbalancer, stderr: %q, error: %v", gatewayRouter, stderr, err)
+			"load balancer, stderr: %q, error: %v", gatewayRouter, stderr, err)
 	}
 
 	lbSCTP, stderr, err := util.RunOVNNbctl("--data=bare", "--no-heading",
@@ -213,7 +182,7 @@ func getGatewayLoadBalancers(gatewayRouter string) (string, string, string, erro
 		"external_ids:SCTP_lb_gateway_router="+gatewayRouter)
 	if err != nil {
 		return "", "", "", fmt.Errorf("failed to get gateway router %q SCTP "+
-			"loadbalancer, stderr: %q, error: %v", gatewayRouter, stderr, err)
+			"load balancer, stderr: %q, error: %v", gatewayRouter, stderr, err)
 	}
 	return lbTCP, lbUDP, lbSCTP, nil
 }

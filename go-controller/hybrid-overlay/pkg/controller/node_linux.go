@@ -43,6 +43,7 @@ type NodeController struct {
 	initialized bool
 	drMAC       net.HardwareAddr
 	drIP        net.IP
+	vxlanPort   uint16
 	// contains a map of pods to corresponding tunnels
 	tunMap      map[string]string
 	tunMapMutex sync.Mutex
@@ -67,9 +68,11 @@ func newNodeController(
 	nodeLister listers.NodeLister,
 	podLister listers.PodLister,
 ) (nodeController, error) {
+
 	node := &NodeController{
 		kube:        kube,
 		nodeName:    nodeName,
+		vxlanPort:   uint16(config.HybridOverlay.VXLANPort),
 		tunMap:      make(map[string]string),
 		tunMapMutex: sync.Mutex{},
 		flowCache:   make(map[string]*flowCacheEntry),
@@ -416,9 +419,10 @@ func (n *NodeController) EnsureHybridOverlayBridge(node *kapi.Node) error {
 	n.drIP = hybridOverlayIfAddr.IP
 
 	_, stderr, err := util.RunOVSVsctl("--may-exist", "add-br", extBridgeName,
-		"--", "set", "Bridge", extBridgeName, "fail_mode=secure")
+		"--", "set", "Bridge", extBridgeName, "fail_mode=secure",
+		"--", "set", "Interface", extBridgeName, "mtu_request="+fmt.Sprintf("%d", config.Default.MTU))
 	if err != nil {
-		return fmt.Errorf("failed to create localnet bridge %s"+
+		return fmt.Errorf("failed to create hybrid-overlay bridge %s"+
 			", stderr:%s: %v", extBridgeName, stderr, err)
 	}
 
@@ -454,7 +458,7 @@ func (n *NodeController) EnsureHybridOverlayBridge(node *kapi.Node) error {
 
 	// Add the VXLAN port for sending/receiving traffic from hybrid overlay nodes
 	_, stderr, err = util.RunOVSVsctl("--may-exist", "add-port", extBridgeName, extVXLANName,
-		"--", "set", "interface", extVXLANName, "type=vxlan", `options:remote_ip="flow"`, `options:key="flow"`)
+		"--", "set", "interface", extVXLANName, "type=vxlan", `options:remote_ip="flow"`, `options:key="flow"`, fmt.Sprintf("options:dst_port=%d", n.vxlanPort))
 	if err != nil {
 		return fmt.Errorf("failed to add VXLAN port for ovs bridge %s"+
 			", stderr:%s: %v", extBridgeName, stderr, err)

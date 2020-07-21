@@ -44,13 +44,12 @@ func addNodeSetupCmds(fexec *ovntest.FakeExec, nodeName string) (string, string)
 		Cmd:    "ovn-nbctl --timeout=15 get logical_switch mynode other-config:subnet",
 		Output: testNodeSubnet,
 	})
-	addGetPortAddressesCmds(fexec, nodeName, testDRMAC, testNodeIP)
 	fexec.AddFakeCmd(&ovntest.ExpectedCmd{
 		Cmd:    "ovs-vsctl --timeout=15 --if-exists get interface ovn-k8s-mp0 mac_in_use",
 		Output: testMgmtMAC,
 	})
 	fexec.AddFakeCmdsNoOutputNoError([]string{
-		"ovs-vsctl --timeout=15 --may-exist add-br br-ext -- set Bridge br-ext fail_mode=secure",
+		"ovs-vsctl --timeout=15 --may-exist add-br br-ext -- set Bridge br-ext fail_mode=secure -- set Interface br-ext mtu_request=1400",
 	})
 	fexec.AddFakeCmd(&ovntest.ExpectedCmd{
 		Cmd:    "ovs-vsctl --timeout=15 --if-exists get interface br-ext mac_in_use",
@@ -65,7 +64,7 @@ func addNodeSetupCmds(fexec *ovntest.FakeExec, nodeName string) (string, string)
 	testNodeIPRaw := getIPAsHexString(ovntest.MustParseIP(testNodeIP))
 	fexec.AddFakeCmdsNoOutputNoError([]string{
 		"ovs-ofctl add-flow br-ext table=0,priority=100,in_port=ext,arp,arp_tpa=" + testNodeIP + ",actions=move:NXM_OF_ETH_SRC[]->NXM_OF_ETH_DST[],mod_dl_src:" + testDRMAC + ",load:0x2->NXM_OF_ARP_OP[],move:NXM_NX_ARP_SHA[]->NXM_NX_ARP_THA[],move:NXM_OF_ARP_SPA[]->NXM_OF_ARP_TPA[],load:0x" + testDRMACRaw + "->NXM_NX_ARP_SHA[],load:0x" + testNodeIPRaw + "->NXM_OF_ARP_SPA[],IN_PORT",
-		`ovs-vsctl --timeout=15 --may-exist add-port br-ext ext-vxlan -- set interface ext-vxlan type=vxlan options:remote_ip="flow" options:key="flow"`,
+		`ovs-vsctl --timeout=15 --may-exist add-port br-ext ext-vxlan -- set interface ext-vxlan type=vxlan options:remote_ip="flow" options:key="flow" options:dst_port=4789`,
 		"ovs-ofctl add-flow br-ext table=0,priority=100,in_port=ext-vxlan,ip,nw_dst=" + testNodeSubnet + ",dl_dst=" + testDRMAC + ",actions=goto_table:10",
 		"ovs-ofctl add-flow br-ext table=0,priority=100,arp,in_port=ext-vxlan,arp_tpa=" + testNodeSubnet + ",actions=move:NXM_OF_ETH_SRC[]->NXM_OF_ETH_DST[],mod_dl_src:" + testDRMAC + ",load:0x2->NXM_OF_ARP_OP[],move:NXM_NX_ARP_SHA[]->NXM_NX_ARP_THA[],load:0x" + testDRMACRaw + "->NXM_NX_ARP_SHA[],move:NXM_OF_ARP_TPA[]->NXM_NX_REG0[],move:NXM_OF_ARP_SPA[]->NXM_OF_ARP_TPA[],move:NXM_NX_REG0[]->NXM_OF_ARP_SPA[],IN_PORT",
 		"ovs-ofctl add-flow br-ext table=10,priority=0,actions=drop",
@@ -302,7 +301,6 @@ var _ = Describe("Hybrid Overlay Node Linux Operations", func() {
 
 			_, err := config.InitConfig(ctx, fexec, nil)
 			Expect(err).NotTo(HaveOccurred())
-
 			f := informers.NewSharedInformerFactory(fakeClient, informer.DefaultResyncInterval)
 
 			n, err := NewNode(
@@ -346,6 +344,53 @@ var _ = Describe("Hybrid Overlay Node Linux Operations", func() {
 
 			_, err := config.InitConfig(ctx, fexec, nil)
 			Expect(err).NotTo(HaveOccurred())
+			f := informers.NewSharedInformerFactory(fakeClient, informer.DefaultResyncInterval)
+
+			n, err := NewNode(
+				&kube.Kube{KClient: fakeClient},
+				thisNode,
+				f.Core().V1().Nodes().Informer(),
+				f.Core().V1().Pods().Informer(),
+			)
+			Expect(err).NotTo(HaveOccurred())
+
+			err = n.controller.EnsureHybridOverlayBridge(node)
+			Expect(err).NotTo(HaveOccurred())
+
+			// FIXME
+			// Eventually(fexec.CalledMatchesExpected, 2).Should(BeTrue(), fexec.ErrorDesc)
+			validateNetlinkState(thisSubnet)
+			return nil
+		}
+		appRun(app, netns)
+	})
+	It("sets up local linux pod", func() {
+		app.Action = func(ctx *cli.Context) error {
+			const (
+				thisDrMAC string = "22:33:44:55:66:77"
+				pod1IP    string = "1.2.3.5"
+				pod1CIDR  string = pod1IP + "/24"
+				pod1MAC   string = "aa:bb:cc:dd:ee:ff"
+			)
+
+			annotations := createNodeAnnotationsForSubnet(thisSubnet)
+			annotations[types.HybridOverlayDRMAC] = thisDrMAC
+			node := createNode(thisNode, "linux", "10.0.0.1", annotations)
+			testPod := createPod("test", "pod1", thisNode, pod1CIDR, pod1MAC)
+			fakeClient := fake.NewSimpleClientset(&v1.NodeList{
+				Items: []v1.Node{*node},
+			})
+
+			// Node setup from initial node sync
+			addNodeSetupCmds(fexec, thisNode)
+			fexec.AddFakeCmd(&ovntest.ExpectedCmd{
+				Cmd: "ovs-ofctl dump-flows br-ext table=0",
+				// Assume fresh OVS bridge
+				Output: "",
+			})
+
+			_, err := config.InitConfig(ctx, fexec, nil)
+			Expect(err).NotTo(HaveOccurred())
 
 			f := informers.NewSharedInformerFactory(fakeClient, informer.DefaultResyncInterval)
 
@@ -363,6 +408,8 @@ var _ = Describe("Hybrid Overlay Node Linux Operations", func() {
 			// FIXME
 			// Eventually(fexec.CalledMatchesExpected, 2).Should(BeTrue(), fexec.ErrorDesc)
 			validateNetlinkState(thisSubnet)
+			err = n.controller.AddPod(testPod)
+			Expect(err).NotTo(HaveOccurred())
 			return nil
 		}
 		appRun(app, netns)
@@ -446,7 +493,6 @@ var _ = Describe("Hybrid Overlay Node Linux Operations", func() {
 
 			_, err := config.InitConfig(ctx, fexec, nil)
 			Expect(err).NotTo(HaveOccurred())
-
 			f := informers.NewSharedInformerFactory(fakeClient, informer.DefaultResyncInterval)
 
 			n, err := NewNode(
@@ -493,7 +539,6 @@ var _ = Describe("Hybrid Overlay Node Linux Operations", func() {
 
 			_, err := config.InitConfig(ctx, fexec, nil)
 			Expect(err).NotTo(HaveOccurred())
-
 			f := informers.NewSharedInformerFactory(fakeClient, informer.DefaultResyncInterval)
 
 			n, err := NewNode(
@@ -562,7 +607,6 @@ var _ = Describe("Hybrid Overlay Node Linux Operations", func() {
 
 			_, err := config.InitConfig(ctx, fexec, nil)
 			Expect(err).NotTo(HaveOccurred())
-
 			f := informers.NewSharedInformerFactory(fakeClient, informer.DefaultResyncInterval)
 
 			n, err := NewNode(

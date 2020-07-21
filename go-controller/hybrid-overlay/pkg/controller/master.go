@@ -5,6 +5,7 @@ import (
 	"net"
 	"time"
 
+	goovn "github.com/ebay/go-ovn"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/hybrid-overlay/pkg/types"
 	hotypes "github.com/ovn-org/ovn-kubernetes/go-controller/hybrid-overlay/pkg/types"
 	houtil "github.com/ovn-org/ovn-kubernetes/go-controller/hybrid-overlay/pkg/util"
@@ -32,6 +33,8 @@ type MasterController struct {
 	nodeEventHandler      informer.EventHandler
 	namespaceEventHandler informer.EventHandler
 	podEventHandler       informer.EventHandler
+	ovnNBClient           goovn.Client
+	ovnSBClient           goovn.Client
 }
 
 // NewMaster a new master controller that listens for node events
@@ -39,10 +42,15 @@ func NewMaster(kube kube.Interface,
 	nodeInformer cache.SharedIndexInformer,
 	namespaceInformer cache.SharedIndexInformer,
 	podInformer cache.SharedIndexInformer,
+	ovnNBClient goovn.Client,
+	ovnSBClient goovn.Client,
 ) (*MasterController, error) {
+
 	m := &MasterController{
-		kube:      kube,
-		allocator: subnetallocator.NewSubnetAllocator(),
+		kube:        kube,
+		allocator:   subnetallocator.NewSubnetAllocator(),
+		ovnNBClient: ovnNBClient,
+		ovnSBClient: ovnSBClient,
 	}
 
 	m.nodeEventHandler = informer.NewDefaultEventHandler("node", nodeInformer,
@@ -95,7 +103,7 @@ func NewMaster(kube kube.Interface,
 
 	// Add our hybrid overlay CIDRs to the subnetallocator
 	for _, clusterEntry := range config.HybridOverlay.ClusterSubnets {
-		err := m.allocator.AddNetworkRange(clusterEntry.CIDR, 32-clusterEntry.HostSubnetLength)
+		err := m.allocator.AddNetworkRange(clusterEntry.CIDR, clusterEntry.HostSubnetLength)
 		if err != nil {
 			return nil, err
 		}
@@ -201,14 +209,13 @@ func (m *MasterController) handleOverlayPort(node *kapi.Node, annotator kube.Ann
 		return nil
 	}
 
-	// FIXME DUAL-STACK
-	subnet := subnets[0]
-
 	portName := util.GetHybridOverlayPortName(node.Name)
-	portMAC, portIPs, _ := util.GetPortAddresses(portName)
+	portMAC, portIPs, _ := util.GetPortAddresses(portName, m.ovnNBClient)
 	if portMAC == nil || portIPs == nil {
 		if portIPs == nil {
-			portIPs = append(portIPs, util.GetNodeHybridOverlayIfAddr(subnet).IP)
+			for _, subnet := range subnets {
+				portIPs = append(portIPs, util.GetNodeHybridOverlayIfAddr(subnet).IP)
+			}
 		}
 		if portMAC == nil {
 			for _, ip := range portIPs {
@@ -228,9 +235,10 @@ func (m *MasterController) handleOverlayPort(node *kapi.Node, annotator kube.Ann
 			return fmt.Errorf("failed to add hybrid overlay port for node %s"+
 				", stderr:%s: %v", node.Name, stderr, err)
 		}
-
-		if err := util.UpdateNodeSwitchExcludeIPs(node.Name, subnet); err != nil {
-			return err
+		for _, subnet := range subnets {
+			if err := util.UpdateNodeSwitchExcludeIPs(node.Name, subnet); err != nil {
+				return err
+			}
 		}
 	}
 	if err := annotator.Set(types.HybridOverlayDRMAC, portMAC.String()); err != nil {

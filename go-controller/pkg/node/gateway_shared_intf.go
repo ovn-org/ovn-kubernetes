@@ -24,25 +24,37 @@ const (
 )
 
 func addService(service *kapi.Service, inport, outport, gwBridge string, nodeIP *net.IPNet) {
-	if !util.ServiceTypeHasNodePort(service) {
+	if !util.ServiceTypeHasNodePort(service) && len(service.Spec.ExternalIPs) == 0 {
 		return
 	}
 
 	for _, svcPort := range service.Spec.Ports {
-		_, err := util.ValidateProtocol(svcPort.Protocol)
-		if err != nil {
-			klog.Errorf("Skipping service add. Invalid service port %s: %v", svcPort.Name, err)
-			continue
-		}
 		protocol := strings.ToLower(string(svcPort.Protocol))
-
-		_, stderr, err := util.RunOVSOfctl("add-flow", gwBridge,
-			fmt.Sprintf("priority=100, in_port=%s, %s, tp_dst=%d, actions=%s",
-				inport, protocol, svcPort.NodePort, outport))
-		if err != nil {
-			klog.Errorf("Failed to add openflow flow on %s for nodePort "+
-				"%d, stderr: %q, error: %v", gwBridge,
-				svcPort.NodePort, stderr, err)
+		if util.ServiceTypeHasNodePort(service) {
+			if err := util.ValidatePort(svcPort.Protocol, svcPort.NodePort); err != nil {
+				klog.Errorf("Skipping service add for svc: %s, err: %v", svcPort.Name, err)
+				continue
+			}
+			_, stderr, err := util.RunOVSOfctl("add-flow", gwBridge,
+				fmt.Sprintf("priority=100, in_port=%s, %s, tp_dst=%d, actions=%s",
+					inport, protocol, svcPort.NodePort, outport))
+			if err != nil {
+				klog.Errorf("Failed to add openflow flow on %s for nodePort: "+
+					"%d, stderr: %q, error: %v", gwBridge, svcPort.NodePort, stderr, err)
+			}
+		}
+		for _, externalIP := range service.Spec.ExternalIPs {
+			if err := util.ValidatePort(svcPort.Protocol, svcPort.Port); err != nil {
+				klog.Errorf("Skipping service add for svc: %s, err: %v", svcPort.Name, err)
+				continue
+			}
+			_, stderr, err := util.RunOVSOfctl("add-flow", gwBridge,
+				fmt.Sprintf("priority=100, in_port=%s, %s, nw_dst=%s, tp_dst=%d, actions=%s",
+					inport, protocol, externalIP, svcPort.Port, outport))
+			if err != nil {
+				klog.Errorf("Failed to add openflow flow on %s for ExternalIP: "+
+					"%s, stderr: %q, error: %v", gwBridge, externalIP, stderr, err)
+			}
 		}
 	}
 
@@ -50,34 +62,45 @@ func addService(service *kapi.Service, inport, outport, gwBridge string, nodeIP 
 }
 
 func deleteService(service *kapi.Service, inport, gwBridge string, nodeIP *net.IPNet) {
-	if !util.ServiceTypeHasNodePort(service) {
+	if !util.ServiceTypeHasNodePort(service) && len(service.Spec.ExternalIPs) == 0 {
 		return
 	}
 
 	for _, svcPort := range service.Spec.Ports {
-		_, err := util.ValidateProtocol(svcPort.Protocol)
-		if err != nil {
-			klog.Errorf("Skipping service delete. Invalid service port %s: %v", svcPort.Name, err)
-			continue
-		}
-
 		protocol := strings.ToLower(string(svcPort.Protocol))
-
-		_, stderr, err := util.RunOVSOfctl("del-flows", gwBridge,
-			fmt.Sprintf("in_port=%s, %s, tp_dst=%d",
-				inport, protocol, svcPort.NodePort))
-		if err != nil {
-			klog.Errorf("Failed to delete openflow flow on %s for nodePort "+
-				"%d, stderr: %q, error: %v", gwBridge,
-				svcPort.NodePort, stderr, err)
+		if util.ServiceTypeHasNodePort(service) {
+			if err := util.ValidatePort(svcPort.Protocol, svcPort.NodePort); err != nil {
+				klog.Errorf("Skipping service delete, for svc: %s, err: %v", svcPort.Name, err)
+				continue
+			}
+			_, stderr, err := util.RunOVSOfctl("del-flows", gwBridge,
+				fmt.Sprintf("in_port=%s, %s, tp_dst=%d",
+					inport, protocol, svcPort.NodePort))
+			if err != nil {
+				klog.Errorf("Failed to delete openflow flow on %s for nodePort: "+
+					"%d, stderr: %q, error: %v", gwBridge, svcPort.NodePort, stderr, err)
+			}
+		}
+		for _, externalIP := range service.Spec.ExternalIPs {
+			if err := util.ValidatePort(svcPort.Protocol, svcPort.Port); err != nil {
+				klog.Errorf("Skipping service delete, for svc: %s, err: %v", svcPort.Name, err)
+				continue
+			}
+			_, stderr, err := util.RunOVSOfctl("del-flows", gwBridge,
+				fmt.Sprintf("in_port=%s, %s, nw_dst=%s, tp_dst=%d",
+					inport, protocol, externalIP, svcPort.Port))
+			if err != nil {
+				klog.Errorf("Failed to delete openflow flow on %s for ExternalIP: "+
+					"%s, stderr: %q, error: %v", gwBridge, externalIP, stderr, err)
+			}
 		}
 	}
 
 	delSharedGatewayIptRules(service, nodeIP)
 }
 
-func syncServices(services []interface{}, inport, gwBridge string) {
-	nodePorts := make(map[string]bool)
+func syncServices(services []interface{}, inport, gwBridge string, nodeIP *net.IPNet) {
+	ports := make(map[string]string)
 	for _, serviceInterface := range services {
 		service, ok := serviceInterface.(*kapi.Service)
 		if !ok {
@@ -86,27 +109,33 @@ func syncServices(services []interface{}, inport, gwBridge string) {
 			continue
 		}
 
-		if !util.ServiceTypeHasNodePort(service) ||
-			len(service.Spec.Ports) == 0 {
+		if !util.ServiceTypeHasNodePort(service) && len(service.Spec.ExternalIPs) == 0 {
 			continue
 		}
 
 		for _, svcPort := range service.Spec.Ports {
-			port := svcPort.NodePort
-			if port == 0 {
-				continue
+			if util.ServiceTypeHasNodePort(service) {
+				if err := util.ValidatePort(svcPort.Protocol, svcPort.NodePort); err != nil {
+					klog.Errorf("syncServices error for service port %s: %v", svcPort.Name, err)
+					continue
+				}
+				protocol := strings.ToLower(string(svcPort.Protocol))
+				nodePortKey := fmt.Sprintf("%s_%d", protocol, svcPort.NodePort)
+				ports[nodePortKey] = ""
 			}
-
-			proto, err := util.ValidateProtocol(svcPort.Protocol)
-			if err != nil {
-				klog.Errorf("syncServices error for service port %s: %v", svcPort.Name, err)
-				continue
+			for _, externalIP := range service.Spec.ExternalIPs {
+				if err := util.ValidatePort(svcPort.Protocol, svcPort.Port); err != nil {
+					klog.Errorf("syncServices error for service port %s: %v", svcPort.Name, err)
+					continue
+				}
+				protocol := strings.ToLower(string(svcPort.Protocol))
+				externalPortKey := fmt.Sprintf("%s_%d", protocol, svcPort.Port)
+				ports[externalPortKey] = externalIP
 			}
-			protocol := strings.ToLower(string(proto))
-			nodePortKey := fmt.Sprintf("%s_%d", protocol, port)
-			nodePorts[nodePortKey] = true
 		}
 	}
+
+	syncSharedGatewayIptRules(services, nodeIP)
 
 	stdout, stderr, err := util.RunOVSOfctl("dump-flows",
 		gwBridge)
@@ -139,17 +168,27 @@ func syncServices(services []interface{}, inport, gwBridge string) {
 			continue
 		}
 
-		if _, ok := nodePorts[key]; !ok {
+		if externalIP, ok := ports[key]; !ok {
 			pair := strings.Split(key, "_")
 			protocol, port := pair[0], pair[1]
-
-			stdout, _, err := util.RunOVSOfctl(
-				"del-flows", gwBridge,
-				fmt.Sprintf("in_port=%s, %s, tp_dst=%s",
-					inport, protocol, port))
-			if err != nil {
-				klog.Errorf("del-flows of %s failed: %q",
-					gwBridge, stdout)
+			if externalIP == "" {
+				stdout, _, err := util.RunOVSOfctl(
+					"del-flows", gwBridge,
+					fmt.Sprintf("in_port=%s, %s, tp_dst=%s",
+						inport, protocol, port))
+				if err != nil {
+					klog.Errorf("del-flows of %s failed: %q",
+						gwBridge, stdout)
+				}
+			} else {
+				stdout, _, err := util.RunOVSOfctl(
+					"del-flows", gwBridge,
+					fmt.Sprintf("in_port=%s, %s, nw_dst=%s, tp_dst=%s",
+						inport, protocol, externalIP, port))
+				if err != nil {
+					klog.Errorf("del-flows of %s failed: %q",
+						gwBridge, stdout)
+				}
 			}
 		}
 	}
@@ -180,8 +219,7 @@ func nodePortWatcher(nodeName, gwBridge, gwIntf string, nodeIP []*net.IPNet, wf 
 	// of the node. If someone on the node is trying to access the NodePort service, those packets
 	// will not be processed by the OpenFlow flows, so we need to add iptable rules that DNATs the
 	// NodePortIP:NodePort to ClusterServiceIP:Port.
-	err = createNodePortIptableChain()
-	if err != nil {
+	if err := initSharedGatewayIPTables(); err != nil {
 		return err
 	}
 
@@ -204,7 +242,7 @@ func nodePortWatcher(nodeName, gwBridge, gwIntf string, nodeIP []*net.IPNet, wf 
 			deleteService(service, ofportPhys, gwBridge, nodeIP[0])
 		},
 	}, func(services []interface{}) {
-		syncServices(services, ofportPhys, gwBridge)
+		syncServices(services, ofportPhys, gwBridge, nodeIP[0])
 	})
 
 	return err
@@ -299,8 +337,7 @@ func addDefaultConntrackRules(nodeName, gwBridge, gwIntf string, stopChan chan s
 	return nil
 }
 
-func (n *OvnNode) initSharedGateway(subnet *net.IPNet, gwNextHop net.IP, gwIntf string,
-	nodeAnnotator kube.Annotator) (postWaitFunc, error) {
+func (n *OvnNode) initSharedGateway(subnets []*net.IPNet, gwNextHop net.IP, gwIntf string, nodeAnnotator kube.Annotator) (postWaitFunc, error) {
 	var bridgeName string
 	var uplinkName string
 	var brCreated bool
@@ -349,7 +386,7 @@ func (n *OvnNode) initSharedGateway(subnet *net.IPNet, gwNextHop net.IP, gwIntf 
 		return nil, fmt.Errorf("failed to set up shared interface gateway: %v", err)
 	}
 
-	err = setupLocalNodeAccessBridge(n.name, subnet)
+	err = setupLocalNodeAccessBridge(n.name, subnets)
 	if err != nil {
 		return nil, err
 	}
@@ -430,6 +467,6 @@ func cleanupSharedGateway() error {
 		return fmt.Errorf("failed to replace-flows on bridge %q stderr:%s (%v)", bridgeName, stderr, err)
 	}
 
-	deleteNodePortIptableChain()
+	cleanupSharedGatewayIPTChains()
 	return nil
 }

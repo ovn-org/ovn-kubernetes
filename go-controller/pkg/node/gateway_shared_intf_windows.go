@@ -1,15 +1,16 @@
 package node
 
 import (
-	kapi "k8s.io/api/core/v1"
 	"net"
+
+	kapi "k8s.io/api/core/v1"
 )
 
-func createNodePortIptableChain() error {
+func initSharedGatewayIPTables() error {
 	return nil
 }
 
-func deleteNodePortIptableChain() {
+func cleanupSharedGatewayIPTChains() {
 }
 
 func addSharedGatewayIptRules(service *kapi.Service, nodeIP *net.IPNet) {
@@ -18,6 +19,9 @@ func addSharedGatewayIptRules(service *kapi.Service, nodeIP *net.IPNet) {
 func delSharedGatewayIptRules(service *kapi.Service, nodeIP *net.IPNet) {
 }
 
-func setupLocalNodeAccessBridge(nodeName string, subnet *net.IPNet) error {
+func syncSharedGatewayIptRules(services []interface{}, nodeIP *net.IPNet) {
+}
+
+func setupLocalNodeAccessBridge(nodeName string, subnets []*net.IPNet) error {
 	return nil
 }

@@ -1,6 +1,7 @@
 package ovn
 
 import (
+	"context"
 	"fmt"
 	"strconv"
 	"strings"
@@ -13,6 +14,7 @@ import (
 	v1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
+	"k8s.io/apimachinery/pkg/util/intstr"
 
 	. "github.com/onsi/ginkgo"
 	. "github.com/onsi/gomega"
@@ -95,7 +97,26 @@ func (e endpoints) addCmds(fexec *ovntest.FakeExec, service v1.Service, endpoint
 	})
 }
 
-func (e endpoints) delCmds(fexec *ovntest.FakeExec, service v1.Service) {
+func (e endpoints) addExternalIPCmds(fexec *ovntest.FakeExec, loadBalancerIPs []string, service v1.Service, endpoint v1.Endpoints) {
+	gatewayRouters := "GR_1 GR_2"
+	fexec.AddFakeCmd(&ovntest.ExpectedCmd{
+		Cmd:    "ovn-nbctl --timeout=15 --data=bare --no-heading --columns=name find logical_router options:chassis!=null",
+		Output: gatewayRouters,
+	})
+	for idx, gatewayR := range strings.Fields(gatewayRouters) {
+		fexec.AddFakeCmd(&ovntest.ExpectedCmd{
+			Cmd:    "ovn-nbctl --timeout=15 --data=bare --no-heading --columns=_uuid find load_balancer external_ids:TCP_lb_gateway_router=" + gatewayR,
+			Output: "load_balancer_" + string(idx),
+		})
+		for _, loadBalancerIP := range loadBalancerIPs {
+			fexec.AddFakeCmdsNoOutputNoError([]string{
+				fmt.Sprintf("ovn-nbctl --timeout=15 set load_balancer load_balancer_%s vips:\"%s:%v\"=\"%s:%v\"", string(idx), loadBalancerIP, service.Spec.Ports[0].Port, endpoint.Subsets[0].Addresses[0].IP, endpoint.Subsets[0].Ports[0].Port),
+			})
+		}
+	}
+}
+
+func (e endpoints) delCmds(fexec *ovntest.FakeExec, service v1.Service, endpoint v1.Endpoints) {
 	for _, sPort := range service.Spec.Ports {
 		if sPort.Protocol == v1.ProtocolTCP {
 			fexec.AddFakeCmdsNoOutputNoError([]string{
@@ -164,6 +185,7 @@ var _ = Describe("OVN Namespace Operations", func() {
 						},
 					},
 					v1.ServiceTypeClusterIP,
+					nil,
 				)
 
 				testE.addCmds(tExec, serviceT, endpointsT)
@@ -182,7 +204,129 @@ var _ = Describe("OVN Namespace Operations", func() {
 				)
 				fakeOvn.controller.WatchEndpoints()
 
-				_, err := fakeOvn.fakeClient.CoreV1().Endpoints(endpointsT.Namespace).Get(endpointsT.Name, metav1.GetOptions{})
+				_, err := fakeOvn.fakeClient.CoreV1().Endpoints(endpointsT.Namespace).Get(context.TODO(), endpointsT.Name, metav1.GetOptions{})
+				Expect(err).NotTo(HaveOccurred())
+				Expect(tExec.CalledMatchesExpected()).To(BeTrue(), tExec.ErrorDesc)
+
+				return nil
+			}
+
+			err := app.Run([]string{app.Name})
+			Expect(err).NotTo(HaveOccurred())
+		})
+
+		It("reconciles existing endpoints with ExternalIP", func() {
+			app.Action = func(ctx *cli.Context) error {
+
+				testE := endpoints{}
+
+				loadBalancerIPs := []string{"1.1.1.1", "192.168.126.11"}
+
+				endpointsT := *newEndpoints("endpoint-service1", "namespace1",
+					[]v1.EndpointAddress{
+						{
+							IP: "10.125.0.2",
+						},
+					},
+					[]v1.EndpointPort{
+						{
+							Name:     "portTcp1",
+							Port:     8080,
+							Protocol: v1.ProtocolTCP,
+						},
+					})
+
+				serviceT := *newService("endpoint-service1", "namespace1", "172.124.0.2",
+					[]v1.ServicePort{
+						{
+							Name:       "portTcp1",
+							Port:       9100,
+							Protocol:   v1.ProtocolTCP,
+							TargetPort: intstr.FromInt(8080),
+						},
+					},
+					v1.ServiceTypeClusterIP,
+					loadBalancerIPs,
+				)
+
+				testE.addCmds(tExec, serviceT, endpointsT)
+				testE.addExternalIPCmds(tExec, loadBalancerIPs, serviceT, endpointsT)
+
+				fakeOvn.start(ctx,
+					&v1.EndpointsList{
+						Items: []v1.Endpoints{
+							endpointsT,
+						},
+					},
+					&v1.ServiceList{
+						Items: []v1.Service{
+							serviceT,
+						},
+					},
+				)
+				fakeOvn.controller.WatchEndpoints()
+
+				_, err := fakeOvn.fakeClient.CoreV1().Endpoints(endpointsT.Namespace).Get(context.TODO(), endpointsT.Name, metav1.GetOptions{})
+				Expect(err).NotTo(HaveOccurred())
+				Expect(tExec.CalledMatchesExpected()).To(BeTrue(), tExec.ErrorDesc)
+
+				return nil
+			}
+
+			err := app.Run([]string{app.Name})
+			Expect(err).NotTo(HaveOccurred())
+		})
+
+		It("reconciles existing endpoints with NodePort", func() {
+			app.Action = func(ctx *cli.Context) error {
+
+				testE := endpoints{}
+
+				endpointsT := *newEndpoints("endpoint-service1", "namespace1",
+					[]v1.EndpointAddress{
+						{
+							IP: "10.125.0.2",
+						},
+					},
+					[]v1.EndpointPort{
+						{
+							Name:     "portTcp1",
+							Port:     8080,
+							Protocol: v1.ProtocolTCP,
+						},
+					})
+
+				serviceT := *newService("endpoint-service1", "namespace1", "172.124.0.2",
+					[]v1.ServicePort{
+						{
+							Name:       "portTcp1",
+							NodePort:   31111,
+							Protocol:   v1.ProtocolTCP,
+							TargetPort: intstr.FromInt(8080),
+						},
+					},
+					v1.ServiceTypeNodePort,
+					nil,
+				)
+
+				testE.addNodePortPortCmds(tExec, serviceT, endpointsT)
+				testE.addCmds(tExec, serviceT, endpointsT)
+
+				fakeOvn.start(ctx,
+					&v1.EndpointsList{
+						Items: []v1.Endpoints{
+							endpointsT,
+						},
+					},
+					&v1.ServiceList{
+						Items: []v1.Service{
+							serviceT,
+						},
+					},
+				)
+				fakeOvn.controller.WatchEndpoints()
+
+				_, err := fakeOvn.fakeClient.CoreV1().Endpoints(endpointsT.Namespace).Get(context.TODO(), endpointsT.Name, metav1.GetOptions{})
 				Expect(err).NotTo(HaveOccurred())
 				Expect(tExec.CalledMatchesExpected()).To(BeTrue(), tExec.ErrorDesc)
 
@@ -221,6 +365,7 @@ var _ = Describe("OVN Namespace Operations", func() {
 						},
 					},
 					v1.ServiceTypeClusterIP,
+					nil,
 				)
 				testE.addCmds(tExec, serviceT, endpointsT)
 
@@ -238,14 +383,14 @@ var _ = Describe("OVN Namespace Operations", func() {
 				)
 				fakeOvn.controller.WatchEndpoints()
 
-				_, err := fakeOvn.fakeClient.CoreV1().Endpoints(endpointsT.Namespace).Get(endpointsT.Name, metav1.GetOptions{})
+				_, err := fakeOvn.fakeClient.CoreV1().Endpoints(endpointsT.Namespace).Get(context.TODO(), endpointsT.Name, metav1.GetOptions{})
 				Expect(err).NotTo(HaveOccurred())
 				Eventually(tExec.CalledMatchesExpected).Should(BeTrue(), tExec.ErrorDesc)
 
 				// Delete the endpoint
-				testE.delCmds(tExec, serviceT)
+				testE.delCmds(tExec, serviceT, endpointsT)
 
-				err = fakeOvn.fakeClient.CoreV1().Endpoints(endpointsT.Namespace).Delete(endpointsT.Name, metav1.NewDeleteOptions(0))
+				err = fakeOvn.fakeClient.CoreV1().Endpoints(endpointsT.Namespace).Delete(context.TODO(), endpointsT.Name, *metav1.NewDeleteOptions(0))
 				Expect(err).NotTo(HaveOccurred())
 				Eventually(tExec.CalledMatchesExpected).Should(BeTrue(), tExec.ErrorDesc)
 
@@ -284,6 +429,7 @@ var _ = Describe("OVN Namespace Operations", func() {
 						},
 					},
 					v1.ServiceTypeNodePort,
+					nil,
 				)
 				testE.addNodePortPortCmds(tExec, serviceT, endpointsT)
 				testE.addCmds(tExec, serviceT, endpointsT)
@@ -302,15 +448,15 @@ var _ = Describe("OVN Namespace Operations", func() {
 				)
 				fakeOvn.controller.WatchEndpoints()
 
-				_, err := fakeOvn.fakeClient.CoreV1().Endpoints(endpointsT.Namespace).Get(endpointsT.Name, metav1.GetOptions{})
+				_, err := fakeOvn.fakeClient.CoreV1().Endpoints(endpointsT.Namespace).Get(context.TODO(), endpointsT.Name, metav1.GetOptions{})
 				Expect(err).NotTo(HaveOccurred())
 				Eventually(tExec.CalledMatchesExpected).Should(BeTrue(), tExec.ErrorDesc)
 
 				// Delete the endpoint
-				testE.delCmds(tExec, serviceT)
+				testE.delCmds(tExec, serviceT, endpointsT)
 				testE.delNodePortPortCmds(tExec, serviceT, endpointsT)
 
-				err = fakeOvn.fakeClient.CoreV1().Endpoints(endpointsT.Namespace).Delete(endpointsT.Name, metav1.NewDeleteOptions(0))
+				err = fakeOvn.fakeClient.CoreV1().Endpoints(endpointsT.Namespace).Delete(context.TODO(), endpointsT.Name, *metav1.NewDeleteOptions(0))
 				Expect(err).NotTo(HaveOccurred())
 				Eventually(tExec.CalledMatchesExpected).Should(BeTrue(), tExec.ErrorDesc)
 

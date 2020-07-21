@@ -55,6 +55,9 @@ fi
 # OVN_LOGLEVEL_SB - log level (ovn-ctl default: -vconsole:off -vfile:info) - v3
 # OVN_LOGLEVEL_CONTROLLER - log level (ovn-ctl default: -vconsole:off -vfile:info) - v3
 # OVN_LOGLEVEL_NBCTLD - log level (ovn-ctl default: -vconsole:off -vfile:info) - v3
+# OVNKUBE_LOGFILE_MAXSIZE - log file max size in MB(default 100 MB)
+# OVNKUBE_LOGFILE_MAXBACKUPS - log file max backups (default 5)
+# OVNKUBE_LOGFILE_MAXAGE - log file max age in days (default 5 days)
 # OVN_NB_PORT - ovn north db port (default 6641)
 # OVN_SB_PORT - ovn south db port (default 6642)
 # OVN_NB_RAFT_PORT - ovn north db raft port (default 6643)
@@ -77,6 +80,11 @@ ovn_loglevel_controller=${OVN_LOGLEVEL_CONTROLLER:-"-vconsole:info"}
 ovn_loglevel_nbctld=${OVN_LOGLEVEL_NBCTLD:-"-vconsole:info"}
 
 ovnkubelogdir=/var/log/ovn-kubernetes
+
+# logfile rotation parameters
+ovnkube_logfile_maxsize=${OVNKUBE_LOGFILE_MAXSIZE:-"100"}
+ovnkube_logfile_maxbackups=${OVNKUBE_LOGFILE_MAXBACKUPS:-"5"}
+ovnkube_logfile_maxage=${OVNKUBE_LOGFILE_MAXAGE:-"5"}
 
 # ovnkube.sh version (update when API between daemonset and script changes - v.x.y)
 ovnkube_version="3"
@@ -114,6 +122,7 @@ ovn_northd_pk=/ovn-cert/ovnnorthd-privkey.pem
 ovn_northd_cert=/ovn-cert/ovnnorthd-cert.pem
 ovn_controller_pk=/ovn-cert/ovncontroller-privkey.pem
 ovn_controller_cert=/ovn-cert/ovncontroller-cert.pem
+ovn_controller_cname="ovncontroller"
 
 transport="tcp"
 ovndb_ctl_ssl_opts=""
@@ -165,6 +174,7 @@ ovn_hybrid_overlay_enable=${OVN_HYBRID_OVERLAY_ENABLE:-}
 ovn_hybrid_overlay_net_cidr=${OVN_HYBRID_OVERLAY_NET_CIDR:-}
 #OVN_REMOTE_PROBE_INTERVAL - ovn remote probe interval in ms (default 100000)
 ovn_remote_probe_interval=${OVN_REMOTE_PROBE_INTERVAL:-100000}
+ovn_multicast_enable=${OVN_MULTICAST_ENABLE:-}
 
 # Determine the ovn rundir.
 if [[ -f /usr/bin/ovn-appctl ]]; then
@@ -758,12 +768,19 @@ ovn-master() {
         --nb-client-privkey ${ovn_controller_pk}
         --nb-client-cert ${ovn_controller_cert}
         --nb-client-cacert ${ovn_ca_cert}
+        --nb-cert-common-name ${ovn_controller_cname}
         --sb-client-privkey ${ovn_controller_pk}
         --sb-client-cert ${ovn_controller_cert}
         --sb-client-cacert ${ovn_ca_cert}
+        --sb-cert-common-name ${ovn_controller_cname}
       "
   }
 
+  multicast_enabled_flag=
+  if [[ ${ovn_multicast_enable} == "true" ]]; then
+      multicast_enabled_flag="--enable-multicast"
+  fi
+  
   echo "=============== ovn-master ========== MASTER ONLY"
   /usr/bin/ovnkube \
     --init-master ${K8S_NODE} \
@@ -772,10 +789,14 @@ ovn-master() {
     --gateway-mode=${ovn_gateway_mode} \
     --nbctl-daemon-mode \
     --loglevel=${ovnkube_loglevel} \
+    --logfile-maxsize=${ovnkube_logfile_maxsize} \
+    --logfile-maxbackups=${ovnkube_logfile_maxbackups} \
+    --logfile-maxage=${ovnkube_logfile_maxage} \
     ${hybrid_overlay_flags} \
     --pidfile ${OVN_RUNDIR}/ovnkube-master.pid \
     --logfile /var/log/ovn-kubernetes/ovnkube-master.log \
     ${ovn_master_ssl_opts} \
+    ${multicast_enabled_flag} \
     --metrics-bind-address "0.0.0.0:9409" &
   echo "=============== ovn-master ========== running"
   wait_for_event attempts=3 process_ready ovnkube-master
@@ -855,6 +876,11 @@ ovn-node() {
     fi
   fi
 
+  multicast_enabled_flag=
+  if [[ ${ovn_multicast_enable} == "true" ]]; then
+      multicast_enabled_flag="--enable-multicast"
+  fi
+  
   OVN_ENCAP_IP=""
   ovn_encap_ip=$(ovs-vsctl --if-exists get Open_vSwitch . external_ids:ovn-encap-ip)
   if [[ $? == 0 ]]; then
@@ -870,9 +896,11 @@ ovn-node() {
         --nb-client-privkey ${ovn_controller_pk}
         --nb-client-cert ${ovn_controller_cert}
         --nb-client-cacert ${ovn_ca_cert}
+        --nb-cert-common-name ${ovn_controller_cname}
         --sb-client-privkey ${ovn_controller_pk}
         --sb-client-cert ${ovn_controller_cert}
         --sb-client-cacert ${ovn_ca_cert}
+        --sb-cert-common-name ${ovn_controller_cname}
       "
   }
 
@@ -884,12 +912,17 @@ ovn-node() {
     --mtu=${mtu} \
     ${OVN_ENCAP_IP} \
     --loglevel=${ovnkube_loglevel} \
+    --loglevel=${ovnkube_loglevel} \
+    --logfile-maxsize=${ovnkube_logfile_maxsize} \
+    --logfile-maxbackups=${ovnkube_logfile_maxbackups} \
+    --logfile-maxage=${ovnkube_logfile_maxage} \
     ${hybrid_overlay_flags} \
     --gateway-mode=${ovn_gateway_mode} ${ovn_gateway_opts} \
     --pidfile ${OVN_RUNDIR}/ovnkube.pid \
     --logfile /var/log/ovn-kubernetes/ovnkube.log \
     ${ovn_node_ssl_opts} \
     --inactivity-probe=${ovn_remote_probe_interval} \
+    ${multicast_enabled_flag} \
     --metrics-bind-address "0.0.0.0:9410" &
 
   wait_for_event attempts=3 process_ready ovnkube
@@ -950,6 +983,23 @@ run-nbctld() {
 
   process_healthy ovn-nbctl ${nbctl_tail_pid}
   echo "=============== run_ovn_nbctl ========== terminated"
+}
+
+# v3 - Runs ovn-kube-util in daemon mode to export prometheus metrics related to OVS.
+ovs-metrics() {
+  check_ovn_daemonset_version "3"
+
+  echo "=============== ovs-metrics - (wait for ovs_ready)"
+  wait_for_event ovs_ready
+
+  ovs_exporter_bind_address=${OVS_EXPORTER_BIND_ADDRESS:-"0.0.0.0:9310"}
+  /usr/bin/ovn-kube-util \
+    --loglevel=${ovnkube_loglevel} \
+    ovs-exporter \
+    --metrics-bind-address ${ovs_exporter_bind_address}
+
+  echo "=============== ovs-metrics with pid ${?} terminated ========== "
+  exit 1
 }
 
 echo "================== ovnkube.sh --- version: ${ovnkube_version} ================"
@@ -1025,6 +1075,9 @@ case ${cmd} in
   ;;
 "db-raft-metrics")
   db-raft-metrics
+  ;;
+"ovs-metrics")
+  ovs-metrics
   ;;
 *)
   echo "invalid command ${cmd}"

@@ -37,34 +37,10 @@ func (ovn *Controller) getLoadBalancer(protocol kapi.Protocol) (string, error) {
 		return "", err
 	}
 	if out == "" {
-		return "", fmt.Errorf("no load-balancer found in the database")
+		return "", fmt.Errorf("no load balancer found in the database")
 	}
 	ovn.loadbalancerClusterCache[protocol] = out
 	return out, nil
-}
-
-// getDefaultGatewayLoadBalancer returns the load balancer for the node with the lowest gateway IP.
-// This is used in the implementation of ExternalIPs
-func (ovn *Controller) getDefaultGatewayLoadBalancer(protocol kapi.Protocol) string {
-	if outStr, ok := ovn.loadbalancerGWCache[protocol]; ok {
-		return outStr
-	}
-
-	gw, _, err := getDefaultGatewayRouterIP()
-	if err != nil {
-		klog.Errorf(err.Error())
-		return ""
-	}
-
-	externalIDKey := string(protocol) + "_lb_gateway_router"
-	lb, _, _ := util.RunOVNNbctl("--data=bare",
-		"--no-heading", "--columns=_uuid", "find", "load_balancer",
-		"external_ids:"+externalIDKey+"="+gw)
-	if len(lb) != 0 {
-		ovn.loadbalancerGWCache[protocol] = lb
-		ovn.defGatewayRouter = gw
-	}
-	return lb
 }
 
 // getLoadBalancerVIPs returns a map whose keys are VIPs (IP:port) on loadBalancer
@@ -75,7 +51,7 @@ func (ovn *Controller) getLoadBalancerVIPs(loadBalancer string) (map[string]inte
 		return nil, err
 	}
 	if outStr == "" {
-		return nil, nil
+		return nil, fmt.Errorf("load balancer vips in OVN DB is an empty string")
 	}
 	// sample outStr:
 	// - {"192.168.0.1:80"="10.1.1.1:80,10.2.2.2:80"}
@@ -91,19 +67,19 @@ func (ovn *Controller) getLoadBalancerVIPs(loadBalancer string) (map[string]inte
 }
 
 // deleteLoadBalancerVIP removes the VIP as well as any reject ACLs associated to the LB
-func (ovn *Controller) deleteLoadBalancerVIP(loadBalancer, vip string) {
+func (ovn *Controller) deleteLoadBalancerVIP(loadBalancer, vip string) error {
 	vipQuotes := fmt.Sprintf("\"%s\"", vip)
 	stdout, stderr, err := util.RunOVNNbctl("--if-exists", "remove", "load_balancer", loadBalancer, "vips", vipQuotes)
 	if err != nil {
-		klog.Errorf("Error in deleting load balancer vip %s for %s"+
+		// if we hit an error and fail to remove load balancer, we skip removing the rejectACL
+		return fmt.Errorf("error in deleting load balancer vip %s for %s"+
 			"stdout: %q, stderr: %q, error: %v",
 			vip, loadBalancer, stdout, stderr, err)
-		// if we hit an error and fail to remove load balancer, we skip removing the rejectACL
-		return
 	}
 	ovn.removeServiceEndpoints(loadBalancer, vip)
 	ovn.deleteLoadBalancerRejectACL(loadBalancer, vip)
 	ovn.removeServiceLB(loadBalancer, vip)
+	return nil
 }
 
 // configureLoadBalancer updates the VIP for sourceIP:sourcePort to point to targets (an

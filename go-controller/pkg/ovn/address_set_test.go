@@ -116,7 +116,7 @@ var _ = Describe("OVN Address Set operations", func() {
 				Expect(err).NotTo(HaveOccurred())
 
 				fexec.AddFakeCmd(&ovntest.ExpectedCmd{
-					Cmd:    "ovn-nbctl --timeout=15 --data=bare --no-heading --columns=_uuid find address_set name=a9625390261332436968",
+					Cmd:    "ovn-nbctl --timeout=15 --data=bare --no-heading --columns=_uuid find address_set name=a16990491322166530807",
 					Output: fakeUUID,
 				})
 				fexec.AddFakeCmdsNoOutputNoError([]string{
@@ -139,7 +139,7 @@ var _ = Describe("OVN Address Set operations", func() {
 				Expect(err).NotTo(HaveOccurred())
 
 				fexec.AddFakeCmd(&ovntest.ExpectedCmd{
-					Cmd:    "ovn-nbctl --timeout=15 --data=bare --no-heading --columns=_uuid find address_set name=a9625390261332436968",
+					Cmd:    "ovn-nbctl --timeout=15 --data=bare --no-heading --columns=_uuid find address_set name=a16990491322166530807",
 					Output: fakeUUID,
 				})
 				fexec.AddFakeCmdsNoOutputNoError([]string{
@@ -167,10 +167,10 @@ var _ = Describe("OVN Address Set operations", func() {
 				Expect(err).NotTo(HaveOccurred())
 
 				fexec.AddFakeCmdsNoOutputNoError([]string{
-					"ovn-nbctl --timeout=15 --data=bare --no-heading --columns=_uuid find address_set name=a9625390261332436968",
+					"ovn-nbctl --timeout=15 --data=bare --no-heading --columns=_uuid find address_set name=a16990491322166530807",
 				})
 				fexec.AddFakeCmd(&ovntest.ExpectedCmd{
-					Cmd:    `ovn-nbctl --timeout=15 create address_set name=a9625390261332436968 external-ids:name=foobar addresses="` + addr1 + `" "` + addr2 + `"`,
+					Cmd:    `ovn-nbctl --timeout=15 create address_set name=a16990491322166530807 external-ids:name=foobar_v4 addresses="` + addr1 + `" "` + addr2 + `"`,
 					Output: fakeUUID,
 				})
 
@@ -191,7 +191,7 @@ var _ = Describe("OVN Address Set operations", func() {
 			Expect(err).NotTo(HaveOccurred())
 
 			fexec.AddFakeCmd(&ovntest.ExpectedCmd{
-				Cmd:    "ovn-nbctl --timeout=15 --data=bare --no-heading --columns=_uuid find address_set name=a9625390261332436968",
+				Cmd:    "ovn-nbctl --timeout=15 --data=bare --no-heading --columns=_uuid find address_set name=a16990491322166530807",
 				Output: fakeUUID,
 			})
 			fexec.AddFakeCmdsNoOutputNoError([]string{
@@ -221,10 +221,10 @@ var _ = Describe("OVN Address Set operations", func() {
 				Expect(err).NotTo(HaveOccurred())
 
 				fexec.AddFakeCmdsNoOutputNoError([]string{
-					"ovn-nbctl --timeout=15 --data=bare --no-heading --columns=_uuid find address_set name=a9625390261332436968",
+					"ovn-nbctl --timeout=15 --data=bare --no-heading --columns=_uuid find address_set name=a16990491322166530807",
 				})
 				fexec.AddFakeCmd(&ovntest.ExpectedCmd{
-					Cmd:    "ovn-nbctl --timeout=15 create address_set name=a9625390261332436968 external-ids:name=foobar",
+					Cmd:    "ovn-nbctl --timeout=15 create address_set name=a16990491322166530807 external-ids:name=foobar_v4",
 					Output: fakeUUID,
 				})
 				fexec.AddFakeCmdsNoOutputNoError([]string{
@@ -234,11 +234,8 @@ var _ = Describe("OVN Address Set operations", func() {
 				as, err := asFactory.NewAddressSet("foobar", nil)
 				Expect(err).NotTo(HaveOccurred())
 
-				err = as.AddIP(net.ParseIP(addr1))
-				Expect(err).NotTo(HaveOccurred())
-
 				// Re-adding is a no-op
-				err = as.AddIP(net.ParseIP(addr1))
+				err = as.AddIPs([]net.IP{net.ParseIP(addr1)})
 				Expect(err).NotTo(HaveOccurred())
 
 				Expect(fexec.CalledMatchesExpected()).To(BeTrue(), fexec.ErrorDesc)
@@ -257,10 +254,10 @@ var _ = Describe("OVN Address Set operations", func() {
 				Expect(err).NotTo(HaveOccurred())
 
 				fexec.AddFakeCmdsNoOutputNoError([]string{
-					"ovn-nbctl --timeout=15 --data=bare --no-heading --columns=_uuid find address_set name=a9625390261332436968",
+					"ovn-nbctl --timeout=15 --data=bare --no-heading --columns=_uuid find address_set name=a16990491322166530807",
 				})
 				fexec.AddFakeCmd(&ovntest.ExpectedCmd{
-					Cmd:    `ovn-nbctl --timeout=15 create address_set name=a9625390261332436968 external-ids:name=foobar addresses="` + addr1 + `"`,
+					Cmd:    `ovn-nbctl --timeout=15 create address_set name=a16990491322166530807 external-ids:name=foobar_v4 addresses="` + addr1 + `"`,
 					Output: fakeUUID,
 				})
 				fexec.AddFakeCmdsNoOutputNoError([]string{
@@ -270,11 +267,264 @@ var _ = Describe("OVN Address Set operations", func() {
 				as, err := asFactory.NewAddressSet("foobar", []net.IP{net.ParseIP(addr1)})
 				Expect(err).NotTo(HaveOccurred())
 
-				err = as.DeleteIP(net.ParseIP(addr1))
+				err = as.DeleteIPs([]net.IP{net.ParseIP(addr1)})
 				Expect(err).NotTo(HaveOccurred())
 
 				// Deleting a non-existent address is a no-op
-				err = as.DeleteIP(net.ParseIP(addr1))
+				err = as.DeleteIPs([]net.IP{net.ParseIP(addr1)})
+				Expect(err).NotTo(HaveOccurred())
+
+				Expect(fexec.CalledMatchesExpected()).To(BeTrue(), fexec.ErrorDesc)
+				return nil
+			}
+
+			err := app.Run([]string{app.Name})
+			Expect(err).NotTo(HaveOccurred())
+		})
+	})
+
+	Context("Dual stack : when creating an address set object", func() {
+		It("re-uses an existing dual stack address set and replaces IPs", func() {
+			app.Action = func(ctx *cli.Context) error {
+				const (
+					addr1 string = "1.2.3.4"
+					addr2 string = "5.6.7.8"
+					addr3 string = "2001:db8::1"
+					addr4 string = "2001:db8::2"
+				)
+
+				_, err := config.InitConfig(ctx, fexec, nil)
+				Expect(err).NotTo(HaveOccurred())
+				config.IPv6Mode = true
+
+				fexec.AddFakeCmd(&ovntest.ExpectedCmd{
+					Cmd:    "ovn-nbctl --timeout=15 --data=bare --no-heading --columns=_uuid find address_set name=a16990491322166530807",
+					Output: fakeUUID,
+				})
+				fexec.AddFakeCmdsNoOutputNoError([]string{
+					`ovn-nbctl --timeout=15 set address_set ` + fakeUUID + ` addresses="` + addr1 + `" "` + addr2 + `"`,
+				})
+
+				fexec.AddFakeCmd(&ovntest.ExpectedCmd{
+					Cmd:    "ovn-nbctl --timeout=15 --data=bare --no-heading --columns=_uuid find address_set name=a16990493521189787229",
+					Output: fakeUUIDv6,
+				})
+				fexec.AddFakeCmdsNoOutputNoError([]string{
+					`ovn-nbctl --timeout=15 set address_set ` + fakeUUIDv6 + ` addresses="` + addr3 + `" "` + addr4 + `"`,
+				})
+
+				_, err = asFactory.NewAddressSet("foobar", []net.IP{net.ParseIP(addr1), net.ParseIP(addr2),
+					net.ParseIP(addr3), net.ParseIP(addr4)})
+				Expect(err).NotTo(HaveOccurred())
+				Expect(fexec.CalledMatchesExpected()).To(BeTrue(), fexec.ErrorDesc)
+				return nil
+			}
+
+			err := app.Run([]string{app.Name})
+			Expect(err).NotTo(HaveOccurred())
+		})
+
+		It("clears an existing address set of dual stack IPs", func() {
+			app.Action = func(ctx *cli.Context) error {
+				_, err := config.InitConfig(ctx, fexec, nil)
+				Expect(err).NotTo(HaveOccurred())
+				config.IPv6Mode = true
+
+				fexec.AddFakeCmd(&ovntest.ExpectedCmd{
+					Cmd:    "ovn-nbctl --timeout=15 --data=bare --no-heading --columns=_uuid find address_set name=a16990491322166530807",
+					Output: fakeUUID,
+				})
+				fexec.AddFakeCmdsNoOutputNoError([]string{
+					"ovn-nbctl --timeout=15 clear address_set " + fakeUUID + " addresses",
+				})
+
+				fexec.AddFakeCmd(&ovntest.ExpectedCmd{
+					Cmd:    "ovn-nbctl --timeout=15 --data=bare --no-heading --columns=_uuid find address_set name=a16990493521189787229",
+					Output: fakeUUIDv6,
+				})
+				fexec.AddFakeCmdsNoOutputNoError([]string{
+					`ovn-nbctl --timeout=15 clear address_set ` + fakeUUIDv6 + " addresses",
+				})
+
+				_, err = asFactory.NewAddressSet("foobar", nil)
+				Expect(err).NotTo(HaveOccurred())
+				Expect(fexec.CalledMatchesExpected()).To(BeTrue(), fexec.ErrorDesc)
+				return nil
+			}
+
+			err := app.Run([]string{app.Name})
+			Expect(err).NotTo(HaveOccurred())
+		})
+
+		It("creates a new address set and sets dual stack IPs", func() {
+			app.Action = func(ctx *cli.Context) error {
+				const (
+					addr1 string = "1.2.3.4"
+					addr2 string = "5.6.7.8"
+					addr3 string = "2001:db8::1"
+					addr4 string = "2001:db8::2"
+				)
+
+				_, err := config.InitConfig(ctx, fexec, nil)
+				Expect(err).NotTo(HaveOccurred())
+				config.IPv6Mode = true
+
+				fexec.AddFakeCmdsNoOutputNoError([]string{
+					"ovn-nbctl --timeout=15 --data=bare --no-heading --columns=_uuid find address_set name=a16990491322166530807",
+				})
+				fexec.AddFakeCmd(&ovntest.ExpectedCmd{
+					Cmd:    `ovn-nbctl --timeout=15 create address_set name=a16990491322166530807 external-ids:name=foobar_v4 addresses="` + addr1 + `" "` + addr2 + `"`,
+					Output: fakeUUID,
+				})
+
+				fexec.AddFakeCmdsNoOutputNoError([]string{
+					"ovn-nbctl --timeout=15 --data=bare --no-heading --columns=_uuid find address_set name=a16990493521189787229",
+				})
+				fexec.AddFakeCmd(&ovntest.ExpectedCmd{
+					Cmd:    `ovn-nbctl --timeout=15 create address_set name=a16990493521189787229 external-ids:name=foobar_v6 addresses="` + addr3 + `" "` + addr4 + `"`,
+					Output: fakeUUIDv6,
+				})
+
+				_, err = asFactory.NewAddressSet("foobar", []net.IP{net.ParseIP(addr1), net.ParseIP(addr2),
+					net.ParseIP(addr3), net.ParseIP(addr4)})
+				Expect(err).NotTo(HaveOccurred())
+				Expect(fexec.CalledMatchesExpected()).To(BeTrue(), fexec.ErrorDesc)
+				return nil
+			}
+
+			err := app.Run([]string{app.Name})
+			Expect(err).NotTo(HaveOccurred())
+		})
+	})
+
+	It("destroys an dual stack address set", func() {
+		app.Action = func(ctx *cli.Context) error {
+			_, err := config.InitConfig(ctx, fexec, nil)
+			Expect(err).NotTo(HaveOccurred())
+			config.IPv6Mode = true
+
+			fexec.AddFakeCmd(&ovntest.ExpectedCmd{
+				Cmd:    "ovn-nbctl --timeout=15 --data=bare --no-heading --columns=_uuid find address_set name=a16990491322166530807",
+				Output: fakeUUID,
+			})
+			fexec.AddFakeCmdsNoOutputNoError([]string{
+				"ovn-nbctl --timeout=15 clear address_set " + fakeUUID + " addresses",
+			})
+
+			fexec.AddFakeCmd(&ovntest.ExpectedCmd{
+				Cmd:    "ovn-nbctl --timeout=15 --data=bare --no-heading --columns=_uuid find address_set name=a16990493521189787229",
+				Output: fakeUUIDv6,
+			})
+			fexec.AddFakeCmdsNoOutputNoError([]string{
+				"ovn-nbctl --timeout=15 clear address_set " + fakeUUIDv6 + " addresses",
+			})
+			fexec.AddFakeCmdsNoOutputNoError([]string{
+				"ovn-nbctl --timeout=15 --if-exists destroy address_set " + fakeUUID,
+				"ovn-nbctl --timeout=15 --if-exists destroy address_set " + fakeUUIDv6,
+			})
+
+			as, err := asFactory.NewAddressSet("foobar", nil)
+			Expect(err).NotTo(HaveOccurred())
+
+			err = as.Destroy()
+			Expect(err).NotTo(HaveOccurred())
+			Expect(fexec.CalledMatchesExpected()).To(BeTrue(), fexec.ErrorDesc)
+			return nil
+		}
+
+		err := app.Run([]string{app.Name})
+		Expect(err).NotTo(HaveOccurred())
+	})
+
+	Context("Dual Stack : when manipulating IPs in an address set object", func() {
+		It("adds  IP to an empty dual stack address set", func() {
+			app.Action = func(ctx *cli.Context) error {
+				const addr1 string = "1.2.3.4"
+				const addr2 string = "2001:db8::1"
+
+				_, err := config.InitConfig(ctx, fexec, nil)
+				Expect(err).NotTo(HaveOccurred())
+				config.IPv6Mode = true
+
+				fexec.AddFakeCmdsNoOutputNoError([]string{
+					"ovn-nbctl --timeout=15 --data=bare --no-heading --columns=_uuid find address_set name=a16990491322166530807",
+				})
+				fexec.AddFakeCmd(&ovntest.ExpectedCmd{
+					Cmd:    "ovn-nbctl --timeout=15 create address_set name=a16990491322166530807 external-ids:name=foobar_v4",
+					Output: fakeUUID,
+				})
+				fexec.AddFakeCmdsNoOutputNoError([]string{
+					"ovn-nbctl --timeout=15 --data=bare --no-heading --columns=_uuid find address_set name=a16990493521189787229",
+				})
+				fexec.AddFakeCmd(&ovntest.ExpectedCmd{
+					Cmd:    "ovn-nbctl --timeout=15 create address_set name=a16990493521189787229 external-ids:name=foobar_v6",
+					Output: fakeUUIDv6,
+				})
+				fexec.AddFakeCmdsNoOutputNoError([]string{
+					`ovn-nbctl --timeout=15 add address_set ` + fakeUUID + ` addresses "` + addr1 + `"`,
+				})
+
+				fexec.AddFakeCmdsNoOutputNoError([]string{
+					`ovn-nbctl --timeout=15 add address_set ` + fakeUUIDv6 + ` addresses "` + addr2 + `"`,
+				})
+
+				as, err := asFactory.NewAddressSet("foobar", nil)
+				Expect(err).NotTo(HaveOccurred())
+
+				err = as.AddIPs([]net.IP{net.ParseIP(addr1), net.ParseIP(addr2)})
+				Expect(err).NotTo(HaveOccurred())
+
+				// Re-adding is a no-op
+				err = as.AddIPs([]net.IP{net.ParseIP(addr1)})
+				Expect(err).NotTo(HaveOccurred())
+
+				Expect(fexec.CalledMatchesExpected()).To(BeTrue(), fexec.ErrorDesc)
+				return nil
+			}
+
+			err := app.Run([]string{app.Name})
+			Expect(err).NotTo(HaveOccurred())
+		})
+
+		It("deletes an IP from an dual stack address set", func() {
+			app.Action = func(ctx *cli.Context) error {
+				const addr1 string = "1.2.3.4"
+				const addr2 string = "2001:db8::1"
+
+				_, err := config.InitConfig(ctx, fexec, nil)
+				Expect(err).NotTo(HaveOccurred())
+				config.IPv6Mode = true
+
+				fexec.AddFakeCmdsNoOutputNoError([]string{
+					"ovn-nbctl --timeout=15 --data=bare --no-heading --columns=_uuid find address_set name=a16990491322166530807",
+				})
+				fexec.AddFakeCmd(&ovntest.ExpectedCmd{
+					Cmd:    `ovn-nbctl --timeout=15 create address_set name=a16990491322166530807 external-ids:name=foobar_v4 addresses="` + addr1 + `"`,
+					Output: fakeUUID,
+				})
+				fexec.AddFakeCmdsNoOutputNoError([]string{
+					"ovn-nbctl --timeout=15 --data=bare --no-heading --columns=_uuid find address_set name=a16990493521189787229",
+				})
+				fexec.AddFakeCmd(&ovntest.ExpectedCmd{
+					Cmd:    `ovn-nbctl --timeout=15 create address_set name=a16990493521189787229 external-ids:name=foobar_v6 addresses="` + addr2 + `"`,
+					Output: fakeUUIDv6,
+				})
+
+				fexec.AddFakeCmdsNoOutputNoError([]string{
+					`ovn-nbctl --timeout=15 remove address_set ` + fakeUUID + ` addresses "` + addr1 + `"`,
+				})
+				fexec.AddFakeCmdsNoOutputNoError([]string{
+					`ovn-nbctl --timeout=15 remove address_set ` + fakeUUIDv6 + ` addresses "` + addr2 + `"`,
+				})
+
+				as, err := asFactory.NewAddressSet("foobar", []net.IP{net.ParseIP(addr1), net.ParseIP(addr2)})
+				Expect(err).NotTo(HaveOccurred())
+
+				err = as.DeleteIPs([]net.IP{net.ParseIP(addr1), net.ParseIP(addr2)})
+				Expect(err).NotTo(HaveOccurred())
+
+				// Deleting a non-existent address is a no-op
+				err = as.DeleteIPs([]net.IP{net.ParseIP(addr1)})
 				Expect(err).NotTo(HaveOccurred())
 
 				Expect(fexec.CalledMatchesExpected()).To(BeTrue(), fexec.ErrorDesc)

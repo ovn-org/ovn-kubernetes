@@ -21,7 +21,8 @@ type IPTablesHelper interface {
 	ClearChain(string, string) error
 	// DeleteChain deletes the chain in the specified table.
 	DeleteChain(string, string) error
-	// NewChain creates a new chain in the specified table
+	// NewChain creates a new chain in the specified table.
+	// If the chain already exists, it will result in an error.
 	NewChain(string, string) error
 	// Exists checks if given rulespec in specified table/chain exists
 	Exists(string, string, ...string) (bool, error)
@@ -77,17 +78,24 @@ type FakeIPTables struct {
 	tables map[string]*FakeTable
 }
 
-// NewFakeWithProtocol creates a new IPTablesHelper wrapping a mock
-// iptables implementation that can be used in unit tests
-func NewFakeWithProtocol(proto iptables.Protocol) (*FakeIPTables, error) {
+// SetFakeIPTablesHelpers populates `helpers` with FakeIPTablesHelper that can be used in unit tests
+func SetFakeIPTablesHelpers() (IPTablesHelper, IPTablesHelper) {
+	iptV4 := newFakeWithProtocol(iptables.ProtocolIPv4)
+	SetIPTablesHelper(iptables.ProtocolIPv4, iptV4)
+	iptV6 := newFakeWithProtocol(iptables.ProtocolIPv6)
+	SetIPTablesHelper(iptables.ProtocolIPv6, iptV6)
+	return iptV4, iptV6
+}
+
+func newFakeWithProtocol(protocol iptables.Protocol) *FakeIPTables {
 	ipt := &FakeIPTables{
-		proto:  proto,
+		proto:  protocol,
 		tables: make(map[string]*FakeTable),
 	}
 	// Prepopulate some common tables
 	ipt.tables["filter"] = newFakeTable()
 	ipt.tables["nat"] = newFakeTable()
-	return ipt, nil
+	return ipt
 }
 
 func (f *FakeIPTables) getTable(tableName string) (*FakeTable, error) {
@@ -234,7 +242,7 @@ func (f *FakeIPTables) Delete(tableName, chainName string, rulespec ...string) e
 // code under test added to iptables
 func (f *FakeIPTables) MatchState(tables map[string]FakeTable) error {
 	if len(tables) != len(f.tables) {
-		return fmt.Errorf("expeted %d tables, got %d", len(tables), len(f.tables))
+		return fmt.Errorf("expected %d tables, got %d", len(tables), len(f.tables))
 	}
 	for tableName, table := range tables {
 		foundTable, err := f.getTable(tableName)

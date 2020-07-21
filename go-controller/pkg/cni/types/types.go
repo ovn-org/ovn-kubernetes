@@ -14,6 +14,15 @@ type NetConf struct {
 	LogFile string `json:"logFile,omitempty"`
 	// Level is the logging verbosity level
 	LogLevel string `json:"logLevel,omitempty"`
+	// LogFileMaxSize is the maximum size in bytes of the logfile
+	// before it gets rolled.
+	LogFileMaxSize int `json:"logfile-maxsize"`
+	// LogFileMaxBackups represents the the maximum number of
+	// old log files to retain
+	LogFileMaxBackups int `json:"logfile-maxbackups"`
+	// LogFileMaxAge represents the maximum number
+	// of days to retain old log files
+	LogFileMaxAge int `json:"logfile-maxage"`
 }
 
 // NetworkSelectionElement represents one element of the JSON format

@@ -61,6 +61,8 @@ parse_args()
                                        ;;
             -ha | --ha-enabled )       KIND_HA=true
                                        ;;
+            -me | --multicast-enabled) OVN_MULTICAST_ENABLE=true
+                                       ;;
             -ho | --hybrid-enabled )   OVN_HYBRID_OVERLAY_ENABLE=true
                                        ;;
             -kt | --keep-taint )       KIND_REMOVE_TAINT=false
@@ -108,6 +110,7 @@ print_params()
      echo "KIND_NUM_WORKER = $KIND_NUM_WORKER"
      echo "OVN_GATEWAY_MODE = $OVN_GATEWAY_MODE"
      echo "OVN_HYBRID_OVERLAY_ENABLE = $OVN_HYBRID_OVERLAY_ENABLE"
+     echo "OVN_MULTICAST_ENABLE = $OVN_MULTICAST_ENABLE"
      echo ""
 }
 
@@ -124,6 +127,7 @@ KIND_REMOVE_TAINT=${KIND_REMOVE_TAINT:-true}
 KIND_IPV4_SUPPORT=${KIND_IPV4_SUPPORT:-true}
 KIND_IPV6_SUPPORT=${KIND_IPV6_SUPPORT:-false}
 OVN_HYBRID_OVERLAY_ENABLE=${OVN_HYBRID_OVERLAY_ENABLE:-false}
+OVN_MULTICAST_ENABLE=${OVN_MULTICAST_ENABLE:-false}
 
 # Input not currently validated. Modify outside script at your own risk.
 # These are the same values defaulted to in KIND code (kind/default.go).
@@ -234,6 +238,34 @@ kubectl get secrets -o jsonpath='{.items[].data.token}' > /tmp/kind/token
 pushd ../go-controller
 make
 popd
+
+if [ "${GITHUB_ACTIONS:-false}" == "true" ]; then
+  # Patch CoreDNS to work in Github CI
+  # 1. Github CI doesn´t offer IPv6 connectivity, so CoreDNS should be configured
+  # to work in an offline environment:
+  # https://github.com/coredns/coredns/issues/2494#issuecomment-457215452
+  # 2. Github CI adds following domains to resolv.conf search field:
+  # .net.
+  # CoreDNS should handle those domains and answer with NXDOMAIN instead of SERVFAIL
+  # otherwise pods stops trying to resolve the domain.
+  # Get the current config
+  original_coredns=$(kubectl get -oyaml -n=kube-system configmap/coredns)
+  echo "Original CoreDNS config:"
+  echo "${original_coredns}"
+  # Patch it
+  fixed_coredns=$(
+    printf '%s' "${original_coredns}" | sed \
+      -e 's/^.*kubernetes cluster\.local/& net/' \
+      -e '/^.*upstream$/d' \
+      -e '/^.*fallthrough.*$/d' \
+      -e '/^.*forward . \/etc\/resolv.conf$/d' \
+      -e '/^.*loop$/d' \
+  )
+  echo "Patched CoreDNS config:"
+  echo "${fixed_coredns}"
+  printf '%s' "${fixed_coredns}" | kubectl apply -f -
+fi
+
 pushd ../dist/images
 sudo cp -f ../../go-controller/_output/go/bin/* .
 echo "ref: $(git rev-parse  --symbolic-full-name HEAD)  commit: $(git rev-parse  HEAD)" > git_info
@@ -244,6 +276,7 @@ docker build -t ovn-daemonset-f:dev -f Dockerfile.fedora .
   --svc-cidr=${SVC_CIDR} \
   --gateway-mode=${OVN_GATEWAY_MODE} \
   --hybrid-enabled=${OVN_HYBRID_OVERLAY_ENABLE} \
+  --multicast-enabled=${OVN_MULTICAST_ENABLE} \
   --k8s-apiserver=https://[${API_IP}]:11337 \
   --ovn-master-count=${KIND_NUM_MASTER} \
   --kind \
@@ -289,4 +322,3 @@ until [ -z "$(kubectl get pod -A -o custom-columns=NAME:metadata.name,STATUS:.st
 done
 echo "Pods are all up, allowing things settle for 30 seconds..."
 sleep 30
-

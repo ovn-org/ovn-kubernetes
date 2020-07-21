@@ -111,6 +111,22 @@ var _ = Describe("Pod annotation tests", func() {
 		}
 	})
 
+	It("returns a distinguishable error when the pod annotation is not set", func() {
+		annotations := make(map[string]string)
+
+		ann, err := UnmarshalPodAnnotation(annotations)
+		Expect(ann).To(BeNil())
+		Expect(err).To(HaveOccurred())
+		Expect(IsAnnotationNotSetError(err)).To(BeTrue())
+
+		annotations[OvnPodAnnotationName] = "blah"
+
+		ann, err = UnmarshalPodAnnotation(annotations)
+		Expect(ann).To(BeNil())
+		Expect(err).To(HaveOccurred())
+		Expect(IsAnnotationNotSetError(err)).To(BeFalse())
+	})
+
 	It("return all pod IPs", func() {
 		type testcase struct {
 			name string

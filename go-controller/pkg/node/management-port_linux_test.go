@@ -4,6 +4,7 @@ package node
 
 import (
 	"bytes"
+	"context"
 	"fmt"
 	"io/ioutil"
 	"net"
@@ -93,7 +94,8 @@ func testManagementPort(ctx *cli.Context, fexec *ovntest.FakeExec, testNS ns.Net
 
 	nodeSubnetCIDRs := make([]*net.IPNet, len(configs))
 	mgtPortAddrs := make([]*netlink.Addr, len(configs))
-	fakeipt := make([]*util.FakeIPTables, len(configs))
+
+	iptV4, iptV6 := util.SetFakeIPTablesHelpers()
 	for i, cfg := range configs {
 		nodeSubnetCIDRs[i] = ovntest.MustParseIPNet(cfg.nodeSubnet)
 		mpCIDR := &net.IPNet{
@@ -103,13 +105,17 @@ func testManagementPort(ctx *cli.Context, fexec *ovntest.FakeExec, testNS ns.Net
 		mgtPortAddrs[i], err = netlink.ParseAddr(mpCIDR.String())
 		Expect(err).NotTo(HaveOccurred())
 
-		fakeipt[i], err = util.NewFakeWithProtocol(cfg.protocol)
-		Expect(err).NotTo(HaveOccurred())
-		util.SetIPTablesHelper(cfg.protocol, fakeipt[i])
-		err = fakeipt[i].NewChain("nat", "POSTROUTING")
-		Expect(err).NotTo(HaveOccurred())
-		err = fakeipt[i].NewChain("nat", "OVN-KUBE-SNAT-MGMTPORT")
-		Expect(err).NotTo(HaveOccurred())
+		if cfg.protocol == iptables.ProtocolIPv4 {
+			err = iptV4.NewChain("nat", "POSTROUTING")
+			Expect(err).NotTo(HaveOccurred())
+			err = iptV4.NewChain("nat", "OVN-KUBE-SNAT-MGMTPORT")
+			Expect(err).NotTo(HaveOccurred())
+		} else {
+			err = iptV6.NewChain("nat", "POSTROUTING")
+			Expect(err).NotTo(HaveOccurred())
+			err = iptV6.NewChain("nat", "OVN-KUBE-SNAT-MGMTPORT")
+			Expect(err).NotTo(HaveOccurred())
+		}
 	}
 
 	existingNode := v1.Node{ObjectMeta: metav1.ObjectMeta{
@@ -192,7 +198,7 @@ func testManagementPort(ctx *cli.Context, fexec *ovntest.FakeExec, testNS ns.Net
 	err = waiter.Wait()
 	Expect(err).NotTo(HaveOccurred())
 
-	for i, cfg := range configs {
+	for _, cfg := range configs {
 		expectedTables := map[string]util.FakeTable{
 			"filter": {},
 			"nat": {
@@ -204,11 +210,18 @@ func testManagementPort(ctx *cli.Context, fexec *ovntest.FakeExec, testNS ns.Net
 				},
 			},
 		}
-		err = fakeipt[i].MatchState(expectedTables)
-		Expect(err).NotTo(HaveOccurred())
+		if cfg.protocol == iptables.ProtocolIPv4 {
+			f := iptV4.(*util.FakeIPTables)
+			err = f.MatchState(expectedTables)
+			Expect(err).NotTo(HaveOccurred())
+		} else {
+			f := iptV6.(*util.FakeIPTables)
+			err = f.MatchState(expectedTables)
+			Expect(err).NotTo(HaveOccurred())
+		}
 	}
 
-	updatedNode, err := fakeClient.CoreV1().Nodes().Get(nodeName, metav1.GetOptions{})
+	updatedNode, err := fakeClient.CoreV1().Nodes().Get(context.TODO(), nodeName, metav1.GetOptions{})
 	Expect(err).NotTo(HaveOccurred())
 
 	macFromAnnotation, err := util.ParseNodeManagementPortMACAddress(updatedNode)
