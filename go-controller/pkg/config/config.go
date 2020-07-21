@@ -1432,6 +1432,8 @@ func buildOvnAuth(exec kexec.Interface, northbound bool, cliAuth, confAuth *OvnA
 		return nil, err
 	}
 
+	// REMOVEME after https://github.com/openshift/cluster-network-operator/pull/640 merges
+	auth.CertCommonName = "ovn"
 	switch {
 	case auth.Scheme == OvnDBSchemeSSL:
 		if auth.PrivKey == "" || auth.Cert == "" || auth.CACert == "" || auth.CertCommonName == "" {
