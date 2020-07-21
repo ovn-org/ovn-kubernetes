@@ -113,8 +113,8 @@ var _ = Describe("Informer Event Handler Tests", func() {
 		_, err := k.CoreV1().Pods(namespace).Create(context.TODO(), pod, metav1.CreateOptions{})
 		Expect(err).NotTo(HaveOccurred())
 
-		Consistently(deletes).Should(Equal(int32(0)), "deletes")
-		Eventually(adds, 3).Should(Equal(int32(1)), "adds")
+		Consistently(func() int32 { return atomic.LoadInt32(&deletes) }).Should(Equal(int32(0)), "deletes")
+		Eventually(func() int32 { return atomic.LoadInt32(&adds) }).Should(Equal(int32(1)), "adds")
 	})
 
 	It("adds existing pod and processes an update event", func() {
@@ -179,11 +179,10 @@ var _ = Describe("Informer Event Handler Tests", func() {
 
 		_, err := k.CoreV1().Pods(namespace).Update(context.TODO(), pod, metav1.UpdateOptions{})
 		Expect(err).NotTo(HaveOccurred())
-
 		// no deletes
-		Consistently(deletes).Should(Equal(int32(0)), "deletes")
+		Consistently(func() int32 { return atomic.LoadInt32(&deletes) }).Should(Equal(int32(0)), "deletes")
 		// two updates, initial add from cache + update event
-		Eventually(adds, 3).Should(Equal(int32(2)), "adds")
+		Eventually(func() int32 { return atomic.LoadInt32(&adds) }).Should(Equal(int32(2)), "adds")
 	})
 
 	It("adds existing pod and processes a delete event", func() {
@@ -246,9 +245,9 @@ var _ = Describe("Informer Event Handler Tests", func() {
 		Expect(err).NotTo(HaveOccurred())
 
 		// initial add from the cache
-		Consistently(adds).Should(Equal(int32(1)), "adds")
+		Consistently(func() int32 { return atomic.LoadInt32(&adds) }).Should(Equal(int32(1)), "adds")
 		// one delete event
-		Eventually(deletes, 3).Should(Equal(int32(1)), "deletes")
+		Eventually(func() int32 { return atomic.LoadInt32(&deletes) }).Should(Equal(int32(1)), "deletes")
 	})
 
 	It("ignores updates using DiscardAllUpdates", func() {
@@ -314,9 +313,9 @@ var _ = Describe("Informer Event Handler Tests", func() {
 		Expect(err).NotTo(HaveOccurred())
 
 		// no deletes
-		Consistently(deletes).Should(Equal(int32(0)), "deletes")
+		Consistently(func() int32 { return atomic.LoadInt32(&deletes) }).Should(Equal(int32(0)), "deletes")
 		// only initial add, no further updates
-		Eventually(adds, 3).Should(Equal(int32(1)), "adds")
+		Eventually(func() int32 { return atomic.LoadInt32(&adds) }).Should(Equal(int32(1)), "adds")
 	})
 
 })

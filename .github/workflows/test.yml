@@ -41,6 +41,13 @@ jobs:
           make lint
         popd
 
+    - name: Test
+      run: |
+        set -x
+        pushd go-controller
+           RACE=1 make check
+        popd
+
     - name: Build
       run: |
         set -x
