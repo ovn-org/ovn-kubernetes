@@ -8,14 +8,13 @@ networking:
 {%- if ovn_ip_family %}
   ipFamily: {{ ovn_ip_family }}
 {%- endif %}
+featureGates:
+  SCTPSupport: true
 kubeadmConfigPatches:
 - |
   kind: ClusterConfiguration
   metadata:
     name: config
-  apiServer:
-    extraArgs:
-      "feature-gates": "SCTPSupport=true"
   etcd:
     local:
       dataDir: "/tmp/lib/etcd"
