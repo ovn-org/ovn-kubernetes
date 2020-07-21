@@ -164,6 +164,7 @@ func JoinHostPortInt32(host string, port int32) string {
 // IPAddrToHWAddr takes the four octets of IPv4 address (aa.bb.cc.dd, for example) and uses them in creating
 // a MAC address (0A:58:AA:BB:CC:DD).  For IPv6, we'll use the first two bytes and last two bytes and hope
 // that results in a unique MAC for the scope of where it's used.
+// Assumption: the caller will ensure that an empty net.IP{} will NOT be passed.
 func IPAddrToHWAddr(ip net.IP) net.HardwareAddr {
 	// Ensure that for IPv4, we are always working with the IP in 4-byte form.
 	ip4 := ip.To4()
