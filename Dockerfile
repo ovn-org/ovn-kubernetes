@@ -33,9 +33,9 @@ RUN yum install -y  \
 	yum clean all
 
 RUN INSTALL_PKGS=" \
-	PyYAML openssl firewalld-filesystem \
+	openssl firewalld-filesystem \
 	libpcap iproute strace \
-	containernetworking-plugins yum-utils \
+	containernetworking-plugins \
 	tcpdump \
 	" && \
 	yum install -y --setopt=tsflags=nodocs --setopt=skip_missing_names_on_install=False $INSTALL_PKGS && \
