@@ -30,6 +30,18 @@ RUN INSTALL_PKGS=" \
 # RPM has propagated to all stable mirrors and can be removed
 RUN dnf install -y ovn --best --advisory=FEDORA-2020-b570bbc33b || true
 
+# ovn-20.06.1-0.fc31 and ovn-20.06.1-4.fc31 are failing CI. So force OVN to
+# run ovn-20.03.0-3.fc31. 'dnf downgrade -y ovn ovn-central ovn-host' drops
+# OVN back to ovn-2.12.0-1.fc31, so download the RPMs first.
+RUN curl -Lo ovn-20.03.0-3.fc31.x86_64.rpm \
+https://kojipkgs.fedoraproject.org//packages/ovn/20.03.0/3.fc31/x86_64/ovn-20.03.0-3.fc31.x86_64.rpm && \
+curl -Lo ovn-central-20.03.0-3.fc31.x86_64.rpm \
+https://kojipkgs.fedoraproject.org//packages/ovn/20.03.0/3.fc31/x86_64/ovn-central-20.03.0-3.fc31.x86_64.rpm && \
+curl -Lo ovn-host-20.03.0-3.fc31.x86_64.rpm \
+https://kojipkgs.fedoraproject.org//packages/ovn/20.03.0/3.fc31/x86_64/ovn-host-20.03.0-3.fc31.x86_64.rpm && \
+dnf downgrade -y ovn-20.03.0-3.fc31.x86_64.rpm ovn-central-20.03.0-3.fc31.x86_64.rpm ovn-host-20.03.0-3.fc31.x86_64.rpm && \
+rm *.rpm
+
 RUN mkdir -p /var/run/openvswitch
 
 # Built in ../../go_controller, then the binaries are copied here.
