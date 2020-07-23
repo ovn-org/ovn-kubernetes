@@ -196,7 +196,7 @@ cookie=0x0, duration=8366.597s, table=1, n_packets=10641, n_bytes=10370087, prio
 
 		iptV4, iptV6 := util.SetFakeIPTablesHelpers()
 
-		nodeAnnotator := kube.NewNodeAnnotator(&kube.Kube{fakeClient, egressFirewallFakeClient}, &existingNode)
+		nodeAnnotator := kube.NewNodeAnnotator(&kube.Kube{fakeClient, egressIPFakeClient, egressFirewallFakeClient}, &existingNode)
 
 		err = util.SetNodeHostSubnetAnnotation(nodeAnnotator, ovntest.MustParseIPNets(nodeSubnet))
 		Expect(err).NotTo(HaveOccurred())
@@ -368,7 +368,7 @@ func localNetInterfaceTest(app *cli.App, testNS ns.NetNS,
 			},
 		)
 
-		nodeAnnotator := kube.NewNodeAnnotator(&kube.Kube{fakeOvnNode.fakeClient, &egressfirewallfake.Clientset{}}, &existingNode)
+		nodeAnnotator := kube.NewNodeAnnotator(&kube.Kube{fakeOvnNode.fakeClient, &egressipfake.Clientset{}, &egressfirewallfake.Clientset{}}, &existingNode)
 		err := util.SetNodeHostSubnetAnnotation(nodeAnnotator, subnets)
 		Expect(err).NotTo(HaveOccurred())
 		err = nodeAnnotator.Run()

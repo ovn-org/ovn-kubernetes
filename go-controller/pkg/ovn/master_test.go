@@ -302,7 +302,7 @@ var _ = Describe("Master Operations", func() {
 			mockOVNSBClient := ovntest.NewMockOVNClient(goovn.DBSB)
 
 			populatePortAddresses(nodeName, hybMAC, hybIP, mockOVNNBClient)
-			nodeAnnotator := kube.NewNodeAnnotator(&kube.Kube{fakeClient, egressFirewallFakeClient}, &testNode)
+			nodeAnnotator := kube.NewNodeAnnotator(&kube.Kube{fakeClient, egressIPFakeClient, egressFirewallFakeClient}, &testNode)
 			err = util.SetL3GatewayConfig(nodeAnnotator, &util.L3GatewayConfig{Mode: config.GatewayModeDisabled})
 			Expect(err).NotTo(HaveOccurred())
 			err = util.SetNodeManagementPortMACAddress(nodeAnnotator, ovntest.MustParseMAC(mgmtMAC))
@@ -395,7 +395,7 @@ var _ = Describe("Master Operations", func() {
 			mockOVNSBClient := ovntest.NewMockOVNClient(goovn.DBSB)
 
 			populatePortAddresses(nodeName, hybMAC, hybIP, mockOVNNBClient)
-			nodeAnnotator := kube.NewNodeAnnotator(&kube.Kube{fakeClient, egressFirewallFakeClient}, &testNode)
+			nodeAnnotator := kube.NewNodeAnnotator(&kube.Kube{fakeClient, egressIPFakeClient, egressFirewallFakeClient}, &testNode)
 			err = util.SetL3GatewayConfig(nodeAnnotator, &util.L3GatewayConfig{Mode: config.GatewayModeDisabled})
 			Expect(err).NotTo(HaveOccurred())
 			err = util.SetNodeManagementPortMACAddress(nodeAnnotator, ovntest.MustParseMAC(mgmtMAC))
@@ -484,7 +484,7 @@ var _ = Describe("Master Operations", func() {
 			mockOVNNBClient := ovntest.NewMockOVNClient(goovn.DBNB)
 			mockOVNSBClient := ovntest.NewMockOVNClient(goovn.DBSB)
 			populatePortAddresses(nodeName, hybMAC, hybIP, mockOVNNBClient)
-			nodeAnnotator := kube.NewNodeAnnotator(&kube.Kube{fakeClient, egressFirewallFakeClient}, &testNode)
+			nodeAnnotator := kube.NewNodeAnnotator(&kube.Kube{fakeClient, egressIPFakeClient, egressFirewallFakeClient}, &testNode)
 			err = util.SetL3GatewayConfig(nodeAnnotator, &util.L3GatewayConfig{Mode: config.GatewayModeDisabled})
 			Expect(err).NotTo(HaveOccurred())
 			err = util.SetNodeManagementPortMACAddress(nodeAnnotator, ovntest.MustParseMAC(mgmtMAC))
@@ -632,7 +632,7 @@ subnet=%s
 			_, err = config.InitConfig(ctx, fexec, nil)
 			Expect(err).NotTo(HaveOccurred())
 
-			nodeAnnotator := kube.NewNodeAnnotator(&kube.Kube{fakeClient, egressFirewallFakeClient}, &masterNode)
+			nodeAnnotator := kube.NewNodeAnnotator(&kube.Kube{fakeClient, egressIPFakeClient, egressFirewallFakeClient}, &masterNode)
 			err = util.SetL3GatewayConfig(nodeAnnotator, &util.L3GatewayConfig{Mode: config.GatewayModeDisabled})
 			Expect(err).NotTo(HaveOccurred())
 			err = util.SetNodeManagementPortMACAddress(nodeAnnotator, ovntest.MustParseMAC(masterMgmtPortMAC))
@@ -763,7 +763,7 @@ var _ = Describe("Gateway Init Operations", func() {
 			_, err = config.InitConfig(ctx, fexec, nil)
 			Expect(err).NotTo(HaveOccurred())
 
-			nodeAnnotator := kube.NewNodeAnnotator(&kube.Kube{fakeClient, egressFirewallFakeClient}, &testNode)
+			nodeAnnotator := kube.NewNodeAnnotator(&kube.Kube{fakeClient, egressIPFakeClient, egressFirewallFakeClient}, &testNode)
 			ifaceID := localnetBridgeName + "_" + nodeName
 			err = util.SetL3GatewayConfig(nodeAnnotator, &util.L3GatewayConfig{
 				Mode:           config.GatewayModeLocal,
@@ -950,7 +950,7 @@ var _ = Describe("Gateway Init Operations", func() {
 			_, err = config.InitConfig(ctx, fexec, nil)
 			Expect(err).NotTo(HaveOccurred())
 
-			nodeAnnotator := kube.NewNodeAnnotator(&kube.Kube{fakeClient, egressFirewallFakeClient}, &testNode)
+			nodeAnnotator := kube.NewNodeAnnotator(&kube.Kube{fakeClient, egressIPFakeClient, egressFirewallFakeClient}, &testNode)
 			ifaceID := physicalBridgeName + "_" + nodeName
 			vlanID := uint(1024)
 			err = util.SetL3GatewayConfig(nodeAnnotator, &util.L3GatewayConfig{

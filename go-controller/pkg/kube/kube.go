@@ -9,6 +9,7 @@ import (
 
 	egressfirewall "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/egressfirewall/v1"
 	egressfirewallclientset "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/egressfirewall/v1/apis/clientset/versioned"
+	egressipclientset "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/egressip/v1/apis/clientset/versioned"
 	kapi "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
@@ -35,6 +36,7 @@ type Interface interface {
 // Kube is the structure object upon which the Interface is implemented
 type Kube struct {
 	KClient              kubernetes.Interface
+	EIPClient            egressipclientset.Interface
 	EgressFirewallClient egressfirewallclientset.Interface
 }
 
