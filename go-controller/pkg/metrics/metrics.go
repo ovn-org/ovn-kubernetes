@@ -41,8 +41,10 @@ var (
 )
 
 type metricDetails struct {
-	help   string
-	metric prometheus.Gauge
+	srcName       string
+	aggregateFrom []string
+	help          string
+	metric        prometheus.Gauge
 }
 
 // OVN/OVS components, namely ovn-northd, ovn-controller, and ovs-vswitchd provide various
@@ -126,15 +128,22 @@ func coverageShowMetricsUpdater(component string) {
 		}
 		coverageShowMetricsMap := componentCoverageShowMetricsMap[component]
 		for metricName, metricInfo := range coverageShowMetricsMap {
-			if metricName == "packet_in" {
-				metricName = "flow_extract"
+			var metricValue float64
+			if metricInfo.srcName != "" {
+				metricName = metricInfo.srcName
 			}
-			if value, ok := coverageShowOutputMap[metricName]; ok {
-				count := parseMetricToFloat(component, metricName, value)
-				metricInfo.metric.Set(count)
+			if metricInfo.aggregateFrom != nil {
+				for _, aggregateMetricName := range metricInfo.aggregateFrom {
+					if value, ok := coverageShowOutputMap[aggregateMetricName]; ok {
+						metricValue += parseMetricToFloat(component, aggregateMetricName, value)
+					}
+				}
 			} else {
-				metricInfo.metric.Set(0)
+				if value, ok := coverageShowOutputMap[metricName]; ok {
+					metricValue = parseMetricToFloat(component, metricName, value)
+				}
 			}
+			metricInfo.metric.Set(metricValue)
 		}
 	}
 }
