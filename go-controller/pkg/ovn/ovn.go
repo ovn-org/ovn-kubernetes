@@ -78,6 +78,7 @@ type Controller struct {
 	kube         kube.Interface
 	watchFactory *factory.WatchFactory
 	stopChan     <-chan struct{}
+	nodeName     string
 
 	masterSubnetAllocator   *subnetallocator.SubnetAllocator
 	joinSubnetAllocator     *subnetallocator.SubnetAllocator

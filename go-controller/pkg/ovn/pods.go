@@ -380,9 +380,11 @@ func (oc *Controller) addLogicalPort(pod *kapi.Pod) (err error) {
 	}
 	klog.Infof("TROZET LSP: %+v", *lsp)
 
-	out, _, err := util.RunOVNNbctl("lsp-get-addresses", portName)
-	if err == nil {
-		klog.Infof("TROZET addresses from OVSDB: %s", out)
+	if strings.Contains(oc.nodeName, "control") {
+		out, _, err := util.RunOVNNbctl("lsp-get-addresses", portName)
+		if err == nil {
+			klog.Infof("TROZET addresses from OVSDB: %s", out)
+		}
 	}
 
 	// Add the pod's logical switch port to the port cache
