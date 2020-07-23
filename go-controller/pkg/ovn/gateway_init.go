@@ -244,7 +244,7 @@ func gatewayInit(nodeName string, clusterIPSubnet []*net.IPNet, hostSubnets []*n
 			"stderr: %q, error: %v", gatewayRouter, stdout, stderr, err)
 	}
 
-	// Add static routes in GR with physical gateway as the default next hop.
+	// Add static routes in GR with gateway router as the default next hop.
 	for _, nextHop := range l3GatewayConfig.NextHops {
 		var allIPs string
 		if utilnet.IsIPv6(nextHop) {
@@ -340,7 +340,7 @@ func addDistributedGWPort() error {
 		"--", "set", "logical_switch_port", lclNetPortname, "addresses=unknown", "type=localnet",
 		"options:network_name="+util.LocalNetworkName)
 	// connect the switch to the distributed router
-	lspName := "ltos-" + nodeLocalSwitch
+	lspName := switchToRouterPrefix + nodeLocalSwitch
 	nbctlArgs = append(nbctlArgs,
 		"--", "--may-exist", "lsp-add", nodeLocalSwitch, lspName,
 		"--", "set", "logical_switch_port", lspName, "type=router", "addresses=router",

@@ -80,7 +80,7 @@ func (oc *Controller) Start(kClient kubernetes.Interface, nodeName string) error
 				}()
 				// run the End-to-end timestamp metric updater only on the
 				// active master node.
-				metrics.StartE2ETimeStampMetricUpdater()
+				metrics.StartE2ETimeStampMetricUpdater(oc.stopChan, oc.ovnNBClient)
 				if err := oc.StartClusterMaster(nodeName); err != nil {
 					panic(err.Error())
 				}
@@ -126,15 +126,18 @@ func (oc *Controller) Start(kClient kubernetes.Interface, nodeName string) error
 //  If true, then either quit or perform a complete reconfiguration of the cluster (recreate switches/routers with new subnet values)
 func (oc *Controller) StartClusterMaster(masterNodeName string) error {
 	// The gateway router need to be connected to the distributed router via a per-node join switch.
-	// We need a subnet allocator that allocates subnet for this per-node join switch. Use the 100.64.0.0/16
-	// or fd98::/64 network range with host bits set to 3. The subnetallocator will start allocating subnet that has upto 6
-	// host IPs)
-	joinSubnet := config.V4JoinSubnet
-	if config.IPv6Mode {
-		joinSubnet = config.V6JoinSubnet
+	// We need a subnet allocator that allocates subnet for this per-node join switch.
+	if config.IPv4Mode {
+		// Use 100.64.0.0/16 with /29 subnets, allowing 8192 nodes with 6 IPs on each. (The join
+		// switches currently only have 2 IPs on them, so this leaves some room for expansion.)
+		_, joinSubnetCIDR, _ := net.ParseCIDR(config.V4JoinSubnet)
+		_ = oc.joinSubnetAllocator.AddNetworkRange(joinSubnetCIDR, 29)
 	}
-	_, joinSubnetCIDR, _ := net.ParseCIDR(joinSubnet)
-	_ = oc.joinSubnetAllocator.AddNetworkRange(joinSubnetCIDR, 3)
+	if config.IPv6Mode {
+		// Use fd98::/48 with /64 subnets
+		_, joinSubnetCIDR, _ := net.ParseCIDR(config.V6JoinSubnet)
+		_ = oc.joinSubnetAllocator.AddNetworkRange(joinSubnetCIDR, 64)
+	}
 
 	// FIXME DUAL-STACK SUPPORT
 	// initialize the subnet required for DNAT and SNAT ip for the shared gateway mode
@@ -150,7 +153,7 @@ func (oc *Controller) StartClusterMaster(masterNodeName string) error {
 		return err
 	}
 	for _, clusterEntry := range config.Default.ClusterSubnets {
-		err := oc.masterSubnetAllocator.AddNetworkRange(clusterEntry.CIDR, clusterEntry.HostBits())
+		err := oc.masterSubnetAllocator.AddNetworkRange(clusterEntry.CIDR, clusterEntry.HostSubnetLength)
 		if err != nil {
 			return err
 		}
@@ -207,6 +210,8 @@ func (oc *Controller) StartClusterMaster(masterNodeName string) error {
 			factory.Core().V1().Nodes().Informer(),
 			factory.Core().V1().Namespaces().Informer(),
 			factory.Core().V1().Pods().Informer(),
+			oc.ovnNBClient,
+			oc.ovnSBClient,
 		)
 		if err != nil {
 			return fmt.Errorf("failed to set up hybrid overlay master: %v", err)
@@ -269,40 +274,40 @@ func (oc *Controller) SetupMaster(masterNodeName string) error {
 	// Create 3 load-balancers for east-west traffic for UDP, TCP, SCTP
 	oc.TCPLoadBalancerUUID, stderr, err = util.RunOVNNbctl("--data=bare", "--no-heading", "--columns=_uuid", "find", "load_balancer", "external_ids:k8s-cluster-lb-tcp=yes")
 	if err != nil {
-		klog.Errorf("Failed to get tcp load-balancer, stderr: %q, error: %v", stderr, err)
+		klog.Errorf("Failed to get tcp load balancer, stderr: %q, error: %v", stderr, err)
 		return err
 	}
 
 	if oc.TCPLoadBalancerUUID == "" {
 		oc.TCPLoadBalancerUUID, stderr, err = util.RunOVNNbctl("--", "create", "load_balancer", "external_ids:k8s-cluster-lb-tcp=yes", "protocol=tcp")
 		if err != nil {
-			klog.Errorf("Failed to create tcp load-balancer, stdout: %q, stderr: %q, error: %v", stdout, stderr, err)
+			klog.Errorf("Failed to create tcp load balancer, stdout: %q, stderr: %q, error: %v", stdout, stderr, err)
 			return err
 		}
 	}
 
 	oc.UDPLoadBalancerUUID, stderr, err = util.RunOVNNbctl("--data=bare", "--no-heading", "--columns=_uuid", "find", "load_balancer", "external_ids:k8s-cluster-lb-udp=yes")
 	if err != nil {
-		klog.Errorf("Failed to get udp load-balancer, stderr: %q, error: %v", stderr, err)
+		klog.Errorf("Failed to get udp load balancer, stderr: %q, error: %v", stderr, err)
 		return err
 	}
 	if oc.UDPLoadBalancerUUID == "" {
 		oc.UDPLoadBalancerUUID, stderr, err = util.RunOVNNbctl("--", "create", "load_balancer", "external_ids:k8s-cluster-lb-udp=yes", "protocol=udp")
 		if err != nil {
-			klog.Errorf("Failed to create udp load-balancer, stdout: %q, stderr: %q, error: %v", stdout, stderr, err)
+			klog.Errorf("Failed to create udp load balancer, stdout: %q, stderr: %q, error: %v", stdout, stderr, err)
 			return err
 		}
 	}
 
 	oc.SCTPLoadBalancerUUID, stderr, err = util.RunOVNNbctl("--data=bare", "--no-heading", "--columns=_uuid", "find", "load_balancer", "external_ids:k8s-cluster-lb-sctp=yes")
 	if err != nil {
-		klog.Errorf("Failed to get sctp load-balancer, stderr: %q, error: %v", stderr, err)
+		klog.Errorf("Failed to get sctp load balancer, stderr: %q, error: %v", stderr, err)
 		return err
 	}
 	if oc.SCTPLoadBalancerUUID == "" && oc.SCTPSupport {
 		oc.SCTPLoadBalancerUUID, stderr, err = util.RunOVNNbctl("--", "create", "load_balancer", "external_ids:k8s-cluster-lb-sctp=yes", "protocol=sctp")
 		if err != nil {
-			klog.Errorf("Failed to create sctp load-balancer, stdout: %q, stderr: %q, error: %v", stdout, stderr, err)
+			klog.Errorf("Failed to create sctp load balancer, stdout: %q, stderr: %q, error: %v", stdout, stderr, err)
 			return err
 		}
 	}
@@ -367,16 +372,6 @@ func (oc *Controller) syncNodeManagementPort(node *kapi.Node, hostSubnets []*net
 	macAddress, err := util.ParseNodeManagementPortMACAddress(node)
 	if err != nil {
 		return err
-	}
-
-	if macAddress == nil {
-		// When macAddress was removed, delete the switch port
-		stdout, stderr, err := util.RunOVNNbctl("--", "--if-exists", "lsp-del", util.K8sPrefix+node.Name)
-		if err != nil {
-			klog.Errorf("Failed to delete logical port to switch, stdout: %q, stderr: %q, error: %v", stdout, stderr, err)
-		}
-
-		return nil
 	}
 
 	if hostSubnets == nil {
@@ -466,13 +461,13 @@ func (oc *Controller) syncGatewayLogicalNetwork(node *kapi.Node, l3GatewayConfig
 		err = oc.handleNodePortLB(node)
 	} else {
 		// nodePort disabled, delete gateway load balancers for this node.
-		physicalGateway := "GR_" + node.Name
+		gatewayRouter := "GR_" + node.Name
 		for _, proto := range []kapi.Protocol{kapi.ProtocolTCP, kapi.ProtocolUDP, kapi.ProtocolSCTP} {
-			lbUUID, _ := oc.getGatewayLoadBalancer(physicalGateway, proto)
+			lbUUID, _ := oc.getGatewayLoadBalancer(gatewayRouter, proto)
 			if lbUUID != "" {
 				_, _, err := util.RunOVNNbctl("--if-exists", "destroy", "load_balancer", lbUUID)
 				if err != nil {
-					klog.Errorf("Failed to destroy %s load balancer for gateway %s: %v", proto, physicalGateway, err)
+					klog.Errorf("Failed to destroy %s load balancer for gateway %s: %v", proto, gatewayRouter, err)
 				}
 			}
 		}
@@ -593,7 +588,7 @@ func (oc *Controller) ensureNodeLogicalNetwork(nodeName string, hostSubnets []*n
 	}
 	stdout, stderr, err = util.RunOVNNbctl("set", "logical_switch", nodeName, "load_balancer="+oc.TCPLoadBalancerUUID)
 	if err != nil {
-		klog.Errorf("Failed to set logical switch %v's loadbalancer, stdout: %q, stderr: %q, error: %v", nodeName, stdout, stderr, err)
+		klog.Errorf("Failed to set logical switch %v's load balancer, stdout: %q, stderr: %q, error: %v", nodeName, stdout, stderr, err)
 		return err
 	}
 
@@ -611,7 +606,7 @@ func (oc *Controller) ensureNodeLogicalNetwork(nodeName string, hostSubnets []*n
 	}
 	stdout, stderr, err = util.RunOVNNbctl("add", "logical_switch", nodeName, "load_balancer", oc.UDPLoadBalancerUUID)
 	if err != nil {
-		klog.Errorf("Failed to add logical switch %v's loadbalancer, stdout: %q, stderr: %q, error: %v", nodeName, stdout, stderr, err)
+		klog.Errorf("Failed to add logical switch %v's load balancer, stdout: %q, stderr: %q, error: %v", nodeName, stdout, stderr, err)
 		return err
 	}
 
@@ -630,7 +625,7 @@ func (oc *Controller) ensureNodeLogicalNetwork(nodeName string, hostSubnets []*n
 		}
 		stdout, stderr, err = util.RunOVNNbctl("add", "logical_switch", nodeName, "load_balancer", oc.SCTPLoadBalancerUUID)
 		if err != nil {
-			klog.Errorf("Failed to add logical switch %v's loadbalancer, stdout: %q, stderr: %q, error: %v", nodeName, stdout, stderr, err)
+			klog.Errorf("Failed to add logical switch %v's load balancer, stdout: %q, stderr: %q, error: %v", nodeName, stdout, stderr, err)
 			return err
 		}
 
@@ -875,12 +870,6 @@ func (oc *Controller) syncNodes(nodes []interface{}) {
 	// watchNodes() will be called for all existing nodes at startup anyway.
 	// Note that this list will include the 'join' cluster switch, which we
 	// do not want to delete.
-	var subnetAttr string
-	if config.IPv6Mode {
-		subnetAttr = "ipv6_prefix"
-	} else {
-		subnetAttr = "subnet"
-	}
 
 	chassisData, stderr, err := util.RunOVNSbctl("--data=bare", "--no-heading",
 		"--columns=name,hostname", "--format=json", "list", "Chassis")
@@ -902,8 +891,7 @@ func (oc *Controller) syncNodes(nodes []interface{}) {
 	}
 
 	nodeSwitches, stderr, err := util.RunOVNNbctl("--data=bare", "--no-heading",
-		"--columns=name,other-config", "find", "logical_switch",
-		"other-config:"+subnetAttr+"!=_")
+		"--columns=name,other-config", "find", "logical_switch")
 	if err != nil {
 		klog.Errorf("Failed to get node logical switches: stderr: %q, error: %v",
 			stderr, err)
@@ -947,6 +935,10 @@ func (oc *Controller) syncNodes(nodes []interface{}) {
 				subnets = append(subnets, subnet)
 			}
 		}
+		if len(subnets) == 0 {
+			continue
+		}
+
 		var tmp NodeSubnets
 		nodeSubnets, ok := NodeSubnetsMap[nodeName]
 		if !ok {

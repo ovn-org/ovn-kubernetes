@@ -7,6 +7,7 @@ import (
 
 	hotypes "github.com/ovn-org/ovn-kubernetes/go-controller/hybrid-overlay/pkg/types"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
+
 	kapi "k8s.io/api/core/v1"
 	utilwait "k8s.io/apimachinery/pkg/util/wait"
 	"k8s.io/klog"
@@ -47,11 +48,8 @@ func (oc *Controller) addPodToNamespace(ns string, portInfo *lpInfo) error {
 	}
 	defer nsInfo.Unlock()
 
-	//FIXME DUAL-STACK
-	if len(portInfo.ips) > 0 {
-		if err := nsInfo.addressSet.AddIP(portInfo.ips[0].IP); err != nil {
-			return err
-		}
+	if err := nsInfo.addressSet.AddIPs(createIPAddressSlice(portInfo.ips)); err != nil {
+		return err
 	}
 
 	// If multicast is allowed and enabled for the namespace, add the port
@@ -72,11 +70,8 @@ func (oc *Controller) deletePodFromNamespace(ns string, portInfo *lpInfo) error 
 	}
 	defer nsInfo.Unlock()
 
-	//FIXME DUAL-STACK
-	if len(portInfo.ips) > 0 {
-		if err := nsInfo.addressSet.DeleteIP(portInfo.ips[0].IP); err != nil {
-			return err
-		}
+	if err := nsInfo.addressSet.DeleteIPs(createIPAddressSlice(portInfo.ips)); err != nil {
+		return err
 	}
 
 	// Remove the port from the multicast allow policy.
@@ -87,6 +82,14 @@ func (oc *Controller) deletePodFromNamespace(ns string, portInfo *lpInfo) error 
 	}
 
 	return nil
+}
+
+func createIPAddressSlice(ips []*net.IPNet) []net.IP {
+	ipAddrs := make([]net.IP, 0)
+	for _, ip := range ips {
+		ipAddrs = append(ipAddrs, ip.IP)
+	}
+	return ipAddrs
 }
 
 // Creates an explicit "allow" policy for multicast traffic within the

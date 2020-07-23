@@ -1,10 +1,12 @@
 package controller
 
 import (
+	"context"
 	"fmt"
 	"reflect"
 	"strings"
 
+	goovn "github.com/ebay/go-ovn"
 	"github.com/urfave/cli/v2"
 	v1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -24,15 +26,20 @@ import (
 	. "github.com/onsi/gomega"
 )
 
-func addGetPortAddressesCmds(fexec *ovntest.FakeExec, nodeName, hybMAC, hybIP string) {
+const hoNodeCliArg string = "-no-hostsubnet-nodes=" + v1.LabelOSStable + "=windows"
+
+func populatePortAddresses(nodeName, hybMAC, hybIP string, ovnClient goovn.Client) {
+	lsp := "int-" + nodeName
+	cmd, err := ovnClient.LSPAdd(nodeName, lsp)
+	Expect(err).NotTo(HaveOccurred())
+	err = cmd.Execute()
+	Expect(err).NotTo(HaveOccurred())
 	addresses := hybMAC + " " + hybIP
 	addresses = strings.TrimSpace(addresses)
-
-	fexec.AddFakeCmd(&ovntest.ExpectedCmd{
-		Cmd: "ovn-nbctl --timeout=15 --if-exists get logical_switch_port int-" + nodeName + " dynamic_addresses addresses",
-		// hybrid overlay ports have static addresses
-		Output: "[]\n[" + addresses + "]\n",
-	})
+	cmd, err = ovnClient.LSPSetDynamicAddresses(lsp, addresses)
+	Expect(err).NotTo(HaveOccurred())
+	err = cmd.Execute()
+	Expect(err).NotTo(HaveOccurred())
 }
 
 func newTestNode(name, os, ovnHostSubnet, hybridHostSubnet, drMAC string) v1.Node {
@@ -72,7 +79,6 @@ var _ = Describe("Hybrid SDN Master Operations", func() {
 		app = cli.NewApp()
 		app.Name = "test"
 		app.Flags = config.Flags
-
 		stopChan = make(chan struct{})
 	})
 
@@ -97,16 +103,21 @@ var _ = Describe("Hybrid SDN Master Operations", func() {
 			fexec := ovntest.NewFakeExec()
 			err := util.SetExec(fexec)
 			Expect(err).NotTo(HaveOccurred())
+
 			_, err = config.InitConfig(ctx, fexec, nil)
 			Expect(err).NotTo(HaveOccurred())
 
 			f := informers.NewSharedInformerFactory(fakeClient, informer.DefaultResyncInterval)
+			mockOVNNBClient := ovntest.NewMockOVNClient(goovn.DBNB)
+			mockOVNSBClient := ovntest.NewMockOVNClient(goovn.DBSB)
 
 			m, err := NewMaster(
 				&kube.Kube{KClient: fakeClient},
 				f.Core().V1().Nodes().Informer(),
 				f.Core().V1().Namespaces().Informer(),
 				f.Core().V1().Pods().Informer(),
+				mockOVNNBClient,
+				mockOVNSBClient,
 			)
 			Expect(err).NotTo(HaveOccurred())
 
@@ -115,7 +126,7 @@ var _ = Describe("Hybrid SDN Master Operations", func() {
 
 			// Windows node should be allocated a subnet
 			Eventually(func() (map[string]string, error) {
-				updatedNode, err := fakeClient.CoreV1().Nodes().Get(nodeName, metav1.GetOptions{})
+				updatedNode, err := fakeClient.CoreV1().Nodes().Get(context.TODO(), nodeName, metav1.GetOptions{})
 				if err != nil {
 					return nil, err
 				}
@@ -123,7 +134,7 @@ var _ = Describe("Hybrid SDN Master Operations", func() {
 			}, 2).Should(HaveKeyWithValue(types.HybridOverlayNodeSubnet, nodeSubnet))
 
 			Eventually(func() error {
-				updatedNode, err := fakeClient.CoreV1().Nodes().Get(nodeName, metav1.GetOptions{})
+				updatedNode, err := fakeClient.CoreV1().Nodes().Get(context.TODO(), nodeName, metav1.GetOptions{})
 				if err != nil {
 					return err
 				}
@@ -160,20 +171,24 @@ var _ = Describe("Hybrid SDN Master Operations", func() {
 			})
 
 			fexec := ovntest.NewFakeExec()
-			addGetPortAddressesCmds(fexec, nodeName, nodeHOMAC, nodeHOIP)
 
 			err := util.SetExec(fexec)
 			Expect(err).NotTo(HaveOccurred())
 			_, err = config.InitConfig(ctx, fexec, nil)
 			Expect(err).NotTo(HaveOccurred())
+			mockOVNNBClient := ovntest.NewMockOVNClient(goovn.DBNB)
+			mockOVNSBClient := ovntest.NewMockOVNClient(goovn.DBSB)
+
+			populatePortAddresses(nodeName, nodeHOMAC, nodeHOIP, mockOVNNBClient)
 
 			f := informers.NewSharedInformerFactory(fakeClient, informer.DefaultResyncInterval)
-
 			m, err := NewMaster(
 				&kube.Kube{KClient: fakeClient},
 				f.Core().V1().Nodes().Informer(),
 				f.Core().V1().Namespaces().Informer(),
 				f.Core().V1().Pods().Informer(),
+				mockOVNNBClient,
+				mockOVNSBClient,
 			)
 			Expect(err).NotTo(HaveOccurred())
 
@@ -181,7 +196,7 @@ var _ = Describe("Hybrid SDN Master Operations", func() {
 			go m.Run(stopChan)
 
 			Eventually(func() (map[string]string, error) {
-				updatedNode, err := fakeClient.CoreV1().Nodes().Get(nodeName, metav1.GetOptions{})
+				updatedNode, err := fakeClient.CoreV1().Nodes().Get(context.TODO(), nodeName, metav1.GetOptions{})
 				if err != nil {
 					return nil, err
 				}
@@ -193,7 +208,7 @@ var _ = Describe("Hybrid SDN Master Operations", func() {
 				"ovn-nbctl --timeout=15 -- --if-exists lsp-del int-node1",
 			})
 
-			err = fakeClient.CoreV1().Nodes().Delete(nodeName, metav1.NewDeleteOptions(0))
+			err = fakeClient.CoreV1().Nodes().Delete(context.TODO(), nodeName, *metav1.NewDeleteOptions(0))
 			Expect(err).NotTo(HaveOccurred())
 
 			Eventually(fexec.CalledMatchesExpected, 2).Should(BeTrue(), fexec.ErrorDesc)
@@ -234,12 +249,15 @@ var _ = Describe("Hybrid SDN Master Operations", func() {
 			Expect(err).NotTo(HaveOccurred())
 
 			f := informers.NewSharedInformerFactory(fakeClient, informer.DefaultResyncInterval)
-
+			mockOVNNBClient := ovntest.NewMockOVNClient(goovn.DBNB)
+			mockOVNSBClient := ovntest.NewMockOVNClient(goovn.DBSB)
 			m, err := NewMaster(
 				&kube.Kube{KClient: fakeClient},
 				f.Core().V1().Nodes().Informer(),
 				f.Core().V1().Namespaces().Informer(),
 				f.Core().V1().Pods().Informer(),
+				mockOVNNBClient,
+				mockOVNSBClient,
 			)
 			Expect(err).NotTo(HaveOccurred())
 
@@ -261,7 +279,7 @@ var _ = Describe("Hybrid SDN Master Operations", func() {
 					return nil, err
 				}
 				return updatedNode.Annotations, nil
-			}, 2).ShouldNot(HaveKey(types.HybridOverlayDRMAC))
+			}, 5).ShouldNot(HaveKey(types.HybridOverlayDRMAC))
 
 			Eventually(fexec.CalledMatchesExpected, 2).Should(BeTrue(), fexec.ErrorDesc)
 			return nil
@@ -312,12 +330,15 @@ var _ = Describe("Hybrid SDN Master Operations", func() {
 			Expect(err).NotTo(HaveOccurred())
 
 			f := informers.NewSharedInformerFactory(fakeClient, informer.DefaultResyncInterval)
-
+			mockOVNNBClient := ovntest.NewMockOVNClient(goovn.DBNB)
+			mockOVNSBClient := ovntest.NewMockOVNClient(goovn.DBSB)
 			m, err := NewMaster(
 				&kube.Kube{KClient: fakeClient},
 				f.Core().V1().Nodes().Informer(),
 				f.Core().V1().Namespaces().Informer(),
 				f.Core().V1().Pods().Informer(),
+				mockOVNNBClient,
+				mockOVNSBClient,
 			)
 			Expect(err).NotTo(HaveOccurred())
 
@@ -325,7 +346,7 @@ var _ = Describe("Hybrid SDN Master Operations", func() {
 			go m.Run(stopChan)
 
 			Eventually(func() error {
-				pod, err := fakeClient.CoreV1().Pods(nsName).Get(pod1Name, metav1.GetOptions{})
+				pod, err := fakeClient.CoreV1().Pods(nsName).Get(context.TODO(), pod1Name, metav1.GetOptions{})
 				if err != nil {
 					return err
 				}
@@ -389,19 +410,22 @@ var _ = Describe("Hybrid SDN Master Operations", func() {
 			f := informers.NewSharedInformerFactory(fakeClient, informer.DefaultResyncInterval)
 
 			k := &kube.Kube{KClient: fakeClient}
-
+			mockOVNNBClient := ovntest.NewMockOVNClient(goovn.DBNB)
+			mockOVNSBClient := ovntest.NewMockOVNClient(goovn.DBSB)
 			m, err := NewMaster(
 				k,
 				f.Core().V1().Nodes().Informer(),
 				f.Core().V1().Namespaces().Informer(),
 				f.Core().V1().Pods().Informer(),
+				mockOVNNBClient,
+				mockOVNSBClient,
 			)
 			Expect(err).NotTo(HaveOccurred())
 
 			f.Start(stopChan)
 			go m.Run(stopChan)
 
-			updatedNs, err := fakeClient.CoreV1().Namespaces().Get(nsName, metav1.GetOptions{})
+			updatedNs, err := fakeClient.CoreV1().Namespaces().Get(context.TODO(), nsName, metav1.GetOptions{})
 			Expect(err).NotTo(HaveOccurred())
 			nsAnnotator := kube.NewNamespaceAnnotator(k, updatedNs)
 			nsAnnotator.Set(types.HybridOverlayVTEP, nsVTEPUpdated)
@@ -410,7 +434,7 @@ var _ = Describe("Hybrid SDN Master Operations", func() {
 			Expect(err).NotTo(HaveOccurred())
 
 			Eventually(func() error {
-				pod, err := fakeClient.CoreV1().Pods(nsName).Get(pod1Name, metav1.GetOptions{})
+				pod, err := fakeClient.CoreV1().Pods(nsName).Get(context.TODO(), pod1Name, metav1.GetOptions{})
 				if err != nil {
 					return err
 				}

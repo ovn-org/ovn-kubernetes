@@ -32,7 +32,7 @@ const DefaultAPIServer = "http://localhost:8443"
 // IP address range from which subnet is allocated for per-node join switch
 const (
 	V4JoinSubnet = "100.64.0.0/16"
-	V6JoinSubnet = "fd98::/64"
+	V6JoinSubnet = "fd98::/48"
 )
 
 // Default IANA-assigned UDP port number for VXLAN
@@ -60,9 +60,12 @@ var (
 
 	// Logging holds logging-related parsed config file parameters and command-line overrides
 	Logging = LoggingConfig{
-		File:    "", // do not log to a file by default
-		CNIFile: "",
-		Level:   4,
+		File:              "", // do not log to a file by default
+		CNIFile:           "",
+		Level:             4,
+		LogFileMaxSize:    100, // Size in Megabytes
+		LogFileMaxBackups: 5,
+		LogFileMaxAge:     5, //days
 	}
 
 	// CNI holds CNI-related parsed config file parameters and command-line overrides
@@ -162,6 +165,13 @@ type LoggingConfig struct {
 	CNIFile string `gcfg:"cnilogfile"`
 	// Level is the logging verbosity level
 	Level int `gcfg:"loglevel"`
+	// LogFileMaxSize is the maximum size in bytes of the logfile
+	// before it gets rolled.
+	LogFileMaxSize int `gcfg:"logfile-maxsize"`
+	// LogFileMaxBackups represents the the maximum number of old log files to retain
+	LogFileMaxBackups int `gcfg:"logfile-maxbackups"`
+	// LogFileMaxAge represents the maximum number of days to retain old log files
+	LogFileMaxAge int `gcfg:"logfile-maxage"`
 }
 
 // CNIConfig holds CNI-related parsed config file parameters and command-line overrides
@@ -222,11 +232,12 @@ type GatewayConfig struct {
 // an OVN database (either northbound or southbound)
 type OvnAuthConfig struct {
 	// e.g: "ssl:192.168.1.2:6641,ssl:192.168.1.2:6642"
-	Address string `gcfg:"address"`
-	PrivKey string `gcfg:"client-privkey"`
-	Cert    string `gcfg:"client-cert"`
-	CACert  string `gcfg:"client-cacert"`
-	Scheme  OvnDBScheme
+	Address        string `gcfg:"address"`
+	PrivKey        string `gcfg:"client-privkey"`
+	Cert           string `gcfg:"client-cert"`
+	CACert         string `gcfg:"client-cacert"`
+	CertCommonName string `gcfg:"cert-common-name"`
+	Scheme         OvnDBScheme
 
 	northbound bool
 	externalID string // ovn-nb or ovn-remote
@@ -520,6 +531,25 @@ var CommonFlags = []cli.Flag{
 		Destination: &cliConfig.Logging.CNIFile,
 		Value:       "/var/log/ovn-kubernetes/ovn-k8s-cni-overlay.log",
 	},
+	// Logfile rotation parameters
+	&cli.IntFlag{
+		Name:        "logfile-maxsize",
+		Usage:       "Maximum size in bytes of the log file before it gets rolled",
+		Destination: &cliConfig.Logging.LogFileMaxSize,
+		Value:       Logging.LogFileMaxSize,
+	},
+	&cli.IntFlag{
+		Name:        "logfile-maxbackups",
+		Usage:       "Maximum number of old log files to retain",
+		Destination: &cliConfig.Logging.LogFileMaxBackups,
+		Value:       Logging.LogFileMaxBackups,
+	},
+	&cli.IntFlag{
+		Name:        "logfile-maxage",
+		Usage:       "Maximum number of days to retain old log files",
+		Destination: &cliConfig.Logging.LogFileMaxAge,
+		Value:       Logging.LogFileMaxAge,
+	},
 }
 
 // CNIFlags capture CNI-related options
@@ -648,6 +678,14 @@ var OvnNBFlags = []cli.Flag{
 			"Default value for this setting is empty which defaults to use local unix socket.",
 		Destination: &cliConfig.OvnNorth.CACert,
 	},
+	&cli.StringFlag{
+		Name: "nb-cert-common-name",
+		Usage: "Common Name of the certificate used for TLS server certificate verification. " +
+			"In cases where the certificate doesn't have any SAN Extensions, this parameter " +
+			"should match the DNS(hostname) of the server. In case the certificate has a " +
+			"SAN extension, this parameter should match one of the SAN fields.",
+		Destination: &cliConfig.OvnNorth.CertCommonName,
+	},
 }
 
 //OvnSBFlags capture OVN southbound database options
@@ -676,6 +714,14 @@ var OvnSBFlags = []cli.Flag{
 		Usage: "CA certificate that the client should use for talking to the OVN database (default when ssl address is used /etc/openvswitch/ovnsb-ca.cert). " +
 			"Default value for this setting is empty which defaults to use local unix socket.",
 		Destination: &cliConfig.OvnSouth.CACert,
+	},
+	&cli.StringFlag{
+		Name: "sb-cert-common-name",
+		Usage: "Common Name of the certificate used for TLS server certificate verification. " +
+			"In cases where the certificate doesn't have any SAN Extensions, this parameter " +
+			"should match the DNS(hostname) of the server. In case the certificate has a " +
+			"SAN extension, this parameter should match one of the SAN fields.",
+		Destination: &cliConfig.OvnSouth.CertCommonName,
 	},
 }
 
@@ -1213,9 +1259,9 @@ func initConfigWithPath(ctx *cli.Context, exec kexec.Interface, saPath string, d
 		}
 		klog.SetOutput(&lumberjack.Logger{
 			Filename:   Logging.File,
-			MaxSize:    100, // megabytes
-			MaxBackups: 10,
-			MaxAge:     30, // days
+			MaxSize:    Logging.LogFileMaxSize, // megabytes
+			MaxBackups: Logging.LogFileMaxBackups,
+			MaxAge:     Logging.LogFileMaxAge, // days
 			Compress:   true,
 		})
 	}
@@ -1386,10 +1432,12 @@ func buildOvnAuth(exec kexec.Interface, northbound bool, cliAuth, confAuth *OvnA
 		return nil, err
 	}
 
+	// REMOVEME after https://github.com/openshift/cluster-network-operator/pull/640 merges
+	auth.CertCommonName = "ovn"
 	switch {
 	case auth.Scheme == OvnDBSchemeSSL:
-		if auth.PrivKey == "" || auth.Cert == "" || auth.CACert == "" {
-			return nil, fmt.Errorf("must specify private key, certificate, and CA certificate for 'ssl' scheme")
+		if auth.PrivKey == "" || auth.Cert == "" || auth.CACert == "" || auth.CertCommonName == "" {
+			return nil, fmt.Errorf("must specify private key, certificate, CA certificate, and common name used in the certificate for 'ssl' scheme")
 		}
 	case auth.Scheme == OvnDBSchemeTCP:
 		if auth.PrivKey != "" || auth.Cert != "" || auth.CACert != "" {

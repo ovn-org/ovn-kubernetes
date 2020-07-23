@@ -17,6 +17,7 @@ import (
 
 	"k8s.io/klog"
 
+	goovn "github.com/ebay/go-ovn"
 	"github.com/urfave/cli/v2"
 	"gopkg.in/fsnotify/fsnotify.v1"
 
@@ -230,12 +231,27 @@ func runOvnKube(ctx *cli.Context) error {
 		if runtime.GOOS == "windows" {
 			return fmt.Errorf("master nodes cannot be of OS type: Windows")
 		}
+		var ovnNBClient, ovnSBClient goovn.Client
+		var err error
+
+		if ovnNBClient, err = util.NewOVNNBClient(); err != nil {
+			return fmt.Errorf("error when trying to initialize go-ovn NB client: %v", err)
+		}
+
+		if ovnSBClient, err = util.NewOVNSBClient(); err != nil {
+			return fmt.Errorf("error when trying to initialize go-ovn SB client: %v", err)
+		}
+
 		// register prometheus metrics exported by the master
-		metrics.RegisterMasterMetrics()
-		ovnController := ovn.NewOvnController(clientset, factory, stopChan, nil)
+		// this must be done prior to calling controller start
+		// since we capture some metrics in Start()
+		metrics.RegisterMasterMetrics(ovnNBClient, ovnSBClient)
+
+		ovnController := ovn.NewOvnController(clientset, factory, stopChan, nil, ovnNBClient, ovnSBClient)
 		if err := ovnController.Start(clientset, master); err != nil {
 			return err
 		}
+
 	}
 
 	if node != "" {
@@ -244,10 +260,10 @@ func runOvnKube(ctx *cli.Context) error {
 		}
 		// register ovnkube node specific prometheus metrics exported by the node
 		metrics.RegisterNodeMetrics()
-		// register ovn specific (ovn-controller and ovn-northd) metrics
+		// register ovn specific (ovn-controller) metrics
 		metrics.RegisterOvnMetrics()
 		start := time.Now()
-		n := ovnnode.NewNode(clientset, factory, node, stopChan)
+		n := ovnnode.NewNode(clientset, factory, node, stopChan, util.EventRecorder(clientset))
 		if err := n.Start(); err != nil {
 			return err
 		}

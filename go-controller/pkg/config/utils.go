@@ -13,12 +13,7 @@ import (
 // CIDRNetworkEntry is the object that holds the definition for a single network CIDR range
 type CIDRNetworkEntry struct {
 	CIDR             *net.IPNet
-	HostSubnetLength uint32
-}
-
-func (e CIDRNetworkEntry) HostBits() uint32 {
-	_, addrLen := e.CIDR.Mask.Size()
-	return uint32(addrLen) - e.HostSubnetLength
+	HostSubnetLength int
 }
 
 // ParseClusterSubnetEntries returns the parsed set of CIDRNetworkEntries passed by the user on the command line
@@ -50,11 +45,11 @@ func ParseClusterSubnetEntries(clusterSubnetCmd string) ([]CIDRNetworkEntry, err
 
 		entryMaskLength, _ := parsedClusterEntry.CIDR.Mask.Size()
 		if len(splitClusterEntry) == 3 {
-			tmp, err := strconv.ParseUint(splitClusterEntry[2], 10, 32)
+			tmp, err := strconv.Atoi(splitClusterEntry[2])
 			if err != nil {
 				return nil, err
 			}
-			parsedClusterEntry.HostSubnetLength = uint32(tmp)
+			parsedClusterEntry.HostSubnetLength = tmp
 
 			if ipv6 && parsedClusterEntry.HostSubnetLength != 64 {
 				return nil, fmt.Errorf("IPv6 only supports /64 host subnets")
@@ -68,7 +63,7 @@ func ParseClusterSubnetEntries(clusterSubnetCmd string) ([]CIDRNetworkEntry, err
 			}
 		}
 
-		if parsedClusterEntry.HostSubnetLength <= uint32(entryMaskLength) {
+		if parsedClusterEntry.HostSubnetLength <= entryMaskLength {
 			return nil, fmt.Errorf("cannot use a host subnet length mask shorter than or equal to the cluster subnet mask. "+
 				"host subnet length: %d, cluster subnet length: %d", parsedClusterEntry.HostSubnetLength, entryMaskLength)
 		}

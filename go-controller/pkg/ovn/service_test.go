@@ -1,6 +1,7 @@
 package ovn
 
 import (
+	"context"
 	"fmt"
 
 	. "github.com/onsi/ginkgo"
@@ -27,13 +28,14 @@ func newServiceMeta(name, namespace string) metav1.ObjectMeta {
 	}
 }
 
-func newService(name, namespace, ip string, ports []v1.ServicePort, serviceType v1.ServiceType) *v1.Service {
+func newService(name, namespace, ip string, ports []v1.ServicePort, serviceType v1.ServiceType, externalIPs []string) *v1.Service {
 	return &v1.Service{
 		ObjectMeta: newServiceMeta(name, namespace),
 		Spec: v1.ServiceSpec{
-			ClusterIP: ip,
-			Ports:     ports,
-			Type:      serviceType,
+			ClusterIP:   ip,
+			Ports:       ports,
+			Type:        serviceType,
+			ExternalIPs: externalIPs,
 		},
 	}
 }
@@ -165,6 +167,7 @@ var _ = Describe("OVN Namespace Operations", func() {
 						},
 					},
 					v1.ServiceTypeClusterIP,
+					nil,
 				)
 
 				test.baseCmds(fExec, service)
@@ -178,7 +181,7 @@ var _ = Describe("OVN Namespace Operations", func() {
 				)
 				fakeOvn.controller.WatchServices()
 
-				_, err := fakeOvn.fakeClient.CoreV1().Services(service.Namespace).Get(service.Name, metav1.GetOptions{})
+				_, err := fakeOvn.fakeClient.CoreV1().Services(service.Namespace).Get(context.TODO(), service.Name, metav1.GetOptions{})
 				Expect(err).NotTo(HaveOccurred())
 				Expect(fExec.CalledMatchesExpected()).To(BeTrue(), fExec.ErrorDesc)
 
@@ -202,6 +205,7 @@ var _ = Describe("OVN Namespace Operations", func() {
 						},
 					},
 					v1.ServiceTypeClusterIP,
+					nil,
 				)
 
 				test.baseCmds(fExec, service)
@@ -215,16 +219,16 @@ var _ = Describe("OVN Namespace Operations", func() {
 				)
 				fakeOvn.controller.WatchServices()
 
-				_, err := fakeOvn.fakeClient.CoreV1().Services(service.Namespace).Get(service.Name, metav1.GetOptions{})
+				_, err := fakeOvn.fakeClient.CoreV1().Services(service.Namespace).Get(context.TODO(), service.Name, metav1.GetOptions{})
 				Expect(err).NotTo(HaveOccurred())
 				Expect(fExec.CalledMatchesExpected()).To(BeTrue(), fExec.ErrorDesc)
 
 				test.delCmds(fExec, service)
-				err = fakeOvn.fakeClient.CoreV1().Services(service.Namespace).Delete(service.Name, metav1.NewDeleteOptions(0))
+				err = fakeOvn.fakeClient.CoreV1().Services(service.Namespace).Delete(context.TODO(), service.Name, *metav1.NewDeleteOptions(0))
 				Expect(err).NotTo(HaveOccurred())
 				Eventually(fExec.CalledMatchesExpected).Should(BeTrue(), fExec.ErrorDesc)
 
-				s, err := fakeOvn.fakeClient.CoreV1().Services(service.Namespace).Get(service.Name, metav1.GetOptions{})
+				s, err := fakeOvn.fakeClient.CoreV1().Services(service.Namespace).Get(context.TODO(), service.Name, metav1.GetOptions{})
 				Expect(err).To(HaveOccurred())
 				Expect(s).To(BeNil())
 

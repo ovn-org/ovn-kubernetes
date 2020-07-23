@@ -10,6 +10,7 @@ import (
 	"sync"
 	"time"
 
+	goovn "github.com/ebay/go-ovn"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/factory"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/kube"
@@ -91,11 +92,6 @@ type Controller struct {
 	// cluster's east-west traffic.
 	loadbalancerClusterCache map[kapi.Protocol]string
 
-	// For TCP and UDP type traffice, cache OVN load balancer that exists on the
-	// default gateway
-	loadbalancerGWCache map[kapi.Protocol]string
-	defGatewayRouter    string
-
 	// A cache of all logical switches seen by the watcher and their subnets
 	lsManager *logicalSwitchManager
 
@@ -144,6 +140,12 @@ type Controller struct {
 
 	// event recorder used to post events to k8s
 	recorder record.EventRecorder
+
+	// go-ovn northbound client interface
+	ovnNBClient goovn.Client
+
+	// go-ovn southbound client interface
+	ovnSBClient goovn.Client
 }
 
 const (
@@ -160,10 +162,12 @@ const (
 // NewOvnController creates a new OVN controller for creating logical network
 // infrastructure and policy
 func NewOvnController(kubeClient kubernetes.Interface, wf *factory.WatchFactory,
-	stopChan <-chan struct{}, addressSetFactory AddressSetFactory) *Controller {
+	stopChan <-chan struct{}, addressSetFactory AddressSetFactory, ovnNBClient goovn.Client, ovnSBClient goovn.Client) *Controller {
+
 	if addressSetFactory == nil {
 		addressSetFactory = NewOvnAddressSetFactory()
 	}
+
 	return &Controller{
 		kube:                     &kube.Kube{KClient: kubeClient},
 		watchFactory:             wf,
@@ -180,13 +184,14 @@ func NewOvnController(kubeClient kubernetes.Interface, wf *factory.WatchFactory,
 		lspEgressDenyCache:       make(map[string]int),
 		lspMutex:                 &sync.Mutex{},
 		loadbalancerClusterCache: make(map[kapi.Protocol]string),
-		loadbalancerGWCache:      make(map[kapi.Protocol]string),
 		multicastSupport:         config.EnableMulticast,
 		serviceVIPToName:         make(map[ServiceVIPKey]types.NamespacedName),
 		serviceVIPToNameLock:     sync.Mutex{},
 		serviceLBMap:             make(map[string]map[string]*loadBalancerConf),
 		serviceLBLock:            sync.Mutex{},
 		recorder:                 util.EventRecorder(kubeClient),
+		ovnNBClient:              ovnNBClient,
+		ovnSBClient:              ovnSBClient,
 	}
 }
 
@@ -627,12 +632,16 @@ func (oc *Controller) WatchNodes() error {
 
 			err = oc.syncNodeManagementPort(node, hostSubnets)
 			if err != nil {
-				klog.Warningf("Error creating management port for node %s: %v", node.Name, err)
+				if !util.IsAnnotationNotSetError(err) {
+					klog.Warningf("Error creating management port for node %s: %v", node.Name, err)
+				}
 				mgmtPortFailed.Store(node.Name, true)
 			}
 
 			if err := oc.syncNodeGateway(node, hostSubnets); err != nil {
-				klog.Warningf(err.Error())
+				if !util.IsAnnotationNotSetError(err) {
+					klog.Warningf(err.Error())
+				}
 				gatewaysFailed.Store(node.Name, true)
 			}
 		},
@@ -664,7 +673,9 @@ func (oc *Controller) WatchNodes() error {
 			if failed || macAddressChanged(oldNode, node) {
 				err := oc.syncNodeManagementPort(node, hostSubnets)
 				if err != nil {
-					klog.Errorf("Error updating management port for node %s: %v", node.Name, err)
+					if !util.IsAnnotationNotSetError(err) {
+						klog.Errorf("Error updating management port for node %s: %v", node.Name, err)
+					}
 					mgmtPortFailed.Store(node.Name, true)
 				} else {
 					mgmtPortFailed.Delete(node.Name)
@@ -677,7 +688,9 @@ func (oc *Controller) WatchNodes() error {
 			if failed || gatewayChanged(oldNode, node) {
 				err := oc.syncNodeGateway(node, nil)
 				if err != nil {
-					klog.Errorf(err.Error())
+					if !util.IsAnnotationNotSetError(err) {
+						klog.Errorf(err.Error())
+					}
 					gatewaysFailed.Store(node.Name, true)
 				} else {
 					gatewaysFailed.Delete(node.Name)
@@ -700,14 +713,6 @@ func (oc *Controller) WatchNodes() error {
 			addNodeFailed.Delete(node.Name)
 			mgmtPortFailed.Delete(node.Name)
 			gatewaysFailed.Delete(node.Name)
-			// If this node was serving the external IP load balancer for services, migrate to a new node
-			if oc.defGatewayRouter == gwRouterPrefix+node.Name {
-				delete(oc.loadbalancerGWCache, kapi.ProtocolTCP)
-				delete(oc.loadbalancerGWCache, kapi.ProtocolUDP)
-				delete(oc.loadbalancerGWCache, kapi.ProtocolSCTP)
-				oc.defGatewayRouter = ""
-				oc.updateExternalIPsLB()
-			}
 		},
 	}, oc.syncNodes)
 	if err == nil {

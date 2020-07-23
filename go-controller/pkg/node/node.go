@@ -11,19 +11,18 @@ import (
 	"strings"
 	"time"
 
-	"k8s.io/klog"
-
 	honode "github.com/ovn-org/ovn-kubernetes/go-controller/hybrid-overlay/pkg/controller"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/cni"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/factory"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/kube"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
-
 	kapi "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/util/wait"
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/tools/cache"
+	"k8s.io/client-go/tools/record"
+	"k8s.io/klog"
 )
 
 // OvnNode is the object holder for utilities meant for node management
@@ -32,15 +31,17 @@ type OvnNode struct {
 	Kube         kube.Interface
 	watchFactory *factory.WatchFactory
 	stopChan     chan struct{}
+	recorder     record.EventRecorder
 }
 
 // NewNode creates a new controller for node management
-func NewNode(kubeClient kubernetes.Interface, wf *factory.WatchFactory, name string, stopChan chan struct{}) *OvnNode {
+func NewNode(kubeClient kubernetes.Interface, wf *factory.WatchFactory, name string, stopChan chan struct{}, eventRecorder record.EventRecorder) *OvnNode {
 	return &OvnNode{
 		name:         name,
 		Kube:         &kube.Kube{KClient: kubeClient},
 		watchFactory: wf,
 		stopChan:     stopChan,
+		recorder:     eventRecorder,
 	}
 }
 
@@ -52,15 +53,15 @@ func setupOVNNode(node *kapi.Node) error {
 		return fmt.Errorf("failed to obtain hostname from node %q: %v", node.Name, err)
 	}
 
-	nodeIP := config.Default.EncapIP
-	if nodeIP == "" {
-		nodeIP, err = util.GetNodeIP(node)
+	encapIP := config.Default.EncapIP
+	if encapIP == "" {
+		encapIP, err = util.GetNodePrimaryIP(node)
 		if err != nil {
 			return fmt.Errorf("failed to obtain local IP from node %q: %v", node.Name, err)
 		}
 	} else {
-		if ip := net.ParseIP(nodeIP); ip == nil {
-			return fmt.Errorf("invalid encapsulation IP provided %q", nodeIP)
+		if ip := net.ParseIP(encapIP); ip == nil {
+			return fmt.Errorf("invalid encapsulation IP provided %q", encapIP)
 		}
 	}
 
@@ -68,7 +69,7 @@ func setupOVNNode(node *kapi.Node) error {
 		"Open_vSwitch",
 		".",
 		fmt.Sprintf("external_ids:ovn-encap-type=%s", config.Default.EncapType),
-		fmt.Sprintf("external_ids:ovn-encap-ip=%s", nodeIP),
+		fmt.Sprintf("external_ids:ovn-encap-ip=%s", encapIP),
 		fmt.Sprintf("external_ids:ovn-remote-probe-interval=%d",
 			config.Default.InactivityProbe),
 		fmt.Sprintf("external_ids:ovn-openflow-probe-interval=%d",
@@ -156,7 +157,7 @@ func isOVNControllerReady(name string) (bool, error) {
 	return true, nil
 }
 
-// Start learns the subnet assigned to it by the master controller
+// Start learns the subnets assigned to it by the master controller
 // and calls the SetupNode script which establishes the logical switch
 func (n *OvnNode) Start() error {
 	var err error
@@ -211,8 +212,7 @@ func (n *OvnNode) Start() error {
 	waiter := newStartupWaiter()
 
 	// Initialize gateway resources on the node
-	// FIXME DUAL-STACK
-	if err := n.initGateway(subnets[0], nodeAnnotator, waiter); err != nil {
+	if err := n.initGateway(subnets, nodeAnnotator, waiter); err != nil {
 		return err
 	}
 
