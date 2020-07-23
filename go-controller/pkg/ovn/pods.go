@@ -346,7 +346,8 @@ func (oc *Controller) addLogicalPort(pod *kapi.Pod) (err error) {
 	for idx, podIfAddr := range podIfAddrs {
 		addresses[idx+1] = podIfAddr.IP.String()
 	}
-	cmd, err = oc.ovnNBClient.LSPSetAddress(portName, addresses...)
+	// LSP addresses in OVN are a single space-separated value
+	cmd, err = oc.ovnNBClient.LSPSetAddress(portName, strings.Join(addresses, " "))
 	if err != nil {
 		return fmt.Errorf("unable to create LSPSetAddress command for port: %s", portName)
 	}
@@ -361,7 +362,7 @@ func (oc *Controller) addLogicalPort(pod *kapi.Pod) (err error) {
 	cmds = append(cmds, cmd)
 
 	// add port security addresses
-	cmd, err = oc.ovnNBClient.LSPSetPortSecurity(portName, addresses...)
+	cmd, err = oc.ovnNBClient.LSPSetPortSecurity(portName, strings.Join(addresses, " "))
 	if err != nil {
 		return fmt.Errorf("unable to create LSPSetPortSecurity command for port: %s", portName)
 	}
