@@ -51,6 +51,7 @@ func (_ ovnkubeMasterLeaderMetricsProvider) NewLeaderMetric() leaderelection.Swi
 
 // Start waits until this process is the leader before starting master functions
 func (oc *Controller) Start(kClient kubernetes.Interface, nodeName string) error {
+	oc.nodeName = nodeName
 	// Set up leader election process first
 	rl, err := resourcelock.New(
 		resourcelock.ConfigMapsResourceLock,
