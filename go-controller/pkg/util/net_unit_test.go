@@ -106,18 +106,18 @@ func TestGetPortAddresses(t *testing.T) {
 			desc:                 "test the code path where ParseMAC fails",
 			inpPort:              "TEST_PORT",
 			errMatch:             fmt.Errorf("failed to parse logical switch port"),
-			onRetArgsOvnNBClient: &onCallReturnArgs{"LSPGet", []string{"string"}, []interface{}{&goovn.LogicalSwitchPort{Addresses: []string{"192.168.1.3", "0a:00:00:00:00:01"}}, nil}},
+			onRetArgsOvnNBClient: &onCallReturnArgs{"LSPGet", []string{"string"}, []interface{}{&goovn.LogicalSwitchPort{Addresses: []string{"192.168.1.3 0a:00:00:00:00:01"}}, nil}},
 		},
 		{
 			desc:                 "test code path where IP address parsing fails",
 			inpPort:              "TEST_PORT",
 			errMatch:             fmt.Errorf("failed to parse logical switch port"),
-			onRetArgsOvnNBClient: &onCallReturnArgs{"LSPGet", []string{"string"}, []interface{}{&goovn.LogicalSwitchPort{Addresses: []string{"192.168.1.3", "0a:00:00:00:00:01"}}, nil}},
+			onRetArgsOvnNBClient: &onCallReturnArgs{"LSPGet", []string{"string"}, []interface{}{&goovn.LogicalSwitchPort{Addresses: []string{"192.168.1.3 0a:00:00:00:00:01"}}, nil}},
 		},
 		{
 			desc:                 "test success path where MAC, IPs are returned",
 			inpPort:              "TEST_PORT",
-			onRetArgsOvnNBClient: &onCallReturnArgs{"LSPGet", []string{"string"}, []interface{}{&goovn.LogicalSwitchPort{Addresses: []string{"0a:00:00:00:00:01", "192.168.1.3"}}, nil}},
+			onRetArgsOvnNBClient: &onCallReturnArgs{"LSPGet", []string{"string"}, []interface{}{&goovn.LogicalSwitchPort{Addresses: []string{"0a:00:00:00:00:01 192.168.1.3"}}, nil}},
 		},
 	}
 	for i, tc := range tests {

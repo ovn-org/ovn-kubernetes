@@ -43,7 +43,9 @@ func GetPortAddresses(portName string, ovnNBClient goovn.Client) (net.HardwareAd
 	var addresses []string
 
 	if lsp.DynamicAddresses == "" {
-		addresses = lsp.Addresses
+		if len(lsp.Addresses) > 0 {
+			addresses = strings.Split(lsp.Addresses[0], " ")
+		}
 	} else {
 		// dynamic addresses have format "0a:00:00:00:00:01 192.168.1.3"
 		// static addresses have format ["0a:00:00:00:00:01 192.168.1.3"]
