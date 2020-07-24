@@ -68,6 +68,7 @@ func setupIPTablesBlocks(netns ns.NetNS, ifInfo *PodInterfaceInfo) error {
 		return nil
 	})
 }
+
 // END OCP HACK
 
 // OCP HACK: wait for OVN to fully process the new pod
@@ -97,4 +98,5 @@ func waitForBrIntFlows(ip string) error {
 		return strings.Contains(stdout, ip), nil
 	})
 }
+
 // END OCP HACK
