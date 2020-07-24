@@ -484,8 +484,6 @@ var _ = Describe("Gateway Init Operations", func() {
 				"-p tcp -m tcp --dport 22623 -j REJECT",
 			)
 			// END OCP HACK
-
-			Expect(ipt.MatchState(expectedTables)).NotTo(HaveOccurred())
 			f4 := iptV4.(*util.FakeIPTables)
 			err = f4.MatchState(expectedTables)
 			Expect(err).NotTo(HaveOccurred())

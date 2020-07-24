@@ -33,6 +33,7 @@ func generateBlockMCSRules(rules *[]iptRule) {
 		args:  []string{"-p", "tcp", "-m", "tcp", "--dport", "22624", "-j", "REJECT"},
 	})
 }
+
 // END OCP HACK
 
 // OCP HACK: Fix Azure/GCP LoadBalancers. https://github.com/openshift/ovn-kubernetes/pull/112
@@ -64,4 +65,5 @@ func getLoadBalancerIPTRules(svc *kapi.Service, svcPort kapi.ServicePort, gatewa
 	}
 	return rules
 }
+
 // END OCP HACK
