@@ -267,8 +267,7 @@ func addDefaultConntrackRules(nodeName, gwBridge, gwIntf string, stopChan chan s
 	}
 
 	// Get ofport of physical interface
-	ofportPhys, stderr, err := util.RunOVSVsctl("--if-exists", "get",
-		"interface", gwIntf, "ofport")
+	ofportPhys, stderr, err := util.RunOVSVsctl("get", "interface", gwIntf, "ofport")
 	if err != nil {
 		return fmt.Errorf("failed to get ofport of %s, stderr: %q, error: %v",
 			gwIntf, stderr, err)
