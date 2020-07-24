@@ -192,12 +192,19 @@ jobs:
       run: |
         make -C test ${{ matrix.target.shard }}
 
+    - name: Generate Report
+      id: xunit-viewer
+      if: always()
+      uses: AutoModality/action-xunit-viewer@v1
+      with:
+        results: ./test/_artifacts/
+
     - name: Upload Junit Reports
       if: always()
       uses: actions/upload-artifact@v2
       with:
         name: kind-junit-${{ env.JOB_NAME }}-${{ github.run_id }}
-        path: '**/_artifacts/**.xml'
+        path: './test/_artifacts/index.html'
 
     - name: Export logs
       if: always()
