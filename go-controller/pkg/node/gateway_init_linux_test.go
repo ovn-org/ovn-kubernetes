@@ -27,6 +27,7 @@ import (
 	"github.com/vishvananda/netlink"
 
 	egressfirewallfake "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/egressfirewall/v1/apis/clientset/versioned/fake"
+	apiextensionsfake "k8s.io/apiextensions-apiserver/pkg/client/clientset/clientset/fake"
 
 	. "github.com/onsi/ginkgo"
 	. "github.com/onsi/gomega"
@@ -179,9 +180,10 @@ cookie=0x0, duration=8366.597s, table=1, n_packets=10641, n_bytes=10370087, prio
 			Items: []v1.Node{existingNode},
 		})
 		egressFirewallFakeClient := &egressfirewallfake.Clientset{}
+		crdFakeClient := &apiextensionsfake.Clientset{}
 
 		stop := make(chan struct{})
-		wf, err := factory.NewWatchFactory(fakeClient, egressFirewallFakeClient)
+		wf, err := factory.NewWatchFactory(fakeClient, egressFirewallFakeClient, crdFakeClient)
 		Expect(err).NotTo(HaveOccurred())
 		defer func() {
 			close(stop)

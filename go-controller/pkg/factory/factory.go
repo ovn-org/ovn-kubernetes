@@ -16,6 +16,12 @@ import (
 	egressfirewallinformerfactory "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/egressfirewall/v1/apis/informers/externalversions"
 	egressfirewalllister "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/egressfirewall/v1/apis/listers/egressfirewall/v1"
 
+	apiextensionsapi "k8s.io/apiextensions-apiserver/pkg/apis/apiextensions/v1beta1"
+	apiextensionsclientset "k8s.io/apiextensions-apiserver/pkg/client/clientset/clientset"
+	apiextensionsscheme "k8s.io/apiextensions-apiserver/pkg/client/clientset/clientset/scheme"
+	apiextensionsinformerfactory "k8s.io/apiextensions-apiserver/pkg/client/informers/externalversions"
+	apiextensionslister "k8s.io/apiextensions-apiserver/pkg/client/listers/apiextensions/v1beta1"
+
 	kapi "k8s.io/api/core/v1"
 	knet "k8s.io/api/networking/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -308,6 +314,8 @@ func newInformerLister(oType reflect.Type, sharedInformer cache.SharedIndexInfor
 		return nil, nil
 	case egressFirewallType:
 		return egressfirewalllister.NewEgressFirewallLister(sharedInformer.GetIndexer()), nil
+	case crdType:
+		return apiextensionslister.NewCustomResourceDefinitionLister(sharedInformer.GetIndexer()), nil
 	}
 
 	return nil, fmt.Errorf("cannot create lister from type %v", oType)
@@ -398,11 +406,14 @@ type WatchFactory struct {
 	// requirements with atomic accesses
 	handlerCounter uint64
 
-	iFactory  informerfactory.SharedInformerFactory
-	efFactory egressfirewallinformerfactory.SharedInformerFactory
-	informers map[reflect.Type]*informer
+	iFactory    informerfactory.SharedInformerFactory
+	efFactory   egressfirewallinformerfactory.SharedInformerFactory
+	efClientset egressfirewallclientset.Interface
+	crdFactory  apiextensionsinformerfactory.SharedInformerFactory
+	informers   map[reflect.Type]*informer
 
-	stopChan chan struct{}
+	stopChan               chan struct{}
+	egressFirewallStopChan chan struct{}
 }
 
 // ObjectCacheInterface represents the exported methods for getting
@@ -439,24 +450,26 @@ var (
 	namespaceType      reflect.Type = reflect.TypeOf(&kapi.Namespace{})
 	nodeType           reflect.Type = reflect.TypeOf(&kapi.Node{})
 	egressFirewallType reflect.Type = reflect.TypeOf(&egressfirewallapi.EgressFirewall{})
+	crdType            reflect.Type = reflect.TypeOf(&apiextensionsapi.CustomResourceDefinition{})
 )
 
 // NewWatchFactory initializes a new watch factory
-func NewWatchFactory(c kubernetes.Interface, ec egressfirewallclientset.Interface) (*WatchFactory, error) {
+func NewWatchFactory(c kubernetes.Interface, ec egressfirewallclientset.Interface, crd apiextensionsclientset.Interface) (*WatchFactory, error) {
 	// resync time is 12 hours, none of the resources being watched in ovn-kubernetes have
 	// any race condition where a resync may be required e.g. cni executable on node watching for
 	// events on pods and assuming that an 'ADD' event will contain the annotations put in by
 	// ovnkube master (currently, it is just a 'get' loop)
 	// the downside of making it tight (like 10 minutes) is needless spinning on all resources
 	wf := &WatchFactory{
-		iFactory:  informerfactory.NewSharedInformerFactory(c, resyncInterval),
-		efFactory: egressfirewallinformerfactory.NewSharedInformerFactory(ec, resyncInterval),
-		informers: make(map[reflect.Type]*informer),
-		stopChan:  make(chan struct{}),
+		iFactory:    informerfactory.NewSharedInformerFactory(c, resyncInterval),
+		efClientset: ec,
+		crdFactory:  apiextensionsinformerfactory.NewSharedInformerFactory(crd, resyncInterval),
+		informers:   make(map[reflect.Type]*informer),
+		stopChan:    make(chan struct{}),
 	}
 	var err error
 
-	err = egressfirewallapi.AddToScheme(egressfirewallscheme.Scheme)
+	err = apiextensionsapi.AddToScheme(apiextensionsscheme.Scheme)
 	if err != nil {
 		return nil, err
 	}
@@ -482,7 +495,7 @@ func NewWatchFactory(c kubernetes.Interface, ec egressfirewallclientset.Interfac
 	if err != nil {
 		return nil, err
 	}
-	wf.informers[egressFirewallType], err = newInformer(egressFirewallType, wf.efFactory.K8s().V1().EgressFirewalls().Informer())
+	wf.informers[crdType], err = newInformer(crdType, wf.crdFactory.Apiextensions().V1beta1().CustomResourceDefinitions().Informer())
 	if err != nil {
 		return nil, err
 	}
@@ -490,7 +503,12 @@ func NewWatchFactory(c kubernetes.Interface, ec egressfirewallclientset.Interfac
 	if err != nil {
 		return nil, err
 	}
-	wf.efFactory.Start(wf.stopChan)
+	wf.crdFactory.Start(wf.stopChan)
+	for oType, synced := range wf.crdFactory.WaitForCacheSync(wf.stopChan) {
+		if !synced {
+			return nil, fmt.Errorf("error in syncing cache for %v informer", oType)
+		}
+	}
 
 	wf.iFactory.Start(wf.stopChan)
 	for oType, synced := range wf.iFactory.WaitForCacheSync(wf.stopChan) {
@@ -500,6 +518,31 @@ func NewWatchFactory(c kubernetes.Interface, ec egressfirewallclientset.Interfac
 	}
 
 	return wf, nil
+}
+
+func (wf *WatchFactory) InitializeEgressFirewallWatchFactory() error {
+	err := egressfirewallapi.AddToScheme(egressfirewallscheme.Scheme)
+	if err != nil {
+		return err
+	}
+	wf.efFactory = egressfirewallinformerfactory.NewSharedInformerFactory(wf.efClientset, resyncInterval)
+	wf.informers[egressFirewallType], err = newInformer(egressFirewallType, wf.efFactory.K8s().V1().EgressFirewalls().Informer())
+	if err != nil {
+		return err
+	}
+	wf.egressFirewallStopChan = make(chan struct{})
+	wf.efFactory.Start(wf.egressFirewallStopChan)
+	for oType, synced := range wf.efFactory.WaitForCacheSync(wf.egressFirewallStopChan) {
+		if !synced {
+			return fmt.Errorf("error in syncing cache for %v informer", oType)
+		}
+	}
+	return nil
+}
+
+func (wf *WatchFactory) ShutdownEgressFirewallWatchFactory() {
+	close(wf.egressFirewallStopChan)
+	wf.informers[egressFirewallType].shutdown()
 }
 
 func (wf *WatchFactory) Shutdown() {
@@ -661,6 +704,16 @@ func (wf *WatchFactory) AddEgressFirewallHandler(handlerFuncs cache.ResourceEven
 // RemoveEgressFirewallHandler removes an EgressFirewall object event handler function
 func (wf *WatchFactory) RemoveEgressFirewallHandler(handler *Handler) error {
 	return wf.removeHandler(egressFirewallType, handler)
+}
+
+// AddCRDHandler adds a handler function that will be executed on CRD obje changes
+func (wf *WatchFactory) AddCRDHandler(handlerFuncs cache.ResourceEventHandler, processExisting func([]interface{})) (*Handler, error) {
+	return wf.addHandler(crdType, "", nil, handlerFuncs, processExisting)
+}
+
+// RemoveCRDHandler removes a CRD object event handler function
+func (wf *WatchFactory) RemoveCRDHandler(handler *Handler) error {
+	return wf.removeHandler(crdType, handler)
 }
 
 // AddNamespaceHandler adds a handler function that will be executed on Namespace object changes

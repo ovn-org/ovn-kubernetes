@@ -21,6 +21,8 @@ import (
 	egressfirewall "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/egressfirewall/v1"
 	egressfirewallclientset "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/egressfirewall/v1/apis/clientset/versioned"
 
+	apiextension "k8s.io/apiextensions-apiserver/pkg/apis/apiextensions/v1beta1"
+
 	kapi "k8s.io/api/core/v1"
 	kapisnetworking "k8s.io/api/networking/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -32,6 +34,10 @@ import (
 	"k8s.io/client-go/tools/record"
 	ref "k8s.io/client-go/tools/reference"
 	"k8s.io/klog"
+)
+
+const (
+	egressfirewallCRD = "egressfirewalls.k8s.ovn.org"
 )
 
 // ServiceVIPKey is used for looking up service namespace information for a
@@ -83,9 +89,10 @@ type namespaceInfo struct {
 // Controller structure is the object which holds the controls for starting
 // and reacting upon the watched resources (e.g. pods, endpoints)
 type Controller struct {
-	kube         kube.Interface
-	watchFactory *factory.WatchFactory
-	stopChan     <-chan struct{}
+	kube                  kube.Interface
+	watchFactory          *factory.WatchFactory
+	egressFirewallHandler *factory.Handler
+	stopChan              <-chan struct{}
 
 	masterSubnetAllocator   *subnetallocator.SubnetAllocator
 	joinSubnetAllocator     *subnetallocator.SubnetAllocator
@@ -216,7 +223,7 @@ func (oc *Controller) Run() error {
 	}
 
 	for _, f := range []func() error{oc.WatchNamespaces, oc.WatchPods, oc.WatchServices,
-		oc.WatchEndpoints, oc.WatchNetworkPolicy, oc.WatchEgressFirewall} {
+		oc.WatchEndpoints, oc.WatchNetworkPolicy, oc.WatchCRD} {
 		if err := f(); err != nil {
 			return err
 		}
@@ -576,10 +583,51 @@ func (oc *Controller) WatchNetworkPolicy() error {
 	return err
 }
 
+// WatchCRD starts the watching of the CRD resource and calls back to the
+// appropriate handler logic
+func (oc *Controller) WatchCRD() error {
+	_, err := oc.watchFactory.AddCRDHandler(cache.ResourceEventHandlerFuncs{
+		AddFunc: func(obj interface{}) {
+			crd := obj.(*apiextension.CustomResourceDefinition)
+			klog.Infof("Adding CRD %s to cluster", crd.Name)
+			if crd.Name == egressfirewallCRD {
+				err := oc.watchFactory.InitializeEgressFirewallWatchFactory()
+				if err != nil {
+					klog.Errorf("Error Creating EgressFirewallWatchFactory: %v", err)
+					return
+				}
+				h, err := oc.WatchEgressFirewall()
+				if err != nil {
+					klog.Errorf("Error watching CRD - %v", err)
+					return
+				}
+				oc.egressFirewallHandler = h
+
+			}
+		},
+		UpdateFunc: func(old, newer interface{}) {
+		},
+		DeleteFunc: func(obj interface{}) {
+			crd := obj.(*apiextension.CustomResourceDefinition)
+			klog.Infof("Deleting CRD %s from cluster", crd.Name)
+			if crd.Name == egressfirewallCRD {
+				err := oc.watchFactory.RemoveEgressFirewallHandler(oc.egressFirewallHandler)
+				if err != nil {
+					klog.Errorf("Error removing EgressFirewallHandler: %v", err)
+				}
+				oc.egressFirewallHandler = nil
+				oc.watchFactory.ShutdownEgressFirewallWatchFactory()
+			}
+		},
+	}, nil)
+	return err
+
+}
+
 // WatchEgressFirewall starts the watching of egressfirewall resource and calls
 // back the appropriate handler logic
-func (oc *Controller) WatchEgressFirewall() error {
-	_, err := oc.watchFactory.AddEgressFirewallHandler(cache.ResourceEventHandlerFuncs{
+func (oc *Controller) WatchEgressFirewall() (*factory.Handler, error) {
+	h, err := oc.watchFactory.AddEgressFirewallHandler(cache.ResourceEventHandlerFuncs{
 		AddFunc: func(obj interface{}) {
 			egressFirewall := obj.(*egressfirewall.EgressFirewall)
 			errList := oc.addEgressFirewall(egressFirewall)
@@ -623,7 +671,7 @@ func (oc *Controller) WatchEgressFirewall() error {
 			}
 		},
 	}, nil)
-	return err
+	return h, err
 }
 
 // WatchNamespaces starts the watching of namespace resource and calls

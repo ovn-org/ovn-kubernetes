@@ -61,13 +61,14 @@ func TestNewClientsets(t *testing.T) {
 
 	for i, tc := range tests {
 		t.Run(fmt.Sprintf("%d:%s", i, tc.desc), func(t *testing.T) {
-			res, egressFirewall, e := NewClientsets(&tc.inpConfig)
+			res, egressFirewall, crd, e := NewClientsets(&tc.inpConfig)
 			t.Log(res, e)
 			if tc.errExpected {
 				assert.Error(t, e)
 			} else {
 				assert.NotNil(t, res)
 				assert.NotNil(t, egressFirewall)
+				assert.NotNil(t, crd)
 			}
 
 		})
