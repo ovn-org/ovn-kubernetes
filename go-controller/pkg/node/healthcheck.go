@@ -113,6 +113,13 @@ func checkForStaleOVSInterfaces(stopChan chan struct{}) {
 						val, stderr, err)
 				}
 			}
+		case <-time.After(10 * time.Second):
+			klog.Warningf("NUMS :   FOR TESTING ONLY ... TRIGGERING RECOMPUTE...")
+			_, _, err := util.RunOVNAppctlWithTimeout(5, "-t", "ovn-controller", "recompute")
+			if err != nil {
+				klog.Warningf("NUMS :   FOR TESTING ONLY ... recompute cmd failed...")
+			}
+
 		case <-stopChan:
 			return
 		}

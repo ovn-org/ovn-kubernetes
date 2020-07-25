@@ -15,32 +15,24 @@ USER root
 
 ENV PYTHONDONTWRITEBYTECODE yes
 
+COPY ovn-20.06.1-5scratch.fc31.x86_64.rpm ovn-host-20.06.1-5scratch.fc31.x86_64.rpm ovn-central-20.06.1-5scratch.fc31.x86_64.rpm /root/
+
 # install needed rpms - openvswitch must be 2.10.4 or higher
 RUN INSTALL_PKGS=" \
 	PyYAML bind-utils procps-ng openssl numactl-libs firewalld-filesystem \
 	libpcap hostname kubernetes-client \
-        ovn ovn-central ovn-host \
 	iptables iproute strace socat \
         " && \
 	dnf install --best --refresh -y --setopt=tsflags=nodocs $INSTALL_PKGS && \
 	dnf clean all && rm -rf /var/cache/dnf/*
 
+RUN dnf install -y /root/ovn*.rpm
+
+RUN rm -f /root/ovn*.rpm
+
 # ensure we pick up ovn-20.03.0-2.fc31 for SCTP fixes/support
 # this should have no effect in the future once the
 # RPM has propagated to all stable mirrors and can be removed
-RUN dnf install -y ovn --best --advisory=FEDORA-2020-b570bbc33b || true
-
-# ovn-20.06.1-0.fc31 and ovn-20.06.1-4.fc31 are failing CI. So force OVN to
-# run ovn-20.03.0-3.fc31. 'dnf downgrade -y ovn ovn-central ovn-host' drops
-# OVN back to ovn-2.12.0-1.fc31, so download the RPMs first.
-RUN curl -Lo ovn-20.03.0-3.fc31.x86_64.rpm \
-https://kojipkgs.fedoraproject.org//packages/ovn/20.03.0/3.fc31/x86_64/ovn-20.03.0-3.fc31.x86_64.rpm && \
-curl -Lo ovn-central-20.03.0-3.fc31.x86_64.rpm \
-https://kojipkgs.fedoraproject.org//packages/ovn/20.03.0/3.fc31/x86_64/ovn-central-20.03.0-3.fc31.x86_64.rpm && \
-curl -Lo ovn-host-20.03.0-3.fc31.x86_64.rpm \
-https://kojipkgs.fedoraproject.org//packages/ovn/20.03.0/3.fc31/x86_64/ovn-host-20.03.0-3.fc31.x86_64.rpm && \
-dnf downgrade -y ovn-20.03.0-3.fc31.x86_64.rpm ovn-central-20.03.0-3.fc31.x86_64.rpm ovn-host-20.03.0-3.fc31.x86_64.rpm && \
-rm *.rpm
 
 RUN mkdir -p /var/run/openvswitch
 
