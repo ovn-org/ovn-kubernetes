@@ -154,7 +154,7 @@ func (s *Server) Accept(lis net.Listener) {
 // ServeConn uses the gob wire format (see package gob) on the
 // connection.  To use an alternate codec, use ServeCodec.
 func (s *Server) ServeConn(conn io.ReadWriteCloser) {
-	s.ServeCodec(newGobCodec(conn))
+	s.ServeCodec(NewGobCodec(conn))
 }
 
 // ServeCodec is like ServeConn but uses the specified codec to

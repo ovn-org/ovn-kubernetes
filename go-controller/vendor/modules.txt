@@ -33,9 +33,9 @@ github.com/beorn7/perks/quantile
 github.com/bhendo/go-powershell
 github.com/bhendo/go-powershell/backend
 github.com/bhendo/go-powershell/utils
-# github.com/cenkalti/hub v1.0.1-0.20160527103212-11382a9960d3
+# github.com/cenkalti/hub v1.0.1
 github.com/cenkalti/hub
-# github.com/cenkalti/rpc2 v0.0.0-20170726070524-c51a77e5f664
+# github.com/cenkalti/rpc2 v0.0.0-20200203073230-5ce2854ce0fd
 github.com/cenkalti/rpc2
 github.com/cenkalti/rpc2/jsonrpc
 # github.com/cespare/xxhash/v2 v2.1.0
@@ -64,7 +64,7 @@ github.com/cpuguy83/go-md2man/v2/md2man
 github.com/davecgh/go-spew/spew
 # github.com/ebay/go-ovn v0.1.0 => github.com/ebay/go-ovn v0.0.0-20200604055416-fff9cdbba909
 github.com/ebay/go-ovn
-# github.com/ebay/libovsdb v0.0.0-20190718202342-e49b8c4e1142
+# github.com/ebay/libovsdb v0.2.1-0.20200719163122-3332afaeb27c
 github.com/ebay/libovsdb
 # github.com/evanphx/json-patch v4.5.0+incompatible
 github.com/evanphx/json-patch
@@ -200,9 +200,9 @@ go.opencensus.io/internal
 go.opencensus.io/trace
 go.opencensus.io/trace/internal
 go.opencensus.io/trace/tracestate
-# golang.org/x/crypto v0.0.0-20200220183623-bac4c82f6975
+# golang.org/x/crypto v0.0.0-20200622213623-75b288015ac9
 golang.org/x/crypto/ssh/terminal
-# golang.org/x/net v0.0.0-20191004110552-13f9640d40b9
+# golang.org/x/net v0.0.0-20200625001655-4c5254603344
 golang.org/x/net/context
 golang.org/x/net/context/ctxhttp
 golang.org/x/net/html
@@ -215,7 +215,7 @@ golang.org/x/net/idna
 # golang.org/x/oauth2 v0.0.0-20190604053449-0f29369cfe45
 golang.org/x/oauth2
 golang.org/x/oauth2/internal
-# golang.org/x/sys v0.0.0-20200121082415-34d275377bf9
+# golang.org/x/sys v0.0.0-20200323222414-85ca7c5b95cd
 golang.org/x/sys/unix
 golang.org/x/sys/windows
 golang.org/x/sys/windows/registry
@@ -242,7 +242,7 @@ golang.org/x/text/unicode/bidi
 golang.org/x/text/unicode/norm
 # golang.org/x/time v0.0.0-20191024005414-555d28b269f0
 golang.org/x/time/rate
-# golang.org/x/xerrors v0.0.0-20190717185122-a985d3407aa7
+# golang.org/x/xerrors v0.0.0-20191204190536-9bdfabe68543
 golang.org/x/xerrors
 golang.org/x/xerrors/internal
 # google.golang.org/appengine v1.5.0

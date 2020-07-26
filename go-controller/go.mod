@@ -7,11 +7,13 @@ require (
 	github.com/Microsoft/hcsshim v0.8.10-0.20200606013352-27a858bf1651
 	github.com/bhendo/go-powershell v0.0.0-20190719160123-219e7fb4e41e
 	github.com/cenk/hub v1.0.1 // indirect
+	github.com/cenkalti/hub v1.0.1 // indirect
+	github.com/cenkalti/rpc2 v0.0.0-20200203073230-5ce2854ce0fd // indirect
 	github.com/containernetworking/cni v0.8.0
 	github.com/containernetworking/plugins v0.8.6
 	github.com/coreos/go-iptables v0.4.5
 	github.com/ebay/go-ovn v0.1.0
-	github.com/ebay/libovsdb v0.0.0-20190718202342-e49b8c4e1142
+	github.com/ebay/libovsdb v0.2.1-0.20200719163122-3332afaeb27c
 	github.com/evanphx/json-patch v4.5.0+incompatible // indirect
 	github.com/golang/groupcache v0.0.0-20191027212112-611e8accdfc9 // indirect
 	github.com/googleapis/gnostic v0.3.1 // indirect
