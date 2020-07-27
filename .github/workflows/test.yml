@@ -12,6 +12,9 @@ env:
   KIND_CLUSTER_NAME: ovn
   KIND_INSTALL_INGRESS: true
   KIND_ALLOW_SYSTEM_WRITES: true
+  # This skips tests tagged as Serial
+  # Current Serial tests are not relevant for OVN
+  PARALLEL: true
 
 jobs:
   build:
@@ -213,10 +216,10 @@ jobs:
         echo "::set-env name=GOPATH::$GOPATH"
         export PATH=$GOPATH/bin:$PATH
         echo "::add-path::$GOPATH/bin"
-  
+
     - name: Disable ufw
       # For IPv6 and Dualstack, ufw (Uncomplicated Firewall) should be disabled.
-      # Not needed for KIND deployments, so just disable all the time. 
+      # Not needed for KIND deployments, so just disable all the time.
       run: |
         sudo ufw disable
 
