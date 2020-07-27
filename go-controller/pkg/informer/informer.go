@@ -5,6 +5,7 @@ package informer
 
 import (
 	"fmt"
+	"sync"
 	"time"
 
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -126,7 +127,6 @@ func (e *eventHandler) Synced() bool {
 // the workqueue and wait for workers to finish processing their current work items.
 func (e *eventHandler) Run(threadiness int, stopCh <-chan struct{}) error {
 	defer utilruntime.HandleCrash()
-	defer e.workqueue.ShutDown()
 
 	klog.Infof("Starting %s informer queue", e.name)
 
@@ -138,14 +138,23 @@ func (e *eventHandler) Run(threadiness int, stopCh <-chan struct{}) error {
 
 	klog.Infof("Starting %d %s queue workers", threadiness, e.name)
 	// start our worker threads
+	wg := &sync.WaitGroup{}
 	for j := 0; j < threadiness; j++ {
-		go wait.Until(e.runWorker, time.Second, stopCh)
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			wait.Until(e.runWorker, time.Second, stopCh)
+		}()
 	}
 
 	klog.Infof("Started %s queue workers", e.name)
 	// wait until the channel is closed
 	<-stopCh
+
 	klog.Infof("Shutting down %s queue workers", e.name)
+	e.workqueue.ShutDown()
+	wg.Wait()
+	klog.Infof("Shut down %s queue workers", e.name)
 
 	return nil
 }

@@ -11,6 +11,7 @@ import (
 	"time"
 
 	goovn "github.com/ebay/go-ovn"
+	hocontroller "github.com/ovn-org/ovn-kubernetes/go-controller/hybrid-overlay/pkg/controller"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
 	egressipv1 "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/egressip/v1"
 	egressipapi "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/egressip/v1/apis/clientset/versioned"
@@ -108,6 +109,8 @@ type Controller struct {
 	masterSubnetAllocator   *subnetallocator.SubnetAllocator
 	joinSubnetAllocator     *subnetallocator.SubnetAllocator
 	nodeLocalNatIPAllocator *ipallocator.Range
+
+	hoMaster *hocontroller.MasterController
 
 	TCPLoadBalancerUUID  string
 	UDPLoadBalancerUUID  string
@@ -258,7 +261,7 @@ func NewOvnController(kubeClient kubernetes.Interface, egressIPClient egressipap
 }
 
 // Run starts the actual watching.
-func (oc *Controller) Run() error {
+func (oc *Controller) Run(wg *sync.WaitGroup) error {
 	oc.syncPeriodic()
 	klog.Infof("Starting all the Watchers...")
 	start := time.Now()
@@ -289,6 +292,14 @@ func (oc *Controller) Run() error {
 
 	if config.Kubernetes.OVNEmptyLbEvents {
 		go oc.ovnControllerEventChecker()
+	}
+
+	if oc.hoMaster != nil {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			oc.hoMaster.Run(oc.stopChan)
+		}()
 	}
 
 	return nil

@@ -10,6 +10,7 @@ import (
 	"path/filepath"
 	"runtime"
 	"strings"
+	"sync"
 	"syscall"
 	"text/tabwriter"
 	"text/template"
@@ -226,6 +227,7 @@ func runOvnKube(ctx *cli.Context) error {
 	}
 
 	stopChan := make(chan struct{})
+	wg := &sync.WaitGroup{}
 
 	if master != "" {
 		if runtime.GOOS == "windows" {
@@ -248,10 +250,9 @@ func runOvnKube(ctx *cli.Context) error {
 		metrics.RegisterMasterMetrics(ovnNBClient, ovnSBClient)
 
 		ovnController := ovn.NewOvnController(clientset, egressIPClientset, egressFirewallClientset, factory, stopChan, nil, ovnNBClient, ovnSBClient, util.EventRecorder(clientset))
-		if err := ovnController.Start(clientset, master); err != nil {
+		if err := ovnController.Start(clientset, master, wg); err != nil {
 			return err
 		}
-
 	}
 
 	if node != "" {
@@ -262,7 +263,7 @@ func runOvnKube(ctx *cli.Context) error {
 		metrics.RegisterNodeMetrics()
 		start := time.Now()
 		n := ovnnode.NewNode(clientset, factory, node, stopChan, util.EventRecorder(clientset))
-		if err := n.Start(); err != nil {
+		if err := n.Start(wg); err != nil {
 			return err
 		}
 		end := time.Since(start)
@@ -285,6 +286,7 @@ func runOvnKube(ctx *cli.Context) error {
 	<-ctx.Context.Done()
 	close(stopChan)
 	factory.Shutdown()
+	wg.Wait()
 	return nil
 }
 
