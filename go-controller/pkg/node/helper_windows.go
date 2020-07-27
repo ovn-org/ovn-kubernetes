@@ -25,8 +25,7 @@ func getIntfName(gatewayIntf string) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	_, stderr, err := util.RunOVSVsctl("--if-exists", "get",
-		"interface", intfName, "ofport")
+	_, stderr, err := util.RunOVSVsctl("get", "interface", intfName, "ofport")
 	if err != nil {
 		return "", fmt.Errorf("failed to get ofport of %s, stderr: %q, error: %v",
 			intfName, stderr, err)
