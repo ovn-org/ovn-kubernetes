@@ -21,13 +21,11 @@ Networking IPerf IPv[46]
 
 # FEATURES NOT AVAILABLE IN OUR CI ENVIRONMENT
 \[Feature:Federation\]
+should have ipv4 and ipv6 internal node ip
 
 # TESTS THAT ASSUME KUBE-PROXY
 kube-proxy
 should set TCP CLOSE_WAIT timeout
-
-# TO BE IMPLEMENTED: https://github.com/ovn-org/ovn-kubernetes/issues/1142
-\[Feature:IPv6DualStackAlphaFeature\]
 
 # TO BE IMPLEMENTED: https://github.com/ovn-org/ovn-kubernetes/issues/819
 Services.+session affinity
@@ -70,6 +68,10 @@ IPV6_ONLY_TESTS="
 \[Feature:Networking-IPv6\]
 "
 
+DUALSTACK_ONLY_TESTS="
+\[Feature:.*DualStack.*\]
+"
+
 # Github CI doesn´t offer IPv6 connectivity, so always skip IPv6 only tests.
 #  See: https://github.com/ovn-org/ovn-kubernetes/issues/1522
 SKIPPED_TESTS=$SKIPPED_TESTS$IPV6_ONLY_TESTS
@@ -78,6 +80,11 @@ SKIPPED_TESTS=$SKIPPED_TESTS$IPV6_ONLY_TESTS
 if [ "$KIND_IPV4_SUPPORT" == false ] && [ "$KIND_IPV6_SUPPORT" == true ]; then
 	echo "IPv6 Only"
 	SKIPPED_TESTS=$SKIPPED_TESTS$IPV4_ONLY_TESTS
+fi
+
+# If not DualStack, skip DualStack tests
+if [ "$KIND_IPV4_SUPPORT" == false ] || [ "$KIND_IPV6_SUPPORT" == false ]; then
+	SKIPPED_TESTS=$SKIPPED_TESTS$DUALSTACK_ONLY_TESTS
 fi
 
 SKIPPED_TESTS="$(groomTestList "${SKIPPED_TESTS}")"
@@ -104,4 +111,3 @@ case "$SHARD" in
 esac
 
 e2e.test ${GINKGO_ARGS}
-

@@ -128,7 +128,7 @@ func shareGatewayInterfaceTest(app *cli.App, testNS ns.NetNS,
 			Output: "5",
 		})
 		fexec.AddFakeCmd(&ovntest.ExpectedCmd{
-			Cmd:    "ovs-vsctl --timeout=15 --if-exists get interface eth0 ofport",
+			Cmd:    "ovs-vsctl --timeout=15 get interface eth0 ofport",
 			Output: "7",
 		})
 		fexec.AddFakeCmdsNoOutputNoError([]string{
@@ -202,7 +202,7 @@ cookie=0x0, duration=8366.597s, table=1, n_packets=10641, n_bytes=10370087, prio
 			err = n.initGateway(ovntest.MustParseIPNets(nodeSubnet), nodeAnnotator, waiter)
 			Expect(err).NotTo(HaveOccurred())
 
-			// check if IP adress have assigned to localnetGatewayNextHopPort interface
+			// check if IP addresses have been assigned to localnetGatewayNextHopPort interface
 			link, err := netlink.LinkByName(localnetGatewayNextHopPort)
 			Expect(err).NotTo(HaveOccurred())
 			addresses, err := netlink.AddrList(link, syscall.AF_INET)

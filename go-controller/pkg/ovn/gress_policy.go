@@ -46,11 +46,20 @@ type portPolicy struct {
 
 func (pp *portPolicy) getL4Match() (string, error) {
 	if pp.protocol == TCP {
-		return fmt.Sprintf("tcp && tcp.dst==%d", pp.port), nil
+		if pp.port != 0 {
+			return fmt.Sprintf("tcp && tcp.dst==%d", pp.port), nil
+		}
+		return "tcp", nil
 	} else if pp.protocol == UDP {
-		return fmt.Sprintf("udp && udp.dst==%d", pp.port), nil
+		if pp.port != 0 {
+			return fmt.Sprintf("udp && udp.dst==%d", pp.port), nil
+		}
+		return "udp", nil
 	} else if pp.protocol == SCTP {
-		return fmt.Sprintf("sctp && sctp.dst==%d", pp.port), nil
+		if pp.port != 0 {
+			return fmt.Sprintf("sctp && sctp.dst==%d", pp.port), nil
+		}
+		return "sctp", nil
 	}
 	return "", fmt.Errorf("unknown port protocol %v", pp.protocol)
 }
@@ -107,11 +116,15 @@ func (gp *gressPolicy) deletePeerPod(pod *v1.Pod) error {
 	return gp.peerAddressSet.DeleteIPs(ips)
 }
 
+// If the port is not specified, it implies all ports for that protocol
 func (gp *gressPolicy) addPortPolicy(portJSON *knet.NetworkPolicyPort) {
-	gp.portPolicies = append(gp.portPolicies, &portPolicy{
-		protocol: string(*portJSON.Protocol),
-		port:     portJSON.Port.IntVal,
-	})
+	pp := &portPolicy{protocol: string(*portJSON.Protocol),
+		port: 0,
+	}
+	if portJSON.Port != nil {
+		pp.port = portJSON.Port.IntVal
+	}
+	gp.portPolicies = append(gp.portPolicies, pp)
 }
 
 func (gp *gressPolicy) addIPBlock(ipblockJSON *knet.IPBlock) {
