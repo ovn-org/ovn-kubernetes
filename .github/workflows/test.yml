@@ -11,6 +11,7 @@ env:
   K8S_VERSION: v1.18.2
   KIND_CLUSTER_NAME: ovn
   KIND_INSTALL_INGRESS: true
+  KIND_ALLOW_SYSTEM_WRITES: true
 
 jobs:
   build:
@@ -137,10 +138,46 @@ jobs:
          - enabled: "false"
            name: "noHA"
         gateway-mode: [local, shared]
+        ipfamily:
+         - ip: ipv4
+           name: "IPv4"
+           ipv4: true
+           ipv6: false
+         - ip: ipv6
+           name: "IPv6"
+           ipv4: false
+           ipv6: true
+         - ip: dualstack
+           name: "Dualstack"
+           ipv4: true
+           ipv6: true
+        # Example of how to exclude a fully qualified test:
+        # - {"ipfamily": {"ip": ipv4}, "ha": {"enabled": "false"}, "gateway-mode": shared, "target": {"shard": shard-n-other}}
+        exclude:
+         # Not currently supported but needs to be.
+         - {"ipfamily": {"ip": dualstack}}
+         - {"ipfamily": {"ip": ipv6}, "target": {"shard": control-plane}}
+         - {"ipfamily": {"ip": ipv6}, "gateway-mode": shared}
+         # Limit matrix combinations for CI. DISABLED items added to exclude list:
+         #   DISABLED  v4  ha     local
+         #   ENABLED   v4  ha     shared
+         #   ENABLED   v4  noha   local
+         #   DISABLED  v4  noha   shared
+         #   ENABLED   v6  ha     local
+         #   DISABLED  v6  ha     shared
+         #   DISABLED  v6  noha   local
+         #   DISABLED  v6  noha   shared
+         - {"ipfamily": {"ip": ipv4}, "ha": {"enabled": "true"}, "gateway-mode": local}
+         - {"ipfamily": {"ip": ipv4}, "ha": {"enabled": "false"}, "gateway-mode": shared}
+         - {"ipfamily": {"ip": ipv6}, "ha": {"enabled": "true"}, "gateway-mode": shared}
+         - {"ipfamily": {"ip": ipv6}, "ha": {"enabled": "false"}, "gateway-mode": local}
+         - {"ipfamily": {"ip": ipv6}, "ha": {"enabled": "false"}, "gateway-mode": shared}
     needs: [build, k8s]
     env:
-      JOB_NAME: "${{ matrix.target.shard }}-${{ matrix.ha.name }}-${{ matrix.gateway-mode }}"
+      JOB_NAME: "${{ matrix.target.shard }}-${{ matrix.ha.name }}-${{ matrix.gateway-mode }}-${{ matrix.ipfamily.name }}"
       KIND_HA: "${{ matrix.ha.enabled }}"
+      KIND_IPV4_SUPPORT: "${{ matrix.ipfamily.ipv4 }}"
+      KIND_IPV6_SUPPORT: "${{ matrix.ipfamily.ipv6 }}"
       OVN_HYBRID_OVERLAY_ENABLE: "${{ matrix.target.hybrid-overlay }}"
       OVN_GATEWAY_MODE: "${{ matrix.gateway-mode }}"
     steps:
@@ -163,6 +200,12 @@ jobs:
         echo "::set-env name=GOPATH::$GOPATH"
         export PATH=$GOPATH/bin:$PATH
         echo "::add-path::$GOPATH/bin"
+  
+    - name: Disable ufw
+      # For IPv6 and Dualstack, ufw (Uncomplicated Firewall) should be disabled.
+      # Not needed for KIND deployments, so just disable all the time. 
+      run: |
+        sudo ufw disable
 
     - name: Restore Kubernetes from cache
       id: cache-k8s
@@ -197,7 +240,21 @@ jobs:
       uses: actions/upload-artifact@v2
       with:
         name: kind-junit-${{ env.JOB_NAME }}-${{ github.run_id }}
-        path: '**/_artifacts/**.xml'
+        path: './test/_artifacts/*.xml'
+
+    - name: Generate Test Report
+      id: xunit-viewer
+      if: always()
+      uses: AutoModality/action-xunit-viewer@v1
+      with:
+        results: ./test/_artifacts/
+
+    - name: Upload Test Report
+      if: always()
+      uses: actions/upload-artifact@v2
+      with:
+        name: test-report-${{ env.JOB_NAME }}-${{ github.run_id }}
+        path: './test/_artifacts/index.html'
 
     - name: Export logs
       if: always()

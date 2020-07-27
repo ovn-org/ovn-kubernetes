@@ -269,10 +269,10 @@ func ovnE2eTimeStampUpdater(direction, database string) {
 	var err error
 
 	if direction == "sb" {
-		stdout, stderr, err = util.RunOVNSbctl("--if-exists", "--no-leader-only",
+		stdout, stderr, err = util.RunOVNSbctlUnix("--if-exists", "--no-leader-only",
 			"get", "SB_Global", ".", "options:e2e_timestamp")
 	} else {
-		stdout, stderr, err = util.RunOVNNbctl("--if-exists", "--no-leader-only",
+		stdout, stderr, err = util.RunOVNNbctlUnix("--if-exists", "--no-leader-only",
 			"get", "NB_Global", ".", "options:e2e_timestamp")
 	}
 	if err != nil {
@@ -280,11 +280,15 @@ func ovnE2eTimeStampUpdater(direction, database string) {
 			"stderr (%s) (%v)", database, stderr, err)
 		return
 	}
-	if value, err := strconv.ParseFloat(stdout, 64); err == nil {
-		metricDBE2eTimestamp.WithLabelValues(database).Set(value)
+	if stdout != "" {
+		if value, err := strconv.ParseFloat(stdout, 64); err == nil {
+			metricDBE2eTimestamp.WithLabelValues(database).Set(value)
+		} else {
+			klog.Errorf("Failed to parse %s e2e-timestamp value to float64 :(%v)",
+				database, err)
+		}
 	} else {
-		klog.Errorf("Failed to parse %s e2e-timestamp value to float64 :(%v)",
-			database, err)
+		metricDBE2eTimestamp.WithLabelValues(database).Set(0)
 	}
 }
 

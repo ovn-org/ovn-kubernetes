@@ -35,20 +35,27 @@ the shards (which may change in the future):
 - control-plane
   - All locally defined tests.
 
-Each of these shards is run in a HA setup and a non-HA setup. The regex
-expression for determining which E2E test is run in which shard, as well as the
-list of skipped tests is defined in
-[ovn-kubernetes/test/scripts/e2e-kind.sh](https://github.com/ovn-org/ovn-kubernetes/blob/master/test/scripts/e2e-kind.sh).
-
-The local tests are controlled in
-[test/scripts/e2e-cp.sh](https://github.com/ovn-org/ovn-kubernetes/blob/master/test/scripts/e2e-cp.sh)
+The regex expression for determining which E2E test is run in which shard, as
+well as the list of skipped tests is defined in
+[ovn-kubernetes/test/scripts/e2e-kind.sh](https://github.com/ovn-org/ovn-kubernetes/blob/master/test/scripts/e2e-kind.sh). The local tests are controlled in
+[ovn-kubernetes/test/scripts/e2e-cp.sh](https://github.com/ovn-org/ovn-kubernetes/blob/master/test/scripts/e2e-cp.sh)
 and the actual tests are defined in the directory
 [ovn-kubernetes/test/e2e/](https://github.com/ovn-org/ovn-kubernetes/tree/master/test/e2e).
+
+Each of these shards can then be run in a matrix of:
+* HA setup (3 masters and 0 workers) and a non-HA setup (1 master and 2 workers)
+* Local Gateway Mode and Shared Gateway Mode. See:
+[Enable Node-Local Services Access in Shared Gateway Mode](https://github.com/ovn-org/ovn-kubernetes/blob/master/docs/design/shared_gw_dgp.md)
+* IPv4 Only and IPv6 Only
+
+To reduce the explosion of tests being run in CI, the test case run are limited
+using an `exclude:` statement in 
+[ovn-kubernetes/.github/workflows/test.yml](https://github.com/ovn-org/ovn-kubernetes/blob/master/.github/workflows/test.yml).
 
 ## Running CI Locally
 
 This section describes how to run CI tests on a local deployment. This may be
-useful for expanding the CI test coverage, or testing a private fix before
+useful for expanding the CI test coverage or testing a private fix before
 creating a pull request.
 
 ### Download and Build Kubernetes Components
@@ -147,13 +154,11 @@ Launch the KIND Deployment.
 ```
 $ pushd contrib
 $ KUBECONFIG=${HOME}/admin.conf
-$ KIND_INSTALL_INGRESS=true ./kind.sh
+$ ./kind.sh
 $ popd
 ```
 
-This will launch a KIND deployment. The `kind.sh` script defaults the cluster
-name to `ovn`. Also by default, the `kind.sh` script defaults the cluster to HA.
-Use `KIND_HA=false` to run in non-HA mode.
+This will launch a KIND deployment. By default the cluster is named `ovn`.
 
 ```
 $ kubectl get nodes
@@ -178,6 +183,36 @@ ovn-kubernetes       ovnkube-node-hhsmk                          3/3     Running
 ovn-kubernetes       ovnkube-node-xvqh4                          3/3     Running   0          5h11m
 ```
 
+The `kind.sh` script defaults the cluster to HA. There are numerous
+configuration when deploying. Use `./kind.sh -h` to see the latest options.
+
+```
+./kind.sh -h
+usage: kind.sh [[[-cf|--config-file <file>] [-kt|keep-taint] [-ha|--ha-enabled]
+                 [-ho|--hybrid-enabled] [-ii|--install-ingress] [-n4|--no-ipv4]
+                 [-i6|--ipv6] [-wk|--num-workers <num>]
+                 [-sw|--allow-system-writes] [-gm|--gateway-mode <mode>]] |
+                [-h]]
+
+-cf | --config-file          Name of the KIND J2 configuration file.
+                             DEFAULT: ./kind.yaml.j2
+-kt | --keep-taint           Do not remove taint components.
+                             DEFAULT: Remove taint components.
+-ha | --ha-enabled           Enable high availability. DEFAULT: HA Disabled.
+-ho | --hybrid-enabled       Enable hybrid overlay. DEFAULT: Disabled.
+-ii | --install-ingress      Flag to install Ingress Components.
+                             DEFAULT: Don't install ingress components.
+-n4 | --no-ipv4              Disable IPv4. DEFAULT: IPv4 Enabled.
+-i6 | --ipv6                 Enable IPv6. DEFAULT: IPv6 Disabled.
+-wk | --num-workers          Number of worker nodes. DEFAULT: HA - 2 worker
+                             nodes and no HA - 0 worker nodes.
+-sw | --allow-system-writes  Allow script to update system. Intended to allow
+                             github CI to be updated with IPv6 settings.
+                             DEFAULT: Don't allow.
+-gm | --gateway-mode         Enable 'shared' or 'local' gateway mode.
+                             DEFAULT: local.
+```
+
 Once the testing is complete, to tear down the KIND deployment:
 
 ```
@@ -186,9 +221,8 @@ $ kind delete cluster --name ovn
 
 ### Run Tests
 
-To run the tests locally, run a KIND deployment as described above
-(`KIND_HA=false` or `KIND_HA=true` as desired). The E2E tests look for the kube
-config file in a special location, so make a copy:
+To run the tests locally, run a KIND deployment as described above. The E2E
+tests look for the kube config file in a special location, so make a copy:
 
 ```
 cp ~/admin.conf ~/.kube/kind-config-kind
@@ -214,4 +248,24 @@ $ cd $GOPATH/src/github.com/ovn-org/ovn-kubernetes
 $ pushd test
 $ make shard-test WHAT="should enforce egress policy allowing traffic to a server in a different namespace based on PodSelector and NamespaceSelector"
 $ popd
+```
+
+To skip the IPv4 only tests (in a IPv6 only deployment), pass the
+`KIND_IPV6_SUPPORT=true` environmental variable to `make`:
+
+```
+$ cd $GOPATH/src/github.com/ovn-org/ovn-kubernetes
+
+$ pushd test
+$ KIND_IPV6_SUPPORT=true make shard-n-other
+$ popd
+```
+
+Github CI doesn´t offer IPv6 connectivity, so IPv6 only tests are always
+skipped. To run those tests locally, comment out the following line from
+[ovn-kubernetes/test/scripts/e2e-kind.sh](https://github.com/ovn-org/ovn-kubernetes/blob/master/test/scripts/e2e-kind.sh)
+
+```
+# Github CI doesn´t offer IPv6 connectivity, so always skip IPv6 only tests.
+SKIPPED_TESTS=$SKIPPED_TESTS$IPV6_ONLY_TESTS
 ```
