@@ -29,9 +29,9 @@ ready_to_join_cluster() {
   if [[ $? != 0 ]]; then
     return 1
   fi
-  target=$(ovn-${db}ctl --db=${transport}:${init_ip}:${port} ${ovndb_ctl_ssl_opts} --data=bare --no-headings \
+  target=$(ovn-${db}ctl --db=${transport}:[${init_ip}]:${port} ${ovndb_ctl_ssl_opts} --data=bare --no-headings \
     --columns=target list connection)
-  if [[ "${target}" != "p${transport}:${port}" ]]; then
+  if [[ "${target}" != "p${transport}:${port}${ovn_raft_conn_ip_url_suffix}" ]]; then
     return 1
   fi
   return 0
@@ -42,8 +42,8 @@ check_ovnkube_db_ep() {
   local dbport=${2}
 
   # TODO: Right now only checks for NB ovsdb instances
-  echo "======= checking ${dbaddr}:${dbport} OVSDB instance ==============="
-  ovsdb-client ${ovndb_ctl_ssl_opts} list-dbs ${transport}:${dbaddr}:${dbport} >/dev/null
+  echo "======= checking [${dbaddr}]:${dbport} OVSDB instance ==============="
+  ovsdb-client ${ovndb_ctl_ssl_opts} list-dbs ${transport}:[${dbaddr}]:${dbport} >/dev/null
   if [[ $? != 0 ]]; then
     return 1
   fi
@@ -145,8 +145,8 @@ set_connection() {
     # this instance is a leader, check if we need to make any changes
     echo "found the current value of target and inactivity probe to be ${output}"
     target=$(echo "${output}" | awk 'ORS=","')
-    if [[ "${target}" != "p${transport}:${port},0," ]]; then
-      ovn-${db}ctl --inactivity-probe=0 set-connection p${transport}:${port}
+    if [[ "${target}" != "p${transport}:${port}${ovn_raft_conn_ip_url_suffix},0," ]]; then
+      ovn-${db}ctl --inactivity-probe=0 set-connection p${transport}:${port}${ovn_raft_conn_ip_url_suffix}
       if [[ $? != 0 ]]; then
         echo "Failed to set connection and disable inactivity probe. Exiting...."
         exit 12
@@ -230,10 +230,18 @@ ovsdb-raft() {
       "
     }
   fi
+
+  # 'ovn-${db}ctl set-connection' called in ovsdb-raft() defaults to IPv4.
+  # For IPv6, overwrite with ":[::]"
+  ovn_raft_conn_ip_url_suffix=""
+  if [[ "${ovn_db_host}" == *":"* ]]; then
+    ovn_raft_conn_ip_url_suffix=":[::]"
+  fi
+
   if [[ "${POD_NAME}" == "ovnkube-db-0" ]]; then
     run_as_ovs_user_if_needed \
       ${OVNCTL_PATH} run_${db}_ovsdb --no-monitor \
-      --db-${db}-cluster-local-addr=${ovn_db_host} \
+      --db-${db}-cluster-local-addr=[${ovn_db_host}] \
       --db-${db}-cluster-local-port=${raft_port} \
       --db-${db}-cluster-local-proto=${transport} \
       ${db_ssl_opts} \
@@ -245,7 +253,7 @@ ovsdb-raft() {
     fi
     run_as_ovs_user_if_needed \
       ${OVNCTL_PATH} run_${db}_ovsdb --no-monitor \
-      --db-${db}-cluster-local-addr=${ovn_db_host} --db-${db}-cluster-remote-addr=${init_ip} \
+      --db-${db}-cluster-local-addr=[${ovn_db_host}] --db-${db}-cluster-remote-addr=[${init_ip}] \
       --db-${db}-cluster-local-port=${raft_port} --db-${db}-cluster-remote-port=${raft_port} \
       --db-${db}-cluster-local-proto=${transport} --db-${db}-cluster-remote-proto=${transport} \
       ${db_ssl_opts} \

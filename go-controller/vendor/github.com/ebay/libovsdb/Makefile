@@ -15,7 +15,7 @@ test-ci:
 
 install-deps:
 	@echo "+ $@"
-	@go get -u github.com/golang/lint/golint
+	@go get -u golang.org/x/lint/golint
 	@go get -d ./...
 
 lint:
