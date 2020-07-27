@@ -192,8 +192,8 @@ func (oc *Controller) StartClusterMaster(masterNodeName string) error {
 				"Disabling Multicast Support")
 			oc.multicastSupport = false
 		}
-		if config.IPv6Mode {
-			klog.Warningf("Multicast support enabled, but can not be used along with IPv6. Disabling Multicast Support")
+		if !config.IPv4Mode {
+			klog.Warningf("Multicast support enabled, but can not be used with single-stack IPv6. Disabling Multicast Support")
 			oc.multicastSupport = false
 		}
 	}
