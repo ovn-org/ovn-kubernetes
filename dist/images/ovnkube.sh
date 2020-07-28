@@ -923,6 +923,7 @@ ovn-node() {
     ${ovn_node_ssl_opts} \
     --inactivity-probe=${ovn_remote_probe_interval} \
     ${multicast_enabled_flag} \
+    --ovn-metrics-bind-address "0.0.0.0:9476" \
     --metrics-bind-address "0.0.0.0:9410" &
 
   wait_for_event attempts=3 process_ready ovnkube
@@ -1073,9 +1074,6 @@ case ${cmd} in
 "sb-ovsdb-raft")
   ovsdb-raft sb ${ovn_sb_port} ${ovn_sb_raft_port} ${ovn_sb_raft_election_timer}
   ;;
-"db-raft-metrics")
-  db-raft-metrics
-  ;;
 "ovs-metrics")
   ovs-metrics
   ;;
@@ -1083,7 +1081,7 @@ case ${cmd} in
   echo "invalid command ${cmd}"
   echo "valid v3 commands: ovs-server nb-ovsdb sb-ovsdb run-ovn-northd ovn-master " \
     "ovn-controller ovn-node display_env display ovn_debug cleanup-ovs-server " \
-    "cleanup-ovn-node nb-ovsdb-raft sb-ovsdb-raft db-raft-metrics"
+    "cleanup-ovn-node nb-ovsdb-raft sb-ovsdb-raft"
   exit 0
   ;;
 esac
