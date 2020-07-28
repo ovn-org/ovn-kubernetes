@@ -3,12 +3,13 @@ package util
 import (
 	"bytes"
 	"fmt"
+	"testing"
+
 	mock_k8s_io_utils_exec "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/testing/mocks/k8s.io/utils/exec"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util/mocks"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
 	kexec "k8s.io/utils/exec"
-	"testing"
 )
 
 type onCallReturnArgs struct {
@@ -484,6 +485,62 @@ func TestRunOVSOfctl(t *testing.T) {
 
 			assert.Equal(t, e, tc.expectedErr)
 			mockExecRunner.AssertExpectations(t)
+			mockKexecIface.AssertExpectations(t)
+		})
+	}
+}
+
+func TestRunOVSDpctl(t *testing.T) {
+	mockKexecIface := new(mock_k8s_io_utils_exec.Interface)
+	mockExecRunner := new(mocks.ExecRunner)
+	mockCmd := new(mock_k8s_io_utils_exec.Cmd)
+	// below is defined in ovs.go
+	runCmdExecRunner = mockExecRunner
+	// note runner is defined in ovs.go file
+	runner = &execHelper{exec: mockKexecIface}
+	tests := []struct {
+		desc                    string
+		expectedErr             error
+		onRetArgsExecUtilsIface *onCallReturnArgs
+		onRetArgsKexecIface     *onCallReturnArgs
+	}{
+		{
+			desc:                    "negative: run `ovs-dpctl` command",
+			expectedErr:             fmt.Errorf("failed to execute ovs-dpctl command"),
+			onRetArgsExecUtilsIface: &onCallReturnArgs{"RunCmd", []string{"*mocks.Cmd", "string", "[]string"}, []interface{}{nil, nil, fmt.Errorf("failed to execute ovs-dpctl command")}},
+			onRetArgsKexecIface:     &onCallReturnArgs{"Command", []string{"string"}, []interface{}{mockCmd}},
+		},
+		{
+			desc:                    "positive: run `ovs-dpctl` ",
+			expectedErr:             nil,
+			onRetArgsExecUtilsIface: &onCallReturnArgs{"RunCmd", []string{"*mocks.Cmd", "string", "[]string"}, []interface{}{bytes.NewBuffer([]byte("testblah")), bytes.NewBuffer([]byte("")), nil}},
+			onRetArgsKexecIface:     &onCallReturnArgs{"Command", []string{"string"}, []interface{}{mockCmd}},
+		},
+	}
+	for i, tc := range tests {
+		t.Run(fmt.Sprintf("%d:%s", i, tc.desc), func(t *testing.T) {
+			call := mockExecRunner.On(tc.onRetArgsExecUtilsIface.onCallMethodName)
+			for _, arg := range tc.onRetArgsExecUtilsIface.onCallMethodArgType {
+				call.Arguments = append(call.Arguments, mock.AnythingOfType(arg))
+			}
+			for _, ret := range tc.onRetArgsExecUtilsIface.retArgList {
+				call.ReturnArguments = append(call.ReturnArguments, ret)
+			}
+			call.Once()
+
+			ifaceCall := mockKexecIface.On(tc.onRetArgsKexecIface.onCallMethodName)
+			for _, arg := range tc.onRetArgsKexecIface.onCallMethodArgType {
+				ifaceCall.Arguments = append(ifaceCall.Arguments, mock.AnythingOfType(arg))
+			}
+			for _, ret := range tc.onRetArgsKexecIface.retArgList {
+				ifaceCall.ReturnArguments = append(ifaceCall.ReturnArguments, ret)
+			}
+			ifaceCall.Once()
+			_, _, e := RunOVSDpctl()
+
+			assert.Equal(t, e, tc.expectedErr)
+			mockExecRunner.AssertExpectations(t)
+			mockKexecIface.AssertExpectations(t)
 		})
 	}
 }
@@ -504,8 +561,8 @@ func TestRunOVSVsctl(t *testing.T) {
 	}{
 		{
 			desc:                    "negative: run `ovs-vsctl` command",
-			expectedErr:             fmt.Errorf("executable file not found in $PATH"),
-			onRetArgsExecUtilsIface: &onCallReturnArgs{"RunCmd", []string{"*mocks.Cmd", "string", "[]string", "string"}, []interface{}{nil, nil, fmt.Errorf("executable file not found in $PATH")}},
+			expectedErr:             fmt.Errorf("failed to execute ovs-vsctl command"),
+			onRetArgsExecUtilsIface: &onCallReturnArgs{"RunCmd", []string{"*mocks.Cmd", "string", "[]string", "string"}, []interface{}{nil, nil, fmt.Errorf("failed to execute ovs-vsctl command")}},
 			onRetArgsKexecIface:     &onCallReturnArgs{"Command", []string{"string", "string", "string"}, []interface{}{mockCmd}},
 		},
 		{
@@ -538,6 +595,7 @@ func TestRunOVSVsctl(t *testing.T) {
 
 			assert.Equal(t, e, tc.expectedErr)
 			mockExecRunner.AssertExpectations(t)
+			mockKexecIface.AssertExpectations(t)
 		})
 	}
 }
@@ -559,9 +617,9 @@ func TestRunOVSAppctlWithTimeout(t *testing.T) {
 	}{
 		{
 			desc:                    "negative: run `ovs-appctl` command with timeout",
-			expectedErr:             fmt.Errorf("executable file not found in $PATH"),
+			expectedErr:             fmt.Errorf("failed to execute ovs-appctl command"),
 			timeout:                 5,
-			onRetArgsExecUtilsIface: &onCallReturnArgs{"RunCmd", []string{"*mocks.Cmd", "string", "[]string", "string"}, []interface{}{nil, nil, fmt.Errorf("executable file not found in $PATH")}},
+			onRetArgsExecUtilsIface: &onCallReturnArgs{"RunCmd", []string{"*mocks.Cmd", "string", "[]string", "string"}, []interface{}{nil, nil, fmt.Errorf("failed to execute ovs-appctl command")}},
 			onRetArgsKexecIface:     &onCallReturnArgs{"Command", []string{"string", "string", "string"}, []interface{}{mockCmd}},
 		},
 		{
@@ -596,6 +654,7 @@ func TestRunOVSAppctlWithTimeout(t *testing.T) {
 
 			assert.Equal(t, e, tc.expectedErr)
 			mockExecRunner.AssertExpectations(t)
+			mockKexecIface.AssertExpectations(t)
 		})
 	}
 }
@@ -616,8 +675,8 @@ func TestRunOVSAppctl(t *testing.T) {
 	}{
 		{
 			desc:                    "negative: run `ovs-appctl` command",
-			expectedErr:             fmt.Errorf("executable file not found in $PATH"),
-			onRetArgsExecUtilsIface: &onCallReturnArgs{"RunCmd", []string{"*mocks.Cmd", "string", "[]string", "string"}, []interface{}{nil, nil, fmt.Errorf("executable file not found in $PATH")}},
+			expectedErr:             fmt.Errorf("failed to execute ovs-appctl command"),
+			onRetArgsExecUtilsIface: &onCallReturnArgs{"RunCmd", []string{"*mocks.Cmd", "string", "[]string", "string"}, []interface{}{nil, nil, fmt.Errorf("failed to execute ovs-appctl command")}},
 			onRetArgsKexecIface:     &onCallReturnArgs{"Command", []string{"string", "string"}, []interface{}{mockCmd}},
 		},
 		{
@@ -651,6 +710,7 @@ func TestRunOVSAppctl(t *testing.T) {
 
 			assert.Equal(t, e, tc.expectedErr)
 			mockExecRunner.AssertExpectations(t)
+			mockKexecIface.AssertExpectations(t)
 		})
 	}
 }
@@ -672,9 +732,9 @@ func TestRunOVNAppctlWithTimeout(t *testing.T) {
 	}{
 		{
 			desc:                    "negative: run `ovn-appctl` command with timeout",
-			expectedErr:             fmt.Errorf("executable file not found in $PATH"),
+			expectedErr:             fmt.Errorf("failed to execute ovn-appctl command"),
 			timeout:                 5,
-			onRetArgsExecUtilsIface: &onCallReturnArgs{"RunCmd", []string{"*mocks.Cmd", "string", "[]string", "string"}, []interface{}{nil, nil, fmt.Errorf("executable file not found in $PATH")}},
+			onRetArgsExecUtilsIface: &onCallReturnArgs{"RunCmd", []string{"*mocks.Cmd", "string", "[]string", "string"}, []interface{}{nil, nil, fmt.Errorf("failed to execute ovn-appctl command")}},
 			onRetArgsKexecIface:     &onCallReturnArgs{"Command", []string{"string", "string"}, []interface{}{mockCmd}},
 		},
 		{
@@ -708,6 +768,7 @@ func TestRunOVNAppctlWithTimeout(t *testing.T) {
 
 			assert.Equal(t, e, tc.expectedErr)
 			mockExecRunner.AssertExpectations(t)
+			mockKexecIface.AssertExpectations(t)
 		})
 	}
 }
@@ -728,8 +789,8 @@ func TestRunOVNNbctlUnix(t *testing.T) {
 	}{
 		{
 			desc:                    "negative: run `ovn-nbctl` command with no env vars generated",
-			expectedErr:             fmt.Errorf("executable file not found in $PATH"),
-			onRetArgsExecUtilsIface: &onCallReturnArgs{"RunCmd", []string{"*mocks.Cmd", "string", "[]string", "string"}, []interface{}{nil, nil, fmt.Errorf("executable file not found in $PATH")}},
+			expectedErr:             fmt.Errorf("failed to execute ovn-nbctl command"),
+			onRetArgsExecUtilsIface: &onCallReturnArgs{"RunCmd", []string{"*mocks.Cmd", "string", "[]string", "string"}, []interface{}{nil, nil, fmt.Errorf("failed to execute ovn-nbctl command")}},
 			onRetArgsKexecIface:     &onCallReturnArgs{"Command", []string{"string", "string"}, []interface{}{mockCmd}},
 		},
 		{
@@ -764,6 +825,7 @@ func TestRunOVNNbctlUnix(t *testing.T) {
 				assert.Error(t, e)
 			}
 			mockExecRunner.AssertExpectations(t)
+			mockKexecIface.AssertExpectations(t)
 		})
 	}
 }
@@ -785,9 +847,9 @@ func TestRunOVNNbctlWithTimeout(t *testing.T) {
 	}{
 		{
 			desc:                    "negative: run `ovn-nbctl` command with timeout",
-			expectedErr:             fmt.Errorf("executable file not found in $PATH"),
+			expectedErr:             fmt.Errorf("failed to execute ovn-nbctl command"),
 			timeout:                 5,
-			onRetArgsExecUtilsIface: &onCallReturnArgs{"RunCmd", []string{"*mocks.Cmd", "string", "[]string", "string"}, []interface{}{nil, nil, fmt.Errorf("executable file not found in $PATH")}},
+			onRetArgsExecUtilsIface: &onCallReturnArgs{"RunCmd", []string{"*mocks.Cmd", "string", "[]string", "string"}, []interface{}{nil, nil, fmt.Errorf("failed to execute ovn-nbctl command")}},
 			onRetArgsKexecIface:     &onCallReturnArgs{"Command", []string{"string", "string"}, []interface{}{mockCmd}},
 		},
 		{
@@ -823,6 +885,7 @@ func TestRunOVNNbctlWithTimeout(t *testing.T) {
 				assert.Error(t, e)
 			}
 			mockExecRunner.AssertExpectations(t)
+			mockKexecIface.AssertExpectations(t)
 		})
 	}
 }
@@ -843,8 +906,8 @@ func TestRunOVNNbctl(t *testing.T) {
 	}{
 		{
 			desc:                    "negative: run `ovn-nbctl` command",
-			expectedErr:             fmt.Errorf("executable file not found in $PATH"),
-			onRetArgsExecUtilsIface: &onCallReturnArgs{"RunCmd", []string{"*mocks.Cmd", "string", "[]string", "string"}, []interface{}{nil, nil, fmt.Errorf("executable file not found in $PATH")}},
+			expectedErr:             fmt.Errorf("failed to execute ovn-nbctl command"),
+			onRetArgsExecUtilsIface: &onCallReturnArgs{"RunCmd", []string{"*mocks.Cmd", "string", "[]string", "string"}, []interface{}{nil, nil, fmt.Errorf("failed to execute ovn-nbctl command")}},
 			onRetArgsKexecIface:     &onCallReturnArgs{"Command", []string{"string", "string"}, []interface{}{mockCmd}},
 		},
 		{
@@ -878,6 +941,7 @@ func TestRunOVNNbctl(t *testing.T) {
 				assert.Error(t, e)
 			}
 			mockExecRunner.AssertExpectations(t)
+			mockKexecIface.AssertExpectations(t)
 		})
 	}
 }
@@ -898,8 +962,8 @@ func TestRunOVNSbctlUnix(t *testing.T) {
 	}{
 		{
 			desc:                    "negative: run `ovn-sbctl` command with no env vars generated",
-			expectedErr:             fmt.Errorf("executable file not found in $PATH"),
-			onRetArgsExecUtilsIface: &onCallReturnArgs{"RunCmd", []string{"*mocks.Cmd", "string", "[]string", "string"}, []interface{}{nil, nil, fmt.Errorf("executable file not found in $PATH")}},
+			expectedErr:             fmt.Errorf("failed to execute ovn-sbctl command"),
+			onRetArgsExecUtilsIface: &onCallReturnArgs{"RunCmd", []string{"*mocks.Cmd", "string", "[]string", "string"}, []interface{}{nil, nil, fmt.Errorf("failed to execute ovn-sbctl command")}},
 			onRetArgsKexecIface:     &onCallReturnArgs{"Command", []string{"string", "string"}, []interface{}{mockCmd}},
 		},
 		{
@@ -933,6 +997,7 @@ func TestRunOVNSbctlUnix(t *testing.T) {
 				assert.Error(t, e)
 			}
 			mockExecRunner.AssertExpectations(t)
+			mockKexecIface.AssertExpectations(t)
 		})
 	}
 }
@@ -954,9 +1019,9 @@ func TestRunOVNSbctlWithTimeout(t *testing.T) {
 	}{
 		{
 			desc:                    "negative: run `ovn-sbctl` command with timeout",
-			expectedErr:             fmt.Errorf("executable file not found in $PATH"),
+			expectedErr:             fmt.Errorf("failed to execute ovn-sbctl command"),
 			timeout:                 5,
-			onRetArgsExecUtilsIface: &onCallReturnArgs{"RunCmd", []string{"*mocks.Cmd", "string", "[]string", "string"}, []interface{}{nil, nil, fmt.Errorf("executable file not found in $PATH")}},
+			onRetArgsExecUtilsIface: &onCallReturnArgs{"RunCmd", []string{"*mocks.Cmd", "string", "[]string", "string"}, []interface{}{nil, nil, fmt.Errorf("failed to execute ovn-sbctl command")}},
 			onRetArgsKexecIface:     &onCallReturnArgs{"Command", []string{"string", "string"}, []interface{}{mockCmd}},
 		},
 		{
@@ -992,6 +1057,7 @@ func TestRunOVNSbctlWithTimeout(t *testing.T) {
 				assert.Error(t, e)
 			}
 			mockExecRunner.AssertExpectations(t)
+			mockKexecIface.AssertExpectations(t)
 		})
 	}
 }
@@ -1012,8 +1078,8 @@ func TestRunOVNSbctl(t *testing.T) {
 	}{
 		{
 			desc:                    "negative: run `ovn-sbctl` command",
-			expectedErr:             fmt.Errorf("executable file not found in $PATH"),
-			onRetArgsExecUtilsIface: &onCallReturnArgs{"RunCmd", []string{"*mocks.Cmd", "string", "[]string", "string"}, []interface{}{nil, nil, fmt.Errorf("executable file not found in $PATH")}},
+			expectedErr:             fmt.Errorf("failed to execute ovn-sbctl command"),
+			onRetArgsExecUtilsIface: &onCallReturnArgs{"RunCmd", []string{"*mocks.Cmd", "string", "[]string", "string"}, []interface{}{nil, nil, fmt.Errorf("failed to execute ovn-sbctl command")}},
 			onRetArgsKexecIface:     &onCallReturnArgs{"Command", []string{"string", "string"}, []interface{}{mockCmd}},
 		},
 		{
@@ -1048,6 +1114,7 @@ func TestRunOVNSbctl(t *testing.T) {
 				assert.Error(t, e)
 			}
 			mockExecRunner.AssertExpectations(t)
+			mockKexecIface.AssertExpectations(t)
 		})
 	}
 }
@@ -1068,8 +1135,8 @@ func TestRunOVSDBClient(t *testing.T) {
 	}{
 		{
 			desc:                    "negative: run `ovsdb-client` command",
-			expectedErr:             fmt.Errorf("executable file not found in $PATH"),
-			onRetArgsExecUtilsIface: &onCallReturnArgs{"RunCmd", []string{"*mocks.Cmd", "string", "[]string", "string"}, []interface{}{nil, nil, fmt.Errorf("executable file not found in $PATH")}},
+			expectedErr:             fmt.Errorf("failed to execute ovsdb-client command"),
+			onRetArgsExecUtilsIface: &onCallReturnArgs{"RunCmd", []string{"*mocks.Cmd", "string", "[]string", "string"}, []interface{}{nil, nil, fmt.Errorf("failed to execute ovsdb-client command")}},
 			onRetArgsKexecIface:     &onCallReturnArgs{"Command", []string{"string", "string"}, []interface{}{mockCmd}},
 		},
 		{
@@ -1104,6 +1171,7 @@ func TestRunOVSDBClient(t *testing.T) {
 				assert.Error(t, e)
 			}
 			mockExecRunner.AssertExpectations(t)
+			mockKexecIface.AssertExpectations(t)
 		})
 	}
 }
@@ -1124,8 +1192,8 @@ func TestRunOVSDBClientOVNNB(t *testing.T) {
 	}{
 		{
 			desc:                    "negative: run `ovsdb-client` command against OVN NB database",
-			expectedErr:             fmt.Errorf("executable file not found in $PATH"),
-			onRetArgsExecUtilsIface: &onCallReturnArgs{"RunCmd", []string{"*mocks.Cmd", "string", "[]string", "string", "string"}, []interface{}{nil, nil, fmt.Errorf("executable file not found in $PATH")}},
+			expectedErr:             fmt.Errorf("failed to execute ovsdb-client command against OVN NB database"),
+			onRetArgsExecUtilsIface: &onCallReturnArgs{"RunCmd", []string{"*mocks.Cmd", "string", "[]string", "string", "string"}, []interface{}{nil, nil, fmt.Errorf("failed to execute ovsdb-client command against OVN NB database")}},
 			onRetArgsKexecIface:     &onCallReturnArgs{"Command", []string{"string", "string", "string"}, []interface{}{mockCmd}},
 		},
 		{
@@ -1160,6 +1228,7 @@ func TestRunOVSDBClientOVNNB(t *testing.T) {
 				assert.Error(t, e)
 			}
 			mockExecRunner.AssertExpectations(t)
+			mockKexecIface.AssertExpectations(t)
 		})
 	}
 }
@@ -1180,8 +1249,8 @@ func TestRunOVNCtl(t *testing.T) {
 	}{
 		{
 			desc:                    "negative: run `ovn-ctl` command",
-			expectedErr:             fmt.Errorf("executable file not found in $PATH"),
-			onRetArgsExecUtilsIface: &onCallReturnArgs{"RunCmd", []string{"*mocks.Cmd", "string", "[]string", "string", "string"}, []interface{}{nil, nil, fmt.Errorf("executable file not found in $PATH")}},
+			expectedErr:             fmt.Errorf("failed to execute ovn-ctl command"),
+			onRetArgsExecUtilsIface: &onCallReturnArgs{"RunCmd", []string{"*mocks.Cmd", "string", "[]string", "string", "string"}, []interface{}{nil, nil, fmt.Errorf("failed to execute ovn-ctl command")}},
 			onRetArgsKexecIface:     &onCallReturnArgs{"Command", []string{"string", "string", "string"}, []interface{}{mockCmd}},
 		},
 		{
@@ -1216,6 +1285,7 @@ func TestRunOVNCtl(t *testing.T) {
 				assert.Error(t, e)
 			}
 			mockExecRunner.AssertExpectations(t)
+			mockKexecIface.AssertExpectations(t)
 		})
 	}
 }
@@ -1236,8 +1306,8 @@ func TestRunOVNNBAppCtl(t *testing.T) {
 	}{
 		{
 			desc:                    "negative: run `ovn-appctl -t nbdbCtlSockPath` command",
-			expectedErr:             fmt.Errorf("executable file not found in $PATH"),
-			onRetArgsExecUtilsIface: &onCallReturnArgs{"RunCmd", []string{"*mocks.Cmd", "string", "[]string", "string", "string"}, []interface{}{nil, nil, fmt.Errorf("executable file not found in $PATH")}},
+			expectedErr:             fmt.Errorf("failed to execute ovn-appctl -t nbdbCtlSockPath command"),
+			onRetArgsExecUtilsIface: &onCallReturnArgs{"RunCmd", []string{"*mocks.Cmd", "string", "[]string", "string", "string"}, []interface{}{nil, nil, fmt.Errorf("failed to execute ovn-appctl -t nbdbCtlSockPath command")}},
 			onRetArgsKexecIface:     &onCallReturnArgs{"Command", []string{"string", "string", "string"}, []interface{}{mockCmd}},
 		},
 		{
@@ -1272,6 +1342,7 @@ func TestRunOVNNBAppCtl(t *testing.T) {
 				assert.Error(t, e)
 			}
 			mockExecRunner.AssertExpectations(t)
+			mockKexecIface.AssertExpectations(t)
 		})
 	}
 }
@@ -1292,8 +1363,8 @@ func TestRunOVNSBAppCtl(t *testing.T) {
 	}{
 		{
 			desc:                    "negative: run `ovn-appctl -t sbdbCtlSockPath` command",
-			expectedErr:             fmt.Errorf("executable file not found in $PATH"),
-			onRetArgsExecUtilsIface: &onCallReturnArgs{"RunCmd", []string{"*mocks.Cmd", "string", "[]string", "string", "string"}, []interface{}{nil, nil, fmt.Errorf("executable file not found in $PATH")}},
+			expectedErr:             fmt.Errorf("failed to execute ovn-appctl -t sbdbCtlSockPath command"),
+			onRetArgsExecUtilsIface: &onCallReturnArgs{"RunCmd", []string{"*mocks.Cmd", "string", "[]string", "string", "string"}, []interface{}{nil, nil, fmt.Errorf("failed to execute ovn-appctl -t sbdbCtlSockPath command")}},
 			onRetArgsKexecIface:     &onCallReturnArgs{"Command", []string{"string", "string", "string"}, []interface{}{mockCmd}},
 		},
 		{
@@ -1328,6 +1399,56 @@ func TestRunOVNSBAppCtl(t *testing.T) {
 				assert.Error(t, e)
 			}
 			mockExecRunner.AssertExpectations(t)
+			mockKexecIface.AssertExpectations(t)
+		})
+	}
+}
+
+func TestRunIP(t *testing.T) {
+	mockKexecIface := new(mock_k8s_io_utils_exec.Interface)
+	mockExecRunner := new(mocks.ExecRunner)
+	mockCmd := new(mock_k8s_io_utils_exec.Cmd)
+	// below is defined in ovs.go
+	runCmdExecRunner = mockExecRunner
+	// note runner is defined in ovs.go file
+	runner = &execHelper{exec: mockKexecIface}
+	tests := []struct {
+		desc                    string
+		expectedErr             error
+		onRetArgsExecUtilsIface *onCallReturnArgs
+		onRetArgsKexecIface     *onCallReturnArgs
+	}{
+		{
+			desc:                    "positive: run IP ",
+			expectedErr:             nil,
+			onRetArgsExecUtilsIface: &onCallReturnArgs{"RunCmd", []string{"*mocks.Cmd", "string", "[]string"}, []interface{}{bytes.NewBuffer([]byte("testblah")), bytes.NewBuffer([]byte("")), nil}},
+			onRetArgsKexecIface:     &onCallReturnArgs{"Command", []string{"string"}, []interface{}{mockCmd}},
+		},
+	}
+	for i, tc := range tests {
+		t.Run(fmt.Sprintf("%d:%s", i, tc.desc), func(t *testing.T) {
+			call := mockExecRunner.On(tc.onRetArgsExecUtilsIface.onCallMethodName)
+			for _, arg := range tc.onRetArgsExecUtilsIface.onCallMethodArgType {
+				call.Arguments = append(call.Arguments, mock.AnythingOfType(arg))
+			}
+			for _, ret := range tc.onRetArgsExecUtilsIface.retArgList {
+				call.ReturnArguments = append(call.ReturnArguments, ret)
+			}
+			call.Once()
+
+			ifaceCall := mockKexecIface.On(tc.onRetArgsKexecIface.onCallMethodName)
+			for _, arg := range tc.onRetArgsKexecIface.onCallMethodArgType {
+				ifaceCall.Arguments = append(ifaceCall.Arguments, mock.AnythingOfType(arg))
+			}
+			for _, ret := range tc.onRetArgsKexecIface.retArgList {
+				ifaceCall.ReturnArguments = append(ifaceCall.ReturnArguments, ret)
+			}
+			ifaceCall.Once()
+			_, _, e := RunIP()
+
+			assert.Equal(t, e, tc.expectedErr)
+			mockExecRunner.AssertExpectations(t)
+			mockKexecIface.AssertExpectations(t)
 		})
 	}
 }
@@ -1349,8 +1470,8 @@ func TestAddNormalActionOFFlow(t *testing.T) {
 	}{
 		{
 			desc:                    "negative: run `ovs-ofctl` command",
-			expectedErr:             fmt.Errorf("executable file not found in $PATH"),
-			onRetArgsExecUtilsIface: &onCallReturnArgs{"RunCmd", []string{"*mocks.Cmd", "string", "[]string", "string", "string", "string", "string", "string"}, []interface{}{nil, nil, fmt.Errorf("executable file not found in $PATH")}},
+			expectedErr:             fmt.Errorf("failed to execute ovs-ofctl command"),
+			onRetArgsExecUtilsIface: &onCallReturnArgs{"RunCmd", []string{"*mocks.Cmd", "string", "[]string", "string", "string", "string", "string", "string"}, []interface{}{nil, nil, fmt.Errorf("failed to execute ovs-ofctl command")}},
 			onRetArgsKexecIface:     &onCallReturnArgs{"Command", []string{"string", "string", "string", "string", "string", "string"}, []interface{}{mockCmd}},
 			onRetArgsCmdList:        &onCallReturnArgs{"SetStdin", []string{"*bytes.Buffer"}, nil},
 		},
@@ -1419,8 +1540,8 @@ func TestReplaceOFFlows(t *testing.T) {
 	}{
 		{
 			desc:                    "negative: run `ovs-ofctl` command",
-			expectedErr:             fmt.Errorf("executable file not found in $PATH"),
-			onRetArgsExecUtilsIface: &onCallReturnArgs{"RunCmd", []string{"*mocks.Cmd", "string", "[]string", "string", "string", "string", "string", "string", "string"}, []interface{}{nil, nil, fmt.Errorf("executable file not found in $PATH")}},
+			expectedErr:             fmt.Errorf("failed to execute ovs-ofctl command"),
+			onRetArgsExecUtilsIface: &onCallReturnArgs{"RunCmd", []string{"*mocks.Cmd", "string", "[]string", "string", "string", "string", "string", "string", "string"}, []interface{}{nil, nil, fmt.Errorf("failed to execute ovs-ofctl command")}},
 			onRetArgsKexecIface:     &onCallReturnArgs{"Command", []string{"string", "string", "string", "string", "string", "string", "string"}, []interface{}{mockCmd}},
 			onRetArgsCmdList:        &onCallReturnArgs{"SetStdin", []string{"*bytes.Buffer"}, nil},
 		},
@@ -1560,7 +1681,7 @@ func TestDetectSCTPSupport(t *testing.T) {
 		{
 			desc:                    "negative: fails to query OVN NB DB for SCTP support",
 			expectedErr:             true,
-			onRetArgsExecUtilsIface: &onCallReturnArgs{"RunCmd", []string{"*mocks.Cmd", "string", "[]string", "string", "string", "string", "string", "string", "string", "string"}, []interface{}{nil, nil, fmt.Errorf("executable file not found in $PATH")}},
+			onRetArgsExecUtilsIface: &onCallReturnArgs{"RunCmd", []string{"*mocks.Cmd", "string", "[]string", "string", "string", "string", "string", "string", "string", "string"}, []interface{}{nil, nil, fmt.Errorf("fails to query OVN NB DB")}},
 			onRetArgsKexecIface:     &onCallReturnArgs{"Command", []string{"string", "string", "string", "string", "string", "string", "string", "string"}, []interface{}{mockCmd}},
 		},
 		{
@@ -1634,6 +1755,7 @@ func TestDetectSCTPSupport(t *testing.T) {
 				assert.Error(t, e)
 			}
 			mockExecRunner.AssertExpectations(t)
+			mockKexecIface.AssertExpectations(t)
 		})
 	}
 }
