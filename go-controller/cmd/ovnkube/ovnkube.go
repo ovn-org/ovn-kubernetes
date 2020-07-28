@@ -260,8 +260,6 @@ func runOvnKube(ctx *cli.Context) error {
 		}
 		// register ovnkube node specific prometheus metrics exported by the node
 		metrics.RegisterNodeMetrics()
-		// register ovn specific (ovn-controller) metrics
-		metrics.RegisterOvnMetrics()
 		start := time.Now()
 		n := ovnnode.NewNode(clientset, factory, node, stopChan, util.EventRecorder(clientset))
 		if err := n.Start(); err != nil {
@@ -272,9 +270,15 @@ func runOvnKube(ctx *cli.Context) error {
 	}
 
 	// now that ovnkube master/node are running, lets expose the metrics HTTP endpoint if configured
-	// start the prometheus server
+	// start the prometheus server to serve OVN K8s Metrics (default master port: 9409, node port: 9410)
 	if config.Kubernetes.MetricsBindAddress != "" {
 		metrics.StartMetricsServer(config.Kubernetes.MetricsBindAddress, config.Kubernetes.MetricsEnablePprof)
+	}
+
+	// start the prometheus server to serve OVN Metrics (default port: 9476)
+	if config.Kubernetes.OVNMetricsBindAddress != "" {
+		metrics.RegisterOvnMetrics(clientset, node)
+		metrics.StartOVNMetricsServer(config.Kubernetes.OVNMetricsBindAddress)
 	}
 
 	// run until cancelled

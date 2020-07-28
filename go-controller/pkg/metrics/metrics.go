@@ -1,6 +1,7 @@
 package metrics
 
 import (
+	"context"
 	"fmt"
 	"net/http"
 	"net/http/pprof"
@@ -8,11 +9,14 @@ import (
 	"strings"
 	"time"
 
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	utilruntime "k8s.io/apimachinery/pkg/util/runtime"
 	utilwait "k8s.io/apimachinery/pkg/util/wait"
+	"k8s.io/client-go/kubernetes"
 	"k8s.io/klog"
 )
 
@@ -148,20 +152,39 @@ func coverageShowMetricsUpdater(component string) {
 	}
 }
 
-// StartMetricsServer runs the prometheus listner so that metrics can be collected
+// The `keepTrying` boolean when set to true will not return an error if we can't find pods with the given label.
+// This is so that the caller can re-try again to see if the pods have appeared in the k8s cluster.
+func checkPodRunsOnGivenNode(clientset *kubernetes.Clientset, label, k8sNodeName string,
+	keepTrying bool) (bool, error) {
+	pods, err := clientset.CoreV1().Pods(config.Kubernetes.OVNConfigNamespace).List(context.TODO(), metav1.ListOptions{
+		LabelSelector: label,
+	})
+	if err != nil {
+		klog.V(5).Infof("Failed to list Pods with label %q: %v. Retrying..", label, err)
+		return false, nil
+	}
+	for _, pod := range pods.Items {
+		if pod.Spec.NodeName == k8sNodeName {
+			return true, nil
+		}
+	}
+	if keepTrying {
+		return false, nil
+	}
+	return false, fmt.Errorf("the Pod matching the label %q doesn't exist on this node %s", label, k8sNodeName)
+}
+
+// StartMetricsServer runs the prometheus listener so that OVN K8s metrics can be collected
 func StartMetricsServer(bindAddress string, enablePprof bool) {
 	mux := http.NewServeMux()
 	mux.Handle("/metrics", promhttp.Handler())
 
 	if enablePprof {
-		klog.Infof("Metrics profiling is enabled")
 		mux.HandleFunc("/debug/pprof/", pprof.Index)
 		mux.HandleFunc("/debug/pprof/cmdline", pprof.Cmdline)
 		mux.HandleFunc("/debug/pprof/profile", pprof.Profile)
 		mux.HandleFunc("/debug/pprof/symbol", pprof.Symbol)
 		mux.HandleFunc("/debug/pprof/trace", pprof.Trace)
-	} else {
-		klog.Infof("Metrics profiling is disabled")
 	}
 
 	go utilwait.Until(func() {
@@ -170,5 +193,27 @@ func StartMetricsServer(bindAddress string, enablePprof bool) {
 			utilruntime.HandleError(fmt.Errorf("starting metrics server failed: %v", err))
 		}
 	}, 5*time.Second, utilwait.NeverStop)
+}
 
+var ovnRegistry = prometheus.NewRegistry()
+
+// StartOVNMetricsServer runs the prometheus listener so that OVN metrics can be collected
+func StartOVNMetricsServer(bindAddress string) {
+	handler := promhttp.InstrumentMetricHandler(ovnRegistry,
+		promhttp.HandlerFor(ovnRegistry, promhttp.HandlerOpts{}))
+	mux := http.NewServeMux()
+	mux.Handle("/metrics", handler)
+
+	go utilwait.Until(func() {
+		err := http.ListenAndServe(bindAddress, mux)
+		if err != nil {
+			utilruntime.HandleError(fmt.Errorf("starting metrics server failed: %v", err))
+		}
+	}, 5*time.Second, utilwait.NeverStop)
+}
+
+func RegisterOvnMetrics(clientset *kubernetes.Clientset, k8sNodeName string) {
+	go RegisterOvnDBMetrics(clientset, k8sNodeName)
+	go RegisterOvnControllerMetrics()
+	go RegisterOvnNorthdMetrics(clientset, k8sNodeName)
 }

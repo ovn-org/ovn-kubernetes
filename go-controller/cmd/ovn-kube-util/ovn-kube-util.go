@@ -28,7 +28,6 @@ func main() {
 		&app.NicsToBridgeCommand,
 		&app.BridgesToNicCommand,
 		&app.ReadinessProbeCommand,
-		&app.OvnDBExporterCommand,
 		&app.OvsExporterCommand,
 	}
 
