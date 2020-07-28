@@ -46,7 +46,7 @@ jobs:
       run: |
         set -x
         pushd go-controller
-           RACE=1 make check
+        make check
         popd
 
     - name: Build
