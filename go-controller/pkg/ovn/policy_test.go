@@ -1383,6 +1383,7 @@ var _ = Describe("OVN NetworkPolicy Low-Level Operations", func() {
 
 		asFactory = newFakeAddressSetFactory()
 		config.IPv4Mode = true
+		config.IPv6Mode = false
 	})
 
 	It("computes match strings from address sets correctly", func() {
