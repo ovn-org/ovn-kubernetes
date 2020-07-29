@@ -174,6 +174,41 @@ var _ = Describe("OVN Logical Switch Manager operations", func() {
 			Expect(err).NotTo(HaveOccurred())
 		})
 
+		It("IPAM allocates, releases, and reallocates IPs correctly", func() {
+			app.Action = func(ctx *cli.Context) error {
+				_, err := config.InitConfig(ctx, fexec, nil)
+				Expect(err).NotTo(HaveOccurred())
+				testNode := testNodeSubnetData{
+					nodeName: "testNode1",
+					subnets: []string{
+						"10.1.1.0/24",
+					},
+				}
+
+				expectedIPAllocations := [][]string{
+					{"10.1.1.3"},
+					{"10.1.1.4"},
+				}
+
+				err = lsManager.AddNode(testNode.nodeName, ovntest.MustParseIPNets(testNode.subnets...))
+				Expect(err).NotTo(HaveOccurred())
+				for _, expectedIPs := range expectedIPAllocations {
+					ips, err := lsManager.AllocateNextIPs(testNode.nodeName)
+					Expect(err).NotTo(HaveOccurred())
+					for i, ip := range ips {
+						Expect(ip.IP.String()).To(Equal(expectedIPs[i]))
+					}
+					err = lsManager.ReleaseIPs(testNode.nodeName, ips)
+					Expect(err).NotTo(HaveOccurred())
+					err = lsManager.AllocateIPs(testNode.nodeName, ips)
+					Expect(err).NotTo(HaveOccurred())
+				}
+				return nil
+			}
+			err := app.Run([]string{app.Name})
+			Expect(err).NotTo(HaveOccurred())
+		})
+
 		It("releases IPs for other host subnet nodes when any host subnets allocation fails", func() {
 			app.Action = func(ctx *cli.Context) error {
 				_, err := config.InitConfig(ctx, fexec, nil)
