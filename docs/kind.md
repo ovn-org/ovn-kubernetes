@@ -14,7 +14,7 @@ KIND deployment of OVN kubernetes is a fast and easy means to quickly install an
 
 ### Installation
 
-For OVN kubernetes KIND deployment, use the kind.sh script. 
+For OVN kubernetes KIND deployment, use the kind.sh script.
 
 To see all the options, you can use the  --help/-h command line option.
 
@@ -35,7 +35,7 @@ usage: kind.sh [[[-cf|--config-file <file>] [-kt|keep-taint] [-ha|--ha-enabled]
 -i6 | --ipv6                 Enable IPv6. DEFAULT: IPv6 Disabled.
 
 ```
-As seen above if you do not specify any options script will assume the default values. 
+As seen above if you do not specify any options script will assume the default values.
 
 You can create your own KIND J2 configuration file if the default one is not sufficient.
 
@@ -52,7 +52,7 @@ This section describes the configuration needed for IPv6 and dual-stack environm
 
 ### Docker Changes For IPv6
 
-For KIND clusters using KIND v0.7.0 or older (CI currently is using v0.7.0), to
+For KIND clusters using KIND v0.7.0 or older (CI currently is using v0.8.1), to
 use IPv6, IPv6 needs to be enable in Docker on the host:
 
 ```
@@ -60,7 +60,7 @@ $ sudo vi /etc/docker/daemon.json
 {
   "ipv6": true
 }
-   
+
 $ sudo systemctl reload docker
 ```
 
@@ -74,7 +74,7 @@ $ sudo vi /etc/docker/daemon.json
   "ipv6": true,
   "fixed-cidr-v6": "2001:db8:1::/64"
 }
-   
+
 $ sudo systemctl reload docker
 ```
 
@@ -90,15 +90,15 @@ $ docker run --rm busybox ip a
     link/loopback 00:00:00:00:00:00 brd 00:00:00:00:00:00
     inet 127.0.0.1/8 scope host lo
        valid_lft forever preferred_lft forever
-    inet6 ::1/128 scope host 
+    inet6 ::1/128 scope host
        valid_lft forever preferred_lft forever
-341: eth0@if342: <BROADCAST,MULTICAST,UP,LOWER_UP,M-DOWN> mtu 1500 qdisc noqueue 
+341: eth0@if342: <BROADCAST,MULTICAST,UP,LOWER_UP,M-DOWN> mtu 1500 qdisc noqueue
     link/ether 02:42:ac:11:00:02 brd ff:ff:ff:ff:ff:ff
     inet 172.17.0.2/16 brd 172.17.255.255 scope global eth0
        valid_lft forever preferred_lft forever
-    inet6 2001:db8:1::242:ac11:2/64 scope global flags 02 
+    inet6 2001:db8:1::242:ac11:2/64 scope global flags 02
        valid_lft forever preferred_lft forever
-    inet6 fe80::42:acff:fe11:2/64 scope link tentative 
+    inet6 fe80::42:acff:fe11:2/64 scope link tentative
        valid_lft forever preferred_lft forever
 ```
 
@@ -127,11 +127,11 @@ the cluster:
 :
 Creating cluster "ovn" ...
  ✓ Ensuring node image (kindest/node:v1.18.2) 🖼
- ✓ Preparing nodes 📦 📦 📦  
- ✓ Writing configuration 📜 
- ✓ Starting control-plane 🕹️ 
- ✓ Installing StorageClass 💾 
- ✗ Joining worker nodes 🚜 
+ ✓ Preparing nodes 📦 📦 📦
+ ✓ Writing configuration 📜
+ ✓ Starting control-plane 🕹️
+ ✓ Installing StorageClass 💾
+ ✗ Joining worker nodes 🚜
 ERROR: failed to create cluster: failed to join node with kubeadm: command "docker exec --privileged ovn-worker kubeadm join --config /kind/kubeadm.conf --ignore-preflight-errors=all --v=6" failed with error: exit status 1
 ```
 
@@ -311,3 +311,14 @@ ovn-kubernetes     ovnkube-node-278l9                        2/3   Running  0   
 ovn-kubernetes     ovnkube-node-bm7v6                        2/3   Running  0        107s   172.17.0.2  ovn-control-plane
 ovn-kubernetes     ovnkube-node-p4k4t                        2/3   Running  0        107s   172.17.0.4  ovn-worker
 ```
+
+### Known issues
+
+Some environments (Fedora32,31 on desktop), have problems when the cluster
+is deleted directly with kind `kind delete cluster --name ovn`, it restarts the host.
+The root cause is unknown, this also can not be reproduced in Ubuntu 20.04 or
+with Fedora32 Cloud, but it does not happen if we clean first the ovn-kubernetes resources.
+
+You can use the following command to delete the cluster:
+
+`contrib/kind.sh --delete`
