@@ -342,6 +342,7 @@ popd
 kind load docker-image ${OVN_IMAGE} --name ${KIND_CLUSTER_NAME}
 
 pushd ../dist/yaml
+run_kubectl apply -f k8s.ovn.org_egressfirewalls.yaml
 run_kubectl apply -f ovn-setup.yaml
 CONTROL_NODES=$(docker ps -f name=ovn-control | grep -v NAMES | awk '{ print $NF }')
 for n in $CONTROL_NODES; do
