@@ -24,8 +24,10 @@ import (
 	"k8s.io/apimachinery/pkg/labels"
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/client-go/kubernetes"
+	"k8s.io/client-go/kubernetes/scheme"
 	"k8s.io/client-go/tools/cache"
 	"k8s.io/client-go/tools/record"
+	ref "k8s.io/client-go/tools/reference"
 	"k8s.io/klog"
 )
 
@@ -400,6 +402,17 @@ func podScheduled(pod *kapi.Pod) bool {
 	return pod.Spec.NodeName != ""
 }
 
+func (oc *Controller) recordPodEvent(addErr error, pod *kapi.Pod) {
+	podRef, err := ref.GetReference(scheme.Scheme, pod)
+	if err != nil {
+		klog.Errorf("Couldn't get a reference to pod %s/%s to post an event: '%v'",
+			pod.Namespace, pod.Name, err)
+	} else {
+		klog.V(5).Infof("Posting a %s event for Pod %s/%s", kapi.EventTypeWarning, pod.Namespace, pod.Name)
+		oc.recorder.Eventf(podRef, kapi.EventTypeWarning, "ErrorAddingLogicalPort", addErr.Error())
+	}
+}
+
 // WatchPods starts the watching of Pod resource and calls back the appropriate handler logic
 func (oc *Controller) WatchPods() error {
 	var retryPods sync.Map
@@ -415,6 +428,7 @@ func (oc *Controller) WatchPods() error {
 			if podScheduled(pod) {
 				if err := oc.addLogicalPort(pod); err != nil {
 					klog.Errorf(err.Error())
+					oc.recordPodEvent(err, pod)
 					retryPods.Store(pod.UID, true)
 				}
 			} else {
@@ -432,6 +446,7 @@ func (oc *Controller) WatchPods() error {
 			if podScheduled(pod) && retry {
 				if err := oc.addLogicalPort(pod); err != nil {
 					klog.Errorf(err.Error())
+					oc.recordPodEvent(err, pod)
 				} else {
 					retryPods.Delete(pod.UID)
 				}

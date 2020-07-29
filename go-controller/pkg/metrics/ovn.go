@@ -198,8 +198,19 @@ var ovnControllerCoverageShowMetricsMap = map[string]*metricDetails{
 			"to buffer overflow.",
 	},
 	"packet_in": {
+		srcName: "flow_extract",
 		help: "Specifies the number of times ovn-controller has " +
 			"handled the packet-ins from ovs-vswitchd.",
+	},
+	"packet_in_drop": {
+		aggregateFrom: []string{
+			"pinctrl_drop_put_mac_binding",
+			"pinctrl_drop_buffered_packets_map",
+			"pinctrl_drop_controller_event",
+			"pinctrl_drop_put_vport_binding",
+		},
+		help: "Specifies the number of times the ovn-controller has dropped the " +
+			"packet-ins from ovs-vswitchd due to resource constraints",
 	},
 }
 
@@ -334,35 +345,6 @@ func RegisterOvnMetrics() {
 				}
 			}
 			return 0
-		}))
-	prometheus.MustRegister(prometheus.NewGaugeFunc(
-		prometheus.GaugeOpts{
-			Namespace: MetricOvnNamespace,
-			Subsystem: MetricOvnSubsystemController,
-			Name:      "packet_in_drop",
-			Help: "Specifies the number of times the ovn-controller has dropped the " +
-				"packet-ins from ovs-vswitchd due to resource constraints",
-		}, func() float64 {
-			coverageShowOutputMap, err := getCoverageShowOutputMap(ovnController)
-			if err != nil {
-				klog.Errorf("%s", err.Error())
-				return 0
-			}
-
-			packetInDropMetrics := []string{
-				"pinctrl_drop_put_mac_binding",
-				"pinctrl_drop_buffered_packets_map",
-				"pinctrl_drop_controller_event",
-				"pinctrl_drop_put_vport_binding",
-			}
-			var packetInDropMetricValue float64
-			for _, metricName := range packetInDropMetrics {
-				if value, ok := coverageShowOutputMap[metricName]; ok {
-					packetInDropMetricValue += parseMetricToFloat(MetricOvnSubsystemController,
-						metricName, value)
-				}
-			}
-			return packetInDropMetricValue
 		}))
 	prometheus.MustRegister(prometheus.NewGaugeFunc(
 		prometheus.GaugeOpts{

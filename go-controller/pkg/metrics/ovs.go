@@ -1066,6 +1066,14 @@ var ovsVswitchdCoverageShowMetricsMap = map[string]*metricDetails{
 		help: "Number of times flows were deleted from the " +
 			"datapath (Linux kernel datapath module).",
 	},
+	"dpif_execute": {
+		aggregateFrom: []string{
+			"dpif_execute",
+			"dpif_execute_with_help",
+		},
+		help: "Number of times the OpenFlow actions were executed in userspace " +
+			"on behalf of the datapath.",
+	},
 	"bridge_reconfigure": {
 		help: "Number of times OVS bridges were reconfigured.",
 	},
@@ -1082,8 +1090,14 @@ var ovsVswitchdCoverageShowMetricsMap = map[string]*metricDetails{
 			"were more than what the kernel can handle reliably.",
 	},
 	"packet_in": {
+		srcName: "flow_extract",
 		help: "Specifies the number of times ovs-vswitchd has " +
 			"handled the packet-ins on behalf of kernel datapath.",
+	},
+	"packet_in_drop": {
+		srcName: "packet_in_overflow",
+		help: "Specifies the number of times the ovs-vswitchd has dropped the " +
+			"packet-ins due to resource constraints.",
 	},
 	"ofproto_dpif_expired": {
 		help: "Number of times the flows were removed for reasons - " +
@@ -1121,49 +1135,6 @@ func RegisterOvsMetrics() {
 			},
 			func() float64 { return 1 },
 		))
-		prometheus.MustRegister(prometheus.NewGaugeFunc(
-			prometheus.GaugeOpts{
-				Namespace: MetricOvsNamespace,
-				Subsystem: MetricOvsSubsystemVswitchd,
-				Name:      "dpif_execute",
-				Help: "Number of times the OpenFlow actions were executed in userspace " +
-					"on behalf of the datapath.",
-			}, func() float64 {
-				coverageShowOutputMap, err := getCoverageShowOutputMap(ovsVswitchd)
-				if err != nil {
-					klog.Errorf("%s", err.Error())
-					return 0
-				}
-
-				dpIfExecuteCounters := []string{
-					"dpif_execute",
-					"dpif_execute_with_help",
-				}
-				var dpIfExecuteMetricValue float64
-				for _, metrciName := range dpIfExecuteCounters {
-					if value, ok := coverageShowOutputMap[metrciName]; ok {
-						dpIfExecuteMetricValue += parseMetricToFloat(MetricOvsSubsystemVswitchd, metrciName, value)
-					}
-				}
-				return dpIfExecuteMetricValue
-			}))
-		prometheus.MustRegister(prometheus.NewGaugeFunc(
-			prometheus.GaugeOpts{
-				Namespace: MetricOvsNamespace,
-				Subsystem: MetricOvsSubsystemVswitchd,
-				Name:      "packet_in_drop",
-				Help: "Specifies the number of times the ovs-vswitchd has dropped the " +
-					"packet-ins due to resource constraints.",
-			}, func() float64 {
-				stdout, stderr, err := util.RunOvsVswitchdAppCtl("coverage/read-counter",
-					"packet_in_overflow")
-				if err != nil {
-					klog.Errorf("Failed to get ovs-vswitchd coverage/read-counter "+
-						"output for packet_in_overflow stderr(%s) : %v", stderr, err)
-					return 0
-				}
-				return parseMetricToFloat(MetricOvsSubsystemVswitchd, "packet_in_drop", stdout)
-			}))
 
 		// Register OVS datapath metrics.
 		prometheus.MustRegister(metricOvsDpTotal)
