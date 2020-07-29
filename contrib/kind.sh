@@ -48,6 +48,7 @@ usage()
     echo "                             DEFAULT: Don't allow."
     echo "-gm | --gateway-mode         Enable 'shared' or 'local' gateway mode."
     echo "                             DEFAULT: local."
+    echo "-ov | --ovn-image            Use the specified docker image instead of building locally. DEFAULT: local build."
     echo ""
 }
 
@@ -95,6 +96,9 @@ parse_args()
                                           fi
                                           OVN_GATEWAY_MODE=$1
                                           ;;
+            -ov | --ovn-image )           shift
+                                          OVN_IMAGE=$1
+                                          ;;
             -h | --help )                 usage
                                           exit
                                           ;;
@@ -120,6 +124,7 @@ print_params()
      echo "OVN_GATEWAY_MODE = $OVN_GATEWAY_MODE"
      echo "OVN_HYBRID_OVERLAY_ENABLE = $OVN_HYBRID_OVERLAY_ENABLE"
      echo "OVN_MULTICAST_ENABLE = $OVN_MULTICAST_ENABLE"
+     echo "OVN_IMAGE = $OVN_IMAGE"
      echo ""
 }
 
@@ -138,6 +143,7 @@ KIND_IPV6_SUPPORT=${KIND_IPV6_SUPPORT:-false}
 OVN_HYBRID_OVERLAY_ENABLE=${OVN_HYBRID_OVERLAY_ENABLE:-false}
 OVN_MULTICAST_ENABLE=${OVN_MULTICAST_ENABLE:-false}
 KIND_ALLOW_SYSTEM_WRITES=${KIND_ALLOW_SYSTEM_WRITES:-false}
+OVN_IMAGE=${OVN_IMAGE:-local}
 
 # Input not currently validated. Modify outside script at your own risk.
 # These are the same values defaulted to in KIND code (kind/default.go).
@@ -207,9 +213,9 @@ check_ipv6() {
     echo "/proc/net/if_inet6 does not exists so no IPv6 support found! Compile the kernel!!"
     ERROR_FOUND=true
   fi
-  if "$ERROR_FOUND"; then 
+  if "$ERROR_FOUND"; then
     exit 2
-  fi  
+  fi
 }
 
 if [ "$KIND_IPV6_SUPPORT" == true ]; then
@@ -251,11 +257,6 @@ kind create cluster --name ${KIND_CLUSTER_NAME} --kubeconfig ${HOME}/admin.conf 
 export KUBECONFIG=${HOME}/admin.conf
 cat ${KUBECONFIG}
 
-# Build the ovn-kube controller
-pushd ../go-controller
-make
-popd
-
 if [ "${GITHUB_ACTIONS:-false}" == "true" ]; then
   # Patch CoreDNS to work in Github CI
   # 1. Github CI doesn´t offer IPv6 connectivity, so CoreDNS should be configured
@@ -283,11 +284,20 @@ if [ "${GITHUB_ACTIONS:-false}" == "true" ]; then
   printf '%s' "${fixed_coredns}" | kubectl apply -f -
 fi
 
-# Create the ovn-kube image
-pushd ../dist/images
-sudo cp -f ../../go-controller/_output/go/bin/* .
-echo "ref: $(git rev-parse  --symbolic-full-name HEAD)  commit: $(git rev-parse  HEAD)" > git_info
-docker build -t ovn-daemonset-f:dev -f Dockerfile.fedora .
+if [ "$OVN_IMAGE" == local ]; then
+  # Build ovn docker image
+  pushd ../go-controller
+  make
+  popd
+
+  # Build ovn kube image
+  pushd ../dist/images
+  sudo cp -f ../../go-controller/_output/go/bin/* .
+  echo "ref: $(git rev-parse  --symbolic-full-name HEAD)  commit: $(git rev-parse  HEAD)" > git_info
+  docker build -t ovn-daemonset-f:dev -f Dockerfile.fedora .
+  OVN_IMAGE=ovn-daemonset-f:dev
+  popd
+fi
 
 # Detect API IP address for OVN
 
@@ -299,8 +309,9 @@ docker build -t ovn-daemonset-f:dev -f Dockerfile.fedora .
 API_URL=$(kind get kubeconfig --internal --name ${KIND_CLUSTER_NAME} | grep server | awk '{ print $2 }')
 
 # Create ovn-kube manifests
+pushd ../dist/images
 ./daemonset.sh \
-  --image=docker.io/library/ovn-daemonset-f:dev \
+  --image=${OVN_IMAGE} \
   --net-cidr=${NET_CIDR} \
   --svc-cidr=${SVC_CIDR} \
   --gateway-mode=${OVN_GATEWAY_MODE} \
@@ -312,10 +323,8 @@ API_URL=$(kind get kubeconfig --internal --name ${KIND_CLUSTER_NAME} | grep serv
   --master-loglevel=5
 popd
 
-# Preload ovn-kube images in the kind cluster
-kind load docker-image ovn-daemonset-f:dev --name ${KIND_CLUSTER_NAME}
+kind load docker-image ${OVN_IMAGE} --name ${KIND_CLUSTER_NAME}
 
-# Deploy ovn-kube
 pushd ../dist/yaml
 run_kubectl apply -f ovn-setup.yaml
 CONTROL_NODES=$(docker ps -f name=ovn-control | grep -v NAMES | awk '{ print $NF }')
