@@ -3,6 +3,7 @@ package node
 import (
 	. "github.com/onsi/gomega"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
+	egressip "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/egressip/v1"
 	egressipfake "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/egressip/v1/apis/clientset/versioned/fake"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/factory"
 	ovntest "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/testing"
@@ -17,14 +18,15 @@ import (
 )
 
 type FakeOVNNode struct {
-	node             *OvnNode
-	watcher          *factory.WatchFactory
-	stopChan         chan struct{}
-	recorder         *record.FakeRecorder
-	fakeClient       *fake.Clientset
-	fakeEgressClient *egressfirewallfake.Clientset
-	fakeCRDClient    *apiextensionsfake.Clientset
-	fakeExec         *ovntest.FakeExec
+	node               *OvnNode
+	watcher            *factory.WatchFactory
+	stopChan           chan struct{}
+	recorder           *record.FakeRecorder
+	fakeClient         *fake.Clientset
+	fakeEgressIPClient *egressipfake.Clientset
+	fakeEgressClient   *egressfirewallfake.Clientset
+	fakeCRDClient      *apiextensionsfake.Clientset
+	fakeExec           *ovntest.FakeExec
 }
 
 func NewFakeOVNNode(fexec *ovntest.FakeExec) *FakeOVNNode {
@@ -38,12 +40,22 @@ func NewFakeOVNNode(fexec *ovntest.FakeExec) *FakeOVNNode {
 }
 
 func (o *FakeOVNNode) start(ctx *cli.Context, objects ...runtime.Object) {
+	egressIPObjects := []runtime.Object{}
+	v1Objects := []runtime.Object{}
+	for _, object := range objects {
+		if _, isEgressIPObject := object.(*egressip.EgressIPList); isEgressIPObject {
+			egressIPObjects = append(egressIPObjects, object)
+		} else {
+			v1Objects = append(v1Objects, object)
+		}
+	}
 	_, err := config.InitConfig(ctx, o.fakeExec, nil)
 	Expect(err).NotTo(HaveOccurred())
 
 	o.fakeCRDClient = apiextensionsfake.NewSimpleClientset()
 	o.fakeEgressClient = egressfirewallfake.NewSimpleClientset()
-	o.fakeClient = fake.NewSimpleClientset(objects...)
+	o.fakeClient = fake.NewSimpleClientset(v1Objects...)
+	o.fakeEgressIPClient = egressipfake.NewSimpleClientset(egressIPObjects...)
 	o.init()
 }
 
@@ -60,8 +72,8 @@ func (o *FakeOVNNode) init() {
 	var err error
 
 	o.stopChan = make(chan struct{})
-	egressIPFakeClient := &egressipfake.Clientset{}
-	o.watcher, err = factory.NewWatchFactory(o.fakeClient, egressIPFakeClient, o.fakeEgressClient, o.fakeCRDClient)
+
+	o.watcher, err = factory.NewWatchFactory(o.fakeClient, o.fakeEgressIPClient, o.fakeEgressClient, o.fakeCRDClient)
 	Expect(err).NotTo(HaveOccurred())
 
 	o.node = NewNode(o.fakeClient, o.watcher, "node", o.stopChan, o.recorder)
