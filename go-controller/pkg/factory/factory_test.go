@@ -17,6 +17,9 @@ import (
 	core "k8s.io/client-go/testing"
 	"k8s.io/client-go/tools/cache"
 
+	egressfirewall "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/egressfirewall/v1"
+	egressfirewallfake "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/egressfirewall/v1/apis/clientset/versioned/fake"
+
 	. "github.com/onsi/ginkgo"
 	. "github.com/onsi/gomega"
 )
@@ -98,7 +101,31 @@ func newService(name, namespace string) *v1.Service {
 	}
 }
 
+func newEgressFirewall(name, namespace string) *egressfirewall.EgressFirewall {
+	return &egressfirewall.EgressFirewall{
+		ObjectMeta: newObjectMeta(name, namespace),
+		Spec: egressfirewall.EgressFirewallSpec{
+			[]egressfirewall.EgressFirewallRule{
+				{
+					Type: egressfirewall.EgressFirewallRuleAllow,
+					To: egressfirewall.EgressFirewallDestination{
+						CIDRSelector: "1.2.3.4/32",
+					},
+				},
+			},
+		},
+	}
+
+}
+
 func objSetup(c *fake.Clientset, objType string, listFn func(core.Action) (bool, runtime.Object, error)) *watch.FakeWatcher {
+	w := watch.NewFake()
+	c.AddWatchReactor(objType, core.DefaultWatchReactor(w, nil))
+	c.AddReactor("list", objType, listFn)
+	return w
+}
+
+func egressFirewallObjSetup(c *egressfirewallfake.Clientset, objType string, listFn func(core.Action) (bool, runtime.Object, error)) *watch.FakeWatcher {
 	w := watch.NewFake()
 	c.AddWatchReactor(objType, core.DefaultWatchReactor(w, nil))
 	c.AddReactor("list", objType, listFn)
@@ -126,8 +153,10 @@ func (c *handlerCalls) getDeleted() int {
 var _ = Describe("Watch Factory Operations", func() {
 	var (
 		fakeClient                                *fake.Clientset
+		egressFirewallFakeClient                  *egressfirewallfake.Clientset
 		podWatch, namespaceWatch, nodeWatch       *watch.FakeWatcher
 		policyWatch, endpointsWatch, serviceWatch *watch.FakeWatcher
+		egressFirewallWatch                       *watch.FakeWatcher
 		pods                                      []*v1.Pod
 		namespaces                                []*v1.Namespace
 		nodes                                     []*v1.Node
@@ -135,11 +164,13 @@ var _ = Describe("Watch Factory Operations", func() {
 		endpoints                                 []*v1.Endpoints
 		services                                  []*v1.Service
 		wf                                        *WatchFactory
+		egressFirewalls                           []*egressfirewall.EgressFirewall
 		err                                       error
 	)
 
 	BeforeEach(func() {
 		fakeClient = &fake.Clientset{}
+		egressFirewallFakeClient = &egressfirewallfake.Clientset{}
 
 		pods = make([]*v1.Pod, 0)
 		podWatch = objSetup(fakeClient, "pods", func(core.Action) (bool, runtime.Object, error) {
@@ -194,6 +225,15 @@ var _ = Describe("Watch Factory Operations", func() {
 			}
 			return true, obj, nil
 		})
+
+		egressFirewalls = make([]*egressfirewall.EgressFirewall, 0)
+		egressFirewallWatch = egressFirewallObjSetup(egressFirewallFakeClient, "egressfirewalls", func(core.Action) (bool, runtime.Object, error) {
+			obj := &egressfirewall.EgressFirewallList{}
+			for _, p := range egressFirewalls {
+				obj.Items = append(obj.Items, *p)
+			}
+			return true, obj, nil
+		})
 	})
 
 	AfterEach(func() {
@@ -202,7 +242,7 @@ var _ = Describe("Watch Factory Operations", func() {
 
 	Context("when a processExisting is given", func() {
 		testExisting := func(objType reflect.Type, namespace string, lsel *metav1.LabelSelector) {
-			wf, err = NewWatchFactory(fakeClient)
+			wf, err = NewWatchFactory(fakeClient, egressFirewallFakeClient)
 			Expect(err).NotTo(HaveOccurred())
 			h, err := wf.addHandler(objType, namespace, lsel,
 				cache.ResourceEventHandlerFuncs{},
@@ -245,6 +285,11 @@ var _ = Describe("Watch Factory Operations", func() {
 			testExisting(serviceType, "", nil)
 		})
 
+		It("is called for each existing egressFirewall", func() {
+			egressFirewalls = append(egressFirewalls, newEgressFirewall("myEgressFirewall", "default"))
+			testExisting(egressFirewallType, "", nil)
+		})
+
 		It("is called for each existing pod that matches a given namespace and label", func() {
 			pod := newPod("pod1", "default")
 			pod.ObjectMeta.Labels["blah"] = "foobar"
@@ -257,7 +302,7 @@ var _ = Describe("Watch Factory Operations", func() {
 
 	Context("when existing items are known to the informer", func() {
 		testExisting := func(objType reflect.Type) {
-			wf, err = NewWatchFactory(fakeClient)
+			wf, err = NewWatchFactory(fakeClient, egressFirewallFakeClient)
 			Expect(err).NotTo(HaveOccurred())
 			var addCalls int32
 			h, err := wf.addHandler(objType, "", nil,
@@ -308,6 +353,11 @@ var _ = Describe("Watch Factory Operations", func() {
 			services = append(services, newService("myservice2", "default"))
 			testExisting(serviceType)
 		})
+		It("calls ADD for each existing egressFirewall", func() {
+			egressFirewalls = append(egressFirewalls, newEgressFirewall("myFirewall", "default"))
+			egressFirewalls = append(egressFirewalls, newEgressFirewall("myFirewall1", "default"))
+			testExisting(egressFirewallType)
+		})
 	})
 
 	addFilteredHandler := func(wf *WatchFactory, objType reflect.Type, namespace string, lsel *metav1.LabelSelector, funcs cache.ResourceEventHandlerFuncs) (*Handler, *handlerCalls) {
@@ -339,7 +389,7 @@ var _ = Describe("Watch Factory Operations", func() {
 	}
 
 	It("responds to pod add/update/delete events", func() {
-		wf, err = NewWatchFactory(fakeClient)
+		wf, err = NewWatchFactory(fakeClient, egressFirewallFakeClient)
 		Expect(err).NotTo(HaveOccurred())
 
 		added := newPod("pod1", "default")
@@ -373,7 +423,7 @@ var _ = Describe("Watch Factory Operations", func() {
 	})
 
 	It("responds to multiple pod add/update/delete events", func() {
-		wf, err = NewWatchFactory(fakeClient)
+		wf, err = NewWatchFactory(fakeClient, egressFirewallFakeClient)
 		Expect(err).NotTo(HaveOccurred())
 
 		const nodeName string = "mynode"
@@ -454,7 +504,7 @@ var _ = Describe("Watch Factory Operations", func() {
 	})
 
 	It("responds to namespace add/update/delete events", func() {
-		wf, err = NewWatchFactory(fakeClient)
+		wf, err = NewWatchFactory(fakeClient, egressFirewallFakeClient)
 		Expect(err).NotTo(HaveOccurred())
 
 		added := newNamespace("default")
@@ -488,7 +538,7 @@ var _ = Describe("Watch Factory Operations", func() {
 	})
 
 	It("responds to node add/update/delete events", func() {
-		wf, err = NewWatchFactory(fakeClient)
+		wf, err = NewWatchFactory(fakeClient, egressFirewallFakeClient)
 		Expect(err).NotTo(HaveOccurred())
 
 		added := newNode("mynode")
@@ -522,7 +572,7 @@ var _ = Describe("Watch Factory Operations", func() {
 	})
 
 	It("responds to multiple node add/update/delete events", func() {
-		wf, err = NewWatchFactory(fakeClient)
+		wf, err = NewWatchFactory(fakeClient, egressFirewallFakeClient)
 		Expect(err).NotTo(HaveOccurred())
 
 		type opTest struct {
@@ -618,7 +668,7 @@ var _ = Describe("Watch Factory Operations", func() {
 			nodes = append(nodes, node)
 		}
 
-		wf, err = NewWatchFactory(fakeClient)
+		wf, err = NewWatchFactory(fakeClient, egressFirewallFakeClient)
 		Expect(err).NotTo(HaveOccurred())
 
 		startWg := sync.WaitGroup{}
@@ -700,7 +750,7 @@ var _ = Describe("Watch Factory Operations", func() {
 			namespaces = append(namespaces, namespace)
 		}
 
-		wf, err = NewWatchFactory(fakeClient)
+		wf, err = NewWatchFactory(fakeClient, egressFirewallFakeClient)
 		Expect(err).NotTo(HaveOccurred())
 
 		startWg := sync.WaitGroup{}
@@ -766,7 +816,7 @@ var _ = Describe("Watch Factory Operations", func() {
 	})
 
 	It("responds to policy add/update/delete events", func() {
-		wf, err = NewWatchFactory(fakeClient)
+		wf, err = NewWatchFactory(fakeClient, egressFirewallFakeClient)
 		Expect(err).NotTo(HaveOccurred())
 
 		added := newPolicy("mypolicy", "default")
@@ -800,7 +850,7 @@ var _ = Describe("Watch Factory Operations", func() {
 	})
 
 	It("responds to endpoints add/update/delete events", func() {
-		wf, err = NewWatchFactory(fakeClient)
+		wf, err = NewWatchFactory(fakeClient, egressFirewallFakeClient)
 		Expect(err).NotTo(HaveOccurred())
 
 		added := newEndpoints("myendpoints", "default")
@@ -841,7 +891,7 @@ var _ = Describe("Watch Factory Operations", func() {
 	})
 
 	It("responds to service add/update/delete events", func() {
-		wf, err = NewWatchFactory(fakeClient)
+		wf, err = NewWatchFactory(fakeClient, egressFirewallFakeClient)
 		Expect(err).NotTo(HaveOccurred())
 
 		added := newService("myservice", "default")
@@ -874,8 +924,42 @@ var _ = Describe("Watch Factory Operations", func() {
 		wf.RemoveServiceHandler(h)
 	})
 
+	It("responds to egressFirewall add/update/delete events", func() {
+		wf, err = NewWatchFactory(fakeClient, egressFirewallFakeClient)
+		Expect(err).NotTo(HaveOccurred())
+
+		added := newEgressFirewall("myEgressFirewall", "default")
+		h, c := addHandler(wf, egressFirewallType, cache.ResourceEventHandlerFuncs{
+			AddFunc: func(obj interface{}) {
+				egressFirewall := obj.(*egressfirewall.EgressFirewall)
+				Expect(reflect.DeepEqual(egressFirewall, added)).To(BeTrue())
+			},
+			UpdateFunc: func(old, new interface{}) {
+				newEgressFirewall := new.(*egressfirewall.EgressFirewall)
+				Expect(reflect.DeepEqual(newEgressFirewall, added)).To(BeTrue())
+				Expect(newEgressFirewall.Spec.Egress[0].Type).To(Equal(egressfirewall.EgressFirewallRuleDeny))
+			},
+			DeleteFunc: func(obj interface{}) {
+				egressFirewall := obj.(*egressfirewall.EgressFirewall)
+				Expect(reflect.DeepEqual(egressFirewall, added)).To(BeTrue())
+			},
+		})
+
+		egressFirewalls = append(egressFirewalls, added)
+		egressFirewallWatch.Add(added)
+		Eventually(c.getAdded, 2).Should(Equal(1))
+		added.Spec.Egress[0].Type = egressfirewall.EgressFirewallRuleDeny
+		egressFirewallWatch.Modify(added)
+		Eventually(c.getUpdated, 2).Should(Equal(1))
+		egressFirewalls = egressFirewalls[:0]
+		egressFirewallWatch.Delete(added)
+		Eventually(c.getDeleted, 2).Should(Equal(1))
+
+		wf.RemoveEgressFirewallHandler(h)
+	})
+
 	It("stops processing events after the handler is removed", func() {
-		wf, err = NewWatchFactory(fakeClient)
+		wf, err = NewWatchFactory(fakeClient, egressFirewallFakeClient)
 		Expect(err).NotTo(HaveOccurred())
 
 		added := newNamespace("default")
@@ -904,7 +988,7 @@ var _ = Describe("Watch Factory Operations", func() {
 	})
 
 	It("filters correctly by label and namespace", func() {
-		wf, err = NewWatchFactory(fakeClient)
+		wf, err = NewWatchFactory(fakeClient, egressFirewallFakeClient)
 		Expect(err).NotTo(HaveOccurred())
 
 		passesFilter := newPod("pod1", "default")
@@ -968,7 +1052,7 @@ var _ = Describe("Watch Factory Operations", func() {
 	})
 
 	It("correctly handles object updates that cause filter changes", func() {
-		wf, err = NewWatchFactory(fakeClient)
+		wf, err = NewWatchFactory(fakeClient, egressFirewallFakeClient)
 		Expect(err).NotTo(HaveOccurred())
 
 		pod := newPod("pod1", "default")

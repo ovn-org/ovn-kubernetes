@@ -60,10 +60,9 @@ type EgressFirewallPort struct {
 	// +kubebuilder:validation:Pattern=^TCP|UDP|SCTP$
 	Protocol string `json:"protocol"`
 	// port that the traffic must match
-	// +optional
 	// +kubebuilder:validation:Minimum:=1
 	// +kubebuilder:validation:Maximum:=65535
-	Port int32 `json:"port,omitempty"`
+	Port int32 `json:"port"`
 }
 
 // EgressFirewallDestination is the endpoint that traffic is either allowed or denied to

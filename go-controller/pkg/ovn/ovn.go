@@ -18,6 +18,9 @@ import (
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/subnetallocator"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
 
+	egressfirewall "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/egressfirewall/v1"
+	egressfirewallclientset "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/egressfirewall/v1/apis/clientset/versioned"
+
 	kapi "k8s.io/api/core/v1"
 	kapisnetworking "k8s.io/api/networking/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -64,6 +67,9 @@ type namespaceInfo struct {
 	// namespacePolicy's mutex (and not necessarily the namespaceInfo's) to work with
 	// the policy itself.
 	networkPolicies map[string]*namespacePolicy
+
+	//defines the namespaces egressFirewallPolicy
+	egressFirewallPolicy *egressFirewall
 
 	hybridOverlayExternalGW net.IP
 	hybridOverlayVTEP       net.IP
@@ -163,7 +169,7 @@ const (
 
 // NewOvnController creates a new OVN controller for creating logical network
 // infrastructure and policy
-func NewOvnController(kubeClient kubernetes.Interface, wf *factory.WatchFactory,
+func NewOvnController(kubeClient kubernetes.Interface, egressFirewallClient egressfirewallclientset.Interface, wf *factory.WatchFactory,
 	stopChan <-chan struct{}, addressSetFactory AddressSetFactory, ovnNBClient goovn.Client, ovnSBClient goovn.Client) *Controller {
 
 	if addressSetFactory == nil {
@@ -171,7 +177,7 @@ func NewOvnController(kubeClient kubernetes.Interface, wf *factory.WatchFactory,
 	}
 
 	return &Controller{
-		kube:                     &kube.Kube{KClient: kubeClient},
+		kube:                     &kube.Kube{KClient: kubeClient, EgressFirewallClient: egressFirewallClient},
 		watchFactory:             wf,
 		stopChan:                 stopChan,
 		masterSubnetAllocator:    subnetallocator.NewSubnetAllocator(),
@@ -210,7 +216,7 @@ func (oc *Controller) Run() error {
 	}
 
 	for _, f := range []func() error{oc.WatchNamespaces, oc.WatchPods, oc.WatchServices,
-		oc.WatchEndpoints, oc.WatchNetworkPolicy} {
+		oc.WatchEndpoints, oc.WatchNetworkPolicy, oc.WatchEgressFirewall} {
 		if err := f(); err != nil {
 			return err
 		}
@@ -570,6 +576,56 @@ func (oc *Controller) WatchNetworkPolicy() error {
 	return err
 }
 
+// WatchEgressFirewall starts the watching of egressfirewall resource and calls
+// back the appropriate handler logic
+func (oc *Controller) WatchEgressFirewall() error {
+	_, err := oc.watchFactory.AddEgressFirewallHandler(cache.ResourceEventHandlerFuncs{
+		AddFunc: func(obj interface{}) {
+			egressFirewall := obj.(*egressfirewall.EgressFirewall)
+			errList := oc.addEgressFirewall(egressFirewall)
+			for _, err := range errList {
+				klog.Error(err)
+			}
+			if len(errList) == 0 {
+				egressFirewall.Status.Status = egressFirewallAppliedCorrectly
+			} else {
+				egressFirewall.Status.Status = egressFirewallAddError
+			}
+			err := oc.updateEgressFirewallWithRetry(egressFirewall)
+			if err != nil {
+				klog.Error(err)
+			}
+		},
+		UpdateFunc: func(old, newer interface{}) {
+			newEgressFirewall := newer.(*egressfirewall.EgressFirewall)
+			oldEgressFirewall := old.(*egressfirewall.EgressFirewall)
+			if !reflect.DeepEqual(oldEgressFirewall.Spec, newEgressFirewall.Spec) {
+				errList := oc.updateEgressFirewall(oldEgressFirewall, newEgressFirewall)
+				if len(errList) > 0 {
+					newEgressFirewall.Status.Status = egressFirewallUpdateError
+					for _, err := range errList {
+						klog.Error(err)
+					}
+				} else {
+					newEgressFirewall.Status.Status = egressFirewallAppliedCorrectly
+				}
+				err := oc.updateEgressFirewallWithRetry(newEgressFirewall)
+				if err != nil {
+					klog.Error(err)
+				}
+			}
+		},
+		DeleteFunc: func(obj interface{}) {
+			egressFirewall := obj.(*egressfirewall.EgressFirewall)
+			errList := oc.deleteEgressFirewall(egressFirewall)
+			for _, err := range errList {
+				klog.Error(err)
+			}
+		},
+	}, nil)
+	return err
+}
+
 // WatchNamespaces starts the watching of namespace resource and calls
 // back the appropriate handler logic
 func (oc *Controller) WatchNamespaces() error {
@@ -658,6 +714,28 @@ func (oc *Controller) WatchNodes() error {
 					klog.Warningf(err.Error())
 				}
 				gatewaysFailed.Store(node.Name, true)
+			}
+
+			//add any existing egressFirewall objects to join switch
+			namespaceList, err := oc.watchFactory.GetNamespaces()
+			if err != nil {
+				klog.Errorf("Error getting list of namespaces when adding node: %s", node.Name)
+			}
+			for _, namespace := range namespaceList {
+				nsInfo, err := oc.waitForNamespaceLocked(namespace.Name)
+				if err != nil {
+					klog.Errorf("Failed to wait for namespace %s event (%v)",
+						namespace.Name, err)
+					continue
+				}
+				if nsInfo.egressFirewallPolicy != nil {
+					err = nsInfo.egressFirewallPolicy.addACLToJoinSwitch([]string{joinSwitch(node.Name)}, nsInfo.addressSet.GetIPv4HashName(), nsInfo.addressSet.GetIPv6HashName())
+					if err != nil {
+						klog.Errorf("%s", err)
+					}
+				}
+
+				nsInfo.Unlock()
 			}
 		},
 		UpdateFunc: func(old, new interface{}) {

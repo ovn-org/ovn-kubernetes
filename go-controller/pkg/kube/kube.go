@@ -3,9 +3,12 @@ package kube
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 
 	"k8s.io/klog"
 
+	egressfirewall "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/egressfirewall/v1"
+	egressfirewallclientset "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/egressfirewall/v1/apis/clientset/versioned"
 	kapi "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
@@ -19,6 +22,7 @@ type Interface interface {
 	SetAnnotationsOnPod(pod *kapi.Pod, annotations map[string]string) error
 	SetAnnotationsOnNode(node *kapi.Node, annotations map[string]interface{}) error
 	SetAnnotationsOnNamespace(namespace *kapi.Namespace, annotations map[string]string) error
+	UpdateEgressFirewall(egressfirewall *egressfirewall.EgressFirewall) error
 	UpdateNodeStatus(node *kapi.Node) error
 	GetAnnotationsOnPod(namespace, name string) (map[string]string, error)
 	GetNodes() (*kapi.NodeList, error)
@@ -30,7 +34,8 @@ type Interface interface {
 
 // Kube is the structure object upon which the Interface is implemented
 type Kube struct {
-	KClient kubernetes.Interface
+	KClient              kubernetes.Interface
+	EgressFirewallClient egressfirewallclientset.Interface
 }
 
 // SetAnnotationsOnPod takes the pod object and map of key/value string pairs to set as annotations
@@ -110,6 +115,15 @@ func (k *Kube) SetAnnotationsOnNamespace(namespace *kapi.Namespace, annotations 
 		klog.Errorf("Error in setting annotation on namespace %s: %v", namespace.Name, err)
 	}
 	return err
+}
+
+// UpdateEgressFirewall updates the EgressFirewall with the provided EgressFirewall data
+func (k *Kube) UpdateEgressFirewall(egressfirewall *egressfirewall.EgressFirewall) error {
+	klog.Infof("Updating status on EgressFirewall %s in namespace %s", egressfirewall.Name, egressfirewall.Namespace)
+	if _, err := k.EgressFirewallClient.K8sV1().EgressFirewalls(egressfirewall.Namespace).Update(context.TODO(), egressfirewall, metav1.UpdateOptions{}); err != nil {
+		return fmt.Errorf("error in updating status on EgressFirewall %s/%s: %v", egressfirewall.Namespace, egressfirewall.Name, err)
+	}
+	return nil
 }
 
 // UpdateNodeStatus takes the node object and sets the provided update status
