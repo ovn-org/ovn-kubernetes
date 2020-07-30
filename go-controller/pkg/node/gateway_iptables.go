@@ -211,15 +211,15 @@ func getExternalIPTRules(svcPort kapi.ServicePort, externalIP, dstIP string) []i
 func getLocalGatewayNATRules(ifname string, ip net.IP) []iptRule {
 	// Allow packets to/from the gateway interface in case defaults deny
 	var protocol iptables.Protocol
-	// OCP HACK: Block MCS Access. https://github.com/openshift/ovn-kubernetes/pull/170
-	rules := make([]iptRule, 0)
-	generateBlockMCSRules(&rules)
-	// END OCP HACK
 	if utilnet.IsIPv6(ip) {
 		protocol = iptables.ProtocolIPv6
 	} else {
 		protocol = iptables.ProtocolIPv4
 	}
+	// OCP HACK: Block MCS Access. https://github.com/openshift/ovn-kubernetes/pull/170
+	rules := make([]iptRule, 0)
+	generateBlockMCSRules(&rules, protocol)
+	// END OCP HACK
 	return append(rules, []iptRule{
 		{
 			table: "filter",

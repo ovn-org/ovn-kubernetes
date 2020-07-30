@@ -27,6 +27,8 @@ import (
 	ovntest "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/testing"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
 
+	egressfirewallfake "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/egressfirewall/v1/apis/clientset/versioned/fake"
+
 	. "github.com/onsi/ginkgo"
 	. "github.com/onsi/gomega"
 )
@@ -121,6 +123,7 @@ func testManagementPort(ctx *cli.Context, fexec *ovntest.FakeExec, testNS ns.Net
 	existingNode := v1.Node{ObjectMeta: metav1.ObjectMeta{
 		Name: nodeName,
 	}}
+
 	fakeClient := fake.NewSimpleClientset(&v1.NodeList{
 		Items: []v1.Node{existingNode},
 	})
@@ -128,7 +131,7 @@ func testManagementPort(ctx *cli.Context, fexec *ovntest.FakeExec, testNS ns.Net
 	_, err = config.InitConfig(ctx, fexec, nil)
 	Expect(err).NotTo(HaveOccurred())
 
-	nodeAnnotator := kube.NewNodeAnnotator(&kube.Kube{fakeClient}, &existingNode)
+	nodeAnnotator := kube.NewNodeAnnotator(&kube.Kube{fakeClient, &egressfirewallfake.Clientset{}}, &existingNode)
 	waiter := newStartupWaiter()
 
 	err = testNS.Do(func(ns.NetNS) error {

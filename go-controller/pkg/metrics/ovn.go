@@ -87,29 +87,24 @@ var metricBridgeMappings = prometheus.NewGaugeVec(prometheus.GaugeOpts{
 )
 
 var (
-	ovnVersion    string
-	ovsLibVersion string
+	ovnControllerVersion       string
+	ovnControllerOvsLibVersion string
 )
 
-func getOvnVersionInfo() {
-	stdout, _, err := util.RunOVNNbctl("--version")
+func getOvnControllerVersionInfo() {
+	stdout, _, err := util.RunOVNControllerAppCtl("version")
 	if err != nil {
 		return
 	}
 
-	// post ovs/ovn split, the output is:
-	//	ovn-nbctl 20.03.90
-	//	Open vSwitch Library 2.13.1
-	//
-	// and before the split we have:
-	// ovn-nbctl (Open vSwitch) 2.12.0
+	// the output looks something like this:
+	// ovn-controller 20.06.0.86f64fc1
+	// Open vSwitch Library 2.13.0.f945b5c5
 	for _, line := range strings.Split(stdout, "\n") {
-		if strings.HasPrefix("ovn-nbctl (Open vSwitch) ", line) {
-			ovnVersion = strings.Fields(line)[3]
-		} else if strings.HasPrefix("ovn-nbctl ", line) {
-			ovnVersion = strings.Fields(line)[1]
-		} else if strings.HasPrefix("Open  vSwitch Library ", line) {
-			ovsLibVersion = strings.Fields(line)[3]
+		if strings.HasPrefix("ovn-controller ", line) {
+			ovnControllerVersion = strings.Fields(line)[1]
+		} else if strings.HasPrefix("Open vSwitch Library ", line) {
+			ovnControllerOvsLibVersion = strings.Fields(line)[3]
 		}
 	}
 }
@@ -307,24 +302,25 @@ func getPortCount(portType string) float64 {
 	return portCount
 }
 
-func RegisterOvnMetrics() {
-	getOvnVersionInfo()
-	prometheus.MustRegister(prometheus.NewGaugeFunc(
+func RegisterOvnControllerMetrics() {
+	getOvnControllerVersionInfo()
+	ovnRegistry.MustRegister(prometheus.NewGaugeFunc(
 		prometheus.GaugeOpts{
 			Namespace: MetricOvnNamespace,
+			Subsystem: MetricOvnSubsystemController,
 			Name:      "build_info",
 			Help: "A metric with a constant '1' value labeled by version and library " +
 				"from which ovn binaries were built",
 			ConstLabels: prometheus.Labels{
-				"version":         ovnVersion,
-				"ovs_lib_version": ovsLibVersion,
+				"version":         ovnControllerVersion,
+				"ovs_lib_version": ovnControllerOvsLibVersion,
 			},
 		},
 		func() float64 { return 1 },
 	))
 
 	// ovn-controller metrics
-	prometheus.MustRegister(prometheus.NewCounterFunc(
+	ovnRegistry.MustRegister(prometheus.NewCounterFunc(
 		prometheus.CounterOpts{
 			Namespace: MetricOvnNamespace,
 			Subsystem: MetricOvnSubsystemController,
@@ -346,7 +342,7 @@ func RegisterOvnMetrics() {
 			}
 			return 0
 		}))
-	prometheus.MustRegister(prometheus.NewGaugeFunc(
+	ovnRegistry.MustRegister(prometheus.NewGaugeFunc(
 		prometheus.GaugeOpts{
 			Namespace: MetricOvnNamespace,
 			Subsystem: MetricOvnSubsystemController,
@@ -357,7 +353,7 @@ func RegisterOvnMetrics() {
 		func() float64 {
 			return getPortCount("patch")
 		}))
-	prometheus.MustRegister(prometheus.NewGaugeFunc(
+	ovnRegistry.MustRegister(prometheus.NewGaugeFunc(
 		prometheus.GaugeOpts{
 			Namespace: MetricOvnNamespace,
 			Subsystem: MetricOvnSubsystemController,
@@ -369,13 +365,13 @@ func RegisterOvnMetrics() {
 		}))
 
 	// register ovn-controller configuration metrics
-	prometheus.MustRegister(metricRemoteProbeInterval)
-	prometheus.MustRegister(metricOpenFlowProbeInterval)
-	prometheus.MustRegister(metricMonitorAll)
-	prometheus.MustRegister(metricEncapIP)
-	prometheus.MustRegister(metricSbConnectionMethod)
-	prometheus.MustRegister(metricEncapType)
-	prometheus.MustRegister(metricBridgeMappings)
+	ovnRegistry.MustRegister(metricRemoteProbeInterval)
+	ovnRegistry.MustRegister(metricOpenFlowProbeInterval)
+	ovnRegistry.MustRegister(metricMonitorAll)
+	ovnRegistry.MustRegister(metricEncapIP)
+	ovnRegistry.MustRegister(metricSbConnectionMethod)
+	ovnRegistry.MustRegister(metricEncapType)
+	ovnRegistry.MustRegister(metricBridgeMappings)
 	// Register the ovn-controller coverage/show metrics
 	componentCoverageShowMetricsMap[ovnController] = ovnControllerCoverageShowMetricsMap
 	registerCoverageShowMetrics(ovnController, MetricOvnNamespace, MetricOvnSubsystemController)

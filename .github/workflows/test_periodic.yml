@@ -106,8 +106,7 @@ jobs:
       fail-fast: false
       matrix:
         target:
-          - shard: shard-n-other
-          - shard: shard-np
+          - shard: shard-network
           - shard: control-plane
         ha:
          - enabled: "true"

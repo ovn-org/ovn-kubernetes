@@ -1,0 +1,120 @@
+
+---
+apiVersion: apiextensions.k8s.io/v1
+kind: CustomResourceDefinition
+metadata:
+  annotations:
+    controller-gen.kubebuilder.io/version: v0.2.9
+  creationTimestamp: null
+  name: egressfirewalls.k8s.ovn.org
+spec:
+  group: k8s.ovn.org
+  names:
+    kind: EgressFirewall
+    listKind: EgressFirewallList
+    plural: egressfirewalls
+    singular: egressfirewall
+  scope: Namespaced
+  versions:
+  - additionalPrinterColumns:
+    - jsonPath: .status.status
+      name: EgressFirewall Status
+      type: string
+    name: v1
+    schema:
+      openAPIV3Schema:
+        description: EgressFirewall describes the current egress firewall for a Namespace.
+          Traffic from a pod to an IP address outside the cluster will be checked
+          against each EgressFirewallRule in the pod's namespace's EgressFirewall,
+          in order. If no rule matches (or no EgressFirewall is present) then the
+          traffic will be allowed by default.
+        properties:
+          apiVersion:
+            description: 'APIVersion defines the versioned schema of this representation
+              of an object. Servers should convert recognized schemas to the latest
+              internal value, and may reject unrecognized values. More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#resources'
+            type: string
+          kind:
+            description: 'Kind is a string value representing the REST resource this
+              object represents. Servers may infer this from the endpoint the client
+              submits requests to. Cannot be updated. In CamelCase. More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#types-kinds'
+            type: string
+          metadata: 
+            type: object
+            properties:
+              name:
+                type: string
+                pattern: ^default$
+          spec:
+            description: Specification of the desired behavior of EgressFirewall.
+            properties:
+              egress:
+                description: a collection of egress firewall rule objects
+                items:
+                  description: EgressFirewallRule is a single egressfirewall rule
+                    object
+                  properties:
+                    ports:
+                      description: ports specify what ports and protocols the rule
+                        applies to
+                      items:
+                        description: EgressFirewallPort specifies the port to allow
+                          or deny traffic to
+                        properties:
+                          port:
+                            description: port that the traffic must match
+                            format: int32
+                            maximum: 65535
+                            minimum: 1
+                            type: integer
+                          protocol:
+                            description: protocol (tcp, udp, sctp) that the traffic
+                              must match.
+                            pattern: ^TCP|UDP|SCTP$
+                            type: string
+                        required:
+                        - port
+                        - protocol
+                        type: object
+                      type: array
+                    to:
+                      description: to is the target that traffic is allowed/denied
+                        to
+                      properties:
+                        cidrSelector:
+                          description: cidrSelector is the CIDR range to allow/deny
+                            traffic to.
+                          type: string
+                      required:
+                      - cidrSelector
+                      type: object
+                    type:
+                      description: type marks this as an "Allow" or "Deny" rule
+                      pattern: ^Allow|Deny$
+                      type: string
+                  required:
+                  - to
+                  - type
+                  type: object
+                type: array
+            required:
+            - egress
+            type: object
+          status:
+            description: Observed status of EgressFirewall
+            properties:
+              status:
+                type: string
+            type: object
+        required:
+        - spec
+        type: object
+    served: true
+    storage: true
+    subresources: {}
+status:
+  acceptedNames:
+    kind: ""
+    plural: ""
+  conditions: []
+  storedVersions: []
