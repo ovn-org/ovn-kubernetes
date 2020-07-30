@@ -12,13 +12,14 @@ import (
 	kapi "k8s.io/api/core/v1"
 	utilwait "k8s.io/apimachinery/pkg/util/wait"
 	"k8s.io/klog"
-	utilnet "k8s.io/utils/net"
 )
 
 const (
 	// Annotation used to enable/disable multicast in the namespace
 	nsMulticastAnnotation        = "k8s.ovn.org/multicast-enabled"
 	routingExternalGWsAnnotation = "k8s.ovn.org/routing-external-gws"
+	routingNamespaceAnnotation   = "k8s.ovn.org/routing-namespaces"
+	routingNetworkAnnotation     = "k8s.ovn.org/routing-network"
 )
 
 func (oc *Controller) syncNamespaces(namespaces []interface{}) {
@@ -158,6 +159,18 @@ func (nsInfo *namespaceInfo) updateNamespacePortGroup(ns string) error {
 	return nil
 }
 
+func parseRoutingExternalGWAnnotation(annotation string) ([]net.IP, error) {
+	var routingExternalGWs []net.IP
+	for _, v := range strings.Split(annotation, ",") {
+		parsedAnnotation := net.ParseIP(v)
+		if parsedAnnotation == nil {
+			return nil, fmt.Errorf("could not parse routing external gw annotation value %s", v)
+		}
+		routingExternalGWs = append(routingExternalGWs, parsedAnnotation)
+	}
+	return routingExternalGWs, nil
+}
+
 // AddNamespace creates corresponding addressset in ovn db
 func (oc *Controller) AddNamespace(ns *kapi.Namespace) {
 	klog.V(5).Infof("Adding namespace: %s", ns.Name)
@@ -204,15 +217,9 @@ func (oc *Controller) AddNamespace(ns *kapi.Namespace) {
 	}
 	annotation = ns.Annotations[routingExternalGWsAnnotation]
 	if annotation != "" {
-		for _, v := range strings.Split(annotation, ",") {
-			parsedAnnotation := net.ParseIP(v)
-			if parsedAnnotation == nil {
-				klog.Errorf("Could not parse routing external gw annotation value %s on namespace %s: %v", v, ns.Name, err)
-				nsInfo.routingExternalGWs = nil
-				break
-			} else {
-				nsInfo.routingExternalGWs = append(nsInfo.routingExternalGWs, parsedAnnotation)
-			}
+		nsInfo.routingExternalGWs, err = parseRoutingExternalGWAnnotation(annotation)
+		if err != nil {
+			klog.Errorf(err.Error())
 		}
 	}
 	nsInfo.addressSet, err = oc.addressSetFactory.NewAddressSet(ns.Name, ips)
@@ -240,13 +247,8 @@ func (oc *Controller) updateNamespace(old, newer *kapi.Namespace) {
 		var stderr string
 		var err error
 		for podIP, gwToGr := range nsInfo.podExternalRoutes {
-			var mask string
 			for gw, gr := range gwToGr {
-				if utilnet.IsIPv6(net.ParseIP(podIP)) {
-					mask = "/128"
-				} else {
-					mask = "/32"
-				}
+				mask := GetIPFullMask(podIP)
 				_, stderr, err = util.RunOVNNbctl("--", "--if-exists", "--policy=src-ip",
 					"lr-route-del", gr, podIP+mask, gw)
 				if err != nil {
@@ -258,15 +260,9 @@ func (oc *Controller) updateNamespace(old, newer *kapi.Namespace) {
 		}
 		nsInfo.routingExternalGWs = nil
 		if annotation != "" {
-			for _, v := range strings.Split(annotation, ",") {
-				parsedAnnotation := net.ParseIP(v)
-				if parsedAnnotation == nil {
-					klog.Errorf("Could not parse routing external gw annotation value %s on namespace %s: %v", v, old.Name, err)
-					nsInfo.routingExternalGWs = nil
-					break
-				} else {
-					nsInfo.routingExternalGWs = append(nsInfo.routingExternalGWs, parsedAnnotation)
-				}
+			nsInfo.routingExternalGWs, err = parseRoutingExternalGWAnnotation(annotation)
+			if err != nil {
+				klog.Errorf(err.Error())
 			}
 			if nsInfo.routingExternalGWs != nil {
 				existingPods, err := oc.watchFactory.GetPods(old.Name)
@@ -276,13 +272,8 @@ func (oc *Controller) updateNamespace(old, newer *kapi.Namespace) {
 					for _, pod := range existingPods {
 						gr := "GR_" + pod.Spec.NodeName
 						for _, gw := range nsInfo.routingExternalGWs {
-							var mask string
 							for _, podIP := range pod.Status.PodIPs {
-								if utilnet.IsIPv6(net.ParseIP(podIP.IP)) {
-									mask = "/128"
-								} else {
-									mask = "/32"
-								}
+								mask := GetIPFullMask(podIP.IP)
 								_, stderr, err = util.RunOVNNbctl("--", "--may-exist", "--policy=src-ip", "--ecmp",
 									"lr-route-add", gr, podIP.IP+mask, gw.String())
 								if err != nil {
@@ -389,9 +380,10 @@ func (oc *Controller) createNamespaceLocked(ns string) *namespaceInfo {
 	defer oc.namespacesMutex.Unlock()
 
 	nsInfo := &namespaceInfo{
-		networkPolicies:   make(map[string]*namespacePolicy),
-		podExternalRoutes: make(map[string]map[string]string),
-		multicastEnabled:  false,
+		networkPolicies:       make(map[string]*namespacePolicy),
+		podExternalRoutes:     make(map[string]map[string]string),
+		multicastEnabled:      false,
+		routingExternalPodGWs: make(map[string][]net.IP),
 	}
 	nsInfo.Lock()
 	oc.namespaces[ns] = nsInfo

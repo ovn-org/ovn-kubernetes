@@ -24,6 +24,7 @@ import (
 	egressfirewallclientset "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/egressfirewall/v1/apis/clientset/versioned"
 
 	apiextension "k8s.io/apiextensions-apiserver/pkg/apis/apiextensions/v1beta1"
+	utilnet "k8s.io/utils/net"
 
 	kapi "k8s.io/api/core/v1"
 	kapisnetworking "k8s.io/api/networking/v1"
@@ -89,6 +90,10 @@ type namespaceInfo struct {
 	// the k8s.ovn.org/routing-external-gws annotation is used. The first map key
 	// is the podIP, the second the GW and the third the GR
 	podExternalRoutes map[string]map[string]string
+
+	// routingExternalPodGWs contains a map of all pods serving as exgws as well as their
+	// exgw IPs
+	routingExternalPodGWs map[string][]net.IP
 
 	// The UUID of the namespace-wide port group that contains all the pods in the namespace.
 	portGroupUUID string
@@ -217,6 +222,20 @@ const (
 	// SCTP is the constant string for the string "SCTP"
 	SCTP = "SCTP"
 )
+
+func GetIPFullMask(ip string) string {
+	const (
+		// IPv4FullMask is the maximum prefix mask for an IPv4 address
+		IPv4FullMask = "/32"
+		// IPv6FullMask is the maxiumum prefix mask for an IPv6 address
+		IPv6FullMask = "/128"
+	)
+
+	if utilnet.IsIPv6(net.ParseIP(ip)) {
+		return IPv6FullMask
+	}
+	return IPv4FullMask
+}
 
 // NewOvnController creates a new OVN controller for creating logical network
 // infrastructure and policy
@@ -515,6 +534,10 @@ func (oc *Controller) WatchPods() error {
 		AddFunc: func(obj interface{}) {
 			pod := obj.(*kapi.Pod)
 			if !podWantsNetwork(pod) {
+				// host network pod is able to serve as external gw for other pods
+				if err := oc.addPodExternalGW(pod); err != nil {
+					klog.Errorf(err.Error())
+				}
 				return
 			}
 			if podScheduled(pod) {
@@ -529,8 +552,16 @@ func (oc *Controller) WatchPods() error {
 			}
 		},
 		UpdateFunc: func(old, newer interface{}) {
+			oldPod := old.(*kapi.Pod)
 			pod := newer.(*kapi.Pod)
 			if !podWantsNetwork(pod) {
+				if oldPod.Annotations[routingNamespaceAnnotation] != pod.Annotations[routingNamespaceAnnotation] ||
+					oldPod.Annotations[routingNetworkAnnotation] != pod.Annotations[routingNetworkAnnotation] {
+					oc.deletePodExternalGW(oldPod)
+					if err := oc.addPodExternalGW(pod); err != nil {
+						klog.Errorf(err.Error())
+					}
+				}
 				return
 			}
 
@@ -546,6 +577,10 @@ func (oc *Controller) WatchPods() error {
 		},
 		DeleteFunc: func(obj interface{}) {
 			pod := obj.(*kapi.Pod)
+			if !podWantsNetwork(pod) {
+				oc.deletePodExternalGW(pod)
+				return
+			}
 			oc.deleteLogicalPort(pod)
 			retryPods.Delete(pod.UID)
 		},

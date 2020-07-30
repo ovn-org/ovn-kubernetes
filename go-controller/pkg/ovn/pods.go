@@ -1,6 +1,7 @@
 package ovn
 
 import (
+	"encoding/json"
 	"fmt"
 	"net"
 	"strings"
@@ -115,12 +116,12 @@ func (oc *Controller) deleteLogicalPort(pod *kapi.Pod) {
 		}
 		podIP := podIPNet.IP.String()
 		if gwToGr, ok := nsInfo.podExternalRoutes[podIP]; ok {
-			var mask string
-			if utilnet.IsIPv6(net.ParseIP(podIP)) {
-				mask = "/128"
-			} else {
-				mask = "/32"
+			if len(gwToGr) == 0 {
+				delete(nsInfo.podExternalRoutes, pod.Status.PodIP)
+				nsInfo.Unlock()
+				continue
 			}
+			mask := GetIPFullMask(podIP)
 			for gw, gr := range gwToGr {
 				_, stderr, err = util.RunOVNNbctl("--", "--if-exists", "--policy=src-ip",
 					"lr-route-del", gr, podIP+mask, gw)
@@ -143,7 +144,7 @@ func (oc *Controller) deleteLogicalPort(pod *kapi.Pod) {
 		}
 		nsInfo.Unlock()
 	}
-
+	oc.deletePodExternalGW(pod)
 	oc.logicalPortCache.remove(logicalPort)
 }
 
@@ -466,16 +467,11 @@ func (oc *Controller) addLogicalPort(pod *kapi.Pod) (err error) {
 	if routingExternalGWs != nil {
 		gr := "GR_" + pod.Spec.NodeName
 		for _, v := range routingExternalGWs {
-			var mask string
 			gw := v.String()
 			for _, podIPNet := range podIfAddrs {
 				podIP := podIPNet.IP.String()
-				if utilnet.IsIPv6(net.ParseIP(podIP)) {
-					mask = "/128"
-				} else {
-					mask = "/32"
-				}
-				_, stderr, err := util.RunOVNNbctl("--", "--may-exist", "--policy=src-ip", "--ecmp",
+				mask := GetIPFullMask(podIP)
+				_, stderr, err := util.RunOVNNbctl("--may-exist", "--policy=src-ip", "--ecmp",
 					"lr-route-add", gr, podIP+mask, gw)
 				if err != nil {
 					return fmt.Errorf("unable to add external gw src-ip route to GR router, stderr:%q, err:%v", stderr, err)
@@ -491,8 +487,9 @@ func (oc *Controller) addLogicalPort(pod *kapi.Pod) (err error) {
 				nsInfo.Unlock()
 			}
 		}
-	}
-	if config.Gateway.DisableSNATMultipleGWs && routingExternalGWs == nil {
+	} else if config.Gateway.DisableSNATMultipleGWs {
+		// Add NAT rules to pods if disable SNAT is set and does not have
+		// namespace annotations to go thru external egress router
 		nodeName := pod.Spec.NodeName
 		node, err := oc.watchFactory.GetNode(nodeName)
 		if err != nil {
@@ -507,12 +504,7 @@ func (oc *Controller) addLogicalPort(pod *kapi.Pod) (err error) {
 			for _, podIPNet := range podIfAddrs {
 				gwIP := gwIPNet.IP.String()
 				podIP := podIPNet.IP.String()
-				var mask string
-				if utilnet.IsIPv6(net.ParseIP(podIP)) {
-					mask = "/128"
-				} else {
-					mask = "/32"
-				}
+				mask := GetIPFullMask(podIP)
 				stdout, stderr, err := util.RunOVNNbctl("--may-exist", "lr-nat-add",
 					gr, "snat", gwIP, podIP+mask)
 				if err != nil {
@@ -521,6 +513,12 @@ func (oc *Controller) addLogicalPort(pod *kapi.Pod) (err error) {
 				}
 			}
 		}
+	}
+
+	// check if this pod is serving as an external GW
+	err = oc.addPodExternalGW(pod)
+	if err != nil {
+		return fmt.Errorf("failed to handle external GW check: %v", err)
 	}
 
 	if err = oc.addPodToNamespace(pod.Namespace, portInfo); err != nil {
@@ -607,4 +605,141 @@ func (oc *Controller) getPortAddresses(nodeName, portName string) (net.HardwareA
 		}
 	}
 	return podMac, podIPNets, nil
+}
+
+func (oc *Controller) addPodExternalGW(pod *kapi.Pod) error {
+	type Network struct {
+		Name string
+		Ips  []string
+	}
+	routingNamespaceAnnotation := pod.Annotations[routingNamespaceAnnotation]
+	if routingNamespaceAnnotation == "" {
+		return nil
+	}
+	klog.Infof("External gateway pod: %s, detected for namespace(s) %s", pod.Name, routingNamespaceAnnotation)
+	var foundGws []net.IP
+	if routingNetworkAnnotation == "" && pod.Spec.HostNetwork {
+		for _, podIP := range pod.Status.PodIPs {
+			ip := net.ParseIP(podIP.IP)
+			if ip != nil {
+				foundGws = append(foundGws, ip)
+			}
+		}
+	} else if routingNetworkAnnotation != "" {
+		var multusNetworks []Network
+		err := json.Unmarshal([]byte(pod.ObjectMeta.Annotations["k8s.v1.cni.cncf.io/network-status"]), &multusNetworks)
+		if err != nil {
+			return fmt.Errorf("unable to unmarshall annotation k8s.v1.cni.cncf.io/network-status on pod %s: %v", pod.Name, err)
+		}
+		for _, multusNetwork := range multusNetworks {
+			if multusNetwork.Name == routingNetworkAnnotation {
+				for _, gwIP := range multusNetwork.Ips {
+					ip := net.ParseIP(gwIP)
+					if ip != nil {
+						foundGws = append(foundGws, ip)
+					}
+				}
+			}
+		}
+	} else {
+		klog.Errorf("Ignoring pod %s as an external gateway candidate. Invalid combination "+
+			"of host network: %t and routing-network annotation: %s", pod.Name, pod.Spec.HostNetwork, routingNetworkAnnotation)
+		return nil
+	}
+
+	// if we found any gateways then we need to update current pods routing in the relevant namespace
+	if len(foundGws) == 0 {
+		klog.Warningf("No valid gateway IPs found for requested external gateway pod: %s", pod.Name)
+		return nil
+	}
+
+	for _, namespace := range strings.Split(routingNamespaceAnnotation, ",") {
+		nsInfo, err := oc.waitForNamespaceLocked(namespace)
+		if err != nil {
+			return err
+		}
+		defer nsInfo.Unlock()
+		nsInfo.routingExternalPodGWs[pod.Name] = foundGws
+		existingPods, err := oc.watchFactory.GetPods(namespace)
+		if err != nil {
+			return fmt.Errorf("failed to get all the pods for namespace %s, error: %v", namespace, err)
+		}
+		for _, gwIP := range foundGws {
+			for _, pod := range existingPods {
+				for _, podIP := range pod.Status.PodIPs {
+					mask := GetIPFullMask(podIP.IP)
+					gr := "GR_" + pod.Spec.NodeName
+					// TODO (trozet): use the go bindings here and batch commands
+					_, stderr, err := util.RunOVNNbctl("--", "--may-exist", "--policy=src-ip", "--ecmp",
+						"lr-route-add", gr, podIP.IP+mask, gwIP.String())
+					if err != nil {
+						klog.Errorf("Unable to add pod ecmp src-ip route to GR router, stderr:%q, err:%v", stderr, err)
+					} else {
+						klog.V(5).Infof("ECMP route added for pod: %s, on gr: %s, to gw: %s", pod.Name,
+							gr, gwIP.String())
+						if nsInfo.podExternalRoutes[podIP.IP] == nil {
+							nsInfo.podExternalRoutes[podIP.IP] = make(map[string]string)
+						}
+						nsInfo.podExternalRoutes[podIP.IP][gwIP.String()] = gr
+					}
+				}
+			}
+		}
+	}
+	return nil
+}
+
+func (oc *Controller) deletePodExternalGW(pod *kapi.Pod) {
+	routingNamespaceAnnotation := pod.Annotations[routingNamespaceAnnotation]
+	if routingNamespaceAnnotation == "" {
+		return
+	}
+	klog.Infof("External gateway pod: %s, detected for namespace(s) %s", pod.Name, routingNamespaceAnnotation)
+	for _, namespace := range strings.Split(routingNamespaceAnnotation, ",") {
+		nsInfo, err := oc.waitForNamespaceLocked(namespace)
+		if err != nil {
+			klog.Error(err)
+			continue
+		}
+		// check if any gateways were stored for this pod
+		foundGws := nsInfo.routingExternalPodGWs[pod.Name]
+		if foundGws == nil {
+			klog.Infof("No gateways found to remove for annotated gateway pod: %s on namespace: %s",
+				pod.Name, namespace)
+			nsInfo.Unlock()
+			continue
+		}
+
+		for _, gwIP := range foundGws {
+			// check for previously configured pod routes
+			for podIP, gwInfo := range nsInfo.podExternalRoutes {
+				if len(gwInfo) == 0 {
+					continue
+				}
+				gr := gwInfo[gwIP.String()]
+				if gr == "" {
+					continue
+				}
+				mask := GetIPFullMask(podIP)
+				// TODO (trozet): use the go bindings here and batch commands
+				_, stderr, err := util.RunOVNNbctl("--", "--if-exists", "--policy=src-ip",
+					"lr-route-del", gr, podIP+mask, gwIP.String())
+				if err != nil {
+					klog.Errorf("Unable to delete pod %s route to GR %s, GW: %s, stderr:%q, err:%v",
+						pod.Name, gr, gwIP.String(), stderr, err)
+				} else {
+					klog.V(5).Infof("ECMP route deleted for pod: %s, on gr: %s, to gw: %s", pod.Name,
+						gr, gwIP.String())
+					delete(nsInfo.podExternalRoutes[podIP], gwIP.String())
+					// clean up if there are no more routes for this podIP
+					if entry := nsInfo.podExternalRoutes[podIP]; len(entry) == 0 {
+						delete(nsInfo.podExternalRoutes, podIP)
+					}
+				}
+			}
+		}
+		delete(nsInfo.routingExternalPodGWs, pod.Name)
+		nsInfo.Unlock()
+		klog.Infof("pod: %s, removed as external gateway for namespace %s", pod.Name, namespace)
+	}
 }
