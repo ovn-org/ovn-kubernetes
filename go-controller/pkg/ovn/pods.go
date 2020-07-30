@@ -77,6 +77,15 @@ func (oc *Controller) deleteLogicalPort(pod *kapi.Pod) {
 	klog.Infof("Deleting pod: %s", podDesc)
 
 	logicalPort := podLogicalPortName(pod)
+
+	// The logical switch port may already be created but not in the logicalPortCache, delete the port regardless.
+	out, stderr, err := util.RunOVNNbctl("--if-exists", "lsp-del", logicalPort)
+	if err != nil {
+		klog.Errorf("Error in deleting pod %s logical port "+
+			"stdout: %q, stderr: %q, (%v)",
+			podDesc, out, stderr, err)
+	}
+
 	portInfo, err := oc.logicalPortCache.get(logicalPort)
 	if err != nil {
 		klog.Errorf(err.Error())
@@ -94,13 +103,6 @@ func (oc *Controller) deleteLogicalPort(pod *kapi.Pod) {
 
 	if err := oc.deletePodFromNamespace(pod.Namespace, portInfo); err != nil {
 		klog.Errorf(err.Error())
-	}
-
-	out, stderr, err := util.RunOVNNbctl("--if-exists", "lsp-del", logicalPort)
-	if err != nil {
-		klog.Errorf("Error in deleting pod %s logical port "+
-			"stdout: %q, stderr: %q, (%v)",
-			podDesc, out, stderr, err)
 	}
 
 	if err := oc.lsManager.ReleaseIPs(portInfo.logicalSwitch, portInfo.ips); err != nil {
