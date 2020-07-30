@@ -23,6 +23,7 @@ import (
 	apiextensions "k8s.io/apiextensions-apiserver/pkg/apis/apiextensions/v1beta1"
 	apiextensionsfake "k8s.io/apiextensions-apiserver/pkg/client/clientset/clientset/fake"
 
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
 	egressip "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/egressip/v1"
 	egressipfake "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/egressip/v1/apis/clientset/versioned/fake"
 
@@ -217,6 +218,10 @@ var _ = Describe("Watch Factory Operations", func() {
 	)
 
 	BeforeEach(func() {
+
+		// Restore global default values before each testcase
+		config.PrepareTestConfig()
+
 		fakeClient = &fake.Clientset{}
 		egressFirewallFakeClient = &egressfirewallfake.Clientset{}
 		crdFakeClient = &apiextensionsfake.Clientset{}
@@ -447,6 +452,33 @@ var _ = Describe("Watch Factory Operations", func() {
 			testExisting(crdType)
 		})
 		It("calls ADD for each existing egressIP", func() {
+			egressIPs = append(egressIPs, newEgressIP("myEgressIP", "default"))
+			egressIPs = append(egressIPs, newEgressIP("myEgressIP1", "default"))
+			testExisting(egressIPType)
+		})
+	})
+
+	Context("when EgressIP is disabled", func() {
+		testExisting := func(objType reflect.Type) {
+			wf, err = NewWatchFactory(fakeClient, egressIPFakeClient, egressFirewallFakeClient, crdFakeClient)
+			Expect(err).NotTo(HaveOccurred())
+			var addCalls int32
+			h, err := wf.addHandler(objType, "", nil,
+				cache.ResourceEventHandlerFuncs{
+					AddFunc: func(obj interface{}) {
+						atomic.AddInt32(&addCalls, 1)
+					},
+					UpdateFunc: func(old, new interface{}) {},
+					DeleteFunc: func(obj interface{}) {},
+				}, func(existing []interface{}) {
+					atomic.AddInt32(&addCalls, int32(len(existing)))
+				})
+			Expect(err).NotTo(HaveOccurred())
+			Expect(int(addCalls)).To(Equal(0))
+			wf.removeHandler(objType, h)
+		}
+		It("does not call ADD for each existing egressIP", func() {
+			config.OVNKubernetesFeature.EgressIPEnabled = false
 			egressIPs = append(egressIPs, newEgressIP("myEgressIP", "default"))
 			egressIPs = append(egressIPs, newEgressIP("myEgressIP1", "default"))
 			testExisting(egressIPType)

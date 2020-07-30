@@ -180,8 +180,10 @@ func (n *OvnNode) initLocalEgressIP(gatewayIfAddrs []*net.IPNet, defaultGatewayI
 		nodeName:           n.name,
 		defaultGatewayIntf: defaultGatewayIntf,
 	}
-	if err := n.watchEgressIP(egressIPLocal); err != nil {
-		return err
+	if config.OVNKubernetesFeature.EgressIPEnabled {
+		if err := n.watchEgressIP(egressIPLocal); err != nil {
+			return err
+		}
 	}
 	return nil
 }

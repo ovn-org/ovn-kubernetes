@@ -270,11 +270,21 @@ func (oc *Controller) Run() error {
 	}
 
 	for _, f := range []func() error{oc.WatchNamespaces, oc.WatchPods, oc.WatchServices,
-		oc.WatchEndpoints, oc.WatchNetworkPolicy, oc.WatchCRD, oc.WatchEgressNodes, oc.WatchEgressIP} {
+		oc.WatchEndpoints, oc.WatchNetworkPolicy, oc.WatchCRD} {
 		if err := f(); err != nil {
 			return err
 		}
 	}
+
+	if config.OVNKubernetesFeature.EgressIPEnabled {
+		if err := oc.WatchEgressNodes(); err != nil {
+			return err
+		}
+		if err := oc.WatchEgressIP(); err != nil {
+			return err
+		}
+	}
+
 	klog.Infof("Completing all the Watchers took %v", time.Since(start))
 
 	if config.Kubernetes.OVNEmptyLbEvents {

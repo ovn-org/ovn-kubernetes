@@ -8,6 +8,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/metrics"
 
 	egressfirewallapi "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/egressfirewall/v1"
@@ -534,10 +535,12 @@ func NewWatchFactory(c kubernetes.Interface, eip egressipclientset.Interface, ec
 			return nil, fmt.Errorf("error in syncing cache for %v informer", oType)
 		}
 	}
-	wf.eipFactory.Start(wf.stopChan)
-	for oType, synced := range wf.eipFactory.WaitForCacheSync(wf.stopChan) {
-		if !synced {
-			return nil, fmt.Errorf("error in syncing cache for %v informer", oType)
+	if config.OVNKubernetesFeature.EgressIPEnabled {
+		wf.eipFactory.Start(wf.stopChan)
+		for oType, synced := range wf.eipFactory.WaitForCacheSync(wf.stopChan) {
+			if !synced {
+				return nil, fmt.Errorf("error in syncing cache for %v informer", oType)
+			}
 		}
 	}
 	return wf, nil
