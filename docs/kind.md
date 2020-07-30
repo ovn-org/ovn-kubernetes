@@ -20,11 +20,7 @@ KIND (Kubernetes in Docker) deployment of OVN kubernetes is a fast and easy mean
 
 ### Run the KIND deployment 
 
-<<<<<<< HEAD
-For OVN kubernetes KIND deployment, use the kind.sh script.
-=======
 For OVN kubernetes KIND deployment, use the `kind.sh` script.
->>>>>>> 82fdb550... Update KIND and CI documentation
 
 First Download and build the OVN-Kubernetes repo: 
 
@@ -110,7 +106,7 @@ As seen above if you do not specify any options script will assume the default v
 - To tear down the KIND cluster when finished simply run 
 
    ```
-   $ kind delete cluster --name ovn
+   $ ./kind.sh --delete
    ```
 
 ## Running OVN-Kubernetes with IPv6 or Dual-stack In KIND
