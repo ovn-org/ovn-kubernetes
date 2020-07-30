@@ -13,6 +13,7 @@ import (
 	kapi "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	utilruntime "k8s.io/apimachinery/pkg/util/runtime"
+	utilwait "k8s.io/apimachinery/pkg/util/wait"
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/tools/leaderelection"
 	"k8s.io/client-go/tools/leaderelection/resourcelock"
@@ -30,7 +31,9 @@ import (
 const (
 	// OvnServiceIdledAt is a constant string representing the Service annotation key
 	// whose value indicates the time stamp in RFC3339 format when a Service was idled
-	OvnServiceIdledAt = "k8s.ovn.org/idled-at"
+	OvnServiceIdledAt              = "k8s.ovn.org/idled-at"
+	OvnNodeAnnotationRetryInterval = 100 * time.Millisecond
+	OvnNodeAnnotationRetryTimeout  = 1 * time.Second
 )
 
 type ovnkubeMasterLeaderMetrics struct{}
@@ -648,7 +651,18 @@ func (oc *Controller) addNodeAnnotations(node *kapi.Node, hostSubnets []*net.IPN
 		return fmt.Errorf("failed to marshal node %q annotation for subnet %s",
 			node.Name, util.JoinIPNets(hostSubnets, ","))
 	}
-	err = oc.kube.SetAnnotationsOnNode(node, nodeAnnotations)
+	// FIXME: the real solution is to reconcile the node object. Once we have a work-queue based
+	// implementation where we can add the item back to the work queue when it fails to
+	// reconcile, we can get rid of the PollImmediate.
+	err = utilwait.PollImmediate(OvnNodeAnnotationRetryInterval, OvnNodeAnnotationRetryTimeout, func() (bool, error) {
+		err = oc.kube.SetAnnotationsOnNode(node, nodeAnnotations)
+		if err != nil {
+			klog.Warningf("Failed to set node annotation, will retry for: %v",
+				OvnNodeAnnotationRetryTimeout)
+		}
+		return err == nil, nil
+	},
+	)
 	if err != nil {
 		return fmt.Errorf("failed to set node-subnets annotation on node %s: %v",
 			node.Name, err)
