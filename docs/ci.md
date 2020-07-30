@@ -107,117 +107,14 @@ generated binaries. For example:
 chmod +x $GOPATH/src/k8s.io/kubernetes/_output/bin/deepcopy-gen
 ```
 
-### Install KIND
+### KIND
 
 Kubernetes in Docker (KIND) is used to deploy Kubernetes locally where a docker
 container is created per Kubernetes node. The CI tests run on this Kubernetes
 deployment. Therefore, KIND will need to be installed locally.
 
-Installation instructions can be found at:
-https://github.com/kubernetes-sigs/kind#installation-and-usage.
-
-NOTE: The OVN-Kubernetes 
-[ovn-kubernetes/contrib/kind.sh](https://github.com/ovn-org/ovn-kubernetes/blob/master/contrib/kind.sh)
-and
-[ovn-kubernetes/contrib/kind.yaml](https://github.com/ovn-org/ovn-kubernetes/blob/master/contrib/kind.yaml)
-files provision port 11337. If firewalld is enabled, this port will need to be
-unblocked:
-
-```
-sudo firewall-cmd --permanent --add-port=11337/tcp; sudo firewall-cmd --reload
-```
-
-### Run KIND Deployment from OVN-Kubernetes
-
-To launch the KIND deployment, the `kind.sh` script must be run out of the
-OVN-Kubernetes repo. Download and build the OVN-Kubernetes repo:
-
-```
-$ go get github.com/ovn-org/ovn-kubernetes; cd GOPATH/src/github.com/ovn-org/ovn-kubernetes
-```
-
-The `kind.sh` script builds OVN-Kubernetes into a container image. To verify
-local changes before building in KIND, run the following:
-
-```
-$ pushd go-controller
-$ make
-$ popd
-
-$ pushd dist/images
-$ make fedora
-$ popd
-```
-
-Launch the KIND Deployment.
-
-```
-$ pushd contrib
-$ KUBECONFIG=${HOME}/admin.conf
-$ ./kind.sh
-$ popd
-```
-
-This will launch a KIND deployment. By default the cluster is named `ovn`.
-
-```
-$ kubectl get nodes
-NAME                STATUS   ROLES    AGE     VERSION
-ovn-control-plane   Ready    master   5h13m   v1.16.4
-ovn-worker          Ready    <none>   5h12m   v1.16.4
-ovn-worker2         Ready    <none>   5h12m   v1.16.4
-
-$ kubectl get pods --all-namespaces
-NAMESPACE            NAME                                        READY   STATUS    RESTARTS   AGE
-kube-system          coredns-5644d7b6d9-kw2xc                    1/1     Running   0          5h13m
-kube-system          coredns-5644d7b6d9-sd9wh                    1/1     Running   0          5h13m
-kube-system          etcd-ovn-control-plane                      1/1     Running   0          5h11m
-kube-system          kube-apiserver-ovn-control-plane            1/1     Running   0          5h12m
-kube-system          kube-controller-manager-ovn-control-plane   1/1     Running   0          5h12m
-kube-system          kube-scheduler-ovn-control-plane            1/1     Running   0          5h11m
-local-path-storage   local-path-provisioner-7745554f7f-9r8dz     1/1     Running   0          5h13m
-ovn-kubernetes       ovnkube-db-5588bd699c-kb8h7                 2/2     Running   0          5h11m
-ovn-kubernetes       ovnkube-master-6f44d456df-bv2x8             3/3     Running   0          5h11m
-ovn-kubernetes       ovnkube-node-2t6m2                          3/3     Running   0          5h11m
-ovn-kubernetes       ovnkube-node-hhsmk                          3/3     Running   0          5h11m
-ovn-kubernetes       ovnkube-node-xvqh4                          3/3     Running   0          5h11m
-```
-
-The `kind.sh` script defaults the cluster to HA. There are numerous
-configuration when deploying. Use `./kind.sh -h` to see the latest options.
-
-```
-./kind.sh -h
-usage: kind.sh [[[-cf|--config-file <file>] [-kt|keep-taint] [-ha|--ha-enabled]
-                 [-ho|--hybrid-enabled] [-ii|--install-ingress] [-n4|--no-ipv4]
-                 [-i6|--ipv6] [-wk|--num-workers <num>]
-                 [-sw|--allow-system-writes] [-gm|--gateway-mode <mode>]] |
-                [-h]]
-
--cf | --config-file          Name of the KIND J2 configuration file.
-                             DEFAULT: ./kind.yaml.j2
--kt | --keep-taint           Do not remove taint components.
-                             DEFAULT: Remove taint components.
--ha | --ha-enabled           Enable high availability. DEFAULT: HA Disabled.
--ho | --hybrid-enabled       Enable hybrid overlay. DEFAULT: Disabled.
--ii | --install-ingress      Flag to install Ingress Components.
-                             DEFAULT: Don't install ingress components.
--n4 | --no-ipv4              Disable IPv4. DEFAULT: IPv4 Enabled.
--i6 | --ipv6                 Enable IPv6. DEFAULT: IPv6 Disabled.
--wk | --num-workers          Number of worker nodes. DEFAULT: HA - 2 worker
-                             nodes and no HA - 0 worker nodes.
--sw | --allow-system-writes  Allow script to update system. Intended to allow
-                             github CI to be updated with IPv6 settings.
-                             DEFAULT: Don't allow.
--gm | --gateway-mode         Enable 'shared' or 'local' gateway mode.
-                             DEFAULT: local.
-```
-
-Once the testing is complete, to tear down the KIND deployment:
-
-```
-$ kind delete cluster --name ovn
-```
+Instructions for installing and running KIND can be found at: 
+https://github.com/ovn-org/ovn-kubernetes/blob/master/docs/kind.md
 
 ### Run Tests
 

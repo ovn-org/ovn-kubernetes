@@ -1,22 +1,82 @@
 # OVN kubernetes KIND Setup
 
-KIND deployment of OVN kubernetes is a fast and easy means to quickly install and test kubernetes with OVN kubernetes CNI.  The value proposition is really for developers who want to reproduce an issue or test a fix in an environment that can be brought up locally and within a few minutes.
+KIND (Kubernetes in Docker) deployment of OVN kubernetes is a fast and easy means to quickly install and test kubernetes with OVN kubernetes CNI.  The value proposition is really for developers who want to reproduce an issue or test a fix in an environment that can be brought up locally and within a few minutes.
 
-### Prerequisites
+### Prerequisites 
 
 - 20 GB of free space in root file system
 - Docker run time
-- KIND  ( https://kubernetes.io/docs/setup/learning-environment/kind/ )
-- kubectl ( https://kubernetes.io/docs/tasks/tools/install-kubectl/ )
+- [KIND]( https://kubernetes.io/docs/setup/learning-environment/kind/ )
+   - Installation instructions can be found at https://github.com/kubernetes-sigs/kind#installation-and-usage. 
+   - NOTE: The OVN-Kubernetes [ovn-kubernetes/contrib/kind.sh](https://github.com/ovn-org/ovn-kubernetes/blob/master/contrib/kind.sh) and [ovn-kubernetes/contrib/kind.yaml](https://github.com/ovn-org/ovn-kubernetes/blob/master/contrib/kind.yaml) files provision port 11337. If firewalld is enabled, this port will need to be unblocked:
+
+      ```
+      sudo firewall-cmd --permanent --add-port=11337/tcp; sudo firewall-cmd --reload
+      ```
+- [kubectl]( https://kubernetes.io/docs/tasks/tools/install-kubectl/ )
 - Python and pip
 
 **NOTE :**  In certain operating systems such as CentOS 8.x, pip2 and pip3 binaries are installed instead of pip. In such situations create a softlink for "pip" that points to "pip2".
 
-### Installation
+### Run the KIND deployment 
 
-For OVN kubernetes KIND deployment, use the kind.sh script.
+For OVN kubernetes KIND deployment, use the `kind.sh` script.
 
-To see all the options, you can use the  --help/-h command line option.
+First Download and build the OVN-Kubernetes repo: 
+
+```
+$ go get github.com/ovn-org/ovn-kubernetes; cd GOPATH/src/github.com/ovn-org/ovn-kubernetes
+```
+
+The `kind.sh` script builds OVN-Kubernetes into a container image. To verify
+local changes before building in KIND, run the following:
+
+```
+$ pushd go-controller
+$ make
+$ popd
+
+$ pushd dist/images
+$ make fedora
+$ popd
+```
+
+Launch the KIND Deployment.
+
+```
+$ pushd contrib
+$ KUBECONFIG=${HOME}/admin.conf
+$ ./kind.sh
+$ popd
+```
+
+This will launch a KIND deployment. By default the cluster is named `ovn`.
+
+```
+$ kubectl get nodes
+NAME                STATUS   ROLES    AGE     VERSION
+ovn-control-plane   Ready    master   5h13m   v1.16.4
+ovn-worker          Ready    <none>   5h12m   v1.16.4
+ovn-worker2         Ready    <none>   5h12m   v1.16.4
+
+$ kubectl get pods --all-namespaces
+NAMESPACE            NAME                                        READY   STATUS    RESTARTS   AGE
+kube-system          coredns-5644d7b6d9-kw2xc                    1/1     Running   0          5h13m
+kube-system          coredns-5644d7b6d9-sd9wh                    1/1     Running   0          5h13m
+kube-system          etcd-ovn-control-plane                      1/1     Running   0          5h11m
+kube-system          kube-apiserver-ovn-control-plane            1/1     Running   0          5h12m
+kube-system          kube-controller-manager-ovn-control-plane   1/1     Running   0          5h12m
+kube-system          kube-scheduler-ovn-control-plane            1/1     Running   0          5h11m
+local-path-storage   local-path-provisioner-7745554f7f-9r8dz     1/1     Running   0          5h13m
+ovn-kubernetes       ovnkube-db-5588bd699c-kb8h7                 2/2     Running   0          5h11m
+ovn-kubernetes       ovnkube-master-6f44d456df-bv2x8             3/3     Running   0          5h11m
+ovn-kubernetes       ovnkube-node-2t6m2                          3/3     Running   0          5h11m
+ovn-kubernetes       ovnkube-node-hhsmk                          3/3     Running   0          5h11m
+ovn-kubernetes       ovnkube-node-xvqh4                          3/3     Running   0          5h11m
+```
+
+The `kind.sh` script defaults the cluster to HA. There are numerous
+configuration when deploying. Use `./kind.sh -h` to see the latest options.
 
 ```
 ./kind.sh --help
@@ -37,12 +97,17 @@ usage: kind.sh [[[-cf|--config-file <file>] [-kt|keep-taint] [-ha|--ha-enabled]
 ```
 As seen above if you do not specify any options script will assume the default values.
 
-You can create your own KIND J2 configuration file if the default one is not sufficient.
+### Usage Notes 
 
-You can also specify these values as environment variables. Command line parameters will override the environment variables.
+- You can create your own KIND J2 configuration file if the default one is not sufficient
 
-After deploying the KIND cluster, you can manage the cluster with regular KIND and kubectl commands.
+- You can also specify these values as environment variables. Command line parameters will override the environment variables.
 
+- To tear down the KIND cluster when finished simply run 
+
+   ```
+   $ ./kind.sh --delete
+   ```
 
 ## Running OVN-Kubernetes with IPv6 or Dual-stack In KIND
 
