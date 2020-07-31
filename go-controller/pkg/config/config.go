@@ -97,8 +97,8 @@ var (
 	// MasterHA holds master HA related config options.
 	MasterHA = MasterHAConfig{
 		ElectionLeaseDuration: 60,
-		ElectionRenewDeadline: 30,
-		ElectionRetryPeriod:   20,
+		ElectionRenewDeadline: 5,
+		ElectionRetryPeriod:   30,
 	}
 
 	// HybridOverlay holds hybrid overlay feature config options.
