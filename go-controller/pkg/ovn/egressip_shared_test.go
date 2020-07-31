@@ -166,7 +166,7 @@ var _ = Describe("Shared gateway mode EgressIP Operations with", func() {
 				fakeOvn.fakeExec.AddFakeCmdsNoOutputNoError(
 					[]string{
 						fmt.Sprintf("ovn-nbctl --timeout=15 lr-policy-add ovn_cluster_router 100 ip4.src == %s && ip4.dst == 0.0.0.0/0 reroute %s", egressPod.Status.PodIP, nodeLogicalRouterIPv4),
-						fmt.Sprintf("ovn-nbctl --timeout=15 lr-nat-add GR_%s dnat_and_snat %s %s", node2.Name, egressIP, egressPod.Status.PodIP),
+						fmt.Sprintf("ovn-nbctl --timeout=15 lr-nat-add GR_%s snat %s %s", node2.Name, egressIP, egressPod.Status.PodIP),
 					},
 				)
 				_, err = fakeOvn.fakeClient.CoreV1().Pods(egressPod.Namespace).Create(context.TODO(), &egressPod, metav1.CreateOptions{})
@@ -276,7 +276,7 @@ var _ = Describe("Shared gateway mode EgressIP Operations with", func() {
 				fakeOvn.fakeExec.AddFakeCmdsNoOutputNoError(
 					[]string{
 						fmt.Sprintf("ovn-nbctl --timeout=15 lr-policy-add ovn_cluster_router 100 ip4.src == %s && ip4.dst == 0.0.0.0/0 reroute %s", egressPod.Status.PodIP, nodeLogicalRouterIPv4),
-						fmt.Sprintf("ovn-nbctl --timeout=15 lr-nat-add GR_%s dnat_and_snat %s %s", node2.Name, egressIP, egressPod.Status.PodIP),
+						fmt.Sprintf("ovn-nbctl --timeout=15 lr-nat-add GR_%s snat %s %s", node2.Name, egressIP, egressPod.Status.PodIP),
 					},
 				)
 				_, err = fakeOvn.fakeClient.CoreV1().Namespaces().Create(context.TODO(), egressNamespace, metav1.CreateOptions{})
@@ -346,7 +346,7 @@ var _ = Describe("Shared gateway mode EgressIP Operations with", func() {
 				fakeOvn.fakeExec.AddFakeCmdsNoOutputNoError(
 					[]string{
 						fmt.Sprintf("ovn-nbctl --timeout=15 lr-policy-add ovn_cluster_router 100 ip6.src == %s && ip6.dst == ::/0 reroute %s", egressPod.Status.PodIP, nodeLogicalRouterIPv6),
-						fmt.Sprintf("ovn-nbctl --timeout=15 lr-nat-add GR_%s dnat_and_snat %s %s", node2.name, egressIP.String(), egressPod.Status.PodIP),
+						fmt.Sprintf("ovn-nbctl --timeout=15 lr-nat-add GR_%s snat %s %s", node2.name, egressIP.String(), egressPod.Status.PodIP),
 					},
 				)
 
@@ -367,7 +367,7 @@ var _ = Describe("Shared gateway mode EgressIP Operations with", func() {
 				fakeOvn.fakeExec.AddFakeCmdsNoOutputNoError(
 					[]string{
 						fmt.Sprintf("ovn-nbctl --timeout=15 lr-policy-del ovn_cluster_router 100 ip6.src == %s && ip6.dst == ::/0", egressPod.Status.PodIP),
-						fmt.Sprintf("ovn-nbctl --timeout=15 lr-nat-del GR_%s dnat_and_snat %s", node2.name, egressIP.String()),
+						fmt.Sprintf("ovn-nbctl --timeout=15 lr-nat-del GR_%s snat %s", node2.name, egressPod.Status.PodIP),
 					},
 				)
 
@@ -430,7 +430,7 @@ var _ = Describe("Shared gateway mode EgressIP Operations with", func() {
 				fakeOvn.fakeExec.AddFakeCmdsNoOutputNoError(
 					[]string{
 						fmt.Sprintf("ovn-nbctl --timeout=15 lr-policy-add ovn_cluster_router 100 ip6.src == %s && ip6.dst == ::/0 reroute %s", egressPod.Status.PodIP, nodeLogicalRouterIPv6),
-						fmt.Sprintf("ovn-nbctl --timeout=15 lr-nat-add GR_%s dnat_and_snat %s %s", node2.name, egressIP.String(), egressPod.Status.PodIP),
+						fmt.Sprintf("ovn-nbctl --timeout=15 lr-nat-add GR_%s snat %s %s", node2.name, egressIP.String(), egressPod.Status.PodIP),
 					},
 				)
 
@@ -524,7 +524,7 @@ var _ = Describe("Shared gateway mode EgressIP Operations with", func() {
 				fakeOvn.fakeExec.AddFakeCmdsNoOutputNoError(
 					[]string{
 						fmt.Sprintf("ovn-nbctl --timeout=15 lr-policy-add ovn_cluster_router 100 ip6.src == %s && ip6.dst == ::/0 reroute %s", podUpdate.Status.PodIP, nodeLogicalRouterIPv6),
-						fmt.Sprintf("ovn-nbctl --timeout=15 lr-nat-add GR_%s dnat_and_snat %s %s", node2.name, egressIP.String(), podUpdate.Status.PodIP),
+						fmt.Sprintf("ovn-nbctl --timeout=15 lr-nat-add GR_%s snat %s %s", node2.name, egressIP.String(), podUpdate.Status.PodIP),
 					},
 				)
 
@@ -648,7 +648,7 @@ var _ = Describe("Shared gateway mode EgressIP Operations with", func() {
 				fakeOvn.fakeExec.AddFakeCmdsNoOutputNoError(
 					[]string{
 						fmt.Sprintf("ovn-nbctl --timeout=15 lr-policy-add ovn_cluster_router 100 ip6.src == %s && ip6.dst == ::/0 reroute %s", egressPod.Status.PodIP, nodeLogicalRouterIPv6),
-						fmt.Sprintf("ovn-nbctl --timeout=15 lr-nat-add GR_%s dnat_and_snat %s %s", node2.name, egressIP.String(), egressPod.Status.PodIP),
+						fmt.Sprintf("ovn-nbctl --timeout=15 lr-nat-add GR_%s snat %s %s", node2.name, egressIP.String(), egressPod.Status.PodIP),
 					},
 				)
 
@@ -669,7 +669,7 @@ var _ = Describe("Shared gateway mode EgressIP Operations with", func() {
 				fakeOvn.fakeExec.AddFakeCmdsNoOutputNoError(
 					[]string{
 						fmt.Sprintf("ovn-nbctl --timeout=15 lr-policy-del ovn_cluster_router 100 ip6.src == %s && ip6.dst == ::/0", egressPod.Status.PodIP),
-						fmt.Sprintf("ovn-nbctl --timeout=15 lr-nat-del GR_%s dnat_and_snat %s", node2.name, egressIP.String()),
+						fmt.Sprintf("ovn-nbctl --timeout=15 lr-nat-del GR_%s snat %s", node2.name, egressPod.Status.PodIP),
 					},
 				)
 
@@ -795,7 +795,7 @@ var _ = Describe("Shared gateway mode EgressIP Operations with", func() {
 				fakeOvn.fakeExec.AddFakeCmdsNoOutputNoError(
 					[]string{
 						fmt.Sprintf("ovn-nbctl --timeout=15 lr-policy-add ovn_cluster_router 100 ip6.src == %s && ip6.dst == ::/0 reroute %s", egressPod.Status.PodIP, nodeLogicalRouterIPv6),
-						fmt.Sprintf("ovn-nbctl --timeout=15 lr-nat-add GR_%s dnat_and_snat %s %s", node2.name, egressIP.String(), egressPod.Status.PodIP),
+						fmt.Sprintf("ovn-nbctl --timeout=15 lr-nat-add GR_%s snat %s %s", node2.name, egressIP.String(), egressPod.Status.PodIP),
 					},
 				)
 
@@ -828,14 +828,14 @@ var _ = Describe("Shared gateway mode EgressIP Operations with", func() {
 				fakeOvn.fakeExec.AddFakeCmdsNoOutputNoError(
 					[]string{
 						fmt.Sprintf("ovn-nbctl --timeout=15 lr-policy-del ovn_cluster_router 100 ip6.src == %s && ip6.dst == ::/0", egressPod.Status.PodIP),
-						fmt.Sprintf("ovn-nbctl --timeout=15 lr-nat-del GR_%s dnat_and_snat %s", node2.name, egressIP.String()),
+						fmt.Sprintf("ovn-nbctl --timeout=15 lr-nat-del GR_%s snat %s", node2.name, egressPod.Status.PodIP),
 					},
 				)
 
 				fakeOvn.fakeExec.AddFakeCmdsNoOutputNoError(
 					[]string{
 						fmt.Sprintf("ovn-nbctl --timeout=15 lr-policy-add ovn_cluster_router 100 ip6.src == %s && ip6.dst == ::/0 reroute %s", egressPod.Status.PodIP, nodeLogicalRouterIPv6),
-						fmt.Sprintf("ovn-nbctl --timeout=15 lr-nat-add GR_%s dnat_and_snat %s %s", node2.name, updatedEgressIP.String(), egressPod.Status.PodIP),
+						fmt.Sprintf("ovn-nbctl --timeout=15 lr-nat-add GR_%s snat %s %s", node2.name, updatedEgressIP.String(), egressPod.Status.PodIP),
 					},
 				)
 
@@ -899,7 +899,7 @@ var _ = Describe("Shared gateway mode EgressIP Operations with", func() {
 				fakeOvn.fakeExec.AddFakeCmdsNoOutputNoError(
 					[]string{
 						fmt.Sprintf("ovn-nbctl --timeout=15 lr-policy-add ovn_cluster_router 100 ip6.src == %s && ip6.dst == ::/0 reroute %s", egressPod.Status.PodIP, nodeLogicalRouterIPv6),
-						fmt.Sprintf("ovn-nbctl --timeout=15 lr-nat-add GR_%s dnat_and_snat %s %s", node2.name, egressIP.String(), egressPod.Status.PodIP),
+						fmt.Sprintf("ovn-nbctl --timeout=15 lr-nat-add GR_%s snat %s %s", node2.name, egressIP.String(), egressPod.Status.PodIP),
 					},
 				)
 

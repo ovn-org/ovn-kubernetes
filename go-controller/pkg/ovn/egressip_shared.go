@@ -59,11 +59,7 @@ func (e *egressIPShared) deletePodEgressIP(eIP *egressipv1.EgressIP, pod *kapi.P
 func createNATRule(podIPs []net.IP, status egressipv1.EgressIPStatusItem) error {
 	for _, podIP := range podIPs {
 		if (utilnet.IsIPv6String(status.EgressIP) && utilnet.IsIPv6(podIP)) || (!utilnet.IsIPv6String(status.EgressIP) && !utilnet.IsIPv6(podIP)) {
-			// TODO: when Bug https://bugzilla.redhat.com/show_bug.cgi?id=1861294 is cleared out: change to snat,
-			// we should not really be DNAT-ing here as that would allow an external client direct access to the egress pods.
-			// EgressIP should only be applied for SNAT-ing traffic.
-			// GOTCHA 1: this in turn means that we only support one pod per egress IP...because you oviously can't DNAT on two separate logical IPs
-			_, stderr, err := util.RunOVNNbctl("lr-nat-add", fmt.Sprintf("GR_%s", status.Node), "dnat_and_snat", status.EgressIP, podIP.String())
+			_, stderr, err := util.RunOVNNbctl("lr-nat-add", fmt.Sprintf("GR_%s", status.Node), "snat", status.EgressIP, podIP.String())
 			if err != nil && !strings.Contains(stderr, natAlreadyExistsMsg) {
 				return fmt.Errorf("OVN transaction error, stderr: %s, err: %v", stderr, err)
 			}
@@ -75,12 +71,7 @@ func createNATRule(podIPs []net.IP, status egressipv1.EgressIPStatusItem) error 
 func deleteNATRule(podIPs []net.IP, status egressipv1.EgressIPStatusItem) error {
 	for _, podIP := range podIPs {
 		if (utilnet.IsIPv6String(status.EgressIP) && utilnet.IsIPv6(podIP)) || (!utilnet.IsIPv6String(status.EgressIP) && !utilnet.IsIPv6(podIP)) {
-			// TODO: when Bug https://bugzilla.redhat.com/show_bug.cgi?id=1861294 is cleared out: change to snat,
-			// we should not really be DNAT-ing here as that would allow an external client direct access to the egress pods.
-			// EgressIP should only be applied for SNAT-ing traffic.
-			// GOTCHA 2: whenever this bugs is fixed, be careful and change to:
-			// util.RunOVNNbctl("lr-nat-del", fmt.Sprintf("GR_%s", status.Node), "dnat_and_snat", podIP.String()) as the ovn-nbctl API is different for snat
-			_, stderr, err := util.RunOVNNbctl("lr-nat-del", fmt.Sprintf("GR_%s", status.Node), "dnat_and_snat", status.EgressIP)
+			_, stderr, err := util.RunOVNNbctl("lr-nat-del", fmt.Sprintf("GR_%s", status.Node), "snat", podIP.String())
 			if err != nil {
 				return fmt.Errorf("OVN transaction error, stderr: %s, err: %v", stderr, err)
 			}
