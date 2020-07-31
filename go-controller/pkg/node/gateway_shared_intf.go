@@ -2,6 +2,7 @@ package node
 
 import (
 	"fmt"
+	"hash/fnv"
 	"net"
 	"reflect"
 	"regexp"
@@ -41,6 +42,48 @@ func addService(service *kapi.Service, inport, outport, gwBridge string, nodeIP 
 			if err != nil {
 				klog.Errorf("Failed to add openflow flow on %s for nodePort: "+
 					"%d, stderr: %q, error: %v", gwBridge, svcPort.NodePort, stderr, err)
+			}
+			// Flows for cloud load balancers on Azure/GCP
+			flows := make([]string, 0)
+
+			// Established traffic is handled by default conntrack rules
+			// Table 1 handles forwarding traffic to pods
+			// Table 2 handles return NAT traffic for node port and forwards out of the host
+			// NodePort/Ingress access in the OVS bridge will only ever come from outside of the host
+			for _, ing := range service.Status.LoadBalancer.Ingress {
+				if ing.IP == "" {
+					continue
+				}
+				ingIP := net.ParseIP(ing.IP)
+				if ingIP == nil {
+					klog.Errorf("Failed to parse ingress IP: %s", ing.IP)
+					continue
+				}
+				cookie, err := svcToCookie(service.Name, ingIP, svcPort.Port)
+				if err != nil {
+					klog.Errorf("Unable to generate cookie for svc: %s, %s, %d, error: %v",
+						service.Name, ingIP.String(), svcPort.Port, err)
+					continue
+				}
+				// Send to CT from external net with DNAT, eventually will land in table 1 (traffic to pods)
+				flows = append(flows,
+					fmt.Sprintf("cookie=%s,priority=101,in_port=%s,ct_state=-trk,%s,nw_dst=%s,tp_dst=%d,"+
+						"actions=ct(commit,table=0,zone=%d,nat(dst=%s)",
+						cookie, inport, protocol, ing.IP, svcPort.Port, config.Default.ConntrackZone,
+						util.JoinHostPortInt32(nodeIP.IP.String(), svcPort.NodePort)))
+				// Incoming return traffic from pods, send to CT, unDNAT, goto table 2
+				flows = append(flows,
+					fmt.Sprintf("cookie=%s,priority=101,in_port=%s,%s,nw_src=%s,tp_src=%d,"+
+						"actions=ct(table=2,zone=%d,nat)",
+						cookie, outport, protocol, nodeIP.IP, svcPort.NodePort, config.Default.ConntrackZone))
+			}
+
+			for _, flow := range flows {
+				_, stderr, err := util.RunOVSOfctl("add-flow", gwBridge, flow)
+				if err != nil {
+					klog.Errorf("Failed to add openflow flow on %s for ingress, stderr: %q, error: %v, flow: %s",
+						gwBridge, stderr, err, flow)
+				}
 			}
 		}
 		for _, externalIP := range service.Spec.ExternalIPs {
@@ -94,6 +137,27 @@ func deleteService(service *kapi.Service, inport, gwBridge string, nodeIP *net.I
 					"%s, stderr: %q, error: %v", gwBridge, externalIP, stderr, err)
 			}
 		}
+		for _, ing := range service.Status.LoadBalancer.Ingress {
+			if ing.IP == "" {
+				continue
+			}
+			ingIP := net.ParseIP(ing.IP)
+			if ingIP == nil {
+				klog.Errorf("Failed to parse ingress IP: %s", ing.IP)
+				continue
+			}
+			cookie, err := svcToCookie(service.Name, ingIP, svcPort.Port)
+			if err != nil {
+				klog.Errorf("Unable to generate cookie for svc: %s, %s, %d, error: %v",
+					service.Name, ingIP.String(), svcPort.Port, err)
+			}
+			_, stderr, err := util.RunOVSOfctl("del-flows", gwBridge,
+				fmt.Sprintf("cookie=%s/-1", cookie))
+			if err != nil {
+				klog.Errorf("Failed to delete openflow flow on %s for Ingress: "+
+					"%s, stderr: %q, error: %v", gwBridge, ingIP, stderr, err)
+			}
+		}
 	}
 
 	delSharedGatewayIptRules(service, nodeIP)
@@ -101,6 +165,7 @@ func deleteService(service *kapi.Service, inport, gwBridge string, nodeIP *net.I
 
 func syncServices(services []interface{}, inport, gwBridge string, nodeIP *net.IPNet) {
 	ports := make(map[string]string)
+	ingressCookies := make(map[string]struct{})
 	for _, serviceInterface := range services {
 		service, ok := serviceInterface.(*kapi.Service)
 		if !ok {
@@ -131,6 +196,19 @@ func syncServices(services []interface{}, inport, gwBridge string, nodeIP *net.I
 				protocol := strings.ToLower(string(svcPort.Protocol))
 				externalPortKey := fmt.Sprintf("%s_%d", protocol, svcPort.Port)
 				ports[externalPortKey] = externalIP
+			}
+			for _, ing := range service.Status.LoadBalancer.Ingress {
+				ingIP := net.ParseIP(ing.IP)
+				if ingIP == nil {
+					klog.Errorf("Failed to parse ingress IP: %s", ing.IP)
+					continue
+				}
+				cookie, err := svcToCookie(service.Name, ingIP, svcPort.Port)
+				if err != nil {
+					klog.Errorf("Unable to generate cookie for svc: %s, %s, %d, error: %v",
+						service.Name, ingIP.String(), svcPort.Port, err)
+				}
+				ingressCookies[cookie] = struct{}{}
 			}
 		}
 	}
@@ -168,10 +246,19 @@ func syncServices(services []interface{}, inport, gwBridge string, nodeIP *net.I
 			continue
 		}
 
+		// FIXME (trozet) this code is buggy, the else statement can never be reached, so external ip flows will hang
+		// around on the switch after sync
+		// refactor this into flow caching later
 		if externalIP, ok := ports[key]; !ok {
 			pair := strings.Split(key, "_")
 			protocol, port := pair[0], pair[1]
 			if externalIP == "" {
+				// Check if this is a known cloud load balancer flow
+				for cookie := range ingressCookies {
+					if strings.Contains(flow, cookie) {
+						continue
+					}
+				}
 				stdout, _, err := util.RunOVSOfctl(
 					"del-flows", gwBridge,
 					fmt.Sprintf("in_port=%s, %s, tp_dst=%s",
@@ -231,7 +318,7 @@ func nodePortWatcher(nodeName, gwBridge, gwIntf string, nodeIP []*net.IPNet, wf 
 		UpdateFunc: func(old, new interface{}) {
 			svcNew := new.(*kapi.Service)
 			svcOld := old.(*kapi.Service)
-			if reflect.DeepEqual(svcNew.Spec, svcOld.Spec) {
+			if reflect.DeepEqual(svcNew.Spec, svcOld.Spec) && reflect.DeepEqual(svcNew.Status, svcOld.Status) {
 				return
 			}
 			deleteService(svcOld, ofportPhys, gwBridge, nodeIP[0])
@@ -252,6 +339,7 @@ func nodePortWatcher(nodeName, gwBridge, gwIntf string, nodeIP []*net.IPNet, wf 
 // -- to steer the NodePort traffic arriving on the host to the OVN logical topology and
 // -- to also connection track the outbound north-south traffic through l3 gateway so that
 //    the return traffic can be steered back to OVN logical topology
+// -- to also handle unDNAT return traffic back out of the host
 func addDefaultConntrackRules(nodeName, gwBridge, gwIntf string, stopChan chan struct{}) error {
 	// the name of the patch port created by ovn-controller is of the form
 	// patch-<logical_port_name_of_localnet_port>-to-br-int
@@ -325,6 +413,15 @@ func addDefaultConntrackRules(nodeName, gwBridge, gwIntf string, stopChan chan s
 	// table 1, all other connections do normal processing
 	_, stderr, err = util.RunOVSOfctl("add-flow", gwBridge,
 		fmt.Sprintf("cookie=%s, priority=0, table=1, actions=output:NORMAL", defaultOpenFlowCookie))
+	if err != nil {
+		return fmt.Errorf("failed to add openflow flow to %s, stderr: %q, "+
+			"error: %v", gwBridge, stderr, err)
+	}
+	nFlows++
+
+	// table 2, return traffic to go to out of the host from nodePort or load balancer access
+	_, stderr, err = util.RunOVSOfctl("add-flow", gwBridge,
+		fmt.Sprintf("cookie=%s, priority=0, table=2, actions=output:%s", defaultOpenFlowCookie, ofportPhys))
 	if err != nil {
 		return fmt.Errorf("failed to add openflow flow to %s, stderr: %q, "+
 			"error: %v", gwBridge, stderr, err)
@@ -468,4 +565,14 @@ func cleanupSharedGateway() error {
 
 	cleanupSharedGatewayIPTChains()
 	return nil
+}
+
+func svcToCookie(name string, ip net.IP, port int32) (string, error) {
+	id := fmt.Sprintf("%s%s%d", name, ip.String(), port)
+	h := fnv.New64a()
+	_, err := h.Write([]byte(id))
+	if err != nil {
+		return "", err
+	}
+	return fmt.Sprintf("0x%x", h.Sum64()), nil
 }
