@@ -3,7 +3,6 @@ package node
 import (
 	"fmt"
 	"net"
-	"runtime"
 	"strings"
 
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
@@ -174,10 +173,8 @@ func CleanupClusterNode(name string) error {
 		klog.Errorf("Failed to delete ovn-bridge-mappings, stdout: %q, stderr: %q, error: %v", stdout, stderr, err)
 	}
 
-	// Delete iptable rules for management port on Linux.
-	if runtime.GOOS != "windows" {
-		DelMgtPortIptRules()
-	}
+	// Delete iptable rules for management port
+	DelMgtPortIptRules()
 
 	return nil
 }

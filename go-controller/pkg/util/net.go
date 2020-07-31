@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"math/big"
 	"net"
-	"runtime"
 	"strconv"
 	"strings"
 
@@ -133,16 +132,6 @@ func GetOVSPortMACAddress(portName string) (net.HardwareAddr, error) {
 	}
 	if macAddress == "[]" {
 		return nil, fmt.Errorf("no mac_address found for %q", portName)
-	}
-	if runtime.GOOS == windowsOS && macAddress == "00:00:00:00:00:00" {
-		// There is a known issue with OVS not correctly picking up the
-		// physical network interface MAC address.
-		stdout, stderr, err := RunPowershell("$(Get-NetAdapter", "-IncludeHidden",
-			"-InterfaceAlias", fmt.Sprintf("\"%s\"", portName), ").MacAddress")
-		if err != nil {
-			return nil, fmt.Errorf("failed to get mac address of %q, stderr: %q, error: %v", portName, stderr, err)
-		}
-		macAddress = stdout
 	}
 	return net.ParseMAC(macAddress)
 }

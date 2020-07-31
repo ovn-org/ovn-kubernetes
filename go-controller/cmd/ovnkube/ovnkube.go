@@ -8,7 +8,6 @@ import (
 	"os"
 	"os/signal"
 	"path/filepath"
-	"runtime"
 	"strings"
 	"syscall"
 	"text/tabwriter"
@@ -228,9 +227,6 @@ func runOvnKube(ctx *cli.Context) error {
 	stopChan := make(chan struct{})
 
 	if master != "" {
-		if runtime.GOOS == "windows" {
-			return fmt.Errorf("master nodes cannot be of OS type: Windows")
-		}
 		var ovnNBClient, ovnSBClient goovn.Client
 		var err error
 
