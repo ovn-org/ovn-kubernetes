@@ -27,6 +27,7 @@ require (
 	github.com/stretchr/testify v1.4.0
 	github.com/urfave/cli/v2 v2.2.0
 	github.com/vishvananda/netlink v0.0.0-20200625175047-bca67dfc8220
+	golang.org/x/sys v0.0.0-20200121082415-34d275377bf9
 	golang.org/x/time v0.0.0-20191024005414-555d28b269f0 // indirect
 	gopkg.in/fsnotify/fsnotify.v1 v1.4.7
 	gopkg.in/gcfg.v1 v1.2.3

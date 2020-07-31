@@ -147,7 +147,7 @@ func (gp *gressPolicy) getL3MatchFromAddressSet() string {
 func constructEmptyMatchString() string {
 	switch {
 	case config.IPv4Mode && config.IPv6Mode:
-		return "ip4 || ip6"
+		return "(ip4 || ip6)"
 	case config.IPv6Mode:
 		return "ip6"
 	default:
