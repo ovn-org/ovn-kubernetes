@@ -3,12 +3,13 @@ package util
 import (
 	"bytes"
 	"fmt"
+	"testing"
+
 	mock_k8s_io_utils_exec "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/testing/mocks/k8s.io/utils/exec"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util/mocks"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
 	kexec "k8s.io/utils/exec"
-	"testing"
 )
 
 type onCallReturnArgs struct {
@@ -96,15 +97,15 @@ func TestSetExec(t *testing.T) {
 		{
 			desc:         "positive, test when 'runner' is nil",
 			expectedErr:  nil,
-			onRetArgs:    &onCallReturnArgs{"LookPath", []string{"string"}, []interface{}{"ip", nil}},
-			fnCallTimes:  9,
+			onRetArgs:    &onCallReturnArgs{"LookPath", []string{"string"}, []interface{}{"ip", nil, "arping", nil}},
+			fnCallTimes:  10,
 			setRunnerNil: true,
 		},
 		{
 			desc:         "positive, test when 'runner' is not nil",
 			expectedErr:  nil,
-			onRetArgs:    &onCallReturnArgs{"LookPath", []string{"string"}, []interface{}{"", nil}},
-			fnCallTimes:  9,
+			onRetArgs:    &onCallReturnArgs{"LookPath", []string{"string"}, []interface{}{"", nil, "", nil}},
+			fnCallTimes:  10,
 			setRunnerNil: false,
 		},
 	}
@@ -136,16 +137,19 @@ func TestSetExecWithoutOVS(t *testing.T) {
 		desc        string
 		expectedErr error
 		onRetArgs   *onCallReturnArgs
+		fnCallTimes int
 	}{
 		{
-			desc:        "positive, ip path found",
+			desc:        "positive, ip and arping path found",
 			expectedErr: nil,
-			onRetArgs:   &onCallReturnArgs{"LookPath", []string{"string"}, []interface{}{"ip", nil}},
+			fnCallTimes: 2,
+			onRetArgs:   &onCallReturnArgs{"LookPath", []string{"string"}, []interface{}{"ip", nil, "arping", nil}},
 		},
 		{
 			desc:        "negative, ip path not found",
 			expectedErr: fmt.Errorf(`exec: \"ip:\" executable file not found in $PATH`),
-			onRetArgs:   &onCallReturnArgs{"LookPath", []string{"string"}, []interface{}{"", fmt.Errorf(`exec: \"ip:\" executable file not found in $PATH`)}},
+			fnCallTimes: 1,
+			onRetArgs:   &onCallReturnArgs{"LookPath", []string{"string"}, []interface{}{"", fmt.Errorf(`exec: \"ip:\" executable file not found in $PATH`), "arping", nil}},
 		},
 	}
 
@@ -158,7 +162,7 @@ func TestSetExecWithoutOVS(t *testing.T) {
 			for _, elem := range tc.onRetArgs.retArgList {
 				call.ReturnArguments = append(call.ReturnArguments, elem)
 			}
-			call.Once()
+			call.Times(tc.fnCallTimes)
 			e := SetExecWithoutOVS(mockKexecIface)
 			assert.Equal(t, e, tc.expectedErr)
 			mockKexecIface.AssertExpectations(t)

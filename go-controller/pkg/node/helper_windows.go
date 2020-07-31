@@ -11,6 +11,10 @@ import (
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
 )
 
+func getDefaultIfAddr(defaultGatewayIntf string) (*net.IPNet, *net.IPNet, error) {
+	return nil, nil, nil
+}
+
 // getDefaultGatewayInterfaceDetails returns the interface name on
 // which the default gateway (for route to 0.0.0.0) is configured.
 // It also returns the default gateway itself.

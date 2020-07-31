@@ -1,7 +1,7 @@
 run:
   skip-dirs:
     - vendor
-    - pkg/crd/egressfirewall/v1/apis
+    - pkg/crd
 
   skip-files:
     - ".*\\_test.go$"

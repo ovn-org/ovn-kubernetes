@@ -17,20 +17,32 @@ import (
 	. "github.com/onsi/gomega"
 )
 
-func newNamespaceMeta(namespace string) metav1.ObjectMeta {
+func newNamespaceMeta(namespace string, additionalLabels map[string]string) metav1.ObjectMeta {
+	labels := map[string]string{
+		"name": namespace,
+	}
+	for k, v := range additionalLabels {
+		labels[k] = v
+	}
 	return metav1.ObjectMeta{
-		UID:  types.UID(namespace),
-		Name: namespace,
-		Labels: map[string]string{
-			"name": namespace,
-		},
+		UID:         types.UID(namespace),
+		Name:        namespace,
+		Labels:      labels,
 		Annotations: map[string]string{},
+	}
+}
+
+func newNamespaceWithLabels(namespace string, additionalLabels map[string]string) *v1.Namespace {
+	return &v1.Namespace{
+		ObjectMeta: newNamespaceMeta(namespace, additionalLabels),
+		Spec:       v1.NamespaceSpec{},
+		Status:     v1.NamespaceStatus{},
 	}
 }
 
 func newNamespace(namespace string) *v1.Namespace {
 	return &v1.Namespace{
-		ObjectMeta: newNamespaceMeta(namespace),
+		ObjectMeta: newNamespaceMeta(namespace, nil),
 		Spec:       v1.NamespaceSpec{},
 		Status:     v1.NamespaceStatus{},
 	}
