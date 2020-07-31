@@ -36,7 +36,7 @@ RUN INSTALL_PKGS=" \
 	openssl firewalld-filesystem \
 	libpcap iproute strace \
 	containernetworking-plugins \
-	tcpdump \
+	tcpdump iputils \
 	" && \
 	yum install -y --setopt=tsflags=nodocs --setopt=skip_missing_names_on_install=False $INSTALL_PKGS && \
 	yum install -y --setopt=tsflags=nodocs --setopt=skip_missing_names_on_install=False "openvswitch2.13 >= 2.13.0-29.el7fdp" openvswitch2.13-devel && \
