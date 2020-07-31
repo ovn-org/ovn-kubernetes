@@ -51,6 +51,12 @@ const (
 
 	// ovnNodeChassisID is the systemID of the node needed for creating L3 gateway
 	ovnNodeChassisID = "k8s.ovn.org/node-chassis-id"
+
+	// ovnNodeCIDR is the CIDR form representation of primary network interface's attached IP address (i.e: 192.168.126.31/24 or 0:0:0:0:0:feff:c0a8:8e0c/64)
+	ovnNodeIfAddr = "k8s.ovn.org/node-primary-ifaddr"
+
+	// OvnNodeEgressLabel is a user assigned node label indicating to ovn-kubernetes that the node is to be used for egress IP assignment
+	ovnNodeEgressLabel = "k8s.ovn.org/egress-assignable"
 )
 
 type L3GatewayConfig struct {
@@ -227,4 +233,42 @@ func ParseNodeManagementPortMACAddress(node *kapi.Node) (net.HardwareAddr, error
 	}
 
 	return net.ParseMAC(macAddress)
+}
+
+type primaryIfAddrAnnotation struct {
+	IPv4 string `json:"ipv4,omitempty"`
+	IPv6 string `json:"ipv6,omitempty"`
+}
+
+// SetNodePrimaryIfAddr sets the IPv4 / IPv6 values of the node's primary network interface
+func SetNodePrimaryIfAddr(nodeAnnotator kube.Annotator, nodeIPNetv4, nodeIPNetv6 *net.IPNet) (err error) {
+	primaryIfAddrAnnotation := primaryIfAddrAnnotation{}
+	if nodeIPNetv4 != nil {
+		primaryIfAddrAnnotation.IPv4 = nodeIPNetv4.String()
+	}
+	if nodeIPNetv6 != nil {
+		primaryIfAddrAnnotation.IPv6 = nodeIPNetv6.String()
+	}
+	return nodeAnnotator.Set(ovnNodeIfAddr, primaryIfAddrAnnotation)
+}
+
+// ParseNodePrimaryIfAddr returns the IPv4 / IPv6 values for the node's primary network interface
+func ParseNodePrimaryIfAddr(node *kapi.Node) (string, string, error) {
+	nodeIfAddrAnnotation, ok := node.Annotations[ovnNodeIfAddr]
+	if !ok {
+		return "", "", newAnnotationNotSetError("%s annotation not found for node %q", ovnNodeIfAddr, node.Name)
+	}
+	nodeIfAddr := primaryIfAddrAnnotation{}
+	if err := json.Unmarshal([]byte(nodeIfAddrAnnotation), &nodeIfAddr); err != nil {
+		return "", "", fmt.Errorf("failed to unmarshal annotation: %s for node %q, err: %v", ovnNodeIfAddr, node.Name, err)
+	}
+	if nodeIfAddr.IPv4 == "" && nodeIfAddr.IPv6 == "" {
+		return "", "", fmt.Errorf("node: %q does not have any IP information set", node.Name)
+	}
+	return nodeIfAddr.IPv4, nodeIfAddr.IPv6, nil
+}
+
+// GetNodeEgressLabel returns label annotation needed for marking nodes as egress assignable
+func GetNodeEgressLabel() string {
+	return ovnNodeEgressLabel
 }

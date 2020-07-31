@@ -27,6 +27,7 @@ import (
 	"github.com/vishvananda/netlink"
 
 	egressfirewallfake "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/egressfirewall/v1/apis/clientset/versioned/fake"
+	egressipfake "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/egressip/v1/apis/clientset/versioned/fake"
 	apiextensionsfake "k8s.io/apiextensions-apiserver/pkg/client/clientset/clientset/fake"
 
 	. "github.com/onsi/ginkgo"
@@ -181,9 +182,10 @@ cookie=0x0, duration=8366.597s, table=1, n_packets=10641, n_bytes=10370087, prio
 		})
 		egressFirewallFakeClient := &egressfirewallfake.Clientset{}
 		crdFakeClient := &apiextensionsfake.Clientset{}
+		egressIPFakeClient := &egressipfake.Clientset{}
 
 		stop := make(chan struct{})
-		wf, err := factory.NewWatchFactory(fakeClient, egressFirewallFakeClient, crdFakeClient)
+		wf, err := factory.NewWatchFactory(fakeClient, egressIPFakeClient, egressFirewallFakeClient, crdFakeClient)
 		Expect(err).NotTo(HaveOccurred())
 		defer func() {
 			close(stop)
@@ -194,7 +196,7 @@ cookie=0x0, duration=8366.597s, table=1, n_packets=10641, n_bytes=10370087, prio
 
 		iptV4, iptV6 := util.SetFakeIPTablesHelpers()
 
-		nodeAnnotator := kube.NewNodeAnnotator(&kube.Kube{fakeClient, egressFirewallFakeClient}, &existingNode)
+		nodeAnnotator := kube.NewNodeAnnotator(&kube.Kube{fakeClient, egressIPFakeClient, egressFirewallFakeClient}, &existingNode)
 
 		err = util.SetNodeHostSubnetAnnotation(nodeAnnotator, ovntest.MustParseIPNets(nodeSubnet))
 		Expect(err).NotTo(HaveOccurred())
@@ -366,7 +368,7 @@ func localNetInterfaceTest(app *cli.App, testNS ns.NetNS,
 			},
 		)
 
-		nodeAnnotator := kube.NewNodeAnnotator(&kube.Kube{fakeOvnNode.fakeClient, &egressfirewallfake.Clientset{}}, &existingNode)
+		nodeAnnotator := kube.NewNodeAnnotator(&kube.Kube{fakeOvnNode.fakeClient, &egressipfake.Clientset{}, &egressfirewallfake.Clientset{}}, &existingNode)
 		err := util.SetNodeHostSubnetAnnotation(nodeAnnotator, subnets)
 		Expect(err).NotTo(HaveOccurred())
 		err = nodeAnnotator.Run()
@@ -385,7 +387,7 @@ func localNetInterfaceTest(app *cli.App, testNS ns.NetNS,
 				}
 			}
 
-			err = fakeOvnNode.node.initLocalnetGateway(subnets, nodeAnnotator)
+			err = fakeOvnNode.node.initLocalnetGateway(subnets, nodeAnnotator, primaryLinkName)
 			Expect(err).NotTo(HaveOccurred())
 			// Check if IP has been assigned to LocalnetGatewayNextHopPort
 			link, err := netlink.LinkByName(localnetGatewayNextHopPort)
@@ -485,19 +487,9 @@ var _ = Describe("Gateway Init Operations", func() {
 		err = testNS.Do(func(ns.NetNS) error {
 			defer GinkgoRecover()
 
-			err := netlink.LinkAdd(&netlink.Dummy{
-				LinkAttrs: netlink.LinkAttrs{
-					Name: "br-local",
-				},
-			})
-			Expect(err).NotTo(HaveOccurred())
+			ovntest.AddLink("br-local")
+			ovntest.AddLink(localnetGatewayNextHopPort)
 
-			err = netlink.LinkAdd(&netlink.Dummy{
-				LinkAttrs: netlink.LinkAttrs{
-					Name: localnetGatewayNextHopPort,
-				},
-			})
-			Expect(err).NotTo(HaveOccurred())
 			return nil
 		})
 		Expect(err).NotTo(HaveOccurred())
@@ -582,12 +574,8 @@ var _ = Describe("Gateway Init Operations", func() {
 			err := testNS.Do(func(ns.NetNS) error {
 				defer GinkgoRecover()
 
-				err := netlink.LinkAdd(&netlink.Dummy{
-					LinkAttrs: netlink.LinkAttrs{
-						Name: eth0Name,
-					},
-				})
-				Expect(err).NotTo(HaveOccurred())
+				ovntest.AddLink(eth0Name)
+
 				l, err := netlink.LinkByName(eth0Name)
 				Expect(err).NotTo(HaveOccurred())
 				err = netlink.LinkSetUp(l)
