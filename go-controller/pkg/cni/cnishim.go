@@ -14,7 +14,6 @@ import (
 	"net"
 	"net/http"
 	"os"
-	"runtime"
 	"strings"
 	"time"
 
@@ -69,13 +68,7 @@ func (p *Plugin) doCNI(url string, req interface{}) ([]byte, error) {
 	client := &http.Client{
 		Transport: &http.Transport{
 			Dial: func(proto, addr string) (net.Conn, error) {
-				var conn net.Conn
-				if runtime.GOOS != "windows" {
-					conn, err = net.Dial("unix", p.socketPath)
-				} else {
-					conn, err = net.Dial("tcp", serverTCPAddress)
-				}
-				return conn, err
+				return net.Dial("unix", p.socketPath)
 			},
 		},
 	}

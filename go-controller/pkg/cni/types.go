@@ -14,7 +14,6 @@ const serverRunDir string = "/var/run/ovn-kubernetes/cni/"
 
 const serverSocketName string = "ovn-cni-server.sock"
 const serverSocketPath string = serverRunDir + "/" + serverSocketName
-const serverTCPAddress string = "127.0.0.1:3996"
 
 // PodInterfaceInfo consists of interface info result from cni server if cni client configure's interface
 type PodInterfaceInfo struct {

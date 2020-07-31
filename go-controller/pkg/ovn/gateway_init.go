@@ -5,6 +5,7 @@ import (
 	"net"
 	"strings"
 
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
 
 	kapi "k8s.io/api/core/v1"
@@ -282,26 +283,30 @@ func gatewayInit(nodeName string, clusterIPSubnet []*net.IPNet, hostSubnets []*n
 		}
 	}
 
-	// Default SNAT rules.
-	externalIPs := make([]net.IP, len(l3GatewayConfig.IPAddresses))
-	for i, ip := range l3GatewayConfig.IPAddresses {
-		externalIPs[i] = ip.IP
-	}
-	for _, entry := range clusterIPSubnet {
-		externalIP, err := gatewayForSubnet(externalIPs, entry)
-		if err != nil {
-			return fmt.Errorf("failed to create default SNAT rules for gateway router %s: %v",
-				gatewayRouter, err)
+	// if config.Gateway.DisabledSNATMultipleGWs is not set (by default is not),
+	// the NAT rules for pods not having annotations to route thru either external
+	// gws or pod CNFs will be added within pods.go addLogicalPort
+	if !config.Gateway.DisableSNATMultipleGWs {
+		// Default SNAT rules.
+		externalIPs := make([]net.IP, len(l3GatewayConfig.IPAddresses))
+		for i, ip := range l3GatewayConfig.IPAddresses {
+			externalIPs[i] = ip.IP
 		}
+		for _, entry := range clusterIPSubnet {
+			externalIP, err := gatewayForSubnet(externalIPs, entry)
+			if err != nil {
+				return fmt.Errorf("failed to create default SNAT rules for gateway router %s: %v",
+					gatewayRouter, err)
+			}
 
-		stdout, stderr, err = util.RunOVNNbctl("--may-exist", "lr-nat-add",
-			gatewayRouter, "snat", externalIP.String(), entry.String())
-		if err != nil {
-			return fmt.Errorf("failed to create default SNAT rules for gateway router %s, "+
-				"stdout: %q, stderr: %q, error: %v", gatewayRouter, stdout, stderr, err)
+			stdout, stderr, err = util.RunOVNNbctl("--may-exist", "lr-nat-add",
+				gatewayRouter, "snat", externalIP.String(), entry.String())
+			if err != nil {
+				return fmt.Errorf("failed to create default SNAT rules for gateway router %s, "+
+					"stdout: %q, stderr: %q, error: %v", gatewayRouter, stdout, stderr, err)
+			}
 		}
 	}
-
 	return nil
 }
 

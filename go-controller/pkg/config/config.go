@@ -9,7 +9,6 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
-	"runtime"
 	"strconv"
 	"strings"
 
@@ -70,9 +69,8 @@ var (
 
 	// CNI holds CNI-related parsed config file parameters and command-line overrides
 	CNI = CNIConfig{
-		ConfDir:         "/etc/cni/net.d",
-		Plugin:          "ovn-k8s-cni-overlay",
-		WinHNSNetworkID: "",
+		ConfDir: "/etc/cni/net.d",
+		Plugin:  "ovn-k8s-cni-overlay",
 	}
 
 	// Kubernetes holds Kubernetes-related parsed config file parameters and command-line overrides
@@ -185,8 +183,6 @@ type CNIConfig struct {
 	ConfDir string `gcfg:"conf-dir"`
 	// Plugin specifies the name of the CNI plugin
 	Plugin string `gcfg:"plugin"`
-	// Windows ONLY, specifies the ID of the HNS Network to which the containers will be attached
-	WinHNSNetworkID string `gcfg:"win-hnsnetwork-id"`
 }
 
 // KubernetesConfig holds Kubernetes-related parsed config file parameters and command-line overrides
@@ -237,6 +233,8 @@ type GatewayConfig struct {
 	VLANID uint `gcfg:"vlan-id"`
 	// NodeportEnable sets whether to provide Kubernetes NodePort service or not
 	NodeportEnable bool `gcfg:"nodeport"`
+	// DisableSNATMultipleGws sets whether to disable SNAT of egress traffic in namespaces annotated with routing-external-gws
+	DisableSNATMultipleGWs bool `gcfg:"disable-snat-multiple-gws"`
 }
 
 // OvnAuthConfig holds client authentication and location details for
@@ -583,11 +581,6 @@ var CNIFlags = []cli.Flag{
 		Destination: &cliConfig.CNI.Plugin,
 		Value:       CNI.Plugin,
 	},
-	&cli.StringFlag{
-		Name:        "win-hnsnetwork-id",
-		Usage:       "the ID of the HNS network to which containers will be attached (default: not set)",
-		Destination: &cliConfig.CNI.WinHNSNetworkID,
-	},
 }
 
 // OVNK8sFeatureFlags capture OVN-Kubernetes feature related options
@@ -790,6 +783,11 @@ var OVNGatewayFlags = []cli.Flag{
 		Name:        "nodeport",
 		Usage:       "Setup nodeport based ingress on gateways.",
 		Destination: &cliConfig.Gateway.NodeportEnable,
+	},
+	&cli.BoolFlag{
+		Name:        "disable-snat-multiple-gws",
+		Usage:       "Disable SNAT for egress traffic with multiple gateways.",
+		Destination: &cliConfig.Gateway.DisableSNATMultipleGWs,
 	},
 
 	// Deprecated CLI options
@@ -1195,14 +1193,7 @@ func getConfigFilePath(ctx *cli.Context) (string, bool) {
 	if configFile != "" {
 		return configFile, false
 	}
-
-	// Linux default
-	if runtime.GOOS != "windows" {
-		return filepath.Join("/etc", "openvswitch", "ovn_k8s.conf"), true
-	}
-
-	// Windows default
-	return filepath.Join(os.Getenv("OVS_SYSCONFDIR"), "ovn_k8s.conf"), true
+	return "/etc/openvswitch/ovn_k8s.conf", true
 }
 
 // InitConfig reads the config file and common command-line options and

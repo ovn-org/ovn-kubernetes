@@ -3,7 +3,6 @@ package node
 import (
 	"fmt"
 	"net"
-	"runtime"
 	"strings"
 
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
@@ -143,8 +142,12 @@ func (n *OvnNode) initGateway(subnets []*net.IPNet, nodeAnnotator kube.Annotator
 		return err
 	}
 
-	// Wait for gateway resources to be created by the master
-	waiter.AddWait(gatewayReady, prFn)
+	// Wait for gateway resources to be created by the master if DisableSNATMultipleGWs is not set,
+	// as that option does not add default SNAT rules on the GR and the gatewayReady function checks
+	// those default NAT rules are present
+	if !config.Gateway.DisableSNATMultipleGWs {
+		waiter.AddWait(gatewayReady, prFn)
+	}
 	return nil
 }
 
@@ -174,10 +177,8 @@ func CleanupClusterNode(name string) error {
 		klog.Errorf("Failed to delete ovn-bridge-mappings, stdout: %q, stderr: %q, error: %v", stdout, stderr, err)
 	}
 
-	// Delete iptable rules for management port on Linux.
-	if runtime.GOOS != "windows" {
-		DelMgtPortIptRules()
-	}
+	// Delete iptable rules for management port
+	DelMgtPortIptRules()
 
 	return nil
 }
