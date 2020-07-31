@@ -18,9 +18,13 @@ type egressIPLocal struct {
 }
 
 func (e *egressIPLocal) addPodEgressIP(eIP *egressipv1.EgressIP, pod *kapi.Pod) error {
-	podIPs, err := e.getPodIPs(pod)
-	if err != nil {
-		return fmt.Errorf("unable to retrieve pod's: %s/%s IPs, err: %v", pod.Namespace, pod.Name, err)
+	podIPs := e.getPodIPs(pod)
+	if podIPs == nil {
+		e.podRetry.Store(getPodKey(pod), true)
+		return nil
+	}
+	if e.needsRetry(pod) {
+		e.podRetry.Delete(getPodKey(pod))
 	}
 	for _, status := range eIP.Status.Items {
 		mark := util.IPToUint32(status.EgressIP)
@@ -32,9 +36,9 @@ func (e *egressIPLocal) addPodEgressIP(eIP *egressipv1.EgressIP, pod *kapi.Pod) 
 }
 
 func (e *egressIPLocal) deletePodEgressIP(eIP *egressipv1.EgressIP, pod *kapi.Pod) error {
-	podIPs, err := e.getPodIPs(pod)
-	if err != nil {
-		return fmt.Errorf("unable to retrieve pod's: %s/%s IPs, err: %v", pod.Namespace, pod.Name, err)
+	podIPs := e.getPodIPs(pod)
+	if podIPs == nil {
+		return nil
 	}
 	for _, status := range eIP.Status.Items {
 		if err := e.deleteEgressPolicy(podIPs, status); err != nil {

@@ -250,7 +250,7 @@ func NewOvnController(kubeClient kubernetes.Interface, egressIPClient egressipap
 	if addressSetFactory == nil {
 		addressSetFactory = NewOvnAddressSetFactory()
 	}
-	modeEgressIP := newModeEgressIP(ovnNBClient)
+	modeEgressIP := newModeEgressIP()
 	return &Controller{
 		kube: &kube.Kube{
 			KClient:              kubeClient,
@@ -344,19 +344,11 @@ type emptyLBBackendEvent struct {
 	uuid     string
 }
 
-func newModeEgressIP(ovnNBClient goovn.Client) modeEgressIP {
+func newModeEgressIP() modeEgressIP {
 	if config.Gateway.Mode == config.GatewayModeLocal {
-		return &egressIPLocal{
-			egressIPMode: egressIPMode{
-				ovnNBClient: ovnNBClient,
-			},
-		}
+		return &egressIPLocal{}
 	}
-	return &egressIPShared{
-		egressIPMode: egressIPMode{
-			ovnNBClient: ovnNBClient,
-		},
-	}
+	return &egressIPShared{}
 }
 
 func extractEmptyLBBackendsEvents(out []byte) ([]emptyLBBackendEvent, error) {

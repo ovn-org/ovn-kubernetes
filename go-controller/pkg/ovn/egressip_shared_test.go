@@ -98,8 +98,6 @@ var _ = Describe("Shared gateway mode EgressIP Operations with", func() {
 					},
 				}
 
-				lsp := fmt.Sprintf("%s_%s", egressPod.Namespace, egressPod.Name)
-				populatePortAddresses(node1Name, lsp, "0a:00:00:00:00:01", egressPod.Status.PodIP, fakeOvn.ovnNBClient)
 				fakeOvn.fakeExec.AddFakeCmd(
 					&ovntest.ExpectedCmd{
 						Cmd:    fmt.Sprintf("ovn-nbctl --timeout=15 --data=bare --format=table --no-heading --columns=options find logical_router name=GR_%s options:lb_force_snat_ip!=-", node2.name),
@@ -184,8 +182,6 @@ var _ = Describe("Shared gateway mode EgressIP Operations with", func() {
 					},
 				}
 
-				lsp := fmt.Sprintf("%s_%s", egressPod.Namespace, egressPod.Name)
-				populatePortAddresses(node1Name, lsp, "0a:00:00:00:00:01", egressPod.Status.PodIP, fakeOvn.ovnNBClient)
 				fakeOvn.fakeExec.AddFakeCmd(
 					&ovntest.ExpectedCmd{
 						Cmd:    fmt.Sprintf("ovn-nbctl --timeout=15 --data=bare --format=table --no-heading --columns=options find logical_router name=GR_%s options:lb_force_snat_ip!=-", node2.name),
@@ -265,8 +261,6 @@ var _ = Describe("Shared gateway mode EgressIP Operations with", func() {
 						},
 					},
 				}
-				lsp := fmt.Sprintf("%s_%s", egressPod.Namespace, egressPod.Name)
-				populatePortAddresses(node1Name, lsp, "0a:00:00:00:00:01", "", fakeOvn.ovnNBClient)
 
 				fakeOvn.controller.WatchEgressIP()
 
@@ -281,12 +275,6 @@ var _ = Describe("Shared gateway mode EgressIP Operations with", func() {
 				Expect(statuses[0].EgressIP).To(Equal(egressIP.String()))
 
 				podUpdate := newPodWithLabels(namespace, podName, node1Name, podV6IP, egressPodLabel)
-
-				// Mock pod IP found in OVN DB
-				cmd, err := fakeOvn.ovnNBClient.LSPSetDynamicAddresses(lsp, fmt.Sprintf("0a:00:00:00:00:01 %s", podUpdate.Status.PodIP))
-				Expect(err).NotTo(HaveOccurred())
-				err = cmd.Execute()
-				Expect(err).NotTo(HaveOccurred())
 
 				fakeOvn.fakeExec.AddFakeCmd(
 					&ovntest.ExpectedCmd{
@@ -350,9 +338,6 @@ var _ = Describe("Shared gateway mode EgressIP Operations with", func() {
 					},
 				}
 
-				lsp := fmt.Sprintf("%s_%s", egressPod.Namespace, egressPod.Name)
-				populatePortAddresses(node1Name, lsp, "0a:00:00:00:00:01", "", fakeOvn.ovnNBClient)
-
 				fakeOvn.controller.WatchEgressIP()
 
 				_, err := fakeOvn.fakeEgressIPClient.K8sV1().EgressIPs().Create(context.TODO(), &eIP, metav1.CreateOptions{})
@@ -414,9 +399,6 @@ var _ = Describe("Shared gateway mode EgressIP Operations with", func() {
 						},
 					},
 				}
-
-				lsp := fmt.Sprintf("%s_%s", egressPod.Namespace, egressPod.Name)
-				populatePortAddresses(node1Name, lsp, "0a:00:00:00:00:01", egressPod.Status.PodIP, fakeOvn.ovnNBClient)
 
 				fakeOvn.fakeExec.AddFakeCmd(
 					&ovntest.ExpectedCmd{
@@ -500,9 +482,6 @@ var _ = Describe("Shared gateway mode EgressIP Operations with", func() {
 					},
 				}
 
-				lsp := fmt.Sprintf("%s_%s", egressPod.Namespace, egressPod.Name)
-				populatePortAddresses(node1Name, lsp, "0a:00:00:00:00:01", "", fakeOvn.ovnNBClient)
-
 				fakeOvn.controller.WatchEgressIP()
 
 				_, err := fakeOvn.fakeEgressIPClient.K8sV1().EgressIPs().Create(context.TODO(), &eIP, metav1.CreateOptions{})
@@ -568,8 +547,6 @@ var _ = Describe("Shared gateway mode EgressIP Operations with", func() {
 					},
 				}
 
-				lsp := fmt.Sprintf("%s_%s", egressPod.Namespace, egressPod.Name)
-				populatePortAddresses(node1Name, lsp, "0a:00:00:00:00:01", egressPod.Status.PodIP, fakeOvn.ovnNBClient)
 				fakeOvn.fakeExec.AddFakeCmd(
 					&ovntest.ExpectedCmd{
 						Cmd:    fmt.Sprintf("ovn-nbctl --timeout=15 --data=bare --format=table --no-heading --columns=options find logical_router name=GR_%s options:lb_force_snat_ip!=-", node2.name),
@@ -675,8 +652,6 @@ var _ = Describe("Shared gateway mode EgressIP Operations with", func() {
 					},
 				}
 
-				lsp := fmt.Sprintf("%s_%s", egressPod.Namespace, egressPod.Name)
-				populatePortAddresses(node1Name, lsp, "0a:00:00:00:00:01", egressPod.Status.PodIP, fakeOvn.ovnNBClient)
 				fakeOvn.fakeExec.AddFakeCmd(
 					&ovntest.ExpectedCmd{
 						Cmd:    fmt.Sprintf("ovn-nbctl --timeout=15 --data=bare --format=table --no-heading --columns=options find logical_router name=GR_%s options:lb_force_snat_ip!=-", node2.name),

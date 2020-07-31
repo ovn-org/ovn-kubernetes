@@ -7,7 +7,6 @@ import (
 	"strings"
 	"sync"
 
-	goovn "github.com/ebay/go-ovn"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
 	egressipv1 "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/egressip/v1"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
@@ -340,7 +339,6 @@ func getPodKey(pod *kapi.Pod) string {
 }
 
 type egressIPMode struct {
-	ovnNBClient    goovn.Client
 	podRetry       sync.Map
 	gatewayIPCache sync.Map
 }
@@ -388,16 +386,15 @@ func (e *egressIPMode) getGatewayRouterJoinIP(node string, wantsIPv6 bool) (net.
 	return nil, fmt.Errorf("node does not have a gateway router IP corresponding to the IP version requested")
 }
 
-func (e *egressIPMode) getPodIPs(pod *kapi.Pod) ([]net.IP, error) {
-	_, podIps, err := util.GetPortAddresses(getPodKey(pod), e.ovnNBClient)
-	if err != nil || len(podIps) == 0 {
-		e.podRetry.Store(getPodKey(pod), true)
-		return nil, fmt.Errorf("pod does not have IP assigned, err: %v", err)
+func (e *egressIPMode) getPodIPs(pod *kapi.Pod) []net.IP {
+	if len(pod.Status.PodIPs) == 0 {
+		return nil
 	}
-	if e.needsRetry(pod) {
-		e.podRetry.Delete(getPodKey(pod))
+	podIPs := []net.IP{}
+	for _, podIP := range pod.Status.PodIPs {
+		podIPs = append(podIPs, net.ParseIP(podIP.IP))
 	}
-	return podIps, nil
+	return podIPs
 }
 
 func (e *egressIPMode) needsRetry(pod *kapi.Pod) bool {
