@@ -314,7 +314,7 @@ func (pr *PodRequest) ConfigureInterface(namespace string, podName string, ifInf
 	}
 
 	// OCP HACK: wait for OVN to fully process the new pod
-	if err = waitForBrIntFlows(ifInfo.IPs[0].IP.String()); err != nil {
+	if err = waitForPodFlows(ifInfo.MAC.String()); err != nil {
 		return nil, fmt.Errorf("timed out dumping br-int flow entries for sandbox: %v", err)
 	}
 	// END OCP HACK

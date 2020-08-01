@@ -3,10 +3,13 @@
 package cni
 
 import (
+	"bytes"
 	"fmt"
 	"os/exec"
 	"strings"
 	"time"
+
+	"k8s.io/klog"
 
 	"github.com/containernetworking/plugins/pkg/ns"
 
@@ -73,29 +76,45 @@ func setupIPTablesBlocks(netns ns.NetNS, ifInfo *PodInterfaceInfo) error {
 
 // OCP HACK: wait for OVN to fully process the new pod
 func ofctlExec(args ...string) (string, error) {
-	args = append([]string{"--timeout=30"}, args...)
-	output, err := runner.Command("ovs-ofctl", args...).CombinedOutput()
-	if err != nil {
-		return "", fmt.Errorf("failed to run 'ovs-ofctl %s': %v\n  %q", strings.Join(args, " "), err, string(output))
-	}
+	args = append([]string{"--timeout=30", "--no-stats", "--strict"}, args...)
+	var stdout, stderr bytes.Buffer
+	cmd := runner.Command("ovs-ofctl", args...)
+	cmd.SetStdout(&stdout)
+	cmd.SetStderr(&stderr)
 
-	outStr := string(output)
-	trimmed := strings.TrimSpace(outStr)
+	cmdStr := strings.Join(args, " ")
+	klog.V(5).Infof("exec: ovs-ofctl %s", cmdStr)
+
+	err := cmd.Run()
+	stdoutStr := string(stdout.Bytes())
+	stderrStr := string(stderr.Bytes())
+	if err != nil {
+		klog.V(5).Infof("exec: stderr: %q", stderrStr)
+		return "", fmt.Errorf("failed to run 'ovs-ofctl %s': %v\n  %q", cmdStr, err, string(stderr.Bytes()))
+	}
+	klog.V(5).Infof("exec: stdout: %q", stdoutStr)
+
+	trimmed := strings.TrimSpace(stdoutStr)
 	// If output is a single line, strip the trailing newline
 	if strings.Count(trimmed, "\n") == 0 {
-		outStr = trimmed
+		stdoutStr = trimmed
 	}
-
-	return outStr, nil
+	return stdoutStr, nil
 }
 
-func waitForBrIntFlows(ip string) error {
-	return wait.PollImmediate(100*time.Millisecond, 20*time.Second, func() (bool, error) {
-		stdout, err := ofctlExec("dump-flows", "br-int")
+func waitForPodFlows(mac string) error {
+	return wait.PollImmediate(200*time.Millisecond, 20*time.Second, func() (bool, error) {
+		//Query the flows by mac address and count the number of flows.
+		query := fmt.Sprintf("table=9,dl_src=%s",mac)
+		//ovs-ofctl dumps error on stderr, so stdout will only dump flow data if matches the query.
+		stdout, err := ofctlExec("dump-flows", "br-int", query)
 		if err != nil {
 			return false, nil
 		}
-		return strings.Contains(stdout, ip), nil
+		if len(stdout) == 0 {
+			return false, nil
+		}
+		return true, nil
 	})
 }
 
