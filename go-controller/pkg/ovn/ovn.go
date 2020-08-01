@@ -289,14 +289,21 @@ func (oc *Controller) Run() error {
 	oc.syncPeriodic()
 	klog.Infof("Starting all the Watchers...")
 	start := time.Now()
-	// WatchNodes must be started first so that its initial Add will
-	// create all node logical switches, which other watches may depend on.
+
+	// WatchNamespaces() should be started first because it has no other
+	// dependencies, and WatchNodes() depends on it
+	if err := oc.WatchNamespaces(); err != nil {
+		return err
+	}
+
+	// WatchNodes must be started next because it creates the node switch
+	// which most other watches depend on.
 	// https://github.com/ovn-org/ovn-kubernetes/pull/859
 	if err := oc.WatchNodes(); err != nil {
 		return err
 	}
 
-	for _, f := range []func() error{oc.WatchNamespaces, oc.WatchPods, oc.WatchServices,
+	for _, f := range []func() error{oc.WatchPods, oc.WatchServices,
 		oc.WatchEndpoints, oc.WatchNetworkPolicy, oc.WatchCRD} {
 		if err := f(); err != nil {
 			return err
