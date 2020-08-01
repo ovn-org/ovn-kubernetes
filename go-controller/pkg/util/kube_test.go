@@ -2,15 +2,16 @@ package util
 
 import (
 	"fmt"
+	"testing"
+
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/cni/types"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
 	"github.com/stretchr/testify/assert"
 	v1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	"testing"
 )
 
-func TestNewClientset(t *testing.T) {
+func TestNewClientsets(t *testing.T) {
 	tests := []struct {
 		desc        string
 		inpConfig   config.KubernetesConfig
@@ -61,12 +62,15 @@ func TestNewClientset(t *testing.T) {
 
 	for i, tc := range tests {
 		t.Run(fmt.Sprintf("%d:%s", i, tc.desc), func(t *testing.T) {
-			res, e := NewClientset(&tc.inpConfig)
+			res, eIPRes, egressFirewall, crd, e := NewClientsets(&tc.inpConfig)
 			t.Log(res, e)
 			if tc.errExpected {
 				assert.Error(t, e)
 			} else {
 				assert.NotNil(t, res)
+				assert.NotNil(t, egressFirewall)
+				assert.NotNil(t, crd)
+				assert.NotNil(t, eIPRes)
 			}
 
 		})

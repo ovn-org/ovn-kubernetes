@@ -66,6 +66,7 @@ fi
 # OVN_SB_RAFT_ELECTION_TIMER - ovn south db election timer in ms (default 1000)
 # OVN_SSL_ENABLE - use SSL transport to NB/SB db and northd (default: no)
 # OVN_REMOTE_PROBE_INTERVAL - ovn remote probe interval in ms (default 100000)
+# OVN_EGRESSIP_ENABLE - enable egress IP for ovn-kubernetes
 
 # The argument to the command is the operation to be performed
 # ovn-master ovn-controller ovn-node display display_env ovn_debug
@@ -172,9 +173,12 @@ ovn_sb_raft_election_timer=${OVN_SB_RAFT_ELECTION_TIMER:-1000}
 
 ovn_hybrid_overlay_enable=${OVN_HYBRID_OVERLAY_ENABLE:-}
 ovn_hybrid_overlay_net_cidr=${OVN_HYBRID_OVERLAY_NET_CIDR:-}
+ovn_disable_snat_multiple_gws=${OVN_DISABLE_SNAT_MULTIPLE_GWS:-}
 #OVN_REMOTE_PROBE_INTERVAL - ovn remote probe interval in ms (default 100000)
 ovn_remote_probe_interval=${OVN_REMOTE_PROBE_INTERVAL:-100000}
 ovn_multicast_enable=${OVN_MULTICAST_ENABLE:-}
+#OVN_EGRESSIP_ENABLE - enable egress IP for ovn-kubernetes
+egressip_enable=${OVN_EGRESSIP_ENABLE:-false}
 
 # Determine the ovn rundir.
 if [[ -f /usr/bin/ovn-appctl ]]; then
@@ -762,6 +766,10 @@ ovn-master() {
       hybrid_overlay_flags="${hybrid_overlay_flags} --hybrid-overlay-cluster-subnets=${ovn_hybrid_overlay_net_cidr}"
     fi
   fi
+  disable_snat_multiple_gws_flag=
+  if [[ ${ovn_disable_snat_multiple_gws} == "true" ]]; then
+      disable_snat_multiple_gws_flag="--disable-snat-multiple-gws"
+  fi
   local ovn_master_ssl_opts=""
   [[ "yes" == ${OVN_SSL_ENABLE} ]] && {
     ovn_master_ssl_opts="
@@ -793,10 +801,12 @@ ovn-master() {
     --logfile-maxbackups=${ovnkube_logfile_maxbackups} \
     --logfile-maxage=${ovnkube_logfile_maxage} \
     ${hybrid_overlay_flags} \
+    ${disable_snat_multiple_gws_flag} \
     --pidfile ${OVN_RUNDIR}/ovnkube-master.pid \
     --logfile /var/log/ovn-kubernetes/ovnkube-master.log \
     ${ovn_master_ssl_opts} \
     ${multicast_enabled_flag} \
+    --egress-ip-enable ${egressip_enable} \
     --metrics-bind-address "0.0.0.0:9409" &
   echo "=============== ovn-master ========== running"
   wait_for_event attempts=3 process_ready ovnkube-master
@@ -876,6 +886,11 @@ ovn-node() {
     fi
   fi
 
+  disable_snat_multiple_gws_flag=
+  if [[ ${ovn_disable_snat_multiple_gws} == "true" ]]; then
+      disable_snat_multiple_gws_flag="--disable-snat-multiple-gws"
+  fi
+
   multicast_enabled_flag=
   if [[ ${ovn_multicast_enable} == "true" ]]; then
       multicast_enabled_flag="--enable-multicast"
@@ -917,12 +932,15 @@ ovn-node() {
     --logfile-maxbackups=${ovnkube_logfile_maxbackups} \
     --logfile-maxage=${ovnkube_logfile_maxage} \
     ${hybrid_overlay_flags} \
+    ${disable_snat_multiple_gws_flag} \
     --gateway-mode=${ovn_gateway_mode} ${ovn_gateway_opts} \
     --pidfile ${OVN_RUNDIR}/ovnkube.pid \
     --logfile /var/log/ovn-kubernetes/ovnkube.log \
     ${ovn_node_ssl_opts} \
     --inactivity-probe=${ovn_remote_probe_interval} \
     ${multicast_enabled_flag} \
+    --ovn-metrics-bind-address "0.0.0.0:9476" \
+    --egress-ip-enable ${egressip_enable} \
     --metrics-bind-address "0.0.0.0:9410" &
 
   wait_for_event attempts=3 process_ready ovnkube
@@ -1073,9 +1091,6 @@ case ${cmd} in
 "sb-ovsdb-raft")
   ovsdb-raft sb ${ovn_sb_port} ${ovn_sb_raft_port} ${ovn_sb_raft_election_timer}
   ;;
-"db-raft-metrics")
-  db-raft-metrics
-  ;;
 "ovs-metrics")
   ovs-metrics
   ;;
@@ -1083,7 +1098,7 @@ case ${cmd} in
   echo "invalid command ${cmd}"
   echo "valid v3 commands: ovs-server nb-ovsdb sb-ovsdb run-ovn-northd ovn-master " \
     "ovn-controller ovn-node display_env display ovn_debug cleanup-ovs-server " \
-    "cleanup-ovn-node nb-ovsdb-raft sb-ovsdb-raft db-raft-metrics"
+    "cleanup-ovn-node nb-ovsdb-raft sb-ovsdb-raft"
   exit 0
   ;;
 esac

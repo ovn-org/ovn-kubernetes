@@ -5,7 +5,6 @@ set -ex
 SHARD=$1
 
 pushd $GOPATH/src/k8s.io/kubernetes/
-export KUBERNETES_CONFORMANCE_TEST=y
 export KUBECONFIG=${HOME}/admin.conf
 export MASTER_NAME=${KIND_CLUSTER_NAME}-control-plane
 export NODE_NAMES=${MASTER_NAME}
@@ -35,6 +34,9 @@ EndpointSlices
 
 # NOT IMPLEMENTED; SEE DISCUSSION IN https://github.com/ovn-org/ovn-kubernetes/pull/1225
 named port.+\[Feature:NetworkPolicy\]
+
+# TO BE FIXED BY https://github.com/kubernetes/kubernetes/pull/93119
+GCE
 
 # ???
 \[Feature:NoSNAT\]
@@ -89,20 +91,22 @@ fi
 
 SKIPPED_TESTS="$(groomTestList "${SKIPPED_TESTS}")"
 
-GINKGO_ARGS="--num-nodes=3 --ginkgo.skip=${SKIPPED_TESTS} --disable-log-dump=false --report-dir=${E2E_REPORT_DIR} --report-prefix=${E2E_REPORT_PREFIX}"
+# if we set PARALLEL=true, skip serial test
+if [ "${PARALLEL:-false}" = "true" ]; then
+  export GINKGO_PARALLEL=y
+  export GINKGO_PARALLEL_NODES=4
+  SKIPPED_TESTS="${SKIPPED_TESTS}|\\[Serial\\]"
+fi
 
 case "$SHARD" in
-	shard-n-other)
-		# all tests that don't have P as their sixth letter after the N, and all other tests
-		GINKGO_ARGS="${GINKGO_ARGS} "'--ginkgo.focus=\[sig-network\]\s([Nn](.{6}[^Pp].*|.{0,6}$)|[^Nn].*)'
+	shard-network)
+		FOCUS="\\[sig-network\\]"
 		;;
-	shard-np)
-		# all tests that have P as the sixth letter after the N
-		GINKGO_ARGS="${GINKGO_ARGS} "'--ginkgo.focus=\[sig-network\]\s[Nn].{6}[Pp].*$'
+	shard-conformance)
+		FOCUS="\\[Conformance\\]"
 		;;
 	shard-test)
-		TEST_REGEX_REPR=$(echo ${@:2} | sed 's/ /\\s/g')
-		GINKGO_ARGS="${GINKGO_ARGS} "'--ginkgo.focus=\[sig-network\].*'$TEST_REGEX_REPR'.*'
+		FOCUS=$(echo ${@:2} | sed 's/ /\\s/g')
 		;;
 	*)
 		echo "unknown shard"
@@ -110,4 +114,19 @@ case "$SHARD" in
 	;;
 esac
 
-e2e.test ${GINKGO_ARGS}
+# setting this env prevents ginkgo e2e from trying to run provider setup
+export KUBERNETES_CONFORMANCE_TEST='y'
+# setting these is required to make RuntimeClass tests work ... :/
+export KUBE_CONTAINER_RUNTIME=remote
+export KUBE_CONTAINER_RUNTIME_ENDPOINT=unix:///run/containerd/containerd.sock
+export KUBE_CONTAINER_RUNTIME_NAME=containerd
+# FIXME we should not tolerate flakes
+# but until then, we retry the test in the same job
+# to stop PR retriggers for totally broken code
+export GINKGO_TOLERATE_FLAKES='y'
+export FLAKE_ATTEMPTS=2
+NUM_NODES=2
+./hack/ginkgo-e2e.sh \
+'--provider=skeleton' "--num-nodes=${NUM_NODES}" \
+"--ginkgo.focus=${FOCUS}" "--ginkgo.skip=${SKIPPED_TESTS}" \
+"--report-dir=${E2E_REPORT_DIR}" '--disable-log-dump=true'

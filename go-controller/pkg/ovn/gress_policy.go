@@ -7,7 +7,7 @@ import (
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
 
-	"k8s.io/api/core/v1"
+	v1 "k8s.io/api/core/v1"
 	knet "k8s.io/api/networking/v1"
 	"k8s.io/apimachinery/pkg/util/sets"
 	"k8s.io/klog"
@@ -147,7 +147,7 @@ func (gp *gressPolicy) getL3MatchFromAddressSet() string {
 func constructEmptyMatchString() string {
 	switch {
 	case config.IPv4Mode && config.IPv6Mode:
-		return "ip4 || ip6"
+		return "(ip4 || ip6)"
 	case config.IPv6Mode:
 		return "ip6"
 	default:
@@ -177,7 +177,7 @@ func (gp *gressPolicy) constructMatchString(v4AddressSets, v6AddressSets []strin
 		matchStr = v6MatchStr
 	}
 	if len(v4AddressSets) > 0 && len(v6AddressSets) > 0 {
-		matchStr = v4MatchStr + "||" + v6MatchStr
+		matchStr = fmt.Sprintf("(%s || %s)", v4MatchStr, v6MatchStr)
 	}
 	return matchStr
 }
@@ -405,7 +405,7 @@ func constructIPStringForACL(direction string, ipCIDRs []string) string {
 		matchStr = v6MatchStr
 	}
 	if len(v4CIDRs) > 0 && len(v6CIDRs) > 0 {
-		matchStr = v4MatchStr + "||" + v6MatchStr
+		matchStr = fmt.Sprintf("(%s || %s)", v4MatchStr, v6MatchStr)
 	}
 	return matchStr
 }

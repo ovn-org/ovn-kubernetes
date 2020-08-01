@@ -10,13 +10,11 @@ if [ -z "${crds}" ]; then
 fi
 
 if  ! ( command -v controller-gen > /dev/null ); then
-  # Need to take an unreleased version of controller-tools
-  # because of controller-tools bug 302
-  echo "controller-gen not found, installing sigs.k8s.io/controller-tools@83f6193..."
+  echo "controller-gen not found, installing sigs.k8s.io/controller-tools"
   olddir="${PWD}"
   builddir="$(mktemp -d)"
   cd "${builddir}"
-  GO111MODULE=on go get -u sigs.k8s.io/controller-tools/cmd/controller-gen@83f6193
+  GO111MODULE=on go get -u sigs.k8s.io/controller-tools/cmd/controller-gen
   cd "${olddir}"
   if [[ "${builddir}" == /tmp/* ]]; then #paranoia
       rm -rf "${builddir}"
@@ -56,4 +54,10 @@ done
 
 echo "Generating CRDs"
 mkdir -p _output/crds
-controller-gen crd paths=./pkg/crd/... output:crd:dir=_output/crds
+controller-gen crd:crdVersions="v1"  paths=./pkg/crd/... output:crd:dir=_output/crds
+echo "Editing egressFirewall CRD"
+## We desire that only egressFirewalls with the name "default" are accepted by the apiserver. The only
+## way that we can put a pattern for validation on the name of the object which is embedded in
+## metav1.ObjectMeta it is required that we add it after the generation of the CRD.
+sed -i -e ':begin;$!N;s/.*metadata:\n.*type: object/          metadata: \n            type: object\n            properties:\n              name:\n                type: string\n                pattern: ^default$/;tbegin;P;D' \
+	_output/crds/k8s.ovn.org_egressfirewalls.yaml

@@ -9,6 +9,7 @@ import (
 
 	"github.com/coreos/go-iptables/iptables"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
+	egressipv1 "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/egressip/v1"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
 	kapi "k8s.io/api/core/v1"
 	"k8s.io/klog"
@@ -18,6 +19,7 @@ import (
 const (
 	iptableNodePortChain   = "OVN-KUBE-NODEPORT"
 	iptableExternalIPChain = "OVN-KUBE-EXTERNALIP"
+	iptableEgressIPChain   = "OVN-KUBE-EGRESSIP"
 )
 
 func clusterIPTablesProtocols() []iptables.Protocol {
@@ -174,6 +176,40 @@ func getNodePortIPTRules(svcPort kapi.ServicePort, nodeIP *net.IPNet, targetIP s
 	}
 }
 
+func getEgressIPTRules(eIPStatus egressipv1.EgressIPStatusItem, gatewayRouterIP string) []iptRule {
+	var protocol iptables.Protocol
+	if utilnet.IsIPv6String(eIPStatus.EgressIP) {
+		protocol = iptables.ProtocolIPv6
+	} else {
+		protocol = iptables.ProtocolIPv4
+	}
+	return []iptRule{
+		{
+			table: "nat",
+			chain: iptableEgressIPChain,
+			args: []string{
+				"-s", gatewayRouterIP,
+				"-m", "mark",
+				"--mark", fmt.Sprintf("0x%x", util.IPToUint32(eIPStatus.EgressIP)),
+				"-j", "SNAT",
+				"--to-source", eIPStatus.EgressIP,
+			},
+			protocol: protocol,
+		},
+		{
+			table: "filter",
+			chain: iptableEgressIPChain,
+			args: []string{
+				"-d", eIPStatus.EgressIP,
+				"-m", "conntrack",
+				"--ctstate", "NEW",
+				"-j", "REJECT",
+			},
+			protocol: protocol,
+		},
+	}
+}
+
 func getExternalIPTRules(svcPort kapi.ServicePort, externalIP, dstIP string) []iptRule {
 	var protocol iptables.Protocol
 	if utilnet.IsIPv6String(externalIP) {
@@ -211,15 +247,15 @@ func getExternalIPTRules(svcPort kapi.ServicePort, externalIP, dstIP string) []i
 func getLocalGatewayNATRules(ifname string, ip net.IP) []iptRule {
 	// Allow packets to/from the gateway interface in case defaults deny
 	var protocol iptables.Protocol
-	// OCP HACK: Block MCS Access. https://github.com/openshift/ovn-kubernetes/pull/170
-	rules := make([]iptRule, 0)
-	generateBlockMCSRules(&rules)
-	// END OCP HACK
 	if utilnet.IsIPv6(ip) {
 		protocol = iptables.ProtocolIPv6
 	} else {
 		protocol = iptables.ProtocolIPv4
 	}
+	// OCP HACK: Block MCS Access. https://github.com/openshift/ovn-kubernetes/pull/170
+	rules := make([]iptRule, 0)
+	generateBlockMCSRules(&rules, protocol)
+	// END OCP HACK
 	return append(rules, []iptRule{
 		{
 			table: "filter",

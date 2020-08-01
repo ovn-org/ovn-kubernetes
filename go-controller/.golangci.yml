@@ -1,6 +1,7 @@
 run:
   skip-dirs:
     - vendor
+    - pkg/crd
 
   skip-files:
     - ".*\\_test.go$"

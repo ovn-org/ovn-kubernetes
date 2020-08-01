@@ -2,10 +2,11 @@ package util
 
 import (
 	"fmt"
-	"github.com/stretchr/testify/mock"
 	"net"
 	"reflect"
 	"testing"
+
+	"github.com/stretchr/testify/mock"
 
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/kube"

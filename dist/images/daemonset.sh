@@ -34,7 +34,9 @@ OVNKUBE_LOGFILE_MAXAGE=""
 OVN_MASTER_COUNT=""
 OVN_REMOTE_PROBE_INTERVAL=""
 OVN_HYBRID_OVERLAY_ENABLE=""
+OVN_DISABLE_SNAT_MULTIPLE_GWS=""
 OVN_MULTICAST_ENABLE=""
+OVN_EGRESSIP_ENABLE=
 
 # Parse parameters given as arguments to this script.
 while [ "$1" != "" ]; do
@@ -128,8 +130,14 @@ while [ "$1" != "" ]; do
   --hybrid-enabled)
     OVN_HYBRID_OVERLAY_ENABLE=$VALUE
     ;;
+  --disable-snat-multiple-gws)
+    OVN_DISABLE_SNAT_MULTIPLE_GWS=$VALUE
+    ;;
   --multicast-enabled)
     OVN_MULTICAST_ENABLE=$VALUE
+    ;;
+  --egress-ip-enable)
+    OVN_EGRESSIP_ENABLE=$VALUE
     ;;
   *)
     echo "WARNING: unknown parameter \"$PARAM\""
@@ -180,8 +188,12 @@ ovnkube_logfile_maxage=${OVNKUBE_LOGFILE_MAXAGE:-"5"}
 echo "ovnkube_logfile_maxage: ${ovnkube_logfile_maxage}"
 ovn_hybrid_overlay_enable=${OVN_HYBRID_OVERLAY_ENABLE}
 echo "ovn_hybrid_overlay_enable: ${ovn_hybrid_overlay_enable}"
+ovn_egress_ip_enable=${OVN_EGRESSIP_ENABLE}
+echo "ovn_egress_ip_enable: ${ovn_egress_ip_enable}"
 ovn_hybrid_overlay_net_cidr=${OVN_HYBRID_OVERLAY_NET_CIDR}
 echo "ovn_hybrid_overlay_net_cidr: ${ovn_hybrid_overlay_net_cidr}"
+ovn_disable_snat_multiple_gws=${OVN_DISABLE_SNAT_MULTIPLE_GWS}
+echo "ovn_disable_snat_multiple_gws: ${ovn_disable_snat_multiple_gws}"
 ovn_ssl_en=${OVN_SSL_ENABLE:-"no"}
 echo "ovn_ssl_enable: ${ovn_ssl_en}"
 ovn_nb_raft_election_timer=${OVN_NB_RAFT_ELECTION_TIMER:-1000}
@@ -215,7 +227,9 @@ ovn_image=${image} \
   ovnkube_logfile_maxage=${ovnkube_logfile_maxage} \
   ovn_hybrid_overlay_net_cidr=${ovn_hybrid_overlay_net_cidr} \
   ovn_hybrid_overlay_enable=${ovn_hybrid_overlay_enable} \
+  ovn_disable_snat_multiple_gws=${ovn_disable_snat_multiple_gws} \
   ovn_multicast_enable=${ovn_multicast_enable} \
+  ovn_egress_ip_enable=${ovn_egress_ip_enable} \
   ovn_ssl_en=${ovn_ssl_en} \
   ovn_remote_probe_interval=${ovn_remote_probe_interval} \
   j2 ../templates/ovnkube-node.yaml.j2 -o ../yaml/ovnkube-node.yaml
@@ -230,7 +244,9 @@ ovn_image=${image} \
   ovnkube_logfile_maxage=${ovnkube_logfile_maxage} \
   ovn_hybrid_overlay_net_cidr=${ovn_hybrid_overlay_net_cidr} \
   ovn_hybrid_overlay_enable=${ovn_hybrid_overlay_enable} \
+  ovn_disable_snat_multiple_gws=${ovn_disable_snat_multiple_gws} \
   ovn_multicast_enable=${ovn_multicast_enable} \
+  ovn_egress_ip_enable=${ovn_egress_ip_enable} \
   ovn_ssl_en=${ovn_ssl_en} \
   ovn_master_count=${ovn_master_count} \
   ovn_gateway_mode=${ovn_gateway_mode} \
@@ -275,5 +291,7 @@ net_cidr=${net_cidr} svc_cidr=${svc_cidr} \
   j2 ../templates/ovn-setup.yaml.j2 -o ../yaml/ovn-setup.yaml
 
 cp ../templates/ovnkube-monitor.yaml.j2 ../yaml/ovnkube-monitor.yaml
+cp ../templates/k8s.ovn.org_egressfirewalls.yaml.j2 ../yaml/k8s.ovn.org_egressfirewalls.yaml
+cp ../templates/k8s.ovn.org_egressips.yaml.j2 ../yaml/k8s.ovn.org_egressips.yaml
 
 exit 0

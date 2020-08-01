@@ -16,13 +16,17 @@ import (
 	"k8s.io/client-go/tools/clientcmd"
 	"k8s.io/client-go/util/cert"
 
+	egressfirewallclientset "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/egressfirewall/v1/apis/clientset/versioned"
+	egressipclientset "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/egressip/v1/apis/clientset/versioned"
+	apiextensionsclientset "k8s.io/apiextensions-apiserver/pkg/client/clientset/clientset"
+
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/cni/types"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
 )
 
-// NewClientset creates a Kubernetes clientset from either a kubeconfig,
+// NewClientsets creates a Kubernetes clientset from either a kubeconfig,
 // TLS properties, or an apiserver URL
-func NewClientset(conf *config.KubernetesConfig) (*kubernetes.Clientset, error) {
+func NewClientsets(conf *config.KubernetesConfig) (*kubernetes.Clientset, *egressipclientset.Clientset, *egressfirewallclientset.Clientset, *apiextensionsclientset.Clientset, error) {
 	var kconfig *rest.Config
 	var err error
 
@@ -32,7 +36,7 @@ func NewClientset(conf *config.KubernetesConfig) (*kubernetes.Clientset, error) 
 	} else if strings.HasPrefix(conf.APIServer, "https") {
 		// TODO: Looks like the check conf.APIServer is redundant and can be removed
 		if conf.APIServer == "" || conf.Token == "" {
-			return nil, fmt.Errorf("TLS-secured apiservers require token and CA certificate")
+			return nil, nil, nil, nil, fmt.Errorf("TLS-secured apiservers require token and CA certificate")
 		}
 		kconfig = &rest.Config{
 			Host:        conf.APIServer,
@@ -40,7 +44,7 @@ func NewClientset(conf *config.KubernetesConfig) (*kubernetes.Clientset, error) 
 		}
 		if conf.CACert != "" {
 			if _, err := cert.NewPool(conf.CACert); err != nil {
-				return nil, err
+				return nil, nil, nil, nil, err
 			}
 			kconfig.TLSClientConfig = rest.TLSClientConfig{CAFile: conf.CACert}
 		}
@@ -53,13 +57,34 @@ func NewClientset(conf *config.KubernetesConfig) (*kubernetes.Clientset, error) 
 		kconfig, err = rest.InClusterConfig()
 	}
 	if err != nil {
-		return nil, err
+		return nil, nil, nil, nil, err
+	}
+
+	crdClientset, err := apiextensionsclientset.NewForConfig(kconfig)
+	if err != nil {
+		return nil, nil, nil, nil, err
+	}
+
+	// CRDS are not protobuf serializable, only JSON. So don't use that config for CRD clientsets
+	egressFirewallClientset, err := egressfirewallclientset.NewForConfig(kconfig)
+	if err != nil {
+		return nil, nil, nil, nil, err
+	}
+
+	egressIPClientset, err := egressipclientset.NewForConfig(kconfig)
+	if err != nil {
+		return nil, nil, nil, nil, err
 	}
 
 	kconfig.AcceptContentTypes = "application/vnd.kubernetes.protobuf,application/json"
 	kconfig.ContentType = "application/vnd.kubernetes.protobuf"
 
-	return kubernetes.NewForConfig(kconfig)
+	kClientset, err := kubernetes.NewForConfig(kconfig)
+	if err != nil {
+		return nil, nil, nil, nil, err
+	}
+
+	return kClientset, egressIPClientset, egressFirewallClientset, crdClientset, nil
 }
 
 // IsClusterIPSet checks if the service is an headless service or not

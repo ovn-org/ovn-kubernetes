@@ -9,7 +9,6 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
-	"runtime"
 	"strconv"
 	"strings"
 
@@ -70,9 +69,8 @@ var (
 
 	// CNI holds CNI-related parsed config file parameters and command-line overrides
 	CNI = CNIConfig{
-		ConfDir:         "/etc/cni/net.d",
-		Plugin:          "ovn-k8s-cni-overlay",
-		WinHNSNetworkID: "",
+		ConfDir: "/etc/cni/net.d",
+		Plugin:  "ovn-k8s-cni-overlay",
 	}
 
 	// Kubernetes holds Kubernetes-related parsed config file parameters and command-line overrides
@@ -80,6 +78,11 @@ var (
 		APIServer:          DefaultAPIServer,
 		RawServiceCIDRs:    "172.16.1.0/24",
 		OVNConfigNamespace: "ovn-kubernetes",
+	}
+
+	// OVNKubernetesFeatureConfig holds OVN-Kubernetes feature enhancement config file parameters and command-line overrides
+	OVNKubernetesFeature = OVNKubernetesFeatureConfig{
+		EgressIPEnabled: true,
 	}
 
 	// OvnNorth holds northbound OVN database client and server authentication and location details
@@ -180,26 +183,30 @@ type CNIConfig struct {
 	ConfDir string `gcfg:"conf-dir"`
 	// Plugin specifies the name of the CNI plugin
 	Plugin string `gcfg:"plugin"`
-	// Windows ONLY, specifies the ID of the HNS Network to which the containers will be attached
-	WinHNSNetworkID string `gcfg:"win-hnsnetwork-id"`
 }
 
 // KubernetesConfig holds Kubernetes-related parsed config file parameters and command-line overrides
 type KubernetesConfig struct {
-	Kubeconfig           string `gcfg:"kubeconfig"`
-	CACert               string `gcfg:"cacert"`
-	APIServer            string `gcfg:"apiserver"`
-	Token                string `gcfg:"token"`
-	CompatServiceCIDR    string `gcfg:"service-cidr"`
-	RawServiceCIDRs      string `gcfg:"service-cidrs"`
-	ServiceCIDRs         []*net.IPNet
-	OVNConfigNamespace   string `gcfg:"ovn-config-namespace"`
-	MetricsBindAddress   string `gcfg:"metrics-bind-address"`
-	MetricsEnablePprof   bool   `gcfg:"metrics-enable-pprof"`
-	OVNEmptyLbEvents     bool   `gcfg:"ovn-empty-lb-events"`
-	PodIP                string `gcfg:"pod-ip"` // UNUSED
-	RawNoHostSubnetNodes string `gcfg:"no-hostsubnet-nodes"`
-	NoHostSubnetNodes    *metav1.LabelSelector
+	Kubeconfig            string `gcfg:"kubeconfig"`
+	CACert                string `gcfg:"cacert"`
+	APIServer             string `gcfg:"apiserver"`
+	Token                 string `gcfg:"token"`
+	CompatServiceCIDR     string `gcfg:"service-cidr"`
+	RawServiceCIDRs       string `gcfg:"service-cidrs"`
+	ServiceCIDRs          []*net.IPNet
+	OVNConfigNamespace    string `gcfg:"ovn-config-namespace"`
+	MetricsBindAddress    string `gcfg:"metrics-bind-address"`
+	OVNMetricsBindAddress string `gcfg:"ovn-metrics-bind-address"`
+	MetricsEnablePprof    bool   `gcfg:"metrics-enable-pprof"`
+	OVNEmptyLbEvents      bool   `gcfg:"ovn-empty-lb-events"`
+	PodIP                 string `gcfg:"pod-ip"` // UNUSED
+	RawNoHostSubnetNodes  string `gcfg:"no-hostsubnet-nodes"`
+	NoHostSubnetNodes     *metav1.LabelSelector
+}
+
+// OVNKubernetesFeatureConfig holds OVN-Kubernetes feature enhancement config file parameters and command-line overrides
+type OVNKubernetesFeatureConfig struct {
+	EgressIPEnabled bool `gcfg:"egress-ip-enable"`
 }
 
 // GatewayMode holds the node gateway mode
@@ -226,6 +233,8 @@ type GatewayConfig struct {
 	VLANID uint `gcfg:"vlan-id"`
 	// NodeportEnable sets whether to provide Kubernetes NodePort service or not
 	NodeportEnable bool `gcfg:"nodeport"`
+	// DisableSNATMultipleGws sets whether to disable SNAT of egress traffic in namespaces annotated with routing-external-gws
+	DisableSNATMultipleGWs bool `gcfg:"disable-snat-multiple-gws"`
 }
 
 // OvnAuthConfig holds client authentication and location details for
@@ -282,27 +291,29 @@ const (
 
 // Config is used to read the structured config file and to cache config in testcases
 type config struct {
-	Default       DefaultConfig
-	Logging       LoggingConfig
-	CNI           CNIConfig
-	Kubernetes    KubernetesConfig
-	OvnNorth      OvnAuthConfig
-	OvnSouth      OvnAuthConfig
-	Gateway       GatewayConfig
-	MasterHA      MasterHAConfig
-	HybridOverlay HybridOverlayConfig
+	Default              DefaultConfig
+	Logging              LoggingConfig
+	CNI                  CNIConfig
+	OVNKubernetesFeature OVNKubernetesFeatureConfig
+	Kubernetes           KubernetesConfig
+	OvnNorth             OvnAuthConfig
+	OvnSouth             OvnAuthConfig
+	Gateway              GatewayConfig
+	MasterHA             MasterHAConfig
+	HybridOverlay        HybridOverlayConfig
 }
 
 var (
-	savedDefault       DefaultConfig
-	savedLogging       LoggingConfig
-	savedCNI           CNIConfig
-	savedKubernetes    KubernetesConfig
-	savedOvnNorth      OvnAuthConfig
-	savedOvnSouth      OvnAuthConfig
-	savedGateway       GatewayConfig
-	savedMasterHA      MasterHAConfig
-	savedHybridOverlay HybridOverlayConfig
+	savedDefault              DefaultConfig
+	savedLogging              LoggingConfig
+	savedCNI                  CNIConfig
+	savedOVNKubernetesFeature OVNKubernetesFeatureConfig
+	savedKubernetes           KubernetesConfig
+	savedOvnNorth             OvnAuthConfig
+	savedOvnSouth             OvnAuthConfig
+	savedGateway              GatewayConfig
+	savedMasterHA             MasterHAConfig
+	savedHybridOverlay        HybridOverlayConfig
 	// legacy service-cluster-ip-range CLI option
 	serviceClusterIPRange string
 	// legacy cluster-subnet CLI option
@@ -318,6 +329,7 @@ func init() {
 	savedDefault = Default
 	savedLogging = Logging
 	savedCNI = CNI
+	savedOVNKubernetesFeature = OVNKubernetesFeature
 	savedKubernetes = Kubernetes
 	savedOvnNorth = OvnNorth
 	savedOvnSouth = OvnSouth
@@ -326,6 +338,7 @@ func init() {
 	savedHybridOverlay = HybridOverlay
 	Flags = append(Flags, CommonFlags...)
 	Flags = append(Flags, CNIFlags...)
+	Flags = append(Flags, OVNK8sFeatureFlags...)
 	Flags = append(Flags, K8sFlags...)
 	Flags = append(Flags, OvnNBFlags...)
 	Flags = append(Flags, OvnSBFlags...)
@@ -340,6 +353,7 @@ func PrepareTestConfig() {
 	Default = savedDefault
 	Logging = savedLogging
 	CNI = savedCNI
+	OVNKubernetesFeature = savedOVNKubernetesFeature
 	Kubernetes = savedKubernetes
 	OvnNorth = savedOvnNorth
 	OvnSouth = savedOvnSouth
@@ -567,10 +581,15 @@ var CNIFlags = []cli.Flag{
 		Destination: &cliConfig.CNI.Plugin,
 		Value:       CNI.Plugin,
 	},
-	&cli.StringFlag{
-		Name:        "win-hnsnetwork-id",
-		Usage:       "the ID of the HNS network to which containers will be attached (default: not set)",
-		Destination: &cliConfig.CNI.WinHNSNetworkID,
+}
+
+// OVNK8sFeatureFlags capture OVN-Kubernetes feature related options
+var OVNK8sFeatureFlags = []cli.Flag{
+	&cli.BoolFlag{
+		Name:        "egress-ip-enable",
+		Usage:       "Configure to use EgressIP CRD feature with ovn-kubernetes.",
+		Destination: &cliConfig.OVNKubernetesFeature.EgressIPEnabled,
+		Value:       OVNKubernetesFeature.EgressIPEnabled,
 	},
 }
 
@@ -624,8 +643,13 @@ var K8sFlags = []cli.Flag{
 	},
 	&cli.StringFlag{
 		Name:        "metrics-bind-address",
-		Usage:       "The IP address and port for the metrics server to serve on (set to 0.0.0.0 for all IPv4 interfaces)",
+		Usage:       "The IP address and port for the OVN K8s metrics server to serve on (set to 0.0.0.0 for all IPv4 interfaces)",
 		Destination: &cliConfig.Kubernetes.MetricsBindAddress,
+	},
+	&cli.StringFlag{
+		Name:        "ovn-metrics-bind-address",
+		Usage:       "The IP address and port for the OVN metrics server to serve on (set to 0.0.0.0 for all IPv4 interfaces)",
+		Destination: &cliConfig.Kubernetes.OVNMetricsBindAddress,
 	},
 	&cli.BoolFlag{
 		Name:        "metrics-enable-pprof",
@@ -760,6 +784,11 @@ var OVNGatewayFlags = []cli.Flag{
 		Usage:       "Setup nodeport based ingress on gateways.",
 		Destination: &cliConfig.Gateway.NodeportEnable,
 	},
+	&cli.BoolFlag{
+		Name:        "disable-snat-multiple-gws",
+		Usage:       "Disable SNAT for egress traffic with multiple gateways.",
+		Destination: &cliConfig.Gateway.DisableSNATMultipleGWs,
+	},
 
 	// Deprecated CLI options
 	&cli.BoolFlag{
@@ -831,6 +860,7 @@ var Flags []cli.Flag
 func GetFlags(customFlags []cli.Flag) []cli.Flag {
 	flags := CommonFlags
 	flags = append(flags, CNIFlags...)
+	flags = append(flags, OVNK8sFeatureFlags...)
 	flags = append(flags, K8sFlags...)
 	flags = append(flags, OvnNBFlags...)
 	flags = append(flags, OvnSBFlags...)
@@ -1060,6 +1090,18 @@ func buildGatewayConfig(ctx *cli.Context, cli, file *config) error {
 	return nil
 }
 
+func buildOVNKubernetesFeatureConfig(ctx *cli.Context, cli, file *config) error {
+	// Copy config file values over default values
+	if err := overrideFields(&OVNKubernetesFeature, &file.OVNKubernetesFeature, &savedOVNKubernetesFeature); err != nil {
+		return err
+	}
+	// And CLI overrides over config file and default values
+	if err := overrideFields(&OVNKubernetesFeature, &cli.OVNKubernetesFeature, &savedOVNKubernetesFeature); err != nil {
+		return err
+	}
+	return nil
+}
+
 func buildMasterHAConfig(ctx *cli.Context, cli, file *config) error {
 	// Copy config file values over default values
 	if err := overrideFields(&MasterHA, &file.MasterHA, &savedMasterHA); err != nil {
@@ -1151,14 +1193,7 @@ func getConfigFilePath(ctx *cli.Context) (string, bool) {
 	if configFile != "" {
 		return configFile, false
 	}
-
-	// Linux default
-	if runtime.GOOS != "windows" {
-		return filepath.Join("/etc", "openvswitch", "ovn_k8s.conf"), true
-	}
-
-	// Windows default
-	return filepath.Join(os.Getenv("OVS_SYSCONFDIR"), "ovn_k8s.conf"), true
+	return "/etc/openvswitch/ovn_k8s.conf", true
 }
 
 // InitConfig reads the config file and common command-line options and
@@ -1186,15 +1221,16 @@ func initConfigWithPath(ctx *cli.Context, exec kexec.Interface, saPath string, d
 	var err error
 	// initialize cfg with default values, allow file read to override
 	cfg := config{
-		Default:       savedDefault,
-		Logging:       savedLogging,
-		CNI:           savedCNI,
-		Kubernetes:    savedKubernetes,
-		OvnNorth:      savedOvnNorth,
-		OvnSouth:      savedOvnSouth,
-		Gateway:       savedGateway,
-		MasterHA:      savedMasterHA,
-		HybridOverlay: savedHybridOverlay,
+		Default:              savedDefault,
+		Logging:              savedLogging,
+		CNI:                  savedCNI,
+		OVNKubernetesFeature: savedOVNKubernetesFeature,
+		Kubernetes:           savedKubernetes,
+		OvnNorth:             savedOvnNorth,
+		OvnSouth:             savedOvnSouth,
+		Gateway:              savedGateway,
+		MasterHA:             savedMasterHA,
+		HybridOverlay:        savedHybridOverlay,
 	}
 
 	allSubnets := newConfigSubnets()
@@ -1271,6 +1307,10 @@ func initConfigWithPath(ctx *cli.Context, exec kexec.Interface, saPath string, d
 	}
 
 	if err = buildKubernetesConfig(exec, &cliConfig, &cfg, saPath, defaults, allSubnets); err != nil {
+		return "", err
+	}
+
+	if err = buildOVNKubernetesFeatureConfig(ctx, &cliConfig, &cfg); err != nil {
 		return "", err
 	}
 
