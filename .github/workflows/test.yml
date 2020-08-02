@@ -57,7 +57,7 @@ jobs:
         set -x
         go get golang.org/x/tools/cmd/cover
         pushd go-controller
-           make
+           RACE=1 make
            make windows
            COVERALLS=1 make check
         popd
