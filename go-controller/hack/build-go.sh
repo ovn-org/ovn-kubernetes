@@ -6,6 +6,7 @@ source "$(dirname "${BASH_SOURCE}")/init.sh"
 # Input:
 #   $@ - targets
 build_binaries() {
+    local args=
     # Check for `go` binary and set ${GOPATH}.
     setup_env
     cd "${OVN_KUBE_ROOT}"
@@ -18,11 +19,14 @@ build_binaries() {
     GIT_BRANCH=$(git rev-parse --symbolic-full-name --abbrev-ref HEAD)
     BUILD_USER=$(whoami)
     BUILD_DATE=$(date +"%Y-%m-%d")
-
+    if [ ! -z "${RACE:-}" ]; then
+        args="-race "
+    fi
     set -x
     for bin in "$@"; do
         binbase=$(basename ${bin})
         go build -v \
+            ${args} \
             -mod vendor \
             -gcflags "${GCFLAGS}" \
             -ldflags "-B ${BUILDID} \

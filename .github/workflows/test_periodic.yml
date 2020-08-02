@@ -46,7 +46,7 @@ jobs:
       run: |
         set -x
         pushd go-controller
-           make
+           RACE=1 make
         popd
 
     - name: Build docker image
