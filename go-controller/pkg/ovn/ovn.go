@@ -142,7 +142,7 @@ type Controller struct {
 	// or oc.deleteNamespaceLocked() to modify it. namespacesMutex is only held
 	// from inside those functions.
 	namespaces      map[string]*namespaceInfo
-	namespacesMutex sync.Mutex
+	namespacesMutex sync.RWMutex
 
 	// An address set factory that creates address sets
 	addressSetFactory AddressSetFactory
@@ -260,7 +260,7 @@ func NewOvnController(kubeClient kubernetes.Interface, egressIPClient egressipap
 		joinSubnetAllocator:           subnetallocator.NewSubnetAllocator(),
 		logicalPortCache:              newPortCache(stopChan),
 		namespaces:                    make(map[string]*namespaceInfo),
-		namespacesMutex:               sync.Mutex{},
+		namespacesMutex:               sync.RWMutex{},
 		addressSetFactory:             addressSetFactory,
 		lspIngressDenyCache:           make(map[string]int),
 		lspEgressDenyCache:            make(map[string]int),
