@@ -535,7 +535,7 @@ func NewWatchFactory(c kubernetes.Interface, eip egressipclientset.Interface, ec
 			return nil, fmt.Errorf("error in syncing cache for %v informer", oType)
 		}
 	}
-	if config.OVNKubernetesFeature.EgressIPEnabled {
+	if config.OVNKubernetesFeature.EnableEgressIP {
 		wf.eipFactory.Start(wf.stopChan)
 		for oType, synced := range wf.eipFactory.WaitForCacheSync(wf.stopChan) {
 			if !synced {

@@ -478,7 +478,7 @@ var _ = Describe("Watch Factory Operations", func() {
 			wf.removeHandler(objType, h)
 		}
 		It("does not call ADD for each existing egressIP", func() {
-			config.OVNKubernetesFeature.EgressIPEnabled = false
+			config.OVNKubernetesFeature.EnableEgressIP = false
 			egressIPs = append(egressIPs, newEgressIP("myEgressIP", "default"))
 			egressIPs = append(egressIPs, newEgressIP("myEgressIP1", "default"))
 			testExisting(egressIPType)

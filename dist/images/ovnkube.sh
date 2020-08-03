@@ -178,7 +178,7 @@ ovn_disable_snat_multiple_gws=${OVN_DISABLE_SNAT_MULTIPLE_GWS:-}
 ovn_remote_probe_interval=${OVN_REMOTE_PROBE_INTERVAL:-100000}
 ovn_multicast_enable=${OVN_MULTICAST_ENABLE:-}
 #OVN_EGRESSIP_ENABLE - enable egress IP for ovn-kubernetes
-egressip_enable=${OVN_EGRESSIP_ENABLE:-false}
+ovn_egressip_enable=${OVN_EGRESSIP_ENABLE:-false}
 
 # Determine the ovn rundir.
 if [[ -f /usr/bin/ovn-appctl ]]; then
@@ -788,7 +788,12 @@ ovn-master() {
   if [[ ${ovn_multicast_enable} == "true" ]]; then
       multicast_enabled_flag="--enable-multicast"
   fi
-  
+
+  egressip_enabled_flag=
+  if [[ ${ovn_egressip_enable} == "true" ]]; then
+      egressip_enabled_flag="--enable-egress-ip"
+  fi
+
   echo "=============== ovn-master ========== MASTER ONLY"
   /usr/bin/ovnkube \
     --init-master ${K8S_NODE} \
@@ -806,7 +811,7 @@ ovn-master() {
     --logfile /var/log/ovn-kubernetes/ovnkube-master.log \
     ${ovn_master_ssl_opts} \
     ${multicast_enabled_flag} \
-    --egress-ip-enable ${egressip_enable} \
+    ${egressip_enabled_flag} \
     --metrics-bind-address "0.0.0.0:9409" &
   echo "=============== ovn-master ========== running"
   wait_for_event attempts=3 process_ready ovnkube-master
@@ -895,6 +900,11 @@ ovn-node() {
   if [[ ${ovn_multicast_enable} == "true" ]]; then
       multicast_enabled_flag="--enable-multicast"
   fi
+
+  egressip_enabled_flag=
+  if [[ ${ovn_egressip_enable} == "true" ]]; then
+      egressip_enabled_flag="--enable-egress-ip"
+  fi
   
   OVN_ENCAP_IP=""
   ovn_encap_ip=$(ovs-vsctl --if-exists get Open_vSwitch . external_ids:ovn-encap-ip)
@@ -939,8 +949,8 @@ ovn-node() {
     ${ovn_node_ssl_opts} \
     --inactivity-probe=${ovn_remote_probe_interval} \
     ${multicast_enabled_flag} \
+    ${egressip_enabled_flag} \
     --ovn-metrics-bind-address "0.0.0.0:9476" \
-    --egress-ip-enable ${egressip_enable} \
     --metrics-bind-address "0.0.0.0:9410" &
 
   wait_for_event attempts=3 process_ready ovnkube
