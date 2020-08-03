@@ -112,7 +112,9 @@ func (oc *Controller) deleteLogicalPort(pod *kapi.Pod) {
 		// delete src-ip cached route to GR
 		nsInfo, err := oc.waitForNamespaceLocked(pod.Namespace)
 		if err != nil {
-			klog.Errorf(err.Error())
+			klog.Errorf("Unable to check port: %s, ip: %s for external gw route deletion: %v", portInfo.name,
+				podIPNet.IP, err)
+			continue
 		}
 		podIP := podIPNet.IP.String()
 		if gwToGr, ok := nsInfo.podExternalRoutes[podIP]; ok {
