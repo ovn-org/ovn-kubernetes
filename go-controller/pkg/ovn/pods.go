@@ -171,11 +171,15 @@ func (oc *Controller) addRoutesGatewayIP(pod *kapi.Pod, podAnnotation *util.PodA
 		return fmt.Errorf("error while getting network attachment definition for [%s/%s]: %v",
 			pod.Namespace, pod.Name, err)
 	}
-	otherDefaultRoute := false
+	otherDefaultRouteV4 := false
+	otherDefaultRouteV6 := false
 	for _, network := range networks {
-		if len(network.GatewayRequest) != 0 && network.GatewayRequest[0] != nil {
-			otherDefaultRoute = true
-			break
+		for _, gatewayRequest := range network.GatewayRequest {
+			if utilnet.IsIPv6(gatewayRequest) {
+				otherDefaultRouteV6 = true
+			} else {
+				otherDefaultRouteV4 = true
+			}
 		}
 	}
 	// DUALSTACK FIXME: hybridOverlayExternalGW is not Dualstack
@@ -203,19 +207,28 @@ func (oc *Controller) addRoutesGatewayIP(pod *kapi.Pod, podAnnotation *util.PodA
 		}
 
 		gatewayIPnet := util.GetNodeGatewayIfAddr(nodeSubnet)
+
+		otherDefaultRoute := otherDefaultRouteV4
+		if isIPv6 {
+			otherDefaultRoute = otherDefaultRouteV6
+		}
 		var gatewayIP net.IP
 		if otherDefaultRoute || hybridOverlayExternalGW != nil {
 			for _, clusterSubnet := range config.Default.ClusterSubnets {
-				podAnnotation.Routes = append(podAnnotation.Routes, util.PodRoute{
-					Dest:    clusterSubnet.CIDR,
-					NextHop: gatewayIPnet.IP,
-				})
+				if isIPv6 == utilnet.IsIPv6CIDR(clusterSubnet.CIDR) {
+					podAnnotation.Routes = append(podAnnotation.Routes, util.PodRoute{
+						Dest:    clusterSubnet.CIDR,
+						NextHop: gatewayIPnet.IP,
+					})
+				}
 			}
 			for _, serviceSubnet := range config.Kubernetes.ServiceCIDRs {
-				podAnnotation.Routes = append(podAnnotation.Routes, util.PodRoute{
-					Dest:    serviceSubnet,
-					NextHop: gatewayIPnet.IP,
-				})
+				if isIPv6 == utilnet.IsIPv6CIDR(serviceSubnet) {
+					podAnnotation.Routes = append(podAnnotation.Routes, util.PodRoute{
+						Dest:    serviceSubnet,
+						NextHop: gatewayIPnet.IP,
+					})
+				}
 			}
 			if hybridOverlayExternalGW != nil {
 				gatewayIP = util.GetNodeHybridOverlayIfAddr(nodeSubnet).IP
