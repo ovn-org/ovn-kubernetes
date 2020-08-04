@@ -667,19 +667,10 @@ var _ = Describe("e2e external gateway validation", func() {
 			framework.Failf("Unable to retrieve a valid address from container %s with inspect output of %s", gwContainerName, localVtepIP)
 		}
 		framework.Logf("the pod side vtep node is %s and the ip %s", ciWorkerNodeSrc, localVtepIP)
-		// retrieve the pod cidr for the worker node
-		jsonFlag := "jsonpath='{.metadata.annotations.k8s\\.ovn\\.org/node-subnets}'"
-		kubectlOut, err := framework.RunKubectl("get", "node", ciWorkerNodeSrc, "-o", jsonFlag)
+		podCIDR, err := getNodePodCIDR(ciWorkerNodeSrc)
 		if err != nil {
 			framework.Failf("Error retrieving the pod cidr from %s %v", ciWorkerNodeSrc, err)
 		}
-		// strip the apostrophe from stdout and parse the pod cidr
-		annotation := strings.Replace(kubectlOut, "'", "", -1)
-		defaultSubnet := make(map[string]string)
-		if err := json.Unmarshal([]byte(annotation), &defaultSubnet); err != nil {
-			framework.Failf("Error parsing the pod cidr from %s %v", ciWorkerNodeSrc, err)
-		}
-		podCIDR := defaultSubnet["default"]
 		framework.Logf("the pod cidr for node %s is %s", ciWorkerNodeSrc, podCIDR)
 		// setup the container to act as an external gateway and vtep
 		_, err = runCommand("docker", "exec", gwContainerName, "ip", "link", "add", "vxlan0", "type", "vxlan", "dev",
@@ -832,19 +823,10 @@ var _ = Describe("e2e multiple external gateway update validation", func() {
 			framework.Failf("Unable to retrieve a valid address from container %s with inspect output of %s", ciWorkerNodeSrc, localVtepIP)
 		}
 		framework.Logf("the pod side vtep node is %s and the ip %s", ciWorkerNodeSrc, localVtepIP)
-		// retrieve the pod cidr for the worker node
-		jsonFlag := "jsonpath='{.metadata.annotations.k8s\\.ovn\\.org/node-subnets}'"
-		kubectlOut, err := framework.RunKubectl("get", "node", ciWorkerNodeSrc, "-o", jsonFlag)
+		podCIDR, err := getNodePodCIDR(ciWorkerNodeSrc)
 		if err != nil {
 			framework.Failf("Error retrieving the pod cidr from %s %v", ciWorkerNodeSrc, err)
 		}
-		// strip the apostrophe from stdout and parse the pod cidr
-		annotation := strings.Replace(kubectlOut, "'", "", -1)
-		defaultSubnet := make(map[string]string)
-		if err := json.Unmarshal([]byte(annotation), &defaultSubnet); err != nil {
-			framework.Failf("Error parsing the pod cidr from %s %v", ciWorkerNodeSrc, err)
-		}
-		podCIDR := defaultSubnet["default"]
 		framework.Logf("the pod cidr for node %s is %s", ciWorkerNodeSrc, podCIDR)
 		// setup the new container to emulate a gateway with routes, vtep and a loopback interface acting as the gateway
 		_, err = runCommand("docker", "exec", gwContainerNameAlt1, "ip", "link", "add", "vxlan0", "type", "vxlan", "dev",
@@ -902,7 +884,7 @@ var _ = Describe("e2e multiple external gateway update validation", func() {
 		time.Sleep(time.Second * 15)
 		// Verify the initial gateway is reachable from the new pod
 		By(fmt.Sprintf("Verifying connectivity to the updated annotation and initial external gateway %s and vtep %s", extGwAlt1, exVtepIpAlt1))
-		kubectlOut, err = framework.RunKubectl("exec", srcPingPodName, frameworkNsFlag, testContainerFlag, "--", "ping", "-w", "40", extGwAlt1)
+		_, err = framework.RunKubectl("exec", srcPingPodName, frameworkNsFlag, testContainerFlag, "--", "ping", "-w", "40", extGwAlt1)
 		if err != nil {
 			framework.Failf("Failed to ping the first gateway %s from container %s on node %s: %v", extGwAlt1, ovnContainer, ovnWorkerNode, err)
 		}
@@ -966,9 +948,30 @@ var _ = Describe("e2e multiple external gateway update validation", func() {
 
 		// Verify the updated gateway is reachable from the initial pod
 		By(fmt.Sprintf("Verifying connectivity to the updated annotation and new external gateway %s and vtep %s", extGwAlt2, exVtepIpAlt2))
-		kubectlOut, err = framework.RunKubectl("exec", srcPingPodName, frameworkNsFlag, testContainerFlag, "--", "ping", "-w", "40", extGwAlt2)
+		_, err = framework.RunKubectl("exec", srcPingPodName, frameworkNsFlag, testContainerFlag, "--", "ping", "-w", "40", extGwAlt2)
 		if err != nil {
 			framework.Failf("Failed to ping the second gateway %s from container %s on node %s: %v", extGwAlt2, ovnContainer, ovnWorkerNode, err)
 		}
 	})
 })
+
+func getNodePodCIDR(nodeName string) (string, error) {
+	// retrieve the pod cidr for the worker node
+	jsonFlag := "jsonpath='{.metadata.annotations.k8s\\.ovn\\.org/node-subnets}'"
+	kubectlOut, err := framework.RunKubectl("get", "node", nodeName, "-o", jsonFlag)
+	if err != nil {
+		return "", err
+	}
+	// strip the apostrophe from stdout and parse the pod cidr
+	annotation := strings.Replace(kubectlOut, "'", "", -1)
+
+	ssSubnets := make(map[string]string)
+	if err := json.Unmarshal([]byte(annotation), &ssSubnets); err == nil {
+		return ssSubnets["default"], nil
+	}
+	dsSubnets := make(map[string][]string)
+	if err := json.Unmarshal([]byte(annotation), &dsSubnets); err == nil {
+		return dsSubnets["default"][0], nil
+	}
+	return "", fmt.Errorf("could not parse annotation %q", annotation)
+}
