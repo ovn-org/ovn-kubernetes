@@ -310,7 +310,7 @@ func (oc *Controller) Run() error {
 		}
 	}
 
-	if config.OVNKubernetesFeature.EgressIPEnabled {
+	if config.OVNKubernetesFeature.EnableEgressIP {
 		if err := oc.WatchEgressNodes(); err != nil {
 			return err
 		}

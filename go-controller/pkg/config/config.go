@@ -82,7 +82,7 @@ var (
 
 	// OVNKubernetesFeatureConfig holds OVN-Kubernetes feature enhancement config file parameters and command-line overrides
 	OVNKubernetesFeature = OVNKubernetesFeatureConfig{
-		EgressIPEnabled: true,
+		EnableEgressIP: true,
 	}
 
 	// OvnNorth holds northbound OVN database client and server authentication and location details
@@ -206,7 +206,7 @@ type KubernetesConfig struct {
 
 // OVNKubernetesFeatureConfig holds OVN-Kubernetes feature enhancement config file parameters and command-line overrides
 type OVNKubernetesFeatureConfig struct {
-	EgressIPEnabled bool `gcfg:"egress-ip-enable"`
+	EnableEgressIP bool `gcfg:"enable-egress-ip"`
 }
 
 // GatewayMode holds the node gateway mode
@@ -586,10 +586,10 @@ var CNIFlags = []cli.Flag{
 // OVNK8sFeatureFlags capture OVN-Kubernetes feature related options
 var OVNK8sFeatureFlags = []cli.Flag{
 	&cli.BoolFlag{
-		Name:        "egress-ip-enable",
+		Name:        "enable-egress-ip",
 		Usage:       "Configure to use EgressIP CRD feature with ovn-kubernetes.",
-		Destination: &cliConfig.OVNKubernetesFeature.EgressIPEnabled,
-		Value:       OVNKubernetesFeature.EgressIPEnabled,
+		Destination: &cliConfig.OVNKubernetesFeature.EnableEgressIP,
+		Value:       OVNKubernetesFeature.EnableEgressIP,
 	},
 }
 
