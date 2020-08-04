@@ -67,6 +67,9 @@ type loadBalancerConf struct {
 type namespaceInfo struct {
 	sync.Mutex
 
+	// deleted indicates that the namespace is being deleted
+	// this avoids the need to use double locking
+	deleted bool
 	// addressSet is an address set object that holds the IP addresses
 	// of all pods in the namespace.
 	addressSet AddressSet

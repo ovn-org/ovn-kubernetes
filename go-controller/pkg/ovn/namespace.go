@@ -364,9 +364,7 @@ func (oc *Controller) getNamespaceLocked(ns string) *namespaceInfo {
 	nsInfo.Lock()
 
 	// Check that the namespace wasn't deleted while we were waiting for the lock
-	oc.namespacesMutex.RLock()
-	defer oc.namespacesMutex.RUnlock()
-	if nsInfo != oc.namespaces[ns] {
+	if nsInfo.deleted {
 		nsInfo.Unlock()
 		return nil
 	}
@@ -376,7 +374,6 @@ func (oc *Controller) getNamespaceLocked(ns string) *namespaceInfo {
 // createNamespaceLocked locks namespacesMutex, creates an entry for ns, and returns it
 // with its mutex locked.
 func (oc *Controller) createNamespaceLocked(ns string) *namespaceInfo {
-	oc.namespacesMutex.Lock()
 
 	nsInfo := &namespaceInfo{
 		networkPolicies:       make(map[string]*namespacePolicy),
@@ -384,9 +381,11 @@ func (oc *Controller) createNamespaceLocked(ns string) *namespaceInfo {
 		multicastEnabled:      false,
 		routingExternalPodGWs: make(map[string][]net.IP),
 	}
+	nsInfo.Lock()
+
+	oc.namespacesMutex.Lock()
 	oc.namespaces[ns] = nsInfo
 	oc.namespacesMutex.Unlock()
-	nsInfo.Lock()
 
 	return nsInfo
 }
@@ -404,17 +403,14 @@ func (oc *Controller) deleteNamespaceLocked(ns string) *namespaceInfo {
 		return nil
 	}
 	nsInfo.Lock()
+	nsInfo.deleted = true
 
-	oc.namespacesMutex.Lock()
-	defer oc.namespacesMutex.Unlock()
-	if nsInfo != oc.namespaces[ns] {
-		nsInfo.Unlock()
-		return nil
-	}
 	if err := nsInfo.addressSet.Destroy(); err != nil {
 		klog.Errorf(err.Error())
 	}
+	oc.namespacesMutex.Lock()
 	delete(oc.namespaces, ns)
+	oc.namespacesMutex.Unlock()
 
 	return nsInfo
 }
