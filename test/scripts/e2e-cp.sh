@@ -6,6 +6,12 @@ set -ex
 export KUBERNETES_CONFORMANCE_TEST=y
 export KUBECONFIG=${HOME}/admin.conf
 
+SKIPPED_TESTS=""
+if [ "$KIND_IPV4_SUPPORT" == true ] && [ "$KIND_IPV6_SUPPORT" == true ]; then
+    # No support for these features in dual-stack yet
+    SKIPPED_TESTS="hybrid.overlay|external.gateway"
+fi
+
 # setting these is required to make RuntimeClass tests work ... :/
 export KUBE_CONTAINER_RUNTIME=remote
 export KUBE_CONTAINER_RUNTIME_ENDPOINT=unix:///run/containerd/containerd.sock
@@ -18,6 +24,7 @@ go mod download
 go test -timeout=0 -v . \
         -ginkgo.v \
         -ginkgo.flakeAttempts ${FLAKE_ATTEMPTS:-2} \
+        -ginkgo.skip=${SKIPPED_TESTS}" \
         -provider skeleton \
         -kubeconfig ${KUBECONFIG} \
         ${CONTAINER_RUNTIME:+"--container-runtime=${CONTAINER_RUNTIME}"} \
