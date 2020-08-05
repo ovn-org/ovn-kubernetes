@@ -271,6 +271,7 @@ ovn_apiServerAddress=${API_IP} \
   ovn_ha=${KIND_HA} \
   ovn_num_master=${KIND_NUM_MASTER} \
   ovn_num_worker=${KIND_NUM_WORKER} \
+  cluster_log_level=${KIND_CLUSTER_LOGLEVEL:-4} \
   j2 ${KIND_CONFIG} -o ${KIND_CONFIG_LCL}
 
 # Create KIND cluster. For additional debug, add '--verbosity <int>': 0 None .. 3 Debug
@@ -350,7 +351,7 @@ kind load docker-image ${OVN_IMAGE} --name ${KIND_CLUSTER_NAME}
 
 pushd ../dist/yaml
 run_kubectl apply -f k8s.ovn.org_egressfirewalls.yaml
-run_kubectl apply -f k8s.ovn.org_egressips.yaml 
+run_kubectl apply -f k8s.ovn.org_egressips.yaml
 run_kubectl apply -f ovn-setup.yaml
 CONTROL_NODES=$(docker ps -f name=ovn-control | grep -v NAMES | awk '{ print $NF }')
 for n in $CONTROL_NODES; do
