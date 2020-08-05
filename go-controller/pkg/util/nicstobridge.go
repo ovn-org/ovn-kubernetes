@@ -75,34 +75,34 @@ func saveIPAddress(oldLink, newLink netlink.Link, addrs []netlink.Addr) error {
 		addr := addrs[i]
 
 		// Remove from oldLink
-		if err := netlink.AddrDel(oldLink, &addr); err != nil {
+		if err := netLinkOps.AddrDel(oldLink, &addr); err != nil {
 			klog.Errorf("Remove addr from %q failed: %v", oldLink.Attrs().Name, err)
 			return err
 		}
 
 		// Add to newLink
 		addr.Label = newLink.Attrs().Name
-		if err := netlink.AddrAdd(newLink, &addr); err != nil {
-			klog.Errorf("Add addr to newLink %q failed: %v", newLink.Attrs().Name, err)
+		if err := netLinkOps.AddrAdd(newLink, &addr); err != nil {
+			klog.Errorf("Add addr to newLink %q failed: %v", addr.Label, err)
 			return err
 		}
-		klog.Infof("Successfully saved addr %q to newLink %q", addr.String(), newLink.Attrs().Name)
+		klog.Infof("Successfully saved addr %q to newLink %q", addr.String(), addr.Label)
 	}
 
-	return netlink.LinkSetUp(newLink)
+	return netLinkOps.LinkSetup(newLink)
 }
 
 // delAddRoute removes 'route' from 'oldLink' and moves to 'newLink'
 func delAddRoute(oldLink, newLink netlink.Link, route netlink.Route) error {
 	// Remove route from old interface
-	if err := netlink.RouteDel(&route); err != nil && !strings.Contains(err.Error(), "no such process") {
+	if err := netLinkOps.RouteDel(&route); err != nil && !strings.Contains(err.Error(), "no such process") {
 		klog.Errorf("Remove route from %q failed: %v", oldLink.Attrs().Name, err)
 		return err
 	}
 
 	// Add route to newLink
 	route.LinkIndex = newLink.Attrs().Index
-	if err := netlink.RouteAdd(&route); err != nil && !os.IsExist(err) {
+	if err := netLinkOps.RouteAdd(&route); err != nil && !os.IsExist(err) {
 		klog.Errorf("Add route to newLink %q failed: %v", newLink.Attrs().Name, err)
 		return err
 	}
@@ -195,7 +195,7 @@ func setupDefaultFile() {
 // NicToBridge creates a OVS bridge for the 'iface' and also moves the IP
 // address and routes of 'iface' to OVS bridge.
 func NicToBridge(iface string) (string, error) {
-	ifaceLink, err := netlink.LinkByName(iface)
+	ifaceLink, err := netLinkOps.LinkByName(iface)
 	if err != nil {
 		return "", err
 	}
@@ -218,16 +218,16 @@ func NicToBridge(iface string) (string, error) {
 	setupDefaultFile()
 
 	// Get ip addresses and routes before any real operations.
-	addrs, err := netlink.AddrList(ifaceLink, syscall.AF_INET)
+	addrs, err := netLinkOps.AddrList(ifaceLink, syscall.AF_INET)
 	if err != nil {
 		return "", err
 	}
-	routes, err := netlink.RouteList(ifaceLink, syscall.AF_INET)
+	routes, err := netLinkOps.RouteList(ifaceLink, syscall.AF_INET)
 	if err != nil {
 		return "", err
 	}
 
-	bridgeLink, err := netlink.LinkByName(bridge)
+	bridgeLink, err := netLinkOps.LinkByName(bridge)
 	if err != nil {
 		return "", err
 	}
@@ -249,17 +249,17 @@ func NicToBridge(iface string) (string, error) {
 // underlying NIC interface and deletes the OVS bridge.
 func BridgeToNic(bridge string) error {
 	// Internal port is named same as the bridge
-	bridgeLink, err := netlink.LinkByName(bridge)
+	bridgeLink, err := netLinkOps.LinkByName(bridge)
 	if err != nil {
 		return err
 	}
 
 	// Get ip addresses and routes before any real operations.
-	addrs, err := netlink.AddrList(bridgeLink, syscall.AF_INET)
+	addrs, err := netLinkOps.AddrList(bridgeLink, syscall.AF_INET)
 	if err != nil {
 		return err
 	}
-	routes, err := netlink.RouteList(bridgeLink, syscall.AF_INET)
+	routes, err := netLinkOps.RouteList(bridgeLink, syscall.AF_INET)
 	if err != nil {
 		return err
 	}
@@ -268,7 +268,7 @@ func BridgeToNic(bridge string) error {
 	if err != nil {
 		return err
 	}
-	ifaceLink, err := netlink.LinkByName(nicName)
+	ifaceLink, err := netLinkOps.LinkByName(nicName)
 	if err != nil {
 		return err
 	}

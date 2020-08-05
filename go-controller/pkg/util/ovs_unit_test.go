@@ -12,6 +12,13 @@ import (
 	kexec "k8s.io/utils/exec"
 )
 
+type onCallReturnArgsRepetitive struct {
+	onCallMethodName                    string
+	onCallMethodsArgsStrTypeAppendCount int
+	onCallMethodArgType                 []string
+	retArgList                          []interface{}
+}
+
 type onCallReturnArgs struct {
 	onCallMethodName    string
 	onCallMethodArgType []string
