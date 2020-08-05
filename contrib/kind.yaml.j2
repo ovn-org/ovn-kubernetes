@@ -18,6 +18,25 @@ kubeadmConfigPatches:
   etcd:
     local:
       dataDir: "/tmp/lib/etcd"
+  apiServer:
+    extraArgs:
+      "v": "{{ cluster_log_level }}"
+  controllerManager:
+    extraArgs:
+      "v": "{{ cluster_log_level }}"
+  scheduler:
+    extraArgs:
+      "v": "{{ cluster_log_level }}"
+  ---
+  kind: InitConfiguration
+  nodeRegistration:
+    kubeletExtraArgs:
+      "v": "{{ cluster_log_level }}"
+  ---
+  kind: JoinConfiguration
+  nodeRegistration:
+    kubeletExtraArgs:
+      "v": "{{ cluster_log_level }}"
 nodes:
  - role: control-plane
    kubeadmConfigPatches:
@@ -35,4 +54,3 @@ nodes:
 {%- for _ in range(ovn_num_worker | int) %}
  - role: worker
 {%- endfor %}
-
