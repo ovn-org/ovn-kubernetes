@@ -1,3 +1,5 @@
+k8s.ovn.org_egressfirewalls.yaml
+k8s.ovn.org_egressips.yaml
 ovnkube-master.yaml
 ovn-setup.yaml
 ovnkube-db.yaml
