@@ -7,12 +7,15 @@ import (
 	. "github.com/onsi/ginkgo"
 	. "github.com/onsi/gomega"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/factory"
 	ovntest "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/testing"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
 	"github.com/urfave/cli/v2"
+	kapi "k8s.io/api/core/v1"
 	v1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
+	"k8s.io/client-go/tools/cache"
 )
 
 const (
@@ -29,7 +32,7 @@ func getFakeLocalAddrs() map[string]net.IPNet {
 	return localAddrSet
 }
 
-func initFakeNodePortWatcher(fakeOvnNode *FakeOVNNode, iptV4, iptV6 util.IPTablesHelper) *localPortWatcherData {
+func initFakeNodePortWatcher(fakeOvnNode *FakeOVNNode, iptV4, iptV6 util.IPTablesHelper) *localPortWatcher {
 	initIPTable := map[string]util.FakeTable{
 		"filter": {},
 		"nat":    {},
@@ -43,12 +46,37 @@ func initFakeNodePortWatcher(fakeOvnNode *FakeOVNNode, iptV4, iptV6 util.IPTable
 	err = f6.MatchState(initIPTable)
 	Expect(err).NotTo(HaveOccurred())
 
-	fNPW := localPortWatcherData{
+	fNPW := localPortWatcher{
 		recorder:     fakeOvnNode.recorder,
 		gatewayIPv4:  v4localnetGatewayIP,
 		localAddrSet: getFakeLocalAddrs(),
 	}
 	return &fNPW
+}
+
+func startLocalPortWatcher(l *localPortWatcher, wf factory.NodeWatchFactory) error {
+	if err := initLocalGatewayIPTables(); err != nil {
+		return err
+	}
+	if err := initRoutingRules(); err != nil {
+		return err
+	}
+	wf.AddServiceHandler(cache.ResourceEventHandlerFuncs{
+		AddFunc: func(obj interface{}) {
+			svc := obj.(*kapi.Service)
+			l.AddService(svc)
+		},
+		UpdateFunc: func(old, new interface{}) {
+			oldSvc := old.(*kapi.Service)
+			newSvc := new.(*kapi.Service)
+			l.UpdateService(oldSvc, newSvc)
+		},
+		DeleteFunc: func(obj interface{}) {
+			svc := obj.(*kapi.Service)
+			l.DeleteService(svc)
+		},
+	}, l.SyncServices)
+	return nil
 }
 
 func newServiceMeta(name, namespace string) metav1.ObjectMeta {
@@ -114,7 +142,7 @@ var _ = Describe("Node Operations", func() {
 				})
 
 				fakeOvnNode.start(ctx)
-				fakeOvnNode.node.watchLocalPorts(fNPW)
+				startLocalPortWatcher(fNPW, fakeOvnNode.watcher)
 
 				expectedTables := map[string]util.FakeTable{
 					"filter": {
@@ -235,7 +263,7 @@ var _ = Describe("Node Operations", func() {
 						},
 					},
 				)
-				fakeOvnNode.node.watchLocalPorts(fNPW)
+				startLocalPortWatcher(fNPW, fakeOvnNode.watcher)
 				Expect(fakeOvnNode.fakeExec.CalledMatchesExpected()).To(BeTrue(), fExec.ErrorDesc)
 
 				expectedTables = map[string]util.FakeTable{

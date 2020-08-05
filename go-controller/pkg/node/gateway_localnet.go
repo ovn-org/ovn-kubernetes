@@ -9,10 +9,10 @@ import (
 	"strings"
 
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/kube"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
 
 	kapi "k8s.io/api/core/v1"
-	"k8s.io/client-go/tools/cache"
 	"k8s.io/client-go/tools/record"
 	"k8s.io/klog"
 	utilnet "k8s.io/utils/net"
@@ -27,6 +27,60 @@ const (
 	localnetGatewayExternalIDTable = "6"
 )
 
+func newLocalGateway(nodeName string, hostSubnets []*net.IPNet, gwNextHops []net.IP, gwIntf string, nodeAnnotator kube.Annotator, recorder record.EventRecorder, cfg *managementPortConfig) (*gateway, error) {
+	gw := &gateway{}
+	var gatewayIfAddrs []*net.IPNet
+	for _, hostSubnet := range hostSubnets {
+		// local gateway mode uses mp0 as default path for all ingress traffic into OVN
+		var nextHop *net.IPNet
+		if utilnet.IsIPv6CIDR(hostSubnet) {
+			nextHop = cfg.ipv6.ifAddr
+		} else {
+			nextHop = cfg.ipv4.ifAddr
+		}
+		// gatewayIfAddrs are the OVN next hops via mp0
+		gatewayIfAddrs = append(gatewayIfAddrs, util.GetNodeGatewayIfAddr(hostSubnet))
+
+		// add iptables masquerading for mp0 to exit the host for egress
+		cidr := nextHop.IP.Mask(nextHop.Mask)
+		cidrNet := &net.IPNet{IP: cidr, Mask: nextHop.Mask}
+		err := initLocalGatewayNATRules(util.K8sMgmtIntfName, cidrNet)
+		if err != nil {
+			return nil, fmt.Errorf("failed to add local NAT rules for: %s, err: %v", util.K8sMgmtIntfName, err)
+		}
+	}
+
+	bridgeName, uplinkName, _, err := gatewayInitInternal(
+		nodeName, gwIntf, hostSubnets, gwNextHops, nodeAnnotator)
+	if err != nil {
+		return nil, err
+	}
+
+	if config.Gateway.NodeportEnable {
+		localAddrSet, err := getLocalAddrs()
+		if err != nil {
+			return nil, err
+		}
+
+		if err := initLocalGatewayIPTables(); err != nil {
+			return nil, err
+		}
+		if err := initRoutingRules(); err != nil {
+			return nil, err
+		}
+		gw.localPortWatcher = newLocalPortWatcher(gatewayIfAddrs, recorder, localAddrSet)
+	}
+
+	gw.initFunc = func() error {
+		klog.Info("Creating Local Gateway Openflow Manager")
+		var err error
+		gw.openflowManager, err = newLocalGatewayOpenflowManager(nodeName, bridgeName, uplinkName)
+		return err
+	}
+
+	return gw, nil
+}
+
 func getGatewayFamilyAddrs(gatewayIfAddrs []*net.IPNet) (string, string) {
 	var gatewayIPv4, gatewayIPv6 string
 	for _, gatewayIfAddr := range gatewayIfAddrs {
@@ -39,20 +93,48 @@ func getGatewayFamilyAddrs(gatewayIfAddrs []*net.IPNet) (string, string) {
 	return gatewayIPv4, gatewayIPv6
 }
 
-type localPortWatcherData struct {
+type localPortWatcher struct {
 	recorder     record.EventRecorder
 	gatewayIPv4  string
 	gatewayIPv6  string
 	localAddrSet map[string]net.IPNet
 }
 
-func newLocalPortWatcherData(gatewayIfAddrs []*net.IPNet, recorder record.EventRecorder, localAddrSet map[string]net.IPNet) *localPortWatcherData {
+func newLocalPortWatcher(gatewayIfAddrs []*net.IPNet, recorder record.EventRecorder, localAddrSet map[string]net.IPNet) *localPortWatcher {
 	gatewayIPv4, gatewayIPv6 := getGatewayFamilyAddrs(gatewayIfAddrs)
-	return &localPortWatcherData{
+	return &localPortWatcher{
+		recorder:     recorder,
 		gatewayIPv4:  gatewayIPv4,
 		gatewayIPv6:  gatewayIPv6,
-		recorder:     recorder,
 		localAddrSet: localAddrSet,
+	}
+}
+
+func (l *localPortWatcher) AddService(svc *kapi.Service) {
+	err := l.addService(svc)
+	if err != nil {
+		klog.Errorf("Error in adding service: %v", err)
+	}
+}
+
+func (l *localPortWatcher) UpdateService(old, new *kapi.Service) {
+	if reflect.DeepEqual(new.Spec, old.Spec) {
+		return
+	}
+	err := l.deleteService(old)
+	if err != nil {
+		klog.Errorf("Error in deleting service - %v", err)
+	}
+	err = l.addService(new)
+	if err != nil {
+		klog.Errorf("Error in modifying service: %v", err)
+	}
+}
+
+func (l *localPortWatcher) DeleteService(svc *kapi.Service) {
+	err := l.deleteService(svc)
+	if err != nil {
+		klog.Errorf("Error in deleting service - %v", err)
 	}
 }
 
@@ -73,8 +155,8 @@ func getLocalAddrs() (map[string]net.IPNet, error) {
 	return localAddrSet, nil
 }
 
-func (npw *localPortWatcherData) networkHasAddress(ip net.IP) bool {
-	for _, net := range npw.localAddrSet {
+func (l *localPortWatcher) networkHasAddress(ip net.IP) bool {
+	for _, net := range l.localAddrSet {
 		if net.Contains(ip) {
 			return true
 		}
@@ -82,12 +164,12 @@ func (npw *localPortWatcherData) networkHasAddress(ip net.IP) bool {
 	return false
 }
 
-func (npw *localPortWatcherData) addService(svc *kapi.Service) error {
+func (l *localPortWatcher) addService(svc *kapi.Service) error {
 	iptRules := []iptRule{}
 	isIPv6Service := utilnet.IsIPv6String(svc.Spec.ClusterIP)
-	gatewayIP := npw.gatewayIPv4
+	gatewayIP := l.gatewayIPv4
 	if isIPv6Service {
-		gatewayIP = npw.gatewayIPv6
+		gatewayIP = l.gatewayIPv6
 	}
 	// holds map of external ips and if they are currently using routes
 	routeUsage := make(map[string]bool)
@@ -120,20 +202,20 @@ func (npw *localPortWatcherData) addService(svc *kapi.Service) error {
 					externalIP, svc.Namespace, svc.Name, svc.Spec.ClusterIP)
 				continue
 			}
-			if _, exists := npw.localAddrSet[externalIP]; exists {
+			if _, exists := l.localAddrSet[externalIP]; exists {
 				if !util.IsClusterIPSet(svc) {
 					serviceRef := kapi.ObjectReference{
 						Kind:      "Service",
 						Namespace: svc.Namespace,
 						Name:      svc.Name,
 					}
-					npw.recorder.Eventf(&serviceRef, kapi.EventTypeWarning, "UnsupportedServiceDefinition", "Unsupported service definition, headless service: %s with a local ExternalIP is not supported by ovn-kubernetes in local gateway mode", svc.Name)
+					l.recorder.Eventf(&serviceRef, kapi.EventTypeWarning, "UnsupportedServiceDefinition", "Unsupported service definition, headless service: %s with a local ExternalIP is not supported by ovn-kubernetes in local gateway mode", svc.Name)
 					klog.Warningf("UnsupportedServiceDefinition event for service %s in namespace %s", svc.Name, svc.Namespace)
 					continue
 				}
 				iptRules = append(iptRules, getExternalIPTRules(port, externalIP, svc.Spec.ClusterIP)...)
 				klog.V(5).Infof("Will add iptables rule for ExternalIP: %s", externalIP)
-			} else if npw.networkHasAddress(net.ParseIP(externalIP)) {
+			} else if l.networkHasAddress(net.ParseIP(externalIP)) {
 				klog.V(5).Infof("ExternalIP: %s is reachable through one of the interfaces on this node, will skip setup", externalIP)
 			} else {
 				if gatewayIP != "" {
@@ -156,12 +238,12 @@ func (npw *localPortWatcherData) addService(svc *kapi.Service) error {
 	return addIptRules(iptRules)
 }
 
-func (npw *localPortWatcherData) deleteService(svc *kapi.Service) error {
+func (l *localPortWatcher) deleteService(svc *kapi.Service) error {
 	iptRules := []iptRule{}
 	isIPv6Service := utilnet.IsIPv6String(svc.Spec.ClusterIP)
-	gatewayIP := npw.gatewayIPv4
+	gatewayIP := l.gatewayIPv4
 	if isIPv6Service {
-		gatewayIP = npw.gatewayIPv6
+		gatewayIP = l.gatewayIPv6
 	}
 	// holds map of external ips and if they are currently using routes
 	routeUsage := make(map[string]bool)
@@ -181,10 +263,10 @@ func (npw *localPortWatcherData) deleteService(svc *kapi.Service) error {
 			if utilnet.IsIPv6String(externalIP) != isIPv6Service {
 				continue
 			}
-			if _, exists := npw.localAddrSet[externalIP]; exists {
+			if _, exists := l.localAddrSet[externalIP]; exists {
 				iptRules = append(iptRules, getExternalIPTRules(port, externalIP, svc.Spec.ClusterIP)...)
 				klog.V(5).Infof("Will delete iptables rule for ExternalIP: %s", externalIP)
-			} else if npw.networkHasAddress(net.ParseIP(externalIP)) {
+			} else if l.networkHasAddress(net.ParseIP(externalIP)) {
 				klog.V(5).Infof("ExternalIP: %s is reachable through one of the interfaces on this node, will skip cleanup", externalIP)
 			} else {
 				if gatewayIP != "" {
@@ -206,7 +288,7 @@ func (npw *localPortWatcherData) deleteService(svc *kapi.Service) error {
 	return delIptRules(iptRules)
 }
 
-func (npw *localPortWatcherData) syncServices(serviceInterface []interface{}) {
+func (l *localPortWatcher) SyncServices(serviceInterface []interface{}) {
 	removeStaleRoutes := func(keepRoutes []string) {
 		stdout, stderr, err := util.RunIP("route", "list", "table", localnetGatewayExternalIDTable)
 		if err != nil || stdout == "" {
@@ -238,9 +320,9 @@ func (npw *localPortWatcherData) syncServices(serviceInterface []interface{}) {
 			klog.Errorf("Spurious object in syncServices: %v", serviceInterface)
 			continue
 		}
-		gatewayIP := npw.gatewayIPv4
+		gatewayIP := l.gatewayIPv4
 		if utilnet.IsIPv6String(svc.Spec.ClusterIP) {
-			gatewayIP = npw.gatewayIPv6
+			gatewayIP = l.gatewayIPv6
 		}
 		if gatewayIP != "" {
 			keepIPTRules = append(keepIPTRules, getGatewayIPTRules(svc, gatewayIP, nil)...)
@@ -264,48 +346,6 @@ func initRoutingRules() error {
 			return fmt.Errorf("error adding routing rule for ExternalIP table (%s): stdout: %s, stderr: %s, err: %v", localnetGatewayExternalIDTable, stdout, stderr, err)
 		}
 	}
-	return nil
-}
-
-func (n *OvnNode) watchLocalPorts(npw *localPortWatcherData) error {
-	if err := initLocalGatewayIPTables(); err != nil {
-		return err
-	}
-	if err := initRoutingRules(); err != nil {
-		return err
-	}
-	n.watchFactory.AddServiceHandler(cache.ResourceEventHandlerFuncs{
-		AddFunc: func(obj interface{}) {
-			svc := obj.(*kapi.Service)
-			err := npw.addService(svc)
-			if err != nil {
-				klog.Errorf("Error in adding service: %v", err)
-			}
-		},
-		UpdateFunc: func(old, new interface{}) {
-			svcNew := new.(*kapi.Service)
-			svcOld := old.(*kapi.Service)
-			if reflect.DeepEqual(svcNew.Spec, svcOld.Spec) &&
-				reflect.DeepEqual(svcNew.Status, svcOld.Status) {
-				return
-			}
-			err := npw.deleteService(svcOld)
-			if err != nil {
-				klog.Errorf("Error in deleting service - %v", err)
-			}
-			err = npw.addService(svcNew)
-			if err != nil {
-				klog.Errorf("Error in modifying service: %v", err)
-			}
-		},
-		DeleteFunc: func(obj interface{}) {
-			svc := obj.(*kapi.Service)
-			err := npw.deleteService(svc)
-			if err != nil {
-				klog.Errorf("Error in deleting service - %v", err)
-			}
-		},
-	}, npw.syncServices)
 	return nil
 }
 
@@ -364,7 +404,7 @@ func getLoadBalancerIPTRules(svc *kapi.Service, svcPort kapi.ServicePort, gatewa
 // -- to also connection track the outbound north-south traffic through l3 gateway so that
 //    the return traffic can be steered back to OVN logical topology
 // -- to also handle unDNAT return traffic back out of the host
-func addDefaultConntrackRulesLocal(nodeName, gwBridge, gwIntf string, stopChan chan struct{}) error {
+func newLocalGatewayOpenflowManager(nodeName, gwBridge, gwIntf string) (*openflowManager, error) {
 	// the name of the patch port created by ovn-controller is of the form
 	// patch-<logical_port_name_of_localnet_port>-to-br-int
 	localnetLpName := gwBridge + "_" + nodeName
@@ -374,21 +414,21 @@ func addDefaultConntrackRulesLocal(nodeName, gwBridge, gwIntf string, stopChan c
 	ofportPatch, stderr, err := util.RunOVSVsctl("wait-until", "Interface", patchPort, "ofport>0",
 		"--", "get", "Interface", patchPort, "ofport")
 	if err != nil {
-		return fmt.Errorf("failed while waiting on patch port %q to be created by ovn-controller and "+
+		return nil, fmt.Errorf("failed while waiting on patch port %q to be created by ovn-controller and "+
 			"while getting ofport. stderr: %q, error: %v", patchPort, stderr, err)
 	}
 
 	// Get ofport of physical interface
 	ofportPhys, stderr, err := util.RunOVSVsctl("get", "interface", gwIntf, "ofport")
 	if err != nil {
-		return fmt.Errorf("failed to get ofport of %s, stderr: %q, error: %v",
+		return nil, fmt.Errorf("failed to get ofport of %s, stderr: %q, error: %v",
 			gwIntf, stderr, err)
 	}
 
 	// replace the left over OpenFlow flows with the FLOOD action flow
 	_, stderr, err = util.AddOFFlowWithSpecificAction(gwBridge, util.FloodAction)
 	if err != nil {
-		return fmt.Errorf("failed to replace-flows on bridge %q stderr:%s (%v)", gwBridge, stderr, err)
+		return nil, fmt.Errorf("failed to replace-flows on bridge %q stderr:%s (%v)", gwBridge, stderr, err)
 	}
 
 	nFlows := 0
@@ -400,7 +440,7 @@ func addDefaultConntrackRulesLocal(nodeName, gwBridge, gwIntf string, stopChan c
 				"actions=ct(commit, exec(load:0x1->NXM_NX_CT_LABEL), zone=%d), output:%s",
 				defaultOpenFlowCookie, ofportPatch, config.Default.ConntrackZone, ofportPhys))
 		if err != nil {
-			return fmt.Errorf("failed to add openflow flow to %s, stderr: %q, "+
+			return nil, fmt.Errorf("failed to add openflow flow to %s, stderr: %q, "+
 				"error: %v", gwBridge, stderr, err)
 		}
 		nFlows++
@@ -411,7 +451,7 @@ func addDefaultConntrackRulesLocal(nodeName, gwBridge, gwIntf string, stopChan c
 			fmt.Sprintf("cookie=%s, priority=50, table=0, in_port=%s, ip, "+
 				"actions=ct(zone=%d, table=1)", defaultOpenFlowCookie, ofportPhys, config.Default.ConntrackZone))
 		if err != nil {
-			return fmt.Errorf("failed to add openflow flow to %s, stderr: %q, "+
+			return nil, fmt.Errorf("failed to add openflow flow to %s, stderr: %q, "+
 				"error: %v", gwBridge, stderr, err)
 		}
 		nFlows++
@@ -424,7 +464,7 @@ func addDefaultConntrackRulesLocal(nodeName, gwBridge, gwIntf string, stopChan c
 				"actions=ct(commit, exec(load:0x1->NXM_NX_CT_LABEL), zone=%d), output:%s",
 				defaultOpenFlowCookie, ofportPatch, config.Default.ConntrackZone, ofportPhys))
 		if err != nil {
-			return fmt.Errorf("failed to add openflow flow to %s, stderr: %q, "+
+			return nil, fmt.Errorf("failed to add openflow flow to %s, stderr: %q, "+
 				"error: %v", gwBridge, stderr, err)
 		}
 		nFlows++
@@ -435,7 +475,7 @@ func addDefaultConntrackRulesLocal(nodeName, gwBridge, gwIntf string, stopChan c
 			fmt.Sprintf("cookie=%s, priority=50, table=0, in_port=%s, ipv6, "+
 				"actions=ct(zone=%d, table=1)", defaultOpenFlowCookie, ofportPhys, config.Default.ConntrackZone))
 		if err != nil {
-			return fmt.Errorf("failed to add openflow flow to %s, stderr: %q, "+
+			return nil, fmt.Errorf("failed to add openflow flow to %s, stderr: %q, "+
 				"error: %v", gwBridge, stderr, err)
 		}
 		nFlows++
@@ -446,7 +486,7 @@ func addDefaultConntrackRulesLocal(nodeName, gwBridge, gwIntf string, stopChan c
 		fmt.Sprintf("cookie=%s, priority=100, table=0, in_port=LOCAL, actions=output:%s",
 			defaultOpenFlowCookie, ofportPhys))
 	if err != nil {
-		return fmt.Errorf("failed to add openflow flow to %s, stderr: %q, error: %v", gwBridge, stderr, err)
+		return nil, fmt.Errorf("failed to add openflow flow to %s, stderr: %q, error: %v", gwBridge, stderr, err)
 	}
 	nFlows++
 
@@ -455,7 +495,7 @@ func addDefaultConntrackRulesLocal(nodeName, gwBridge, gwIntf string, stopChan c
 		fmt.Sprintf("cookie=%s, priority=99, table=0, in_port=%s, actions=output:%s",
 			defaultOpenFlowCookie, ofportPatch, ofportPhys))
 	if err != nil {
-		return fmt.Errorf("failed to add openflow flow to %s, stderr: %q, error: %v", gwBridge, stderr, err)
+		return nil, fmt.Errorf("failed to add openflow flow to %s, stderr: %q, error: %v", gwBridge, stderr, err)
 	}
 
 	nFlows++
@@ -465,7 +505,7 @@ func addDefaultConntrackRulesLocal(nodeName, gwBridge, gwIntf string, stopChan c
 		fmt.Sprintf("cookie=%s, priority=100, table=1, ct_label=0x1, "+
 			"actions=output:%s", defaultOpenFlowCookie, ofportPatch))
 	if err != nil {
-		return fmt.Errorf("failed to add openflow flow to %s, stderr: %q, "+
+		return nil, fmt.Errorf("failed to add openflow flow to %s, stderr: %q, "+
 			"error: %v", gwBridge, stderr, err)
 	}
 	nFlows++
@@ -484,7 +524,7 @@ func addDefaultConntrackRulesLocal(nodeName, gwBridge, gwIntf string, stopChan c
 			fmt.Sprintf("cookie=%s, priority=3, table=1, %s, %s_dst=%s/%d, actions=output:%s",
 				defaultOpenFlowCookie, ipPrefix, ipPrefix, cidr.IP, mask, ofportPatch))
 		if err != nil {
-			return fmt.Errorf("failed to add openflow flow to %s, stderr: %q, "+
+			return nil, fmt.Errorf("failed to add openflow flow to %s, stderr: %q, "+
 				"error: %v", gwBridge, stderr, err)
 		}
 		nFlows++
@@ -497,7 +537,7 @@ func addDefaultConntrackRulesLocal(nodeName, gwBridge, gwIntf string, stopChan c
 		_, stderr, err = util.RunOVSOfctl("add-flow", gwBridge,
 			fmt.Sprintf("cookie=%s, priority=1, table=1,icmp6 actions=FLOOD", defaultOpenFlowCookie))
 		if err != nil {
-			return fmt.Errorf("failed to add openflow flow to %s, stderr: %q, "+
+			return nil, fmt.Errorf("failed to add openflow flow to %s, stderr: %q, "+
 				"error: %v", gwBridge, stderr, err)
 		}
 		nFlows++
@@ -507,12 +547,13 @@ func addDefaultConntrackRulesLocal(nodeName, gwBridge, gwIntf string, stopChan c
 	_, stderr, err = util.RunOVSOfctl("add-flow", gwBridge,
 		fmt.Sprintf("cookie=%s, priority=0, table=1, actions=LOCAL", defaultOpenFlowCookie))
 	if err != nil {
-		return fmt.Errorf("failed to add openflow flow to %s, stderr: %q, "+
+		return nil, fmt.Errorf("failed to add openflow flow to %s, stderr: %q, "+
 			"error: %v", gwBridge, stderr, err)
 	}
 	nFlows++
 
 	// add health check function to check default OpenFlow flows are on the shared gateway bridge
-	go checkDefaultConntrackRules(gwBridge, gwIntf, patchPort, ofportPhys, ofportPatch, nFlows, stopChan)
-	return nil
+	return &openflowManager{
+		gwBridge, gwIntf, patchPort, ofportPhys, ofportPatch, nFlows,
+	}, nil
 }
