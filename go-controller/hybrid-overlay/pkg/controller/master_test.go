@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"reflect"
 	"strings"
+	"sync"
 
 	goovn "github.com/ebay/go-ovn"
 	"github.com/urfave/cli/v2"
@@ -70,6 +71,7 @@ var _ = Describe("Hybrid SDN Master Operations", func() {
 	var (
 		app      *cli.App
 		stopChan chan struct{}
+		wg       *sync.WaitGroup
 	)
 
 	BeforeEach(func() {
@@ -80,10 +82,12 @@ var _ = Describe("Hybrid SDN Master Operations", func() {
 		app.Name = "test"
 		app.Flags = config.Flags
 		stopChan = make(chan struct{})
+		wg = &sync.WaitGroup{}
 	})
 
 	AfterEach(func() {
 		close(stopChan)
+		wg.Wait()
 	})
 
 	const hybridOverlayClusterCIDR string = "11.1.0.0/16/24"
@@ -122,7 +126,11 @@ var _ = Describe("Hybrid SDN Master Operations", func() {
 			Expect(err).NotTo(HaveOccurred())
 
 			f.Start(stopChan)
-			go m.Run(stopChan)
+			wg.Add(1)
+			go func() {
+				defer wg.Done()
+				m.Run(stopChan)
+			}()
 
 			// Windows node should be allocated a subnet
 			Eventually(func() (map[string]string, error) {
@@ -193,7 +201,11 @@ var _ = Describe("Hybrid SDN Master Operations", func() {
 			Expect(err).NotTo(HaveOccurred())
 
 			f.Start(stopChan)
-			go m.Run(stopChan)
+			wg.Add(1)
+			go func() {
+				defer wg.Done()
+				m.Run(stopChan)
+			}()
 
 			Eventually(func() (map[string]string, error) {
 				updatedNode, err := fakeClient.CoreV1().Nodes().Get(context.TODO(), nodeName, metav1.GetOptions{})
@@ -262,7 +274,11 @@ var _ = Describe("Hybrid SDN Master Operations", func() {
 			Expect(err).NotTo(HaveOccurred())
 
 			f.Start(stopChan)
-			go m.Run(stopChan)
+			wg.Add(1)
+			go func() {
+				defer wg.Done()
+				m.Run(stopChan)
+			}()
 
 			k := &kube.Kube{KClient: fakeClient}
 			updatedNode, err := k.GetNode(nodeName)
@@ -343,7 +359,11 @@ var _ = Describe("Hybrid SDN Master Operations", func() {
 			Expect(err).NotTo(HaveOccurred())
 
 			f.Start(stopChan)
-			go m.Run(stopChan)
+			wg.Add(1)
+			go func() {
+				defer wg.Done()
+				m.Run(stopChan)
+			}()
 
 			Eventually(func() error {
 				pod, err := fakeClient.CoreV1().Pods(nsName).Get(context.TODO(), pod1Name, metav1.GetOptions{})
@@ -423,7 +443,11 @@ var _ = Describe("Hybrid SDN Master Operations", func() {
 			Expect(err).NotTo(HaveOccurred())
 
 			f.Start(stopChan)
-			go m.Run(stopChan)
+			wg.Add(1)
+			go func() {
+				defer wg.Done()
+				m.Run(stopChan)
+			}()
 
 			updatedNs, err := fakeClient.CoreV1().Namespaces().Get(context.TODO(), nsName, metav1.GetOptions{})
 			Expect(err).NotTo(HaveOccurred())

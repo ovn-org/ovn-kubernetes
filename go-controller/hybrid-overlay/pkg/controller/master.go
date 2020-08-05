@@ -3,6 +3,7 @@ package controller
 import (
 	"fmt"
 	"net"
+	"sync"
 	"time"
 
 	goovn "github.com/ebay/go-ovn"
@@ -134,27 +135,35 @@ func (m *MasterController) Run(stopCh <-chan struct{}) {
 	defer utilruntime.HandleCrash()
 	klog.Info("Starting Hybrid Overlay Master Controller")
 
-	klog.Info("Starting workers")
+	wg := &sync.WaitGroup{}
+	wg.Add(1)
 	go func() {
+		defer wg.Done()
 		err := m.nodeEventHandler.Run(informer.DefaultNodeInformerThreadiness, stopCh)
 		if err != nil {
 			klog.Error(err)
 		}
 	}()
+	wg.Add(1)
 	go func() {
+		defer wg.Done()
 		err := m.namespaceEventHandler.Run(informer.DefaultInformerThreadiness, stopCh)
 		if err != nil {
 			klog.Error(err)
 		}
 	}()
+	wg.Add(1)
 	go func() {
+		defer wg.Done()
 		err := m.podEventHandler.Run(informer.DefaultInformerThreadiness, stopCh)
 		if err != nil {
 			klog.Error(err)
 		}
 	}()
 	<-stopCh
-	klog.Info("Shutting down workers")
+	klog.Info("Shutting down Hybrid Overlay Master workers")
+	wg.Wait()
+	klog.Info("Shut down Hybrid Overlay Master workers")
 }
 
 // hybridOverlayNodeEnsureSubnet allocates a subnet and sets the

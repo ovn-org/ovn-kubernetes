@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"net"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/urfave/cli/v2"
@@ -176,6 +177,7 @@ var _ = Describe("Hybrid Overlay Node Linux Operations", func() {
 		fexec    *ovntest.FakeExec
 		netns    ns.NetNS
 		stopChan chan struct{}
+		wg       *sync.WaitGroup
 	)
 	const (
 		thisNode   string = "mynode"
@@ -191,6 +193,7 @@ var _ = Describe("Hybrid Overlay Node Linux Operations", func() {
 		app.Flags = config.Flags
 
 		stopChan = make(chan struct{})
+		wg = &sync.WaitGroup{}
 
 		fexec = ovntest.NewLooseCompareFakeExec()
 		err := util.SetExec(fexec)
@@ -217,6 +220,7 @@ var _ = Describe("Hybrid Overlay Node Linux Operations", func() {
 
 	AfterEach(func() {
 		close(stopChan)
+		wg.Wait()
 		Expect(netns.Close()).To(Succeed())
 		Expect(testutils.UnmountNS(netns)).To(Succeed())
 	})
@@ -254,7 +258,11 @@ var _ = Describe("Hybrid Overlay Node Linux Operations", func() {
 			Expect(err).NotTo(HaveOccurred())
 
 			f.Start(stopChan)
-			go n.nodeEventHandler.Run(1, stopChan)
+			wg.Add(1)
+			go func() {
+				defer wg.Done()
+				n.nodeEventHandler.Run(1, stopChan)
+			}()
 
 			// FIXME
 			// Eventually(fexec.CalledMatchesExpected, 2).Should(BeTrue(), fexec.ErrorDesc)
@@ -298,7 +306,11 @@ var _ = Describe("Hybrid Overlay Node Linux Operations", func() {
 			Expect(err).NotTo(HaveOccurred())
 
 			f.Start(stopChan)
-			go n.nodeEventHandler.Run(1, stopChan)
+			wg.Add(1)
+			go func() {
+				defer wg.Done()
+				n.nodeEventHandler.Run(1, stopChan)
+			}()
 
 			// FIXME
 			// Eventually(fexec.CalledMatchesExpected, 2).Should(BeTrue(), fexec.ErrorDesc)
@@ -443,7 +455,11 @@ var _ = Describe("Hybrid Overlay Node Linux Operations", func() {
 			Expect(err).NotTo(HaveOccurred())
 
 			f.Start(stopChan)
-			go n.nodeEventHandler.Run(1, stopChan)
+			wg.Add(1)
+			go func() {
+				defer wg.Done()
+				n.nodeEventHandler.Run(1, stopChan)
+			}()
 
 			// FIXME
 			// Eventually(fexec.CalledMatchesExpected, 2).Should(BeTrue(), fexec.ErrorDesc)
@@ -490,7 +506,11 @@ var _ = Describe("Hybrid Overlay Node Linux Operations", func() {
 			Expect(err).NotTo(HaveOccurred())
 
 			f.Start(stopChan)
-			go n.nodeEventHandler.Run(1, stopChan)
+			wg.Add(1)
+			go func() {
+				defer wg.Done()
+				n.nodeEventHandler.Run(1, stopChan)
+			}()
 
 			//FIXME
 			// Eventually(fexec.CalledMatchesExpected, 2).Should(BeTrue(), fexec.ErrorDesc)
@@ -536,7 +556,11 @@ var _ = Describe("Hybrid Overlay Node Linux Operations", func() {
 			Expect(err).NotTo(HaveOccurred())
 
 			f.Start(stopChan)
-			go n.Run(stopChan)
+			wg.Add(1)
+			go func() {
+				defer wg.Done()
+				n.Run(stopChan)
+			}()
 
 			// Wait for the controller to start
 			err = wait.PollImmediate(500*time.Millisecond, 5*time.Second, func() (bool, error) { return n.ready == true, nil })
@@ -608,7 +632,11 @@ var _ = Describe("Hybrid Overlay Node Linux Operations", func() {
 			// Expect(err).NotTo(HaveOccurred())
 
 			f.Start(stopChan)
-			go n.Run(stopChan)
+			wg.Add(1)
+			go func() {
+				defer wg.Done()
+				n.Run(stopChan)
+			}()
 
 			// Wait for the controller to start
 			err = wait.PollImmediate(500*time.Millisecond, 5*time.Second, func() (bool, error) { return n.ready == true, nil })

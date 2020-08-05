@@ -8,6 +8,7 @@ import (
 	"os"
 	"reflect"
 	"strings"
+	"sync"
 	"time"
 
 	kapi "k8s.io/api/core/v1"
@@ -21,7 +22,7 @@ import (
 	"k8s.io/klog"
 	utilnet "k8s.io/utils/net"
 
-	homaster "github.com/ovn-org/ovn-kubernetes/go-controller/hybrid-overlay/pkg/controller"
+	hocontroller "github.com/ovn-org/ovn-kubernetes/go-controller/hybrid-overlay/pkg/controller"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/metrics"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/ipallocator"
@@ -53,7 +54,7 @@ func (_ ovnkubeMasterLeaderMetricsProvider) NewLeaderMetric() leaderelection.Swi
 }
 
 // Start waits until this process is the leader before starting master functions
-func (oc *Controller) Start(kClient kubernetes.Interface, nodeName string) error {
+func (oc *Controller) Start(kClient kubernetes.Interface, nodeName string, wg *sync.WaitGroup) error {
 	// Set up leader election process first
 	rl, err := resourcelock.New(
 		resourcelock.ConfigMapsResourceLock,
@@ -87,7 +88,7 @@ func (oc *Controller) Start(kClient kubernetes.Interface, nodeName string) error
 				if err := oc.StartClusterMaster(nodeName); err != nil {
 					panic(err.Error())
 				}
-				if err := oc.Run(); err != nil {
+				if err := oc.Run(wg); err != nil {
 					panic(err.Error())
 				}
 			},
@@ -208,7 +209,7 @@ func (oc *Controller) StartClusterMaster(masterNodeName string) error {
 
 	if config.HybridOverlay.Enabled {
 		factory := oc.watchFactory.GetFactory()
-		nodeMaster, err := homaster.NewMaster(
+		oc.hoMaster, err = hocontroller.NewMaster(
 			oc.kube,
 			factory.Core().V1().Nodes().Informer(),
 			factory.Core().V1().Namespaces().Informer(),
@@ -219,7 +220,6 @@ func (oc *Controller) StartClusterMaster(masterNodeName string) error {
 		if err != nil {
 			return fmt.Errorf("failed to set up hybrid overlay master: %v", err)
 		}
-		go nodeMaster.Run(oc.stopChan)
 	}
 
 	return nil

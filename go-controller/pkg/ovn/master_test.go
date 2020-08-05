@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"net"
 	"strings"
+	"sync"
 
 	goovn "github.com/ebay/go-ovn"
 	"github.com/urfave/cli/v2"
@@ -244,6 +245,7 @@ var _ = Describe("Master Operations", func() {
 		app      *cli.App
 		f        *factory.WatchFactory
 		stopChan chan struct{}
+		wg       *sync.WaitGroup
 	)
 
 	BeforeEach(func() {
@@ -254,11 +256,13 @@ var _ = Describe("Master Operations", func() {
 		app.Name = "test"
 		app.Flags = config.Flags
 		stopChan = make(chan struct{})
+		wg = &sync.WaitGroup{}
 	})
 
 	AfterEach(func() {
 		close(stopChan)
 		f.Shutdown()
+		wg.Wait()
 	})
 
 	It("creates logical network elements for a 2-node cluster", func() {
@@ -328,6 +332,12 @@ var _ = Describe("Master Operations", func() {
 
 			err = clusterController.WatchNodes()
 			Expect(err).NotTo(HaveOccurred())
+
+			wg.Add(1)
+			go func() {
+				defer wg.Done()
+				clusterController.hoMaster.Run(stopChan)
+			}()
 
 			Eventually(fexec.CalledMatchesExpected, 2).Should(BeTrue(), fexec.ErrorDesc)
 			updatedNode, err := fakeClient.CoreV1().Nodes().Get(context.TODO(), nodeName, metav1.GetOptions{})
@@ -421,6 +431,12 @@ var _ = Describe("Master Operations", func() {
 			err = clusterController.WatchNodes()
 			Expect(err).NotTo(HaveOccurred())
 
+			wg.Add(1)
+			go func() {
+				defer wg.Done()
+				clusterController.hoMaster.Run(stopChan)
+			}()
+
 			Eventually(fexec.CalledMatchesExpected, 2).Should(BeTrue(), fexec.ErrorDesc)
 			updatedNode, err := fakeClient.CoreV1().Nodes().Get(context.TODO(), nodeName, metav1.GetOptions{})
 			Expect(err).NotTo(HaveOccurred())
@@ -510,6 +526,12 @@ var _ = Describe("Master Operations", func() {
 
 			err = clusterController.WatchNodes()
 			Expect(err).NotTo(HaveOccurred())
+
+			wg.Add(1)
+			go func() {
+				defer wg.Done()
+				clusterController.hoMaster.Run(stopChan)
+			}()
 
 			Eventually(fexec.CalledMatchesExpected, 2).Should(BeTrue(), fexec.ErrorDesc)
 			updatedNode, err := fakeClient.CoreV1().Nodes().Get(context.TODO(), nodeName, metav1.GetOptions{})

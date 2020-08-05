@@ -9,6 +9,7 @@ import (
 	"reflect"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	honode "github.com/ovn-org/ovn-kubernetes/go-controller/hybrid-overlay/pkg/controller"
@@ -159,7 +160,7 @@ func isOVNControllerReady(name string) (bool, error) {
 
 // Start learns the subnets assigned to it by the master controller
 // and calls the SetupNode script which establishes the logical switch
-func (n *OvnNode) Start() error {
+func (n *OvnNode) Start(wg *sync.WaitGroup) error {
 	var err error
 	var node *kapi.Node
 	var subnets []*net.IPNet
@@ -244,11 +245,10 @@ func (n *OvnNode) Start() error {
 		if err != nil {
 			return err
 		}
+		wg.Add(1)
 		go func() {
-			err := nodeController.Run(n.stopChan)
-			if err != nil {
-				klog.Error(err)
-			}
+			defer wg.Done()
+			nodeController.Run(n.stopChan)
 		}()
 	}
 

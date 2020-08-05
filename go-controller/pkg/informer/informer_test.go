@@ -2,6 +2,7 @@ package informer
 
 import (
 	"context"
+	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -55,6 +56,20 @@ var _ = Describe("Informer Event Handler Tests", func() {
 	const (
 		namespace string = "test"
 	)
+	var (
+		stopChan chan struct{}
+		wg       *sync.WaitGroup
+	)
+
+	BeforeEach(func() {
+		stopChan = make(chan struct{})
+		wg = &sync.WaitGroup{}
+	})
+
+	AfterEach(func() {
+		close(stopChan)
+		wg.Wait()
+	})
 
 	It("processes an add event", func() {
 		adds := int32(0)
@@ -87,11 +102,12 @@ var _ = Describe("Informer Event Handler Tests", func() {
 			ReceiveAllUpdates,
 		)
 
-		stopChan := make(chan struct{})
-		defer close(stopChan)
-
 		f.Start(stopChan)
-		go e.Run(1, stopChan)
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			e.Run(1, stopChan)
+		}()
 
 		wait.PollImmediate(
 			500*time.Millisecond,
@@ -152,11 +168,12 @@ var _ = Describe("Informer Event Handler Tests", func() {
 			ReceiveAllUpdates,
 		)
 
-		stopChan := make(chan struct{})
-		defer close(stopChan)
-
 		f.Start(stopChan)
-		go e.Run(1, stopChan)
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			e.Run(1, stopChan)
+		}()
 
 		wait.PollImmediate(
 			500*time.Millisecond,
@@ -219,11 +236,12 @@ var _ = Describe("Informer Event Handler Tests", func() {
 			ReceiveAllUpdates,
 		)
 
-		stopChan := make(chan struct{})
-		defer close(stopChan)
-
 		f.Start(stopChan)
-		go e.Run(1, stopChan)
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			e.Run(1, stopChan)
+		}()
 
 		wait.PollImmediate(
 			500*time.Millisecond,
@@ -285,11 +303,12 @@ var _ = Describe("Informer Event Handler Tests", func() {
 			DiscardAllUpdates,
 		)
 
-		stopChan := make(chan struct{})
-		defer close(stopChan)
-
 		f.Start(stopChan)
-		go e.Run(1, stopChan)
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			e.Run(1, stopChan)
+		}()
 
 		wait.PollImmediate(
 			500*time.Millisecond,
