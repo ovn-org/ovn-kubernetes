@@ -343,6 +343,7 @@ pushd ../dist/images
   --k8s-apiserver=${API_URL} \
   --ovn-master-count=${KIND_NUM_MASTER} \
   --kind \
+  --ovn-unprivileged-mode=no \
   --master-loglevel=5 \
   --egress-ip-enable=true
 popd
