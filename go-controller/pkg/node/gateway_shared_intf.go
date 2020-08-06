@@ -433,7 +433,7 @@ func addDefaultConntrackRules(nodeName, gwBridge, gwIntf string, stopChan chan s
 	return nil
 }
 
-func (n *OvnNode) initSharedGateway(subnets []*net.IPNet, gwNextHop net.IP, gwIntf string, nodeAnnotator kube.Annotator) (postWaitFunc, error) {
+func (n *OvnNode) initSharedGateway(subnets []*net.IPNet, gwNextHops []net.IP, gwIntf string, nodeAnnotator kube.Annotator) (postWaitFunc, error) {
 	var bridgeName string
 	var uplinkName string
 	var brCreated bool
@@ -465,17 +465,13 @@ func (n *OvnNode) initSharedGateway(subnets []*net.IPNet, gwNextHop net.IP, gwIn
 		bridgeName = gwIntf
 	}
 
-	// Now, we get IP address from OVS bridge. If IP does not exist,
+	// Now, we get IP addresses from OVS bridge. If IP does not exist,
 	// error out.
-	ipAddress, err := getIPv4Address(gwIntf)
+	ips, err := getNetworkInterfaceIPAddresses(gwIntf)
 	if err != nil {
 		return nil, fmt.Errorf("failed to get interface details for %s (%v)",
 			gwIntf, err)
 	}
-	if ipAddress == nil {
-		return nil, fmt.Errorf("%s does not have a ipv4 address", gwIntf)
-	}
-
 	ifaceID, macAddress, err := bridgedGatewayNodeSetup(n.name, bridgeName, gwIntf,
 		util.PhysicalNetworkName, brCreated)
 	if err != nil {
@@ -496,8 +492,8 @@ func (n *OvnNode) initSharedGateway(subnets []*net.IPNet, gwNextHop net.IP, gwIn
 		ChassisID:      chassisID,
 		InterfaceID:    ifaceID,
 		MACAddress:     macAddress,
-		IPAddresses:    []*net.IPNet{ipAddress},
-		NextHops:       []net.IP{gwNextHop},
+		IPAddresses:    ips,
+		NextHops:       gwNextHops,
 		NodePortEnable: config.Gateway.NodeportEnable,
 		VLANID:         &config.Gateway.VLANID,
 	})
@@ -514,7 +510,7 @@ func (n *OvnNode) initSharedGateway(subnets []*net.IPNet, gwNextHop net.IP, gwIn
 
 		if config.Gateway.NodeportEnable {
 			// Program cluster.GatewayIntf to let nodePort traffic to go to pods.
-			if err := nodePortWatcher(n.name, bridgeName, uplinkName, []*net.IPNet{ipAddress},
+			if err := nodePortWatcher(n.name, bridgeName, uplinkName, ips,
 				n.watchFactory); err != nil {
 				return err
 			}

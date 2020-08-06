@@ -34,7 +34,6 @@ delete()
   kind delete cluster --name ${KIND_CLUSTER_NAME:-ovn}
 }
 
-
 usage()
 {
     echo "usage: kind.sh [[[-cf|--config-file <file>] [-kt|keep-taint] [-ha|--ha-enabled]"
@@ -173,7 +172,7 @@ OVN_IMAGE=${OVN_IMAGE:-local}
 NET_CIDR_IPV4=${NET_CIDR_IPV4:-10.244.0.0/16}
 SVC_CIDR_IPV4=${SVC_CIDR_IPV4:-10.96.0.0/12}
 NET_CIDR_IPV6=${NET_CIDR_IPV6:-fd00:10:244::/48}
-SVC_CIDR_IPV6=${SVC_CIDR_IPV6:-fd00:10:96::/64}
+SVC_CIDR_IPV6=${SVC_CIDR_IPV6:-fd00:10:96::/112}
 
 KIND_NUM_MASTER=1
 if [ "$KIND_HA" == true ]; then
@@ -275,8 +274,8 @@ ovn_apiServerAddress=${API_IP} \
   j2 ${KIND_CONFIG} -o ${KIND_CONFIG_LCL}
 
 # Create KIND cluster. For additional debug, add '--verbosity <int>': 0 None .. 3 Debug
-kind create cluster --name ${KIND_CLUSTER_NAME} --kubeconfig ${HOME}/admin.conf --image kindest/node:${K8S_VERSION} --config=${KIND_CONFIG_LCL}
 export KUBECONFIG=${HOME}/admin.conf
+kind create cluster --name ${KIND_CLUSTER_NAME} --kubeconfig ${KUBECONFIG} --image kindest/node:${K8S_VERSION} --config=${KIND_CONFIG_LCL}
 cat ${KUBECONFIG}
 
 if [ "${GITHUB_ACTIONS:-false}" == "true" ]; then
