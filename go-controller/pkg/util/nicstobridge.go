@@ -9,6 +9,7 @@ import (
 	"strings"
 	"syscall"
 
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
 	"github.com/vishvananda/netlink"
 	"k8s.io/klog"
 )
@@ -218,11 +219,16 @@ func NicToBridge(iface string) (string, error) {
 	setupDefaultFile()
 
 	// Get ip addresses and routes before any real operations.
-	addrs, err := netLinkOps.AddrList(ifaceLink, syscall.AF_INET)
+	family := syscall.AF_UNSPEC
+	// FIXME: Should move all interfaces over, but in IPv4 only, breaks.
+	if config.IPv4Mode && !config.IPv6Mode {
+		family = syscall.AF_INET
+	}
+	addrs, err := netLinkOps.AddrList(ifaceLink, family)
 	if err != nil {
 		return "", err
 	}
-	routes, err := netLinkOps.RouteList(ifaceLink, syscall.AF_INET)
+	routes, err := netLinkOps.RouteList(ifaceLink, family)
 	if err != nil {
 		return "", err
 	}
@@ -255,11 +261,16 @@ func BridgeToNic(bridge string) error {
 	}
 
 	// Get ip addresses and routes before any real operations.
-	addrs, err := netLinkOps.AddrList(bridgeLink, syscall.AF_INET)
+	family := syscall.AF_UNSPEC
+	// FIXME: Should move all interfaces over, but in IPv4 only, breaks.
+	if config.IPv4Mode && !config.IPv6Mode {
+		family = syscall.AF_INET
+	}
+	addrs, err := netLinkOps.AddrList(bridgeLink, family)
 	if err != nil {
 		return err
 	}
-	routes, err := netLinkOps.RouteList(bridgeLink, syscall.AF_INET)
+	routes, err := netLinkOps.RouteList(bridgeLink, family)
 	if err != nil {
 		return err
 	}
