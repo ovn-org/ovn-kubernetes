@@ -83,6 +83,12 @@ func (oc *Controller) addEgressFirewall(egressFirewall *egressfirewallapi.Egress
 	var errList []error
 	for i, egressFirewallRule := range egressFirewall.Spec.Egress {
 		//process Rules into egressFirewallRules for egressFirewall struct
+
+		if egressFirewallRule.To.CIDRSelector == "0.0.0.0/32" {
+			egressFirewallRule.To.CIDRSelector = "0.0.0.0/0"
+			klog.Warningf("Correcting CIDRSelector '0.0.0.0/32' to '0.0.0.0/0' in EgressNetworkPolicy %s:%s", ef.namespace, ef.name)
+		}
+
 		efr, err := newEgressFirewallRule(egressFirewallRule, i)
 		if err != nil {
 			errList = append(errList, fmt.Errorf("error: cannot create EgressFirewall Rule for destination %s to namespace %s - %v",
