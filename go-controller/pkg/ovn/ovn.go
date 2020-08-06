@@ -14,7 +14,6 @@ import (
 	hocontroller "github.com/ovn-org/ovn-kubernetes/go-controller/hybrid-overlay/pkg/controller"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
 	egressipv1 "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/egressip/v1"
-	egressipapi "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/egressip/v1/apis/clientset/versioned"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/factory"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/kube"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/ipallocator"
@@ -22,7 +21,6 @@ import (
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
 
 	egressfirewall "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/egressfirewall/v1"
-	egressfirewallclientset "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/egressfirewall/v1/apis/clientset/versioned"
 
 	apiextension "k8s.io/apiextensions-apiserver/pkg/apis/apiextensions/v1beta1"
 	utilnet "k8s.io/utils/net"
@@ -32,7 +30,6 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/labels"
 	"k8s.io/apimachinery/pkg/types"
-	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/kubernetes/scheme"
 	"k8s.io/client-go/tools/cache"
 	"k8s.io/client-go/tools/record"
@@ -251,7 +248,7 @@ func GetIPFullMask(ip string) string {
 
 // NewOvnController creates a new OVN controller for creating logical network
 // infrastructure and policy
-func NewOvnController(kubeClient kubernetes.Interface, egressIPClient egressipapi.Interface, egressFirewallClient egressfirewallclientset.Interface, wf *factory.WatchFactory,
+func NewOvnController(ovnClient *util.OVNClientset, wf *factory.WatchFactory,
 	stopChan <-chan struct{}, addressSetFactory AddressSetFactory, ovnNBClient goovn.Client, ovnSBClient goovn.Client, recorder record.EventRecorder) *Controller {
 
 	if addressSetFactory == nil {
@@ -260,9 +257,9 @@ func NewOvnController(kubeClient kubernetes.Interface, egressIPClient egressipap
 	modeEgressIP := newModeEgressIP()
 	return &Controller{
 		kube: &kube.Kube{
-			KClient:              kubeClient,
-			EIPClient:            egressIPClient,
-			EgressFirewallClient: egressFirewallClient,
+			KClient:              ovnClient.KubeClient,
+			EIPClient:            ovnClient.EgressIPClient,
+			EgressFirewallClient: ovnClient.EgressFirewallClient,
 		},
 		watchFactory:                  wf,
 		stopChan:                      stopChan,

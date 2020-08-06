@@ -189,13 +189,13 @@ func runOvnKube(ctx *cli.Context) error {
 		return fmt.Errorf("failed to initialize exec helper: %v", err)
 	}
 
-	clientset, egressIPClientset, egressFirewallClientset, crdClientset, err := util.NewClientsets(&config.Kubernetes)
+	ovnClientset, err := util.NewOVNClientset(&config.Kubernetes)
 	if err != nil {
 		return err
 	}
 
 	// create factory and start the controllers asked for
-	factory, err := factory.NewWatchFactory(clientset, egressIPClientset, egressFirewallClientset, crdClientset)
+	factory, err := factory.NewWatchFactory(ovnClientset)
 	if err != nil {
 		return err
 	}
@@ -245,8 +245,8 @@ func runOvnKube(ctx *cli.Context) error {
 		// since we capture some metrics in Start()
 		metrics.RegisterMasterMetrics(ovnNBClient, ovnSBClient)
 
-		ovnController := ovn.NewOvnController(clientset, egressIPClientset, egressFirewallClientset, factory, stopChan, nil, ovnNBClient, ovnSBClient, util.EventRecorder(clientset))
-		if err := ovnController.Start(clientset, master, wg); err != nil {
+		ovnController := ovn.NewOvnController(ovnClientset, factory, stopChan, nil, ovnNBClient, ovnSBClient, util.EventRecorder(ovnClientset.KubeClient))
+		if err := ovnController.Start(ovnClientset.KubeClient, master, wg); err != nil {
 			return err
 		}
 	}
@@ -258,7 +258,7 @@ func runOvnKube(ctx *cli.Context) error {
 		// register ovnkube node specific prometheus metrics exported by the node
 		metrics.RegisterNodeMetrics()
 		start := time.Now()
-		n := ovnnode.NewNode(clientset, factory, node, stopChan, util.EventRecorder(clientset))
+		n := ovnnode.NewNode(ovnClientset.KubeClient, factory, node, stopChan, util.EventRecorder(ovnClientset.KubeClient))
 		if err := n.Start(wg); err != nil {
 			return err
 		}
@@ -274,7 +274,7 @@ func runOvnKube(ctx *cli.Context) error {
 
 	// start the prometheus server to serve OVN Metrics (default port: 9476)
 	if config.Kubernetes.OVNMetricsBindAddress != "" {
-		metrics.RegisterOvnMetrics(clientset, node)
+		metrics.RegisterOvnMetrics(ovnClientset.KubeClient, node)
 		metrics.StartOVNMetricsServer(config.Kubernetes.OVNMetricsBindAddress)
 	}
 

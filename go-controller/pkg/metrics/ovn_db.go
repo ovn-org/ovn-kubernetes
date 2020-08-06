@@ -349,7 +349,7 @@ func getOvnDbVersionInfo() {
 	}
 }
 
-func RegisterOvnDBMetrics(clientset *kubernetes.Clientset, k8sNodeName string) {
+func RegisterOvnDBMetrics(clientset kubernetes.Interface, k8sNodeName string) {
 	err := wait.PollImmediate(1*time.Second, 300*time.Second, func() (bool, error) {
 		return checkPodRunsOnGivenNode(clientset, "name=ovnkube-db", k8sNodeName, false)
 	})

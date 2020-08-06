@@ -176,15 +176,21 @@ cookie=0x0, duration=8366.597s, table=1, n_packets=10641, n_bytes=10370087, prio
 			Name: nodeName,
 		}}
 
-		fakeClient := fake.NewSimpleClientset(&v1.NodeList{
+		kubeFakeClient := fake.NewSimpleClientset(&v1.NodeList{
 			Items: []v1.Node{existingNode},
 		})
 		egressFirewallFakeClient := &egressfirewallfake.Clientset{}
 		crdFakeClient := &apiextensionsfake.Clientset{}
 		egressIPFakeClient := &egressipfake.Clientset{}
+		fakeClient := &util.OVNClientset{
+			KubeClient:           kubeFakeClient,
+			EgressIPClient:       egressIPFakeClient,
+			EgressFirewallClient: egressFirewallFakeClient,
+			APIExtensionsClient:  crdFakeClient,
+		}
 
 		stop := make(chan struct{})
-		wf, err := factory.NewWatchFactory(fakeClient, egressIPFakeClient, egressFirewallFakeClient, crdFakeClient)
+		wf, err := factory.NewWatchFactory(fakeClient)
 		Expect(err).NotTo(HaveOccurred())
 		defer func() {
 			close(stop)
@@ -195,7 +201,7 @@ cookie=0x0, duration=8366.597s, table=1, n_packets=10641, n_bytes=10370087, prio
 
 		iptV4, iptV6 := util.SetFakeIPTablesHelpers()
 
-		nodeAnnotator := kube.NewNodeAnnotator(&kube.Kube{fakeClient, egressIPFakeClient, egressFirewallFakeClient}, &existingNode)
+		nodeAnnotator := kube.NewNodeAnnotator(&kube.Kube{fakeClient.KubeClient, egressIPFakeClient, egressFirewallFakeClient}, &existingNode)
 
 		err = util.SetNodeHostSubnetAnnotation(nodeAnnotator, ovntest.MustParseIPNets(nodeSubnet))
 		Expect(err).NotTo(HaveOccurred())
@@ -368,7 +374,7 @@ func localNetInterfaceTest(app *cli.App, testNS ns.NetNS,
 			},
 		)
 
-		nodeAnnotator := kube.NewNodeAnnotator(&kube.Kube{fakeOvnNode.fakeClient, &egressipfake.Clientset{}, &egressfirewallfake.Clientset{}}, &existingNode)
+		nodeAnnotator := kube.NewNodeAnnotator(&kube.Kube{fakeOvnNode.fakeClient.KubeClient, &egressipfake.Clientset{}, &egressfirewallfake.Clientset{}}, &existingNode)
 		err := util.SetNodeHostSubnetAnnotation(nodeAnnotator, subnets)
 		Expect(err).NotTo(HaveOccurred())
 		err = nodeAnnotator.Run()

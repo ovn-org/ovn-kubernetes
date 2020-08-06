@@ -177,7 +177,7 @@ func runOvnKubeDBChecker(ctx *cli.Context) error {
 		return fmt.Errorf("failed to initialize exec helper: %v", err)
 	}
 
-	kclient, egressIPClient, egressFirewallClient, _, err := util.NewClientsets(&config.Kubernetes)
+	ovnClientset, err := util.NewOVNClientset(&config.Kubernetes)
 	if err != nil {
 		return err
 	}
@@ -185,9 +185,9 @@ func runOvnKubeDBChecker(ctx *cli.Context) error {
 	stopChan := make(chan struct{})
 	ovndbmanager.RunDBChecker(
 		&kube.Kube{
-			KClient:              kclient,
-			EIPClient:            egressIPClient,
-			EgressFirewallClient: egressFirewallClient,
+			KClient:              ovnClientset.KubeClient,
+			EIPClient:            ovnClientset.EgressIPClient,
+			EgressFirewallClient: ovnClientset.EgressFirewallClient,
 		},
 		stopChan)
 	// run until cancelled
