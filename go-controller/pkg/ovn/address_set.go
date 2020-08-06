@@ -6,11 +6,13 @@ import (
 	"sort"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
 
 	"k8s.io/apimachinery/pkg/util/sets"
+	utilwait "k8s.io/apimachinery/pkg/util/wait"
 	"k8s.io/klog"
 	utilnet "k8s.io/utils/net"
 )
@@ -417,4 +419,49 @@ func getIPv4ASHashedName(name string) string {
 
 func getIPv6ASHashedName(name string) string {
 	return hashedAddressSet(name + ipv6AddressSetSuffix)
+}
+
+// This method checks if an address set exists in OVN NB or not. In some cases when a namespace
+// is created, there will be multiple callbacks to create addtess set and create/updates ACLs for
+// network policies. To ensure address set is created under these circumstances, this method
+// will retry for 1 second to check if the address set exists.
+func addressSetExists(hashName string) (bool, error) {
+	err := utilwait.PollImmediate(100*time.Millisecond, 1*time.Second, func() (bool, error) {
+		uuid, stderr, err := util.RunOVNNbctl("--data=bare",
+			"--no-heading", "--columns=_uuid", "find", "address_set",
+			"name="+hashName)
+		if err != nil {
+			klog.Warningf("Find failed to get address set %s, stderr: %s (%v). Retrying.",
+				hashName, stderr, err)
+		}
+		return uuid != "", nil
+	},
+	)
+	if err != nil {
+		return false, err
+	}
+	return true, nil
+}
+
+// This method checks if the address sets for a namespace exists or not. This is to ensure
+// when ACLs are created through namespace create callbacks for policies, we need to make sure
+// address set is already created before we install ACLs.
+func addressSetExistsForNamespace(namespace string) bool {
+	var v4AsExists, v6AsExists bool
+	var err error
+	v4AsExists = true
+	v6AsExists = true
+	if config.IPv4Mode {
+		v4AsExists, err = addressSetExists(getIPv4ASHashedName(namespace))
+		if err != nil {
+			return false
+		}
+	}
+	if config.IPv6Mode {
+		v6AsExists, err = addressSetExists(getIPv6ASHashedName(namespace))
+		if err != nil {
+			return false
+		}
+	}
+	return v4AsExists && v6AsExists
 }

@@ -218,6 +218,15 @@ func (gp *gressPolicy) addNamespaceAddressSet(name, portGroupName string) {
 	if gp.peerV4AddressSets.Has(v4HashName) || gp.peerV6AddressSets.Has(v6HashName) {
 		return
 	}
+
+	//Check if the address set exist in OVN.
+	asExists := addressSetExistsForNamespace(name)
+	if !asExists {
+		klog.Errorf("Address set for namespace %s is not found. Not installing ACLs for port group %s",
+			name, portGroupName)
+		return
+	}
+
 	oldL3Match := gp.getL3MatchFromAddressSet()
 	if config.IPv4Mode {
 		gp.peerV4AddressSets.Insert(v4HashName)
