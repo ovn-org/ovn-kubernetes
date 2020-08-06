@@ -284,7 +284,8 @@ var _ = Describe("Management Port Operations", func() {
 		v6gwIP        string = "fda6:0:0:1::1"
 		v6mgtPortIP   string = "fda6:0:0:1::2"
 		v6serviceCIDR string = "fc95::/64"
-		v6lrpMAC      string = "0a:58:fd:a6:00:01" // generated from gatewayIP
+		// generated from util.IPAddrToHWAddr(net.ParseIP("fda6:0:0:1::1")).String()
+		v6lrpMAC string = "0a:58:23:5a:40:f1"
 	)
 
 	It("sets up the management port for IPv4 clusters", func() {

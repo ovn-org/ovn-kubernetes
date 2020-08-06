@@ -332,9 +332,10 @@ func TestIPAddrToHWAddr(t *testing.T) {
 			outExp: ovntest.MustParseMAC("0a:58:c0:a8:01:05"),
 		},
 		{
-			desc:   "test IPv6 instance of net.IP",
-			inpIP:  ovntest.MustParseIP("fd01::1234"),
-			outExp: ovntest.MustParseMAC("0a:58:fd:01:12:34"),
+			desc:  "test IPv6 instance of net.IP",
+			inpIP: ovntest.MustParseIP("fd01::1234"),
+			// 0a:58:ee:33:fc:1a generated from util.IPAddrToHWAddr(net.ParseIP(""fd01::1234")).String()
+			outExp: ovntest.MustParseMAC("0a:58:11:37:a6:26"),
 		},
 	}
 	for i, tc := range tests {
