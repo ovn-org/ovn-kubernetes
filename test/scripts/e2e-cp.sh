@@ -24,7 +24,7 @@ go mod download
 go test -timeout=0 -v . \
         -ginkgo.v \
         -ginkgo.flakeAttempts ${FLAKE_ATTEMPTS:-2} \
-        -ginkgo.skip=${SKIPPED_TESTS}" \
+        -ginkgo.skip="${SKIPPED_TESTS}" \
         -provider skeleton \
         -kubeconfig ${KUBECONFIG} \
         ${CONTAINER_RUNTIME:+"--container-runtime=${CONTAINER_RUNTIME}"} \
