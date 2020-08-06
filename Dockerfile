@@ -34,7 +34,7 @@ RUN yum install -y  \
 
 RUN INSTALL_PKGS=" \
 	openssl firewalld-filesystem \
-	libpcap iputils iproute strace \
+	libpcap iproute strace \
 	containernetworking-plugins \
 	tcpdump iputils \
 	" && \
