@@ -33,7 +33,7 @@ spec:
       # as all pods.
       serviceAccountName: ovn
       hostNetwork: true
-      hostPID: true
+      {{ "hostPID: true" if ovn_unprivileged_mode=="no" }}
       containers:
 
       # ovsdb-server and ovs-switchd daemons
@@ -161,10 +161,12 @@ spec:
 
         securityContext:
           runAsUser: 0
-          capabilities:
-            add: ["NET_ADMIN", "SYS_ADMIN", "SYS_PTRACE"]
-          {% if kind is defined and kind -%}
+          {% if ovn_unprivileged_mode=="no" -%}
           privileged: true
+          {% else -%}
+          capabilities:
+            add:
+            - NET_ADMIN
           {% endif %}
 
         terminationMessagePolicy: FallbackToLogsOnError
@@ -262,6 +264,8 @@ spec:
           value: "{{ ovn_remote_probe_interval }}"
         - name: OVN_MULTICAST_ENABLE
           value: "{{ ovn_multicast_enable }}"
+        - name: OVN_UNPRIVILEGED_MODE
+          value: "{{ ovn_unprivileged_mode }}"
 
         lifecycle:
           preStop:
