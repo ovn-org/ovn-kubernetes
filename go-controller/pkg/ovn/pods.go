@@ -288,6 +288,7 @@ func (oc *Controller) addLogicalPort(pod *kapi.Pod) (err error) {
 	}()
 
 	logicalSwitch := pod.Spec.NodeName
+	klog.Infof("TROZET: %s: waiting on switch %s", pod.Name, logicalSwitch)
 	err = oc.waitForNodeLogicalSwitch(logicalSwitch)
 	if err != nil {
 		return err
@@ -303,6 +304,7 @@ func (oc *Controller) addLogicalPort(pod *kapi.Pod) (err error) {
 	var cmd *goovn.OvnCommand
 	var releaseIPs, clearAddressesFromNB bool
 
+	klog.Infof("TROZET: %s: checking ovn lsp %s", pod.Name, portName)
 	// Check if the pod's logical switch port already exists. If it
 	// does don't re-add the port to OVN as this will change its
 	// UUID and and the port cache, address sets, and port groups
@@ -312,6 +314,7 @@ func (oc *Controller) addLogicalPort(pod *kapi.Pod) (err error) {
 		return fmt.Errorf("unable to get the lsp: %s from the nbdb: %s", portName, err)
 	}
 
+	klog.Infof("TROZET: %s: done ovn lsp %s", pod.Name, portName)
 	if lsp == nil {
 		cmd, err = oc.ovnNBClient.LSPAdd(logicalSwitch, portName)
 		if err != nil {
@@ -321,7 +324,7 @@ func (oc *Controller) addLogicalPort(pod *kapi.Pod) (err error) {
 	}
 
 	annotation, err := util.UnmarshalPodAnnotation(pod.Annotations)
-
+	klog.Infof("TROZET: %s done unmarshal annotation", pod.Name)
 	// the IPs we allocate in this function need to be released back to the
 	// IPAM pool if there is some error in any step of addLogicalPort past
 	// the point the IPs were assigned via the IPAM manager.
@@ -331,6 +334,7 @@ func (oc *Controller) addLogicalPort(pod *kapi.Pod) (err error) {
 	// named return variable for defer to work correctly.
 
 	defer func() {
+		klog.Infof("TROZET: %s starting defer cleanup", pod.Name)
 		if releaseIPs && err != nil {
 			if relErr := oc.lsManager.ReleaseIPs(logicalSwitch, podIfAddrs); relErr != nil {
 				klog.Errorf("Error when releasing IPs for node: %s, err: %q",
@@ -339,6 +343,7 @@ func (oc *Controller) addLogicalPort(pod *kapi.Pod) (err error) {
 				klog.Infof("Released IPs: %s for node: %s", util.JoinIPNetIPs(podIfAddrs, " "), logicalSwitch)
 			}
 		}
+		klog.Infof("TROZET: %s done release IPs", pod.Name)
 		if clearAddressesFromNB && err != nil {
 			var rollBackCmds []*goovn.OvnCommand
 			rollBackCmd, rollBackErr := oc.ovnNBClient.LSPSetAddress(portName, "")
@@ -361,6 +366,7 @@ func (oc *Controller) addLogicalPort(pod *kapi.Pod) (err error) {
 					portName, logicalSwitch)
 			}
 		}
+		klog.Infof("TROZET: %s ending defer cleanup", pod.Name)
 	}()
 
 	if err == nil {
@@ -375,11 +381,13 @@ func (oc *Controller) addLogicalPort(pod *kapi.Pod) (err error) {
 		}
 		cmds = append(cmds, cmd)
 	} else {
+		klog.Infof("TROZET: %s getting port addresses", pod.Name)
 		podMac, podIfAddrs, err = oc.getPortAddresses(logicalSwitch, portName)
 		if err != nil {
 			return fmt.Errorf("failed to get pod addresses for pod %s on node: %s, err: %v",
 				portName, logicalSwitch, err)
 		}
+		klog.Infof("TROZET: %s assigning addresses", pod.Name)
 		if podMac == nil || podIfAddrs == nil {
 			podMac, podIfAddrs, err = oc.assignPodAddresses(logicalSwitch)
 			if err != nil {
@@ -389,6 +397,7 @@ func (oc *Controller) addLogicalPort(pod *kapi.Pod) (err error) {
 			releaseIPs = true
 		} else {
 			if len(podIfAddrs) > 0 {
+				klog.Infof("TROZET: %s allocating ips", pod.Name)
 				if err = oc.lsManager.AllocateIPs(logicalSwitch, podIfAddrs); err != nil {
 					klog.Warningf("Failed to block off already allocated IPs: %s for pod %s on node: %s"+
 						" error: %v", util.JoinIPNetIPs(podIfAddrs, " "), portName,
@@ -398,7 +407,7 @@ func (oc *Controller) addLogicalPort(pod *kapi.Pod) (err error) {
 				releaseIPs = true
 			}
 		}
-
+		klog.Infof("TROZET: %s done allocating ips", pod.Name)
 		var networks []*types.NetworkSelectionElement
 
 		networks, err = util.GetPodNetSelAnnotation(pod, util.DefNetworkAnnotation)
@@ -421,9 +430,11 @@ func (oc *Controller) addLogicalPort(pod *kapi.Pod) (err error) {
 					networks[0].MacRequest, pod.Name, err)
 			}
 		}
+		klog.Infof("TROZET: %s done pod net sel annotation", pod.Name)
 
 	}
 
+	klog.Infof("TROZET: %s setting address on port", pod.Name)
 	// set addresses on the port
 	addresses = make([]string, len(podIfAddrs)+1)
 	addresses[0] = podMac.String()
@@ -452,6 +463,7 @@ func (oc *Controller) addLogicalPort(pod *kapi.Pod) (err error) {
 	}
 	cmds = append(cmds, cmd)
 
+	klog.Infof("TROZET: %s done batching OVN commands", pod.Name)
 	// execute all the commands together.
 	err = oc.ovnNBClient.Execute(cmds...)
 	if err != nil {
@@ -459,21 +471,23 @@ func (oc *Controller) addLogicalPort(pod *kapi.Pod) (err error) {
 			portName, err)
 	}
 	clearAddressesFromNB = true
+	klog.Infof("TROZET: %s done executing OVN commands", pod.Name)
 	lsp, err = oc.ovnNBClient.LSPGet(portName)
 	if err != nil || lsp == nil {
 		return fmt.Errorf("failed to get the logical switch port: %s from the ovn client, error: %s", portName, err)
 	}
-
+	klog.Infof("TROZET: %s got LSP", pod.Name)
 	// Add the pod's logical switch port to the port cache
 	portInfo := oc.logicalPortCache.add(logicalSwitch, portName, lsp.UUID, podMac, podIfAddrs)
 
 	// Enforce the default deny multicast policy
 	if oc.multicastSupport {
+		klog.Infof("TROZET: %s adding default multicast deny", pod.Name)
 		if err = podAddDefaultDenyMulticastPolicy(portInfo); err != nil {
 			return err
 		}
 	}
-
+	klog.Infof("TROZET: %s at exgw stuff", pod.Name)
 	// add src-ip routes to GR if external gw annotation is set
 	routingExternalGWs, err := oc.getRoutingExternalGWs(pod.Namespace)
 	if err != nil {
@@ -529,18 +543,19 @@ func (oc *Controller) addLogicalPort(pod *kapi.Pod) (err error) {
 			}
 		}
 	}
-
+	klog.Infof("TROZET: %s done exgw routes an SNAT", pod.Name)
 	// check if this pod is serving as an external GW
 	err = oc.addPodExternalGW(pod)
 	if err != nil {
 		return fmt.Errorf("failed to handle external GW check: %v", err)
 	}
-
+	klog.Infof("TROZET: %s done checking if pod is a gateway", pod.Name)
 	if err = oc.addPodToNamespace(pod.Namespace, portInfo); err != nil {
 		return err
 	}
-
+	klog.Infof("TROZET: %s done adding pod to namespace", pod.Name)
 	if annotation == nil {
+		klog.Infof("TROZET: %s annotation is nil block", pod.Name)
 		podAnnotation := util.PodAnnotation{
 			IPs: podIfAddrs,
 			MAC: podMac,
@@ -550,25 +565,28 @@ func (oc *Controller) addLogicalPort(pod *kapi.Pod) (err error) {
 			return fmt.Errorf("cannot retrieve subnet for assigning gateway routes for pod %s, node: %s",
 				pod.Name, logicalSwitch)
 		}
+		klog.Infof("TROZET: %s done getting switch subnets", pod.Name)
 		err = oc.addRoutesGatewayIP(pod, &podAnnotation, nodeSubnets)
 		if err != nil {
 			return err
 		}
+		klog.Infof("TROZET: %s done adding routes gateway ip", pod.Name)
 		var marshalledAnnotation map[string]string
 		marshalledAnnotation, err = util.MarshalPodAnnotation(&podAnnotation)
 		if err != nil {
 			return fmt.Errorf("error creating pod network annotation: %v", err)
 		}
-
+		klog.Infof("TROZET: %s setting annotation", pod.Name)
 		klog.V(5).Infof("Annotation values: ip=%v ; mac=%s ; gw=%s\nAnnotation=%s",
 			podIfAddrs, podMac, podAnnotation.Gateways, marshalledAnnotation)
 		if err = oc.kube.SetAnnotationsOnPod(pod, marshalledAnnotation); err != nil {
 			return fmt.Errorf("failed to set annotation on pod %s: %v", pod.Name, err)
 		}
-
+		klog.Infof("TROZET: %s recording metrics", pod.Name)
 		// observe the pod creation latency metric.
 		metrics.RecordPodCreated(pod)
 	}
+	klog.Infof("TROZET: %s done add logical port", pod.Name)
 
 	return nil
 }
