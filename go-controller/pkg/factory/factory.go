@@ -621,7 +621,7 @@ func getObjectMeta(objType reflect.Type, obj interface{}) (*metav1.ObjectMeta, e
 func (wf *WatchFactory) addHandler(objType reflect.Type, namespace string, lsel *metav1.LabelSelector, funcs cache.ResourceEventHandler, processExisting func([]interface{})) (*Handler, error) {
 	inf, ok := wf.informers[objType]
 	if !ok {
-		return nil, fmt.Errorf("unknown object type %v", objType)
+		klog.Fatalf("Tried to add handler of unknown object type %v", objType)
 	}
 
 	sel, err := metav1.LabelSelectorAsSelector(lsel)
@@ -670,10 +670,7 @@ func (wf *WatchFactory) addHandler(objType reflect.Type, namespace string, lsel 
 }
 
 func (wf *WatchFactory) removeHandler(objType reflect.Type, handler *Handler) error {
-	if inf, ok := wf.informers[objType]; ok {
-		return inf.removeHandler(handler)
-	}
-	return fmt.Errorf("tried to remove unknown object type %v event handler", objType)
+	return wf.informers[objType].removeHandler(handler)
 }
 
 // AddPodHandler adds a handler function that will be executed on Pod object changes
