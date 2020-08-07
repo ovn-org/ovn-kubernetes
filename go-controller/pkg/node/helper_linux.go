@@ -73,10 +73,12 @@ func getDefaultIfAddr(defaultGatewayIntf string) (*net.IPNet, *net.IPNet, error)
 	}
 	for _, addr := range addrs {
 		if addr.Label != getEgressLabel(defaultGatewayIntf) {
-			if utilnet.IsIPv6(addr.IP) {
-				v6IfAddr = addr.IPNet
-			} else {
-				v4IfAddr = addr.IPNet
+			if addr.IP.IsGlobalUnicast() {
+				if utilnet.IsIPv6(addr.IP) {
+					v6IfAddr = addr.IPNet
+				} else {
+					v4IfAddr = addr.IPNet
+				}
 			}
 		}
 	}

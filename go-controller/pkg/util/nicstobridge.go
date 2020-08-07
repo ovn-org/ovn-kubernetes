@@ -75,19 +75,21 @@ func saveIPAddress(oldLink, newLink netlink.Link, addrs []netlink.Addr) error {
 	for i := range addrs {
 		addr := addrs[i]
 
-		// Remove from oldLink
-		if err := netLinkOps.AddrDel(oldLink, &addr); err != nil {
-			klog.Errorf("Remove addr from %q failed: %v", oldLink.Attrs().Name, err)
-			return err
-		}
+		if addr.IP.IsGlobalUnicast() {
+			// Remove from oldLink
+			if err := netLinkOps.AddrDel(oldLink, &addr); err != nil {
+				klog.Errorf("Remove addr from %q failed: %v", oldLink.Attrs().Name, err)
+				return err
+			}
 
-		// Add to newLink
-		addr.Label = newLink.Attrs().Name
-		if err := netLinkOps.AddrAdd(newLink, &addr); err != nil {
-			klog.Errorf("Add addr to newLink %q failed: %v", addr.Label, err)
-			return err
+			// Add to newLink
+			addr.Label = newLink.Attrs().Name
+			if err := netLinkOps.AddrAdd(newLink, &addr); err != nil {
+				klog.Errorf("Add addr to newLink %q failed: %v", addr.Label, err)
+				return err
+			}
+			klog.Infof("Successfully saved addr %q to newLink %q", addr.String(), addr.Label)
 		}
-		klog.Infof("Successfully saved addr %q to newLink %q", addr.String(), addr.Label)
 	}
 
 	return netLinkOps.LinkSetup(newLink)
@@ -120,6 +122,8 @@ func saveRoute(oldLink, newLink netlink.Link, routes []netlink.Route) error {
 		// GCE where we have /32 IP addresses and we can't add the default
 		// gateway before the route to the gateway.
 		if route.Dst == nil && route.Gw != nil && route.LinkIndex > 0 {
+			continue
+		} else if route.Dst != nil && !route.Dst.IP.IsGlobalUnicast() {
 			continue
 		}
 
