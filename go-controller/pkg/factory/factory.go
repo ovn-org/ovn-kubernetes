@@ -70,11 +70,8 @@ func (h *Handler) OnDelete(obj interface{}) {
 	}
 }
 
-func (h *Handler) kill() error {
-	if !atomic.CompareAndSwapUint32(&h.tombstone, handlerAlive, handlerDead) {
-		return fmt.Errorf("event handler %d already dead", h.id)
-	}
-	return nil
+func (h *Handler) kill() bool {
+	return atomic.CompareAndSwapUint32(&h.tombstone, handlerAlive, handlerDead)
 }
 
 type event struct {
@@ -147,9 +144,10 @@ func (i *informer) addHandler(id uint64, filterFunc func(obj interface{}) bool, 
 	return handler
 }
 
-func (i *informer) removeHandler(handler *Handler) error {
-	if err := handler.kill(); err != nil {
-		return err
+func (i *informer) removeHandler(handler *Handler) {
+	if !handler.kill() {
+		klog.Errorf("Removing already-removed %v event handler %d", i.oType, handler.id)
+		return
 	}
 
 	klog.V(5).Infof("Sending %v event handler %d for removal", i.oType, handler.id)
@@ -165,8 +163,6 @@ func (i *informer) removeHandler(handler *Handler) error {
 			klog.Warningf("Tried to remove unknown object type %v event handler %d", i.oType, handler.id)
 		}
 	}()
-
-	return nil
 }
 
 func (i *informer) processEvents(events chan *event, stopChan <-chan struct{}) {
@@ -293,7 +289,7 @@ func (i *informer) removeAllHandlers() {
 	i.Lock()
 	defer i.Unlock()
 	for _, handler := range i.handlers {
-		_ = i.removeHandler(handler)
+		i.removeHandler(handler)
 	}
 }
 
@@ -669,8 +665,8 @@ func (wf *WatchFactory) addHandler(objType reflect.Type, namespace string, lsel 
 	return handler, nil
 }
 
-func (wf *WatchFactory) removeHandler(objType reflect.Type, handler *Handler) error {
-	return wf.informers[objType].removeHandler(handler)
+func (wf *WatchFactory) removeHandler(objType reflect.Type, handler *Handler) {
+	wf.informers[objType].removeHandler(handler)
 }
 
 // AddPodHandler adds a handler function that will be executed on Pod object changes
@@ -684,8 +680,8 @@ func (wf *WatchFactory) AddFilteredPodHandler(namespace string, lsel *metav1.Lab
 }
 
 // RemovePodHandler removes a Pod object event handler function
-func (wf *WatchFactory) RemovePodHandler(handler *Handler) error {
-	return wf.removeHandler(podType, handler)
+func (wf *WatchFactory) RemovePodHandler(handler *Handler) {
+	wf.removeHandler(podType, handler)
 }
 
 // AddServiceHandler adds a handler function that will be executed on Service object changes
@@ -694,8 +690,8 @@ func (wf *WatchFactory) AddServiceHandler(handlerFuncs cache.ResourceEventHandle
 }
 
 // RemoveServiceHandler removes a Service object event handler function
-func (wf *WatchFactory) RemoveServiceHandler(handler *Handler) error {
-	return wf.removeHandler(serviceType, handler)
+func (wf *WatchFactory) RemoveServiceHandler(handler *Handler) {
+	wf.removeHandler(serviceType, handler)
 }
 
 // AddEndpointsHandler adds a handler function that will be executed on Endpoints object changes
@@ -709,8 +705,8 @@ func (wf *WatchFactory) AddFilteredEndpointsHandler(namespace string, lsel *meta
 }
 
 // RemoveEndpointsHandler removes a Endpoints object event handler function
-func (wf *WatchFactory) RemoveEndpointsHandler(handler *Handler) error {
-	return wf.removeHandler(endpointsType, handler)
+func (wf *WatchFactory) RemoveEndpointsHandler(handler *Handler) {
+	wf.removeHandler(endpointsType, handler)
 }
 
 // AddPolicyHandler adds a handler function that will be executed on NetworkPolicy object changes
@@ -719,8 +715,8 @@ func (wf *WatchFactory) AddPolicyHandler(handlerFuncs cache.ResourceEventHandler
 }
 
 // RemovePolicyHandler removes a NetworkPolicy object event handler function
-func (wf *WatchFactory) RemovePolicyHandler(handler *Handler) error {
-	return wf.removeHandler(policyType, handler)
+func (wf *WatchFactory) RemovePolicyHandler(handler *Handler) {
+	wf.removeHandler(policyType, handler)
 }
 
 // AddEgressFirewallHandler adds a handler function that will be executed on EgressFirewall object changes
@@ -729,8 +725,8 @@ func (wf *WatchFactory) AddEgressFirewallHandler(handlerFuncs cache.ResourceEven
 }
 
 // RemoveEgressFirewallHandler removes an EgressFirewall object event handler function
-func (wf *WatchFactory) RemoveEgressFirewallHandler(handler *Handler) error {
-	return wf.removeHandler(egressFirewallType, handler)
+func (wf *WatchFactory) RemoveEgressFirewallHandler(handler *Handler) {
+	wf.removeHandler(egressFirewallType, handler)
 }
 
 // AddCRDHandler adds a handler function that will be executed on CRD obje changes
@@ -739,8 +735,8 @@ func (wf *WatchFactory) AddCRDHandler(handlerFuncs cache.ResourceEventHandler, p
 }
 
 // RemoveCRDHandler removes a CRD object event handler function
-func (wf *WatchFactory) RemoveCRDHandler(handler *Handler) error {
-	return wf.removeHandler(crdType, handler)
+func (wf *WatchFactory) RemoveCRDHandler(handler *Handler) {
+	wf.removeHandler(crdType, handler)
 }
 
 // AddEgressIPHandler adds a handler function that will be executed on EgressIP object changes
@@ -749,8 +745,8 @@ func (wf *WatchFactory) AddEgressIPHandler(handlerFuncs cache.ResourceEventHandl
 }
 
 // RemoveEgressIPHandler removes an EgressIP object event handler function
-func (wf *WatchFactory) RemoveEgressIPHandler(handler *Handler) error {
-	return wf.removeHandler(egressIPType, handler)
+func (wf *WatchFactory) RemoveEgressIPHandler(handler *Handler) {
+	wf.removeHandler(egressIPType, handler)
 }
 
 // AddNamespaceHandler adds a handler function that will be executed on Namespace object changes
@@ -764,8 +760,8 @@ func (wf *WatchFactory) AddFilteredNamespaceHandler(namespace string, lsel *meta
 }
 
 // RemoveNamespaceHandler removes a Namespace object event handler function
-func (wf *WatchFactory) RemoveNamespaceHandler(handler *Handler) error {
-	return wf.removeHandler(namespaceType, handler)
+func (wf *WatchFactory) RemoveNamespaceHandler(handler *Handler) {
+	wf.removeHandler(namespaceType, handler)
 }
 
 // AddNodeHandler adds a handler function that will be executed on Node object changes
@@ -779,8 +775,8 @@ func (wf *WatchFactory) AddFilteredNodeHandler(lsel *metav1.LabelSelector, handl
 }
 
 // RemoveNodeHandler removes a Node object event handler function
-func (wf *WatchFactory) RemoveNodeHandler(handler *Handler) error {
-	return wf.removeHandler(nodeType, handler)
+func (wf *WatchFactory) RemoveNodeHandler(handler *Handler) {
+	wf.removeHandler(nodeType, handler)
 }
 
 // GetPod returns the pod spec given the namespace and pod name

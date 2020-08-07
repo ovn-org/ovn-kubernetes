@@ -743,10 +743,7 @@ func (oc *Controller) WatchCRD() error {
 			crd := obj.(*apiextension.CustomResourceDefinition)
 			klog.Infof("Deleting CRD %s from cluster", crd.Name)
 			if crd.Name == egressfirewallCRD {
-				err := oc.watchFactory.RemoveEgressFirewallHandler(oc.egressFirewallHandler)
-				if err != nil {
-					klog.Errorf("Error removing EgressFirewallHandler: %v", err)
-				}
+				oc.watchFactory.RemoveEgressFirewallHandler(oc.egressFirewallHandler)
 				oc.egressFirewallHandler = nil
 				oc.watchFactory.ShutdownEgressFirewallWatchFactory()
 			}

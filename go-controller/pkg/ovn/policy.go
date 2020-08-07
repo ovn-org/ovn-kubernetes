@@ -866,7 +866,7 @@ func (oc *Controller) handlePeerNamespaceAndPodSelector(
 				np.Lock()
 				defer np.Unlock()
 				if np.deleted {
-					_ = oc.watchFactory.RemovePodHandler(podHandler)
+					oc.watchFactory.RemovePodHandler(podHandler)
 					return
 				}
 				np.podHandlerList = append(np.podHandlerList, podHandler)
@@ -922,9 +922,9 @@ func (oc *Controller) handlePeerNamespaceSelector(
 
 func (oc *Controller) shutdownHandlers(np *namespacePolicy) {
 	for _, handler := range np.podHandlerList {
-		_ = oc.watchFactory.RemovePodHandler(handler)
+		oc.watchFactory.RemovePodHandler(handler)
 	}
 	for _, handler := range np.nsHandlerList {
-		_ = oc.watchFactory.RemoveNamespaceHandler(handler)
+		oc.watchFactory.RemoveNamespaceHandler(handler)
 	}
 }
