@@ -97,12 +97,8 @@ func (n *OvnNode) initGateway(subnets []*net.IPNet, nodeAnnotator kube.Annotator
 	waiter *startupWaiter) error {
 
 	if config.Gateway.NodeportEnable {
-		if err := initLoadBalancerHealthChecker(n.name, n.watchFactory); err != nil {
-			return err
-		}
-		if err := initPortClaimWatcher(n.recorder, n.watchFactory); err != nil {
-			return err
-		}
+		initLoadBalancerHealthChecker(n.name, n.watchFactory)
+		initPortClaimWatcher(n.recorder, n.watchFactory)
 	}
 
 	gatewayNextHop := net.ParseIP(config.Gateway.NextHop)

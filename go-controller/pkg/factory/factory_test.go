@@ -10,6 +10,7 @@ import (
 	v1 "k8s.io/api/core/v1"
 	knet "k8s.io/api/networking/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/labels"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/apimachinery/pkg/watch"
@@ -317,18 +318,17 @@ var _ = Describe("Watch Factory Operations", func() {
 	})
 
 	Context("when a processExisting is given", func() {
-		testExisting := func(objType reflect.Type, namespace string, lsel *metav1.LabelSelector) {
+		testExisting := func(objType reflect.Type, namespace string, sel labels.Selector) {
 			wf, err = NewWatchFactory(fakeClient, egressIPFakeClient, egressFirewallFakeClient, crdFakeClient)
 			Expect(err).NotTo(HaveOccurred())
 			err = wf.InitializeEgressFirewallWatchFactory()
 			Expect(err).NotTo(HaveOccurred())
-			h, err := wf.addHandler(objType, namespace, lsel,
+			h := wf.addHandler(objType, namespace, sel,
 				cache.ResourceEventHandlerFuncs{},
 				func(objs []interface{}) {
 					defer GinkgoRecover()
 					Expect(len(objs)).To(Equal(1))
 				})
-			Expect(err).NotTo(HaveOccurred())
 			Expect(h).NotTo(BeNil())
 			wf.removeHandler(objType, h)
 		}
@@ -380,9 +380,15 @@ var _ = Describe("Watch Factory Operations", func() {
 			pod := newPod("pod1", "default")
 			pod.ObjectMeta.Labels["blah"] = "foobar"
 			pods = append(pods, pod)
-			testExisting(podType, "default", &metav1.LabelSelector{
-				MatchLabels: map[string]string{"blah": "foobar"},
-			})
+
+			sel, err := metav1.LabelSelectorAsSelector(
+				&metav1.LabelSelector{
+					MatchLabels: map[string]string{"blah": "foobar"},
+				},
+			)
+			Expect(err).NotTo(HaveOccurred())
+
+			testExisting(podType, "default", sel)
 		})
 	})
 
@@ -393,7 +399,7 @@ var _ = Describe("Watch Factory Operations", func() {
 			err = wf.InitializeEgressFirewallWatchFactory()
 			Expect(err).NotTo(HaveOccurred())
 			var addCalls int32
-			h, err := wf.addHandler(objType, "", nil,
+			h := wf.addHandler(objType, "", nil,
 				cache.ResourceEventHandlerFuncs{
 					AddFunc: func(obj interface{}) {
 						atomic.AddInt32(&addCalls, 1)
@@ -401,7 +407,6 @@ var _ = Describe("Watch Factory Operations", func() {
 					UpdateFunc: func(old, new interface{}) {},
 					DeleteFunc: func(obj interface{}) {},
 				}, nil)
-			Expect(err).NotTo(HaveOccurred())
 			Expect(int(addCalls)).To(Equal(2))
 			wf.removeHandler(objType, h)
 		}
@@ -463,7 +468,7 @@ var _ = Describe("Watch Factory Operations", func() {
 			wf, err = NewWatchFactory(fakeClient, egressIPFakeClient, egressFirewallFakeClient, crdFakeClient)
 			Expect(err).NotTo(HaveOccurred())
 			var addCalls int32
-			h, err := wf.addHandler(objType, "", nil,
+			h := wf.addHandler(objType, "", nil,
 				cache.ResourceEventHandlerFuncs{
 					AddFunc: func(obj interface{}) {
 						atomic.AddInt32(&addCalls, 1)
@@ -473,7 +478,6 @@ var _ = Describe("Watch Factory Operations", func() {
 				}, func(existing []interface{}) {
 					atomic.AddInt32(&addCalls, int32(len(existing)))
 				})
-			Expect(err).NotTo(HaveOccurred())
 			Expect(int(addCalls)).To(Equal(0))
 			wf.removeHandler(objType, h)
 		}
@@ -485,9 +489,9 @@ var _ = Describe("Watch Factory Operations", func() {
 		})
 	})
 
-	addFilteredHandler := func(wf *WatchFactory, objType reflect.Type, namespace string, lsel *metav1.LabelSelector, funcs cache.ResourceEventHandlerFuncs) (*Handler, *handlerCalls) {
+	addFilteredHandler := func(wf *WatchFactory, objType reflect.Type, namespace string, sel labels.Selector, funcs cache.ResourceEventHandlerFuncs) (*Handler, *handlerCalls) {
 		calls := handlerCalls{}
-		h, err := wf.addHandler(objType, namespace, lsel, cache.ResourceEventHandlerFuncs{
+		h := wf.addHandler(objType, namespace, sel, cache.ResourceEventHandlerFuncs{
 			AddFunc: func(obj interface{}) {
 				defer GinkgoRecover()
 				atomic.AddInt32(&calls.added, 1)
@@ -504,7 +508,6 @@ var _ = Describe("Watch Factory Operations", func() {
 				funcs.DeleteFunc(obj)
 			},
 		}, nil)
-		Expect(err).NotTo(HaveOccurred())
 		Expect(h).NotTo(BeNil())
 		return h, &calls
 	}
@@ -1190,12 +1193,17 @@ var _ = Describe("Watch Factory Operations", func() {
 		failsFilter2 := newPod("pod3", "otherns")
 		failsFilter2.ObjectMeta.Labels["blah"] = "foobar"
 
-		_, c := addFilteredHandler(wf,
-			podType,
-			"default",
+		sel, err := metav1.LabelSelectorAsSelector(
 			&metav1.LabelSelector{
 				MatchLabels: map[string]string{"blah": "foobar"},
 			},
+		)
+		Expect(err).NotTo(HaveOccurred())
+
+		_, c := addFilteredHandler(wf,
+			podType,
+			"default",
+			sel,
 			cache.ResourceEventHandlerFuncs{
 				AddFunc: func(obj interface{}) {
 					pod := obj.(*v1.Pod)
@@ -1250,13 +1258,18 @@ var _ = Describe("Watch Factory Operations", func() {
 		pod := newPod("pod1", "default")
 		pod.ObjectMeta.Labels["blah"] = "baz"
 
+		sel, err := metav1.LabelSelectorAsSelector(
+			&metav1.LabelSelector{
+				MatchLabels: map[string]string{"blah": "foobar"},
+			},
+		)
+		Expect(err).NotTo(HaveOccurred())
+
 		equalPod := pod
 		h, c := addFilteredHandler(wf,
 			podType,
 			"default",
-			&metav1.LabelSelector{
-				MatchLabels: map[string]string{"blah": "foobar"},
-			},
+			sel,
 			cache.ResourceEventHandlerFuncs{
 				AddFunc: func(obj interface{}) {
 					p := obj.(*v1.Pod)

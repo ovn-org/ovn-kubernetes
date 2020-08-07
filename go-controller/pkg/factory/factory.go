@@ -614,19 +614,14 @@ func getObjectMeta(objType reflect.Type, obj interface{}) (*metav1.ObjectMeta, e
 	return nil, fmt.Errorf("cannot get ObjectMeta from type %v", objType)
 }
 
-func (wf *WatchFactory) addHandler(objType reflect.Type, namespace string, lsel *metav1.LabelSelector, funcs cache.ResourceEventHandler, processExisting func([]interface{})) (*Handler, error) {
+func (wf *WatchFactory) addHandler(objType reflect.Type, namespace string, sel labels.Selector, funcs cache.ResourceEventHandler, processExisting func([]interface{})) *Handler {
 	inf, ok := wf.informers[objType]
 	if !ok {
 		klog.Fatalf("Tried to add handler of unknown object type %v", objType)
 	}
 
-	sel, err := metav1.LabelSelectorAsSelector(lsel)
-	if err != nil {
-		return nil, fmt.Errorf("error creating label selector: %v", err)
-	}
-
 	filterFunc := func(obj interface{}) bool {
-		if namespace == "" && lsel == nil {
+		if namespace == "" && sel == nil {
 			// Unfiltered handler
 			return true
 		}
@@ -638,7 +633,7 @@ func (wf *WatchFactory) addHandler(objType reflect.Type, namespace string, lsel 
 		if namespace != "" && meta.Namespace != namespace {
 			return false
 		}
-		if lsel != nil && !sel.Matches(labels.Set(meta.Labels)) {
+		if sel != nil && !sel.Matches(labels.Set(meta.Labels)) {
 			return false
 		}
 		return true
@@ -662,7 +657,7 @@ func (wf *WatchFactory) addHandler(objType reflect.Type, namespace string, lsel 
 	handlerID := atomic.AddUint64(&wf.handlerCounter, 1)
 	handler := inf.addHandler(handlerID, filterFunc, funcs, items)
 	klog.V(5).Infof("Added %v event handler %d", objType, handler.id)
-	return handler, nil
+	return handler
 }
 
 func (wf *WatchFactory) removeHandler(objType reflect.Type, handler *Handler) {
@@ -670,13 +665,13 @@ func (wf *WatchFactory) removeHandler(objType reflect.Type, handler *Handler) {
 }
 
 // AddPodHandler adds a handler function that will be executed on Pod object changes
-func (wf *WatchFactory) AddPodHandler(handlerFuncs cache.ResourceEventHandler, processExisting func([]interface{})) (*Handler, error) {
+func (wf *WatchFactory) AddPodHandler(handlerFuncs cache.ResourceEventHandler, processExisting func([]interface{})) *Handler {
 	return wf.addHandler(podType, "", nil, handlerFuncs, processExisting)
 }
 
 // AddFilteredPodHandler adds a handler function that will be executed when Pod objects that match the given filters change
-func (wf *WatchFactory) AddFilteredPodHandler(namespace string, lsel *metav1.LabelSelector, handlerFuncs cache.ResourceEventHandler, processExisting func([]interface{})) (*Handler, error) {
-	return wf.addHandler(podType, namespace, lsel, handlerFuncs, processExisting)
+func (wf *WatchFactory) AddFilteredPodHandler(namespace string, sel labels.Selector, handlerFuncs cache.ResourceEventHandler, processExisting func([]interface{})) *Handler {
+	return wf.addHandler(podType, namespace, sel, handlerFuncs, processExisting)
 }
 
 // RemovePodHandler removes a Pod object event handler function
@@ -685,7 +680,7 @@ func (wf *WatchFactory) RemovePodHandler(handler *Handler) {
 }
 
 // AddServiceHandler adds a handler function that will be executed on Service object changes
-func (wf *WatchFactory) AddServiceHandler(handlerFuncs cache.ResourceEventHandler, processExisting func([]interface{})) (*Handler, error) {
+func (wf *WatchFactory) AddServiceHandler(handlerFuncs cache.ResourceEventHandler, processExisting func([]interface{})) *Handler {
 	return wf.addHandler(serviceType, "", nil, handlerFuncs, processExisting)
 }
 
@@ -695,13 +690,13 @@ func (wf *WatchFactory) RemoveServiceHandler(handler *Handler) {
 }
 
 // AddEndpointsHandler adds a handler function that will be executed on Endpoints object changes
-func (wf *WatchFactory) AddEndpointsHandler(handlerFuncs cache.ResourceEventHandler, processExisting func([]interface{})) (*Handler, error) {
+func (wf *WatchFactory) AddEndpointsHandler(handlerFuncs cache.ResourceEventHandler, processExisting func([]interface{})) *Handler {
 	return wf.addHandler(endpointsType, "", nil, handlerFuncs, processExisting)
 }
 
 // AddFilteredEndpointsHandler adds a handler function that will be executed when Endpoint objects that match the given filters change
-func (wf *WatchFactory) AddFilteredEndpointsHandler(namespace string, lsel *metav1.LabelSelector, handlerFuncs cache.ResourceEventHandler, processExisting func([]interface{})) (*Handler, error) {
-	return wf.addHandler(endpointsType, namespace, lsel, handlerFuncs, processExisting)
+func (wf *WatchFactory) AddFilteredEndpointsHandler(namespace string, sel labels.Selector, handlerFuncs cache.ResourceEventHandler, processExisting func([]interface{})) *Handler {
+	return wf.addHandler(endpointsType, namespace, sel, handlerFuncs, processExisting)
 }
 
 // RemoveEndpointsHandler removes a Endpoints object event handler function
@@ -710,7 +705,7 @@ func (wf *WatchFactory) RemoveEndpointsHandler(handler *Handler) {
 }
 
 // AddPolicyHandler adds a handler function that will be executed on NetworkPolicy object changes
-func (wf *WatchFactory) AddPolicyHandler(handlerFuncs cache.ResourceEventHandler, processExisting func([]interface{})) (*Handler, error) {
+func (wf *WatchFactory) AddPolicyHandler(handlerFuncs cache.ResourceEventHandler, processExisting func([]interface{})) *Handler {
 	return wf.addHandler(policyType, "", nil, handlerFuncs, processExisting)
 }
 
@@ -720,7 +715,7 @@ func (wf *WatchFactory) RemovePolicyHandler(handler *Handler) {
 }
 
 // AddEgressFirewallHandler adds a handler function that will be executed on EgressFirewall object changes
-func (wf *WatchFactory) AddEgressFirewallHandler(handlerFuncs cache.ResourceEventHandler, processExisting func([]interface{})) (*Handler, error) {
+func (wf *WatchFactory) AddEgressFirewallHandler(handlerFuncs cache.ResourceEventHandler, processExisting func([]interface{})) *Handler {
 	return wf.addHandler(egressFirewallType, "", nil, handlerFuncs, processExisting)
 }
 
@@ -730,7 +725,7 @@ func (wf *WatchFactory) RemoveEgressFirewallHandler(handler *Handler) {
 }
 
 // AddCRDHandler adds a handler function that will be executed on CRD obje changes
-func (wf *WatchFactory) AddCRDHandler(handlerFuncs cache.ResourceEventHandler, processExisting func([]interface{})) (*Handler, error) {
+func (wf *WatchFactory) AddCRDHandler(handlerFuncs cache.ResourceEventHandler, processExisting func([]interface{})) *Handler {
 	return wf.addHandler(crdType, "", nil, handlerFuncs, processExisting)
 }
 
@@ -740,7 +735,7 @@ func (wf *WatchFactory) RemoveCRDHandler(handler *Handler) {
 }
 
 // AddEgressIPHandler adds a handler function that will be executed on EgressIP object changes
-func (wf *WatchFactory) AddEgressIPHandler(handlerFuncs cache.ResourceEventHandler, processExisting func([]interface{})) (*Handler, error) {
+func (wf *WatchFactory) AddEgressIPHandler(handlerFuncs cache.ResourceEventHandler, processExisting func([]interface{})) *Handler {
 	return wf.addHandler(egressIPType, "", nil, handlerFuncs, processExisting)
 }
 
@@ -750,13 +745,13 @@ func (wf *WatchFactory) RemoveEgressIPHandler(handler *Handler) {
 }
 
 // AddNamespaceHandler adds a handler function that will be executed on Namespace object changes
-func (wf *WatchFactory) AddNamespaceHandler(handlerFuncs cache.ResourceEventHandler, processExisting func([]interface{})) (*Handler, error) {
+func (wf *WatchFactory) AddNamespaceHandler(handlerFuncs cache.ResourceEventHandler, processExisting func([]interface{})) *Handler {
 	return wf.addHandler(namespaceType, "", nil, handlerFuncs, processExisting)
 }
 
 // AddFilteredNamespaceHandler adds a handler function that will be executed when Namespace objects that match the given filters change
-func (wf *WatchFactory) AddFilteredNamespaceHandler(namespace string, lsel *metav1.LabelSelector, handlerFuncs cache.ResourceEventHandler, processExisting func([]interface{})) (*Handler, error) {
-	return wf.addHandler(namespaceType, namespace, lsel, handlerFuncs, processExisting)
+func (wf *WatchFactory) AddFilteredNamespaceHandler(namespace string, sel labels.Selector, handlerFuncs cache.ResourceEventHandler, processExisting func([]interface{})) *Handler {
+	return wf.addHandler(namespaceType, namespace, sel, handlerFuncs, processExisting)
 }
 
 // RemoveNamespaceHandler removes a Namespace object event handler function
@@ -765,13 +760,13 @@ func (wf *WatchFactory) RemoveNamespaceHandler(handler *Handler) {
 }
 
 // AddNodeHandler adds a handler function that will be executed on Node object changes
-func (wf *WatchFactory) AddNodeHandler(handlerFuncs cache.ResourceEventHandler, processExisting func([]interface{})) (*Handler, error) {
+func (wf *WatchFactory) AddNodeHandler(handlerFuncs cache.ResourceEventHandler, processExisting func([]interface{})) *Handler {
 	return wf.addHandler(nodeType, "", nil, handlerFuncs, processExisting)
 }
 
 // AddFilteredNodeHandler dds a handler function that will be executed when Node objects that match the given label selector
-func (wf *WatchFactory) AddFilteredNodeHandler(lsel *metav1.LabelSelector, handlerFuncs cache.ResourceEventHandler, processExisting func([]interface{})) (*Handler, error) {
-	return wf.addHandler(nodeType, "", lsel, handlerFuncs, processExisting)
+func (wf *WatchFactory) AddFilteredNodeHandler(sel labels.Selector, handlerFuncs cache.ResourceEventHandler, processExisting func([]interface{})) *Handler {
+	return wf.addHandler(nodeType, "", sel, handlerFuncs, processExisting)
 }
 
 // RemoveNodeHandler removes a Node object event handler function

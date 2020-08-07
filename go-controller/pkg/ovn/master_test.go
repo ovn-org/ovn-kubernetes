@@ -330,8 +330,7 @@ var _ = Describe("Master Operations", func() {
 			err = clusterController.StartClusterMaster("master")
 			Expect(err).NotTo(HaveOccurred())
 
-			err = clusterController.WatchNodes()
-			Expect(err).NotTo(HaveOccurred())
+			clusterController.WatchNodes()
 
 			wg.Add(1)
 			go func() {
@@ -428,8 +427,7 @@ var _ = Describe("Master Operations", func() {
 			err = clusterController.StartClusterMaster("master")
 			Expect(err).NotTo(HaveOccurred())
 
-			err = clusterController.WatchNodes()
-			Expect(err).NotTo(HaveOccurred())
+			clusterController.WatchNodes()
 
 			wg.Add(1)
 			go func() {
@@ -524,8 +522,7 @@ var _ = Describe("Master Operations", func() {
 			err = clusterController.StartClusterMaster("master")
 			Expect(err).NotTo(HaveOccurred())
 
-			err = clusterController.WatchNodes()
-			Expect(err).NotTo(HaveOccurred())
+			clusterController.WatchNodes()
 
 			wg.Add(1)
 			go func() {
@@ -680,8 +677,7 @@ subnet=%s
 			_ = clusterController.joinSubnetAllocator.AddNetworkRange(ovntest.MustParseIPNet("100.64.0.0/16"), 29)
 
 			// Let the real code run and ensure OVN database sync
-			err = clusterController.WatchNodes()
-			Expect(err).NotTo(HaveOccurred())
+			clusterController.WatchNodes()
 
 			Expect(fexec.CalledMatchesExpected()).To(BeTrue(), fexec.ErrorDesc)
 
@@ -905,8 +901,7 @@ var _ = Describe("Gateway Init Operations", func() {
 			_ = clusterController.joinSubnetAllocator.AddNetworkRange(ovntest.MustParseIPNet("100.64.0.0/16"), 29)
 
 			// Let the real code run and ensure OVN database sync
-			err = clusterController.WatchNodes()
-			Expect(err).NotTo(HaveOccurred())
+			clusterController.WatchNodes()
 
 			subnet := ovntest.MustParseIPNet(nodeSubnet)
 			err = clusterController.syncGatewayLogicalNetwork(updatedNode, l3GatewayConfig, []*net.IPNet{subnet})
@@ -1103,8 +1098,7 @@ var _ = Describe("Gateway Init Operations", func() {
 			clusterController.nodeLocalNatIPAllocator, _ = ipallocator.NewCIDRRange(ovntest.MustParseIPNet(util.V4NodeLocalNatSubnet))
 
 			// Let the real code run and ensure OVN database sync
-			err = clusterController.WatchNodes()
-			Expect(err).NotTo(HaveOccurred())
+			clusterController.WatchNodes()
 
 			subnet := ovntest.MustParseIPNet(nodeSubnet)
 			err = clusterController.syncGatewayLogicalNetwork(updatedNode, l3GatewayConfig, []*net.IPNet{subnet})
