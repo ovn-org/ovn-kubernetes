@@ -7,8 +7,8 @@ export KUBERNETES_CONFORMANCE_TEST=y
 export KUBECONFIG=${HOME}/admin.conf
 
 SKIPPED_TESTS=""
-if [ "$KIND_IPV4_SUPPORT" == true ] && [ "$KIND_IPV6_SUPPORT" == true ]; then
-    # No support for these features in dual-stack yet
+if [ "$KIND_IPV6_SUPPORT" == true ]; then
+    # No support for these features in dual-stack and ipv6 yet
     SKIPPED_TESTS="hybrid.overlay|external.gateway"
 fi
 
