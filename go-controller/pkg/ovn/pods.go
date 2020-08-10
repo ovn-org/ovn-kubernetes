@@ -379,8 +379,6 @@ func (oc *Controller) addLogicalPort(pod *kapi.Pod) (err error) {
 
 		// ensure we have reserved the IPs in the annotation
 		if err = oc.lsManager.AllocateIPs(logicalSwitch, podIfAddrs); err != nil && err != ipallocator.ErrAllocated {
-			// this should also be treated as an allocation for purposes of error handling
-			releaseIPs = true
 			return fmt.Errorf("unable to ensure IPs allocated for already annotated pod: %s, IPs: %s, error: %v",
 				pod.Name, util.JoinIPNetIPs(podIfAddrs, " "), err)
 		} else {
@@ -413,7 +411,6 @@ func (oc *Controller) addLogicalPort(pod *kapi.Pod) (err error) {
 					portName, logicalSwitch, err)
 			}
 		}
-		releaseIPs = true
 
 		var networks []*types.NetworkSelectionElement
 
@@ -437,7 +434,31 @@ func (oc *Controller) addLogicalPort(pod *kapi.Pod) (err error) {
 					networks[0].MacRequest, pod.Name, err)
 			}
 		}
+		podAnnotation := util.PodAnnotation{
+			IPs: podIfAddrs,
+			MAC: podMac,
+		}
+		var nodeSubnets []*net.IPNet
+		if nodeSubnets = oc.lsManager.GetSwitchSubnets(logicalSwitch); nodeSubnets == nil {
+			return fmt.Errorf("cannot retrieve subnet for assigning gateway routes for pod %s, node: %s",
+				pod.Name, logicalSwitch)
+		}
+		err = oc.addRoutesGatewayIP(pod, &podAnnotation, nodeSubnets)
+		if err != nil {
+			return err
+		}
+		var marshalledAnnotation map[string]string
+		marshalledAnnotation, err = util.MarshalPodAnnotation(&podAnnotation)
+		if err != nil {
+			return fmt.Errorf("error creating pod network annotation: %v", err)
+		}
 
+		klog.V(5).Infof("Annotation values: ip=%v ; mac=%s ; gw=%s\nAnnotation=%s",
+			podIfAddrs, podMac, podAnnotation.Gateways, marshalledAnnotation)
+		if err = oc.kube.SetAnnotationsOnPod(pod, marshalledAnnotation); err != nil {
+			releaseIPs = true
+			return fmt.Errorf("failed to set annotation on pod %s: %v", pod.Name, err)
+		}
 	}
 
 	// set addresses on the port
@@ -461,13 +482,6 @@ func (oc *Controller) addLogicalPort(pod *kapi.Pod) (err error) {
 	}
 	cmds = append(cmds, cmd)
 
-	// add port security addresses
-	cmd, err = oc.ovnNBClient.LSPSetPortSecurity(portName, strings.Join(addresses, " "))
-	if err != nil {
-		return fmt.Errorf("unable to create LSPSetPortSecurity command for port: %s", portName)
-	}
-	cmds = append(cmds, cmd)
-
 	// execute all the commands together.
 	err = oc.ovnNBClient.Execute(cmds...)
 	if err != nil {
@@ -482,6 +496,11 @@ func (oc *Controller) addLogicalPort(pod *kapi.Pod) (err error) {
 
 	// Add the pod's logical switch port to the port cache
 	portInfo := oc.logicalPortCache.add(logicalSwitch, portName, lsp.UUID, podMac, podIfAddrs)
+
+	// Wait for namespace to exist, no calls after this should ever use waitForNamespaceLocked
+	if err = oc.addPodToNamespace(pod.Namespace, portInfo); err != nil {
+		return err
+	}
 
 	// Enforce the default deny multicast policy
 	if oc.multicastSupport {
@@ -552,40 +571,20 @@ func (oc *Controller) addLogicalPort(pod *kapi.Pod) (err error) {
 		return fmt.Errorf("failed to handle external GW check: %v", err)
 	}
 
-	if err = oc.addPodToNamespace(pod.Namespace, portInfo); err != nil {
-		return err
+	// CNI depends on the flows from port security, delay setting it until end
+	cmd, err = oc.ovnNBClient.LSPSetPortSecurity(portName, strings.Join(addresses, " "))
+	if err != nil {
+		return fmt.Errorf("unable to create LSPSetPortSecurity command for port: %s", portName)
 	}
 
-	if annotation == nil {
-		podAnnotation := util.PodAnnotation{
-			IPs: podIfAddrs,
-			MAC: podMac,
-		}
-		var nodeSubnets []*net.IPNet
-		if nodeSubnets = oc.lsManager.GetSwitchSubnets(logicalSwitch); nodeSubnets == nil {
-			return fmt.Errorf("cannot retrieve subnet for assigning gateway routes for pod %s, node: %s",
-				pod.Name, logicalSwitch)
-		}
-		err = oc.addRoutesGatewayIP(pod, &podAnnotation, nodeSubnets)
-		if err != nil {
-			return err
-		}
-		var marshalledAnnotation map[string]string
-		marshalledAnnotation, err = util.MarshalPodAnnotation(&podAnnotation)
-		if err != nil {
-			return fmt.Errorf("error creating pod network annotation: %v", err)
-		}
-
-		klog.V(5).Infof("Annotation values: ip=%v ; mac=%s ; gw=%s\nAnnotation=%s",
-			podIfAddrs, podMac, podAnnotation.Gateways, marshalledAnnotation)
-		if err = oc.kube.SetAnnotationsOnPod(pod, marshalledAnnotation); err != nil {
-			return fmt.Errorf("failed to set annotation on pod %s: %v", pod.Name, err)
-		}
-
-		// observe the pod creation latency metric.
-		metrics.RecordPodCreated(pod)
+	err = oc.ovnNBClient.Execute(cmd)
+	if err != nil {
+		return fmt.Errorf("error while setting port security on port: %s error: %v",
+			portName, err)
 	}
 
+	// observe the pod creation latency metric.
+	metrics.RecordPodCreated(pod)
 	return nil
 }
 
