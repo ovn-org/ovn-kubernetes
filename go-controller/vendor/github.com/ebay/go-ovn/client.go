@@ -21,9 +21,10 @@ import (
 	"sync"
 
 	"crypto/tls"
-	"github.com/ebay/libovsdb"
 	"log"
 	"time"
+
+	"github.com/ebay/libovsdb"
 )
 
 // Client ovnnb/sb client
@@ -102,6 +103,8 @@ type Client interface {
 	LRSRAdd(lr string, ip_prefix string, nexthop string, output_port []string, policy []string, external_ids map[string]string) (*OvnCommand, error)
 	// Delete LRSR with given ip_prefix, nexthop, policy and outputPort on given lr
 	LRSRDel(lr string, prefix string, nexthop, policy, outputPort *string) (*OvnCommand, error)
+	// Delete LRSR by uuid given lr
+	LRSRDelByUUID(lr, uuid string) (*OvnCommand, error)
 	// Get all LRSRs by lr
 	LRSRList(lr string) ([]*LogicalRouterStaticRoute, error)
 
@@ -183,6 +186,8 @@ type Client interface {
 	ChassisDel(chName string) (*OvnCommand, error)
 	// Get chassis by hostname or name
 	ChassisGet(chname string) ([]*Chassis, error)
+	// List chassis
+	ChassisList() ([]*Chassis, error)
 
 	// Get encaps by chassis name
 	EncapList(chname string) ([]*Encap, error)
@@ -214,17 +219,24 @@ type ovndb struct {
 	disconnectCB OVNDisconnectedCallback
 	db           string
 	addr         string
+	tableCols    map[string][]string
 	tlsConfig    *tls.Config
 	reconn       bool
 }
 
-func connect(c *ovndb) error {
+func connect(c *ovndb) (err error) {
 	ovsdb, err := libovsdb.Connect(c.addr, c.tlsConfig)
 	if err != nil {
 		return err
 	}
 	c.client = ovsdb
-	initial, err := ovsdb.MonitorAll(c.db, "")
+	defer func() {
+		if err != nil {
+			c.client.Disconnect()
+			c.client = nil
+		}
+	}()
+	initial, err := c.MonitorTables("")
 	if err != nil {
 		return err
 	}
@@ -251,6 +263,7 @@ func NewClient(cfg *Config) (Client, error) {
 		signalCB:     cfg.SignalCB,
 		disconnectCB: cfg.DisconnectCB,
 		db:           db,
+		tableCols:    cfg.TableCols,
 		addr:         cfg.Addr,
 		tlsConfig:    cfg.TLSConfig,
 		reconn:       cfg.Reconnect,
@@ -286,6 +299,54 @@ func (c *ovndb) reconnect() {
 	}()
 }
 
+func (c *ovndb) MonitorTables(jsonContext interface{}) (*libovsdb.TableUpdates, error) {
+	// get the table list based on the DB
+	var tables []string
+	if c.db == DBNB {
+		tables = NBTablesOrder
+	} else {
+		tables = SBTablesOrder
+	}
+
+	// verify whether user specified table and its columns are legit
+	if len(c.tableCols) != 0 {
+		supportedTableMaps := make(map[string]bool)
+		for _, table := range tables {
+			supportedTableMaps[table] = true
+		}
+		for table, columns := range c.tableCols {
+			if _, ok := supportedTableMaps[table]; ok {
+				// TODO: adding support for specific columns requires more work.
+				// All of the rowTo<TableName>() functions need to be fixed for
+				// the missing columns.
+				if len(columns) != 0 {
+					return nil, fmt.Errorf("providing specific columns is not supported yet")
+				}
+			} else {
+				return nil, fmt.Errorf("specified table %q in database %q not supported by the library",
+					table, c.db)
+			}
+		}
+	} else {
+		c.tableCols = make(map[string][]string)
+		for _, table := range tables {
+			c.tableCols[table] = []string{}
+		}
+	}
+	requests := make(map[string]libovsdb.MonitorRequest)
+	for table, columns := range c.tableCols {
+		requests[table] = libovsdb.MonitorRequest{
+			Columns: columns,
+			Select: libovsdb.MonitorSelect{
+				Initial: true,
+				Insert:  true,
+				Delete:  true,
+				Modify:  true,
+			}}
+	}
+	return c.client.Monitor(c.db, jsonContext, requests)
+}
+
 // TODO return proper error
 func (c *ovndb) Close() error {
 	c.client.Disconnect()
@@ -298,6 +359,10 @@ func (c *ovndb) EncapList(chname string) ([]*Encap, error) {
 
 func (c *ovndb) ChassisGet(name string) ([]*Chassis, error) {
 	return c.chassisGetImp(name)
+}
+
+func (c *ovndb) ChassisList() ([]*Chassis, error) {
+	return c.chassisListImp()
 }
 
 func (c *ovndb) ChassisAdd(name string, hostname string, etype []string, ip string,
@@ -435,6 +500,10 @@ func (c *ovndb) LRSRAdd(lr string, ip_prefix string, nexthop string, output_port
 
 func (c *ovndb) LRSRDel(lr string, prefix string, nexthop, policy, outputPort *string) (*OvnCommand, error) {
 	return c.lrsrDelImp(lr, prefix, nexthop, policy, outputPort)
+}
+
+func (c *ovndb) LRSRDelByUUID(lr, uuid string) (*OvnCommand, error) {
+	return c.lrsrDelByUUIDImp(lr, uuid)
 }
 
 func (c *ovndb) LRSRList(lr string) ([]*LogicalRouterStaticRoute, error) {
