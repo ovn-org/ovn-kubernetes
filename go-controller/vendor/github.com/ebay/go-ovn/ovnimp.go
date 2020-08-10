@@ -25,6 +25,10 @@ import (
 	"github.com/ebay/libovsdb"
 )
 
+const (
+	commitTransactionText = "commiting transaction"
+)
+
 var (
 	// ErrorOption used when invalid args specified
 	ErrorOption = errors.New("invalid option specified")
@@ -149,12 +153,23 @@ func (odbi *ovndb) transact(db string, ops ...libovsdb.Operation) ([]libovsdb.Op
 		return reply, err
 	}
 
-	if len(reply) < len(ops) {
-		for i, o := range reply {
-			if o.Error != "" && i < len(ops) {
-				return nil, fmt.Errorf("Transaction Failed due to an error : %v details: %v in %v", o.Error, o.Details, ops[i])
+	// Per RFC 7047 Section 4.1.3, the operation result array in the transact response object
+	// maps one-to-one with operations array in the transact request object. We need to check
+	// each of the operation result for null error to ensure that the transaction has succeeded.
+	for i, o := range reply {
+		if o.Error != "" {
+			// Per RFC 7047 Section 4.1.3, if all of the operations succeed, but the results
+			// cannot be committed, then "result" will have one more element than "params",
+			// with the additional element being an <error>.
+			opsInfo := commitTransactionText
+			if i < len(ops) {
+				opsInfo = fmt.Sprintf("%v", ops[i])
 			}
+			return nil, fmt.Errorf("Transaction Failed due to an error: %v details: %v in %s",
+				o.Error, o.Details, opsInfo)
 		}
+	}
+	if len(reply) < len(ops) {
 		return reply, fmt.Errorf("Number of Replies should be atleast equal to number of operations")
 	}
 	return reply, nil
@@ -195,7 +210,7 @@ func (odbi *ovndb) populateCache(updates libovsdb.TableUpdates) {
 	odbi.cachemutex.Lock()
 	defer odbi.cachemutex.Unlock()
 
-	for _, table := range tablesOrder {
+	for table := range odbi.tableCols {
 		tableUpdate, ok := updates.Updates[table]
 		if !ok {
 			continue

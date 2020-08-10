@@ -55,7 +55,7 @@ github.com/coreos/go-iptables/iptables
 github.com/cpuguy83/go-md2man/v2/md2man
 # github.com/davecgh/go-spew v1.1.1
 github.com/davecgh/go-spew/spew
-# github.com/ebay/go-ovn v0.1.0 => github.com/ebay/go-ovn v0.0.0-20200604055416-fff9cdbba909
+# github.com/ebay/go-ovn v0.1.0 => github.com/ebay/go-ovn v0.1.1-0.20200810162212-30abed5fb968
 github.com/ebay/go-ovn
 # github.com/ebay/libovsdb v0.2.1-0.20200719163122-3332afaeb27c
 github.com/ebay/libovsdb

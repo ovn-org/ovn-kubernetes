@@ -132,6 +132,37 @@ func (odbi *ovndb) lrsrDelImp(lr string, prefix string, nexthop, policy, outputP
 	return &OvnCommand{operations, odbi, make([][]map[string]interface{}, len(operations))}, nil
 }
 
+func (odbi *ovndb) lrsrDelByUUIDImp(lr, uuid string) (*OvnCommand, error) {
+	if lr == "" {
+		return nil, fmt.Errorf("lr (logical router name) is required")
+	}
+	if uuid == "" {
+		return nil, fmt.Errorf("uuid is required")
+	}
+	row := make(OVNRow)
+	row["name"] = lr
+	lruuid := odbi.getRowUUID(tableLogicalRouter, row)
+	if len(lruuid) == 0 {
+		return nil, ErrorNotFound
+	}
+
+	mutateSet, err := libovsdb.NewOvsSet([]libovsdb.UUID{stringToGoUUID(uuid)})
+	if err != nil {
+		return nil, err
+	}
+	mutation := libovsdb.NewMutation("static_routes", opDelete, mutateSet)
+	// mutate  lrouter for the corresponding static_routes
+	mucondition := libovsdb.NewCondition("name", "==", lr)
+	mutateOp := libovsdb.Operation{
+		Op:        opMutate,
+		Table:     tableLogicalRouter,
+		Mutations: []interface{}{mutation},
+		Where:     []interface{}{mucondition},
+	}
+	operations := []libovsdb.Operation{mutateOp}
+	return &OvnCommand{operations, odbi, make([][]map[string]interface{}, len(operations))}, nil
+}
+
 func (odbi *ovndb) rowToLogicalRouterStaticRoute(uuid string) *LogicalRouterStaticRoute {
 	cacheLogicalRouterStaticRoute, ok := odbi.cache[tableLogicalRouterStaticRoute][uuid]
 	if !ok {

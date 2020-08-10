@@ -123,6 +123,28 @@ func (odbi *ovndb) chassisDelImp(name string) (*OvnCommand, error) {
 	return &OvnCommand{operations, odbi, make([][]map[string]interface{}, len(operations))}, nil
 }
 
+func (odbi *ovndb) chassisListImp() ([]*Chassis, error) {
+	var listChassis []*Chassis
+
+	odbi.cachemutex.RLock()
+	defer odbi.cachemutex.RUnlock()
+
+	cacheChassis, ok := odbi.cache[tableChassis]
+
+	if !ok {
+		return nil, ErrorSchema
+	}
+
+	for uuid := range cacheChassis {
+		ch, err := odbi.rowToChassis(uuid)
+		if err != nil {
+			return nil, err
+		}
+		listChassis = append(listChassis, ch)
+	}
+	return listChassis, nil
+}
+
 func (odbi *ovndb) chassisGetImp(chassis string) ([]*Chassis, error) {
 	var listChassis []*Chassis
 
@@ -142,8 +164,7 @@ func (odbi *ovndb) chassisGetImp(chassis string) ([]*Chassis, error) {
 				return nil, err
 			}
 			listChassis = append(listChassis, ch)
-		}
-		if chName, ok := drows.Fields["name"].(string); ok && chName == chassis {
+		} else if chName, ok := drows.Fields["name"].(string); ok && chName == chassis {
 			ch, err := odbi.rowToChassis(uuid)
 			if err != nil {
 				return nil, err

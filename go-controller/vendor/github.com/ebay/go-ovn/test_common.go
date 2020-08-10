@@ -53,9 +53,7 @@ var (
 	ovn_socket string
 )
 
-func getOVNClient(db string) (ovndbapi Client) {
-	var api Client
-	var err error
+func buildOvnDbConfig(db string) *Config {
 	cfg := &Config{}
 	if db == DBNB || db == "" {
 		ovn_db = os.Getenv("OVN_NB_DB")
@@ -73,11 +71,6 @@ func getOVNClient(db string) (ovndbapi Client) {
 
 	if ovn_db == "" {
 		cfg.Addr = UNIX + ":" + ovs_rundir + "/" + ovn_socket
-
-		api, err = NewClient(cfg)
-		if err != nil {
-			log.Fatal(err)
-		}
 	} else {
 		strs := strings.Split(ovn_db, ":")
 		fmt.Println(strs)
@@ -86,10 +79,6 @@ func getOVNClient(db string) (ovndbapi Client) {
 		}
 		if len(strs) == 2 {
 			cfg.Addr = UNIX + ":" + ovs_rundir + "/" + strs[1]
-			api, err = NewClient(cfg)
-			if err != nil {
-				log.Fatal(err)
-			}
 		} else {
 			port, _ := strconv.Atoi(strs[2])
 			protocol := strs[0]
@@ -122,13 +111,17 @@ func getOVNClient(db string) (ovndbapi Client) {
 				}
 				cfg.TLSConfig = &tlsConfig
 			}
-
 			cfg.Addr = fmt.Sprintf("%s:%s:%d", strs[0], strs[1], port)
-			api, err = NewClient(cfg)
-			if err != nil {
-				log.Fatal(err)
-			}
 		}
+	}
+	return cfg
+}
+
+func getOVNClient(db string) (ovndbapi Client) {
+	cfg := buildOvnDbConfig(db)
+	api, err := NewClient(cfg)
+	if err != nil {
+		log.Fatal(err)
 	}
 	return api
 }
