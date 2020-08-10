@@ -119,9 +119,12 @@ func (e endpoints) addExternalIPCmds(fexec *ovntest.FakeExec, loadBalancerIPs []
 func (e endpoints) delCmds(fexec *ovntest.FakeExec, service v1.Service, endpoint v1.Endpoints) {
 	for _, sPort := range service.Spec.Ports {
 		if sPort.Protocol == v1.ProtocolTCP {
+			// When all endpoints have been deleted, the reject ACL is added
+			aclName := generateACLName(k8sTCPLoadBalancerIP, service.Spec.ClusterIP, sPort.Port)
+			match := fmt.Sprintf("ip4.dst==%s && tcp && tcp.dst==%d", service.Spec.ClusterIP, sPort.Port)
 			fexec.AddFakeCmdsNoOutputNoError([]string{
-				fmt.Sprintf("ovn-nbctl --timeout=15 --data=bare --no-heading --columns=_uuid find logical_switch load_balancer{>=}%s", k8sTCPLoadBalancerIP),
-				fmt.Sprintf("ovn-nbctl --timeout=15 --data=bare --no-heading --columns=name find logical_router load_balancer{>=}%s", k8sTCPLoadBalancerIP),
+				fmt.Sprintf("ovn-nbctl --timeout=15 --data=bare --no-heading --columns=_uuid find acl name=%s", aclName),
+				fmt.Sprintf("ovn-nbctl --timeout=15 --id=@acl create acl direction=from-lport priority=1000 match=\"%s\" action=reject name=%s -- add port_group  acls @acl", match, aclName),
 				fmt.Sprintf("ovn-nbctl --timeout=15 set load_balancer %s vips:\"%s:%v\"=\"\"", k8sTCPLoadBalancerIP, service.Spec.ClusterIP, sPort.Port),
 			})
 		} else if sPort.Protocol == v1.ProtocolUDP {
