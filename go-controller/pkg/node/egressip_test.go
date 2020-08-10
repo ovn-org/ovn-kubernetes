@@ -101,8 +101,7 @@ var _ = Describe("EgressIP Operations", func() {
 					},
 				)
 
-				err = fakeOvnNode.node.watchEgressIP(egressIPLocal)
-				Expect(err).NotTo(HaveOccurred())
+				fakeOvnNode.node.watchEgressIP(egressIPLocal)
 
 				addrs := func() []netlink.Addr {
 					addrs, err := netlink.AddrList(link, netlink.FAMILY_V4)
@@ -156,8 +155,7 @@ var _ = Describe("EgressIP Operations", func() {
 				link, err := netlink.LinkByName(primaryLinkName)
 				mockAddPrimaryIP(link)
 
-				err = fakeOvnNode.node.watchEgressIP(egressIPLocal)
-				Expect(err).NotTo(HaveOccurred())
+				fakeOvnNode.node.watchEgressIP(egressIPLocal)
 
 				addrs := func() []netlink.Addr {
 					addrs, err := netlink.AddrList(link, netlink.FAMILY_V4)
@@ -214,8 +212,7 @@ var _ = Describe("EgressIP Operations", func() {
 				link, err := netlink.LinkByName(primaryLinkName)
 				mockAddPrimaryIP(link)
 
-				err = fakeOvnNode.node.watchEgressIP(egressIPLocal)
-				Expect(err).NotTo(HaveOccurred())
+				fakeOvnNode.node.watchEgressIP(egressIPLocal)
 
 				addrs := func() []netlink.Addr {
 					addrs, err := netlink.AddrList(link, netlink.FAMILY_V4)
@@ -268,8 +265,7 @@ var _ = Describe("EgressIP Operations", func() {
 				link, err := netlink.LinkByName(primaryLinkName)
 				mockAddPrimaryIP(link)
 
-				err = fakeOvnNode.node.watchEgressIP(egressIPLocal)
-				Expect(err).NotTo(HaveOccurred())
+				fakeOvnNode.node.watchEgressIP(egressIPLocal)
 
 				addrs := func() []netlink.Addr {
 					addrs, err := netlink.AddrList(link, netlink.FAMILY_V4)
@@ -336,8 +332,7 @@ var _ = Describe("EgressIP Operations", func() {
 				link, err := netlink.LinkByName(primaryLinkName)
 				mockAddPrimaryIP(link)
 
-				err = fakeOvnNode.node.watchEgressIP(egressIPLocal)
-				Expect(err).NotTo(HaveOccurred())
+				fakeOvnNode.node.watchEgressIP(egressIPLocal)
 
 				addrs := func() []netlink.Addr {
 					addrs, err := netlink.AddrList(link, netlink.FAMILY_V4)
@@ -428,8 +423,7 @@ var _ = Describe("EgressIP Operations", func() {
 				link, err := netlink.LinkByName(primaryLinkName)
 				mockAddPrimaryIP(link)
 
-				err = fakeOvnNode.node.watchEgressIP(egressIPLocal)
-				Expect(err).NotTo(HaveOccurred())
+				fakeOvnNode.node.watchEgressIP(egressIPLocal)
 
 				addrs := func() []netlink.Addr {
 					addrs, err := netlink.AddrList(link, netlink.FAMILY_V4)
@@ -507,8 +501,7 @@ var _ = Describe("EgressIP Operations", func() {
 				link, err := netlink.LinkByName(primaryLinkName)
 				mockAddPrimaryIP(link)
 
-				err = fakeOvnNode.node.watchEgressIP(egressIPLocal)
-				Expect(err).NotTo(HaveOccurred())
+				fakeOvnNode.node.watchEgressIP(egressIPLocal)
 
 				addrs := func() []netlink.Addr {
 					addrs, err := netlink.AddrList(link, netlink.FAMILY_V4)

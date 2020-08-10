@@ -115,9 +115,7 @@ func (n *OvnNode) initLocalnetGateway(hostSubnets []*net.IPNet, nodeAnnotator ku
 		}
 	}
 
-	if err := n.initLocalEgressIP(gatewayIfAddrs, defaultGatewayIntf); err != nil {
-		return err
-	}
+	n.initLocalEgressIP(gatewayIfAddrs, defaultGatewayIntf)
 
 	chassisID, err := util.GetNodeChassisID()
 	if err != nil {
@@ -172,20 +170,18 @@ func getGatewayFamilyAddrs(gatewayIfAddrs []*net.IPNet) (string, string) {
 	return gatewayIPv4, gatewayIPv6
 }
 
-func (n *OvnNode) initLocalEgressIP(gatewayIfAddrs []*net.IPNet, defaultGatewayIntf string) error {
+func (n *OvnNode) initLocalEgressIP(gatewayIfAddrs []*net.IPNet, defaultGatewayIntf string) {
+	if !config.OVNKubernetesFeature.EnableEgressIP {
+		return
+	}
+
 	gatewayIPv4, gatewayIPv6 := getGatewayFamilyAddrs(gatewayIfAddrs)
-	egressIPLocal := &egressIPLocal{
+	n.watchEgressIP(&egressIPLocal{
 		gatewayIPv4:        gatewayIPv4,
 		gatewayIPv6:        gatewayIPv6,
 		nodeName:           n.name,
 		defaultGatewayIntf: defaultGatewayIntf,
-	}
-	if config.OVNKubernetesFeature.EnableEgressIP {
-		if err := n.watchEgressIP(egressIPLocal); err != nil {
-			return err
-		}
-	}
-	return nil
+	})
 }
 
 type localPortWatcherData struct {
@@ -410,7 +406,7 @@ func (n *OvnNode) watchLocalPorts(npw *localPortWatcherData) error {
 	if err := initRoutingRules(); err != nil {
 		return err
 	}
-	_, err := n.watchFactory.AddServiceHandler(cache.ResourceEventHandlerFuncs{
+	n.watchFactory.AddServiceHandler(cache.ResourceEventHandlerFuncs{
 		AddFunc: func(obj interface{}) {
 			svc := obj.(*kapi.Service)
 			err := npw.addService(svc)
@@ -442,7 +438,7 @@ func (n *OvnNode) watchLocalPorts(npw *localPortWatcherData) error {
 			}
 		},
 	}, npw.syncServices)
-	return err
+	return nil
 }
 
 func cleanupLocalnetGateway(physnet string) error {

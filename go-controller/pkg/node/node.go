@@ -272,10 +272,7 @@ func (n *OvnNode) Start(wg *sync.WaitGroup) error {
 	if !ok {
 		return fmt.Errorf("cannot get kubeclient for starting CNI server")
 	}
-	err = n.WatchEndpoints()
-	if err != nil {
-		return err
-	}
+	n.WatchEndpoints()
 
 	// start the cni server
 	cniServer := cni.NewCNIServer("", kclient.KClient)
@@ -284,8 +281,8 @@ func (n *OvnNode) Start(wg *sync.WaitGroup) error {
 	return err
 }
 
-func (n *OvnNode) WatchEndpoints() error {
-	_, err := n.watchFactory.AddEndpointsHandler(cache.ResourceEventHandlerFuncs{
+func (n *OvnNode) WatchEndpoints() {
+	n.watchFactory.AddEndpointsHandler(cache.ResourceEventHandlerFuncs{
 		UpdateFunc: func(old, new interface{}) {
 			epNew := new.(*kapi.Endpoints)
 			epOld := old.(*kapi.Endpoints)
@@ -313,7 +310,6 @@ func (n *OvnNode) WatchEndpoints() error {
 			}
 		},
 	}, nil)
-	return err
 }
 
 type epAddressItem struct {

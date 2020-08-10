@@ -310,7 +310,7 @@ func nodePortWatcher(nodeName, gwBridge, gwIntf string, nodeIP []*net.IPNet, wf 
 		return err
 	}
 
-	_, err = wf.AddServiceHandler(cache.ResourceEventHandlerFuncs{
+	wf.AddServiceHandler(cache.ResourceEventHandlerFuncs{
 		AddFunc: func(obj interface{}) {
 			service := obj.(*kapi.Service)
 			addService(service, ofportPhys, ofportPatch, gwBridge, nodeIP[0])
@@ -332,7 +332,7 @@ func nodePortWatcher(nodeName, gwBridge, gwIntf string, nodeIP []*net.IPNet, wf 
 		syncServices(services, ofportPhys, gwBridge, nodeIP[0])
 	})
 
-	return err
+	return nil
 }
 
 // since we share the host's k8s node IP, add OpenFlow flows

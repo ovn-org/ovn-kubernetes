@@ -295,31 +295,22 @@ func (oc *Controller) Run(wg *sync.WaitGroup) error {
 
 	// WatchNamespaces() should be started first because it has no other
 	// dependencies, and WatchNodes() depends on it
-	if err := oc.WatchNamespaces(); err != nil {
-		return err
-	}
+	oc.WatchNamespaces()
 
 	// WatchNodes must be started next because it creates the node switch
 	// which most other watches depend on.
 	// https://github.com/ovn-org/ovn-kubernetes/pull/859
-	if err := oc.WatchNodes(); err != nil {
-		return err
-	}
+	oc.WatchNodes()
 
-	for _, f := range []func() error{oc.WatchPods, oc.WatchServices,
-		oc.WatchEndpoints, oc.WatchNetworkPolicy, oc.WatchCRD} {
-		if err := f(); err != nil {
-			return err
-		}
-	}
+	oc.WatchPods()
+	oc.WatchServices()
+	oc.WatchEndpoints()
+	oc.WatchNetworkPolicy()
+	oc.WatchCRD()
 
 	if config.OVNKubernetesFeature.EnableEgressIP {
-		if err := oc.WatchEgressNodes(); err != nil {
-			return err
-		}
-		if err := oc.WatchEgressIP(); err != nil {
-			return err
-		}
+		oc.WatchEgressNodes()
+		oc.WatchEgressIP()
 	}
 
 	klog.Infof("Completing all the Watchers took %v", time.Since(start))
@@ -544,11 +535,11 @@ func (oc *Controller) recordPodEvent(addErr error, pod *kapi.Pod) {
 }
 
 // WatchPods starts the watching of Pod resource and calls back the appropriate handler logic
-func (oc *Controller) WatchPods() error {
+func (oc *Controller) WatchPods() {
 	var retryPods sync.Map
 
 	start := time.Now()
-	_, err := oc.watchFactory.AddPodHandler(cache.ResourceEventHandlerFuncs{
+	oc.watchFactory.AddPodHandler(cache.ResourceEventHandlerFuncs{
 		AddFunc: func(obj interface{}) {
 			pod := obj.(*kapi.Pod)
 			if !podWantsNetwork(pod) {
@@ -603,18 +594,14 @@ func (oc *Controller) WatchPods() error {
 			retryPods.Delete(pod.UID)
 		},
 	}, oc.syncPods)
-	if err == nil {
-		klog.Infof("Bootstrapping existing pods and cleaning stale pods took %v",
-			time.Since(start))
-	}
-	return err
+	klog.Infof("Bootstrapping existing pods and cleaning stale pods took %v", time.Since(start))
 }
 
 // WatchServices starts the watching of Service resource and calls back the
 // appropriate handler logic
-func (oc *Controller) WatchServices() error {
+func (oc *Controller) WatchServices() {
 	start := time.Now()
-	_, err := oc.watchFactory.AddServiceHandler(cache.ResourceEventHandlerFuncs{
+	oc.watchFactory.AddServiceHandler(cache.ResourceEventHandlerFuncs{
 		AddFunc: func(obj interface{}) {
 			service := obj.(*kapi.Service)
 			err := oc.createService(service)
@@ -635,17 +622,13 @@ func (oc *Controller) WatchServices() error {
 			oc.deleteService(service)
 		},
 	}, oc.syncServices)
-	if err == nil {
-		klog.Infof("Bootstrapping existing services and cleaning stale services took %v",
-			time.Since(start))
-	}
-	return err
+	klog.Infof("Bootstrapping existing services and cleaning stale services took %v", time.Since(start))
 }
 
 // WatchEndpoints starts the watching of Endpoint resource and calls back the appropriate handler logic
-func (oc *Controller) WatchEndpoints() error {
+func (oc *Controller) WatchEndpoints() {
 	start := time.Now()
-	_, err := oc.watchFactory.AddEndpointsHandler(cache.ResourceEventHandlerFuncs{
+	oc.watchFactory.AddEndpointsHandler(cache.ResourceEventHandlerFuncs{
 		AddFunc: func(obj interface{}) {
 			ep := obj.(*kapi.Endpoints)
 			err := oc.AddEndpoints(ep)
@@ -679,18 +662,14 @@ func (oc *Controller) WatchEndpoints() error {
 			}
 		},
 	}, nil)
-	if err == nil {
-		klog.Infof("Bootstrapping existing endpoints and cleaning stale endpoints took %v",
-			time.Since(start))
-	}
-	return err
+	klog.Infof("Bootstrapping existing endpoints and cleaning stale endpoints took %v", time.Since(start))
 }
 
 // WatchNetworkPolicy starts the watching of network policy resource and calls
 // back the appropriate handler logic
-func (oc *Controller) WatchNetworkPolicy() error {
+func (oc *Controller) WatchNetworkPolicy() {
 	start := time.Now()
-	_, err := oc.watchFactory.AddPolicyHandler(cache.ResourceEventHandlerFuncs{
+	oc.watchFactory.AddPolicyHandler(cache.ResourceEventHandlerFuncs{
 		AddFunc: func(obj interface{}) {
 			policy := obj.(*kapisnetworking.NetworkPolicy)
 			oc.addNetworkPolicy(policy)
@@ -708,17 +687,13 @@ func (oc *Controller) WatchNetworkPolicy() error {
 			oc.deleteNetworkPolicy(policy)
 		},
 	}, oc.syncNetworkPolicies)
-	if err == nil {
-		klog.Infof("Bootstrapping existing policies and cleaning stale policies took %v",
-			time.Since(start))
-	}
-	return err
+	klog.Infof("Bootstrapping existing policies and cleaning stale policies took %v", time.Since(start))
 }
 
 // WatchCRD starts the watching of the CRD resource and calls back to the
 // appropriate handler logic
-func (oc *Controller) WatchCRD() error {
-	_, err := oc.watchFactory.AddCRDHandler(cache.ResourceEventHandlerFuncs{
+func (oc *Controller) WatchCRD() {
+	oc.watchFactory.AddCRDHandler(cache.ResourceEventHandlerFuncs{
 		AddFunc: func(obj interface{}) {
 			crd := obj.(*apiextension.CustomResourceDefinition)
 			klog.Infof("Adding CRD %s to cluster", crd.Name)
@@ -728,12 +703,7 @@ func (oc *Controller) WatchCRD() error {
 					klog.Errorf("Error Creating EgressFirewallWatchFactory: %v", err)
 					return
 				}
-				h, err := oc.WatchEgressFirewall()
-				if err != nil {
-					klog.Errorf("Error watching CRD - %v", err)
-					return
-				}
-				oc.egressFirewallHandler = h
+				oc.egressFirewallHandler = oc.WatchEgressFirewall()
 
 			}
 		},
@@ -743,23 +713,18 @@ func (oc *Controller) WatchCRD() error {
 			crd := obj.(*apiextension.CustomResourceDefinition)
 			klog.Infof("Deleting CRD %s from cluster", crd.Name)
 			if crd.Name == egressfirewallCRD {
-				err := oc.watchFactory.RemoveEgressFirewallHandler(oc.egressFirewallHandler)
-				if err != nil {
-					klog.Errorf("Error removing EgressFirewallHandler: %v", err)
-				}
+				oc.watchFactory.RemoveEgressFirewallHandler(oc.egressFirewallHandler)
 				oc.egressFirewallHandler = nil
 				oc.watchFactory.ShutdownEgressFirewallWatchFactory()
 			}
 		},
 	}, nil)
-	return err
-
 }
 
 // WatchEgressFirewall starts the watching of egressfirewall resource and calls
 // back the appropriate handler logic
-func (oc *Controller) WatchEgressFirewall() (*factory.Handler, error) {
-	h, err := oc.watchFactory.AddEgressFirewallHandler(cache.ResourceEventHandlerFuncs{
+func (oc *Controller) WatchEgressFirewall() *factory.Handler {
+	return oc.watchFactory.AddEgressFirewallHandler(cache.ResourceEventHandlerFuncs{
 		AddFunc: func(obj interface{}) {
 			egressFirewall := obj.(*egressfirewall.EgressFirewall)
 			errList := oc.addEgressFirewall(egressFirewall)
@@ -803,14 +768,13 @@ func (oc *Controller) WatchEgressFirewall() (*factory.Handler, error) {
 			}
 		},
 	}, nil)
-	return h, err
 }
 
 // WatchEgressNodes starts the watching of egress assignable nodes and calls
 // back the appropriate handler logic.
-func (oc *Controller) WatchEgressNodes() error {
+func (oc *Controller) WatchEgressNodes() {
 	nodeEgressLabel := util.GetNodeEgressLabel()
-	_, err := oc.watchFactory.AddNodeHandler(cache.ResourceEventHandlerFuncs{
+	oc.watchFactory.AddNodeHandler(cache.ResourceEventHandlerFuncs{
 		AddFunc: func(obj interface{}) {
 			node := obj.(*kapi.Node)
 			if err := oc.addNodeForEgress(node); err != nil {
@@ -854,13 +818,12 @@ func (oc *Controller) WatchEgressNodes() error {
 			}
 		},
 	}, oc.initClusterEgressPolicies)
-	return err
 }
 
 // WatchEgressIP starts the watching of egressip resource and calls
 // back the appropriate handler logic.
-func (oc *Controller) WatchEgressIP() error {
-	_, err := oc.watchFactory.AddEgressIPHandler(cache.ResourceEventHandlerFuncs{
+func (oc *Controller) WatchEgressIP() {
+	oc.watchFactory.AddEgressIPHandler(cache.ResourceEventHandlerFuncs{
 		AddFunc: func(obj interface{}) {
 			eIP := obj.(*egressipv1.EgressIP)
 			if err := oc.addEgressIP(eIP); err != nil {
@@ -895,14 +858,13 @@ func (oc *Controller) WatchEgressIP() error {
 			}
 		},
 	}, oc.syncEgressIPs)
-	return err
 }
 
 // WatchNamespaces starts the watching of namespace resource and calls
 // back the appropriate handler logic
-func (oc *Controller) WatchNamespaces() error {
+func (oc *Controller) WatchNamespaces() {
 	start := time.Now()
-	_, err := oc.watchFactory.AddNamespaceHandler(cache.ResourceEventHandlerFuncs{
+	oc.watchFactory.AddNamespaceHandler(cache.ResourceEventHandlerFuncs{
 		AddFunc: func(obj interface{}) {
 			ns := obj.(*kapi.Namespace)
 			oc.AddNamespace(ns)
@@ -916,11 +878,7 @@ func (oc *Controller) WatchNamespaces() error {
 			oc.deleteNamespace(ns)
 		},
 	}, oc.syncNamespaces)
-	if err == nil {
-		klog.Infof("Bootstrapping existing namespaces and cleaning stale namespaces took %v",
-			time.Since(start))
-	}
-	return err
+	klog.Infof("Bootstrapping existing namespaces and cleaning stale namespaces took %v", time.Since(start))
 }
 
 func (oc *Controller) syncNodeGateway(node *kapi.Node, hostSubnets []*net.IPNet) error {
@@ -946,13 +904,13 @@ func (oc *Controller) syncNodeGateway(node *kapi.Node, hostSubnets []*net.IPNet)
 
 // WatchNodes starts the watching of node resource and calls
 // back the appropriate handler logic
-func (oc *Controller) WatchNodes() error {
+func (oc *Controller) WatchNodes() {
 	var gatewaysFailed sync.Map
 	var mgmtPortFailed sync.Map
 	var addNodeFailed sync.Map
 
 	start := time.Now()
-	_, err := oc.watchFactory.AddNodeHandler(cache.ResourceEventHandlerFuncs{
+	oc.watchFactory.AddNodeHandler(cache.ResourceEventHandlerFuncs{
 		AddFunc: func(obj interface{}) {
 			node := obj.(*kapi.Node)
 			if noHostSubnet := noHostSubnet(node); noHostSubnet {
@@ -1080,11 +1038,7 @@ func (oc *Controller) WatchNodes() error {
 			gatewaysFailed.Delete(node.Name)
 		},
 	}, oc.syncNodes)
-	if err == nil {
-		klog.Infof("Bootstrapping existing nodes and cleaning stale nodes took %v",
-			time.Since(start))
-	}
-	return err
+	klog.Infof("Bootstrapping existing nodes and cleaning stale nodes took %v", time.Since(start))
 }
 
 // AddServiceVIPToName associates a k8s service name with a load balancer VIP
