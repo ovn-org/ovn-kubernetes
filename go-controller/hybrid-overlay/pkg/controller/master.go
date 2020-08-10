@@ -198,46 +198,76 @@ func (m *MasterController) releaseNodeSubnet(nodeName string, subnet *net.IPNet)
 	return nil
 }
 
+// handleOverlayPort reconciles the node's overlay port with OVN.
+// It needs to handle the following cases:
+//   - no subnet allocated: unset MAC annotation
+//   - no MAC annotation, no lsp: configure lsp, set annotation
+//   - annotation, no lsp: configure lsp
+//   - annotation, lsp: ensure lsp matches annotation
+//   - no annotation, lsp: set annotation from lsp
 func (m *MasterController) handleOverlayPort(node *kapi.Node, annotator kube.Annotator) error {
-	_, haveDRMACAnnotation := node.Annotations[types.HybridOverlayDRMAC]
+	var err error
+	var annotationMAC, portMAC net.HardwareAddr
+	portName := util.GetHybridOverlayPortName(node.Name)
 
+	// retrieve mac annotation
+	am, annotationOK := node.Annotations[types.HybridOverlayDRMAC]
+	if annotationOK {
+		annotationMAC, err = net.ParseMAC(am)
+		if err != nil {
+			klog.Errorf("MAC annotation %s on node %s is invalid, ignoring.", annotationMAC, node.Name)
+			annotationOK = false
+		}
+	}
+
+	// no subnet allocated? unset mac annotation, be done.
 	subnets, err := util.ParseNodeHostSubnetAnnotation(node)
 	if subnets == nil || err != nil {
 		// No subnet allocated yet; clean up
 		klog.V(5).Infof("No subnet allocation yet for %s", node.Name)
-		if haveDRMACAnnotation {
+		if annotationOK {
 			m.deleteOverlayPort(node)
 			annotator.Delete(types.HybridOverlayDRMAC)
 		}
 		return nil
 	}
 
-	if haveDRMACAnnotation {
-		// already set up; do nothing
-		klog.V(5).Infof("Annotation already exists on %s. doing nothing", node.Name)
-		return nil
+	// retrieve port configuration. If port isn't set up, portMAC will be nil
+	portMAC, _, _ = util.GetPortAddresses(portName, m.ovnNBClient)
+
+	// compare port configuration to annotation MAC, reconcile as needed
+	lspOK := false
+
+	// nothing allocated, allocate default mac
+	if portMAC == nil && annotationMAC == nil {
+		for _, subnet := range subnets {
+			ip := util.GetNodeHybridOverlayIfAddr(subnet).IP
+			portMAC = util.IPAddrToHWAddr(ip)
+			annotationMAC = portMAC
+			if !utilnet.IsIPv6(ip) {
+				break
+			}
+		}
+		klog.V(5).Infof("Allocating MAC %s to node %s", portMAC.String(), node.Name)
+	} else if portMAC == nil && annotationMAC != nil { // annotation, no port
+		portMAC = annotationMAC
+	} else if portMAC != nil && annotationMAC == nil { // port, no annotation
+		lspOK = true
+		annotationMAC = portMAC
+	} else if portMAC != nil && annotationMAC != nil { // port & annotation: anno wins
+		if portMAC.String() != annotationMAC.String() {
+			klog.V(2).Infof("Warning: node %s lsp %s has mismatching hybrid port mac, correcting", node.Name, portName)
+			portMAC = annotationMAC
+		} else {
+			lspOK = true
+		}
 	}
 
-	portName := util.GetHybridOverlayPortName(node.Name)
-	portMAC, portIPs, _ := util.GetPortAddresses(portName, m.ovnNBClient)
-	if portMAC == nil || portIPs == nil {
-		if portIPs == nil {
-			for _, subnet := range subnets {
-				portIPs = append(portIPs, util.GetNodeHybridOverlayIfAddr(subnet).IP)
-			}
-		}
-		if portMAC == nil {
-			for _, ip := range portIPs {
-				portMAC = util.IPAddrToHWAddr(ip)
-				if !utilnet.IsIPv6(ip) {
-					break
-				}
-			}
-		}
-
-		klog.Infof("Creating node %s hybrid overlay port", node.Name)
+	if !lspOK {
+		klog.Infof("Creating / updating node %s hybrid overlay port with mac %s", node.Name, portMAC.String())
 
 		var stderr string
+		// create / update lsps
 		_, stderr, err = util.RunOVNNbctl("--", "--may-exist", "lsp-add", node.Name, portName,
 			"--", "lsp-set-addresses", portName, portMAC.String())
 		if err != nil {
@@ -250,8 +280,12 @@ func (m *MasterController) handleOverlayPort(node *kapi.Node, annotator kube.Ann
 			}
 		}
 	}
-	if err := annotator.Set(types.HybridOverlayDRMAC, portMAC.String()); err != nil {
-		return fmt.Errorf("failed to set node %s hybrid overlay DRMAC annotation: %v", node.Name, err)
+
+	if !annotationOK {
+		klog.Infof("Setting node %s hybrid overlay mac annotation to %s", node.Name, annotationMAC.String())
+		if err := annotator.Set(types.HybridOverlayDRMAC, portMAC.String()); err != nil {
+			return fmt.Errorf("failed to set node %s hybrid overlay DRMAC annotation: %v", node.Name, err)
+		}
 	}
 
 	return nil
