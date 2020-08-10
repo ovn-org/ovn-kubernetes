@@ -133,6 +133,71 @@ var _ = Describe("Informer Event Handler Tests", func() {
 		Eventually(func() int32 { return atomic.LoadInt32(&adds) }).Should(Equal(int32(1)), "adds")
 	})
 
+	It("do not processes an add event if the pod is set for deletion", func() {
+		adds := int32(0)
+		deletes := int32(0)
+
+		k := fake.NewSimpleClientset(
+			&v1.Namespace{
+				ObjectMeta: metav1.ObjectMeta{
+					UID:  types.UID(namespace),
+					Name: namespace,
+				},
+				Spec:   v1.NamespaceSpec{},
+				Status: v1.NamespaceStatus{},
+			},
+		)
+
+		f := informers.NewSharedInformerFactory(k, 0)
+
+		e := NewDefaultEventHandler(
+			"test",
+			f.Core().V1().Pods().Informer(),
+			func(obj interface{}) error {
+				atomic.AddInt32(&adds, 1)
+				return nil
+			},
+			func(obj interface{}) error {
+				atomic.AddInt32(&deletes, 1)
+				return nil
+			},
+			ReceiveAllUpdates,
+		)
+
+		f.Start(stopChan)
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			e.Run(1, stopChan)
+		}()
+
+		wait.PollImmediate(
+			500*time.Millisecond,
+			5*time.Second,
+			func() (bool, error) {
+				return e.Synced(), nil
+			},
+		)
+
+		Eventually(func() (bool, error) {
+			ns, err := k.CoreV1().Namespaces().Get(context.TODO(), namespace, metav1.GetOptions{})
+			if err != nil {
+				return false, err
+			}
+			return ns != nil, nil
+		}, 2).Should(BeTrue())
+
+		pod := newPod("foo", namespace)
+		now := metav1.Now()
+		pod.SetDeletionTimestamp(&now)
+
+		_, err := k.CoreV1().Pods(namespace).Create(context.TODO(), pod, metav1.CreateOptions{})
+		Expect(err).NotTo(HaveOccurred())
+
+		Consistently(func() int32 { return atomic.LoadInt32(&deletes) }).Should(Equal(int32(0)), "deletes")
+		Eventually(func() int32 { return atomic.LoadInt32(&adds) }).Should(Equal(int32(0)), "adds")
+	})
+
 	It("adds existing pod and processes an update event", func() {
 		adds := int32(0)
 		deletes := int32(0)
@@ -200,6 +265,77 @@ var _ = Describe("Informer Event Handler Tests", func() {
 		Consistently(func() int32 { return atomic.LoadInt32(&deletes) }).Should(Equal(int32(0)), "deletes")
 		// two updates, initial add from cache + update event
 		Eventually(func() int32 { return atomic.LoadInt32(&adds) }).Should(Equal(int32(2)), "adds")
+	})
+
+	It("adds existing pod and do not processes an update event if it was set for deletion", func() {
+		adds := int32(0)
+		deletes := int32(0)
+
+		pod := newPod("foo", namespace)
+		k := fake.NewSimpleClientset(
+			[]runtime.Object{
+				&v1.Namespace{
+					ObjectMeta: metav1.ObjectMeta{
+						UID:  types.UID(namespace),
+						Name: namespace,
+					},
+					Spec:   v1.NamespaceSpec{},
+					Status: v1.NamespaceStatus{},
+				},
+				pod,
+			}...,
+		)
+
+		f := informers.NewSharedInformerFactory(k, 0)
+
+		e := NewDefaultEventHandler(
+			"test",
+			f.Core().V1().Pods().Informer(),
+			func(obj interface{}) error {
+				atomic.AddInt32(&adds, 1)
+				return nil
+			},
+			func(obj interface{}) error {
+				atomic.AddInt32(&deletes, 1)
+				return nil
+			},
+			ReceiveAllUpdates,
+		)
+
+		f.Start(stopChan)
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			e.Run(1, stopChan)
+		}()
+
+		wait.PollImmediate(
+			500*time.Millisecond,
+			5*time.Second,
+			func() (bool, error) {
+				return e.Synced(), nil
+			},
+		)
+
+		Eventually(func() (bool, error) {
+			pod, err := k.CoreV1().Pods(namespace).Get(context.TODO(), "foo", metav1.GetOptions{})
+			if err != nil {
+				return false, err
+			}
+			return pod != nil, nil
+		}, 2).Should(BeTrue())
+
+		pod.Annotations = map[string]string{"bar": "baz"}
+		pod.ResourceVersion = "11"
+		now := metav1.Now()
+		pod.SetDeletionTimestamp(&now)
+
+		_, err := k.CoreV1().Pods(namespace).Update(context.TODO(), pod, metav1.UpdateOptions{})
+		Expect(err).NotTo(HaveOccurred())
+		// no deletes
+		Consistently(func() int32 { return atomic.LoadInt32(&deletes) }).Should(Equal(int32(0)), "deletes")
+		// only initial add from cache event
+		Eventually(func() int32 { return atomic.LoadInt32(&adds) }).Should(Equal(int32(1)), "adds")
 	})
 
 	It("adds existing pod and processes a delete event", func() {
@@ -391,5 +527,31 @@ var _ = Describe("Event Handler Internals", func() {
 		Expect(err).NotTo(HaveOccurred())
 
 		Expect(exists).To(BeTrue())
+	})
+
+	It("should not enqueue object set for deletion", func() {
+		k := fake.NewSimpleClientset()
+		factory := informers.NewSharedInformerFactory(k, 0)
+		e := eventHandler{
+			name:           "test",
+			informer:       factory.Core().V1().Pods().Informer(),
+			deletedIndexer: cache.NewIndexer(cache.DeletionHandlingMetaNamespaceKeyFunc, cache.Indexers{}),
+			workqueue:      workqueue.NewRateLimitingQueue(workqueue.DefaultControllerRateLimiter()),
+			add: func(obj interface{}) error {
+				return nil
+			},
+			delete: func(obj interface{}) error {
+				return nil
+			},
+			updateFilter: ReceiveAllUpdates,
+		}
+
+		obj := newPod("bar", "foo")
+		now := metav1.Now()
+		obj.SetDeletionTimestamp(&now)
+
+		e.enqueue(obj)
+
+		Expect(e.workqueue.Len()).To(Equal(0))
 	})
 })
