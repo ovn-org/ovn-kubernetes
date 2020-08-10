@@ -171,7 +171,7 @@ func checkConnectivityPingToHost(f *framework.Framework, nodeName, podName, host
 }
 
 // Create a pod on the specified node using the agnostic host image
-func createGenericPod(f *framework.Framework, podName, nodeSelector string, command []string) {
+func createAgnhostPod(f *framework.Framework, podName, nodeSelector string, args []string) error {
 	contName := fmt.Sprintf("%s-container", podName)
 
 	pod := &v1.Pod{
@@ -181,29 +181,22 @@ func createGenericPod(f *framework.Framework, podName, nodeSelector string, comm
 		Spec: v1.PodSpec{
 			Containers: []v1.Container{
 				{
-					Name:    contName,
-					Image:   framework.AgnHostImage,
-					Command: command,
+					Name:  contName,
+					Image: framework.AgnHostImage,
+					Args:  args,
 				},
 			},
 			NodeName:      nodeSelector,
 			RestartPolicy: v1.RestartPolicyNever,
 		},
 	}
-	podClient := f.ClientSet.CoreV1().Pods(f.Namespace.Name)
-	_, err := podClient.Create(pod)
+
+	_, err := f.ClientSet.CoreV1().Pods(f.Namespace.Name).Create(pod)
 	if err != nil {
-		framework.Logf("Warning: Failed to get logs from pod %q: %v", pod.Name, err)
+		framework.Logf("Warning: Failed to create pod %q: %v", pod.Name, err)
+		return err
 	}
-	err = e2epod.WaitForPodNotPending(f.ClientSet, podName, f.Namespace.Name)
-	if err != nil {
-		logs, logErr := e2epod.GetPodLogs(f.ClientSet, f.Namespace.Name, pod.Name, contName)
-		if logErr != nil {
-			framework.Logf("Warning: Failed to get logs from pod %q: %v", pod.Name, logErr)
-		} else {
-			framework.Logf("pod %s/%s logs:\n%s", f.Namespace.Name, pod.Name, logs)
-		}
-	}
+	return e2epod.WaitForPodNotPending(f.ClientSet, podName, f.Namespace.Name)
 }
 
 // Get the IP address of a pod in the specified namespace
@@ -389,7 +382,6 @@ var _ = Describe("test e2e inter-node connectivity between worker nodes hybrid o
 		var ciWorkerNodeSrc string
 		var ciWorkerNodeDst string
 		dstPingPodName := "e2e-dst-ping-pod"
-		command := []string{"bash", "-c", "sleep 20000"}
 
 		// non-ha ci mode runs a named set of nodes with a prefix of ovn-worker
 		ciWorkerNodeSrc = ovnWorkerNode
@@ -403,7 +395,8 @@ var _ = Describe("test e2e inter-node connectivity between worker nodes hybrid o
 		By(fmt.Sprintf("Creating a container on node %s and verifying connectivity to a pod on node %s", ciWorkerNodeSrc, ciWorkerNodeDst))
 
 		// Create the pod that will be used as the destination for the connectivity test
-		createGenericPod(f, dstPingPodName, ciWorkerNodeDst, command)
+		err = createAgnhostPod(f, dstPingPodName, ciWorkerNodeDst, []string{"pause"})
+		framework.ExpectNoError(err)
 
 		// Wait for pod exgw setup to be almost ready
 		wait.PollImmediate(1*time.Second, 30*time.Second, func() (bool, error) {
@@ -545,7 +538,6 @@ var _ = Describe("e2e multiple external gateway update validation", func() {
 		extGWCidrAlt1 := fmt.Sprintf("%s/24", extGwAlt1)
 		extGWCidrAlt2 := fmt.Sprintf("%s/24", extGwAlt2)
 		srcPingPodName := "e2e-exgw-src-ping-pod"
-		command := []string{"bash", "-c", "sleep 20000"}
 		frameworkNsFlag := fmt.Sprintf("--namespace=%s", f.Namespace.Name)
 		testContainer := fmt.Sprintf("%s-container", srcPingPodName)
 		testContainerFlag := fmt.Sprintf("--container=%s", testContainer)
@@ -613,7 +605,8 @@ var _ = Describe("e2e multiple external gateway update validation", func() {
 			framework.Failf("failed to add the pod route on the test container: %v", err)
 		}
 		// Create the pod that will be used as the source for the connectivity test
-		createGenericPod(f, srcPingPodName, ciWorkerNodeSrc, command)
+		err = createAgnhostPod(f, srcPingPodName, ciWorkerNodeSrc, []string{"pause"})
+		framework.ExpectNoError(err)
 
 		// Wait for pod exgw setup to be almost ready
 		wait.PollImmediate(1*time.Second, 30*time.Second, func() (bool, error) {
@@ -817,7 +810,6 @@ var _ = Describe("e2e non-vxlan external gateway and update validation", func() 
 		exGWRemoteCidrAlt1 := fmt.Sprintf("%s/24", exGWRemoteIpAlt1)
 		exGWRemoteCidrAlt2 := fmt.Sprintf("%s/24", exGWRemoteIpAlt2)
 		srcPingPodName := "e2e-exgw-novxlan-src-ping-pod"
-		command := []string{"bash", "-c", "sleep 20000"}
 		frameworkNsFlag := fmt.Sprintf("--namespace=%s", f.Namespace.Name)
 		testContainer := fmt.Sprintf("%s-container", srcPingPodName)
 		testContainerFlag := fmt.Sprintf("--container=%s", testContainer)
@@ -871,7 +863,8 @@ var _ = Describe("e2e non-vxlan external gateway and update validation", func() 
 			framework.Failf("failed to add the loopback ip to dev lo on the test container: %v", err)
 		}
 		// Create the pod that will be used as the source for the connectivity test
-		createGenericPod(f, srcPingPodName, ciWorkerNodeSrc, command)
+		err = createAgnhostPod(f, srcPingPodName, ciWorkerNodeSrc, []string{"pause"})
+		framework.ExpectNoError(err, "failed to create pod to ping external gw")
 
 		// Wait for pod exgw setup to be almost ready
 		wait.PollImmediate(1*time.Second, 30*time.Second, func() (bool, error) {
