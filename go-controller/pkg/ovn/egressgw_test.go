@@ -78,7 +78,7 @@ var _ = Describe("OVN Egress Gateway Operations", func() {
 					},
 				)
 				t.populateLogicalSwitchCache(fakeOvn)
-				t.addPodDenyMcast(fExec)
+				t.addToClusterPortGroup(fExec)
 				fExec.AddFakeCmd(&ovntest.ExpectedCmd{
 					Cmd:    "ovn-nbctl --timeout=15 --may-exist --policy=src-ip --ecmp-symmetric-reply lr-route-add GR_node1 10.128.1.3/32 9.0.0.1",
 					Output: "\n",
@@ -125,7 +125,7 @@ var _ = Describe("OVN Egress Gateway Operations", func() {
 					},
 				)
 				t.populateLogicalSwitchCache(fakeOvn)
-				t.addPodDenyMcast(fExec)
+				t.addToClusterPortGroup(fExec)
 				fExec.AddFakeCmd(&ovntest.ExpectedCmd{
 					Cmd:    "ovn-nbctl --timeout=15 --may-exist --policy=src-ip --ecmp-symmetric-reply lr-route-add GR_node1 10.128.1.3/32 9.0.0.1",
 					Output: "\n",
@@ -176,7 +176,7 @@ var _ = Describe("OVN Egress Gateway Operations", func() {
 					},
 				)
 				t.populateLogicalSwitchCache(fakeOvn)
-				t.addPodDenyMcast(fExec)
+				t.addToClusterPortGroup(fExec)
 				fExec.AddFakeCmd(&ovntest.ExpectedCmd{
 					Cmd:    "ovn-nbctl --timeout=15 --may-exist --policy=src-ip --ecmp-symmetric-reply lr-route-add GR_node1 10.128.1.3/32 9.0.0.1",
 					Output: "\n",
@@ -241,7 +241,7 @@ var _ = Describe("OVN Egress Gateway Operations", func() {
 					},
 				)
 				t.populateLogicalSwitchCache(fakeOvn)
-				t.addPodDenyMcast(fExec)
+				t.addToClusterPortGroup(fExec)
 				fExec.AddFakeCmd(&ovntest.ExpectedCmd{
 					Cmd:    "ovn-nbctl --timeout=15 --may-exist --policy=src-ip --ecmp-symmetric-reply lr-route-add GR_node1 10.128.1.3/32 9.0.0.1",
 					Output: "\n",
@@ -309,7 +309,7 @@ var _ = Describe("OVN Egress Gateway Operations", func() {
 					},
 				)
 				t.populateLogicalSwitchCache(fakeOvn)
-				t.addPodDenyMcast(fExec)
+				t.addToClusterPortGroup(fExec)
 				fakeOvn.controller.WatchNamespaces()
 				fakeOvn.controller.WatchPods()
 				_, err := fakeOvn.fakeClient.CoreV1().Pods(t.namespace).Create(context.TODO(), newPod(t.namespace, t.podName, t.nodeName, t.podIP), metav1.CreateOptions{})
@@ -359,7 +359,7 @@ var _ = Describe("OVN Egress Gateway Operations", func() {
 					},
 				)
 				t.populateLogicalSwitchCache(fakeOvn)
-				t.addPodDenyMcast(fExec)
+				t.addToClusterPortGroup(fExec)
 				fakeOvn.controller.WatchNamespaces()
 				fakeOvn.controller.WatchPods()
 				Eventually(fExec.CalledMatchesExpected).Should(BeTrue(), fExec.ErrorDesc)
@@ -417,7 +417,7 @@ var _ = Describe("OVN Egress Gateway Operations", func() {
 					},
 				)
 				t.populateLogicalSwitchCache(fakeOvn)
-				t.addPodDenyMcast(fExec)
+				t.addToClusterPortGroup(fExec)
 				fakeOvn.controller.WatchNamespaces()
 				fakeOvn.controller.WatchPods()
 				_, err = fakeOvn.fakeClient.CoreV1().Pods(t.namespace).Create(context.TODO(), newPod(t.namespace, t.podName, t.nodeName, t.podIP), metav1.CreateOptions{})
@@ -467,7 +467,7 @@ var _ = Describe("OVN Egress Gateway Operations", func() {
 					},
 				)
 				t.populateLogicalSwitchCache(fakeOvn)
-				t.addPodDenyMcast(fExec)
+				t.addToClusterPortGroup(fExec)
 				fakeOvn.controller.WatchNamespaces()
 				fakeOvn.controller.WatchPods()
 				Eventually(fExec.CalledMatchesExpected).Should(BeTrue(), fExec.ErrorDesc)

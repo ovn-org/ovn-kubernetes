@@ -41,7 +41,8 @@ import (
 )
 
 const (
-	egressfirewallCRD = "egressfirewalls.k8s.ovn.org"
+	egressfirewallCRD    string = "egressfirewalls.k8s.ovn.org"
+	clusterPortGroupName string = "clusterPortGroup"
 )
 
 // ServiceVIPKey is used for looking up service namespace information for a
@@ -151,6 +152,9 @@ type Controller struct {
 
 	// An address set factory that creates address sets
 	addressSetFactory AddressSetFactory
+
+	// Port group for all cluster logical switch ports
+	clusterPortGroupUUID string
 
 	// Port group for ingress deny rule
 	portGroupIngressDeny string
@@ -317,6 +321,10 @@ func (oc *Controller) Run(wg *sync.WaitGroup) error {
 	}
 
 	klog.Infof("Completing all the Watchers took %v", time.Since(start))
+
+	// Remove old multicastDefaultDeny port group now that all ports
+	// have been added to the clusterPortGroup by WatchPods()
+	deletePortGroup("mcastPortGroupDeny")
 
 	if config.Kubernetes.OVNEmptyLbEvents {
 		go oc.ovnControllerEventChecker()

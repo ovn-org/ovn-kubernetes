@@ -440,7 +440,7 @@ var _ = Describe("OVN NetworkPolicy Operations", func() {
 					})
 
 				nPodTest.baseCmds(fExec)
-				nPodTest.addPodDenyMcast(fExec)
+				nPodTest.addToClusterPortGroup(fExec)
 				npTest.addNamespaceSelectorCmds(fExec, networkPolicy, false)
 				npTest.addLocalPodCmds(fExec, networkPolicy)
 
@@ -539,7 +539,7 @@ var _ = Describe("OVN NetworkPolicy Operations", func() {
 					})
 
 				nPodTest.baseCmds(fExec)
-				nPodTest.addPodDenyMcast(fExec)
+				nPodTest.addToClusterPortGroup(fExec)
 				npTest.addNamespaceSelectorCmds(fExec, networkPolicy, false)
 
 				fakeOvn.start(ctx,
@@ -632,7 +632,7 @@ var _ = Describe("OVN NetworkPolicy Operations", func() {
 				)
 
 				nPodTest.baseCmds(fExec)
-				nPodTest.addPodDenyMcast(fExec)
+				nPodTest.addToClusterPortGroup(fExec)
 				npTest.baseCmds(fExec, networkPolicy)
 				npTest.addLocalPodCmds(fExec, networkPolicy)
 
@@ -722,7 +722,7 @@ var _ = Describe("OVN NetworkPolicy Operations", func() {
 					})
 
 				nPodTest.baseCmds(fExec)
-				nPodTest.addPodDenyMcast(fExec)
+				nPodTest.addToClusterPortGroup(fExec)
 				npTest.addNamespaceSelectorCmds(fExec, networkPolicy, true)
 				npTest.addLocalPodCmds(fExec, networkPolicy)
 
@@ -908,7 +908,7 @@ var _ = Describe("OVN NetworkPolicy Operations", func() {
 					})
 
 				nPodTest.baseCmds(fExec)
-				nPodTest.addPodDenyMcast(fExec)
+				nPodTest.addToClusterPortGroup(fExec)
 				npTest.addNamespaceSelectorCmds(fExec, networkPolicy, false)
 				npTest.addLocalPodCmds(fExec, networkPolicy)
 
@@ -1016,7 +1016,7 @@ var _ = Describe("OVN NetworkPolicy Operations", func() {
 					})
 
 				nPodTest.baseCmds(fExec)
-				nPodTest.addPodDenyMcast(fExec)
+				nPodTest.addToClusterPortGroup(fExec)
 				npTest.addNamespaceSelectorCmds(fExec, networkPolicy, false)
 
 				fakeOvn.start(ctx,
@@ -1116,7 +1116,7 @@ var _ = Describe("OVN NetworkPolicy Operations", func() {
 					})
 
 				nPodTest.baseCmds(fExec)
-				nPodTest.addPodDenyMcast(fExec)
+				nPodTest.addToClusterPortGroup(fExec)
 				npTest.addNamespaceSelectorCmds(fExec, networkPolicy, false)
 				npTest.addLocalPodCmds(fExec, networkPolicy)
 
@@ -1221,7 +1221,7 @@ var _ = Describe("OVN NetworkPolicy Operations", func() {
 				)
 
 				nPodTest.baseCmds(fExec)
-				nPodTest.addPodDenyMcast(fExec)
+				nPodTest.addToClusterPortGroup(fExec)
 				fakeOvn.start(ctx,
 					&v1.NamespaceList{
 						Items: []v1.Namespace{
@@ -1300,7 +1300,7 @@ var _ = Describe("OVN NetworkPolicy Operations", func() {
 				Eventually(fExec.CalledMatchesExpected).Should(BeTrue(), fExec.ErrorDesc)
 
 				nPodTest.populateLogicalSwitchCache(fakeOvn)
-				nPodTest.addPodDenyMcast(fExec)
+				nPodTest.addToClusterPortGroup(fExec)
 
 				// The pod should be added to the multicast allow group.
 				mcastPolicy.addPodCmds(fExec, namespace1.Name)

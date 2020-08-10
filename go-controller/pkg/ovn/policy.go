@@ -327,46 +327,23 @@ func deleteMulticastAllowPolicy(ns string, nsInfo *namespaceInfo) error {
 //   that are not allowed to receive multicast raffic.
 // - one ACL dropping ingress multicast traffic to all pods.
 // Caller must hold the namespace's namespaceInfo object lock.
-func createDefaultDenyMulticastPolicy() error {
-	portGroupName := "mcastPortGroupDeny"
-	portGroupUUID, err := createPortGroup(portGroupName, portGroupName)
-	if err != nil {
-		return fmt.Errorf("failed to create port_group for %s (%v)",
-			portGroupName, err)
-	}
-
+func (oc *Controller) createDefaultDenyMulticastPolicy() error {
 	// By default deny any egress multicast traffic from any pod. This drops
 	// IP multicast membership reports therefore denying any multicast traffic
 	// to be forwarded to pods.
-	err = addACLPortGroup(portGroupUUID, portGroupName, fromLport,
+	err := addACLPortGroup(oc.clusterPortGroupUUID, clusterPortGroupName, fromLport,
 		defaultMcastDenyPriority, "ip4.mcast", "drop", knet.PolicyTypeEgress)
 	if err != nil {
-		return fmt.Errorf("failed to create default deny multicast egress ACL (%v)",
-			err)
+		return fmt.Errorf("failed to create default deny multicast egress ACL: %v", err)
 	}
 
 	// By default deny any ingress multicast traffic to any pod.
-	err = addACLPortGroup(portGroupUUID, portGroupName, toLport,
+	err = addACLPortGroup(oc.clusterPortGroupUUID, clusterPortGroupName, toLport,
 		defaultMcastDenyPriority, "ip4.mcast", "drop", knet.PolicyTypeIngress)
 	if err != nil {
-		return fmt.Errorf("failed to create default deny multicast ingress ACL (%v)",
-			err)
+		return fmt.Errorf("failed to create default deny multicast ingress ACL: %v", err)
 	}
 
-	return nil
-}
-
-func podAddDefaultDenyMulticastPolicy(portInfo *lpInfo) error {
-	if err := addToPortGroup("mcastPortGroupDeny", portInfo); err != nil {
-		return fmt.Errorf("failed to add port %s to default multicast deny ACL: %v", portInfo.name, err)
-	}
-	return nil
-}
-
-func podDeleteDefaultDenyMulticastPolicy(portInfo *lpInfo) error {
-	if err := deleteFromPortGroup("mcastPortGroupDeny", portInfo); err != nil {
-		return fmt.Errorf("failed to delete port %s from default multicast deny ACL: %v", portInfo.name, err)
-	}
 	return nil
 }
 
