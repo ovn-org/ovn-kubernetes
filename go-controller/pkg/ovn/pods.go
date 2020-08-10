@@ -11,6 +11,7 @@ import (
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/cni/types"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/metrics"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/ipallocator"
 	util "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
 	kapi "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/util/wait"
@@ -302,6 +303,7 @@ func (oc *Controller) addLogicalPort(pod *kapi.Pod) (err error) {
 	var addresses []string
 	var cmd *goovn.OvnCommand
 	var releaseIPs, clearAddressesFromNB bool
+	needsIP := true
 
 	// Check if the pod's logical switch port already exists. If it
 	// does don't re-add the port to OVN as this will change its
@@ -374,30 +376,44 @@ func (oc *Controller) addLogicalPort(pod *kapi.Pod) (err error) {
 			return fmt.Errorf("unable to create LSPSetDynamicAddresses command for port: %s", portName)
 		}
 		cmds = append(cmds, cmd)
-	} else {
+
+		// ensure we have reserved the IPs in the annotation
+		if err = oc.lsManager.AllocateIPs(logicalSwitch, podIfAddrs); err != nil && err != ipallocator.ErrAllocated {
+			// this should also be treated as an allocation for purposes of error handling
+			releaseIPs = true
+			return fmt.Errorf("unable to ensure IPs allocated for already annotated pod: %s, IPs: %s, error: %v",
+				pod.Name, util.JoinIPNetIPs(podIfAddrs, " "), err)
+		} else {
+			needsIP = false
+		}
+	}
+
+	if needsIP {
+		// try to get the IP from existing port in OVN first
 		podMac, podIfAddrs, err = oc.getPortAddresses(logicalSwitch, portName)
 		if err != nil {
 			return fmt.Errorf("failed to get pod addresses for pod %s on node: %s, err: %v",
 				portName, logicalSwitch, err)
 		}
-		if podMac == nil || podIfAddrs == nil {
+		needsNewAllocation := false
+		// ensure we have reserved the IPs found in OVN
+		if len(podIfAddrs) == 0 {
+			needsNewAllocation = true
+		} else if err = oc.lsManager.AllocateIPs(logicalSwitch, podIfAddrs); err != nil && err != ipallocator.ErrAllocated {
+			klog.Warningf("Unable to allocate IPs found on existing OVN port: %s, for pod %s on node: %s"+
+				" error: %v", util.JoinIPNetIPs(podIfAddrs, " "), portName, logicalSwitch, err)
+
+			needsNewAllocation = true
+		}
+		if needsNewAllocation {
+			// Previous attempts to use already configured IPs failed, need to assign new
 			podMac, podIfAddrs, err = oc.assignPodAddresses(logicalSwitch)
 			if err != nil {
 				return fmt.Errorf("failed to assign pod addresses for pod %s on node: %s, err: %v",
 					portName, logicalSwitch, err)
 			}
-			releaseIPs = true
-		} else {
-			if len(podIfAddrs) > 0 {
-				if err = oc.lsManager.AllocateIPs(logicalSwitch, podIfAddrs); err != nil {
-					klog.Warningf("Failed to block off already allocated IPs: %s for pod %s on node: %s"+
-						" error: %v", util.JoinIPNetIPs(podIfAddrs, " "), portName,
-						logicalSwitch, err)
-				}
-				// this should also be treated as an allocation for purposes of error handling
-				releaseIPs = true
-			}
 		}
+		releaseIPs = true
 
 		var networks []*types.NetworkSelectionElement
 
