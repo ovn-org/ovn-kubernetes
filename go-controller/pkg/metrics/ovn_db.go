@@ -7,6 +7,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
 	"github.com/prometheus/client_golang/prometheus"
 	"k8s.io/apimachinery/pkg/util/wait"
@@ -425,7 +426,7 @@ func RegisterOvnDBMetrics(clientset kubernetes.Interface, k8sNodeName string) {
 				ovnDBSizeMetricsUpdater(direction, database)
 				ovnE2eTimeStampUpdater(direction, database)
 			}
-			time.Sleep(30 * time.Second)
+			time.Sleep(time.Duration(config.Default.MetricsScrapeInterval) * time.Second)
 		}
 	}()
 }

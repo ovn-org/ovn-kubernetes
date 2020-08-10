@@ -4,6 +4,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
 	"github.com/prometheus/client_golang/prometheus"
 	"k8s.io/apimachinery/pkg/util/wait"
@@ -153,5 +154,5 @@ func RegisterOvnNorthdMetrics(clientset kubernetes.Interface, k8sNodeName string
 	// Register the ovn-northd coverage/show metrics with prometheus
 	componentCoverageShowMetricsMap[ovnNorthd] = ovnNorthdCoverageShowMetricsMap
 	registerCoverageShowMetrics(ovnNorthd, MetricOvnNamespace, MetricOvnSubsystemNorthd)
-	go coverageShowMetricsUpdater(ovnNorthd)
+	go coverageShowMetricsUpdater(ovnNorthd, config.Default.MetricsScrapeInterval)
 }

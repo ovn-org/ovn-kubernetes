@@ -11,6 +11,7 @@ import (
 	kexec "k8s.io/utils/exec"
 )
 
+var metricsScrapeInterval int
 var OvsExporterCommand = cli.Command{
 	Name:  "ovs-exporter",
 	Usage: "",
@@ -18,6 +19,12 @@ var OvsExporterCommand = cli.Command{
 		&cli.StringFlag{
 			Name:  "metrics-bind-address",
 			Usage: `The IP address and port for the metrics server to serve on (default ":9310")`,
+		},
+		&cli.IntFlag{
+			Name:        "metrics-interval",
+			Usage:       "The Interval at which ovs metrics are collected",
+			Value:       30,
+			Destination: &metricsScrapeInterval,
 		},
 	},
 	Action: func(ctx *cli.Context) error {
@@ -34,7 +41,7 @@ var OvsExporterCommand = cli.Command{
 		mux.Handle("/metrics", promhttp.Handler())
 
 		// register ovs metrics that will be served off of /metrics path
-		metrics.RegisterOvsMetrics()
+		metrics.RegisterOvsMetrics(metricsScrapeInterval)
 
 		err := http.ListenAndServe(bindAddress, mux)
 		if err != nil {

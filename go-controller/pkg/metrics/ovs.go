@@ -409,9 +409,9 @@ func setOvsDatapathMetrics(datapaths []string) (err error) {
 }
 
 // ovsDatapathMetricsUpdate updates the ovs datapath metrics for every 30 sec
-func ovsDatapathMetricsUpdate() {
+func ovsDatapathMetricsUpdate(metricsScrapeInterval int) {
 	for {
-		time.Sleep(30 * time.Second)
+		time.Sleep(time.Duration(metricsScrapeInterval) * time.Second)
 		datapaths, err := getOvsDatapaths()
 		if err != nil {
 			klog.Errorf("%s", err.Error())
@@ -534,9 +534,9 @@ func getOvsBridgeInfo() (bridgePortCount map[string]float64, portToBridgeMap map
 
 // ovsBridgeMetricsUpdate updates bridgeMetrics &
 // ovsInterface metrics & geneveInterface metrics for every 30sec
-func ovsBridgeMetricsUpdate() {
+func ovsBridgeMetricsUpdate(metricsScrapeInterval int) {
 	for {
-		time.Sleep(30 * time.Second)
+		time.Sleep(time.Duration(metricsScrapeInterval) * time.Second)
 		// set geneve interface metrics
 		err := geneveInterfaceMetricsUpdate()
 		if err != nil {
@@ -864,13 +864,13 @@ func setOvsMemoryMetrics() (err error) {
 	return nil
 }
 
-func ovsMemoryMetricsUpdate() {
+func ovsMemoryMetricsUpdate(metricsScrapeInterval int) {
 	for {
 		err := setOvsMemoryMetrics()
 		if err != nil {
 			klog.Errorf("%s", err.Error())
 		}
-		time.Sleep(30 * time.Second)
+		time.Sleep(time.Duration(metricsScrapeInterval) * time.Second)
 	}
 }
 
@@ -917,13 +917,13 @@ func setOvsHwOffloadMetrics() (err error) {
 	return nil
 }
 
-func ovsHwOffloadMetricsUpdate() {
+func ovsHwOffloadMetricsUpdate(metricsScrapeInterval int) {
 	for {
 		err := setOvsHwOffloadMetrics()
 		if err != nil {
 			klog.Errorf("%s", err.Error())
 		}
-		time.Sleep(30 * time.Second)
+		time.Sleep(time.Duration(metricsScrapeInterval) * time.Second)
 	}
 }
 
@@ -1182,7 +1182,7 @@ var ovsVswitchdCoverageShowMetricsMap = map[string]*metricDetails{
 }
 var registerOvsMetricsOnce sync.Once
 
-func RegisterOvsMetrics() {
+func RegisterOvsMetrics(metricsScrapeInterval int) {
 	registerOvsMetricsOnce.Do(func() {
 		getOvsVersionInfo()
 		prometheus.MustRegister(prometheus.NewGaugeFunc(
@@ -1231,14 +1231,14 @@ func RegisterOvsMetrics() {
 		registerCoverageShowMetrics(ovsVswitchd, MetricOvsNamespace, MetricOvsSubsystemVswitchd)
 
 		// OVS datapath metrics updater
-		go ovsDatapathMetricsUpdate()
+		go ovsDatapathMetricsUpdate(metricsScrapeInterval)
 		// OVS bridge metrics updater
-		go ovsBridgeMetricsUpdate()
+		go ovsBridgeMetricsUpdate(metricsScrapeInterval)
 		// OVS memory metrics updater
-		go ovsMemoryMetricsUpdate()
+		go ovsMemoryMetricsUpdate(metricsScrapeInterval)
 		// OVS hw Offload metrics updater
-		go ovsHwOffloadMetricsUpdate()
+		go ovsHwOffloadMetricsUpdate(metricsScrapeInterval)
 		// OVS coverage/show metrics updater.
-		go coverageShowMetricsUpdater(ovsVswitchd)
+		go coverageShowMetricsUpdater(ovsVswitchd, metricsScrapeInterval)
 	})
 }

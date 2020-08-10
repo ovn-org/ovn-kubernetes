@@ -6,6 +6,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
 	"github.com/prometheus/client_golang/prometheus"
 )
@@ -275,7 +276,7 @@ func ovnControllerConfigurationMetricsUpdater() {
 		if err != nil {
 			klog.Errorf("%s", err.Error())
 		}
-		time.Sleep(30 * time.Second)
+		time.Sleep(time.Duration(config.Default.MetricsScrapeInterval) * time.Second)
 	}
 }
 
@@ -379,5 +380,5 @@ func RegisterOvnControllerMetrics() {
 	// ovn-controller configuration metrics updater
 	go ovnControllerConfigurationMetricsUpdater()
 	// ovn-controller coverage show metrics updater
-	go coverageShowMetricsUpdater(ovnController)
+	go coverageShowMetricsUpdater(ovnController, config.Default.MetricsScrapeInterval)
 }
