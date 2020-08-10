@@ -1,9 +1,13 @@
 package cni
 
 import (
+	"bytes"
 	"fmt"
 	"strings"
+	"time"
 
+	"k8s.io/apimachinery/pkg/util/wait"
+	"k8s.io/klog"
 	kexec "k8s.io/utils/exec"
 )
 
@@ -65,4 +69,47 @@ func ovsClear(table, record string, columns ...string) error {
 	args := append([]string{"--if-exists", "clear", table, record}, columns...)
 	_, err := ovsExec(args...)
 	return err
+}
+
+func ofctlExec(args ...string) (string, error) {
+	args = append([]string{"--timeout=10", "--no-stats", "--strict"}, args...)
+	var stdout, stderr bytes.Buffer
+	cmd := runner.Command("ovs-ofctl", args...)
+	cmd.SetStdout(&stdout)
+	cmd.SetStderr(&stderr)
+
+	cmdStr := strings.Join(args, " ")
+	klog.V(5).Infof("exec: ovs-ofctl %s", cmdStr)
+
+	err := cmd.Run()
+	if err != nil {
+		stderrStr := stderr.String()
+		klog.Errorf("exec: ovs-ofctl %s : stderr: %q", cmdStr, stderrStr)
+		return "", fmt.Errorf("failed to run 'ovs-ofctl %s': %v\n  %q", cmdStr, err, stderrStr)
+	}
+	stdoutStr := stdout.String()
+	klog.V(5).Infof("exec: ovs-ofctl %s: stdout: %q", cmdStr, stdoutStr)
+
+	trimmed := strings.TrimSpace(stdoutStr)
+	// If output is a single line, strip the trailing newline
+	if strings.Count(trimmed, "\n") == 0 {
+		stdoutStr = trimmed
+	}
+	return stdoutStr, nil
+}
+
+func waitForPodFlows(mac string) error {
+	return wait.PollImmediate(200*time.Millisecond, 20*time.Second, func() (bool, error) {
+		// Query the flows by mac address
+		query := fmt.Sprintf("table=9,dl_src=%s", mac)
+		// ovs-ofctl dumps error on stderr, so stdout will only dump flow data if matches the query.
+		stdout, err := ofctlExec("dump-flows", "br-int", query)
+		if err != nil {
+			return false, nil
+		}
+		if len(stdout) == 0 {
+			return false, nil
+		}
+		return true, nil
+	})
 }
