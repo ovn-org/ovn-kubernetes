@@ -201,7 +201,7 @@ func TestSaveIPAddress(t *testing.T) {
 			inpNewLink: mockLink,
 			inpAddrs:   []netlink.Addr{},
 			onRetArgsNetLinkLibOpers: []onCallReturnArgs{
-				{"LinkSetup", []string{"*mocks.Link"}, []interface{}{nil}},
+				{"LinkSetUp", []string{"*mocks.Link"}, []interface{}{nil}},
 			},
 		},
 		{
@@ -239,7 +239,7 @@ func TestSaveIPAddress(t *testing.T) {
 			onRetArgsNetLinkLibOpers: []onCallReturnArgs{
 				{"AddrDel", []string{"*mocks.Link", "*netlink.Addr"}, []interface{}{nil}},
 				{"AddrAdd", []string{"*mocks.Link", "*netlink.Addr"}, []interface{}{nil}},
-				{"LinkSetup", []string{"*mocks.Link"}, []interface{}{nil}},
+				{"LinkSetUp", []string{"*mocks.Link"}, []interface{}{nil}},
 			},
 			onRetArgsLinkIfaceOpers: []onCallReturnArgs{
 				{"Attrs", []string{}, []interface{}{&netlink.LinkAttrs{Name: "testIfaceName"}}},
@@ -579,7 +579,7 @@ func TestNicToBridge(t *testing.T) {
 				{"AddrList", []string{"*mocks.Link", "int"}, []interface{}{[]netlink.Addr{}, nil}},
 				{"RouteList", []string{"*mocks.Link", "int"}, []interface{}{[]netlink.Route{}, nil}},
 				{"LinkByName", []string{"string"}, []interface{}{mockLink, nil}},
-				{"LinkSetup", []string{"*mocks.Link"}, []interface{}{fmt.Errorf("mock error")}},
+				{"LinkSetUp", []string{"*mocks.Link"}, []interface{}{fmt.Errorf("mock error")}},
 			},
 			onRetArgsLinkIfaceOpers: []onCallReturnArgs{
 				{"Attrs", []string{}, []interface{}{&netlink.LinkAttrs{Name: "testIfaceName"}}},
@@ -595,7 +595,7 @@ func TestNicToBridge(t *testing.T) {
 				{"AddrList", []string{"*mocks.Link", "int"}, []interface{}{[]netlink.Addr{}, nil}},
 				{"RouteList", []string{"*mocks.Link", "int"}, []interface{}{[]netlink.Route{{Gw: ovntest.MustParseIP("10.10.10.1"), LinkIndex: 1}}, nil}},
 				{"LinkByName", []string{"string"}, []interface{}{mockLink, nil}},
-				{"LinkSetup", []string{"*mocks.Link"}, []interface{}{nil}},
+				{"LinkSetUp", []string{"*mocks.Link"}, []interface{}{nil}},
 				{"RouteDel", []string{"*netlink.Route"}, []interface{}{fmt.Errorf("mock error")}},
 			},
 			onRetArgsLinkIfaceOpers: []onCallReturnArgs{
@@ -612,7 +612,7 @@ func TestNicToBridge(t *testing.T) {
 				{"AddrList", []string{"*mocks.Link", "int"}, []interface{}{[]netlink.Addr{}, nil}},
 				{"RouteList", []string{"*mocks.Link", "int"}, []interface{}{[]netlink.Route{{Gw: ovntest.MustParseIP("10.10.10.1"), LinkIndex: 1}}, nil}},
 				{"LinkByName", []string{"string"}, []interface{}{mockLink, nil}},
-				{"LinkSetup", []string{"*mocks.Link"}, []interface{}{nil}},
+				{"LinkSetUp", []string{"*mocks.Link"}, []interface{}{nil}},
 				{"RouteDel", []string{"*netlink.Route"}, []interface{}{nil}},
 				{"RouteAdd", []string{"*netlink.Route"}, []interface{}{nil}},
 			},
@@ -828,7 +828,7 @@ func TestBridgeToNic(t *testing.T) {
 				// Below three rows are to invoke the save ip adddress function
 				{"AddrDel", []string{"*mocks.Link", "*netlink.Addr"}, []interface{}{nil}},
 				{"AddrAdd", []string{"*mocks.Link", "*netlink.Addr"}, []interface{}{nil}},
-				{"LinkSetup", []string{"*mocks.Link"}, []interface{}{fmt.Errorf("mock error")}},
+				{"LinkSetUp", []string{"*mocks.Link"}, []interface{}{fmt.Errorf("mock error")}},
 			},
 			onRetArgsLinkIfaceOpers: []onCallReturnArgs{
 				// Below row entry is for mocking the `if err = saveIPAddress(bridgeLink, ifaceLink, addrs); err != nil` code path
@@ -864,7 +864,7 @@ func TestBridgeToNic(t *testing.T) {
 				// Below three row entries are for mocking the `if err = saveIPAddress(bridgeLink, ifaceLink, addrs); err != nil` code path
 				{"AddrDel", []string{"*mocks.Link", "*netlink.Addr"}, []interface{}{nil}},
 				{"AddrAdd", []string{"*mocks.Link", "*netlink.Addr"}, []interface{}{nil}},
-				{"LinkSetup", []string{"*mocks.Link"}, []interface{}{nil}},
+				{"LinkSetUp", []string{"*mocks.Link"}, []interface{}{nil}},
 				// Below two row entries are for mocking the `if err = saveRoute(bridgeLink, ifaceLink, routes); err != nil` code path
 				{"RouteDel", []string{"*netlink.Route"}, []interface{}{nil}},
 				{"RouteAdd", []string{"*netlink.Route"}, []interface{}{fmt.Errorf("mock error")}},
@@ -911,7 +911,7 @@ func TestBridgeToNic(t *testing.T) {
 				// Below three row entries are for mocking the `if err = saveIPAddress(bridgeLink, ifaceLink, addrs); err != nil` code path
 				{"AddrDel", []string{"*mocks.Link", "*netlink.Addr"}, []interface{}{nil}},
 				{"AddrAdd", []string{"*mocks.Link", "*netlink.Addr"}, []interface{}{nil}},
-				{"LinkSetup", []string{"*mocks.Link"}, []interface{}{nil}},
+				{"LinkSetUp", []string{"*mocks.Link"}, []interface{}{nil}},
 				// Below two row entries are for mocking the `if err = saveRoute(bridgeLink, ifaceLink, routes); err != nil` code path
 				{"RouteDel", []string{"*netlink.Route"}, []interface{}{nil}},
 				{"RouteAdd", []string{"*netlink.Route"}, []interface{}{nil}},
@@ -964,7 +964,7 @@ func TestBridgeToNic(t *testing.T) {
 				// Below three row entries are for mocking the `if err = saveIPAddress(bridgeLink, ifaceLink, addrs); err != nil` code path
 				{"AddrDel", []string{"*mocks.Link", "*netlink.Addr"}, []interface{}{nil}},
 				{"AddrAdd", []string{"*mocks.Link", "*netlink.Addr"}, []interface{}{nil}},
-				{"LinkSetup", []string{"*mocks.Link"}, []interface{}{nil}},
+				{"LinkSetUp", []string{"*mocks.Link"}, []interface{}{nil}},
 				// Below two row entries are for mocking the `if err = saveRoute(bridgeLink, ifaceLink, routes); err != nil` code path
 				{"RouteDel", []string{"*netlink.Route"}, []interface{}{nil}},
 				{"RouteAdd", []string{"*netlink.Route"}, []interface{}{nil}},
@@ -1017,7 +1017,7 @@ func TestBridgeToNic(t *testing.T) {
 				// Below three row entries are for mocking the `if err = saveIPAddress(bridgeLink, ifaceLink, addrs); err != nil` code path
 				{"AddrDel", []string{"*mocks.Link", "*netlink.Addr"}, []interface{}{nil}},
 				{"AddrAdd", []string{"*mocks.Link", "*netlink.Addr"}, []interface{}{nil}},
-				{"LinkSetup", []string{"*mocks.Link"}, []interface{}{nil}},
+				{"LinkSetUp", []string{"*mocks.Link"}, []interface{}{nil}},
 				// Below two row entries are for mocking the `if err = saveRoute(bridgeLink, ifaceLink, routes); err != nil` code path
 				{"RouteDel", []string{"*netlink.Route"}, []interface{}{nil}},
 				{"RouteAdd", []string{"*netlink.Route"}, []interface{}{nil}},
@@ -1074,7 +1074,7 @@ func TestBridgeToNic(t *testing.T) {
 				// Below three row entries are for mocking the `if err = saveIPAddress(bridgeLink, ifaceLink, addrs); err != nil` code path
 				{"AddrDel", []string{"*mocks.Link", "*netlink.Addr"}, []interface{}{nil}},
 				{"AddrAdd", []string{"*mocks.Link", "*netlink.Addr"}, []interface{}{nil}},
-				{"LinkSetup", []string{"*mocks.Link"}, []interface{}{nil}},
+				{"LinkSetUp", []string{"*mocks.Link"}, []interface{}{nil}},
 				// Below two row entries are for mocking the `if err = saveRoute(bridgeLink, ifaceLink, routes); err != nil` code path
 				{"RouteDel", []string{"*netlink.Route"}, []interface{}{nil}},
 				{"RouteAdd", []string{"*netlink.Route"}, []interface{}{nil}},
@@ -1135,7 +1135,7 @@ func TestBridgeToNic(t *testing.T) {
 				// Below three row entries are for mocking the `if err = saveIPAddress(bridgeLink, ifaceLink, addrs); err != nil` code path
 				{"AddrDel", []string{"*mocks.Link", "*netlink.Addr"}, []interface{}{nil}},
 				{"AddrAdd", []string{"*mocks.Link", "*netlink.Addr"}, []interface{}{nil}},
-				{"LinkSetup", []string{"*mocks.Link"}, []interface{}{nil}},
+				{"LinkSetUp", []string{"*mocks.Link"}, []interface{}{nil}},
 				// Below two row entries are for mocking the `if err = saveRoute(bridgeLink, ifaceLink, routes); err != nil` code path
 				{"RouteDel", []string{"*netlink.Route"}, []interface{}{nil}},
 				{"RouteAdd", []string{"*netlink.Route"}, []interface{}{nil}},
@@ -1196,7 +1196,7 @@ func TestBridgeToNic(t *testing.T) {
 				// Below three row entries are for mocking the `if err = saveIPAddress(bridgeLink, ifaceLink, addrs); err != nil` code path
 				{"AddrDel", []string{"*mocks.Link", "*netlink.Addr"}, []interface{}{nil}},
 				{"AddrAdd", []string{"*mocks.Link", "*netlink.Addr"}, []interface{}{nil}},
-				{"LinkSetup", []string{"*mocks.Link"}, []interface{}{nil}},
+				{"LinkSetUp", []string{"*mocks.Link"}, []interface{}{nil}},
 				// Below two row entries are for mocking the `if err = saveRoute(bridgeLink, ifaceLink, routes); err != nil` code path
 				{"RouteDel", []string{"*netlink.Route"}, []interface{}{nil}},
 				{"RouteAdd", []string{"*netlink.Route"}, []interface{}{nil}},
@@ -1256,7 +1256,7 @@ func TestBridgeToNic(t *testing.T) {
 				// Below three row entries are for mocking the `if err = saveIPAddress(bridgeLink, ifaceLink, addrs); err != nil` code path
 				{"AddrDel", []string{"*mocks.Link", "*netlink.Addr"}, []interface{}{nil}},
 				{"AddrAdd", []string{"*mocks.Link", "*netlink.Addr"}, []interface{}{nil}},
-				{"LinkSetup", []string{"*mocks.Link"}, []interface{}{nil}},
+				{"LinkSetUp", []string{"*mocks.Link"}, []interface{}{nil}},
 				// Below two row entries are for mocking the `if err = saveRoute(bridgeLink, ifaceLink, routes); err != nil` code path
 				{"RouteDel", []string{"*netlink.Route"}, []interface{}{nil}},
 				{"RouteAdd", []string{"*netlink.Route"}, []interface{}{nil}},

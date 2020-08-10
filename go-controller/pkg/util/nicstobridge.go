@@ -89,7 +89,7 @@ func saveIPAddress(oldLink, newLink netlink.Link, addrs []netlink.Addr) error {
 		klog.Infof("Successfully saved addr %q to newLink %q", addr.String(), addr.Label)
 	}
 
-	return netLinkOps.LinkSetup(newLink)
+	return netLinkOps.LinkSetUp(newLink)
 }
 
 // delAddRoute removes 'route' from 'oldLink' and moves to 'newLink'
