@@ -93,8 +93,8 @@ func NewDefaultEventHandler(
 		UpdateFunc: func(old, new interface{}) {
 			oldObj := old.(metav1.Object)
 			newObj := new.(metav1.Object)
-			// Make sure object is not set for deletion and was actually changed
-			if oldObj.GetDeletionTimestamp() == nil && oldObj.GetResourceVersion() != newObj.GetResourceVersion() {
+			// Make sure object was actually changed
+			if oldObj.GetResourceVersion() != newObj.GetResourceVersion() {
 				// check the update aginst the predicate functions
 				if e.updateFilter(old, new) {
 					// enqueue if it matches
@@ -161,6 +161,10 @@ func (e *eventHandler) Run(threadiness int, stopCh <-chan struct{}) error {
 
 // enqueue adds an item to the workqueue
 func (e *eventHandler) enqueue(obj interface{}) {
+	// ignore objects that are already set for deletion
+	if !obj.(metav1.Object).GetDeletionTimestamp().IsZero() {
+		return
+	}
 	var key string
 	var err error
 	// get the key for our object
