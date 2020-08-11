@@ -302,7 +302,7 @@ func (oc *Controller) addLogicalPort(pod *kapi.Pod) (err error) {
 	var cmds []*goovn.OvnCommand
 	var addresses []string
 	var cmd *goovn.OvnCommand
-	var releaseIPs, clearAddressesFromNB bool
+	var releaseIPs bool
 	needsIP := true
 
 	// Check if the pod's logical switch port already exists. If it
@@ -339,28 +339,6 @@ func (oc *Controller) addLogicalPort(pod *kapi.Pod) (err error) {
 					logicalSwitch, relErr)
 			} else {
 				klog.Infof("Released IPs: %s for node: %s", util.JoinIPNetIPs(podIfAddrs, " "), logicalSwitch)
-			}
-		}
-		if clearAddressesFromNB && err != nil {
-			var rollBackCmds []*goovn.OvnCommand
-			rollBackCmd, rollBackErr := oc.ovnNBClient.LSPSetAddress(portName, "")
-			if rollBackErr != nil {
-				klog.Errorf("Unable to create LSPSetAddress command for "+
-					"rolling back addresses on port: %s, switch :%s",
-					portName, logicalSwitch)
-			}
-			rollBackCmds = append(rollBackCmds, rollBackCmd)
-			rollBackCmd, rollBackErr = oc.ovnNBClient.LSPSetPortSecurity(portName, "")
-			if rollBackErr != nil {
-				klog.Errorf("Unable to create LSPSetPortSecurity command for "+
-					"rolling back port security addresses on port: %s, switch: %s",
-					portName, logicalSwitch)
-			}
-			rollBackCmds = append(rollBackCmds, rollBackCmd)
-			rollBackErr = oc.ovnNBClient.Execute(rollBackCmds...)
-			if rollBackErr != nil {
-				klog.Errorf("Error executing roll back commands for port: %s on switch: %s",
-					portName, logicalSwitch)
 			}
 		}
 	}()
@@ -488,7 +466,7 @@ func (oc *Controller) addLogicalPort(pod *kapi.Pod) (err error) {
 		return fmt.Errorf("error while creating logical port %s error: %v",
 			portName, err)
 	}
-	clearAddressesFromNB = true
+
 	lsp, err = oc.ovnNBClient.LSPGet(portName)
 	if err != nil || lsp == nil {
 		return fmt.Errorf("failed to get the logical switch port: %s from the ovn client, error: %s", portName, err)
