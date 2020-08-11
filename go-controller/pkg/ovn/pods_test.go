@@ -240,8 +240,8 @@ var _ = Describe("OVN Pod Operations", func() {
 						},
 					},
 				)
-				fakeOvn.controller.WatchPods()
 				fakeOvn.controller.WatchNamespaces()
+				fakeOvn.controller.WatchPods()
 
 				pod, err := fakeOvn.fakeClient.CoreV1().Pods(t.namespace).Get(context.TODO(), t.podName, metav1.GetOptions{})
 				Expect(err).NotTo(HaveOccurred())
