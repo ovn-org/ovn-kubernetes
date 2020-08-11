@@ -125,27 +125,22 @@ func (oc *Controller) updateEgressFirewall(oldEgressFirewall, newEgressFirewall 
 func (oc *Controller) deleteEgressFirewall(egressFirewall *egressfirewallapi.EgressFirewall) []error {
 	klog.Infof("Deleting egress Firewall %s in namespace %s", egressFirewall.Name, egressFirewall.Namespace)
 
-	nsInfo, err := oc.waitForNamespaceLocked(egressFirewall.Namespace)
-	if err != nil {
-		return []error{fmt.Errorf("failed to wait for namespace %s event (%v)",
-			egressFirewall.Namespace, err)}
+	nsInfo := oc.getNamespaceLocked(egressFirewall.Namespace)
+	if nsInfo != nil {
+		// clear it so an error does not prevent future egressFirewalls
+		nsInfo.egressFirewallPolicy = nil
+		nsInfo.Unlock()
 	}
-	defer nsInfo.Unlock()
-
-	// copy the egressFirewall object out of nsInfo and clear it so an error does not prevent future egressFirewalls
-	// from admission
-	egressFirewallCopy := nsInfo.egressFirewallPolicy
-	nsInfo.egressFirewallPolicy = nil
 
 	existingNodes, err := oc.kube.GetNodes()
 	if err != nil {
 		return []error{fmt.Errorf("error deleting egressFirewall for namespace %s, cannot get nodes to delete ACLS %v",
-			egressFirewallCopy.namespace, err)}
+			egressFirewall.Namespace, err)}
 	}
 
 	stdout, stderr, err := util.RunOVNNbctl("--data=bare", "--no-heading",
 		"--columns=_uuid", "find", "ACL",
-		fmt.Sprintf("external-ids:egressFirewall=%s", egressFirewallCopy.namespace))
+		fmt.Sprintf("external-ids:egressFirewall=%s", egressFirewall.Namespace))
 	if err != nil {
 		return []error{fmt.Errorf("error executing find ACL command, stderr: %q, %+v", stderr, err)}
 	}
@@ -157,7 +152,7 @@ func (oc *Controller) deleteEgressFirewall(egressFirewall *egressfirewallapi.Egr
 				joinSwitch(node.Name), "acls", uuid)
 			if err != nil {
 				errList = append(errList, fmt.Errorf("failed to delete the rules for "+
-					"egressFirewall in namespace %s on node %s, stderr: %q (%v)", egressFirewallCopy.namespace, node.Name, stderr, err))
+					"egressFirewall in namespace %s on node %s, stderr: %q (%v)", egressFirewall.Namespace, node.Name, stderr, err))
 			}
 		}
 	}
