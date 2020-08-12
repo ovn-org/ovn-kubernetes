@@ -9,6 +9,7 @@ import (
 	"strings"
 	"syscall"
 
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
 	"github.com/vishvananda/netlink"
 	"k8s.io/klog"
 )
@@ -74,19 +75,21 @@ func saveIPAddress(oldLink, newLink netlink.Link, addrs []netlink.Addr) error {
 	for i := range addrs {
 		addr := addrs[i]
 
-		// Remove from oldLink
-		if err := netLinkOps.AddrDel(oldLink, &addr); err != nil {
-			klog.Errorf("Remove addr from %q failed: %v", oldLink.Attrs().Name, err)
-			return err
-		}
+		if addr.IP.IsGlobalUnicast() {
+			// Remove from oldLink
+			if err := netLinkOps.AddrDel(oldLink, &addr); err != nil {
+				klog.Errorf("Remove addr from %q failed: %v", oldLink.Attrs().Name, err)
+				return err
+			}
 
-		// Add to newLink
-		addr.Label = newLink.Attrs().Name
-		if err := netLinkOps.AddrAdd(newLink, &addr); err != nil {
-			klog.Errorf("Add addr to newLink %q failed: %v", addr.Label, err)
-			return err
+			// Add to newLink
+			addr.Label = newLink.Attrs().Name
+			if err := netLinkOps.AddrAdd(newLink, &addr); err != nil {
+				klog.Errorf("Add addr to newLink %q failed: %v", addr.Label, err)
+				return err
+			}
+			klog.Infof("Successfully saved addr %q to newLink %q", addr.String(), addr.Label)
 		}
-		klog.Infof("Successfully saved addr %q to newLink %q", addr.String(), addr.Label)
 	}
 
 	return netLinkOps.LinkSetUp(newLink)
@@ -119,6 +122,8 @@ func saveRoute(oldLink, newLink netlink.Link, routes []netlink.Route) error {
 		// GCE where we have /32 IP addresses and we can't add the default
 		// gateway before the route to the gateway.
 		if route.Dst == nil && route.Gw != nil && route.LinkIndex > 0 {
+			continue
+		} else if route.Dst != nil && !route.Dst.IP.IsGlobalUnicast() {
 			continue
 		}
 
@@ -218,11 +223,16 @@ func NicToBridge(iface string) (string, error) {
 	setupDefaultFile()
 
 	// Get ip addresses and routes before any real operations.
-	addrs, err := netLinkOps.AddrList(ifaceLink, syscall.AF_INET)
+	family := syscall.AF_UNSPEC
+	// FIXME: Should move all interfaces over, but in IPv4 only, breaks.
+	if config.IPv4Mode && !config.IPv6Mode {
+		family = syscall.AF_INET
+	}
+	addrs, err := netLinkOps.AddrList(ifaceLink, family)
 	if err != nil {
 		return "", err
 	}
-	routes, err := netLinkOps.RouteList(ifaceLink, syscall.AF_INET)
+	routes, err := netLinkOps.RouteList(ifaceLink, family)
 	if err != nil {
 		return "", err
 	}
@@ -255,11 +265,16 @@ func BridgeToNic(bridge string) error {
 	}
 
 	// Get ip addresses and routes before any real operations.
-	addrs, err := netLinkOps.AddrList(bridgeLink, syscall.AF_INET)
+	family := syscall.AF_UNSPEC
+	// FIXME: Should move all interfaces over, but in IPv4 only, breaks.
+	if config.IPv4Mode && !config.IPv6Mode {
+		family = syscall.AF_INET
+	}
+	addrs, err := netLinkOps.AddrList(bridgeLink, family)
 	if err != nil {
 		return err
 	}
-	routes, err := netLinkOps.RouteList(bridgeLink, syscall.AF_INET)
+	routes, err := netLinkOps.RouteList(bridgeLink, family)
 	if err != nil {
 		return err
 	}

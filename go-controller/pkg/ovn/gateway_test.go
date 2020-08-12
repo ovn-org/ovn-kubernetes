@@ -126,13 +126,15 @@ node4 chassis=912d592c-904c-40cd-9ef1-c2e5b49a33dd lb_force_snat_ip=100.64.0.4`,
 		err := util.SetExec(fexec)
 		Expect(err).NotTo(HaveOccurred())
 
+		// 0a:58:ee:33:fc:1a generated from util.IPAddrToHWAddr(net.ParseIP("fd98::1")).String()
+		// 0a:58:5f:8a:48:8c generated from util.IPAddrToHWAddr(net.ParseIP("fd98::2")).String()
 		fexec.AddFakeCmdsNoOutputNoError([]string{
 			"ovn-nbctl --timeout=15 -- --may-exist lr-add GR_test-node -- set logical_router GR_test-node options:chassis=SYSTEM-ID external_ids:physical_ip=fd99::2 external_ids:physical_ips=fd99::2",
 			"ovn-nbctl --timeout=15 -- --may-exist ls-add join_test-node",
 			"ovn-nbctl --timeout=15 -- --may-exist lsp-add join_test-node jtor-GR_test-node -- set logical_switch_port jtor-GR_test-node type=router options:router-port=rtoj-GR_test-node addresses=router",
-			"ovn-nbctl --timeout=15 -- --if-exists lrp-del rtoj-GR_test-node -- lrp-add GR_test-node rtoj-GR_test-node 0a:58:fd:98:00:01 fd98::1/125",
+			"ovn-nbctl --timeout=15 -- --if-exists lrp-del rtoj-GR_test-node -- lrp-add GR_test-node rtoj-GR_test-node 0a:58:ee:33:fc:1a fd98::1/125",
 			"ovn-nbctl --timeout=15 -- --may-exist lsp-add join_test-node jtod-test-node -- set logical_switch_port jtod-test-node type=router options:router-port=dtoj-test-node addresses=router",
-			"ovn-nbctl --timeout=15 -- --if-exists lrp-del dtoj-test-node -- lrp-add ovn_cluster_router dtoj-test-node 0a:58:fd:98:00:02 fd98::2/125",
+			"ovn-nbctl --timeout=15 -- --if-exists lrp-del dtoj-test-node -- lrp-add ovn_cluster_router dtoj-test-node 0a:58:5f:8a:48:8c fd98::2/125",
 			"ovn-nbctl --timeout=15 set logical_router GR_test-node options:lb_force_snat_ip=fd98::1",
 			"ovn-nbctl --timeout=15 --may-exist lr-route-add GR_test-node fd01::/48 fd98::2",
 		})

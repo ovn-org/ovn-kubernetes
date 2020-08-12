@@ -1,6 +1,7 @@
 package util
 
 import (
+	"crypto/sha256"
 	"encoding/binary"
 	"fmt"
 	"math/big"
@@ -162,8 +163,7 @@ func JoinHostPortInt32(host string, port int32) string {
 }
 
 // IPAddrToHWAddr takes the four octets of IPv4 address (aa.bb.cc.dd, for example) and uses them in creating
-// a MAC address (0A:58:AA:BB:CC:DD).  For IPv6, we'll use the first two bytes and last two bytes and hope
-// that results in a unique MAC for the scope of where it's used.
+// a MAC address (0A:58:AA:BB:CC:DD).  For IPv6, create a hash from the IPv6 string and use that for MAC Address.
 // Assumption: the caller will ensure that an empty net.IP{} will NOT be passed.
 func IPAddrToHWAddr(ip net.IP) net.HardwareAddr {
 	// Ensure that for IPv4, we are always working with the IP in 4-byte form.
@@ -173,8 +173,8 @@ func IPAddrToHWAddr(ip net.IP) net.HardwareAddr {
 		return net.HardwareAddr{0x0A, 0x58, ip4[0], ip4[1], ip4[2], ip4[3]}
 	}
 
-	// IPv6 - use the first two and last two bytes.
-	return net.HardwareAddr{0x0A, 0x58, ip[0], ip[1], ip[14], ip[15]}
+	hash := sha256.Sum256([]byte(ip.String()))
+	return net.HardwareAddr{0x0A, 0x58, hash[0], hash[1], hash[2], hash[3]}
 }
 
 // JoinIPs joins the string forms of an array of net.IP, as with strings.Join

@@ -119,9 +119,11 @@ type Controller struct {
 	egressFirewallHandler *factory.Handler
 	stopChan              <-chan struct{}
 
-	masterSubnetAllocator   *subnetallocator.SubnetAllocator
-	joinSubnetAllocator     *subnetallocator.SubnetAllocator
-	nodeLocalNatIPAllocator *ipallocator.Range
+	// FIXME DUAL-STACK -  Make IP Allocators more dual-stack friendly
+	masterSubnetAllocator     *subnetallocator.SubnetAllocator
+	joinSubnetAllocator       *subnetallocator.SubnetAllocator
+	nodeLocalNatIPv4Allocator *ipallocator.Range
+	nodeLocalNatIPv6Allocator *ipallocator.Range
 
 	hoMaster *hocontroller.MasterController
 
@@ -258,7 +260,8 @@ func NewOvnController(kubeClient kubernetes.Interface, egressIPClient egressipap
 		watchFactory:                  wf,
 		stopChan:                      stopChan,
 		masterSubnetAllocator:         subnetallocator.NewSubnetAllocator(),
-		nodeLocalNatIPAllocator:       &ipallocator.Range{},
+		nodeLocalNatIPv4Allocator:     &ipallocator.Range{},
+		nodeLocalNatIPv6Allocator:     &ipallocator.Range{},
 		lsManager:                     newLogicalSwitchManager(),
 		joinSubnetAllocator:           subnetallocator.NewSubnetAllocator(),
 		logicalPortCache:              newPortCache(stopChan),

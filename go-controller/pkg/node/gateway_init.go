@@ -71,8 +71,8 @@ func bridgedGatewayNodeSetup(nodeName, bridgeName, bridgeInterface, physicalNetw
 	return ifaceID, macAddress, nil
 }
 
-// getIPv4Address returns the ipv4 address for the network interface 'iface'.
-func getIPv4Address(iface string) (*net.IPNet, error) {
+// getNetworkInterfaceIPAddresses returns the IP addresses for the network interface 'iface'.
+func getNetworkInterfaceIPAddresses(iface string) ([]*net.IPNet, error) {
 	intf, err := net.InterfaceByName(iface)
 	if err != nil {
 		return nil, err
@@ -82,15 +82,84 @@ func getIPv4Address(iface string) (*net.IPNet, error) {
 	if err != nil {
 		return nil, err
 	}
+	var ips []*net.IPNet
+	var foundIPv4 bool
+	var foundIPv6 bool
 	for _, addr := range addrs {
 		switch ip := addr.(type) {
 		case *net.IPNet:
-			if !utilnet.IsIPv6CIDR(ip) {
-				return ip, nil
+			if utilnet.IsIPv6CIDR(ip) {
+				if config.IPv6Mode && !foundIPv6 {
+					ips = append(ips, ip)
+					foundIPv6 = true
+				}
+			} else if config.IPv4Mode && !foundIPv4 {
+				ips = append(ips, ip)
+				foundIPv4 = true
 			}
 		}
 	}
-	return nil, nil
+	if config.IPv4Mode && !foundIPv4 {
+		return nil, fmt.Errorf("failed to find IPv4 address on interface %s", iface)
+	} else if config.IPv6Mode && !foundIPv6 {
+		return nil, fmt.Errorf("failed to find IPv6 address on interface %s", iface)
+	}
+	return ips, nil
+}
+
+func getGatewayNextHops() ([]net.IP, string, error) {
+	var gatewayNextHops []net.IP
+	var needIPv4NextHop bool
+	var needIPv6NextHop bool
+
+	if config.IPv4Mode {
+		needIPv4NextHop = true
+	}
+	if config.IPv6Mode {
+		needIPv6NextHop = true
+	}
+
+	// FIXME DUAL-STACK: config.Gateway.NextHop should be a slice of nexthops
+	if config.Gateway.NextHop != "" {
+		// Parse NextHop to make sure it is valid before using. Return error if not valid.
+		nextHop := net.ParseIP(config.Gateway.NextHop)
+		if nextHop == nil {
+			return nil, "", fmt.Errorf("failed to parse configured next-hop: %s", config.Gateway.NextHop)
+		}
+		if config.IPv4Mode && !utilnet.IsIPv6(nextHop) {
+			gatewayNextHops = append(gatewayNextHops, nextHop)
+			needIPv4NextHop = false
+		}
+		if config.IPv6Mode && utilnet.IsIPv6(nextHop) {
+			gatewayNextHops = append(gatewayNextHops, nextHop)
+			needIPv6NextHop = false
+		}
+	}
+	gatewayIntf := config.Gateway.Interface
+	if needIPv4NextHop || needIPv6NextHop || gatewayIntf == "" {
+		defaultGatewayIntf, defaultGatewayNextHops, err := getDefaultGatewayInterfaceDetails()
+		if err != nil {
+			return nil, "", err
+		}
+		if needIPv4NextHop || needIPv6NextHop {
+			for _, defaultGatewayNextHop := range defaultGatewayNextHops {
+				if needIPv4NextHop && !utilnet.IsIPv6(defaultGatewayNextHop) {
+					gatewayNextHops = append(gatewayNextHops, defaultGatewayNextHop)
+					needIPv4NextHop = false
+				} else if needIPv6NextHop && utilnet.IsIPv6(defaultGatewayNextHop) {
+					gatewayNextHops = append(gatewayNextHops, defaultGatewayNextHop)
+					needIPv6NextHop = false
+				}
+			}
+			if needIPv4NextHop || needIPv6NextHop {
+				return nil, "", fmt.Errorf("failed to get next-hop: IPv4=%v IPv6=%v", needIPv4NextHop, needIPv6NextHop)
+			}
+		}
+		if gatewayIntf == "" {
+			gatewayIntf = defaultGatewayIntf
+		}
+	}
+	return gatewayNextHops, gatewayIntf, nil
 }
 
 func (n *OvnNode) initGateway(subnets []*net.IPNet, nodeAnnotator kube.Annotator,
@@ -101,19 +170,9 @@ func (n *OvnNode) initGateway(subnets []*net.IPNet, nodeAnnotator kube.Annotator
 		initPortClaimWatcher(n.recorder, n.watchFactory)
 	}
 
-	gatewayNextHop := net.ParseIP(config.Gateway.NextHop)
-	gatewayIntf := config.Gateway.Interface
-	if gatewayNextHop == nil || gatewayIntf == "" {
-		defaultGatewayIntf, defaultGatewayNextHop, err := getDefaultGatewayInterfaceDetails()
-		if err != nil {
-			return err
-		}
-		if gatewayNextHop == nil {
-			gatewayNextHop = defaultGatewayNextHop
-		}
-		if gatewayIntf == "" {
-			gatewayIntf = defaultGatewayIntf
-		}
+	gatewayNextHops, gatewayIntf, err := getGatewayNextHops()
+	if err != nil {
+		return err
 	}
 
 	v4IfAddr, v6IfAddr, err := getDefaultIfAddr(gatewayIntf)
@@ -128,7 +187,7 @@ func (n *OvnNode) initGateway(subnets []*net.IPNet, nodeAnnotator kube.Annotator
 	case config.GatewayModeLocal:
 		err = n.initLocalnetGateway(subnets, nodeAnnotator, gatewayIntf)
 	case config.GatewayModeShared:
-		prFn, err = n.initSharedGateway(subnets, gatewayNextHop, gatewayIntf, nodeAnnotator)
+		prFn, err = n.initSharedGateway(subnets, gatewayNextHops, gatewayIntf, nodeAnnotator)
 	case config.GatewayModeDisabled:
 		err = util.SetL3GatewayConfig(nodeAnnotator, &util.L3GatewayConfig{
 			Mode: config.GatewayModeDisabled,

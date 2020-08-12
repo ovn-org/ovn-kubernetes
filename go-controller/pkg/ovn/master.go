@@ -136,20 +136,24 @@ func (oc *Controller) StartClusterMaster(masterNodeName string) error {
 		// switches currently only have 2 IPs on them, so this leaves some room for expansion.)
 		_, joinSubnetCIDR, _ := net.ParseCIDR(config.V4JoinSubnet)
 		_ = oc.joinSubnetAllocator.AddNetworkRange(joinSubnetCIDR, 29)
+		// initialize the subnet required for DNAT and SNAT ip for the shared gateway mode
+		_, nodeLocalNatSubnetCIDR, _ := net.ParseCIDR(util.V4NodeLocalNatSubnet)
+		oc.nodeLocalNatIPv4Allocator, _ = ipallocator.NewCIDRRange(nodeLocalNatSubnetCIDR)
+		// set aside the first two IPs for the nextHop on the host and for distributed gateway port
+		_ = oc.nodeLocalNatIPv4Allocator.Allocate(net.ParseIP(util.V4NodeLocalNatSubnetNextHop))
+		_ = oc.nodeLocalNatIPv4Allocator.Allocate(net.ParseIP(util.V4NodeLocalDistributedGwPortIP))
 	}
 	if config.IPv6Mode {
 		// Use fd98::/48 with /64 subnets
 		_, joinSubnetCIDR, _ := net.ParseCIDR(config.V6JoinSubnet)
 		_ = oc.joinSubnetAllocator.AddNetworkRange(joinSubnetCIDR, 64)
+		// initialize the subnet required for DNAT and SNAT ip for the shared gateway mode
+		_, nodeLocalNatSubnetCIDR, _ := net.ParseCIDR(util.V6NodeLocalNatSubnet)
+		oc.nodeLocalNatIPv6Allocator, _ = ipallocator.NewCIDRRange(nodeLocalNatSubnetCIDR)
+		// set aside the first two IPs for the nextHop on the host and for distributed gateway port
+		_ = oc.nodeLocalNatIPv6Allocator.Allocate(net.ParseIP(util.V6NodeLocalNatSubnetNextHop))
+		_ = oc.nodeLocalNatIPv6Allocator.Allocate(net.ParseIP(util.V6NodeLocalDistributedGwPortIP))
 	}
-
-	// FIXME DUAL-STACK SUPPORT
-	// initialize the subnet required for DNAT and SNAT ip for the shared gateway mode
-	_, nodeLocalNatSubnetCIDR, _ := net.ParseCIDR(util.V4NodeLocalNatSubnet)
-	oc.nodeLocalNatIPAllocator, _ = ipallocator.NewCIDRRange(nodeLocalNatSubnetCIDR)
-	// set aside the first two IPs for the nextHop on the host and for distributed gateway port
-	_ = oc.nodeLocalNatIPAllocator.Allocate(net.ParseIP(util.V4NodeLocalNatSubnetNextHop))
-	_ = oc.nodeLocalNatIPAllocator.Allocate(net.ParseIP(util.V4NodeLocalDistributedGwPortIP))
 
 	existingNodes, err := oc.kube.GetNodes()
 	if err != nil {
@@ -179,7 +183,12 @@ func (oc *Controller) StartClusterMaster(masterNodeName string) error {
 		}
 		nodeLocalNatIPs, _ := util.ParseNodeLocalNatIPAnnotation(&node)
 		for _, nodeLocalNatIP := range nodeLocalNatIPs {
-			err := oc.nodeLocalNatIPAllocator.Allocate(nodeLocalNatIP)
+			var err error
+			if utilnet.IsIPv6(nodeLocalNatIP) {
+				err = oc.nodeLocalNatIPv6Allocator.Allocate(nodeLocalNatIP)
+			} else {
+				err = oc.nodeLocalNatIPv4Allocator.Allocate(nodeLocalNatIP)
+			}
 			if err != nil {
 				utilruntime.HandleError(err)
 			}
@@ -449,14 +458,19 @@ func (oc *Controller) syncGatewayLogicalNetwork(node *kapi.Node, l3GatewayConfig
 		if err != nil {
 			return err
 		}
-		mpIP := util.GetNodeManagementIfAddr(subnets[0]).IP.String()
+		for _, subnet := range subnets {
+			hostIfAddr := util.GetNodeManagementIfAddr(subnet)
+			l3GatewayConfigIP, err := util.MatchIPFamily(utilnet.IsIPv6(hostIfAddr.IP), l3GatewayConfig.IPAddresses)
+			if err != nil {
+				return err
+			}
+			if err := addPolicyBasedRoutes(node.Name, hostIfAddr.IP.String(), l3GatewayConfigIP); err != nil {
+				return err
+			}
 
-		if err := addPolicyBasedRoutes(node.Name, mpIP, l3GatewayConfig.IPAddresses); err != nil {
-			return err
-		}
-
-		if err := oc.addNodeLocalNatEntries(node, mpMAC.String(), mpIP); err != nil {
-			return err
+			if err := oc.addNodeLocalNatEntries(node, mpMAC.String(), hostIfAddr); err != nil {
+				return err
+			}
 		}
 	}
 
@@ -750,9 +764,15 @@ func (oc *Controller) deleteNode(nodeName string, hostSubnets, joinSubnets []*ne
 			klog.Errorf("Error deleting node %s JoinSubnet %v: %v", nodeName, joinSubnet, err)
 		}
 	}
-	if len(nodeLocalNatIPs) > 0 {
-		if err := oc.nodeLocalNatIPAllocator.Release(nodeLocalNatIPs[0]); err != nil {
-			klog.Errorf("Error deleting node %s's node local NAT IP %v: %v", nodeName, nodeLocalNatIPs, err)
+	for _, nodeLocalNatIP := range nodeLocalNatIPs {
+		var err error
+		if utilnet.IsIPv6(nodeLocalNatIP) {
+			err = oc.nodeLocalNatIPv6Allocator.Release(nodeLocalNatIP)
+		} else {
+			err = oc.nodeLocalNatIPv4Allocator.Release(nodeLocalNatIP)
+		}
+		if err != nil {
+			klog.Errorf("Error deleting node %s's node local NAT IP %s from %v: %v", nodeName, nodeLocalNatIP, nodeLocalNatIPs, err)
 		}
 	}
 

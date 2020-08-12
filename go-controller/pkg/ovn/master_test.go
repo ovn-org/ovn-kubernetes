@@ -1095,7 +1095,7 @@ var _ = Describe("Gateway Init Operations", func() {
 			clusterController.SCTPSupport = true
 
 			_ = clusterController.joinSubnetAllocator.AddNetworkRange(ovntest.MustParseIPNet("100.64.0.0/16"), 29)
-			clusterController.nodeLocalNatIPAllocator, _ = ipallocator.NewCIDRRange(ovntest.MustParseIPNet(util.V4NodeLocalNatSubnet))
+			clusterController.nodeLocalNatIPv4Allocator, _ = ipallocator.NewCIDRRange(ovntest.MustParseIPNet(util.V4NodeLocalNatSubnet))
 
 			// Let the real code run and ensure OVN database sync
 			clusterController.WatchNodes()

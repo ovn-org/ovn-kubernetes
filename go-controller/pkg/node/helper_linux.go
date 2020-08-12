@@ -7,6 +7,7 @@ import (
 	"net"
 	"syscall"
 
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
 	"github.com/vishvananda/netlink"
 	kapi "k8s.io/api/core/v1"
@@ -15,27 +16,49 @@ import (
 
 // getDefaultGatewayInterfaceDetails returns the interface name on
 // which the default gateway (for route to 0.0.0.0) is configured.
-// It also returns the default gateway itself.
-func getDefaultGatewayInterfaceDetails() (string, net.IP, error) {
-	routes, err := netlink.RouteList(nil, syscall.AF_INET)
+// It also returns the default gateways themselves.
+func getDefaultGatewayInterfaceDetails() (string, []net.IP, error) {
+	var intfName string
+	var gatewayIPs []net.IP
+
+	needIPv4 := config.IPv4Mode
+	needIPv6 := config.IPv6Mode
+	routes, err := netlink.RouteList(nil, syscall.AF_UNSPEC)
 	if err != nil {
 		return "", nil, fmt.Errorf("failed to get routing table in node")
 	}
 
-	for i := range routes {
-		route := routes[i]
+	for _, route := range routes {
 		if route.Dst == nil && route.Gw != nil && route.LinkIndex > 0 {
 			intfLink, err := netlink.LinkByIndex(route.LinkIndex)
 			if err != nil {
 				continue
 			}
-			intfName := intfLink.Attrs().Name
-			if intfName != "" {
-				return intfName, route.Gw, nil
+			if utilnet.IsIPv6(route.Gw) {
+				if !needIPv6 {
+					continue
+				}
+				needIPv6 = false
+			} else {
+				if !needIPv4 {
+					continue
+				}
+				needIPv4 = false
 			}
+
+			if intfName == "" {
+				intfName = intfLink.Attrs().Name
+			} else if intfName != intfLink.Attrs().Name {
+				return "", nil, fmt.Errorf("multiple gateway interfaces detected: %s %s", intfName, intfLink.Attrs().Name)
+			}
+			gatewayIPs = append(gatewayIPs, route.Gw)
 		}
 	}
-	return "", nil, fmt.Errorf("failed to get default gateway interface")
+
+	if len(gatewayIPs) == 0 {
+		return "", nil, fmt.Errorf("failed to get default gateway interface")
+	}
+	return intfName, gatewayIPs, nil
 }
 
 func getDefaultIfAddr(defaultGatewayIntf string) (*net.IPNet, *net.IPNet, error) {
@@ -50,10 +73,12 @@ func getDefaultIfAddr(defaultGatewayIntf string) (*net.IPNet, *net.IPNet, error)
 	}
 	for _, addr := range addrs {
 		if addr.Label != getEgressLabel(defaultGatewayIntf) {
-			if utilnet.IsIPv6(addr.IP) {
-				v6IfAddr = addr.IPNet
-			} else {
-				v4IfAddr = addr.IPNet
+			if addr.IP.IsGlobalUnicast() {
+				if utilnet.IsIPv6(addr.IP) {
+					v6IfAddr = addr.IPNet
+				} else {
+					v4IfAddr = addr.IPNet
+				}
 			}
 		}
 	}
