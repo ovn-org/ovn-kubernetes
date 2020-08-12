@@ -165,41 +165,115 @@ func (oc *Controller) updateEgressFirewallWithRetry(egressfirewall *egressfirewa
 
 func (ef *egressFirewall) addLogicalRouterPolicyToClusterRouter(hashedAddressSetNameIPv4, hashedAddressSetNameIPv6 string, efStartPriority int) error {
 	for _, rule := range ef.egressRules {
-		var match string
 		var action string
+		var matchTargets []matchTarget
 		if rule.access == egressfirewallapi.EgressFirewallRuleAllow {
 			action = "allow"
 		} else {
 			action = "drop"
 		}
-		if !utilnet.IsIPv6CIDRString(rule.to.cidrSelector) {
-			match = fmt.Sprintf("match=\"ip4.dst == %s && ip4.src == $%s", rule.to.cidrSelector, hashedAddressSetNameIPv4)
+		if utilnet.IsIPv6CIDRString(rule.to.cidrSelector) {
+			matchTargets = []matchTarget{{matchKindV6CIDR, rule.to.cidrSelector}}
 		} else {
-			match = fmt.Sprintf("match=\"ip6.dst == %s && ip6.src == $%s", rule.to.cidrSelector, hashedAddressSetNameIPv6)
+			matchTargets = []matchTarget{{matchKindV4CIDR, rule.to.cidrSelector}}
 		}
-
-		if len(rule.ports) > 0 {
-			match = fmt.Sprintf("%s && ( %s )", match, egressGetL4Match(rule.ports))
-		}
-
-		match = fmt.Sprintf("%s && %s\"", match, getClusterSubnetsExclusion())
-
-		_, stderr, err := util.RunOVNNbctl("--id=@logical_router_policy", "create", "logical_router_policy",
-			fmt.Sprintf("priority=%d", efStartPriority-rule.id),
-			match, "action="+action, fmt.Sprintf("external-ids:egressFirewall=%s", ef.namespace),
-			"--", "add", "logical_router", types.OVNClusterRouter, "policies", "@logical_router_policy")
+		match := generateMatch(hashedAddressSetNameIPv4, hashedAddressSetNameIPv6, matchTargets, rule.ports)
+		err := createLogicalRouterPolicy(efStartPriority-rule.id, match, action, ef.namespace)
 		if err != nil {
-			// TODO: lr-policy-add doesn't support --may-exist, resort to this workaround for now.
-			// Have raised an issue against ovn repository (https://github.com/ovn-org/ovn/issues/49)
-			if !strings.Contains(stderr, "already existed") {
-				return fmt.Errorf("failed to add policy route '%s' to %s "+
-					"stderr: %s, error: %v", match, types.OVNClusterRouter, stderr, err)
-			}
+			return err
 		}
 	}
 	return nil
 }
 
+// createLogicalRouterPolicy uses the previously generated elements and creates the logical_router_policy
+// for a specific egressFirewallRouter
+func createLogicalRouterPolicy(priority int, match, action, namespace string) error {
+	_, stderr, err := util.RunOVNNbctl("--id=@logical_router_policy", "create", "logical_router_policy",
+		fmt.Sprintf("priority=%d", priority),
+		match, "action="+action, fmt.Sprintf("external-ids:egressFirewall=%s", namespace),
+		"--", "add", "logical_router", types.OVNClusterRouter, "policies", "@logical_router_policy")
+	if err != nil {
+		// TODO: lr-policy-add doesn't support --may-exist, resort to this workaround for now.
+		// Have raised an issue against ovn repository (https://github.com/ovn-org/ovn/issues/49)
+		if !strings.Contains(stderr, "already existed") {
+			return fmt.Errorf("failed to add policy route '%s' to %s "+
+				"stderr: %s, error: %v", match, types.OVNClusterRouter, stderr, err)
+		}
+	}
+	return nil
+}
+
+type matchTarget struct {
+	kind  matchKind
+	value string
+}
+
+type matchKind int
+
+const (
+	matchKindV4CIDR matchKind = iota
+	matchKindV6CIDR
+	matchKindV4AddressSet
+	matchKindV6AddressSet
+)
+
+func (m *matchTarget) toExpr() string {
+	switch m.kind {
+	case matchKindV4CIDR:
+		return fmt.Sprintf("ip4.dst == %s", m.value)
+	case matchKindV6CIDR:
+		return fmt.Sprintf("ip6.dst == %s", m.value)
+	case matchKindV4AddressSet:
+		if m.value != "" {
+			return fmt.Sprintf("ip4.dst == $%s", m.value)
+		}
+		return ""
+	case matchKindV6AddressSet:
+		if m.value != "" {
+			return fmt.Sprintf("ip6.dst == $%s", m.value)
+		}
+		return ""
+	}
+	panic("invalid matchKind")
+}
+
+// generateMatch generates the "match" section of ACL generation for egressFirewallRules.
+// It is referentially transparent as all the elements have been validated before this function is called
+// sample output:
+// match=\"(ip4.dst == 1.2.3.4/32) && ip4.src == $testv4 && ip4.dst != 10.128.0.0/14\
+func generateMatch(ipv4Source, ipv6Source string, destinations []matchTarget, dstPorts []egressfirewallapi.EgressFirewallPort) string {
+	var src string
+	var dst string
+	switch {
+	case len(ipv4Source) > 0 && len(ipv6Source) > 0:
+		src = fmt.Sprintf("(ip4.src == $%s || ip6.src == $%s)", ipv4Source, ipv6Source)
+	case len(ipv4Source) > 0:
+		src = fmt.Sprintf("ip4.src == $%s", ipv4Source)
+	case len(ipv6Source) > 0:
+		src = fmt.Sprintf("ip6.src == $%s", ipv6Source)
+	}
+
+	for _, entry := range destinations {
+		if entry.value == "" {
+			continue
+		}
+		dst = strings.Join([]string{dst, entry.toExpr()}, " || ")
+	}
+
+	// remove the first 4 characters from dst because I always append " || " and the first entry does not need it
+	match := fmt.Sprintf("match=\"(%s) && %s", dst[4:], src)
+	if len(dstPorts) > 0 {
+		match = fmt.Sprintf("%s && %s", match, egressGetL4Match(dstPorts))
+	}
+
+	return fmt.Sprintf("%s && %s\"", match, getClusterSubnetsExclusion())
+}
+
+// egressGetL4Match generates the rules for when ports are specified in an egressFirewall Rule
+// since the ports can be specified in any order in an egressFirewallRule the best way to build up
+// a single rule is to build up each protocol as you walk through the list and place the appropriate logic
+// between the elements.
 func egressGetL4Match(ports []egressfirewallapi.EgressFirewallPort) string {
 	var udpString string
 	var tcpString string
@@ -260,7 +334,7 @@ func egressGetL4Match(ports []egressfirewallapi.EgressFirewallPort) string {
 			}
 		}
 	}
-	return l4Match
+	return fmt.Sprintf("(%s)", l4Match)
 }
 
 func getClusterSubnetsExclusion() string {
