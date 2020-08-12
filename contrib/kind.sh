@@ -88,6 +88,8 @@ parse_args()
                                                 ;;
             -i6 | --ipv6 )                      KIND_IPV6_SUPPORT=true
                                                 ;;
+            -ie | --ipsec-enabled )             OVN_IPSEC_ENABLE=true
+                                                ;;
             -wk | --num-workers )               shift
                                                 if ! [[ "$1" =~ ^[0-9]+$ ]]; then
                                                     echo "Invalid num-workers: $1"
@@ -139,6 +141,7 @@ print_params()
      echo "OVN_DISABLE_SNAT_MULTIPLE_GWS = $OVN_DISABLE_SNAT_MULTIPLE_GWS"
      echo "OVN_MULTICAST_ENABLE = $OVN_MULTICAST_ENABLE"
      echo "OVN_IMAGE = $OVN_IMAGE"
+     echo "OVN_IPSEC_ENABLE = $OVN_IPSEC_ENABLE"
      echo ""
 }
 
@@ -164,6 +167,7 @@ OVN_DISABLE_SNAT_MULTIPLE_GWS=${OVN_DISABLE_SNAT_MULTIPLE_GWS:-false}
 OVN_MULTICAST_ENABLE=${OVN_MULTICAST_ENABLE:-false}
 KIND_ALLOW_SYSTEM_WRITES=${KIND_ALLOW_SYSTEM_WRITES:-false}
 OVN_IMAGE=${OVN_IMAGE:-local}
+OVN_IPSEC_ENABLE=${OVN_IPSEC_ENABLE:-false}
 
 # Input not currently validated. Modify outside script at your own risk.
 # These are the same values defaulted to in KIND code (kind/default.go).
@@ -263,6 +267,86 @@ else
   exit 1
 fi
 
+# Inspired by:
+# https://github.com/openvswitch/ovs/blob/master/utilities/ovs-pki.in
+
+# Create a CA for ovn kubernetes
+ipsec_ca_init() {
+  pushd ipsec
+
+  # If we are generating the CA we should remove all previously generated (and
+  # signed) certs and keys.
+  rm -rf certs/*
+  rm -rf kindca/*
+
+  # Generate CA cert and keys
+  mkdir -p kindca/certs kindca/crl kindca/newcerts
+  mkdir -p -m 0700 kindca/private
+  touch kindca/index.txt
+  test -e kindca/crlnumber || echo 01 > kindca/crlnumber
+  test -e kindca/serial || echo 01 > kindca/serial
+
+  openssl req -config ipsec-ca.cnf -nodes \
+  -newkey rsa:2048 -keyout kindca/private/cakey.pem -out kindca/careq.pem
+
+  openssl ca -config ipsec-ca.cnf -create_serial \
+              -extensions ca_cert -out kindca/cacert.pem \
+              -days 3650 -batch -keyfile kindca/private/cakey.pem -selfsign \
+              -infiles kindca/careq.pem
+  chmod 0700 kindca/private/cakey.pem
+
+  popd
+}
+
+# Generate host certificates and sign with CA
+ipsec_cert_gen() {
+  pushd ipsec
+
+  name=${1}
+  mkdir -p certs/${name}
+
+  # We need to generate a unique CN that can be generated repeatedly as this
+  # will also be the OVS system-id on each host
+  cn=`uuidgen --namespace @dns --name ${name} -s`
+  umask 077 && openssl genrsa -out "certs/${name}/${name}-privkey.pem" 2048
+  openssl req -new -text \
+          -extensions v3_req \
+          -addext "subjectAltName = DNS:${cn}" \
+          -subj "/C=US/O=ovnkubernetes/OU=kind/CN=$cn" \
+          -key "certs/${name}/${name}-privkey.pem" \
+          -out "certs/${name}/${name}-req.pem"
+
+  # Sign certificate
+  openssl ca -config ipsec-ca.cnf -extensions usr_cert -batch -in \
+          certs/${name}/${name}-req.pem > certs/${name}/${name}-cert.pem
+
+  # Each host should have a copy of the CA certificate in order to validate
+  # other hosts' certificates.
+  cp kindca/cacert.pem certs/${name}/
+
+  popd
+}
+
+if [ "$OVN_IPSEC_ENABLE" == true ]; then
+  ipsec_ca_init
+
+  # Generate and sign certs for control plane node
+  ipsec_cert_gen ovn-control-plane
+
+  # Generate and sign certs for worker nodes
+  # TODO - Need to test with $KIND_NUM_MASTER
+  for i in `seq 1 $((KIND_NUM_WORKER + KIND_NUM_MASTER))`
+  do
+    # kind has an awkward naming convention for workers: ovn-worker, ovn-worker2,
+    # etc. We need to handle the first worker seperately
+    if [ "${i}" == "1" ]; then
+      ipsec_cert_gen ovn-worker
+    else
+      ipsec_cert_gen ovn-worker${i}
+    fi
+  done
+fi
+
 # Output of the j2 command
 KIND_CONFIG_LCL=./kind.yaml
 
@@ -344,6 +428,7 @@ pushd ../dist/images
   --hybrid-enabled=${OVN_HYBRID_OVERLAY_ENABLE} \
   --disable-snat-multiple-gws=${OVN_DISABLE_SNAT_MULTIPLE_GWS} \
   --multicast-enabled=${OVN_MULTICAST_ENABLE} \
+  --ipsec-enabled=${OVN_IPSEC_ENABLE} \
   --k8s-apiserver=${API_URL} \
   --ovn-master-count=${KIND_NUM_MASTER} \
   --kind \
@@ -378,6 +463,11 @@ fi
 run_kubectl apply -f ovs-node.yaml
 run_kubectl apply -f ovnkube-master.yaml
 run_kubectl apply -f ovnkube-node.yaml
+
+if [ "$OVN_IPSEC_ENABLE" == true ]; then
+  run_kubectl apply -f ovn-ipsec.yaml
+fi
+
 popd
 
 # Delete kube-proxy

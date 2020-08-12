@@ -45,6 +45,10 @@ kubeadmConfigPatches:
       "v": "{{ cluster_log_level }}"
 nodes:
  - role: control-plane
+   extraMounts:
+   - containerPath: /ipsec-certs
+     hostPath: ./ipsec/certs
+     readOnly: true
    kubeadmConfigPatches:
    - |
      kind: InitConfiguration
@@ -55,8 +59,16 @@ nodes:
 {%- if ovn_ha is equalto "true" %}
 {%- for _ in range(1, ovn_num_master | int) %}
  - role: worker
+   extraMounts:
+   - containerPath: /ipsec_certs
+     hostPath: ./ipsec/certs
+     readOnly: true
 {%- endfor %}
 {%- endif %}
 {%- for _ in range(ovn_num_worker | int) %}
  - role: worker
+   extraMounts:
+   - containerPath: /ipsec-certs
+     hostPath: ./ipsec/certs
+     readOnly: true
 {%- endfor %}

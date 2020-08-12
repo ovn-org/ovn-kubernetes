@@ -6,8 +6,9 @@ if [[ "${OVNKUBE_SH_VERBOSE:-}" == "true" ]]; then
   set -x
 fi
 
-# source the functions in ovndb-raft-functions.sh
+# source helper functions
 . /root/ovndb-raft-functions.sh
+. /root/ovn-ipsec-functions.sh
 
 # This script is the entrypoint to the image.
 # Supports version 3 daemonsets
@@ -65,6 +66,7 @@ fi
 # OVN_NB_RAFT_ELECTION_TIMER - ovn north db election timer in ms (default 1000)
 # OVN_SB_RAFT_ELECTION_TIMER - ovn south db election timer in ms (default 1000)
 # OVN_SSL_ENABLE - use SSL transport to NB/SB db and northd (default: no)
+# OVN_IPSEC_ENABLE - Enable IPsec encryption of pod traffic (default: no)
 # OVN_REMOTE_PROBE_INTERVAL - ovn remote probe interval in ms (default 100000)
 # OVN_EGRESSIP_ENABLE - enable egress IP for ovn-kubernetes
 # OVN_UNPRIVILEGED_MODE - execute CNI ovs/netns commands from host (default no)
@@ -125,6 +127,10 @@ ovn_northd_cert=/ovn-cert/ovnnorthd-cert.pem
 ovn_controller_pk=/ovn-cert/ovncontroller-privkey.pem
 ovn_controller_cert=/ovn-cert/ovncontroller-cert.pem
 ovn_controller_cname="ovncontroller"
+
+# The ovs_system_id is generated using the hostname of the node in order to
+# have a deterministic system_id.
+ovs_system_id=$(uuidgen --namespace @dns --name `hostname` -s)
 
 transport="tcp"
 ovndb_ctl_ssl_opts=""
@@ -561,7 +567,7 @@ ovs-server() {
   fi
 
   /usr/share/openvswitch/scripts/ovs-ctl start --no-ovs-vswitchd \
-    --system-id=random ${ovs_options} ${USER_ARGS} "$@"
+    --system-id=${ovs_system_id} ${ovs_options} ${USER_ARGS} "$@"
 
   # Restrict the number of pthreads ovs-vswitchd creates to reduce the
   # amount of RSS it uses on hosts with many cores
@@ -572,11 +578,16 @@ ovs-server() {
     ovs-vsctl --no-wait set Open_vSwitch . other_config:n-handler-threads=10
   fi
   /usr/share/openvswitch/scripts/ovs-ctl start --no-ovsdb-server \
-    --system-id=random ${ovs_options} ${USER_ARGS} "$@"
+    --system-id=${ovs_system_id} ${ovs_options} ${USER_ARGS} "$@"
 
   tail --follow=name ${OVS_LOGDIR}/ovs-vswitchd.log ${OVS_LOGDIR}/ovsdb-server.log &
   ovs_tail_pid=$!
   sleep 10
+
+  ovs-vsctl set Open_vSwitch .  other_config:certificate=/etc/keys/$(hostname)/$(hostname)-cert.pem \
+                                other_config:private_key=/etc/keys/$(hostname)/$(hostname)-privkey.pem \
+                                other_config:ca_cert=/etc/keys/$(hostname)/cacert.pem
+
   while true; do
     if ! /usr/share/openvswitch/scripts/ovs-ctl status >/dev/null; then
       echo "OVS seems to have crashed, exiting"
@@ -1112,6 +1123,8 @@ display_version
 # ovn-controller - all nodes (v3)
 # ovn-node       - all nodes (v3)
 # cleanup-ovn-node - all nodes (v3)
+# ovn-ipsec         - all nodes (v3)
+# cleanup-ovn-ipsec - all nodes (v3)
 
 case ${cmd} in
 "nb-ovsdb") # pod ovnkube-db container nb-ovsdb
@@ -1171,13 +1184,20 @@ case ${cmd} in
 "ovs-metrics")
   ovs-metrics
   ;;
+"ovn-ipsec")
+  ovn-ipsec
+  ;;
+"cleanup-ovn-ipsec")
+  cleanup-ovn-ipsec
+  ;;
 *)
   echo "invalid command ${cmd}"
   echo "valid v3 commands: ovs-server nb-ovsdb sb-ovsdb run-ovn-northd ovn-master " \
     "ovn-controller ovn-node display_env display ovn_debug cleanup-ovs-server " \
-    "cleanup-ovn-node nb-ovsdb-raft sb-ovsdb-raft"
+    "cleanup-ovn-node nb-ovsdb-raft sb-ovsdb-raft ovn-ipsec cleanup-ovn-ipsec"
   exit 0
   ;;
 esac
 
 exit 0
+

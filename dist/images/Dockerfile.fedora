@@ -20,7 +20,7 @@ RUN INSTALL_PKGS=" \
 	PyYAML bind-utils procps-ng openssl numactl-libs firewalld-filesystem \
 	libpcap hostname kubernetes-client \
         ovn ovn-central ovn-host python3-openvswitch python3-pyOpenSSL \
-	iptables iproute iputils strace socat \
+	iptables iproute iputils strace socat openvswitch-ipsec libreswan  \
         " && \
 	dnf install --best --refresh -y --setopt=tsflags=nodocs $INSTALL_PKGS && \
 	dnf clean all && rm -rf /var/cache/dnf/*
@@ -31,6 +31,7 @@ RUN INSTALL_PKGS=" \
 RUN dnf install -y --enablerepo=updates-testing --best --advisory=FEDORA-2020-cc142bbddb "ovn >= 20.09.0-1" || exit 1
 
 RUN mkdir -p /var/run/openvswitch
+RUN mkdir -p /etc/keys
 
 # Built in ../../go_controller, then the binaries are copied here.
 # put things where they are in the pkg
@@ -42,6 +43,7 @@ COPY ovn-k8s-cni-overlay /usr/libexec/cni/ovn-k8s-cni-overlay
 # variables to direct operation and configure ovn
 COPY ovnkube.sh /root/
 COPY ovndb-raft-functions.sh /root/
+COPY ovn-ipsec-functions.sh /root/
 
 # copy git commit number into image
 COPY git_info /root

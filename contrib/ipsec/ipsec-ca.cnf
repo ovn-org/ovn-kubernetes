@@ -1,0 +1,40 @@
+[ req ]
+prompt = no
+distinguished_name = req_distinguished_name
+[ req_distinguished_name ]
+C = US
+O = ovnkubernetes
+OU = kind
+CN = kindca
+[ ca ]
+default_ca = the_ca
+[ the_ca ]
+dir            = kindca                     # top dir
+database       = $dir/index.txt        # index file.
+new_certs_dir  = $dir/newcerts         # new certs dir
+certificate    = $dir/cacert.pem       # The CA cert
+serial         = $dir/serial           # serial no file
+private_key    = $dir/private/cakey.pem# CA private key
+RANDFILE       = $dir/private/.rand    # random number file
+default_days   = 3650                  # how long to certify for
+default_crl_days= 30                   # how long before next CRL
+default_md     = sha512                # message digest to use
+policy         = policy                # default policy
+email_in_dn    = no                    # Don't add the email into cert DN
+name_opt       = ca_default            # Subject name display option
+cert_opt       = ca_default            # Certificate display option
+copy_extensions = copy                 # Copy extensions from request
+unique_subject = no                    # Allow certs with duplicate subjects
+# For the CA policy
+[ policy ]
+countryName             = optional
+stateOrProvinceName     = optional
+organizationName        = match
+organizationalUnitName  = optional
+commonName              = supplied
+emailAddress            = optional
+# For the x509v3 extension
+[ ca_cert ]
+basicConstraints=CA:true
+[ usr_cert ]
+basicConstraints=CA:false

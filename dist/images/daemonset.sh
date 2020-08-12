@@ -144,6 +144,9 @@ while [ "$1" != "" ]; do
   --multicast-enabled)
     OVN_MULTICAST_ENABLE=$VALUE
     ;;
+  --ipsec-enabled)
+    OVN_IPSEC_ENABLE=$VALUE
+    ;;
   --egress-ip-enable)
     OVN_EGRESSIP_ENABLE=$VALUE
     ;;
@@ -226,6 +229,8 @@ ovn_sb_raft_port=${OVN_SB_RAFT_PORT:-6644}
 echo "ovn_sb_raft_port: ${ovn_sb_raft_port}"
 ovn_multicast_enable=${OVN_MULTICAST_ENABLE}
 echo "ovn_multicast_enable: ${ovn_multicast_enable}"
+ovn_ipsec_enable=${OVN_IPSEC_ENABLE}
+echo "ovn_ipsec_enable: ${ovn_ipsec_enable}"
 
 ovn_image=${image} \
   ovn_image_pull_policy=${image_pull_policy} \
@@ -295,7 +300,13 @@ ovn_image=${image} \
 ovn_image=${image} \
   ovn_image_pull_policy=${image_pull_policy} \
   ovn_unprivileged_mode=${ovn_unprivileged_mode} \
+  ovn_ipsec_enable=${ovn_ipsec_enable} \
   j2 ../templates/ovs-node.yaml.j2 -o ../yaml/ovs-node.yaml
+
+ovn_image=${image} \
+  ovn_image_pull_policy=${image_pull_policy} \
+  ovn_unprivileged_mode=${ovn_unprivileged_mode} \
+  j2 ../templates/ovn-ipsec.yaml.j2 -o ../yaml/ovn-ipsec.yaml
 
 # ovn-setup.yaml
 net_cidr=${OVN_NET_CIDR:-"10.128.0.0/14/23"}

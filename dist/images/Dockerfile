@@ -24,7 +24,7 @@ COPY kubernetes.repo /etc/yum.repos.d/kubernetes.repo
 RUN INSTALL_PKGS=" \
 	PyYAML bind-utils procps-ng openssl numactl-libs firewalld-filesystem \
 	libpcap kubectl \
-	iproute iputils strace socat \
+	iproute iputils strace socat libreswan \
 	unbound-libs \
         " && \
 	yum install -y --setopt=tsflags=nodocs --setopt=skip_missing_names_on_install=False $INSTALL_PKGS

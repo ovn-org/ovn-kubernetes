@@ -36,11 +36,11 @@ ARG OVS_REPO=https://github.com/openvswitch/ovs.git
 ARG OVS_BRANCH=master
 
 #Install tools that is required for building ovs/ovn
-
+#Install libreswan for IPsec
 RUN dnf upgrade -y && dnf install --best --refresh -y --setopt=tsflags=nodocs \
 	PyYAML bind-utils procps-ng openssl numactl-libs firewalld-filesystem \
         libpcap hostname kubernetes-client python3-openvswitch python3-pyOpenSSL  \
-        iptables iproute iputils strace socat\
+        iptables iproute iputils strace socat libreswan\
         "kernel-devel-uname-r == $KERNEL_VERSION" \
 	@'Development Tools' rpm-build dnf-plugins-core kmod && \
 	dnf clean all && rm -rf /var/cache/dnf/*
@@ -61,6 +61,7 @@ RUN echo "Building OVS with kernel version : " $KERNEL_VERSION
 RUN ./boot.sh
 RUN ./configure --prefix=/usr --localstatedir=/var --sysconfdir=/etc --enable-ssl --with-linux=/usr/src/kernels/$KERNEL_VERSION/
 RUN make && make install
+RUN pip -qq install python/
 RUN ovs-vsctl --version && ovs-ofctl --version
 
 #Clone OVN Source Code
@@ -96,6 +97,7 @@ COPY ./iptables-scripts/ip6tables-restore /usr/sbin/
 # ovnkube.sh is the entry point. This script examines environment
 # variables to direct operation and configure ovn
 COPY ovnkube.sh ovndb-raft-functions.sh /root/
+COPY ovn-ipsec-functions.sh /root/
 
 RUN getent group openvswitch >/dev/null || groupadd -r openvswitch
 RUN getent passwd openvswitch >/dev/null || useradd -r -g openvswitch -d / -s /sbin/nologin -c "Open vSwitch Daemons" openvswitch
