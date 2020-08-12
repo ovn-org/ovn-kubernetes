@@ -2,7 +2,6 @@ package ovn
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"net"
 	"os"
@@ -22,6 +21,7 @@ import (
 	"k8s.io/klog"
 	utilnet "k8s.io/utils/net"
 
+	goovn "github.com/ebay/go-ovn"
 	hocontroller "github.com/ovn-org/ovn-kubernetes/go-controller/hybrid-overlay/pkg/controller"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/metrics"
@@ -843,6 +843,27 @@ func (oc *Controller) clearInitialNodeNetworkUnavailableCondition(origNode, newN
 	}
 }
 
+// delete chassis of the given nodeName/chassisName map
+func deleteChassis(ovnSBClient goovn.Client, chassisMap map[string]string) {
+	cmds := make([]*goovn.OvnCommand, 0, len(chassisMap))
+	for _, chassisName := range chassisMap {
+		if chassisName != "" {
+			cmd, err := ovnSBClient.ChassisDel(chassisName)
+			if err != nil {
+				klog.Errorf("Unable to create the ChassisDel command for chassis: %s from the sbdb", chassisName)
+			} else {
+				cmds = append(cmds, cmd)
+			}
+		}
+	}
+
+	if len(cmds) != 0 {
+		if err := ovnSBClient.Execute(cmds...); err != nil {
+			klog.Errorf("Failed to delete chassis for node/chassis map %v: error: %v", chassisMap, err)
+		}
+	}
+}
+
 // this is the worker function that does the periodic sync of nodes from kube API
 // and sbdb and deletes chassis that are stale
 func (oc *Controller) syncNodesPeriodic() {
@@ -859,18 +880,15 @@ func (oc *Controller) syncNodesPeriodic() {
 		nodeNames = append(nodeNames, node.Name)
 	}
 
-	chassisData, stderr, err := util.RunOVNSbctl("--data=bare", "--no-heading",
-		"--columns=name,hostname", "--format=json", "list", "Chassis")
+	chassisList, err := oc.ovnSBClient.ChassisList()
 	if err != nil {
-		klog.Errorf("Failed to get chassis list: stderr: %s, error: %v",
-			stderr, err)
+		klog.Errorf("Failed to get chassis list: error: %v", err)
 		return
 	}
 
-	chassisMap, err := oc.unmarshalChassisDataIntoMap([]byte(chassisData))
-	if err != nil {
-		klog.Errorf("Failed to unmarshal chassis data into chassis map, error: %v: %s", err, chassisData)
-		return
+	chassisMap := map[string]string{}
+	for _, chassis := range chassisList {
+		chassisMap[chassis.Hostname] = chassis.Name
 	}
 
 	//delete existing nodes from the chassis map.
@@ -878,15 +896,7 @@ func (oc *Controller) syncNodesPeriodic() {
 		delete(chassisMap, nodeName)
 	}
 
-	for nodeName, chassisName := range chassisMap {
-		if chassisName != "" {
-			_, stderr, err = util.RunOVNSbctl("--if-exist", "chassis-del", chassisName)
-			if err != nil {
-				klog.Errorf("Failed to delete chassis with name %s for node %s: stderr: %s, error: %v",
-					chassisName, nodeName, stderr, err)
-			}
-		}
-	}
+	deleteChassis(oc.ovnSBClient, chassisMap)
 }
 
 func (oc *Controller) syncNodes(nodes []interface{}) {
@@ -904,19 +914,15 @@ func (oc *Controller) syncNodes(nodes []interface{}) {
 	// watchNodes() will be called for all existing nodes at startup anyway.
 	// Note that this list will include the 'join' cluster switch, which we
 	// do not want to delete.
-
-	chassisData, stderr, err := util.RunOVNSbctl("--data=bare", "--no-heading",
-		"--columns=name,hostname", "--format=json", "list", "Chassis")
+	chassisList, err := oc.ovnSBClient.ChassisList()
 	if err != nil {
-		klog.Errorf("Failed to get chassis list: stderr: %q, error: %v",
-			stderr, err)
+		klog.Errorf("Failed to get chassis list: error: %v", err)
 		return
 	}
 
-	chassisMap, err := oc.unmarshalChassisDataIntoMap([]byte(chassisData))
-	if err != nil {
-		klog.Errorf("Failed to unmarshal chassis data into chassis map, error: %v: %s", err, chassisData)
-		return
+	chassisMap := map[string]string{}
+	for _, chassis := range chassisList {
+		chassisMap[chassis.Hostname] = chassis.Name
 	}
 
 	//delete existing nodes from the chassis map.
@@ -994,65 +1000,38 @@ func (oc *Controller) syncNodes(nodes []interface{}) {
 		delete(chassisMap, nodeName)
 	}
 
-	for nodeName, chassisName := range chassisMap {
-		if chassisName != "" {
-			_, stderr, err = util.RunOVNSbctl("--if-exist", "chassis-del", chassisName)
-			if err != nil {
-				klog.Errorf("Failed to delete chassis with name %s for logical switch %s: stderr: %q, error: %v",
-					chassisName, nodeName, stderr, err)
-			}
-		}
-	}
-}
-
-func (oc *Controller) unmarshalChassisDataIntoMap(chData []byte) (map[string]string, error) {
-	//map of node name to chassis name
-	chassisMap := make(map[string]string)
-
-	type chassisList struct {
-		Data     [][]string
-		Headings []string
-	}
-	var mapUnmarshal chassisList
-
-	if len(chData) == 0 {
-		return chassisMap, nil
-	}
-
-	err := json.Unmarshal(chData, &mapUnmarshal)
-
-	if err != nil {
-		return nil, fmt.Errorf("error unmarshaling the chassis data: %s", err)
-	}
-
-	for _, chassis := range mapUnmarshal.Data {
-		if len(chassis) < 2 || chassis[0] == "" || chassis[1] == "" {
-			continue
-		}
-		chassisMap[chassis[1]] = chassis[0]
-	}
-
-	return chassisMap, nil
+	deleteChassis(oc.ovnSBClient, chassisMap)
 }
 
 func (oc *Controller) deleteNodeChassis(nodeName string) error {
-	chassisName, stderr, err := util.RunOVNSbctl("--data=bare", "--no-heading",
-		"--columns=name", "find", "Chassis",
-		"hostname="+nodeName)
+	var chNames []string
+
+	chassisList, err := oc.ovnSBClient.ChassisGet(nodeName)
 	if err != nil {
-		return fmt.Errorf("failed to get chassis name for node %s: stderr: %q, error: %v",
-			nodeName, stderr, err)
+		return fmt.Errorf("failed to get chassis list for node %s: error: %v", nodeName, err)
 	}
 
-	if chassisName == "" {
-		klog.Warningf("Chassis name is empty for node: %s", nodeName)
-	} else {
-		_, stderr, err = util.RunOVNSbctl("--if-exist", "chassis-del", chassisName)
-		if err != nil {
-			return fmt.Errorf("failed to delete chassis with name %s for node %s: stderr: %q, error: %v",
-				chassisName, nodeName, stderr, err)
+	cmds := make([]*goovn.OvnCommand, 0, len(chassisList))
+	for _, chassis := range chassisList {
+		if chassis.Name == "" {
+			klog.Warningf("Chassis name is empty for node: %s", nodeName)
+			continue
 		}
+		cmd, err := oc.ovnSBClient.ChassisDel(chassis.Name)
+		if err != nil {
+			return fmt.Errorf("unable to create the ChassisDel command for chassis: %s", chassis.Name)
+		}
+		chNames = append(chNames, chassis.Name)
+		cmds = append(cmds, cmd)
 	}
 
+	if len(cmds) == 0 {
+		return fmt.Errorf("failed to find chassis for node %s", nodeName)
+	}
+
+	if err = oc.ovnSBClient.Execute(cmds...); err != nil {
+		return fmt.Errorf("failed to delete chassis %q for node %s: error: %v",
+			strings.Join(chNames, ","), nodeName, err)
+	}
 	return nil
 }
