@@ -1532,6 +1532,9 @@ var _ = Describe("OVN master EgressIP Operations", func() {
 
 				getEgressIP := func() string {
 					statuses = getEgressIPStatusSafely(egressIPName)
+					if len(statuses) == 0 {
+						return "try again"
+					}
 					return statuses[0].EgressIP
 				}
 
