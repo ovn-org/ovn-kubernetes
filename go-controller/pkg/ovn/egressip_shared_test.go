@@ -22,6 +22,12 @@ var _ = Describe("Shared gateway mode EgressIP Operations with", func() {
 		tExec   *ovntest.FakeExec
 	)
 
+	getEgressIPAllocatorSizeSafely := func() int {
+		fakeOvn.controller.eIPAllocatorMutex.Lock()
+		defer fakeOvn.controller.eIPAllocatorMutex.Unlock()
+		return len(fakeOvn.controller.eIPAllocator)
+	}
+
 	getEgressIPStatusLenSafely := func(egressIPName string) func() int {
 		return func() int {
 			fakeOvn.controller.eIPAllocatorMutex.Lock()
@@ -56,6 +62,239 @@ var _ = Describe("Shared gateway mode EgressIP Operations with", func() {
 
 	AfterEach(func() {
 		fakeOvn.shutdown()
+	})
+
+	Context("On node UPDATE", func() {
+
+		It("should re-assign EgressIPs and perform proper OVN transactions when pod is created after node egress label switch", func() {
+			app.Action = func(ctx *cli.Context) error {
+
+				egressIP := "192.168.126.101"
+				node1IPv4 := "192.168.126.202/24"
+				node2IPv4 := "192.168.126.51/24"
+
+				egressPod := *newPodWithLabels(namespace, podName, node1Name, podV4IP, egressPodLabel)
+				egressNamespace := newNamespace(namespace)
+
+				node1 := v1.Node{ObjectMeta: metav1.ObjectMeta{
+					Name: node1Name,
+					Annotations: map[string]string{
+						"k8s.ovn.org/node-primary-ifaddr": fmt.Sprintf("{\"ipv4\": \"%s\", \"ipv6\": \"%s\"}", node1IPv4, ""),
+					},
+					Labels: map[string]string{
+						"k8s.ovn.org/egress-assignable": "",
+					},
+				}}
+				node2 := v1.Node{ObjectMeta: metav1.ObjectMeta{
+					Name: node2Name,
+					Annotations: map[string]string{
+						"k8s.ovn.org/node-primary-ifaddr": fmt.Sprintf("{\"ipv4\": \"%s\", \"ipv6\": \"%s\"}", node2IPv4, ""),
+					},
+				}}
+
+				eIP := egressipv1.EgressIP{
+					ObjectMeta: newEgressIPMeta(egressIPName),
+					Spec: egressipv1.EgressIPSpec{
+						EgressIPs: []string{egressIP},
+						PodSelector: metav1.LabelSelector{
+							MatchLabels: egressPodLabel,
+						},
+						NamespaceSelector: metav1.LabelSelector{
+							MatchLabels: map[string]string{
+								"name": egressNamespace.Name,
+							},
+						},
+					},
+					Status: egressipv1.EgressIPStatus{
+						Items: []egressipv1.EgressIPStatusItem{},
+					},
+				}
+
+				fakeOvn.start(ctx,
+					&egressipv1.EgressIPList{
+						Items: []egressipv1.EgressIP{eIP},
+					},
+					&v1.NodeList{
+						Items: []v1.Node{node1, node2},
+					},
+					&v1.NamespaceList{
+						Items: []v1.Namespace{*egressNamespace},
+					})
+
+				fakeOvn.fakeExec.AddFakeCmdsNoOutputNoError(
+					[]string{
+						fmt.Sprintf("ovn-nbctl --timeout=15 lr-policy-add ovn_cluster_router 101 ip4.src == 10.128.0.0/14 && ip4.dst == 10.128.0.0/14 allow"),
+					},
+				)
+
+				fakeOvn.controller.WatchEgressNodes()
+				Eventually(getEgressIPAllocatorSizeSafely).Should(Equal(1))
+				Expect(fakeOvn.controller.eIPAllocator).To(HaveKey(node1.Name))
+
+				fakeOvn.controller.WatchEgressIP()
+				Eventually(getEgressIPStatusLenSafely(egressIPName)).Should(Equal(1))
+				statuses := getEgressIPStatusSafely(egressIPName)
+				Expect(statuses[0].Node).To(Equal(node1.Name))
+				Expect(statuses[0].EgressIP).To(Equal(egressIP))
+
+				node1.Labels = map[string]string{}
+				node2.Labels = map[string]string{
+					"k8s.ovn.org/egress-assignable": "",
+				}
+
+				_, err := fakeOvn.fakeClient.CoreV1().Nodes().Update(context.TODO(), &node1, metav1.UpdateOptions{})
+				Expect(err).NotTo(HaveOccurred())
+				_, err = fakeOvn.fakeClient.CoreV1().Nodes().Update(context.TODO(), &node2, metav1.UpdateOptions{})
+				Expect(err).NotTo(HaveOccurred())
+
+				nodeSwitch := func() string {
+					statuses = getEgressIPStatusSafely(egressIPName)
+					return statuses[0].Node
+				}
+
+				Eventually(getEgressIPStatusLenSafely(egressIPName)).Should(Equal(1))
+				Eventually(nodeSwitch).Should(Equal(node2.Name))
+				statuses = getEgressIPStatusSafely(egressIPName)
+				Expect(statuses[0].EgressIP).To(Equal(egressIP))
+
+				fakeOvn.fakeExec.AddFakeCmd(
+					&ovntest.ExpectedCmd{
+						Cmd:    fmt.Sprintf("ovn-nbctl --timeout=15 --data=bare --format=table --no-heading --columns=options find logical_router name=GR_%s options:lb_force_snat_ip!=-", node2.Name),
+						Output: fmt.Sprintf("lb_force_snat_ip=%s", nodeLogicalRouterIPv4),
+					},
+				)
+				fakeOvn.fakeExec.AddFakeCmdsNoOutputNoError(
+					[]string{
+						fmt.Sprintf("ovn-nbctl --timeout=15 lr-policy-add ovn_cluster_router 100 ip4.src == %s && ip4.dst == 0.0.0.0/0 reroute %s", egressPod.Status.PodIP, nodeLogicalRouterIPv4),
+						fmt.Sprintf("ovn-nbctl --timeout=15 lr-nat-add GR_%s dnat_and_snat %s %s", node2.Name, egressIP, egressPod.Status.PodIP),
+					},
+				)
+				_, err = fakeOvn.fakeClient.CoreV1().Pods(egressPod.Namespace).Create(context.TODO(), &egressPod, metav1.CreateOptions{})
+
+				Eventually(fakeOvn.fakeExec.CalledMatchesExpected).Should(BeTrue(), fakeOvn.fakeExec.ErrorDesc)
+
+				return nil
+			}
+
+			err := app.Run([]string{app.Name})
+			Expect(err).NotTo(HaveOccurred())
+		})
+
+		It("should re-assign EgressIPs and perform proper OVN transactions when namespace and pod is created after node egress label switch", func() {
+			app.Action = func(ctx *cli.Context) error {
+
+				egressIP := "192.168.126.101"
+				node1IPv4 := "192.168.126.202/24"
+				node2IPv4 := "192.168.126.51/24"
+
+				egressPod := *newPodWithLabels(namespace, podName, node1Name, podV4IP, egressPodLabel)
+				egressNamespace := newNamespace(namespace)
+
+				node1 := v1.Node{ObjectMeta: metav1.ObjectMeta{
+					Name: node1Name,
+					Annotations: map[string]string{
+						"k8s.ovn.org/node-primary-ifaddr": fmt.Sprintf("{\"ipv4\": \"%s\", \"ipv6\": \"%s\"}", node1IPv4, ""),
+					},
+					Labels: map[string]string{
+						"k8s.ovn.org/egress-assignable": "",
+					},
+				}}
+				node2 := v1.Node{ObjectMeta: metav1.ObjectMeta{
+					Name: node2Name,
+					Annotations: map[string]string{
+						"k8s.ovn.org/node-primary-ifaddr": fmt.Sprintf("{\"ipv4\": \"%s\", \"ipv6\": \"%s\"}", node2IPv4, ""),
+					},
+				}}
+
+				eIP := egressipv1.EgressIP{
+					ObjectMeta: newEgressIPMeta(egressIPName),
+					Spec: egressipv1.EgressIPSpec{
+						EgressIPs: []string{egressIP},
+						PodSelector: metav1.LabelSelector{
+							MatchLabels: egressPodLabel,
+						},
+						NamespaceSelector: metav1.LabelSelector{
+							MatchLabels: map[string]string{
+								"name": egressNamespace.Name,
+							},
+						},
+					},
+					Status: egressipv1.EgressIPStatus{
+						Items: []egressipv1.EgressIPStatusItem{},
+					},
+				}
+
+				fakeOvn.start(ctx,
+					&egressipv1.EgressIPList{
+						Items: []egressipv1.EgressIP{eIP},
+					},
+					&v1.NodeList{
+						Items: []v1.Node{node1, node2},
+					})
+
+				fakeOvn.fakeExec.AddFakeCmdsNoOutputNoError(
+					[]string{
+						fmt.Sprintf("ovn-nbctl --timeout=15 lr-policy-add ovn_cluster_router 101 ip4.src == 10.128.0.0/14 && ip4.dst == 10.128.0.0/14 allow"),
+					},
+				)
+				fakeOvn.controller.WatchEgressNodes()
+				Eventually(getEgressIPAllocatorSizeSafely).Should(Equal(1))
+				Expect(fakeOvn.controller.eIPAllocator).To(HaveKey(node1.Name))
+
+				fakeOvn.controller.WatchEgressIP()
+				Eventually(getEgressIPStatusLenSafely(egressIPName)).Should(Equal(1))
+				statuses := getEgressIPStatusSafely(egressIPName)
+				Expect(statuses[0].Node).To(Equal(node1.Name))
+				Expect(statuses[0].EgressIP).To(Equal(egressIP))
+
+				node1.Labels = map[string]string{}
+				node2.Labels = map[string]string{
+					"k8s.ovn.org/egress-assignable": "",
+				}
+
+				_, err := fakeOvn.fakeClient.CoreV1().Nodes().Update(context.TODO(), &node1, metav1.UpdateOptions{})
+				Expect(err).NotTo(HaveOccurred())
+				_, err = fakeOvn.fakeClient.CoreV1().Nodes().Update(context.TODO(), &node2, metav1.UpdateOptions{})
+				Expect(err).NotTo(HaveOccurred())
+
+				nodeSwitch := func() string {
+					statuses = getEgressIPStatusSafely(egressIPName)
+					return statuses[0].Node
+				}
+
+				Eventually(getEgressIPStatusLenSafely(egressIPName)).Should(Equal(1))
+				Eventually(nodeSwitch).Should(Equal(node2.Name))
+				statuses = getEgressIPStatusSafely(egressIPName)
+				Expect(statuses[0].EgressIP).To(Equal(egressIP))
+
+				fakeOvn.fakeExec.AddFakeCmd(
+					&ovntest.ExpectedCmd{
+						Cmd:    fmt.Sprintf("ovn-nbctl --timeout=15 --data=bare --format=table --no-heading --columns=options find logical_router name=GR_%s options:lb_force_snat_ip!=-", node2.Name),
+						Output: fmt.Sprintf("lb_force_snat_ip=%s", nodeLogicalRouterIPv4),
+					},
+				)
+				fakeOvn.fakeExec.AddFakeCmdsNoOutputNoError(
+					[]string{
+						fmt.Sprintf("ovn-nbctl --timeout=15 lr-policy-add ovn_cluster_router 100 ip4.src == %s && ip4.dst == 0.0.0.0/0 reroute %s", egressPod.Status.PodIP, nodeLogicalRouterIPv4),
+						fmt.Sprintf("ovn-nbctl --timeout=15 lr-nat-add GR_%s dnat_and_snat %s %s", node2.Name, egressIP, egressPod.Status.PodIP),
+					},
+				)
+				_, err = fakeOvn.fakeClient.CoreV1().Namespaces().Create(context.TODO(), egressNamespace, metav1.CreateOptions{})
+				Expect(err).NotTo(HaveOccurred())
+				Eventually(func() int {
+					fakeOvn.controller.egressIPPodHandlerMutex.Lock()
+					defer fakeOvn.controller.egressIPPodHandlerMutex.Unlock()
+					return len(fakeOvn.controller.egressIPPodHandlerCache)
+				}).Should(Equal(1))
+				_, err = fakeOvn.fakeClient.CoreV1().Pods(egressPod.Namespace).Create(context.TODO(), &egressPod, metav1.CreateOptions{})
+				Expect(err).NotTo(HaveOccurred())
+				Eventually(fakeOvn.fakeExec.CalledMatchesExpected).Should(BeTrue(), fakeOvn.fakeExec.ErrorDesc)
+				return nil
+			}
+
+			err := app.Run([]string{app.Name})
+			Expect(err).NotTo(HaveOccurred())
+		})
 	})
 
 	Context("IPv6 on pod UPDATE", func() {

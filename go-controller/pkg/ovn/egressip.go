@@ -74,11 +74,17 @@ func (oc *Controller) deleteEgressIP(eIP *egressipv1.EgressIP) error {
 
 	oc.egressIPNamespaceHandlerMutex.Lock()
 	defer oc.egressIPNamespaceHandlerMutex.Unlock()
-	delete(oc.egressIPNamespaceHandlerCache, getEgressIPKey(eIP))
+	if nH, exists := oc.egressIPNamespaceHandlerCache[getEgressIPKey(eIP)]; exists {
+		oc.watchFactory.RemoveNamespaceHandler(&nH)
+		delete(oc.egressIPNamespaceHandlerCache, getEgressIPKey(eIP))
+	}
 
 	oc.egressIPPodHandlerMutex.Lock()
 	defer oc.egressIPPodHandlerMutex.Unlock()
-	delete(oc.egressIPPodHandlerCache, getEgressIPKey(eIP))
+	if pH, exists := oc.egressIPPodHandlerCache[getEgressIPKey(eIP)]; exists {
+		oc.watchFactory.RemovePodHandler(&pH)
+		delete(oc.egressIPPodHandlerCache, getEgressIPKey(eIP))
+	}
 
 	namespaces, err := oc.kube.GetNamespaces(eIP.Spec.NamespaceSelector)
 	if err != nil {
@@ -217,7 +223,10 @@ func (oc *Controller) addNamespaceEgressIP(eIP *egressipv1.EgressIP, namespace *
 func (oc *Controller) deleteNamespaceEgressIP(eIP *egressipv1.EgressIP, namespace *kapi.Namespace) error {
 	oc.egressIPPodHandlerMutex.Lock()
 	defer oc.egressIPPodHandlerMutex.Unlock()
-	delete(oc.egressIPPodHandlerCache, getEgressIPKey(eIP))
+	if pH, exists := oc.egressIPPodHandlerCache[getEgressIPKey(eIP)]; exists {
+		oc.watchFactory.RemovePodHandler(&pH)
+		delete(oc.egressIPPodHandlerCache, getEgressIPKey(eIP))
+	}
 	if err := oc.deleteNamespacePodsEgressIP(eIP, namespace); err != nil {
 		return err
 	}
