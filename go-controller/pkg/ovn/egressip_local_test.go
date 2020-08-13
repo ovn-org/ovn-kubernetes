@@ -106,12 +106,12 @@ var _ = Describe("Local gateway mode EgressIP Operations with", func() {
 				fakeOvn.fakeExec.AddFakeCmd(
 					&ovntest.ExpectedCmd{
 						Cmd:    fmt.Sprintf("ovn-nbctl --timeout=15 --data=bare --format=table --no-heading --columns=options find logical_router name=GR_%s options:lb_force_snat_ip!=-", node2.name),
-						Output: fmt.Sprintf("lb_force_snat_ip=%s", nodeGatewayRouterIP),
+						Output: fmt.Sprintf("lb_force_snat_ip=%s", nodeLogicalRouterIPv6),
 					},
 				)
 				fakeOvn.fakeExec.AddFakeCmdsNoOutputNoError(
 					[]string{
-						fmt.Sprintf("ovn-nbctl --timeout=15 lr-policy-add ovn_cluster_router 100 ip6.src == %s && ip6.dst == ::/0 reroute %s pkt_mark=%v", egressPod.Status.PodIP, nodeGatewayRouterIP, mark),
+						fmt.Sprintf("ovn-nbctl --timeout=15 lr-policy-add ovn_cluster_router 100 ip6.src == %s && ip6.dst == ::/0 reroute %s pkt_mark=%v", egressPod.Status.PodIP, nodeLogicalRouterIPv6, mark),
 					},
 				)
 
@@ -190,12 +190,12 @@ var _ = Describe("Local gateway mode EgressIP Operations with", func() {
 				fakeOvn.fakeExec.AddFakeCmd(
 					&ovntest.ExpectedCmd{
 						Cmd:    fmt.Sprintf("ovn-nbctl --timeout=15 --data=bare --format=table --no-heading --columns=options find logical_router name=GR_%s options:lb_force_snat_ip!=-", node2.name),
-						Output: fmt.Sprintf("lb_force_snat_ip=%s", nodeGatewayRouterIP),
+						Output: fmt.Sprintf("lb_force_snat_ip=%s", nodeLogicalRouterIPv6),
 					},
 				)
 				fakeOvn.fakeExec.AddFakeCmdsNoOutputNoError(
 					[]string{
-						fmt.Sprintf("ovn-nbctl --timeout=15 lr-policy-add ovn_cluster_router 100 ip6.src == %s && ip6.dst == ::/0 reroute %s pkt_mark=%v", egressPod.Status.PodIP, nodeGatewayRouterIP, mark),
+						fmt.Sprintf("ovn-nbctl --timeout=15 lr-policy-add ovn_cluster_router 100 ip6.src == %s && ip6.dst == ::/0 reroute %s pkt_mark=%v", egressPod.Status.PodIP, nodeLogicalRouterIPv6, mark),
 					},
 				)
 
@@ -286,12 +286,12 @@ var _ = Describe("Local gateway mode EgressIP Operations with", func() {
 				fakeOvn.fakeExec.AddFakeCmd(
 					&ovntest.ExpectedCmd{
 						Cmd:    fmt.Sprintf("ovn-nbctl --timeout=15 --data=bare --format=table --no-heading --columns=options find logical_router name=GR_%s options:lb_force_snat_ip!=-", node2.name),
-						Output: fmt.Sprintf("lb_force_snat_ip=%s", nodeGatewayRouterIP),
+						Output: fmt.Sprintf("lb_force_snat_ip=%s", nodeLogicalRouterIPv6),
 					},
 				)
 				fakeOvn.fakeExec.AddFakeCmdsNoOutputNoError(
 					[]string{
-						fmt.Sprintf("ovn-nbctl --timeout=15 lr-policy-add ovn_cluster_router 100 ip6.src == %s && ip6.dst == ::/0 reroute %s pkt_mark=%v", podUpdate.Status.PodIP, nodeGatewayRouterIP, mark),
+						fmt.Sprintf("ovn-nbctl --timeout=15 lr-policy-add ovn_cluster_router 100 ip6.src == %s && ip6.dst == ::/0 reroute %s pkt_mark=%v", podUpdate.Status.PodIP, nodeLogicalRouterIPv6, mark),
 					},
 				)
 
@@ -414,12 +414,12 @@ var _ = Describe("Local gateway mode EgressIP Operations with", func() {
 				fakeOvn.fakeExec.AddFakeCmd(
 					&ovntest.ExpectedCmd{
 						Cmd:    fmt.Sprintf("ovn-nbctl --timeout=15 --data=bare --format=table --no-heading --columns=options find logical_router name=GR_%s options:lb_force_snat_ip!=-", node2.name),
-						Output: fmt.Sprintf("lb_force_snat_ip=%s", nodeGatewayRouterIP),
+						Output: fmt.Sprintf("lb_force_snat_ip=%s", nodeLogicalRouterIPv6),
 					},
 				)
 				fakeOvn.fakeExec.AddFakeCmdsNoOutputNoError(
 					[]string{
-						fmt.Sprintf("ovn-nbctl --timeout=15 lr-policy-add ovn_cluster_router 100 ip6.src == %s && ip6.dst == ::/0 reroute %s pkt_mark=%v", egressPod.Status.PodIP, nodeGatewayRouterIP, mark),
+						fmt.Sprintf("ovn-nbctl --timeout=15 lr-policy-add ovn_cluster_router 100 ip6.src == %s && ip6.dst == ::/0 reroute %s pkt_mark=%v", egressPod.Status.PodIP, nodeLogicalRouterIPv6, mark),
 					},
 				)
 
@@ -561,12 +561,12 @@ var _ = Describe("Local gateway mode EgressIP Operations with", func() {
 				fakeOvn.fakeExec.AddFakeCmd(
 					&ovntest.ExpectedCmd{
 						Cmd:    fmt.Sprintf("ovn-nbctl --timeout=15 --data=bare --format=table --no-heading --columns=options find logical_router name=GR_%s options:lb_force_snat_ip!=-", node2.name),
-						Output: fmt.Sprintf("lb_force_snat_ip=%s", nodeGatewayRouterIP),
+						Output: fmt.Sprintf("lb_force_snat_ip=%s", nodeLogicalRouterIPv6),
 					},
 				)
 				fakeOvn.fakeExec.AddFakeCmdsNoOutputNoError(
 					[]string{
-						fmt.Sprintf("ovn-nbctl --timeout=15 lr-policy-add ovn_cluster_router 100 ip6.src == %s && ip6.dst == ::/0 reroute %s pkt_mark=%v", egressPod.Status.PodIP, nodeGatewayRouterIP, mark),
+						fmt.Sprintf("ovn-nbctl --timeout=15 lr-policy-add ovn_cluster_router 100 ip6.src == %s && ip6.dst == ::/0 reroute %s pkt_mark=%v", egressPod.Status.PodIP, nodeLogicalRouterIPv6, mark),
 					},
 				)
 
@@ -606,7 +606,7 @@ var _ = Describe("Local gateway mode EgressIP Operations with", func() {
 				)
 				fakeOvn.fakeExec.AddFakeCmdsNoOutputNoError(
 					[]string{
-						fmt.Sprintf("ovn-nbctl --timeout=15 lr-policy-add ovn_cluster_router 100 ip6.src == %s && ip6.dst == ::/0 reroute %s pkt_mark=%v", egressPod.Status.PodIP, nodeGatewayRouterIP, mark),
+						fmt.Sprintf("ovn-nbctl --timeout=15 lr-policy-add ovn_cluster_router 100 ip6.src == %s && ip6.dst == ::/0 reroute %s pkt_mark=%v", egressPod.Status.PodIP, nodeLogicalRouterIPv6, mark),
 					},
 				)
 

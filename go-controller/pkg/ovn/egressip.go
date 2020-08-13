@@ -22,7 +22,7 @@ import (
 
 const (
 	defaultNoRereoutePriority = "101"
-	egressIPRereoutePriority  = "100"
+	egressIPReroutePriority   = "100"
 )
 
 type modeEgressIP interface {
@@ -417,10 +417,10 @@ func (e *egressIPMode) createEgressPolicy(podIps []net.IP, status egressipv1.Egr
 			var stderr string
 			var err error
 			if packetMark == 0 {
-				_, stderr, err = util.RunOVNNbctl("lr-policy-add", ovnClusterRouter, egressIPRereoutePriority,
+				_, stderr, err = util.RunOVNNbctl("lr-policy-add", ovnClusterRouter, egressIPReroutePriority,
 					fmt.Sprintf("ip6.src == %s && ip6.dst == ::/0", podIP.String()), "reroute", gatewayRouterIP.String())
 			} else {
-				_, stderr, err = util.RunOVNNbctl("lr-policy-add", ovnClusterRouter, egressIPRereoutePriority,
+				_, stderr, err = util.RunOVNNbctl("lr-policy-add", ovnClusterRouter, egressIPReroutePriority,
 					fmt.Sprintf("ip6.src == %s && ip6.dst == ::/0", podIP.String()), "reroute", gatewayRouterIP.String(), fmt.Sprintf("pkt_mark=%v", packetMark))
 			}
 			if err != nil && !strings.Contains(stderr, policyAlreadyExistsMsg) {
@@ -430,10 +430,10 @@ func (e *egressIPMode) createEgressPolicy(podIps []net.IP, status egressipv1.Egr
 			var stderr string
 			var err error
 			if packetMark == 0 {
-				_, stderr, err = util.RunOVNNbctl("lr-policy-add", ovnClusterRouter, egressIPRereoutePriority,
+				_, stderr, err = util.RunOVNNbctl("lr-policy-add", ovnClusterRouter, egressIPReroutePriority,
 					fmt.Sprintf("ip4.src == %s && ip4.dst == 0.0.0.0/0", podIP.String()), "reroute", gatewayRouterIP.String())
 			} else {
-				_, stderr, err = util.RunOVNNbctl("lr-policy-add", ovnClusterRouter, egressIPRereoutePriority,
+				_, stderr, err = util.RunOVNNbctl("lr-policy-add", ovnClusterRouter, egressIPReroutePriority,
 					fmt.Sprintf("ip4.src == %s && ip4.dst == 0.0.0.0/0", podIP.String()), "reroute", gatewayRouterIP.String(), fmt.Sprintf("pkt_mark=%v", packetMark))
 			}
 			if err != nil && !strings.Contains(stderr, policyAlreadyExistsMsg) {
@@ -447,12 +447,12 @@ func (e *egressIPMode) createEgressPolicy(podIps []net.IP, status egressipv1.Egr
 func (e *egressIPMode) deleteEgressPolicy(podIps []net.IP, status egressipv1.EgressIPStatusItem) error {
 	for _, podIP := range podIps {
 		if utilnet.IsIPv6(podIP) && utilnet.IsIPv6String(status.EgressIP) {
-			_, _, err := util.RunOVNNbctl("lr-policy-del", ovnClusterRouter, egressIPRereoutePriority, fmt.Sprintf("ip6.src == %s && ip6.dst == ::/0", podIP.String()))
+			_, _, err := util.RunOVNNbctl("lr-policy-del", ovnClusterRouter, egressIPReroutePriority, fmt.Sprintf("ip6.src == %s && ip6.dst == ::/0", podIP.String()))
 			if err != nil {
 				return fmt.Errorf("unable to delete logical router policy for pod IP: %s, err: %v", podIP.String(), err)
 			}
 		} else if !utilnet.IsIPv6(podIP) && !utilnet.IsIPv6String(status.EgressIP) {
-			_, _, err := util.RunOVNNbctl("lr-policy-del", ovnClusterRouter, egressIPRereoutePriority, fmt.Sprintf("ip4.src == %s && ip4.dst == 0.0.0.0/0", podIP.String()))
+			_, _, err := util.RunOVNNbctl("lr-policy-del", ovnClusterRouter, egressIPReroutePriority, fmt.Sprintf("ip4.src == %s && ip4.dst == 0.0.0.0/0", podIP.String()))
 			if err != nil {
 				return fmt.Errorf("unable to delete logical router policy for pod IP: %s, err: %v", podIP.String(), err)
 			}
