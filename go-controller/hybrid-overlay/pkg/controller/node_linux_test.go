@@ -339,7 +339,7 @@ var _ = Describe("Hybrid Overlay Node Linux Operations", func() {
 				// Assume fresh OVS bridge
 				Output: "",
 			})
-
+			config.HybridOverlay.RawClusterSubnets = "10.0.0.1/16/23"
 			_, err := config.InitConfig(ctx, fexec, nil)
 			Expect(err).NotTo(HaveOccurred())
 			f := informers.NewSharedInformerFactory(fakeClient, informer.DefaultResyncInterval)
@@ -386,7 +386,7 @@ var _ = Describe("Hybrid Overlay Node Linux Operations", func() {
 				// Assume fresh OVS bridge
 				Output: "",
 			})
-
+			config.HybridOverlay.RawClusterSubnets = "10.0.0.1/16/23"
 			_, err := config.InitConfig(ctx, fexec, nil)
 			Expect(err).NotTo(HaveOccurred())
 
