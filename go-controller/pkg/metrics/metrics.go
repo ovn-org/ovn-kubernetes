@@ -25,7 +25,7 @@ const (
 	MetricOvnkubeSubsystemMaster = "master"
 	MetricOvnkubeSubsystemNode   = "node"
 	MetricOvnNamespace           = "ovn"
-	MetricOvnSubsystemDBRaft     = "db_raft"
+	MetricOvnSubsystemDB         = "db"
 	MetricOvnSubsystemNorthd     = "northd"
 	MetricOvnSubsystemController = "controller"
 	MetricOvsNamespace           = "ovs"

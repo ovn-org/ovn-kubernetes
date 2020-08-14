@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"net"
 	"reflect"
+	"sync"
 
 	"github.com/ovn-org/ovn-kubernetes/go-controller/hybrid-overlay/pkg/types"
 	hotypes "github.com/ovn-org/ovn-kubernetes/go-controller/hybrid-overlay/pkg/types"
@@ -128,32 +129,44 @@ func NewNode(
 	return n, nil
 }
 
-// Run starts the controller
-func (n *Node) Run(stopCh <-chan struct{}) error {
+// Run starts the controller and does not return until all operations have
+// terminated after the stop channel is closed
+func (n *Node) Run(stopCh <-chan struct{}) {
 	defer utilruntime.HandleCrash()
 	klog.Info("Starting Hybrid Overlay Node Controller")
 
-	klog.Info("Starting workers")
+	wg := &sync.WaitGroup{}
+
+	klog.Info("Starting Hybrid Overlay Node workers")
+	wg.Add(1)
 	go func() {
+		defer wg.Done()
 		err := n.nodeEventHandler.Run(informer.DefaultNodeInformerThreadiness, stopCh)
 		if err != nil {
 			klog.Error(err)
 		}
 	}()
+	wg.Add(1)
 	go func() {
+		defer wg.Done()
 		err := n.podEventHandler.Run(informer.DefaultInformerThreadiness, stopCh)
 		if err != nil {
 			klog.Error(err)
 		}
 	}()
 
-	go n.controller.RunFlowSync(stopCh)
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		n.controller.RunFlowSync(stopCh)
+	}()
 
-	klog.Info("Started workers")
+	klog.Info("Started Hybrid Overlay Node workers")
 	n.ready = true
 	<-stopCh
-	klog.Info("Shutting down workers")
-	return nil
+	klog.Info("Shutting down Hybrid Overlay Node workers")
+	wg.Wait()
+	klog.Info("Shut down Hybrid Overlay Node workers")
 }
 
 // getNodeSubnetAndIP returns the node's hybrid overlay subnet and the node's

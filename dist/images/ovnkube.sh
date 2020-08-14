@@ -67,6 +67,7 @@ fi
 # OVN_SSL_ENABLE - use SSL transport to NB/SB db and northd (default: no)
 # OVN_REMOTE_PROBE_INTERVAL - ovn remote probe interval in ms (default 100000)
 # OVN_EGRESSIP_ENABLE - enable egress IP for ovn-kubernetes
+# OVN_UNPRIVILEGED_MODE - execute CNI ovs/netns commands from host (default no)
 
 # The argument to the command is the operation to be performed
 # ovn-master ovn-controller ovn-node display display_env ovn_debug
@@ -178,7 +179,7 @@ ovn_disable_snat_multiple_gws=${OVN_DISABLE_SNAT_MULTIPLE_GWS:-}
 ovn_remote_probe_interval=${OVN_REMOTE_PROBE_INTERVAL:-100000}
 ovn_multicast_enable=${OVN_MULTICAST_ENABLE:-}
 #OVN_EGRESSIP_ENABLE - enable egress IP for ovn-kubernetes
-egressip_enable=${OVN_EGRESSIP_ENABLE:-false}
+ovn_egressip_enable=${OVN_EGRESSIP_ENABLE:-false}
 
 # Determine the ovn rundir.
 if [[ -f /usr/bin/ovn-appctl ]]; then
@@ -788,7 +789,12 @@ ovn-master() {
   if [[ ${ovn_multicast_enable} == "true" ]]; then
       multicast_enabled_flag="--enable-multicast"
   fi
-  
+
+  egressip_enabled_flag=
+  if [[ ${ovn_egressip_enable} == "true" ]]; then
+      egressip_enabled_flag="--enable-egress-ip"
+  fi
+
   echo "=============== ovn-master ========== MASTER ONLY"
   /usr/bin/ovnkube \
     --init-master ${K8S_NODE} \
@@ -806,7 +812,7 @@ ovn-master() {
     --logfile /var/log/ovn-kubernetes/ovnkube-master.log \
     ${ovn_master_ssl_opts} \
     ${multicast_enabled_flag} \
-    --egress-ip-enable ${egressip_enable} \
+    ${egressip_enabled_flag} \
     --metrics-bind-address "0.0.0.0:9409" &
   echo "=============== ovn-master ========== running"
   wait_for_event attempts=3 process_ready ovnkube-master
@@ -895,6 +901,11 @@ ovn-node() {
   if [[ ${ovn_multicast_enable} == "true" ]]; then
       multicast_enabled_flag="--enable-multicast"
   fi
+
+  egressip_enabled_flag=
+  if [[ ${ovn_egressip_enable} == "true" ]]; then
+      egressip_enabled_flag="--enable-egress-ip"
+  fi
   
   OVN_ENCAP_IP=""
   ovn_encap_ip=$(ovs-vsctl --if-exists get Open_vSwitch . external_ids:ovn-encap-ip)
@@ -919,10 +930,16 @@ ovn-node() {
       "
   }
 
+  ovn_unprivileged_flag="--unprivileged-mode"
+  if test -z "${OVN_UNPRIVILEGED_MODE+x}" -o "x${OVN_UNPRIVILEGED_MODE}" = xno; then
+    ovn_unprivileged_flag=""
+  fi
+
   echo "=============== ovn-node   --init-node"
   /usr/bin/ovnkube --init-node ${K8S_NODE} \
     --cluster-subnets ${net_cidr} --k8s-service-cidr=${svc_cidr} \
     --nb-address=${ovn_nbdb} --sb-address=${ovn_sbdb} \
+    ${ovn_unprivileged_flag} \
     --nodeport \
     --mtu=${mtu} \
     ${OVN_ENCAP_IP} \
@@ -939,8 +956,8 @@ ovn-node() {
     ${ovn_node_ssl_opts} \
     --inactivity-probe=${ovn_remote_probe_interval} \
     ${multicast_enabled_flag} \
+    ${egressip_enabled_flag} \
     --ovn-metrics-bind-address "0.0.0.0:9476" \
-    --egress-ip-enable ${egressip_enable} \
     --metrics-bind-address "0.0.0.0:9410" &
 
   wait_for_event attempts=3 process_ready ovnkube

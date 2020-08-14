@@ -10,12 +10,19 @@ cd "${OVN_KUBE_ROOT}"
 
 PKGS=$(go list -mod vendor -f '{{if len .TestGoFiles}} {{.ImportPath}} {{end}}' ${PKGS:-./cmd/... ./pkg/... ./hybrid-overlay/...} | xargs)
 
+if [[ "$1" == "focus" && "$2" != "" ]]; then
+    gingko_focus="-ginkgo.focus=\"$2\""
+fi
+
 function testrun {
     local idx="${1}"
     local pkg="${2}"
     local otherargs="${@:3} "
     local args=
     local ginkgoargs=
+    if [[ -n "$gingko_focus" ]]; then
+        local ginkgoargs=${ginkgo_focus:-}
+    fi
     local path=${pkg#github.com/ovn-org/ovn-kubernetes/go-controller}
     # enable go race detector
     if [ ! -z "${RACE:-}" ]; then
@@ -30,7 +37,10 @@ function testrun {
     fi
     if [ -n "${TEST_REPORT_DIR}" ] && grep -q -r "ginkgo" .${path}; then
 	    prefix=$( echo ${path} | cut -c 2- | sed 's,/,_,g')
-	    ginkgoargs="-ginkgo.v -ginkgo.reportFile ${TEST_REPORT_DIR}/junit-${prefix}.xml"
+        ginkgoargs="-ginkgo.v -ginkgo.reportFile ${TEST_REPORT_DIR}/junit-${prefix}.xml"
+        if [[ -n "$gingko_focus" ]]; then
+            ginkgoargs="-ginkgo.v ${gingko_focus} -ginkgo.reportFile ${TEST_REPORT_DIR}/junit-${prefix}.xml"
+        fi
     fi
     args="${args}${otherargs}${pkg}"
 

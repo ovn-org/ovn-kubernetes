@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"reflect"
 	"strings"
+	"sync"
 
 	goovn "github.com/ebay/go-ovn"
 	"github.com/urfave/cli/v2"
@@ -70,6 +71,7 @@ var _ = Describe("Hybrid SDN Master Operations", func() {
 	var (
 		app      *cli.App
 		stopChan chan struct{}
+		wg       *sync.WaitGroup
 	)
 
 	BeforeEach(func() {
@@ -80,10 +82,12 @@ var _ = Describe("Hybrid SDN Master Operations", func() {
 		app.Name = "test"
 		app.Flags = config.Flags
 		stopChan = make(chan struct{})
+		wg = &sync.WaitGroup{}
 	})
 
 	AfterEach(func() {
 		close(stopChan)
+		wg.Wait()
 	})
 
 	const hybridOverlayClusterCIDR string = "11.1.0.0/16/24"
@@ -122,7 +126,11 @@ var _ = Describe("Hybrid SDN Master Operations", func() {
 			Expect(err).NotTo(HaveOccurred())
 
 			f.Start(stopChan)
-			go m.Run(stopChan)
+			wg.Add(1)
+			go func() {
+				defer wg.Done()
+				m.Run(stopChan)
+			}()
 
 			// Windows node should be allocated a subnet
 			Eventually(func() (map[string]string, error) {
@@ -161,6 +169,90 @@ var _ = Describe("Hybrid SDN Master Operations", func() {
 				nodeName   string = "node1"
 				nodeSubnet string = "10.1.2.0/24"
 				nodeHOIP   string = "10.1.2.3"
+				nodeHOMAC  string = "0a:58:0a:01:02:03"
+			)
+
+			fakeClient := fake.NewSimpleClientset(&v1.NodeList{
+				Items: []v1.Node{
+					newTestNode(nodeName, "linux", nodeSubnet, "", ""),
+				},
+			})
+
+			fexec := ovntest.NewFakeExec()
+			err := util.SetExec(fexec)
+			Expect(err).NotTo(HaveOccurred())
+			_, err = config.InitConfig(ctx, fexec, nil)
+			Expect(err).NotTo(HaveOccurred())
+			mockOVNNBClient := ovntest.NewMockOVNClient(goovn.DBNB)
+			mockOVNSBClient := ovntest.NewMockOVNClient(goovn.DBSB)
+
+			f := informers.NewSharedInformerFactory(fakeClient, informer.DefaultResyncInterval)
+			m, err := NewMaster(
+				&kube.Kube{KClient: fakeClient},
+				f.Core().V1().Nodes().Informer(),
+				f.Core().V1().Namespaces().Informer(),
+				f.Core().V1().Pods().Informer(),
+				mockOVNNBClient,
+				mockOVNSBClient,
+			)
+			Expect(err).NotTo(HaveOccurred())
+
+			fexec.AddFakeCmdsNoOutputNoError([]string{
+				// Setting the mac on the lsp
+				"ovn-nbctl --timeout=15 -- " +
+					"--may-exist lsp-add node1 int-node1 -- " +
+					"lsp-set-addresses int-node1 " + nodeHOMAC,
+			})
+
+			fexec.AddFakeCmd(&ovntest.ExpectedCmd{
+				Cmd:    "ovn-nbctl --timeout=15 lsp-list " + nodeName,
+				Output: "29df5ce5-2802-4ee5-891f-4fb27ca776e9 (" + util.K8sPrefix + nodeName + ")",
+			})
+			fexec.AddFakeCmdsNoOutputNoError([]string{
+				"ovn-nbctl --timeout=15 -- --if-exists set logical_switch " + nodeName + " other-config:exclude_ips=" + nodeHOIP,
+			})
+
+			f.Start(stopChan)
+			wg.Add(1)
+			go func() {
+				defer wg.Done()
+				m.Run(stopChan)
+			}()
+
+			Eventually(func() (map[string]string, error) {
+				updatedNode, err := fakeClient.CoreV1().Nodes().Get(context.TODO(), nodeName, metav1.GetOptions{})
+				if err != nil {
+					return nil, err
+				}
+				return updatedNode.Annotations, nil
+			}, 2).Should(HaveKeyWithValue(types.HybridOverlayDRMAC, nodeHOMAC))
+
+			// Test that deleting the node cleans up the OVN objects
+			fexec.AddFakeCmdsNoOutputNoError([]string{
+				"ovn-nbctl --timeout=15 -- --if-exists lsp-del int-node1",
+			})
+
+			err = fakeClient.CoreV1().Nodes().Delete(context.TODO(), nodeName, *metav1.NewDeleteOptions(0))
+			Expect(err).NotTo(HaveOccurred())
+
+			Eventually(fexec.CalledMatchesExpected, 2).Should(BeTrue(), fexec.ErrorDesc)
+			return nil
+		}
+
+		err := app.Run([]string{
+			app.Name,
+			"-enable-hybrid-overlay",
+			"-hybrid-overlay-cluster-subnets=" + hybridOverlayClusterCIDR,
+		})
+		Expect(err).NotTo(HaveOccurred())
+	})
+
+	It("handles a Linux node with no annotation but an existing port", func() {
+		app.Action = func(ctx *cli.Context) error {
+			const (
+				nodeName   string = "node1"
+				nodeSubnet string = "10.1.2.0/24"
+				nodeHOIP   string = "10.1.2.3"
 				nodeHOMAC  string = "00:00:00:52:19:d2"
 			)
 
@@ -193,7 +285,11 @@ var _ = Describe("Hybrid SDN Master Operations", func() {
 			Expect(err).NotTo(HaveOccurred())
 
 			f.Start(stopChan)
-			go m.Run(stopChan)
+			wg.Add(1)
+			go func() {
+				defer wg.Done()
+				m.Run(stopChan)
+			}()
 
 			Eventually(func() (map[string]string, error) {
 				updatedNode, err := fakeClient.CoreV1().Nodes().Get(context.TODO(), nodeName, metav1.GetOptions{})
@@ -202,19 +298,8 @@ var _ = Describe("Hybrid SDN Master Operations", func() {
 				}
 				return updatedNode.Annotations, nil
 			}, 2).Should(HaveKeyWithValue(types.HybridOverlayDRMAC, nodeHOMAC))
-
-			// Test that deleting the node cleans up the OVN objects
-			fexec.AddFakeCmdsNoOutputNoError([]string{
-				"ovn-nbctl --timeout=15 -- --if-exists lsp-del int-node1",
-			})
-
-			err = fakeClient.CoreV1().Nodes().Delete(context.TODO(), nodeName, *metav1.NewDeleteOptions(0))
-			Expect(err).NotTo(HaveOccurred())
-
-			Eventually(fexec.CalledMatchesExpected, 2).Should(BeTrue(), fexec.ErrorDesc)
 			return nil
 		}
-
 		err := app.Run([]string{
 			app.Name,
 			"-enable-hybrid-overlay",
@@ -261,8 +346,14 @@ var _ = Describe("Hybrid SDN Master Operations", func() {
 			)
 			Expect(err).NotTo(HaveOccurred())
 
+			populatePortAddresses(nodeName, nodeHOMAC, nodeHOIP, mockOVNNBClient)
+
 			f.Start(stopChan)
-			go m.Run(stopChan)
+			wg.Add(1)
+			go func() {
+				defer wg.Done()
+				m.Run(stopChan)
+			}()
 
 			k := &kube.Kube{KClient: fakeClient}
 			updatedNode, err := k.GetNode(nodeName)
@@ -301,6 +392,7 @@ var _ = Describe("Hybrid SDN Master Operations", func() {
 				nsExGw            = "2.2.2.2"
 				nodeName   string = "node1"
 				nodeSubnet string = "10.1.2.0/24"
+				nodeHOIP   string = "10.1.2.3"
 				nodeHOMAC  string = "00:00:00:52:19:d2"
 				pod1Name   string = "pod1"
 				pod1IP     string = "1.2.3.5"
@@ -342,8 +434,14 @@ var _ = Describe("Hybrid SDN Master Operations", func() {
 			)
 			Expect(err).NotTo(HaveOccurred())
 
+			populatePortAddresses(nodeName, nodeHOMAC, nodeHOIP, mockOVNNBClient)
+
 			f.Start(stopChan)
-			go m.Run(stopChan)
+			wg.Add(1)
+			go func() {
+				defer wg.Done()
+				m.Run(stopChan)
+			}()
 
 			Eventually(func() error {
 				pod, err := fakeClient.CoreV1().Pods(nsName).Get(context.TODO(), pod1Name, metav1.GetOptions{})
@@ -423,7 +521,11 @@ var _ = Describe("Hybrid SDN Master Operations", func() {
 			Expect(err).NotTo(HaveOccurred())
 
 			f.Start(stopChan)
-			go m.Run(stopChan)
+			wg.Add(1)
+			go func() {
+				defer wg.Done()
+				m.Run(stopChan)
+			}()
 
 			updatedNs, err := fakeClient.CoreV1().Namespaces().Get(context.TODO(), nsName, metav1.GetOptions{})
 			Expect(err).NotTo(HaveOccurred())

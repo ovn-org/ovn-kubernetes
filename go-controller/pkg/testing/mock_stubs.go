@@ -142,6 +142,11 @@ func (mock *MockOVNClient) LRSRDel(lr string, ip_prefix string, nexthop, policy,
 	return nil, fmt.Errorf("method %s is not implemented yet", functionName())
 }
 
+// Delete LRSR by uuid given lr
+func (mock *MockOVNClient) LRSRDelByUUID(lr, uuid string) (*goovn.OvnCommand, error) {
+	return nil, fmt.Errorf("method %s is not implemented yet", functionName())
+}
+
 // Get all LRSRs by lr
 func (mock *MockOVNClient) LRSRList(lr string) ([]*goovn.LogicalRouterStaticRoute, error) {
 	return nil, fmt.Errorf("method %s is not implemented yet", functionName())
@@ -270,6 +275,11 @@ func (mock *MockOVNClient) ChassisDel(chName string) (*goovn.OvnCommand, error) 
 
 // Get chassis by hostname or name
 func (mock *MockOVNClient) ChassisGet(chname string) ([]*goovn.Chassis, error) {
+	return nil, fmt.Errorf("method %s is not implemented yet", functionName())
+}
+
+// List chassis
+func (mock *MockOVNClient) ChassisList() ([]*goovn.Chassis, error) {
 	return nil, fmt.Errorf("method %s is not implemented yet", functionName())
 }
 

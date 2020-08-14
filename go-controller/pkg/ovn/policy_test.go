@@ -1241,7 +1241,7 @@ var _ = Describe("OVN NetworkPolicy Operations", func() {
 					context.TODO(), namespace1.Name, metav1.GetOptions{})
 				Expect(err).NotTo(HaveOccurred())
 				Expect(ns).NotTo(BeNil())
-
+				Eventually(fExec.CalledMatchesExpected).Should(BeTrue(), fExec.ErrorDesc)
 				// Enable multicast in the namespace
 				mcastPolicy := multicastPolicy{}
 				mcastPolicy.enableCmds(fExec, namespace1.Name)

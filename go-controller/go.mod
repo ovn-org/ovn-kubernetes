@@ -41,4 +41,4 @@ require (
 	k8s.io/utils v0.0.0-20200324210504-a9aa75ae1b89
 )
 
-replace github.com/ebay/go-ovn v0.1.0 => github.com/ebay/go-ovn v0.0.0-20200604055416-fff9cdbba909
+replace github.com/ebay/go-ovn v0.1.0 => github.com/ebay/go-ovn v0.1.1-0.20200810162212-30abed5fb968

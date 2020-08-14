@@ -5,6 +5,7 @@ package informer
 
 import (
 	"fmt"
+	"sync"
 	"time"
 
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -92,8 +93,8 @@ func NewDefaultEventHandler(
 		UpdateFunc: func(old, new interface{}) {
 			oldObj := old.(metav1.Object)
 			newObj := new.(metav1.Object)
-			// Make sure object is not set for deletion and was actually changed
-			if oldObj.GetDeletionTimestamp() == nil && oldObj.GetResourceVersion() != newObj.GetResourceVersion() {
+			// Make sure object was actually changed
+			if oldObj.GetResourceVersion() != newObj.GetResourceVersion() {
 				// check the update aginst the predicate functions
 				if e.updateFilter(old, new) {
 					// enqueue if it matches
@@ -126,7 +127,6 @@ func (e *eventHandler) Synced() bool {
 // the workqueue and wait for workers to finish processing their current work items.
 func (e *eventHandler) Run(threadiness int, stopCh <-chan struct{}) error {
 	defer utilruntime.HandleCrash()
-	defer e.workqueue.ShutDown()
 
 	klog.Infof("Starting %s informer queue", e.name)
 
@@ -138,20 +138,33 @@ func (e *eventHandler) Run(threadiness int, stopCh <-chan struct{}) error {
 
 	klog.Infof("Starting %d %s queue workers", threadiness, e.name)
 	// start our worker threads
+	wg := &sync.WaitGroup{}
 	for j := 0; j < threadiness; j++ {
-		go wait.Until(e.runWorker, time.Second, stopCh)
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			wait.Until(e.runWorker, time.Second, stopCh)
+		}()
 	}
 
 	klog.Infof("Started %s queue workers", e.name)
 	// wait until the channel is closed
 	<-stopCh
+
 	klog.Infof("Shutting down %s queue workers", e.name)
+	e.workqueue.ShutDown()
+	wg.Wait()
+	klog.Infof("Shut down %s queue workers", e.name)
 
 	return nil
 }
 
 // enqueue adds an item to the workqueue
 func (e *eventHandler) enqueue(obj interface{}) {
+	// ignore objects that are already set for deletion
+	if !obj.(metav1.Object).GetDeletionTimestamp().IsZero() {
+		return
+	}
 	var key string
 	var err error
 	// get the key for our object

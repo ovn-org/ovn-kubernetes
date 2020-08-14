@@ -13,6 +13,7 @@ import (
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
 	kapi "k8s.io/api/core/v1"
 	v1 "k8s.io/api/core/v1"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	utilwait "k8s.io/apimachinery/pkg/util/wait"
 	"k8s.io/client-go/tools/cache"
 	"k8s.io/client-go/util/retry"
@@ -43,7 +44,11 @@ func (oc *Controller) addEgressIP(eIP *egressipv1.EgressIP) error {
 	oc.egressIPNamespaceHandlerMutex.Lock()
 	defer oc.egressIPNamespaceHandlerMutex.Unlock()
 
-	h, err := oc.watchFactory.AddFilteredNamespaceHandler("", &eIP.Spec.NamespaceSelector,
+	sel, err := metav1.LabelSelectorAsSelector(&eIP.Spec.NamespaceSelector)
+	if err != nil {
+		return fmt.Errorf("invalid namespaceSelector on EgressIP %s: %v", eIP.Name, err)
+	}
+	h := oc.watchFactory.AddFilteredNamespaceHandler("", sel,
 		cache.ResourceEventHandlerFuncs{
 			AddFunc: func(obj interface{}) {
 				namespace := obj.(*kapi.Namespace)
@@ -61,9 +66,6 @@ func (oc *Controller) addEgressIP(eIP *egressipv1.EgressIP) error {
 				}
 			},
 		}, nil)
-	if err != nil {
-		return err
-	}
 	oc.egressIPNamespaceHandlerCache[getEgressIPKey(eIP)] = *h
 	return nil
 }
@@ -170,7 +172,12 @@ func (oc *Controller) updateEgressIPWithRetry(eIP *egressipv1.EgressIP) error {
 func (oc *Controller) addNamespaceEgressIP(eIP *egressipv1.EgressIP, namespace *kapi.Namespace) error {
 	oc.egressIPPodHandlerMutex.Lock()
 	defer oc.egressIPPodHandlerMutex.Unlock()
-	h, err := oc.watchFactory.AddFilteredPodHandler(namespace.Name, &eIP.Spec.PodSelector,
+
+	sel, err := metav1.LabelSelectorAsSelector(&eIP.Spec.PodSelector)
+	if err != nil {
+		return fmt.Errorf("invalid podSelector on EgressIP %s: %v", eIP.Name, err)
+	}
+	h := oc.watchFactory.AddFilteredPodHandler(namespace.Name, sel,
 		cache.ResourceEventHandlerFuncs{
 			AddFunc: func(obj interface{}) {
 				pod := obj.(*kapi.Pod)
@@ -204,9 +211,6 @@ func (oc *Controller) addNamespaceEgressIP(eIP *egressipv1.EgressIP, namespace *
 				}
 			},
 		}, nil)
-	if err != nil {
-		return err
-	}
 	oc.egressIPPodHandlerCache[getEgressIPKey(eIP)] = *h
 	return nil
 }

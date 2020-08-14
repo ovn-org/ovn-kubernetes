@@ -54,7 +54,7 @@ const (
 	tableSBGlobal                 string = "SB_Global"
 )
 
-var tablesOrder = []string{
+var NBTablesOrder = []string{
 	tableNBGlobal,
 	tableAddressSet,
 	tableACL,
@@ -74,6 +74,9 @@ var tablesOrder = []string{
 	tablePortGroup,
 	tableLogicalSwitch,
 	tableLogicalRouter,
+}
+
+var SBTablesOrder = []string{
 	tableChassis,
 	tableEncap,
 	tableSBGlobal,
