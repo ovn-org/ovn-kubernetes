@@ -562,7 +562,7 @@ var _ = Describe("Config Operations", func() {
 			Expect(OvnSouth.Address).To(Equal("ssl:6.5.4.1:6652"))
 			Expect(OvnSouth.CertCommonName).To(Equal("testsbcommonname"))
 
-			Expect(Gateway.Mode).To(Equal(GatewayModeLocal))
+			Expect(Gateway.Mode).To(Equal(GatewayModeShared))
 			Expect(Gateway.NodeportEnable).To(BeTrue())
 
 			Expect(HybridOverlay.Enabled).To(BeTrue())
@@ -597,7 +597,7 @@ var _ = Describe("Config Operations", func() {
 			"-sb-client-cert=/client/cert2",
 			"-sb-client-cacert=/client/cacert2",
 			"-sb-cert-common-name=testsbcommonname",
-			"-gateway-mode=local",
+			"-gateway-mode=shared",
 			"-nodeport",
 			"-enable-hybrid-overlay",
 			"-hybrid-overlay-cluster-subnets=11.132.0.0/14/23",
@@ -777,6 +777,21 @@ mode=shared
 		cliArgs := []string{
 			app.Name,
 			"-gateway-mode=adsfasdfaf",
+		}
+		err := app.Run(cliArgs)
+		Expect(err).NotTo(HaveOccurred())
+	})
+
+	It("returns an error when the vlan-id is specified for mode other than shared gateway mode", func() {
+		app.Action = func(ctx *cli.Context) error {
+			_, err := InitConfig(ctx, kexec.New(), nil)
+			Expect(err).To(MatchError("gateway VLAN ID option: 30 is supported only in shared gateway mode"))
+			return nil
+		}
+		cliArgs := []string{
+			app.Name,
+			"-gateway-mode=local",
+			"-gateway-vlanid=30",
 		}
 		err := app.Run(cliArgs)
 		Expect(err).NotTo(HaveOccurred())
