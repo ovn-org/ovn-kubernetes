@@ -63,8 +63,8 @@ func GetNodeInternalIP(node *kapi.Node) (string, error) {
 }
 
 // StartNodeWatch starts a node event handler
-func StartNodeWatch(h types.NodeHandler, wf *factory.WatchFactory) error {
-	_, err := wf.AddNodeHandler(cache.ResourceEventHandlerFuncs{
+func StartNodeWatch(h types.NodeHandler, wf *factory.WatchFactory) {
+	wf.AddNodeHandler(cache.ResourceEventHandlerFuncs{
 		AddFunc: func(obj interface{}) {
 			node := obj.(*kapi.Node)
 			h.Add(node)
@@ -79,7 +79,6 @@ func StartNodeWatch(h types.NodeHandler, wf *factory.WatchFactory) error {
 			h.Delete(node)
 		},
 	}, nil)
-	return err
 }
 
 // CopyNamespaceAnnotationsToPod copies annotations from a namespace to a pod

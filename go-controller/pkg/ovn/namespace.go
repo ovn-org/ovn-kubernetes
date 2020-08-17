@@ -46,9 +46,9 @@ func (oc *Controller) syncNamespaces(namespaces []interface{}) {
 }
 
 func (oc *Controller) addPodToNamespace(ns string, portInfo *lpInfo) error {
-	nsInfo := oc.getNamespaceLocked(ns)
-	if nsInfo == nil {
-		return nil
+	nsInfo, err := oc.waitForNamespaceLocked(ns)
+	if err != nil {
+		return err
 	}
 	defer nsInfo.Unlock()
 

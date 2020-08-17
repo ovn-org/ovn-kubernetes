@@ -41,9 +41,9 @@ func newPortClaimWatcher(recorder record.EventRecorder) localPort {
 	}
 }
 
-func initPortClaimWatcher(recorder record.EventRecorder, wf *factory.WatchFactory) error {
+func initPortClaimWatcher(recorder record.EventRecorder, wf *factory.WatchFactory) {
 	port = newPortClaimWatcher(recorder)
-	_, err := wf.AddServiceHandler(cache.ResourceEventHandlerFuncs{
+	wf.AddServiceHandler(cache.ResourceEventHandlerFuncs{
 		AddFunc: func(obj interface{}) {
 			svc := obj.(*kapi.Service)
 			if errors := addServicePortClaim(svc); len(errors) > 0 {
@@ -70,7 +70,6 @@ func initPortClaimWatcher(recorder record.EventRecorder, wf *factory.WatchFactor
 			}
 		},
 	}, nil)
-	return err
 }
 
 func addServicePortClaim(svc *kapi.Service) []error {

@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"net"
 	"strings"
+	"sync"
 
 	goovn "github.com/ebay/go-ovn"
 	"github.com/urfave/cli/v2"
@@ -244,6 +245,7 @@ var _ = Describe("Master Operations", func() {
 		app      *cli.App
 		f        *factory.WatchFactory
 		stopChan chan struct{}
+		wg       *sync.WaitGroup
 	)
 
 	BeforeEach(func() {
@@ -254,11 +256,13 @@ var _ = Describe("Master Operations", func() {
 		app.Name = "test"
 		app.Flags = config.Flags
 		stopChan = make(chan struct{})
+		wg = &sync.WaitGroup{}
 	})
 
 	AfterEach(func() {
 		close(stopChan)
 		f.Shutdown()
+		wg.Wait()
 	})
 
 	It("creates logical network elements for a 2-node cluster", func() {
@@ -326,8 +330,13 @@ var _ = Describe("Master Operations", func() {
 			err = clusterController.StartClusterMaster("master")
 			Expect(err).NotTo(HaveOccurred())
 
-			err = clusterController.WatchNodes()
-			Expect(err).NotTo(HaveOccurred())
+			clusterController.WatchNodes()
+
+			wg.Add(1)
+			go func() {
+				defer wg.Done()
+				clusterController.hoMaster.Run(stopChan)
+			}()
 
 			Eventually(fexec.CalledMatchesExpected, 2).Should(BeTrue(), fexec.ErrorDesc)
 			updatedNode, err := fakeClient.CoreV1().Nodes().Get(context.TODO(), nodeName, metav1.GetOptions{})
@@ -418,8 +427,13 @@ var _ = Describe("Master Operations", func() {
 			err = clusterController.StartClusterMaster("master")
 			Expect(err).NotTo(HaveOccurred())
 
-			err = clusterController.WatchNodes()
-			Expect(err).NotTo(HaveOccurred())
+			clusterController.WatchNodes()
+
+			wg.Add(1)
+			go func() {
+				defer wg.Done()
+				clusterController.hoMaster.Run(stopChan)
+			}()
 
 			Eventually(fexec.CalledMatchesExpected, 2).Should(BeTrue(), fexec.ErrorDesc)
 			updatedNode, err := fakeClient.CoreV1().Nodes().Get(context.TODO(), nodeName, metav1.GetOptions{})
@@ -508,8 +522,13 @@ var _ = Describe("Master Operations", func() {
 			err = clusterController.StartClusterMaster("master")
 			Expect(err).NotTo(HaveOccurred())
 
-			err = clusterController.WatchNodes()
-			Expect(err).NotTo(HaveOccurred())
+			clusterController.WatchNodes()
+
+			wg.Add(1)
+			go func() {
+				defer wg.Done()
+				clusterController.hoMaster.Run(stopChan)
+			}()
 
 			Eventually(fexec.CalledMatchesExpected, 2).Should(BeTrue(), fexec.ErrorDesc)
 			updatedNode, err := fakeClient.CoreV1().Nodes().Get(context.TODO(), nodeName, metav1.GetOptions{})
@@ -658,8 +677,7 @@ subnet=%s
 			_ = clusterController.joinSubnetAllocator.AddNetworkRange(ovntest.MustParseIPNet("100.64.0.0/16"), 29)
 
 			// Let the real code run and ensure OVN database sync
-			err = clusterController.WatchNodes()
-			Expect(err).NotTo(HaveOccurred())
+			clusterController.WatchNodes()
 
 			Expect(fexec.CalledMatchesExpected()).To(BeTrue(), fexec.ErrorDesc)
 
@@ -883,8 +901,7 @@ var _ = Describe("Gateway Init Operations", func() {
 			_ = clusterController.joinSubnetAllocator.AddNetworkRange(ovntest.MustParseIPNet("100.64.0.0/16"), 29)
 
 			// Let the real code run and ensure OVN database sync
-			err = clusterController.WatchNodes()
-			Expect(err).NotTo(HaveOccurred())
+			clusterController.WatchNodes()
 
 			subnet := ovntest.MustParseIPNet(nodeSubnet)
 			err = clusterController.syncGatewayLogicalNetwork(updatedNode, l3GatewayConfig, []*net.IPNet{subnet})
@@ -1078,11 +1095,10 @@ var _ = Describe("Gateway Init Operations", func() {
 			clusterController.SCTPSupport = true
 
 			_ = clusterController.joinSubnetAllocator.AddNetworkRange(ovntest.MustParseIPNet("100.64.0.0/16"), 29)
-			clusterController.nodeLocalNatIPAllocator, _ = ipallocator.NewCIDRRange(ovntest.MustParseIPNet(util.V4NodeLocalNatSubnet))
+			clusterController.nodeLocalNatIPv4Allocator, _ = ipallocator.NewCIDRRange(ovntest.MustParseIPNet(util.V4NodeLocalNatSubnet))
 
 			// Let the real code run and ensure OVN database sync
-			err = clusterController.WatchNodes()
-			Expect(err).NotTo(HaveOccurred())
+			clusterController.WatchNodes()
 
 			subnet := ovntest.MustParseIPNet(nodeSubnet)
 			err = clusterController.syncGatewayLogicalNetwork(updatedNode, l3GatewayConfig, []*net.IPNet{subnet})

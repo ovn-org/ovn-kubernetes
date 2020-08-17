@@ -156,7 +156,7 @@ func (f *FakeExec) Command(cmd string, args ...string) kexec.Cmd {
 				// Fail if the first unused expected command doesn't
 				// match the one that is being executed
 				if executed != candidate.Cmd {
-					klog.Fatal(f.ErrorDesc())
+					klog.Fatal(f.internalErrorDesc())
 				}
 			}
 		}

@@ -18,12 +18,12 @@ import (
 
 // initLoadBalancerHealthChecker initializes the health check server for
 // ServiceTypeLoadBalancer services
-func initLoadBalancerHealthChecker(nodeName string, wf *factory.WatchFactory) error {
+func initLoadBalancerHealthChecker(nodeName string, wf *factory.WatchFactory) {
 	server := healthcheck.NewServer(nodeName, nil, nil, nil)
 	services := make(map[ktypes.NamespacedName]uint16)
 	endpoints := make(map[ktypes.NamespacedName]int)
 
-	_, err := wf.AddServiceHandler(cache.ResourceEventHandlerFuncs{
+	wf.AddServiceHandler(cache.ResourceEventHandlerFuncs{
 		AddFunc: func(obj interface{}) {
 			svc := obj.(*kapi.Service)
 			if svc.Spec.HealthCheckNodePort != 0 {
@@ -45,11 +45,8 @@ func initLoadBalancerHealthChecker(nodeName string, wf *factory.WatchFactory) er
 			}
 		},
 	}, nil)
-	if err != nil {
-		return err
-	}
 
-	_, err = wf.AddEndpointsHandler(cache.ResourceEventHandlerFuncs{
+	wf.AddEndpointsHandler(cache.ResourceEventHandlerFuncs{
 		AddFunc: func(obj interface{}) {
 			ep := obj.(*kapi.Endpoints)
 			name := ktypes.NamespacedName{Namespace: ep.Namespace, Name: ep.Name}
@@ -73,7 +70,6 @@ func initLoadBalancerHealthChecker(nodeName string, wf *factory.WatchFactory) er
 			_ = server.SyncEndpoints(endpoints)
 		},
 	}, nil)
-	return err
 }
 
 func countLocalEndpoints(ep *kapi.Endpoints, nodeName string) int {

@@ -34,6 +34,7 @@ const (
 	ovnSbctlCommand    = "ovn-sbctl"
 	ovnAppctlCommand   = "ovn-appctl"
 	ovsdbClientCommand = "ovsdb-client"
+	ovsdbToolCommand   = "ovsdb-tool"
 	arpingCommand      = "arping"
 	ipCommand          = "ip"
 	powershellCommand  = "powershell"
@@ -119,6 +120,7 @@ type execHelper struct {
 	sbctlPath       string
 	ovnctlPath      string
 	ovsdbClientPath string
+	ovsdbToolPath   string
 	ovnRunDir       string
 	ipPath          string
 	arpingPath      string
@@ -216,6 +218,10 @@ func SetExec(exec kexec.Interface) error {
 		return err
 	}
 	runner.ovsdbClientPath, err = exec.LookPath(ovsdbClientCommand)
+	if err != nil {
+		return err
+	}
+	runner.ovsdbToolPath, err = exec.LookPath(ovsdbToolCommand)
 	if err != nil {
 		return err
 	}
@@ -511,6 +517,12 @@ func RunOVNSbctlWithTimeout(timeout int, args ...string) (string, string,
 // RunOVSDBClient runs an 'ovsdb-client [OPTIONS] COMMAND [ARG...] command'.
 func RunOVSDBClient(args ...string) (string, string, error) {
 	stdout, stderr, err := runOVNretry(runner.ovsdbClientPath, nil, args...)
+	return strings.Trim(strings.TrimSpace(stdout.String()), "\""), stderr.String(), err
+}
+
+// RunOVSDBTool runs an 'ovsdb-tool [OPTIONS] COMMAND [ARG...] command'.
+func RunOVSDBTool(args ...string) (string, string, error) {
+	stdout, stderr, err := run(runner.ovsdbToolPath, args...)
 	return strings.Trim(strings.TrimSpace(stdout.String()), "\""), stderr.String(), err
 }
 

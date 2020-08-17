@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"os/signal"
+	"sync"
 	"syscall"
 
 	"github.com/urfave/cli/v2"
@@ -115,15 +116,16 @@ func runHybridOverlay(ctx *cli.Context) error {
 	}
 
 	f.Start(stopChan)
+	wg := &sync.WaitGroup{}
+	wg.Add(1)
 	go func() {
-		err := n.Run(stopChan)
-		if err != nil {
-			klog.Error(err)
-		}
+		defer wg.Done()
+		n.Run(stopChan)
 	}()
 
 	// run until cancelled
 	<-ctx.Context.Done()
 	close(stopChan)
+	wg.Wait()
 	return nil
 }

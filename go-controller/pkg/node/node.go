@@ -9,6 +9,7 @@ import (
 	"reflect"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	honode "github.com/ovn-org/ovn-kubernetes/go-controller/hybrid-overlay/pkg/controller"
@@ -159,7 +160,7 @@ func isOVNControllerReady(name string) (bool, error) {
 
 // Start learns the subnets assigned to it by the master controller
 // and calls the SetupNode script which establishes the logical switch
-func (n *OvnNode) Start() error {
+func (n *OvnNode) Start(wg *sync.WaitGroup) error {
 	var err error
 	var node *kapi.Node
 	var subnets []*net.IPNet
@@ -244,11 +245,10 @@ func (n *OvnNode) Start() error {
 		if err != nil {
 			return err
 		}
+		wg.Add(1)
 		go func() {
-			err := nodeController.Run(n.stopChan)
-			if err != nil {
-				klog.Error(err)
-			}
+			defer wg.Done()
+			nodeController.Run(n.stopChan)
 		}()
 	}
 
@@ -272,10 +272,7 @@ func (n *OvnNode) Start() error {
 	if !ok {
 		return fmt.Errorf("cannot get kubeclient for starting CNI server")
 	}
-	err = n.WatchEndpoints()
-	if err != nil {
-		return err
-	}
+	n.WatchEndpoints()
 
 	// start the cni server
 	cniServer := cni.NewCNIServer("", kclient.KClient)
@@ -284,8 +281,8 @@ func (n *OvnNode) Start() error {
 	return err
 }
 
-func (n *OvnNode) WatchEndpoints() error {
-	_, err := n.watchFactory.AddEndpointsHandler(cache.ResourceEventHandlerFuncs{
+func (n *OvnNode) WatchEndpoints() {
+	n.watchFactory.AddEndpointsHandler(cache.ResourceEventHandlerFuncs{
 		UpdateFunc: func(old, new interface{}) {
 			epNew := new.(*kapi.Endpoints)
 			epOld := old.(*kapi.Endpoints)
@@ -313,7 +310,6 @@ func (n *OvnNode) WatchEndpoints() error {
 			}
 		},
 	}, nil)
-	return err
 }
 
 type epAddressItem struct {

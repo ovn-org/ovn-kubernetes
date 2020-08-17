@@ -558,8 +558,10 @@ func (oc *Controller) handleLocalPodSelectorDelFunc(
 func (oc *Controller) handleLocalPodSelector(
 	policy *knet.NetworkPolicy, np *namespacePolicy) {
 
-	h, err := oc.watchFactory.AddFilteredPodHandler(policy.Namespace,
-		&policy.Spec.PodSelector,
+	// NetworkPolicy is validated by the apiserver; this can't fail.
+	sel, _ := metav1.LabelSelectorAsSelector(&policy.Spec.PodSelector)
+
+	h := oc.watchFactory.AddFilteredPodHandler(policy.Namespace, sel,
 		cache.ResourceEventHandlerFuncs{
 			AddFunc: func(obj interface{}) {
 				oc.handleLocalPodSelectorAddFunc(policy, np, obj)
@@ -571,11 +573,6 @@ func (oc *Controller) handleLocalPodSelector(
 				oc.handleLocalPodSelectorAddFunc(policy, np, newObj)
 			},
 		}, nil)
-	if err != nil {
-		klog.Errorf("Error watching local pods for policy %s in namespace %s: %v",
-			policy.Name, policy.Namespace, err)
-		return
-	}
 
 	np.podHandlerList = append(np.podHandlerList, h)
 }
@@ -804,8 +801,10 @@ func (oc *Controller) handlePeerPodSelector(
 	policy *knet.NetworkPolicy, podSelector *metav1.LabelSelector,
 	gp *gressPolicy, np *namespacePolicy) {
 
-	h, err := oc.watchFactory.AddFilteredPodHandler(policy.Namespace,
-		podSelector,
+	// NetworkPolicy is validated by the apiserver; this can't fail.
+	sel, _ := metav1.LabelSelectorAsSelector(podSelector)
+
+	h := oc.watchFactory.AddFilteredPodHandler(policy.Namespace, sel,
 		cache.ResourceEventHandlerFuncs{
 			AddFunc: func(obj interface{}) {
 				oc.handlePeerPodSelectorAddUpdate(gp, obj)
@@ -817,12 +816,6 @@ func (oc *Controller) handlePeerPodSelector(
 				oc.handlePeerPodSelectorAddUpdate(gp, newObj)
 			},
 		}, nil)
-	if err != nil {
-		klog.Errorf("Error watching peer pods for policy %s in namespace %s: %v",
-			policy.Name, policy.Namespace, err)
-		return
-	}
-
 	np.podHandlerList = append(np.podHandlerList, h)
 }
 
@@ -832,8 +825,12 @@ func (oc *Controller) handlePeerNamespaceAndPodSelector(
 	podSelector *metav1.LabelSelector,
 	gp *gressPolicy,
 	np *namespacePolicy) {
-	namespaceHandler, err := oc.watchFactory.AddFilteredNamespaceHandler("",
-		namespaceSelector,
+
+	// NetworkPolicy is validated by the apiserver; this can't fail.
+	nsSel, _ := metav1.LabelSelectorAsSelector(namespaceSelector)
+	podSel, _ := metav1.LabelSelectorAsSelector(podSelector)
+
+	namespaceHandler := oc.watchFactory.AddFilteredNamespaceHandler("", nsSel,
 		cache.ResourceEventHandlerFuncs{
 			AddFunc: func(obj interface{}) {
 				namespace := obj.(*kapi.Namespace)
@@ -846,8 +843,7 @@ func (oc *Controller) handlePeerNamespaceAndPodSelector(
 
 				// The AddFilteredPodHandler call might call handlePeerPodSelectorAddUpdate
 				// on existing pods so we can't be holding the lock at this point
-				podHandler, err := oc.watchFactory.AddFilteredPodHandler(namespace.Name,
-					podSelector,
+				podHandler := oc.watchFactory.AddFilteredPodHandler(namespace.Name, podSel,
 					cache.ResourceEventHandlerFuncs{
 						AddFunc: func(obj interface{}) {
 							oc.handlePeerPodSelectorAddUpdate(gp, obj)
@@ -859,14 +855,10 @@ func (oc *Controller) handlePeerNamespaceAndPodSelector(
 							oc.handlePeerPodSelectorAddUpdate(gp, newObj)
 						},
 					}, nil)
-				if err != nil {
-					klog.Errorf("Error watching pods in namespace %s for policy %s: %v", namespace.Name, policy.Name, err)
-					return
-				}
 				np.Lock()
 				defer np.Unlock()
 				if np.deleted {
-					_ = oc.watchFactory.RemovePodHandler(podHandler)
+					oc.watchFactory.RemovePodHandler(podHandler)
 					return
 				}
 				np.podHandlerList = append(np.podHandlerList, podHandler)
@@ -876,11 +868,6 @@ func (oc *Controller) handlePeerNamespaceAndPodSelector(
 			UpdateFunc: func(oldObj, newObj interface{}) {
 			},
 		}, nil)
-	if err != nil {
-		klog.Errorf("Error watching namespaces for policy %s: %v",
-			policy.Name, err)
-		return
-	}
 	np.nsHandlerList = append(np.nsHandlerList, namespaceHandler)
 }
 
@@ -889,8 +876,10 @@ func (oc *Controller) handlePeerNamespaceSelector(
 	namespaceSelector *metav1.LabelSelector,
 	gress *gressPolicy, np *namespacePolicy) {
 
-	h, err := oc.watchFactory.AddFilteredNamespaceHandler("",
-		namespaceSelector,
+	// NetworkPolicy is validated by the apiserver; this can't fail.
+	sel, _ := metav1.LabelSelectorAsSelector(namespaceSelector)
+
+	h := oc.watchFactory.AddFilteredNamespaceHandler("", sel,
 		cache.ResourceEventHandlerFuncs{
 			AddFunc: func(obj interface{}) {
 				namespace := obj.(*kapi.Namespace)
@@ -911,20 +900,14 @@ func (oc *Controller) handlePeerNamespaceSelector(
 			UpdateFunc: func(oldObj, newObj interface{}) {
 			},
 		}, nil)
-	if err != nil {
-		klog.Errorf("Error watching namespaces for policy %s: %v",
-			policy.Name, err)
-		return
-	}
-
 	np.nsHandlerList = append(np.nsHandlerList, h)
 }
 
 func (oc *Controller) shutdownHandlers(np *namespacePolicy) {
 	for _, handler := range np.podHandlerList {
-		_ = oc.watchFactory.RemovePodHandler(handler)
+		oc.watchFactory.RemovePodHandler(handler)
 	}
 	for _, handler := range np.nsHandlerList {
-		_ = oc.watchFactory.RemoveNamespaceHandler(handler)
+		oc.watchFactory.RemoveNamespaceHandler(handler)
 	}
 }

@@ -25,8 +25,8 @@ type egressIPLocal struct {
 	defaultGatewayIntf string
 }
 
-func (n *OvnNode) watchEgressIP(egressIPLocal *egressIPLocal) error {
-	_, err := n.watchFactory.AddEgressIPHandler(cache.ResourceEventHandlerFuncs{
+func (n *OvnNode) watchEgressIP(egressIPLocal *egressIPLocal) {
+	n.watchFactory.AddEgressIPHandler(cache.ResourceEventHandlerFuncs{
 		AddFunc: func(obj interface{}) {
 			eIP := obj.(*egressipv1.EgressIP)
 			if err := egressIPLocal.addEgressIP(eIP); err != nil {
@@ -52,7 +52,6 @@ func (n *OvnNode) watchEgressIP(egressIPLocal *egressIPLocal) error {
 			}
 		},
 	}, egressIPLocal.syncEgressIPs)
-	return err
 }
 
 func (e *egressIPLocal) isNodeIP(link netlink.Link, addr *netlink.Addr) (bool, error) {
