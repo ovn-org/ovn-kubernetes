@@ -112,7 +112,7 @@ var _ = Describe("Local gateway mode EgressIP Operations with", func() {
 				fakeOvn.fakeExec.AddFakeCmdsNoOutputNoError(
 					[]string{
 						fmt.Sprintf("ovn-nbctl --timeout=15 --format=csv --data=bare --no-heading --columns=_uuid find logical_router_policy match=\"%s\" priority=%s external_ids:name=%s", fmt.Sprintf("ip6.src == %s", egressPod.Status.PodIP), egressIPReroutePriority, eIP.Name),
-						fmt.Sprintf("ovn-nbctl --timeout=15 --id=@lr-policy create logical_router_policy action=reroute match=\"%s\" priority=%s nexthop=%s external_ids:name=%s pkt_mark=%v -- add logical_router %s policies @lr-policy", fmt.Sprintf("ip6.src == %s", egressPod.Status.PodIP), egressIPReroutePriority, nodeLogicalRouterIPv6, eIP.Name, mark, ovnClusterRouter),
+						fmt.Sprintf("ovn-nbctl --timeout=15 --id=@lr-policy create logical_router_policy action=reroute match=\"%s\" priority=%s nexthop=%s external_ids:name=%s options:pkt_mark=%v -- add logical_router %s policies @lr-policy", fmt.Sprintf("ip6.src == %s", egressPod.Status.PodIP), egressIPReroutePriority, nodeLogicalRouterIPv6, eIP.Name, mark, ovnClusterRouter),
 					},
 				)
 
@@ -203,7 +203,7 @@ var _ = Describe("Local gateway mode EgressIP Operations with", func() {
 				fakeOvn.fakeExec.AddFakeCmdsNoOutputNoError(
 					[]string{
 						fmt.Sprintf("ovn-nbctl --timeout=15 --format=csv --data=bare --no-heading --columns=_uuid find logical_router_policy match=\"%s\" priority=%s external_ids:name=%s", fmt.Sprintf("ip6.src == %s", egressPod.Status.PodIP), egressIPReroutePriority, eIP.Name),
-						fmt.Sprintf("ovn-nbctl --timeout=15 --id=@lr-policy create logical_router_policy action=reroute match=\"%s\" priority=%s nexthop=%s external_ids:name=%s pkt_mark=%v -- add logical_router %s policies @lr-policy", fmt.Sprintf("ip6.src == %s", egressPod.Status.PodIP), egressIPReroutePriority, nodeLogicalRouterIPv6, eIP.Name, mark, ovnClusterRouter),
+						fmt.Sprintf("ovn-nbctl --timeout=15 --id=@lr-policy create logical_router_policy action=reroute match=\"%s\" priority=%s nexthop=%s external_ids:name=%s options:pkt_mark=%v -- add logical_router %s policies @lr-policy", fmt.Sprintf("ip6.src == %s", egressPod.Status.PodIP), egressIPReroutePriority, nodeLogicalRouterIPv6, eIP.Name, mark, ovnClusterRouter),
 					},
 				)
 
@@ -300,7 +300,7 @@ var _ = Describe("Local gateway mode EgressIP Operations with", func() {
 				fakeOvn.fakeExec.AddFakeCmdsNoOutputNoError(
 					[]string{
 						fmt.Sprintf("ovn-nbctl --timeout=15 --format=csv --data=bare --no-heading --columns=_uuid find logical_router_policy match=\"%s\" priority=%s external_ids:name=%s", fmt.Sprintf("ip6.src == %s", podV6IP), egressIPReroutePriority, eIP.Name),
-						fmt.Sprintf("ovn-nbctl --timeout=15 --id=@lr-policy create logical_router_policy action=reroute match=\"%s\" priority=%s nexthop=%s external_ids:name=%s pkt_mark=%v -- add logical_router %s policies @lr-policy", fmt.Sprintf("ip6.src == %s", podV6IP), egressIPReroutePriority, nodeLogicalRouterIPv6, eIP.Name, mark, ovnClusterRouter),
+						fmt.Sprintf("ovn-nbctl --timeout=15 --id=@lr-policy create logical_router_policy action=reroute match=\"%s\" priority=%s nexthop=%s external_ids:name=%s options:pkt_mark=%v -- add logical_router %s policies @lr-policy", fmt.Sprintf("ip6.src == %s", podV6IP), egressIPReroutePriority, nodeLogicalRouterIPv6, eIP.Name, mark, ovnClusterRouter),
 					},
 				)
 
@@ -429,7 +429,7 @@ var _ = Describe("Local gateway mode EgressIP Operations with", func() {
 				fakeOvn.fakeExec.AddFakeCmdsNoOutputNoError(
 					[]string{
 						fmt.Sprintf("ovn-nbctl --timeout=15 --format=csv --data=bare --no-heading --columns=_uuid find logical_router_policy match=\"%s\" priority=%s external_ids:name=%s", fmt.Sprintf("ip6.src == %s", egressPod.Status.PodIP), egressIPReroutePriority, eIP.Name),
-						fmt.Sprintf("ovn-nbctl --timeout=15 --id=@lr-policy create logical_router_policy action=reroute match=\"%s\" priority=%s nexthop=%s external_ids:name=%s pkt_mark=%v -- add logical_router %s policies @lr-policy", fmt.Sprintf("ip6.src == %s", egressPod.Status.PodIP), egressIPReroutePriority, nodeLogicalRouterIPv6, eIP.Name, mark, ovnClusterRouter),
+						fmt.Sprintf("ovn-nbctl --timeout=15 --id=@lr-policy create logical_router_policy action=reroute match=\"%s\" priority=%s nexthop=%s external_ids:name=%s options:pkt_mark=%v -- add logical_router %s policies @lr-policy", fmt.Sprintf("ip6.src == %s", egressPod.Status.PodIP), egressIPReroutePriority, nodeLogicalRouterIPv6, eIP.Name, mark, ovnClusterRouter),
 					},
 				)
 
@@ -583,7 +583,7 @@ var _ = Describe("Local gateway mode EgressIP Operations with", func() {
 				fakeOvn.fakeExec.AddFakeCmdsNoOutputNoError(
 					[]string{
 						fmt.Sprintf("ovn-nbctl --timeout=15 --format=csv --data=bare --no-heading --columns=_uuid find logical_router_policy match=\"%s\" priority=%s external_ids:name=%s", fmt.Sprintf("ip6.src == %s", egressPod.Status.PodIP), egressIPReroutePriority, eIP.Name),
-						fmt.Sprintf("ovn-nbctl --timeout=15 --id=@lr-policy create logical_router_policy action=reroute match=\"%s\" priority=%s nexthop=%s external_ids:name=%s pkt_mark=%v -- add logical_router %s policies @lr-policy", fmt.Sprintf("ip6.src == %s", egressPod.Status.PodIP), egressIPReroutePriority, nodeLogicalRouterIPv6, eIP.Name, mark, ovnClusterRouter),
+						fmt.Sprintf("ovn-nbctl --timeout=15 --id=@lr-policy create logical_router_policy action=reroute match=\"%s\" priority=%s nexthop=%s external_ids:name=%s options:pkt_mark=%v -- add logical_router %s policies @lr-policy", fmt.Sprintf("ip6.src == %s", egressPod.Status.PodIP), egressIPReroutePriority, nodeLogicalRouterIPv6, eIP.Name, mark, ovnClusterRouter),
 					},
 				)
 
@@ -630,7 +630,7 @@ var _ = Describe("Local gateway mode EgressIP Operations with", func() {
 				fakeOvn.fakeExec.AddFakeCmdsNoOutputNoError(
 					[]string{
 						fmt.Sprintf("ovn-nbctl --timeout=15 --format=csv --data=bare --no-heading --columns=_uuid find logical_router_policy match=\"%s\" priority=%s external_ids:name=%s", fmt.Sprintf("ip6.src == %s", egressPod.Status.PodIP), egressIPReroutePriority, eIP.Name),
-						fmt.Sprintf("ovn-nbctl --timeout=15 --id=@lr-policy create logical_router_policy action=reroute match=\"%s\" priority=%s nexthop=%s external_ids:name=%s pkt_mark=%v -- add logical_router %s policies @lr-policy", fmt.Sprintf("ip6.src == %s", egressPod.Status.PodIP), egressIPReroutePriority, nodeLogicalRouterIPv6, eIP.Name, mark, ovnClusterRouter),
+						fmt.Sprintf("ovn-nbctl --timeout=15 --id=@lr-policy create logical_router_policy action=reroute match=\"%s\" priority=%s nexthop=%s external_ids:name=%s options:pkt_mark=%v -- add logical_router %s policies @lr-policy", fmt.Sprintf("ip6.src == %s", egressPod.Status.PodIP), egressIPReroutePriority, nodeLogicalRouterIPv6, eIP.Name, mark, ovnClusterRouter),
 					},
 				)
 

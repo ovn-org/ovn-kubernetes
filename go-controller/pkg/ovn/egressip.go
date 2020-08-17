@@ -447,7 +447,7 @@ func (e *egressIPMode) createEgressPolicy(podIps []net.IP, status egressipv1.Egr
 					fmt.Sprintf("priority=%v", egressIPReroutePriority),
 					fmt.Sprintf("nexthop=%s", gatewayRouterIP),
 					fmt.Sprintf("external_ids:name=%s", egressIPName),
-					fmt.Sprintf("pkt_mark=%v", packetMark),
+					fmt.Sprintf("options:pkt_mark=%v", packetMark),
 					"--",
 					"add",
 					"logical_router",
