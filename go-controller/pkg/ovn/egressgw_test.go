@@ -80,7 +80,7 @@ var _ = Describe("OVN Egress Gateway Operations", func() {
 				t.populateLogicalSwitchCache(fakeOvn)
 				t.addPodDenyMcast(fExec)
 				fExec.AddFakeCmd(&ovntest.ExpectedCmd{
-					Cmd:    "ovn-nbctl --timeout=15 --may-exist --policy=src-ip --ecmp lr-route-add GR_node1 10.128.1.3/32 9.0.0.1",
+					Cmd:    "ovn-nbctl --timeout=15 --may-exist --policy=src-ip --ecmp-symmetric-reply lr-route-add GR_node1 10.128.1.3/32 9.0.0.1",
 					Output: "\n",
 				})
 				fakeOvn.controller.WatchNamespaces()
@@ -127,11 +127,11 @@ var _ = Describe("OVN Egress Gateway Operations", func() {
 				t.populateLogicalSwitchCache(fakeOvn)
 				t.addPodDenyMcast(fExec)
 				fExec.AddFakeCmd(&ovntest.ExpectedCmd{
-					Cmd:    "ovn-nbctl --timeout=15 --may-exist --policy=src-ip --ecmp lr-route-add GR_node1 10.128.1.3/32 9.0.0.1",
+					Cmd:    "ovn-nbctl --timeout=15 --may-exist --policy=src-ip --ecmp-symmetric-reply lr-route-add GR_node1 10.128.1.3/32 9.0.0.1",
 					Output: "\n",
 				})
 				fExec.AddFakeCmd(&ovntest.ExpectedCmd{
-					Cmd:    "ovn-nbctl --timeout=15 --may-exist --policy=src-ip --ecmp lr-route-add GR_node1 10.128.1.3/32 9.0.0.2",
+					Cmd:    "ovn-nbctl --timeout=15 --may-exist --policy=src-ip --ecmp-symmetric-reply lr-route-add GR_node1 10.128.1.3/32 9.0.0.2",
 					Output: "\n",
 				})
 				fakeOvn.controller.WatchNamespaces()
@@ -178,11 +178,11 @@ var _ = Describe("OVN Egress Gateway Operations", func() {
 				t.populateLogicalSwitchCache(fakeOvn)
 				t.addPodDenyMcast(fExec)
 				fExec.AddFakeCmd(&ovntest.ExpectedCmd{
-					Cmd:    "ovn-nbctl --timeout=15 --may-exist --policy=src-ip --ecmp lr-route-add GR_node1 10.128.1.3/32 9.0.0.1",
+					Cmd:    "ovn-nbctl --timeout=15 --may-exist --policy=src-ip --ecmp-symmetric-reply lr-route-add GR_node1 10.128.1.3/32 9.0.0.1",
 					Output: "\n",
 				})
 				fExec.AddFakeCmd(&ovntest.ExpectedCmd{
-					Cmd:    "ovn-nbctl --timeout=15 --may-exist --policy=src-ip --ecmp lr-route-add GR_node1 10.128.1.3/32 9.0.0.2",
+					Cmd:    "ovn-nbctl --timeout=15 --may-exist --policy=src-ip --ecmp-symmetric-reply lr-route-add GR_node1 10.128.1.3/32 9.0.0.2",
 					Output: "\n",
 				})
 				fakeOvn.controller.WatchNamespaces()
@@ -243,11 +243,11 @@ var _ = Describe("OVN Egress Gateway Operations", func() {
 				t.populateLogicalSwitchCache(fakeOvn)
 				t.addPodDenyMcast(fExec)
 				fExec.AddFakeCmd(&ovntest.ExpectedCmd{
-					Cmd:    "ovn-nbctl --timeout=15 --may-exist --policy=src-ip --ecmp lr-route-add GR_node1 10.128.1.3/32 9.0.0.1",
+					Cmd:    "ovn-nbctl --timeout=15 --may-exist --policy=src-ip --ecmp-symmetric-reply lr-route-add GR_node1 10.128.1.3/32 9.0.0.1",
 					Output: "\n",
 				})
 				fExec.AddFakeCmd(&ovntest.ExpectedCmd{
-					Cmd:    "ovn-nbctl --timeout=15 --may-exist --policy=src-ip --ecmp lr-route-add GR_node1 10.128.1.3/32 9.0.0.2",
+					Cmd:    "ovn-nbctl --timeout=15 --may-exist --policy=src-ip --ecmp-symmetric-reply lr-route-add GR_node1 10.128.1.3/32 9.0.0.2",
 					Output: "\n",
 				})
 				fakeOvn.controller.WatchNamespaces()
@@ -315,7 +315,7 @@ var _ = Describe("OVN Egress Gateway Operations", func() {
 				_, err := fakeOvn.fakeClient.CoreV1().Pods(t.namespace).Create(context.TODO(), newPod(t.namespace, t.podName, t.nodeName, t.podIP), metav1.CreateOptions{})
 				Expect(err).NotTo(HaveOccurred())
 				fExec.AddFakeCmd(&ovntest.ExpectedCmd{
-					Cmd:    "ovn-nbctl --timeout=15 --may-exist --policy=src-ip --ecmp lr-route-add GR_node1 10.128.1.3/32 9.0.0.1",
+					Cmd:    "ovn-nbctl --timeout=15 --may-exist --policy=src-ip --ecmp-symmetric-reply lr-route-add GR_node1 10.128.1.3/32 9.0.0.1",
 					Output: "\n",
 				})
 				Eventually(func() string { return getPodAnnotations(fakeOvn.fakeClient, t.namespace, t.podName) }, 2).Should(MatchJSON(`{"default": {"ip_addresses":["` + t.podIP + `/24"], "mac_address":"` + t.podMAC + `", "gateway_ips": ["` + t.nodeGWIP + `"], "ip_address":"` + t.podIP + `/24", "gateway_ip": "` + t.nodeGWIP + `"}}`))
@@ -366,7 +366,7 @@ var _ = Describe("OVN Egress Gateway Operations", func() {
 				_, err := fakeOvn.fakeClient.CoreV1().Pods(namespaceX.Name).Create(context.TODO(), &gwPod, metav1.CreateOptions{})
 				Expect(err).NotTo(HaveOccurred())
 				fExec.AddFakeCmd(&ovntest.ExpectedCmd{
-					Cmd:    "ovn-nbctl --timeout=15 -- --may-exist --policy=src-ip --ecmp lr-route-add GR_node1 10.128.1.3/32 9.0.0.1",
+					Cmd:    "ovn-nbctl --timeout=15 -- --may-exist --policy=src-ip --ecmp-symmetric-reply lr-route-add GR_node1 10.128.1.3/32 9.0.0.1",
 					Output: "\n",
 				})
 				Eventually(fExec.CalledMatchesExpected).Should(BeTrue(), fExec.ErrorDesc)
@@ -423,7 +423,7 @@ var _ = Describe("OVN Egress Gateway Operations", func() {
 				_, err = fakeOvn.fakeClient.CoreV1().Pods(t.namespace).Create(context.TODO(), newPod(t.namespace, t.podName, t.nodeName, t.podIP), metav1.CreateOptions{})
 				Expect(err).NotTo(HaveOccurred())
 				fExec.AddFakeCmd(&ovntest.ExpectedCmd{
-					Cmd:    "ovn-nbctl --timeout=15 --may-exist --policy=src-ip --ecmp lr-route-add GR_node1 10.128.1.3/32 11.0.0.1",
+					Cmd:    "ovn-nbctl --timeout=15 --may-exist --policy=src-ip --ecmp-symmetric-reply lr-route-add GR_node1 10.128.1.3/32 11.0.0.1",
 					Output: "\n",
 				})
 				Eventually(func() string { return getPodAnnotations(fakeOvn.fakeClient, t.namespace, t.podName) }, 2).Should(MatchJSON(`{"default": {"ip_addresses":["` + t.podIP + `/24"], "mac_address":"` + t.podMAC + `", "gateway_ips": ["` + t.nodeGWIP + `"], "ip_address":"` + t.podIP + `/24", "gateway_ip": "` + t.nodeGWIP + `"}}`))
@@ -474,7 +474,7 @@ var _ = Describe("OVN Egress Gateway Operations", func() {
 				_, err := fakeOvn.fakeClient.CoreV1().Pods(namespaceX.Name).Create(context.TODO(), &gwPod, metav1.CreateOptions{})
 				Expect(err).NotTo(HaveOccurred())
 				fExec.AddFakeCmd(&ovntest.ExpectedCmd{
-					Cmd:    "ovn-nbctl --timeout=15 -- --may-exist --policy=src-ip --ecmp lr-route-add GR_node1 10.128.1.3/32 9.0.0.1",
+					Cmd:    "ovn-nbctl --timeout=15 -- --may-exist --policy=src-ip --ecmp-symmetric-reply lr-route-add GR_node1 10.128.1.3/32 9.0.0.1",
 					Output: "\n",
 				})
 				Eventually(fExec.CalledMatchesExpected).Should(BeTrue(), fExec.ErrorDesc)

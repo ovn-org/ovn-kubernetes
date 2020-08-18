@@ -103,7 +103,7 @@ func (oc *Controller) addGWRoutesForNamespace(namespace string, gws []net.IP, ns
 		for _, gw := range gws {
 			for _, podIP := range pod.Status.PodIPs {
 				mask := GetIPFullMask(podIP.IP)
-				_, stderr, err := util.RunOVNNbctl("--", "--may-exist", "--policy=src-ip", "--ecmp",
+				_, stderr, err := util.RunOVNNbctl("--", "--may-exist", "--policy=src-ip", "--ecmp-symmetric-reply",
 					"lr-route-add", gr, podIP.IP+mask, gw.String())
 				if err != nil {
 					return fmt.Errorf("unable to add src-ip route to GR router, stderr:%q, err:%v", stderr, err)
@@ -242,7 +242,7 @@ func (oc *Controller) addGWRoutesForPod(routingGWs []net.IP, podIfAddrs []*net.I
 		for _, podIPNet := range podIfAddrs {
 			podIP := podIPNet.IP.String()
 			mask := GetIPFullMask(podIP)
-			_, stderr, err := util.RunOVNNbctl("--may-exist", "--policy=src-ip", "--ecmp",
+			_, stderr, err := util.RunOVNNbctl("--may-exist", "--policy=src-ip", "--ecmp-symmetric-reply",
 				"lr-route-add", gr, podIP+mask, gw)
 			if err != nil {
 				return fmt.Errorf("unable to add external gw src-ip route to GR router, stderr:%q, err:%v", stderr, err)
