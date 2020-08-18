@@ -368,6 +368,7 @@ if [ "$KIND_HA" == true ]; then
 else
   run_kubectl apply -f ovnkube-db.yaml
 fi
+run_kubectl apply -f ovs-node.yaml
 run_kubectl apply -f ovnkube-master.yaml
 run_kubectl apply -f ovnkube-node.yaml
 popd
