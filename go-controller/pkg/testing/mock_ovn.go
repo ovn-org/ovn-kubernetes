@@ -3,6 +3,7 @@ package testing
 import (
 	"fmt"
 	"runtime"
+	"sync"
 	"syscall"
 
 	goovn "github.com/ebay/go-ovn"
@@ -48,6 +49,8 @@ type MockOVNClient struct {
 	// error injection
 	// keys are of the form: Table:Name:FieldType
 	errorCache map[string]error
+	// Mutex synchronizing MockOVNClient's cache and errorCache
+	mutex sync.Mutex
 	// represents connected client
 	connected bool
 }
@@ -94,6 +97,8 @@ func (mock *MockOVNClient) Close() error {
 }
 
 func (mock *MockOVNClient) ExecuteMockCommand(e *MockExecution) error {
+	mock.mutex.Lock()
+	defer mock.mutex.Unlock()
 	var (
 		cache MockObjectCacheByName
 		ok    bool
@@ -169,6 +174,8 @@ func (mock *MockOVNClient) updateCache(table string, objName string, update Upda
 
 // insert a fake error to the cache
 func (mock *MockOVNClient) AddToErrorCache(table, name, fieldType string, err error) {
+	mock.mutex.Lock()
+	defer mock.mutex.Unlock()
 	mock.errorCache[fmt.Sprintf("%s:%s:%s", table, name, fieldType)] = err
 }
 
@@ -183,6 +190,8 @@ func (mock *MockOVNClient) retFromErrorCache(table, name, fieldType string) erro
 
 // delete an instance of fake error from cache
 func (mock *MockOVNClient) RemoveFromErrorCache(table, name, fieldType string) {
+	mock.mutex.Lock()
+	defer mock.mutex.Unlock()
 	key := fmt.Sprintf("%s:%s:%s", table, name, fieldType)
 	delete(mock.errorCache, key)
 }
