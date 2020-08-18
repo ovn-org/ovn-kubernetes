@@ -5,6 +5,12 @@ networking:
   disableDefaultCNI: true
   apiServerAddress: {{ ovn_apiServerAddress | default('0.0.0.0') }}
   apiServerPort: 11337
+{%- if net_cidr %}
+  podSubnet: "{{ net_cidr }}"
+{%- endif %}
+{%- if svc_cidr %}
+  serviceSubnet: "{{ svc_cidr }}"
+{%- endif %}
 {%- if ovn_ip_family %}
   ipFamily: {{ ovn_ip_family }}
 {%- endif %}
