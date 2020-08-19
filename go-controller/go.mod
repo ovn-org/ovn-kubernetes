@@ -24,6 +24,7 @@ require (
 	github.com/onsi/gomega v1.8.1
 	github.com/prometheus/client_golang v1.2.1
 	github.com/satori/go.uuid v0.0.0-20181028125025-b2ce2384e17b // indirect
+	github.com/spf13/afero v1.2.2
 	github.com/stretchr/testify v1.4.0
 	github.com/urfave/cli/v2 v2.2.0
 	github.com/vishvananda/netlink v0.0.0-20200625175047-bca67dfc8220
