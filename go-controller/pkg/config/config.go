@@ -1082,9 +1082,10 @@ func buildGatewayConfig(ctx *cli.Context, cli, file *config) error {
 		if Gateway.NextHop != "" {
 			return fmt.Errorf("gateway next-hop option %q not allowed when gateway is disabled", Gateway.NextHop)
 		}
-		if Gateway.VLANID != 0 {
-			return fmt.Errorf("gateway VLAN ID option '%d' not allowed when gateway is disabled", Gateway.VLANID)
-		}
+	}
+
+	if Gateway.Mode != GatewayModeShared && Gateway.VLANID != 0 {
+		return fmt.Errorf("gateway VLAN ID option: %d is supported only in shared gateway mode", Gateway.VLANID)
 	}
 	return nil
 }
