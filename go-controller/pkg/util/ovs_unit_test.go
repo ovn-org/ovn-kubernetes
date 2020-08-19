@@ -2110,7 +2110,7 @@ func TestRunIP(t *testing.T) {
 	}
 }
 
-func TestAddNormalActionOFFlow(t *testing.T) {
+func TestAddFloodActionOFFlow(t *testing.T) {
 	mockKexecIface := new(mock_k8s_io_utils_exec.Interface)
 	mockCmd := new(mock_k8s_io_utils_exec.Cmd)
 	mockExecRunner := new(mocks.ExecRunner)
@@ -2169,7 +2169,7 @@ func TestAddNormalActionOFFlow(t *testing.T) {
 			}
 			mockCall.Once()
 
-			_, _, e := AddNormalActionOFFlow("somename")
+			_, _, e := AddFloodActionOFFlow("somename")
 
 			if tc.expectedErr != nil {
 				assert.Error(t, e)
