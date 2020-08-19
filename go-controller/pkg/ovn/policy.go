@@ -243,9 +243,8 @@ func (oc *Controller) createDefaultDenyPortGroup(policyType knet.PolicyType) err
 
 // Creates the match string used for ACLs allowing incoming multicast into a
 // namespace, that is, from IPs that are in the namespace's address set.
-func getMulticastACLMatch(ns string) string {
-	nsAddressSet := hashedAddressSet(ns)
-	return "ip4.src == $" + nsAddressSet + " && ip4.mcast"
+func getMulticastACLMatch(nsInfo *namespaceInfo) string {
+	return "ip4.src == $" + nsInfo.addressSet.GetIPv4HashName() + " && ip4.mcast"
 }
 
 // Creates a policy to allow multicast traffic within 'ns':
@@ -270,7 +269,7 @@ func (oc *Controller) createMulticastAllowPolicy(ns string, nsInfo *namespaceInf
 	}
 
 	err = addACLPortGroup(nsInfo.portGroupUUID, hashedPortGroup(ns), toLport,
-		defaultMcastAllowPriority, getMulticastACLMatch(ns), "allow",
+		defaultMcastAllowPriority, getMulticastACLMatch(nsInfo), "allow",
 		knet.PolicyTypeIngress)
 	if err != nil {
 		return fmt.Errorf("failed to create allow ingress multicast ACL for %s (%v)",
@@ -294,7 +293,7 @@ func (oc *Controller) createMulticastAllowPolicy(ns string, nsInfo *namespaceInf
 	return nil
 }
 
-func deleteMulticastACLs(ns, portGroupHash string) error {
+func deleteMulticastACLs(ns, portGroupHash string, nsInfo *namespaceInfo) error {
 	err := deleteACLPortGroup(portGroupHash, fromLport,
 		defaultMcastAllowPriority, "ip4.mcast", "allow",
 		knet.PolicyTypeEgress)
@@ -304,7 +303,7 @@ func deleteMulticastACLs(ns, portGroupHash string) error {
 	}
 
 	err = deleteACLPortGroup(portGroupHash, toLport,
-		defaultMcastAllowPriority, getMulticastACLMatch(ns), "allow",
+		defaultMcastAllowPriority, getMulticastACLMatch(nsInfo), "allow",
 		knet.PolicyTypeIngress)
 	if err != nil {
 		return fmt.Errorf("failed to delete allow ingress multicast ACL for %s (%v)",
@@ -318,7 +317,7 @@ func deleteMulticastACLs(ns, portGroupHash string) error {
 func deleteMulticastAllowPolicy(ns string, nsInfo *namespaceInfo) error {
 	portGroupHash := hashedPortGroup(ns)
 
-	err := deleteMulticastACLs(ns, portGroupHash)
+	err := deleteMulticastACLs(ns, portGroupHash, nsInfo)
 	if err != nil {
 		return err
 	}

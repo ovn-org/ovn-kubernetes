@@ -200,7 +200,7 @@ func (n networkPolicy) delPodCmds(fexec *ovntest.FakeExec, networkPolicy *knet.N
 
 type multicastPolicy struct{}
 
-func (p multicastPolicy) enableCmds(fExec *ovntest.FakeExec, ns string) {
+func (p multicastPolicy) enableCmds(fExec *ovntest.FakeExec, ns, nsAs string) {
 	pg_name := ns
 	pg_hash := hashedPortGroup(ns)
 
@@ -223,7 +223,7 @@ func (p multicastPolicy) enableCmds(fExec *ovntest.FakeExec, ns string) {
 			"-- add port_group fake_uuid acls @acl",
 	})
 
-	match = getMulticastACLMatch(ns)
+	match = "ip4.src == $" + hashedAddressSet(nsAs) + " && ip4.mcast"
 	match = getACLMatch(pg_hash, match, knet.PolicyTypeIngress)
 	fExec.AddFakeCmdsNoOutputNoError([]string{
 		"ovn-nbctl --timeout=15 --data=bare --no-heading --columns=_uuid find ACL " +
@@ -236,7 +236,7 @@ func (p multicastPolicy) enableCmds(fExec *ovntest.FakeExec, ns string) {
 	})
 }
 
-func (p multicastPolicy) disableCmds(fExec *ovntest.FakeExec, ns string) {
+func (p multicastPolicy) disableCmds(fExec *ovntest.FakeExec, ns, nsAs string) {
 	pg_hash := hashedPortGroup(ns)
 
 	match := getACLMatch(pg_hash, "ip4.mcast", knet.PolicyTypeEgress)
@@ -249,7 +249,7 @@ func (p multicastPolicy) disableCmds(fExec *ovntest.FakeExec, ns string) {
 		"ovn-nbctl --timeout=15 remove port_group " + pg_hash + " acls fake_uuid",
 	})
 
-	match = getMulticastACLMatch(ns)
+	match = "ip4.src == $" + hashedAddressSet(nsAs) + " && ip4.mcast"
 	match = getACLMatch(pg_hash, match, knet.PolicyTypeIngress)
 	fExec.AddFakeCmd(&ovntest.ExpectedCmd{
 		Cmd: "ovn-nbctl --timeout=15 --data=bare --no-heading --columns=_uuid find ACL " +
@@ -1186,14 +1186,14 @@ var _ = Describe("OVN NetworkPolicy Operations", func() {
 
 				// Enable multicast in the namespace.
 				mcastPolicy := multicastPolicy{}
-				mcastPolicy.enableCmds(fExec, namespace1.Name)
+				mcastPolicy.enableCmds(fExec, namespace1.Name, v4AddressSetName1)
 				ns.Annotations[nsMulticastAnnotation] = "true"
 				_, err = fakeOvn.fakeClient.CoreV1().Namespaces().Update(context.TODO(), ns, metav1.UpdateOptions{})
 				Expect(err).NotTo(HaveOccurred())
 				Eventually(fExec.CalledMatchesExpected).Should(BeTrue(), fExec.ErrorDesc)
 
 				// Disable multicast in the namespace.
-				mcastPolicy.disableCmds(fExec, namespace1.Name)
+				mcastPolicy.disableCmds(fExec, namespace1.Name, v4AddressSetName1)
 				ns.Annotations[nsMulticastAnnotation] = "false"
 				_, err = fakeOvn.fakeClient.CoreV1().Namespaces().Update(context.TODO(), ns, metav1.UpdateOptions{})
 				Expect(err).NotTo(HaveOccurred())
@@ -1244,7 +1244,7 @@ var _ = Describe("OVN NetworkPolicy Operations", func() {
 				Eventually(fExec.CalledMatchesExpected).Should(BeTrue(), fExec.ErrorDesc)
 				// Enable multicast in the namespace
 				mcastPolicy := multicastPolicy{}
-				mcastPolicy.enableCmds(fExec, namespace1.Name)
+				mcastPolicy.enableCmds(fExec, namespace1.Name, v4AddressSetName1)
 				// The pod should be added to the multicast allow port group.
 				mcastPolicy.addPodCmds(fExec, namespace1.Name)
 				ns.Annotations[nsMulticastAnnotation] = "true"
@@ -1293,7 +1293,7 @@ var _ = Describe("OVN NetworkPolicy Operations", func() {
 
 				// Enable multicast in the namespace.
 				mcastPolicy := multicastPolicy{}
-				mcastPolicy.enableCmds(fExec, namespace1.Name)
+				mcastPolicy.enableCmds(fExec, namespace1.Name, v4AddressSetName1)
 				ns.Annotations[nsMulticastAnnotation] = "true"
 				_, err = fakeOvn.fakeClient.CoreV1().Namespaces().Update(context.TODO(), ns, metav1.UpdateOptions{})
 				Expect(err).NotTo(HaveOccurred())
