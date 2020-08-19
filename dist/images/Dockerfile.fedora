@@ -25,10 +25,11 @@ RUN INSTALL_PKGS=" \
 	dnf install --best --refresh -y --setopt=tsflags=nodocs $INSTALL_PKGS && \
 	dnf clean all && rm -rf /var/cache/dnf/*
 
-# ensure we pick up ovn-20.06.1-6.fc31 for IP fixes in ovn-controller.
+# ensure we pick up ovn-20.06.1-7.fc31 for dual-stack, ECMP, and conntrack
+# optimizations.
 # This should have no effect in the future once the RPM has propagated
 # to all stable mirrors and can be removed
-RUN dnf install -y ovn --best --advisory=FEDORA-2020-c462afb312 || true
+RUN dnf install -y ovn --best --advisory=FEDORA-2020-d558018d54 || true
 
 RUN mkdir -p /var/run/openvswitch
 
