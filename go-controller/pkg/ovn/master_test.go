@@ -227,6 +227,10 @@ func addNodeportLBs(fexec *ovntest.FakeExec, nodeName, tcpLBUUID, udpLBUUID, sct
 	fexec.AddFakeCmdsNoOutputNoError([]string{
 		"ovn-nbctl --timeout=15 set logical_router " + gwRouterPrefix + nodeName + " load_balancer=" + tcpLBUUID +
 			"," + udpLBUUID + "," + sctpLBUUID,
+		"ovn-nbctl --timeout=15 get logical_switch " + nodeName + " load_balancer",
+		"ovn-nbctl --timeout=15 ls-lb-add " + nodeName + " " + tcpLBUUID,
+		"ovn-nbctl --timeout=15 ls-lb-add " + nodeName + " " + udpLBUUID,
+		"ovn-nbctl --timeout=15 ls-lb-add " + nodeName + " " + sctpLBUUID,
 	})
 }
 
