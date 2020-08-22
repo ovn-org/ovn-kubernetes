@@ -2,6 +2,7 @@ package ovn
 
 import (
 	"fmt"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
 	"net"
 	"strings"
 	"time"
@@ -227,6 +228,11 @@ func (oc *Controller) AddNamespace(ns *kapi.Namespace) {
 		klog.Errorf(err.Error())
 	}
 
+	// TODO(trozet) figure out if there is any possibility of detecting if a pod GW already exists, which
+	// is servicing this namespace. Right now that would mean searching through all pods, which is very inefficient.
+	// For now it is required that a pod serving as a gateway for a namespace is added AFTER the serving namespace is
+	// created
+
 	oc.multicastUpdateNamespace(ns, nsInfo)
 }
 
@@ -244,48 +250,49 @@ func (oc *Controller) updateNamespace(old, newer *kapi.Namespace) {
 	annotation = newer.Annotations[routingExternalGWsAnnotation]
 	oldAnnotation = old.Annotations[routingExternalGWsAnnotation]
 	if annotation != oldAnnotation {
-		var stderr string
-		var err error
-		for podIP, gwToGr := range nsInfo.podExternalRoutes {
-			for gw, gr := range gwToGr {
-				mask := GetIPFullMask(podIP)
-				_, stderr, err = util.RunOVNNbctl("--", "--if-exists", "--policy=src-ip",
-					"lr-route-del", gr, podIP+mask, gw)
-				if err != nil {
-					klog.Errorf("Unable to delete src-ip route to GR router, stderr:%q, err:%v", stderr, err)
-				} else {
-					delete(nsInfo.podExternalRoutes, podIP)
-				}
-			}
-		}
-		nsInfo.routingExternalGWs = nil
-		if annotation != "" {
-			nsInfo.routingExternalGWs, err = parseRoutingExternalGWAnnotation(annotation)
-			if err != nil {
-				klog.Errorf(err.Error())
-			}
-			if nsInfo.routingExternalGWs != nil {
+		// if old gw annotation was empty, new one must not be empty, so we should remove any per pod SNAT
+		if oldAnnotation == "" {
+			if config.Gateway.DisableSNATMultipleGWs && (len(nsInfo.routingExternalGWs) != 0 || len(nsInfo.routingExternalPodGWs) != 0) {
 				existingPods, err := oc.watchFactory.GetPods(old.Name)
 				if err != nil {
 					klog.Errorf("Failed to get all the pods (%v)", err)
+				}
+				for _, pod := range existingPods {
+					logicalPort := podLogicalPortName(pod)
+					portInfo, err := oc.logicalPortCache.get(logicalPort)
+					if err != nil {
+						klog.Warningf("Unable to get port %s in cache for SNAT rule removal", logicalPort)
+					} else {
+						oc.deletePerPodGRSNAT(pod.Spec.NodeName, portInfo.ips)
+					}
+				}
+			}
+		} else {
+			oc.deleteGWRoutesForNamespace(nsInfo)
+		}
+		exGateways, err := parseRoutingExternalGWAnnotation(annotation)
+		if err != nil {
+			klog.Error(err.Error())
+		} else {
+			err = oc.addExternalGWsForNamespace(exGateways, nsInfo, old.Name)
+			if err != nil {
+				klog.Error(err.Error())
+			}
+		}
+		// if new annotation is empty, exgws were removed, may need to add SNAT per pod
+		// check if there are any pod gateways serving this namespace as well
+		if annotation == "" && len(nsInfo.routingExternalPodGWs) == 0 && config.Gateway.DisableSNATMultipleGWs {
+			existingPods, err := oc.watchFactory.GetPods(old.Name)
+			if err != nil {
+				klog.Errorf("Failed to get all the pods (%v)", err)
+			}
+			for _, pod := range existingPods {
+				podAnnotation, err := util.UnmarshalPodAnnotation(pod.Annotations)
+				if err != nil {
+					klog.Error(err.Error())
 				} else {
-					for _, pod := range existingPods {
-						gr := "GR_" + pod.Spec.NodeName
-						for _, gw := range nsInfo.routingExternalGWs {
-							for _, podIP := range pod.Status.PodIPs {
-								mask := GetIPFullMask(podIP.IP)
-								_, stderr, err = util.RunOVNNbctl("--", "--may-exist", "--policy=src-ip", "--ecmp",
-									"lr-route-add", gr, podIP.IP+mask, gw.String())
-								if err != nil {
-									klog.Errorf("Unable to add src-ip route to GR router, stderr:%q, err:%v", stderr, err)
-								} else {
-									if nsInfo.podExternalRoutes[podIP.IP] == nil {
-										nsInfo.podExternalRoutes[podIP.IP] = make(map[string]string)
-									}
-									nsInfo.podExternalRoutes[podIP.IP][gw.String()] = gr
-								}
-							}
-						}
+					if err = oc.addPerPodGRSNAT(pod, podAnnotation.IPs); err != nil {
+						klog.Error(err.Error())
 					}
 				}
 			}
@@ -324,7 +331,7 @@ func (oc *Controller) deleteNamespace(ns *kapi.Namespace) {
 		return
 	}
 	defer nsInfo.Unlock()
-
+	oc.deleteGWRoutesForNamespace(nsInfo)
 	oc.multicastDeleteNamespace(ns, nsInfo)
 }
 

@@ -10,8 +10,21 @@
 
 all: ubuntu centos fedora
 
+SLASH = -
+ARCH = $(subst aarch64,arm64,$(subst x86_64,amd64,$(patsubst i%86,386,$(shell uname -m))))
+IMAGE_ARCH = $(SLASH)$(ARCH)
+DOCKERFILE_ARCH =
+ifeq ($(ARCH),arm64)
+        DOCKERFILE_ARCH=.arm64
+endif
+
+# The image of ovnkube/ovn-daemonset-u should be multi-arched before using it on arm64
 ubuntu: bld
-	docker build -t ovn-kube-u -f Dockerfile.ubuntu .
+	docker build -t ovn-kube-u$(IMAGE_ARCH) -f Dockerfile.ubuntu$(DOCKERFILE_ARCH) .
+ifeq ($(ARCH),amd64)
+	docker tag "ovn-kube-u$(IMAGE_ARCH):latest" \
+              "ovn-kube-u:latest"
+endif
 	# This is the default in the ovnkube*.yaml files
 	# docker login -u ovnkube docker.io/ovnkube
 	# docker push docker.io/ovnkube/ovn-daemonset-u:latest
@@ -50,6 +63,12 @@ fedora-dev: bld
                     --ovn-loglevel-nbctld="-vconsole:info" \
                     --ovn_nb_raft_election_timer="1000" \
                     --ovn_sb_raft_election_timer="1000"
+
+DOCKER_IMAGE_TAG = latest
+
+# Multi-arch the ubuntu based image with fat-manifest
+ubuntu-image-multi-arch:
+	./push_manifest.sh ovn-daemonset-u $(DOCKER_IMAGE_TAG)
 
 # This target expands the daemonset yaml templates into final form
 # Use CLI flags or environment variables to customize its behavior.

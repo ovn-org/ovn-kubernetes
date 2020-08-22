@@ -3,10 +3,15 @@ package util
 import (
 	"bytes"
 	"fmt"
+	"os"
 	"testing"
+
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
+	ovntest "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/testing"
 
 	mock_k8s_io_utils_exec "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/testing/mocks/k8s.io/utils/exec"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util/mocks"
+	"github.com/spf13/afero"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
 	kexec "k8s.io/utils/exec"
@@ -23,6 +28,648 @@ type onCallReturnArgs struct {
 	onCallMethodName    string
 	onCallMethodArgType []string
 	retArgList          []interface{}
+}
+
+func TestRunningPlatform(t *testing.T) {
+	// Below is defined in ovs.go file
+	AppFs = afero.NewMemMapFs()
+	AppFs.MkdirAll("/etc", 0755)
+	tests := []struct {
+		desc            string
+		fileContent     []byte
+		filePermissions os.FileMode
+		expOut          string
+		expErr          error
+	}{
+		{
+			desc:   "ReadFile returns error",
+			expErr: fmt.Errorf("failed to parse file"),
+		},
+		{
+			desc:            "failed to find platform name",
+			expErr:          fmt.Errorf("failed to find the platform name"),
+			fileContent:     []byte("NAME="),
+			filePermissions: 0755,
+		},
+		{
+			desc:            "platform name returned is RHEL",
+			expOut:          "RHEL",
+			fileContent:     []byte("NAME=\"CentOS Linux\""),
+			filePermissions: 0755,
+		},
+		{
+			desc:            "platform name returned is Ubuntu",
+			expOut:          "Ubuntu",
+			fileContent:     []byte("NAME=\"Debian\""),
+			filePermissions: 0755,
+		},
+		{
+			desc:            "platform name returned is Photon",
+			expOut:          "Photon",
+			fileContent:     []byte("NAME=\"VMware\""),
+			filePermissions: 0755,
+		},
+		{
+			desc:            "unknown platform",
+			expErr:          fmt.Errorf("unknown platform"),
+			fileContent:     []byte("NAME=\"blah\""),
+			filePermissions: 0755,
+		},
+	}
+	for i, tc := range tests {
+		t.Run(fmt.Sprintf("%d:%s", i, tc.desc), func(t *testing.T) {
+			if tc.fileContent != nil && tc.filePermissions != 0 {
+				afero.WriteFile(AppFs, "/etc/os-release", tc.fileContent, tc.filePermissions)
+				defer AppFs.Remove("/etc/os-release")
+			}
+			res, err := runningPlatform()
+			t.Log(res, err)
+			if tc.expErr != nil {
+				assert.Contains(t, err.Error(), tc.expErr.Error())
+			} else {
+				assert.Equal(t, res, tc.expOut)
+			}
+		})
+	}
+}
+
+func TestRunOVNretry(t *testing.T) {
+	mockKexecIface := new(mock_k8s_io_utils_exec.Interface)
+	mockExecRunner := new(mocks.ExecRunner)
+	mockCmd := new(mock_k8s_io_utils_exec.Cmd)
+	// Below is defined in ovs.go
+	ovnCmdRetryCount = 0
+	// below is defined in ovs.go
+	runCmdExecRunner = mockExecRunner
+	// note runner is defined in ovs.go file
+	runner = &execHelper{exec: mockKexecIface}
+
+	tests := []struct {
+		desc                    string
+		inpCmdPath              string
+		inpEnvVars              []string
+		errMatch                error
+		onRetArgsExecUtilsIface *onCallReturnArgs
+		onRetArgsKexecIface     *onCallReturnArgs
+	}{
+		{
+			desc:                    "test path when runWithEnvVars returns no error",
+			inpCmdPath:              runner.ovnctlPath,
+			inpEnvVars:              []string{},
+			onRetArgsExecUtilsIface: &onCallReturnArgs{"RunCmd", []string{"*mocks.Cmd", "string", "[]string"}, []interface{}{nil, nil, nil}},
+			onRetArgsKexecIface:     &onCallReturnArgs{"Command", []string{"string"}, []interface{}{mockCmd}},
+		},
+		{
+			desc:                    "test path when runWithEnvVars returns  \"Connection refused\" error",
+			inpCmdPath:              runner.ovnctlPath,
+			inpEnvVars:              []string{},
+			errMatch:                fmt.Errorf("connection refused"),
+			onRetArgsExecUtilsIface: &onCallReturnArgs{"RunCmd", []string{"*mocks.Cmd", "string", "[]string"}, []interface{}{nil, bytes.NewBuffer([]byte("Connection refused")), fmt.Errorf("connection refused")}},
+			onRetArgsKexecIface:     &onCallReturnArgs{"Command", []string{"string"}, []interface{}{mockCmd}},
+		},
+		{
+			desc:                    "test path when runWithEnvVars returns an error OTHER THAN \"Connection refused\" ",
+			inpCmdPath:              runner.ovnctlPath,
+			inpEnvVars:              []string{},
+			errMatch:                fmt.Errorf("OVN command"),
+			onRetArgsExecUtilsIface: &onCallReturnArgs{"RunCmd", []string{"*mocks.Cmd", "string", "[]string"}, []interface{}{nil, nil, fmt.Errorf("mock error")}},
+			onRetArgsKexecIface:     &onCallReturnArgs{"Command", []string{"string"}, []interface{}{mockCmd}},
+		},
+	}
+	for i, tc := range tests {
+		t.Run(fmt.Sprintf("%d:%s", i, tc.desc), func(t *testing.T) {
+			call := mockExecRunner.On(tc.onRetArgsExecUtilsIface.onCallMethodName)
+			for _, arg := range tc.onRetArgsExecUtilsIface.onCallMethodArgType {
+				call.Arguments = append(call.Arguments, mock.AnythingOfType(arg))
+			}
+			for _, ret := range tc.onRetArgsExecUtilsIface.retArgList {
+				call.ReturnArguments = append(call.ReturnArguments, ret)
+			}
+			call.Once()
+
+			ifaceCall := mockKexecIface.On(tc.onRetArgsKexecIface.onCallMethodName)
+			for _, arg := range tc.onRetArgsKexecIface.onCallMethodArgType {
+				ifaceCall.Arguments = append(ifaceCall.Arguments, mock.AnythingOfType(arg))
+			}
+			for _, ret := range tc.onRetArgsKexecIface.retArgList {
+				ifaceCall.ReturnArguments = append(ifaceCall.ReturnArguments, ret)
+			}
+			ifaceCall.Once()
+			_, _, e := runOVNretry(tc.inpCmdPath, tc.inpEnvVars)
+
+			if tc.errMatch != nil {
+				assert.Contains(t, e.Error(), tc.errMatch.Error())
+			} else {
+				assert.Nil(t, e)
+			}
+			mockExecRunner.AssertExpectations(t)
+			mockKexecIface.AssertExpectations(t)
+		})
+	}
+}
+
+func TestGetNbctlSocketPath(t *testing.T) {
+	// Below is defined in ovs.go file
+	AppFs = afero.NewMemMapFs()
+
+	tests := []struct {
+		desc         string
+		mockEnvKey   string
+		mockEnvVal   string
+		errMatch     error
+		outExp       string
+		dirFileMocks []ovntest.AferoDirMockHelper
+	}{
+		{
+			desc:       "test code path when `os.Getenv() is non empty` and when Stat() returns error",
+			mockEnvKey: "OVN_NB_DAEMON",
+			mockEnvVal: "/some/blah/path",
+			errMatch:   fmt.Errorf("OVN_NB_DAEMON ovn-nbctl daemon control socket"),
+			outExp:     "",
+		},
+		{
+			desc:       "test code path when `os.Getenv() is non empty` and when Stat() returns success",
+			mockEnvKey: "OVN_NB_DAEMON",
+			mockEnvVal: "/some/blah/path",
+			dirFileMocks: []ovntest.AferoDirMockHelper{
+				{
+					DirName:     "/some/blah/",
+					Permissions: 0755,
+					Files: []ovntest.AferoFileMockHelper{
+						{"/some/blah/path", 0755, []byte("blah")},
+					},
+				},
+			},
+			outExp: "OVN_NB_DAEMON=/some/blah/path",
+		},
+		{
+			desc: "test code path when ReadFile() returns error",
+			dirFileMocks: []ovntest.AferoDirMockHelper{
+				{
+					DirName:     "/some/blah/",
+					Permissions: 0755,
+					Files: []ovntest.AferoFileMockHelper{
+						{"/some/blah/path", 0755, []byte("blah")},
+					},
+				},
+			},
+			errMatch: fmt.Errorf("failed to find ovn-nbctl daemon pidfile/socket in /var/run/ovn/,/var/run/openvswitch/"),
+		},
+		{
+			desc: "test code path when ReadFile() and Stat succeed",
+			dirFileMocks: []ovntest.AferoDirMockHelper{
+				{
+					DirName:     "/var/run/ovn/",
+					Permissions: 0755,
+					Files: []ovntest.AferoFileMockHelper{
+						{"/var/run/ovn/ovn-nbctl.pid", 0755, []byte("pid")},
+						{"/var/run/ovn/ovn-nbctl.pid.ctl", 0755, []byte("blah")},
+					},
+				},
+			},
+			outExp: "OVN_NB_DAEMON=/var/run/ovn/ovn-nbctl.pid.ctl",
+		},
+	}
+	for i, tc := range tests {
+		t.Run(fmt.Sprintf("%d:%s", i, tc.desc), func(t *testing.T) {
+			if len(tc.mockEnvKey) != 0 && len(tc.mockEnvVal) != 0 {
+				prevVal := os.Getenv(tc.mockEnvKey)
+				os.Setenv(tc.mockEnvKey, tc.mockEnvVal)
+				defer os.Setenv(tc.mockEnvKey, prevVal)
+			}
+			if len(tc.dirFileMocks) > 0 {
+				for _, item := range tc.dirFileMocks {
+					AppFs.MkdirAll(item.DirName, item.Permissions)
+					defer AppFs.Remove(item.DirName)
+					if len(item.Files) != 0 {
+						for _, f := range item.Files {
+							afero.WriteFile(AppFs, f.FileName, f.Content, f.Permissions)
+						}
+					}
+				}
+			}
+			out, err := getNbctlSocketPath()
+			t.Log(out, err)
+			if tc.errMatch != nil {
+				assert.Contains(t, err.Error(), tc.errMatch.Error())
+				assert.Equal(t, len(out), 0)
+			} else {
+				assert.Nil(t, err)
+				assert.Equal(t, tc.outExp, out)
+			}
+		})
+	}
+}
+
+func TestGetNbctlArgsAndEnv(t *testing.T) {
+	// Below is defined in ovs.go file
+	AppFs = afero.NewMemMapFs()
+
+	tests := []struct {
+		desc            string
+		nbctlDaemonMode bool
+		ovnnbscheme     config.OvnDBScheme
+		mockEnvKey      string
+		mockEnvVal      string
+		dirFileMocks    []ovntest.AferoDirMockHelper
+		inpTimeout      int
+		outCmdArgs      []string
+		outEnvArgs      []string
+	}{
+		{
+			desc:            "test success path when confg.NbctlDaemonMode is true",
+			nbctlDaemonMode: true,
+			mockEnvKey:      "OVN_NB_DAEMON",
+			mockEnvVal:      "/some/blah/path",
+			dirFileMocks: []ovntest.AferoDirMockHelper{
+				{
+					DirName:     "/some/blah/",
+					Permissions: 0755,
+					Files: []ovntest.AferoFileMockHelper{
+						{"/some/blah/path", 0755, []byte("blah")},
+					},
+				},
+			},
+			inpTimeout: 15,
+			outCmdArgs: []string{"--timeout=15"},
+			outEnvArgs: []string{"OVN_NB_DAEMON=/some/blah/path"},
+		},
+		{
+			desc:            "test error path when config.NbctlDaemonMode is true",
+			nbctlDaemonMode: true,
+			ovnnbscheme:     config.OvnDBSchemeUnix,
+			inpTimeout:      15,
+			outCmdArgs:      []string{"--timeout=15"},
+			outEnvArgs:      []string{},
+		},
+		{
+			desc:        "test path when config.OvnNorth.Scheme == config.OvnDBSchemeSSL",
+			ovnnbscheme: config.OvnDBSchemeSSL,
+			inpTimeout:  15,
+			// the values for key related to SSL fields are empty as default config do not have those configured
+			outCmdArgs: []string{"--private-key=", "--certificate=", "--bootstrap-ca-cert=", "--db=", "--timeout=15"},
+			outEnvArgs: []string{},
+		},
+		{
+			desc:        "test path when config.OvnNorth.Scheme == config.OvnDBSchemeTCP",
+			ovnnbscheme: config.OvnDBSchemeTCP,
+			inpTimeout:  15,
+			// the values for key related to `db' are empty as as default config do not have those configured
+			outCmdArgs: []string{"--db=", "--timeout=15"},
+			outEnvArgs: []string{},
+		},
+		{
+			desc:       "test default path",
+			inpTimeout: 15,
+			outCmdArgs: []string{"--timeout=15"},
+			outEnvArgs: []string{},
+		},
+	}
+	for i, tc := range tests {
+		t.Run(fmt.Sprintf("%d:%s", i, tc.desc), func(t *testing.T) {
+			if len(tc.mockEnvKey) != 0 && len(tc.mockEnvVal) != 0 {
+				prevVal := os.Getenv(tc.mockEnvKey)
+				os.Setenv(tc.mockEnvKey, tc.mockEnvVal)
+				defer os.Setenv(tc.mockEnvKey, prevVal)
+			}
+			if tc.nbctlDaemonMode {
+				preValNbctlDaemonMode := config.NbctlDaemonMode
+				config.NbctlDaemonMode = tc.nbctlDaemonMode
+				// defining below func to reset daemon mode to the previous value
+				resetMode := func(preVal bool) { config.NbctlDaemonMode = preVal }
+				// defer is allowed only for functions
+				defer resetMode(preValNbctlDaemonMode)
+			}
+			if len(tc.ovnnbscheme) != 0 {
+				preValOvnNBScheme := config.OvnNorth.Scheme
+				config.OvnNorth.Scheme = tc.ovnnbscheme
+				// defining below func to reset scheme to previous value
+				resetScheme := func(preVal config.OvnDBScheme) { config.OvnNorth.Scheme = preValOvnNBScheme }
+				// defer is allowed only for functions
+				defer resetScheme(preValOvnNBScheme)
+			}
+			if len(tc.dirFileMocks) > 0 {
+				for _, item := range tc.dirFileMocks {
+					AppFs.MkdirAll(item.DirName, item.Permissions)
+					defer AppFs.Remove(item.DirName)
+					if len(item.Files) != 0 {
+						for _, f := range item.Files {
+							afero.WriteFile(AppFs, f.FileName, f.Content, f.Permissions)
+						}
+					}
+				}
+			}
+			cmdArgs, envVars := getNbctlArgsAndEnv(tc.inpTimeout)
+			assert.Equal(t, cmdArgs, tc.outCmdArgs)
+			assert.Equal(t, envVars, tc.outEnvArgs)
+		})
+	}
+}
+
+func TestGetNbOVSDBArgs(t *testing.T) {
+	tests := []struct {
+		desc        string
+		inpCmdStr   string
+		inpVarArgs  string
+		ovnnbscheme config.OvnDBScheme
+		outExp      []string
+	}{
+		{
+			desc:        "test code path when command string is EMPTY, NO additional args are provided and config.OvnNorth.Scheme != config.OvnDBSchemeSSL",
+			ovnnbscheme: config.OvnDBSchemeUnix,
+			outExp:      []string{"", "", ""},
+		},
+		{
+			desc:        "test code path when command string is non-empty, additional args are provided and config.OvnNorth.Scheme == config.OvnDBSchemeSSL",
+			inpCmdStr:   "list-columns",
+			inpVarArgs:  "blah",
+			ovnnbscheme: config.OvnDBSchemeSSL,
+			outExp:      []string{"--private-key=", "--certificate=", "--bootstrap-ca-cert=", "list-columns", "", "blah"},
+		},
+		{
+			desc:        "test code path when command string is non-empty, additional args are provided and config.OvnNorth.Scheme != config.OvnDBSchemeSSL",
+			inpCmdStr:   "list-columns",
+			inpVarArgs:  "blah",
+			ovnnbscheme: config.OvnDBSchemeUnix,
+			outExp:      []string{"list-columns", "", "blah"},
+		},
+	}
+	for i, tc := range tests {
+		t.Run(fmt.Sprintf("%d:%s", i, tc.desc), func(t *testing.T) {
+			if len(tc.ovnnbscheme) != 0 {
+				preValOvnNBScheme := config.OvnNorth.Scheme
+				config.OvnNorth.Scheme = tc.ovnnbscheme
+				// defining below func to reset scheme to previous value
+				resetScheme := func(preVal config.OvnDBScheme) { config.OvnNorth.Scheme = preValOvnNBScheme }
+				// defer is allowed only for functions
+				defer resetScheme(preValOvnNBScheme)
+			}
+			res := getNbOVSDBArgs(tc.inpCmdStr, tc.inpVarArgs)
+			assert.Equal(t, res, tc.outExp)
+		})
+	}
+}
+
+func TestRunOVNNorthAppCtl(t *testing.T) {
+	// Below is defined in ovs.go file
+	AppFs = afero.NewMemMapFs()
+	mockKexecIface := new(mock_k8s_io_utils_exec.Interface)
+	mockExecRunner := new(mocks.ExecRunner)
+	mockCmd := new(mock_k8s_io_utils_exec.Cmd)
+	// below is defined in ovs.go
+	runCmdExecRunner = mockExecRunner
+	// note runner is defined in ovs.go file
+	runner = &execHelper{exec: mockKexecIface}
+	// note runner.ovndir is defined in ovs.go file and so is ovnRunDir var with an initial value
+	runner.ovnRunDir = ovnRunDir
+
+	tests := []struct {
+		desc                    string
+		inpVarArgs              string
+		errMatch                error
+		dirFileMocks            []ovntest.AferoDirMockHelper
+		onRetArgsExecUtilsIface *onCallReturnArgs
+		onRetArgsKexecIface     *onCallReturnArgs
+	}{
+		{
+			desc:     "test path when ReadFile returns error",
+			errMatch: fmt.Errorf("failed to run the command since failed to get ovn-northd's pid:"),
+		},
+		{
+			desc: "test path when runOVNretry succeeds",
+			dirFileMocks: []ovntest.AferoDirMockHelper{
+				{
+					DirName:     "/var/run/ovn/",
+					Permissions: 0755,
+					Files: []ovntest.AferoFileMockHelper{
+						{"/var/run/ovn/ovn-northd.pid", 0755, []byte("pid")},
+					},
+				},
+			},
+			onRetArgsExecUtilsIface: &onCallReturnArgs{"RunCmd", []string{"*mocks.Cmd", "string", "[]string", "string", "string"}, []interface{}{bytes.NewBuffer([]byte("testblah")), bytes.NewBuffer([]byte("")), nil}},
+			onRetArgsKexecIface:     &onCallReturnArgs{"Command", []string{"string", "string", "string"}, []interface{}{mockCmd}},
+		},
+	}
+	for i, tc := range tests {
+		t.Run(fmt.Sprintf("%d:%s", i, tc.desc), func(t *testing.T) {
+			if tc.onRetArgsExecUtilsIface != nil {
+				call := mockExecRunner.On(tc.onRetArgsExecUtilsIface.onCallMethodName)
+				for _, arg := range tc.onRetArgsExecUtilsIface.onCallMethodArgType {
+					call.Arguments = append(call.Arguments, mock.AnythingOfType(arg))
+				}
+				for _, ret := range tc.onRetArgsExecUtilsIface.retArgList {
+					call.ReturnArguments = append(call.ReturnArguments, ret)
+				}
+				call.Once()
+			}
+
+			if tc.onRetArgsKexecIface != nil {
+				ifaceCall := mockKexecIface.On(tc.onRetArgsKexecIface.onCallMethodName)
+				for _, arg := range tc.onRetArgsKexecIface.onCallMethodArgType {
+					ifaceCall.Arguments = append(ifaceCall.Arguments, mock.AnythingOfType(arg))
+				}
+				for _, ret := range tc.onRetArgsKexecIface.retArgList {
+					ifaceCall.ReturnArguments = append(ifaceCall.ReturnArguments, ret)
+				}
+				ifaceCall.Once()
+			}
+
+			if len(tc.dirFileMocks) > 0 {
+				for _, item := range tc.dirFileMocks {
+					AppFs.MkdirAll(item.DirName, item.Permissions)
+					defer AppFs.Remove(item.DirName)
+					if len(item.Files) != 0 {
+						for _, f := range item.Files {
+							afero.WriteFile(AppFs, f.FileName, f.Content, f.Permissions)
+						}
+					}
+				}
+			}
+			_, _, err := RunOVNNorthAppCtl()
+			t.Log(err)
+			if tc.errMatch != nil {
+				assert.Contains(t, err.Error(), tc.errMatch.Error())
+			} else {
+				assert.Nil(t, err)
+			}
+			mockExecRunner.AssertExpectations(t)
+			mockKexecIface.AssertExpectations(t)
+		})
+	}
+}
+
+func TestRunOVNControllerAppCtl(t *testing.T) {
+	// Below is defined in ovs.go file
+	AppFs = afero.NewMemMapFs()
+	mockKexecIface := new(mock_k8s_io_utils_exec.Interface)
+	mockExecRunner := new(mocks.ExecRunner)
+	mockCmd := new(mock_k8s_io_utils_exec.Cmd)
+	// below is defined in ovs.go
+	runCmdExecRunner = mockExecRunner
+	// note runner is defined in ovs.go file
+	runner = &execHelper{exec: mockKexecIface}
+	// note runner.ovndir is defined in ovs.go file and so is ovnRunDir var with an initial value
+	runner.ovnRunDir = ovnRunDir
+
+	tests := []struct {
+		desc                    string
+		inpVarArgs              string
+		errMatch                error
+		dirFileMocks            []ovntest.AferoDirMockHelper
+		onRetArgsExecUtilsIface *onCallReturnArgs
+		onRetArgsKexecIface     *onCallReturnArgs
+	}{
+		{
+			desc:     "test path when ReadFile returns error",
+			errMatch: fmt.Errorf("failed to get ovn-controller pid"),
+		},
+		{
+			desc: "test path when runOVNretry succeeds",
+			dirFileMocks: []ovntest.AferoDirMockHelper{
+				{
+					DirName:     "/var/run/ovn/",
+					Permissions: 0755,
+					Files: []ovntest.AferoFileMockHelper{
+						{"/var/run/ovn/ovn-controller.pid", 0755, []byte("pid")},
+					},
+				},
+			},
+			onRetArgsExecUtilsIface: &onCallReturnArgs{"RunCmd", []string{"*mocks.Cmd", "string", "[]string", "string", "string"}, []interface{}{bytes.NewBuffer([]byte("testblah")), bytes.NewBuffer([]byte("")), nil}},
+			onRetArgsKexecIface:     &onCallReturnArgs{"Command", []string{"string", "string", "string"}, []interface{}{mockCmd}},
+		},
+	}
+	for i, tc := range tests {
+		t.Run(fmt.Sprintf("%d:%s", i, tc.desc), func(t *testing.T) {
+			if tc.onRetArgsExecUtilsIface != nil {
+				call := mockExecRunner.On(tc.onRetArgsExecUtilsIface.onCallMethodName)
+				for _, arg := range tc.onRetArgsExecUtilsIface.onCallMethodArgType {
+					call.Arguments = append(call.Arguments, mock.AnythingOfType(arg))
+				}
+				for _, ret := range tc.onRetArgsExecUtilsIface.retArgList {
+					call.ReturnArguments = append(call.ReturnArguments, ret)
+				}
+				call.Once()
+			}
+
+			if tc.onRetArgsKexecIface != nil {
+				ifaceCall := mockKexecIface.On(tc.onRetArgsKexecIface.onCallMethodName)
+				for _, arg := range tc.onRetArgsKexecIface.onCallMethodArgType {
+					ifaceCall.Arguments = append(ifaceCall.Arguments, mock.AnythingOfType(arg))
+				}
+				for _, ret := range tc.onRetArgsKexecIface.retArgList {
+					ifaceCall.ReturnArguments = append(ifaceCall.ReturnArguments, ret)
+				}
+				ifaceCall.Once()
+			}
+
+			if len(tc.dirFileMocks) > 0 {
+				for _, item := range tc.dirFileMocks {
+					AppFs.MkdirAll(item.DirName, item.Permissions)
+					defer AppFs.Remove(item.DirName)
+					if len(item.Files) != 0 {
+						for _, f := range item.Files {
+							afero.WriteFile(AppFs, f.FileName, f.Content, f.Permissions)
+						}
+					}
+				}
+			}
+			_, _, err := RunOVNControllerAppCtl()
+			t.Log(err)
+			if tc.errMatch != nil {
+				assert.Contains(t, err.Error(), tc.errMatch.Error())
+			} else {
+				assert.Nil(t, err)
+			}
+			mockExecRunner.AssertExpectations(t)
+			mockKexecIface.AssertExpectations(t)
+		})
+	}
+}
+
+func TestRunOvsVswitchdAppCtl(t *testing.T) {
+	// Below is defined in ovs.go file
+	AppFs = afero.NewMemMapFs()
+	mockKexecIface := new(mock_k8s_io_utils_exec.Interface)
+	mockExecRunner := new(mocks.ExecRunner)
+	mockCmd := new(mock_k8s_io_utils_exec.Cmd)
+	// below is defined in ovs.go
+	runCmdExecRunner = mockExecRunner
+	// note runner is defined in ovs.go file
+	runner = &execHelper{exec: mockKexecIface}
+
+	tests := []struct {
+		desc                    string
+		inpVarArgs              string
+		errMatch                error
+		dirFileMocks            []ovntest.AferoDirMockHelper
+		onRetArgsExecUtilsIface *onCallReturnArgs
+		onRetArgsKexecIface     *onCallReturnArgs
+	}{
+		{
+			desc:     "test path when ReadFile returns error",
+			errMatch: fmt.Errorf("failed to get ovs-vswitch pid"),
+		},
+		{
+			desc: "test path when runOVNretry succeeds",
+			dirFileMocks: []ovntest.AferoDirMockHelper{
+				{
+					DirName:     "/var/run/openvswitch/",
+					Permissions: 0755,
+					Files: []ovntest.AferoFileMockHelper{
+						{"/var/run/openvswitch/ovs-vswitchd.pid", 0755, []byte("pid")},
+					},
+				},
+			},
+			onRetArgsExecUtilsIface: &onCallReturnArgs{"RunCmd", []string{"*mocks.Cmd", "string", "[]string", "string", "string"}, []interface{}{bytes.NewBuffer([]byte("testblah")), bytes.NewBuffer([]byte("")), nil}},
+			onRetArgsKexecIface:     &onCallReturnArgs{"Command", []string{"string", "string", "string"}, []interface{}{mockCmd}},
+		},
+	}
+	for i, tc := range tests {
+		t.Run(fmt.Sprintf("%d:%s", i, tc.desc), func(t *testing.T) {
+			if tc.onRetArgsExecUtilsIface != nil {
+				call := mockExecRunner.On(tc.onRetArgsExecUtilsIface.onCallMethodName)
+				for _, arg := range tc.onRetArgsExecUtilsIface.onCallMethodArgType {
+					call.Arguments = append(call.Arguments, mock.AnythingOfType(arg))
+				}
+				for _, ret := range tc.onRetArgsExecUtilsIface.retArgList {
+					call.ReturnArguments = append(call.ReturnArguments, ret)
+				}
+				call.Once()
+			}
+
+			if tc.onRetArgsKexecIface != nil {
+				ifaceCall := mockKexecIface.On(tc.onRetArgsKexecIface.onCallMethodName)
+				for _, arg := range tc.onRetArgsKexecIface.onCallMethodArgType {
+					ifaceCall.Arguments = append(ifaceCall.Arguments, mock.AnythingOfType(arg))
+				}
+				for _, ret := range tc.onRetArgsKexecIface.retArgList {
+					ifaceCall.ReturnArguments = append(ifaceCall.ReturnArguments, ret)
+				}
+				ifaceCall.Once()
+			}
+
+			if len(tc.dirFileMocks) > 0 {
+				for _, item := range tc.dirFileMocks {
+					AppFs.MkdirAll(item.DirName, item.Permissions)
+					defer AppFs.Remove(item.DirName)
+					if len(item.Files) != 0 {
+						for _, f := range item.Files {
+							afero.WriteFile(AppFs, f.FileName, f.Content, f.Permissions)
+						}
+					}
+				}
+			}
+			_, _, err := RunOvsVswitchdAppCtl()
+			t.Log(err)
+			if tc.errMatch != nil {
+				assert.Contains(t, err.Error(), tc.errMatch.Error())
+			} else {
+				assert.Nil(t, err)
+			}
+			mockExecRunner.AssertExpectations(t)
+			mockKexecIface.AssertExpectations(t)
+		})
+	}
 }
 
 func TestDefaultExecRunner_RunCmd(t *testing.T) {
@@ -1463,7 +2110,7 @@ func TestRunIP(t *testing.T) {
 	}
 }
 
-func TestAddNormalActionOFFlow(t *testing.T) {
+func TestAddFloodActionOFFlow(t *testing.T) {
 	mockKexecIface := new(mock_k8s_io_utils_exec.Interface)
 	mockCmd := new(mock_k8s_io_utils_exec.Cmd)
 	mockExecRunner := new(mocks.ExecRunner)
@@ -1522,7 +2169,7 @@ func TestAddNormalActionOFFlow(t *testing.T) {
 			}
 			mockCall.Once()
 
-			_, _, e := AddNormalActionOFFlow("somename")
+			_, _, e := AddFloodActionOFFlow("somename")
 
 			if tc.expectedErr != nil {
 				assert.Error(t, e)

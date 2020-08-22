@@ -35,6 +35,7 @@ const (
 	// fixed MAC address for the br-nexthop interface. the last 4 hex bytes
 	// translates to the br-nexthop's IP address
 	localnetGatewayNextHopMac = "00:00:a9:fe:21:01"
+	localnetGatewayMac        = "00:00:a9:fe:21:02"
 	// Routing table for ExternalIP communication
 	localnetGatewayExternalIDTable = "6"
 )
@@ -122,11 +123,13 @@ func (n *OvnNode) initLocalnetGateway(hostSubnets []*net.IPNet, nodeAnnotator ku
 		return err
 	}
 
+	gwMacAddress, _ := net.ParseMAC(localnetGatewayMac)
+
 	err = util.SetL3GatewayConfig(nodeAnnotator, &util.L3GatewayConfig{
 		Mode:           config.GatewayModeLocal,
 		ChassisID:      chassisID,
 		InterfaceID:    ifaceID,
-		MACAddress:     macAddress,
+		MACAddress:     gwMacAddress,
 		IPAddresses:    gatewayIfAddrs,
 		NextHops:       nextHops,
 		NodePortEnable: config.Gateway.NodeportEnable,
