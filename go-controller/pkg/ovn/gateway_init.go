@@ -177,6 +177,22 @@ func gatewayInit(nodeName string, clusterIPSubnet []*net.IPNet, hostSubnets []*n
 				"gateway router %s, stdout: %q, stderr: %q, error: %v",
 				gatewayRouter, stdout, stderr, err)
 		}
+		// Also add north-south load-balancers to local switches for pod -> nodePort traffic
+		stdout, stderr, err = util.RunOVNNbctl("get", "logical_switch", nodeName, "load_balancer")
+		if err != nil {
+			return fmt.Errorf("failed to get load-balancers on the node switch %s, stdout: %q, "+
+				"stderr: %q, error: %v", nodeName, stdout, stderr, err)
+		}
+		for _, proto := range enabledProtos {
+			if !strings.Contains(stdout, protoLBMap[proto]) {
+				stdout, stderr, err = util.RunOVNNbctl("ls-lb-add", nodeName, protoLBMap[proto])
+				if err != nil {
+					return fmt.Errorf("failed to add north-south load-balancer %s to the "+
+						"node switch %s, stdout: %q, stderr: %q, error: %v",
+						protoLBMap[proto], nodeName, stdout, stderr, err)
+				}
+			}
+		}
 	}
 
 	// Create the external switch for the physical interface to connect to.
