@@ -26,10 +26,10 @@ build_binaries() {
             -mod vendor \
             -gcflags "${GCFLAGS}" \
             -ldflags "-B ${BUILDID} \
-                -X ${OVN_KUBE_GO_PACKAGE}/pkg/metrics.Commit=${GIT_COMMIT} \
-                -X ${OVN_KUBE_GO_PACKAGE}/pkg/metrics.Branch=${GIT_BRANCH} \
-                -X ${OVN_KUBE_GO_PACKAGE}/pkg/metrics.BuildUser=${BUILD_USER} \
-                -X ${OVN_KUBE_GO_PACKAGE}/pkg/metrics.BuildDate=${BUILD_DATE}" \
+                -X ${OVN_KUBE_GO_PACKAGE}/pkg/config.Commit=${GIT_COMMIT} \
+                -X ${OVN_KUBE_GO_PACKAGE}/pkg/config.Branch=${GIT_BRANCH} \
+                -X ${OVN_KUBE_GO_PACKAGE}/pkg/config.BuildUser=${BUILD_USER} \
+                -X ${OVN_KUBE_GO_PACKAGE}/pkg/config.BuildDate=${BUILD_DATE}" \
             -o "${OVN_KUBE_OUTPUT_BINPATH}/${binbase}"\
             "./${bin}"
     done
