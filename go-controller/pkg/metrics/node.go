@@ -4,6 +4,7 @@ import (
 	"runtime"
 	"sync"
 
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
 	"github.com/prometheus/client_golang/prometheus"
 )
 
@@ -50,10 +51,10 @@ func RegisterNodeMetrics() {
 					"and go version from which ovnkube was built and when and who built it.",
 				ConstLabels: prometheus.Labels{
 					"version":    "0.0",
-					"revision":   Commit,
-					"branch":     Branch,
-					"build_user": BuildUser,
-					"build_date": BuildDate,
+					"revision":   config.Commit,
+					"branch":     config.Branch,
+					"build_user": config.BuildUser,
+					"build_date": config.BuildDate,
 					"goversion":  runtime.Version(),
 				},
 			},
