@@ -178,6 +178,9 @@ func (n *OvnNode) Start(wg *sync.WaitGroup) error {
 		}
 	}
 
+	go n.ensureOvnRaft(util.OvnNbdbLocation)
+	go n.ensureOvnRaft(util.OvnSbdbLocation)
+
 	if node, err = n.Kube.GetNode(n.name); err != nil {
 		return fmt.Errorf("error retrieving node %s: %v", n.name, err)
 	}
