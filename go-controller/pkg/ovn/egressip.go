@@ -252,8 +252,8 @@ func (oc *Controller) deleteNamespacePodsEgressIP(eIP *egressipv1.EgressIP, name
 }
 
 func (oc *Controller) assignEgressIPs(eIP *egressipv1.EgressIP) error {
-	assignments := []egressipv1.EgressIPStatusItem{}
 	oc.eIPAllocatorMutex.Lock()
+	assignments := []egressipv1.EgressIPStatusItem{}
 	defer func() {
 		eIP.Status.Items = assignments
 		oc.eIPAllocatorMutex.Unlock()
@@ -543,6 +543,7 @@ func (oc *Controller) addEgressNode(egressNode *kapi.Node) error {
 			klog.Errorf("Re-assignment for EgressIP: unable to retrieve EgressIP: %s from the api-server, err: %v", eIPName, err)
 			return true
 		}
+		eIP = eIP.DeepCopy()
 		if err := oc.addEgressIP(eIP); err != nil {
 			klog.Errorf("Re-assignment for EgressIP: unable to assign EgressIP: %s, err: %v", eIP.Name, err)
 			return true
@@ -579,6 +580,7 @@ func (oc *Controller) deleteEgressNode(egressNode *kapi.Node) error {
 			if err := oc.deleteEgressIP(&eIP); err != nil {
 				klog.Errorf("EgressIP: %s re-assignmnent error: old egress IP deletion failed, err: %v", eIP.Name, err)
 			}
+			eIP = *(eIP.DeepCopy())
 			eIP.Status = egressipv1.EgressIPStatus{
 				Items: []egressipv1.EgressIPStatusItem{},
 			}

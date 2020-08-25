@@ -33,19 +33,15 @@ var _ = Describe("Shared gateway mode EgressIP Operations with", func() {
 		return len(fakeOvn.controller.eIPAllocator)
 	}
 
-	getEgressIPStatusLenSafely := func(egressIPName string) func() int {
+	getEgressIPStatusLen := func(egressIPName string) func() int {
 		return func() int {
-			fakeOvn.controller.eIPAllocatorMutex.Lock()
-			defer fakeOvn.controller.eIPAllocatorMutex.Unlock()
 			tmp, err := fakeOvn.fakeEgressIPClient.K8sV1().EgressIPs().Get(context.TODO(), egressIPName, metav1.GetOptions{})
 			Expect(err).NotTo(HaveOccurred())
 			return len(tmp.Status.Items)
 		}
 	}
 
-	getEgressIPStatusSafely := func(egressIPName string) []egressipv1.EgressIPStatusItem {
-		fakeOvn.controller.eIPAllocatorMutex.Lock()
-		defer fakeOvn.controller.eIPAllocatorMutex.Unlock()
+	getEgressIPStatus := func(egressIPName string) []egressipv1.EgressIPStatusItem {
 		tmp, err := fakeOvn.fakeEgressIPClient.K8sV1().EgressIPs().Get(context.TODO(), egressIPName, metav1.GetOptions{})
 		Expect(err).NotTo(HaveOccurred())
 		return tmp.Status.Items
@@ -137,8 +133,8 @@ var _ = Describe("Shared gateway mode EgressIP Operations with", func() {
 				Expect(fakeOvn.controller.eIPAllocator).To(HaveKey(node1.Name))
 
 				fakeOvn.controller.WatchEgressIP()
-				Eventually(getEgressIPStatusLenSafely(egressIPName)).Should(Equal(1))
-				statuses := getEgressIPStatusSafely(egressIPName)
+				Eventually(getEgressIPStatusLen(egressIPName)).Should(Equal(1))
+				statuses := getEgressIPStatus(egressIPName)
 				Expect(statuses[0].Node).To(Equal(node1.Name))
 				Expect(statuses[0].EgressIP).To(Equal(egressIP))
 
@@ -153,13 +149,13 @@ var _ = Describe("Shared gateway mode EgressIP Operations with", func() {
 				Expect(err).NotTo(HaveOccurred())
 
 				nodeSwitch := func() string {
-					statuses = getEgressIPStatusSafely(egressIPName)
+					statuses = getEgressIPStatus(egressIPName)
 					return statuses[0].Node
 				}
 
-				Eventually(getEgressIPStatusLenSafely(egressIPName)).Should(Equal(1))
+				Eventually(getEgressIPStatusLen(egressIPName)).Should(Equal(1))
 				Eventually(nodeSwitch).Should(Equal(node2.Name))
-				statuses = getEgressIPStatusSafely(egressIPName)
+				statuses = getEgressIPStatus(egressIPName)
 				Expect(statuses[0].EgressIP).To(Equal(egressIP))
 
 				fakeOvn.fakeExec.AddFakeCmd(
@@ -249,8 +245,8 @@ var _ = Describe("Shared gateway mode EgressIP Operations with", func() {
 				Expect(fakeOvn.controller.eIPAllocator).To(HaveKey(node1.Name))
 
 				fakeOvn.controller.WatchEgressIP()
-				Eventually(getEgressIPStatusLenSafely(egressIPName)).Should(Equal(1))
-				statuses := getEgressIPStatusSafely(egressIPName)
+				Eventually(getEgressIPStatusLen(egressIPName)).Should(Equal(1))
+				statuses := getEgressIPStatus(egressIPName)
 				Expect(statuses[0].Node).To(Equal(node1.Name))
 				Expect(statuses[0].EgressIP).To(Equal(egressIP))
 
@@ -265,13 +261,13 @@ var _ = Describe("Shared gateway mode EgressIP Operations with", func() {
 				Expect(err).NotTo(HaveOccurred())
 
 				nodeSwitch := func() string {
-					statuses = getEgressIPStatusSafely(egressIPName)
+					statuses = getEgressIPStatus(egressIPName)
 					return statuses[0].Node
 				}
 
-				Eventually(getEgressIPStatusLenSafely(egressIPName)).Should(Equal(1))
+				Eventually(getEgressIPStatusLen(egressIPName)).Should(Equal(1))
 				Eventually(nodeSwitch).Should(Equal(node2.Name))
-				statuses = getEgressIPStatusSafely(egressIPName)
+				statuses = getEgressIPStatus(egressIPName)
 				Expect(statuses[0].EgressIP).To(Equal(egressIP))
 
 				fakeOvn.fakeExec.AddFakeCmd(
@@ -366,10 +362,10 @@ var _ = Describe("Shared gateway mode EgressIP Operations with", func() {
 				_, err := fakeOvn.fakeEgressIPClient.K8sV1().EgressIPs().Create(context.TODO(), &eIP, metav1.CreateOptions{})
 				Expect(err).NotTo(HaveOccurred())
 
-				Eventually(getEgressIPStatusLenSafely(eIP.Name)).Should(Equal(1))
+				Eventually(getEgressIPStatusLen(eIP.Name)).Should(Equal(1))
 				Eventually(fakeOvn.fakeExec.CalledMatchesExpected).Should(BeTrue(), fakeOvn.fakeExec.ErrorDesc)
 
-				statuses := getEgressIPStatusSafely(eIP.Name)
+				statuses := getEgressIPStatus(eIP.Name)
 				Expect(statuses[0].Node).To(Equal(node2.name))
 				Expect(statuses[0].EgressIP).To(Equal(egressIP.String()))
 
@@ -399,7 +395,7 @@ var _ = Describe("Shared gateway mode EgressIP Operations with", func() {
 				)
 				_, err = fakeOvn.fakeClient.CoreV1().Pods(egressPod.Namespace).Update(context.TODO(), podUpdate, metav1.UpdateOptions{})
 				Expect(err).ToNot(HaveOccurred())
-				Eventually(getEgressIPStatusLenSafely(eIP.Name)).Should(Equal(1))
+				Eventually(getEgressIPStatusLen(eIP.Name)).Should(Equal(1))
 				Eventually(fakeOvn.fakeExec.CalledMatchesExpected).Should(BeTrue(), fakeOvn.fakeExec.ErrorDesc)
 				return nil
 			}
@@ -467,10 +463,10 @@ var _ = Describe("Shared gateway mode EgressIP Operations with", func() {
 				_, err := fakeOvn.fakeEgressIPClient.K8sV1().EgressIPs().Create(context.TODO(), &eIP, metav1.CreateOptions{})
 				Expect(err).NotTo(HaveOccurred())
 
-				Eventually(getEgressIPStatusLenSafely(eIP.Name)).Should(Equal(1))
+				Eventually(getEgressIPStatusLen(eIP.Name)).Should(Equal(1))
 				Eventually(fakeOvn.fakeExec.CalledMatchesExpected).Should(BeTrue(), fakeOvn.fakeExec.ErrorDesc)
 
-				statuses := getEgressIPStatusSafely(eIP.Name)
+				statuses := getEgressIPStatus(eIP.Name)
 				Expect(statuses[0].Node).To(Equal(node2.name))
 				Expect(statuses[0].EgressIP).To(Equal(egressIP.String()))
 
@@ -481,7 +477,7 @@ var _ = Describe("Shared gateway mode EgressIP Operations with", func() {
 
 				_, err = fakeOvn.fakeClient.CoreV1().Pods(egressPod.Namespace).Update(context.TODO(), podUpdate, metav1.UpdateOptions{})
 				Expect(err).ToNot(HaveOccurred())
-				Eventually(getEgressIPStatusLenSafely(eIP.Name)).Should(Equal(1))
+				Eventually(getEgressIPStatusLen(eIP.Name)).Should(Equal(1))
 				Eventually(fakeOvn.fakeExec.CalledMatchesExpected).Should(BeTrue(), fakeOvn.fakeExec.ErrorDesc)
 				return nil
 			}
@@ -534,10 +530,10 @@ var _ = Describe("Shared gateway mode EgressIP Operations with", func() {
 				_, err := fakeOvn.fakeEgressIPClient.K8sV1().EgressIPs().Create(context.TODO(), &eIP, metav1.CreateOptions{})
 				Expect(err).NotTo(HaveOccurred())
 
-				Eventually(getEgressIPStatusLenSafely(eIP.Name)).Should(Equal(1))
+				Eventually(getEgressIPStatusLen(eIP.Name)).Should(Equal(1))
 				Eventually(fakeOvn.fakeExec.CalledMatchesExpected).Should(BeTrue(), fakeOvn.fakeExec.ErrorDesc)
 
-				statuses := getEgressIPStatusSafely(eIP.Name)
+				statuses := getEgressIPStatus(eIP.Name)
 				Expect(statuses[0].Node).To(Equal(node2.name))
 				Expect(statuses[0].EgressIP).To(Equal(egressIP.String()))
 
@@ -560,7 +556,7 @@ var _ = Describe("Shared gateway mode EgressIP Operations with", func() {
 
 				_, err = fakeOvn.fakeClient.CoreV1().Pods(egressPod.Namespace).Update(context.TODO(), podUpdate, metav1.UpdateOptions{})
 				Expect(err).ToNot(HaveOccurred())
-				Eventually(getEgressIPStatusLenSafely(eIP.Name)).Should(Equal(1))
+				Eventually(getEgressIPStatusLen(eIP.Name)).Should(Equal(1))
 				Eventually(fakeOvn.fakeExec.CalledMatchesExpected).Should(BeTrue(), fakeOvn.fakeExec.ErrorDesc)
 				return nil
 			}
@@ -612,16 +608,16 @@ var _ = Describe("Shared gateway mode EgressIP Operations with", func() {
 				_, err := fakeOvn.fakeEgressIPClient.K8sV1().EgressIPs().Create(context.TODO(), &eIP, metav1.CreateOptions{})
 				Expect(err).NotTo(HaveOccurred())
 
-				Eventually(getEgressIPStatusLenSafely(eIP.Name)).Should(Equal(1))
+				Eventually(getEgressIPStatusLen(eIP.Name)).Should(Equal(1))
 				Eventually(fakeOvn.fakeExec.CalledMatchesExpected).Should(BeTrue(), fakeOvn.fakeExec.ErrorDesc)
 
-				statuses := getEgressIPStatusSafely(eIP.Name)
+				statuses := getEgressIPStatus(eIP.Name)
 				Expect(statuses[0].Node).To(Equal(node2.name))
 				Expect(statuses[0].EgressIP).To(Equal(egressIP.String()))
 
 				err = fakeOvn.fakeClient.CoreV1().Pods(egressPod.Namespace).Delete(context.TODO(), egressPod.Name, *metav1.NewDeleteOptions(0))
 				Expect(err).ToNot(HaveOccurred())
-				Eventually(getEgressIPStatusLenSafely(eIP.Name)).Should(Equal(1))
+				Eventually(getEgressIPStatusLen(eIP.Name)).Should(Equal(1))
 				Eventually(fakeOvn.fakeExec.CalledMatchesExpected).Should(BeTrue(), fakeOvn.fakeExec.ErrorDesc)
 				return nil
 			}
@@ -689,10 +685,10 @@ var _ = Describe("Shared gateway mode EgressIP Operations with", func() {
 				_, err := fakeOvn.fakeEgressIPClient.K8sV1().EgressIPs().Create(context.TODO(), &eIP, metav1.CreateOptions{})
 				Expect(err).NotTo(HaveOccurred())
 
-				Eventually(getEgressIPStatusLenSafely(eIP.Name)).Should(Equal(1))
+				Eventually(getEgressIPStatusLen(eIP.Name)).Should(Equal(1))
 				Eventually(fakeOvn.fakeExec.CalledMatchesExpected).Should(BeTrue(), fakeOvn.fakeExec.ErrorDesc)
 
-				statuses := getEgressIPStatusSafely(eIP.Name)
+				statuses := getEgressIPStatus(eIP.Name)
 				Expect(statuses[0].Node).To(Equal(node2.name))
 				Expect(statuses[0].EgressIP).To(Equal(egressIP.String()))
 
@@ -723,7 +719,7 @@ var _ = Describe("Shared gateway mode EgressIP Operations with", func() {
 
 				_, err = fakeOvn.fakeClient.CoreV1().Namespaces().Update(context.TODO(), namespaceUpdate, metav1.UpdateOptions{})
 				Expect(err).ToNot(HaveOccurred())
-				Eventually(getEgressIPStatusLenSafely(eIP.Name)).Should(Equal(1))
+				Eventually(getEgressIPStatusLen(eIP.Name)).Should(Equal(1))
 				Eventually(fakeOvn.fakeExec.CalledMatchesExpected).Should(BeTrue(), fakeOvn.fakeExec.ErrorDesc)
 				return nil
 			}
@@ -774,10 +770,10 @@ var _ = Describe("Shared gateway mode EgressIP Operations with", func() {
 				_, err := fakeOvn.fakeEgressIPClient.K8sV1().EgressIPs().Create(context.TODO(), &eIP, metav1.CreateOptions{})
 				Expect(err).NotTo(HaveOccurred())
 
-				Eventually(getEgressIPStatusLenSafely(eIP.Name)).Should(Equal(1))
+				Eventually(getEgressIPStatusLen(eIP.Name)).Should(Equal(1))
 				Eventually(fakeOvn.fakeExec.CalledMatchesExpected).Should(BeTrue(), fakeOvn.fakeExec.ErrorDesc)
 
-				statuses := getEgressIPStatusSafely(eIP.Name)
+				statuses := getEgressIPStatus(eIP.Name)
 				Expect(statuses[0].Node).To(Equal(node2.name))
 				Expect(statuses[0].EgressIP).To(Equal(egressIP.String()))
 
@@ -785,7 +781,7 @@ var _ = Describe("Shared gateway mode EgressIP Operations with", func() {
 
 				_, err = fakeOvn.fakeClient.CoreV1().Namespaces().Update(context.TODO(), namespaceUpdate, metav1.UpdateOptions{})
 				Expect(err).ToNot(HaveOccurred())
-				Eventually(getEgressIPStatusLenSafely(eIP.Name)).Should(Equal(1))
+				Eventually(getEgressIPStatusLen(eIP.Name)).Should(Equal(1))
 				Eventually(fakeOvn.fakeExec.CalledMatchesExpected).Should(BeTrue(), fakeOvn.fakeExec.ErrorDesc)
 				return nil
 			}
@@ -854,10 +850,10 @@ var _ = Describe("Shared gateway mode EgressIP Operations with", func() {
 				_, err := fakeOvn.fakeEgressIPClient.K8sV1().EgressIPs().Create(context.TODO(), &eIP, metav1.CreateOptions{})
 				Expect(err).NotTo(HaveOccurred())
 
-				Eventually(getEgressIPStatusLenSafely(eIP.Name)).Should(Equal(1))
+				Eventually(getEgressIPStatusLen(eIP.Name)).Should(Equal(1))
 				Eventually(fakeOvn.fakeExec.CalledMatchesExpected).Should(BeTrue(), fakeOvn.fakeExec.ErrorDesc)
 
-				statuses := getEgressIPStatusSafely(eIP.Name)
+				statuses := getEgressIPStatus(eIP.Name)
 				Expect(statuses[0].Node).To(Equal(node2.name))
 				Expect(statuses[0].EgressIP).To(Equal(egressIP.String()))
 
@@ -909,9 +905,9 @@ var _ = Describe("Shared gateway mode EgressIP Operations with", func() {
 				_, err = fakeOvn.fakeEgressIPClient.K8sV1().EgressIPs().Update(context.TODO(), eIPUpdate, metav1.UpdateOptions{})
 				Expect(err).ToNot(HaveOccurred())
 				Eventually(fakeOvn.fakeExec.CalledMatchesExpected).Should(BeTrue(), fakeOvn.fakeExec.ErrorDesc)
-				Eventually(getEgressIPStatusLenSafely(eIP.Name)).Should(Equal(1))
+				Eventually(getEgressIPStatusLen(eIP.Name)).Should(Equal(1))
 
-				statuses = getEgressIPStatusSafely(eIP.Name)
+				statuses = getEgressIPStatus(eIP.Name)
 				Expect(statuses[0].Node).To(Equal(node2.name))
 				Expect(statuses[0].EgressIP).To(Equal(updatedEgressIP.String()))
 				return nil
@@ -977,10 +973,10 @@ var _ = Describe("Shared gateway mode EgressIP Operations with", func() {
 				_, err := fakeOvn.fakeEgressIPClient.K8sV1().EgressIPs().Create(context.TODO(), &eIP, metav1.CreateOptions{})
 				Expect(err).NotTo(HaveOccurred())
 
-				Eventually(getEgressIPStatusLenSafely(eIP.Name)).Should(Equal(1))
+				Eventually(getEgressIPStatusLen(eIP.Name)).Should(Equal(1))
 				Eventually(fakeOvn.fakeExec.CalledMatchesExpected).Should(BeTrue(), fakeOvn.fakeExec.ErrorDesc)
 
-				statuses := getEgressIPStatusSafely(eIP.Name)
+				statuses := getEgressIPStatus(eIP.Name)
 				Expect(statuses[0].Node).To(Equal(node2.name))
 				Expect(statuses[0].EgressIP).To(Equal(egressIP.String()))
 
@@ -1002,9 +998,9 @@ var _ = Describe("Shared gateway mode EgressIP Operations with", func() {
 				_, err = fakeOvn.fakeEgressIPClient.K8sV1().EgressIPs().Update(context.TODO(), eIPUpdate, metav1.UpdateOptions{})
 				Expect(err).NotTo(HaveOccurred())
 				Eventually(fakeOvn.fakeExec.CalledMatchesExpected).Should(BeTrue(), fakeOvn.fakeExec.ErrorDesc)
-				Eventually(getEgressIPStatusLenSafely(eIP.Name)).Should(Equal(1))
+				Eventually(getEgressIPStatusLen(eIP.Name)).Should(Equal(1))
 
-				statuses = getEgressIPStatusSafely(eIP.Name)
+				statuses = getEgressIPStatus(eIP.Name)
 				Expect(statuses[0].Node).To(Equal(bogusNode))
 				Expect(statuses[0].EgressIP).To(Equal(bogusIP))
 

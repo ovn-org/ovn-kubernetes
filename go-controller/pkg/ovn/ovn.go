@@ -820,7 +820,7 @@ func (oc *Controller) WatchEgressNodes() {
 func (oc *Controller) WatchEgressIP() {
 	oc.watchFactory.AddEgressIPHandler(cache.ResourceEventHandlerFuncs{
 		AddFunc: func(obj interface{}) {
-			eIP := obj.(*egressipv1.EgressIP)
+			eIP := obj.(*egressipv1.EgressIP).DeepCopy()
 			if err := oc.addEgressIP(eIP); err != nil {
 				klog.Error(err)
 			}
@@ -830,7 +830,7 @@ func (oc *Controller) WatchEgressIP() {
 		},
 		UpdateFunc: func(old, new interface{}) {
 			oldEIP := old.(*egressipv1.EgressIP)
-			newEIP := new.(*egressipv1.EgressIP)
+			newEIP := new.(*egressipv1.EgressIP).DeepCopy()
 			if !reflect.DeepEqual(oldEIP.Spec, newEIP.Spec) {
 				if err := oc.deleteEgressIP(oldEIP); err != nil {
 					klog.Error(err)
