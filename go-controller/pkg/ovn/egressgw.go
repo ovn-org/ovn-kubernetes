@@ -288,7 +288,14 @@ func (oc *Controller) addPerPodGRSNAT(pod *kapi.Pod, podIfAddrs []*net.IPNet) er
 		for _, podIPNet := range podIfAddrs {
 			podIP := podIPNet.IP.String()
 			mask := GetIPFullMask(podIP)
-			stdout, stderr, err := util.RunOVNNbctl("--may-exist", "lr-nat-add",
+			// may-exist works only if the the nat rule being added has everything the same i.e.,
+			// the type, the router name, external IP and the logical IP must match
+			// else the tuple is considered different one than existing.
+			// If the type is snat and the logical IP is the same, but external IP is different,
+			// even with --may-exist, the add may error out. this is because, for snat,
+			// (type, router, logical ip) is considered a key for uniqueness
+			stdout, stderr, err := util.RunOVNNbctl("--if-exists", "lr-nat-del", gr, "snat", podIP+mask,
+				"--", "lr-nat-add",
 				gr, "snat", gwIP, podIP+mask)
 			if err != nil {
 				return fmt.Errorf("failed to create SNAT rule for pod on gateway router %s, "+
