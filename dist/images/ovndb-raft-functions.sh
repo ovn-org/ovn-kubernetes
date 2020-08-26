@@ -225,6 +225,7 @@ ovsdb_cleanup() {
 
 # v3 - create nb_ovsdb/sb_ovsdb cluster in a separate container
 ovsdb-raft() {
+  DB_CLUSTERED=true
   local db=${1}
   local port=${2}
   local raft_port=${3}

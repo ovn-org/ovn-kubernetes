@@ -181,6 +181,9 @@ ovn_multicast_enable=${OVN_MULTICAST_ENABLE:-}
 #OVN_EGRESSIP_ENABLE - enable egress IP for ovn-kubernetes
 ovn_egressip_enable=${OVN_EGRESSIP_ENABLE:-false}
 
+# DB_CLUSTERED is used to indicate in check_health whether or not to check if DB is part of Raft cluster
+DB_CLUSTERED=false
+
 # Determine the ovn rundir.
 if [[ -f /usr/bin/ovn-appctl ]]; then
   # ovn-appctl is present. Use new ovn run dir path.
@@ -348,7 +351,7 @@ process_ready() {
   return 1
 }
 
-# continously checks if process is healthy. Exits if process terminates.
+# continuously checks if process is healthy. Exits if process terminates.
 # $1 is the name of the process
 # $2 is the pid of an another process to kill before exiting
 process_healthy() {
@@ -398,6 +401,24 @@ check_health() {
     exit 1
     ;;
   esac
+
+  if $DB_CLUSTERED; then
+    if [[ ${1} == "ovnnb_db" ]]; then
+      if ! ovn-appctl -t ${ctl_file} cluster/status OVN_Northbound; then
+        echo "Error: DB: ${1} is no longer part of the cluster"
+        # wipe DB to force this db to join clean
+        rm -f ${ovn_db_file}
+        return 1
+      fi
+    elif [[ ${1} == "ovnsb_db" ]]; then
+      if ! ovn-appctl -t ${ctl_file} cluster/status OVN_Southbound; then
+        echo "Error: DB: ${1} is no longer part of the cluster"
+        # wipe DB to force this db to join clean
+        rm -f ${ovn_db_file}
+        return 1
+      fi
+    fi
+  fi
 
   if [[ ${ctl_file} == "" ]]; then
     # no control file, so just do the PID check
