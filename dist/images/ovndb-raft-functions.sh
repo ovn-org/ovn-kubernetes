@@ -19,13 +19,49 @@ verify-ovsdb-raft() {
 
 bracketify() { case "$1" in *:*) echo "[$1]" ;; *) echo "$1" ;; esac }
 
-# OVN DB must be up in the first DB node
-# This waits for ovnkube-db-0 POD to come up
-ready_to_join_cluster() {
+# checks if a db pod is part of a current cluster
+db_part_of_cluster() {
+  local pod=${1}
+  local db=${2}
+  local port=${3}
+  echo "Checking if ${pod} is part of cluster"
+  init_ip=$(kubectl --server=${K8S_APISERVER} --token=${k8s_token} --certificate-authority=${K8S_CACERT} \
+    get pod -n ${ovn_kubernetes_namespace} ${pod} -o=jsonpath='{.status.podIP}')
+  if [[ $? != 0 ]]; then
+    echo "Unable to get ${pod} ip "
+    return 1
+  fi
+  echo "Found ${pod} ip: $init_ip"
+  init_ip=$(bracketify $init_ip)
+  target=$(ovn-${db}ctl --timeout=5 --db=${transport}:${init_ip}:${port} ${ovndb_ctl_ssl_opts} --data=bare --no-headings \
+    --columns=target list connection)
+  if [[ "${target}" != "p${transport}:${port}${ovn_raft_conn_ip_url_suffix}" ]]; then
+    echo "Unable to check correct target ${target} "
+    return 1
+  fi
+
+  echo "${pod} is part of cluster"
+  return 0
+}
+
+# Checks if cluster has already been initialized.
+# If not it returns false and sets init_ip to ovnkube-db-0
+cluster_exists() {
   # See if ep is available ...
   local db=${1}
   local port=${2}
 
+  db_pods=$(kubectl --server=${K8S_APISERVER} --token=${k8s_token} --certificate-authority=${K8S_CACERT} \
+    get pod -n ${ovn_kubernetes_namespace} -o=jsonpath='{.items[*].metadata.name}' | egrep -o 'ovnkube-db[^ ]+')
+
+  for db_pod in $db_pods; do
+    if db_part_of_cluster $db_pod $db $port; then
+      echo "${db_pod} is part of current cluster with ip: ${init_ip}!"
+      return 0
+    fi
+  done
+
+  # if we get here  there is no cluster, set init_ip and get out
   init_ip="$(kubectl --server=${K8S_APISERVER} --token=${k8s_token} --certificate-authority=${K8S_CACERT} \
     get pod -n ${ovn_kubernetes_namespace} ovnkube-db-0 -o=jsonpath='{.status.podIP}')"
   if [[ $? != 0 ]]; then
@@ -33,12 +69,7 @@ ready_to_join_cluster() {
   fi
 
   init_ip=$(bracketify $init_ip)
-  target=$(ovn-${db}ctl --db=${transport}:${init_ip}:${port} ${ovndb_ctl_ssl_opts} --data=bare --no-headings \
-    --columns=target list connection)
-  if [[ "${target}" != "p${transport}:${port}${ovn_raft_conn_ip_url_suffix}" ]]; then
-    return 1
-  fi
-  return 0
+  return 1
 }
 
 check_ovnkube_db_ep() {
@@ -242,26 +273,53 @@ ovsdb-raft() {
     ovn_raft_conn_ip_url_suffix=":[::]"
   fi
 
-  if [[ "${POD_NAME}" == "ovnkube-db-0" ]]; then
-    run_as_ovs_user_if_needed \
-      ${OVNCTL_PATH} run_${db}_ovsdb --no-monitor \
-      --db-${db}-cluster-local-addr=$(bracketify ${ovn_db_host}) \
-      --db-${db}-cluster-local-port=${raft_port} \
-      --db-${db}-cluster-local-proto=${transport} \
-      ${db_ssl_opts} \
-      --ovn-${db}-log="${ovn_loglevel_db}" &
-  else
-    # join the remote cluster node if the DB is not created
-    if [[ "${initialize}" == "true" ]]; then
-      wait_for_event ready_to_join_cluster ${db} ${port}
-    fi
-    run_as_ovs_user_if_needed \
+  initial_raft_create=true
+  if [[ "${initialize}" == "true" ]]; then
+    # check to see if a cluster already exists. If it does, just join it.
+    counter=0
+    cluster_found=false
+    while [ $counter -lt 5 ]; do
+      if cluster_exists ${db} ${port}; then
+        cluster_found=true
+        break
+      fi
+      sleep 1
+      counter=$((counter+1))
+    done
+
+    if ${cluster_found}; then
+      echo "Cluster already exists for DB: ${db}"
+      initial_raft_create=false
+      run_as_ovs_user_if_needed \
       ${OVNCTL_PATH} run_${db}_ovsdb --no-monitor \
       --db-${db}-cluster-local-addr=$(bracketify ${ovn_db_host}) --db-${db}-cluster-remote-addr=${init_ip} \
       --db-${db}-cluster-local-port=${raft_port} --db-${db}-cluster-remote-port=${raft_port} \
       --db-${db}-cluster-local-proto=${transport} --db-${db}-cluster-remote-proto=${transport} \
       ${db_ssl_opts} \
       --ovn-${db}-log="${ovn_loglevel_db}" &
+    else
+      # either we need to initialize a new cluster or wait for db-0 to create it
+      if [[ "${POD_NAME}" == "ovnkube-db-0" ]]; then
+        echo "Cluster does not exist for DB: ${db}, creating new raft cluster"
+        run_as_ovs_user_if_needed \
+        ${OVNCTL_PATH} run_${db}_ovsdb --no-monitor \
+        --db-${db}-cluster-local-addr=$(bracketify ${ovn_db_host}) \
+        --db-${db}-cluster-local-port=${raft_port} \
+        --db-${db}-cluster-local-proto=${transport} \
+        ${db_ssl_opts} \
+        --ovn-${db}-log="${ovn_loglevel_db}" &
+      else
+        echo "Cluster does not exist for DB: ${db}, waiting for ovnkube-db-0 pod to create it"
+        wait_for_event cluster_exists ${db} ${port}
+        run_as_ovs_user_if_needed \
+        ${OVNCTL_PATH} run_${db}_ovsdb --no-monitor \
+        --db-${db}-cluster-local-addr=$(bracketify ${ovn_db_host}) --db-${db}-cluster-remote-addr=${init_ip} \
+        --db-${db}-cluster-local-port=${raft_port} --db-${db}-cluster-remote-port=${raft_port} \
+        --db-${db}-cluster-local-proto=${transport} --db-${db}-cluster-remote-proto=${transport} \
+        ${db_ssl_opts} \
+        --ovn-${db}-log="${ovn_loglevel_db}" &
+      fi
+    fi
   fi
 
   # Following command waits for the database on server to enter a `connected` state
@@ -276,12 +334,14 @@ ovsdb-raft() {
   echo "=============== ${db}-ovsdb-raft ========== RUNNING"
 
   if [[ "${POD_NAME}" == "ovnkube-db-0" ]]; then
-    # set the election timer value before other servers join the cluster and it can
-    # only be set on the leader so we must do this in ovnkube-db-0 when it is still
-    # a single-node cluster
-    set_election_timer ${db} ${election_timer}
-    if [[ ${db} == "nb" ]]; then
-      set_northd_probe_interval
+    if ${initial_raft_create}; then
+      # set the election timer value before other servers join the cluster and it can
+      # only be set on the leader so we must do this in ovnkube-db-0 when it is still
+      # a single-node cluster
+      set_election_timer ${db} ${election_timer}
+      if [[ ${db} == "nb" ]]; then
+        set_northd_probe_interval
+      fi
     fi
     # set the connection and disable inactivity probe, this deletes the old connection if any
     set_connection ${db} ${port}
