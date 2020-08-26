@@ -17,6 +17,8 @@ verify-ovsdb-raft() {
   fi
 }
 
+bracketify() { case "$1" in *:*) echo "[$1]" ;; *) echo "$1" ;; esac }
+
 # OVN DB must be up in the first DB node
 # This waits for ovnkube-db-0 POD to come up
 ready_to_join_cluster() {
@@ -29,7 +31,9 @@ ready_to_join_cluster() {
   if [[ $? != 0 ]]; then
     return 1
   fi
-  target=$(ovn-${db}ctl --db=${transport}:[${init_ip}]:${port} ${ovndb_ctl_ssl_opts} --data=bare --no-headings \
+
+  init_ip=$(bracketify $init_ip)
+  target=$(ovn-${db}ctl --db=${transport}:${init_ip}:${port} ${ovndb_ctl_ssl_opts} --data=bare --no-headings \
     --columns=target list connection)
   if [[ "${target}" != "p${transport}:${port}${ovn_raft_conn_ip_url_suffix}" ]]; then
     return 1
@@ -241,7 +245,7 @@ ovsdb-raft() {
   if [[ "${POD_NAME}" == "ovnkube-db-0" ]]; then
     run_as_ovs_user_if_needed \
       ${OVNCTL_PATH} run_${db}_ovsdb --no-monitor \
-      --db-${db}-cluster-local-addr=[${ovn_db_host}] \
+      --db-${db}-cluster-local-addr=$(bracketify ${ovn_db_host}) \
       --db-${db}-cluster-local-port=${raft_port} \
       --db-${db}-cluster-local-proto=${transport} \
       ${db_ssl_opts} \
@@ -253,7 +257,7 @@ ovsdb-raft() {
     fi
     run_as_ovs_user_if_needed \
       ${OVNCTL_PATH} run_${db}_ovsdb --no-monitor \
-      --db-${db}-cluster-local-addr=[${ovn_db_host}] --db-${db}-cluster-remote-addr=[${init_ip}] \
+      --db-${db}-cluster-local-addr=$(bracketify ${ovn_db_host}) --db-${db}-cluster-remote-addr=${init_ip} \
       --db-${db}-cluster-local-port=${raft_port} --db-${db}-cluster-remote-port=${raft_port} \
       --db-${db}-cluster-local-proto=${transport} --db-${db}-cluster-remote-proto=${transport} \
       ${db_ssl_opts} \

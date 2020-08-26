@@ -290,13 +290,14 @@ check_ovn_daemonset_version() {
 get_ovn_db_vars() {
   ovn_nbdb_str=""
   ovn_sbdb_str=""
-  for i in ${!ovn_db_hosts[@]}; do
-    if [[ ${i} -ne 0 ]]; then
+  for i in "${ovn_db_hosts[@]}"; do
+    if [ -n "$ovn_nbdb_str" ]; then
       ovn_nbdb_str=${ovn_nbdb_str}","
       ovn_sbdb_str=${ovn_sbdb_str}","
     fi
-    ovn_nbdb_str=${ovn_nbdb_str}${transport}://[${ovn_db_hosts[${i}]}]:${ovn_nb_port}
-    ovn_sbdb_str=${ovn_sbdb_str}${transport}://[${ovn_db_hosts[${i}]}]:${ovn_sb_port}
+    ip=$(bracketify $i)
+    ovn_nbdb_str=${ovn_nbdb_str}${transport}://${ip}:${ovn_nb_port}
+    ovn_sbdb_str=${ovn_sbdb_str}${transport}://${ip}:${ovn_sb_port}
   done
   # OVN_NORTH and OVN_SOUTH override derived host
   ovn_nbdb=${OVN_NORTH:-$ovn_nbdb_str}
@@ -651,7 +652,7 @@ nb-ovsdb() {
     ovn-nbctl set-ssl ${ovn_nb_pk} ${ovn_nb_cert} ${ovn_ca_cert}
     echo "=============== nb-ovsdb ========== reconfigured for SSL"
   }
-  ovn-nbctl --inactivity-probe=0 set-connection p${transport}:${ovn_nb_port}:[${ovn_db_host}]
+  ovn-nbctl --inactivity-probe=0 set-connection p${transport}:${ovn_nb_port}:$(bracketify ${ovn_db_host})
 
   tail --follow=name ${OVN_LOGDIR}/ovsdb-server-nb.log &
   ovn_tail_pid=$!
@@ -683,7 +684,7 @@ sb-ovsdb() {
     ovn-sbctl set-ssl ${ovn_sb_pk} ${ovn_sb_cert} ${ovn_ca_cert}
     echo "=============== sb-ovsdb ========== reconfigured for SSL"
   }
-  ovn-sbctl --inactivity-probe=0 set-connection p${transport}:${ovn_sb_port}:[${ovn_db_host}]
+  ovn-sbctl --inactivity-probe=0 set-connection p${transport}:${ovn_sb_port}:$(bracketify ${ovn_db_host})
 
   # create the ovnkube-db endpoints
   wait_for_event attempts=10 check_ovnkube_db_ep ${ovn_db_host} ${ovn_nb_port}
