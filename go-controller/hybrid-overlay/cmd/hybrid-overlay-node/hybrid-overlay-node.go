@@ -22,8 +22,8 @@ import (
 )
 
 var nodeName string
-var runAsWindowsService bool
 
+const windowServiceArgName = "windows-service"
 const appName = "hybrid-overlay-node"
 
 func main() {
@@ -38,22 +38,33 @@ func main() {
 			Destination: &nodeName,
 		},
 		&cli.BoolFlag{
-			Name:        "windows-service",
-			Usage:       "Enables hybrid overlay to run as a Windows service. Ignored on Linux.",
-			Destination: &runAsWindowsService,
+			Name:  windowServiceArgName,
+			Usage: "Enables hybrid overlay to run as a Windows service. Ignored on Linux.",
 		}})
+
+	ctx := context.Background()
+
 	c.Action = func(c *cli.Context) error {
+		if err := initForOS(c, ctx); err != nil {
+			klog.Exit(err)
+		}
+
 		if err := runHybridOverlay(c); err != nil {
 			panic(err.Error())
 		}
 		return nil
 	}
 
-	ctx := context.Background()
+	if err := c.RunContext(ctx, os.Args); err != nil {
+		klog.Exit(err)
+	}
+}
+
+func signalHandler(c context.Context) {
+	ctx, cancel := context.WithCancel(c)
 
 	// trap SIGHUP, SIGINT, SIGTERM, SIGQUIT and
 	// cancel the context
-	ctx, cancel := context.WithCancel(ctx)
 	exitCh := make(chan os.Signal, 1)
 	signal.Notify(exitCh,
 		syscall.SIGHUP,
@@ -72,10 +83,6 @@ func main() {
 		case <-ctx.Done():
 		}
 	}()
-
-	if err := c.RunContext(ctx, os.Args); err != nil {
-		klog.Exit(err)
-	}
 }
 
 func runHybridOverlay(ctx *cli.Context) error {
@@ -90,10 +97,6 @@ func runHybridOverlay(ctx *cli.Context) error {
 
 	if nodeName == "" {
 		return fmt.Errorf("missing node name; use the 'node' flag to provide one")
-	}
-
-	if err := initForOS(runAsWindowsService); err != nil {
-		klog.Infof("Error initializing Windows service: %v", err)
 	}
 
 	clientset, _, _, _, err := util.NewClientsets(&config.Kubernetes)

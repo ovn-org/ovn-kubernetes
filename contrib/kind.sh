@@ -1,10 +1,5 @@
 #!/usr/bin/env bash
 
-
-# ensure j2 renderer installed
-pip freeze | grep j2cli || pip install j2cli[yaml] --user
-export PATH=~/.local/bin:$PATH
-
 run_kubectl() {
   local retries=0
   local attempts=10
@@ -148,6 +143,11 @@ print_params()
 }
 
 parse_args $*
+
+# ensure j2 renderer installed
+pip install wheel
+pip freeze | grep j2cli || pip install j2cli[yaml] --user
+export PATH=~/.local/bin:$PATH
 
 # Set default values
 KIND_CLUSTER_NAME=${KIND_CLUSTER_NAME:-ovn}

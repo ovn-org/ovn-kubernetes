@@ -15,6 +15,11 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 
+var (
+	policyID = "policy_id"
+	natID    = "nat_id"
+)
+
 var _ = Describe("Shared gateway mode EgressIP Operations with", func() {
 	var (
 		app     *cli.App
@@ -22,19 +27,21 @@ var _ = Describe("Shared gateway mode EgressIP Operations with", func() {
 		tExec   *ovntest.FakeExec
 	)
 
-	getEgressIPStatusLenSafely := func(egressIPName string) func() int {
+	getEgressIPAllocatorSizeSafely := func() int {
+		fakeOvn.controller.eIPAllocatorMutex.Lock()
+		defer fakeOvn.controller.eIPAllocatorMutex.Unlock()
+		return len(fakeOvn.controller.eIPAllocator)
+	}
+
+	getEgressIPStatusLen := func(egressIPName string) func() int {
 		return func() int {
-			fakeOvn.controller.eIPAllocatorMutex.Lock()
-			defer fakeOvn.controller.eIPAllocatorMutex.Unlock()
 			tmp, err := fakeOvn.fakeEgressIPClient.K8sV1().EgressIPs().Get(context.TODO(), egressIPName, metav1.GetOptions{})
 			Expect(err).NotTo(HaveOccurred())
 			return len(tmp.Status.Items)
 		}
 	}
 
-	getEgressIPStatusSafely := func(egressIPName string) []egressipv1.EgressIPStatusItem {
-		fakeOvn.controller.eIPAllocatorMutex.Lock()
-		defer fakeOvn.controller.eIPAllocatorMutex.Unlock()
+	getEgressIPStatus := func(egressIPName string) []egressipv1.EgressIPStatusItem {
 		tmp, err := fakeOvn.fakeEgressIPClient.K8sV1().EgressIPs().Get(context.TODO(), egressIPName, metav1.GetOptions{})
 		Expect(err).NotTo(HaveOccurred())
 		return tmp.Status.Items
@@ -56,6 +63,243 @@ var _ = Describe("Shared gateway mode EgressIP Operations with", func() {
 
 	AfterEach(func() {
 		fakeOvn.shutdown()
+	})
+
+	Context("On node UPDATE", func() {
+
+		It("should re-assign EgressIPs and perform proper OVN transactions when pod is created after node egress label switch", func() {
+			app.Action = func(ctx *cli.Context) error {
+
+				egressIP := "192.168.126.101"
+				node1IPv4 := "192.168.126.202/24"
+				node2IPv4 := "192.168.126.51/24"
+
+				egressPod := *newPodWithLabels(namespace, podName, node1Name, podV4IP, egressPodLabel)
+				egressNamespace := newNamespace(namespace)
+
+				node1 := v1.Node{ObjectMeta: metav1.ObjectMeta{
+					Name: node1Name,
+					Annotations: map[string]string{
+						"k8s.ovn.org/node-primary-ifaddr": fmt.Sprintf("{\"ipv4\": \"%s\", \"ipv6\": \"%s\"}", node1IPv4, ""),
+					},
+					Labels: map[string]string{
+						"k8s.ovn.org/egress-assignable": "",
+					},
+				}}
+				node2 := v1.Node{ObjectMeta: metav1.ObjectMeta{
+					Name: node2Name,
+					Annotations: map[string]string{
+						"k8s.ovn.org/node-primary-ifaddr": fmt.Sprintf("{\"ipv4\": \"%s\", \"ipv6\": \"%s\"}", node2IPv4, ""),
+					},
+				}}
+
+				eIP := egressipv1.EgressIP{
+					ObjectMeta: newEgressIPMeta(egressIPName),
+					Spec: egressipv1.EgressIPSpec{
+						EgressIPs: []string{egressIP},
+						PodSelector: metav1.LabelSelector{
+							MatchLabels: egressPodLabel,
+						},
+						NamespaceSelector: metav1.LabelSelector{
+							MatchLabels: map[string]string{
+								"name": egressNamespace.Name,
+							},
+						},
+					},
+					Status: egressipv1.EgressIPStatus{
+						Items: []egressipv1.EgressIPStatusItem{},
+					},
+				}
+
+				fakeOvn.start(ctx,
+					&egressipv1.EgressIPList{
+						Items: []egressipv1.EgressIP{eIP},
+					},
+					&v1.NodeList{
+						Items: []v1.Node{node1, node2},
+					},
+					&v1.NamespaceList{
+						Items: []v1.Namespace{*egressNamespace},
+					})
+
+				fakeOvn.fakeExec.AddFakeCmdsNoOutputNoError(
+					[]string{
+						fmt.Sprintf("ovn-nbctl --timeout=15 lr-policy-add ovn_cluster_router 101 ip4.src == 10.128.0.0/14 && ip4.dst == 10.128.0.0/14 allow"),
+					},
+				)
+
+				fakeOvn.controller.WatchEgressNodes()
+				Eventually(getEgressIPAllocatorSizeSafely).Should(Equal(1))
+				Expect(fakeOvn.controller.eIPAllocator).To(HaveKey(node1.Name))
+
+				fakeOvn.controller.WatchEgressIP()
+				Eventually(getEgressIPStatusLen(egressIPName)).Should(Equal(1))
+				statuses := getEgressIPStatus(egressIPName)
+				Expect(statuses[0].Node).To(Equal(node1.Name))
+				Expect(statuses[0].EgressIP).To(Equal(egressIP))
+
+				node1.Labels = map[string]string{}
+				node2.Labels = map[string]string{
+					"k8s.ovn.org/egress-assignable": "",
+				}
+
+				_, err := fakeOvn.fakeClient.CoreV1().Nodes().Update(context.TODO(), &node1, metav1.UpdateOptions{})
+				Expect(err).NotTo(HaveOccurred())
+				_, err = fakeOvn.fakeClient.CoreV1().Nodes().Update(context.TODO(), &node2, metav1.UpdateOptions{})
+				Expect(err).NotTo(HaveOccurred())
+
+				nodeSwitch := func() string {
+					statuses = getEgressIPStatus(egressIPName)
+					return statuses[0].Node
+				}
+
+				Eventually(getEgressIPStatusLen(egressIPName)).Should(Equal(1))
+				Eventually(nodeSwitch).Should(Equal(node2.Name))
+				statuses = getEgressIPStatus(egressIPName)
+				Expect(statuses[0].EgressIP).To(Equal(egressIP))
+
+				fakeOvn.fakeExec.AddFakeCmd(
+					&ovntest.ExpectedCmd{
+						Cmd:    fmt.Sprintf("ovn-nbctl --timeout=15 --data=bare --format=table --no-heading --columns=options find logical_router name=GR_%s options:lb_force_snat_ip!=-", node2.Name),
+						Output: fmt.Sprintf("lb_force_snat_ip=%s", nodeLogicalRouterIPv4),
+					},
+				)
+				fakeOvn.fakeExec.AddFakeCmdsNoOutputNoError(
+					[]string{
+						fmt.Sprintf("ovn-nbctl --timeout=15 --format=csv --data=bare --no-heading --columns=_uuid find logical_router_policy match=\"%s\" priority=%s external_ids:name=%s", fmt.Sprintf("ip4.src == %s", egressPod.Status.PodIP), egressIPReroutePriority, eIP.Name),
+						fmt.Sprintf("ovn-nbctl --timeout=15 --id=@lr-policy create logical_router_policy action=reroute match=\"%s\" priority=%s nexthop=%s external_ids:name=%s -- add logical_router %s policies @lr-policy", fmt.Sprintf("ip4.src == %s", egressPod.Status.PodIP), egressIPReroutePriority, nodeLogicalRouterIPv4, eIP.Name, ovnClusterRouter),
+						fmt.Sprintf("ovn-nbctl --timeout=15 --format=csv --data=bare --no-heading --columns=_uuid find nat external_ids:name=%s logical_ip=%s external_ip=%s", eIP.Name, egressPod.Status.PodIP, egressIP),
+						fmt.Sprintf("ovn-nbctl --timeout=15 --id=@nat create nat type=snat %s %s %s %s -- add logical_router GR_%s nat @nat", fmt.Sprintf("logical_port=k8s-%s", node2.Name), fmt.Sprintf("external_ip=%s", egressIP), fmt.Sprintf("logical_ip=%s", egressPod.Status.PodIP), fmt.Sprintf("external_ids:name=%s", eIP.Name), node2.Name),
+					},
+				)
+				_, err = fakeOvn.fakeClient.CoreV1().Pods(egressPod.Namespace).Create(context.TODO(), &egressPod, metav1.CreateOptions{})
+
+				Eventually(fakeOvn.fakeExec.CalledMatchesExpected).Should(BeTrue(), fakeOvn.fakeExec.ErrorDesc)
+
+				return nil
+			}
+
+			err := app.Run([]string{app.Name})
+			Expect(err).NotTo(HaveOccurred())
+		})
+
+		It("should re-assign EgressIPs and perform proper OVN transactions when namespace and pod is created after node egress label switch", func() {
+			app.Action = func(ctx *cli.Context) error {
+
+				egressIP := "192.168.126.101"
+				node1IPv4 := "192.168.126.202/24"
+				node2IPv4 := "192.168.126.51/24"
+
+				egressPod := *newPodWithLabels(namespace, podName, node1Name, podV4IP, egressPodLabel)
+				egressNamespace := newNamespace(namespace)
+
+				node1 := v1.Node{ObjectMeta: metav1.ObjectMeta{
+					Name: node1Name,
+					Annotations: map[string]string{
+						"k8s.ovn.org/node-primary-ifaddr": fmt.Sprintf("{\"ipv4\": \"%s\", \"ipv6\": \"%s\"}", node1IPv4, ""),
+					},
+					Labels: map[string]string{
+						"k8s.ovn.org/egress-assignable": "",
+					},
+				}}
+				node2 := v1.Node{ObjectMeta: metav1.ObjectMeta{
+					Name: node2Name,
+					Annotations: map[string]string{
+						"k8s.ovn.org/node-primary-ifaddr": fmt.Sprintf("{\"ipv4\": \"%s\", \"ipv6\": \"%s\"}", node2IPv4, ""),
+					},
+				}}
+
+				eIP := egressipv1.EgressIP{
+					ObjectMeta: newEgressIPMeta(egressIPName),
+					Spec: egressipv1.EgressIPSpec{
+						EgressIPs: []string{egressIP},
+						PodSelector: metav1.LabelSelector{
+							MatchLabels: egressPodLabel,
+						},
+						NamespaceSelector: metav1.LabelSelector{
+							MatchLabels: map[string]string{
+								"name": egressNamespace.Name,
+							},
+						},
+					},
+					Status: egressipv1.EgressIPStatus{
+						Items: []egressipv1.EgressIPStatusItem{},
+					},
+				}
+
+				fakeOvn.start(ctx,
+					&egressipv1.EgressIPList{
+						Items: []egressipv1.EgressIP{eIP},
+					},
+					&v1.NodeList{
+						Items: []v1.Node{node1, node2},
+					})
+
+				fakeOvn.fakeExec.AddFakeCmdsNoOutputNoError(
+					[]string{
+						fmt.Sprintf("ovn-nbctl --timeout=15 lr-policy-add ovn_cluster_router 101 ip4.src == 10.128.0.0/14 && ip4.dst == 10.128.0.0/14 allow"),
+					},
+				)
+				fakeOvn.controller.WatchEgressNodes()
+				Eventually(getEgressIPAllocatorSizeSafely).Should(Equal(1))
+				Expect(fakeOvn.controller.eIPAllocator).To(HaveKey(node1.Name))
+
+				fakeOvn.controller.WatchEgressIP()
+				Eventually(getEgressIPStatusLen(egressIPName)).Should(Equal(1))
+				statuses := getEgressIPStatus(egressIPName)
+				Expect(statuses[0].Node).To(Equal(node1.Name))
+				Expect(statuses[0].EgressIP).To(Equal(egressIP))
+
+				node1.Labels = map[string]string{}
+				node2.Labels = map[string]string{
+					"k8s.ovn.org/egress-assignable": "",
+				}
+
+				_, err := fakeOvn.fakeClient.CoreV1().Nodes().Update(context.TODO(), &node1, metav1.UpdateOptions{})
+				Expect(err).NotTo(HaveOccurred())
+				_, err = fakeOvn.fakeClient.CoreV1().Nodes().Update(context.TODO(), &node2, metav1.UpdateOptions{})
+				Expect(err).NotTo(HaveOccurred())
+
+				nodeSwitch := func() string {
+					statuses = getEgressIPStatus(egressIPName)
+					return statuses[0].Node
+				}
+
+				Eventually(getEgressIPStatusLen(egressIPName)).Should(Equal(1))
+				Eventually(nodeSwitch).Should(Equal(node2.Name))
+				statuses = getEgressIPStatus(egressIPName)
+				Expect(statuses[0].EgressIP).To(Equal(egressIP))
+
+				fakeOvn.fakeExec.AddFakeCmd(
+					&ovntest.ExpectedCmd{
+						Cmd:    fmt.Sprintf("ovn-nbctl --timeout=15 --data=bare --format=table --no-heading --columns=options find logical_router name=GR_%s options:lb_force_snat_ip!=-", node2.Name),
+						Output: fmt.Sprintf("lb_force_snat_ip=%s", nodeLogicalRouterIPv4),
+					},
+				)
+				fakeOvn.fakeExec.AddFakeCmdsNoOutputNoError(
+					[]string{
+						fmt.Sprintf("ovn-nbctl --timeout=15 --format=csv --data=bare --no-heading --columns=_uuid find logical_router_policy match=\"%s\" priority=%s external_ids:name=%s", fmt.Sprintf("ip4.src == %s", egressPod.Status.PodIP), egressIPReroutePriority, eIP.Name),
+						fmt.Sprintf("ovn-nbctl --timeout=15 --id=@lr-policy create logical_router_policy action=reroute match=\"%s\" priority=%s nexthop=%s external_ids:name=%s -- add logical_router %s policies @lr-policy", fmt.Sprintf("ip4.src == %s", egressPod.Status.PodIP), egressIPReroutePriority, nodeLogicalRouterIPv4, eIP.Name, ovnClusterRouter),
+						fmt.Sprintf("ovn-nbctl --timeout=15 --format=csv --data=bare --no-heading --columns=_uuid find nat external_ids:name=%s logical_ip=%s external_ip=%s", eIP.Name, egressPod.Status.PodIP, egressIP),
+						fmt.Sprintf("ovn-nbctl --timeout=15 --id=@nat create nat type=snat %s %s %s %s -- add logical_router GR_%s nat @nat", fmt.Sprintf("logical_port=k8s-%s", node2.Name), fmt.Sprintf("external_ip=%s", egressIP), fmt.Sprintf("logical_ip=%s", egressPod.Status.PodIP), fmt.Sprintf("external_ids:name=%s", eIP.Name), node2.Name),
+					},
+				)
+				_, err = fakeOvn.fakeClient.CoreV1().Namespaces().Create(context.TODO(), egressNamespace, metav1.CreateOptions{})
+				Expect(err).NotTo(HaveOccurred())
+				Eventually(func() int {
+					fakeOvn.controller.egressIPPodHandlerMutex.Lock()
+					defer fakeOvn.controller.egressIPPodHandlerMutex.Unlock()
+					return len(fakeOvn.controller.egressIPPodHandlerCache)
+				}).Should(Equal(1))
+				_, err = fakeOvn.fakeClient.CoreV1().Pods(egressPod.Namespace).Create(context.TODO(), &egressPod, metav1.CreateOptions{})
+				Expect(err).NotTo(HaveOccurred())
+				Eventually(fakeOvn.fakeExec.CalledMatchesExpected).Should(BeTrue(), fakeOvn.fakeExec.ErrorDesc)
+				return nil
+			}
+
+			err := app.Run([]string{app.Name})
+			Expect(err).NotTo(HaveOccurred())
+		})
 	})
 
 	Context("IPv6 on pod UPDATE", func() {
@@ -98,18 +342,18 @@ var _ = Describe("Shared gateway mode EgressIP Operations with", func() {
 					},
 				}
 
-				lsp := fmt.Sprintf("%s_%s", egressPod.Namespace, egressPod.Name)
-				populatePortAddresses(node1Name, lsp, "0a:00:00:00:00:01", egressPod.Status.PodIP, fakeOvn.ovnNBClient)
 				fakeOvn.fakeExec.AddFakeCmd(
 					&ovntest.ExpectedCmd{
 						Cmd:    fmt.Sprintf("ovn-nbctl --timeout=15 --data=bare --format=table --no-heading --columns=options find logical_router name=GR_%s options:lb_force_snat_ip!=-", node2.name),
-						Output: fmt.Sprintf("lb_force_snat_ip=%s", nodeGatewayRouterIP),
+						Output: fmt.Sprintf("lb_force_snat_ip=%s", nodeLogicalRouterIPv6),
 					},
 				)
 				fakeOvn.fakeExec.AddFakeCmdsNoOutputNoError(
 					[]string{
-						fmt.Sprintf("ovn-nbctl --timeout=15 lr-policy-add ovn_cluster_router 100 ip6.src == %s && ip6.dst == ::/0 reroute %s", egressPod.Status.PodIP, nodeGatewayRouterIP),
-						fmt.Sprintf("ovn-nbctl --timeout=15 lr-nat-add GR_%s dnat_and_snat %s %s", node2.name, egressIP.String(), egressPod.Status.PodIP),
+						fmt.Sprintf("ovn-nbctl --timeout=15 --format=csv --data=bare --no-heading --columns=_uuid find logical_router_policy match=\"%s\" priority=%s external_ids:name=%s", fmt.Sprintf("ip6.src == %s", egressPod.Status.PodIP), egressIPReroutePriority, eIP.Name),
+						fmt.Sprintf("ovn-nbctl --timeout=15 --id=@lr-policy create logical_router_policy action=reroute match=\"%s\" priority=%s nexthop=%s external_ids:name=%s -- add logical_router %s policies @lr-policy", fmt.Sprintf("ip6.src == %s", egressPod.Status.PodIP), egressIPReroutePriority, nodeLogicalRouterIPv6, eIP.Name, ovnClusterRouter),
+						fmt.Sprintf("ovn-nbctl --timeout=15 --format=csv --data=bare --no-heading --columns=_uuid find nat external_ids:name=%s logical_ip=%s external_ip=%s", eIP.Name, egressPod.Status.PodIP, egressIP),
+						fmt.Sprintf("ovn-nbctl --timeout=15 --id=@nat create nat type=snat %s %s %s %s -- add logical_router GR_%s nat @nat", fmt.Sprintf("logical_port=k8s-%s", node2.name), fmt.Sprintf("external_ip=%s", egressIP), fmt.Sprintf("logical_ip=%s", egressPod.Status.PodIP), fmt.Sprintf("external_ids:name=%s", eIP.Name), node2.name),
 					},
 				)
 
@@ -118,25 +362,40 @@ var _ = Describe("Shared gateway mode EgressIP Operations with", func() {
 				_, err := fakeOvn.fakeEgressIPClient.K8sV1().EgressIPs().Create(context.TODO(), &eIP, metav1.CreateOptions{})
 				Expect(err).NotTo(HaveOccurred())
 
-				Eventually(getEgressIPStatusLenSafely(eIP.Name)).Should(Equal(1))
+				Eventually(getEgressIPStatusLen(eIP.Name)).Should(Equal(1))
 				Eventually(fakeOvn.fakeExec.CalledMatchesExpected).Should(BeTrue(), fakeOvn.fakeExec.ErrorDesc)
 
-				statuses := getEgressIPStatusSafely(eIP.Name)
+				statuses := getEgressIPStatus(eIP.Name)
 				Expect(statuses[0].Node).To(Equal(node2.name))
 				Expect(statuses[0].EgressIP).To(Equal(egressIP.String()))
 
 				podUpdate := newPod(namespace, podName, node1Name, podV6IP)
 
-				fakeOvn.fakeExec.AddFakeCmdsNoOutputNoError(
-					[]string{
-						fmt.Sprintf("ovn-nbctl --timeout=15 lr-policy-del ovn_cluster_router 100 ip6.src == %s && ip6.dst == ::/0", egressPod.Status.PodIP),
-						fmt.Sprintf("ovn-nbctl --timeout=15 lr-nat-del GR_%s dnat_and_snat %s", node2.name, egressIP.String()),
+				fakeOvn.fakeExec.AddFakeCmd(
+					&ovntest.ExpectedCmd{
+						Cmd:    fmt.Sprintf("ovn-nbctl --timeout=15 --format=csv --data=bare --no-heading --columns=_uuid find logical_router_policy match=\"%s\" priority=%s external_ids:name=%s", fmt.Sprintf("ip6.src == %s", egressPod.Status.PodIP), egressIPReroutePriority, eIP.Name),
+						Output: policyID,
 					},
 				)
-
+				fakeOvn.fakeExec.AddFakeCmdsNoOutputNoError(
+					[]string{
+						fmt.Sprintf("ovn-nbctl --timeout=15 remove logical_router %s policies %s", ovnClusterRouter, policyID),
+					},
+				)
+				fakeOvn.fakeExec.AddFakeCmd(
+					&ovntest.ExpectedCmd{
+						Cmd:    fmt.Sprintf("ovn-nbctl --timeout=15 --format=csv --data=bare --no-heading --columns=_uuid find nat %s %s %s", fmt.Sprintf("external_ids:name=%s", egressIPName), fmt.Sprintf("logical_ip=%s", egressPod.Status.PodIP), fmt.Sprintf("external_ip=%s", egressIP.String())),
+						Output: natID,
+					},
+				)
+				fakeOvn.fakeExec.AddFakeCmdsNoOutputNoError(
+					[]string{
+						fmt.Sprintf("ovn-nbctl --timeout=15 remove logical_router GR_%s nat %s", node2.name, natID),
+					},
+				)
 				_, err = fakeOvn.fakeClient.CoreV1().Pods(egressPod.Namespace).Update(context.TODO(), podUpdate, metav1.UpdateOptions{})
 				Expect(err).ToNot(HaveOccurred())
-				Eventually(getEgressIPStatusLenSafely(eIP.Name)).Should(Equal(1))
+				Eventually(getEgressIPStatusLen(eIP.Name)).Should(Equal(1))
 				Eventually(fakeOvn.fakeExec.CalledMatchesExpected).Should(BeTrue(), fakeOvn.fakeExec.ErrorDesc)
 				return nil
 			}
@@ -184,18 +443,18 @@ var _ = Describe("Shared gateway mode EgressIP Operations with", func() {
 					},
 				}
 
-				lsp := fmt.Sprintf("%s_%s", egressPod.Namespace, egressPod.Name)
-				populatePortAddresses(node1Name, lsp, "0a:00:00:00:00:01", egressPod.Status.PodIP, fakeOvn.ovnNBClient)
 				fakeOvn.fakeExec.AddFakeCmd(
 					&ovntest.ExpectedCmd{
 						Cmd:    fmt.Sprintf("ovn-nbctl --timeout=15 --data=bare --format=table --no-heading --columns=options find logical_router name=GR_%s options:lb_force_snat_ip!=-", node2.name),
-						Output: fmt.Sprintf("lb_force_snat_ip=%s", nodeGatewayRouterIP),
+						Output: fmt.Sprintf("lb_force_snat_ip=%s", nodeLogicalRouterIPv6),
 					},
 				)
 				fakeOvn.fakeExec.AddFakeCmdsNoOutputNoError(
 					[]string{
-						fmt.Sprintf("ovn-nbctl --timeout=15 lr-policy-add ovn_cluster_router 100 ip6.src == %s && ip6.dst == ::/0 reroute %s", egressPod.Status.PodIP, nodeGatewayRouterIP),
-						fmt.Sprintf("ovn-nbctl --timeout=15 lr-nat-add GR_%s dnat_and_snat %s %s", node2.name, egressIP.String(), egressPod.Status.PodIP),
+						fmt.Sprintf("ovn-nbctl --timeout=15 --format=csv --data=bare --no-heading --columns=_uuid find logical_router_policy match=\"%s\" priority=%s external_ids:name=%s", fmt.Sprintf("ip6.src == %s", egressPod.Status.PodIP), egressIPReroutePriority, eIP.Name),
+						fmt.Sprintf("ovn-nbctl --timeout=15 --id=@lr-policy create logical_router_policy action=reroute match=\"%s\" priority=%s nexthop=%s external_ids:name=%s -- add logical_router %s policies @lr-policy", fmt.Sprintf("ip6.src == %s", egressPod.Status.PodIP), egressIPReroutePriority, nodeLogicalRouterIPv6, eIP.Name, ovnClusterRouter),
+						fmt.Sprintf("ovn-nbctl --timeout=15 --format=csv --data=bare --no-heading --columns=_uuid find nat external_ids:name=%s logical_ip=%s external_ip=%s", eIP.Name, egressPod.Status.PodIP, egressIP),
+						fmt.Sprintf("ovn-nbctl --timeout=15 --id=@nat create nat type=snat %s %s %s %s -- add logical_router GR_%s nat @nat", fmt.Sprintf("logical_port=k8s-%s", node2.name), fmt.Sprintf("external_ip=%s", egressIP), fmt.Sprintf("logical_ip=%s", egressPod.Status.PodIP), fmt.Sprintf("external_ids:name=%s", eIP.Name), node2.name),
 					},
 				)
 
@@ -204,10 +463,10 @@ var _ = Describe("Shared gateway mode EgressIP Operations with", func() {
 				_, err := fakeOvn.fakeEgressIPClient.K8sV1().EgressIPs().Create(context.TODO(), &eIP, metav1.CreateOptions{})
 				Expect(err).NotTo(HaveOccurred())
 
-				Eventually(getEgressIPStatusLenSafely(eIP.Name)).Should(Equal(1))
+				Eventually(getEgressIPStatusLen(eIP.Name)).Should(Equal(1))
 				Eventually(fakeOvn.fakeExec.CalledMatchesExpected).Should(BeTrue(), fakeOvn.fakeExec.ErrorDesc)
 
-				statuses := getEgressIPStatusSafely(eIP.Name)
+				statuses := getEgressIPStatus(eIP.Name)
 				Expect(statuses[0].Node).To(Equal(node2.name))
 				Expect(statuses[0].EgressIP).To(Equal(egressIP.String()))
 
@@ -218,7 +477,7 @@ var _ = Describe("Shared gateway mode EgressIP Operations with", func() {
 
 				_, err = fakeOvn.fakeClient.CoreV1().Pods(egressPod.Namespace).Update(context.TODO(), podUpdate, metav1.UpdateOptions{})
 				Expect(err).ToNot(HaveOccurred())
-				Eventually(getEgressIPStatusLenSafely(eIP.Name)).Should(Equal(1))
+				Eventually(getEgressIPStatusLen(eIP.Name)).Should(Equal(1))
 				Eventually(fakeOvn.fakeExec.CalledMatchesExpected).Should(BeTrue(), fakeOvn.fakeExec.ErrorDesc)
 				return nil
 			}
@@ -265,45 +524,39 @@ var _ = Describe("Shared gateway mode EgressIP Operations with", func() {
 						},
 					},
 				}
-				lsp := fmt.Sprintf("%s_%s", egressPod.Namespace, egressPod.Name)
-				populatePortAddresses(node1Name, lsp, "0a:00:00:00:00:01", "", fakeOvn.ovnNBClient)
 
 				fakeOvn.controller.WatchEgressIP()
 
 				_, err := fakeOvn.fakeEgressIPClient.K8sV1().EgressIPs().Create(context.TODO(), &eIP, metav1.CreateOptions{})
 				Expect(err).NotTo(HaveOccurred())
 
-				Eventually(getEgressIPStatusLenSafely(eIP.Name)).Should(Equal(1))
+				Eventually(getEgressIPStatusLen(eIP.Name)).Should(Equal(1))
 				Eventually(fakeOvn.fakeExec.CalledMatchesExpected).Should(BeTrue(), fakeOvn.fakeExec.ErrorDesc)
 
-				statuses := getEgressIPStatusSafely(eIP.Name)
+				statuses := getEgressIPStatus(eIP.Name)
 				Expect(statuses[0].Node).To(Equal(node2.name))
 				Expect(statuses[0].EgressIP).To(Equal(egressIP.String()))
 
 				podUpdate := newPodWithLabels(namespace, podName, node1Name, podV6IP, egressPodLabel)
 
-				// Mock pod IP found in OVN DB
-				cmd, err := fakeOvn.ovnNBClient.LSPSetDynamicAddresses(lsp, fmt.Sprintf("0a:00:00:00:00:01 %s", podUpdate.Status.PodIP))
-				Expect(err).NotTo(HaveOccurred())
-				err = cmd.Execute()
-				Expect(err).NotTo(HaveOccurred())
-
 				fakeOvn.fakeExec.AddFakeCmd(
 					&ovntest.ExpectedCmd{
 						Cmd:    fmt.Sprintf("ovn-nbctl --timeout=15 --data=bare --format=table --no-heading --columns=options find logical_router name=GR_%s options:lb_force_snat_ip!=-", node2.name),
-						Output: fmt.Sprintf("lb_force_snat_ip=%s", nodeGatewayRouterIP),
+						Output: fmt.Sprintf("lb_force_snat_ip=%s", nodeLogicalRouterIPv6),
 					},
 				)
 				fakeOvn.fakeExec.AddFakeCmdsNoOutputNoError(
 					[]string{
-						fmt.Sprintf("ovn-nbctl --timeout=15 lr-policy-add ovn_cluster_router 100 ip6.src == %s && ip6.dst == ::/0 reroute %s", podUpdate.Status.PodIP, nodeGatewayRouterIP),
-						fmt.Sprintf("ovn-nbctl --timeout=15 lr-nat-add GR_%s dnat_and_snat %s %s", node2.name, egressIP.String(), podUpdate.Status.PodIP),
+						fmt.Sprintf("ovn-nbctl --timeout=15 --format=csv --data=bare --no-heading --columns=_uuid find logical_router_policy match=\"%s\" priority=%s external_ids:name=%s", fmt.Sprintf("ip6.src == %s", podV6IP), egressIPReroutePriority, eIP.Name),
+						fmt.Sprintf("ovn-nbctl --timeout=15 --id=@lr-policy create logical_router_policy action=reroute match=\"%s\" priority=%s nexthop=%s external_ids:name=%s -- add logical_router %s policies @lr-policy", fmt.Sprintf("ip6.src == %s", podV6IP), egressIPReroutePriority, nodeLogicalRouterIPv6, eIP.Name, ovnClusterRouter),
+						fmt.Sprintf("ovn-nbctl --timeout=15 --format=csv --data=bare --no-heading --columns=_uuid find nat external_ids:name=%s logical_ip=%s external_ip=%s", eIP.Name, podV6IP, egressIP),
+						fmt.Sprintf("ovn-nbctl --timeout=15 --id=@nat create nat type=snat %s %s %s %s -- add logical_router GR_%s nat @nat", fmt.Sprintf("logical_port=k8s-%s", node2.name), fmt.Sprintf("external_ip=%s", egressIP), fmt.Sprintf("logical_ip=%s", podV6IP), fmt.Sprintf("external_ids:name=%s", eIP.Name), node2.name),
 					},
 				)
 
 				_, err = fakeOvn.fakeClient.CoreV1().Pods(egressPod.Namespace).Update(context.TODO(), podUpdate, metav1.UpdateOptions{})
 				Expect(err).ToNot(HaveOccurred())
-				Eventually(getEgressIPStatusLenSafely(eIP.Name)).Should(Equal(1))
+				Eventually(getEgressIPStatusLen(eIP.Name)).Should(Equal(1))
 				Eventually(fakeOvn.fakeExec.CalledMatchesExpected).Should(BeTrue(), fakeOvn.fakeExec.ErrorDesc)
 				return nil
 			}
@@ -350,24 +603,21 @@ var _ = Describe("Shared gateway mode EgressIP Operations with", func() {
 					},
 				}
 
-				lsp := fmt.Sprintf("%s_%s", egressPod.Namespace, egressPod.Name)
-				populatePortAddresses(node1Name, lsp, "0a:00:00:00:00:01", "", fakeOvn.ovnNBClient)
-
 				fakeOvn.controller.WatchEgressIP()
 
 				_, err := fakeOvn.fakeEgressIPClient.K8sV1().EgressIPs().Create(context.TODO(), &eIP, metav1.CreateOptions{})
 				Expect(err).NotTo(HaveOccurred())
 
-				Eventually(getEgressIPStatusLenSafely(eIP.Name)).Should(Equal(1))
+				Eventually(getEgressIPStatusLen(eIP.Name)).Should(Equal(1))
 				Eventually(fakeOvn.fakeExec.CalledMatchesExpected).Should(BeTrue(), fakeOvn.fakeExec.ErrorDesc)
 
-				statuses := getEgressIPStatusSafely(eIP.Name)
+				statuses := getEgressIPStatus(eIP.Name)
 				Expect(statuses[0].Node).To(Equal(node2.name))
 				Expect(statuses[0].EgressIP).To(Equal(egressIP.String()))
 
 				err = fakeOvn.fakeClient.CoreV1().Pods(egressPod.Namespace).Delete(context.TODO(), egressPod.Name, *metav1.NewDeleteOptions(0))
 				Expect(err).ToNot(HaveOccurred())
-				Eventually(getEgressIPStatusLenSafely(eIP.Name)).Should(Equal(1))
+				Eventually(getEgressIPStatusLen(eIP.Name)).Should(Equal(1))
 				Eventually(fakeOvn.fakeExec.CalledMatchesExpected).Should(BeTrue(), fakeOvn.fakeExec.ErrorDesc)
 				return nil
 			}
@@ -415,19 +665,18 @@ var _ = Describe("Shared gateway mode EgressIP Operations with", func() {
 					},
 				}
 
-				lsp := fmt.Sprintf("%s_%s", egressPod.Namespace, egressPod.Name)
-				populatePortAddresses(node1Name, lsp, "0a:00:00:00:00:01", egressPod.Status.PodIP, fakeOvn.ovnNBClient)
-
 				fakeOvn.fakeExec.AddFakeCmd(
 					&ovntest.ExpectedCmd{
 						Cmd:    fmt.Sprintf("ovn-nbctl --timeout=15 --data=bare --format=table --no-heading --columns=options find logical_router name=GR_%s options:lb_force_snat_ip!=-", node2.name),
-						Output: fmt.Sprintf("lb_force_snat_ip=%s", nodeGatewayRouterIP),
+						Output: fmt.Sprintf("lb_force_snat_ip=%s", nodeLogicalRouterIPv6),
 					},
 				)
 				fakeOvn.fakeExec.AddFakeCmdsNoOutputNoError(
 					[]string{
-						fmt.Sprintf("ovn-nbctl --timeout=15 lr-policy-add ovn_cluster_router 100 ip6.src == %s && ip6.dst == ::/0 reroute %s", egressPod.Status.PodIP, nodeGatewayRouterIP),
-						fmt.Sprintf("ovn-nbctl --timeout=15 lr-nat-add GR_%s dnat_and_snat %s %s", node2.name, egressIP.String(), egressPod.Status.PodIP),
+						fmt.Sprintf("ovn-nbctl --timeout=15 --format=csv --data=bare --no-heading --columns=_uuid find logical_router_policy match=\"%s\" priority=%s external_ids:name=%s", fmt.Sprintf("ip6.src == %s", egressPod.Status.PodIP), egressIPReroutePriority, eIP.Name),
+						fmt.Sprintf("ovn-nbctl --timeout=15 --id=@lr-policy create logical_router_policy action=reroute match=\"%s\" priority=%s nexthop=%s external_ids:name=%s -- add logical_router %s policies @lr-policy", fmt.Sprintf("ip6.src == %s", egressPod.Status.PodIP), egressIPReroutePriority, nodeLogicalRouterIPv6, eIP.Name, ovnClusterRouter),
+						fmt.Sprintf("ovn-nbctl --timeout=15 --format=csv --data=bare --no-heading --columns=_uuid find nat external_ids:name=%s logical_ip=%s external_ip=%s", eIP.Name, egressPod.Status.PodIP, egressIP),
+						fmt.Sprintf("ovn-nbctl --timeout=15 --id=@nat create nat type=snat %s %s %s %s -- add logical_router GR_%s nat @nat", fmt.Sprintf("logical_port=k8s-%s", node2.name), fmt.Sprintf("external_ip=%s", egressIP), fmt.Sprintf("logical_ip=%s", egressPod.Status.PodIP), fmt.Sprintf("external_ids:name=%s", eIP.Name), node2.name),
 					},
 				)
 
@@ -436,25 +685,41 @@ var _ = Describe("Shared gateway mode EgressIP Operations with", func() {
 				_, err := fakeOvn.fakeEgressIPClient.K8sV1().EgressIPs().Create(context.TODO(), &eIP, metav1.CreateOptions{})
 				Expect(err).NotTo(HaveOccurred())
 
-				Eventually(getEgressIPStatusLenSafely(eIP.Name)).Should(Equal(1))
+				Eventually(getEgressIPStatusLen(eIP.Name)).Should(Equal(1))
 				Eventually(fakeOvn.fakeExec.CalledMatchesExpected).Should(BeTrue(), fakeOvn.fakeExec.ErrorDesc)
 
-				statuses := getEgressIPStatusSafely(eIP.Name)
+				statuses := getEgressIPStatus(eIP.Name)
 				Expect(statuses[0].Node).To(Equal(node2.name))
 				Expect(statuses[0].EgressIP).To(Equal(egressIP.String()))
 
 				namespaceUpdate := newNamespace(namespace)
 
+				fakeOvn.fakeExec.AddFakeCmd(
+					&ovntest.ExpectedCmd{
+						Cmd:    fmt.Sprintf("ovn-nbctl --timeout=15 --format=csv --data=bare --no-heading --columns=_uuid find logical_router_policy match=\"%s\" priority=%s external_ids:name=%s", fmt.Sprintf("ip6.src == %s", egressPod.Status.PodIP), egressIPReroutePriority, eIP.Name),
+						Output: policyID,
+					},
+				)
 				fakeOvn.fakeExec.AddFakeCmdsNoOutputNoError(
 					[]string{
-						fmt.Sprintf("ovn-nbctl --timeout=15 lr-policy-del ovn_cluster_router 100 ip6.src == %s && ip6.dst == ::/0", egressPod.Status.PodIP),
-						fmt.Sprintf("ovn-nbctl --timeout=15 lr-nat-del GR_%s dnat_and_snat %s", node2.name, egressIP.String()),
+						fmt.Sprintf("ovn-nbctl --timeout=15 remove logical_router %s policies %s", ovnClusterRouter, policyID),
+					},
+				)
+				fakeOvn.fakeExec.AddFakeCmd(
+					&ovntest.ExpectedCmd{
+						Cmd:    fmt.Sprintf("ovn-nbctl --timeout=15 --format=csv --data=bare --no-heading --columns=_uuid find nat %s %s %s", fmt.Sprintf("external_ids:name=%s", egressIPName), fmt.Sprintf("logical_ip=%s", egressPod.Status.PodIP), fmt.Sprintf("external_ip=%s", egressIP.String())),
+						Output: natID,
+					},
+				)
+				fakeOvn.fakeExec.AddFakeCmdsNoOutputNoError(
+					[]string{
+						fmt.Sprintf("ovn-nbctl --timeout=15 remove logical_router GR_%s nat %s", node2.name, natID),
 					},
 				)
 
 				_, err = fakeOvn.fakeClient.CoreV1().Namespaces().Update(context.TODO(), namespaceUpdate, metav1.UpdateOptions{})
 				Expect(err).ToNot(HaveOccurred())
-				Eventually(getEgressIPStatusLenSafely(eIP.Name)).Should(Equal(1))
+				Eventually(getEgressIPStatusLen(eIP.Name)).Should(Equal(1))
 				Eventually(fakeOvn.fakeExec.CalledMatchesExpected).Should(BeTrue(), fakeOvn.fakeExec.ErrorDesc)
 				return nil
 			}
@@ -500,18 +765,15 @@ var _ = Describe("Shared gateway mode EgressIP Operations with", func() {
 					},
 				}
 
-				lsp := fmt.Sprintf("%s_%s", egressPod.Namespace, egressPod.Name)
-				populatePortAddresses(node1Name, lsp, "0a:00:00:00:00:01", "", fakeOvn.ovnNBClient)
-
 				fakeOvn.controller.WatchEgressIP()
 
 				_, err := fakeOvn.fakeEgressIPClient.K8sV1().EgressIPs().Create(context.TODO(), &eIP, metav1.CreateOptions{})
 				Expect(err).NotTo(HaveOccurred())
 
-				Eventually(getEgressIPStatusLenSafely(eIP.Name)).Should(Equal(1))
+				Eventually(getEgressIPStatusLen(eIP.Name)).Should(Equal(1))
 				Eventually(fakeOvn.fakeExec.CalledMatchesExpected).Should(BeTrue(), fakeOvn.fakeExec.ErrorDesc)
 
-				statuses := getEgressIPStatusSafely(eIP.Name)
+				statuses := getEgressIPStatus(eIP.Name)
 				Expect(statuses[0].Node).To(Equal(node2.name))
 				Expect(statuses[0].EgressIP).To(Equal(egressIP.String()))
 
@@ -519,7 +781,7 @@ var _ = Describe("Shared gateway mode EgressIP Operations with", func() {
 
 				_, err = fakeOvn.fakeClient.CoreV1().Namespaces().Update(context.TODO(), namespaceUpdate, metav1.UpdateOptions{})
 				Expect(err).ToNot(HaveOccurred())
-				Eventually(getEgressIPStatusLenSafely(eIP.Name)).Should(Equal(1))
+				Eventually(getEgressIPStatusLen(eIP.Name)).Should(Equal(1))
 				Eventually(fakeOvn.fakeExec.CalledMatchesExpected).Should(BeTrue(), fakeOvn.fakeExec.ErrorDesc)
 				return nil
 			}
@@ -568,18 +830,18 @@ var _ = Describe("Shared gateway mode EgressIP Operations with", func() {
 					},
 				}
 
-				lsp := fmt.Sprintf("%s_%s", egressPod.Namespace, egressPod.Name)
-				populatePortAddresses(node1Name, lsp, "0a:00:00:00:00:01", egressPod.Status.PodIP, fakeOvn.ovnNBClient)
 				fakeOvn.fakeExec.AddFakeCmd(
 					&ovntest.ExpectedCmd{
 						Cmd:    fmt.Sprintf("ovn-nbctl --timeout=15 --data=bare --format=table --no-heading --columns=options find logical_router name=GR_%s options:lb_force_snat_ip!=-", node2.name),
-						Output: fmt.Sprintf("lb_force_snat_ip=%s", nodeGatewayRouterIP),
+						Output: fmt.Sprintf("lb_force_snat_ip=%s", nodeLogicalRouterIPv6),
 					},
 				)
 				fakeOvn.fakeExec.AddFakeCmdsNoOutputNoError(
 					[]string{
-						fmt.Sprintf("ovn-nbctl --timeout=15 lr-policy-add ovn_cluster_router 100 ip6.src == %s && ip6.dst == ::/0 reroute %s", egressPod.Status.PodIP, nodeGatewayRouterIP),
-						fmt.Sprintf("ovn-nbctl --timeout=15 lr-nat-add GR_%s dnat_and_snat %s %s", node2.name, egressIP.String(), egressPod.Status.PodIP),
+						fmt.Sprintf("ovn-nbctl --timeout=15 --format=csv --data=bare --no-heading --columns=_uuid find logical_router_policy match=\"%s\" priority=%s external_ids:name=%s", fmt.Sprintf("ip6.src == %s", egressPod.Status.PodIP), egressIPReroutePriority, eIP.Name),
+						fmt.Sprintf("ovn-nbctl --timeout=15 --id=@lr-policy create logical_router_policy action=reroute match=\"%s\" priority=%s nexthop=%s external_ids:name=%s -- add logical_router %s policies @lr-policy", fmt.Sprintf("ip6.src == %s", egressPod.Status.PodIP), egressIPReroutePriority, nodeLogicalRouterIPv6, eIP.Name, ovnClusterRouter),
+						fmt.Sprintf("ovn-nbctl --timeout=15 --format=csv --data=bare --no-heading --columns=_uuid find nat external_ids:name=%s logical_ip=%s external_ip=%s", eIP.Name, egressPod.Status.PodIP, egressIP),
+						fmt.Sprintf("ovn-nbctl --timeout=15 --id=@nat create nat type=snat %s %s %s %s -- add logical_router GR_%s nat @nat", fmt.Sprintf("logical_port=k8s-%s", node2.name), fmt.Sprintf("external_ip=%s", egressIP), fmt.Sprintf("logical_ip=%s", egressPod.Status.PodIP), fmt.Sprintf("external_ids:name=%s", eIP.Name), node2.name),
 					},
 				)
 
@@ -588,10 +850,10 @@ var _ = Describe("Shared gateway mode EgressIP Operations with", func() {
 				_, err := fakeOvn.fakeEgressIPClient.K8sV1().EgressIPs().Create(context.TODO(), &eIP, metav1.CreateOptions{})
 				Expect(err).NotTo(HaveOccurred())
 
-				Eventually(getEgressIPStatusLenSafely(eIP.Name)).Should(Equal(1))
+				Eventually(getEgressIPStatusLen(eIP.Name)).Should(Equal(1))
 				Eventually(fakeOvn.fakeExec.CalledMatchesExpected).Should(BeTrue(), fakeOvn.fakeExec.ErrorDesc)
 
-				statuses := getEgressIPStatusSafely(eIP.Name)
+				statuses := getEgressIPStatus(eIP.Name)
 				Expect(statuses[0].Node).To(Equal(node2.name))
 				Expect(statuses[0].EgressIP).To(Equal(egressIP.String()))
 
@@ -609,27 +871,43 @@ var _ = Describe("Shared gateway mode EgressIP Operations with", func() {
 						MatchLabels: egressPodLabel,
 					},
 				}
-
-				fakeOvn.fakeExec.AddFakeCmdsNoOutputNoError(
-					[]string{
-						fmt.Sprintf("ovn-nbctl --timeout=15 lr-policy-del ovn_cluster_router 100 ip6.src == %s && ip6.dst == ::/0", egressPod.Status.PodIP),
-						fmt.Sprintf("ovn-nbctl --timeout=15 lr-nat-del GR_%s dnat_and_snat %s", node2.name, egressIP.String()),
+				fakeOvn.fakeExec.AddFakeCmd(
+					&ovntest.ExpectedCmd{
+						Cmd:    fmt.Sprintf("ovn-nbctl --timeout=15 --format=csv --data=bare --no-heading --columns=_uuid find logical_router_policy match=\"%s\" priority=%s external_ids:name=%s", fmt.Sprintf("ip6.src == %s", egressPod.Status.PodIP), egressIPReroutePriority, eIP.Name),
+						Output: policyID,
 					},
 				)
-
 				fakeOvn.fakeExec.AddFakeCmdsNoOutputNoError(
 					[]string{
-						fmt.Sprintf("ovn-nbctl --timeout=15 lr-policy-add ovn_cluster_router 100 ip6.src == %s && ip6.dst == ::/0 reroute %s", egressPod.Status.PodIP, nodeGatewayRouterIP),
-						fmt.Sprintf("ovn-nbctl --timeout=15 lr-nat-add GR_%s dnat_and_snat %s %s", node2.name, updatedEgressIP.String(), egressPod.Status.PodIP),
+						fmt.Sprintf("ovn-nbctl --timeout=15 remove logical_router %s policies %s", ovnClusterRouter, policyID),
+					},
+				)
+				fakeOvn.fakeExec.AddFakeCmd(
+					&ovntest.ExpectedCmd{
+						Cmd:    fmt.Sprintf("ovn-nbctl --timeout=15 --format=csv --data=bare --no-heading --columns=_uuid find nat %s %s %s", fmt.Sprintf("external_ids:name=%s", egressIPName), fmt.Sprintf("logical_ip=%s", egressPod.Status.PodIP), fmt.Sprintf("external_ip=%s", egressIP.String())),
+						Output: natID,
+					},
+				)
+				fakeOvn.fakeExec.AddFakeCmdsNoOutputNoError(
+					[]string{
+						fmt.Sprintf("ovn-nbctl --timeout=15 remove logical_router GR_%s nat %s", node2.name, natID),
+					},
+				)
+				fakeOvn.fakeExec.AddFakeCmdsNoOutputNoError(
+					[]string{
+						fmt.Sprintf("ovn-nbctl --timeout=15 --format=csv --data=bare --no-heading --columns=_uuid find logical_router_policy match=\"%s\" priority=%s external_ids:name=%s", fmt.Sprintf("ip6.src == %s", egressPod.Status.PodIP), egressIPReroutePriority, eIP.Name),
+						fmt.Sprintf("ovn-nbctl --timeout=15 --id=@lr-policy create logical_router_policy action=reroute match=\"%s\" priority=%s nexthop=%s external_ids:name=%s -- add logical_router %s policies @lr-policy", fmt.Sprintf("ip6.src == %s", egressPod.Status.PodIP), egressIPReroutePriority, nodeLogicalRouterIPv6, eIP.Name, ovnClusterRouter),
+						fmt.Sprintf("ovn-nbctl --timeout=15 --format=csv --data=bare --no-heading --columns=_uuid find nat external_ids:name=%s logical_ip=%s external_ip=%s", eIP.Name, egressPod.Status.PodIP, updatedEgressIP.String()),
+						fmt.Sprintf("ovn-nbctl --timeout=15 --id=@nat create nat type=snat %s %s %s %s -- add logical_router GR_%s nat @nat", fmt.Sprintf("logical_port=k8s-%s", node2.name), fmt.Sprintf("external_ip=%s", updatedEgressIP.String()), fmt.Sprintf("logical_ip=%s", egressPod.Status.PodIP), fmt.Sprintf("external_ids:name=%s", eIP.Name), node2.name),
 					},
 				)
 
 				_, err = fakeOvn.fakeEgressIPClient.K8sV1().EgressIPs().Update(context.TODO(), eIPUpdate, metav1.UpdateOptions{})
 				Expect(err).ToNot(HaveOccurred())
 				Eventually(fakeOvn.fakeExec.CalledMatchesExpected).Should(BeTrue(), fakeOvn.fakeExec.ErrorDesc)
-				Eventually(getEgressIPStatusLenSafely(eIP.Name)).Should(Equal(1))
+				Eventually(getEgressIPStatusLen(eIP.Name)).Should(Equal(1))
 
-				statuses = getEgressIPStatusSafely(eIP.Name)
+				statuses = getEgressIPStatus(eIP.Name)
 				Expect(statuses[0].Node).To(Equal(node2.name))
 				Expect(statuses[0].EgressIP).To(Equal(updatedEgressIP.String()))
 				return nil
@@ -675,18 +953,18 @@ var _ = Describe("Shared gateway mode EgressIP Operations with", func() {
 					},
 				}
 
-				lsp := fmt.Sprintf("%s_%s", egressPod.Namespace, egressPod.Name)
-				populatePortAddresses(node1Name, lsp, "0a:00:00:00:00:01", egressPod.Status.PodIP, fakeOvn.ovnNBClient)
 				fakeOvn.fakeExec.AddFakeCmd(
 					&ovntest.ExpectedCmd{
 						Cmd:    fmt.Sprintf("ovn-nbctl --timeout=15 --data=bare --format=table --no-heading --columns=options find logical_router name=GR_%s options:lb_force_snat_ip!=-", node2.name),
-						Output: fmt.Sprintf("lb_force_snat_ip=%s", nodeGatewayRouterIP),
+						Output: fmt.Sprintf("lb_force_snat_ip=%s", nodeLogicalRouterIPv6),
 					},
 				)
 				fakeOvn.fakeExec.AddFakeCmdsNoOutputNoError(
 					[]string{
-						fmt.Sprintf("ovn-nbctl --timeout=15 lr-policy-add ovn_cluster_router 100 ip6.src == %s && ip6.dst == ::/0 reroute %s", egressPod.Status.PodIP, nodeGatewayRouterIP),
-						fmt.Sprintf("ovn-nbctl --timeout=15 lr-nat-add GR_%s dnat_and_snat %s %s", node2.name, egressIP.String(), egressPod.Status.PodIP),
+						fmt.Sprintf("ovn-nbctl --timeout=15 --format=csv --data=bare --no-heading --columns=_uuid find logical_router_policy match=\"%s\" priority=%s external_ids:name=%s", fmt.Sprintf("ip6.src == %s", egressPod.Status.PodIP), egressIPReroutePriority, eIP.Name),
+						fmt.Sprintf("ovn-nbctl --timeout=15 --id=@lr-policy create logical_router_policy action=reroute match=\"%s\" priority=%s nexthop=%s external_ids:name=%s -- add logical_router %s policies @lr-policy", fmt.Sprintf("ip6.src == %s", egressPod.Status.PodIP), egressIPReroutePriority, nodeLogicalRouterIPv6, eIP.Name, ovnClusterRouter),
+						fmt.Sprintf("ovn-nbctl --timeout=15 --format=csv --data=bare --no-heading --columns=_uuid find nat external_ids:name=%s logical_ip=%s external_ip=%s", eIP.Name, egressPod.Status.PodIP, egressIP.String()),
+						fmt.Sprintf("ovn-nbctl --timeout=15 --id=@nat create nat type=snat %s %s %s %s -- add logical_router GR_%s nat @nat", fmt.Sprintf("logical_port=k8s-%s", node2.name), fmt.Sprintf("external_ip=%s", egressIP.String()), fmt.Sprintf("logical_ip=%s", egressPod.Status.PodIP), fmt.Sprintf("external_ids:name=%s", eIP.Name), node2.name),
 					},
 				)
 
@@ -695,10 +973,10 @@ var _ = Describe("Shared gateway mode EgressIP Operations with", func() {
 				_, err := fakeOvn.fakeEgressIPClient.K8sV1().EgressIPs().Create(context.TODO(), &eIP, metav1.CreateOptions{})
 				Expect(err).NotTo(HaveOccurred())
 
-				Eventually(getEgressIPStatusLenSafely(eIP.Name)).Should(Equal(1))
+				Eventually(getEgressIPStatusLen(eIP.Name)).Should(Equal(1))
 				Eventually(fakeOvn.fakeExec.CalledMatchesExpected).Should(BeTrue(), fakeOvn.fakeExec.ErrorDesc)
 
-				statuses := getEgressIPStatusSafely(eIP.Name)
+				statuses := getEgressIPStatus(eIP.Name)
 				Expect(statuses[0].Node).To(Equal(node2.name))
 				Expect(statuses[0].EgressIP).To(Equal(egressIP.String()))
 
@@ -720,9 +998,9 @@ var _ = Describe("Shared gateway mode EgressIP Operations with", func() {
 				_, err = fakeOvn.fakeEgressIPClient.K8sV1().EgressIPs().Update(context.TODO(), eIPUpdate, metav1.UpdateOptions{})
 				Expect(err).NotTo(HaveOccurred())
 				Eventually(fakeOvn.fakeExec.CalledMatchesExpected).Should(BeTrue(), fakeOvn.fakeExec.ErrorDesc)
-				Eventually(getEgressIPStatusLenSafely(eIP.Name)).Should(Equal(1))
+				Eventually(getEgressIPStatusLen(eIP.Name)).Should(Equal(1))
 
-				statuses = getEgressIPStatusSafely(eIP.Name)
+				statuses = getEgressIPStatus(eIP.Name)
 				Expect(statuses[0].Node).To(Equal(bogusNode))
 				Expect(statuses[0].EgressIP).To(Equal(bogusIP))
 

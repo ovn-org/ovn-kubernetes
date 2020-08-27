@@ -36,14 +36,6 @@ const (
 	ovsVswitchd   = "ovs-vswitchd"
 )
 
-// Build information. Populated at build-time.
-var (
-	Commit    string
-	Branch    string
-	BuildUser string
-	BuildDate string
-)
-
 type metricDetails struct {
 	srcName       string
 	aggregateFrom []string

@@ -9,6 +9,7 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"runtime"
 	"strconv"
 	"strings"
 
@@ -39,8 +40,21 @@ const DefaultVXLANPort = 4789
 
 // The following are global config parameters that other modules may access directly
 var (
+	// Build information. Populated at build-time.
+	// commit ID used to build ovn-kubernetes
+	Commit = ""
+	// branch used to build ovn-kubernetes
+	Branch = ""
+	// ovn-kubernetes build user
+	BuildUser = ""
+	// ovn-kubernetes build date
+	BuildDate = ""
 	// ovn-kubernetes version, to be changed with every release
 	Version = "0.3.0"
+	// version of the go runtime used to compile ovn-kubernetes
+	GoVersion = runtime.Version()
+	// os and architecture used to build ovn-kubernetes
+	OSArch = fmt.Sprintf("%s %s", runtime.GOOS, runtime.GOARCH)
 
 	// ovn-kubernetes cni config file name
 	CNIConfFileName = "10-ovn-kubernetes.conf"
@@ -335,6 +349,14 @@ func init() {
 	savedGateway = Gateway
 	savedMasterHA = MasterHA
 	savedHybridOverlay = HybridOverlay
+	cli.VersionPrinter = func(c *cli.Context) {
+		fmt.Printf("Version: %s\n", Version)
+		fmt.Printf("Git commit: %s\n", Commit)
+		fmt.Printf("Git branch: %s\n", Branch)
+		fmt.Printf("Go version: %s\n", GoVersion)
+		fmt.Printf("Build date: %s\n", BuildDate)
+		fmt.Printf("OS/Arch: %s\n", OSArch)
+	}
 	Flags = append(Flags, CommonFlags...)
 	Flags = append(Flags, CNIFlags...)
 	Flags = append(Flags, OVNK8sFeatureFlags...)
