@@ -100,14 +100,9 @@ func addAllowACLFromNode(logicalSwitch string, mgmtPortIP net.IP) error {
 	if utilnet.IsIPv6(mgmtPortIP) {
 		ipFamily = "ip6"
 	}
-
-	matchSrc := fmt.Sprintf("%s.src==%s", ipFamily, mgmtPortIP.String())
-	matchDst := fmt.Sprintf("%s.dst==%s", ipFamily, mgmtPortIP.String())
-	_, stderr, err := util.RunOVNNbctl(
-		"--may-exist", "acl-add", logicalSwitch, "to-lport", defaultAllowPriority, matchSrc, "allow",
-		"--", "--may-exist", "acl-add", logicalSwitch, "to-lport", defaultAllowPriority, matchDst, "allow",
-		"--", "--may-exist", "acl-add", logicalSwitch, "from-lport", defaultAllowPriority, matchSrc, "allow",
-		"--", "--may-exist", "acl-add", logicalSwitch, "from-lport", defaultAllowPriority, matchDst, "allow")
+	match := fmt.Sprintf("%s.src==%s", ipFamily, mgmtPortIP.String())
+	_, stderr, err := util.RunOVNNbctl("--may-exist", "acl-add", logicalSwitch,
+		"to-lport", defaultAllowPriority, match, "allow-related")
 	if err != nil {
 		return fmt.Errorf("failed to create the node acl for "+
 			"logical_switch=%s, stderr: %q (%v)", logicalSwitch, stderr, err)

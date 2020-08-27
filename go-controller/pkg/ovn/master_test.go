@@ -189,10 +189,7 @@ func defaultFakeExec(nodeSubnet, nodeName string, sctpSupport bool) (*ovntest.Fa
 		})
 	}
 	fexec.AddFakeCmdsNoOutputNoError([]string{
-		"ovn-nbctl --timeout=15 --may-exist acl-add " + nodeName + " to-lport 1001 ip4.src==" + nodeMgmtPortIP.String() + " allow " +
-			"-- --may-exist acl-add " + nodeName + " to-lport 1001 ip4.dst==" + nodeMgmtPortIP.String() + " allow " +
-			"-- --may-exist acl-add " + nodeName + " from-lport 1001 ip4.src==" + nodeMgmtPortIP.String() + " allow " +
-			"-- --may-exist acl-add " + nodeName + " from-lport 1001 ip4.dst==" + nodeMgmtPortIP.String() + " allow",
+		"ovn-nbctl --timeout=15 --may-exist acl-add " + nodeName + " to-lport 1001 ip4.src==" + nodeMgmtPortIP.String() + " allow-related",
 		"ovn-nbctl --timeout=15 -- --may-exist lsp-add " + nodeName + " " + util.K8sPrefix + nodeName + " -- lsp-set-addresses " + util.K8sPrefix + nodeName + " " + mgmtMAC + " " + nodeMgmtPortIP.String(),
 	})
 	fexec.AddFakeCmd(&ovntest.ExpectedCmd{
@@ -614,10 +611,7 @@ subnet=%s
 				"ovn-nbctl --timeout=15 set logical_switch " + masterName + " load_balancer=" + tcpLBUUID,
 				"ovn-nbctl --timeout=15 add logical_switch " + masterName + " load_balancer " + udpLBUUID,
 				"ovn-nbctl --timeout=15 add logical_switch " + masterName + " load_balancer " + sctpLBUUID,
-				"ovn-nbctl --timeout=15 --may-exist acl-add " + masterName + " to-lport 1001 ip4.src==" + masterMgmtPortIP + " allow " +
-					"-- --may-exist acl-add " + masterName + " to-lport 1001 ip4.dst==" + masterMgmtPortIP + " allow " +
-					"-- --may-exist acl-add " + masterName + " from-lport 1001 ip4.src==" + masterMgmtPortIP + " allow " +
-					"-- --may-exist acl-add " + masterName + " from-lport 1001 ip4.dst==" + masterMgmtPortIP + " allow",
+				"ovn-nbctl --timeout=15 --may-exist acl-add " + masterName + " to-lport 1001 ip4.src==" + masterMgmtPortIP + " allow-related",
 				"ovn-nbctl --timeout=15 -- --may-exist lsp-add " + masterName + " " + util.K8sPrefix + masterName + " -- lsp-set-addresses " + util.K8sPrefix + masterName + " " + masterMgmtPortMAC + " " + masterMgmtPortIP,
 			})
 			fexec.AddFakeCmd(&ovntest.ExpectedCmd{
@@ -830,10 +824,7 @@ var _ = Describe("Gateway Init Operations", func() {
 				"ovn-nbctl --timeout=15 set logical_switch " + nodeName + " load_balancer=" + tcpLBUUID,
 				"ovn-nbctl --timeout=15 add logical_switch " + nodeName + " load_balancer " + udpLBUUID,
 				"ovn-nbctl --timeout=15 add logical_switch " + nodeName + " load_balancer " + sctpLBUUID,
-				"ovn-nbctl --timeout=15 --may-exist acl-add " + nodeName + " to-lport 1001 ip4.src==" + masterMgmtPortIP + " allow " +
-					"-- --may-exist acl-add " + nodeName + " to-lport 1001 ip4.dst==" + masterMgmtPortIP + " allow " +
-					"-- --may-exist acl-add " + nodeName + " from-lport 1001 ip4.src==" + masterMgmtPortIP + " allow " +
-					"-- --may-exist acl-add " + nodeName + " from-lport 1001 ip4.dst==" + masterMgmtPortIP + " allow",
+				"ovn-nbctl --timeout=15 --may-exist acl-add " + nodeName + " to-lport 1001 ip4.src==" + masterMgmtPortIP + " allow-related",
 				"ovn-nbctl --timeout=15 -- --may-exist lsp-add " + nodeName + " " + util.K8sPrefix + nodeName + " -- lsp-set-addresses " + util.K8sPrefix + nodeName + " " + brLocalnetMAC + " " + masterMgmtPortIP,
 			})
 			fexec.AddFakeCmd(&ovntest.ExpectedCmd{
@@ -1022,10 +1013,7 @@ var _ = Describe("Gateway Init Operations", func() {
 				"ovn-nbctl --timeout=15 set logical_switch " + nodeName + " load_balancer=" + tcpLBUUID,
 				"ovn-nbctl --timeout=15 add logical_switch " + nodeName + " load_balancer " + udpLBUUID,
 				"ovn-nbctl --timeout=15 add logical_switch " + nodeName + " load_balancer " + sctpLBUUID,
-				"ovn-nbctl --timeout=15 --may-exist acl-add " + nodeName + " to-lport 1001 ip4.src==" + nodeMgmtPortIP + " allow " +
-					"-- --may-exist acl-add " + nodeName + " to-lport 1001 ip4.dst==" + nodeMgmtPortIP + " allow " +
-					"-- --may-exist acl-add " + nodeName + " from-lport 1001 ip4.src==" + nodeMgmtPortIP + " allow " +
-					"-- --may-exist acl-add " + nodeName + " from-lport 1001 ip4.dst==" + nodeMgmtPortIP + " allow",
+				"ovn-nbctl --timeout=15 --may-exist acl-add " + nodeName + " to-lport 1001 ip4.src==" + nodeMgmtPortIP + " allow-related",
 				"ovn-nbctl --timeout=15 -- --may-exist lsp-add " + nodeName + " " + util.K8sPrefix + nodeName + " -- lsp-set-addresses " + util.K8sPrefix + nodeName + " " + nodeMgmtPortMAC + " " + nodeMgmtPortIP,
 			})
 			fexec.AddFakeCmd(&ovntest.ExpectedCmd{
