@@ -106,11 +106,11 @@ func (e endpoints) addExternalIPCmds(fexec *ovntest.FakeExec, loadBalancerIPs []
 	for idx, gatewayR := range strings.Fields(gatewayRouters) {
 		fexec.AddFakeCmd(&ovntest.ExpectedCmd{
 			Cmd:    "ovn-nbctl --timeout=15 --data=bare --no-heading --columns=_uuid find load_balancer external_ids:TCP_lb_gateway_router=" + gatewayR,
-			Output: "load_balancer_" + string(idx),
+			Output: fmt.Sprintf("load_balancer_%d", idx),
 		})
 		for _, loadBalancerIP := range loadBalancerIPs {
 			fexec.AddFakeCmdsNoOutputNoError([]string{
-				fmt.Sprintf("ovn-nbctl --timeout=15 set load_balancer load_balancer_%s vips:\"%s:%v\"=\"%s:%v\"", string(idx), loadBalancerIP, service.Spec.Ports[0].Port, endpoint.Subsets[0].Addresses[0].IP, endpoint.Subsets[0].Ports[0].Port),
+				fmt.Sprintf("ovn-nbctl --timeout=15 set load_balancer load_balancer_%d vips:\"%s:%v\"=\"%s:%v\"", idx, loadBalancerIP, service.Spec.Ports[0].Port, endpoint.Subsets[0].Addresses[0].IP, endpoint.Subsets[0].Ports[0].Port),
 			})
 		}
 	}
