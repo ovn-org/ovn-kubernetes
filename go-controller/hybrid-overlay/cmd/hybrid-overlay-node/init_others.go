@@ -15,7 +15,14 @@ limitations under the License.
 
 package main
 
+import (
+	"context"
+
+	"github.com/urfave/cli/v2"
+)
+
 // initForOS performs non-Windows specific app initialization
-func initForOS(service bool) error {
+func initForOS(c *cli.Context, ctx context.Context) error {
+	signalHandler(ctx)
 	return nil
 }

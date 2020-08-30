@@ -250,7 +250,7 @@ func NewOvnController(kubeClient kubernetes.Interface, egressIPClient egressipap
 	if addressSetFactory == nil {
 		addressSetFactory = NewOvnAddressSetFactory()
 	}
-	modeEgressIP := newModeEgressIP(ovnNBClient)
+	modeEgressIP := newModeEgressIP()
 	return &Controller{
 		kube: &kube.Kube{
 			KClient:              kubeClient,
@@ -344,19 +344,11 @@ type emptyLBBackendEvent struct {
 	uuid     string
 }
 
-func newModeEgressIP(ovnNBClient goovn.Client) modeEgressIP {
+func newModeEgressIP() modeEgressIP {
 	if config.Gateway.Mode == config.GatewayModeLocal {
-		return &egressIPLocal{
-			egressIPMode: egressIPMode{
-				ovnNBClient: ovnNBClient,
-			},
-		}
+		return &egressIPLocal{}
 	}
-	return &egressIPShared{
-		egressIPMode: egressIPMode{
-			ovnNBClient: ovnNBClient,
-		},
-	}
+	return &egressIPShared{}
 }
 
 func extractEmptyLBBackendsEvents(out []byte) ([]emptyLBBackendEvent, error) {
@@ -828,7 +820,7 @@ func (oc *Controller) WatchEgressNodes() {
 func (oc *Controller) WatchEgressIP() {
 	oc.watchFactory.AddEgressIPHandler(cache.ResourceEventHandlerFuncs{
 		AddFunc: func(obj interface{}) {
-			eIP := obj.(*egressipv1.EgressIP)
+			eIP := obj.(*egressipv1.EgressIP).DeepCopy()
 			if err := oc.addEgressIP(eIP); err != nil {
 				klog.Error(err)
 			}
@@ -838,7 +830,7 @@ func (oc *Controller) WatchEgressIP() {
 		},
 		UpdateFunc: func(old, new interface{}) {
 			oldEIP := old.(*egressipv1.EgressIP)
-			newEIP := new.(*egressipv1.EgressIP)
+			newEIP := new.(*egressipv1.EgressIP).DeepCopy()
 			if !reflect.DeepEqual(oldEIP.Spec, newEIP.Spec) {
 				if err := oc.deleteEgressIP(oldEIP); err != nil {
 					klog.Error(err)
