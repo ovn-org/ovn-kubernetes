@@ -239,42 +239,101 @@ func TestIPFamilyName(t *testing.T) {
 
 func TestMatchIPFamily(t *testing.T) {
 	tests := []struct {
-		desc        string
-		inpIPFamily bool // true matches with IPv6 and false with IPv4
-		inpSubnets  []string
-		expErr      bool
+		desc      string
+		inpIsIPv6 bool // true matches with IPv6 and false with IPv4
+		inpIPs    []string
+		expected  string
 	}{
 		{
-			desc:        "negative: attempt to get IPv6 from an empty IP list",
-			inpIPFamily: true,
-			inpSubnets:  []string{},
-			expErr:      true,
+			desc:      "negative: attempt to get IPv6 from an empty IP list",
+			inpIsIPv6: true,
+			inpIPs:    []string{},
+			expected:  "",
 		},
 		{
-			desc:        "negative: attempt to get IPv4 from an empty IP list",
-			inpIPFamily: false,
-			inpSubnets:  []string{},
-			expErr:      true,
+			desc:      "negative: attempt to get IPv4 from an empty IP list",
+			inpIsIPv6: false,
+			inpIPs:    []string{},
+			expected:  "",
 		},
 		{
-			desc:        "positive: retrieve IPv6 valid address",
-			inpIPFamily: true,
-			inpSubnets:  []string{"192.168.1.0/24", "fd01::1/24"},
+			desc:      "negative: attempt to get IPv4 from IPv6-only list",
+			inpIsIPv6: false,
+			inpIPs:    []string{"fd01::1"},
+			expected:  "",
 		},
 		{
-			desc:        "positive: retrieve IPv4 valid address",
-			inpIPFamily: false,
-			inpSubnets:  []string{"fd01::1/24", "192.168.1.0/24"},
+			desc:      "positive: retrieve IPv6 valid address",
+			inpIsIPv6: true,
+			inpIPs:    []string{"192.168.1.0", "fd01::1"},
+			expected:  "fd01::1",
+		},
+		{
+			desc:      "positive: retrieve IPv4 valid address",
+			inpIsIPv6: false,
+			inpIPs:    []string{"192.168.1.0", "fd01::1"},
+			expected:  "192.168.1.0",
 		},
 	}
 	for i, tc := range tests {
 		t.Run(fmt.Sprintf("%d:%s", i, tc.desc), func(t *testing.T) {
-			res, err := MatchIPFamily(tc.inpIPFamily, ovntest.MustParseIPNets(tc.inpSubnets...))
+			res, err := MatchIPFamily(tc.inpIsIPv6, ovntest.MustParseIPs(tc.inpIPs...))
 			t.Log(res, err)
-			if !tc.expErr {
-				assert.NotNil(t, res)
-			} else {
+			if tc.expected == "" {
 				assert.Error(t, err)
+			} else {
+				assert.Equal(t, res, ovntest.MustParseIP(tc.expected))
+			}
+		})
+	}
+}
+
+func TestMatchIPNetFamily(t *testing.T) {
+	tests := []struct {
+		desc       string
+		inpIsIPv6  bool // true matches with IPv6 and false with IPv4
+		inpSubnets []string
+		expected   string
+	}{
+		{
+			desc:       "negative: attempt to get IPv6 from an empty IP list",
+			inpIsIPv6:  true,
+			inpSubnets: []string{},
+			expected:   "",
+		},
+		{
+			desc:       "negative: attempt to get IPv4 from an empty IP list",
+			inpIsIPv6:  false,
+			inpSubnets: []string{},
+			expected:   "",
+		},
+		{
+			desc:       "negative: attempt to get IPv4 from IPv6-only list",
+			inpIsIPv6:  false,
+			inpSubnets: []string{"fd01::1/64"},
+			expected:   "",
+		},
+		{
+			desc:       "positive: retrieve IPv6 valid address",
+			inpIsIPv6:  true,
+			inpSubnets: []string{"192.168.1.0/24", "fd01::1/64"},
+			expected:   "fd01::1/64",
+		},
+		{
+			desc:       "positive: retrieve IPv4 valid address",
+			inpIsIPv6:  false,
+			inpSubnets: []string{"192.168.1.0/24", "fd01::1/64"},
+			expected:   "192.168.1.0/24",
+		},
+	}
+	for i, tc := range tests {
+		t.Run(fmt.Sprintf("%d:%s", i, tc.desc), func(t *testing.T) {
+			res, err := MatchIPNetFamily(tc.inpIsIPv6, ovntest.MustParseIPNets(tc.inpSubnets...))
+			t.Log(res, err)
+			if tc.expected == "" {
+				assert.Error(t, err)
+			} else {
+				assert.Equal(t, res, ovntest.MustParseIPNet(tc.expected))
 			}
 		})
 	}

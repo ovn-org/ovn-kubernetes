@@ -460,7 +460,7 @@ func (oc *Controller) syncGatewayLogicalNetwork(node *kapi.Node, l3GatewayConfig
 		}
 		for _, subnet := range subnets {
 			hostIfAddr := util.GetNodeManagementIfAddr(subnet)
-			l3GatewayConfigIP, err := util.MatchIPFamily(utilnet.IsIPv6(hostIfAddr.IP), l3GatewayConfig.IPAddresses)
+			l3GatewayConfigIP, err := util.MatchIPNetFamily(utilnet.IsIPv6(hostIfAddr.IP), l3GatewayConfig.IPAddresses)
 			if err != nil {
 				return err
 			}

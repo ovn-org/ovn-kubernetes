@@ -120,7 +120,7 @@ func gatewayInit(nodeName string, clusterIPSubnet []*net.IPNet, hostSubnets []*n
 	}
 
 	for _, entry := range clusterIPSubnet {
-		drLRPIP, err := gatewayForSubnet(drLRPIPs, entry)
+		drLRPIP, err := util.MatchIPFamily(utilnet.IsIPv6CIDR(entry), drLRPIPs)
 		if err != nil {
 			return fmt.Errorf("failed to add a static route in GR %s with distributed "+
 				"router as the nexthop: %v",
@@ -282,7 +282,7 @@ func gatewayInit(nodeName string, clusterIPSubnet []*net.IPNet, hostSubnets []*n
 	// Add source IP address based routes in distributed router
 	// for this gateway router.
 	for _, hostSubnet := range hostSubnets {
-		gwLRPIP, err := gatewayForSubnet(gwLRPIPs, hostSubnet)
+		gwLRPIP, err := util.MatchIPFamily(utilnet.IsIPv6CIDR(hostSubnet), gwLRPIPs)
 		if err != nil {
 			return fmt.Errorf("failed to add source IP address based "+
 				"routes in distributed router %s: %v",
@@ -309,7 +309,7 @@ func gatewayInit(nodeName string, clusterIPSubnet []*net.IPNet, hostSubnets []*n
 			externalIPs[i] = ip.IP
 		}
 		for _, entry := range clusterIPSubnet {
-			externalIP, err := gatewayForSubnet(externalIPs, entry)
+			externalIP, err := util.MatchIPFamily(utilnet.IsIPv6CIDR(entry), externalIPs)
 			if err != nil {
 				return fmt.Errorf("failed to create default SNAT rules for gateway router %s: %v",
 					gatewayRouter, err)
@@ -550,18 +550,4 @@ func (oc *Controller) addNodeLocalNatEntries(node *kapi.Node, mgmtPortMAC string
 			node.Name, err)
 	}
 	return nil
-}
-
-func gatewayForSubnet(gateways []net.IP, subnet *net.IPNet) (net.IP, error) {
-	isIPv6 := utilnet.IsIPv6CIDR(subnet)
-	for _, ip := range gateways {
-		if utilnet.IsIPv6(ip) == isIPv6 {
-			return ip, nil
-		}
-	}
-	if isIPv6 {
-		return nil, fmt.Errorf("no IPv6 gateway available")
-	} else {
-		return nil, fmt.Errorf("no IPv4 gateway available")
-	}
 }

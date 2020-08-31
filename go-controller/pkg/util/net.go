@@ -223,13 +223,24 @@ func IPFamilyName(isIPv6 bool) string {
 	}
 }
 
-// MatchIPFamily loops through the array of *net.IPNet and returns the
+// MatchIPFamily loops through the array of net.IP and returns the
 // first entry in the list in the same IP Family, based on input flag isIPv6.
-func MatchIPFamily(isIPv6 bool, subnets []*net.IPNet) (*net.IPNet, error) {
-	for _, subnet := range subnets {
-		if utilnet.IsIPv6CIDR(subnet) == isIPv6 {
-			return subnet, nil
+func MatchIPFamily(isIPv6 bool, ips []net.IP) (net.IP, error) {
+	for _, ip := range ips {
+		if utilnet.IsIPv6(ip) == isIPv6 {
+			return ip, nil
 		}
 	}
-	return nil, fmt.Errorf("no %s subnet available", IPFamilyName(isIPv6))
+	return nil, fmt.Errorf("no %s IP available", IPFamilyName(isIPv6))
+}
+
+// MatchIPNetFamily loops through the array of *net.IPNet and returns the
+// first entry in the list in the same IP Family, based on input flag isIPv6.
+func MatchIPNetFamily(isIPv6 bool, ipnets []*net.IPNet) (*net.IPNet, error) {
+	for _, ipnet := range ipnets {
+		if utilnet.IsIPv6CIDR(ipnet) == isIPv6 {
+			return ipnet, nil
+		}
+	}
+	return nil, fmt.Errorf("no %s value available", IPFamilyName(isIPv6))
 }
