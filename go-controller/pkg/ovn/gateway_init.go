@@ -109,11 +109,8 @@ func gatewayInit(nodeName string, clusterIPSubnet []*net.IPNet, hostSubnets []*n
 	// default for any sane deployment), we need to SNAT traffic
 	// heading to the logical space with the Gateway router's IP so that
 	// return traffic comes back to the same gateway router.
-
-	// FIXME DUAL-STACK: There doesn't seem to be any way to configure multiple
-	// lb_force_snat_ip values. (https://bugzilla.redhat.com/show_bug.cgi?id=1823003)
 	stdout, stderr, err = util.RunOVNNbctl("set", "logical_router",
-		gatewayRouter, "options:lb_force_snat_ip="+gwLRPIPs[0].String())
+		gatewayRouter, "options:lb_force_snat_ip="+util.JoinIPs(gwLRPIPs, " "))
 	if err != nil {
 		return fmt.Errorf("failed to set logical router %s's lb_force_snat_ip option, "+
 			"stdout: %q, stderr: %q, error: %v", gatewayRouter, stdout, stderr, err)

@@ -160,8 +160,8 @@ var _ = Describe("Shared gateway mode EgressIP Operations with", func() {
 
 				fakeOvn.fakeExec.AddFakeCmd(
 					&ovntest.ExpectedCmd{
-						Cmd:    fmt.Sprintf("ovn-nbctl --timeout=15 --data=bare --format=table --no-heading --columns=options find logical_router name=GR_%s options:lb_force_snat_ip!=-", node2.Name),
-						Output: fmt.Sprintf("lb_force_snat_ip=%s", nodeLogicalRouterIPv4),
+						Cmd:    fmt.Sprintf("ovn-nbctl --timeout=15 --format=table --no-heading --columns=options find logical_router name=GR_%s options:lb_force_snat_ip!=-", node2.Name),
+						Output: fmt.Sprintf(`{ lb_force_snat_ip="%s" }`, nodeLogicalRouterIPv4),
 					},
 				)
 				fakeOvn.fakeExec.AddFakeCmdsNoOutputNoError(
@@ -272,8 +272,8 @@ var _ = Describe("Shared gateway mode EgressIP Operations with", func() {
 
 				fakeOvn.fakeExec.AddFakeCmd(
 					&ovntest.ExpectedCmd{
-						Cmd:    fmt.Sprintf("ovn-nbctl --timeout=15 --data=bare --format=table --no-heading --columns=options find logical_router name=GR_%s options:lb_force_snat_ip!=-", node2.Name),
-						Output: fmt.Sprintf("lb_force_snat_ip=%s", nodeLogicalRouterIPv4),
+						Cmd:    fmt.Sprintf("ovn-nbctl --timeout=15 --format=table --no-heading --columns=options find logical_router name=GR_%s options:lb_force_snat_ip!=-", node2.Name),
+						Output: fmt.Sprintf(`{ lb_force_snat_ip="%s" }`, nodeLogicalRouterIPv4),
 					},
 				)
 				fakeOvn.fakeExec.AddFakeCmdsNoOutputNoError(
@@ -344,8 +344,8 @@ var _ = Describe("Shared gateway mode EgressIP Operations with", func() {
 
 				fakeOvn.fakeExec.AddFakeCmd(
 					&ovntest.ExpectedCmd{
-						Cmd:    fmt.Sprintf("ovn-nbctl --timeout=15 --data=bare --format=table --no-heading --columns=options find logical_router name=GR_%s options:lb_force_snat_ip!=-", node2.name),
-						Output: fmt.Sprintf("lb_force_snat_ip=%s", nodeLogicalRouterIPv6),
+						Cmd:    fmt.Sprintf("ovn-nbctl --timeout=15 --format=table --no-heading --columns=options find logical_router name=GR_%s options:lb_force_snat_ip!=-", node2.name),
+						Output: fmt.Sprintf(`{ lb_force_snat_ip="%s" }`, nodeLogicalRouterIPv6),
 					},
 				)
 				fakeOvn.fakeExec.AddFakeCmdsNoOutputNoError(
@@ -445,8 +445,8 @@ var _ = Describe("Shared gateway mode EgressIP Operations with", func() {
 
 				fakeOvn.fakeExec.AddFakeCmd(
 					&ovntest.ExpectedCmd{
-						Cmd:    fmt.Sprintf("ovn-nbctl --timeout=15 --data=bare --format=table --no-heading --columns=options find logical_router name=GR_%s options:lb_force_snat_ip!=-", node2.name),
-						Output: fmt.Sprintf("lb_force_snat_ip=%s", nodeLogicalRouterIPv6),
+						Cmd:    fmt.Sprintf("ovn-nbctl --timeout=15 --format=table --no-heading --columns=options find logical_router name=GR_%s options:lb_force_snat_ip!=-", node2.name),
+						Output: fmt.Sprintf(`{ lb_force_snat_ip="%s" }`, nodeLogicalRouterIPv6),
 					},
 				)
 				fakeOvn.fakeExec.AddFakeCmdsNoOutputNoError(
@@ -541,8 +541,8 @@ var _ = Describe("Shared gateway mode EgressIP Operations with", func() {
 
 				fakeOvn.fakeExec.AddFakeCmd(
 					&ovntest.ExpectedCmd{
-						Cmd:    fmt.Sprintf("ovn-nbctl --timeout=15 --data=bare --format=table --no-heading --columns=options find logical_router name=GR_%s options:lb_force_snat_ip!=-", node2.name),
-						Output: fmt.Sprintf("lb_force_snat_ip=%s", nodeLogicalRouterIPv6),
+						Cmd:    fmt.Sprintf("ovn-nbctl --timeout=15 --format=table --no-heading --columns=options find logical_router name=GR_%s options:lb_force_snat_ip!=-", node2.name),
+						Output: fmt.Sprintf(`{ lb_force_snat_ip="%s" }`, nodeLogicalRouterIPv6),
 					},
 				)
 				fakeOvn.fakeExec.AddFakeCmdsNoOutputNoError(
@@ -667,8 +667,8 @@ var _ = Describe("Shared gateway mode EgressIP Operations with", func() {
 
 				fakeOvn.fakeExec.AddFakeCmd(
 					&ovntest.ExpectedCmd{
-						Cmd:    fmt.Sprintf("ovn-nbctl --timeout=15 --data=bare --format=table --no-heading --columns=options find logical_router name=GR_%s options:lb_force_snat_ip!=-", node2.name),
-						Output: fmt.Sprintf("lb_force_snat_ip=%s", nodeLogicalRouterIPv6),
+						Cmd:    fmt.Sprintf("ovn-nbctl --timeout=15 --format=table --no-heading --columns=options find logical_router name=GR_%s options:lb_force_snat_ip!=-", node2.name),
+						Output: fmt.Sprintf(`{ lb_force_snat_ip="%s" }`, nodeLogicalRouterIPv6),
 					},
 				)
 				fakeOvn.fakeExec.AddFakeCmdsNoOutputNoError(
@@ -832,8 +832,8 @@ var _ = Describe("Shared gateway mode EgressIP Operations with", func() {
 
 				fakeOvn.fakeExec.AddFakeCmd(
 					&ovntest.ExpectedCmd{
-						Cmd:    fmt.Sprintf("ovn-nbctl --timeout=15 --data=bare --format=table --no-heading --columns=options find logical_router name=GR_%s options:lb_force_snat_ip!=-", node2.name),
-						Output: fmt.Sprintf("lb_force_snat_ip=%s", nodeLogicalRouterIPv6),
+						Cmd:    fmt.Sprintf("ovn-nbctl --timeout=15 --format=table --no-heading --columns=options find logical_router name=GR_%s options:lb_force_snat_ip!=-", node2.name),
+						Output: fmt.Sprintf(`{ lb_force_snat_ip="%s" }`, nodeLogicalRouterIPv6),
 					},
 				)
 				fakeOvn.fakeExec.AddFakeCmdsNoOutputNoError(
@@ -955,8 +955,8 @@ var _ = Describe("Shared gateway mode EgressIP Operations with", func() {
 
 				fakeOvn.fakeExec.AddFakeCmd(
 					&ovntest.ExpectedCmd{
-						Cmd:    fmt.Sprintf("ovn-nbctl --timeout=15 --data=bare --format=table --no-heading --columns=options find logical_router name=GR_%s options:lb_force_snat_ip!=-", node2.name),
-						Output: fmt.Sprintf("lb_force_snat_ip=%s", nodeLogicalRouterIPv6),
+						Cmd:    fmt.Sprintf("ovn-nbctl --timeout=15 --format=table --no-heading --columns=options find logical_router name=GR_%s options:lb_force_snat_ip!=-", node2.name),
+						Output: fmt.Sprintf(`{ lb_force_snat_ip="%s" }`, nodeLogicalRouterIPv6),
 					},
 				)
 				fakeOvn.fakeExec.AddFakeCmdsNoOutputNoError(

@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"math/big"
 	"net"
+	"regexp"
 	"strconv"
 	"strings"
 
@@ -43,12 +44,13 @@ func IPToUint32(egressIP string) uint32 {
 	return binary.BigEndian.Uint32(ip)
 }
 
+var forceSNAT = regexp.MustCompile(`lb_force_snat_ip="([^"]*)"`)
+
 // GetNodeLogicalRouterIPs returns the IPs (IPv4 and/or IPv6) of the provided node's logical router
 // Expected output from the ovn-nbctl command, which will need to be parsed is:
-// "chassis=939391b7-b4b3-4c3a-b9a9-665103ee13b5 lb_force_snat_ip=100.64.0.1"
+// `{ chassis="939391b7-b4b3-4c3a-b9a9-665103ee13b5", lb_force_snat_ip="100.64.0.1 fd99::1" }`
 func GetNodeLogicalRouterIPs(nodeName string) ([]net.IP, error) {
 	stdout, _, err := RunOVNNbctl(
-		"--data=bare",
 		"--format=table",
 		"--no-heading",
 		"--columns=options",
@@ -59,16 +61,17 @@ func GetNodeLogicalRouterIPs(nodeName string) ([]net.IP, error) {
 	if err != nil {
 		return nil, fmt.Errorf("unable to retrieve the logical router for node: %s, err: %v", nodeName, err)
 	}
+	matches := forceSNAT.FindStringSubmatch(stdout)
+	if len(matches) != 2 {
+		return nil, fmt.Errorf("could not find logical router IP for node: %s in %q", nodeName, stdout)
+	}
+
 	var ips []net.IP
-	tag := "lb_force_snat_ip="
-	for _, p := range strings.Fields(stdout) {
-		if strings.HasPrefix(p, tag) {
-			ipStr := p[len(tag):]
-			if ip := net.ParseIP(ipStr); ip != nil {
-				ips = append(ips, ip)
-			} else {
-				return nil, fmt.Errorf("failed to parse gateway router %q IP %q", p, ipStr)
-			}
+	for _, ipStr := range strings.Fields(matches[1]) {
+		if ip := net.ParseIP(ipStr); ip != nil {
+			ips = append(ips, ip)
+		} else {
+			return nil, fmt.Errorf("failed to parse gateway router IP %q", ipStr)
 		}
 	}
 	return ips, nil
