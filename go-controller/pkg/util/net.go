@@ -43,10 +43,10 @@ func IPToUint32(egressIP string) uint32 {
 	return binary.BigEndian.Uint32(ip)
 }
 
-// GetNodeLogicalRouterIP returns the IPs (IPv4 and/or IPv6) of the provided node's logical router
+// GetNodeLogicalRouterIPs returns the IPs (IPv4 and/or IPv6) of the provided node's logical router
 // Expected output from the ovn-nbctl command, which will need to be parsed is:
 // "chassis=939391b7-b4b3-4c3a-b9a9-665103ee13b5 lb_force_snat_ip=100.64.0.1"
-func GetNodeLogicalRouterIP(nodeName string) (net.IP, net.IP, error) {
+func GetNodeLogicalRouterIPs(nodeName string) ([]net.IP, error) {
 	stdout, _, err := RunOVNNbctl(
 		"--data=bare",
 		"--format=table",
@@ -57,25 +57,21 @@ func GetNodeLogicalRouterIP(nodeName string) (net.IP, net.IP, error) {
 		"options:lb_force_snat_ip!=-",
 	)
 	if err != nil {
-		return nil, nil, fmt.Errorf("unable to retrieve the logical router for node: %s, err: %v", nodeName, err)
+		return nil, fmt.Errorf("unable to retrieve the logical router for node: %s, err: %v", nodeName, err)
 	}
-	var ipV4, ipV6 net.IP
+	var ips []net.IP
 	tag := "lb_force_snat_ip="
 	for _, p := range strings.Fields(stdout) {
 		if strings.HasPrefix(p, tag) {
 			ipStr := p[len(tag):]
 			if ip := net.ParseIP(ipStr); ip != nil {
-				if utilnet.IsIPv6(ip) {
-					ipV6 = ip
-				} else {
-					ipV4 = ip
-				}
+				ips = append(ips, ip)
 			} else {
-				return nil, nil, fmt.Errorf("failed to parse gateway router %q IP %q", p, ipStr)
+				return nil, fmt.Errorf("failed to parse gateway router %q IP %q", p, ipStr)
 			}
 		}
 	}
-	return ipV4, ipV6, nil
+	return ips, nil
 }
 
 // GetPortAddresses returns the MAC and IPs of the given logical switch port
