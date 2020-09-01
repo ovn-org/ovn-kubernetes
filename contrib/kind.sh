@@ -167,10 +167,11 @@ OVN_IMAGE=${OVN_IMAGE:-local}
 
 # Input not currently validated. Modify outside script at your own risk.
 # These are the same values defaulted to in KIND code (kind/default.go).
-# NOTE: Upstream KIND IPv6 masks are different (currently rejected by ParseClusterSubnetEntries()):
+# NOTE: KIND NET_CIDR_IPV6 default use a /64 but OVN have a /64 per host
+# so it needs to use a larger subnet
 #  Upstream - NET_CIDR_IPV6=fd00:10:244::/64 SVC_CIDR_IPV6=fd00:10:96::/112
 NET_CIDR_IPV4=${NET_CIDR_IPV4:-10.244.0.0/16}
-SVC_CIDR_IPV4=${SVC_CIDR_IPV4:-10.96.0.0/12}
+SVC_CIDR_IPV4=${SVC_CIDR_IPV4:-10.96.0.0/16}
 NET_CIDR_IPV6=${NET_CIDR_IPV6:-fd00:10:244::/48}
 SVC_CIDR_IPV6=${SVC_CIDR_IPV6:-fd00:10:96::/112}
 
@@ -268,6 +269,8 @@ KIND_CONFIG_LCL=./kind.yaml
 ovn_apiServerAddress=${API_IP} \
   ovn_ip_family=${IP_FAMILY} \
   ovn_ha=${KIND_HA} \
+  net_cidr=${NET_CIDR} \
+  svc_cidr=${SVC_CIDR} \
   ovn_num_master=${KIND_NUM_MASTER} \
   ovn_num_worker=${KIND_NUM_WORKER} \
   cluster_log_level=${KIND_CLUSTER_LOGLEVEL:-4} \
