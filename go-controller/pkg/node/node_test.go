@@ -9,6 +9,7 @@ import (
 	ovntest "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/testing"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
 	kapi "k8s.io/api/core/v1"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
 	. "github.com/onsi/ginkgo"
 	. "github.com/onsi/gomega"
@@ -35,12 +36,11 @@ var _ = Describe("Node Operations", func() {
 				ofintval int    = 180
 			)
 			node := kapi.Node{
+				ObjectMeta: metav1.ObjectMeta{
+					Name: nodeName,
+				},
 				Status: kapi.NodeStatus{
 					Addresses: []kapi.NodeAddress{
-						{
-							Type:    kapi.NodeHostName,
-							Address: nodeName,
-						},
 						{
 							Type:    kapi.NodeExternalIP,
 							Address: nodeIP,
@@ -89,12 +89,11 @@ var _ = Describe("Node Operations", func() {
 				encapUUID   string = "e4437094-0094-4223-9f14-995d98d5fff8"
 			)
 			node := kapi.Node{
+				ObjectMeta: metav1.ObjectMeta{
+					Name: nodeName,
+				},
 				Status: kapi.NodeStatus{
 					Addresses: []kapi.NodeAddress{
-						{
-							Type:    kapi.NodeHostName,
-							Address: nodeName,
-						},
 						{
 							Type:    kapi.NodeExternalIP,
 							Address: nodeIP,
