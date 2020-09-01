@@ -46,11 +46,6 @@ ClusterDns \[Feature:Example\]
 should set default value on new IngressClass
 # RACE CONDITION IN TEST, SEE https://github.com/kubernetes/kubernetes/pull/90254
 should prevent Ingress creation if more than 1 IngressClass marked as default
-
-# shard-n Tests
-#  See: https://github.com/ovn-org/ovn-kubernetes/issues/1516
-#  IPV4 fails due to: https://bugzilla.redhat.com/show_bug.cgi?id=1870359
-Network.+should resolve connrection reset issue
 "
 
 IPV4_ONLY_TESTS="
@@ -60,6 +55,10 @@ IPV4_ONLY_TESTS="
 
 # The following tests currently fail for IPv6 only, but should be passing.
 # They will be removed as they are resolved.
+
+# shard-n Tests
+#  See: https://github.com/ovn-org/ovn-kubernetes/issues/1516
+Network.+should resolve connrection reset issue
 
 # shard-np Tests
 #  See: https://github.com/ovn-org/ovn-kubernetes/issues/1517
