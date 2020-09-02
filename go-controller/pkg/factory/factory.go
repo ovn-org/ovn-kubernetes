@@ -514,10 +514,6 @@ func NewWatchFactory(c kubernetes.Interface, eip egressipclientset.Interface, ec
 	if err != nil {
 		return nil, err
 	}
-	wf.informers[egressIPType], err = newInformer(egressIPType, wf.eipFactory.K8s().V1().EgressIPs().Informer())
-	if err != nil {
-		return nil, err
-	}
 
 	wf.crdFactory.Start(wf.stopChan)
 	for oType, synced := range wf.crdFactory.WaitForCacheSync(wf.stopChan) {
@@ -532,6 +528,10 @@ func NewWatchFactory(c kubernetes.Interface, eip egressipclientset.Interface, ec
 		}
 	}
 	if config.OVNKubernetesFeature.EnableEgressIP {
+		wf.informers[egressIPType], err = newInformer(egressIPType, wf.eipFactory.K8s().V1().EgressIPs().Informer())
+		if err != nil {
+			return nil, err
+		}
 		wf.eipFactory.Start(wf.stopChan)
 		for oType, synced := range wf.eipFactory.WaitForCacheSync(wf.stopChan) {
 			if !synced {
