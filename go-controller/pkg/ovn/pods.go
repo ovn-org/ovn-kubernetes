@@ -97,11 +97,13 @@ func (oc *Controller) deleteLogicalPort(pod *kapi.Pod) {
 		klog.Errorf(err.Error())
 	}
 
-	out, stderr, err := util.RunOVNNbctl("--if-exists", "lsp-del", logicalPort)
-	if err != nil {
-		klog.Errorf("Error in deleting pod %s logical port "+
-			"stdout: %q, stderr: %q, (%v)",
-			podDesc, out, stderr, err)
+	cmd, err := oc.ovnNBClient.LSPDel(logicalPort)
+	if err == nil {
+		if err = oc.ovnNBClient.Execute(cmd); err != nil {
+			klog.Errorf("Error while deleting logical port: %s, %v", logicalPort, err)
+		}
+	} else if err != goovn.ErrorNotFound {
+		klog.Errorf(err.Error())
 	}
 
 	if err := oc.lsManager.ReleaseIPs(portInfo.logicalSwitch, portInfo.ips); err != nil {
@@ -294,6 +296,8 @@ func (oc *Controller) addLogicalPort(pod *kapi.Pod) (err error) {
 			return fmt.Errorf("unable to create the LSPAdd command for port: %s from the nbdb", portName)
 		}
 		cmds = append(cmds, cmd)
+	} else {
+		klog.Infof("LSP already exists for port: %s", portName)
 	}
 
 	annotation, err := util.UnmarshalPodAnnotation(pod.Annotations)
