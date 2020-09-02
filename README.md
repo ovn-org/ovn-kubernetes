@@ -73,6 +73,12 @@ Apply OVN DaemonSet and Deployment yamls.
 # Create OVN namespace, service accounts, ovnkube-db headless service, configmap, and policies
 kubectl create -f $HOME/work/src/github.com/ovn-org/ovn-kubernetes/dist/yaml/ovn-setup.yaml
 
+# Optionally, if you plan to use the Egress IPs or EgressFirewall features, create the corresponding CRDs: 
+# create egressips.k8s.ovn.org CRD
+kubectl create -f $HOME/work/src/github.com/ovn-org/ovn-kubernetes/dist/yaml/k8s.ovn.org_egressips.yaml
+# create egressfirewalls.k8s.ovn.org CRD
+kubectl create -f $HOME/work/src/github.com/ovn-org/ovn-kubernetes/dist/yaml/k8s.ovn.org_egressfirewalls.yaml
+
 # Run ovnkube-db deployment.
 kubectl create -f $HOME/work/src/github.com/ovn-org/ovn-kubernetes/dist/yaml/ovnkube-db.yaml
 
