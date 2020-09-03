@@ -474,6 +474,26 @@ func addDefaultConntrackRules(nodeName, gwBridge, gwIntf string, stopChan chan s
 		nFlows++
 	}
 
+	// table 0, packets coming from host should go out physical port
+	_, stderr, err = util.RunOVSOfctl("add-flow", gwBridge,
+		fmt.Sprintf("cookie=%s, priority=100, in_port=LOCAL, actions=output:%s",
+			defaultOpenFlowCookie, ofportPhys))
+	if err != nil {
+		return fmt.Errorf("failed to add openflow flow to %s, stderr: %q, error: %v", gwBridge, stderr, err)
+	}
+
+	nFlows++
+
+	// table 0, packets coming from OVN that are not IP should go out of the host
+	_, stderr, err = util.RunOVSOfctl("add-flow", gwBridge,
+		fmt.Sprintf("cookie=%s, priority=99, in_port=%s, actions=output:%s",
+			defaultOpenFlowCookie, ofportPatch, ofportPhys))
+	if err != nil {
+		return fmt.Errorf("failed to add openflow flow to %s, stderr: %q, error: %v", gwBridge, stderr, err)
+	}
+
+	nFlows++
+
 	// table 1, established and related connections go to pod
 	_, stderr, err = util.RunOVSOfctl("add-flow", gwBridge,
 		fmt.Sprintf("cookie=%s, priority=100, table=1, ct_state=+trk+est, "+
@@ -492,6 +512,18 @@ func addDefaultConntrackRules(nodeName, gwBridge, gwIntf string, stopChan chan s
 			"error: %v", gwBridge, stderr, err)
 	}
 	nFlows++
+
+	if config.IPv6Mode {
+		// REMOVEME(trozet) when https://bugzilla.kernel.org/show_bug.cgi?id=11797 is resolved
+		// must flood icmpv6 traffic as it fails to create a CT entry
+		_, stderr, err = util.RunOVSOfctl("add-flow", gwBridge,
+			fmt.Sprintf("cookie=%s, priority=1, table=1,icmp6 actions=FLOOD", defaultOpenFlowCookie))
+		if err != nil {
+			return fmt.Errorf("failed to add openflow flow to %s, stderr: %q, "+
+				"error: %v", gwBridge, stderr, err)
+		}
+		nFlows++
+	}
 
 	// table 1, all other connections do normal processing
 	_, stderr, err = util.RunOVSOfctl("add-flow", gwBridge,
