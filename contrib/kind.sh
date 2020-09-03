@@ -347,7 +347,12 @@ pushd ../dist/images
   --kind \
   --ovn-unprivileged-mode=no \
   --master-loglevel=5 \
-  --egress-ip-enable=true
+  --egress-ip-enable=true \
+  --ovn-loglevel-nb="-vconsole:dbg -vfile:dbg" \
+  --ovn-loglevel-sb="-vconsole:dbg -vfile:dbg" \
+  --ovn-loglevel-northd="-vconsole:dbg -vfile:dbg" \
+  --ovn-loglevel-controller="-vconsole:dbg" \
+  --ovn-loglevel-nbctld="-vconsole:dbg"
 popd
 
 kind load docker-image ${OVN_IMAGE} --name ${KIND_CLUSTER_NAME}
