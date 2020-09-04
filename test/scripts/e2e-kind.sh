@@ -32,6 +32,9 @@ Services.+session affinity
 # TO BE IMPLEMENTED: https://github.com/ovn-org/ovn-kubernetes/issues/1116
 EndpointSlices
 
+# TO BE IMPLEMENTED: https://github.com/ovn-org/ovn-kubernetes/issues/1663
+IPBlock.CIDR and IPBlock.Except
+
 # NOT IMPLEMENTED; SEE DISCUSSION IN https://github.com/ovn-org/ovn-kubernetes/pull/1225
 named port.+\[Feature:NetworkPolicy\]
 
