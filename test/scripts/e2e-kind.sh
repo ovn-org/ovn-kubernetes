@@ -63,8 +63,8 @@ IPV4_ONLY_TESTS="
 # They will be removed as they are resolved.
 
 # shard-n Tests
-#  See: https://github.com/ovn-org/ovn-kubernetes/issues/1516
-Network.+should resolve connrection reset issue
+#  See: https://github.com/kubernetes/kubernetes/pull/94136
+Network.+should resolve connection reset issue
 
 # shard-np Tests
 #  See: https://github.com/ovn-org/ovn-kubernetes/issues/1517
