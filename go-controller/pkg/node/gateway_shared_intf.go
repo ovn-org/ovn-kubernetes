@@ -304,6 +304,10 @@ func syncServices(services []interface{}, inport, gwBridge string, nodeIP *net.I
 			pair := strings.Split(key, "_")
 			protocol, port := pair[0], pair[1]
 			if externalIP == "" {
+				// Check if this is a host tcp port flow for kapi or etcd 6443, 2379, 2380
+				if (port == "6443" || port == "2379" || port == "2380") && (protocol == "tcp" || protocol == "tcp6") {
+					continue
+				}
 				// Check if this is a known cloud load balancer flow
 				for cookie := range ingressCookies {
 					if strings.Contains(flow, cookie) {
@@ -397,7 +401,7 @@ func nodePortWatcher(nodeName, gwBridge, gwIntf string, nodeIP []*net.IPNet, wf 
 // -- to also connection track the outbound north-south traffic through l3 gateway so that
 //    the return traffic can be steered back to OVN logical topology
 // -- to also handle unDNAT return traffic back out of the host
-func addDefaultConntrackRules(nodeName, gwBridge, gwIntf string, stopChan chan struct{}) error {
+func addDefaultConntrackRules(nodeName, gwBridge, gwIntf string, nodeIPs []*net.IPNet, stopChan chan struct{}) error {
 	// the name of the patch port created by ovn-controller is of the form
 	// patch-<logical_port_name_of_localnet_port>-to-br-int
 	localnetLpName := gwBridge + "_" + nodeName
@@ -550,6 +554,61 @@ func addDefaultConntrackRules(nodeName, gwBridge, gwIntf string, stopChan chan s
 		nFlows++
 	}
 
+	for _, ip := range nodeIPs {
+		var proto, l3dst, l3src string
+		if utilnet.IsIPv6(ip.IP) {
+			proto = "tcp6"
+			l3dst = "ipv6_dst"
+			l3src = "ipv6_src"
+		} else {
+			proto = "tcp"
+			l3dst = "ip_dst"
+			l3src = "ip_src"
+		}
+		// table 0, send ingress kapi server traffic to host
+		_, stderr, err = util.RunOVSOfctl("add-flow", gwBridge,
+			fmt.Sprintf("cookie=%s, priority=1000, table=0, in_port=%s, %s, %s=%s, tp_dst=6443, actions=LOCAL",
+				defaultOpenFlowCookie, ofportPhys, proto, l3dst, ip.IP.String()))
+		if err != nil {
+			return fmt.Errorf("failed to add openflow flow to %s, stderr: %q, "+
+				"error: %v", gwBridge, stderr, err)
+		}
+		nFlows++
+
+		// table 0, send egress kapi server traffic out of host
+		_, stderr, err = util.RunOVSOfctl("add-flow", gwBridge,
+			fmt.Sprintf("cookie=%s, priority=1000, table=0, in_port=LOCAL, %s, %s=%s, tp_src=6443, actions=output:%s",
+				defaultOpenFlowCookie, proto, l3src, ip.IP.String(), ofportPhys))
+		if err != nil {
+			return fmt.Errorf("failed to add openflow flow to %s, stderr: %q, "+
+				"error: %v", gwBridge, stderr, err)
+		}
+		nFlows++
+
+		// table 0, send etcd server traffic
+		for _, etcdPort := range []string{"2379", "2380"} {
+			// ingress etcd server traffic to host
+			_, stderr, err = util.RunOVSOfctl("add-flow", gwBridge,
+				fmt.Sprintf("cookie=%s, priority=1000, table=0, in_port=%s, %s, %s=%s, tp_dst=%s, actions=LOCAL",
+					defaultOpenFlowCookie, ofportPhys, proto, l3dst, ip.IP.String(), etcdPort))
+			if err != nil {
+				return fmt.Errorf("failed to add openflow flow to %s, stderr: %q, "+
+					"error: %v", gwBridge, stderr, err)
+			}
+			nFlows++
+
+			// egress etcd server traffic out of host
+			_, stderr, err = util.RunOVSOfctl("add-flow", gwBridge,
+				fmt.Sprintf("cookie=%s, priority=1000, table=0, in_port=LOCAL, %s, %s=%s, tp_src=%s, actions=output:%s",
+					defaultOpenFlowCookie, proto, l3src, ip.IP.String(), etcdPort, ofportPhys))
+			if err != nil {
+				return fmt.Errorf("failed to add openflow flow to %s, stderr: %q, "+
+					"error: %v", gwBridge, stderr, err)
+			}
+			nFlows++
+		}
+	}
+
 	// table 1, all other connections do normal processing
 	_, stderr, err = util.RunOVSOfctl("add-flow", gwBridge,
 		fmt.Sprintf("cookie=%s, priority=0, table=1, actions=output:NORMAL", defaultOpenFlowCookie))
@@ -652,7 +711,7 @@ func (n *OvnNode) initSharedGateway(subnets []*net.IPNet, gwNextHops []net.IP, g
 	return func() error {
 		// Program cluster.GatewayIntf to let non-pod traffic to go to host
 		// stack
-		if err := addDefaultConntrackRules(n.name, bridgeName, uplinkName, n.stopChan); err != nil {
+		if err := addDefaultConntrackRules(n.name, bridgeName, uplinkName, ips, n.stopChan); err != nil {
 			return err
 		}
 
