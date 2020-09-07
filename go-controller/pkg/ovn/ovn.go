@@ -104,11 +104,14 @@ type namespaceInfo struct {
 
 // eNode is a cache helper used for egress IP assignment
 type eNode struct {
-	v4Subnet    *net.IPNet
-	v6Subnet    *net.IPNet
-	allocations map[string]bool
-	tainted     bool
-	name        string
+	v4IP               net.IP
+	v6IP               net.IP
+	v4Subnet           *net.IPNet
+	v6Subnet           *net.IPNet
+	allocations        map[string]bool
+	isEgressAssignable bool
+	tainted            bool
+	name               string
 }
 
 // Controller structure is the object which holds the controls for starting

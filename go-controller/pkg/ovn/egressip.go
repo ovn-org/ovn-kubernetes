@@ -125,6 +125,10 @@ func (oc *Controller) syncEgressIPs(eIPs []interface{}) {
 				klog.Errorf("Allocator error: EgressIP allocation contains unparsable IP address: %s", eIPStatus.EgressIP)
 				break
 			}
+			if node := oc.isAnyClusterNodeIP(ip); node != nil {
+				klog.Errorf("Allocator error: EgressIP allocation: %s is the IP of node: %s ", ip.String(), node.name)
+				break
+			}
 			if utilnet.IsIPv6(ip) && eNode.v6Subnet != nil {
 				if !eNode.v6Subnet.Contains(ip) {
 					klog.Errorf("Allocator error: EgressIP allocation: %s on subnet: %s which cannot host it", ip.String(), eNode.v6Subnet.String())
@@ -167,6 +171,16 @@ func (oc *Controller) syncEgressIPs(eIPs []interface{}) {
 			eNode.tainted = false
 		}
 	}
+}
+
+func (oc *Controller) isAnyClusterNodeIP(ip net.IP) *eNode {
+	for _, eNode := range oc.eIPAllocator {
+		if (utilnet.IsIPv6(ip) && eNode.v6IP != nil && eNode.v6IP.Equal(ip)) ||
+			(!utilnet.IsIPv6(ip) && eNode.v4IP != nil && eNode.v4IP.Equal(ip)) {
+			return eNode
+		}
+	}
+	return nil
 }
 
 func (oc *Controller) updateEgressIPWithRetry(eIP *egressipv1.EgressIP) error {
@@ -256,7 +270,8 @@ func (oc *Controller) assignEgressIPs(eIP *egressipv1.EgressIP) error {
 		eIP.Status.Items = assignments
 		oc.eIPAllocatorMutex.Unlock()
 	}()
-	if len(oc.eIPAllocator) == 0 {
+	assignableNodes, existingAllocations := oc.getSortedEgressData()
+	if len(assignableNodes) == 0 {
 		oc.egressAssignmentRetry.Store(eIP.Name, true)
 		eIPRef := kapi.ObjectReference{
 			Kind: "EgressIP",
@@ -265,7 +280,6 @@ func (oc *Controller) assignEgressIPs(eIP *egressipv1.EgressIP) error {
 		oc.recorder.Eventf(&eIPRef, kapi.EventTypeWarning, "NoMatchingNodeFound", "no assignable nodes for EgressIP: %s, please tag at least one node with label: %s", eIP.Name, util.GetNodeEgressLabel())
 		return fmt.Errorf("no assignable nodes")
 	}
-	eNodes, existingAllocations := oc.getSortedEgressData()
 	klog.V(5).Infof("Current assignments are: %+v", existingAllocations)
 	for _, egressIP := range eIP.Spec.EgressIPs {
 		klog.V(5).Infof("Will attempt assignment for egress IP: %s", egressIP)
@@ -279,24 +293,37 @@ func (oc *Controller) assignEgressIPs(eIP *egressipv1.EgressIP) error {
 			klog.Errorf("Unable to parse provided EgressIP: %s, invalid", egressIP)
 			continue
 		}
-		for i := 0; i < len(eNodes); i++ {
-			klog.V(5).Infof("Attempting assignment on egress node: %+v", eNodes[i])
+		if node := oc.isAnyClusterNodeIP(eIPC); node != nil {
+			eIPRef := kapi.ObjectReference{
+				Kind: "EgressIP",
+				Name: eIP.Name,
+			}
+			oc.recorder.Eventf(
+				&eIPRef,
+				kapi.EventTypeWarning,
+				"UnsupportedRequest",
+				"Egress IP: %v for object EgressIP: %s is the IP address of node: %s, this is unsupported", eIPC, eIP.Name, node.name,
+			)
+			return fmt.Errorf("egress IP: %v is the IP address of node: %s", eIPC, node.name)
+		}
+		for i := 0; i < len(assignableNodes); i++ {
+			klog.V(5).Infof("Attempting assignment on egress node: %+v", assignableNodes[i])
 			if _, exists := existingAllocations[eIPC.String()]; exists {
-				klog.V(5).Infof("EgressIP: %s is already allocated, skipping", eIPC.String())
+				klog.V(5).Infof("EgressIP: %v is already allocated, skipping", eIPC)
 				break
 			}
-			if eNodes[i].tainted {
-				klog.V(5).Infof("Node: %s is already in use by another egress IP for this EgressIP: %s, trying another node", eNodes[i].name, eIP.Name)
+			if assignableNodes[i].tainted {
+				klog.V(5).Infof("Node: %s is already in use by another egress IP for this EgressIP: %s, trying another node", assignableNodes[i].name, eIP.Name)
 				continue
 			}
-			if (utilnet.IsIPv6(eIPC) && eNodes[i].v6Subnet != nil && eNodes[i].v6Subnet.Contains(eIPC)) ||
-				(!utilnet.IsIPv6(eIPC) && eNodes[i].v4Subnet != nil && eNodes[i].v4Subnet.Contains(eIPC)) {
-				eNodes[i].tainted, oc.eIPAllocator[eNodes[i].name].allocations[eIPC.String()] = true, true
+			if (utilnet.IsIPv6(eIPC) && assignableNodes[i].v6Subnet != nil && assignableNodes[i].v6Subnet.Contains(eIPC)) ||
+				(!utilnet.IsIPv6(eIPC) && assignableNodes[i].v4Subnet != nil && assignableNodes[i].v4Subnet.Contains(eIPC)) {
+				assignableNodes[i].tainted, oc.eIPAllocator[assignableNodes[i].name].allocations[eIPC.String()] = true, true
 				assignments = append(assignments, egressipv1.EgressIPStatusItem{
 					EgressIP: eIPC.String(),
-					Node:     eNodes[i].name,
+					Node:     assignableNodes[i].name,
 				})
-				klog.V(5).Infof("Successful assignment of egress IP: %s on node: %+v", egressIP, eNodes[i])
+				klog.V(5).Infof("Successful assignment of egress IP: %s on node: %+v", egressIP, assignableNodes[i])
 				break
 			}
 		}
@@ -334,18 +361,20 @@ func (oc *Controller) releaseEgressIPs(eIP *egressipv1.EgressIP) {
 }
 
 func (oc *Controller) getSortedEgressData() ([]eNode, map[string]bool) {
-	nodes := []eNode{}
+	assignableNodes := []eNode{}
 	allAllocations := make(map[string]bool)
 	for _, eNode := range oc.eIPAllocator {
-		nodes = append(nodes, *eNode)
+		if eNode.isEgressAssignable {
+			assignableNodes = append(assignableNodes, *eNode)
+		}
 		for ip := range eNode.allocations {
 			allAllocations[ip] = true
 		}
 	}
-	sort.Slice(nodes, func(i, j int) bool {
-		return len(nodes[i].allocations) < len(nodes[j].allocations)
+	sort.Slice(assignableNodes, func(i, j int) bool {
+		return len(assignableNodes[i].allocations) < len(assignableNodes[j].allocations)
 	})
-	return nodes, allAllocations
+	return assignableNodes, allAllocations
 }
 
 func getEgressIPKey(eIP *egressipv1.EgressIP) string {
@@ -622,9 +651,9 @@ func findReroutePolicyIDs(filterOption, egressIPName string, gatewayRouterIP net
 
 func (oc *Controller) addEgressNode(egressNode *kapi.Node) error {
 	klog.V(5).Infof("Egress node: %s about to be initialized", egressNode.Name)
-	if err := oc.initEgressIPAllocator(egressNode); err != nil {
-		return fmt.Errorf("egress node initialization error: %v", err)
-	}
+	oc.eIPAllocatorMutex.Lock()
+	oc.eIPAllocator[egressNode.Name].isEgressAssignable = true
+	oc.eIPAllocatorMutex.Unlock()
 	oc.egressAssignmentRetry.Range(func(key, value interface{}) bool {
 		eIPName := key.(string)
 		klog.V(5).Infof("Re-assignment for EgressIP: %s attempted by new node: %s", eIPName, egressNode.Name)
@@ -645,9 +674,10 @@ func (oc *Controller) addEgressNode(egressNode *kapi.Node) error {
 
 func (oc *Controller) deleteEgressNode(egressNode *kapi.Node) error {
 	oc.eIPAllocatorMutex.Lock()
-	delete(oc.eIPAllocator, egressNode.Name)
+	if eNode, exists := oc.eIPAllocator[egressNode.Name]; exists {
+		eNode.isEgressAssignable = false
+	}
 	oc.eIPAllocatorMutex.Unlock()
-
 	klog.V(5).Infof("Egress node: %s about to be removed", egressNode.Name)
 	egressIPs, err := oc.kube.GetEgressIPs()
 	if err != nil {
@@ -691,25 +721,28 @@ func (oc *Controller) reassignEgressIP(eIP *egressipv1.EgressIP) error {
 func (oc *Controller) initEgressIPAllocator(node *kapi.Node) (err error) {
 	oc.eIPAllocatorMutex.Lock()
 	defer oc.eIPAllocatorMutex.Unlock()
+	var v4IP, v6IP net.IP
 	var v4Subnet, v6Subnet *net.IPNet
 	v4IfAddr, v6IfAddr, err := util.ParseNodePrimaryIfAddr(node)
 	if err != nil {
 		return fmt.Errorf("unable to use node for egress assignment, err: %v", err)
 	}
 	if v4IfAddr != "" {
-		_, v4Subnet, err = net.ParseCIDR(v4IfAddr)
+		v4IP, v4Subnet, err = net.ParseCIDR(v4IfAddr)
 		if err != nil {
 			return err
 		}
 	}
 	if v6IfAddr != "" {
-		_, v6Subnet, err = net.ParseCIDR(v6IfAddr)
+		v6IP, v6Subnet, err = net.ParseCIDR(v6IfAddr)
 		if err != nil {
 			return err
 		}
 	}
 	oc.eIPAllocator[node.Name] = &eNode{
 		name:        node.Name,
+		v4IP:        v4IP,
+		v6IP:        v6IP,
 		v4Subnet:    v4Subnet,
 		v6Subnet:    v6Subnet,
 		allocations: make(map[string]bool),
@@ -723,6 +756,9 @@ func (oc *Controller) addNodeForEgress(node *v1.Node) error {
 	if err := oc.createDefaultNoRerouteNodePolicies(v4Addr, v6Addr, v4ClusterSubnet, v6ClusterSubnet); err != nil {
 		return err
 	}
+	if err := oc.initEgressIPAllocator(node); err != nil {
+		return fmt.Errorf("egress node initialization error: %v", err)
+	}
 	return nil
 }
 
@@ -732,6 +768,9 @@ func (oc *Controller) deleteNodeForEgress(node *v1.Node) error {
 	if err := oc.deleteDefaultNoRerouteNodePolicies(v4Addr, v6Addr, v4ClusterSubnet, v6ClusterSubnet); err != nil {
 		return err
 	}
+	oc.eIPAllocatorMutex.Lock()
+	delete(oc.eIPAllocator, node.Name)
+	oc.eIPAllocatorMutex.Unlock()
 	return nil
 }
 
