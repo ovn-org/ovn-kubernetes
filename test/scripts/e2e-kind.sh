@@ -100,7 +100,7 @@ SKIPPED_TESTS="$(groomTestList "${SKIPPED_TESTS}")"
 # if we set PARALLEL=true, skip serial test
 if [ "${PARALLEL:-false}" = "true" ]; then
   export GINKGO_PARALLEL=y
-  export GINKGO_PARALLEL_NODES=4
+  export GINKGO_PARALLEL_NODES=20
   SKIPPED_TESTS="${SKIPPED_TESTS}|\\[Serial\\]"
 fi
 
