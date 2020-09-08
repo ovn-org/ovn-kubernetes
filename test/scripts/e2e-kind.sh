@@ -32,9 +32,6 @@ Services.+session affinity
 # TO BE IMPLEMENTED: https://github.com/ovn-org/ovn-kubernetes/issues/1116
 EndpointSlices
 
-# TO BE IMPLEMENTED: https://github.com/ovn-org/ovn-kubernetes/issues/1663
-IPBlock.CIDR and IPBlock.Except
-
 # TO BE IMPLEMENTED: https://github.com/ovn-org/ovn-kubernetes/issues/1664
 should be able to preserve UDP traffic when server pod cycles for a NodePort service
 
