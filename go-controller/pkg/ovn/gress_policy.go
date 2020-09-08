@@ -306,6 +306,11 @@ func (gp *gressPolicy) addACLAllow(match, l4Match, portGroupUUID string, ipBlock
 		return fmt.Errorf("find failed to get the allow rule for "+
 			"namespace=%s, policy=%s, stderr: %q (%v)",
 			gp.policyNamespace, gp.policyName, stderr, err)
+	} else {
+		klog.Infof("Added the allow rule for "+
+			"namespace=%s, policy=%s",
+			gp.policyNamespace, gp.policyName)
+
 	}
 
 	if uuid != "" {
@@ -327,6 +332,10 @@ func (gp *gressPolicy) addACLAllow(match, l4Match, portGroupUUID string, ipBlock
 		return fmt.Errorf("failed to create the acl allow rule for "+
 			"namespace=%s, policy=%s, stderr: %q (%v)", gp.policyNamespace,
 			gp.policyName, stderr, err)
+	} else {
+		klog.Infof("Created the acl allow rule for "+
+			"namespace=%s, policy=%s,", gp.policyNamespace,
+			gp.policyName)
 	}
 
 	return nil
