@@ -104,9 +104,19 @@ func moveIfToNetns(ifname string, netns ns.NetNS) error {
 }
 
 func setupNetwork(link netlink.Link, ifInfo *PodInterfaceInfo) error {
+	// set the mac addresss, set down the interface before changing the mac
+	// so the EUI64 link local address generated uses the new MAC when we set it up again
+	if err := util.GetNetLinkOps().LinkSetDown(link); err != nil {
+		return fmt.Errorf("failed to set down interface %s: %v", link.Attrs().Name, err)
+	}
 	if err := util.GetNetLinkOps().LinkSetHardwareAddr(link, ifInfo.MAC); err != nil {
 		return fmt.Errorf("failed to add mac address %s to %s: %v", ifInfo.MAC, link.Attrs().Name, err)
 	}
+	if err := util.GetNetLinkOps().LinkSetUp(link); err != nil {
+		return fmt.Errorf("failed to set up interface %s: %v", link.Attrs().Name, err)
+	}
+
+	// set the IP address
 	for _, ip := range ifInfo.IPs {
 		addr := &netlink.Addr{IPNet: ip}
 		if err := util.GetNetLinkOps().AddrAdd(link, addr); err != nil {
@@ -339,12 +349,23 @@ func (pr *PodRequest) ConfigureInterface(namespace string, podName string, ifInf
 	}
 
 	err = netns.Do(func(hostNS ns.NetNS) error {
-		if _, err := os.Stat("/proc/sys/net/ipv6/conf/all/dad_transmits"); !os.IsNotExist(err) {
-			err = setSysctl("/proc/sys/net/ipv6/conf/all/dad_transmits", 0)
+		// deny IPv6 neighbor solicitations
+		dadSysctlIface := fmt.Sprintf("/proc/sys/net/ipv6/conf/%s/dad_transmits", contIface.Name)
+		if _, err := os.Stat(dadSysctlIface); !os.IsNotExist(err) {
+			err = setSysctl(dadSysctlIface, 0)
 			if err != nil {
 				klog.Warningf("Failed to disable IPv6 DAD: %q", err)
 			}
 		}
+		// generate address based on EUI64
+		genSysctlIface := fmt.Sprintf("/proc/sys/net/ipv6/conf/%s/addr_gen_mode", contIface.Name)
+		if _, err := os.Stat(genSysctlIface); !os.IsNotExist(err) {
+			err = setSysctl(genSysctlIface, 0)
+			if err != nil {
+				klog.Warningf("Failed to set IPv6 address generation mode to EUI64: %q", err)
+			}
+		}
+
 		return ip.SettleAddresses(contIface.Name, 10)
 	})
 	if err != nil {
