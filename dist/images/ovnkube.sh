@@ -835,10 +835,6 @@ ovn-controller() {
   echo "ovn_nbdb ${ovn_nbdb}   ovn_sbdb ${ovn_sbdb}"
   echo "ovn_nbdb_conn ${ovn_nbdb_conn}"
 
-  # cleanup any stale ovn-nb and ovn-remote keys in Open_vSwitch table
-  ovs-vsctl remove Open_vSwitch . external_ids ovn-remote
-  ovs-vsctl remove Open_vSwitch . external_ids ovn-nb
-
   echo "=============== ovn-controller  start_controller"
   rm -f /var/run/ovn-kubernetes/cni/*
   rm -f ${OVN_RUNDIR}/ovn-controller.*.ctl
@@ -906,7 +902,7 @@ ovn-node() {
   if [[ ${ovn_egressip_enable} == "true" ]]; then
       egressip_enabled_flag="--enable-egress-ip"
   fi
-  
+
   OVN_ENCAP_IP=""
   ovn_encap_ip=$(ovs-vsctl --if-exists get Open_vSwitch . external_ids:ovn-encap-ip)
   if [[ $? == 0 ]]; then
