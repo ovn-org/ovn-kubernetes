@@ -145,7 +145,7 @@ jobs:
       fail-fast: false
       matrix:
         target:
-          - shard: shard-network
+          - shard: shard-conformance
             hybrid-overlay: false
           - shard: control-plane
             hybrid-overlay: true
