@@ -771,7 +771,7 @@ mode=shared
 	It("returns an error when the gateway mode is invalid", func() {
 		app.Action = func(ctx *cli.Context) error {
 			_, err := InitConfig(ctx, kexec.New(), nil)
-			Expect(err).To(MatchError("invalid gateway mode \"adsfasdfaf\": expect one of shared,local"))
+			Expect(err).To(MatchError("invalid gateway mode \"adsfasdfaf\": expect one of shared,local,hybrid"))
 			return nil
 		}
 		cliArgs := []string{

@@ -104,7 +104,7 @@ node4 chassis=912d592c-904c-40cd-9ef1-c2e5b49a33dd lb_force_snat_ip=100.64.0.4`,
 			"ovn-nbctl --timeout=15 --if-exists lr-nat-del GR_test-node snat 10.128.0.0/14 -- lr-nat-add GR_test-node snat 169.254.33.2 10.128.0.0/14",
 		})
 
-		err = gatewayInit(nodeName, clusterIPSubnets, hostSubnets, joinSubnets, l3GatewayConfig, sctpSupport)
+		err = gatewayInit(nodeName, clusterIPSubnets, hostSubnets, joinSubnets, l3GatewayConfig, nil, sctpSupport)
 		Expect(err).NotTo(HaveOccurred())
 		Expect(fexec.CalledMatchesExpected()).To(BeTrue())
 	})
@@ -175,7 +175,7 @@ node4 chassis=912d592c-904c-40cd-9ef1-c2e5b49a33dd lb_force_snat_ip=100.64.0.4`,
 			"ovn-nbctl --timeout=15 --if-exists lr-nat-del GR_test-node snat fd01::/48 -- lr-nat-add GR_test-node snat fd99::2 fd01::/48",
 		})
 
-		err = gatewayInit(nodeName, clusterIPSubnets, hostSubnets, joinSubnets, l3GatewayConfig, sctpSupport)
+		err = gatewayInit(nodeName, clusterIPSubnets, hostSubnets, joinSubnets, l3GatewayConfig, nil, sctpSupport)
 		Expect(err).NotTo(HaveOccurred())
 		Expect(fexec.CalledMatchesExpected()).To(BeTrue())
 	})
@@ -248,7 +248,7 @@ node4 chassis=912d592c-904c-40cd-9ef1-c2e5b49a33dd lb_force_snat_ip=100.64.0.4`,
 			"ovn-nbctl --timeout=15 --if-exists lr-nat-del GR_test-node snat fd01::/48 -- lr-nat-add GR_test-node snat fd99::2 fd01::/48",
 		})
 
-		err = gatewayInit(nodeName, clusterIPSubnets, hostSubnets, joinSubnets, l3GatewayConfig, sctpSupport)
+		err = gatewayInit(nodeName, clusterIPSubnets, hostSubnets, joinSubnets, l3GatewayConfig, nil, sctpSupport)
 		Expect(err).NotTo(HaveOccurred())
 		Expect(fexec.CalledMatchesExpected()).To(BeTrue())
 	})

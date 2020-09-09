@@ -426,7 +426,8 @@ func (oc *Controller) syncNodeManagementPort(node *kapi.Node, hostSubnets []*net
 	return nil
 }
 
-func (oc *Controller) syncGatewayLogicalNetwork(node *kapi.Node, l3GatewayConfig *util.L3GatewayConfig, hostSubnets []*net.IPNet) error {
+func (oc *Controller) syncGatewayLogicalNetwork(node *kapi.Node, l3GatewayConfig *util.L3GatewayConfig,
+	hybridGatewayConfig *util.L3GatewayConfig, hostSubnets []*net.IPNet) error {
 	var err error
 	var clusterSubnets []*net.IPNet
 	for _, clusterSubnet := range config.Default.ClusterSubnets {
@@ -439,12 +440,12 @@ func (oc *Controller) syncGatewayLogicalNetwork(node *kapi.Node, l3GatewayConfig
 		return err
 	}
 
-	err = gatewayInit(node.Name, clusterSubnets, hostSubnets, joinSubnets, l3GatewayConfig, oc.SCTPSupport)
+	err = gatewayInit(node.Name, clusterSubnets, hostSubnets, joinSubnets, l3GatewayConfig, hybridGatewayConfig, oc.SCTPSupport)
 	if err != nil {
 		return fmt.Errorf("failed to init shared interface gateway: %v", err)
 	}
 
-	if l3GatewayConfig.Mode == config.GatewayModeShared {
+	if l3GatewayConfig.Mode == config.GatewayModeShared || hybridGatewayConfig != nil {
 		// in the case of shared gateway mode, we need to setup
 		// 1. two policy based routes to steer traffic to the k8s node IP
 		// 	  - from the management port via the node_local_switch's localnet port
@@ -460,7 +461,14 @@ func (oc *Controller) syncGatewayLogicalNetwork(node *kapi.Node, l3GatewayConfig
 		}
 		for _, subnet := range subnets {
 			hostIfAddr := util.GetNodeManagementIfAddr(subnet)
-			l3GatewayConfigIP, err := util.MatchIPNetFamily(utilnet.IsIPv6(hostIfAddr.IP), l3GatewayConfig.IPAddresses)
+
+			var l3GatewayConfigIP *net.IPNet
+
+			if hybridGatewayConfig != nil {
+				l3GatewayConfigIP, err = util.MatchIPNetFamily(utilnet.IsIPv6(hostIfAddr.IP), hybridGatewayConfig.IPAddresses)
+			} else {
+				l3GatewayConfigIP, err = util.MatchIPNetFamily(utilnet.IsIPv6(hostIfAddr.IP), l3GatewayConfig.IPAddresses)
+			}
 			if err != nil {
 				return err
 			}

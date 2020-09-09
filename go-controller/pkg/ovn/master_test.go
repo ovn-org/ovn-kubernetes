@@ -904,7 +904,7 @@ var _ = Describe("Gateway Init Operations", func() {
 			clusterController.WatchNodes()
 
 			subnet := ovntest.MustParseIPNet(nodeSubnet)
-			err = clusterController.syncGatewayLogicalNetwork(updatedNode, l3GatewayConfig, []*net.IPNet{subnet})
+			err = clusterController.syncGatewayLogicalNetwork(updatedNode, l3GatewayConfig, nil, []*net.IPNet{subnet})
 			Expect(err).NotTo(HaveOccurred())
 
 			Expect(fexec.CalledMatchesExpected()).To(BeTrue(), fexec.ErrorDesc)
@@ -1102,7 +1102,7 @@ var _ = Describe("Gateway Init Operations", func() {
 			clusterController.WatchNodes()
 
 			subnet := ovntest.MustParseIPNet(nodeSubnet)
-			err = clusterController.syncGatewayLogicalNetwork(updatedNode, l3GatewayConfig, []*net.IPNet{subnet})
+			err = clusterController.syncGatewayLogicalNetwork(updatedNode, l3GatewayConfig, nil, []*net.IPNet{subnet})
 			Expect(err).NotTo(HaveOccurred())
 
 			Expect(fexec.CalledMatchesExpected()).To(BeTrue(), fexec.ErrorDesc)

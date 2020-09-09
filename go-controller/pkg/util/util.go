@@ -22,6 +22,7 @@ const (
 	// PhysicalNetworkName is the name that maps to an OVS bridge that provides
 	// access to physical/external network
 	PhysicalNetworkName = "physnet"
+	HybridNetworkName   = "physnet2"
 
 	// LocalNetworkName is the name that maps to an OVS bridge that provides
 	// access to local service

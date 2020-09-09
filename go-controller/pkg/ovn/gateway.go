@@ -16,6 +16,7 @@ const (
 
 	joinSwitchPrefix             = "join_"
 	externalSwitchPrefix         = "ext_"
+	hybridSwitchPrefix           = "hybrid_"
 	gwRouterPrefix               = "GR_"
 	routerToSwitchPrefix         = "rtos-"
 	switchToRouterPrefix         = "stor-"
@@ -25,6 +26,8 @@ const (
 	joinSwitchToDistRouterPrefix = "jtod-"
 	extSwitchToGwRouterPrefix    = "etor-"
 	gwRouterToExtSwitchPrefix    = "rtoe-"
+	gwRouterToHybridSwitchPrefix = "rtoh-"
+	hybridSwitchToGwRouterPrefix = "etoh-"
 
 	nodeLocalSwitch          = "node_local_switch"
 	nodeSubnetPolicyPriority = "1004"

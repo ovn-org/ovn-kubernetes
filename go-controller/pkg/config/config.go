@@ -232,6 +232,8 @@ const (
 	GatewayModeShared GatewayMode = "shared"
 	// GatewayModeLocal indicates OVN creates a local NAT-ed interface for the gateway
 	GatewayModeLocal GatewayMode = "local"
+	// GatewayModeHybrid indicates OVN creates a local NAT-ed interface for the gateway uses shared gw for exgws
+	GatewayModeHybrid GatewayMode = "hybrid"
 )
 
 // GatewayConfig holds node gateway-related parsed config file parameters and command-line overrides
@@ -1083,7 +1085,7 @@ func buildGatewayConfig(ctx *cli.Context, cli, file *config) error {
 	}
 
 	if Gateway.Mode != GatewayModeDisabled {
-		validModes := []string{string(GatewayModeShared), string(GatewayModeLocal)}
+		validModes := []string{string(GatewayModeShared), string(GatewayModeLocal), string(GatewayModeHybrid)}
 		var found bool
 		for _, mode := range validModes {
 			if string(Gateway.Mode) == mode {

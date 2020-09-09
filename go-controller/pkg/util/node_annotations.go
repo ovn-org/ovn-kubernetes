@@ -43,6 +43,9 @@ const (
 	// ovnNodeL3GatewayConfig is the constant string representing the l3 gateway annotation key
 	ovnNodeL3GatewayConfig = "k8s.ovn.org/l3-gateway-config"
 
+	// ovnHybridNetworkGateway is the constant string representing the l3 gateway annotation key
+	ovnHybridNetworkGateway = "hybrid"
+
 	// OvnDefaultNetworkGateway captures L3 gateway config for default OVN network interface
 	ovnDefaultNetworkGateway = "default"
 
@@ -124,7 +127,8 @@ func (cfg *L3GatewayConfig) UnmarshalJSON(bytes []byte) error {
 	cfg.Mode = cfgjson.Mode
 	if cfg.Mode == config.GatewayModeDisabled {
 		return nil
-	} else if cfg.Mode != config.GatewayModeShared && cfg.Mode != config.GatewayModeLocal {
+	} else if cfg.Mode != config.GatewayModeShared && cfg.Mode != config.GatewayModeLocal &&
+		cfg.Mode != config.GatewayModeHybrid {
 		return fmt.Errorf("bad 'mode' value %q", cfgjson.Mode)
 	}
 
@@ -166,18 +170,20 @@ func (cfg *L3GatewayConfig) UnmarshalJSON(bytes []byte) error {
 		}
 	}
 
-	if len(cfgjson.NextHops) == 0 {
-		cfg.NextHops = make([]net.IP, 1)
-		cfg.NextHops[0] = net.ParseIP(cfgjson.NextHop)
-		if cfg.NextHops[0] == nil {
-			return fmt.Errorf("bad 'next-hop' value %q", cfgjson.NextHop)
-		}
-	} else {
-		cfg.NextHops = make([]net.IP, len(cfgjson.NextHops))
-		for i, nextHopStr := range cfgjson.NextHops {
-			cfg.NextHops[i] = net.ParseIP(nextHopStr)
-			if cfg.NextHops[i] == nil {
-				return fmt.Errorf("bad 'next-hops' value %q", nextHopStr)
+	if cfg.Mode != config.GatewayModeHybrid {
+		if len(cfgjson.NextHops) == 0 {
+			cfg.NextHops = make([]net.IP, 1)
+			cfg.NextHops[0] = net.ParseIP(cfgjson.NextHop)
+			if cfg.NextHops[0] == nil {
+				return fmt.Errorf("bad 'next-hop' value %q", cfgjson.NextHop)
+			}
+		} else {
+			cfg.NextHops = make([]net.IP, len(cfgjson.NextHops))
+			for i, nextHopStr := range cfgjson.NextHops {
+				cfg.NextHops[i] = net.ParseIP(nextHopStr)
+				if cfg.NextHops[i] == nil {
+					return fmt.Errorf("bad 'next-hops' value %q", nextHopStr)
+				}
 			}
 		}
 	}
@@ -196,6 +202,51 @@ func SetL3GatewayConfig(nodeAnnotator kube.Annotator, cfg *L3GatewayConfig) erro
 		}
 	}
 	return nil
+}
+
+func SetL3HybridGatewayConfig(nodeAnnotator kube.Annotator, cfg, hybridCfg *L3GatewayConfig) error {
+	gatewayAnnotation := map[string]*L3GatewayConfig{ovnDefaultNetworkGateway: cfg, ovnHybridNetworkGateway: hybridCfg}
+	if err := nodeAnnotator.Set(ovnNodeL3GatewayConfig, gatewayAnnotation); err != nil {
+		return err
+	}
+	if cfg.ChassisID != "" {
+		if err := nodeAnnotator.Set(ovnNodeChassisID, cfg.ChassisID); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// ParseNodeL3HybridGatewayAnnotation returns the parsed l3-gateway-config annotation
+func ParseNodeL3HybridGatewayAnnotation(node *kapi.Node) (*L3GatewayConfig, *L3GatewayConfig, error) {
+	l3GatewayAnnotation, ok := node.Annotations[ovnNodeL3GatewayConfig]
+	if !ok {
+		return nil, nil, newAnnotationNotSetError("%s annotation not found for node %q", ovnNodeL3GatewayConfig, node.Name)
+	}
+
+	var cfgs map[string]*L3GatewayConfig
+	if err := json.Unmarshal([]byte(l3GatewayAnnotation), &cfgs); err != nil {
+		return nil, nil, fmt.Errorf("failed to unmarshal l3 gateway config annotation %s for node %q: %v", l3GatewayAnnotation, node.Name, err)
+	}
+
+	cfg, ok := cfgs[ovnDefaultNetworkGateway]
+	if !ok {
+		return nil, nil, fmt.Errorf("%s annotation for %s network not found", ovnNodeL3GatewayConfig, ovnDefaultNetworkGateway)
+	}
+
+	hybridCfg, ok := cfgs[ovnHybridNetworkGateway]
+	if !ok {
+		return nil, nil, fmt.Errorf("%s annotation for %s network not found", ovnNodeL3GatewayConfig, ovnHybridNetworkGateway)
+	}
+
+	if cfg.Mode != config.GatewayModeDisabled {
+		cfg.ChassisID, ok = node.Annotations[ovnNodeChassisID]
+		if !ok {
+			return nil, nil, fmt.Errorf("%s annotation not found", ovnNodeChassisID)
+		}
+	}
+
+	return cfg, hybridCfg, nil
 }
 
 // ParseNodeL3GatewayAnnotation returns the parsed l3-gateway-config annotation
