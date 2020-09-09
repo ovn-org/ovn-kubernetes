@@ -17,17 +17,20 @@ import (
 	utilnet "k8s.io/utils/net"
 )
 
+var (
+	nodeLogicalRouterIPv6 = net.ParseIP("fef0::56")
+	nodeLogicalRouterIPv4 = net.ParseIP("100.64.0.2")
+)
+
 const (
-	namespace             = "egressip-namespace"
-	nodeLogicalRouterIPv6 = "fef0::56"
-	nodeLogicalRouterIPv4 = "100.64.0.2"
-	nodeInternalIP        = "def0::56"
-	podV4IP               = "10.128.0.15"
-	podV6IP               = "ae70::66"
-	v6ClusterSubnet       = "ae70::66/64"
-	v4ClusterSubnet       = "10.128.0.0/14"
-	podName               = "egress_pod"
-	egressIPName          = "egressip"
+	namespace       = "egressip-namespace"
+	nodeInternalIP  = "def0::56"
+	podV4IP         = "10.128.0.15"
+	podV6IP         = "ae70::66"
+	v6ClusterSubnet = "ae70::66/64"
+	v4ClusterSubnet = "10.128.0.0/14"
+	podName         = "egress_pod"
+	egressIPName    = "egressip"
 )
 
 func newEgressIPMeta(name string) metav1.ObjectMeta {

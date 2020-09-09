@@ -404,7 +404,7 @@ func (e *egressIPMode) createEgressPolicy(podIps []net.IP, status egressipv1.Egr
 	isEgressIPv6 := utilnet.IsIPv6String(status.EgressIP)
 	gatewayRouterIP, err := e.getGatewayRouterJoinIP(status.Node, isEgressIPv6)
 	if err != nil {
-		return fmt.Errorf("unable to retrieve node's: %s gateway IP, err: %v", status.Node, err)
+		return fmt.Errorf("unable to retrieve gateway IP for node: %s, err: %v", status.Node, err)
 	}
 	for _, podIP := range podIps {
 		var err error
@@ -414,7 +414,7 @@ func (e *egressIPMode) createEgressPolicy(podIps []net.IP, status egressipv1.Egr
 		} else if !isEgressIPv6 && !utilnet.IsIPv6(podIP) {
 			filterOption = fmt.Sprintf("ip4.src == %s", podIP.String())
 		}
-		policyIDs, err := findLRPolicyIDs(filterOption, egressIPName)
+		policyIDs, err := findLRPolicyIDs(filterOption, egressIPName, gatewayRouterIP)
 		if err != nil {
 			return err
 		}
@@ -464,6 +464,11 @@ func (e *egressIPMode) createEgressPolicy(podIps []net.IP, status egressipv1.Egr
 }
 
 func (e *egressIPMode) deleteEgressPolicy(podIps []net.IP, status egressipv1.EgressIPStatusItem, egressIPName string) error {
+	isEgressIPv6 := utilnet.IsIPv6String(status.EgressIP)
+	gatewayRouterIP, err := e.getGatewayRouterJoinIP(status.Node, isEgressIPv6)
+	if err != nil {
+		return fmt.Errorf("unable to retrieve gateway IP for node: %s, err: %v", status.Node, err)
+	}
 	for _, podIP := range podIps {
 		var filterOption string
 		if utilnet.IsIPv6(podIP) && utilnet.IsIPv6String(status.EgressIP) {
@@ -471,7 +476,7 @@ func (e *egressIPMode) deleteEgressPolicy(podIps []net.IP, status egressipv1.Egr
 		} else if !utilnet.IsIPv6(podIP) && !utilnet.IsIPv6String(status.EgressIP) {
 			filterOption = fmt.Sprintf("ip4.src == %s", podIP.String())
 		}
-		policyIDs, err := findLRPolicyIDs(filterOption, egressIPName)
+		policyIDs, err := findLRPolicyIDs(filterOption, egressIPName, gatewayRouterIP)
 		if err != nil {
 			return err
 		}
@@ -491,7 +496,7 @@ func (e *egressIPMode) deleteEgressPolicy(podIps []net.IP, status egressipv1.Egr
 	return nil
 }
 
-func findLRPolicyIDs(filterOption, egressIPName string) ([]string, error) {
+func findLRPolicyIDs(filterOption, egressIPName string, gatewayRouterIP net.IP) ([]string, error) {
 	policyIDs, stderr, err := util.RunOVNNbctl(
 		"--format=csv",
 		"--data=bare",
@@ -502,6 +507,7 @@ func findLRPolicyIDs(filterOption, egressIPName string) ([]string, error) {
 		fmt.Sprintf("match=\"%s\"", filterOption),
 		fmt.Sprintf("priority=%v", egressIPReroutePriority),
 		fmt.Sprintf("external_ids:name=%s", egressIPName),
+		fmt.Sprintf("nexthop=%s", gatewayRouterIP),
 	)
 	if err != nil {
 		return nil, fmt.Errorf("unable to find logical router policy for EgressIP: %s, stderr: %s, err: %v", egressIPName, stderr, err)
