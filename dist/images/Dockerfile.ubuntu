@@ -14,13 +14,6 @@ USER root
 
 RUN apt-get update && apt-get install -y arping iproute2 curl software-properties-common setpriv
 
-# We do not have much control over the exact version of OVS/OVN that can be
-# obtained from upstream Ubuntu. guru@ovn.org maintains more latest versions of
-# OVS/OVN packages at 3.19.28.122. Please comment out the next 3 lines if
-# you prefer to use upstream Ubuntu packages instead.
-RUN echo "deb http://3.19.28.122/openvswitch/stable /" |  tee /etc/apt/sources.list.d/openvswitch.list
-RUN curl http://3.19.28.122/openvswitch/keyFile |  apt-key add -
-
 RUN echo "deb https://apt.kubernetes.io/ kubernetes-xenial main" | tee -a /etc/apt/sources.list.d/kubernetes.list
 RUN curl -s https://packages.cloud.google.com/apt/doc/apt-key.gpg | apt-key add -
 
