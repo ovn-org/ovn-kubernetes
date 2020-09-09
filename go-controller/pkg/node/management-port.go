@@ -8,7 +8,9 @@ import (
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/kube"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
+
 	"k8s.io/klog"
+	utilnet "k8s.io/utils/net"
 )
 
 func (n *OvnNode) createManagementPort(hostSubnets []*net.IPNet, nodeAnnotator kube.Annotator,
@@ -49,13 +51,50 @@ func (n *OvnNode) createManagementPort(hostSubnets []*net.IPNet, nodeAnnotator k
 		return err
 	}
 
-	err = createPlatformManagementPort(util.K8sMgmtIntfName, hostSubnets, n.stopChan)
+	cfg, err := createPlatformManagementPort(util.K8sMgmtIntfName, hostSubnets, n.stopChan)
 	if err != nil {
 		return err
 	}
 
 	if err := util.SetNodeManagementPortMACAddress(nodeAnnotator, macAddress); err != nil {
 		return err
+	}
+
+	if config.Gateway.Mode == config.GatewayModeLocal {
+		var gatewayIfAddrs []*net.IPNet
+		for _, hostSubnet := range hostSubnets {
+			// local gateway mode uses mp0 as default path for all ingress traffic into OVN
+			var nextHop *net.IPNet
+			if utilnet.IsIPv6CIDR(hostSubnet) {
+				nextHop = cfg.ipv6.ifAddr
+			} else {
+				nextHop = cfg.ipv4.ifAddr
+			}
+			gatewayIfAddrs = append(gatewayIfAddrs, nextHop)
+
+			// add iptables masquerading for mp0 to exit the host for egress
+			cidr := nextHop.IP.Mask(nextHop.Mask)
+			cidrNet := &net.IPNet{IP: cidr, Mask: nextHop.Mask}
+			err = initLocalGatewayNATRules(util.K8sMgmtIntfName, cidrNet)
+			if err != nil {
+				return fmt.Errorf("failed to add local NAT rules for: %s, err: %v", util.K8sMgmtIntfName, err)
+			}
+		}
+
+		n.initLocalEgressIP(gatewayIfAddrs, util.K8sMgmtIntfName)
+
+		if config.Gateway.NodeportEnable {
+			localAddrSet, err := getLocalAddrs()
+			if err != nil {
+				return err
+			}
+			err = n.watchLocalPorts(
+				newLocalPortWatcherData(gatewayIfAddrs, n.recorder, localAddrSet),
+			)
+			if err != nil {
+				return err
+			}
+		}
 	}
 
 	waiter.AddWait(managementPortReady, nil)

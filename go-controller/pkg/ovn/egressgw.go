@@ -3,6 +3,8 @@ package ovn
 import (
 	"encoding/json"
 	"fmt"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
+	utilnet "k8s.io/utils/net"
 	"net"
 	"strings"
 
@@ -108,6 +110,9 @@ func (oc *Controller) addGWRoutesForNamespace(namespace string, gws []net.IP, ns
 				if err != nil {
 					return fmt.Errorf("unable to add src-ip route to GR router, stderr:%q, err:%v", stderr, err)
 				}
+				if err := oc.addHybridRoutePolicyForPod(net.ParseIP(podIP.IP), pod.Spec.NodeName); err != nil {
+					return err
+				}
 				if nsInfo.podExternalRoutes[podIP.IP] == nil {
 					nsInfo.podExternalRoutes[podIP.IP] = make(map[string]string)
 				}
@@ -128,12 +133,12 @@ func (oc *Controller) deletePodExternalGW(pod *kapi.Pod) {
 	klog.Infof("Deleting routes for external gateway pod: %s, for namespace(s) %s", pod.Name,
 		podRoutingNamespaceAnno)
 	for _, namespace := range strings.Split(podRoutingNamespaceAnno, ",") {
-		oc.deletePodGWRoutesForNamespace(pod.Name, namespace)
+		oc.deletePodGWRoutesForNamespace(pod.Name, namespace, pod.Spec.NodeName)
 	}
 }
 
 // deletePodGwRoutesForNamespace handles deleting all routes in a namespace for a specific pod GW
-func (oc *Controller) deletePodGWRoutesForNamespace(pod, namespace string) {
+func (oc *Controller) deletePodGWRoutesForNamespace(pod, namespace, node string) {
 	nsInfo := oc.getNamespaceLocked(namespace)
 	if nsInfo == nil {
 		return
@@ -159,6 +164,10 @@ func (oc *Controller) deletePodGWRoutesForNamespace(pod, namespace string) {
 			}
 			mask := GetIPFullMask(podIP)
 			// TODO (trozet): use the go bindings here and batch commands
+			if err := oc.delHybridRoutePolicyForPod(net.ParseIP(podIP), node); err != nil {
+				klog.Error(err)
+			}
+
 			_, stderr, err := util.RunOVNNbctl("--", "--if-exists", "--policy=src-ip",
 				"lr-route-del", gr, podIP+mask, gwIP.String())
 			if err != nil {
@@ -188,6 +197,10 @@ func (oc *Controller) deleteGWRoutesForNamespace(nsInfo *namespaceInfo) {
 	for podIP, gwToGr := range nsInfo.podExternalRoutes {
 		for gw, gr := range gwToGr {
 			mask := GetIPFullMask(podIP)
+			node := strings.TrimPrefix(gr, "GR_")
+			if err := oc.delHybridRoutePolicyForPod(net.ParseIP(podIP), node); err != nil {
+				klog.Error(err)
+			}
 			_, stderr, err := util.RunOVNNbctl("--", "--if-exists", "--policy=src-ip",
 				"lr-route-del", gr, podIP+mask, gw)
 			if err != nil {
@@ -217,6 +230,10 @@ func (oc *Controller) deleteGWRoutesForPod(namespace string, podIPNets []*net.IP
 			}
 			mask := GetIPFullMask(pod)
 			for gw, gr := range gwToGr {
+				node := strings.TrimPrefix(gr, "GR_")
+				if err := oc.delHybridRoutePolicyForPod(podIPNet.IP, node); err != nil {
+					klog.Error(err)
+				}
 				_, stderr, err := util.RunOVNNbctl("--", "--if-exists", "--policy=src-ip",
 					"lr-route-del", gr, pod+mask, gw)
 				if err != nil {
@@ -230,12 +247,13 @@ func (oc *Controller) deleteGWRoutesForPod(namespace string, podIPNets []*net.IP
 }
 
 // addEgressGwRoutesForPod handles adding all routes to gateways for a pod on a specific GR
-func (oc *Controller) addGWRoutesForPod(routingGWs []net.IP, podIfAddrs []*net.IPNet, namespace, gr string) error {
+func (oc *Controller) addGWRoutesForPod(routingGWs []net.IP, podIfAddrs []*net.IPNet, namespace, node string) error {
 	nsInfo, err := oc.waitForNamespaceLocked(namespace)
 	if err != nil {
 		return err
 	}
 	defer nsInfo.Unlock()
+	gr := "GR_" + node
 	for _, v := range routingGWs {
 		gw := v.String()
 		// TODO (trozet): use the go bindings here and batch commands
@@ -248,6 +266,9 @@ func (oc *Controller) addGWRoutesForPod(routingGWs []net.IP, podIfAddrs []*net.I
 				return fmt.Errorf("unable to add external gw src-ip route to GR router, stderr:%q, err:%v", stderr, err)
 			}
 
+			if err := oc.addHybridRoutePolicyForPod(podIPNet.IP, node); err != nil {
+				return err
+			}
 			if nsInfo.podExternalRoutes[podIP] == nil {
 				nsInfo.podExternalRoutes[podIP] = make(map[string]string)
 			}
@@ -301,6 +322,64 @@ func (oc *Controller) addPerPodGRSNAT(pod *kapi.Pod, podIfAddrs []*net.IPNet) er
 				return fmt.Errorf("failed to create SNAT rule for pod on gateway router %s, "+
 					"stdout: %q, stderr: %q, error: %v", gr, stdout, stderr, err)
 			}
+		}
+	}
+	return nil
+}
+
+// addHybridRoutePolicyForPod handles adding a higher priority allow policy to allow traffic to be routed normally
+// by ecmp routes
+func (oc *Controller) addHybridRoutePolicyForPod(podIP net.IP, node string) error {
+	if config.Gateway.Mode == config.GatewayModeLocal {
+		// add allow policy to bypass lr-policy in GR
+		var l3Prefix string
+		if utilnet.IsIPv6(podIP) {
+			l3Prefix = "ip6"
+		} else {
+			l3Prefix = "ip4"
+		}
+		// get the GR to join switch ip address
+		out, stderr, err := util.RunOVNNbctl("--data=bare", "--no-heading", "--columns=networks", "find",
+			"logical_router_port", fmt.Sprintf("name=rtoj-GR_%s", node))
+		if err != nil {
+			return fmt.Errorf("unable to find IP address for node: %s, rtoj port, stderr: %s, err: %v", node,
+				stderr, err)
+		}
+		grJoinIP, _, err := net.ParseCIDR(out)
+		if err != nil {
+			return fmt.Errorf("failed to parse gateway router join interface IP: %s, err: %v", grJoinIP, err)
+		}
+		matchStr := fmt.Sprintf(`inport == "rtos-%s" && %s.src == %s`, node, l3Prefix, podIP)
+		_, stderr, err = util.RunOVNNbctl("lr-policy-add", ovnClusterRouter, "501", matchStr, "reroute",
+			grJoinIP.String())
+		if err != nil {
+			// TODO: lr-policy-add doesn't support --may-exist, resort to this workaround for now.
+			// Have raised an issue against ovn repository (https://github.com/ovn-org/ovn/issues/49)
+			if !strings.Contains(stderr, "already existed") {
+				return fmt.Errorf("failed to add policy route '%s' to %s "+
+					"stderr: %s, error: %v", matchStr, ovnClusterRouter, stderr, err)
+			}
+		}
+	}
+	return nil
+}
+
+// delHybridRoutePolicyForPod handles deleting a higher priority allow policy to allow traffic to be routed normally
+// by ecmp routes
+func (oc *Controller) delHybridRoutePolicyForPod(podIP net.IP, node string) error {
+	if config.Gateway.Mode == config.GatewayModeLocal {
+		// delete allow policy to bypass lr-policy in GR
+		var l3Prefix string
+		if utilnet.IsIPv6(podIP) {
+			l3Prefix = "ip6"
+		} else {
+			l3Prefix = "ip4"
+		}
+		matchStr := fmt.Sprintf(`inport == "rtos-%s" && %s.src == %s`, node, l3Prefix, podIP)
+		_, stderr, err := util.RunOVNNbctl("lr-policy-del", ovnClusterRouter, "501", matchStr)
+		if err != nil {
+			klog.Errorf("Failed to remove policy: %s, on: %s, stderr: %s, err: %v",
+				matchStr, ovnClusterRouter, stderr, err)
 		}
 	}
 	return nil
