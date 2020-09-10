@@ -1139,6 +1139,11 @@ var _ = Describe("e2e non-vxlan external gateway and update validation", func() 
 		if validIP == nil {
 			framework.Failf("Warning: Failed to get an IP for the source pod %s, test will fail", srcPingPodName)
 		}
+		// add a host route on the first mock gateway for return traffic to the pod
+		_, err = runCommand("docker", "exec", gwContainerNameAlt1, "ip", "route", "add", pingSrc, "via", nodeIP)
+		if err != nil {
+			framework.Failf("failed to add the pod host route on the test container: %v", err)
+		}
 		time.Sleep(time.Second * 15)
 		// Verify the gateway and remote address is reachable from the initial pod
 		By(fmt.Sprintf("Verifying connectivity without vxlan to the updated annotation and initial external gateway %s and remote address %s", exGWIpAlt1, exGWRemoteIpAlt1))
@@ -1175,6 +1180,11 @@ var _ = Describe("e2e non-vxlan external gateway and update validation", func() 
 		_, err = runCommand("docker", "exec", gwContainerNameAlt2, "ip", "address", "add", exGWRemoteCidrAlt2, "dev", "lo")
 		if err != nil {
 			framework.Failf("failed to add the loopback ip to dev lo on the test container: %v", err)
+		}
+		// add a host route on the second mock gateway for return traffic to the pod
+		_, err = runCommand("docker", "exec", gwContainerNameAlt2, "ip", "route", "add", pingSrc, "via", nodeIP)
+		if err != nil {
+			framework.Failf("failed to add the pod route on the test container: %v", err)
 		}
 		// Wait for the exGW pod networking to be almost, updated
 		wait.PollImmediate(1*time.Second, 30*time.Second, func() (bool, error) {
