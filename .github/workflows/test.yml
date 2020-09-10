@@ -154,7 +154,7 @@ jobs:
            name: "HA"
          - enabled: "false"
            name: "noHA"
-        gateway-mode: [local, shared]
+        gateway-mode: [local, shared, hybrid]
         ipfamily:
          - ip: ipv4
            name: "IPv4"
@@ -176,18 +176,20 @@ jobs:
          - {"ipfamily": {"ip": ipv6}, "target": {"shard": control-plane}}
          # Limit matrix combinations for CI. DISABLED items added to exclude list:
          #   DISABLED  v4  ha     local
-         #   ENABLED   v4  ha     shared
+         #   ENABLED   v4  ha     shared, hybrid
          #   ENABLED   v4  noha   local
-         #   DISABLED  v4  noha   shared
+         #   DISABLED  v4  noha   shared, hybrid
          #   DISABLED  v6  ha     local
-         #   ENABLED   v6  ha     shared
+         #   ENABLED   v6  ha     shared, hybrid
          #   DISABLED  v6  noha   local
-         #   DISABLED  v6  noha   shared
+         #   DISABLED  v6  noha   shared, hybrid
          - {"ipfamily": {"ip": ipv4}, "ha": {"enabled": "true"}, "gateway-mode": local}
          - {"ipfamily": {"ip": ipv4}, "ha": {"enabled": "false"}, "gateway-mode": shared}
+         - {"ipfamily": {"ip": ipv4}, "ha": {"enabled": "false"}, "gateway-mode": hybrid}
          - {"ipfamily": {"ip": ipv6}, "ha": {"enabled": "true"}, "gateway-mode": local}
          - {"ipfamily": {"ip": ipv6}, "ha": {"enabled": "false"}, "gateway-mode": local}
          - {"ipfamily": {"ip": ipv6}, "ha": {"enabled": "false"}, "gateway-mode": shared}
+         - {"ipfamily": {"ip": ipv6}, "ha": {"enabled": "false"}, "gateway-mode": hybrid}
     needs: [build, k8s]
     env:
       JOB_NAME: "${{ matrix.target.shard }}-${{ matrix.ha.name }}-${{ matrix.gateway-mode }}-${{ matrix.ipfamily.name }}"
