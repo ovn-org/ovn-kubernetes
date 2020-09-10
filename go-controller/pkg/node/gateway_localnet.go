@@ -151,7 +151,7 @@ func (n *OvnNode) initLocalnetGateway(hostSubnets []*net.IPNet, nodeAnnotator ku
 			return err
 		}
 		err = n.watchLocalPorts(
-			newLocalPortWatcherData(gatewayIfAddrs, n.recorder, localAddrSet),
+			newLocalPortWatcherData(gatewayIfAddrs, n.recorder, localAddrSet, nil),
 		)
 		if err != nil {
 			return err
@@ -192,16 +192,23 @@ type localPortWatcherData struct {
 	gatewayIPv4  string
 	gatewayIPv6  string
 	localAddrSet map[string]net.IPNet
+	nodeIP       *net.IPNet
 }
 
-func newLocalPortWatcherData(gatewayIfAddrs []*net.IPNet, recorder record.EventRecorder, localAddrSet map[string]net.IPNet) *localPortWatcherData {
+func newLocalPortWatcherData(gatewayIfAddrs []*net.IPNet, recorder record.EventRecorder, localAddrSet map[string]net.IPNet, nodeIP []*net.IPNet) *localPortWatcherData {
 	gatewayIPv4, gatewayIPv6 := getGatewayFamilyAddrs(gatewayIfAddrs)
-	return &localPortWatcherData{
+
+	lpw := &localPortWatcherData{
 		gatewayIPv4:  gatewayIPv4,
 		gatewayIPv6:  gatewayIPv6,
 		recorder:     recorder,
 		localAddrSet: localAddrSet,
 	}
+
+	if len(nodeIP) > 0 {
+		lpw.nodeIP = nodeIP[0]
+	}
+	return lpw
 }
 
 func getLocalAddrs() (map[string]net.IPNet, error) {
@@ -249,6 +256,9 @@ func (npw *localPortWatcherData) addService(svc *kapi.Service) error {
 				// dest address as the load-balancer ingress IP and port
 				iptRules = append(iptRules, getLoadBalancerIPTRules(svc, port, gatewayIP, port.NodePort)...)
 				iptRules = append(iptRules, getNodePortIPTRules(port, nil, gatewayIP, port.NodePort)...)
+				if config.Gateway.Mode == config.GatewayModeHybrid {
+					iptRules = append(iptRules, getHybridNodePortIPTRules(port, npw.nodeIP, svc.Spec.ClusterIP)...)
+				}
 				klog.V(5).Infof("Will add iptables rule for NodePort and Cloud load balancers: %v and "+
 					"protocol: %v", port.NodePort, port.Protocol)
 			} else {
@@ -314,6 +324,9 @@ func (npw *localPortWatcherData) deleteService(svc *kapi.Service) error {
 				// dest address as the load-balancer ingress IP and port
 				iptRules = append(iptRules, getLoadBalancerIPTRules(svc, port, gatewayIP, port.NodePort)...)
 				iptRules = append(iptRules, getNodePortIPTRules(port, nil, gatewayIP, port.NodePort)...)
+				if config.Gateway.Mode == config.GatewayModeHybrid {
+					iptRules = append(iptRules, getHybridNodePortIPTRules(port, npw.nodeIP, svc.Spec.ClusterIP)...)
+				}
 				klog.V(5).Infof("Will delete iptables rule for NodePort and cloud load balancers: %v and "+
 					"protocol: %v", port.NodePort, port.Protocol)
 			}

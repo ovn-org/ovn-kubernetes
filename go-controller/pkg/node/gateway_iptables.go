@@ -175,6 +175,31 @@ func getNodePortIPTRules(svcPort kapi.ServicePort, nodeIP *net.IPNet, targetIP s
 	}
 }
 
+func getHybridNodePortIPTRules(svcPort kapi.ServicePort, nodeIP *net.IPNet, targetIP string) []iptRule {
+	var protocol iptables.Protocol
+	if utilnet.IsIPv6String(targetIP) {
+		protocol = iptables.ProtocolIPv6
+	} else {
+		protocol = iptables.ProtocolIPv4
+	}
+
+	natArgs := []string{
+		"-p", string(svcPort.Protocol),
+		"-s", nodeIP.IP.String(),
+		"--dport", fmt.Sprintf("%d", svcPort.NodePort),
+		"-j", "DNAT",
+		"--to-destination", util.JoinHostPortInt32(targetIP, svcPort.Port),
+	}
+	return []iptRule{
+		{
+			table:    "nat",
+			chain:    iptableNodePortChain,
+			args:     natArgs,
+			protocol: protocol,
+		},
+	}
+}
+
 func getEgressIPTRules(eIPStatus egressipv1.EgressIPStatusItem, gatewayRouterIP string) []iptRule {
 	var protocol iptables.Protocol
 	if utilnet.IsIPv6String(eIPStatus.EgressIP) {

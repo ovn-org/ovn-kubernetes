@@ -116,19 +116,6 @@ func (n *OvnNode) initHybridGateway(hostSubnets []*net.IPNet, gwIntf string, nod
 		}
 	}
 
-	if config.Gateway.NodeportEnable {
-		localAddrSet, err := getLocalAddrs()
-		if err != nil {
-			return nil, err
-		}
-		err = n.watchLocalPorts(
-			newLocalPortWatcherData(gatewayIfAddrs, n.recorder, localAddrSet),
-		)
-		if err != nil {
-			return nil, err
-		}
-	}
-
 	var bridgeName string
 	var uplinkName string
 	var brCreated bool
@@ -165,6 +152,19 @@ func (n *OvnNode) initHybridGateway(hostSubnets []*net.IPNet, gwIntf string, nod
 	if err != nil {
 		return nil, fmt.Errorf("failed to get interface details for %s (%v)",
 			gwIntf, err)
+	}
+
+	if config.Gateway.NodeportEnable {
+		localAddrSet, err := getLocalAddrs()
+		if err != nil {
+			return nil, err
+		}
+		err = n.watchLocalPorts(
+			newLocalPortWatcherData(gatewayIfAddrs, n.recorder, localAddrSet, ips),
+		)
+		if err != nil {
+			return nil, err
+		}
 	}
 
 	ifaceID, macAddress, err = bridgedGatewayNodeSetup(n.name, bridgeName, gwIntf,
