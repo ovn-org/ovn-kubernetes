@@ -137,6 +137,9 @@ func shareGatewayInterfaceTest(app *cli.App, testNS ns.NetNS,
 			Output: "7",
 		})
 		fexec.AddFakeCmdsNoOutputNoError([]string{
+			"ovs-ofctl mod-port breth0 5 no-flood",
+		})
+		fexec.AddFakeCmdsNoOutputNoError([]string{
 			"ovs-ofctl -O OpenFlow13 replace-flows breth0 -",
 		})
 		fexec.AddFakeCmdsNoOutputNoError([]string{

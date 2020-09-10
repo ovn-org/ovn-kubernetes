@@ -418,6 +418,13 @@ func addDefaultConntrackRules(nodeName, gwBridge, gwIntf string, stopChan chan s
 			gwIntf, stderr, err)
 	}
 
+	// set no-flood on the physical port
+	_, stderr, err = util.RunOVSOfctl("mod-port", gwBridge, ofportPatch, "no-flood")
+	if err != nil {
+		return fmt.Errorf("failed to set no-flood on %s's ofport %s, stderr: %q, error: %v",
+			gwBridge, ofportPatch, stderr, err)
+	}
+
 	// replace the left over OpenFlow flows with the FLOOD action flow
 	_, stderr, err = util.AddFloodActionOFFlow(gwBridge)
 	if err != nil {
