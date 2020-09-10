@@ -59,6 +59,14 @@ func setupLocalNodeAccessBridge(nodeName string, subnets []*net.IPNet) error {
 		return err
 	}
 
+	// bounce interface to get link local address back for ipv6
+	if _, err = util.LinkSetDown(localnetGatewayNextHopPort); err != nil {
+		return err
+	}
+	if _, err = util.LinkSetUp(localnetGatewayNextHopPort); err != nil {
+		return err
+	}
+
 	for _, subnet := range subnets {
 		var gatewayNextHop net.IP
 		var gatewaySubnetMask net.IPMask

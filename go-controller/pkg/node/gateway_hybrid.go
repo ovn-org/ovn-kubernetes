@@ -7,7 +7,6 @@ import (
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/kube"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
-	"k8s.io/klog"
 	"net"
 	"strings"
 
@@ -24,7 +23,7 @@ func (n *OvnNode) initHybridGateway(hostSubnets []*net.IPNet, gwIntf string, nod
 			", stderr:%s (%v)", localnetBridgeName, stderr, err)
 	}
 
-	ifaceID, macAddress, err := bridgedGatewayNodeSetup(n.name, localnetBridgeName, localnetBridgeName,
+	ifaceID, _, err := bridgedGatewayNodeSetup(n.name, localnetBridgeName, localnetBridgeName,
 		util.PhysicalNetworkName, true)
 	if err != nil {
 		return nil, fmt.Errorf("failed to set up shared interface gateway: %v", err)
@@ -54,6 +53,14 @@ func (n *OvnNode) initHybridGateway(hostSubnets []*net.IPNet, gwIntf string, nod
 		return nil, err
 	}
 
+	// bounce interface to get link local address back for ipv6
+	if _, err = util.LinkSetDown(localnetGatewayNextHopPort); err != nil {
+		return nil, err
+	}
+	if _, err = util.LinkSetUp(localnetGatewayNextHopPort); err != nil {
+		return nil, err
+	}
+
 	var gatewayIfAddrs []*net.IPNet
 	var nextHops []net.IP
 	for _, hostSubnet := range hostSubnets {
@@ -75,18 +82,6 @@ func (n *OvnNode) initHybridGateway(hostSubnets []*net.IPNet, gwIntf string, nod
 
 		if err = util.LinkAddrAdd(link, gatewayNextHopIfAddr); err != nil {
 			return nil, err
-		}
-		if utilnet.IsIPv6CIDR(hostSubnet) {
-			// TODO - IPv6 hack ... for some reason neighbor discovery isn't working here, so hard code a
-			// MAC binding for the gateway IP address for now - need to debug this further
-			if exists, _ := util.LinkNeighExists(link, gatewayIP, macAddress); !exists {
-				err = util.LinkNeighAdd(link, gatewayIP, macAddress)
-				if err == nil {
-					klog.Infof("Added MAC binding for %s on %s", gatewayIP, localnetGatewayNextHopPort)
-				} else {
-					klog.Errorf("Error in adding MAC binding for %s on %s: %v", gatewayIP, localnetGatewayNextHopPort, err)
-				}
-			}
 		}
 	}
 
@@ -167,7 +162,7 @@ func (n *OvnNode) initHybridGateway(hostSubnets []*net.IPNet, gwIntf string, nod
 		}
 	}
 
-	ifaceID, macAddress, err = bridgedGatewayNodeSetup(n.name, bridgeName, gwIntf,
+	ifaceID, macAddress, err := bridgedGatewayNodeSetup(n.name, bridgeName, gwIntf,
 		util.HybridNetworkName, brCreated)
 	if err != nil {
 		return nil, fmt.Errorf("failed to set up shared interface gateway: %v", err)

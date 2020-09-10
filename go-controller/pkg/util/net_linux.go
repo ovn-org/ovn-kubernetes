@@ -144,6 +144,19 @@ func LinkSetUp(interfaceName string) (netlink.Link, error) {
 	return link, nil
 }
 
+// LinkSetDown returns the netlink device with its state marked down
+func LinkSetDown(interfaceName string) (netlink.Link, error) {
+	link, err := netLinkOps.LinkByName(interfaceName)
+	if err != nil {
+		return nil, fmt.Errorf("failed to lookup link %s: %v", interfaceName, err)
+	}
+	err = netLinkOps.LinkSetDown(link)
+	if err != nil {
+		return nil, fmt.Errorf("failed to set the link %s down: %v", interfaceName, err)
+	}
+	return link, nil
+}
+
 // LinkAddrFlush flushes all the addresses on the given link
 func LinkAddrFlush(link netlink.Link) error {
 	addrs, err := netLinkOps.AddrList(link, netlink.FAMILY_ALL)

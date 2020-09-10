@@ -241,6 +241,16 @@ func setupManagementPortConfig(cfg *managementPortConfig) ([]string, error) {
 	var warnings, allWarnings []string
 	var err error
 
+	if cfg.ipv6 != nil {
+		// bounce interface to get link local address back for ipv6
+		if _, err = util.LinkSetDown(cfg.ifName); err != nil {
+			return nil, err
+		}
+		if _, err = util.LinkSetUp(cfg.ifName); err != nil {
+			return nil, err
+		}
+	}
+
 	if cfg.ipv4 != nil {
 		warnings, err = setupManagementPortIPFamilyConfig(cfg, cfg.ipv4)
 		allWarnings = append(allWarnings, warnings...)
