@@ -191,7 +191,7 @@ jobs:
     needs: [build, k8s]
     env:
       JOB_NAME: "${{ matrix.target.shard }}-${{ matrix.ha.name }}-${{ matrix.gateway-mode }}-${{ matrix.ipfamily.name }}"
-      KIND_HA: "${{ matrix.ha.enabled }}"
+      OVN_HA: "${{ matrix.ha.enabled }}"
       KIND_IPV4_SUPPORT: "${{ matrix.ipfamily.ipv4 }}"
       KIND_IPV6_SUPPORT: "${{ matrix.ipfamily.ipv6 }}"
       OVN_HYBRID_OVERLAY_ENABLE: "${{ matrix.target.hybrid-overlay }}"

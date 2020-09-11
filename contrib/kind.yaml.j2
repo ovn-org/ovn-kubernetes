@@ -54,7 +54,7 @@ nodes:
          authorization-mode: "AlwaysAllow"
 {%- if ovn_ha is equalto "true" %}
 {%- for _ in range(1, ovn_num_master | int) %}
- - role: control-plane
+ - role: worker
 {%- endfor %}
 {%- endif %}
 {%- for _ in range(ovn_num_worker | int) %}
