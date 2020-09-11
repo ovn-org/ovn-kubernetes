@@ -144,13 +144,16 @@ func LinkSetUp(interfaceName string) (netlink.Link, error) {
 	return link, nil
 }
 
-// LinkAddrFlush flushes all the addresses on the given link
+// LinkAddrFlush flushes all the addresses on the given link, except IPv6 link-local addresses
 func LinkAddrFlush(link netlink.Link) error {
 	addrs, err := netLinkOps.AddrList(link, netlink.FAMILY_ALL)
 	if err != nil {
 		return fmt.Errorf("failed to list addresses for the link %s: %v", link.Attrs().Name, err)
 	}
 	for _, addr := range addrs {
+		if utilnet.IsIPv6(addr.IP) && addr.IP.IsLinkLocalUnicast() {
+			continue
+		}
 		err = netLinkOps.AddrDel(link, &addr)
 		if err != nil {
 			return fmt.Errorf("failed to delete address %s on link %s: %v",

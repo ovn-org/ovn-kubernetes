@@ -127,7 +127,7 @@ func newManagementPortConfig(interfaceName string, hostSubnets []*net.IPNet) (*m
 
 func tearDownManagementPortConfig(mpcfg *managementPortConfig) error {
 	// for the initial setup we need to start from the clean slate, so flush
-	// all addresses on this link, routes through this link, and
+	// all (non-LL) addresses on this link, routes through this link, and
 	// finally any IPtable rules for this link.
 	if err := util.LinkAddrFlush(mpcfg.link); err != nil {
 		return err

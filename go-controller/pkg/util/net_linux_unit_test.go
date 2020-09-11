@@ -170,6 +170,24 @@ func TestLinkAddrFlush(t *testing.T) {
 				{"AddrDel", []string{"*mocks.Link", "*netlink.Addr"}, []interface{}{nil}},
 			},
 		},
+		{
+			desc:  "IPv6 link-local address is not flushed",
+			input: mockLink,
+			onRetArgsNetLinkLibOpers: []onCallReturnArgs{
+				{
+					"AddrList",
+					[]string{"*mocks.Link", "int"},
+					[]interface{}{
+						[]netlink.Addr{
+							{
+								IPNet: ovntest.MustParseIPNet("fe80::1234/64"),
+							},
+						},
+						nil,
+					},
+				},
+			},
+		},
 	}
 	for i, tc := range tests {
 		t.Run(fmt.Sprintf("%d:%s", i, tc.desc), func(t *testing.T) {

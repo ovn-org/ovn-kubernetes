@@ -54,7 +54,7 @@ func setupLocalNodeAccessBridge(nodeName string, subnets []*net.IPNet) error {
 		return err
 	}
 
-	// Flush all IP addresses on the nexthop port and add the new IP address(es)
+	// Flush all (non-LL) IP addresses on the nexthop port and add the new IP address(es)
 	if err = util.LinkAddrFlush(link); err != nil {
 		return err
 	}
