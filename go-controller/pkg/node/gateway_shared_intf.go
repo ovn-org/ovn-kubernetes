@@ -425,8 +425,8 @@ func addDefaultConntrackRules(nodeName, gwBridge, gwIntf string, stopChan chan s
 			gwBridge, ofportPatch, stderr, err)
 	}
 
-	// replace the left over OpenFlow flows with the FLOOD action flow
-	_, stderr, err = util.AddFloodActionOFFlow(gwBridge)
+	// replace the left over OpenFlow flows with the NORMAL action flow
+	_, stderr, err = util.AddNormalActionOFFlow(gwBridge)
 	if err != nil {
 		return fmt.Errorf("failed to replace-flows on bridge %q stderr:%s (%v)", gwBridge, stderr, err)
 	}
@@ -502,7 +502,7 @@ func addDefaultConntrackRules(nodeName, gwBridge, gwIntf string, stopChan chan s
 
 	// table 1, all other connections do normal processing
 	_, stderr, err = util.RunOVSOfctl("add-flow", gwBridge,
-		fmt.Sprintf("cookie=%s, priority=0, table=1, actions=output:FLOOD", defaultOpenFlowCookie))
+		fmt.Sprintf("cookie=%s, priority=0, table=1, actions=output:NORMAL", defaultOpenFlowCookie))
 	if err != nil {
 		return fmt.Errorf("failed to add openflow flow to %s, stderr: %q, "+
 			"error: %v", gwBridge, stderr, err)
@@ -644,7 +644,7 @@ func cleanupSharedGateway() error {
 		return nil
 	}
 
-	_, stderr, err = util.AddFloodActionOFFlow(bridgeName)
+	_, stderr, err = util.AddNormalActionOFFlow(bridgeName)
 	if err != nil {
 		return fmt.Errorf("failed to replace-flows on bridge %q stderr:%s (%v)", bridgeName, stderr, err)
 	}
