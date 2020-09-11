@@ -652,12 +652,12 @@ func RunRoute(args ...string) (string, string, error) {
 	return strings.TrimSpace(stdout.String()), stderr.String(), err
 }
 
-// AddFloodActionOFFlow replaces flows in the bridge with a FLOOD action flow
-func AddFloodActionOFFlow(bridgeName string) (string, string, error) {
+// AddNormalActionOFFlow replaces flows in the bridge with a NORMAL action flow
+func AddNormalActionOFFlow(bridgeName string) (string, string, error) {
 	args := []string{"-O", "OpenFlow13", "replace-flows", bridgeName, "-"}
 
 	stdin := &bytes.Buffer{}
-	stdin.Write([]byte("table=0,priority=0,actions=FLOOD\n"))
+	stdin.Write([]byte("table=0,priority=0,actions=NORMAL\n"))
 
 	cmd := runner.exec.Command(runner.ofctlPath, args...)
 	cmd.SetStdin(stdin)
