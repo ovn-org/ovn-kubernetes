@@ -109,7 +109,7 @@ case "$SHARD" in
 		FOCUS="\\[sig-network\\]"
 		;;
 	shard-conformance)
-		FOCUS="\\[Conformance\\]|\\[sig-network\\]"
+		FOCUS="\\[Conformance\\]"
 		;;
 	shard-test)
 		FOCUS=$(echo ${@:2} | sed 's/ /\\s/g')
