@@ -74,7 +74,7 @@ parse_args()
                                                 ;;
             -ii | --install-ingress )           KIND_INSTALL_INGRESS=true
                                                 ;;
-            -ha | --ha-enabled )                OVN_HA=true
+            -ha | --ha-enabled )                KIND_HA=true
                                                 ;;
             -me | --multicast-enabled)          OVN_MULTICAST_ENABLE=true
                                                 ;;
@@ -127,7 +127,7 @@ print_params()
      echo "Using these parameters to install KIND"
      echo ""
      echo "KIND_INSTALL_INGRESS = $KIND_INSTALL_INGRESS"
-     echo "OVN_HA = $OVN_HA"
+     echo "KIND_HA = $KIND_HA"
      echo "KIND_CONFIG_FILE = $KIND_CONFIG"
      echo "KIND_REMOVE_TAINT = $KIND_REMOVE_TAINT"
      echo "KIND_IPV4_SUPPORT = $KIND_IPV4_SUPPORT"
@@ -154,7 +154,7 @@ KIND_CLUSTER_NAME=${KIND_CLUSTER_NAME:-ovn}
 K8S_VERSION=${K8S_VERSION:-v1.19.0}
 OVN_GATEWAY_MODE=${OVN_GATEWAY_MODE:-local}
 KIND_INSTALL_INGRESS=${KIND_INSTALL_INGRESS:-false}
-OVN_HA=${OVN_HA:-false}
+KIND_HA=${KIND_HA:-false}
 KIND_CONFIG=${KIND_CONFIG:-./kind.yaml.j2}
 KIND_REMOVE_TAINT=${KIND_REMOVE_TAINT:-true}
 KIND_IPV4_SUPPORT=${KIND_IPV4_SUPPORT:-true}
@@ -176,7 +176,7 @@ NET_CIDR_IPV6=${NET_CIDR_IPV6:-fd00:10:244::/48}
 SVC_CIDR_IPV6=${SVC_CIDR_IPV6:-fd00:10:96::/112}
 
 KIND_NUM_MASTER=1
-if [ "$OVN_HA" == true ]; then
+if [ "$KIND_HA" == true ]; then
   KIND_NUM_MASTER=3
   KIND_NUM_WORKER=${KIND_NUM_WORKER:-0}
 else
@@ -268,7 +268,7 @@ KIND_CONFIG_LCL=./kind.yaml
 
 ovn_apiServerAddress=${API_IP} \
   ovn_ip_family=${IP_FAMILY} \
-  ovn_ha=${OVN_HA} \
+  ovn_ha=${KIND_HA} \
   net_cidr=${NET_CIDR} \
   svc_cidr=${SVC_CIDR} \
   ovn_num_master=${KIND_NUM_MASTER} \
@@ -356,18 +356,14 @@ pushd ../dist/yaml
 run_kubectl apply -f k8s.ovn.org_egressfirewalls.yaml
 run_kubectl apply -f k8s.ovn.org_egressips.yaml
 run_kubectl apply -f ovn-setup.yaml
-MASTER_NODES=$(kind get nodes --name ${KIND_CLUSTER_NAME} | head -n ${KIND_NUM_MASTER})
-# We want OVN HA not Kubernetes HA
-# leverage the kubeadm well-known label node-role.kubernetes.io/master=
-# to choose the nodes where ovn master components will be placed
-for n in $MASTER_NODES; do
-  kubectl label node $n k8s.ovn.org/ovnkube-db=true node-role.kubernetes.io/master="" --overwrite
+CONTROL_NODES=$(docker ps -f name=ovn-control | grep -v NAMES | awk '{ print $NF }')
+for n in $CONTROL_NODES; do
+  run_kubectl label node $n k8s.ovn.org/ovnkube-db=true
   if [ "$KIND_REMOVE_TAINT" == true ]; then
-    # do not error if it fails to remove the taint
-    kubectl taint node $n node-role.kubernetes.io/master:NoSchedule- || true
+    run_kubectl taint node $n node-role.kubernetes.io/master:NoSchedule-
   fi
 done
-if [ "$OVN_HA" == true ]; then
+if [ "$KIND_HA" == true ]; then
   run_kubectl apply -f ovnkube-db-raft.yaml
 else
   run_kubectl apply -f ovnkube-db.yaml
