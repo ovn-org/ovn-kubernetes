@@ -50,8 +50,6 @@ const (
 	defaultDenyPriority = "1000"
 	// Default allow acl rule priority
 	defaultAllowPriority = "1001"
-	// IP Block except deny acl rule priority
-	ipBlockDenyPriority = "1010"
 	// Default multicast deny acl rule priority
 	defaultMcastDenyPriority = "1011"
 	// Default multicast allow acl rule priority
