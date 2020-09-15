@@ -114,9 +114,39 @@ func (f *fakeAddressSetFactory) ExpectAddressSetWithIPs(name string, ips []strin
 	Expect(as.ips).To(HaveLen(len(ips)))
 }
 
+// ExpectAddressSetWithIPsAF ensures the named address set exists with the given set of IPs
+// if the address family type is enabled in config.
+func (f *fakeAddressSetFactory) ExpectAddressSetWithIPsAF(nameV4, nameV6 string, ipsv4 []string, ipsv6 []string) {
+	if config.IPv4Mode {
+		f.ExpectAddressSetWithIPs(nameV4, ipsv4)
+	} else {
+		f.ExpectNoAddressSet(nameV4)
+	}
+	if config.IPv6Mode {
+		f.ExpectAddressSetWithIPs(nameV6, ipsv6)
+	} else {
+		f.ExpectNoAddressSet(nameV6)
+	}
+}
+
 // ExpectEmptyAddressSet ensures the named address set exists with no IPs
 func (f *fakeAddressSetFactory) ExpectEmptyAddressSet(name string) {
 	f.ExpectAddressSetWithIPs(name, nil)
+}
+
+// ExpectEmptyAddressSetAF ensures the named address set exists with no IPs if
+// the address family type is enabled in config.
+func (f *fakeAddressSetFactory) ExpectEmptyAddressSetAF(nameV4, nameV6 string) {
+	if config.IPv4Mode {
+		f.ExpectEmptyAddressSet(nameV4)
+	} else {
+		f.ExpectNoAddressSet(nameV4)
+	}
+	if config.IPv6Mode {
+		f.ExpectEmptyAddressSet(nameV6)
+	} else {
+		f.ExpectNoAddressSet(nameV6)
+	}
 }
 
 // EventuallyExpectEmptyAddressSet ensures the named address set eventually exists with no IPs

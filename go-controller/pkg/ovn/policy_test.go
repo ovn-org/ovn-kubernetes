@@ -11,7 +11,7 @@ import (
 
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
 	ovntest "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/testing"
-	util "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
 	"github.com/urfave/cli/v2"
 
 	v1 "k8s.io/api/core/v1"
@@ -20,6 +20,31 @@ import (
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/apimachinery/pkg/util/intstr"
 )
+
+type ipMode struct {
+	IPv4Mode bool
+	IPv6Mode bool
+}
+
+// FIXME DUAL-STACK: FakeOVN doesn't really support adding more than one
+// pod to the namespace. All logical ports would share the same fakeUUID.
+// When this is addressed we can add an entry for
+// IPv4Mode = true, IPv6Mode = true.
+func getIpModes() []ipMode {
+	return []ipMode{
+		{true, false},
+		{false, true},
+	}
+}
+
+func ipModeStr(m ipMode) string {
+	return fmt.Sprintf("(IPv4 %t IPv6 %t)", m.IPv4Mode, m.IPv6Mode)
+}
+
+func setIpMode(m ipMode) {
+	config.IPv4Mode = m.IPv4Mode
+	config.IPv6Mode = m.IPv6Mode
+}
 
 type networkPolicy struct{}
 
@@ -200,7 +225,7 @@ func (n networkPolicy) delPodCmds(fexec *ovntest.FakeExec, networkPolicy *knet.N
 
 type multicastPolicy struct{}
 
-func (p multicastPolicy) enableCmds(fExec *ovntest.FakeExec, ns, nsAs string) {
+func (p multicastPolicy) enableCmds(fExec *ovntest.FakeExec, ns, nsAsV4, nsAsV6 string) {
 	pg_name := ns
 	pg_hash := hashedPortGroup(ns)
 
@@ -212,7 +237,7 @@ func (p multicastPolicy) enableCmds(fExec *ovntest.FakeExec, ns, nsAs string) {
 		Output: "fake_uuid",
 	})
 
-	match := getACLMatch(pg_hash, "ip4.mcast", knet.PolicyTypeEgress)
+	match := getACLMatch(pg_hash, getMulticastACLEgrMatch(), knet.PolicyTypeEgress)
 	fExec.AddFakeCmdsNoOutputNoError([]string{
 		"ovn-nbctl --timeout=15 --data=bare --no-heading --columns=_uuid find ACL " +
 			match + " action=allow external-ids:default-deny-policy-type=Egress",
@@ -223,8 +248,9 @@ func (p multicastPolicy) enableCmds(fExec *ovntest.FakeExec, ns, nsAs string) {
 			"-- add port_group fake_uuid acls @acl",
 	})
 
-	match = "ip4.src == $" + hashedAddressSet(nsAs) + " && ip4.mcast"
-	match = getACLMatch(pg_hash, match, knet.PolicyTypeIngress)
+	match = getACLMatch(pg_hash,
+		getMulticastACLIgrMatch(hashedAddressSet(nsAsV4), hashedAddressSet(nsAsV6)),
+		knet.PolicyTypeIngress)
 	fExec.AddFakeCmdsNoOutputNoError([]string{
 		"ovn-nbctl --timeout=15 --data=bare --no-heading --columns=_uuid find ACL " +
 			match + " action=allow external-ids:default-deny-policy-type=Ingress",
@@ -236,10 +262,10 @@ func (p multicastPolicy) enableCmds(fExec *ovntest.FakeExec, ns, nsAs string) {
 	})
 }
 
-func (p multicastPolicy) disableCmds(fExec *ovntest.FakeExec, ns, nsAs string) {
+func (p multicastPolicy) disableCmds(fExec *ovntest.FakeExec, ns, nsAsV4, nsAsV6 string) {
 	pg_hash := hashedPortGroup(ns)
 
-	match := getACLMatch(pg_hash, "ip4.mcast", knet.PolicyTypeEgress)
+	match := getACLMatch(pg_hash, getMulticastACLEgrMatch(), knet.PolicyTypeEgress)
 	fExec.AddFakeCmd(&ovntest.ExpectedCmd{
 		Cmd: "ovn-nbctl --timeout=15 --data=bare --no-heading --columns=_uuid find ACL " +
 			match + " " + "action=allow external-ids:default-deny-policy-type=Egress",
@@ -249,8 +275,9 @@ func (p multicastPolicy) disableCmds(fExec *ovntest.FakeExec, ns, nsAs string) {
 		"ovn-nbctl --timeout=15 remove port_group " + pg_hash + " acls fake_uuid",
 	})
 
-	match = "ip4.src == $" + hashedAddressSet(nsAs) + " && ip4.mcast"
-	match = getACLMatch(pg_hash, match, knet.PolicyTypeIngress)
+	match = getACLMatch(pg_hash,
+		getMulticastACLIgrMatch(hashedAddressSet(nsAsV4), hashedAddressSet(nsAsV6)),
+		knet.PolicyTypeIngress)
 	fExec.AddFakeCmd(&ovntest.ExpectedCmd{
 		Cmd: "ovn-nbctl --timeout=15 --data=bare --no-heading --columns=_uuid find ACL " +
 			match + " " + "action=allow external-ids:default-deny-policy-type=Ingress",
@@ -285,6 +312,262 @@ func (p multicastPolicy) delPodCmds(fExec *ovntest.FakeExec, ns string) {
 			"--if-exists remove port_group " + pg_hash + " ports " + fakeUUID,
 	})
 }
+
+var _ = Describe("OVN NetworkPolicy Operations with IP Address Family", func() {
+	const (
+		namespaceName1    = "namespace1"
+		v4AddressSetName1 = namespaceName1 + ipv4AddressSetSuffix
+		v6AddressSetName1 = namespaceName1 + ipv6AddressSetSuffix
+
+		namespaceName2    = "namespace2"
+		v4AddressSetName2 = namespaceName2 + ipv4AddressSetSuffix
+		v6AddressSetName2 = namespaceName2 + ipv6AddressSetSuffix
+	)
+	var (
+		app     *cli.App
+		fakeOvn *FakeOVN
+		fExec   *ovntest.FakeExec
+	)
+
+	BeforeEach(func() {
+		// Restore global default values before each testcase
+		config.PrepareTestConfig()
+		config.IPv4Mode = true
+		config.IPv6Mode = false
+
+		app = cli.NewApp()
+		app.Name = "test"
+		app.Flags = config.Flags
+
+		fExec = ovntest.NewLooseCompareFakeExec()
+		fakeOvn = NewFakeOVN(fExec)
+	})
+
+	AfterEach(func() {
+		fakeOvn.shutdown()
+	})
+
+	Context("during execution", func() {
+		for _, m := range getIpModes() {
+			m := m
+			It("tests enabling/disabling multicast in a namespace "+ipModeStr(m), func() {
+				app.Action = func(ctx *cli.Context) error {
+					namespace1 := *newNamespace(namespaceName1)
+
+					fakeOvn.start(ctx,
+						&v1.NamespaceList{
+							Items: []v1.Namespace{
+								namespace1,
+							},
+						},
+					)
+					setIpMode(m)
+
+					fakeOvn.controller.WatchNamespaces()
+					ns, err := fakeOvn.fakeClient.CoreV1().Namespaces().Get(
+						context.TODO(), namespace1.Name, metav1.GetOptions{})
+					Expect(err).NotTo(HaveOccurred())
+					Expect(ns).NotTo(BeNil())
+
+					// Multicast is denied by default.
+					_, ok := ns.Annotations[nsMulticastAnnotation]
+					Expect(ok).To(BeFalse())
+
+					// Enable multicast in the namespace.
+					mcastPolicy := multicastPolicy{}
+					mcastPolicy.enableCmds(fExec, namespace1.Name, v4AddressSetName1, v6AddressSetName1)
+					ns.Annotations[nsMulticastAnnotation] = "true"
+					_, err = fakeOvn.fakeClient.CoreV1().Namespaces().Update(context.TODO(), ns, metav1.UpdateOptions{})
+					Expect(err).NotTo(HaveOccurred())
+					Eventually(fExec.CalledMatchesExpected).Should(BeTrue(), fExec.ErrorDesc)
+
+					// Disable multicast in the namespace.
+					mcastPolicy.disableCmds(fExec, namespace1.Name, v4AddressSetName1, v6AddressSetName1)
+					ns.Annotations[nsMulticastAnnotation] = "false"
+					_, err = fakeOvn.fakeClient.CoreV1().Namespaces().Update(context.TODO(), ns, metav1.UpdateOptions{})
+					Expect(err).NotTo(HaveOccurred())
+					Eventually(fExec.CalledMatchesExpected).Should(BeTrue(), fExec.ErrorDesc)
+					return nil
+				}
+
+				err := app.Run([]string{app.Name})
+				Expect(err).NotTo(HaveOccurred())
+			})
+
+			It("tests enabling multicast in a namespace with a pod "+ipModeStr(m), func() {
+				app.Action = func(ctx *cli.Context) error {
+					namespace1 := *newNamespace(namespaceName1)
+					nPodTestV4 := newTPod(
+						"node1",
+						"10.128.1.0/24",
+						"10.128.1.2",
+						"10.128.1.1",
+						"myPod1",
+						"10.128.1.3",
+						"0a:58:0a:80:01:03",
+						namespace1.Name,
+					)
+					nPodTestV6 := newTPod(
+						"node1",
+						"fd00:10:244::/64",
+						"fd00:10:244::2",
+						"fd00:10:244::1",
+						"myPod2",
+						"fd00:10:244::3",
+						"0a:58:0a:80:02:03",
+						namespace1.Name,
+					)
+					var tPods []pod
+					if m.IPv4Mode {
+						tPods = append(tPods, nPodTestV4)
+					}
+					if m.IPv6Mode {
+						tPods = append(tPods, nPodTestV6)
+					}
+
+					var pods []v1.Pod
+					for _, tPod := range tPods {
+						pods = append(pods,
+							*newPod(tPod.namespace, tPod.podName, tPod.nodeName, tPod.podIP))
+						tPod.baseCmds(fExec)
+						tPod.addPodDenyMcast(fExec)
+					}
+
+					fakeOvn.start(ctx,
+						&v1.NamespaceList{
+							Items: []v1.Namespace{
+								namespace1,
+							},
+						},
+						&v1.PodList{
+							Items: pods,
+						},
+					)
+					setIpMode(m)
+
+					for _, tPod := range tPods {
+						tPod.populateLogicalSwitchCache(fakeOvn)
+					}
+					fakeOvn.controller.WatchPods()
+					fakeOvn.controller.WatchNamespaces()
+					ns, err := fakeOvn.fakeClient.CoreV1().Namespaces().Get(
+						context.TODO(), namespace1.Name, metav1.GetOptions{})
+					Expect(err).NotTo(HaveOccurred())
+					Expect(ns).NotTo(BeNil())
+					Eventually(fExec.CalledMatchesExpected).Should(BeTrue(), fExec.ErrorDesc)
+					// Enable multicast in the namespace
+					mcastPolicy := multicastPolicy{}
+					mcastPolicy.enableCmds(fExec, namespace1.Name, v4AddressSetName1, v6AddressSetName1)
+					// The pod should be added to the multicast allow port group.
+					mcastPolicy.addPodCmds(fExec, namespace1.Name)
+					ns.Annotations[nsMulticastAnnotation] = "true"
+					_, err = fakeOvn.fakeClient.CoreV1().Namespaces().Update(context.TODO(), ns, metav1.UpdateOptions{})
+					Expect(err).NotTo(HaveOccurred())
+					Eventually(fExec.CalledMatchesExpected).Should(BeTrue(), fExec.ErrorDesc)
+					fakeOvn.asf.ExpectAddressSetWithIPsAF(v4AddressSetName1, v6AddressSetName1,
+						[]string{nPodTestV4.podIP}, []string{nPodTestV6.podIP})
+					return nil
+				}
+
+				err := app.Run([]string{app.Name})
+				Expect(err).NotTo(HaveOccurred())
+			})
+
+			It("tests adding a pod to a multicast enabled namespace "+ipModeStr(m), func() {
+				app.Action = func(ctx *cli.Context) error {
+					namespace1 := *newNamespace(namespaceName1)
+					nPodTestV4 := newTPod(
+						"node1",
+						"10.128.1.0/24",
+						"10.128.1.2",
+						"10.128.1.1",
+						"myPod1",
+						"10.128.1.3",
+						"0a:58:0a:80:01:03",
+						namespace1.Name,
+					)
+					nPodTestV6 := newTPod(
+						"node1",
+						"fd00:10:244::/64",
+						"fd00:10:244::2",
+						"fd00:10:244::1",
+						"myPod2",
+						"fd00:10:244::3",
+						"0a:58:0a:80:02:03",
+						namespace1.Name,
+					)
+					var tPods []pod
+					if m.IPv4Mode {
+						tPods = append(tPods, nPodTestV4)
+					}
+					if m.IPv6Mode {
+						tPods = append(tPods, nPodTestV6)
+					}
+
+					fakeOvn.start(ctx,
+						&v1.NamespaceList{
+							Items: []v1.Namespace{
+								namespace1,
+							},
+						},
+					)
+					setIpMode(m)
+
+					for _, tPod := range tPods {
+						tPod.baseCmds(fExec)
+					}
+					fakeOvn.controller.WatchNamespaces()
+					fakeOvn.controller.WatchPods()
+					ns, err := fakeOvn.fakeClient.CoreV1().Namespaces().Get(
+						context.TODO(), namespace1.Name, metav1.GetOptions{})
+					Expect(err).NotTo(HaveOccurred())
+					Expect(ns).NotTo(BeNil())
+
+					// Enable multicast in the namespace.
+					mcastPolicy := multicastPolicy{}
+					mcastPolicy.enableCmds(fExec, namespace1.Name, v4AddressSetName1, v6AddressSetName1)
+					ns.Annotations[nsMulticastAnnotation] = "true"
+					_, err = fakeOvn.fakeClient.CoreV1().Namespaces().Update(context.TODO(), ns, metav1.UpdateOptions{})
+					Expect(err).NotTo(HaveOccurred())
+					Eventually(fExec.CalledMatchesExpected).Should(BeTrue(), fExec.ErrorDesc)
+
+					for _, tPod := range tPods {
+						tPod.populateLogicalSwitchCache(fakeOvn)
+						tPod.addPodDenyMcast(fExec)
+						// The pod should be added to the multicast allow group.
+						mcastPolicy.addPodCmds(fExec, namespace1.Name)
+						_, err = fakeOvn.fakeClient.CoreV1().Pods(tPod.namespace).Create(context.TODO(), newPod(
+							tPod.namespace, tPod.podName, tPod.nodeName, tPod.podIP), metav1.CreateOptions{})
+						Expect(err).NotTo(HaveOccurred())
+
+					}
+
+					Eventually(fExec.CalledMatchesExpected).Should(BeTrue(), fExec.ErrorDesc)
+					fakeOvn.asf.ExpectAddressSetWithIPsAF(v4AddressSetName1, v6AddressSetName1,
+						[]string{nPodTestV4.podIP}, []string{nPodTestV6.podIP})
+
+					for _, tPod := range tPods {
+						// Delete the pod from the namespace.
+						mcastPolicy.delPodCmds(fExec, namespace1.Name)
+						// The pod should be removed from the multicasts default deny
+						// group and from the multicast allow group.
+						tPod.delCmds(fExec)
+						err = fakeOvn.fakeClient.CoreV1().Pods(tPod.namespace).Delete(context.TODO(),
+							tPod.podName, *metav1.NewDeleteOptions(0))
+						Expect(err).NotTo(HaveOccurred())
+					}
+
+					Eventually(fExec.CalledMatchesExpected).Should(BeTrue(), fExec.ErrorDesc)
+					fakeOvn.asf.ExpectEmptyAddressSetAF(v4AddressSetName1, v6AddressSetName1)
+					return nil
+				}
+
+				err := app.Run([]string{app.Name})
+				Expect(err).NotTo(HaveOccurred())
+			})
+		}
+	})
+})
 
 var _ = Describe("OVN NetworkPolicy Operations", func() {
 	const (
@@ -1155,175 +1438,6 @@ var _ = Describe("OVN NetworkPolicy Operations", func() {
 				Eventually(fExec.CalledMatchesExpected).Should(BeTrue(), fExec.ErrorDesc)
 				eventuallyExpectNoAddressSets(fakeOvn, networkPolicy)
 
-				return nil
-			}
-
-			err := app.Run([]string{app.Name})
-			Expect(err).NotTo(HaveOccurred())
-		})
-
-		It("tests enabling/disabling multicast in a namespace", func() {
-			app.Action = func(ctx *cli.Context) error {
-				namespace1 := *newNamespace(namespaceName1)
-
-				fakeOvn.start(ctx,
-					&v1.NamespaceList{
-						Items: []v1.Namespace{
-							namespace1,
-						},
-					},
-				)
-
-				fakeOvn.controller.WatchNamespaces()
-				ns, err := fakeOvn.fakeClient.CoreV1().Namespaces().Get(
-					context.TODO(), namespace1.Name, metav1.GetOptions{})
-				Expect(err).NotTo(HaveOccurred())
-				Expect(ns).NotTo(BeNil())
-
-				// Multicast is denied by default.
-				_, ok := ns.Annotations[nsMulticastAnnotation]
-				Expect(ok).To(BeFalse())
-
-				// Enable multicast in the namespace.
-				mcastPolicy := multicastPolicy{}
-				mcastPolicy.enableCmds(fExec, namespace1.Name, v4AddressSetName1)
-				ns.Annotations[nsMulticastAnnotation] = "true"
-				_, err = fakeOvn.fakeClient.CoreV1().Namespaces().Update(context.TODO(), ns, metav1.UpdateOptions{})
-				Expect(err).NotTo(HaveOccurred())
-				Eventually(fExec.CalledMatchesExpected).Should(BeTrue(), fExec.ErrorDesc)
-
-				// Disable multicast in the namespace.
-				mcastPolicy.disableCmds(fExec, namespace1.Name, v4AddressSetName1)
-				ns.Annotations[nsMulticastAnnotation] = "false"
-				_, err = fakeOvn.fakeClient.CoreV1().Namespaces().Update(context.TODO(), ns, metav1.UpdateOptions{})
-				Expect(err).NotTo(HaveOccurred())
-				Eventually(fExec.CalledMatchesExpected).Should(BeTrue(), fExec.ErrorDesc)
-				return nil
-			}
-
-			err := app.Run([]string{app.Name})
-			Expect(err).NotTo(HaveOccurred())
-		})
-
-		It("tests enabling multicast in a namespace with a pod", func() {
-			app.Action = func(ctx *cli.Context) error {
-				namespace1 := *newNamespace(namespaceName1)
-
-				nPodTest := newTPod(
-					"node1",
-					"10.128.1.0/24",
-					"10.128.1.2",
-					"10.128.1.1",
-					"myPod",
-					"10.128.1.3",
-					"0a:58:0a:80:01:03",
-					namespace1.Name,
-				)
-
-				nPodTest.baseCmds(fExec)
-				nPodTest.addPodDenyMcast(fExec)
-				fakeOvn.start(ctx,
-					&v1.NamespaceList{
-						Items: []v1.Namespace{
-							namespace1,
-						},
-					},
-					&v1.PodList{
-						Items: []v1.Pod{
-							*newPod(nPodTest.namespace, nPodTest.podName, nPodTest.nodeName, nPodTest.podIP),
-						},
-					},
-				)
-				nPodTest.populateLogicalSwitchCache(fakeOvn)
-				fakeOvn.controller.WatchPods()
-				fakeOvn.controller.WatchNamespaces()
-				ns, err := fakeOvn.fakeClient.CoreV1().Namespaces().Get(
-					context.TODO(), namespace1.Name, metav1.GetOptions{})
-				Expect(err).NotTo(HaveOccurred())
-				Expect(ns).NotTo(BeNil())
-				Eventually(fExec.CalledMatchesExpected).Should(BeTrue(), fExec.ErrorDesc)
-				// Enable multicast in the namespace
-				mcastPolicy := multicastPolicy{}
-				mcastPolicy.enableCmds(fExec, namespace1.Name, v4AddressSetName1)
-				// The pod should be added to the multicast allow port group.
-				mcastPolicy.addPodCmds(fExec, namespace1.Name)
-				ns.Annotations[nsMulticastAnnotation] = "true"
-				_, err = fakeOvn.fakeClient.CoreV1().Namespaces().Update(context.TODO(), ns, metav1.UpdateOptions{})
-				Expect(err).NotTo(HaveOccurred())
-				Eventually(fExec.CalledMatchesExpected).Should(BeTrue(), fExec.ErrorDesc)
-				fakeOvn.asf.ExpectAddressSetWithIPs(v4AddressSetName1, []string{nPodTest.podIP})
-				fakeOvn.asf.ExpectNoAddressSet(v6AddressSetName1)
-				return nil
-			}
-
-			err := app.Run([]string{app.Name})
-			Expect(err).NotTo(HaveOccurred())
-		})
-
-		It("tests adding a pod to a multicast enabled namespace", func() {
-			app.Action = func(ctx *cli.Context) error {
-				namespace1 := *newNamespace(namespaceName1)
-
-				nPodTest := newTPod(
-					"node1",
-					"10.128.1.0/24",
-					"10.128.1.2",
-					"10.128.1.1",
-					"myPod",
-					"10.128.1.3",
-					"0a:58:0a:80:01:03",
-					namespace1.Name,
-				)
-
-				fakeOvn.start(ctx,
-					&v1.NamespaceList{
-						Items: []v1.Namespace{
-							namespace1,
-						},
-					},
-				)
-
-				nPodTest.baseCmds(fExec)
-				fakeOvn.controller.WatchNamespaces()
-				fakeOvn.controller.WatchPods()
-				ns, err := fakeOvn.fakeClient.CoreV1().Namespaces().Get(
-					context.TODO(), namespace1.Name, metav1.GetOptions{})
-				Expect(err).NotTo(HaveOccurred())
-				Expect(ns).NotTo(BeNil())
-
-				// Enable multicast in the namespace.
-				mcastPolicy := multicastPolicy{}
-				mcastPolicy.enableCmds(fExec, namespace1.Name, v4AddressSetName1)
-				ns.Annotations[nsMulticastAnnotation] = "true"
-				_, err = fakeOvn.fakeClient.CoreV1().Namespaces().Update(context.TODO(), ns, metav1.UpdateOptions{})
-				Expect(err).NotTo(HaveOccurred())
-				Eventually(fExec.CalledMatchesExpected).Should(BeTrue(), fExec.ErrorDesc)
-
-				nPodTest.populateLogicalSwitchCache(fakeOvn)
-				nPodTest.addPodDenyMcast(fExec)
-
-				// The pod should be added to the multicast allow group.
-				mcastPolicy.addPodCmds(fExec, namespace1.Name)
-
-				_, err = fakeOvn.fakeClient.CoreV1().Pods(nPodTest.namespace).Create(context.TODO(), newPod(
-					nPodTest.namespace, nPodTest.podName, nPodTest.nodeName, nPodTest.podIP), metav1.CreateOptions{})
-				Expect(err).NotTo(HaveOccurred())
-				Eventually(fExec.CalledMatchesExpected).Should(BeTrue(), fExec.ErrorDesc)
-				fakeOvn.asf.ExpectAddressSetWithIPs(v4AddressSetName1, []string{nPodTest.podIP})
-				fakeOvn.asf.ExpectNoAddressSet(v6AddressSetName1)
-
-				// Delete the pod from the namespace.
-				mcastPolicy.delPodCmds(fExec, namespace1.Name)
-				// The pod should be removed from the multicasts default deny
-				// group and from the multicast allow group.
-				nPodTest.delCmds(fExec)
-
-				err = fakeOvn.fakeClient.CoreV1().Pods(nPodTest.namespace).Delete(context.TODO(),
-					nPodTest.podName, *metav1.NewDeleteOptions(0))
-				Expect(err).NotTo(HaveOccurred())
-				Eventually(fExec.CalledMatchesExpected).Should(BeTrue(), fExec.ErrorDesc)
-				fakeOvn.asf.ExpectEmptyAddressSet(v4AddressSetName1)
-				fakeOvn.asf.ExpectNoAddressSet(v6AddressSetName1)
 				return nil
 			}
 
