@@ -135,6 +135,8 @@ func delPbrAndNatRules(nodeName string) {
 			priority = nodeSubnetPolicyPriority
 		} else if strings.Contains(match, nodeName) {
 			priority = mgmtPortPolicyPriority
+		} else if strings.Contains(match, "inter") {
+			priority = interNodePolicyPriority
 		} else {
 			continue
 		}

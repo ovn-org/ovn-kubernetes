@@ -12,6 +12,13 @@ import (
 )
 
 var _ = Describe("Gateway Init Operations", func() {
+	BeforeEach(func() {
+		// Restore global default values before each testcase
+		config.PrepareTestConfig()
+		// TODO make contexts here for shared gw mode and local gw mode, right now this only tests shared gw
+		config.Gateway.Mode = config.GatewayModeShared
+	})
+
 	It("correctly sorts gateway routers", func() {
 		fexec := ovntest.NewFakeExec()
 		fexec.AddFakeCmd(&ovntest.ExpectedCmd{

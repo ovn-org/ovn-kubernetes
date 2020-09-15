@@ -9,145 +9,25 @@ import (
 	"strings"
 
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
-	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/kube"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
-	"k8s.io/klog"
 
 	kapi "k8s.io/api/core/v1"
 	"k8s.io/client-go/tools/cache"
 	"k8s.io/client-go/tools/record"
+	"k8s.io/klog"
 	utilnet "k8s.io/utils/net"
 )
 
 const (
-	v4localnetGatewayIP           = "169.254.33.2"
-	v4localnetGatewayNextHop      = "169.254.33.1"
-	v4localnetGatewaySubnetPrefix = 24
-
-	v6localnetGatewayIP           = "fd99::2"
-	v6localnetGatewayNextHop      = "fd99::1"
-	v6localnetGatewaySubnetPrefix = 64
+	v4localnetGatewayIP = "169.254.33.2"
 
 	// localnetGatewayNextHopPort is the name of the gateway port on the host to which all
 	// the packets leaving the OVN logical topology will be forwarded
-	localnetGatewayNextHopPort       = "ovn-k8s-gw0"
-	legacyLocalnetGatewayNextHopPort = "br-nexthop"
-	// fixed MAC address for the br-nexthop interface. the last 4 hex bytes
-	// translates to the br-nexthop's IP address
-	localnetGatewayNextHopMac = "00:00:a9:fe:21:01"
-	localnetGatewayMac        = "00:00:a9:fe:21:02"
+	localnetGatewayNextHopPort = "ovn-k8s-gw0"
+
 	// Routing table for ExternalIP communication
 	localnetGatewayExternalIDTable = "6"
 )
-
-func (n *OvnNode) initLocalnetGateway(hostSubnets []*net.IPNet, nodeAnnotator kube.Annotator, defaultGatewayIntf string) error {
-	// Create a localnet OVS bridge.
-	localnetBridgeName := "br-local"
-	_, stderr, err := util.RunOVSVsctl("--may-exist", "add-br",
-		localnetBridgeName)
-	if err != nil {
-		return fmt.Errorf("failed to create localnet bridge %s"+
-			", stderr:%s (%v)", localnetBridgeName, stderr, err)
-	}
-
-	ifaceID, _, err := bridgedGatewayNodeSetup(n.name, localnetBridgeName, localnetBridgeName,
-		util.PhysicalNetworkName, true)
-	if err != nil {
-		return fmt.Errorf("failed to set up shared interface gateway: %v", err)
-	}
-	_, err = util.LinkSetUp(localnetBridgeName)
-	if err != nil {
-		return err
-	}
-
-	// Create a localnet bridge gateway port
-	_, stderr, err = util.RunOVSVsctl(
-		"--if-exists", "del-port", localnetBridgeName, legacyLocalnetGatewayNextHopPort,
-		"--", "--may-exist", "add-port", localnetBridgeName, localnetGatewayNextHopPort,
-		"--", "set", "interface", localnetGatewayNextHopPort, "type=internal",
-		"mtu_request="+fmt.Sprintf("%d", config.Default.MTU),
-		fmt.Sprintf("mac=%s", strings.ReplaceAll(localnetGatewayNextHopMac, ":", "\\:")))
-	if err != nil {
-		return fmt.Errorf("failed to create localnet bridge gateway port %s"+
-			", stderr:%s (%v)", localnetGatewayNextHopPort, stderr, err)
-	}
-	link, err := util.LinkSetUp(localnetGatewayNextHopPort)
-	if err != nil {
-		return err
-	}
-	// Flush any addresses on localnetGatewayNextHopPort first
-	if err := util.LinkAddrFlush(link); err != nil {
-		return err
-	}
-
-	var gatewayIfAddrs []*net.IPNet
-	var nextHops []net.IP
-	for _, hostSubnet := range hostSubnets {
-		var gatewayIP, gatewayNextHop net.IP
-		var gatewaySubnetMask net.IPMask
-		if utilnet.IsIPv6CIDR(hostSubnet) {
-			gatewayIP = net.ParseIP(v6localnetGatewayIP)
-			gatewayNextHop = net.ParseIP(v6localnetGatewayNextHop)
-			gatewaySubnetMask = net.CIDRMask(v6localnetGatewaySubnetPrefix, 128)
-		} else {
-			gatewayIP = net.ParseIP(v4localnetGatewayIP)
-			gatewayNextHop = net.ParseIP(v4localnetGatewayNextHop)
-			gatewaySubnetMask = net.CIDRMask(v4localnetGatewaySubnetPrefix, 32)
-		}
-		gatewayIfAddr := &net.IPNet{IP: gatewayIP, Mask: gatewaySubnetMask}
-		gatewayNextHopIfAddr := &net.IPNet{IP: gatewayNextHop, Mask: gatewaySubnetMask}
-		gatewayIfAddrs = append(gatewayIfAddrs, gatewayIfAddr)
-		nextHops = append(nextHops, gatewayNextHop)
-
-		if err = util.LinkAddrAdd(link, gatewayNextHopIfAddr); err != nil {
-			return err
-		}
-	}
-
-	n.initLocalEgressIP(gatewayIfAddrs, defaultGatewayIntf)
-
-	chassisID, err := util.GetNodeChassisID()
-	if err != nil {
-		return err
-	}
-
-	gwMacAddress, _ := net.ParseMAC(localnetGatewayMac)
-
-	err = util.SetL3GatewayConfig(nodeAnnotator, &util.L3GatewayConfig{
-		Mode:           config.GatewayModeLocal,
-		ChassisID:      chassisID,
-		InterfaceID:    ifaceID,
-		MACAddress:     gwMacAddress,
-		IPAddresses:    gatewayIfAddrs,
-		NextHops:       nextHops,
-		NodePortEnable: config.Gateway.NodeportEnable,
-	})
-	if err != nil {
-		return err
-	}
-
-	for _, ifaddr := range gatewayIfAddrs {
-		err = initLocalGatewayNATRules(localnetGatewayNextHopPort, ifaddr.IP)
-		if err != nil {
-			return fmt.Errorf("failed to add NAT rules for localnet gateway (%v)", err)
-		}
-	}
-
-	if config.Gateway.NodeportEnable {
-		localAddrSet, err := getLocalAddrs()
-		if err != nil {
-			return err
-		}
-		err = n.watchLocalPorts(
-			newLocalPortWatcherData(gatewayIfAddrs, n.recorder, localAddrSet),
-		)
-		if err != nil {
-			return err
-		}
-	}
-
-	return nil
-}
 
 func getGatewayFamilyAddrs(gatewayIfAddrs []*net.IPNet) (string, string) {
 	var gatewayIPv4, gatewayIPv6 string
@@ -235,8 +115,8 @@ func (npw *localPortWatcherData) addService(svc *kapi.Service) error {
 			if gatewayIP != "" {
 				// Fix Azure/GCP LoadBalancers. They will forward traffic directly to the node with the
 				// dest address as the load-balancer ingress IP and port
-				iptRules = append(iptRules, getLoadBalancerIPTRules(svc, port, gatewayIP, port.NodePort)...)
-				iptRules = append(iptRules, getNodePortIPTRules(port, nil, gatewayIP, port.NodePort)...)
+				iptRules = append(iptRules, getLoadBalancerIPTRules(svc, port, svc.Spec.ClusterIP, port.Port)...)
+				iptRules = append(iptRules, getNodePortIPTRules(port, nil, svc.Spec.ClusterIP, port.Port)...)
 				klog.V(5).Infof("Will add iptables rule for NodePort and Cloud load balancers: %v and "+
 					"protocol: %v", port.NodePort, port.Protocol)
 			} else {
@@ -300,8 +180,8 @@ func (npw *localPortWatcherData) deleteService(svc *kapi.Service) error {
 			if gatewayIP != "" {
 				// Fix Azure/GCP LoadBalancers. They will forward traffic directly to the node with the
 				// dest address as the load-balancer ingress IP and port
-				iptRules = append(iptRules, getLoadBalancerIPTRules(svc, port, gatewayIP, port.NodePort)...)
-				iptRules = append(iptRules, getNodePortIPTRules(port, nil, gatewayIP, port.NodePort)...)
+				iptRules = append(iptRules, getLoadBalancerIPTRules(svc, port, svc.Spec.ClusterIP, port.Port)...)
+				iptRules = append(iptRules, getNodePortIPTRules(port, nil, svc.Spec.ClusterIP, port.Port)...)
 				klog.V(5).Infof("Will delete iptables rule for NodePort and cloud load balancers: %v and "+
 					"protocol: %v", port.NodePort, port.Protocol)
 			}
@@ -480,4 +360,162 @@ func getLoadBalancerIPTRules(svc *kapi.Service, svcPort kapi.ServicePort, gatewa
 		})
 	}
 	return rules
+}
+
+// since we share the host's k8s node IP, add OpenFlow flows
+// -- to steer the NodePort traffic arriving on the host to the OVN logical topology and
+// -- to also connection track the outbound north-south traffic through l3 gateway so that
+//    the return traffic can be steered back to OVN logical topology
+// -- to also handle unDNAT return traffic back out of the host
+func addDefaultConntrackRulesLocal(nodeName, gwBridge, gwIntf string, stopChan chan struct{}) error {
+	// the name of the patch port created by ovn-controller is of the form
+	// patch-<logical_port_name_of_localnet_port>-to-br-int
+	localnetLpName := gwBridge + "_" + nodeName
+	patchPort := "patch-" + localnetLpName + "-to-br-int"
+	// Get ofport of patchPort, but before that make sure ovn-controller created
+	// one for us (waits for about ovsCommandTimeout seconds)
+	ofportPatch, stderr, err := util.RunOVSVsctl("wait-until", "Interface", patchPort, "ofport>0",
+		"--", "get", "Interface", patchPort, "ofport")
+	if err != nil {
+		return fmt.Errorf("failed while waiting on patch port %q to be created by ovn-controller and "+
+			"while getting ofport. stderr: %q, error: %v", patchPort, stderr, err)
+	}
+
+	// Get ofport of physical interface
+	ofportPhys, stderr, err := util.RunOVSVsctl("get", "interface", gwIntf, "ofport")
+	if err != nil {
+		return fmt.Errorf("failed to get ofport of %s, stderr: %q, error: %v",
+			gwIntf, stderr, err)
+	}
+
+	// replace the left over OpenFlow flows with the FLOOD action flow
+	_, stderr, err = util.AddFloodActionOFFlow(gwBridge)
+	if err != nil {
+		return fmt.Errorf("failed to replace-flows on bridge %q stderr:%s (%v)", gwBridge, stderr, err)
+	}
+
+	nFlows := 0
+	if config.IPv4Mode {
+		// table 0, packets coming from pods headed externally. Commit connections
+		// so that reverse direction goes back to the pods.
+		_, stderr, err = util.RunOVSOfctl("add-flow", gwBridge,
+			fmt.Sprintf("cookie=%s, priority=100, table=0, in_port=%s, ip, "+
+				"actions=ct(commit, exec(load:0x1->NXM_NX_CT_LABEL), zone=%d), output:%s",
+				defaultOpenFlowCookie, ofportPatch, config.Default.ConntrackZone, ofportPhys))
+		if err != nil {
+			return fmt.Errorf("failed to add openflow flow to %s, stderr: %q, "+
+				"error: %v", gwBridge, stderr, err)
+		}
+		nFlows++
+
+		// table 0, packets coming from external. Send it through conntrack and
+		// resubmit to table 1 to know the state of the connection.
+		_, stderr, err = util.RunOVSOfctl("add-flow", gwBridge,
+			fmt.Sprintf("cookie=%s, priority=50, table=0, in_port=%s, ip, "+
+				"actions=ct(zone=%d, table=1)", defaultOpenFlowCookie, ofportPhys, config.Default.ConntrackZone))
+		if err != nil {
+			return fmt.Errorf("failed to add openflow flow to %s, stderr: %q, "+
+				"error: %v", gwBridge, stderr, err)
+		}
+		nFlows++
+	}
+	if config.IPv6Mode {
+		// table 0, packets coming from pods headed externally. Commit connections
+		// so that reverse direction goes back to the pods.
+		_, stderr, err = util.RunOVSOfctl("add-flow", gwBridge,
+			fmt.Sprintf("cookie=%s, priority=100, table=0, in_port=%s, ipv6, "+
+				"actions=ct(commit, exec(load:0x1->NXM_NX_CT_LABEL), zone=%d), output:%s",
+				defaultOpenFlowCookie, ofportPatch, config.Default.ConntrackZone, ofportPhys))
+		if err != nil {
+			return fmt.Errorf("failed to add openflow flow to %s, stderr: %q, "+
+				"error: %v", gwBridge, stderr, err)
+		}
+		nFlows++
+
+		// table 0, packets coming from external. Send it through conntrack and
+		// resubmit to table 1 to know the state of the connection.
+		_, stderr, err = util.RunOVSOfctl("add-flow", gwBridge,
+			fmt.Sprintf("cookie=%s, priority=50, table=0, in_port=%s, ipv6, "+
+				"actions=ct(zone=%d, table=1)", defaultOpenFlowCookie, ofportPhys, config.Default.ConntrackZone))
+		if err != nil {
+			return fmt.Errorf("failed to add openflow flow to %s, stderr: %q, "+
+				"error: %v", gwBridge, stderr, err)
+		}
+		nFlows++
+	}
+
+	// table 0, packets coming from host should go out physical port
+	_, stderr, err = util.RunOVSOfctl("add-flow", gwBridge,
+		fmt.Sprintf("cookie=%s, priority=100, table=0, in_port=LOCAL, actions=output:%s",
+			defaultOpenFlowCookie, ofportPhys))
+	if err != nil {
+		return fmt.Errorf("failed to add openflow flow to %s, stderr: %q, error: %v", gwBridge, stderr, err)
+	}
+	nFlows++
+
+	// table 0, packets coming from OVN that are not IP should go out of the host
+	_, stderr, err = util.RunOVSOfctl("add-flow", gwBridge,
+		fmt.Sprintf("cookie=%s, priority=99, table=0, in_port=%s, actions=output:%s",
+			defaultOpenFlowCookie, ofportPatch, ofportPhys))
+	if err != nil {
+		return fmt.Errorf("failed to add openflow flow to %s, stderr: %q, error: %v", gwBridge, stderr, err)
+	}
+
+	nFlows++
+
+	// table 1, known connections with ct_label 1 go to pod
+	_, stderr, err = util.RunOVSOfctl("add-flow", gwBridge,
+		fmt.Sprintf("cookie=%s, priority=100, table=1, ct_label=0x1, "+
+			"actions=output:%s", defaultOpenFlowCookie, ofportPatch))
+	if err != nil {
+		return fmt.Errorf("failed to add openflow flow to %s, stderr: %q, "+
+			"error: %v", gwBridge, stderr, err)
+	}
+	nFlows++
+
+	// table 1, traffic to pod subnet go directly to OVN
+	for _, clusterEntry := range config.Default.ClusterSubnets {
+		cidr := clusterEntry.CIDR
+		var ipPrefix string
+		if cidr.IP.To4() != nil {
+			ipPrefix = "ip"
+		} else {
+			ipPrefix = "ipv6"
+		}
+		mask, _ := cidr.Mask.Size()
+		_, stderr, err = util.RunOVSOfctl("add-flow", gwBridge,
+			fmt.Sprintf("cookie=%s, priority=3, table=1, %s, %s_dst=%s/%d, actions=output:%s",
+				defaultOpenFlowCookie, ipPrefix, ipPrefix, cidr.IP, mask, ofportPatch))
+		if err != nil {
+			return fmt.Errorf("failed to add openflow flow to %s, stderr: %q, "+
+				"error: %v", gwBridge, stderr, err)
+		}
+		nFlows++
+
+	}
+
+	if config.IPv6Mode {
+		// REMOVEME(trozet) when https://bugzilla.kernel.org/show_bug.cgi?id=11797 is resolved
+		// must flood icmpv6 traffic as it fails to create a CT entry
+		_, stderr, err = util.RunOVSOfctl("add-flow", gwBridge,
+			fmt.Sprintf("cookie=%s, priority=1, table=1,icmp6 actions=FLOOD", defaultOpenFlowCookie))
+		if err != nil {
+			return fmt.Errorf("failed to add openflow flow to %s, stderr: %q, "+
+				"error: %v", gwBridge, stderr, err)
+		}
+		nFlows++
+	}
+
+	// table 1, all other connections go to host
+	_, stderr, err = util.RunOVSOfctl("add-flow", gwBridge,
+		fmt.Sprintf("cookie=%s, priority=0, table=1, actions=LOCAL", defaultOpenFlowCookie))
+	if err != nil {
+		return fmt.Errorf("failed to add openflow flow to %s, stderr: %q, "+
+			"error: %v", gwBridge, stderr, err)
+	}
+	nFlows++
+
+	// add health check function to check default OpenFlow flows are on the shared gateway bridge
+	go checkDefaultConntrackRules(gwBridge, gwIntf, patchPort, ofportPhys, ofportPatch, nFlows, stopChan)
+	return nil
 }
