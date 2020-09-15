@@ -290,8 +290,7 @@ func (oc *Controller) assignEgressIPs(eIP *egressipv1.EgressIP) error {
 				Name: eIP.Name,
 			}
 			oc.recorder.Eventf(&eIPRef, kapi.EventTypeWarning, "InvalidEgressIP", "egress IP: %s for object EgressIP: %s is not a valid IP address", egressIP, eIP.Name)
-			klog.Errorf("Unable to parse provided EgressIP: %s, invalid", egressIP)
-			continue
+			return fmt.Errorf("unable to parse provided EgressIP: %s, invalid", egressIP)
 		}
 		if node := oc.isAnyClusterNodeIP(eIPC); node != nil {
 			eIPRef := kapi.ObjectReference{

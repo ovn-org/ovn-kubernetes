@@ -1688,7 +1688,7 @@ var _ = Describe("OVN master EgressIP Operations", func() {
 
 				err := fakeOvn.controller.assignEgressIPs(&eIP)
 				Expect(err).To(HaveOccurred())
-				Expect(err.Error()).To(Equal("no matching host found"))
+				Expect(err.Error()).To(Equal(fmt.Sprintf("unable to parse provided EgressIP: %s, invalid", egressIPs[0])))
 				Expect(eIP.Status.Items).To(HaveLen(0))
 				return nil
 			}
@@ -2012,7 +2012,7 @@ var _ = Describe("OVN master EgressIP Operations", func() {
 
 				err := fakeOvn.controller.assignEgressIPs(&eIP)
 				Expect(err).To(HaveOccurred())
-				Expect(err.Error()).To(Equal("no matching host found"))
+				Expect(err.Error()).To(Equal(fmt.Sprintf("unable to parse provided EgressIP: %s, invalid", egressIPs[0])))
 				Expect(eIP.Status.Items).To(HaveLen(0))
 				return nil
 			}
