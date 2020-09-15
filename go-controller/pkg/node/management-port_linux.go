@@ -127,7 +127,7 @@ func newManagementPortConfig(interfaceName string, hostSubnets []*net.IPNet) (*m
 
 func tearDownManagementPortConfig(mpcfg *managementPortConfig) error {
 	// for the initial setup we need to start from the clean slate, so flush
-	// all addresses on this link, routes through this link, and
+	// all (non-LL) addresses on this link, routes through this link, and
 	// finally any IPtable rules for this link.
 	if err := util.LinkAddrFlush(mpcfg.link); err != nil {
 		return err
@@ -256,25 +256,25 @@ func setupManagementPortConfig(cfg *managementPortConfig) ([]string, error) {
 // createPlatformManagementPort creates a management port attached to the node switch
 // that lets the node access its pods via their private IP address. This is used
 // for health checking and other management tasks.
-func createPlatformManagementPort(interfaceName string, localSubnets []*net.IPNet, stopChan chan struct{}) error {
+func createPlatformManagementPort(interfaceName string, localSubnets []*net.IPNet, stopChan chan struct{}) (*managementPortConfig, error) {
 	var cfg *managementPortConfig
 	var err error
 
 	if cfg, err = newManagementPortConfig(interfaceName, localSubnets); err != nil {
-		return err
+		return nil, err
 	}
 
 	if err = tearDownManagementPortConfig(cfg); err != nil {
-		return err
+		return nil, err
 	}
 
 	if _, err = setupManagementPortConfig(cfg); err != nil {
-		return err
+		return nil, err
 	}
 
 	// start the management port health check
 	go checkManagementPortHealth(cfg, stopChan)
-	return nil
+	return cfg, nil
 }
 
 //DelMgtPortIptRules delete all the iptable rules for the management port.

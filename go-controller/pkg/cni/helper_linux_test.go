@@ -228,6 +228,7 @@ func TestSetupNetwork(t *testing.T) {
 			},
 			errMatch: fmt.Errorf("failed to add mac address"),
 			netLinkOpsMockHelper: []ovntest.TestifyMockHelper{
+				{"LinkSetDown", []string{"*mocks.Link"}, []interface{}{nil}},
 				{"LinkSetHardwareAddr", []string{"*mocks.Link", "net.HardwareAddr"}, []interface{}{fmt.Errorf("mock error")}},
 			},
 			linkMockHelper: []ovntest.TestifyMockHelper{
@@ -245,7 +246,9 @@ func TestSetupNetwork(t *testing.T) {
 			},
 			errMatch: fmt.Errorf("failed to add IP addr"),
 			netLinkOpsMockHelper: []ovntest.TestifyMockHelper{
+				{"LinkSetDown", []string{"*mocks.Link"}, []interface{}{nil}},
 				{"LinkSetHardwareAddr", []string{"*mocks.Link", "net.HardwareAddr"}, []interface{}{nil}},
+				{"LinkSetUp", []string{"*mocks.Link"}, []interface{}{nil}},
 				{"AddrAdd", []string{"*mocks.Link", "*netlink.Addr"}, []interface{}{fmt.Errorf("mock error")}},
 			},
 			linkMockHelper: []ovntest.TestifyMockHelper{
@@ -264,7 +267,9 @@ func TestSetupNetwork(t *testing.T) {
 			},
 			errMatch: fmt.Errorf("failed to add gateway route"),
 			netLinkOpsMockHelper: []ovntest.TestifyMockHelper{
+				{"LinkSetDown", []string{"*mocks.Link"}, []interface{}{nil}},
 				{"LinkSetHardwareAddr", []string{"*mocks.Link", "net.HardwareAddr"}, []interface{}{nil}},
+				{"LinkSetUp", []string{"*mocks.Link"}, []interface{}{nil}},
 				{"AddrAdd", []string{"*mocks.Link", "*netlink.Addr"}, []interface{}{nil}},
 			},
 			cniPluginMockHelper: []ovntest.TestifyMockHelper{
@@ -289,7 +294,9 @@ func TestSetupNetwork(t *testing.T) {
 			},
 			errMatch: fmt.Errorf("failed to add pod route"),
 			netLinkOpsMockHelper: []ovntest.TestifyMockHelper{
+				{"LinkSetDown", []string{"*mocks.Link"}, []interface{}{nil}},
 				{"LinkSetHardwareAddr", []string{"*mocks.Link", "net.HardwareAddr"}, []interface{}{nil}},
+				{"LinkSetUp", []string{"*mocks.Link"}, []interface{}{nil}},
 				{"AddrAdd", []string{"*mocks.Link", "*netlink.Addr"}, []interface{}{nil}},
 			},
 			cniPluginMockHelper: []ovntest.TestifyMockHelper{
@@ -314,7 +321,9 @@ func TestSetupNetwork(t *testing.T) {
 				},
 			},
 			netLinkOpsMockHelper: []ovntest.TestifyMockHelper{
+				{"LinkSetDown", []string{"*mocks.Link"}, []interface{}{nil}},
 				{"LinkSetHardwareAddr", []string{"*mocks.Link", "net.HardwareAddr"}, []interface{}{nil}},
+				{"LinkSetUp", []string{"*mocks.Link"}, []interface{}{nil}},
 				{"AddrAdd", []string{"*mocks.Link", "*netlink.Addr"}, []interface{}{nil}},
 			},
 			cniPluginMockHelper: []ovntest.TestifyMockHelper{

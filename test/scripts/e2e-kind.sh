@@ -32,6 +32,12 @@ Services.+session affinity
 # TO BE IMPLEMENTED: https://github.com/ovn-org/ovn-kubernetes/issues/1116
 EndpointSlices
 
+# TO BE IMPLEMENTED: https://github.com/ovn-org/ovn-kubernetes/issues/1663
+IPBlock.CIDR and IPBlock.Except
+
+# TO BE IMPLEMENTED: https://github.com/ovn-org/ovn-kubernetes/issues/1664
+should be able to preserve UDP traffic when server pod cycles for a NodePort service
+
 # NOT IMPLEMENTED; SEE DISCUSSION IN https://github.com/ovn-org/ovn-kubernetes/pull/1225
 named port.+\[Feature:NetworkPolicy\]
 
@@ -46,11 +52,6 @@ ClusterDns \[Feature:Example\]
 should set default value on new IngressClass
 # RACE CONDITION IN TEST, SEE https://github.com/kubernetes/kubernetes/pull/90254
 should prevent Ingress creation if more than 1 IngressClass marked as default
-
-# shard-n Tests
-#  See: https://github.com/ovn-org/ovn-kubernetes/issues/1516
-#  IPV4 fails due to: https://bugzilla.redhat.com/show_bug.cgi?id=1870359
-Network.+should resolve connrection reset issue
 "
 
 IPV4_ONLY_TESTS="
@@ -60,6 +61,10 @@ IPV4_ONLY_TESTS="
 
 # The following tests currently fail for IPv6 only, but should be passing.
 # They will be removed as they are resolved.
+
+# shard-n Tests
+#  See: https://github.com/kubernetes/kubernetes/pull/94136
+Network.+should resolve connection reset issue
 
 # shard-np Tests
 #  See: https://github.com/ovn-org/ovn-kubernetes/issues/1517
@@ -95,7 +100,7 @@ SKIPPED_TESTS="$(groomTestList "${SKIPPED_TESTS}")"
 # if we set PARALLEL=true, skip serial test
 if [ "${PARALLEL:-false}" = "true" ]; then
   export GINKGO_PARALLEL=y
-  export GINKGO_PARALLEL_NODES=4
+  export GINKGO_PARALLEL_NODES=20
   SKIPPED_TESTS="${SKIPPED_TESTS}|\\[Serial\\]"
 fi
 
@@ -104,7 +109,7 @@ case "$SHARD" in
 		FOCUS="\\[sig-network\\]"
 		;;
 	shard-conformance)
-		FOCUS="\\[Conformance\\]"
+		FOCUS="\\[Conformance\\]|\\[sig-network\\]"
 		;;
 	shard-test)
 		FOCUS=$(echo ${@:2} | sed 's/ /\\s/g')

@@ -49,11 +49,6 @@ func NewNode(kubeClient kubernetes.Interface, wf *factory.WatchFactory, name str
 func setupOVNNode(node *kapi.Node) error {
 	var err error
 
-	nodeName, err := util.GetNodeHostname(node)
-	if err != nil {
-		return fmt.Errorf("failed to obtain hostname from node %q: %v", node.Name, err)
-	}
-
 	encapIP := config.Default.EncapIP
 	if encapIP == "" {
 		encapIP, err = util.GetNodePrimaryIP(node)
@@ -75,7 +70,7 @@ func setupOVNNode(node *kapi.Node) error {
 			config.Default.InactivityProbe),
 		fmt.Sprintf("external_ids:ovn-openflow-probe-interval=%d",
 			config.Default.OpenFlowProbe),
-		fmt.Sprintf("external_ids:hostname=\"%s\"", nodeName),
+		fmt.Sprintf("external_ids:hostname=\"%s\"", node.Name),
 		"external_ids:ovn-monitor-all=true",
 	)
 	if err != nil {

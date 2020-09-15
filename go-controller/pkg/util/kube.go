@@ -134,27 +134,6 @@ func GetNodePrimaryIP(node *kapi.Node) (string, error) {
 		kapi.NodeInternalIP, kapi.NodeExternalIP)
 }
 
-// GetNodeHostame extracts the hostname from the node status in the API
-func GetNodeHostname(node *kapi.Node) (string, error) {
-	for _, addr := range node.Status.Addresses {
-		if addr.Type == kapi.NodeHostName {
-			return addr.Address, nil
-		}
-	}
-	for _, addr := range node.Status.Addresses {
-		if addr.Type == kapi.NodeExternalDNS {
-			return addr.Address, nil
-		}
-	}
-	for _, addr := range node.Status.Addresses {
-		if addr.Type == kapi.NodeInternalDNS {
-			return addr.Address, nil
-		}
-	}
-	return "", fmt.Errorf("%s doesn't have an address with type %s, %s or %s", node.GetName(),
-		kapi.NodeHostName, kapi.NodeExternalDNS, kapi.NodeInternalDNS)
-}
-
 const (
 	// DefNetworkAnnotation is the pod annotation for the cluster-wide default network
 	DefNetworkAnnotation = "v1.multus-cni.io/default-network"

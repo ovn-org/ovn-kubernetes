@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"math/big"
 	"net"
+	"regexp"
 	"strconv"
 	"strings"
 
@@ -43,12 +44,13 @@ func IPToUint32(egressIP string) uint32 {
 	return binary.BigEndian.Uint32(ip)
 }
 
-// GetNodeLogicalRouterIP returns the IPs (IPv4 and/or IPv6) of the provided node's logical router
+var forceSNAT = regexp.MustCompile(`lb_force_snat_ip="([^"]*)"`)
+
+// GetNodeLogicalRouterIPs returns the IPs (IPv4 and/or IPv6) of the provided node's logical router
 // Expected output from the ovn-nbctl command, which will need to be parsed is:
-// "chassis=939391b7-b4b3-4c3a-b9a9-665103ee13b5 lb_force_snat_ip=100.64.0.1"
-func GetNodeLogicalRouterIP(nodeName string) (net.IP, net.IP, error) {
+// `{ chassis="939391b7-b4b3-4c3a-b9a9-665103ee13b5", lb_force_snat_ip="100.64.0.1 fd99::1" }`
+func GetNodeLogicalRouterIPs(nodeName string) ([]net.IP, error) {
 	stdout, _, err := RunOVNNbctl(
-		"--data=bare",
 		"--format=table",
 		"--no-heading",
 		"--columns=options",
@@ -57,25 +59,22 @@ func GetNodeLogicalRouterIP(nodeName string) (net.IP, net.IP, error) {
 		"options:lb_force_snat_ip!=-",
 	)
 	if err != nil {
-		return nil, nil, fmt.Errorf("unable to retrieve the logical router for node: %s, err: %v", nodeName, err)
+		return nil, fmt.Errorf("unable to retrieve the logical router for node: %s, err: %v", nodeName, err)
 	}
-	var ipV4, ipV6 net.IP
-	tag := "lb_force_snat_ip="
-	for _, p := range strings.Fields(stdout) {
-		if strings.HasPrefix(p, tag) {
-			ipStr := p[len(tag):]
-			if ip := net.ParseIP(ipStr); ip != nil {
-				if utilnet.IsIPv6(ip) {
-					ipV6 = ip
-				} else {
-					ipV4 = ip
-				}
-			} else {
-				return nil, nil, fmt.Errorf("failed to parse gateway router %q IP %q", p, ipStr)
-			}
+	matches := forceSNAT.FindStringSubmatch(stdout)
+	if len(matches) != 2 {
+		return nil, fmt.Errorf("could not find logical router IP for node: %s in %q", nodeName, stdout)
+	}
+
+	var ips []net.IP
+	for _, ipStr := range strings.Fields(matches[1]) {
+		if ip := net.ParseIP(ipStr); ip != nil {
+			ips = append(ips, ip)
+		} else {
+			return nil, fmt.Errorf("failed to parse gateway router IP %q", ipStr)
 		}
 	}
-	return ipV4, ipV6, nil
+	return ips, nil
 }
 
 // GetPortAddresses returns the MAC and IPs of the given logical switch port
@@ -223,13 +222,24 @@ func IPFamilyName(isIPv6 bool) string {
 	}
 }
 
-// MatchIPFamily loops through the array of *net.IPNet and returns the
+// MatchIPFamily loops through the array of net.IP and returns the
 // first entry in the list in the same IP Family, based on input flag isIPv6.
-func MatchIPFamily(isIPv6 bool, subnets []*net.IPNet) (*net.IPNet, error) {
-	for _, subnet := range subnets {
-		if utilnet.IsIPv6CIDR(subnet) == isIPv6 {
-			return subnet, nil
+func MatchIPFamily(isIPv6 bool, ips []net.IP) (net.IP, error) {
+	for _, ip := range ips {
+		if utilnet.IsIPv6(ip) == isIPv6 {
+			return ip, nil
 		}
 	}
-	return nil, fmt.Errorf("no %s subnet available", IPFamilyName(isIPv6))
+	return nil, fmt.Errorf("no %s IP available", IPFamilyName(isIPv6))
+}
+
+// MatchIPNetFamily loops through the array of *net.IPNet and returns the
+// first entry in the list in the same IP Family, based on input flag isIPv6.
+func MatchIPNetFamily(isIPv6 bool, ipnets []*net.IPNet) (*net.IPNet, error) {
+	for _, ipnet := range ipnets {
+		if utilnet.IsIPv6CIDR(ipnet) == isIPv6 {
+			return ipnet, nil
+		}
+	}
+	return nil, fmt.Errorf("no %s value available", IPFamilyName(isIPv6))
 }

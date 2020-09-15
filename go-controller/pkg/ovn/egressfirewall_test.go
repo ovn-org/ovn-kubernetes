@@ -331,7 +331,6 @@ var _ = Describe("OVN EgressFirewall Operations", func() {
 				defer close(stopChan)
 				fExec.AddFakeCmdsNoOutputNoError([]string{
 					//adding the original node commands
-					"ovn-sbctl --timeout=15 --data=bare --no-heading --columns=name,hostname --format=json list Chassis",
 					"ovn-nbctl --timeout=15 --data=bare --no-heading --columns=name,other-config find logical_switch",
 					"ovn-nbctl --timeout=15 --if-exists lrp-del rtos-node1 -- lrp-add ovn_cluster_router rtos-node1 ",
 					"ovn-nbctl --timeout=15 --may-exist ls-add node1 -- set logical_switch node1",

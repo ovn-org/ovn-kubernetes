@@ -7,8 +7,8 @@ on:
 
 
 env:
-  GO_VERSION: 1.13.4
-  K8S_VERSION: v1.18.2
+  GO_VERSION: 1.15.1
+  K8S_VERSION: v1.19.0
   KIND_CLUSTER_NAME: ovn
   KIND_INSTALL_INGRESS: true
   KIND_ALLOW_SYSTEM_WRITES: true
@@ -145,7 +145,7 @@ jobs:
       fail-fast: false
       matrix:
         target:
-          - shard: shard-network
+          - shard: shard-conformance
             hybrid-overlay: false
           - shard: control-plane
             hybrid-overlay: true
@@ -191,7 +191,7 @@ jobs:
     needs: [build, k8s]
     env:
       JOB_NAME: "${{ matrix.target.shard }}-${{ matrix.ha.name }}-${{ matrix.gateway-mode }}-${{ matrix.ipfamily.name }}"
-      KIND_HA: "${{ matrix.ha.enabled }}"
+      OVN_HA: "${{ matrix.ha.enabled }}"
       KIND_IPV4_SUPPORT: "${{ matrix.ipfamily.ipv4 }}"
       KIND_IPV6_SUPPORT: "${{ matrix.ipfamily.ipv6 }}"
       OVN_HYBRID_OVERLAY_ENABLE: "${{ matrix.target.hybrid-overlay }}"
