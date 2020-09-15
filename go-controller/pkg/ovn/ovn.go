@@ -721,7 +721,7 @@ func (oc *Controller) WatchCRD() {
 func (oc *Controller) WatchEgressFirewall() *factory.Handler {
 	return oc.watchFactory.AddEgressFirewallHandler(cache.ResourceEventHandlerFuncs{
 		AddFunc: func(obj interface{}) {
-			egressFirewall := obj.(*egressfirewall.EgressFirewall)
+			egressFirewall := obj.(*egressfirewall.EgressFirewall).DeepCopy()
 			errList := oc.addEgressFirewall(egressFirewall)
 			for _, err := range errList {
 				klog.Error(err)
@@ -737,7 +737,7 @@ func (oc *Controller) WatchEgressFirewall() *factory.Handler {
 			}
 		},
 		UpdateFunc: func(old, newer interface{}) {
-			newEgressFirewall := newer.(*egressfirewall.EgressFirewall)
+			newEgressFirewall := newer.(*egressfirewall.EgressFirewall).DeepCopy()
 			oldEgressFirewall := old.(*egressfirewall.EgressFirewall)
 			if !reflect.DeepEqual(oldEgressFirewall.Spec, newEgressFirewall.Spec) {
 				errList := oc.updateEgressFirewall(oldEgressFirewall, newEgressFirewall)
