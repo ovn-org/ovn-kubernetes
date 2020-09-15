@@ -13,15 +13,7 @@ if [[ ! -f /usr/local/bin/e2e.test ]]; then
 fi
 popd
 
-if [[ -n "$(go env GOBIN)" ]]; then
-  INSTALL_PATH=$(go env GOBIN)
-else
-  mkdir -p $GOPATH/bin
-  INSTALL_PATH=$GOPATH/bin
-fi
-
-curl -Lo $INSTALL_PATH/kind https://github.com/kubernetes-sigs/kind/releases/download/v0.8.1/kind-linux-amd64
-chmod +x $INSTALL_PATH/kind
+go get sigs.k8s.io/kind@c58694155106d0ac6e9612b7af5d0ac4f0559ba3
 pushd ../contrib
 ./kind.sh
 popd

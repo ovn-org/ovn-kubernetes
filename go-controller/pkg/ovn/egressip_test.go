@@ -272,8 +272,8 @@ var _ = Describe("OVN master EgressIP Operations", func() {
 					"k8s.ovn.org/egress-assignable": "",
 				}
 
-				_, ipV4Sub, err := net.ParseCIDR(nodeIPv4)
-				_, ipV6Sub, err := net.ParseCIDR(nodeIPv6)
+				_, ipv4Sub, err := net.ParseCIDR(nodeIPv4)
+				_, ipv6Sub, err := net.ParseCIDR(nodeIPv6)
 
 				_, err = fakeOvn.fakeClient.CoreV1().Nodes().Update(context.TODO(), &node, metav1.UpdateOptions{})
 				Expect(err).NotTo(HaveOccurred())
@@ -285,8 +285,8 @@ var _ = Describe("OVN master EgressIP Operations", func() {
 
 				Expect(fakeOvn.controller.eIPAllocator).To(HaveLen(1))
 				Expect(fakeOvn.controller.eIPAllocator).To(HaveKey(node.Name))
-				Expect(fakeOvn.controller.eIPAllocator[node.Name].v4Subnet).To(Equal(ipV4Sub))
-				Expect(fakeOvn.controller.eIPAllocator[node.Name].v6Subnet).To(Equal(ipV6Sub))
+				Expect(fakeOvn.controller.eIPAllocator[node.Name].v4Subnet).To(Equal(ipv4Sub))
+				Expect(fakeOvn.controller.eIPAllocator[node.Name].v6Subnet).To(Equal(ipv6Sub))
 
 				getCacheCount := func() int {
 					cacheCount := 0

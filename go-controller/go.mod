@@ -30,6 +30,7 @@ require (
 	github.com/urfave/cli/v2 v2.2.0
 	github.com/vishvananda/netlink v0.0.0-20200625175047-bca67dfc8220
 	golang.org/x/sys v0.0.0-20200323222414-85ca7c5b95cd
+	golang.org/x/text v0.3.3 // indirect
 	golang.org/x/time v0.0.0-20191024005414-555d28b269f0 // indirect
 	gopkg.in/fsnotify/fsnotify.v1 v1.4.7
 	gopkg.in/gcfg.v1 v1.2.3

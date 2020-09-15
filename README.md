@@ -27,7 +27,7 @@ sudo apt-get install openvswitch-datapath-dkms -y
 
 Create OVN StatefulSet, DaemonSet and Deployment yamls from templates by running the commands below:
 (The $MASTER_IP below is the IP address of the machine where kube-apiserver is
-running). 
+running).
 
 **Note:** when specifying the pod CIDR to the command below, daemonset.sh will
 generate a /24 subnet prefix to create per-node CIDRs. Ensure your pod subnet is has a
@@ -55,7 +55,7 @@ cd $HOME/work/src/github.com/ovn-org/ovn-kubernetes/dist/images
     --k8s-apiserver=https://$MASTER_IP:6443
 ```
 
-To set specific logging level for OVN components, pass the related parameter from the below mentioned 
+To set specific logging level for OVN components, pass the related parameter from the below mentioned
 list to the above command. Set values are the default values.
 ```
     --master-loglevel="5" \\Log level for ovnkube (master)
@@ -67,11 +67,22 @@ list to the above command. Set values are the default values.
     --ovn-loglevel-nbctld="-vconsole:info" \\ Log config for nbctl daemon
 ```
 
+If you are not running OVS directly in the nodes, you must apply the OVS Daemonset yaml.
+```
+kubectl create -f $HOME/work/src/github.com/ovn-org/ovn-kubernetes/dist/yaml/ovs-node.yaml
+```
+
 Apply OVN DaemonSet and Deployment yamls.
 
 ```
 # Create OVN namespace, service accounts, ovnkube-db headless service, configmap, and policies
 kubectl create -f $HOME/work/src/github.com/ovn-org/ovn-kubernetes/dist/yaml/ovn-setup.yaml
+
+# Optionally, if you plan to use the Egress IPs or EgressFirewall features, create the corresponding CRDs:
+# create egressips.k8s.ovn.org CRD
+kubectl create -f $HOME/work/src/github.com/ovn-org/ovn-kubernetes/dist/yaml/k8s.ovn.org_egressips.yaml
+# create egressfirewalls.k8s.ovn.org CRD
+kubectl create -f $HOME/work/src/github.com/ovn-org/ovn-kubernetes/dist/yaml/k8s.ovn.org_egressfirewalls.yaml
 
 # Run ovnkube-db deployment.
 kubectl create -f $HOME/work/src/github.com/ovn-org/ovn-kubernetes/dist/yaml/ovnkube-db.yaml

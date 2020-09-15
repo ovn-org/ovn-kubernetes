@@ -27,6 +27,7 @@ const (
 	gwRouterToExtSwitchPrefix    = "rtoe-"
 
 	nodeLocalSwitch          = "node_local_switch"
+	interNodePolicyPriority  = "1003"
 	nodeSubnetPolicyPriority = "1004"
 	mgmtPortPolicyPriority   = "1005"
 )

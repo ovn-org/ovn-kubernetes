@@ -268,21 +268,6 @@ func (mock *MockOVNClient) ChassisAdd(name string, hostname string, etype []stri
 	return nil, fmt.Errorf("method %s is not implemented yet", functionName())
 }
 
-// Delete chassis with given name
-func (mock *MockOVNClient) ChassisDel(chName string) (*goovn.OvnCommand, error) {
-	return nil, fmt.Errorf("method %s is not implemented yet", functionName())
-}
-
-// Get chassis by hostname or name
-func (mock *MockOVNClient) ChassisGet(chname string) ([]*goovn.Chassis, error) {
-	return nil, fmt.Errorf("method %s is not implemented yet", functionName())
-}
-
-// List chassis
-func (mock *MockOVNClient) ChassisList() ([]*goovn.Chassis, error) {
-	return nil, fmt.Errorf("method %s is not implemented yet", functionName())
-}
-
 // Get encaps by chassis name
 func (mock *MockOVNClient) EncapList(chname string) ([]*goovn.Encap, error) {
 	return nil, fmt.Errorf("method %s is not implemented yet", functionName())

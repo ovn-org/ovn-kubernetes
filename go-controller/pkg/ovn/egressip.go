@@ -355,47 +355,31 @@ type egressIPMode struct {
 	gatewayIPCache sync.Map
 }
 
-type gatewayRouter struct {
-	ipV4 net.IP
-	ipV6 net.IP
-}
-
 func (e *egressIPMode) getGatewayRouterJoinIP(node string, wantsIPv6 bool) (net.IP, error) {
+	var gatewayIPs []net.IP
+
 	if item, exists := e.gatewayIPCache.Load(node); exists {
-		if gatewayRouter, ok := item.(gatewayRouter); ok {
-			if wantsIPv6 && gatewayRouter.ipV6 != nil {
-				return gatewayRouter.ipV6, nil
-			} else if !wantsIPv6 && gatewayRouter.ipV4 != nil {
-				return gatewayRouter.ipV4, nil
-			}
-			return nil, fmt.Errorf("node does not have a gateway router IP corresponding to the IP version requested")
+		var ok bool
+		if gatewayIPs, ok = item.([]net.IP); !ok {
+			return nil, fmt.Errorf("unable to cast node: %s gatewayIP cache item to correct type", node)
 		}
-		return nil, fmt.Errorf("unable to cast node: %s gatewayIP cache item to correct type", node)
-	}
-	gatewayRouter := gatewayRouter{}
-	err := utilwait.ExponentialBackoff(retry.DefaultRetry, func() (bool, error) {
-		grIPv4, grIPv6, err := util.GetNodeLogicalRouterIP(node)
+	} else {
+		err := utilwait.ExponentialBackoff(retry.DefaultRetry, func() (bool, error) {
+			var err error
+			gatewayIPs, err = util.GetNodeLogicalRouterIPs(node)
+			return err == nil, nil
+		})
 		if err != nil {
-			return false, nil
+			return nil, err
 		}
-		if grIPv4 != nil {
-			gatewayRouter.ipV4 = grIPv4
-		}
-		if grIPv6 != nil {
-			gatewayRouter.ipV6 = grIPv6
-		}
-		return true, nil
-	})
-	if err != nil {
-		return nil, err
+		e.gatewayIPCache.Store(node, gatewayIPs)
 	}
-	e.gatewayIPCache.Store(node, gatewayRouter)
-	if wantsIPv6 && gatewayRouter.ipV6 != nil {
-		return gatewayRouter.ipV6, nil
-	} else if !wantsIPv6 && gatewayRouter.ipV4 != nil {
-		return gatewayRouter.ipV4, nil
+
+	if ip, err := util.MatchIPFamily(wantsIPv6, gatewayIPs); ip != nil {
+		return ip, nil
+	} else {
+		return nil, fmt.Errorf("could not find node %s gateway router: %v", node, err)
 	}
-	return nil, fmt.Errorf("node does not have a gateway router IP corresponding to the IP version requested")
 }
 
 func (e *egressIPMode) getPodIPs(pod *kapi.Pod) []net.IP {

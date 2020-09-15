@@ -44,7 +44,7 @@ function testrun {
     fi
     args="${args}${otherargs}${pkg}"
 
-    go test -v ${args} ${ginkgoargs} -mod vendor
+    go test -v -mod vendor ${args} ${ginkgoargs}
 }
 
 # These packages requires root for network namespace maniuplation in unit tests

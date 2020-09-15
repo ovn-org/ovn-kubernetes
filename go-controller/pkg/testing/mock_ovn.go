@@ -13,6 +13,7 @@ import (
 const (
 	LogicalSwitchType     string = "Logical_Switch"
 	LogicalSwitchPortType string = "Logical_Switch_Port"
+	ChassisType           string = "Chassis"
 )
 
 const (
@@ -62,12 +63,16 @@ var _ goovn.Execution = &MockExecution{}
 
 // return a new mock client to operate on db
 func NewMockOVNClient(db string) *MockOVNClient {
-	return &MockOVNClient{
+	mock := &MockOVNClient{
 		db:         db,
 		cache:      make(map[string]MockObjectCacheByName),
 		errorCache: make(map[string]error),
 		connected:  true,
 	}
+	mock.cache[LogicalSwitchPortType] = make(MockObjectCacheByName)
+	mock.cache[ChassisType] = make(MockObjectCacheByName)
+	mock.cache[LogicalSwitchType] = make(MockObjectCacheByName)
+	return mock
 }
 
 func functionName() string {
