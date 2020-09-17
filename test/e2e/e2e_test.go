@@ -32,6 +32,7 @@ const (
 	vxlanPort            = "4789"
 	podNetworkAnnotation = "k8s.ovn.org/pod-networks"
 	exGwAnnotation       = "k8s.ovn.org/hybrid-overlay-external-gw"
+	agnhostImage         = "k8s.gcr.io/e2e-test-images/agnhost:2.21"
 )
 
 // checkContinuousConnectivity creates a pod that checks the web connectivity against the host:ip during the duration specified in seconds
@@ -49,7 +50,7 @@ func checkContinuousConnectivity(f *framework.Framework, nodeName, podName, host
 			Containers: []v1.Container{
 				{
 					Name:    podName,
-					Image:   framework.AgnHostImage,
+					Image:   agnhostImage,
 					Command: command,
 				},
 			},
@@ -107,7 +108,7 @@ func checkConnectivityPingToHost(f *framework.Framework, nodeName, podName, host
 			Containers: []v1.Container{
 				{
 					Name:    podName,
-					Image:   framework.AgnHostImage,
+					Image:   agnhostImage,
 					Command: command,
 					Args:    args,
 				},
@@ -135,7 +136,7 @@ func createAgnhostPod(f *framework.Framework, podName, nodeSelector string, args
 			Containers: []v1.Container{
 				{
 					Name:  podName,
-					Image: framework.AgnHostImage,
+					Image: agnhostImage,
 					Args:  args,
 				},
 			},
@@ -250,7 +251,7 @@ var _ = ginkgo.Describe("e2e control plane", func() {
 		// Since this is not really a test of kubernetes in any way, we
 		// leave it as a pre-test assertion, rather than a Ginko test.
 		// start the container that will act as an external host of the cluster
-		_, err := runCommand("docker", "run", "--rm", "-itd", "--privileged", "--network", "kind", "--name", extHost, "httpd:2.4.46-alpine")
+		_, err := runCommand("docker", "run", "--rm", "-itd", "--privileged", "--network", "kind", "--name", extHost, agnhostImage, "netexec", "--http-port", "80")
 		if err != nil {
 			framework.Failf("failed to start external gateway test container: %v", err)
 		}
@@ -403,7 +404,7 @@ var _ = ginkgo.Describe("test e2e inter-node connectivity between worker nodes h
 			nodeIP: ips[1],
 		}
 		// start the container that will act as an external gateway
-		_, err = runCommand("docker", "run", "-itd", "--privileged", "--network", "kind", "--name", gwContainerName, "httpd:2.4.46-alpine")
+		_, err = runCommand("docker", "run", "-itd", "--privileged", "--network", "kind", "--name", gwContainerName, agnhostImage, "netexec", "--http-port", "80")
 		if err != nil {
 			framework.Failf("failed to start external gateway test container: %v", err)
 		}
