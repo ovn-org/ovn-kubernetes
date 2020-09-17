@@ -15,7 +15,7 @@ import (
 )
 
 const (
-	defaultStartPriority           = 2000
+	defaultStartPriority           = 100
 	egressFirewallAppliedCorrectly = "EgressFirewall Rules applied"
 	egressFirewallAddError         = "EgressFirewall Rules not correctly added"
 	egressFirewallUpdateError      = "EgressFirewall Rules did not update correctly"
@@ -83,6 +83,10 @@ func (oc *Controller) addEgressFirewall(egressFirewall *egressfirewallapi.Egress
 	var errList []error
 	for i, egressFirewallRule := range egressFirewall.Spec.Egress {
 		//process Rules into egressFirewallRules for egressFirewall struct
+		if i > defaultStartPriority {
+			klog.Warningf("egressFirewall for namespace %s has to many rules, the rest will be ignored", egressFirewall.Namespace)
+			break
+		}
 		efr, err := newEgressFirewallRule(egressFirewallRule, i)
 		if err != nil {
 			errList = append(errList, fmt.Errorf("error: cannot create EgressFirewall Rule for destination %s to namespace %s - %v",
@@ -96,15 +100,7 @@ func (oc *Controller) addEgressFirewall(egressFirewall *egressfirewallapi.Egress
 		return errList
 	}
 
-	existingNodes, err := oc.kube.GetNodes()
-	if err != nil {
-		return []error{fmt.Errorf("error unable to add egressfirewall %s, cannot list nodes: %s", egressFirewall.Name, err)}
-	}
-	var joinSwitches []string
-	for _, node := range existingNodes.Items {
-		joinSwitches = append(joinSwitches, joinSwitch(node.Name))
-	}
-	err = ef.addACLToJoinSwitch(joinSwitches, nsInfo.addressSet.GetIPv4HashName(), nsInfo.addressSet.GetIPv6HashName())
+	err = ef.addLogicalRouterPolicyToClusterRouter(nsInfo.addressSet.GetIPv4HashName(), nsInfo.addressSet.GetIPv6HashName())
 	if err != nil {
 		errList = append(errList, err)
 	}
@@ -131,29 +127,19 @@ func (oc *Controller) deleteEgressFirewall(egressFirewall *egressfirewallapi.Egr
 		nsInfo.egressFirewallPolicy = nil
 		nsInfo.Unlock()
 	}
-
-	existingNodes, err := oc.kube.GetNodes()
+	stdout, stderr, err := util.RunOVNNbctl("--data=bare", "--no-heading", "--columns=_uuid", "find", "logical_router_policy", fmt.Sprintf("external-ids:egressFirewall=%s", egressFirewall.Namespace))
 	if err != nil {
-		return []error{fmt.Errorf("error deleting egressFirewall for namespace %s, cannot get nodes to delete ACLS %v",
-			egressFirewall.Namespace, err)}
-	}
-
-	stdout, stderr, err := util.RunOVNNbctl("--data=bare", "--no-heading",
-		"--columns=_uuid", "find", "ACL",
-		fmt.Sprintf("external-ids:egressFirewall=%s", egressFirewall.Namespace))
-	if err != nil {
-		return []error{fmt.Errorf("error executing find ACL command, stderr: %q, %+v", stderr, err)}
+		return []error{fmt.Errorf("error deleting egressFirewall for namespace %s, cannot get logical router policies from LR %s - %s:%s",
+			egressFirewall.Namespace, ovnClusterRouter, err, stderr)}
 	}
 	var errList []error
+
 	uuids := strings.Fields(stdout)
 	for _, uuid := range uuids {
-		for _, node := range existingNodes.Items {
-			_, stderr, err := util.RunOVNNbctl("remove", "logical_switch",
-				joinSwitch(node.Name), "acls", uuid)
-			if err != nil {
-				errList = append(errList, fmt.Errorf("failed to delete the rules for "+
-					"egressFirewall in namespace %s on node %s, stderr: %q (%v)", egressFirewall.Namespace, node.Name, stderr, err))
-			}
+		_, stderr, err := util.RunOVNNbctl("lr-policy-del", ovnClusterRouter, uuid)
+		if err != nil {
+			errList = append(errList, fmt.Errorf("failed to delete the rules for "+
+				"egressFirewall in namespace %s on logical switch %s, stderr: %q (%v)", egressFirewall.Namespace, ovnClusterRouter, stderr, err))
 		}
 	}
 	return errList
@@ -165,7 +151,7 @@ func (oc *Controller) updateEgressFirewallWithRetry(egressfirewall *egressfirewa
 	})
 }
 
-func (ef *egressFirewall) addACLToJoinSwitch(joinSwitches []string, hashedAddressSetNameIPv4, hashedAddressSetNameIPv6 string) error {
+func (ef *egressFirewall) addLogicalRouterPolicyToClusterRouter(hashedAddressSetNameIPv4, hashedAddressSetNameIPv6 string) error {
 	for _, rule := range ef.egressRules {
 		var match string
 		var action string
@@ -188,30 +174,17 @@ func (ef *egressFirewall) addACLToJoinSwitch(joinSwitches []string, hashedAddres
 		if len(rule.ports) > 0 {
 			match = fmt.Sprintf("%s && ( %s )\"", match[:len(match)-1], egressGetL4Match(rule.ports))
 		}
-		uuid, stderr, err := util.RunOVNNbctl("--data=bare", "--no-heading",
-			"--columns=_uuid", "find", "ACL", match, "action="+action,
-			fmt.Sprintf("external-ids:egressFirewall=%s", ef.namespace))
 
+		_, stderr, err := util.RunOVNNbctl("--id=@logical_router_policy", "create", "logical_router_policy",
+			fmt.Sprintf("priority=%d", defaultStartPriority-rule.id),
+			match, "action="+action, fmt.Sprintf("external-ids:egressFirewall=%s", ef.namespace),
+			"--", "add", "logical_router", ovnClusterRouter, "policies", "@logical_router_policy")
 		if err != nil {
-			return fmt.Errorf("error executing find ACL command, stderr: %q, %+v", stderr, err)
-		}
-		for _, joinSwitch := range joinSwitches {
-			if uuid == "" {
-				_, stderr, err := util.RunOVNNbctl("--id=@acl", "create", "acl",
-					fmt.Sprintf("priority=%d", defaultStartPriority-rule.id),
-					fmt.Sprintf("direction=%s", fromLport), match, "action="+action,
-					fmt.Sprintf("external-ids:egressFirewall=%s", ef.namespace),
-					"--", "add", "logical_switch", joinSwitch,
-					"acls", "@acl")
-				if err != nil {
-					return fmt.Errorf("error executing create ACL command, stderr: %q, %+v", stderr, err)
-				}
-			} else {
-				_, stderr, err := util.RunOVNNbctl("add", "logical_switch", joinSwitch, "acls", uuid)
-				if err != nil {
-					return fmt.Errorf("error adding ACL to joinsSwitch %s failed, stderr: %q, %+v", joinSwitch, stderr, err)
-
-				}
+			// TODO: lr-policy-add doesn't support --may-exist, resort to this workaround for now.
+			// Have raised an issue against ovn repository (https://github.com/ovn-org/ovn/issues/49)
+			if !strings.Contains(stderr, "already existed") {
+				return fmt.Errorf("failed to add policy route '%s' to %s "+
+					"stderr: %s, error: %v", match, ovnClusterRouter, stderr, err)
 			}
 		}
 	}
@@ -279,8 +252,4 @@ func egressGetL4Match(ports []egressfirewallapi.EgressFirewallPort) string {
 		}
 	}
 	return l4Match
-}
-
-func joinSwitch(nodeName string) string {
-	return fmt.Sprintf("join_%s", nodeName)
 }
