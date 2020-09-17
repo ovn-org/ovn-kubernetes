@@ -316,7 +316,9 @@ if [ "$OVN_IMAGE" == local ]; then
 
   # Build ovn kube image
   pushd ../dist/images
-  sudo cp -f ../../go-controller/_output/go/bin/* .
+  # Find all built executables, but ignore the 'windows' directory if it exists
+  BINS=$(find ../../go-controller/_output/go/bin/ -maxdepth 1 -type f | xargs)
+  sudo cp -f ${BINS} .
   echo "ref: $(git rev-parse  --symbolic-full-name HEAD)  commit: $(git rev-parse  HEAD)" > git_info
   docker build -t ovn-daemonset-f:dev -f Dockerfile.fedora .
   OVN_IMAGE=ovn-daemonset-f:dev
