@@ -356,6 +356,15 @@ var _ = Describe("Hybrid SDN Master Operations", func() {
 			}()
 
 			k := &kube.Kube{KClient: fakeClient}
+
+			Eventually(func() (map[string]string, error) {
+				updatedNode, err := k.GetNode(nodeName)
+				if err != nil {
+					return nil, err
+				}
+				return updatedNode.Annotations, nil
+			}, 2).Should(HaveKeyWithValue(types.HybridOverlayDRMAC, nodeHOMAC))
+
 			updatedNode, err := k.GetNode(nodeName)
 			Expect(err).NotTo(HaveOccurred())
 
