@@ -316,13 +316,12 @@ func createPod(f *framework.Framework, podName, nodeSelector string, command []s
 }
 
 // Get the IP address of a pod in the specified namespace
-func getPodAddress(podName, namespace string) (string, error) {
+func getPodAddress(podName, namespace string) string {
 	podIP, err := framework.RunKubectl("get", "pods", podName, "--template={{.status.podIP}}", "-n"+namespace)
 	if err != nil {
 		framework.Failf("Unable to retrieve the IP for pod %s %v", podName, err)
-		return "", err
 	}
-	return podIP, nil
+	return podIP
 }
 
 // runCommand runs the cmd and returns the combined stdout and stderr
@@ -515,11 +514,7 @@ var _ = Describe("test e2e inter-node connectivity between worker nodes hybrid o
 
 		// Wait for pod exgw setup to be almost ready
 		err = wait.PollImmediate(retryInterval, retryTimeout, func() (bool, error) {
-			pingTarget, err = getPodAddress(dstPingPodName, f.Namespace.Name)
-			if err != nil {
-				framework.Logf("retrying ... error trying to get pod  %s address: %v", dstPingPodName, err)
-				return false, nil
-			}
+			pingTarget = getPodAddress(dstPingPodName, f.Namespace.Name)
 			validIP = net.ParseIP(pingTarget)
 			if validIP == nil {
 				return false, nil
@@ -604,7 +599,6 @@ var _ = Describe("test e2e inter-node connectivity between worker nodes", func()
 	})
 
 	It("Should validate connectivity within a namespace of pods on separate nodes", func() {
-		var err error
 		var validIP net.IP
 		var pingTarget string
 		var ciWorkerNodeSrc string
@@ -628,10 +622,7 @@ var _ = Describe("test e2e inter-node connectivity between worker nodes", func()
 		// There is a condition somewhere with e2e WaitForPodNotPending that returns ready
 		// before calling for the IP address will succeed. This simply adds some retries.
 		for i := 1; i < getPodIPRetry; i++ {
-			pingTarget, err = getPodAddress(dstPingPodName, f.Namespace.Name)
-			if err != nil {
-				framework.Logf("Warning unable to query the test pod on node %s %v", ciWorkerNodeSrc, err)
-			}
+			pingTarget = getPodAddress(dstPingPodName, f.Namespace.Name)
 			validIP = net.ParseIP(pingTarget)
 			if validIP != nil {
 				framework.Logf("Destination ping target for %s is %s", dstPingPodName, pingTarget)
@@ -1005,11 +996,7 @@ var _ = Describe("e2e multiple external gateway update validation", func() {
 
 		// Wait for pod exgw setup to be almost ready
 		err = wait.PollImmediate(retryInterval, retryTimeout, func() (bool, error) {
-			pingSrc, err = getPodAddress(srcPingPodName, f.Namespace.Name)
-			if err != nil {
-				framework.Logf("retrying ... error trying to get pod  %s address: %v", srcPingPodName, err)
-				return false, nil
-			}
+			pingSrc = getPodAddress(srcPingPodName, f.Namespace.Name)
 			validIP = net.ParseIP(pingSrc)
 			if validIP == nil {
 				return false, nil
@@ -1288,12 +1275,9 @@ spec:
 
 		wait.PollImmediate(retryInterval, retryTimeout, func() (bool, error) {
 			for _, podName := range []string{pod1Name, pod2Name} {
-				kubectlOut, err := getPodAddress(podName, f.Namespace.Name)
+				kubectlOut := getPodAddress(podName, f.Namespace.Name)
 				srcIP := net.ParseIP(kubectlOut)
 				if srcIP == nil {
-					return false, nil
-				}
-				if err != nil {
 					return false, nil
 				}
 			}
@@ -1310,7 +1294,7 @@ spec:
 			framework.Failf("Error: unable to parse API-server IP address:  %s", apiServerIP)
 		}
 
-		pod2IP, _ := getPodAddress(pod2Name, f.Namespace.Name)
+		pod2IP := getPodAddress(pod2Name, f.Namespace.Name)
 
 		By("Checking connectivity from both to an external node and verify that the IP is one of the egress IPs")
 		targetExternalContainerAndTest("egress", pod1Name, []string{egressIP1.String(), egressIP2.String()})
@@ -1525,11 +1509,7 @@ var _ = Describe("e2e non-vxlan external gateway and update validation", func() 
 		createGenericPod(f, srcPingPodName, ciWorkerNodeSrc, command)
 		// wait for pod setup to return a valid address
 		err = wait.PollImmediate(retryInterval, retryTimeout, func() (bool, error) {
-			pingSrc, err = getPodAddress(srcPingPodName, f.Namespace.Name)
-			if err != nil {
-				framework.Logf("retrying ... error trying to get pod  %s address: %v", srcPingPodName, err)
-				return false, nil
-			}
+			pingSrc = getPodAddress(srcPingPodName, f.Namespace.Name)
 			validIP = net.ParseIP(pingSrc)
 			if validIP == nil {
 				return false, nil
