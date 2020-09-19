@@ -179,13 +179,12 @@ jobs:
          #   ENABLED   v4  ha     shared
          #   ENABLED   v4  noha   local
          #   DISABLED  v4  noha   shared
-         #   DISABLED  v6  ha     local
+         #   ENABLED   v6  ha     local
          #   ENABLED   v6  ha     shared
          #   DISABLED  v6  noha   local
          #   DISABLED  v6  noha   shared
          - {"ipfamily": {"ip": ipv4}, "ha": {"enabled": "true"}, "gateway-mode": local}
          - {"ipfamily": {"ip": ipv4}, "ha": {"enabled": "false"}, "gateway-mode": shared}
-         - {"ipfamily": {"ip": ipv6}, "ha": {"enabled": "true"}, "gateway-mode": local}
          - {"ipfamily": {"ip": ipv6}, "ha": {"enabled": "false"}, "gateway-mode": local}
          - {"ipfamily": {"ip": ipv6}, "ha": {"enabled": "false"}, "gateway-mode": shared}
     needs: [build, k8s]
