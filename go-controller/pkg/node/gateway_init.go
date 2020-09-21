@@ -73,30 +73,23 @@ func bridgedGatewayNodeSetup(nodeName, bridgeName, bridgeInterface, physicalNetw
 
 // getNetworkInterfaceIPAddresses returns the IP addresses for the network interface 'iface'.
 func getNetworkInterfaceIPAddresses(iface string) ([]*net.IPNet, error) {
-	intf, err := net.InterfaceByName(iface)
+	allIPs, err := util.GetNetworkInterfaceIPs(iface)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("could not find IP addresses: %v", err)
 	}
 
-	addrs, err := intf.Addrs()
-	if err != nil {
-		return nil, err
-	}
 	var ips []*net.IPNet
 	var foundIPv4 bool
 	var foundIPv6 bool
-	for _, addr := range addrs {
-		switch ip := addr.(type) {
-		case *net.IPNet:
-			if utilnet.IsIPv6CIDR(ip) {
-				if config.IPv6Mode && !foundIPv6 {
-					ips = append(ips, ip)
-					foundIPv6 = true
-				}
-			} else if config.IPv4Mode && !foundIPv4 {
+	for _, ip := range allIPs {
+		if utilnet.IsIPv6CIDR(ip) {
+			if config.IPv6Mode && !foundIPv6 {
 				ips = append(ips, ip)
-				foundIPv4 = true
+				foundIPv6 = true
 			}
+		} else if config.IPv4Mode && !foundIPv4 {
+			ips = append(ips, ip)
+			foundIPv4 = true
 		}
 	}
 	if config.IPv4Mode && !foundIPv4 {
