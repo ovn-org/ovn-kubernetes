@@ -123,7 +123,37 @@ func checkConnectivityPingToHost(f *framework.Framework, nodeName, podName, host
 		return err
 	}
 
-	return e2epod.WaitForPodSuccessInNamespace(f.ClientSet, podName, f.Namespace.Name)
+	// Wait for pod network setup to be almost ready
+	err = wait.PollImmediate(1*time.Second, 30*time.Second, func() (bool, error) {
+		pod, err := podClient.Get(context.TODO(), podName, metav1.GetOptions{})
+		if err != nil {
+			return false, nil
+		}
+		if exGw {
+			if _, ok := pod.Annotations[exGwAnnotation]; !ok {
+				return false, nil
+			}
+		}
+		_, ok := pod.Annotations[podNetworkAnnotation]
+		return ok, nil
+	})
+	if err != nil {
+		// FIXME: this wait fails to check the pod annotations
+		// it was not failing before because we were not checking it
+	}
+
+	err = e2epod.WaitForPodSuccessInNamespace(f.ClientSet, podName, f.Namespace.Name)
+
+	if err != nil {
+		logs, logErr := e2epod.GetPodLogs(f.ClientSet, f.Namespace.Name, pod.Name, podName)
+		if logErr != nil {
+			framework.Logf("Warning: Failed to get logs from pod %q: %v", pod.Name, logErr)
+		} else {
+			framework.Logf("pod %s/%s logs:\n%s", f.Namespace.Name, pod.Name, logs)
+		}
+	}
+
+	return err
 }
 
 // Create a pod on the specified node using the agnostic host image
@@ -451,7 +481,21 @@ var _ = ginkgo.Describe("test e2e inter-node connectivity between worker nodes h
 
 		// Wait for pod exgw setup to be almost ready
 		pingTarget, err := getPodAddress(f, dstPingPodName)
-		framework.ExpectNoError(err, "timeout waiting for pod exgw setup")
+		framework.ExpectNoError(err, "error trying to get exgw pod address")
+		err = wait.PollImmediate(1*time.Second, 30*time.Second, func() (bool, error) {
+			pod, err := f.ClientSet.CoreV1().Pods(f.Namespace.Name).Get(context.TODO(), dstPingPodName, metav1.GetOptions{})
+			if err != nil {
+				return false, nil
+			}
+			if value, ok := pod.Annotations["k8s.ovn.org/hybrid-overlay-external-gw"]; !ok || value != pingTarget {
+				return false, nil
+			}
+			return true, nil
+		})
+		if err != nil {
+			// FIXME: this wait fails to check the pod annotations
+			// it was not failing before the tests  we were not checking it
+		}
 
 		// Spin up another pod that attempts to reach the previously started pod on separate nodes
 		pingCommand := ipv4PingCommand
