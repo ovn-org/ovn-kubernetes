@@ -3,8 +3,10 @@ package ovn
 import (
 	"fmt"
 	"net"
+	"strconv"
 	"strings"
 
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
 	egressfirewallapi "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/egressfirewall/v1"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
 
@@ -15,7 +17,6 @@ import (
 )
 
 const (
-	defaultStartPriority           = 100
 	egressFirewallAppliedCorrectly = "EgressFirewall Rules applied"
 	egressFirewallAddError         = "EgressFirewall Rules not correctly added"
 	egressFirewallUpdateError      = "EgressFirewall Rules did not update correctly"
@@ -81,9 +82,17 @@ func (oc *Controller) addEgressFirewall(egressFirewall *egressfirewallapi.Egress
 	ef := newEgressFirewall(egressFirewall)
 	nsInfo.egressFirewallPolicy = ef
 	var errList []error
+	egressFirewallStartPriorityInt, err := strconv.Atoi(egressFirewallStartPriority)
+	if err != nil {
+		return []error{fmt.Errorf("failed to convert egressFirewallStartPriority to Integer: cannot add egressFirewall for namespace %s", egressFirewall.Namespace)}
+	}
+	minimumReservedEgressFirewallPriorityInt, err := strconv.Atoi(minimumReservedEgressFirewallPriority)
+	if err != nil {
+		return []error{fmt.Errorf("failed to convert minumumReservedEgressFirewallPriority to Integer: cannot add egressFirewall for namespace %s", egressFirewall.Namespace)}
+	}
 	for i, egressFirewallRule := range egressFirewall.Spec.Egress {
 		//process Rules into egressFirewallRules for egressFirewall struct
-		if i > defaultStartPriority {
+		if i > egressFirewallStartPriorityInt-minimumReservedEgressFirewallPriorityInt {
 			klog.Warningf("egressFirewall for namespace %s has to many rules, the rest will be ignored", egressFirewall.Namespace)
 			break
 		}
@@ -100,7 +109,7 @@ func (oc *Controller) addEgressFirewall(egressFirewall *egressfirewallapi.Egress
 		return errList
 	}
 
-	err = ef.addLogicalRouterPolicyToClusterRouter(nsInfo.addressSet.GetIPv4HashName(), nsInfo.addressSet.GetIPv6HashName())
+	err = ef.addLogicalRouterPolicyToClusterRouter(nsInfo.addressSet.GetIPv4HashName(), nsInfo.addressSet.GetIPv6HashName(), egressFirewallStartPriorityInt)
 	if err != nil {
 		errList = append(errList, err)
 	}
@@ -151,7 +160,7 @@ func (oc *Controller) updateEgressFirewallWithRetry(egressfirewall *egressfirewa
 	})
 }
 
-func (ef *egressFirewall) addLogicalRouterPolicyToClusterRouter(hashedAddressSetNameIPv4, hashedAddressSetNameIPv6 string) error {
+func (ef *egressFirewall) addLogicalRouterPolicyToClusterRouter(hashedAddressSetNameIPv4, hashedAddressSetNameIPv6 string, efStartPriority int) error {
 	for _, rule := range ef.egressRules {
 		var match string
 		var action string
@@ -166,17 +175,19 @@ func (ef *egressFirewall) addLogicalRouterPolicyToClusterRouter(hashedAddressSet
 			return fmt.Errorf("error rule.to.cidrSelector %s is not a valid CIDR (%+v)", rule.to.cidrSelector, err)
 		}
 		if !utilnet.IsIPv6(ipAddress) {
-			match = fmt.Sprintf("match=\"ip4.dst == %s && ip4.src == $%s\"", rule.to.cidrSelector, hashedAddressSetNameIPv4)
+			match = fmt.Sprintf("match=\"ip4.dst == %s && ip4.src == $%s", rule.to.cidrSelector, hashedAddressSetNameIPv4)
 		} else {
-			match = fmt.Sprintf("match=\"ip6.dst == %s && ip6.src == $%s\"", rule.to.cidrSelector, hashedAddressSetNameIPv6)
+			match = fmt.Sprintf("match=\"ip6.dst == %s && ip6.src == $%s", rule.to.cidrSelector, hashedAddressSetNameIPv6)
 		}
 
 		if len(rule.ports) > 0 {
-			match = fmt.Sprintf("%s && ( %s )\"", match[:len(match)-1], egressGetL4Match(rule.ports))
+			match = fmt.Sprintf("%s && ( %s )", match, egressGetL4Match(rule.ports))
 		}
 
+		match = fmt.Sprintf("%s && %s\"", match, getClusterSubnetsExclusion())
+
 		_, stderr, err := util.RunOVNNbctl("--id=@logical_router_policy", "create", "logical_router_policy",
-			fmt.Sprintf("priority=%d", defaultStartPriority-rule.id),
+			fmt.Sprintf("priority=%d", efStartPriority-rule.id),
 			match, "action="+action, fmt.Sprintf("external-ids:egressFirewall=%s", ef.namespace),
 			"--", "add", "logical_router", ovnClusterRouter, "policies", "@logical_router_policy")
 		if err != nil {
@@ -252,4 +263,16 @@ func egressGetL4Match(ports []egressfirewallapi.EgressFirewallPort) string {
 		}
 	}
 	return l4Match
+}
+
+func getClusterSubnetsExclusion() string {
+	var exclusion string
+	for _, clusterSubnet := range config.Default.ClusterSubnets {
+		if utilnet.IsIPv6CIDR(clusterSubnet.CIDR) {
+			exclusion += fmt.Sprintf(" && %s.dst != %s", "ip6", clusterSubnet.CIDR)
+		} else {
+			exclusion += fmt.Sprintf(" && %s.dst != %s", "ip4", clusterSubnet.CIDR)
+		}
+	}
+	return exclusion[4:]
 }

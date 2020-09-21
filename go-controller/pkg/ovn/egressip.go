@@ -21,8 +21,6 @@ import (
 )
 
 const (
-	defaultNoRereoutePriority = "101"
-	egressIPReroutePriority   = "100"
 	// In case we restart we need accept executing ovn-nbctl commands with this error.
 	// The ovn-nbctl API does not support `--may-exist` for `lr-policy-add`
 	policyAlreadyExistsMsg = "Same routing policy already existed"
