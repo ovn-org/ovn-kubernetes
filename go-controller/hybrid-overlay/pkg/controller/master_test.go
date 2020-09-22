@@ -166,7 +166,7 @@ var _ = Describe("Hybrid SDN Master Operations", func() {
 	It("sets up and cleans up a Linux node with a OVN hostsubnet annotation", func() {
 		app.Action = func(ctx *cli.Context) error {
 			const (
-				nodeName   string = "node1"
+				nodeName   string = "node2"
 				nodeSubnet string = "10.1.2.0/24"
 				nodeHOIP   string = "10.1.2.3"
 				nodeHOMAC  string = "0a:58:0a:01:02:03"
@@ -200,8 +200,8 @@ var _ = Describe("Hybrid SDN Master Operations", func() {
 			fexec.AddFakeCmdsNoOutputNoError([]string{
 				// Setting the mac on the lsp
 				"ovn-nbctl --timeout=15 -- " +
-					"--may-exist lsp-add node1 int-node1 -- " +
-					"lsp-set-addresses int-node1 " + nodeHOMAC,
+					"--may-exist lsp-add node2 int-node2 -- " +
+					"lsp-set-addresses int-node2 " + nodeHOMAC,
 			})
 
 			fexec.AddFakeCmd(&ovntest.ExpectedCmd{
@@ -229,7 +229,7 @@ var _ = Describe("Hybrid SDN Master Operations", func() {
 
 			// Test that deleting the node cleans up the OVN objects
 			fexec.AddFakeCmdsNoOutputNoError([]string{
-				"ovn-nbctl --timeout=15 -- --if-exists lsp-del int-node1",
+				"ovn-nbctl --timeout=15 -- --if-exists lsp-del int-node2",
 			})
 
 			err = fakeClient.CoreV1().Nodes().Delete(context.TODO(), nodeName, *metav1.NewDeleteOptions(0))
@@ -250,7 +250,7 @@ var _ = Describe("Hybrid SDN Master Operations", func() {
 	It("handles a Linux node with no annotation but an existing port", func() {
 		app.Action = func(ctx *cli.Context) error {
 			const (
-				nodeName   string = "node1"
+				nodeName   string = "node3"
 				nodeSubnet string = "10.1.2.0/24"
 				nodeHOIP   string = "10.1.2.3"
 				nodeHOMAC  string = "00:00:00:52:19:d2"
@@ -311,7 +311,7 @@ var _ = Describe("Hybrid SDN Master Operations", func() {
 	It("cleans up a Linux node when the OVN hostsubnet annotation is removed", func() {
 		app.Action = func(ctx *cli.Context) error {
 			const (
-				nodeName   string = "node1"
+				nodeName   string = "node4"
 				nodeSubnet string = "10.1.2.0/24"
 				nodeHOIP   string = "10.1.2.3"
 				nodeHOMAC  string = "00:00:00:52:19:d2"
@@ -325,7 +325,7 @@ var _ = Describe("Hybrid SDN Master Operations", func() {
 
 			fexec := ovntest.NewFakeExec()
 			fexec.AddFakeCmdsNoOutputNoError([]string{
-				"ovn-nbctl --timeout=15 -- --if-exists lsp-del int-node1",
+				"ovn-nbctl --timeout=15 -- --if-exists lsp-del int-node4",
 			})
 
 			err := util.SetExec(fexec)
@@ -399,7 +399,7 @@ var _ = Describe("Hybrid SDN Master Operations", func() {
 				nsName     string = "nstest"
 				nsVTEP            = "1.1.1.1"
 				nsExGw            = "2.2.2.2"
-				nodeName   string = "node1"
+				nodeName   string = "node5"
 				nodeSubnet string = "10.1.2.0/24"
 				nodeHOIP   string = "10.1.2.3"
 				nodeHOMAC  string = "00:00:00:52:19:d2"
@@ -485,7 +485,7 @@ var _ = Describe("Hybrid SDN Master Operations", func() {
 				nsVTEPUpdated string = "3.3.3.3"
 				nsExGw        string = "2.2.2.2"
 				nsExGwUpdated string = "4.4.4.4"
-				nodeName      string = "node1"
+				nodeName      string = "node6"
 				nodeSubnet    string = "10.1.2.0/24"
 				nodeHOMAC     string = "00:00:00:52:19:d2"
 				pod1Name      string = "pod1"
