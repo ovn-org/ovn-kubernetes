@@ -2,7 +2,6 @@ package util
 
 import (
 	"crypto/sha256"
-	"encoding/binary"
 	"fmt"
 	"math/big"
 	"net"
@@ -28,19 +27,6 @@ func ipToInt(ip net.IP) *big.Int {
 
 func intToIP(i *big.Int) net.IP {
 	return net.IP(i.Bytes())
-}
-
-// IPToUint32 returns a uint32 of an IPv4/IPv6 string
-func IPToUint32(egressIP string) uint32 {
-	ip := net.ParseIP(egressIP)
-	if utilnet.IsIPv6(ip) {
-		// This can obviously not be done for IPv6. But the logic here is:
-		// "allow users to create IPv6 egress IP addresses with a 1/(2^32)
-		// probability that they might collide. Or just use shared gateway
-		// mode, and live without this risk."
-		return binary.BigEndian.Uint32(ip[12:16])
-	}
-	return binary.BigEndian.Uint32(ip)
 }
 
 // GetNodeLogicalRouterNetworkInfo returns the IPs (IPv4 and/or IPv6) of the provided node's logical router
