@@ -13,7 +13,7 @@ if [[ ! -f /usr/local/bin/e2e.test ]]; then
 fi
 popd
 
-go get sigs.k8s.io/kind@c58694155106d0ac6e9612b7af5d0ac4f0559ba3
+go get sigs.k8s.io/kind@v0.9.0
 pushd ../contrib
 ./kind.sh
 popd

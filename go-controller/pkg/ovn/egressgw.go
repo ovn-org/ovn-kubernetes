@@ -349,7 +349,22 @@ func (oc *Controller) addHybridRoutePolicyForPod(podIP net.IP, node string) erro
 		if err != nil {
 			return fmt.Errorf("failed to parse gateway router join interface IP: %s, err: %v", grJoinIP, err)
 		}
+		var matchDst string
+		var clusterL3Prefix string
+		for _, clusterSubnet := range config.Default.ClusterSubnets {
+			if utilnet.IsIPv6CIDR(clusterSubnet.CIDR) {
+				clusterL3Prefix = "ip6"
+			} else {
+				clusterL3Prefix = "ip4"
+			}
+			if l3Prefix != clusterL3Prefix {
+				continue
+			}
+			matchDst += fmt.Sprintf(" && %s.dst != %s", clusterL3Prefix, clusterSubnet.CIDR)
+		}
+		// traffic destined outside of cluster subnet go to GR
 		matchStr := fmt.Sprintf(`inport == "rtos-%s" && %s.src == %s`, node, l3Prefix, podIP)
+		matchStr += matchDst
 		_, stderr, err = util.RunOVNNbctl("lr-policy-add", ovnClusterRouter, "501", matchStr, "reroute",
 			grJoinIP.String())
 		if err != nil {
@@ -375,7 +390,21 @@ func (oc *Controller) delHybridRoutePolicyForPod(podIP net.IP, node string) erro
 		} else {
 			l3Prefix = "ip4"
 		}
+		var matchDst string
+		var clusterL3Prefix string
+		for _, clusterSubnet := range config.Default.ClusterSubnets {
+			if utilnet.IsIPv6CIDR(clusterSubnet.CIDR) {
+				clusterL3Prefix = "ip6"
+			} else {
+				clusterL3Prefix = "ip4"
+			}
+			if l3Prefix != clusterL3Prefix {
+				continue
+			}
+			matchDst += fmt.Sprintf(" && %s.dst != %s", l3Prefix, clusterSubnet.CIDR)
+		}
 		matchStr := fmt.Sprintf(`inport == "rtos-%s" && %s.src == %s`, node, l3Prefix, podIP)
+		matchStr += matchDst
 		_, stderr, err := util.RunOVNNbctl("lr-policy-del", ovnClusterRouter, "501", matchStr)
 		if err != nil {
 			klog.Errorf("Failed to remove policy: %s, on: %s, stderr: %s, err: %v",

@@ -441,7 +441,7 @@ type ObjectCacheInterface interface {
 var _ ObjectCacheInterface = &WatchFactory{}
 
 const (
-	resyncInterval        = 12 * time.Hour
+	resyncInterval        = 0
 	handlerAlive   uint32 = 0
 	handlerDead    uint32 = 1
 	numEventQueues int    = 15
@@ -461,11 +461,12 @@ var (
 
 // NewWatchFactory initializes a new watch factory
 func NewWatchFactory(c kubernetes.Interface, eip egressipclientset.Interface, ec egressfirewallclientset.Interface, crd apiextensionsclientset.Interface) (*WatchFactory, error) {
-	// resync time is 12 hours, none of the resources being watched in ovn-kubernetes have
+	// resync time is 0, none of the resources being watched in ovn-kubernetes have
 	// any race condition where a resync may be required e.g. cni executable on node watching for
 	// events on pods and assuming that an 'ADD' event will contain the annotations put in by
 	// ovnkube master (currently, it is just a 'get' loop)
 	// the downside of making it tight (like 10 minutes) is needless spinning on all resources
+	// However, AddEventHandlerWithResyncPeriod can specify a per handler resync period
 	wf := &WatchFactory{
 		iFactory:    informerfactory.NewSharedInformerFactory(c, resyncInterval),
 		eipFactory:  egressipinformerfactory.NewSharedInformerFactory(eip, resyncInterval),

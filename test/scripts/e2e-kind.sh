@@ -32,9 +32,6 @@ Services.+session affinity
 # TO BE IMPLEMENTED: https://github.com/ovn-org/ovn-kubernetes/issues/1116
 EndpointSlices
 
-# TO BE IMPLEMENTED: https://github.com/ovn-org/ovn-kubernetes/issues/1663
-IPBlock.CIDR and IPBlock.Except
-
 # TO BE IMPLEMENTED: https://github.com/ovn-org/ovn-kubernetes/issues/1664
 should be able to preserve UDP traffic when server pod cycles for a NodePort service
 
@@ -61,6 +58,9 @@ IPV4_ONLY_TESTS="
 
 # The following tests currently fail for IPv6 only, but should be passing.
 # They will be removed as they are resolved.
+
+# See: https://github.com/ovn-org/ovn-kubernetes/issues/1683
+IPBlock.CIDR and IPBlock.Except
 
 # shard-n Tests
 #  See: https://github.com/kubernetes/kubernetes/pull/94136
