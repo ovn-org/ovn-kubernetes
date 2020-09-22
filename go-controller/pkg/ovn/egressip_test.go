@@ -53,7 +53,7 @@ var (
 	node2Name      = "node2"
 )
 
-func setupNode(nodeName string, ipNets []string, mockAllocationIPs []string) eNode {
+func setupNode(nodeName string, ipNets []string, mockAllocationIPs []string) egressNode {
 	var v4IP, v6IP net.IP
 	var v4Subnet, v6Subnet *net.IPNet
 	for _, ipNet := range ipNets {
@@ -72,7 +72,7 @@ func setupNode(nodeName string, ipNets []string, mockAllocationIPs []string) eNo
 		mockAllcations[net.ParseIP(mockAllocationIP).String()] = true
 	}
 
-	node := eNode{
+	node := egressNode{
 		v4IP:               v4IP,
 		v6IP:               v6IP,
 		v4Subnet:           v4Subnet,
@@ -92,9 +92,9 @@ var _ = Describe("OVN master EgressIP Operations", func() {
 	)
 
 	getEgressIPAllocatorSizeSafely := func() int {
-		fakeOvn.controller.eIPAllocatorMutex.Lock()
-		defer fakeOvn.controller.eIPAllocatorMutex.Unlock()
-		return len(fakeOvn.controller.eIPAllocator)
+		fakeOvn.controller.eIPC.allocatorMutex.Lock()
+		defer fakeOvn.controller.eIPC.allocatorMutex.Unlock()
+		return len(fakeOvn.controller.eIPC.allocator)
 	}
 
 	getEgressIPStatusLen := func(egressIPName string) func() int {
@@ -113,9 +113,9 @@ var _ = Describe("OVN master EgressIP Operations", func() {
 
 	isEgressAssignableNode := func(nodeName string) func() bool {
 		return func() bool {
-			fakeOvn.controller.eIPAllocatorMutex.Lock()
-			defer fakeOvn.controller.eIPAllocatorMutex.Unlock()
-			if item, exists := fakeOvn.controller.eIPAllocator[nodeName]; exists {
+			fakeOvn.controller.eIPC.allocatorMutex.Lock()
+			defer fakeOvn.controller.eIPC.allocatorMutex.Unlock()
+			if item, exists := fakeOvn.controller.eIPC.allocator[nodeName]; exists {
 				return item.isEgressAssignable
 			}
 			return false
@@ -203,8 +203,8 @@ var _ = Describe("OVN master EgressIP Operations", func() {
 
 				fakeOvn.controller.WatchEgressNodes()
 				Eventually(getEgressIPAllocatorSizeSafely).Should(Equal(2))
-				Expect(fakeOvn.controller.eIPAllocator).To(HaveKey(node1.Name))
-				Expect(fakeOvn.controller.eIPAllocator).To(HaveKey(node2.Name))
+				Expect(fakeOvn.controller.eIPC.allocator).To(HaveKey(node1.Name))
+				Expect(fakeOvn.controller.eIPC.allocator).To(HaveKey(node2.Name))
 				Eventually(isEgressAssignableNode(node1.Name)).Should(BeTrue())
 				Eventually(isEgressAssignableNode(node2.Name)).Should(BeFalse())
 
@@ -318,8 +318,8 @@ var _ = Describe("OVN master EgressIP Operations", func() {
 				)
 				fakeOvn.controller.WatchEgressNodes()
 				Eventually(getEgressIPAllocatorSizeSafely).Should(Equal(2))
-				Expect(fakeOvn.controller.eIPAllocator).To(HaveKey(node1.Name))
-				Expect(fakeOvn.controller.eIPAllocator).To(HaveKey(node2.Name))
+				Expect(fakeOvn.controller.eIPC.allocator).To(HaveKey(node1.Name))
+				Expect(fakeOvn.controller.eIPC.allocator).To(HaveKey(node2.Name))
 				Eventually(isEgressAssignableNode(node1.Name)).Should(BeTrue())
 				Eventually(isEgressAssignableNode(node2.Name)).Should(BeFalse())
 
@@ -366,9 +366,9 @@ var _ = Describe("OVN master EgressIP Operations", func() {
 				_, err = fakeOvn.fakeClient.KubeClient.CoreV1().Namespaces().Create(context.TODO(), egressNamespace, metav1.CreateOptions{})
 				Expect(err).NotTo(HaveOccurred())
 				Eventually(func() int {
-					fakeOvn.controller.egressIPPodHandlerMutex.Lock()
-					defer fakeOvn.controller.egressIPPodHandlerMutex.Unlock()
-					return len(fakeOvn.controller.egressIPPodHandlerCache)
+					fakeOvn.controller.eIPC.podHandlerMutex.Lock()
+					defer fakeOvn.controller.eIPC.podHandlerMutex.Unlock()
+					return len(fakeOvn.controller.eIPC.podHandlerCache)
 				}).Should(Equal(1))
 				_, err = fakeOvn.fakeClient.KubeClient.CoreV1().Pods(egressPod.Namespace).Create(context.TODO(), &egressPod, metav1.CreateOptions{})
 				Expect(err).NotTo(HaveOccurred())
@@ -401,8 +401,8 @@ var _ = Describe("OVN master EgressIP Operations", func() {
 				node1 := setupNode(node1Name, []string{"0:0:0:0:0:feff:c0a8:8e0c/64"}, []string{"0:0:0:0:0:feff:c0a8:8e32", "0:0:0:0:0:feff:c0a8:8e1e"})
 				node2 := setupNode(node2Name, []string{"0:0:0:0:0:fedf:c0a8:8e0c/64"}, []string{"0:0:0:0:0:feff:c0a8:8e23"})
 
-				fakeOvn.controller.eIPAllocator[node1.name] = &node1
-				fakeOvn.controller.eIPAllocator[node2.name] = &node2
+				fakeOvn.controller.eIPC.allocator[node1.name] = &node1
+				fakeOvn.controller.eIPC.allocator[node2.name] = &node2
 
 				eIP := egressipv1.EgressIP{
 					ObjectMeta: newEgressIPMeta(egressIPName),
@@ -502,8 +502,8 @@ var _ = Describe("OVN master EgressIP Operations", func() {
 				node1 := setupNode(node1Name, []string{"0:0:0:0:0:feff:c0a8:8e0c/64"}, []string{"0:0:0:0:0:feff:c0a8:8e32", "0:0:0:0:0:feff:c0a8:8e1e"})
 				node2 := setupNode(node2Name, []string{"0:0:0:0:0:fedf:c0a8:8e0c/64"}, []string{"0:0:0:0:0:feff:c0a8:8e23"})
 
-				fakeOvn.controller.eIPAllocator[node1.name] = &node1
-				fakeOvn.controller.eIPAllocator[node2.name] = &node2
+				fakeOvn.controller.eIPC.allocator[node1.name] = &node1
+				fakeOvn.controller.eIPC.allocator[node2.name] = &node2
 
 				eIP := egressipv1.EgressIP{
 					ObjectMeta: newEgressIPMeta(egressIPName),
@@ -584,8 +584,8 @@ var _ = Describe("OVN master EgressIP Operations", func() {
 				node1 := setupNode(node1Name, []string{"0:0:0:0:0:feff:c0a8:8e0c/64"}, []string{"0:0:0:0:0:feff:c0a8:8e32", "0:0:0:0:0:feff:c0a8:8e1e"})
 				node2 := setupNode(node2Name, []string{"0:0:0:0:0:fedf:c0a8:8e0c/64"}, []string{"0:0:0:0:0:feff:c0a8:8e23"})
 
-				fakeOvn.controller.eIPAllocator[node1.name] = &node1
-				fakeOvn.controller.eIPAllocator[node2.name] = &node2
+				fakeOvn.controller.eIPC.allocator[node1.name] = &node1
+				fakeOvn.controller.eIPC.allocator[node2.name] = &node2
 
 				eIP := egressipv1.EgressIP{
 					ObjectMeta: newEgressIPMeta(egressIPName),
@@ -662,8 +662,8 @@ var _ = Describe("OVN master EgressIP Operations", func() {
 				node1 := setupNode(node1Name, []string{"0:0:0:0:0:feff:c0a8:8e0c/64"}, []string{"0:0:0:0:0:feff:c0a8:8e32", "0:0:0:0:0:feff:c0a8:8e1e"})
 				node2 := setupNode(node2Name, []string{"0:0:0:0:0:fedf:c0a8:8e0c/64"}, []string{"0:0:0:0:0:feff:c0a8:8e23"})
 
-				fakeOvn.controller.eIPAllocator[node1.name] = &node1
-				fakeOvn.controller.eIPAllocator[node2.name] = &node2
+				fakeOvn.controller.eIPC.allocator[node1.name] = &node1
+				fakeOvn.controller.eIPC.allocator[node2.name] = &node2
 
 				eIP := egressipv1.EgressIP{
 					ObjectMeta: newEgressIPMeta(egressIPName),
@@ -726,8 +726,8 @@ var _ = Describe("OVN master EgressIP Operations", func() {
 				node1 := setupNode(node1Name, []string{"0:0:0:0:0:feff:c0a8:8e0c/64"}, []string{"0:0:0:0:0:feff:c0a8:8e32", "0:0:0:0:0:feff:c0a8:8e1e"})
 				node2 := setupNode(node2Name, []string{"0:0:0:0:0:fedf:c0a8:8e0c/64"}, []string{"0:0:0:0:0:feff:c0a8:8e23"})
 
-				fakeOvn.controller.eIPAllocator[node1.name] = &node1
-				fakeOvn.controller.eIPAllocator[node2.name] = &node2
+				fakeOvn.controller.eIPC.allocator[node1.name] = &node1
+				fakeOvn.controller.eIPC.allocator[node2.name] = &node2
 
 				eIP := egressipv1.EgressIP{
 					ObjectMeta: newEgressIPMeta(egressIPName),
@@ -826,8 +826,8 @@ var _ = Describe("OVN master EgressIP Operations", func() {
 				node1 := setupNode(node1Name, []string{"0:0:0:0:0:feff:c0a8:8e0c/64"}, []string{"0:0:0:0:0:feff:c0a8:8e32", "0:0:0:0:0:feff:c0a8:8e1e"})
 				node2 := setupNode(node2Name, []string{"0:0:0:0:0:fedf:c0a8:8e0c/64"}, []string{"0:0:0:0:0:feff:c0a8:8e23"})
 
-				fakeOvn.controller.eIPAllocator[node1.name] = &node1
-				fakeOvn.controller.eIPAllocator[node2.name] = &node2
+				fakeOvn.controller.eIPC.allocator[node1.name] = &node1
+				fakeOvn.controller.eIPC.allocator[node2.name] = &node2
 
 				eIP := egressipv1.EgressIP{
 					ObjectMeta: newEgressIPMeta("egressip"),
@@ -891,8 +891,8 @@ var _ = Describe("OVN master EgressIP Operations", func() {
 				node1 := setupNode(node1Name, []string{"0:0:0:0:0:feff:c0a8:8e0c/64"}, []string{"0:0:0:0:0:feff:c0a8:8e32", "0:0:0:0:0:feff:c0a8:8e1e"})
 				node2 := setupNode(node2Name, []string{"0:0:0:0:0:fedf:c0a8:8e0c/64"}, []string{"0:0:0:0:0:feff:c0a8:8e23"})
 
-				fakeOvn.controller.eIPAllocator[node1.name] = &node1
-				fakeOvn.controller.eIPAllocator[node2.name] = &node2
+				fakeOvn.controller.eIPC.allocator[node1.name] = &node1
+				fakeOvn.controller.eIPC.allocator[node2.name] = &node2
 
 				eIP := egressipv1.EgressIP{
 					ObjectMeta: newEgressIPMeta(egressIPName),
@@ -1014,8 +1014,8 @@ var _ = Describe("OVN master EgressIP Operations", func() {
 				node1 := setupNode(node1Name, []string{"0:0:0:0:0:feff:c0a8:8e0c/64"}, []string{"0:0:0:0:0:feff:c0a8:8e32", "0:0:0:0:0:feff:c0a8:8e1e"})
 				node2 := setupNode(node2Name, []string{"0:0:0:0:0:fedf:c0a8:8e0c/64"}, []string{"0:0:0:0:0:feff:c0a8:8e23"})
 
-				fakeOvn.controller.eIPAllocator[node1.name] = &node1
-				fakeOvn.controller.eIPAllocator[node2.name] = &node2
+				fakeOvn.controller.eIPC.allocator[node1.name] = &node1
+				fakeOvn.controller.eIPC.allocator[node2.name] = &node2
 
 				eIP := egressipv1.EgressIP{
 					ObjectMeta: newEgressIPMeta(egressIPName),
@@ -1131,9 +1131,9 @@ var _ = Describe("OVN master EgressIP Operations", func() {
 				_, err = fakeOvn.fakeClient.KubeClient.CoreV1().Nodes().Create(context.TODO(), &node1, metav1.CreateOptions{})
 				Expect(err).NotTo(HaveOccurred())
 				Eventually(getEgressIPAllocatorSizeSafely).Should(Equal(1))
-				Expect(fakeOvn.controller.eIPAllocator).To(HaveKey(node1.Name))
-				Expect(fakeOvn.controller.eIPAllocator[node1.Name].v4Subnet).To(Equal(ip1V4Sub))
-				Expect(fakeOvn.controller.eIPAllocator[node1.Name].v6Subnet).To(Equal(ip1V6Sub))
+				Expect(fakeOvn.controller.eIPC.allocator).To(HaveKey(node1.Name))
+				Expect(fakeOvn.controller.eIPC.allocator[node1.Name].v4Subnet).To(Equal(ip1V4Sub))
+				Expect(fakeOvn.controller.eIPC.allocator[node1.Name].v6Subnet).To(Equal(ip1V6Sub))
 
 				node2.Labels = map[string]string{
 					"k8s.ovn.org/egress-assignable": "",
@@ -1142,11 +1142,11 @@ var _ = Describe("OVN master EgressIP Operations", func() {
 				_, err = fakeOvn.fakeClient.KubeClient.CoreV1().Nodes().Create(context.TODO(), &node2, metav1.CreateOptions{})
 				Expect(err).NotTo(HaveOccurred())
 				Eventually(getEgressIPAllocatorSizeSafely).Should(Equal(2))
-				Expect(fakeOvn.controller.eIPAllocator).To(HaveKey(node1.Name))
-				Expect(fakeOvn.controller.eIPAllocator).To(HaveKey(node2.Name))
-				Expect(fakeOvn.controller.eIPAllocator[node2.Name].v4Subnet).To(Equal(ip2V4Sub))
-				Expect(fakeOvn.controller.eIPAllocator[node1.Name].v4Subnet).To(Equal(ip1V4Sub))
-				Expect(fakeOvn.controller.eIPAllocator[node1.Name].v6Subnet).To(Equal(ip1V6Sub))
+				Expect(fakeOvn.controller.eIPC.allocator).To(HaveKey(node1.Name))
+				Expect(fakeOvn.controller.eIPC.allocator).To(HaveKey(node2.Name))
+				Expect(fakeOvn.controller.eIPC.allocator[node2.Name].v4Subnet).To(Equal(ip2V4Sub))
+				Expect(fakeOvn.controller.eIPC.allocator[node1.Name].v4Subnet).To(Equal(ip1V4Sub))
+				Expect(fakeOvn.controller.eIPC.allocator[node1.Name].v6Subnet).To(Equal(ip1V6Sub))
 				return nil
 			}
 
@@ -1175,7 +1175,7 @@ var _ = Describe("OVN master EgressIP Operations", func() {
 				)
 
 				allocatorItems := func() int {
-					return len(fakeOvn.controller.eIPAllocator)
+					return len(fakeOvn.controller.eIPC.allocator)
 				}
 
 				fakeOvn.controller.WatchEgressNodes()
@@ -1260,14 +1260,14 @@ var _ = Describe("OVN master EgressIP Operations", func() {
 				Expect(statuses[0].Node).To(Equal(node.Name))
 				Expect(statuses[0].EgressIP).To(Equal(egressIP))
 
-				Expect(fakeOvn.controller.eIPAllocator).To(HaveLen(1))
-				Expect(fakeOvn.controller.eIPAllocator).To(HaveKey(node.Name))
-				Expect(fakeOvn.controller.eIPAllocator[node.Name].v4Subnet).To(Equal(ipv4Sub))
-				Expect(fakeOvn.controller.eIPAllocator[node.Name].v6Subnet).To(Equal(ipv6Sub))
+				Expect(fakeOvn.controller.eIPC.allocator).To(HaveLen(1))
+				Expect(fakeOvn.controller.eIPC.allocator).To(HaveKey(node.Name))
+				Expect(fakeOvn.controller.eIPC.allocator[node.Name].v4Subnet).To(Equal(ipv4Sub))
+				Expect(fakeOvn.controller.eIPC.allocator[node.Name].v6Subnet).To(Equal(ipv6Sub))
 
 				getCacheCount := func() int {
 					cacheCount := 0
-					fakeOvn.controller.egressAssignmentRetry.Range(func(key, value interface{}) bool {
+					fakeOvn.controller.eIPC.assignmentRetry.Range(func(key, value interface{}) bool {
 						cacheCount++
 						return true
 					})
@@ -1336,8 +1336,8 @@ var _ = Describe("OVN master EgressIP Operations", func() {
 				fakeOvn.controller.WatchEgressIP()
 
 				Eventually(getEgressIPAllocatorSizeSafely).Should(Equal(2))
-				Expect(fakeOvn.controller.eIPAllocator).To(HaveKey(node1.Name))
-				Expect(fakeOvn.controller.eIPAllocator).To(HaveKey(node2.Name))
+				Expect(fakeOvn.controller.eIPC.allocator).To(HaveKey(node1.Name))
+				Expect(fakeOvn.controller.eIPC.allocator).To(HaveKey(node2.Name))
 
 				Eventually(getEgressIPStatusLen(egressIPName)).Should(Equal(0))
 				recordedEvent := <-fakeOvn.fakeRecorder.Events
@@ -1404,7 +1404,7 @@ var _ = Describe("OVN master EgressIP Operations", func() {
 
 				getCacheCount := func() int {
 					cacheCount := 0
-					fakeOvn.controller.egressAssignmentRetry.Range(func(key, value interface{}) bool {
+					fakeOvn.controller.eIPC.assignmentRetry.Range(func(key, value interface{}) bool {
 						cacheCount++
 						return true
 					})
@@ -1483,13 +1483,13 @@ var _ = Describe("OVN master EgressIP Operations", func() {
 				_, ip2V4Sub, err := net.ParseCIDR(node2IPv4)
 
 				Eventually(getEgressIPAllocatorSizeSafely).Should(Equal(2))
-				Expect(fakeOvn.controller.eIPAllocator).To(HaveKey(node1.Name))
-				Expect(fakeOvn.controller.eIPAllocator).To(HaveKey(node2.Name))
+				Expect(fakeOvn.controller.eIPC.allocator).To(HaveKey(node1.Name))
+				Expect(fakeOvn.controller.eIPC.allocator).To(HaveKey(node2.Name))
 				Eventually(isEgressAssignableNode(node1.Name)).Should(BeFalse())
 				Eventually(isEgressAssignableNode(node2.Name)).Should(BeFalse())
-				Expect(fakeOvn.controller.eIPAllocator[node1.Name].v4Subnet).To(Equal(ip1V4Sub))
-				Expect(fakeOvn.controller.eIPAllocator[node1.Name].v6Subnet).To(Equal(ip1V6Sub))
-				Expect(fakeOvn.controller.eIPAllocator[node2.Name].v4Subnet).To(Equal(ip2V4Sub))
+				Expect(fakeOvn.controller.eIPC.allocator[node1.Name].v4Subnet).To(Equal(ip1V4Sub))
+				Expect(fakeOvn.controller.eIPC.allocator[node1.Name].v6Subnet).To(Equal(ip1V6Sub))
+				Expect(fakeOvn.controller.eIPC.allocator[node2.Name].v4Subnet).To(Equal(ip2V4Sub))
 				Eventually(eIP.Status.Items).Should(HaveLen(0))
 
 				node1.Labels = map[string]string{
@@ -1504,7 +1504,7 @@ var _ = Describe("OVN master EgressIP Operations", func() {
 
 				calculateCacheCount := func() int {
 					cacheCount := 0
-					fakeOvn.controller.egressAssignmentRetry.Range(func(key, value interface{}) bool {
+					fakeOvn.controller.eIPC.assignmentRetry.Range(func(key, value interface{}) bool {
 						cacheCount++
 						return true
 					})
@@ -1587,7 +1587,7 @@ var _ = Describe("OVN master EgressIP Operations", func() {
 				fakeOvn.controller.WatchEgressIP()
 
 				Eventually(getEgressIPAllocatorSizeSafely).Should(Equal(1))
-				Expect(fakeOvn.controller.eIPAllocator).To(HaveKey(node1.Name))
+				Expect(fakeOvn.controller.eIPC.allocator).To(HaveKey(node1.Name))
 				Eventually(getEgressIPStatusLen(egressIPName)).Should(Equal(1))
 				statuses := getEgressIPStatus(egressIPName)
 				Expect(statuses[0].Node).To(Equal(node1.Name))
@@ -1601,14 +1601,14 @@ var _ = Describe("OVN master EgressIP Operations", func() {
 				Expect(statuses[0].Node).To(Equal(node1.Name))
 				Expect(statuses[0].EgressIP).To(Equal(egressIP))
 				Eventually(getEgressIPAllocatorSizeSafely).Should(Equal(2))
-				Expect(fakeOvn.controller.eIPAllocator).To(HaveKey(node1.Name))
-				Expect(fakeOvn.controller.eIPAllocator).To(HaveKey(node2.Name))
+				Expect(fakeOvn.controller.eIPC.allocator).To(HaveKey(node1.Name))
+				Expect(fakeOvn.controller.eIPC.allocator).To(HaveKey(node2.Name))
 
 				err = fakeOvn.fakeClient.KubeClient.CoreV1().Nodes().Delete(context.TODO(), node1.Name, *metav1.NewDeleteOptions(0))
 				Expect(err).NotTo(HaveOccurred())
 				Eventually(getEgressIPAllocatorSizeSafely).Should(Equal(1))
-				Expect(fakeOvn.controller.eIPAllocator).ToNot(HaveKey(node1.Name))
-				Expect(fakeOvn.controller.eIPAllocator).To(HaveKey(node2.Name))
+				Expect(fakeOvn.controller.eIPC.allocator).ToNot(HaveKey(node1.Name))
+				Expect(fakeOvn.controller.eIPC.allocator).To(HaveKey(node2.Name))
 				Eventually(getEgressIPStatusLen(egressIPName)).Should(Equal(1))
 
 				getNewNode := func() string {
@@ -1640,8 +1640,8 @@ var _ = Describe("OVN master EgressIP Operations", func() {
 				node1 := setupNode(node1Name, []string{"0:0:0:0:0:feff:c0a8:8e0c/64"}, []string{"0:0:0:0:0:feff:c0a8:8e23"})
 				node2 := setupNode(node2Name, []string{"192.168.126.51/24"}, []string{"192.168.126.68", "192.168.126.102"})
 
-				fakeOvn.controller.eIPAllocator[node1.name] = &node1
-				fakeOvn.controller.eIPAllocator[node2.name] = &node2
+				fakeOvn.controller.eIPC.allocator[node1.name] = &node1
+				fakeOvn.controller.eIPC.allocator[node2.name] = &node2
 
 				eIP := egressipv1.EgressIP{
 					ObjectMeta: newEgressIPMeta(egressIPName),
@@ -1676,8 +1676,8 @@ var _ = Describe("OVN master EgressIP Operations", func() {
 				node1 := setupNode(node1Name, []string{"192.168.126.12/24"}, []string{"192.168.126.102", "192.168.126.111"})
 				node2 := setupNode(node2Name, []string{"192.168.126.51/24"}, []string{"192.168.126.68"})
 
-				fakeOvn.controller.eIPAllocator[node1.name] = &node1
-				fakeOvn.controller.eIPAllocator[node2.name] = &node2
+				fakeOvn.controller.eIPC.allocator[node1.name] = &node1
+				fakeOvn.controller.eIPC.allocator[node2.name] = &node2
 
 				eIP := egressipv1.EgressIP{
 					ObjectMeta: newEgressIPMeta(egressIPName),
@@ -1709,8 +1709,8 @@ var _ = Describe("OVN master EgressIP Operations", func() {
 				node1 := setupNode(node1Name, []string{"0:0:0:0:0:feff:c0a8:8e0c/64"}, []string{"0:0:0:0:0:feff:c0a8:8e32", "0:0:0:0:0:feff:c0a8:8e1e"})
 				node2 := setupNode(node2Name, []string{"0:0:0:0:0:fedf:c0a8:8e0c/64"}, []string{"0:0:0:0:0:feff:c0a8:8e23"})
 
-				fakeOvn.controller.eIPAllocator[node1.name] = &node1
-				fakeOvn.controller.eIPAllocator[node2.name] = &node2
+				fakeOvn.controller.eIPC.allocator[node1.name] = &node1
+				fakeOvn.controller.eIPC.allocator[node2.name] = &node2
 
 				eIP := egressipv1.EgressIP{
 					ObjectMeta: newEgressIPMeta(egressIPName),
@@ -1741,8 +1741,8 @@ var _ = Describe("OVN master EgressIP Operations", func() {
 				node1 := setupNode(node1Name, []string{"0:0:0:0:0:feff:c0a8:8e0c/64"}, []string{"0:0:0:0:0:feff:c0a8:8e32", "0:0:0:0:0:feff:c0a8:8e1e"})
 				node2 := setupNode(node2Name, []string{"0:0:0:0:0:fedf:c0a8:8e0c/64"}, []string{"0:0:0:0:0:feff:c0a8:8e23"})
 
-				fakeOvn.controller.eIPAllocator[node1.name] = &node1
-				fakeOvn.controller.eIPAllocator[node2.name] = &node2
+				fakeOvn.controller.eIPC.allocator[node1.name] = &node1
+				fakeOvn.controller.eIPC.allocator[node2.name] = &node2
 
 				eIP := egressipv1.EgressIP{
 					ObjectMeta: newEgressIPMeta(egressIPName),
@@ -1776,8 +1776,8 @@ var _ = Describe("OVN master EgressIP Operations", func() {
 				node1 := setupNode(node1Name, []string{"0:0:0:0:0:feff:c0a8:8e0c/64"}, []string{"0:0:0:0:0:feff:c0a8:8e32", "0:0:0:0:0:feff:c0a8:8e1e"})
 				node2 := setupNode(node2Name, []string{"0:0:0:0:0:fedf:c0a8:8e0c/64"}, []string{"0:0:0:0:0:feff:c0a8:8e23"})
 
-				fakeOvn.controller.eIPAllocator[node1.name] = &node1
-				fakeOvn.controller.eIPAllocator[node2.name] = &node2
+				fakeOvn.controller.eIPC.allocator[node1.name] = &node1
+				fakeOvn.controller.eIPC.allocator[node2.name] = &node2
 
 				eIP := egressipv1.EgressIP{
 					ObjectMeta: newEgressIPMeta(egressIPName),
@@ -1810,8 +1810,8 @@ var _ = Describe("OVN master EgressIP Operations", func() {
 				node1 := setupNode(node1Name, []string{"0:0:0:0:0:feff:c0a8:8e0c/64"}, []string{egressIP, "0:0:0:0:0:feff:c0a8:8e1e"})
 				node2 := setupNode(node2Name, []string{"0:0:0:0:0:fedf:c0a8:8e0c/64"}, []string{"0:0:0:0:0:feff:c0a8:8e23"})
 
-				fakeOvn.controller.eIPAllocator[node1.name] = &node1
-				fakeOvn.controller.eIPAllocator[node2.name] = &node2
+				fakeOvn.controller.eIPC.allocator[node1.name] = &node1
+				fakeOvn.controller.eIPC.allocator[node2.name] = &node2
 
 				egressIPs := []string{egressIP}
 				eIP := egressipv1.EgressIP{
@@ -1842,8 +1842,8 @@ var _ = Describe("OVN master EgressIP Operations", func() {
 				node1 := setupNode(node1Name, []string{egressIP + "/64"}, []string{"0:0:0:0:0:feff:c0a8:8e32", "0:0:0:0:0:feff:c0a8:8e1e"})
 				node2 := setupNode(node2Name, []string{"0:0:0:0:0:fedf:c0a8:8e0c/64"}, []string{"0:0:0:0:0:feff:c0a8:8e23"})
 
-				fakeOvn.controller.eIPAllocator[node1.name] = &node1
-				fakeOvn.controller.eIPAllocator[node2.name] = &node2
+				fakeOvn.controller.eIPC.allocator[node1.name] = &node1
+				fakeOvn.controller.eIPC.allocator[node2.name] = &node2
 
 				eIP := egressipv1.EgressIP{
 					ObjectMeta: newEgressIPMeta(egressIPName),
@@ -1872,8 +1872,8 @@ var _ = Describe("OVN master EgressIP Operations", func() {
 				node1 := setupNode(node1Name, []string{"0:0:0:0:0:feff:c0a8:8e0c/64"}, []string{"0:0:0:0:0:feff:c0a8:8e32", "0:0:0:0:0:feff:c0a8:8e1e"})
 				node2 := setupNode(node2Name, []string{"0:0:0:0:0:fedf:c0a8:8e0c/64"}, []string{"0:0:0:0:0:feff:c0a8:8e23"})
 
-				fakeOvn.controller.eIPAllocator[node1.name] = &node1
-				fakeOvn.controller.eIPAllocator[node2.name] = &node2
+				fakeOvn.controller.eIPC.allocator[node1.name] = &node1
+				fakeOvn.controller.eIPC.allocator[node2.name] = &node2
 
 				egressIPs := []string{egressIP}
 
@@ -1905,8 +1905,8 @@ var _ = Describe("OVN master EgressIP Operations", func() {
 				node1 := setupNode(node1Name, []string{"0:0:0:0:0:feff:c0a8:8e0c/64"}, []string{"0:0:0:0:0:feff:c0a8:8e32", "0:0:0:0:0:feff:c0a8:8e1e"})
 				node2 := setupNode(node2Name, []string{"0:0:0:0:0:fedf:c0a8:8e0c/64"}, []string{"0:0:0:0:0:feff:c0a8:8e23"})
 
-				fakeOvn.controller.eIPAllocator[node1.name] = &node1
-				fakeOvn.controller.eIPAllocator[node2.name] = &node2
+				fakeOvn.controller.eIPC.allocator[node1.name] = &node1
+				fakeOvn.controller.eIPC.allocator[node2.name] = &node2
 
 				eIPs := []string{egressIP}
 				eIP := egressipv1.EgressIP{
@@ -1937,8 +1937,8 @@ var _ = Describe("OVN master EgressIP Operations", func() {
 				node1 := setupNode(node1Name, []string{"0:0:0:0:0:feff:c0a8:8e0c/64"}, []string{"0:0:0:0:0:feff:c0a8:8e32", "0:0:0:0:0:feff:c0a8:8e1e"})
 				node2 := setupNode(node2Name, []string{"0:0:0:0:0:fedf:c0a8:8e0c/64"}, []string{"0:0:0:0:0:feff:c0a8:8e23"})
 
-				fakeOvn.controller.eIPAllocator[node1.name] = &node1
-				fakeOvn.controller.eIPAllocator[node2.name] = &node2
+				fakeOvn.controller.eIPC.allocator[node1.name] = &node1
+				fakeOvn.controller.eIPC.allocator[node2.name] = &node2
 
 				eIP := egressipv1.EgressIP{
 					ObjectMeta: newEgressIPMeta(egressIPName),
@@ -1968,8 +1968,8 @@ var _ = Describe("OVN master EgressIP Operations", func() {
 				node1 := setupNode(node1Name, []string{"0:0:0:0:0:feff:c0a8:8e0c/64"}, []string{"0:0:0:0:0:feff:c0a8:8e32", "0:0:0:0:0:feff:c0a8:8e1e"})
 				node2 := setupNode(node2Name, []string{"0:0:0:0:0:fedf:c0a8:8e0c/64"}, []string{"0:0:0:0:0:feff:c0a8:8e23"})
 
-				fakeOvn.controller.eIPAllocator[node1.name] = &node1
-				fakeOvn.controller.eIPAllocator[node2.name] = &node2
+				fakeOvn.controller.eIPC.allocator[node1.name] = &node1
+				fakeOvn.controller.eIPC.allocator[node2.name] = &node2
 				egressIPs := []string{egressIP}
 
 				eIP := egressipv1.EgressIP{
@@ -2000,8 +2000,8 @@ var _ = Describe("OVN master EgressIP Operations", func() {
 				node1 := setupNode(node1Name, []string{"0:0:0:0:0:feff:c0a8:8e0c/64"}, []string{"0:0:0:0:0:feff:c0a8:8e32", "0:0:0:0:0:feff:c0a8:8e1e"})
 				node2 := setupNode(node2Name, []string{"0:0:0:0:0:fedf:c0a8:8e0c/64"}, []string{"0:0:0:0:0:feff:c0a8:8e23"})
 
-				fakeOvn.controller.eIPAllocator[node1.name] = &node1
-				fakeOvn.controller.eIPAllocator[node2.name] = &node2
+				fakeOvn.controller.eIPC.allocator[node1.name] = &node1
+				fakeOvn.controller.eIPC.allocator[node2.name] = &node2
 
 				eIP := egressipv1.EgressIP{
 					ObjectMeta: newEgressIPMeta(egressIPName),
@@ -2032,8 +2032,8 @@ var _ = Describe("OVN master EgressIP Operations", func() {
 				node1 := setupNode(node1Name, []string{"192.168.126.12/24"}, []string{"192.168.126.102", "192.168.126.111"})
 				node2 := setupNode(node2Name, []string{"192.168.126.51/24"}, []string{"192.168.126.68"})
 
-				fakeOvn.controller.eIPAllocator[node1.name] = &node1
-				fakeOvn.controller.eIPAllocator[node2.name] = &node2
+				fakeOvn.controller.eIPC.allocator[node1.name] = &node1
+				fakeOvn.controller.eIPC.allocator[node2.name] = &node2
 
 				eIP := egressipv1.EgressIP{
 					ObjectMeta: newEgressIPMeta(egressIPName),
@@ -2076,8 +2076,8 @@ var _ = Describe("OVN master EgressIP Operations", func() {
 				node1 := setupNode(node1Name, []string{"0:0:0:0:0:feff:c0a8:8e0c/64"}, []string{"0:0:0:0:0:feff:c0a8:8e32", "0:0:0:0:0:feff:c0a8:8e1e"})
 				node2 := setupNode(node2Name, []string{"0:0:0:0:0:fedf:c0a8:8e0c/64"}, []string{"0:0:0:0:0:feff:c0a8:8e23"})
 
-				fakeOvn.controller.eIPAllocator[node1.name] = &node1
-				fakeOvn.controller.eIPAllocator[node2.name] = &node2
+				fakeOvn.controller.eIPC.allocator[node1.name] = &node1
+				fakeOvn.controller.eIPC.allocator[node2.name] = &node2
 
 				eIP := egressipv1.EgressIP{
 					ObjectMeta: newEgressIPMeta(egressIPName),
@@ -2116,8 +2116,8 @@ var _ = Describe("OVN master EgressIP Operations", func() {
 				node1 := setupNode(node1Name, []string{"0:0:0:0:0:feff:c0a8:8e0c/64"}, []string{"0:0:0:0:0:feff:c0a8:8e23"})
 				node2 := setupNode(node2Name, []string{"192.168.126.51/24"}, []string{"192.168.126.68", "192.168.126.102"})
 
-				fakeOvn.controller.eIPAllocator[node1.name] = &node1
-				fakeOvn.controller.eIPAllocator[node2.name] = &node2
+				fakeOvn.controller.eIPC.allocator[node1.name] = &node1
+				fakeOvn.controller.eIPC.allocator[node2.name] = &node2
 
 				eIP := egressipv1.EgressIP{
 					ObjectMeta: newEgressIPMeta(egressIPName),
@@ -2184,8 +2184,8 @@ var _ = Describe("OVN master EgressIP Operations", func() {
 						Items: []egressipv1.EgressIP{eIP},
 					})
 
-				fakeOvn.controller.eIPAllocator[node1.name] = &node1
-				fakeOvn.controller.eIPAllocator[node2.name] = &node2
+				fakeOvn.controller.eIPC.allocator[node1.name] = &node1
+				fakeOvn.controller.eIPC.allocator[node2.name] = &node2
 
 				fakeOvn.fakeExec.AddFakeCmdsNoOutputNoError(
 					[]string{
@@ -2240,8 +2240,8 @@ var _ = Describe("OVN master EgressIP Operations", func() {
 						Items: []egressipv1.EgressIP{eIP},
 					})
 
-				fakeOvn.controller.eIPAllocator[node1.name] = &node1
-				fakeOvn.controller.eIPAllocator[node2.name] = &node2
+				fakeOvn.controller.eIPC.allocator[node1.name] = &node1
+				fakeOvn.controller.eIPC.allocator[node2.name] = &node2
 				fakeOvn.fakeExec.AddFakeCmdsNoOutputNoError(
 					[]string{
 						fmt.Sprintf("ovn-nbctl --timeout=15 lr-policy-add ovn_cluster_router 101 ip4.src == 10.128.0.0/14 && ip4.dst == 10.128.0.0/14 allow"),
@@ -2290,8 +2290,8 @@ var _ = Describe("OVN master EgressIP Operations", func() {
 						Items: []egressipv1.EgressIP{eIP},
 					})
 
-				fakeOvn.controller.eIPAllocator[node1.name] = &node1
-				fakeOvn.controller.eIPAllocator[node2.name] = &node2
+				fakeOvn.controller.eIPC.allocator[node1.name] = &node1
+				fakeOvn.controller.eIPC.allocator[node2.name] = &node2
 				fakeOvn.fakeExec.AddFakeCmdsNoOutputNoError(
 					[]string{
 						fmt.Sprintf("ovn-nbctl --timeout=15 lr-policy-add ovn_cluster_router 101 ip4.src == 10.128.0.0/14 && ip4.dst == 10.128.0.0/14 allow"),
@@ -2346,8 +2346,8 @@ var _ = Describe("OVN master EgressIP Operations", func() {
 						Items: []egressipv1.EgressIP{eIP},
 					})
 
-				fakeOvn.controller.eIPAllocator[node1.name] = &node1
-				fakeOvn.controller.eIPAllocator[node2.name] = &node2
+				fakeOvn.controller.eIPC.allocator[node1.name] = &node1
+				fakeOvn.controller.eIPC.allocator[node2.name] = &node2
 				fakeOvn.fakeExec.AddFakeCmdsNoOutputNoError(
 					[]string{
 						fmt.Sprintf("ovn-nbctl --timeout=15 lr-policy-add ovn_cluster_router 101 ip4.src == 10.128.0.0/14 && ip4.dst == 10.128.0.0/14 allow"),
@@ -2397,8 +2397,8 @@ var _ = Describe("OVN master EgressIP Operations", func() {
 						Items: []egressipv1.EgressIP{eIP},
 					})
 
-				fakeOvn.controller.eIPAllocator[node1.name] = &node1
-				fakeOvn.controller.eIPAllocator[node2.name] = &node2
+				fakeOvn.controller.eIPC.allocator[node1.name] = &node1
+				fakeOvn.controller.eIPC.allocator[node2.name] = &node2
 				fakeOvn.fakeExec.AddFakeCmdsNoOutputNoError(
 					[]string{
 						fmt.Sprintf("ovn-nbctl --timeout=15 lr-policy-add ovn_cluster_router 101 ip4.src == 10.128.0.0/14 && ip4.dst == 10.128.0.0/14 allow"),
@@ -2446,8 +2446,8 @@ var _ = Describe("OVN master EgressIP Operations", func() {
 						Items: []egressipv1.EgressIP{eIP},
 					})
 
-				fakeOvn.controller.eIPAllocator[node1.name] = &node1
-				fakeOvn.controller.eIPAllocator[node2.name] = &node2
+				fakeOvn.controller.eIPC.allocator[node1.name] = &node1
+				fakeOvn.controller.eIPC.allocator[node2.name] = &node2
 				fakeOvn.fakeExec.AddFakeCmdsNoOutputNoError(
 					[]string{
 						fmt.Sprintf("ovn-nbctl --timeout=15 lr-policy-add ovn_cluster_router 101 ip4.src == 10.128.0.0/14 && ip4.dst == 10.128.0.0/14 allow"),
@@ -2494,8 +2494,8 @@ var _ = Describe("OVN master EgressIP Operations", func() {
 						Items: []egressipv1.EgressIP{eIP},
 					})
 
-				fakeOvn.controller.eIPAllocator[node1.name] = &node1
-				fakeOvn.controller.eIPAllocator[node2.name] = &node2
+				fakeOvn.controller.eIPC.allocator[node1.name] = &node1
+				fakeOvn.controller.eIPC.allocator[node2.name] = &node2
 				fakeOvn.fakeExec.AddFakeCmdsNoOutputNoError(
 					[]string{
 						fmt.Sprintf("ovn-nbctl --timeout=15 lr-policy-add ovn_cluster_router 101 ip4.src == 10.128.0.0/14 && ip4.dst == 10.128.0.0/14 allow"),
@@ -2538,8 +2538,8 @@ var _ = Describe("OVN master EgressIP Operations", func() {
 				}
 				fakeOvn.start(ctx)
 
-				fakeOvn.controller.eIPAllocator[node1.name] = &node1
-				fakeOvn.controller.eIPAllocator[node2.name] = &node2
+				fakeOvn.controller.eIPC.allocator[node1.name] = &node1
+				fakeOvn.controller.eIPC.allocator[node2.name] = &node2
 				fakeOvn.fakeExec.AddFakeCmdsNoOutputNoError(
 					[]string{
 						fmt.Sprintf("ovn-nbctl --timeout=15 lr-policy-add ovn_cluster_router 101 ip4.src == 10.128.0.0/14 && ip4.dst == 10.128.0.0/14 allow"),
@@ -2588,8 +2588,8 @@ var _ = Describe("OVN master EgressIP Operations", func() {
 				}
 				fakeOvn.start(ctx)
 
-				fakeOvn.controller.eIPAllocator[node1.name] = &node1
-				fakeOvn.controller.eIPAllocator[node2.name] = &node2
+				fakeOvn.controller.eIPC.allocator[node1.name] = &node1
+				fakeOvn.controller.eIPC.allocator[node2.name] = &node2
 				fakeOvn.fakeExec.AddFakeCmdsNoOutputNoError(
 					[]string{
 						fmt.Sprintf("ovn-nbctl --timeout=15 lr-policy-add ovn_cluster_router 101 ip4.src == 10.128.0.0/14 && ip4.dst == 10.128.0.0/14 allow"),
