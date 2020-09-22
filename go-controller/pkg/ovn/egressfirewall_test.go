@@ -69,7 +69,7 @@ var _ = Describe("OVN EgressFirewall Operations", func() {
 					node1Name string = "node1"
 				)
 				fExec.AddFakeCmdsNoOutputNoError([]string{
-					"ovn-nbctl --timeout=15 --id=@logical_router_policy create logical_router_policy priority=100 match=\"ip4.dst == 1.2.3.4/23 && ip4.src == $a10481622940199974102\" action=allow external-ids:egressFirewall=namespace1 -- add logical_router ovn_cluster_router policies @logical_router_policy",
+					"ovn-nbctl --timeout=15 --id=@logical_router_policy create logical_router_policy priority=10000 match=\"ip4.dst == 1.2.3.4/23 && ip4.src == $a10481622940199974102 && ip4.dst != 10.128.0.0/14\" action=allow external-ids:egressFirewall=namespace1 -- add logical_router ovn_cluster_router policies @logical_router_policy",
 				})
 
 				namespace1 := *newNamespace("namespace1")
@@ -126,7 +126,7 @@ var _ = Describe("OVN EgressFirewall Operations", func() {
 					node1Name string = "node1"
 				)
 				fExec.AddFakeCmdsNoOutputNoError([]string{
-					"ovn-nbctl --timeout=15 --id=@logical_router_policy create logical_router_policy priority=100 match=\"ip4.dst == 1.2.3.4/23 && ip4.src == $a10481622940199974102 && ( (udp) )\" action=drop external-ids:egressFirewall=namespace1 -- add logical_router ovn_cluster_router policies @logical_router_policy",
+					"ovn-nbctl --timeout=15 --id=@logical_router_policy create logical_router_policy priority=10000 match=\"ip4.dst == 1.2.3.4/23 && ip4.src == $a10481622940199974102 && ( (udp) ) && ip4.dst != 10.128.0.0/14\" action=drop external-ids:egressFirewall=namespace1 -- add logical_router ovn_cluster_router policies @logical_router_policy",
 				})
 				namespace1 := *newNamespace("namespace1")
 				egressFirewall := newEgressFirewallObject("default", namespace1.Name, []egressfirewallapi.EgressFirewallRule{
@@ -182,8 +182,8 @@ var _ = Describe("OVN EgressFirewall Operations", func() {
 					node1Name string = "node1"
 				)
 				fExec.AddFakeCmdsNoOutputNoError([]string{
-					"ovn-nbctl --timeout=15 --id=@logical_router_policy create logical_router_policy priority=100 match=\"ip4.dst == 1.2.3.5/23 && " +
-						"ip4.src == $a10481622940199974102 && ( (udp && ( udp.dst == 100 )) || (tcp) )\" action=allow external-ids:egressFirewall=namespace1 -- add logical_router ovn_cluster_router policies @logical_router_policy",
+					"ovn-nbctl --timeout=15 --id=@logical_router_policy create logical_router_policy priority=10000 match=\"ip4.dst == 1.2.3.5/23 && " +
+						"ip4.src == $a10481622940199974102 && ( (udp && ( udp.dst == 100 )) || (tcp) ) && ip4.dst != 10.128.0.0/14\" action=allow external-ids:egressFirewall=namespace1 -- add logical_router ovn_cluster_router policies @logical_router_policy",
 					"ovn-nbctl --timeout=15 lr-policy-del ovn_cluster_router " + fmt.Sprintf("%s", fakeUUID),
 				})
 				fExec.AddFakeCmd(&ovntest.ExpectedCmd{
@@ -251,8 +251,8 @@ var _ = Describe("OVN EgressFirewall Operations", func() {
 					node1Name string = "node1"
 				)
 				fExec.AddFakeCmdsNoOutputNoError([]string{
-					"ovn-nbctl --timeout=15 --id=@logical_router_policy create logical_router_policy priority=100 match=\"ip4.dst == 1.2.3.4/23 && ip4.src == $a10481622940199974102\" action=allow external-ids:egressFirewall=namespace1 -- add logical_router ovn_cluster_router policies @logical_router_policy",
-					"ovn-nbctl --timeout=15 --id=@logical_router_policy create logical_router_policy priority=100 match=\"ip4.dst == 1.2.3.4/23 && ip4.src == $a10481622940199974102\" action=drop external-ids:egressFirewall=namespace1 -- add logical_router ovn_cluster_router policies @logical_router_policy",
+					"ovn-nbctl --timeout=15 --id=@logical_router_policy create logical_router_policy priority=10000 match=\"ip4.dst == 1.2.3.4/23 && ip4.src == $a10481622940199974102 && ip4.dst != 10.128.0.0/14\" action=allow external-ids:egressFirewall=namespace1 -- add logical_router ovn_cluster_router policies @logical_router_policy",
+					"ovn-nbctl --timeout=15 --id=@logical_router_policy create logical_router_policy priority=10000 match=\"ip4.dst == 1.2.3.4/23 && ip4.src == $a10481622940199974102 && ip4.dst != 10.128.0.0/14\" action=drop external-ids:egressFirewall=namespace1 -- add logical_router ovn_cluster_router policies @logical_router_policy",
 					"ovn-nbctl --timeout=15 lr-policy-del ovn_cluster_router " + fmt.Sprintf("%s", fakeUUID),
 				})
 				fExec.AddFakeCmd(&ovntest.ExpectedCmd{
