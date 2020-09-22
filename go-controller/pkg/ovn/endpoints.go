@@ -114,9 +114,14 @@ func (ovn *Controller) AddEndpoints(ep *kapi.Endpoints) error {
 func (ovn *Controller) handleNodePortLB(node *kapi.Node) error {
 	gatewayRouter := gwRouterPrefix + node.Name
 	var physicalIPs []string
-	if physicalIPs, _ = ovn.getGatewayPhysicalIPs(gatewayRouter); physicalIPs == nil {
-		return fmt.Errorf("gateway physical IP for node %q does not yet exist", node.Name)
+	// OCP HACK - there will not be a GR during local gw + no gw interface mode (upgrade from 4.5->4.6)
+	// See https://github.com/openshift/ovn-kubernetes/pull/281
+	if !isGatewayInterfaceNone() {
+		if physicalIPs, _ = ovn.getGatewayPhysicalIPs(gatewayRouter); physicalIPs == nil {
+			return fmt.Errorf("gateway physical IP for node %q does not yet exist", node.Name)
+		}
 	}
+	// END OCP HACK
 	namespaces, err := ovn.watchFactory.GetNamespaces()
 	if err != nil {
 		return fmt.Errorf("failed to get k8s namespaces: %v", err)
