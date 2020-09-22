@@ -18,8 +18,10 @@ import (
 )
 
 var (
-	nodeLogicalRouterIPv6 = net.ParseIP("fef0::56")
-	nodeLogicalRouterIPv4 = net.ParseIP("100.64.0.2")
+	nodeLogicalRouterIPv6     = "fef0::56"
+	nodeLogicalRouterIPv4     = "100.64.0.2"
+	nodeLogicalRouterIfAddrV6 = nodeLogicalRouterIPv6 + "/125"
+	nodeLogicalRouterIfAddrV4 = nodeLogicalRouterIPv4 + "/29"
 )
 
 const (

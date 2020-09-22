@@ -363,7 +363,6 @@ type egressIPMode struct {
 
 func (e *egressIPMode) getGatewayRouterJoinIP(node string, wantsIPv6 bool) (net.IP, error) {
 	var gatewayIPs []net.IP
-
 	if item, exists := e.gatewayIPCache.Load(node); exists {
 		var ok bool
 		if gatewayIPs, ok = item.([]net.IP); !ok {
@@ -372,7 +371,10 @@ func (e *egressIPMode) getGatewayRouterJoinIP(node string, wantsIPv6 bool) (net.
 	} else {
 		err := utilwait.ExponentialBackoff(retry.DefaultRetry, func() (bool, error) {
 			var err error
-			gatewayIPs, err = util.GetNodeLogicalRouterIPs(node)
+			gatewayIPs, err = util.GetNodeGatewayRouterNetInfo(node)
+			if err != nil {
+				klog.Errorf("Attempt at finding node gateway router network information failed, err: %v", err)
+			}
 			return err == nil, nil
 		})
 		if err != nil {
