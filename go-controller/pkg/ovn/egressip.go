@@ -310,6 +310,14 @@ func (oc *Controller) assignEgressIPs(eIP *egressipv1.EgressIP) error {
 		oc.recorder.Eventf(&eIPRef, kapi.EventTypeWarning, "NoMatchingNodeFound", "No matching nodes found, which can host any of the egress IPs: %v for object EgressIP: %s", eIP.Spec.EgressIPs, eIP.Name)
 		return fmt.Errorf("no matching host found")
 	}
+	if len(assignments) < len(eIP.Spec.EgressIPs) {
+		oc.egressAssignmentRetry.Store(eIP.Name, true)
+		eIPRef := kapi.ObjectReference{
+			Kind: "EgressIP",
+			Name: eIP.Name,
+		}
+		oc.recorder.Eventf(&eIPRef, kapi.EventTypeWarning, "UnassignedRequest", "Not all egress IPs for EgressIP: %s could be assigned, please tag more nodes", eIP.Name)
+	}
 	return nil
 }
 
@@ -531,15 +539,11 @@ func (oc *Controller) addEgressNode(egressNode *kapi.Node) error {
 			klog.Errorf("Re-assignment for EgressIP: unable to retrieve EgressIP: %s from the api-server, err: %v", eIPName, err)
 			return true
 		}
-		eIP = eIP.DeepCopy()
-		if err := oc.addEgressIP(eIP); err != nil {
-			klog.Errorf("Re-assignment for EgressIP: unable to assign EgressIP: %s, err: %v", eIP.Name, err)
+		if err := oc.reassignEgressIP(eIP); err != nil {
+			klog.Errorf("Re-assignment for EgressIP: %s failed, err: %v", eIP.Name, err)
 			return true
 		}
 		oc.egressAssignmentRetry.Delete(eIP.Name)
-		if err := oc.updateEgressIPWithRetry(eIP); err != nil {
-			klog.Error(err)
-		}
 		return true
 	})
 	return nil
@@ -564,21 +568,28 @@ func (oc *Controller) deleteEgressNode(egressNode *kapi.Node) error {
 			}
 		}
 		if needsReassignment {
-			klog.V(5).Infof("EgressIP: %s about to be re-assigned", eIP.Name)
-			if err := oc.deleteEgressIP(&eIP); err != nil {
-				klog.Errorf("EgressIP: %s re-assignmnent error: old egress IP deletion failed, err: %v", eIP.Name, err)
-			}
-			eIP = *(eIP.DeepCopy())
-			eIP.Status = egressipv1.EgressIPStatus{
-				Items: []egressipv1.EgressIPStatusItem{},
-			}
-			if err := oc.addEgressIP(&eIP); err != nil {
-				klog.Errorf("EgressIP: %s re-assignmnent error: new egress IP assignment failed, err: %v", eIP.Name, err)
-			}
-			if err := oc.updateEgressIPWithRetry(&eIP); err != nil {
-				klog.Errorf("EgressIP: %s re-assignmnent error: update of new egress IP failed, err: %v", eIP.Name, err)
+			if err := oc.reassignEgressIP(&eIP); err != nil {
+				klog.Errorf("EgressIP: %s re-assignmnent error: %v", eIP.Name, err)
 			}
 		}
+	}
+	return nil
+}
+
+func (oc *Controller) reassignEgressIP(eIP *egressipv1.EgressIP) error {
+	klog.V(5).Infof("EgressIP: %s about to be re-assigned", eIP.Name)
+	if err := oc.deleteEgressIP(eIP); err != nil {
+		return fmt.Errorf("old egress IP deletion failed, err: %v", err)
+	}
+	eIP = eIP.DeepCopy()
+	eIP.Status = egressipv1.EgressIPStatus{
+		Items: []egressipv1.EgressIPStatusItem{},
+	}
+	if err := oc.addEgressIP(eIP); err != nil {
+		return fmt.Errorf("new egress IP assignment failed, err: %v", err)
+	}
+	if err := oc.updateEgressIPWithRetry(eIP); err != nil {
+		return fmt.Errorf("update of new egress IP failed, err: %v", err)
 	}
 	return nil
 }

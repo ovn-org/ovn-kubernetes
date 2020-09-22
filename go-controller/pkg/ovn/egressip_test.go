@@ -308,6 +308,88 @@ var _ = Describe("OVN master EgressIP Operations", func() {
 			Expect(err).NotTo(HaveOccurred())
 		})
 
+		It("should re-assigned EgressIPs when more nodes get tagged if the first assignment attempt wasn't fully successful", func() {
+			app.Action = func(ctx *cli.Context) error {
+
+				egressIP1 := "192.168.126.25"
+				egressIP2 := "192.168.126.30"
+				node1IPv4 := "192.168.126.51/24"
+				node2IPv4 := "192.168.126.101/24"
+
+				node1 := v1.Node{ObjectMeta: metav1.ObjectMeta{
+					Name: node1Name,
+					Labels: map[string]string{
+						"k8s.ovn.org/egress-assignable": "",
+					},
+					Annotations: map[string]string{
+						"k8s.ovn.org/node-primary-ifaddr": fmt.Sprintf("{\"ipv4\": \"%s\"}", node1IPv4),
+					},
+				}}
+				node2 := v1.Node{ObjectMeta: metav1.ObjectMeta{
+					Name: node2Name,
+					Annotations: map[string]string{
+						"k8s.ovn.org/node-primary-ifaddr": fmt.Sprintf("{\"ipv4\": \"%s\"}", node2IPv4),
+					},
+				}}
+
+				eIP := egressipv1.EgressIP{
+					ObjectMeta: newEgressIPMeta(egressIPName),
+					Spec: egressipv1.EgressIPSpec{
+						EgressIPs: []string{egressIP1, egressIP2},
+					},
+					Status: egressipv1.EgressIPStatus{
+						Items: []egressipv1.EgressIPStatusItem{},
+					},
+				}
+
+				fakeOvn.start(ctx,
+					&egressipv1.EgressIPList{
+						Items: []egressipv1.EgressIP{eIP},
+					},
+					&v1.NodeList{
+						Items: []v1.Node{node1, node2},
+					})
+
+				fakeOvn.fakeExec.AddFakeCmdsNoOutputNoError(
+					[]string{
+						fmt.Sprintf("ovn-nbctl --timeout=15 lr-policy-add ovn_cluster_router 101 ip4.src == 10.128.0.0/14 && ip4.dst == 10.128.0.0/14 allow"),
+					},
+				)
+				fakeOvn.controller.WatchEgressNodes()
+				fakeOvn.controller.WatchEgressIP()
+
+				Eventually(getEgressIPAllocatorSizeSafely).Should(Equal(1))
+				Eventually(getEgressIPStatusLen(egressIPName)).Should(Equal(1))
+
+				getCacheCount := func() int {
+					cacheCount := 0
+					fakeOvn.controller.egressAssignmentRetry.Range(func(key, value interface{}) bool {
+						cacheCount++
+						return true
+					})
+					return cacheCount
+				}
+
+				Eventually(getCacheCount).Should(Equal(1))
+
+				recordedEvent := <-fakeOvn.fakeRecorder.Events
+				Expect(recordedEvent).To(ContainSubstring("Not all egress IPs for EgressIP: %s could be assigned, please tag more nodes", eIP.Name))
+
+				node2.Labels = map[string]string{
+					"k8s.ovn.org/egress-assignable": "",
+				}
+
+				_, err := fakeOvn.fakeClient.CoreV1().Nodes().Update(context.TODO(), &node2, metav1.UpdateOptions{})
+				Expect(err).NotTo(HaveOccurred())
+
+				Eventually(getEgressIPStatusLen(egressIPName)).Should(Equal(2))
+				return nil
+			}
+
+			err := app.Run([]string{app.Name})
+			Expect(err).NotTo(HaveOccurred())
+		})
+
 		It("should only get assigned EgressIPs which matches their subnet when the node is tagged", func() {
 			app.Action = func(ctx *cli.Context) error {
 
