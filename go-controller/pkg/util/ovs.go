@@ -51,26 +51,13 @@ const (
 	sbdbCtlSock     = "ovnsb_db.ctl"
 	OvnNbdbLocation = "/etc/ovn/ovnnb_db.db"
 	OvnSbdbLocation = "/etc/ovn/ovnsb_db.db"
-)
 
-var (
-	// These are variables (not constants) so that testcases can modify them
 	ovsRunDir string = "/var/run/openvswitch/"
 	ovnRunDir string = "/var/run/ovn/"
-
-	savedOVSRunDir = ovsRunDir
-	savedOVNRunDir = ovnRunDir
 )
 
 var ovnCmdRetryCount = 200
 var AppFs = afero.NewOsFs()
-
-// PrepareTestConfig restores default config values. Used by testcases to
-// provide a pristine environment between tests.
-func PrepareTestConfig() {
-	ovsRunDir = savedOVSRunDir
-	ovnRunDir = savedOVNRunDir
-}
 
 // this metric is set only for the ovnkube in master mode since 99.9% of
 // all the ovn-nbctl/ovn-sbctl calls occur on the master
@@ -604,13 +591,13 @@ func RunOVNControllerAppCtl(args ...string) (string, string, error) {
 // RunOvsVswitchdAppCtl runs an 'ovs-appctl -t /var/run/openvsiwthc/ovs-vswitchd.pid.ctl command'
 func RunOvsVswitchdAppCtl(args ...string) (string, string, error) {
 	var cmdArgs []string
-	pid, err := afero.ReadFile(AppFs, savedOVSRunDir+"ovs-vswitchd.pid")
+	pid, err := afero.ReadFile(AppFs, ovsRunDir+"ovs-vswitchd.pid")
 	if err != nil {
 		return "", "", fmt.Errorf("failed to get ovs-vswitch pid : %v", err)
 	}
 	cmdArgs = []string{
 		"-t",
-		savedOVSRunDir + fmt.Sprintf("ovs-vswitchd.%s.ctl", strings.TrimSpace(string(pid))),
+		ovsRunDir + fmt.Sprintf("ovs-vswitchd.%s.ctl", strings.TrimSpace(string(pid))),
 	}
 	cmdArgs = append(cmdArgs, args...)
 	stdout, stderr, err := runOVNretry(runner.appctlPath, nil, cmdArgs...)
