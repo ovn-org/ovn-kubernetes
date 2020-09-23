@@ -357,8 +357,6 @@ func TestRunOVNNorthAppCtl(t *testing.T) {
 	runCmdExecRunner = mockExecRunner
 	// note runner is defined in ovs.go file
 	runner = &execHelper{exec: mockKexecIface}
-	// note runner.ovndir is defined in ovs.go file and so is ovnRunDir var with an initial value
-	runner.ovnRunDir = ovnRunDir
 
 	tests := []struct {
 		desc                    string
@@ -445,8 +443,6 @@ func TestRunOVNControllerAppCtl(t *testing.T) {
 	runCmdExecRunner = mockExecRunner
 	// note runner is defined in ovs.go file
 	runner = &execHelper{exec: mockKexecIface}
-	// note runner.ovndir is defined in ovs.go file and so is ovnRunDir var with an initial value
-	runner.ovnRunDir = ovnRunDir
 
 	tests := []struct {
 		desc                    string

@@ -72,7 +72,6 @@ type execHelper struct {
 	ovnctlPath      string
 	ovsdbClientPath string
 	ovsdbToolPath   string
-	ovnRunDir       string
 	ipPath          string
 	arpingPath      string
 	powershellPath  string
@@ -147,17 +146,7 @@ func SetExec(exec kexec.Interface) error {
 
 	runner.ovnappctlPath, err = exec.LookPath(ovnAppctlCommand)
 	if err != nil {
-		// If ovn-appctl command is not available then fall back to
-		// ovs-appctl. It also means OVN is using the rundir of
-		// openvswitch.
-		runner.ovnappctlPath = runner.appctlPath
-		runner.ovnctlPath = "/usr/share/openvswitch/scripts/ovn-ctl"
-		runner.ovnRunDir = ovsRunDir
-	} else {
-		// If ovn-appctl command is available, it means OVN
-		// has its own separate rundir, logdir, sharedir.
-		runner.ovnctlPath = "/usr/share/ovn/scripts/ovn-ctl"
-		runner.ovnRunDir = ovnRunDir
+		return err
 	}
 
 	runner.nbctlPath, err = exec.LookPath(ovnNbctlCommand)
@@ -493,7 +482,7 @@ func RunOVNNBAppCtl(args ...string) (string, string, error) {
 	var cmdArgs []string
 	cmdArgs = []string{
 		"-t",
-		runner.ovnRunDir + nbdbCtlSock,
+		ovnRunDir + nbdbCtlSock,
 	}
 	cmdArgs = append(cmdArgs, args...)
 	stdout, stderr, err := runOVNretry(runner.ovnappctlPath, nil, cmdArgs...)
@@ -505,7 +494,7 @@ func RunOVNSBAppCtl(args ...string) (string, string, error) {
 	var cmdArgs []string
 	cmdArgs = []string{
 		"-t",
-		runner.ovnRunDir + sbdbCtlSock,
+		ovnRunDir + sbdbCtlSock,
 	}
 	cmdArgs = append(cmdArgs, args...)
 	stdout, stderr, err := runOVNretry(runner.ovnappctlPath, nil, cmdArgs...)
@@ -517,14 +506,14 @@ func RunOVNSBAppCtl(args ...string) (string, string, error) {
 func RunOVNNorthAppCtl(args ...string) (string, string, error) {
 	var cmdArgs []string
 
-	pid, err := afero.ReadFile(AppFs, runner.ovnRunDir+"ovn-northd.pid")
+	pid, err := afero.ReadFile(AppFs, ovnRunDir+"ovn-northd.pid")
 	if err != nil {
 		return "", "", fmt.Errorf("failed to run the command since failed to get ovn-northd's pid: %v", err)
 	}
 
 	cmdArgs = []string{
 		"-t",
-		runner.ovnRunDir + fmt.Sprintf("ovn-northd.%s.ctl", strings.TrimSpace(string(pid))),
+		ovnRunDir + fmt.Sprintf("ovn-northd.%s.ctl", strings.TrimSpace(string(pid))),
 	}
 	cmdArgs = append(cmdArgs, args...)
 	stdout, stderr, err := runOVNretry(runner.ovnappctlPath, nil, cmdArgs...)
@@ -534,13 +523,13 @@ func RunOVNNorthAppCtl(args ...string) (string, string, error) {
 // RunOVNControllerAppCtl runs an 'ovs-appctl -t ovn-controller.pid.ctl command'.
 func RunOVNControllerAppCtl(args ...string) (string, string, error) {
 	var cmdArgs []string
-	pid, err := afero.ReadFile(AppFs, runner.ovnRunDir+"ovn-controller.pid")
+	pid, err := afero.ReadFile(AppFs, ovnRunDir+"ovn-controller.pid")
 	if err != nil {
 		return "", "", fmt.Errorf("failed to get ovn-controller pid : %v", err)
 	}
 	cmdArgs = []string{
 		"-t",
-		runner.ovnRunDir + fmt.Sprintf("ovn-controller.%s.ctl", strings.TrimSpace(string(pid))),
+		ovnRunDir + fmt.Sprintf("ovn-controller.%s.ctl", strings.TrimSpace(string(pid))),
 	}
 	cmdArgs = append(cmdArgs, args...)
 	stdout, stderr, err := runOVNretry(runner.ovnappctlPath, nil, cmdArgs...)
@@ -620,7 +609,7 @@ func ReplaceOFFlows(bridgeName string, flows []string) (string, string, error) {
 
 // GetOvnRunDir returns the OVN's rundir.
 func GetOvnRunDir() string {
-	return runner.ovnRunDir
+	return ovnRunDir
 }
 
 // ovsdb-server(5) says a clustered database is connected if the server
