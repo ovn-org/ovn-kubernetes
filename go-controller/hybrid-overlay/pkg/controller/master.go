@@ -326,6 +326,7 @@ func (m *MasterController) AddNode(node *kapi.Node) error {
 
 // DeleteNode handles node deletions
 func (m *MasterController) DeleteNode(node *kapi.Node) error {
+	klog.Infof("Processing node delete for %s", node.Name)
 	if subnet, _ := houtil.ParseHybridOverlayHostSubnet(node); subnet != nil {
 		if err := m.releaseNodeSubnet(node.Name, subnet); err != nil {
 			return err
@@ -335,6 +336,7 @@ func (m *MasterController) DeleteNode(node *kapi.Node) error {
 	if _, ok := node.Annotations[types.HybridOverlayDRMAC]; ok && !houtil.IsHybridOverlayNode(node) {
 		m.deleteOverlayPort(node)
 	}
+	klog.Infof("Node delete for %s completed", node.Name)
 	return nil
 }
 
