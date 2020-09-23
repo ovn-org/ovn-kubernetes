@@ -520,7 +520,7 @@ func RunOVNNorthAppCtl(args ...string) (string, string, error) {
 	return strings.Trim(strings.TrimSpace(stdout.String()), "\""), stderr.String(), err
 }
 
-// RunOVNControllerAppCtl runs an 'ovs-appctl -t ovn-controller.pid.ctl command'.
+// RunOVNControllerAppCtl runs an 'ovn-appctl -t ovn-controller.pid.ctl command'.
 func RunOVNControllerAppCtl(args ...string) (string, string, error) {
 	var cmdArgs []string
 	pid, err := afero.ReadFile(AppFs, ovnRunDir+"ovn-controller.pid")
@@ -605,11 +605,6 @@ func ReplaceOFFlows(bridgeName string, flows []string) (string, string, error) {
 	cmd.SetStdin(stdin)
 	stdout, stderr, err := runCmd(cmd, runner.ofctlPath, args...)
 	return strings.Trim(stdout.String(), "\" \n"), stderr.String(), err
-}
-
-// GetOvnRunDir returns the OVN's rundir.
-func GetOvnRunDir() string {
-	return ovnRunDir
 }
 
 // ovsdb-server(5) says a clustered database is connected if the server

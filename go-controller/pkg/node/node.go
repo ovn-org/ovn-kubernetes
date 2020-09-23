@@ -2,7 +2,6 @@ package node
 
 import (
 	"fmt"
-	"io/ioutil"
 	"net"
 	"os"
 	"path/filepath"
@@ -102,16 +101,8 @@ func setupOVNNode(node *kapi.Node) error {
 }
 
 func isOVNControllerReady(name string) (bool, error) {
-	runDir := util.GetOvnRunDir()
-
-	pid, err := ioutil.ReadFile(runDir + "ovn-controller.pid")
-	if err != nil {
-		return false, fmt.Errorf("unknown pid for ovn-controller process: %v", err)
-	}
-
-	err = wait.PollImmediate(500*time.Millisecond, 60*time.Second, func() (bool, error) {
-		ctlFile := runDir + fmt.Sprintf("ovn-controller.%s.ctl", strings.TrimSuffix(string(pid), "\n"))
-		ret, _, err := util.RunOVSAppctl("-t", ctlFile, "connection-status")
+	err := wait.PollImmediate(500*time.Millisecond, 60*time.Second, func() (bool, error) {
+		ret, _, err := util.RunOVNControllerAppCtl("connection-status")
 		if err == nil {
 			klog.Infof("Node %s connection status = %s", name, ret)
 			return ret == "connected", nil
