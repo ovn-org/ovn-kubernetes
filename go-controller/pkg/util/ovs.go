@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"runtime"
 	"strings"
 	"sync/atomic"
 	"time"
@@ -21,10 +20,6 @@ import (
 )
 
 const (
-	// On Windows we need an increased timeout on OVS commands, because
-	// adding internal ports on a non Hyper-V enabled host will call
-	// external Powershell commandlets.
-	// TODO: Decrease the timeout once port adding is improved on Windows
 	ovsCommandTimeout  = 15
 	ovsVsctlCommand    = "ovs-vsctl"
 	ovsOfctlCommand    = "ovs-ofctl"
@@ -37,9 +32,6 @@ const (
 	ovsdbToolCommand   = "ovsdb-tool"
 	arpingCommand      = "arping"
 	ipCommand          = "ip"
-	powershellCommand  = "powershell"
-	netshCommand       = "netsh"
-	routeCommand       = "route"
 )
 
 const (
@@ -69,14 +61,10 @@ type execHelper struct {
 	ovnappctlPath   string
 	nbctlPath       string
 	sbctlPath       string
-	ovnctlPath      string
 	ovsdbClientPath string
 	ovsdbToolPath   string
 	ipPath          string
 	arpingPath      string
-	powershellPath  string
-	netshPath       string
-	routePath       string
 }
 
 var runner *execHelper
@@ -122,11 +110,9 @@ var runCmdExecRunner ExecRunner = &defaultExecRunner{}
 // SetExec validates executable paths and saves the given exec interface
 // to be used for running various OVS and OVN utilites
 func SetExec(exec kexec.Interface) error {
-	err := SetExecWithoutOVS(exec)
-	if err != nil {
-		return err
-	}
+	runner = &execHelper{exec: exec}
 
+	var err error
 	runner.ofctlPath, err = exec.LookPath(ovsOfctlCommand)
 	if err != nil {
 		return err
@@ -165,39 +151,15 @@ func SetExec(exec kexec.Interface) error {
 	if err != nil {
 		return err
 	}
-
-	return nil
-}
-
-// SetExecWithoutOVS validates executable paths excluding OVS/OVN binaries and
-// saves the given exec interface to be used for running various utilites
-func SetExecWithoutOVS(exec kexec.Interface) error {
-	var err error
-
-	runner = &execHelper{exec: exec}
-	if runtime.GOOS == windowsOS {
-		runner.powershellPath, err = exec.LookPath(powershellCommand)
-		if err != nil {
-			return err
-		}
-		runner.netshPath, err = exec.LookPath(netshCommand)
-		if err != nil {
-			return err
-		}
-		runner.routePath, err = exec.LookPath(routeCommand)
-		if err != nil {
-			return err
-		}
-	} else {
-		runner.ipPath, err = exec.LookPath(ipCommand)
-		if err != nil {
-			return err
-		}
-		runner.arpingPath, err = exec.LookPath(arpingCommand)
-		if err != nil {
-			return err
-		}
+	runner.ipPath, err = exec.LookPath(ipCommand)
+	if err != nil {
+		return err
 	}
+	runner.arpingPath, err = exec.LookPath(arpingCommand)
+	if err != nil {
+		return err
+	}
+
 	return nil
 }
 
@@ -471,12 +433,6 @@ func RunOVNSbctl(args ...string) (string, string, error) {
 	return RunOVNSbctlWithTimeout(ovsCommandTimeout, args...)
 }
 
-// RunOVNCtl runs an ovn-ctl command.
-func RunOVNCtl(args ...string) (string, string, error) {
-	stdout, stderr, err := runOVNretry(runner.ovnctlPath, nil, args...)
-	return strings.Trim(strings.TrimSpace(stdout.String()), "\""), stderr.String(), err
-}
-
 // RunOVNNBAppCtl runs an 'ovs-appctl -t nbdbCtlSockPath command'.
 func RunOVNNBAppCtl(args ...string) (string, string, error) {
 	var cmdArgs []string
@@ -561,24 +517,6 @@ func RunIP(args ...string) (string, string, error) {
 // RunArping runs a command via the "arping" utility
 func RunArping(args ...string) (string, string, error) {
 	stdout, stderr, err := run(runner.arpingPath, args...)
-	return strings.TrimSpace(stdout.String()), stderr.String(), err
-}
-
-// RunPowershell runs a command via the Windows powershell utility
-func RunPowershell(args ...string) (string, string, error) {
-	stdout, stderr, err := run(runner.powershellPath, args...)
-	return strings.TrimSpace(stdout.String()), stderr.String(), err
-}
-
-// RunNetsh runs a command via the Windows netsh utility
-func RunNetsh(args ...string) (string, string, error) {
-	stdout, stderr, err := run(runner.netshPath, args...)
-	return strings.TrimSpace(stdout.String()), stderr.String(), err
-}
-
-// RunRoute runs a command via the Windows route utility
-func RunRoute(args ...string) (string, string, error) {
-	stdout, stderr, err := run(runner.routePath, args...)
 	return strings.TrimSpace(stdout.String()), stderr.String(), err
 }
 

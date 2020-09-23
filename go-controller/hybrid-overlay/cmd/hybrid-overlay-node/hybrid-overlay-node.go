@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"os/signal"
+	"runtime"
 	"sync"
 	"syscall"
 
@@ -91,8 +92,10 @@ func runHybridOverlay(ctx *cli.Context) error {
 		return err
 	}
 
-	if err := util.SetExecWithoutOVS(exec); err != nil {
-		return err
+	if runtime.GOOS != "windows" {
+		if err := util.SetExec(exec); err != nil {
+			return err
+		}
 	}
 
 	if nodeName == "" {
