@@ -286,13 +286,6 @@ func SetSpecificExec(exec kexec.Interface, commands ...string) error {
 	return nil
 }
 
-// GetExec returns the exec interface which can be used for running commands directly.
-// Only use for passing an exec interface into pkg/config which cannot call this
-// function directly because this module imports pkg/config already.
-func GetExec() kexec.Interface {
-	return runner.exec
-}
-
 var runCounter uint64
 
 func runCmd(cmd kexec.Cmd, cmdPath string, args ...string) (*bytes.Buffer, *bytes.Buffer, error) {
