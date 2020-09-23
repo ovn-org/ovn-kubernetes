@@ -6,17 +6,25 @@ import (
 	"fmt"
 	"io/ioutil"
 	"os"
+	"runtime"
 	"strings"
 	"syscall"
 
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
+	"github.com/spf13/afero"
 	"github.com/vishvananda/netlink"
+
 	"k8s.io/klog"
 )
 
 const (
 	ubuntuDefaultFile = "/etc/default/openvswitch-switch"
 	rhelDefaultFile   = "/etc/default/openvswitch"
+
+	osRelease = "/etc/os-release"
+	rhel      = "RHEL"
+	ubuntu    = "Ubuntu"
+	windowsOS = "windows"
 )
 
 func getBridgeName(iface string) string {
@@ -148,8 +156,48 @@ func saveRoute(oldLink, newLink netlink.Link, routes []netlink.Route) error {
 	return nil
 }
 
+func runningPlatform(fs afero.Fs) (string, error) {
+	if runtime.GOOS == windowsOS {
+		return windowsOS, nil
+	}
+	if fs == nil {
+		fs = afero.NewOsFs()
+	}
+	fileContents, err := afero.ReadFile(fs, osRelease)
+	if err != nil {
+		return "", fmt.Errorf("failed to parse file %s (%v)", osRelease, err)
+	}
+
+	var platform string
+	ss := strings.Split(string(fileContents), "\n")
+	for _, pair := range ss {
+		keyValue := strings.Split(pair, "=")
+		if len(keyValue) == 2 {
+			if keyValue[0] == "Name" || keyValue[0] == "NAME" {
+				platform = keyValue[1]
+				break
+			}
+		}
+	}
+
+	if platform == "" {
+		return "", fmt.Errorf("failed to find the platform name")
+	}
+
+	if strings.Contains(platform, "Fedora") ||
+		strings.Contains(platform, "Red Hat") || strings.Contains(platform, "CentOS") {
+		return rhel, nil
+	} else if strings.Contains(platform, "Debian") ||
+		strings.Contains(platform, ubuntu) {
+		return ubuntu, nil
+	} else if strings.Contains(platform, "VMware") {
+		return "Photon", nil
+	}
+	return "", fmt.Errorf("unknown platform")
+}
+
 func setupDefaultFile() {
-	platform, err := runningPlatform()
+	platform, err := runningPlatform(afero.NewOsFs())
 	if err != nil {
 		klog.Errorf("Failed to set OVS package default file (%v)", err)
 		return

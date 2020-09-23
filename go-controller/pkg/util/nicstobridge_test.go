@@ -3,6 +3,7 @@ package util
 import (
 	"bytes"
 	"fmt"
+	"os"
 	"testing"
 
 	ovntest "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/testing"
@@ -13,6 +14,7 @@ import (
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util/mocks"
 	"github.com/stretchr/testify/mock"
 
+	"github.com/spf13/afero"
 	"github.com/stretchr/testify/assert"
 )
 
@@ -1334,6 +1336,69 @@ func TestBridgeToNic(t *testing.T) {
 			mockExecRunner.AssertExpectations(t)
 			mockNetLinkOps.AssertExpectations(t)
 			mockLink.AssertExpectations(t)
+		})
+	}
+}
+
+func TestRunningPlatform(t *testing.T) {
+	// Below is defined in nicstobridge.go file
+	appFs := afero.NewMemMapFs()
+	appFs.MkdirAll("/etc", 0755)
+	tests := []struct {
+		desc            string
+		fileContent     []byte
+		filePermissions os.FileMode
+		expOut          string
+		expErr          error
+	}{
+		{
+			desc:   "ReadFile returns error",
+			expErr: fmt.Errorf("failed to parse file"),
+		},
+		{
+			desc:            "failed to find platform name",
+			expErr:          fmt.Errorf("failed to find the platform name"),
+			fileContent:     []byte("NAME="),
+			filePermissions: 0755,
+		},
+		{
+			desc:            "platform name returned is RHEL",
+			expOut:          "RHEL",
+			fileContent:     []byte("NAME=\"CentOS Linux\""),
+			filePermissions: 0755,
+		},
+		{
+			desc:            "platform name returned is Ubuntu",
+			expOut:          "Ubuntu",
+			fileContent:     []byte("NAME=\"Debian\""),
+			filePermissions: 0755,
+		},
+		{
+			desc:            "platform name returned is Photon",
+			expOut:          "Photon",
+			fileContent:     []byte("NAME=\"VMware\""),
+			filePermissions: 0755,
+		},
+		{
+			desc:            "unknown platform",
+			expErr:          fmt.Errorf("unknown platform"),
+			fileContent:     []byte("NAME=\"blah\""),
+			filePermissions: 0755,
+		},
+	}
+	for i, tc := range tests {
+		t.Run(fmt.Sprintf("%d:%s", i, tc.desc), func(t *testing.T) {
+			if tc.fileContent != nil && tc.filePermissions != 0 {
+				afero.WriteFile(appFs, "/etc/os-release", tc.fileContent, tc.filePermissions)
+				defer appFs.Remove("/etc/os-release")
+			}
+			res, err := runningPlatform(appFs)
+			t.Log(res, err)
+			if tc.expErr != nil {
+				assert.Contains(t, err.Error(), tc.expErr.Error())
+			} else {
+				assert.Equal(t, res, tc.expOut)
+			}
 		})
 	}
 }

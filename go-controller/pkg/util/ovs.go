@@ -40,10 +40,6 @@ const (
 	powershellCommand  = "powershell"
 	netshCommand       = "netsh"
 	routeCommand       = "route"
-	osRelease          = "/etc/os-release"
-	rhel               = "RHEL"
-	ubuntu             = "Ubuntu"
-	windowsOS          = "windows"
 )
 
 const (
@@ -62,43 +58,6 @@ var AppFs = afero.NewOsFs()
 // this metric is set only for the ovnkube in master mode since 99.9% of
 // all the ovn-nbctl/ovn-sbctl calls occur on the master
 var MetricOvnCliLatency *prometheus.HistogramVec
-
-func runningPlatform() (string, error) {
-	if runtime.GOOS == windowsOS {
-		return windowsOS, nil
-	}
-	fileContents, err := afero.ReadFile(AppFs, osRelease)
-	if err != nil {
-		return "", fmt.Errorf("failed to parse file %s (%v)", osRelease, err)
-	}
-
-	var platform string
-	ss := strings.Split(string(fileContents), "\n")
-	for _, pair := range ss {
-		keyValue := strings.Split(pair, "=")
-		if len(keyValue) == 2 {
-			if keyValue[0] == "Name" || keyValue[0] == "NAME" {
-				platform = keyValue[1]
-				break
-			}
-		}
-	}
-
-	if platform == "" {
-		return "", fmt.Errorf("failed to find the platform name")
-	}
-
-	if strings.Contains(platform, "Fedora") ||
-		strings.Contains(platform, "Red Hat") || strings.Contains(platform, "CentOS") {
-		return rhel, nil
-	} else if strings.Contains(platform, "Debian") ||
-		strings.Contains(platform, ubuntu) {
-		return ubuntu, nil
-	} else if strings.Contains(platform, "VMware") {
-		return "Photon", nil
-	}
-	return "", fmt.Errorf("unknown platform")
-}
 
 // Exec runs various OVN and OVS utilities
 type execHelper struct {
