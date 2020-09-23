@@ -81,8 +81,6 @@ func (n *OvnNode) createManagementPort(hostSubnets []*net.IPNet, nodeAnnotator k
 			}
 		}
 
-		n.initLocalEgressIP(gatewayIfAddrs, util.K8sMgmtIntfName)
-
 		if config.Gateway.NodeportEnable {
 			localAddrSet, err := getLocalAddrs()
 			if err != nil {
