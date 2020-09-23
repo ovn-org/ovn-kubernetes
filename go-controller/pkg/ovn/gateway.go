@@ -28,7 +28,7 @@ const (
 
 	nodeLocalSwitch = "node_local_switch"
 
-	// prority of logical router policies on the ovnClusterRouter
+	// priority of logical router policies on the ovnClusterRouter
 	egressFirewallStartPriority           = "10000"
 	minimumReservedEgressFirewallPriority = "2000"
 	mgmtPortPolicyPriority                = "1005"
