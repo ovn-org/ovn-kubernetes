@@ -11,6 +11,7 @@ import (
 	kapi "k8s.io/api/core/v1"
 
 	"github.com/vishvananda/netlink"
+	"golang.org/x/sys/unix"
 
 	utilnet "k8s.io/utils/net"
 )
@@ -317,4 +318,33 @@ func DeleteConntrack(ip string, port int32, protocol kapi.Protocol) error {
 		}
 	}
 	return nil
+}
+
+// GetNetworkInterfaceIPs returns the IP addresses for the network interface 'iface'.
+func GetNetworkInterfaceIPs(iface string) ([]*net.IPNet, error) {
+	link, err := netLinkOps.LinkByName(iface)
+	if err != nil {
+		return nil, fmt.Errorf("failed to lookup link %s: %v", iface, err)
+	}
+
+	addrs, err := netLinkOps.AddrList(link, netlink.FAMILY_ALL)
+	if err != nil {
+		return nil, fmt.Errorf("failed to list addresses for %q: %v", iface, err)
+	}
+
+	var ips []*net.IPNet
+	for _, addr := range addrs {
+		if addr.IP.IsLinkLocalUnicast() {
+			continue
+		}
+		// Ignore addresses marked as secondary or deprecated since they may
+		// disappear. (In bare metal clusters using MetalLB or similar, these
+		// flags are used to mark load balancer IPs that aren't permanently owned
+		// by the node).
+		if (addr.Flags & (unix.IFA_F_SECONDARY | unix.IFA_F_DEPRECATED)) != 0 {
+			continue
+		}
+		ips = append(ips, addr.IPNet)
+	}
+	return ips, nil
 }

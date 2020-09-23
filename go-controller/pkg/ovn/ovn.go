@@ -940,28 +940,6 @@ func (oc *Controller) WatchNodes() {
 				}
 				gatewaysFailed.Store(node.Name, true)
 			}
-
-			//add any existing egressFirewall objects to join switch
-			namespaceList, err := oc.watchFactory.GetNamespaces()
-			if err != nil {
-				klog.Errorf("Error getting list of namespaces when adding node: %s", node.Name)
-			}
-			for _, namespace := range namespaceList {
-				nsInfo, err := oc.waitForNamespaceLocked(namespace.Name)
-				if err != nil {
-					klog.Errorf("Failed to wait for namespace %s event (%v)",
-						namespace.Name, err)
-					continue
-				}
-				if nsInfo.egressFirewallPolicy != nil {
-					err = nsInfo.egressFirewallPolicy.addACLToJoinSwitch([]string{joinSwitch(node.Name)}, nsInfo.addressSet.GetIPv4HashName(), nsInfo.addressSet.GetIPv6HashName())
-					if err != nil {
-						klog.Errorf("%s", err)
-					}
-				}
-
-				nsInfo.Unlock()
-			}
 		},
 		UpdateFunc: func(old, new interface{}) {
 			oldNode := old.(*kapi.Node)
