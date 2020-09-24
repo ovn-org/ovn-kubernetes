@@ -2,11 +2,9 @@ package util
 
 import (
 	"crypto/sha256"
-	"encoding/binary"
 	"fmt"
 	"math/big"
 	"net"
-	"regexp"
 	"strconv"
 	"strings"
 
@@ -31,47 +29,27 @@ func intToIP(i *big.Int) net.IP {
 	return net.IP(i.Bytes())
 }
 
-// IPToUint32 returns a uint32 of an IPv4/IPv6 string
-func IPToUint32(egressIP string) uint32 {
-	ip := net.ParseIP(egressIP)
-	if utilnet.IsIPv6(ip) {
-		// This can obviously not be done for IPv6. But the logic here is:
-		// "allow users to create IPv6 egress IP addresses with a 1/(2^32)
-		// probability that they might collide. Or just use shared gateway
-		// mode, and live without this risk."
-		return binary.BigEndian.Uint32(ip[12:16])
-	}
-	return binary.BigEndian.Uint32(ip)
-}
-
-var forceSNAT = regexp.MustCompile(`lb_force_snat_ip="([^"]*)"`)
-
-// GetNodeLogicalRouterIPs returns the IPs (IPv4 and/or IPv6) of the provided node's logical router
+// GetNodeLogicalRouterNetworkInfo returns the IPs (IPv4 and/or IPv6) of the provided node's logical router
 // Expected output from the ovn-nbctl command, which will need to be parsed is:
-// `{ chassis="939391b7-b4b3-4c3a-b9a9-665103ee13b5", lb_force_snat_ip="100.64.0.1 fd99::1" }`
-func GetNodeLogicalRouterIPs(nodeName string) ([]net.IP, error) {
+// `100.64.1.1/29 fd98:1::/125`
+func GetNodeGatewayRouterNetInfo(nodeName string) ([]net.IP, error) {
 	stdout, _, err := RunOVNNbctl(
 		"--format=table",
+		"--data=bare",
 		"--no-heading",
-		"--columns=options",
-		"find", "logical_router",
-		fmt.Sprintf("name=GR_%s", nodeName),
-		"options:lb_force_snat_ip!=-",
+		"--columns=networks",
+		"find", "logical_router_port",
+		fmt.Sprintf("name=rtoj-GR_%s", nodeName),
 	)
 	if err != nil {
 		return nil, fmt.Errorf("unable to retrieve the logical router for node: %s, err: %v", nodeName, err)
 	}
-	matches := forceSNAT.FindStringSubmatch(stdout)
-	if len(matches) != 2 {
-		return nil, fmt.Errorf("could not find logical router IP for node: %s in %q", nodeName, stdout)
-	}
-
 	var ips []net.IP
-	for _, ipStr := range strings.Fields(matches[1]) {
-		if ip := net.ParseIP(ipStr); ip != nil {
+	for _, gatewayRouterIfAddr := range strings.Fields(stdout) {
+		if ip, _, err := net.ParseCIDR(gatewayRouterIfAddr); err == nil {
 			ips = append(ips, ip)
 		} else {
-			return nil, fmt.Errorf("failed to parse gateway router IP %q", ipStr)
+			return nil, fmt.Errorf("unable to parse the found gateway router IP address: %s", gatewayRouterIfAddr)
 		}
 	}
 	return ips, nil

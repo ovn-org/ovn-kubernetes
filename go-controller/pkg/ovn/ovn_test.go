@@ -37,7 +37,7 @@ type FakeOVN struct {
 	stopChan           chan struct{}
 	fakeExec           *ovntest.FakeExec
 	asf                *fakeAddressSetFactory
-	fakeRecorder       record.EventRecorder
+	fakeRecorder       *record.FakeRecorder
 	ovnNBClient        goovn.Client
 	ovnSBClient        goovn.Client
 }

@@ -345,10 +345,7 @@ type emptyLBBackendEvent struct {
 }
 
 func newModeEgressIP() modeEgressIP {
-	if config.Gateway.Mode == config.GatewayModeLocal {
-		return &egressIPLocal{}
-	}
-	return &egressIPShared{}
+	return &egressIPMode{}
 }
 
 func extractEmptyLBBackendsEvents(out []byte) ([]emptyLBBackendEvent, error) {
