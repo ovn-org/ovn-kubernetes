@@ -25,7 +25,7 @@ func TestGetNicName(t *testing.T) {
 	// below is defined in ovs.go
 	runCmdExecRunner = mockExecRunner
 	// note runner is defined in ovs.go file
-	runner = &execHelper{exec: mockKexecIface}
+	runner := &execHelper{exec: mockKexecIface}
 	tests := []struct {
 		desc                string
 		errMatch            error
@@ -168,7 +168,7 @@ func TestGetNicName(t *testing.T) {
 				call.Once()
 			}
 
-			res, err := GetNicName(tc.inpBrName)
+			res, err := GetNicName(runner, tc.inpBrName)
 
 			t.Log(res, err)
 
@@ -490,7 +490,7 @@ func TestNicToBridge(t *testing.T) {
 	// below is defined in ovs.go
 	runCmdExecRunner = mockExecRunner
 	// note runner is defined in ovs.go file
-	runner = &execHelper{exec: mockKexecIface}
+	runner := &execHelper{exec: mockKexecIface}
 
 	mockNetLinkOps := new(mocks.NetLinkOps)
 	mockLink := new(netlink_mocks.Link)
@@ -678,7 +678,7 @@ func TestNicToBridge(t *testing.T) {
 				call.Once()
 			}
 
-			res, err := NicToBridge(tc.inpIface)
+			res, err := NicToBridge(runner, tc.inpIface)
 			t.Log(res, err)
 			if tc.errExp {
 				assert.Error(t, err)
@@ -702,7 +702,7 @@ func TestBridgeToNic(t *testing.T) {
 	// below is defined in ovs.go
 	runCmdExecRunner = mockExecRunner
 	// note runner is defined in ovs.go file
-	runner = &execHelper{exec: mockKexecIface}
+	runner := &execHelper{exec: mockKexecIface}
 
 	mockNetLinkOps := new(mocks.NetLinkOps)
 	mockLink := new(netlink_mocks.Link)
@@ -1325,7 +1325,7 @@ func TestBridgeToNic(t *testing.T) {
 				call.Once()
 			}
 
-			err := BridgeToNic(tc.inpBridge)
+			err := BridgeToNic(runner, tc.inpBridge)
 			t.Log(err)
 			if tc.errExp {
 				assert.Error(t, err)

@@ -33,16 +33,16 @@ func getBridgeName(iface string) string {
 
 // GetNicName returns the physical NIC name, given an OVS bridge name
 // configured by NicToBridge()
-func GetNicName(brName string) (string, error) {
+func GetNicName(exec ExecHelper, brName string) (string, error) {
 	// Check for system type port (required to be set if using NetworkManager)
-	stdout, stderr, err := RunOVSVsctl("list-ports", brName)
+	stdout, stderr, err := exec.RunOVSVsctl("list-ports", brName)
 	if err != nil {
 		return "", fmt.Errorf("failed to get list of ports on bridge %q:, stderr: %q, error: %v",
 			brName, stderr, err)
 	}
 
 	for _, port := range strings.Split(stdout, "\n") {
-		stdout, stderr, err = RunOVSVsctl("get", "Port", port, "Interfaces")
+		stdout, stderr, err = exec.RunOVSVsctl("get", "Port", port, "Interfaces")
 		if err != nil {
 			return "", fmt.Errorf("failed to get port %q on bridge %q:, stderr: %q, error: %v",
 				port, brName, stderr, err)
@@ -51,7 +51,7 @@ func GetNicName(brName string) (string, error) {
 		// remove brackets on list of interfaces
 		ifaces := strings.TrimPrefix(strings.TrimSuffix(stdout, "]"), "[")
 		for _, iface := range strings.Split(ifaces, ",") {
-			stdout, stderr, err = RunOVSVsctl("get", "Interface", strings.TrimSpace(iface), "Type")
+			stdout, stderr, err = exec.RunOVSVsctl("get", "Interface", strings.TrimSpace(iface), "Type")
 			if err != nil {
 				return "", fmt.Errorf("failed to get Interface %q Type on bridge %q:, stderr: %q, error: %v",
 					iface, brName, stderr, err)
@@ -65,7 +65,7 @@ func GetNicName(brName string) (string, error) {
 	}
 
 	// Check for bridge-uplink to indicate the NIC
-	stdout, stderr, err = RunOVSVsctl(
+	stdout, stderr, err = exec.RunOVSVsctl(
 		"br-get-external-id", brName, "bridge-uplink")
 	if err != nil {
 		return "", fmt.Errorf("failed to get the bridge-uplink for the bridge %q:, stderr: %q, error: %v",
@@ -247,14 +247,14 @@ func setupDefaultFile() {
 
 // NicToBridge creates a OVS bridge for the 'iface' and also moves the IP
 // address and routes of 'iface' to OVS bridge.
-func NicToBridge(iface string) (string, error) {
+func NicToBridge(exec ExecHelper, iface string) (string, error) {
 	ifaceLink, err := netLinkOps.LinkByName(iface)
 	if err != nil {
 		return "", err
 	}
 
 	bridge := getBridgeName(iface)
-	stdout, stderr, err := RunOVSVsctl(
+	stdout, stderr, err := exec.RunOVSVsctl(
 		"--", "--may-exist", "add-br", bridge,
 		"--", "br-set-external-id", bridge, "bridge-id", bridge,
 		"--", "br-set-external-id", bridge, "bridge-uplink", iface,
@@ -305,7 +305,7 @@ func NicToBridge(iface string) (string, error) {
 
 // BridgeToNic moves the IP address and routes of internal port of the bridge to
 // underlying NIC interface and deletes the OVS bridge.
-func BridgeToNic(bridge string) error {
+func BridgeToNic(exec ExecHelper, bridge string) error {
 	// Internal port is named same as the bridge
 	bridgeLink, err := netLinkOps.LinkByName(bridge)
 	if err != nil {
@@ -327,7 +327,7 @@ func BridgeToNic(bridge string) error {
 		return err
 	}
 
-	nicName, err := GetNicName(bridge)
+	nicName, err := GetNicName(exec, bridge)
 	if err != nil {
 		return err
 	}
@@ -348,7 +348,7 @@ func BridgeToNic(bridge string) error {
 
 	// for every bridge interface that is of type "patch", find the peer
 	// interface and delete that interface from the integration bridge
-	stdout, stderr, err := RunOVSVsctl("list-ifaces", bridge)
+	stdout, stderr, err := exec.RunOVSVsctl("list-ifaces", bridge)
 	if err != nil {
 		klog.Errorf("Failed to get interfaces for OVS bridge: %q, "+
 			"stderr: %q, error: %v", bridge, stderr, err)
@@ -356,7 +356,7 @@ func BridgeToNic(bridge string) error {
 	}
 	ifacesList := strings.Split(strings.TrimSpace(stdout), "\n")
 	for _, iface := range ifacesList {
-		stdout, stderr, err = RunOVSVsctl("get", "interface", iface, "type")
+		stdout, stderr, err = exec.RunOVSVsctl("get", "interface", iface, "type")
 		if err != nil {
 			klog.Warningf("Failed to determine the type of interface: %q, "+
 				"stderr: %q, error: %v", iface, stderr, err)
@@ -364,7 +364,7 @@ func BridgeToNic(bridge string) error {
 		} else if stdout != "patch" {
 			continue
 		}
-		stdout, stderr, err = RunOVSVsctl("get", "interface", iface, "options:peer")
+		stdout, stderr, err = exec.RunOVSVsctl("get", "interface", iface, "options:peer")
 		if err != nil {
 			klog.Warningf("Failed to get the peer port for patch interface: %q, "+
 				"stderr: %q, error: %v", iface, stderr, err)
@@ -372,7 +372,7 @@ func BridgeToNic(bridge string) error {
 		}
 		// stdout has the peer interface, just delete it
 		peer := strings.TrimSpace(stdout)
-		_, stderr, err = RunOVSVsctl("--if-exists", "del-port", "br-int", peer)
+		_, stderr, err = exec.RunOVSVsctl("--if-exists", "del-port", "br-int", peer)
 		if err != nil {
 			klog.Warningf("Failed to delete patch port %q on br-int, "+
 				"stderr: %q, error: %v", peer, stderr, err)
@@ -380,7 +380,7 @@ func BridgeToNic(bridge string) error {
 	}
 
 	// Now delete the bridge
-	stdout, stderr, err = RunOVSVsctl("--", "--if-exists", "del-br", bridge)
+	stdout, stderr, err = exec.RunOVSVsctl("--", "--if-exists", "del-br", bridge)
 	if err != nil {
 		klog.Errorf("Failed to delete OVS bridge, stdout: %q, stderr: %q, error: %v", stdout, stderr, err)
 		return err

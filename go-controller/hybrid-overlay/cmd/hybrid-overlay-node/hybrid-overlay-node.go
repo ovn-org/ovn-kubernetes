@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"os"
 	"os/signal"
-	"runtime"
 	"sync"
 	"syscall"
 
@@ -87,15 +86,14 @@ func signalHandler(c context.Context) {
 }
 
 func runHybridOverlay(ctx *cli.Context) error {
-	exec := kexec.New()
-	if _, err := config.InitConfig(ctx, exec, nil); err != nil {
+	baseExec := kexec.New()
+	if _, err := config.InitConfig(ctx, baseExec, nil); err != nil {
 		return err
 	}
 
-	if runtime.GOOS != "windows" {
-		if err := util.SetExec(exec); err != nil {
-			return err
-		}
+	exec, err := util.NewExecHelper(baseExec)
+	if err != nil {
+		return err
 	}
 
 	if nodeName == "" {
@@ -113,6 +111,7 @@ func runHybridOverlay(ctx *cli.Context) error {
 
 	n, err := controller.NewNode(
 		&kube.Kube{KClient: clientset},
+		exec,
 		nodeName,
 		f.Core().V1().Nodes().Informer(),
 		f.Core().V1().Pods().Informer(),
