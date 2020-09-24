@@ -122,6 +122,7 @@ var _ = Describe("Hybrid SDN Master Operations", func() {
 				f.Core().V1().Pods().Informer(),
 				mockOVNNBClient,
 				mockOVNSBClient,
+				informer.NewTestEventHandler,
 			)
 			Expect(err).NotTo(HaveOccurred())
 
@@ -194,6 +195,7 @@ var _ = Describe("Hybrid SDN Master Operations", func() {
 				f.Core().V1().Pods().Informer(),
 				mockOVNNBClient,
 				mockOVNSBClient,
+				informer.NewTestEventHandler,
 			)
 			Expect(err).NotTo(HaveOccurred())
 
@@ -281,6 +283,7 @@ var _ = Describe("Hybrid SDN Master Operations", func() {
 				f.Core().V1().Pods().Informer(),
 				mockOVNNBClient,
 				mockOVNSBClient,
+				informer.NewTestEventHandler,
 			)
 			Expect(err).NotTo(HaveOccurred())
 
@@ -343,6 +346,7 @@ var _ = Describe("Hybrid SDN Master Operations", func() {
 				f.Core().V1().Pods().Informer(),
 				mockOVNNBClient,
 				mockOVNSBClient,
+				informer.NewTestEventHandler,
 			)
 			Expect(err).NotTo(HaveOccurred())
 
@@ -431,6 +435,7 @@ var _ = Describe("Hybrid SDN Master Operations", func() {
 				f.Core().V1().Pods().Informer(),
 				mockOVNNBClient,
 				mockOVNSBClient,
+				informer.NewTestEventHandler,
 			)
 			Expect(err).NotTo(HaveOccurred())
 
@@ -517,6 +522,7 @@ var _ = Describe("Hybrid SDN Master Operations", func() {
 				f.Core().V1().Pods().Informer(),
 				mockOVNNBClient,
 				mockOVNSBClient,
+				informer.NewTestEventHandler,
 			)
 			Expect(err).NotTo(HaveOccurred())
 

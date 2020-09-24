@@ -45,6 +45,7 @@ func NewMaster(kube kube.Interface,
 	podInformer cache.SharedIndexInformer,
 	ovnNBClient goovn.Client,
 	ovnSBClient goovn.Client,
+	eventHandlerCreateFunction informer.EventHandlerCreateFunction,
 ) (*MasterController, error) {
 
 	m := &MasterController{
@@ -54,7 +55,7 @@ func NewMaster(kube kube.Interface,
 		ovnSBClient: ovnSBClient,
 	}
 
-	m.nodeEventHandler = informer.NewDefaultEventHandler("node", nodeInformer,
+	m.nodeEventHandler = eventHandlerCreateFunction("node", nodeInformer,
 		func(obj interface{}) error {
 			node, ok := obj.(*kapi.Node)
 			if !ok {
@@ -72,7 +73,7 @@ func NewMaster(kube kube.Interface,
 		informer.ReceiveAllUpdates,
 	)
 
-	m.namespaceEventHandler = informer.NewDefaultEventHandler("namespace", namespaceInformer,
+	m.namespaceEventHandler = eventHandlerCreateFunction("namespace", namespaceInformer,
 		func(obj interface{}) error {
 			ns, ok := obj.(*kapi.Namespace)
 			if !ok {
@@ -87,7 +88,7 @@ func NewMaster(kube kube.Interface,
 		nsHybridAnnotationChanged,
 	)
 
-	m.podEventHandler = informer.NewDefaultEventHandler("pod", podInformer,
+	m.podEventHandler = eventHandlerCreateFunction("pod", podInformer,
 		func(obj interface{}) error {
 			pod, ok := obj.(*kapi.Pod)
 			if !ok {
