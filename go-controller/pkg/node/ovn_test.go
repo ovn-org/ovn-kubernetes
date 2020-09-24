@@ -3,7 +3,6 @@ package node
 import (
 	. "github.com/onsi/gomega"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
-	egressip "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/egressip/v1"
 	egressipfake "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/egressip/v1/apis/clientset/versioned/fake"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/factory"
 	ovntest "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/testing"
@@ -42,22 +41,17 @@ func NewFakeOVNNode(fexec *ovntest.FakeExec) *FakeOVNNode {
 }
 
 func (o *FakeOVNNode) start(ctx *cli.Context, objects ...runtime.Object) {
-	egressIPObjects := []runtime.Object{}
 	v1Objects := []runtime.Object{}
 	for _, object := range objects {
-		if _, isEgressIPObject := object.(*egressip.EgressIPList); isEgressIPObject {
-			egressIPObjects = append(egressIPObjects, object)
-		} else {
-			v1Objects = append(v1Objects, object)
-		}
+		v1Objects = append(v1Objects, object)
 	}
 	_, err := config.InitConfig(ctx, o.fakeExec, nil)
 	Expect(err).NotTo(HaveOccurred())
 
 	o.fakeCRDClient = apiextensionsfake.NewSimpleClientset()
 	o.fakeEgressClient = egressfirewallfake.NewSimpleClientset()
+	o.fakeEgressIPClient = egressipfake.NewSimpleClientset()
 	o.fakeClient = fake.NewSimpleClientset(v1Objects...)
-	o.fakeEgressIPClient = egressipfake.NewSimpleClientset(egressIPObjects...)
 	o.init()
 }
 

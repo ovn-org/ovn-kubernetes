@@ -467,24 +467,10 @@ var _ = Describe("Watch Factory Operations", func() {
 		testExisting := func(objType reflect.Type) {
 			wf, err = NewWatchFactory(fakeClient, egressIPFakeClient, egressFirewallFakeClient, crdFakeClient)
 			Expect(err).NotTo(HaveOccurred())
-			var addCalls int32
-			h := wf.addHandler(objType, "", nil,
-				cache.ResourceEventHandlerFuncs{
-					AddFunc: func(obj interface{}) {
-						atomic.AddInt32(&addCalls, 1)
-					},
-					UpdateFunc: func(old, new interface{}) {},
-					DeleteFunc: func(obj interface{}) {},
-				}, func(existing []interface{}) {
-					atomic.AddInt32(&addCalls, int32(len(existing)))
-				})
-			Expect(int(addCalls)).To(Equal(0))
-			wf.removeHandler(objType, h)
+			Expect(wf.informers).NotTo(HaveKey(objType))
 		}
-		It("does not call ADD for each existing egressIP", func() {
+		It("does not contain Egress IP informer", func() {
 			config.OVNKubernetesFeature.EnableEgressIP = false
-			egressIPs = append(egressIPs, newEgressIP("myEgressIP", "default"))
-			egressIPs = append(egressIPs, newEgressIP("myEgressIP1", "default"))
 			testExisting(egressIPType)
 		})
 	})

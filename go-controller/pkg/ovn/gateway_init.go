@@ -4,11 +4,13 @@ import (
 	"fmt"
 	"net"
 	"strings"
+	"time"
 
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
 
 	kapi "k8s.io/api/core/v1"
+	"k8s.io/apimachinery/pkg/util/wait"
 	"k8s.io/klog"
 	utilnet "k8s.io/utils/net"
 )
@@ -431,8 +433,14 @@ func addDistributedGWPort() error {
 		return nil
 	}
 
-	datapath, stderr, err := util.RunOVNSbctl("--data=bare", "--no-heading", "--columns=_uuid", "find", "datapath",
-		"external_ids:name="+ovnClusterRouter)
+	// Wait a bit for northd to create the cluster router's datapath in southbound
+	var datapath string
+	err = wait.PollImmediate(time.Second, 30*time.Second, func() (bool, error) {
+		datapath, stderr, err = util.RunOVNSbctl("--data=bare", "--no-heading", "--columns=_uuid", "find", "datapath",
+			"external_ids:name="+ovnClusterRouter)
+		// Ignore errors; can't easily detect which are transient or fatal
+		return datapath != "", nil
+	})
 	if err != nil {
 		return fmt.Errorf("failed to get the datapatah UUID of %s from OVN SB "+
 			"stdout: %q, stderr: %q, error: %v", ovnClusterRouter, datapath, stderr, err)

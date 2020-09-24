@@ -310,6 +310,14 @@ func (oc *Controller) assignEgressIPs(eIP *egressipv1.EgressIP) error {
 		oc.recorder.Eventf(&eIPRef, kapi.EventTypeWarning, "NoMatchingNodeFound", "No matching nodes found, which can host any of the egress IPs: %v for object EgressIP: %s", eIP.Spec.EgressIPs, eIP.Name)
 		return fmt.Errorf("no matching host found")
 	}
+	if len(assignments) < len(eIP.Spec.EgressIPs) {
+		oc.egressAssignmentRetry.Store(eIP.Name, true)
+		eIPRef := kapi.ObjectReference{
+			Kind: "EgressIP",
+			Name: eIP.Name,
+		}
+		oc.recorder.Eventf(&eIPRef, kapi.EventTypeWarning, "UnassignedRequest", "Not all egress IPs for EgressIP: %s could be assigned, please tag more nodes", eIP.Name)
+	}
 	return nil
 }
 
@@ -353,9 +361,122 @@ type egressIPMode struct {
 	gatewayIPCache sync.Map
 }
 
+func (e *egressIPMode) addPodEgressIP(eIP *egressipv1.EgressIP, pod *kapi.Pod) error {
+	podIPs := e.getPodIPs(pod)
+	if podIPs == nil {
+		e.podRetry.Store(getPodKey(pod), true)
+		return nil
+	}
+	if e.needsRetry(pod) {
+		e.podRetry.Delete(getPodKey(pod))
+	}
+	for _, status := range eIP.Status.Items {
+		if err := e.createEgressPolicy(podIPs, status, eIP.Name); err != nil {
+			return fmt.Errorf("unable to create logical router policy for status: %v, err: %v", status, err)
+		}
+		if err := createNATRule(podIPs, status, eIP.Name); err != nil {
+			return fmt.Errorf("unable to create NAT rule for status: %v, err: %v", status, err)
+		}
+	}
+	return nil
+}
+
+func (e *egressIPMode) deletePodEgressIP(eIP *egressipv1.EgressIP, pod *kapi.Pod) error {
+	podIPs := e.getPodIPs(pod)
+	if podIPs == nil {
+		return nil
+	}
+	for _, status := range eIP.Status.Items {
+		if err := e.deleteEgressPolicy(podIPs, status, eIP.Name); err != nil {
+			return fmt.Errorf("unable to delete logical router policy for status: %v, err: %v", status, err)
+		}
+		if err := deleteNATRule(podIPs, status, eIP.Name); err != nil {
+			return fmt.Errorf("unable to delete NAT rule for status: %v, err: %v", status, err)
+		}
+	}
+	return nil
+}
+
+func createNATRule(podIPs []net.IP, status egressipv1.EgressIPStatusItem, egressIPName string) error {
+	for _, podIP := range podIPs {
+		if (utilnet.IsIPv6String(status.EgressIP) && utilnet.IsIPv6(podIP)) || (!utilnet.IsIPv6String(status.EgressIP) && !utilnet.IsIPv6(podIP)) {
+			natIDs, err := findNatIDs(egressIPName, podIP.String(), status.EgressIP)
+			if err != nil {
+				return err
+			}
+			if natIDs == nil {
+				_, stderr, err := util.RunOVNNbctl(
+					"--id=@nat",
+					"create",
+					"nat",
+					"type=snat",
+					fmt.Sprintf("logical_port=k8s-%s", status.Node),
+					fmt.Sprintf("external_ip=%s", status.EgressIP),
+					fmt.Sprintf("logical_ip=%s", podIP),
+					fmt.Sprintf("external_ids:name=%s", egressIPName),
+					"--",
+					"add",
+					"logical_router",
+					fmt.Sprintf("GR_%s", status.Node),
+					"nat",
+					"@nat",
+				)
+				if err != nil {
+					return fmt.Errorf("unable to create nat rule, stderr: %s, err: %v", stderr, err)
+				}
+			}
+		}
+	}
+	return nil
+}
+
+func deleteNATRule(podIPs []net.IP, status egressipv1.EgressIPStatusItem, egressIPName string) error {
+	for _, podIP := range podIPs {
+		if (utilnet.IsIPv6String(status.EgressIP) && utilnet.IsIPv6(podIP)) || (!utilnet.IsIPv6String(status.EgressIP) && !utilnet.IsIPv6(podIP)) {
+			natIDs, err := findNatIDs(egressIPName, podIP.String(), status.EgressIP)
+			if err != nil {
+				return err
+			}
+			for _, natID := range natIDs {
+				_, stderr, err := util.RunOVNNbctl(
+					"remove",
+					"logical_router",
+					fmt.Sprintf("GR_%s", status.Node),
+					"nat",
+					natID,
+				)
+				if err != nil {
+					return fmt.Errorf("unable to remove nat from logical_router, stderr: %s, err: %v", stderr, err)
+				}
+			}
+		}
+	}
+	return nil
+}
+
+func findNatIDs(egressIPName, podIP, egressIP string) ([]string, error) {
+	natIDs, stderr, err := util.RunOVNNbctl(
+		"--format=csv",
+		"--data=bare",
+		"--no-heading",
+		"--columns=_uuid",
+		"find",
+		"nat",
+		fmt.Sprintf("external_ids:name=%s", egressIPName),
+		fmt.Sprintf("logical_ip=%s", podIP),
+		fmt.Sprintf("external_ip=%s", egressIP),
+	)
+	if err != nil {
+		return nil, fmt.Errorf("unable to find nat ID, stderr: %s, err: %v", stderr, err)
+	}
+	if natIDs == "" {
+		return nil, nil
+	}
+	return strings.Split(natIDs, "\n"), nil
+}
+
 func (e *egressIPMode) getGatewayRouterJoinIP(node string, wantsIPv6 bool) (net.IP, error) {
 	var gatewayIPs []net.IP
-
 	if item, exists := e.gatewayIPCache.Load(node); exists {
 		var ok bool
 		if gatewayIPs, ok = item.([]net.IP); !ok {
@@ -364,7 +485,10 @@ func (e *egressIPMode) getGatewayRouterJoinIP(node string, wantsIPv6 bool) (net.
 	} else {
 		err := utilwait.ExponentialBackoff(retry.DefaultRetry, func() (bool, error) {
 			var err error
-			gatewayIPs, err = util.GetNodeLogicalRouterIPs(node)
+			gatewayIPs, err = util.GetNodeGatewayRouterNetInfo(node)
+			if err != nil {
+				klog.Errorf("Attempt at finding node gateway router network information failed, err: %v", err)
+			}
 			return err == nil, nil
 		})
 		if err != nil {
@@ -397,14 +521,12 @@ func (e *egressIPMode) needsRetry(pod *kapi.Pod) bool {
 }
 
 // createEgressPolicy uses logical router policies to force egress traffic to the egress node, for that we need
-// to retrive the internal gateway router IP attached to the egress node. This method handles both the shared and
-// local gateway mode case, and in the local case (i.e: packetMark != 0) uses the optional packetMark field
-// on the logical router policy to properly L3 SNAT on the node side.
-func (e *egressIPMode) createEgressPolicy(podIps []net.IP, status egressipv1.EgressIPStatusItem, packetMark uint32, egressIPName string) error {
+// to retrive the internal gateway router IP attached to the egress node.
+func (e *egressIPMode) createEgressPolicy(podIps []net.IP, status egressipv1.EgressIPStatusItem, egressIPName string) error {
 	isEgressIPv6 := utilnet.IsIPv6String(status.EgressIP)
 	gatewayRouterIP, err := e.getGatewayRouterJoinIP(status.Node, isEgressIPv6)
 	if err != nil {
-		return fmt.Errorf("unable to retrieve node's: %s gateway IP, err: %v", status.Node, err)
+		return fmt.Errorf("unable to retrieve gateway IP for node: %s, err: %v", status.Node, err)
 	}
 	for _, podIP := range podIps {
 		var err error
@@ -414,47 +536,27 @@ func (e *egressIPMode) createEgressPolicy(podIps []net.IP, status egressipv1.Egr
 		} else if !isEgressIPv6 && !utilnet.IsIPv6(podIP) {
 			filterOption = fmt.Sprintf("ip4.src == %s", podIP.String())
 		}
-		policyIDs, err := findLRPolicyIDs(filterOption, egressIPName)
+		policyIDs, err := findReroutePolicyIDs(filterOption, egressIPName, gatewayRouterIP)
 		if err != nil {
 			return err
 		}
 		if policyIDs == nil {
-			if packetMark != 0 {
-				_, stderr, err = util.RunOVNNbctl(
-					"--id=@lr-policy",
-					"create",
-					"logical_router_policy",
-					"action=reroute",
-					fmt.Sprintf("match=\"%s\"", filterOption),
-					fmt.Sprintf("priority=%v", egressIPReroutePriority),
-					fmt.Sprintf("nexthop=%s", gatewayRouterIP),
-					fmt.Sprintf("external_ids:name=%s", egressIPName),
-					fmt.Sprintf("options:pkt_mark=%v", packetMark),
-					"--",
-					"add",
-					"logical_router",
-					ovnClusterRouter,
-					"policies",
-					"@lr-policy",
-				)
-			} else {
-				_, stderr, err = util.RunOVNNbctl(
-					"--id=@lr-policy",
-					"create",
-					"logical_router_policy",
-					"action=reroute",
-					fmt.Sprintf("match=\"%s\"", filterOption),
-					fmt.Sprintf("priority=%v", egressIPReroutePriority),
-					fmt.Sprintf("nexthop=%s", gatewayRouterIP),
-					fmt.Sprintf("external_ids:name=%s", egressIPName),
-					"--",
-					"add",
-					"logical_router",
-					ovnClusterRouter,
-					"policies",
-					"@lr-policy",
-				)
-			}
+			_, stderr, err = util.RunOVNNbctl(
+				"--id=@lr-policy",
+				"create",
+				"logical_router_policy",
+				"action=reroute",
+				fmt.Sprintf("match=\"%s\"", filterOption),
+				fmt.Sprintf("priority=%v", egressIPReroutePriority),
+				fmt.Sprintf("nexthop=%s", gatewayRouterIP),
+				fmt.Sprintf("external_ids:name=%s", egressIPName),
+				"--",
+				"add",
+				"logical_router",
+				ovnClusterRouter,
+				"policies",
+				"@lr-policy",
+			)
 			if err != nil {
 				return fmt.Errorf("unable to create logical router policy: %s, stderr: %s, err: %v", status.EgressIP, stderr, err)
 			}
@@ -464,6 +566,11 @@ func (e *egressIPMode) createEgressPolicy(podIps []net.IP, status egressipv1.Egr
 }
 
 func (e *egressIPMode) deleteEgressPolicy(podIps []net.IP, status egressipv1.EgressIPStatusItem, egressIPName string) error {
+	isEgressIPv6 := utilnet.IsIPv6String(status.EgressIP)
+	gatewayRouterIP, err := e.getGatewayRouterJoinIP(status.Node, isEgressIPv6)
+	if err != nil {
+		return fmt.Errorf("unable to retrieve gateway IP for node: %s, err: %v", status.Node, err)
+	}
 	for _, podIP := range podIps {
 		var filterOption string
 		if utilnet.IsIPv6(podIP) && utilnet.IsIPv6String(status.EgressIP) {
@@ -471,7 +578,7 @@ func (e *egressIPMode) deleteEgressPolicy(podIps []net.IP, status egressipv1.Egr
 		} else if !utilnet.IsIPv6(podIP) && !utilnet.IsIPv6String(status.EgressIP) {
 			filterOption = fmt.Sprintf("ip4.src == %s", podIP.String())
 		}
-		policyIDs, err := findLRPolicyIDs(filterOption, egressIPName)
+		policyIDs, err := findReroutePolicyIDs(filterOption, egressIPName, gatewayRouterIP)
 		if err != nil {
 			return err
 		}
@@ -491,7 +598,7 @@ func (e *egressIPMode) deleteEgressPolicy(podIps []net.IP, status egressipv1.Egr
 	return nil
 }
 
-func findLRPolicyIDs(filterOption, egressIPName string) ([]string, error) {
+func findReroutePolicyIDs(filterOption, egressIPName string, gatewayRouterIP net.IP) ([]string, error) {
 	policyIDs, stderr, err := util.RunOVNNbctl(
 		"--format=csv",
 		"--data=bare",
@@ -502,6 +609,7 @@ func findLRPolicyIDs(filterOption, egressIPName string) ([]string, error) {
 		fmt.Sprintf("match=\"%s\"", filterOption),
 		fmt.Sprintf("priority=%v", egressIPReroutePriority),
 		fmt.Sprintf("external_ids:name=%s", egressIPName),
+		fmt.Sprintf("nexthop=%s", gatewayRouterIP),
 	)
 	if err != nil {
 		return nil, fmt.Errorf("unable to find logical router policy for EgressIP: %s, stderr: %s, err: %v", egressIPName, stderr, err)
@@ -525,15 +633,11 @@ func (oc *Controller) addEgressNode(egressNode *kapi.Node) error {
 			klog.Errorf("Re-assignment for EgressIP: unable to retrieve EgressIP: %s from the api-server, err: %v", eIPName, err)
 			return true
 		}
-		eIP = eIP.DeepCopy()
-		if err := oc.addEgressIP(eIP); err != nil {
-			klog.Errorf("Re-assignment for EgressIP: unable to assign EgressIP: %s, err: %v", eIP.Name, err)
+		if err := oc.reassignEgressIP(eIP); err != nil {
+			klog.Errorf("Re-assignment for EgressIP: %s failed, err: %v", eIP.Name, err)
 			return true
 		}
 		oc.egressAssignmentRetry.Delete(eIP.Name)
-		if err := oc.updateEgressIPWithRetry(eIP); err != nil {
-			klog.Error(err)
-		}
 		return true
 	})
 	return nil
@@ -558,21 +662,28 @@ func (oc *Controller) deleteEgressNode(egressNode *kapi.Node) error {
 			}
 		}
 		if needsReassignment {
-			klog.V(5).Infof("EgressIP: %s about to be re-assigned", eIP.Name)
-			if err := oc.deleteEgressIP(&eIP); err != nil {
-				klog.Errorf("EgressIP: %s re-assignmnent error: old egress IP deletion failed, err: %v", eIP.Name, err)
-			}
-			eIP = *(eIP.DeepCopy())
-			eIP.Status = egressipv1.EgressIPStatus{
-				Items: []egressipv1.EgressIPStatusItem{},
-			}
-			if err := oc.addEgressIP(&eIP); err != nil {
-				klog.Errorf("EgressIP: %s re-assignmnent error: new egress IP assignment failed, err: %v", eIP.Name, err)
-			}
-			if err := oc.updateEgressIPWithRetry(&eIP); err != nil {
-				klog.Errorf("EgressIP: %s re-assignmnent error: update of new egress IP failed, err: %v", eIP.Name, err)
+			if err := oc.reassignEgressIP(&eIP); err != nil {
+				klog.Errorf("EgressIP: %s re-assignmnent error: %v", eIP.Name, err)
 			}
 		}
+	}
+	return nil
+}
+
+func (oc *Controller) reassignEgressIP(eIP *egressipv1.EgressIP) error {
+	klog.V(5).Infof("EgressIP: %s about to be re-assigned", eIP.Name)
+	if err := oc.deleteEgressIP(eIP); err != nil {
+		return fmt.Errorf("old egress IP deletion failed, err: %v", err)
+	}
+	eIP = eIP.DeepCopy()
+	eIP.Status = egressipv1.EgressIPStatus{
+		Items: []egressipv1.EgressIPStatusItem{},
+	}
+	if err := oc.addEgressIP(eIP); err != nil {
+		return fmt.Errorf("new egress IP assignment failed, err: %v", err)
+	}
+	if err := oc.updateEgressIPWithRetry(eIP); err != nil {
+		return fmt.Errorf("update of new egress IP failed, err: %v", err)
 	}
 	return nil
 }

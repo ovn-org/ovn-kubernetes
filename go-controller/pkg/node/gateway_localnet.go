@@ -41,20 +41,6 @@ func getGatewayFamilyAddrs(gatewayIfAddrs []*net.IPNet) (string, string) {
 	return gatewayIPv4, gatewayIPv6
 }
 
-func (n *OvnNode) initLocalEgressIP(gatewayIfAddrs []*net.IPNet, defaultGatewayIntf string) {
-	if !config.OVNKubernetesFeature.EnableEgressIP {
-		return
-	}
-
-	gatewayIPv4, gatewayIPv6 := getGatewayFamilyAddrs(gatewayIfAddrs)
-	n.watchEgressIP(&egressIPLocal{
-		gatewayIPv4:        gatewayIPv4,
-		gatewayIPv6:        gatewayIPv6,
-		nodeName:           n.name,
-		defaultGatewayIntf: defaultGatewayIntf,
-	})
-}
-
 type localPortWatcherData struct {
 	recorder     record.EventRecorder
 	gatewayIPv4  string
