@@ -28,7 +28,7 @@ RUN INSTALL_PKGS=" \
 # ensure we pick up ovn-20.06.2-3.fc31 for ovn-controller crash fix
 # This should have no effect in the future once the RPM has propagated
 # to all stable mirrors and can be removed
-RUN dnf install -y --enablerepo=updates-testing --best --advisory=FEDORA-2020-d2abd8fe6c "ovn >= 20.06.2-3" || exit 1
+RUN dnf install -y --best "ovn >= 20.06.2-3" || exit 1
 
 RUN mkdir -p /var/run/openvswitch
 
