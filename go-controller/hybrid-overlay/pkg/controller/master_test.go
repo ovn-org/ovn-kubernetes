@@ -108,7 +108,7 @@ var _ = Describe("Hybrid SDN Master Operations", func() {
 				},
 			})
 
-			_, err := config.InitConfig(ctx, fexec, nil)
+			_, err := config.InitDebugConfig(ctx, fexec, nil)
 			Expect(err).NotTo(HaveOccurred())
 
 			f := informers.NewSharedInformerFactory(fakeClient, informer.DefaultResyncInterval)
@@ -158,7 +158,6 @@ var _ = Describe("Hybrid SDN Master Operations", func() {
 
 		err := app.Run([]string{
 			app.Name,
-			"-loglevel=5",
 			"-no-hostsubnet-nodes=" + v1.LabelOSStable + "=windows",
 			"-enable-hybrid-overlay",
 			"-hybrid-overlay-cluster-subnets=" + hybridOverlayClusterCIDR,
@@ -181,7 +180,7 @@ var _ = Describe("Hybrid SDN Master Operations", func() {
 				},
 			})
 
-			_, err := config.InitConfig(ctx, fexec, nil)
+			_, err := config.InitDebugConfig(ctx, fexec, nil)
 			Expect(err).NotTo(HaveOccurred())
 			mockOVNNBClient := ovntest.NewMockOVNClient(goovn.DBNB)
 			mockOVNSBClient := ovntest.NewMockOVNClient(goovn.DBSB)
@@ -233,7 +232,6 @@ var _ = Describe("Hybrid SDN Master Operations", func() {
 
 		err := app.Run([]string{
 			app.Name,
-			"-loglevel=5",
 			"-enable-hybrid-overlay",
 			"-hybrid-overlay-cluster-subnets=" + hybridOverlayClusterCIDR,
 		})
@@ -255,7 +253,7 @@ var _ = Describe("Hybrid SDN Master Operations", func() {
 				},
 			})
 
-			_, err := config.InitConfig(ctx, fexec, nil)
+			_, err := config.InitDebugConfig(ctx, fexec, nil)
 			Expect(err).NotTo(HaveOccurred())
 			mockOVNNBClient := ovntest.NewMockOVNClient(goovn.DBNB)
 			mockOVNSBClient := ovntest.NewMockOVNClient(goovn.DBSB)
@@ -293,7 +291,6 @@ var _ = Describe("Hybrid SDN Master Operations", func() {
 		}
 		err := app.Run([]string{
 			app.Name,
-			"-loglevel=5",
 			"-enable-hybrid-overlay",
 			"-hybrid-overlay-cluster-subnets=" + hybridOverlayClusterCIDR,
 		})
@@ -369,7 +366,6 @@ var _ = Describe("Hybrid SDN Master Operations", func() {
 
 		err := app.Run([]string{
 			app.Name,
-			"-loglevel=5",
 			"-enable-hybrid-overlay",
 			"-hybrid-overlay-cluster-subnets=" + hybridOverlayClusterCIDR,
 		})
@@ -410,7 +406,7 @@ var _ = Describe("Hybrid SDN Master Operations", func() {
 				&v1.NodeList{Items: []v1.Node{newTestNode(nodeName, "linux", nodeSubnet, "", nodeHOMAC)}},
 			}...)
 
-			_, err := config.InitConfig(ctx, nil, nil)
+			_, err := config.InitDebugConfig(ctx, nil, nil)
 			Expect(err).NotTo(HaveOccurred())
 
 			f := informers.NewSharedInformerFactory(fakeClient, informer.DefaultResyncInterval)
@@ -456,7 +452,6 @@ var _ = Describe("Hybrid SDN Master Operations", func() {
 
 		err := app.Run([]string{
 			app.Name,
-			"-loglevel=5",
 			"-enable-hybrid-overlay",
 			"-hybrid-overlay-cluster-subnets=" + hybridOverlayClusterCIDR,
 		})
@@ -500,7 +495,7 @@ var _ = Describe("Hybrid SDN Master Operations", func() {
 			}...)
 
 			addLinuxNodeCommands(fexec, nodeHOMAC, nodeName, nodeHOIP)
-			_, err := config.InitConfig(ctx, nil, nil)
+			_, err := config.InitDebugConfig(ctx, nil, nil)
 			Expect(err).NotTo(HaveOccurred())
 			f := informers.NewSharedInformerFactory(fakeClient, informer.DefaultResyncInterval)
 
@@ -553,7 +548,6 @@ var _ = Describe("Hybrid SDN Master Operations", func() {
 
 		err := app.Run([]string{
 			app.Name,
-			"-loglevel=5",
 			"-enable-hybrid-overlay",
 			"-hybrid-overlay-cluster-subnets=" + hybridOverlayClusterCIDR,
 		})

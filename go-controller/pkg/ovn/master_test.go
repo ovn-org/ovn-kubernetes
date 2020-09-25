@@ -301,7 +301,7 @@ var _ = Describe("Master Operations", func() {
 			err := util.SetExec(fexec)
 			Expect(err).NotTo(HaveOccurred())
 
-			_, err = config.InitConfig(ctx, fexec, nil)
+			_, err = config.InitDebugConfig(ctx, fexec, nil)
 			Expect(err).NotTo(HaveOccurred())
 
 			mockOVNNBClient := ovntest.NewMockOVNClient(goovn.DBNB)
@@ -399,7 +399,7 @@ var _ = Describe("Master Operations", func() {
 			err := util.SetExec(fexec)
 			Expect(err).NotTo(HaveOccurred())
 
-			_, err = config.InitConfig(ctx, fexec, nil)
+			_, err = config.InitDebugConfig(ctx, fexec, nil)
 			Expect(err).NotTo(HaveOccurred())
 
 			mockOVNNBClient := ovntest.NewMockOVNClient(goovn.DBNB)
@@ -495,7 +495,7 @@ var _ = Describe("Master Operations", func() {
 			Expect(err).NotTo(HaveOccurred())
 			cleanupGateway(fexec, nodeName, nodeSubnet, clusterCIDR, nextHop)
 
-			_, err = config.InitConfig(ctx, fexec, nil)
+			_, err = config.InitDebugConfig(ctx, fexec, nil)
 			Expect(err).NotTo(HaveOccurred())
 			mockOVNNBClient := ovntest.NewMockOVNClient(goovn.DBNB)
 			mockOVNSBClient := ovntest.NewMockOVNClient(goovn.DBSB)
@@ -645,7 +645,7 @@ subnet=%s
 			err := util.SetExec(fexec)
 			Expect(err).NotTo(HaveOccurred())
 
-			_, err = config.InitConfig(ctx, fexec, nil)
+			_, err = config.InitDebugConfig(ctx, fexec, nil)
 			Expect(err).NotTo(HaveOccurred())
 
 			nodeAnnotator := kube.NewNodeAnnotator(&kube.Kube{fakeClient, egressIPFakeClient, egressFirewallFakeClient}, &masterNode)
@@ -779,7 +779,7 @@ var _ = Describe("Gateway Init Operations", func() {
 			err := util.SetExec(fexec)
 			Expect(err).NotTo(HaveOccurred())
 
-			_, err = config.InitConfig(ctx, fexec, nil)
+			_, err = config.InitDebugConfig(ctx, fexec, nil)
 			Expect(err).NotTo(HaveOccurred())
 
 			nodeAnnotator := kube.NewNodeAnnotator(&kube.Kube{fakeClient, egressIPFakeClient, egressFirewallFakeClient}, &testNode)
@@ -967,7 +967,7 @@ var _ = Describe("Gateway Init Operations", func() {
 			err := util.SetExec(fexec)
 			Expect(err).NotTo(HaveOccurred())
 
-			_, err = config.InitConfig(ctx, fexec, nil)
+			_, err = config.InitDebugConfig(ctx, fexec, nil)
 			Expect(err).NotTo(HaveOccurred())
 
 			nodeAnnotator := kube.NewNodeAnnotator(&kube.Kube{fakeClient, egressIPFakeClient, egressFirewallFakeClient}, &testNode)

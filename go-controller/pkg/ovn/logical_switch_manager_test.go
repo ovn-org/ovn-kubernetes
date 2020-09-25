@@ -36,7 +36,7 @@ var _ = Describe("OVN Logical Switch Manager operations", func() {
 	Context("when adding node", func() {
 		It("creates IPAM for each subnet and reserves IPs correctly", func() {
 			app.Action = func(ctx *cli.Context) error {
-				_, err := config.InitConfig(ctx, fexec, nil)
+				_, err := config.InitDebugConfig(ctx, fexec, nil)
 				Expect(err).NotTo(HaveOccurred())
 
 				testNode := testNodeSubnetData{
@@ -85,7 +85,7 @@ var _ = Describe("OVN Logical Switch Manager operations", func() {
 
 		It("manages no host subnet nodes correctly", func() {
 			app.Action = func(ctx *cli.Context) error {
-				_, err := config.InitConfig(ctx, fexec, nil)
+				_, err := config.InitDebugConfig(ctx, fexec, nil)
 				Expect(err).NotTo(HaveOccurred())
 				testNode := testNodeSubnetData{
 					nodeName: "testNode1",
@@ -104,7 +104,7 @@ var _ = Describe("OVN Logical Switch Manager operations", func() {
 
 		It("handles updates to the host subnets correctly", func() {
 			app.Action = func(ctx *cli.Context) error {
-				_, err := config.InitConfig(ctx, fexec, nil)
+				_, err := config.InitDebugConfig(ctx, fexec, nil)
 				Expect(err).NotTo(HaveOccurred())
 				testNode := testNodeSubnetData{
 					nodeName: "testNode1",
@@ -144,7 +144,7 @@ var _ = Describe("OVN Logical Switch Manager operations", func() {
 	Context("when allocating IP addresses", func() {
 		It("IPAM for each subnet allocates IPs contiguously", func() {
 			app.Action = func(ctx *cli.Context) error {
-				_, err := config.InitConfig(ctx, fexec, nil)
+				_, err := config.InitDebugConfig(ctx, fexec, nil)
 				Expect(err).NotTo(HaveOccurred())
 				testNode := testNodeSubnetData{
 					nodeName: "testNode1",
@@ -176,7 +176,7 @@ var _ = Describe("OVN Logical Switch Manager operations", func() {
 
 		It("IPAM allocates, releases, and reallocates IPs correctly", func() {
 			app.Action = func(ctx *cli.Context) error {
-				_, err := config.InitConfig(ctx, fexec, nil)
+				_, err := config.InitDebugConfig(ctx, fexec, nil)
 				Expect(err).NotTo(HaveOccurred())
 				testNode := testNodeSubnetData{
 					nodeName: "testNode1",
@@ -211,7 +211,7 @@ var _ = Describe("OVN Logical Switch Manager operations", func() {
 
 		It("releases IPs for other host subnet nodes when any host subnets allocation fails", func() {
 			app.Action = func(ctx *cli.Context) error {
-				_, err := config.InitConfig(ctx, fexec, nil)
+				_, err := config.InitDebugConfig(ctx, fexec, nil)
 				Expect(err).NotTo(HaveOccurred())
 				testNode := testNodeSubnetData{
 					nodeName: "testNode1",
@@ -249,7 +249,7 @@ var _ = Describe("OVN Logical Switch Manager operations", func() {
 
 		It("fails correctly when trying to block a previously allocated IP", func() {
 			app.Action = func(ctx *cli.Context) error {
-				_, err := config.InitConfig(ctx, fexec, nil)
+				_, err := config.InitDebugConfig(ctx, fexec, nil)
 				Expect(err).NotTo(HaveOccurred())
 				testNode := testNodeSubnetData{
 					nodeName: "testNode1",

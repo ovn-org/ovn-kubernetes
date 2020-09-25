@@ -45,7 +45,7 @@ func (o *FakeOVNNode) start(ctx *cli.Context, objects ...runtime.Object) {
 	for _, object := range objects {
 		v1Objects = append(v1Objects, object)
 	}
-	_, err := config.InitConfig(ctx, o.fakeExec, nil)
+	_, err := config.InitDebugConfig(ctx, o.fakeExec, nil)
 	Expect(err).NotTo(HaveOccurred())
 
 	o.fakeCRDClient = apiextensionsfake.NewSimpleClientset()

@@ -64,7 +64,7 @@ var _ = Describe("Node Operations", func() {
 			err := util.SetExec(fexec)
 			Expect(err).NotTo(HaveOccurred())
 
-			_, err = config.InitConfig(ctx, fexec, nil)
+			_, err = config.InitDebugConfig(ctx, fexec, nil)
 			Expect(err).NotTo(HaveOccurred())
 
 			err = setupOVNNode(&node)
@@ -131,7 +131,7 @@ var _ = Describe("Node Operations", func() {
 			err := util.SetExec(fexec)
 			Expect(err).NotTo(HaveOccurred())
 
-			_, err = config.InitConfig(ctx, fexec, nil)
+			_, err = config.InitDebugConfig(ctx, fexec, nil)
 			Expect(err).NotTo(HaveOccurred())
 			config.Default.EncapPort = encapPort
 

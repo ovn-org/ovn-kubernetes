@@ -128,7 +128,7 @@ func testManagementPort(ctx *cli.Context, fexec *ovntest.FakeExec, testNS ns.Net
 		Items: []v1.Node{existingNode},
 	})
 
-	_, err = config.InitConfig(ctx, fexec, nil)
+	_, err = config.InitDebugConfig(ctx, fexec, nil)
 	Expect(err).NotTo(HaveOccurred())
 
 	nodeAnnotator := kube.NewNodeAnnotator(&kube.Kube{fakeClient, egressipv1fake.NewSimpleClientset(), &egressfirewallfake.Clientset{}}, &existingNode)

@@ -244,7 +244,7 @@ var _ = Describe("Hybrid Overlay Node Linux Operations", func() {
 				Output: "",
 			})
 
-			_, err := config.InitConfig(ctx, fexec, nil)
+			_, err := config.InitDebugConfig(ctx, fexec, nil)
 			Expect(err).NotTo(HaveOccurred())
 
 			f := informers.NewSharedInformerFactory(fakeClient, informer.DefaultResyncInterval)
@@ -294,7 +294,7 @@ var _ = Describe("Hybrid Overlay Node Linux Operations", func() {
 				Output: "",
 			})
 
-			_, err := config.InitConfig(ctx, fexec, nil)
+			_, err := config.InitDebugConfig(ctx, fexec, nil)
 			Expect(err).NotTo(HaveOccurred())
 			f := informers.NewSharedInformerFactory(fakeClient, informer.DefaultResyncInterval)
 
@@ -342,7 +342,7 @@ var _ = Describe("Hybrid Overlay Node Linux Operations", func() {
 				Output: "",
 			})
 			config.HybridOverlay.RawClusterSubnets = "10.0.0.1/16/23"
-			_, err := config.InitConfig(ctx, fexec, nil)
+			_, err := config.InitDebugConfig(ctx, fexec, nil)
 			Expect(err).NotTo(HaveOccurred())
 			f := informers.NewSharedInformerFactory(fakeClient, informer.DefaultResyncInterval)
 
@@ -390,7 +390,7 @@ var _ = Describe("Hybrid Overlay Node Linux Operations", func() {
 				Output: "",
 			})
 			config.HybridOverlay.RawClusterSubnets = "10.0.0.1/16/23"
-			_, err := config.InitConfig(ctx, fexec, nil)
+			_, err := config.InitDebugConfig(ctx, fexec, nil)
 			Expect(err).NotTo(HaveOccurred())
 
 			f := informers.NewSharedInformerFactory(fakeClient, informer.DefaultResyncInterval)
@@ -445,7 +445,7 @@ var _ = Describe("Hybrid Overlay Node Linux Operations", func() {
 				"ovs-ofctl add-flow br-ext cookie=0xca12f31b,table=0,priority=100,ip,nw_dst=5.6.7.0/24,actions=load:4097->NXM_NX_TUN_ID[0..31],set_field:10.0.0.2->tun_dst,set_field:22:33:44:55:66:77->eth_dst,output:ext-vxlan",
 			})
 
-			_, err := config.InitConfig(ctx, fexec, nil)
+			_, err := config.InitDebugConfig(ctx, fexec, nil)
 			Expect(err).NotTo(HaveOccurred())
 
 			f := informers.NewSharedInformerFactory(fakeClient, informer.DefaultResyncInterval)
@@ -498,7 +498,7 @@ var _ = Describe("Hybrid Overlay Node Linux Operations", func() {
 				"ovs-ofctl del-flows br-ext cookie=0x1f40e27c/0xffffffff",
 			})
 
-			_, err := config.InitConfig(ctx, fexec, nil)
+			_, err := config.InitDebugConfig(ctx, fexec, nil)
 			Expect(err).NotTo(HaveOccurred())
 			f := informers.NewSharedInformerFactory(fakeClient, informer.DefaultResyncInterval)
 
@@ -549,7 +549,7 @@ var _ = Describe("Hybrid Overlay Node Linux Operations", func() {
 				"ovs-ofctl -O OpenFlow13 --bundle replace-flows br-ext -",
 			})
 
-			_, err := config.InitConfig(ctx, fexec, nil)
+			_, err := config.InitDebugConfig(ctx, fexec, nil)
 			Expect(err).NotTo(HaveOccurred())
 			f := informers.NewSharedInformerFactory(fakeClient, informer.DefaultResyncInterval)
 
@@ -622,7 +622,7 @@ var _ = Describe("Hybrid Overlay Node Linux Operations", func() {
 				"ovs-ofctl -O OpenFlow13 --bundle replace-flows br-ext -",
 			})
 
-			_, err := config.InitConfig(ctx, fexec, nil)
+			_, err := config.InitDebugConfig(ctx, fexec, nil)
 			Expect(err).NotTo(HaveOccurred())
 			f := informers.NewSharedInformerFactory(fakeClient, informer.DefaultResyncInterval)
 

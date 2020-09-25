@@ -49,7 +49,7 @@ var _ = Describe("OVN Address Set operations", func() {
 	Context("when iterating address sets", func() {
 		It("calls the iterator function for each address set with the given prefix", func() {
 			app.Action = func(ctx *cli.Context) error {
-				_, err := config.InitConfig(ctx, fexec, nil)
+				_, err := config.InitDebugConfig(ctx, fexec, nil)
 				Expect(err).NotTo(HaveOccurred())
 
 				namespaces := []testAddressSetName{
@@ -112,7 +112,7 @@ var _ = Describe("OVN Address Set operations", func() {
 					addr2 string = "5.6.7.8"
 				)
 
-				_, err := config.InitConfig(ctx, fexec, nil)
+				_, err := config.InitDebugConfig(ctx, fexec, nil)
 				Expect(err).NotTo(HaveOccurred())
 
 				fexec.AddFakeCmd(&ovntest.ExpectedCmd{
@@ -135,7 +135,7 @@ var _ = Describe("OVN Address Set operations", func() {
 
 		It("clears an existing address set of IPs", func() {
 			app.Action = func(ctx *cli.Context) error {
-				_, err := config.InitConfig(ctx, fexec, nil)
+				_, err := config.InitDebugConfig(ctx, fexec, nil)
 				Expect(err).NotTo(HaveOccurred())
 
 				fexec.AddFakeCmd(&ovntest.ExpectedCmd{
@@ -163,7 +163,7 @@ var _ = Describe("OVN Address Set operations", func() {
 					addr2 string = "5.6.7.8"
 				)
 
-				_, err := config.InitConfig(ctx, fexec, nil)
+				_, err := config.InitDebugConfig(ctx, fexec, nil)
 				Expect(err).NotTo(HaveOccurred())
 
 				fexec.AddFakeCmdsNoOutputNoError([]string{
@@ -187,7 +187,7 @@ var _ = Describe("OVN Address Set operations", func() {
 
 	It("destroys an address set", func() {
 		app.Action = func(ctx *cli.Context) error {
-			_, err := config.InitConfig(ctx, fexec, nil)
+			_, err := config.InitDebugConfig(ctx, fexec, nil)
 			Expect(err).NotTo(HaveOccurred())
 
 			fexec.AddFakeCmd(&ovntest.ExpectedCmd{
@@ -217,7 +217,7 @@ var _ = Describe("OVN Address Set operations", func() {
 			app.Action = func(ctx *cli.Context) error {
 				const addr1 string = "1.2.3.4"
 
-				_, err := config.InitConfig(ctx, fexec, nil)
+				_, err := config.InitDebugConfig(ctx, fexec, nil)
 				Expect(err).NotTo(HaveOccurred())
 
 				fexec.AddFakeCmdsNoOutputNoError([]string{
@@ -250,7 +250,7 @@ var _ = Describe("OVN Address Set operations", func() {
 			app.Action = func(ctx *cli.Context) error {
 				const addr1 string = "1.2.3.4"
 
-				_, err := config.InitConfig(ctx, fexec, nil)
+				_, err := config.InitDebugConfig(ctx, fexec, nil)
 				Expect(err).NotTo(HaveOccurred())
 
 				fexec.AddFakeCmdsNoOutputNoError([]string{
@@ -293,7 +293,7 @@ var _ = Describe("OVN Address Set operations", func() {
 					addr4 string = "2001:db8::2"
 				)
 
-				_, err := config.InitConfig(ctx, fexec, nil)
+				_, err := config.InitDebugConfig(ctx, fexec, nil)
 				Expect(err).NotTo(HaveOccurred())
 				config.IPv6Mode = true
 
@@ -326,7 +326,7 @@ var _ = Describe("OVN Address Set operations", func() {
 
 		It("clears an existing address set of dual stack IPs", func() {
 			app.Action = func(ctx *cli.Context) error {
-				_, err := config.InitConfig(ctx, fexec, nil)
+				_, err := config.InitDebugConfig(ctx, fexec, nil)
 				Expect(err).NotTo(HaveOccurred())
 				config.IPv6Mode = true
 
@@ -365,7 +365,7 @@ var _ = Describe("OVN Address Set operations", func() {
 					addr4 string = "2001:db8::2"
 				)
 
-				_, err := config.InitConfig(ctx, fexec, nil)
+				_, err := config.InitDebugConfig(ctx, fexec, nil)
 				Expect(err).NotTo(HaveOccurred())
 				config.IPv6Mode = true
 
@@ -399,7 +399,7 @@ var _ = Describe("OVN Address Set operations", func() {
 
 	It("destroys an dual stack address set", func() {
 		app.Action = func(ctx *cli.Context) error {
-			_, err := config.InitConfig(ctx, fexec, nil)
+			_, err := config.InitDebugConfig(ctx, fexec, nil)
 			Expect(err).NotTo(HaveOccurred())
 			config.IPv6Mode = true
 
@@ -442,7 +442,7 @@ var _ = Describe("OVN Address Set operations", func() {
 				const addr1 string = "1.2.3.4"
 				const addr2 string = "2001:db8::1"
 
-				_, err := config.InitConfig(ctx, fexec, nil)
+				_, err := config.InitDebugConfig(ctx, fexec, nil)
 				Expect(err).NotTo(HaveOccurred())
 				config.IPv6Mode = true
 
@@ -491,7 +491,7 @@ var _ = Describe("OVN Address Set operations", func() {
 				const addr1 string = "1.2.3.4"
 				const addr2 string = "2001:db8::1"
 
-				_, err := config.InitConfig(ctx, fexec, nil)
+				_, err := config.InitDebugConfig(ctx, fexec, nil)
 				Expect(err).NotTo(HaveOccurred())
 				config.IPv6Mode = true
 
