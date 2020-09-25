@@ -28,14 +28,14 @@ RUN INSTALL_PKGS=" \
 # ensure we pick up ovn-20.06.2-3.fc31 for ovn-controller crash fix
 # This should have no effect in the future once the RPM has propagated
 # to all stable mirrors and can be removed
-RUN dnf install -y --enablerepo=updates-testing --best --advisory=FEDORA-2020-d2abd8fe6c "ovn >= 20.06.2-3" || exit 1
+RUN dnf install -y --best "ovn >= 20.06.2-3" || exit 1
 
 RUN mkdir -p /var/run/openvswitch
 
 # Built in ../../go_controller, then the binaries are copied here.
 # put things where they are in the pkg
 RUN mkdir -p /usr/libexec/cni/
-COPY ovnkube ovn-kube-util /usr/bin/
+COPY ovnkube ovn-kube-util ovndbchecker /usr/bin/
 COPY ovn-k8s-cni-overlay /usr/libexec/cni/ovn-k8s-cni-overlay
 
 # ovnkube.sh is the entry point. This script examines environment

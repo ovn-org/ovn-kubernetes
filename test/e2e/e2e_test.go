@@ -170,6 +170,59 @@ func checkConnectivityPingToHost(f *framework.Framework, nodeName, podName, host
 	return err
 }
 
+// Place the workload on the specified node and return pod gw route
+func getPodGWRoute(f *framework.Framework, nodeName string, podName string) net.IP {
+	command := []string{"bash", "-c", "sleep 20000"}
+	contName := fmt.Sprintf("%s-container", podName)
+	pod := &v1.Pod{
+		ObjectMeta: metav1.ObjectMeta{
+			Name: podName,
+		},
+		Spec: v1.PodSpec{
+			Containers: []v1.Container{
+				{
+					Name:    contName,
+					Image:   framework.AgnHostImage,
+					Command: command,
+				},
+			},
+			NodeName:      nodeName,
+			RestartPolicy: v1.RestartPolicyNever,
+		},
+	}
+	podClient := f.ClientSet.CoreV1().Pods(f.Namespace.Name)
+	_, err := podClient.Create(pod)
+	if err != nil {
+		framework.Failf("Error trying to create pod")
+	}
+
+	// Wait for pod network setup to be almost ready
+	wait.PollImmediate(1*time.Second, 30*time.Second, func() (bool, error) {
+		podGet, err := podClient.Get(podName, metav1.GetOptions{})
+		if err != nil {
+			return false, nil
+		}
+		if podGet.Annotations != nil && podGet.Annotations[podNetworkAnnotation] != "" {
+			return true, nil
+		}
+		return false, nil
+	})
+	if err != nil {
+		framework.Failf("Error trying to get the pod annotations")
+	}
+
+	podGet, err := podClient.Get(podName, metav1.GetOptions{})
+	if err != nil {
+		framework.Failf("Error trying to get the pod object")
+	}
+	annotation, err := unmarshalPodAnnotation(podGet.Annotations)
+	if err != nil {
+		framework.Failf("Error trying to unmarshal pod annotations")
+	}
+
+	return annotation.Gateways[0]
+}
+
 // Create a pod on the specified node using the agnostic host image
 func createGenericPod(f *framework.Framework, podName, nodeSelector string, command []string) {
 	contName := fmt.Sprintf("%s-container", podName)
@@ -696,6 +749,68 @@ var _ = Describe("e2e external gateway validation", func() {
 		framework.ExpectNoError(
 			// generate traffic that will being encapsulated and sent to the external gateway.
 			checkConnectivityPingToHost(f, ciWorkerNodeSrc, "external-gateway-e2e", extGW, ipv4PingCommand, 30, true))
+	})
+
+	It("Should add default routes over .3 if hybrid external gw annotation is set", func() {
+		// non-ha ci mode runs a set of kind nodes prefixed with ovn-worker
+		ciWorkerNodeSrc := ovnWorkerNode
+		if haMode {
+			// ha ci mode runs a named set of nodes with a prefix of ovn-control-plane
+			ciWorkerNodeSrc = ovnHaWorkerNode
+		}
+		localVtepIP, err := runCommand("docker", "inspect", "-f", ciNetworkFlag, ciWorkerNodeSrc)
+		if err != nil {
+			framework.Failf("failed to get the node ip address from node %s %v", ciWorkerNodeSrc, err)
+		}
+		localVtepIP = strings.TrimSuffix(localVtepIP, "\n")
+		if ip := net.ParseIP(localVtepIP); ip == nil {
+			framework.Failf("Unable to retrieve a valid address from container %s with inspect output of %s", gwContainerName, localVtepIP)
+		}
+		framework.Logf("the pod side vtep node is %s and the ip %s", ciWorkerNodeSrc, localVtepIP)
+		podCIDR, err := getNodePodCIDR(ciWorkerNodeSrc)
+		if err != nil {
+			framework.Failf("Error retrieving the pod cidr from %s %v", ciWorkerNodeSrc, err)
+		}
+		framework.Logf("the pod cidr for node %s is %s", ciWorkerNodeSrc, podCIDR)
+		By(fmt.Sprintf("Creating a container on %s and check default routes", ciWorkerNodeSrc))
+		if getPodGWRoute(f, ciWorkerNodeSrc, "hybrid-external-routing-external-gws-preference-e2e").To4()[3] != 3 {
+			framework.Fail("The pod gw route should go thru .3 port when hybrid external gw annotation is used")
+		}
+	})
+
+	It("routing-external-gws routes to OVN DR should take precedence over hybrid external gw routes to .3", func() {
+		// non-ha ci mode runs a set of kind nodes prefixed with ovn-worker
+		ciWorkerNodeSrc := ovnWorkerNode
+		if haMode {
+			// ha ci mode runs a named set of nodes with a prefix of ovn-control-plane
+			ciWorkerNodeSrc = ovnHaWorkerNode
+		}
+		localVtepIP, err := runCommand("docker", "inspect", "-f", ciNetworkFlag, ciWorkerNodeSrc)
+		if err != nil {
+			framework.Failf("failed to get the node ip address from node %s %v", ciWorkerNodeSrc, err)
+		}
+		localVtepIP = strings.TrimSuffix(localVtepIP, "\n")
+		if ip := net.ParseIP(localVtepIP); ip == nil {
+			framework.Failf("Unable to retrieve a valid address from container %s with inspect output of %s", gwContainerName, localVtepIP)
+		}
+		framework.Logf("the pod side vtep node is %s and the ip %s", ciWorkerNodeSrc, localVtepIP)
+		podCIDR, err := getNodePodCIDR(ciWorkerNodeSrc)
+		if err != nil {
+			framework.Failf("Error retrieving the pod cidr from %s %v", ciWorkerNodeSrc, err)
+		}
+		framework.Logf("the pod cidr for node %s is %s", ciWorkerNodeSrc, podCIDR)
+		annotateArgs := []string{
+			"annotate",
+			"namespace",
+			f.Namespace.Name,
+			fmt.Sprintf("k8s.ovn.org/routing-external-gws=%s", "172.17.250.1"),
+		}
+		framework.Logf("Annotating the external gateway test namespace with routing-external-gws annotation:%s", "172.17.250.1")
+		framework.RunKubectlOrDie(annotateArgs...)
+		By(fmt.Sprintf("Creating a container on %s and check default routes", ciWorkerNodeSrc))
+		if getPodGWRoute(f, ciWorkerNodeSrc, "hybrid-external-routing-external-gws-preference-e2e").To4()[3] != 1 {
+			framework.Fail("routing-external-gws annotation not taking precedence over hybrid external as pod gw route is going thru .3 port")
+		}
 	})
 })
 
