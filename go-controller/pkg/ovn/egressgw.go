@@ -343,7 +343,7 @@ func (oc *Controller) addHybridRoutePolicyForPod(podIP net.IP, node string) erro
 		// get the GR to join switch ip address
 		grJoinIPs, err := util.GetNodeGatewayRouterIPs(node)
 		if err != nil {
-			return fmt.Errorf("unable to find IP address for node: %s, rtoj port, err: %v", node, err)
+			return fmt.Errorf("unable to find IP address for node: %s, %s port, err: %v", node, util.GwRouterToJoinSwitchPrefix, err)
 		}
 		grJoinIP, err := util.MatchIPFamily(isIPv6, grJoinIPs)
 		if err != nil {
@@ -363,16 +363,16 @@ func (oc *Controller) addHybridRoutePolicyForPod(podIP net.IP, node string) erro
 			matchDst += fmt.Sprintf(" && %s.dst != %s", clusterL3Prefix, clusterSubnet.CIDR)
 		}
 		// traffic destined outside of cluster subnet go to GR
-		matchStr := fmt.Sprintf(`inport == "rtos-%s" && %s.src == %s`, node, l3Prefix, podIP)
+		matchStr := fmt.Sprintf(`inport == "%s%s" && %s.src == %s`, util.RouterToSwitchPrefix, node, l3Prefix, podIP)
 		matchStr += matchDst
-		_, stderr, err := util.RunOVNNbctl("lr-policy-add", ovnClusterRouter, "501", matchStr, "reroute",
+		_, stderr, err := util.RunOVNNbctl("lr-policy-add", util.OVNClusterRouter, "501", matchStr, "reroute",
 			grJoinIP.String())
 		if err != nil {
 			// TODO: lr-policy-add doesn't support --may-exist, resort to this workaround for now.
 			// Have raised an issue against ovn repository (https://github.com/ovn-org/ovn/issues/49)
 			if !strings.Contains(stderr, "already existed") {
 				return fmt.Errorf("failed to add policy route '%s' to %s "+
-					"stderr: %s, error: %v", matchStr, ovnClusterRouter, stderr, err)
+					"stderr: %s, error: %v", matchStr, util.OVNClusterRouter, stderr, err)
 			}
 		}
 	}
@@ -403,12 +403,12 @@ func (oc *Controller) delHybridRoutePolicyForPod(podIP net.IP, node string) erro
 			}
 			matchDst += fmt.Sprintf(" && %s.dst != %s", l3Prefix, clusterSubnet.CIDR)
 		}
-		matchStr := fmt.Sprintf(`inport == "rtos-%s" && %s.src == %s`, node, l3Prefix, podIP)
+		matchStr := fmt.Sprintf(`inport == "%s%s" && %s.src == %s`, util.RouterToSwitchPrefix, node, l3Prefix, podIP)
 		matchStr += matchDst
-		_, stderr, err := util.RunOVNNbctl("lr-policy-del", ovnClusterRouter, "501", matchStr)
+		_, stderr, err := util.RunOVNNbctl("lr-policy-del", util.OVNClusterRouter, "501", matchStr)
 		if err != nil {
 			klog.Errorf("Failed to remove policy: %s, on: %s, stderr: %s, err: %v",
-				matchStr, ovnClusterRouter, stderr, err)
+				matchStr, util.OVNClusterRouter, stderr, err)
 		}
 	}
 	return nil

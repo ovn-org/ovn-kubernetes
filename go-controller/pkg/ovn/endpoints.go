@@ -112,7 +112,7 @@ func (ovn *Controller) AddEndpoints(ep *kapi.Endpoints) error {
 }
 
 func (ovn *Controller) handleNodePortLB(node *kapi.Node) error {
-	gatewayRouter := gwRouterPrefix + node.Name
+	gatewayRouter := util.GwRouterPrefix + node.Name
 	var physicalIPs []string
 	if physicalIPs, _ = ovn.getGatewayPhysicalIPs(gatewayRouter); physicalIPs == nil {
 		return fmt.Errorf("gateway physical IP for node %q does not yet exist", node.Name)

@@ -39,7 +39,7 @@ func GetNodeGatewayRouterIPs(nodeName string) ([]net.IP, error) {
 		"--no-heading",
 		"--columns=networks",
 		"find", "logical_router_port",
-		fmt.Sprintf("name=rtoj-GR_%s", nodeName),
+		fmt.Sprintf("name=%s%s%s", GwRouterToJoinSwitchPrefix, GwRouterPrefix, nodeName),
 	)
 	if err != nil {
 		return nil, fmt.Errorf("unable to retrieve the logical router for node: %s, err: %v", nodeName, err)
