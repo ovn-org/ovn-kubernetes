@@ -207,19 +207,6 @@ func (oc *Controller) addRoutesGatewayIP(pod *kapi.Pod, podAnnotation *util.PodA
 			gatewayIP = gatewayIPnet.IP
 		}
 
-		if len(config.HybridOverlay.ClusterSubnets) > 0 && !hasRoutingExternalGWs && !hasPodRoutingGWs {
-			// Add a route for each hybrid overlay subnet via the hybrid
-			// overlay port on the pod's logical switch.
-			nextHop := util.GetNodeHybridOverlayIfAddr(nodeSubnet).IP
-			for _, clusterSubnet := range config.HybridOverlay.ClusterSubnets {
-				if utilnet.IsIPv6CIDR(clusterSubnet.CIDR) == isIPv6 {
-					podAnnotation.Routes = append(podAnnotation.Routes, util.PodRoute{
-						Dest:    clusterSubnet.CIDR,
-						NextHop: nextHop,
-					})
-				}
-			}
-		}
 		if gatewayIP != nil {
 			podAnnotation.Gateways = append(podAnnotation.Gateways, gatewayIP)
 		}
