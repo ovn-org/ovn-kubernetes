@@ -16,6 +16,7 @@ import (
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/cni"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/factory"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/informer"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/kube"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
 	kapi "k8s.io/api/core/v1"
@@ -236,6 +237,7 @@ func (n *OvnNode) Start(wg *sync.WaitGroup) error {
 			n.name,
 			factory.Core().V1().Nodes().Informer(),
 			factory.Core().V1().Pods().Informer(),
+			informer.NewDefaultEventHandler,
 		)
 		if err != nil {
 			return err

@@ -24,6 +24,7 @@ import (
 	goovn "github.com/ebay/go-ovn"
 	hocontroller "github.com/ovn-org/ovn-kubernetes/go-controller/hybrid-overlay/pkg/controller"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/informer"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/metrics"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/ipallocator"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
@@ -225,6 +226,7 @@ func (oc *Controller) StartClusterMaster(masterNodeName string) error {
 			factory.Core().V1().Pods().Informer(),
 			oc.ovnNBClient,
 			oc.ovnSBClient,
+			informer.NewDefaultEventHandler,
 		)
 		if err != nil {
 			return fmt.Errorf("failed to set up hybrid overlay master: %v", err)

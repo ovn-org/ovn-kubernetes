@@ -76,6 +76,7 @@ func NewNode(
 	nodeName string,
 	nodeInformer cache.SharedIndexInformer,
 	podInformer cache.SharedIndexInformer,
+	eventHandlerCreateFunction informer.EventHandlerCreateFunction,
 ) (*Node, error) {
 
 	nodeLister := listers.NewNodeLister(nodeInformer.GetIndexer())
@@ -86,7 +87,7 @@ func NewNode(
 		return nil, err
 	}
 	n := &Node{controller: controller}
-	n.nodeEventHandler = informer.NewDefaultEventHandler("node", nodeInformer,
+	n.nodeEventHandler = eventHandlerCreateFunction("node", nodeInformer,
 		func(obj interface{}) error {
 			node, ok := obj.(*kapi.Node)
 			if !ok {
@@ -103,7 +104,7 @@ func NewNode(
 		},
 		nodeChanged,
 	)
-	n.podEventHandler = informer.NewDefaultEventHandler("pod", podInformer,
+	n.podEventHandler = eventHandlerCreateFunction("pod", podInformer,
 		func(obj interface{}) error {
 			pod, ok := obj.(*kapi.Pod)
 			if !ok {

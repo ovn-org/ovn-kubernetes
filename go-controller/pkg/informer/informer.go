@@ -61,6 +61,14 @@ func DiscardAllUpdates(old, new interface{}) bool {
 	return false
 }
 
+// EventHandlerCreateFunction is function that creates new event handlers
+type EventHandlerCreateFunction func(
+	name string,
+	informer cache.SharedIndexInformer,
+	addFunc, deleteFunc func(obj interface{}) error,
+	updateFilterFunc UpdateFilterFunction,
+) EventHandler
+
 // NewDefaultEventHandler returns a new default event handler
 // The default event handler
 // - Enqueue Adds to the workqueue
@@ -93,13 +101,52 @@ func NewDefaultEventHandler(
 		UpdateFunc: func(old, new interface{}) {
 			oldObj := old.(metav1.Object)
 			newObj := new.(metav1.Object)
-			// Make sure object was actually changed
-			if oldObj.GetResourceVersion() != newObj.GetResourceVersion() {
-				// check the update aginst the predicate functions
-				if e.updateFilter(old, new) {
-					// enqueue if it matches
-					e.enqueue(newObj)
-				}
+			// Make sure object was actually changed.
+			if oldObj.GetResourceVersion() == newObj.GetResourceVersion() {
+				return
+			}
+			// check the update aginst the predicate functions
+			if e.updateFilter(old, new) {
+				// enqueue if it matches
+				e.enqueue(newObj)
+			}
+		},
+		DeleteFunc: func(obj interface{}) {
+			// dispatch to enqueueDelete to ensure deleted items are handled properly
+			e.enqueueDelete(obj)
+		},
+	})
+	return e
+}
+
+// NewTestEventHandler returns an event handler similar to NewEventHandler.
+// The only difference is that it ignores the ResourceVersion check.
+func NewTestEventHandler(
+	name string,
+	informer cache.SharedIndexInformer,
+	addFunc, deleteFunc func(obj interface{}) error,
+	updateFilterFunc UpdateFilterFunction,
+) EventHandler {
+	e := &eventHandler{
+		name:           name,
+		informer:       informer,
+		deletedIndexer: cache.NewIndexer(cache.DeletionHandlingMetaNamespaceKeyFunc, cache.Indexers{}),
+		workqueue:      workqueue.NewRateLimitingQueue(workqueue.DefaultControllerRateLimiter()),
+		add:            addFunc,
+		delete:         deleteFunc,
+		updateFilter:   updateFilterFunc,
+	}
+	informer.AddEventHandler(cache.ResourceEventHandlerFuncs{
+		AddFunc: func(obj interface{}) {
+			// always enqueue adds
+			e.enqueue(obj)
+		},
+		UpdateFunc: func(old, new interface{}) {
+			newObj := new.(metav1.Object)
+			// check the update aginst the predicate functions
+			if e.updateFilter(old, new) {
+				// enqueue if it matches
+				e.enqueue(newObj)
 			}
 		},
 		DeleteFunc: func(obj interface{}) {
