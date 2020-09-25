@@ -47,8 +47,10 @@ const (
 )
 
 const (
-	nbdbCtlSock = "ovnnb_db.ctl"
-	sbdbCtlSock = "ovnsb_db.ctl"
+	nbdbCtlSock     = "ovnnb_db.ctl"
+	sbdbCtlSock     = "ovnsb_db.ctl"
+	OvnNbdbLocation = "/etc/ovn/ovnnb_db.db"
+	OvnSbdbLocation = "/etc/ovn/ovnsb_db.db"
 )
 
 var (

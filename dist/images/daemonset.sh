@@ -24,6 +24,7 @@ KIND=""
 OVN_UNPRIVILEGED_MODE=""
 MASTER_LOGLEVEL=""
 NODE_LOGLEVEL=""
+DBCHECKER_LOGLEVEL=""
 OVN_LOGLEVEL_NORTHD=""
 OVN_LOGLEVEL_NB=""
 OVN_LOGLEVEL_SB=""
@@ -82,6 +83,9 @@ while [ "$1" != "" ]; do
     ;;
   --node-loglevel)
     NODE_LOGLEVEL=$VALUE
+    ;;
+  --dbchecker-loglevel)
+    DBCHECKER_LOGLEVEL=$VALUE
     ;;
   --ovn-loglevel-northd)
     OVN_LOGLEVEL_NORTHD=$VALUE
@@ -174,6 +178,8 @@ master_loglevel=${MASTER_LOGLEVEL:-"4"}
 echo "master_loglevel: ${master_loglevel}"
 node_loglevel=${NODE_LOGLEVEL:-"4"}
 echo "node_loglevel: ${node_loglevel}"
+db_checker_loglevel=${DBCHECKER_LOGLEVEL:-"4"}
+echo "db_checker_loglevel: ${db_checker_loglevel}"
 ovn_loglevel_northd=${OVN_LOGLEVEL_NORTHD:-"-vconsole:info -vfile:info"}
 echo "ovn_loglevel_northd: ${ovn_loglevel_northd}"
 ovn_loglevel_nb=${OVN_LOGLEVEL_NB:-"-vconsole:info -vfile:info"}
@@ -273,6 +279,10 @@ ovn_image=${image} \
   ovn_db_replicas=${ovn_db_replicas} \
   ovn_db_minAvailable=${ovn_db_minAvailable} \
   ovn_loglevel_nb=${ovn_loglevel_nb} ovn_loglevel_sb=${ovn_loglevel_sb} \
+  ovn_dbchecker_loglevel=${db_checker_loglevel} \
+  ovnkube_logfile_maxsize=${ovnkube_logfile_maxsize} \
+  ovnkube_logfile_maxbackups=${ovnkube_logfile_maxbackups} \
+  ovnkube_logfile_maxage=${ovnkube_logfile_maxage} \
   ovn_ssl_en=${ovn_ssl_en} \
   ovn_nb_raft_election_timer=${ovn_nb_raft_election_timer} \
   ovn_sb_raft_election_timer=${ovn_sb_raft_election_timer} \
