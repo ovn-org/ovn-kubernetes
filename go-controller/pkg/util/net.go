@@ -29,10 +29,10 @@ func intToIP(i *big.Int) net.IP {
 	return net.IP(i.Bytes())
 }
 
-// GetNodeLogicalRouterNetworkInfo returns the IPs (IPv4 and/or IPv6) of the provided node's logical router
+// GetNodeGatewayRouterIPs returns the IPs (IPv4 and/or IPv6) of the provided node's logical router
 // Expected output from the ovn-nbctl command, which will need to be parsed is:
 // `100.64.1.1/29 fd98:1::/125`
-func GetNodeGatewayRouterNetInfo(nodeName string) ([]net.IP, error) {
+func GetNodeGatewayRouterIPs(nodeName string) ([]net.IP, error) {
 	stdout, _, err := RunOVNNbctl(
 		"--format=table",
 		"--data=bare",

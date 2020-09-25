@@ -592,7 +592,7 @@ func (e *egressIPController) getGatewayRouterJoinIP(node string, wantsIPv6 bool)
 	} else {
 		err := utilwait.ExponentialBackoff(retry.DefaultRetry, func() (bool, error) {
 			var err error
-			gatewayIPs, err = util.GetNodeGatewayRouterNetInfo(node)
+			gatewayIPs, err = util.GetNodeGatewayRouterIPs(node)
 			if err != nil {
 				klog.Errorf("Attempt at finding node gateway router network information failed, err: %v", err)
 			}

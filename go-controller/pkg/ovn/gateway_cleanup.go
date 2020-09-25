@@ -16,35 +16,15 @@ func gatewayCleanup(nodeName string) error {
 	gatewayRouter := gwRouterPrefix + nodeName
 
 	// Get the gateway router port's IP address (connected to join switch)
-	var routerIP net.IP
-	var nextHops []net.IP
-	routerIPNetworks, stderr, err := util.RunOVNNbctl("--if-exist", "get",
-		"logical_router_port", gwRouterToJoinSwitchPrefix+gatewayRouter, "networks")
+	nextHops, err := util.GetNodeGatewayRouterIPs(nodeName)
 	if err != nil {
-		return fmt.Errorf("failed to get logical router port for gateway router %s, "+
-			"stderr: %q, error: %v", gatewayRouter, stderr, err)
-	}
-
-	// eg: `["100.64.1.1/29", "fd98:1::/125"]`
-	routerIPNetworks = strings.Trim(routerIPNetworks, "[]")
-	if routerIPNetworks != "" {
-		for _, routerIPNetwork := range strings.Split(routerIPNetworks, ", ") {
-			routerIPNetwork = strings.Trim(routerIPNetwork, "\"")
-			routerIP, _, err = net.ParseCIDR(routerIPNetwork)
-			if err != nil {
-				return fmt.Errorf("could not parse logical router port %q: %v",
-					routerIPNetwork, err)
-			}
-			if routerIP != nil {
-				nextHops = append(nextHops, routerIP)
-			}
-		}
+		return fmt.Errorf("failed to get logical router port for gateway router %s, error: %v", gatewayRouter, err)
 	}
 
 	staticRouteCleanup(nextHops)
 
 	// Remove the join switch that connects ovn_cluster_router to gateway router
-	_, stderr, err = util.RunOVNNbctl("--if-exist", "ls-del", joinSwitchPrefix+nodeName)
+	_, stderr, err := util.RunOVNNbctl("--if-exist", "ls-del", joinSwitchPrefix+nodeName)
 	if err != nil {
 		return fmt.Errorf("failed to delete the join logical switch %s, "+
 			"stderr: %q, error: %v", joinSwitchPrefix+nodeName, stderr, err)
