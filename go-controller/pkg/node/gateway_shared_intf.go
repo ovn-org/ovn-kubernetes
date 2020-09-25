@@ -522,7 +522,13 @@ func (n *OvnNode) initSharedGateway(subnets []*net.IPNet, gwNextHops []net.IP, g
 	var brCreated bool
 	var err error
 
-	if bridgeName, _, err = util.RunOVSVsctl("--", "port-to-br", gwIntf); err == nil {
+	// OCP HACK
+	// Do not configure OVS bridge for local gateway mode with a gateway iface of none
+	// For 4.5->4.6 migration, see 	https://github.com/openshift/ovn-kubernetes/pull/281
+	if gwIntf == "none" {
+		return n.initSharedGatewayNoBridge(subnets, gwNextHops, nodeAnnotator)
+		// END OCP HACK
+	} else if bridgeName, _, err = util.RunOVSVsctl("--", "port-to-br", gwIntf); err == nil {
 		// This is an OVS bridge's internal port
 		uplinkName, err = util.GetNicName(bridgeName)
 		if err != nil {
