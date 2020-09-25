@@ -290,13 +290,14 @@ check_ovn_daemonset_version() {
 get_ovn_db_vars() {
   ovn_nbdb_str=""
   ovn_sbdb_str=""
-  for i in ${!ovn_db_hosts[@]}; do
-    if [[ ${i} -ne 0 ]]; then
+  for i in "${ovn_db_hosts[@]}"; do
+    if [ -n "$ovn_nbdb_str" ]; then
       ovn_nbdb_str=${ovn_nbdb_str}","
       ovn_sbdb_str=${ovn_sbdb_str}","
     fi
-    ovn_nbdb_str=${ovn_nbdb_str}${transport}://[${ovn_db_hosts[${i}]}]:${ovn_nb_port}
-    ovn_sbdb_str=${ovn_sbdb_str}${transport}://[${ovn_db_hosts[${i}]}]:${ovn_sb_port}
+    ip=$(bracketify $i)
+    ovn_nbdb_str=${ovn_nbdb_str}${transport}://${ip}:${ovn_nb_port}
+    ovn_sbdb_str=${ovn_sbdb_str}${transport}://${ip}:${ovn_sb_port}
   done
   # OVN_NORTH and OVN_SOUTH override derived host
   ovn_nbdb=${OVN_NORTH:-$ovn_nbdb_str}
@@ -347,7 +348,7 @@ process_ready() {
   return 1
 }
 
-# continously checks if process is healthy. Exits if process terminates.
+# continuously checks if process is healthy. Exits if process terminates.
 # $1 is the name of the process
 # $2 is the pid of an another process to kill before exiting
 process_healthy() {
@@ -380,7 +381,7 @@ process_healthy() {
 check_health() {
   ctl_file=""
   case ${1} in
-  "ovnkube" | "ovnkube-master")
+  "ovnkube" | "ovnkube-master" | "ovn-dbchecker")
     # just check for presence of pid
     ;;
   "ovnnb_db" | "ovnsb_db")
@@ -439,6 +440,7 @@ display() {
   display_file "ovn-controller" ${OVN_RUNDIR}/ovn-controller.pid ${OVN_LOGDIR}/ovn-controller.log
   display_file "ovnkube" ${OVN_RUNDIR}/ovnkube.pid ${ovnkubelogdir}/ovnkube.log
   display_file "run-nbctld" ${OVN_RUNDIR}/ovn-nbctl.pid ${OVN_LOGDIR}/ovn-nbctl.log
+  display_file "ovn-dbchecker" ${OVN_RUNDIR}/ovn-dbchecker.pid ${OVN_LOGDIR}/ovn-dbchecker.log
 }
 
 setup_cni() {
@@ -651,7 +653,7 @@ nb-ovsdb() {
     ovn-nbctl set-ssl ${ovn_nb_pk} ${ovn_nb_cert} ${ovn_ca_cert}
     echo "=============== nb-ovsdb ========== reconfigured for SSL"
   }
-  ovn-nbctl --inactivity-probe=0 set-connection p${transport}:${ovn_nb_port}:[${ovn_db_host}]
+  ovn-nbctl --inactivity-probe=0 set-connection p${transport}:${ovn_nb_port}:$(bracketify ${ovn_db_host})
 
   tail --follow=name ${OVN_LOGDIR}/ovsdb-server-nb.log &
   ovn_tail_pid=$!
@@ -683,7 +685,7 @@ sb-ovsdb() {
     ovn-sbctl set-ssl ${ovn_sb_pk} ${ovn_sb_cert} ${ovn_ca_cert}
     echo "=============== sb-ovsdb ========== reconfigured for SSL"
   }
-  ovn-sbctl --inactivity-probe=0 set-connection p${transport}:${ovn_sb_port}:[${ovn_db_host}]
+  ovn-sbctl --inactivity-probe=0 set-connection p${transport}:${ovn_sb_port}:$(bracketify ${ovn_db_host})
 
   # create the ovnkube-db endpoints
   wait_for_event attempts=10 check_ovnkube_db_ep ${ovn_db_host} ${ovn_nb_port}
@@ -694,6 +696,56 @@ sb-ovsdb() {
 
   process_healthy ovnsb_db ${ovn_tail_pid}
   echo "=============== run sb_ovsdb ========== terminated"
+}
+
+# v3 - Runs ovn-dbchecker on ovnkube-db pod.
+ovn-dbchecker() {
+  trap 'kill $(jobs -p); exit 0' TERM
+  check_ovn_daemonset_version "3"
+  rm -f ${OVN_RUNDIR}/ovn-dbchecker.pid
+  
+  # wait for ready_to_start_node
+  echo "=============== ovn-dbchecker - (wait for ready_to_start_node)"
+  wait_for_event ready_to_start_node
+  echo "ovn_nbdb ${ovn_nbdb}   ovn_sbdb ${ovn_sbdb}"
+
+  # wait for nb-ovsdb and sb-ovsdb to start
+  echo "=============== ovn-dbchecker (wait for nb-ovsdb) ========== OVNKUBE_DB"
+  wait_for_event attempts=15 process_ready ovnnb_db
+
+  echo "=============== ovn-dbchecker (wait for sb-ovsdb) ========== OVNKUBE_DB"
+  wait_for_event attempts=15 process_ready ovnsb_db
+
+  local ovn_db_ssl_opts=""
+  [[ "yes" == ${OVN_SSL_ENABLE} ]] && {
+    ovn_db_ssl_opts="
+        --nb-client-privkey ${ovn_controller_pk}
+        --nb-client-cert ${ovn_controller_cert}
+        --nb-client-cacert ${ovn_ca_cert}
+        --nb-cert-common-name ${ovn_controller_cname}
+        --sb-client-privkey ${ovn_controller_pk}
+        --sb-client-cert ${ovn_controller_cert}
+        --sb-client-cacert ${ovn_ca_cert}
+        --sb-cert-common-name ${ovn_controller_cname}
+      "
+  }
+  
+  echo "=============== ovn-dbchecker ========== OVNKUBE_DB"
+  /usr/bin/ovndbchecker \
+    --nb-address=${ovn_nbdb} --sb-address=${ovn_sbdb} \
+    ${ovn_db_ssl_opts} \  
+    --loglevel=${ovnkube_loglevel} \
+    --logfile-maxsize=${ovnkube_logfile_maxsize} \
+    --logfile-maxbackups=${ovnkube_logfile_maxbackups} \
+    --logfile-maxage=${ovnkube_logfile_maxage} \
+    --pidfile ${OVN_RUNDIR}/ovn-dbchecker.pid \
+    --logfile /var/log/ovn-kubernetes/ovn-dbchecker.log &
+  
+  echo "=============== ovn-dbchecker ========== running"
+  wait_for_event attempts=3 process_ready ovn-dbchecker
+
+  process_healthy ovn-dbchecker
+  exit 11
 }
 
 # v3 - Runs northd on master. Does not run nb_ovsdb, and sb_ovsdb
@@ -1047,6 +1099,7 @@ display_version
 # run-ovn-northd Runs ovn-northd as a process does not run nb_ovsdb or sb_ovsdb (v3)
 # nb-ovsdb       Runs nb_ovsdb as a process (no detach or monitor) (v3)
 # sb-ovsdb       Runs sb_ovsdb as a process (no detach or monitor) (v3)
+# ovn-dbchecker  Runs ovndb checker alongside nb-ovsdb and sb-ovsdb containers (v3)
 # ovn-master     - master only (v3)
 # ovn-controller - all nodes (v3)
 # ovn-node       - all nodes (v3)
@@ -1058,6 +1111,9 @@ case ${cmd} in
   ;;
 "sb-ovsdb") # pod ovnkube-db container sb-ovsdb
   sb-ovsdb
+  ;;
+"ovn-dbchecker") # pod ovnkube-db container ovn-dbchecker
+  ovn-dbchecker
   ;;
 "run-ovn-northd") # pod ovnkube-master container run-ovn-northd
   run-ovn-northd
