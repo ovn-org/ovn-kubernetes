@@ -173,6 +173,7 @@ var _ = Describe("Hybrid SDN Master Operations", func() {
 				nodeSubnet string = "10.1.2.0/24"
 				nodeHOIP   string = "10.1.2.3"
 				nodeHOMAC  string = "0a:58:0a:01:02:03"
+				uuid       string = "12345"
 			)
 
 			fakeClient := fake.NewSimpleClientset(&v1.NodeList{
@@ -223,6 +224,13 @@ var _ = Describe("Hybrid SDN Master Operations", func() {
 			fexec.AddFakeCmdsNoOutputNoError([]string{
 				"ovn-nbctl --timeout=15 -- --if-exists lsp-del int-node1",
 			})
+			fexec.AddFakeCmd(&ovntest.ExpectedCmd{
+				Cmd:    "ovn-nbctl --timeout=15 --data=bare --no-heading --columns=_uuid find logical_router_policy external-ids:hybrid-overlay=" + nodeName,
+				Output: uuid,
+			})
+			fexec.AddFakeCmdsNoOutputNoError([]string{
+				"ovn-nbctl --timeout=15 lr-policy-del ovn_cluster_router " + uuid,
+			})
 
 			err = fakeClient.CoreV1().Nodes().Delete(context.TODO(), nodeName, *metav1.NewDeleteOptions(0))
 			Expect(err).NotTo(HaveOccurred())
@@ -255,6 +263,22 @@ var _ = Describe("Hybrid SDN Master Operations", func() {
 				},
 			})
 
+			// #1 node add
+			fexec.AddFakeCmdsNoOutputNoError([]string{
+				"ovn-nbctl --timeout=15 --id=@lr-policy create " +
+					"logical_router_policy priority=1006 action=reroute " +
+					"external-ids:hybrid-overlay=node1 match=\"(ip4.dst == 11.1.0.0/16) " +
+					"&& ip4.src == 10.1.2.0/24\" nexthop=10.1.2.3 -- add logical_router " +
+					"ovn_cluster_router policies @lr-policy",
+			})
+			// #2 comes because we set the ho dr gw mac annotation in #1
+			fexec.AddFakeCmdsNoOutputNoError([]string{
+				"ovn-nbctl --timeout=15 --id=@lr-policy create " +
+					"logical_router_policy priority=1006 action=reroute " +
+					"external-ids:hybrid-overlay=node1 match=\"(ip4.dst == 11.1.0.0/16) " +
+					"&& ip4.src == 10.1.2.0/24\" nexthop=10.1.2.3 -- add logical_router " +
+					"ovn_cluster_router policies @lr-policy",
+			})
 			_, err := config.InitConfig(ctx, fexec, nil)
 			Expect(err).NotTo(HaveOccurred())
 			mockOVNNBClient := ovntest.NewMockOVNClient(goovn.DBNB)
@@ -307,6 +331,7 @@ var _ = Describe("Hybrid SDN Master Operations", func() {
 				nodeSubnet string = "10.1.2.0/24"
 				nodeHOIP   string = "10.1.2.3"
 				nodeHOMAC  string = "00:00:00:52:19:d2"
+				uuid       string = "5678"
 			)
 
 			fakeClient := fake.NewSimpleClientset(&v1.NodeList{
@@ -314,9 +339,23 @@ var _ = Describe("Hybrid SDN Master Operations", func() {
 					newTestNode(nodeName, "linux", nodeSubnet, "", nodeHOMAC),
 				},
 			})
+			fexec.AddFakeCmdsNoOutputNoError([]string{
+				"ovn-nbctl --timeout=15 --id=@lr-policy create " +
+					"logical_router_policy priority=1006 action=reroute " +
+					"external-ids:hybrid-overlay=node1 match=\"(ip4.dst == 11.1.0.0/16) " +
+					"&& ip4.src == 10.1.2.0/24\" nexthop=10.1.2.3 -- add logical_router " +
+					"ovn_cluster_router policies @lr-policy",
+			})
 
 			fexec.AddFakeCmdsNoOutputNoError([]string{
 				"ovn-nbctl --timeout=15 -- --if-exists lsp-del int-node1",
+			})
+			fexec.AddFakeCmd(&ovntest.ExpectedCmd{
+				Cmd:    "ovn-nbctl --timeout=15 --data=bare --no-heading --columns=_uuid find logical_router_policy external-ids:hybrid-overlay=" + nodeName,
+				Output: uuid,
+			})
+			fexec.AddFakeCmdsNoOutputNoError([]string{
+				"ovn-nbctl --timeout=15 lr-policy-del ovn_cluster_router " + uuid,
 			})
 
 			_, err := config.InitConfig(ctx, fexec, nil)
@@ -410,7 +449,14 @@ var _ = Describe("Hybrid SDN Master Operations", func() {
 				&v1.NodeList{Items: []v1.Node{newTestNode(nodeName, "linux", nodeSubnet, "", nodeHOMAC)}},
 			}...)
 
-			_, err := config.InitConfig(ctx, nil, nil)
+			fexec.AddFakeCmdsNoOutputNoError([]string{
+				"ovn-nbctl --timeout=15 --id=@lr-policy create " +
+					"logical_router_policy priority=1006 action=reroute " +
+					"external-ids:hybrid-overlay=node1 match=\"(ip4.dst == 11.1.0.0/16) " +
+					"&& ip4.src == 10.1.2.0/24\" nexthop=10.1.2.3 -- add logical_router " +
+					"ovn_cluster_router policies @lr-policy",
+			})
+			_, err := config.InitConfig(ctx, fexec, nil)
 			Expect(err).NotTo(HaveOccurred())
 
 			f := informers.NewSharedInformerFactory(fakeClient, informer.DefaultResyncInterval)
@@ -575,5 +621,10 @@ func addLinuxNodeCommands(fexec *ovntest.FakeExec, nodeHOMAC, nodeName, nodeHOIP
 	})
 	fexec.AddFakeCmdsNoOutputNoError([]string{
 		"ovn-nbctl --timeout=15 -- --if-exists set logical_switch " + nodeName + " other-config:exclude_ips=" + nodeHOIP,
+		"ovn-nbctl --timeout=15 --id=@lr-policy create " +
+			"logical_router_policy priority=1006 action=reroute " +
+			"external-ids:hybrid-overlay=node1 match=\"(ip4.dst == 11.1.0.0/16) " +
+			"&& ip4.src == 10.1.2.0/24\" nexthop=10.1.2.3 -- add logical_router " +
+			"ovn_cluster_router policies @lr-policy",
 	})
 }
