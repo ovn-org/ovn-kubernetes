@@ -1223,21 +1223,29 @@ func getConfigFilePath(ctx *cli.Context) (string, bool) {
 // constructs the global config object from them. It returns the config file
 // path (if explicitly specified) or an error
 func InitConfig(ctx *cli.Context, exec kexec.Interface, defaults *Defaults) (string, error) {
-	return initConfigWithPath(ctx, exec, kubeServiceAccountPath, defaults)
+	return initConfigWithPath(ctx, exec, kubeServiceAccountPath, defaults, false)
+}
+
+// InitDebugConfig reads the config file and common command-line options and
+// constructs the global config object from them.
+// It sets the log level to 5 for debug purposes
+// It returns the config file path (if explicitly specified) or an error
+func InitDebugConfig(ctx *cli.Context, exec kexec.Interface, defaults *Defaults) (string, error) {
+	return initConfigWithPath(ctx, exec, kubeServiceAccountPath, defaults, true)
 }
 
 // InitConfigSa reads the config file and common command-line options and
 // constructs the global config object from them. It passes the service account directory.
 // It returns the config file path (if explicitly specified) or an error
 func InitConfigSa(ctx *cli.Context, exec kexec.Interface, saPath string, defaults *Defaults) (string, error) {
-	return initConfigWithPath(ctx, exec, saPath, defaults)
+	return initConfigWithPath(ctx, exec, saPath, defaults, false)
 }
 
 // initConfigWithPath reads the given config file (or if empty, reads the config file
 // specified by command-line arguments, or empty, the default config file) and
 // common command-line options and constructs the global config object from
 // them. It returns the config file path (if explicitly specified) or an error
-func initConfigWithPath(ctx *cli.Context, exec kexec.Interface, saPath string, defaults *Defaults) (string, error) {
+func initConfigWithPath(ctx *cli.Context, exec kexec.Interface, saPath string, defaults *Defaults, debug bool) (string, error) {
 	var retConfigFile string
 	var configFile string
 	var configFileIsDefault bool
@@ -1296,6 +1304,9 @@ func initConfigWithPath(ctx *cli.Context, exec kexec.Interface, saPath string, d
 	}
 
 	// Logging setup
+	if debug {
+		cfg.Logging.Level = 5
+	}
 	if err = overrideFields(&Logging, &cfg.Logging, &savedLogging); err != nil {
 		return "", err
 	}
