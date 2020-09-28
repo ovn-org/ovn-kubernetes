@@ -656,7 +656,6 @@ var _ = Describe("e2e external gateway validation", func() {
 	)
 	var (
 		haMode        bool
-		ciNetworkName string
 		ciNetworkFlag string
 		extGWCidr     = fmt.Sprintf("%s/24", extGW)
 		ovnNsFlag     = fmt.Sprintf("--namespace=%s", ovnNs)
@@ -669,22 +668,9 @@ var _ = Describe("e2e external gateway validation", func() {
 		jsonFlag := "-o=jsonpath='{.items..metadata.name}'"
 		fieldSelectorFlag := fmt.Sprintf("--field-selector=spec.nodeName=%s", ovnWorkerNode)
 		fieldSelectorHaFlag := fmt.Sprintf("--field-selector=spec.nodeName=%s", ovnHaWorkerNode)
-		ciNetworkName = "kind"
-		ciNetworkFlag = "{{ .NetworkSettings.Networks.kind.IPAddress }}"
-		// Determine which network the kind install is using. KIND 7 and before use the default network name of 'bridge'
-		controlNodeIP, err := runCommand("docker", "inspect", "-f", ciNetworkFlag, ovnControlNode)
-		if err != nil {
-			framework.Failf("Failed to inspect the container %s: %v", ovnWorkerNode, err)
-		}
-		// trim newline from the inspect output
-		controlNodeIP = strings.TrimSuffix(controlNodeIP, "\n")
-		if ip := net.ParseIP(controlNodeIP); ip == nil {
-			// set values for kind v7 and earlier
-			ciNetworkName = "bridge"
-			ciNetworkFlag = "{{ .NetworkSettings.IPAddress }}"
-		}
+		ciNetworkFlag = fmt.Sprintf("{{ .NetworkSettings.Networks.%s.IPAddress }}", ciNetworkName)
 		// start the container that will act as an external gateway
-		_, err = runCommand("docker", "run", "-itd", "--privileged", "--network", ciNetworkName, "--name", gwContainerName, "centos")
+		_, err := runCommand("docker", "run", "-itd", "--privileged", "--network", ciNetworkName, "--name", gwContainerName, "centos")
 		if err != nil {
 			framework.Failf("failed to start external gateway test container: %v", err)
 		}
@@ -862,7 +848,6 @@ var _ = Describe("e2e multiple external gateway update validation", func() {
 	)
 	var (
 		haMode        bool
-		ciNetworkName string
 		ciNetworkFlag string
 		ovnNsFlag     = fmt.Sprintf("--namespace=%s", ovnNs)
 	)
@@ -874,20 +859,7 @@ var _ = Describe("e2e multiple external gateway update validation", func() {
 		jsonFlag := "-o=jsonpath='{.items..metadata.name}'"
 		fieldSelectorFlag := fmt.Sprintf("--field-selector=spec.nodeName=%s", ovnWorkerNode)
 		fieldSelectorHaFlag := fmt.Sprintf("--field-selector=spec.nodeName=%s", ovnHaWorkerNode)
-		ciNetworkName = "kind"
-		ciNetworkFlag = "{{ .NetworkSettings.Networks.kind.IPAddress }}"
-		// Determine which network bridge the kind install is using. KIND 7 and before use the default network name of 'bridge'
-		controlNodeIP, err := runCommand("docker", "inspect", "-f", ciNetworkFlag, ovnControlNode)
-		if err != nil {
-			framework.Failf("Failed to inspect the container %s: %v", ovnWorkerNode, err)
-		}
-		// trim newline from the inspect output
-		controlNodeIP = strings.TrimSuffix(controlNodeIP, "\n")
-		if ip := net.ParseIP(controlNodeIP); ip == nil {
-			// set values for kind v7 and earlier
-			ciNetworkName = "bridge"
-			ciNetworkFlag = "{{ .NetworkSettings.IPAddress }}"
-		}
+		ciNetworkFlag = fmt.Sprintf("{{ .NetworkSettings.Networks.%s.IPAddress }}", ciNetworkName)
 		// attempt to retrieve the pod name that will source the tunnel test in non-HA mode
 		kubectlOut, err := framework.RunKubectl("get", "pods", ovnNsFlag, "-l", labelFlag, jsonFlag, fieldSelectorFlag)
 		if err != nil {
@@ -1378,7 +1350,6 @@ var _ = Describe("e2e non-vxlan external gateway and update validation", func() 
 	)
 	var (
 		haMode        bool
-		ciNetworkName string
 		ciNetworkFlag string
 		ovnNsFlag     = fmt.Sprintf("--namespace=%s", ovnNs)
 	)
@@ -1390,7 +1361,7 @@ var _ = Describe("e2e non-vxlan external gateway and update validation", func() 
 		jsonFlag := "-o=jsonpath='{.items..metadata.name}'"
 		fieldSelectorFlag := fmt.Sprintf("--field-selector=spec.nodeName=%s", ovnWorkerNode)
 		fieldSelectorHaFlag := fmt.Sprintf("--field-selector=spec.nodeName=%s", ovnHaWorkerNode)
-		ciNetworkFlag = "{{ .NetworkSettings.Networks.kind.IPAddress }}"
+		ciNetworkFlag = fmt.Sprintf("{{ .NetworkSettings.Networks.%s.IPAddress }}", ciNetworkName)
 		fieldSelectorControlFlag := fmt.Sprintf("--field-selector=spec.nodeName=%s", ovnControlNode)
 		// retrieve pod names from the running cluster
 		kubectlOut, err := framework.RunKubectl("get", "pods", ovnNsFlag, "-l", labelFlag, jsonFlag, fieldSelectorControlFlag)
@@ -1403,18 +1374,6 @@ var _ = Describe("e2e non-vxlan external gateway and update validation", func() 
 		_, err = framework.RunKubectl("exec", ovnPodName, ovnNsFlag, ovnContainerFlag, "--", "ovs-vsctl", "br-exists", sharedGatewayBridge)
 		if err != nil {
 			framework.Skipf("shared gateway mode not running in the current job setup, skipping non-vxlan external gateway testing")
-		}
-		// Determine which network bridge the kind install is using. KIND 7 and before use the default network name of 'bridge'
-		controlNodeIP, err := runCommand("docker", "inspect", "-f", ciNetworkFlag, ovnControlNode)
-		if err != nil {
-			framework.Failf("Failed to inspect the container %s: %v", ovnWorkerNode, err)
-		}
-		// trim newline from the inspect output
-		controlNodeIP = strings.TrimSuffix(controlNodeIP, "\n")
-		if ip := net.ParseIP(controlNodeIP); ip == nil {
-			// set values for kind v7 and earlier
-			ciNetworkName = "bridge"
-			ciNetworkFlag = "{{ .NetworkSettings.IPAddress }}"
 		}
 		// attempt to retrieve the pod name that will source the test in non-HA mode
 		kubectlOut, err = framework.RunKubectl("get", "pods", ovnNsFlag, "-l", labelFlag, jsonFlag, fieldSelectorFlag)
