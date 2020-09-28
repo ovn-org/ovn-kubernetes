@@ -11,6 +11,9 @@ env:
   KIND_CLUSTER_NAME: ovn
   KIND_INSTALL_INGRESS: true
   KIND_ALLOW_SYSTEM_WRITES: true
+  # This skips tests tagged as Serial
+  # Current Serial tests are not relevant for OVN
+  PARALLEL: true
 
 jobs:
   build:
