@@ -139,6 +139,19 @@ func JoinHostPortInt32(host string, port int32) string {
 	return net.JoinHostPort(host, strconv.Itoa(int(port)))
 }
 
+// SplitHostPortInt32 splits a vip into its host and port counterparts
+func SplitHostPortInt32(vip string) (string, int32, error) {
+	ip, portRaw, err := net.SplitHostPort(vip)
+	if err != nil {
+		return "", 0, err
+	}
+	port, err := strconv.ParseInt(portRaw, 10, 32)
+	if err != nil {
+		return "", 0, err
+	}
+	return ip, int32(port), nil
+}
+
 // IPAddrToHWAddr takes the four octets of IPv4 address (aa.bb.cc.dd, for example) and uses them in creating
 // a MAC address (0A:58:AA:BB:CC:DD).  For IPv6, create a hash from the IPv6 string and use that for MAC Address.
 // Assumption: the caller will ensure that an empty net.IP{} will NOT be passed.
