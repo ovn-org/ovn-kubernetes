@@ -19,7 +19,7 @@ import (
 const (
 	egressFirewallAppliedCorrectly = "EgressFirewall Rules applied"
 	egressFirewallAddError         = "EgressFirewall Rules not correctly added"
-	egressFirewallUpdateError      = "EgressFirewall Rules did not update correctly"
+	egressFirewallUpdateError      = "EgressFirewall Rules not correctly updated"
 )
 
 type egressFirewall struct {
@@ -66,7 +66,7 @@ func newEgressFirewallRule(rawEgressFirewallRule egressfirewallapi.EgressFirewal
 }
 
 func (oc *Controller) addEgressFirewall(egressFirewall *egressfirewallapi.EgressFirewall) []error {
-	klog.Infof("Adding egress Firewall %s in namespace %s", egressFirewall.Name, egressFirewall.Namespace)
+	klog.Infof("Adding egressFirewall %s in namespace %s", egressFirewall.Name, egressFirewall.Namespace)
 	nsInfo, err := oc.waitForNamespaceLocked(egressFirewall.Namespace)
 	if err != nil {
 		return []error{fmt.Errorf("failed to wait for namespace %s event (%v)",
@@ -91,14 +91,15 @@ func (oc *Controller) addEgressFirewall(egressFirewall *egressfirewallapi.Egress
 		return []error{fmt.Errorf("failed to convert minumumReservedEgressFirewallPriority to Integer: cannot add egressFirewall for namespace %s", egressFirewall.Namespace)}
 	}
 	for i, egressFirewallRule := range egressFirewall.Spec.Egress {
-		//process Rules into egressFirewallRules for egressFirewall struct
+		// process Rules into egressFirewallRules for egressFirewall struct
 		if i > egressFirewallStartPriorityInt-minimumReservedEgressFirewallPriorityInt {
-			klog.Warningf("egressFirewall for namespace %s has to many rules, the rest will be ignored", egressFirewall.Namespace)
+			klog.Warningf("egressFirewall for namespace %s has too many rules, the rest will be ignored",
+				egressFirewall.Namespace)
 			break
 		}
 		efr, err := newEgressFirewallRule(egressFirewallRule, i)
 		if err != nil {
-			errList = append(errList, fmt.Errorf("error: cannot create EgressFirewall Rule for destination %s to namespace %s - %v",
+			errList = append(errList, fmt.Errorf("error: cannot create EgressFirewall Rule to destination %s for namespace %s - %v",
 				egressFirewallRule.To.CIDRSelector, egressFirewall.Namespace, err))
 			continue
 
@@ -111,14 +112,10 @@ func (oc *Controller) addEgressFirewall(egressFirewall *egressfirewallapi.Egress
 
 	err = ef.addLogicalRouterPolicyToClusterRouter(nsInfo.addressSet.GetIPv4HashName(), nsInfo.addressSet.GetIPv6HashName(), egressFirewallStartPriorityInt)
 	if err != nil {
-		errList = append(errList, err)
-	}
-	if len(errList) > 0 {
-		return errList
+		return []error{err}
 	}
 
 	return nil
-
 }
 
 func (oc *Controller) updateEgressFirewall(oldEgressFirewall, newEgressFirewall *egressfirewallapi.EgressFirewall) []error {
@@ -169,12 +166,7 @@ func (ef *egressFirewall) addLogicalRouterPolicyToClusterRouter(hashedAddressSet
 		} else {
 			action = "drop"
 		}
-
-		ipAddress, _, err := net.ParseCIDR(rule.to.cidrSelector)
-		if err != nil {
-			return fmt.Errorf("error rule.to.cidrSelector %s is not a valid CIDR (%+v)", rule.to.cidrSelector, err)
-		}
-		if !utilnet.IsIPv6(ipAddress) {
+		if !utilnet.IsIPv6CIDRString(rule.to.cidrSelector) {
 			match = fmt.Sprintf("match=\"ip4.dst == %s && ip4.src == $%s", rule.to.cidrSelector, hashedAddressSetNameIPv4)
 		} else {
 			match = fmt.Sprintf("match=\"ip6.dst == %s && ip6.src == $%s", rule.to.cidrSelector, hashedAddressSetNameIPv6)
@@ -268,11 +260,14 @@ func egressGetL4Match(ports []egressfirewallapi.EgressFirewallPort) string {
 func getClusterSubnetsExclusion() string {
 	var exclusion string
 	for _, clusterSubnet := range config.Default.ClusterSubnets {
+		if exclusion != "" {
+			exclusion += " && "
+		}
 		if utilnet.IsIPv6CIDR(clusterSubnet.CIDR) {
-			exclusion += fmt.Sprintf(" && %s.dst != %s", "ip6", clusterSubnet.CIDR)
+			exclusion += fmt.Sprintf("%s.dst != %s", "ip6", clusterSubnet.CIDR)
 		} else {
-			exclusion += fmt.Sprintf(" && %s.dst != %s", "ip4", clusterSubnet.CIDR)
+			exclusion += fmt.Sprintf("%s.dst != %s", "ip4", clusterSubnet.CIDR)
 		}
 	}
-	return exclusion[4:]
+	return exclusion
 }

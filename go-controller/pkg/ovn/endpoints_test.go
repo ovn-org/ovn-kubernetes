@@ -83,6 +83,7 @@ func (e endpoints) delNodePortPortCmds(fexec *ovntest.FakeExec, service v1.Servi
 		})
 		fexec.AddFakeCmdsNoOutputNoError([]string{
 			fmt.Sprintf("ovn-nbctl --timeout=15 --if-exists remove load_balancer load_balancer_%s vips \"%s:%v\"", strconv.Itoa(idx), "169.254.33.2", service.Spec.Ports[0].NodePort),
+			fmt.Sprintf("ovn-nbctl --timeout=15 --data=bare --no-heading --columns=_uuid find acl name=load_balancer_%s-169.254.33.2\\:%d", strconv.Itoa(idx), service.Spec.Ports[0].NodePort),
 		})
 	}
 }
