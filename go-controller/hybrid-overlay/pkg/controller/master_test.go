@@ -72,6 +72,7 @@ var _ = Describe("Hybrid SDN Master Operations", func() {
 		app      *cli.App
 		stopChan chan struct{}
 		wg       *sync.WaitGroup
+		fexec    *ovntest.FakeExec
 	)
 
 	BeforeEach(func() {
@@ -83,6 +84,9 @@ var _ = Describe("Hybrid SDN Master Operations", func() {
 		app.Flags = config.Flags
 		stopChan = make(chan struct{})
 		wg = &sync.WaitGroup{}
+		fexec = ovntest.NewFakeExec()
+		err := util.SetExec(fexec)
+		Expect(err).NotTo(HaveOccurred())
 	})
 
 	AfterEach(func() {
@@ -104,11 +108,7 @@ var _ = Describe("Hybrid SDN Master Operations", func() {
 				},
 			})
 
-			fexec := ovntest.NewFakeExec()
-			err := util.SetExec(fexec)
-			Expect(err).NotTo(HaveOccurred())
-
-			_, err = config.InitConfig(ctx, fexec, nil)
+			_, err := config.InitConfig(ctx, fexec, nil)
 			Expect(err).NotTo(HaveOccurred())
 
 			f := informers.NewSharedInformerFactory(fakeClient, informer.DefaultResyncInterval)
@@ -122,6 +122,7 @@ var _ = Describe("Hybrid SDN Master Operations", func() {
 				f.Core().V1().Pods().Informer(),
 				mockOVNNBClient,
 				mockOVNSBClient,
+				informer.NewTestEventHandler,
 			)
 			Expect(err).NotTo(HaveOccurred())
 
@@ -131,6 +132,7 @@ var _ = Describe("Hybrid SDN Master Operations", func() {
 				defer wg.Done()
 				m.Run(stopChan)
 			}()
+			f.WaitForCacheSync(stopChan)
 
 			// Windows node should be allocated a subnet
 			Eventually(func() (map[string]string, error) {
@@ -156,6 +158,7 @@ var _ = Describe("Hybrid SDN Master Operations", func() {
 
 		err := app.Run([]string{
 			app.Name,
+			"-loglevel=5",
 			"-no-hostsubnet-nodes=" + v1.LabelOSStable + "=windows",
 			"-enable-hybrid-overlay",
 			"-hybrid-overlay-cluster-subnets=" + hybridOverlayClusterCIDR,
@@ -178,10 +181,7 @@ var _ = Describe("Hybrid SDN Master Operations", func() {
 				},
 			})
 
-			fexec := ovntest.NewFakeExec()
-			err := util.SetExec(fexec)
-			Expect(err).NotTo(HaveOccurred())
-			_, err = config.InitConfig(ctx, fexec, nil)
+			_, err := config.InitConfig(ctx, fexec, nil)
 			Expect(err).NotTo(HaveOccurred())
 			mockOVNNBClient := ovntest.NewMockOVNClient(goovn.DBNB)
 			mockOVNSBClient := ovntest.NewMockOVNClient(goovn.DBSB)
@@ -194,23 +194,14 @@ var _ = Describe("Hybrid SDN Master Operations", func() {
 				f.Core().V1().Pods().Informer(),
 				mockOVNNBClient,
 				mockOVNSBClient,
+				informer.NewTestEventHandler,
 			)
 			Expect(err).NotTo(HaveOccurred())
 
-			fexec.AddFakeCmdsNoOutputNoError([]string{
-				// Setting the mac on the lsp
-				"ovn-nbctl --timeout=15 -- " +
-					"--may-exist lsp-add node1 int-node1 -- " +
-					"lsp-set-addresses int-node1 " + nodeHOMAC,
-			})
-
-			fexec.AddFakeCmd(&ovntest.ExpectedCmd{
-				Cmd:    "ovn-nbctl --timeout=15 lsp-list " + nodeName,
-				Output: "29df5ce5-2802-4ee5-891f-4fb27ca776e9 (" + util.K8sPrefix + nodeName + ")",
-			})
-			fexec.AddFakeCmdsNoOutputNoError([]string{
-				"ovn-nbctl --timeout=15 -- --if-exists set logical_switch " + nodeName + " other-config:exclude_ips=" + nodeHOIP,
-			})
+			// #1 node add
+			addLinuxNodeCommands(fexec, nodeHOMAC, nodeName, nodeHOIP)
+			// #2 comes because we set the ho dr gw mac annotation in #1
+			addLinuxNodeCommands(fexec, nodeHOMAC, nodeName, nodeHOIP)
 
 			f.Start(stopChan)
 			wg.Add(1)
@@ -218,6 +209,7 @@ var _ = Describe("Hybrid SDN Master Operations", func() {
 				defer wg.Done()
 				m.Run(stopChan)
 			}()
+			f.WaitForCacheSync(stopChan)
 
 			Eventually(func() (map[string]string, error) {
 				updatedNode, err := fakeClient.CoreV1().Nodes().Get(context.TODO(), nodeName, metav1.GetOptions{})
@@ -241,6 +233,7 @@ var _ = Describe("Hybrid SDN Master Operations", func() {
 
 		err := app.Run([]string{
 			app.Name,
+			"-loglevel=5",
 			"-enable-hybrid-overlay",
 			"-hybrid-overlay-cluster-subnets=" + hybridOverlayClusterCIDR,
 		})
@@ -262,11 +255,7 @@ var _ = Describe("Hybrid SDN Master Operations", func() {
 				},
 			})
 
-			fexec := ovntest.NewFakeExec()
-
-			err := util.SetExec(fexec)
-			Expect(err).NotTo(HaveOccurred())
-			_, err = config.InitConfig(ctx, fexec, nil)
+			_, err := config.InitConfig(ctx, fexec, nil)
 			Expect(err).NotTo(HaveOccurred())
 			mockOVNNBClient := ovntest.NewMockOVNClient(goovn.DBNB)
 			mockOVNSBClient := ovntest.NewMockOVNClient(goovn.DBSB)
@@ -281,6 +270,7 @@ var _ = Describe("Hybrid SDN Master Operations", func() {
 				f.Core().V1().Pods().Informer(),
 				mockOVNNBClient,
 				mockOVNSBClient,
+				informer.NewTestEventHandler,
 			)
 			Expect(err).NotTo(HaveOccurred())
 
@@ -290,6 +280,7 @@ var _ = Describe("Hybrid SDN Master Operations", func() {
 				defer wg.Done()
 				m.Run(stopChan)
 			}()
+			f.WaitForCacheSync(stopChan)
 
 			Eventually(func() (map[string]string, error) {
 				updatedNode, err := fakeClient.CoreV1().Nodes().Get(context.TODO(), nodeName, metav1.GetOptions{})
@@ -302,6 +293,7 @@ var _ = Describe("Hybrid SDN Master Operations", func() {
 		}
 		err := app.Run([]string{
 			app.Name,
+			"-loglevel=5",
 			"-enable-hybrid-overlay",
 			"-hybrid-overlay-cluster-subnets=" + hybridOverlayClusterCIDR,
 		})
@@ -323,14 +315,11 @@ var _ = Describe("Hybrid SDN Master Operations", func() {
 				},
 			})
 
-			fexec := ovntest.NewFakeExec()
 			fexec.AddFakeCmdsNoOutputNoError([]string{
 				"ovn-nbctl --timeout=15 -- --if-exists lsp-del int-node1",
 			})
 
-			err := util.SetExec(fexec)
-			Expect(err).NotTo(HaveOccurred())
-			_, err = config.InitConfig(ctx, fexec, nil)
+			_, err := config.InitConfig(ctx, fexec, nil)
 			Expect(err).NotTo(HaveOccurred())
 
 			f := informers.NewSharedInformerFactory(fakeClient, informer.DefaultResyncInterval)
@@ -343,6 +332,7 @@ var _ = Describe("Hybrid SDN Master Operations", func() {
 				f.Core().V1().Pods().Informer(),
 				mockOVNNBClient,
 				mockOVNSBClient,
+				informer.NewTestEventHandler,
 			)
 			Expect(err).NotTo(HaveOccurred())
 
@@ -354,6 +344,7 @@ var _ = Describe("Hybrid SDN Master Operations", func() {
 				defer wg.Done()
 				m.Run(stopChan)
 			}()
+			f.WaitForCacheSync(stopChan)
 
 			k := &kube.Kube{KClient: fakeClient}
 			updatedNode, err := k.GetNode(nodeName)
@@ -378,6 +369,7 @@ var _ = Describe("Hybrid SDN Master Operations", func() {
 
 		err := app.Run([]string{
 			app.Name,
+			"-loglevel=5",
 			"-enable-hybrid-overlay",
 			"-hybrid-overlay-cluster-subnets=" + hybridOverlayClusterCIDR,
 		})
@@ -431,6 +423,7 @@ var _ = Describe("Hybrid SDN Master Operations", func() {
 				f.Core().V1().Pods().Informer(),
 				mockOVNNBClient,
 				mockOVNSBClient,
+				informer.NewTestEventHandler,
 			)
 			Expect(err).NotTo(HaveOccurred())
 
@@ -442,6 +435,7 @@ var _ = Describe("Hybrid SDN Master Operations", func() {
 				defer wg.Done()
 				m.Run(stopChan)
 			}()
+			f.WaitForCacheSync(stopChan)
 
 			Eventually(func() error {
 				pod, err := fakeClient.CoreV1().Pods(nsName).Get(context.TODO(), pod1Name, metav1.GetOptions{})
@@ -462,6 +456,7 @@ var _ = Describe("Hybrid SDN Master Operations", func() {
 
 		err := app.Run([]string{
 			app.Name,
+			"-loglevel=5",
 			"-enable-hybrid-overlay",
 			"-hybrid-overlay-cluster-subnets=" + hybridOverlayClusterCIDR,
 		})
@@ -479,6 +474,7 @@ var _ = Describe("Hybrid SDN Master Operations", func() {
 				nodeName      string = "node1"
 				nodeSubnet    string = "10.1.2.0/24"
 				nodeHOMAC     string = "00:00:00:52:19:d2"
+				nodeHOIP      string = "10.1.2.3"
 				pod1Name      string = "pod1"
 				pod1IP        string = "1.2.3.5"
 				pod1CIDR      string = pod1IP + "/24"
@@ -503,6 +499,7 @@ var _ = Describe("Hybrid SDN Master Operations", func() {
 				createPod(nsName, pod1Name, nodeName, pod1CIDR, pod1MAC),
 			}...)
 
+			addLinuxNodeCommands(fexec, nodeHOMAC, nodeName, nodeHOIP)
 			_, err := config.InitConfig(ctx, nil, nil)
 			Expect(err).NotTo(HaveOccurred())
 			f := informers.NewSharedInformerFactory(fakeClient, informer.DefaultResyncInterval)
@@ -517,6 +514,7 @@ var _ = Describe("Hybrid SDN Master Operations", func() {
 				f.Core().V1().Pods().Informer(),
 				mockOVNNBClient,
 				mockOVNSBClient,
+				informer.NewTestEventHandler,
 			)
 			Expect(err).NotTo(HaveOccurred())
 
@@ -526,6 +524,7 @@ var _ = Describe("Hybrid SDN Master Operations", func() {
 				defer wg.Done()
 				m.Run(stopChan)
 			}()
+			f.WaitForCacheSync(stopChan)
 
 			updatedNs, err := fakeClient.CoreV1().Namespaces().Get(context.TODO(), nsName, metav1.GetOptions{})
 			Expect(err).NotTo(HaveOccurred())
@@ -554,9 +553,27 @@ var _ = Describe("Hybrid SDN Master Operations", func() {
 
 		err := app.Run([]string{
 			app.Name,
+			"-loglevel=5",
 			"-enable-hybrid-overlay",
 			"-hybrid-overlay-cluster-subnets=" + hybridOverlayClusterCIDR,
 		})
 		Expect(err).NotTo(HaveOccurred())
 	})
 })
+
+func addLinuxNodeCommands(fexec *ovntest.FakeExec, nodeHOMAC, nodeName, nodeHOIP string) {
+	fexec.AddFakeCmdsNoOutputNoError([]string{
+		// Setting the mac on the lsp
+		"ovn-nbctl --timeout=15 -- " +
+			"--may-exist lsp-add node1 int-node1 -- " +
+			"lsp-set-addresses int-node1 " + nodeHOMAC,
+	})
+
+	fexec.AddFakeCmd(&ovntest.ExpectedCmd{
+		Cmd:    "ovn-nbctl --timeout=15 lsp-list " + nodeName,
+		Output: "29df5ce5-2802-4ee5-891f-4fb27ca776e9 (" + util.K8sPrefix + nodeName + ")",
+	})
+	fexec.AddFakeCmdsNoOutputNoError([]string{
+		"ovn-nbctl --timeout=15 -- --if-exists set logical_switch " + nodeName + " other-config:exclude_ips=" + nodeHOIP,
+	})
+}

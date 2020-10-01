@@ -43,7 +43,7 @@ func (ovn *Controller) getLbEndpoints(ep *kapi.Endpoints) map[kapi.Protocol]map[
 
 // AddEndpoints adds endpoints and creates corresponding resources in OVN
 func (ovn *Controller) AddEndpoints(ep *kapi.Endpoints) error {
-	klog.V(5).Infof("Adding endpoints: %s for namespace: %s", ep.Name, ep.Namespace)
+	klog.Infof("Adding endpoints: %s for namespace: %s", ep.Name, ep.Namespace)
 	// get service
 	// TODO: cache the service
 	svc, err := ovn.watchFactory.GetService(ep.Namespace, ep.Name)
@@ -162,7 +162,7 @@ func (ovn *Controller) handleNodePortLB(node *kapi.Node) error {
 }
 
 func (ovn *Controller) deleteEndpoints(ep *kapi.Endpoints) error {
-	klog.V(5).Infof("Deleting endpoints: %s for namespace: %s", ep.Name, ep.Namespace)
+	klog.Infof("Deleting endpoints: %s for namespace: %s", ep.Name, ep.Namespace)
 	svc, err := ovn.watchFactory.GetService(ep.Namespace, ep.Name)
 	if err != nil {
 		// This is not necessarily an error. For e.g when a service is deleted,
@@ -188,7 +188,7 @@ func (ovn *Controller) deleteEndpoints(ep *kapi.Endpoints) error {
 			if err != nil {
 				klog.Errorf("Failed to create reject ACL for load balancer: %s, error: %v", lb, err)
 			}
-			klog.V(5).Infof("Reject ACL created for load balancer: %s, %s", lb, aclUUID)
+			klog.Infof("Reject ACL created for load balancer: %s, %s", lb, aclUUID)
 		}
 
 		// clear endpoints from the LB

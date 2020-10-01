@@ -128,15 +128,21 @@ func delPbrAndNatRules(nodeName string) {
 			"stdout: %s, stderr: %s, error: %v", matches, stderr, err)
 		matches = ""
 	}
-	nodeSubnetMatchSubStr := fmt.Sprintf("rtos-%s", nodeName)
+	// matches inport for a policy, must use ending quote to substring match to avoid matching other nodes accidentally
+	// i.e. rtos-ovn-worker would match rtos-ovn-worker2
+	nodeSubnetMatchSubStr := fmt.Sprintf("rtos-%s\"", nodeName)
+	// for inter node, match the comment in the policy, and include extra space to avoid accidental submatch
+	interNodeMatchSubStr := fmt.Sprintf("inter-%s ", nodeName)
+	// mgmt port policy matches node name in comment, use extra spaces to avoid accidental match of other nodes
+	mgmtPortPolicyMatchSubStr := fmt.Sprintf(" %s ", nodeName)
 	for _, match := range strings.Split(matches, "\n\n") {
 		var priority string
 		if strings.Contains(match, nodeSubnetMatchSubStr) {
 			priority = nodeSubnetPolicyPriority
-		} else if strings.Contains(match, nodeName) {
-			priority = mgmtPortPolicyPriority
-		} else if strings.Contains(match, "inter") {
+		} else if strings.Contains(match, interNodeMatchSubStr) {
 			priority = interNodePolicyPriority
+		} else if strings.Contains(match, mgmtPortPolicyMatchSubStr) {
+			priority = mgmtPortPolicyPriority
 		} else {
 			continue
 		}

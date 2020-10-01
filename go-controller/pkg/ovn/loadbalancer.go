@@ -162,7 +162,7 @@ func (ovn *Controller) getLogicalSwitchesForLoadBalancer(lb string) ([]string, e
 }
 
 // TODO: Add unittest for function.
-func generateACLName(lb string, sourceIP string, sourcePort int32) string {
+func (ovn *Controller) generateACLName(lb string, sourceIP string, sourcePort int32) string {
 	aclName := fmt.Sprintf("%s-%s:%d", lb, sourceIP, sourcePort)
 	aclName = strings.ReplaceAll(aclName, ":", "\\:")
 	// ACL names are limited to 63 characters
@@ -221,7 +221,7 @@ func (ovn *Controller) createLoadBalancerRejectACL(lb string, sourceIP string, s
 	}
 	vip := util.JoinHostPortInt32(sourceIP, sourcePort)
 	// NOTE: doesn't use vip, to avoid having brackets in the name with IPv6
-	aclName := generateACLName(lb, sourceIP, sourcePort)
+	aclName := ovn.generateACLName(lb, sourceIP, sourcePort)
 	// If ovn-k8s was restarted, we lost the cache, and an ACL may already exist in OVN. In that case we need to check
 	// using ACL name
 	aclUUID, stderr, err := util.RunOVNNbctl("--data=bare", "--no-heading", "--columns=_uuid", "find", "acl",
@@ -267,12 +267,43 @@ func (ovn *Controller) createLoadBalancerRejectACL(lb string, sourceIP string, s
 }
 
 func (ovn *Controller) deleteLoadBalancerRejectACL(lb, vip string) {
-	acl, _ := ovn.getServiceLBInfo(lb, vip)
-	if acl == "" {
+	aclUUID, hasEndpoints := ovn.getServiceLBInfo(lb, vip)
+	if aclUUID == "" && !hasEndpoints {
+		// If no ACL and does not have endpoints, we can assume there is no valid entry in the cache here as
+		// this is an illegal state.
+		// Determine and remove ACL by name.
+		ip, port, err := util.SplitHostPortInt32(vip)
+		if err != nil {
+			klog.Errorf("Unable to parse vip for Reject ACL deletion: %v", err)
+			return
+		}
+		ovn.removeStaleRejectACL(lb, ip, port)
+	} else if aclUUID == "" {
+		// Must have endpoints and no reject ACL to remove
 		klog.V(5).Infof("No reject ACL found to remove for load balancer: %s, vip: %s", lb, vip)
+		return
+	} else {
+		ovn.removeACLFromNodeSwitches(lb, aclUUID)
+	}
+	ovn.removeServiceACL(lb, vip)
+}
+
+func (ovn *Controller) removeStaleRejectACL(lb, ip string, port int32) {
+	aclName := ovn.generateACLName(lb, ip, port)
+	aclUUID, stderr, err := util.RunOVNNbctl("--data=bare", "--no-heading", "--columns=_uuid", "find", "acl",
+		fmt.Sprintf("name=%s", aclName))
+	if err != nil {
+		klog.Errorf("Error while querying ACLs by name: %s, %v", stderr, err)
+		return
+	} else if len(aclUUID) == 0 {
+		klog.Infof("Reject ACL not found to remove for name: %s", aclName)
 		return
 	}
 
+	ovn.removeACLFromNodeSwitches(lb, aclUUID)
+}
+
+func (ovn *Controller) removeACLFromNodeSwitches(lb, aclUUID string) {
 	switches, err := ovn.getLogicalSwitchesForLoadBalancer(lb)
 	if err != nil {
 		klog.Errorf("Could not retrieve logical switches associated with load balancer %s", lb)
@@ -281,17 +312,15 @@ func (ovn *Controller) deleteLoadBalancerRejectACL(lb, vip string) {
 
 	args := []string{}
 	for _, ls := range switches {
-		args = append(args, "--", "--if-exists", "remove", "logical_switch", ls, "acl", acl)
+		args = append(args, "--", "--if-exists", "remove", "logical_switch", ls, "acl", aclUUID)
 	}
 
 	if len(args) > 0 {
 		_, _, err = util.RunOVNNbctl(args...)
 		if err != nil {
-			klog.Errorf("Error while removing ACL: %s, from switches, error: %v", acl, err)
+			klog.Errorf("Error while removing ACL: %s, from switches, error: %v", aclUUID, err)
 		} else {
-			klog.V(5).Infof("ACL: %s, removed from switches: %s", acl, switches)
+			klog.Infof("ACL: %s, removed from switches: %s", aclUUID, switches)
 		}
 	}
-
-	ovn.removeServiceACL(lb, vip)
 }

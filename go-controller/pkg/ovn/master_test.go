@@ -45,6 +45,10 @@ func cleanupPBRandNATRules(fexec *ovntest.FakeExec, nodeName string, nodeSubnet 
 	matchstr1 := fmt.Sprintf("ip4.src == %s && ip4.dst == nodePhysicalIP /* %s */", mgmtPortIP, nodeName)
 	matchstr2 := fmt.Sprintf(`inport == "rtos-%s" && ip4.dst == nodePhysicalIP /* %s */`, nodeName, nodeName)
 	matchstr3 := fmt.Sprintf("ip4.src == source && ip4.dst == nodePhysicalIP")
+	matchstr4 := fmt.Sprintf(`ip4.src == NO DELETE  && ip4.dst != 10.244.0.0/16 /* inter-%s-no */`, nodeName)
+	matchstr5 := fmt.Sprintf(`ip4.src == 10.244.0.2  && ip4.dst != 10.244.0.0/16 /* inter-%s */`, nodeName)
+	matchstr6 := fmt.Sprintf("ip4.src == NO DELETE && ip4.dst == nodePhysicalIP /* %s-no */", nodeName)
+
 	fexec.AddFakeCmd(&ovntest.ExpectedCmd{
 		Cmd: "ovn-nbctl --timeout=15 --data=bare --no-heading --columns=match find logical_router_policy",
 		Output: fmt.Sprintf(`%s
@@ -52,11 +56,18 @@ func cleanupPBRandNATRules(fexec *ovntest.FakeExec, nodeName string, nodeSubnet 
 %s
 
 %s
-`, matchstr1, matchstr2, matchstr3),
+
+%s
+
+%s
+
+%s
+`, matchstr1, matchstr2, matchstr3, matchstr4, matchstr5, matchstr6),
 	})
 	fexec.AddFakeCmdsNoOutputNoError([]string{
 		"ovn-nbctl --timeout=15 lr-policy-del " + ovnClusterRouter + " " + mgmtPortPolicyPriority + " " + matchstr1,
 		"ovn-nbctl --timeout=15 lr-policy-del " + ovnClusterRouter + " " + nodeSubnetPolicyPriority + " " + matchstr2,
+		"ovn-nbctl --timeout=15 lr-policy-del " + ovnClusterRouter + " " + interNodePolicyPriority + " " + matchstr5,
 	})
 }
 
