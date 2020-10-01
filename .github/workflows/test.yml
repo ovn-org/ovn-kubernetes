@@ -147,8 +147,10 @@ jobs:
         target:
           - shard: shard-conformance
             hybrid-overlay: false
+            multicast-enable: false
           - shard: control-plane
             hybrid-overlay: true
+            multicast-enable: true
         ha:
          - enabled: "true"
            name: "HA"
@@ -173,7 +175,7 @@ jobs:
         exclude:
          # Not currently supported but needs to be.
          - {"ipfamily": {"ip": dualstack}}
-         - {"ipfamily": {"ip": ipv6}, "target": {"shard": control-plane}}
+         - { "ha": {"enabled": "false"},  "gateway-mode": shared, "target": {"shard": control-plane}}
          # Limit matrix combinations for CI. DISABLED items added to exclude list:
          #   DISABLED  v4  ha     local
          #   ENABLED   v4  ha     shared
@@ -195,6 +197,7 @@ jobs:
       KIND_IPV6_SUPPORT: "${{ matrix.ipfamily.ipv6 }}"
       OVN_HYBRID_OVERLAY_ENABLE: "${{ matrix.target.hybrid-overlay }}"
       OVN_GATEWAY_MODE: "${{ matrix.gateway-mode }}"
+      OVN_MULTICAST_ENABLE:  "${{ matrix.target.multicast-enable }}"
     steps:
 
     - name: Free up disk space
