@@ -7,8 +7,9 @@ export KUBERNETES_CONFORMANCE_TEST=y
 export KUBECONFIG=${HOME}/admin.conf
 
 SKIPPED_TESTS=""
-if [ "$KIND_IPV4_SUPPORT" == true ] && [ "$KIND_IPV6_SUPPORT" == true ]; then
-    # No support for these features in dual-stack yet
+if [ "$KIND_IPV6_SUPPORT" == true ]; then
+    FOCUS_TESTS="multicast"
+    # No support for these features in dual-stack or IPv6 only yet
     SKIPPED_TESTS="hybrid.overlay|external.gateway"
 fi
 
@@ -24,6 +25,7 @@ go mod download
 go test -timeout=0 -v . \
         -ginkgo.v \
         -ginkgo.flakeAttempts ${FLAKE_ATTEMPTS:-2} \
+        -ginkgo.focus="${FOCUS_TESTS}" \
         -ginkgo.skip="${SKIPPED_TESTS}" \
         -provider skeleton \
         -kubeconfig ${KUBECONFIG} \
