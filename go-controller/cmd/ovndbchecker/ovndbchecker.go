@@ -18,6 +18,7 @@ import (
 	"github.com/urfave/cli/v2"
 
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/kube"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovndbmanager"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
 )
@@ -176,8 +177,19 @@ func runOvnKubeDBChecker(ctx *cli.Context) error {
 		return fmt.Errorf("failed to initialize exec helper: %v", err)
 	}
 
+	kclient, egressIPClient, egressFirewallClient, _, err := util.NewClientsets(&config.Kubernetes)
+	if err != nil {
+		return err
+	}
+
 	stopChan := make(chan struct{})
-	ovndbmanager.RunDBChecker(stopChan)
+	ovndbmanager.RunDBChecker(
+		&kube.Kube{
+			KClient:              kclient,
+			EIPClient:            egressIPClient,
+			EgressFirewallClient: egressFirewallClient,
+		},
+		stopChan)
 	// run until cancelled
 	<-ctx.Context.Done()
 	close(stopChan)
