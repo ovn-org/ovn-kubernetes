@@ -14,11 +14,12 @@ arrives to the VF, and a packet sent through the VF is received by its represent
 The following manufacturers are known to work:
 
 - Mellanox ConnectX-5 NIC
+- Mellanox ConnectX-6DX NIC
 
 ## Prerequisites
 
-- Linux Kernel TBD (require connection tracking offload - https://lwn.net/Articles/793082/)
-- Open vSwitch TBD (require connection tracking offload - https://mail.openvswitch.org/pipermail/ovs-dev/2019-July/360376.html)
+- Linux Kernel 5.7.0 or above
+- Open vSwitch 2.13 or above
 - iproute >= 4.12
 - sriov-device-plugin
 - multus-cni
