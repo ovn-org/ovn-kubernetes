@@ -6,6 +6,7 @@ import (
 	"net"
 	"os"
 	"reflect"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -36,6 +37,8 @@ const (
 	OvnServiceIdledAt              = "k8s.ovn.org/idled-at"
 	OvnNodeAnnotationRetryInterval = 100 * time.Millisecond
 	OvnNodeAnnotationRetryTimeout  = 1 * time.Second
+	OvnSingleJoinSwithTopoVersion  = 1
+	OvnCurrentTopologyVersion      = OvnSingleJoinSwithTopoVersion
 )
 
 type ovnkubeMasterLeaderMetrics struct{}
@@ -121,6 +124,85 @@ func (oc *Controller) Start(kClient kubernetes.Interface, nodeName string, wg *s
 	return nil
 }
 
+// delete obsoleted logical OVN entities that are specific for Multiple join switches OVN topology. Also cleanup
+// OVN entities for deleted nodes (similar to syncNodes() but for obsoleted Multiple join switches OVN topology)
+func (oc *Controller) upgradeToSingleSwitchOVNTopology(existingNodeList *kapi.NodeList) error {
+
+	existingNodes := make(map[string]bool)
+	for _, node := range existingNodeList.Items {
+		existingNodes[node.Name] = true
+
+		// delete the obsoleted node-join-subnets annotation
+		err := oc.kube.SetAnnotationsOnNode(&node, map[string]interface{}{"k8s.ovn.org/node-join-subnets": nil})
+		if err != nil {
+			klog.Errorf("Failed to remove node-join-subnets annotation for node %s", node.Name)
+		}
+	}
+
+	nodeSwitches, stderr, err := util.RunOVNNbctl("--data=bare", "--no-heading", "--format=csv",
+		"--columns=name,other-config", "find", "logical_switch")
+	if err != nil {
+		return fmt.Errorf("failed to get node logical switches: stderr: %q, error: %v",
+			stderr, err)
+	}
+
+	// find node logical switches which have other-config value set
+	logicalNodes := make(map[string]bool)
+	for _, result := range strings.Split(nodeSwitches, "\n") {
+		// Split result into name and other-config
+		items := strings.Split(result, ",")
+		if len(items) != 2 || len(items[0]) == 0 || len(items[1]) == 0 {
+			continue
+		}
+		logicalNodes[items[0]] = true
+	}
+
+	for nodeName := range logicalNodes {
+		// if the node was deleted when ovn-master was down, delete its per-node switch
+		upgradeOnly := true
+		if _, ok := existingNodes[nodeName]; !ok {
+			_ = oc.deleteNodeLogicalNetwork(nodeName)
+			upgradeOnly = false
+		}
+
+		// for all nodes include the ones that were deleted, delete its gateway entities.
+		// See comments above the multiJoinSwitchGatewayCleanup() function for details.
+		err = multiJoinSwitchGatewayCleanup(nodeName, upgradeOnly)
+		if err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func (oc *Controller) upgradeOVNTopology(existingNodes *kapi.NodeList) error {
+	// Find out the current OVN topology version, if "k8s-ovn-topo-version" external_ids is does not exist, it is pre
+	// OVN topology versioning, set version number to 0
+	ver := 0
+	stdout, stderr, err := util.RunOVNNbctl("get", "logical_router", util.OVNClusterRouter, "external_ids:k8s-ovn-topo-version")
+	if err != nil {
+		if strings.Contains(stderr, "no row") {
+			// no OVNClusterRouter exists, DB is empty, nothing to upgrade
+			ver = OvnCurrentTopologyVersion
+		} else {
+			klog.Infof("No version string found. The OVN topology is before versioning is introduced. Upgrade needed")
+		}
+	} else {
+		v, err := strconv.Atoi(stdout)
+		if err != nil {
+			klog.Errorf("Invalid OVN topology version string of the cluster: %s", stdout)
+		} else {
+			ver = v
+		}
+	}
+
+	// If current DB version is greater than OvnSingleJoinSwithTopoVersion, no need to upgrade to single switch topology
+	if ver < OvnSingleJoinSwithTopoVersion {
+		return oc.upgradeToSingleSwitchOVNTopology(existingNodes)
+	}
+	return nil
+}
+
 // StartClusterMaster runs a subnet IPAM and a controller that watches arrival/departure
 // of nodes in the cluster
 // On an addition to the cluster (node create), a new subnet is created for it that will translate
@@ -152,6 +234,12 @@ func (oc *Controller) StartClusterMaster(masterNodeName string) error {
 	existingNodes, err := oc.kube.GetNodes()
 	if err != nil {
 		klog.Errorf("Error in fetching nodes: %v", err)
+		return err
+	}
+
+	err = oc.upgradeOVNTopology(existingNodes)
+	if err != nil {
+		klog.Errorf("Failed to upgrade OVN topology to version %d: %v", OvnCurrentTopologyVersion, err)
 		return err
 	}
 
@@ -226,7 +314,8 @@ func (oc *Controller) StartClusterMaster(masterNodeName string) error {
 func (oc *Controller) SetupMaster(masterNodeName string) error {
 	// Create a single common distributed router for the cluster.
 	stdout, stderr, err := util.RunOVNNbctl("--", "--may-exist", "lr-add", util.OVNClusterRouter,
-		"--", "set", "logical_router", util.OVNClusterRouter, "external_ids:k8s-cluster-router=yes")
+		"--", "set", "logical_router", util.OVNClusterRouter, "external_ids:k8s-cluster-router=yes",
+		fmt.Sprintf("external_ids:k8s-ovn-topo-version=%d", OvnCurrentTopologyVersion))
 	if err != nil {
 		klog.Errorf("Failed to create a single common distributed router for the cluster, "+
 			"stdout: %q, stderr: %q, error: %v", stdout, stderr, err)
@@ -960,6 +1049,7 @@ func (oc *Controller) syncNodes(nodes []interface{}) {
 		return
 	}
 
+	// find node logical switches which have other-config value set
 	for _, result := range strings.Split(nodeSwitches, "\n") {
 		// Split result into name and other-config
 		items := strings.Split(result, ",")

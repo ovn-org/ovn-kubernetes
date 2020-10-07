@@ -122,7 +122,7 @@ func defaultFakeExec(nodeSubnet, nodeName string, sctpSupport bool) (*ovntest.Fa
 	fexec.AddFakeCmdsNoOutputNoError([]string{
 		"ovn-nbctl --timeout=15 --columns=_uuid list port_group",
 		"ovn-sbctl --timeout=15 --columns=_uuid list IGMP_Group",
-		"ovn-nbctl --timeout=15 -- --may-exist lr-add ovn_cluster_router -- set logical_router ovn_cluster_router external_ids:k8s-cluster-router=yes",
+		"ovn-nbctl --timeout=15 -- --may-exist lr-add ovn_cluster_router -- set logical_router ovn_cluster_router external_ids:k8s-cluster-router=yes external_ids:k8s-ovn-topo-version=1",
 	})
 	if sctpSupport {
 		fexec.AddFakeCmd(&ovntest.ExpectedCmd{

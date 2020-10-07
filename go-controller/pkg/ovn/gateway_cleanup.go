@@ -159,3 +159,116 @@ func staticRouteCleanup(nextHops []net.IP) {
 		}
 	}
 }
+
+// multiJoinSwitchGatewayCleanup removes the OVN NB gateway logical entities that for
+// the obsoleted multiple join switch OVN topology.
+//
+// if "upgradeOnly" is true, this function only deletes the gateway logical entities that
+// are unique for the multiple join switch OVN topology version; this is used for
+// upgrading its OVN logical topology to the single join switch version.
+//
+// if "upgradeOnly" is false, this function deletes all the gateway logical entities of
+// the specific node, even some of them are common in both the multiple join switch and
+// the single join switch versions; this is to cleanup the logical entities for the
+// specified node if the node was deleted when the ovnkube-master pod was brought down
+// to do the version upgrade.
+func multiJoinSwitchGatewayCleanup(nodeName string, upgradeOnly bool) error {
+	gatewayRouter := util.GwRouterPrefix + nodeName
+
+	// Get the gateway router port's IP address (connected to join switch)
+	var nextHops []net.IP
+
+	gwIPAddrs, err := util.GetLRPAddrs(util.GwRouterToJoinSwitchPrefix + gatewayRouter)
+	if err != nil {
+		return err
+	}
+
+	for _, gwIPAddr := range gwIPAddrs {
+		// Delete logical router policy whose nexthop is the old rtoj- gateway port address
+		stdout, stderr, err := util.RunOVNNbctl("--data=bare", "--no-heading", "--columns=_uuid",
+			"find", "logical_router_policy", fmt.Sprintf("nexthop=%s", gwIPAddr.IP))
+		if err != nil {
+			klog.Errorf("Unable to find LR policy of nexthop: %s for node %s, stderr: %s, err: %v",
+				gwIPAddr.IP, nodeName, stderr, err)
+			continue
+		}
+		if stdout != "" {
+			policyIDs := strings.Fields(stdout)
+			for _, policyID := range policyIDs {
+				_, stderr, err = util.RunOVNNbctl("remove", "logical_router", util.OVNClusterRouter, "policies", policyID)
+				if err != nil {
+					klog.Errorf("Unable to remove LR policy: %s, stderr: %s, err: %v", policyID, stderr, err)
+				}
+			}
+		}
+		nextHops = append(nextHops, gwIPAddr.IP)
+	}
+	staticRouteCleanup(nextHops)
+
+	// Remove the join switch that connects ovn_cluster_router to gateway router
+	_, stderr, err := util.RunOVNNbctl("--if-exist", "ls-del", "join_"+nodeName)
+	if err != nil {
+		return fmt.Errorf("failed to delete the join logical switch %s, "+
+			"stderr: %q, error: %v", "join_"+nodeName, stderr, err)
+	}
+
+	// Remove the logical router port on the distributed router that connects to the join switch
+	_, stderr, err = util.RunOVNNbctl("--if-exist", "lrp-del", "dtoj-"+nodeName)
+	if err != nil {
+		return fmt.Errorf("failed to delete the patch port dtoj-%s on distributed router "+
+			"stderr: %q, error: %v", nodeName, stderr, err)
+	}
+
+	// Remove the logical router port on the gateway router that connects to the join switch
+	_, stderr, err = util.RunOVNNbctl("--if-exist", "lrp-del", util.GwRouterToJoinSwitchPrefix+gatewayRouter)
+	if err != nil {
+		return fmt.Errorf("failed to delete the port %s%s on gateway router "+
+			"stderr: %q, error: %v", util.GwRouterToJoinSwitchPrefix, gatewayRouter, stderr, err)
+	}
+
+	if upgradeOnly {
+		return nil
+	}
+
+	// Remove the gateway router associated with nodeName
+	_, stderr, err = util.RunOVNNbctl("--if-exist", "lr-del",
+		gatewayRouter)
+	if err != nil {
+		return fmt.Errorf("failed to delete gateway router %s, stderr: %q, "+
+			"error: %v", gatewayRouter, stderr, err)
+	}
+
+	// Remove external switch
+	externalSwitch := util.ExternalSwitchPrefix + nodeName
+	_, stderr, err = util.RunOVNNbctl("--if-exist", "ls-del",
+		externalSwitch)
+	if err != nil {
+		return fmt.Errorf("failed to delete external switch %s, stderr: %q, "+
+			"error: %v", externalSwitch, stderr, err)
+	}
+
+	// If exists, remove the TCP, UDP load-balancers created for north-south traffic for gateway router.
+	k8sNSLbTCP, k8sNSLbUDP, k8sNSLbSCTP, err := getGatewayLoadBalancers(gatewayRouter)
+	if err != nil {
+		return err
+	}
+	protoLBMap := map[kapi.Protocol]string{
+		kapi.ProtocolTCP:  k8sNSLbTCP,
+		kapi.ProtocolUDP:  k8sNSLbUDP,
+		kapi.ProtocolSCTP: k8sNSLbSCTP,
+	}
+	for proto, uuid := range protoLBMap {
+		if uuid != "" {
+			_, stderr, err = util.RunOVNNbctl("lb-del", uuid)
+			if err != nil {
+				return fmt.Errorf("failed to delete Gateway router %s's %s load balancer %s, stderr: %q, "+
+					"error: %v", gatewayRouter, proto, uuid, stderr, err)
+			}
+		}
+	}
+
+	// We don't know the gateway mode as this is running in the master, try to delete the additional local
+	// gateway for the shared gateway mode. it will be no op if this is done for other gateway modes.
+	delPbrAndNatRules(nodeName)
+	return nil
+}
