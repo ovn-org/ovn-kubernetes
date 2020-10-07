@@ -13,7 +13,14 @@ if [[ ! -f /usr/local/bin/e2e.test ]]; then
 fi
 popd
 
-go get sigs.k8s.io/kind@v0.9.0
+# Install kind (dual-stack is not released upstream so we have to use our own version)
+if [ "$KIND_IPV4_SUPPORT" == true ] && [ "$KIND_IPV6_SUPPORT" == true ]; then
+  sudo curl -Lo /usr/local/bin/kind https://github.com/aojea/kind/releases/download/dualstack/kind
+  sudo chmod +x /usr/local/bin/kind
+else
+  go get sigs.k8s.io/kind@v0.9.0
+fi
+
 pushd ../contrib
 ./kind.sh
 popd
