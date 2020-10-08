@@ -95,6 +95,10 @@ func podIPToCookie(podIP net.IP) string {
 
 // AddPod handles the pod add event
 func (n *NodeController) AddPod(pod *kapi.Pod) error {
+	// nothing to do for hostnetworked pod
+	if !util.PodWantsNetwork(pod) {
+		return nil
+	}
 	podIPs, podMAC, err := getPodDetails(pod)
 	if err != nil {
 		klog.V(5).Infof("Cleaning up hybrid overlay pod %s/%s because %v", pod.Namespace, pod.Name, err)
@@ -225,6 +229,10 @@ func (n *NodeController) AddPod(pod *kapi.Pod) error {
 
 // DeletePod handles the pod delete event
 func (n *NodeController) DeletePod(pod *kapi.Pod) error {
+	// nothing to do for hostnetworked pods
+	if !util.PodWantsNetwork(pod) {
+		return nil
+	}
 	podIPs, _, err := getPodDetails(pod)
 	if err != nil {
 		return fmt.Errorf("error getting pod details: %v", err)

@@ -134,6 +134,12 @@ func GetNodePrimaryIP(node *kapi.Node) (string, error) {
 		kapi.NodeInternalIP, kapi.NodeExternalIP)
 }
 
+// PodWantsNetwork returns if the given pod is hostNetworked or not to determine if networking
+// needs to be setup
+func PodWantsNetwork(pod *kapi.Pod) bool {
+	return !pod.Spec.HostNetwork
+}
+
 const (
 	// DefNetworkAnnotation is the pod annotation for the cluster-wide default network
 	DefNetworkAnnotation = "v1.multus-cni.io/default-network"
