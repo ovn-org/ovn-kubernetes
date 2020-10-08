@@ -46,7 +46,11 @@ OVN_EMPTY_LB_EVENTS=""
 OVN_MULTICAST_ENABLE=""
 OVN_EGRESSIP_ENABLE=
 OVN_EGRESSFIREWALL_ENABLE=
+<<<<<<< HEAD
 OVN_DISABLE_OVN_IFACE_ID_VER="false"
+=======
+OVN_MULTIHOME_ENABLE=
+>>>>>>> 7cb0ffc90... support multi-homed pod using OVN k8s CNI
 OVN_V4_JOIN_SUBNET=""
 OVN_V6_JOIN_SUBNET=""
 OVN_NETFLOW_TARGETS=""
@@ -190,6 +194,9 @@ while [ "$1" != "" ]; do
   --egress-firewall-enable)
     OVN_EGRESSFIREWALL_ENABLE=$VALUE
     ;;
+  --multihome-enable)
+    OVN_MULTIHOME_ENABLE=$VALUE
+    ;;
   --v4-join-subnet)
     OVN_V4_JOIN_SUBNET=$VALUE
     ;;
@@ -280,8 +287,13 @@ ovn_egress_ip_enable=${OVN_EGRESSIP_ENABLE}
 echo "ovn_egress_ip_enable: ${ovn_egress_ip_enable}"
 ovn_egress_firewall_enable=${OVN_EGRESSFIREWALL_ENABLE}
 echo "ovn_egress_firewall_enable: ${ovn_egress_firewall_enable}"
+<<<<<<< HEAD
 ovn_disable_ovn_iface_id_ver=${OVN_DISABLE_OVN_IFACE_ID_VER}
 echo "ovn_disable_ovn_iface_id_ver: ${ovn_disable_ovn_iface_id_ver}"
+=======
+ovn_multihome_enable=${OVN_MULTIHOME_ENABLE}
+echo "ovn_multihome_enable: ${ovn_multihome_enable}"
+>>>>>>> 7cb0ffc90... support multi-homed pod using OVN k8s CNI
 ovn_hybrid_overlay_net_cidr=${OVN_HYBRID_OVERLAY_NET_CIDR}
 echo "ovn_hybrid_overlay_net_cidr: ${ovn_hybrid_overlay_net_cidr}"
 ovn_disable_snat_multiple_gws=${OVN_DISABLE_SNAT_MULTIPLE_GWS}
@@ -359,6 +371,7 @@ ovn_image=${image} \
   ovn_v6_join_subnet=${ovn_v6_join_subnet} \
   ovn_multicast_enable=${ovn_multicast_enable} \
   ovn_egress_ip_enable=${ovn_egress_ip_enable} \
+  ovn_multihome_enable=${ovn_multihome_enable} \
   ovn_ssl_en=${ovn_ssl_en} \
   ovn_remote_probe_interval=${ovn_remote_probe_interval} \
   ovn_monitor_all=${ovn_monitor_all} \
@@ -397,6 +410,11 @@ ovn_image=${image} \
   ovn_v6_join_subnet=${ovn_v6_join_subnet} \
   ovn_multicast_enable=${ovn_multicast_enable} \
   ovn_egress_ip_enable=${ovn_egress_ip_enable} \
+<<<<<<< HEAD
+=======
+  ovn_multihome_enable=${ovn_multihome_enable} \
+  ovn_remote_probe_interval=${ovn_remote_probe_interval} \
+>>>>>>> 7cb0ffc90... support multi-homed pod using OVN k8s CNI
   ovn_netflow_targets=${ovn_netflow_targets} \
   ovn_sflow_targets=${ovn_sflow_targets} \
   ovn_ipfix_targets=${ovn_ipfix_targets} \
@@ -427,6 +445,7 @@ ovn_image=${image} \
   ovn_multicast_enable=${ovn_multicast_enable} \
   ovn_egress_ip_enable=${ovn_egress_ip_enable} \
   ovn_egress_firewall_enable=${ovn_egress_firewall_enable} \
+  ovn_multihome_enable=${ovn_multihome_enable} \
   ovn_ssl_en=${ovn_ssl_en} \
   ovn_master_count=${ovn_master_count} \
   ovn_gateway_mode=${ovn_gateway_mode} \

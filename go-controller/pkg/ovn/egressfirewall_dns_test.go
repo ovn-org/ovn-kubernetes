@@ -2,6 +2,7 @@ package ovn
 
 import (
 	"fmt"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
 	"net"
 	"testing"
 	"time"
@@ -29,7 +30,8 @@ func TestNewEgressDNS(t *testing.T) {
 	assert.Nil(t, err)
 	t.Cleanup(libovsdbCleanup.Cleanup)
 
-	testOvnAddFtry := addressset.NewOvnAddressSetFactory(libovsdbOvnNBClient)
+	netNameInfo := util.NetNameInfo{NetName: types.DefaultNetworkName, Prefix: "", NotDefault: false}
+	testOvnAddFtry := addressset.NewOvnAddressSetFactory(netNameInfo, libovsdbOvnNBClient)
 	mockDnsOps := new(util_mocks.DNSOps)
 	util.SetDNSLibOpsMockInst(mockDnsOps)
 	tests := []struct {

@@ -9,6 +9,7 @@ import (
 	"sync"
 	"testing"
 
+	networkattachmentdefinitionfake "github.com/k8snetworkplumbingwg/network-attachment-definition-client/pkg/client/clientset/versioned/fake"
 	"github.com/onsi/ginkgo"
 	"github.com/onsi/gomega"
 	libovsdbclient "github.com/ovn-org/libovsdb/client"
@@ -142,7 +143,7 @@ func defaultFakeExec(nodeSubnet, nodeName string, sctpSupport bool) *ovntest.Fak
 
 	fexec.AddFakeCmdsNoOutputNoError([]string{
 		"ovn-nbctl --timeout=15 --if-exist get logical_router_port rtoj-GR_" + nodeName + " networks",
-		"ovn-nbctl --timeout=15 --data=bare --no-heading --format=csv --columns=name,other-config find logical_switch",
+		"ovn-nbctl --timeout=15 --data=bare --no-heading --format=csv --columns=name,other-config find logical_switch external_ids:network_name{=}[]",
 	})
 	fexec.AddFakeCmdsNoOutputNoError([]string{
 		"ovn-nbctl --timeout=15 --if-exists lrp-del " + types.RouterToSwitchPrefix + nodeName + " -- lrp-add ovn_cluster_router " + types.RouterToSwitchPrefix + nodeName + " " + lrpMAC + " " + gwCIDR,
@@ -374,11 +375,13 @@ var _ = ginkgo.Describe("Master Operations", func() {
 			egressFirewallFakeClient := &egressfirewallfake.Clientset{}
 			crdFakeClient := &apiextensionsfake.Clientset{}
 			egressIPFakeClient := &egressipfake.Clientset{}
+			networkAttchDefClient := &networkattachmentdefinitionfake.Clientset{}
 			fakeClient := &util.OVNClientset{
-				KubeClient:           kubeFakeClient,
-				EgressIPClient:       egressIPFakeClient,
-				EgressFirewallClient: egressFirewallFakeClient,
-				APIExtensionsClient:  crdFakeClient,
+				KubeClient:             kubeFakeClient,
+				EgressIPClient:         egressIPFakeClient,
+				EgressFirewallClient:   egressFirewallFakeClient,
+				NetworkAttchDefClient:  networkAttchDefClient,
+				//APIExtensionsClient:    crdFakeClient,
 			}
 
 			err := util.SetExec(fexec)
@@ -480,11 +483,13 @@ var _ = ginkgo.Describe("Master Operations", func() {
 			egressFirewallFakeClient := &egressfirewallfake.Clientset{}
 			crdFakeClient := &apiextensionsfake.Clientset{}
 			egressIPFakeClient := &egressipfake.Clientset{}
+			networkAttchDefClient := &networkattachmentdefinitionfake.Clientset{}
 			fakeClient := &util.OVNClientset{
-				KubeClient:           kubeFakeClient,
-				EgressIPClient:       egressIPFakeClient,
-				EgressFirewallClient: egressFirewallFakeClient,
-				APIExtensionsClient:  crdFakeClient,
+				KubeClient:             kubeFakeClient,
+				EgressIPClient:         egressIPFakeClient,
+				EgressFirewallClient:   egressFirewallFakeClient,
+				NetworkAttchDefClient:  networkAttchDefClient,
+				//APIExtensionsClient:    crdFakeClient,
 			}
 
 			err := util.SetExec(fexec)
@@ -582,11 +587,13 @@ var _ = ginkgo.Describe("Master Operations", func() {
 			egressFirewallFakeClient := &egressfirewallfake.Clientset{}
 			crdFakeClient := &apiextensionsfake.Clientset{}
 			egressIPFakeClient := &egressipfake.Clientset{}
+			networkAttchDefClient := &networkattachmentdefinitionfake.Clientset{}
 			fakeClient := &util.OVNClientset{
-				KubeClient:           kubeFakeClient,
-				EgressIPClient:       egressIPFakeClient,
-				EgressFirewallClient: egressFirewallFakeClient,
-				APIExtensionsClient:  crdFakeClient,
+				KubeClient:             kubeFakeClient,
+				EgressIPClient:         egressIPFakeClient,
+				EgressFirewallClient:   egressFirewallFakeClient,
+				NetworkAttchDefClient:  networkAttchDefClient,
+				//APIExtensionsClient:    crdFakeClient,
 			}
 
 			fexec, tcpLBUUID, udpLBUUID, sctpLBUUID := defaultFakeExec(nodeSubnet, nodeName, true)
@@ -680,7 +687,7 @@ var _ = ginkgo.Describe("Master Operations", func() {
 				"ovn-nbctl --timeout=15 --if-exist get logical_router_port rtoj-GR_" + masterName + " networks",
 			})
 			fexec.AddFakeCmd(&ovntest.ExpectedCmd{
-				Cmd: "ovn-nbctl --timeout=15 --data=bare --no-heading --columns=name,other-config find logical_switch",
+				Cmd: "ovn-nbctl --timeout=15 --data=bare --no-heading --columns=name,other-config find logical_switch external_ids:network_name{=}[]",
 				// Return two nodes
 				Output: fmt.Sprintf(`%s
 subnet=%s
@@ -748,11 +755,13 @@ subnet=%s
 			egressFirewallFakeClient := &egressfirewallfake.Clientset{}
 			crdFakeClient := &apiextensionsfake.Clientset{}
 			egressIPFakeClient := &egressipfake.Clientset{}
+			networkAttchDefClient := &networkattachmentdefinitionfake.Clientset{}
 			fakeClient := &util.OVNClientset{
-				KubeClient:           kubeFakeClient,
-				EgressIPClient:       egressIPFakeClient,
-				EgressFirewallClient: egressFirewallFakeClient,
-				APIExtensionsClient:  crdFakeClient,
+				KubeClient:            kubeFakeClient,
+				EgressIPClient:        egressIPFakeClient,
+				EgressFirewallClient:  egressFirewallFakeClient,
+				NetworkAttchDefClient: networkAttchDefClient,
+				//APIExtensionsClient:   crdFakeClient,
 			}
 
 			err := util.SetExec(fexec)
@@ -884,10 +893,12 @@ var _ = ginkgo.Describe("Gateway Init Operations", func() {
 			})
 			egressFirewallFakeClient := &egressfirewallfake.Clientset{}
 			egressIPFakeClient := &egressipfake.Clientset{}
+			networkAttchDefClient := &networkattachmentdefinitionfake.Clientset{}
 			fakeClient := &util.OVNClientset{
-				KubeClient:           kubeFakeClient,
-				EgressIPClient:       egressIPFakeClient,
-				EgressFirewallClient: egressFirewallFakeClient,
+				KubeClient:            kubeFakeClient,
+				EgressIPClient:        egressIPFakeClient,
+				EgressFirewallClient:  egressFirewallFakeClient,
+				NetworkAttchDefClient: networkAttchDefClient,
 			}
 
 			_, err := config.InitConfig(ctx, nil, nil)
@@ -976,14 +987,16 @@ var _ = ginkgo.Describe("Gateway Init Operations", func() {
 			expectedDatabaseState := []libovsdbtest.TestData{}
 			expectedDatabaseState = addNodeLogicalFlows(expectedDatabaseState, expectedOVNClusterRouter, expectedNodeSwitch, expectedClusterRouterPortGroup, expectedClusterPortGroup, &node1, clusterCIDR, config.IPv6Mode)
 
-			clusterController := NewOvnController(fakeClient, f, stopChan, addressset.NewFakeAddressSetFactory(),
-				libovsdbOvnNBClient, libovsdbOvnSBClient,
-				record.NewFakeRecorder(0))
+			ovnMHController := NewOvnMHController(fakeClient, "", f,
+				stopChan, libovsdbOvnNBClient, libovsdbOvnSBClient,
+				record.NewFakeRecorder(0), nil)
+			_ = ovnMHController.setDefaultOvnController(addressset.NewFakeAddressSetFactory())
+			clusterController := ovnMHController.ovnController
 			clusterController.loadBalancerGroupUUID = expectedClusterLBGroup.UUID
 			gomega.Expect(clusterController).NotTo(gomega.BeNil())
 
 			clusterController.SCTPSupport = true
-			clusterController.joinSwIPManager, _ = lsm.NewJoinLogicalSwitchIPManager(clusterController.nbClient, []string{node1.Name})
+			clusterController.joinSwIPManager, _ = lsm.NewJoinLogicalSwitchIPManager(clusterController.mc.nbClient, []string{node1.Name})
 			_, _ = clusterController.joinSwIPManager.EnsureJoinLRPIPs(types.OVNClusterRouter)
 
 			// Let the real code run and ensure OVN database sync
@@ -1072,10 +1085,13 @@ var _ = ginkgo.Describe("Gateway Init Operations", func() {
 			})
 			egressFirewallFakeClient := &egressfirewallfake.Clientset{}
 			egressIPFakeClient := &egressipfake.Clientset{}
+			networkAttchDefClient := &networkattachmentdefinitionfake.Clientset{}
 			fakeClient := &util.OVNClientset{
-				KubeClient:           kubeFakeClient,
-				EgressIPClient:       egressIPFakeClient,
-				EgressFirewallClient: egressFirewallFakeClient,
+				KubeClient:            kubeFakeClient,
+				EgressIPClient:        egressIPFakeClient,
+				EgressFirewallClient:  egressFirewallFakeClient,
+				NetworkAttchDefClient: networkAttchDefClient,
+				//APIExtensionsClient:   crdFakeClient,
 			}
 
 			_, err := config.InitConfig(ctx, nil, nil)
@@ -1164,14 +1180,16 @@ var _ = ginkgo.Describe("Gateway Init Operations", func() {
 			expectedDatabaseState := []libovsdbtest.TestData{}
 			expectedDatabaseState = addNodeLogicalFlows(expectedDatabaseState, expectedOVNClusterRouter, expectedNodeSwitch, expectedClusterRouterPortGroup, expectedClusterPortGroup, &node1, clusterCIDR, config.IPv6Mode)
 
-			clusterController := NewOvnController(fakeClient, f, stopChan, addressset.NewFakeAddressSetFactory(),
-				libovsdbOvnNBClient, libovsdbOvnSBClient,
-				record.NewFakeRecorder(0))
+			ovnMHController := NewOvnMHController(fakeClient, "", f,
+				stopChan, libovsdbOvnNBClient, libovsdbOvnSBClient,
+				record.NewFakeRecorder(0), nil)
+			_ = ovnMHController.setDefaultOvnController(addressset.NewFakeAddressSetFactory())
+			clusterController := ovnMHController.ovnController
 			clusterController.loadBalancerGroupUUID = expectedClusterLBGroup.UUID
 			gomega.Expect(clusterController).NotTo(gomega.BeNil())
 
 			clusterController.SCTPSupport = true
-			clusterController.joinSwIPManager, _ = lsm.NewJoinLogicalSwitchIPManager(clusterController.nbClient, []string{node1.Name})
+			clusterController.joinSwIPManager, _ = lsm.NewJoinLogicalSwitchIPManager(clusterController.mc.nbClient, []string{node1.Name})
 			_, _ = clusterController.joinSwIPManager.EnsureJoinLRPIPs(types.OVNClusterRouter)
 
 			// Let the real code run and ensure OVN database sync
@@ -1459,9 +1477,11 @@ func TestController_allocateNodeSubnets(t *testing.T) {
 			}
 			t.Cleanup(libovsdbCleanup.Cleanup)
 
-			clusterController := NewOvnController(fakeClient, f, stopChan, addressset.NewFakeAddressSetFactory(),
-				libovsdbOvnNBClient, libovsdbOvnSBClient,
-				record.NewFakeRecorder(0))
+			ovnMHController := NewOvnMHController(fakeClient, "", f,
+				stopChan, libovsdbOvnNBClient, libovsdbOvnSBClient,
+				record.NewFakeRecorder(0), nil)
+			_ = ovnMHController.setDefaultOvnController(addressset.NewFakeAddressSetFactory())
+			clusterController := ovnMHController.ovnController
 			clusterController.loadBalancerGroupUUID = expectedClusterLBGroup.UUID
 
 			// configure the cluster allocators

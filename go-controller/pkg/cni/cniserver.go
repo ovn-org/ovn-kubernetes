@@ -176,6 +176,17 @@ func cniRequestToPodRequest(cr *Request, podLister corev1listers.PodLister, kcli
 		return nil, fmt.Errorf("broken stdin args")
 	}
 
+	// the first network to the Pod is always named as `default`, so we need
+	// to capture the effective NetConf name and NAD Name
+	req.effectiveNetName = types.DefaultNetworkName
+	req.effectiveNADName = types.DefaultNetworkName
+	if conf.NotDefault {
+		req.effectiveNetName = conf.Name
+		if conf.NadName == "" {
+			return nil, fmt.Errorf("OVN Netconf %q doesn't contain network-attachment-definition name", conf.Name)
+		}
+		req.effectiveNADName = conf.NadName
+	}
 	req.CNIConf = conf
 	req.timestamp = time.Now()
 	// Match the Kubelet default CRI operation timeout of 2m

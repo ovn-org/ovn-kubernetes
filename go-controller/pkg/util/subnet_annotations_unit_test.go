@@ -152,7 +152,7 @@ func TestParseSubnetAnnotation(t *testing.T) {
 			},
 		},
 		{
-			desc:        "error: annotation has no default network",
+			desc:        "error:annotation has no default network",
 			annName:     ovnNodeSubnets,
 			errExpected: true,
 			inpNode: v1.Node{
@@ -167,12 +167,11 @@ func TestParseSubnetAnnotation(t *testing.T) {
 	}
 	for i, tc := range tests {
 		t.Run(fmt.Sprintf("%d:%s", i, tc.desc), func(t *testing.T) {
-			ipListMap, e := parseSubnetAnnotation(tc.inpNode.Annotations, tc.annName)
+			ipList, e := parseSubnetAnnotation(tc.inpNode.Annotations, tc.annName)
 			if tc.errExpected {
 				t.Log(e)
 				assert.Error(t, e)
 			} else {
-				ipList := ipListMap[types.DefaultNetworkName]
 				t.Log(ipList)
 				assert.Greater(t, len(ipList), 0)
 			}
@@ -325,7 +324,7 @@ func TestDeleteNodeHostSubnetAnnotation(t *testing.T) {
 	}
 	for i, tc := range tests {
 		t.Run(fmt.Sprintf("%d:%s", i, tc.desc), func(t *testing.T) {
-			DeleteNodeHostSubnetAnnotation(tc.inpNodeAnnotator)
+			DeleteNodeHostSubnetAnnotation(tc.inpNodeAnnotator, types.DefaultNetworkName)
 		})
 	}
 }

@@ -259,7 +259,7 @@ func (_m *KubeInterface) GetNodes() (*v1.NodeList, error) {
 }
 
 // GetPod provides a mock function with given fields: namespace, name
-func (_m *KubeInterface) GetPod(namespace string, name string) (*v1.Pod, error) {
+func (_m *KubeInterface) GetPod(namespace, name string) (*v1.Pod, error) {
 	ret := _m.Called(namespace, name)
 
 	var r0 *v1.Pod

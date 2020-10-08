@@ -302,6 +302,7 @@ type KubernetesConfig struct {
 type OVNKubernetesFeatureConfig struct {
 	EnableEgressIP       bool `gcfg:"enable-egress-ip"`
 	EnableEgressFirewall bool `gcfg:"enable-egress-firewall"`
+	EnableMultiNetwork   bool `gcfg:"enable-multi-network"`
 }
 
 // GatewayMode holds the node gateway mode
@@ -830,6 +831,12 @@ var OVNK8sFeatureFlags = []cli.Flag{
 		Usage:       "Configure to use EgressFirewall CRD feature with ovn-kubernetes.",
 		Destination: &cliConfig.OVNKubernetesFeature.EnableEgressFirewall,
 		Value:       OVNKubernetesFeature.EnableEgressFirewall,
+	},
+	&cli.BoolFlag{
+		Name:        "enable-multi-network",
+		Usage:       "Configure to use NetworkAttachmentDefition CRD feature with ovn-kubernetes.",
+		Destination: &cliConfig.OVNKubernetesFeature.EnableMultiNetwork,
+		Value:       OVNKubernetesFeature.EnableMultiNetwork,
 	},
 }
 

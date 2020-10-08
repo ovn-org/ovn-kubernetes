@@ -1,6 +1,7 @@
 package node
 
 import (
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io/ioutil"
@@ -13,6 +14,7 @@ import (
 	"time"
 
 	kapi "k8s.io/api/core/v1"
+	//	apiextension "k8s.io/apiextensions-apiserver/pkg/apis/apiextensions/v1beta1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/labels"
 	"k8s.io/apimachinery/pkg/selection"
@@ -25,8 +27,11 @@ import (
 	"k8s.io/klog/v2"
 	utilnet "k8s.io/utils/net"
 
+	ctypes "github.com/containernetworking/cni/pkg/types"
+	nettypes "github.com/k8snetworkplumbingwg/network-attachment-definition-client/pkg/apis/k8s.cni.cncf.io/v1"
 	honode "github.com/ovn-org/ovn-kubernetes/go-controller/hybrid-overlay/pkg/controller"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/cni"
+	cnitypes "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/cni/types"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/factory"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/informer"
@@ -45,6 +50,18 @@ type OvnNode struct {
 	stopChan     chan struct{}
 	recorder     record.EventRecorder
 	gateway      Gateway
+	ovnUpEnabled bool
+
+	defaultNodeController     *ovnNodeController
+	nonDefaultNodeControllers sync.Map
+	defaultNetAttachDefs      sync.Map
+}
+
+type ovnNodeController struct {
+	node       *OvnNode
+	nadInfo    *util.NetAttachDefInfo
+	podHandler *factory.Handler
+	added      bool
 }
 
 // NewNode creates a new controller for node management
@@ -293,6 +310,23 @@ func isOVNControllerReady() (bool, error) {
 	return true, nil
 }
 
+func (n *OvnNode) NewOvnNodeController(nadInfo *util.NetAttachDefInfo) (*ovnNodeController, error) {
+	nc := &ovnNodeController{
+		node:    n,
+		nadInfo: nadInfo,
+		added:   false,
+	}
+	if !nadInfo.NotDefault {
+		n.defaultNodeController = nc
+	} else {
+		_, loaded := n.nonDefaultNodeControllers.LoadOrStore(nadInfo.NetName, nc)
+		if loaded {
+			return nil, fmt.Errorf("non default Network attachment definition %s already exists", nadInfo.NetName)
+		}
+	}
+	return nc, nil
+}
+
 // Starting with v21.03.0 OVN sets OVS.Interface.external-id:ovn-installed
 // and OVNSB.Port_Binding.up when all OVS flows associated to a
 // logical port have been successfully programmed.
@@ -324,7 +358,6 @@ func (n *OvnNode) Start(wg *sync.WaitGroup) error {
 	var mgmtPort ManagementPort
 	var mgmtPortConfig *managementPortConfig
 	var cniServer *cni.Server
-	var isOvnUpEnabled bool
 
 	klog.Infof("OVN Kube Node initialization, Mode: %s", config.OvnKubeNode.Mode)
 
@@ -385,7 +418,7 @@ func (n *OvnNode) Start(wg *sync.WaitGroup) error {
 	klog.Infof("Node %s ready for ovn initialization with subnet %s", n.name, util.JoinIPNets(subnets, ","))
 
 	if config.OvnKubeNode.Mode != types.NodeModeDPUHost {
-		isOvnUpEnabled, err = getOVNIfUpCheckMode()
+		n.ovnUpEnabled, err = getOVNIfUpCheckMode()
 		if err != nil {
 			return err
 		}
@@ -397,7 +430,7 @@ func (n *OvnNode) Start(wg *sync.WaitGroup) error {
 		if !ok {
 			return fmt.Errorf("cannot get kubeclient for starting CNI server")
 		}
-		cniServer, err = cni.NewCNIServer("", isOvnUpEnabled, n.watchFactory, kclient.KClient)
+		cniServer, err = cni.NewCNIServer("", n.ovnUpEnabled, n.watchFactory, kclient.KClient)
 		if err != nil {
 			return err
 		}
@@ -512,12 +545,12 @@ func (n *OvnNode) Start(wg *sync.WaitGroup) error {
 					}
 				}
 				// ensure CNI support for port binding built into OVN, as masters have been upgraded
-				if initialTopoVersion < types.OvnPortBindingTopoVersion && cniServer != nil && !isOvnUpEnabled {
-					isOvnUpEnabled, err = getOVNIfUpCheckMode()
+				if initialTopoVersion < types.OvnPortBindingTopoVersion && cniServer != nil && !n.ovnUpEnabled {
+					n.ovnUpEnabled, err = getOVNIfUpCheckMode()
 					if err != nil {
 						klog.Errorf("%v", err)
 					}
-					if isOvnUpEnabled {
+					if n.ovnUpEnabled {
 						cniServer.EnableOVNPortUpSupport()
 					}
 				}
@@ -572,14 +605,214 @@ func (n *OvnNode) Start(wg *sync.WaitGroup) error {
 		}
 	}
 
-	if config.OvnKubeNode.Mode == types.NodeModeDPU {
-		n.watchPodsDPU(isOvnUpEnabled)
-	} else {
+	if config.OvnKubeNode.Mode != types.NodeModeDPUHost {
+		defaultNetConf := &cnitypes.NetConf{
+			NetConf: ctypes.NetConf{
+				Name: types.DefaultNetworkName,
+			},
+			NetCidr:    config.Default.RawClusterSubnets,
+			MTU:        config.Default.MTU,
+			NotDefault: false,
+		}
+		nadInfo, _ := util.NewNetAttachDefInfo(defaultNetConf)
+		nc, _ := n.NewOvnNodeController(nadInfo)
+
+		if config.OvnKubeNode.Mode == types.NodeModeDPU {
+			nc.watchPodsDPU(n.ovnUpEnabled)
+		}
+		nc.added = true
+
+		if config.OVNKubernetesFeature.EnableMultiNetwork {
+			n.watchNetworkAttachmentDefinitions()
+		}
+	}
+
+	if config.OvnKubeNode.Mode != types.NodeModeDPU {
 		// start the cni server
 		err = cniServer.Start(cni.HandleCNIRequest)
 	}
 
 	return err
+}
+
+// watchNetworkAttachmentDefinitions starts the watching of network attachment definition
+// resource and calls back the appropriate handler logic
+func (n *OvnNode) watchNetworkAttachmentDefinitions() *factory.Handler {
+	return n.watchFactory.AddNetworkattachmentdefinitionHandler(cache.ResourceEventHandlerFuncs{
+		AddFunc: func(obj interface{}) {
+			netattachdef := obj.(*nettypes.NetworkAttachmentDefinition)
+			n.addNetworkAttachDefinition(netattachdef)
+		},
+		UpdateFunc: func(old, new interface{}) {},
+		DeleteFunc: func(obj interface{}) {
+			netattachdef := obj.(*nettypes.NetworkAttachmentDefinition)
+			n.deleteNetworkAttachDefinition(netattachdef)
+		},
+	}, nil)
+}
+
+func (n *OvnNode) initOvnNodeController(netattachdef *nettypes.NetworkAttachmentDefinition) (*ovnNodeController, error) {
+	netconf := &cnitypes.NetConf{MTU: config.Default.MTU}
+
+	// looking for network attachment definition that use OVN K8S CNI only
+	err := json.Unmarshal([]byte(netattachdef.Spec.Config), &netconf)
+	if err != nil {
+		return nil, fmt.Errorf("error parsing Network Attachment Definition %s: %v", netattachdef.Name, err)
+	}
+
+	if netconf.Type != "ovn-k8s-cni-overlay" {
+		klog.V(5).Infof("Network Attachment Definition %s is not based on OVN plugin", netattachdef.Name)
+		return nil, nil
+	}
+
+	if netconf.Name == "" {
+		netconf.Name = netattachdef.Name
+	}
+
+	nadInfo, err := util.NewNetAttachDefInfo(netconf)
+	if err != nil {
+		return nil, err
+	}
+
+	// nadName must be in the correct form for non-default net-attach-def
+	if nadInfo.NotDefault {
+		nadName := util.GetNadName(netattachdef.Namespace, netattachdef.Name, !nadInfo.NotDefault)
+		if netconf.NadName != nadName {
+			return nil, fmt.Errorf("unexpected net_attach_def_name %s of Network Attachment Definition %s/%s, expected: %s",
+				netconf.NadName, netattachdef.Namespace, netattachdef.Name, nadName)
+		}
+	}
+
+	if !nadInfo.NotDefault {
+		n.defaultNodeController.nadInfo.NetAttachDefs.Store(util.GetNadKeyName(netattachdef.Namespace, netattachdef.Name), true)
+		return n.defaultNodeController, nil
+	}
+
+	if nadInfo.NetName == types.DefaultNetworkName {
+		return nil, fmt.Errorf("non-default Network attachment definition's name cannot be %s", types.DefaultNetworkName)
+	}
+
+	// Note that net-attach-def add/delete/update events are serialized, so we don't need locks here.
+	// Check if any Controller of the same netconf.Name already exists, if so, check its conf to see if they are the same.
+	v, ok := n.nonDefaultNodeControllers.Load(nadInfo.NetName)
+	if ok {
+		nc := v.(*ovnNodeController)
+		if nc.nadInfo.NetCidr != nadInfo.NetCidr || nc.nadInfo.MTU != nadInfo.MTU {
+			return nil, fmt.Errorf("network attachment definition %s/%s does not share the same CNI config of name %s",
+				netattachdef.Namespace, netattachdef.Name, nadInfo.NetName)
+		} else {
+			nc.nadInfo.NetAttachDefs.Store(util.GetNadKeyName(netattachdef.Namespace, netattachdef.Name), true)
+		}
+		return nc, nil
+	}
+
+	nadInfo.NetAttachDefs.Store(util.GetNadKeyName(netattachdef.Namespace, netattachdef.Name), true)
+	return n.NewOvnNodeController(nadInfo)
+}
+
+// syncNetworkAttachDefinition() delete OVN logical entities of the obsoleted netNames.
+func (n *OvnNode) syncNetworkAttachDefinition(netattachdefs []interface{}) {
+	// we need to walk through all net-attach-def and add them into Controller.nadInfo.NetAttachDefs, so that when each
+	// Controller is running, watchPodsDPU()->IsNetworkOnPod() can correctly check Pods need to be plumbed
+	// for the specific Controller
+	for _, netattachdefIntf := range netattachdefs {
+		netattachdef, ok := netattachdefIntf.(*nettypes.NetworkAttachmentDefinition)
+		if !ok {
+			klog.Errorf("Spurious object in syncNetworkAttachDefinition: %v", netattachdefIntf)
+			continue
+		}
+
+		_, err := n.initOvnNodeController(netattachdef)
+		if err != nil {
+			klog.Errorf(err.Error())
+		}
+	}
+}
+
+func (n *OvnNode) addNetworkAttachDefinition(netattachdef *nettypes.NetworkAttachmentDefinition) {
+	nc, err := n.initOvnNodeController(netattachdef)
+	if err != nil {
+		klog.Errorf(err.Error())
+		return
+	}
+
+	if nc == nil || nc.added {
+		return
+	}
+
+	nc.added = true
+
+	if config.OvnKubeNode.Mode == types.NodeModeDPU {
+		nc.watchPodsDPU(n.ovnUpEnabled)
+	}
+}
+
+func (n *OvnNode) deleteNetworkAttachDefinition(netattachdef *nettypes.NetworkAttachmentDefinition) {
+	netconf := &cnitypes.NetConf{}
+
+	// looking for network attachment definition that use OVN K8S CNI only
+	err := json.Unmarshal([]byte(netattachdef.Spec.Config), &netconf)
+	if err != nil {
+		klog.Errorf("Error parsing Network Attachment Definition %s: %v", netattachdef.Name, err)
+		return
+	}
+
+	if netconf.Type != "ovn-k8s-cni-overlay" {
+		klog.V(5).Infof("Network Attachment Definition %s is not based on OVN plugin", netattachdef.Name)
+		return
+	}
+
+	if netconf.Name == "" {
+		netconf.Name = netattachdef.Name
+	}
+
+	nadInfo, err := util.NewNetAttachDefInfo(netconf)
+	if err != nil {
+		klog.Errorf(err.Error())
+		return
+	}
+
+	if netconf.NadName != "" {
+		nadName := util.GetNadName(netattachdef.Namespace, netattachdef.Name, !nadInfo.NotDefault)
+		if netconf.NadName != nadName {
+			klog.Errorf("Unexpected net_attach_def_name %s of Network Attachment Definition %s/%s, expected: %s",
+				netconf.NadName, netattachdef.Namespace, netattachdef.Name, nadName)
+			return
+		}
+	}
+
+	if !nadInfo.NotDefault {
+		n.defaultNodeController.nadInfo.NetAttachDefs.Delete(util.GetNadKeyName(netattachdef.Namespace, netattachdef.Name))
+		return
+	}
+
+	v, ok := n.nonDefaultNodeControllers.Load(nadInfo.NetName)
+	if !ok {
+		klog.Errorf("Failed to find network controller for network %s", nadInfo.NetName)
+		return
+	}
+
+	nc := v.(*ovnNodeController)
+	nc.nadInfo.NetAttachDefs.Delete(util.GetNadKeyName(netattachdef.Namespace, netattachdef.Name))
+
+	// check if there any net-attach-def sharing the same CNI conf name left, if yes, just return
+	netAttachDefLeft := false
+	nc.nadInfo.NetAttachDefs.Range(func(key, value interface{}) bool {
+		netAttachDefLeft = true
+		return false
+	})
+
+	if netAttachDefLeft {
+		return
+	}
+
+	if config.OvnKubeNode.Mode == types.NodeModeDPU {
+		if nc.podHandler != nil {
+			nc.node.watchFactory.RemovePodHandler(nc.podHandler)
+		}
+	}
+
+	n.nonDefaultNodeControllers.Delete(nadInfo.NetName)
 }
 
 func (n *OvnNode) WatchEndpoints() {

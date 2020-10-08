@@ -25,7 +25,7 @@ func (oc *Controller) gatewayCleanup(nodeName string) error {
 	// Get the gateway router port's IP address (connected to join switch)
 	var nextHops []net.IP
 
-	gwIPAddrs, err := util.GetLRPAddrs(oc.nbClient, types.GWRouterToJoinSwitchPrefix+gatewayRouter)
+	gwIPAddrs, err := util.GetLRPAddrs(oc.mc.nbClient, types.GWRouterToJoinSwitchPrefix+gatewayRouter)
 	if err != nil {
 		return err
 	}
@@ -57,12 +57,12 @@ func (oc *Controller) gatewayCleanup(nodeName string) error {
 			},
 		},
 	}
-	if err := oc.modelClient.Delete(opModels...); err != nil {
+	if err := oc.mc.modelClient.Delete(opModels...); err != nil {
 		return fmt.Errorf("failed to delete logical switch port %s%s:, error: %v", types.JoinSwitchToGWRouterPrefix, gatewayRouter, err)
 	}
 
 	// Remove router to lb associations from the LBCache before removing the router
-	lbCache, err := ovnlb.GetLBCache(oc.nbClient)
+	lbCache, err := ovnlb.GetLBCache(oc.mc.nbClient)
 	if err != nil {
 		return fmt.Errorf("failed to get load_balancer cache for router %s: %v", gatewayRouter, err)
 	}
@@ -73,7 +73,7 @@ func (oc *Controller) gatewayCleanup(nodeName string) error {
 		ModelPredicate: func(lr *nbdb.LogicalRouter) bool { return lr.Name == gatewayRouter },
 		ExistingResult: &[]nbdb.LogicalRouter{},
 	}
-	if err := oc.modelClient.Delete(opModel); err != nil {
+	if err := oc.mc.modelClient.Delete(opModel); err != nil {
 		return fmt.Errorf("failed to delete gateway router %s, error: %v", gatewayRouter, err)
 	}
 
@@ -82,7 +82,7 @@ func (oc *Controller) gatewayCleanup(nodeName string) error {
 		ModelPredicate: func(ls *nbdb.LogicalSwitch) bool { return ls.Name == types.ExternalSwitchPrefix+nodeName },
 		ExistingResult: &[]nbdb.LogicalSwitch{},
 	}
-	if err := oc.modelClient.Delete(opModel); err != nil {
+	if err := oc.mc.modelClient.Delete(opModel); err != nil {
 		return fmt.Errorf("failed to delete external switch %s, error: %v", types.ExternalSwitchPrefix+nodeName, err)
 	}
 
@@ -91,7 +91,7 @@ func (oc *Controller) gatewayCleanup(nodeName string) error {
 		ModelPredicate: func(ls *nbdb.LogicalSwitch) bool { return ls.Name == exGWexternalSwitch },
 		ExistingResult: &[]nbdb.LogicalSwitch{},
 	}
-	if err := oc.modelClient.Delete(opModel); err != nil {
+	if err := oc.mc.modelClient.Delete(opModel); err != nil {
 		return fmt.Errorf("failed to delete external switch %s, error: %v", exGWexternalSwitch, err)
 	}
 
@@ -106,7 +106,7 @@ func (oc *Controller) delPbrAndNatRules(nodeName string, lrpTypes []string) {
 	// because there will be none since this NAT is only for outbound traffic and not for inbound
 	mgmtPortName := types.K8sPrefix + nodeName
 	nat := libovsdbops.BuildRouterDNATAndSNAT(nil, nil, mgmtPortName, "", nil)
-	err := libovsdbops.DeleteNatsFromRouter(oc.nbClient, types.OVNClusterRouter, nat)
+	err := libovsdbops.DeleteNatsFromRouter(oc.mc.nbClient, types.OVNClusterRouter, nat)
 	if err != nil {
 		klog.Errorf("Failed to delete the dnat_and_snat associated with the management "+
 			"port %s, error: %v", mgmtPortName, err)
@@ -140,7 +140,7 @@ func (oc *Controller) staticRouteCleanup(nextHops []net.IP) {
 				},
 			},
 		}
-		if err := oc.modelClient.Delete(opModels...); err != nil {
+		if err := oc.mc.modelClient.Delete(opModels...); err != nil {
 			klog.Errorf("Failed to delete static route for nexthop: %s, err: %v", nextHop.String(), err)
 		}
 	}
@@ -164,7 +164,7 @@ func (oc *Controller) multiJoinSwitchGatewayCleanup(nodeName string, upgradeOnly
 	// Get the gateway router port's IP address (connected to join switch)
 	var nextHops []net.IP
 
-	gwIPAddrs, err := util.GetLRPAddrs(oc.nbClient, types.GWRouterToJoinSwitchPrefix+gatewayRouter)
+	gwIPAddrs, err := util.GetLRPAddrs(oc.mc.nbClient, types.GWRouterToJoinSwitchPrefix+gatewayRouter)
 	if err != nil {
 		return err
 	}
@@ -192,7 +192,7 @@ func (oc *Controller) multiJoinSwitchGatewayCleanup(nodeName string, upgradeOnly
 				},
 			},
 		}
-		if err := oc.modelClient.Delete(opModels...); err != nil {
+		if err := oc.mc.modelClient.Delete(opModels...); err != nil {
 			klog.Errorf("Unable to remove LR policy : %s, err: %v", err)
 		}
 		nextHops = append(nextHops, gwIPAddr.IP)
@@ -203,7 +203,7 @@ func (oc *Controller) multiJoinSwitchGatewayCleanup(nodeName string, upgradeOnly
 	opModel := libovsdbops.OperationModel{
 		ModelPredicate: func(ls *nbdb.LogicalSwitch) bool { return ls.Name == types.JoinSwitchPrefix+nodeName },
 	}
-	if err := oc.modelClient.Delete(opModel); err != nil {
+	if err := oc.mc.modelClient.Delete(opModel); err != nil {
 		return fmt.Errorf("failed to delete the join logical switch %s, error: %v", types.JoinSwitchPrefix+nodeName, err)
 	}
 
@@ -229,7 +229,7 @@ func (oc *Controller) multiJoinSwitchGatewayCleanup(nodeName string, upgradeOnly
 			},
 		},
 	}
-	if err := oc.modelClient.Delete(opModels...); err != nil {
+	if err := oc.mc.modelClient.Delete(opModels...); err != nil {
 		return fmt.Errorf("failed to delete the patch port %s-%s on distributed router, error: %v", types.DistRouterToJoinSwitchPrefix, nodeName, err)
 	}
 
@@ -255,7 +255,7 @@ func (oc *Controller) multiJoinSwitchGatewayCleanup(nodeName string, upgradeOnly
 			},
 		},
 	}
-	if err := oc.modelClient.Delete(opModels...); err != nil {
+	if err := oc.mc.modelClient.Delete(opModels...); err != nil {
 		return fmt.Errorf("failed to delete the port %s%s on gateway router, error: %v", types.GWRouterToJoinSwitchPrefix, gatewayRouter, err)
 	}
 
@@ -264,7 +264,7 @@ func (oc *Controller) multiJoinSwitchGatewayCleanup(nodeName string, upgradeOnly
 	}
 
 	// Remove router to lb associations from the LBCache before removing the router
-	lbCache, err := ovnlb.GetLBCache(oc.nbClient)
+	lbCache, err := ovnlb.GetLBCache(oc.mc.nbClient)
 	if err != nil {
 		return fmt.Errorf("failed to get load_balancer cache for router %s: %v", gatewayRouter, err)
 	}
@@ -274,7 +274,7 @@ func (oc *Controller) multiJoinSwitchGatewayCleanup(nodeName string, upgradeOnly
 	opModel = libovsdbops.OperationModel{
 		ModelPredicate: func(lr *nbdb.LogicalRouter) bool { return lr.Name == gatewayRouter },
 	}
-	if err := oc.modelClient.Delete(opModel); err != nil {
+	if err := oc.mc.modelClient.Delete(opModel); err != nil {
 		return fmt.Errorf("failed to delete gateway router %s, error: %v", gatewayRouter, err)
 	}
 
@@ -282,7 +282,7 @@ func (oc *Controller) multiJoinSwitchGatewayCleanup(nodeName string, upgradeOnly
 	opModel = libovsdbops.OperationModel{
 		ModelPredicate: func(ls *nbdb.LogicalSwitch) bool { return ls.Name == types.ExternalSwitchPrefix+nodeName },
 	}
-	if err := oc.modelClient.Delete(opModel); err != nil {
+	if err := oc.mc.modelClient.Delete(opModel); err != nil {
 		return fmt.Errorf("failed to delete external switch %s, error: %v", types.ExternalSwitchPrefix+nodeName, err)
 	}
 
@@ -321,7 +321,7 @@ func (oc *Controller) removeLRPolicies(nodeName string, priorities []string) {
 				},
 			},
 		}
-		if err := oc.modelClient.Delete(opModels...); err != nil {
+		if err := oc.mc.modelClient.Delete(opModels...); err != nil {
 			klog.Errorf("Failed to remove the policy routes %s associated with the node %s, error: %v", priority, nodeName, err)
 		}
 	}
@@ -343,7 +343,7 @@ func (oc *Controller) cleanupDGP(nodes *kapi.NodeList) error {
 				},
 			},
 		}
-		if err := oc.modelClient.WithClient(oc.sbClient).Delete(opModels...); err != nil {
+		if err := oc.mc.modelClient.WithClient(oc.mc.sbClient).Delete(opModels...); err != nil {
 			return fmt.Errorf("unable to remove mac_binding for DGP, err: %v", err)
 		}
 	}
@@ -354,7 +354,7 @@ func (oc *Controller) cleanupDGP(nodes *kapi.NodeList) error {
 			ExistingResult: &[]nbdb.LogicalSwitch{},
 		},
 	}
-	if err := oc.modelClient.Delete(opModels...); err != nil {
+	if err := oc.mc.modelClient.Delete(opModels...); err != nil {
 		return fmt.Errorf("unable to remove node local switch, err: %v", err)
 	}
 
@@ -383,7 +383,7 @@ func (oc *Controller) cleanupDGP(nodes *kapi.NodeList) error {
 			},
 		},
 	}
-	if err := oc.modelClient.Delete(opModels...); err != nil {
+	if err := oc.mc.modelClient.Delete(opModels...); err != nil {
 		return fmt.Errorf("unable to delete DGP LRP, error: %v", err)
 	}
 	return nil

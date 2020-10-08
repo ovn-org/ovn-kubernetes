@@ -10,15 +10,16 @@ import (
 	"sync"
 
 	libovsdbclient "github.com/ovn-org/libovsdb/client"
+	cnitypes "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/cni/types"
 
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/libovsdbops"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/nbdb"
-
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
 
 	"github.com/urfave/cli/v2"
 
+	kapi "k8s.io/api/core/v1"
 	"k8s.io/klog/v2"
 	utilnet "k8s.io/utils/net"
 )
@@ -137,6 +138,63 @@ func HashForOVN(s string) string {
 	return fmt.Sprintf("a%s", hashString)
 }
 
+type NetNameInfo struct {
+	// netconf's name
+	NetName    string
+	Prefix     string
+	NotDefault bool
+}
+
+type NetAttachDefInfo struct {
+	NetNameInfo
+	// net-attach-defs shared the same CNI Conf, key is <Namespace>/<Name> of net-attach-def.
+	// Note that it means they share the same logical switch (subnet cidr/MTU etc), but they might
+	// have different resource requirement (requires or not require VF, or different VF resource set)
+	NetAttachDefs sync.Map
+	NetCidr       string
+	MTU           int
+}
+
+func NewNetAttachDefInfo(netconf *cnitypes.NetConf) (*NetAttachDefInfo, error) {
+	netName := "default"
+	if netconf.NotDefault {
+		netName = netconf.Name
+	}
+	prefix := GetNetworkPrefix(netName, !netconf.NotDefault)
+
+	nadInfo := NetAttachDefInfo{
+		NetCidr:     netconf.NetCidr,
+		MTU:         netconf.MTU,
+		NetNameInfo: NetNameInfo{netName, prefix, netconf.NotDefault},
+	}
+
+	return &nadInfo, nil
+}
+
+// Note that for port_group and address_set, it does not allow the '-' character
+func GetNadName(namespace, name string, isDefault bool) string {
+	if isDefault {
+		return "default"
+	}
+	return GetNadKeyName(namespace, name)
+}
+
+// key of NetAttachDefInfo.NetAttachDefs map
+func GetNadKeyName(namespace, name string) string {
+	return fmt.Sprintf("%s/%s", namespace, name)
+}
+
+// Note that for port_group and address_set, it does not allow the '-' character
+// Also replace "/" in nadName with "."
+func GetNetworkPrefix(netName string, isDefault bool) string {
+	if isDefault {
+		return ""
+	}
+	name := strings.ReplaceAll(netName, "-", ".")
+	name = strings.ReplaceAll(name, "/", ".")
+	return name + "_"
+}
+
 // UpdateIPsSlice will search for values of oldIPs in the slice "s" and update it with newIPs values of same IP family
 func UpdateIPsSlice(s, oldIPs, newIPs []string) []string {
 	n := make([]string, len(s))
@@ -201,12 +259,14 @@ ipLoop:
 	return out
 }
 
-func GetLogicalPortName(podNamespace, podName string) string {
-	return composePortName(podNamespace, podName)
+func GetLogicalPortName(podNamespace, podName, nadName string, isDefault bool) string {
+	netPrefix := GetNetworkPrefix(nadName, isDefault)
+	return composePortName(podNamespace, podName, netPrefix)
 }
 
-func GetIfaceId(podNamespace, podName string) string {
-	return composePortName(podNamespace, podName)
+func GetIfaceId(podNamespace, podName, nadName string, isDefault bool) string {
+	netPrefix := GetNetworkPrefix(nadName, isDefault)
+	return composePortName(podNamespace, podName, netPrefix)
 }
 
 // composePortName should be called both for LogicalPortName and iface-id
@@ -215,8 +275,24 @@ func GetIfaceId(podNamespace, podName string) string {
 // in the Open_vSwitch database’s Interface table,
 // because hypervisors use external_ids:iface-id as a lookup key to
 // identify the network interface of that entity.
-func composePortName(podNamespace, podName string) string {
-	return podNamespace + "_" + podName
+func composePortName(podNamespace, podName, netPrefix string) string {
+	return netPrefix + podNamespace + "_" + podName
+}
+
+// Get all possible logical ports name of this network
+func GetAllLogicalPortNames(pod *kapi.Pod, nadInfo *NetAttachDefInfo) []string {
+	ports := []string{}
+	on, networkMap, err := IsNetworkOnPod(pod, nadInfo)
+	if err != nil {
+		klog.Errorf(err.Error())
+	} else if on {
+		// the pod is attached to this specific network
+		for nadName := range networkMap {
+			portName := GetLogicalPortName(pod.Namespace, pod.Name, nadName, !nadInfo.NotDefault)
+			ports = append(ports, portName)
+		}
+	}
+	return ports
 }
 
 func SliceHasStringItem(slice []string, item string) bool {

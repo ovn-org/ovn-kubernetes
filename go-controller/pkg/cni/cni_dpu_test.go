@@ -46,6 +46,13 @@ var _ = Describe("cni_dpu tests", func() {
 				Annotations: map[string]string{},
 			},
 		}
+		pod = &v1.Pod{
+			ObjectMeta: metav1.ObjectMeta{
+				Name:        pr.PodName,
+				Namespace:   pr.PodNamespace,
+				Annotations: map[string]string{},
+			},
+		}
 	})
 	Context("addDPUConnectionDetailsAnnot", func() {
 		It("Sets dpu.connection-details pod annotation", func() {
@@ -62,9 +69,9 @@ var _ = Describe("cni_dpu tests", func() {
 			err := util.MarshalPodDPUConnDetails(&cpod.Annotations, &dpuCd, ovntypes.DefaultNetworkName)
 			Expect(err).ToNot(HaveOccurred())
 			fakeKubeInterface.On("UpdatePod", cpod).Return(nil)
+
 			err = pr.addDPUConnectionDetailsAnnot(&fakeKubeInterface, "")
 			Expect(err).ToNot(HaveOccurred())
-
 		})
 
 		It("Fails if DeviceID is not present in CNI config", func() {

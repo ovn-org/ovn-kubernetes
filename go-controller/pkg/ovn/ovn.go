@@ -10,13 +10,16 @@ import (
 	"net"
 	"reflect"
 	"strconv"
+	"strings"
 	"sync"
 	"time"
 
+	ctypes "github.com/containernetworking/cni/pkg/types"
 	nettypes "github.com/k8snetworkplumbingwg/network-attachment-definition-client/pkg/apis/k8s.cni.cncf.io/v1"
 	ocpcloudnetworkapi "github.com/openshift/api/cloudnetwork/v1"
 	libovsdbclient "github.com/ovn-org/libovsdb/client"
 	hocontroller "github.com/ovn-org/ovn-kubernetes/go-controller/hybrid-overlay/pkg/controller"
+	cnitypes "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/cni/types"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
 	egressipv1 "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/egressip/v1"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/factory"
@@ -102,15 +105,50 @@ type namespaceInfo struct {
 	portGroupEgressDenyName  string // Port group Name for egress deny rule
 }
 
+// multihome controller
+type OvnMHController struct {
+	client       clientset.Interface
+	kube         kube.Interface
+	watchFactory *factory.WatchFactory
+	wg           *sync.WaitGroup
+	stopChan     chan struct{}
+
+	nodeName string
+
+	// event recorder used to post events to k8s
+	recorder record.EventRecorder
+
+	// libovsdb northbound client interface
+	nbClient libovsdbclient.Client
+
+	// libovsdb southbound client interface
+	sbClient libovsdbclient.Client
+
+	modelClient libovsdbops.ModelClient
+
+	metricsRecorder *metrics.ControlPlaneRecorder
+
+	// default network controller
+	ovnController *Controller
+	// controller for non default networks, key is netName of net-attach-def, value is *Controller
+	nonDefaultOvnControllers sync.Map
+}
+
 // Controller structure is the object which holds the controls for starting
 // and reacting upon the watched resources (e.g. pods, endpoints)
 type Controller struct {
-	client                clientset.Interface
-	kube                  kube.Interface
-	watchFactory          *factory.WatchFactory
+	mc                    *OvnMHController
+	wg                    *sync.WaitGroup
+	stopChan              chan struct{}
 	egressFirewallHandler *factory.Handler
-	stopChan              <-chan struct{}
+	podHandler            *factory.Handler
+	nodeHandler           *factory.Handler
+	isStarted             bool
 
+	nadInfo *util.NetAttachDefInfo
+
+	// configured cluster subnets
+	clusterSubnets []config.CIDRNetworkEntry
 	// FIXME DUAL-STACK -  Make IP Allocators more dual-stack friendly
 	masterSubnetAllocator *subnetallocator.SubnetAllocator
 
@@ -176,17 +214,6 @@ type Controller struct {
 
 	joinSwIPManager *lsm.JoinSwitchIPManager
 
-	// event recorder used to post events to k8s
-	recorder record.EventRecorder
-
-	// libovsdb northbound client interface
-	nbClient libovsdbclient.Client
-
-	// libovsdb southbound client interface
-	sbClient libovsdbclient.Client
-
-	modelClient libovsdbops.ModelClient
-
 	// v4HostSubnetsUsed keeps track of number of v4 subnets currently assigned to nodes
 	v4HostSubnetsUsed float64
 
@@ -199,8 +226,6 @@ type Controller struct {
 
 	// channel to indicate we need to retry pods immediately
 	retryPodsChan chan struct{}
-
-	metricsRecorder *metrics.ControlPlaneRecorder
 }
 
 type retryEntry struct {
@@ -236,17 +261,10 @@ func GetIPFullMask(ip string) string {
 	return IPv4FullMask
 }
 
-// NewOvnController creates a new OVN controller for creating logical network
-// infrastructure and policy
-func NewOvnController(ovnClient *util.OVNClientset, wf *factory.WatchFactory, stopChan <-chan struct{}, addressSetFactory addressset.AddressSetFactory,
-	libovsdbOvnNBClient libovsdbclient.Client, libovsdbOvnSBClient libovsdbclient.Client,
-	recorder record.EventRecorder) *Controller {
-	if addressSetFactory == nil {
-		addressSetFactory = addressset.NewOvnAddressSetFactory(libovsdbOvnNBClient)
-	}
-	modelClient := libovsdbops.NewModelClient(libovsdbOvnNBClient)
-	svcController, svcFactory := newServiceController(ovnClient.KubeClient, libovsdbOvnNBClient)
-	return &Controller{
+func NewOvnMHController(ovnClient *util.OVNClientset, nodeName string, wf *factory.WatchFactory,
+	stopChan chan struct{}, libovsdbOvnNBClient libovsdbclient.Client, libovsdbOvnSBClient libovsdbclient.Client,
+	recorder record.EventRecorder, wg *sync.WaitGroup) *OvnMHController {
+	return &OvnMHController{
 		client: ovnClient.KubeClient,
 		kube: &kube.Kube{
 			KClient:              ovnClient.KubeClient,
@@ -254,8 +272,67 @@ func NewOvnController(ovnClient *util.OVNClientset, wf *factory.WatchFactory, st
 			EgressFirewallClient: ovnClient.EgressFirewallClient,
 			CloudNetworkClient:   ovnClient.CloudNetworkClient,
 		},
-		watchFactory:          wf,
+		watchFactory:    wf,
+		wg:              wg,
+		stopChan:        stopChan,
+		recorder:        recorder,
+		nbClient:        libovsdbOvnNBClient,
+		sbClient:        libovsdbOvnSBClient,
+		modelClient:     libovsdbops.NewModelClient(libovsdbOvnNBClient),
+		metricsRecorder: metrics.NewControlPlaneRecorder(libovsdbOvnSBClient),
+		nodeName:        nodeName,
+	}
+}
+
+// If the default network net_attach_def does not exist, we'd need to create default OVN Controller based on config.
+func (mc *OvnMHController) setDefaultOvnController(addressSetFactory addressset.AddressSetFactory) error {
+	// default controller already exists, nothing to do.
+	if mc.ovnController != nil {
+		return nil
+	}
+
+	defaultNetConf := &cnitypes.NetConf{
+		NetConf: ctypes.NetConf{
+			Name: ovntypes.DefaultNetworkName,
+		},
+		NetCidr:    config.Default.RawClusterSubnets,
+		MTU:        config.Default.MTU,
+		NotDefault: false,
+	}
+	nadInfo, _ := util.NewNetAttachDefInfo(defaultNetConf)
+	_, err := mc.NewOvnController(nadInfo, addressSetFactory)
+	if err != nil {
+		return err
+	}
+	return nil
+}
+
+// NewOvnController creates a new OVN controller for creating logical network
+// infrastructure and policy
+func (mc *OvnMHController) NewOvnController(nadInfo *util.NetAttachDefInfo,
+	addressSetFactory addressset.AddressSetFactory) (*Controller, error) {
+	if addressSetFactory == nil {
+		addressSetFactory = addressset.NewOvnAddressSetFactory(nadInfo.NetNameInfo, mc.nbClient)
+	}
+
+	if nadInfo.NetCidr == "" {
+		return nil, fmt.Errorf("netcidr: %s is not specified for network %s", nadInfo.NetCidr, nadInfo.NetName)
+	}
+
+	clusterIPNet, err := config.ParseClusterSubnetEntries(nadInfo.NetCidr)
+	if err != nil {
+		return nil, fmt.Errorf("cluster subnet %s for network %s is invalid: %v", nadInfo.NetCidr, nadInfo.NetName, err)
+	}
+
+	stopChan := mc.stopChan
+	if nadInfo.NotDefault {
+		stopChan = make(chan struct{})
+	}
+	oc := &Controller{
+		mc:                    mc,
 		stopChan:              stopChan,
+		nadInfo:               nadInfo,
+		clusterSubnets:        clusterIPNet,
 		masterSubnetAllocator: subnetallocator.NewSubnetAllocator(),
 		lsManager:             lsm.NewLogicalSwitchManager(),
 		logicalPortCache:      newPortCache(stopChan),
@@ -267,14 +344,15 @@ func NewOvnController(ovnClient *util.OVNClientset, wf *factory.WatchFactory, st
 		lspIngressDenyCache:   make(map[string]int),
 		lspEgressDenyCache:    make(map[string]int),
 		lspMutex:              &sync.Mutex{},
+		isStarted:             false,
 		eIPC: egressIPController{
 			egressIPAssignmentMutex: &sync.Mutex{},
 			podAssignmentMutex:      &sync.Mutex{},
 			podAssignment:           make(map[string][]egressipv1.EgressIPStatusItem),
 			allocator:               allocator{&sync.Mutex{}, make(map[string]*egressNode)},
-			nbClient:                libovsdbOvnNBClient,
-			modelClient:             modelClient,
-			watchFactory:            wf,
+			nbClient:                mc.nbClient,
+			modelClient:             mc.modelClient,
+			watchFactory:            mc.watchFactory,
 		},
 		loadbalancerClusterCache: make(map[kapi.Protocol]string),
 		multicastSupport:         config.EnableMulticast,
@@ -283,25 +361,28 @@ func NewOvnController(ovnClient *util.OVNClientset, wf *factory.WatchFactory, st
 		joinSwIPManager:          nil,
 		retryPods:                make(map[types.UID]*retryEntry),
 		retryPodsChan:            make(chan struct{}, 1),
-		recorder:                 recorder,
-		nbClient:                 libovsdbOvnNBClient,
-		sbClient:                 libovsdbOvnSBClient,
-		svcController:            svcController,
-		svcFactory:               svcFactory,
-		modelClient:              modelClient,
-		metricsRecorder:          metrics.NewControlPlaneRecorder(libovsdbOvnSBClient),
 	}
+	if !nadInfo.NotDefault {
+		oc.wg = mc.wg
+		mc.ovnController = oc
+		oc.svcController, oc.svcFactory = newServiceController(mc.client, mc.nbClient)
+	} else {
+		oc.multicastSupport = false
+		oc.wg = &sync.WaitGroup{}
+		_, loaded := mc.nonDefaultOvnControllers.LoadOrStore(nadInfo.NetName, oc)
+		if loaded {
+			return nil, fmt.Errorf("non default Network attachment definition %s already exists", nadInfo.NetName)
+		}
+	}
+	return oc, nil
 }
 
 // Run starts the actual watching.
-func (oc *Controller) Run(wg *sync.WaitGroup, nodeName string) error {
-	// Start and sync the watch factory to begin listening for events
-	if err := oc.watchFactory.Start(); err != nil {
-		return err
+func (oc *Controller) Run(nodeName string) error {
+	if !oc.nadInfo.NotDefault {
+		oc.syncPeriodic()
 	}
-
-	oc.syncPeriodic()
-	klog.Infof("Starting all the Watchers...")
+	klog.Infof("Starting all the Watchers for network %s...", oc.nadInfo.NetName)
 	start := time.Now()
 
 	// Sync external gateway routes. External gateway may be set in namespaces
@@ -310,70 +391,76 @@ func (oc *Controller) Run(wg *sync.WaitGroup, nodeName string) error {
 
 	// WatchNamespaces() should be started first because it has no other
 	// dependencies, and WatchNodes() depends on it
-	oc.WatchNamespaces()
+	if !oc.nadInfo.NotDefault {
+		oc.WatchNamespaces()
+	}
 
 	// WatchNodes must be started next because it creates the node switch
 	// which most other watches depend on.
 	// https://github.com/ovn-org/ovn-kubernetes/pull/859
 	oc.WatchNodes()
 
-	// Start service watch factory and sync services
-	oc.svcFactory.Start(oc.stopChan)
+	if !oc.nadInfo.NotDefault {
+		// Start service watch factory and sync services
+		oc.svcFactory.Start(oc.stopChan)
 
-	// Services should be started after nodes to prevent LB churn
-	if err := oc.StartServiceController(wg, true); err != nil {
-		return err
+		// Services should be started after nodes to prevent LB churn
+		if err := oc.StartServiceController(oc.wg, true); err != nil {
+			return err
+		}
 	}
 
 	oc.WatchPods()
 
-	// WatchNetworkPolicy depends on WatchPods and WatchNamespaces
-	oc.WatchNetworkPolicy()
+	if !oc.nadInfo.NotDefault {
+		// WatchNetworkPolicy depends on WatchPods and WatchNamespaces
+		oc.WatchNetworkPolicy()
 
-	if config.OVNKubernetesFeature.EnableEgressIP {
-		oc.WatchEgressNodes()
-		oc.WatchEgressIP()
-		if util.PlatformTypeIsEgressIPCloudProvider() {
-			oc.WatchCloudPrivateIPConfig()
+		if config.OVNKubernetesFeature.EnableEgressIP {
+			oc.WatchEgressNodes()
+			oc.WatchEgressIP()
+			if util.PlatformTypeIsEgressIPCloudProvider() {
+				oc.WatchCloudPrivateIPConfig()
+			}
 		}
-	}
 
-	if config.OVNKubernetesFeature.EnableEgressFirewall {
-		var err error
-		oc.egressFirewallDNS, err = NewEgressDNS(oc.addressSetFactory, oc.stopChan)
-		if err != nil {
-			return err
+		if config.OVNKubernetesFeature.EnableEgressFirewall {
+			var err error
+			oc.egressFirewallDNS, err = NewEgressDNS(oc.addressSetFactory, oc.stopChan)
+			if err != nil {
+				return err
+			}
+			oc.egressFirewallDNS.Run(egressFirewallDNSDefaultDuration)
+			oc.egressFirewallHandler = oc.WatchEgressFirewall()
 		}
-		oc.egressFirewallDNS.Run(egressFirewallDNSDefaultDuration)
-		oc.egressFirewallHandler = oc.WatchEgressFirewall()
+		klog.Infof("Completing all the Watchers took %v", time.Since(start))
 
-	}
-
-	klog.Infof("Completing all the Watchers took %v", time.Since(start))
-
-	if config.Kubernetes.OVNEmptyLbEvents {
-		klog.Infof("Starting unidling controller")
-		unidlingController, err := unidling.NewController(
-			oc.recorder,
-			oc.watchFactory.ServiceInformer(),
-			oc.sbClient,
-		)
-		if err != nil {
-			return err
+		if config.Kubernetes.OVNEmptyLbEvents {
+			klog.Infof("Starting unidling controller")
+			unidlingController, err := unidling.NewController(
+				oc.mc.recorder,
+				oc.mc.watchFactory.ServiceInformer(),
+				oc.mc.sbClient,
+			)
+			if err != nil {
+				return err
+			}
+			oc.wg.Add(1)
+			go func() {
+				defer oc.wg.Done()
+				unidlingController.Run(oc.stopChan)
+			}()
 		}
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
-			unidlingController.Run(oc.stopChan)
-		}()
-	}
 
-	if oc.hoMaster != nil {
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
-			oc.hoMaster.Run(oc.stopChan)
-		}()
+		if oc.hoMaster != nil {
+			oc.wg.Add(1)
+			go func() {
+				defer oc.wg.Done()
+				oc.hoMaster.Run(oc.stopChan)
+			}()
+		}
+	} else {
+		klog.Infof("Completing all the Watchers for network %s took %v", oc.nadInfo.NetName, time.Since(start))
 	}
 
 	// Final step to cleanup after resource handlers have synced
@@ -388,7 +475,7 @@ func (oc *Controller) Run(wg *sync.WaitGroup, nodeName string) error {
 	logicalRouterRes := []nbdb.LogicalRouter{}
 	ctx, cancel := context.WithTimeout(context.Background(), ovntypes.OVSDBTimeout)
 	defer cancel()
-	if err := oc.nbClient.WhereCache(func(lr *nbdb.LogicalRouter) bool {
+	if err := oc.mc.nbClient.WhereCache(func(lr *nbdb.LogicalRouter) bool {
 		return lr.Name == ovntypes.OVNClusterRouter
 	}).List(ctx, &logicalRouterRes); err != nil {
 		return fmt.Errorf("failed in retrieving %s, error: %v", ovntypes.OVNClusterRouter, err)
@@ -407,18 +494,20 @@ func (oc *Controller) Run(wg *sync.WaitGroup, nodeName string) error {
 		},
 		ErrNotFound: true,
 	}
-	if _, err := oc.modelClient.CreateOrUpdate(opModel); err != nil {
+	if _, err := oc.mc.modelClient.CreateOrUpdate(opModel); err != nil {
 		return fmt.Errorf("failed to generate set topology version in OVN, err: %v", err)
 	}
 
-	// Update topology version on node
-	node, err := oc.kube.GetNode(nodeName)
-	if err != nil {
-		return fmt.Errorf("unable to get node: %s", nodeName)
-	}
-	err = oc.kube.SetAnnotationsOnNode(node.Name, map[string]interface{}{ovntypes.OvnK8sTopoAnno: strconv.Itoa(ovntypes.OvnCurrentTopologyVersion)})
-	if err != nil {
-		return fmt.Errorf("failed to set topology annotation for node %s", node.Name)
+	if !oc.nadInfo.NotDefault {
+		// Update topology version on node
+		node, err := oc.mc.kube.GetNode(nodeName)
+		if err != nil {
+			return fmt.Errorf("unable to get node: %s", nodeName)
+		}
+		err = oc.mc.kube.SetAnnotationsOnNode(node.Name, map[string]interface{}{ovntypes.OvnK8sTopoAnno: strconv.Itoa(ovntypes.OvnCurrentTopologyVersion)})
+		if err != nil {
+			return fmt.Errorf("failed to set topology annotation for node %s", node.Name)
+		}
 	}
 
 	return nil
@@ -432,7 +521,7 @@ func (oc *Controller) ovnTopologyCleanup() error {
 
 	// Cleanup address sets in non dual stack formats in all versions known to possibly exist.
 	if ver <= ovntypes.OvnPortBindingTopoVersion {
-		err = addressset.NonDualStackAddressSetCleanup(oc.nbClient)
+		err = addressset.NonDualStackAddressSetCleanup(oc.nadInfo.NetNameInfo, oc.mc.nbClient)
 	}
 	return err
 }
@@ -445,7 +534,7 @@ func (oc *Controller) determineOVNTopoVersionFromOVN() (int, error) {
 	logicalRouterRes := []nbdb.LogicalRouter{}
 	ctx, cancel := context.WithTimeout(context.Background(), ovntypes.OVSDBTimeout)
 	defer cancel()
-	if err := oc.nbClient.WhereCache(func(lr *nbdb.LogicalRouter) bool {
+	if err := oc.mc.nbClient.WhereCache(func(lr *nbdb.LogicalRouter) bool {
 		return lr.Name == ovntypes.OVNClusterRouter
 	}).List(ctx, &logicalRouterRes); err != nil {
 		return ver, fmt.Errorf("failed in retrieving %s to determine the current version of OVN logical topology: "+
@@ -472,6 +561,10 @@ func (oc *Controller) determineOVNTopoVersionFromOVN() (int, error) {
 // for syncNodesPeriodic which deletes chassis records from the sbdb
 // every 5 minutes
 func (oc *Controller) syncPeriodic() {
+	if oc.nadInfo.NotDefault {
+		return
+	}
+
 	go func() {
 		nodeSyncTicker := time.NewTicker(5 * time.Minute)
 		for {
@@ -492,7 +585,7 @@ func (oc *Controller) recordPodEvent(addErr error, pod *kapi.Pod) {
 			pod.Namespace, pod.Name, err)
 	} else {
 		klog.V(5).Infof("Posting a %s event for Pod %s/%s", kapi.EventTypeWarning, pod.Namespace, pod.Name)
-		oc.recorder.Eventf(podRef, kapi.EventTypeWarning, "ErrorAddingLogicalPort", addErr.Error())
+		oc.mc.recorder.Eventf(podRef, kapi.EventTypeWarning, "ErrorAddingLogicalPort", addErr.Error())
 	}
 }
 
@@ -511,7 +604,7 @@ func (oc *Controller) iterateRetryPods(updateAll bool) {
 		pod := podEntry.pod
 		podDesc := fmt.Sprintf("[%s/%s/%s]", pod.UID, pod.Namespace, pod.Name)
 		// it could be that the Pod got deleted, but Pod's DeleteFunc has not been called yet, so don't retry
-		kPod, err := oc.watchFactory.GetPod(pod.Namespace, pod.Name)
+		kPod, err := oc.mc.watchFactory.GetPod(pod.Namespace, pod.Name)
 		if err != nil && errors.IsNotFound(err) {
 			klog.Infof("%s pod not found in the informers cache, not going to retry pod setup", podDesc)
 			delete(oc.retryPods, uid)
@@ -619,11 +712,13 @@ func (oc *Controller) ensurePod(oldPod, pod *kapi.Pod, addPort bool) bool {
 		return false
 	}
 
-	if oldPod != nil && (exGatewayAnnotationsChanged(oldPod, pod) || networkStatusAnnotationsChanged(oldPod, pod)) {
-		// No matter if a pod is ovn networked, or host networked, we still need to check for exgw
-		// annotations. If the pod is ovn networked and is in update reschedule, addLogicalPort will take
-		// care of updating the exgw updates
-		oc.deletePodExternalGW(oldPod)
+	if !oc.nadInfo.NotDefault {
+		if oldPod != nil && (exGatewayAnnotationsChanged(oldPod, pod) || networkStatusAnnotationsChanged(oldPod, pod)) {
+			// No matter if a pod is ovn networked, or host networked, we still need to check for exgw
+			// annotations. If the pod is ovn networked and is in update reschedule, addLogicalPort will take
+			// care of updating the exgw updates
+			oc.deletePodExternalGW(oldPod)
+		}
 	}
 
 	if util.PodWantsNetwork(pod) && addPort {
@@ -633,6 +728,10 @@ func (oc *Controller) ensurePod(oldPod, pod *kapi.Pod, addPort bool) bool {
 			return false
 		}
 	} else {
+		if oc.nadInfo.NotDefault {
+			return true
+		}
+
 		// either pod is host-networked or its an update for a normal pod (addPort=false case)
 		if oldPod == nil || exGatewayAnnotationsChanged(oldPod, pod) || networkStatusAnnotationsChanged(oldPod, pod) {
 			if err := oc.addPodExternalGW(pod); err != nil {
@@ -672,11 +771,10 @@ func (oc *Controller) WatchPods() {
 	}()
 
 	start := time.Now()
-
-	oc.watchFactory.AddPodHandler(cache.ResourceEventHandlerFuncs{
+	oc.podHandler = oc.mc.watchFactory.AddPodHandler(cache.ResourceEventHandlerFuncs{
 		AddFunc: func(obj interface{}) {
 			pod := obj.(*kapi.Pod)
-			go oc.metricsRecorder.AddPodEvent(pod.UID)
+			go oc.mc.metricsRecorder.AddPodEvent(pod.UID)
 			oc.initRetryPod(pod)
 			if !oc.ensurePod(nil, pod, true) {
 				oc.unSkipRetryPod(pod)
@@ -696,7 +794,7 @@ func (oc *Controller) WatchPods() {
 			// Therefore we need to get the latest version of this pod to attempt to addLogicalPort with
 			podName := pod.Name
 			podNs := pod.Namespace
-			pod, err := oc.watchFactory.GetPod(podNs, podName)
+			pod, err := oc.mc.watchFactory.GetPod(podNs, podName)
 			if err != nil {
 				klog.Warningf("Unable to get pod %s/%s for pod update, most likely it was already deleted",
 					podNs, podName)
@@ -711,9 +809,9 @@ func (oc *Controller) WatchPods() {
 		},
 		DeleteFunc: func(obj interface{}) {
 			pod := obj.(*kapi.Pod)
-			go oc.metricsRecorder.CleanPodRecord(pod.UID)
+			go oc.mc.metricsRecorder.CleanPodRecord(pod.UID)
 			oc.checkAndDeleteRetryPod(pod.UID)
-			if !util.PodWantsNetwork(pod) {
+			if !util.PodWantsNetwork(pod) && !oc.nadInfo.NotDefault {
 				oc.deletePodExternalGW(pod)
 				return
 			}
@@ -727,8 +825,12 @@ func (oc *Controller) WatchPods() {
 // WatchNetworkPolicy starts the watching of network policy resource and calls
 // back the appropriate handler logic
 func (oc *Controller) WatchNetworkPolicy() {
+	if oc.nadInfo.NotDefault {
+		klog.Infof("WatchNetworkPolicy for network %s is a no-op", oc.nadInfo.NetName)
+		return
+	}
 	start := time.Now()
-	oc.watchFactory.AddPolicyHandler(cache.ResourceEventHandlerFuncs{
+	oc.mc.watchFactory.AddPolicyHandler(cache.ResourceEventHandlerFuncs{
 		AddFunc: func(obj interface{}) {
 			policy := obj.(*kapisnetworking.NetworkPolicy)
 			oc.addNetworkPolicy(policy)
@@ -752,7 +854,11 @@ func (oc *Controller) WatchNetworkPolicy() {
 // WatchEgressFirewall starts the watching of egressfirewall resource and calls
 // back the appropriate handler logic
 func (oc *Controller) WatchEgressFirewall() *factory.Handler {
-	return oc.watchFactory.AddEgressFirewallHandler(cache.ResourceEventHandlerFuncs{
+	if oc.nadInfo.NotDefault {
+		return nil
+	}
+
+	return oc.mc.watchFactory.AddEgressFirewallHandler(cache.ResourceEventHandlerFuncs{
 		AddFunc: func(obj interface{}) {
 			egressFirewall := obj.(*egressfirewall.EgressFirewall).DeepCopy()
 			addErrors := oc.addEgressFirewall(egressFirewall)
@@ -806,8 +912,13 @@ func (oc *Controller) WatchEgressFirewall() *factory.Handler {
 // WatchEgressNodes starts the watching of egress assignable nodes and calls
 // back the appropriate handler logic.
 func (oc *Controller) WatchEgressNodes() {
+	if oc.nadInfo.NotDefault {
+		klog.Infof("WatchEgressNodes for network %s is a no-op", oc.nadInfo.NetName)
+		return
+	}
+
 	nodeEgressLabel := util.GetNodeEgressLabel()
-	oc.watchFactory.AddNodeHandler(cache.ResourceEventHandlerFuncs{
+	oc.mc.watchFactory.AddNodeHandler(cache.ResourceEventHandlerFuncs{
 		AddFunc: func(obj interface{}) {
 			node := obj.(*kapi.Node)
 			if err := oc.addNodeForEgress(node); err != nil {
@@ -911,7 +1022,7 @@ func (oc *Controller) WatchEgressNodes() {
 // WatchCloudPrivateIPConfig starts the watching of cloudprivateipconfigs
 // resource and calls back the appropriate handler logic.
 func (oc *Controller) WatchCloudPrivateIPConfig() {
-	oc.watchFactory.AddCloudPrivateIPConfigHandler(cache.ResourceEventHandlerFuncs{
+	oc.mc.watchFactory.AddCloudPrivateIPConfigHandler(cache.ResourceEventHandlerFuncs{
 		AddFunc: func(obj interface{}) {
 			cloudPrivateIPConfig := obj.(*ocpcloudnetworkapi.CloudPrivateIPConfig)
 			if err := oc.reconcileCloudPrivateIPConfig(nil, cloudPrivateIPConfig); err != nil {
@@ -938,7 +1049,12 @@ func (oc *Controller) WatchCloudPrivateIPConfig() {
 // appropriate handler logic. It also initiates the other dedicated resource
 // handlers for egress IP setup: namespaces, pods.
 func (oc *Controller) WatchEgressIP() {
-	oc.watchFactory.AddEgressIPHandler(cache.ResourceEventHandlerFuncs{
+	if oc.nadInfo.NotDefault {
+		klog.Infof("WatchEgressIP for network %s is a no-op", oc.nadInfo.NetName)
+		return
+	}
+
+	oc.mc.watchFactory.AddEgressIPHandler(cache.ResourceEventHandlerFuncs{
 		AddFunc: func(obj interface{}) {
 			eIP := obj.(*egressipv1.EgressIP)
 			if err := oc.reconcileEgressIP(nil, eIP); err != nil {
@@ -964,7 +1080,7 @@ func (oc *Controller) WatchEgressIP() {
 }
 
 func (oc *Controller) watchEgressIPNamespaces() {
-	oc.watchFactory.AddNamespaceHandler(cache.ResourceEventHandlerFuncs{
+	oc.mc.watchFactory.AddNamespaceHandler(cache.ResourceEventHandlerFuncs{
 		AddFunc: func(obj interface{}) {
 			namespace := obj.(*kapi.Namespace)
 			if err := oc.reconcileEgressIPNamespace(nil, namespace); err != nil {
@@ -988,7 +1104,7 @@ func (oc *Controller) watchEgressIPNamespaces() {
 }
 
 func (oc *Controller) watchEgressIPPods() {
-	oc.watchFactory.AddPodHandler(cache.ResourceEventHandlerFuncs{
+	oc.mc.watchFactory.AddPodHandler(cache.ResourceEventHandlerFuncs{
 		AddFunc: func(obj interface{}) {
 			pod := obj.(*kapi.Pod)
 			if err := oc.reconcileEgressIPPod(nil, pod); err != nil {
@@ -1014,8 +1130,13 @@ func (oc *Controller) watchEgressIPPods() {
 // WatchNamespaces starts the watching of namespace resource and calls
 // back the appropriate handler logic
 func (oc *Controller) WatchNamespaces() {
+	if oc.nadInfo.NotDefault {
+		klog.Infof("WatchNamespaces for network %s is a no-op", oc.nadInfo.NetName)
+		return
+	}
+
 	start := time.Now()
-	oc.watchFactory.AddNamespaceHandler(cache.ResourceEventHandlerFuncs{
+	oc.mc.watchFactory.AddNamespaceHandler(cache.ResourceEventHandlerFuncs{
 		AddFunc: func(obj interface{}) {
 			ns := obj.(*kapi.Namespace)
 			oc.AddNamespace(ns)
@@ -1034,13 +1155,18 @@ func (oc *Controller) WatchNamespaces() {
 
 // syncNodeGateway ensures a node's gateway router is configured
 func (oc *Controller) syncNodeGateway(node *kapi.Node, hostSubnets []*net.IPNet) error {
+	if oc.nadInfo.NotDefault {
+		klog.Infof("WatchNamespaces for network %s is a no-op", oc.nadInfo.NetName)
+		return nil
+	}
+
 	l3GatewayConfig, err := util.ParseNodeL3GatewayAnnotation(node)
 	if err != nil {
 		return err
 	}
 
 	if hostSubnets == nil {
-		hostSubnets, err = util.ParseNodeHostSubnetAnnotation(node, ovntypes.DefaultNetworkName)
+		hostSubnets, err = util.ParseNodeHostSubnetAnnotation(node, oc.nadInfo.NetName)
 		if err != nil {
 			return err
 		}
@@ -1077,7 +1203,7 @@ func (oc *Controller) WatchNodes() {
 	var nodeClusterRouterPortFailed sync.Map
 
 	start := time.Now()
-	oc.watchFactory.AddNodeHandler(cache.ResourceEventHandlerFuncs{
+	oc.nodeHandler = oc.mc.watchFactory.AddNodeHandler(cache.ResourceEventHandlerFuncs{
 		AddFunc: func(obj interface{}) {
 			node := obj.(*kapi.Node)
 			if noHostSubnet := noHostSubnet(node); noHostSubnet {
@@ -1105,6 +1231,20 @@ func (oc *Controller) WatchNodes() {
 				nodeClusterRouterPortFailed.Store(node.Name, true)
 			}
 
+			// ensure pods that already exist on this node have their logical ports created
+			options := metav1.ListOptions{FieldSelector: fields.OneTermEqualSelector("spec.nodeName", node.Name).String()}
+			pods, err := oc.mc.client.CoreV1().Pods(metav1.NamespaceAll).List(context.TODO(), options)
+			if err != nil {
+				klog.Errorf("Unable to list existing pods on node: %s, existing pods on this node may not function")
+			} else {
+				oc.addRetryPods(pods.Items)
+				oc.requestRetryPods()
+			}
+
+			if oc.nadInfo.NotDefault {
+				return
+			}
+
 			err = oc.syncNodeManagementPort(node, hostSubnets)
 			if err != nil {
 				if !util.IsAnnotationNotSetError(err) {
@@ -1119,17 +1259,6 @@ func (oc *Controller) WatchNodes() {
 				}
 				gatewaysFailed.Store(node.Name, true)
 			}
-
-			// ensure pods that already exist on this node have their logical ports created
-			options := metav1.ListOptions{FieldSelector: fields.OneTermEqualSelector("spec.nodeName", node.Name).String()}
-			pods, err := oc.client.CoreV1().Pods(metav1.NamespaceAll).List(context.TODO(), options)
-			if err != nil {
-				klog.Errorf("Unable to list existing pods on node: %s, existing pods on this node may not function")
-			} else {
-				oc.addRetryPods(pods.Items)
-				oc.requestRetryPods()
-			}
-
 		},
 		UpdateFunc: func(old, new interface{}) {
 			oldNode := old.(*kapi.Node)
@@ -1156,7 +1285,7 @@ func (oc *Controller) WatchNodes() {
 			}
 
 			_, failed = nodeClusterRouterPortFailed.Load(node.Name)
-			if failed || nodeChassisChanged(oldNode, node) || nodeSubnetChanged(oldNode, node) {
+			if failed || nodeChassisChanged(oldNode, node) || nodeSubnetChanged(oldNode, node, oc.nadInfo.NetName) {
 				if err = oc.syncNodeClusterRouterPort(node, nil); err != nil {
 					if !util.IsAnnotationNotSetError(err) {
 						klog.Warningf(err.Error())
@@ -1167,8 +1296,12 @@ func (oc *Controller) WatchNodes() {
 				}
 			}
 
+			if oc.nadInfo.NotDefault {
+				return
+			}
+
 			_, failed = mgmtPortFailed.Load(node.Name)
-			if failed || macAddressChanged(oldNode, node) || nodeSubnetChanged(oldNode, node) {
+			if failed || macAddressChanged(oldNode, node) || nodeSubnetChanged(oldNode, node, oc.nadInfo.NetName) {
 				err := oc.syncNodeManagementPort(node, hostSubnets)
 				if err != nil {
 					if !util.IsAnnotationNotSetError(err) {
@@ -1188,7 +1321,7 @@ func (oc *Controller) WatchNodes() {
 			oc.clearInitialNodeNetworkUnavailableCondition(oldNode, node)
 
 			_, failed = gatewaysFailed.Load(node.Name)
-			if failed || gatewayChanged(oldNode, node) || nodeSubnetChanged(oldNode, node) || hostAddressesChanged(oldNode, node) {
+			if failed || oc.gatewayChanged(oldNode, node) || nodeSubnetChanged(oldNode, node, oc.nadInfo.NetName) || hostAddressesChanged(oldNode, node) {
 				err := oc.syncNodeGateway(node, nil)
 				if err != nil {
 					if !util.IsAnnotationNotSetError(err) {
@@ -1205,7 +1338,7 @@ func (oc *Controller) WatchNodes() {
 			klog.V(5).Infof("Delete event for Node %q. Removing the node from "+
 				"various caches", node.Name)
 
-			nodeSubnets, _ := util.ParseNodeHostSubnetAnnotation(node, ovntypes.DefaultNetworkName)
+			nodeSubnets, _ := util.ParseNodeHostSubnetAnnotation(node, oc.nadInfo.NetName)
 			oc.deleteNode(node.Name, nodeSubnets)
 			oc.lsManager.DeleteNode(node.Name)
 			addNodeFailed.Delete(node.Name)
@@ -1256,8 +1389,291 @@ func (oc *Controller) aclLoggingCanEnable(annotation string, nsInfo *namespaceIn
 	return okCnt > 0
 }
 
+func (mc *OvnMHController) initOvnController(netattachdef *nettypes.NetworkAttachmentDefinition) (*Controller, error) {
+	netconf := &cnitypes.NetConf{MTU: config.Default.MTU}
+
+	// looking for network attachment definition that use OVN K8S CNI only
+	err := json.Unmarshal([]byte(netattachdef.Spec.Config), &netconf)
+	if err != nil {
+		return nil, fmt.Errorf("error parsing Network Attachment Definition %s/%s: %v", netattachdef.Namespace, netattachdef.Name, err)
+	}
+
+	if netconf.Type != "ovn-k8s-cni-overlay" {
+		klog.V(5).Infof("Network Attachment Definition %s/%s is not based on OVN plugin", netattachdef.Namespace, netattachdef.Name)
+		return nil, nil
+	}
+
+	if netconf.Name == "" {
+		netconf.Name = netattachdef.Name
+	}
+
+	nadInfo, err := util.NewNetAttachDefInfo(netconf)
+	if err != nil {
+		return nil, err
+	}
+	klog.V(5).Infof("Add Network Attachment Definition %s/%s to nad %s", netattachdef.Namespace, netattachdef.Name, nadInfo.NetName)
+
+	// nadName must be in the correct form for non-default net-attach-def
+	if nadInfo.NotDefault {
+		nadName := util.GetNadName(netattachdef.Namespace, netattachdef.Name, !nadInfo.NotDefault)
+		if netconf.NadName != nadName {
+			return nil, fmt.Errorf("unexpected net_attach_def_name %s of Network Attachment Definition %s/%s, expected: %s",
+				netconf.NadName, netattachdef.Namespace, netattachdef.Name, nadName)
+		}
+	}
+
+	if !nadInfo.NotDefault {
+		mc.ovnController.nadInfo.NetAttachDefs.Store(util.GetNadKeyName(netattachdef.Namespace, netattachdef.Name), true)
+		return mc.ovnController, nil
+	}
+
+	if nadInfo.NetName == ovntypes.DefaultNetworkName {
+		return nil, fmt.Errorf("non-default Network attachment definition's name cannot be %s", ovntypes.DefaultNetworkName)
+	}
+
+	// Note that net-attach-def add/delete/update events are serialized, so we don't need locks here.
+	// Check if any Controller of the same netconf.Name already exists, if so, check its conf to see if they are the same.
+	v, ok := mc.nonDefaultOvnControllers.Load(nadInfo.NetName)
+	if ok {
+		oc := v.(*Controller)
+		if oc.nadInfo.NetCidr != nadInfo.NetCidr || oc.nadInfo.MTU != nadInfo.MTU {
+			return nil, fmt.Errorf("network attachment definition %s/%s does not share the same CNI config of name %s",
+				netattachdef.Namespace, netattachdef.Name, nadInfo.NetName)
+		} else {
+			oc.nadInfo.NetAttachDefs.Store(util.GetNadKeyName(netattachdef.Namespace, netattachdef.Name), true)
+			return oc, nil
+		}
+	}
+
+	nadInfo.NetAttachDefs.Store(util.GetNadKeyName(netattachdef.Namespace, netattachdef.Name), true)
+	return mc.NewOvnController(nadInfo, nil)
+}
+
+func (mc *OvnMHController) addNetworkAttachDefinition(netattachdef *nettypes.NetworkAttachmentDefinition) {
+	klog.Infof("Add Network Attachment Definition %s/%s", netattachdef.Namespace, netattachdef.Name)
+	oc, err := mc.initOvnController(netattachdef)
+	if err != nil {
+		klog.Errorf("Failed to add Network Attachment Definition %s/%s: %v", netattachdef.Namespace, netattachdef.Name, err)
+		return
+	}
+
+	// This controller may already started if it is shared by multiple net-attach-def
+	if oc == nil || oc.isStarted {
+		return
+	}
+
+	klog.Infof("The first Network Attachment Definition %s/%s is added to nad %s, create associated logical entities",
+		netattachdef.Namespace, netattachdef.Name, oc.nadInfo.NetName)
+	// run the cluster controller to init the master
+	err = oc.StartClusterMaster(mc.nodeName)
+	if err != nil {
+		klog.Errorf(err.Error())
+		return
+	}
+
+	err = oc.Run(oc.mc.nodeName)
+	if err != nil {
+		klog.Errorf(err.Error())
+	}
+}
+
+func (mc *OvnMHController) deleteNetworkAttachDefinition(netattachdef *nettypes.NetworkAttachmentDefinition) {
+	netconf := &cnitypes.NetConf{}
+	err := json.Unmarshal([]byte(netattachdef.Spec.Config), &netconf)
+	if err != nil && netconf.Type != "ovn-k8s-cni-overlay" {
+		return
+	}
+
+	if netconf.Type != "ovn-k8s-cni-overlay" {
+		klog.V(5).Infof("Network Attachment Definition %s is not based on OVN plugin", netattachdef.Name)
+		return
+	}
+
+	if netconf.Name == "" {
+		netconf.Name = netattachdef.Name
+	}
+
+	nadInfo, err := util.NewNetAttachDefInfo(netconf)
+	if err != nil {
+		klog.Errorf(err.Error())
+		return
+	}
+
+	klog.Infof("Delete net-attach-def %s/%s from nad %s", netattachdef.Namespace, netattachdef.Name, nadInfo.NetName)
+
+	if netconf.NadName != "" {
+		nadName := util.GetNadName(netattachdef.Namespace, netattachdef.Name, !nadInfo.NotDefault)
+		if netconf.NadName != nadName {
+			klog.Errorf("Unexpected net_attach_def_name %s of Network Attachment Definition %s/%s, expected: %s",
+				netconf.NadName, netattachdef.Namespace, netattachdef.Name, nadName)
+			return
+		}
+	}
+
+	if !nadInfo.NotDefault {
+		mc.ovnController.nadInfo.NetAttachDefs.Delete(util.GetNadKeyName(netattachdef.Namespace, netattachdef.Name))
+		return
+	}
+
+	v, ok := mc.nonDefaultOvnControllers.Load(nadInfo.NetName)
+	if !ok {
+		klog.Errorf("Failed to find network controller for network %s", nadInfo.NetName)
+		return
+	}
+
+	oc := v.(*Controller)
+	oc.nadInfo.NetAttachDefs.Delete(util.GetNadKeyName(netattachdef.Namespace, netattachdef.Name))
+
+	// check if there any net-attach-def sharing the same CNI conf name left, if yes, just return
+	netAttachDefLeft := false
+	oc.nadInfo.NetAttachDefs.Range(func(key, value interface{}) bool {
+		netAttachDefLeft = true
+		return false
+	})
+
+	if netAttachDefLeft {
+		return
+	}
+
+	klog.Infof("The last Network Attachment Definition %s/%s is deleted from nad %s, delete associated logical entities",
+		netattachdef.Namespace, netattachdef.Name, nadInfo.NetName)
+	oc.wg.Wait()
+	close(oc.stopChan)
+
+	if oc.podHandler != nil {
+		oc.mc.watchFactory.RemovePodHandler(oc.podHandler)
+	}
+
+	if oc.nodeHandler != nil {
+		oc.mc.watchFactory.RemoveNodeHandler(oc.nodeHandler)
+	}
+
+	oc.deleteMaster()
+
+	existingNodes, err := oc.mc.kube.GetNodes()
+	if err != nil {
+		klog.Errorf("Error in initializing/fetching subnets: %v", err)
+		return
+	}
+	// remove hostsubnet annoation for this network
+	for _, node := range existingNodes.Items {
+		err := oc.deleteNodeLogicalNetwork(node.Name)
+		if err != nil {
+			klog.Error("Failed to delete node %s for network %s: %v", node.Name, oc.nadInfo.NetName, err)
+		}
+		_ = oc.updateNodeAnnotationWithRetry(node.Name, []*net.IPNet{})
+		oc.lsManager.DeleteNode(node.Name)
+	}
+
+	mc.nonDefaultOvnControllers.Delete(nadInfo.NetName)
+}
+
+// syncNetworkAttachDefinition() delete OVN logical entities of the obsoleted netNames.
+func (mc *OvnMHController) syncNetworkAttachDefinition(netattachdefs []interface{}) {
+	// Get all the existing non-default netNames
+	expectedNetworks := make(map[string]bool)
+
+	// we need to walk through all net-attach-def and add them into Controller.nadInfo.NetAttachDefs, so that when each
+	// Controller is running, watchPods()->addLogicalPod()->IsNetworkOnPod() can correctly check Pods need to be plumbed
+	// for the specific Controller
+	for _, netattachdefIntf := range netattachdefs {
+		netattachdef, ok := netattachdefIntf.(*nettypes.NetworkAttachmentDefinition)
+		if !ok {
+			klog.Errorf("Spurious object in syncNetworkAttachDefinition: %v", netattachdefIntf)
+			continue
+		}
+
+		// ovnController.nadInfo.NetAttachDefs
+		oc, err := mc.initOvnController(netattachdef)
+		if err != nil {
+			klog.Errorf(err.Error())
+			continue
+		}
+
+		if oc == nil {
+			continue
+		}
+		expectedNetworks[oc.nadInfo.NetName] = true
+	}
+
+	// Find all the logical node switches for the non-default networks and delete the ones that belong to the
+	// obsolete networks
+	nodeSwitches, err := libovsdbops.FindSwitchesWithOtherConfig(mc.nbClient)
+	if err != nil {
+		klog.Errorf("Failed to get node logical switches which have other-config set error: %v", err)
+		return
+	}
+	for _, nodeSwitch := range nodeSwitches {
+		netName, ok := nodeSwitch.ExternalIDs["network_name"]
+		if !ok {
+			continue
+		}
+		if _, ok := expectedNetworks[netName]; ok {
+			// network still exists, no cleanup to do
+			continue
+		}
+		netPrefix := util.GetNetworkPrefix(netName, false)
+		// items[0] is the switch name, which should be prefixed with netName
+		if netName == ovntypes.DefaultNetworkName || !strings.HasPrefix(nodeSwitch.Name, netPrefix) {
+			klog.Warningf("Unexpected logical switch %s for network %s during sync", nodeSwitch.Name, netName)
+			continue
+		}
+
+		nodeName := strings.TrimPrefix(nodeSwitch.Name, netPrefix)
+		oc := &Controller{mc: mc, nadInfo: &util.NetAttachDefInfo{NetNameInfo: util.NetNameInfo{NetName: netName, Prefix: netPrefix, NotDefault: true}}}
+		if err := oc.deleteNodeLogicalNetwork(nodeName); err != nil {
+			klog.Errorf("Error deleting node %s logical network: %v", nodeName, err)
+		}
+		_ = oc.updateNodeAnnotationWithRetry(nodeName, []*net.IPNet{})
+	}
+	clusterRouters, err := libovsdbops.FindRoutersWitherExternalIds(mc.nbClient, map[string]string{"k8s-cluster-router": "yes"})
+	if err != nil {
+		klog.Errorf("Failed to get all distributed logical routers: %v", err)
+		return
+	}
+	for _, clusterRouter := range clusterRouters {
+		netName, ok := clusterRouter.ExternalIDs["network_name"]
+		if !ok {
+			continue
+		}
+		if _, ok := expectedNetworks[netName]; ok {
+			// network still exists, no cleanup to do
+			continue
+		}
+
+		netPrefix := util.GetNetworkPrefix(netName, false)
+		// items[0] is the router name, which should be prefixed with netName
+		if netName == ovntypes.DefaultNetworkName || !strings.HasPrefix(clusterRouter.Name, netPrefix) {
+			klog.Warningf("Unexpected logical router %s for network %s during sync", clusterRouter.Name, netName)
+			continue
+		}
+
+		oc := &Controller{mc: mc, nadInfo: &util.NetAttachDefInfo{NetNameInfo: util.NetNameInfo{NetName: netName, Prefix: netPrefix, NotDefault: true}}}
+		oc.deleteMaster()
+	}
+}
+
+// watchNetworkAttachmentDefinitions starts the watching of network attachment definition
+// resource and calls back the appropriate handler logic
+func (mc *OvnMHController) watchNetworkAttachmentDefinitions() *factory.Handler {
+	return mc.watchFactory.AddNetworkattachmentdefinitionHandler(cache.ResourceEventHandlerFuncs{
+		AddFunc: func(obj interface{}) {
+			netattachdef := obj.(*nettypes.NetworkAttachmentDefinition)
+			mc.addNetworkAttachDefinition(netattachdef)
+		},
+		UpdateFunc: func(old, new interface{}) {},
+		DeleteFunc: func(obj interface{}) {
+			netattachdef := obj.(*nettypes.NetworkAttachmentDefinition)
+			mc.deleteNetworkAttachDefinition(netattachdef)
+		},
+	}, mc.syncNetworkAttachDefinition)
+}
+
 // gatewayChanged() compares old annotations to new and returns true if something has changed.
-func gatewayChanged(oldNode, newNode *kapi.Node) bool {
+func (oc *Controller) gatewayChanged(oldNode, newNode *kapi.Node) bool {
+	if oc.nadInfo.NotDefault {
+		return false
+	}
 	oldL3GatewayConfig, _ := util.ParseNodeL3GatewayAnnotation(oldNode)
 	l3GatewayConfig, _ := util.ParseNodeL3GatewayAnnotation(newNode)
 	return !reflect.DeepEqual(oldL3GatewayConfig, l3GatewayConfig)
@@ -1277,9 +1693,9 @@ func macAddressChanged(oldNode, node *kapi.Node) bool {
 	return !bytes.Equal(oldMacAddress, macAddress)
 }
 
-func nodeSubnetChanged(oldNode, node *kapi.Node) bool {
-	oldSubnets, _ := util.ParseNodeHostSubnetAnnotation(oldNode, ovntypes.DefaultNetworkName)
-	newSubnets, _ := util.ParseNodeHostSubnetAnnotation(node, ovntypes.DefaultNetworkName)
+func nodeSubnetChanged(oldNode, node *kapi.Node, netName string) bool {
+	oldSubnets, _ := util.ParseNodeHostSubnetAnnotation(oldNode, netName)
+	newSubnets, _ := util.ParseNodeHostSubnetAnnotation(node, netName)
 	return !reflect.DeepEqual(oldSubnets, newSubnets)
 }
 
@@ -1351,6 +1767,11 @@ func newServiceController(client clientset.Interface, nbClient libovsdbclient.Cl
 }
 
 func (oc *Controller) StartServiceController(wg *sync.WaitGroup, runRepair bool) error {
+	if oc.nadInfo.NotDefault {
+		klog.Infof("StartServiceController for network %s is a no-op", oc.nadInfo.NetName)
+		return nil
+	}
+
 	klog.Infof("Starting OVN Service Controller: Using Endpoint Slices")
 	wg.Add(1)
 	go func() {

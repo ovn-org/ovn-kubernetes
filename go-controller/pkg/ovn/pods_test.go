@@ -120,7 +120,7 @@ func newTPod(nodeName, nodeSubnet, nodeMgtIP, nodeGWIP, podName, podIP, podMAC, 
 		podIP:      podIP,
 		podMAC:     podMAC,
 		namespace:  namespace,
-		portName:   util.GetLogicalPortName(namespace, podName),
+		portName:   util.GetLogicalPortName(namespace, podName, "", true),
 		portUUID:   libovsdbops.BuildNamedUUID(),
 	}
 	return
@@ -156,7 +156,7 @@ func getExpectedDataPodsAndSwitches(pods []testPod, nodes []string) []libovsdbte
 		podAddr := fmt.Sprintf("%s %s", pod.podMAC, pod.podIP)
 		lsp := &nbdb.LogicalSwitchPort{
 			UUID:      lspUUID,
-			Name:      util.GetLogicalPortName(pod.namespace, pod.podName),
+			Name:      util.GetLogicalPortName(pod.namespace, pod.podName, "", true),
 			Addresses: []string{podAddr},
 			ExternalIDs: map[string]string{
 				"pod":       "true",
@@ -265,7 +265,7 @@ var _ = ginkgo.Describe("OVN Pod Operations", func() {
 
 				// Assign it and perform the update
 				t.nodeName = "node1"
-				t.portName = util.GetLogicalPortName(t.namespace, t.podName)
+				t.portName = util.GetLogicalPortName(t.namespace, t.podName, "", true)
 				t.populateLogicalSwitchCache(fakeOvn)
 
 				_, err = fakeOvn.fakeClient.KubeClient.CoreV1().Pods(t.namespace).Update(context.TODO(),
@@ -622,7 +622,7 @@ var _ = ginkgo.Describe("OVN Pod Operations", func() {
 						},
 						&nbdb.LogicalSwitchPort{
 							UUID:      t1.portUUID,
-							Name:      util.GetLogicalPortName(t1.namespace, t1.podName),
+							Name:      util.GetLogicalPortName(t1.namespace, t1.podName, "", true),
 							Addresses: []string{t1.podMAC, t1.podIP},
 							ExternalIDs: map[string]string{
 								"pod":       "true",
@@ -638,7 +638,7 @@ var _ = ginkgo.Describe("OVN Pod Operations", func() {
 						},
 						&nbdb.LogicalSwitchPort{
 							UUID:      t2.portUUID,
-							Name:      util.GetLogicalPortName(t2.namespace, t2.podName),
+							Name:      util.GetLogicalPortName(t2.namespace, t2.podName, "", true),
 							Addresses: []string{t2.podMAC, t2.podIP},
 							ExternalIDs: map[string]string{
 								"pod":       "true",

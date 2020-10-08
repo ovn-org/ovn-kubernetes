@@ -98,7 +98,7 @@ func newEgressFirewallRule(rawEgressFirewallRule egressfirewallapi.EgressFirewal
 // NOTE: Utilize the fact that we know that all egress firewall related setup must have a priority: types.MinimumReservedEgressFirewallPriority <= priority <= types.EgressFirewallStartPriority
 func (oc *Controller) syncEgressFirewall(egressFirewalls []interface{}) {
 	// Lookup all ACLs used for egress Firewalls
-	egressFirewallACLs, err := libovsdbops.FindACLsByPriorityRange(oc.nbClient, types.MinimumReservedEgressFirewallPriority, types.EgressFirewallStartPriority)
+	egressFirewallACLs, err := libovsdbops.FindACLsByPriorityRange(oc.mc.nbClient, types.MinimumReservedEgressFirewallPriority, types.EgressFirewallStartPriority)
 	if err != nil {
 		klog.Errorf("Unable to list egress firewall ACLs, cannot cleanup old stale data, err: %v", err)
 		return
@@ -107,7 +107,7 @@ func (oc *Controller) syncEgressFirewall(egressFirewalls []interface{}) {
 	if config.Gateway.Mode == config.GatewayModeShared {
 		// Mode is shared gateway mode, make sure to delete all egfw ACLs on the node switches
 		if len(egressFirewallACLs) != 0 {
-			err = libovsdbops.RemoveACLsFromNodeSwitches(oc.nbClient, egressFirewallACLs)
+			err = libovsdbops.RemoveACLsFromNodeSwitches(oc.mc.nbClient, egressFirewallACLs)
 			if err != nil {
 				klog.Errorf("Failed to remove reject acl from node logical switches: %v", err)
 				return
@@ -116,7 +116,7 @@ func (oc *Controller) syncEgressFirewall(egressFirewalls []interface{}) {
 	} else if config.Gateway.Mode == config.GatewayModeLocal {
 		// Mode is local gateway mode, make sure to delete all egfw ACLs on the join switches
 		if len(egressFirewallACLs) != 0 {
-			err = libovsdbops.RemoveACLsFromJoinSwitch(oc.nbClient, egressFirewallACLs)
+			err = libovsdbops.RemoveACLsFromJoinSwitch(oc.mc.nbClient, egressFirewallACLs)
 			if err != nil {
 				klog.Errorf("Failed to remove reject acl from node logical switches: %v", err)
 				return
@@ -128,7 +128,7 @@ func (oc *Controller) syncEgressFirewall(egressFirewalls []interface{}) {
 		opModels := []libovsdbops.OperationModel{}
 		for i := range egressFirewallACLs {
 			egressFirewallACL := egressFirewallACLs[i]
-			egressFirewallACL.Direction = types.DirectionToLPort
+			egressFirewallACL.Direction = nbdb.ACLDirectionToLport
 			opModels = append(opModels, libovsdbops.OperationModel{
 				Model: &egressFirewallACL,
 				OnModelUpdates: []interface{}{
@@ -137,7 +137,7 @@ func (oc *Controller) syncEgressFirewall(egressFirewalls []interface{}) {
 				ErrNotFound: true,
 			})
 		}
-		if _, err := oc.modelClient.CreateOrUpdate(opModels...); err != nil {
+		if _, err := oc.mc.modelClient.CreateOrUpdate(opModels...); err != nil {
 			klog.Errorf("Unable to set ACL direction on egress firewall acls, cannot convert old ACL data err: %v", err)
 		}
 	}
@@ -164,7 +164,7 @@ func (oc *Controller) syncEgressFirewall(egressFirewalls []interface{}) {
 			},
 		},
 	}
-	if err := oc.modelClient.Delete(opModels...); err != nil {
+	if err := oc.mc.modelClient.Delete(opModels...); err != nil {
 		klog.Errorf("Unable to remove egress firewall policy, cannot cleanup old stale data, err: %v", err)
 	}
 
@@ -182,7 +182,7 @@ func (oc *Controller) syncEgressFirewall(egressFirewalls []interface{}) {
 	}
 
 	// get all the k8s EgressFirewall Objects
-	egressFirewallList, err := oc.kube.GetEgressFirewalls()
+	egressFirewallList, err := oc.mc.kube.GetEgressFirewalls()
 	if err != nil {
 		klog.Errorf("Cannot reconcile the state of egressfirewalls in ovn database and k8s. err: %v", err)
 	}
@@ -291,7 +291,7 @@ func (oc *Controller) deleteEgressFirewall(egressFirewallObj *egressfirewallapi.
 
 func (oc *Controller) updateEgressFirewallWithRetry(egressfirewall *egressfirewallapi.EgressFirewall) error {
 	retryErr := retry.RetryOnConflict(retry.DefaultRetry, func() error {
-		return oc.kube.UpdateEgressFirewall(egressfirewall)
+		return oc.mc.kube.UpdateEgressFirewall(egressfirewall)
 	})
 	if retryErr != nil {
 		return fmt.Errorf("error in updating status on EgressFirewall %s/%s: %v",
@@ -343,7 +343,7 @@ func (oc *Controller) addEgressFirewallRules(ef *egressFirewall, hashedAddressSe
 func (oc *Controller) createEgressFirewallRules(priority int, match, action, externalID string) error {
 	logicalSwitches := []string{}
 	if config.Gateway.Mode == config.GatewayModeLocal {
-		nodes, err := oc.watchFactory.GetNodes()
+		nodes, err := oc.mc.watchFactory.GetNodes()
 		if err != nil {
 			return fmt.Errorf("unable to setup egress firewall ACLs on cluster nodes, err: %v", err)
 		}
@@ -356,7 +356,7 @@ func (oc *Controller) createEgressFirewallRules(priority int, match, action, ext
 
 	egressFirewallACL := &nbdb.ACL{
 		Priority:    priority,
-		Direction:   types.DirectionToLPort,
+		Direction:   nbdb.ACLDirectionToLport,
 		Match:       match,
 		Action:      action,
 		ExternalIDs: map[string]string{"egressFirewall": externalID},
@@ -394,7 +394,7 @@ func (oc *Controller) createEgressFirewallRules(priority int, match, action, ext
 		},
 	}, opModels...)
 
-	if _, err := oc.modelClient.CreateOrUpdate(opModels...); err != nil {
+	if _, err := oc.mc.modelClient.CreateOrUpdate(opModels...); err != nil {
 		return fmt.Errorf("failed to create egressFirewall ACL in ns %s and add to logical switches %v err: %v",
 			externalID, logicalSwitches, err)
 	}
@@ -405,7 +405,7 @@ func (oc *Controller) createEgressFirewallRules(priority int, match, action, ext
 // deleteEgressFirewallRules delete the specific logical router policy/join switch Acls
 func (oc *Controller) deleteEgressFirewallRules(externalID string) error {
 	// Find ACLs for a given egressFirewall
-	egressFirewallACLs, err := libovsdbops.FindACLsByExternalID(oc.nbClient, map[string]string{"egressFirewall": externalID})
+	egressFirewallACLs, err := libovsdbops.FindACLsByExternalID(oc.mc.nbClient, map[string]string{"egressFirewall": externalID})
 	if err != nil {
 		return fmt.Errorf("unable to list egress firewall ACLs, cannot cleanup old stale data, err: %v", err)
 	}
@@ -416,13 +416,13 @@ func (oc *Controller) deleteEgressFirewallRules(externalID string) error {
 	}
 
 	// delete egress firewall acls off any logical switch which has it
-	err = libovsdbops.RemoveACLsFromAllSwitches(oc.nbClient, egressFirewallACLs)
+	err = libovsdbops.RemoveACLsFromAllSwitches(oc.mc.nbClient, egressFirewallACLs)
 	if err != nil {
 		return fmt.Errorf("failed to remove reject acl from logical switches: %v", err)
 	}
 
 	// Manually remove the egressFirewall ACLs instead of relying on ovsdb garbage collection to do so
-	err = libovsdbops.DeleteACLs(oc.nbClient, egressFirewallACLs)
+	err = libovsdbops.DeleteACLs(oc.mc.nbClient, egressFirewallACLs)
 	if err != nil {
 		return err
 	}

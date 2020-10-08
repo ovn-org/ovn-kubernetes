@@ -24,6 +24,7 @@ import (
 )
 
 type gressPolicy struct {
+	netAttachInfo   *util.NetAttachDefInfo
 	policyNamespace string
 	policyName      string
 	policyType      knet.PolicyType
@@ -72,8 +73,10 @@ func (pp *portPolicy) getL4Match() (string, error) {
 	return foundProtocol, nil
 }
 
-func newGressPolicy(policyType knet.PolicyType, idx int, namespace, name string) *gressPolicy {
+func newGressPolicy(policyType knet.PolicyType, idx int, namespace, name string,
+	netAttachInfo *util.NetAttachDefInfo) *gressPolicy {
 	return &gressPolicy{
+		netAttachInfo:     netAttachInfo,
 		policyNamespace:   namespace,
 		policyName:        name,
 		policyType:        policyType,
@@ -145,7 +148,7 @@ func (gp *gressPolicy) addPeerPods(pods ...*v1.Pod) error {
 	}
 	ips := make([]net.IP, 0, len(pods)*podIPFactor)
 	for _, pod := range pods {
-		podIPs, err := util.GetAllPodIPs(pod)
+		podIPs, err := util.GetAllPodIPs(pod, gp.netAttachInfo)
 		if err != nil {
 			return err
 		}
@@ -156,7 +159,7 @@ func (gp *gressPolicy) addPeerPods(pods ...*v1.Pod) error {
 }
 
 func (gp *gressPolicy) deletePeerPod(pod *v1.Pod) error {
-	ips, err := util.GetAllPodIPs(pod)
+	ips, err := util.GetAllPodIPs(pod, gp.netAttachInfo)
 	if err != nil {
 		return err
 	}

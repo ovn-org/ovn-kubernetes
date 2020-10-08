@@ -325,7 +325,7 @@ var _ = ginkgo.Describe("OVN master EgressIP Operations", func() {
 				gomega.Eventually(isEgressAssignableNode(node2.Name)).Should(gomega.BeFalse())
 
 				lsp := &nbdb.LogicalSwitchPort{Name: types.EXTSwitchToGWRouterPrefix + types.GWRouterPrefix + node1Name}
-				fakeOvn.controller.nbClient.Get(context.Background(), lsp)
+				fakeOvn.controller.mc.nbClient.Get(context.Background(), lsp)
 				gomega.Eventually(lsp.Options["nat-addresses"]).Should(gomega.Equal("router"))
 
 				gomega.Eventually(getEgressIPStatusLen(egressIPName)).Should(gomega.Equal(1))
@@ -561,7 +561,7 @@ var _ = ginkgo.Describe("OVN master EgressIP Operations", func() {
 				gomega.Eventually(isEgressAssignableNode(node2.Name)).Should(gomega.BeFalse())
 
 				lsp := &nbdb.LogicalSwitchPort{Name: types.EXTSwitchToGWRouterPrefix + types.GWRouterPrefix + node1Name}
-				fakeOvn.controller.nbClient.Get(context.Background(), lsp)
+				fakeOvn.controller.mc.nbClient.Get(context.Background(), lsp)
 				gomega.Eventually(lsp.Options["nat-addresses"]).Should(gomega.Equal("router"))
 
 				fakeOvn.controller.WatchEgressIP()

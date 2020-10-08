@@ -8,10 +8,14 @@ import (
 	netattachdefapi "github.com/k8snetworkplumbingwg/network-attachment-definition-client/pkg/apis/k8s.cni.cncf.io/v1"
 	netattachdefutils "github.com/k8snetworkplumbingwg/network-attachment-definition-client/pkg/utils"
 
-	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
 	"k8s.io/api/core/v1"
 	"k8s.io/klog/v2"
 	utilnet "k8s.io/utils/net"
+)
+
+const (
+	defaultMultusNamespace = "kube-system"
+	defaultNetAnnot        = "v1.multus-cni.io/default-network"
 )
 
 // This handles the "k8s.ovn.org/pod-networks" annotation on Pods, used to pass
@@ -46,8 +50,6 @@ import (
 const (
 	// OvnPodAnnotationName is the constant string representing the POD annotation key
 	OvnPodAnnotationName = "k8s.ovn.org/pod-networks"
-	// DefNetworkAnnotation is the pod annotation for the cluster-wide default network
-	DefNetworkAnnotation = "v1.multus-cni.io/default-network"
 )
 
 // PodAnnotation describes the assigned network details for a single pod network. (The
@@ -140,13 +142,13 @@ func MarshalPodAnnotation(pannotations *map[string]string, podInfo *PodAnnotatio
 	podNetworks[netName] = pa
 	bytes, err := json.Marshal(podNetworks)
 	if err != nil {
-		return fmt.Errorf("failed marshaling podNetworks map %v", podNetworks)
+		return fmt.Errorf("failed marshaling pod annotation map %v: %v", podNetworks, err)
 	}
 	annotations[OvnPodAnnotationName] = string(bytes)
 	return nil
 }
 
-// UnmarshalPodAnnotation returns the default network info from pod.Annotations
+// UnmarshalPodAnnotation returns the specified network info from pod.Annotations
 func UnmarshalPodAnnotation(annotations map[string]string, netName string) (*PodAnnotation, error) {
 	ovnAnnotation, ok := annotations[OvnPodAnnotationName]
 	if !ok {
@@ -158,12 +160,11 @@ func UnmarshalPodAnnotation(annotations map[string]string, netName string) (*Pod
 		return nil, fmt.Errorf("failed to unmarshal ovn pod annotation %q: %v",
 			ovnAnnotation, err)
 	}
-	tempA := podNetworks[netName]
+	tempA, ok := podNetworks[netName]
 	if !ok {
 		return nil, fmt.Errorf("no ovn pod annotation for network %s: %q",
 			netName, ovnAnnotation)
 	}
-
 	a := &tempA
 
 	podAnnotation := &PodAnnotation{}
@@ -229,31 +230,51 @@ func UnmarshalPodAnnotation(annotations map[string]string, netName string) (*Pod
 	return podAnnotation, nil
 }
 
-// GetAllPodIPs returns the pod's IP addresses, first from the OVN annotation
-// and then falling back to the Pod Status IPs. This function is intended to
-// also return IPs for HostNetwork and other non-OVN-IPAM-ed pods.
-func GetAllPodIPs(pod *v1.Pod) ([]net.IP, error) {
-	annotation, err := UnmarshalPodAnnotation(pod.Annotations, types.DefaultNetworkName)
-	if annotation != nil {
-		// Use the OVN annotation if valid
-		ips := make([]net.IP, 0, len(annotation.IPs))
-		for _, ip := range annotation.IPs {
-			ips = append(ips, ip.IP)
-		}
+// GetAllPodIPs returns the pod's network IP addresses for specified network,
+// first from the OVN annotation and then falling back to the Pod Status IPs.
+// This function is intended to also return IPs for HostNetwork and other
+// non-OVN-IPAM-ed pods.
+func GetAllPodIPs(pod *v1.Pod, netAttachInfo *NetAttachDefInfo) ([]net.IP, error) {
+	ips := []net.IP{}
+	on, networkMap, err := IsNetworkOnPod(pod, netAttachInfo)
+	if err != nil {
+		return nil, err
+	} else if !on {
+		// the pod is not attached to this specific network, don't return error
 		return ips, nil
+	}
+	for nadName := range networkMap {
+		annotation, _ := UnmarshalPodAnnotation(pod.Annotations, nadName)
+		if annotation != nil {
+			// Use the OVN annotation if valid
+			ips := make([]net.IP, 0, len(annotation.IPs))
+			for _, ip := range annotation.IPs {
+				ips = append(ips, ip.IP)
+			}
+			return ips, nil
+		}
+	}
+
+	if len(ips) != 0 {
+		return ips, nil
+	}
+
+	if netAttachInfo.NotDefault {
+		return []net.IP{}, fmt.Errorf("no pod annotation of pod %s/%s found for network %s",
+			pod.Namespace, pod.Name, netAttachInfo.NetName)
 	}
 
 	// return error if there are no IPs in pod status
 	if len(pod.Status.PodIPs) == 0 {
 		if pod.Status.PodIP == "" {
-			return nil, fmt.Errorf("no pod IPs found on pod %s: %v", pod.Name, err)
+			return nil, fmt.Errorf("no pod IPs found on pod %s/%s", pod.Namespace, pod.Name)
 		}
 		// Kubelets < 1.16 only set podIP
 		return []net.IP{net.ParseIP(pod.Status.PodIP)}, nil
 	}
 
 	// Otherwise if the annotation is not valid try to use Kube API pod IPs
-	ips := make([]net.IP, 0, len(pod.Status.PodIPs))
+	ips = make([]net.IP, 0, len(pod.Status.PodIPs))
 	for _, podIP := range pod.Status.PodIPs {
 		ip := net.ParseIP(podIP.IP)
 		if ip == nil {
@@ -269,12 +290,12 @@ func GetAllPodIPs(pod *v1.Pod) ([]net.IP, error) {
 func GetK8sPodDefaultNetwork(pod *v1.Pod) (*netattachdefapi.NetworkSelectionElement, error) {
 	var netAnnot string
 
-	netAnnot, ok := pod.Annotations[DefNetworkAnnotation]
+	netAnnot, ok := pod.Annotations[defaultNetAnnot]
 	if !ok {
 		return nil, nil
 	}
 
-	networks, err := netattachdefutils.ParseNetworkAnnotation(netAnnot, pod.Namespace)
+	networks, err := netattachdefutils.ParseNetworkAnnotation(netAnnot, defaultMultusNamespace)
 	if err != nil {
 		return nil, fmt.Errorf("GetK8sPodDefaultNetwork: failed to parse CRD object: %v", err)
 	}

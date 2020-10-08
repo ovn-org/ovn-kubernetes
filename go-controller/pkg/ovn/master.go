@@ -7,7 +7,6 @@ import (
 	"os"
 	"reflect"
 	"strings"
-	"sync"
 	"time"
 
 	kapi "k8s.io/api/core/v1"
@@ -59,17 +58,17 @@ func (_ ovnkubeMasterLeaderMetricsProvider) NewLeaderMetric() leaderelection.Swi
 }
 
 // Start waits until this process is the leader before starting master functions
-func (oc *Controller) Start(nodeName string, wg *sync.WaitGroup, ctx context.Context) error {
+func (mc *OvnMHController) Start(ctx context.Context) error {
 	// Set up leader election process first
 	rl, err := resourcelock.New(
 		resourcelock.ConfigMapsResourceLock,
 		config.Kubernetes.OVNConfigNamespace,
 		"ovn-kubernetes-master",
-		oc.client.CoreV1(),
+		mc.client.CoreV1(),
 		nil,
 		resourcelock.ResourceLockConfig{
-			Identity:      nodeName,
-			EventRecorder: oc.recorder,
+			Identity:      mc.nodeName,
+			EventRecorder: mc.recorder,
 		},
 	)
 	if err != nil {
@@ -92,11 +91,30 @@ func (oc *Controller) Start(nodeName string, wg *sync.WaitGroup, ctx context.Con
 					metrics.MetricMasterReadyDuration.Set(end.Seconds())
 				}()
 				// run only on the active master node.
-				metrics.StartMasterMetricUpdater(oc.stopChan, oc.nbClient)
-				if err := oc.StartClusterMaster(nodeName); err != nil {
+				metrics.StartMasterMetricUpdater(mc.stopChan, mc.nbClient)
+
+				if err := mc.setDefaultOvnController(nil); err != nil {
 					panic(err.Error())
 				}
-				if err := oc.Run(wg, nodeName); err != nil {
+
+				// Enable logical datapath groups for OVN 20.12 and later
+				if err := mc.enableOVNLogicalDatapathGroups(); err != nil {
+					panic(err.Error())
+				}
+
+				// Start and sync the watch factory to begin listening for events
+				if err := mc.watchFactory.Start(); err != nil {
+					panic(err.Error())
+				}
+
+				if config.OVNKubernetesFeature.EnableMultiNetwork {
+					mc.watchNetworkAttachmentDefinitions()
+				}
+
+				if err := mc.ovnController.StartClusterMaster(mc.nodeName); err != nil {
+					panic(err.Error())
+				}
+				if err := mc.ovnController.Run(mc.nodeName); err != nil {
 					panic(err.Error())
 				}
 			},
@@ -110,7 +128,7 @@ func (oc *Controller) Start(nodeName string, wg *sync.WaitGroup, ctx context.Con
 				os.Exit(0)
 			},
 			OnNewLeader: func(newLeaderName string) {
-				if newLeaderName != nodeName {
+				if newLeaderName != mc.nodeName {
 					klog.Infof("Lost the election to %s; in standby mode", newLeaderName)
 				}
 			},
@@ -123,11 +141,11 @@ func (oc *Controller) Start(nodeName string, wg *sync.WaitGroup, ctx context.Con
 		return err
 	}
 
-	wg.Add(1)
+	mc.wg.Add(1)
 	go func() {
 		leaderElector.Run(ctx)
 		klog.Infof("Stopped leader election")
-		wg.Done()
+		mc.wg.Done()
 	}()
 
 	return nil
@@ -135,7 +153,9 @@ func (oc *Controller) Start(nodeName string, wg *sync.WaitGroup, ctx context.Con
 
 // cleanup obsolete *gressDefaultDeny port groups
 func (oc *Controller) upgradeToNamespacedDenyPGOVNTopology(existingNodeList *kapi.NodeList) error {
-	err := libovsdbops.DeletePortGroups(oc.nbClient, "ingressDefaultDeny", "egressDefaultDeny")
+	ingressPGName := oc.nadInfo.Prefix + "ingressDefaultDeny"
+	egressPGName := oc.nadInfo.Prefix + "egressDefaultDeny"
+	err := libovsdbops.DeletePortGroups(oc.mc.nbClient, ingressPGName, egressPGName)
 	if err != nil {
 		klog.Errorf("%v", err)
 	}
@@ -145,18 +165,22 @@ func (oc *Controller) upgradeToNamespacedDenyPGOVNTopology(existingNodeList *kap
 // delete obsoleted logical OVN entities that are specific for Multiple join switches OVN topology. Also cleanup
 // OVN entities for deleted nodes (similar to syncNodes() but for obsoleted Multiple join switches OVN topology)
 func (oc *Controller) upgradeToSingleSwitchOVNTopology(existingNodeList *kapi.NodeList) error {
+	if oc.nadInfo.NotDefault {
+		return nil
+	}
+
 	existingNodes := make(map[string]bool)
 	for _, node := range existingNodeList.Items {
 		existingNodes[node.Name] = true
 
 		// delete the obsoleted node-join-subnets annotation
-		err := oc.kube.SetAnnotationsOnNode(node.Name, map[string]interface{}{"k8s.ovn.org/node-join-subnets": nil})
+		err := oc.mc.kube.SetAnnotationsOnNode(node.Name, map[string]interface{}{"k8s.ovn.org/node-join-subnets": nil})
 		if err != nil {
 			klog.Errorf("Failed to remove node-join-subnets annotation for node %s", node.Name)
 		}
 	}
 
-	legacyJoinSwitches, err := libovsdbops.FindPerNodeJoinSwitches(oc.nbClient)
+	legacyJoinSwitches, err := libovsdbops.FindPerNodeJoinSwitches(oc.mc.nbClient)
 	if err != nil {
 		klog.Errorf("Failed to remove any legacy per node join switches")
 	}
@@ -203,6 +227,20 @@ func (oc *Controller) upgradeOVNTopology(existingNodes *kapi.NodeList) error {
 	return err
 }
 
+// enableOVNLogicalDataPathGroups sets an OVN flag to enable logical datapath
+// groups on OVN 20.12 and later. The option is ignored if OVN doesn't
+// understand it. Logical datapath groups reduce the size of the southbound
+// database in large clusters. ovn-controllers should be upgraded to a version
+// that supports them before the option is turned on by the master.
+func (mc *OvnMHController) enableOVNLogicalDatapathGroups() error {
+	dpGroupOpts := map[string]string{"use_logical_dp_groups": "true"}
+	if err := libovsdbops.UpdateNBGlobalOptions(mc.nbClient, dpGroupOpts); err != nil {
+		klog.Errorf("Failed to set NB global option to enable logical datapath groups: %v", err)
+		return err
+	}
+	return nil
+}
+
 // StartClusterMaster runs a subnet IPAM and a controller that watches arrival/departure
 // of nodes in the cluster
 // On an addition to the cluster (node create), a new subnet is created for it that will translate
@@ -212,20 +250,11 @@ func (oc *Controller) upgradeOVNTopology(existingNodes *kapi.NodeList) error {
 // TODO: Verify that the cluster was not already called with a different global subnet
 //  If true, then either quit or perform a complete reconfiguration of the cluster (recreate switches/routers with new subnet values)
 func (oc *Controller) StartClusterMaster(masterNodeName string) error {
-	klog.Infof("Starting cluster master")
+	klog.Infof("Starting cluster master for network %s", oc.nadInfo.NetName)
 
-	// enableOVNLogicalDataPathGroups sets an OVN flag to enable logical datapath
-	// groups on OVN 20.12 and later. The option is ignored if OVN doesn't
-	// understand it. Logical datapath groups reduce the size of the southbound
-	// database in large clusters. ovn-controllers should be upgraded to a version
-	// that supports them before the option is turned on by the master.
-	dpGroupOpts := map[string]string{"use_logical_dp_groups": "true"}
-	if err := libovsdbops.UpdateNBGlobalOptions(oc.nbClient, dpGroupOpts); err != nil {
-		klog.Errorf("Failed to set NB global option to enable logical datapath groups: %v", err)
-		return err
-	}
+	oc.isStarted = true
 
-	existingNodes, err := oc.kube.GetNodes()
+	existingNodes, err := oc.mc.kube.GetNodes()
 	if err != nil {
 		klog.Errorf("Error in fetching nodes: %v", err)
 		return err
@@ -237,15 +266,14 @@ func (oc *Controller) StartClusterMaster(masterNodeName string) error {
 		return err
 	}
 
-	klog.Infof("Allocating subnets")
 	var v4HostSubnetCount, v6HostSubnetCount float64
-	for _, clusterEntry := range config.Default.ClusterSubnets {
-		err := oc.masterSubnetAllocator.AddNetworkRange(clusterEntry.CIDR, clusterEntry.HostSubnetLength)
+	for _, ipnet := range oc.clusterSubnets {
+		err := oc.masterSubnetAllocator.AddNetworkRange(ipnet.CIDR, ipnet.HostSubnetLength)
 		if err != nil {
 			return err
 		}
-		klog.V(5).Infof("Added network range %s to the allocator", clusterEntry.CIDR)
-		util.CalculateHostSubnetsForClusterEntry(clusterEntry, &v4HostSubnetCount, &v6HostSubnetCount)
+		klog.V(5).Infof("Added network range %s to the allocator", ipnet.CIDR)
+		util.CalculateHostSubnetsForClusterEntry(ipnet, &v4HostSubnetCount, &v6HostSubnetCount)
 	}
 	nodeNames := []string{}
 	for _, node := range existingNodes.Items {
@@ -255,48 +283,51 @@ func (oc *Controller) StartClusterMaster(masterNodeName string) error {
 	// update metrics for host subnets
 	metrics.RecordSubnetCount(v4HostSubnetCount, v6HostSubnetCount)
 
-	if oc.multicastSupport {
-		if _, _, err := util.RunOVNSbctl("--columns=_uuid", "list", "IGMP_Group"); err != nil {
-			klog.Warningf("Multicast support enabled, however version of OVN in use does not support IGMP Group. " +
-				"Disabling Multicast Support")
-			oc.multicastSupport = false
+	if !oc.nadInfo.NotDefault {
+		if oc.multicastSupport {
+			if _, _, err := util.RunOVNSbctl("--columns=_uuid", "list", "IGMP_Group"); err != nil {
+				klog.Warningf("Multicast support enabled, however version of OVN in use does not support IGMP Group. " +
+					"Disabling Multicast Support")
+				oc.multicastSupport = false
+			}
 		}
-	}
+		meterFairness := true
 
-	meterFairness := true
-
-	// This always needs to be looked up in two transactions because there's no way to lookup
-	// a meter's meter_band
-	aclLogMeterPtr, err := libovsdbops.FindMeterByName(oc.nbClient, types.OvnACLLoggingMeter)
-	if err != nil && err != libovsdbclient.ErrNotFound {
-		// Log error but don't stop master setup
-		klog.Errorf("ACL logging support enabled, however failed to find acl-logging meter err: %v"+
-			"Disabling ACL logging support", err)
-		oc.aclLoggingEnabled = false
-	}
-
-	// if meter exists update its fairness, otherwise create it
-	if aclLogMeterPtr != nil {
-		if err := libovsdbops.UpdateMeterFairness(oc.nbClient, aclLogMeterPtr, meterFairness); err != nil {
-			klog.Warningf("Failed to enable 'fair' metering for %s meter: %v", types.OvnACLLoggingMeter, err)
-		}
-	} else {
-		meterBand := &nbdb.MeterBand{
-			Action: types.MeterAction,
-			Rate:   config.Logging.ACLLoggingRateLimit,
-		}
-		meter := &nbdb.Meter{
-			Name: types.OvnACLLoggingMeter,
-			Fair: &meterFairness,
-			Unit: types.PacketsPerSecond,
-		}
-
-		if err := libovsdbops.CreateMeterWithBand(oc.nbClient, meter, meterBand); err != nil {
-			klog.Warningf("ACL logging support enabled, however acl-logging meter could not be created: %v. "+
+		// This always needs to be looked up in two transactions because there's no way to lookup
+		// a meter's meter_band
+		aclLogMeterPtr, err := libovsdbops.FindMeterByName(oc.mc.nbClient, types.OvnACLLoggingMeter)
+		if err != nil && err != libovsdbclient.ErrNotFound {
+			// Log error but don't stop master setup
+			klog.Errorf("ACL logging support enabled, however failed to find acl-logging meter err: %v"+
 				"Disabling ACL logging support", err)
 			oc.aclLoggingEnabled = false
 		}
 
+		// if meter exists update its fairness, otherwise create it
+		if aclLogMeterPtr != nil {
+			if err := libovsdbops.UpdateMeterFairness(oc.mc.nbClient, aclLogMeterPtr, meterFairness); err != nil {
+				klog.Warningf("Failed to enable 'fair' metering for %s meter: %v", types.OvnACLLoggingMeter, err)
+			}
+		} else {
+			meterBand := &nbdb.MeterBand{
+				Action: types.MeterAction,
+				Rate:   config.Logging.ACLLoggingRateLimit,
+			}
+			meter := &nbdb.Meter{
+				Name: types.OvnACLLoggingMeter,
+				Fair: &meterFairness,
+				Unit: types.PacketsPerSecond,
+			}
+
+			if err := libovsdbops.CreateMeterWithBand(oc.mc.nbClient, meter, meterBand); err != nil {
+				klog.Warningf("ACL logging support enabled, however acl-logging meter could not be created: %v. "+
+					"Disabling ACL logging support", err)
+				oc.aclLoggingEnabled = false
+			}
+		}
+	} else {
+		// TBD do we support multicast for non-default network? if yes, search for clusterRtrPortGroupName and clusterRtrPortGroupUUID
+		oc.multicastSupport = false
 	}
 
 	// FIXME: When https://github.com/ovn-org/libovsdb/issues/235 is fixed,
@@ -305,7 +336,7 @@ func (oc *Controller) StartClusterMaster(masterNodeName string) error {
 		klog.Warningf("Load Balancer Group support enabled, however version of OVN in use does not support Load Balancer Groups.")
 	} else {
 		loadBalancerGroup := nbdb.LoadBalancerGroup{
-			Name: types.ClusterLBGroupName,
+			Name: oc.nadInfo.Prefix + types.ClusterLBGroupName,
 		}
 		// Create loadBalancerGroup if needed. Since this table is indexed by name, there is no need to
 		// mention that field in OnModelUpdates or ModelPredicate.
@@ -314,26 +345,27 @@ func (oc *Controller) StartClusterMaster(masterNodeName string) error {
 				Model: &loadBalancerGroup,
 			},
 		}
-		if _, err = oc.modelClient.CreateOrUpdate(opModels...); err != nil {
+		if _, err = oc.mc.modelClient.CreateOrUpdate(opModels...); err != nil {
 			klog.Errorf("Error creating cluster-wide load balancer group (%v)", err)
 			return err
 		}
 		oc.loadBalancerGroupUUID = loadBalancerGroup.UUID
 	}
 
-	if err := oc.SetupMaster(masterNodeName, nodeNames); err != nil {
+	if err := oc.SetupMaster(nodeNames); err != nil {
 		klog.Errorf("Failed to setup master (%v)", err)
 		return err
 	}
 
-	if config.HybridOverlay.Enabled {
+	// default network only
+	if !oc.nadInfo.NotDefault && config.HybridOverlay.Enabled {
 		oc.hoMaster, err = hocontroller.NewMaster(
-			oc.kube,
-			oc.watchFactory.NodeInformer(),
-			oc.watchFactory.NamespaceInformer(),
-			oc.watchFactory.PodInformer(),
-			oc.nbClient,
-			oc.sbClient,
+			oc.mc.kube,
+			oc.mc.watchFactory.NodeInformer(),
+			oc.mc.watchFactory.NamespaceInformer(),
+			oc.mc.watchFactory.PodInformer(),
+			oc.mc.nbClient,
+			oc.mc.sbClient,
 			informer.NewDefaultEventHandler,
 		)
 		if err != nil {
@@ -345,10 +377,12 @@ func (oc *Controller) StartClusterMaster(masterNodeName string) error {
 }
 
 // SetupMaster creates the central router and load-balancers for the network
-func (oc *Controller) SetupMaster(masterNodeName string, existingNodeNames []string) error {
+func (oc *Controller) SetupMaster(existingNodeNames []string) error {
+	clusterRouterName := oc.nadInfo.Prefix + types.OVNClusterRouter
+
 	// Create a single common distributed router for the cluster.
 	logicalRouter := nbdb.LogicalRouter{
-		Name: types.OVNClusterRouter,
+		Name: clusterRouterName,
 		ExternalIDs: map[string]string{
 			"k8s-cluster-router": "yes",
 		},
@@ -356,19 +390,24 @@ func (oc *Controller) SetupMaster(masterNodeName string, existingNodeNames []str
 			"always_learn_from_arp_request": "false",
 		},
 	}
+	if oc.nadInfo.NotDefault {
+		logicalRouter.ExternalIDs["network_name"] = oc.nadInfo.NetName
+	}
 	if oc.multicastSupport {
-		logicalRouter.Options = map[string]string{
-			"mcast_relay": "true",
-		}
+		logicalRouter.Options["mcast_relay"] = "true"
 	}
 	opModels := []libovsdbops.OperationModel{
 		{
 			Model:          &logicalRouter,
-			ModelPredicate: func(lr *nbdb.LogicalRouter) bool { return lr.Name == types.OVNClusterRouter },
+			ModelPredicate: func(lr *nbdb.LogicalRouter) bool { return lr.Name == clusterRouterName },
 		},
 	}
-	if _, err := oc.modelClient.CreateOrUpdate(opModels...); err != nil {
+	if _, err := oc.mc.modelClient.CreateOrUpdate(opModels...); err != nil {
 		return fmt.Errorf("failed to create a single common distributed router for the cluster, error: %v", err)
+	}
+
+	if oc.nadInfo.NotDefault {
+		return nil
 	}
 
 	// Determine SCTP support
@@ -384,8 +423,8 @@ func (oc *Controller) SetupMaster(masterNodeName string, existingNodeNames []str
 	}
 
 	// Create a cluster-wide port group that all logical switch ports are part of
-	pg := libovsdbops.BuildPortGroup(types.ClusterPortGroupName, types.ClusterPortGroupName, nil, nil)
-	err = libovsdbops.CreateOrUpdatePortGroups(oc.nbClient, pg)
+	pg := buildPortGroup(types.ClusterPortGroupName, types.ClusterPortGroupName, nil, nil, oc.nadInfo.NetNameInfo)
+	err = libovsdbops.CreateOrUpdatePortGroups(oc.mc.nbClient, pg)
 	if err != nil {
 		klog.Errorf("Failed to create cluster port group: %v", err)
 		return err
@@ -394,8 +433,8 @@ func (oc *Controller) SetupMaster(masterNodeName string, existingNodeNames []str
 	// Create a cluster-wide port group with all node-to-cluster router
 	// logical switch ports.  Currently the only user is multicast but it might
 	// be used for other features in the future.
-	pg = libovsdbops.BuildPortGroup(types.ClusterRtrPortGroupName, types.ClusterRtrPortGroupName, nil, nil)
-	err = libovsdbops.CreateOrUpdatePortGroups(oc.nbClient, pg)
+	pg = buildPortGroup(types.ClusterRtrPortGroupName, types.ClusterRtrPortGroupName, nil, nil, oc.nadInfo.NetNameInfo)
+	err = libovsdbops.CreateOrUpdatePortGroups(oc.mc.nbClient, pg)
 	if err != nil {
 		klog.Errorf("Failed to create cluster port group: %v", err)
 		return err
@@ -421,31 +460,31 @@ func (oc *Controller) SetupMaster(masterNodeName string, existingNodeNames []str
 
 	// Initialize the OVNJoinSwitch switch IP manager
 	// The OVNJoinSwitch will be allocated IP addresses in the range 100.64.0.0/16 or fd98::/64.
-	oc.joinSwIPManager, err = lsm.NewJoinLogicalSwitchIPManager(oc.nbClient, existingNodeNames)
+	oc.joinSwIPManager, err = lsm.NewJoinLogicalSwitchIPManager(oc.mc.nbClient, existingNodeNames)
 	if err != nil {
 		return err
 	}
 
 	// Allocate IPs for logical router port "GwRouterToJoinSwitchPrefix + OVNClusterRouter". This should always
 	// allocate the first IPs in the join switch subnets
-	gwLRPIfAddrs, err := oc.joinSwIPManager.EnsureJoinLRPIPs(types.OVNClusterRouter)
+	gwLRPIfAddrs, err := oc.joinSwIPManager.EnsureJoinLRPIPs(clusterRouterName)
 	if err != nil {
-		return fmt.Errorf("failed to allocate join switch IP address connected to %s: %v", types.OVNClusterRouter, err)
+		return fmt.Errorf("failed to allocate join switch IP address connected to %s: %v", clusterRouterName, err)
 	}
 
 	// Create OVNJoinSwitch that will be used to connect gateway routers to the distributed router.
+	joinSwitchName := oc.nadInfo.Prefix + types.OVNJoinSwitch
 	logicalSwitch := nbdb.LogicalSwitch{
-		Name: types.OVNJoinSwitch,
+		Name: joinSwitchName,
 	}
 	opModels = []libovsdbops.OperationModel{
 		{
 			Model:          &logicalSwitch,
-			ModelPredicate: func(ls *nbdb.LogicalSwitch) bool { return ls.Name == types.OVNJoinSwitch },
+			ModelPredicate: func(ls *nbdb.LogicalSwitch) bool { return ls.Name == joinSwitchName },
 		},
 	}
-	if _, err := oc.modelClient.CreateOrUpdate(opModels...); err != nil {
+	if _, err := oc.mc.modelClient.CreateOrUpdate(opModels...); err != nil {
 		return fmt.Errorf("failed to create logical switch %s, error: %v", types.OVNJoinSwitch, err)
-
 	}
 
 	// Connect the distributed router to OVNJoinSwitch.
@@ -482,7 +521,7 @@ func (oc *Controller) SetupMaster(masterNodeName string, existingNodeNames []str
 			ErrNotFound: true,
 		},
 	}
-	if _, err := oc.modelClient.CreateOrUpdate(opModels...); err != nil {
+	if _, err := oc.mc.modelClient.CreateOrUpdate(opModels...); err != nil {
 		return fmt.Errorf("failed to add logical router port %s, error: %v", drRouterPort, err)
 	}
 
@@ -511,11 +550,30 @@ func (oc *Controller) SetupMaster(masterNodeName string, existingNodeNames []str
 			ErrNotFound: true,
 		},
 	}
-	if _, err := oc.modelClient.CreateOrUpdate(opModels...); err != nil {
+	if _, err := oc.mc.modelClient.CreateOrUpdate(opModels...); err != nil {
 		return fmt.Errorf("failed to add router-type logical switch port %s to %s, error: %v",
 			drSwitchPort, types.OVNJoinSwitch, err)
 	}
 	return nil
+}
+
+// deleteMaster delete the central router and switch for the network
+func (oc *Controller) deleteMaster() {
+	if !oc.nadInfo.NotDefault {
+		return
+	}
+
+	// delete the single common distributed router for the cluster.
+	clusterRouter := oc.nadInfo.Prefix + types.OVNClusterRouter
+	opModels := []libovsdbops.OperationModel{
+		{
+			Model:          &nbdb.LogicalRouter{},
+			ModelPredicate: func(lr *nbdb.LogicalRouter) bool { return lr.Name == clusterRouter },
+		},
+	}
+	if err := oc.mc.modelClient.Delete(opModels...); err != nil {
+		klog.Errorf("Failed to delete a distributed router for network %s: %v", oc.nadInfo.NetName, err)
+	}
 }
 
 func (oc *Controller) addNodeLogicalSwitchPort(logicalSwitchName, portName, portType string, addresses []string, options map[string]string) (string, error) {
@@ -545,7 +603,7 @@ func (oc *Controller) addNodeLogicalSwitchPort(logicalSwitchName, portName, port
 			ErrNotFound: true,
 		},
 	}
-	_, err := oc.modelClient.CreateOrUpdate(opModels...)
+	_, err := oc.mc.modelClient.CreateOrUpdate(opModels...)
 	if err != nil {
 		return "", fmt.Errorf("failed to add logical port %s to switch %s, error: %v", portName, logicalSwitch.Name, err)
 	}
@@ -554,13 +612,18 @@ func (oc *Controller) addNodeLogicalSwitchPort(logicalSwitchName, portName, port
 }
 
 func (oc *Controller) syncNodeManagementPort(node *kapi.Node, hostSubnets []*net.IPNet) error {
+	// management port is not needed for non-default network
+	if oc.nadInfo.NotDefault {
+		return nil
+	}
+
 	macAddress, err := util.ParseNodeManagementPortMACAddress(node)
 	if err != nil {
 		return err
 	}
 
 	if hostSubnets == nil {
-		hostSubnets, err = util.ParseNodeHostSubnetAnnotation(node, types.DefaultNetworkName)
+		hostSubnets, err = util.ParseNodeHostSubnetAnnotation(node, oc.nadInfo.NetName)
 		if err != nil {
 			return err
 		}
@@ -572,7 +635,7 @@ func (oc *Controller) syncNodeManagementPort(node *kapi.Node, hostSubnets []*net
 		mgmtIfAddr := util.GetNodeManagementIfAddr(hostSubnet)
 		addresses += " " + mgmtIfAddr.IP.String()
 
-		if err := addAllowACLFromNode(node.Name, mgmtIfAddr.IP, oc.nbClient); err != nil {
+		if err := addAllowACLFromNode(node.Name, mgmtIfAddr.IP, oc.mc.nbClient); err != nil {
 			return err
 		}
 
@@ -612,7 +675,7 @@ func (oc *Controller) syncNodeManagementPort(node *kapi.Node, hostSubnets []*net
 					ErrNotFound: true,
 				},
 			}
-			if _, err := oc.modelClient.CreateOrUpdate(opModels...); err != nil {
+			if _, err := oc.mc.modelClient.CreateOrUpdate(opModels...); err != nil {
 				return fmt.Errorf("failed to add source IP address based "+
 					"routes in distributed router %s, error: %v", types.OVNClusterRouter, err)
 			}
@@ -626,14 +689,14 @@ func (oc *Controller) syncNodeManagementPort(node *kapi.Node, hostSubnets []*net
 		return err
 	}
 
-	err = libovsdbops.AddPortsToPortGroup(oc.nbClient, types.ClusterPortGroupName, uuid)
+	err = libovsdbops.AddPortsToPortGroup(oc.mc.nbClient, types.ClusterPortGroupName, uuid)
 	if err != nil {
 		klog.Errorf(err.Error())
 		return err
 	}
 
 	if v4Subnet != nil {
-		if err := util.UpdateNodeSwitchExcludeIPs(oc.nbClient, node.Name, v4Subnet); err != nil {
+		if err := util.UpdateNodeSwitchExcludeIPs(oc.mc.nbClient, node.Name, v4Subnet); err != nil {
 			return err
 		}
 	}
@@ -645,7 +708,12 @@ func (oc *Controller) syncGatewayLogicalNetwork(node *kapi.Node, l3GatewayConfig
 	hostSubnets []*net.IPNet, hostAddrs sets.String) error {
 	var err error
 	var gwLRPIPs, clusterSubnets []*net.IPNet
-	for _, clusterSubnet := range config.Default.ClusterSubnets {
+
+	if oc.nadInfo.NotDefault {
+		return nil
+	}
+
+	for _, clusterSubnet := range oc.clusterSubnets {
 		clusterSubnets = append(clusterSubnets, clusterSubnet.CIDR)
 	}
 
@@ -691,7 +759,7 @@ func (oc *Controller) syncNodeClusterRouterPort(node *kapi.Node, hostSubnets []*
 	}
 
 	if hostSubnets == nil {
-		hostSubnets, err = util.ParseNodeHostSubnetAnnotation(node, types.DefaultNetworkName)
+		hostSubnets, err = util.ParseNodeHostSubnetAnnotation(node, oc.nadInfo.NetName)
 		if err != nil {
 			return err
 		}
@@ -707,7 +775,9 @@ func (oc *Controller) syncNodeClusterRouterPort(node *kapi.Node, hostSubnets []*
 		}
 	}
 
-	lrpName := types.RouterToSwitchPrefix + node.Name
+	switchName := oc.nadInfo.Prefix + node.Name
+	clusterRouterName := oc.nadInfo.Prefix + types.OVNClusterRouter
+	lrpName := types.RouterToSwitchPrefix + switchName
 	lrpNetworks := []string{}
 	for _, hostSubnet := range hostSubnets {
 		gwIfAddr := util.GetNodeGatewayIfAddr(hostSubnet)
@@ -734,7 +804,7 @@ func (oc *Controller) syncNodeClusterRouterPort(node *kapi.Node, hostSubnets []*
 		},
 		{
 			Model:          &logicalRouter,
-			ModelPredicate: func(lr *nbdb.LogicalRouter) bool { return lr.Name == types.OVNClusterRouter },
+			ModelPredicate: func(lr *nbdb.LogicalRouter) bool { return lr.Name == clusterRouterName },
 			OnModelMutations: []interface{}{
 				&logicalRouter.Ports,
 			},
@@ -742,8 +812,8 @@ func (oc *Controller) syncNodeClusterRouterPort(node *kapi.Node, hostSubnets []*
 		},
 	}
 
-	if _, err := oc.modelClient.CreateOrUpdate(opModels...); err != nil {
-		klog.Errorf("Failed to add logical router port %s to router %s, error: %v", lrpName, types.OVNClusterRouter, err)
+	if _, err := oc.mc.modelClient.CreateOrUpdate(opModels...); err != nil {
+		klog.Errorf("Failed to add logical router port %s to router %s, error: %v", lrpName, clusterRouterName, err)
 		return err
 	}
 
@@ -776,7 +846,7 @@ func (oc *Controller) syncNodeClusterRouterPort(node *kapi.Node, hostSubnets []*
 		},
 	}
 
-	if _, err := oc.modelClient.CreateOrUpdate(opModels...); err != nil {
+	if _, err := oc.mc.modelClient.CreateOrUpdate(opModels...); err != nil {
 		klog.Errorf("Failed to add gateway chassis %s to logical router port %s, error: %v", chassisID, lrpName, err)
 		return err
 	}
@@ -796,8 +866,12 @@ func (oc *Controller) ensureNodeLogicalNetwork(node *kapi.Node, hostSubnets []*n
 		}
 	}
 
+	switchName := oc.nadInfo.Prefix + nodeName
 	logicalSwitch := nbdb.LogicalSwitch{
-		Name: nodeName,
+		Name: switchName,
+	}
+	if oc.nadInfo.NotDefault {
+		logicalSwitch.ExternalIDs = map[string]string{"network_name": oc.nadInfo.NetName}
 	}
 
 	var v4Gateway, v6Gateway net.IP
@@ -818,7 +892,7 @@ func (oc *Controller) ensureNodeLogicalNetwork(node *kapi.Node, hostSubnets []*n
 		} else {
 			v4Gateway = gwIfAddr.IP
 			excludeIPs := mgmtIfAddr.IP.String()
-			if config.HybridOverlay.Enabled {
+			if !oc.nadInfo.NotDefault && config.HybridOverlay.Enabled {
 				hybridOverlayIfAddr := util.GetNodeHybridOverlayIfAddr(hostSubnet)
 				excludeIPs += ".." + hybridOverlayIfAddr.IP.String()
 			}
@@ -833,7 +907,7 @@ func (oc *Controller) ensureNodeLogicalNetwork(node *kapi.Node, hostSubnets []*n
 		logicalSwitch.LoadBalancerGroup = []string{oc.loadBalancerGroupUUID}
 	}
 
-	logicalRouterPortName := types.RouterToSwitchPrefix + nodeName
+	logicalRouterPortName := types.RouterToSwitchPrefix + switchName
 	logicalRouterPort := nbdb.LogicalRouterPort{
 		Name:     logicalRouterPortName,
 		MAC:      nodeLRPMAC.String(),
@@ -868,36 +942,38 @@ func (oc *Controller) ensureNodeLogicalNetwork(node *kapi.Node, hostSubnets []*n
 			},
 		},
 	}
-	if _, err := oc.modelClient.CreateOrUpdate(opModels...); err != nil {
+	if _, err := oc.mc.modelClient.CreateOrUpdate(opModels...); err != nil {
 		return fmt.Errorf("failed to add logical port to router, error: %v", err)
 	}
 
-	// also add the join switch IPs for this node - needed in shared gateway mode
-	lrpIPs, err := oc.joinSwIPManager.EnsureJoinLRPIPs(nodeName)
-	if err != nil {
-		return fmt.Errorf("failed to get join switch port IP address for node %s: %v", nodeName, err)
-	}
-
-	for _, lrpIP := range lrpIPs {
-		hostNetworkPolicyIPs = append(hostNetworkPolicyIPs, lrpIP.IP)
-	}
-
-	// add the host network IPs for this node to host network namespace's address set
-	if err = func() error {
-		hostNetworkNamespace := config.Kubernetes.HostNetworkNamespace
-		if hostNetworkNamespace != "" {
-			nsInfo, nsUnlock, err := oc.ensureNamespaceLocked(hostNetworkNamespace, true, nil)
-			if err != nil {
-				return fmt.Errorf("failed to ensure namespace locked: %v", err)
-			}
-			defer nsUnlock()
-			if err = nsInfo.addressSet.AddIPs(hostNetworkPolicyIPs); err != nil {
-				return err
-			}
+	if !oc.nadInfo.NotDefault {
+		// also add the join switch IPs for this node - needed in shared gateway mode
+		lrpIPs, err := oc.joinSwIPManager.EnsureJoinLRPIPs(nodeName)
+		if err != nil {
+			return fmt.Errorf("failed to get join switch port IP address for node %s: %v", nodeName, err)
 		}
-		return nil
-	}(); err != nil {
-		return err
+
+		for _, lrpIP := range lrpIPs {
+			hostNetworkPolicyIPs = append(hostNetworkPolicyIPs, lrpIP.IP)
+		}
+
+		// add the host network IPs for this node to host network namespace's address set
+		if err = func() error {
+			hostNetworkNamespace := config.Kubernetes.HostNetworkNamespace
+			if hostNetworkNamespace != "" {
+				nsInfo, nsUnlock, err := oc.ensureNamespaceLocked(hostNetworkNamespace, true, nil)
+				if err != nil {
+					return fmt.Errorf("failed to ensure namespace locked: %v", err)
+				}
+				defer nsUnlock()
+				if err = nsInfo.addressSet.AddIPs(hostNetworkPolicyIPs); err != nil {
+					return err
+				}
+			}
+			return nil
+		}(); err != nil {
+			return err
+		}
 	}
 
 	// If supported, enable IGMP/MLD snooping and querier on the node.
@@ -930,23 +1006,25 @@ func (oc *Controller) ensureNodeLogicalNetwork(node *kapi.Node, hostSubnets []*n
 				ErrNotFound: true,
 			},
 		}
-		if _, err := oc.modelClient.CreateOrUpdate(opModels...); err != nil {
+		if _, err := oc.mc.modelClient.CreateOrUpdate(opModels...); err != nil {
 			return fmt.Errorf("failed to configure Multicast on logical switch for node %s, error: %v", nodeName, err)
 		}
 	}
 
 	// Connect the switch to the router.
-	nodeSwToRtrUUID, err := oc.addNodeLogicalSwitchPort(nodeName, types.SwitchToRouterPrefix+nodeName,
-		"router", []string{"router"}, map[string]string{"router-port": types.RouterToSwitchPrefix + nodeName})
+	nodeSwToRtrUUID, err := oc.addNodeLogicalSwitchPort(switchName, types.SwitchToRouterPrefix+switchName,
+		"router", []string{"router"}, map[string]string{"router-port": types.RouterToSwitchPrefix + switchName})
 	if err != nil {
 		klog.Errorf("Failed to add logical port to switch, error: %v", err)
 		return err
 	}
 
-	err = libovsdbops.AddPortsToPortGroup(oc.nbClient, types.ClusterRtrPortGroupName, nodeSwToRtrUUID)
-	if err != nil {
-		klog.Errorf(err.Error())
-		return err
+	if !oc.nadInfo.NotDefault {
+		err = libovsdbops.AddPortsToPortGroup(oc.mc.nbClient, types.ClusterRtrPortGroupName, nodeSwToRtrUUID)
+		if err != nil {
+			klog.Errorf(err.Error())
+			return err
+		}
 	}
 
 	// Add the node to the logical switch cache
@@ -964,30 +1042,30 @@ func (oc *Controller) updateNodeAnnotationWithRetry(nodeName string, hostSubnets
 	//// Retry if it fails because of potential conflict, or temporary API server down
 	resultErr := retry.OnError(retry.DefaultBackoff, isError, func() error {
 		// Informer cache should not be mutated, so get a copy of the object
-		node, err := oc.kube.GetNode(nodeName)
+		node, err := oc.mc.kube.GetNode(nodeName)
 		if err != nil {
 			return err
 		}
 
 		cnode := node.DeepCopy()
-		err = util.UpdateNodeHostSubnetAnnotation(cnode.Annotations, hostSubnets, types.DefaultNetworkName)
+		err = util.UpdateNodeHostSubnetAnnotation(cnode.Annotations, hostSubnets, oc.nadInfo.NetName)
 		if err != nil {
-			return fmt.Errorf("failed to update node %q annotation subnet %s",
-				node.Name, util.JoinIPNets(hostSubnets, ","))
+			return fmt.Errorf("failed to update node %q annotation for network %s subnet %s",
+				node.Name, oc.nadInfo.NetName, util.JoinIPNets(hostSubnets, ","))
 		}
-		return oc.kube.UpdateNode(cnode)
+		return oc.mc.kube.UpdateNode(cnode)
 	})
 	if resultErr != nil {
-		return fmt.Errorf("failed to update node %s annotation", nodeName)
+		return fmt.Errorf("failed to update node %s annotation for network %s", nodeName, oc.nadInfo.NetName)
 	}
 	return nil
 }
 
 func (oc *Controller) allocateNodeSubnets(node *kapi.Node) ([]*net.IPNet, []*net.IPNet, error) {
-	hostSubnets, err := util.ParseNodeHostSubnetAnnotation(node, types.DefaultNetworkName)
+	hostSubnets, err := util.ParseNodeHostSubnetAnnotation(node, oc.nadInfo.NetName)
 	if err != nil {
 		// Log the error and try to allocate new subnets
-		klog.Infof("Failed to get node %s host subnets annotations: %v", node.Name, err)
+		klog.Infof("Failed to get node %s host subnets annotations for network %s: %v", node.Name, oc.nadInfo.NetName, err)
 	}
 	allocatedSubnets := []*net.IPNet{}
 
@@ -1002,7 +1080,7 @@ func (oc *Controller) allocateNodeSubnets(node *kapi.Node) ([]*net.IPNet, []*net
 	// node already has the expected subnets annotated
 	// assume IP families match, i.e. no IPv6 config and node annotation IPv4
 	if expectedHostSubnets == currentHostSubnets {
-		klog.Infof("Allocated Subnets %v on Node %s", hostSubnets, node.Name)
+		klog.Infof("Allocated Subnets %v on Node %s for network %s", hostSubnets, node.Name, oc.nadInfo.NetName)
 		return hostSubnets, allocatedSubnets, nil
 	}
 
@@ -1092,7 +1170,9 @@ func (oc *Controller) allocateNodeSubnets(node *kapi.Node) ([]*net.IPNet, []*net
 }
 
 func (oc *Controller) addNode(node *kapi.Node) ([]*net.IPNet, error) {
-	oc.clearInitialNodeNetworkUnavailableCondition(node, nil)
+	if !oc.nadInfo.NotDefault {
+		oc.clearInitialNodeNetworkUnavailableCondition(node, nil)
+	}
 	hostSubnets, allocatedSubnets, err := oc.allocateNodeSubnets(node)
 	if err != nil {
 		return nil, err
@@ -1123,8 +1203,10 @@ func (oc *Controller) addNode(node *kapi.Node) ([]*net.IPNet, error) {
 		return nil, err
 	}
 
-	// delete stale chassis in SBDB if any
-	oc.deleteStaleNodeChassis(node)
+	if !oc.nadInfo.NotDefault {
+		// delete stale chassis in SBDB if any
+		oc.deleteStaleNodeChassis(node)
+	}
 
 	// If node annotation succeeds and subnets were allocated, update the used subnet count
 	if len(allocatedSubnets) > 0 {
@@ -1133,19 +1215,25 @@ func (oc *Controller) addNode(node *kapi.Node) ([]*net.IPNet, error) {
 				&oc.v4HostSubnetsUsed,
 				&oc.v6HostSubnetsUsed, true)
 		}
-		metrics.RecordSubnetUsage(oc.v4HostSubnetsUsed, oc.v6HostSubnetsUsed)
+		if !oc.nadInfo.NotDefault {
+			metrics.RecordSubnetUsage(oc.v4HostSubnetsUsed, oc.v6HostSubnetsUsed)
+		}
 	}
 	return hostSubnets, nil
 }
 
 // check if any existing chassis entries in the SBDB mismatches with node's chassisID annotation
 func (oc *Controller) checkNodeChassisMismatch(node *kapi.Node) (bool, error) {
+	if oc.nadInfo.NotDefault {
+		return false, nil
+	}
+
 	chassisID, err := util.ParseNodeChassisIDAnnotation(node)
 	if err != nil {
 		return false, nil
 	}
 
-	chassisList, err := libovsdbops.ListChassis(oc.sbClient)
+	chassisList, err := libovsdbops.ListChassis(oc.mc.sbClient)
 	if err != nil && err != libovsdbclient.ErrNotFound {
 		return false, fmt.Errorf("failed to get chassis list for node %s: error: %v", node.Name, err)
 	}
@@ -1164,14 +1252,18 @@ func (oc *Controller) checkNodeChassisMismatch(node *kapi.Node) (bool, error) {
 
 // delete stale chassis in SBDB if system-id of the specific node has changed.
 func (oc *Controller) deleteStaleNodeChassis(node *kapi.Node) {
+	if oc.nadInfo.NotDefault {
+		return
+	}
+
 	mismatch, err := oc.checkNodeChassisMismatch(node)
 	if err != nil {
 		klog.Errorf("Failed to check if there is any stale chassis for node %s in SBDB: %v", node.Name, err)
 	} else if mismatch {
 		klog.V(5).Infof("Node %s now has a new chassis ID, delete its stale chassis in SBDB", node.Name)
-		if err = libovsdbops.DeleteNodeChassis(oc.sbClient, node.Name); err != nil {
+		if err = libovsdbops.DeleteNodeChassis(oc.mc.sbClient, node.Name); err != nil {
 			// Send an event and Log on failure
-			oc.recorder.Eventf(node, kapi.EventTypeWarning, "ErrorMismatchChassis",
+			oc.mc.recorder.Eventf(node, kapi.EventTypeWarning, "ErrorMismatchChassis",
 				"Node %s is now with a new chassis ID. Its stale chassis entry is still in the SBDB",
 				node.Name)
 			klog.Errorf("Node %s is now with a new chassis ID. Its stale chassis entry is still in the SBDB", node.Name)
@@ -1191,13 +1283,14 @@ func (oc *Controller) deleteNodeHostSubnet(nodeName string, subnet *net.IPNet) e
 // deleteNodeLogicalNetwork removes the logical switch and logical router port associated with the node
 func (oc *Controller) deleteNodeLogicalNetwork(nodeName string) error {
 	// Remove switch to lb associations from the LBCache before removing the switch
-	lbCache, err := ovnlb.GetLBCache(oc.nbClient)
+	lbCache, err := ovnlb.GetLBCache(oc.mc.nbClient)
 	if err != nil {
 		return fmt.Errorf("failed to get load_balancer cache for node %s: %v", nodeName, err)
 	}
 	lbCache.RemoveSwitch(nodeName)
 	// Remove the logical switch associated with the node
-	logicalRouterPortName := types.RouterToSwitchPrefix + nodeName
+	switchName := oc.nadInfo.Prefix + nodeName
+	logicalRouterPortName := types.RouterToSwitchPrefix + switchName
 	clusterRouterModel := nbdb.LogicalRouter{}
 	nodeLogicalRouterPort := nbdb.LogicalRouterPort{
 		Name: logicalRouterPortName,
@@ -1223,8 +1316,9 @@ func (oc *Controller) deleteNodeLogicalNetwork(nodeName string) error {
 			},
 		},
 	}
-	if err := oc.modelClient.Delete(opModels...); err != nil {
-		return fmt.Errorf("failed to delete logical switch and logical router port associated with node: %s, error: %v", nodeName, err)
+	if err := oc.mc.modelClient.Delete(opModels...); err != nil {
+		return fmt.Errorf("failed to delete logical switch and logical router port associated with node: %s on network %s, error: %v",
+			nodeName, oc.nadInfo.NetName, err)
 	}
 	return nil
 }
@@ -1238,23 +1332,27 @@ func (oc *Controller) deleteNode(nodeName string, hostSubnets []*net.IPNet) {
 			util.UpdateUsedHostSubnetsCount(hostSubnet, &oc.v4HostSubnetsUsed, &oc.v6HostSubnetsUsed, false)
 		}
 	}
-	// update metrics
-	metrics.RecordSubnetUsage(oc.v4HostSubnetsUsed, oc.v6HostSubnetsUsed)
+	if !oc.nadInfo.NotDefault {
+		// update metrics
+		metrics.RecordSubnetUsage(oc.v4HostSubnetsUsed, oc.v6HostSubnetsUsed)
+	}
 
 	if err := oc.deleteNodeLogicalNetwork(nodeName); err != nil {
 		klog.Errorf("Error deleting node %s logical network: %v", nodeName, err)
 	}
 
-	if err := oc.gatewayCleanup(nodeName); err != nil {
-		klog.Errorf("Failed to clean up node %s gateway: (%v)", nodeName, err)
-	}
+	if !oc.nadInfo.NotDefault {
+		if err := oc.gatewayCleanup(nodeName); err != nil {
+			klog.Errorf("Failed to clean up node %s gateway: (%v)", nodeName, err)
+		}
 
-	if err := oc.joinSwIPManager.ReleaseJoinLRPIPs(nodeName); err != nil {
-		klog.Errorf("Failed to clean up GR LRP IPs for node %s: %v", nodeName, err)
-	}
+		if err := oc.joinSwIPManager.ReleaseJoinLRPIPs(nodeName); err != nil {
+			klog.Errorf("Failed to clean up GR LRP IPs for node %s: %v", nodeName, err)
+		}
 
-	if err := libovsdbops.DeleteNodeChassis(oc.sbClient, nodeName); err != nil {
-		klog.Errorf("Failed to remove the chassis associated with node %s in the OVN SB Chassis table: %v", nodeName, err)
+		if err := libovsdbops.DeleteNodeChassis(oc.mc.sbClient, nodeName); err != nil {
+			klog.Errorf("Failed to remove the chassis associated with node %s in the OVN SB Chassis table: %v", nodeName, err)
+		}
 	}
 }
 
@@ -1279,7 +1377,7 @@ func (oc *Controller) clearInitialNodeNetworkUnavailableCondition(origNode, newN
 	resultErr := retry.RetryOnConflict(retry.DefaultBackoff, func() error {
 		var err error
 
-		oldNode, err := oc.kube.GetNode(origNode.Name)
+		oldNode, err := oc.mc.kube.GetNode(origNode.Name)
 		if err != nil {
 			return err
 		}
@@ -1294,7 +1392,7 @@ func (oc *Controller) clearInitialNodeNetworkUnavailableCondition(origNode, newN
 					condition.Reason = "RouteCreated"
 					condition.Message = "ovn-kube cleared kubelet-set NoRouteCreated"
 					condition.LastTransitionTime = metav1.Now()
-					if err = oc.kube.UpdateNodeStatus(node); err == nil {
+					if err = oc.mc.kube.UpdateNodeStatus(node); err == nil {
 						cleared = true
 					}
 				}
@@ -1313,8 +1411,12 @@ func (oc *Controller) clearInitialNodeNetworkUnavailableCondition(origNode, newN
 // this is the worker function that does the periodic sync of nodes from kube API
 // and sbdb and deletes chassis that are stale
 func (oc *Controller) syncNodesPeriodic() {
+	if oc.nadInfo.NotDefault {
+		return
+	}
+
 	//node names is a slice of all node names
-	nodes, err := oc.kube.GetNodes()
+	nodes, err := oc.mc.kube.GetNodes()
 	if err != nil {
 		klog.Errorf("Error getting existing nodes from kube API: %v", err)
 		return
@@ -1326,7 +1428,7 @@ func (oc *Controller) syncNodesPeriodic() {
 		nodeNames = append(nodeNames, node.Name)
 	}
 
-	chassisList, err := libovsdbops.ListChassis(oc.sbClient)
+	chassisList, err := libovsdbops.ListChassis(oc.mc.sbClient)
 	if err != nil {
 		klog.Errorf("Failed to get chassis list: error: %v", err)
 		return
@@ -1347,7 +1449,7 @@ func (oc *Controller) syncNodesPeriodic() {
 		staleChassisNames = append(staleChassisNames, v)
 	}
 
-	if err = libovsdbops.DeleteChassis(oc.sbClient, staleChassisNames...); err != nil {
+	if err = libovsdbops.DeleteChassis(oc.mc.sbClient, staleChassisNames...); err != nil {
 		klog.Errorf("Failed Deleting chassis %v error: %v", chassisHostNameMap, err)
 		return
 	}
@@ -1367,8 +1469,8 @@ func (oc *Controller) syncNodes(nodes []interface{}) {
 		}
 		foundNodes.Insert(node.Name)
 
-		hostSubnets, _ := util.ParseNodeHostSubnetAnnotation(node, types.DefaultNetworkName)
-		klog.V(5).Infof("Node %s contains subnets: %v", node.Name, hostSubnets)
+		hostSubnets, _ := util.ParseNodeHostSubnetAnnotation(node, oc.nadInfo.NetName)
+		klog.V(5).Infof("Node %s contains subnets: %v for network %s", node.Name, hostSubnets, oc.nadInfo.NetName)
 		for _, hostSubnet := range hostSubnets {
 			err := oc.masterSubnetAllocator.MarkAllocatedNetwork(hostSubnet)
 			if err != nil {
@@ -1383,31 +1485,45 @@ func (oc *Controller) syncNodes(nodes []interface{}) {
 			klog.Errorf("Failed to get join switch port IP address for node %s: %v", node.Name, err)
 		}
 	}
-	metrics.RecordSubnetUsage(oc.v4HostSubnetsUsed, oc.v6HostSubnetsUsed)
 
 	chassisHostNames := sets.NewString()
+	staleChassis := sets.NewString()
+	if !oc.nadInfo.NotDefault {
+		metrics.RecordSubnetUsage(oc.v4HostSubnetsUsed, oc.v6HostSubnetsUsed)
 
-	chassisList, err := libovsdbops.ListChassis(oc.sbClient)
-	if err != nil {
-		klog.Errorf("Failed to get chassis list: error: %v", err)
-		return
+		chassisList, err := libovsdbops.ListChassis(oc.mc.sbClient)
+		if err != nil {
+			klog.Errorf("Failed to get chassis list: error: %v", err)
+			return
+		}
+
+		for _, chassis := range chassisList {
+			chassisHostNames.Insert(chassis.Hostname)
+		}
+
+		// Find difference between existing chassis and found nodes
+		staleChassis = chassisHostNames.Difference(foundNodes)
 	}
 
-	for _, chassis := range chassisList {
-		chassisHostNames.Insert(chassis.Hostname)
-	}
-
-	// Find difference between existing chassis and found nodes
-	staleChassis := chassisHostNames.Difference(foundNodes)
-
-	nodeSwitches, err := libovsdbops.FindSwitchesWithOtherConfig(oc.nbClient)
+	nodeSwitches, err := libovsdbops.FindSwitchesWithOtherConfig(oc.mc.nbClient)
 	if err != nil {
 		klog.Errorf("Failed to get node logical switches which have other-config set error: %v", err)
 		return
 	}
 
 	for _, nodeSwitch := range nodeSwitches {
-		if foundNodes.Has(nodeSwitch.Name) {
+		netName, ok := nodeSwitch.ExternalIDs["network_name"]
+		if oc.nadInfo.NotDefault {
+			if !ok || netName != oc.nadInfo.NetName {
+				continue
+			}
+		} else {
+			if ok {
+				continue
+			}
+		}
+		nodeName := strings.TrimPrefix(nodeSwitch.Name, oc.nadInfo.Prefix)
+		if foundNodes.Has(nodeName) {
 			// node still exists, no cleanup to do
 			continue
 		}
@@ -1436,13 +1552,15 @@ func (oc *Controller) syncNodes(nodes []interface{}) {
 			continue
 		}
 
-		oc.deleteNode(nodeSwitch.Name, subnets)
+		oc.deleteNode(nodeName, subnets)
 		//remove the node from the chassis map so we don't delete it twice
-		staleChassis.Delete(nodeSwitch.Name)
+		staleChassis.Delete(nodeName)
 	}
 
-	if err := libovsdbops.DeleteNodeChassis(oc.sbClient, staleChassis.List()...); err != nil {
-		klog.Errorf("Failed Deleting chassis %v error: %v", staleChassis.List(), err)
-		return
+	if !oc.nadInfo.NotDefault {
+		if err := libovsdbops.DeleteNodeChassis(oc.mc.sbClient, staleChassis.List()...); err != nil {
+			klog.Errorf("Failed Deleting chassis %v error: %v", staleChassis.List(), err)
+			return
+		}
 	}
 }

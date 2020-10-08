@@ -68,7 +68,7 @@ func (oc *Controller) gatewayInit(nodeName string, clusterIPSubnet []*net.IPNet,
 		},
 	}
 
-	if _, err := oc.modelClient.CreateOrUpdate(opModels...); err != nil {
+	if _, err := oc.mc.modelClient.CreateOrUpdate(opModels...); err != nil {
 		return fmt.Errorf("failed to create logical router %v, err: %v", gatewayRouter, err)
 	}
 
@@ -102,7 +102,7 @@ func (oc *Controller) gatewayInit(nodeName string, clusterIPSubnet []*net.IPNet,
 		},
 	}
 
-	if _, err := oc.modelClient.CreateOrUpdate(opModels...); err != nil {
+	if _, err := oc.mc.modelClient.CreateOrUpdate(opModels...); err != nil {
 		return fmt.Errorf("failed to add port %q to logical switch %q, err: %v", gwSwitchPort, types.OVNJoinSwitch, err)
 	}
 
@@ -138,7 +138,7 @@ func (oc *Controller) gatewayInit(nodeName string, clusterIPSubnet []*net.IPNet,
 		},
 	}
 
-	if _, err := oc.modelClient.CreateOrUpdate(opModels...); err != nil {
+	if _, err := oc.mc.modelClient.CreateOrUpdate(opModels...); err != nil {
 		return fmt.Errorf("failed to add logical router port %q for gateway router %s, err: %v", gwRouterPort, gatewayRouter, err)
 	}
 
@@ -159,7 +159,7 @@ func (oc *Controller) gatewayInit(nodeName string, clusterIPSubnet []*net.IPNet,
 		}
 
 		tmpRouters := []nbdb.LogicalRouter{}
-		if err := oc.nbClient.WhereCache(func(lr *nbdb.LogicalRouter) bool { return lr.Name == gatewayRouter }).List(ctx, &tmpRouters); err != nil {
+		if err := oc.mc.nbClient.WhereCache(func(lr *nbdb.LogicalRouter) bool { return lr.Name == gatewayRouter }).List(ctx, &tmpRouters); err != nil {
 			return fmt.Errorf("unable to list logical router: %s, err: %v", gatewayRouter, err)
 		}
 		if len(tmpRouters) != 1 {
@@ -191,7 +191,7 @@ func (oc *Controller) gatewayInit(nodeName string, clusterIPSubnet []*net.IPNet,
 				ErrNotFound: true,
 			},
 		}
-		if _, err := oc.modelClient.CreateOrUpdate(opModels...); err != nil {
+		if _, err := oc.mc.modelClient.CreateOrUpdate(opModels...); err != nil {
 			return fmt.Errorf("failed to add a static route in GR %s with distributed router as the nexthop, err: %v", gatewayRouter, err)
 		}
 	}
@@ -260,7 +260,7 @@ func (oc *Controller) gatewayInit(nodeName string, clusterIPSubnet []*net.IPNet,
 				ErrNotFound: true,
 			},
 		}
-		if _, err := oc.modelClient.CreateOrUpdate(opModels...); err != nil {
+		if _, err := oc.mc.modelClient.CreateOrUpdate(opModels...); err != nil {
 			return fmt.Errorf("failed to add a static route in GR %s with physical gateway as the default next hop, err: %v", gatewayRouter, err)
 		}
 	}
@@ -301,7 +301,7 @@ func (oc *Controller) gatewayInit(nodeName string, clusterIPSubnet []*net.IPNet,
 				ErrNotFound: true,
 			},
 		}
-		if _, err := oc.modelClient.CreateOrUpdate(opModels...); err != nil {
+		if _, err := oc.mc.modelClient.CreateOrUpdate(opModels...); err != nil {
 			return fmt.Errorf("failed to add a static route in GR %s with physical gateway as the default next hop, err: %v", gatewayRouter, err)
 		}
 	}
@@ -353,7 +353,7 @@ func (oc *Controller) gatewayInit(nodeName string, clusterIPSubnet []*net.IPNet,
 					ErrNotFound: true,
 				},
 			}
-			if _, err := oc.modelClient.CreateOrUpdate(opModels...); err != nil {
+			if _, err := oc.mc.modelClient.CreateOrUpdate(opModels...); err != nil {
 				return fmt.Errorf("failed to add a static route in GR %s with physical gateway as the default next hop, err: %v", gatewayRouter, err)
 			}
 		} else if config.Gateway.Mode == config.GatewayModeLocal {
@@ -382,7 +382,7 @@ func (oc *Controller) gatewayInit(nodeName string, clusterIPSubnet []*net.IPNet,
 					},
 				},
 			}
-			if err := oc.modelClient.Delete(opModels...); err != nil {
+			if err := oc.mc.modelClient.Delete(opModels...); err != nil {
 				return fmt.Errorf("failed to delete static route for nexthop: %s, prefix: %s, err: %v", gwLRPIP[0].String(), hostSubnet.String(), err)
 			}
 		}
@@ -409,7 +409,7 @@ func (oc *Controller) gatewayInit(nodeName string, clusterIPSubnet []*net.IPNet,
 			nat = libovsdbops.BuildRouterSNAT(&externalIP[0], entry, "", nil)
 			nats = append(nats, nat)
 		}
-		err := libovsdbops.AddOrUpdateNatsToRouter(oc.nbClient, gatewayRouter, nats...)
+		err := libovsdbops.AddOrUpdateNatsToRouter(oc.mc.nbClient, gatewayRouter, nats...)
 		if err != nil {
 			return fmt.Errorf("failed to update SNAT rule for pod on router %s error: %v", gatewayRouter, err)
 		}
@@ -419,7 +419,7 @@ func (oc *Controller) gatewayInit(nodeName string, clusterIPSubnet []*net.IPNet,
 			nat = libovsdbops.BuildRouterSNAT(nil, logicalSubnet, "", nil)
 			nats = append(nats, nat)
 		}
-		err := libovsdbops.DeleteNatsFromRouter(oc.nbClient, gatewayRouter, nats...)
+		err := libovsdbops.DeleteNatsFromRouter(oc.mc.nbClient, gatewayRouter, nats...)
 		if err != nil {
 			return fmt.Errorf("failed to delete GW SNAT rule for pod on router %s error: %v", gatewayRouter, err)
 		}
@@ -443,7 +443,7 @@ func (oc *Controller) addExternalSwitch(prefix, interfaceID, nodeName, gatewayRo
 			ModelPredicate: func(ls *nbdb.LogicalSwitch) bool { return ls.Name == externalSwitch },
 		},
 	}
-	if _, err := oc.modelClient.CreateOrUpdate(opModels...); err != nil {
+	if _, err := oc.mc.modelClient.CreateOrUpdate(opModels...); err != nil {
 		return fmt.Errorf("failed to create logical switch %s, err: %v", externalSwitch, err)
 	}
 
@@ -485,7 +485,7 @@ func (oc *Controller) addExternalSwitch(prefix, interfaceID, nodeName, gatewayRo
 			ErrNotFound: true,
 		},
 	}
-	if _, err := oc.modelClient.CreateOrUpdate(opModels...); err != nil {
+	if _, err := oc.mc.modelClient.CreateOrUpdate(opModels...); err != nil {
 		return fmt.Errorf("failed to add logical switch port: %s to switch %s, err: %v", interfaceID, externalSwitch, err)
 	}
 
@@ -528,7 +528,7 @@ func (oc *Controller) addExternalSwitch(prefix, interfaceID, nodeName, gatewayRo
 			ErrNotFound: true,
 		},
 	}
-	if _, err := oc.modelClient.CreateOrUpdate(opModels...); err != nil {
+	if _, err := oc.mc.modelClient.CreateOrUpdate(opModels...); err != nil {
 		return fmt.Errorf("failed to add logical router port: %s to router %s, err: %v", externalRouterPort, gatewayRouter, err)
 	}
 
@@ -564,7 +564,7 @@ func (oc *Controller) addExternalSwitch(prefix, interfaceID, nodeName, gatewayRo
 			ErrNotFound: true,
 		},
 	}
-	if _, err := oc.modelClient.CreateOrUpdate(opModels...); err != nil {
+	if _, err := oc.mc.modelClient.CreateOrUpdate(opModels...); err != nil {
 		return fmt.Errorf("failed to add logical switch port: %s to switch %s, err: %v", externalSwitchPortToRouter, externalSwitch, err)
 	}
 	return nil
@@ -688,7 +688,7 @@ func (oc *Controller) findPolicyBasedRoutes(priority string) ([]nbdb.LogicalRout
 	logicalRouterPolicyResult := []nbdb.LogicalRouterPolicy{}
 	ctx, cancel := context.WithTimeout(context.Background(), types.OVSDBTimeout)
 	defer cancel()
-	err := oc.nbClient.WhereCache(func(lrp *nbdb.LogicalRouterPolicy) bool {
+	err := oc.mc.nbClient.WhereCache(func(lrp *nbdb.LogicalRouterPolicy) bool {
 		return lrp.Priority == intPriority
 	}).List(ctx, &logicalRouterPolicyResult)
 	if err != nil {
@@ -732,7 +732,7 @@ func (oc *Controller) createPolicyBasedRoutes(match, priority, nexthops string) 
 			ErrNotFound: true,
 		},
 	}
-	if _, err := oc.modelClient.CreateOrUpdate(opModels...); err != nil {
+	if _, err := oc.mc.modelClient.CreateOrUpdate(opModels...); err != nil {
 		return fmt.Errorf("unable to create policy based routes, err: %v", err)
 	}
 	return nil
@@ -757,7 +757,7 @@ func (oc *Controller) deletePolicyBasedRoutes(policyID, priority string) error {
 			},
 		},
 	}
-	if err := oc.modelClient.Delete(opModels...); err != nil {
+	if err := oc.mc.modelClient.Delete(opModels...); err != nil {
 		return fmt.Errorf("unable to delete logical router policy, err: %v", err)
 	}
 	return nil

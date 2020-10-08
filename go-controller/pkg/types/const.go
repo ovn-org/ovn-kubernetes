@@ -46,10 +46,6 @@ const (
 
 	NodeLocalSwitch = "node_local_switch"
 
-	// ACL directions
-	DirectionToLPort   = "to-lport"
-	DirectionFromLPort = "from-lport"
-
 	// ACL Priorities
 
 	// Default routed multicast allow acl rule priority

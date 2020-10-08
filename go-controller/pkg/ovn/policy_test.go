@@ -3,6 +3,7 @@ package ovn
 import (
 	"context"
 	"fmt"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
 	"sort"
 	"strconv"
 	"strings"
@@ -155,19 +156,21 @@ func (n kNetworkPolicy) getDefaultDenyData(networkPolicy *knet.NetworkPolicy, po
 		lsps = append(lsps, &nbdb.LogicalSwitchPort{UUID: uuid})
 	}
 
-	egressDenyPG := libovsdbops.BuildPortGroup(
+	egressDenyPG := buildPortGroup(
 		pgHash+"_"+egressDenyPG,
 		pgHash+"_"+egressDenyPG,
 		lsps,
 		[]*nbdb.ACL{egressDenyACL, egressAllowACL},
+		util.NetNameInfo{types.DefaultNetworkName, "", false},
 	)
 	egressDenyPG.UUID = libovsdbops.BuildNamedUUID()
 
-	ingressDenyPG := libovsdbops.BuildPortGroup(
+	ingressDenyPG := buildPortGroup(
 		pgHash+"_"+ingressDenyPG,
 		pgHash+"_"+ingressDenyPG,
 		lsps,
 		[]*nbdb.ACL{ingressDenyACL, ingressAllowACL},
+		util.NetNameInfo{types.DefaultNetworkName, "", false},
 	)
 	ingressDenyPG.UUID = libovsdbops.BuildNamedUUID()
 
@@ -292,11 +295,12 @@ func (n kNetworkPolicy) getPolicyData(networkPolicy *knet.NetworkPolicy, policyP
 		lsps = append(lsps, &nbdb.LogicalSwitchPort{UUID: uuid})
 	}
 
-	pg := libovsdbops.BuildPortGroup(
+	pg := buildPortGroup(
 		pgHash,
 		pgName,
 		lsps,
 		acls,
+		util.NetNameInfo{types.DefaultNetworkName, "", false},
 	)
 	pg.UUID = libovsdbops.BuildNamedUUID()
 
@@ -401,11 +405,12 @@ func (p multicastPolicy) getMulticastPolicyExpectedData(ns string, ports []strin
 		lsps = append(lsps, &nbdb.LogicalSwitchPort{UUID: uuid})
 	}
 
-	pg := libovsdbops.BuildPortGroup(
+	pg := buildPortGroup(
 		hashedPortGroup(ns),
 		ns,
 		lsps,
 		[]*nbdb.ACL{egressACL, ingressACL},
+		util.NetNameInfo{types.DefaultNetworkName, "", false},
 	)
 	pg.UUID = libovsdbops.BuildNamedUUID()
 
@@ -2086,7 +2091,8 @@ var _ = ginkgo.Describe("OVN NetworkPolicy Low-Level Operations", func() {
 			},
 		}
 
-		gp := newGressPolicy(knet.PolicyTypeIngress, 0, policy.Namespace, policy.Name)
+		netAttachInfo := &util.NetAttachDefInfo{NetNameInfo: util.NetNameInfo{NetName: types.DefaultNetworkName, Prefix: "", NotDefault: false}}
+		gp := newGressPolicy(knet.PolicyTypeIngress, 0, policy.Namespace, policy.Name, netAttachInfo)
 		err := gp.ensurePeerAddressSet(asFactory)
 		gomega.Expect(err).NotTo(gomega.HaveOccurred())
 		asName := gp.peerAddressSet.GetName()
@@ -2185,7 +2191,7 @@ var _ = ginkgo.Describe("OVN NetworkPolicy Low-Level Operations", func() {
 						Match:     "ip4.src==" + ipv4MgmtIP,
 						Priority:  types.DefaultAllowPriority,
 						Action:    "allow-related",
-						Direction: types.DirectionToLPort,
+						Direction: nbdb.ACLDirectionToLport,
 					},
 				},
 			}
@@ -2265,7 +2271,7 @@ func generateAllowFromNodeData(nodeName, mgmtIP string) (nodeSwitch *nbdb.Logica
 
 	match := fmt.Sprintf("%s.src==%s", ipFamily, mgmtIP)
 
-	nodeACL := libovsdbops.BuildACL("", types.DirectionToLPort, types.DefaultAllowPriority, match, "allow-related", "", "", false, nil)
+	nodeACL := libovsdbops.BuildACL("", nbdb.ACLDirectionToLport, types.DefaultAllowPriority, match, "allow-related", "", "", false, nil)
 	nodeACL.UUID = libovsdbops.BuildNamedUUID()
 
 	testNode := &nbdb.LogicalSwitch{
