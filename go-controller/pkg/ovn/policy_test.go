@@ -3,11 +3,10 @@ package ovn
 import (
 	"context"
 	"fmt"
-	"sort"
-	"strings"
-
 	. "github.com/onsi/ginkgo"
 	. "github.com/onsi/gomega"
+	"sort"
+	"strings"
 
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
 	ovntest "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/testing"
@@ -440,7 +439,6 @@ var _ = Describe("OVN NetworkPolicy Operations", func() {
 					})
 
 				nPodTest.baseCmds(fExec)
-				nPodTest.addPodDenyMcast(fExec)
 				npTest.addNamespaceSelectorCmds(fExec, networkPolicy, false)
 				npTest.addLocalPodCmds(fExec, networkPolicy)
 
@@ -539,7 +537,6 @@ var _ = Describe("OVN NetworkPolicy Operations", func() {
 					})
 
 				nPodTest.baseCmds(fExec)
-				nPodTest.addPodDenyMcast(fExec)
 				npTest.addNamespaceSelectorCmds(fExec, networkPolicy, false)
 
 				fakeOvn.start(ctx,
@@ -632,7 +629,6 @@ var _ = Describe("OVN NetworkPolicy Operations", func() {
 				)
 
 				nPodTest.baseCmds(fExec)
-				nPodTest.addPodDenyMcast(fExec)
 				npTest.baseCmds(fExec, networkPolicy)
 				npTest.addLocalPodCmds(fExec, networkPolicy)
 
@@ -722,7 +718,6 @@ var _ = Describe("OVN NetworkPolicy Operations", func() {
 					})
 
 				nPodTest.baseCmds(fExec)
-				nPodTest.addPodDenyMcast(fExec)
 				npTest.addNamespaceSelectorCmds(fExec, networkPolicy, true)
 				npTest.addLocalPodCmds(fExec, networkPolicy)
 
@@ -908,7 +903,6 @@ var _ = Describe("OVN NetworkPolicy Operations", func() {
 					})
 
 				nPodTest.baseCmds(fExec)
-				nPodTest.addPodDenyMcast(fExec)
 				npTest.addNamespaceSelectorCmds(fExec, networkPolicy, false)
 				npTest.addLocalPodCmds(fExec, networkPolicy)
 
@@ -942,7 +936,6 @@ var _ = Describe("OVN NetworkPolicy Operations", func() {
 				Expect(err).NotTo(HaveOccurred())
 				Eventually(fExec.CalledMatchesExpected).Should(BeTrue(), fExec.ErrorDesc)
 
-				nPodTest.delCmds(fExec)
 				npTest.delPodCmds(fExec, networkPolicy)
 
 				err = fakeOvn.fakeClient.CoreV1().Pods(nPodTest.namespace).Delete(context.TODO(), nPodTest.podName, *metav1.NewDeleteOptions(0))
@@ -1016,7 +1009,6 @@ var _ = Describe("OVN NetworkPolicy Operations", func() {
 					})
 
 				nPodTest.baseCmds(fExec)
-				nPodTest.addPodDenyMcast(fExec)
 				npTest.addNamespaceSelectorCmds(fExec, networkPolicy, false)
 
 				fakeOvn.start(ctx,
@@ -1051,8 +1043,6 @@ var _ = Describe("OVN NetworkPolicy Operations", func() {
 				_, err := fakeOvn.fakeClient.NetworkingV1().NetworkPolicies(networkPolicy.Namespace).Get(context.TODO(), networkPolicy.Name, metav1.GetOptions{})
 				Expect(err).NotTo(HaveOccurred())
 				Eventually(fExec.CalledMatchesExpected).Should(BeTrue(), fExec.ErrorDesc)
-
-				nPodTest.delCmds(fExec)
 
 				err = fakeOvn.fakeClient.CoreV1().Pods(nPodTest.namespace).Delete(context.TODO(), nPodTest.podName, *metav1.NewDeleteOptions(0))
 				Expect(err).NotTo(HaveOccurred())
@@ -1116,7 +1106,6 @@ var _ = Describe("OVN NetworkPolicy Operations", func() {
 					})
 
 				nPodTest.baseCmds(fExec)
-				nPodTest.addPodDenyMcast(fExec)
 				npTest.addNamespaceSelectorCmds(fExec, networkPolicy, false)
 				npTest.addLocalPodCmds(fExec, networkPolicy)
 
@@ -1221,7 +1210,6 @@ var _ = Describe("OVN NetworkPolicy Operations", func() {
 				)
 
 				nPodTest.baseCmds(fExec)
-				nPodTest.addPodDenyMcast(fExec)
 				fakeOvn.start(ctx,
 					&v1.NamespaceList{
 						Items: []v1.Namespace{
@@ -1300,7 +1288,6 @@ var _ = Describe("OVN NetworkPolicy Operations", func() {
 				Eventually(fExec.CalledMatchesExpected).Should(BeTrue(), fExec.ErrorDesc)
 
 				nPodTest.populateLogicalSwitchCache(fakeOvn)
-				nPodTest.addPodDenyMcast(fExec)
 
 				// The pod should be added to the multicast allow group.
 				mcastPolicy.addPodCmds(fExec, namespace1.Name)
@@ -1314,9 +1301,6 @@ var _ = Describe("OVN NetworkPolicy Operations", func() {
 
 				// Delete the pod from the namespace.
 				mcastPolicy.delPodCmds(fExec, namespace1.Name)
-				// The pod should be removed from the multicasts default deny
-				// group and from the multicast allow group.
-				nPodTest.delCmds(fExec)
 
 				err = fakeOvn.fakeClient.CoreV1().Pods(nPodTest.namespace).Delete(context.TODO(),
 					nPodTest.podName, *metav1.NewDeleteOptions(0))

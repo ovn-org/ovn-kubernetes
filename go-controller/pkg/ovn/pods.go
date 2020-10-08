@@ -86,13 +86,6 @@ func (oc *Controller) deleteLogicalPort(pod *kapi.Pod) {
 
 	// FIXME: if any of these steps fails we need to stop and try again later...
 
-	// Remove the port from the default deny multicast policy
-	if oc.multicastSupport {
-		if err := podDeleteDefaultDenyMulticastPolicy(portInfo); err != nil {
-			klog.Errorf(err.Error())
-		}
-	}
-
 	if err := oc.deletePodFromNamespace(pod.Namespace, portInfo); err != nil {
 		klog.Errorf(err.Error())
 	}
@@ -458,13 +451,6 @@ func (oc *Controller) addLogicalPort(pod *kapi.Pod) (err error) {
 	// Wait for namespace to exist, no calls after this should ever use waitForNamespaceLocked
 	if err = oc.addPodToNamespace(pod.Namespace, portInfo); err != nil {
 		return err
-	}
-
-	// Enforce the default deny multicast policy
-	if oc.multicastSupport {
-		if err = podAddDefaultDenyMulticastPolicy(portInfo); err != nil {
-			return err
-		}
 	}
 
 	// add src-ip routes to GR if external gw annotation is set
