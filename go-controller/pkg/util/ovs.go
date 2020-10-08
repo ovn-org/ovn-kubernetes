@@ -827,20 +827,21 @@ func DetectSCTPSupport() (bool, error) {
 // DetermineOVNTopoVersionFromOVN determines what OVN Topology version is being used
 // If "k8s-ovn-topo-version" key in external_ids column does not exist, it is prior to OVN topology versioning
 // and therefore set version number to OvnCurrentTopologyVersion
-func DetermineOVNTopoVersionFromOVN() (int, error) {
+func DetermineOVNTopoVersionFromOVN(netPrefix string) (int, error) {
 	ver := 0
+	ovnClusterRouter := netPrefix + types.OVNClusterRouter
 	stdout, stderr, err := RunOVNNbctl("--data=bare", "--no-headings", "--columns=name", "find", "logical_router",
-		fmt.Sprintf("name=%s", types.OVNClusterRouter))
+		fmt.Sprintf("name=%s", ovnClusterRouter))
 	if err != nil {
 		return ver, fmt.Errorf("failed in retrieving %s to determine the current version of OVN logical topology: "+
-			"stderr: %q, error: %v", types.OVNClusterRouter, stderr, err)
+			"stderr: %q, error: %v", ovnClusterRouter, stderr, err)
 	}
 	if len(stdout) == 0 {
 		// no OVNClusterRouter exists, DB is empty, nothing to upgrade
 		return math.MaxInt32, nil
 	}
 
-	stdout, stderr, err = RunOVNNbctl("--if-exists", "get", "logical_router", types.OVNClusterRouter,
+	stdout, stderr, err = RunOVNNbctl("--if-exists", "get", "logical_router", ovnClusterRouter,
 		"external_ids:k8s-ovn-topo-version")
 	if err != nil {
 		return 0, fmt.Errorf("failed to determine the current version of OVN logical topology: stderr: %q, error: %v",

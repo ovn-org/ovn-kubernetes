@@ -51,6 +51,10 @@ func (oc *Controller) syncNamespaces(namespaces []interface{}) {
 }
 
 func (oc *Controller) addPodToNamespace(ns string, portInfo *lpInfo) error {
+	if oc.nadInfo.NotDefault {
+		return nil
+	}
+
 	nsInfo, err := oc.waitForNamespaceLocked(ns)
 	if err != nil {
 		return err
@@ -72,7 +76,7 @@ func (oc *Controller) addPodToNamespace(ns string, portInfo *lpInfo) error {
 	// If multicast is allowed and enabled for the namespace, add the port
 	// to the allow policy.
 	if oc.multicastSupport && nsInfo.multicastEnabled {
-		if err := podAddAllowMulticastPolicy(oc.ovnNBClient, ns, portInfo); err != nil {
+		if err := podAddAllowMulticastPolicy(oc.mc.ovnNBClient, ns, portInfo); err != nil {
 			return err
 		}
 	}
@@ -95,7 +99,7 @@ func (oc *Controller) deletePodFromNamespace(ns string, portInfo *lpInfo) error 
 
 	// Remove the port from the multicast allow policy.
 	if oc.multicastSupport && nsInfo.multicastEnabled {
-		if err := podDeleteAllowMulticastPolicy(oc.ovnNBClient, ns, portInfo); err != nil {
+		if err := podDeleteAllowMulticastPolicy(oc.mc.ovnNBClient, ns, portInfo); err != nil {
 			return err
 		}
 	}
@@ -131,7 +135,7 @@ func (oc *Controller) multicastUpdateNamespace(ns *kapi.Namespace, nsInfo *names
 	if enabled {
 		err = oc.createMulticastAllowPolicy(ns.Name, nsInfo)
 	} else {
-		err = deleteMulticastAllowPolicy(oc.ovnNBClient, ns.Name, nsInfo)
+		err = deleteMulticastAllowPolicy(oc.mc.ovnNBClient, ns.Name, nsInfo)
 	}
 	if err != nil {
 		klog.Errorf(err.Error())
@@ -144,7 +148,7 @@ func (oc *Controller) multicastUpdateNamespace(ns *kapi.Namespace, nsInfo *names
 func (oc *Controller) multicastDeleteNamespace(ns *kapi.Namespace, nsInfo *namespaceInfo) {
 	if nsInfo.multicastEnabled {
 		nsInfo.multicastEnabled = false
-		if err := deleteMulticastAllowPolicy(oc.ovnNBClient, ns.Name, nsInfo); err != nil {
+		if err := deleteMulticastAllowPolicy(oc.mc.ovnNBClient, ns.Name, nsInfo); err != nil {
 			klog.Errorf(err.Error())
 		}
 	}
@@ -246,12 +250,12 @@ func (oc *Controller) updateNamespace(old, newer *kapi.Namespace) {
 		// if old gw annotation was empty, new one must not be empty, so we should remove any per pod SNAT
 		if oldGWAnnotation == "" {
 			if config.Gateway.DisableSNATMultipleGWs && (len(nsInfo.routingExternalGWs.gws) != 0 || len(nsInfo.routingExternalPodGWs) != 0) {
-				existingPods, err := oc.watchFactory.GetPods(old.Name)
+				existingPods, err := oc.mc.watchFactory.GetPods(old.Name)
 				if err != nil {
 					klog.Errorf("Failed to get all the pods (%v)", err)
 				}
 				for _, pod := range existingPods {
-					logicalPort := podLogicalPortName(pod)
+					logicalPort := podLogicalPortName(pod, oc.nadInfo.Prefix)
 					portInfo, err := oc.logicalPortCache.get(logicalPort)
 					if err != nil {
 						klog.Warningf("Unable to get port %s in cache for SNAT rule removal", logicalPort)
@@ -275,12 +279,12 @@ func (oc *Controller) updateNamespace(old, newer *kapi.Namespace) {
 		// if new annotation is empty, exgws were removed, may need to add SNAT per pod
 		// check if there are any pod gateways serving this namespace as well
 		if gwAnnotation == "" && len(nsInfo.routingExternalPodGWs) == 0 && config.Gateway.DisableSNATMultipleGWs {
-			existingPods, err := oc.watchFactory.GetPods(old.Name)
+			existingPods, err := oc.mc.watchFactory.GetPods(old.Name)
 			if err != nil {
 				klog.Errorf("Failed to get all the pods (%v)", err)
 			}
 			for _, pod := range existingPods {
-				podAnnotation, err := util.UnmarshalPodAnnotation(pod.Annotations)
+				podAnnotation, err := util.UnmarshalPodAnnotation(pod.Annotations, oc.nadInfo.NetName)
 				if err != nil {
 					klog.Error(err.Error())
 				} else {
@@ -451,13 +455,13 @@ func (oc *Controller) createNamespaceAddrSetAllPods(ns string) (addressset.Addre
 	if config.Kubernetes.HostNetworkNamespace != "" &&
 		ns == config.Kubernetes.HostNetworkNamespace {
 		// add the mp0 interface addresses to this namespace.
-		existingNodes, err := oc.watchFactory.GetNodes()
+		existingNodes, err := oc.mc.watchFactory.GetNodes()
 		if err != nil {
 			klog.Errorf("Failed to get all nodes (%v)", err)
 		} else {
 			ips = make([]net.IP, 0, len(existingNodes))
 			for _, node := range existingNodes {
-				hostSubnets, err := util.ParseNodeHostSubnetAnnotation(node)
+				hostSubnets, err := util.ParseNodeHostSubnetAnnotation(node, oc.nadInfo.NetName)
 				if err != nil {
 					klog.Warningf("Error parsing host subnet annotation for node %s (%v)",
 						node.Name, err)
@@ -480,14 +484,14 @@ func (oc *Controller) createNamespaceAddrSetAllPods(ns string) (addressset.Addre
 		}
 	}
 	// Get all the pods in the namespace and append their IP to the address_set
-	existingPods, err := oc.watchFactory.GetPods(ns)
+	existingPods, err := oc.mc.watchFactory.GetPods(ns)
 	if err != nil {
 		klog.Errorf("Failed to get all the pods (%v)", err)
 	} else {
 		ips = make([]net.IP, 0, len(existingPods))
 		for _, pod := range existingPods {
 			if pod.Status.PodIP != "" && !pod.Spec.HostNetwork {
-				podIPs, err := util.GetAllPodIPs(pod)
+				podIPs, err := util.GetAllPodIPs(pod, oc.nadInfo.NetNameInfo)
 				if err != nil {
 					klog.Warningf(err.Error())
 					continue

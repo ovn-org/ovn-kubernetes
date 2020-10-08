@@ -237,7 +237,7 @@ var _ = ginkgo.Describe("OVN Namespace Operations", func() {
 
 				updatedNode, err := fakeClient.KubeClient.CoreV1().Nodes().Get(context.TODO(), node1.Name, metav1.GetOptions{})
 				gomega.Expect(err).NotTo(gomega.HaveOccurred())
-				nodeHostSubnetAnnotations, err := util.ParseNodeHostSubnetAnnotation(updatedNode)
+				nodeHostSubnetAnnotations, err := util.ParseNodeHostSubnetAnnotation(updatedNode, ovntypes.DefaultNetworkName)
 				gomega.Expect(err).NotTo(gomega.HaveOccurred())
 				gomega.Eventually(nodeHostSubnetAnnotations[0].String()).Should(gomega.Equal(node1.NodeSubnet))
 				_, err = config.InitConfig(ctx, fakeOvn.fakeExec, nil)
@@ -262,8 +262,8 @@ var _ = ginkgo.Describe("OVN Namespace Operations", func() {
 				gomega.Expect(len(gwLRPIPs) != 0).To(gomega.BeTrue())
 
 				// clusterController.WatchNodes() needs to following two port groups to have been created.
-				fakeOvn.controller.clusterRtrPortGroupUUID, err = createPortGroup(fakeOvn.controller.ovnNBClient, clusterRtrPortGroupName, clusterRtrPortGroupName)
-				fakeOvn.controller.clusterPortGroupUUID, err = createPortGroup(fakeOvn.controller.ovnNBClient, clusterPortGroupName, clusterPortGroupName)
+				fakeOvn.controller.clusterRtrPortGroupUUID, err = createPortGroup(fakeOvn.mhController.ovnNBClient, clusterRtrPortGroupName, clusterRtrPortGroupName)
+				fakeOvn.controller.clusterPortGroupUUID, err = createPortGroup(fakeOvn.mhController.ovnNBClient, clusterPortGroupName, clusterPortGroupName)
 
 				fakeOvn.controller.WatchNamespaces()
 				fakeOvn.asf.EventuallyExpectEmptyAddressSet(hostNetworkNamespace)

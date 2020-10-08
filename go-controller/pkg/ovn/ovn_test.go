@@ -15,6 +15,7 @@ import (
 	"k8s.io/client-go/kubernetes/fake"
 	"k8s.io/client-go/tools/record"
 
+	networkattachmentdefinitionfake "github.com/k8snetworkplumbingwg/network-attachment-definition-client/pkg/client/clientset/versioned/fake"
 	egressfirewall "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/egressfirewall/v1"
 	egressfirewallfake "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/egressfirewall/v1/apis/clientset/versioned/fake"
 	egressip "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/egressip/v1"
@@ -37,6 +38,7 @@ const (
 type FakeOVN struct {
 	fakeClient   *util.OVNClientset
 	watcher      *factory.WatchFactory
+	mhController *OvnMHController
 	controller   *Controller
 	stopChan     chan struct{}
 	fakeExec     *ovntest.FakeExec
@@ -74,9 +76,11 @@ func (o *FakeOVN) start(ctx *cli.Context, objects ...runtime.Object) {
 	_, err := config.InitConfig(ctx, o.fakeExec, nil)
 	gomega.Expect(err).NotTo(gomega.HaveOccurred())
 	o.fakeClient = &util.OVNClientset{
-		KubeClient:           fake.NewSimpleClientset(v1Objects...),
-		EgressIPClient:       egressipfake.NewSimpleClientset(egressIPObjects...),
-		EgressFirewallClient: egressfirewallfake.NewSimpleClientset(egressFirewallObjects...),
+		KubeClient:            fake.NewSimpleClientset(v1Objects...),
+		EgressIPClient:        egressipfake.NewSimpleClientset(egressIPObjects...),
+		EgressFirewallClient:  egressfirewallfake.NewSimpleClientset(egressFirewallObjects...),
+		NetworkAttchDefClient: networkattachmentdefinitionfake.NewSimpleClientset(),
+		//		APIExtensionsClient:   apiextensionsfake.NewSimpleClientset(),
 	}
 	o.init()
 }
@@ -89,9 +93,9 @@ func (o *FakeOVN) restart() {
 func (o *FakeOVN) shutdown() {
 	close(o.stopChan)
 	o.watcher.Shutdown()
-	err := o.controller.ovnNBClient.Close()
+	err := o.mhController.ovnNBClient.Close()
 	gomega.Expect(err).NotTo(gomega.HaveOccurred())
-	err = o.controller.ovnSBClient.Close()
+	err = o.mhController.ovnSBClient.Close()
 	gomega.Expect(err).NotTo(gomega.HaveOccurred())
 	o.wg.Wait()
 }
@@ -103,9 +107,11 @@ func (o *FakeOVN) init() {
 	gomega.Expect(err).NotTo(gomega.HaveOccurred())
 	o.ovnNBClient = ovntest.NewMockOVNClient(goovn.DBNB)
 	o.ovnSBClient = ovntest.NewMockOVNClient(goovn.DBSB)
-	o.controller = NewOvnController(o.fakeClient, o.watcher,
-		o.stopChan, o.asf, o.ovnNBClient,
-		o.ovnSBClient, o.fakeRecorder)
+	o.mhController = NewOvnMHController(o.fakeClient, "", o.watcher,
+		o.stopChan, o.ovnNBClient,
+		o.ovnSBClient, o.fakeRecorder, nil)
+	_ = o.mhController.setDefaultOvnController(o.asf)
+	o.controller = o.mhController.ovnController
 	o.controller.multicastSupport = true
 }
 

@@ -4,14 +4,16 @@ import (
 	"fmt"
 	. "github.com/onsi/ginkgo"
 	. "github.com/onsi/gomega"
-	"github.com/stretchr/testify/mock"
 	v1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
+	ctypes "github.com/containernetworking/cni/pkg/types"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/cni"
+	cnitypes "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/cni/types"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/kube/mocks"
 	ovntest "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/testing"
 	linkMock "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/testing/mocks/github.com/vishvananda/netlink"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
 	utilMocks "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util/mocks"
 )
@@ -22,7 +24,7 @@ func genOVSFindCmd(table, column, condition string) string {
 }
 
 func genOVSAddPortCmd(hostIfaceName, ifaceID, mac, ip, sandboxID string) string {
-	return fmt.Sprintf("ovs-vsctl --timeout=30 add-port br-int %s -- set interface %s external_ids:attached_mac=%s "+
+	return fmt.Sprintf("ovs-vsctl --timeout=30 --may-exist add-port br-int %s -- set interface %s external_ids:attached_mac=%s "+
 		"external_ids:iface-id=%s external_ids:ip_addresses=%s external_ids:sandbox=%s",
 		hostIfaceName, hostIfaceName, mac, ifaceID, ip, sandboxID)
 }
@@ -53,6 +55,7 @@ var _ = Describe("Node Smart NIC tests", func() {
 	var kubeMock mocks.KubeInterface
 	var pod v1.Pod
 	var node OvnNode
+	var nc *ovnNodeController
 
 	origSriovnetOps := util.GetSriovnetOps()
 	origNetlinkOps := util.GetNetLinkOps()
@@ -71,6 +74,13 @@ var _ = Describe("Node Smart NIC tests", func() {
 
 		kubeMock = mocks.KubeInterface{}
 		node = OvnNode{Kube: &kubeMock}
+		netconf := &cnitypes.NetConf{
+			NetConf: ctypes.NetConf{
+				Name: types.DefaultNetworkName,
+			},
+		}
+		nadInfo := util.NewNetAttachDefInfo("default", "default", netconf)
+		nc, _ = node.NewOvnNodeController(nadInfo)
 
 		pod = v1.Pod{ObjectMeta: metav1.ObjectMeta{
 			Name:        "a-pod",
@@ -89,17 +99,22 @@ var _ = Describe("Node Smart NIC tests", func() {
 
 	Context("getVfRepName", func() {
 		It("gets VF representor based on smartnic.connection-details Pod annotation", func() {
-			podAnnot := map[string]string{
-				util.SmartNicConnectionDetailsAnnot: `{"pfId":"0","vfId":"9","sandboxId":"a8d09931"}`,
+			scd := util.SmartNICConnectionDetails{
+				PfId:      "0",
+				VfId:      "9",
+				SandboxId: "a8d09931",
 			}
+			podAnnot := map[string]string{}
+			err := util.MarshalPodSmartNicConnDetails(&podAnnot, &scd, types.DefaultNetworkName)
+			Expect(err).ToNot(HaveOccurred())
 			pod.Annotations = podAnnot
 			sriovnetOpsMock.On("GetVfRepresentorSmartNIC", "0", "9").Return("pf0vf9", nil)
-			rep, err := node.getVfRepName(&pod)
+			rep, err := nc.getVfRepName(&pod)
 			Expect(err).ToNot(HaveOccurred())
 			Expect(rep).To(Equal("pf0vf9"))
 		})
 		It("Fails if smartnic.connection-details annotation is missing from Pod", func() {
-			_, err := node.getVfRepName(&pod)
+			_, err := nc.getVfRepName(&pod)
 			Expect(err).To(HaveOccurred())
 		})
 	})
@@ -117,18 +132,24 @@ var _ = Describe("Node Smart NIC tests", func() {
 				Ingress:       -1,
 				Egress:        -1,
 				IsSmartNic:    true,
+				NetNameInfo:   util.NetNameInfo{types.DefaultNetworkName, "", false},
 			}
 
-			// set pod annotations
-			podAnnot := map[string]string{
-				util.SmartNicConnectionDetailsAnnot: `{"pfId":"0","vfId":"9","sandboxId":"a8d09931"}`,
+			scd := util.SmartNICConnectionDetails{
+				PfId:      "0",
+				VfId:      "9",
+				SandboxId: "a8d09931",
 			}
+			podAnnot := map[string]string{}
+			err := util.MarshalPodSmartNicConnDetails(&podAnnot, &scd, types.DefaultNetworkName)
+			Expect(err).ToNot(HaveOccurred())
+			// set pod annotations
 			pod.Annotations = podAnnot
 		})
 
 		It("Fails if smartnic.connection-details Pod annotation is not present", func() {
 			pod.Annotations = map[string]string{}
-			err := node.addRepPort(&pod, vfRep, ifInfo)
+			err := nc.addRepPort(&pod, vfRep, ifInfo)
 			Expect(err).To(HaveOccurred())
 			Expect(err.Error()).To(ContainSubstring("failed to get smart-nic annotation"))
 		})
@@ -151,7 +172,7 @@ var _ = Describe("Node Smart NIC tests", func() {
 			})
 
 			// call addRepPort()
-			err := node.addRepPort(&pod, vfRep, ifInfo)
+			err := nc.addRepPort(&pod, vfRep, ifInfo)
 			Expect(err).To(HaveOccurred())
 			Expect(err.Error()).To(ContainSubstring("failed to run ovs command"))
 			Expect(execMock.CalledMatchesExpected()).To(BeTrue(), execMock.ErrorDesc())
@@ -204,7 +225,7 @@ var _ = Describe("Node Smart NIC tests", func() {
 						Cmd: genOVSDelPortCmd("pf0vf9"),
 					})
 
-					err := node.addRepPort(&pod, vfRep, ifInfo)
+					err := nc.addRepPort(&pod, vfRep, ifInfo)
 					Expect(err).To(HaveOccurred())
 					Expect(execMock.CalledMatchesExpected()).To(BeTrue(), execMock.ErrorDesc())
 				})
@@ -218,7 +239,7 @@ var _ = Describe("Node Smart NIC tests", func() {
 						Cmd: genOVSDelPortCmd("pf0vf9"),
 					})
 
-					err := node.addRepPort(&pod, vfRep, ifInfo)
+					err := nc.addRepPort(&pod, vfRep, ifInfo)
 					Expect(err).To(HaveOccurred())
 					Expect(execMock.CalledMatchesExpected()).To(BeTrue(), execMock.ErrorDesc())
 				})
@@ -233,20 +254,24 @@ var _ = Describe("Node Smart NIC tests", func() {
 						Cmd: genOVSDelPortCmd("pf0vf9"),
 					})
 
-					err := node.addRepPort(&pod, vfRep, ifInfo)
+					err := nc.addRepPort(&pod, vfRep, ifInfo)
 					Expect(err).To(HaveOccurred())
 					Expect(execMock.CalledMatchesExpected()).To(BeTrue(), execMock.ErrorDesc())
 				})
 			})
 
 			It("Sets smartnic-connection-status pod annotation on success", func() {
-				expectedAnnot := map[string]string{util.SmartNicConnetionStatusAnnot: `{"Status":"Ready"}`}
 				netlinkOpsMock.On("LinkByName", vfRep).Return(vfLink, nil)
 				netlinkOpsMock.On("LinkSetMTU", vfLink, ifInfo.MTU).Return(nil)
 				netlinkOpsMock.On("LinkSetUp", vfLink).Return(nil)
-				kubeMock.On("SetAnnotationsOnPod", pod.Namespace, pod.Name, expectedAnnot).Return(nil)
+				scs := util.SmartNICConnectionStatus{
+					Status: "Ready",
+				}
+				err := util.MarshalPodSmartNicConnStatus(&pod.Annotations, &scs, types.DefaultNetworkName)
+				Expect(err).ToNot(HaveOccurred())
+				kubeMock.On("UpdatePod", &pod).Return(nil)
 
-				err := node.addRepPort(&pod, vfRep, ifInfo)
+				err = nc.addRepPort(&pod, vfRep, ifInfo)
 				Expect(err).ToNot(HaveOccurred())
 				Expect(execMock.CalledMatchesExpected()).To(BeTrue(), execMock.ErrorDesc())
 			})
@@ -255,15 +280,19 @@ var _ = Describe("Node Smart NIC tests", func() {
 				netlinkOpsMock.On("LinkByName", vfRep).Return(vfLink, nil)
 				netlinkOpsMock.On("LinkSetMTU", vfLink, ifInfo.MTU).Return(nil)
 				netlinkOpsMock.On("LinkSetUp", vfLink).Return(nil)
-				kubeMock.On("SetAnnotationsOnPod", pod.Namespace, pod.Name, mock.Anything).Return(
-					fmt.Errorf("failed to set pod annotations"))
+				scs := util.SmartNICConnectionStatus{
+					Status: "Ready",
+				}
+				err := util.MarshalPodSmartNicConnStatus(&pod.Annotations, &scs, types.DefaultNetworkName)
+				Expect(err).ToNot(HaveOccurred())
+				kubeMock.On("UpdatePod", &pod).Return(fmt.Errorf("failed to set pod annotations"))
 				// Mock netlink/ovs calls for cleanup
 				netlinkOpsMock.On("LinkSetDown", vfLink).Return(nil)
 				execMock.AddFakeCmd(&ovntest.ExpectedCmd{
 					Cmd: genOVSDelPortCmd("pf0vf9"),
 				})
 
-				err := node.addRepPort(&pod, vfRep, ifInfo)
+				err = nc.addRepPort(&pod, vfRep, ifInfo)
 				Expect(err).To(HaveOccurred())
 				Expect(execMock.CalledMatchesExpected()).To(BeTrue(), execMock.ErrorDesc())
 			})
@@ -285,7 +314,7 @@ var _ = Describe("Node Smart NIC tests", func() {
 			execMock.AddFakeCmd(&ovntest.ExpectedCmd{
 				Cmd: fmt.Sprintf("ovs-vsctl --timeout=15 --if-exists del-port br-int %s", "pf0vf9"),
 			})
-			err := node.delRepPort(vfRep)
+			err := nc.delRepPort(vfRep)
 			Expect(err).ToNot(HaveOccurred())
 			Expect(execMock.CalledMatchesExpected()).To(BeTrue(), execMock.ErrorDesc())
 		})
@@ -295,7 +324,7 @@ var _ = Describe("Node Smart NIC tests", func() {
 			execMock.AddFakeCmd(&ovntest.ExpectedCmd{
 				Cmd: genOVSDelPortCmd("pf0vf9"),
 			})
-			err := node.delRepPort(vfRep)
+			err := nc.delRepPort(vfRep)
 			Expect(err).ToNot(HaveOccurred())
 			Expect(execMock.CalledMatchesExpected()).To(BeTrue(), execMock.ErrorDesc())
 		})
@@ -314,7 +343,7 @@ var _ = Describe("Node Smart NIC tests", func() {
 				Err: nil,
 			})
 			// pass on the second
-			err := node.delRepPort(vfRep)
+			err := nc.delRepPort(vfRep)
 			Expect(err).ToNot(HaveOccurred())
 			Expect(execMock.CalledMatchesExpected()).To(BeTrue(), execMock.ErrorDesc())
 		})

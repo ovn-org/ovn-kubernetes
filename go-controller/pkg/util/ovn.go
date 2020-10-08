@@ -7,10 +7,13 @@ import (
 	"fmt"
 	"net"
 	"strings"
+	"sync"
 	"time"
 
+	networkattachmentdefinitionapi "github.com/k8snetworkplumbingwg/network-attachment-definition-client/pkg/apis/k8s.cni.cncf.io/v1"
 	ovntypes "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
 
+	kapi "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/util/wait"
 	"k8s.io/klog/v2"
 )
@@ -144,4 +147,46 @@ func FindOVNLoadBalancer(externalID, externalValue string) (string, string, erro
 		return "", stderr, err
 	}
 	return out, "", nil
+}
+
+// See if this pod needs to plumb over this given network specified by netconf,
+// and return its NetworkSelectionElement if it exists.
+//
+// Note that since each network attachment definition has its own cidr defined, the same network cannot
+// exist in the same pod more than once, or it is configuration error.
+//
+// defaultNetAttachDefs is maps of all the net-attach-def
+func IsNetworkOnPod(pod *kapi.Pod, nadInfo *NetAttachDefInfo, defaultNetAttachDefs *sync.Map) (bool,
+	*networkattachmentdefinitionapi.NetworkSelectionElement, error) {
+	allNetworks, err := GetK8sPodAllNetworks(pod)
+	if err != nil {
+		return false, nil, err
+	}
+
+	podDesc := fmt.Sprintf("%s/%s", pod.Namespace, pod.Name)
+	if !nadInfo.NotDefault {
+		defaultNetwork, err := GetK8sPodDefaultNetwork(pod)
+		if err != nil {
+			// multus won't add this Pod if this fails, should never happen
+			return false, nil, fmt.Errorf("failed to get default network for pod %s: %v", podDesc, err)
+		}
+		if defaultNetwork == nil {
+			return true, nil, nil
+		} else {
+			if _, ok := defaultNetAttachDefs.Load(defaultNetwork.Namespace + "_" + defaultNetwork.Name); !ok {
+				return false, nil, nil
+			}
+		}
+		return true, defaultNetwork, nil
+	}
+
+	// For non-default network controller, try to see if its name exists in the Pod's k8s.v1.cni.cncf.io/networks, if no,
+	// return false;
+	for _, network := range *allNetworks {
+		if network.Name == nadInfo.Name && network.Namespace == nadInfo.Namespace {
+			return true, network, nil
+		}
+	}
+	return false, nil, nil
+
 }

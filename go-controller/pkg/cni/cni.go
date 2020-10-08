@@ -15,6 +15,8 @@ import (
 
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/kube"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
 )
 
 var (
@@ -83,6 +85,11 @@ func (pr *PodRequest) cmdAdd(podLister corev1listers.PodLister, useOVSExternalID
 	if namespace == "" || podName == "" {
 		return nil, fmt.Errorf("required CNI variable missing")
 	}
+	netName := types.DefaultNetworkName
+	if pr.CNIConf.NotDefault {
+		netName = pr.CNIConf.Name
+	}
+	netPrefix := util.GetNetworkPrefix(netName, !pr.CNIConf.NotDefault)
 
 	kubecli := &kube.Kube{KClient: kclient}
 	annotCondFn := isOvnReady
@@ -90,19 +97,20 @@ func (pr *PodRequest) cmdAdd(podLister corev1listers.PodLister, useOVSExternalID
 	if pr.IsSmartNIC {
 		// Add Smart-NIC connection-details annotation so ovnkube-node running on smart-NIC
 		// performs the needed network plumbing.
-		if err := pr.addSmartNICConnectionDetailsAnnot(kubecli); err != nil {
+		if err := pr.addSmartNICConnectionDetailsAnnot(kubecli, netName); err != nil {
 			return nil, err
 		}
 		annotCondFn = isSmartNICReady
 	}
 	// Get the IP address and MAC address of the pod
 	// for Smart-Nic, ensure connection-details is present
-	annotations, err := GetPodAnnotations(pr.ctx, podLister, kclient, namespace, podName, annotCondFn)
+	annotations, err := GetPodAnnotations(pr.ctx, podLister, kclient, namespace, podName, netName, annotCondFn)
 	if err != nil {
 		return nil, fmt.Errorf("failed to get pod annotation: %v", err)
 	}
 
-	podInterfaceInfo, err := PodAnnotation2PodInfo(annotations, useOVSExternalIDs, pr.IsSmartNIC)
+	netNameInfo := util.NetNameInfo{NetName: netName, Prefix: netPrefix, NotDefault: pr.CNIConf.NotDefault}
+	podInterfaceInfo, err := PodAnnotation2PodInfo(annotations, useOVSExternalIDs, pr.IsSmartNIC, netNameInfo)
 	if err != nil {
 		return nil, err
 	}
@@ -119,7 +127,7 @@ func (pr *PodRequest) cmdAdd(podLister corev1listers.PodLister, useOVSExternalID
 
 	responseBytes, err := json.Marshal(response)
 	if err != nil {
-		return nil, fmt.Errorf("failed to marshal pod request response: %v", err)
+		return nil, fmt.Errorf("failed to marshal pod request response for network %s: %v", netName, err)
 	}
 
 	return responseBytes, nil
@@ -143,13 +151,16 @@ func (pr *PodRequest) cmdCheck(podLister corev1listers.PodLister, useOVSExternal
 	if namespace == "" || podName == "" {
 		return nil, fmt.Errorf("required CNI variable missing")
 	}
-
+	netName := types.DefaultNetworkName
+	if pr.CNIConf.NotDefault {
+		netName = pr.CNIConf.Name
+	}
 	// Get the IP address and MAC address of the pod
 	annotCondFn := isOvnReady
 	if pr.IsSmartNIC {
 		annotCondFn = isSmartNICReady
 	}
-	annotations, err := GetPodAnnotations(pr.ctx, podLister, kclient, pr.PodNamespace, pr.PodName, annotCondFn)
+	annotations, err := GetPodAnnotations(pr.ctx, podLister, kclient, pr.PodNamespace, pr.PodName, netName, annotCondFn)
 	if err != nil {
 		return nil, err
 	}

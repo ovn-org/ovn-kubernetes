@@ -469,7 +469,7 @@ var _ = ginkgo.Describe("OVN Pod Operations", func() {
 				)
 
 				fExec.AddFakeCmd(&ovntest.ExpectedCmd{
-					Cmd:    "ovn-nbctl --timeout=15 --data=bare --no-heading --columns=name find logical_switch_port external_ids:pod=true",
+					Cmd:    "ovn-nbctl --timeout=15 --data=bare --no-heading --columns=name find logical_switch_port external_ids:pod=true external_ids:network_name{=}[]",
 					Output: t.portName + "\n",
 				})
 				fExec.AddFakeCmdsNoOutputNoError([]string{
@@ -524,7 +524,7 @@ var _ = ginkgo.Describe("OVN Pod Operations", func() {
 				)
 
 				fExec.AddFakeCmd(&ovntest.ExpectedCmd{
-					Cmd:    "ovn-nbctl --timeout=15 --data=bare --no-heading --columns=name find logical_switch_port external_ids:pod=true",
+					Cmd:    "ovn-nbctl --timeout=15 --data=bare --no-heading --columns=name find logical_switch_port external_ids:pod=true external_ids:network_name{=}[]",
 					Output: "\n",
 				})
 
@@ -590,7 +590,6 @@ var _ = ginkgo.Describe("OVN Pod Operations", func() {
 				gomega.Expect(fExec.CalledMatchesExpected()).To(gomega.BeTrue(), fExec.ErrorDesc)
 				gomega.Eventually(func() string { return getPodAnnotations(fakeOvn.fakeClient.KubeClient, t.namespace, t.podName) }, 2).Should(gomega.MatchJSON(`{"default": {"ip_addresses":["` + t.podIP + `/24"], "mac_address":"` + t.podMAC + `", "gateway_ips": ["` + t.nodeGWIP + `"], "mtu": "` + t.podMTU + `", "ip_address":"` + t.podIP + `/24", "gateway_ip": "` + t.nodeGWIP + `"}}`))
 				// Simulate an OVN restart with a new IP assignment and verify that the pod annotation is updated.
-
 				t.populateLogicalSwitchCache(fakeOvn)
 
 				fakeOvn.restart()

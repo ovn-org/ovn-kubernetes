@@ -10,6 +10,7 @@ import (
 	houtil "github.com/ovn-org/ovn-kubernetes/go-controller/hybrid-overlay/pkg/util"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/informer"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/kube"
+	ovntypes "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
 	kapi "k8s.io/api/core/v1"
 
@@ -183,7 +184,7 @@ func getNodeSubnetAndIP(node *kapi.Node) (*net.IPNet, net.IP) {
 	var cidr *net.IPNet
 
 	// Parse Linux node OVN hostsubnet annotation first
-	cidrs, _ := util.ParseNodeHostSubnetAnnotation(node)
+	cidrs, _ := util.ParseNodeHostSubnetAnnotation(node, ovntypes.DefaultNetworkName)
 	if cidrs != nil {
 		// FIXME DUAL-STACK
 		cidr = cidrs[0]
@@ -234,7 +235,7 @@ func getNodeDetails(node *kapi.Node) (*net.IPNet, net.IP, net.HardwareAddr, erro
 }
 
 func getPodDetails(pod *kapi.Pod) ([]*net.IPNet, net.HardwareAddr, error) {
-	podInfo, err := util.UnmarshalPodAnnotation(pod.Annotations)
+	podInfo, err := util.UnmarshalPodAnnotation(pod.Annotations, ovntypes.DefaultNetworkName)
 	if err != nil {
 		return nil, nil, err
 	}

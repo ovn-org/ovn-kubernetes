@@ -3,8 +3,6 @@ package util
 import (
 	"encoding/json"
 	"fmt"
-
-	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/kube"
 )
 
 /*
@@ -55,75 +53,90 @@ type SmartNICConnectionStatus struct {
 	Reason string `json:"Reason,omitempty"`
 }
 
-func (scd *SmartNICConnectionDetails) FromPodAnnotation(podAnnot map[string]string) error {
-	if annot, ok := podAnnot[SmartNicConnectionDetailsAnnot]; ok {
-		if err := json.Unmarshal([]byte(annot), scd); err != nil {
-			return fmt.Errorf("failed to unmarshal SmartNICConnectionDetails. %v", err)
+// MarshalPodSmartNicConnDetails returns a JSON-formatted annotation describing the pod's smart-nic connection details
+func MarshalPodSmartNicConnDetails(pannotations *map[string]string, scd *SmartNICConnectionDetails, netName string) error {
+	annotations := *pannotations
+	if annotations == nil {
+		annotations = make(map[string]string)
+		*pannotations = annotations
+	}
+	podScds := make(map[string]SmartNICConnectionDetails)
+	ovnAnnotation, ok := annotations[SmartNicConnectionDetailsAnnot]
+	if ok {
+		if err := json.Unmarshal([]byte(ovnAnnotation), &podScds); err != nil {
+			return fmt.Errorf("failed to unmarshal ovn pod annotation %q: %v",
+				ovnAnnotation, err)
 		}
-		return nil
 	}
-	return fmt.Errorf("failed to get SmartNICConnectionDetails, pod annotation \"%s\" does not exist",
-		SmartNicConnectionDetailsAnnot)
-}
-
-func (scd *SmartNICConnectionDetails) SetPodAnnotation(podAnnotator kube.Annotator) error {
-	data, err := json.Marshal(scd)
+	podScds[netName] = *scd
+	bytes, err := json.Marshal(podScds)
 	if err != nil {
-		// We should not get here
-		return fmt.Errorf("failed to set annotation. %v", err)
+		return fmt.Errorf("failed marshaling pod annotation map %v: %v", podScds, err)
 	}
-	err = podAnnotator.Set(SmartNicConnectionDetailsAnnot, string(data))
-	if err != nil {
-		// We should not get here
-		return fmt.Errorf("failed to set annotation. %v", err)
-	}
+	annotations[SmartNicConnectionDetailsAnnot] = string(bytes)
 	return nil
 }
 
-func (scd *SmartNICConnectionDetails) AsAnnotation() (map[string]string, error) {
-	data, err := json.Marshal(scd)
-	if err != nil {
-		// We should not get here
-		return nil, fmt.Errorf("failed to set annotation. %v", err)
+// UnmarshalPodSmartNicConnDetails returns smart-nic connection details for the specified network
+func UnmarshalPodSmartNicConnDetails(annotations map[string]string, netName string) (*SmartNICConnectionDetails, error) {
+	ovnAnnotation, ok := annotations[SmartNicConnectionDetailsAnnot]
+	if !ok {
+		return nil, newAnnotationNotSetError("could not find OVN pod annotation in %v", annotations)
 	}
-	annot := make(map[string]string)
-	annot[SmartNicConnectionDetailsAnnot] = string(data)
-	return annot, nil
+
+	podScds := make(map[string]SmartNICConnectionDetails)
+	if err := json.Unmarshal([]byte(ovnAnnotation), &podScds); err != nil {
+		return nil, fmt.Errorf("failed to unmarshal ovn pod annotation %q: %v",
+			ovnAnnotation, err)
+	}
+	scd, ok := podScds[netName]
+	if !ok {
+		return nil, fmt.Errorf("no smart-nic connection details annotation for network %s: %q",
+			netName, ovnAnnotation)
+	}
+	return &scd, nil
 }
 
-func (scs *SmartNICConnectionStatus) FromPodAnnotation(podAnnot map[string]string) error {
-	if annot, ok := podAnnot[SmartNicConnetionStatusAnnot]; ok {
-		if err := json.Unmarshal([]byte(annot), scs); err != nil {
-			return fmt.Errorf("failed to unmarshal SmartNICConnectionStatus. %v", err)
+// MarshalPodSmartNicConnStatus returns a JSON-formatted annotation describing the pod's smart-nic connection status
+func MarshalPodSmartNicConnStatus(pannotations *map[string]string, scs *SmartNICConnectionStatus, netName string) error {
+	annotations := *pannotations
+	if annotations == nil {
+		annotations = make(map[string]string)
+		*pannotations = annotations
+	}
+	podScds := make(map[string]SmartNICConnectionStatus)
+	ovnAnnotation, ok := annotations[SmartNicConnetionStatusAnnot]
+	if ok {
+		if err := json.Unmarshal([]byte(ovnAnnotation), &podScds); err != nil {
+			return fmt.Errorf("failed to unmarshal ovn pod annotation %q: %v",
+				ovnAnnotation, err)
 		}
-		return nil
 	}
-	return fmt.Errorf("failed to get SmartNICConnectionStatus pod annotation \"%s\" does not exist",
-		SmartNicConnetionStatusAnnot)
-}
-
-func (scs *SmartNICConnectionStatus) SetPodAnnotation(podAnnotator kube.Annotator) error {
-	data, err := json.Marshal(scs)
+	podScds[netName] = *scs
+	bytes, err := json.Marshal(podScds)
 	if err != nil {
-		// We should not get here
-		return fmt.Errorf("failed to set annotation. %v", err)
+		return fmt.Errorf("failed marshaling pod annotation map %v: %v", podScds, err)
 	}
-	err = podAnnotator.Set(SmartNicConnetionStatusAnnot, string(data))
-	if err != nil {
-		// We should not get here
-		return fmt.Errorf("failed to set annotation. %v", err)
-	}
+	annotations[SmartNicConnetionStatusAnnot] = string(bytes)
 	return nil
 }
 
-func (scs *SmartNICConnectionStatus) AsAnnotation() (map[string]string, error) {
-	data, err := json.Marshal(scs)
-	if err != nil {
-		// We should not get here
-		return nil, fmt.Errorf("failed to set annotation. %v", err)
+// UnmarshalPodSmartNicConnStatus returns smart-nic connection status for the specified network
+func UnmarshalPodSmartNicConnStatus(annotations map[string]string, netName string) (*SmartNICConnectionStatus, error) {
+	ovnAnnotation, ok := annotations[SmartNicConnetionStatusAnnot]
+	if !ok {
+		return nil, newAnnotationNotSetError("could not find OVN pod annotation in %v", annotations)
 	}
 
-	annot := make(map[string]string)
-	annot[SmartNicConnetionStatusAnnot] = string(data)
-	return annot, nil
+	podScss := make(map[string]SmartNICConnectionStatus)
+	if err := json.Unmarshal([]byte(ovnAnnotation), &podScss); err != nil {
+		return nil, fmt.Errorf("failed to unmarshal ovn pod annotation %q: %v",
+			ovnAnnotation, err)
+	}
+	scs, ok := podScss[netName]
+	if !ok {
+		return nil, fmt.Errorf("no smart-nic connection status annotation for network %s: %q",
+			netName, ovnAnnotation)
+	}
+	return &scs, nil
 }

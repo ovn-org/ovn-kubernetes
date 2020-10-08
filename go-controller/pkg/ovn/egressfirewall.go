@@ -111,7 +111,7 @@ func (oc *Controller) syncEgressFirewall(egressFirwalls []interface{}) {
 			return
 		}
 		if egressFirewallACLIDs != "" {
-			nodes, err := oc.watchFactory.GetNodes()
+			nodes, err := oc.mc.watchFactory.GetNodes()
 			if err != nil {
 				klog.Errorf("Unable to cleanup egress firewall ACLs remaining from local gateway mode, cannot list nodes, err: %v", err)
 				return
@@ -237,7 +237,7 @@ func (oc *Controller) syncEgressFirewall(egressFirwalls []interface{}) {
 	}
 
 	// get all the k8s EgressFirewall Objects
-	egressFirewallList, err := oc.kube.GetEgressFirewalls()
+	egressFirewallList, err := oc.mc.kube.GetEgressFirewalls()
 	if err != nil {
 		klog.Errorf("Cannot reconcile the state of egressfirewalls in ovn database and k8s. err: %v", err)
 	}
@@ -354,7 +354,7 @@ func (oc *Controller) deleteEgressFirewall(egressFirewallObj *egressfirewallapi.
 
 func (oc *Controller) updateEgressFirewallWithRetry(egressfirewall *egressfirewallapi.EgressFirewall) error {
 	retryErr := retry.RetryOnConflict(retry.DefaultRetry, func() error {
-		return oc.kube.UpdateEgressFirewall(egressfirewall)
+		return oc.mc.kube.UpdateEgressFirewall(egressfirewall)
 	})
 	if retryErr != nil {
 		return fmt.Errorf("error in updating status on EgressFirewall %s/%s: %v",
@@ -406,7 +406,7 @@ func (oc *Controller) addEgressFirewallRules(ef *egressFirewall, hashedAddressSe
 func (oc *Controller) createEgressFirewallRules(priority int, match, action, externalID string, txn *util.NBTxn) error {
 	logicalSwitches := []string{}
 	if config.Gateway.Mode == config.GatewayModeLocal {
-		nodes, err := oc.watchFactory.GetNodes()
+		nodes, err := oc.mc.watchFactory.GetNodes()
 		if err != nil {
 			return fmt.Errorf("unable to setup egress firewall ACLs on cluster nodes, err: %v", err)
 		}
@@ -453,7 +453,7 @@ func (oc *Controller) createEgressFirewallRules(priority int, match, action, ext
 func (oc *Controller) deleteEgressFirewallRules(externalID string, txn *util.NBTxn) error {
 	logicalSwitches := []string{}
 	if config.Gateway.Mode == config.GatewayModeLocal {
-		nodes, err := oc.watchFactory.GetNodes()
+		nodes, err := oc.mc.watchFactory.GetNodes()
 		if err != nil {
 			return fmt.Errorf("unable to setup egress firewall ACLs on cluster nodes, err: %v", err)
 		}

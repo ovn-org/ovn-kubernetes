@@ -1,7 +1,8 @@
 package types
 
 const (
-	K8sPrefix = "k8s-"
+	DefaultNetworkName = "default"
+	K8sPrefix          = "k8s-"
 	// K8sMgmtIntfName name to be used as an OVS internal port on the node
 	K8sMgmtIntfName = "ovn-k8s-mp0"
 
@@ -118,4 +119,9 @@ const (
 	NodeModeFull         = "full"
 	NodeModeSmartNIC     = "smart-nic"
 	NodeModeSmartNICHost = "smart-nic-host"
+
+	// CRD names
+	EgressFirewallCRD    string = "egressfirewalls.k8s.ovn.org"
+	IcmpNetworkPolicyCRD string = "icmpnetworkpolicies.k8s.ovn.org"
+	NetAttachDefCRD      string = "network-attachment-definitions.k8s.cni.cncf.io"
 )

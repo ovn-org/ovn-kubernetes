@@ -22,18 +22,20 @@ import (
 	"k8s.io/klog/v2"
 	utilnet "k8s.io/utils/net"
 
+	networkattachmentdefinitionapi "github.com/k8snetworkplumbingwg/network-attachment-definition-client/pkg/apis/k8s.cni.cncf.io/v1"
+	networkattchmentdefclientset "github.com/k8snetworkplumbingwg/network-attachment-definition-client/pkg/client/clientset/versioned"
 	egressfirewallclientset "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/egressfirewall/v1/apis/clientset/versioned"
 	egressipclientset "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/egressip/v1/apis/clientset/versioned"
 
-	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/cni/types"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
 )
 
 // OVNClientset is a wrapper around all clientsets used by OVN-Kubernetes
 type OVNClientset struct {
-	KubeClient           kubernetes.Interface
-	EgressIPClient       egressipclientset.Interface
-	EgressFirewallClient egressfirewallclientset.Interface
+	KubeClient            kubernetes.Interface
+	EgressIPClient        egressipclientset.Interface
+	EgressFirewallClient  egressfirewallclientset.Interface
+	NetworkAttchDefClient networkattchmentdefclientset.Interface
 }
 
 func adjustCommit() string {
@@ -117,6 +119,7 @@ func NewOVNClientset(conf *config.KubernetesConfig) (*OVNClientset, error) {
 	if err != nil {
 		return nil, err
 	}
+
 	kconfig, err := newKubernetesRestConfig(conf)
 	if err != nil {
 		return nil, fmt.Errorf("unable to create kubernetes rest config, err: %v", err)
@@ -129,10 +132,15 @@ func NewOVNClientset(conf *config.KubernetesConfig) (*OVNClientset, error) {
 	if err != nil {
 		return nil, err
 	}
+	networkAttchmntDefClientset, err := networkattchmentdefclientset.NewForConfig(kconfig)
+	if err != nil {
+		return nil, err
+	}
 	return &OVNClientset{
-		KubeClient:           kclientset,
-		EgressIPClient:       egressIPClientset,
-		EgressFirewallClient: egressFirewallClientset,
+		KubeClient:            kclientset,
+		EgressIPClient:        egressIPClientset,
+		EgressFirewallClient:  egressFirewallClientset,
+		NetworkAttchDefClient: networkAttchmntDefClientset,
 	}, nil
 }
 
@@ -213,9 +221,6 @@ func PodScheduled(pod *kapi.Pod) bool {
 const (
 	// DefNetworkAnnotation is the pod annotation for the cluster-wide default network
 	DefNetworkAnnotation = "v1.multus-cni.io/default-network"
-
-	// NetworkAttachmentAnnotation is the pod annotation for network-attachment-definition
-	NetworkAttachmentAnnotation = "k8s.v1.cni.cncf.io/networks"
 )
 
 // GetPodNetSelAnnotation returns the pod's Network Attachment Selection Annotation either for
@@ -226,9 +231,9 @@ const (
 //
 // Note that the changes below is based on following assumptions, which is true today.
 // - a pod's default network is OVN managed
-func GetPodNetSelAnnotation(pod *kapi.Pod, netAttachAnnot string) ([]*types.NetworkSelectionElement, error) {
+func GetPodNetSelAnnotation(pod *kapi.Pod, netAttachAnnot string) ([]*networkattachmentdefinitionapi.NetworkSelectionElement, error) {
 	var networkAnnotation string
-	var networks []*types.NetworkSelectionElement
+	var networks []*networkattachmentdefinitionapi.NetworkSelectionElement
 
 	networkAnnotation = pod.Annotations[netAttachAnnot]
 	if networkAnnotation == "" {

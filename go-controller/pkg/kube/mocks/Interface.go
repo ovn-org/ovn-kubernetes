@@ -242,6 +242,29 @@ func (_m *KubeInterface) GetNodes() (*v1.NodeList, error) {
 	return r0, r1
 }
 
+// GetPod provides a mock function with given fields: namespace, name
+func (_m *KubeInterface) GetPod(namespace, name string) (*v1.Pod, error) {
+	ret := _m.Called(namespace, name)
+
+	var r0 *v1.Pod
+	if rf, ok := ret.Get(0).(func(string, string) *v1.Pod); ok {
+		r0 = rf(namespace, name)
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).(*v1.Pod)
+		}
+	}
+
+	var r1 error
+	if rf, ok := ret.Get(1).(func(string, string) error); ok {
+		r1 = rf(namespace, name)
+	} else {
+		r1 = ret.Error(1)
+	}
+
+	return r0, r1
+}
+
 // GetPods provides a mock function with given fields: namespace, labelSelector
 func (_m *KubeInterface) GetPods(namespace string, labelSelector metav1.LabelSelector) (*v1.PodList, error) {
 	ret := _m.Called(namespace, labelSelector)
@@ -328,6 +351,34 @@ func (_m *KubeInterface) UpdateEgressIP(eIP *egressipv1.EgressIP) error {
 	var r0 error
 	if rf, ok := ret.Get(0).(func(*egressipv1.EgressIP) error); ok {
 		r0 = rf(eIP)
+	} else {
+		r0 = ret.Error(0)
+	}
+
+	return r0
+}
+
+// UpdateNode provides a mock function with given fields: node
+func (_m *KubeInterface) UpdateNode(node *v1.Node) error {
+	ret := _m.Called(node)
+
+	var r0 error
+	if rf, ok := ret.Get(0).(func(*v1.Node) error); ok {
+		r0 = rf(node)
+	} else {
+		r0 = ret.Error(0)
+	}
+
+	return r0
+}
+
+// UpdatePod provides a mock function with given fields: pod
+func (_m *KubeInterface) UpdatePod(pod *v1.Pod) error {
+	ret := _m.Called(pod)
+
+	var r0 error
+	if rf, ok := ret.Get(0).(func(*v1.Pod) error); ok {
+		r0 = rf(pod)
 	} else {
 		r0 = ret.Error(0)
 	}
