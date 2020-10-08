@@ -34,7 +34,6 @@ type Interface interface {
 	PatchEgressIP(name string, patchData []byte) error
 	UpdateNodeStatus(node *kapi.Node) error
 	UpdateNode(node *kapi.Node) error
-	UpdatePod(pod *kapi.Pod) error
 	GetAnnotationsOnPod(namespace, name string) (map[string]string, error)
 	GetNodes() (*kapi.NodeList, error)
 	GetEgressIP(name string) (*egressipv1.EgressIP, error)
@@ -50,6 +49,7 @@ type Interface interface {
 	UpdateCloudPrivateIPConfig(cloudPrivateIPConfig *ocpcloudnetworkapi.CloudPrivateIPConfig) (*ocpcloudnetworkapi.CloudPrivateIPConfig, error)
 	DeleteCloudPrivateIPConfig(name string) error
 	Events() kv1core.EventInterface
+	UpdatePod(pod *kapi.Pod) error
 }
 
 // Kube is the structure object upon which the Interface is implemented

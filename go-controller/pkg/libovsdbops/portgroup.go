@@ -5,9 +5,8 @@ import (
 	libovsdbclient "github.com/ovn-org/libovsdb/client"
 	"github.com/ovn-org/libovsdb/model"
 	libovsdb "github.com/ovn-org/libovsdb/ovsdb"
-	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
-
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/nbdb"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
 )
 
 // findPortGroup looks up the port group in the cache and sets the UUID
@@ -29,7 +28,7 @@ func findPortGroup(nbClient libovsdbclient.Client, pg *nbdb.PortGroup) error {
 	return err
 }
 
-func BuildPortGroup(hashName, name string, ports []*nbdb.LogicalSwitchPort, acls []*nbdb.ACL) *nbdb.PortGroup {
+func BuildPortGroup(pgName, name string, ports []*nbdb.LogicalSwitchPort, acls []*nbdb.ACL, externalIds map[string]string) *nbdb.PortGroup {
 	var aclUUIDs []string
 	if len(acls) > 0 {
 		aclUUIDs = make([]string, 0, len(acls))
@@ -47,10 +46,10 @@ func BuildPortGroup(hashName, name string, ports []*nbdb.LogicalSwitchPort, acls
 	}
 
 	return &nbdb.PortGroup{
-		Name:        hashName,
+		Name:        pgName,
 		ACLs:        aclUUIDs,
 		Ports:       portUUIDs,
-		ExternalIDs: map[string]string{"name": name},
+		ExternalIDs: externalIds,
 	}
 }
 

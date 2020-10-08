@@ -27,7 +27,7 @@ func (oc *Controller) iterateRetryNetworkPolicies(updateAll bool) {
 		if npEntry.newPolicy != nil {
 			// get the latest version of the new policy from the informer, if it doesn't exist we are not going to
 			// create the new policy
-			np, err := oc.watchFactory.GetNetworkPolicy(npEntry.newPolicy.Namespace, npEntry.newPolicy.Name)
+			np, err := oc.mc.watchFactory.GetNetworkPolicy(npEntry.newPolicy.Namespace, npEntry.newPolicy.Name)
 			if err != nil && errors.IsNotFound(err) {
 				klog.Infof("%s policy not found in the informers cache, not going to retry policy create", namespacedName)
 				npEntry.newPolicy = nil

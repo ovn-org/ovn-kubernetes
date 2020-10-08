@@ -138,6 +138,7 @@ var _ = ginkgo.Describe("OVN Namespace Operations", func() {
 			config.Gateway.Mode = config.GatewayModeShared
 			config.Gateway.NodeportEnable = true
 			var err error
+			config.Default.RawClusterSubnets = clusterCIDR
 			config.Default.ClusterSubnets, err = config.ParseClusterSubnetEntries(clusterCIDR)
 			gomega.Expect(err).NotTo(gomega.HaveOccurred())
 

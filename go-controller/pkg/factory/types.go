@@ -42,6 +42,9 @@ type NodeWatchFactory interface {
 	AddPodHandler(handlerFuncs cache.ResourceEventHandler, processExisting func([]interface{})) *Handler
 	RemovePodHandler(handler *Handler)
 
+	AddNetworkattachmentdefinitionHandler(handlerFuncs cache.ResourceEventHandler, processExisting func([]interface{})) *Handler
+	RemoveNetworkattachmentdefinitionHandler(handler *Handler)
+
 	NodeInformer() cache.SharedIndexInformer
 	LocalPodInformer() cache.SharedIndexInformer
 

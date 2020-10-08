@@ -3,13 +3,12 @@ package util
 import (
 	"encoding/json"
 	"fmt"
-	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
 	"net"
 
 	kapi "k8s.io/api/core/v1"
-	v1 "k8s.io/api/core/v1"
 
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/kube"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
 )
 
 // This handles the annotations related to subnets assigned to a node. The annotations are
@@ -19,18 +18,19 @@ import (
 //   annotations:
 //     k8s.ovn.org/node-subnets: |
 //       {
-//         "default": "10.130.0.0/23"
+//         "default": "10.130.0.0/23",
+//         "nw1":     "10.132.0.0/23"
 //       }
 //
-// (This allows for specifying multiple network attachments, but currently only "default"
-// is used.)
+// (This allows for specifying multiple network attachments
 //
 // In a dual-stack cluster, the values are lists:
 //
 //   annotations:
 //     k8s.ovn.org/node-subnets: |
 //       {
-//         "default": ["10.130.0.0/23", "fd01:0:0:2::/64"]
+//         "default": ["10.130.0.0/23", "fd01:0:0:2::/64"],
+//         "nw1":     ["10.132.0.0/23", "fd03:0:0:2::/64"],
 //       }
 
 const (
@@ -132,7 +132,7 @@ func parseSubnetAnnotation(nodeAnnotations map[string]string, annotationName str
 	return subnetMap, nil
 }
 
-func NodeSubnetAnnotationChanged(oldNode, newNode *v1.Node) bool {
+func NodeSubnetAnnotationChanged(oldNode, newNode *kapi.Node) bool {
 	return oldNode.Annotations[ovnNodeSubnets] != newNode.Annotations[ovnNodeSubnets]
 }
 
@@ -143,15 +143,15 @@ func UpdateNodeHostSubnetAnnotation(annotations map[string]string, hostSubnets [
 	return updateSubnetAnnotation(annotations, ovnNodeSubnets, netName, hostSubnets)
 }
 
-// SetNodeHostSubnetAnnotation sets a "k8s.ovn.org/node-subnets" annotation
+// SetNodeHostSubnetAnnotation sets a "k8s.ovn.org/[netName_]node-subnets" annotation
 // using a kube.Annotator
 func SetNodeHostSubnetAnnotation(nodeAnnotator kube.Annotator, defaultSubnets []*net.IPNet) error {
 	return setSubnetAnnotation(nodeAnnotator, ovnNodeSubnets, defaultSubnets)
 }
 
-// DeleteNodeHostSubnetAnnotation removes a "k8s.ovn.org/node-subnets" annotation
+// DeleteNodeHostSubnetAnnotation removes a "k8s.ovn.org/[netName_]node-subnets" annotation
 // using a kube.Annotator
-func DeleteNodeHostSubnetAnnotation(nodeAnnotator kube.Annotator) {
+func DeleteNodeHostSubnetAnnotation(nodeAnnotator kube.Annotator, netName string) {
 	nodeAnnotator.Delete(ovnNodeSubnets)
 }
 

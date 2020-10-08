@@ -242,9 +242,10 @@ func runOvnKube(ctx *cli.Context) error {
 		// register prometheus metrics that do not depend on becoming ovnkube-master leader
 		metrics.RegisterMasterBase()
 
-		ovnController := ovn.NewOvnController(ovnClientset, masterWatchFactory, stopChan, nil,
-			libovsdbOvnNBClient, libovsdbOvnSBClient, util.EventRecorder(ovnClientset.KubeClient))
-		if err := ovnController.Start(master, wg, ctx.Context); err != nil {
+		ovnMHController := ovn.NewOvnMHController(ovnClientset, master, masterWatchFactory,
+			stopChan, libovsdbOvnNBClient, libovsdbOvnSBClient, util.EventRecorder(ovnClientset.KubeClient), wg)
+		err = ovnMHController.Start(ctx.Context)
+		if err != nil {
 			return err
 		}
 	}

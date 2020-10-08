@@ -10,7 +10,6 @@ import (
 	"strings"
 	"time"
 
-	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
 
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
@@ -236,7 +235,7 @@ func doPodFlowsExist(mac string, ifAddrs []*net.IPNet, ofPort int) bool {
 // has changed either UID or MAC terminate this sandbox request early instead
 // of waiting for OVN to set up flows that will never exist.
 func checkCancelSandbox(mac string, podLister corev1listers.PodLister, kclient kubernetes.Interface,
-	namespace, name, initialPodUID string) error {
+	namespace, name, nadName, initialPodUID string) error {
 	pod, err := getPod(podLister, kclient, namespace, name)
 	if err != nil {
 		if apierrors.IsNotFound(err) {
@@ -258,7 +257,7 @@ func checkCancelSandbox(mac string, podLister corev1listers.PodLister, kclient k
 		return fmt.Errorf("canceled old pod sandbox")
 	}
 
-	ovnAnnot, err := util.UnmarshalPodAnnotation(pod.Annotations, types.DefaultNetworkName)
+	ovnAnnot, err := util.UnmarshalPodAnnotation(pod.Annotations, nadName)
 	if err != nil {
 		return fmt.Errorf("pod OVN annotations deleted or invalid")
 	}
@@ -276,7 +275,7 @@ func checkCancelSandbox(mac string, podLister corev1listers.PodLister, kclient k
 func waitForPodInterface(ctx context.Context, mac string, ifAddrs []*net.IPNet,
 	ifaceName, ifaceID string, ofPort int, checkExternalIDs bool,
 	podLister corev1listers.PodLister, kclient kubernetes.Interface,
-	namespace, name, initialPodUID string) error {
+	namespace, name, nadName, initialPodUID string) error {
 	var detail string
 
 	if checkExternalIDs {
@@ -307,7 +306,7 @@ func waitForPodInterface(ctx context.Context, mac string, ifAddrs []*net.IPNet,
 				}
 			}
 
-			if err := checkCancelSandbox(mac, podLister, kclient, namespace, name, initialPodUID); err != nil {
+			if err := checkCancelSandbox(mac, podLister, kclient, namespace, name, nadName, initialPodUID); err != nil {
 				return fmt.Errorf("%v waiting for OVS port binding for %s %v", err, mac, ifAddrs)
 			}
 

@@ -3,6 +3,7 @@ package ovn
 import (
 	"context"
 	"github.com/onsi/gomega"
+	networkattachmentdefinitionfake "github.com/k8snetworkplumbingwg/network-attachment-definition-client/pkg/client/clientset/versioned/fake"
 	libovsdbclient "github.com/ovn-org/libovsdb/client"
 	egressfirewall "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/egressfirewall/v1"
 	egressfirewallfake "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/egressfirewall/v1/apis/clientset/versioned/fake"
@@ -35,6 +36,7 @@ const (
 type FakeOVN struct {
 	fakeClient   *util.OVNClientset
 	watcher      *factory.WatchFactory
+	mhController *OvnMHController
 	controller   *Controller
 	stopChan     chan struct{}
 	asf          *addressset.FakeAddressSetFactory
@@ -70,9 +72,10 @@ func (o *FakeOVN) start(objects ...runtime.Object) {
 		}
 	}
 	o.fakeClient = &util.OVNClientset{
-		KubeClient:           fake.NewSimpleClientset(v1Objects...),
-		EgressIPClient:       egressipfake.NewSimpleClientset(egressIPObjects...),
-		EgressFirewallClient: egressfirewallfake.NewSimpleClientset(egressFirewallObjects...),
+		KubeClient:            fake.NewSimpleClientset(v1Objects...),
+		EgressIPClient:        egressipfake.NewSimpleClientset(egressIPObjects...),
+		EgressFirewallClient:  egressfirewallfake.NewSimpleClientset(egressFirewallObjects...),
+		NetworkAttchDefClient: networkattachmentdefinitionfake.NewSimpleClientset(),
 	}
 	o.init()
 }
@@ -98,26 +101,27 @@ func (o *FakeOVN) init() {
 	gomega.Expect(err).NotTo(gomega.HaveOccurred())
 
 	o.stopChan = make(chan struct{})
-	o.controller = NewOvnController(o.fakeClient, o.watcher,
-		o.stopChan, o.asf,
-		o.nbClient, o.sbClient,
-		o.fakeRecorder)
+	o.mhController = NewOvnMHController(o.fakeClient, "", o.watcher,
+		o.stopChan, o.nbClient, o.sbClient,
+		o.fakeRecorder, nil)
+	_ = o.mhController.setDefaultOvnController(o.asf)
+	o.controller = o.mhController.ovnController
 	o.controller.multicastSupport = true
 	o.controller.loadBalancerGroupUUID = types.ClusterLBGroupName + "-UUID"
 }
 
 func (o *FakeOVN) resetNBClient(ctx context.Context) {
-	if o.controller.nbClient.Connected() {
-		o.controller.nbClient.Close()
+	if o.mhController.nbClient.Connected() {
+		o.mhController.nbClient.Close()
 	}
 	gomega.Eventually(func() bool {
-		return o.controller.nbClient.Connected()
+		return o.mhController.nbClient.Connected()
 	}).Should(gomega.BeFalse())
-	err := o.controller.nbClient.Connect(ctx)
+	err := o.mhController.nbClient.Connect(ctx)
 	gomega.Expect(err).NotTo(gomega.HaveOccurred())
 	gomega.Eventually(func() bool {
-		return o.controller.nbClient.Connected()
+		return o.mhController.nbClient.Connected()
 	}).Should(gomega.BeTrue())
-	_, err = o.controller.nbClient.MonitorAll(ctx)
+	_, err = o.mhController.nbClient.MonitorAll(ctx)
 	gomega.Expect(err).NotTo(gomega.HaveOccurred())
 }

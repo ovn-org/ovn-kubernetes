@@ -23,6 +23,7 @@ import (
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/testing/libovsdb"
 	libovsdbtest "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/testing/libovsdb"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
 
 	"github.com/urfave/cli/v2"
 
@@ -156,19 +157,21 @@ func (n kNetworkPolicy) getDefaultDenyData(networkPolicy *knet.NetworkPolicy, po
 		lsps = append(lsps, &nbdb.LogicalSwitchPort{UUID: uuid})
 	}
 
-	egressDenyPG := libovsdbops.BuildPortGroup(
+	egressDenyPG := buildPortGroup(
 		pgHash+"_"+egressDenyPG,
 		pgHash+"_"+egressDenyPG,
 		lsps,
 		[]*nbdb.ACL{egressDenyACL, egressAllowACL},
+		util.NetNameInfo{types.DefaultNetworkName, "", false},
 	)
 	egressDenyPG.UUID = libovsdbops.BuildNamedUUID()
 
-	ingressDenyPG := libovsdbops.BuildPortGroup(
+	ingressDenyPG := buildPortGroup(
 		pgHash+"_"+ingressDenyPG,
 		pgHash+"_"+ingressDenyPG,
 		lsps,
 		[]*nbdb.ACL{ingressDenyACL, ingressAllowACL},
+		util.NetNameInfo{types.DefaultNetworkName, "", false},
 	)
 	ingressDenyPG.UUID = libovsdbops.BuildNamedUUID()
 
@@ -293,11 +296,12 @@ func (n kNetworkPolicy) getPolicyData(networkPolicy *knet.NetworkPolicy, policyP
 		lsps = append(lsps, &nbdb.LogicalSwitchPort{UUID: uuid})
 	}
 
-	pg := libovsdbops.BuildPortGroup(
+	pg := buildPortGroup(
 		pgHash,
 		pgName,
 		lsps,
 		acls,
+		util.NetNameInfo{types.DefaultNetworkName, "", false},
 	)
 	pg.UUID = libovsdbops.BuildNamedUUID()
 
@@ -402,11 +406,12 @@ func (p multicastPolicy) getMulticastPolicyExpectedData(ns string, ports []strin
 		lsps = append(lsps, &nbdb.LogicalSwitchPort{UUID: uuid})
 	}
 
-	pg := libovsdbops.BuildPortGroup(
+	pg := buildPortGroup(
 		hashedPortGroup(ns),
 		ns,
 		lsps,
 		[]*nbdb.ACL{egressACL, ingressACL},
+		util.NetNameInfo{types.DefaultNetworkName, "", false},
 	)
 	pg.UUID = libovsdbops.BuildNamedUUID()
 
@@ -554,7 +559,7 @@ var _ = ginkgo.Describe("OVN NetworkPolicy Operations with IP Address Family", f
 					setIpMode(m)
 
 					for _, tPod := range tPods {
-						tPod.populateLogicalSwitchCache(fakeOvn, getLogicalSwitchUUID(fakeOvn.controller.nbClient, "node1"))
+						tPod.populateLogicalSwitchCache(fakeOvn, getLogicalSwitchUUID(fakeOvn.controller.mc.nbClient, "node1"))
 					}
 
 					fakeOvn.controller.WatchNamespaces()
@@ -649,7 +654,7 @@ var _ = ginkgo.Describe("OVN NetworkPolicy Operations with IP Address Family", f
 					})...))
 
 					for _, tPod := range tPods {
-						tPod.populateLogicalSwitchCache(fakeOvn, getLogicalSwitchUUID(fakeOvn.controller.nbClient, "node1"))
+						tPod.populateLogicalSwitchCache(fakeOvn, getLogicalSwitchUUID(fakeOvn.controller.mc.nbClient, "node1"))
 						_, err = fakeOvn.fakeClient.KubeClient.CoreV1().Pods(tPod.namespace).Create(context.TODO(), newPod(
 							tPod.namespace, tPod.podName, tPod.nodeName, tPod.podIP), metav1.CreateOptions{})
 						gomega.Expect(err).NotTo(gomega.HaveOccurred())
@@ -949,7 +954,7 @@ var _ = ginkgo.Describe("OVN NetworkPolicy Operations", func() {
 						},
 					},
 				)
-				nPodTest.populateLogicalSwitchCache(fakeOvn, getLogicalSwitchUUID(fakeOvn.controller.nbClient, "node1"))
+				nPodTest.populateLogicalSwitchCache(fakeOvn, getLogicalSwitchUUID(fakeOvn.controller.mc.nbClient, "node1"))
 				fakeOvn.controller.WatchNamespaces()
 				fakeOvn.controller.WatchPods()
 				fakeOvn.controller.WatchNetworkPolicy()
@@ -1157,7 +1162,7 @@ var _ = ginkgo.Describe("OVN NetworkPolicy Operations", func() {
 						Items: []knet.NetworkPolicy{*networkPolicy},
 					},
 				)
-				nPodTest.populateLogicalSwitchCache(fakeOvn, getLogicalSwitchUUID(fakeOvn.controller.nbClient, "node1"))
+				nPodTest.populateLogicalSwitchCache(fakeOvn, getLogicalSwitchUUID(fakeOvn.controller.mc.nbClient, "node1"))
 				fakeOvn.controller.WatchNamespaces()
 				fakeOvn.controller.WatchPods()
 				fakeOvn.controller.WatchNetworkPolicy()
@@ -1288,7 +1293,7 @@ var _ = ginkgo.Describe("OVN NetworkPolicy Operations", func() {
 						Items: []knet.NetworkPolicy{*networkPolicy},
 					},
 				)
-				nPodTest.populateLogicalSwitchCache(fakeOvn, getLogicalSwitchUUID(fakeOvn.controller.nbClient, "node1"))
+				nPodTest.populateLogicalSwitchCache(fakeOvn, getLogicalSwitchUUID(fakeOvn.mhController.nbClient, "node1"))
 				fakeOvn.controller.WatchNamespaces()
 				fakeOvn.controller.WatchPods()
 				fakeOvn.controller.WatchNetworkPolicy()
@@ -1302,9 +1307,9 @@ var _ = ginkgo.Describe("OVN NetworkPolicy Operations", func() {
 
 				ginkgo.By("Bringing down NBDB")
 				// inject transient problem, nbdb is down
-				fakeOvn.controller.nbClient.Close()
+				fakeOvn.mhController.nbClient.Close()
 				gomega.Eventually(func() bool {
-					return fakeOvn.controller.nbClient.Connected()
+					return fakeOvn.mhController.nbClient.Connected()
 				}).Should(gomega.BeFalse())
 
 				// Create a second NP
@@ -1423,7 +1428,7 @@ var _ = ginkgo.Describe("OVN NetworkPolicy Operations", func() {
 						Items: []knet.NetworkPolicy{*networkPolicy},
 					},
 				)
-				nPodTest.populateLogicalSwitchCache(fakeOvn, getLogicalSwitchUUID(fakeOvn.controller.nbClient, "node1"))
+				nPodTest.populateLogicalSwitchCache(fakeOvn, getLogicalSwitchUUID(fakeOvn.mhController.nbClient, "node1"))
 				fakeOvn.controller.WatchNamespaces()
 				fakeOvn.controller.WatchPods()
 				fakeOvn.controller.WatchNetworkPolicy()
@@ -1437,9 +1442,9 @@ var _ = ginkgo.Describe("OVN NetworkPolicy Operations", func() {
 
 				ginkgo.By("Bringing down NBDB")
 				// inject transient problem, nbdb is down
-				fakeOvn.controller.nbClient.Close()
+				fakeOvn.mhController.nbClient.Close()
 				gomega.Eventually(func() bool {
-					return fakeOvn.controller.nbClient.Connected()
+					return fakeOvn.mhController.nbClient.Connected()
 				}).Should(gomega.BeFalse())
 
 				ginkgo.By("Delete the first network policy")
@@ -1561,7 +1566,7 @@ var _ = ginkgo.Describe("OVN NetworkPolicy Operations", func() {
 						},
 					},
 				)
-				nPodTest.populateLogicalSwitchCache(fakeOvn, getLogicalSwitchUUID(fakeOvn.controller.nbClient, "node1"))
+				nPodTest.populateLogicalSwitchCache(fakeOvn, getLogicalSwitchUUID(fakeOvn.controller.mc.nbClient, "node1"))
 				fakeOvn.controller.WatchNamespaces()
 				fakeOvn.controller.WatchPods()
 				fakeOvn.controller.WatchNetworkPolicy()
@@ -1742,7 +1747,7 @@ var _ = ginkgo.Describe("OVN NetworkPolicy Operations", func() {
 						},
 					},
 				)
-				nPodTest.populateLogicalSwitchCache(fakeOvn, getLogicalSwitchUUID(fakeOvn.controller.nbClient, "node1"))
+				nPodTest.populateLogicalSwitchCache(fakeOvn, getLogicalSwitchUUID(fakeOvn.controller.mc.nbClient, "node1"))
 				fakeOvn.controller.WatchNamespaces()
 				fakeOvn.controller.WatchPods()
 				fakeOvn.controller.WatchNetworkPolicy()
@@ -1858,7 +1863,7 @@ var _ = ginkgo.Describe("OVN NetworkPolicy Operations", func() {
 						},
 					},
 				)
-				nPodTest.populateLogicalSwitchCache(fakeOvn, getLogicalSwitchUUID(fakeOvn.controller.nbClient, "node1"))
+				nPodTest.populateLogicalSwitchCache(fakeOvn, getLogicalSwitchUUID(fakeOvn.controller.mc.nbClient, "node1"))
 				fakeOvn.controller.WatchNamespaces()
 				fakeOvn.controller.WatchPods()
 				fakeOvn.controller.WatchNetworkPolicy()
@@ -1965,7 +1970,7 @@ var _ = ginkgo.Describe("OVN NetworkPolicy Operations", func() {
 						},
 					},
 				)
-				nPodTest.populateLogicalSwitchCache(fakeOvn, getLogicalSwitchUUID(fakeOvn.controller.nbClient, "node1"))
+				nPodTest.populateLogicalSwitchCache(fakeOvn, getLogicalSwitchUUID(fakeOvn.controller.mc.nbClient, "node1"))
 				fakeOvn.controller.WatchNamespaces()
 				fakeOvn.controller.WatchPods()
 				fakeOvn.controller.WatchNetworkPolicy()
@@ -2063,7 +2068,7 @@ var _ = ginkgo.Describe("OVN NetworkPolicy Operations", func() {
 						},
 					},
 				)
-				nPodTest.populateLogicalSwitchCache(fakeOvn, getLogicalSwitchUUID(fakeOvn.controller.nbClient, "node1"))
+				nPodTest.populateLogicalSwitchCache(fakeOvn, getLogicalSwitchUUID(fakeOvn.controller.mc.nbClient, "node1"))
 				fakeOvn.controller.WatchNamespaces()
 				fakeOvn.controller.WatchPods()
 				fakeOvn.controller.WatchNetworkPolicy()
@@ -2158,10 +2163,10 @@ var _ = ginkgo.Describe("OVN NetworkPolicy Operations", func() {
 					},
 				)
 				gomega.Eventually(func() bool {
-					return fakeOvn.controller.nbClient.Connected()
+					return fakeOvn.mhController.nbClient.Connected()
 				}).Should(gomega.BeTrue())
 
-				nPodTest.populateLogicalSwitchCache(fakeOvn, getLogicalSwitchUUID(fakeOvn.controller.nbClient, "node1"))
+				nPodTest.populateLogicalSwitchCache(fakeOvn, getLogicalSwitchUUID(fakeOvn.mhController.nbClient, "node1"))
 				fakeOvn.controller.WatchNamespaces()
 				fakeOvn.controller.WatchPods()
 				fakeOvn.controller.WatchNetworkPolicy()
@@ -2172,9 +2177,9 @@ var _ = ginkgo.Describe("OVN NetworkPolicy Operations", func() {
 				fakeOvn.asf.ExpectAddressSetWithIPs(namespaceName1, []string{nPodTest.podIP})
 
 				// inject transient problem, nbdb is down
-				fakeOvn.controller.nbClient.Close()
+				fakeOvn.mhController.nbClient.Close()
 				gomega.Eventually(func() bool {
-					return fakeOvn.controller.nbClient.Connected()
+					return fakeOvn.mhController.nbClient.Connected()
 				}).Should(gomega.BeFalse())
 				err = fakeOvn.fakeClient.KubeClient.NetworkingV1().NetworkPolicies(networkPolicy.Namespace).Delete(context.TODO(), networkPolicy.Name, *metav1.NewDeleteOptions(0))
 				gomega.Expect(err).NotTo(gomega.HaveOccurred())
@@ -2195,7 +2200,7 @@ var _ = ginkgo.Describe("OVN NetworkPolicy Operations", func() {
 				acls := []libovsdb.TestData{}
 				acls = append(acls, gressPolicyExpectedData[:len(gressPolicyExpectedData)-1]...)
 				acls = append(acls, defaultDenyExpectedData[:len(defaultDenyExpectedData)-2]...)
-				gomega.Eventually(fakeOvn.controller.nbClient).Should(libovsdb.HaveData(append(acls, getExpectedDataPodsAndSwitches([]testPod{nPodTest}, []string{"node1"})...)))
+				gomega.Eventually(fakeOvn.mhController.nbClient).Should(libovsdb.HaveData(append(acls, getExpectedDataPodsAndSwitches([]testPod{nPodTest}, []string{"node1"})...)))
 
 				// check the cache no longer has the entry
 				gomega.Eventually(func() *retryNetPolEntry {
@@ -2491,7 +2496,8 @@ var _ = ginkgo.Describe("OVN NetworkPolicy Low-Level Operations", func() {
 			},
 		}
 
-		gp := newGressPolicy(knet.PolicyTypeIngress, 0, policy.Namespace, policy.Name)
+		netAttachInfo := &util.NetAttachDefInfo{NetNameInfo: util.NetNameInfo{NetName: types.DefaultNetworkName, Prefix: "", IsSecondary: false}}
+		gp := newGressPolicy(knet.PolicyTypeIngress, 0, policy.Namespace, policy.Name, netAttachInfo)
 		err := gp.ensurePeerAddressSet(asFactory)
 		gomega.Expect(err).NotTo(gomega.HaveOccurred())
 		asName := gp.peerAddressSet.GetName()

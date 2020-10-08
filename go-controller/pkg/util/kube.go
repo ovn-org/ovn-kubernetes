@@ -23,6 +23,7 @@ import (
 	"k8s.io/client-go/util/cert"
 	"k8s.io/klog/v2"
 
+	networkattchmentdefclientset "github.com/k8snetworkplumbingwg/network-attachment-definition-client/pkg/client/clientset/versioned"
 	egressfirewallclientset "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/egressfirewall/v1/apis/clientset/versioned"
 	egressipclientset "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/egressip/v1/apis/clientset/versioned"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
@@ -34,10 +35,11 @@ import (
 
 // OVNClientset is a wrapper around all clientsets used by OVN-Kubernetes
 type OVNClientset struct {
-	KubeClient           kubernetes.Interface
-	EgressIPClient       egressipclientset.Interface
-	EgressFirewallClient egressfirewallclientset.Interface
-	CloudNetworkClient   ocpcloudnetworkclientset.Interface
+	KubeClient            kubernetes.Interface
+	EgressIPClient        egressipclientset.Interface
+	EgressFirewallClient  egressfirewallclientset.Interface
+	CloudNetworkClient    ocpcloudnetworkclientset.Interface
+	NetworkAttchDefClient networkattchmentdefclientset.Interface
 }
 
 func adjustCommit() string {
@@ -119,6 +121,7 @@ func NewOVNClientset(conf *config.KubernetesConfig) (*OVNClientset, error) {
 	if err != nil {
 		return nil, err
 	}
+
 	kconfig, err := newKubernetesRestConfig(conf)
 	if err != nil {
 		return nil, fmt.Errorf("unable to create kubernetes rest config, err: %v", err)
@@ -135,11 +138,16 @@ func NewOVNClientset(conf *config.KubernetesConfig) (*OVNClientset, error) {
 	if err != nil {
 		return nil, err
 	}
+	networkAttchmntDefClientset, err := networkattchmentdefclientset.NewForConfig(kconfig)
+	if err != nil {
+		return nil, err
+	}
 	return &OVNClientset{
-		KubeClient:           kclientset,
-		EgressIPClient:       egressIPClientset,
-		EgressFirewallClient: egressFirewallClientset,
-		CloudNetworkClient:   cloudNetworkClientset,
+		KubeClient:            kclientset,
+		EgressIPClient:        egressIPClientset,
+		EgressFirewallClient:  egressFirewallClientset,
+		CloudNetworkClient:    cloudNetworkClientset,
+		NetworkAttchDefClient: networkAttchmntDefClientset,
 	}, nil
 }
 
@@ -220,6 +228,11 @@ func PodWantsNetwork(pod *kapi.Pod) bool {
 func PodScheduled(pod *kapi.Pod) bool {
 	return pod.Spec.NodeName != ""
 }
+
+const (
+	// DefNetworkAnnotation is the pod annotation for the cluster-wide default network
+	DefNetworkAnnotation = "v1.multus-cni.io/default-network"
+)
 
 // EventRecorder returns an EventRecorder type that can be
 // used to post Events to different object's lifecycles.

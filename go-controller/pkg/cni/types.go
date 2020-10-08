@@ -36,6 +36,7 @@ type KubeAPIAuth struct {
 // PodInterfaceInfo consists of interface info result from cni server if cni client configure's interface
 type PodInterfaceInfo struct {
 	util.PodAnnotation
+	util.NetNameInfo
 
 	MTU           int    `json:"mtu"`
 	RoutableMTU   int    `json:"routable-mtu"`
@@ -44,6 +45,7 @@ type PodInterfaceInfo struct {
 	CheckExtIDs   bool   `json:"check-external-ids"`
 	IsDPUHostMode bool   `json:"is-dpu-host-mode"`
 	PodUID        string `json:"pod-uid"`
+	NadName       string `json:"nadName"`
 	VfNetdevName  string `json:"vf-netdev-name"`
 }
 
@@ -138,6 +140,11 @@ type PodRequest struct {
 	ctx context.Context
 	// cancel should be called to cancel this request
 	cancel context.CancelFunc
+	// Since the default network to the Pod is always named `default`, we will need
+	// effective names for both the NetConf and Name. Following two fields
+	// captures the same.
+	effectiveNetName string
+	effectiveNADName string
 }
 
 type cniRequestFunc func(request *PodRequest, podLister corev1listers.PodLister, useOVSExternalIDs bool, kclient kubernetes.Interface, kubeAuth *KubeAPIAuth) ([]byte, error)
