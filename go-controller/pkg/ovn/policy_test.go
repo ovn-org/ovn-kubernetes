@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"sort"
 	"strings"
+	"time"
 
 	. "github.com/onsi/ginkgo"
 	. "github.com/onsi/gomega"
@@ -440,7 +441,6 @@ var _ = Describe("OVN NetworkPolicy Operations", func() {
 					})
 
 				nPodTest.baseCmds(fExec)
-				nPodTest.addPodDenyMcast(fExec)
 				npTest.addNamespaceSelectorCmds(fExec, networkPolicy, false)
 				npTest.addLocalPodCmds(fExec, networkPolicy)
 
@@ -539,7 +539,6 @@ var _ = Describe("OVN NetworkPolicy Operations", func() {
 					})
 
 				nPodTest.baseCmds(fExec)
-				nPodTest.addPodDenyMcast(fExec)
 				npTest.addNamespaceSelectorCmds(fExec, networkPolicy, false)
 
 				fakeOvn.start(ctx,
@@ -632,7 +631,6 @@ var _ = Describe("OVN NetworkPolicy Operations", func() {
 				)
 
 				nPodTest.baseCmds(fExec)
-				nPodTest.addPodDenyMcast(fExec)
 				npTest.baseCmds(fExec, networkPolicy)
 				npTest.addLocalPodCmds(fExec, networkPolicy)
 
@@ -722,7 +720,6 @@ var _ = Describe("OVN NetworkPolicy Operations", func() {
 					})
 
 				nPodTest.baseCmds(fExec)
-				nPodTest.addPodDenyMcast(fExec)
 				npTest.addNamespaceSelectorCmds(fExec, networkPolicy, true)
 				npTest.addLocalPodCmds(fExec, networkPolicy)
 
@@ -908,7 +905,6 @@ var _ = Describe("OVN NetworkPolicy Operations", func() {
 					})
 
 				nPodTest.baseCmds(fExec)
-				nPodTest.addPodDenyMcast(fExec)
 				npTest.addNamespaceSelectorCmds(fExec, networkPolicy, false)
 				npTest.addLocalPodCmds(fExec, networkPolicy)
 
@@ -942,7 +938,6 @@ var _ = Describe("OVN NetworkPolicy Operations", func() {
 				Expect(err).NotTo(HaveOccurred())
 				Eventually(fExec.CalledMatchesExpected).Should(BeTrue(), fExec.ErrorDesc)
 
-				nPodTest.delCmds(fExec)
 				npTest.delPodCmds(fExec, networkPolicy)
 
 				err = fakeOvn.fakeClient.CoreV1().Pods(nPodTest.namespace).Delete(context.TODO(), nPodTest.podName, *metav1.NewDeleteOptions(0))
@@ -1016,7 +1011,6 @@ var _ = Describe("OVN NetworkPolicy Operations", func() {
 					})
 
 				nPodTest.baseCmds(fExec)
-				nPodTest.addPodDenyMcast(fExec)
 				npTest.addNamespaceSelectorCmds(fExec, networkPolicy, false)
 
 				fakeOvn.start(ctx,
@@ -1051,8 +1045,6 @@ var _ = Describe("OVN NetworkPolicy Operations", func() {
 				_, err := fakeOvn.fakeClient.NetworkingV1().NetworkPolicies(networkPolicy.Namespace).Get(context.TODO(), networkPolicy.Name, metav1.GetOptions{})
 				Expect(err).NotTo(HaveOccurred())
 				Eventually(fExec.CalledMatchesExpected).Should(BeTrue(), fExec.ErrorDesc)
-
-				nPodTest.delCmds(fExec)
 
 				err = fakeOvn.fakeClient.CoreV1().Pods(nPodTest.namespace).Delete(context.TODO(), nPodTest.podName, *metav1.NewDeleteOptions(0))
 				Expect(err).NotTo(HaveOccurred())
@@ -1116,7 +1108,6 @@ var _ = Describe("OVN NetworkPolicy Operations", func() {
 					})
 
 				nPodTest.baseCmds(fExec)
-				nPodTest.addPodDenyMcast(fExec)
 				npTest.addNamespaceSelectorCmds(fExec, networkPolicy, false)
 				npTest.addLocalPodCmds(fExec, networkPolicy)
 
@@ -1198,6 +1189,9 @@ var _ = Describe("OVN NetworkPolicy Operations", func() {
 				_, err = fakeOvn.fakeClient.CoreV1().Namespaces().Update(context.TODO(), ns, metav1.UpdateOptions{})
 				Expect(err).NotTo(HaveOccurred())
 				Eventually(fExec.CalledMatchesExpected).Should(BeTrue(), fExec.ErrorDesc)
+
+				err = fakeOvn.fakeClient.CoreV1().Namespaces().Delete(context.TODO(), namespace1.Name, *metav1.NewDeleteOptions(0))
+				Expect(err).NotTo(HaveOccurred())
 				return nil
 			}
 
@@ -1221,7 +1215,6 @@ var _ = Describe("OVN NetworkPolicy Operations", func() {
 				)
 
 				nPodTest.baseCmds(fExec)
-				nPodTest.addPodDenyMcast(fExec)
 				fakeOvn.start(ctx,
 					&v1.NamespaceList{
 						Items: []v1.Namespace{
@@ -1234,25 +1227,29 @@ var _ = Describe("OVN NetworkPolicy Operations", func() {
 						},
 					},
 				)
+				fakeOvn.controller.WatchNamespaces()
 				nPodTest.populateLogicalSwitchCache(fakeOvn)
 				fakeOvn.controller.WatchPods()
-				fakeOvn.controller.WatchNamespaces()
 				ns, err := fakeOvn.fakeClient.CoreV1().Namespaces().Get(
 					context.TODO(), namespace1.Name, metav1.GetOptions{})
 				Expect(err).NotTo(HaveOccurred())
 				Expect(ns).NotTo(BeNil())
-				Eventually(fExec.CalledMatchesExpected).Should(BeTrue(), fExec.ErrorDesc)
+
+				ns.Annotations[nsMulticastAnnotation] = "true"
+				_, err = fakeOvn.fakeClient.CoreV1().Namespaces().Update(context.TODO(), ns, metav1.UpdateOptions{})
+				Expect(err).NotTo(HaveOccurred())
+
 				// Enable multicast in the namespace
 				mcastPolicy := multicastPolicy{}
 				mcastPolicy.enableCmds(fExec, namespace1.Name, v4AddressSetName1)
 				// The pod should be added to the multicast allow port group.
 				mcastPolicy.addPodCmds(fExec, namespace1.Name)
-				ns.Annotations[nsMulticastAnnotation] = "true"
-				_, err = fakeOvn.fakeClient.CoreV1().Namespaces().Update(context.TODO(), ns, metav1.UpdateOptions{})
-				Expect(err).NotTo(HaveOccurred())
-				Eventually(fExec.CalledMatchesExpected).Should(BeTrue(), fExec.ErrorDesc)
+
+				Eventually(fExec.CalledMatchesExpected, 5*time.Second).Should(BeTrue(), fExec.ErrorDesc)
 				fakeOvn.asf.ExpectAddressSetWithIPs(v4AddressSetName1, []string{nPodTest.podIP})
 				fakeOvn.asf.ExpectNoAddressSet(v6AddressSetName1)
+				err = fakeOvn.fakeClient.CoreV1().Namespaces().Delete(context.TODO(), namespace1.Name, *metav1.NewDeleteOptions(0))
+				Expect(err).NotTo(HaveOccurred())
 				return nil
 			}
 
@@ -1300,7 +1297,6 @@ var _ = Describe("OVN NetworkPolicy Operations", func() {
 				Eventually(fExec.CalledMatchesExpected).Should(BeTrue(), fExec.ErrorDesc)
 
 				nPodTest.populateLogicalSwitchCache(fakeOvn)
-				nPodTest.addPodDenyMcast(fExec)
 
 				// The pod should be added to the multicast allow group.
 				mcastPolicy.addPodCmds(fExec, namespace1.Name)
@@ -1314,9 +1310,6 @@ var _ = Describe("OVN NetworkPolicy Operations", func() {
 
 				// Delete the pod from the namespace.
 				mcastPolicy.delPodCmds(fExec, namespace1.Name)
-				// The pod should be removed from the multicasts default deny
-				// group and from the multicast allow group.
-				nPodTest.delCmds(fExec)
 
 				err = fakeOvn.fakeClient.CoreV1().Pods(nPodTest.namespace).Delete(context.TODO(),
 					nPodTest.podName, *metav1.NewDeleteOptions(0))

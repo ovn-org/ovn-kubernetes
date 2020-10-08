@@ -41,7 +41,8 @@ import (
 )
 
 const (
-	egressfirewallCRD = "egressfirewalls.k8s.ovn.org"
+	egressfirewallCRD    string = "egressfirewalls.k8s.ovn.org"
+	clusterPortGroupName string = "clusterPortGroup"
 )
 
 // ServiceVIPKey is used for looking up service namespace information for a
@@ -151,6 +152,9 @@ type Controller struct {
 
 	// An address set factory that creates address sets
 	addressSetFactory AddressSetFactory
+
+	// Port group for all cluster logical switch ports
+	clusterPortGroupUUID string
 
 	// Port group for ingress deny rule
 	portGroupIngressDeny string
