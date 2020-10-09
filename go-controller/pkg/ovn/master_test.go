@@ -625,6 +625,13 @@ subnet=%s
 				"ovn-nbctl --timeout=15 -- --may-exist lsp-add " + masterName + " " + util.K8sPrefix + masterName + " -- lsp-set-addresses " + util.K8sPrefix + masterName + " " + masterMgmtPortMAC + " " + masterMgmtPortIP,
 			})
 			fexec.AddFakeCmd(&ovntest.ExpectedCmd{
+				Cmd:    "ovn-nbctl --timeout=15 get logical_switch_port " + util.K8sPrefix + masterName + " _uuid",
+				Output: fakeUUID + "\n",
+			})
+			fexec.AddFakeCmdsNoOutputNoError([]string{
+				"ovn-nbctl --timeout=15 --if-exists remove port_group clusterPortGroup ports " + fakeUUID + " -- add port_group clusterPortGroup ports " + fakeUUID,
+			})
+			fexec.AddFakeCmd(&ovntest.ExpectedCmd{
 				Cmd:    "ovn-nbctl --timeout=15 lsp-list " + masterName,
 				Output: "29df5ce5-2802-4ee5-891f-4fb27ca776e9 (" + util.K8sPrefix + masterName + ")",
 			})
@@ -839,6 +846,13 @@ var _ = Describe("Gateway Init Operations", func() {
 				"ovn-nbctl --timeout=15 add logical_switch " + nodeName + " load_balancer " + sctpLBUUID,
 				"ovn-nbctl --timeout=15 --may-exist acl-add " + nodeName + " to-lport 1001 ip4.src==" + masterMgmtPortIP + " allow-related",
 				"ovn-nbctl --timeout=15 -- --may-exist lsp-add " + nodeName + " " + util.K8sPrefix + nodeName + " -- lsp-set-addresses " + util.K8sPrefix + nodeName + " " + brLocalnetMAC + " " + masterMgmtPortIP,
+			})
+			fexec.AddFakeCmd(&ovntest.ExpectedCmd{
+				Cmd:    "ovn-nbctl --timeout=15 get logical_switch_port " + util.K8sPrefix + nodeName + " _uuid",
+				Output: fakeUUID + "\n",
+			})
+			fexec.AddFakeCmdsNoOutputNoError([]string{
+				"ovn-nbctl --timeout=15 --if-exists remove port_group clusterPortGroup ports " + fakeUUID + " -- add port_group clusterPortGroup ports " + fakeUUID,
 			})
 			fexec.AddFakeCmd(&ovntest.ExpectedCmd{
 				Cmd:    "ovn-nbctl --timeout=15 lsp-list " + nodeName,
