@@ -8,6 +8,8 @@ KIND_IPV6_SUPPORT?=false
 
 .PHONY: install-kind
 install-kind:
+	KIND_IPV4_SUPPORT=$(KIND_IPV4_SUPPORT) \
+	KIND_IPV6_SUPPORT=$(KIND_IPV6_SUPPORT) \
 	./scripts/install-kind.sh
 
 .PHONY: shard-%
