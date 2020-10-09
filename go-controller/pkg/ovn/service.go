@@ -168,7 +168,16 @@ func (ovn *Controller) syncServices(services []interface{}) {
 					for lb, hasEps := range svcCacheEntry {
 						if hasEps {
 							klog.Infof("Service Sync: Removing OVN stale reject ACL: %s", name)
-							ovn.removeACLFromNodeSwitches(lb, uuid)
+							ovn.removeACLFromPortGroup(lb, uuid)
+							switches, err := ovn.getLogicalSwitchesForLoadBalancer(lb)
+							if err != nil {
+								klog.Errorf("Error finding logical switch that contains load balancer %s: %v", lb, err)
+								continue
+							} else if len(switches) != 0 {
+								klog.V(5).Infof("Service Sync: If exist, Remove OVN stale reject ACL (%s) "+
+									"from logical switches that contains load balancer %s", name, lb)
+								ovn.removeACLFromNodeSwitches(switches, uuid)
+							}
 						}
 					}
 				}
