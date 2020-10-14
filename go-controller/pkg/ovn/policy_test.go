@@ -1189,9 +1189,6 @@ var _ = Describe("OVN NetworkPolicy Operations", func() {
 				_, err = fakeOvn.fakeClient.CoreV1().Namespaces().Update(context.TODO(), ns, metav1.UpdateOptions{})
 				Expect(err).NotTo(HaveOccurred())
 				Eventually(fExec.CalledMatchesExpected).Should(BeTrue(), fExec.ErrorDesc)
-
-				err = fakeOvn.fakeClient.CoreV1().Namespaces().Delete(context.TODO(), namespace1.Name, *metav1.NewDeleteOptions(0))
-				Expect(err).NotTo(HaveOccurred())
 				return nil
 			}
 
@@ -1227,9 +1224,9 @@ var _ = Describe("OVN NetworkPolicy Operations", func() {
 						},
 					},
 				)
-				fakeOvn.controller.WatchNamespaces()
 				nPodTest.populateLogicalSwitchCache(fakeOvn)
 				fakeOvn.controller.WatchPods()
+				fakeOvn.controller.WatchNamespaces()
 				ns, err := fakeOvn.fakeClient.CoreV1().Namespaces().Get(
 					context.TODO(), namespace1.Name, metav1.GetOptions{})
 				Expect(err).NotTo(HaveOccurred())
@@ -1248,8 +1245,6 @@ var _ = Describe("OVN NetworkPolicy Operations", func() {
 				Eventually(fExec.CalledMatchesExpected, 5*time.Second).Should(BeTrue(), fExec.ErrorDesc)
 				fakeOvn.asf.ExpectAddressSetWithIPs(v4AddressSetName1, []string{nPodTest.podIP})
 				fakeOvn.asf.ExpectNoAddressSet(v6AddressSetName1)
-				err = fakeOvn.fakeClient.CoreV1().Namespaces().Delete(context.TODO(), namespace1.Name, *metav1.NewDeleteOptions(0))
-				Expect(err).NotTo(HaveOccurred())
 				return nil
 			}
 
