@@ -190,7 +190,8 @@ cookie=0x0, duration=8366.597s, table=1, n_packets=10641, n_bytes=10370087, prio
 		}
 
 		stop := make(chan struct{})
-		wf, err := factory.NewWatchFactory(fakeClient)
+		wf, err := factory.NewNodeWatchFactory(fakeClient, nodeName)
+
 		Expect(err).NotTo(HaveOccurred())
 		defer func() {
 			close(stop)

@@ -38,7 +38,6 @@ type flowCacheEntry struct {
 
 // NodeController is the node hybrid overlay controller
 type NodeController struct {
-	kube        kube.Interface
 	nodeName    string
 	initialized bool
 	drMAC       net.HardwareAddr
@@ -54,7 +53,6 @@ type NodeController struct {
 	flowChan chan struct{}
 
 	nodeLister listers.NodeLister
-	podLister  listers.PodLister
 }
 
 // newNodeController returns a node handler that listens for node events
@@ -63,14 +61,12 @@ type NodeController struct {
 //  1. Setting up a VXLAN gateway and hooking to the OVN gateway
 //  2. Setting back annotations about its VTEP and gateway MAC address to its own object
 func newNodeController(
-	kube kube.Interface,
+	_ kube.Interface,
 	nodeName string,
 	nodeLister listers.NodeLister,
-	podLister listers.PodLister,
 ) (nodeController, error) {
 
 	node := &NodeController{
-		kube:        kube,
 		nodeName:    nodeName,
 		vxlanPort:   uint16(config.HybridOverlay.VXLANPort),
 		tunMap:      make(map[string]string),
@@ -79,7 +75,6 @@ func newNodeController(
 		flowMutex:   sync.Mutex{},
 		flowChan:    make(chan struct{}, 1),
 		nodeLister:  nodeLister,
-		podLister:   podLister,
 	}
 	return node, nil
 }

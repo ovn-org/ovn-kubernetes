@@ -218,12 +218,11 @@ func (oc *Controller) StartClusterMaster(masterNodeName string) error {
 	}
 
 	if config.HybridOverlay.Enabled {
-		factory := oc.watchFactory.GetFactory()
 		oc.hoMaster, err = hocontroller.NewMaster(
 			oc.kube,
-			factory.Core().V1().Nodes().Informer(),
-			factory.Core().V1().Namespaces().Informer(),
-			factory.Core().V1().Pods().Informer(),
+			oc.watchFactory.NodeInformer(),
+			oc.watchFactory.NamespaceInformer(),
+			oc.watchFactory.PodInformer(),
 			oc.ovnNBClient,
 			oc.ovnSBClient,
 			informer.NewDefaultEventHandler,

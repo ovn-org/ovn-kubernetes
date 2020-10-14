@@ -92,7 +92,7 @@ func (o *FakeOVN) shutdown() {
 func (o *FakeOVN) init() {
 	var err error
 	o.stopChan = make(chan struct{})
-	o.watcher, err = factory.NewWatchFactory(o.fakeClient)
+	o.watcher, err = factory.NewMasterWatchFactory(o.fakeClient)
 	o.watcher.InitializeEgressFirewallWatchFactory()
 	Expect(err).NotTo(HaveOccurred())
 	o.ovnNBClient = ovntest.NewMockOVNClient(goovn.DBNB)

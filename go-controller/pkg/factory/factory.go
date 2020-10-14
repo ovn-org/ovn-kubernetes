@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"reflect"
 	"sync/atomic"
+	"time"
 
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
@@ -21,10 +22,15 @@ import (
 	apiextensionsinformerfactory "k8s.io/apiextensions-apiserver/pkg/client/informers/externalversions"
 
 	kapi "k8s.io/api/core/v1"
+	v1 "k8s.io/api/core/v1"
 	knet "k8s.io/api/networking/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/fields"
 	"k8s.io/apimachinery/pkg/labels"
+	"k8s.io/apimachinery/pkg/selection"
 	informerfactory "k8s.io/client-go/informers"
+	v1coreinformers "k8s.io/client-go/informers/core/v1"
+	"k8s.io/client-go/kubernetes"
 	listers "k8s.io/client-go/listers/core/v1"
 	"k8s.io/client-go/tools/cache"
 	"k8s.io/klog"
@@ -51,6 +57,12 @@ type WatchFactory struct {
 var _ ObjectCacheInterface = &WatchFactory{}
 
 const (
+	// resync time is 0, none of the resources being watched in ovn-kubernetes have
+	// any race condition where a resync may be required e.g. cni executable on node watching for
+	// events on pods and assuming that an 'ADD' event will contain the annotations put in by
+	// ovnkube master (currently, it is just a 'get' loop)
+	// the downside of making it tight (like 10 minutes) is needless spinning on all resources
+	// However, AddEventHandlerWithResyncPeriod can specify a per handler resync period
 	resyncInterval        = 0
 	handlerAlive   uint32 = 0
 	handlerDead    uint32 = 1
@@ -69,8 +81,8 @@ var (
 	egressIPType       reflect.Type = reflect.TypeOf(&egressipapi.EgressIP{})
 )
 
-// NewWatchFactory initializes a new watch factory
-func NewWatchFactory(ovnClientset *util.OVNClientset) (*WatchFactory, error) {
+// NewMasterWatchFactory initializes a new watch factory for the master or master+node processes.
+func NewMasterWatchFactory(ovnClientset *util.OVNClientset) (*WatchFactory, error) {
 	// resync time is 12 hours, none of the resources being watched in ovn-kubernetes have
 	// any race condition where a resync may be required e.g. cni executable on node watching for
 	// events on pods and assuming that an 'ADD' event will contain the annotations put in by
@@ -96,7 +108,27 @@ func NewWatchFactory(ovnClientset *util.OVNClientset) (*WatchFactory, error) {
 		return nil, err
 	}
 
-	// Create shared informers we know we'll use
+	// For Services and Endpoints, pre-populate the shared Informer with one that
+	// has a label selector excluding headless services.
+	wf.iFactory.InformerFor(&kapi.Service{}, func(c kubernetes.Interface, resyncPeriod time.Duration) cache.SharedIndexInformer {
+		return v1coreinformers.NewFilteredServiceInformer(
+			c,
+			kapi.NamespaceAll,
+			resyncPeriod,
+			cache.Indexers{cache.NamespaceIndex: cache.MetaNamespaceIndexFunc},
+			noAlternateProxySelector())
+	})
+
+	wf.iFactory.InformerFor(&kapi.Endpoints{}, func(c kubernetes.Interface, resyncPeriod time.Duration) cache.SharedIndexInformer {
+		return v1coreinformers.NewFilteredEndpointsInformer(
+			c,
+			kapi.NamespaceAll,
+			resyncPeriod,
+			cache.Indexers{cache.NamespaceIndex: cache.MetaNamespaceIndexFunc},
+			noHeadlessServiceSelector())
+	})
+
+	// Create our informer-wrapper informer (and underlying shared informer) for types we need
 	wf.informers[podType], err = newQueuedInformer(podType, wf.iFactory.Core().V1().Pods().Informer(), wf.stopChan)
 	if err != nil {
 		return nil, err
@@ -150,6 +182,78 @@ func NewWatchFactory(ovnClientset *util.OVNClientset) (*WatchFactory, error) {
 			}
 		}
 	}
+	return wf, nil
+}
+
+// NewNodeWatchFactory initializes a watch factory with significantly fewer
+// informers to save memory + bandwidth. It is to be used by the node-only process.
+func NewNodeWatchFactory(ovnClientset *util.OVNClientset, nodeName string) (*WatchFactory, error) {
+	wf := &WatchFactory{
+		iFactory:    informerfactory.NewSharedInformerFactory(ovnClientset.KubeClient, resyncInterval),
+		eipFactory:  egressipinformerfactory.NewSharedInformerFactory(ovnClientset.EgressIPClient, resyncInterval),
+		efClientset: ovnClientset.EgressFirewallClient,
+		crdFactory:  apiextensionsinformerfactory.NewSharedInformerFactory(ovnClientset.APIExtensionsClient, resyncInterval),
+		informers:   make(map[reflect.Type]*informer),
+		stopChan:    make(chan struct{}),
+	}
+	// For Services and Endpoints, pre-populate the shared Informer with one that
+	// has a label selector excluding headless services.
+	wf.iFactory.InformerFor(&kapi.Service{}, func(c kubernetes.Interface, resyncPeriod time.Duration) cache.SharedIndexInformer {
+		return v1coreinformers.NewFilteredServiceInformer(
+			c,
+			kapi.NamespaceAll,
+			resyncPeriod,
+			cache.Indexers{cache.NamespaceIndex: cache.MetaNamespaceIndexFunc},
+			noAlternateProxySelector())
+	})
+
+	wf.iFactory.InformerFor(&kapi.Endpoints{}, func(c kubernetes.Interface, resyncPeriod time.Duration) cache.SharedIndexInformer {
+		return v1coreinformers.NewFilteredEndpointsInformer(
+			c,
+			kapi.NamespaceAll,
+			resyncPeriod,
+			cache.Indexers{cache.NamespaceIndex: cache.MetaNamespaceIndexFunc},
+			noHeadlessServiceSelector())
+	})
+
+	// For Pods, only select pods scheduled to this node
+	wf.iFactory.InformerFor(&kapi.Pod{}, func(c kubernetes.Interface, resyncPeriod time.Duration) cache.SharedIndexInformer {
+		return v1coreinformers.NewFilteredPodInformer(
+			c,
+			kapi.NamespaceAll,
+			resyncPeriod,
+			cache.Indexers{cache.NamespaceIndex: cache.MetaNamespaceIndexFunc},
+			func(opts *metav1.ListOptions) {
+				opts.FieldSelector = fields.OneTermEqualSelector("spec.nodeName", nodeName).String()
+			})
+	})
+
+	var err error
+	wf.informers[podType], err = newQueuedInformer(podType, wf.iFactory.Core().V1().Pods().Informer(), wf.stopChan)
+	if err != nil {
+		return nil, err
+	}
+	wf.informers[serviceType], err = newInformer(serviceType, wf.iFactory.Core().V1().Services().Informer())
+	if err != nil {
+		return nil, err
+	}
+	wf.informers[endpointsType], err = newInformer(endpointsType, wf.iFactory.Core().V1().Endpoints().Informer())
+	if err != nil {
+		return nil, err
+	}
+
+	wf.informers[nodeType], err = newInformer(nodeType, wf.iFactory.Core().V1().Nodes().Informer())
+	if err != nil {
+		return nil, err
+	}
+
+	wf.iFactory.Start(wf.stopChan)
+	for oType, synced := range wf.iFactory.WaitForCacheSync(wf.stopChan) {
+		if !synced {
+			return nil, fmt.Errorf("error in syncing cache for %v informer", oType)
+		}
+	}
+
 	return wf, nil
 }
 
@@ -439,7 +543,58 @@ func (wf *WatchFactory) GetNamespaces() ([]*kapi.Namespace, error) {
 	return namespaceLister.List(labels.Everything())
 }
 
-// GetFactory returns the underlying informer factory
-func (wf *WatchFactory) GetFactory() informerfactory.SharedInformerFactory {
-	return wf.iFactory
+func (wf *WatchFactory) NodeInformer() cache.SharedIndexInformer {
+	return wf.informers[nodeType].inf
+}
+
+// LocalPodInformer returns a shared Informer that may or may not only
+// return pods running on the local node.
+func (wf *WatchFactory) LocalPodInformer() cache.SharedIndexInformer {
+	return wf.informers[podType].inf
+}
+
+func (wf *WatchFactory) PodInformer() cache.SharedIndexInformer {
+	return wf.informers[podType].inf
+}
+
+func (wf *WatchFactory) NamespaceInformer() cache.SharedIndexInformer {
+	return wf.informers[namespaceType].inf
+}
+
+// noHeadlessServiceSelector is a LabelSelector added to the watch for
+// Endpoints (and, eventually, EndpointSlices) that excludes endpoints
+// for headless services.
+// This matches the behavior of kube-proxy
+func noHeadlessServiceSelector() func(options *metav1.ListOptions) {
+	// if the service is headless, skip it
+	noHeadlessEndpoints, err := labels.NewRequirement(v1.IsHeadlessService, selection.DoesNotExist, nil)
+	if err != nil {
+		// cannot occur
+		panic(err)
+	}
+
+	labelSelector := labels.NewSelector().Add(*noHeadlessEndpoints)
+
+	return func(options *metav1.ListOptions) {
+		options.LabelSelector = labelSelector.String()
+	}
+}
+
+// noAlternateProxySelector is a LabelSelector added to the watch for
+// services that excludes services with a well-known label indicating
+// proxying is via an alternate proxy.
+// This matches the behavior of kube-proxy
+func noAlternateProxySelector() func(options *metav1.ListOptions) {
+	// if the proxy-name annotation is set, skip this service
+	noProxyName, err := labels.NewRequirement("service.kubernetes.io/service-proxy-name", selection.DoesNotExist, nil)
+	if err != nil {
+		// cannot occur
+		panic(err)
+	}
+
+	labelSelector := labels.NewSelector().Add(*noProxyName)
+
+	return func(options *metav1.ListOptions) {
+		options.LabelSelector = labelSelector.String()
+	}
 }

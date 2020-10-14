@@ -3,7 +3,6 @@ package node
 import (
 	. "github.com/onsi/gomega"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
-	egressipfake "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/egressip/v1/apis/clientset/versioned/fake"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/factory"
 	ovntest "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/testing"
 	util "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
@@ -12,6 +11,7 @@ import (
 	"k8s.io/client-go/kubernetes/fake"
 	"k8s.io/client-go/tools/record"
 
+	egressipfake "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/egressip/v1/apis/clientset/versioned/fake"
 	apiextensionsfake "k8s.io/apiextensions-apiserver/pkg/client/clientset/clientset/fake"
 )
 
@@ -19,7 +19,7 @@ var fakeNodeName = "node"
 
 type FakeOVNNode struct {
 	node       *OvnNode
-	watcher    *factory.WatchFactory
+	watcher    factory.NodeWatchFactory
 	stopChan   chan struct{}
 	recorder   *record.FakeRecorder
 	fakeClient *util.OVNClientset
@@ -66,7 +66,7 @@ func (o *FakeOVNNode) init() {
 
 	o.stopChan = make(chan struct{})
 
-	o.watcher, err = factory.NewWatchFactory(o.fakeClient)
+	o.watcher, err = factory.NewNodeWatchFactory(o.fakeClient, fakeNodeName)
 	Expect(err).NotTo(HaveOccurred())
 
 	o.node = NewNode(o.fakeClient.KubeClient, o.watcher, fakeNodeName, o.stopChan, o.recorder)
