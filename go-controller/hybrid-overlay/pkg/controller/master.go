@@ -300,6 +300,8 @@ func (m *MasterController) handleOverlayPort(node *kapi.Node, annotator kube.Ann
 }
 
 func createLogicalRouterPolicyForNode(node *kapi.Node, subnets []*net.IPNet) error {
+	// test to see if this code is causing the errors
+	return nil
 	// get all the windows subnets as the dest for lr-policy match
 	var dest string
 	var nextHop string
