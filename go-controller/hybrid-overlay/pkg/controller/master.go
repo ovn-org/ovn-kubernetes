@@ -302,52 +302,6 @@ func (m *MasterController) handleOverlayPort(node *kapi.Node, annotator kube.Ann
 func createLogicalRouterPolicyForNode(node *kapi.Node, subnets []*net.IPNet) error {
 	// test to see if this code is causing the errors
 	return nil
-	// get all the windows subnets as the dest for lr-policy match
-	var dest string
-	var nextHop string
-	var src string
-	for _, hybridSubnet := range config.HybridOverlay.ClusterSubnets {
-		if !utilnet.IsIPv6CIDR(hybridSubnet.CIDR) {
-			dest = dest + fmt.Sprintf("|| ip4.dst == %s", hybridSubnet.CIDR.String())
-		}
-	}
-	//the src is the nodes subnet and the next hop is the third address (x.x.x.3) in the nodes subnet
-	for _, subnet := range subnets {
-		if !utilnet.IsIPv6CIDR(subnet) {
-			src = fmt.Sprintf("ip4.src == %s", subnet.String())
-			ip := util.GetNodeHybridOverlayIfAddr(subnet)
-			nextHop = ip.IP.String()
-			break
-		}
-	}
-	if len(nextHop) == 0 {
-		return fmt.Errorf("could not find an ipv4 Node subnet for node %s", node.Name)
-	}
-
-	_, stderr, err := util.RunOVNNbctl(
-		"--id=@lr-policy",
-		"create",
-		"logical_router_policy",
-		"priority=1006",
-		"action=reroute",
-		fmt.Sprintf("external-ids:hybrid-overlay=%s", node.Name),
-		fmt.Sprintf("match=\"(%s) && %s\"", dest[3:], src),
-		fmt.Sprintf("nexthop=%s", nextHop),
-		"--",
-		"add",
-		"logical_router",
-		"ovn_cluster_router",
-		"policies",
-		"@lr-policy",
-	)
-	if err != nil {
-		// TODO: lr-policy-add doesn't support --may-exist, resort to this workaround for now.
-		// Have raised an issue against ovn repository (https://github.com/ovn-org/ovn/issues/49)
-		if !strings.Contains(stderr, "already existed") {
-			return fmt.Errorf("cannot add logical router policy for hybrid cluster network for node %s: %s", node.Name, stderr)
-		}
-	}
-	return nil
 }
 
 func (m *MasterController) deleteOverlayPort(node *kapi.Node) {

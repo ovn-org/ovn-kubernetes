@@ -339,13 +339,13 @@ var _ = Describe("Hybrid SDN Master Operations", func() {
 					newTestNode(nodeName, "linux", nodeSubnet, "", nodeHOMAC),
 				},
 			})
-			fexec.AddFakeCmdsNoOutputNoError([]string{
-				"ovn-nbctl --timeout=15 --id=@lr-policy create " +
-					"logical_router_policy priority=1006 action=reroute " +
-					"external-ids:hybrid-overlay=node1 match=\"(ip4.dst == 11.1.0.0/16) " +
-					"&& ip4.src == 10.1.2.0/24\" nexthop=10.1.2.3 -- add logical_router " +
-					"ovn_cluster_router policies @lr-policy",
-			})
+			//			fexec.AddFakeCmdsNoOutputNoError([]string{
+			//				"ovn-nbctl --timeout=15 --id=@lr-policy create " +
+			//					"logical_router_policy priority=1006 action=reroute " +
+			//					"external-ids:hybrid-overlay=node1 match=\"(ip4.dst == 11.1.0.0/16) " +
+			//					"&& ip4.src == 10.1.2.0/24\" nexthop=10.1.2.3 -- add logical_router " +
+			//					"ovn_cluster_router policies @lr-policy",
+			//			})
 
 			fexec.AddFakeCmdsNoOutputNoError([]string{
 				"ovn-nbctl --timeout=15 -- --if-exists lsp-del int-node1",
@@ -621,10 +621,10 @@ func addLinuxNodeCommands(fexec *ovntest.FakeExec, nodeHOMAC, nodeName, nodeHOIP
 	})
 	fexec.AddFakeCmdsNoOutputNoError([]string{
 		"ovn-nbctl --timeout=15 -- --if-exists set logical_switch " + nodeName + " other-config:exclude_ips=" + nodeHOIP,
-		"ovn-nbctl --timeout=15 --id=@lr-policy create " +
-			"logical_router_policy priority=1006 action=reroute " +
-			"external-ids:hybrid-overlay=node1 match=\"(ip4.dst == 11.1.0.0/16) " +
-			"&& ip4.src == 10.1.2.0/24\" nexthop=10.1.2.3 -- add logical_router " +
-			"ovn_cluster_router policies @lr-policy",
+		//		"ovn-nbctl --timeout=15 --id=@lr-policy create " +
+		//			"logical_router_policy priority=1006 action=reroute " +
+		//			"external-ids:hybrid-overlay=node1 match=\"(ip4.dst == 11.1.0.0/16) " +
+		//			"&& ip4.src == 10.1.2.0/24\" nexthop=10.1.2.3 -- add logical_router " +
+		//			"ovn_cluster_router policies @lr-policy",
 	})
 }
