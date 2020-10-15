@@ -218,7 +218,7 @@ func ensureDBHealth(db string) {
 	stdout, stderr, err := util.RunOVSDBTool("check-cluster", db)
 	if err != nil {
 		// backup the db by renaming it and then stop the nb/sb ovsdb process.
-		klog.Fatalf("Error occured during checking of clustered db "+
+		klog.Errorf("Error occured during checking of clustered db "+
 			"db: %s,stdout: %q, stderr: %q, err: %v",
 			db, stdout, stderr, err)
 		dbFile := filepath.Base(db)
