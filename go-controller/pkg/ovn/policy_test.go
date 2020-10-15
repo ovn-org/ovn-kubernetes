@@ -1224,8 +1224,8 @@ var _ = Describe("OVN NetworkPolicy Operations", func() {
 					},
 				)
 				nPodTest.populateLogicalSwitchCache(fakeOvn)
-				fakeOvn.controller.WatchPods()
 				fakeOvn.controller.WatchNamespaces()
+				fakeOvn.controller.WatchPods()
 				ns, err := fakeOvn.fakeClient.CoreV1().Namespaces().Get(
 					context.TODO(), namespace1.Name, metav1.GetOptions{})
 				Expect(err).NotTo(HaveOccurred())
