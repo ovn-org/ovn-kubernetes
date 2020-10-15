@@ -445,6 +445,64 @@ var _ = Describe("OVN Pod Operations", func() {
 			err := app.Run([]string{app.Name})
 			Expect(err).NotTo(HaveOccurred())
 		})
+
+		It("retries a failed pod Add when namespace doesn't yet exist", func() {
+			app.Action = func(ctx *cli.Context) error {
+
+				namespaceT := newNamespace("namespace1")
+				t := newTPod(
+					"node1",
+					"10.128.1.0/24",
+					"10.128.1.2",
+					"10.128.1.1",
+					"myPod",
+					"10.128.1.3",
+					"0a:58:0a:80:01:03",
+					namespaceT.Name,
+				)
+				podJSON := `{"default": {"ip_addresses":["` + t.podIP + `/24"], "mac_address":"` + t.podMAC + `", "gateway_ips": ["` + t.nodeGWIP + `"], "ip_address":"` + t.podIP + `/24", "gateway_ip": "` + t.nodeGWIP + `"}}`
+
+				fExec.AddFakeCmd(&ovntest.ExpectedCmd{
+					Cmd:    "ovn-nbctl --timeout=15 --data=bare --no-heading --columns=name find logical_switch_port external_ids:pod=true",
+					Output: "\n",
+				})
+
+				fakeOvn.start(ctx)
+				t.populateLogicalSwitchCache(fakeOvn)
+				fakeOvn.controller.WatchNamespaces()
+				fakeOvn.controller.WatchPods()
+				Expect(fExec.CalledMatchesExpected()).To(BeTrue(), fExec.ErrorDesc)
+
+				// Add pod before namespace; pod will be annotated
+				// but namespace address set will not exist
+				_, err := fakeOvn.fakeClient.CoreV1().Pods(t.namespace).Create(context.TODO(), newPod(t.namespace, t.podName, t.nodeName, t.podIP), metav1.CreateOptions{})
+				Expect(err).NotTo(HaveOccurred())
+				Eventually(func() string { return getPodAnnotations(fakeOvn.fakeClient, t.namespace, t.podName) }, 2).Should(MatchJSON(podJSON))
+
+				v4AddressSetName := t.namespace + ipv4AddressSetSuffix
+				fakeOvn.asf.ExpectNoAddressSet(v4AddressSetName)
+
+				t.addPodDenyMcast(fExec)
+
+				// Now add the namespace
+				_, err = fakeOvn.fakeClient.CoreV1().Namespaces().Create(context.TODO(), namespaceT, metav1.CreateOptions{})
+				Expect(err).NotTo(HaveOccurred())
+
+				// Pod creation should be retried on Update event
+				Eventually(fExec.CalledMatchesExpected).Should(BeTrue(), fExec.ErrorDesc)
+				Expect(getPodAnnotations(fakeOvn.fakeClient, t.namespace, t.podName)).Should(MatchJSON(podJSON))
+				fakeOvn.asf.ExpectAddressSetWithIPs(v4AddressSetName, []string{t.podIP})
+
+				lsp, err := fakeOvn.ovnNBClient.LSPGet(t.namespace + "_" + t.podName)
+				Expect(err).NotTo(HaveOccurred())
+				Expect(lsp.Addresses).To(HaveLen(1))
+				Expect(lsp.Addresses[0]).To(ContainSubstring(t.podIP))
+				return nil
+			}
+
+			err := app.Run([]string{app.Name})
+			Expect(err).NotTo(HaveOccurred())
+		})
 	})
 
 	Context("on startup", func() {
