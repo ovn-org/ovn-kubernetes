@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"sort"
 	"strings"
-	"time"
 
 	. "github.com/onsi/ginkgo"
 	. "github.com/onsi/gomega"
@@ -1231,10 +1230,7 @@ var _ = Describe("OVN NetworkPolicy Operations", func() {
 					context.TODO(), namespace1.Name, metav1.GetOptions{})
 				Expect(err).NotTo(HaveOccurred())
 				Expect(ns).NotTo(BeNil())
-
-				ns.Annotations[nsMulticastAnnotation] = "true"
-				_, err = fakeOvn.fakeClient.CoreV1().Namespaces().Update(context.TODO(), ns, metav1.UpdateOptions{})
-				Expect(err).NotTo(HaveOccurred())
+				Eventually(fExec.CalledMatchesExpected).Should(BeTrue(), fExec.ErrorDesc)
 
 				// Enable multicast in the namespace
 				mcastPolicy := multicastPolicy{}
@@ -1242,7 +1238,11 @@ var _ = Describe("OVN NetworkPolicy Operations", func() {
 				// The pod should be added to the multicast allow port group.
 				mcastPolicy.addPodCmds(fExec, namespace1.Name)
 
-				Eventually(fExec.CalledMatchesExpected, 5*time.Second).Should(BeTrue(), fExec.ErrorDesc)
+				ns.Annotations[nsMulticastAnnotation] = "true"
+				_, err = fakeOvn.fakeClient.CoreV1().Namespaces().Update(context.TODO(), ns, metav1.UpdateOptions{})
+				Expect(err).NotTo(HaveOccurred())
+
+				Eventually(fExec.CalledMatchesExpected).Should(BeTrue(), fExec.ErrorDesc)
 				fakeOvn.asf.ExpectAddressSetWithIPs(v4AddressSetName1, []string{nPodTest.podIP})
 				fakeOvn.asf.ExpectNoAddressSet(v6AddressSetName1)
 				return nil
