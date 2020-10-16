@@ -462,8 +462,8 @@ var _ = Describe("OVN NetworkPolicy Operations", func() {
 					},
 				)
 				nPodTest.populateLogicalSwitchCache(fakeOvn)
-				fakeOvn.controller.WatchPods()
 				fakeOvn.controller.WatchNamespaces()
+				fakeOvn.controller.WatchPods()
 				fakeOvn.controller.WatchNetworkPolicy()
 
 				expectAddressSetsWithIP(fakeOvn, networkPolicy, nPodTest.podIP)
@@ -561,8 +561,8 @@ var _ = Describe("OVN NetworkPolicy Operations", func() {
 					},
 				)
 				nPodTest.populateLogicalSwitchCache(fakeOvn)
-				fakeOvn.controller.WatchPods()
 				fakeOvn.controller.WatchNamespaces()
+				fakeOvn.controller.WatchPods()
 				fakeOvn.controller.WatchNetworkPolicy()
 
 				fakeOvn.asf.ExpectEmptyAddressSet(v4AddressSetName1)
@@ -656,8 +656,8 @@ var _ = Describe("OVN NetworkPolicy Operations", func() {
 					},
 				)
 				nPodTest.populateLogicalSwitchCache(fakeOvn)
-				fakeOvn.controller.WatchPods()
 				fakeOvn.controller.WatchNamespaces()
+				fakeOvn.controller.WatchPods()
 				fakeOvn.controller.WatchNetworkPolicy()
 
 				_, err := fakeOvn.fakeClient.NetworkingV1().NetworkPolicies(networkPolicy.Namespace).Get(context.TODO(), networkPolicy.Name, metav1.GetOptions{})
@@ -745,8 +745,8 @@ var _ = Describe("OVN NetworkPolicy Operations", func() {
 					},
 				)
 				nPodTest.populateLogicalSwitchCache(fakeOvn)
-				fakeOvn.controller.WatchPods()
 				fakeOvn.controller.WatchNamespaces()
+				fakeOvn.controller.WatchPods()
 				fakeOvn.controller.WatchNetworkPolicy()
 
 				_, err := fakeOvn.fakeClient.NetworkingV1().NetworkPolicies(networkPolicy.Namespace).Get(context.TODO(), networkPolicy.Name, metav1.GetOptions{})
@@ -930,8 +930,8 @@ var _ = Describe("OVN NetworkPolicy Operations", func() {
 					},
 				)
 				nPodTest.populateLogicalSwitchCache(fakeOvn)
-				fakeOvn.controller.WatchPods()
 				fakeOvn.controller.WatchNamespaces()
+				fakeOvn.controller.WatchPods()
 				fakeOvn.controller.WatchNetworkPolicy()
 
 				expectAddressSetsWithIP(fakeOvn, networkPolicy, nPodTest.podIP)
@@ -1038,8 +1038,8 @@ var _ = Describe("OVN NetworkPolicy Operations", func() {
 					},
 				)
 				nPodTest.populateLogicalSwitchCache(fakeOvn)
-				fakeOvn.controller.WatchPods()
 				fakeOvn.controller.WatchNamespaces()
+				fakeOvn.controller.WatchPods()
 				fakeOvn.controller.WatchNetworkPolicy()
 
 				fakeOvn.asf.ExpectEmptyAddressSet(v4AddressSetName1)
@@ -1138,8 +1138,8 @@ var _ = Describe("OVN NetworkPolicy Operations", func() {
 					},
 				)
 				nPodTest.populateLogicalSwitchCache(fakeOvn)
-				fakeOvn.controller.WatchPods()
 				fakeOvn.controller.WatchNamespaces()
+				fakeOvn.controller.WatchPods()
 				fakeOvn.controller.WatchNetworkPolicy()
 
 				_, err := fakeOvn.fakeClient.NetworkingV1().NetworkPolicies(networkPolicy.Namespace).Get(context.TODO(), networkPolicy.Name, metav1.GetOptions{})
@@ -1235,8 +1235,8 @@ var _ = Describe("OVN NetworkPolicy Operations", func() {
 					},
 				)
 				nPodTest.populateLogicalSwitchCache(fakeOvn)
-				fakeOvn.controller.WatchPods()
 				fakeOvn.controller.WatchNamespaces()
+				fakeOvn.controller.WatchPods()
 				ns, err := fakeOvn.fakeClient.CoreV1().Namespaces().Get(
 					context.TODO(), namespace1.Name, metav1.GetOptions{})
 				Expect(err).NotTo(HaveOccurred())
