@@ -29,20 +29,6 @@ Create OVN StatefulSet, DaemonSet and Deployment yamls from templates by running
 (The $MASTER_IP below is the IP address of the machine where kube-apiserver is
 running).
 
-**Note:** when specifying the pod CIDR to the command below, daemonset.sh will
-generate a /24 subnet prefix to create per-node CIDRs. Ensure your pod subnet is has a
-prefix less than 24, or edit the generated ovn-setup.yaml and specify a host subnet
-prefix. For example, providing a net-cidr of "129.168.1.0/24" would require modifying
-ovn-setup.yaml with a host subnet prefix as follows:
-
-```
-data:
-  net_cidr:      "192.168.1.0/24/25"
-```
-
-Where "/25" is just chosen for this example, but may be any legitimate prefix value greater
-than 24.
-
 ```
 # Clone ovn-kubernetes repo
 mkdir -p $HOME/work/src/github.com/ovn-org
@@ -50,7 +36,7 @@ cd $HOME/work/src/github.com/ovn-org
 git clone https://github.com/ovn-org/ovn-kubernetes
 cd $HOME/work/src/github.com/ovn-org/ovn-kubernetes/dist/images
 ./daemonset.sh --image=docker.io/ovnkube/ovn-daemonset-u:latest \
-    --net-cidr=192.168.0.0/16 --svc-cidr=172.16.1.0/24 \
+    --net-cidr=192.168.0.0/16/24 --svc-cidr=172.16.1.0/24 \
     --gateway-mode="local" \
     --k8s-apiserver=https://$MASTER_IP:6443
 ```
