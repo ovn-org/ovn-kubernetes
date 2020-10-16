@@ -27,6 +27,8 @@ const (
 	vxlanPort            = "4789"
 	podNetworkAnnotation = "k8s.ovn.org/pod-networks"
 	exGwAnnotation       = "k8s.ovn.org/hybrid-overlay-external-gw"
+	retryInterval        = 1 * time.Second  // polling interval timer
+	retryTimeout         = 40 * time.Second // polling timeout
 )
 
 func checkContinuousConnectivity(f *framework.Framework, nodeName, podName, host string, port, timeout int, podChan chan *v1.Pod, errChan chan error) {
@@ -142,7 +144,7 @@ func checkConnectivityPingToHost(f *framework.Framework, nodeName, podName, host
 	}
 
 	// Wait for pod network setup to be almost ready
-	wait.PollImmediate(1*time.Second, 30*time.Second, func() (bool, error) {
+	err = wait.PollImmediate(retryInterval, retryTimeout, func() (bool, error) {
 		pod, err := podClient.Get(podName, metav1.GetOptions{})
 		if err != nil {
 			return false, nil
@@ -155,6 +157,10 @@ func checkConnectivityPingToHost(f *framework.Framework, nodeName, podName, host
 		_, ok := pod.Annotations[podNetworkAnnotation]
 		return ok, nil
 	})
+	// Fail the test if no pod annotation is retrieved
+	if err != nil {
+		framework.Failf("Error trying to get the pod annotation")
+	}
 
 	err = e2epod.WaitForPodSuccessInNamespace(f.ClientSet, podName, f.Namespace.Name)
 
@@ -369,7 +375,6 @@ var _ = Describe("test e2e inter-node connectivity between worker nodes hybrid o
 		ovnContainer     string = "ovnkube-node"
 		gwContainerName  string = "gw-test-container-internode"
 		jsonFlag         string = "-o=jsonpath='{.items..metadata.name}'"
-		getPodIPRetry    int    = 20
 	)
 	var (
 		haMode    bool
@@ -459,36 +464,21 @@ var _ = Describe("test e2e inter-node connectivity between worker nodes hybrid o
 		createGenericPod(f, dstPingPodName, ciWorkerNodeDst, command)
 
 		// Wait for pod exgw setup to be almost ready
-		wait.PollImmediate(1*time.Second, 30*time.Second, func() (bool, error) {
-			jsonFlag := "jsonpath='{.metadata.annotations.k8s\\.ovn\\.org/hybrid-overlay-external-gw}'"
-			kubectlOut, err := framework.RunKubectl("get", "pod", ovnNsFlag, dstPingPodName, jsonFlag)
+		err = wait.PollImmediate(retryInterval, retryTimeout, func() (bool, error) {
+			pingTarget, err = getPodAddress(dstPingPodName, f.Namespace.Name)
 			if err != nil {
+				framework.Logf("retrying ... error trying to get pod  %s address: %v", dstPingPodName, err)
 				return false, nil
 			}
-			if !strings.Contains(kubectlOut, pingTarget) {
+			validIP = net.ParseIP(pingTarget)
+			if validIP == nil {
 				return false, nil
 			}
 			return true, nil
 		})
-
-		// There is a condition somewhere with e2e WaitForPodNotPending that returns ready
-		// before calling for the IP address will succeed. This simply adds some retries.
-		for i := 1; i < getPodIPRetry; i++ {
-			pingTarget, err = getPodAddress(dstPingPodName, f.Namespace.Name)
-			if err != nil {
-				framework.Logf("Warning unable to query the test pod on node %s %v", ciWorkerNodeSrc, err)
-			}
-			validIP = net.ParseIP(pingTarget)
-			if validIP != nil {
-				framework.Logf("Destination ping target for %s is %s", dstPingPodName, pingTarget)
-				break
-			}
-			time.Sleep(time.Second * 4)
-			framework.Logf("Retry attempt %d to get pod IP from initializing pod %s", i, dstPingPodName)
-		}
 		// Fail the test if no address is ever retrieved
-		if validIP == nil {
-			framework.Failf("Warning: Failed to get an IP for target pod %s, test will fail", dstPingPodName)
+		if err != nil {
+			framework.Failf("Error trying to get the pod IP address")
 		}
 		// Spin up another pod that attempts to reach the previously started pod on separate nodes
 		framework.ExpectNoError(
@@ -828,7 +818,6 @@ var _ = Describe("e2e multiple external gateway update validation", func() {
 		gwContainerNameAlt1 string = "gw-test-container-alt"
 		gwContainerNameAlt2 string = "gw-test-container-alt2"
 		ovnControlNode      string = "ovn-control-plane"
-		getPodIPRetry       int    = 20
 	)
 	var (
 		haMode        bool
@@ -965,38 +954,22 @@ var _ = Describe("e2e multiple external gateway update validation", func() {
 		createGenericPod(f, srcPingPodName, ciWorkerNodeSrc, command)
 
 		// Wait for pod exgw setup to be almost ready
-		wait.PollImmediate(1*time.Second, 30*time.Second, func() (bool, error) {
-			jsonFlag := "jsonpath='{.metadata.annotations.k8s\\.ovn\\.org/hybrid-overlay-external-gw}'"
-			kubectlOut, err := framework.RunKubectl("get", "pod", ovnNsFlag, srcPingPodName, jsonFlag)
+		err = wait.PollImmediate(retryInterval, retryTimeout, func() (bool, error) {
+			pingSrc, err = getPodAddress(srcPingPodName, f.Namespace.Name)
 			if err != nil {
+				framework.Logf("retrying ... error trying to get pod  %s address: %v", srcPingPodName, err)
 				return false, nil
 			}
-			if !strings.Contains(kubectlOut, extGwAlt1) {
+			validIP = net.ParseIP(pingSrc)
+			if validIP == nil {
 				return false, nil
 			}
 			return true, nil
 		})
-
-		// There is a condition with e2e WaitForPodNotPending that returns ready
-		// before calling for the IP address will succeed. This simply adds some retries.
-		for i := 1; i < getPodIPRetry; i++ {
-			pingSrc, err = getPodAddress(srcPingPodName, f.Namespace.Name)
-			if err != nil {
-				framework.Logf("Warning unable to query the test pod on node %s %v", ciWorkerNodeSrc, err)
-			}
-			validIP = net.ParseIP(pingSrc)
-			if validIP != nil {
-				framework.Logf("Source pod is %s is %s", srcPingPodName, pingSrc)
-				break
-			}
-			time.Sleep(time.Second * 4)
-			framework.Logf("Retry attempt %d to get pod IP from initializing pod %s", i, srcPingPodName)
-		}
 		// Fail the test if no address is ever retrieved
-		if validIP == nil {
-			framework.Failf("Warning: Failed to get an IP for the source pod %s, test will fail", srcPingPodName)
+		if err != nil {
+			framework.Failf("Error trying to get the pod IP address")
 		}
-		time.Sleep(time.Second * 15)
 		// Verify the initial gateway is reachable from the new pod
 		By(fmt.Sprintf("Verifying connectivity to the updated annotation and initial external gateway %s and vtep %s", extGwAlt1, exVtepIpAlt1))
 		_, err = framework.RunKubectl("exec", srcPingPodName, frameworkNsFlag, testContainerFlag, "--", "ping", "-w", "40", extGwAlt1)
@@ -1048,20 +1021,6 @@ var _ = Describe("e2e multiple external gateway update validation", func() {
 			framework.Failf("failed to add the pod route on the test container: %v", err)
 		}
 
-		// Wait for the exGW pod networking to be almost, updated
-		wait.PollImmediate(1*time.Second, 30*time.Second, func() (bool, error) {
-			jsonFlag := "jsonpath='{.metadata.annotations.k8s\\.ovn\\.org/hybrid-overlay-external-gw}'"
-			kubectlOut, err := framework.RunKubectl("get", "pod", ovnNsFlag, srcPingPodName, jsonFlag)
-			if err != nil {
-				return false, nil
-			}
-			if !strings.Contains(kubectlOut, extGwAlt2) {
-				return false, nil
-			}
-			return true, nil
-		})
-
-		// Verify the updated gateway is reachable from the initial pod
 		By(fmt.Sprintf("Verifying connectivity to the updated annotation and new external gateway %s and vtep %s", extGwAlt2, exVtepIpAlt2))
 		_, err = framework.RunKubectl("exec", srcPingPodName, frameworkNsFlag, testContainerFlag, "--", "ping", "-w", "40", extGwAlt2)
 		if err != nil {
@@ -1087,7 +1046,6 @@ var _ = Describe("e2e non-vxlan external gateway and update validation", func() 
 		gwContainerNameAlt2 string = "gw-novxlan-test-container-alt2"
 		ovnControlNode      string = "ovn-control-plane"
 		sharedGatewayBridge string = "breth0"
-		getPodIPRetry       int    = 20
 	)
 	var (
 		haMode        bool
@@ -1221,38 +1179,22 @@ var _ = Describe("e2e non-vxlan external gateway and update validation", func() 
 		}
 		// Create the pod that will be used as the source for the connectivity test
 		createGenericPod(f, srcPingPodName, ciWorkerNodeSrc, command)
-
-		// Wait for pod exgw setup to be almost ready
-		wait.PollImmediate(1*time.Second, 30*time.Second, func() (bool, error) {
-			jsonFlag := "jsonpath='{.metadata.annotations.k8s\\.ovn\\.org/routing-external-gws}'"
-			kubectlOut, err := framework.RunKubectl("get", "pod", ovnNsFlag, srcPingPodName, jsonFlag)
+		// wait for pod setup to return a valid address
+		err = wait.PollImmediate(retryInterval, retryTimeout, func() (bool, error) {
+			pingSrc, err = getPodAddress(srcPingPodName, f.Namespace.Name)
 			if err != nil {
+				framework.Logf("retrying ... error trying to get pod  %s address: %v", srcPingPodName, err)
 				return false, nil
 			}
-			if !strings.Contains(kubectlOut, exGWRemoteIpAlt1) {
+			validIP = net.ParseIP(pingSrc)
+			if validIP == nil {
 				return false, nil
 			}
 			return true, nil
 		})
-
-		// There is a condition with e2e WaitForPodNotPending that returns ready
-		// before calling for the IP address will succeed. This simply adds some retries.
-		for i := 1; i < getPodIPRetry; i++ {
-			pingSrc, err = getPodAddress(srcPingPodName, f.Namespace.Name)
-			if err != nil {
-				framework.Logf("Warning unable to query the test pod on node %s %v", ciWorkerNodeSrc, err)
-			}
-			validIP = net.ParseIP(pingSrc)
-			if validIP != nil {
-				framework.Logf("Source pod is %s is %s", srcPingPodName, pingSrc)
-				break
-			}
-			time.Sleep(time.Second * 4)
-			framework.Logf("Retry attempt %d to get pod IP from initializing pod %s", i, srcPingPodName)
-		}
 		// Fail the test if no address is ever retrieved
-		if validIP == nil {
-			framework.Failf("Warning: Failed to get an IP for the source pod %s, test will fail", srcPingPodName)
+		if err != nil {
+			framework.Failf("Error trying to get the pod IP address")
 		}
 		// add a host route on the first mock gateway for return traffic to the pod
 		_, err = runCommand("docker", "exec", gwContainerNameAlt1, "ip", "route", "add", pingSrc, "via", nodeIP)
@@ -1301,18 +1243,6 @@ var _ = Describe("e2e non-vxlan external gateway and update validation", func() 
 		if err != nil {
 			framework.Failf("failed to add the pod route on the test container: %v", err)
 		}
-		// Wait for the exGW pod networking to be almost, updated
-		wait.PollImmediate(1*time.Second, 30*time.Second, func() (bool, error) {
-			jsonFlag := "jsonpath='{.metadata.annotations.k8s\\.ovn\\.org/hybrid-overlay-external-gw}'"
-			kubectlOut, err := framework.RunKubectl("get", "pod", ovnNsFlag, srcPingPodName, jsonFlag)
-			if err != nil {
-				return false, nil
-			}
-			if !strings.Contains(kubectlOut, exGWRemoteIpAlt2) {
-				return false, nil
-			}
-			return true, nil
-		})
 		// Verify the updated gateway and remote address is reachable from the initial pod
 		By(fmt.Sprintf("Verifying connectivity without vxlan to the updated annotation and new external gateway %s and remote IP %s", exGWRemoteIpAlt2, exGWIpAlt2))
 		_, err = framework.RunKubectl("exec", srcPingPodName, frameworkNsFlag, testContainerFlag, "--", "ping", "-w", "40", exGWRemoteIpAlt2)
