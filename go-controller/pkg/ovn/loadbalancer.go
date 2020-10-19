@@ -188,7 +188,7 @@ func (ovn *Controller) generateACLNameForOVNCommand(lb string, sourceIP string, 
 	return strings.ReplaceAll(ovn.generateACLName(lb, sourceIP, sourcePort), ":", "\\:")
 }
 
-func (ovn *Controller) createLoadBalancerRejectACL(lb string, sourceIP string, sourcePort int32, proto kapi.Protocol) (string, error) {
+func (ovn *Controller) createLoadBalancerRejectACL(lb, sourceIP string, sourcePort int32, proto kapi.Protocol) (string, error) {
 	ovn.serviceLBLock.Lock()
 	defer ovn.serviceLBLock.Unlock()
 	switches, err := ovn.getLogicalSwitchesForLoadBalancer(lb)
@@ -205,8 +205,7 @@ func (ovn *Controller) createLoadBalancerRejectACL(lb string, sourceIP string, s
 	if ip == nil {
 		return "", fmt.Errorf("cannot create reject ACL, invalid source IP: %s", sourceIP)
 	}
-	var aclMatch string
-	var l3Prefix string
+	var l3Prefix, aclMatch string
 	if utilnet.IsIPv6(ip) {
 		l3Prefix = "ip6"
 	} else {
@@ -223,39 +222,38 @@ func (ovn *Controller) createLoadBalancerRejectACL(lb string, sourceIP string, s
 		klog.Errorf("Error while querying ACLs by name: %s, %v", stderr, err)
 	} else if len(aclUUID) > 0 {
 		klog.Infof("Existing Service Reject ACL found: %s for %s", aclUUID, aclName)
-		// If we found the ACL exists we need to ensure it applies to all logical switches
-		cmd := []string{}
-		for _, ls := range switches {
-			cmd = append(cmd, "--", "add", "logical_switch", ls, "acls", aclUUID)
+		_, stderr, err = util.RunOVNNbctl("--", "add", "port_group", ovn.clusterPortGroupUUID, "acls", aclUUID)
+		if err != nil {
+			klog.Errorf("Failed to add LB %s ACL %s %q to cluster port group: %q (%v)",
+				lb, aclUUID, aclName, stderr, err)
+			return "", err
 		}
-		if len(cmd) > 0 {
-			_, _, err = util.RunOVNNbctl(cmd...)
-			if err != nil {
-				klog.Warningf("Unable to add reject ACL: %s for switches: %s", aclUUID, switches)
-			}
-		}
+
 		ovn.setServiceACLToLB(lb, vip, aclUUID)
+
+		// If reject ACL exist, ensures that the _uuid is removed from logical_switch acls list.
+		// This step is required to ensure the clean-up when ovn upgrades from logical_switch acls
+		// to port_group based acls.
+		ovn.removeACLFromNodeSwitches(switches, aclUUID)
 		return aclUUID, nil
 	}
 
 	aclMatch = fmt.Sprintf("match=\"%s.dst==%s && %s && %s.dst==%d\"", l3Prefix, sourceIP,
 		strings.ToLower(string(proto)), strings.ToLower(string(proto)), sourcePort)
-
-	cmd := []string{"--id=@acl", "create", "acl", "direction=from-lport", "priority=1000", aclMatch, "action=reject",
+	cmd := []string{"--id=@reject-acl", "create", "acl", "direction=from-lport", "priority=1000", aclMatch, "action=reject",
 		fmt.Sprintf("name=%s", aclName)}
-	for _, ls := range switches {
-		cmd = append(cmd, "--", "add", "logical_switch", ls, "acls", "@acl")
-	}
-
+	cmd = append(cmd, "--", "add", "port_group", ovn.clusterPortGroupUUID, "acls", "@reject-acl")
 	aclUUID, stderr, err = util.RunOVNNbctl(cmd...)
 	if err != nil {
-		return "", fmt.Errorf("error creating ACL reject rule: %s for load balancer %s: %s, %s", cmd, lb, stderr,
-			err)
-	} else {
-		// Associate ACL UUID with load balancer and ip+port so we can remove this ACL if
-		// backends are re-added.
-		ovn.setServiceACLToLB(lb, vip, aclUUID)
+		klog.Errorf("Failed to add LB %s ACL %s %q to cluster port group: %q (%v)",
+			lb, aclUUID, aclName, stderr, err)
+		return "", err
 	}
+
+	// Associate ACL UUID with load balancer and ip+port so we can remove this ACL if
+	// backends are re-added.
+	ovn.setServiceACLToLB(lb, vip, aclUUID)
+
 	return aclUUID, nil
 }
 
@@ -270,50 +268,58 @@ func (ovn *Controller) deleteLoadBalancerRejectACL(lb, vip string) {
 			klog.Errorf("Unable to parse vip for Reject ACL deletion: %v", err)
 			return
 		}
-		ovn.removeStaleRejectACL(lb, ip, port)
+		aclUUID, err = ovn.findStaleRejectACL(lb, ip, port)
+		if err == nil {
+			ovn.removeACLFromPortGroup(lb, aclUUID)
+		}
+		return
 	} else if aclUUID == "" {
 		// Must have endpoints and no reject ACL to remove
 		klog.V(5).Infof("No reject ACL found to remove for load balancer: %s, vip: %s", lb, vip)
 		return
-	} else {
-		ovn.removeACLFromNodeSwitches(lb, aclUUID)
 	}
+	ovn.removeACLFromPortGroup(lb, aclUUID)
 	ovn.removeServiceACL(lb, vip)
 }
 
-func (ovn *Controller) removeStaleRejectACL(lb, ip string, port int32) {
+func (ovn *Controller) findStaleRejectACL(lb, ip string, port int32) (string, error) {
 	aclName := ovn.generateACLNameForOVNCommand(lb, ip, port)
 	aclUUID, stderr, err := util.RunOVNNbctl("--data=bare", "--no-heading", "--columns=_uuid", "find", "acl",
 		fmt.Sprintf("name=%s", aclName))
 	if err != nil {
 		klog.Errorf("Error while querying ACLs by name: %s, %v", stderr, err)
-		return
+		return "", err
 	} else if len(aclUUID) == 0 {
 		klog.Infof("Reject ACL not found to remove for name: %s", aclName)
-		return
+		return "", fmt.Errorf("reject ACL not found to remove for name: %s", aclName)
 	}
-
-	ovn.removeACLFromNodeSwitches(lb, aclUUID)
+	return aclUUID, nil
 }
 
-func (ovn *Controller) removeACLFromNodeSwitches(lb, aclUUID string) {
-	switches, err := ovn.getLogicalSwitchesForLoadBalancer(lb)
-	if err != nil {
-		klog.Errorf("Could not retrieve logical switches associated with load balancer %s", lb)
-		return
-	}
-
+// Remove the ACL uuid entry from Logical Switch acl's list.
+// Deprecated:This method is not required once a release with this patch is out.
+// This logic is specifically added to address the ovn upgrade.
+func (ovn *Controller) removeACLFromNodeSwitches(switches []string, aclUUID string) {
 	args := []string{}
 	for _, ls := range switches {
 		args = append(args, "--", "--if-exists", "remove", "logical_switch", ls, "acl", aclUUID)
 	}
 
 	if len(args) > 0 {
-		_, _, err = util.RunOVNNbctl(args...)
+		_, _, err := util.RunOVNNbctl(args...)
 		if err != nil {
 			klog.Errorf("Error while removing ACL: %s, from switches, error: %v", aclUUID, err)
 		} else {
 			klog.Infof("ACL: %s, removed from switches: %s", aclUUID, switches)
 		}
+	}
+}
+
+func (ovn *Controller) removeACLFromPortGroup(lb, aclUUID string) {
+	_, stderr, err := util.RunOVNNbctl("--", "--if-exists", "remove", "port_group", ovn.clusterPortGroupUUID, "acls", aclUUID)
+	if err != nil {
+		klog.Errorf("Failed to remove reject ACL %s from LB %s: stderr: %q, error: %v", aclUUID, lb, stderr, err)
+	} else {
+		klog.Infof("ACL: %s, removed from the port group : %s", aclUUID, ovn.clusterPortGroupUUID)
 	}
 }
