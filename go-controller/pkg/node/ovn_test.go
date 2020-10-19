@@ -12,22 +12,18 @@ import (
 	"k8s.io/client-go/kubernetes/fake"
 	"k8s.io/client-go/tools/record"
 
-	egressfirewallfake "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/egressfirewall/v1/apis/clientset/versioned/fake"
 	apiextensionsfake "k8s.io/apiextensions-apiserver/pkg/client/clientset/clientset/fake"
 )
 
 var fakeNodeName = "node"
 
 type FakeOVNNode struct {
-	node               *OvnNode
-	watcher            *factory.WatchFactory
-	stopChan           chan struct{}
-	recorder           *record.FakeRecorder
-	fakeClient         *fake.Clientset
-	fakeEgressIPClient *egressipfake.Clientset
-	fakeEgressClient   *egressfirewallfake.Clientset
-	fakeCRDClient      *apiextensionsfake.Clientset
-	fakeExec           *ovntest.FakeExec
+	node       *OvnNode
+	watcher    *factory.WatchFactory
+	stopChan   chan struct{}
+	recorder   *record.FakeRecorder
+	fakeClient *util.OVNClientset
+	fakeExec   *ovntest.FakeExec
 }
 
 func NewFakeOVNNode(fexec *ovntest.FakeExec) *FakeOVNNode {
@@ -48,10 +44,11 @@ func (o *FakeOVNNode) start(ctx *cli.Context, objects ...runtime.Object) {
 	_, err := config.InitConfig(ctx, o.fakeExec, nil)
 	Expect(err).NotTo(HaveOccurred())
 
-	o.fakeCRDClient = apiextensionsfake.NewSimpleClientset()
-	o.fakeEgressClient = egressfirewallfake.NewSimpleClientset()
-	o.fakeEgressIPClient = egressipfake.NewSimpleClientset()
-	o.fakeClient = fake.NewSimpleClientset(v1Objects...)
+	o.fakeClient = &util.OVNClientset{
+		KubeClient:          fake.NewSimpleClientset(v1Objects...),
+		EgressIPClient:      egressipfake.NewSimpleClientset(),
+		APIExtensionsClient: apiextensionsfake.NewSimpleClientset(),
+	}
 	o.init()
 }
 
@@ -69,8 +66,8 @@ func (o *FakeOVNNode) init() {
 
 	o.stopChan = make(chan struct{})
 
-	o.watcher, err = factory.NewWatchFactory(o.fakeClient, o.fakeEgressIPClient, o.fakeEgressClient, o.fakeCRDClient)
+	o.watcher, err = factory.NewWatchFactory(o.fakeClient)
 	Expect(err).NotTo(HaveOccurred())
 
-	o.node = NewNode(o.fakeClient, o.watcher, fakeNodeName, o.stopChan, o.recorder)
+	o.node = NewNode(o.fakeClient.KubeClient, o.watcher, fakeNodeName, o.stopChan, o.recorder)
 }

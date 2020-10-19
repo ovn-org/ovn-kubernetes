@@ -107,7 +107,7 @@ var _ = Describe("OVN Namespace Operations", func() {
 				fakeOvn.controller.logicalPortCache.add(tP.nodeName, tP.portName, fakeUUID, podMAC, podIPNets)
 				fakeOvn.controller.WatchNamespaces()
 
-				_, err := fakeOvn.fakeClient.CoreV1().Namespaces().Get(context.TODO(), namespaceT.Name, metav1.GetOptions{})
+				_, err := fakeOvn.fakeClient.KubeClient.CoreV1().Namespaces().Get(context.TODO(), namespaceT.Name, metav1.GetOptions{})
 				Expect(err).NotTo(HaveOccurred())
 
 				fakeOvn.asf.ExpectAddressSetWithIPs(v4AddressSetName, []string{tP.podIP})
@@ -129,7 +129,7 @@ var _ = Describe("OVN Namespace Operations", func() {
 				})
 				fakeOvn.controller.WatchNamespaces()
 
-				_, err := fakeOvn.fakeClient.CoreV1().Namespaces().Get(context.TODO(), namespaceName, metav1.GetOptions{})
+				_, err := fakeOvn.fakeClient.KubeClient.CoreV1().Namespaces().Get(context.TODO(), namespaceName, metav1.GetOptions{})
 				Expect(err).NotTo(HaveOccurred())
 
 				fakeOvn.asf.ExpectEmptyAddressSet(v4AddressSetName)
@@ -155,7 +155,7 @@ var _ = Describe("OVN Namespace Operations", func() {
 				fakeOvn.asf.ExpectEmptyAddressSet(v4AddressSetName)
 				fakeOvn.asf.ExpectNoAddressSet(v6AddressSetName)
 
-				err := fakeOvn.fakeClient.CoreV1().Namespaces().Delete(context.TODO(), namespaceName, *metav1.NewDeleteOptions(1))
+				err := fakeOvn.fakeClient.KubeClient.CoreV1().Namespaces().Delete(context.TODO(), namespaceName, *metav1.NewDeleteOptions(1))
 				Expect(err).NotTo(HaveOccurred())
 				fakeOvn.asf.EventuallyExpectNoAddressSet(v4AddressSetName)
 				return nil

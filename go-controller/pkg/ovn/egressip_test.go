@@ -99,14 +99,14 @@ var _ = Describe("OVN master EgressIP Operations", func() {
 
 	getEgressIPStatusLen := func(egressIPName string) func() int {
 		return func() int {
-			tmp, err := fakeOvn.fakeEgressIPClient.K8sV1().EgressIPs().Get(context.TODO(), egressIPName, metav1.GetOptions{})
+			tmp, err := fakeOvn.fakeClient.EgressIPClient.K8sV1().EgressIPs().Get(context.TODO(), egressIPName, metav1.GetOptions{})
 			Expect(err).NotTo(HaveOccurred())
 			return len(tmp.Status.Items)
 		}
 	}
 
 	getEgressIPStatus := func(egressIPName string) []egressipv1.EgressIPStatusItem {
-		tmp, err := fakeOvn.fakeEgressIPClient.K8sV1().EgressIPs().Get(context.TODO(), egressIPName, metav1.GetOptions{})
+		tmp, err := fakeOvn.fakeClient.EgressIPClient.K8sV1().EgressIPs().Get(context.TODO(), egressIPName, metav1.GetOptions{})
 		Expect(err).NotTo(HaveOccurred())
 		return tmp.Status.Items
 	}
@@ -219,9 +219,9 @@ var _ = Describe("OVN master EgressIP Operations", func() {
 					"k8s.ovn.org/egress-assignable": "",
 				}
 
-				_, err := fakeOvn.fakeClient.CoreV1().Nodes().Update(context.TODO(), &node1, metav1.UpdateOptions{})
+				_, err := fakeOvn.fakeClient.KubeClient.CoreV1().Nodes().Update(context.TODO(), &node1, metav1.UpdateOptions{})
 				Expect(err).NotTo(HaveOccurred())
-				_, err = fakeOvn.fakeClient.CoreV1().Nodes().Update(context.TODO(), &node2, metav1.UpdateOptions{})
+				_, err = fakeOvn.fakeClient.KubeClient.CoreV1().Nodes().Update(context.TODO(), &node2, metav1.UpdateOptions{})
 				Expect(err).NotTo(HaveOccurred())
 
 				nodeSwitch := func() string {
@@ -248,7 +248,7 @@ var _ = Describe("OVN master EgressIP Operations", func() {
 						fmt.Sprintf("ovn-nbctl --timeout=15 --id=@nat create nat type=snat %s %s %s %s -- add logical_router GR_%s nat @nat", fmt.Sprintf("logical_port=k8s-%s", node2.Name), fmt.Sprintf("external_ip=%s", egressIP), fmt.Sprintf("logical_ip=%s", egressPod.Status.PodIP), fmt.Sprintf("external_ids:name=%s", eIP.Name), node2.Name),
 					},
 				)
-				_, err = fakeOvn.fakeClient.CoreV1().Pods(egressPod.Namespace).Create(context.TODO(), &egressPod, metav1.CreateOptions{})
+				_, err = fakeOvn.fakeClient.KubeClient.CoreV1().Pods(egressPod.Namespace).Create(context.TODO(), &egressPod, metav1.CreateOptions{})
 
 				Eventually(fakeOvn.fakeExec.CalledMatchesExpected).Should(BeTrue(), fakeOvn.fakeExec.ErrorDesc)
 
@@ -334,9 +334,9 @@ var _ = Describe("OVN master EgressIP Operations", func() {
 					"k8s.ovn.org/egress-assignable": "",
 				}
 
-				_, err := fakeOvn.fakeClient.CoreV1().Nodes().Update(context.TODO(), &node1, metav1.UpdateOptions{})
+				_, err := fakeOvn.fakeClient.KubeClient.CoreV1().Nodes().Update(context.TODO(), &node1, metav1.UpdateOptions{})
 				Expect(err).NotTo(HaveOccurred())
-				_, err = fakeOvn.fakeClient.CoreV1().Nodes().Update(context.TODO(), &node2, metav1.UpdateOptions{})
+				_, err = fakeOvn.fakeClient.KubeClient.CoreV1().Nodes().Update(context.TODO(), &node2, metav1.UpdateOptions{})
 				Expect(err).NotTo(HaveOccurred())
 
 				nodeSwitch := func() string {
@@ -363,14 +363,14 @@ var _ = Describe("OVN master EgressIP Operations", func() {
 						fmt.Sprintf("ovn-nbctl --timeout=15 --id=@nat create nat type=snat %s %s %s %s -- add logical_router GR_%s nat @nat", fmt.Sprintf("logical_port=k8s-%s", node2.Name), fmt.Sprintf("external_ip=%s", egressIP), fmt.Sprintf("logical_ip=%s", egressPod.Status.PodIP), fmt.Sprintf("external_ids:name=%s", eIP.Name), node2.Name),
 					},
 				)
-				_, err = fakeOvn.fakeClient.CoreV1().Namespaces().Create(context.TODO(), egressNamespace, metav1.CreateOptions{})
+				_, err = fakeOvn.fakeClient.KubeClient.CoreV1().Namespaces().Create(context.TODO(), egressNamespace, metav1.CreateOptions{})
 				Expect(err).NotTo(HaveOccurred())
 				Eventually(func() int {
 					fakeOvn.controller.egressIPPodHandlerMutex.Lock()
 					defer fakeOvn.controller.egressIPPodHandlerMutex.Unlock()
 					return len(fakeOvn.controller.egressIPPodHandlerCache)
 				}).Should(Equal(1))
-				_, err = fakeOvn.fakeClient.CoreV1().Pods(egressPod.Namespace).Create(context.TODO(), &egressPod, metav1.CreateOptions{})
+				_, err = fakeOvn.fakeClient.KubeClient.CoreV1().Pods(egressPod.Namespace).Create(context.TODO(), &egressPod, metav1.CreateOptions{})
 				Expect(err).NotTo(HaveOccurred())
 				Eventually(fakeOvn.fakeExec.CalledMatchesExpected).Should(BeTrue(), fakeOvn.fakeExec.ErrorDesc)
 				return nil
@@ -438,7 +438,7 @@ var _ = Describe("OVN master EgressIP Operations", func() {
 
 				fakeOvn.controller.WatchEgressIP()
 
-				_, err := fakeOvn.fakeEgressIPClient.K8sV1().EgressIPs().Create(context.TODO(), &eIP, metav1.CreateOptions{})
+				_, err := fakeOvn.fakeClient.EgressIPClient.K8sV1().EgressIPs().Create(context.TODO(), &eIP, metav1.CreateOptions{})
 				Expect(err).NotTo(HaveOccurred())
 
 				Eventually(getEgressIPStatusLen(eIP.Name)).Should(Equal(1))
@@ -472,7 +472,7 @@ var _ = Describe("OVN master EgressIP Operations", func() {
 						fmt.Sprintf("ovn-nbctl --timeout=15 remove logical_router GR_%s nat %s", node2.name, natID),
 					},
 				)
-				_, err = fakeOvn.fakeClient.CoreV1().Pods(egressPod.Namespace).Update(context.TODO(), podUpdate, metav1.UpdateOptions{})
+				_, err = fakeOvn.fakeClient.KubeClient.CoreV1().Pods(egressPod.Namespace).Update(context.TODO(), podUpdate, metav1.UpdateOptions{})
 				Expect(err).ToNot(HaveOccurred())
 				Eventually(getEgressIPStatusLen(eIP.Name)).Should(Equal(1))
 				Eventually(fakeOvn.fakeExec.CalledMatchesExpected).Should(BeTrue(), fakeOvn.fakeExec.ErrorDesc)
@@ -539,7 +539,7 @@ var _ = Describe("OVN master EgressIP Operations", func() {
 
 				fakeOvn.controller.WatchEgressIP()
 
-				_, err := fakeOvn.fakeEgressIPClient.K8sV1().EgressIPs().Create(context.TODO(), &eIP, metav1.CreateOptions{})
+				_, err := fakeOvn.fakeClient.EgressIPClient.K8sV1().EgressIPs().Create(context.TODO(), &eIP, metav1.CreateOptions{})
 				Expect(err).NotTo(HaveOccurred())
 
 				Eventually(getEgressIPStatusLen(eIP.Name)).Should(Equal(1))
@@ -554,7 +554,7 @@ var _ = Describe("OVN master EgressIP Operations", func() {
 					"some":   "update",
 				})
 
-				_, err = fakeOvn.fakeClient.CoreV1().Pods(egressPod.Namespace).Update(context.TODO(), podUpdate, metav1.UpdateOptions{})
+				_, err = fakeOvn.fakeClient.KubeClient.CoreV1().Pods(egressPod.Namespace).Update(context.TODO(), podUpdate, metav1.UpdateOptions{})
 				Expect(err).ToNot(HaveOccurred())
 				Eventually(getEgressIPStatusLen(eIP.Name)).Should(Equal(1))
 				Eventually(fakeOvn.fakeExec.CalledMatchesExpected).Should(BeTrue(), fakeOvn.fakeExec.ErrorDesc)
@@ -606,7 +606,7 @@ var _ = Describe("OVN master EgressIP Operations", func() {
 
 				fakeOvn.controller.WatchEgressIP()
 
-				_, err := fakeOvn.fakeEgressIPClient.K8sV1().EgressIPs().Create(context.TODO(), &eIP, metav1.CreateOptions{})
+				_, err := fakeOvn.fakeClient.EgressIPClient.K8sV1().EgressIPs().Create(context.TODO(), &eIP, metav1.CreateOptions{})
 				Expect(err).NotTo(HaveOccurred())
 
 				Eventually(getEgressIPStatusLen(eIP.Name)).Should(Equal(1))
@@ -633,7 +633,7 @@ var _ = Describe("OVN master EgressIP Operations", func() {
 					},
 				)
 
-				_, err = fakeOvn.fakeClient.CoreV1().Pods(egressPod.Namespace).Update(context.TODO(), podUpdate, metav1.UpdateOptions{})
+				_, err = fakeOvn.fakeClient.KubeClient.CoreV1().Pods(egressPod.Namespace).Update(context.TODO(), podUpdate, metav1.UpdateOptions{})
 				Expect(err).ToNot(HaveOccurred())
 				Eventually(getEgressIPStatusLen(eIP.Name)).Should(Equal(1))
 				Eventually(fakeOvn.fakeExec.CalledMatchesExpected).Should(BeTrue(), fakeOvn.fakeExec.ErrorDesc)
@@ -684,7 +684,7 @@ var _ = Describe("OVN master EgressIP Operations", func() {
 
 				fakeOvn.controller.WatchEgressIP()
 
-				_, err := fakeOvn.fakeEgressIPClient.K8sV1().EgressIPs().Create(context.TODO(), &eIP, metav1.CreateOptions{})
+				_, err := fakeOvn.fakeClient.EgressIPClient.K8sV1().EgressIPs().Create(context.TODO(), &eIP, metav1.CreateOptions{})
 				Expect(err).NotTo(HaveOccurred())
 
 				Eventually(getEgressIPStatusLen(eIP.Name)).Should(Equal(1))
@@ -694,7 +694,7 @@ var _ = Describe("OVN master EgressIP Operations", func() {
 				Expect(statuses[0].Node).To(Equal(node2.name))
 				Expect(statuses[0].EgressIP).To(Equal(egressIP.String()))
 
-				err = fakeOvn.fakeClient.CoreV1().Pods(egressPod.Namespace).Delete(context.TODO(), egressPod.Name, *metav1.NewDeleteOptions(0))
+				err = fakeOvn.fakeClient.KubeClient.CoreV1().Pods(egressPod.Namespace).Delete(context.TODO(), egressPod.Name, *metav1.NewDeleteOptions(0))
 				Expect(err).ToNot(HaveOccurred())
 				Eventually(getEgressIPStatusLen(eIP.Name)).Should(Equal(1))
 				Eventually(fakeOvn.fakeExec.CalledMatchesExpected).Should(BeTrue(), fakeOvn.fakeExec.ErrorDesc)
@@ -761,7 +761,7 @@ var _ = Describe("OVN master EgressIP Operations", func() {
 
 				fakeOvn.controller.WatchEgressIP()
 
-				_, err := fakeOvn.fakeEgressIPClient.K8sV1().EgressIPs().Create(context.TODO(), &eIP, metav1.CreateOptions{})
+				_, err := fakeOvn.fakeClient.EgressIPClient.K8sV1().EgressIPs().Create(context.TODO(), &eIP, metav1.CreateOptions{})
 				Expect(err).NotTo(HaveOccurred())
 
 				Eventually(getEgressIPStatusLen(eIP.Name)).Should(Equal(1))
@@ -796,7 +796,7 @@ var _ = Describe("OVN master EgressIP Operations", func() {
 					},
 				)
 
-				_, err = fakeOvn.fakeClient.CoreV1().Namespaces().Update(context.TODO(), namespaceUpdate, metav1.UpdateOptions{})
+				_, err = fakeOvn.fakeClient.KubeClient.CoreV1().Namespaces().Update(context.TODO(), namespaceUpdate, metav1.UpdateOptions{})
 				Expect(err).ToNot(HaveOccurred())
 				Eventually(getEgressIPStatusLen(eIP.Name)).Should(Equal(1))
 				Eventually(fakeOvn.fakeExec.CalledMatchesExpected).Should(BeTrue(), fakeOvn.fakeExec.ErrorDesc)
@@ -846,7 +846,7 @@ var _ = Describe("OVN master EgressIP Operations", func() {
 
 				fakeOvn.controller.WatchEgressIP()
 
-				_, err := fakeOvn.fakeEgressIPClient.K8sV1().EgressIPs().Create(context.TODO(), &eIP, metav1.CreateOptions{})
+				_, err := fakeOvn.fakeClient.EgressIPClient.K8sV1().EgressIPs().Create(context.TODO(), &eIP, metav1.CreateOptions{})
 				Expect(err).NotTo(HaveOccurred())
 
 				Eventually(getEgressIPStatusLen(eIP.Name)).Should(Equal(1))
@@ -858,7 +858,7 @@ var _ = Describe("OVN master EgressIP Operations", func() {
 
 				namespaceUpdate := newNamespace(namespace)
 
-				_, err = fakeOvn.fakeClient.CoreV1().Namespaces().Update(context.TODO(), namespaceUpdate, metav1.UpdateOptions{})
+				_, err = fakeOvn.fakeClient.KubeClient.CoreV1().Namespaces().Update(context.TODO(), namespaceUpdate, metav1.UpdateOptions{})
 				Expect(err).ToNot(HaveOccurred())
 				Eventually(getEgressIPStatusLen(eIP.Name)).Should(Equal(1))
 				Eventually(fakeOvn.fakeExec.CalledMatchesExpected).Should(BeTrue(), fakeOvn.fakeExec.ErrorDesc)
@@ -926,7 +926,7 @@ var _ = Describe("OVN master EgressIP Operations", func() {
 
 				fakeOvn.controller.WatchEgressIP()
 
-				_, err := fakeOvn.fakeEgressIPClient.K8sV1().EgressIPs().Create(context.TODO(), &eIP, metav1.CreateOptions{})
+				_, err := fakeOvn.fakeClient.EgressIPClient.K8sV1().EgressIPs().Create(context.TODO(), &eIP, metav1.CreateOptions{})
 				Expect(err).NotTo(HaveOccurred())
 
 				Eventually(getEgressIPStatusLen(eIP.Name)).Should(Equal(1))
@@ -936,7 +936,7 @@ var _ = Describe("OVN master EgressIP Operations", func() {
 				Expect(statuses[0].Node).To(Equal(node2.name))
 				Expect(statuses[0].EgressIP).To(Equal(egressIP.String()))
 
-				eIPUpdate, err := fakeOvn.fakeEgressIPClient.K8sV1().EgressIPs().Get(context.TODO(), eIP.Name, metav1.GetOptions{})
+				eIPUpdate, err := fakeOvn.fakeClient.EgressIPClient.K8sV1().EgressIPs().Get(context.TODO(), eIP.Name, metav1.GetOptions{})
 				Expect(err).NotTo(HaveOccurred())
 
 				eIPUpdate.Spec = egressipv1.EgressIPSpec{
@@ -981,7 +981,7 @@ var _ = Describe("OVN master EgressIP Operations", func() {
 					},
 				)
 
-				_, err = fakeOvn.fakeEgressIPClient.K8sV1().EgressIPs().Update(context.TODO(), eIPUpdate, metav1.UpdateOptions{})
+				_, err = fakeOvn.fakeClient.EgressIPClient.K8sV1().EgressIPs().Update(context.TODO(), eIPUpdate, metav1.UpdateOptions{})
 				Expect(err).ToNot(HaveOccurred())
 				Eventually(fakeOvn.fakeExec.CalledMatchesExpected).Should(BeTrue(), fakeOvn.fakeExec.ErrorDesc)
 				Eventually(getEgressIPStatusLen(eIP.Name)).Should(Equal(1))
@@ -1049,7 +1049,7 @@ var _ = Describe("OVN master EgressIP Operations", func() {
 
 				fakeOvn.controller.WatchEgressIP()
 
-				_, err := fakeOvn.fakeEgressIPClient.K8sV1().EgressIPs().Create(context.TODO(), &eIP, metav1.CreateOptions{})
+				_, err := fakeOvn.fakeClient.EgressIPClient.K8sV1().EgressIPs().Create(context.TODO(), &eIP, metav1.CreateOptions{})
 				Expect(err).NotTo(HaveOccurred())
 
 				Eventually(getEgressIPStatusLen(eIP.Name)).Should(Equal(1))
@@ -1062,7 +1062,7 @@ var _ = Describe("OVN master EgressIP Operations", func() {
 				bogusNode := "BOOOOGUUUUUS"
 				bogusIP := "192.168.126.9"
 
-				eIPUpdate, err := fakeOvn.fakeEgressIPClient.K8sV1().EgressIPs().Get(context.TODO(), eIP.Name, metav1.GetOptions{})
+				eIPUpdate, err := fakeOvn.fakeClient.EgressIPClient.K8sV1().EgressIPs().Get(context.TODO(), eIP.Name, metav1.GetOptions{})
 				Expect(err).NotTo(HaveOccurred())
 
 				eIPUpdate.Status = egressipv1.EgressIPStatus{
@@ -1074,7 +1074,7 @@ var _ = Describe("OVN master EgressIP Operations", func() {
 					},
 				}
 
-				_, err = fakeOvn.fakeEgressIPClient.K8sV1().EgressIPs().Update(context.TODO(), eIPUpdate, metav1.UpdateOptions{})
+				_, err = fakeOvn.fakeClient.EgressIPClient.K8sV1().EgressIPs().Update(context.TODO(), eIPUpdate, metav1.UpdateOptions{})
 				Expect(err).NotTo(HaveOccurred())
 				Eventually(fakeOvn.fakeExec.CalledMatchesExpected).Should(BeTrue(), fakeOvn.fakeExec.ErrorDesc)
 				Eventually(getEgressIPStatusLen(eIP.Name)).Should(Equal(1))
@@ -1128,7 +1128,7 @@ var _ = Describe("OVN master EgressIP Operations", func() {
 				_, ip1V6Sub, err := net.ParseCIDR(node1IPv6)
 				_, ip2V4Sub, err := net.ParseCIDR(node2IPv4)
 
-				_, err = fakeOvn.fakeClient.CoreV1().Nodes().Create(context.TODO(), &node1, metav1.CreateOptions{})
+				_, err = fakeOvn.fakeClient.KubeClient.CoreV1().Nodes().Create(context.TODO(), &node1, metav1.CreateOptions{})
 				Expect(err).NotTo(HaveOccurred())
 				Eventually(getEgressIPAllocatorSizeSafely).Should(Equal(1))
 				Expect(fakeOvn.controller.eIPAllocator).To(HaveKey(node1.Name))
@@ -1139,7 +1139,7 @@ var _ = Describe("OVN master EgressIP Operations", func() {
 					"k8s.ovn.org/egress-assignable": "",
 				}
 
-				_, err = fakeOvn.fakeClient.CoreV1().Nodes().Create(context.TODO(), &node2, metav1.CreateOptions{})
+				_, err = fakeOvn.fakeClient.KubeClient.CoreV1().Nodes().Create(context.TODO(), &node2, metav1.CreateOptions{})
 				Expect(err).NotTo(HaveOccurred())
 				Eventually(getEgressIPAllocatorSizeSafely).Should(Equal(2))
 				Expect(fakeOvn.controller.eIPAllocator).To(HaveKey(node1.Name))
@@ -1185,7 +1185,7 @@ var _ = Describe("OVN master EgressIP Operations", func() {
 					"k8s.ovn.org/egress-assignable": "",
 				}
 
-				_, err := fakeOvn.fakeClient.CoreV1().Nodes().Update(context.TODO(), &node, metav1.UpdateOptions{})
+				_, err := fakeOvn.fakeClient.KubeClient.CoreV1().Nodes().Update(context.TODO(), &node, metav1.UpdateOptions{})
 				Expect(err).NotTo(HaveOccurred())
 				Eventually(allocatorItems).Should(Equal(0))
 
@@ -1251,7 +1251,7 @@ var _ = Describe("OVN master EgressIP Operations", func() {
 				_, ipv4Sub, err := net.ParseCIDR(nodeIPv4)
 				_, ipv6Sub, err := net.ParseCIDR(nodeIPv6)
 
-				_, err = fakeOvn.fakeClient.CoreV1().Nodes().Update(context.TODO(), &node, metav1.UpdateOptions{})
+				_, err = fakeOvn.fakeClient.KubeClient.CoreV1().Nodes().Update(context.TODO(), &node, metav1.UpdateOptions{})
 				Expect(err).NotTo(HaveOccurred())
 
 				Eventually(getEgressIPStatusLen(egressIPName)).Should(Equal(1))
@@ -1420,7 +1420,7 @@ var _ = Describe("OVN master EgressIP Operations", func() {
 					"k8s.ovn.org/egress-assignable": "",
 				}
 
-				_, err := fakeOvn.fakeClient.CoreV1().Nodes().Update(context.TODO(), &node2, metav1.UpdateOptions{})
+				_, err := fakeOvn.fakeClient.KubeClient.CoreV1().Nodes().Update(context.TODO(), &node2, metav1.UpdateOptions{})
 				Expect(err).NotTo(HaveOccurred())
 
 				Eventually(getEgressIPStatusLen(egressIPName)).Should(Equal(2))
@@ -1496,7 +1496,7 @@ var _ = Describe("OVN master EgressIP Operations", func() {
 					"k8s.ovn.org/egress-assignable": "",
 				}
 
-				_, err = fakeOvn.fakeClient.CoreV1().Nodes().Update(context.TODO(), &node1, metav1.UpdateOptions{})
+				_, err = fakeOvn.fakeClient.KubeClient.CoreV1().Nodes().Update(context.TODO(), &node1, metav1.UpdateOptions{})
 				Expect(err).NotTo(HaveOccurred())
 
 				Eventually(getEgressIPStatusLen(egressIPName)).Should(Equal(0))
@@ -1517,7 +1517,7 @@ var _ = Describe("OVN master EgressIP Operations", func() {
 					"k8s.ovn.org/egress-assignable": "",
 				}
 
-				_, err = fakeOvn.fakeClient.CoreV1().Nodes().Update(context.TODO(), &node2, metav1.UpdateOptions{})
+				_, err = fakeOvn.fakeClient.KubeClient.CoreV1().Nodes().Update(context.TODO(), &node2, metav1.UpdateOptions{})
 				Expect(err).NotTo(HaveOccurred())
 				Eventually(getEgressIPStatusLen(egressIPName)).Should(Equal(1))
 
@@ -1593,7 +1593,7 @@ var _ = Describe("OVN master EgressIP Operations", func() {
 				Expect(statuses[0].Node).To(Equal(node1.Name))
 				Expect(statuses[0].EgressIP).To(Equal(egressIP))
 
-				_, err := fakeOvn.fakeClient.CoreV1().Nodes().Create(context.TODO(), &node2, metav1.CreateOptions{})
+				_, err := fakeOvn.fakeClient.KubeClient.CoreV1().Nodes().Create(context.TODO(), &node2, metav1.CreateOptions{})
 				Expect(err).NotTo(HaveOccurred())
 
 				Eventually(getEgressIPStatusLen(egressIPName)).Should(Equal(1))
@@ -1604,7 +1604,7 @@ var _ = Describe("OVN master EgressIP Operations", func() {
 				Expect(fakeOvn.controller.eIPAllocator).To(HaveKey(node1.Name))
 				Expect(fakeOvn.controller.eIPAllocator).To(HaveKey(node2.Name))
 
-				err = fakeOvn.fakeClient.CoreV1().Nodes().Delete(context.TODO(), node1.Name, *metav1.NewDeleteOptions(0))
+				err = fakeOvn.fakeClient.KubeClient.CoreV1().Nodes().Delete(context.TODO(), node1.Name, *metav1.NewDeleteOptions(0))
 				Expect(err).NotTo(HaveOccurred())
 				Eventually(getEgressIPAllocatorSizeSafely).Should(Equal(1))
 				Expect(fakeOvn.controller.eIPAllocator).ToNot(HaveKey(node1.Name))
@@ -2053,7 +2053,7 @@ var _ = Describe("OVN master EgressIP Operations", func() {
 				)
 				fakeOvn.controller.WatchEgressIP()
 
-				_, err := fakeOvn.fakeEgressIPClient.K8sV1().EgressIPs().Create(context.TODO(), &eIP, metav1.CreateOptions{})
+				_, err := fakeOvn.fakeClient.EgressIPClient.K8sV1().EgressIPs().Create(context.TODO(), &eIP, metav1.CreateOptions{})
 				Expect(err).NotTo(HaveOccurred())
 
 				Eventually(getEgressIPStatusLen(egressIPName)).Should(Equal(1))
@@ -2092,7 +2092,7 @@ var _ = Describe("OVN master EgressIP Operations", func() {
 				)
 				fakeOvn.controller.WatchEgressIP()
 
-				_, err := fakeOvn.fakeEgressIPClient.K8sV1().EgressIPs().Create(context.TODO(), &eIP, metav1.CreateOptions{})
+				_, err := fakeOvn.fakeClient.EgressIPClient.K8sV1().EgressIPs().Create(context.TODO(), &eIP, metav1.CreateOptions{})
 				Expect(err).NotTo(HaveOccurred())
 
 				Eventually(getEgressIPStatusLen(egressIPName)).Should(Equal(1))
@@ -2132,7 +2132,7 @@ var _ = Describe("OVN master EgressIP Operations", func() {
 				)
 				fakeOvn.controller.WatchEgressIP()
 
-				_, err := fakeOvn.fakeEgressIPClient.K8sV1().EgressIPs().Create(context.TODO(), &eIP, metav1.CreateOptions{})
+				_, err := fakeOvn.fakeClient.EgressIPClient.K8sV1().EgressIPs().Create(context.TODO(), &eIP, metav1.CreateOptions{})
 				Expect(err).NotTo(HaveOccurred())
 
 				Eventually(getEgressIPStatusLen(egressIPName)).Should(Equal(2))
@@ -2547,7 +2547,7 @@ var _ = Describe("OVN master EgressIP Operations", func() {
 				)
 				fakeOvn.controller.WatchEgressIP()
 
-				_, err := fakeOvn.fakeEgressIPClient.K8sV1().EgressIPs().Create(context.TODO(), &eIP1, metav1.CreateOptions{})
+				_, err := fakeOvn.fakeClient.EgressIPClient.K8sV1().EgressIPs().Create(context.TODO(), &eIP1, metav1.CreateOptions{})
 				Expect(err).ToNot(HaveOccurred())
 
 				Eventually(getEgressIPStatusLen(eIP1.Name)).Should(Equal(1))
@@ -2555,7 +2555,7 @@ var _ = Describe("OVN master EgressIP Operations", func() {
 				Expect(statuses[0].Node).To(Equal(node2.name))
 				Expect(statuses[0].EgressIP).To(Equal(egressIP1))
 
-				_, err = fakeOvn.fakeEgressIPClient.K8sV1().EgressIPs().Create(context.TODO(), &eIP2, metav1.CreateOptions{})
+				_, err = fakeOvn.fakeClient.EgressIPClient.K8sV1().EgressIPs().Create(context.TODO(), &eIP2, metav1.CreateOptions{})
 				Expect(err).ToNot(HaveOccurred())
 
 				Eventually(getEgressIPStatusLen(eIP2.Name)).Should(Equal(0))
@@ -2597,7 +2597,7 @@ var _ = Describe("OVN master EgressIP Operations", func() {
 				)
 				fakeOvn.controller.WatchEgressIP()
 
-				_, err := fakeOvn.fakeEgressIPClient.K8sV1().EgressIPs().Create(context.TODO(), &eIP1, metav1.CreateOptions{})
+				_, err := fakeOvn.fakeClient.EgressIPClient.K8sV1().EgressIPs().Create(context.TODO(), &eIP1, metav1.CreateOptions{})
 				Expect(err).ToNot(HaveOccurred())
 
 				Eventually(getEgressIPStatusLen(egressIPName)).Should(Equal(1))
@@ -2605,11 +2605,11 @@ var _ = Describe("OVN master EgressIP Operations", func() {
 				Expect(statuses[0].Node).To(Equal(node2.name))
 				Expect(statuses[0].EgressIP).To(Equal(egressIP))
 
-				eIPToUpdate, err := fakeOvn.fakeEgressIPClient.K8sV1().EgressIPs().Get(context.TODO(), eIP1.Name, metav1.GetOptions{})
+				eIPToUpdate, err := fakeOvn.fakeClient.EgressIPClient.K8sV1().EgressIPs().Get(context.TODO(), eIP1.Name, metav1.GetOptions{})
 				Expect(err).NotTo(HaveOccurred())
 				eIPToUpdate.Spec.EgressIPs = []string{updateEgressIP}
 
-				_, err = fakeOvn.fakeEgressIPClient.K8sV1().EgressIPs().Update(context.TODO(), eIPToUpdate, metav1.UpdateOptions{})
+				_, err = fakeOvn.fakeClient.EgressIPClient.K8sV1().EgressIPs().Update(context.TODO(), eIPToUpdate, metav1.UpdateOptions{})
 				Expect(err).ToNot(HaveOccurred())
 
 				getEgressIP := func() string {
