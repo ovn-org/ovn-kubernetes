@@ -8,41 +8,55 @@ import (
 
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/factory"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
+
 	kapi "k8s.io/api/core/v1"
+	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/client-go/tools/cache"
 	"k8s.io/client-go/tools/record"
 	"k8s.io/klog"
+	utilnet "k8s.io/utils/net"
 )
 
-type handler func(port int32, protocol kapi.Protocol, svc *kapi.Service) error
+type handler func(desc string, ip string, port int32, protocol kapi.Protocol, svc *kapi.Service) error
 
-type localPort interface {
-	open(port int32, protocol kapi.Protocol, svc *kapi.Service) error
-	close(port int32, protocol kapi.Protocol, svc *kapi.Service) error
+type localPortHandler interface {
+	open(desc string, ip string, port int32, protocol kapi.Protocol, svc *kapi.Service) error
+	close(desc string, ip string, port int32, protocol kapi.Protocol, svc *kapi.Service) error
 }
 
-var port localPort
+var portHandler localPortHandler
 
-type activeSocket interface {
-	Close() error
-}
+var portOpener utilnet.PortOpener
 
 type portClaimWatcher struct {
 	recorder          record.EventRecorder
 	activeSocketsLock sync.Mutex
-	activeSockets     map[kapi.Protocol]map[int32]activeSocket
+	localAddrSet      map[string]net.IPNet
+	portsMap          map[utilnet.LocalPort]utilnet.Closeable
 }
 
-func newPortClaimWatcher(recorder record.EventRecorder) localPort {
+// Constants for valid LocalHost descriptions:
+const (
+	nodePortDescr     = "nodePort for"
+	externalPortDescr = "externalIP for"
+)
+
+func newPortClaimWatcher(recorder record.EventRecorder, localAddrSet map[string]net.IPNet) localPortHandler {
 	return &portClaimWatcher{
 		recorder:          recorder,
 		activeSocketsLock: sync.Mutex{},
-		activeSockets:     make(map[kapi.Protocol]map[int32]activeSocket),
+		portsMap:          make(map[utilnet.LocalPort]utilnet.Closeable),
+		localAddrSet:      localAddrSet,
 	}
 }
 
-func initPortClaimWatcher(recorder record.EventRecorder, wf factory.NodeWatchFactory) {
-	port = newPortClaimWatcher(recorder)
+func initPortClaimWatcher(recorder record.EventRecorder, wf factory.NodeWatchFactory) error {
+	localAddrSet, err := getLocalAddrs()
+	if err != nil {
+		return err
+	}
+	portHandler = newPortClaimWatcher(recorder, localAddrSet)
+	portOpener = &utilnet.ListenPortOpener
 	wf.AddServiceHandler(cache.ResourceEventHandlerFuncs{
 		AddFunc: func(obj interface{}) {
 			svc := obj.(*kapi.Service)
@@ -70,14 +84,15 @@ func initPortClaimWatcher(recorder record.EventRecorder, wf factory.NodeWatchFac
 			}
 		},
 	}, nil)
+	return nil
 }
 
 func addServicePortClaim(svc *kapi.Service) []error {
-	return handleService(svc, port.open)
+	return handleService(svc, portHandler.open)
 }
 
 func deleteServicePortClaim(svc *kapi.Service) []error {
-	return handleService(svc, port.close)
+	return handleService(svc, portHandler.close)
 }
 
 func handleService(svc *kapi.Service, handler handler) []error {
@@ -85,14 +100,17 @@ func handleService(svc *kapi.Service, handler handler) []error {
 	if !util.ServiceTypeHasNodePort(svc) && len(svc.Spec.ExternalIPs) == 0 {
 		return errors
 	}
+
 	for _, svcPort := range svc.Spec.Ports {
 		if util.ServiceTypeHasNodePort(svc) {
-			if err := handlePort(svc, svcPort.NodePort, svcPort.Protocol, handler); err != nil {
+			klog.V(5).Infof("Handle NodePort service %s port %d", svc.Name, svcPort.NodePort)
+			if err := handlePort(getDescription(svcPort.Name, svc, true), svc, "", svcPort.NodePort, svcPort.Protocol, handler); err != nil {
 				errors = append(errors, err)
 			}
 		}
-		if len(svc.Spec.ExternalIPs) > 0 {
-			if err := handlePort(svc, svcPort.Port, svcPort.Protocol, handler); err != nil {
+		for _, externalIP := range svc.Spec.ExternalIPs {
+			klog.V(5).Infof("Handle ExternalIPs service %s external IP %s port %d", svc.Name, externalIP, svcPort.Port)
+			if err := handlePort(getDescription(svcPort.Name, svc, false), svc, externalIP, svcPort.Port, svcPort.Protocol, handler); err != nil {
 				errors = append(errors, err)
 			}
 		}
@@ -100,11 +118,29 @@ func handleService(svc *kapi.Service, handler handler) []error {
 	return errors
 }
 
-func handlePort(svc *kapi.Service, port int32, protocol kapi.Protocol, handler handler) error {
+// LocalPorts allows to add an arbitrary description, which can be used to distinguish LocalPorts instances having the
+// same networking parameters by created for different services.
+// kube-proxy and this implementation use the following format of the description: "
+//        for NodePort services            - "nodePort for namespace/name[:portName]
+//        for services with External IPs   - "externalIP for namespace/name[:portName]
+func getDescription(portName string, svc *kapi.Service, nodePort bool) string {
+	svcName := types.NamespacedName{Namespace: svc.Namespace, Name: svc.Name}
+	prefix := externalPortDescr
+	if nodePort {
+		prefix = nodePortDescr
+	}
+	if len(portName) == 0 {
+		return fmt.Sprintf("%s %s", prefix, svcName.String())
+	} else {
+		return fmt.Sprintf("%s %s:%s", prefix, svcName.String(), portName)
+	}
+}
+
+func handlePort(desc string, svc *kapi.Service, ip string, port int32, protocol kapi.Protocol, handler handler) error {
 	if err := util.ValidatePort(protocol, port); err != nil {
 		return fmt.Errorf("invalid service port %s, err: %v", svc.Name, err)
 	}
-	if err := handler(port, protocol, svc); err != nil {
+	if err := handler(desc, ip, port, protocol, svc); err != nil {
 		return err
 	}
 	return nil
@@ -120,61 +156,73 @@ func updateServicePortClaim(oldSvc, newSvc *kapi.Service) []error {
 	return errors
 }
 
-func (p *portClaimWatcher) open(port int32, protocol kapi.Protocol, svc *kapi.Service) error {
-	klog.V(5).Infof("Opening socket for service: %s/%s and port: %v", svc.Namespace, svc.Name, port)
-	var socket activeSocket
-	var socketError error
+func (p *portClaimWatcher) open(desc string, ip string, port int32, protocol kapi.Protocol, svc *kapi.Service) error {
+	klog.V(5).Infof("Opening socket for service: %s/%s, port: %v and protocol %s", svc.Namespace, svc.Name, port, protocol)
+
+	if ip != "" {
+		if _, exists := p.localAddrSet[ip]; !exists {
+			klog.V(5).Infof("The IP %s is not one of the node local ports", ip)
+			return nil
+		}
+	}
+	var localPort *utilnet.LocalPort
+	var portError error
 	switch protocol {
-	case kapi.ProtocolTCP:
-		listener, err := net.Listen("tcp", fmt.Sprintf(":%d", port))
-		if err != nil {
-			socketError = err
-			break
-		}
-		socket = listener
-	case kapi.ProtocolUDP:
-		addr, err := net.ResolveUDPAddr("udp", fmt.Sprintf(":%d", port))
-		if err != nil {
-			socketError = err
-			break
-		}
-		conn, err := net.ListenUDP("udp", addr)
-		if err != nil {
-			socketError = err
-			break
-		}
-		socket = conn
+	case kapi.ProtocolTCP, kapi.ProtocolUDP:
+		localPort, portError = utilnet.NewLocalPort(desc, ip, "", int(port), utilnet.Protocol(protocol))
 	case kapi.ProtocolSCTP:
 		// Do not open ports for SCTP, ref: https://github.com/kubernetes/enhancements/blob/master/keps/sig-network/0015-20180614-SCTP-support.md#the-solution-in-the-kubernetes-sctp-support-implementation
 		return nil
 	default:
-		socketError = fmt.Errorf("unknown protocol %q", protocol)
+		portError = fmt.Errorf("unknown protocol %q", protocol)
 	}
-	if socketError != nil {
-		p.emitPortClaimEvent(svc, port, socketError)
-		return socketError
+	if portError != nil {
+		p.emitPortClaimEvent(svc, port, portError)
+		return portError
 	}
+	klog.V(5).Infof("Opening socket for LocalPort %v", localPort)
 	p.activeSocketsLock.Lock()
 	defer p.activeSocketsLock.Unlock()
-	if _, exists := p.activeSockets[protocol]; exists {
-		p.activeSockets[protocol][port] = socket
+
+	if _, exists := p.portsMap[*localPort]; exists {
+		return fmt.Errorf("error try to open socket for svc: %s/%s on port: %v again", svc.Namespace, svc.Name, port)
 	} else {
-		p.activeSockets[protocol] = map[int32]activeSocket{
-			port: socket,
+		closeable, err := portOpener.OpenLocalPort(localPort)
+		if err != nil {
+			p.emitPortClaimEvent(svc, port, err)
+			return err
 		}
+		p.portsMap[*localPort] = closeable
 	}
 	return nil
 }
 
-func (p *portClaimWatcher) close(port int32, protocol kapi.Protocol, svc *kapi.Service) error {
+func (p *portClaimWatcher) close(desc string, ip string, port int32, protocol kapi.Protocol, svc *kapi.Service) error {
+	klog.V(5).Infof("Closing socket claimed for service: %s/%s and port: %v", svc.Namespace, svc.Name, port)
+
+	if protocol != kapi.ProtocolTCP && protocol != kapi.ProtocolUDP {
+		return nil
+	}
+	if ip != "" {
+		if _, exists := p.localAddrSet[ip]; !exists {
+			klog.V(5).Infof("The IP %s is not one of the node local ports", ip)
+			return nil
+		}
+	}
+	localPort, err := utilnet.NewLocalPort(desc, ip, "", int(port), utilnet.Protocol(protocol))
+	if err != nil {
+		return fmt.Errorf("error localPort creation for svc: %s/%s on port: %v, err: %v", svc.Namespace, svc.Name, port, err)
+	}
+	klog.V(5).Infof("Closing socket for LocalPort %v", localPort)
+
 	p.activeSocketsLock.Lock()
 	defer p.activeSocketsLock.Unlock()
-	klog.V(5).Infof("Closing socket claimed for service: %s/%s and port: %v", svc.Namespace, svc.Name, port)
-	if socket, exists := p.activeSockets[protocol][port]; exists {
-		if err := socket.Close(); err != nil {
+
+	if _, exists := p.portsMap[*localPort]; exists {
+		if err = p.portsMap[*localPort].Close(); err != nil {
 			return fmt.Errorf("error closing socket for svc: %s/%s on port: %v, err: %v", svc.Namespace, svc.Name, port, err)
 		}
-		delete(p.activeSockets[protocol], port)
+		delete(p.portsMap, *localPort)
 		return nil
 	}
 	return fmt.Errorf("error closing socket for svc: %s/%s on port: %v, port was never opened...?", svc.Namespace, svc.Name, port)
