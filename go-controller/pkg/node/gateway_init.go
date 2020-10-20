@@ -176,16 +176,14 @@ func (n *OvnNode) initGateway(subnets []*net.IPNet, nodeAnnotator kube.Annotator
 	}
 
 	var prFn postWaitFunc
-	switch config.Gateway.Mode {
-	case config.GatewayModeLocal:
+	if config.Gateway.Mode != config.GatewayModeDisabled {
 		prFn, err = n.initSharedGateway(subnets, gatewayNextHops, gatewayIntf, nodeAnnotator)
-	case config.GatewayModeShared:
-		prFn, err = n.initSharedGateway(subnets, gatewayNextHops, gatewayIntf, nodeAnnotator)
-	case config.GatewayModeDisabled:
+	} else {
 		err = util.SetL3GatewayConfig(nodeAnnotator, &util.L3GatewayConfig{
 			Mode: config.GatewayModeDisabled,
 		})
 	}
+
 	if err != nil {
 		return err
 	}
