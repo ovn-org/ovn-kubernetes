@@ -984,11 +984,12 @@ var _ = Describe("OVN master EgressIP Operations", func() {
 				_, err = fakeOvn.fakeClient.EgressIPClient.K8sV1().EgressIPs().Update(context.TODO(), eIPUpdate, metav1.UpdateOptions{})
 				Expect(err).ToNot(HaveOccurred())
 				Eventually(fakeOvn.fakeExec.CalledMatchesExpected).Should(BeTrue(), fakeOvn.fakeExec.ErrorDesc)
-				Eventually(getEgressIPStatusLen(eIP.Name)).Should(Equal(1))
 
-				statuses = getEgressIPStatus(eIP.Name)
+				Eventually(func() string {
+					statuses = getEgressIPStatus(eIP.Name)
+					return statuses[0].EgressIP
+				}).Should(Equal(updatedEgressIP.String()))
 				Expect(statuses[0].Node).To(Equal(node2.name))
-				Expect(statuses[0].EgressIP).To(Equal(updatedEgressIP.String()))
 				return nil
 			}
 
