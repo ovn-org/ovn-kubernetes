@@ -19,7 +19,7 @@ ENV PYTHONDONTWRITEBYTECODE yes
 RUN INSTALL_PKGS=" \
 	PyYAML bind-utils procps-ng openssl numactl-libs firewalld-filesystem \
 	libpcap hostname kubernetes-client \
-        ovn ovn-central ovn-host \
+        ovn ovn-central ovn-host python3-openvswitch python3-pyOpenSSL \
 	iptables iproute iputils strace socat \
         " && \
 	dnf install --best --refresh -y --setopt=tsflags=nodocs $INSTALL_PKGS && \
