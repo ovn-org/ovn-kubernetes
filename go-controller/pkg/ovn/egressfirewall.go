@@ -110,6 +110,11 @@ func (oc *Controller) addEgressFirewall(egressFirewall *egressfirewallapi.Egress
 		return errList
 	}
 
+	if nsInfo.addressSet == nil {
+		// TODO(trozet): remove dependency on nsInfo object and just determine hash names to create Egress FW with
+		return []error{fmt.Errorf("unable to add egress firewall policy, namespace: %s has no address set", egressFirewall.Namespace)}
+	}
+
 	err = ef.addLogicalRouterPolicyToClusterRouter(nsInfo.addressSet.GetIPv4HashName(), nsInfo.addressSet.GetIPv6HashName(), egressFirewallStartPriorityInt)
 	if err != nil {
 		return []error{err}

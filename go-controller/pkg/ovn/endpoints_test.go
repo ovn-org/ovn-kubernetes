@@ -205,7 +205,7 @@ var _ = Describe("OVN Namespace Operations", func() {
 				)
 				fakeOvn.controller.WatchEndpoints()
 
-				_, err := fakeOvn.fakeClient.CoreV1().Endpoints(endpointsT.Namespace).Get(context.TODO(), endpointsT.Name, metav1.GetOptions{})
+				_, err := fakeOvn.fakeClient.KubeClient.CoreV1().Endpoints(endpointsT.Namespace).Get(context.TODO(), endpointsT.Name, metav1.GetOptions{})
 				Expect(err).NotTo(HaveOccurred())
 				Expect(tExec.CalledMatchesExpected()).To(BeTrue(), tExec.ErrorDesc)
 
@@ -267,7 +267,7 @@ var _ = Describe("OVN Namespace Operations", func() {
 				)
 				fakeOvn.controller.WatchEndpoints()
 
-				_, err := fakeOvn.fakeClient.CoreV1().Endpoints(endpointsT.Namespace).Get(context.TODO(), endpointsT.Name, metav1.GetOptions{})
+				_, err := fakeOvn.fakeClient.KubeClient.CoreV1().Endpoints(endpointsT.Namespace).Get(context.TODO(), endpointsT.Name, metav1.GetOptions{})
 				Expect(err).NotTo(HaveOccurred())
 				Expect(tExec.CalledMatchesExpected()).To(BeTrue(), tExec.ErrorDesc)
 
@@ -327,7 +327,7 @@ var _ = Describe("OVN Namespace Operations", func() {
 				)
 				fakeOvn.controller.WatchEndpoints()
 
-				_, err := fakeOvn.fakeClient.CoreV1().Endpoints(endpointsT.Namespace).Get(context.TODO(), endpointsT.Name, metav1.GetOptions{})
+				_, err := fakeOvn.fakeClient.KubeClient.CoreV1().Endpoints(endpointsT.Namespace).Get(context.TODO(), endpointsT.Name, metav1.GetOptions{})
 				Expect(err).NotTo(HaveOccurred())
 				Expect(tExec.CalledMatchesExpected()).To(BeTrue(), tExec.ErrorDesc)
 
@@ -384,14 +384,14 @@ var _ = Describe("OVN Namespace Operations", func() {
 				)
 				fakeOvn.controller.WatchEndpoints()
 
-				_, err := fakeOvn.fakeClient.CoreV1().Endpoints(endpointsT.Namespace).Get(context.TODO(), endpointsT.Name, metav1.GetOptions{})
+				_, err := fakeOvn.fakeClient.KubeClient.CoreV1().Endpoints(endpointsT.Namespace).Get(context.TODO(), endpointsT.Name, metav1.GetOptions{})
 				Expect(err).NotTo(HaveOccurred())
 				Eventually(tExec.CalledMatchesExpected).Should(BeTrue(), tExec.ErrorDesc)
 
 				// Delete the endpoint
 				testE.delCmds(tExec, serviceT, endpointsT)
 
-				err = fakeOvn.fakeClient.CoreV1().Endpoints(endpointsT.Namespace).Delete(context.TODO(), endpointsT.Name, *metav1.NewDeleteOptions(0))
+				err = fakeOvn.fakeClient.KubeClient.CoreV1().Endpoints(endpointsT.Namespace).Delete(context.TODO(), endpointsT.Name, *metav1.NewDeleteOptions(0))
 				Expect(err).NotTo(HaveOccurred())
 				Eventually(tExec.CalledMatchesExpected).Should(BeTrue(), tExec.ErrorDesc)
 
@@ -449,7 +449,7 @@ var _ = Describe("OVN Namespace Operations", func() {
 				)
 				fakeOvn.controller.WatchEndpoints()
 
-				_, err := fakeOvn.fakeClient.CoreV1().Endpoints(endpointsT.Namespace).Get(context.TODO(), endpointsT.Name, metav1.GetOptions{})
+				_, err := fakeOvn.fakeClient.KubeClient.CoreV1().Endpoints(endpointsT.Namespace).Get(context.TODO(), endpointsT.Name, metav1.GetOptions{})
 				Expect(err).NotTo(HaveOccurred())
 				Eventually(tExec.CalledMatchesExpected).Should(BeTrue(), tExec.ErrorDesc)
 
@@ -457,7 +457,7 @@ var _ = Describe("OVN Namespace Operations", func() {
 				testE.delCmds(tExec, serviceT, endpointsT)
 				testE.delNodePortPortCmds(tExec, serviceT, endpointsT)
 
-				err = fakeOvn.fakeClient.CoreV1().Endpoints(endpointsT.Namespace).Delete(context.TODO(), endpointsT.Name, *metav1.NewDeleteOptions(0))
+				err = fakeOvn.fakeClient.KubeClient.CoreV1().Endpoints(endpointsT.Namespace).Delete(context.TODO(), endpointsT.Name, *metav1.NewDeleteOptions(0))
 				Expect(err).NotTo(HaveOccurred())
 				Eventually(tExec.CalledMatchesExpected).Should(BeTrue(), tExec.ErrorDesc)
 

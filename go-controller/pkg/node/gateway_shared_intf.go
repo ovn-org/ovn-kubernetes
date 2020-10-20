@@ -419,7 +419,7 @@ func addDefaultConntrackRules(nodeName, gwBridge, gwIntf string, stopChan chan s
 	}
 
 	// replace the left over OpenFlow flows with the FLOOD action flow
-	_, stderr, err = util.AddFloodActionOFFlow(gwBridge)
+	_, stderr, err = util.AddOFFlowWithSpecificAction(gwBridge, util.FloodAction)
 	if err != nil {
 		return fmt.Errorf("failed to replace-flows on bridge %q stderr:%s (%v)", gwBridge, stderr, err)
 	}
@@ -648,7 +648,7 @@ func cleanupSharedGateway() error {
 		return nil
 	}
 
-	_, stderr, err = util.AddFloodActionOFFlow(bridgeName)
+	_, stderr, err = util.AddOFFlowWithSpecificAction(bridgeName, util.NormalAction)
 	if err != nil {
 		return fmt.Errorf("failed to replace-flows on bridge %q stderr:%s (%v)", bridgeName, stderr, err)
 	}

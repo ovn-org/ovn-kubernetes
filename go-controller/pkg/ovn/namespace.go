@@ -53,6 +53,14 @@ func (oc *Controller) addPodToNamespace(ns string, portInfo *lpInfo) error {
 	}
 	defer nsInfo.Unlock()
 
+	if nsInfo.addressSet == nil {
+		nsInfo.addressSet, err = oc.createNamespaceAddrSetAllPods(ns)
+		if err != nil {
+			return fmt.Errorf("unable to add pod to namespace. Cannot create address set for namespace: %s,"+
+				"error: %v", ns, err)
+		}
+	}
+
 	if err := nsInfo.addressSet.AddIPs(createIPAddressSlice(portInfo.ips)); err != nil {
 		return err
 	}
@@ -75,8 +83,10 @@ func (oc *Controller) deletePodFromNamespace(ns string, portInfo *lpInfo) error 
 	}
 	defer nsInfo.Unlock()
 
-	if err := nsInfo.addressSet.DeleteIPs(createIPAddressSlice(portInfo.ips)); err != nil {
-		return err
+	if nsInfo.addressSet != nil {
+		if err := nsInfo.addressSet.DeleteIPs(createIPAddressSlice(portInfo.ips)); err != nil {
+			return err
+		}
 	}
 
 	// Remove the port from the multicast allow policy.
@@ -178,26 +188,7 @@ func (oc *Controller) AddNamespace(ns *kapi.Namespace) {
 	nsInfo := oc.createNamespaceLocked(ns.Name)
 	defer nsInfo.Unlock()
 
-	// Get all the pods in the namespace and append their IP to the
-	// address_set
-	var ips []net.IP
-	existingPods, err := oc.watchFactory.GetPods(ns.Name)
-	if err != nil {
-		klog.Errorf("Failed to get all the pods (%v)", err)
-	} else {
-		ips = make([]net.IP, 0, len(existingPods))
-		for _, pod := range existingPods {
-			if pod.Status.PodIP != "" && !pod.Spec.HostNetwork {
-				podIPs, err := util.GetAllPodIPs(pod)
-				if err != nil {
-					klog.Warningf(err.Error())
-					continue
-				}
-				ips = append(ips, podIPs...)
-			}
-		}
-	}
-
+	var err error
 	annotation := ns.Annotations[hotypes.HybridOverlayExternalGw]
 	if annotation != "" {
 		parsedAnnotation := net.ParseIP(annotation)
@@ -223,7 +214,7 @@ func (oc *Controller) AddNamespace(ns *kapi.Namespace) {
 			klog.Errorf(err.Error())
 		}
 	}
-	nsInfo.addressSet, err = oc.addressSetFactory.NewAddressSet(ns.Name, ips)
+	nsInfo.addressSet, err = oc.createNamespaceAddrSetAllPods(ns.Name)
 	if err != nil {
 		klog.Errorf(err.Error())
 	}
@@ -424,10 +415,36 @@ func (oc *Controller) deleteNamespaceLocked(ns string) *namespaceInfo {
 		nsInfo.Unlock()
 		return nil
 	}
-	if err := nsInfo.addressSet.Destroy(); err != nil {
-		klog.Errorf(err.Error())
+	if nsInfo.addressSet != nil {
+		if err := nsInfo.addressSet.Destroy(); err != nil {
+			klog.Errorf(err.Error())
+		}
 	}
 	delete(oc.namespaces, ns)
 
 	return nsInfo
+}
+
+func (oc *Controller) createNamespaceAddrSetAllPods(ns string) (AddressSet, error) {
+	// Get all the pods in the namespace and append their IP to the
+	// address_set
+	var ips []net.IP
+	existingPods, err := oc.watchFactory.GetPods(ns)
+	if err != nil {
+		klog.Errorf("Failed to get all the pods (%v)", err)
+	} else {
+		ips = make([]net.IP, 0, len(existingPods))
+		for _, pod := range existingPods {
+			if pod.Status.PodIP != "" && !pod.Spec.HostNetwork {
+				podIPs, err := util.GetAllPodIPs(pod)
+				if err != nil {
+					klog.Warningf(err.Error())
+					continue
+				}
+				ips = append(ips, podIPs...)
+			}
+		}
+	}
+
+	return oc.addressSetFactory.NewAddressSet(ns, ips)
 }

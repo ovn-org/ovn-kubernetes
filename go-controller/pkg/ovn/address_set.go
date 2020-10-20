@@ -278,10 +278,14 @@ func (as *ovnAddressSets) AddIPs(ips []net.IP) error {
 	defer as.Unlock()
 
 	for _, ip := range ips {
-		if utilnet.IsIPv6(ip) {
+		switch {
+		case utilnet.IsIPv6(ip) && as.ipv6 != nil:
 			err = as.ipv6.addIP(ip)
-		} else {
+		case !utilnet.IsIPv6(ip) && as.ipv4 != nil:
 			err = as.ipv4.addIP(ip)
+		default:
+			err = fmt.Errorf("cluster is not configured for this type of ip address (%s)", ip)
+
 		}
 		if err != nil {
 			return err

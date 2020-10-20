@@ -3,6 +3,8 @@ package cni
 import (
 	"bytes"
 	"fmt"
+	utilnet "k8s.io/utils/net"
+	"net"
 	"strings"
 	"time"
 
@@ -98,17 +100,54 @@ func ofctlExec(args ...string) (string, error) {
 	return stdoutStr, nil
 }
 
-func waitForPodFlows(mac string) error {
+func waitForPodFlows(mac string, ifAddrs []*net.IPNet) error {
+	// query represents the match criteria, and different OF tables that this query may match on
+	type query struct {
+		match  string
+		tables []int
+	}
+
 	return wait.PollImmediate(200*time.Millisecond, 20*time.Second, func() (bool, error) {
-		// Query the flows by mac address
-		query := fmt.Sprintf("table=9,dl_src=%s", mac)
-		// ovs-ofctl dumps error on stderr, so stdout will only dump flow data if matches the query.
-		stdout, err := ofctlExec("dump-flows", "br-int", query)
-		if err != nil {
-			return false, nil
+		// Function checks for OpenFlow flows to know the pod is ready
+		// TODO(trozet): in the future use a more stable mechanism provided by OVN:
+		// https://bugzilla.redhat.com/show_bug.cgi?id=1839102
+
+		// Query the flows by mac address for in_port_security
+		queries := []query{
+			{
+				match:  "dl_src=" + mac,
+				tables: []int{9},
+			},
 		}
-		if len(stdout) == 0 {
-			return false, nil
+		for _, ifAddr := range ifAddrs {
+			var ipMatch string
+			if !utilnet.IsIPv6(ifAddr.IP) {
+				ipMatch = "ip,ip_dst"
+			} else {
+				ipMatch = "ipv6,ipv6_dst"
+			}
+			// add queries for out_port_security
+			// note we need to support table 48 for 20.06 OVN backwards compatibility. Table 49 is now
+			// where out_port_security lives
+			queries = append(queries,
+				query{fmt.Sprintf("%s=%s", ipMatch, ifAddr.IP), []int{48, 49}},
+			)
+		}
+		for _, query := range queries {
+			found := false
+			// Look for a match in any table to be considered success
+			for _, table := range query.tables {
+				queryStr := fmt.Sprintf("table=%d,%s", table, query.match)
+				// ovs-ofctl dumps error on stderr, so stdout will only dump flow data if matches the query.
+				stdout, err := ofctlExec("dump-flows", "br-int", queryStr)
+				if err == nil && len(stdout) > 0 {
+					found = true
+					break
+				}
+			}
+			if !found {
+				return false, nil
+			}
 		}
 		return true, nil
 	})

@@ -100,6 +100,7 @@ func (gp *gressPolicy) addPeerPod(pod *v1.Pod) error {
 	if err != nil {
 		return err
 	}
+
 	return gp.peerAddressSet.AddIPs(ips)
 }
 

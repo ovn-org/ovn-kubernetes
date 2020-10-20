@@ -14,7 +14,6 @@ import (
 	hocontroller "github.com/ovn-org/ovn-kubernetes/go-controller/hybrid-overlay/pkg/controller"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
 	egressipv1 "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/egressip/v1"
-	egressipapi "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/egressip/v1/apis/clientset/versioned"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/factory"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/kube"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/ipallocator"
@@ -22,7 +21,6 @@ import (
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
 
 	egressfirewall "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/egressfirewall/v1"
-	egressfirewallclientset "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/egressfirewall/v1/apis/clientset/versioned"
 
 	apiextension "k8s.io/apiextensions-apiserver/pkg/apis/apiextensions/v1beta1"
 	utilnet "k8s.io/utils/net"
@@ -32,7 +30,6 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/labels"
 	"k8s.io/apimachinery/pkg/types"
-	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/kubernetes/scheme"
 	"k8s.io/client-go/tools/cache"
 	"k8s.io/client-go/tools/record"
@@ -41,7 +38,8 @@ import (
 )
 
 const (
-	egressfirewallCRD = "egressfirewalls.k8s.ovn.org"
+	egressfirewallCRD    string = "egressfirewalls.k8s.ovn.org"
+	clusterPortGroupName string = "clusterPortGroup"
 )
 
 // ServiceVIPKey is used for looking up service namespace information for a
@@ -104,11 +102,14 @@ type namespaceInfo struct {
 
 // eNode is a cache helper used for egress IP assignment
 type eNode struct {
-	v4Subnet    *net.IPNet
-	v6Subnet    *net.IPNet
-	allocations map[string]bool
-	tainted     bool
-	name        string
+	v4IP               net.IP
+	v6IP               net.IP
+	v4Subnet           *net.IPNet
+	v6Subnet           *net.IPNet
+	allocations        map[string]bool
+	isEgressAssignable bool
+	tainted            bool
+	name               string
 }
 
 // Controller structure is the object which holds the controls for starting
@@ -151,6 +152,9 @@ type Controller struct {
 
 	// An address set factory that creates address sets
 	addressSetFactory AddressSetFactory
+
+	// Port group for all cluster logical switch ports
+	clusterPortGroupUUID string
 
 	// Port group for ingress deny rule
 	portGroupIngressDeny string
@@ -244,7 +248,7 @@ func GetIPFullMask(ip string) string {
 
 // NewOvnController creates a new OVN controller for creating logical network
 // infrastructure and policy
-func NewOvnController(kubeClient kubernetes.Interface, egressIPClient egressipapi.Interface, egressFirewallClient egressfirewallclientset.Interface, wf *factory.WatchFactory,
+func NewOvnController(ovnClient *util.OVNClientset, wf *factory.WatchFactory,
 	stopChan <-chan struct{}, addressSetFactory AddressSetFactory, ovnNBClient goovn.Client, ovnSBClient goovn.Client, recorder record.EventRecorder) *Controller {
 
 	if addressSetFactory == nil {
@@ -253,9 +257,9 @@ func NewOvnController(kubeClient kubernetes.Interface, egressIPClient egressipap
 	modeEgressIP := newModeEgressIP()
 	return &Controller{
 		kube: &kube.Kube{
-			KClient:              kubeClient,
-			EIPClient:            egressIPClient,
-			EgressFirewallClient: egressFirewallClient,
+			KClient:              ovnClient.KubeClient,
+			EIPClient:            ovnClient.EgressIPClient,
+			EgressFirewallClient: ovnClient.EgressFirewallClient,
 		},
 		watchFactory:                  wf,
 		stopChan:                      stopChan,
