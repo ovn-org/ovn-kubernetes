@@ -2,12 +2,13 @@ package util
 
 import (
 	"fmt"
+	"testing"
+
 	goovn "github.com/ebay/go-ovn"
 	ovntest "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/testing"
-	go_ovn_mocks "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/testing/mocks/ebay/go-ovn"
+	go_ovn_mocks "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/testing/mocks/github.com/ebay/go-ovn"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
-	"testing"
 )
 
 func TestOvnNBLSPDel(t *testing.T) {
