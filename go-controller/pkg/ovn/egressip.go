@@ -651,7 +651,9 @@ func findReroutePolicyIDs(filterOption, egressIPName string, gatewayRouterIP net
 func (oc *Controller) addEgressNode(egressNode *kapi.Node) error {
 	klog.V(5).Infof("Egress node: %s about to be initialized", egressNode.Name)
 	oc.eIPAllocatorMutex.Lock()
-	oc.eIPAllocator[egressNode.Name].isEgressAssignable = true
+	if eNode, exists := oc.eIPAllocator[egressNode.Name]; exists {
+		eNode.isEgressAssignable = true
+	}
 	oc.eIPAllocatorMutex.Unlock()
 	oc.egressAssignmentRetry.Range(func(key, value interface{}) bool {
 		eIPName := key.(string)
