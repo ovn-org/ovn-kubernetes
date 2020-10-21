@@ -89,6 +89,8 @@ func (npw *localPortWatcherData) addService(svc *kapi.Service) error {
 	if isIPv6Service {
 		gatewayIP = npw.gatewayIPv6
 	}
+	// holds map of external ips and if they are currently using routes
+	routeUsage := make(map[string]bool)
 	for _, port := range svc.Spec.Ports {
 		if util.ServiceTypeHasNodePort(svc) {
 			if err := util.ValidatePort(port.Protocol, port.NodePort); err != nil {
@@ -135,16 +137,19 @@ func (npw *localPortWatcherData) addService(svc *kapi.Service) error {
 				klog.V(5).Infof("ExternalIP: %s is reachable through one of the interfaces on this node, will skip setup", externalIP)
 			} else {
 				if gatewayIP != "" {
-					if stdout, stderr, err := util.RunIP("route", "replace", externalIP, "via", gatewayIP, "dev", util.K8sMgmtIntfName, "table", localnetGatewayExternalIDTable); err != nil {
-						klog.Errorf("Error adding routing table entry for ExternalIP %s, via gw: %s: stdout: %s, stderr: %s, err: %v", externalIP, gatewayIP, stdout, stderr, err)
-					} else {
-						klog.V(5).Infof("Successfully added route for ExternalIP: %s", externalIP)
-					}
+					routeUsage[externalIP] = true
 				} else {
 					klog.Warningf("No gateway of appropriate IP family for ExternalIP %s for Service %s/%s",
 						externalIP, svc.Namespace, svc.Name)
 				}
 			}
+		}
+	}
+	for externalIP := range routeUsage {
+		if stdout, stderr, err := util.RunIP("route", "replace", externalIP, "via", gatewayIP, "dev", util.K8sMgmtIntfName, "table", localnetGatewayExternalIDTable); err != nil {
+			klog.Errorf("Error adding routing table entry for ExternalIP %s, via gw: %s: stdout: %s, stderr: %s, err: %v", externalIP, gatewayIP, stdout, stderr, err)
+		} else {
+			klog.V(5).Infof("Successfully added route for ExternalIP: %s", externalIP)
 		}
 	}
 	klog.V(5).Infof("Adding iptables rules: %v for service: %v", iptRules, svc.Name)
@@ -158,6 +163,8 @@ func (npw *localPortWatcherData) deleteService(svc *kapi.Service) error {
 	if isIPv6Service {
 		gatewayIP = npw.gatewayIPv6
 	}
+	// holds map of external ips and if they are currently using routes
+	routeUsage := make(map[string]bool)
 	// Note that unlike with addService we just silently ignore IPv4/IPv6 mismatches here
 	for _, port := range svc.Spec.Ports {
 		if util.ServiceTypeHasNodePort(svc) {
@@ -181,15 +188,20 @@ func (npw *localPortWatcherData) deleteService(svc *kapi.Service) error {
 				klog.V(5).Infof("ExternalIP: %s is reachable through one of the interfaces on this node, will skip cleanup", externalIP)
 			} else {
 				if gatewayIP != "" {
-					if stdout, stderr, err := util.RunIP("route", "del", externalIP, "via", gatewayIP, "dev", util.K8sMgmtIntfName, "table", localnetGatewayExternalIDTable); err != nil {
-						klog.Errorf("Error delete routing table entry for ExternalIP %s: stdout: %s, stderr: %s, err: %v", externalIP, stdout, stderr, err)
-					} else {
-						klog.V(5).Infof("Successfully deleted route for ExternalIP: %s", externalIP)
-					}
+					routeUsage[externalIP] = true
 				}
 			}
 		}
 	}
+
+	for externalIP := range routeUsage {
+		if stdout, stderr, err := util.RunIP("route", "del", externalIP, "via", gatewayIP, "dev", util.K8sMgmtIntfName, "table", localnetGatewayExternalIDTable); err != nil {
+			klog.Errorf("Error delete routing table entry for ExternalIP %s: stdout: %s, stderr: %s, err: %v", externalIP, stdout, stderr, err)
+		} else {
+			klog.V(5).Infof("Successfully deleted route for ExternalIP: %s", externalIP)
+		}
+	}
+
 	klog.V(5).Infof("Deleting iptables rules: %v for service: %v", iptRules, svc.Name)
 	return delIptRules(iptRules)
 }
