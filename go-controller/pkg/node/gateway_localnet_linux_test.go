@@ -15,6 +15,10 @@ import (
 	"k8s.io/apimachinery/pkg/types"
 )
 
+const (
+	v4localnetGatewayIP = "10.244.0.1"
+)
+
 func getFakeLocalAddrs() map[string]net.IPNet {
 	localAddrSet := make(map[string]net.IPNet)
 	for _, network := range []string{"127.0.0.1/32", "10.10.10.1/24"} {
@@ -172,13 +176,13 @@ var _ = Describe("Node Operations", func() {
 				})
 				fakeOvnNode.fakeExec.AddFakeCmd(&ovntest.ExpectedCmd{
 					Cmd:    "ip route list table " + localnetGatewayExternalIDTable,
-					Output: fmt.Sprintf("%s via %s dev %s\n9.9.9.9 via %s dev %s\n", externalIP, v4localnetGatewayIP, localnetGatewayNextHopPort, v4localnetGatewayIP, localnetGatewayNextHopPort),
+					Output: fmt.Sprintf("%s via %s dev %s\n9.9.9.9 via %s dev %s\n", externalIP, v4localnetGatewayIP, util.K8sMgmtIntfName, v4localnetGatewayIP, util.K8sMgmtIntfName),
 				})
 				fakeOvnNode.fakeExec.AddFakeCmdsNoOutputNoError([]string{
-					fmt.Sprintf("ip route del 9.9.9.9 via %s dev %s table %s", v4localnetGatewayIP, localnetGatewayNextHopPort, localnetGatewayExternalIDTable),
+					fmt.Sprintf("ip route del 9.9.9.9 via %s dev %s table %s", v4localnetGatewayIP, util.K8sMgmtIntfName, localnetGatewayExternalIDTable),
 				})
 				fakeOvnNode.fakeExec.AddFakeCmdsNoOutputNoError([]string{
-					fmt.Sprintf("ip route replace %s via %s dev %s table %s", externalIP, v4localnetGatewayIP, localnetGatewayNextHopPort, localnetGatewayExternalIDTable),
+					fmt.Sprintf("ip route replace %s via %s dev %s table %s", externalIP, v4localnetGatewayIP, util.K8sMgmtIntfName, localnetGatewayExternalIDTable),
 				})
 
 				service := *newService("service1", "namespace1", "10.129.0.2",
@@ -295,7 +299,7 @@ var _ = Describe("Node Operations", func() {
 				)
 
 				fakeOvnNode.fakeExec.AddFakeCmdsNoOutputNoError([]string{
-					fmt.Sprintf("ip route replace %s via %s dev %s table %s", externalIP, v4localnetGatewayIP, localnetGatewayNextHopPort, localnetGatewayExternalIDTable),
+					fmt.Sprintf("ip route replace %s via %s dev %s table %s", externalIP, v4localnetGatewayIP, util.K8sMgmtIntfName, localnetGatewayExternalIDTable),
 				})
 
 				fNPW.addService(&service)
@@ -515,7 +519,7 @@ var _ = Describe("Node Operations", func() {
 				)
 
 				fakeOvnNode.fakeExec.AddFakeCmdsNoOutputNoError([]string{
-					fmt.Sprintf("ip route del %s via %s dev %s table %s", externalIP, v4localnetGatewayIP, localnetGatewayNextHopPort, localnetGatewayExternalIDTable),
+					fmt.Sprintf("ip route del %s via %s dev %s table %s", externalIP, v4localnetGatewayIP, util.K8sMgmtIntfName, localnetGatewayExternalIDTable),
 				})
 
 				fNPW.deleteService(&service)
