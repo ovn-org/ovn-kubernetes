@@ -722,31 +722,33 @@ func (oc *Controller) reassignEgressIP(eIP *egressipv1.EgressIP) error {
 func (oc *Controller) initEgressIPAllocator(node *kapi.Node) (err error) {
 	oc.eIPAllocatorMutex.Lock()
 	defer oc.eIPAllocatorMutex.Unlock()
-	var v4IP, v6IP net.IP
-	var v4Subnet, v6Subnet *net.IPNet
-	v4IfAddr, v6IfAddr, err := util.ParseNodePrimaryIfAddr(node)
-	if err != nil {
-		return fmt.Errorf("unable to use node for egress assignment, err: %v", err)
-	}
-	if v4IfAddr != "" {
-		v4IP, v4Subnet, err = net.ParseCIDR(v4IfAddr)
+	if _, exists := oc.eIPAllocator[node.Name]; !exists {
+		var v4IP, v6IP net.IP
+		var v4Subnet, v6Subnet *net.IPNet
+		v4IfAddr, v6IfAddr, err := util.ParseNodePrimaryIfAddr(node)
 		if err != nil {
-			return err
+			return fmt.Errorf("unable to use node for egress assignment, err: %v", err)
 		}
-	}
-	if v6IfAddr != "" {
-		v6IP, v6Subnet, err = net.ParseCIDR(v6IfAddr)
-		if err != nil {
-			return err
+		if v4IfAddr != "" {
+			v4IP, v4Subnet, err = net.ParseCIDR(v4IfAddr)
+			if err != nil {
+				return err
+			}
 		}
-	}
-	oc.eIPAllocator[node.Name] = &eNode{
-		name:        node.Name,
-		v4IP:        v4IP,
-		v6IP:        v6IP,
-		v4Subnet:    v4Subnet,
-		v6Subnet:    v6Subnet,
-		allocations: make(map[string]bool),
+		if v6IfAddr != "" {
+			v6IP, v6Subnet, err = net.ParseCIDR(v6IfAddr)
+			if err != nil {
+				return err
+			}
+		}
+		oc.eIPAllocator[node.Name] = &eNode{
+			name:        node.Name,
+			v4IP:        v4IP,
+			v6IP:        v6IP,
+			v4Subnet:    v4Subnet,
+			v6Subnet:    v6Subnet,
+			allocations: make(map[string]bool),
+		}
 	}
 	return nil
 }

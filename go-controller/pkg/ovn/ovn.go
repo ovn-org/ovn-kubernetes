@@ -784,6 +784,9 @@ func (oc *Controller) WatchEgressNodes() {
 		UpdateFunc: func(old, new interface{}) {
 			oldNode := old.(*kapi.Node)
 			newNode := new.(*kapi.Node)
+			if err := oc.initEgressIPAllocator(newNode); err != nil {
+				klog.Error(err)
+			}
 			oldLabels := oldNode.GetLabels()
 			newLabels := newNode.GetLabels()
 			_, oldHadEgressLabel := oldLabels[nodeEgressLabel]
