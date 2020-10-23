@@ -4,13 +4,13 @@
 # required binaries from OVN and OVS. By default OVN and OVS binaries are built
 # using the master branch of the respective projects.
 #
-# NOTE: 
+# NOTE:
 # 1) Binaries are built using the version specified using OVN-BRANCH,
 # OVS-BRANCH args below in the Dockerfile. By default the branch is set to
 # master, so it will build OVN and OVS binaries from the master branch code.
 # Please change the branch name if image needs to be build with different
 # branch.
-# 
+#
 # 2) User need to make sure that ovs datapath module built with the same
 # kernel is installed and loaded on the host machines for ovs daemons to
 # load properly.
@@ -39,7 +39,7 @@ ARG OVS_BRANCH=master
 
 RUN dnf upgrade -y && dnf install --best --refresh -y --setopt=tsflags=nodocs \
 	PyYAML bind-utils procps-ng openssl numactl-libs firewalld-filesystem \
-        libpcap hostname kubernetes-client \
+        libpcap hostname kubernetes-client python3-openvswitch python3-pyOpenSSL  \
         iptables iproute iputils strace socat\
         "kernel-devel-uname-r == $KERNEL_VERSION" \
 	@'Development Tools' rpm-build dnf-plugins-core kmod && \
