@@ -232,13 +232,13 @@ func getPodGWRoute(f *framework.Framework, nodeName string, podName string) net.
 }
 
 // Create a pod on the specified node using the agnostic host image
-func createGenericPod(f *framework.Framework, podName, nodeSelector string, command []string) {
-	createPod(f, podName, nodeSelector, command, nil)
+func createGenericPod(f *framework.Framework, podName, nodeSelector, namespace string, command []string) {
+	createPod(f, podName, nodeSelector, namespace, command, nil)
 }
 
 // Create a pod on the specified node using the agnostic host image
-func createGenericPodWithLabel(f *framework.Framework, podName, nodeSelector string, command []string, labels map[string]string) {
-	createPod(f, podName, nodeSelector, command, labels)
+func createGenericPodWithLabel(f *framework.Framework, podName, nodeSelector, namespace string, command []string, labels map[string]string) {
+	createPod(f, podName, nodeSelector, namespace, command, labels)
 }
 
 func createClusterExternalContainer(containerName string, containerImage string, additionalArgs []string) string {
@@ -279,7 +279,8 @@ func getPod(f *framework.Framework, podName string) *v1.Pod {
 }
 
 // Create a pod on the specified node using the agnostic host image
-func createPod(f *framework.Framework, podName, nodeSelector string, command []string, labels map[string]string) {
+func createPod(f *framework.Framework, podName, nodeSelector, namespace string, command []string, labels map[string]string) {
+
 	contName := fmt.Sprintf("%s-container", podName)
 
 	pod := &v1.Pod{
@@ -299,18 +300,18 @@ func createPod(f *framework.Framework, podName, nodeSelector string, command []s
 			RestartPolicy: v1.RestartPolicyNever,
 		},
 	}
-	podClient := f.ClientSet.CoreV1().Pods(f.Namespace.Name)
+	podClient := f.ClientSet.CoreV1().Pods(namespace)
 	_, err := podClient.Create(pod)
 	if err != nil {
 		framework.Logf("Warning: Failed to get logs from pod %q: %v", pod.Name, err)
 	}
-	err = e2epod.WaitForPodNotPending(f.ClientSet, podName, f.Namespace.Name)
+	err = e2epod.WaitForPodNotPending(f.ClientSet, podName, namespace)
 	if err != nil {
-		logs, logErr := e2epod.GetPodLogs(f.ClientSet, f.Namespace.Name, pod.Name, contName)
+		logs, logErr := e2epod.GetPodLogs(f.ClientSet, namespace, pod.Name, contName)
 		if logErr != nil {
 			framework.Logf("Warning: Failed to get logs from pod %q: %v", pod.Name, logErr)
 		} else {
-			framework.Logf("pod %s/%s logs:\n%s", f.Namespace.Name, pod.Name, logs)
+			framework.Logf("pod %s/%s logs:\n%s", namespace, pod.Name, logs)
 		}
 	}
 }
@@ -510,7 +511,7 @@ var _ = Describe("test e2e inter-node connectivity between worker nodes hybrid o
 		By(fmt.Sprintf("Creating a container on node %s and verifying connectivity to a pod on node %s", ciWorkerNodeSrc, ciWorkerNodeDst))
 
 		// Create the pod that will be used as the destination for the connectivity test
-		createGenericPod(f, dstPingPodName, ciWorkerNodeDst, command)
+		createGenericPod(f, dstPingPodName, ciWorkerNodeDst, f.Namespace.Name, command)
 
 		// Wait for pod exgw setup to be almost ready
 		err = wait.PollImmediate(retryInterval, retryTimeout, func() (bool, error) {
@@ -617,7 +618,7 @@ var _ = Describe("test e2e inter-node connectivity between worker nodes", func()
 		By(fmt.Sprintf("Creating a container on node %s and verifying connectivity to a pod on node %s", ciWorkerNodeSrc, ciWorkerNodeDst))
 
 		// Create the pod that will be used as the destination for the connectivity test
-		createGenericPod(f, dstPingPodName, ciWorkerNodeDst, command)
+		createGenericPod(f, dstPingPodName, ciWorkerNodeDst, f.Namespace.Name, command)
 
 		// There is a condition somewhere with e2e WaitForPodNotPending that returns ready
 		// before calling for the IP address will succeed. This simply adds some retries.
@@ -964,7 +965,7 @@ var _ = Describe("e2e multiple external gateway update validation", func() {
 			framework.Failf("failed to add the pod route on the test container: %v", err)
 		}
 		// Create the pod that will be used as the source for the connectivity test
-		createGenericPod(f, srcPingPodName, ciWorkerNodeSrc, command)
+		createGenericPod(f, srcPingPodName, ciWorkerNodeSrc, f.Namespace.Name, command)
 
 		// Wait for pod exgw setup to be almost ready
 		err = wait.PollImmediate(retryInterval, retryTimeout, func() (bool, error) {
@@ -1242,8 +1243,8 @@ spec:
 		}
 
 		By("Creating two pods matching the EgressIP: one running on each of the egress nodes")
-		createGenericPodWithLabel(f, pod1Name, pod1Node.name, command, podEgressLabel)
-		createGenericPodWithLabel(f, pod2Name, pod2Node.name, command, podEgressLabel)
+		createGenericPodWithLabel(f, pod1Name, pod1Node.name, f.Namespace.Name, command, podEgressLabel)
+		createGenericPodWithLabel(f, pod2Name, pod2Node.name, f.Namespace.Name, command, podEgressLabel)
 
 		wait.PollImmediate(retryInterval, retryTimeout, func() (bool, error) {
 			for _, podName := range []string{pod1Name, pod2Name} {
@@ -1465,7 +1466,7 @@ var _ = Describe("e2e non-vxlan external gateway and update validation", func() 
 			framework.Failf("failed to add the loopback ip to dev lo on the test container: %v", err)
 		}
 		// Create the pod that will be used as the source for the connectivity test
-		createGenericPod(f, srcPingPodName, ciWorkerNodeSrc, command)
+		createGenericPod(f, srcPingPodName, ciWorkerNodeSrc, f.Namespace.Name, command)
 		// wait for pod setup to return a valid address
 		err = wait.PollImmediate(retryInterval, retryTimeout, func() (bool, error) {
 			pingSrc = getPodAddress(srcPingPodName, f.Namespace.Name)
@@ -1629,7 +1630,7 @@ spec:
 		// apply the egress firewall configuration
 		framework.RunKubectlOrDie(applyArgs...)
 		// create the pod that will be used as the source for the connectivity test
-		createGenericPod(f, srcPodName, serverNodeInfo.name, command)
+		createGenericPod(f, srcPodName, serverNodeInfo.name, f.Namespace.Name,command)
 
 		// Wait for pod exgw setup to be almost ready
 		err := wait.PollImmediate(retryInterval, retryTimeout, func() (bool, error) {
@@ -1667,6 +1668,164 @@ spec:
 		_, err = framework.RunKubectl("exec", srcPodName, frameworkNsFlag, testContainerFlag, "--", "nc", "-vz", "-w", testTimeout, exFWPermitTcpWwwDest, "443")
 		if err == nil {
 			framework.Failf("Failed to curl the remote host %s from container %s on node %s: %v", exFWPermitTcpWwwDest, ovnContainer, serverNodeInfo.name, err)
+		}
+	})
+})
+
+// Validate pods can reach a network running in a container's looback address via
+// an external gateway running on eth0 of the container without any tunnel encap.
+// The traffic will get proxied through an annotated pod in the default namespace.
+var _ = ginkgo.Describe("e2e non-vxlan external gateway through a gateway pod", func() {
+	const (
+		svcname          string = "externalgw-pod-novxlan"
+		dummyMac         string = "01:23:45:67:89:10"
+		exGWRemoteIp     string = "10.249.3.1"
+		gwContainerName  string = "ex-gw-container"
+		ciNetworkFlag    string = "{{ .NetworkSettings.Networks.kind.IPAddress }}"
+		ciNetworkName    string = "kind"
+		defaultNamespace string = "default"
+		routingNetwork   string = "foo"
+		srcPingPodName   string = "e2e-exgw-src-ping-pod"
+		gatewayPodName   string = "e2e-gateway-pod"
+	)
+
+	f := framework.NewDefaultFramework(svcname)
+
+	type nodeInfo struct {
+		name   string
+		nodeIP string
+	}
+
+	var (
+		worker1NodeInfo nodeInfo
+		worker2NodeInfo nodeInfo
+	)
+
+	ginkgo.BeforeEach(func() {
+
+		// retrieve worker node names
+		nodes, err := e2enode.GetBoundedReadySchedulableNodes(f.ClientSet, 3)
+		framework.ExpectNoError(err)
+		if len(nodes.Items) < 3 {
+			framework.Failf(
+				"Test requires >= 3 Ready nodes, but there are only %v nodes",
+				len(nodes.Items))
+		}
+		ips := e2enode.CollectAddresses(nodes, v1.NodeInternalIP)
+		worker1NodeInfo = nodeInfo{
+			name:   nodes.Items[1].Name,
+			nodeIP: ips[1],
+		}
+		worker2NodeInfo = nodeInfo{
+			name:   nodes.Items[2].Name,
+			nodeIP: ips[2],
+		}
+	})
+
+	ginkgo.AfterEach(func() {
+		// tear down the containers simulating the gateways
+		if cid, _ := runCommand("docker", "ps", "-qaf", fmt.Sprintf("name=%s", gwContainerName)); cid != "" {
+			if _, err := runCommand("docker", "rm", "-f", gwContainerName); err != nil {
+				framework.Logf("failed to delete the gateway test container %s %v", gwContainerName, err)
+			}
+		}
+	})
+
+	ginkgo.It("Should validate connectivity to an external gateway's loopback address via a pod with external gateway annotations enabled", func() {
+
+		var (
+			pingSrc           string
+			exGWRemoteCidr    = fmt.Sprintf("%s/32", exGWRemoteIp)
+			command           = []string{"bash", "-c", "sleep 20000"}
+			frameworkNsFlag   = fmt.Sprintf("--namespace=%s", f.Namespace.Name)
+			testContainer     = fmt.Sprintf("%s-container", srcPingPodName)
+			testContainerFlag = fmt.Sprintf("--container=%s", testContainer)
+		)
+
+		// start the container that will act as an external gateway
+		_, err := runCommand("docker", "run", "-itd", "--privileged", "--network", ciNetworkName, "--name", gwContainerName, "centos")
+		if err != nil {
+			framework.Failf("failed to start external gateway test container %s: %v", gwContainerName, err)
+		}
+		// retrieve the container ip of the external gateway container
+		exGWIp, err := runCommand("docker", "inspect", "-f", ciNetworkFlag, gwContainerName)
+		if err != nil {
+			framework.Failf("failed to start external gateway test container: %v", err)
+		}
+		// trim newline from the inspect output
+		exGWIp = strings.TrimSuffix(exGWIp, "\n")
+		if ip := net.ParseIP(exGWIp); ip == nil {
+			framework.Failf("Unable to retrieve a valid address from container %s with inspect output of %s", gwContainerName, exGWIp)
+		}
+
+		// create the pod that acts as a proxy for egress traffic to the external gateway
+		createGenericPod(f, gatewayPodName, worker1NodeInfo.name, defaultNamespace, command)
+		// wait for pod setup to return a valid address
+		// note: this is polling the default namespace, not the framework naespace
+		err = wait.PollImmediate(retryInterval, retryTimeout, func() (bool, error) {
+			kubectlOut := getPodAddress(gatewayPodName, defaultNamespace)
+			validIP := net.ParseIP(kubectlOut)
+			if validIP == nil {
+				return false, nil
+			}
+			return true, nil
+		})
+		// Fail the test if no address is ever retrieved
+		if err != nil {
+			framework.Failf("Error trying to get the pod IP address")
+		}
+
+		// add the annotations to the pod to enable the gateway forwarding.
+		// this fakes out the multus annotation so that the pod IP is
+		// actually an IP of an external container for testing purposes
+		annotateArgs := []string{
+			"annotate",
+			"pods",
+			gatewayPodName,
+			fmt.Sprintf("k8s.v1.cni.cncf.io/network-status=[{\"name\":\"%s\",\"interface\":"+
+				"\"net1\",\"ips\":[\"%s\"],\"mac\":\"%s\"}]", routingNetwork, exGWIp, dummyMac),
+			fmt.Sprintf("k8s.ovn.org/routing-namespaces=%s", f.Namespace.Name),
+			fmt.Sprintf("k8s.ovn.org/routing-network=%s", routingNetwork),
+		}
+		framework.Logf("Annotating the external gateway pod with annotation %s", annotateArgs)
+		framework.RunKubectlOrDie(annotateArgs...)
+
+		// create the pod that will source the connectivity test to the external gateway
+		createGenericPod(f, srcPingPodName, worker2NodeInfo.name, f.Namespace.Name, command)
+		// wait for the pod setup to return a valid address
+		err = wait.PollImmediate(retryInterval, retryTimeout, func() (bool, error) {
+			pingSrc = getPodAddress(srcPingPodName, f.Namespace.Name)
+			validIP := net.ParseIP(pingSrc)
+			if validIP == nil {
+				return false, nil
+			}
+			return true, nil
+		})
+		// Fail the test if no address is ever retrieved
+		if err != nil {
+			framework.Failf("Error trying to get the pod IP address")
+		}
+
+		// add loopback interface used to validate all traffic is getting drained through the gateway
+		_, err = runCommand("docker", "exec", gwContainerName, "ip", "address", "add", exGWRemoteCidr, "dev", "lo")
+		if err != nil {
+			framework.Failf("failed to add the loopback ip to dev lo on the test container: %v", err)
+		}
+		// add a host route on the mock gateway for return traffic to the proxy pod
+		_, err = runCommand("docker", "exec", gwContainerName, "ip", "route", "add", pingSrc, "via", worker1NodeInfo.nodeIP)
+		if err != nil {
+			framework.Failf("failed to add the pod host route on the test container: %v", err)
+		}
+		// Verify the external gateway loopback address running on the external container is reachable and
+		// that traffic from the source ping pod is proxied through the pod in the default namespace
+		ginkgo.By(fmt.Sprintf("Verifying connectivity via the gateway namespace to the gateway %s and remote address %s", exGWIp, exGWRemoteIp))
+		_, err = framework.RunKubectl("exec", srcPingPodName, frameworkNsFlag, testContainerFlag, "--", "ping", "-w", "40", exGWRemoteIp)
+		if err != nil {
+			framework.Failf("Failed to ping the remote gateway network %s from pod %s: %v", exGWRemoteIp, srcPingPodName, err)
+		}
+		err = f.ClientSet.CoreV1().Pods(defaultNamespace).Delete(gatewayPodName, metav1.NewDeleteOptions(0))
+		if err != nil {
+			framework.Logf("Failed to get delete the pod %s in the namespace %s: %v", gatewayPodName, defaultNamespace, err)
 		}
 	})
 })
