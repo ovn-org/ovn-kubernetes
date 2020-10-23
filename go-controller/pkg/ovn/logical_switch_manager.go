@@ -167,13 +167,35 @@ func (manager *logicalSwitchManager) AllocateIPs(nodeName string, ipnets []*net.
 			ipnets, nodeName)
 
 	}
+
+	var err error
+	allocated := make(map[int]*net.IPNet)
+	defer func() {
+		if err != nil {
+			// iterate over range of already allocated indices and release
+			// ips allocated before the error occurred.
+			for relIdx, relIPNet := range allocated {
+				if relErr := lsi.ipams[relIdx].Release(relIPNet.IP); relErr != nil {
+					klog.Errorf("Error while releasing IP: %s, err: %v", relIPNet.IP, relErr)
+				} else {
+					klog.Warningf("Reserved IP: %s were released", relIPNet.IP.String())
+				}
+			}
+		}
+	}()
+
 	for _, ipnet := range ipnets {
-		for _, ipam := range lsi.ipams {
+		for idx, ipam := range lsi.ipams {
 			cidr := ipam.CIDR()
 			if cidr.Contains(ipnet.IP) {
-				if err := ipam.Allocate(ipnet.IP); err != nil {
+				if _, ok = allocated[idx]; ok {
+					err = fmt.Errorf("Error: attempt to reserve multiple IPs in the same IPAM instance")
 					return err
 				}
+				if err = ipam.Allocate(ipnet.IP); err != nil {
+					return err
+				}
+				allocated[idx] = ipnet
 				break
 			}
 		}
