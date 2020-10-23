@@ -121,7 +121,9 @@ func (g *gateway) Run(stopChan <-chan struct{}) {
 	}
 }
 
-func gatewayInitInternal(nodeName, gwIntf string, subnets []*net.IPNet, gwNextHops []net.IP, nodeAnnotator kube.Annotator) (string, string, []*net.IPNet, error) {
+func gatewayInitInternal(nodeName, gwIntf string, subnets []*net.IPNet, gwNextHops []net.IP, nodeAnnotator kube.Annotator) (
+	string, string, net.HardwareAddr, []*net.IPNet, error) {
+
 	var bridgeName string
 	var uplinkName string
 	var brCreated bool
@@ -131,14 +133,14 @@ func gatewayInitInternal(nodeName, gwIntf string, subnets []*net.IPNet, gwNextHo
 		// This is an OVS bridge's internal port
 		uplinkName, err = util.GetNicName(bridgeName)
 		if err != nil {
-			return bridgeName, uplinkName, nil, err
+			return bridgeName, uplinkName, nil, nil, err
 		}
 	} else if _, _, err := util.RunOVSVsctl("--", "br-exists", gwIntf); err != nil {
 		// This is not a OVS bridge. We need to create a OVS bridge
 		// and add cluster.GatewayIntf as a port of that bridge.
 		bridgeName, err = util.NicToBridge(gwIntf)
 		if err != nil {
-			return bridgeName, uplinkName, nil, fmt.Errorf("failed to convert %s to OVS bridge: %v", gwIntf, err)
+			return bridgeName, uplinkName, nil, nil, fmt.Errorf("failed to convert %s to OVS bridge: %v", gwIntf, err)
 		}
 		uplinkName = gwIntf
 		gwIntf = bridgeName
@@ -147,7 +149,7 @@ func gatewayInitInternal(nodeName, gwIntf string, subnets []*net.IPNet, gwNextHo
 		// gateway interface is an OVS bridge
 		uplinkName, err = getIntfName(gwIntf)
 		if err != nil {
-			return bridgeName, uplinkName, nil, err
+			return bridgeName, uplinkName, nil, nil, err
 		}
 		bridgeName = gwIntf
 	}
@@ -156,22 +158,22 @@ func gatewayInitInternal(nodeName, gwIntf string, subnets []*net.IPNet, gwNextHo
 	// error out.
 	ips, err := getNetworkInterfaceIPAddresses(gwIntf)
 	if err != nil {
-		return bridgeName, uplinkName, nil, fmt.Errorf("failed to get interface details for %s (%v)",
+		return bridgeName, uplinkName, nil, nil, fmt.Errorf("failed to get interface details for %s (%v)",
 			gwIntf, err)
 	}
 	ifaceID, macAddress, err := bridgedGatewayNodeSetup(nodeName, bridgeName, gwIntf,
 		types.PhysicalNetworkName, brCreated)
 	if err != nil {
-		return bridgeName, uplinkName, nil, fmt.Errorf("failed to set up shared interface gateway: %v", err)
+		return bridgeName, uplinkName, nil, nil, fmt.Errorf("failed to set up shared interface gateway: %v", err)
 	}
 
 	err = setupLocalNodeAccessBridge(nodeName, subnets)
 	if err != nil {
-		return bridgeName, uplinkName, nil, err
+		return bridgeName, uplinkName, nil, nil, err
 	}
 	chassisID, err := util.GetNodeChassisID()
 	if err != nil {
-		return bridgeName, uplinkName, nil, err
+		return bridgeName, uplinkName, nil, nil, err
 	}
 
 	err = util.SetL3GatewayConfig(nodeAnnotator, &util.L3GatewayConfig{
@@ -184,5 +186,5 @@ func gatewayInitInternal(nodeName, gwIntf string, subnets []*net.IPNet, gwNextHo
 		NodePortEnable: config.Gateway.NodeportEnable,
 		VLANID:         &config.Gateway.VLANID,
 	})
-	return bridgeName, uplinkName, ips, err
+	return bridgeName, uplinkName, macAddress, ips, err
 }
