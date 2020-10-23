@@ -285,15 +285,11 @@ func (gp *gressPolicy) localPodAddACL(portGroupName, portGroupUUID string) {
 	}
 }
 
-// addACLAllow adds an "allow" ACL with a given match to the given Port Group
+// addACLAllow adds an ACL with a given match to the given Port Group
 func (gp *gressPolicy) addACLAllow(match, l4Match, portGroupUUID string, ipBlockCidr bool) error {
 	var direction, action string
 	direction = toLport
-	if gp.policyType == knet.PolicyTypeIngress {
-		action = "allow-related"
-	} else {
-		action = "allow"
-	}
+	action = "allow-related"
 
 	uuid, stderr, err := util.RunOVNNbctl("--data=bare", "--no-heading",
 		"--columns=_uuid", "find", "ACL",
@@ -333,7 +329,7 @@ func (gp *gressPolicy) addACLAllow(match, l4Match, portGroupUUID string, ipBlock
 	return nil
 }
 
-// modifyACLAllow updates an "allow" ACL with a new match
+// modifyACLAllow updates an ACL with a new match
 func (gp *gressPolicy) modifyACLAllow(oldMatch, newMatch string) error {
 	uuid, stderr, err := util.RunOVNNbctl("--data=bare", "--no-heading",
 		"--columns=_uuid", "find", "ACL", oldMatch,
