@@ -210,7 +210,8 @@ func (npw *localPortWatcherData) syncServices(serviceInterface []interface{}) {
 	removeStaleRoutes := func(keepRoutes []string) {
 		stdout, stderr, err := util.RunIP("route", "list", "table", localnetGatewayExternalIDTable)
 		if err != nil || stdout == "" {
-			klog.Infof("No routing table entries for ExternalIP table %s: stdout: %s, stderr: %s, err: %v", localnetGatewayExternalIDTable, stdout, stderr, err)
+			klog.Infof("No routing table entries for ExternalIP table %s: stdout: %s, stderr: %s, err: %v",
+				localnetGatewayExternalIDTable, stdout, strings.Replace(stderr, "\n", "", -1), err)
 			return
 		}
 		for _, existingRoute := range strings.Split(stdout, "\n") {
