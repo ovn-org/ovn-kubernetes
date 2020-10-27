@@ -3,9 +3,12 @@ package ovn
 import (
 	"fmt"
 	"net"
+	"os"
 	"sort"
 	"strings"
 	"sync"
+	"syscall"
+	"time"
 
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
 	egressipv1 "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/egressip/v1"
@@ -20,6 +23,12 @@ import (
 	"k8s.io/klog"
 	utilnet "k8s.io/utils/net"
 )
+
+type egressIPDialer interface {
+	dial(ip net.IP) bool
+}
+
+var dialer egressIPDialer = &egressIPDial{}
 
 const (
 	// In case we restart we need accept executing ovn-nbctl commands with this error.
@@ -99,6 +108,15 @@ func (oc *Controller) isEgressNodeReady(egressNode *kapi.Node) bool {
 		if condition.Type == v1.NodeReady {
 			return condition.Status == v1.ConditionTrue
 		}
+	}
+	return false
+}
+
+func (oc *Controller) isEgressNodeReachable(egressNode *kapi.Node) bool {
+	oc.eIPC.allocatorMutex.Lock()
+	defer oc.eIPC.allocatorMutex.Unlock()
+	if eNode, exists := oc.eIPC.allocator[egressNode.Name]; exists {
+		return eNode.isReachable || oc.isReachable(eNode)
 	}
 	return false
 }
@@ -366,7 +384,7 @@ func (oc *Controller) getSortedEgressData() ([]egressNode, map[string]bool) {
 	assignableNodes := []egressNode{}
 	allAllocations := make(map[string]bool)
 	for _, eNode := range oc.eIPC.allocator {
-		if eNode.isEgressAssignable && eNode.isReady {
+		if eNode.isEgressAssignable && eNode.isReady && eNode.isReachable {
 			assignableNodes = append(assignableNodes, *eNode)
 		}
 		for ip := range eNode.allocations {
@@ -392,6 +410,14 @@ func (oc *Controller) setNodeEgressReady(nodeName string, isReady bool) {
 	defer oc.eIPC.allocatorMutex.Unlock()
 	if eNode, exists := oc.eIPC.allocator[nodeName]; exists {
 		eNode.isReady = isReady
+	}
+}
+
+func (oc *Controller) setNodeEgressReachable(nodeName string, isReachable bool) {
+	oc.eIPC.allocatorMutex.Lock()
+	defer oc.eIPC.allocatorMutex.Unlock()
+	if eNode, exists := oc.eIPC.allocator[nodeName]; exists {
+		eNode.isReachable = isReachable
 	}
 }
 
@@ -517,6 +543,7 @@ func (oc *Controller) deleteNodeForEgress(node *v1.Node) error {
 func (oc *Controller) initClusterEgressPolicies(nodes []interface{}) {
 	v4ClusterSubnet, v6ClusterSubnet := getClusterSubnets()
 	createDefaultNoReroutePodPolicies(v4ClusterSubnet, v6ClusterSubnet)
+	go oc.checkEgressNodesReachability()
 }
 
 // egressNode is a cache helper used for egress IP assignment, representing an egress node
@@ -527,6 +554,7 @@ type egressNode struct {
 	v6Subnet           *net.IPNet
 	allocations        map[string]bool
 	isReady            bool
+	isReachable        bool
 	isEgressAssignable bool
 	tainted            bool
 	name               string
@@ -742,6 +770,84 @@ func findReroutePolicyIDs(filterOption, egressIPName string, gatewayRouterIP net
 		return nil, nil
 	}
 	return strings.Split(policyIDs, "\n"), nil
+}
+
+func (oc *Controller) checkEgressNodesReachability() {
+	for {
+		reAddOrDelete := map[string]bool{}
+		oc.eIPC.allocatorMutex.Lock()
+		for _, eNode := range oc.eIPC.allocator {
+			if eNode.isEgressAssignable && eNode.isReady {
+				wasReachable := eNode.isReachable
+				isReachable := oc.isReachable(eNode)
+				if wasReachable && !isReachable {
+					reAddOrDelete[eNode.name] = true
+				} else if !wasReachable && isReachable {
+					reAddOrDelete[eNode.name] = false
+				}
+				eNode.isReachable = isReachable
+			}
+		}
+		oc.eIPC.allocatorMutex.Unlock()
+		for nodeName, shouldDelete := range reAddOrDelete {
+			node, err := oc.kube.GetNode(nodeName)
+			if err != nil {
+				klog.Errorf("Node: %s reachability changed, but could not retrieve node from API server, err: %v", node.Name, err)
+			}
+			if shouldDelete {
+				klog.Warningf("Node: %s is detected as unreachable, deleting it from egress assignment", node.Name)
+				if err := oc.deleteEgressNode(node); err != nil {
+					klog.Errorf("Node: %s is detected as unreachable, but could not re-assign egress IPs, err: %v", node.Name, err)
+				}
+			} else {
+				klog.Infof("Node: %s is detected as reachable and ready again, adding it to egress assignment", node.Name)
+				if err := oc.addEgressNode(node); err != nil {
+					klog.Errorf("Node: %s is detected as reachable and ready again, but could not re-assign egress IPs, err: %v", node.Name, err)
+				}
+			}
+		}
+		time.Sleep(5 * time.Second)
+	}
+}
+
+func (oc *Controller) isReachable(node *egressNode) bool {
+	reachable := false
+	// check IPv6 only if IPv4 fails
+	if node.v4IP != nil {
+		if reachable = dialer.dial(node.v4IP); reachable {
+			return reachable
+		}
+	}
+	if node.v6IP != nil {
+		reachable = dialer.dial(node.v6IP)
+	}
+	return reachable
+}
+
+type egressIPDial struct{}
+
+// Blantant copy from: https://github.com/openshift/sdn/blob/master/pkg/network/common/egressip.go#L499-L505
+// Ping a node and return whether or not we think it is online. We do this by trying to
+// open a TCP connection to the "discard" service (port 9); if the node is offline, the
+// attempt will either time out with no response, or else return "no route to host" (and
+// we will return false). If the node is online then we presumably will get a "connection
+// refused" error; but the code below assumes that anything other than timeout or "no
+// route" indicates that the node is online.
+func (e *egressIPDial) dial(ip net.IP) bool {
+	timeout := time.Second
+	conn, err := net.DialTimeout("tcp", net.JoinHostPort(ip.String(), "9"), timeout)
+	if conn != nil {
+		conn.Close()
+	}
+	if opErr, ok := err.(*net.OpError); ok {
+		if opErr.Timeout() {
+			return false
+		}
+		if sysErr, ok := opErr.Err.(*os.SyscallError); ok && sysErr.Err == syscall.EHOSTUNREACH {
+			return false
+		}
+	}
+	return true
 }
 
 func getClusterSubnets() (*net.IPNet, *net.IPNet) {

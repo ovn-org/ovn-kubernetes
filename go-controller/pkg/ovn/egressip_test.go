@@ -18,6 +18,12 @@ import (
 	utilnet "k8s.io/utils/net"
 )
 
+type fakeEgressIPDialer struct{}
+
+func (f fakeEgressIPDialer) dial(ip net.IP) bool {
+	return true
+}
+
 var (
 	reroutePolicyID           = "reroute_policy_id"
 	natID                     = "nat_id"
@@ -81,6 +87,7 @@ func setupNode(nodeName string, ipNets []string, mockAllocationIPs []string) egr
 		allocations:        mockAllcations,
 		name:               nodeName,
 		isReady:            true,
+		isReachable:        true,
 		isEgressAssignable: true,
 	}
 	return node
@@ -92,6 +99,8 @@ var _ = Describe("OVN master EgressIP Operations", func() {
 		fakeOvn *FakeOVN
 		tExec   *ovntest.FakeExec
 	)
+
+	dialer = fakeEgressIPDialer{}
 
 	getEgressIPAllocatorSizeSafely := func() int {
 		fakeOvn.controller.eIPC.allocatorMutex.Lock()
@@ -134,6 +143,7 @@ var _ = Describe("OVN master EgressIP Operations", func() {
 
 		tExec = ovntest.NewFakeExec()
 		fakeOvn = NewFakeOVN(tExec)
+
 	})
 
 	AfterEach(func() {

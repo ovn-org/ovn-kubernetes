@@ -737,9 +737,10 @@ func (oc *Controller) WatchEgressNodes() {
 				klog.Error(err)
 			}
 			nodeLabels := node.GetLabels()
-			if _, hasEgressLabel := nodeLabels[nodeEgressLabel]; hasEgressLabel && oc.isEgressNodeReady(node) {
+			if _, hasEgressLabel := nodeLabels[nodeEgressLabel]; hasEgressLabel && oc.isEgressNodeReady(node) && oc.isEgressNodeReachable(node) {
 				oc.setNodeEgressAssignable(node.Name, true)
 				oc.setNodeEgressReady(node.Name, true)
+				oc.setNodeEgressReachable(node.Name, true)
 				if err := oc.addEgressNode(node); err != nil {
 					klog.Error(err)
 				}
@@ -768,16 +769,18 @@ func (oc *Controller) WatchEgressNodes() {
 			}
 			isOldReady := oc.isEgressNodeReady(oldNode)
 			isNewReady := oc.isEgressNodeReady(newNode)
+			isNewReachable := oc.isEgressNodeReachable(newNode)
 			oc.setNodeEgressReady(newNode.Name, isNewReady)
+			oc.setNodeEgressReachable(newNode.Name, isNewReachable)
 			if !oldHadEgressLabel && newHasEgressLabel {
 				klog.Infof("Node: %s has been labelled, adding it for egress assignment", newNode.Name)
 				oc.setNodeEgressAssignable(newNode.Name, true)
-				if isNewReady {
+				if isNewReady && isNewReachable {
 					if err := oc.addEgressNode(newNode); err != nil {
 						klog.Error(err)
 					}
 				} else {
-					klog.Warningf("Node: %s has been labelled, but node is not ready, cannot use it for egress assignment", newNode.Name)
+					klog.Warningf("Node: %s has been labelled, but node is not ready and reachable, cannot use it for egress assignment", newNode.Name)
 				}
 				return
 			}
@@ -789,8 +792,8 @@ func (oc *Controller) WatchEgressNodes() {
 				if err := oc.deleteEgressNode(newNode); err != nil {
 					klog.Error(err)
 				}
-			} else if isNewReady {
-				klog.Infof("Node: %s is ready, adding it for egress assignment", newNode.Name)
+			} else if isNewReady && isNewReachable {
+				klog.Infof("Node: %s is ready and reachable, adding it for egress assignment", newNode.Name)
 				if err := oc.addEgressNode(newNode); err != nil {
 					klog.Error(err)
 				}
