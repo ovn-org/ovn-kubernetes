@@ -273,8 +273,8 @@ node4 chassis=912d592c-904c-40cd-9ef1-c2e5b49a33dd lb_force_snat_ip=100.64.0.4`,
 		Expect(err).NotTo(HaveOccurred())
 
 		fexec.AddFakeCmd(&ovntest.ExpectedCmd{
-			Cmd:    "ovn-nbctl --timeout=15 --if-exist get logical_router_port rtoj-GR_test-node networks",
-			Output: "[\"100.64.0.1/29\"]",
+			Cmd:    "ovn-nbctl --timeout=15 --format=table --data=bare --no-heading --columns=networks find logical_router_port name=rtoj-GR_test-node",
+			Output: "100.64.0.1/29",
 		})
 		fexec.AddFakeCmd(&ovntest.ExpectedCmd{
 			Cmd:    "ovn-nbctl --timeout=15 --data=bare --no-heading --columns=_uuid find logical_router_static_route nexthop=\"100.64.0.1\"",
@@ -328,8 +328,8 @@ node4 chassis=912d592c-904c-40cd-9ef1-c2e5b49a33dd lb_force_snat_ip=100.64.0.4`,
 		Expect(err).NotTo(HaveOccurred())
 
 		fexec.AddFakeCmd(&ovntest.ExpectedCmd{
-			Cmd:    "ovn-nbctl --timeout=15 --if-exist get logical_router_port rtoj-GR_test-node networks",
-			Output: "[\"100.64.0.1/29\", \"fd98::1/125\"]",
+			Cmd:    "ovn-nbctl --timeout=15 --format=table --data=bare --no-heading --columns=networks find logical_router_port name=rtoj-GR_test-node",
+			Output: "100.64.0.1/29 fd98::1/125",
 		})
 		fexec.AddFakeCmd(&ovntest.ExpectedCmd{
 			Cmd:    "ovn-nbctl --timeout=15 --data=bare --no-heading --columns=_uuid find logical_router_static_route nexthop=\"100.64.0.1\"",

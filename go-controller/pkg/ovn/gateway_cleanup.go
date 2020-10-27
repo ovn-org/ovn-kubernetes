@@ -13,41 +13,21 @@ import (
 
 // gatewayCleanup removes all the NB DB objects created for a node's gateway
 func gatewayCleanup(nodeName string) error {
-	gatewayRouter := gwRouterPrefix + nodeName
+	gatewayRouter := util.GwRouterPrefix + nodeName
 
 	// Get the gateway router port's IP address (connected to join switch)
-	var routerIP net.IP
-	var nextHops []net.IP
-	routerIPNetworks, stderr, err := util.RunOVNNbctl("--if-exist", "get",
-		"logical_router_port", gwRouterToJoinSwitchPrefix+gatewayRouter, "networks")
+	nextHops, err := util.GetNodeGatewayRouterIPs(nodeName)
 	if err != nil {
-		return fmt.Errorf("failed to get logical router port for gateway router %s, "+
-			"stderr: %q, error: %v", gatewayRouter, stderr, err)
-	}
-
-	// eg: `["100.64.1.1/29", "fd98:1::/125"]`
-	routerIPNetworks = strings.Trim(routerIPNetworks, "[]")
-	if routerIPNetworks != "" {
-		for _, routerIPNetwork := range strings.Split(routerIPNetworks, ", ") {
-			routerIPNetwork = strings.Trim(routerIPNetwork, "\"")
-			routerIP, _, err = net.ParseCIDR(routerIPNetwork)
-			if err != nil {
-				return fmt.Errorf("could not parse logical router port %q: %v",
-					routerIPNetwork, err)
-			}
-			if routerIP != nil {
-				nextHops = append(nextHops, routerIP)
-			}
-		}
+		return fmt.Errorf("failed to get logical router port for gateway router %s, error: %v", gatewayRouter, err)
 	}
 
 	staticRouteCleanup(nextHops)
 
 	// Remove the join switch that connects ovn_cluster_router to gateway router
-	_, stderr, err = util.RunOVNNbctl("--if-exist", "ls-del", joinSwitchPrefix+nodeName)
+	_, stderr, err := util.RunOVNNbctl("--if-exist", "ls-del", util.JoinSwitchPrefix+nodeName)
 	if err != nil {
 		return fmt.Errorf("failed to delete the join logical switch %s, "+
-			"stderr: %q, error: %v", joinSwitchPrefix+nodeName, stderr, err)
+			"stderr: %q, error: %v", util.JoinSwitchPrefix+nodeName, stderr, err)
 	}
 
 	// Remove the gateway router associated with nodeName
@@ -59,7 +39,7 @@ func gatewayCleanup(nodeName string) error {
 	}
 
 	// Remove external switch
-	externalSwitch := externalSwitchPrefix + nodeName
+	externalSwitch := util.ExternalSwitchPrefix + nodeName
 	_, stderr, err = util.RunOVNNbctl("--if-exist", "ls-del",
 		externalSwitch)
 	if err != nil {
@@ -68,10 +48,10 @@ func gatewayCleanup(nodeName string) error {
 	}
 
 	// Remove the patch port on the distributed router that connects to join switch
-	_, stderr, err = util.RunOVNNbctl("--if-exist", "lrp-del", distRouterToJoinSwitchPrefix+nodeName)
+	_, stderr, err = util.RunOVNNbctl("--if-exist", "lrp-del", util.DistRouterToJoinSwitchPrefix+nodeName)
 	if err != nil {
-		return fmt.Errorf("failed to delete the patch port dtoj-%s on distributed router "+
-			"stderr: %q, error: %v", nodeName, stderr, err)
+		return fmt.Errorf("failed to delete the patch port %s%s on distributed router "+
+			"stderr: %q, error: %v", util.DistRouterToJoinSwitchPrefix, nodeName, stderr, err)
 	}
 
 	// If exists, remove the TCP, UDP load-balancers created for north-south traffic for gateway router.
@@ -113,7 +93,7 @@ func delPbrAndNatRules(nodeName string) {
 		externalIP = ""
 	}
 	if externalIP != "" {
-		_, stderr, err = util.RunOVNNbctl("--if-exists", "lr-nat-del", ovnClusterRouter, "dnat_and_snat", externalIP)
+		_, stderr, err = util.RunOVNNbctl("--if-exists", "lr-nat-del", util.OVNClusterRouter, "dnat_and_snat", externalIP)
 		if err != nil {
 			klog.Errorf("Failed to delete the dnat_and_snat ip %s associated with the management "+
 				"port %s: stderr: %s, error: %v", externalIP, mgmtPortName, stderr, err)
@@ -130,9 +110,9 @@ func delPbrAndNatRules(nodeName string) {
 	}
 	// matches inport for a policy, must use ending quote to substring match to avoid matching other nodes accidentally
 	// i.e. rtos-ovn-worker would match rtos-ovn-worker2
-	nodeSubnetMatchSubStr := fmt.Sprintf("rtos-%s\"", nodeName)
+	nodeSubnetMatchSubStr := fmt.Sprintf("%s%s\"", util.RouterToSwitchPrefix, nodeName)
 	// for inter node, match the comment in the policy, and include extra space to avoid accidental submatch
-	interNodeMatchSubStr := fmt.Sprintf("inter-%s ", nodeName)
+	interNodeMatchSubStr := fmt.Sprintf("%s%s ", util.InterPrefix, nodeName)
 	// mgmt port policy matches node name in comment, use extra spaces to avoid accidental match of other nodes
 	mgmtPortPolicyMatchSubStr := fmt.Sprintf(" %s ", nodeName)
 	for _, match := range strings.Split(matches, "\n\n") {
@@ -146,7 +126,7 @@ func delPbrAndNatRules(nodeName string) {
 		} else {
 			continue
 		}
-		_, stderr, err = util.RunOVNNbctl("lr-policy-del", ovnClusterRouter, priority, match)
+		_, stderr, err = util.RunOVNNbctl("lr-policy-del", util.OVNClusterRouter, priority, match)
 		if err != nil {
 			klog.Errorf("Failed to remove the policy routes (%s, %s) associated with the node %s: stderr: %s, error: %v",
 				priority, match, nodeName, stderr, err)
@@ -172,7 +152,7 @@ func staticRouteCleanup(nextHops []net.IP) {
 		routes := strings.Fields(uuids)
 		for _, route := range routes {
 			_, stderr, err = util.RunOVNNbctl("--if-exists", "remove",
-				"logical_router", ovnClusterRouter, "static_routes", route)
+				"logical_router", util.OVNClusterRouter, "static_routes", route)
 			if err != nil {
 				klog.Errorf("Failed to delete static route %s"+
 					", stderr: %q, err = %v", route, stderr, err)

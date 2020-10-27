@@ -141,16 +141,16 @@ func (oc *Controller) deleteEgressFirewall(egressFirewall *egressfirewallapi.Egr
 	stdout, stderr, err := util.RunOVNNbctl("--data=bare", "--no-heading", "--columns=_uuid", "find", "logical_router_policy", fmt.Sprintf("external-ids:egressFirewall=%s", egressFirewall.Namespace))
 	if err != nil {
 		return []error{fmt.Errorf("error deleting egressFirewall for namespace %s, cannot get logical router policies from LR %s - %s:%s",
-			egressFirewall.Namespace, ovnClusterRouter, err, stderr)}
+			egressFirewall.Namespace, util.OVNClusterRouter, err, stderr)}
 	}
 	var errList []error
 
 	uuids := strings.Fields(stdout)
 	for _, uuid := range uuids {
-		_, stderr, err := util.RunOVNNbctl("lr-policy-del", ovnClusterRouter, uuid)
+		_, stderr, err := util.RunOVNNbctl("lr-policy-del", util.OVNClusterRouter, uuid)
 		if err != nil {
 			errList = append(errList, fmt.Errorf("failed to delete the rules for "+
-				"egressFirewall in namespace %s on logical switch %s, stderr: %q (%v)", egressFirewall.Namespace, ovnClusterRouter, stderr, err))
+				"egressFirewall in namespace %s on logical switch %s, stderr: %q (%v)", egressFirewall.Namespace, util.OVNClusterRouter, stderr, err))
 		}
 	}
 	return errList
@@ -186,13 +186,13 @@ func (ef *egressFirewall) addLogicalRouterPolicyToClusterRouter(hashedAddressSet
 		_, stderr, err := util.RunOVNNbctl("--id=@logical_router_policy", "create", "logical_router_policy",
 			fmt.Sprintf("priority=%d", efStartPriority-rule.id),
 			match, "action="+action, fmt.Sprintf("external-ids:egressFirewall=%s", ef.namespace),
-			"--", "add", "logical_router", ovnClusterRouter, "policies", "@logical_router_policy")
+			"--", "add", "logical_router", util.OVNClusterRouter, "policies", "@logical_router_policy")
 		if err != nil {
 			// TODO: lr-policy-add doesn't support --may-exist, resort to this workaround for now.
 			// Have raised an issue against ovn repository (https://github.com/ovn-org/ovn/issues/49)
 			if !strings.Contains(stderr, "already existed") {
 				return fmt.Errorf("failed to add policy route '%s' to %s "+
-					"stderr: %s, error: %v", match, ovnClusterRouter, stderr, err)
+					"stderr: %s, error: %v", match, util.OVNClusterRouter, stderr, err)
 			}
 		}
 	}
