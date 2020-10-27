@@ -18,7 +18,7 @@ import (
 
 // initLoadBalancerHealthChecker initializes the health check server for
 // ServiceTypeLoadBalancer services
-func initLoadBalancerHealthChecker(nodeName string, wf *factory.WatchFactory) {
+func initLoadBalancerHealthChecker(nodeName string, wf factory.NodeWatchFactory) {
 	server := healthcheck.NewServer(nodeName, nil, nil, nil)
 	services := make(map[ktypes.NamespacedName]uint16)
 	endpoints := make(map[ktypes.NamespacedName]int)

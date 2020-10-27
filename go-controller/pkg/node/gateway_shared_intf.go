@@ -338,7 +338,7 @@ func syncServices(services []interface{}, inport, gwBridge string, nodeIP *net.I
 	}
 }
 
-func nodePortWatcher(nodeName, gwBridge, gwIntf string, nodeIP []*net.IPNet, wf *factory.WatchFactory) error {
+func nodePortWatcher(nodeName, gwBridge, gwIntf string, nodeIP []*net.IPNet, wf factory.NodeWatchFactory) error {
 	// the name of the patch port created by ovn-controller is of the form
 	// patch-<logical_port_name_of_localnet_port>-to-br-int
 	patchPort := "patch-" + gwBridge + "_" + nodeName + "-to-br-int"

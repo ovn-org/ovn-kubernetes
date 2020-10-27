@@ -31,13 +31,13 @@ import (
 type OvnNode struct {
 	name         string
 	Kube         kube.Interface
-	watchFactory *factory.WatchFactory
+	watchFactory factory.NodeWatchFactory
 	stopChan     chan struct{}
 	recorder     record.EventRecorder
 }
 
 // NewNode creates a new controller for node management
-func NewNode(kubeClient kubernetes.Interface, wf *factory.WatchFactory, name string, stopChan chan struct{}, eventRecorder record.EventRecorder) *OvnNode {
+func NewNode(kubeClient kubernetes.Interface, wf factory.NodeWatchFactory, name string, stopChan chan struct{}, eventRecorder record.EventRecorder) *OvnNode {
 	return &OvnNode{
 		name:         name,
 		Kube:         &kube.Kube{KClient: kubeClient},
@@ -231,12 +231,11 @@ func (n *OvnNode) Start(wg *sync.WaitGroup) error {
 	klog.Infof("Gateway and management port readiness took %v", time.Since(start))
 
 	if config.HybridOverlay.Enabled {
-		factory := n.watchFactory.GetFactory()
 		nodeController, err := honode.NewNode(
 			n.Kube,
 			n.name,
-			factory.Core().V1().Nodes().Informer(),
-			factory.Core().V1().Pods().Informer(),
+			n.watchFactory.NodeInformer(),
+			n.watchFactory.LocalPodInformer(),
 			informer.NewDefaultEventHandler,
 		)
 		if err != nil {

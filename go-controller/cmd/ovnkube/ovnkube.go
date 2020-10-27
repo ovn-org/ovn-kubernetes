@@ -194,12 +194,6 @@ func runOvnKube(ctx *cli.Context) error {
 		return err
 	}
 
-	// create factory and start the controllers asked for
-	factory, err := factory.NewWatchFactory(ovnClientset)
-	if err != nil {
-		return err
-	}
-
 	master := ctx.String("init-master")
 	node := ctx.String("init-node")
 
@@ -228,9 +222,17 @@ func runOvnKube(ctx *cli.Context) error {
 	stopChan := make(chan struct{})
 	wg := &sync.WaitGroup{}
 
+	var watchFactory factory.Shutdownable
+	var masterWatchFactory *factory.WatchFactory
 	if master != "" {
-		var ovnNBClient, ovnSBClient goovn.Client
 		var err error
+		// create factory and start the controllers asked for
+		masterWatchFactory, err = factory.NewMasterWatchFactory(ovnClientset)
+		if err != nil {
+			return err
+		}
+		watchFactory = masterWatchFactory
+		var ovnNBClient, ovnSBClient goovn.Client
 
 		if ovnNBClient, err = util.NewOVNNBClient(); err != nil {
 			return fmt.Errorf("error when trying to initialize go-ovn NB client: %v", err)
@@ -245,20 +247,32 @@ func runOvnKube(ctx *cli.Context) error {
 		// since we capture some metrics in Start()
 		metrics.RegisterMasterMetrics(ovnNBClient, ovnSBClient)
 
-		ovnController := ovn.NewOvnController(ovnClientset, factory, stopChan, nil, ovnNBClient, ovnSBClient, util.EventRecorder(ovnClientset.KubeClient))
+		ovnController := ovn.NewOvnController(ovnClientset, masterWatchFactory, stopChan, nil, ovnNBClient, ovnSBClient, util.EventRecorder(ovnClientset.KubeClient))
 		if err := ovnController.Start(ovnClientset.KubeClient, master, wg); err != nil {
 			return err
 		}
 	}
 
 	if node != "" {
+		var nodeWatchFactory factory.NodeWatchFactory
+		if masterWatchFactory == nil {
+			var err error
+			nodeWatchFactory, err = factory.NewNodeWatchFactory(ovnClientset, node)
+			if err != nil {
+				return err
+			}
+			watchFactory = nodeWatchFactory
+		} else {
+			nodeWatchFactory = masterWatchFactory
+		}
+
 		if config.Kubernetes.Token == "" {
 			return fmt.Errorf("cannot initialize node without service account 'token'. Please provide one with --k8s-token argument")
 		}
 		// register ovnkube node specific prometheus metrics exported by the node
 		metrics.RegisterNodeMetrics()
 		start := time.Now()
-		n := ovnnode.NewNode(ovnClientset.KubeClient, factory, node, stopChan, util.EventRecorder(ovnClientset.KubeClient))
+		n := ovnnode.NewNode(ovnClientset.KubeClient, nodeWatchFactory, node, stopChan, util.EventRecorder(ovnClientset.KubeClient))
 		if err := n.Start(wg); err != nil {
 			return err
 		}
@@ -281,7 +295,7 @@ func runOvnKube(ctx *cli.Context) error {
 	// run until cancelled
 	<-ctx.Context.Done()
 	close(stopChan)
-	factory.Shutdown()
+	watchFactory.Shutdown()
 	wg.Wait()
 	return nil
 }

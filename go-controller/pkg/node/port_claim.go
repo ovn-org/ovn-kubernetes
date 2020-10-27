@@ -41,7 +41,7 @@ func newPortClaimWatcher(recorder record.EventRecorder) localPort {
 	}
 }
 
-func initPortClaimWatcher(recorder record.EventRecorder, wf *factory.WatchFactory) {
+func initPortClaimWatcher(recorder record.EventRecorder, wf factory.NodeWatchFactory) {
 	port = newPortClaimWatcher(recorder)
 	wf.AddServiceHandler(cache.ResourceEventHandlerFuncs{
 		AddFunc: func(obj interface{}) {
