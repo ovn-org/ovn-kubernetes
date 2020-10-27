@@ -473,13 +473,14 @@ func (oc *Controller) reassignEgressIP(eIP *egressipv1.EgressIP) error {
 	eIP.Status = egressipv1.EgressIPStatus{
 		Items: []egressipv1.EgressIPStatusItem{},
 	}
+	var reassignError error
 	if err := oc.addEgressIP(eIP); err != nil {
-		return fmt.Errorf("new egress IP assignment failed, err: %v", err)
+		reassignError = fmt.Errorf("new egress IP assignment failed, err: %v", err)
 	}
 	if err := oc.updateEgressIPWithRetry(eIP); err != nil {
 		return fmt.Errorf("update of new egress IP failed, err: %v", err)
 	}
-	return nil
+	return reassignError
 }
 
 func (oc *Controller) initEgressIPAllocator(node *kapi.Node) (err error) {
