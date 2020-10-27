@@ -32,11 +32,8 @@ RUN yum install -y  \
 	selinux-policy && \
 	yum clean all
 
-#======== 4.6.0-0.nightly-2020-09-25-070943 Version ========
-# ovn2.13-20.06.2-11.el8fdp.x86_64
-# openvswitch2.13-2.13.0-57.el8fdp
 ARG ovsver=2.13.0-57.el8fdp
-ARG ovnver=20.06.2-11.el8fdp
+ARG ovnver=20.09.0-7.el8fdn
 
 RUN INSTALL_PKGS=" \
 	openssl firewalld-filesystem \
