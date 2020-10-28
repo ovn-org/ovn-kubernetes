@@ -183,8 +183,9 @@ func (ovn *Controller) deleteEndpoints(ep *kapi.Endpoints) error {
 			aclUUID, err := ovn.createLoadBalancerRejectACL(lb, svc.Spec.ClusterIP, svcPort.Port, svcPort.Protocol)
 			if err != nil {
 				klog.Errorf("Failed to create reject ACL for load balancer: %s, error: %v", lb, err)
+			} else {
+				klog.Infof("Reject ACL created for load balancer: %s, %s", lb, aclUUID)
 			}
-			klog.Infof("Reject ACL created for load balancer: %s, %s", lb, aclUUID)
 		}
 
 		// clear endpoints from the LB
