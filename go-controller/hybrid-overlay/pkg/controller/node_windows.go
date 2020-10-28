@@ -13,7 +13,7 @@ import (
 
 	kapi "k8s.io/api/core/v1"
 	listers "k8s.io/client-go/listers/core/v1"
-	"k8s.io/klog"
+	"k8s.io/klog/v2"
 
 	"github.com/Microsoft/hcsshim/hcn"
 )

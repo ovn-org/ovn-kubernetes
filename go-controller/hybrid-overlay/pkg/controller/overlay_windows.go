@@ -6,7 +6,7 @@ import (
 	"net"
 
 	"github.com/Microsoft/hcsshim/hcn"
-	"k8s.io/klog"
+	"k8s.io/klog/v2"
 
 	ps "github.com/bhendo/go-powershell"
 	psBackend "github.com/bhendo/go-powershell/backend"

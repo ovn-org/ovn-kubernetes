@@ -1,7 +1,7 @@
 package app
 
 import (
-	"k8s.io/klog"
+	"k8s.io/klog/v2"
 	"net/http"
 
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/metrics"

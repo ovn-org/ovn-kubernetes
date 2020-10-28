@@ -2,7 +2,7 @@ package metrics
 
 import (
 	"fmt"
-	"k8s.io/klog"
+	"k8s.io/klog/v2"
 	"strings"
 	"time"
 
