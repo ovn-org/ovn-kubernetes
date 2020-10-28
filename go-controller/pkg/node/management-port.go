@@ -70,7 +70,8 @@ func (n *OvnNode) createManagementPort(hostSubnets []*net.IPNet, nodeAnnotator k
 			} else {
 				nextHop = cfg.ipv4.ifAddr
 			}
-			gatewayIfAddrs = append(gatewayIfAddrs, nextHop)
+			// gatewayIfAddrs are the OVN next hops via mp0
+			gatewayIfAddrs = append(gatewayIfAddrs, util.GetNodeGatewayIfAddr(hostSubnet))
 
 			// add iptables masquerading for mp0 to exit the host for egress
 			cidr := nextHop.IP.Mask(nextHop.Mask)
