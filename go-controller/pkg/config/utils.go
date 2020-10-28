@@ -21,7 +21,6 @@ type CIDRNetworkEntry struct {
 // addresses from.
 func ParseClusterSubnetEntries(clusterSubnetCmd string) ([]CIDRNetworkEntry, error) {
 	var parsedClusterList []CIDRNetworkEntry
-	ipv6 := false
 	clusterEntriesList := strings.Split(clusterSubnetCmd, ",")
 
 	for _, clusterEntry := range clusterEntriesList {
@@ -39,10 +38,7 @@ func ParseClusterSubnetEntries(clusterSubnetCmd string) ([]CIDRNetworkEntry, err
 			return nil, err
 		}
 
-		if utilnet.IsIPv6(parsedClusterEntry.CIDR.IP) {
-			ipv6 = true
-		}
-
+		ipv6 := utilnet.IsIPv6(parsedClusterEntry.CIDR.IP)
 		entryMaskLength, _ := parsedClusterEntry.CIDR.Mask.Size()
 		if len(splitClusterEntry) == 3 {
 			tmp, err := strconv.Atoi(splitClusterEntry[2])
