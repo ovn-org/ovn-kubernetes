@@ -16,6 +16,7 @@ import (
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
 	kapi "k8s.io/api/core/v1"
 	v1 "k8s.io/api/core/v1"
+	errors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	utilwait "k8s.io/apimachinery/pkg/util/wait"
 	"k8s.io/client-go/tools/cache"
@@ -427,6 +428,11 @@ func (oc *Controller) addEgressNode(egressNode *kapi.Node) error {
 		eIPName := key.(string)
 		klog.V(5).Infof("Re-assignment for EgressIP: %s attempted by new node: %s", eIPName, egressNode.Name)
 		eIP, err := oc.kube.GetEgressIP(eIPName)
+		if errors.IsNotFound(err) {
+			klog.Errorf("Re-assignment for EgressIP: EgressIP: %s not found in the api-server, err: %v", eIPName, err)
+			oc.eIPC.assignmentRetry.Delete(eIP.Name)
+			return true
+		}
 		if err != nil {
 			klog.Errorf("Re-assignment for EgressIP: unable to retrieve EgressIP: %s from the api-server, err: %v", eIPName, err)
 			return true
