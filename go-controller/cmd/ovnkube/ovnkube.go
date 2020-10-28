@@ -15,7 +15,7 @@ import (
 	"text/template"
 	"time"
 
-	"k8s.io/klog"
+	"k8s.io/klog/v2"
 
 	goovn "github.com/ebay/go-ovn"
 	"github.com/urfave/cli/v2"

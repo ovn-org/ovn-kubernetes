@@ -9,7 +9,7 @@ import (
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/kube"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
 
-	"k8s.io/klog"
+	"k8s.io/klog/v2"
 )
 
 func createManagementPort(nodeNameOriginal string, hostSubnets []*net.IPNet, nodeAnnotator kube.Annotator,

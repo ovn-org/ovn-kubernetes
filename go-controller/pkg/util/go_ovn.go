@@ -8,7 +8,7 @@ import (
 
 	goovn "github.com/ebay/go-ovn"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
-	"k8s.io/klog"
+	"k8s.io/klog/v2"
 )
 
 func NewOVNNBClient() (goovn.Client, error) {
