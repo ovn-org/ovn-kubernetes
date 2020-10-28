@@ -110,7 +110,6 @@ type Controller struct {
 
 	// FIXME DUAL-STACK -  Make IP Allocators more dual-stack friendly
 	masterSubnetAllocator     *subnetallocator.SubnetAllocator
-	joinSubnetAllocator       *subnetallocator.SubnetAllocator
 	nodeLocalNatIPv4Allocator *ipallocator.Range
 	nodeLocalNatIPv6Allocator *ipallocator.Range
 
@@ -177,6 +176,8 @@ type Controller struct {
 
 	serviceLBLock sync.Mutex
 
+	joinSwIPManager *joinSwitchIPManager
+
 	// event recorder used to post events to k8s
 	recorder record.EventRecorder
 
@@ -232,7 +233,6 @@ func NewOvnController(ovnClient *util.OVNClientset, wf *factory.WatchFactory,
 		nodeLocalNatIPv4Allocator: &ipallocator.Range{},
 		nodeLocalNatIPv6Allocator: &ipallocator.Range{},
 		lsManager:                 newLogicalSwitchManager(),
-		joinSubnetAllocator:       subnetallocator.NewSubnetAllocator(),
 		logicalPortCache:          newPortCache(stopChan),
 		namespaces:                make(map[string]*namespaceInfo),
 		namespacesMutex:           sync.Mutex{},
@@ -254,6 +254,7 @@ func NewOvnController(ovnClient *util.OVNClientset, wf *factory.WatchFactory,
 		serviceVIPToNameLock:     sync.Mutex{},
 		serviceLBMap:             make(map[string]map[string]*loadBalancerConf),
 		serviceLBLock:            sync.Mutex{},
+		joinSwIPManager:          nil,
 		recorder:                 recorder,
 		ovnNBClient:              ovnNBClient,
 		ovnSBClient:              ovnSBClient,
@@ -853,6 +854,9 @@ func (oc *Controller) syncNodeGateway(node *kapi.Node, hostSubnets []*net.IPNet)
 		if err := gatewayCleanup(node.Name); err != nil {
 			return fmt.Errorf("error cleaning up gateway for node %s: %v", node.Name, err)
 		}
+		if err := oc.joinSwIPManager.releaseJoinLRPIPs(node.Name); err != nil {
+			return err
+		}
 	} else if hostSubnets != nil {
 		if err := oc.syncGatewayLogicalNetwork(node, l3GatewayConfig, hostSubnets); err != nil {
 			return fmt.Errorf("error creating gateway for node %s: %v", node.Name, err)
@@ -963,9 +967,8 @@ func (oc *Controller) WatchNodes() {
 				"various caches", node.Name)
 
 			nodeSubnets, _ := util.ParseNodeHostSubnetAnnotation(node)
-			joinSubnets, _ := util.ParseNodeJoinSubnetAnnotation(node)
 			dnatSnatIPs, _ := util.ParseNodeLocalNatIPAnnotation(node)
-			err := oc.deleteNode(node.Name, nodeSubnets, joinSubnets, dnatSnatIPs)
+			err := oc.deleteNode(node.Name, nodeSubnets, dnatSnatIPs)
 			if err != nil {
 				klog.Error(err)
 			}

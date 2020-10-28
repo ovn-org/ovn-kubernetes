@@ -6,6 +6,7 @@ import (
 	"net"
 	"os"
 	"reflect"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -36,6 +37,8 @@ const (
 	OvnServiceIdledAt              = "k8s.ovn.org/idled-at"
 	OvnNodeAnnotationRetryInterval = 100 * time.Millisecond
 	OvnNodeAnnotationRetryTimeout  = 1 * time.Second
+	OvnSingleJoinSwithTopoVersion  = 1
+	OvnCurrentTopologyVersion      = OvnSingleJoinSwithTopoVersion
 )
 
 type ovnkubeMasterLeaderMetrics struct{}
@@ -121,6 +124,85 @@ func (oc *Controller) Start(kClient kubernetes.Interface, nodeName string, wg *s
 	return nil
 }
 
+// delete obsoleted logical OVN entities that are specific for Multiple join switches OVN topology. Also cleanup
+// OVN entities for deleted nodes (similar to syncNodes() but for obsoleted Multiple join switches OVN topology)
+func (oc *Controller) upgradeToSingleSwitchOVNTopology(existingNodeList *kapi.NodeList) error {
+
+	existingNodes := make(map[string]bool)
+	for _, node := range existingNodeList.Items {
+		existingNodes[node.Name] = true
+
+		// delete the obsoleted node-join-subnets annotation
+		err := oc.kube.SetAnnotationsOnNode(&node, map[string]interface{}{"k8s.ovn.org/node-join-subnets": nil})
+		if err != nil {
+			klog.Errorf("Failed to remove node-join-subnets annotation for node %s", node.Name)
+		}
+	}
+
+	nodeSwitches, stderr, err := util.RunOVNNbctl("--data=bare", "--no-heading", "--format=csv",
+		"--columns=name,other-config", "find", "logical_switch")
+	if err != nil {
+		return fmt.Errorf("failed to get node logical switches: stderr: %q, error: %v",
+			stderr, err)
+	}
+
+	// find node logical switches which have other-config value set
+	logicalNodes := make(map[string]bool)
+	for _, result := range strings.Split(nodeSwitches, "\n") {
+		// Split result into name and other-config
+		items := strings.Split(result, ",")
+		if len(items) != 2 || len(items[0]) == 0 || len(items[1]) == 0 {
+			continue
+		}
+		logicalNodes[items[0]] = true
+	}
+
+	for nodeName := range logicalNodes {
+		// if the node was deleted when ovn-master was down, delete its per-node switch
+		upgradeOnly := true
+		if _, ok := existingNodes[nodeName]; !ok {
+			_ = oc.deleteNodeLogicalNetwork(nodeName)
+			upgradeOnly = false
+		}
+
+		// for all nodes include the ones that were deleted, delete its gateway entities.
+		// See comments above the multiJoinSwitchGatewayCleanup() function for details.
+		err = multiJoinSwitchGatewayCleanup(nodeName, upgradeOnly)
+		if err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func (oc *Controller) upgradeOVNTopology(existingNodes *kapi.NodeList) error {
+	// Find out the current OVN topology version, if "k8s-ovn-topo-version" external_ids is does not exist, it is pre
+	// OVN topology versioning, set version number to 0
+	ver := 0
+	stdout, stderr, err := util.RunOVNNbctl("get", "logical_router", util.OVNClusterRouter, "external_ids:k8s-ovn-topo-version")
+	if err != nil {
+		if strings.Contains(stderr, "no row") {
+			// no OVNClusterRouter exists, DB is empty, nothing to upgrade
+			ver = OvnCurrentTopologyVersion
+		} else {
+			klog.Infof("No version string found. The OVN topology is before versioning is introduced. Upgrade needed")
+		}
+	} else {
+		v, err := strconv.Atoi(stdout)
+		if err != nil {
+			klog.Errorf("Invalid OVN topology version string of the cluster: %s", stdout)
+		} else {
+			ver = v
+		}
+	}
+
+	// If current DB version is greater than OvnSingleJoinSwithTopoVersion, no need to upgrade to single switch topology
+	if ver < OvnSingleJoinSwithTopoVersion {
+		return oc.upgradeToSingleSwitchOVNTopology(existingNodes)
+	}
+	return nil
+}
+
 // StartClusterMaster runs a subnet IPAM and a controller that watches arrival/departure
 // of nodes in the cluster
 // On an addition to the cluster (node create), a new subnet is created for it that will translate
@@ -133,10 +215,6 @@ func (oc *Controller) StartClusterMaster(masterNodeName string) error {
 	// The gateway router need to be connected to the distributed router via a per-node join switch.
 	// We need a subnet allocator that allocates subnet for this per-node join switch.
 	if config.IPv4Mode {
-		// Use 100.64.0.0/16 with /29 subnets, allowing 8192 nodes with 6 IPs on each. (The join
-		// switches currently only have 2 IPs on them, so this leaves some room for expansion.)
-		_, joinSubnetCIDR, _ := net.ParseCIDR(config.V4JoinSubnet)
-		_ = oc.joinSubnetAllocator.AddNetworkRange(joinSubnetCIDR, 29)
 		// initialize the subnet required for DNAT and SNAT ip for the shared gateway mode
 		_, nodeLocalNatSubnetCIDR, _ := net.ParseCIDR(util.V4NodeLocalNatSubnet)
 		oc.nodeLocalNatIPv4Allocator, _ = ipallocator.NewCIDRRange(nodeLocalNatSubnetCIDR)
@@ -145,9 +223,6 @@ func (oc *Controller) StartClusterMaster(masterNodeName string) error {
 		_ = oc.nodeLocalNatIPv4Allocator.Allocate(net.ParseIP(util.V4NodeLocalDistributedGwPortIP))
 	}
 	if config.IPv6Mode {
-		// Use fd98::/48 with /64 subnets
-		_, joinSubnetCIDR, _ := net.ParseCIDR(config.V6JoinSubnet)
-		_ = oc.joinSubnetAllocator.AddNetworkRange(joinSubnetCIDR, 64)
 		// initialize the subnet required for DNAT and SNAT ip for the shared gateway mode
 		_, nodeLocalNatSubnetCIDR, _ := net.ParseCIDR(util.V6NodeLocalNatSubnet)
 		oc.nodeLocalNatIPv6Allocator, _ = ipallocator.NewCIDRRange(nodeLocalNatSubnetCIDR)
@@ -158,9 +233,16 @@ func (oc *Controller) StartClusterMaster(masterNodeName string) error {
 
 	existingNodes, err := oc.kube.GetNodes()
 	if err != nil {
-		klog.Errorf("Error in initializing/fetching subnets: %v", err)
+		klog.Errorf("Error in fetching nodes: %v", err)
 		return err
 	}
+
+	err = oc.upgradeOVNTopology(existingNodes)
+	if err != nil {
+		klog.Errorf("Failed to upgrade OVN topology to version %d: %v", OvnCurrentTopologyVersion, err)
+		return err
+	}
+
 	for _, clusterEntry := range config.Default.ClusterSubnets {
 		err := oc.masterSubnetAllocator.AddNetworkRange(clusterEntry.CIDR, clusterEntry.HostSubnetLength)
 		if err != nil {
@@ -171,13 +253,6 @@ func (oc *Controller) StartClusterMaster(masterNodeName string) error {
 		hostSubnets, _ := util.ParseNodeHostSubnetAnnotation(&node)
 		for _, hostSubnet := range hostSubnets {
 			err := oc.masterSubnetAllocator.MarkAllocatedNetwork(hostSubnet)
-			if err != nil {
-				utilruntime.HandleError(err)
-			}
-		}
-		joinsubnets, _ := util.ParseNodeJoinSubnetAnnotation(&node)
-		for _, joinsubnet := range joinsubnets {
-			err := oc.joinSubnetAllocator.MarkAllocatedNetwork(joinsubnet)
 			if err != nil {
 				utilruntime.HandleError(err)
 			}
@@ -239,7 +314,8 @@ func (oc *Controller) StartClusterMaster(masterNodeName string) error {
 func (oc *Controller) SetupMaster(masterNodeName string) error {
 	// Create a single common distributed router for the cluster.
 	stdout, stderr, err := util.RunOVNNbctl("--", "--may-exist", "lr-add", util.OVNClusterRouter,
-		"--", "set", "logical_router", util.OVNClusterRouter, "external_ids:k8s-cluster-router=yes")
+		"--", "set", "logical_router", util.OVNClusterRouter, "external_ids:k8s-cluster-router=yes",
+		fmt.Sprintf("external_ids:k8s-ovn-topo-version=%d", OvnCurrentTopologyVersion))
 	if err != nil {
 		klog.Errorf("Failed to create a single common distributed router for the cluster, "+
 			"stdout: %q, stderr: %q, error: %v", stdout, stderr, err)
@@ -327,60 +403,55 @@ func (oc *Controller) SetupMaster(masterNodeName string) error {
 			return err
 		}
 	}
-	return nil
-}
 
-func (oc *Controller) addNodeJoinSubnetAnnotations(node *kapi.Node, subnets []*net.IPNet) error {
-	nodeAnnotations, err := util.CreateNodeJoinSubnetAnnotation(subnets)
+	// Initialize the OVNJoinSwitch switch IP manager
+	// The OVNJoinSwitch will be allocated IP addresses in the range 100.64.0.0/16 or fd98::/64.
+	oc.joinSwIPManager, err = initJoinLogicalSwitchIPManager()
 	if err != nil {
-		return fmt.Errorf("failed to marshal node %q join subnets annotation for subnet %s",
-			node.Name, util.JoinIPNets(subnets, ","))
+		return err
 	}
-	err = oc.kube.SetAnnotationsOnNode(node, nodeAnnotations)
+
+	// Allocate IPs for logical router port "GwRouterToJoinSwitchPrefix + OVNClusterRouter". This should always
+	// allocate the first IPs in the join switch subnets
+	gwLRPIfAddrs, err := oc.joinSwIPManager.ensureJoinLRPIPs(util.OVNClusterRouter)
 	if err != nil {
-		return fmt.Errorf("failed to set node-join-subnets annotation on node %s: %v",
-			node.Name, err)
-	}
-	return nil
-}
-
-func (oc *Controller) allocateJoinSubnet(node *kapi.Node) ([]*net.IPNet, error) {
-	joinSubnets, err := util.ParseNodeJoinSubnetAnnotation(node)
-	if err == nil {
-		return joinSubnets, nil
+		return fmt.Errorf("failed to allocate join switch IP address connected to %s: %v", util.OVNClusterRouter, err)
 	}
 
-	// Allocate a new network for the join switch
-	joinSubnets, err = oc.joinSubnetAllocator.AllocateNetworks()
+	// Create OVNJoinSwitch that will be used to connect gateway routers to the distributed router.
+	_, stderr, err = util.RunOVNNbctl("--may-exist", "ls-add", util.OVNJoinSwitch)
 	if err != nil {
-		return nil, fmt.Errorf("error allocating subnet for join switch for node %s: %v", node.Name, err)
+		klog.Errorf("Failed to create logical switch %s, stderr: %q, error: %v", util.OVNJoinSwitch, stderr, err)
+		return err
 	}
 
-	defer func() {
-		// Release the allocation on error
-		if err != nil {
-			for _, joinSubnet := range joinSubnets {
-				_ = oc.joinSubnetAllocator.ReleaseNetwork(joinSubnet)
-			}
-		}
-	}()
-
-	// Set annotation on the node
-	err = oc.addNodeJoinSubnetAnnotations(node, joinSubnets)
+	// Connect the distributed router to OVNJoinSwitch.
+	drSwitchPort := util.JoinSwitchToGwRouterPrefix + util.OVNClusterRouter
+	drRouterPort := util.GwRouterToJoinSwitchPrefix + util.OVNClusterRouter
+	gwLRPMAC := util.IPAddrToHWAddr(gwLRPIfAddrs[0].IP)
+	args := []string{
+		"--", "--if-exists", "lrp-del", drRouterPort,
+		"--", "lrp-add", util.OVNClusterRouter, drRouterPort, gwLRPMAC.String(),
+	}
+	for _, gwLRPIfAddr := range gwLRPIfAddrs {
+		args = append(args, gwLRPIfAddr.String())
+	}
+	_, stderr, err = util.RunOVNNbctl(args...)
 	if err != nil {
-		return nil, err
+		klog.Errorf("Failed to add logical router port %s, stderr: %q, error: %v", drRouterPort, stderr, err)
+		return err
 	}
 
-	klog.Infof("Allocated join subnet %q for node %q", util.JoinIPNets(joinSubnets, ","), node.Name)
-	return joinSubnets, nil
-}
-
-func (oc *Controller) deleteNodeJoinSubnet(nodeName string, subnet *net.IPNet) error {
-	err := oc.joinSubnetAllocator.ReleaseNetwork(subnet)
+	// Connect the switch OVNJoinSwitch to the router.
+	_, stderr, err = util.RunOVNNbctl("--may-exist", "lsp-add", util.OVNJoinSwitch,
+		drSwitchPort, "--", "set", "logical_switch_port", drSwitchPort, "type=router",
+		"options:router-port="+drRouterPort, "addresses=router")
 	if err != nil {
-		return fmt.Errorf("error deleting join subnet %v for node %q: %s", subnet, nodeName, err)
+		klog.Errorf("Failed to add router-type logical switch port %s to %s, stderr: %q, error: %v",
+			drSwitchPort, util.OVNJoinSwitch, stderr, err)
+		return err
 	}
-	klog.Infof("Deleted JoinSubnet %v for node %s", subnet, nodeName)
+
 	return nil
 }
 
@@ -467,18 +538,18 @@ func (oc *Controller) syncNodeManagementPort(node *kapi.Node, hostSubnets []*net
 func (oc *Controller) syncGatewayLogicalNetwork(node *kapi.Node, l3GatewayConfig *util.L3GatewayConfig,
 	hostSubnets []*net.IPNet) error {
 	var err error
-	var clusterSubnets []*net.IPNet
+	var gwLRPIPs, clusterSubnets []*net.IPNet
 	for _, clusterSubnet := range config.Default.ClusterSubnets {
 		clusterSubnets = append(clusterSubnets, clusterSubnet.CIDR)
 	}
 
-	// get a subnet for the per-node join switch
-	joinSubnets, err := oc.allocateJoinSubnet(node)
+	gwLRPIPs, err = oc.joinSwIPManager.ensureJoinLRPIPs(node.Name)
 	if err != nil {
-		return err
+		return fmt.Errorf("failed to allocate join switch port IP address for node %s: %v", node.Name, err)
 	}
 
-	err = gatewayInit(node.Name, clusterSubnets, hostSubnets, joinSubnets, l3GatewayConfig, oc.SCTPSupport)
+	drLRPIPs, _ := oc.joinSwIPManager.getJoinLRPCacheIPs(util.OVNClusterRouter)
+	err = gatewayInit(node.Name, clusterSubnets, hostSubnets, l3GatewayConfig, oc.SCTPSupport, gwLRPIPs, drLRPIPs)
 	if err != nil {
 		return fmt.Errorf("failed to init shared interface gateway: %v", err)
 	}
@@ -788,17 +859,12 @@ func (oc *Controller) deleteNodeLogicalNetwork(nodeName string) error {
 	return nil
 }
 
-func (oc *Controller) deleteNode(nodeName string, hostSubnets, joinSubnets []*net.IPNet,
+func (oc *Controller) deleteNode(nodeName string, hostSubnets []*net.IPNet,
 	nodeLocalNatIPs []net.IP) error {
 	// Clean up as much as we can but don't hard error
 	for _, hostSubnet := range hostSubnets {
 		if err := oc.deleteNodeHostSubnet(nodeName, hostSubnet); err != nil {
 			klog.Errorf("Error deleting node %s HostSubnet %v: %v", nodeName, hostSubnet, err)
-		}
-	}
-	for _, joinSubnet := range joinSubnets {
-		if err := oc.deleteNodeJoinSubnet(nodeName, joinSubnet); err != nil {
-			klog.Errorf("Error deleting node %s JoinSubnet %v: %v", nodeName, joinSubnet, err)
 		}
 	}
 	for _, nodeLocalNatIP := range nodeLocalNatIPs {
@@ -819,6 +885,10 @@ func (oc *Controller) deleteNode(nodeName string, hostSubnets, joinSubnets []*ne
 
 	if err := gatewayCleanup(nodeName); err != nil {
 		return fmt.Errorf("failed to clean up node %s gateway: (%v)", nodeName, err)
+	}
+
+	if err := oc.joinSwIPManager.releaseJoinLRPIPs(nodeName); err != nil {
+		return err
 	}
 
 	if err := oc.deleteNodeChassis(nodeName); err != nil {
@@ -946,6 +1016,9 @@ func (oc *Controller) syncNodes(nodes []interface{}) {
 			continue
 		}
 		foundNodes[node.Name] = node
+		// For each existing node, reserve its joinSwitch LRP IPs if they already exist.
+		gwLRPIPs := oc.getJoinLRPAddresses(node.Name)
+		_ = oc.joinSwIPManager.reserveJoinLRPIPs(node.Name, gwLRPIPs)
 	}
 
 	// We only deal with cleaning up nodes that shouldn't exist here, since
@@ -969,30 +1042,21 @@ func (oc *Controller) syncNodes(nodes []interface{}) {
 	}
 
 	nodeSwitches, stderr, err := util.RunOVNNbctl("--data=bare", "--no-heading",
-		"--columns=name,other-config", "find", "logical_switch")
+		"--format=csv", "--columns=name,other-config", "find", "logical_switch")
 	if err != nil {
 		klog.Errorf("Failed to get node logical switches: stderr: %q, error: %v",
 			stderr, err)
 		return
 	}
 
-	type NodeSubnets struct {
-		hostSubnets []*net.IPNet
-		joinSubnets []*net.IPNet
-	}
-	NodeSubnetsMap := make(map[string]*NodeSubnets)
-	for _, result := range strings.Split(nodeSwitches, "\n\n") {
+	// find node logical switches which have other-config value set
+	for _, result := range strings.Split(nodeSwitches, "\n") {
 		// Split result into name and other-config
-		items := strings.Split(result, "\n")
+		items := strings.Split(result, ",")
 		if len(items) != 2 || len(items[0]) == 0 {
 			continue
 		}
-		isJoinSwitch := false
 		nodeName := items[0]
-		if strings.HasPrefix(items[0], util.JoinSwitchPrefix) {
-			isJoinSwitch = true
-			nodeName = strings.Split(items[0], "_")[1]
-		}
 		if _, ok := foundNodes[nodeName]; ok {
 			// node still exists, no cleanup to do
 			continue
@@ -1017,21 +1081,7 @@ func (oc *Controller) syncNodes(nodes []interface{}) {
 			continue
 		}
 
-		var tmp NodeSubnets
-		nodeSubnets, ok := NodeSubnetsMap[nodeName]
-		if !ok {
-			nodeSubnets = &tmp
-			NodeSubnetsMap[nodeName] = nodeSubnets
-		}
-		if isJoinSwitch {
-			nodeSubnets.joinSubnets = subnets
-		} else {
-			nodeSubnets.hostSubnets = subnets
-		}
-	}
-
-	for nodeName, nodeSubnets := range NodeSubnetsMap {
-		if err := oc.deleteNode(nodeName, nodeSubnets.hostSubnets, nodeSubnets.joinSubnets, nil); err != nil {
+		if err := oc.deleteNode(nodeName, subnets, nil); err != nil {
 			klog.Error(err)
 		}
 		//remove the node from the chassis map so we don't delete it twice
