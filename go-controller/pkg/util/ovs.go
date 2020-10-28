@@ -16,7 +16,7 @@ import (
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/spf13/afero"
 
-	"k8s.io/klog"
+	"k8s.io/klog/v2"
 	kexec "k8s.io/utils/exec"
 )
 
