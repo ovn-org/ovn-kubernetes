@@ -37,8 +37,8 @@ const (
 	OvnServiceIdledAt              = "k8s.ovn.org/idled-at"
 	OvnNodeAnnotationRetryInterval = 100 * time.Millisecond
 	OvnNodeAnnotationRetryTimeout  = 1 * time.Second
-	OvnSingleJoinSwithTopoVersion  = 1
-	OvnCurrentTopologyVersion      = OvnSingleJoinSwithTopoVersion
+	OvnSingleJoinSwitchTopoVersion = 1
+	OvnCurrentTopologyVersion      = OvnSingleJoinSwitchTopoVersion
 )
 
 type ovnkubeMasterLeaderMetrics struct{}
@@ -127,7 +127,6 @@ func (oc *Controller) Start(kClient kubernetes.Interface, nodeName string, wg *s
 // delete obsoleted logical OVN entities that are specific for Multiple join switches OVN topology. Also cleanup
 // OVN entities for deleted nodes (similar to syncNodes() but for obsoleted Multiple join switches OVN topology)
 func (oc *Controller) upgradeToSingleSwitchOVNTopology(existingNodeList *kapi.NodeList) error {
-
 	existingNodes := make(map[string]bool)
 	for _, node := range existingNodeList.Items {
 		existingNodes[node.Name] = true
@@ -140,21 +139,20 @@ func (oc *Controller) upgradeToSingleSwitchOVNTopology(existingNodeList *kapi.No
 	}
 
 	nodeSwitches, stderr, err := util.RunOVNNbctl("--data=bare", "--no-heading", "--format=csv",
-		"--columns=name,other-config", "find", "logical_switch")
+		"--columns=name", "find", "logical_switch")
 	if err != nil {
-		return fmt.Errorf("failed to get node logical switches: stderr: %q, error: %v",
+		return fmt.Errorf("failed to get all logical switches for upgrade: stderr: %q, error: %v",
 			stderr, err)
 	}
 
-	// find node logical switches which have other-config value set
 	logicalNodes := make(map[string]bool)
-	for _, result := range strings.Split(nodeSwitches, "\n") {
-		// Split result into name and other-config
-		items := strings.Split(result, ",")
-		if len(items) != 2 || len(items[0]) == 0 || len(items[1]) == 0 {
+	for _, switchName := range strings.Split(nodeSwitches, "\n") {
+		// We are interested only in the join_* switches
+		if !strings.HasPrefix(switchName, "join_") {
 			continue
 		}
-		logicalNodes[items[0]] = true
+		nodeName := strings.SplitN(switchName, "_", 1)[1]
+		logicalNodes[nodeName] = true
 	}
 
 	for nodeName := range logicalNodes {
@@ -176,28 +174,38 @@ func (oc *Controller) upgradeToSingleSwitchOVNTopology(existingNodeList *kapi.No
 }
 
 func (oc *Controller) upgradeOVNTopology(existingNodes *kapi.NodeList) error {
-	// Find out the current OVN topology version, if "k8s-ovn-topo-version" external_ids is does not exist, it is pre
-	// OVN topology versioning, set version number to 0
+	// Find out the current OVN topology version. If "k8s-ovn-topo-version" key in external_ids column does not exist,
+	// it is prior to OVN topology versioning and therefore set version number to OvnCurrentTopologyVersion
 	ver := 0
-	stdout, stderr, err := util.RunOVNNbctl("get", "logical_router", util.OVNClusterRouter, "external_ids:k8s-ovn-topo-version")
+	stdout, stderr, err := util.RunOVNNbctl("--data=bare", "--no-headings", "--columns=name", "find", "logical_router",
+		fmt.Sprintf("name=%s", util.OVNClusterRouter))
 	if err != nil {
-		if strings.Contains(stderr, "no row") {
-			// no OVNClusterRouter exists, DB is empty, nothing to upgrade
-			ver = OvnCurrentTopologyVersion
-		} else {
-			klog.Infof("No version string found. The OVN topology is before versioning is introduced. Upgrade needed")
-		}
+		return fmt.Errorf("failed in retrieving %s to determine the current version of OVN logical topology: "+
+			"stderr: %q, error: %v", util.OVNClusterRouter, stderr, err)
+	}
+	if len(stdout) == 0 {
+		// no OVNClusterRouter exists, DB is empty, nothing to upgrade
+		return nil
+	}
+
+	stdout, stderr, err = util.RunOVNNbctl("--if-exists", "get", "logical_router", util.OVNClusterRouter,
+		"external_ids:k8s-ovn-topo-version")
+	if err != nil {
+		return fmt.Errorf("failed to determine the current version of OVN logical topology: stderr: %q, error: %v",
+			stderr, err)
+	} else if len(stdout) == 0 {
+		klog.Infof("No version string found. The OVN topology is before versioning is introduced. Upgrade needed")
 	} else {
 		v, err := strconv.Atoi(stdout)
 		if err != nil {
-			klog.Errorf("Invalid OVN topology version string of the cluster: %s", stdout)
+			return fmt.Errorf("invalid OVN topology version string for the cluster: %s", stdout)
 		} else {
 			ver = v
 		}
 	}
 
-	// If current DB version is greater than OvnSingleJoinSwithTopoVersion, no need to upgrade to single switch topology
-	if ver < OvnSingleJoinSwithTopoVersion {
+	// If current DB version is greater than OvnSingleJoinSwitchTopoVersion, no need to upgrade to single switch topology
+	if ver < OvnSingleJoinSwitchTopoVersion {
 		return oc.upgradeToSingleSwitchOVNTopology(existingNodes)
 	}
 	return nil
