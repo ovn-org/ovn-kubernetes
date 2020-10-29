@@ -341,9 +341,9 @@ func (oc *Controller) addHybridRoutePolicyForPod(podIP net.IP, node string) erro
 			l3Prefix = "ip4"
 		}
 		// get the GR to join switch ip address
-		grJoinIfAddrs, err := util.GetLRPAddrs(util.GwRouterToJoinSwitchPrefix + util.GwRouterPrefix + node)
+		grJoinIfAddrs, err := util.GetLRPAddrs(config.GWRouterToJoinSwitchPrefix + config.GWRouterPrefix + node)
 		if err != nil {
-			return fmt.Errorf("unable to find IP address for node: %s, %s port, err: %v", node, util.GwRouterToJoinSwitchPrefix, err)
+			return fmt.Errorf("unable to find IP address for node: %s, %s port, err: %v", node, config.GWRouterToJoinSwitchPrefix, err)
 		}
 		grJoinIfAddr, err := util.MatchIPNetFamily(utilnet.IsIPv6(podIP), grJoinIfAddrs)
 		if err != nil {
@@ -364,16 +364,16 @@ func (oc *Controller) addHybridRoutePolicyForPod(podIP net.IP, node string) erro
 			matchDst += fmt.Sprintf(" && %s.dst != %s", clusterL3Prefix, clusterSubnet.CIDR)
 		}
 		// traffic destined outside of cluster subnet go to GR
-		matchStr := fmt.Sprintf(`inport == "%s%s" && %s.src == %s`, util.RouterToSwitchPrefix, node, l3Prefix, podIP)
+		matchStr := fmt.Sprintf(`inport == "%s%s" && %s.src == %s`, config.RouterToSwitchPrefix, node, l3Prefix, podIP)
 		matchStr += matchDst
-		_, stderr, err := util.RunOVNNbctl("lr-policy-add", util.OVNClusterRouter, "501", matchStr, "reroute",
+		_, stderr, err := util.RunOVNNbctl("lr-policy-add", config.OVNClusterRouter, "501", matchStr, "reroute",
 			grJoinIfAddr.IP.String())
 		if err != nil {
 			// TODO: lr-policy-add doesn't support --may-exist, resort to this workaround for now.
 			// Have raised an issue against ovn repository (https://github.com/ovn-org/ovn/issues/49)
 			if !strings.Contains(stderr, "already existed") {
 				return fmt.Errorf("failed to add policy route '%s' to %s "+
-					"stderr: %s, error: %v", matchStr, util.OVNClusterRouter, stderr, err)
+					"stderr: %s, error: %v", matchStr, config.OVNClusterRouter, stderr, err)
 			}
 		}
 	}
@@ -404,12 +404,12 @@ func (oc *Controller) delHybridRoutePolicyForPod(podIP net.IP, node string) erro
 			}
 			matchDst += fmt.Sprintf(" && %s.dst != %s", l3Prefix, clusterSubnet.CIDR)
 		}
-		matchStr := fmt.Sprintf(`inport == "%s%s" && %s.src == %s`, util.RouterToSwitchPrefix, node, l3Prefix, podIP)
+		matchStr := fmt.Sprintf(`inport == "%s%s" && %s.src == %s`, config.RouterToSwitchPrefix, node, l3Prefix, podIP)
 		matchStr += matchDst
-		_, stderr, err := util.RunOVNNbctl("lr-policy-del", util.OVNClusterRouter, "501", matchStr)
+		_, stderr, err := util.RunOVNNbctl("lr-policy-del", config.OVNClusterRouter, "501", matchStr)
 		if err != nil {
 			klog.Errorf("Failed to remove policy: %s, on: %s, stderr: %s, err: %v",
-				matchStr, util.OVNClusterRouter, stderr, err)
+				matchStr, config.OVNClusterRouter, stderr, err)
 		}
 	}
 	return nil

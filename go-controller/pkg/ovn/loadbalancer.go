@@ -6,6 +6,7 @@ import (
 	"net"
 	"strings"
 
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
 
 	kapi "k8s.io/api/core/v1"
@@ -154,9 +155,9 @@ func (ovn *Controller) getLogicalSwitchesForLoadBalancer(lb string) ([]string, e
 	}
 	// if this is a GR we know the corresponding join and external switches, otherwise this is an unhandled
 	// case
-	if strings.HasPrefix(out, util.GwRouterPrefix) {
-		routerName := strings.TrimPrefix(out, util.GwRouterPrefix)
-		return []string{util.OVNJoinSwitch, util.ExternalSwitchPrefix + routerName}, nil
+	if strings.HasPrefix(out, config.GWRouterPrefix) {
+		routerName := strings.TrimPrefix(out, config.GWRouterPrefix)
+		return []string{config.OVNJoinSwitch, config.ExternalSwitchPrefix + routerName}, nil
 	}
 	return nil, fmt.Errorf("router detected with load balancer that is not a GR")
 }

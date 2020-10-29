@@ -146,7 +146,7 @@ func (npw *localPortWatcherData) addService(svc *kapi.Service) error {
 		}
 	}
 	for externalIP := range routeUsage {
-		if stdout, stderr, err := util.RunIP("route", "replace", externalIP, "via", gatewayIP, "dev", util.K8sMgmtIntfName, "table", localnetGatewayExternalIDTable); err != nil {
+		if stdout, stderr, err := util.RunIP("route", "replace", externalIP, "via", gatewayIP, "dev", config.K8sMgmtIntfName, "table", localnetGatewayExternalIDTable); err != nil {
 			klog.Errorf("Error adding routing table entry for ExternalIP %s, via gw: %s: stdout: %s, stderr: %s, err: %v", externalIP, gatewayIP, stdout, stderr, err)
 		} else {
 			klog.V(5).Infof("Successfully added route for ExternalIP: %s", externalIP)
@@ -195,7 +195,7 @@ func (npw *localPortWatcherData) deleteService(svc *kapi.Service) error {
 	}
 
 	for externalIP := range routeUsage {
-		if stdout, stderr, err := util.RunIP("route", "del", externalIP, "via", gatewayIP, "dev", util.K8sMgmtIntfName, "table", localnetGatewayExternalIDTable); err != nil {
+		if stdout, stderr, err := util.RunIP("route", "del", externalIP, "via", gatewayIP, "dev", config.K8sMgmtIntfName, "table", localnetGatewayExternalIDTable); err != nil {
 			klog.Errorf("Error delete routing table entry for ExternalIP %s: stdout: %s, stderr: %s, err: %v", externalIP, stdout, stderr, err)
 		} else {
 			klog.V(5).Infof("Successfully deleted route for ExternalIP: %s", externalIP)

@@ -65,8 +65,8 @@ func testManagementPort(ctx *cli.Context, fexec *ovntest.FakeExec, testNS ns.Net
 	const (
 		nodeName      string = "node1"
 		mgtPortMAC    string = "00:00:00:55:66:77"
-		mgtPort       string = util.K8sMgmtIntfName
-		legacyMgtPort string = util.K8sPrefix + nodeName
+		mgtPort       string = config.K8sMgmtIntfName
+		legacyMgtPort string = config.K8sPrefix + nodeName
 		mtu           string = "1400"
 	)
 
@@ -259,7 +259,7 @@ var _ = Describe("Management Port Operations", func() {
 		Expect(err).NotTo(HaveOccurred())
 		err = testNS.Do(func(ns.NetNS) error {
 			defer GinkgoRecover()
-			ovntest.AddLink(util.K8sMgmtIntfName)
+			ovntest.AddLink(config.K8sMgmtIntfName)
 			return nil
 		})
 		Expect(err).NotTo(HaveOccurred())

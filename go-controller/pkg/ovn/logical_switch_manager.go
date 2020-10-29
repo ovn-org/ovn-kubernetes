@@ -314,14 +314,14 @@ func initJoinLogicalSwitchIPManager() (*joinSwitchIPManager, error) {
 		lrpIPCache: make(map[string][]*net.IPNet),
 	}
 	var joinSubnets []*net.IPNet
-	for _, joinSubnetString := range []string{util.V4JoinSubnetCidr, util.V6JoinSubnetCidr} {
+	for _, joinSubnetString := range []string{config.V4JoinSubnetCIDR, config.V6JoinSubnetCIDR} {
 		_, joinSubnet, err := net.ParseCIDR(joinSubnetString)
 		if err != nil {
 			return nil, fmt.Errorf("error parsing join subnet string %s: %v", joinSubnetString, err)
 		}
 		joinSubnets = append(joinSubnets, joinSubnet)
 	}
-	err := j.lsm.AddNode(util.OVNJoinSwitch, joinSubnets)
+	err := j.lsm.AddNode(config.OVNJoinSwitch, joinSubnets)
 	if err != nil {
 		return nil, err
 	}
@@ -354,10 +354,10 @@ func (jsIPManager *joinSwitchIPManager) delJoinLRPCacheIPs(nodeName string) {
 // reserveJoinLRPIPs tries to add the LRP IPs to the joinSwitchIPManager, then they will be stored in the cache;
 func (jsIPManager *joinSwitchIPManager) reserveJoinLRPIPs(nodeName string, gwLRPIPs []*net.IPNet) (err error) {
 	// reserve the given IP in the allocator
-	if err = jsIPManager.lsm.AllocateIPs(util.OVNJoinSwitch, gwLRPIPs); err == nil {
+	if err = jsIPManager.lsm.AllocateIPs(config.OVNJoinSwitch, gwLRPIPs); err == nil {
 		defer func() {
 			if err != nil {
-				if relErr := jsIPManager.lsm.ReleaseIPs(util.OVNJoinSwitch, gwLRPIPs); relErr != nil {
+				if relErr := jsIPManager.lsm.ReleaseIPs(config.OVNJoinSwitch, gwLRPIPs); relErr != nil {
 					klog.Errorf("Failed to release logical router port IPs %v just reserved for node %s: %q",
 						util.JoinIPNetIPs(gwLRPIPs, " "), nodeName, relErr)
 				}
@@ -378,14 +378,14 @@ func (jsIPManager *joinSwitchIPManager) ensureJoinLRPIPs(nodeName string) (gwLRP
 	if ok {
 		return gwLRPIPs, nil
 	}
-	gwLRPIPs, err = jsIPManager.lsm.AllocateNextIPs(util.OVNJoinSwitch)
+	gwLRPIPs, err = jsIPManager.lsm.AllocateNextIPs(config.OVNJoinSwitch)
 	if err != nil {
 		return nil, err
 	}
 
 	defer func() {
 		if err != nil {
-			if relErr := jsIPManager.lsm.ReleaseIPs(util.OVNJoinSwitch, gwLRPIPs); relErr != nil {
+			if relErr := jsIPManager.lsm.ReleaseIPs(config.OVNJoinSwitch, gwLRPIPs); relErr != nil {
 				klog.Errorf("Failed to release logical router port IPs %v for node %s: %q",
 					util.JoinIPNetIPs(gwLRPIPs, " "), nodeName, relErr)
 			}
@@ -405,7 +405,7 @@ func (jsIPManager *joinSwitchIPManager) releaseJoinLRPIPs(nodeName string) error
 
 	gwLRPIPs, ok := jsIPManager.getJoinLRPCacheIPs(nodeName)
 	if ok {
-		err = jsIPManager.lsm.ReleaseIPs(util.OVNJoinSwitch, gwLRPIPs)
+		err = jsIPManager.lsm.ReleaseIPs(config.OVNJoinSwitch, gwLRPIPs)
 		jsIPManager.delJoinLRPCacheIPs(nodeName)
 	}
 	return err

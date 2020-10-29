@@ -556,7 +556,7 @@ func (n *OvnNode) initSharedGateway(subnets []*net.IPNet, gwNextHops []net.IP, g
 			gwIntf, err)
 	}
 	ifaceID, macAddress, err := bridgedGatewayNodeSetup(n.name, bridgeName, gwIntf,
-		util.PhysicalNetworkName, brCreated)
+		config.PhysicalNetworkName, brCreated)
 	if err != nil {
 		return nil, fmt.Errorf("failed to set up shared interface gateway: %v", err)
 	}
@@ -633,7 +633,7 @@ func cleanupSharedGateway() error {
 	bridgeMappings := strings.Split(stdout, ",")
 	for _, bridgeMapping := range bridgeMappings {
 		m := strings.Split(bridgeMapping, ":")
-		if network := m[0]; network == util.PhysicalNetworkName {
+		if network := m[0]; network == config.PhysicalNetworkName {
 			bridgeName = m[1]
 			break
 		}

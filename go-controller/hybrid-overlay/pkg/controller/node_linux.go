@@ -522,9 +522,9 @@ func (n *NodeController) EnsureHybridOverlayBridge(node *kapi.Node) error {
 	if len(config.HybridOverlay.ClusterSubnets) > 0 {
 		// Add a route via the hybrid overlay port IP through the management port
 		// interface for each hybrid overlay cluster subnet
-		mgmtPortLink, err := netlink.LinkByName(util.K8sMgmtIntfName)
+		mgmtPortLink, err := netlink.LinkByName(config.K8sMgmtIntfName)
 		if err != nil {
-			return fmt.Errorf("failed to lookup link %s: %v", util.K8sMgmtIntfName, err)
+			return fmt.Errorf("failed to lookup link %s: %v", config.K8sMgmtIntfName, err)
 		}
 		mgmtPortMAC := mgmtPortLink.Attrs().HardwareAddr
 		for _, clusterEntry := range config.HybridOverlay.ClusterSubnets {
