@@ -16,11 +16,12 @@ import (
 	"k8s.io/client-go/informers"
 	"k8s.io/client-go/kubernetes/fake"
 
-	"github.com/ovn-org/ovn-kubernetes/go-controller/hybrid-overlay/pkg/types"
+	hotypes "github.com/ovn-org/ovn-kubernetes/go-controller/hybrid-overlay/pkg/types"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/informer"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/kube"
 	ovntest "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/testing"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
 
 	"github.com/containernetworking/plugins/pkg/ns"
@@ -129,7 +130,7 @@ func validateNetlinkState(nodeSubnet string) {
 	Expect(err).NotTo(HaveOccurred())
 	Expect(link.Attrs().Flags & net.FlagUp).To(Equal(net.FlagUp))
 
-	link, err = netlink.LinkByName(util.K8sMgmtIntfName)
+	link, err = netlink.LinkByName(types.K8sMgmtIntfName)
 	Expect(err).NotTo(HaveOccurred())
 	Expect(link.Attrs().Flags & net.FlagUp).To(Equal(net.FlagUp))
 
@@ -208,7 +209,7 @@ var _ = Describe("Hybrid Overlay Node Linux Operations", func() {
 			ovntest.AddLink(extBridgeName)
 
 			// Set up management interface with its address
-			link := ovntest.AddLink(util.K8sMgmtIntfName)
+			link := ovntest.AddLink(types.K8sMgmtIntfName)
 			_, thisNet, err := net.ParseCIDR(thisSubnet)
 			Expect(err).NotTo(HaveOccurred())
 			mgmtIfAddr := util.GetNodeManagementIfAddr(thisNet)
@@ -328,7 +329,7 @@ var _ = Describe("Hybrid Overlay Node Linux Operations", func() {
 			)
 
 			annotations := createNodeAnnotationsForSubnet(thisSubnet)
-			annotations[types.HybridOverlayDRMAC] = thisDrMAC
+			annotations[hotypes.HybridOverlayDRMAC] = thisDrMAC
 			node := createNode(thisNode, "linux", "10.0.0.1", annotations)
 			fakeClient := fake.NewSimpleClientset(&v1.NodeList{
 				Items: []v1.Node{*node},
@@ -375,7 +376,7 @@ var _ = Describe("Hybrid Overlay Node Linux Operations", func() {
 			)
 
 			annotations := createNodeAnnotationsForSubnet(thisSubnet)
-			annotations[types.HybridOverlayDRMAC] = thisDrMAC
+			annotations[hotypes.HybridOverlayDRMAC] = thisDrMAC
 			node := createNode(thisNode, "linux", "10.0.0.1", annotations)
 			testPod := createPod("test", "pod1", thisNode, pod1CIDR, pod1MAC)
 			fakeClient := fake.NewSimpleClientset(&v1.NodeList{
@@ -429,8 +430,8 @@ var _ = Describe("Hybrid Overlay Node Linux Operations", func() {
 			fakeClient := fake.NewSimpleClientset(&v1.NodeList{
 				Items: []v1.Node{
 					*createNode(node1Name, "windows", node1IP, map[string]string{
-						types.HybridOverlayNodeSubnet: node1Subnet,
-						types.HybridOverlayDRMAC:      node1DrMAC,
+						hotypes.HybridOverlayNodeSubnet: node1Subnet,
+						hotypes.HybridOverlayDRMAC:      node1DrMAC,
 					}),
 				},
 			})
@@ -593,7 +594,7 @@ var _ = Describe("Hybrid Overlay Node Linux Operations", func() {
 					UID:  k8stypes.UID("test"),
 					Name: "test",
 					Annotations: map[string]string{
-						types.HybridOverlayDRMAC: "00:11:22:33:44:55:66",
+						hotypes.HybridOverlayDRMAC: "00:11:22:33:44:55:66",
 					},
 				},
 				Spec:   v1.NamespaceSpec{},

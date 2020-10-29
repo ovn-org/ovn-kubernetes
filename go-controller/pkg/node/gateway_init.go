@@ -12,6 +12,7 @@ import (
 
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/kube"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
 	util "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
 )
 
@@ -262,7 +263,7 @@ func CleanupClusterNode(name string) error {
 
 	klog.V(5).Infof("Cleaning up gateway resources on node: %q", name)
 	if config.Gateway.Mode == config.GatewayModeLocal || config.Gateway.Mode == config.GatewayModeShared {
-		err = cleanupLocalnetGateway(util.LocalNetworkName)
+		err = cleanupLocalnetGateway(types.LocalNetworkName)
 		if err != nil {
 			klog.Errorf("Failed to cleanup Localnet Gateway, error: %v", err)
 		}

@@ -10,6 +10,7 @@ import (
 
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/kube"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
 
 	kapi "k8s.io/api/core/v1"
@@ -44,9 +45,9 @@ func newLocalGateway(nodeName string, hostSubnets []*net.IPNet, gwNextHops []net
 		// add iptables masquerading for mp0 to exit the host for egress
 		cidr := nextHop.IP.Mask(nextHop.Mask)
 		cidrNet := &net.IPNet{IP: cidr, Mask: nextHop.Mask}
-		err := initLocalGatewayNATRules(util.K8sMgmtIntfName, cidrNet)
+		err := initLocalGatewayNATRules(types.K8sMgmtIntfName, cidrNet)
 		if err != nil {
-			return nil, fmt.Errorf("failed to add local NAT rules for: %s, err: %v", util.K8sMgmtIntfName, err)
+			return nil, fmt.Errorf("failed to add local NAT rules for: %s, err: %v", types.K8sMgmtIntfName, err)
 		}
 	}
 
@@ -228,7 +229,7 @@ func (l *localPortWatcher) addService(svc *kapi.Service) error {
 		}
 	}
 	for externalIP := range routeUsage {
-		if stdout, stderr, err := util.RunIP("route", "replace", externalIP, "via", gatewayIP, "dev", util.K8sMgmtIntfName, "table", localnetGatewayExternalIDTable); err != nil {
+		if stdout, stderr, err := util.RunIP("route", "replace", externalIP, "via", gatewayIP, "dev", types.K8sMgmtIntfName, "table", localnetGatewayExternalIDTable); err != nil {
 			klog.Errorf("Error adding routing table entry for ExternalIP %s, via gw: %s: stdout: %s, stderr: %s, err: %v", externalIP, gatewayIP, stdout, stderr, err)
 		} else {
 			klog.V(5).Infof("Successfully added route for ExternalIP: %s", externalIP)
@@ -277,7 +278,7 @@ func (l *localPortWatcher) deleteService(svc *kapi.Service) error {
 	}
 
 	for externalIP := range routeUsage {
-		if stdout, stderr, err := util.RunIP("route", "del", externalIP, "via", gatewayIP, "dev", util.K8sMgmtIntfName, "table", localnetGatewayExternalIDTable); err != nil {
+		if stdout, stderr, err := util.RunIP("route", "del", externalIP, "via", gatewayIP, "dev", types.K8sMgmtIntfName, "table", localnetGatewayExternalIDTable); err != nil {
 			klog.Errorf("Error delete routing table entry for ExternalIP %s: stdout: %s, stderr: %s, err: %v", externalIP, stdout, stderr, err)
 		} else {
 			klog.V(5).Infof("Successfully deleted route for ExternalIP: %s", externalIP)
