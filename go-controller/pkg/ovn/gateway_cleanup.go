@@ -154,7 +154,6 @@ func staticRouteCleanup(nextHops []net.IP) {
 			if err != nil {
 				klog.Errorf("Failed to delete static route %s"+
 					", stderr: %q, err = %v", route, stderr, err)
-				continue
 			}
 		}
 	}
