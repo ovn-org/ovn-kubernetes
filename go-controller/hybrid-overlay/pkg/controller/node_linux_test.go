@@ -129,7 +129,7 @@ func validateNetlinkState(nodeSubnet string) {
 	Expect(err).NotTo(HaveOccurred())
 	Expect(link.Attrs().Flags & net.FlagUp).To(Equal(net.FlagUp))
 
-	link, err = netlink.LinkByName(util.K8sMgmtIntfName)
+	link, err = netlink.LinkByName(config.K8sMgmtIntfName)
 	Expect(err).NotTo(HaveOccurred())
 	Expect(link.Attrs().Flags & net.FlagUp).To(Equal(net.FlagUp))
 
@@ -208,7 +208,7 @@ var _ = Describe("Hybrid Overlay Node Linux Operations", func() {
 			ovntest.AddLink(extBridgeName)
 
 			// Set up management interface with its address
-			link := ovntest.AddLink(util.K8sMgmtIntfName)
+			link := ovntest.AddLink(config.K8sMgmtIntfName)
 			_, thisNet, err := net.ParseCIDR(thisSubnet)
 			Expect(err).NotTo(HaveOccurred())
 			mgmtIfAddr := util.GetNodeManagementIfAddr(thisNet)

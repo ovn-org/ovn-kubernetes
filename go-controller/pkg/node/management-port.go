@@ -29,29 +29,29 @@ func (n *OvnNode) createManagementPort(hostSubnets []*net.IPNet, nodeAnnotator k
 	legacyMgmtIntfName := util.GetLegacyK8sMgmtIntfName(nodeName)
 	stdout, stderr, err := util.RunOVSVsctl(
 		"--", "--if-exists", "del-port", "br-int", legacyMgmtIntfName,
-		"--", "--may-exist", "add-port", "br-int", util.K8sMgmtIntfName,
-		"--", "set", "interface", util.K8sMgmtIntfName,
+		"--", "--may-exist", "add-port", "br-int", config.K8sMgmtIntfName,
+		"--", "set", "interface", config.K8sMgmtIntfName,
 		"type=internal", "mtu_request="+fmt.Sprintf("%d", config.Default.MTU),
-		"external-ids:iface-id="+util.K8sPrefix+nodeName)
+		"external-ids:iface-id="+config.K8sPrefix+nodeName)
 	if err != nil {
 		klog.Errorf("Failed to add port to br-int, stdout: %q, stderr: %q, error: %v", stdout, stderr, err)
 		return err
 	}
-	macAddress, err := util.GetOVSPortMACAddress(util.K8sMgmtIntfName)
+	macAddress, err := util.GetOVSPortMACAddress(config.K8sMgmtIntfName)
 	if err != nil {
 		klog.Errorf("Failed to get management port MAC address: %v", err)
 		return err
 	}
 	// persist the MAC address so that upon node reboot we get back the same mac address.
-	_, stderr, err = util.RunOVSVsctl("set", "interface", util.K8sMgmtIntfName,
+	_, stderr, err = util.RunOVSVsctl("set", "interface", config.K8sMgmtIntfName,
 		fmt.Sprintf("mac=%s", strings.ReplaceAll(macAddress.String(), ":", "\\:")))
 	if err != nil {
 		klog.Errorf("Failed to persist MAC address %q for %q: stderr:%s (%v)", macAddress.String(),
-			util.K8sMgmtIntfName, stderr, err)
+			config.K8sMgmtIntfName, stderr, err)
 		return err
 	}
 
-	cfg, err := createPlatformManagementPort(util.K8sMgmtIntfName, hostSubnets, n.stopChan)
+	cfg, err := createPlatformManagementPort(config.K8sMgmtIntfName, hostSubnets, n.stopChan)
 	if err != nil {
 		return err
 	}
@@ -76,9 +76,9 @@ func (n *OvnNode) createManagementPort(hostSubnets []*net.IPNet, nodeAnnotator k
 			// add iptables masquerading for mp0 to exit the host for egress
 			cidr := nextHop.IP.Mask(nextHop.Mask)
 			cidrNet := &net.IPNet{IP: cidr, Mask: nextHop.Mask}
-			err = initLocalGatewayNATRules(util.K8sMgmtIntfName, cidrNet)
+			err = initLocalGatewayNATRules(config.K8sMgmtIntfName, cidrNet)
 			if err != nil {
-				return fmt.Errorf("failed to add local NAT rules for: %s, err: %v", util.K8sMgmtIntfName, err)
+				return fmt.Errorf("failed to add local NAT rules for: %s, err: %v", config.K8sMgmtIntfName, err)
 			}
 		}
 
@@ -103,7 +103,7 @@ func (n *OvnNode) createManagementPort(hostSubnets []*net.IPNet, nodeAnnotator k
 // managementPortReady will check to see if OpenFlow rules for management port has been created
 func managementPortReady() (bool, error) {
 	// Get the OVS interface name for the Management Port
-	ofport, _, err := util.RunOVSVsctl("--if-exists", "get", "interface", util.K8sMgmtIntfName, "ofport")
+	ofport, _, err := util.RunOVSVsctl("--if-exists", "get", "interface", config.K8sMgmtIntfName, "ofport")
 	if err != nil {
 		return false, nil
 	}

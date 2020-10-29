@@ -5,21 +5,11 @@ import (
 	"net"
 	"strings"
 
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
 
 	kapi "k8s.io/api/core/v1"
 	"k8s.io/klog"
-)
-
-const (
-	// priority of logical router policies on the ovnClusterRouter
-	egressFirewallStartPriority           = "10000"
-	minimumReservedEgressFirewallPriority = "2000"
-	mgmtPortPolicyPriority                = "1005"
-	nodeSubnetPolicyPriority              = "1004"
-	interNodePolicyPriority               = "1003"
-	defaultNoRereoutePriority             = "101"
-	egressIPReroutePriority               = "100"
 )
 
 func (ovn *Controller) getOvnGateways() ([]string, string, error) {
@@ -182,7 +172,7 @@ func getGatewayLoadBalancers(gatewayRouter string) (string, string, string, erro
 func (oc *Controller) getJoinLRPAddresses(nodeName string) []*net.IPNet {
 	// try to get the IPs from the logical router port
 	gwLRPIPs := []*net.IPNet{}
-	gwLrpName := util.GwRouterToJoinSwitchPrefix + util.GwRouterPrefix + nodeName
+	gwLrpName := config.GWRouterToJoinSwitchPrefix + config.GWRouterPrefix + nodeName
 	joinSubnets := oc.joinSwIPManager.lsm.GetSwitchSubnets(nodeName)
 	ifAddrs, err := util.GetLRPAddrs(gwLrpName)
 	if err == nil {

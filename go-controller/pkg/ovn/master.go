@@ -178,17 +178,17 @@ func (oc *Controller) upgradeOVNTopology(existingNodes *kapi.NodeList) error {
 	// it is prior to OVN topology versioning and therefore set version number to OvnCurrentTopologyVersion
 	ver := 0
 	stdout, stderr, err := util.RunOVNNbctl("--data=bare", "--no-headings", "--columns=name", "find", "logical_router",
-		fmt.Sprintf("name=%s", util.OVNClusterRouter))
+		fmt.Sprintf("name=%s", config.OVNClusterRouter))
 	if err != nil {
 		return fmt.Errorf("failed in retrieving %s to determine the current version of OVN logical topology: "+
-			"stderr: %q, error: %v", util.OVNClusterRouter, stderr, err)
+			"stderr: %q, error: %v", config.OVNClusterRouter, stderr, err)
 	}
 	if len(stdout) == 0 {
 		// no OVNClusterRouter exists, DB is empty, nothing to upgrade
 		return nil
 	}
 
-	stdout, stderr, err = util.RunOVNNbctl("--if-exists", "get", "logical_router", util.OVNClusterRouter,
+	stdout, stderr, err = util.RunOVNNbctl("--if-exists", "get", "logical_router", config.OVNClusterRouter,
 		"external_ids:k8s-ovn-topo-version")
 	if err != nil {
 		return fmt.Errorf("failed to determine the current version of OVN logical topology: stderr: %q, error: %v",
@@ -224,19 +224,19 @@ func (oc *Controller) StartClusterMaster(masterNodeName string) error {
 	// We need a subnet allocator that allocates subnet for this per-node join switch.
 	if config.IPv4Mode {
 		// initialize the subnet required for DNAT and SNAT ip for the shared gateway mode
-		_, nodeLocalNatSubnetCIDR, _ := net.ParseCIDR(util.V4NodeLocalNatSubnet)
+		_, nodeLocalNatSubnetCIDR, _ := net.ParseCIDR(config.V4NodeLocalNATSubnet)
 		oc.nodeLocalNatIPv4Allocator, _ = ipallocator.NewCIDRRange(nodeLocalNatSubnetCIDR)
 		// set aside the first two IPs for the nextHop on the host and for distributed gateway port
-		_ = oc.nodeLocalNatIPv4Allocator.Allocate(net.ParseIP(util.V4NodeLocalNatSubnetNextHop))
-		_ = oc.nodeLocalNatIPv4Allocator.Allocate(net.ParseIP(util.V4NodeLocalDistributedGwPortIP))
+		_ = oc.nodeLocalNatIPv4Allocator.Allocate(net.ParseIP(config.V4NodeLocalNATSubnetNextHop))
+		_ = oc.nodeLocalNatIPv4Allocator.Allocate(net.ParseIP(config.V4NodeLocalDistributedGWPortIP))
 	}
 	if config.IPv6Mode {
 		// initialize the subnet required for DNAT and SNAT ip for the shared gateway mode
-		_, nodeLocalNatSubnetCIDR, _ := net.ParseCIDR(util.V6NodeLocalNatSubnet)
+		_, nodeLocalNatSubnetCIDR, _ := net.ParseCIDR(config.V6NodeLocalNATSubnet)
 		oc.nodeLocalNatIPv6Allocator, _ = ipallocator.NewCIDRRange(nodeLocalNatSubnetCIDR)
 		// set aside the first two IPs for the nextHop on the host and for distributed gateway port
-		_ = oc.nodeLocalNatIPv6Allocator.Allocate(net.ParseIP(util.V6NodeLocalNatSubnetNextHop))
-		_ = oc.nodeLocalNatIPv6Allocator.Allocate(net.ParseIP(util.V6NodeLocalDistributedGwPortIP))
+		_ = oc.nodeLocalNatIPv6Allocator.Allocate(net.ParseIP(config.V6NodeLocalNATSubnetNextHop))
+		_ = oc.nodeLocalNatIPv6Allocator.Allocate(net.ParseIP(config.V6NodeLocalDistributedGWPortIP))
 	}
 
 	existingNodes, err := oc.kube.GetNodes()
@@ -321,8 +321,8 @@ func (oc *Controller) StartClusterMaster(masterNodeName string) error {
 // SetupMaster creates the central router and load-balancers for the network
 func (oc *Controller) SetupMaster(masterNodeName string) error {
 	// Create a single common distributed router for the cluster.
-	stdout, stderr, err := util.RunOVNNbctl("--", "--may-exist", "lr-add", util.OVNClusterRouter,
-		"--", "set", "logical_router", util.OVNClusterRouter, "external_ids:k8s-cluster-router=yes",
+	stdout, stderr, err := util.RunOVNNbctl("--", "--may-exist", "lr-add", config.OVNClusterRouter,
+		"--", "set", "logical_router", config.OVNClusterRouter, "external_ids:k8s-cluster-router=yes",
 		fmt.Sprintf("external_ids:k8s-ovn-topo-version=%d", OvnCurrentTopologyVersion))
 	if err != nil {
 		klog.Errorf("Failed to create a single common distributed router for the cluster, "+
@@ -356,7 +356,7 @@ func (oc *Controller) SetupMaster(masterNodeName string) error {
 	// traffic between nodes.
 	if oc.multicastSupport {
 		stdout, stderr, err = util.RunOVNNbctl("--", "set", "logical_router",
-			util.OVNClusterRouter, "options:mcast_relay=\"true\"")
+			config.OVNClusterRouter, "options:mcast_relay=\"true\"")
 		if err != nil {
 			klog.Errorf("Failed to enable IGMP relay on the cluster router, "+
 				"stdout: %q, stderr: %q, error: %v", stdout, stderr, err)
@@ -421,25 +421,25 @@ func (oc *Controller) SetupMaster(masterNodeName string) error {
 
 	// Allocate IPs for logical router port "GwRouterToJoinSwitchPrefix + OVNClusterRouter". This should always
 	// allocate the first IPs in the join switch subnets
-	gwLRPIfAddrs, err := oc.joinSwIPManager.ensureJoinLRPIPs(util.OVNClusterRouter)
+	gwLRPIfAddrs, err := oc.joinSwIPManager.ensureJoinLRPIPs(config.OVNClusterRouter)
 	if err != nil {
-		return fmt.Errorf("failed to allocate join switch IP address connected to %s: %v", util.OVNClusterRouter, err)
+		return fmt.Errorf("failed to allocate join switch IP address connected to %s: %v", config.OVNClusterRouter, err)
 	}
 
 	// Create OVNJoinSwitch that will be used to connect gateway routers to the distributed router.
-	_, stderr, err = util.RunOVNNbctl("--may-exist", "ls-add", util.OVNJoinSwitch)
+	_, stderr, err = util.RunOVNNbctl("--may-exist", "ls-add", config.OVNJoinSwitch)
 	if err != nil {
-		klog.Errorf("Failed to create logical switch %s, stderr: %q, error: %v", util.OVNJoinSwitch, stderr, err)
+		klog.Errorf("Failed to create logical switch %s, stderr: %q, error: %v", config.OVNJoinSwitch, stderr, err)
 		return err
 	}
 
 	// Connect the distributed router to OVNJoinSwitch.
-	drSwitchPort := util.JoinSwitchToGwRouterPrefix + util.OVNClusterRouter
-	drRouterPort := util.GwRouterToJoinSwitchPrefix + util.OVNClusterRouter
+	drSwitchPort := config.JoinSwitchToGWRouterPrefix + config.OVNClusterRouter
+	drRouterPort := config.GWRouterToJoinSwitchPrefix + config.OVNClusterRouter
 	gwLRPMAC := util.IPAddrToHWAddr(gwLRPIfAddrs[0].IP)
 	args := []string{
 		"--", "--if-exists", "lrp-del", drRouterPort,
-		"--", "lrp-add", util.OVNClusterRouter, drRouterPort, gwLRPMAC.String(),
+		"--", "lrp-add", config.OVNClusterRouter, drRouterPort, gwLRPMAC.String(),
 	}
 	for _, gwLRPIfAddr := range gwLRPIfAddrs {
 		args = append(args, gwLRPIfAddr.String())
@@ -451,12 +451,12 @@ func (oc *Controller) SetupMaster(masterNodeName string) error {
 	}
 
 	// Connect the switch OVNJoinSwitch to the router.
-	_, stderr, err = util.RunOVNNbctl("--may-exist", "lsp-add", util.OVNJoinSwitch,
+	_, stderr, err = util.RunOVNNbctl("--may-exist", "lsp-add", config.OVNJoinSwitch,
 		drSwitchPort, "--", "set", "logical_switch_port", drSwitchPort, "type=router",
 		"options:router-port="+drRouterPort, "addresses=router")
 	if err != nil {
 		klog.Errorf("Failed to add router-type logical switch port %s to %s, stderr: %q, error: %v",
-			drSwitchPort, util.OVNJoinSwitch, stderr, err)
+			drSwitchPort, config.OVNJoinSwitch, stderr, err)
 		return err
 	}
 
@@ -492,18 +492,18 @@ func (oc *Controller) syncNodeManagementPort(node *kapi.Node, hostSubnets []*net
 
 		if config.Gateway.Mode == config.GatewayModeLocal {
 			stdout, stderr, err := util.RunOVNNbctl("--may-exist",
-				"--policy=src-ip", "lr-route-add", util.OVNClusterRouter,
+				"--policy=src-ip", "lr-route-add", config.OVNClusterRouter,
 				hostSubnet.String(), mgmtIfAddr.IP.String())
 			if err != nil {
 				return fmt.Errorf("failed to add source IP address based "+
 					"routes in distributed router %s, stdout: %q, "+
-					"stderr: %q, error: %v", util.OVNClusterRouter, stdout, stderr, err)
+					"stderr: %q, error: %v", config.OVNClusterRouter, stdout, stderr, err)
 			}
 		}
 	}
 
 	// Create this node's management logical port on the node switch
-	portName := util.K8sPrefix + node.Name
+	portName := config.K8sPrefix + node.Name
 	stdout, stderr, err := util.RunOVNNbctl(
 		"--", "--may-exist", "lsp-add", node.Name, portName,
 		"--", "lsp-set-addresses", portName, addresses)
@@ -556,7 +556,7 @@ func (oc *Controller) syncGatewayLogicalNetwork(node *kapi.Node, l3GatewayConfig
 		return fmt.Errorf("failed to allocate join switch port IP address for node %s: %v", node.Name, err)
 	}
 
-	drLRPIPs, _ := oc.joinSwIPManager.getJoinLRPCacheIPs(util.OVNClusterRouter)
+	drLRPIPs, _ := oc.joinSwIPManager.getJoinLRPCacheIPs(config.OVNClusterRouter)
 	err = gatewayInit(node.Name, clusterSubnets, hostSubnets, l3GatewayConfig, oc.SCTPSupport, gwLRPIPs, drLRPIPs)
 	if err != nil {
 		return fmt.Errorf("failed to init shared interface gateway: %v", err)
@@ -621,8 +621,8 @@ func (oc *Controller) ensureNodeLogicalNetwork(nodeName string, hostSubnets []*n
 	}
 
 	lrpArgs := []string{
-		"--if-exists", "lrp-del", util.RouterToSwitchPrefix + nodeName,
-		"--", "lrp-add", util.OVNClusterRouter, util.RouterToSwitchPrefix + nodeName,
+		"--if-exists", "lrp-del", config.RouterToSwitchPrefix + nodeName,
+		"--", "lrp-add", config.OVNClusterRouter, config.RouterToSwitchPrefix + nodeName,
 		nodeLRPMAC.String(),
 	}
 
@@ -707,9 +707,9 @@ func (oc *Controller) ensureNodeLogicalNetwork(nodeName string, hostSubnets []*n
 	}
 
 	// Connect the switch to the router.
-	stdout, stderr, err = util.RunOVNNbctl("--", "--may-exist", "lsp-add", nodeName, util.SwitchToRouterPrefix+nodeName,
-		"--", "set", "logical_switch_port", util.SwitchToRouterPrefix+nodeName, "type=router",
-		"options:router-port="+util.RouterToSwitchPrefix+nodeName, "addresses="+"\""+nodeLRPMAC.String()+"\"")
+	stdout, stderr, err = util.RunOVNNbctl("--", "--may-exist", "lsp-add", nodeName, config.SwitchToRouterPrefix+nodeName,
+		"--", "set", "logical_switch_port", config.SwitchToRouterPrefix+nodeName, "type=router",
+		"options:router-port="+config.RouterToSwitchPrefix+nodeName, "addresses="+"\""+nodeLRPMAC.String()+"\"")
 	if err != nil {
 		klog.Errorf("Failed to add logical port to switch, stdout: %q, stderr: %q, error: %v", stdout, stderr, err)
 		return err
@@ -859,9 +859,9 @@ func (oc *Controller) deleteNodeLogicalNetwork(nodeName string) error {
 	}
 
 	// Remove the patch port that connects distributed router to node's logical switch
-	if _, stderr, err := util.RunOVNNbctl("--if-exist", "lrp-del", util.RouterToSwitchPrefix+nodeName); err != nil {
+	if _, stderr, err := util.RunOVNNbctl("--if-exist", "lrp-del", config.RouterToSwitchPrefix+nodeName); err != nil {
 		return fmt.Errorf("failed to delete logical router port %s%s, "+
-			"stderr: %q, error: %v", util.RouterToSwitchPrefix, nodeName, stderr, err)
+			"stderr: %q, error: %v", config.RouterToSwitchPrefix, nodeName, stderr, err)
 	}
 
 	return nil

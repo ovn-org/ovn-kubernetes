@@ -82,11 +82,11 @@ func (oc *Controller) addEgressFirewall(egressFirewall *egressfirewallapi.Egress
 	ef := newEgressFirewall(egressFirewall)
 	nsInfo.egressFirewallPolicy = ef
 	var errList []error
-	egressFirewallStartPriorityInt, err := strconv.Atoi(egressFirewallStartPriority)
+	egressFirewallStartPriorityInt, err := strconv.Atoi(config.EgressFirewallStartPriority)
 	if err != nil {
 		return []error{fmt.Errorf("failed to convert egressFirewallStartPriority to Integer: cannot add egressFirewall for namespace %s", egressFirewall.Namespace)}
 	}
-	minimumReservedEgressFirewallPriorityInt, err := strconv.Atoi(minimumReservedEgressFirewallPriority)
+	minimumReservedEgressFirewallPriorityInt, err := strconv.Atoi(config.MinimumReservedEgressFirewallPriority)
 	if err != nil {
 		return []error{fmt.Errorf("failed to convert minumumReservedEgressFirewallPriority to Integer: cannot add egressFirewall for namespace %s", egressFirewall.Namespace)}
 	}
@@ -141,16 +141,16 @@ func (oc *Controller) deleteEgressFirewall(egressFirewall *egressfirewallapi.Egr
 	stdout, stderr, err := util.RunOVNNbctl("--data=bare", "--no-heading", "--columns=_uuid", "find", "logical_router_policy", fmt.Sprintf("external-ids:egressFirewall=%s", egressFirewall.Namespace))
 	if err != nil {
 		return []error{fmt.Errorf("error deleting egressFirewall for namespace %s, cannot get logical router policies from LR %s - %s:%s",
-			egressFirewall.Namespace, util.OVNClusterRouter, err, stderr)}
+			egressFirewall.Namespace, config.OVNClusterRouter, err, stderr)}
 	}
 	var errList []error
 
 	uuids := strings.Fields(stdout)
 	for _, uuid := range uuids {
-		_, stderr, err := util.RunOVNNbctl("lr-policy-del", util.OVNClusterRouter, uuid)
+		_, stderr, err := util.RunOVNNbctl("lr-policy-del", config.OVNClusterRouter, uuid)
 		if err != nil {
 			errList = append(errList, fmt.Errorf("failed to delete the rules for "+
-				"egressFirewall in namespace %s on logical switch %s, stderr: %q (%v)", egressFirewall.Namespace, util.OVNClusterRouter, stderr, err))
+				"egressFirewall in namespace %s on logical switch %s, stderr: %q (%v)", egressFirewall.Namespace, config.OVNClusterRouter, stderr, err))
 		}
 	}
 	return errList
@@ -186,13 +186,13 @@ func (ef *egressFirewall) addLogicalRouterPolicyToClusterRouter(hashedAddressSet
 		_, stderr, err := util.RunOVNNbctl("--id=@logical_router_policy", "create", "logical_router_policy",
 			fmt.Sprintf("priority=%d", efStartPriority-rule.id),
 			match, "action="+action, fmt.Sprintf("external-ids:egressFirewall=%s", ef.namespace),
-			"--", "add", "logical_router", util.OVNClusterRouter, "policies", "@logical_router_policy")
+			"--", "add", "logical_router", config.OVNClusterRouter, "policies", "@logical_router_policy")
 		if err != nil {
 			// TODO: lr-policy-add doesn't support --may-exist, resort to this workaround for now.
 			// Have raised an issue against ovn repository (https://github.com/ovn-org/ovn/issues/49)
 			if !strings.Contains(stderr, "already existed") {
 				return fmt.Errorf("failed to add policy route '%s' to %s "+
-					"stderr: %s, error: %v", match, util.OVNClusterRouter, stderr, err)
+					"stderr: %s, error: %v", match, config.OVNClusterRouter, stderr, err)
 			}
 		}
 	}
