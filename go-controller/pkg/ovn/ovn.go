@@ -20,7 +20,8 @@ import (
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/subnetallocator"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
 
-	egressfirewall "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/egressfirewall/v1"
+	egressfirewallapi "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/egressfirewall/v1"
+	egressfirewall "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/egressfirewall"
 
 	apiextension "k8s.io/apiextensions-apiserver/pkg/apis/apiextensions/v1beta1"
 	utilnet "k8s.io/utils/net"
@@ -75,9 +76,6 @@ type namespaceInfo struct {
 	// namespacePolicy's mutex (and not necessarily the namespaceInfo's) to work with
 	// the policy itself.
 	networkPolicies map[string]*namespacePolicy
-
-	//defines the namespaces egressFirewallPolicy
-	egressFirewallPolicy *egressFirewall
 
 	hybridOverlayExternalGW net.IP
 	hybridOverlayVTEP       net.IP
@@ -137,6 +135,8 @@ type Controller struct {
 	namespaces      map[string]*namespaceInfo
 	namespacesMutex sync.Mutex
 
+	//defines the namespaces egressFirewallPolicies
+	egressFirewallPolicies *egressfirewall.EgressFirewallPolicies
 	// An address set factory that creates address sets
 	addressSetFactory AddressSetFactory
 
@@ -236,6 +236,7 @@ func NewOvnController(ovnClient *util.OVNClientset, wf *factory.WatchFactory,
 		logicalPortCache:          newPortCache(stopChan),
 		namespaces:                make(map[string]*namespaceInfo),
 		namespacesMutex:           sync.Mutex{},
+		egressFirewallPolicies:    egressfirewall.NewEgressFirewallPolicies(&kube.Kube{KClient: ovnClient.KubeClient}),
 		addressSetFactory:         addressSetFactory,
 		lspIngressDenyCache:       make(map[string]int),
 		lspEgressDenyCache:        make(map[string]int),
@@ -683,43 +684,43 @@ func (oc *Controller) WatchCRD() {
 func (oc *Controller) WatchEgressFirewall() *factory.Handler {
 	return oc.watchFactory.AddEgressFirewallHandler(cache.ResourceEventHandlerFuncs{
 		AddFunc: func(obj interface{}) {
-			egressFirewall := obj.(*egressfirewall.EgressFirewall).DeepCopy()
-			errList := oc.addEgressFirewall(egressFirewall)
+			egressFirewall := obj.(*egressfirewallapi.EgressFirewall).DeepCopy()
+			errList := oc.egressFirewallPolicies.AddEgressFirewall(egressFirewall, getIPv4ASHashedName(egressFirewall.Namespace), getIPv6ASHashedName(egressFirewall.Namespace))
 			for _, err := range errList {
 				klog.Error(err)
 			}
 			if len(errList) == 0 {
-				egressFirewall.Status.Status = egressFirewallAppliedCorrectly
+				egressFirewall.Status.Status = egressfirewall.EgressFirewallAppliedCorrectly
 			} else {
-				egressFirewall.Status.Status = egressFirewallAddError
+				egressFirewall.Status.Status = egressfirewall.EgressFirewallAddError
 			}
-			err := oc.updateEgressFirewallWithRetry(egressFirewall)
+			err := oc.egressFirewallPolicies.UpdateEgressFirewallWithRetry(egressFirewall)
 			if err != nil {
 				klog.Error(err)
 			}
 		},
 		UpdateFunc: func(old, newer interface{}) {
-			newEgressFirewall := newer.(*egressfirewall.EgressFirewall).DeepCopy()
-			oldEgressFirewall := old.(*egressfirewall.EgressFirewall)
+			newEgressFirewall := newer.(*egressfirewallapi.EgressFirewall).DeepCopy()
+			oldEgressFirewall := old.(*egressfirewallapi.EgressFirewall)
 			if !reflect.DeepEqual(oldEgressFirewall.Spec, newEgressFirewall.Spec) {
-				errList := oc.updateEgressFirewall(oldEgressFirewall, newEgressFirewall)
+				errList := oc.egressFirewallPolicies.UpdateEgressFirewall(oldEgressFirewall, newEgressFirewall, getIPv4ASHashedName(newEgressFirewall.Namespace), getIPv6ASHashedName(newEgressFirewall.Namespace))
 				if len(errList) > 0 {
-					newEgressFirewall.Status.Status = egressFirewallUpdateError
+					newEgressFirewall.Status.Status = egressfirewall.EgressFirewallUpdateError
 					for _, err := range errList {
 						klog.Error(err)
 					}
 				} else {
-					newEgressFirewall.Status.Status = egressFirewallAppliedCorrectly
+					newEgressFirewall.Status.Status = egressfirewall.EgressFirewallAppliedCorrectly
 				}
-				err := oc.updateEgressFirewallWithRetry(newEgressFirewall)
+				err := oc.egressFirewallPolicies.UpdateEgressFirewallWithRetry(newEgressFirewall)
 				if err != nil {
 					klog.Error(err)
 				}
 			}
 		},
 		DeleteFunc: func(obj interface{}) {
-			egressFirewall := obj.(*egressfirewall.EgressFirewall)
-			errList := oc.deleteEgressFirewall(egressFirewall)
+			egressFirewall := obj.(*egressfirewallapi.EgressFirewall)
+			errList := oc.egressFirewallPolicies.DeleteEgressFirewall(egressFirewall)
 			for _, err := range errList {
 				klog.Error(err)
 			}

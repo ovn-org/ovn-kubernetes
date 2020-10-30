@@ -1,13 +1,15 @@
-package ovn
+package egressfirewall
 
 import (
 	"fmt"
 	"net"
 	"strconv"
 	"strings"
+	"sync"
 
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
 	egressfirewallapi "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/egressfirewall/v1"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/kube"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
 
 	kapi "k8s.io/api/core/v1"
@@ -17,10 +19,17 @@ import (
 )
 
 const (
-	egressFirewallAppliedCorrectly = "EgressFirewall Rules applied"
-	egressFirewallAddError         = "EgressFirewall Rules not correctly added"
-	egressFirewallUpdateError      = "EgressFirewall Rules not correctly updated"
+	EgressFirewallAppliedCorrectly = "EgressFirewall Rules applied"
+	EgressFirewallAddError         = "EgressFirewall Rules not correctly added"
+	EgressFirewallUpdateError      = "EgressFirewall Rules not correctly updated"
 )
+
+type EgressFirewallPolicies struct {
+	sync.Mutex
+
+	kubeInterface   kube.Interface
+	egressFirewalls map[string]*egressFirewall
+}
 
 type egressFirewall struct {
 	name        string
@@ -37,6 +46,13 @@ type egressFirewallRule struct {
 
 type destination struct {
 	cidrSelector string
+}
+
+func NewEgressFirewallPolicies(kubeInterface kube.Interface) *EgressFirewallPolicies {
+	return &EgressFirewallPolicies{
+		egressFirewalls: make(map[string]*egressFirewall),
+	}
+
 }
 
 func newEgressFirewall(egressFirewallPolicy *egressfirewallapi.EgressFirewall) *egressFirewall {
@@ -65,22 +81,18 @@ func newEgressFirewallRule(rawEgressFirewallRule egressfirewallapi.EgressFirewal
 	return efr, nil
 }
 
-func (oc *Controller) addEgressFirewall(egressFirewall *egressfirewallapi.EgressFirewall) []error {
+func (efp *EgressFirewallPolicies) AddEgressFirewall(egressFirewall *egressfirewallapi.EgressFirewall, asIPv4Hash, asIPv6Hash string) []error {
 	klog.Infof("Adding egressFirewall %s in namespace %s", egressFirewall.Name, egressFirewall.Namespace)
-	nsInfo, err := oc.waitForNamespaceLocked(egressFirewall.Namespace)
-	if err != nil {
-		return []error{fmt.Errorf("failed to wait for namespace %s event (%v)",
-			egressFirewall.Namespace, err)}
-	}
-	defer nsInfo.Unlock()
+	efp.Lock()
+	defer efp.Unlock()
 
-	if nsInfo.egressFirewallPolicy != nil {
+	if efp.egressFirewalls[egressFirewall.Namespace] != nil {
 		return []error{fmt.Errorf("error attempting to add egressFirewall %s to namespace %s when it already has an egressFirewall",
 			egressFirewall.Name, egressFirewall.Namespace)}
 	}
 
 	ef := newEgressFirewall(egressFirewall)
-	nsInfo.egressFirewallPolicy = ef
+	efp.egressFirewalls[egressFirewall.Namespace] = ef
 	var errList []error
 	egressFirewallStartPriorityInt, err := strconv.Atoi(config.EgressFirewallStartPriority)
 	if err != nil {
@@ -110,12 +122,7 @@ func (oc *Controller) addEgressFirewall(egressFirewall *egressfirewallapi.Egress
 		return errList
 	}
 
-	if nsInfo.addressSet == nil {
-		// TODO(trozet): remove dependency on nsInfo object and just determine hash names to create Egress FW with
-		return []error{fmt.Errorf("unable to add egress firewall policy, namespace: %s has no address set", egressFirewall.Namespace)}
-	}
-
-	err = ef.addLogicalRouterPolicyToClusterRouter(nsInfo.addressSet.GetIPv4HashName(), nsInfo.addressSet.GetIPv6HashName(), egressFirewallStartPriorityInt)
+	err = ef.addLogicalRouterPolicyToClusterRouter(asIPv4Hash, asIPv6Hash, egressFirewallStartPriorityInt)
 	if err != nil {
 		return []error{err}
 	}
@@ -123,21 +130,19 @@ func (oc *Controller) addEgressFirewall(egressFirewall *egressfirewallapi.Egress
 	return nil
 }
 
-func (oc *Controller) updateEgressFirewall(oldEgressFirewall, newEgressFirewall *egressfirewallapi.EgressFirewall) []error {
-	errList := oc.deleteEgressFirewall(oldEgressFirewall)
-	errList = append(errList, oc.addEgressFirewall(newEgressFirewall)...)
+func (efp *EgressFirewallPolicies) UpdateEgressFirewall(oldEgressFirewall, newEgressFirewall *egressfirewallapi.EgressFirewall, asIPv4Hash, asIPv6Hash string) []error {
+	errList := efp.DeleteEgressFirewall(oldEgressFirewall)
+	errList = append(errList, efp.AddEgressFirewall(newEgressFirewall, asIPv4Hash, asIPv6Hash)...)
 	return errList
 }
 
-func (oc *Controller) deleteEgressFirewall(egressFirewall *egressfirewallapi.EgressFirewall) []error {
+func (efp *EgressFirewallPolicies) DeleteEgressFirewall(egressFirewall *egressfirewallapi.EgressFirewall) []error {
 	klog.Infof("Deleting egress Firewall %s in namespace %s", egressFirewall.Name, egressFirewall.Namespace)
+	efp.Lock()
+	defer efp.Unlock()
 
-	nsInfo := oc.getNamespaceLocked(egressFirewall.Namespace)
-	if nsInfo != nil {
-		// clear it so an error does not prevent future egressFirewalls
-		nsInfo.egressFirewallPolicy = nil
-		nsInfo.Unlock()
-	}
+	//delete the egressFirewallPolicy entry so an ovn error will not prevent further egressfirewalls to be added for the given namespace
+	delete(efp.egressFirewalls, egressFirewall.Namespace)
 	stdout, stderr, err := util.RunOVNNbctl("--data=bare", "--no-heading", "--columns=_uuid", "find", "logical_router_policy", fmt.Sprintf("external-ids:egressFirewall=%s", egressFirewall.Namespace))
 	if err != nil {
 		return []error{fmt.Errorf("error deleting egressFirewall for namespace %s, cannot get logical router policies from LR %s - %s:%s",
@@ -156,9 +161,9 @@ func (oc *Controller) deleteEgressFirewall(egressFirewall *egressfirewallapi.Egr
 	return errList
 }
 
-func (oc *Controller) updateEgressFirewallWithRetry(egressfirewall *egressfirewallapi.EgressFirewall) error {
+func (efp *EgressFirewallPolicies) UpdateEgressFirewallWithRetry(egressfirewall *egressfirewallapi.EgressFirewall) error {
 	return retry.RetryOnConflict(retry.DefaultRetry, func() error {
-		return oc.kube.UpdateEgressFirewall(egressfirewall)
+		return efp.kubeInterface.UpdateEgressFirewall(egressfirewall)
 	})
 }
 
