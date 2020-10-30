@@ -25,6 +25,18 @@ func hashedPortGroup(s string) string {
 	return hashForOVN(s)
 }
 
+func findPortGroup(name string, hashName string) (string, error) {
+	portGroup, stderr, err := util.RunOVNNbctl("--data=bare",
+		"--no-heading", "--columns=_uuid", "find", "port_group",
+		fmt.Sprintf("name=%s", hashName))
+	if err != nil {
+		return "", fmt.Errorf("find failed to get port_group, stderr: %q (%v)",
+			stderr, err)
+	}
+
+	return portGroup, nil
+}
+
 func createPortGroup(name string, hashName string) (string, error) {
 	klog.V(5).Infof("createPortGroup with %s", name)
 	portGroup, stderr, err := util.RunOVNNbctl("--data=bare",

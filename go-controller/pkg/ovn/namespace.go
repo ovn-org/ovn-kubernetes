@@ -124,9 +124,21 @@ func (oc *Controller) multicastUpdateNamespace(ns *kapi.Namespace, nsInfo *names
 	var err error
 	nsInfo.multicastEnabled = enabled
 	if enabled {
-		err = oc.createMulticastAllowPolicy(ns.Name, nsInfo)
+		//Creates Port Group name if dosn't exist
+		err := nsInfo.updateNamespacePortGroup(ns.Name)
+		if err != nil {
+			klog.Errorf(err.Error())
+		}
+
+		err = oc.createMulticastAllowPolicy(ns.Name)
 	} else {
-		err = deleteMulticastAllowPolicy(ns.Name, nsInfo)
+		err = deleteMulticastAllowPolicy(ns.Name)
+		//updates namespace's port group info
+		err := nsInfo.updateNamespacePortGroup(ns.Name)
+		if err != nil {
+			klog.Errorf(err.Error())
+		}
+
 	}
 	if err != nil {
 		klog.Errorf(err.Error())
@@ -139,7 +151,12 @@ func (oc *Controller) multicastUpdateNamespace(ns *kapi.Namespace, nsInfo *names
 func (oc *Controller) multicastDeleteNamespace(ns *kapi.Namespace, nsInfo *namespaceInfo) {
 	if nsInfo.multicastEnabled {
 		nsInfo.multicastEnabled = false
-		if err := deleteMulticastAllowPolicy(ns.Name, nsInfo); err != nil {
+		if err := deleteMulticastAllowPolicy(ns.Name); err != nil {
+			klog.Errorf(err.Error())
+		}
+		//Add this here to remove nsInfo Dependency in policy.go, it was
+		//redundant anyways (i.e multicastEnabled was already checked)
+		if err := nsInfo.updateNamespacePortGroup(ns.Name); err != nil {
 			klog.Errorf(err.Error())
 		}
 	}
@@ -282,11 +299,13 @@ func (oc *Controller) deleteNamespace(ns *kapi.Namespace) {
 	}
 	defer nsInfo.Unlock()
 
-	klog.V(5).Infof("Deleting Namespace's NetworkPolicy entities")
-	for _, np := range nsInfo.networkPolicies {
-		delete(nsInfo.networkPolicies, np.name)
-		oc.destroyNamespacePolicy(np)
-	}
+	//All namespaces should be deleated by K8's
+	//klog.V(5).Infof("Deleting Namespace's NetworkPolicy entities")
+
+	//for _, np := range nsInfo.networkPolicies {
+	//	delete(nsInfo.networkPolicies, np.name)
+	//	oc.destroyNamespacePolicy(np)
+	//}
 	oc.deleteGWRoutesForNamespace(nsInfo)
 	oc.multicastDeleteNamespace(ns, nsInfo)
 }
@@ -343,7 +362,7 @@ func (oc *Controller) createNamespaceLocked(ns string) *namespaceInfo {
 	defer oc.namespacesMutex.Unlock()
 
 	nsInfo := &namespaceInfo{
-		networkPolicies:       make(map[string]*namespacePolicy),
+		//networkPolicies:       make(map[string]*namespacePolicy),
 		podExternalRoutes:     make(map[string]map[string]string),
 		multicastEnabled:      false,
 		routingExternalPodGWs: make(map[string][]net.IP),

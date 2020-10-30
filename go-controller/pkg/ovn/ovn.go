@@ -75,7 +75,7 @@ type namespaceInfo struct {
 	// namespaceInfo's mutex to add/delete/lookup policies, but must hold the
 	// namespacePolicy's mutex (and not necessarily the namespaceInfo's) to work with
 	// the policy itself.
-	networkPolicies map[string]*namespacePolicy
+	//networkPolicies map[string]*namespacePolicy
 
 	// defines the namespaces egressFirewallPolicy
 	egressFirewallPolicy *egressFirewall
@@ -135,6 +135,11 @@ type Controller struct {
 	// from inside those functions.
 	namespaces      map[string]*namespaceInfo
 	namespacesMutex sync.Mutex
+
+	//Network Policy resources on a per namespace basis
+	//must use oc getNetworkPolicyLocked() to read
+	networkPolicies      map[types.NamespacedName]*networkPolicy
+	networkPoliciesMutex sync.Mutex
 
 	// An address set factory that creates address sets
 	addressSetFactory AddressSetFactory
