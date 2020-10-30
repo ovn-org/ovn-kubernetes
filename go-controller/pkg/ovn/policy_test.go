@@ -10,6 +10,7 @@ import (
 	. "github.com/onsi/gomega"
 
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
+	addressset "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/address_set"
 	ovntest "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/testing"
 	util "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
 	"github.com/urfave/cli/v2"
@@ -130,7 +131,7 @@ func (n networkPolicy) addNamespaceSelectorCmds(fexec *ovntest.FakeExec, network
 
 func getAddressSetName(namespace, name string, policyType knet.PolicyType, idx int) string {
 	direction := strings.ToLower(string(policyType))
-	return fmt.Sprintf("%s.%s.%s.%d%s", namespace, name, direction, idx, ipv4AddressSetSuffix)
+	return fmt.Sprintf("%s.%s.%s.%d%s", namespace, name, direction, idx, addressset.GetIPv4AddressSetSuffix())
 }
 
 func eventuallyExpectNoAddressSets(fakeOvn *FakeOVN, networkPolicy *knet.NetworkPolicy) {
@@ -223,7 +224,7 @@ func (p multicastPolicy) enableCmds(fExec *ovntest.FakeExec, ns, nsAs string) {
 			"-- add port_group fake_uuid acls @acl",
 	})
 
-	match = "ip4.src == $" + hashedAddressSet(nsAs) + " && ip4.mcast"
+	match = "ip4.src == $" + addressset.GetIPv4ASHashedName(ns) + " && ip4.mcast"
 	match = getACLMatch(pg_hash, match, knet.PolicyTypeIngress)
 	fExec.AddFakeCmdsNoOutputNoError([]string{
 		"ovn-nbctl --timeout=15 --data=bare --no-heading --columns=_uuid find ACL " +
@@ -249,7 +250,7 @@ func (p multicastPolicy) disableCmds(fExec *ovntest.FakeExec, ns, nsAs string) {
 		"ovn-nbctl --timeout=15 remove port_group " + pg_hash + " acls fake_uuid",
 	})
 
-	match = "ip4.src == $" + hashedAddressSet(nsAs) + " && ip4.mcast"
+	match = "ip4.src == $" + addressset.GetIPv4ASHashedName(ns) + " && ip4.mcast"
 	match = getACLMatch(pg_hash, match, knet.PolicyTypeIngress)
 	fExec.AddFakeCmd(&ovntest.ExpectedCmd{
 		Cmd: "ovn-nbctl --timeout=15 --data=bare --no-heading --columns=_uuid find ACL " +
@@ -288,13 +289,8 @@ func (p multicastPolicy) delPodCmds(fExec *ovntest.FakeExec, ns string) {
 
 var _ = Describe("OVN NetworkPolicy Operations", func() {
 	const (
-		namespaceName1    = "namespace1"
-		v4AddressSetName1 = namespaceName1 + ipv4AddressSetSuffix
-		v6AddressSetName1 = namespaceName1 + ipv6AddressSetSuffix
-
-		namespaceName2    = "namespace2"
-		v4AddressSetName2 = namespaceName2 + ipv4AddressSetSuffix
-		v6AddressSetName2 = namespaceName2 + ipv6AddressSetSuffix
+		namespaceName1 = "namespace1"
+		namespaceName2 = "namespace2"
 	)
 	var (
 		app     *cli.App
@@ -375,10 +371,10 @@ var _ = Describe("OVN NetworkPolicy Operations", func() {
 				fakeOvn.controller.WatchNamespaces()
 				fakeOvn.controller.WatchNetworkPolicy()
 
-				fakeOvn.asf.ExpectEmptyAddressSet(v4AddressSetName1)
-				fakeOvn.asf.ExpectEmptyAddressSet(v4AddressSetName2)
-				fakeOvn.asf.ExpectNoAddressSet(v6AddressSetName1)
-				fakeOvn.asf.ExpectNoAddressSet(v6AddressSetName2)
+				fakeOvn.asf.ExpectEmptyAddressSet(addressset.GetIPv4ASName(namespaceName1))
+				fakeOvn.asf.ExpectEmptyAddressSet(addressset.GetIPv4ASName(namespaceName2))
+				fakeOvn.asf.ExpectNoAddressSet(addressset.GetIPv6ASName(namespaceName1))
+				fakeOvn.asf.ExpectNoAddressSet(addressset.GetIPv6ASName(namespaceName2))
 
 				eventuallyExpectEmptyAddressSets(fakeOvn, networkPolicy)
 
@@ -466,8 +462,8 @@ var _ = Describe("OVN NetworkPolicy Operations", func() {
 				fakeOvn.controller.WatchNetworkPolicy()
 
 				expectAddressSetsWithIP(fakeOvn, networkPolicy, nPodTest.podIP)
-				fakeOvn.asf.ExpectAddressSetWithIPs(v4AddressSetName1, []string{nPodTest.podIP})
-				fakeOvn.asf.ExpectNoAddressSet(v6AddressSetName1)
+				fakeOvn.asf.ExpectAddressSetWithIPs(addressset.GetIPv4ASName(namespaceName1), []string{nPodTest.podIP})
+				fakeOvn.asf.ExpectNoAddressSet(addressset.GetIPv6ASName(namespaceName1))
 
 				_, err := fakeOvn.fakeClient.KubeClient.NetworkingV1().NetworkPolicies(networkPolicy.Namespace).Get(context.TODO(), networkPolicy.Name, metav1.GetOptions{})
 				Expect(err).NotTo(HaveOccurred())
@@ -563,12 +559,12 @@ var _ = Describe("OVN NetworkPolicy Operations", func() {
 				fakeOvn.controller.WatchPods()
 				fakeOvn.controller.WatchNetworkPolicy()
 
-				fakeOvn.asf.ExpectEmptyAddressSet(v4AddressSetName1)
+				fakeOvn.asf.ExpectEmptyAddressSet(addressset.GetIPv4ASName(namespaceName1))
 				expectAddressSetsWithIP(fakeOvn, networkPolicy, nPodTest.podIP)
-				fakeOvn.asf.ExpectAddressSetWithIPs(v4AddressSetName2, []string{nPodTest.podIP})
+				fakeOvn.asf.ExpectAddressSetWithIPs(addressset.GetIPv4ASName(namespaceName2), []string{nPodTest.podIP})
 
-				fakeOvn.asf.ExpectNoAddressSet(v6AddressSetName1)
-				fakeOvn.asf.ExpectNoAddressSet(v6AddressSetName2)
+				fakeOvn.asf.ExpectNoAddressSet(addressset.GetIPv6ASName(namespaceName1))
+				fakeOvn.asf.ExpectNoAddressSet(addressset.GetIPv6ASName(namespaceName2))
 
 				_, err := fakeOvn.fakeClient.KubeClient.NetworkingV1().NetworkPolicies(networkPolicy.Namespace).Get(context.TODO(), networkPolicy.Name, metav1.GetOptions{})
 				Expect(err).NotTo(HaveOccurred())
@@ -660,8 +656,8 @@ var _ = Describe("OVN NetworkPolicy Operations", func() {
 				_, err := fakeOvn.fakeClient.KubeClient.NetworkingV1().NetworkPolicies(networkPolicy.Namespace).Get(context.TODO(), networkPolicy.Name, metav1.GetOptions{})
 				Expect(err).NotTo(HaveOccurred())
 				Eventually(fExec.CalledMatchesExpected).Should(BeTrue(), fExec.ErrorDesc)
-				fakeOvn.asf.ExpectAddressSetWithIPs(v4AddressSetName1, []string{nPodTest.podIP})
-				fakeOvn.asf.ExpectNoAddressSet(v6AddressSetName1)
+				fakeOvn.asf.ExpectAddressSetWithIPs(addressset.GetIPv4ASName(namespaceName1), []string{nPodTest.podIP})
+				fakeOvn.asf.ExpectNoAddressSet(addressset.GetIPv6ASName(namespaceName1))
 
 				return nil
 			}
@@ -748,8 +744,8 @@ var _ = Describe("OVN NetworkPolicy Operations", func() {
 				_, err := fakeOvn.fakeClient.KubeClient.NetworkingV1().NetworkPolicies(networkPolicy.Namespace).Get(context.TODO(), networkPolicy.Name, metav1.GetOptions{})
 				Expect(err).NotTo(HaveOccurred())
 				Eventually(fExec.CalledMatchesExpected).Should(BeTrue(), fExec.ErrorDesc)
-				fakeOvn.asf.ExpectAddressSetWithIPs(v4AddressSetName1, []string{nPodTest.podIP})
-				fakeOvn.asf.ExpectNoAddressSet(v6AddressSetName1)
+				fakeOvn.asf.ExpectAddressSetWithIPs(addressset.GetIPv4ASName(namespaceName1), []string{nPodTest.podIP})
+				fakeOvn.asf.ExpectNoAddressSet(addressset.GetIPv6ASName(namespaceName1))
 
 				fExec.AddFakeCmd(&ovntest.ExpectedCmd{
 					Cmd:    "ovn-nbctl --timeout=15 --data=bare --no-heading --columns=_uuid find ACL match=\"ip4.src == {$a3128014386057836746, $a4615334824109672969} && outport == @a14195333570786048679\" external-ids:namespace=namespace1 external-ids:policy=networkpolicy1 external-ids:Ingress_num=0 external-ids:policy_type=Ingress",
@@ -765,8 +761,8 @@ var _ = Describe("OVN NetworkPolicy Operations", func() {
 				err = fakeOvn.fakeClient.KubeClient.CoreV1().Namespaces().Delete(context.TODO(), namespace2.Name, *metav1.NewDeleteOptions(0))
 				Expect(err).NotTo(HaveOccurred())
 				Eventually(fExec.CalledMatchesExpected).Should(BeTrue(), fExec.ErrorDesc)
-				fakeOvn.asf.EventuallyExpectNoAddressSet(v4AddressSetName2)
-				fakeOvn.asf.EventuallyExpectNoAddressSet(v6AddressSetName2)
+				fakeOvn.asf.EventuallyExpectNoAddressSet(addressset.GetIPv4ASName(namespaceName2))
+				fakeOvn.asf.EventuallyExpectNoAddressSet(addressset.GetIPv6ASName(namespaceName2))
 
 				return nil
 			}
@@ -848,8 +844,8 @@ var _ = Describe("OVN NetworkPolicy Operations", func() {
 				err = fakeOvn.fakeClient.KubeClient.CoreV1().Namespaces().Delete(context.TODO(), namespace2.Name, *metav1.NewDeleteOptions(0))
 				Expect(err).NotTo(HaveOccurred())
 				Eventually(fExec.CalledMatchesExpected).Should(BeTrue(), fExec.ErrorDesc)
-				fakeOvn.asf.EventuallyExpectNoAddressSet(v4AddressSetName2)
-				fakeOvn.asf.EventuallyExpectNoAddressSet(v6AddressSetName2)
+				fakeOvn.asf.EventuallyExpectNoAddressSet(addressset.GetIPv4ASName(namespaceName2))
+				fakeOvn.asf.EventuallyExpectNoAddressSet(addressset.GetIPv6ASName(namespaceName2))
 				return nil
 			}
 
@@ -930,8 +926,8 @@ var _ = Describe("OVN NetworkPolicy Operations", func() {
 				fakeOvn.controller.WatchNetworkPolicy()
 
 				expectAddressSetsWithIP(fakeOvn, networkPolicy, nPodTest.podIP)
-				fakeOvn.asf.ExpectAddressSetWithIPs(v4AddressSetName1, []string{nPodTest.podIP})
-				fakeOvn.asf.ExpectNoAddressSet(v6AddressSetName1)
+				fakeOvn.asf.ExpectAddressSetWithIPs(addressset.GetIPv4ASName(namespaceName1), []string{nPodTest.podIP})
+				fakeOvn.asf.ExpectNoAddressSet(addressset.GetIPv6ASName(namespaceName1))
 
 				_, err := fakeOvn.fakeClient.KubeClient.NetworkingV1().NetworkPolicies(networkPolicy.Namespace).Get(context.TODO(), networkPolicy.Name, metav1.GetOptions{})
 				Expect(err).NotTo(HaveOccurred())
@@ -944,7 +940,7 @@ var _ = Describe("OVN NetworkPolicy Operations", func() {
 				Eventually(fExec.CalledMatchesExpected).Should(BeTrue(), fExec.ErrorDesc)
 
 				eventuallyExpectEmptyAddressSets(fakeOvn, networkPolicy)
-				fakeOvn.asf.EventuallyExpectEmptyAddressSet(v4AddressSetName1)
+				fakeOvn.asf.EventuallyExpectEmptyAddressSet(addressset.GetIPv4ASName(namespaceName1))
 				return nil
 			}
 
@@ -1035,11 +1031,11 @@ var _ = Describe("OVN NetworkPolicy Operations", func() {
 				fakeOvn.controller.WatchPods()
 				fakeOvn.controller.WatchNetworkPolicy()
 
-				fakeOvn.asf.ExpectEmptyAddressSet(v4AddressSetName1)
+				fakeOvn.asf.ExpectEmptyAddressSet(addressset.GetIPv4ASName(namespaceName1))
 				expectAddressSetsWithIP(fakeOvn, networkPolicy, nPodTest.podIP)
-				fakeOvn.asf.ExpectAddressSetWithIPs(v4AddressSetName2, []string{nPodTest.podIP})
-				fakeOvn.asf.ExpectNoAddressSet(v6AddressSetName1)
-				fakeOvn.asf.ExpectNoAddressSet(v6AddressSetName2)
+				fakeOvn.asf.ExpectAddressSetWithIPs(addressset.GetIPv4ASName(namespaceName2), []string{nPodTest.podIP})
+				fakeOvn.asf.ExpectNoAddressSet(addressset.GetIPv6ASName(namespaceName1))
+				fakeOvn.asf.ExpectNoAddressSet(addressset.GetIPv6ASName(namespaceName2))
 
 				_, err := fakeOvn.fakeClient.KubeClient.NetworkingV1().NetworkPolicies(networkPolicy.Namespace).Get(context.TODO(), networkPolicy.Name, metav1.GetOptions{})
 				Expect(err).NotTo(HaveOccurred())
@@ -1051,7 +1047,7 @@ var _ = Describe("OVN NetworkPolicy Operations", func() {
 
 				// After deleting the pod all address sets should be empty
 				eventuallyExpectEmptyAddressSets(fakeOvn, networkPolicy)
-				fakeOvn.asf.EventuallyExpectEmptyAddressSet(v4AddressSetName1)
+				fakeOvn.asf.EventuallyExpectEmptyAddressSet(addressset.GetIPv4ASName(namespaceName1))
 
 				return nil
 			}
@@ -1135,8 +1131,8 @@ var _ = Describe("OVN NetworkPolicy Operations", func() {
 				_, err := fakeOvn.fakeClient.KubeClient.NetworkingV1().NetworkPolicies(networkPolicy.Namespace).Get(context.TODO(), networkPolicy.Name, metav1.GetOptions{})
 				Expect(err).NotTo(HaveOccurred())
 				Eventually(fExec.CalledMatchesExpected).Should(BeTrue(), fExec.ErrorDesc)
-				fakeOvn.asf.ExpectAddressSetWithIPs(v4AddressSetName1, []string{nPodTest.podIP})
-				fakeOvn.asf.ExpectNoAddressSet(v6AddressSetName1)
+				fakeOvn.asf.ExpectAddressSetWithIPs(addressset.GetIPv4ASName(namespaceName1), []string{nPodTest.podIP})
+				fakeOvn.asf.ExpectNoAddressSet(addressset.GetIPv6ASName(namespaceName1))
 
 				npTest.delCmds(fExec, nPodTest, networkPolicy, true)
 
@@ -1176,14 +1172,14 @@ var _ = Describe("OVN NetworkPolicy Operations", func() {
 
 				// Enable multicast in the namespace.
 				mcastPolicy := multicastPolicy{}
-				mcastPolicy.enableCmds(fExec, namespace1.Name, v4AddressSetName1)
+				mcastPolicy.enableCmds(fExec, namespace1.Name, addressset.GetIPv4ASName(namespaceName1))
 				ns.Annotations[nsMulticastAnnotation] = "true"
 				_, err = fakeOvn.fakeClient.KubeClient.CoreV1().Namespaces().Update(context.TODO(), ns, metav1.UpdateOptions{})
 				Expect(err).NotTo(HaveOccurred())
 				Eventually(fExec.CalledMatchesExpected).Should(BeTrue(), fExec.ErrorDesc)
 
 				// Disable multicast in the namespace.
-				mcastPolicy.disableCmds(fExec, namespace1.Name, v4AddressSetName1)
+				mcastPolicy.disableCmds(fExec, namespace1.Name, addressset.GetIPv4ASName(namespaceName1))
 				ns.Annotations[nsMulticastAnnotation] = "false"
 				_, err = fakeOvn.fakeClient.KubeClient.CoreV1().Namespaces().Update(context.TODO(), ns, metav1.UpdateOptions{})
 				Expect(err).NotTo(HaveOccurred())
@@ -1233,15 +1229,15 @@ var _ = Describe("OVN NetworkPolicy Operations", func() {
 				Eventually(fExec.CalledMatchesExpected).Should(BeTrue(), fExec.ErrorDesc)
 				// Enable multicast in the namespace
 				mcastPolicy := multicastPolicy{}
-				mcastPolicy.enableCmds(fExec, namespace1.Name, v4AddressSetName1)
+				mcastPolicy.enableCmds(fExec, namespace1.Name, addressset.GetIPv4ASName(namespaceName1))
 				// The pod should be added to the multicast allow port group.
 				mcastPolicy.addPodCmds(fExec, namespace1.Name)
 				ns.Annotations[nsMulticastAnnotation] = "true"
 				_, err = fakeOvn.fakeClient.KubeClient.CoreV1().Namespaces().Update(context.TODO(), ns, metav1.UpdateOptions{})
 				Expect(err).NotTo(HaveOccurred())
 				Eventually(fExec.CalledMatchesExpected).Should(BeTrue(), fExec.ErrorDesc)
-				fakeOvn.asf.ExpectAddressSetWithIPs(v4AddressSetName1, []string{nPodTest.podIP})
-				fakeOvn.asf.ExpectNoAddressSet(v6AddressSetName1)
+				fakeOvn.asf.ExpectAddressSetWithIPs(addressset.GetIPv4ASName(namespaceName1), []string{nPodTest.podIP})
+				fakeOvn.asf.ExpectNoAddressSet(addressset.GetIPv6ASName(namespaceName1))
 				return nil
 			}
 
@@ -1282,7 +1278,7 @@ var _ = Describe("OVN NetworkPolicy Operations", func() {
 
 				// Enable multicast in the namespace.
 				mcastPolicy := multicastPolicy{}
-				mcastPolicy.enableCmds(fExec, namespace1.Name, v4AddressSetName1)
+				mcastPolicy.enableCmds(fExec, namespace1.Name, addressset.GetIPv4ASName(namespaceName1))
 				ns.Annotations[nsMulticastAnnotation] = "true"
 				_, err = fakeOvn.fakeClient.KubeClient.CoreV1().Namespaces().Update(context.TODO(), ns, metav1.UpdateOptions{})
 				Expect(err).NotTo(HaveOccurred())
@@ -1297,8 +1293,8 @@ var _ = Describe("OVN NetworkPolicy Operations", func() {
 					nPodTest.namespace, nPodTest.podName, nPodTest.nodeName, nPodTest.podIP), metav1.CreateOptions{})
 				Expect(err).NotTo(HaveOccurred())
 				Eventually(fExec.CalledMatchesExpected).Should(BeTrue(), fExec.ErrorDesc)
-				fakeOvn.asf.ExpectAddressSetWithIPs(v4AddressSetName1, []string{nPodTest.podIP})
-				fakeOvn.asf.ExpectNoAddressSet(v6AddressSetName1)
+				fakeOvn.asf.ExpectAddressSetWithIPs(addressset.GetIPv4ASName(namespaceName1), []string{nPodTest.podIP})
+				fakeOvn.asf.ExpectNoAddressSet(addressset.GetIPv6ASName(namespaceName1))
 
 				// Delete the pod from the namespace.
 				mcastPolicy.delPodCmds(fExec, namespace1.Name)
@@ -1307,8 +1303,8 @@ var _ = Describe("OVN NetworkPolicy Operations", func() {
 					nPodTest.podName, *metav1.NewDeleteOptions(0))
 				Expect(err).NotTo(HaveOccurred())
 				Eventually(fExec.CalledMatchesExpected).Should(BeTrue(), fExec.ErrorDesc)
-				fakeOvn.asf.ExpectEmptyAddressSet(v4AddressSetName1)
-				fakeOvn.asf.ExpectNoAddressSet(v6AddressSetName1)
+				fakeOvn.asf.ExpectEmptyAddressSet(addressset.GetIPv4ASName(namespaceName1))
+				fakeOvn.asf.ExpectNoAddressSet(addressset.GetIPv6ASName(namespaceName1))
 				return nil
 			}
 
@@ -1321,7 +1317,7 @@ var _ = Describe("OVN NetworkPolicy Operations", func() {
 func asMatch(addressSets []string) string {
 	hashedNames := make([]string, 0, len(addressSets))
 	for _, as := range addressSets {
-		hashedNames = append(hashedNames, hashedAddressSet(as))
+		hashedNames = append(hashedNames, util.HashForOVN(as))
 	}
 	sort.Strings(hashedNames)
 	var match string
@@ -1356,7 +1352,7 @@ func addExpectedGressCmds(fExec *ovntest.FakeExec, gp *gressPolicy, pgName strin
 var _ = Describe("OVN NetworkPolicy Low-Level Operations", func() {
 	var (
 		fExec     *ovntest.FakeExec
-		asFactory *fakeAddressSetFactory
+		asFactory *addressset.FakeAddressSetFactory
 	)
 
 	BeforeEach(func() {
@@ -1366,7 +1362,7 @@ var _ = Describe("OVN NetworkPolicy Low-Level Operations", func() {
 		err := util.SetExec(fExec)
 		Expect(err).NotTo(HaveOccurred())
 
-		asFactory = newFakeAddressSetFactory()
+		asFactory = addressset.NewFakeAddressSetFactory()
 		config.IPv4Mode = true
 		config.IPv6Mode = false
 	})
@@ -1388,7 +1384,7 @@ var _ = Describe("OVN NetworkPolicy Low-Level Operations", func() {
 		gp := newGressPolicy(knet.PolicyTypeIngress, 0, policy.Namespace, policy.Name)
 		err := gp.ensurePeerAddressSet(asFactory)
 		Expect(err).NotTo(HaveOccurred())
-		asName := getIPv4ASName(gp.peerAddressSet.GetName())
+		asName := addressset.GetIPv4ASName(gp.peerAddressSet.GetName())
 
 		one := fmt.Sprintf("testing.policy.ingress.1")
 		two := fmt.Sprintf("testing.policy.ingress.2")
@@ -1397,12 +1393,12 @@ var _ = Describe("OVN NetworkPolicy Low-Level Operations", func() {
 		five := fmt.Sprintf("testing.policy.ingress.5")
 		six := fmt.Sprintf("testing.policy.ingress.6")
 
-		v4One := one + ipv4AddressSetSuffix
-		v4Two := two + ipv4AddressSetSuffix
-		v4Three := three + ipv4AddressSetSuffix
-		v4Four := four + ipv4AddressSetSuffix
-		v4Five := five + ipv4AddressSetSuffix
-		v4Six := six + ipv4AddressSetSuffix
+		v4One := one + addressset.GetIPv4AddressSetSuffix()
+		v4Two := two + addressset.GetIPv4AddressSetSuffix()
+		v4Three := three + addressset.GetIPv4AddressSetSuffix()
+		v4Four := four + addressset.GetIPv4AddressSetSuffix()
+		v4Five := five + addressset.GetIPv4AddressSetSuffix()
+		v4Six := six + addressset.GetIPv4AddressSetSuffix()
 
 		cur := addExpectedGressCmds(fExec, gp, pgName, []string{asName}, []string{asName, v4One})
 		gp.addNamespaceAddressSet(one, pgName)

@@ -5,6 +5,7 @@ import (
 	"strings"
 
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
+	addressset "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/address_set"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
 
 	v1 "k8s.io/api/core/v1"
@@ -22,7 +23,7 @@ type gressPolicy struct {
 
 	// peerAddressSet points to the addressSet that holds all peer pod
 	// IP addresess.
-	peerAddressSet AddressSet
+	peerAddressSet addressset.AddressSet
 
 	// peerV4AddressSets has Address sets for all namespaces and pod selectors for IPv4
 	peerV4AddressSets sets.String
@@ -73,7 +74,7 @@ func newGressPolicy(policyType knet.PolicyType, idx int, namespace, name string)
 	}
 }
 
-func (gp *gressPolicy) ensurePeerAddressSet(factory AddressSetFactory) error {
+func (gp *gressPolicy) ensurePeerAddressSet(factory addressset.AddressSetFactory) error {
 	if gp.peerAddressSet != nil {
 		return nil
 	}
@@ -193,8 +194,8 @@ func (gp *gressPolicy) getMatchFromIPBlock(lportMatch, l4Match string) []string 
 
 // addNamespaceAddressSet adds a new namespace address set to the gress policy
 func (gp *gressPolicy) addNamespaceAddressSet(name, portGroupName string) {
-	v4HashName := "$" + getIPv4ASHashedName(name)
-	v6HashName := "$" + getIPv6ASHashedName(name)
+	v4HashName := "$" + addressset.GetIPv4ASHashedName(name)
+	v6HashName := "$" + addressset.GetIPv6ASHashedName(name)
 
 	if gp.peerV4AddressSets.Has(v4HashName) || gp.peerV6AddressSets.Has(v6HashName) {
 		return
@@ -212,8 +213,8 @@ func (gp *gressPolicy) addNamespaceAddressSet(name, portGroupName string) {
 // delNamespaceAddressSet removes a namespace address set from the gress policy
 
 func (gp *gressPolicy) delNamespaceAddressSet(name, portGroupName string) {
-	v4HashName := "$" + getIPv4ASHashedName(name)
-	v6HashName := "$" + getIPv6ASHashedName(name)
+	v4HashName := "$" + addressset.GetIPv4ASHashedName(name)
+	v6HashName := "$" + addressset.GetIPv6ASHashedName(name)
 
 	if !gp.peerV4AddressSets.Has(v4HashName) && !gp.peerV6AddressSets.Has(v6HashName) {
 		return

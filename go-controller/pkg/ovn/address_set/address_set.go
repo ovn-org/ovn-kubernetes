@@ -1,4 +1,4 @@
-package ovn
+package addressset
 
 import (
 	"fmt"
@@ -131,11 +131,11 @@ func (asf *ovnAddressSetFactory) DestroyAddressSetInBackingStore(name string) er
 	if err != nil {
 		return err
 	}
-	err = destroyAddressSet(getIPv4ASName(name))
+	err = destroyAddressSet(GetIPv4ASName(name))
 	if err != nil {
 		return err
 	}
-	err = destroyAddressSet(getIPv6ASName(name))
+	err = destroyAddressSet(GetIPv6ASName(name))
 	return err
 }
 
@@ -168,7 +168,7 @@ var _ AddressSet = &ovnAddressSets{}
 
 // hash the provided input to make it a valid ovnAddressSet name.
 func hashedAddressSet(s string) string {
-	return hashForOVN(s)
+	return util.HashForOVN(s)
 }
 
 func asDetail(as *ovnAddressSet) string {
@@ -191,13 +191,13 @@ func newOvnAddressSets(name string, ips []net.IP) (*ovnAddressSets, error) {
 		}
 	}
 	if config.IPv4Mode {
-		v4set, err = newOvnAddressSet(getIPv4ASName(name), v4IPs)
+		v4set, err = newOvnAddressSet(GetIPv4ASName(name), v4IPs)
 		if err != nil {
 			return nil, err
 		}
 	}
 	if config.IPv6Mode {
-		v6set, err = newOvnAddressSet(getIPv6ASName(name), v6IPs)
+		v6set, err = newOvnAddressSet(GetIPv6ASName(name), v6IPs)
 		if err != nil {
 			return nil, err
 		}
@@ -407,18 +407,22 @@ func (as *ovnAddressSet) destroy() error {
 	return nil
 }
 
-func getIPv4ASName(name string) string {
+func GetIPv4ASName(name string) string {
 	return name + ipv4AddressSetSuffix
 }
 
-func getIPv6ASName(name string) string {
+func GetIPv6ASName(name string) string {
 	return name + ipv6AddressSetSuffix
 }
 
-func getIPv4ASHashedName(name string) string {
+func GetIPv4ASHashedName(name string) string {
 	return hashedAddressSet(name + ipv4AddressSetSuffix)
 }
 
-func getIPv6ASHashedName(name string) string {
+func GetIPv6ASHashedName(name string) string {
 	return hashedAddressSet(name + ipv6AddressSetSuffix)
+}
+
+func GetIPv4AddressSetSuffix() string {
+	return ipv4AddressSetSuffix
 }

@@ -2,7 +2,9 @@ package util
 
 import (
 	"fmt"
+	"hash/fnv"
 	"net"
+	"strconv"
 	"strings"
 	"sync"
 
@@ -112,6 +114,17 @@ func UpdateNodeSwitchExcludeIPs(nodeName string, subnet *net.IPNet) error {
 			"stderr: %q, error: %v", nodeName, stderr, err)
 	}
 	return nil
+}
+
+// hash the provided input to make it a valid OVN name
+func HashForOVN(s string) string {
+	h := fnv.New64a()
+	_, err := h.Write([]byte(s))
+	if err != nil {
+		klog.Errorf("Failed to hash %s", s)
+	}
+	hashString := strconv.FormatUint(h.Sum64(), 10)
+	return fmt.Sprintf("a%s", hashString)
 }
 
 // GetHybridOverlayPortName returns the name of the hybrid overlay switch port

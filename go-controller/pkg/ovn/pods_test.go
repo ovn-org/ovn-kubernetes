@@ -13,6 +13,7 @@ import (
 	"github.com/urfave/cli/v2"
 
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
+	addressset "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/address_set"
 	ovntest "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/testing"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
 
@@ -456,7 +457,7 @@ var _ = Describe("OVN Pod Operations", func() {
 				Expect(err).NotTo(HaveOccurred())
 				Eventually(func() string { return getPodAnnotations(fakeOvn.fakeClient.KubeClient, t.namespace, t.podName) }, 2).Should(MatchJSON(podJSON))
 
-				v4AddressSetName := t.namespace + ipv4AddressSetSuffix
+				v4AddressSetName := t.namespace + addressset.GetIPv4AddressSetSuffix()
 				fakeOvn.asf.ExpectNoAddressSet(v4AddressSetName)
 
 				// Now add the namespace

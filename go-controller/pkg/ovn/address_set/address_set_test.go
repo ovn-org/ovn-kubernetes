@@ -1,4 +1,4 @@
-package ovn
+package addressset
 
 import (
 	"fmt"
@@ -12,6 +12,12 @@ import (
 
 	. "github.com/onsi/ginkgo"
 	. "github.com/onsi/gomega"
+)
+
+const (
+	// fake UUIDs used for returning UUID's from ovn commands
+	fakeUUID   = "8a86f6d8-7972-4253-b0bd-ddbef66e9303"
+	fakeUUIDv6 = "8a86f6d8-7972-4253-b0bd-ddbef66e9303"
 )
 
 type testAddressSetName struct {
