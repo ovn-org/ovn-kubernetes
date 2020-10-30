@@ -598,6 +598,9 @@ type egressIPController struct {
 }
 
 func (e *egressIPController) addPodEgressIP(eIP *egressipv1.EgressIP, pod *kapi.Pod) error {
+	if pod.Spec.HostNetwork {
+		return nil
+	}
 	podIPs := e.getPodIPs(pod)
 	if podIPs == nil {
 		e.podRetry.Store(getPodKey(pod), true)
@@ -618,6 +621,9 @@ func (e *egressIPController) addPodEgressIP(eIP *egressipv1.EgressIP, pod *kapi.
 }
 
 func (e *egressIPController) deletePodEgressIP(eIP *egressipv1.EgressIP, pod *kapi.Pod) error {
+	if pod.Spec.HostNetwork {
+		return nil
+	}
 	podIPs := e.getPodIPs(pod)
 	if podIPs == nil {
 		return nil
