@@ -252,7 +252,7 @@ var metricDBE2eTimestamp = prometheus.NewGaugeVec(prometheus.GaugeOpts{
 )
 
 func ovnDBSizeMetricsUpdater(direction, database string) {
-	dbFile := fmt.Sprintf("/etc/openvswitch/ovn%s_db.db", direction)
+	dbFile := fmt.Sprintf("/etc/ovn/ovn%s_db.db", direction)
 	fileInfo, err := os.Stat(dbFile)
 	if err != nil {
 		klog.Errorf("Failed to get the DB size for database %s: %v", database, err)
