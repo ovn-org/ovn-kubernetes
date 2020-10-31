@@ -108,8 +108,8 @@ func RegisterMasterMetrics(nbClient, sbClient goovn.Client) {
 			}
 			return 0
 		}
-		prometheus.MustRegister(prometheus.NewCounterFunc(
-			prometheus.CounterOpts{
+		prometheus.MustRegister(prometheus.NewGaugeFunc(
+			prometheus.GaugeOpts{
 				Namespace: MetricOvnkubeNamespace,
 				Subsystem: MetricOvnkubeSubsystemMaster,
 				Name:      "sb_e2e_timestamp",
