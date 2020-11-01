@@ -2,7 +2,7 @@ name: ovn-ci-periodic
 
 on:
   schedule:
-    - cron:  '0 6 * * *'
+    - cron: "0 6 * * *"
   workflow_dispatch:
 
 env:
@@ -21,94 +21,93 @@ jobs:
     name: Build
     runs-on: ubuntu-latest
     steps:
-    - name: Set up Go
-      uses: actions/setup-go@v1
-      with:
-        go-version: ${{ env.GO_VERSION }}
-      id: go
+      - name: Set up Go
+        uses: actions/setup-go@v1
+        with:
+          go-version: ${{ env.GO_VERSION }}
+        id: go
 
-    - name: Check out code into the Go module directory
-      uses: actions/checkout@v2
+      - name: Check out code into the Go module directory
+        uses: actions/checkout@v2
 
-    - name: Set up environment
-      run: |
-        export GOPATH=$(go env GOPATH)
-        echo "GOPATH=$GOPATH" >> $GITHUB_ENV
-        echo "$GOPATH/bin" >> $GITHUB_PATH
+      - name: Set up environment
+        run: |
+          export GOPATH=$(go env GOPATH)
+          echo "GOPATH=$GOPATH" >> $GITHUB_ENV
+          echo "$GOPATH/bin" >> $GITHUB_PATH
 
-    - name: Build
-      run: |
-        set -x
-        pushd go-controller
-           make
-        popd
+      - name: Build
+        run: |
+          set -x
+          pushd go-controller
+             make
+          popd
 
-    - name: Build docker image
-      run: |
-        pushd dist/images
-          sudo cp -f ../../go-controller/_output/go/bin/ovn* .
-          echo "ref: $(git rev-parse  --symbolic-full-name HEAD)  commit: $(git rev-parse  HEAD)" > git_info
-          docker build -t ovn-daemonset-f:dev -f Dockerfile.fedora .
-          mkdir _output
-          docker save ovn-daemonset-f:dev > _output/image.tar
-        popd
+      - name: Build docker image
+        run: |
+          pushd dist/images
+            sudo cp -f ../../go-controller/_output/go/bin/ovn* .
+            echo "ref: $(git rev-parse  --symbolic-full-name HEAD)  commit: $(git rev-parse  HEAD)" > git_info
+            docker build -t ovn-daemonset-f:dev -f Dockerfile.fedora .
+            mkdir _output
+            docker save ovn-daemonset-f:dev > _output/image.tar
+          popd
 
-    - uses: actions/upload-artifact@v2
-      with:
-        name: test-image
-        path: dist/images/_output/image.tar
+      - uses: actions/upload-artifact@v2
+        with:
+          name: test-image
+          path: dist/images/_output/image.tar
 
   k8s:
     if: github.repository == 'ovn-org/ovn-kubernetes' || github.event_name == 'workflow_dispatch'
     name: Build k8s
     runs-on: ubuntu-latest
     steps:
+      - name: Set up environment
+        run: |
+          export GOPATH=$(go env GOPATH)
+          echo "GOPATH=$GOPATH" >> $GITHUB_ENV
+          echo "$GOPATH/bin" >> $GITHUB_PATH
 
-    - name: Set up environment
-      run: |
-        export GOPATH=$(go env GOPATH)
-        echo "GOPATH=$GOPATH" >> $GITHUB_ENV
-        echo "$GOPATH/bin" >> $GITHUB_PATH
+      - name: Set up Go
+        uses: actions/setup-go@v1
+        with:
+          go-version: ${{ env.GO_VERSION }}
 
-    - name: Set up Go
-      uses: actions/setup-go@v1
-      with:
-        go-version: ${{ env.GO_VERSION }}
+      - name: Install KIND
+        run: |
+          sudo curl -Lo /usr/local/bin/kind https://github.com/aojea/kind/releases/download/dualstack/kind
+          sudo chmod +x /usr/local/bin/kind
 
-    - name: Install KIND
-      run: |
-        sudo curl -Lo /usr/local/bin/kind https://github.com/aojea/kind/releases/download/dualstack/kind
-        sudo chmod +x /usr/local/bin/kind
+      - name: Clone Kubernetes
+        run: |
+          set -x
+          rm -rf $GOPATH/src/k8s.io/kubernetes
+          git clone --single-branch --branch $K8S_VERSION https://github.com/kubernetes/kubernetes.git $GOPATH/src/k8s.io/kubernetes/
+          cd $GOPATH/src/k8s.io/kubernetes
+          source hack/lib/version.sh
+          kube::version::get_version_vars
+          echo "KUBE_GIT_VERSION=$KUBE_GIT_VERSION" >> $GITHUB_ENV
 
-    - name: Clone Kubernetes
-      run: |
-        set -x
-        rm -rf $GOPATH/src/k8s.io/kubernetes
-        git clone --single-branch --branch $K8S_VERSION https://github.com/kubernetes/kubernetes.git $GOPATH/src/k8s.io/kubernetes/
-        cd $GOPATH/src/k8s.io/kubernetes
-        source hack/lib/version.sh
-        kube::version::get_version_vars
-        echo "KUBE_GIT_VERSION=$KUBE_GIT_VERSION" >> $GITHUB_ENV
-        
-    - name: Cache Kubernetes
-      id: cache-k8s
-      uses: actions/cache@v2
-      with:
-        path: ${{ env.GOPATH }}/src/k8s.io/kubernetes
-        key: k8s-go-master-${{ env.KUBE_GIT_VERSION }}
-        restore-keys: |
-          k8s-go-master
+      - name: Cache Kubernetes
+        id: cache-k8s
+        uses: actions/cache@v2
+        with:
+          path: ${{ env.GOPATH }}/src/k8s.io/kubernetes
+          key: k8s-go-master-${{ env.KUBE_GIT_VERSION }}
+          restore-keys: |
+            k8s-go-master
 
-    - name: Build and install Kubernetes
-      if: steps.cache-k8s.outputs.cache-hit != 'true'
-      run: |
-        set -x
-        pushd $GOPATH/src/k8s.io/kubernetes/
-          make WHAT="test/e2e/e2e.test vendor/github.com/onsi/ginkgo/ginkgo cmd/kubectl"
-          /usr/local/bin/kind build node-image --image=kindest/node:master
-          docker save kindest/node:master > _output/kind-image.tar
-        popd
-        
+      - name: Build and install Kubernetes
+        if: steps.cache-k8s.outputs.cache-hit != 'true'
+        run: |
+          set -x
+          pushd $GOPATH/src/k8s.io/kubernetes/
+            make WHAT="test/e2e/e2e.test vendor/github.com/onsi/ginkgo/ginkgo cmd/kubectl"
+            /usr/local/bin/kind build node-image --image=kindest/node:master
+            docker save kindest/node:master > _output/kind-image.tar
+          popd
+
   e2e-dual:
     if: github.repository == 'ovn-org/ovn-kubernetes' || github.event_name == 'workflow_dispatch'
     name: e2e-dual
@@ -121,10 +120,10 @@ jobs:
           - shard: shard-conformance
           - shard: control-plane
         ha:
-         - enabled: "true"
-           name: "HA"
-         - enabled: "false"
-           name: "noHA"
+          - enabled: "true"
+            name: "HA"
+          - enabled: "false"
+            name: "noHA"
     needs: [build, k8s]
     env:
       JOB_NAME: "${{ matrix.target.shard }}-${{ matrix.ha.name }}"
@@ -133,92 +132,84 @@ jobs:
       KIND_IPV4_SUPPORT: true
       KIND_IPV6_SUPPORT: true
     steps:
+      - name: Set up Go
+        uses: actions/setup-go@v1
+        with:
+          go-version: ${{ env.GO_VERSION }}
+        id: go
 
-    - name: Set up Go
-      uses: actions/setup-go@v1
-      with:
-        go-version: ${{ env.GO_VERSION }}
-      id: go
+      - name: Check out code into the Go module directory
+        uses: actions/checkout@v2
 
-    - name: Check out code into the Go module directory
-      uses: actions/checkout@v2
+      - name: Set up environment
+        run: |
+          export GOPATH=$(go env GOPATH)
+          echo "GOPATH=$GOPATH" >> $GITHUB_ENV
+          echo "$GOPATH/bin" >> $GITHUB_PATH
 
-    - name: Set up environment
-      run: |
-        export GOPATH=$(go env GOPATH)
-        echo "GOPATH=$GOPATH" >> $GITHUB_ENV
-        echo "$GOPATH/bin" >> $GITHUB_PATH
+      - name: Install KIND
+        run: |
+          sudo curl -Lo /usr/local/bin/kind https://github.com/aojea/kind/releases/download/dualstack/kind
+          sudo chmod +x /usr/local/bin/kind
 
-    - name: Install KIND
-      run: |
-        sudo curl -Lo /usr/local/bin/kind https://github.com/aojea/kind/releases/download/dualstack/kind
-        sudo chmod +x /usr/local/bin/kind
+      - uses: actions/download-artifact@v2
+        with:
+          name: test-image
 
-    - uses: actions/download-artifact@v2
-      with:
-        name: test-image
-   
-    - name: Load docker image
-      run: |
-        docker load --input image.tar
+      - name: Load docker image
+        run: |
+          docker load --input image.tar
 
-    - name: Restore Kubernetes from cache
-      id: cache-k8s
-      uses: actions/cache@v2
-      with:
-        path: "${{ env.GOPATH }}/src/k8s.io/kubernetes"
-        key: k8s-go-master
+      - name: Restore Kubernetes from cache
+        id: cache-k8s
+        uses: actions/cache@v2
+        with:
+          path: "${{ env.GOPATH }}/src/k8s.io/kubernetes"
+          key: k8s-go-master
 
-    - name: Copy k8s artifacts
-      run: |
-        pushd $GOPATH/src/k8s.io/kubernetes/
-          docker load --input ./_output/kind-image.tar
-          sudo cp ./_output/local/go/bin/kubectl /usr/local/bin/kubectl
-          sudo cp ./_output/local/go/bin/e2e.test /usr/local/bin/e2e.test
-        popd
-        
-    - name: kind setup
-      run: |
-        export OVN_IMAGE="ovn-daemonset-f:dev"
-        # Run KIND
-        pushd ./contrib
-          ./kind.sh
-        popd
+      - name: Copy k8s artifacts
+        run: |
+          pushd $GOPATH/src/k8s.io/kubernetes/
+            docker load --input ./_output/kind-image.tar
+            sudo cp ./_output/local/go/bin/kubectl /usr/local/bin/kubectl
+            sudo cp ./_output/local/go/bin/e2e.test /usr/local/bin/e2e.test
+          popd
 
-    - name: Run Tests
-      run: |
-        make -C test ${{ matrix.target.shard }}
+      - name: kind setup
+        run: |
+          export OVN_IMAGE="ovn-daemonset-f:dev"
+          # Run KIND
+          pushd ./contrib
+            ./kind.sh
+          popd
 
-    - name: Upload Junit Reports
-      if: always()
-      uses: actions/upload-artifact@v2
-      with:
-        name: kind-junit-${{ env.JOB_NAME }}-${{ github.run_id }}
-        path: './test/_artifacts/*.xml'
+      - name: Run Tests
+        run: |
+          make -C test ${{ matrix.target.shard }} | tee ./test/_artifacts/e2e.log
 
-    - name: Generate Test Report
-      id: xunit-viewer
-      if: always()
-      uses: AutoModality/action-xunit-viewer@v1
-      with:
-        results: ./test/_artifacts/
+      - name: Export logs
+        if: always()
+        run: |
+          mkdir -p /tmp/kind/logs
+          kind export logs --name ${KIND_CLUSTER_NAME} /tmp/kind/logs
 
-    - name: Upload Test Report
-      if: always()
-      uses: actions/upload-artifact@v2
-      with:
-        name: test-report-${{ env.JOB_NAME }}-${{ github.run_id }}
-        path: './test/_artifacts/index.html'
+      # Setup gcloud CLI
+      - uses: GoogleCloudPlatform/github-actions/setup-gcloud@master
+        if: always()
+        with:
+          version: "290.0.1"
+          service_account_key: ${{ secrets.GKE_SA_KEY }}
+          project_id: ${{ secrets.GKE_PROJECT }}
 
-    - name: Export logs
-      if: always()
-      run: |
-        mkdir -p /tmp/kind/logs
-        kind export logs --name ${KIND_CLUSTER_NAME} --loglevel=debug /tmp/kind/logs
-
-    - name: Upload logs
-      if: always()
-      uses: actions/upload-artifact@v2
-      with:
-        name: kind-logs-${{ env.JOB_NAME }}-${{ github.run_id }}
-        path: /tmp/kind/logs
+      - name: Testgrid
+        if: always()
+        run: |
+          export LOG_DIR='./test/_artifacts/'
+          # get upload_e2e.py
+          wget https://raw.githubusercontent.com/kubernetes/test-infra/master/testgrid/conformance/upload_e2e.py
+          date  +"%b %e %H:%M:%S.999: DONE" >> $LOG_DIR/e2e.log
+          # upload e2e log to google storage
+          python3.6 upload_e2e.py --junit=$LOG_DIR/junit*.xml --log=$LOG_DIR/e2e.log \
+              --bucket=gs://ovn-kubernetes-github/logs/${{ env.JOB_NAME }}/${{ github.run_id }}
+          # upload logs folder
+          gsutil -m cp -R /tmp/kind/logs gs://ovn-kubernetes-github/logs/${{ env.JOB_NAME }}/${{ github.run_id }}
