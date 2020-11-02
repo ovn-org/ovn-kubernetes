@@ -437,11 +437,14 @@ func (oc *Controller) addEgressNode(egressNode *kapi.Node) error {
 			klog.Errorf("Re-assignment for EgressIP: unable to retrieve EgressIP: %s from the api-server, err: %v", eIPName, err)
 			return true
 		}
-		if err := oc.reassignEgressIP(eIP); err != nil {
+		newEIP, err := oc.reassignEgressIP(eIP)
+		if err != nil {
 			klog.Errorf("Re-assignment for EgressIP: %s failed, err: %v", eIP.Name, err)
 			return true
 		}
-		oc.eIPC.assignmentRetry.Delete(eIP.Name)
+		if len(newEIP.Spec.EgressIPs) == len(newEIP.Status.Items) {
+			oc.eIPC.assignmentRetry.Delete(eIP.Name)
+		}
 		return true
 	})
 	return nil
@@ -462,7 +465,7 @@ func (oc *Controller) deleteEgressNode(egressNode *kapi.Node) error {
 			}
 		}
 		if needsReassignment {
-			if err := oc.reassignEgressIP(&eIP); err != nil {
+			if _, err := oc.reassignEgressIP(&eIP); err != nil {
 				klog.Errorf("EgressIP: %s re-assignmnent error: %v", eIP.Name, err)
 			}
 		}
@@ -470,10 +473,10 @@ func (oc *Controller) deleteEgressNode(egressNode *kapi.Node) error {
 	return nil
 }
 
-func (oc *Controller) reassignEgressIP(eIP *egressipv1.EgressIP) error {
+func (oc *Controller) reassignEgressIP(eIP *egressipv1.EgressIP) (*egressipv1.EgressIP, error) {
 	klog.V(5).Infof("EgressIP: %s about to be re-assigned", eIP.Name)
 	if err := oc.deleteEgressIP(eIP); err != nil {
-		return fmt.Errorf("old egress IP deletion failed, err: %v", err)
+		return nil, fmt.Errorf("old egress IP deletion failed, err: %v", err)
 	}
 	eIP = eIP.DeepCopy()
 	eIP.Status = egressipv1.EgressIPStatus{
@@ -484,9 +487,9 @@ func (oc *Controller) reassignEgressIP(eIP *egressipv1.EgressIP) error {
 		reassignError = fmt.Errorf("new egress IP assignment failed, err: %v", err)
 	}
 	if err := oc.updateEgressIPWithRetry(eIP); err != nil {
-		return fmt.Errorf("update of new egress IP failed, err: %v", err)
+		return nil, fmt.Errorf("update of new egress IP failed, err: %v", err)
 	}
-	return reassignError
+	return eIP, reassignError
 }
 
 func (oc *Controller) initEgressIPAllocator(node *kapi.Node) (err error) {

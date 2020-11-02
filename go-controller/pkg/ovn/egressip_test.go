@@ -1685,6 +1685,119 @@ var _ = Describe("OVN master EgressIP Operations", func() {
 			Expect(err).NotTo(HaveOccurred())
 		})
 
+		It("should try re-assigning EgressIP until all defined egress IPs are assigned", func() {
+			app.Action = func(ctx *cli.Context) error {
+
+				egressIP1 := "192.168.126.101"
+				egressIP2 := "192.168.126.102"
+				node1IPv4 := "192.168.126.12/24"
+				node2IPv4 := "192.168.126.51/24"
+
+				node1 := v1.Node{
+					ObjectMeta: metav1.ObjectMeta{
+						Name: node1Name,
+						Annotations: map[string]string{
+							"k8s.ovn.org/node-primary-ifaddr": fmt.Sprintf("{\"ipv4\": \"%s\"}", node1IPv4),
+						},
+					},
+					Status: v1.NodeStatus{
+						Conditions: []v1.NodeCondition{
+							{
+								Type:   v1.NodeReady,
+								Status: v1.ConditionTrue,
+							},
+						},
+					},
+				}
+				node2 := v1.Node{
+					ObjectMeta: metav1.ObjectMeta{
+						Name: node2Name,
+						Annotations: map[string]string{
+							"k8s.ovn.org/node-primary-ifaddr": fmt.Sprintf("{\"ipv4\": \"%s\"}", node2IPv4),
+						},
+					},
+					Status: v1.NodeStatus{
+						Conditions: []v1.NodeCondition{
+							{
+								Type:   v1.NodeReady,
+								Status: v1.ConditionTrue,
+							},
+						},
+					},
+				}
+
+				eIP := egressipv1.EgressIP{
+					ObjectMeta: newEgressIPMeta(egressIPName),
+					Spec: egressipv1.EgressIPSpec{
+						EgressIPs: []string{egressIP1, egressIP2},
+					},
+					Status: egressipv1.EgressIPStatus{
+						Items: []egressipv1.EgressIPStatusItem{},
+					},
+				}
+
+				fakeOvn.start(ctx,
+					&egressipv1.EgressIPList{
+						Items: []egressipv1.EgressIP{eIP},
+					},
+					&v1.NodeList{
+						Items: []v1.Node{node1, node2},
+					})
+
+				fakeOvn.fakeExec.AddFakeCmdsNoOutputNoError(
+					[]string{
+						fmt.Sprintf("ovn-nbctl --timeout=15 lr-policy-add ovn_cluster_router 101 ip4.src == 10.128.0.0/14 && ip4.dst == 10.128.0.0/14 allow"),
+					},
+				)
+
+				fakeOvn.controller.WatchEgressNodes()
+				fakeOvn.controller.WatchEgressIP()
+
+				Eventually(getEgressIPAllocatorSizeSafely).Should(Equal(2))
+				Expect(fakeOvn.controller.eIPC.allocator).To(HaveKey(node1.Name))
+				Expect(fakeOvn.controller.eIPC.allocator).To(HaveKey(node2.Name))
+				Eventually(getEgressIPStatusLen(egressIPName)).Should(Equal(0))
+
+				node1.Labels = map[string]string{
+					"k8s.ovn.org/egress-assignable": "",
+				}
+
+				_, err := fakeOvn.fakeClient.KubeClient.CoreV1().Nodes().Update(context.TODO(), &node1, metav1.UpdateOptions{})
+				Expect(err).NotTo(HaveOccurred())
+
+				Eventually(getEgressIPStatusLen(egressIPName)).Should(Equal(1))
+				statuses := getEgressIPStatus(egressIPName)
+				Expect(statuses[0].Node).To(Equal(node1.Name))
+				Expect(statuses[0].EgressIP).To(Equal(egressIP1))
+
+				getCacheCount := func() int {
+					cacheCount := 0
+					fakeOvn.controller.eIPC.assignmentRetry.Range(func(key, value interface{}) bool {
+						cacheCount++
+						return true
+					})
+					return cacheCount
+				}
+
+				Eventually(getCacheCount).Should(Equal(1))
+
+				node2.Labels = map[string]string{
+					"k8s.ovn.org/egress-assignable": "",
+				}
+
+				_, err = fakeOvn.fakeClient.KubeClient.CoreV1().Nodes().Update(context.TODO(), &node2, metav1.UpdateOptions{})
+				Expect(err).NotTo(HaveOccurred())
+
+				Eventually(getEgressIPStatusLen(egressIPName)).Should(Equal(2))
+				Eventually(getCacheCount).Should(Equal(0))
+
+				return nil
+			}
+
+			err := app.Run([]string{app.Name})
+			Expect(err).NotTo(HaveOccurred())
+		})
+
 		It("should re-balance EgressIPs when their node is removed", func() {
 			app.Action = func(ctx *cli.Context) error {
 
@@ -1869,6 +1982,7 @@ var _ = Describe("OVN master EgressIP Operations", func() {
 			err := app.Run([]string{app.Name})
 			Expect(err).NotTo(HaveOccurred())
 		})
+
 	})
 
 	Context("IPv6 assignment", func() {
