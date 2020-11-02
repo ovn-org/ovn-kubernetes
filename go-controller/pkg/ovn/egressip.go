@@ -94,6 +94,15 @@ func (oc *Controller) deleteEgressIP(eIP *egressipv1.EgressIP) error {
 	return nil
 }
 
+func (oc *Controller) isEgressNodeReady(egressNode *kapi.Node) bool {
+	for _, condition := range egressNode.Status.Conditions {
+		if condition.Type == v1.NodeReady {
+			return condition.Status == v1.ConditionTrue
+		}
+	}
+	return false
+}
+
 func (oc *Controller) syncEgressIPs(eIPs []interface{}) {
 	oc.eIPC.allocatorMutex.Lock()
 	defer oc.eIPC.allocatorMutex.Unlock()
@@ -357,7 +366,7 @@ func (oc *Controller) getSortedEgressData() ([]egressNode, map[string]bool) {
 	assignableNodes := []egressNode{}
 	allAllocations := make(map[string]bool)
 	for _, eNode := range oc.eIPC.allocator {
-		if eNode.isEgressAssignable {
+		if eNode.isEgressAssignable && eNode.isReady {
 			assignableNodes = append(assignableNodes, *eNode)
 		}
 		for ip := range eNode.allocations {
@@ -370,13 +379,24 @@ func (oc *Controller) getSortedEgressData() ([]egressNode, map[string]bool) {
 	return assignableNodes, allAllocations
 }
 
+func (oc *Controller) setNodeEgressAssignable(nodeName string, isAssignable bool) {
+	oc.eIPC.allocatorMutex.Lock()
+	defer oc.eIPC.allocatorMutex.Unlock()
+	if eNode, exists := oc.eIPC.allocator[nodeName]; exists {
+		eNode.isEgressAssignable = isAssignable
+	}
+}
+
+func (oc *Controller) setNodeEgressReady(nodeName string, isReady bool) {
+	oc.eIPC.allocatorMutex.Lock()
+	defer oc.eIPC.allocatorMutex.Unlock()
+	if eNode, exists := oc.eIPC.allocator[nodeName]; exists {
+		eNode.isReady = isReady
+	}
+}
+
 func (oc *Controller) addEgressNode(egressNode *kapi.Node) error {
 	klog.V(5).Infof("Egress node: %s about to be initialized", egressNode.Name)
-	oc.eIPC.allocatorMutex.Lock()
-	if eNode, exists := oc.eIPC.allocator[egressNode.Name]; exists {
-		eNode.isEgressAssignable = true
-	}
-	oc.eIPC.allocatorMutex.Unlock()
 	oc.eIPC.assignmentRetry.Range(func(key, value interface{}) bool {
 		eIPName := key.(string)
 		klog.V(5).Infof("Re-assignment for EgressIP: %s attempted by new node: %s", eIPName, egressNode.Name)
@@ -396,11 +416,6 @@ func (oc *Controller) addEgressNode(egressNode *kapi.Node) error {
 }
 
 func (oc *Controller) deleteEgressNode(egressNode *kapi.Node) error {
-	oc.eIPC.allocatorMutex.Lock()
-	if eNode, exists := oc.eIPC.allocator[egressNode.Name]; exists {
-		eNode.isEgressAssignable = false
-	}
-	oc.eIPC.allocatorMutex.Unlock()
 	klog.V(5).Infof("Egress node: %s about to be removed", egressNode.Name)
 	egressIPs, err := oc.kube.GetEgressIPs()
 	if err != nil {
@@ -511,6 +526,7 @@ type egressNode struct {
 	v4Subnet           *net.IPNet
 	v6Subnet           *net.IPNet
 	allocations        map[string]bool
+	isReady            bool
 	isEgressAssignable bool
 	tainted            bool
 	name               string

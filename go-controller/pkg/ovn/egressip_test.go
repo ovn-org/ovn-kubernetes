@@ -80,6 +80,7 @@ func setupNode(nodeName string, ipNets []string, mockAllocationIPs []string) egr
 		v6Subnet:           v6Subnet,
 		allocations:        mockAllcations,
 		name:               nodeName,
+		isReady:            true,
 		isEgressAssignable: true,
 	}
 	return node
@@ -151,21 +152,41 @@ var _ = Describe("OVN master EgressIP Operations", func() {
 				egressPod := *newPodWithLabels(namespace, podName, node1Name, podV4IP, egressPodLabel)
 				egressNamespace := newNamespace(namespace)
 
-				node1 := v1.Node{ObjectMeta: metav1.ObjectMeta{
-					Name: node1Name,
-					Annotations: map[string]string{
-						"k8s.ovn.org/node-primary-ifaddr": fmt.Sprintf("{\"ipv4\": \"%s\", \"ipv6\": \"%s\"}", node1IPv4, ""),
+				node1 := v1.Node{
+					ObjectMeta: metav1.ObjectMeta{
+						Name: node1Name,
+						Annotations: map[string]string{
+							"k8s.ovn.org/node-primary-ifaddr": fmt.Sprintf("{\"ipv4\": \"%s\", \"ipv6\": \"%s\"}", node1IPv4, ""),
+						},
+						Labels: map[string]string{
+							"k8s.ovn.org/egress-assignable": "",
+						},
 					},
-					Labels: map[string]string{
-						"k8s.ovn.org/egress-assignable": "",
+					Status: v1.NodeStatus{
+						Conditions: []v1.NodeCondition{
+							{
+								Type:   v1.NodeReady,
+								Status: v1.ConditionTrue,
+							},
+						},
 					},
-				}}
-				node2 := v1.Node{ObjectMeta: metav1.ObjectMeta{
-					Name: node2Name,
-					Annotations: map[string]string{
-						"k8s.ovn.org/node-primary-ifaddr": fmt.Sprintf("{\"ipv4\": \"%s\", \"ipv6\": \"%s\"}", node2IPv4, ""),
+				}
+				node2 := v1.Node{
+					ObjectMeta: metav1.ObjectMeta{
+						Name: node2Name,
+						Annotations: map[string]string{
+							"k8s.ovn.org/node-primary-ifaddr": fmt.Sprintf("{\"ipv4\": \"%s\", \"ipv6\": \"%s\"}", node2IPv4, ""),
+						},
 					},
-				}}
+					Status: v1.NodeStatus{
+						Conditions: []v1.NodeCondition{
+							{
+								Type:   v1.NodeReady,
+								Status: v1.ConditionTrue,
+							},
+						},
+					},
+				}
 
 				eIP := egressipv1.EgressIP{
 					ObjectMeta: newEgressIPMeta(egressIPName),
@@ -270,21 +291,41 @@ var _ = Describe("OVN master EgressIP Operations", func() {
 				egressPod := *newPodWithLabels(namespace, podName, node1Name, podV4IP, egressPodLabel)
 				egressNamespace := newNamespace(namespace)
 
-				node1 := v1.Node{ObjectMeta: metav1.ObjectMeta{
-					Name: node1Name,
-					Annotations: map[string]string{
-						"k8s.ovn.org/node-primary-ifaddr": fmt.Sprintf("{\"ipv4\": \"%s\", \"ipv6\": \"%s\"}", node1IPv4, ""),
+				node1 := v1.Node{
+					ObjectMeta: metav1.ObjectMeta{
+						Name: node1Name,
+						Annotations: map[string]string{
+							"k8s.ovn.org/node-primary-ifaddr": fmt.Sprintf("{\"ipv4\": \"%s\", \"ipv6\": \"%s\"}", node1IPv4, ""),
+						},
+						Labels: map[string]string{
+							"k8s.ovn.org/egress-assignable": "",
+						},
 					},
-					Labels: map[string]string{
-						"k8s.ovn.org/egress-assignable": "",
+					Status: v1.NodeStatus{
+						Conditions: []v1.NodeCondition{
+							{
+								Type:   v1.NodeReady,
+								Status: v1.ConditionTrue,
+							},
+						},
 					},
-				}}
-				node2 := v1.Node{ObjectMeta: metav1.ObjectMeta{
-					Name: node2Name,
-					Annotations: map[string]string{
-						"k8s.ovn.org/node-primary-ifaddr": fmt.Sprintf("{\"ipv4\": \"%s\", \"ipv6\": \"%s\"}", node2IPv4, ""),
+				}
+				node2 := v1.Node{
+					ObjectMeta: metav1.ObjectMeta{
+						Name: node2Name,
+						Annotations: map[string]string{
+							"k8s.ovn.org/node-primary-ifaddr": fmt.Sprintf("{\"ipv4\": \"%s\", \"ipv6\": \"%s\"}", node2IPv4, ""),
+						},
 					},
-				}}
+					Status: v1.NodeStatus{
+						Conditions: []v1.NodeCondition{
+							{
+								Type:   v1.NodeReady,
+								Status: v1.ConditionTrue,
+							},
+						},
+					},
+				}
 
 				eIP := egressipv1.EgressIP{
 					ObjectMeta: newEgressIPMeta(egressIPName),
@@ -1102,18 +1143,38 @@ var _ = Describe("OVN master EgressIP Operations", func() {
 				node1IPv6 := "0:0:0:0:0:feff:c0a8:8e0c/64"
 				node2IPv4 := "192.168.126.51/24"
 
-				node1 := v1.Node{ObjectMeta: metav1.ObjectMeta{
-					Name: "node1",
-					Annotations: map[string]string{
-						"k8s.ovn.org/node-primary-ifaddr": fmt.Sprintf("{\"ipv4\": \"%s\", \"ipv6\": \"%s\"}", node1IPv4, node1IPv6),
+				node1 := v1.Node{
+					ObjectMeta: metav1.ObjectMeta{
+						Name: "node1",
+						Annotations: map[string]string{
+							"k8s.ovn.org/node-primary-ifaddr": fmt.Sprintf("{\"ipv4\": \"%s\", \"ipv6\": \"%s\"}", node1IPv4, node1IPv6),
+						},
 					},
-				}}
-				node2 := v1.Node{ObjectMeta: metav1.ObjectMeta{
-					Name: "node2",
-					Annotations: map[string]string{
-						"k8s.ovn.org/node-primary-ifaddr": fmt.Sprintf("{\"ipv4\": \"%s\", \"ipv6\": \"%s\"}", node2IPv4, ""),
+					Status: v1.NodeStatus{
+						Conditions: []v1.NodeCondition{
+							{
+								Type:   v1.NodeReady,
+								Status: v1.ConditionTrue,
+							},
+						},
 					},
-				}}
+				}
+				node2 := v1.Node{
+					ObjectMeta: metav1.ObjectMeta{
+						Name: "node2",
+						Annotations: map[string]string{
+							"k8s.ovn.org/node-primary-ifaddr": fmt.Sprintf("{\"ipv4\": \"%s\", \"ipv6\": \"%s\"}", node2IPv4, ""),
+						},
+					},
+					Status: v1.NodeStatus{
+						Conditions: []v1.NodeCondition{
+							{
+								Type:   v1.NodeReady,
+								Status: v1.ConditionTrue,
+							},
+						},
+					},
+				}
 				fakeOvn.start(ctx)
 				fakeOvn.fakeExec.AddFakeCmdsNoOutputNoError(
 					[]string{
@@ -1161,12 +1222,22 @@ var _ = Describe("OVN master EgressIP Operations", func() {
 
 				nodeIPv4 := "192.168.126.510/24"
 				nodeIPv6 := "0:0:0:0:0:feff:c0a8:8e0c/64"
-				node := v1.Node{ObjectMeta: metav1.ObjectMeta{
-					Name: "myNode",
-					Annotations: map[string]string{
-						"k8s.ovn.org/node-primary-ifaddr": fmt.Sprintf("{\"ipv4\": \"%s\", \"ipv6\": \"%s\"}", nodeIPv4, nodeIPv6),
+				node := v1.Node{
+					ObjectMeta: metav1.ObjectMeta{
+						Name: "myNode",
+						Annotations: map[string]string{
+							"k8s.ovn.org/node-primary-ifaddr": fmt.Sprintf("{\"ipv4\": \"%s\", \"ipv6\": \"%s\"}", nodeIPv4, nodeIPv6),
+						},
 					},
-				}}
+					Status: v1.NodeStatus{
+						Conditions: []v1.NodeCondition{
+							{
+								Type:   v1.NodeReady,
+								Status: v1.ConditionTrue,
+							},
+						},
+					},
+				}
 				fakeOvn.start(ctx, &v1.NodeList{
 					Items: []v1.Node{node},
 				})
@@ -1209,12 +1280,22 @@ var _ = Describe("OVN master EgressIP Operations", func() {
 				nodeIPv4 := "192.168.126.51/24"
 				nodeIPv6 := "0:0:0:0:0:feff:c0a8:8e0c/64"
 
-				node := v1.Node{ObjectMeta: metav1.ObjectMeta{
-					Name: node1Name,
-					Annotations: map[string]string{
-						"k8s.ovn.org/node-primary-ifaddr": fmt.Sprintf("{\"ipv4\": \"%s\", \"ipv6\": \"%s\"}", nodeIPv4, nodeIPv6),
+				node := v1.Node{
+					ObjectMeta: metav1.ObjectMeta{
+						Name: node1Name,
+						Annotations: map[string]string{
+							"k8s.ovn.org/node-primary-ifaddr": fmt.Sprintf("{\"ipv4\": \"%s\", \"ipv6\": \"%s\"}", nodeIPv4, nodeIPv6),
+						},
 					},
-				}}
+					Status: v1.NodeStatus{
+						Conditions: []v1.NodeCondition{
+							{
+								Type:   v1.NodeReady,
+								Status: v1.ConditionTrue,
+							},
+						},
+					},
+				}
 
 				eIP := egressipv1.EgressIP{
 					ObjectMeta: newEgressIPMeta(egressIPName),
@@ -1292,24 +1373,44 @@ var _ = Describe("OVN master EgressIP Operations", func() {
 				node1IPv6 := "0:0:0:0:0:feff:c0a8:8e0c/64"
 				node2IPv4 := "192.168.126.51/24"
 
-				node1 := v1.Node{ObjectMeta: metav1.ObjectMeta{
-					Name: node1Name,
-					Labels: map[string]string{
-						"k8s.ovn.org/egress-assignable": "",
+				node1 := v1.Node{
+					ObjectMeta: metav1.ObjectMeta{
+						Name: node1Name,
+						Labels: map[string]string{
+							"k8s.ovn.org/egress-assignable": "",
+						},
+						Annotations: map[string]string{
+							"k8s.ovn.org/node-primary-ifaddr": fmt.Sprintf("{\"ipv4\": \"%s\", \"ipv6\": \"%s\"}", node1IPv4, node1IPv6),
+						},
 					},
-					Annotations: map[string]string{
-						"k8s.ovn.org/node-primary-ifaddr": fmt.Sprintf("{\"ipv4\": \"%s\", \"ipv6\": \"%s\"}", node1IPv4, node1IPv6),
+					Status: v1.NodeStatus{
+						Conditions: []v1.NodeCondition{
+							{
+								Type:   v1.NodeReady,
+								Status: v1.ConditionTrue,
+							},
+						},
 					},
-				}}
-				node2 := v1.Node{ObjectMeta: metav1.ObjectMeta{
-					Name: node2Name,
-					Labels: map[string]string{
-						"k8s.ovn.org/egress-assignable": "",
+				}
+				node2 := v1.Node{
+					ObjectMeta: metav1.ObjectMeta{
+						Name: node2Name,
+						Labels: map[string]string{
+							"k8s.ovn.org/egress-assignable": "",
+						},
+						Annotations: map[string]string{
+							"k8s.ovn.org/node-primary-ifaddr": fmt.Sprintf("{\"ipv4\": \"%s\", \"ipv6\": \"%s\"}", node2IPv4, ""),
+						},
 					},
-					Annotations: map[string]string{
-						"k8s.ovn.org/node-primary-ifaddr": fmt.Sprintf("{\"ipv4\": \"%s\", \"ipv6\": \"%s\"}", node2IPv4, ""),
+					Status: v1.NodeStatus{
+						Conditions: []v1.NodeCondition{
+							{
+								Type:   v1.NodeReady,
+								Status: v1.ConditionTrue,
+							},
+						},
 					},
-				}}
+				}
 
 				eIP := egressipv1.EgressIP{
 					ObjectMeta: newEgressIPMeta(egressIPName),
@@ -1359,21 +1460,41 @@ var _ = Describe("OVN master EgressIP Operations", func() {
 				node1IPv4 := "192.168.126.51/24"
 				node2IPv4 := "192.168.126.101/24"
 
-				node1 := v1.Node{ObjectMeta: metav1.ObjectMeta{
-					Name: node1Name,
-					Labels: map[string]string{
-						"k8s.ovn.org/egress-assignable": "",
+				node1 := v1.Node{
+					ObjectMeta: metav1.ObjectMeta{
+						Name: node1Name,
+						Labels: map[string]string{
+							"k8s.ovn.org/egress-assignable": "",
+						},
+						Annotations: map[string]string{
+							"k8s.ovn.org/node-primary-ifaddr": fmt.Sprintf("{\"ipv4\": \"%s\"}", node1IPv4),
+						},
 					},
-					Annotations: map[string]string{
-						"k8s.ovn.org/node-primary-ifaddr": fmt.Sprintf("{\"ipv4\": \"%s\"}", node1IPv4),
+					Status: v1.NodeStatus{
+						Conditions: []v1.NodeCondition{
+							{
+								Type:   v1.NodeReady,
+								Status: v1.ConditionTrue,
+							},
+						},
 					},
-				}}
-				node2 := v1.Node{ObjectMeta: metav1.ObjectMeta{
-					Name: node2Name,
-					Annotations: map[string]string{
-						"k8s.ovn.org/node-primary-ifaddr": fmt.Sprintf("{\"ipv4\": \"%s\"}", node2IPv4),
+				}
+				node2 := v1.Node{
+					ObjectMeta: metav1.ObjectMeta{
+						Name: node2Name,
+						Annotations: map[string]string{
+							"k8s.ovn.org/node-primary-ifaddr": fmt.Sprintf("{\"ipv4\": \"%s\"}", node2IPv4),
+						},
 					},
-				}}
+					Status: v1.NodeStatus{
+						Conditions: []v1.NodeCondition{
+							{
+								Type:   v1.NodeReady,
+								Status: v1.ConditionTrue,
+							},
+						},
+					},
+				}
 
 				eIP := egressipv1.EgressIP{
 					ObjectMeta: newEgressIPMeta(egressIPName),
@@ -1441,18 +1562,38 @@ var _ = Describe("OVN master EgressIP Operations", func() {
 				node1IPv6 := "0:0:0:0:0:feff:c0a8:8e0c/64"
 				node2IPv4 := "192.168.126.51/24"
 
-				node1 := v1.Node{ObjectMeta: metav1.ObjectMeta{
-					Name: node1Name,
-					Annotations: map[string]string{
-						"k8s.ovn.org/node-primary-ifaddr": fmt.Sprintf("{\"ipv4\": \"%s\", \"ipv6\": \"%s\"}", node1IPv4, node1IPv6),
+				node1 := v1.Node{
+					ObjectMeta: metav1.ObjectMeta{
+						Name: node1Name,
+						Annotations: map[string]string{
+							"k8s.ovn.org/node-primary-ifaddr": fmt.Sprintf("{\"ipv4\": \"%s\", \"ipv6\": \"%s\"}", node1IPv4, node1IPv6),
+						},
 					},
-				}}
-				node2 := v1.Node{ObjectMeta: metav1.ObjectMeta{
-					Name: node2Name,
-					Annotations: map[string]string{
-						"k8s.ovn.org/node-primary-ifaddr": fmt.Sprintf("{\"ipv4\": \"%s\", \"ipv6\": \"%s\"}", node2IPv4, ""),
+					Status: v1.NodeStatus{
+						Conditions: []v1.NodeCondition{
+							{
+								Type:   v1.NodeReady,
+								Status: v1.ConditionTrue,
+							},
+						},
 					},
-				}}
+				}
+				node2 := v1.Node{
+					ObjectMeta: metav1.ObjectMeta{
+						Name: node2Name,
+						Annotations: map[string]string{
+							"k8s.ovn.org/node-primary-ifaddr": fmt.Sprintf("{\"ipv4\": \"%s\", \"ipv6\": \"%s\"}", node2IPv4, ""),
+						},
+					},
+					Status: v1.NodeStatus{
+						Conditions: []v1.NodeCondition{
+							{
+								Type:   v1.NodeReady,
+								Status: v1.ConditionTrue,
+							},
+						},
+					},
+				}
 
 				eIP := egressipv1.EgressIP{
 					ObjectMeta: newEgressIPMeta(egressIPName),
@@ -1542,24 +1683,44 @@ var _ = Describe("OVN master EgressIP Operations", func() {
 				node1IPv6 := "0:0:0:0:0:feff:c0a8:8e0c/64"
 				node2IPv4 := "192.168.126.51/24"
 
-				node1 := v1.Node{ObjectMeta: metav1.ObjectMeta{
-					Name: node1Name,
-					Annotations: map[string]string{
-						"k8s.ovn.org/node-primary-ifaddr": fmt.Sprintf("{\"ipv4\": \"%s\", \"ipv6\": \"%s\"}", node1IPv4, node1IPv6),
+				node1 := v1.Node{
+					ObjectMeta: metav1.ObjectMeta{
+						Name: node1Name,
+						Annotations: map[string]string{
+							"k8s.ovn.org/node-primary-ifaddr": fmt.Sprintf("{\"ipv4\": \"%s\", \"ipv6\": \"%s\"}", node1IPv4, node1IPv6),
+						},
+						Labels: map[string]string{
+							"k8s.ovn.org/egress-assignable": "",
+						},
 					},
-					Labels: map[string]string{
-						"k8s.ovn.org/egress-assignable": "",
+					Status: v1.NodeStatus{
+						Conditions: []v1.NodeCondition{
+							{
+								Type:   v1.NodeReady,
+								Status: v1.ConditionTrue,
+							},
+						},
 					},
-				}}
-				node2 := v1.Node{ObjectMeta: metav1.ObjectMeta{
-					Name: node2Name,
-					Annotations: map[string]string{
-						"k8s.ovn.org/node-primary-ifaddr": fmt.Sprintf("{\"ipv4\": \"%s\", \"ipv6\": \"%s\"}", node2IPv4, ""),
+				}
+				node2 := v1.Node{
+					ObjectMeta: metav1.ObjectMeta{
+						Name: node2Name,
+						Annotations: map[string]string{
+							"k8s.ovn.org/node-primary-ifaddr": fmt.Sprintf("{\"ipv4\": \"%s\", \"ipv6\": \"%s\"}", node2IPv4, ""),
+						},
+						Labels: map[string]string{
+							"k8s.ovn.org/egress-assignable": "",
+						},
 					},
-					Labels: map[string]string{
-						"k8s.ovn.org/egress-assignable": "",
+					Status: v1.NodeStatus{
+						Conditions: []v1.NodeCondition{
+							{
+								Type:   v1.NodeReady,
+								Status: v1.ConditionTrue,
+							},
+						},
 					},
-				}}
+				}
 
 				eIP := egressipv1.EgressIP{
 					ObjectMeta: newEgressIPMeta(egressIPName),
