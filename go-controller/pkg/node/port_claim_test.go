@@ -1,47 +1,94 @@
 package node
 
 import (
+	"fmt"
+
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
+
 	. "github.com/onsi/ginkgo"
 	. "github.com/onsi/gomega"
-	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
 	"github.com/urfave/cli/v2"
 	kapi "k8s.io/api/core/v1"
+	"k8s.io/client-go/tools/record"
+	utilnet "k8s.io/utils/net"
 )
 
 type testPortClaimWatcher struct {
 	tPortOpen       []int32
 	tPortClose      []int32
 	tProtocolOpen   []kapi.Protocol
+	tProtocolClose  []kapi.Protocol
+	tIPOpen         []string
+	tIPClose        []string
 	tPortOpenCount  int
 	tPortCloseCount int
-	tActiveSockets  map[kapi.Protocol]map[int32]bool
+	tPortsMap       map[utilnet.LocalPort]bool
 }
 
-func (p *testPortClaimWatcher) open(port int32, protocol kapi.Protocol, svc *kapi.Service) error {
-	if _, exists := p.tActiveSockets[protocol]; exists {
-		p.tActiveSockets[protocol][port] = true
-	} else {
-		p.tActiveSockets[protocol] = map[int32]bool{
-			port: true,
-		}
+type fakePortOpr struct{}
+
+func (f *fakePortOpr) OpenLocalPort(lp *utilnet.LocalPort) (utilnet.Closeable, error) {
+	return f, nil
+}
+
+func (f *fakePortOpr) Close() error {
+	return nil
+}
+
+func (p *testPortClaimWatcher) open(desc string, ip string, port int32, protocol kapi.Protocol, svc *kapi.Service) error {
+	localPort, portError := newLocalPort(desc, ip, port, protocol)
+	if portError != nil {
+		return portError
 	}
-	Expect(p.tActiveSockets).To(HaveKey(protocol))
-	Expect(p.tActiveSockets[protocol]).To(HaveKey(port))
-	Expect(port).To(Equal(p.tPortOpen[p.tPortOpenCount]))
-	Expect(protocol).To(Equal(p.tProtocolOpen[p.tPortOpenCount]))
+	p.tPortsMap[*localPort] = true
+	// check that we set the values for assertion
+	if len(p.tPortOpen) > 0 {
+		Expect(port).To(Equal(p.tPortOpen[p.tPortOpenCount]))
+	}
+	if len(p.tProtocolOpen) > 0 {
+		Expect(protocol).To(Equal(p.tProtocolOpen[p.tPortOpenCount]))
+	}
+	if len(p.tIPOpen) > 0 {
+		Expect(ip).To(Equal(p.tIPOpen[p.tPortOpenCount]))
+	}
 	p.tPortOpenCount++
 	return nil
 }
 
-func (p *testPortClaimWatcher) close(port int32, protocol kapi.Protocol, svc *kapi.Service) error {
-	if _, exists := p.tActiveSockets[protocol][port]; exists {
-		delete(p.tActiveSockets[protocol], port)
+func (p *testPortClaimWatcher) close(desc string, ip string, port int32, protocol kapi.Protocol, svc *kapi.Service) error {
+	localPort, portError := newLocalPort(desc, ip, port, protocol)
+	if portError != nil {
+		return portError
 	}
-	Expect(p.tActiveSockets).To(HaveKey(protocol))
-	Expect(p.tActiveSockets[protocol]).ToNot(HaveKey(port))
-	Expect(port).To(Equal(p.tPortClose[p.tPortCloseCount]))
+	_, exists := p.tPortsMap[*localPort]
+	Expect(exists).To(Equal(true))
+	delete(p.tPortsMap, *localPort)
+	// check that we set the values for assertion
+	if len(p.tPortClose) > 0 {
+		Expect(port).To(Equal(p.tPortClose[p.tPortCloseCount]))
+	}
+	if len(p.tProtocolClose) > 0 {
+		Expect(protocol).To(Equal(p.tProtocolClose[p.tPortCloseCount]))
+	}
+	if len(p.tIPClose) > 0 {
+		Expect(ip).To(Equal(p.tIPClose[p.tPortCloseCount]))
+	}
 	p.tPortCloseCount++
 	return nil
+}
+
+func newLocalPort(desc string, ip string, port int32, protocol kapi.Protocol) (*utilnet.LocalPort, error) {
+	var localPort *utilnet.LocalPort
+	var portError error
+	switch protocol {
+	case kapi.ProtocolTCP:
+		localPort, portError = utilnet.NewLocalPort(desc, ip, "", int(port), utilnet.TCP)
+	case kapi.ProtocolUDP:
+		localPort, portError = utilnet.NewLocalPort(desc, ip, "", int(port), utilnet.UDP)
+	default:
+		portError = fmt.Errorf("wrong protocol %s", protocol)
+	}
+	return localPort, portError
 }
 
 var _ = Describe("Node Operations", func() {
@@ -64,10 +111,11 @@ var _ = Describe("Node Operations", func() {
 		It("should open a port for ExternalIP", func() {
 			app.Action = func(ctx *cli.Context) error {
 
-				port = &testPortClaimWatcher{
-					tPortOpen:      []int32{8080, 9999},
-					tProtocolOpen:  []kapi.Protocol{kapi.ProtocolTCP, kapi.ProtocolTCP},
-					tActiveSockets: make(map[kapi.Protocol]map[int32]bool),
+				portHandler = &testPortClaimWatcher{
+					tPortOpen:     []int32{8080, 9999},
+					tProtocolOpen: []kapi.Protocol{kapi.ProtocolTCP, kapi.ProtocolTCP},
+					tIPOpen:       []string{"8.8.8.8", "8.8.8.8"},
+					tPortsMap:     make(map[utilnet.LocalPort]bool),
 				}
 
 				service := newService("service1", "namespace1", "10.129.0.2",
@@ -88,7 +136,7 @@ var _ = Describe("Node Operations", func() {
 				errors := addServicePortClaim(service)
 				Expect(errors).To(HaveLen(0))
 
-				fakePort := port.(*testPortClaimWatcher)
+				fakePort := portHandler.(*testPortClaimWatcher)
 				Expect(fakePort.tPortOpenCount).To(Equal(len(service.Spec.Ports)))
 
 				return nil
@@ -100,13 +148,14 @@ var _ = Describe("Node Operations", func() {
 		It("should open a NodePort", func() {
 			app.Action = func(ctx *cli.Context) error {
 
-				port = &testPortClaimWatcher{
-					tPortOpen:      []int32{32222, 31111},
-					tProtocolOpen:  []kapi.Protocol{kapi.ProtocolTCP, kapi.ProtocolTCP},
-					tActiveSockets: make(map[kapi.Protocol]map[int32]bool),
+				portHandler = &testPortClaimWatcher{
+					tPortOpen:     []int32{32222, 31111},
+					tProtocolOpen: []kapi.Protocol{kapi.ProtocolTCP, kapi.ProtocolTCP},
+					tIPOpen:       []string{"", ""},
+					tPortsMap:     make(map[utilnet.LocalPort]bool),
 				}
 
-				service := newService("service1", "namespace1", "10.129.0.2",
+				service := newService("service2", "namespace1", "10.129.0.2",
 					[]kapi.ServicePort{
 						{
 							NodePort: 32222,
@@ -124,7 +173,7 @@ var _ = Describe("Node Operations", func() {
 				errors := addServicePortClaim(service)
 				Expect(errors).To(HaveLen(0))
 
-				fakePort := port.(*testPortClaimWatcher)
+				fakePort := portHandler.(*testPortClaimWatcher)
 				Expect(fakePort.tPortOpenCount).To(Equal(len(service.Spec.Ports)))
 
 				return nil
@@ -136,13 +185,14 @@ var _ = Describe("Node Operations", func() {
 		It("should open a NodePort and port for ExternalIP", func() {
 			app.Action = func(ctx *cli.Context) error {
 
-				port = &testPortClaimWatcher{
-					tPortOpen:      []int32{32222, 8081, 31111, 8080},
-					tProtocolOpen:  []kapi.Protocol{kapi.ProtocolTCP, kapi.ProtocolTCP, kapi.ProtocolTCP, kapi.ProtocolTCP},
-					tActiveSockets: make(map[kapi.Protocol]map[int32]bool),
+				portHandler = &testPortClaimWatcher{
+					tPortOpen:     []int32{32222, 8081, 31111, 8080},
+					tProtocolOpen: []kapi.Protocol{kapi.ProtocolTCP, kapi.ProtocolTCP, kapi.ProtocolTCP, kapi.ProtocolTCP},
+					tIPOpen:       []string{"", "8.8.8.8", "", "8.8.8.8"},
+					tPortsMap:     make(map[utilnet.LocalPort]bool),
 				}
 
-				service := newService("service1", "namespace1", "10.129.0.2",
+				service := newService("service3", "namespace1", "10.129.0.2",
 					[]kapi.ServicePort{
 						{
 							NodePort: 32222,
@@ -162,7 +212,7 @@ var _ = Describe("Node Operations", func() {
 				errors := addServicePortClaim(service)
 				Expect(errors).To(HaveLen(0))
 
-				fakePort := port.(*testPortClaimWatcher)
+				fakePort := portHandler.(*testPortClaimWatcher)
 				Expect(fakePort.tPortOpenCount).To(Equal(len(service.Spec.Ports) * 2))
 
 				return nil
@@ -174,13 +224,14 @@ var _ = Describe("Node Operations", func() {
 		It("should open per protocol NodePorts and ExternalIPs ports", func() {
 			app.Action = func(ctx *cli.Context) error {
 
-				port = &testPortClaimWatcher{
-					tPortOpen:      []int32{32222, 8081, 32222, 8081},
-					tProtocolOpen:  []kapi.Protocol{kapi.ProtocolTCP, kapi.ProtocolTCP, kapi.ProtocolUDP, kapi.ProtocolUDP},
-					tActiveSockets: make(map[kapi.Protocol]map[int32]bool),
+				portHandler = &testPortClaimWatcher{
+					tPortOpen:     []int32{32222, 8081, 32222, 8081},
+					tProtocolOpen: []kapi.Protocol{kapi.ProtocolTCP, kapi.ProtocolTCP, kapi.ProtocolUDP, kapi.ProtocolUDP},
+					tIPOpen:       []string{"", "8.8.8.8", "", "8.8.8.8"},
+					tPortsMap:     make(map[utilnet.LocalPort]bool),
 				}
 
-				service := newService("service1", "namespace1", "10.129.0.2",
+				service := newService("service4", "namespace1", "10.129.0.2",
 					[]kapi.ServicePort{
 						{
 							NodePort: 32222,
@@ -200,7 +251,7 @@ var _ = Describe("Node Operations", func() {
 				errors := addServicePortClaim(service)
 				Expect(errors).To(HaveLen(0))
 
-				fakePort := port.(*testPortClaimWatcher)
+				fakePort := portHandler.(*testPortClaimWatcher)
 				Expect(fakePort.tPortOpenCount).To(Equal(len(service.Spec.Ports) * 2))
 
 				return nil
@@ -212,9 +263,9 @@ var _ = Describe("Node Operations", func() {
 		It("should not open a port for ClusterIP", func() {
 			app.Action = func(ctx *cli.Context) error {
 
-				port = &testPortClaimWatcher{}
+				portHandler = &testPortClaimWatcher{}
 
-				service := newService("service1", "namespace1", "10.129.0.2",
+				service := newService("service5", "namespace1", "10.129.0.2",
 					[]kapi.ServicePort{
 						{
 							Port:     8081,
@@ -232,7 +283,7 @@ var _ = Describe("Node Operations", func() {
 				errors := addServicePortClaim(service)
 				Expect(errors).To(HaveLen(0))
 
-				fakePort := port.(*testPortClaimWatcher)
+				fakePort := portHandler.(*testPortClaimWatcher)
 				Expect(fakePort.tPortOpenCount).To(Equal(0))
 
 				return nil
@@ -247,11 +298,11 @@ var _ = Describe("Node Operations", func() {
 		It("should not do anything ports for ClusterIP updates", func() {
 			app.Action = func(ctx *cli.Context) error {
 
-				port = &testPortClaimWatcher{
+				portHandler = &testPortClaimWatcher{
 					tPortClose: []int32{8080, 9999},
 				}
 
-				oldService := newService("service1", "namespace1", "10.129.0.2",
+				oldService := newService("service6", "namespace1", "10.129.0.2",
 					[]kapi.ServicePort{
 						{
 							Port:     8080,
@@ -265,7 +316,7 @@ var _ = Describe("Node Operations", func() {
 					kapi.ServiceTypeClusterIP,
 					[]string{},
 				)
-				newService := newService("service1", "namespace1", "10.129.0.2",
+				newService := newService("service7", "namespace1", "10.129.0.2",
 					[]kapi.ServicePort{
 						{
 							Port:     8080,
@@ -283,7 +334,7 @@ var _ = Describe("Node Operations", func() {
 				errors := updateServicePortClaim(oldService, newService)
 				Expect(errors).To(HaveLen(0))
 
-				fakePort := port.(*testPortClaimWatcher)
+				fakePort := portHandler.(*testPortClaimWatcher)
 				Expect(fakePort.tPortOpenCount).To(Equal(0))
 				Expect(fakePort.tPortCloseCount).To(Equal(0))
 
@@ -296,17 +347,7 @@ var _ = Describe("Node Operations", func() {
 		It("should only remove ports when ExternalIP -> no ExternalIP", func() {
 			app.Action = func(ctx *cli.Context) error {
 
-				port = &testPortClaimWatcher{
-					tPortClose: []int32{8080, 9999},
-					tActiveSockets: map[kapi.Protocol]map[int32]bool{
-						kapi.ProtocolTCP: {
-							8080: true,
-							9999: true,
-						},
-					},
-				}
-
-				oldService := newService("service1", "namespace1", "10.129.0.2",
+				oldService := newService("service8", "namespace1", "10.129.0.2",
 					[]kapi.ServicePort{
 						{
 							Port:     8080,
@@ -320,7 +361,7 @@ var _ = Describe("Node Operations", func() {
 					kapi.ServiceTypeClusterIP,
 					[]string{"8.8.8.8"},
 				)
-				newService := newService("service1", "namespace1", "10.129.0.2",
+				newService := newService("service9", "namespace1", "10.129.0.2",
 					[]kapi.ServicePort{
 						{
 							Port:     8080,
@@ -335,10 +376,23 @@ var _ = Describe("Node Operations", func() {
 					[]string{},
 				)
 
+				portMap := make(map[utilnet.LocalPort]bool)
+				lp, _ := utilnet.NewLocalPort(getDescription("", oldService, false), "8.8.8.8", "", 8080, utilnet.TCP)
+				portMap[*lp] = true
+				lp, _ = utilnet.NewLocalPort(getDescription("", oldService, false), "8.8.8.8", "", 9999, utilnet.TCP)
+				portMap[*lp] = true
+
+				portHandler = &testPortClaimWatcher{
+					tPortClose:     []int32{8080, 9999},
+					tProtocolClose: []kapi.Protocol{kapi.ProtocolTCP, kapi.ProtocolTCP},
+					tIPClose:       []string{"8.8.8.8", "8.8.8.8"},
+					tPortsMap:      portMap,
+				}
+
 				errors := updateServicePortClaim(oldService, newService)
 				Expect(errors).To(HaveLen(0))
 
-				fakePort := port.(*testPortClaimWatcher)
+				fakePort := portHandler.(*testPortClaimWatcher)
 				Expect(fakePort.tPortOpenCount).To(Equal(0))
 				Expect(fakePort.tPortCloseCount).To(Equal(len(oldService.Spec.Ports)))
 
@@ -354,37 +408,41 @@ var _ = Describe("Node Operations", func() {
 
 		It("should close ports for ExternalIP", func() {
 			app.Action = func(ctx *cli.Context) error {
-
-				port = &testPortClaimWatcher{
-					tPortClose: []int32{8080, 9999},
-					tActiveSockets: map[kapi.Protocol]map[int32]bool{
-						kapi.ProtocolTCP: {
-							8080: true,
-							9999: true,
-						},
-					},
-				}
-
-				service := newService("service1", "namespace1", "10.129.0.2",
+				service := newService("service10", "namespace1", "10.129.0.2",
 					[]kapi.ServicePort{
 						{
-							Port:     8080,
+							Port:     8088,
 							Protocol: kapi.ProtocolTCP,
 						},
 						{
-							Port:     9999,
-							Protocol: kapi.ProtocolTCP,
+							Port:     9998,
+							Protocol: kapi.ProtocolUDP,
 						},
 					},
 					kapi.ServiceTypeClusterIP,
 					[]string{"8.8.8.8", "10.10.10.10"},
 				)
+				portMap := make(map[utilnet.LocalPort]bool)
+				lp, _ := utilnet.NewLocalPort(getDescription("", service, false), "8.8.8.8", "", 8088, utilnet.TCP)
+				portMap[*lp] = true
+				lp, _ = utilnet.NewLocalPort(getDescription("", service, false), "10.10.10.10", "", 8088, utilnet.TCP)
+				portMap[*lp] = true
+				lp, _ = utilnet.NewLocalPort(getDescription("", service, false), "8.8.8.8", "", 9998, utilnet.UDP)
+				portMap[*lp] = true
+				lp, _ = utilnet.NewLocalPort(getDescription("", service, false), "10.10.10.10", "", 9998, utilnet.UDP)
+				portMap[*lp] = true
+
+				portHandler = &testPortClaimWatcher{
+					tPortClose: []int32{8088, 8088, 9998, 9998},
+					tIPClose:   []string{"8.8.8.8", "10.10.10.10", "8.8.8.8", "10.10.10.10"},
+					tPortsMap:  portMap,
+				}
 
 				errors := deleteServicePortClaim(service)
 				Expect(errors).To(HaveLen(0))
 
-				fakePort := port.(*testPortClaimWatcher)
-				Expect(fakePort.tPortCloseCount).To(Equal(len(service.Spec.Ports)))
+				fakePort := portHandler.(*testPortClaimWatcher)
+				Expect(fakePort.tPortCloseCount).To(Equal(len(service.Spec.Ports) * len(service.Spec.ExternalIPs)))
 
 				return nil
 			}
@@ -394,20 +452,7 @@ var _ = Describe("Node Operations", func() {
 
 		It("should close a NodePort and port for ExternalIP", func() {
 			app.Action = func(ctx *cli.Context) error {
-
-				port = &testPortClaimWatcher{
-					tPortClose: []int32{32222, 8081, 31111, 8080},
-					tActiveSockets: map[kapi.Protocol]map[int32]bool{
-						kapi.ProtocolTCP: {
-							8080:  true,
-							8081:  true,
-							32222: true,
-							31111: true,
-						},
-					},
-				}
-
-				service := newService("service1", "namespace1", "10.129.0.2",
+				service := newService("service11", "namespace1", "10.129.0.2",
 					[]kapi.ServicePort{
 						{
 							NodePort: 32222,
@@ -417,17 +462,33 @@ var _ = Describe("Node Operations", func() {
 						{
 							NodePort: 31111,
 							Port:     8080,
-							Protocol: kapi.ProtocolTCP,
+							Protocol: kapi.ProtocolUDP,
 						},
 					},
 					kapi.ServiceTypeNodePort,
 					[]string{"8.8.8.8"},
 				)
 
+				portMap := make(map[utilnet.LocalPort]bool)
+				lp, _ := utilnet.NewLocalPort(getDescription("", service, true), "", "", 32222, utilnet.TCP)
+				portMap[*lp] = true
+				lp, _ = utilnet.NewLocalPort(getDescription("", service, false), "8.8.8.8", "", 8081, utilnet.TCP)
+				portMap[*lp] = true
+				lp, _ = utilnet.NewLocalPort(getDescription("", service, true), "", "", 31111, utilnet.UDP)
+				portMap[*lp] = true
+				lp, _ = utilnet.NewLocalPort(getDescription("", service, false), "8.8.8.8", "", 8080, utilnet.UDP)
+				portMap[*lp] = true
+
+				portHandler = &testPortClaimWatcher{
+					tPortClose: []int32{32222, 8081, 31111, 8080},
+					tIPClose:   []string{"", "8.8.8.8", "", "8.8.8.8"},
+					tPortsMap:  portMap,
+				}
+
 				errors := deleteServicePortClaim(service)
 				Expect(errors).To(HaveLen(0))
 
-				fakePort := port.(*testPortClaimWatcher)
+				fakePort := portHandler.(*testPortClaimWatcher)
 				Expect(fakePort.tPortCloseCount).To(Equal(len(service.Spec.Ports) * 2))
 
 				return nil
@@ -438,22 +499,7 @@ var _ = Describe("Node Operations", func() {
 
 		It("should close per protocol for NodePort and ExternalIP ports", func() {
 			app.Action = func(ctx *cli.Context) error {
-
-				port = &testPortClaimWatcher{
-					tPortClose: []int32{32222, 8081, 32222, 8081},
-					tActiveSockets: map[kapi.Protocol]map[int32]bool{
-						kapi.ProtocolTCP: {
-							8081:  true,
-							32222: true,
-						},
-						kapi.ProtocolUDP: {
-							8081:  true,
-							32222: true,
-						},
-					},
-				}
-
-				service := newService("service1", "namespace1", "10.129.0.2",
+				service := newService("service12", "namespace1", "10.129.0.2",
 					[]kapi.ServicePort{
 						{
 							NodePort: 32222,
@@ -470,10 +516,25 @@ var _ = Describe("Node Operations", func() {
 					[]string{"8.8.8.8"},
 				)
 
+				portMap := make(map[utilnet.LocalPort]bool)
+				lp, _ := utilnet.NewLocalPort(getDescription("", service, true), "", "", 32222, utilnet.TCP)
+				portMap[*lp] = true
+				lp, _ = utilnet.NewLocalPort(getDescription("", service, false), "8.8.8.8", "", 8081, utilnet.TCP)
+				portMap[*lp] = true
+				lp, _ = utilnet.NewLocalPort(getDescription("", service, true), "", "", 32222, utilnet.UDP)
+				portMap[*lp] = true
+				lp, _ = utilnet.NewLocalPort(getDescription("", service, false), "8.8.8.8", "", 8081, utilnet.UDP)
+				portMap[*lp] = true
+
+				portHandler = &testPortClaimWatcher{
+					tPortClose: []int32{32222, 8081, 32222, 8081},
+					tPortsMap:  portMap,
+				}
+
 				errors := deleteServicePortClaim(service)
 				Expect(errors).To(HaveLen(0))
 
-				fakePort := port.(*testPortClaimWatcher)
+				fakePort := portHandler.(*testPortClaimWatcher)
 				Expect(fakePort.tPortCloseCount).To(Equal(len(service.Spec.Ports) * 2))
 
 				return nil
@@ -485,17 +546,7 @@ var _ = Describe("Node Operations", func() {
 		It("should close ports for NodePort", func() {
 			app.Action = func(ctx *cli.Context) error {
 
-				port = &testPortClaimWatcher{
-					tPortClose: []int32{31100, 32200},
-					tActiveSockets: map[kapi.Protocol]map[int32]bool{
-						kapi.ProtocolTCP: {
-							31100: true,
-							32200: true,
-						},
-					},
-				}
-
-				service := newService("service1", "namespace1", "10.129.0.2",
+				service := newService("service13", "namespace1", "10.129.0.2",
 					[]kapi.ServicePort{
 						{
 							NodePort: 31100,
@@ -510,11 +561,77 @@ var _ = Describe("Node Operations", func() {
 					[]string{},
 				)
 
+				portMap := make(map[utilnet.LocalPort]bool)
+				lp, _ := utilnet.NewLocalPort(getDescription("", service, true), "", "", 31100, utilnet.TCP)
+				portMap[*lp] = true
+				lp, _ = utilnet.NewLocalPort(getDescription("", service, true), "", "", 32200, utilnet.TCP)
+				portMap[*lp] = true
+
+				portHandler = &testPortClaimWatcher{
+					tPortClose: []int32{31100, 32200},
+					tPortsMap:  portMap,
+				}
+
 				errors := deleteServicePortClaim(service)
 				Expect(errors).To(HaveLen(0))
 
-				fakePort := port.(*testPortClaimWatcher)
+				fakePort := portHandler.(*testPortClaimWatcher)
 				Expect(fakePort.tPortCloseCount).To(Equal(len(service.Spec.Ports)))
+
+				return nil
+			}
+			err := app.Run([]string{app.Name})
+			Expect(err).NotTo(HaveOccurred())
+		})
+	})
+	Context("open/close check operations", func() {
+		It("should open and close ports", func() {
+			app.Action = func(ctx *cli.Context) error {
+				localAddrSet, err := getLocalAddrs()
+				Expect(err).ShouldNot(HaveOccurred())
+				portHandler = newPortClaimWatcher(&record.FakeRecorder{}, localAddrSet)
+				portOpener = &fakePortOpr{}
+				service := newService("service13", "namespace1", "10.129.0.2",
+					[]kapi.ServicePort{
+						{
+							NodePort: 32221,
+							Port:     8081,
+							Protocol: kapi.ProtocolTCP,
+						},
+						{
+							NodePort: 32222,
+							Port:     8082,
+							Protocol: kapi.ProtocolUDP,
+						},
+					},
+					kapi.ServiceTypeNodePort,
+					[]string{"127.0.0.1", "8.8.8.8"},
+				)
+				errors := handleService(service, portHandler.open)
+				Expect(len(errors)).To(Equal(0))
+				pcw := portHandler.(*portClaimWatcher)
+				Expect(len(pcw.portsMap)).To(Equal(4))
+				lps := make([]*utilnet.LocalPort, 0)
+				lp, err := utilnet.NewLocalPort(getDescription("", service, true), "", "", 32221, utilnet.TCP)
+				Expect(err).ShouldNot(HaveOccurred())
+				lps = append(lps, lp)
+				lp, err = utilnet.NewLocalPort(getDescription("", service, false), "127.0.0.1", "", 8081, utilnet.TCP)
+				Expect(err).ShouldNot(HaveOccurred())
+				lps = append(lps, lp)
+				lp, err = utilnet.NewLocalPort(getDescription("", service, true), "", "", 32222, utilnet.UDP)
+				Expect(err).ShouldNot(HaveOccurred())
+				lps = append(lps, lp)
+				lp, err = utilnet.NewLocalPort(getDescription("", service, false), "127.0.0.1", "", 8082, utilnet.UDP)
+				Expect(err).ShouldNot(HaveOccurred())
+				lps = append(lps, lp)
+
+				for _, lp = range lps {
+					_, exists := pcw.portsMap[*lp]
+					Expect(exists).To(Equal(true))
+				}
+				errors = handleService(service, portHandler.close)
+				Expect(len(errors)).To(Equal(0))
+				Expect(len(pcw.portsMap)).To(Equal(0))
 
 				return nil
 			}

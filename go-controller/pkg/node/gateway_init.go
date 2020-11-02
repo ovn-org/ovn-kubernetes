@@ -160,7 +160,10 @@ func (n *OvnNode) initGateway(subnets []*net.IPNet, nodeAnnotator kube.Annotator
 
 	if config.Gateway.NodeportEnable {
 		initLoadBalancerHealthChecker(n.name, n.watchFactory)
-		initPortClaimWatcher(n.recorder, n.watchFactory)
+		err := initPortClaimWatcher(n.recorder, n.watchFactory)
+		if err != nil {
+			return err
+		}
 	}
 
 	gatewayNextHops, gatewayIntf, err := getGatewayNextHops()
