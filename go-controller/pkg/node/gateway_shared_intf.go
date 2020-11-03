@@ -463,14 +463,16 @@ func newSharedGatewayOpenFlowManager(nodeName, gwBridge, gwIntf string) (*openfl
 	}
 	nFlows++
 
-	// table 2, return traffic to go to out of the host from nodePort or load balancer access
-	_, stderr, err = util.RunOVSOfctl("add-flow", gwBridge,
-		fmt.Sprintf("cookie=%s, priority=0, table=2, actions=output:%s", defaultOpenFlowCookie, ofportPhys))
-	if err != nil {
-		return nil, fmt.Errorf("failed to add openflow flow to %s, stderr: %q, "+
-			"error: %v", gwBridge, stderr, err)
+	if config.Gateway.NodeportEnable {
+		// table 2, return traffic to go to out of the host from nodePort or load balancer access
+		_, stderr, err = util.RunOVSOfctl("add-flow", gwBridge,
+			fmt.Sprintf("cookie=%s, priority=0, table=2, actions=output:%s", defaultOpenFlowCookie, ofportPhys))
+		if err != nil {
+			return nil, fmt.Errorf("failed to add openflow flow to %s, stderr: %q, "+
+				"error: %v", gwBridge, stderr, err)
+		}
+		nFlows++
 	}
-	nFlows++
 
 	// add health check function to check default OpenFlow flows are on the shared gateway bridge
 	return &openflowManager{
@@ -489,17 +491,17 @@ func newSharedGateway(nodeName string, subnets []*net.IPNet, gwNextHops []net.IP
 	}
 
 	gw.initFunc = func() error {
+		// Program cluster.GatewayIntf to let non-pod traffic to go to host
+		// stack
+		klog.Info("Creating Shared Gateway Openflow Manager")
+		var err error
+
+		gw.openflowManager, err = newSharedGatewayOpenFlowManager(nodeName, bridgeName, uplinkName)
+		if err != nil {
+			return err
+		}
+
 		if config.Gateway.NodeportEnable {
-			// Program cluster.GatewayIntf to let non-pod traffic to go to host
-			// stack
-			klog.Info("Creating Shared Gateway Openflow Manager")
-			var err error
-
-			gw.openflowManager, err = newSharedGatewayOpenFlowManager(nodeName, bridgeName, uplinkName)
-			if err != nil {
-				return err
-			}
-
 			klog.Info("Creating Shared Gateway Node Port Watcher")
 			gw.nodePortWatcher, err = newNodePortWatcher(nodeName, bridgeName, uplinkName, ips[0])
 			if err != nil {
