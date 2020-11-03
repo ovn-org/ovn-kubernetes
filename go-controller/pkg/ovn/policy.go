@@ -100,18 +100,21 @@ func (oc *Controller) syncNetworkPolicies(networkPolicies []interface{}) {
 
 func (oc *Controller) getNetworkPoliciesLocked() map[types.NamespacedName]*networkPolicy {
 	//Get lock on controller's networkPolicies struct
+	klog.V(5).Infof("getting a lock on the networkPolicies stuct")
 	oc.networkPoliciesMutex.Lock()
 
 	npInfo := oc.networkPolicies
 
 	if npInfo == nil {
+		klog.V(5).Infof("The NetworkPolicies Struct is Nil, returning Nothing")
+
 		return nil
 	}
 
 	// Check that the networkPolicy wasn't deleted while we were waiting for the lock
 	//Don't need this here
 	//oc.networkPoliciesMutex.Lock()
-	//defer oc.networkPoliciesMutex.Unlock()
+	//defer c.networkPoliciesMutex.Unlock()
 	//if reflect.DeepEqual(npInfo,oc.networkPolicies) {
 	//	npInfo.Unlock()
 	//	return nil
@@ -130,12 +133,16 @@ func (oc *Controller) waitForNetworkPoliciesLocked(ns string) (map[types.Namespa
 
 	//Ensure namespace is created before applying policies
 	//Do we need this? still requires locking on NS creation
+	klog.V(5).Infof("createPortGroup with %s", ns)
 	nsInfo, err := oc.waitForNamespaceLocked(ns)
 	if nsInfo == nil {
-		return nil, fmt.Errorf("timeout waiting for namespace")
+		return nil, fmt.Errorf("Namespace not here yet")
+	}
+	if err != nil {
+		return nil, fmt.Errorf("never received Locked Namespace: %s", err)
 	}
 	nsInfo.Unlock()
-
+	klog.V(5).Infof("Namespace exists, now trying to get netpolicies structure")
 	//wait for lock on networkPolicies Struct
 	err = utilwait.PollImmediate(100*time.Millisecond, 10*time.Second,
 		func() (bool, error) {
@@ -146,6 +153,8 @@ func (oc *Controller) waitForNetworkPoliciesLocked(ns string) (map[types.Namespa
 	if err != nil {
 		return nil, fmt.Errorf("timeout waiting for networkPolicy")
 	}
+
+	klog.V(5).Infof("Got a Lock on the NetworkPolicy Struct")
 	return npInfo, nil
 }
 
@@ -644,6 +653,7 @@ func (oc *Controller) addNetworkPolicy(policy *knet.NetworkPolicy) {
 		return
 	}
 	defer oc.networkPoliciesMutex.Unlock()
+	klog.V(5).Infof("Got main Network Policy map, back in addNetwork policy ")
 
 	nsIdx := types.NamespacedName{
 		Name:      policy.Name,
@@ -653,9 +663,10 @@ func (oc *Controller) addNetworkPolicy(policy *knet.NetworkPolicy) {
 	_, alreadyExists := npInfo[nsIdx]
 	if alreadyExists {
 		oc.networkPoliciesMutex.Unlock()
+		klog.V(5).Infof("networkPolicy already exists")
 		return
 	}
-
+	klog.V(5).Infof("Making new networkPolicy")
 	np := NewNetworkPolicy(policy)
 	npInfo[nsIdx] = np
 	//Lock the network policy itself
@@ -780,6 +791,7 @@ func (oc *Controller) addNetworkPolicy(policy *knet.NetworkPolicy) {
 
 // deletes the networkPolicy from controller map and returns it, locked
 func (oc *Controller) deleteNetworkPolicyLocked(policy *knet.NetworkPolicy) *networkPolicy {
+	klog.Infof("Deleting network policy %s in namespace %s", policy.Name, policy.Namespace)
 	npInfo := oc.getNetworkPoliciesLocked()
 	if npInfo == nil {
 		return nil

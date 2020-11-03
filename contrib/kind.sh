@@ -273,7 +273,7 @@ ovn_apiServerAddress=${API_IP} \
   svc_cidr=${SVC_CIDR} \
   ovn_num_master=${KIND_NUM_MASTER} \
   ovn_num_worker=${KIND_NUM_WORKER} \
-  cluster_log_level=${KIND_CLUSTER_LOGLEVEL:-4} \
+  cluster_log_level=${KIND_CLUSTER_LOGLEVEL:5} \
   j2 ${KIND_CONFIG} -o ${KIND_CONFIG_LCL}
 
 # Create KIND cluster. For additional debug, add '--verbosity <int>': 0 None .. 3 Debug

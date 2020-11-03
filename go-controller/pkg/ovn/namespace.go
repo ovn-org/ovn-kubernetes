@@ -125,16 +125,22 @@ func (oc *Controller) multicastUpdateNamespace(ns *kapi.Namespace, nsInfo *names
 	nsInfo.multicastEnabled = enabled
 	if enabled {
 		//Creates Port Group name if dosn't exist
-		err := nsInfo.updateNamespacePortGroup(ns.Name)
+		err = nsInfo.updateNamespacePortGroup(ns.Name)
 		if err != nil {
 			klog.Errorf(err.Error())
 		}
 
 		err = oc.createMulticastAllowPolicy(ns.Name)
+		if err != nil {
+			klog.Errorf(err.Error())
+		}
 	} else {
 		err = deleteMulticastAllowPolicy(ns.Name)
+		if err != nil {
+			klog.Errorf(err.Error())
+		}
 		//updates namespace's port group info
-		err := nsInfo.updateNamespacePortGroup(ns.Name)
+		err = nsInfo.updateNamespacePortGroup(ns.Name)
 		if err != nil {
 			klog.Errorf(err.Error())
 		}
