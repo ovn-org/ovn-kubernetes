@@ -2,6 +2,7 @@ package cni
 
 import (
 	"net/http"
+	"sync"
 
 	"github.com/containernetworking/cni/pkg/types/current"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/cni/types"
@@ -85,4 +86,9 @@ type Server struct {
 	requestFunc cniRequestFunc
 	rundir      string
 	kclient     kubernetes.Interface
+
+	// Pod list and lock to prevent overlapping ADD/DEL of same pod for
+	// different sandboxes. Map of "<namespace>/<name>" to sandbox ID
+	podsLock sync.Mutex
+	pods     map[string]string
 }

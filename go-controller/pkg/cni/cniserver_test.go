@@ -13,7 +13,9 @@ import (
 	"path/filepath"
 	"reflect"
 	"strings"
+	"sync"
 	"testing"
+	"time"
 
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/kubernetes/fake"
@@ -204,5 +206,82 @@ func TestCNIServer(t *testing.T) {
 				t.Fatalf("[%s] unexpected error message '%v'", tc.name, string(body))
 			}
 		}
+	}
+}
+
+func TestCNIServerOverlappingRequests(t *testing.T) {
+	tmpDir, err := utiltesting.MkTmpdir("cniserver")
+	if err != nil {
+		t.Fatalf("failed to create temp directory: %v", err)
+	}
+	defer os.RemoveAll(tmpDir)
+	socketPath := filepath.Join(tmpDir, serverSocketName)
+	fakeClient := fake.NewSimpleClientset()
+
+	firstAddStarted := make(chan bool)
+	const magicSandboxID string = "foobar"
+
+	s := NewCNIServer(tmpDir, fakeClient)
+	if err := s.Start(func(request *PodRequest, kclient kubernetes.Interface) ([]byte, error) {
+		if request.Command == CNIAdd {
+			if request.SandboxID == magicSandboxID {
+				close(firstAddStarted)
+				time.Sleep(10 * time.Second)
+			}
+			return []byte("{}"), nil
+		}
+		return nil, nil
+	}); err != nil {
+		t.Fatalf("error starting CNI server: %v", err)
+	}
+
+	client := &http.Client{
+		Transport: &http.Transport{
+			Dial: func(proto, addr string) (net.Conn, error) {
+				return net.Dial("unix", socketPath)
+			},
+		},
+	}
+
+	makeRequest := func(cmd command, sandbox string) *Request {
+		return &Request{
+			Env: map[string]string{
+				"CNI_COMMAND":     string(cmd),
+				"CNI_CONTAINERID": sandbox,
+				"CNI_NETNS":       "/some/path",
+				"CNI_ARGS":        "K8S_POD_NAMESPACE=awesome-namespace;K8S_POD_NAME=awesome-name",
+			},
+			Config: []byte("{\"cniVersion\": \"0.1.0\",\"name\": \"ovnkube\",\"type\": \"ovnkube\"}"),
+		}
+	}
+
+	wg := &sync.WaitGroup{}
+	wg.Add(2)
+	var add1Code, add2Code, del1Code, del2Code int
+	go func() {
+		_, add1Code = clientDoCNI(t, client, makeRequest(CNIAdd, magicSandboxID))
+		_, del1Code = clientDoCNI(t, client, makeRequest(CNIDel, magicSandboxID))
+		wg.Done()
+	}()
+	go func() {
+		// Wait until the first add has been started by the handler
+		<-firstAddStarted
+		_, add2Code = clientDoCNI(t, client, makeRequest(CNIAdd, "blah"))
+		_, del2Code = clientDoCNI(t, client, makeRequest(CNIDel, "blah"))
+		wg.Done()
+	}()
+	wg.Wait()
+
+	if add1Code != http.StatusOK {
+		t.Fatalf("add1 expected status %v but got %v", http.StatusOK, add1Code)
+	}
+	if del1Code != http.StatusOK {
+		t.Fatalf("del1 expected status %v but got %v", http.StatusOK, del1Code)
+	}
+	if add2Code != http.StatusBadRequest {
+		t.Fatalf("add2 expected status %v but got %v", http.StatusBadRequest, add2Code)
+	}
+	if del2Code != http.StatusBadRequest {
+		t.Fatalf("del2 expected status %v but got %v", http.StatusBadRequest, del2Code)
 	}
 }

@@ -53,6 +53,7 @@ func NewCNIServer(rundir string, kclient kubernetes.Interface) *Server {
 		},
 		rundir:  rundir,
 		kclient: kclient,
+		pods:    make(map[string]string),
 	}
 	router.NotFoundHandler = http.HandlerFunc(http.NotFound)
 	router.HandleFunc("/", s.handleCNIRequest).Methods("POST")
@@ -129,6 +130,36 @@ func cniRequestToPodRequest(cr *Request) (*PodRequest, error) {
 	return req, nil
 }
 
+func (s *Server) validateRequest(req *PodRequest) error {
+	// Enforce non-overlapping operations for a given pod; kubelet and/or
+	// the runtime may ask that we create a second sandbox for the same
+	// pod before cleaning up the first one. ovn-kube can't handle that
+	// since the OVN iface-id is per-pod, not per-sandbox.
+
+	pd := podDescription(req)
+
+	s.podsLock.Lock()
+	defer s.podsLock.Unlock()
+	if sandboxID, ok := s.pods[pd]; ok {
+		// Cannot have overlapping or duplicate ADDs
+		// Cannot have CHECK/DEL for a different sandbox than the active one
+		if req.Command == CNIAdd || req.SandboxID != sandboxID {
+			return fmt.Errorf("%s cannot %s for %s; sandbox %s already active",
+				pd, string(req.Command), req.SandboxID, sandboxID)
+		}
+	}
+
+	// Request is allowed, do some housekeeping
+	if req.Command == CNIAdd {
+		// Start tracking the pod/sandbox
+		s.pods[pd] = req.SandboxID
+	} else if req.Command == CNIDel {
+		delete(s.pods, pd)
+	}
+
+	return nil
+}
+
 // Dispatch a pod request to the request handler and return the result to the
 // CNI server client
 func (s *Server) handleCNIRequest(w http.ResponseWriter, r *http.Request) {
@@ -140,6 +171,11 @@ func (s *Server) handleCNIRequest(w http.ResponseWriter, r *http.Request) {
 	}
 	req, err := cniRequestToPodRequest(&cr)
 	if err != nil {
+		http.Error(w, fmt.Sprintf("%v", err), http.StatusBadRequest)
+		return
+	}
+
+	if err := s.validateRequest(req); err != nil {
 		http.Error(w, fmt.Sprintf("%v", err), http.StatusBadRequest)
 		return
 	}
