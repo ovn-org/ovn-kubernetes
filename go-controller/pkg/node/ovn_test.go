@@ -1,6 +1,8 @@
 package node
 
 import (
+	"sync"
+
 	. "github.com/onsi/gomega"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/factory"
@@ -24,6 +26,7 @@ type FakeOVNNode struct {
 	recorder   *record.FakeRecorder
 	fakeClient *util.OVNClientset
 	fakeExec   *ovntest.FakeExec
+	wg         *sync.WaitGroup
 }
 
 func NewFakeOVNNode(fexec *ovntest.FakeExec) *FakeOVNNode {
@@ -33,6 +36,7 @@ func NewFakeOVNNode(fexec *ovntest.FakeExec) *FakeOVNNode {
 	return &FakeOVNNode{
 		fakeExec: fexec,
 		recorder: record.NewFakeRecorder(1),
+		wg:       &sync.WaitGroup{},
 	}
 }
 
@@ -59,6 +63,7 @@ func (o *FakeOVNNode) restart() {
 
 func (o *FakeOVNNode) shutdown() {
 	close(o.stopChan)
+	o.wg.Wait()
 }
 
 func (o *FakeOVNNode) init() {
@@ -70,4 +75,5 @@ func (o *FakeOVNNode) init() {
 	Expect(err).NotTo(HaveOccurred())
 
 	o.node = NewNode(o.fakeClient.KubeClient, o.watcher, fakeNodeName, o.stopChan, o.recorder)
+	o.node.Start(o.wg)
 }

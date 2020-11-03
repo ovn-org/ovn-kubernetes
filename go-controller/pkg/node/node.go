@@ -34,6 +34,7 @@ type OvnNode struct {
 	watchFactory factory.NodeWatchFactory
 	stopChan     chan struct{}
 	recorder     record.EventRecorder
+	gateway      Gateway
 }
 
 // NewNode creates a new controller for node management
@@ -208,15 +209,19 @@ func (n *OvnNode) Start(wg *sync.WaitGroup) error {
 	nodeAnnotator := kube.NewNodeAnnotator(n.Kube, node)
 	waiter := newStartupWaiter()
 
-	// Initialize gateway resources on the node
-	if err := n.initGateway(subnets, nodeAnnotator, waiter); err != nil {
+	// Initialize management port resources on the node
+	mgmtPortConfig, err := createManagementPort(n.name, subnets, nodeAnnotator, waiter)
+	if err != nil {
 		return err
 	}
 
-	// Initialize management port resources on the node
-	if err := n.createManagementPort(subnets, nodeAnnotator, waiter); err != nil {
+	// Initialize gateway resources on the node
+	if err := n.initGateway(subnets, nodeAnnotator, waiter, mgmtPortConfig); err != nil {
 		return err
 	}
+
+	wg.Add(1)
+	go n.gateway.Run(n.stopChan)
 
 	if err := nodeAnnotator.Run(); err != nil {
 		return fmt.Errorf("failed to set node %s annotations: %v", n.name, err)
@@ -254,6 +259,9 @@ func (n *OvnNode) Start(wg *sync.WaitGroup) error {
 
 	// start health check to ensure there are no stale OVS internal ports
 	go checkForStaleOVSInterfaces(n.stopChan)
+
+	// start management port health check
+	go checkManagementPortHealth(mgmtPortConfig, n.stopChan)
 
 	confFile := filepath.Join(config.CNI.ConfDir, config.CNIConfFileName)
 	_, err = os.Stat(confFile)
