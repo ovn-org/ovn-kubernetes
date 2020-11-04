@@ -147,7 +147,7 @@ parse_args $*
 
 # ensure j2 renderer installed
 
-if `python -m pip --version` ; then
+if python -m pip --version ; then
   pip install wheel
   pip freeze | grep j2cli || pip install j2cli[yaml] --user
 else
