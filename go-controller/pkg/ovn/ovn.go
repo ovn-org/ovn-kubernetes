@@ -1035,23 +1035,6 @@ func (oc *Controller) getServiceLBInfo(lb, vip string) (string, bool) {
 	return conf.rejectACL, len(conf.endpoints) > 0
 }
 
-// getAllACLsForServiceLB retrieves all of the ACLs for a given load balancer
-func (oc *Controller) getAllACLsForServiceLB(lb string) []string {
-	oc.serviceLBLock.Lock()
-	defer oc.serviceLBLock.Unlock()
-	confMap, ok := oc.serviceLBMap[lb]
-	if !ok {
-		return nil
-	}
-	var acls []string
-	for _, v := range confMap {
-		if len(v.rejectACL) > 0 {
-			acls = append(acls, v.rejectACL)
-		}
-	}
-	return acls
-}
-
 // removeServiceLB removes the entire LB entry for a VIP
 func (oc *Controller) removeServiceLB(lb, vip string) {
 	oc.serviceLBLock.Lock()
