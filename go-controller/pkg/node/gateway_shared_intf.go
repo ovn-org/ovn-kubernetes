@@ -10,6 +10,7 @@ import (
 
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/kube"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
 
 	kapi "k8s.io/api/core/v1"
@@ -579,7 +580,7 @@ func cleanupSharedGateway() error {
 	bridgeMappings := strings.Split(stdout, ",")
 	for _, bridgeMapping := range bridgeMappings {
 		m := strings.Split(bridgeMapping, ":")
-		if network := m[0]; network == util.PhysicalNetworkName {
+		if network := m[0]; network == types.PhysicalNetworkName {
 			bridgeName = m[1]
 			break
 		}

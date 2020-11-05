@@ -7,6 +7,7 @@ import (
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/informer"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/kube"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
 	util "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
 	kapi "k8s.io/api/core/v1"
 	"k8s.io/klog"
@@ -159,7 +160,7 @@ func gatewayInitInternal(nodeName, gwIntf string, subnets []*net.IPNet, gwNextHo
 			gwIntf, err)
 	}
 	ifaceID, macAddress, err := bridgedGatewayNodeSetup(nodeName, bridgeName, gwIntf,
-		util.PhysicalNetworkName, brCreated)
+		types.PhysicalNetworkName, brCreated)
 	if err != nil {
 		return bridgeName, uplinkName, nil, fmt.Errorf("failed to set up shared interface gateway: %v", err)
 	}
