@@ -5,7 +5,7 @@ Local build and test
 
 You can use go get command:
 ```
-go get github.com/Mellanox/sriovnet.git
+go get github.com/Mellanox/sriovnet
 ```
 
 Example:
@@ -15,6 +15,7 @@ package main
 
 import (
     "fmt"
+
     "github.com/Mellanox/sriovnet"
 )
 
