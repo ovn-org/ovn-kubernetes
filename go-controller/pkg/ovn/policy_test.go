@@ -207,8 +207,12 @@ func (p multicastPolicy) enableCmds(fExec *ovntest.FakeExec, ns, nsAs string) {
 	fExec.AddFakeCmdsNoOutputNoError([]string{
 		"ovn-nbctl --timeout=15 --data=bare --no-heading --columns=_uuid find port_group name=" + pg_hash,
 	})
+	fExec.AddFakeCmdsNoOutputNoError([]string{
+		"ovn-nbctl --timeout=15 create port_group name=" + pg_hash + " external-ids:name=" + pg_name,
+	})
+
 	fExec.AddFakeCmd(&ovntest.ExpectedCmd{
-		Cmd:    "ovn-nbctl --timeout=15 create port_group name=" + pg_hash + " external-ids:name=" + pg_name,
+		Cmd:    "ovn-nbctl --timeout=15 --data=bare --no-heading --columns=_uuid find port_group name=" + pg_hash,
 		Output: "fake_uuid",
 	})
 
@@ -223,7 +227,12 @@ func (p multicastPolicy) enableCmds(fExec *ovntest.FakeExec, ns, nsAs string) {
 			"-- add port_group fake_uuid acls @acl",
 	})
 
-	match = "ip4.src == $" + hashedAddressSet(nsAs) + " && ip4.mcast"
+	fExec.AddFakeCmd(&ovntest.ExpectedCmd{
+		Cmd:    "ovn-nbctl --timeout=15 --data=bare --no-heading --columns=_uuid find address_set name=" + hashedAddressSet(ns),
+		Output: "fake_asuuid",
+	})
+
+	match = "ip4.src == $fake_asuuid && ip4.mcast"
 	match = getACLMatch(pg_hash, match, knet.PolicyTypeIngress)
 	fExec.AddFakeCmdsNoOutputNoError([]string{
 		"ovn-nbctl --timeout=15 --data=bare --no-heading --columns=_uuid find ACL " +
@@ -249,7 +258,13 @@ func (p multicastPolicy) disableCmds(fExec *ovntest.FakeExec, ns, nsAs string) {
 		"ovn-nbctl --timeout=15 remove port_group " + pg_hash + " acls fake_uuid",
 	})
 
-	match = "ip4.src == $" + hashedAddressSet(nsAs) + " && ip4.mcast"
+	fExec.AddFakeCmd(&ovntest.ExpectedCmd{
+		Cmd:    "ovn-nbctl --timeout=15 --data=bare --no-heading --columns=_uuid find address_set name=" + hashedAddressSet(ns),
+		Output: "fake_asuuid",
+	})
+
+	match = "ip4.src == $fake_asuuid && ip4.mcast"
+	//match = "ip4.src == $" + hashedAddressSet(nsAs) + " && ip4.mcast"
 	match = getACLMatch(pg_hash, match, knet.PolicyTypeIngress)
 	fExec.AddFakeCmd(&ovntest.ExpectedCmd{
 		Cmd: "ovn-nbctl --timeout=15 --data=bare --no-heading --columns=_uuid find ACL " +

@@ -111,6 +111,7 @@ func createIPAddressSlice(ips []*net.IPNet) []net.IP {
 // Traffic will be dropped by the default multicast deny ACL.
 func (oc *Controller) multicastUpdateNamespace(ns *kapi.Namespace, nsInfo *namespaceInfo) {
 	if !oc.multicastSupport {
+		klog.V(5).Infof("Multicast is not supported")
 		return
 	}
 
@@ -118,6 +119,7 @@ func (oc *Controller) multicastUpdateNamespace(ns *kapi.Namespace, nsInfo *names
 	enabledOld := nsInfo.multicastEnabled
 
 	if enabledOld == enabled {
+		klog.V(5).Infof("Multicast enabled state didn't change")
 		return
 	}
 
@@ -125,20 +127,23 @@ func (oc *Controller) multicastUpdateNamespace(ns *kapi.Namespace, nsInfo *names
 	nsInfo.multicastEnabled = enabled
 	if enabled {
 		//Creates Port Group name if dosn't exist
+		klog.V(5).Infof("Multicast is enabled for NS: %s and we're updating the port group", ns.Name)
 		err = nsInfo.updateNamespacePortGroup(ns.Name)
 		if err != nil {
 			klog.Errorf(err.Error())
 		}
-
+		klog.V(5).Infof("Multicast is enabled for NS: %s and the port group was updated", ns.Name)
 		err = oc.createMulticastAllowPolicy(ns.Name)
 		if err != nil {
 			klog.Errorf(err.Error())
 		}
 	} else {
+		klog.V(5).Infof("Deleting Multicast port Group for %s", ns)
 		err = deleteMulticastAllowPolicy(ns.Name)
 		if err != nil {
 			klog.Errorf(err.Error())
 		}
+
 		//updates namespace's port group info
 		err = nsInfo.updateNamespacePortGroup(ns.Name)
 		if err != nil {
@@ -174,18 +179,22 @@ func (oc *Controller) multicastDeleteNamespace(ns *kapi.Namespace, nsInfo *names
 // cleaned up when no object that relies on it exists.
 func (nsInfo *namespaceInfo) updateNamespacePortGroup(ns string) error {
 	if nsInfo.multicastEnabled {
+
 		if nsInfo.portGroupUUID != "" {
 			// Multicast is enabled and the port group exists so there is nothing to do.
+			klog.V(5).Infof("Multicast is enabled but port Group already exists %s", nsInfo.portGroupUUID)
 			return nil
 		}
-
+		klog.V(5).Infof("Creating Multicast port Group for %s", ns)
 		// The port group should exist but doesn't so create it
 		portGroupUUID, err := createPortGroup(ns, hashedPortGroup(ns))
 		if err != nil {
 			return fmt.Errorf("failed to create port_group for %s (%v)", ns, err)
 		}
+		klog.V(5).Infof("Created Multicast port Group for %s, it's UUID is %s", ns, portGroupUUID)
 		nsInfo.portGroupUUID = portGroupUUID
 	} else {
+		klog.V(5).Infof("Deleting Multicast port Group for %s", ns)
 		deletePortGroup(hashedPortGroup(ns))
 		nsInfo.portGroupUUID = ""
 	}

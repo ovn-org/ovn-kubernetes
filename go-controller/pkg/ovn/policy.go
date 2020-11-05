@@ -100,7 +100,7 @@ func (oc *Controller) syncNetworkPolicies(networkPolicies []interface{}) {
 
 func (oc *Controller) getNetworkPoliciesLocked() map[types.NamespacedName]*networkPolicy {
 	//Get lock on controller's networkPolicies struct
-	klog.V(5).Infof("getting a lock on the networkPolicies stuct")
+	klog.V(5).Infof("Getting a lock on the networkPolicies stuct")
 	oc.networkPoliciesMutex.Lock()
 
 	npInfo := oc.networkPolicies
@@ -124,9 +124,9 @@ func (oc *Controller) getNetworkPoliciesLocked() map[types.NamespacedName]*netwo
 
 }
 
-// waitForNamespaceLocked waits up to 10 seconds for a Namespace to be known; use this
-// rather than getNamespaceLocked when calling from a thread where you might be processing
-// an event in a namespace before the Namespace factory thread has processed the Namespace
+// waitForNetworkPolicyLocked waits up to 10 seconds for a NetworkPolicy to be known; use this
+// rather than getNetworkPolicyLocked when calling from a thread where you might be processing
+// an event in a NetworkPolicy before the NetworkPolicy factory thread has processed the NetworkPolicy
 // addition.
 func (oc *Controller) waitForNetworkPoliciesLocked(ns string) (map[types.NamespacedName]*networkPolicy, error) {
 	var npInfo map[types.NamespacedName]*networkPolicy
@@ -136,12 +136,13 @@ func (oc *Controller) waitForNetworkPoliciesLocked(ns string) (map[types.Namespa
 	klog.V(5).Infof("createPortGroup with %s", ns)
 	nsInfo, err := oc.waitForNamespaceLocked(ns)
 	if nsInfo == nil {
-		return nil, fmt.Errorf("Namespace not here yet")
+		return nil, fmt.Errorf("namespace not here yet")
 	}
 	if err != nil {
 		return nil, fmt.Errorf("never received Locked Namespace: %s", err)
 	}
-	nsInfo.Unlock()
+	defer nsInfo.Unlock()
+
 	klog.V(5).Infof("Namespace exists, now trying to get netpolicies structure")
 	//wait for lock on networkPolicies Struct
 	err = utilwait.PollImmediate(100*time.Millisecond, 10*time.Second,
@@ -279,6 +280,7 @@ func (oc *Controller) createDefaultDenyPortGroup(policyType knet.PolicyType) err
 			portGroupName, err)
 	}
 	match := getACLMatch(portGroupName, "", policyType)
+
 	err = addACLPortGroup(portGroupUUID, toLport,
 		defaultDenyPriority, match, "drop", policyType)
 	if err != nil {
@@ -300,10 +302,15 @@ func (oc *Controller) createDefaultDenyPortGroup(policyType knet.PolicyType) err
 	return nil
 }
 
-// Creates the match string used for ACLs allowing incoming multicast into a
+// Creates the match string used for ACLs allowing incomint into a
 // namespace, that is, from IPs that are in the namespace's address set.
 func getMulticastACLMatch(ns string) string {
-	return "ip4.src == $" + hashedAddressSet(ns) + " && ip4.mcast"
+
+	asUUID, _ := findAddressSet(ns, hashedAddressSet(ns))
+
+	klog.V(5).Infof("Namespace %s's address set UUID is %s", ns, asUUID)
+
+	return "ip4.src == $" + asUUID + " && ip4.mcast"
 }
 
 // Creates a policy to allow multicast traffic within 'ns':
@@ -328,6 +335,7 @@ func (oc *Controller) createMulticastAllowPolicy(ns string) error {
 	}
 
 	match := getACLMatch(hashedPortGroupName, "ip4.mcast", knet.PolicyTypeEgress)
+
 	err = addACLPortGroup(portGroupUUID, fromLport,
 		defaultMcastAllowPriority, match, "allow", knet.PolicyTypeEgress)
 	if err != nil {
@@ -525,6 +533,7 @@ func (oc *Controller) handleLocalPodSelectorAddFunc(
 		return
 	}
 
+	klog.V(5).Infof("Adding Pod %s to NetworkPolicy %s", pod.ObjectMeta.Name, np.name)
 	// Get the logical port info
 	logicalPort := podLogicalPortName(pod)
 	portInfo, err := oc.logicalPortCache.get(logicalPort)
@@ -532,18 +541,22 @@ func (oc *Controller) handleLocalPodSelectorAddFunc(
 		klog.Errorf(err.Error())
 		return
 	}
+	klog.V(5).Infof("Pod's Port name is %s", logicalPort)
 
 	np.Lock()
 	defer np.Unlock()
 
 	if np.deleted {
+		klog.V(5).Infof("Network policy %s was deleted, or signaled as deleted", np.name)
 		return
 	}
 
 	if _, ok := np.localPods[logicalPort]; ok {
+		klog.V(5).Infof("Logical port info is already in namespace struct")
 		return
 	}
 
+	klog.V(5).Infof("Trying to add pod to local Deny policy, logicalport: %s", logicalPort)
 	oc.localPodAddDefaultDeny(policy, portInfo)
 
 	if np.portGroupUUID == "" {
@@ -617,6 +630,7 @@ func (oc *Controller) handleLocalPodSelector(
 	h := oc.watchFactory.AddFilteredPodHandler(policy.Namespace, sel,
 		cache.ResourceEventHandlerFuncs{
 			AddFunc: func(obj interface{}) {
+				klog.V(5).Infof("Adding Pod to NP selector")
 				oc.handleLocalPodSelectorAddFunc(policy, np, obj)
 			},
 			DeleteFunc: func(obj interface{}) {
@@ -652,7 +666,7 @@ func (oc *Controller) addNetworkPolicy(policy *knet.NetworkPolicy) {
 			policy.Namespace, err)
 		return
 	}
-	defer oc.networkPoliciesMutex.Unlock()
+	//defer oc.networkPoliciesMutex.Unlock()
 	klog.V(5).Infof("Got main Network Policy map, back in addNetwork policy ")
 
 	nsIdx := types.NamespacedName{
@@ -662,7 +676,7 @@ func (oc *Controller) addNetworkPolicy(policy *knet.NetworkPolicy) {
 
 	_, alreadyExists := npInfo[nsIdx]
 	if alreadyExists {
-		oc.networkPoliciesMutex.Unlock()
+		//oc.networkPoliciesMutex.Unlock()
 		klog.V(5).Infof("networkPolicy already exists")
 		return
 	}
@@ -671,14 +685,17 @@ func (oc *Controller) addNetworkPolicy(policy *knet.NetworkPolicy) {
 	npInfo[nsIdx] = np
 	//Lock the network policy itself
 	np.Lock()
-	//Unlock the networPoliciesMutex do I need this with the defer?
+	//Unlock the npInfo struct
 	oc.networkPoliciesMutex.Unlock()
+	//Unlock the networPoliciesMutex do I need this with the defer -> NO?
+	//oc.networkPoliciesMutex.Unlock()
 
 	// Create a port group for the policy. All the pods that this policy
 	// selects will be eventually added to this port group.
 	readableGroupName := fmt.Sprintf("%s_%s", policy.Namespace, policy.Name)
 	np.portGroupName = hashedPortGroup(readableGroupName)
 
+	klog.V(5).Infof("Making new port group %s", readableGroupName)
 	np.portGroupUUID, err = createPortGroup(readableGroupName, np.portGroupName)
 	if err != nil {
 		klog.Errorf("Failed to create port_group for network policy %s in "+
@@ -694,6 +711,7 @@ func (oc *Controller) addNetworkPolicy(policy *knet.NetworkPolicy) {
 	var policyHandlers []policyHandler
 	// Go through each ingress rule.  For each ingress rule, create an
 	// addressSet for the peer pods.
+	klog.V(5).Infof("Going though each ingress rule and making an addressSet for each")
 	for i, ingressJSON := range policy.Spec.Ingress {
 		klog.V(5).Infof("Network policy ingress is %+v", ingressJSON)
 
@@ -765,6 +783,7 @@ func (oc *Controller) addNetworkPolicy(policy *knet.NetworkPolicy) {
 
 	// For all the pods in the local namespace that this policy
 	// effects, add them to the port group.
+	klog.V(5).Infof("Entering handleLocalPodSelector")
 	oc.handleLocalPodSelector(policy, np)
 
 	for _, handler := range policyHandlers {
