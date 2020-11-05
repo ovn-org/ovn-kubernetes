@@ -2,12 +2,13 @@ package sriovnet
 
 import (
 	"fmt"
-	"io/ioutil"
 	"os"
 	"path/filepath"
 	"regexp"
 	"strconv"
 	"strings"
+
+	utilfs "github.com/Mellanox/sriovnet/pkg/utils/filesystem"
 )
 
 const (
@@ -45,7 +46,7 @@ func parsePortName(physPortName string) (pfRepIndex int, vfRepIndex int, err err
 
 func isSwitchdev(netdevice string) bool {
 	swIDFile := filepath.Join(NetSysDir, netdevice, netdevPhysSwitchID)
-	physSwitchID, err := ioutil.ReadFile(swIDFile)
+	physSwitchID, err := utilfs.Fs.ReadFile(swIDFile)
 	if err != nil {
 		return false
 	}
@@ -59,7 +60,7 @@ func isSwitchdev(netdevice string) bool {
 // returns the uplink represntor netdev name for that VF.
 func GetUplinkRepresentor(vfPciAddress string) (string, error) {
 	devicePath := filepath.Join(PciSysDir, vfPciAddress, "physfn/net")
-	devices, err := ioutil.ReadDir(devicePath)
+	devices, err := utilfs.Fs.ReadDir(devicePath)
 	if err != nil {
 		return "", fmt.Errorf("failed to lookup %s: %v", vfPciAddress, err)
 	}
@@ -73,20 +74,20 @@ func GetUplinkRepresentor(vfPciAddress string) (string, error) {
 
 func GetVfRepresentor(uplink string, vfIndex int) (string, error) {
 	swIDFile := filepath.Join(NetSysDir, uplink, netdevPhysSwitchID)
-	physSwitchID, err := ioutil.ReadFile(swIDFile)
+	physSwitchID, err := utilfs.Fs.ReadFile(swIDFile)
 	if err != nil || string(physSwitchID) == "" {
 		return "", fmt.Errorf("cant get uplink %s switch id", uplink)
 	}
 
 	pfSubsystemPath := filepath.Join(NetSysDir, uplink, "subsystem")
-	devices, err := ioutil.ReadDir(pfSubsystemPath)
+	devices, err := utilfs.Fs.ReadDir(pfSubsystemPath)
 	if err != nil {
 		return "", err
 	}
 	for _, device := range devices {
 		devicePath := filepath.Join(NetSysDir, device.Name())
 		deviceSwIDFile := filepath.Join(devicePath, netdevPhysSwitchID)
-		deviceSwID, err := ioutil.ReadFile(deviceSwIDFile)
+		deviceSwID, err := utilfs.Fs.ReadFile(deviceSwIDFile)
 		if err != nil || string(deviceSwID) != string(physSwitchID) {
 			continue
 		}
@@ -95,7 +96,7 @@ func GetVfRepresentor(uplink string, vfIndex int) (string, error) {
 		if os.IsNotExist(err) {
 			continue
 		}
-		physPortName, err := ioutil.ReadFile(devicePortNameFile)
+		physPortName, err := utilfs.Fs.ReadFile(devicePortNameFile)
 		if err != nil {
 			continue
 		}
