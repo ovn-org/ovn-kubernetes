@@ -96,6 +96,11 @@ func (gp *gressPolicy) ensurePeerAddressSet(factory AddressSetFactory) error {
 }
 
 func (gp *gressPolicy) addPeerPod(pod *v1.Pod) error {
+	if gp.peerAddressSet == nil {
+		return fmt.Errorf("peer AddressSet is nil, cannot add peer pod: %s for gressPolicy: %s",
+			pod.ObjectMeta.Name, gp.policyName)
+	}
+
 	ips, err := util.GetAllPodIPs(pod)
 	if err != nil {
 		return err
