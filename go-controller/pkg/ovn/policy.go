@@ -19,6 +19,7 @@ type namespacePolicy struct {
 	sync.Mutex
 	name            string
 	namespace       string
+	policyTypes     []knet.PolicyType
 	ingressPolicies []*gressPolicy
 	egressPolicies  []*gressPolicy
 	podHandlerList  []*factory.Handler
@@ -33,6 +34,7 @@ func NewNamespacePolicy(policy *knet.NetworkPolicy) *namespacePolicy {
 	np := &namespacePolicy{
 		name:            policy.Name,
 		namespace:       policy.Namespace,
+		policyTypes:     policy.Spec.PolicyTypes,
 		ingressPolicies: make([]*gressPolicy, 0),
 		egressPolicies:  make([]*gressPolicy, 0),
 		podHandlerList:  make([]*factory.Handler, 0),
@@ -419,7 +421,9 @@ func (oc *Controller) localPodDelDefaultDeny(
 	oc.lspMutex.Lock()
 	defer oc.lspMutex.Unlock()
 
-	if !(len(np.ingressPolicies) == 0 && len(np.egressPolicies) > 0) {
+	// Remove port from ingress deny port-group for [Ingress] and [ingress,egress] PolicyTypes
+	// If NOT [egress] PolicyType
+	if !(len(np.policyTypes) == 1 && np.policyTypes[0] == knet.PolicyTypeEgress) {
 		if oc.lspIngressDenyCache[portInfo.name] > 0 {
 			oc.lspIngressDenyCache[portInfo.name]--
 			if oc.lspIngressDenyCache[portInfo.name] == 0 {
@@ -429,9 +433,10 @@ func (oc *Controller) localPodDelDefaultDeny(
 			}
 		}
 	}
-
-	if (len(np.ingressPolicies) == 0 && len(np.egressPolicies) > 0) ||
-		len(np.egressPolicies) > 0 || (len(np.egressPolicies) > 0 && len(np.ingressPolicies) > 0) {
+	// Remove port from egress deny port group for [egress] and [ingress,egress] PolicyTypes
+	// if [egress] PolicyType OR there are any egress rules OR [ingress,egress] PolicyType
+	if (len(np.policyTypes) == 1 && np.policyTypes[0] == knet.PolicyTypeEgress) ||
+		len(np.egressPolicies) > 0 || len(np.policyTypes) == 2 {
 		if oc.lspEgressDenyCache[portInfo.name] > 0 {
 			oc.lspEgressDenyCache[portInfo.name]--
 			if oc.lspEgressDenyCache[portInfo.name] == 0 {
