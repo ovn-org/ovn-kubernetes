@@ -155,11 +155,13 @@ func shareGatewayInterfaceTest(app *cli.App, testNS ns.NetNS,
 			"ovs-ofctl -O OpenFlow13 replace-flows breth0 -",
 		})
 		fexec.AddFakeCmdsNoOutputNoError([]string{
+			"ovs-ofctl add-flow breth0 cookie=0xdeff105, priority=10, table=0, in_port=7, dl_dst=" + eth0MAC + ", actions=output:5,output:LOCAL",
 			"ovs-ofctl add-flow breth0 cookie=0xdeff105, priority=100, in_port=5, ip, actions=ct(commit, zone=64000), output:7",
 			"ovs-ofctl add-flow breth0 cookie=0xdeff105, priority=50, in_port=7, ip, actions=ct(zone=64000, table=1)",
 			"ovs-ofctl add-flow breth0 cookie=0xdeff105, priority=100, table=1, ct_state=+trk+est, actions=output:5",
 			"ovs-ofctl add-flow breth0 cookie=0xdeff105, priority=100, table=1, ct_state=+trk+rel, actions=output:5",
-			"ovs-ofctl add-flow breth0 cookie=0xdeff105, priority=0, table=1, actions=output:FLOOD",
+			"ovs-ofctl add-flow breth0 cookie=0xdeff105, priority=10, table=1, dl_dst=" + eth0MAC + ", actions=output:LOCAL",
+			"ovs-ofctl add-flow breth0 cookie=0xdeff105, priority=0, table=1, actions=output:NORMAL",
 			"ovs-ofctl add-flow breth0 cookie=0xdeff105, priority=0, table=2, actions=output:7",
 		})
 		// nodePortWatcher()

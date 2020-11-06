@@ -359,7 +359,7 @@ func (npw *nodePortWatcher) SyncServices(services []interface{}) {
 // -- to also connection track the outbound north-south traffic through l3 gateway so that
 //    the return traffic can be steered back to OVN logical topology
 // -- to also handle unDNAT return traffic back out of the host
-func newSharedGatewayOpenFlowManager(nodeName, gwBridge, gwIntf string) (*openflowManager, error) {
+func newSharedGatewayOpenFlowManager(nodeName, macAddress, gwBridge, gwIntf string) (*openflowManager, error) {
 	// the name of the patch port created by ovn-controller is of the form
 	// patch-<logical_port_name_of_localnet_port>-to-br-int
 	localnetLpName := gwBridge + "_" + nodeName
@@ -380,13 +380,22 @@ func newSharedGatewayOpenFlowManager(nodeName, gwBridge, gwIntf string) (*openfl
 			gwIntf, stderr, err)
 	}
 
-	// replace the left over OpenFlow flows with the FLOOD action flow
-	_, stderr, err = util.AddOFFlowWithSpecificAction(gwBridge, util.FloodAction)
+	// replace the left over OpenFlow flows with the NORMAL action flow
+	_, stderr, err = util.AddOFFlowWithSpecificAction(gwBridge, util.NormalAction)
 	if err != nil {
 		return nil, fmt.Errorf("failed to replace-flows on bridge %q stderr:%s (%v)", gwBridge, stderr, err)
 	}
 
 	nFlows := 0
+	// table 0, we check to see if this dest mac is the shared mac, if so flood to both ports
+	_, stderr, err = util.RunOVSOfctl("add-flow", gwBridge,
+		fmt.Sprintf("cookie=%s, priority=10, table=0, in_port=%s, dl_dst=%s, actions=output:%s,output:LOCAL",
+			defaultOpenFlowCookie, ofportPhys, macAddress, ofportPatch))
+	if err != nil {
+		return nil, fmt.Errorf("failed to add openflow flow to %s, stderr: %q, error: %v", gwBridge, stderr, err)
+	}
+	nFlows++
+
 	if config.IPv4Mode {
 		// table 0, packets coming from pods headed externally. Commit connections
 		// so that reverse direction goes back to the pods.
@@ -455,9 +464,29 @@ func newSharedGatewayOpenFlowManager(nodeName, gwBridge, gwIntf string) (*openfl
 	}
 	nFlows++
 
+	// table 1, we check to see if this dest mac is the shared mac, if so flood to both ports
+	_, stderr, err = util.RunOVSOfctl("add-flow", gwBridge,
+		fmt.Sprintf("cookie=%s, priority=10, table=1, dl_dst=%s, actions=output:LOCAL",
+			defaultOpenFlowCookie, macAddress))
+	if err != nil {
+		return nil, fmt.Errorf("failed to add openflow flow to %s, stderr: %q, error: %v", gwBridge, stderr, err)
+	}
+	nFlows++
+
+	if config.IPv6Mode {
+		// REMOVEME(trozet) when https://bugzilla.kernel.org/show_bug.cgi?id=11797 is resolved
+		// must flood icmpv6 traffic as it fails to create a CT entry
+		_, stderr, err = util.RunOVSOfctl("add-flow", gwBridge,
+			fmt.Sprintf("cookie=%s, priority=1, table=1,icmp6 actions=FLOOD", defaultOpenFlowCookie))
+		if err != nil {
+			return nil, fmt.Errorf("failed to add openflow flow to %s, stderr: %q, error: %v", gwBridge, stderr, err)
+		}
+		nFlows++
+	}
+
 	// table 1, all other connections do normal processing
 	_, stderr, err = util.RunOVSOfctl("add-flow", gwBridge,
-		fmt.Sprintf("cookie=%s, priority=0, table=1, actions=output:FLOOD", defaultOpenFlowCookie))
+		fmt.Sprintf("cookie=%s, priority=0, table=1, actions=output:NORMAL", defaultOpenFlowCookie))
 	if err != nil {
 		return nil, fmt.Errorf("failed to add openflow flow to %s, stderr: %q, "+
 			"error: %v", gwBridge, stderr, err)
@@ -485,7 +514,7 @@ func newSharedGateway(nodeName string, subnets []*net.IPNet, gwNextHops []net.IP
 	klog.Info("Creating new shared gateway")
 	gw := &gateway{}
 
-	bridgeName, uplinkName, ips, err := gatewayInitInternal(
+	bridgeName, uplinkName, macAddress, ips, err := gatewayInitInternal(
 		nodeName, gwIntf, subnets, gwNextHops, nodeAnnotator)
 	if err != nil {
 		return nil, err
@@ -497,7 +526,7 @@ func newSharedGateway(nodeName string, subnets []*net.IPNet, gwNextHops []net.IP
 		klog.Info("Creating Shared Gateway Openflow Manager")
 		var err error
 
-		gw.openflowManager, err = newSharedGatewayOpenFlowManager(nodeName, bridgeName, uplinkName)
+		gw.openflowManager, err = newSharedGatewayOpenFlowManager(nodeName, macAddress.String(), bridgeName, uplinkName)
 		if err != nil {
 			return err
 		}

@@ -51,7 +51,7 @@ func newLocalGateway(nodeName string, hostSubnets []*net.IPNet, gwNextHops []net
 		}
 	}
 
-	bridgeName, uplinkName, _, err := gatewayInitInternal(
+	bridgeName, uplinkName, _, _, err := gatewayInitInternal(
 		nodeName, gwIntf, hostSubnets, gwNextHops, nodeAnnotator)
 	if err != nil {
 		return nil, err
