@@ -3,12 +3,14 @@ package ovn
 import (
 	"encoding/json"
 	"fmt"
-	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
 	"net"
 	"reflect"
 	"strings"
 
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
+
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/loadbalancer"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
 
 	kapi "k8s.io/api/core/v1"
@@ -19,7 +21,7 @@ import (
 
 func addRejectACLs(rejectACLs map[string]map[string]bool, lb, ip string, port int32, hasEndpoints bool) {
 	if ip != "" {
-		name := generateACLName(lb, ip, port)
+		name := loadbalancer.GenerateACLName(lb, ip, port)
 		if _, ok := rejectACLs[name]; !ok {
 			rejectACLs[name] = make(map[string]bool)
 		}
@@ -219,7 +221,7 @@ func (ovn *Controller) syncServices(services []interface{}) {
 			continue
 		}
 
-		loadBalancerVIPs, err := ovn.getLoadBalancerVIPs(loadBalancer)
+		loadBalancerVIPs, err := loadbalancer.GetLoadBalancerVIPs(loadBalancer)
 		if err != nil {
 			klog.Errorf("Failed to get load balancer vips for %s (%v)", loadBalancer, err)
 			continue
@@ -249,7 +251,7 @@ func (ovn *Controller) syncServices(services []interface{}) {
 				klog.Errorf("Gateway router %s does not have load balancer (%v)", gateway, err)
 				continue
 			}
-			loadBalancerVIPs, err := ovn.getLoadBalancerVIPs(loadBalancer)
+			loadBalancerVIPs, err := loadbalancer.GetLoadBalancerVIPs(loadBalancer)
 			if err != nil {
 				klog.Errorf("Failed to get load balancer vips for %s (%v)", loadBalancer, err)
 				continue
