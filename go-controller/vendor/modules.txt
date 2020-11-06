@@ -61,7 +61,6 @@ github.com/ebay/go-ovn
 github.com/ebay/libovsdb
 # github.com/evanphx/json-patch v4.5.0+incompatible
 github.com/evanphx/json-patch
-# github.com/go-logr/logr v0.1.0
 # github.com/go-logr/logr v0.2.0
 github.com/go-logr/logr
 # github.com/gogo/protobuf v1.3.1
