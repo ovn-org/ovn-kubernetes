@@ -274,6 +274,7 @@ jobs:
       uses: AutoModality/action-xunit-viewer@v1
       with:
         results: ./test/_artifacts/
+        fail: false
 
     - name: Upload Test Report
       if: always()
