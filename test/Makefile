@@ -26,4 +26,4 @@ control-plane:
 	E2E_REPORT_PREFIX=$(JOB_NAME)_ \
 	KIND_IPV4_SUPPORT=$(KIND_IPV4_SUPPORT) \
 	KIND_IPV6_SUPPORT=$(KIND_IPV6_SUPPORT) \
-	./scripts/e2e-cp.sh
+	./scripts/e2e-cp.sh $(WHAT)

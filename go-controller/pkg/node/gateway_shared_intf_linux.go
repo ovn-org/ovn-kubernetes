@@ -8,6 +8,7 @@ import (
 	"strings"
 
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
 
 	kapi "k8s.io/api/core/v1"
@@ -28,7 +29,7 @@ func setupLocalNodeAccessBridge(nodeName string, subnets []*net.IPNet) error {
 	}
 
 	_, _, err = bridgedGatewayNodeSetup(nodeName, localBridgeName, localBridgeName,
-		util.LocalNetworkName, true)
+		types.LocalNetworkName, true)
 	if err != nil {
 		return fmt.Errorf("failed while setting up local node access bridge : %v", err)
 	}
@@ -40,9 +41,9 @@ func setupLocalNodeAccessBridge(nodeName string, subnets []*net.IPNet) error {
 
 	var macAddress string
 	if config.IPv4Mode {
-		macAddress = util.IPAddrToHWAddr(net.ParseIP(util.V4NodeLocalNatSubnetNextHop)).String()
+		macAddress = util.IPAddrToHWAddr(net.ParseIP(types.V4NodeLocalNATSubnetNextHop)).String()
 	} else {
-		macAddress = util.IPAddrToHWAddr(net.ParseIP(util.V6NodeLocalNatSubnetNextHop)).String()
+		macAddress = util.IPAddrToHWAddr(net.ParseIP(types.V6NodeLocalNATSubnetNextHop)).String()
 	}
 
 	_, stderr, err = util.RunOVSVsctl(
@@ -71,11 +72,11 @@ func setupLocalNodeAccessBridge(nodeName string, subnets []*net.IPNet) error {
 		var gatewaySubnetMask net.IPMask
 		isSubnetIPv6 := utilnet.IsIPv6CIDR(subnet)
 		if isSubnetIPv6 {
-			gatewayNextHop = net.ParseIP(util.V6NodeLocalNatSubnetNextHop)
-			gatewaySubnetMask = net.CIDRMask(util.V6NodeLocalNatSubnetPrefix, 128)
+			gatewayNextHop = net.ParseIP(types.V6NodeLocalNATSubnetNextHop)
+			gatewaySubnetMask = net.CIDRMask(types.V6NodeLocalNATSubnetPrefix, 128)
 		} else {
-			gatewayNextHop = net.ParseIP(util.V4NodeLocalNatSubnetNextHop)
-			gatewaySubnetMask = net.CIDRMask(util.V4NodeLocalNatSubnetPrefix, 32)
+			gatewayNextHop = net.ParseIP(types.V4NodeLocalNATSubnetNextHop)
+			gatewaySubnetMask = net.CIDRMask(types.V4NodeLocalNATSubnetPrefix, 32)
 		}
 		gatewayNextHopCIDR := &net.IPNet{IP: gatewayNextHop, Mask: gatewaySubnetMask}
 		if err = util.LinkAddrAdd(link, gatewayNextHopCIDR); err != nil {

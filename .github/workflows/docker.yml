@@ -26,9 +26,8 @@ jobs:
     - name: Set up environment
       run: |
         export GOPATH=$(go env GOPATH)
-        echo "::set-env name=GOPATH::$GOPATH"
-        export PATH=$GOPATH/bin:$PATH
-        echo "::add-path::$GOPATH/bin"
+        echo "GOPATH=$GOPATH" >> $GITHUB_ENV
+        echo "$GOPATH/bin" >> $GITHUB_PATH
 
     - name: Build images
       run: |

@@ -22,6 +22,7 @@ import (
 	egressipv1fake "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/egressip/v1/apis/clientset/versioned/fake"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/kube"
 	ovntest "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/testing"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
 	v1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -65,8 +66,8 @@ func testManagementPort(ctx *cli.Context, fexec *ovntest.FakeExec, testNS ns.Net
 	const (
 		nodeName      string = "node1"
 		mgtPortMAC    string = "00:00:00:55:66:77"
-		mgtPort       string = util.K8sMgmtIntfName
-		legacyMgtPort string = util.K8sPrefix + nodeName
+		mgtPort       string = types.K8sMgmtIntfName
+		legacyMgtPort string = types.K8sPrefix + nodeName
 		mtu           string = "1400"
 	)
 
@@ -137,8 +138,7 @@ func testManagementPort(ctx *cli.Context, fexec *ovntest.FakeExec, testNS ns.Net
 	err = testNS.Do(func(ns.NetNS) error {
 		defer GinkgoRecover()
 
-		n := OvnNode{name: nodeName, stopChan: make(chan struct{})}
-		err = n.createManagementPort(nodeSubnetCIDRs, nodeAnnotator, waiter)
+		_, err = createManagementPort(nodeName, nodeSubnetCIDRs, nodeAnnotator, waiter)
 		Expect(err).NotTo(HaveOccurred())
 		l, err := netlink.LinkByName(mgtPort)
 		Expect(err).NotTo(HaveOccurred())
@@ -259,7 +259,7 @@ var _ = Describe("Management Port Operations", func() {
 		Expect(err).NotTo(HaveOccurred())
 		err = testNS.Do(func(ns.NetNS) error {
 			defer GinkgoRecover()
-			ovntest.AddLink(util.K8sMgmtIntfName)
+			ovntest.AddLink(types.K8sMgmtIntfName)
 			return nil
 		})
 		Expect(err).NotTo(HaveOccurred())

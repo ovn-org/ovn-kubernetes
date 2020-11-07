@@ -38,7 +38,6 @@ type NodeController struct {
 func newNodeController(kube kube.Interface,
 	nodeName string,
 	nodeLister listers.NodeLister,
-	podLister listers.PodLister,
 ) (nodeController, error) {
 	supportedFeatures := hcn.GetSupportedFeatures()
 	if !supportedFeatures.HostRoute {
@@ -54,7 +53,7 @@ func newNodeController(kube kube.Interface,
 			"UDP port. Please make sure you install all the KB updates on your system.")
 	}
 
-	node, err := kube.GetNode(nodeName)
+	node, err := nodeLister.Get(nodeName)
 	if err != nil {
 		return nil, err
 	}

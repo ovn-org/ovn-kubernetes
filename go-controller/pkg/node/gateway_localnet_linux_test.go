@@ -7,12 +7,20 @@ import (
 	. "github.com/onsi/ginkgo"
 	. "github.com/onsi/gomega"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/factory"
 	ovntest "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/testing"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
 	"github.com/urfave/cli/v2"
+	kapi "k8s.io/api/core/v1"
 	v1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	"k8s.io/apimachinery/pkg/types"
+	k8stypes "k8s.io/apimachinery/pkg/types"
+	"k8s.io/client-go/tools/cache"
+)
+
+const (
+	v4localnetGatewayIP = "10.244.0.1"
 )
 
 func getFakeLocalAddrs() map[string]net.IPNet {
@@ -25,7 +33,7 @@ func getFakeLocalAddrs() map[string]net.IPNet {
 	return localAddrSet
 }
 
-func initFakeNodePortWatcher(fakeOvnNode *FakeOVNNode, iptV4, iptV6 util.IPTablesHelper) *localPortWatcherData {
+func initFakeNodePortWatcher(fakeOvnNode *FakeOVNNode, iptV4, iptV6 util.IPTablesHelper) *localPortWatcher {
 	initIPTable := map[string]util.FakeTable{
 		"filter": {},
 		"nat":    {},
@@ -39,7 +47,7 @@ func initFakeNodePortWatcher(fakeOvnNode *FakeOVNNode, iptV4, iptV6 util.IPTable
 	err = f6.MatchState(initIPTable)
 	Expect(err).NotTo(HaveOccurred())
 
-	fNPW := localPortWatcherData{
+	fNPW := localPortWatcher{
 		recorder:     fakeOvnNode.recorder,
 		gatewayIPv4:  v4localnetGatewayIP,
 		localAddrSet: getFakeLocalAddrs(),
@@ -47,9 +55,34 @@ func initFakeNodePortWatcher(fakeOvnNode *FakeOVNNode, iptV4, iptV6 util.IPTable
 	return &fNPW
 }
 
+func startLocalPortWatcher(l *localPortWatcher, wf factory.NodeWatchFactory) error {
+	if err := initLocalGatewayIPTables(); err != nil {
+		return err
+	}
+	if err := initRoutingRules(); err != nil {
+		return err
+	}
+	wf.AddServiceHandler(cache.ResourceEventHandlerFuncs{
+		AddFunc: func(obj interface{}) {
+			svc := obj.(*kapi.Service)
+			l.AddService(svc)
+		},
+		UpdateFunc: func(old, new interface{}) {
+			oldSvc := old.(*kapi.Service)
+			newSvc := new.(*kapi.Service)
+			l.UpdateService(oldSvc, newSvc)
+		},
+		DeleteFunc: func(obj interface{}) {
+			svc := obj.(*kapi.Service)
+			l.DeleteService(svc)
+		},
+	}, l.SyncServices)
+	return nil
+}
+
 func newServiceMeta(name, namespace string) metav1.ObjectMeta {
 	return metav1.ObjectMeta{
-		UID:       types.UID(namespace),
+		UID:       k8stypes.UID(namespace),
 		Name:      name,
 		Namespace: namespace,
 		Labels: map[string]string{
@@ -110,7 +143,7 @@ var _ = Describe("Node Operations", func() {
 				})
 
 				fakeOvnNode.start(ctx)
-				fakeOvnNode.node.watchLocalPorts(fNPW)
+				startLocalPortWatcher(fNPW, fakeOvnNode.watcher)
 
 				expectedTables := map[string]util.FakeTable{
 					"filter": {
@@ -172,13 +205,13 @@ var _ = Describe("Node Operations", func() {
 				})
 				fakeOvnNode.fakeExec.AddFakeCmd(&ovntest.ExpectedCmd{
 					Cmd:    "ip route list table " + localnetGatewayExternalIDTable,
-					Output: fmt.Sprintf("%s via %s dev %s\n9.9.9.9 via %s dev %s\n", externalIP, v4localnetGatewayIP, localnetGatewayNextHopPort, v4localnetGatewayIP, localnetGatewayNextHopPort),
+					Output: fmt.Sprintf("%s via %s dev %s\n9.9.9.9 via %s dev %s\n", externalIP, v4localnetGatewayIP, types.K8sMgmtIntfName, v4localnetGatewayIP, types.K8sMgmtIntfName),
 				})
 				fakeOvnNode.fakeExec.AddFakeCmdsNoOutputNoError([]string{
-					fmt.Sprintf("ip route del 9.9.9.9 via %s dev %s table %s", v4localnetGatewayIP, localnetGatewayNextHopPort, localnetGatewayExternalIDTable),
+					fmt.Sprintf("ip route del 9.9.9.9 via %s dev %s table %s", v4localnetGatewayIP, types.K8sMgmtIntfName, localnetGatewayExternalIDTable),
 				})
 				fakeOvnNode.fakeExec.AddFakeCmdsNoOutputNoError([]string{
-					fmt.Sprintf("ip route replace %s via %s dev %s table %s", externalIP, v4localnetGatewayIP, localnetGatewayNextHopPort, localnetGatewayExternalIDTable),
+					fmt.Sprintf("ip route replace %s via %s dev %s table %s", externalIP, v4localnetGatewayIP, types.K8sMgmtIntfName, localnetGatewayExternalIDTable),
 				})
 
 				service := *newService("service1", "namespace1", "10.129.0.2",
@@ -231,7 +264,7 @@ var _ = Describe("Node Operations", func() {
 						},
 					},
 				)
-				fakeOvnNode.node.watchLocalPorts(fNPW)
+				startLocalPortWatcher(fNPW, fakeOvnNode.watcher)
 				Expect(fakeOvnNode.fakeExec.CalledMatchesExpected()).To(BeTrue(), fExec.ErrorDesc)
 
 				expectedTables = map[string]util.FakeTable{
@@ -295,7 +328,7 @@ var _ = Describe("Node Operations", func() {
 				)
 
 				fakeOvnNode.fakeExec.AddFakeCmdsNoOutputNoError([]string{
-					fmt.Sprintf("ip route replace %s via %s dev %s table %s", externalIP, v4localnetGatewayIP, localnetGatewayNextHopPort, localnetGatewayExternalIDTable),
+					fmt.Sprintf("ip route replace %s via %s dev %s table %s", externalIP, v4localnetGatewayIP, types.K8sMgmtIntfName, localnetGatewayExternalIDTable),
 				})
 
 				fNPW.addService(&service)
@@ -515,7 +548,7 @@ var _ = Describe("Node Operations", func() {
 				)
 
 				fakeOvnNode.fakeExec.AddFakeCmdsNoOutputNoError([]string{
-					fmt.Sprintf("ip route del %s via %s dev %s table %s", externalIP, v4localnetGatewayIP, localnetGatewayNextHopPort, localnetGatewayExternalIDTable),
+					fmt.Sprintf("ip route del %s via %s dev %s table %s", externalIP, v4localnetGatewayIP, types.K8sMgmtIntfName, localnetGatewayExternalIDTable),
 				})
 
 				fNPW.deleteService(&service)

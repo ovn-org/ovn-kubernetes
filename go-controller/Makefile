@@ -27,7 +27,7 @@ windows:
 	WINDOWS_BUILD="yes" hack/build-go.sh hybrid-overlay/cmd/hybrid-overlay-node
 
 check test:
-	hack/test-go.sh ${PKGS}
+	RACE=1 hack/test-go.sh ${PKGS}
 
 codegen:
 	hack/update-codegen.sh

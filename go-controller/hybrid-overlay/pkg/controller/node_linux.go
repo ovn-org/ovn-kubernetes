@@ -13,6 +13,7 @@ import (
 	houtil "github.com/ovn-org/ovn-kubernetes/go-controller/hybrid-overlay/pkg/util"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/kube"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
 
 	"github.com/vishvananda/netlink"
@@ -38,7 +39,6 @@ type flowCacheEntry struct {
 
 // NodeController is the node hybrid overlay controller
 type NodeController struct {
-	kube        kube.Interface
 	nodeName    string
 	initialized bool
 	drMAC       net.HardwareAddr
@@ -54,7 +54,6 @@ type NodeController struct {
 	flowChan chan struct{}
 
 	nodeLister listers.NodeLister
-	podLister  listers.PodLister
 }
 
 // newNodeController returns a node handler that listens for node events
@@ -63,14 +62,12 @@ type NodeController struct {
 //  1. Setting up a VXLAN gateway and hooking to the OVN gateway
 //  2. Setting back annotations about its VTEP and gateway MAC address to its own object
 func newNodeController(
-	kube kube.Interface,
+	_ kube.Interface,
 	nodeName string,
 	nodeLister listers.NodeLister,
-	podLister listers.PodLister,
 ) (nodeController, error) {
 
 	node := &NodeController{
-		kube:        kube,
 		nodeName:    nodeName,
 		vxlanPort:   uint16(config.HybridOverlay.VXLANPort),
 		tunMap:      make(map[string]string),
@@ -79,7 +76,6 @@ func newNodeController(
 		flowMutex:   sync.Mutex{},
 		flowChan:    make(chan struct{}, 1),
 		nodeLister:  nodeLister,
-		podLister:   podLister,
 	}
 	return node, nil
 }
@@ -527,9 +523,9 @@ func (n *NodeController) EnsureHybridOverlayBridge(node *kapi.Node) error {
 	if len(config.HybridOverlay.ClusterSubnets) > 0 {
 		// Add a route via the hybrid overlay port IP through the management port
 		// interface for each hybrid overlay cluster subnet
-		mgmtPortLink, err := netlink.LinkByName(util.K8sMgmtIntfName)
+		mgmtPortLink, err := netlink.LinkByName(types.K8sMgmtIntfName)
 		if err != nil {
-			return fmt.Errorf("failed to lookup link %s: %v", util.K8sMgmtIntfName, err)
+			return fmt.Errorf("failed to lookup link %s: %v", types.K8sMgmtIntfName, err)
 		}
 		mgmtPortMAC := mgmtPortLink.Attrs().HardwareAddr
 		for _, clusterEntry := range config.HybridOverlay.ClusterSubnets {

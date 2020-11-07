@@ -101,9 +101,9 @@ func getOvnControllerVersionInfo() {
 	// ovn-controller 20.06.0.86f64fc1
 	// Open vSwitch Library 2.13.0.f945b5c5
 	for _, line := range strings.Split(stdout, "\n") {
-		if strings.HasPrefix("ovn-controller ", line) {
+		if strings.HasPrefix(line, "ovn-controller ") {
 			ovnControllerVersion = strings.Fields(line)[1]
-		} else if strings.HasPrefix("Open vSwitch Library ", line) {
+		} else if strings.HasPrefix(line, "Open vSwitch Library ") {
 			ovnControllerOvsLibVersion = strings.Fields(line)[3]
 		}
 	}

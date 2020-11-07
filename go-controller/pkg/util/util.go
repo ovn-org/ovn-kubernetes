@@ -7,35 +7,12 @@ import (
 	"sync"
 
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
 
 	"github.com/urfave/cli/v2"
 
 	"k8s.io/klog"
 	utilnet "k8s.io/utils/net"
-)
-
-const (
-	K8sPrefix = "k8s-"
-	// K8sMgmtIntfName name to be used as an OVS internal port on the node
-	K8sMgmtIntfName = "ovn-k8s-mp0"
-
-	// PhysicalNetworkName is the name that maps to an OVS bridge that provides
-	// access to physical/external network
-	PhysicalNetworkName = "physnet"
-
-	// LocalNetworkName is the name that maps to an OVS bridge that provides
-	// access to local service
-	LocalNetworkName = "locnet"
-
-	V6NodeLocalNatSubnet           = "fd99::/64"
-	V6NodeLocalNatSubnetPrefix     = 64
-	V6NodeLocalNatSubnetNextHop    = "fd99::1"
-	V6NodeLocalDistributedGwPortIP = "fd99::2"
-
-	V4NodeLocalNatSubnet           = "169.254.0.0/20"
-	V4NodeLocalNatSubnetPrefix     = 20
-	V4NodeLocalNatSubnetNextHop    = "169.254.0.1"
-	V4NodeLocalDistributedGwPortIP = "169.254.0.2"
 )
 
 // StringArg gets the named command-line argument or returns an error if it is empty
@@ -50,9 +27,9 @@ func StringArg(context *cli.Context, name string) (string, error) {
 // GetLegacyK8sMgmtIntfName returns legacy management ovs-port name
 func GetLegacyK8sMgmtIntfName(nodeName string) string {
 	if len(nodeName) > 11 {
-		return K8sPrefix + (nodeName[:11])
+		return types.K8sPrefix + (nodeName[:11])
 	}
-	return K8sPrefix + nodeName
+	return types.K8sPrefix + nodeName
 }
 
 // GetNodeChassisID returns the machine's OVN chassis ID
@@ -96,7 +73,7 @@ func UpdateNodeSwitchExcludeIPs(nodeName string, subnet *net.IPNet) error {
 	lines := strings.Split(stdout, "\n")
 	for _, line := range lines {
 		line = strings.TrimSpace(line)
-		if strings.Contains(line, "("+K8sPrefix+nodeName+")") {
+		if strings.Contains(line, "("+types.K8sPrefix+nodeName+")") {
 			haveManagementPort = true
 		} else if strings.Contains(line, "("+GetHybridOverlayPortName(nodeName)+")") {
 			// we always need to set to false because we do not reserve the IP on the LSP for HO

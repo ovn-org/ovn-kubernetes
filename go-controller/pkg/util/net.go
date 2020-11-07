@@ -29,32 +29,6 @@ func intToIP(i *big.Int) net.IP {
 	return net.IP(i.Bytes())
 }
 
-// GetNodeLogicalRouterNetworkInfo returns the IPs (IPv4 and/or IPv6) of the provided node's logical router
-// Expected output from the ovn-nbctl command, which will need to be parsed is:
-// `100.64.1.1/29 fd98:1::/125`
-func GetNodeGatewayRouterNetInfo(nodeName string) ([]net.IP, error) {
-	stdout, _, err := RunOVNNbctl(
-		"--format=table",
-		"--data=bare",
-		"--no-heading",
-		"--columns=networks",
-		"find", "logical_router_port",
-		fmt.Sprintf("name=rtoj-GR_%s", nodeName),
-	)
-	if err != nil {
-		return nil, fmt.Errorf("unable to retrieve the logical router for node: %s, err: %v", nodeName, err)
-	}
-	var ips []net.IP
-	for _, gatewayRouterIfAddr := range strings.Fields(stdout) {
-		if ip, _, err := net.ParseCIDR(gatewayRouterIfAddr); err == nil {
-			ips = append(ips, ip)
-		} else {
-			return nil, fmt.Errorf("unable to parse the found gateway router IP address: %s", gatewayRouterIfAddr)
-		}
-	}
-	return ips, nil
-}
-
 // GetPortAddresses returns the MAC and IPs of the given logical switch port
 func GetPortAddresses(portName string, ovnNBClient goovn.Client) (net.HardwareAddr, []net.IP, error) {
 	lsp, err := ovnNBClient.LSPGet(portName)
@@ -98,6 +72,31 @@ func GetPortAddresses(portName string, ovnNBClient goovn.Client) (net.HardwareAd
 		ips = append(ips, ip)
 	}
 	return mac, ips, nil
+}
+
+// GetLRPAddrs returns the addresses for the given logical router port
+func GetLRPAddrs(portName string) ([]*net.IPNet, error) {
+	networks := []*net.IPNet{}
+	output, stderr, err := RunOVNNbctl("--if-exist", "get", "logical_router_port", portName, "networks")
+	if err != nil {
+		return nil, fmt.Errorf("failed to get logical router port %s, "+
+			"stderr: %q, error: %v", portName, stderr, err)
+	}
+
+	// eg: `["100.64.0.3/16", "fd98::3/64"]`
+	output = strings.Trim(output, "[]")
+	if output != "" {
+		for _, ipNetStr := range strings.Split(output, ", ") {
+			ipNetStr = strings.Trim(ipNetStr, "\"")
+			ip, cidr, err := net.ParseCIDR(ipNetStr)
+			if err != nil {
+				return nil, fmt.Errorf("could not parse logical router port %q: %v",
+					ipNetStr, err)
+			}
+			networks = append(networks, &net.IPNet{IP: ip, Mask: cidr.Mask})
+		}
+	}
+	return networks, nil
 }
 
 // GetOVSPortMACAddress returns the MAC address of a given OVS port

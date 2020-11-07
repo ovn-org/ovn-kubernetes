@@ -5,11 +5,15 @@ import (
 	"net"
 	"strings"
 
-	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
-	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/kube"
-	util "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
+	kapi "k8s.io/api/core/v1"
+	"k8s.io/client-go/tools/cache"
 	"k8s.io/klog"
 	utilnet "k8s.io/utils/net"
+
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/kube"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
+	util "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
 )
 
 // bridgedGatewayNodeSetup makes the bridge's MAC address permanent (if needed), sets up
@@ -156,11 +160,19 @@ func getGatewayNextHops() ([]net.IP, string, error) {
 }
 
 func (n *OvnNode) initGateway(subnets []*net.IPNet, nodeAnnotator kube.Annotator,
-	waiter *startupWaiter) error {
+	waiter *startupWaiter, managementPortConfig *managementPortConfig) error {
+	klog.Info("Initializing Gateway Functionality")
+	var err error
+
+	var loadBalancerHealthChecker *loadBalancerHealthChecker
+	var portClaimWatcher *portClaimWatcher
 
 	if config.Gateway.NodeportEnable {
-		initLoadBalancerHealthChecker(n.name, n.watchFactory)
-		initPortClaimWatcher(n.recorder, n.watchFactory)
+		loadBalancerHealthChecker = newLoadBalancerHealthChecker(n.name)
+		portClaimWatcher, err = newPortClaimWatcher(n.recorder)
+		if err != nil {
+			return err
+		}
 	}
 
 	gatewayNextHops, gatewayIntf, err := getGatewayNextHops()
@@ -175,14 +187,23 @@ func (n *OvnNode) initGateway(subnets []*net.IPNet, nodeAnnotator kube.Annotator
 		}
 	}
 
-	var prFn postWaitFunc
-	if config.Gateway.Mode != config.GatewayModeDisabled {
-		prFn, err = n.initSharedGateway(subnets, gatewayNextHops, gatewayIntf, nodeAnnotator)
-	} else {
+	var gw *gateway
+	switch config.Gateway.Mode {
+	case config.GatewayModeLocal:
+		klog.Info("Preparing Local Gateway")
+		gw, err = newLocalGateway(n.name, subnets, gatewayNextHops, gatewayIntf, nodeAnnotator, n.recorder, managementPortConfig)
+	case config.GatewayModeShared:
+		klog.Info("Preparing Shared Gateway")
+		gw, err = newSharedGateway(n.name, subnets, gatewayNextHops, gatewayIntf, nodeAnnotator)
+	case config.GatewayModeDisabled:
+		klog.Info("Gateway Mode is disabled")
+		gw = &gateway{}
 		err = util.SetL3GatewayConfig(nodeAnnotator, &util.L3GatewayConfig{
 			Mode: config.GatewayModeDisabled,
 		})
 	}
+	gw.loadBalancerHealthChecker = loadBalancerHealthChecker
+	gw.portClaimWatcher = portClaimWatcher
 
 	if err != nil {
 		return err
@@ -192,11 +213,47 @@ func (n *OvnNode) initGateway(subnets []*net.IPNet, nodeAnnotator kube.Annotator
 	// as that option does not add default SNAT rules on the GR and the gatewayReady function checks
 	// those default NAT rules are present
 	if !config.Gateway.DisableSNATMultipleGWs && config.Gateway.Mode != config.GatewayModeLocal {
-		waiter.AddWait(gatewayReady, prFn)
+		waiter.AddWait(gatewayReady, gw.Init)
 	} else {
-		waiter.AddWait(func() (bool, error) { return true, nil }, prFn)
+		waiter.AddWait(func() (bool, error) { return true, nil }, gw.Init)
 	}
-	return nil
+
+	n.gateway = gw
+	n.watchFactory.AddServiceHandler(cache.ResourceEventHandlerFuncs{
+		AddFunc: func(obj interface{}) {
+			svc := obj.(*kapi.Service)
+			n.gateway.AddService(svc)
+		},
+		UpdateFunc: func(old, new interface{}) {
+			oldSvc := old.(*kapi.Service)
+			newSvc := new.(*kapi.Service)
+			n.gateway.UpdateService(oldSvc, newSvc)
+		},
+		DeleteFunc: func(obj interface{}) {
+			svc := obj.(*kapi.Service)
+			n.gateway.DeleteService(svc)
+		},
+	}, n.gateway.SyncServices)
+	if err != nil {
+		return err
+	}
+
+	n.watchFactory.AddEndpointsHandler(cache.ResourceEventHandlerFuncs{
+		AddFunc: func(obj interface{}) {
+			ep := obj.(*kapi.Endpoints)
+			n.gateway.AddEndpoints(ep)
+		},
+		UpdateFunc: func(old, new interface{}) {
+			oldEp := old.(*kapi.Endpoints)
+			newEp := new.(*kapi.Endpoints)
+			n.gateway.UpdateEndpoints(oldEp, newEp)
+		},
+		DeleteFunc: func(obj interface{}) {
+			ep := obj.(*kapi.Endpoints)
+			n.gateway.DeleteEndpoints(ep)
+		},
+	}, nil)
+	return err
 }
 
 // CleanupClusterNode cleans up OVS resources on the k8s node on ovnkube-node daemonset deletion.
@@ -206,7 +263,7 @@ func CleanupClusterNode(name string) error {
 
 	klog.V(5).Infof("Cleaning up gateway resources on node: %q", name)
 	if config.Gateway.Mode == config.GatewayModeLocal || config.Gateway.Mode == config.GatewayModeShared {
-		err = cleanupLocalnetGateway(util.LocalNetworkName)
+		err = cleanupLocalnetGateway(types.LocalNetworkName)
 		if err != nil {
 			klog.Errorf("Failed to cleanup Localnet Gateway, error: %v", err)
 		}
@@ -249,5 +306,6 @@ func gatewayReady() (bool, error) {
 			return false, nil
 		}
 	}
+	klog.Info("Gateway is ready")
 	return true, nil
 }
