@@ -43,8 +43,8 @@ func generateBlockMCSRules(rules *[]iptRule, protocol iptables.Protocol) {
 
 // initSharedGatewayNoBridge is used in order to run local gateway mode without moving the NIC to an ovs bridge
 // https://github.com/openshift/ovn-kubernetes/pull/281
-func (n *OvnNode) initSharedGatewayNoBridge(subnets []*net.IPNet, gwNextHops []net.IP, nodeAnnotator kube.Annotator) (postWaitFunc, error) {
-	err := setupLocalNodeAccessBridge(n.name, subnets)
+func initSharedGatewayNoBridge(nodeName string, subnets []*net.IPNet, gwNextHops []net.IP, nodeAnnotator kube.Annotator) (postWaitFunc, error) {
+	err := setupLocalNodeAccessBridge(nodeName, subnets)
 	if err != nil {
 		return nil, err
 	}
