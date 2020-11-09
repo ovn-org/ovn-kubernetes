@@ -261,6 +261,15 @@ var _ = Describe("Informer Event Handler Tests", func() {
 
 		_, err := k.CoreV1().Pods(namespace).Update(context.TODO(), pod, metav1.UpdateOptions{})
 		Expect(err).NotTo(HaveOccurred())
+
+		Eventually(func() (bool, error) {
+			pod, err := k.CoreV1().Pods(namespace).Get(context.TODO(), "foo", metav1.GetOptions{})
+			if err != nil {
+				return false, err
+			}
+			return pod.ResourceVersion == "11", nil
+		}, 2).Should(BeTrue())
+
 		// no deletes
 		Consistently(func() int32 { return atomic.LoadInt32(&deletes) }).Should(Equal(int32(0)), "deletes")
 		// two updates, initial add from cache + update event
