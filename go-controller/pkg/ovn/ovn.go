@@ -474,10 +474,6 @@ func (oc *Controller) ovnControllerEventChecker() {
 	}
 }
 
-func podScheduled(pod *kapi.Pod) bool {
-	return pod.Spec.NodeName != ""
-}
-
 func (oc *Controller) recordPodEvent(addErr error, pod *kapi.Pod) {
 	podRef, err := ref.GetReference(scheme.Scheme, pod)
 	if err != nil {
@@ -504,7 +500,7 @@ func (oc *Controller) WatchPods() {
 				}
 				return
 			}
-			if podScheduled(pod) {
+			if util.PodScheduled(pod) {
 				if err := oc.addLogicalPort(pod); err != nil {
 					klog.Errorf(err.Error())
 					oc.recordPodEvent(err, pod)
@@ -520,7 +516,7 @@ func (oc *Controller) WatchPods() {
 			pod := newer.(*kapi.Pod)
 
 			_, retry := retryPods.Load(pod.UID)
-			if podScheduled(pod) && retry && util.PodWantsNetwork(pod) {
+			if util.PodScheduled(pod) && retry && util.PodWantsNetwork(pod) {
 				if err := oc.addLogicalPort(pod); err != nil {
 					klog.Errorf(err.Error())
 					oc.recordPodEvent(err, pod)
