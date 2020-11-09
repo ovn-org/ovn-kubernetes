@@ -1816,6 +1816,228 @@ var _ = ginkgo.Describe("e2e non-vxlan external gateway through a gateway pod", 
 	})
 })
 
+// Validate pods can reach a network running in multiple container's loopback
+// addresses via two external gateways running on eth0 of the container without
+// any tunnel encap. This test defines two external gateways and validates ECMP
+// functionality to the container loopbacks. To verify traffic reaches the
+// gateways, tcpdump is running on the external gateways and will exit successfully
+// once an ICMP packet is received from the annotated pod in the k8s cluster.
+var _ = ginkgo.Describe("e2e multiple ecmp external gateway validation", func() {
+	const (
+		svcname            string = "novxlan-externalgw-ecmp"
+		exGWRemoteIpPrefix string = "10.249.10."
+		gwContainer1       string = "gw-ecmp-test-container1"
+		gwContainer2       string = "gw-ecmp-test-container2"
+		ciNetworkName      string = "kind"
+		testTimeout        string = "20"
+		ecmpRetry          int    = 20
+	)
+
+	f := framework.NewDefaultFramework(svcname)
+
+	type nodeInfo struct {
+		name   string
+		nodeIP string
+	}
+
+	var (
+		workerNodeInfo nodeInfo
+	)
+
+	ginkgo.BeforeEach(func() {
+
+		// retrieve worker node names
+		nodes, err := e2enode.GetBoundedReadySchedulableNodes(f.ClientSet, 3)
+		framework.ExpectNoError(err)
+		if len(nodes.Items) < 3 {
+			framework.Failf(
+				"Test requires >= 3 Ready nodes, but there are only %v nodes",
+				len(nodes.Items))
+		}
+		ips := e2enode.CollectAddresses(nodes, v1.NodeInternalIP)
+		workerNodeInfo = nodeInfo{
+			name:   nodes.Items[1].Name,
+			nodeIP: ips[1],
+		}
+	})
+
+	ginkgo.AfterEach(func() {
+		// tear down the containers simulating the gateways
+		if cid, _ := runCommand("docker", "ps", "-qaf", fmt.Sprintf("name=%s", gwContainer1)); cid != "" {
+			if _, err := runCommand("docker", "rm", "-f", gwContainer1); err != nil {
+				framework.Logf("failed to delete the gateway test container %s %v", gwContainer1, err)
+			}
+		}
+		if cid, _ := runCommand("docker", "ps", "-qaf", fmt.Sprintf("name=%s", gwContainer2)); cid != "" {
+			if _, err := runCommand("docker", "rm", "-f", gwContainer2); err != nil {
+				framework.Logf("failed to delete the gateway test container %s %v", gwContainer2, err)
+			}
+		}
+	})
+
+	ginkgo.It("Should validate connectivity to multiple external gateways for an ECMP scenario", func() {
+
+		var (
+			pingSrc           string
+			ciNetworkFlag     = "{{ .NetworkSettings.Networks.kind.IPAddress }}"
+			srcPingPodName    = "e2e-exgw-ecmp-src-ping-pod"
+			command           = []string{"bash", "-c", "sleep 20000"}
+			frameworkNsFlag   = fmt.Sprintf("--namespace=%s", f.Namespace.Name)
+			testContainer     = fmt.Sprintf("%s-container", srcPingPodName)
+			testContainerFlag = fmt.Sprintf("--container=%s", testContainer)
+		)
+
+		// start the first container that will act as an external gateway
+		_, err := runCommand("docker", "run", "-itd", "--privileged", "--network", ciNetworkName, "--name", gwContainer1, "centos/tools")
+		if err != nil {
+			framework.Failf("failed to start external gateway test container %s: %v", gwContainer1, err)
+		}
+		// retrieve the container ip of the external gateway container
+		exGWIp1, err := runCommand("docker", "inspect", "-f", ciNetworkFlag, gwContainer1)
+		if err != nil {
+			framework.Failf("failed to start external gateway test container: %v", err)
+		}
+		// trim newline from the inspect output
+		exGWIp1 = strings.TrimSuffix(exGWIp1, "\n")
+		if ip := net.ParseIP(exGWIp1); ip == nil {
+			framework.Failf("Unable to retrieve a valid address from container %s with inspect output of %s", gwContainer1, exGWIp1)
+		}
+
+		// start the second container that will act as an external gateway
+		_, err = runCommand("docker", "run", "-itd", "--privileged", "--network", ciNetworkName, "--name", gwContainer2, "centos/tools")
+		if err != nil {
+			framework.Failf("failed to start external gateway test container %s: %v", gwContainer2, err)
+		}
+		// retrieve the container ip of the external gateway container
+		exGWIp2, err := runCommand("docker", "inspect", "-f", ciNetworkFlag, gwContainer2)
+		if err != nil {
+			framework.Failf("failed to start external gateway test container: %v", err)
+		}
+		// trim newline from the inspect output
+		exGWIp2 = strings.TrimSuffix(exGWIp2, "\n")
+		if ip := net.ParseIP(exGWIp2); ip == nil {
+			framework.Failf("Unable to retrieve a valid address from container %s with inspect output of %s", gwContainer2, exGWIp2)
+		}
+
+		// annotate the test namespace with multiple gateways defined
+		annotateArgs := []string{
+			"annotate",
+			"namespace",
+			f.Namespace.Name,
+			fmt.Sprintf("k8s.ovn.org/routing-external-gws=%s,%s", exGWIp1, exGWIp2),
+		}
+		framework.Logf("Annotating the external gateway test namespace to container gateways: %s, %s", exGWIp1, exGWIp2)
+		framework.RunKubectlOrDie(annotateArgs...)
+
+		nodeIP, err := runCommand("docker", "inspect", "-f", ciNetworkFlag, workerNodeInfo.name)
+		if err != nil {
+			framework.Failf("failed to get the node ip address from node %s %v", workerNodeInfo.name, err)
+		}
+		nodeIP = strings.TrimSuffix(nodeIP, "\n")
+		if ip := net.ParseIP(nodeIP); ip == nil {
+			framework.Failf("Unable to retrieve a valid address from container %s with inspect output of %s", workerNodeInfo.name, nodeIP)
+		}
+		framework.Logf("the pod side node is %s and the source node ip is %s", workerNodeInfo.name, nodeIP)
+		podCIDR, err := getNodePodCIDR(workerNodeInfo.name)
+		if err != nil {
+			framework.Failf("Error retrieving the pod cidr from %s %v", workerNodeInfo.name, err)
+		}
+		framework.Logf("the pod cidr for node %s is %s", workerNodeInfo.name, podCIDR)
+
+		// Add loopback addresses used to validate all traffic is getting drained
+		// through the gateway. OVN will choose an ECMP route based on a 5-tuple hash,
+		// so we need to cycle through multiple dest IPs to be able to hit both gateways
+		for _, containerName := range []string{gwContainer1, gwContainer2} {
+			for lastOctet := 1; lastOctet <= ecmpRetry; lastOctet++ {
+				gwLoPrefix := fmt.Sprintf("%s%d/32", exGWRemoteIpPrefix, lastOctet)
+				// add the loopback addresses to the gateway container
+				_, err = runCommand("docker", "exec", containerName, "ip", "address", "add", gwLoPrefix, "dev", "lo")
+				if err != nil {
+					framework.Failf("failed to add the loopback ip to dev lo on the test container %s: %v", containerName, err)
+				}
+			}
+		}
+
+		// Create the pod that will be used as the source for the connectivity test
+		createGenericPod(f, srcPingPodName, workerNodeInfo.name, f.Namespace.Name, command)
+		// wait for the pod setup to return a valid address
+		err = wait.PollImmediate(retryInterval, retryTimeout, func() (bool, error) {
+			pingSrc = getPodAddress(srcPingPodName, f.Namespace.Name)
+			validIP := net.ParseIP(pingSrc)
+			if validIP == nil {
+				return false, nil
+			}
+			return true, nil
+		})
+		// Fail the test if no address is ever retrieved
+		if err != nil {
+			framework.Failf("Error trying to get the pod IP address")
+		}
+		// add a host route on the gateways for return traffic to the pod
+		_, err = runCommand("docker", "exec", gwContainer1, "ip", "route", "add", pingSrc, "via", nodeIP)
+		if err != nil {
+			framework.Failf("failed to add the pod host route on the test container %s: %v", gwContainer1, err)
+		}
+		_, err = runCommand("docker", "exec", gwContainer2, "ip", "route", "add", pingSrc, "via", nodeIP)
+		if err != nil {
+			framework.Failf("failed to add the pod host route on the test container %s: %v", gwContainer2, err)
+		}
+
+		// Verify the gateways and remote loopback addresses are reachable from the pod.
+		// Iterate checking connectivity to the loopbacks on the gateways until tcpdump see
+		// the traffic or 20 attempts fail. Odds of a false negative here is ~ (1/2)^20
+		ginkgo.By(fmt.Sprintf("Verifying ecmp connectivity to the external gateways by iterating through the prefix %s", exGWRemoteIpPrefix))
+
+		// create a buffered channel that will handle error reporting from the goroutines
+		icmpChan := make(chan error, 2)
+
+		// Check for egress traffic to both gateway loopback addresses using tcpdump, since
+		// /proc/net/dev counters only record the ingress interface traffic is received on.
+		// The test will waits until an ICMP packet is matched on the gateways or fail the
+		// test if a packet to the loopback is not received within the timer interval.
+		// If an ICMP packet is never detected, return the error via the specified chanel.
+		go func() {
+			_, err = runCommand("docker", "exec", gwContainer1, "timeout", testTimeout, "tcpdump", "-c", "1", "icmp")
+			if err == nil {
+				framework.Logf("ICMP packet successfully detected on gateway %s", gwContainer1)
+				icmpChan <- err
+			}
+			icmpChan <- err
+		}()
+		go func() {
+			_, err = runCommand("docker", "exec", gwContainer2, "timeout", testTimeout, "tcpdump", "-c", "1", "icmp")
+			if err == nil {
+				framework.Logf("ICMP packet successfully detected on gateway %s", gwContainer2)
+				icmpChan <- err
+			}
+			icmpChan <- err
+		}()
+
+		// spawn a goroutine to asynchronously (to speed up the test)
+		// to ping the gateway loopbacks on both containers via ECMP.
+		for lastOctet := 1; lastOctet <= ecmpRetry; lastOctet++ {
+			gwLo := fmt.Sprintf("%s%d", exGWRemoteIpPrefix, lastOctet)
+			go func() {
+				_, err = framework.RunKubectl("exec", srcPingPodName, frameworkNsFlag, testContainerFlag, "--", "ping", "-c", testTimeout, gwLo)
+				if err != nil {
+					framework.Logf("error generating a ping from the test pod %s: %v", srcPingPodName, err)
+				}
+			}()
+		}
+
+		// collect any errors and report them in a failure report
+		errs := []error{}
+		for i := 0; i < 2; i++ {
+			if err := <-icmpChan; err != nil {
+				errs = append(errs, err)
+			}
+		}
+		if len(errs) > 0 {
+			framework.Failf("failed to reach the mock gateway(s):\n%v", errs)
+		}
+	})
+})
+
 func getNodePodCIDR(nodeName string) (string, error) {
 	// retrieve the pod cidr for the worker node
 	jsonFlag := "jsonpath='{.metadata.annotations.k8s\\.ovn\\.org/node-subnets}'"

@@ -260,7 +260,17 @@ var _ = ginkgo.Describe("Informer Event Handler Tests", func() {
 		pod.ResourceVersion = "11"
 
 		_, err := k.CoreV1().Pods(namespace).Update(context.TODO(), pod, metav1.UpdateOptions{})
+
 		gomega.Expect(err).NotTo(gomega.HaveOccurred())
+
+		gomega.Eventually(func() (bool, error) {
+			pod, err := k.CoreV1().Pods(namespace).Get(context.TODO(), "foo", metav1.GetOptions{})
+			if err != nil {
+				return false, err
+			}
+			return pod.ResourceVersion == "11", nil
+		}, 2).Should(gomega.BeTrue())
+
 		// no deletes
 		gomega.Consistently(func() int32 { return atomic.LoadInt32(&deletes) }).Should(gomega.Equal(int32(0)), "deletes")
 		// two updates, initial add from cache + update event
