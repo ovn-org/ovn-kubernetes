@@ -583,6 +583,7 @@ func TestSetupSriovInterface(t *testing.T) {
 			errExp:      true,
 			sriovOpsMockHelper: []ovntest.TestifyMockHelper{
 				{"GetNetDevicesFromPci", []string{"string"}, []interface{}{[]string{"en01"}, nil}},
+				{"GetVfIndexByPciAddress", []string{"string"}, []interface{}{0, nil}},
 				{"GetUplinkRepresentor", []string{"string"}, []interface{}{"", fmt.Errorf("mock error")}},
 			},
 		},
@@ -599,7 +600,6 @@ func TestSetupSriovInterface(t *testing.T) {
 			errExp:      true,
 			sriovOpsMockHelper: []ovntest.TestifyMockHelper{
 				{"GetNetDevicesFromPci", []string{"string"}, []interface{}{[]string{"en01"}, nil}},
-				{"GetUplinkRepresentor", []string{"string"}, []interface{}{"testlinkrepresentor", nil}},
 				{"GetVfIndexByPciAddress", []string{"string"}, []interface{}{-1, fmt.Errorf("mock error")}},
 			},
 		},
@@ -616,8 +616,8 @@ func TestSetupSriovInterface(t *testing.T) {
 			errExp:      true,
 			sriovOpsMockHelper: []ovntest.TestifyMockHelper{
 				{"GetNetDevicesFromPci", []string{"string"}, []interface{}{[]string{"en01"}, nil}},
-				{"GetUplinkRepresentor", []string{"string"}, []interface{}{"testlinkrepresentor", nil}},
 				{"GetVfIndexByPciAddress", []string{"string"}, []interface{}{0, nil}},
+				{"GetUplinkRepresentor", []string{"string"}, []interface{}{"testlinkrepresentor", nil}},
 				{"GetVfRepresentor", []string{"string", "int"}, []interface{}{"", fmt.Errorf("mock error")}},
 			},
 		},
@@ -634,8 +634,8 @@ func TestSetupSriovInterface(t *testing.T) {
 			errMatch:    fmt.Errorf("failed to rename"),
 			sriovOpsMockHelper: []ovntest.TestifyMockHelper{
 				{"GetNetDevicesFromPci", []string{"string"}, []interface{}{[]string{"en01"}, nil}},
-				{"GetUplinkRepresentor", []string{"string"}, []interface{}{"testlinkrepresentor", nil}},
 				{"GetVfIndexByPciAddress", []string{"string"}, []interface{}{0, nil}},
+				{"GetUplinkRepresentor", []string{"string"}, []interface{}{"testlinkrepresentor", nil}},
 				{"GetVfRepresentor", []string{"string", "int"}, []interface{}{"VFRepresentor", nil}},
 			},
 			netLinkOpsMockHelper: []ovntest.TestifyMockHelper{
@@ -656,8 +656,8 @@ func TestSetupSriovInterface(t *testing.T) {
 			errExp:      true,
 			sriovOpsMockHelper: []ovntest.TestifyMockHelper{
 				{"GetNetDevicesFromPci", []string{"string"}, []interface{}{[]string{"en01"}, nil}},
-				{"GetUplinkRepresentor", []string{"string"}, []interface{}{"testlinkrepresentor", nil}},
 				{"GetVfIndexByPciAddress", []string{"string"}, []interface{}{0, nil}},
+				{"GetUplinkRepresentor", []string{"string"}, []interface{}{"testlinkrepresentor", nil}},
 				{"GetVfRepresentor", []string{"string", "int"}, []interface{}{"VFRepresentor", nil}},
 			},
 			netLinkOpsMockHelper: []ovntest.TestifyMockHelper{
@@ -683,8 +683,8 @@ func TestSetupSriovInterface(t *testing.T) {
 			errMatch:    fmt.Errorf("failed to set MTU on"),
 			sriovOpsMockHelper: []ovntest.TestifyMockHelper{
 				{"GetNetDevicesFromPci", []string{"string"}, []interface{}{[]string{"en01"}, nil}},
-				{"GetUplinkRepresentor", []string{"string"}, []interface{}{"testlinkrepresentor", nil}},
 				{"GetVfIndexByPciAddress", []string{"string"}, []interface{}{0, nil}},
+				{"GetUplinkRepresentor", []string{"string"}, []interface{}{"testlinkrepresentor", nil}},
 				{"GetVfRepresentor", []string{"string", "int"}, []interface{}{"VFRepresentor", nil}},
 			},
 			netLinkOpsMockHelper: []ovntest.TestifyMockHelper{
@@ -716,8 +716,8 @@ func TestSetupSriovInterface(t *testing.T) {
 			errExp:      true,
 			sriovOpsMockHelper: []ovntest.TestifyMockHelper{
 				{"GetNetDevicesFromPci", []string{"string"}, []interface{}{[]string{"en01"}, nil}},
-				{"GetUplinkRepresentor", []string{"string"}, []interface{}{"testlinkrepresentor", nil}},
 				{"GetVfIndexByPciAddress", []string{"string"}, []interface{}{0, nil}},
+				{"GetUplinkRepresentor", []string{"string"}, []interface{}{"testlinkrepresentor", nil}},
 				{"GetVfRepresentor", []string{"string", "int"}, []interface{}{"VFRepresentor", nil}},
 			},
 			netLinkOpsMockHelper: []ovntest.TestifyMockHelper{
@@ -751,8 +751,8 @@ func TestSetupSriovInterface(t *testing.T) {
 			errExp:      true,
 			sriovOpsMockHelper: []ovntest.TestifyMockHelper{
 				{"GetNetDevicesFromPci", []string{"string"}, []interface{}{[]string{"en01"}, nil}},
-				{"GetUplinkRepresentor", []string{"string"}, []interface{}{"testlinkrepresentor", nil}},
 				{"GetVfIndexByPciAddress", []string{"string"}, []interface{}{0, nil}},
+				{"GetUplinkRepresentor", []string{"string"}, []interface{}{"testlinkrepresentor", nil}},
 				{"GetVfRepresentor", []string{"string", "int"}, []interface{}{"VFRepresentor", nil}},
 			},
 			netLinkOpsMockHelper: []ovntest.TestifyMockHelper{

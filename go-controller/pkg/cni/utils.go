@@ -15,6 +15,9 @@ import (
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
 )
 
+const SmartNicConnectionDetails = "k8s.ovn.org/smartnic.connection-details"
+const SmartNicConnetionStatus = "k8s.ovn.org/smartnic.connection-status"
+
 func GetPodAnnotationsWithBackoff(kubecli kube.Interface, namespace string, podName string, isSmartNic bool) (annotations map[string]string, err error) {
 	// Get the IP address and MAC address from the API server.
 	// Exponential back off ~32 seconds + 7* t(api call)
@@ -31,7 +34,7 @@ func GetPodAnnotationsWithBackoff(kubecli kube.Interface, namespace string, podN
 		}
 		if _, ok := annotations[util.OvnPodAnnotationName]; ok {
 			if isSmartNic {
-				if _, ok := annotations["k8s.ovn.org/smartnic.connection-ready"]; ok {
+				if _, ok := annotations[SmartNicConnetionStatus]; ok {
 					return true, nil
 				}
 				return false, nil

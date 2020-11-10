@@ -198,39 +198,38 @@ func setupSriovInterface(netns ns.NetNS, containerID, ifName string, ifInfo *Pod
 	}
 	vfNetdevice := vfNetdevices[0]
 
-	// 2. get Uplink netdevice
-	uplink, err := sriovLibOps.GetUplinkRepresentor(pciAddrs)
-	if err != nil {
-		return nil, nil, err
-	}
-
-	// 3. get VF index from PCI
+	// 2. get VF index from PCI
 	vfIndex, err := sriovLibOps.GetVfIndexByPciAddress(pciAddrs)
 	if err != nil {
 		return nil, nil, err
 	}
+	if !ifInfo.IsSmartNic {
+		// 3. get Uplink netdevice
+		uplink, err := sriovLibOps.GetUplinkRepresentor(pciAddrs)
+		if err != nil {
+			return nil, nil, err
+		}
+		// 4. lookup representor
+		rep, err := sriovLibOps.GetVfRepresentor(uplink, vfIndex)
+		if err != nil {
+			return nil, nil, err
+		}
+		oldHostRepName := rep
+		// 5. rename the host VF representor
+		hostIface.Name = containerID[:15]
+		if err = renameLink(oldHostRepName, hostIface.Name); err != nil {
+			return nil, nil, fmt.Errorf("failed to rename %s to %s: %v", oldHostRepName, hostIface.Name, err)
+		}
+		link, err := util.GetNetLinkOps().LinkByName(hostIface.Name)
+		if err != nil {
+			return nil, nil, err
+		}
+		hostIface.Mac = link.Attrs().HardwareAddr.String()
 
-	// 4. lookup representor
-	rep, err := sriovLibOps.GetVfRepresentor(uplink, vfIndex)
-	if err != nil {
-		return nil, nil, err
-	}
-	oldHostRepName := rep
-
-	// 5. rename the host VF representor
-	hostIface.Name = containerID[:15]
-	if err = renameLink(oldHostRepName, hostIface.Name); err != nil {
-		return nil, nil, fmt.Errorf("failed to rename %s to %s: %v", oldHostRepName, hostIface.Name, err)
-	}
-	link, err := util.GetNetLinkOps().LinkByName(hostIface.Name)
-	if err != nil {
-		return nil, nil, err
-	}
-	hostIface.Mac = link.Attrs().HardwareAddr.String()
-
-	// 6. set MTU on VF representor
-	if err = util.GetNetLinkOps().LinkSetMTU(link, ifInfo.MTU); err != nil {
-		return nil, nil, fmt.Errorf("failed to set MTU on %s: %v", hostIface.Name, err)
+		// 6. set MTU on VF representor
+		if err = util.GetNetLinkOps().LinkSetMTU(link, ifInfo.MTU); err != nil {
+			return nil, nil, fmt.Errorf("failed to set MTU on %s: %v", hostIface.Name, err)
+		}
 	}
 
 	// 7. Move VF to Container namespace
@@ -245,7 +244,7 @@ func setupSriovInterface(netns ns.NetNS, containerID, ifName string, ifInfo *Pod
 		if err != nil {
 			return err
 		}
-		link, err = util.GetNetLinkOps().LinkByName(contIface.Name)
+		link, err := util.GetNetLinkOps().LinkByName(contIface.Name)
 		if err != nil {
 			return err
 		}
