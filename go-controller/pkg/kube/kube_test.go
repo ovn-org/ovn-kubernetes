@@ -2,12 +2,11 @@ package kube
 
 import (
 	"fmt"
+	"testing"
+
 	egressfirewall "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/egressfirewall/v1"
 	mock_egressfirewall_iface "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/egressfirewall/v1/apis/clientset/versioned/mocks"
 	mock_egressfirewall_k8s_v1 "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/egressfirewall/v1/apis/clientset/versioned/typed/egressfirewall/v1/mocks"
-	egressv1 "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/egressip/v1"
-	mock_eipclient_iface "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/egressip/v1/apis/clientset/versioned/mocks"
-	mock_eip_k8s_v1 "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/egressip/v1/apis/clientset/versioned/typed/egressip/v1/mocks"
 	ovntest "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/testing"
 	mock_clientgo_iface "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/testing/mocks/k8s.io/client-go/kubernetes"
 	mock_core_v1 "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/testing/mocks/k8s.io/client-go/kubernetes/typed/core/v1"
@@ -15,7 +14,6 @@ import (
 	"github.com/stretchr/testify/mock"
 	v1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	"testing"
 )
 
 func TestKube_SetAnnotationsOnPod(t *testing.T) {
@@ -339,86 +337,6 @@ func TestKube_UpdateEgressFirewall(t *testing.T) {
 			mockIface.AssertExpectations(t)
 			mockK8sIface.AssertExpectations(t)
 			mockEgressfirewallIface.AssertExpectations(t)
-
-		})
-	}
-}
-
-func TestKube_UpdateEgressIP(t *testing.T) {
-	mockIface := new(mock_eipclient_iface.Interface)
-	mockK8sIface := new(mock_eip_k8s_v1.K8sV1Interface)
-	mockEgressIPIface := new(mock_eip_k8s_v1.EgressIPInterface)
-
-	k := &Kube{EIPClient: mockIface}
-	tests := []struct {
-		desc                   string
-		errorMatch             error
-		onRetMockInterfaceArgs *ovntest.TestifyMockHelper
-		onRetMockK8sArgs       *ovntest.TestifyMockHelper
-		onRetMockEgressIPArgs  *ovntest.TestifyMockHelper
-	}{
-		{
-			desc:                   "Negative test code path",
-			errorMatch:             fmt.Errorf("error in updating status on EgressIP"),
-			onRetMockInterfaceArgs: &ovntest.TestifyMockHelper{"K8sV1", []string{}, []interface{}{mockK8sIface}},
-			onRetMockK8sArgs:       &ovntest.TestifyMockHelper{"EgressIPs", []string{}, []interface{}{mockEgressIPIface}},
-			onRetMockEgressIPArgs:  &ovntest.TestifyMockHelper{"Update", []string{"*context.emptyCtx", "*v1.EgressIP", "v1.UpdateOptions"}, []interface{}{nil, fmt.Errorf("error in updating status on EgressIP")}},
-		},
-		{
-			desc:                   "Positive test code path",
-			onRetMockInterfaceArgs: &ovntest.TestifyMockHelper{"K8sV1", []string{}, []interface{}{mockK8sIface}},
-			onRetMockK8sArgs:       &ovntest.TestifyMockHelper{"EgressIPs", []string{}, []interface{}{mockEgressIPIface}},
-			onRetMockEgressIPArgs:  &ovntest.TestifyMockHelper{"Update", []string{"*context.emptyCtx", "*v1.EgressIP", "v1.UpdateOptions"}, []interface{}{nil, nil}},
-		},
-	}
-	for i, tc := range tests {
-
-		t.Run(fmt.Sprintf("%d:%s", i, tc.desc), func(t *testing.T) {
-
-			if tc.onRetMockInterfaceArgs != nil {
-				mockiFaceCall := mockIface.On(tc.onRetMockInterfaceArgs.OnCallMethodName)
-				for _, arg := range tc.onRetMockInterfaceArgs.OnCallMethodArgType {
-					mockiFaceCall.Arguments = append(mockiFaceCall.Arguments, mock.AnythingOfType(arg))
-				}
-				for _, ret := range tc.onRetMockInterfaceArgs.RetArgList {
-					mockiFaceCall.ReturnArguments = append(mockiFaceCall.ReturnArguments, ret)
-				}
-				mockiFaceCall.Once()
-			}
-
-			if tc.onRetMockK8sArgs != nil {
-				mockK8sCall := mockK8sIface.On(tc.onRetMockK8sArgs.OnCallMethodName)
-				for _, arg := range tc.onRetMockK8sArgs.OnCallMethodArgType {
-					mockK8sCall.Arguments = append(mockK8sCall.Arguments, mock.AnythingOfType(arg))
-				}
-				for _, elem := range tc.onRetMockK8sArgs.RetArgList {
-					mockK8sCall.ReturnArguments = append(mockK8sCall.ReturnArguments, elem)
-				}
-				mockK8sCall.Once()
-			}
-
-			if tc.onRetMockEgressIPArgs != nil {
-				mockEgressIPCall := mockEgressIPIface.On(tc.onRetMockEgressIPArgs.OnCallMethodName)
-				for _, arg := range tc.onRetMockEgressIPArgs.OnCallMethodArgType {
-					mockEgressIPCall.Arguments = append(mockEgressIPCall.Arguments, mock.AnythingOfType(arg))
-				}
-				for _, elem := range tc.onRetMockEgressIPArgs.RetArgList {
-					mockEgressIPCall.ReturnArguments = append(mockEgressIPCall.ReturnArguments, elem)
-				}
-				mockEgressIPCall.Once()
-			}
-
-			e := k.UpdateEgressIP(&egressv1.EgressIP{})
-
-			if tc.errorMatch != nil {
-				assert.Contains(t, e.Error(), tc.errorMatch.Error())
-			} else {
-				assert.Nil(t, e)
-			}
-
-			mockIface.AssertExpectations(t)
-			mockK8sIface.AssertExpectations(t)
-			mockEgressIPIface.AssertExpectations(t)
 
 		})
 	}
@@ -850,144 +768,6 @@ func TestKube_GetNode(t *testing.T) {
 			mockIface.AssertExpectations(t)
 			mockCoreIface.AssertExpectations(t)
 			mockNodeIface.AssertExpectations(t)
-
-		})
-	}
-}
-
-func TestKube_GetEgressIP(t *testing.T) {
-	mockIface := new(mock_eipclient_iface.Interface)
-	mockK8sIface := new(mock_eip_k8s_v1.K8sV1Interface)
-	mockEgressIPIface := new(mock_eip_k8s_v1.EgressIPInterface)
-
-	k := &Kube{EIPClient: mockIface}
-	tests := []struct {
-		desc                   string
-		expectedErr            bool
-		onRetMockInterfaceArgs *ovntest.TestifyMockHelper
-		onRetMockK8sArgs       *ovntest.TestifyMockHelper
-		onRetMockEgressIPArgs  *ovntest.TestifyMockHelper
-	}{
-		{
-			desc:                   "Positive test code path",
-			expectedErr:            false,
-			onRetMockInterfaceArgs: &ovntest.TestifyMockHelper{"K8sV1", []string{}, []interface{}{mockK8sIface}},
-			onRetMockK8sArgs:       &ovntest.TestifyMockHelper{"EgressIPs", []string{}, []interface{}{mockEgressIPIface}},
-			onRetMockEgressIPArgs:  &ovntest.TestifyMockHelper{"Get", []string{"*context.emptyCtx", "string", "v1.GetOptions"}, []interface{}{nil, nil}},
-		},
-	}
-	for i, tc := range tests {
-
-		t.Run(fmt.Sprintf("%d:%s", i, tc.desc), func(t *testing.T) {
-
-			if tc.onRetMockInterfaceArgs != nil {
-				mockiFaceCall := mockIface.On(tc.onRetMockInterfaceArgs.OnCallMethodName)
-				for _, arg := range tc.onRetMockInterfaceArgs.OnCallMethodArgType {
-					mockiFaceCall.Arguments = append(mockiFaceCall.Arguments, mock.AnythingOfType(arg))
-				}
-				for _, ret := range tc.onRetMockInterfaceArgs.RetArgList {
-					mockiFaceCall.ReturnArguments = append(mockiFaceCall.ReturnArguments, ret)
-				}
-				mockiFaceCall.Once()
-			}
-
-			if tc.onRetMockK8sArgs != nil {
-				mockK8sCall := mockK8sIface.On(tc.onRetMockK8sArgs.OnCallMethodName)
-				for _, arg := range tc.onRetMockK8sArgs.OnCallMethodArgType {
-					mockK8sCall.Arguments = append(mockK8sCall.Arguments, mock.AnythingOfType(arg))
-				}
-				for _, elem := range tc.onRetMockK8sArgs.RetArgList {
-					mockK8sCall.ReturnArguments = append(mockK8sCall.ReturnArguments, elem)
-				}
-				mockK8sCall.Once()
-			}
-
-			if tc.onRetMockEgressIPArgs != nil {
-				mockEgressIPCall := mockEgressIPIface.On(tc.onRetMockEgressIPArgs.OnCallMethodName)
-				for _, arg := range tc.onRetMockEgressIPArgs.OnCallMethodArgType {
-					mockEgressIPCall.Arguments = append(mockEgressIPCall.Arguments, mock.AnythingOfType(arg))
-				}
-				for _, elem := range tc.onRetMockEgressIPArgs.RetArgList {
-					mockEgressIPCall.ReturnArguments = append(mockEgressIPCall.ReturnArguments, elem)
-				}
-				mockEgressIPCall.Once()
-			}
-
-			_, e := k.GetEgressIP("string")
-			assert.Nil(t, e)
-
-			mockIface.AssertExpectations(t)
-			mockK8sIface.AssertExpectations(t)
-			mockEgressIPIface.AssertExpectations(t)
-
-		})
-	}
-}
-
-func TestKube_GetEgressIPs(t *testing.T) {
-	mockIface := new(mock_eipclient_iface.Interface)
-	mockK8sIface := new(mock_eip_k8s_v1.K8sV1Interface)
-	mockEgressIPIface := new(mock_eip_k8s_v1.EgressIPInterface)
-
-	k := &Kube{EIPClient: mockIface}
-	tests := []struct {
-		desc                   string
-		expectedErr            bool
-		onRetMockInterfaceArgs *ovntest.TestifyMockHelper
-		onRetMockK8sArgs       *ovntest.TestifyMockHelper
-		onRetMockEgressIPArgs  *ovntest.TestifyMockHelper
-	}{
-		{
-			desc:                   "Positive test code path",
-			expectedErr:            false,
-			onRetMockInterfaceArgs: &ovntest.TestifyMockHelper{"K8sV1", []string{}, []interface{}{mockK8sIface}},
-			onRetMockK8sArgs:       &ovntest.TestifyMockHelper{"EgressIPs", []string{}, []interface{}{mockEgressIPIface}},
-			onRetMockEgressIPArgs:  &ovntest.TestifyMockHelper{"List", []string{"*context.emptyCtx", "v1.ListOptions"}, []interface{}{nil, nil}},
-		},
-	}
-	for i, tc := range tests {
-
-		t.Run(fmt.Sprintf("%d:%s", i, tc.desc), func(t *testing.T) {
-
-			if tc.onRetMockInterfaceArgs != nil {
-				mockiFaceCall := mockIface.On(tc.onRetMockInterfaceArgs.OnCallMethodName)
-				for _, arg := range tc.onRetMockInterfaceArgs.OnCallMethodArgType {
-					mockiFaceCall.Arguments = append(mockiFaceCall.Arguments, mock.AnythingOfType(arg))
-				}
-				for _, ret := range tc.onRetMockInterfaceArgs.RetArgList {
-					mockiFaceCall.ReturnArguments = append(mockiFaceCall.ReturnArguments, ret)
-				}
-				mockiFaceCall.Once()
-			}
-
-			if tc.onRetMockK8sArgs != nil {
-				mockK8sCall := mockK8sIface.On(tc.onRetMockK8sArgs.OnCallMethodName)
-				for _, arg := range tc.onRetMockK8sArgs.OnCallMethodArgType {
-					mockK8sCall.Arguments = append(mockK8sCall.Arguments, mock.AnythingOfType(arg))
-				}
-				for _, elem := range tc.onRetMockK8sArgs.RetArgList {
-					mockK8sCall.ReturnArguments = append(mockK8sCall.ReturnArguments, elem)
-				}
-				mockK8sCall.Once()
-			}
-
-			if tc.onRetMockEgressIPArgs != nil {
-				mockEgressIPCall := mockEgressIPIface.On(tc.onRetMockEgressIPArgs.OnCallMethodName)
-				for _, arg := range tc.onRetMockEgressIPArgs.OnCallMethodArgType {
-					mockEgressIPCall.Arguments = append(mockEgressIPCall.Arguments, mock.AnythingOfType(arg))
-				}
-				for _, elem := range tc.onRetMockEgressIPArgs.RetArgList {
-					mockEgressIPCall.ReturnArguments = append(mockEgressIPCall.ReturnArguments, elem)
-				}
-				mockEgressIPCall.Once()
-			}
-
-			_, e := k.GetEgressIPs()
-			assert.Nil(t, e)
-
-			mockIface.AssertExpectations(t)
-			mockK8sIface.AssertExpectations(t)
-			mockEgressIPIface.AssertExpectations(t)
 
 		})
 	}

@@ -1935,7 +1935,7 @@ var _ = Describe("OVN master EgressIP Operations", func() {
 						EgressIPs: []string{egressIP},
 					},
 				}
-				err := fakeOvn.controller.assignEgressIPs(&eIP)
+				err := fakeOvn.controller.eIPC.assignEgressIPs(&eIP)
 				Expect(err).NotTo(HaveOccurred())
 				Expect(eIP.Status.Items).To(HaveLen(1))
 				Expect(eIP.Status.Items[0].Node).To(Equal(node2.name))
@@ -1972,7 +1972,7 @@ var _ = Describe("OVN master EgressIP Operations", func() {
 					},
 				}
 
-				err := fakeOvn.controller.assignEgressIPs(&eIP)
+				err := fakeOvn.controller.eIPC.assignEgressIPs(&eIP)
 				Expect(err).To(HaveOccurred())
 				Expect(err.Error()).To(Equal(fmt.Sprintf("unable to parse provided EgressIP: %s, invalid", egressIPs[0])))
 				Expect(eIP.Status.Items).To(HaveLen(0))
@@ -2005,7 +2005,7 @@ var _ = Describe("OVN master EgressIP Operations", func() {
 						EgressIPs: []string{egressIP},
 					},
 				}
-				err := fakeOvn.controller.assignEgressIPs(&eIP)
+				err := fakeOvn.controller.eIPC.assignEgressIPs(&eIP)
 				Expect(err).NotTo(HaveOccurred())
 				Expect(eIP.Status.Items).To(HaveLen(1))
 				Expect(eIP.Status.Items[0].Node).To(Equal(node2.name))
@@ -2037,7 +2037,7 @@ var _ = Describe("OVN master EgressIP Operations", func() {
 						EgressIPs: []string{egressIP1, egressIP2},
 					},
 				}
-				err := fakeOvn.controller.assignEgressIPs(&eIP)
+				err := fakeOvn.controller.eIPC.assignEgressIPs(&eIP)
 				Expect(err).NotTo(HaveOccurred())
 				Expect(eIP.Status.Items).To(HaveLen(2))
 				Expect(eIP.Status.Items[0].Node).To(Equal(node2.name))
@@ -2072,7 +2072,7 @@ var _ = Describe("OVN master EgressIP Operations", func() {
 						EgressIPs: []string{egressIP1, egressIP2, egressIP3},
 					},
 				}
-				err := fakeOvn.controller.assignEgressIPs(&eIP)
+				err := fakeOvn.controller.eIPC.assignEgressIPs(&eIP)
 				Expect(err).NotTo(HaveOccurred())
 				Expect(eIP.Status.Items).To(HaveLen(2))
 				Expect(eIP.Status.Items[0].Node).To(Equal(node2.name))
@@ -2108,7 +2108,7 @@ var _ = Describe("OVN master EgressIP Operations", func() {
 					},
 				}
 
-				err := fakeOvn.controller.assignEgressIPs(&eIP)
+				err := fakeOvn.controller.eIPC.assignEgressIPs(&eIP)
 				Expect(err).To(HaveOccurred())
 				Expect(err.Error()).To(Equal("no matching host found"))
 				Expect(eIP.Status.Items).To(HaveLen(0))
@@ -2138,7 +2138,7 @@ var _ = Describe("OVN master EgressIP Operations", func() {
 						EgressIPs: []string{egressIP},
 					},
 				}
-				err := fakeOvn.controller.assignEgressIPs(&eIP)
+				err := fakeOvn.controller.eIPC.assignEgressIPs(&eIP)
 				Expect(err).To(HaveOccurred())
 				Expect(eIP.Status.Items).To(HaveLen(0))
 
@@ -2171,7 +2171,7 @@ var _ = Describe("OVN master EgressIP Operations", func() {
 					},
 				}
 
-				err := fakeOvn.controller.assignEgressIPs(&eIP)
+				err := fakeOvn.controller.eIPC.assignEgressIPs(&eIP)
 				Expect(err).To(HaveOccurred())
 				Expect(err.Error()).To(Equal("no matching host found"))
 				Expect(eIP.Status.Items).To(HaveLen(0))
@@ -2203,7 +2203,7 @@ var _ = Describe("OVN master EgressIP Operations", func() {
 					},
 				}
 
-				err := fakeOvn.controller.assignEgressIPs(&eIP)
+				err := fakeOvn.controller.eIPC.assignEgressIPs(&eIP)
 				Expect(err).To(HaveOccurred())
 				Expect(err.Error()).To(Equal("no matching host found"))
 				Expect(eIP.Status.Items).To(HaveLen(0))
@@ -2233,7 +2233,7 @@ var _ = Describe("OVN master EgressIP Operations", func() {
 						EgressIPs: []string{egressIP},
 					},
 				}
-				err := fakeOvn.controller.assignEgressIPs(&eIP)
+				err := fakeOvn.controller.eIPC.assignEgressIPs(&eIP)
 				Expect(err).NotTo(HaveOccurred())
 				Expect(eIP.Status.Items).To(HaveLen(1))
 				Expect(eIP.Status.Items[0].Node).To(Equal(node2.name))
@@ -2266,7 +2266,7 @@ var _ = Describe("OVN master EgressIP Operations", func() {
 					},
 				}
 
-				err := fakeOvn.controller.assignEgressIPs(&eIP)
+				err := fakeOvn.controller.eIPC.assignEgressIPs(&eIP)
 				Expect(err).To(HaveOccurred())
 				Expect(err.Error()).To(Equal("no matching host found"))
 				Expect(eIP.Status.Items).To(HaveLen(0))
@@ -2297,7 +2297,7 @@ var _ = Describe("OVN master EgressIP Operations", func() {
 					},
 				}
 
-				err := fakeOvn.controller.assignEgressIPs(&eIP)
+				err := fakeOvn.controller.eIPC.assignEgressIPs(&eIP)
 				Expect(err).To(HaveOccurred())
 				Expect(err.Error()).To(Equal(fmt.Sprintf("unable to parse provided EgressIP: %s, invalid", egressIPs[0])))
 				Expect(eIP.Status.Items).To(HaveLen(0))

@@ -1,6 +1,7 @@
 package ovn
 
 import (
+	"context"
 	"fmt"
 	"net"
 	"os"
@@ -12,6 +13,7 @@ import (
 
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
 	egressipv1 "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/egressip/v1"
+	egressipclientset "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/egressip/v1/apis/clientset/versioned"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/factory"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
@@ -21,6 +23,7 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	utilwait "k8s.io/apimachinery/pkg/util/wait"
 	"k8s.io/client-go/tools/cache"
+	"k8s.io/client-go/tools/record"
 	"k8s.io/client-go/util/retry"
 	"k8s.io/klog"
 	utilnet "k8s.io/utils/net"
@@ -38,28 +41,51 @@ const (
 	policyAlreadyExistsMsg = "Same routing policy already existed"
 )
 
-func (oc *Controller) addEgressIP(eIP *egressipv1.EgressIP) error {
+// updateEgressIP updates the EgressIP with the provided EgressIP data
+func updateEgressIP(client egressipclientset.Interface, eIP *egressipv1.EgressIP) error {
+	klog.Infof("Updating status on EgressIP %s", eIP.Name)
+	if _, err := client.K8sV1().EgressIPs().Update(context.TODO(), eIP, metav1.UpdateOptions{}); err != nil {
+		return fmt.Errorf("error in updating status on EgressIP %s: %v", eIP.Name, err)
+	}
+	return nil
+}
+
+func newEgressIPController(wf *factory.WatchFactory, client egressipclientset.Interface, recorder record.EventRecorder) egressIPController {
+	return egressIPController{
+		wf:                    wf,
+		client:                client,
+		recorder:              recorder,
+		namespaceHandlerMutex: &sync.Mutex{},
+		namespaceHandlerCache: make(map[string]factory.Handler),
+		podHandlerMutex:       &sync.Mutex{},
+		podHandlerCache:       make(map[string]factory.Handler),
+		allocatorMutex:        &sync.Mutex{},
+		allocator:             make(map[string]*egressNode),
+	}
+}
+
+func (e *egressIPController) addEgressIP(eIP *egressipv1.EgressIP) error {
 	// If the status is set at this point, then we know it's valid from syncEgressIP and we have no assignment to do.
 	// Just initialize all watchers (which should not re-create any already existing items in the OVN DB)
 	if len(eIP.Status.Items) == 0 {
-		if err := oc.assignEgressIPs(eIP); err != nil {
+		if err := e.assignEgressIPs(eIP); err != nil {
 			return fmt.Errorf("unable to assign egress IP: %s, error: %v", eIP.Name, err)
 		}
 	}
 
-	oc.eIPC.namespaceHandlerMutex.Lock()
-	defer oc.eIPC.namespaceHandlerMutex.Unlock()
+	e.namespaceHandlerMutex.Lock()
+	defer e.namespaceHandlerMutex.Unlock()
 
 	sel, err := metav1.LabelSelectorAsSelector(&eIP.Spec.NamespaceSelector)
 	if err != nil {
 		return fmt.Errorf("invalid namespaceSelector on EgressIP %s: %v", eIP.Name, err)
 	}
-	h := oc.watchFactory.AddFilteredNamespaceHandler("", sel,
+	h := e.wf.AddFilteredNamespaceHandler("", sel,
 		cache.ResourceEventHandlerFuncs{
 			AddFunc: func(obj interface{}) {
 				namespace := obj.(*kapi.Namespace)
 				klog.V(5).Infof("EgressIP: %s has matched on namespace: %s", eIP.Name, namespace.Name)
-				if err := oc.addNamespaceEgressIP(eIP, namespace); err != nil {
+				if err := e.addNamespaceEgressIP(eIP, namespace); err != nil {
 					klog.Errorf("error: unable to add namespace handler for EgressIP: %s, err: %v", eIP.Name, err)
 				}
 			},
@@ -67,45 +93,45 @@ func (oc *Controller) addEgressIP(eIP *egressipv1.EgressIP) error {
 			DeleteFunc: func(obj interface{}) {
 				namespace := obj.(*kapi.Namespace)
 				klog.V(5).Infof("EgressIP: %s stopped matching on namespace: %s", eIP.Name, namespace.Name)
-				if err := oc.deleteNamespaceEgressIP(eIP, namespace); err != nil {
+				if err := e.deleteNamespaceEgressIP(eIP, namespace); err != nil {
 					klog.Errorf("error: unable to delete namespace handler for EgressIP: %s, err: %v", eIP.Name, err)
 				}
 			},
 		}, nil)
-	oc.eIPC.namespaceHandlerCache[getEgressIPKey(eIP)] = *h
+	e.namespaceHandlerCache[getEgressIPKey(eIP)] = *h
 	return nil
 }
 
-func (oc *Controller) deleteEgressIP(eIP *egressipv1.EgressIP) error {
-	oc.releaseEgressIPs(eIP)
+func (e *egressIPController) deleteEgressIP(eIP *egressipv1.EgressIP) error {
+	e.releaseEgressIPs(eIP)
 
-	oc.eIPC.namespaceHandlerMutex.Lock()
-	defer oc.eIPC.namespaceHandlerMutex.Unlock()
-	if nH, exists := oc.eIPC.namespaceHandlerCache[getEgressIPKey(eIP)]; exists {
-		oc.watchFactory.RemoveNamespaceHandler(&nH)
-		delete(oc.eIPC.namespaceHandlerCache, getEgressIPKey(eIP))
+	e.namespaceHandlerMutex.Lock()
+	defer e.namespaceHandlerMutex.Unlock()
+	if nH, exists := e.namespaceHandlerCache[getEgressIPKey(eIP)]; exists {
+		e.wf.RemoveNamespaceHandler(&nH)
+		delete(e.namespaceHandlerCache, getEgressIPKey(eIP))
 	}
 
-	oc.eIPC.podHandlerMutex.Lock()
-	defer oc.eIPC.podHandlerMutex.Unlock()
-	if pH, exists := oc.eIPC.podHandlerCache[getEgressIPKey(eIP)]; exists {
-		oc.watchFactory.RemovePodHandler(&pH)
-		delete(oc.eIPC.podHandlerCache, getEgressIPKey(eIP))
+	e.podHandlerMutex.Lock()
+	defer e.podHandlerMutex.Unlock()
+	if pH, exists := e.podHandlerCache[getEgressIPKey(eIP)]; exists {
+		e.wf.RemovePodHandler(&pH)
+		delete(e.podHandlerCache, getEgressIPKey(eIP))
 	}
 
-	namespaces, err := oc.kube.GetNamespaces(eIP.Spec.NamespaceSelector)
+	namespaces, err := e.wf.GetNamespacesWithSelector(eIP.Spec.NamespaceSelector)
 	if err != nil {
 		return err
 	}
-	for _, namespace := range namespaces.Items {
-		if err := oc.deleteNamespacePodsEgressIP(eIP, &namespace); err != nil {
+	for _, namespace := range namespaces {
+		if err := e.deleteNamespacePodsEgressIP(eIP, namespace); err != nil {
 			return err
 		}
 	}
 	return nil
 }
 
-func (oc *Controller) isEgressNodeReady(egressNode *kapi.Node) bool {
+func (e *egressIPController) isEgressNodeReady(egressNode *kapi.Node) bool {
 	for _, condition := range egressNode.Status.Conditions {
 		if condition.Type == v1.NodeReady {
 			return condition.Status == v1.ConditionTrue
@@ -114,18 +140,18 @@ func (oc *Controller) isEgressNodeReady(egressNode *kapi.Node) bool {
 	return false
 }
 
-func (oc *Controller) isEgressNodeReachable(egressNode *kapi.Node) bool {
-	oc.eIPC.allocatorMutex.Lock()
-	defer oc.eIPC.allocatorMutex.Unlock()
-	if eNode, exists := oc.eIPC.allocator[egressNode.Name]; exists {
-		return eNode.isReachable || oc.isReachable(eNode)
+func (e *egressIPController) isEgressNodeReachable(egressNode *kapi.Node) bool {
+	e.allocatorMutex.Lock()
+	defer e.allocatorMutex.Unlock()
+	if eNode, exists := e.allocator[egressNode.Name]; exists {
+		return eNode.isReachable || e.isReachable(eNode)
 	}
 	return false
 }
 
-func (oc *Controller) syncEgressIPs(eIPs []interface{}) {
-	oc.eIPC.allocatorMutex.Lock()
-	defer oc.eIPC.allocatorMutex.Unlock()
+func (e *egressIPController) syncEgressIPs(eIPs []interface{}) {
+	e.allocatorMutex.Lock()
+	defer e.allocatorMutex.Unlock()
 	for _, eIP := range eIPs {
 		eIP, ok := eIP.(*egressipv1.EgressIP)
 		if !ok {
@@ -135,7 +161,7 @@ func (oc *Controller) syncEgressIPs(eIPs []interface{}) {
 		var validAssignment bool
 		for _, eIPStatus := range eIP.Status.Items {
 			validAssignment = false
-			eNode, exists := oc.eIPC.allocator[eIPStatus.Node]
+			eNode, exists := e.allocator[eIPStatus.Node]
 			if !exists {
 				klog.Errorf("Allocator error: EgressIP: %s claims to have an allocation on a node which is unassignable for egress IP: %s", eIP.Name, eIPStatus.Node)
 				break
@@ -149,7 +175,7 @@ func (oc *Controller) syncEgressIPs(eIPs []interface{}) {
 				klog.Errorf("Allocator error: EgressIP allocation contains unparsable IP address: %s", eIPStatus.EgressIP)
 				break
 			}
-			if node := oc.isAnyClusterNodeIP(ip); node != nil {
+			if node := e.isAnyClusterNodeIP(ip); node != nil {
 				klog.Errorf("Allocator error: EgressIP allocation: %s is the IP of node: %s ", ip.String(), node.name)
 				break
 			}
@@ -176,29 +202,29 @@ func (oc *Controller) syncEgressIPs(eIPs []interface{}) {
 			eIP.Status = egressipv1.EgressIPStatus{
 				Items: []egressipv1.EgressIPStatusItem{},
 			}
-			if err := oc.updateEgressIPWithRetry(eIP); err != nil {
+			if err := e.updateEgressIPWithRetry(eIP); err != nil {
 				klog.Error(err)
 				continue
 			}
-			namespaces, err := oc.kube.GetNamespaces(eIP.Spec.NamespaceSelector)
+			namespaces, err := e.wf.GetNamespacesWithSelector(eIP.Spec.NamespaceSelector)
 			if err != nil {
 				klog.Errorf("Unable to list namespaces matched by EgressIP: %s, err: %v", getEgressIPKey(eIP), err)
 				continue
 			}
-			for _, namespace := range namespaces.Items {
-				if err := oc.deleteNamespacePodsEgressIP(eIP, &namespace); err != nil {
+			for _, namespace := range namespaces {
+				if err := e.deleteNamespacePodsEgressIP(eIP, namespace); err != nil {
 					klog.Error(err)
 				}
 			}
 		}
-		for _, eNode := range oc.eIPC.allocator {
+		for _, eNode := range e.allocator {
 			eNode.tainted = false
 		}
 	}
 }
 
-func (oc *Controller) isAnyClusterNodeIP(ip net.IP) *egressNode {
-	for _, eNode := range oc.eIPC.allocator {
+func (e *egressIPController) isAnyClusterNodeIP(ip net.IP) *egressNode {
+	for _, eNode := range e.allocator {
 		if ip.Equal(eNode.v6IP) || ip.Equal(eNode.v4IP) {
 			return eNode
 		}
@@ -206,26 +232,26 @@ func (oc *Controller) isAnyClusterNodeIP(ip net.IP) *egressNode {
 	return nil
 }
 
-func (oc *Controller) updateEgressIPWithRetry(eIP *egressipv1.EgressIP) error {
+func (e *egressIPController) updateEgressIPWithRetry(eIP *egressipv1.EgressIP) error {
 	return retry.RetryOnConflict(retry.DefaultRetry, func() error {
-		return oc.kube.UpdateEgressIP(eIP)
+		return updateEgressIP(e.client, eIP)
 	})
 }
 
-func (oc *Controller) addNamespaceEgressIP(eIP *egressipv1.EgressIP, namespace *kapi.Namespace) error {
-	oc.eIPC.podHandlerMutex.Lock()
-	defer oc.eIPC.podHandlerMutex.Unlock()
+func (e *egressIPController) addNamespaceEgressIP(eIP *egressipv1.EgressIP, namespace *kapi.Namespace) error {
+	e.podHandlerMutex.Lock()
+	defer e.podHandlerMutex.Unlock()
 
 	sel, err := metav1.LabelSelectorAsSelector(&eIP.Spec.PodSelector)
 	if err != nil {
 		return fmt.Errorf("invalid podSelector on EgressIP %s: %v", eIP.Name, err)
 	}
-	h := oc.watchFactory.AddFilteredPodHandler(namespace.Name, sel,
+	h := e.wf.AddFilteredPodHandler(namespace.Name, sel,
 		cache.ResourceEventHandlerFuncs{
 			AddFunc: func(obj interface{}) {
 				pod := obj.(*kapi.Pod)
 				klog.V(5).Infof("EgressIP: %s has matched on pod: %s in namespace: %s", eIP.Name, pod.Name, namespace.Name)
-				if err := oc.eIPC.addPodEgressIP(eIP, pod); err != nil {
+				if err := e.addPodEgressIP(eIP, pod); err != nil {
 					klog.Errorf("Unable to add pod: %s/%s to EgressIP: %s, err: %v", pod.Namespace, pod.Name, eIP.Name, err)
 				}
 			},
@@ -234,9 +260,9 @@ func (oc *Controller) addNamespaceEgressIP(eIP *egressipv1.EgressIP, namespace *
 				// FYI: the only pod update we care about here is the pod being assigned an IP, which
 				// it didn't have when we received the ADD. If the label is changed and it stops matching:
 				// this watcher receives a delete.
-				if oc.eIPC.needsRetry(newPod) {
+				if e.needsRetry(newPod) {
 					klog.V(5).Infof("EgressIP: %s update for pod: %s in namespace: %s", eIP.Name, newPod.Name, namespace.Name)
-					if err := oc.eIPC.addPodEgressIP(eIP, newPod); err != nil {
+					if err := e.addPodEgressIP(eIP, newPod); err != nil {
 						klog.Errorf("Unable to add pod: %s/%s to EgressIP: %s, err: %v", newPod.Namespace, newPod.Name, eIP.Name, err)
 					}
 				}
@@ -246,39 +272,39 @@ func (oc *Controller) addNamespaceEgressIP(eIP *egressipv1.EgressIP, namespace *
 				// FYI: we can be in a situation where we processed a pod ADD for which there was no IP
 				// address assigned. If the pod is deleted before the IP address is assigned,
 				// we should not process that delete (as nothing exists in OVN for it)
-				klog.V(5).Infof("EgressIP: %s has stopped matching on pod: %s in namespace: %s, needs delete: %v", eIP.Name, pod.Name, namespace.Name, !oc.eIPC.needsRetry(pod))
-				if !oc.eIPC.needsRetry(pod) {
-					if err := oc.eIPC.deletePodEgressIP(eIP, pod); err != nil {
+				klog.V(5).Infof("EgressIP: %s has stopped matching on pod: %s in namespace: %s, needs delete: %v", eIP.Name, pod.Name, namespace.Name, !e.needsRetry(pod))
+				if !e.needsRetry(pod) {
+					if err := e.deletePodEgressIP(eIP, pod); err != nil {
 						klog.Errorf("Unable to delete pod: %s/%s to EgressIP: %s, err: %v", pod.Namespace, pod.Name, eIP.Name, err)
 					}
 				}
 			},
 		}, nil)
-	oc.eIPC.podHandlerCache[getEgressIPKey(eIP)] = *h
+	e.podHandlerCache[getEgressIPKey(eIP)] = *h
 	return nil
 }
 
-func (oc *Controller) deleteNamespaceEgressIP(eIP *egressipv1.EgressIP, namespace *kapi.Namespace) error {
-	oc.eIPC.podHandlerMutex.Lock()
-	defer oc.eIPC.podHandlerMutex.Unlock()
-	if pH, exists := oc.eIPC.podHandlerCache[getEgressIPKey(eIP)]; exists {
-		oc.watchFactory.RemovePodHandler(&pH)
-		delete(oc.eIPC.podHandlerCache, getEgressIPKey(eIP))
+func (e *egressIPController) deleteNamespaceEgressIP(eIP *egressipv1.EgressIP, namespace *kapi.Namespace) error {
+	e.podHandlerMutex.Lock()
+	defer e.podHandlerMutex.Unlock()
+	if pH, exists := e.podHandlerCache[getEgressIPKey(eIP)]; exists {
+		e.wf.RemovePodHandler(&pH)
+		delete(e.podHandlerCache, getEgressIPKey(eIP))
 	}
-	if err := oc.deleteNamespacePodsEgressIP(eIP, namespace); err != nil {
+	if err := e.deleteNamespacePodsEgressIP(eIP, namespace); err != nil {
 		return err
 	}
 	return nil
 }
 
-func (oc *Controller) deleteNamespacePodsEgressIP(eIP *egressipv1.EgressIP, namespace *kapi.Namespace) error {
-	pods, err := oc.kube.GetPods(namespace.Name, eIP.Spec.PodSelector)
+func (e *egressIPController) deleteNamespacePodsEgressIP(eIP *egressipv1.EgressIP, namespace *kapi.Namespace) error {
+	pods, err := e.wf.GetPodsWithSelector(namespace.Name, eIP.Spec.PodSelector)
 	if err != nil {
 		return err
 	}
-	for _, pod := range pods.Items {
-		if !oc.eIPC.needsRetry(&pod) {
-			if err := oc.eIPC.deletePodEgressIP(eIP, &pod); err != nil {
+	for _, pod := range pods {
+		if !e.needsRetry(pod) {
+			if err := e.deletePodEgressIP(eIP, pod); err != nil {
 				return err
 			}
 		}
@@ -286,21 +312,21 @@ func (oc *Controller) deleteNamespacePodsEgressIP(eIP *egressipv1.EgressIP, name
 	return nil
 }
 
-func (oc *Controller) assignEgressIPs(eIP *egressipv1.EgressIP) error {
-	oc.eIPC.allocatorMutex.Lock()
+func (e *egressIPController) assignEgressIPs(eIP *egressipv1.EgressIP) error {
+	e.allocatorMutex.Lock()
 	assignments := []egressipv1.EgressIPStatusItem{}
 	defer func() {
 		eIP.Status.Items = assignments
-		oc.eIPC.allocatorMutex.Unlock()
+		e.allocatorMutex.Unlock()
 	}()
-	assignableNodes, existingAllocations := oc.getSortedEgressData()
+	assignableNodes, existingAllocations := e.getSortedEgressData()
 	if len(assignableNodes) == 0 {
-		oc.eIPC.assignmentRetry.Store(eIP.Name, true)
+		e.assignmentRetry.Store(eIP.Name, true)
 		eIPRef := kapi.ObjectReference{
 			Kind: "EgressIP",
 			Name: eIP.Name,
 		}
-		oc.recorder.Eventf(&eIPRef, kapi.EventTypeWarning, "NoMatchingNodeFound", "no assignable nodes for EgressIP: %s, please tag at least one node with label: %s", eIP.Name, util.GetNodeEgressLabel())
+		e.recorder.Eventf(&eIPRef, kapi.EventTypeWarning, "NoMatchingNodeFound", "no assignable nodes for EgressIP: %s, please tag at least one node with label: %s", eIP.Name, util.GetNodeEgressLabel())
 		return fmt.Errorf("no assignable nodes")
 	}
 	klog.V(5).Infof("Current assignments are: %+v", existingAllocations)
@@ -312,15 +338,15 @@ func (oc *Controller) assignEgressIPs(eIP *egressipv1.EgressIP) error {
 				Kind: "EgressIP",
 				Name: eIP.Name,
 			}
-			oc.recorder.Eventf(&eIPRef, kapi.EventTypeWarning, "InvalidEgressIP", "egress IP: %s for object EgressIP: %s is not a valid IP address", egressIP, eIP.Name)
+			e.recorder.Eventf(&eIPRef, kapi.EventTypeWarning, "InvalidEgressIP", "egress IP: %s for object EgressIP: %s is not a valid IP address", egressIP, eIP.Name)
 			return fmt.Errorf("unable to parse provided EgressIP: %s, invalid", egressIP)
 		}
-		if node := oc.isAnyClusterNodeIP(eIPC); node != nil {
+		if node := e.isAnyClusterNodeIP(eIPC); node != nil {
 			eIPRef := kapi.ObjectReference{
 				Kind: "EgressIP",
 				Name: eIP.Name,
 			}
-			oc.recorder.Eventf(
+			e.recorder.Eventf(
 				&eIPRef,
 				kapi.EventTypeWarning,
 				"UnsupportedRequest",
@@ -340,7 +366,7 @@ func (oc *Controller) assignEgressIPs(eIP *egressipv1.EgressIP) error {
 			}
 			if (assignableNodes[i].v6Subnet != nil && assignableNodes[i].v6Subnet.Contains(eIPC)) ||
 				(assignableNodes[i].v4Subnet != nil && assignableNodes[i].v4Subnet.Contains(eIPC)) {
-				assignableNodes[i].tainted, oc.eIPC.allocator[assignableNodes[i].name].allocations[eIPC.String()] = true, true
+				assignableNodes[i].tainted, e.allocator[assignableNodes[i].name].allocations[eIPC.String()] = true, true
 				assignments = append(assignments, egressipv1.EgressIPStatusItem{
 					EgressIP: eIPC.String(),
 					Node:     assignableNodes[i].name,
@@ -351,41 +377,41 @@ func (oc *Controller) assignEgressIPs(eIP *egressipv1.EgressIP) error {
 		}
 	}
 	if len(assignments) == 0 {
-		oc.eIPC.assignmentRetry.Store(eIP.Name, true)
+		e.assignmentRetry.Store(eIP.Name, true)
 		eIPRef := kapi.ObjectReference{
 			Kind: "EgressIP",
 			Name: eIP.Name,
 		}
-		oc.recorder.Eventf(&eIPRef, kapi.EventTypeWarning, "NoMatchingNodeFound", "No matching nodes found, which can host any of the egress IPs: %v for object EgressIP: %s", eIP.Spec.EgressIPs, eIP.Name)
+		e.recorder.Eventf(&eIPRef, kapi.EventTypeWarning, "NoMatchingNodeFound", "No matching nodes found, which can host any of the egress IPs: %v for object EgressIP: %s", eIP.Spec.EgressIPs, eIP.Name)
 		return fmt.Errorf("no matching host found")
 	}
 	if len(assignments) < len(eIP.Spec.EgressIPs) {
-		oc.eIPC.assignmentRetry.Store(eIP.Name, true)
+		e.assignmentRetry.Store(eIP.Name, true)
 		eIPRef := kapi.ObjectReference{
 			Kind: "EgressIP",
 			Name: eIP.Name,
 		}
-		oc.recorder.Eventf(&eIPRef, kapi.EventTypeWarning, "UnassignedRequest", "Not all egress IPs for EgressIP: %s could be assigned, please tag more nodes", eIP.Name)
+		e.recorder.Eventf(&eIPRef, kapi.EventTypeWarning, "UnassignedRequest", "Not all egress IPs for EgressIP: %s could be assigned, please tag more nodes", eIP.Name)
 	}
 	return nil
 }
 
-func (oc *Controller) releaseEgressIPs(eIP *egressipv1.EgressIP) {
-	oc.eIPC.allocatorMutex.Lock()
-	defer oc.eIPC.allocatorMutex.Unlock()
+func (e *egressIPController) releaseEgressIPs(eIP *egressipv1.EgressIP) {
+	e.allocatorMutex.Lock()
+	defer e.allocatorMutex.Unlock()
 	for _, status := range eIP.Status.Items {
 		klog.V(5).Infof("Releasing egress IP assignment: %s", status.EgressIP)
-		if node, exists := oc.eIPC.allocator[status.Node]; exists {
+		if node, exists := e.allocator[status.Node]; exists {
 			delete(node.allocations, status.EgressIP)
 		}
-		klog.V(5).Infof("Remaining allocations on node are: %+v", oc.eIPC.allocator[status.Node])
+		klog.V(5).Infof("Remaining allocations on node are: %+v", e.allocator[status.Node])
 	}
 }
 
-func (oc *Controller) getSortedEgressData() ([]egressNode, map[string]bool) {
+func (e *egressIPController) getSortedEgressData() ([]egressNode, map[string]bool) {
 	assignableNodes := []egressNode{}
 	allAllocations := make(map[string]bool)
-	for _, eNode := range oc.eIPC.allocator {
+	for _, eNode := range e.allocator {
 		if eNode.isEgressAssignable && eNode.isReady && eNode.isReachable {
 			assignableNodes = append(assignableNodes, *eNode)
 		}
@@ -399,65 +425,65 @@ func (oc *Controller) getSortedEgressData() ([]egressNode, map[string]bool) {
 	return assignableNodes, allAllocations
 }
 
-func (oc *Controller) setNodeEgressAssignable(nodeName string, isAssignable bool) {
-	oc.eIPC.allocatorMutex.Lock()
-	defer oc.eIPC.allocatorMutex.Unlock()
-	if eNode, exists := oc.eIPC.allocator[nodeName]; exists {
+func (e *egressIPController) setNodeEgressAssignable(nodeName string, isAssignable bool) {
+	e.allocatorMutex.Lock()
+	defer e.allocatorMutex.Unlock()
+	if eNode, exists := e.allocator[nodeName]; exists {
 		eNode.isEgressAssignable = isAssignable
 	}
 }
 
-func (oc *Controller) setNodeEgressReady(nodeName string, isReady bool) {
-	oc.eIPC.allocatorMutex.Lock()
-	defer oc.eIPC.allocatorMutex.Unlock()
-	if eNode, exists := oc.eIPC.allocator[nodeName]; exists {
+func (e *egressIPController) setNodeEgressReady(nodeName string, isReady bool) {
+	e.allocatorMutex.Lock()
+	defer e.allocatorMutex.Unlock()
+	if eNode, exists := e.allocator[nodeName]; exists {
 		eNode.isReady = isReady
 	}
 }
 
-func (oc *Controller) setNodeEgressReachable(nodeName string, isReachable bool) {
-	oc.eIPC.allocatorMutex.Lock()
-	defer oc.eIPC.allocatorMutex.Unlock()
-	if eNode, exists := oc.eIPC.allocator[nodeName]; exists {
+func (e *egressIPController) setNodeEgressReachable(nodeName string, isReachable bool) {
+	e.allocatorMutex.Lock()
+	defer e.allocatorMutex.Unlock()
+	if eNode, exists := e.allocator[nodeName]; exists {
 		eNode.isReachable = isReachable
 	}
 }
 
-func (oc *Controller) addEgressNode(egressNode *kapi.Node) error {
+func (e *egressIPController) addEgressNode(egressNode *kapi.Node) error {
 	klog.V(5).Infof("Egress node: %s about to be initialized", egressNode.Name)
-	oc.eIPC.assignmentRetry.Range(func(key, value interface{}) bool {
+	e.assignmentRetry.Range(func(key, value interface{}) bool {
 		eIPName := key.(string)
 		klog.V(5).Infof("Re-assignment for EgressIP: %s attempted by new node: %s", eIPName, egressNode.Name)
-		eIP, err := oc.kube.GetEgressIP(eIPName)
+		eIP, err := e.wf.GetEgressIP(eIPName)
 		if errors.IsNotFound(err) {
 			klog.Errorf("Re-assignment for EgressIP: EgressIP: %s not found in the api-server, err: %v", eIPName, err)
-			oc.eIPC.assignmentRetry.Delete(eIP.Name)
+			e.assignmentRetry.Delete(eIP.Name)
 			return true
 		}
 		if err != nil {
-			klog.Errorf("Re-assignment for EgressIP: unable to retrieve EgressIP: %s from the api-server, err: %v", eIPName, err)
+			klog.Errorf("Re-assignment for EgressIP: unable to retrieve EgressIP: %s from the informer cache, err: %v", eIPName, err)
 			return true
 		}
-		newEIP, err := oc.reassignEgressIP(eIP)
+		newEIP, err := e.reassignEgressIP(eIP)
 		if err != nil {
 			klog.Errorf("Re-assignment for EgressIP: %s failed, err: %v", eIP.Name, err)
 			return true
 		}
 		if len(newEIP.Spec.EgressIPs) == len(newEIP.Status.Items) {
-			oc.eIPC.assignmentRetry.Delete(eIP.Name)
+			e.assignmentRetry.Delete(eIP.Name)
 		}
 		return true
 	})
 	return nil
 }
 
-func (oc *Controller) deleteEgressNode(egressNode *kapi.Node) error {
+func (e *egressIPController) deleteEgressNode(egressNode *kapi.Node) error {
 	klog.V(5).Infof("Egress node: %s about to be removed", egressNode.Name)
-	egressIPs, err := oc.kube.GetEgressIPs()
+	egressIPs, err := e.wf.GetEgressIPs()
 	if err != nil {
 		return fmt.Errorf("unable to list egressIPs, err: %v", err)
 	}
-	for _, eIP := range egressIPs.Items {
+	for _, eIP := range egressIPs {
 		needsReassignment := false
 		for _, status := range eIP.Status.Items {
 			if status.Node == egressNode.Name {
@@ -466,7 +492,7 @@ func (oc *Controller) deleteEgressNode(egressNode *kapi.Node) error {
 			}
 		}
 		if needsReassignment {
-			if _, err := oc.reassignEgressIP(&eIP); err != nil {
+			if _, err := e.reassignEgressIP(eIP); err != nil {
 				klog.Errorf("EgressIP: %s re-assignmnent error: %v", eIP.Name, err)
 			}
 		}
@@ -474,9 +500,9 @@ func (oc *Controller) deleteEgressNode(egressNode *kapi.Node) error {
 	return nil
 }
 
-func (oc *Controller) reassignEgressIP(eIP *egressipv1.EgressIP) (*egressipv1.EgressIP, error) {
+func (e *egressIPController) reassignEgressIP(eIP *egressipv1.EgressIP) (*egressipv1.EgressIP, error) {
 	klog.V(5).Infof("EgressIP: %s about to be re-assigned", eIP.Name)
-	if err := oc.deleteEgressIP(eIP); err != nil {
+	if err := e.deleteEgressIP(eIP); err != nil {
 		return nil, fmt.Errorf("old egress IP deletion failed, err: %v", err)
 	}
 	eIP = eIP.DeepCopy()
@@ -484,19 +510,19 @@ func (oc *Controller) reassignEgressIP(eIP *egressipv1.EgressIP) (*egressipv1.Eg
 		Items: []egressipv1.EgressIPStatusItem{},
 	}
 	var reassignError error
-	if err := oc.addEgressIP(eIP); err != nil {
+	if err := e.addEgressIP(eIP); err != nil {
 		reassignError = fmt.Errorf("new egress IP assignment failed, err: %v", err)
 	}
-	if err := oc.updateEgressIPWithRetry(eIP); err != nil {
+	if err := e.updateEgressIPWithRetry(eIP); err != nil {
 		return nil, fmt.Errorf("update of new egress IP failed, err: %v", err)
 	}
 	return eIP, reassignError
 }
 
-func (oc *Controller) initEgressIPAllocator(node *kapi.Node) (err error) {
-	oc.eIPC.allocatorMutex.Lock()
-	defer oc.eIPC.allocatorMutex.Unlock()
-	if _, exists := oc.eIPC.allocator[node.Name]; !exists {
+func (e *egressIPController) initEgressIPAllocator(node *kapi.Node) (err error) {
+	e.allocatorMutex.Lock()
+	defer e.allocatorMutex.Unlock()
+	if _, exists := e.allocator[node.Name]; !exists {
 		var v4IP, v6IP net.IP
 		var v4Subnet, v6Subnet *net.IPNet
 		v4IfAddr, v6IfAddr, err := util.ParseNodePrimaryIfAddr(node)
@@ -515,7 +541,7 @@ func (oc *Controller) initEgressIPAllocator(node *kapi.Node) (err error) {
 				return err
 			}
 		}
-		oc.eIPC.allocator[node.Name] = &egressNode{
+		e.allocator[node.Name] = &egressNode{
 			name:        node.Name,
 			v4IP:        v4IP,
 			v6IP:        v6IP,
@@ -527,34 +553,34 @@ func (oc *Controller) initEgressIPAllocator(node *kapi.Node) (err error) {
 	return nil
 }
 
-func (oc *Controller) addNodeForEgress(node *v1.Node) error {
+func (e *egressIPController) addNodeForEgress(node *v1.Node) error {
 	v4Addr, v6Addr := getNodeInternalAddrs(node)
 	v4ClusterSubnet, v6ClusterSubnet := getClusterSubnets()
 	if err := createDefaultNoRerouteNodePolicies(v4Addr, v6Addr, v4ClusterSubnet, v6ClusterSubnet); err != nil {
 		return err
 	}
-	if err := oc.initEgressIPAllocator(node); err != nil {
+	if err := e.initEgressIPAllocator(node); err != nil {
 		return fmt.Errorf("egress node initialization error: %v", err)
 	}
 	return nil
 }
 
-func (oc *Controller) deleteNodeForEgress(node *v1.Node) error {
+func (e *egressIPController) deleteNodeForEgress(node *v1.Node) error {
 	v4Addr, v6Addr := getNodeInternalAddrs(node)
 	v4ClusterSubnet, v6ClusterSubnet := getClusterSubnets()
 	if err := deleteDefaultNoRerouteNodePolicies(v4Addr, v6Addr, v4ClusterSubnet, v6ClusterSubnet); err != nil {
 		return err
 	}
-	oc.eIPC.allocatorMutex.Lock()
-	delete(oc.eIPC.allocator, node.Name)
-	oc.eIPC.allocatorMutex.Unlock()
+	e.allocatorMutex.Lock()
+	delete(e.allocator, node.Name)
+	e.allocatorMutex.Unlock()
 	return nil
 }
 
-func (oc *Controller) initClusterEgressPolicies(nodes []interface{}) {
+func (e *egressIPController) initClusterEgressPolicies(nodes []interface{}) {
 	v4ClusterSubnet, v6ClusterSubnet := getClusterSubnets()
 	createDefaultNoReroutePodPolicies(v4ClusterSubnet, v6ClusterSubnet)
-	go oc.checkEgressNodesReachability()
+	go e.checkEgressNodesReachability()
 }
 
 // egressNode is a cache helper used for egress IP assignment, representing an egress node
@@ -572,6 +598,12 @@ type egressNode struct {
 }
 
 type egressIPController struct {
+	wf *factory.WatchFactory
+
+	client egressipclientset.Interface
+	// event recorder used to post events to k8s
+	recorder record.EventRecorder
+
 	// Cache used for retrying pods which did not have an IP address when we processed the EgressIP object
 	podRetry sync.Map
 
@@ -789,14 +821,14 @@ func findReroutePolicyIDs(filterOption, egressIPName string, gatewayRouterIP net
 	return strings.Split(policyIDs, "\n"), nil
 }
 
-func (oc *Controller) checkEgressNodesReachability() {
+func (e *egressIPController) checkEgressNodesReachability() {
 	for {
 		reAddOrDelete := map[string]bool{}
-		oc.eIPC.allocatorMutex.Lock()
-		for _, eNode := range oc.eIPC.allocator {
+		e.allocatorMutex.Lock()
+		for _, eNode := range e.allocator {
 			if eNode.isEgressAssignable && eNode.isReady {
 				wasReachable := eNode.isReachable
-				isReachable := oc.isReachable(eNode)
+				isReachable := e.isReachable(eNode)
 				if wasReachable && !isReachable {
 					reAddOrDelete[eNode.name] = true
 				} else if !wasReachable && isReachable {
@@ -805,20 +837,20 @@ func (oc *Controller) checkEgressNodesReachability() {
 				eNode.isReachable = isReachable
 			}
 		}
-		oc.eIPC.allocatorMutex.Unlock()
+		e.allocatorMutex.Unlock()
 		for nodeName, shouldDelete := range reAddOrDelete {
-			node, err := oc.kube.GetNode(nodeName)
+			node, err := e.wf.GetNode(nodeName)
 			if err != nil {
 				klog.Errorf("Node: %s reachability changed, but could not retrieve node from API server, err: %v", node.Name, err)
 			}
 			if shouldDelete {
 				klog.Warningf("Node: %s is detected as unreachable, deleting it from egress assignment", node.Name)
-				if err := oc.deleteEgressNode(node); err != nil {
+				if err := e.deleteEgressNode(node); err != nil {
 					klog.Errorf("Node: %s is detected as unreachable, but could not re-assign egress IPs, err: %v", node.Name, err)
 				}
 			} else {
 				klog.Infof("Node: %s is detected as reachable and ready again, adding it to egress assignment", node.Name)
-				if err := oc.addEgressNode(node); err != nil {
+				if err := e.addEgressNode(node); err != nil {
 					klog.Errorf("Node: %s is detected as reachable and ready again, but could not re-assign egress IPs, err: %v", node.Name, err)
 				}
 			}
@@ -827,7 +859,7 @@ func (oc *Controller) checkEgressNodesReachability() {
 	}
 }
 
-func (oc *Controller) isReachable(node *egressNode) bool {
+func (e *egressIPController) isReachable(node *egressNode) bool {
 	reachable := false
 	// check IPv6 only if IPv4 fails
 	if node.v4IP != nil {

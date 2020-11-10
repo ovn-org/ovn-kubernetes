@@ -217,7 +217,7 @@ cookie=0x0, duration=8366.597s, table=1, n_packets=10641, n_bytes=10370087, prio
 			wf.Shutdown()
 		}()
 
-		k := &kube.Kube{fakeClient.KubeClient, egressIPFakeClient, egressFirewallFakeClient}
+		k := &kube.Kube{fakeClient.KubeClient, egressFirewallFakeClient}
 
 		iptV4, iptV6 := util.SetFakeIPTablesHelpers()
 

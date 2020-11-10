@@ -224,7 +224,6 @@ func NewOvnController(ovnClient *util.OVNClientset, wf *factory.WatchFactory,
 	return &Controller{
 		kube: &kube.Kube{
 			KClient:              ovnClient.KubeClient,
-			EIPClient:            ovnClient.EgressIPClient,
 			EgressFirewallClient: ovnClient.EgressFirewallClient,
 		},
 		watchFactory:              wf,
@@ -240,24 +239,17 @@ func NewOvnController(ovnClient *util.OVNClientset, wf *factory.WatchFactory,
 		lspIngressDenyCache:       make(map[string]int),
 		lspEgressDenyCache:        make(map[string]int),
 		lspMutex:                  &sync.Mutex{},
-		eIPC: egressIPController{
-			namespaceHandlerMutex: &sync.Mutex{},
-			namespaceHandlerCache: make(map[string]factory.Handler),
-			podHandlerMutex:       &sync.Mutex{},
-			podHandlerCache:       make(map[string]factory.Handler),
-			allocatorMutex:        &sync.Mutex{},
-			allocator:             make(map[string]*egressNode),
-		},
-		loadbalancerClusterCache: make(map[kapi.Protocol]string),
-		multicastSupport:         config.EnableMulticast,
-		serviceVIPToName:         make(map[ServiceVIPKey]types.NamespacedName),
-		serviceVIPToNameLock:     sync.Mutex{},
-		serviceLBMap:             make(map[string]map[string]*loadBalancerConf),
-		serviceLBLock:            sync.Mutex{},
-		joinSwIPManager:          nil,
-		recorder:                 recorder,
-		ovnNBClient:              ovnNBClient,
-		ovnSBClient:              ovnSBClient,
+		eIPC:                      newEgressIPController(wf, ovnClient.EgressIPClient, recorder),
+		loadbalancerClusterCache:  make(map[kapi.Protocol]string),
+		multicastSupport:          config.EnableMulticast,
+		serviceVIPToName:          make(map[ServiceVIPKey]types.NamespacedName),
+		serviceVIPToNameLock:      sync.Mutex{},
+		serviceLBMap:              make(map[string]map[string]*loadBalancerConf),
+		serviceLBLock:             sync.Mutex{},
+		joinSwIPManager:           nil,
+		recorder:                  recorder,
+		ovnNBClient:               ovnNBClient,
+		ovnSBClient:               ovnSBClient,
 	}
 }
 
@@ -734,15 +726,15 @@ func (oc *Controller) WatchEgressNodes() {
 	oc.watchFactory.AddNodeHandler(cache.ResourceEventHandlerFuncs{
 		AddFunc: func(obj interface{}) {
 			node := obj.(*kapi.Node)
-			if err := oc.addNodeForEgress(node); err != nil {
+			if err := oc.eIPC.addNodeForEgress(node); err != nil {
 				klog.Error(err)
 			}
 			nodeLabels := node.GetLabels()
-			if _, hasEgressLabel := nodeLabels[nodeEgressLabel]; hasEgressLabel && oc.isEgressNodeReady(node) && oc.isEgressNodeReachable(node) {
-				oc.setNodeEgressAssignable(node.Name, true)
-				oc.setNodeEgressReady(node.Name, true)
-				oc.setNodeEgressReachable(node.Name, true)
-				if err := oc.addEgressNode(node); err != nil {
+			if _, hasEgressLabel := nodeLabels[nodeEgressLabel]; hasEgressLabel && oc.eIPC.isEgressNodeReady(node) && oc.eIPC.isEgressNodeReachable(node) {
+				oc.eIPC.setNodeEgressAssignable(node.Name, true)
+				oc.eIPC.setNodeEgressReady(node.Name, true)
+				oc.eIPC.setNodeEgressReachable(node.Name, true)
+				if err := oc.eIPC.addEgressNode(node); err != nil {
 					klog.Error(err)
 				}
 			}
@@ -750,7 +742,7 @@ func (oc *Controller) WatchEgressNodes() {
 		UpdateFunc: func(old, new interface{}) {
 			oldNode := old.(*kapi.Node)
 			newNode := new.(*kapi.Node)
-			if err := oc.initEgressIPAllocator(newNode); err != nil {
+			if err := oc.eIPC.initEgressIPAllocator(newNode); err != nil {
 				klog.Error(err)
 			}
 			oldLabels := oldNode.GetLabels()
@@ -762,22 +754,22 @@ func (oc *Controller) WatchEgressNodes() {
 			}
 			if oldHadEgressLabel && !newHasEgressLabel {
 				klog.Infof("Node: %s has been un-labelled, deleting it from egress assignment", newNode.Name)
-				oc.setNodeEgressAssignable(oldNode.Name, false)
-				if err := oc.deleteEgressNode(oldNode); err != nil {
+				oc.eIPC.setNodeEgressAssignable(oldNode.Name, false)
+				if err := oc.eIPC.deleteEgressNode(oldNode); err != nil {
 					klog.Error(err)
 				}
 				return
 			}
-			isOldReady := oc.isEgressNodeReady(oldNode)
-			isNewReady := oc.isEgressNodeReady(newNode)
-			isNewReachable := oc.isEgressNodeReachable(newNode)
-			oc.setNodeEgressReady(newNode.Name, isNewReady)
-			oc.setNodeEgressReachable(newNode.Name, isNewReachable)
+			isOldReady := oc.eIPC.isEgressNodeReady(oldNode)
+			isNewReady := oc.eIPC.isEgressNodeReady(newNode)
+			isNewReachable := oc.eIPC.isEgressNodeReachable(newNode)
+			oc.eIPC.setNodeEgressReady(newNode.Name, isNewReady)
+			oc.eIPC.setNodeEgressReachable(newNode.Name, isNewReachable)
 			if !oldHadEgressLabel && newHasEgressLabel {
 				klog.Infof("Node: %s has been labelled, adding it for egress assignment", newNode.Name)
-				oc.setNodeEgressAssignable(newNode.Name, true)
+				oc.eIPC.setNodeEgressAssignable(newNode.Name, true)
 				if isNewReady && isNewReachable {
-					if err := oc.addEgressNode(newNode); err != nil {
+					if err := oc.eIPC.addEgressNode(newNode); err != nil {
 						klog.Error(err)
 					}
 				} else {
@@ -790,29 +782,29 @@ func (oc *Controller) WatchEgressNodes() {
 			}
 			if !isNewReady {
 				klog.Warningf("Node: %s is not ready, deleting it from egress assignment", newNode.Name)
-				if err := oc.deleteEgressNode(newNode); err != nil {
+				if err := oc.eIPC.deleteEgressNode(newNode); err != nil {
 					klog.Error(err)
 				}
 			} else if isNewReady && isNewReachable {
 				klog.Infof("Node: %s is ready and reachable, adding it for egress assignment", newNode.Name)
-				if err := oc.addEgressNode(newNode); err != nil {
+				if err := oc.eIPC.addEgressNode(newNode); err != nil {
 					klog.Error(err)
 				}
 			}
 		},
 		DeleteFunc: func(obj interface{}) {
 			node := obj.(*kapi.Node)
-			if err := oc.deleteNodeForEgress(node); err != nil {
+			if err := oc.eIPC.deleteNodeForEgress(node); err != nil {
 				klog.Error(err)
 			}
 			nodeLabels := node.GetLabels()
 			if _, hasEgressLabel := nodeLabels[nodeEgressLabel]; hasEgressLabel {
-				if err := oc.deleteEgressNode(node); err != nil {
+				if err := oc.eIPC.deleteEgressNode(node); err != nil {
 					klog.Error(err)
 				}
 			}
 		},
-	}, oc.initClusterEgressPolicies)
+	}, oc.eIPC.initClusterEgressPolicies)
 }
 
 // WatchEgressIP starts the watching of egressip resource and calls
@@ -821,10 +813,10 @@ func (oc *Controller) WatchEgressIP() {
 	oc.watchFactory.AddEgressIPHandler(cache.ResourceEventHandlerFuncs{
 		AddFunc: func(obj interface{}) {
 			eIP := obj.(*egressipv1.EgressIP).DeepCopy()
-			if err := oc.addEgressIP(eIP); err != nil {
+			if err := oc.eIPC.addEgressIP(eIP); err != nil {
 				klog.Error(err)
 			}
-			if err := oc.updateEgressIPWithRetry(eIP); err != nil {
+			if err := oc.eIPC.updateEgressIPWithRetry(eIP); err != nil {
 				klog.Error(err)
 			}
 		},
@@ -832,27 +824,27 @@ func (oc *Controller) WatchEgressIP() {
 			oldEIP := old.(*egressipv1.EgressIP)
 			newEIP := new.(*egressipv1.EgressIP).DeepCopy()
 			if !reflect.DeepEqual(oldEIP.Spec, newEIP.Spec) {
-				if err := oc.deleteEgressIP(oldEIP); err != nil {
+				if err := oc.eIPC.deleteEgressIP(oldEIP); err != nil {
 					klog.Error(err)
 				}
 				newEIP.Status = egressipv1.EgressIPStatus{
 					Items: []egressipv1.EgressIPStatusItem{},
 				}
-				if err := oc.addEgressIP(newEIP); err != nil {
+				if err := oc.eIPC.addEgressIP(newEIP); err != nil {
 					klog.Error(err)
 				}
-				if err := oc.updateEgressIPWithRetry(newEIP); err != nil {
+				if err := oc.eIPC.updateEgressIPWithRetry(newEIP); err != nil {
 					klog.Error(err)
 				}
 			}
 		},
 		DeleteFunc: func(obj interface{}) {
 			eIP := obj.(*egressipv1.EgressIP)
-			if err := oc.deleteEgressIP(eIP); err != nil {
+			if err := oc.eIPC.deleteEgressIP(eIP); err != nil {
 				klog.Error(err)
 			}
 		},
-	}, oc.syncEgressIPs)
+	}, oc.eIPC.syncEgressIPs)
 }
 
 // WatchNamespaces starts the watching of namespace resource and calls

@@ -9,8 +9,6 @@ import (
 
 	egressfirewall "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/egressfirewall/v1"
 	egressfirewallclientset "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/egressfirewall/v1/apis/clientset/versioned"
-	egressipv1 "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/egressip/v1"
-	egressipclientset "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/egressip/v1/apis/clientset/versioned"
 	kapi "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/labels"
@@ -26,12 +24,9 @@ type Interface interface {
 	SetAnnotationsOnNode(node *kapi.Node, annotations map[string]interface{}) error
 	SetAnnotationsOnNamespace(namespace *kapi.Namespace, annotations map[string]string) error
 	UpdateEgressFirewall(egressfirewall *egressfirewall.EgressFirewall) error
-	UpdateEgressIP(eIP *egressipv1.EgressIP) error
 	UpdateNodeStatus(node *kapi.Node) error
 	GetAnnotationsOnPod(namespace, name string) (map[string]string, error)
 	GetNodes() (*kapi.NodeList, error)
-	GetEgressIP(name string) (*egressipv1.EgressIP, error)
-	GetEgressIPs() (*egressipv1.EgressIPList, error)
 	GetNamespaces(labelSelector metav1.LabelSelector) (*kapi.NamespaceList, error)
 	GetPods(namespace string, labelSelector metav1.LabelSelector) (*kapi.PodList, error)
 	GetNode(name string) (*kapi.Node, error)
@@ -43,7 +38,6 @@ type Interface interface {
 // Kube is the structure object upon which the Interface is implemented
 type Kube struct {
 	KClient              kubernetes.Interface
-	EIPClient            egressipclientset.Interface
 	EgressFirewallClient egressfirewallclientset.Interface
 }
 
@@ -135,15 +129,6 @@ func (k *Kube) UpdateEgressFirewall(egressfirewall *egressfirewall.EgressFirewal
 	return nil
 }
 
-// UpdateEgressIP updates the EgressIP with the provided EgressIP data
-func (k *Kube) UpdateEgressIP(eIP *egressipv1.EgressIP) error {
-	klog.Infof("Updating status on EgressIP %s", eIP.Name)
-	if _, err := k.EIPClient.K8sV1().EgressIPs().Update(context.TODO(), eIP, metav1.UpdateOptions{}); err != nil {
-		return fmt.Errorf("error in updating status on EgressIP %s: %v", eIP.Name, err)
-	}
-	return nil
-}
-
 // UpdateNodeStatus takes the node object and sets the provided update status
 func (k *Kube) UpdateNodeStatus(node *kapi.Node) error {
 	klog.Infof("Updating status on node %s", node.Name)
@@ -185,16 +170,6 @@ func (k *Kube) GetNodes() (*kapi.NodeList, error) {
 // GetNode returns the Node resource from kubernetes apiserver, given its name
 func (k *Kube) GetNode(name string) (*kapi.Node, error) {
 	return k.KClient.CoreV1().Nodes().Get(context.TODO(), name, metav1.GetOptions{})
-}
-
-// GetEgressIP returns the EgressIP object from kubernetes
-func (k *Kube) GetEgressIP(name string) (*egressipv1.EgressIP, error) {
-	return k.EIPClient.K8sV1().EgressIPs().Get(context.TODO(), name, metav1.GetOptions{})
-}
-
-// GetEgressIPs returns the list of all EgressIP objects from kubernetes
-func (k *Kube) GetEgressIPs() (*egressipv1.EgressIPList, error) {
-	return k.EIPClient.K8sV1().EgressIPs().List(context.TODO(), metav1.ListOptions{})
 }
 
 // GetEndpoint returns the Endpoints resource

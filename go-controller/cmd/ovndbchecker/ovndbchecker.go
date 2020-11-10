@@ -186,7 +186,6 @@ func runOvnKubeDBChecker(ctx *cli.Context) error {
 	ovndbmanager.RunDBChecker(
 		&kube.Kube{
 			KClient:              ovnClientset.KubeClient,
-			EIPClient:            ovnClientset.EgressIPClient,
 			EgressFirewallClient: ovnClientset.EgressFirewallClient,
 		},
 		stopChan)

@@ -17,6 +17,8 @@ import (
 	egressipapi "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/egressip/v1"
 	egressipscheme "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/egressip/v1/apis/clientset/versioned/scheme"
 	egressipinformerfactory "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/egressip/v1/apis/informers/externalversions"
+	egressiplister "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/egressip/v1/apis/listers/egressip/v1"
+
 	apiextensionsapi "k8s.io/apiextensions-apiserver/pkg/apis/apiextensions/v1beta1"
 	apiextensionsscheme "k8s.io/apiextensions-apiserver/pkg/client/clientset/clientset/scheme"
 	apiextensionsinformerfactory "k8s.io/apiextensions-apiserver/pkg/client/informers/externalversions"
@@ -501,6 +503,13 @@ func (wf *WatchFactory) GetPods(namespace string) ([]*kapi.Pod, error) {
 	return podLister.Pods(namespace).List(labels.Everything())
 }
 
+// GetPodsWithSelector returns a list of pods matching the selector
+func (wf *WatchFactory) GetPodsWithSelector(namespace string, selector metav1.LabelSelector) ([]*kapi.Pod, error) {
+	labelSelector := labels.SelectorFromSet(selector.MatchLabels)
+	podLister := wf.informers[podType].lister.(listers.PodLister)
+	return podLister.Pods(namespace).List(labelSelector)
+}
+
 // GetNodes returns the node specs of all the nodes
 func (wf *WatchFactory) GetNodes() ([]*kapi.Node, error) {
 	nodeLister := wf.informers[nodeType].lister.(listers.NodeLister)
@@ -541,6 +550,25 @@ func (wf *WatchFactory) GetNamespace(name string) (*kapi.Namespace, error) {
 func (wf *WatchFactory) GetNamespaces() ([]*kapi.Namespace, error) {
 	namespaceLister := wf.informers[namespaceType].lister.(listers.NamespaceLister)
 	return namespaceLister.List(labels.Everything())
+}
+
+// GetNamespacesWithSelector returns a list of namespaces matching the selector
+func (wf *WatchFactory) GetNamespacesWithSelector(selector metav1.LabelSelector) ([]*kapi.Namespace, error) {
+	labelSelector := labels.SelectorFromSet(selector.MatchLabels)
+	namespaceLister := wf.informers[namespaceType].lister.(listers.NamespaceLister)
+	return namespaceLister.List(labelSelector)
+}
+
+// GetEgressIPs returns a list of egress IPs in the cluster
+func (wf *WatchFactory) GetEgressIPs() ([]*egressipapi.EgressIP, error) {
+	eIPLister := wf.informers[egressIPType].lister.(egressiplister.EgressIPLister)
+	return eIPLister.List(labels.Everything())
+}
+
+// GetEgressIP returns an egress IP by name
+func (wf *WatchFactory) GetEgressIP(name string) (*egressipapi.EgressIP, error) {
+	eIPLister := wf.informers[egressIPType].lister.(egressiplister.EgressIPLister)
+	return eIPLister.Get(name)
 }
 
 func (wf *WatchFactory) NodeInformer() cache.SharedIndexInformer {
