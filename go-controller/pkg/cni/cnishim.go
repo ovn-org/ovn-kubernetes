@@ -10,7 +10,7 @@ import (
 	"flag"
 	"fmt"
 	"io/ioutil"
-	"k8s.io/klog"
+	"k8s.io/klog/v2"
 	"net"
 	"net/http"
 	"os"

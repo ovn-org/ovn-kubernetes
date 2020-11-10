@@ -14,7 +14,7 @@ import (
 	kapi "k8s.io/api/core/v1"
 	"k8s.io/client-go/kubernetes/scheme"
 	"k8s.io/client-go/tools/reference"
-	"k8s.io/klog"
+	"k8s.io/klog/v2"
 )
 
 func addRejectACLs(rejectACLs map[string]map[string]bool, lb, ip string, port int32, hasEndpoints bool) {
