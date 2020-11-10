@@ -110,6 +110,18 @@ func (ovn *Controller) syncServices(services []interface{}) {
 					svcRejectACLs[name] = make(map[string]bool)
 				}
 				svcRejectACLs[name][lb] = hasEndpoints
+
+				// Cloud load balancers: directly load balance that traffic from pods
+				for _, ing := range service.Status.LoadBalancer.Ingress {
+					if ing.IP == "" {
+						continue
+					}
+					name := ovn.generateACLName(lb, ing.IP, svcPort.Port)
+					if _, ok := svcRejectACLs[name]; !ok {
+						svcRejectACLs[name] = make(map[string]bool)
+					}
+					svcRejectACLs[name][lb] = hasEndpoints
+				}
 			}
 			for _, extIP := range service.Spec.ExternalIPs {
 				key := util.JoinHostPortInt32(extIP, svcPort.Port)
@@ -385,6 +397,20 @@ func (ovn *Controller) createService(service *kapi.Service) error {
 					klog.Infof("Service Reject ACL created for ClusterIP service: %s, namespace: %s, via: "+
 						"%s:%s:%d, ACL UUID: %s", service.Name, service.Namespace, svcPort.Protocol,
 						service.Spec.ClusterIP, svcPort.Port, aclUUID)
+					// Cloud load balancers: directly reject traffic from pods
+					for _, ing := range service.Status.LoadBalancer.Ingress {
+						if ing.IP == "" {
+							continue
+						}
+						aclUUID, err := ovn.createLoadBalancerRejectACL(loadBalancer, ing.IP, svcPort.Port, svcPort.Protocol)
+						if err != nil {
+							klog.Errorf("Failed to create reject ACL for Ingress IP: %s, load balancer: %s, error: %v",
+								ing.IP, loadBalancer, err)
+						} else {
+							klog.Infof("Reject ACL created for Ingress IP: %s, load balancer: %s, %s", ing.IP,
+								loadBalancer, aclUUID)
+						}
+					}
 				}
 				if len(service.Spec.ExternalIPs) > 0 {
 					gateways, _, err := ovn.getOvnGateways()
@@ -424,8 +450,10 @@ func (ovn *Controller) updateService(oldSvc, newSvc *kapi.Service) error {
 	if reflect.DeepEqual(newSvc.Spec.Ports, oldSvc.Spec.Ports) &&
 		reflect.DeepEqual(newSvc.Spec.ExternalIPs, oldSvc.Spec.ExternalIPs) &&
 		reflect.DeepEqual(newSvc.Spec.ClusterIP, oldSvc.Spec.ClusterIP) &&
-		reflect.DeepEqual(newSvc.Spec.Type, oldSvc.Spec.Type) {
-		klog.V(5).Infof("Skipping service update for: %s as change does not apply to any of .Spec.Ports, .Spec.ExternalIP, .Spec.ClusterIP, .Spec.Type", newSvc.Name)
+		reflect.DeepEqual(newSvc.Spec.Type, oldSvc.Spec.Type) &&
+		reflect.DeepEqual(newSvc.Status.LoadBalancer.Ingress, oldSvc.Status.LoadBalancer.Ingress) {
+		klog.V(5).Infof("Skipping service update for: %s as change does not apply to any of .Spec.Ports, "+
+			".Spec.ExternalIP, .Spec.ClusterIP, .Spec.Type, .Status.LoadBalancer.Ingress", newSvc.Name)
 		return nil
 	}
 
@@ -466,6 +494,16 @@ func (ovn *Controller) deleteService(service *kapi.Service) {
 			vip := util.JoinHostPortInt32(service.Spec.ClusterIP, svcPort.Port)
 			if err := ovn.deleteLoadBalancerVIP(loadBalancer, vip); err != nil {
 				klog.Error(err)
+			}
+			// Cloud load balancers
+			for _, ing := range service.Status.LoadBalancer.Ingress {
+				if ing.IP == "" {
+					continue
+				}
+				ingressVIP := util.JoinHostPortInt32(ing.IP, svcPort.Port)
+				if err := ovn.deleteLoadBalancerVIP(loadBalancer, ingressVIP); err != nil {
+					klog.Error(err)
+				}
 			}
 			if err := ovn.deleteExternalVIPs(service, svcPort); err != nil {
 				klog.Error(err)
