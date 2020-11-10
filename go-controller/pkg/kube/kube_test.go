@@ -84,7 +84,7 @@ func TestKube_SetAnnotationsOnPod(t *testing.T) {
 				mockPodCall.Once()
 			}
 
-			e := k.SetAnnotationsOnPod(pod, annotations)
+			e := k.SetAnnotationsOnPod(pod.Name, pod.Namespace, annotations)
 
 			if tc.expectedErr {
 				assert.Error(t, e)
