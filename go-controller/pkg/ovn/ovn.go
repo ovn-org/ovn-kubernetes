@@ -71,13 +71,7 @@ type namespaceInfo struct {
 	// of all pods in the namespace.
 	addressSet AddressSet
 
-	// map from NetworkPolicy name to namespacePolicy. You must hold the
-	// namespaceInfo's mutex to add/delete/lookup policies, but must hold the
-	// namespacePolicy's mutex (and not necessarily the namespaceInfo's) to work with
-	// the policy itself.
-	//networkPolicies map[string]*namespacePolicy
-
-	// defines the namespaces egressFirewallPolicy
+	//defines the namespaces egressFirewallPolicy
 	egressFirewallPolicy *egressFirewall
 
 	// routingExternalGWs is a slice of net.IP containing the values parsed from
@@ -137,7 +131,8 @@ type Controller struct {
 	namespacesMutex sync.Mutex
 
 	//Network Policy resources on a per namespace basis
-	//must use oc getNetworkPolicyLocked() to read
+	//must use getNetworkPolicyLocked() or waitforNetworkPoliciesLocked
+	//to read or edit the networkPolicies Map
 	networkPolicies      map[types.NamespacedName]*networkPolicy
 	networkPoliciesMutex sync.Mutex
 
