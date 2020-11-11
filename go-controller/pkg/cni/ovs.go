@@ -55,6 +55,16 @@ func ovsSet(table, record string, values ...string) error {
 	return err
 }
 
+func ovsGet(table, record, column, key string) (string, error) {
+	args := []string{"--if-exists", "get", table, record}
+	if key != "" {
+		args = append(args, fmt.Sprintf("%s:%s", column, key))
+	} else {
+		args = append(args, column)
+	}
+	return ovsExec(args...)
+}
+
 // Returns the given column of records that match the condition
 func ovsFind(table, column, condition string) ([]string, error) {
 	output, err := ovsExec("--no-heading", "--format=csv", "--data=bare", "--columns="+column, "find", table, condition)
@@ -100,7 +110,7 @@ func ofctlExec(args ...string) (string, error) {
 	return stdoutStr, nil
 }
 
-func waitForPodFlows(mac string, ifAddrs []*net.IPNet) error {
+func waitForPodFlows(mac string, ifAddrs []*net.IPNet, ifaceName, ifaceID string) error {
 	// query represents the match criteria, and different OF tables that this query may match on
 	type query struct {
 		match  string
@@ -111,6 +121,17 @@ func waitForPodFlows(mac string, ifAddrs []*net.IPNet) error {
 		// Function checks for OpenFlow flows to know the pod is ready
 		// TODO(trozet): in the future use a more stable mechanism provided by OVN:
 		// https://bugzilla.redhat.com/show_bug.cgi?id=1839102
+
+		// ensure the OVS interface is still active. It may have been cleared by a subsequent CNI ADD
+		// and if so, there's no need to keep checking for flows
+		out, err := ovsGet("Interface", ifaceName, "external-ids", "iface-id")
+		if err != nil {
+			return false, nil
+		}
+		if out != ifaceID {
+			return false, fmt.Errorf("OVS sandbox port %s is no longer active (probably due to a subsequent "+
+				"CNI ADD)", ifaceName)
+		}
 
 		// Query the flows by mac address for in_port_security
 		queries := []query{
