@@ -2,6 +2,8 @@ package cni
 
 import (
 	"net/http"
+	"sync"
+	"time"
 
 	"github.com/containernetworking/cni/pkg/types/current"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/cni/types"
@@ -74,6 +76,8 @@ type PodRequest struct {
 	IfName string
 	// CNI conf obtained from stdin conf
 	CNIConf *types.NetConf
+	// Timestamp when the request was started
+	timestamp time.Time
 }
 
 type cniRequestFunc func(request *PodRequest, podLister corev1listers.PodLister) ([]byte, error)
@@ -85,4 +89,8 @@ type Server struct {
 	requestFunc cniRequestFunc
 	rundir      string
 	podLister   corev1listers.PodLister
+
+	// runningSandboxAdds is a map of sandbox ID to PodRequest for any CNIAdd operation
+	runningSandboxAddsLock sync.Mutex
+	runningSandboxAdds     map[string]*PodRequest
 }

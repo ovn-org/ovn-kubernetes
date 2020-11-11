@@ -6,6 +6,7 @@ import (
 	"io/ioutil"
 	"net/http"
 	"strings"
+	"time"
 
 	"github.com/gorilla/mux"
 	corev1listers "k8s.io/client-go/listers/core/v1"
@@ -51,8 +52,9 @@ func NewCNIServer(rundir string, podLister corev1listers.PodLister) *Server {
 		Server: http.Server{
 			Handler: router,
 		},
-		rundir:    rundir,
-		podLister: podLister,
+		rundir:             rundir,
+		podLister:          podLister,
+		runningSandboxAdds: make(map[string]*PodRequest),
 	}
 	router.NotFoundHandler = http.HandlerFunc(http.NotFound)
 	router.HandleFunc("/metrics", s.handleCNIMetrics).Methods("POST")
@@ -94,7 +96,6 @@ func gatherCNIArgs(env map[string]string) (map[string]string, error) {
 }
 
 func cniRequestToPodRequest(cr *Request) (*PodRequest, error) {
-
 	cmd, ok := cr.Env["CNI_COMMAND"]
 	if !ok {
 		return nil, fmt.Errorf("unexpected or missing CNI_COMMAND")
@@ -137,8 +138,34 @@ func cniRequestToPodRequest(cr *Request) (*PodRequest, error) {
 	if err != nil {
 		return nil, fmt.Errorf("broken stdin args")
 	}
+
 	req.CNIConf = conf
+	req.timestamp = time.Now()
 	return req, nil
+}
+
+func (s *Server) startSandboxRequest(req *PodRequest) error {
+	// Only sandbox add requests are tracked because only adds need
+	// to be canceled when a newer request comes in.
+	if req.Command == CNIAdd {
+		s.runningSandboxAddsLock.Lock()
+		defer s.runningSandboxAddsLock.Unlock()
+		if _, ok := s.runningSandboxAdds[req.SandboxID]; ok {
+			// Should never happen as the runtime is required to
+			// serialize operations for the same sandbox
+			return fmt.Errorf("%s already started", req)
+		}
+		s.runningSandboxAdds[req.SandboxID] = req
+	}
+	return nil
+}
+
+func (s *Server) finishSandboxRequest(req *PodRequest) {
+	if req.Command == CNIAdd {
+		s.runningSandboxAddsLock.Lock()
+		defer s.runningSandboxAddsLock.Unlock()
+		delete(s.runningSandboxAdds, req.SandboxID)
+	}
 }
 
 // Dispatch a pod request to the request handler and return the result to the
@@ -153,6 +180,11 @@ func (s *Server) handleCNIRequest(r *http.Request) ([]byte, error) {
 	if err != nil {
 		return nil, err
 	}
+
+	if err := s.startSandboxRequest(req); err != nil {
+		return nil, err
+	}
+	defer s.finishSandboxRequest(req)
 
 	result, err := s.requestFunc(req, s.podLister)
 	if err != nil {

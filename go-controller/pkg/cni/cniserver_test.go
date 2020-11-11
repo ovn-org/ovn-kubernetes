@@ -57,6 +57,10 @@ func serverHandleCNI(request *PodRequest, podLister corev1listers.PodLister) ([]
 	return nil, fmt.Errorf("unhandled CNI command %v", request.Command)
 }
 
+func makeCNIArgs(namespace, name string) string {
+	return fmt.Sprintf("K8S_POD_NAMESPACE=%s;K8S_POD_NAME=%s", namespace, name)
+}
+
 func TestCNIServer(t *testing.T) {
 	tmpDir, err := utiltesting.MkTmpdir("cniserver")
 	if err != nil {
@@ -96,6 +100,12 @@ func TestCNIServer(t *testing.T) {
 		errorPrefix string
 	}
 
+	const (
+		sandboxID string = "adsfadsfasfdasdfasf"
+		namespace string = "awesome-namespace"
+		name      string = "awesome-name"
+		cniConfig string = "{\"cniVersion\": \"0.1.0\",\"name\": \"ovnkube\",\"type\": \"ovnkube\"}"
+	)
 	testcases := []testcase{
 		// Normal ADD request
 		{
@@ -103,11 +113,11 @@ func TestCNIServer(t *testing.T) {
 			request: &Request{
 				Env: map[string]string{
 					"CNI_COMMAND":     string(CNIAdd),
-					"CNI_CONTAINERID": "adsfadsfasfdasdfasf",
+					"CNI_CONTAINERID": sandboxID,
 					"CNI_NETNS":       "/path/to/something",
-					"CNI_ARGS":        "K8S_POD_NAMESPACE=awesome-namespace;K8S_POD_NAME=awesome-name",
+					"CNI_ARGS":        makeCNIArgs(namespace, name),
 				},
-				Config: []byte("{\"cniVersion\": \"0.1.0\",\"name\": \"ovnkube\",\"type\": \"ovnkube\"}"),
+				Config: []byte(cniConfig),
 			},
 			result: expectedResult,
 		},
@@ -117,11 +127,11 @@ func TestCNIServer(t *testing.T) {
 			request: &Request{
 				Env: map[string]string{
 					"CNI_COMMAND":     string(CNIDel),
-					"CNI_CONTAINERID": "adsfadsfasfdasdfasf",
+					"CNI_CONTAINERID": sandboxID,
 					"CNI_NETNS":       "/path/to/something",
-					"CNI_ARGS":        "K8S_POD_NAMESPACE=awesome-namespace;K8S_POD_NAME=awesome-name",
+					"CNI_ARGS":        makeCNIArgs(namespace, name),
 				},
-				Config: []byte("{\"cniVersion\": \"0.1.0\",\"name\": \"ovnkube\",\"type\": \"ovnkube\"}"),
+				Config: []byte(cniConfig),
 			},
 			result: nil,
 		},
@@ -131,11 +141,11 @@ func TestCNIServer(t *testing.T) {
 			request: &Request{
 				Env: map[string]string{
 					"CNI_COMMAND":     string(CNIUpdate),
-					"CNI_CONTAINERID": "adsfadsfasfdasdfasf",
+					"CNI_CONTAINERID": sandboxID,
 					"CNI_NETNS":       "/path/to/something",
-					"CNI_ARGS":        "K8S_POD_NAMESPACE=awesome-namespace;K8S_POD_NAME=awesome-name",
+					"CNI_ARGS":        makeCNIArgs(namespace, name),
 				},
-				Config: []byte("{\"cniVersion\": \"0.1.0\",\"name\": \"ovnkube\",\"type\": \"ovnkube\"}"),
+				Config: []byte(cniConfig),
 			},
 			result: nil,
 		},
@@ -145,10 +155,10 @@ func TestCNIServer(t *testing.T) {
 			request: &Request{
 				Env: map[string]string{
 					"CNI_COMMAND":     string(CNIAdd),
-					"CNI_CONTAINERID": "adsfadsfasfdasdfasf",
+					"CNI_CONTAINERID": sandboxID,
 					"CNI_NETNS":       "/path/to/something",
 				},
-				Config: []byte("{\"cniVersion\": \"0.1.0\",\"name\": \"ovnkube\",\"type\": \"ovnkube\"}"),
+				Config: []byte(cniConfig),
 			},
 			result:      nil,
 			errorPrefix: "missing CNI_ARGS",
@@ -159,10 +169,10 @@ func TestCNIServer(t *testing.T) {
 			request: &Request{
 				Env: map[string]string{
 					"CNI_COMMAND":     string(CNIAdd),
-					"CNI_CONTAINERID": "adsfadsfasfdasdfasf",
-					"CNI_ARGS":        "K8S_POD_NAMESPACE=awesome-namespace;K8S_POD_NAME=awesome-name",
+					"CNI_CONTAINERID": sandboxID,
+					"CNI_ARGS":        makeCNIArgs(namespace, name),
 				},
-				Config: []byte("{\"cniVersion\": \"0.1.0\",\"name\": \"ovnkube\",\"type\": \"ovnkube\"}"),
+				Config: []byte(cniConfig),
 			},
 			result:      nil,
 			errorPrefix: "missing CNI_NETNS",
@@ -172,11 +182,11 @@ func TestCNIServer(t *testing.T) {
 			name: "ARGS3",
 			request: &Request{
 				Env: map[string]string{
-					"CNI_CONTAINERID": "adsfadsfasfdasdfasf",
+					"CNI_CONTAINERID": sandboxID,
 					"CNI_NETNS":       "/path/to/something",
-					"CNI_ARGS":        "K8S_POD_NAMESPACE=awesome-namespace;K8S_POD_NAME=awesome-name",
+					"CNI_ARGS":        makeCNIArgs(namespace, name),
 				},
-				Config: []byte("{\"cniVersion\": \"0.1.0\",\"name\": \"ovnkube\",\"type\": \"ovnkube\"}"),
+				Config: []byte(cniConfig),
 			},
 			result:      nil,
 			errorPrefix: "unexpected or missing CNI_COMMAND",
