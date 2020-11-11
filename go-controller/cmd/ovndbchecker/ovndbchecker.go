@@ -21,6 +21,8 @@ import (
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/kube"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovndbmanager"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
+
+	_ "go.uber.org/automaxprocs"
 )
 
 const (

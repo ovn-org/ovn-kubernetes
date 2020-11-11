@@ -29,6 +29,8 @@ import (
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
 
 	kexec "k8s.io/utils/exec"
+
+	_ "go.uber.org/automaxprocs"
 )
 
 const (

@@ -9,6 +9,8 @@ import (
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
 	"github.com/urfave/cli/v2"
 	"k8s.io/klog"
+
+	_ "go.uber.org/automaxprocs"
 )
 
 func main() {

@@ -9,6 +9,8 @@ import (
 	bv "github.com/containernetworking/plugins/pkg/utils/buildversion"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/cni"
 	"github.com/urfave/cli/v2"
+
+	_ "go.uber.org/automaxprocs"
 )
 
 func main() {
