@@ -130,6 +130,13 @@ var _ = Describe("Informer Event Handler Tests", func() {
 		Expect(err).NotTo(HaveOccurred())
 
 		Consistently(func() int32 { return atomic.LoadInt32(&deletes) }).Should(Equal(int32(0)), "deletes")
+		Eventually(func() (bool, error) {
+			pod, err := k.CoreV1().Pods(namespace).Get(context.TODO(), "foo", metav1.GetOptions{})
+			if err != nil {
+				return false, err
+			}
+			return pod != nil, nil
+		}, 2).Should(BeTrue())
 		Eventually(func() int32 { return atomic.LoadInt32(&adds) }).Should(Equal(int32(1)), "adds")
 	})
 
