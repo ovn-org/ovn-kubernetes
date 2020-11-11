@@ -17,6 +17,16 @@ import (
 	"k8s.io/klog"
 )
 
+func addRejectACLs(rejectACLs map[string]map[string]bool, lb, ip string, port int32, hasEndpoints bool) {
+	if ip != "" {
+		name := generateACLName(lb, ip, port)
+		if _, ok := rejectACLs[name]; !ok {
+			rejectACLs[name] = make(map[string]bool)
+		}
+		rejectACLs[name][lb] = hasEndpoints
+	}
+}
+
 func (ovn *Controller) syncServices(services []interface{}) {
 	// For all clusterIP in k8s, we will populate the below slice with
 	// IP:port. In OVN's database those are the keys. We need to
@@ -89,11 +99,7 @@ func (ovn *Controller) syncServices(services []interface{}) {
 							continue
 						}
 						for _, physicalIP := range physicalIPs {
-							name := ovn.generateACLName(lb, physicalIP, svcPort.NodePort)
-							if _, ok := svcRejectACLs[name]; !ok {
-								svcRejectACLs[name] = make(map[string]bool)
-							}
-							svcRejectACLs[name][lb] = hasEndpoints
+							addRejectACLs(svcRejectACLs, lb, physicalIP, svcPort.NodePort, hasEndpoints)
 						}
 					}
 				}
@@ -105,22 +111,11 @@ func (ovn *Controller) syncServices(services []interface{}) {
 			if err != nil {
 				klog.Warningf("Unable to get existing load balancer from ovn. Reject ACLs may not be synced!")
 			} else {
-				name := ovn.generateACLName(lb, service.Spec.ClusterIP, svcPort.Port)
-				if _, ok := svcRejectACLs[name]; !ok {
-					svcRejectACLs[name] = make(map[string]bool)
-				}
-				svcRejectACLs[name][lb] = hasEndpoints
+				addRejectACLs(svcRejectACLs, lb, service.Spec.ClusterIP, svcPort.Port, hasEndpoints)
 
 				// Cloud load balancers: directly load balance that traffic from pods
 				for _, ing := range service.Status.LoadBalancer.Ingress {
-					if ing.IP == "" {
-						continue
-					}
-					name := ovn.generateACLName(lb, ing.IP, svcPort.Port)
-					if _, ok := svcRejectACLs[name]; !ok {
-						svcRejectACLs[name] = make(map[string]bool)
-					}
-					svcRejectACLs[name][lb] = hasEndpoints
+					addRejectACLs(svcRejectACLs, lb, ing.IP, svcPort.Port, hasEndpoints)
 				}
 			}
 			for _, extIP := range service.Spec.ExternalIPs {
@@ -137,11 +132,7 @@ func (ovn *Controller) syncServices(services []interface{}) {
 							gateway, err)
 						continue
 					}
-					name := ovn.generateACLName(lb, extIP, svcPort.Port)
-					if _, ok := svcRejectACLs[name]; !ok {
-						svcRejectACLs[name] = make(map[string]bool)
-					}
-					svcRejectACLs[name][lb] = hasEndpoints
+					addRejectACLs(svcRejectACLs, lb, extIP, svcPort.Port, hasEndpoints)
 				}
 			}
 		}
