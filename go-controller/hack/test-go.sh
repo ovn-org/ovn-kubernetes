@@ -37,7 +37,11 @@ function testrun {
         args=""
         go_test="sudo ${testfile}"
     fi
-
+    # set gomaxprocs to 1 in CI, because actions are run in containers and we don't know what cpu
+    # limits are being imposed
+    if [ -n "${CI}" ]; then
+        args="${args}-test.cpu 1 "
+    fi
     if [[ -n "$gingko_focus" ]]; then
         local ginkgoargs=${ginkgo_focus:-}
     fi
