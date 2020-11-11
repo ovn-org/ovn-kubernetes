@@ -25,10 +25,7 @@ RUN INSTALL_PKGS=" \
 	dnf install --best --refresh -y --setopt=tsflags=nodocs $INSTALL_PKGS && \
 	dnf clean all && rm -rf /var/cache/dnf/*
 
-# ensure we pick up ovn-20.09.0-1.fc32 for ovn-northd MLD fixes.
-# This should have no effect in the future once the RPM has propagated
-# to all stable mirrors and can be removed
-RUN dnf install -y --enablerepo=updates-testing --best --advisory=FEDORA-2020-6c71d0012d "ovn >= 20.09.0-1" || exit 1
+RUN dnf install -y --enablerepo=updates-testing --best --advisory=FEDORA-2020-fa92b9d524 "ovn >= 20.09.0-2" || exit 1
 
 RUN mkdir -p /var/run/openvswitch
 
