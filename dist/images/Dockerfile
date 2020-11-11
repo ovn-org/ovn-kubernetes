@@ -41,7 +41,7 @@ ARG dpdkVer=18.11.2
 ARG dpdkSubVer=1.el7
 ARG dpdkRpmUrl=http://mirror.centos.org/centos/7/extras/${rpmArch}/Packages/dpdk-${dpdkVer}-${dpdkSubVer}.${rpmArch}.rpm
 
-RUN if [ "$(uname -m)" = "aarch64" ]; then dpdkRpmUrl=http://psw32.psw.net/altarch/7/extras/aarch64/Packages/dpdk-18.11-4.el7_6.aarch64.rpm; fi && rpm -i ${dpdkRpmUrl}
+RUN if [ "$(uname -m)" = "aarch64" ]; then dpdkRpmUrl=http://mirror.centos.org/altarch/7/extras/aarch64/Packages/dpdk-${dpdkVer}-${dpdkSubVer}.${rpmArch}.rpm; fi && rpm -i ${dpdkRpmUrl}
 RUN rpm -i http://cbs.centos.org/kojifiles/packages/openvswitch/${ovsVer}/${ovsSubVer}/${rpmArch}/openvswitch-${ovsVer}-${ovsSubVer}.${rpmArch}.rpm
 RUN rpm -i http://cbs.centos.org/kojifiles/packages/openvswitch/${ovsVer}/${ovsSubVer}/${rpmArch}/openvswitch-ovn-common-${ovsVer}-${ovsSubVer}.${rpmArch}.rpm
 RUN rpm -i http://cbs.centos.org/kojifiles/packages/openvswitch/${ovsVer}/${ovsSubVer}/${rpmArch}/openvswitch-ovn-central-${ovsVer}-${ovsSubVer}.${rpmArch}.rpm

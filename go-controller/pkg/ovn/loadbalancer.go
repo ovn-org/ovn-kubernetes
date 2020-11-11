@@ -167,7 +167,7 @@ func (ovn *Controller) getGRLogicalSwitchForLoadBalancer(lb string) (string, err
 }
 
 // TODO: Add unittest for function.
-func (ovn *Controller) generateACLName(lb string, sourceIP string, sourcePort int32) string {
+func generateACLName(lb string, sourceIP string, sourcePort int32) string {
 	aclName := fmt.Sprintf("%s-%s:%d", lb, sourceIP, sourcePort)
 	// ACL names are limited to 63 characters
 	if len(aclName) > 63 {
@@ -189,8 +189,8 @@ func (ovn *Controller) generateACLName(lb string, sourceIP string, sourcePort in
 	return aclName
 }
 
-func (ovn *Controller) generateACLNameForOVNCommand(lb string, sourceIP string, sourcePort int32) string {
-	return strings.ReplaceAll(ovn.generateACLName(lb, sourceIP, sourcePort), ":", "\\:")
+func generateACLNameForOVNCommand(lb string, sourceIP string, sourcePort int32) string {
+	return strings.ReplaceAll(generateACLName(lb, sourceIP, sourcePort), ":", "\\:")
 }
 
 func (ovn *Controller) createLoadBalancerRejectACL(lb, sourceIP string, sourcePort int32, proto kapi.Protocol) (string, error) {
@@ -232,7 +232,7 @@ func (ovn *Controller) createLoadBalancerRejectACL(lb, sourceIP string, sourcePo
 	}
 	vip := util.JoinHostPortInt32(sourceIP, sourcePort)
 	// NOTE: doesn't use vip, to avoid having brackets in the name with IPv6
-	aclName := ovn.generateACLNameForOVNCommand(lb, sourceIP, sourcePort)
+	aclName := generateACLNameForOVNCommand(lb, sourceIP, sourcePort)
 	// If ovn-k8s was restarted, we lost the cache, and an ACL may already exist in OVN. In that case we need to check
 	// using ACL name
 	aclUUID, stderr, err := util.RunOVNNbctl("--data=bare", "--no-heading", "--columns=_uuid", "find", "acl",
@@ -327,7 +327,7 @@ func (ovn *Controller) deleteLoadBalancerRejectACL(lb, vip string) {
 }
 
 func (ovn *Controller) findStaleRejectACL(lb, ip string, port int32) (string, error) {
-	aclName := ovn.generateACLNameForOVNCommand(lb, ip, port)
+	aclName := generateACLNameForOVNCommand(lb, ip, port)
 	aclUUID, stderr, err := util.RunOVNNbctl("--data=bare", "--no-heading", "--columns=_uuid", "find", "acl",
 		fmt.Sprintf("name=%s", aclName))
 	if err != nil {
