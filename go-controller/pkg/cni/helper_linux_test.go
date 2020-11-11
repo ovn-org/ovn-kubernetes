@@ -364,7 +364,7 @@ func TestSetupNetwork(t *testing.T) {
 				}
 				call.Once()
 			}
-			err := setupNetwork(tc.inpLink, tc.inpPodIfaceInfo)
+			err := setupNetwork("eth0", tc.inpLink, tc.inpPodIfaceInfo)
 			t.Log(err)
 			if tc.errMatch != nil {
 				assert.Contains(t, err.Error(), tc.errMatch.Error())

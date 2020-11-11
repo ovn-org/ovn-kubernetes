@@ -11,7 +11,6 @@ import (
 	"github.com/containernetworking/cni/pkg/types"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/kube"
-	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/tools/clientcmd"
 )
@@ -80,14 +79,9 @@ func (bp *SmartNicPlugin) CmdAdd(args *skel.CmdArgs) error {
 	if err != nil {
 		return err
 	}
-	podInfo, err := util.UnmarshalPodAnnotation(annotations)
+	podInterfaceInfo, err := PodAnnotation2PodInfo(annotations) 
 	if err != nil {
-		return fmt.Errorf("failed to unmarshal ovn annotation: %v", err)
-	}
-	podInterfaceInfo := &PodInterfaceInfo{
-		PodAnnotation: *podInfo,
-		MTU:           config.Default.MTU,
-		IsSmartNic:    true,
+		return fmt.Errorf("failed to convert pod annotation to podInterfaceInfo", err)
 	}
 
 	// 6. Move VF to pod namespace

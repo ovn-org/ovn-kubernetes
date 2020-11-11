@@ -3,7 +3,7 @@
 package cni
 
 import (
-	"fmt"
+        "fmt"
 	"io/ioutil"
 	"net"
 	"os"
@@ -103,7 +103,7 @@ func moveIfToNetns(ifname string, netns ns.NetNS) error {
 	return nil
 }
 
-func setupNetwork(link netlink.Link, ifInfo *PodInterfaceInfo) error {
+func setupNetwork(contIfaceName string, link netlink.Link, ifInfo *PodInterfaceInfo) error {
 	// set the mac addresss, set down the interface before changing the mac
 	// so the EUI64 link local address generated uses the new MAC when we set it up again
 	if err := util.GetNetLinkOps().LinkSetDown(link); err != nil {
@@ -134,6 +134,27 @@ func setupNetwork(link netlink.Link, ifInfo *PodInterfaceInfo) error {
 		}
 	}
 
+	// deny IPv6 neighbor solicitations
+	dadSysctlIface := fmt.Sprintf("/proc/sys/net/ipv6/conf/%s/dad_transmits", contIfaceName)
+	if _, err := os.Stat(dadSysctlIface); !os.IsNotExist(err) {
+		err = setSysctl(dadSysctlIface, 0)
+		if err != nil {
+			klog.Warningf("Failed to disable IPv6 DAD: %q", err)
+		}
+	}
+	// generate address based on EUI64
+	genSysctlIface := fmt.Sprintf("/proc/sys/net/ipv6/conf/%s/addr_gen_mode", contIfaceName)
+	if _, err := os.Stat(genSysctlIface); !os.IsNotExist(err) {
+		err = setSysctl(genSysctlIface, 0)
+		if err != nil {
+			klog.Warningf("Failed to set IPv6 address generation mode to EUI64: %q", err)
+		}
+	}
+
+	err := ip.SettleAddresses(contIfaceName, 10)
+	if err != nil {
+		klog.Warningf("Failed to settle addresses: %q", err)
+	}
 	return nil
 }
 
@@ -156,7 +177,7 @@ func setupInterface(netns ns.NetNS, containerID, ifName string, ifInfo *PodInter
 			return fmt.Errorf("failed to lookup %s: %v", contIface.Name, err)
 		}
 
-		err = setupNetwork(link, ifInfo)
+		err = setupNetwork(contIface.Name, link, ifInfo)
 		if err != nil {
 			return err
 		}
@@ -257,7 +278,7 @@ func setupSriovInterface(netns ns.NetNS, containerID, ifName string, ifInfo *Pod
 			return err
 		}
 
-		err = setupNetwork(link, ifInfo)
+		err = setupNetwork(contIface.Name, link, ifInfo)
 		if err != nil {
 			return err
 		}
@@ -272,6 +293,61 @@ func setupSriovInterface(netns ns.NetNS, containerID, ifName string, ifInfo *Pod
 	}
 
 	return hostIface, contIface, nil
+}
+
+func ConfigureOVS(namespace string, podName string, hostIfaceName string, ifInfo *PodInterfaceInfo, sandboxID string) error {
+	ifaceID := fmt.Sprintf("%s_%s", namespace, podName)
+
+	// Find and remove any existing OVS port with this iface-id. Pods can
+	// have multiple sandboxes if some are waiting for garbage collection,
+	// but only the latest one should have the iface-id set.
+	uuids, _ := ovsFind("Interface", "_uuid", "external-ids:iface-id="+ifaceID)
+	for _, uuid := range uuids {
+		if out, err := ovsExec("remove", "Interface", uuid, "external-ids", "iface-id"); err != nil {
+			klog.Warningf("Failed to clear stale OVS port %q iface-id %q: %v\n  %q", uuid, ifaceID, err, out)
+		}
+	}
+	ipStrs := make([]string, len(ifInfo.IPs))
+	for i, ip := range ifInfo.IPs {
+		ipStrs[i] = ip.String()
+	}
+	// Add the new sandbox's OVS port
+	ovsArgs := []string{
+		"add-port", "br-int", hostIfaceName, "--", "set",
+		"interface", hostIfaceName,
+		fmt.Sprintf("external_ids:attached_mac=%s", ifInfo.MAC),
+		fmt.Sprintf("external_ids:iface-id=%s", ifaceID),
+		fmt.Sprintf("external_ids:ip_addresses=%s", strings.Join(ipStrs, ",")),
+		fmt.Sprintf("external_ids:sandbox=%s", sandboxID),
+	}
+
+	if out, err := ovsExec(ovsArgs...); err != nil {
+		return fmt.Errorf("failure in plugging pod interface: %v\n  %q", err, out)
+	}
+
+	if err := clearPodBandwidth(sandboxID); err != nil {
+		return err
+	}
+
+	if ifInfo.Ingress > 0 || ifInfo.Egress > 0 {
+		l, err := netlink.LinkByName(hostIfaceName)
+		if err != nil {
+			return fmt.Errorf("failed to find host veth interface %s: %v", hostIfaceName, err)
+		}
+		err = netlink.LinkSetTxQLen(l, 1000)
+		if err != nil {
+			return fmt.Errorf("failed to set host veth txqlen: %v", err)
+		}
+
+		if err := setPodBandwidth(sandboxID, hostIfaceName, ifInfo.Ingress, ifInfo.Egress); err != nil {
+			return err
+		}
+	}
+
+	if err := waitForPodFlows(ifInfo.MAC.String(), ifInfo.IPs, hostIfaceName, ifaceID); err != nil {
+		return fmt.Errorf("error while waiting on flows for pod: %v", err)
+	}
+	return nil
 }
 
 // ConfigureInterface sets up the container interface
@@ -296,85 +372,12 @@ func (pr *PodRequest) ConfigureInterface(namespace string, podName string, ifInf
 	if err != nil {
 		return nil, err
 	}
-
-	ifaceID := fmt.Sprintf("%s_%s", namespace, podName)
-
-	// Find and remove any existing OVS port with this iface-id. Pods can
-	// have multiple sandboxes if some are waiting for garbage collection,
-	// but only the latest one should have the iface-id set.
-	uuids, _ := ovsFind("Interface", "_uuid", "external-ids:iface-id="+ifaceID)
-	for _, uuid := range uuids {
-		if out, err := ovsExec("remove", "Interface", uuid, "external-ids", "iface-id"); err != nil {
-			klog.Warningf("Failed to clear stale OVS port %q iface-id %q: %v\n  %q", uuid, ifaceID, err, out)
-		}
-	}
-
-	ipStrs := make([]string, len(ifInfo.IPs))
-	for i, ip := range ifInfo.IPs {
-		ipStrs[i] = ip.String()
-	}
-
-	// Add the new sandbox's OVS port
-	ovsArgs := []string{
-		"add-port", "br-int", hostIface.Name, "--", "set",
-		"interface", hostIface.Name,
-		fmt.Sprintf("external_ids:attached_mac=%s", ifInfo.MAC),
-		fmt.Sprintf("external_ids:iface-id=%s", ifaceID),
-		fmt.Sprintf("external_ids:ip_addresses=%s", strings.Join(ipStrs, ",")),
-		fmt.Sprintf("external_ids:sandbox=%s", pr.SandboxID),
-	}
-
-	if out, err := ovsExec(ovsArgs...); err != nil {
-		return nil, fmt.Errorf("failure in plugging pod interface: %v\n  %q", err, out)
-	}
-
-	if err := clearPodBandwidth(pr.SandboxID); err != nil {
-		return nil, err
-	}
-
-	if ifInfo.Ingress > 0 || ifInfo.Egress > 0 {
-		l, err := netlink.LinkByName(hostIface.Name)
+	if !ifInfo.IsSmartNic {
+		err = ConfigureOVS(namespace, podName, hostIface.Name, ifInfo, pr.SandboxID)
 		if err != nil {
-			return nil, fmt.Errorf("failed to find host veth interface %s: %v", hostIface.Name, err)
-		}
-		err = netlink.LinkSetTxQLen(l, 1000)
-		if err != nil {
-			return nil, fmt.Errorf("failed to set host veth txqlen: %v", err)
-		}
-
-		if err := setPodBandwidth(pr.SandboxID, hostIface.Name, ifInfo.Ingress, ifInfo.Egress); err != nil {
 			return nil, err
 		}
 	}
-
-	err = netns.Do(func(hostNS ns.NetNS) error {
-		// deny IPv6 neighbor solicitations
-		dadSysctlIface := fmt.Sprintf("/proc/sys/net/ipv6/conf/%s/dad_transmits", contIface.Name)
-		if _, err := os.Stat(dadSysctlIface); !os.IsNotExist(err) {
-			err = setSysctl(dadSysctlIface, 0)
-			if err != nil {
-				klog.Warningf("Failed to disable IPv6 DAD: %q", err)
-			}
-		}
-		// generate address based on EUI64
-		genSysctlIface := fmt.Sprintf("/proc/sys/net/ipv6/conf/%s/addr_gen_mode", contIface.Name)
-		if _, err := os.Stat(genSysctlIface); !os.IsNotExist(err) {
-			err = setSysctl(genSysctlIface, 0)
-			if err != nil {
-				klog.Warningf("Failed to set IPv6 address generation mode to EUI64: %q", err)
-			}
-		}
-
-		return ip.SettleAddresses(contIface.Name, 10)
-	})
-	if err != nil {
-		klog.Warningf("Failed to settle addresses: %q", err)
-	}
-
-	if err = waitForPodFlows(ifInfo.MAC.String(), ifInfo.IPs, hostIface.Name, ifaceID); err != nil {
-		return nil, fmt.Errorf("error while waiting on flows for pod: %s, error: %v", podName, err)
-	}
-
 	return []*current.Interface{hostIface, contIface}, nil
 }
 

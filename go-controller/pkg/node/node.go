@@ -7,10 +7,19 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"regexp"
 	"strconv"
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/vishvananda/netlink"
+	kapi "k8s.io/api/core/v1"
+	"k8s.io/apimachinery/pkg/util/wait"
+	"k8s.io/client-go/kubernetes"
+	"k8s.io/client-go/tools/cache"
+	"k8s.io/client-go/tools/record"
+	"k8s.io/klog"
 
 	honode "github.com/ovn-org/ovn-kubernetes/go-controller/hybrid-overlay/pkg/controller"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/cni"
@@ -19,12 +28,6 @@ import (
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/informer"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/kube"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
-	kapi "k8s.io/api/core/v1"
-	"k8s.io/apimachinery/pkg/util/wait"
-	"k8s.io/client-go/kubernetes"
-	"k8s.io/client-go/tools/cache"
-	"k8s.io/client-go/tools/record"
-	"k8s.io/klog"
 )
 
 // OvnNode is the object holder for utilities meant for node management
@@ -35,16 +38,18 @@ type OvnNode struct {
 	stopChan     chan struct{}
 	recorder     record.EventRecorder
 	gateway      Gateway
+	isSmartNIC   bool
 }
 
 // NewNode creates a new controller for node management
-func NewNode(kubeClient kubernetes.Interface, wf factory.NodeWatchFactory, name string, stopChan chan struct{}, eventRecorder record.EventRecorder) *OvnNode {
+func NewNode(kubeClient kubernetes.Interface, wf factory.NodeWatchFactory, name string, stopChan chan struct{}, eventRecorder record.EventRecorder, isSmartNIC bool) *OvnNode {
 	return &OvnNode{
 		name:         name,
 		Kube:         &kube.Kube{KClient: kubeClient},
 		watchFactory: wf,
 		stopChan:     stopChan,
 		recorder:     eventRecorder,
+		isSmartNIC:   isSmartNIC,
 	}
 }
 
@@ -278,9 +283,13 @@ func (n *OvnNode) Start(wg *sync.WaitGroup) error {
 	}
 	n.WatchEndpoints()
 
-	// start the cni server
-	cniServer := cni.NewCNIServer("", kclient.KClient)
-	err = cniServer.Start(cni.HandleCNIRequest)
+	if n.isSmartNIC {
+		n.watchSmartNicPods()
+	} else {
+		// start the cni server
+		cniServer := cni.NewCNIServer("", kclient.KClient)
+		err = cniServer.Start(cni.HandleCNIRequest)
+	}
 
 	return err
 }
@@ -340,4 +349,144 @@ func buildEndpointAddressMap(epSubsets []kapi.EndpointSubset) map[epAddressItem]
 	}
 
 	return epMap
+}
+
+//watchSmartNicPods watch updates for pod smart nic annotations
+func (n *OvnNode) watchSmartNicPods() {
+	var retryPods sync.Map
+	// servedPods tracks the pods that got a VF
+	var servedPods sync.Map
+	_ = n.watchFactory.AddPodHandler(cache.ResourceEventHandlerFuncs{
+		AddFunc: func(obj interface{}) {
+			klog.Infof("AddFunc:")
+			pod := obj.(*kapi.Pod)
+			if !util.PodWantsNetwork(pod) || pod.Status.Phase == kapi.PodRunning {
+				return
+			}
+			if util.PodScheduled(pod) {
+				// Is this pod created on same node where the smart NIC
+				if n.name != pod.Spec.NodeName {
+					return
+				}
+
+				vfRepName, err := n.getVfRepName(pod)
+				if err != nil {
+					retryPods.Store(pod.UID, true)
+					return
+				}
+				podInterfaceInfo, err := cni.PodAnnotation2PodInfo(pod.Annotations)
+				if err != nil {
+					retryPods.Store(pod.UID, true)
+					return
+				}
+				err = n.addRepPort(pod, vfRepName, podInterfaceInfo)
+				if err != nil {
+					retryPods.Store(pod.UID, true)
+				} else {
+					servedPods.Store(pod.UID, true)
+				}
+			} else {
+				// Handle unscheduled pods later in UpdateFunc
+				retryPods.Store(pod.UID, true)
+				return
+			}
+		},
+		UpdateFunc: func(old, newer interface{}) {
+			klog.Infof("UpdateFunc:")
+			pod := newer.(*kapi.Pod)
+			if !util.PodWantsNetwork(pod) || pod.Status.Phase == kapi.PodRunning {
+				retryPods.Delete(pod.UID)
+				return
+			}
+			_, retry := retryPods.Load(pod.UID)
+			if util.PodScheduled(pod) && retry {
+				if n.name != pod.Spec.NodeName {
+					retryPods.Delete(pod.UID)
+					return
+				}
+				vfRepName, err := n.getVfRepName(pod)
+				if err != nil {
+					retryPods.Store(pod.UID, true)
+					return
+				}
+				podInterfaceInfo, err := cni.PodAnnotation2PodInfo(pod.Annotations)
+				if err != nil {
+					retryPods.Store(pod.UID, true)
+					return
+				}
+				err = n.addRepPort(pod, vfRepName, podInterfaceInfo)
+				if err != nil {
+					retryPods.Store(pod.UID, true)
+				} else {
+					servedPods.Store(pod.UID, true)
+					retryPods.Delete(pod.UID)
+				}
+			}
+		},
+		DeleteFunc: func(obj interface{}) {
+			klog.Infof("DeleteFunc:")
+			pod := obj.(*kapi.Pod)
+			if _, ok := servedPods.Load(pod.UID); !ok {
+				return
+			}
+			servedPods.Delete(pod.UID)
+			vfRepName, err := n.getVfRepName(pod)
+			if err != nil {
+				return
+			}
+			_ = n.delRepPort(vfRepName)
+		},
+	}, nil)
+}
+
+// @TODO fix the method to lookup rep
+// getVfRepName returns the VF's representor of the VF assigned to the pod
+func (n *OvnNode) getVfRepName(pod *kapi.Pod) (string, error) {
+	smartNicDetails, ok := pod.Annotations[cni.SmartNicConnectionDetails]
+	if !ok {
+		return "", fmt.Errorf("smart-nic annotation \"%s\" not found", cni.SmartNicConnectionDetails)
+	}
+
+	pfPciAddress := regexp.MustCompile(`pf=(\d+:\d+:\d+\.\d)`).FindStringSubmatch(smartNicDetails)[1]
+	pfIndex := string(pfPciAddress[len(pfPciAddress)-1])
+	vfIndex := regexp.MustCompile(`vf=(\d+)`).FindStringSubmatch(smartNicDetails)[1]
+
+	// The represontor name can be pf<pfIndex>vf<vfIndex> or c0pf<pfIndex>vf<vfIndex>
+	vfRepName := fmt.Sprintf("pf%svf%s", pfIndex, vfIndex)
+	if _, err := netlink.LinkByName(vfRepName); err == nil {
+		return vfRepName, nil
+	}
+
+	vfRepName = "c0" + vfRepName
+	if _, err := netlink.LinkByName(vfRepName); err == nil {
+		return vfRepName, nil
+	}
+
+	return "", fmt.Errorf("no represontor found for %s", smartNicDetails)
+}
+
+// addRepPort adds the representor of the VF to the ovs bridge
+func (n *OvnNode) addRepPort(pod *kapi.Pod, vfRepName string, ifInfo *cni.PodInterfaceInfo) error {
+	sandboxID := pod.Annotations["sandbox"]
+	err := cni.ConfigureOVS(pod.Namespace, pod.Name, vfRepName, ifInfo, sandboxID)
+	if err != nil {
+		return err
+	}
+	klog.Infof("Port %s added to bridge br-int", vfRepName)
+	// @TODO fix connection-status
+	err = n.Kube.SetAnnotationsOnPod(pod.Namespace, pod.Name, map[string]string{
+		cni.SmartNicConnetionStatus: "True"})
+	return err
+}
+
+// delRepPort delete the representor of the VF from the ovs bridge
+func (n *OvnNode) delRepPort(vfRepName string) error {
+	return wait.PollImmediate(500*time.Millisecond, 60*time.Second, func() (bool, error) {
+		_, _, err := util.RunOVSVsctl("--if-exists", "del-port", "br-int", vfRepName)
+		if err != nil {
+			return false, nil
+		}
+		klog.Infof("Port %s deleted from bridge br-int", vfRepName)
+		return true, nil
+	})
 }

@@ -11,6 +11,7 @@ import (
 	"k8s.io/apimachinery/pkg/util/wait"
 	"k8s.io/klog"
 
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/kube"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
 )
@@ -47,6 +48,25 @@ func GetPodAnnotationsWithBackoff(kubecli kube.Interface, namespace string, podN
 	}
 
 	return annotations, nil
+}
+
+func PodAnnotation2PodInfo(podAnnotationMap map[string]string) (*PodInterfaceInfo, error) {
+	podAnnotation, err := util.UnmarshalPodAnnotation(podAnnotationMap)
+	if err != nil {
+		return nil, err
+	}
+	ingress, egress, err := extractPodBandwidthResources(podAnnotationMap)
+	if err != nil {
+		return nil, err
+	}
+	podInterfaceInfo := &PodInterfaceInfo{
+		PodAnnotation: *podAnnotation,
+		MTU:           config.Default.MTU,
+		Ingress:       ingress,
+		Egress:        egress,
+		IsSmartNic:    true,
+	}
+	return podInterfaceInfo, nil
 }
 
 //Move to sriovnet

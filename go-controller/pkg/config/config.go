@@ -585,6 +585,10 @@ var CommonFlags = []cli.Flag{
 		Destination: &cliConfig.Logging.LogFileMaxAge,
 		Value:       Logging.LogFileMaxAge,
 	},
+	&cli.BoolFlag{
+		Name:  "smart-nic",
+		Usage: "Setup a smart nic node",
+	},
 }
 
 // CNIFlags capture CNI-related options
