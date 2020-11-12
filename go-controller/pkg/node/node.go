@@ -22,6 +22,7 @@ import (
 	kapi "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/util/wait"
 	"k8s.io/client-go/kubernetes"
+	listers "k8s.io/client-go/listers/core/v1"
 	"k8s.io/client-go/tools/cache"
 	"k8s.io/client-go/tools/record"
 	"k8s.io/klog"
@@ -272,14 +273,12 @@ func (n *OvnNode) Start(wg *sync.WaitGroup) error {
 		}
 	}
 
-	kclient, ok := n.Kube.(*kube.Kube)
-	if !ok {
-		return fmt.Errorf("cannot get kubeclient for starting CNI server")
-	}
 	n.WatchEndpoints()
 
-	// start the cni server
-	cniServer := cni.NewCNIServer("", kclient.KClient)
+	// start the cni server with a podLister
+	// so we get the Pod information from the local cache
+	podLister := listers.NewPodLister(n.watchFactory.LocalPodInformer().GetIndexer())
+	cniServer := cni.NewCNIServer("", podLister)
 	err = cniServer.Start(cni.HandleCNIRequest)
 
 	return err

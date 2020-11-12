@@ -6,17 +6,15 @@ import (
 	"net"
 	"time"
 
-	"k8s.io/client-go/kubernetes"
+	corev1listers "k8s.io/client-go/listers/core/v1"
 	"k8s.io/klog"
 
 	"github.com/containernetworking/cni/pkg/types/current"
-	"k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/api/resource"
 	"k8s.io/apimachinery/pkg/util/wait"
 	utilnet "k8s.io/utils/net"
 
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
-	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/kube"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
 )
 
@@ -65,36 +63,17 @@ func podDescription(pr *PodRequest) string {
 	return fmt.Sprintf("[%s/%s]", pr.PodNamespace, pr.PodName)
 }
 
-func (pr *PodRequest) cmdAdd(kclient kubernetes.Interface) ([]byte, error) {
+func (pr *PodRequest) cmdAdd(podLister corev1listers.PodLister) ([]byte, error) {
 	namespace := pr.PodNamespace
 	podName := pr.PodName
 	if namespace == "" || podName == "" {
 		return nil, fmt.Errorf("required CNI variable missing")
 	}
 
-	kubecli := &kube.Kube{KClient: kclient}
-
-	// Get the IP address and MAC address from the API server.
-	// Exponential back off ~32 seconds + 7* t(api call)
-	var annotationBackoff = wait.Backoff{Duration: 1 * time.Second, Steps: 7, Factor: 1.5, Jitter: 0.1}
-	var annotations map[string]string
-	var err error
-	if err = wait.ExponentialBackoff(annotationBackoff, func() (bool, error) {
-		annotations, err = kubecli.GetAnnotationsOnPod(namespace, podName)
-		if err != nil {
-			if errors.IsNotFound(err) {
-				// Pod not found; don't bother waiting longer
-				return false, err
-			}
-			klog.Warningf("Error getting pod annotations: %v", err)
-			return false, nil
-		}
-		if _, ok := annotations[util.OvnPodAnnotationName]; ok {
-			return true, nil
-		}
-		return false, nil
-	}); err != nil {
-		return nil, fmt.Errorf("failed to get pod annotation: %v", err)
+	// Get the IP address and MAC address of the pod
+	annotations, err := getAnnotationsOnPod(podLister, namespace, podName)
+	if err != nil {
+		return nil, err
 	}
 
 	podInfo, err := util.UnmarshalPodAnnotation(annotations)
@@ -142,14 +121,14 @@ func (pr *PodRequest) cmdDel() ([]byte, error) {
 // Argument '*PodRequest' encapsulates all the necessary information
 // kclient is passed in so that clientset can be reused from the server
 // Return value is the actual bytes to be sent back without further processing.
-func HandleCNIRequest(request *PodRequest, kclient kubernetes.Interface) ([]byte, error) {
+func HandleCNIRequest(request *PodRequest, podLister corev1listers.PodLister) ([]byte, error) {
 	pd := podDescription(request)
 	klog.Infof("%s dispatching pod network request %v", pd, request)
 	var result []byte
 	var err error
 	switch request.Command {
 	case CNIAdd:
-		result, err = request.cmdAdd(kclient)
+		result, err = request.cmdAdd(podLister)
 	case CNIDel:
 		result, err = request.cmdDel()
 	default:
@@ -198,4 +177,25 @@ func (pr *PodRequest) getCNIResult(podInterfaceInfo *PodInterfaceInfo) (*current
 		Interfaces: interfacesArray,
 		IPs:        ips,
 	}, nil
+}
+
+// getAnnotationsOnPod obtains the pod annotation from the cache
+func getAnnotationsOnPod(podLister corev1listers.PodLister, namespace, name string) (map[string]string, error) {
+	var annotations map[string]string
+
+	if err := wait.PollImmediate(200*time.Millisecond, 30*time.Second, func() (bool, error) {
+		pod, err := podLister.Pods(namespace).Get(name)
+		if err != nil {
+			return false, err
+		}
+		annotations = pod.ObjectMeta.Annotations
+		if _, ok := annotations[util.OvnPodAnnotationName]; ok {
+			return true, nil
+		}
+		// pod found but without annotations
+		return false, nil
+	}); err != nil {
+		return nil, fmt.Errorf("failed to get pod %s/%s annotations: %v", name, namespace, err)
+	}
+	return annotations, nil
 }
