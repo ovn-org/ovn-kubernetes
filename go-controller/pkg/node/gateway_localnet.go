@@ -187,18 +187,20 @@ func (l *localPortWatcher) addService(svc *kapi.Service) error {
 	// holds map of external ips and if they are currently using routes
 	routeUsage := make(map[string]bool)
 	for _, port := range svc.Spec.Ports {
+		if util.ServiceTypeHasClusterIP(svc) {
+			// Fix Azure/GCP LoadBalancers. They will forward traffic directly to the node with the
+			// dest address as the load-balancer ingress IP and port
+			iptRules = append(iptRules, getLoadBalancerIPTRules(svc, port, svc.Spec.ClusterIP, port.Port)...)
+		}
+
 		if util.ServiceTypeHasNodePort(svc) {
 			if err := util.ValidatePort(port.Protocol, port.NodePort); err != nil {
 				klog.Warningf("Invalid service node port %s, err: %v", port.Name, err)
 				continue
 			}
-
 			if gatewayIP != "" {
-				// Fix Azure/GCP LoadBalancers. They will forward traffic directly to the node with the
-				// dest address as the load-balancer ingress IP and port
-				iptRules = append(iptRules, getLoadBalancerIPTRules(svc, port, svc.Spec.ClusterIP, port.Port)...)
 				iptRules = append(iptRules, getNodePortIPTRules(port, nil, svc.Spec.ClusterIP, port.Port)...)
-				klog.V(5).Infof("Will add iptables rule for NodePort and Cloud load balancers: %v and "+
+				klog.V(5).Infof("Will add iptables rule for NodePort: %v and "+
 					"protocol: %v", port.NodePort, port.Protocol)
 			} else {
 				klog.Warningf("No gateway of appropriate IP family for NodePort Service %s/%s %s",
@@ -262,13 +264,15 @@ func (l *localPortWatcher) deleteService(svc *kapi.Service) error {
 	routeUsage := make(map[string]bool)
 	// Note that unlike with addService we just silently ignore IPv4/IPv6 mismatches here
 	for _, port := range svc.Spec.Ports {
+		if util.ServiceTypeHasClusterIP(svc) {
+			// Fix Azure/GCP LoadBalancers. They will forward traffic directly to the node with the
+			// dest address as the load-balancer ingress IP and port
+			iptRules = append(iptRules, getLoadBalancerIPTRules(svc, port, svc.Spec.ClusterIP, port.Port)...)
+		}
 		if util.ServiceTypeHasNodePort(svc) {
 			if gatewayIP != "" {
-				// Fix Azure/GCP LoadBalancers. They will forward traffic directly to the node with the
-				// dest address as the load-balancer ingress IP and port
-				iptRules = append(iptRules, getLoadBalancerIPTRules(svc, port, svc.Spec.ClusterIP, port.Port)...)
 				iptRules = append(iptRules, getNodePortIPTRules(port, nil, svc.Spec.ClusterIP, port.Port)...)
-				klog.V(5).Infof("Will delete iptables rule for NodePort and cloud load balancers: %v and "+
+				klog.V(5).Infof("Will delete iptables rule for NodePort: %v and "+
 					"protocol: %v", port.NodePort, port.Protocol)
 			}
 		}
