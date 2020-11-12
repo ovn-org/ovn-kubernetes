@@ -278,6 +278,9 @@ ovn_apiServerAddress=${API_IP} \
 
 # Create KIND cluster. For additional debug, add '--verbosity <int>': 0 None .. 3 Debug
 export KUBECONFIG=${HOME}/admin.conf
+if kind get clusters | grep ovn; then
+  delete
+fi
 kind create cluster --name ${KIND_CLUSTER_NAME} --kubeconfig ${KUBECONFIG} --image kindest/node:${K8S_VERSION} --config=${KIND_CONFIG_LCL}
 cat ${KUBECONFIG}
 
