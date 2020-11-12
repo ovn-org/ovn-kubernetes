@@ -24,7 +24,7 @@ run_kubectl() {
 # with Fedora32 Cloud, but it does not happen if we clean first the ovn-kubernetes resources.
 delete()
 {
-  kubectl --kubeconfig ${HOME}/admin.conf delete namespace ovn-kubernetes
+  timeout 5 kubectl --kubeconfig ${HOME}/admin.conf delete namespace ovn-kubernetes || true
   sleep 5
   kind delete cluster --name ${KIND_CLUSTER_NAME:-ovn}
 }
