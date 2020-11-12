@@ -372,7 +372,7 @@ func (pr *PodRequest) ConfigureInterface(namespace string, podName string, ifInf
 		klog.Warningf("Failed to settle addresses: %q", err)
 	}
 
-	if err = waitForPodFlows(ifInfo.MAC.String(), ifInfo.IPs, hostIface.Name, ifaceID); err != nil {
+	if err = waitForPodFlows(pr.ctx, ifInfo.MAC.String(), ifInfo.IPs, hostIface.Name, ifaceID); err != nil {
 		return nil, fmt.Errorf("error while waiting on flows for pod: %v", err)
 	}
 

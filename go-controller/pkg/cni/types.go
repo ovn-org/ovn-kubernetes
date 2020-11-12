@@ -1,6 +1,7 @@
 package cni
 
 import (
+	"context"
 	"net/http"
 	"sync"
 	"time"
@@ -78,6 +79,10 @@ type PodRequest struct {
 	CNIConf *types.NetConf
 	// Timestamp when the request was started
 	timestamp time.Time
+	// ctx is a context tracking this request's lifetime
+	ctx context.Context
+	// cancel should be called to cancel this request
+	cancel context.CancelFunc
 }
 
 type cniRequestFunc func(request *PodRequest, podLister corev1listers.PodLister) ([]byte, error)

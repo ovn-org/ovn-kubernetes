@@ -1,6 +1,7 @@
 package cni
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"io/ioutil"
@@ -9,10 +10,13 @@ import (
 	"time"
 
 	"github.com/gorilla/mux"
+	kapi "k8s.io/api/core/v1"
 	corev1listers "k8s.io/client-go/listers/core/v1"
+	"k8s.io/client-go/tools/cache"
 	"k8s.io/klog"
 
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/factory"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/metrics"
 )
 
@@ -42,7 +46,7 @@ import (
 // started.
 
 // NewCNIServer creates and returns a new Server object which will listen on a socket in the given path
-func NewCNIServer(rundir string, podLister corev1listers.PodLister) *Server {
+func NewCNIServer(rundir string, factory factory.NodeWatchFactory) *Server {
 	if len(rundir) == 0 {
 		rundir = serverRunDir
 	}
@@ -53,7 +57,7 @@ func NewCNIServer(rundir string, podLister corev1listers.PodLister) *Server {
 			Handler: router,
 		},
 		rundir:             rundir,
-		podLister:          podLister,
+		podLister:          corev1listers.NewPodLister(factory.LocalPodInformer().GetIndexer()),
 		runningSandboxAdds: make(map[string]*PodRequest),
 	}
 	router.NotFoundHandler = http.HandlerFunc(http.NotFound)
@@ -71,7 +75,42 @@ func NewCNIServer(rundir string, podLister corev1listers.PodLister) *Server {
 			klog.Warningf("Error writing HTTP response: %v", err)
 		}
 	}).Methods("POST")
+
+	factory.AddPodHandler(cache.ResourceEventHandlerFuncs{
+		DeleteFunc: func(obj interface{}) {
+			pod := obj.(*kapi.Pod)
+			s.cancelOldestPodAdd(pod)
+		},
+	}, nil)
+
 	return s
+}
+
+// cancelOldestPodAdd requests that the earliest outstanding add operation for a given
+// pod should be canceled.
+func (s *Server) cancelOldestPodAdd(pod *kapi.Pod) {
+	s.runningSandboxAddsLock.Lock()
+	defer s.runningSandboxAddsLock.Unlock()
+
+	oldest := time.Now()
+	var found *PodRequest
+
+	// There may be >= 0 sandboxes for a Pod Namespace+Name. Kubelet defers
+	// sandbox deletion to GC, and if a pod is deleted and re-created kubelet
+	// will start a second sandbox for the "new" Pod which has a different UID.
+	// We only want to cancel the oldest sandbox because it's either the
+	// only sandbox or has been superceded by a newer request.
+	for _, req := range s.runningSandboxAdds {
+		if req.PodNamespace == pod.Namespace && req.PodName == pod.Name && req.timestamp.Before(oldest) {
+			found = req
+			oldest = req.timestamp
+		}
+	}
+
+	if found != nil {
+		found.cancel()
+		klog.Infof("%s canceled sandbox ADD request", found)
+	}
 }
 
 // Split the "CNI_ARGS" environment variable's value into a map.  CNI_ARGS
@@ -141,6 +180,7 @@ func cniRequestToPodRequest(cr *Request) (*PodRequest, error) {
 
 	req.CNIConf = conf
 	req.timestamp = time.Now()
+	req.ctx, req.cancel = context.WithCancel(context.Background())
 	return req, nil
 }
 
@@ -153,7 +193,7 @@ func (s *Server) startSandboxRequest(req *PodRequest) error {
 		if _, ok := s.runningSandboxAdds[req.SandboxID]; ok {
 			// Should never happen as the runtime is required to
 			// serialize operations for the same sandbox
-			return fmt.Errorf("%s already started", req)
+			return fmt.Errorf("%s ADD already started", req)
 		}
 		s.runningSandboxAdds[req.SandboxID] = req
 	}

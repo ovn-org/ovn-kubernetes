@@ -35,6 +35,9 @@ type NodeWatchFactory interface {
 	AddFilteredEndpointsHandler(namespace string, sel labels.Selector, handlerFuncs cache.ResourceEventHandler, processExisting func([]interface{})) *Handler
 	RemoveEndpointsHandler(handler *Handler)
 
+	AddPodHandler(handlerFuncs cache.ResourceEventHandler, processExisting func([]interface{})) *Handler
+	RemovePodHandler(handler *Handler)
+
 	NodeInformer() cache.SharedIndexInformer
 	LocalPodInformer() cache.SharedIndexInformer
 }
