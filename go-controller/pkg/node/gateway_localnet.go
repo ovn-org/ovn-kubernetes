@@ -119,7 +119,13 @@ func (l *localPortWatcher) AddService(svc *kapi.Service) {
 }
 
 func (l *localPortWatcher) UpdateService(old, new *kapi.Service) {
-	if reflect.DeepEqual(new.Spec, old.Spec) {
+	if reflect.DeepEqual(new.Spec.Ports, old.Spec.Ports) &&
+		reflect.DeepEqual(new.Spec.ExternalIPs, old.Spec.ExternalIPs) &&
+		reflect.DeepEqual(new.Spec.ClusterIP, old.Spec.ClusterIP) &&
+		reflect.DeepEqual(new.Spec.Type, old.Spec.Type) &&
+		reflect.DeepEqual(new.Status.LoadBalancer.Ingress, old.Status.LoadBalancer.Ingress) {
+		klog.V(5).Infof("Skipping service update for: %s as change does not apply to any of .Spec.Ports, "+
+			".Spec.ExternalIP, .Spec.ClusterIP, .Spec.Type, .Status.LoadBalancer.Ingress", new.Name)
 		return
 	}
 	err := l.deleteService(old)
@@ -234,10 +240,10 @@ func (l *localPortWatcher) addService(svc *kapi.Service) error {
 		if stdout, stderr, err := util.RunIP("route", "replace", externalIP, "via", gatewayIP, "dev", types.K8sMgmtIntfName, "table", localnetGatewayExternalIDTable); err != nil {
 			klog.Errorf("Error adding routing table entry for ExternalIP %s, via gw: %s: stdout: %s, stderr: %s, err: %v", externalIP, gatewayIP, stdout, stderr, err)
 		} else {
-			klog.V(5).Infof("Successfully added route for ExternalIP: %s", externalIP)
+			klog.Infof("Successfully added route for ExternalIP: %s", externalIP)
 		}
 	}
-	klog.V(5).Infof("Adding iptables rules: %v for service: %v", iptRules, svc.Name)
+	klog.Infof("Adding iptables rules: %v for service: %v", iptRules, svc.Name)
 	return addIptRules(iptRules)
 }
 
@@ -285,11 +291,11 @@ func (l *localPortWatcher) deleteService(svc *kapi.Service) error {
 		if stdout, stderr, err := util.RunIP("route", "del", externalIP, "via", gatewayIP, "dev", types.K8sMgmtIntfName, "table", localnetGatewayExternalIDTable); err != nil {
 			klog.Errorf("Error delete routing table entry for ExternalIP %s: stdout: %s, stderr: %s, err: %v", externalIP, stdout, stderr, err)
 		} else {
-			klog.V(5).Infof("Successfully deleted route for ExternalIP: %s", externalIP)
+			klog.Infof("Successfully deleted route for ExternalIP: %s", externalIP)
 		}
 	}
 
-	klog.V(5).Infof("Deleting iptables rules: %v for service: %v", iptRules, svc.Name)
+	klog.Infof("Deleting iptables rules: %v for service: %v", iptRules, svc.Name)
 	return delIptRules(iptRules)
 }
 
@@ -310,7 +316,7 @@ func (l *localPortWatcher) SyncServices(serviceInterface []interface{}) {
 				}
 			}
 			if !isFound {
-				klog.V(5).Infof("Deleting stale routing rule: %s", existingRoute)
+				klog.Infof("Deleting stale routing rule: %s", existingRoute)
 				if _, stderr, err := util.RunIP("route", "del", existingRoute, "table", localnetGatewayExternalIDTable); err != nil {
 					klog.Errorf("Error deleting stale routing rule: stderr: %s, err: %v", stderr, err)
 				}
