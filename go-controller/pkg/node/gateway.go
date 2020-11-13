@@ -24,12 +24,16 @@ type Gateway interface {
 }
 
 type gateway struct {
+	// loadBalancerHealthChecker is a health check server for load-balancer type services
 	loadBalancerHealthChecker informer.ServiceAndEndpointsEventHandler
-	portClaimWatcher          informer.ServiceEventHandler
-	nodePortWatcher           informer.ServiceEventHandler
-	localPortWatcher          informer.ServiceEventHandler
-	openflowManager           *openflowManager
-	initFunc                  func() error
+	// portClaimWatcher is for reserving ports for virtual IPs allocated by the cluster on the host
+	portClaimWatcher informer.ServiceEventHandler
+	// nodePortWatcher is used in Shared GW mode to handle nodePort flows in shared OVS bridge
+	nodePortWatcher informer.ServiceEventHandler
+	// localPortWatcher is used in Local GW mode to handle iptables rules and routes for services
+	localPortWatcher informer.ServiceEventHandler
+	openflowManager  *openflowManager
+	initFunc         func() error
 }
 
 func (g *gateway) AddService(svc *kapi.Service) {
@@ -73,7 +77,7 @@ func (g *gateway) DeleteService(svc *kapi.Service) {
 		g.nodePortWatcher.DeleteService(svc)
 	}
 	if g.localPortWatcher != nil {
-		g.localPortWatcher.AddService(svc)
+		g.localPortWatcher.DeleteService(svc)
 	}
 }
 
