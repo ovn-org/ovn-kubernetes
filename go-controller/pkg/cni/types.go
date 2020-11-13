@@ -1,12 +1,15 @@
 package cni
 
 import (
+	"context"
 	"net/http"
+	"sync"
+	"time"
 
 	"github.com/containernetworking/cni/pkg/types/current"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/cni/types"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
-	"k8s.io/client-go/kubernetes"
+	corev1listers "k8s.io/client-go/listers/core/v1"
 )
 
 // serverRunDir is the default directory for CNIServer runtime files
@@ -74,9 +77,15 @@ type PodRequest struct {
 	IfName string
 	// CNI conf obtained from stdin conf
 	CNIConf *types.NetConf
+	// Timestamp when the request was started
+	timestamp time.Time
+	// ctx is a context tracking this request's lifetime
+	ctx context.Context
+	// cancel should be called to cancel this request
+	cancel context.CancelFunc
 }
 
-type cniRequestFunc func(request *PodRequest, kclient kubernetes.Interface) ([]byte, error)
+type cniRequestFunc func(request *PodRequest, podLister corev1listers.PodLister) ([]byte, error)
 
 // Server object that listens for JSON-marshaled Request objects
 // on a private root-only Unix domain socket.
@@ -84,5 +93,9 @@ type Server struct {
 	http.Server
 	requestFunc cniRequestFunc
 	rundir      string
-	kclient     kubernetes.Interface
+	podLister   corev1listers.PodLister
+
+	// runningSandboxAdds is a map of sandbox ID to PodRequest for any CNIAdd operation
+	runningSandboxAddsLock sync.Mutex
+	runningSandboxAdds     map[string]*PodRequest
 }

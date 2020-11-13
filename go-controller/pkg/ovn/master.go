@@ -152,7 +152,7 @@ func (oc *Controller) upgradeToSingleSwitchOVNTopology(existingNodeList *kapi.No
 		if !strings.HasPrefix(switchName, "join_") {
 			continue
 		}
-		nodeName := strings.SplitN(switchName, "_", 1)[1]
+		nodeName := strings.TrimPrefix(switchName, "join_")
 		logicalNodes[nodeName] = true
 	}
 
