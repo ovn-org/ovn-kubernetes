@@ -59,8 +59,8 @@ func extractPodBandwidthResources(podAnnotations map[string]string) (int64, int6
 	return ingress, egress, nil
 }
 
-func podDescription(pr *PodRequest) string {
-	return fmt.Sprintf("[%s/%s]", pr.PodNamespace, pr.PodName)
+func (pr *PodRequest) String() string {
+	return fmt.Sprintf("[%s/%s %s]", pr.PodNamespace, pr.PodName, pr.SandboxID)
 }
 
 func (pr *PodRequest) cmdAdd(podLister corev1listers.PodLister) ([]byte, error) {
@@ -122,10 +122,10 @@ func (pr *PodRequest) cmdDel() ([]byte, error) {
 // kclient is passed in so that clientset can be reused from the server
 // Return value is the actual bytes to be sent back without further processing.
 func HandleCNIRequest(request *PodRequest, podLister corev1listers.PodLister) ([]byte, error) {
-	pd := podDescription(request)
-	klog.Infof("%s dispatching pod network request %v", pd, request)
 	var result []byte
 	var err error
+
+	klog.Infof("%s %s starting CNI request %v", request, request.Command, request)
 	switch request.Command {
 	case CNIAdd:
 		result, err = request.cmdAdd(podLister)
@@ -133,10 +133,11 @@ func HandleCNIRequest(request *PodRequest, podLister corev1listers.PodLister) ([
 		result, err = request.cmdDel()
 	default:
 	}
-	klog.Infof("%s CNI request %v, result %q, err %v", pd, request, string(result), err)
+	klog.Infof("%s %s finished CNI request %v, result %q, err %v", request, request.Command, request, string(result), err)
+
 	if err != nil {
-		// Prefix errors with pod info for easier failure debugging
-		return nil, fmt.Errorf("%s %v", pd, err)
+		// Prefix errors with request info for easier failure debugging
+		return nil, fmt.Errorf("%s %v", request, err)
 	}
 	return result, nil
 }

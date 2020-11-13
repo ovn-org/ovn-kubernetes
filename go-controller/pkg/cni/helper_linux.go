@@ -373,7 +373,7 @@ func (pr *PodRequest) ConfigureInterface(namespace string, podName string, ifInf
 	}
 
 	if err = waitForPodFlows(ifInfo.MAC.String(), ifInfo.IPs, hostIface.Name, ifaceID); err != nil {
-		return nil, fmt.Errorf("error while waiting on flows for pod: %s, error: %v", podName, err)
+		return nil, fmt.Errorf("error while waiting on flows for pod: %v", err)
 	}
 
 	return []*current.Interface{hostIface, contIface}, nil

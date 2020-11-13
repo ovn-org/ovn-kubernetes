@@ -55,8 +55,20 @@ func NewCNIServer(rundir string, podLister corev1listers.PodLister) *Server {
 		podLister: podLister,
 	}
 	router.NotFoundHandler = http.HandlerFunc(http.NotFound)
-	router.HandleFunc("/", s.handleCNIRequest).Methods("POST")
 	router.HandleFunc("/metrics", s.handleCNIMetrics).Methods("POST")
+	router.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
+		result, err := s.handleCNIRequest(r)
+		if err != nil {
+			http.Error(w, fmt.Sprintf("%v", err), http.StatusBadRequest)
+			return
+		}
+
+		// Empty response JSON means success with no body
+		w.Header().Set("Content-Type", "application/json")
+		if _, err := w.Write(result); err != nil {
+			klog.Warningf("Error writing HTTP response: %v", err)
+		}
+	}).Methods("POST")
 	return s
 }
 
@@ -131,30 +143,23 @@ func cniRequestToPodRequest(cr *Request) (*PodRequest, error) {
 
 // Dispatch a pod request to the request handler and return the result to the
 // CNI server client
-func (s *Server) handleCNIRequest(w http.ResponseWriter, r *http.Request) {
+func (s *Server) handleCNIRequest(r *http.Request) ([]byte, error) {
 	var cr Request
 	b, _ := ioutil.ReadAll(r.Body)
 	if err := json.Unmarshal(b, &cr); err != nil {
-		http.Error(w, fmt.Sprintf("%v", err), http.StatusBadRequest)
-		return
+		return nil, err
 	}
 	req, err := cniRequestToPodRequest(&cr)
 	if err != nil {
-		http.Error(w, fmt.Sprintf("%v", err), http.StatusBadRequest)
-		return
+		return nil, err
 	}
 
-	klog.Infof("Waiting for %s result for pod %s/%s", req.Command, req.PodNamespace, req.PodName)
 	result, err := s.requestFunc(req, s.podLister)
 	if err != nil {
-		http.Error(w, fmt.Sprintf("%v", err), http.StatusBadRequest)
-	} else {
-		// Empty response JSON means success with no body
-		w.Header().Set("Content-Type", "application/json")
-		if _, err := w.Write(result); err != nil {
-			klog.Warningf("Error writing %s HTTP response: %v", req.Command, err)
-		}
+		// Prefix error with request information for easier debugging
+		return nil, fmt.Errorf("%s %v", req, err)
 	}
+	return result, nil
 }
 
 func (s *Server) handleCNIMetrics(w http.ResponseWriter, r *http.Request) {
