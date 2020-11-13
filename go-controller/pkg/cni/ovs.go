@@ -2,13 +2,13 @@ package cni
 
 import (
 	"bytes"
+	"context"
 	"fmt"
 	utilnet "k8s.io/utils/net"
 	"net"
 	"strings"
 	"time"
 
-	"k8s.io/apimachinery/pkg/util/wait"
 	"k8s.io/klog"
 	kexec "k8s.io/utils/exec"
 )
@@ -110,66 +110,91 @@ func ofctlExec(args ...string) (string, error) {
 	return stdoutStr, nil
 }
 
-func waitForPodFlows(mac string, ifAddrs []*net.IPNet, ifaceName, ifaceID string) error {
+func isIfaceIDSet(ifaceName, ifaceID string) error {
+	// ensure the OVS interface is still active. It may have been cleared by a subsequent CNI ADD
+	// and if so, there's no need to keep checking for flows
+	out, err := ovsGet("Interface", ifaceName, "external-ids", "iface-id")
+	if err == nil && out != ifaceID {
+		return fmt.Errorf("OVS sandbox port %s is no longer active (probably due to a subsequent "+
+			"CNI ADD)", ifaceName)
+	}
+
+	// Try again
+	return nil
+}
+
+func doPodFlowsExist(mac string, ifAddrs []*net.IPNet) bool {
+	// Function checks for OpenFlow flows to know the pod is ready
+	// TODO(trozet): in the future use a more stable mechanism provided by OVN:
+	// https://bugzilla.redhat.com/show_bug.cgi?id=1839102
+
 	// query represents the match criteria, and different OF tables that this query may match on
 	type query struct {
 		match  string
 		tables []int
 	}
 
-	return wait.PollImmediate(200*time.Millisecond, 20*time.Second, func() (bool, error) {
-		// Function checks for OpenFlow flows to know the pod is ready
-		// TODO(trozet): in the future use a more stable mechanism provided by OVN:
-		// https://bugzilla.redhat.com/show_bug.cgi?id=1839102
+	// Query the flows by mac address for in_port_security
+	queries := []query{
+		{
+			match:  "dl_src=" + mac,
+			tables: []int{9},
+		},
+	}
+	for _, ifAddr := range ifAddrs {
+		var ipMatch string
+		if !utilnet.IsIPv6(ifAddr.IP) {
+			ipMatch = "ip,ip_dst"
+		} else {
+			ipMatch = "ipv6,ipv6_dst"
+		}
+		// add queries for out_port_security
+		// note we need to support table 48 for 20.06 OVN backwards compatibility. Table 49 is now
+		// where out_port_security lives
+		queries = append(queries,
+			query{fmt.Sprintf("%s=%s", ipMatch, ifAddr.IP), []int{48, 49}},
+		)
+	}
 
-		// ensure the OVS interface is still active. It may have been cleared by a subsequent CNI ADD
-		// and if so, there's no need to keep checking for flows
-		out, err := ovsGet("Interface", ifaceName, "external-ids", "iface-id")
-		if err != nil {
-			return false, nil
+	// Must find the right flows in all queries to succeed
+	for _, query := range queries {
+		found := false
+		// Look for a match in any table of this query to be considered success
+		for _, table := range query.tables {
+			queryStr := fmt.Sprintf("table=%d,%s", table, query.match)
+			// ovs-ofctl dumps error on stderr, so stdout will only dump flow data if matches the query.
+			stdout, err := ofctlExec("dump-flows", "br-int", queryStr)
+			if err == nil && len(stdout) > 0 {
+				found = true
+				break
+			}
 		}
-		if out != ifaceID {
-			return false, fmt.Errorf("OVS sandbox port %s is no longer active (probably due to a subsequent "+
-				"CNI ADD)", ifaceName)
+		if !found {
+			return false
 		}
+	}
 
-		// Query the flows by mac address for in_port_security
-		queries := []query{
-			{
-				match:  "dl_src=" + mac,
-				tables: []int{9},
-			},
-		}
-		for _, ifAddr := range ifAddrs {
-			var ipMatch string
-			if !utilnet.IsIPv6(ifAddr.IP) {
-				ipMatch = "ip,ip_dst"
-			} else {
-				ipMatch = "ipv6,ipv6_dst"
+	return true
+}
+
+func waitForPodFlows(ctx context.Context, mac string, ifAddrs []*net.IPNet, ifaceName, ifaceID string) error {
+	timeout := time.After(20 * time.Second)
+	for {
+		select {
+		case <-ctx.Done():
+			return fmt.Errorf("canceled waiting for OVS flows")
+		case <-timeout:
+			return fmt.Errorf("timed out waiting for OVS flows")
+		default:
+			if err := isIfaceIDSet(ifaceName, ifaceID); err != nil {
+				return err
 			}
-			// add queries for out_port_security
-			// note we need to support table 48 for 20.06 OVN backwards compatibility. Table 49 is now
-			// where out_port_security lives
-			queries = append(queries,
-				query{fmt.Sprintf("%s=%s", ipMatch, ifAddr.IP), []int{48, 49}},
-			)
-		}
-		for _, query := range queries {
-			found := false
-			// Look for a match in any table to be considered success
-			for _, table := range query.tables {
-				queryStr := fmt.Sprintf("table=%d,%s", table, query.match)
-				// ovs-ofctl dumps error on stderr, so stdout will only dump flow data if matches the query.
-				stdout, err := ofctlExec("dump-flows", "br-int", queryStr)
-				if err == nil && len(stdout) > 0 {
-					found = true
-					break
-				}
+			if doPodFlowsExist(mac, ifAddrs) {
+				// success
+				return nil
 			}
-			if !found {
-				return false, nil
-			}
+			// try again later
+			time.Sleep(200 * time.Millisecond)
 		}
-		return true, nil
-	})
+	}
 }

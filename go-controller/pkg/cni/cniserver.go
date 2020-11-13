@@ -1,17 +1,22 @@
 package cni
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"io/ioutil"
 	"net/http"
 	"strings"
+	"time"
 
 	"github.com/gorilla/mux"
-	"k8s.io/client-go/kubernetes"
+	kapi "k8s.io/api/core/v1"
+	corev1listers "k8s.io/client-go/listers/core/v1"
+	"k8s.io/client-go/tools/cache"
 	"k8s.io/klog"
 
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/factory"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/metrics"
 )
 
@@ -41,7 +46,7 @@ import (
 // started.
 
 // NewCNIServer creates and returns a new Server object which will listen on a socket in the given path
-func NewCNIServer(rundir string, kclient kubernetes.Interface) *Server {
+func NewCNIServer(rundir string, factory factory.NodeWatchFactory) *Server {
 	if len(rundir) == 0 {
 		rundir = serverRunDir
 	}
@@ -51,13 +56,61 @@ func NewCNIServer(rundir string, kclient kubernetes.Interface) *Server {
 		Server: http.Server{
 			Handler: router,
 		},
-		rundir:  rundir,
-		kclient: kclient,
+		rundir:             rundir,
+		podLister:          corev1listers.NewPodLister(factory.LocalPodInformer().GetIndexer()),
+		runningSandboxAdds: make(map[string]*PodRequest),
 	}
 	router.NotFoundHandler = http.HandlerFunc(http.NotFound)
-	router.HandleFunc("/", s.handleCNIRequest).Methods("POST")
 	router.HandleFunc("/metrics", s.handleCNIMetrics).Methods("POST")
+	router.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
+		result, err := s.handleCNIRequest(r)
+		if err != nil {
+			http.Error(w, fmt.Sprintf("%v", err), http.StatusBadRequest)
+			return
+		}
+
+		// Empty response JSON means success with no body
+		w.Header().Set("Content-Type", "application/json")
+		if _, err := w.Write(result); err != nil {
+			klog.Warningf("Error writing HTTP response: %v", err)
+		}
+	}).Methods("POST")
+
+	factory.AddPodHandler(cache.ResourceEventHandlerFuncs{
+		DeleteFunc: func(obj interface{}) {
+			pod := obj.(*kapi.Pod)
+			s.cancelOldestPodAdd(pod)
+		},
+	}, nil)
+
 	return s
+}
+
+// cancelOldestPodAdd requests that the earliest outstanding add operation for a given
+// pod should be canceled.
+func (s *Server) cancelOldestPodAdd(pod *kapi.Pod) {
+	s.runningSandboxAddsLock.Lock()
+	defer s.runningSandboxAddsLock.Unlock()
+
+	oldest := time.Now()
+	var found *PodRequest
+
+	// There may be >= 0 sandboxes for a Pod Namespace+Name. Kubelet defers
+	// sandbox deletion to GC, and if a pod is deleted and re-created kubelet
+	// will start a second sandbox for the "new" Pod which has a different UID.
+	// We only want to cancel the oldest sandbox because it's either the
+	// only sandbox or has been superceded by a newer request.
+	for _, req := range s.runningSandboxAdds {
+		if req.PodNamespace == pod.Namespace && req.PodName == pod.Name && req.timestamp.Before(oldest) {
+			found = req
+			oldest = req.timestamp
+		}
+	}
+
+	if found != nil {
+		found.cancel()
+		klog.Infof("%s canceled sandbox ADD request", found)
+	}
 }
 
 // Split the "CNI_ARGS" environment variable's value into a map.  CNI_ARGS
@@ -82,7 +135,6 @@ func gatherCNIArgs(env map[string]string) (map[string]string, error) {
 }
 
 func cniRequestToPodRequest(cr *Request) (*PodRequest, error) {
-
 	cmd, ok := cr.Env["CNI_COMMAND"]
 	if !ok {
 		return nil, fmt.Errorf("unexpected or missing CNI_COMMAND")
@@ -125,36 +177,61 @@ func cniRequestToPodRequest(cr *Request) (*PodRequest, error) {
 	if err != nil {
 		return nil, fmt.Errorf("broken stdin args")
 	}
+
 	req.CNIConf = conf
+	req.timestamp = time.Now()
+	req.ctx, req.cancel = context.WithCancel(context.Background())
 	return req, nil
+}
+
+func (s *Server) startSandboxRequest(req *PodRequest) error {
+	// Only sandbox add requests are tracked because only adds need
+	// to be canceled when a newer request comes in.
+	if req.Command == CNIAdd {
+		s.runningSandboxAddsLock.Lock()
+		defer s.runningSandboxAddsLock.Unlock()
+		if _, ok := s.runningSandboxAdds[req.SandboxID]; ok {
+			// Should never happen as the runtime is required to
+			// serialize operations for the same sandbox
+			return fmt.Errorf("%s ADD already started", req)
+		}
+		s.runningSandboxAdds[req.SandboxID] = req
+	}
+	return nil
+}
+
+func (s *Server) finishSandboxRequest(req *PodRequest) {
+	if req.Command == CNIAdd {
+		s.runningSandboxAddsLock.Lock()
+		defer s.runningSandboxAddsLock.Unlock()
+		delete(s.runningSandboxAdds, req.SandboxID)
+	}
 }
 
 // Dispatch a pod request to the request handler and return the result to the
 // CNI server client
-func (s *Server) handleCNIRequest(w http.ResponseWriter, r *http.Request) {
+func (s *Server) handleCNIRequest(r *http.Request) ([]byte, error) {
 	var cr Request
 	b, _ := ioutil.ReadAll(r.Body)
 	if err := json.Unmarshal(b, &cr); err != nil {
-		http.Error(w, fmt.Sprintf("%v", err), http.StatusBadRequest)
-		return
+		return nil, err
 	}
 	req, err := cniRequestToPodRequest(&cr)
 	if err != nil {
-		http.Error(w, fmt.Sprintf("%v", err), http.StatusBadRequest)
-		return
+		return nil, err
 	}
 
-	klog.Infof("Waiting for %s result for pod %s/%s", req.Command, req.PodNamespace, req.PodName)
-	result, err := s.requestFunc(req, s.kclient)
-	if err != nil {
-		http.Error(w, fmt.Sprintf("%v", err), http.StatusBadRequest)
-	} else {
-		// Empty response JSON means success with no body
-		w.Header().Set("Content-Type", "application/json")
-		if _, err := w.Write(result); err != nil {
-			klog.Warningf("Error writing %s HTTP response: %v", req.Command, err)
-		}
+	if err := s.startSandboxRequest(req); err != nil {
+		return nil, err
 	}
+	defer s.finishSandboxRequest(req)
+
+	result, err := s.requestFunc(req, s.podLister)
+	if err != nil {
+		// Prefix error with request information for easier debugging
+		return nil, fmt.Errorf("%s %v", req, err)
+	}
+	return result, nil
 }
 
 func (s *Server) handleCNIMetrics(w http.ResponseWriter, r *http.Request) {
