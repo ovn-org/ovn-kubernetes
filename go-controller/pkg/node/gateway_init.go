@@ -202,12 +202,11 @@ func (n *OvnNode) initGateway(subnets []*net.IPNet, nodeAnnotator kube.Annotator
 			Mode: config.GatewayModeDisabled,
 		})
 	}
-	gw.loadBalancerHealthChecker = loadBalancerHealthChecker
-	gw.portClaimWatcher = portClaimWatcher
-
 	if err != nil {
 		return err
 	}
+	gw.loadBalancerHealthChecker = loadBalancerHealthChecker
+	gw.portClaimWatcher = portClaimWatcher
 
 	// Wait for gateway resources to be created by the master if DisableSNATMultipleGWs is not set,
 	// as that option does not add default SNAT rules on the GR and the gatewayReady function checks
