@@ -6,70 +6,77 @@ import (
 	"strings"
 	"time"
 
-	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/factory"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/kube/healthcheck"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
 
 	kapi "k8s.io/api/core/v1"
 	ktypes "k8s.io/apimachinery/pkg/types"
-	"k8s.io/client-go/tools/cache"
 	"k8s.io/klog"
 )
 
 // initLoadBalancerHealthChecker initializes the health check server for
 // ServiceTypeLoadBalancer services
-func initLoadBalancerHealthChecker(nodeName string, wf *factory.WatchFactory) {
-	server := healthcheck.NewServer(nodeName, nil, nil, nil)
-	services := make(map[ktypes.NamespacedName]uint16)
-	endpoints := make(map[ktypes.NamespacedName]int)
 
-	wf.AddServiceHandler(cache.ResourceEventHandlerFuncs{
-		AddFunc: func(obj interface{}) {
-			svc := obj.(*kapi.Service)
-			if svc.Spec.HealthCheckNodePort != 0 {
-				name := ktypes.NamespacedName{Namespace: svc.Namespace, Name: svc.Name}
-				services[name] = uint16(svc.Spec.HealthCheckNodePort)
-				_ = server.SyncServices(services)
-			}
-		},
-		UpdateFunc: func(old, new interface{}) {
-			// HealthCheckNodePort can't be changed on update
-		},
-		DeleteFunc: func(obj interface{}) {
-			svc := obj.(*kapi.Service)
-			if svc.Spec.HealthCheckNodePort != 0 {
-				name := ktypes.NamespacedName{Namespace: svc.Namespace, Name: svc.Name}
-				delete(services, name)
-				delete(endpoints, name)
-				_ = server.SyncServices(services)
-			}
-		},
-	}, nil)
+type loadBalancerHealthChecker struct {
+	nodeName  string
+	server    healthcheck.Server
+	services  map[ktypes.NamespacedName]uint16
+	endpoints map[ktypes.NamespacedName]int
+}
 
-	wf.AddEndpointsHandler(cache.ResourceEventHandlerFuncs{
-		AddFunc: func(obj interface{}) {
-			ep := obj.(*kapi.Endpoints)
-			name := ktypes.NamespacedName{Namespace: ep.Namespace, Name: ep.Name}
-			if _, exists := services[name]; exists {
-				endpoints[name] = countLocalEndpoints(ep, nodeName)
-				_ = server.SyncEndpoints(endpoints)
-			}
-		},
-		UpdateFunc: func(old, new interface{}) {
-			ep := new.(*kapi.Endpoints)
-			name := ktypes.NamespacedName{Namespace: ep.Namespace, Name: ep.Name}
-			if _, exists := services[name]; exists {
-				endpoints[name] = countLocalEndpoints(ep, nodeName)
-				_ = server.SyncEndpoints(endpoints)
-			}
-		},
-		DeleteFunc: func(obj interface{}) {
-			ep := obj.(*kapi.Endpoints)
-			name := ktypes.NamespacedName{Namespace: ep.Namespace, Name: ep.Name}
-			delete(endpoints, name)
-			_ = server.SyncEndpoints(endpoints)
-		},
-	}, nil)
+func newLoadBalancerHealthChecker(nodeName string) *loadBalancerHealthChecker {
+	return &loadBalancerHealthChecker{
+		nodeName:  nodeName,
+		server:    healthcheck.NewServer(nodeName, nil, nil, nil),
+		services:  make(map[ktypes.NamespacedName]uint16),
+		endpoints: make(map[ktypes.NamespacedName]int),
+	}
+}
+
+func (l *loadBalancerHealthChecker) AddService(svc *kapi.Service) {
+	if svc.Spec.HealthCheckNodePort != 0 {
+		name := ktypes.NamespacedName{Namespace: svc.Namespace, Name: svc.Name}
+		l.services[name] = uint16(svc.Spec.HealthCheckNodePort)
+		_ = l.server.SyncServices(l.services)
+	}
+}
+
+func (l *loadBalancerHealthChecker) UpdateService(old, new *kapi.Service) {
+	// HealthCheckNodePort can't be changed on update
+}
+
+func (l *loadBalancerHealthChecker) DeleteService(svc *kapi.Service) {
+	if svc.Spec.HealthCheckNodePort != 0 {
+		name := ktypes.NamespacedName{Namespace: svc.Namespace, Name: svc.Name}
+		delete(l.services, name)
+		delete(l.endpoints, name)
+		_ = l.server.SyncServices(l.services)
+	}
+}
+
+func (l *loadBalancerHealthChecker) SyncServices(svcs []interface{}) {}
+
+func (l *loadBalancerHealthChecker) AddEndpoints(ep *kapi.Endpoints) {
+	name := ktypes.NamespacedName{Namespace: ep.Namespace, Name: ep.Name}
+	if _, exists := l.services[name]; exists {
+		l.endpoints[name] = countLocalEndpoints(ep, l.nodeName)
+		_ = l.server.SyncEndpoints(l.endpoints)
+	}
+}
+
+func (l *loadBalancerHealthChecker) UpdateEndpoints(old, new *kapi.Endpoints) {
+	name := ktypes.NamespacedName{Namespace: new.Namespace, Name: new.Name}
+	if _, exists := l.services[name]; exists {
+		l.endpoints[name] = countLocalEndpoints(new, l.nodeName)
+		_ = l.server.SyncEndpoints(l.endpoints)
+	}
+
+}
+
+func (l *loadBalancerHealthChecker) DeleteEndpoints(ep *kapi.Endpoints) {
+	name := ktypes.NamespacedName{Namespace: ep.Namespace, Name: ep.Name}
+	delete(l.endpoints, name)
+	_ = l.server.SyncEndpoints(l.endpoints)
 }
 
 func countLocalEndpoints(ep *kapi.Endpoints, nodeName string) int {
@@ -115,15 +122,23 @@ func checkForStaleOVSInterfaces(stopChan chan struct{}) {
 	}
 }
 
+type openflowManager struct {
+	gwBridge    string
+	physIntf    string
+	patchIntf   string
+	ofportPhys  string
+	ofportPatch string
+	nFlows      int
+}
+
 // checkDefaultOpenFlow checks for the existence of default OpenFlow rules and
 // exits if the output is not as expected
-func checkDefaultConntrackRules(gwBridge string, physIntf, patchIntf, ofportPhys, ofportPatch string,
-	nFlows int, stopChan chan struct{}) {
-	flowCount := fmt.Sprintf("flow_count=%d", nFlows)
+func (c *openflowManager) Run(stopChan <-chan struct{}) {
+	flowCount := fmt.Sprintf("flow_count=%d", c.nFlows)
 	for {
 		select {
 		case <-time.After(15 * time.Second):
-			out, _, err := util.RunOVSOfctl("dump-aggregate", gwBridge,
+			out, _, err := util.RunOVSOfctl("dump-aggregate", c.gwBridge,
 				fmt.Sprintf("cookie=%s/-1", defaultOpenFlowCookie))
 			if err != nil {
 				klog.Errorf("Failed to dump aggregate statistics of the default OpenFlow rules: %v", err)
@@ -132,33 +147,33 @@ func checkDefaultConntrackRules(gwBridge string, physIntf, patchIntf, ofportPhys
 
 			if !strings.Contains(out, flowCount) {
 				klog.Errorf("Fatal error: unexpected default OpenFlows count, expect %d output: %v\n",
-					nFlows, out)
+					c.nFlows, out)
 				os.Exit(1)
 			}
 
 			// it could be that the ovn-controller recreated the patch between the host OVS bridge and
 			// the integration bridge, as a result the ofport number changed for that patch interface
-			curOfportPatch, stderr, err := util.RunOVSVsctl("--if-exists", "get", "Interface", patchIntf, "ofport")
+			curOfportPatch, stderr, err := util.RunOVSVsctl("--if-exists", "get", "Interface", c.patchIntf, "ofport")
 			if err != nil {
-				klog.Errorf("Failed to get ofport of %s, stderr: %q, error: %v", patchIntf, stderr, err)
+				klog.Errorf("Failed to get ofport of %s, stderr: %q, error: %v", c.patchIntf, stderr, err)
 				continue
 			}
-			if ofportPatch != curOfportPatch {
+			if c.ofportPatch != curOfportPatch {
 				klog.Errorf("Fatal error: ofport of %s has changed from %s to %s",
-					patchIntf, ofportPatch, curOfportPatch)
+					c.patchIntf, c.ofportPatch, curOfportPatch)
 				os.Exit(1)
 			}
 
 			// it could be that someone removed the physical interface and added it back on the OVS host
 			// bridge, as a result the ofport number changed for that physical interface
-			curOfportPhys, stderr, err := util.RunOVSVsctl("--if-exists", "get", "interface", physIntf, "ofport")
+			curOfportPhys, stderr, err := util.RunOVSVsctl("--if-exists", "get", "interface", c.physIntf, "ofport")
 			if err != nil {
-				klog.Errorf("Failed to get ofport of %s, stderr: %q, error: %v", physIntf, stderr, err)
+				klog.Errorf("Failed to get ofport of %s, stderr: %q, error: %v", c.physIntf, stderr, err)
 				continue
 			}
-			if ofportPhys != curOfportPhys {
+			if c.ofportPhys != curOfportPhys {
 				klog.Errorf("Fatal error: ofport of %s has changed from %s to %s",
-					physIntf, ofportPhys, curOfportPhys)
+					c.physIntf, c.ofportPhys, curOfportPhys)
 				os.Exit(1)
 			}
 		case <-stopChan:

@@ -3,6 +3,7 @@ package ovn
 import (
 	"fmt"
 
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
 
 	kapi "k8s.io/api/core/v1"
@@ -106,13 +107,22 @@ func (ovn *Controller) AddEndpoints(ep *kapi.Endpoints) error {
 					}
 				}
 			}
+			// Cloud load balancers: directly load balance that traffic from pods
+			for _, ing := range svc.Status.LoadBalancer.Ingress {
+				if ing.IP == "" {
+					continue
+				}
+				if err = ovn.createLoadBalancerVIPs(loadBalancer, []string{ing.IP}, svcPort.Port, lbEps.IPs, lbEps.Port); err != nil {
+					klog.Errorf("Error in creating Ingress LB IP for svc %s, target port: %d - %v\n", svc.Name, lbEps.Port, err)
+				}
+			}
 		}
 	}
 	return nil
 }
 
 func (ovn *Controller) handleNodePortLB(node *kapi.Node) error {
-	gatewayRouter := gwRouterPrefix + node.Name
+	gatewayRouter := types.GWRouterPrefix + node.Name
 	var physicalIPs []string
 	// OCP HACK - there will not be a GR during local gw + no gw interface mode (upgrade from 4.5->4.6)
 	// See https://github.com/openshift/ovn-kubernetes/pull/281
@@ -187,8 +197,9 @@ func (ovn *Controller) deleteEndpoints(ep *kapi.Endpoints) error {
 			aclUUID, err := ovn.createLoadBalancerRejectACL(lb, svc.Spec.ClusterIP, svcPort.Port, svcPort.Protocol)
 			if err != nil {
 				klog.Errorf("Failed to create reject ACL for load balancer: %s, error: %v", lb, err)
+			} else {
+				klog.Infof("Reject ACL created for load balancer: %s, %s", lb, aclUUID)
 			}
-			klog.Infof("Reject ACL created for load balancer: %s, %s", lb, aclUUID)
 		}
 
 		// clear endpoints from the LB
@@ -196,6 +207,27 @@ func (ovn *Controller) deleteEndpoints(ep *kapi.Endpoints) error {
 		if err != nil {
 			klog.Errorf("Error in deleting endpoints for lb %s: %v", lb, err)
 		}
+
+		// Cloud load balancers: directly reject traffic from pods
+		for _, ing := range svc.Status.LoadBalancer.Ingress {
+			if ing.IP == "" {
+				continue
+			}
+			if ovn.svcQualifiesForReject(svc) {
+				aclUUID, err := ovn.createLoadBalancerRejectACL(lb, ing.IP, svcPort.Port, svcPort.Protocol)
+				if err != nil {
+					klog.Errorf("Failed to create reject ACL for Ingress IP: %s, load balancer: %s, error: %v",
+						ing.IP, lb, err)
+				} else {
+					klog.Infof("Reject ACL created for Ingress IP: %s, load balancer: %s, %s", ing.IP, lb, aclUUID)
+				}
+			}
+			err := ovn.configureLoadBalancer(lb, ing.IP, svcPort.Port, nil)
+			if err != nil {
+				klog.Errorf("Error in deleting endpoints for lb %s: %v", lb, err)
+			}
+		}
+
 		vip := util.JoinHostPortInt32(svc.Spec.ClusterIP, svcPort.Port)
 		ovn.removeServiceEndpoints(lb, vip)
 

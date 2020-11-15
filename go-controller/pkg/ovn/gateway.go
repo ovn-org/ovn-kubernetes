@@ -2,87 +2,36 @@ package ovn
 
 import (
 	"fmt"
-	"strings"
+	"net"
 
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/gateway"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
 
 	kapi "k8s.io/api/core/v1"
 	"k8s.io/klog"
 )
 
-const (
-	// ovnClusterRouter is the name of the distributed router
-	ovnClusterRouter = "ovn_cluster_router"
-
-	joinSwitchPrefix             = "join_"
-	externalSwitchPrefix         = "ext_"
-	gwRouterPrefix               = "GR_"
-	routerToSwitchPrefix         = "rtos-"
-	switchToRouterPrefix         = "stor-"
-	joinSwitchToGwRouterPrefix   = "jtor-"
-	gwRouterToJoinSwitchPrefix   = "rtoj-"
-	distRouterToJoinSwitchPrefix = "dtoj-"
-	joinSwitchToDistRouterPrefix = "jtod-"
-	extSwitchToGwRouterPrefix    = "etor-"
-	gwRouterToExtSwitchPrefix    = "rtoe-"
-
-	nodeLocalSwitch = "node_local_switch"
-
-	// priority of logical router policies on the ovnClusterRouter
-	egressFirewallStartPriority           = "10000"
-	minimumReservedEgressFirewallPriority = "2000"
-	mgmtPortPolicyPriority                = "1005"
-	nodeSubnetPolicyPriority              = "1004"
-	interNodePolicyPriority               = "1003"
-	defaultNoRereoutePriority             = "101"
-	egressIPReroutePriority               = "100"
-)
-
 func (ovn *Controller) getOvnGateways() ([]string, string, error) {
-	// Return all created gateways.
-	out, stderr, err := util.RunOVNNbctl("--data=bare", "--no-heading",
-		"--columns=name", "find",
-		"logical_router",
-		"options:chassis!=null")
-	return strings.Fields(out), stderr, err
+	return gateway.GetOvnGateways()
 }
 
 func (ovn *Controller) getGatewayPhysicalIPs(gatewayRouter string) ([]string, error) {
-	physicalIPs, _, err := util.RunOVNNbctl("get", "logical_router",
-		gatewayRouter, "external_ids:physical_ips")
-	if err == nil {
-		return strings.Split(physicalIPs, ","), nil
-	}
-
-	physicalIP, _, err := util.RunOVNNbctl("get", "logical_router",
-		gatewayRouter, "external_ids:physical_ip")
-	if err != nil {
-		return nil, err
-	}
-
-	return []string{physicalIP}, nil
+	return gateway.GetGatewayPhysicalIPs(gatewayRouter)
 }
 
 func (ovn *Controller) getGatewayLoadBalancer(gatewayRouter string, protocol kapi.Protocol) (string, error) {
-	externalIDKey := string(protocol) + "_lb_gateway_router"
-	loadBalancer, _, err := util.RunOVNNbctl("--data=bare", "--no-heading",
-		"--columns=_uuid", "find", "load_balancer",
-		"external_ids:"+externalIDKey+"="+
-			gatewayRouter)
-	if err != nil {
-		return "", err
-	}
-	if loadBalancer == "" {
-		return "", fmt.Errorf("load balancer item in OVN DB is an empty string")
-	}
-	return loadBalancer, nil
+	return gateway.GetGatewayLoadBalancer(gatewayRouter, protocol)
+}
+
+// getGatewayLoadBalancers find TCP, SCTP, UDP load-balancers from gateway router.
+func getGatewayLoadBalancers(gatewayRouter string) (string, string, string, error) {
+	return gateway.GetGatewayLoadBalancers(gatewayRouter)
 }
 
 func (ovn *Controller) createGatewayVIPs(protocol kapi.Protocol, sourcePort int32, targetIPs []string, targetPort int32) error {
 	klog.V(5).Infof("Creating Gateway VIPs - %s, %d, [%v], %d", protocol, sourcePort, targetIPs, targetPort)
-
 	// Each gateway has a separate load-balancer for N/S traffic
-
 	gatewayRouters, _, err := ovn.getOvnGateways()
 	if err != nil {
 		return err
@@ -166,30 +115,34 @@ func (ovn *Controller) deleteExternalVIPs(service *kapi.Service, svcPort kapi.Se
 	return nil
 }
 
-// getGatewayLoadBalancers find TCP, SCTP, UDP load-balancers from gateway router.
-func getGatewayLoadBalancers(gatewayRouter string) (string, string, string, error) {
-	lbTCP, stderr, err := util.RunOVNNbctl("--data=bare", "--no-heading",
-		"--columns=_uuid", "find", "load_balancer",
-		"external_ids:TCP_lb_gateway_router="+gatewayRouter)
-	if err != nil {
-		return "", "", "", fmt.Errorf("failed to get gateway router %q TCP "+
-			"load balancer, stderr: %q, error: %v", gatewayRouter, stderr, err)
+// getJoinLRPAddresses check if IPs of gateway logical router port are within the join switch IP range, and return them if true.
+func (oc *Controller) getJoinLRPAddresses(nodeName string) []*net.IPNet {
+	// try to get the IPs from the logical router port
+	gwLRPIPs := []*net.IPNet{}
+	gwLrpName := types.GWRouterToJoinSwitchPrefix + types.GWRouterPrefix + nodeName
+	joinSubnets := oc.joinSwIPManager.lsm.GetSwitchSubnets(nodeName)
+	ifAddrs, err := util.GetLRPAddrs(gwLrpName)
+	if err == nil {
+		for _, ifAddr := range ifAddrs {
+			for _, subnet := range joinSubnets {
+				if subnet.Contains(ifAddr.IP) {
+					gwLRPIPs = append(gwLRPIPs, &net.IPNet{IP: ifAddr.IP, Mask: subnet.Mask})
+					break
+				}
+			}
+		}
 	}
 
-	lbUDP, stderr, err := util.RunOVNNbctl("--data=bare", "--no-heading",
-		"--columns=_uuid", "find", "load_balancer",
-		"external_ids:UDP_lb_gateway_router="+gatewayRouter)
-	if err != nil {
-		return "", "", "", fmt.Errorf("failed to get gateway router %q UDP "+
-			"load balancer, stderr: %q, error: %v", gatewayRouter, stderr, err)
+	if len(gwLRPIPs) != len(joinSubnets) {
+		var errStr string
+		if len(gwLRPIPs) == 0 {
+			errStr = fmt.Sprintf("Failed to get IPs for logical router port %s", gwLrpName)
+		} else {
+			errStr = fmt.Sprintf("Invalid IPs %s (possibly not in the range of subnet %s)",
+				util.JoinIPNetIPs(gwLRPIPs, " "), util.JoinIPNetIPs(joinSubnets, " "))
+		}
+		klog.Warningf("%s for logical router port %s", errStr, gwLrpName)
+		return []*net.IPNet{}
 	}
-
-	lbSCTP, stderr, err := util.RunOVNNbctl("--data=bare", "--no-heading",
-		"--columns=_uuid", "find", "load_balancer",
-		"external_ids:SCTP_lb_gateway_router="+gatewayRouter)
-	if err != nil {
-		return "", "", "", fmt.Errorf("failed to get gateway router %q SCTP "+
-			"load balancer, stderr: %q, error: %v", gatewayRouter, stderr, err)
-	}
-	return lbTCP, lbUDP, lbSCTP, nil
+	return gwLRPIPs
 }

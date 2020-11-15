@@ -9,20 +9,23 @@ import (
 	"strings"
 	"syscall"
 
+	"github.com/urfave/cli/v2"
+	kapi "k8s.io/api/core/v1"
+	v1 "k8s.io/api/core/v1"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/client-go/kubernetes/fake"
+	"k8s.io/client-go/tools/cache"
+
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/factory"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/kube"
 	ovntest "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/testing"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
 
 	"github.com/containernetworking/plugins/pkg/ns"
 	"github.com/containernetworking/plugins/pkg/testutils"
-	"github.com/urfave/cli/v2"
 	"github.com/vishvananda/netlink"
-	v1 "k8s.io/api/core/v1"
-	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	"k8s.io/client-go/kubernetes/fake"
-	"k8s.io/client-go/tools/record"
 
 	egressfirewallfake "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/egressfirewall/v1/apis/clientset/versioned/fake"
 	egressipfake "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/egressip/v1/apis/clientset/versioned/fake"
@@ -32,8 +35,26 @@ import (
 	. "github.com/onsi/gomega"
 )
 
+func startGateway(gw Gateway, wf factory.NodeWatchFactory) {
+	wf.AddServiceHandler(cache.ResourceEventHandlerFuncs{
+		AddFunc: func(obj interface{}) {
+			svc := obj.(*kapi.Service)
+			gw.AddService(svc)
+		},
+		UpdateFunc: func(old, new interface{}) {
+			oldSvc := old.(*kapi.Service)
+			newSvc := new.(*kapi.Service)
+			gw.UpdateService(oldSvc, newSvc)
+		},
+		DeleteFunc: func(obj interface{}) {
+			svc := obj.(*kapi.Service)
+			gw.DeleteService(svc)
+		},
+	}, gw.SyncServices)
+}
+
 func setupNodeAccessBridgeTest(fexec *ovntest.FakeExec, nodeName, brLocalnetMAC, mtu string) {
-	gwPortMac := util.IPAddrToHWAddr(net.ParseIP(util.V4NodeLocalNatSubnetNextHop)).String()
+	gwPortMac := util.IPAddrToHWAddr(net.ParseIP(types.V4NodeLocalNATSubnetNextHop)).String()
 
 	fexec.AddFakeCmdsNoOutputNoError([]string{
 		"ovs-vsctl --timeout=15 --may-exist add-br br-local",
@@ -47,10 +68,10 @@ func setupNodeAccessBridgeTest(fexec *ovntest.FakeExec, nodeName, brLocalnetMAC,
 	})
 	fexec.AddFakeCmd(&ovntest.ExpectedCmd{
 		Cmd:    "ovs-vsctl --timeout=15 --if-exists get Open_vSwitch . external_ids:ovn-bridge-mappings",
-		Output: util.PhysicalNetworkName + ":breth0",
+		Output: types.PhysicalNetworkName + ":breth0",
 	})
 	fexec.AddFakeCmdsNoOutputNoError([]string{
-		"ovs-vsctl --timeout=15 set Open_vSwitch . external_ids:ovn-bridge-mappings=" + util.PhysicalNetworkName + ":breth0" + "," + util.LocalNetworkName + ":br-local",
+		"ovs-vsctl --timeout=15 set Open_vSwitch . external_ids:ovn-bridge-mappings=" + types.PhysicalNetworkName + ":breth0" + "," + types.LocalNetworkName + ":br-local",
 	})
 	fexec.AddFakeCmdsNoOutputNoError([]string{
 		"ovs-vsctl --timeout=15 --may-exist add-port br-local " + localnetGatewayNextHopPort +
@@ -65,14 +86,14 @@ func shareGatewayInterfaceTest(app *cli.App, testNS ns.NetNS,
 	app.Action = func(ctx *cli.Context) error {
 		const (
 			nodeName      string = "node1"
-			brNextHopIp   string = util.V4NodeLocalNatSubnetNextHop
+			brNextHopIp   string = types.V4NodeLocalNATSubnetNextHop
 			systemID      string = "cb9ec8fa-b409-4ef3-9f42-d9283c47aac6"
 			nodeSubnet    string = "10.1.1.0/24"
 			brLocalnetMAC string = "11:22:33:44:55:66"
 		)
 
-		brNextHopCIDR := fmt.Sprintf("%s/%d", brNextHopIp, util.V4NodeLocalNatSubnetPrefix)
-		fexec := ovntest.NewFakeExec()
+		brNextHopCIDR := fmt.Sprintf("%s/%d", brNextHopIp, types.V4NodeLocalNATSubnetPrefix)
+		fexec := ovntest.NewLooseCompareFakeExec()
 		fexec.AddFakeCmd(&ovntest.ExpectedCmd{
 			Cmd: "ovs-vsctl --timeout=15 -- port-to-br eth0",
 			Err: fmt.Errorf(""),
@@ -113,7 +134,7 @@ func shareGatewayInterfaceTest(app *cli.App, testNS ns.NetNS,
 			Output: "",
 		})
 		fexec.AddFakeCmdsNoOutputNoError([]string{
-			"ovs-vsctl --timeout=15 set Open_vSwitch . external_ids:ovn-bridge-mappings=" + util.PhysicalNetworkName + ":breth0",
+			"ovs-vsctl --timeout=15 set Open_vSwitch . external_ids:ovn-bridge-mappings=" + types.PhysicalNetworkName + ":breth0",
 		})
 
 		setupNodeAccessBridgeTest(fexec, nodeName, brLocalnetMAC, mtu)
@@ -121,10 +142,6 @@ func shareGatewayInterfaceTest(app *cli.App, testNS ns.NetNS,
 		fexec.AddFakeCmd(&ovntest.ExpectedCmd{
 			Cmd:    "ovs-vsctl --timeout=15 --if-exists get Open_vSwitch . external_ids:system-id",
 			Output: systemID,
-		})
-		fexec.AddFakeCmd(&ovntest.ExpectedCmd{
-			Cmd:    "ovs-ofctl --no-stats --no-names dump-flows br-int table=41,ip,nw_src=" + clusterCIDR,
-			Output: ` cookie=0x770ac8a6, table=41, priority=17,ip,metadata=0x3,nw_src=` + clusterCIDR + ` actions=ct(commit,table=42,zone=NXM_NX_REG12[0..15],nat(src=` + eth0IP + `))`,
 		})
 		fexec.AddFakeCmd(&ovntest.ExpectedCmd{
 			Cmd:    "ovs-vsctl --timeout=15 wait-until Interface patch-breth0_node1-to-br-int ofport>0 -- get Interface patch-breth0_node1-to-br-int ofport",
@@ -138,11 +155,13 @@ func shareGatewayInterfaceTest(app *cli.App, testNS ns.NetNS,
 			"ovs-ofctl -O OpenFlow13 replace-flows breth0 -",
 		})
 		fexec.AddFakeCmdsNoOutputNoError([]string{
+			"ovs-ofctl add-flow breth0 cookie=0xdeff105, priority=10, table=0, in_port=7, dl_dst=" + eth0MAC + ", actions=output:5,output:LOCAL",
 			"ovs-ofctl add-flow breth0 cookie=0xdeff105, priority=100, in_port=5, ip, actions=ct(commit, zone=64000), output:7",
 			"ovs-ofctl add-flow breth0 cookie=0xdeff105, priority=50, in_port=7, ip, actions=ct(zone=64000, table=1)",
 			"ovs-ofctl add-flow breth0 cookie=0xdeff105, priority=100, table=1, ct_state=+trk+est, actions=output:5",
 			"ovs-ofctl add-flow breth0 cookie=0xdeff105, priority=100, table=1, ct_state=+trk+rel, actions=output:5",
-			"ovs-ofctl add-flow breth0 cookie=0xdeff105, priority=0, table=1, actions=output:FLOOD",
+			"ovs-ofctl add-flow breth0 cookie=0xdeff105, priority=10, table=1, dl_dst=" + eth0MAC + ", actions=output:LOCAL",
+			"ovs-ofctl add-flow breth0 cookie=0xdeff105, priority=0, table=1, actions=output:NORMAL",
 			"ovs-ofctl add-flow breth0 cookie=0xdeff105, priority=0, table=2, actions=output:7",
 		})
 		// nodePortWatcher()
@@ -176,26 +195,33 @@ cookie=0x0, duration=8366.597s, table=1, n_packets=10641, n_bytes=10370087, prio
 			Name: nodeName,
 		}}
 
-		fakeClient := fake.NewSimpleClientset(&v1.NodeList{
+		kubeFakeClient := fake.NewSimpleClientset(&v1.NodeList{
 			Items: []v1.Node{existingNode},
 		})
 		egressFirewallFakeClient := &egressfirewallfake.Clientset{}
 		crdFakeClient := &apiextensionsfake.Clientset{}
 		egressIPFakeClient := &egressipfake.Clientset{}
+		fakeClient := &util.OVNClientset{
+			KubeClient:           kubeFakeClient,
+			EgressIPClient:       egressIPFakeClient,
+			EgressFirewallClient: egressFirewallFakeClient,
+			APIExtensionsClient:  crdFakeClient,
+		}
 
 		stop := make(chan struct{})
-		wf, err := factory.NewWatchFactory(fakeClient, egressIPFakeClient, egressFirewallFakeClient, crdFakeClient)
+		wf, err := factory.NewNodeWatchFactory(fakeClient, nodeName)
+
 		Expect(err).NotTo(HaveOccurred())
 		defer func() {
 			close(stop)
 			wf.Shutdown()
 		}()
 
-		n := NewNode(nil, wf, existingNode.Name, stop, record.NewFakeRecorder(0))
+		k := &kube.Kube{fakeClient.KubeClient, egressIPFakeClient, egressFirewallFakeClient}
 
 		iptV4, iptV6 := util.SetFakeIPTablesHelpers()
 
-		nodeAnnotator := kube.NewNodeAnnotator(&kube.Kube{fakeClient, egressIPFakeClient, egressFirewallFakeClient}, &existingNode)
+		nodeAnnotator := kube.NewNodeAnnotator(k, &existingNode)
 
 		err = util.SetNodeHostSubnetAnnotation(nodeAnnotator, ovntest.MustParseIPNets(nodeSubnet))
 		Expect(err).NotTo(HaveOccurred())
@@ -205,10 +231,12 @@ cookie=0x0, duration=8366.597s, table=1, n_packets=10641, n_bytes=10370087, prio
 		err = testNS.Do(func(ns.NetNS) error {
 			defer GinkgoRecover()
 
-			waiter := newStartupWaiter()
-			err = n.initGateway(ovntest.MustParseIPNets(nodeSubnet), nodeAnnotator, waiter)
+			gatewayNextHops, gatewayIntf, err := getGatewayNextHops()
+			sharedGw, err := newSharedGateway(nodeName, ovntest.MustParseIPNets(nodeSubnet), gatewayNextHops, gatewayIntf, nodeAnnotator)
 			Expect(err).NotTo(HaveOccurred())
-
+			err = sharedGw.Init()
+			Expect(err).NotTo(HaveOccurred())
+			startGateway(sharedGw, wf)
 			// check if IP addresses have been assigned to localnetGatewayNextHopPort interface
 			link, err := netlink.LinkByName(localnetGatewayNextHopPort)
 			Expect(err).NotTo(HaveOccurred())
@@ -227,8 +255,8 @@ cookie=0x0, duration=8366.597s, table=1, n_packets=10641, n_bytes=10370087, prio
 
 			err = nodeAnnotator.Run()
 			Expect(err).NotTo(HaveOccurred())
-			err = waiter.Wait()
-			Expect(err).NotTo(HaveOccurred())
+
+			go sharedGw.Run(stop)
 
 			// Verify the code moved eth0's IP address, MAC, and routes
 			// over to breth0
@@ -251,7 +279,7 @@ cookie=0x0, duration=8366.597s, table=1, n_packets=10641, n_bytes=10370087, prio
 			return nil
 		})
 
-		Expect(fexec.CalledMatchesExpected()).To(BeTrue(), fexec.ErrorDesc)
+		Eventually(fexec.CalledMatchesExpected, 5).Should(BeTrue(), fexec.ErrorDesc)
 
 		expectedTables := map[string]util.FakeTable{
 			"filter": {
@@ -319,7 +347,7 @@ func localNetInterfaceTest(app *cli.App, testNS ns.NetNS,
 			systemID      string = "cb9ec8fa-b409-4ef3-9f42-d9283c47aac6"
 		)
 
-		fexec := ovntest.NewFakeExec()
+		fexec := ovntest.NewLooseCompareFakeExec()
 		fakeOvnNode := NewFakeOVNNode(fexec)
 
 		fexec.AddFakeCmdsNoOutputNoError([]string{
@@ -337,7 +365,7 @@ func localNetInterfaceTest(app *cli.App, testNS ns.NetNS,
 			Output: "",
 		})
 		fexec.AddFakeCmdsNoOutputNoError([]string{
-			"ovs-vsctl --timeout=15 set Open_vSwitch . external_ids:ovn-bridge-mappings=" + util.PhysicalNetworkName + ":br-local",
+			"ovs-vsctl --timeout=15 set Open_vSwitch . external_ids:ovn-bridge-mappings=" + types.PhysicalNetworkName + ":br-local",
 			"ovs-vsctl --timeout=15 --if-exists del-port br-local " + legacyLocalnetGatewayNextHopPort +
 				" -- --may-exist add-port br-local " + localnetGatewayNextHopPort + " -- set interface " + localnetGatewayNextHopPort + " type=internal mtu_request=" + mtu + " mac=00\\:00\\:a9\\:fe\\:21\\:01",
 		})
@@ -368,7 +396,7 @@ func localNetInterfaceTest(app *cli.App, testNS ns.NetNS,
 			},
 		)
 
-		nodeAnnotator := kube.NewNodeAnnotator(&kube.Kube{fakeOvnNode.fakeClient, &egressipfake.Clientset{}, &egressfirewallfake.Clientset{}}, &existingNode)
+		nodeAnnotator := kube.NewNodeAnnotator(&kube.Kube{fakeOvnNode.fakeClient.KubeClient, &egressipfake.Clientset{}, &egressfirewallfake.Clientset{}}, &existingNode)
 		err := util.SetNodeHostSubnetAnnotation(nodeAnnotator, subnets)
 		Expect(err).NotTo(HaveOccurred())
 		err = nodeAnnotator.Run()
@@ -387,8 +415,10 @@ func localNetInterfaceTest(app *cli.App, testNS ns.NetNS,
 				}
 			}
 
-			_, err = fakeOvnNode.node.initSharedGateway(subnets, nil, primaryLinkName, nodeAnnotator)
+			gw, err := newLocalGateway(fakeOvnNode.watcher, fakeNodeName, subnets, nodeAnnotator, fakeOvnNode.recorder, primaryLinkName)
 			Expect(err).NotTo(HaveOccurred())
+			startGateway(gw, fakeOvnNode.watcher)
+
 			// Check if IP has been assigned to LocalnetGatewayNextHopPort
 			link, err := netlink.LinkByName(localnetGatewayNextHopPort)
 			Expect(err).NotTo(HaveOccurred())
@@ -410,7 +440,7 @@ func localNetInterfaceTest(app *cli.App, testNS ns.NetNS,
 		})
 		Expect(err).NotTo(HaveOccurred())
 
-		Expect(fexec.CalledMatchesExpected()).To(BeTrue(), fexec.ErrorDesc)
+		Eventually(fexec.CalledMatchesExpected, 2).Should(BeTrue(), fexec.ErrorDesc)
 
 		for i := 0; i < len(ipts); i++ {
 			err = ipts[i].MatchState(expectedIPTablesRules[i])

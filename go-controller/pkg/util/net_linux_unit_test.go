@@ -8,7 +8,7 @@ import (
 	kapi "k8s.io/api/core/v1"
 
 	ovntest "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/testing"
-	netlink_mocks "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/testing/mocks/vishvananda/netlink"
+	netlink_mocks "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/testing/mocks/github.com/vishvananda/netlink"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util/mocks"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"

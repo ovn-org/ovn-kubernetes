@@ -33,9 +33,8 @@ jobs:
     - name: Set up environment
       run: |
         export GOPATH=$(go env GOPATH)
-        echo "::set-env name=GOPATH::$GOPATH"
-        export PATH=$GOPATH/bin:$PATH
-        echo "::add-path::$GOPATH/bin"
+        echo "GOPATH=$GOPATH" >> $GITHUB_ENV
+        echo "$GOPATH/bin" >> $GITHUB_PATH
 
     - name: Verify
       run: |
@@ -108,9 +107,8 @@ jobs:
     - name: Set up environment
       run: |
         export GOPATH=$(go env GOPATH)
-        echo "::set-env name=GOPATH::$GOPATH"
-        export PATH=$GOPATH/bin:$PATH
-        echo "::add-path::$GOPATH/bin"
+        echo "GOPATH=$GOPATH" >> $GITHUB_ENV
+        echo "$GOPATH/bin" >> $GITHUB_PATH
 
     - name: Cache Kubernetes
       id: cache-k8s
@@ -218,9 +216,8 @@ jobs:
     - name: Set up environment
       run: |
         export GOPATH=$(go env GOPATH)
-        echo "::set-env name=GOPATH::$GOPATH"
-        export PATH=$GOPATH/bin:$PATH
-        echo "::add-path::$GOPATH/bin"
+        echo "GOPATH=$GOPATH" >> $GITHUB_ENV
+        echo "$GOPATH/bin" >> $GITHUB_PATH
 
     - name: Disable ufw
       # For IPv6 and Dualstack, ufw (Uncomplicated Firewall) should be disabled.

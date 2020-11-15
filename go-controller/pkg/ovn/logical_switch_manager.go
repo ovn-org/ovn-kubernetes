@@ -9,6 +9,7 @@ import (
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
 	ipam "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/ipallocator"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/ipallocator/allocator"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
 	"k8s.io/klog"
 )
@@ -167,13 +168,35 @@ func (manager *logicalSwitchManager) AllocateIPs(nodeName string, ipnets []*net.
 			ipnets, nodeName)
 
 	}
+
+	var err error
+	allocated := make(map[int]*net.IPNet)
+	defer func() {
+		if err != nil {
+			// iterate over range of already allocated indices and release
+			// ips allocated before the error occurred.
+			for relIdx, relIPNet := range allocated {
+				if relErr := lsi.ipams[relIdx].Release(relIPNet.IP); relErr != nil {
+					klog.Errorf("Error while releasing IP: %s, err: %v", relIPNet.IP, relErr)
+				} else {
+					klog.Warningf("Reserved IP: %s were released", relIPNet.IP.String())
+				}
+			}
+		}
+	}()
+
 	for _, ipnet := range ipnets {
-		for _, ipam := range lsi.ipams {
+		for idx, ipam := range lsi.ipams {
 			cidr := ipam.CIDR()
 			if cidr.Contains(ipnet.IP) {
-				if err := ipam.Allocate(ipnet.IP); err != nil {
+				if _, ok = allocated[idx]; ok {
+					err = fmt.Errorf("Error: attempt to reserve multiple IPs in the same IPAM instance")
 					return err
 				}
+				if err = ipam.Allocate(ipnet.IP); err != nil {
+					return err
+				}
+				allocated[idx] = ipnet
 				break
 			}
 		}
@@ -260,4 +283,131 @@ func (manager *logicalSwitchManager) ReleaseIPs(nodeName string, ipnets []*net.I
 		}
 	}
 	return nil
+}
+
+// IP allocator manager for join switch's IPv4 and IPv6 subnets.
+type joinSwitchIPManager struct {
+	lsm            *logicalSwitchManager
+	lrpIPCache     map[string][]*net.IPNet
+	lrpIPCacheLock sync.Mutex
+}
+
+// NewJoinIPAMAllocator provides an ipam interface which can be used for join switch IPAM
+// allocations for the specified cidr using a contiguous allocation strategy.
+func NewJoinIPAMAllocator(cidr *net.IPNet) (ipam.Interface, error) {
+	subnetRange, err := ipam.NewAllocatorCIDRRange(cidr, func(max int, rangeSpec string) (allocator.Interface, error) {
+		return allocator.NewContiguousAllocationMap(max, rangeSpec), nil
+	})
+	if err != nil {
+		return nil, err
+	}
+	return subnetRange, nil
+}
+
+// Initializes a new join switch logical switch manager.
+// This IPmanager guaranteed to always have both IPv4 and IPv6 regardless of dual-stack
+func initJoinLogicalSwitchIPManager() (*joinSwitchIPManager, error) {
+	j := joinSwitchIPManager{
+		lsm: &logicalSwitchManager{
+			cache:    make(map[string]logicalSwitchInfo),
+			ipamFunc: NewJoinIPAMAllocator,
+		},
+		lrpIPCache: make(map[string][]*net.IPNet),
+	}
+	var joinSubnets []*net.IPNet
+	for _, joinSubnetString := range []string{types.V4JoinSubnetCIDR, types.V6JoinSubnetCIDR} {
+		_, joinSubnet, err := net.ParseCIDR(joinSubnetString)
+		if err != nil {
+			return nil, fmt.Errorf("error parsing join subnet string %s: %v", joinSubnetString, err)
+		}
+		joinSubnets = append(joinSubnets, joinSubnet)
+	}
+	err := j.lsm.AddNode(types.OVNJoinSwitch, joinSubnets)
+	if err != nil {
+		return nil, err
+	}
+	return &j, nil
+}
+
+func (jsIPManager *joinSwitchIPManager) getJoinLRPCacheIPs(nodeName string) ([]*net.IPNet, bool) {
+	jsIPManager.lrpIPCacheLock.Lock()
+	defer jsIPManager.lrpIPCacheLock.Unlock()
+	gwLRPIPs, ok := jsIPManager.lrpIPCache[nodeName]
+	return gwLRPIPs, ok
+}
+
+func (jsIPManager *joinSwitchIPManager) setJoinLRPCacheIPs(nodeName string, gwLRPIPs []*net.IPNet) error {
+	jsIPManager.lrpIPCacheLock.Lock()
+	defer jsIPManager.lrpIPCacheLock.Unlock()
+	if _, ok := jsIPManager.lrpIPCache[nodeName]; ok {
+		return fmt.Errorf("join switch IPs already allocated for node %s", nodeName)
+	}
+	jsIPManager.lrpIPCache[nodeName] = gwLRPIPs
+	return nil
+}
+
+func (jsIPManager *joinSwitchIPManager) delJoinLRPCacheIPs(nodeName string) {
+	jsIPManager.lrpIPCacheLock.Lock()
+	defer jsIPManager.lrpIPCacheLock.Unlock()
+	delete(jsIPManager.lrpIPCache, nodeName)
+}
+
+// reserveJoinLRPIPs tries to add the LRP IPs to the joinSwitchIPManager, then they will be stored in the cache;
+func (jsIPManager *joinSwitchIPManager) reserveJoinLRPIPs(nodeName string, gwLRPIPs []*net.IPNet) (err error) {
+	// reserve the given IP in the allocator
+	if err = jsIPManager.lsm.AllocateIPs(types.OVNJoinSwitch, gwLRPIPs); err == nil {
+		defer func() {
+			if err != nil {
+				if relErr := jsIPManager.lsm.ReleaseIPs(types.OVNJoinSwitch, gwLRPIPs); relErr != nil {
+					klog.Errorf("Failed to release logical router port IPs %v just reserved for node %s: %q",
+						util.JoinIPNetIPs(gwLRPIPs, " "), nodeName, relErr)
+				}
+			}
+		}()
+		if err = jsIPManager.setJoinLRPCacheIPs(nodeName, gwLRPIPs); err != nil {
+			klog.Errorf("Failed to add reserved IPs to the join switch IP cache: %s", err.Error())
+		}
+	}
+	return err
+}
+
+// ensureJoinLRPIPs tries to allocate the LRP IPs if it is not yet allocated, then they will be stored in the cache
+func (jsIPManager *joinSwitchIPManager) ensureJoinLRPIPs(nodeName string) (gwLRPIPs []*net.IPNet, err error) {
+	var ok bool
+	// first check the IP cache, return if an entry already exists
+	gwLRPIPs, ok = jsIPManager.getJoinLRPCacheIPs(nodeName)
+	if ok {
+		return gwLRPIPs, nil
+	}
+	gwLRPIPs, err = jsIPManager.lsm.AllocateNextIPs(types.OVNJoinSwitch)
+	if err != nil {
+		return nil, err
+	}
+
+	defer func() {
+		if err != nil {
+			if relErr := jsIPManager.lsm.ReleaseIPs(types.OVNJoinSwitch, gwLRPIPs); relErr != nil {
+				klog.Errorf("Failed to release logical router port IPs %v for node %s: %q",
+					util.JoinIPNetIPs(gwLRPIPs, " "), nodeName, relErr)
+			}
+		}
+	}()
+
+	if err = jsIPManager.setJoinLRPCacheIPs(nodeName, gwLRPIPs); err != nil {
+		klog.Errorf("Failed to add allocated IPs to the join switch IP cache: %s", err.Error())
+		return nil, err
+	}
+
+	return gwLRPIPs, nil
+}
+
+func (jsIPManager *joinSwitchIPManager) releaseJoinLRPIPs(nodeName string) error {
+	var err error
+
+	gwLRPIPs, ok := jsIPManager.getJoinLRPCacheIPs(nodeName)
+	if ok {
+		err = jsIPManager.lsm.ReleaseIPs(types.OVNJoinSwitch, gwLRPIPs)
+		jsIPManager.delJoinLRPCacheIPs(nodeName)
+	}
+	return err
 }

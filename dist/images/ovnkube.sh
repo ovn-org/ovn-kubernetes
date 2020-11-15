@@ -151,6 +151,9 @@ net_cidr=${OVN_NET_CIDR:-10.128.0.0/14/23}
 svc_cidr=${OVN_SVC_CIDR:-172.30.0.0/16}
 mtu=${OVN_MTU:-1400}
 
+# set metrics endpoint bind to K8S_NODE_IP.
+metrics_endpoint_ip=${K8S_NODE_IP:-0.0.0.0}
+metrics_endpoint_ip=$(bracketify $metrics_endpoint_ip)
 ovn_kubernetes_namespace=${OVN_KUBERNETES_NAMESPACE:-ovn-kubernetes}
 
 # host on which ovnkube-db POD is running and this POD contains both
@@ -847,6 +850,8 @@ ovn-master() {
       egressip_enabled_flag="--enable-egress-ip"
   fi
 
+  ovnkube_master_metrics_bind_address="${metrics_endpoint_ip}:9409"
+
   echo "=============== ovn-master ========== MASTER ONLY"
   /usr/bin/ovnkube \
     --init-master ${K8S_NODE} \
@@ -865,7 +870,7 @@ ovn-master() {
     ${ovn_master_ssl_opts} \
     ${multicast_enabled_flag} \
     ${egressip_enabled_flag} \
-    --metrics-bind-address "0.0.0.0:9409" &
+    --metrics-bind-address ${ovnkube_master_metrics_bind_address} &
   echo "=============== ovn-master ========== running"
   wait_for_event attempts=3 process_ready ovnkube-master
 
@@ -983,6 +988,9 @@ ovn-node() {
     ovn_unprivileged_flag=""
   fi
 
+  ovn_metrics_bind_address="${metrics_endpoint_ip}:9476"
+  ovnkube_node_metrics_bind_address="${metrics_endpoint_ip}:9410"
+
   echo "=============== ovn-node   --init-node"
   /usr/bin/ovnkube --init-node ${K8S_NODE} \
     --cluster-subnets ${net_cidr} --k8s-service-cidr=${svc_cidr} \
@@ -1005,8 +1013,8 @@ ovn-node() {
     --inactivity-probe=${ovn_remote_probe_interval} \
     ${multicast_enabled_flag} \
     ${egressip_enabled_flag} \
-    --ovn-metrics-bind-address "0.0.0.0:9476" \
-    --metrics-bind-address "0.0.0.0:9410" &
+    --ovn-metrics-bind-address ${ovn_metrics_bind_address} \
+    --metrics-bind-address ${ovnkube_node_metrics_bind_address} &
 
   wait_for_event attempts=3 process_ready ovnkube
   setup_cni
@@ -1075,7 +1083,7 @@ ovs-metrics() {
   echo "=============== ovs-metrics - (wait for ovs_ready)"
   wait_for_event ovs_ready
 
-  ovs_exporter_bind_address=${OVS_EXPORTER_BIND_ADDRESS:-"0.0.0.0:9310"}
+  ovs_exporter_bind_address="${metrics_endpoint_ip}:9310"
   /usr/bin/ovn-kube-util \
     --loglevel=${ovnkube_loglevel} \
     ovs-exporter \

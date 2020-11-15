@@ -5,6 +5,7 @@ import (
 
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
 	ovntest "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/testing"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
 
 	. "github.com/onsi/ginkgo"
@@ -50,7 +51,8 @@ node4 chassis=912d592c-904c-40cd-9ef1-c2e5b49a33dd lb_force_snat_ip=100.64.0.4`,
 	It("creates an IPv4 gateway in OVN", func() {
 		clusterIPSubnets := ovntest.MustParseIPNets("10.128.0.0/14")
 		hostSubnets := ovntest.MustParseIPNets("10.130.0.0/23")
-		joinSubnets := ovntest.MustParseIPNets("100.64.0.0/29")
+		joinLRPIPs := ovntest.MustParseIPNets("100.64.0.3/16")
+		defLRPIPs := ovntest.MustParseIPNets("100.64.0.1/16")
 		nodeName := "test-node"
 		l3GatewayConfig := &util.L3GatewayConfig{
 			Mode:           config.GatewayModeLocal,
@@ -69,13 +71,12 @@ node4 chassis=912d592c-904c-40cd-9ef1-c2e5b49a33dd lb_force_snat_ip=100.64.0.4`,
 
 		fexec.AddFakeCmdsNoOutputNoError([]string{
 			"ovn-nbctl --timeout=15 -- --may-exist lr-add GR_test-node -- set logical_router GR_test-node options:chassis=SYSTEM-ID external_ids:physical_ip=169.254.33.2 external_ids:physical_ips=169.254.33.2",
-			"ovn-nbctl --timeout=15 -- --may-exist ls-add join_test-node",
-			"ovn-nbctl --timeout=15 -- --may-exist lsp-add join_test-node jtor-GR_test-node -- set logical_switch_port jtor-GR_test-node type=router options:router-port=rtoj-GR_test-node addresses=router",
-			"ovn-nbctl --timeout=15 -- --if-exists lrp-del rtoj-GR_test-node -- lrp-add GR_test-node rtoj-GR_test-node 0a:58:64:40:00:01 100.64.0.1/29",
-			"ovn-nbctl --timeout=15 -- --may-exist lsp-add join_test-node jtod-test-node -- set logical_switch_port jtod-test-node type=router options:router-port=dtoj-test-node addresses=router",
-			"ovn-nbctl --timeout=15 -- --if-exists lrp-del dtoj-test-node -- lrp-add ovn_cluster_router dtoj-test-node 0a:58:64:40:00:02 100.64.0.2/29",
-			"ovn-nbctl --timeout=15 set logical_router GR_test-node options:lb_force_snat_ip=100.64.0.1",
-			"ovn-nbctl --timeout=15 --may-exist lr-route-add GR_test-node 10.128.0.0/14 100.64.0.2",
+			"ovn-nbctl --timeout=15 -- --may-exist lsp-add " + types.OVNJoinSwitch + " jtor-GR_test-node -- set logical_switch_port jtor-GR_test-node type=router options:router-port=rtoj-GR_test-node addresses=router",
+			"ovn-nbctl --timeout=15 -- --if-exists lrp-del rtoj-GR_test-node -- lrp-add GR_test-node rtoj-GR_test-node 0a:58:64:40:00:03 100.64.0.3/16",
+			"ovn-nbctl --timeout=15 set logical_router GR_test-node options:lb_force_snat_ip=100.64.0.3",
+			"ovn-nbctl --timeout=15 set logical_router GR_test-node options:always_learn_from_arp_request=false",
+			"ovn-nbctl --timeout=15 set logical_router GR_test-node options:dynamic_neigh_routers=true",
+			"ovn-nbctl --timeout=15 --may-exist lr-route-add GR_test-node 10.128.0.0/14 100.64.0.1",
 		})
 
 		const (
@@ -107,11 +108,12 @@ node4 chassis=912d592c-904c-40cd-9ef1-c2e5b49a33dd lb_force_snat_ip=100.64.0.4`,
 			"ovn-nbctl --timeout=15 -- --if-exists lrp-del rtoe-GR_test-node -- lrp-add GR_test-node rtoe-GR_test-node 11:22:33:44:55:66 169.254.33.2/24 -- set logical_router_port rtoe-GR_test-node external-ids:gateway-physical-ip=yes",
 			"ovn-nbctl --timeout=15 -- --may-exist lsp-add ext_test-node etor-GR_test-node -- set logical_switch_port etor-GR_test-node type=router options:router-port=rtoe-GR_test-node addresses=\"11:22:33:44:55:66\"",
 			"ovn-nbctl --timeout=15 --may-exist lr-route-add GR_test-node 0.0.0.0/0 169.254.33.1 rtoe-GR_test-node",
-			"ovn-nbctl --timeout=15 --may-exist --policy=src-ip lr-route-add ovn_cluster_router 10.130.0.0/23 100.64.0.1",
+			"ovn-nbctl --timeout=15 --may-exist lr-route-add ovn_cluster_router 100.64.0.3 100.64.0.3",
+			"ovn-nbctl --timeout=15 --may-exist --policy=src-ip lr-route-add ovn_cluster_router 10.130.0.0/23 100.64.0.3",
 			"ovn-nbctl --timeout=15 --if-exists lr-nat-del GR_test-node snat 10.128.0.0/14 -- lr-nat-add GR_test-node snat 169.254.33.2 10.128.0.0/14",
 		})
 
-		err = gatewayInit(nodeName, clusterIPSubnets, hostSubnets, joinSubnets, l3GatewayConfig, sctpSupport)
+		err = gatewayInit(nodeName, clusterIPSubnets, hostSubnets, l3GatewayConfig, sctpSupport, joinLRPIPs, defLRPIPs)
 		Expect(err).NotTo(HaveOccurred())
 		Expect(fexec.CalledMatchesExpected()).To(BeTrue())
 	})
@@ -119,7 +121,8 @@ node4 chassis=912d592c-904c-40cd-9ef1-c2e5b49a33dd lb_force_snat_ip=100.64.0.4`,
 	It("creates an IPv6 gateway in OVN", func() {
 		clusterIPSubnets := ovntest.MustParseIPNets("fd01::/48")
 		hostSubnets := ovntest.MustParseIPNets("fd01:0:0:2::/64")
-		joinSubnets := ovntest.MustParseIPNets("fd98::/125")
+		joinLRPIPs := ovntest.MustParseIPNets("fd98::3/64")
+		defLRPIPs := ovntest.MustParseIPNets("fd98::1/64")
 		nodeName := "test-node"
 		l3GatewayConfig := &util.L3GatewayConfig{
 			Mode:           config.GatewayModeLocal,
@@ -140,13 +143,12 @@ node4 chassis=912d592c-904c-40cd-9ef1-c2e5b49a33dd lb_force_snat_ip=100.64.0.4`,
 		// 0a:58:5f:8a:48:8c generated from util.IPAddrToHWAddr(net.ParseIP("fd98::2")).String()
 		fexec.AddFakeCmdsNoOutputNoError([]string{
 			"ovn-nbctl --timeout=15 -- --may-exist lr-add GR_test-node -- set logical_router GR_test-node options:chassis=SYSTEM-ID external_ids:physical_ip=fd99::2 external_ids:physical_ips=fd99::2",
-			"ovn-nbctl --timeout=15 -- --may-exist ls-add join_test-node",
-			"ovn-nbctl --timeout=15 -- --may-exist lsp-add join_test-node jtor-GR_test-node -- set logical_switch_port jtor-GR_test-node type=router options:router-port=rtoj-GR_test-node addresses=router",
-			"ovn-nbctl --timeout=15 -- --if-exists lrp-del rtoj-GR_test-node -- lrp-add GR_test-node rtoj-GR_test-node 0a:58:ee:33:fc:1a fd98::1/125",
-			"ovn-nbctl --timeout=15 -- --may-exist lsp-add join_test-node jtod-test-node -- set logical_switch_port jtod-test-node type=router options:router-port=dtoj-test-node addresses=router",
-			"ovn-nbctl --timeout=15 -- --if-exists lrp-del dtoj-test-node -- lrp-add ovn_cluster_router dtoj-test-node 0a:58:5f:8a:48:8c fd98::2/125",
-			"ovn-nbctl --timeout=15 set logical_router GR_test-node options:lb_force_snat_ip=fd98::1",
-			"ovn-nbctl --timeout=15 --may-exist lr-route-add GR_test-node fd01::/48 fd98::2",
+			"ovn-nbctl --timeout=15 -- --may-exist lsp-add " + types.OVNJoinSwitch + " jtor-GR_test-node -- set logical_switch_port jtor-GR_test-node type=router options:router-port=rtoj-GR_test-node addresses=router",
+			"ovn-nbctl --timeout=15 -- --if-exists lrp-del rtoj-GR_test-node -- lrp-add GR_test-node rtoj-GR_test-node 0a:58:87:f0:33:ca fd98::3/64",
+			"ovn-nbctl --timeout=15 set logical_router GR_test-node options:lb_force_snat_ip=fd98::3",
+			"ovn-nbctl --timeout=15 set logical_router GR_test-node options:always_learn_from_arp_request=false",
+			"ovn-nbctl --timeout=15 set logical_router GR_test-node options:dynamic_neigh_routers=true",
+			"ovn-nbctl --timeout=15 --may-exist lr-route-add GR_test-node fd01::/48 fd98::1",
 		})
 
 		const (
@@ -178,11 +180,12 @@ node4 chassis=912d592c-904c-40cd-9ef1-c2e5b49a33dd lb_force_snat_ip=100.64.0.4`,
 			"ovn-nbctl --timeout=15 -- --if-exists lrp-del rtoe-GR_test-node -- lrp-add GR_test-node rtoe-GR_test-node 11:22:33:44:55:66 fd99::2/64 -- set logical_router_port rtoe-GR_test-node external-ids:gateway-physical-ip=yes",
 			"ovn-nbctl --timeout=15 -- --may-exist lsp-add ext_test-node etor-GR_test-node -- set logical_switch_port etor-GR_test-node type=router options:router-port=rtoe-GR_test-node addresses=\"11:22:33:44:55:66\"",
 			"ovn-nbctl --timeout=15 --may-exist lr-route-add GR_test-node ::/0 fd99::1 rtoe-GR_test-node",
-			"ovn-nbctl --timeout=15 --may-exist --policy=src-ip lr-route-add ovn_cluster_router fd01:0:0:2::/64 fd98::1",
+			"ovn-nbctl --timeout=15 --may-exist lr-route-add ovn_cluster_router fd98::3 fd98::3",
+			"ovn-nbctl --timeout=15 --may-exist --policy=src-ip lr-route-add ovn_cluster_router fd01:0:0:2::/64 fd98::3",
 			"ovn-nbctl --timeout=15 --if-exists lr-nat-del GR_test-node snat fd01::/48 -- lr-nat-add GR_test-node snat fd99::2 fd01::/48",
 		})
 
-		err = gatewayInit(nodeName, clusterIPSubnets, hostSubnets, joinSubnets, l3GatewayConfig, sctpSupport)
+		err = gatewayInit(nodeName, clusterIPSubnets, hostSubnets, l3GatewayConfig, sctpSupport, joinLRPIPs, defLRPIPs)
 		Expect(err).NotTo(HaveOccurred())
 		Expect(fexec.CalledMatchesExpected()).To(BeTrue())
 	})
@@ -190,7 +193,8 @@ node4 chassis=912d592c-904c-40cd-9ef1-c2e5b49a33dd lb_force_snat_ip=100.64.0.4`,
 	It("creates a dual-stack gateway in OVN", func() {
 		clusterIPSubnets := ovntest.MustParseIPNets("10.128.0.0/14", "fd01::/48")
 		hostSubnets := ovntest.MustParseIPNets("10.130.0.0/23", "fd01:0:0:2::/64")
-		joinSubnets := ovntest.MustParseIPNets("100.64.0.0/29", "fd98::/125")
+		joinLRPIPs := ovntest.MustParseIPNets("100.64.0.3/16", "fd98::3/64")
+		defLRPIPs := ovntest.MustParseIPNets("100.64.0.1/16", "fd98::1/64")
 		nodeName := "test-node"
 		l3GatewayConfig := &util.L3GatewayConfig{
 			Mode:           config.GatewayModeLocal,
@@ -209,14 +213,13 @@ node4 chassis=912d592c-904c-40cd-9ef1-c2e5b49a33dd lb_force_snat_ip=100.64.0.4`,
 
 		fexec.AddFakeCmdsNoOutputNoError([]string{
 			"ovn-nbctl --timeout=15 -- --may-exist lr-add GR_test-node -- set logical_router GR_test-node options:chassis=SYSTEM-ID external_ids:physical_ip=169.254.33.2 external_ids:physical_ips=169.254.33.2,fd99::2",
-			"ovn-nbctl --timeout=15 -- --may-exist ls-add join_test-node",
-			"ovn-nbctl --timeout=15 -- --may-exist lsp-add join_test-node jtor-GR_test-node -- set logical_switch_port jtor-GR_test-node type=router options:router-port=rtoj-GR_test-node addresses=router",
-			"ovn-nbctl --timeout=15 -- --if-exists lrp-del rtoj-GR_test-node -- lrp-add GR_test-node rtoj-GR_test-node 0a:58:64:40:00:01 100.64.0.1/29 fd98::1/125",
-			"ovn-nbctl --timeout=15 -- --may-exist lsp-add join_test-node jtod-test-node -- set logical_switch_port jtod-test-node type=router options:router-port=dtoj-test-node addresses=router",
-			"ovn-nbctl --timeout=15 -- --if-exists lrp-del dtoj-test-node -- lrp-add ovn_cluster_router dtoj-test-node 0a:58:64:40:00:02 100.64.0.2/29 fd98::2/125",
-			"ovn-nbctl --timeout=15 set logical_router GR_test-node options:lb_force_snat_ip=100.64.0.1 fd98::1",
-			"ovn-nbctl --timeout=15 --may-exist lr-route-add GR_test-node 10.128.0.0/14 100.64.0.2",
-			"ovn-nbctl --timeout=15 --may-exist lr-route-add GR_test-node fd01::/48 fd98::2",
+			"ovn-nbctl --timeout=15 -- --may-exist lsp-add " + types.OVNJoinSwitch + " jtor-GR_test-node -- set logical_switch_port jtor-GR_test-node type=router options:router-port=rtoj-GR_test-node addresses=router",
+			"ovn-nbctl --timeout=15 -- --if-exists lrp-del rtoj-GR_test-node -- lrp-add GR_test-node rtoj-GR_test-node 0a:58:64:40:00:03 100.64.0.3/16 fd98::3/64",
+			"ovn-nbctl --timeout=15 set logical_router GR_test-node options:lb_force_snat_ip=100.64.0.3 fd98::3",
+			"ovn-nbctl --timeout=15 set logical_router GR_test-node options:always_learn_from_arp_request=false",
+			"ovn-nbctl --timeout=15 set logical_router GR_test-node options:dynamic_neigh_routers=true",
+			"ovn-nbctl --timeout=15 --may-exist lr-route-add GR_test-node 10.128.0.0/14 100.64.0.1",
+			"ovn-nbctl --timeout=15 --may-exist lr-route-add GR_test-node fd01::/48 fd98::1",
 		})
 
 		const (
@@ -249,13 +252,15 @@ node4 chassis=912d592c-904c-40cd-9ef1-c2e5b49a33dd lb_force_snat_ip=100.64.0.4`,
 			"ovn-nbctl --timeout=15 -- --may-exist lsp-add ext_test-node etor-GR_test-node -- set logical_switch_port etor-GR_test-node type=router options:router-port=rtoe-GR_test-node addresses=\"11:22:33:44:55:66\"",
 			"ovn-nbctl --timeout=15 --may-exist lr-route-add GR_test-node 0.0.0.0/0 169.254.33.1 rtoe-GR_test-node",
 			"ovn-nbctl --timeout=15 --may-exist lr-route-add GR_test-node ::/0 fd99::1 rtoe-GR_test-node",
-			"ovn-nbctl --timeout=15 --may-exist --policy=src-ip lr-route-add ovn_cluster_router 10.130.0.0/23 100.64.0.1",
-			"ovn-nbctl --timeout=15 --may-exist --policy=src-ip lr-route-add ovn_cluster_router fd01:0:0:2::/64 fd98::1",
+			"ovn-nbctl --timeout=15 --may-exist lr-route-add ovn_cluster_router 100.64.0.3 100.64.0.3",
+			"ovn-nbctl --timeout=15 --may-exist lr-route-add ovn_cluster_router fd98::3 fd98::3",
+			"ovn-nbctl --timeout=15 --may-exist --policy=src-ip lr-route-add ovn_cluster_router 10.130.0.0/23 100.64.0.3",
+			"ovn-nbctl --timeout=15 --may-exist --policy=src-ip lr-route-add ovn_cluster_router fd01:0:0:2::/64 fd98::3",
 			"ovn-nbctl --timeout=15 --if-exists lr-nat-del GR_test-node snat 10.128.0.0/14 -- lr-nat-add GR_test-node snat 169.254.33.2 10.128.0.0/14",
 			"ovn-nbctl --timeout=15 --if-exists lr-nat-del GR_test-node snat fd01::/48 -- lr-nat-add GR_test-node snat fd99::2 fd01::/48",
 		})
 
-		err = gatewayInit(nodeName, clusterIPSubnets, hostSubnets, joinSubnets, l3GatewayConfig, sctpSupport)
+		err = gatewayInit(nodeName, clusterIPSubnets, hostSubnets, l3GatewayConfig, sctpSupport, joinLRPIPs, defLRPIPs)
 		Expect(err).NotTo(HaveOccurred())
 		Expect(fexec.CalledMatchesExpected()).To(BeTrue())
 	})
@@ -274,7 +279,7 @@ node4 chassis=912d592c-904c-40cd-9ef1-c2e5b49a33dd lb_force_snat_ip=100.64.0.4`,
 
 		fexec.AddFakeCmd(&ovntest.ExpectedCmd{
 			Cmd:    "ovn-nbctl --timeout=15 --if-exist get logical_router_port rtoj-GR_test-node networks",
-			Output: "[\"100.64.0.1/29\"]",
+			Output: "[\"100.64.0.1/16\"]",
 		})
 		fexec.AddFakeCmd(&ovntest.ExpectedCmd{
 			Cmd:    "ovn-nbctl --timeout=15 --data=bare --no-heading --columns=_uuid find logical_router_static_route nexthop=\"100.64.0.1\"",
@@ -284,10 +289,9 @@ node4 chassis=912d592c-904c-40cd-9ef1-c2e5b49a33dd lb_force_snat_ip=100.64.0.4`,
 			"ovn-nbctl --timeout=15 --if-exists remove logical_router ovn_cluster_router static_routes " + nodeRouteUUID,
 		})
 		fexec.AddFakeCmdsNoOutputNoError([]string{
-			"ovn-nbctl --timeout=15 --if-exist ls-del join_test-node",
+			"ovn-nbctl --timeout=15 --if-exist lsp-del jtor-GR_test-node",
 			"ovn-nbctl --timeout=15 --if-exist lr-del GR_test-node",
 			"ovn-nbctl --timeout=15 --if-exist ls-del ext_test-node",
-			"ovn-nbctl --timeout=15 --if-exist lrp-del dtoj-test-node",
 		})
 
 		fexec.AddFakeCmd(&ovntest.ExpectedCmd{
@@ -329,7 +333,7 @@ node4 chassis=912d592c-904c-40cd-9ef1-c2e5b49a33dd lb_force_snat_ip=100.64.0.4`,
 
 		fexec.AddFakeCmd(&ovntest.ExpectedCmd{
 			Cmd:    "ovn-nbctl --timeout=15 --if-exist get logical_router_port rtoj-GR_test-node networks",
-			Output: "[\"100.64.0.1/29\", \"fd98::1/125\"]",
+			Output: "[\"100.64.0.1/16\", \"fd98::1/64\"]",
 		})
 		fexec.AddFakeCmd(&ovntest.ExpectedCmd{
 			Cmd:    "ovn-nbctl --timeout=15 --data=bare --no-heading --columns=_uuid find logical_router_static_route nexthop=\"100.64.0.1\"",
@@ -347,10 +351,9 @@ node4 chassis=912d592c-904c-40cd-9ef1-c2e5b49a33dd lb_force_snat_ip=100.64.0.4`,
 		})
 
 		fexec.AddFakeCmdsNoOutputNoError([]string{
-			"ovn-nbctl --timeout=15 --if-exist ls-del join_test-node",
+			"ovn-nbctl --timeout=15 --if-exist lsp-del jtor-GR_test-node",
 			"ovn-nbctl --timeout=15 --if-exist lr-del GR_test-node",
 			"ovn-nbctl --timeout=15 --if-exist ls-del ext_test-node",
-			"ovn-nbctl --timeout=15 --if-exist lrp-del dtoj-test-node",
 		})
 
 		fexec.AddFakeCmd(&ovntest.ExpectedCmd{

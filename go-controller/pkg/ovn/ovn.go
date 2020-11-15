@@ -14,7 +14,6 @@ import (
 	hocontroller "github.com/ovn-org/ovn-kubernetes/go-controller/hybrid-overlay/pkg/controller"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
 	egressipv1 "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/egressip/v1"
-	egressipapi "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/egressip/v1/apis/clientset/versioned"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/factory"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/kube"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/ipallocator"
@@ -22,7 +21,6 @@ import (
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
 
 	egressfirewall "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/egressfirewall/v1"
-	egressfirewallclientset "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/egressfirewall/v1/apis/clientset/versioned"
 
 	apiextension "k8s.io/apiextensions-apiserver/pkg/apis/apiextensions/v1beta1"
 	utilnet "k8s.io/utils/net"
@@ -32,7 +30,6 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/labels"
 	"k8s.io/apimachinery/pkg/types"
-	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/kubernetes/scheme"
 	"k8s.io/client-go/tools/cache"
 	"k8s.io/client-go/tools/record"
@@ -41,7 +38,8 @@ import (
 )
 
 const (
-	egressfirewallCRD = "egressfirewalls.k8s.ovn.org"
+	egressfirewallCRD    string = "egressfirewalls.k8s.ovn.org"
+	clusterPortGroupName string = "clusterPortGroup"
 )
 
 // ServiceVIPKey is used for looking up service namespace information for a
@@ -102,15 +100,6 @@ type namespaceInfo struct {
 	multicastEnabled bool
 }
 
-// eNode is a cache helper used for egress IP assignment
-type eNode struct {
-	v4Subnet    *net.IPNet
-	v6Subnet    *net.IPNet
-	allocations map[string]bool
-	tainted     bool
-	name        string
-}
-
 // Controller structure is the object which holds the controls for starting
 // and reacting upon the watched resources (e.g. pods, endpoints)
 type Controller struct {
@@ -121,7 +110,6 @@ type Controller struct {
 
 	// FIXME DUAL-STACK -  Make IP Allocators more dual-stack friendly
 	masterSubnetAllocator     *subnetallocator.SubnetAllocator
-	joinSubnetAllocator       *subnetallocator.SubnetAllocator
 	nodeLocalNatIPv4Allocator *ipallocator.Range
 	nodeLocalNatIPv6Allocator *ipallocator.Range
 
@@ -152,6 +140,9 @@ type Controller struct {
 	// An address set factory that creates address sets
 	addressSetFactory AddressSetFactory
 
+	// Port group for all cluster logical switch ports
+	clusterPortGroupUUID string
+
 	// Port group for ingress deny rule
 	portGroupIngressDeny string
 
@@ -172,30 +163,8 @@ type Controller struct {
 	// Supports multicast?
 	multicastSupport bool
 
-	// Interface used for programming OVN for egress IP, based on the mode it's running in.
-	modeEgressIP modeEgressIP
-
-	// Sync used for retrying EgressIP objects which were created before any node existed.
-	egressAssignmentRetry sync.Map
-
-	// Mutex used for syncing the egressIP namespace handlers
-	egressIPNamespaceHandlerMutex *sync.Mutex
-
-	// Cache used for keeping track of EgressIP namespace handlers
-	egressIPNamespaceHandlerCache map[string]factory.Handler
-
-	// Mutex used for syncing the egressIP pod handlers
-	egressIPPodHandlerMutex *sync.Mutex
-
-	// Cache used for keeping track of EgressIP pod handlers
-	egressIPPodHandlerCache map[string]factory.Handler
-
-	// A cache used for egress IP assignments containing data for all cluster nodes
-	// used for egress IP assignments
-	eIPAllocator map[string]*eNode
-
-	// A mutex for eIPAllocator
-	eIPAllocatorMutex *sync.Mutex
+	// Controller used for programming OVN for egress IP
+	eIPC egressIPController
 
 	// Map of load balancers to service namespace
 	serviceVIPToName map[ServiceVIPKey]types.NamespacedName
@@ -206,6 +175,8 @@ type Controller struct {
 	serviceLBMap map[string]map[string]*loadBalancerConf
 
 	serviceLBLock sync.Mutex
+
+	joinSwIPManager *joinSwitchIPManager
 
 	// event recorder used to post events to k8s
 	recorder record.EventRecorder
@@ -244,49 +215,49 @@ func GetIPFullMask(ip string) string {
 
 // NewOvnController creates a new OVN controller for creating logical network
 // infrastructure and policy
-func NewOvnController(kubeClient kubernetes.Interface, egressIPClient egressipapi.Interface, egressFirewallClient egressfirewallclientset.Interface, wf *factory.WatchFactory,
+func NewOvnController(ovnClient *util.OVNClientset, wf *factory.WatchFactory,
 	stopChan <-chan struct{}, addressSetFactory AddressSetFactory, ovnNBClient goovn.Client, ovnSBClient goovn.Client, recorder record.EventRecorder) *Controller {
 
 	if addressSetFactory == nil {
 		addressSetFactory = NewOvnAddressSetFactory()
 	}
-	modeEgressIP := newModeEgressIP()
 	return &Controller{
 		kube: &kube.Kube{
-			KClient:              kubeClient,
-			EIPClient:            egressIPClient,
-			EgressFirewallClient: egressFirewallClient,
+			KClient:              ovnClient.KubeClient,
+			EIPClient:            ovnClient.EgressIPClient,
+			EgressFirewallClient: ovnClient.EgressFirewallClient,
 		},
-		watchFactory:                  wf,
-		stopChan:                      stopChan,
-		masterSubnetAllocator:         subnetallocator.NewSubnetAllocator(),
-		nodeLocalNatIPv4Allocator:     &ipallocator.Range{},
-		nodeLocalNatIPv6Allocator:     &ipallocator.Range{},
-		lsManager:                     newLogicalSwitchManager(),
-		joinSubnetAllocator:           subnetallocator.NewSubnetAllocator(),
-		logicalPortCache:              newPortCache(stopChan),
-		namespaces:                    make(map[string]*namespaceInfo),
-		namespacesMutex:               sync.Mutex{},
-		addressSetFactory:             addressSetFactory,
-		lspIngressDenyCache:           make(map[string]int),
-		lspEgressDenyCache:            make(map[string]int),
-		lspMutex:                      &sync.Mutex{},
-		modeEgressIP:                  modeEgressIP,
-		egressIPNamespaceHandlerMutex: &sync.Mutex{},
-		egressIPNamespaceHandlerCache: make(map[string]factory.Handler),
-		egressIPPodHandlerMutex:       &sync.Mutex{},
-		egressIPPodHandlerCache:       make(map[string]factory.Handler),
-		eIPAllocatorMutex:             &sync.Mutex{},
-		eIPAllocator:                  make(map[string]*eNode),
-		loadbalancerClusterCache:      make(map[kapi.Protocol]string),
-		multicastSupport:              config.EnableMulticast,
-		serviceVIPToName:              make(map[ServiceVIPKey]types.NamespacedName),
-		serviceVIPToNameLock:          sync.Mutex{},
-		serviceLBMap:                  make(map[string]map[string]*loadBalancerConf),
-		serviceLBLock:                 sync.Mutex{},
-		recorder:                      recorder,
-		ovnNBClient:                   ovnNBClient,
-		ovnSBClient:                   ovnSBClient,
+		watchFactory:              wf,
+		stopChan:                  stopChan,
+		masterSubnetAllocator:     subnetallocator.NewSubnetAllocator(),
+		nodeLocalNatIPv4Allocator: &ipallocator.Range{},
+		nodeLocalNatIPv6Allocator: &ipallocator.Range{},
+		lsManager:                 newLogicalSwitchManager(),
+		logicalPortCache:          newPortCache(stopChan),
+		namespaces:                make(map[string]*namespaceInfo),
+		namespacesMutex:           sync.Mutex{},
+		addressSetFactory:         addressSetFactory,
+		lspIngressDenyCache:       make(map[string]int),
+		lspEgressDenyCache:        make(map[string]int),
+		lspMutex:                  &sync.Mutex{},
+		eIPC: egressIPController{
+			namespaceHandlerMutex: &sync.Mutex{},
+			namespaceHandlerCache: make(map[string]factory.Handler),
+			podHandlerMutex:       &sync.Mutex{},
+			podHandlerCache:       make(map[string]factory.Handler),
+			allocatorMutex:        &sync.Mutex{},
+			allocator:             make(map[string]*egressNode),
+		},
+		loadbalancerClusterCache: make(map[kapi.Protocol]string),
+		multicastSupport:         config.EnableMulticast,
+		serviceVIPToName:         make(map[ServiceVIPKey]types.NamespacedName),
+		serviceVIPToNameLock:     sync.Mutex{},
+		serviceLBMap:             make(map[string]map[string]*loadBalancerConf),
+		serviceLBLock:            sync.Mutex{},
+		joinSwIPManager:          nil,
+		recorder:                 recorder,
+		ovnNBClient:              ovnNBClient,
+		ovnSBClient:              ovnSBClient,
 	}
 }
 
@@ -342,10 +313,6 @@ type emptyLBBackendEvent struct {
 	vip      string
 	protocol kapi.Protocol
 	uuid     string
-}
-
-func newModeEgressIP() modeEgressIP {
-	return &egressIPMode{}
 }
 
 func extractEmptyLBBackendsEvents(out []byte) ([]emptyLBBackendEvent, error) {
@@ -771,7 +738,10 @@ func (oc *Controller) WatchEgressNodes() {
 				klog.Error(err)
 			}
 			nodeLabels := node.GetLabels()
-			if _, hasEgressLabel := nodeLabels[nodeEgressLabel]; hasEgressLabel {
+			if _, hasEgressLabel := nodeLabels[nodeEgressLabel]; hasEgressLabel && oc.isEgressNodeReady(node) && oc.isEgressNodeReachable(node) {
+				oc.setNodeEgressAssignable(node.Name, true)
+				oc.setNodeEgressReady(node.Name, true)
+				oc.setNodeEgressReachable(node.Name, true)
 				if err := oc.addEgressNode(node); err != nil {
 					klog.Error(err)
 				}
@@ -780,17 +750,52 @@ func (oc *Controller) WatchEgressNodes() {
 		UpdateFunc: func(old, new interface{}) {
 			oldNode := old.(*kapi.Node)
 			newNode := new.(*kapi.Node)
+			if err := oc.initEgressIPAllocator(newNode); err != nil {
+				klog.Error(err)
+			}
 			oldLabels := oldNode.GetLabels()
 			newLabels := newNode.GetLabels()
 			_, oldHadEgressLabel := oldLabels[nodeEgressLabel]
 			_, newHasEgressLabel := newLabels[nodeEgressLabel]
-			if !oldHadEgressLabel && newHasEgressLabel {
-				if err := oc.addEgressNode(newNode); err != nil {
-					klog.Error(err)
-				}
+			if !oldHadEgressLabel && !newHasEgressLabel {
+				return
 			}
 			if oldHadEgressLabel && !newHasEgressLabel {
+				klog.Infof("Node: %s has been un-labelled, deleting it from egress assignment", newNode.Name)
+				oc.setNodeEgressAssignable(oldNode.Name, false)
 				if err := oc.deleteEgressNode(oldNode); err != nil {
+					klog.Error(err)
+				}
+				return
+			}
+			isOldReady := oc.isEgressNodeReady(oldNode)
+			isNewReady := oc.isEgressNodeReady(newNode)
+			isNewReachable := oc.isEgressNodeReachable(newNode)
+			oc.setNodeEgressReady(newNode.Name, isNewReady)
+			oc.setNodeEgressReachable(newNode.Name, isNewReachable)
+			if !oldHadEgressLabel && newHasEgressLabel {
+				klog.Infof("Node: %s has been labelled, adding it for egress assignment", newNode.Name)
+				oc.setNodeEgressAssignable(newNode.Name, true)
+				if isNewReady && isNewReachable {
+					if err := oc.addEgressNode(newNode); err != nil {
+						klog.Error(err)
+					}
+				} else {
+					klog.Warningf("Node: %s has been labelled, but node is not ready and reachable, cannot use it for egress assignment", newNode.Name)
+				}
+				return
+			}
+			if isOldReady == isNewReady {
+				return
+			}
+			if !isNewReady {
+				klog.Warningf("Node: %s is not ready, deleting it from egress assignment", newNode.Name)
+				if err := oc.deleteEgressNode(newNode); err != nil {
+					klog.Error(err)
+				}
+			} else if isNewReady && isNewReachable {
+				klog.Infof("Node: %s is ready and reachable, adding it for egress assignment", newNode.Name)
+				if err := oc.addEgressNode(newNode); err != nil {
 					klog.Error(err)
 				}
 			}
@@ -883,6 +888,9 @@ func (oc *Controller) syncNodeGateway(node *kapi.Node, hostSubnets []*net.IPNet)
 	if l3GatewayConfig.Mode == config.GatewayModeDisabled {
 		if err := gatewayCleanup(node.Name); err != nil {
 			return fmt.Errorf("error cleaning up gateway for node %s: %v", node.Name, err)
+		}
+		if err := oc.joinSwIPManager.releaseJoinLRPIPs(node.Name); err != nil {
+			return err
 		}
 	} else if hostSubnets != nil {
 		if err := oc.syncGatewayLogicalNetwork(node, l3GatewayConfig, hostSubnets); err != nil {
@@ -994,9 +1002,8 @@ func (oc *Controller) WatchNodes() {
 				"various caches", node.Name)
 
 			nodeSubnets, _ := util.ParseNodeHostSubnetAnnotation(node)
-			joinSubnets, _ := util.ParseNodeJoinSubnetAnnotation(node)
 			dnatSnatIPs, _ := util.ParseNodeLocalNatIPAnnotation(node)
-			err := oc.deleteNode(node.Name, nodeSubnets, joinSubnets, dnatSnatIPs)
+			err := oc.deleteNode(node.Name, nodeSubnets, dnatSnatIPs)
 			if err != nil {
 				klog.Error(err)
 			}
@@ -1061,23 +1068,6 @@ func (oc *Controller) getServiceLBInfo(lb, vip string) (string, bool) {
 		conf = &loadBalancerConf{}
 	}
 	return conf.rejectACL, len(conf.endpoints) > 0
-}
-
-// getAllACLsForServiceLB retrieves all of the ACLs for a given load balancer
-func (oc *Controller) getAllACLsForServiceLB(lb string) []string {
-	oc.serviceLBLock.Lock()
-	defer oc.serviceLBLock.Unlock()
-	confMap, ok := oc.serviceLBMap[lb]
-	if !ok {
-		return nil
-	}
-	var acls []string
-	for _, v := range confMap {
-		if len(v.rejectACL) > 0 {
-			acls = append(acls, v.rejectACL)
-		}
-	}
-	return acls
 }
 
 // removeServiceLB removes the entire LB entry for a VIP

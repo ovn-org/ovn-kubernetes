@@ -8,6 +8,7 @@ import (
 
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
 	egressfirewallapi "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/egressfirewall/v1"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
 
 	kapi "k8s.io/api/core/v1"
@@ -82,11 +83,11 @@ func (oc *Controller) addEgressFirewall(egressFirewall *egressfirewallapi.Egress
 	ef := newEgressFirewall(egressFirewall)
 	nsInfo.egressFirewallPolicy = ef
 	var errList []error
-	egressFirewallStartPriorityInt, err := strconv.Atoi(egressFirewallStartPriority)
+	egressFirewallStartPriorityInt, err := strconv.Atoi(types.EgressFirewallStartPriority)
 	if err != nil {
 		return []error{fmt.Errorf("failed to convert egressFirewallStartPriority to Integer: cannot add egressFirewall for namespace %s", egressFirewall.Namespace)}
 	}
-	minimumReservedEgressFirewallPriorityInt, err := strconv.Atoi(minimumReservedEgressFirewallPriority)
+	minimumReservedEgressFirewallPriorityInt, err := strconv.Atoi(types.MinimumReservedEgressFirewallPriority)
 	if err != nil {
 		return []error{fmt.Errorf("failed to convert minumumReservedEgressFirewallPriority to Integer: cannot add egressFirewall for namespace %s", egressFirewall.Namespace)}
 	}
@@ -108,6 +109,11 @@ func (oc *Controller) addEgressFirewall(egressFirewall *egressfirewallapi.Egress
 	}
 	if len(errList) > 0 {
 		return errList
+	}
+
+	if nsInfo.addressSet == nil {
+		// TODO(trozet): remove dependency on nsInfo object and just determine hash names to create Egress FW with
+		return []error{fmt.Errorf("unable to add egress firewall policy, namespace: %s has no address set", egressFirewall.Namespace)}
 	}
 
 	err = ef.addLogicalRouterPolicyToClusterRouter(nsInfo.addressSet.GetIPv4HashName(), nsInfo.addressSet.GetIPv6HashName(), egressFirewallStartPriorityInt)
@@ -136,16 +142,16 @@ func (oc *Controller) deleteEgressFirewall(egressFirewall *egressfirewallapi.Egr
 	stdout, stderr, err := util.RunOVNNbctl("--data=bare", "--no-heading", "--columns=_uuid", "find", "logical_router_policy", fmt.Sprintf("external-ids:egressFirewall=%s", egressFirewall.Namespace))
 	if err != nil {
 		return []error{fmt.Errorf("error deleting egressFirewall for namespace %s, cannot get logical router policies from LR %s - %s:%s",
-			egressFirewall.Namespace, ovnClusterRouter, err, stderr)}
+			egressFirewall.Namespace, types.OVNClusterRouter, err, stderr)}
 	}
 	var errList []error
 
 	uuids := strings.Fields(stdout)
 	for _, uuid := range uuids {
-		_, stderr, err := util.RunOVNNbctl("lr-policy-del", ovnClusterRouter, uuid)
+		_, stderr, err := util.RunOVNNbctl("lr-policy-del", types.OVNClusterRouter, uuid)
 		if err != nil {
 			errList = append(errList, fmt.Errorf("failed to delete the rules for "+
-				"egressFirewall in namespace %s on logical switch %s, stderr: %q (%v)", egressFirewall.Namespace, ovnClusterRouter, stderr, err))
+				"egressFirewall in namespace %s on logical switch %s, stderr: %q (%v)", egressFirewall.Namespace, types.OVNClusterRouter, stderr, err))
 		}
 	}
 	return errList
@@ -181,13 +187,13 @@ func (ef *egressFirewall) addLogicalRouterPolicyToClusterRouter(hashedAddressSet
 		_, stderr, err := util.RunOVNNbctl("--id=@logical_router_policy", "create", "logical_router_policy",
 			fmt.Sprintf("priority=%d", efStartPriority-rule.id),
 			match, "action="+action, fmt.Sprintf("external-ids:egressFirewall=%s", ef.namespace),
-			"--", "add", "logical_router", ovnClusterRouter, "policies", "@logical_router_policy")
+			"--", "add", "logical_router", types.OVNClusterRouter, "policies", "@logical_router_policy")
 		if err != nil {
 			// TODO: lr-policy-add doesn't support --may-exist, resort to this workaround for now.
 			// Have raised an issue against ovn repository (https://github.com/ovn-org/ovn/issues/49)
 			if !strings.Contains(stderr, "already existed") {
 				return fmt.Errorf("failed to add policy route '%s' to %s "+
-					"stderr: %s, error: %v", match, ovnClusterRouter, stderr, err)
+					"stderr: %s, error: %v", match, types.OVNClusterRouter, stderr, err)
 			}
 		}
 	}

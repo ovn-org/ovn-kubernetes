@@ -1,22 +1,20 @@
 package cni
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"net"
 	"time"
 
-	"k8s.io/client-go/kubernetes"
+	corev1listers "k8s.io/client-go/listers/core/v1"
 	"k8s.io/klog"
 
 	"github.com/containernetworking/cni/pkg/types/current"
-	"k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/api/resource"
-	"k8s.io/apimachinery/pkg/util/wait"
 	utilnet "k8s.io/utils/net"
 
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
-	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/kube"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
 )
 
@@ -61,40 +59,21 @@ func extractPodBandwidthResources(podAnnotations map[string]string) (int64, int6
 	return ingress, egress, nil
 }
 
-func podDescription(pr *PodRequest) string {
-	return fmt.Sprintf("[%s/%s]", pr.PodNamespace, pr.PodName)
+func (pr *PodRequest) String() string {
+	return fmt.Sprintf("[%s/%s %s]", pr.PodNamespace, pr.PodName, pr.SandboxID)
 }
 
-func (pr *PodRequest) cmdAdd(kclient kubernetes.Interface) ([]byte, error) {
+func (pr *PodRequest) cmdAdd(podLister corev1listers.PodLister) ([]byte, error) {
 	namespace := pr.PodNamespace
 	podName := pr.PodName
 	if namespace == "" || podName == "" {
 		return nil, fmt.Errorf("required CNI variable missing")
 	}
 
-	kubecli := &kube.Kube{KClient: kclient}
-
-	// Get the IP address and MAC address from the API server.
-	// Exponential back off ~32 seconds + 7* t(api call)
-	var annotationBackoff = wait.Backoff{Duration: 1 * time.Second, Steps: 7, Factor: 1.5, Jitter: 0.1}
-	var annotations map[string]string
-	var err error
-	if err = wait.ExponentialBackoff(annotationBackoff, func() (bool, error) {
-		annotations, err = kubecli.GetAnnotationsOnPod(namespace, podName)
-		if err != nil {
-			if errors.IsNotFound(err) {
-				// Pod not found; don't bother waiting longer
-				return false, err
-			}
-			klog.Warningf("Error getting pod annotations: %v", err)
-			return false, nil
-		}
-		if _, ok := annotations[util.OvnPodAnnotationName]; ok {
-			return true, nil
-		}
-		return false, nil
-	}); err != nil {
-		return nil, fmt.Errorf("failed to get pod annotation: %v", err)
+	// Get the IP address and MAC address of the pod
+	annotations, err := getPodAnnotations(pr.ctx, podLister, pr.PodNamespace, pr.PodName)
+	if err != nil {
+		return nil, err
 	}
 
 	podInfo, err := util.UnmarshalPodAnnotation(annotations)
@@ -142,22 +121,23 @@ func (pr *PodRequest) cmdDel() ([]byte, error) {
 // Argument '*PodRequest' encapsulates all the necessary information
 // kclient is passed in so that clientset can be reused from the server
 // Return value is the actual bytes to be sent back without further processing.
-func HandleCNIRequest(request *PodRequest, kclient kubernetes.Interface) ([]byte, error) {
-	pd := podDescription(request)
-	klog.Infof("%s dispatching pod network request %v", pd, request)
+func HandleCNIRequest(request *PodRequest, podLister corev1listers.PodLister) ([]byte, error) {
 	var result []byte
 	var err error
+
+	klog.Infof("%s %s starting CNI request %v", request, request.Command, request)
 	switch request.Command {
 	case CNIAdd:
-		result, err = request.cmdAdd(kclient)
+		result, err = request.cmdAdd(podLister)
 	case CNIDel:
 		result, err = request.cmdDel()
 	default:
 	}
-	klog.Infof("%s CNI request %v, result %q, err %v", pd, request, string(result), err)
+	klog.Infof("%s %s finished CNI request %v, result %q, err %v", request, request.Command, request, string(result), err)
+
 	if err != nil {
-		// Prefix errors with pod info for easier failure debugging
-		return nil, fmt.Errorf("%s %v", pd, err)
+		// Prefix errors with request info for easier failure debugging
+		return nil, fmt.Errorf("%s %v", request, err)
 	}
 	return result, nil
 }
@@ -198,4 +178,28 @@ func (pr *PodRequest) getCNIResult(podInterfaceInfo *PodInterfaceInfo) (*current
 		Interfaces: interfacesArray,
 		IPs:        ips,
 	}, nil
+}
+
+// getPodAnnotations obtains the pod annotation from the cache
+func getPodAnnotations(ctx context.Context, podLister corev1listers.PodLister, namespace, name string) (map[string]string, error) {
+	timeout := time.After(30 * time.Second)
+	for {
+		select {
+		case <-ctx.Done():
+			return nil, fmt.Errorf("canceled waiting for annotations")
+		case <-timeout:
+			return nil, fmt.Errorf("timed out waiting for annotations")
+		default:
+			pod, err := podLister.Pods(namespace).Get(name)
+			if err != nil {
+				return nil, fmt.Errorf("failed to get annotations: %v", err)
+			}
+			annotations := pod.ObjectMeta.Annotations
+			if _, ok := annotations[util.OvnPodAnnotationName]; ok {
+				return annotations, nil
+			}
+			// try again later
+			time.Sleep(200 * time.Millisecond)
+		}
+	}
 }

@@ -11,7 +11,7 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 
-func TestNewClientsets(t *testing.T) {
+func TestNewClientset(t *testing.T) {
 	tests := []struct {
 		desc        string
 		inpConfig   config.KubernetesConfig
@@ -62,17 +62,13 @@ func TestNewClientsets(t *testing.T) {
 
 	for i, tc := range tests {
 		t.Run(fmt.Sprintf("%d:%s", i, tc.desc), func(t *testing.T) {
-			res, eIPRes, egressFirewall, crd, e := NewClientsets(&tc.inpConfig)
+			res, e := NewOVNClientset(&tc.inpConfig)
 			t.Log(res, e)
 			if tc.errExpected {
 				assert.Error(t, e)
 			} else {
 				assert.NotNil(t, res)
-				assert.NotNil(t, egressFirewall)
-				assert.NotNil(t, crd)
-				assert.NotNil(t, eIPRes)
 			}
-
 		})
 	}
 }

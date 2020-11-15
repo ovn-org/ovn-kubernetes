@@ -13,6 +13,7 @@ import (
 	"k8s.io/client-go/kubernetes/fake"
 	"k8s.io/client-go/tools/record"
 
+	egressfirewall "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/egressfirewall/v1"
 	egressfirewallfake "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/egressfirewall/v1/apis/clientset/versioned/fake"
 	egressip "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/egressip/v1"
 	egressipfake "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/egressip/v1/apis/clientset/versioned/fake"
@@ -20,26 +21,24 @@ import (
 )
 
 const (
-	k8sTCPLoadBalancerIP  = "k8s_tcp_load_balancer"
-	k8sUDPLoadBalancerIP  = "k8s_udp_load_balancer"
-	k8sSCTPLoadBalancerIP = "k8s_sctp_load_balancer"
-	fakeUUID              = "8a86f6d8-7972-4253-b0bd-ddbef66e9303"
-	fakeUUIDv6            = "8a86f6d8-7972-4253-b0bd-ddbef66e9304"
+	k8sTCPLoadBalancerIP    = "k8s_tcp_load_balancer"
+	k8sUDPLoadBalancerIP    = "k8s_udp_load_balancer"
+	k8sSCTPLoadBalancerIP   = "k8s_sctp_load_balancer"
+	fakeUUID                = "8a86f6d8-7972-4253-b0bd-ddbef66e9303"
+	fakeUUIDv6              = "8a86f6d8-7972-4253-b0bd-ddbef66e9304"
+	ovnClusterPortGroupUUID = "740515f3-7ece-4cd1-9be5-6fdb9066d198"
 )
 
 type FakeOVN struct {
-	fakeClient         *fake.Clientset
-	fakeEgressIPClient *egressipfake.Clientset
-	fakeEgressClient   *egressfirewallfake.Clientset
-	fakeCRDClient      *apiextensionsfake.Clientset
-	watcher            *factory.WatchFactory
-	controller         *Controller
-	stopChan           chan struct{}
-	fakeExec           *ovntest.FakeExec
-	asf                *fakeAddressSetFactory
-	fakeRecorder       *record.FakeRecorder
-	ovnNBClient        goovn.Client
-	ovnSBClient        goovn.Client
+	fakeClient   *util.OVNClientset
+	watcher      *factory.WatchFactory
+	controller   *Controller
+	stopChan     chan struct{}
+	fakeExec     *ovntest.FakeExec
+	asf          *fakeAddressSetFactory
+	fakeRecorder *record.FakeRecorder
+	ovnNBClient  goovn.Client
+	ovnSBClient  goovn.Client
 }
 
 func NewFakeOVN(fexec *ovntest.FakeExec) *FakeOVN {
@@ -54,20 +53,25 @@ func NewFakeOVN(fexec *ovntest.FakeExec) *FakeOVN {
 
 func (o *FakeOVN) start(ctx *cli.Context, objects ...runtime.Object) {
 	egressIPObjects := []runtime.Object{}
+	egressFirewallObjects := []runtime.Object{}
 	v1Objects := []runtime.Object{}
 	for _, object := range objects {
 		if _, isEgressIPObject := object.(*egressip.EgressIPList); isEgressIPObject {
 			egressIPObjects = append(egressIPObjects, object)
+		} else if _, isEgressFirewallObject := object.(*egressfirewall.EgressFirewallList); isEgressFirewallObject {
+			egressFirewallObjects = append(egressFirewallObjects, object)
 		} else {
 			v1Objects = append(v1Objects, object)
 		}
 	}
 	_, err := config.InitConfig(ctx, o.fakeExec, nil)
 	Expect(err).NotTo(HaveOccurred())
-
-	o.fakeCRDClient = apiextensionsfake.NewSimpleClientset()
-	o.fakeClient = fake.NewSimpleClientset(v1Objects...)
-	o.fakeEgressIPClient = egressipfake.NewSimpleClientset(egressIPObjects...)
+	o.fakeClient = &util.OVNClientset{
+		KubeClient:           fake.NewSimpleClientset(v1Objects...),
+		EgressIPClient:       egressipfake.NewSimpleClientset(egressIPObjects...),
+		EgressFirewallClient: egressfirewallfake.NewSimpleClientset(egressFirewallObjects...),
+		APIExtensionsClient:  apiextensionsfake.NewSimpleClientset(),
+	}
 	o.init()
 }
 
@@ -78,9 +82,7 @@ func (o *FakeOVN) restart() {
 
 func (o *FakeOVN) shutdown() {
 	close(o.stopChan)
-	if o.fakeEgressClient != nil {
-		o.watcher.ShutdownEgressFirewallWatchFactory()
-	}
+	o.watcher.ShutdownEgressFirewallWatchFactory()
 	o.watcher.Shutdown()
 	err := o.controller.ovnNBClient.Close()
 	Expect(err).NotTo(HaveOccurred())
@@ -90,20 +92,16 @@ func (o *FakeOVN) shutdown() {
 
 func (o *FakeOVN) init() {
 	var err error
-
 	o.stopChan = make(chan struct{})
-	o.watcher, err = factory.NewWatchFactory(o.fakeClient, o.fakeEgressIPClient, o.fakeEgressClient, o.fakeCRDClient)
-	if o.fakeEgressClient != nil {
-		o.watcher.InitializeEgressFirewallWatchFactory()
-	}
+	o.watcher, err = factory.NewMasterWatchFactory(o.fakeClient)
+	o.watcher.InitializeEgressFirewallWatchFactory()
 	Expect(err).NotTo(HaveOccurred())
 	o.ovnNBClient = ovntest.NewMockOVNClient(goovn.DBNB)
 	o.ovnSBClient = ovntest.NewMockOVNClient(goovn.DBSB)
-	o.controller = NewOvnController(o.fakeClient, o.fakeEgressIPClient, o.fakeEgressClient, o.watcher,
+	o.controller = NewOvnController(o.fakeClient, o.watcher,
 		o.stopChan, o.asf, o.ovnNBClient,
 		o.ovnSBClient, o.fakeRecorder)
 	o.controller.multicastSupport = true
-
 }
 
 func mockAddNBDBError(table, name, field string, err error, ovnNBClient goovn.Client) {

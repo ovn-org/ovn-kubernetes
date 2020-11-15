@@ -185,6 +185,10 @@ spec:
           valueFrom:
             fieldRef:
               fieldPath: spec.nodeName
+        - name: K8S_NODE_IP
+          valueFrom:
+            fieldRef:
+              fieldPath: status.hostIP
         - name: OVN_GATEWAY_MODE
           value: "{{ ovn_gateway_mode }}"
         - name: OVN_GATEWAY_OPTS
@@ -247,6 +251,10 @@ spec:
         env:
         - name: OVN_DAEMONSET_VERSION
           value: "3"
+        - name: K8S_NODE_IP
+          valueFrom:
+            fieldRef:
+              fieldPath: status.hostIP
         # end of container
 
       nodeSelector:

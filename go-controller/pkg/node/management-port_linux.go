@@ -11,6 +11,7 @@ import (
 
 	"github.com/coreos/go-iptables/iptables"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
 	"github.com/vishvananda/netlink"
 
@@ -196,7 +197,7 @@ func setupManagementPortIPFamilyConfig(mpcfg *managementPortConfig, cfg *managem
 	// source protocol address to be in the Logical Switch's subnet.
 	if exists, err = util.LinkNeighExists(mpcfg.link, cfg.gwIP, mpcfg.routerMAC); err == nil && !exists {
 		warnings = append(warnings, fmt.Sprintf("missing arp entry for MAC/IP binding (%s/%s) on link %s",
-			mpcfg.routerMAC.String(), cfg.gwIP, util.K8sMgmtIntfName))
+			mpcfg.routerMAC.String(), cfg.gwIP, types.K8sMgmtIntfName))
 		err = util.LinkNeighAdd(mpcfg.link, cfg.gwIP, mpcfg.routerMAC)
 	}
 	if err != nil {
@@ -256,7 +257,7 @@ func setupManagementPortConfig(cfg *managementPortConfig) ([]string, error) {
 // createPlatformManagementPort creates a management port attached to the node switch
 // that lets the node access its pods via their private IP address. This is used
 // for health checking and other management tasks.
-func createPlatformManagementPort(interfaceName string, localSubnets []*net.IPNet, stopChan chan struct{}) (*managementPortConfig, error) {
+func createPlatformManagementPort(interfaceName string, localSubnets []*net.IPNet) (*managementPortConfig, error) {
 	var cfg *managementPortConfig
 	var err error
 
@@ -272,8 +273,6 @@ func createPlatformManagementPort(interfaceName string, localSubnets []*net.IPNe
 		return nil, err
 	}
 
-	// start the management port health check
-	go checkManagementPortHealth(cfg, stopChan)
 	return cfg, nil
 }
 
@@ -288,7 +287,7 @@ func DelMgtPortIptRules() {
 	if err != nil {
 		return
 	}
-	rule := []string{"-o", util.K8sMgmtIntfName, "-j", iptableMgmPortChain}
+	rule := []string{"-o", types.K8sMgmtIntfName, "-j", iptableMgmPortChain}
 	_ = ipt.Delete("nat", "POSTROUTING", rule...)
 	_ = ipt6.Delete("nat", "POSTROUTING", rule...)
 	_ = ipt.ClearChain("nat", iptableMgmPortChain)

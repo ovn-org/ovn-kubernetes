@@ -96,10 +96,16 @@ func (gp *gressPolicy) ensurePeerAddressSet(factory AddressSetFactory) error {
 }
 
 func (gp *gressPolicy) addPeerPod(pod *v1.Pod) error {
+	if gp.peerAddressSet == nil {
+		return fmt.Errorf("peer AddressSet is nil, cannot add peer pod: %s for gressPolicy: %s",
+			pod.ObjectMeta.Name, gp.policyName)
+	}
+
 	ips, err := util.GetAllPodIPs(pod)
 	if err != nil {
 		return err
 	}
+
 	return gp.peerAddressSet.AddIPs(ips)
 }
 
@@ -284,15 +290,11 @@ func (gp *gressPolicy) localPodAddACL(portGroupName, portGroupUUID string) {
 	}
 }
 
-// addACLAllow adds an "allow" ACL with a given match to the given Port Group
+// addACLAllow adds an ACL with a given match to the given Port Group
 func (gp *gressPolicy) addACLAllow(match, l4Match, portGroupUUID string, ipBlockCidr bool) error {
 	var direction, action string
 	direction = toLport
-	if gp.policyType == knet.PolicyTypeIngress {
-		action = "allow-related"
-	} else {
-		action = "allow"
-	}
+	action = "allow-related"
 
 	uuid, stderr, err := util.RunOVNNbctl("--data=bare", "--no-heading",
 		"--columns=_uuid", "find", "ACL",
@@ -332,7 +334,7 @@ func (gp *gressPolicy) addACLAllow(match, l4Match, portGroupUUID string, ipBlock
 	return nil
 }
 
-// modifyACLAllow updates an "allow" ACL with a new match
+// modifyACLAllow updates an ACL with a new match
 func (gp *gressPolicy) modifyACLAllow(oldMatch, newMatch string) error {
 	uuid, stderr, err := util.RunOVNNbctl("--data=bare", "--no-heading",
 		"--columns=_uuid", "find", "ACL", oldMatch,

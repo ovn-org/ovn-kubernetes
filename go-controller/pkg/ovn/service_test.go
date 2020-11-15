@@ -120,14 +120,26 @@ func (s service) baseCmds(fexec *ovntest.FakeExec, service v1.Service) {
 		"ovn-nbctl --timeout=15 --if-exists remove load_balancer sctp_load_balancer_id_1 vips \"172.30.0.10:53\"",
 		"ovn-nbctl --timeout=15 --data=bare --no-heading --columns=_uuid find acl name=sctp_load_balancer_id_1-172.30.0.10\\:53",
 	})
+	fexec.AddFakeCmd(&ovntest.ExpectedCmd{
+		Cmd:    fmt.Sprintf("ovn-nbctl --timeout=15 --data=bare --no-heading --columns=_uuid find logical_switch load_balancer{>=}%s", k8sTCPLoadBalancerIP),
+		Output: "62c672a4-1132-44ab-9202-e47d18784138",
+	})
 	fexec.AddFakeCmdsNoOutputNoError([]string{
-		fmt.Sprintf("ovn-nbctl --timeout=15 --data=bare --no-heading --columns=_uuid find logical_switch load_balancer{>=}k8s_tcp_load_balancer"),
-		fmt.Sprintf("ovn-nbctl --timeout=15 --data=bare --no-heading --columns=name find logical_router load_balancer{>=}k8s_tcp_load_balancer"),
+		fmt.Sprintf("ovn-nbctl --timeout=15 --data=bare --no-heading --columns=name find logical_router load_balancer{>=}%s", k8sTCPLoadBalancerIP),
 	})
 }
 
 func (s service) addCmds(fexec *ovntest.FakeExec, service v1.Service) {
 	s.baseCmds(fexec, service)
+	for _, port := range service.Spec.Ports {
+		fexec.AddFakeCmdsNoOutputNoError([]string{
+			fmt.Sprintf("ovn-nbctl --timeout=15 --data=bare --no-heading --columns=_uuid find acl name=%s-%s\\:%v",
+				k8sTCPLoadBalancerIP, service.Spec.ClusterIP, port.Port),
+			fmt.Sprintf("ovn-nbctl --timeout=15 --id=@reject-acl create acl direction=from-lport priority=1000 match=\"ip4.dst==%s && tcp "+
+				"&& tcp.dst==%v\" action=reject name=%s-%s\\:%v -- add port_group %s acls @reject-acl", service.Spec.ClusterIP, port.Port,
+				k8sTCPLoadBalancerIP, service.Spec.ClusterIP, port.Port, ovnClusterPortGroupUUID),
+		})
+	}
 }
 
 func (s service) delCmds(fexec *ovntest.FakeExec, service v1.Service) {
@@ -180,7 +192,7 @@ var _ = Describe("OVN Namespace Operations", func() {
 					nil,
 				)
 
-				test.baseCmds(fExec, service)
+				test.addCmds(fExec, service)
 
 				fakeOvn.start(ctx,
 					&v1.ServiceList{
@@ -189,9 +201,10 @@ var _ = Describe("OVN Namespace Operations", func() {
 						},
 					},
 				)
+				fakeOvn.controller.clusterPortGroupUUID = ovnClusterPortGroupUUID
 				fakeOvn.controller.WatchServices()
 
-				_, err := fakeOvn.fakeClient.CoreV1().Services(service.Namespace).Get(context.TODO(), service.Name, metav1.GetOptions{})
+				_, err := fakeOvn.fakeClient.KubeClient.CoreV1().Services(service.Namespace).Get(context.TODO(), service.Name, metav1.GetOptions{})
 				Expect(err).NotTo(HaveOccurred())
 				Expect(fExec.CalledMatchesExpected()).To(BeTrue(), fExec.ErrorDesc)
 
@@ -218,7 +231,7 @@ var _ = Describe("OVN Namespace Operations", func() {
 					nil,
 				)
 
-				test.baseCmds(fExec, service)
+				test.addCmds(fExec, service)
 
 				fakeOvn.start(ctx,
 					&v1.ServiceList{
@@ -227,18 +240,19 @@ var _ = Describe("OVN Namespace Operations", func() {
 						},
 					},
 				)
+				fakeOvn.controller.clusterPortGroupUUID = ovnClusterPortGroupUUID
 				fakeOvn.controller.WatchServices()
 
-				_, err := fakeOvn.fakeClient.CoreV1().Services(service.Namespace).Get(context.TODO(), service.Name, metav1.GetOptions{})
+				_, err := fakeOvn.fakeClient.KubeClient.CoreV1().Services(service.Namespace).Get(context.TODO(), service.Name, metav1.GetOptions{})
 				Expect(err).NotTo(HaveOccurred())
 				Expect(fExec.CalledMatchesExpected()).To(BeTrue(), fExec.ErrorDesc)
 
 				test.delCmds(fExec, service)
-				err = fakeOvn.fakeClient.CoreV1().Services(service.Namespace).Delete(context.TODO(), service.Name, *metav1.NewDeleteOptions(0))
+				err = fakeOvn.fakeClient.KubeClient.CoreV1().Services(service.Namespace).Delete(context.TODO(), service.Name, *metav1.NewDeleteOptions(0))
 				Expect(err).NotTo(HaveOccurred())
 				Eventually(fExec.CalledMatchesExpected).Should(BeTrue(), fExec.ErrorDesc)
 
-				s, err := fakeOvn.fakeClient.CoreV1().Services(service.Namespace).Get(context.TODO(), service.Name, metav1.GetOptions{})
+				s, err := fakeOvn.fakeClient.KubeClient.CoreV1().Services(service.Namespace).Get(context.TODO(), service.Name, metav1.GetOptions{})
 				Expect(err).To(HaveOccurred())
 				Expect(s).To(BeNil())
 

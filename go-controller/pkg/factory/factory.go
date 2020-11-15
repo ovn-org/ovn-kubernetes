@@ -2,407 +2,39 @@ package factory
 
 import (
 	"fmt"
-	"hash/fnv"
 	"reflect"
-	"sync"
 	"sync/atomic"
 	"time"
 
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
-	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/metrics"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
 
 	egressfirewallapi "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/egressfirewall/v1"
 	egressfirewallclientset "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/egressfirewall/v1/apis/clientset/versioned"
 	egressfirewallscheme "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/egressfirewall/v1/apis/clientset/versioned/scheme"
 	egressfirewallinformerfactory "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/egressfirewall/v1/apis/informers/externalversions"
-	egressfirewalllister "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/egressfirewall/v1/apis/listers/egressfirewall/v1"
 
 	egressipapi "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/egressip/v1"
-	egressipclientset "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/egressip/v1/apis/clientset/versioned"
 	egressipscheme "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/egressip/v1/apis/clientset/versioned/scheme"
 	egressipinformerfactory "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/egressip/v1/apis/informers/externalversions"
-	egressiplister "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/egressip/v1/apis/listers/egressip/v1"
 	apiextensionsapi "k8s.io/apiextensions-apiserver/pkg/apis/apiextensions/v1beta1"
-	apiextensionsclientset "k8s.io/apiextensions-apiserver/pkg/client/clientset/clientset"
 	apiextensionsscheme "k8s.io/apiextensions-apiserver/pkg/client/clientset/clientset/scheme"
 	apiextensionsinformerfactory "k8s.io/apiextensions-apiserver/pkg/client/informers/externalversions"
-	apiextensionslister "k8s.io/apiextensions-apiserver/pkg/client/listers/apiextensions/v1beta1"
 
 	kapi "k8s.io/api/core/v1"
+	v1 "k8s.io/api/core/v1"
 	knet "k8s.io/api/networking/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/fields"
 	"k8s.io/apimachinery/pkg/labels"
+	"k8s.io/apimachinery/pkg/selection"
 	informerfactory "k8s.io/client-go/informers"
+	v1coreinformers "k8s.io/client-go/informers/core/v1"
 	"k8s.io/client-go/kubernetes"
 	listers "k8s.io/client-go/listers/core/v1"
 	"k8s.io/client-go/tools/cache"
 	"k8s.io/klog"
 )
-
-// Handler represents an event handler and is private to the factory module
-type Handler struct {
-	base cache.FilteringResourceEventHandler
-
-	id uint64
-	// tombstone is used to track the handler's lifetime. handlerAlive
-	// indicates the handler can be called, while handlerDead indicates
-	// it has been scheduled for removal and should not be called.
-	// tombstone should only be set using atomic operations since it is
-	// used from multiple goroutines.
-	tombstone uint32
-}
-
-func (h *Handler) OnAdd(obj interface{}) {
-	if atomic.LoadUint32(&h.tombstone) == handlerAlive {
-		h.base.OnAdd(obj)
-	}
-}
-
-func (h *Handler) OnUpdate(oldObj, newObj interface{}) {
-	if atomic.LoadUint32(&h.tombstone) == handlerAlive {
-		h.base.OnUpdate(oldObj, newObj)
-	}
-}
-
-func (h *Handler) OnDelete(obj interface{}) {
-	if atomic.LoadUint32(&h.tombstone) == handlerAlive {
-		h.base.OnDelete(obj)
-	}
-}
-
-func (h *Handler) kill() bool {
-	return atomic.CompareAndSwapUint32(&h.tombstone, handlerAlive, handlerDead)
-}
-
-type event struct {
-	obj     interface{}
-	oldObj  interface{}
-	process func(*event)
-}
-
-type listerInterface interface{}
-
-type initialAddFn func(*Handler, []interface{})
-
-type informer struct {
-	sync.RWMutex
-	oType    reflect.Type
-	inf      cache.SharedIndexInformer
-	handlers map[uint64]*Handler
-	events   []chan *event
-	lister   listerInterface
-	// initialAddFunc will be called to deliver the initial list of objects
-	// when a handler is added
-	initialAddFunc initialAddFn
-	shutdownWg     sync.WaitGroup
-}
-
-func (i *informer) forEachQueuedHandler(f func(h *Handler)) {
-	i.RLock()
-	curHandlers := make([]*Handler, 0, len(i.handlers))
-	for _, handler := range i.handlers {
-		curHandlers = append(curHandlers, handler)
-	}
-	i.RUnlock()
-
-	for _, handler := range curHandlers {
-		f(handler)
-	}
-}
-
-func (i *informer) forEachHandler(obj interface{}, f func(h *Handler)) {
-	i.RLock()
-	defer i.RUnlock()
-
-	objType := reflect.TypeOf(obj)
-	if objType != i.oType {
-		klog.Errorf("Object type %v did not match expected %v", objType, i.oType)
-		return
-	}
-
-	for _, handler := range i.handlers {
-		f(handler)
-	}
-}
-
-func (i *informer) addHandler(id uint64, filterFunc func(obj interface{}) bool, funcs cache.ResourceEventHandler, existingItems []interface{}) *Handler {
-	handler := &Handler{
-		cache.FilteringResourceEventHandler{
-			FilterFunc: filterFunc,
-			Handler:    funcs,
-		},
-		id,
-		handlerAlive,
-	}
-
-	// Send existing items to the handler's add function; informers usually
-	// do this but since we share informers, it's long-since happened so
-	// we must emulate that here
-	i.initialAddFunc(handler, existingItems)
-
-	i.handlers[id] = handler
-	return handler
-}
-
-func (i *informer) removeHandler(handler *Handler) {
-	if !handler.kill() {
-		klog.Errorf("Removing already-removed %v event handler %d", i.oType, handler.id)
-		return
-	}
-
-	klog.V(5).Infof("Sending %v event handler %d for removal", i.oType, handler.id)
-
-	go func() {
-		i.Lock()
-		defer i.Unlock()
-		if _, ok := i.handlers[handler.id]; ok {
-			// Remove the handler
-			delete(i.handlers, handler.id)
-			klog.V(5).Infof("Removed %v event handler %d", i.oType, handler.id)
-		} else {
-			klog.Warningf("Tried to remove unknown object type %v event handler %d", i.oType, handler.id)
-		}
-	}()
-}
-
-func (i *informer) processEvents(events chan *event, stopChan <-chan struct{}) {
-	defer i.shutdownWg.Done()
-	for {
-		select {
-		case e, ok := <-events:
-			if !ok {
-				return
-			}
-			e.process(e)
-		case <-stopChan:
-			return
-		}
-	}
-}
-
-func getQueueNum(oType reflect.Type, obj interface{}) uint32 {
-	meta, err := getObjectMeta(oType, obj)
-	if err != nil {
-		klog.Errorf("Object has no meta: %v", err)
-		return 0
-	}
-
-	// Distribute the object to an event queue based on a hash of its
-	// namespaced name, so that all events for a given object are
-	// serialized in one queue.
-	h := fnv.New32()
-	if meta.Namespace != "" {
-		_, _ = h.Write([]byte(meta.Namespace))
-		_, _ = h.Write([]byte("/"))
-	}
-	_, _ = h.Write([]byte(meta.Name))
-	return h.Sum32() % uint32(numEventQueues)
-}
-
-// enqueueEvent adds an event to the appropriate queue for the object
-func (i *informer) enqueueEvent(oldObj, obj interface{}, processFunc func(*event)) {
-	i.events[getQueueNum(i.oType, obj)] <- &event{
-		obj:     obj,
-		oldObj:  oldObj,
-		process: processFunc,
-	}
-}
-
-func ensureObjectOnDelete(obj interface{}, expectedType reflect.Type) (interface{}, error) {
-	if expectedType == reflect.TypeOf(obj) {
-		return obj, nil
-	}
-	tombstone, ok := obj.(cache.DeletedFinalStateUnknown)
-	if !ok {
-		return nil, fmt.Errorf("couldn't get object from tombstone: %+v", obj)
-	}
-	obj = tombstone.Obj
-	objType := reflect.TypeOf(obj)
-	if expectedType != objType {
-		return nil, fmt.Errorf("expected tombstone object resource type %v but got %v", expectedType, objType)
-	}
-	return obj, nil
-}
-
-func (i *informer) newFederatedQueuedHandler() cache.ResourceEventHandlerFuncs {
-	return cache.ResourceEventHandlerFuncs{
-		AddFunc: func(obj interface{}) {
-			i.enqueueEvent(nil, obj, func(e *event) {
-				i.forEachQueuedHandler(func(h *Handler) {
-					h.OnAdd(e.obj)
-				})
-			})
-		},
-		UpdateFunc: func(oldObj, newObj interface{}) {
-			metrics.MetricResourceUpdateCount.WithLabelValues(i.oType.Elem().Name()).Inc()
-			i.enqueueEvent(oldObj, newObj, func(e *event) {
-				i.forEachQueuedHandler(func(h *Handler) {
-					h.OnUpdate(e.oldObj, e.obj)
-				})
-			})
-		},
-		DeleteFunc: func(obj interface{}) {
-			realObj, err := ensureObjectOnDelete(obj, i.oType)
-			if err != nil {
-				klog.Errorf(err.Error())
-				return
-			}
-			i.enqueueEvent(nil, realObj, func(e *event) {
-				i.forEachQueuedHandler(func(h *Handler) {
-					h.OnDelete(e.obj)
-				})
-			})
-		},
-	}
-}
-
-func (i *informer) newFederatedHandler() cache.ResourceEventHandlerFuncs {
-	return cache.ResourceEventHandlerFuncs{
-		AddFunc: func(obj interface{}) {
-			i.forEachHandler(obj, func(h *Handler) {
-				h.OnAdd(obj)
-			})
-		},
-		UpdateFunc: func(oldObj, newObj interface{}) {
-			name := i.oType.Elem().Name()
-			metrics.MetricResourceUpdateCount.WithLabelValues(name).Inc()
-			i.forEachHandler(newObj, func(h *Handler) {
-				start := time.Now()
-				h.OnUpdate(oldObj, newObj)
-				metrics.MetricResourceUpdateLatency.WithLabelValues(name).Observe(time.Since(start).Seconds())
-			})
-		},
-		DeleteFunc: func(obj interface{}) {
-			realObj, err := ensureObjectOnDelete(obj, i.oType)
-			if err != nil {
-				klog.Errorf(err.Error())
-				return
-			}
-			i.forEachHandler(realObj, func(h *Handler) {
-				h.OnDelete(realObj)
-			})
-		},
-	}
-}
-
-func (i *informer) removeAllHandlers() {
-	i.Lock()
-	defer i.Unlock()
-	for _, handler := range i.handlers {
-		i.removeHandler(handler)
-	}
-}
-
-func (i *informer) shutdown() {
-	i.removeAllHandlers()
-
-	// Wait for all event processors to finish
-	i.shutdownWg.Wait()
-}
-
-func newInformerLister(oType reflect.Type, sharedInformer cache.SharedIndexInformer) (listerInterface, error) {
-	switch oType {
-	case podType:
-		return listers.NewPodLister(sharedInformer.GetIndexer()), nil
-	case serviceType:
-		return listers.NewServiceLister(sharedInformer.GetIndexer()), nil
-	case endpointsType:
-		return listers.NewEndpointsLister(sharedInformer.GetIndexer()), nil
-	case namespaceType:
-		return listers.NewNamespaceLister(sharedInformer.GetIndexer()), nil
-	case nodeType:
-		return listers.NewNodeLister(sharedInformer.GetIndexer()), nil
-	case policyType:
-		return nil, nil
-	case egressFirewallType:
-		return egressfirewalllister.NewEgressFirewallLister(sharedInformer.GetIndexer()), nil
-	case crdType:
-		return apiextensionslister.NewCustomResourceDefinitionLister(sharedInformer.GetIndexer()), nil
-	case egressIPType:
-		return egressiplister.NewEgressIPLister(sharedInformer.GetIndexer()), nil
-	}
-
-	return nil, fmt.Errorf("cannot create lister from type %v", oType)
-}
-
-func newBaseInformer(oType reflect.Type, sharedInformer cache.SharedIndexInformer) (*informer, error) {
-	lister, err := newInformerLister(oType, sharedInformer)
-	if err != nil {
-		klog.Errorf(err.Error())
-		return nil, err
-	}
-
-	return &informer{
-		oType:      oType,
-		inf:        sharedInformer,
-		lister:     lister,
-		handlers:   make(map[uint64]*Handler),
-		shutdownWg: sync.WaitGroup{},
-	}, nil
-}
-
-func newInformer(oType reflect.Type, sharedInformer cache.SharedIndexInformer) (*informer, error) {
-	i, err := newBaseInformer(oType, sharedInformer)
-	if err != nil {
-		return nil, err
-	}
-	i.initialAddFunc = func(h *Handler, items []interface{}) {
-		for _, item := range items {
-			h.OnAdd(item)
-		}
-	}
-	i.inf.AddEventHandler(i.newFederatedHandler())
-	return i, nil
-}
-
-func newQueuedInformer(oType reflect.Type, sharedInformer cache.SharedIndexInformer, stopChan chan struct{}) (*informer, error) {
-	i, err := newBaseInformer(oType, sharedInformer)
-	if err != nil {
-		return nil, err
-	}
-	i.events = make([]chan *event, numEventQueues)
-	i.shutdownWg.Add(len(i.events))
-	for j := range i.events {
-		i.events[j] = make(chan *event, 10)
-		go i.processEvents(i.events[j], stopChan)
-	}
-	i.initialAddFunc = func(h *Handler, items []interface{}) {
-		// Make a handler-specific channel array across which the
-		// initial add events will be distributed. When a new handler
-		// is added, only that handler should receive events for all
-		// existing objects.
-		adds := make([]chan interface{}, numEventQueues)
-		queueWg := &sync.WaitGroup{}
-		queueWg.Add(len(adds))
-		for j := range adds {
-			adds[j] = make(chan interface{}, 10)
-			go func(addChan chan interface{}) {
-				defer queueWg.Done()
-				for {
-					obj, ok := <-addChan
-					if !ok {
-						return
-					}
-					h.OnAdd(obj)
-				}
-			}(adds[j])
-		}
-		// Distribute the existing items into the handler-specific
-		// channel array.
-		for _, obj := range items {
-			queueIdx := getQueueNum(i.oType, obj)
-			adds[queueIdx] <- obj
-		}
-		// Close all the channels
-		for j := range adds {
-			close(adds[j])
-		}
-		// Wait until all the object additions have been processed
-		queueWg.Wait()
-	}
-	i.inf.AddEventHandler(i.newFederatedQueuedHandler())
-	return i, nil
-}
 
 // WatchFactory initializes and manages common kube watches
 type WatchFactory struct {
@@ -421,26 +53,16 @@ type WatchFactory struct {
 	egressFirewallStopChan chan struct{}
 }
 
-// ObjectCacheInterface represents the exported methods for getting
-// kubernetes resources from the informer cache
-
-type ObjectCacheInterface interface {
-	GetPod(namespace, name string) (*kapi.Pod, error)
-	GetPods(namespace string) ([]*kapi.Pod, error)
-	GetNodes() ([]*kapi.Node, error)
-	GetNode(name string) (*kapi.Node, error)
-	GetService(namespace, name string) (*kapi.Service, error)
-	GetEndpoints(namespace string) ([]*kapi.Endpoints, error)
-	GetEndpoint(namespace, name string) (*kapi.Endpoints, error)
-	GetNamespace(name string) (*kapi.Namespace, error)
-	GetNamespaces() ([]*kapi.Namespace, error)
-}
-
 // WatchFactory implements the ObjectCacheInterface interface.
-
 var _ ObjectCacheInterface = &WatchFactory{}
 
 const (
+	// resync time is 0, none of the resources being watched in ovn-kubernetes have
+	// any race condition where a resync may be required e.g. cni executable on node watching for
+	// events on pods and assuming that an 'ADD' event will contain the annotations put in by
+	// ovnkube master (currently, it is just a 'get' loop)
+	// the downside of making it tight (like 10 minutes) is needless spinning on all resources
+	// However, AddEventHandlerWithResyncPeriod can specify a per handler resync period
 	resyncInterval        = 0
 	handlerAlive   uint32 = 0
 	handlerDead    uint32 = 1
@@ -459,19 +81,19 @@ var (
 	egressIPType       reflect.Type = reflect.TypeOf(&egressipapi.EgressIP{})
 )
 
-// NewWatchFactory initializes a new watch factory
-func NewWatchFactory(c kubernetes.Interface, eip egressipclientset.Interface, ec egressfirewallclientset.Interface, crd apiextensionsclientset.Interface) (*WatchFactory, error) {
-	// resync time is 0, none of the resources being watched in ovn-kubernetes have
+// NewMasterWatchFactory initializes a new watch factory for the master or master+node processes.
+func NewMasterWatchFactory(ovnClientset *util.OVNClientset) (*WatchFactory, error) {
+	// resync time is 12 hours, none of the resources being watched in ovn-kubernetes have
 	// any race condition where a resync may be required e.g. cni executable on node watching for
 	// events on pods and assuming that an 'ADD' event will contain the annotations put in by
 	// ovnkube master (currently, it is just a 'get' loop)
 	// the downside of making it tight (like 10 minutes) is needless spinning on all resources
 	// However, AddEventHandlerWithResyncPeriod can specify a per handler resync period
 	wf := &WatchFactory{
-		iFactory:    informerfactory.NewSharedInformerFactory(c, resyncInterval),
-		eipFactory:  egressipinformerfactory.NewSharedInformerFactory(eip, resyncInterval),
-		efClientset: ec,
-		crdFactory:  apiextensionsinformerfactory.NewSharedInformerFactory(crd, resyncInterval),
+		iFactory:    informerfactory.NewSharedInformerFactory(ovnClientset.KubeClient, resyncInterval),
+		eipFactory:  egressipinformerfactory.NewSharedInformerFactory(ovnClientset.EgressIPClient, resyncInterval),
+		efClientset: ovnClientset.EgressFirewallClient,
+		crdFactory:  apiextensionsinformerfactory.NewSharedInformerFactory(ovnClientset.APIExtensionsClient, resyncInterval),
 		informers:   make(map[reflect.Type]*informer),
 		stopChan:    make(chan struct{}),
 	}
@@ -486,7 +108,27 @@ func NewWatchFactory(c kubernetes.Interface, eip egressipclientset.Interface, ec
 		return nil, err
 	}
 
-	// Create shared informers we know we'll use
+	// For Services and Endpoints, pre-populate the shared Informer with one that
+	// has a label selector excluding headless services.
+	wf.iFactory.InformerFor(&kapi.Service{}, func(c kubernetes.Interface, resyncPeriod time.Duration) cache.SharedIndexInformer {
+		return v1coreinformers.NewFilteredServiceInformer(
+			c,
+			kapi.NamespaceAll,
+			resyncPeriod,
+			cache.Indexers{cache.NamespaceIndex: cache.MetaNamespaceIndexFunc},
+			noAlternateProxySelector())
+	})
+
+	wf.iFactory.InformerFor(&kapi.Endpoints{}, func(c kubernetes.Interface, resyncPeriod time.Duration) cache.SharedIndexInformer {
+		return v1coreinformers.NewFilteredEndpointsInformer(
+			c,
+			kapi.NamespaceAll,
+			resyncPeriod,
+			cache.Indexers{cache.NamespaceIndex: cache.MetaNamespaceIndexFunc},
+			noHeadlessServiceSelector())
+	})
+
+	// Create our informer-wrapper informer (and underlying shared informer) for types we need
 	wf.informers[podType], err = newQueuedInformer(podType, wf.iFactory.Core().V1().Pods().Informer(), wf.stopChan)
 	if err != nil {
 		return nil, err
@@ -540,6 +182,78 @@ func NewWatchFactory(c kubernetes.Interface, eip egressipclientset.Interface, ec
 			}
 		}
 	}
+	return wf, nil
+}
+
+// NewNodeWatchFactory initializes a watch factory with significantly fewer
+// informers to save memory + bandwidth. It is to be used by the node-only process.
+func NewNodeWatchFactory(ovnClientset *util.OVNClientset, nodeName string) (*WatchFactory, error) {
+	wf := &WatchFactory{
+		iFactory:    informerfactory.NewSharedInformerFactory(ovnClientset.KubeClient, resyncInterval),
+		eipFactory:  egressipinformerfactory.NewSharedInformerFactory(ovnClientset.EgressIPClient, resyncInterval),
+		efClientset: ovnClientset.EgressFirewallClient,
+		crdFactory:  apiextensionsinformerfactory.NewSharedInformerFactory(ovnClientset.APIExtensionsClient, resyncInterval),
+		informers:   make(map[reflect.Type]*informer),
+		stopChan:    make(chan struct{}),
+	}
+	// For Services and Endpoints, pre-populate the shared Informer with one that
+	// has a label selector excluding headless services.
+	wf.iFactory.InformerFor(&kapi.Service{}, func(c kubernetes.Interface, resyncPeriod time.Duration) cache.SharedIndexInformer {
+		return v1coreinformers.NewFilteredServiceInformer(
+			c,
+			kapi.NamespaceAll,
+			resyncPeriod,
+			cache.Indexers{cache.NamespaceIndex: cache.MetaNamespaceIndexFunc},
+			noAlternateProxySelector())
+	})
+
+	wf.iFactory.InformerFor(&kapi.Endpoints{}, func(c kubernetes.Interface, resyncPeriod time.Duration) cache.SharedIndexInformer {
+		return v1coreinformers.NewFilteredEndpointsInformer(
+			c,
+			kapi.NamespaceAll,
+			resyncPeriod,
+			cache.Indexers{cache.NamespaceIndex: cache.MetaNamespaceIndexFunc},
+			noHeadlessServiceSelector())
+	})
+
+	// For Pods, only select pods scheduled to this node
+	wf.iFactory.InformerFor(&kapi.Pod{}, func(c kubernetes.Interface, resyncPeriod time.Duration) cache.SharedIndexInformer {
+		return v1coreinformers.NewFilteredPodInformer(
+			c,
+			kapi.NamespaceAll,
+			resyncPeriod,
+			cache.Indexers{cache.NamespaceIndex: cache.MetaNamespaceIndexFunc},
+			func(opts *metav1.ListOptions) {
+				opts.FieldSelector = fields.OneTermEqualSelector("spec.nodeName", nodeName).String()
+			})
+	})
+
+	var err error
+	wf.informers[podType], err = newQueuedInformer(podType, wf.iFactory.Core().V1().Pods().Informer(), wf.stopChan)
+	if err != nil {
+		return nil, err
+	}
+	wf.informers[serviceType], err = newInformer(serviceType, wf.iFactory.Core().V1().Services().Informer())
+	if err != nil {
+		return nil, err
+	}
+	wf.informers[endpointsType], err = newInformer(endpointsType, wf.iFactory.Core().V1().Endpoints().Informer())
+	if err != nil {
+		return nil, err
+	}
+
+	wf.informers[nodeType], err = newInformer(nodeType, wf.iFactory.Core().V1().Nodes().Informer())
+	if err != nil {
+		return nil, err
+	}
+
+	wf.iFactory.Start(wf.stopChan)
+	for oType, synced := range wf.iFactory.WaitForCacheSync(wf.stopChan) {
+		if !synced {
+			return nil, fmt.Errorf("error in syncing cache for %v informer", oType)
+		}
+	}
+
 	return wf, nil
 }
 
@@ -829,7 +543,58 @@ func (wf *WatchFactory) GetNamespaces() ([]*kapi.Namespace, error) {
 	return namespaceLister.List(labels.Everything())
 }
 
-// GetFactory returns the underlying informer factory
-func (wf *WatchFactory) GetFactory() informerfactory.SharedInformerFactory {
-	return wf.iFactory
+func (wf *WatchFactory) NodeInformer() cache.SharedIndexInformer {
+	return wf.informers[nodeType].inf
+}
+
+// LocalPodInformer returns a shared Informer that may or may not only
+// return pods running on the local node.
+func (wf *WatchFactory) LocalPodInformer() cache.SharedIndexInformer {
+	return wf.informers[podType].inf
+}
+
+func (wf *WatchFactory) PodInformer() cache.SharedIndexInformer {
+	return wf.informers[podType].inf
+}
+
+func (wf *WatchFactory) NamespaceInformer() cache.SharedIndexInformer {
+	return wf.informers[namespaceType].inf
+}
+
+// noHeadlessServiceSelector is a LabelSelector added to the watch for
+// Endpoints (and, eventually, EndpointSlices) that excludes endpoints
+// for headless services.
+// This matches the behavior of kube-proxy
+func noHeadlessServiceSelector() func(options *metav1.ListOptions) {
+	// if the service is headless, skip it
+	noHeadlessEndpoints, err := labels.NewRequirement(v1.IsHeadlessService, selection.DoesNotExist, nil)
+	if err != nil {
+		// cannot occur
+		panic(err)
+	}
+
+	labelSelector := labels.NewSelector().Add(*noHeadlessEndpoints)
+
+	return func(options *metav1.ListOptions) {
+		options.LabelSelector = labelSelector.String()
+	}
+}
+
+// noAlternateProxySelector is a LabelSelector added to the watch for
+// services that excludes services with a well-known label indicating
+// proxying is via an alternate proxy.
+// This matches the behavior of kube-proxy
+func noAlternateProxySelector() func(options *metav1.ListOptions) {
+	// if the proxy-name annotation is set, skip this service
+	noProxyName, err := labels.NewRequirement("service.kubernetes.io/service-proxy-name", selection.DoesNotExist, nil)
+	if err != nil {
+		// cannot occur
+		panic(err)
+	}
+
+	labelSelector := labels.NewSelector().Add(*noProxyName)
+
+	return func(options *metav1.ListOptions) {
+		options.LabelSelector = labelSelector.String()
+	}
 }

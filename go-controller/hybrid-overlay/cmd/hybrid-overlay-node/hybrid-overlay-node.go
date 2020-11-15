@@ -99,7 +99,7 @@ func runHybridOverlay(ctx *cli.Context) error {
 		return fmt.Errorf("missing node name; use the 'node' flag to provide one")
 	}
 
-	clientset, _, _, _, err := util.NewClientsets(&config.Kubernetes)
+	clientset, err := util.NewKubernetesClientset(&config.Kubernetes)
 	if err != nil {
 		return err
 	}

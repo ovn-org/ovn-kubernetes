@@ -3,18 +3,17 @@ package ovn
 import (
 	"context"
 	"fmt"
+
 	. "github.com/onsi/ginkgo"
 	. "github.com/onsi/gomega"
 
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
 	egressfirewallapi "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/egressfirewall/v1"
-	egressfirewallfake "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/egressfirewall/v1/apis/clientset/versioned/fake"
 	ovntest "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/testing"
 	"github.com/urfave/cli/v2"
 
 	v1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/types"
 )
 
@@ -82,31 +81,32 @@ var _ = Describe("OVN EgressFirewall Operations", func() {
 					},
 				})
 
-				fakeOVN.fakeEgressClient = egressfirewallfake.NewSimpleClientset([]runtime.Object{
+				fakeOVN.start(ctx,
 					&egressfirewallapi.EgressFirewallList{
 						Items: []egressfirewallapi.EgressFirewall{
 							*egressFirewall,
 						},
 					},
-				}...)
-				fakeOVN.start(ctx, &v1.NamespaceList{
-					Items: []v1.Namespace{
-						namespace1,
-					},
-				}, &v1.NodeList{
-					Items: []v1.Node{
-						{
-							Status: v1.NodeStatus{
-								Phase: v1.NodeRunning,
-							},
-							ObjectMeta: newObjectMeta(node1Name, ""),
+					&v1.NamespaceList{
+						Items: []v1.Namespace{
+							namespace1,
 						},
 					},
-				})
+					&v1.NodeList{
+						Items: []v1.Node{
+							{
+								Status: v1.NodeStatus{
+									Phase: v1.NodeRunning,
+								},
+								ObjectMeta: newObjectMeta(node1Name, ""),
+							},
+						},
+					})
+
 				fakeOVN.controller.WatchNamespaces()
 				fakeOVN.controller.WatchEgressFirewall()
 
-				_, err := fakeOVN.fakeEgressClient.K8sV1().EgressFirewalls(egressFirewall.Namespace).Get(context.TODO(), egressFirewall.Name, metav1.GetOptions{})
+				_, err := fakeOVN.fakeClient.EgressFirewallClient.K8sV1().EgressFirewalls(egressFirewall.Namespace).Get(context.TODO(), egressFirewall.Name, metav1.GetOptions{})
 				Expect(err).NotTo(HaveOccurred())
 
 				Eventually(fExec.CalledMatchesExpected).Should(BeTrue(), fExec.ErrorDesc)
@@ -142,29 +142,30 @@ var _ = Describe("OVN EgressFirewall Operations", func() {
 						},
 					},
 				})
-				fakeOVN.fakeEgressClient = egressfirewallfake.NewSimpleClientset([]runtime.Object{
+				fakeOVN.start(ctx,
 					&egressfirewallapi.EgressFirewallList{
 						Items: []egressfirewallapi.EgressFirewall{
 							*egressFirewall,
 						},
 					},
-				}...)
-				fakeOVN.start(ctx, &v1.NamespaceList{
-					Items: []v1.Namespace{
-						namespace1,
-					},
-				}, &v1.NodeList{
-					Items: []v1.Node{
-						{
-							Status: v1.NodeStatus{
-								Phase: v1.NodeRunning,
-							},
-							ObjectMeta: newObjectMeta(node1Name, ""),
+					&v1.NamespaceList{
+						Items: []v1.Namespace{
+							namespace1,
 						},
 					},
-				})
+					&v1.NodeList{
+						Items: []v1.Node{
+							{
+								Status: v1.NodeStatus{
+									Phase: v1.NodeRunning,
+								},
+								ObjectMeta: newObjectMeta(node1Name, ""),
+							},
+						},
+					})
+
 				fakeOVN.controller.WatchNamespaces()
-				_, err := fakeOVN.fakeEgressClient.K8sV1().EgressFirewalls(egressFirewall.Namespace).Get(context.TODO(), egressFirewall.Name, metav1.GetOptions{})
+				_, err := fakeOVN.fakeClient.EgressFirewallClient.K8sV1().EgressFirewalls(egressFirewall.Namespace).Get(context.TODO(), egressFirewall.Name, metav1.GetOptions{})
 				Expect(err).NotTo(HaveOccurred())
 
 				fakeOVN.controller.WatchEgressFirewall()
@@ -210,31 +211,32 @@ var _ = Describe("OVN EgressFirewall Operations", func() {
 					},
 				})
 
-				fakeOVN.fakeEgressClient = egressfirewallfake.NewSimpleClientset([]runtime.Object{
+				fakeOVN.start(ctx,
 					&egressfirewallapi.EgressFirewallList{
 						Items: []egressfirewallapi.EgressFirewall{
 							*egressFirewall,
 						},
 					},
-				}...)
-				fakeOVN.start(ctx, &v1.NamespaceList{
-					Items: []v1.Namespace{
-						namespace1,
-					},
-				}, &v1.NodeList{
-					Items: []v1.Node{
-						{
-							Status: v1.NodeStatus{
-								Phase: v1.NodeRunning,
-							},
-							ObjectMeta: newObjectMeta(node1Name, ""),
+					&v1.NamespaceList{
+						Items: []v1.Namespace{
+							namespace1,
 						},
 					},
-				})
+					&v1.NodeList{
+						Items: []v1.Node{
+							{
+								Status: v1.NodeStatus{
+									Phase: v1.NodeRunning,
+								},
+								ObjectMeta: newObjectMeta(node1Name, ""),
+							},
+						},
+					})
+
 				fakeOVN.controller.WatchNamespaces()
 				fakeOVN.controller.WatchEgressFirewall()
 
-				err := fakeOVN.fakeEgressClient.K8sV1().EgressFirewalls(egressFirewall.Namespace).Delete(context.TODO(), egressFirewall.Name, *metav1.NewDeleteOptions(0))
+				err := fakeOVN.fakeClient.EgressFirewallClient.K8sV1().EgressFirewalls(egressFirewall.Namespace).Delete(context.TODO(), egressFirewall.Name, *metav1.NewDeleteOptions(0))
 				Expect(err).NotTo(HaveOccurred())
 
 				Eventually(fExec.CalledMatchesExpected).Should(BeTrue(), fExec.ErrorDesc)
@@ -278,33 +280,34 @@ var _ = Describe("OVN EgressFirewall Operations", func() {
 					},
 				})
 
-				fakeOVN.fakeEgressClient = egressfirewallfake.NewSimpleClientset([]runtime.Object{
+				fakeOVN.start(ctx,
 					&egressfirewallapi.EgressFirewallList{
 						Items: []egressfirewallapi.EgressFirewall{
 							*egressFirewall,
 						},
 					},
-				}...)
-				fakeOVN.start(ctx, &v1.NamespaceList{
-					Items: []v1.Namespace{
-						namespace1,
-					},
-				}, &v1.NodeList{
-					Items: []v1.Node{
-						{
-							Status: v1.NodeStatus{
-								Phase: v1.NodeRunning,
-							},
-							ObjectMeta: newObjectMeta(node1Name, ""),
+					&v1.NamespaceList{
+						Items: []v1.Namespace{
+							namespace1,
 						},
 					},
-				})
+					&v1.NodeList{
+						Items: []v1.Node{
+							{
+								Status: v1.NodeStatus{
+									Phase: v1.NodeRunning,
+								},
+								ObjectMeta: newObjectMeta(node1Name, ""),
+							},
+						},
+					})
+
 				fakeOVN.controller.WatchNamespaces()
 				fakeOVN.controller.WatchEgressFirewall()
 
-				_, err := fakeOVN.fakeEgressClient.K8sV1().EgressFirewalls(egressFirewall.Namespace).Get(context.TODO(), egressFirewall.Name, metav1.GetOptions{})
+				_, err := fakeOVN.fakeClient.EgressFirewallClient.K8sV1().EgressFirewalls(egressFirewall.Namespace).Get(context.TODO(), egressFirewall.Name, metav1.GetOptions{})
 				Expect(err).NotTo(HaveOccurred())
-				_, err = fakeOVN.fakeEgressClient.K8sV1().EgressFirewalls(egressFirewall1.Namespace).Update(context.TODO(), egressFirewall1, metav1.UpdateOptions{})
+				_, err = fakeOVN.fakeClient.EgressFirewallClient.K8sV1().EgressFirewalls(egressFirewall1.Namespace).Update(context.TODO(), egressFirewall1, metav1.UpdateOptions{})
 				Expect(err).NotTo(HaveOccurred())
 
 				Eventually(fExec.CalledMatchesExpected).Should(BeTrue(), fExec.ErrorDesc)

@@ -3,8 +3,10 @@ package ovn
 import (
 	"encoding/json"
 	"fmt"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
 	"net"
 	"reflect"
+	"strings"
 
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
@@ -14,6 +16,16 @@ import (
 	"k8s.io/client-go/tools/reference"
 	"k8s.io/klog"
 )
+
+func addRejectACLs(rejectACLs map[string]map[string]bool, lb, ip string, port int32, hasEndpoints bool) {
+	if ip != "" {
+		name := generateACLName(lb, ip, port)
+		if _, ok := rejectACLs[name]; !ok {
+			rejectACLs[name] = make(map[string]bool)
+		}
+		rejectACLs[name][lb] = hasEndpoints
+	}
+}
 
 func (ovn *Controller) syncServices(services []interface{}) {
 	// For all clusterIP in k8s, we will populate the below slice with
@@ -87,11 +99,7 @@ func (ovn *Controller) syncServices(services []interface{}) {
 							continue
 						}
 						for _, physicalIP := range physicalIPs {
-							name := ovn.generateACLName(lb, physicalIP, svcPort.NodePort)
-							if _, ok := svcRejectACLs[name]; !ok {
-								svcRejectACLs[name] = make(map[string]bool)
-							}
-							svcRejectACLs[name][lb] = hasEndpoints
+							addRejectACLs(svcRejectACLs, lb, physicalIP, svcPort.NodePort, hasEndpoints)
 						}
 					}
 				}
@@ -103,11 +111,12 @@ func (ovn *Controller) syncServices(services []interface{}) {
 			if err != nil {
 				klog.Warningf("Unable to get existing load balancer from ovn. Reject ACLs may not be synced!")
 			} else {
-				name := ovn.generateACLName(lb, service.Spec.ClusterIP, svcPort.Port)
-				if _, ok := svcRejectACLs[name]; !ok {
-					svcRejectACLs[name] = make(map[string]bool)
+				addRejectACLs(svcRejectACLs, lb, service.Spec.ClusterIP, svcPort.Port, hasEndpoints)
+
+				// Cloud load balancers: directly load balance that traffic from pods
+				for _, ing := range service.Status.LoadBalancer.Ingress {
+					addRejectACLs(svcRejectACLs, lb, ing.IP, svcPort.Port, hasEndpoints)
 				}
-				svcRejectACLs[name][lb] = hasEndpoints
 			}
 			for _, extIP := range service.Spec.ExternalIPs {
 				key := util.JoinHostPortInt32(extIP, svcPort.Port)
@@ -123,11 +132,7 @@ func (ovn *Controller) syncServices(services []interface{}) {
 							gateway, err)
 						continue
 					}
-					name := ovn.generateACLName(lb, extIP, svcPort.Port)
-					if _, ok := svcRejectACLs[name]; !ok {
-						svcRejectACLs[name] = make(map[string]bool)
-					}
-					svcRejectACLs[name][lb] = hasEndpoints
+					addRejectACLs(svcRejectACLs, lb, extIP, svcPort.Port, hasEndpoints)
 				}
 			}
 		}
@@ -168,7 +173,36 @@ func (ovn *Controller) syncServices(services []interface{}) {
 					for lb, hasEps := range svcCacheEntry {
 						if hasEps {
 							klog.Infof("Service Sync: Removing OVN stale reject ACL: %s", name)
-							ovn.removeACLFromNodeSwitches(lb, uuid)
+							ovn.removeACLFromPortGroup(lb, uuid)
+							var foundSwitches []string
+							// For upgrade from a non-port group Reject ACL implementation
+							// Deprecated: remove in the future
+							switches, err := ovn.getLogicalSwitchesForLoadBalancer(lb)
+							if err != nil {
+								klog.Errorf("Error finding node logical switches for load balancer "+
+									"%s: %v", lb, err)
+							} else {
+								foundSwitches = append(foundSwitches, switches...)
+							}
+							// Look for load balancer on join/external switches
+							grExtSwitch, err := ovn.getGRLogicalSwitchForLoadBalancer(lb)
+							if err != nil {
+								klog.Errorf("Error finding GR logical switches for load balancer "+
+									"%s: %v", lb, err)
+							} else {
+								// For upgrade from a previous implementation the ACL may also be on join switch
+								if grExtSwitch != "" {
+									routerName := strings.TrimPrefix(grExtSwitch, types.ExternalSwitchPrefix)
+									grJoinSwitch := types.JoinSwitchPrefix + routerName
+									foundSwitches = append(foundSwitches, grExtSwitch, grJoinSwitch)
+								}
+							}
+							if len(foundSwitches) > 0 {
+								klog.V(5).Infof("Service Sync: Removing OVN stale reject ACL (%s) "+
+									"from logical switches that contains load balancer %s, switches: %s", name, lb,
+									foundSwitches)
+								ovn.removeACLFromNodeSwitches(foundSwitches, uuid)
+							}
 						}
 					}
 				}
@@ -323,7 +357,9 @@ func (ovn *Controller) createService(service *kapi.Service) error {
 						if err != nil {
 							return fmt.Errorf("failed to create service ACL: %v", err)
 						}
-						klog.Infof("Service Reject ACL created for gateway router: %s", aclUUID)
+						klog.Infof("Service Reject ACL created for NodePort service: %s, namespace: %s, via "+
+							"gateway router: %s:%s:%d, ACL UUID:%s", service.Name, service.Namespace,
+							svcPort.Protocol, physicalIP, port, aclUUID)
 					}
 				}
 			}
@@ -349,7 +385,23 @@ func (ovn *Controller) createService(service *kapi.Service) error {
 					if err != nil {
 						return fmt.Errorf("failed to create service ACL: %v", err)
 					}
-					klog.Infof("Service Reject ACL created for cluster IP: %s", aclUUID)
+					klog.Infof("Service Reject ACL created for ClusterIP service: %s, namespace: %s, via: "+
+						"%s:%s:%d, ACL UUID: %s", service.Name, service.Namespace, svcPort.Protocol,
+						service.Spec.ClusterIP, svcPort.Port, aclUUID)
+					// Cloud load balancers: directly reject traffic from pods
+					for _, ing := range service.Status.LoadBalancer.Ingress {
+						if ing.IP == "" {
+							continue
+						}
+						aclUUID, err := ovn.createLoadBalancerRejectACL(loadBalancer, ing.IP, svcPort.Port, svcPort.Protocol)
+						if err != nil {
+							klog.Errorf("Failed to create reject ACL for Ingress IP: %s, load balancer: %s, error: %v",
+								ing.IP, loadBalancer, err)
+						} else {
+							klog.Infof("Reject ACL created for Ingress IP: %s, load balancer: %s, %s", ing.IP,
+								loadBalancer, aclUUID)
+						}
+					}
 				}
 				if len(service.Spec.ExternalIPs) > 0 {
 					gateways, _, err := ovn.getOvnGateways()
@@ -372,7 +424,9 @@ func (ovn *Controller) createService(service *kapi.Service) error {
 								if err != nil {
 									return fmt.Errorf("failed to create service ACL for external IP")
 								}
-								klog.Infof("Service Reject ACL created for external IP: %s", aclUUID)
+								klog.Infof("Service Reject ACL created for ExternalIP service: %s, namespace: %s,"+
+									"via: %s:%s:%d, ACL UUID: %s", service.Name, service.Namespace, svcPort.Protocol,
+									extIP, svcPort.Port, aclUUID)
 							}
 						}
 					}
@@ -387,8 +441,10 @@ func (ovn *Controller) updateService(oldSvc, newSvc *kapi.Service) error {
 	if reflect.DeepEqual(newSvc.Spec.Ports, oldSvc.Spec.Ports) &&
 		reflect.DeepEqual(newSvc.Spec.ExternalIPs, oldSvc.Spec.ExternalIPs) &&
 		reflect.DeepEqual(newSvc.Spec.ClusterIP, oldSvc.Spec.ClusterIP) &&
-		reflect.DeepEqual(newSvc.Spec.Type, oldSvc.Spec.Type) {
-		klog.V(5).Infof("Skipping service update for: %s as change does not apply to any of .Spec.Ports, .Spec.ExternalIP, .Spec.ClusterIP, .Spec.Type", newSvc.Name)
+		reflect.DeepEqual(newSvc.Spec.Type, oldSvc.Spec.Type) &&
+		reflect.DeepEqual(newSvc.Status.LoadBalancer.Ingress, oldSvc.Status.LoadBalancer.Ingress) {
+		klog.V(5).Infof("Skipping service update for: %s as change does not apply to any of .Spec.Ports, "+
+			".Spec.ExternalIP, .Spec.ClusterIP, .Spec.Type, .Status.LoadBalancer.Ingress", newSvc.Name)
 		return nil
 	}
 
@@ -429,6 +485,16 @@ func (ovn *Controller) deleteService(service *kapi.Service) {
 			vip := util.JoinHostPortInt32(service.Spec.ClusterIP, svcPort.Port)
 			if err := ovn.deleteLoadBalancerVIP(loadBalancer, vip); err != nil {
 				klog.Error(err)
+			}
+			// Cloud load balancers
+			for _, ing := range service.Status.LoadBalancer.Ingress {
+				if ing.IP == "" {
+					continue
+				}
+				ingressVIP := util.JoinHostPortInt32(ing.IP, svcPort.Port)
+				if err := ovn.deleteLoadBalancerVIP(loadBalancer, ingressVIP); err != nil {
+					klog.Error(err)
+				}
 			}
 			if err := ovn.deleteExternalVIPs(service, svcPort); err != nil {
 				klog.Error(err)

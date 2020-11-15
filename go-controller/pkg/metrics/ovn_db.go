@@ -252,7 +252,7 @@ var metricDBE2eTimestamp = prometheus.NewGaugeVec(prometheus.GaugeOpts{
 )
 
 func ovnDBSizeMetricsUpdater(direction, database string) {
-	dbFile := fmt.Sprintf("/etc/openvswitch/ovn%s_db.db", direction)
+	dbFile := fmt.Sprintf("/etc/ovn/ovn%s_db.db", direction)
 	fileInfo, err := os.Stat(dbFile)
 	if err != nil {
 		klog.Errorf("Failed to get the DB size for database %s: %v", database, err)
@@ -349,9 +349,9 @@ func getOvnDbVersionInfo() {
 	}
 }
 
-func RegisterOvnDBMetrics(clientset *kubernetes.Clientset, k8sNodeName string) {
+func RegisterOvnDBMetrics(clientset kubernetes.Interface, k8sNodeName string) {
 	err := wait.PollImmediate(1*time.Second, 300*time.Second, func() (bool, error) {
-		return checkPodRunsOnGivenNode(clientset, "name=ovnkube-db", k8sNodeName, false)
+		return checkPodRunsOnGivenNode(clientset, "ovn-db-pod=true", k8sNodeName, false)
 	})
 	if err != nil {
 		if err == wait.ErrWaitTimeout {

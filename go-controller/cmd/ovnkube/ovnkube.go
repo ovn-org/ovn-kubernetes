@@ -189,13 +189,7 @@ func runOvnKube(ctx *cli.Context) error {
 		return fmt.Errorf("failed to initialize exec helper: %v", err)
 	}
 
-	clientset, egressIPClientset, egressFirewallClientset, crdClientset, err := util.NewClientsets(&config.Kubernetes)
-	if err != nil {
-		return err
-	}
-
-	// create factory and start the controllers asked for
-	factory, err := factory.NewWatchFactory(clientset, egressIPClientset, egressFirewallClientset, crdClientset)
+	ovnClientset, err := util.NewOVNClientset(&config.Kubernetes)
 	if err != nil {
 		return err
 	}
@@ -228,9 +222,17 @@ func runOvnKube(ctx *cli.Context) error {
 	stopChan := make(chan struct{})
 	wg := &sync.WaitGroup{}
 
+	var watchFactory factory.Shutdownable
+	var masterWatchFactory *factory.WatchFactory
 	if master != "" {
-		var ovnNBClient, ovnSBClient goovn.Client
 		var err error
+		// create factory and start the controllers asked for
+		masterWatchFactory, err = factory.NewMasterWatchFactory(ovnClientset)
+		if err != nil {
+			return err
+		}
+		watchFactory = masterWatchFactory
+		var ovnNBClient, ovnSBClient goovn.Client
 
 		if ovnNBClient, err = util.NewOVNNBClient(); err != nil {
 			return fmt.Errorf("error when trying to initialize go-ovn NB client: %v", err)
@@ -245,20 +247,32 @@ func runOvnKube(ctx *cli.Context) error {
 		// since we capture some metrics in Start()
 		metrics.RegisterMasterMetrics(ovnNBClient, ovnSBClient)
 
-		ovnController := ovn.NewOvnController(clientset, egressIPClientset, egressFirewallClientset, factory, stopChan, nil, ovnNBClient, ovnSBClient, util.EventRecorder(clientset))
-		if err := ovnController.Start(clientset, master, wg); err != nil {
+		ovnController := ovn.NewOvnController(ovnClientset, masterWatchFactory, stopChan, nil, ovnNBClient, ovnSBClient, util.EventRecorder(ovnClientset.KubeClient))
+		if err := ovnController.Start(ovnClientset.KubeClient, master, wg); err != nil {
 			return err
 		}
 	}
 
 	if node != "" {
+		var nodeWatchFactory factory.NodeWatchFactory
+		if masterWatchFactory == nil {
+			var err error
+			nodeWatchFactory, err = factory.NewNodeWatchFactory(ovnClientset, node)
+			if err != nil {
+				return err
+			}
+			watchFactory = nodeWatchFactory
+		} else {
+			nodeWatchFactory = masterWatchFactory
+		}
+
 		if config.Kubernetes.Token == "" {
 			return fmt.Errorf("cannot initialize node without service account 'token'. Please provide one with --k8s-token argument")
 		}
 		// register ovnkube node specific prometheus metrics exported by the node
 		metrics.RegisterNodeMetrics()
 		start := time.Now()
-		n := ovnnode.NewNode(clientset, factory, node, stopChan, util.EventRecorder(clientset))
+		n := ovnnode.NewNode(ovnClientset.KubeClient, nodeWatchFactory, node, stopChan, util.EventRecorder(ovnClientset.KubeClient))
 		if err := n.Start(wg); err != nil {
 			return err
 		}
@@ -274,14 +288,14 @@ func runOvnKube(ctx *cli.Context) error {
 
 	// start the prometheus server to serve OVN Metrics (default port: 9476)
 	if config.Kubernetes.OVNMetricsBindAddress != "" {
-		metrics.RegisterOvnMetrics(clientset, node)
+		metrics.RegisterOvnMetrics(ovnClientset.KubeClient, node)
 		metrics.StartOVNMetricsServer(config.Kubernetes.OVNMetricsBindAddress)
 	}
 
 	// run until cancelled
 	<-ctx.Context.Done()
 	close(stopChan)
-	factory.Shutdown()
+	watchFactory.Shutdown()
 	wg.Wait()
 	return nil
 }

@@ -1,13 +1,17 @@
+// +build linux
+
 package metrics
 
 import (
 	"fmt"
+	"reflect"
 	"strings"
 	"sync"
 	"time"
 
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
 	"github.com/prometheus/client_golang/prometheus"
+	"github.com/vishvananda/netlink"
 	"k8s.io/klog"
 )
 
@@ -222,7 +226,7 @@ var metricOvsTcPolicy = prometheus.NewGauge(prometheus.GaugeOpts{
 var metricInterafceDriverName = prometheus.NewGaugeVec(prometheus.GaugeOpts{
 	Namespace: MetricOvsNamespace,
 	Subsystem: MetricOvsSubsystemVswitchd,
-	Name:      "interafce_driver_name",
+	Name:      "interface_driver_name",
 	Help: "A metric with a constant '1' value labeled by driver name that " +
 		"specifies the name of the device driver controlling the network interface"},
 	[]string{
@@ -528,10 +532,17 @@ func getOvsBridgeInfo() (bridgePortCount map[string]float64, portToBridgeMap map
 	return bridgePortCount, portToBridgeMap, nil
 }
 
-// ovsBridgeMetricsUpdate updates bridgeMetrics & ovsInterface metrics for every 30sec
+// ovsBridgeMetricsUpdate updates bridgeMetrics &
+// ovsInterface metrics & geneveInterface metrics for every 30sec
 func ovsBridgeMetricsUpdate() {
 	for {
 		time.Sleep(30 * time.Second)
+		// set geneve interface metrics
+		err := geneveInterfaceMetricsUpdate()
+		if err != nil {
+			klog.Errorf("%s", err.Error())
+		}
+		// update ovs bridge metrics
 		bridgePortCountMapping, portBridgeMapping, err := getOvsBridgeInfo()
 		if err != nil {
 			klog.Errorf("%s", err.Error())
@@ -682,6 +693,56 @@ func setOvsInterfaceStatusFields(interfaceBridge, interfacePort, interfaceName, 
 		interfaceName, driverVersion).Set(1)
 	metricInterafceFirmwareVersion.WithLabelValues(interfaceBridge, interfacePort,
 		interfaceName, firmwareVersion).Set(1)
+}
+
+func getGeneveInterfaceStatsFieldValue(stats *netlink.LinkStatistics, field string) float64 {
+	r := reflect.ValueOf(stats)
+	fieldValue := reflect.Indirect(r).FieldByName(field)
+	return float64(fieldValue.Uint())
+}
+
+func setGeneveInterfaceStatistics(geneveInterfaceName string, link netlink.Link) {
+	var geneveInterfaceStatsMap = map[string]string{
+		"rx_packets":   "RxPackets",
+		"rx_bytes":     "RxBytes",
+		"rx_dropped":   "RxDropped",
+		"rx_frame_err": "RxFrameErrors",
+		"rx_over_err":  "RxOverErrors",
+		"rx_crc_err":   "RxCrcErrors",
+		"rx_errors":    "RxErrors",
+		"tx_packets":   "TxPackets",
+		"tx_bytes":     "TxBytes",
+		"tx_dropped":   "TxDropped",
+		"collisions":   "Collisions",
+		"tx_errors":    "TxErrors",
+	}
+
+	for statsName, geneveStatsName := range geneveInterfaceStatsMap {
+		metricName := "interface_" + statsName
+		metricValue := getGeneveInterfaceStatsFieldValue(link.Attrs().Statistics, geneveStatsName)
+		ovsInterfaceMetricsDataMap[metricName].metric.WithLabelValues(
+			"none", "none", geneveInterfaceName).Set(metricValue)
+	}
+}
+
+// geneveInterfaceMetricsUpdate updates the geneve interface
+// metrics obtained through netlink library equivalent to
+// (ip -s li show genev_sys_6081)
+func geneveInterfaceMetricsUpdate() error {
+	geneveInterfaceName := "genev_sys_6081"
+	link, err := netlink.LinkByName(geneveInterfaceName)
+	if err != nil {
+		return fmt.Errorf("failed to lookup link %s: (%v)", geneveInterfaceName, err)
+	}
+	ovsInterfaceMetricsDataMap["interface_mtu"].metric.WithLabelValues(
+		"none", "none", geneveInterfaceName).Set(float64(link.Attrs().MTU))
+	geneveInterfaceLinkStateValue := getOvsInterfaceState(link.Attrs().OperState.String())
+	ovsInterfaceMetricsDataMap["interface_link_state"].metric.WithLabelValues(
+		"none", "none", geneveInterfaceName).Set(geneveInterfaceLinkStateValue)
+	ovsInterfaceMetricsDataMap["interface_ifindex"].metric.WithLabelValues(
+		"none", "none", geneveInterfaceName).Set(float64(link.Attrs().Index))
+	setGeneveInterfaceStatistics(geneveInterfaceName, link)
+	return nil
 }
 
 // ovsInterfaceMetricsUpdate updates the ovs interface metrics
