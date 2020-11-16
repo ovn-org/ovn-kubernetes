@@ -191,6 +191,10 @@ func (ovn *Controller) deleteEndpoints(ep *kapi.Endpoints) error {
 	if !util.IsClusterIPSet(svc) {
 		return nil
 	}
+	gateways, _, err := ovn.getOvnGateways()
+	if err != nil {
+		klog.Error(err)
+	}
 	for _, svcPort := range svc.Spec.Ports {
 		var lb string
 		lb, err = ovn.getLoadBalancer(svcPort.Protocol)
@@ -198,50 +202,37 @@ func (ovn *Controller) deleteEndpoints(ep *kapi.Endpoints) error {
 			klog.Errorf("Failed to get load balancer for %s (%v)", lb, err)
 			continue
 		}
+		// Cluster IP service
+		ovn.clearVIPsAddRejectACL(svc, lb, svc.Spec.ClusterIP, svcPort.Port, svcPort.Protocol)
 
-		// apply reject ACL if necessary before deleting endpoints (avoids unwanted traffic events hitting OVN/OVS)
-		if svcQualifiesForReject(svc) {
-			aclUUID, err := ovn.createLoadBalancerRejectACL(lb, svc.Spec.ClusterIP, svcPort.Port, svcPort.Protocol)
+		for _, gateway := range gateways {
+			loadBalancer, err := ovn.getGatewayLoadBalancer(gateway, svcPort.Protocol)
 			if err != nil {
-				klog.Errorf("Failed to create reject ACL for load balancer: %s, error: %v", lb, err)
-			} else {
-				klog.Infof("Reject ACL created for load balancer: %s, %s", lb, aclUUID)
-			}
-		}
-
-		// clear endpoints from the LB
-		err := ovn.configureLoadBalancer(lb, svc.Spec.ClusterIP, svcPort.Port, nil)
-		if err != nil {
-			klog.Errorf("Error in deleting endpoints for lb %s: %v", lb, err)
-		}
-
-		// Cloud load balancers: directly reject traffic from pods
-		for _, ing := range svc.Status.LoadBalancer.Ingress {
-			if ing.IP == "" {
+				klog.Errorf("Gateway router %s does not have load balancer (%v)", gateway, err)
 				continue
 			}
-			gateways, _, err := ovn.getOvnGateways()
-			if err != nil {
-				return err
-			}
-			for _, gateway := range gateways {
-				loadBalancer, err := ovn.getGatewayLoadBalancer(gateway, svcPort.Protocol)
-				if err != nil {
-					klog.Errorf("Gateway router %s does not have load balancer (%v)", gateway, err)
+			// Cloud load balancers: directly reject traffic from pods
+			for _, ing := range svc.Status.LoadBalancer.Ingress {
+				if ing.IP == "" {
 					continue
 				}
 				ovn.clearVIPsAddRejectACL(svc, loadBalancer, ing.IP, svcPort.Port, svcPort.Protocol)
 			}
-		}
-
-		vip := util.JoinHostPortInt32(svc.Spec.ClusterIP, svcPort.Port)
-		ovn.removeServiceEndpoints(lb, vip)
-
-		if util.ServiceTypeHasNodePort(svc) {
-			ovn.deleteGatewayVIPs(svcPort.Protocol, svcPort.NodePort)
-		}
-		if err := ovn.deleteExternalVIPs(svc, svcPort); err != nil {
-			klog.Error(err)
+			// Node Port services
+			if util.ServiceTypeHasNodePort(svc) {
+				physicalIPs, err := ovn.getGatewayPhysicalIPs(gateway)
+				if err != nil {
+					klog.Errorf("Gateway router %s does not have physical ip (%v)", gateway, err)
+					continue
+				}
+				for _, physicalIP := range physicalIPs {
+					ovn.clearVIPsAddRejectACL(svc, loadBalancer, physicalIP, svcPort.NodePort, svcPort.Protocol)
+				}
+			}
+			// External IP services
+			for _, extIP := range svc.Spec.ExternalIPs {
+				ovn.clearVIPsAddRejectACL(svc, loadBalancer, extIP, svcPort.Port, svcPort.Protocol)
+			}
 		}
 	}
 	return nil
