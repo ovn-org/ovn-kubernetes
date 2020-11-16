@@ -162,7 +162,6 @@ func shareGatewayInterfaceTest(app *cli.App, testNS ns.NetNS,
 			"ovs-ofctl add-flow breth0 cookie=0xdeff105, priority=100, table=1, ct_state=+trk+rel, actions=output:5",
 			"ovs-ofctl add-flow breth0 cookie=0xdeff105, priority=10, table=1, dl_dst=" + eth0MAC + ", actions=output:LOCAL",
 			"ovs-ofctl add-flow breth0 cookie=0xdeff105, priority=0, table=1, actions=output:NORMAL",
-			"ovs-ofctl add-flow breth0 cookie=0xdeff105, priority=0, table=2, actions=output:7",
 		})
 		// nodePortWatcher()
 		fexec.AddFakeCmd(&ovntest.ExpectedCmd{
