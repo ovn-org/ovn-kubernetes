@@ -108,12 +108,24 @@ func (ovn *Controller) AddEndpoints(ep *kapi.Endpoints) error {
 				}
 			}
 			// Cloud load balancers: directly load balance that traffic from pods
+			// Apply to gateway load-balancers to handle ingress traffic to the GR as well as worker switches
 			for _, ing := range svc.Status.LoadBalancer.Ingress {
 				if ing.IP == "" {
 					continue
 				}
-				if err = ovn.createLoadBalancerVIPs(loadBalancer, []string{ing.IP}, svcPort.Port, lbEps.IPs, lbEps.Port); err != nil {
-					klog.Errorf("Error in creating Ingress LB IP for svc %s, target port: %d - %v\n", svc.Name, lbEps.Port, err)
+				gateways, _, err := ovn.getOvnGateways()
+				if err != nil {
+					return err
+				}
+				for _, gateway := range gateways {
+					loadBalancer, err := ovn.getGatewayLoadBalancer(gateway, svcPort.Protocol)
+					if err != nil {
+						klog.Errorf("Gateway router %s does not have load balancer (%v)", gateway, err)
+						continue
+					}
+					if err = ovn.createLoadBalancerVIPs(loadBalancer, []string{ing.IP}, svcPort.Port, lbEps.IPs, lbEps.Port); err != nil {
+						klog.Errorf("Error in creating Ingress LB IP for svc %s, target port: %d - %v\n", svc.Name, lbEps.Port, err)
+					}
 				}
 			}
 		}
@@ -188,7 +200,7 @@ func (ovn *Controller) deleteEndpoints(ep *kapi.Endpoints) error {
 		}
 
 		// apply reject ACL if necessary before deleting endpoints (avoids unwanted traffic events hitting OVN/OVS)
-		if ovn.svcQualifiesForReject(svc) {
+		if svcQualifiesForReject(svc) {
 			aclUUID, err := ovn.createLoadBalancerRejectACL(lb, svc.Spec.ClusterIP, svcPort.Port, svcPort.Protocol)
 			if err != nil {
 				klog.Errorf("Failed to create reject ACL for load balancer: %s, error: %v", lb, err)
@@ -208,18 +220,17 @@ func (ovn *Controller) deleteEndpoints(ep *kapi.Endpoints) error {
 			if ing.IP == "" {
 				continue
 			}
-			if ovn.svcQualifiesForReject(svc) {
-				aclUUID, err := ovn.createLoadBalancerRejectACL(lb, ing.IP, svcPort.Port, svcPort.Protocol)
-				if err != nil {
-					klog.Errorf("Failed to create reject ACL for Ingress IP: %s, load balancer: %s, error: %v",
-						ing.IP, lb, err)
-				} else {
-					klog.Infof("Reject ACL created for Ingress IP: %s, load balancer: %s, %s", ing.IP, lb, aclUUID)
-				}
-			}
-			err := ovn.configureLoadBalancer(lb, ing.IP, svcPort.Port, nil)
+			gateways, _, err := ovn.getOvnGateways()
 			if err != nil {
-				klog.Errorf("Error in deleting endpoints for lb %s: %v", lb, err)
+				return err
+			}
+			for _, gateway := range gateways {
+				loadBalancer, err := ovn.getGatewayLoadBalancer(gateway, svcPort.Protocol)
+				if err != nil {
+					klog.Errorf("Gateway router %s does not have load balancer (%v)", gateway, err)
+					continue
+				}
+				ovn.clearVIPsAddRejectACL(svc, loadBalancer, ing.IP, svcPort.Port, svcPort.Protocol)
 			}
 		}
 
@@ -234,4 +245,20 @@ func (ovn *Controller) deleteEndpoints(ep *kapi.Endpoints) error {
 		}
 	}
 	return nil
+}
+
+func (ovn *Controller) clearVIPsAddRejectACL(svc *kapi.Service, lb, ip string, port int32, proto kapi.Protocol) {
+	if svcQualifiesForReject(svc) {
+		aclUUID, err := ovn.createLoadBalancerRejectACL(lb, ip, port, proto)
+		if err != nil {
+			klog.Errorf("Failed to create reject ACL for VIP: %s:%d, load balancer: %s, error: %v",
+				ip, port, lb, err)
+		} else {
+			klog.Infof("Reject ACL created for VIP: %s:%d, load balancer: %s, %s", ip, port, lb, aclUUID)
+		}
+	}
+	err := ovn.configureLoadBalancer(lb, ip, port, nil)
+	if err != nil {
+		klog.Errorf("Error in clearing endpoints for lb %s: %v", lb, err)
+	}
 }

@@ -115,6 +115,31 @@ func (ovn *Controller) deleteExternalVIPs(service *kapi.Service, svcPort kapi.Se
 	return nil
 }
 
+func (ovn *Controller) deleteIngressVIPs(service *kapi.Service, svcPort kapi.ServicePort) error {
+	gateways, stderr, err := ovn.getOvnGateways()
+	if err != nil {
+		return fmt.Errorf("error: failed to get ovn gateways, stderr: %s, err: %v)", stderr, err)
+	}
+	for _, ing := range service.Status.LoadBalancer.Ingress {
+		if ing.IP == "" {
+			continue
+		}
+		klog.V(5).Infof("Searching to remove Ingress VIPs - %s, %d", svcPort.Protocol, svcPort.Port)
+		ingressVIP := util.JoinHostPortInt32(ing.IP, svcPort.Port)
+		for _, gw := range gateways {
+			loadBalancer, err := ovn.getGatewayLoadBalancer(gw, svcPort.Protocol)
+			if err != nil {
+				klog.Errorf("Gateway router %s does not have load balancer (%v)", gw, err)
+				continue
+			}
+			if err := ovn.deleteLoadBalancerVIP(loadBalancer, ingressVIP); err != nil {
+				klog.Error(err)
+			}
+		}
+	}
+	return nil
+}
+
 // getJoinLRPAddresses check if IPs of gateway logical router port are within the join switch IP range, and return them if true.
 func (oc *Controller) getJoinLRPAddresses(nodeName string) []*net.IPNet {
 	// try to get the IPs from the logical router port
