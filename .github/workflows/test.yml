@@ -5,7 +5,7 @@ on:
   pull_request:
     branches: [ master ]
   schedule:
-    - cron: '* */12 * * *'
+    - cron: '0 */12 * * *'
 
 env:
   GO_VERSION: 1.15.1
