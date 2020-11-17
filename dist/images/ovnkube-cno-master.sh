@@ -18,7 +18,6 @@ set -xe
 
 
 echo "$(date -Iseconds) - starting ovn-northd"
-echo "[run-northd] IRL <script> exec ovn-northd --no-chdir -vconsole${OVN_LOG_LEVEL} -vfile:off --ovnnb-db ${OVN_NB_DB_LIST} --ovnsb-db ${OVN_SB_DB_LIST}"
    exec ovn-northd \
 	     --no-chdir "-vconsole:${OVN_LOG_LEVEL}" -vfile:off \
 	     --ovnnb-db "${OVN_NB_DB_LIST}" \
@@ -36,9 +35,7 @@ set -xe
             source "/env/_master"
             set +o allexport
           fi
-          echo "----------- [run-nbdb] IRL <script> -------------------"
  
-	  #IRL
           run-nbdb-postStart1
 
 	  # initialize variables
@@ -191,8 +188,6 @@ run-nbdb-postStart1() {
                 if [[ "${K8S_NODE_IP}" == "${MASTER_IP}" ]]; then
                   echo "$(date -Iseconds) - nbdb - postStart - waiting for master to be selected"
 		
-		  echo "----------- [run-nbdb-postStart] IRL <script> -------------------"
- 
 
                   # set the connection and disable inactivity probe
                   retries=0
@@ -205,7 +200,6 @@ run-nbdb-postStart1() {
                   sleep 2
                   done
 
-		  echo "IRL: Entering Section on Initialization"
                   # Upgrade the db if required.
                   DB_SCHEMA="/usr/share/ovn/ovn-nb.ovsschema"
                   DB_SERVER="unix:/var/run/ovn/ovnnb_db.sock"
@@ -223,7 +217,6 @@ run-nbdb-postStart1() {
                   fi
                 fi
 		
-		echo "IRL: Entering Section on northd probe interval"
                 #configure northd_probe_interval
                 OVN_NB_CTL="ovn-nbctl -p /ovn-cert/tls.key -c /ovn-cert/tls.crt -C /ovn-ca/ca-bundle.crt \
                 --db "${OVN_NB_DB_LIST}""
@@ -242,7 +235,6 @@ run-nbdb-postStart1() {
                   fi
                 done
 		
-		echo "IRL entering section on setting northd probe interval"
 
                 if [[ "${current_probe_interval}" != "${northd_probe_interval}" ]]; then
                   retries=0
@@ -259,7 +251,6 @@ run-nbdb-postStart1() {
                   done
                 fi
 
-		echo "IRL: Entering Section on NB RAFT election timers"
                 #configure NB RAFT election timers
                 election_timer="${OVN_NB_RAFT_ELECTION_TIMER}"
                 echo "Setting nb-db raft election timer to ${election_timer} ms"
@@ -293,7 +284,6 @@ run-nbdb-postStart1() {
                     fi
                   done
 
-		  echo "IRL: Entering is_leader"
                   is_leader=$(ovs-appctl -t /var/run/ovn/ovnnb_db.ctl cluster/status OVN_Northbound 2>/dev/null \
                     | grep "Role: leader")
                   if [[ ! -z "${is_leader}" ]]; then
@@ -400,7 +390,6 @@ run-nbdb-postStart1() {
             set +o allexport
           fi
 
-	  #IRL	
 	  run-sbdb-postStart1
           
 	  # initialize variables
