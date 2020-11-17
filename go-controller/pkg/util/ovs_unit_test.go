@@ -1833,6 +1833,63 @@ func TestRunOVSDBClient(t *testing.T) {
 	}
 }
 
+func TestRunOVSDBTool(t *testing.T) {
+	mockKexecIface := new(mock_k8s_io_utils_exec.Interface)
+	mockExecRunner := new(mocks.ExecRunner)
+	mockCmd := new(mock_k8s_io_utils_exec.Cmd)
+	// below is defined in ovs.go.
+	runCmdExecRunner = mockExecRunner
+	// note runner is defined in ovs.go file
+	runner = &execHelper{exec: mockKexecIface}
+	tests := []struct {
+		desc                    string
+		expectedErr             error
+		onRetArgsExecUtilsIface *onCallReturnArgs
+		onRetArgsKexecIface     *onCallReturnArgs
+	}{
+		{
+			desc:                    "negative: run `ovsdb-tool` command",
+			expectedErr:             fmt.Errorf("failed to execute ovsdb-tool command"),
+			onRetArgsExecUtilsIface: &onCallReturnArgs{"RunCmd", []string{"*mocks.Cmd", "string", "[]string", "string"}, []interface{}{nil, nil, fmt.Errorf("failed to execute ovsdb-tool command")}},
+			onRetArgsKexecIface:     &onCallReturnArgs{"Command", []string{"string", "string"}, []interface{}{mockCmd}},
+		},
+		{
+			desc:                    "positive: run `ovsdb-tool` command",
+			expectedErr:             nil,
+			onRetArgsExecUtilsIface: &onCallReturnArgs{"RunCmd", []string{"*mocks.Cmd", "string", "[]string", "string"}, []interface{}{bytes.NewBuffer([]byte("testblah")), bytes.NewBuffer([]byte("")), nil}},
+			onRetArgsKexecIface:     &onCallReturnArgs{"Command", []string{"string", "string"}, []interface{}{mockCmd}},
+		},
+	}
+	for i, tc := range tests {
+		t.Run(fmt.Sprintf("%d:%s", i, tc.desc), func(t *testing.T) {
+			call := mockExecRunner.On(tc.onRetArgsExecUtilsIface.onCallMethodName)
+			for _, arg := range tc.onRetArgsExecUtilsIface.onCallMethodArgType {
+				call.Arguments = append(call.Arguments, mock.AnythingOfType(arg))
+			}
+			for _, ret := range tc.onRetArgsExecUtilsIface.retArgList {
+				call.ReturnArguments = append(call.ReturnArguments, ret)
+			}
+			call.Once()
+
+			ifaceCall := mockKexecIface.On(tc.onRetArgsKexecIface.onCallMethodName)
+			for _, arg := range tc.onRetArgsKexecIface.onCallMethodArgType {
+				ifaceCall.Arguments = append(ifaceCall.Arguments, mock.AnythingOfType(arg))
+			}
+			for _, ret := range tc.onRetArgsKexecIface.retArgList {
+				ifaceCall.ReturnArguments = append(ifaceCall.ReturnArguments, ret)
+			}
+			ifaceCall.Once()
+			_, _, e := RunOVSDBTool()
+
+			if tc.expectedErr != nil {
+				assert.Error(t, e)
+			}
+			mockExecRunner.AssertExpectations(t)
+			mockKexecIface.AssertExpectations(t)
+		})
+	}
+}
+
 func TestRunOVSDBClientOVNNB(t *testing.T) {
 	mockKexecIface := new(mock_k8s_io_utils_exec.Interface)
 	mockExecRunner := new(mocks.ExecRunner)
