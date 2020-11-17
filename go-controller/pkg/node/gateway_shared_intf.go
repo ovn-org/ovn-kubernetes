@@ -464,7 +464,7 @@ func newSharedGatewayOpenFlowManager(nodeName, macAddress, gwBridge, gwIntf stri
 	}
 	nFlows++
 
-	// table 1, we check to see if this dest mac is the shared mac, if so flood to both ports
+	// table 1, we check to see if this dest mac is the shared mac, if so send to host
 	_, stderr, err = util.RunOVSOfctl("add-flow", gwBridge,
 		fmt.Sprintf("cookie=%s, priority=10, table=1, dl_dst=%s, actions=output:LOCAL",
 			defaultOpenFlowCookie, macAddress))
