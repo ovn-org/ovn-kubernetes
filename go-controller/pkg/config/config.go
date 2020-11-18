@@ -95,9 +95,7 @@ var (
 	}
 
 	// OVNKubernetesFeatureConfig holds OVN-Kubernetes feature enhancement config file parameters and command-line overrides
-	OVNKubernetesFeature = OVNKubernetesFeatureConfig{
-		EnableEgressIP: true,
-	}
+	OVNKubernetesFeature OVNKubernetesFeatureConfig
 
 	// OvnNorth holds northbound OVN database client and server authentication and location details
 	OvnNorth OvnAuthConfig

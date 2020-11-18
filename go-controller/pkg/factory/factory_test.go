@@ -224,6 +224,7 @@ var _ = Describe("Watch Factory Operations", func() {
 
 		// Restore global default values before each testcase
 		config.PrepareTestConfig()
+		config.OVNKubernetesFeature.EnableEgressIP = true
 
 		fakeClient = &fake.Clientset{}
 		egressFirewallFakeClient = &egressfirewallfake.Clientset{}
