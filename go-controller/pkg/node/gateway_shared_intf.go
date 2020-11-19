@@ -464,7 +464,28 @@ func newSharedGatewayOpenFlowManager(nodeName, macAddress, gwBridge, gwIntf stri
 	}
 	nFlows++
 
-	// table 1, we check to see if this dest mac is the shared mac, if so flood to both ports
+	if config.Gateway.DisableSNATMultipleGWs {
+		// table 1, traffic to pod subnet go directly to OVN
+		for _, clusterEntry := range config.Default.ClusterSubnets {
+			cidr := clusterEntry.CIDR
+			var ipPrefix string
+			if utilnet.IsIPv6CIDR(cidr) {
+				ipPrefix = "ipv6"
+			} else {
+				ipPrefix = "ip"
+			}
+			_, stderr, err = util.RunOVSOfctl("add-flow", gwBridge,
+				fmt.Sprintf("cookie=%s, priority=15, table=1, %s, %s_dst=%s, actions=output:%s",
+					defaultOpenFlowCookie, ipPrefix, ipPrefix, cidr, ofportPatch))
+			if err != nil {
+				return nil, fmt.Errorf("failed to add openflow flow to %s, stderr: %q, "+
+					"error: %v", gwBridge, stderr, err)
+			}
+			nFlows++
+		}
+	}
+
+	// table 1, we check to see if this dest mac is the shared mac, if so send to host
 	_, stderr, err = util.RunOVSOfctl("add-flow", gwBridge,
 		fmt.Sprintf("cookie=%s, priority=10, table=1, dl_dst=%s, actions=output:LOCAL",
 			defaultOpenFlowCookie, macAddress))
@@ -475,13 +496,17 @@ func newSharedGatewayOpenFlowManager(nodeName, macAddress, gwBridge, gwIntf stri
 
 	if config.IPv6Mode {
 		// REMOVEME(trozet) when https://bugzilla.kernel.org/show_bug.cgi?id=11797 is resolved
-		// must flood icmpv6 traffic as it fails to create a CT entry
-		_, stderr, err = util.RunOVSOfctl("add-flow", gwBridge,
-			fmt.Sprintf("cookie=%s, priority=1, table=1,icmp6 actions=FLOOD", defaultOpenFlowCookie))
-		if err != nil {
-			return nil, fmt.Errorf("failed to add openflow flow to %s, stderr: %q, error: %v", gwBridge, stderr, err)
+		// must flood icmpv6 Route Advertisement and Neighbor Advertisement traffic as it fails to create a CT entry
+		for _, icmpType := range []int{types.RouteAdvertisementICMPType, types.NeighborAdvertisementICMPType} {
+			_, stderr, err = util.RunOVSOfctl("add-flow", gwBridge,
+				fmt.Sprintf("cookie=%s, priority=14, table=1,icmp6,icmpv6_type=%d actions=FLOOD",
+					defaultOpenFlowCookie, icmpType))
+			if err != nil {
+				return nil, fmt.Errorf("failed to add openflow flow to %s, stderr: %q, "+
+					"error: %v", gwBridge, stderr, err)
+			}
+			nFlows++
 		}
-		nFlows++
 	}
 
 	// table 1, all other connections do normal processing
