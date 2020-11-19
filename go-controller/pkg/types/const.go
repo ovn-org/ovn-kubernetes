@@ -53,4 +53,8 @@ const (
 
 	V4JoinSubnetCIDR = "100.64.0.0/16"
 	V6JoinSubnetCIDR = "fd98::/64"
+
+	// OpenFlow and Networking constants
+	RouteAdvertisementICMPType    = 134
+	NeighborAdvertisementICMPType = 136
 )
