@@ -7,7 +7,6 @@ import (
 	"strings"
 	"time"
 
-	hotypes "github.com/ovn-org/ovn-kubernetes/go-controller/hybrid-overlay/pkg/types"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
 
 	kapi "k8s.io/api/core/v1"
@@ -189,25 +188,7 @@ func (oc *Controller) AddNamespace(ns *kapi.Namespace) {
 	defer nsInfo.Unlock()
 
 	var err error
-	annotation := ns.Annotations[hotypes.HybridOverlayExternalGw]
-	if annotation != "" {
-		parsedAnnotation := net.ParseIP(annotation)
-		if parsedAnnotation == nil {
-			klog.Errorf("Could not parse hybrid overlay external gw annotation")
-		} else {
-			nsInfo.hybridOverlayExternalGW = parsedAnnotation
-		}
-	}
-	annotation = ns.Annotations[hotypes.HybridOverlayVTEP]
-	if annotation != "" {
-		parsedAnnotation := net.ParseIP(annotation)
-		if parsedAnnotation == nil {
-			klog.Errorf("Could not parse hybrid overlay VTEP annotation")
-		} else {
-			nsInfo.hybridOverlayVTEP = parsedAnnotation
-		}
-	}
-	annotation = ns.Annotations[routingExternalGWsAnnotation]
+	annotation := ns.Annotations[routingExternalGWsAnnotation]
 	if annotation != "" {
 		nsInfo.routingExternalGWs, err = parseRoutingExternalGWAnnotation(annotation)
 		if err != nil {
@@ -288,28 +269,6 @@ func (oc *Controller) updateNamespace(old, newer *kapi.Namespace) {
 				}
 			}
 		}
-	}
-	annotation = newer.Annotations[hotypes.HybridOverlayExternalGw]
-	if annotation != "" {
-		parsedAnnotation := net.ParseIP(annotation)
-		if parsedAnnotation == nil {
-			klog.Errorf("Could not parse hybrid overlay external gw annotation")
-		} else {
-			nsInfo.hybridOverlayExternalGW = parsedAnnotation
-		}
-	} else {
-		nsInfo.hybridOverlayExternalGW = nil
-	}
-	annotation = newer.Annotations[hotypes.HybridOverlayVTEP]
-	if annotation != "" {
-		parsedAnnotation := net.ParseIP(annotation)
-		if parsedAnnotation == nil {
-			klog.Errorf("Could not parse hybrid overlay VTEP annotation")
-		} else {
-			nsInfo.hybridOverlayVTEP = parsedAnnotation
-		}
-	} else {
-		nsInfo.hybridOverlayVTEP = nil
 	}
 	oc.multicastUpdateNamespace(newer, nsInfo)
 }
