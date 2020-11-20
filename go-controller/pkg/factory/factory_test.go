@@ -794,21 +794,6 @@ var _ = Describe("Watch Factory Operations", func() {
 		wf, err = NewMasterWatchFactory(ovnClientset)
 		Expect(err).NotTo(HaveOccurred())
 
-		startWg := sync.WaitGroup{}
-		startWg.Add(1)
-		doneWg := sync.WaitGroup{}
-		doneWg.Add(1)
-		go func() {
-			startWg.Done()
-			// Send an update event for each node
-			for _, n := range nodes {
-				n.Status.Phase = v1.NodeTerminated
-				nodeWatch.Modify(n)
-			}
-			doneWg.Done()
-		}()
-		startWg.Wait()
-
 		h, c := addHandler(wf, nodeType, cache.ResourceEventHandlerFuncs{
 			AddFunc: func(obj interface{}) {
 				defer GinkgoRecover()
@@ -835,7 +820,16 @@ var _ = Describe("Watch Factory Operations", func() {
 			},
 			DeleteFunc: func(obj interface{}) {},
 		})
-		doneWg.Wait()
+
+		done := make(chan bool)
+		go func() {
+			// Send an update event for each node
+			for _, n := range nodes {
+				n.Status.Phase = v1.NodeTerminated
+				nodeWatch.Modify(n)
+			}
+			done <- true
+		}()
 
 		// Adds are done synchronously at handler addition time
 		for _, ot := range testNodes {
@@ -845,6 +839,7 @@ var _ = Describe("Watch Factory Operations", func() {
 		}
 		Expect(c.getAdded()).To(Equal(len(testNodes)))
 
+		<-done
 		// Updates are async and may take a bit longer to finish
 		Eventually(c.getUpdated, 10).Should(Equal(len(testNodes)))
 		for _, ot := range testNodes {
