@@ -31,6 +31,10 @@ run-nbdb() {
         set +o allexport
     fi
 
+<<<<<<< HEAD
+=======
+    run-nbdb-postStart
+>>>>>>> 97f72e8dcd8a4b61a39e49635506ae0f65971024
 
     # initialize variables
     ovn_kubernetes_namespace=openshift-ovn-kubernetes
@@ -260,8 +264,8 @@ run-nbdb-readinessProbe() {
 run-nbdb-preStop() {
     /usr/bin/ovn-appctl -t /var/run/ovn/ovnnb_db.ctl exit
 }
-run-db-readinessProbe() {
 
+run-db-readinessProbe() {
     set -xe
     /usr/bin/ovn-appctl -t ${OVN_DB_FILE_PATH} --timeout=3 cluster/status ${OVN_DB_BOUND} 2>/dev/null | grep ${K8S_NODE_IP} | grep -v Address -q
 }
@@ -269,6 +273,7 @@ run-db-preStop() {
     /usr/bin/ovn-appctl -t ${OVN_DB_FILE_PATH} exit
 
 }
+
 run-kube-rbac-proxy() {
     set -euo pipefail
     TLS_PK=/etc/pki/tls/metrics-cert/tls.key
@@ -379,6 +384,10 @@ run-sbdb() {
         set +o allexport
     fi
 
+<<<<<<< HEAD
+=======
+    run-sbdb-postStart
+>>>>>>> 97f72e8dcd8a4b61a39e49635506ae0f65971024
 
     # initialize variables
     ovn_kubernetes_namespace=openshift-ovn-kubernetes
@@ -566,6 +575,10 @@ run-sbdb-postStart() {
 
 run-sbdb-preStop() {
     /usr/bin/ovn-appctl -t /var/run/ovn/ovnsb_db.ctl exit
+<<<<<<< HEAD
+=======
+    echo "done!"
+>>>>>>> 97f72e8dcd8a4b61a39e49635506ae0f65971024
 }
 
 run-sbdb-readinessProbe() {
@@ -692,24 +705,34 @@ case ${cmd} in
 "run-nbdb-preStop")
     run-nbdb-preStop
     ;;
+<<<<<<< HEAD
 "run-db-preStop")
     run-db-preStop
     ;;
+=======
+>>>>>>> 97f72e8dcd8a4b61a39e49635506ae0f65971024
 "run-sbdb-readinessProbe")
     run-sbdb-readinessProbe
     ;;
 "run-nbdb-readinessProbe")
     run-nbdb-readinessProbe
     ;;
+<<<<<<< HEAD
 "run-db-readinessProbe")
     run-db-readinessProbe
     ;;
+=======
+>>>>>>> 97f72e8dcd8a4b61a39e49635506ae0f65971024
 "run-kube-rbac-proxy")
     run-kube-rbac-proxy
     ;;
 *)
     echo "invalid command ${cmd}"
+<<<<<<< HEAD
     echo "valid commands: run-ovn-northd run-ovn-dbchecker run-db-preStop run-db-readinessProbe" \
+=======
+    echo "valid commands: run-ovn-northd run-ovn-dbchecker " \
+>>>>>>> 97f72e8dcd8a4b61a39e49635506ae0f65971024
         "run-nbdb run-nbdb-postStart run-kube-rbac-proxy run-nbdb-readinessProbe " \ 
     "run-sbdb-readinessProbe run-nbdb-preStop run-sbdb-preStop run-sbdb-postStart run-sbdb run-sbdb-postStart"
     exit 0
