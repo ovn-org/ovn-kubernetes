@@ -4,6 +4,7 @@ import (
 	"strings"
 	"sync"
 
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
 	v1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/util/sets"
 	"k8s.io/klog/v2"
@@ -125,4 +126,15 @@ func (st *serviceTracker) getServiceVipsMap() sets.String {
 		}
 	}
 	return result
+}
+
+// updateKubernetesService adds or updates the tracker from a Kubernetes service
+// added for testing purposes
+func (st *serviceTracker) updateKubernetesService(service *v1.Service) {
+	for _, ip := range service.Spec.ClusterIPs {
+		for _, svcPort := range service.Spec.Ports {
+			vip := util.JoinHostPortInt32(ip, svcPort.Port)
+			st.updateService(service.Name, service.Namespace, vip, svcPort.Protocol)
+		}
+	}
 }
