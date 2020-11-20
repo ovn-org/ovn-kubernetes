@@ -62,7 +62,8 @@ func ovsGet(table, record, column, key string) (string, error) {
 	} else {
 		args = append(args, column)
 	}
-	return ovsExec(args...)
+	output, err := ovsExec(args...)
+	return strings.Trim(strings.TrimSpace(string(output)), "\""), err
 }
 
 // Returns the given column of records that match the condition
