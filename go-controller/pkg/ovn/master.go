@@ -32,9 +32,6 @@ import (
 )
 
 const (
-	// OvnServiceIdledAt is a constant string representing the Service annotation key
-	// whose value indicates the time stamp in RFC3339 format when a Service was idled
-	OvnServiceIdledAt              = "k8s.ovn.org/idled-at"
 	OvnNodeAnnotationRetryInterval = 100 * time.Millisecond
 	OvnNodeAnnotationRetryTimeout  = 1 * time.Second
 	OvnSingleJoinSwitchTopoVersion = 1
@@ -97,7 +94,7 @@ func (oc *Controller) Start(nodeName string, wg *sync.WaitGroup) error {
 				}
 			},
 			OnStoppedLeading: func() {
-				//This node was leader and it lost the election.
+				// This node was leader and it lost the election.
 				// Whenever the node transitions from leader to follower,
 				// we need to handle the transition properly like clearing
 				// the cache. It is better to exit for now.
@@ -956,7 +953,7 @@ func deleteChassis(ovnSBClient goovn.Client, chassisMap map[string]string) {
 // this is the worker function that does the periodic sync of nodes from kube API
 // and sbdb and deletes chassis that are stale
 func (oc *Controller) syncNodesPeriodic() {
-	//node names is a slice of all node names
+	// node names is a slice of all node names
 	nodes, err := oc.kube.GetNodes()
 	if err != nil {
 		klog.Errorf("Error getting existing nodes from kube API: %v", err)
@@ -980,7 +977,7 @@ func (oc *Controller) syncNodesPeriodic() {
 		chassisMap[chassis.Hostname] = chassis.Name
 	}
 
-	//delete existing nodes from the chassis map.
+	// delete existing nodes from the chassis map.
 	for _, nodeName := range nodeNames {
 		delete(chassisMap, nodeName)
 	}
@@ -1017,7 +1014,7 @@ func (oc *Controller) syncNodes(nodes []interface{}) {
 		chassisMap[chassis.Hostname] = chassis.Name
 	}
 
-	//delete existing nodes from the chassis map.
+	// delete existing nodes from the chassis map.
 	for nodeName := range foundNodes {
 		delete(chassisMap, nodeName)
 	}
@@ -1065,7 +1062,7 @@ func (oc *Controller) syncNodes(nodes []interface{}) {
 		if err := oc.deleteNode(nodeName, subnets, nil); err != nil {
 			klog.Error(err)
 		}
-		//remove the node from the chassis map so we don't delete it twice
+		// remove the node from the chassis map so we don't delete it twice
 		delete(chassisMap, nodeName)
 	}
 

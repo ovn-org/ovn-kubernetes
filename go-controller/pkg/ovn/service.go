@@ -3,10 +3,11 @@ package ovn
 import (
 	"encoding/json"
 	"fmt"
-	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
 	"net"
 	"reflect"
 	"strings"
+
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
 
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
@@ -508,6 +509,6 @@ func (ovn *Controller) deleteService(service *kapi.Service) {
 // or OVNEmptyLbEvents are not enabled. When idilng or empty LB events are enabled, we want to ensure we
 // receive these packets and not reject them.
 func (ovn *Controller) svcQualifiesForReject(service *kapi.Service) bool {
-	_, ok := service.Annotations[OvnServiceIdledAt]
+	_, ok := service.Annotations[types.OvnServiceIdledAt]
 	return !(config.Kubernetes.OVNEmptyLbEvents && ok)
 }
