@@ -853,6 +853,15 @@ func (oc *Controller) handlePeerNamespaceAndPodSelector(
 				np.podHandlerList = append(np.podHandlerList, podHandler)
 			},
 			DeleteFunc: func(obj interface{}) {
+				// when the namespace labels no longer apply
+				// remove the namespaces pods from the address_set
+				namespace := obj.(*kapi.Namespace)
+				pods, _ := oc.watchFactory.GetPods(namespace.Name)
+
+				for _, pod := range pods {
+					oc.handlePeerPodSelectorDelete(gp, pod)
+				}
+
 			},
 			UpdateFunc: func(oldObj, newObj interface{}) {
 			},
