@@ -3,6 +3,7 @@ package util
 import (
 	"encoding/json"
 	"fmt"
+	"strconv"
 	"strings"
 
 	kapi "k8s.io/api/core/v1"
@@ -17,6 +18,7 @@ import (
 
 	egressfirewallclientset "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/egressfirewall/v1/apis/clientset/versioned"
 	egressipclientset "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/egressip/v1/apis/clientset/versioned"
+	discovery "k8s.io/api/discovery/v1beta1"
 	apiextensionsclientset "k8s.io/apiextensions-apiserver/pkg/client/clientset/clientset"
 
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/cni/types"
@@ -210,16 +212,37 @@ func GetPodNetSelAnnotation(pod *kapi.Pod, netAttachAnnot string) ([]*types.Netw
 	return networks, nil
 }
 
-// eventRecorder returns an EventRecorder type that can be
+// EventRecorder returns an EventRecorder type that can be
 // used to post Events to different object's lifecycles.
 func EventRecorder(kubeClient kubernetes.Interface) record.EventRecorder {
 	eventBroadcaster := record.NewBroadcaster()
 	eventBroadcaster.StartLogging(klog.Infof)
 	eventBroadcaster.StartRecordingToSink(
 		&typedcorev1.EventSinkImpl{
-			Interface: kubeClient.CoreV1().Events("")})
+			Interface: kubeClient.CoreV1().Events(""),
+		})
 	recorder := eventBroadcaster.NewRecorder(
 		scheme.Scheme,
 		kapi.EventSource{Component: "controlplane"})
 	return recorder
+}
+
+// UseEndpointSlices if the EndpointSlice API is available
+// and if the kubernetes versions supports DualStack (Kubernetes >= 1.20)
+func UseEndpointSlices(kubeClient kubernetes.Interface) bool {
+	endpointSlicesEnabled := false
+	if _, err := kubeClient.Discovery().ServerResourcesForGroupVersion(discovery.SchemeGroupVersion.String()); err == nil {
+		// The EndpointSlice API is enabled check if is running in a supported version
+		klog.V(2).Infof("Kubernetes Endpoint Slices enabled on the cluster: %s", discovery.SchemeGroupVersion.String())
+		endpointSlicesEnabled = true
+	}
+	// We only use Slices if > 1.19 since we only need them for Dual Stack
+	sv, _ := kubeClient.Discovery().ServerVersion()
+	major, _ := strconv.Atoi(sv.Major)
+	minor, _ := strconv.Atoi(sv.Minor)
+	klog.Infof("Kubernetes running with version %d.%d", major, minor)
+	if major <= 1 && minor < 20 || !endpointSlicesEnabled {
+		return false
+	}
+	return true
 }
