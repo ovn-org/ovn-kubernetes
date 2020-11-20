@@ -57,6 +57,13 @@ rules:
   - statefulsets
   verbs: ["get", "list", "watch"]
 - apiGroups:
+  - discovery.k8s.io
+  resources:
+  - endpointslices
+  verbs:
+  - list
+  - watch
+- apiGroups:
   - ""
   resources:
   - events
