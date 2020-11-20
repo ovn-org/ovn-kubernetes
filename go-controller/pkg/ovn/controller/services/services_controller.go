@@ -48,6 +48,7 @@ func NewController(client clientset.Interface,
 	serviceInformer coreinformers.ServiceInformer,
 	endpointSliceInformer discoveryinformers.EndpointSliceInformer,
 ) *Controller {
+	klog.V(4).Info("Creating event broadcaster")
 	broadcaster := record.NewBroadcaster()
 	broadcaster.StartStructuredLogging(0)
 	broadcaster.StartRecordingToSink(&v1core.EventSinkImpl{Interface: client.CoreV1().Events("")})
@@ -61,6 +62,7 @@ func NewController(client clientset.Interface,
 	}
 
 	// services
+	klog.Info("Setting up event handlers for services")
 	serviceInformer.Informer().AddEventHandler(cache.ResourceEventHandlerFuncs{
 		AddFunc:    c.onServiceAdd,
 		UpdateFunc: c.onServiceUpdate,
@@ -70,6 +72,7 @@ func NewController(client clientset.Interface,
 	c.servicesSynced = serviceInformer.Informer().HasSynced
 
 	// endpoints slices
+	klog.Info("Setting up event handlers for endpoint slices")
 	endpointSliceInformer.Informer().AddEventHandler(cache.ResourceEventHandlerFuncs{
 		AddFunc:    c.onEndpointSliceAdd,
 		UpdateFunc: c.onEndpointSliceUpdate,
@@ -127,10 +130,13 @@ func (c *Controller) Run(workers int, stopCh <-chan struct{}) error {
 	klog.Infof("Starting controller %s", controllerName)
 	defer klog.Infof("Shutting down controller %s", controllerName)
 
+	// Wait for the caches to be synced before starting workers
+	klog.Info("Waiting for informer caches to sync")
 	if !cache.WaitForNamedCacheSync(controllerName, stopCh, c.servicesSynced, c.endpointSlicesSynced) {
 		return fmt.Errorf("error syncing cache")
 	}
 
+	klog.Info("Starting workers")
 	for i := 0; i < workers; i++ {
 		go wait.Until(c.worker, c.workerLoopPeriod, stopCh)
 	}
