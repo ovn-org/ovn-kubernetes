@@ -125,7 +125,7 @@ func HandleCNIRequest(request *PodRequest, podLister corev1listers.PodLister) ([
 	var result []byte
 	var err error
 
-	klog.Infof("%s %s starting CNI request %v", request, request.Command, request)
+	klog.Infof("%s %s starting CNI request %+v", request, request.Command, request)
 	switch request.Command {
 	case CNIAdd:
 		result, err = request.cmdAdd(podLister)
@@ -133,7 +133,7 @@ func HandleCNIRequest(request *PodRequest, podLister corev1listers.PodLister) ([
 		result, err = request.cmdDel()
 	default:
 	}
-	klog.Infof("%s %s finished CNI request %v, result %q, err %v", request, request.Command, request, string(result), err)
+	klog.Infof("%s %s finished CNI request %+v, result %q, err %v", request, request.Command, request, string(result), err)
 
 	if err != nil {
 		// Prefix errors with request info for easier failure debugging

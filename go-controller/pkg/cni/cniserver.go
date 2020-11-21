@@ -186,7 +186,9 @@ func cniRequestToPodRequest(cr *Request) (*PodRequest, error) {
 
 func (s *Server) startSandboxRequest(req *PodRequest) error {
 	// Only sandbox add requests are tracked because only adds need
-	// to be canceled when a newer request comes in.
+	// to be canceled when the pod is deleted. Delete requests should
+	// be run to completion to clean up anything the earlier add
+	// already configured.
 	if req.Command == CNIAdd {
 		s.runningSandboxAddsLock.Lock()
 		defer s.runningSandboxAddsLock.Unlock()

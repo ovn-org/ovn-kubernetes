@@ -1059,6 +1059,115 @@ var _ = Describe("OVN NetworkPolicy Operations", func() {
 			err := app.Run([]string{app.Name})
 			Expect(err).NotTo(HaveOccurred())
 		})
+		It("reconciles an updated namespace label", func() {
+			app.Action = func(ctx *cli.Context) error {
+
+				npTest := networkPolicy{}
+
+				namespace1 := *newNamespace(namespaceName1)
+				namespace2 := *newNamespace(namespaceName2)
+
+				nPodTest := newTPod(
+					"node1",
+					"10.128.1.0/24",
+					"10.128.1.2",
+					"10.128.1.1",
+					"myPod",
+					"10.128.1.3",
+					"0a:58:0a:80:01:03",
+					namespace2.Name,
+				)
+				networkPolicy := newNetworkPolicy("networkpolicy1", namespace1.Name,
+					metav1.LabelSelector{},
+					[]knet.NetworkPolicyIngressRule{
+						{
+							From: []knet.NetworkPolicyPeer{
+								{
+									PodSelector: &metav1.LabelSelector{
+										MatchLabels: map[string]string{
+											"name": nPodTest.podName,
+										},
+									},
+									NamespaceSelector: &metav1.LabelSelector{
+										MatchLabels: map[string]string{
+											"name": nPodTest.namespace,
+										},
+									},
+								},
+							},
+						},
+					},
+					[]knet.NetworkPolicyEgressRule{
+						{
+							To: []knet.NetworkPolicyPeer{
+								{
+									PodSelector: &metav1.LabelSelector{
+										MatchLabels: map[string]string{
+											"name": nPodTest.podName,
+										},
+									},
+									NamespaceSelector: &metav1.LabelSelector{
+										MatchLabels: map[string]string{
+											"name": nPodTest.namespace,
+										},
+									},
+								},
+							},
+						},
+					})
+
+				nPodTest.baseCmds(fExec)
+				npTest.addNamespaceSelectorCmds(fExec, networkPolicy, false)
+
+				fakeOvn.start(ctx,
+					&v1.NamespaceList{
+						Items: []v1.Namespace{
+							namespace1,
+							namespace2,
+						},
+					},
+					&v1.PodList{
+						Items: []v1.Pod{
+							*newPod(nPodTest.namespace, nPodTest.podName, nPodTest.nodeName, nPodTest.podIP),
+						},
+					},
+					&knet.NetworkPolicyList{
+						Items: []knet.NetworkPolicy{
+							*networkPolicy,
+						},
+					},
+				)
+				nPodTest.populateLogicalSwitchCache(fakeOvn)
+				fakeOvn.controller.WatchNamespaces()
+				fakeOvn.controller.WatchPods()
+				fakeOvn.controller.WatchNetworkPolicy()
+
+				fakeOvn.asf.ExpectEmptyAddressSet(v4AddressSetName1)
+				expectAddressSetsWithIP(fakeOvn, networkPolicy, nPodTest.podIP)
+				fakeOvn.asf.ExpectAddressSetWithIPs(v4AddressSetName2, []string{nPodTest.podIP})
+				fakeOvn.asf.ExpectNoAddressSet(v6AddressSetName1)
+				fakeOvn.asf.ExpectNoAddressSet(v6AddressSetName2)
+
+				_, err := fakeOvn.fakeClient.KubeClient.NetworkingV1().NetworkPolicies(networkPolicy.Namespace).Get(context.TODO(), networkPolicy.Name, metav1.GetOptions{})
+				Expect(err).NotTo(HaveOccurred())
+				Eventually(fExec.CalledMatchesExpected).Should(BeTrue(), fExec.ErrorDesc)
+
+				namespace2.ObjectMeta.Labels = map[string]string{"labels": "test"}
+				_, err = fakeOvn.fakeClient.KubeClient.CoreV1().Namespaces().Update(context.TODO(), &namespace2, metav1.UpdateOptions{})
+				Expect(err).NotTo(HaveOccurred())
+				Eventually(fExec.CalledMatchesExpected).Should(BeTrue(), fExec.ErrorDesc)
+
+				// After updating the namespace all address sets should be empty
+				eventuallyExpectEmptyAddressSets(fakeOvn, networkPolicy)
+
+				fakeOvn.asf.EventuallyExpectEmptyAddressSet(v4AddressSetName1)
+
+				return nil
+			}
+
+			err := app.Run([]string{app.Name})
+			Expect(err).NotTo(HaveOccurred())
+		})
 
 		It("reconciles a deleted networkpolicy", func() {
 			app.Action = func(ctx *cli.Context) error {
