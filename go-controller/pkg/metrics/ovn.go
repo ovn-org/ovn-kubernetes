@@ -9,7 +9,7 @@ import (
 
 	"k8s.io/klog/v2"
 	utilnet "k8s.io/utils/net"
-	
+
 	"github.com/prometheus/client_golang/prometheus"
 
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
@@ -524,6 +524,8 @@ func RegisterOvnControllerMetrics() {
 	go ovnControllerConfigurationMetricsUpdater()
 	// ovn-controller coverage show metrics updater
 	go coverageShowMetricsUpdater(ovnController)
+	// Service metrics updater
+	go serviceMetricsUpdater()
 	// ovn-controller subnet configuration metrics publisher
 	ovnControllerServiceSubnetMetricsPublisher()
 	ovnControllerClusterSubnetMetricsPublisher()
