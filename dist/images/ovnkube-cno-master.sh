@@ -30,6 +30,7 @@ run-nbdb() {
         source "/env/_master"
         set +o allexport
     fi
+    
 
     # initialize variables
     ovn_kubernetes_namespace=openshift-ovn-kubernetes
@@ -124,6 +125,8 @@ run-nbdb() {
             --ovn-nb-log="-vconsole:${OVN_LOG_LEVEL} -vfile:off" \
             run_nb_ovsdb
     fi
+    
+    run-nbdb-postStart
 
 }
 
@@ -370,7 +373,7 @@ run-sbdb() {
         source /env/_master
         set +o allexport
     fi
-
+    
 
     # initialize variables
     ovn_kubernetes_namespace=openshift-ovn-kubernetes
@@ -464,6 +467,9 @@ run-sbdb() {
             --ovn-sb-log="-vconsole:${OVN_LOG_LEVEL} -vfile:off" \
             run_sb_ovsdb
     fi
+    
+    run-sbdb-postStart
+
 }
 
 run-sbdb-postStart() {
@@ -682,6 +688,9 @@ case ${cmd} in
 "run-sbdb-preStop")
     run-sbdb-preStop
     ;;
+"run-sbdb-postStart")
+    run-sbdb-postStart
+    ;;
 "run-nbdb-preStop")
     run-nbdb-preStop
     ;;
@@ -698,7 +707,7 @@ case ${cmd} in
     echo "invalid command ${cmd}"
     echo "valid commands: run-ovn-northd run-ovn-dbchecker " \
         "run-nbdb run-nbdb-postStart run-kube-rbac-proxy run-nbdb-readinessProbe " \ 
-    "run-sbdb-readinessProbe run-nbdb-preStop run-sbdb-preStop run-sbdb-postStart run-sbdb run-sbdb-postStart"
+    "run-sbdb-readinessProbe run-nbdb-preStop run-sbdb-preStop run-sbdb run-sbdb-postStart"
     exit 0
     ;;
 esac
