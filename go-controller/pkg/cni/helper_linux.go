@@ -296,6 +296,7 @@ func setupSriovInterface(netns ns.NetNS, containerID, ifName string, ifInfo *Pod
 }
 
 func ConfigureOVS(namespace string, podName string, hostIfaceName string, ifInfo *PodInterfaceInfo, sandboxID string) error {
+	klog.Infof("ConfigureOVS: namespace: %s, podName: %s", namespace, podName)
 	ifaceID := fmt.Sprintf("%s_%s", namespace, podName)
 
 	// Find and remove any existing OVS port with this iface-id. Pods can

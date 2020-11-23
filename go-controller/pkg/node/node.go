@@ -358,8 +358,8 @@ func (n *OvnNode) watchSmartNicPods() {
 	var servedPods sync.Map
 	_ = n.watchFactory.AddPodHandler(cache.ResourceEventHandlerFuncs{
 		AddFunc: func(obj interface{}) {
-			klog.Infof("AddFunc:")
 			pod := obj.(*kapi.Pod)
+			klog.Infof("AddFunc for POD: %s/%s", pod.ObjectMeta.GetNamespace(), pod.ObjectMeta.GetName())
 			if !util.PodWantsNetwork(pod) || pod.Status.Phase == kapi.PodRunning {
 				return
 			}
@@ -371,6 +371,7 @@ func (n *OvnNode) watchSmartNicPods() {
 
 				vfRepName, err := n.getVfRepName(pod)
 				if err != nil {
+					klog.Infof("Failed to get rep name, %s. retrying", err)
 					retryPods.Store(pod.UID, true)
 					return
 				}
@@ -381,6 +382,7 @@ func (n *OvnNode) watchSmartNicPods() {
 				}
 				err = n.addRepPort(pod, vfRepName, podInterfaceInfo)
 				if err != nil {
+					klog.Infof("Failed to add rep port, %s. retrying", err)
 					retryPods.Store(pod.UID, true)
 				} else {
 					servedPods.Store(pod.UID, true)
@@ -392,8 +394,8 @@ func (n *OvnNode) watchSmartNicPods() {
 			}
 		},
 		UpdateFunc: func(old, newer interface{}) {
-			klog.Infof("UpdateFunc:")
 			pod := newer.(*kapi.Pod)
+			klog.Infof("UpdateFunc for POD: %s/%s", pod.ObjectMeta.GetNamespace(), pod.ObjectMeta.GetName())
 			if !util.PodWantsNetwork(pod) || pod.Status.Phase == kapi.PodRunning {
 				retryPods.Delete(pod.UID)
 				return
@@ -406,6 +408,7 @@ func (n *OvnNode) watchSmartNicPods() {
 				}
 				vfRepName, err := n.getVfRepName(pod)
 				if err != nil {
+					klog.Infof("Failed to get rep name, %s. retrying", err)
 					retryPods.Store(pod.UID, true)
 					return
 				}
@@ -416,6 +419,7 @@ func (n *OvnNode) watchSmartNicPods() {
 				}
 				err = n.addRepPort(pod, vfRepName, podInterfaceInfo)
 				if err != nil {
+					klog.Infof("Failed to add rep port, %s. retrying", err)
 					retryPods.Store(pod.UID, true)
 				} else {
 					servedPods.Store(pod.UID, true)
@@ -424,17 +428,22 @@ func (n *OvnNode) watchSmartNicPods() {
 			}
 		},
 		DeleteFunc: func(obj interface{}) {
-			klog.Infof("DeleteFunc:")
 			pod := obj.(*kapi.Pod)
+			klog.Infof("DeleteFunc for POD: %s/%s", pod.ObjectMeta.GetNamespace(), pod.ObjectMeta.GetName())
 			if _, ok := servedPods.Load(pod.UID); !ok {
 				return
 			}
 			servedPods.Delete(pod.UID)
+			retryPods.Delete(pod.UID)
 			vfRepName, err := n.getVfRepName(pod)
 			if err != nil {
+				klog.Errorf("Failed to get VF Representor Name from Pod: %s. Representor port may have been deleted.", err)
 				return
 			}
-			_ = n.delRepPort(vfRepName)
+			err = n.delRepPort(vfRepName)
+			if err != nil {
+				klog.Infof("Failed to delete VF representor %s. %s", vfRepName, err)
+			}
 		},
 	}, nil)
 }
@@ -467,7 +476,9 @@ func (n *OvnNode) getVfRepName(pod *kapi.Pod) (string, error) {
 
 // addRepPort adds the representor of the VF to the ovs bridge
 func (n *OvnNode) addRepPort(pod *kapi.Pod, vfRepName string, ifInfo *cni.PodInterfaceInfo) error {
+	klog.Infof("addRepPort: %s", vfRepName)
 	sandboxID := pod.Annotations["sandbox"]
+	// TODO(Adrianc): Set link up for VF representor
 	err := cni.ConfigureOVS(pod.Namespace, pod.Name, vfRepName, ifInfo, sandboxID)
 	if err != nil {
 		return err
@@ -481,6 +492,7 @@ func (n *OvnNode) addRepPort(pod *kapi.Pod, vfRepName string, ifInfo *cni.PodInt
 
 // delRepPort delete the representor of the VF from the ovs bridge
 func (n *OvnNode) delRepPort(vfRepName string) error {
+	klog.Infof("delRepPort: %s", vfRepName)
 	return wait.PollImmediate(500*time.Millisecond, 60*time.Second, func() (bool, error) {
 		_, _, err := util.RunOVSVsctl("--if-exists", "del-port", "br-int", vfRepName)
 		if err != nil {
