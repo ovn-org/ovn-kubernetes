@@ -281,7 +281,7 @@ export KUBECONFIG=${HOME}/admin.conf
 if kind get clusters | grep ovn; then
   delete
 fi
-kind create cluster --name ${KIND_CLUSTER_NAME} --kubeconfig ${KUBECONFIG} --image kindest/node:${K8S_VERSION} --config=${KIND_CONFIG_LCL}
+kind create cluster --name ${KIND_CLUSTER_NAME} --kubeconfig ${KUBECONFIG} --image aojea/kindnode:kind9a91871c_k8s379ed6644da --config=${KIND_CONFIG_LCL}
 cat ${KUBECONFIG}
 
 if [ "${GITHUB_ACTIONS:-false}" == "true" ]; then
