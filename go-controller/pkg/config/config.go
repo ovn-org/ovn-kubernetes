@@ -371,6 +371,7 @@ func init() {
 func PrepareTestConfig() {
 	Default = savedDefault
 	Logging = savedLogging
+	Logging.Level = 5
 	CNI = savedCNI
 	OVNKubernetesFeature = savedOVNKubernetesFeature
 	Kubernetes = savedKubernetes
