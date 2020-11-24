@@ -305,7 +305,7 @@ func (oc *Controller) addPerPodGRSNAT(pod *kapi.Pod, podIfAddrs []*net.IPNet) er
 	if err != nil {
 		return fmt.Errorf("unable to parse node L3 gw annotation: %v", err)
 	}
-	gr := "GR_" + nodeName
+	gr := types.GWRouterPrefix + nodeName
 	for _, gwIPNet := range l3GWConfig.IPAddresses {
 		gwIP := gwIPNet.IP.String()
 		for _, podIPNet := range podIfAddrs {
@@ -367,7 +367,7 @@ func (oc *Controller) addHybridRoutePolicyForPod(podIP net.IP, node string) erro
 		// traffic destined outside of cluster subnet go to GR
 		matchStr := fmt.Sprintf(`inport == "%s%s" && %s.src == %s`, types.RouterToSwitchPrefix, node, l3Prefix, podIP)
 		matchStr += matchDst
-		_, stderr, err := util.RunOVNNbctl("lr-policy-add", types.OVNClusterRouter, "501", matchStr, "reroute",
+		_, stderr, err := util.RunOVNNbctl("lr-policy-add", types.OVNClusterRouter, types.HybridOverlayReroutePriority, matchStr, "reroute",
 			grJoinIfAddr.IP.String())
 		if err != nil {
 			// TODO: lr-policy-add doesn't support --may-exist, resort to this workaround for now.
@@ -407,7 +407,7 @@ func (oc *Controller) delHybridRoutePolicyForPod(podIP net.IP, node string) erro
 		}
 		matchStr := fmt.Sprintf(`inport == "%s%s" && %s.src == %s`, types.RouterToSwitchPrefix, node, l3Prefix, podIP)
 		matchStr += matchDst
-		_, stderr, err := util.RunOVNNbctl("lr-policy-del", types.OVNClusterRouter, "501", matchStr)
+		_, stderr, err := util.RunOVNNbctl("lr-policy-del", types.OVNClusterRouter, types.HybridOverlayReroutePriority, matchStr)
 		if err != nil {
 			klog.Errorf("Failed to remove policy: %s, on: %s, stderr: %s, err: %v",
 				matchStr, types.OVNClusterRouter, stderr, err)

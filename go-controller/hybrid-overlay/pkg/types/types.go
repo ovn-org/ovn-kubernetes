@@ -11,9 +11,9 @@ const (
 	HybridOverlayNodeSubnet = HybridOverlayAnnotationBase + "node-subnet"
 	// HybridOverlayDRMAC holds the MAC address of the Distributed Router/gateway
 	HybridOverlayDRMAC = HybridOverlayAnnotationBase + "distributed-router-gateway-mac"
-	// HybridOverlayExternalGw is a namespace annotation that holds the IP address of the external gateway to route default traffic
+	// HybridOverlayExternalGw is a pod and namespace annotation. It holds the IP address of the external gateway to route default traffic
 	HybridOverlayExternalGw = HybridOverlayAnnotationBase + "external-gw"
-	// HybridOverlayVTEP is a namespace annotation that holds the IP address of the VTEP
+	// HybridOverlayVTEP is a pod and namespace annotation that holds the IP address of the VTEP
 	HybridOverlayVTEP = HybridOverlayAnnotationBase + "vtep"
 	// HybridOverlayVNI is the VNI for VXLAN tunnels between nodes/endpoints
 	HybridOverlayVNI = 4097

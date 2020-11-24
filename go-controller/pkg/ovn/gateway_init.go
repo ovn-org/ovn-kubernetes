@@ -302,8 +302,8 @@ func gatewayInit(nodeName string, clusterIPSubnet []*net.IPNet, hostSubnets []*n
 		}
 	}
 
-	// if config.Gateway.DisabledSNATMultipleGWs is not set (by default is not),
-	// the NAT rules for pods not having annotations to route thru either external
+	// if config.Gateway.DisabledSNATMultipleGWs is not set (by default it is not),
+	// the NAT rules for pods not having annotations to route through either external
 	// gws or pod CNFs will be added within pods.go addLogicalPort
 	if !config.Gateway.DisableSNATMultipleGWs && config.Gateway.Mode != config.GatewayModeLocal {
 		// Default SNAT rules.
