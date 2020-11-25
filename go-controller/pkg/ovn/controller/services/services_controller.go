@@ -54,9 +54,11 @@ func NewController(client clientset.Interface,
 	broadcaster.StartRecordingToSink(&v1core.EventSinkImpl{Interface: client.CoreV1().Events("")})
 	recorder := broadcaster.NewRecorder(scheme.Scheme, v1.EventSource{Component: controllerName})
 
+	st := newServiceTracker()
+
 	c := &Controller{
 		client:           client,
-		serviceTracker:   newServiceTracker(),
+		serviceTracker:   st,
 		queue:            workqueue.NewNamedRateLimitingQueue(workqueue.DefaultControllerRateLimiter(), controllerName),
 		workerLoopPeriod: time.Second,
 	}
@@ -84,6 +86,9 @@ func NewController(client clientset.Interface,
 
 	c.eventBroadcaster = broadcaster
 	c.eventRecorder = recorder
+
+	// repair controller
+	c.repair = NewRepair(5*time.Minute, st)
 
 	return c
 }
@@ -119,6 +124,9 @@ type Controller struct {
 
 	// workerLoopPeriod is the time between worker runs. The workers process the queue of service and pod changes.
 	workerLoopPeriod time.Duration
+
+	// repair contains a controller that keeps in sync OVN and Kubernetes services
+	repair *Repair
 }
 
 // Run will not return until stopCh is closed. workers determines how many
@@ -141,6 +149,11 @@ func (c *Controller) Run(workers int, stopCh <-chan struct{}) error {
 		go wait.Until(c.worker, c.workerLoopPeriod, stopCh)
 	}
 
+	// Run only once the repair controller to keep in sync Kubernetes and OVN
+	klog.Info("Remove stale OVN services")
+	if err := c.repair.RunOnce(); err != nil {
+		klog.Errorf("Error repairing services: %v")
+	}
 	<-stopCh
 	return nil
 }
