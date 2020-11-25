@@ -351,18 +351,18 @@ func getOvnDbVersionInfo() {
 
 func RegisterOvnDBMetrics(clientset kubernetes.Interface, k8sNodeName string) {
 	/*
-	err := wait.PollImmediate(1*time.Second, 300*time.Second, func() (bool, error) {
-		return checkPodRunsOnGivenNode(clientset, "ovn-db-pod=true", k8sNodeName, false)
-	})
-	if err != nil {
-		if err == wait.ErrWaitTimeout {
-			klog.Errorf("Timed out while checking if OVN DB Pod runs on this %q K8s Node: %v. "+
-				"Not registering OVN DB Metrics on this Node.", k8sNodeName, err)
-		} else {
-			klog.Infof("Not registering OVN DB Metrics on this Node since OVN DBs are not running on this node.")
-		}
-		return
-	}*/
+		err := wait.PollImmediate(1*time.Second, 300*time.Second, func() (bool, error) {
+			return checkPodRunsOnGivenNode(clientset, "ovn-db-pod=true", k8sNodeName, false)
+		})
+		if err != nil {
+			if err == wait.ErrWaitTimeout {
+				klog.Errorf("Timed out while checking if OVN DB Pod runs on this %q K8s Node: %v. "+
+					"Not registering OVN DB Metrics on this Node.", k8sNodeName, err)
+			} else {
+				klog.Infof("Not registering OVN DB Metrics on this Node since OVN DBs are not running on this node.")
+			}
+			return
+		}*/
 	klog.Info("Found OVN DB Pod running on this node. Registering OVN DB Metrics")
 
 	// get the ovsdb server version info

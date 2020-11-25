@@ -168,7 +168,6 @@ func checkPodRunsOnGivenNode(clientset kubernetes.Interface, label, k8sNodeName 
 
 var ovnRegistry = prometheus.NewRegistry()
 
-
 // StartMetricsServer runs the prometheus listener so that OVN K8s metrics can be collected
 func StartMetricsServer(bindAddress string, enablePprof bool, enableOvnDBMetrics bool) {
 	mux := http.NewServeMux()
@@ -181,14 +180,14 @@ func StartMetricsServer(bindAddress string, enablePprof bool, enableOvnDBMetrics
 		mux.HandleFunc("/debug/pprof/symbol", pprof.Symbol)
 		mux.HandleFunc("/debug/pprof/trace", pprof.Trace)
 	}
-	
-	if(enableOvnDBMetrics){
+
+	if enableOvnDBMetrics {
 		ovnHandler := promhttp.InstrumentMetricHandler(ovnRegistry,
-		promhttp.HandlerFor(ovnRegistry, promhttp.HandlerOpts{}))
+			promhttp.HandlerFor(ovnRegistry, promhttp.HandlerOpts{}))
 		//mux := http.NewServeMux()
 		mux.Handle("/ovnmetrics", ovnHandler)
 	}
-	
+
 	go utilwait.Until(func() {
 		err := http.ListenAndServe(bindAddress, mux)
 		if err != nil {
@@ -196,7 +195,6 @@ func StartMetricsServer(bindAddress string, enablePprof bool, enableOvnDBMetrics
 		}
 	}, 5*time.Second, utilwait.NeverStop)
 }
-
 
 // StartOVNMetricsServer runs the prometheus listener so that OVN metrics can be collected
 func StartOVNMetricsServer(bindAddress string) {
@@ -219,7 +217,7 @@ func StartOVNMetricsServerOnDifferentPath(bindAddress string) {
 		promhttp.HandlerFor(ovnRegistry, promhttp.HandlerOpts{}))
 	mux := http.NewServeMux()
 	mux.Handle("/ovnmetrics", handler)
-	
+
 	go utilwait.Until(func() {
 		err := http.ListenAndServe(bindAddress, mux)
 		if err != nil {
