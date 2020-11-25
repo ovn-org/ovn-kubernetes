@@ -166,8 +166,11 @@ func checkPodRunsOnGivenNode(clientset kubernetes.Interface, label, k8sNodeName 
 	return false, fmt.Errorf("the Pod matching the label %q doesn't exist on this node %s", label, k8sNodeName)
 }
 
+var ovnRegistry = prometheus.NewRegistry()
+
+
 // StartMetricsServer runs the prometheus listener so that OVN K8s metrics can be collected
-func StartMetricsServer(bindAddress string, enablePprof bool) {
+func StartMetricsServer(bindAddress string, enablePprof bool, enableOvnDBMetrics bool) {
 	mux := http.NewServeMux()
 	mux.Handle("/metrics", promhttp.Handler())
 
@@ -178,6 +181,29 @@ func StartMetricsServer(bindAddress string, enablePprof bool) {
 		mux.HandleFunc("/debug/pprof/symbol", pprof.Symbol)
 		mux.HandleFunc("/debug/pprof/trace", pprof.Trace)
 	}
+	
+	if(enableOvnDBMetrics){
+		ovnHandler := promhttp.InstrumentMetricHandler(ovnRegistry,
+		promhttp.HandlerFor(ovnRegistry, promhttp.HandlerOpts{}))
+		//mux := http.NewServeMux()
+		mux.Handle("/ovnmetrics", ovnHandler)
+	}
+	
+	go utilwait.Until(func() {
+		err := http.ListenAndServe(bindAddress, mux)
+		if err != nil {
+			utilruntime.HandleError(fmt.Errorf("starting metrics server failed: %v", err))
+		}
+	}, 5*time.Second, utilwait.NeverStop)
+}
+
+
+// StartOVNMetricsServer runs the prometheus listener so that OVN metrics can be collected
+func StartOVNMetricsServer(bindAddress string) {
+	handler := promhttp.InstrumentMetricHandler(ovnRegistry,
+		promhttp.HandlerFor(ovnRegistry, promhttp.HandlerOpts{}))
+	mux := http.NewServeMux()
+	mux.Handle("/metrics", handler)
 
 	go utilwait.Until(func() {
 		err := http.ListenAndServe(bindAddress, mux)
@@ -187,15 +213,13 @@ func StartMetricsServer(bindAddress string, enablePprof bool) {
 	}, 5*time.Second, utilwait.NeverStop)
 }
 
-var ovnRegistry = prometheus.NewRegistry()
-
 // StartOVNMetricsServer runs the prometheus listener so that OVN metrics can be collected
-func StartOVNMetricsServer(bindAddress string) {
+func StartOVNMetricsServerOnDifferentPath(bindAddress string) {
 	handler := promhttp.InstrumentMetricHandler(ovnRegistry,
 		promhttp.HandlerFor(ovnRegistry, promhttp.HandlerOpts{}))
 	mux := http.NewServeMux()
-	mux.Handle("/metrics", handler)
-
+	mux.Handle("/ovnmetrics", handler)
+	
 	go utilwait.Until(func() {
 		err := http.ListenAndServe(bindAddress, mux)
 		if err != nil {

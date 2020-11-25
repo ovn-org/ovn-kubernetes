@@ -9,7 +9,7 @@ import (
 
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
 	"github.com/prometheus/client_golang/prometheus"
-	"k8s.io/apimachinery/pkg/util/wait"
+	//"k8s.io/apimachinery/pkg/util/wait"
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/klog"
 )
@@ -350,6 +350,7 @@ func getOvnDbVersionInfo() {
 }
 
 func RegisterOvnDBMetrics(clientset kubernetes.Interface, k8sNodeName string) {
+	/*
 	err := wait.PollImmediate(1*time.Second, 300*time.Second, func() (bool, error) {
 		return checkPodRunsOnGivenNode(clientset, "ovn-db-pod=true", k8sNodeName, false)
 	})
@@ -361,7 +362,7 @@ func RegisterOvnDBMetrics(clientset kubernetes.Interface, k8sNodeName string) {
 			klog.Infof("Not registering OVN DB Metrics on this Node since OVN DBs are not running on this node.")
 		}
 		return
-	}
+	}*/
 	klog.Info("Found OVN DB Pod running on this node. Registering OVN DB Metrics")
 
 	// get the ovsdb server version info
@@ -387,7 +388,7 @@ func RegisterOvnDBMetrics(clientset kubernetes.Interface, k8sNodeName string) {
 	))
 	// check if DB is clustered or not
 	dbIsClustered := true
-	_, _, err = util.RunOVSDBTool("db-is-standalone", "/etc/openvswitch/ovnsb_db.db")
+	_, _, err := util.RunOVSDBTool("db-is-standalone", "/etc/openvswitch/ovnsb_db.db")
 	if err == nil {
 		dbIsClustered = false
 	}
