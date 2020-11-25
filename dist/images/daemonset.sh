@@ -39,6 +39,8 @@ OVN_HYBRID_OVERLAY_ENABLE=""
 OVN_DISABLE_SNAT_MULTIPLE_GWS=""
 OVN_MULTICAST_ENABLE=""
 OVN_EGRESSIP_ENABLE=
+OVN_V4_JOIN_SUBNET=""
+OVN_V6_JOIN_SUBNET=""
 
 # Parse parameters given as arguments to this script.
 while [ "$1" != "" ]; do
@@ -147,6 +149,12 @@ while [ "$1" != "" ]; do
   --egress-ip-enable)
     OVN_EGRESSIP_ENABLE=$VALUE
     ;;
+  --v4-join-subnet)
+    OVN_V4_JOIN_SUBNET=$VALUE
+    ;;
+  --v6-join-subnet)
+    OVN_V6_JOIN_SUBNET=$VALUE
+    ;;
   *)
     echo "WARNING: unknown parameter \"$PARAM\""
     exit 1
@@ -226,6 +234,10 @@ ovn_sb_raft_port=${OVN_SB_RAFT_PORT:-6644}
 echo "ovn_sb_raft_port: ${ovn_sb_raft_port}"
 ovn_multicast_enable=${OVN_MULTICAST_ENABLE}
 echo "ovn_multicast_enable: ${ovn_multicast_enable}"
+ovn_v4_join_subnet=${OVN_V4_JOIN_SUBNET}
+echo "ovn_v4_join_subnet: ${ovn_v4_join_subnet}"
+ovn_v6_join_subnet=${OVN_V6_JOIN_SUBNET}
+echo "ovn_v6_join_subnet: ${ovn_v6_join_subnet}"
 
 ovn_image=${image} \
   ovn_image_pull_policy=${image_pull_policy} \
@@ -241,6 +253,8 @@ ovn_image=${image} \
   ovn_hybrid_overlay_net_cidr=${ovn_hybrid_overlay_net_cidr} \
   ovn_hybrid_overlay_enable=${ovn_hybrid_overlay_enable} \
   ovn_disable_snat_multiple_gws=${ovn_disable_snat_multiple_gws} \
+  ovn_v4_join_subnet=${ovn_v4_join_subnet} \
+  ovn_v6_join_subnet=${ovn_v6_join_subnet} \
   ovn_multicast_enable=${ovn_multicast_enable} \
   ovn_egress_ip_enable=${ovn_egress_ip_enable} \
   ovn_ssl_en=${ovn_ssl_en} \
@@ -258,6 +272,8 @@ ovn_image=${image} \
   ovn_hybrid_overlay_net_cidr=${ovn_hybrid_overlay_net_cidr} \
   ovn_hybrid_overlay_enable=${ovn_hybrid_overlay_enable} \
   ovn_disable_snat_multiple_gws=${ovn_disable_snat_multiple_gws} \
+  ovn_v4_join_subnet=${ovn_v4_join_subnet} \
+  ovn_v6_join_subnet=${ovn_v6_join_subnet} \
   ovn_multicast_enable=${ovn_multicast_enable} \
   ovn_egress_ip_enable=${ovn_egress_ip_enable} \
   ovn_ssl_en=${ovn_ssl_en} \
