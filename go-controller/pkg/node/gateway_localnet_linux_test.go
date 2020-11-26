@@ -21,6 +21,7 @@ import (
 
 const (
 	v4localnetGatewayIP = "10.244.0.1"
+	v6localnetGatewayIP = "fd00:96:1::1"
 )
 
 func getFakeLocalAddrs() map[string]net.IPNet {
@@ -104,11 +105,12 @@ func newService(name, namespace, ip string, ports []v1.ServicePort, serviceType 
 }
 
 var _ = Describe("Node Operations", func() {
-
 	var (
-		app         *cli.App
-		fakeOvnNode *FakeOVNNode
-		fExec       *ovntest.FakeExec
+		app          *cli.App
+		fakeOvnNode  *FakeOVNNode
+		fExec        *ovntest.FakeExec
+		iptV4, iptV6 util.IPTablesHelper
+		fNPW         *localPortWatcher
 	)
 
 	BeforeEach(func() {
@@ -121,16 +123,13 @@ var _ = Describe("Node Operations", func() {
 
 		fExec = ovntest.NewFakeExec()
 		fakeOvnNode = NewFakeOVNNode(fExec)
+		iptV4, iptV6 = util.SetFakeIPTablesHelpers()
+		fNPW = initFakeNodePortWatcher(fakeOvnNode, iptV4, iptV6)
 	})
 
 	Context("on startup", func() {
-
 		It("inits physical routing rules", func() {
 			app.Action = func(ctx *cli.Context) error {
-
-				iptV4, iptV6 := util.SetFakeIPTablesHelpers()
-				fNPW := initFakeNodePortWatcher(fakeOvnNode, iptV4, iptV6)
-
 				fakeOvnNode.fakeExec.AddFakeCmd(&ovntest.ExpectedCmd{
 					Cmd: "ip rule",
 					Output: "0:	from all lookup local\n32766:	from all lookup main\n32767:	from all lookup default\n",
@@ -188,12 +187,8 @@ var _ = Describe("Node Operations", func() {
 
 		It("removes stale physical routing rules while keeping remaining intact", func() {
 			app.Action = func(ctx *cli.Context) error {
-
 				externalIP := "1.1.1.1"
 				externalIPPort := int32(8032)
-
-				iptV4, iptV6 := util.SetFakeIPTablesHelpers()
-				fNPW := initFakeNodePortWatcher(fakeOvnNode, iptV4, iptV6)
 
 				// Create some fake routing and iptable rules
 				fakeOvnNode.fakeExec.AddFakeCmd(&ovntest.ExpectedCmd{
@@ -307,14 +302,9 @@ var _ = Describe("Node Operations", func() {
 	})
 
 	Context("on add", func() {
-
 		It("inits physical routing rules with ExternalIP outside any local network", func() {
 			app.Action = func(ctx *cli.Context) error {
-
 				externalIP := "1.1.1.1"
-
-				iptV4, iptV6 := util.SetFakeIPTablesHelpers()
-				fNPW := initFakeNodePortWatcher(fakeOvnNode, iptV4, iptV6)
 
 				service := *newService("service1", "namespace1", "10.129.0.2",
 					[]v1.ServicePort{
@@ -354,11 +344,7 @@ var _ = Describe("Node Operations", func() {
 
 		It("does nothing when ExternalIP on shared network", func() {
 			app.Action = func(ctx *cli.Context) error {
-
 				externalIP := "10.10.10.2"
-
-				iptV4, iptV6 := util.SetFakeIPTablesHelpers()
-				fNPW := initFakeNodePortWatcher(fakeOvnNode, iptV4, iptV6)
 
 				service := *newService("service1", "namespace1", "10.129.0.2",
 					[]v1.ServicePort{
@@ -394,11 +380,7 @@ var _ = Describe("Node Operations", func() {
 
 		It("inits iptables rules when ExternalIP attached to network interface", func() {
 			app.Action = func(ctx *cli.Context) error {
-
 				externalIP := "10.10.10.1"
-
-				iptV4, iptV6 := util.SetFakeIPTablesHelpers()
-				fNPW := initFakeNodePortWatcher(fakeOvnNode, iptV4, iptV6)
 
 				service := *newService("service1", "namespace1", "10.129.0.2",
 					[]v1.ServicePort{
@@ -438,11 +420,7 @@ var _ = Describe("Node Operations", func() {
 
 		It("inits iptables rules with NodePort", func() {
 			app.Action = func(ctx *cli.Context) error {
-
 				nodePort := int32(31111)
-
-				iptV4, iptV6 := util.SetFakeIPTablesHelpers()
-				fNPW := initFakeNodePortWatcher(fakeOvnNode, iptV4, iptV6)
 
 				service := *newService("service1", "namespace1", "10.129.0.2",
 					[]v1.ServicePort{
@@ -480,43 +458,56 @@ var _ = Describe("Node Operations", func() {
 			Expect(err).NotTo(HaveOccurred())
 		})
 
-		It("emits event when ExternalIP attached to network interface with headless service", func() {
+		It("inits iptables rules with DualStack NodePort", func() {
 			app.Action = func(ctx *cli.Context) error {
+				nodePort := int32(31111)
 
-				externalIP := "10.10.10.1"
-				externalIPPort := int32(8032)
+				fNPW.gatewayIPv6 = v6localnetGatewayIP
 
-				iptV4, iptV6 := util.SetFakeIPTablesHelpers()
-				fNPW := initFakeNodePortWatcher(fakeOvnNode, iptV4, iptV6)
-
-				service := *newService("service1", "namespace1", "None",
+				service := *newService("service1", "namespace1", "10.129.0.2",
 					[]v1.ServicePort{
 						{
-							Port:     externalIPPort,
+							NodePort: nodePort,
 							Protocol: v1.ProtocolTCP,
 						},
 					},
-					v1.ServiceTypeClusterIP,
-					[]string{externalIP},
+					v1.ServiceTypeNodePort,
+					nil,
 				)
-
+				service.Spec.ClusterIPs = []string{"10.129.0.2", "fd00:10:96::10"}
 				fNPW.addService(&service)
 
-				// Check that event was emitted
-				recordedEvent := <-fakeOvnNode.recorder.Events
-				Expect(recordedEvent).To(ContainSubstring("UnsupportedServiceDefinition"))
-
-				expectedTables := map[string]util.FakeTable{
-					"filter": {},
-					"nat":    {},
+				expectedTables4 := map[string]util.FakeTable{
+					"filter": {
+						"OVN-KUBE-NODEPORT": []string{
+							fmt.Sprintf("-p %s --dport %v -j ACCEPT", service.Spec.Ports[0].Protocol, service.Spec.Ports[0].NodePort),
+						},
+					},
+					"nat": {
+						"OVN-KUBE-NODEPORT": []string{
+							fmt.Sprintf("-p %s --dport %v -j DNAT --to-destination %s:%v", service.Spec.Ports[0].Protocol, service.Spec.Ports[0].NodePort, service.Spec.ClusterIPs[0], service.Spec.Ports[0].Port),
+						},
+					},
 				}
 
 				f4 := iptV4.(*util.FakeIPTables)
-				err := f4.MatchState(expectedTables)
+				err := f4.MatchState(expectedTables4)
 				Expect(err).NotTo(HaveOccurred())
 
+				expectedTables6 := map[string]util.FakeTable{
+					"filter": {
+						"OVN-KUBE-NODEPORT": []string{
+							fmt.Sprintf("-p %s --dport %v -j ACCEPT", service.Spec.Ports[0].Protocol, service.Spec.Ports[0].NodePort),
+						},
+					},
+					"nat": {
+						"OVN-KUBE-NODEPORT": []string{
+							fmt.Sprintf("-p %s --dport %v -j DNAT --to-destination [%s]:%v", service.Spec.Ports[0].Protocol, service.Spec.Ports[0].NodePort, service.Spec.ClusterIPs[1], service.Spec.Ports[0].Port),
+						},
+					},
+				}
 				f6 := iptV6.(*util.FakeIPTables)
-				err = f6.MatchState(expectedTables)
+				err = f6.MatchState(expectedTables6)
 				Expect(err).NotTo(HaveOccurred())
 
 				return nil
@@ -527,14 +518,9 @@ var _ = Describe("Node Operations", func() {
 	})
 
 	Context("on delete", func() {
-
 		It("deletes physical routing rules with ExternalIP outside any local network", func() {
 			app.Action = func(ctx *cli.Context) error {
-
 				externalIP := "1.1.1.1"
-
-				iptV4, iptV6 := util.SetFakeIPTablesHelpers()
-				fNPW := initFakeNodePortWatcher(fakeOvnNode, iptV4, iptV6)
 
 				service := *newService("service1", "namespace1", "10.129.0.2",
 					[]v1.ServicePort{
@@ -574,11 +560,7 @@ var _ = Describe("Node Operations", func() {
 
 		It("does nothing when ExternalIP on shared network", func() {
 			app.Action = func(ctx *cli.Context) error {
-
 				externalIP := "10.10.10.2"
-
-				iptV4, iptV6 := util.SetFakeIPTablesHelpers()
-				fNPW := initFakeNodePortWatcher(fakeOvnNode, iptV4, iptV6)
 
 				service := *newService("service1", "namespace1", "10.129.0.2",
 					[]v1.ServicePort{
@@ -614,11 +596,7 @@ var _ = Describe("Node Operations", func() {
 
 		It("deletes iptables rules with ExternalIP attached to network interface", func() {
 			app.Action = func(ctx *cli.Context) error {
-
 				externalIP := "10.10.10.1"
-
-				iptV4, iptV6 := util.SetFakeIPTablesHelpers()
-				fNPW := initFakeNodePortWatcher(fakeOvnNode, iptV4, iptV6)
 
 				service := *newService("service1", "namespace1", "10.129.0.2",
 					[]v1.ServicePort{
@@ -654,11 +632,7 @@ var _ = Describe("Node Operations", func() {
 
 		It("deletes iptables rules for NodePort", func() {
 			app.Action = func(ctx *cli.Context) error {
-
 				nodePort := int32(31111)
-
-				iptV4, iptV6 := util.SetFakeIPTablesHelpers()
-				fNPW := initFakeNodePortWatcher(fakeOvnNode, iptV4, iptV6)
 
 				service := *newService("service1", "namespace1", "10.129.0.2",
 					[]v1.ServicePort{
@@ -694,15 +668,10 @@ var _ = Describe("Node Operations", func() {
 	})
 
 	Context("on add and delete", func() {
-
 		It("manages iptables rules with ExternalIP attached to network interface", func() {
 			app.Action = func(ctx *cli.Context) error {
-
 				externalIP := "10.10.10.1"
 				externalIPPort := int32(8034)
-
-				iptV4, iptV6 := util.SetFakeIPTablesHelpers()
-				fNPW := initFakeNodePortWatcher(fakeOvnNode, iptV4, iptV6)
 
 				service := *newService("service1", "namespace1", "10.129.0.2",
 					[]v1.ServicePort{
@@ -757,11 +726,7 @@ var _ = Describe("Node Operations", func() {
 
 		It("manages iptables rules for NodePort", func() {
 			app.Action = func(ctx *cli.Context) error {
-
 				nodePort := int32(38034)
-
-				iptV4, iptV6 := util.SetFakeIPTablesHelpers()
-				fNPW := initFakeNodePortWatcher(fakeOvnNode, iptV4, iptV6)
 
 				service := *newService("service1", "namespace1", "10.129.0.2",
 					[]v1.ServicePort{
@@ -813,6 +778,5 @@ var _ = Describe("Node Operations", func() {
 			err := app.Run([]string{app.Name})
 			Expect(err).NotTo(HaveOccurred())
 		})
-
 	})
 })
