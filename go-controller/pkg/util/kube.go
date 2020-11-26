@@ -123,6 +123,19 @@ func IsClusterIPSet(service *kapi.Service) bool {
 	return service.Spec.ClusterIP != kapi.ClusterIPNone && service.Spec.ClusterIP != ""
 }
 
+// GetClusterIPs return an array with the ClusterIPs present in the service
+// for backward compatibility with versions < 1.20
+// we need to handle the case where only ClusterIP exist
+func GetClusterIPs(service *kapi.Service) []string {
+	if len(service.Spec.ClusterIPs) > 0 {
+		return service.Spec.ClusterIPs
+	}
+	if len(service.Spec.ClusterIP) > 0 && service.Spec.ClusterIP != kapi.ClusterIPNone {
+		return []string{service.Spec.ClusterIP}
+	}
+	return []string{}
+}
+
 // ValidatePort checks if the port is non-zero and port protocol is valid
 func ValidatePort(proto kapi.Protocol, port int32) error {
 	if port <= 0 || port > 65535 {

@@ -122,6 +122,7 @@ func (l *localPortWatcher) UpdateService(old, new *kapi.Service) {
 	if reflect.DeepEqual(new.Spec.Ports, old.Spec.Ports) &&
 		reflect.DeepEqual(new.Spec.ExternalIPs, old.Spec.ExternalIPs) &&
 		reflect.DeepEqual(new.Spec.ClusterIP, old.Spec.ClusterIP) &&
+		reflect.DeepEqual(new.Spec.ClusterIPs, old.Spec.ClusterIPs) &&
 		reflect.DeepEqual(new.Spec.Type, old.Spec.Type) &&
 		reflect.DeepEqual(new.Status.LoadBalancer.Ingress, old.Status.LoadBalancer.Ingress) {
 		klog.V(5).Infof("Skipping service update for: %s as change does not apply to any of .Spec.Ports, "+
@@ -172,131 +173,131 @@ func (l *localPortWatcher) networkHasAddress(ip net.IP) bool {
 }
 
 func (l *localPortWatcher) addService(svc *kapi.Service) error {
-	iptRules := []iptRule{}
-	isIPv6Service := utilnet.IsIPv6String(svc.Spec.ClusterIP)
-	gatewayIP := l.gatewayIPv4
-	if isIPv6Service {
-		gatewayIP = l.gatewayIPv6
+	// don't process headless service or services that doesn't have NodePorts or ExternalIPs
+	if !util.ServiceTypeHasClusterIP(svc) || !util.IsClusterIPSet(svc) {
+		return nil
 	}
-	// holds map of external ips and if they are currently using routes
-	routeUsage := make(map[string]bool)
-	for _, port := range svc.Spec.Ports {
-		if util.ServiceTypeHasClusterIP(svc) {
+
+	for _, ip := range util.GetClusterIPs(svc) {
+		iptRules := []iptRule{}
+		isIPv6Service := utilnet.IsIPv6String(ip)
+		gatewayIP := l.gatewayIPv4
+		if isIPv6Service {
+			gatewayIP = l.gatewayIPv6
+		}
+		// holds map of external ips and if they are currently using routes
+		routeUsage := make(map[string]bool)
+		for _, port := range svc.Spec.Ports {
 			// Fix Azure/GCP LoadBalancers. They will forward traffic directly to the node with the
 			// dest address as the load-balancer ingress IP and port
-			iptRules = append(iptRules, getLoadBalancerIPTRules(svc, port, svc.Spec.ClusterIP, port.Port)...)
-		}
+			iptRules = append(iptRules, getLoadBalancerIPTRules(svc, port, ip, port.Port)...)
 
-		if util.ServiceTypeHasNodePort(svc) {
-			if err := util.ValidatePort(port.Protocol, port.NodePort); err != nil {
-				klog.Warningf("Invalid service node port %s, err: %v", port.Name, err)
-				continue
+			if port.NodePort > 0 {
+				if gatewayIP != "" {
+					iptRules = append(iptRules, getNodePortIPTRules(port, nil, ip, port.Port)...)
+					klog.V(5).Infof("Will add iptables rule for NodePort: %v and "+
+						"protocol: %v", port.NodePort, port.Protocol)
+				} else {
+					klog.Warningf("No gateway of appropriate IP family for NodePort Service %s/%s %s",
+						svc.Namespace, svc.Name, ip)
+				}
 			}
-			if gatewayIP != "" {
-				iptRules = append(iptRules, getNodePortIPTRules(port, nil, svc.Spec.ClusterIP, port.Port)...)
-				klog.V(5).Infof("Will add iptables rule for NodePort: %v and "+
-					"protocol: %v", port.NodePort, port.Protocol)
-			} else {
-				klog.Warningf("No gateway of appropriate IP family for NodePort Service %s/%s %s",
-					svc.Namespace, svc.Name, svc.Spec.ClusterIP)
-			}
-		}
-		for _, externalIP := range svc.Spec.ExternalIPs {
-			if err := util.ValidatePort(port.Protocol, port.Port); err != nil {
-				klog.Warningf("Invalid service port %s, err: %v", port.Name, err)
-				break
-			}
-			if utilnet.IsIPv6String(externalIP) != isIPv6Service {
-				klog.Warningf("Invalid ExternalIP %s for Service %s/%s with ClusterIP %s",
-					externalIP, svc.Namespace, svc.Name, svc.Spec.ClusterIP)
-				continue
-			}
-			if _, exists := l.localAddrSet[externalIP]; exists {
-				if !util.IsClusterIPSet(svc) {
-					serviceRef := kapi.ObjectReference{
-						Kind:      "Service",
-						Namespace: svc.Namespace,
-						Name:      svc.Name,
-					}
-					l.recorder.Eventf(&serviceRef, kapi.EventTypeWarning, "UnsupportedServiceDefinition", "Unsupported service definition, headless service: %s with a local ExternalIP is not supported by ovn-kubernetes in local gateway mode", svc.Name)
-					klog.Warningf("UnsupportedServiceDefinition event for service %s in namespace %s", svc.Name, svc.Namespace)
+			for _, externalIP := range svc.Spec.ExternalIPs {
+
+				if utilnet.IsIPv6String(externalIP) != isIPv6Service {
+					klog.Warningf("Invalid ExternalIP %s for Service %s/%s with ClusterIP %s",
+						externalIP, svc.Namespace, svc.Name, ip)
 					continue
 				}
-				iptRules = append(iptRules, getExternalIPTRules(port, externalIP, svc.Spec.ClusterIP)...)
-				klog.V(5).Infof("Will add iptables rule for ExternalIP: %s", externalIP)
-			} else if l.networkHasAddress(net.ParseIP(externalIP)) {
-				klog.V(5).Infof("ExternalIP: %s is reachable through one of the interfaces on this node, will skip setup", externalIP)
-			} else {
-				if gatewayIP != "" {
-					routeUsage[externalIP] = true
+				if _, exists := l.localAddrSet[externalIP]; exists {
+
+					iptRules = append(iptRules, getExternalIPTRules(port, externalIP, ip)...)
+					klog.V(5).Infof("Will add iptables rule for ExternalIP: %s", externalIP)
+				} else if l.networkHasAddress(net.ParseIP(externalIP)) {
+					klog.V(5).Infof("ExternalIP: %s is reachable through one of the interfaces on this node, will skip setup", externalIP)
 				} else {
-					klog.Warningf("No gateway of appropriate IP family for ExternalIP %s for Service %s/%s",
-						externalIP, svc.Namespace, svc.Name)
+					if gatewayIP != "" {
+						routeUsage[externalIP] = true
+					} else {
+						klog.Warningf("No gateway of appropriate IP family for ExternalIP %s for Service %s/%s",
+							externalIP, svc.Namespace, svc.Name)
+					}
 				}
 			}
 		}
-	}
-	for externalIP := range routeUsage {
-		if stdout, stderr, err := util.RunIP("route", "replace", externalIP, "via", gatewayIP, "dev", types.K8sMgmtIntfName, "table", localnetGatewayExternalIDTable); err != nil {
-			klog.Errorf("Error adding routing table entry for ExternalIP %s, via gw: %s: stdout: %s, stderr: %s, err: %v", externalIP, gatewayIP, stdout, stderr, err)
-		} else {
-			klog.Infof("Successfully added route for ExternalIP: %s", externalIP)
+		for externalIP := range routeUsage {
+			if stdout, stderr, err := util.RunIP("route", "replace", externalIP, "via", gatewayIP, "dev", types.K8sMgmtIntfName, "table", localnetGatewayExternalIDTable); err != nil {
+				klog.Errorf("Error adding routing table entry for ExternalIP %s, via gw: %s: stdout: %s, stderr: %s, err: %v", externalIP, gatewayIP, stdout, stderr, err)
+			} else {
+				klog.Infof("Successfully added route for ExternalIP: %s", externalIP)
+			}
+		}
+		klog.Infof("Adding iptables rules: %v for service: %v", iptRules, svc.Name)
+		if err := addIptRules(iptRules); err != nil {
+			klog.Errorf("Error adding iptables rules: %v for service: %v err: %v", iptRules, svc.Name, err)
 		}
 	}
-	klog.Infof("Adding iptables rules: %v for service: %v", iptRules, svc.Name)
-	return addIptRules(iptRules)
+	return nil
 }
 
 func (l *localPortWatcher) deleteService(svc *kapi.Service) error {
-	iptRules := []iptRule{}
-	isIPv6Service := utilnet.IsIPv6String(svc.Spec.ClusterIP)
-	gatewayIP := l.gatewayIPv4
-	if isIPv6Service {
-		gatewayIP = l.gatewayIPv6
+	// don't process headless service or services that doesn't have NodePorts or ExternalIPs
+	if !util.ServiceTypeHasClusterIP(svc) || !util.IsClusterIPSet(svc) {
+		return nil
 	}
-	// holds map of external ips and if they are currently using routes
-	routeUsage := make(map[string]bool)
-	// Note that unlike with addService we just silently ignore IPv4/IPv6 mismatches here
-	for _, port := range svc.Spec.Ports {
-		if util.ServiceTypeHasClusterIP(svc) {
+
+	for _, ip := range util.GetClusterIPs(svc) {
+		iptRules := []iptRule{}
+		isIPv6Service := utilnet.IsIPv6String(ip)
+		gatewayIP := l.gatewayIPv4
+		if isIPv6Service {
+			gatewayIP = l.gatewayIPv6
+		}
+		// holds map of external ips and if they are currently using routes
+		routeUsage := make(map[string]bool)
+		// Note that unlike with addService we just silently ignore IPv4/IPv6 mismatches here
+		for _, port := range svc.Spec.Ports {
 			// Fix Azure/GCP LoadBalancers. They will forward traffic directly to the node with the
 			// dest address as the load-balancer ingress IP and port
-			iptRules = append(iptRules, getLoadBalancerIPTRules(svc, port, svc.Spec.ClusterIP, port.Port)...)
-		}
-		if util.ServiceTypeHasNodePort(svc) {
-			if gatewayIP != "" {
-				iptRules = append(iptRules, getNodePortIPTRules(port, nil, svc.Spec.ClusterIP, port.Port)...)
-				klog.V(5).Infof("Will delete iptables rule for NodePort: %v and "+
-					"protocol: %v", port.NodePort, port.Protocol)
-			}
-		}
-		for _, externalIP := range svc.Spec.ExternalIPs {
-			if utilnet.IsIPv6String(externalIP) != isIPv6Service {
-				continue
-			}
-			if _, exists := l.localAddrSet[externalIP]; exists {
-				iptRules = append(iptRules, getExternalIPTRules(port, externalIP, svc.Spec.ClusterIP)...)
-				klog.V(5).Infof("Will delete iptables rule for ExternalIP: %s", externalIP)
-			} else if l.networkHasAddress(net.ParseIP(externalIP)) {
-				klog.V(5).Infof("ExternalIP: %s is reachable through one of the interfaces on this node, will skip cleanup", externalIP)
-			} else {
+			iptRules = append(iptRules, getLoadBalancerIPTRules(svc, port, ip, port.Port)...)
+			if port.NodePort > 0 {
 				if gatewayIP != "" {
-					routeUsage[externalIP] = true
+					iptRules = append(iptRules, getNodePortIPTRules(port, nil, ip, port.Port)...)
+					klog.V(5).Infof("Will delete iptables rule for NodePort: %v and "+
+						"protocol: %v", port.NodePort, port.Protocol)
+				}
+			}
+			for _, externalIP := range svc.Spec.ExternalIPs {
+				if utilnet.IsIPv6String(externalIP) != isIPv6Service {
+					continue
+				}
+				if _, exists := l.localAddrSet[externalIP]; exists {
+					iptRules = append(iptRules, getExternalIPTRules(port, externalIP, ip)...)
+					klog.V(5).Infof("Will delete iptables rule for ExternalIP: %s", externalIP)
+				} else if l.networkHasAddress(net.ParseIP(externalIP)) {
+					klog.V(5).Infof("ExternalIP: %s is reachable through one of the interfaces on this node, will skip cleanup", externalIP)
+				} else {
+					if gatewayIP != "" {
+						routeUsage[externalIP] = true
+					}
 				}
 			}
 		}
-	}
 
-	for externalIP := range routeUsage {
-		if stdout, stderr, err := util.RunIP("route", "del", externalIP, "via", gatewayIP, "dev", types.K8sMgmtIntfName, "table", localnetGatewayExternalIDTable); err != nil {
-			klog.Errorf("Error delete routing table entry for ExternalIP %s: stdout: %s, stderr: %s, err: %v", externalIP, stdout, stderr, err)
-		} else {
-			klog.Infof("Successfully deleted route for ExternalIP: %s", externalIP)
+		for externalIP := range routeUsage {
+			if stdout, stderr, err := util.RunIP("route", "del", externalIP, "via", gatewayIP, "dev", types.K8sMgmtIntfName, "table", localnetGatewayExternalIDTable); err != nil {
+				klog.Errorf("Error delete routing table entry for ExternalIP %s: stdout: %s, stderr: %s, err: %v", externalIP, stdout, stderr, err)
+			} else {
+				klog.Infof("Successfully deleted route for ExternalIP: %s", externalIP)
+			}
+		}
+
+		klog.Infof("Deleting iptables rules: %v for service: %v", iptRules, svc.Name)
+		if err := delIptRules(iptRules); err != nil {
+			klog.Errorf("Error deleting iptables rules: %v for service: %v err: %v", iptRules, svc.Name, err)
 		}
 	}
-
-	klog.Infof("Deleting iptables rules: %v for service: %v", iptRules, svc.Name)
-	return delIptRules(iptRules)
+	return nil
 }
 
 func (l *localPortWatcher) SyncServices(serviceInterface []interface{}) {
@@ -331,14 +332,16 @@ func (l *localPortWatcher) SyncServices(serviceInterface []interface{}) {
 			klog.Errorf("Spurious object in syncServices: %v", serviceInterface)
 			continue
 		}
-		gatewayIP := l.gatewayIPv4
-		if utilnet.IsIPv6String(svc.Spec.ClusterIP) {
-			gatewayIP = l.gatewayIPv6
+		for _, ip := range util.GetClusterIPs(svc) {
+			gatewayIP := l.gatewayIPv4
+			if utilnet.IsIPv6String(ip) {
+				gatewayIP = l.gatewayIPv6
+			}
+			if gatewayIP != "" {
+				keepIPTRules = append(keepIPTRules, getGatewayIPTRules(svc, gatewayIP, nil)...)
+			}
+			keepRoutes = append(keepRoutes, svc.Spec.ExternalIPs...)
 		}
-		if gatewayIP != "" {
-			keepIPTRules = append(keepIPTRules, getGatewayIPTRules(svc, gatewayIP, nil)...)
-		}
-		keepRoutes = append(keepRoutes, svc.Spec.ExternalIPs...)
 	}
 	for _, chain := range []string{iptableNodePortChain, iptableExternalIPChain} {
 		recreateIPTRules("nat", chain, keepIPTRules)
