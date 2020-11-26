@@ -4,7 +4,6 @@ import (
 	"fmt"
 	"hash/fnv"
 	"net"
-	"reflect"
 	"regexp"
 	"strings"
 
@@ -14,6 +13,7 @@ import (
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
 
 	kapi "k8s.io/api/core/v1"
+	apiequality "k8s.io/apimachinery/pkg/api/equality"
 	"k8s.io/klog/v2"
 	utilnet "k8s.io/utils/net"
 )
@@ -41,11 +41,7 @@ func (npw *nodePortWatcher) AddService(service *kapi.Service) {
 	for _, svcPort := range service.Spec.Ports {
 		protocol := strings.ToLower(string(svcPort.Protocol))
 		protocol6 := protocol + "6"
-		if util.ServiceTypeHasNodePort(service) {
-			if err := util.ValidatePort(svcPort.Protocol, svcPort.NodePort); err != nil {
-				klog.Errorf("Skipping service add for svc: %s, err: %v", svcPort.Name, err)
-				continue
-			}
+		if svcPort.NodePort > 0 {
 			if config.IPv4Mode {
 				_, stderr, err := util.RunOVSOfctl("add-flow", npw.gwBridge,
 					fmt.Sprintf("priority=100, in_port=%s, %s, tp_dst=%d, actions=%s",
@@ -72,9 +68,6 @@ func (npw *nodePortWatcher) AddService(service *kapi.Service) {
 			// Table 2 handles return NAT traffic for node port and forwards out of the host
 			// NodePort/Ingress access in the OVS bridge will only ever come from outside of the host
 			for _, ing := range service.Status.LoadBalancer.Ingress {
-				if ing.IP == "" {
-					continue
-				}
 				ingIP := net.ParseIP(ing.IP)
 				if ingIP == nil {
 					klog.Errorf("Failed to parse ingress IP: %s", ing.IP)
@@ -116,10 +109,6 @@ func (npw *nodePortWatcher) AddService(service *kapi.Service) {
 			}
 		}
 		for _, externalIP := range service.Spec.ExternalIPs {
-			if err := util.ValidatePort(svcPort.Protocol, svcPort.Port); err != nil {
-				klog.Errorf("Skipping service add for svc: %s, err: %v", svcPort.Name, err)
-				continue
-			}
 			flowProtocol := protocol
 			nw_dst := "nw_dst"
 			if utilnet.IsIPv6String(externalIP) {
@@ -140,7 +129,8 @@ func (npw *nodePortWatcher) AddService(service *kapi.Service) {
 }
 
 func (npw *nodePortWatcher) UpdateService(new, old *kapi.Service) {
-	if reflect.DeepEqual(new.Spec, old.Spec) {
+	// don't process services if there are no changes
+	if apiequality.Semantic.DeepEqual(new.Spec, old.Spec) && apiequality.Semantic.DeepEqual(new.Status, old.Status) {
 		return
 	}
 	npw.DeleteService(old)
@@ -155,11 +145,7 @@ func (npw *nodePortWatcher) DeleteService(service *kapi.Service) {
 	for _, svcPort := range service.Spec.Ports {
 		protocol := strings.ToLower(string(svcPort.Protocol))
 		protocol6 := protocol + "6"
-		if util.ServiceTypeHasNodePort(service) {
-			if err := util.ValidatePort(svcPort.Protocol, svcPort.NodePort); err != nil {
-				klog.Errorf("Skipping service delete, for svc: %s, err: %v", svcPort.Name, err)
-				continue
-			}
+		if svcPort.NodePort > 0 {
 			if config.IPv4Mode {
 				_, stderr, err := util.RunOVSOfctl("del-flows", npw.gwBridge,
 					fmt.Sprintf("in_port=%s, %s, tp_dst=%d",
@@ -199,9 +185,6 @@ func (npw *nodePortWatcher) DeleteService(service *kapi.Service) {
 			}
 		}
 		for _, ing := range service.Status.LoadBalancer.Ingress {
-			if ing.IP == "" {
-				continue
-			}
 			ingIP := net.ParseIP(ing.IP)
 			if ingIP == nil {
 				klog.Errorf("Failed to parse ingress IP: %s", ing.IP)
@@ -240,20 +223,12 @@ func (npw *nodePortWatcher) SyncServices(services []interface{}) {
 		}
 
 		for _, svcPort := range service.Spec.Ports {
-			if util.ServiceTypeHasNodePort(service) {
-				if err := util.ValidatePort(svcPort.Protocol, svcPort.NodePort); err != nil {
-					klog.Errorf("syncServices error for service port %s: %v", svcPort.Name, err)
-					continue
-				}
+			if svcPort.NodePort > 0 {
 				protocol := strings.ToLower(string(svcPort.Protocol))
 				nodePortKey := fmt.Sprintf("%s_%d", protocol, svcPort.NodePort)
 				ports[nodePortKey] = ""
 			}
 			for _, externalIP := range service.Spec.ExternalIPs {
-				if err := util.ValidatePort(svcPort.Protocol, svcPort.Port); err != nil {
-					klog.Errorf("syncServices error for service port %s: %v", svcPort.Name, err)
-					continue
-				}
 				protocol := strings.ToLower(string(svcPort.Protocol))
 				externalPortKey := fmt.Sprintf("%s_%d", protocol, svcPort.Port)
 				ports[externalPortKey] = externalIP
