@@ -305,7 +305,7 @@ func DeleteConntrack(ip string, port int32, protocol kapi.Protocol) error {
 			return fmt.Errorf("could not add port %d to conntrack filter: %v", port, err)
 		}
 	}
-	if err := filter.AddIP(netlink.ConntrackReplyAnyIP, ipAddress); err != nil {
+	if err := filter.AddIP(netlink.ConntrackOrigDstIP, ipAddress); err != nil {
 		return fmt.Errorf("could not add IP: %s to conntrack filter: %v", ipAddress, err)
 	}
 	if ipAddress.To4() != nil {

@@ -28,6 +28,7 @@ type ObjectCacheInterface interface {
 type NodeWatchFactory interface {
 	Shutdownable
 
+	GetService(namespace, name string) (*kapi.Service, error)
 	AddServiceHandler(handlerFuncs cache.ResourceEventHandler, processExisting func([]interface{})) *Handler
 	RemoveServiceHandler(handler *Handler)
 

@@ -273,6 +273,12 @@ func (n *OvnNode) Start(wg *sync.WaitGroup) error {
 		}
 	}
 
+	// Connectionless protocol like UDP and SCTP can leave stale
+	// conntrack connections that black hole the traffic.
+	// To avoid that, we flush the connections directed to the Service IP:Port
+	// when the service removes or changes its endpoints.
+	// We have to do it in all nodes because the OVN Load Balancers
+	// DNAT the traffic in origin so, we don't know the origin.
 	n.WatchEndpoints()
 
 	cniServer := cni.NewCNIServer("", n.watchFactory)
@@ -286,54 +292,45 @@ func (n *OvnNode) WatchEndpoints() {
 		UpdateFunc: func(old, new interface{}) {
 			epNew := new.(*kapi.Endpoints)
 			epOld := old.(*kapi.Endpoints)
+			// return if there are no endpoint changes
 			if apiequality.Semantic.DeepEqual(epNew.Subsets, epOld.Subsets) {
 				return
 			}
-			newEpAddressMap := buildEndpointAddressMap(epNew.Subsets)
-			for item := range buildEndpointAddressMap(epOld.Subsets) {
-				if _, ok := newEpAddressMap[item]; !ok {
-					err := deleteConntrack(item.ip, item.port, item.protocol)
-					if err != nil {
-						klog.Errorf("Failed to delete conntrack entry for %s: %v", item.ip, err)
-					}
-				}
+			// get the service that belongs to the endpoint
+			svc, err := n.watchFactory.GetService(epNew.Namespace, epNew.Name)
+			if err != nil {
+				klog.Errorf("Error getting service %s/%s after its endpoints changed: %v", epNew.Name, epNew.Namespace, err)
+				return
 			}
+			deleteServiceConntrackEntries(svc)
 		},
 		DeleteFunc: func(obj interface{}) {
 			ep := obj.(*kapi.Endpoints)
-			for item := range buildEndpointAddressMap(ep.Subsets) {
-				err := deleteConntrack(item.ip, item.port, item.protocol)
-				if err != nil {
-					klog.Errorf("Failed to delete conntrack entry for %s: %v", item.ip, err)
-				}
-
+			// get the service that belongs to the endpoint
+			svc, err := n.watchFactory.GetService(ep.Namespace, ep.Name)
+			if err != nil {
+				klog.Errorf("Error getting service %s/%s after its endpoints changed: %v", ep.Name, ep.Namespace, err)
+				return
 			}
+			deleteServiceConntrackEntries(svc)
 		},
 	}, nil)
 }
 
-type epAddressItem struct {
-	ip       string
-	port     int32
-	protocol kapi.Protocol
-}
-
-//buildEndpointAddressMap builds a map of all UDP and SCTP ports in the endpoint subset along with that port's IP address
-func buildEndpointAddressMap(epSubsets []kapi.EndpointSubset) map[epAddressItem]struct{} {
-	epMap := make(map[epAddressItem]struct{})
-	for _, subset := range epSubsets {
-		for _, address := range subset.Addresses {
-			for _, port := range subset.Ports {
-				if port.Protocol == kapi.ProtocolUDP || port.Protocol == kapi.ProtocolSCTP {
-					epMap[epAddressItem{
-						ip:       address.IP,
-						port:     port.Port,
-						protocol: port.Protocol,
-					}] = struct{}{}
-				}
-			}
-		}
+func deleteServiceConntrackEntries(svc *kapi.Service) {
+	// return if the service doesn't have ClusterIPs
+	if !util.IsClusterIPSet(svc) {
+		return
 	}
 
-	return epMap
+	for _, port := range svc.Spec.Ports {
+		// only connectionless protocols can leave stale conntrack connections
+		if port.Protocol != kapi.ProtocolUDP && port.Protocol != kapi.ProtocolSCTP {
+			continue
+		}
+		err := deleteConntrack(svc.Spec.ClusterIP, port.Port, port.Protocol)
+		if err != nil {
+			klog.Errorf("Failed to delete conntrack entry for %s:%d: %v", svc.Spec.ClusterIP, port.Port, err)
+		}
+	}
 }
