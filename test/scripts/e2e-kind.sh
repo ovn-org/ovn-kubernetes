@@ -38,6 +38,9 @@ named port.+\[Feature:NetworkPolicy\]
 # TO BE FIXED BY https://github.com/kubernetes/kubernetes/pull/93119
 GCE
 
+# TO BE REMOVED BY https://github.com/kubernetes/kubernetes/issues/96717
+should create a Pod with SCTP HostPort
+
 # ???
 \[Feature:NoSNAT\]
 Services.+(ESIPP|cleanup finalizer)
