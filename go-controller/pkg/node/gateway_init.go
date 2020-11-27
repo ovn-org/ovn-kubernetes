@@ -205,6 +205,7 @@ func (n *OvnNode) initGateway(subnets []*net.IPNet, nodeAnnotator kube.Annotator
 	if err != nil {
 		return err
 	}
+	gw.nodeIPs = []string{v4IfAddr.IP.String(), v6IfAddr.IP.String()}
 	gw.loadBalancerHealthChecker = loadBalancerHealthChecker
 	gw.portClaimWatcher = portClaimWatcher
 

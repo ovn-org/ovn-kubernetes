@@ -302,7 +302,7 @@ func (n *OvnNode) WatchEndpoints() {
 				klog.Errorf("Error getting service %s/%s after its endpoints changed: %v", epNew.Name, epNew.Namespace, err)
 				return
 			}
-			deleteServiceConntrackEntries(svc)
+			deleteServiceConntrackEntries(svc, n.gateway.NodeIPs())
 		},
 		DeleteFunc: func(obj interface{}) {
 			ep := obj.(*kapi.Endpoints)
@@ -312,12 +312,12 @@ func (n *OvnNode) WatchEndpoints() {
 				klog.Errorf("Error getting service %s/%s after its endpoints changed: %v", ep.Name, ep.Namespace, err)
 				return
 			}
-			deleteServiceConntrackEntries(svc)
+			deleteServiceConntrackEntries(svc, n.gateway.NodeIPs())
 		},
 	}, nil)
 }
 
-func deleteServiceConntrackEntries(svc *kapi.Service) {
+func deleteServiceConntrackEntries(svc *kapi.Service, nodeIPs []string) {
 	// return if the service doesn't have ClusterIPs
 	if !util.IsClusterIPSet(svc) {
 		return
@@ -330,7 +330,16 @@ func deleteServiceConntrackEntries(svc *kapi.Service) {
 		}
 		err := deleteConntrack(svc.Spec.ClusterIP, port.Port, port.Protocol)
 		if err != nil {
-			klog.Errorf("Failed to delete conntrack entry for %s:%d: %v", svc.Spec.ClusterIP, port.Port, err)
+			klog.Errorf("Failed to delete conntrack entry for ClusterIP %s:%d: %v", svc.Spec.ClusterIP, port.Port, err)
+		}
+		// delete the conntrack entries for nodePorts
+		if port.NodePort > 0 {
+			for _, nodeIP := range nodeIPs {
+				err := deleteConntrack(nodeIP, port.NodePort, port.Protocol)
+				if err != nil {
+					klog.Errorf("Failed to delete conntrack entry for NodePort %s:%d: %v", nodeIP, port.NodePort, err)
+				}
+			}
 		}
 	}
 }

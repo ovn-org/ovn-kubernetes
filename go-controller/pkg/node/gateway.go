@@ -21,6 +21,8 @@ type Gateway interface {
 	informer.ServiceAndEndpointsEventHandler
 	Init() error
 	Run(<-chan struct{})
+	// getter for NodeIPs
+	NodeIPs() []string
 }
 
 type gateway struct {
@@ -34,6 +36,11 @@ type gateway struct {
 	localPortWatcher informer.ServiceEventHandler
 	openflowManager  *openflowManager
 	initFunc         func() error
+	nodeIPs          []string
+}
+
+func (g *gateway) NodeIPs() []string {
+	return g.nodeIPs
 }
 
 func (g *gateway) AddService(svc *kapi.Service) {
@@ -127,7 +134,6 @@ func (g *gateway) Run(stopChan <-chan struct{}) {
 
 func gatewayInitInternal(nodeName, gwIntf string, subnets []*net.IPNet, gwNextHops []net.IP, nodeAnnotator kube.Annotator) (
 	string, string, net.HardwareAddr, []*net.IPNet, error) {
-
 	var bridgeName string
 	var uplinkName string
 	var brCreated bool
