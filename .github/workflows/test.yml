@@ -403,18 +403,12 @@ jobs:
           path: './test/_artifacts/*.xml'
 
       - name: Generate Test Report
-        id: xunit-viewer
         if: always()
-        uses: AutoModality/action-xunit-viewer@v1
+        uses: mikepenz/action-junit-report@v1
         with:
-          results: ./test/_artifacts/
+          report_paths: './test/_artifacts/*.xml'
+          github_token: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Upload Test Report
-        if: always()
-        uses: actions/upload-artifact@v2
-        with:
-          name: test-report-${{ env.JOB_NAME }}-${{ github.run_id }}
-          path: './test/_artifacts/index.html'
 
       - name: Export logs
         if: always()
