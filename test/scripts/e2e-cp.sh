@@ -12,6 +12,15 @@ if [ "$KIND_IPV4_SUPPORT" == true ] && [ "$KIND_IPV6_SUPPORT" == true ]; then
     SKIPPED_TESTS="hybrid.overlay|external.gateway"
 fi
 
+
+if [ "$OVN_HA" == false ]; then
+  if [ SKIPPED_TESTS != "" ]; then
+  	SKIPPED_TESTS+="|"
+  fi
+  # No support for these features in no-ha mode yet
+  SKIPPED_TESTS+="e2e delete databases"
+fi
+
 # setting these is required to make RuntimeClass tests work ... :/
 export KUBE_CONTAINER_RUNTIME=remote
 export KUBE_CONTAINER_RUNTIME_ENDPOINT=unix:///run/containerd/containerd.sock
