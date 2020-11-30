@@ -40,6 +40,7 @@ type NodeWatchFactory interface {
 
 	NodeInformer() cache.SharedIndexInformer
 	LocalPodInformer() cache.SharedIndexInformer
+	GetNode(name string) (*kapi.Node, error)
 }
 
 type Shutdownable interface {

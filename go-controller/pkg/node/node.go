@@ -175,17 +175,27 @@ func (n *OvnNode) Start(wg *sync.WaitGroup) error {
 		}
 	}
 
-	if node, err = n.Kube.GetNode(n.name); err != nil {
-		return fmt.Errorf("error retrieving node %s: %v", n.name, err)
-	}
-	err = setupOVNNode(node)
+	// Wait until the node is registered and is ready
+	err = wait.PollImmediate(500*time.Millisecond, 300*time.Second, func() (bool, error) {
+		// Get current node from the API
+		if node, err = n.watchFactory.GetNode(n.name); err != nil {
+			return false, nil
+		}
+		// Try to setup the Node
+		err = setupOVNNode(node)
+		if err != nil {
+			return false, nil
+		}
+		return true, nil
+	})
 	if err != nil {
-		return err
+
+		return fmt.Errorf("timed out waiting to setup node %q: %v", n.name, err)
 	}
 
 	// First wait for the node logical switch to be created by the Master, timeout is 300s.
 	err = wait.PollImmediate(500*time.Millisecond, 300*time.Second, func() (bool, error) {
-		if node, err = n.Kube.GetNode(n.name); err != nil {
+		if node, err = n.watchFactory.GetNode(n.name); err != nil {
 			klog.Infof("Waiting to retrieve node %s: %v", n.name, err)
 			return false, nil
 		}
