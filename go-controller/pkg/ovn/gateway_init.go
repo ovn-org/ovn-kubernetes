@@ -80,6 +80,14 @@ func gatewayInit(nodeName string, clusterIPSubnet []*net.IPNet, hostSubnets []*n
 			return fmt.Errorf("failed to set logical router %s's lb_force_snat_ip option, "+
 				"stdout: %q, stderr: %q, error: %v", gatewayRouter, stdout, stderr, err)
 		}
+
+		// Set shared gw SNAT to use host CT Zone. This will avoid potential SNAT collisions between
+		// host networked pods and OVN networked pods northbound traffic
+		stdout, stderr, err = util.RunOVNNbctl("set", "logical_router", gatewayRouter, "options:snat-ct-zone=0")
+		if err != nil {
+			return fmt.Errorf("failed to set logical router %s's SNAT CT Zone to 0, "+
+				"stdout: %q, stderr: %q, error: %v", gatewayRouter, stdout, stderr, err)
+		}
 	}
 
 	// To decrease the numbers of MAC_Binding entries in a large scale cluster, change the default behavior of always
