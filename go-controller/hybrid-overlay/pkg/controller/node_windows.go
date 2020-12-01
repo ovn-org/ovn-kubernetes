@@ -53,7 +53,7 @@ func newNodeController(kube kube.Interface,
 			"UDP port. Please make sure you install all the KB updates on your system.")
 	}
 
-	node, err := nodeLister.Get(nodeName)
+	node, err := kube.GetNode(nodeName)
 	if err != nil {
 		return nil, err
 	}
