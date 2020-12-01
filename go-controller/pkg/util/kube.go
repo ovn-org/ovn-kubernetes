@@ -66,6 +66,8 @@ func newKubernetesRestConfig(conf *config.KubernetesConfig) (*rest.Config, error
 	if err != nil {
 		return nil, err
 	}
+	kconfig.QPS = 25
+	kconfig.Burst = 25
 	return kconfig, nil
 }
 
