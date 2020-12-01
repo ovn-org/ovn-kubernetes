@@ -12,7 +12,6 @@ import (
 	mock_k8s_io_utils_exec "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/testing/mocks/k8s.io/utils/exec"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util/mocks"
 	"github.com/stretchr/testify/assert"
-	"github.com/stretchr/testify/mock"
 )
 
 func TestNextIP(t *testing.T) {
@@ -69,68 +68,61 @@ func TestGetPortAddresses(t *testing.T) {
 		inpPort              string
 		errAssert            bool
 		errMatch             error
-		onRetArgsOvnNBClient *onCallReturnArgs
+		onRetArgsOvnNBClient *ovntest.TestifyMockHelper
 	}{
 		{
 			desc:                 "test path where LSPGet() returns goovn.ErrorSchema/goovn.ErrorNotFound",
 			inpPort:              "TEST_PORT",
-			onRetArgsOvnNBClient: &onCallReturnArgs{"LSPGet", []string{"string"}, []interface{}{nil, goovn.ErrorSchema}},
+			onRetArgsOvnNBClient: &ovntest.TestifyMockHelper{OnCallMethodName: "LSPGet", OnCallMethodArgType: []string{"string"}, RetArgList: []interface{}{nil, goovn.ErrorSchema}},
 		},
 		{
 			desc:                 "test path where LSPGet() returns an error other than goovn.ErrorSchema/goovn.ErrorNotFound",
 			inpPort:              "TEST_PORT",
 			errAssert:            true,
-			onRetArgsOvnNBClient: &onCallReturnArgs{"LSPGet", []string{"string"}, []interface{}{nil, goovn.ErrorOption}},
+			onRetArgsOvnNBClient: &ovntest.TestifyMockHelper{OnCallMethodName: "LSPGet", OnCallMethodArgType: []string{"string"}, RetArgList: []interface{}{nil, goovn.ErrorOption}},
 		},
 		{
 			desc:                 "test path where LSPGet() returns nil",
 			inpPort:              "TEST_PORT",
-			onRetArgsOvnNBClient: &onCallReturnArgs{"LSPGet", []string{"string"}, []interface{}{nil, nil}},
+			onRetArgsOvnNBClient: &ovntest.TestifyMockHelper{OnCallMethodName: "LSPGet", OnCallMethodArgType: []string{"string"}, RetArgList: []interface{}{nil, nil}},
 		},
 		{
 			desc:                 "test path where lsp.DynamicAddresses is a zero length string and len(addresses)==0",
 			inpPort:              "TEST_PORT",
-			onRetArgsOvnNBClient: &onCallReturnArgs{"LSPGet", []string{"string"}, []interface{}{&goovn.LogicalSwitchPort{DynamicAddresses: ""}, nil}},
+			onRetArgsOvnNBClient: &ovntest.TestifyMockHelper{OnCallMethodName: "LSPGet", OnCallMethodArgType: []string{"string"}, RetArgList: []interface{}{&goovn.LogicalSwitchPort{DynamicAddresses: ""}, nil}},
 		},
 		{
 			desc:                 "test path where lsp.DynamicAddresses is non-zero length string and value of first address in addresses list is set to dynamic",
 			inpPort:              "TEST_PORT",
-			onRetArgsOvnNBClient: &onCallReturnArgs{"LSPGet", []string{"string"}, []interface{}{&goovn.LogicalSwitchPort{DynamicAddresses: "06:c6:d4:fb:fb:ba 10.244.2.2"}, nil}},
+			onRetArgsOvnNBClient: &ovntest.TestifyMockHelper{OnCallMethodName: "LSPGet", OnCallMethodArgType: []string{"string"}, RetArgList: []interface{}{&goovn.LogicalSwitchPort{DynamicAddresses: "06:c6:d4:fb:fb:ba 10.244.2.2"}, nil}},
 		},
 		{
 			desc:                 "test code path where addresses list count is less than 2",
 			inpPort:              "TEST_PORT",
 			errMatch:             fmt.Errorf("error while obtaining addresses for"),
-			onRetArgsOvnNBClient: &onCallReturnArgs{"LSPGet", []string{"string"}, []interface{}{&goovn.LogicalSwitchPort{DynamicAddresses: "06:c6:d4:fb:fb:ba"}, nil}},
+			onRetArgsOvnNBClient: &ovntest.TestifyMockHelper{OnCallMethodName: "LSPGet", OnCallMethodArgType: []string{"string"}, RetArgList: []interface{}{&goovn.LogicalSwitchPort{DynamicAddresses: "06:c6:d4:fb:fb:ba"}, nil}},
 		},
 		{
 			desc:                 "test the code path where ParseMAC fails",
 			inpPort:              "TEST_PORT",
 			errMatch:             fmt.Errorf("failed to parse logical switch port"),
-			onRetArgsOvnNBClient: &onCallReturnArgs{"LSPGet", []string{"string"}, []interface{}{&goovn.LogicalSwitchPort{Addresses: []string{"192.168.1.3 0a:00:00:00:00:01"}}, nil}},
+			onRetArgsOvnNBClient: &ovntest.TestifyMockHelper{OnCallMethodName: "LSPGet", OnCallMethodArgType: []string{"string"}, RetArgList: []interface{}{&goovn.LogicalSwitchPort{Addresses: []string{"192.168.1.3 0a:00:00:00:00:01"}}, nil}},
 		},
 		{
 			desc:                 "test code path where IP address parsing fails",
 			inpPort:              "TEST_PORT",
 			errMatch:             fmt.Errorf("failed to parse logical switch port"),
-			onRetArgsOvnNBClient: &onCallReturnArgs{"LSPGet", []string{"string"}, []interface{}{&goovn.LogicalSwitchPort{Addresses: []string{"192.168.1.3 0a:00:00:00:00:01"}}, nil}},
+			onRetArgsOvnNBClient: &ovntest.TestifyMockHelper{OnCallMethodName: "LSPGet", OnCallMethodArgType: []string{"string"}, RetArgList: []interface{}{&goovn.LogicalSwitchPort{Addresses: []string{"192.168.1.3 0a:00:00:00:00:01"}}, nil}},
 		},
 		{
 			desc:                 "test success path where MAC, IPs are returned",
 			inpPort:              "TEST_PORT",
-			onRetArgsOvnNBClient: &onCallReturnArgs{"LSPGet", []string{"string"}, []interface{}{&goovn.LogicalSwitchPort{Addresses: []string{"0a:00:00:00:00:01 192.168.1.3"}}, nil}},
+			onRetArgsOvnNBClient: &ovntest.TestifyMockHelper{OnCallMethodName: "LSPGet", OnCallMethodArgType: []string{"string"}, RetArgList: []interface{}{&goovn.LogicalSwitchPort{Addresses: []string{"0a:00:00:00:00:01 192.168.1.3"}}, nil}},
 		},
 	}
 	for i, tc := range tests {
 		t.Run(fmt.Sprintf("%d:%s", i, tc.desc), func(t *testing.T) {
-			call := mockOvnNBClient.On(tc.onRetArgsOvnNBClient.onCallMethodName)
-			for _, arg := range tc.onRetArgsOvnNBClient.onCallMethodArgType {
-				call.Arguments = append(call.Arguments, mock.AnythingOfType(arg))
-			}
-			for _, ret := range tc.onRetArgsOvnNBClient.retArgList {
-				call.ReturnArguments = append(call.ReturnArguments, ret)
-			}
-			call.Once()
+			ovntest.ProcessMockFn(&mockOvnNBClient.Mock, *tc.onRetArgsOvnNBClient)
 
 			hwAddr, ipList, err := GetPortAddresses(tc.inpPort, mockOvnNBClient)
 			t.Log(hwAddr.String(), ipList, err)
@@ -156,49 +148,35 @@ func TestGetOVSPortMACAddress(t *testing.T) {
 		desc                    string
 		input                   string
 		errExpected             bool
-		onRetArgsExecUtilsIface *onCallReturnArgs
-		onRetArgsKexecIface     *onCallReturnArgs
+		onRetArgsExecUtilsIface *ovntest.TestifyMockHelper
+		onRetArgsKexecIface     *ovntest.TestifyMockHelper
 	}{
 		// NOTE: May need a test to validate (e.g; zero length string ) portName parameter that is passed to function
 		{
 			desc:                    "tests code path when RunOVSVsctl returns error",
 			input:                   "TEST_PORT",
 			errExpected:             true,
-			onRetArgsExecUtilsIface: &onCallReturnArgs{"RunCmd", []string{"*mocks.Cmd", "string", "[]string", "string", "string", "string", "string", "string", "string"}, []interface{}{nil, nil, fmt.Errorf("executable file not found in $PATH")}},
-			onRetArgsKexecIface:     &onCallReturnArgs{"Command", []string{"string", "string", "string", "string", "string", "string", "string"}, []interface{}{mockCmd}},
+			onRetArgsExecUtilsIface: &ovntest.TestifyMockHelper{OnCallMethodName: "RunCmd", OnCallMethodArgType: []string{"*mocks.Cmd", "string", "[]string", "string", "string", "string", "string", "string", "string"}, RetArgList: []interface{}{nil, nil, fmt.Errorf("executable file not found in $PATH")}},
+			onRetArgsKexecIface:     &ovntest.TestifyMockHelper{OnCallMethodName: "Command", OnCallMethodArgType: []string{"string", "string", "string", "string", "string", "string", "string"}, RetArgList: []interface{}{mockCmd}},
 		},
 		{
 			desc:                    "tests code path when MAC address returned is []",
 			input:                   "TEST_PORT",
 			errExpected:             true,
-			onRetArgsExecUtilsIface: &onCallReturnArgs{"RunCmd", []string{"*mocks.Cmd", "string", "[]string", "string", "string", "string", "string", "string", "string"}, []interface{}{bytes.NewBuffer([]byte("[]")), nil, nil}},
-			onRetArgsKexecIface:     &onCallReturnArgs{"Command", []string{"string", "string", "string", "string", "string", "string", "string"}, []interface{}{mockCmd}},
+			onRetArgsExecUtilsIface: &ovntest.TestifyMockHelper{OnCallMethodName: "RunCmd", OnCallMethodArgType: []string{"*mocks.Cmd", "string", "[]string", "string", "string", "string", "string", "string", "string"}, RetArgList: []interface{}{bytes.NewBuffer([]byte("[]")), nil, nil}},
+			onRetArgsKexecIface:     &ovntest.TestifyMockHelper{OnCallMethodName: "Command", OnCallMethodArgType: []string{"string", "string", "string", "string", "string", "string", "string"}, RetArgList: []interface{}{mockCmd}},
 		},
 		{
 			desc:                    "tests code path when Valid MAC address is returned",
 			input:                   "TEST_PORT",
-			onRetArgsExecUtilsIface: &onCallReturnArgs{"RunCmd", []string{"*mocks.Cmd", "string", "[]string", "string", "string", "string", "string", "string", "string"}, []interface{}{bytes.NewBuffer([]byte("00:00:a9:fe:21:01")), nil, nil}},
-			onRetArgsKexecIface:     &onCallReturnArgs{"Command", []string{"string", "string", "string", "string", "string", "string", "string"}, []interface{}{mockCmd}},
+			onRetArgsExecUtilsIface: &ovntest.TestifyMockHelper{OnCallMethodName: "RunCmd", OnCallMethodArgType: []string{"*mocks.Cmd", "string", "[]string", "string", "string", "string", "string", "string", "string"}, RetArgList: []interface{}{bytes.NewBuffer([]byte("00:00:a9:fe:21:01")), nil, nil}},
+			onRetArgsKexecIface:     &ovntest.TestifyMockHelper{OnCallMethodName: "Command", OnCallMethodArgType: []string{"string", "string", "string", "string", "string", "string", "string"}, RetArgList: []interface{}{mockCmd}},
 		},
 	}
 	for i, tc := range tests {
 		t.Run(fmt.Sprintf("%d:%s", i, tc.desc), func(t *testing.T) {
-			call := mockExecRunner.On(tc.onRetArgsExecUtilsIface.onCallMethodName)
-			for _, arg := range tc.onRetArgsExecUtilsIface.onCallMethodArgType {
-				call.Arguments = append(call.Arguments, mock.AnythingOfType(arg))
-			}
-			for _, ret := range tc.onRetArgsExecUtilsIface.retArgList {
-				call.ReturnArguments = append(call.ReturnArguments, ret)
-			}
-			call.Once()
-			ifaceCall := mockKexecIface.On(tc.onRetArgsKexecIface.onCallMethodName)
-			for _, arg := range tc.onRetArgsKexecIface.onCallMethodArgType {
-				ifaceCall.Arguments = append(ifaceCall.Arguments, mock.AnythingOfType(arg))
-			}
-			for _, ret := range tc.onRetArgsKexecIface.retArgList {
-				ifaceCall.ReturnArguments = append(ifaceCall.ReturnArguments, ret)
-			}
-			ifaceCall.Once()
+			ovntest.ProcessMockFn(&mockExecRunner.Mock, *tc.onRetArgsExecUtilsIface)
+			ovntest.ProcessMockFn(&mockKexecIface.Mock, *tc.onRetArgsKexecIface)
 
 			res, err := GetOVSPortMACAddress(tc.input)
 			t.Log(res, err)
