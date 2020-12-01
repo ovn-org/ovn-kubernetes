@@ -282,7 +282,7 @@ func TestMatchIPFamily(t *testing.T) {
 			if tc.expected == "" {
 				assert.Error(t, err)
 			} else {
-				assert.Equal(t, res, ovntest.MustParseIP(tc.expected))
+				assert.Equal(t, res[0], ovntest.MustParseIP(tc.expected))
 			}
 		})
 	}

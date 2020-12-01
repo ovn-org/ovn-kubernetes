@@ -301,7 +301,7 @@ func gatewayInit(nodeName string, clusterIPSubnet []*net.IPNet, hostSubnets []*n
 		if config.Gateway.Mode != config.GatewayModeLocal {
 			stdout, stderr, err = util.RunOVNNbctl("--may-exist",
 				"--policy=src-ip", "lr-route-add", types.OVNClusterRouter,
-				hostSubnet.String(), gwLRPIP.String())
+				hostSubnet.String(), gwLRPIP[0].String())
 			if err != nil {
 				return fmt.Errorf("failed to add source IP address based "+
 					"routes in distributed router %s, stdout: %q, "+
@@ -329,7 +329,7 @@ func gatewayInit(nodeName string, clusterIPSubnet []*net.IPNet, hostSubnets []*n
 			// if the external ip has changed, but the logical ip has stayed the same
 			stdout, stderr, err := util.RunOVNNbctl("--if-exists", "lr-nat-del",
 				gatewayRouter, "snat", entry.String(), "--", "lr-nat-add",
-				gatewayRouter, "snat", externalIP.String(), entry.String())
+				gatewayRouter, "snat", externalIP[0].String(), entry.String())
 			if err != nil {
 				return fmt.Errorf("failed to create default SNAT rules for gateway router %s, "+
 					"stdout: %q, stderr: %q, error: %v", gatewayRouter, stdout, stderr, err)
