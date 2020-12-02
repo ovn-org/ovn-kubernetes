@@ -362,7 +362,7 @@ func RegisterOvnDBMetrics(clientset kubernetes.Interface, k8sNodeName string) {
 		}
 		return
 	}
-	klog.Info("Found OVN DB Pod running on this node. Registering OVN DB Metrics")
+	klog.Info("Found OVN DB Pod running on this node. Registering OVN DB Metrics on Node.")
 
 	// get the ovsdb server version info
 	getOvnDbVersionInfo()
