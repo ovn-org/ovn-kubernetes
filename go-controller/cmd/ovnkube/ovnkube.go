@@ -15,11 +15,11 @@ import (
 	"text/template"
 	"time"
 
-	"k8s.io/klog/v2"
-
 	goovn "github.com/ebay/go-ovn"
+	"github.com/prometheus/client_golang/prometheus"
 	"github.com/urfave/cli/v2"
 	"gopkg.in/fsnotify/fsnotify.v1"
+	"k8s.io/klog/v2"
 
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/factory"
@@ -283,12 +283,16 @@ func runOvnKube(ctx *cli.Context) error {
 	// now that ovnkube master/node are running, lets expose the metrics HTTP endpoint if configured
 	// start the prometheus server to serve OVN K8s Metrics (default master port: 9409, node port: 9410)
 	if config.Kubernetes.MetricsBindAddress != "" {
+		if config.Kubernetes.OVNMetricsBindAddress == "" {
+			//Expose OVNRegistry Metrics on same mux as Metrics Server
+			metrics.RegisterOvnMetrics(prometheus.DefaultRegisterer, ovnClientset.KubeClient, node)
+		}
 		metrics.StartMetricsServer(config.Kubernetes.MetricsBindAddress, config.Kubernetes.MetricsEnablePprof)
 	}
 
 	// start the prometheus server to serve OVN Metrics (default port: 9476)
 	if config.Kubernetes.OVNMetricsBindAddress != "" {
-		metrics.RegisterOvnMetrics(ovnClientset.KubeClient, node)
+		metrics.RegisterOvnMetrics(metrics.GetOvnRegistry(), ovnClientset.KubeClient, node)
 		metrics.StartOVNMetricsServer(config.Kubernetes.OVNMetricsBindAddress)
 	}
 

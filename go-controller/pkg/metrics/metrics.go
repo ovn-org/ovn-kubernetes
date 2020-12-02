@@ -166,6 +166,12 @@ func checkPodRunsOnGivenNode(clientset kubernetes.Interface, label, k8sNodeName 
 	return false, fmt.Errorf("the Pod matching the label %q doesn't exist on this node %s", label, k8sNodeName)
 }
 
+var ovnRegistry = prometheus.NewRegistry()
+
+func GetOvnRegistry() *prometheus.Registry {
+	return ovnRegistry
+}
+
 // StartMetricsServer runs the prometheus listener so that OVN K8s metrics can be collected
 func StartMetricsServer(bindAddress string, enablePprof bool) {
 	mux := http.NewServeMux()
@@ -187,8 +193,6 @@ func StartMetricsServer(bindAddress string, enablePprof bool) {
 	}, 5*time.Second, utilwait.NeverStop)
 }
 
-var ovnRegistry = prometheus.NewRegistry()
-
 // StartOVNMetricsServer runs the prometheus listener so that OVN metrics can be collected
 func StartOVNMetricsServer(bindAddress string) {
 	handler := promhttp.InstrumentMetricHandler(ovnRegistry,
@@ -204,8 +208,8 @@ func StartOVNMetricsServer(bindAddress string) {
 	}, 5*time.Second, utilwait.NeverStop)
 }
 
-func RegisterOvnMetrics(clientset kubernetes.Interface, k8sNodeName string) {
-	go RegisterOvnDBMetrics(clientset, k8sNodeName)
+func RegisterOvnMetrics(registry prometheus.Registerer, clientset kubernetes.Interface, k8sNodeName string) {
+	go RegisterOvnDBMetrics(registry, clientset, k8sNodeName)
 	go RegisterOvnControllerMetrics()
 	go RegisterOvnNorthdMetrics(clientset, k8sNodeName)
 }
