@@ -156,28 +156,12 @@ func (oc *Controller) addRoutesGatewayIP(pod *kapi.Pod, podAnnotation *util.PodA
 			}
 		}
 	}
-	// DUALSTACK FIXME: hybridOverlayExternalGW is not Dualstack
-	var hybridOverlayExternalGW net.IP
-	if config.HybridOverlay.Enabled {
-		hybridOverlayExternalGW, err = oc.getHybridOverlayExternalGwAnnotation(pod.Namespace)
-		if err != nil {
-			return err
-		}
-	}
 
 	for _, podIfAddr := range podAnnotation.IPs {
 		isIPv6 := utilnet.IsIPv6CIDR(podIfAddr)
 		nodeSubnet, err := util.MatchIPNetFamily(isIPv6, nodeSubnets)
 		if err != nil {
 			return err
-		}
-		// DUALSTACK FIXME: hybridOverlayExternalGW is not Dualstack
-		// When oc.getHybridOverlayExternalGwAnnotation() supports dualstack, return error if no match.
-		// If external gateway mode is configured, need to use it for all outgoing traffic, so don't want
-		// to fall back to the default gateway here
-		if hybridOverlayExternalGW != nil && utilnet.IsIPv6(hybridOverlayExternalGW) != isIPv6 {
-			klog.Warningf("Pod %s/%s has no external gateway for %s", pod.Namespace, pod.Name, util.IPFamilyName(isIPv6))
-			continue
 		}
 
 		gatewayIPnet := util.GetNodeGatewayIfAddr(nodeSubnet)
@@ -189,7 +173,7 @@ func (oc *Controller) addRoutesGatewayIP(pod *kapi.Pod, podAnnotation *util.PodA
 		var gatewayIP net.IP
 		hasRoutingExternalGWs := len(oc.getRoutingExternalGWs(pod.Namespace)) > 0
 		hasPodRoutingGWs := len(oc.getRoutingPodGWs(pod.Namespace)) > 0
-		if otherDefaultRoute || (hybridOverlayExternalGW != nil && !hasRoutingExternalGWs && !hasPodRoutingGWs) {
+		if otherDefaultRoute || (hasRoutingExternalGWs && hasPodRoutingGWs) {
 			for _, clusterSubnet := range config.Default.ClusterSubnets {
 				if isIPv6 == utilnet.IsIPv6CIDR(clusterSubnet.CIDR) {
 					podAnnotation.Routes = append(podAnnotation.Routes, util.PodRoute{
@@ -205,9 +189,6 @@ func (oc *Controller) addRoutesGatewayIP(pod *kapi.Pod, podAnnotation *util.PodA
 						NextHop: gatewayIPnet.IP,
 					})
 				}
-			}
-			if hybridOverlayExternalGW != nil {
-				gatewayIP = util.GetNodeHybridOverlayIfAddr(nodeSubnet).IP
 			}
 		} else {
 			gatewayIP = gatewayIPnet.IP
@@ -249,15 +230,6 @@ func (oc *Controller) getRoutingPodGWs(ns string) map[string][]net.IP {
 	}
 	defer nsInfo.Unlock()
 	return nsInfo.routingExternalPodGWs
-}
-
-func (oc *Controller) getHybridOverlayExternalGwAnnotation(ns string) (net.IP, error) {
-	nsInfo, err := oc.waitForNamespaceLocked(ns)
-	if err != nil {
-		return nil, err
-	}
-	defer nsInfo.Unlock()
-	return nsInfo.hybridOverlayExternalGW, nil
 }
 
 func (oc *Controller) addLogicalPort(pod *kapi.Pod) (err error) {
