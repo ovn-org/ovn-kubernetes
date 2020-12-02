@@ -18,7 +18,6 @@ import (
 	"k8s.io/apimachinery/pkg/types"
 )
 
-//func newEgressFirewallMeta(name, namespace string) metav1.ObjectMeta {
 func newObjectMeta(name, namespace string) metav1.ObjectMeta {
 	return metav1.ObjectMeta{
 		UID:       types.UID(namespace),
@@ -46,7 +45,7 @@ var _ = Describe("OVN EgressFirewall Operations", func() {
 	)
 
 	BeforeEach(func() {
-		// Restore global default values before each testcase
+		// Restore global default values before each 99999e
 		config.PrepareTestConfig()
 
 		app = cli.NewApp()
@@ -69,7 +68,7 @@ var _ = Describe("OVN EgressFirewall Operations", func() {
 					node1Name string = "node1"
 				)
 				fExec.AddFakeCmdsNoOutputNoError([]string{
-					"ovn-nbctl --timeout=15 --id=@logical_router_policy create logical_router_policy priority=10000 match=\"(ip4.dst == 1.2.3.4/23) && ip4.src == $a10481622940199974102 && ip4.dst != 10.128.0.0/14\" action=allow external-ids:egressFirewall=namespace1 -- add logical_router ovn_cluster_router policies @logical_router_policy",
+					"ovn-nbctl --timeout=15 --id=@logical_router_policy create logical_router_policy priority=9999 match=\"(ip4.dst == 1.2.3.4/23) && ip4.src == $a10481622940199974102 && ip4.dst != 10.128.0.0/14\" action=allow external-ids:egressFirewall=namespace1 -- add logical_router ovn_cluster_router policies @logical_router_policy",
 				})
 
 				namespace1 := *newNamespace("namespace1")
@@ -125,7 +124,7 @@ var _ = Describe("OVN EgressFirewall Operations", func() {
 					node1Name string = "node1"
 				)
 				fExec.AddFakeCmdsNoOutputNoError([]string{
-					"ovn-nbctl --timeout=15 --id=@logical_router_policy create logical_router_policy priority=10000 match=\"(ip6.dst == 2002::1234:abcd:ffff:c0a8:101/64) && (ip4.src == $a10481622940199974102 || ip6.src == $a10481620741176717680) && ip4.dst != 10.128.0.0/14\" action=allow external-ids:egressFirewall=namespace1 -- add logical_router ovn_cluster_router policies @logical_router_policy",
+					"ovn-nbctl --timeout=15 --id=@logical_router_policy create logical_router_policy priority=9999 match=\"(ip6.dst == 2002::1234:abcd:ffff:c0a8:101/64) && (ip4.src == $a10481622940199974102 || ip6.src == $a10481620741176717680) && ip4.dst != 10.128.0.0/14\" action=allow external-ids:egressFirewall=namespace1 -- add logical_router ovn_cluster_router policies @logical_router_policy",
 				})
 
 				namespace1 := *newNamespace("namespace1")
@@ -182,7 +181,7 @@ var _ = Describe("OVN EgressFirewall Operations", func() {
 					node1Name string = "node1"
 				)
 				fExec.AddFakeCmdsNoOutputNoError([]string{
-					"ovn-nbctl --timeout=15 --id=@logical_router_policy create logical_router_policy priority=10000 match=\"(ip4.dst == 1.2.3.4/23) && ip4.src == $a10481622940199974102 && ((udp && ( udp.dst == 100 ))) && ip4.dst != 10.128.0.0/14\" action=drop external-ids:egressFirewall=namespace1 -- add logical_router ovn_cluster_router policies @logical_router_policy",
+					"ovn-nbctl --timeout=15 --id=@logical_router_policy create logical_router_policy priority=9999 match=\"(ip4.dst == 1.2.3.4/23) && ip4.src == $a10481622940199974102 && ((udp && ( udp.dst == 100 ))) && ip4.dst != 10.128.0.0/14\" action=drop external-ids:egressFirewall=namespace1 -- add logical_router ovn_cluster_router policies @logical_router_policy",
 				})
 				namespace1 := *newNamespace("namespace1")
 				egressFirewall := newEgressFirewallObject("default", namespace1.Name, []egressfirewallapi.EgressFirewallRule{
@@ -240,7 +239,7 @@ var _ = Describe("OVN EgressFirewall Operations", func() {
 					node1Name string = "node1"
 				)
 				fExec.AddFakeCmdsNoOutputNoError([]string{
-					"ovn-nbctl --timeout=15 --id=@logical_router_policy create logical_router_policy priority=10000 match=\"(ip4.dst == 1.2.3.5/23) && " +
+					"ovn-nbctl --timeout=15 --id=@logical_router_policy create logical_router_policy priority=9999 match=\"(ip4.dst == 1.2.3.5/23) && " +
 						"ip4.src == $a10481622940199974102 && ((tcp && ( tcp.dst == 100 ))) && ip4.dst != 10.128.0.0/14\" action=allow external-ids:egressFirewall=namespace1 -- add logical_router ovn_cluster_router policies @logical_router_policy",
 					"ovn-nbctl --timeout=15 lr-policy-del ovn_cluster_router " + fmt.Sprintf("%s", fakeUUID),
 				})
@@ -307,12 +306,18 @@ var _ = Describe("OVN EgressFirewall Operations", func() {
 					node1Name string = "node1"
 				)
 				fExec.AddFakeCmdsNoOutputNoError([]string{
-					"ovn-nbctl --timeout=15 --id=@logical_router_policy create logical_router_policy priority=10000 match=\"(ip4.dst == 1.2.3.4/23) && ip4.src == $a10481622940199974102 && ip4.dst != 10.128.0.0/14\" action=allow external-ids:egressFirewall=namespace1 -- add logical_router ovn_cluster_router policies @logical_router_policy",
-					"ovn-nbctl --timeout=15 --id=@logical_router_policy create logical_router_policy priority=10000 match=\"(ip4.dst == 1.2.3.4/23) && ip4.src == $a10481622940199974102 && ip4.dst != 10.128.0.0/14\" action=drop external-ids:egressFirewall=namespace1 -- add logical_router ovn_cluster_router policies @logical_router_policy",
+					"ovn-nbctl --timeout=15 --id=@logical_router_policy create logical_router_policy priority=9999 match=\"(ip4.dst == 1.2.3.4/23) && ip4.src == $a10481622940199974102 && ip4.dst != 10.128.0.0/14\" action=allow external-ids:egressFirewall=namespace1 -- add logical_router ovn_cluster_router policies @logical_router_policy",
+					"ovn-nbctl --timeout=15 --id=@logical_router_policy create logical_router_policy priority=10000 match=\"(ip4.dst == 0.0.0.0/0 || ip6.dst == ::/0) && ip4.src == $a10481622940199974102 && ip4.dst != 10.128.0.0/14\" action=drop external-ids:egressFirewall=namespace1-blockAll -- add logical_router ovn_cluster_router policies @logical_router_policy",
+					"ovn-nbctl --timeout=15 --id=@logical_router_policy create logical_router_policy priority=9999 match=\"(ip4.dst == 1.2.3.4/23) && ip4.src == $a10481622940199974102 && ip4.dst != 10.128.0.0/14\" action=drop external-ids:egressFirewall=namespace1 -- add logical_router ovn_cluster_router policies @logical_router_policy",
+					"ovn-nbctl --timeout=15 lr-policy-del ovn_cluster_router " + fmt.Sprintf("%s", fakeUUID),
 					"ovn-nbctl --timeout=15 lr-policy-del ovn_cluster_router " + fmt.Sprintf("%s", fakeUUID),
 				})
 				fExec.AddFakeCmd(&ovntest.ExpectedCmd{
 					Cmd:    "ovn-nbctl --timeout=15 --data=bare --no-heading --columns=_uuid find logical_router_policy external-ids:egressFirewall=namespace1",
+					Output: fmt.Sprintf("%s", fakeUUID),
+				})
+				fExec.AddFakeCmd(&ovntest.ExpectedCmd{
+					Cmd:    "ovn-nbctl --timeout=15 --data=bare --no-heading --columns=_uuid find logical_router_policy external-ids:egressFirewall=namespace1-blockAll",
 					Output: fmt.Sprintf("%s", fakeUUID),
 				})
 
@@ -559,3 +564,17 @@ var _ = Describe("OVN test basic functions", func() {
 		}
 	})
 })
+
+//helper functions to help test egressfirewallDNS
+
+// Create an EgressDNS object without the Sync function
+// To make it easier to mock EgressFirewall functionality create an egressFirewall
+// without the go routine of the sync function
+
+//GetDNSEntryForTest Gets a dnsEntry from a EgressDNS object for testing
+func (e *EgressDNS) GetDNSEntryForTest(dnsName string) (map[string]struct{}, []net.IP, AddressSet, error) {
+	if e.dnsEntries[dnsName] == nil {
+		return nil, nil, nil, fmt.Errorf("there is no dnsEntry for dnsName: %s", dnsName)
+	}
+	return e.dnsEntries[dnsName].namespaces, e.dnsEntries[dnsName].dnsResolves, e.dnsEntries[dnsName].dnsAddressSet, nil
+}
