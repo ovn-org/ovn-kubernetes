@@ -36,7 +36,7 @@ ARG ovsver=2.13.0-72.el8fdp
 ARG ovnver=20.09.0-7.el8fdn
 
 RUN INSTALL_PKGS=" \
-	openssl firewalld-filesystem \
+	openssl python3-pyOpenSSL firewalld-filesystem \
 	libpcap iproute strace \
 	containernetworking-plugins \
 	tcpdump iputils \
