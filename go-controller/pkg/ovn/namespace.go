@@ -126,26 +126,28 @@ func (oc *Controller) multicastUpdateNamespace(ns *kapi.Namespace, nsInfo *names
 	var err error
 	nsInfo.multicastEnabled = enabled
 	if enabled {
-		klog.V(5).Infof("Multicast is enabled for Namspace %s and the port group is being updated", ns.Name)
+		klog.V(5).Infof("Multicast is enabled for namespace %s and the port group is being updated", ns.Name)
 		err = nsInfo.updateNamespacePortGroup(ns.Name)
 		if err != nil {
-			klog.Errorf("Error trying to update port group for namspace %s:%v", ns.Name, err)
+			klog.Errorf("Error trying to update port group for namespace %s:%v", ns.Name, err)
 		}
 
 		err = oc.createMulticastAllowPolicy(ns.Name)
 		if err != nil {
-			klog.Errorf("Error trying to create a multicast allow policy for namspace %s:%v", ns.Name, err)
+
+			klog.Errorf("Error trying to create a multicast allow policy for namespace %s:%v", ns.Name, err)
+
 		}
 	} else {
 		klog.V(5).Infof("Deleting Multicast port Group for %s", ns)
 		err = deleteMulticastAllowPolicy(ns.Name)
 		if err != nil {
-			klog.Errorf("Error trying to delete a multicast allow policy for namspace %s:%v", ns.Name, err)
+			klog.Errorf("Error trying to delete a multicast allow policy for namespace %s:%v", ns.Name, err)
 		}
 
 		err = nsInfo.updateNamespacePortGroup(ns.Name)
 		if err != nil {
-			klog.Errorf("Error trying to update port group for namspace %s:%v", ns.Name, err)
+			klog.Errorf("Error trying to update port group for namespace %s:%v", ns.Name, err)
 		}
 
 	}
@@ -161,12 +163,12 @@ func (oc *Controller) multicastDeleteNamespace(ns *kapi.Namespace, nsInfo *names
 	if nsInfo.multicastEnabled {
 		nsInfo.multicastEnabled = false
 		if err := deleteMulticastAllowPolicy(ns.Name); err != nil {
-			klog.Errorf("Error trying to delete a multicast allow policy for namspace %s:%v", ns.Name, err)
+			klog.Errorf("Error trying to delete a multicast allow policy for namespace %s:%v", ns.Name, err)
 		}
 		//Add this here to remove nsInfo Dependency from policy.go
 		//Ensures multicast portgroup is removed
 		if err := nsInfo.updateNamespacePortGroup(ns.Name); err != nil {
-			klog.Errorf("Error trying to update port group for namspace %s:%v", ns.Name, err)
+			klog.Errorf("Error trying to update port group for namespace %s:%v", ns.Name, err)
 		}
 	}
 }

@@ -1062,7 +1062,7 @@ var _ = Describe("OVN NetworkPolicy Operations", func() {
 		It("reconciles an updated namespace label", func() {
 			app.Action = func(ctx *cli.Context) error {
 
-				npTest := networkPolicy{}
+				npTest := networkPolicyTest{}
 
 				namespace1 := *newNamespace(namespaceName1)
 				namespace2 := *newNamespace(namespaceName2)

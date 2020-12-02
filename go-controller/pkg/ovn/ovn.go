@@ -71,7 +71,7 @@ type namespaceInfo struct {
 	// of all pods in the namespace.
 	addressSet AddressSet
 
-	//defines the namespaces egressFirewallPolicy
+	// defines the namespaces egressFirewallPolicy
 	egressFirewallPolicy *egressFirewall
 
 	// routingExternalGWs is a slice of net.IP containing the values parsed from
@@ -130,9 +130,9 @@ type Controller struct {
 	namespaces      map[string]*namespaceInfo
 	namespacesMutex sync.Mutex
 
-	//Network Policy resources on a per namespace basis
-	//must use getNetworkPolicyLocked() or waitforNetworkPoliciesLocked
-	//to read or edit the networkPolicies Map
+	// Network Policy resources on a per namespace basis
+	// must use getNetworkPolicyLocked() or waitforNetworkPoliciesLocked
+	// to read or edit the networkPolicies Map
 	networkPolicies      map[types.NamespacedName]*networkPolicy
 	networkPoliciesMutex sync.Mutex
 
