@@ -15,6 +15,7 @@ const (
 	LogicalSwitchType     string = "Logical_Switch"
 	LogicalSwitchPortType string = "Logical_Switch_Port"
 	ChassisType           string = "Chassis"
+	ACLType               string = "ACL"
 )
 
 const (

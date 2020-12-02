@@ -57,11 +57,6 @@ func (mock *MockOVNClient) LSLBList(ls string) ([]*goovn.LoadBalancer, error) {
 	return nil, fmt.Errorf("method %s is not implemented yet", functionName())
 }
 
-// Add ACL
-func (mock *MockOVNClient) ACLAdd(ls, direct, match, action string, priority int, external_ids map[string]string, logflag bool, meter string, severity string) (*goovn.OvnCommand, error) {
-	return nil, fmt.Errorf("method %s is not implemented yet", functionName())
-}
-
 // Delete acl
 func (mock *MockOVNClient) ACLDel(ls, direct, match string, priority int, external_ids map[string]string) (*goovn.OvnCommand, error) {
 	return nil, fmt.Errorf("method %s is not implemented yet", functionName())
