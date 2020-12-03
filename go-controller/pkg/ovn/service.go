@@ -352,7 +352,7 @@ func (ovn *Controller) createService(service *kapi.Service) error {
 						if err := ovn.AddEndpoints(ep); err != nil {
 							return err
 						}
-					} else if ovn.svcQualifiesForReject(service) {
+					} else if svcQualifiesForReject(service) {
 						aclUUID, err := ovn.createLoadBalancerRejectACL(loadBalancer, physicalIP, port, svcPort.Protocol)
 						if err != nil {
 							return fmt.Errorf("failed to create service ACL: %v", err)
@@ -370,7 +370,7 @@ func (ovn *Controller) createService(service *kapi.Service) error {
 				klog.Errorf("Failed to get load balancer for %s (%v)", svcPort.Protocol, err)
 				break
 			}
-			if ovn.svcQualifiesForReject(service) {
+			if svcQualifiesForReject(service) {
 				vip := util.JoinHostPortInt32(service.Spec.ClusterIP, svcPort.Port)
 				// Skip creating LB if endpoints watcher already did it
 				if _, hasEps := ovn.getServiceLBInfo(loadBalancer, vip); hasEps {
@@ -487,14 +487,8 @@ func (ovn *Controller) deleteService(service *kapi.Service) {
 				klog.Error(err)
 			}
 			// Cloud load balancers
-			for _, ing := range service.Status.LoadBalancer.Ingress {
-				if ing.IP == "" {
-					continue
-				}
-				ingressVIP := util.JoinHostPortInt32(ing.IP, svcPort.Port)
-				if err := ovn.deleteLoadBalancerVIP(loadBalancer, ingressVIP); err != nil {
-					klog.Error(err)
-				}
+			if err := ovn.deleteIngressVIPs(service, svcPort); err != nil {
+				klog.Error(err)
 			}
 			if err := ovn.deleteExternalVIPs(service, svcPort); err != nil {
 				klog.Error(err)
@@ -507,7 +501,7 @@ func (ovn *Controller) deleteService(service *kapi.Service) {
 // The reject ACL is only applied to terminate incoming connections immediately when idling is not used
 // or OVNEmptyLbEvents are not enabled. When idilng or empty LB events are enabled, we want to ensure we
 // receive these packets and not reject them.
-func (ovn *Controller) svcQualifiesForReject(service *kapi.Service) bool {
+func svcQualifiesForReject(service *kapi.Service) bool {
 	_, ok := service.Annotations[OvnServiceIdledAt]
 	return !(config.Kubernetes.OVNEmptyLbEvents && ok)
 }
