@@ -19,13 +19,16 @@ ENV PYTHONDONTWRITEBYTECODE yes
 RUN INSTALL_PKGS=" \
 	python3-pyyaml bind-utils procps-ng openssl numactl-libs firewalld-filesystem \
 	libpcap hostname kubernetes-client \
-        ovn ovn-central ovn-host python3-openvswitch python3-pyOpenSSL \
+	# ovn ovn-central ovn-host \
+	python3-openvswitch python3-pyOpenSSL \
 	iptables iproute iputils strace socat \
-        " && \
+	" && \
 	dnf install --best --refresh -y --setopt=tsflags=nodocs $INSTALL_PKGS && \
 	dnf clean all && rm -rf /var/cache/dnf/*
 
-RUN dnf install -y --enablerepo=updates-testing --best --advisory=FEDORA-2020-fa92b9d524 "ovn >= 20.09.0-2" || exit 1
+# RUN dnf install -y --enablerepo=updates-testing --best --advisory=FEDORA-2020-fa92b9d524 "ovn >= 20.09.0-2" || exit 1
+ADD rpms /tmp/rpms
+RUN dnf install -y /tmp/rpms/*.rpm && rm -f /tmp/rpms/*
 
 RUN mkdir -p /var/run/openvswitch
 
@@ -52,8 +55,8 @@ COPY ./iptables-scripts/ip6tables-save /usr/sbin/
 COPY ./iptables-scripts/ip6tables-restore /usr/sbin/
 
 LABEL io.k8s.display-name="ovn-kubernetes" \
-      io.k8s.description="This is a Kubernetes network plugin that provides an overlay network using OVN." \
-      maintainer="Phil Cameron <pcameron@redhat.com>"
+	io.k8s.description="This is a Kubernetes network plugin that provides an overlay network using OVN." \
+	maintainer="Phil Cameron <pcameron@redhat.com>"
 
 WORKDIR /root
 ENTRYPOINT /root/ovnkube.sh
