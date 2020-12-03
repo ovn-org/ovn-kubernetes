@@ -4,7 +4,7 @@ apiVersion: apiextensions.k8s.io/v1
 kind: CustomResourceDefinition
 metadata:
   annotations:
-    controller-gen.kubebuilder.io/version: v0.2.9
+    controller-gen.kubebuilder.io/version: v0.3.0
   creationTimestamp: null
   name: egressfirewalls.k8s.ovn.org
 spec:
@@ -23,23 +23,15 @@ spec:
     name: v1
     schema:
       openAPIV3Schema:
-        description: EgressFirewall describes the current egress firewall for a Namespace.
-          Traffic from a pod to an IP address outside the cluster will be checked
-          against each EgressFirewallRule in the pod's namespace's EgressFirewall,
-          in order. If no rule matches (or no EgressFirewall is present) then the
-          traffic will be allowed by default.
+        description: EgressFirewall describes the current egress firewall for a Namespace. Traffic from a pod to an IP address outside the cluster will be checked against each EgressFirewallRule in the pod's namespace's EgressFirewall, in order. If no rule matches (or no EgressFirewall is present) then the traffic will be allowed by default.
         properties:
           apiVersion:
-            description: 'APIVersion defines the versioned schema of this representation
-              of an object. Servers should convert recognized schemas to the latest
-              internal value, and may reject unrecognized values. More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#resources'
+            description: 'APIVersion defines the versioned schema of this representation of an object. Servers should convert recognized schemas to the latest internal value, and may reject unrecognized values. More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#resources'
             type: string
           kind:
-            description: 'Kind is a string value representing the REST resource this
-              object represents. Servers may infer this from the endpoint the client
-              submits requests to. Cannot be updated. In CamelCase. More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#types-kinds'
+            description: 'Kind is a string value representing the REST resource this object represents. Servers may infer this from the endpoint the client submits requests to. Cannot be updated. In CamelCase. More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#types-kinds'
             type: string
-          metadata: 
+          metadata:
             type: object
             properties:
               name:
@@ -51,15 +43,12 @@ spec:
               egress:
                 description: a collection of egress firewall rule objects
                 items:
-                  description: EgressFirewallRule is a single egressfirewall rule
-                    object
+                  description: EgressFirewallRule is a single egressfirewall rule object
                   properties:
                     ports:
-                      description: ports specify what ports and protocols the rule
-                        applies to
+                      description: ports specify what ports and protocols the rule applies to
                       items:
-                        description: EgressFirewallPort specifies the port to allow
-                          or deny traffic to
+                        description: EgressFirewallPort specifies the port to allow or deny traffic to
                         properties:
                           port:
                             description: port that the traffic must match
@@ -68,8 +57,7 @@ spec:
                             minimum: 1
                             type: integer
                           protocol:
-                            description: protocol (tcp, udp, sctp) that the traffic
-                              must match.
+                            description: protocol (tcp, udp, sctp) that the traffic must match.
                             pattern: ^TCP|UDP|SCTP$
                             type: string
                         required:
@@ -78,16 +66,18 @@ spec:
                         type: object
                       type: array
                     to:
-                      description: to is the target that traffic is allowed/denied
-                        to
+                      description: to is the target that traffic is allowed/denied to
                       properties:
                         cidrSelector:
-                          description: cidrSelector is the CIDR range to allow/deny
-                            traffic to.
+                          description: cidrSelector is the CIDR range to allow/deny traffic to. If this is set, dnsName must be unset.
                           type: string
-                      required:
-                      - cidrSelector
+                        dnsName:
+                          description: dnsName is the domain name to allow/deny traffic to. If this is set, cidrSelector must be unset.
+                          pattern: ^([A-Za-z0-9-]+\.)*[A-Za-z0-9-]+\.?$
+                          type: string
                       type: object
+                      minProperties: 1
+                      maxProperties: 1
                     type:
                       description: type marks this as an "Allow" or "Deny" rule
                       pattern: ^Allow|Deny$

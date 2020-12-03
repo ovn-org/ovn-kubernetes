@@ -7,6 +7,8 @@ import (
 	"strings"
 	"sync"
 
+	"github.com/pkg/errors"
+
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
 
@@ -46,7 +48,10 @@ type AddressSet interface {
 	GetIPv6HashName() string
 	// GetName returns the descriptive name of the address set
 	GetName() string
+	// AddIPs adds the array of IPs to the address set
 	AddIPs(ip []net.IP) error
+	// SetIPs sets the address set to the given array of addresses
+	SetIPs(ip []net.IP) error
 	DeleteIPs(ip []net.IP) error
 	Destroy() error
 }
@@ -272,6 +277,29 @@ func (as *ovnAddressSets) GetName() string {
 	return as.name
 }
 
+func (as *ovnAddressSets) SetIPs(ips []net.IP) error {
+	var err error
+	var listIPv4, listIPv6 []net.IP
+	as.Lock()
+	defer as.Unlock()
+
+	for _, ip := range ips {
+		if utilnet.IsIPv6(ip) {
+			listIPv6 = append(listIPv6, ip)
+		} else {
+			listIPv4 = append(listIPv4, ip)
+		}
+	}
+	if as.ipv6 != nil {
+		err = as.ipv6.setIP(listIPv6)
+	}
+	if as.ipv4 != nil {
+		err = errors.Wrapf(err, "%v", as.ipv4.setIP(listIPv4))
+	}
+
+	return err
+}
+
 func (as *ovnAddressSets) AddIPs(ips []net.IP) error {
 	var err error
 	as.Lock()
@@ -356,6 +384,26 @@ func (as *ovnAddressSet) setOrClear() error {
 			return fmt.Errorf("failed to clear address set %q, stderr: %q (%v)",
 				asDetail(as), stderr, err)
 		}
+	}
+	return nil
+}
+
+// setIP updates the given address set in OVN to be the given IPs
+func (as *ovnAddressSet) setIP(ips []net.IP) error {
+	var ipList []string
+
+	// delete the old map of IP addresses
+	as.ips = make(map[string]net.IP)
+
+	for _, ip := range ips {
+		ipList = append(ipList, `"`+ip.String()+`"`)
+		as.ips[ip.String()] = ip
+	}
+	joinedIPs := strings.Join(ipList, " ")
+	_, stderr, err := util.RunOVNNbctl("set", "address_set", as.uuid, "addresses="+joinedIPs)
+	if err != nil {
+		return fmt.Errorf("failed to set address set %q, stderr: %q (%v)",
+			asDetail(as), stderr, err)
 	}
 	return nil
 }
