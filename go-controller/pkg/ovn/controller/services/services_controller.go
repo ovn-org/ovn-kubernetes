@@ -290,7 +290,7 @@ func (c *Controller) syncServices(key string) error {
 				return err
 			}
 			c.serviceTracker.updateService(name, namespace, vip, svcPort.Protocol)
-			// TODO: Insert a reject ACL if the service doesn't have endpoints associated
+			// OVN inserts a reject ACL if the service doesn't have endpoints associated
 			if len(eps) == 0 {
 				klog.V(4).Infof("Service %s/%s without endpoints", name, namespace)
 			}
@@ -333,7 +333,7 @@ func (c *Controller) syncServices(key string) error {
 						}
 						c.serviceTracker.updateService(name, namespace, vip, svcPort.Protocol)
 					}
-					// TODO: Insert a reject ACL if the service doesn't have endpoints associated
+					// OVN inserts a reject ACL if the service doesn't have endpoints associated
 					if len(eps) == 0 {
 						klog.V(4).Infof("Service %s/%s without endpoints", name, namespace)
 					}
