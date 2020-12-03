@@ -376,7 +376,7 @@ func (oc *Controller) SetupMaster(masterNodeName string) error {
 	}
 
 	if oc.TCPLoadBalancerUUID == "" {
-		oc.TCPLoadBalancerUUID, stderr, err = util.RunOVNNbctl("--", "create", "load_balancer", "external_ids:k8s-cluster-lb-tcp=yes", "protocol=tcp")
+		oc.TCPLoadBalancerUUID, stderr, err = util.RunOVNNbctl("--", "create", "load_balancer", "external_ids:k8s-cluster-lb-tcp=yes", "protocol=tcp", "options:reject=true")
 		if err != nil {
 			klog.Errorf("Failed to create tcp load balancer, stdout: %q, stderr: %q, error: %v", stdout, stderr, err)
 			return err
@@ -389,7 +389,7 @@ func (oc *Controller) SetupMaster(masterNodeName string) error {
 		return err
 	}
 	if oc.UDPLoadBalancerUUID == "" {
-		oc.UDPLoadBalancerUUID, stderr, err = util.RunOVNNbctl("--", "create", "load_balancer", "external_ids:k8s-cluster-lb-udp=yes", "protocol=udp")
+		oc.UDPLoadBalancerUUID, stderr, err = util.RunOVNNbctl("--", "create", "load_balancer", "external_ids:k8s-cluster-lb-udp=yes", "protocol=udp", "options:reject=true")
 		if err != nil {
 			klog.Errorf("Failed to create udp load balancer, stdout: %q, stderr: %q, error: %v", stdout, stderr, err)
 			return err
@@ -402,7 +402,7 @@ func (oc *Controller) SetupMaster(masterNodeName string) error {
 		return err
 	}
 	if oc.SCTPLoadBalancerUUID == "" && oc.SCTPSupport {
-		oc.SCTPLoadBalancerUUID, stderr, err = util.RunOVNNbctl("--", "create", "load_balancer", "external_ids:k8s-cluster-lb-sctp=yes", "protocol=sctp")
+		oc.SCTPLoadBalancerUUID, stderr, err = util.RunOVNNbctl("--", "create", "load_balancer", "external_ids:k8s-cluster-lb-sctp=yes", "protocol=sctp", "options:reject=true")
 		if err != nil {
 			klog.Errorf("Failed to create sctp load balancer, stdout: %q, stderr: %q, error: %v", stdout, stderr, err)
 			return err

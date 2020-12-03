@@ -93,7 +93,7 @@ node4 chassis=912d592c-904c-40cd-9ef1-c2e5b49a33dd lb_force_snat_ip=100.64.0.4`,
 			"ovn-nbctl --timeout=15 --data=bare --no-heading --columns=_uuid find load_balancer external_ids:SCTP_lb_gateway_router=GR_test-node",
 		})
 		fexec.AddFakeCmd(&ovntest.ExpectedCmd{
-			Cmd:    "ovn-nbctl --timeout=15 -- create load_balancer external_ids:UDP_lb_gateway_router=GR_test-node protocol=udp",
+			Cmd:    "ovn-nbctl --timeout=15 -- create load_balancer external_ids:UDP_lb_gateway_router=GR_test-node protocol=udp options:reject=true",
 			Output: udpLBUUID,
 		})
 		fexec.AddFakeCmdsNoOutputNoError([]string{
@@ -166,7 +166,7 @@ node4 chassis=912d592c-904c-40cd-9ef1-c2e5b49a33dd lb_force_snat_ip=100.64.0.4`,
 			"ovn-nbctl --timeout=15 --data=bare --no-heading --columns=_uuid find load_balancer external_ids:SCTP_lb_gateway_router=GR_test-node",
 		})
 		fexec.AddFakeCmd(&ovntest.ExpectedCmd{
-			Cmd:    "ovn-nbctl --timeout=15 -- create load_balancer external_ids:UDP_lb_gateway_router=GR_test-node protocol=udp",
+			Cmd:    "ovn-nbctl --timeout=15 -- create load_balancer external_ids:UDP_lb_gateway_router=GR_test-node protocol=udp options:reject=true",
 			Output: udpLBUUID,
 		})
 		fexec.AddFakeCmdsNoOutputNoError([]string{
@@ -238,7 +238,7 @@ node4 chassis=912d592c-904c-40cd-9ef1-c2e5b49a33dd lb_force_snat_ip=100.64.0.4`,
 			"ovn-nbctl --timeout=15 --data=bare --no-heading --columns=_uuid find load_balancer external_ids:SCTP_lb_gateway_router=GR_test-node",
 		})
 		fexec.AddFakeCmd(&ovntest.ExpectedCmd{
-			Cmd:    "ovn-nbctl --timeout=15 -- create load_balancer external_ids:UDP_lb_gateway_router=GR_test-node protocol=udp",
+			Cmd:    "ovn-nbctl --timeout=15 -- create load_balancer external_ids:UDP_lb_gateway_router=GR_test-node protocol=udp options:reject=true",
 			Output: udpLBUUID,
 		})
 		fexec.AddFakeCmdsNoOutputNoError([]string{

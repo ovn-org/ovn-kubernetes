@@ -150,7 +150,7 @@ func defaultFakeExec(nodeSubnet, nodeName string, sctpSupport bool) (*ovntest.Fa
 		Output: "",
 	})
 	fexec.AddFakeCmd(&ovntest.ExpectedCmd{
-		Cmd:    "ovn-nbctl --timeout=15 -- create load_balancer external_ids:k8s-cluster-lb-tcp=yes protocol=tcp",
+		Cmd:    "ovn-nbctl --timeout=15 -- create load_balancer external_ids:k8s-cluster-lb-tcp=yes protocol=tcp options:reject=true",
 		Output: tcpLBUUID,
 	})
 	fexec.AddFakeCmd(&ovntest.ExpectedCmd{
@@ -158,7 +158,7 @@ func defaultFakeExec(nodeSubnet, nodeName string, sctpSupport bool) (*ovntest.Fa
 		Output: "",
 	})
 	fexec.AddFakeCmd(&ovntest.ExpectedCmd{
-		Cmd:    "ovn-nbctl --timeout=15 -- create load_balancer external_ids:k8s-cluster-lb-udp=yes protocol=udp",
+		Cmd:    "ovn-nbctl --timeout=15 -- create load_balancer external_ids:k8s-cluster-lb-udp=yes protocol=udp options:reject=true",
 		Output: udpLBUUID,
 	})
 	fexec.AddFakeCmd(&ovntest.ExpectedCmd{
@@ -167,7 +167,7 @@ func defaultFakeExec(nodeSubnet, nodeName string, sctpSupport bool) (*ovntest.Fa
 	})
 	if sctpSupport {
 		fexec.AddFakeCmd(&ovntest.ExpectedCmd{
-			Cmd:    "ovn-nbctl --timeout=15 -- create load_balancer external_ids:k8s-cluster-lb-sctp=yes protocol=sctp",
+			Cmd:    "ovn-nbctl --timeout=15 -- create load_balancer external_ids:k8s-cluster-lb-sctp=yes protocol=sctp options:reject=true",
 			Output: sctpLBUUID,
 		})
 	}
@@ -241,15 +241,15 @@ func addNodeportLBs(fexec *ovntest.FakeExec, nodeName, tcpLBUUID, udpLBUUID, sct
 		"ovn-nbctl --timeout=15 --data=bare --no-heading --columns=_uuid find load_balancer external_ids:SCTP_lb_gateway_router=" + types.GWRouterPrefix + nodeName,
 	})
 	fexec.AddFakeCmd(&ovntest.ExpectedCmd{
-		Cmd:    "ovn-nbctl --timeout=15 -- create load_balancer external_ids:TCP_lb_gateway_router=" + types.GWRouterPrefix + nodeName + " protocol=tcp",
+		Cmd:    "ovn-nbctl --timeout=15 -- create load_balancer external_ids:TCP_lb_gateway_router=" + types.GWRouterPrefix + nodeName + " protocol=tcp options:reject=true",
 		Output: tcpLBUUID,
 	})
 	fexec.AddFakeCmd(&ovntest.ExpectedCmd{
-		Cmd:    "ovn-nbctl --timeout=15 -- create load_balancer external_ids:UDP_lb_gateway_router=" + types.GWRouterPrefix + nodeName + " protocol=udp",
+		Cmd:    "ovn-nbctl --timeout=15 -- create load_balancer external_ids:UDP_lb_gateway_router=" + types.GWRouterPrefix + nodeName + " protocol=udp options:reject=true",
 		Output: udpLBUUID,
 	})
 	fexec.AddFakeCmd(&ovntest.ExpectedCmd{
-		Cmd:    "ovn-nbctl --timeout=15 -- create load_balancer external_ids:SCTP_lb_gateway_router=" + types.GWRouterPrefix + nodeName + " protocol=sctp",
+		Cmd:    "ovn-nbctl --timeout=15 -- create load_balancer external_ids:SCTP_lb_gateway_router=" + types.GWRouterPrefix + nodeName + " protocol=sctp options:reject=true",
 		Output: sctpLBUUID,
 	})
 	fexec.AddFakeCmdsNoOutputNoError([]string{
