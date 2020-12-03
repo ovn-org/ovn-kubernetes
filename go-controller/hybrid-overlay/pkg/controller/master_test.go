@@ -3,7 +3,6 @@ package controller
 import (
 	"context"
 	"fmt"
-	"reflect"
 	"strings"
 	"sync"
 
@@ -11,8 +10,6 @@ import (
 	"github.com/urfave/cli/v2"
 	v1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	"k8s.io/apimachinery/pkg/runtime"
-	k8stypes "k8s.io/apimachinery/pkg/types"
 	"k8s.io/client-go/informers"
 	"k8s.io/client-go/kubernetes/fake"
 
@@ -365,190 +362,6 @@ var _ = Describe("Hybrid SDN Master Operations", func() {
 			}, 5).ShouldNot(HaveKey(hotypes.HybridOverlayDRMAC))
 
 			Eventually(fexec.CalledMatchesExpected, 2).Should(BeTrue(), fexec.ErrorDesc)
-			return nil
-		}
-
-		err := app.Run([]string{
-			app.Name,
-			"-loglevel=5",
-			"-enable-hybrid-overlay",
-			"-hybrid-overlay-cluster-subnets=" + hybridOverlayClusterCIDR,
-		})
-		Expect(err).NotTo(HaveOccurred())
-	})
-
-	It("copies namespace annotations when a pod is added", func() {
-		app.Action = func(ctx *cli.Context) error {
-			const (
-				nsName     string = "nstest"
-				nsVTEP            = "1.1.1.1"
-				nsExGw            = "2.2.2.2"
-				nodeName   string = "node1"
-				nodeSubnet string = "10.1.2.0/24"
-				nodeHOIP   string = "10.1.2.3"
-				nodeHOMAC  string = "00:00:00:52:19:d2"
-				pod1Name   string = "pod1"
-				pod1IP     string = "1.2.3.5"
-				pod1CIDR   string = pod1IP + "/24"
-				pod1MAC    string = "aa:bb:cc:dd:ee:ff"
-			)
-
-			ns := &v1.Namespace{
-				ObjectMeta: metav1.ObjectMeta{
-					UID:  k8stypes.UID(nsName),
-					Name: nsName,
-					Annotations: map[string]string{
-						hotypes.HybridOverlayVTEP:       nsVTEP,
-						hotypes.HybridOverlayExternalGw: nsExGw,
-					},
-				},
-				Spec:   v1.NamespaceSpec{},
-				Status: v1.NamespaceStatus{},
-			}
-			fakeClient := fake.NewSimpleClientset([]runtime.Object{
-				ns,
-				createPod(nsName, pod1Name, nodeName, pod1CIDR, pod1MAC),
-				&v1.NodeList{Items: []v1.Node{newTestNode(nodeName, "linux", nodeSubnet, "", nodeHOMAC)}},
-			}...)
-
-			_, err := config.InitConfig(ctx, nil, nil)
-			Expect(err).NotTo(HaveOccurred())
-
-			f := informers.NewSharedInformerFactory(fakeClient, informer.DefaultResyncInterval)
-			mockOVNNBClient := ovntest.NewMockOVNClient(goovn.DBNB)
-			mockOVNSBClient := ovntest.NewMockOVNClient(goovn.DBSB)
-			m, err := NewMaster(
-				&kube.Kube{KClient: fakeClient},
-				f.Core().V1().Nodes().Informer(),
-				f.Core().V1().Namespaces().Informer(),
-				f.Core().V1().Pods().Informer(),
-				mockOVNNBClient,
-				mockOVNSBClient,
-				informer.NewTestEventHandler,
-			)
-			Expect(err).NotTo(HaveOccurred())
-
-			populatePortAddresses(nodeName, nodeHOMAC, nodeHOIP, mockOVNNBClient)
-
-			f.Start(stopChan)
-			wg.Add(1)
-			go func() {
-				defer wg.Done()
-				m.Run(stopChan)
-			}()
-			f.WaitForCacheSync(stopChan)
-
-			Eventually(func() error {
-				pod, err := fakeClient.CoreV1().Pods(nsName).Get(context.TODO(), pod1Name, metav1.GetOptions{})
-				if err != nil {
-					return err
-				}
-				if pod.Annotations[hotypes.HybridOverlayVTEP] != nsVTEP {
-					return fmt.Errorf("error with annotation %s. expected: %s, got: %s", hotypes.HybridOverlayVTEP, nsVTEP, pod.Annotations[hotypes.HybridOverlayVTEP])
-				}
-				if pod.Annotations[hotypes.HybridOverlayExternalGw] != nsExGw {
-					return fmt.Errorf("error with annotation %s. expected: %s, got: %s", hotypes.HybridOverlayVTEP, nsExGw, pod.Annotations[hotypes.HybridOverlayExternalGw])
-				}
-				return nil
-			}, 2).Should(Succeed())
-
-			return nil
-		}
-
-		err := app.Run([]string{
-			app.Name,
-			"-loglevel=5",
-			"-enable-hybrid-overlay",
-			"-hybrid-overlay-cluster-subnets=" + hybridOverlayClusterCIDR,
-		})
-		Expect(err).NotTo(HaveOccurred())
-	})
-
-	It("update pod annotations when a namespace is updated", func() {
-		app.Action = func(ctx *cli.Context) error {
-			const (
-				nsName        string = "nstest"
-				nsVTEP        string = "1.1.1.1"
-				nsVTEPUpdated string = "3.3.3.3"
-				nsExGw        string = "2.2.2.2"
-				nsExGwUpdated string = "4.4.4.4"
-				nodeName      string = "node1"
-				nodeSubnet    string = "10.1.2.0/24"
-				nodeHOMAC     string = "00:00:00:52:19:d2"
-				nodeHOIP      string = "10.1.2.3"
-				pod1Name      string = "pod1"
-				pod1IP        string = "1.2.3.5"
-				pod1CIDR      string = pod1IP + "/24"
-				pod1MAC       string = "aa:bb:cc:dd:ee:ff"
-			)
-
-			ns := &v1.Namespace{
-				ObjectMeta: metav1.ObjectMeta{
-					UID:  k8stypes.UID(nsName),
-					Name: nsName,
-					Annotations: map[string]string{
-						hotypes.HybridOverlayVTEP:       nsVTEP,
-						hotypes.HybridOverlayExternalGw: nsExGw,
-					},
-				},
-				Spec:   v1.NamespaceSpec{},
-				Status: v1.NamespaceStatus{},
-			}
-			fakeClient := fake.NewSimpleClientset([]runtime.Object{
-				ns,
-				&v1.NodeList{Items: []v1.Node{newTestNode(nodeName, "linux", nodeSubnet, "", nodeHOMAC)}},
-				createPod(nsName, pod1Name, nodeName, pod1CIDR, pod1MAC),
-			}...)
-
-			addLinuxNodeCommands(fexec, nodeHOMAC, nodeName, nodeHOIP)
-			_, err := config.InitConfig(ctx, nil, nil)
-			Expect(err).NotTo(HaveOccurred())
-			f := informers.NewSharedInformerFactory(fakeClient, informer.DefaultResyncInterval)
-
-			k := &kube.Kube{KClient: fakeClient}
-			mockOVNNBClient := ovntest.NewMockOVNClient(goovn.DBNB)
-			mockOVNSBClient := ovntest.NewMockOVNClient(goovn.DBSB)
-			m, err := NewMaster(
-				k,
-				f.Core().V1().Nodes().Informer(),
-				f.Core().V1().Namespaces().Informer(),
-				f.Core().V1().Pods().Informer(),
-				mockOVNNBClient,
-				mockOVNSBClient,
-				informer.NewTestEventHandler,
-			)
-			Expect(err).NotTo(HaveOccurred())
-
-			f.Start(stopChan)
-			wg.Add(1)
-			go func() {
-				defer wg.Done()
-				m.Run(stopChan)
-			}()
-			f.WaitForCacheSync(stopChan)
-
-			updatedNs, err := fakeClient.CoreV1().Namespaces().Get(context.TODO(), nsName, metav1.GetOptions{})
-			Expect(err).NotTo(HaveOccurred())
-			nsAnnotator := kube.NewNamespaceAnnotator(k, updatedNs)
-			nsAnnotator.Set(hotypes.HybridOverlayVTEP, nsVTEPUpdated)
-			nsAnnotator.Set(hotypes.HybridOverlayExternalGw, nsExGwUpdated)
-			err = nsAnnotator.Run()
-			Expect(err).NotTo(HaveOccurred())
-
-			Eventually(func() error {
-				pod, err := fakeClient.CoreV1().Pods(nsName).Get(context.TODO(), pod1Name, metav1.GetOptions{})
-				if err != nil {
-					return err
-				}
-				if reflect.DeepEqual(pod.Annotations[hotypes.HybridOverlayVTEP], nsVTEP) {
-					return fmt.Errorf("error with annotation %s. expected: %s, got: %s", hotypes.HybridOverlayVTEP, nsVTEPUpdated, pod.Annotations[hotypes.HybridOverlayVTEP])
-				}
-				if reflect.DeepEqual(pod.Annotations[hotypes.HybridOverlayExternalGw], nsExGw) {
-					return fmt.Errorf("error with annotation %s. expected: %s, got: %s", hotypes.HybridOverlayExternalGw, nsExGwUpdated, pod.Annotations[hotypes.HybridOverlayExternalGw])
-				}
-				return nil
-			}, 2).Should(Succeed())
-
 			return nil
 		}
 

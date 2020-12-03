@@ -6,7 +6,7 @@ import (
 	"strconv"
 
 	util "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
-	"k8s.io/klog"
+	"k8s.io/klog/v2"
 )
 
 // hash the provided input to make it a valid addressSet or portGroup name.

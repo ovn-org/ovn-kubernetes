@@ -214,11 +214,15 @@ func IPFamilyName(isIPv6 bool) string {
 
 // MatchIPFamily loops through the array of net.IP and returns the
 // first entry in the list in the same IP Family, based on input flag isIPv6.
-func MatchIPFamily(isIPv6 bool, ips []net.IP) (net.IP, error) {
+func MatchIPFamily(isIPv6 bool, ips []net.IP) ([]net.IP, error) {
+	var ipAddrs []net.IP
 	for _, ip := range ips {
 		if utilnet.IsIPv6(ip) == isIPv6 {
-			return ip, nil
+			ipAddrs = append(ipAddrs, ip)
 		}
+	}
+	if len(ipAddrs) > 0 {
+		return ipAddrs, nil
 	}
 	return nil, fmt.Errorf("no %s IP available", IPFamilyName(isIPv6))
 }

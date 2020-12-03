@@ -15,7 +15,7 @@ import (
 	nettypes "github.com/k8snetworkplumbingwg/network-attachment-definition-client/pkg/apis/k8s.cni.cncf.io/v1"
 
 	kapi "k8s.io/api/core/v1"
-	"k8s.io/klog"
+	"k8s.io/klog/v2"
 )
 
 // addPodExternalGW handles detecting if a pod is serving as an external gateway for namespace(s) and adding routes
@@ -256,25 +256,37 @@ func (oc *Controller) addGWRoutesForPod(routingGWs []net.IP, podIfAddrs []*net.I
 	}
 	defer nsInfo.Unlock()
 	gr := "GR_" + node
-	for _, v := range routingGWs {
-		gw := v.String()
+	for _, podIPNet := range podIfAddrs {
+		routesAdded := 0
 		// TODO (trozet): use the go bindings here and batch commands
-		for _, podIPNet := range podIfAddrs {
+		// validate the ip and gateway belong to the same address family
+		gws, err := util.MatchIPFamily(utilnet.IsIPv6(podIPNet.IP), routingGWs)
+		if err == nil {
 			podIP := podIPNet.IP.String()
-			mask := GetIPFullMask(podIP)
-			_, stderr, err := util.RunOVNNbctl("--may-exist", "--policy=src-ip", "--ecmp-symmetric-reply",
-				"lr-route-add", gr, podIP+mask, gw)
-			if err != nil {
-				return fmt.Errorf("unable to add external gw src-ip route to GR router, stderr:%q, err:%v", stderr, err)
+			for _, gw := range gws {
+				gwStr := gw.String()
+				mask := GetIPFullMask(podIP)
+				_, stderr, err := util.RunOVNNbctl("--may-exist", "--policy=src-ip", "--ecmp-symmetric-reply",
+					"lr-route-add", gr, podIP+mask, gwStr)
+				if err != nil {
+					return fmt.Errorf("unable to add external gwStr src-ip route to GR router, stderr:%q, err:%gw", stderr, err)
+				}
+				if err := oc.addHybridRoutePolicyForPod(podIPNet.IP, node); err != nil {
+					return err
+				}
+				if nsInfo.podExternalRoutes[podIP] == nil {
+					nsInfo.podExternalRoutes[podIP] = make(map[string]string)
+				}
+				nsInfo.podExternalRoutes[podIP][gwStr] = gr
+				routesAdded++
 			}
-
-			if err := oc.addHybridRoutePolicyForPod(podIPNet.IP, node); err != nil {
-				return err
-			}
-			if nsInfo.podExternalRoutes[podIP] == nil {
-				nsInfo.podExternalRoutes[podIP] = make(map[string]string)
-			}
-			nsInfo.podExternalRoutes[podIP][gw] = gr
+		} else {
+			klog.Warningf("Address families for the pod address %s and gateway %s did not match", podIPNet.IP.String(), routingGWs)
+		}
+		// if no routes are added return an error
+		if routesAdded < 1 {
+			return fmt.Errorf("gateway specified for namespace %s with gateway addresses %v but no valid routes exist for pod: %s",
+				namespace, podIfAddrs, node)
 		}
 	}
 	return nil
@@ -305,7 +317,7 @@ func (oc *Controller) addPerPodGRSNAT(pod *kapi.Pod, podIfAddrs []*net.IPNet) er
 	if err != nil {
 		return fmt.Errorf("unable to parse node L3 gw annotation: %v", err)
 	}
-	gr := "GR_" + nodeName
+	gr := types.GWRouterPrefix + nodeName
 	for _, gwIPNet := range l3GWConfig.IPAddresses {
 		gwIP := gwIPNet.IP.String()
 		for _, podIPNet := range podIfAddrs {
@@ -367,7 +379,7 @@ func (oc *Controller) addHybridRoutePolicyForPod(podIP net.IP, node string) erro
 		// traffic destined outside of cluster subnet go to GR
 		matchStr := fmt.Sprintf(`inport == "%s%s" && %s.src == %s`, types.RouterToSwitchPrefix, node, l3Prefix, podIP)
 		matchStr += matchDst
-		_, stderr, err := util.RunOVNNbctl("lr-policy-add", types.OVNClusterRouter, "501", matchStr, "reroute",
+		_, stderr, err := util.RunOVNNbctl("lr-policy-add", types.OVNClusterRouter, types.HybridOverlayReroutePriority, matchStr, "reroute",
 			grJoinIfAddr.IP.String())
 		if err != nil {
 			// TODO: lr-policy-add doesn't support --may-exist, resort to this workaround for now.
@@ -407,7 +419,7 @@ func (oc *Controller) delHybridRoutePolicyForPod(podIP net.IP, node string) erro
 		}
 		matchStr := fmt.Sprintf(`inport == "%s%s" && %s.src == %s`, types.RouterToSwitchPrefix, node, l3Prefix, podIP)
 		matchStr += matchDst
-		_, stderr, err := util.RunOVNNbctl("lr-policy-del", types.OVNClusterRouter, "501", matchStr)
+		_, stderr, err := util.RunOVNNbctl("lr-policy-del", types.OVNClusterRouter, types.HybridOverlayReroutePriority, matchStr)
 		if err != nil {
 			klog.Errorf("Failed to remove policy: %s, on: %s, stderr: %s, err: %v",
 				matchStr, types.OVNClusterRouter, stderr, err)

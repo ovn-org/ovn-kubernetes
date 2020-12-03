@@ -11,7 +11,7 @@ import (
 
 	kapi "k8s.io/api/core/v1"
 	ktypes "k8s.io/apimachinery/pkg/types"
-	"k8s.io/klog"
+	"k8s.io/klog/v2"
 )
 
 // initLoadBalancerHealthChecker initializes the health check server for

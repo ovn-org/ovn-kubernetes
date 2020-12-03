@@ -11,7 +11,7 @@ import (
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/ipallocator/allocator"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
-	"k8s.io/klog"
+	"k8s.io/klog/v2"
 )
 
 // logicalSwitchInfo contains information corresponding to the node. It holds the

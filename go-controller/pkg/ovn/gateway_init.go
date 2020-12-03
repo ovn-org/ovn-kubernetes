@@ -12,7 +12,7 @@ import (
 
 	kapi "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/util/wait"
-	"k8s.io/klog"
+	"k8s.io/klog/v2"
 	utilnet "k8s.io/utils/net"
 )
 
@@ -78,6 +78,14 @@ func gatewayInit(nodeName string, clusterIPSubnet []*net.IPNet, hostSubnets []*n
 			gatewayRouter, "options:lb_force_snat_ip="+util.JoinIPs(gwLRPIPs, " "))
 		if err != nil {
 			return fmt.Errorf("failed to set logical router %s's lb_force_snat_ip option, "+
+				"stdout: %q, stderr: %q, error: %v", gatewayRouter, stdout, stderr, err)
+		}
+
+		// Set shared gw SNAT to use host CT Zone. This will avoid potential SNAT collisions between
+		// host networked pods and OVN networked pods northbound traffic
+		stdout, stderr, err = util.RunOVNNbctl("set", "logical_router", gatewayRouter, "options:snat-ct-zone=0")
+		if err != nil {
+			return fmt.Errorf("failed to set logical router %s's SNAT CT Zone to 0, "+
 				"stdout: %q, stderr: %q, error: %v", gatewayRouter, stdout, stderr, err)
 		}
 	}
@@ -293,7 +301,7 @@ func gatewayInit(nodeName string, clusterIPSubnet []*net.IPNet, hostSubnets []*n
 		if config.Gateway.Mode != config.GatewayModeLocal {
 			stdout, stderr, err = util.RunOVNNbctl("--may-exist",
 				"--policy=src-ip", "lr-route-add", types.OVNClusterRouter,
-				hostSubnet.String(), gwLRPIP.String())
+				hostSubnet.String(), gwLRPIP[0].String())
 			if err != nil {
 				return fmt.Errorf("failed to add source IP address based "+
 					"routes in distributed router %s, stdout: %q, "+
@@ -302,8 +310,8 @@ func gatewayInit(nodeName string, clusterIPSubnet []*net.IPNet, hostSubnets []*n
 		}
 	}
 
-	// if config.Gateway.DisabledSNATMultipleGWs is not set (by default is not),
-	// the NAT rules for pods not having annotations to route thru either external
+	// if config.Gateway.DisabledSNATMultipleGWs is not set (by default it is not),
+	// the NAT rules for pods not having annotations to route through either external
 	// gws or pod CNFs will be added within pods.go addLogicalPort
 	if !config.Gateway.DisableSNATMultipleGWs && config.Gateway.Mode != config.GatewayModeLocal {
 		// Default SNAT rules.
@@ -321,7 +329,7 @@ func gatewayInit(nodeName string, clusterIPSubnet []*net.IPNet, hostSubnets []*n
 			// if the external ip has changed, but the logical ip has stayed the same
 			stdout, stderr, err := util.RunOVNNbctl("--if-exists", "lr-nat-del",
 				gatewayRouter, "snat", entry.String(), "--", "lr-nat-add",
-				gatewayRouter, "snat", externalIP.String(), entry.String())
+				gatewayRouter, "snat", externalIP[0].String(), entry.String())
 			if err != nil {
 				return fmt.Errorf("failed to create default SNAT rules for gateway router %s, "+
 					"stdout: %q, stderr: %q, error: %v", gatewayRouter, stdout, stderr, err)
