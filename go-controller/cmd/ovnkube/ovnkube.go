@@ -15,7 +15,7 @@ import (
 	"text/template"
 	"time"
 
-	"k8s.io/klog"
+	"k8s.io/klog/v2"
 
 	goovn "github.com/ebay/go-ovn"
 	"github.com/urfave/cli/v2"
@@ -248,7 +248,7 @@ func runOvnKube(ctx *cli.Context) error {
 		metrics.RegisterMasterMetrics(ovnNBClient, ovnSBClient)
 
 		ovnController := ovn.NewOvnController(ovnClientset, masterWatchFactory, stopChan, nil, ovnNBClient, ovnSBClient, util.EventRecorder(ovnClientset.KubeClient))
-		if err := ovnController.Start(ovnClientset.KubeClient, master, wg); err != nil {
+		if err := ovnController.Start(master, wg); err != nil {
 			return err
 		}
 	}

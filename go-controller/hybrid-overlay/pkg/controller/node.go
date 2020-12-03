@@ -7,7 +7,6 @@ import (
 	"sync"
 
 	"github.com/ovn-org/ovn-kubernetes/go-controller/hybrid-overlay/pkg/types"
-	hotypes "github.com/ovn-org/ovn-kubernetes/go-controller/hybrid-overlay/pkg/types"
 	houtil "github.com/ovn-org/ovn-kubernetes/go-controller/hybrid-overlay/pkg/util"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/informer"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/kube"
@@ -17,7 +16,7 @@ import (
 	utilruntime "k8s.io/apimachinery/pkg/util/runtime"
 	listers "k8s.io/client-go/listers/core/v1"
 	"k8s.io/client-go/tools/cache"
-	"k8s.io/klog"
+	"k8s.io/klog/v2"
 )
 
 // The nodeController interface is implemented by the os-specific code
@@ -54,12 +53,8 @@ func podChanged(old, new interface{}) bool {
 
 	oldIPs, oldMAC, _ := getPodDetails(oldPod)
 	newIPs, newMAC, _ := getPodDetails(newPod)
-	oldExGw := oldPod.Annotations[hotypes.HybridOverlayExternalGw]
-	oldVTEP := oldPod.Annotations[hotypes.HybridOverlayVTEP]
-	newExGw := newPod.Annotations[hotypes.HybridOverlayExternalGw]
-	newVTEP := newPod.Annotations[hotypes.HybridOverlayVTEP]
 
-	if len(oldIPs) != len(newIPs) || !reflect.DeepEqual(oldMAC, newMAC) || !reflect.DeepEqual(oldExGw, newExGw) || !reflect.DeepEqual(oldVTEP, newVTEP) {
+	if len(oldIPs) != len(newIPs) || !reflect.DeepEqual(oldMAC, newMAC) {
 		return true
 	}
 	for i := range oldIPs {

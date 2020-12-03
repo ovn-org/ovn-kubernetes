@@ -136,6 +136,7 @@ var _ = Describe("OVN master EgressIP Operations", func() {
 	BeforeEach(func() {
 		// Restore global default values before each testcase
 		config.PrepareTestConfig()
+		config.OVNKubernetesFeature.EnableEgressIP = true
 
 		app = cli.NewApp()
 		app.Name = "test"

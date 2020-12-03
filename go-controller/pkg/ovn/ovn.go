@@ -30,11 +30,12 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/labels"
 	"k8s.io/apimachinery/pkg/types"
+	clientset "k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/kubernetes/scheme"
 	"k8s.io/client-go/tools/cache"
 	"k8s.io/client-go/tools/record"
 	ref "k8s.io/client-go/tools/reference"
-	"k8s.io/klog"
+	"k8s.io/klog/v2"
 )
 
 const (
@@ -76,11 +77,8 @@ type namespaceInfo struct {
 	// the policy itself.
 	networkPolicies map[string]*namespacePolicy
 
-	//defines the namespaces egressFirewallPolicy
+	// defines the namespaces egressFirewallPolicy
 	egressFirewallPolicy *egressFirewall
-
-	hybridOverlayExternalGW net.IP
-	hybridOverlayVTEP       net.IP
 
 	// routingExternalGWs is a slice of net.IP containing the values parsed from
 	// annotation k8s.ovn.org/routing-external-gws
@@ -103,6 +101,7 @@ type namespaceInfo struct {
 // Controller structure is the object which holds the controls for starting
 // and reacting upon the watched resources (e.g. pods, endpoints)
 type Controller struct {
+	client                clientset.Interface
 	kube                  kube.Interface
 	watchFactory          *factory.WatchFactory
 	egressFirewallHandler *factory.Handler
@@ -217,11 +216,11 @@ func GetIPFullMask(ip string) string {
 // infrastructure and policy
 func NewOvnController(ovnClient *util.OVNClientset, wf *factory.WatchFactory,
 	stopChan <-chan struct{}, addressSetFactory AddressSetFactory, ovnNBClient goovn.Client, ovnSBClient goovn.Client, recorder record.EventRecorder) *Controller {
-
 	if addressSetFactory == nil {
 		addressSetFactory = NewOvnAddressSetFactory()
 	}
 	return &Controller{
+		client: ovnClient.KubeClient,
 		kube: &kube.Kube{
 			KClient:              ovnClient.KubeClient,
 			EIPClient:            ovnClient.EgressIPClient,
@@ -426,7 +425,6 @@ func (oc *Controller) syncPeriodic() {
 			}
 		}
 	}()
-
 }
 
 func (oc *Controller) ovnControllerEventChecker() {

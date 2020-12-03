@@ -13,7 +13,7 @@ import (
 	"k8s.io/client-go/tools/clientcmd"
 	"k8s.io/client-go/tools/record"
 	"k8s.io/client-go/util/cert"
-	"k8s.io/klog"
+	"k8s.io/klog/v2"
 
 	egressfirewallclientset "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/egressfirewall/v1/apis/clientset/versioned"
 	egressipclientset "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/egressip/v1/apis/clientset/versioned"
@@ -66,6 +66,8 @@ func newKubernetesRestConfig(conf *config.KubernetesConfig) (*rest.Config, error
 	if err != nil {
 		return nil, err
 	}
+	kconfig.QPS = 25
+	kconfig.Burst = 25
 	return kconfig, nil
 }
 

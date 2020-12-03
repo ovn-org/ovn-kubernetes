@@ -12,7 +12,7 @@ import (
 	"text/tabwriter"
 	"text/template"
 
-	"k8s.io/klog"
+	"k8s.io/klog/v2"
 	kexec "k8s.io/utils/exec"
 
 	"github.com/urfave/cli/v2"

@@ -4,13 +4,13 @@ import (
 	"bytes"
 	"fmt"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
+	ovntest "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/testing"
 	"net"
 	"testing"
 
 	mock_k8s_io_utils_exec "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/testing/mocks/k8s.io/utils/exec"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util/mocks"
 	"github.com/stretchr/testify/assert"
-	"github.com/stretchr/testify/mock"
 )
 
 func TestGetLegacyK8sMgmtIntfName(t *testing.T) {
@@ -52,55 +52,39 @@ func TestGetNodeChassisID(t *testing.T) {
 	tests := []struct {
 		desc                    string
 		errExpected             bool
-		onRetArgsExecUtilsIface *onCallReturnArgs
-		onRetArgsKexecIface     *onCallReturnArgs
+		onRetArgsExecUtilsIface *ovntest.TestifyMockHelper
+		onRetArgsKexecIface     *ovntest.TestifyMockHelper
 	}{
 		{
 			desc:                    "ovs-vsctl command returns error",
 			errExpected:             true,
-			onRetArgsExecUtilsIface: &onCallReturnArgs{"RunCmd", []string{"*mocks.Cmd", "string", "[]string", "string", "string", "string", "string", "string", "string"}, []interface{}{bytes.NewBuffer([]byte("")), bytes.NewBuffer([]byte("")), fmt.Errorf("test error")}},
-			onRetArgsKexecIface:     &onCallReturnArgs{"Command", []string{"string", "string", "string", "string", "string", "string", "string"}, []interface{}{mockCmd}},
+			onRetArgsExecUtilsIface: &ovntest.TestifyMockHelper{OnCallMethodName: "RunCmd", OnCallMethodArgType: []string{"*mocks.Cmd", "string", "[]string", "string", "string", "string", "string", "string", "string"}, RetArgList: []interface{}{bytes.NewBuffer([]byte("")), bytes.NewBuffer([]byte("")), fmt.Errorf("test error")}},
+			onRetArgsKexecIface:     &ovntest.TestifyMockHelper{OnCallMethodName: "Command", OnCallMethodArgType: []string{"string", "string", "string", "string", "string", "string", "string"}, RetArgList: []interface{}{mockCmd}},
 		},
 		{
 			desc:                    "ovs-vsctl command returns empty chassisID along with error",
 			errExpected:             true,
-			onRetArgsExecUtilsIface: &onCallReturnArgs{"RunCmd", []string{"*mocks.Cmd", "string", "[]string", "string", "string", "string", "string", "string", "string"}, []interface{}{bytes.NewBuffer([]byte("")), bytes.NewBuffer([]byte("")), fmt.Errorf("test error")}},
-			onRetArgsKexecIface:     &onCallReturnArgs{"Command", []string{"string", "string", "string", "string", "string", "string", "string"}, []interface{}{mockCmd}},
+			onRetArgsExecUtilsIface: &ovntest.TestifyMockHelper{OnCallMethodName: "RunCmd", OnCallMethodArgType: []string{"*mocks.Cmd", "string", "[]string", "string", "string", "string", "string", "string", "string"}, RetArgList: []interface{}{bytes.NewBuffer([]byte("")), bytes.NewBuffer([]byte("")), fmt.Errorf("test error")}},
+			onRetArgsKexecIface:     &ovntest.TestifyMockHelper{OnCallMethodName: "Command", OnCallMethodArgType: []string{"string", "string", "string", "string", "string", "string", "string"}, RetArgList: []interface{}{mockCmd}},
 		},
 		{
 			desc:                    "ovs-vsctl command returns empty chassisID with NO error",
 			errExpected:             true,
-			onRetArgsExecUtilsIface: &onCallReturnArgs{"RunCmd", []string{"*mocks.Cmd", "string", "[]string", "string", "string", "string", "string", "string", "string"}, []interface{}{bytes.NewBuffer([]byte("")), bytes.NewBuffer([]byte("")), nil}},
-			onRetArgsKexecIface:     &onCallReturnArgs{"Command", []string{"string", "string", "string", "string", "string", "string", "string"}, []interface{}{mockCmd}},
+			onRetArgsExecUtilsIface: &ovntest.TestifyMockHelper{OnCallMethodName: "RunCmd", OnCallMethodArgType: []string{"*mocks.Cmd", "string", "[]string", "string", "string", "string", "string", "string", "string"}, RetArgList: []interface{}{bytes.NewBuffer([]byte("")), bytes.NewBuffer([]byte("")), nil}},
+			onRetArgsKexecIface:     &ovntest.TestifyMockHelper{OnCallMethodName: "Command", OnCallMethodArgType: []string{"string", "string", "string", "string", "string", "string", "string"}, RetArgList: []interface{}{mockCmd}},
 		},
 		{
 			desc:                    "ovs-vsctl command returns valid chassisID",
 			errExpected:             false,
-			onRetArgsExecUtilsIface: &onCallReturnArgs{"RunCmd", []string{"*mocks.Cmd", "string", "[]string", "string", "string", "string", "string", "string", "string"}, []interface{}{bytes.NewBuffer([]byte("4e98c281-f12b-4601-ab5a-a3d759fcb493")), bytes.NewBuffer([]byte("")), nil}},
-			onRetArgsKexecIface:     &onCallReturnArgs{"Command", []string{"string", "string", "string", "string", "string", "string", "string"}, []interface{}{mockCmd}},
+			onRetArgsExecUtilsIface: &ovntest.TestifyMockHelper{OnCallMethodName: "RunCmd", OnCallMethodArgType: []string{"*mocks.Cmd", "string", "[]string", "string", "string", "string", "string", "string", "string"}, RetArgList: []interface{}{bytes.NewBuffer([]byte("4e98c281-f12b-4601-ab5a-a3d759fcb493")), bytes.NewBuffer([]byte("")), nil}},
+			onRetArgsKexecIface:     &ovntest.TestifyMockHelper{OnCallMethodName: "Command", OnCallMethodArgType: []string{"string", "string", "string", "string", "string", "string", "string"}, RetArgList: []interface{}{mockCmd}},
 		},
 	}
 
 	for i, tc := range tests {
 		t.Run(fmt.Sprintf("%d:%s", i, tc.desc), func(t *testing.T) {
-
-			call := mockExecRunner.On(tc.onRetArgsExecUtilsIface.onCallMethodName)
-			for _, arg := range tc.onRetArgsExecUtilsIface.onCallMethodArgType {
-				call.Arguments = append(call.Arguments, mock.AnythingOfType(arg))
-			}
-			for _, ret := range tc.onRetArgsExecUtilsIface.retArgList {
-				call.ReturnArguments = append(call.ReturnArguments, ret)
-			}
-			call.Once()
-
-			ifaceCall := mockKexecIface.On(tc.onRetArgsKexecIface.onCallMethodName)
-			for _, arg := range tc.onRetArgsKexecIface.onCallMethodArgType {
-				ifaceCall.Arguments = append(ifaceCall.Arguments, mock.AnythingOfType(arg))
-			}
-			for _, ret := range tc.onRetArgsKexecIface.retArgList {
-				ifaceCall.ReturnArguments = append(ifaceCall.ReturnArguments, ret)
-			}
-			ifaceCall.Once()
+			ovntest.ProcessMockFn(&mockExecRunner.Mock, *tc.onRetArgsExecUtilsIface)
+			ovntest.ProcessMockFn(&mockKexecIface.Mock, *tc.onRetArgsKexecIface)
 
 			ret, e := GetNodeChassisID()
 			if tc.errExpected {
@@ -129,19 +113,19 @@ func TestUpdateNodeSwitchExcludeIPs(t *testing.T) {
 		inpSubnetStr            string
 		errExpected             bool
 		setCfgHybridOvlyEnabled bool
-		onRetArgsExecUtilsIface []onCallReturnArgs
-		onRetArgsKexecIface     []onCallReturnArgs
+		onRetArgsExecUtilsIface []ovntest.TestifyMockHelper
+		onRetArgsKexecIface     []ovntest.TestifyMockHelper
 	}{
 		{
 			desc:         "IPv4 CIDR, ovn-nbctl fails to list logical switch ports",
 			errExpected:  true,
 			inpNodeName:  "ovn-control-plane",
 			inpSubnetStr: "192.168.1.0/24",
-			onRetArgsExecUtilsIface: []onCallReturnArgs{
-				{"RunCmd", []string{"*mocks.Cmd", "string", "[]string", "string", "string", "string"}, []interface{}{bytes.NewBuffer([]byte("")), bytes.NewBuffer([]byte("")), fmt.Errorf("RunOVNNbctl error")}},
+			onRetArgsExecUtilsIface: []ovntest.TestifyMockHelper{
+				{OnCallMethodName: "RunCmd", OnCallMethodArgType: []string{"*mocks.Cmd", "string", "[]string", "string", "string", "string"}, RetArgList: []interface{}{bytes.NewBuffer([]byte("")), bytes.NewBuffer([]byte("")), fmt.Errorf("RunOVNNbctl error")}},
 			},
-			onRetArgsKexecIface: []onCallReturnArgs{
-				{"Command", []string{"string", "string", "string", "string"}, []interface{}{mockCmd}},
+			onRetArgsKexecIface: []ovntest.TestifyMockHelper{
+				{OnCallMethodName: "Command", OnCallMethodArgType: []string{"string", "string", "string", "string"}, RetArgList: []interface{}{mockCmd}},
 			},
 		},
 		{
@@ -156,11 +140,11 @@ func TestUpdateNodeSwitchExcludeIPs(t *testing.T) {
 			inpNodeName:             "ovn-control-plane",
 			inpSubnetStr:            "192.168.1.0/24",
 			setCfgHybridOvlyEnabled: true,
-			onRetArgsExecUtilsIface: []onCallReturnArgs{
+			onRetArgsExecUtilsIface: []ovntest.TestifyMockHelper{
 				{
-					"RunCmd",
-					[]string{"*mocks.Cmd", "string", "[]string", "string", "string", "string"},
-					[]interface{}{
+					OnCallMethodName:    "RunCmd",
+					OnCallMethodArgType: []string{"*mocks.Cmd", "string", "[]string", "string", "string", "string"},
+					RetArgList: []interface{}{
 						// below is output from command --> ovn-nbctl lsp-list ovn-control-plane
 						bytes.NewBuffer([]byte("7dc3d98a-660a-477b-a6bc-d42904ed59e7 (k8s-ovn-control-plane)\nd23162b4-87b1-4ff8-b5a5-5cb731d822ed (kube-system_coredns-6955765f44-l9jxq)\n1e8cd861-c584-4e38-8c50-7a71a6ae26bb (local-path-storage_local-path-provisioner-85445b74d4-w5ghw)\n8f1b3173-aa43-4014-adcb-36eae52f7502 (stor-ovn-control-plane)")),
 						bytes.NewBuffer([]byte("")),
@@ -168,12 +152,12 @@ func TestUpdateNodeSwitchExcludeIPs(t *testing.T) {
 					},
 				},
 				{
-					"RunCmd", []string{"*mocks.Cmd", "string", "[]string", "string", "string", "string", "string", "string", "string", "string", "string"}, []interface{}{bytes.NewBuffer([]byte("")), bytes.NewBuffer([]byte("")), nil},
+					OnCallMethodName: "RunCmd", OnCallMethodArgType: []string{"*mocks.Cmd", "string", "[]string", "string", "string", "string", "string", "string", "string", "string", "string"}, RetArgList: []interface{}{bytes.NewBuffer([]byte("")), bytes.NewBuffer([]byte("")), nil},
 				},
 			},
-			onRetArgsKexecIface: []onCallReturnArgs{
-				{"Command", []string{"string", "string", "string", "string", "string", "string", "string", "string", "string"}, []interface{}{mockCmd}},
-				{"Command", []string{"string", "string", "string", "string", "string", "string", "string", "string", "string"}, []interface{}{mockCmd}},
+			onRetArgsKexecIface: []ovntest.TestifyMockHelper{
+				{OnCallMethodName: "Command", OnCallMethodArgType: []string{"string", "string", "string", "string", "string", "string", "string", "string", "string"}, RetArgList: []interface{}{mockCmd}},
+				{OnCallMethodName: "Command", OnCallMethodArgType: []string{"string", "string", "string", "string", "string", "string", "string", "string", "string"}, RetArgList: []interface{}{mockCmd}},
 			},
 		},
 		{
@@ -182,11 +166,11 @@ func TestUpdateNodeSwitchExcludeIPs(t *testing.T) {
 			inpNodeName:             "ovn-control-plane",
 			inpSubnetStr:            "192.168.1.0/24",
 			setCfgHybridOvlyEnabled: true,
-			onRetArgsExecUtilsIface: []onCallReturnArgs{
+			onRetArgsExecUtilsIface: []ovntest.TestifyMockHelper{
 				{
-					"RunCmd",
-					[]string{"*mocks.Cmd", "string", "[]string", "string", "string", "string"},
-					[]interface{}{
+					OnCallMethodName:    "RunCmd",
+					OnCallMethodArgType: []string{"*mocks.Cmd", "string", "[]string", "string", "string", "string"},
+					RetArgList: []interface{}{
 						// below is output from command --> ovn-nbctl lsp-list ovn-control-plane
 						bytes.NewBuffer([]byte("7dc3d98a-660a-477b-a6bc-d42904ed59e7 (int-ovn-control-plane)\nd23162b4-87b1-4ff8-b5a5-5cb731d822ed (kube-system_coredns-6955765f44-l9jxq)\n1e8cd861-c584-4e38-8c50-7a71a6ae26bb (local-path-storage_local-path-provisioner-85445b74d4-w5ghw)\n8f1b3173-aa43-4014-adcb-36eae52f7502 (stor-ovn-control-plane)")),
 						bytes.NewBuffer([]byte("")),
@@ -194,12 +178,12 @@ func TestUpdateNodeSwitchExcludeIPs(t *testing.T) {
 					},
 				},
 				{
-					"RunCmd", []string{"*mocks.Cmd", "string", "[]string", "string", "string", "string", "string", "string", "string", "string", "string"}, []interface{}{bytes.NewBuffer([]byte("")), bytes.NewBuffer([]byte("")), nil},
+					OnCallMethodName: "RunCmd", OnCallMethodArgType: []string{"*mocks.Cmd", "string", "[]string", "string", "string", "string", "string", "string", "string", "string", "string"}, RetArgList: []interface{}{bytes.NewBuffer([]byte("")), bytes.NewBuffer([]byte("")), nil},
 				},
 			},
-			onRetArgsKexecIface: []onCallReturnArgs{
-				{"Command", []string{"string", "string", "string", "string", "string", "string", "string", "string", "string"}, []interface{}{mockCmd}},
-				{"Command", []string{"string", "string", "string", "string", "string", "string", "string", "string", "string"}, []interface{}{mockCmd}},
+			onRetArgsKexecIface: []ovntest.TestifyMockHelper{
+				{OnCallMethodName: "Command", OnCallMethodArgType: []string{"string", "string", "string", "string", "string", "string", "string", "string", "string"}, RetArgList: []interface{}{mockCmd}},
+				{OnCallMethodName: "Command", OnCallMethodArgType: []string{"string", "string", "string", "string", "string", "string", "string", "string", "string"}, RetArgList: []interface{}{mockCmd}},
 			},
 		},
 		{
@@ -207,11 +191,11 @@ func TestUpdateNodeSwitchExcludeIPs(t *testing.T) {
 			errExpected:  false,
 			inpNodeName:  "ovn-control-plane",
 			inpSubnetStr: "192.168.1.0/24",
-			onRetArgsExecUtilsIface: []onCallReturnArgs{
+			onRetArgsExecUtilsIface: []ovntest.TestifyMockHelper{
 				{
-					"RunCmd",
-					[]string{"*mocks.Cmd", "string", "[]string", "string", "string", "string"},
-					[]interface{}{
+					OnCallMethodName:    "RunCmd",
+					OnCallMethodArgType: []string{"*mocks.Cmd", "string", "[]string", "string", "string", "string"},
+					RetArgList: []interface{}{
 						// below is output from command --> ovn-nbctl lsp-list ovn-control-plane
 						bytes.NewBuffer([]byte("d23162b4-87b1-4ff8-b5a5-5cb731d822ed (kube-system_coredns-6955765f44-l9jxq)\n1e8cd861-c584-4e38-8c50-7a71a6ae26bb (local-path-storage_local-path-provisioner-85445b74d4-w5ghw)\n8f1b3173-aa43-4014-adcb-36eae52f7502 (stor-ovn-control-plane)")),
 						bytes.NewBuffer([]byte("")),
@@ -219,43 +203,20 @@ func TestUpdateNodeSwitchExcludeIPs(t *testing.T) {
 					},
 				},
 				{
-					"RunCmd", []string{"*mocks.Cmd", "string", "[]string", "string", "string", "string", "string", "string", "string", "string", "string"}, []interface{}{bytes.NewBuffer([]byte("")), bytes.NewBuffer([]byte("")), fmt.Errorf("test error")},
+					OnCallMethodName: "RunCmd", OnCallMethodArgType: []string{"*mocks.Cmd", "string", "[]string", "string", "string", "string", "string", "string", "string", "string", "string"}, RetArgList: []interface{}{bytes.NewBuffer([]byte("")), bytes.NewBuffer([]byte("")), fmt.Errorf("test error")},
 				},
 			},
-			onRetArgsKexecIface: []onCallReturnArgs{
-				{"Command", []string{"string", "string", "string", "string"}, []interface{}{mockCmd}},
-				{"Command", []string{"string", "string", "string", "string", "string", "string", "string", "string"}, []interface{}{mockCmd}},
+			onRetArgsKexecIface: []ovntest.TestifyMockHelper{
+				{OnCallMethodName: "Command", OnCallMethodArgType: []string{"string", "string", "string", "string"}, RetArgList: []interface{}{mockCmd}},
+				{OnCallMethodName: "Command", OnCallMethodArgType: []string{"string", "string", "string", "string", "string", "string", "string", "string"}, RetArgList: []interface{}{mockCmd}},
 			},
 		},
 	}
 
 	for i, tc := range tests {
 		t.Run(fmt.Sprintf("%d:%s", i, tc.desc), func(t *testing.T) {
-			if tc.onRetArgsExecUtilsIface != nil {
-				for _, item := range tc.onRetArgsExecUtilsIface {
-					call := mockExecRunner.On(item.onCallMethodName)
-					for _, arg := range item.onCallMethodArgType {
-						call.Arguments = append(call.Arguments, mock.AnythingOfType(arg))
-					}
-					for _, elem := range item.retArgList {
-						call.ReturnArguments = append(call.ReturnArguments, elem)
-					}
-					call.Once()
-				}
-			}
-
-			if tc.onRetArgsKexecIface != nil {
-				for _, item := range tc.onRetArgsKexecIface {
-					ifaceCall := mockKexecIface.On(item.onCallMethodName)
-					for _, arg := range item.onCallMethodArgType {
-						ifaceCall.Arguments = append(ifaceCall.Arguments, mock.AnythingOfType(arg))
-					}
-					for _, elem := range item.retArgList {
-						ifaceCall.ReturnArguments = append(ifaceCall.ReturnArguments, elem)
-					}
-					ifaceCall.Once()
-				}
-			}
+			ovntest.ProcessMockFnList(&mockExecRunner.Mock, tc.onRetArgsExecUtilsIface)
+			ovntest.ProcessMockFnList(&mockKexecIface.Mock, tc.onRetArgsKexecIface)
 
 			_, ipnet, err := net.ParseCIDR(tc.inpSubnetStr)
 			if err != nil {

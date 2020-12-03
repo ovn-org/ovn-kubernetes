@@ -4,7 +4,7 @@ import (
 	"fmt"
 
 	goovn "github.com/ebay/go-ovn"
-	"k8s.io/klog"
+	"k8s.io/klog/v2"
 )
 
 // Get logical switch port by name
