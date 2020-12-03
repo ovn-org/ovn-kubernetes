@@ -67,8 +67,11 @@ type EgressFirewallPort struct {
 
 // EgressFirewallDestination is the endpoint that traffic is either allowed or denied to
 type EgressFirewallDestination struct {
-	// cidrSelector is the CIDR range to allow/deny traffic to.
-	CIDRSelector string `json:"cidrSelector"`
+	// cidrSelector is the CIDR range to allow/deny traffic to. If this is set, dnsName must be unset.
+	CIDRSelector string `json:"cidrSelector,omitempty"`
+	// dnsName is the domain name to allow/deny traffic to. If this is set, cidrSelector must be unset.
+	// +kubebuilder:validation:Pattern=^([A-Za-z0-9-]+\.)*[A-Za-z0-9-]+\.?$
+	DNSName string `json:"dnsName,omitempty"`
 }
 
 // +k8s:deepcopy-gen:interfaces=k8s.io/apimachinery/pkg/runtime.Object

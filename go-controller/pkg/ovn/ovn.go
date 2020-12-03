@@ -39,8 +39,9 @@ import (
 )
 
 const (
-	egressfirewallCRD    string = "egressfirewalls.k8s.ovn.org"
-	clusterPortGroupName string = "clusterPortGroup"
+	egressfirewallCRD                string        = "egressfirewalls.k8s.ovn.org"
+	clusterPortGroupName             string        = "clusterPortGroup"
+	egressFirewallDNSDefaultDuration time.Duration = 30 * time.Minute
 )
 
 // ServiceVIPKey is used for looking up service namespace information for a
@@ -164,6 +165,8 @@ type Controller struct {
 
 	// Controller used for programming OVN for egress IP
 	eIPC egressIPController
+
+	egressFirewallDNS *EgressDNS
 
 	// Map of load balancers to service namespace
 	serviceVIPToName map[ServiceVIPKey]types.NamespacedName
@@ -660,6 +663,11 @@ func (oc *Controller) WatchCRD() {
 				}
 				oc.egressFirewallHandler = oc.WatchEgressFirewall()
 
+				oc.egressFirewallDNS, err = NewEgressDNS(oc.addressSetFactory, oc.stopChan)
+				oc.egressFirewallDNS.Run(egressFirewallDNSDefaultDuration)
+				if err != nil {
+					klog.Errorf("Error Creating EgressFirewallDNS: %v", err)
+				}
 			}
 		},
 		UpdateFunc: func(old, newer interface{}) {
@@ -668,6 +676,7 @@ func (oc *Controller) WatchCRD() {
 			crd := obj.(*apiextension.CustomResourceDefinition)
 			klog.Infof("Deleting CRD %s from cluster", crd.Name)
 			if crd.Name == egressfirewallCRD {
+				oc.egressFirewallDNS.Shutdown()
 				oc.watchFactory.RemoveEgressFirewallHandler(oc.egressFirewallHandler)
 				oc.egressFirewallHandler = nil
 				oc.watchFactory.ShutdownEgressFirewallWatchFactory()
@@ -682,15 +691,15 @@ func (oc *Controller) WatchEgressFirewall() *factory.Handler {
 	return oc.watchFactory.AddEgressFirewallHandler(cache.ResourceEventHandlerFuncs{
 		AddFunc: func(obj interface{}) {
 			egressFirewall := obj.(*egressfirewall.EgressFirewall).DeepCopy()
-			errList := oc.addEgressFirewall(egressFirewall)
-			for _, err := range errList {
-				klog.Error(err)
-			}
-			if len(errList) == 0 {
-				egressFirewall.Status.Status = egressFirewallAppliedCorrectly
-			} else {
+			addErrors := oc.addEgressFirewall(egressFirewall)
+			if addErrors != nil {
+				klog.Error(addErrors)
 				egressFirewall.Status.Status = egressFirewallAddError
+			} else {
+
+				egressFirewall.Status.Status = egressFirewallAppliedCorrectly
 			}
+
 			err := oc.updateEgressFirewallWithRetry(egressFirewall)
 			if err != nil {
 				klog.Error(err)
@@ -701,11 +710,9 @@ func (oc *Controller) WatchEgressFirewall() *factory.Handler {
 			oldEgressFirewall := old.(*egressfirewall.EgressFirewall)
 			if !reflect.DeepEqual(oldEgressFirewall.Spec, newEgressFirewall.Spec) {
 				errList := oc.updateEgressFirewall(oldEgressFirewall, newEgressFirewall)
-				if len(errList) > 0 {
+				if errList != nil {
 					newEgressFirewall.Status.Status = egressFirewallUpdateError
-					for _, err := range errList {
-						klog.Error(err)
-					}
+					klog.Error(errList)
 				} else {
 					newEgressFirewall.Status.Status = egressFirewallAppliedCorrectly
 				}
@@ -717,9 +724,9 @@ func (oc *Controller) WatchEgressFirewall() *factory.Handler {
 		},
 		DeleteFunc: func(obj interface{}) {
 			egressFirewall := obj.(*egressfirewall.EgressFirewall)
-			errList := oc.deleteEgressFirewall(egressFirewall)
-			for _, err := range errList {
-				klog.Error(err)
+			deleteErrors := oc.deleteEgressFirewall(egressFirewall)
+			if deleteErrors != nil {
+				klog.Error(deleteErrors)
 			}
 		},
 	}, nil)
