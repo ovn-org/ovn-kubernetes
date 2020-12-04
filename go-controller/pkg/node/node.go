@@ -220,9 +220,6 @@ func (n *OvnNode) Start(wg *sync.WaitGroup) error {
 		return err
 	}
 
-	wg.Add(1)
-	go n.gateway.Run(n.stopChan)
-
 	if err := nodeAnnotator.Run(); err != nil {
 		return fmt.Errorf("failed to set node %s annotations: %v", n.name, err)
 	}
@@ -233,6 +230,7 @@ func (n *OvnNode) Start(wg *sync.WaitGroup) error {
 	if err := waiter.Wait(); err != nil {
 		return err
 	}
+	go n.gateway.Run(n.stopChan, wg)
 	klog.Infof("Gateway and management port readiness took %v", time.Since(start))
 
 	if config.HybridOverlay.Enabled {
