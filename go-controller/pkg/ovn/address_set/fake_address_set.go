@@ -1,4 +1,4 @@
-package ovn
+package addressset
 
 import (
 	"net"
@@ -13,23 +13,23 @@ import (
 	. "github.com/onsi/gomega"
 )
 
-func newFakeAddressSetFactory() *fakeAddressSetFactory {
-	return &fakeAddressSetFactory{
+func NewFakeAddressSetFactory() *FakeAddressSetFactory {
+	return &FakeAddressSetFactory{
 		sets: make(map[string]*fakeAddressSet),
 	}
 }
 
-type fakeAddressSetFactory struct {
+type FakeAddressSetFactory struct {
 	sync.RWMutex
 	// maps address set name to object
 	sets map[string]*fakeAddressSet
 }
 
 // fakeFactory implements the AddressSetFactory interface
-var _ AddressSetFactory = &fakeAddressSetFactory{}
+var _ AddressSetFactory = &FakeAddressSetFactory{}
 
 // NewAddressSet returns a new address set object
-func (f *fakeAddressSetFactory) NewAddressSet(name string, ips []net.IP) (AddressSet, error) {
+func (f *FakeAddressSetFactory) NewAddressSet(name string, ips []net.IP) (AddressSet, error) {
 	f.Lock()
 	defer f.Unlock()
 	_, ok := f.sets[name]
@@ -38,16 +38,17 @@ func (f *fakeAddressSetFactory) NewAddressSet(name string, ips []net.IP) (Addres
 	if err != nil {
 		return nil, err
 	}
+	ip4ASName, ip6ASName := MakeAddressSetName(name)
 	if set.ipv4 != nil {
-		f.sets[getIPv4ASName(name)] = set.ipv4
+		f.sets[ip4ASName] = set.ipv4
 	}
 	if set.ipv6 != nil {
-		f.sets[getIPv6ASName(name)] = set.ipv6
+		f.sets[ip6ASName] = set.ipv6
 	}
 	return set, nil
 }
 
-func (f *fakeAddressSetFactory) ForEachAddressSet(iteratorFn AddressSetIterFunc) error {
+func (f *FakeAddressSetFactory) ForEachAddressSet(iteratorFn AddressSetIterFunc) error {
 	asNames := sets.String{}
 	for _, set := range f.sets {
 		asName := truncateSuffixFromAddressSet(set.getName())
@@ -66,21 +67,22 @@ func (f *fakeAddressSetFactory) ForEachAddressSet(iteratorFn AddressSetIterFunc)
 	return nil
 }
 
-func (f *fakeAddressSetFactory) DestroyAddressSetInBackingStore(name string) error {
+func (f *FakeAddressSetFactory) DestroyAddressSetInBackingStore(name string) error {
 	if _, ok := f.sets[name]; ok {
 		f.removeAddressSet(name)
 		return nil
 	}
+	ip4ASName, ip6ASName := MakeAddressSetName(name)
 	if config.IPv4Mode {
-		f.removeAddressSet(getIPv4ASName(name))
+		f.removeAddressSet(ip4ASName)
 	}
 	if config.IPv6Mode {
-		f.removeAddressSet(getIPv6ASName(name))
+		f.removeAddressSet(ip6ASName)
 	}
 	return nil
 }
 
-func (f *fakeAddressSetFactory) getAddressSet(name string) *fakeAddressSet {
+func (f *FakeAddressSetFactory) getAddressSet(name string) *fakeAddressSet {
 	f.RLock()
 	defer f.RUnlock()
 	if as, ok := f.sets[name]; ok {
@@ -91,38 +93,56 @@ func (f *fakeAddressSetFactory) getAddressSet(name string) *fakeAddressSet {
 }
 
 // removeAddressSet removes the address set from the factory
-func (f *fakeAddressSetFactory) removeAddressSet(name string) {
+func (f *FakeAddressSetFactory) removeAddressSet(name string) {
 	f.Lock()
 	defer f.Unlock()
 	delete(f.sets, name)
 }
 
 // ExpectNoAddressSet ensures the named address set does not exist
-func (f *fakeAddressSetFactory) ExpectNoAddressSet(name string) {
+func (f *FakeAddressSetFactory) ExpectNoAddressSet(name string) {
 	_, ok := f.sets[name]
 	Expect(ok).To(BeFalse())
 }
 
 // ExpectAddressSetWithIPs ensures the named address set exists with the given set of IPs
-func (f *fakeAddressSetFactory) ExpectAddressSetWithIPs(name string, ips []string) {
-	as := f.getAddressSet(name)
-	Expect(as).NotTo(BeNil())
-	defer as.Unlock()
-	for _, expectedIP := range ips {
-		Expect(as.ips).To(HaveKey(expectedIP))
+func (f *FakeAddressSetFactory) ExpectAddressSetWithIPs(name string, ips []string) {
+	var lenAddressSet int
+	name4, name6 := MakeAddressSetName(name)
+	as4 := f.getAddressSet(name4)
+	if as4 != nil {
+		defer as4.Unlock()
+		lenAddressSet = lenAddressSet + len(as4.ips)
 	}
-	Expect(as.ips).To(HaveLen(len(ips)))
+	as6 := f.getAddressSet(name6)
+	if as6 != nil {
+		defer as6.Unlock()
+		lenAddressSet = lenAddressSet + len(as6.ips)
+	}
+
+	for _, ip := range ips {
+		if utilnet.IsIPv6(net.ParseIP(ip)) {
+			Expect(as6).NotTo(BeNil())
+			Expect(as6.ips).To(HaveKey(ip))
+		} else {
+			Expect(as4).NotTo(BeNil())
+			Expect(as4.ips).To(HaveKey(ip))
+		}
+	}
+
+	Expect(lenAddressSet).To(Equal(len(ips)))
 }
 
 // ExpectEmptyAddressSet ensures the named address set exists with no IPs
-func (f *fakeAddressSetFactory) ExpectEmptyAddressSet(name string) {
+func (f *FakeAddressSetFactory) ExpectEmptyAddressSet(name string) {
 	f.ExpectAddressSetWithIPs(name, nil)
 }
 
 // EventuallyExpectEmptyAddressSet ensures the named address set eventually exists with no IPs
-func (f *fakeAddressSetFactory) EventuallyExpectEmptyAddressSet(name string) {
+func (f *FakeAddressSetFactory) EventuallyExpectEmptyAddressSet(name string) {
+	name4, _ := MakeAddressSetName(name)
 	Eventually(func() bool {
-		as := f.getAddressSet(name)
+		as := f.getAddressSet(name4)
 		Expect(as).NotTo(BeNil())
 		defer as.Unlock()
 		return len(as.ips) == 0
@@ -130,7 +150,7 @@ func (f *fakeAddressSetFactory) EventuallyExpectEmptyAddressSet(name string) {
 }
 
 // EventuallyExpectNoAddressSet ensures the named address set eventually does not exist
-func (f *fakeAddressSetFactory) EventuallyExpectNoAddressSet(name string) {
+func (f *FakeAddressSetFactory) EventuallyExpectNoAddressSet(name string) {
 	Eventually(func() bool {
 		f.RLock()
 		defer f.RUnlock()
@@ -171,11 +191,12 @@ func newFakeAddressSets(name string, ips []net.IP, removeFn removeFunc) (*fakeAd
 			v4Ips = append(v4Ips, ip)
 		}
 	}
+	ip4ASName, ip6ASName := MakeAddressSetName(name)
 	if config.IPv4Mode {
-		v4set = newFakeAddressSet(getIPv4ASName(name), v4Ips, removeFn)
+		v4set = newFakeAddressSet(ip4ASName, v4Ips, removeFn)
 	}
 	if config.IPv6Mode {
-		v6set = newFakeAddressSet(getIPv6ASName(name), v6Ips, removeFn)
+		v6set = newFakeAddressSet(ip6ASName, v6Ips, removeFn)
 	}
 	return &fakeAddressSets{name: name, ipv4: v4set, ipv6: v6set}, nil
 }
@@ -193,18 +214,16 @@ func newFakeAddressSet(name string, ips []net.IP, removeFn removeFunc) *fakeAddr
 	return as
 }
 
-func (as *fakeAddressSets) GetIPv4HashName() string {
+func (as *fakeAddressSets) GetASHashNames() (string, string) {
+	var ipv4AS string
+	var ipv6AS string
 	if as.ipv4 != nil {
-		return as.ipv4.getHashName()
+		ipv4AS = as.ipv4.getHashName()
 	}
-	return ""
-}
-
-func (as *fakeAddressSets) GetIPv6HashName() string {
 	if as.ipv6 != nil {
-		return as.ipv6.getHashName()
+		ipv6AS = as.ipv6.getHashName()
 	}
-	return ""
+	return ipv4AS, ipv6AS
 }
 
 func (as *fakeAddressSets) GetName() string {

@@ -6,7 +6,8 @@ import (
 	"testing"
 	"time"
 
-	mocks "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/mocks"
+	addressset "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/address_set"
+	mocks "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/address_set/mocks"
 	ovntest "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/testing"
 	util_mocks "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util/mocks"
 	"github.com/stretchr/testify/assert"
@@ -22,7 +23,7 @@ import (
 
 func TestNewEgressDNS(t *testing.T) {
 	testCh := make(chan struct{})
-	testOvnAddFtry := ovn.NewOvnAddressSetFactory()
+	testOvnAddFtry := addressset.NewOvnAddressSetFactory()
 	mockDnsOps := new(util_mocks.DNSOps)
 	util.SetDNSLibOpsMockInst(mockDnsOps)
 	tests := []struct {

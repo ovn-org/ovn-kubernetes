@@ -454,8 +454,7 @@ var _ = Describe("OVN Pod Operations", func() {
 				Expect(err).NotTo(HaveOccurred())
 				Eventually(func() string { return getPodAnnotations(fakeOvn.fakeClient.KubeClient, t.namespace, t.podName) }, 2).Should(MatchJSON(podJSON))
 
-				v4AddressSetName := t.namespace + ipv4AddressSetSuffix
-				fakeOvn.asf.ExpectNoAddressSet(v4AddressSetName)
+				fakeOvn.asf.ExpectNoAddressSet(t.namespace)
 
 				// Now add the namespace
 				_, err = fakeOvn.fakeClient.KubeClient.CoreV1().Namespaces().Create(context.TODO(), namespaceT, metav1.CreateOptions{})
