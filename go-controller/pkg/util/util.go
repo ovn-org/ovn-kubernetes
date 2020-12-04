@@ -2,7 +2,9 @@ package util
 
 import (
 	"fmt"
+	"hash/fnv"
 	"net"
+	"strconv"
 	"strings"
 	"sync"
 
@@ -172,4 +174,17 @@ func UpdateUsedHostSubnetsCount(subnet *net.IPNet,
 	} else {
 		*v6SubnetsAllocated = *v6SubnetsAllocated + float64(1*op)
 	}
+}
+
+// HashforOVN hashes the provided input to make it a valid addressSet or portGroup name.
+func HashForOVN(s string) string {
+	h := fnv.New64a()
+	_, err := h.Write([]byte(s))
+	if err != nil {
+		klog.Errorf("Failed to hash %s", s)
+		return ""
+	}
+	hashString := strconv.FormatUint(h.Sum64(), 10)
+	return fmt.Sprintf("a%s", hashString)
+
 }

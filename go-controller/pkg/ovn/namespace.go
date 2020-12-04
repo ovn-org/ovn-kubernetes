@@ -7,6 +7,7 @@ import (
 	"strings"
 	"time"
 
+	addressset "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/address_set"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
 
 	kapi "k8s.io/api/core/v1"
@@ -384,9 +385,8 @@ func (oc *Controller) deleteNamespaceLocked(ns string) *namespaceInfo {
 	return nsInfo
 }
 
-func (oc *Controller) createNamespaceAddrSetAllPods(ns string) (AddressSet, error) {
-	// Get all the pods in the namespace and append their IP to the
-	// address_set
+func (oc *Controller) createNamespaceAddrSetAllPods(ns string) (addressset.AddressSet, error) {
+	// Get all the pods in the namespace and append their IP to the address_set
 	var ips []net.IP
 	existingPods, err := oc.watchFactory.GetPods(ns)
 	if err != nil {

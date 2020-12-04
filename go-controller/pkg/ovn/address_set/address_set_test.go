@@ -1,4 +1,4 @@
-package ovn
+package addressset
 
 import (
 	"fmt"
@@ -19,6 +19,11 @@ type testAddressSetName struct {
 	suffix1   string
 	suffix2   string
 }
+
+const (
+	fakeUUID   = "8a86f6d8-7972-4253-b0bd-ddbef66e9303"
+	fakeUUIDv6 = "8a86f6d8-7972-4253-b0bd-ddbef66e9304"
+)
 
 func (asn *testAddressSetName) makeName() string {
 	return fmt.Sprintf("%s.%s.%s", asn.namespace, asn.suffix1, asn.suffix2)
