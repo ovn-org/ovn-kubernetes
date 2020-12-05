@@ -100,42 +100,6 @@ jobs:
         github-token: ${{ secrets.GITHUB_TOKEN }}
         path-to-lcov: coverage.lcov
 
-  k8s:
-    name: Build k8s
-    runs-on: ubuntu-latest
-    steps:
-
-    - name: Set up environment
-      run: |
-        export GOPATH=$(go env GOPATH)
-        echo "GOPATH=$GOPATH" >> $GITHUB_ENV
-        echo "$GOPATH/bin" >> $GITHUB_PATH
-
-    - name: Cache Kubernetes
-      id: cache-k8s
-      if: github.event_name == 'push' || github.event_name == 'pull_request'
-      uses: actions/cache@v2
-      with:
-        path: ${{ env.GOPATH }}/src/k8s.io/kubernetes/
-        key: k8s-go-2-${{ env.K8S_VERSION }}
-
-    - name: Set up Go
-      uses: actions/setup-go@v1
-      with:
-        go-version: ${{ env.GO_VERSION }}
-      id: go
-      if: steps.cache-k8s.outputs.cache-hit != 'true'
-
-    - name: Build and install Kubernetes
-      if: steps.cache-k8s.outputs.cache-hit != 'true'
-      run: |
-        set -x
-        rm -rf $GOPATH/src/k8s.io/kubernetes
-        git clone --single-branch --branch $K8S_VERSION https://github.com/kubernetes/kubernetes.git $GOPATH/src/k8s.io/kubernetes/
-        pushd $GOPATH/src/k8s.io/kubernetes/
-        make WHAT="test/e2e/e2e.test vendor/github.com/onsi/ginkgo/ginkgo cmd/kubectl"
-        rm -rf .git
-
   e2e:
     name: e2e
     if: github.event_name != 'schedule'
@@ -193,7 +157,7 @@ jobs:
          - {"ipfamily": {"ip": ipv6}, "ha": {"enabled": "false"}, "gateway-mode": shared}
          - {"ipfamily": {"ip": dualstack}, "ha": {"enabled": "true"}, "gateway-mode": shared}
          - {"ipfamily": {"ip": dualstack}, "ha": {"enabled": "false"}}
-    needs: [build, k8s]
+    needs: [build]
     env:
       JOB_NAME: "${{ matrix.target.shard }}-${{ matrix.ha.name }}-${{ matrix.gateway-mode }}-${{ matrix.ipfamily.name }}"
       OVN_HA: "${{ matrix.ha.enabled }}"
@@ -227,29 +191,10 @@ jobs:
       run: |
         sudo ufw disable
 
-    - name: Restore Kubernetes from cache
-      id: cache-k8s
-      uses: actions/cache@v2
-      with:
-        path: "${{ env.GOPATH }}/src/k8s.io/kubernetes/"
-        key: k8s-go-2-${{ env.K8S_VERSION }}
-
-    # Re-build if kube wasn't in the cache due to
-    # https://github.com/actions/cache/issues/107#issuecomment-598188250
-    # https://github.com/actions/cache/issues/208#issuecomment-596664572
-    - name: Build and install Kubernetes
-      if: steps.cache-k8s.outputs.cache-hit != 'true'
-      run: |
-        set -x
-        rm -rf $GOPATH/src/k8s.io/kubernetes/
-        git clone --single-branch --branch $K8S_VERSION https://github.com/kubernetes/kubernetes.git $GOPATH/src/k8s.io/kubernetes/
-        pushd $GOPATH/src/k8s.io/kubernetes/
-        make WHAT="test/e2e/e2e.test vendor/github.com/onsi/ginkgo/ginkgo cmd/kubectl"
-        rm -rf .git
-
     - uses: actions/download-artifact@v2
       with:
         name: test-image
+
     - name: Load docker image
       run: |
         docker load --input image.tar
@@ -325,7 +270,7 @@ jobs:
             name: "Dualstack"
             ipv4: true
             ipv6: true
-    needs: [ build, k8s ]
+    needs: [ build ]
     env:
       JOB_NAME: "${{ matrix.target.shard }}-${{ matrix.ha.name }}-${{ matrix.gateway-mode }}-${{ matrix.ipfamily.name }}"
       OVN_HA: "${{ matrix.ha.enabled }}"
@@ -358,26 +303,6 @@ jobs:
         # Not needed for KIND deployments, so just disable all the time.
         run: |
           sudo ufw disable
-
-      - name: Restore Kubernetes from cache
-        id: cache-k8s
-        uses: actions/cache@v2
-        with:
-          path: "${{ env.GOPATH }}/src/k8s.io/kubernetes/"
-          key: k8s-go-2-${{ env.K8S_VERSION }}
-
-      # Re-build if kube wasn't in the cache due to
-      # https://github.com/actions/cache/issues/107#issuecomment-598188250
-      # https://github.com/actions/cache/issues/208#issuecomment-596664572
-      - name: Build and install Kubernetes
-        if: steps.cache-k8s.outputs.cache-hit != 'true'
-        run: |
-          set -x
-          rm -rf $GOPATH/src/k8s.io/kubernetes/
-          git clone --single-branch --branch $K8S_VERSION https://github.com/kubernetes/kubernetes.git $GOPATH/src/k8s.io/kubernetes/
-          pushd $GOPATH/src/k8s.io/kubernetes/
-          make WHAT="test/e2e/e2e.test vendor/github.com/onsi/ginkgo/ginkgo cmd/kubectl"
-          rm -rf .git
 
       - uses: actions/download-artifact@v2
         with:
