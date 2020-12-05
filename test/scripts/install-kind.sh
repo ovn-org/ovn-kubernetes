@@ -2,23 +2,30 @@
 
 set -ex
 
-export GO111MODULE="on"
+# Install latest stable kubectl
+curl -LO https://storage.googleapis.com/kubernetes-release/release/$(curl -s https://storage.googleapis.com/kubernetes-release/release/stable.txt)/bin/linux/amd64/kubectl
+chmod +x ./kubectl
+sudo mv ./kubectl /usr/local/bin/kubectl
 
-pushd $GOPATH/src/k8s.io/kubernetes/
-if [[ ! -f /usr/local/bin/kubectl ]]; then
-  sudo ln ./_output/local/go/bin/kubectl /usr/local/bin/kubectl
-fi
-if [[ ! -f /usr/local/bin/e2e.test ]]; then
-  sudo ln ./_output/local/go/bin/e2e.test /usr/local/bin/e2e.test
-fi
-popd
+# Install latest e2e test binary
+# The e2e binaries are built from https://github.com/aojea/kubernetes-e2e-binaries
+# Current e2e binary versions is latest 1.19 tag v1.19.4
+curl -LO https://github.com/aojea/kubernetes-e2e-binaries/releases/download/d360454c/e2e.test
+chmod +x ./e2e.test
+sudo mv ./e2e.test /usr/local/bin/e2e.test
+
+# Install ginkgo
+go get github.com/onsi/ginkgo/ginkgo
+go get github.com/onsi/gomega/...
 
 # Install kind (dual-stack is not released upstream so we have to use our own version)
 if [ "$KIND_IPV4_SUPPORT" == true ] && [ "$KIND_IPV6_SUPPORT" == true ]; then
   sudo curl -Lo /usr/local/bin/kind https://github.com/aojea/kind/releases/download/dualstack/kind
   sudo chmod +x /usr/local/bin/kind
 else
-  go get sigs.k8s.io/kind@v0.9.0
+  curl -Lo ./kind https://kind.sigs.k8s.io/dl/v0.9.0/kind-linux-amd64
+  chmod +x ./kind
+  sudo mv ./kind /usr/local/bin/
 fi
 
 pushd ../contrib
