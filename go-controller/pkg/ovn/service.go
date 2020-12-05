@@ -371,6 +371,10 @@ func (ovn *Controller) createService(service *kapi.Service) error {
 				break
 			}
 			if svcQualifiesForReject(service) {
+				gateways, _, err := ovn.getOvnGateways()
+				if err != nil {
+					return err
+				}
 				vip := util.JoinHostPortInt32(service.Spec.ClusterIP, svcPort.Port)
 				// Skip creating LB if endpoints watcher already did it
 				if _, hasEps := ovn.getServiceLBInfo(loadBalancer, vip); hasEps {
@@ -388,26 +392,29 @@ func (ovn *Controller) createService(service *kapi.Service) error {
 					klog.Infof("Service Reject ACL created for ClusterIP service: %s, namespace: %s, via: "+
 						"%s:%s:%d, ACL UUID: %s", service.Name, service.Namespace, svcPort.Protocol,
 						service.Spec.ClusterIP, svcPort.Port, aclUUID)
-					// Cloud load balancers: directly reject traffic from pods
+					// Cloud load balancers reject ACLs
 					for _, ing := range service.Status.LoadBalancer.Ingress {
 						if ing.IP == "" {
 							continue
 						}
-						aclUUID, err := ovn.createLoadBalancerRejectACL(loadBalancer, ing.IP, svcPort.Port, svcPort.Protocol)
-						if err != nil {
-							klog.Errorf("Failed to create reject ACL for Ingress IP: %s, load balancer: %s, error: %v",
-								ing.IP, loadBalancer, err)
-						} else {
-							klog.Infof("Reject ACL created for Ingress IP: %s, load balancer: %s, %s", ing.IP,
-								loadBalancer, aclUUID)
+						for _, gateway := range gateways {
+							loadBalancer, err := ovn.getGatewayLoadBalancer(gateway, svcPort.Protocol)
+							if err != nil {
+								klog.Errorf("Gateway router %s does not have load balancer (%v)", gateway, err)
+								continue
+							}
+							aclUUID, err := ovn.createLoadBalancerRejectACL(loadBalancer, ing.IP, svcPort.Port, svcPort.Protocol)
+							if err != nil {
+								klog.Errorf("Failed to create reject ACL for Ingress IP: %s, load balancer: %s, error: %v",
+									ing.IP, loadBalancer, err)
+							} else {
+								klog.Infof("Reject ACL created for Ingress IP: %s, load balancer: %s, %s", ing.IP,
+									loadBalancer, aclUUID)
+							}
 						}
 					}
 				}
 				if len(service.Spec.ExternalIPs) > 0 {
-					gateways, _, err := ovn.getOvnGateways()
-					if err != nil {
-						return err
-					}
 					for _, extIP := range service.Spec.ExternalIPs {
 						for _, gateway := range gateways {
 							loadBalancer, err := ovn.getGatewayLoadBalancer(gateway, svcPort.Protocol)
