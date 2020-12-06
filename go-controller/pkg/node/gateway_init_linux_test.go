@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"net"
 	"strings"
+	"sync"
 	"syscall"
 
 	"github.com/urfave/cli/v2"
@@ -255,7 +256,7 @@ cookie=0x0, duration=8366.597s, table=1, n_packets=10641, n_bytes=10370087, prio
 			err = nodeAnnotator.Run()
 			Expect(err).NotTo(HaveOccurred())
 
-			go sharedGw.Run(stop)
+			go sharedGw.Run(stop, &sync.WaitGroup{})
 
 			// Verify the code moved eth0's IP address, MAC, and routes
 			// over to breth0

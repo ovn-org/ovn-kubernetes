@@ -1495,6 +1495,144 @@ var _ = ginkgo.Describe("e2e multiple ecmp external gateway validation", func() 
 	})
 })
 
+// This test validates ingress traffic sourced from a mock external gateway
+// running as a container. Add a namespace annotated with the IP of the
+// mock external container's eth0 address. Add a loopback address and a
+// route pointing to the pod in the test namespace. Validate connectivity
+// sourcing from the mock gateway container loopback to the test ns pod.
+var _ = ginkgo.Describe("e2e ingress gateway traffic validation", func() {
+	const (
+		svcname       string = "novxlan-externalgw-ingress"
+		gwContainer   string = "gw-ingress-test-container"
+		ciNetworkName string = "kind"
+	)
+
+	f := framework.NewDefaultFramework(svcname)
+
+	type nodeInfo struct {
+		name   string
+		nodeIP string
+	}
+
+	var (
+		workerNodeInfo nodeInfo
+	)
+
+	ginkgo.BeforeEach(func() {
+
+		// retrieve worker node names
+		nodes, err := e2enode.GetBoundedReadySchedulableNodes(f.ClientSet, 3)
+		framework.ExpectNoError(err)
+		if len(nodes.Items) < 3 {
+			framework.Failf(
+				"Test requires >= 3 Ready nodes, but there are only %v nodes",
+				len(nodes.Items))
+		}
+		ips := e2enode.CollectAddresses(nodes, v1.NodeInternalIP)
+		workerNodeInfo = nodeInfo{
+			name:   nodes.Items[1].Name,
+			nodeIP: ips[1],
+		}
+	})
+
+	ginkgo.AfterEach(func() {
+		// tear down the container simulating the gateway
+		if cid, _ := runCommand("docker", "ps", "-qaf", fmt.Sprintf("name=%s", gwContainer)); cid != "" {
+			if _, err := runCommand("docker", "rm", "-f", gwContainer); err != nil {
+				framework.Logf("failed to delete the gateway test container %s %v", gwContainer, err)
+			}
+		}
+	})
+
+	ginkgo.It("Should validate ingress connectivity from an external gateway", func() {
+
+		var (
+			pingDstPod     string
+			ciNetworkFlag  = "{{ .NetworkSettings.Networks.kind.IPAddress }}"
+			dstPingPodName = "e2e-exgw-ingress-ping-pod"
+			command        = []string{"bash", "-c", "sleep 20000"}
+			exGWLo         = "10.30.1.1"
+			exGWLoCidr     = fmt.Sprintf("%s/32", exGWLo)
+			pingCount      = "3"
+		)
+
+		// start the first container that will act as an external gateway
+		_, err := runCommand("docker", "run", "-itd", "--privileged", "--network", ciNetworkName, "--name", gwContainer, "centos/tools")
+		if err != nil {
+			framework.Failf("failed to start external gateway test container %s: %v", gwContainer, err)
+		}
+		// retrieve the container ip of the external gateway container
+		exGWIp, err := runCommand("docker", "inspect", "-f", ciNetworkFlag, gwContainer)
+		if err != nil {
+			framework.Failf("failed to start external gateway test container: %v", err)
+		}
+		// trim newline from the inspect output
+		exGWIp = strings.TrimSuffix(exGWIp, "\n")
+		if ip := net.ParseIP(exGWIp); ip == nil {
+			framework.Failf("Unable to retrieve a valid address from container %s with inspect output of %s", gwContainer, exGWIp)
+		}
+
+		// annotate the test namespace with the external gateway address
+		annotateArgs := []string{
+			"annotate",
+			"namespace",
+			f.Namespace.Name,
+			fmt.Sprintf("k8s.ovn.org/routing-external-gws=%s", exGWIp),
+		}
+		framework.Logf("Annotating the external gateway test namespace to container gateway: %s", exGWIp)
+		framework.RunKubectlOrDie(annotateArgs...)
+
+		nodeIP, err := runCommand("docker", "inspect", "-f", ciNetworkFlag, workerNodeInfo.name)
+		if err != nil {
+			framework.Failf("failed to get the node ip address from node %s %v", workerNodeInfo.name, err)
+		}
+		nodeIP = strings.TrimSuffix(nodeIP, "\n")
+		if ip := net.ParseIP(nodeIP); ip == nil {
+			framework.Failf("Unable to retrieve a valid address from container %s with inspect output of %s", workerNodeInfo.name, nodeIP)
+		}
+		framework.Logf("the pod side node is %s and the source node ip is %s", workerNodeInfo.name, nodeIP)
+		podCIDR, err := getNodePodCIDR(workerNodeInfo.name)
+		if err != nil {
+			framework.Failf("Error retrieving the pod cidr from %s %v", workerNodeInfo.name, err)
+		}
+		framework.Logf("the pod cidr for node %s is %s", workerNodeInfo.name, podCIDR)
+
+		// Create the pod that will be used as the source for the connectivity test
+		createGenericPod(f, dstPingPodName, workerNodeInfo.name, f.Namespace.Name, command)
+		// wait for the pod setup to return a valid address
+		err = wait.PollImmediate(retryInterval, retryTimeout, func() (bool, error) {
+			pingDstPod = getPodAddress(dstPingPodName, f.Namespace.Name)
+			validIP := net.ParseIP(pingDstPod)
+			if validIP == nil {
+				return false, nil
+			}
+			return true, nil
+		})
+		// fail the test if a pod address is never retrieved
+		if err != nil {
+			framework.Failf("Error trying to get the pod IP address")
+		}
+		// add a host route on the gateways for return traffic to the pod
+		_, err = runCommand("docker", "exec", gwContainer, "ip", "route", "add", pingDstPod, "via", nodeIP)
+		if err != nil {
+			framework.Failf("failed to add the pod host route on the test container %s: %v", gwContainer, err)
+		}
+		// add a loopback address to the mock container that will source the ingress test
+		_, err = runCommand("docker", "exec", gwContainer, "ip", "address", "add", exGWLoCidr, "dev", "lo")
+		if err != nil {
+			framework.Failf("failed to add the loopback ip to dev lo on the test container: %v", err)
+		}
+
+		// Validate connectivity from the external gateway loopback to the pod in the test namespace
+		ginkgo.By(fmt.Sprintf("Validate ingress traffic from the external gateway %s can reach the pod in the exgw annotated namespace", gwContainer))
+		// generate traffic that will verify connectivity from the mock external gateway loopback
+		_, err = runCommand("docker", "exec", gwContainer, "ping", "-c", pingCount, "-S", exGWLo, "-I", "eth0", pingDstPod)
+		if err != nil {
+			framework.Failf("failed to ping the pod address %s from mock container %s: %v", pingDstPod, gwContainer, err)
+		}
+	})
+})
+
 func getNodePodCIDR(nodeName string) (string, error) {
 	// retrieve the pod cidr for the worker node
 	jsonFlag := "jsonpath='{.metadata.annotations.k8s\\.ovn\\.org/node-subnets}'"
