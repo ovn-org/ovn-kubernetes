@@ -3,6 +3,7 @@ package node
 import (
 	"fmt"
 	"net"
+	"sync"
 
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/informer"
@@ -20,7 +21,7 @@ import (
 type Gateway interface {
 	informer.ServiceAndEndpointsEventHandler
 	Init() error
-	Run(<-chan struct{})
+	Run(<-chan struct{}, *sync.WaitGroup)
 }
 
 type gateway struct {
@@ -118,9 +119,11 @@ func (g *gateway) Init() error {
 	return g.initFunc()
 }
 
-func (g *gateway) Run(stopChan <-chan struct{}) {
+func (g *gateway) Run(stopChan <-chan struct{}, wg *sync.WaitGroup) {
 	if g.openflowManager != nil {
 		klog.Info("Spawning Conntrack Rule Check Thread")
+		wg.Add(1)
+		defer wg.Done()
 		g.openflowManager.Run(stopChan)
 	}
 }
