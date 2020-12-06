@@ -37,8 +37,11 @@ var (
 	RemoteSubnetVersion = VersionRanges{VersionRange{MinVersion: Version{Major: 9, Minor: 2}, MaxVersion: Version{Major: math.MaxInt32, Minor: math.MaxInt32}}}
 	// A Host Route policy allows for local container to local host communication Overlay networks
 	HostRouteVersion = VersionRanges{VersionRange{MinVersion: Version{Major: 9, Minor: 2}, MaxVersion: Version{Major: math.MaxInt32, Minor: math.MaxInt32}}}
-	// HNS 10.2 allows for Direct Server Return for loadbalancing
-	DSRVersion = VersionRanges{VersionRange{MinVersion: Version{Major: 10, Minor: 2}, MaxVersion: Version{Major: math.MaxInt32, Minor: math.MaxInt32}}}
+	// HNS 9.3 through 10.0 (not included), and 10.2+ allows for Direct Server Return for loadbalancing
+	DSRVersion = VersionRanges{
+		VersionRange{MinVersion: Version{Major: 9, Minor: 3}, MaxVersion: Version{Major: 9, Minor: math.MaxInt32}},
+		VersionRange{MinVersion: Version{Major: 10, Minor: 2}, MaxVersion: Version{Major: math.MaxInt32, Minor: math.MaxInt32}},
+	}
 	// HNS 9.3 through 10.0 (not included) and, 10.4+ provide support for configuring endpoints with /32 prefixes
 	Slash32EndpointPrefixesVersion = VersionRanges{
 		VersionRange{MinVersion: Version{Major: 9, Minor: 3}, MaxVersion: Version{Major: 9, Minor: math.MaxInt32}},
