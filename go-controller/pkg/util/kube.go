@@ -255,7 +255,7 @@ func UseEndpointSlices(kubeClient kubernetes.Interface) bool {
 	minor, _ := strconv.Atoi(sv.Minor)
 	klog.Infof("Kubernetes running with version %d.%d", major, minor)
 	if major <= 1 && minor < 20 || !endpointSlicesEnabled {
-		return false
+		return true
 	}
 	return true
 }

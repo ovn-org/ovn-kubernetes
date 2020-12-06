@@ -287,7 +287,7 @@ func (oc *Controller) Run(wg *sync.WaitGroup) error {
 	// and the OVN configuration.
 	// We use a level triggered controller to handle services if k8s > 1.19,
 	// using endpoint slices instead endpoints if OVN is configured for dual stack.
-	if util.UseEndpointSlices(oc.client) && config.IPv4Mode && config.IPv6Mode {
+	if util.UseEndpointSlices(oc.client) {
 		// Services are handled differently depending on the Kubernetes API versions
 		klog.Infof("Dual Stack enabled: using EndpointSlices instead of Endpoints in k8s versions > 1.19")
 		// Create our own informers to start compartamentalizing the code
