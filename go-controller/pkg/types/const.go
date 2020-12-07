@@ -52,9 +52,6 @@ const (
 	V4NodeLocalNATSubnetNextHop    = "169.254.0.1"
 	V4NodeLocalDistributedGWPortIP = "169.254.0.2"
 
-	V4JoinSubnetCIDR = "100.64.0.0/16"
-	V6JoinSubnetCIDR = "fd98::/64"
-
 	// OpenFlow and Networking constants
 	RouteAdvertisementICMPType    = 134
 	NeighborAdvertisementICMPType = 136

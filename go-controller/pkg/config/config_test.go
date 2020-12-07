@@ -172,6 +172,8 @@ interface=eth1
 next-hop=1.3.4.5
 vlan-id=10
 nodeport=false
+v4-join-subnet=100.65.0.0/16
+v6-join-subnet=fd90::/64
 
 [hybridoverlay]
 enabled=true
@@ -502,6 +504,8 @@ var _ = Describe("Config Operations", func() {
 			Expect(Gateway.NextHop).To(Equal("1.3.4.5"))
 			Expect(Gateway.VLANID).To(Equal(uint(10)))
 			Expect(Gateway.NodeportEnable).To(BeFalse())
+			Expect(Gateway.V4JoinSubnet).To(Equal("100.65.0.0/16"))
+			Expect(Gateway.V6JoinSubnet).To(Equal("fd90::/64"))
 
 			Expect(HybridOverlay.Enabled).To(BeTrue())
 			Expect(HybridOverlay.ClusterSubnets).To(Equal([]CIDRNetworkEntry{
@@ -564,6 +568,8 @@ var _ = Describe("Config Operations", func() {
 
 			Expect(Gateway.Mode).To(Equal(GatewayModeShared))
 			Expect(Gateway.NodeportEnable).To(BeTrue())
+			Expect(Gateway.V4JoinSubnet).To(Equal("100.63.0.0/16"))
+			Expect(Gateway.V6JoinSubnet).To(Equal("fd99::/48"))
 
 			Expect(HybridOverlay.Enabled).To(BeTrue())
 			Expect(HybridOverlay.ClusterSubnets).To(Equal([]CIDRNetworkEntry{
@@ -599,6 +605,8 @@ var _ = Describe("Config Operations", func() {
 			"-sb-cert-common-name=testsbcommonname",
 			"-gateway-mode=shared",
 			"-nodeport",
+			"-gateway-v4-join-subnet=100.63.0.0/16",
+			"-gateway-v6-join-subnet=fd99::/48",
 			"-enable-hybrid-overlay",
 			"-hybrid-overlay-cluster-subnets=11.132.0.0/14/23",
 		}
@@ -796,7 +804,32 @@ mode=shared
 		err := app.Run(cliArgs)
 		Expect(err).NotTo(HaveOccurred())
 	})
-
+	It("returns an error when the v4 join subnet specified is invalid", func() {
+		app.Action = func(ctx *cli.Context) error {
+			_, err := InitConfig(ctx, kexec.New(), nil)
+			Expect(err).To(MatchError("invalid gateway v4 join subnet specified, subnet: foobar: error: invalid CIDR address: foobar"))
+			return nil
+		}
+		cliArgs := []string{
+			app.Name,
+			"-gateway-v4-join-subnet=foobar",
+		}
+		err := app.Run(cliArgs)
+		Expect(err).NotTo(HaveOccurred())
+	})
+	It("returns an error when the v6 join subnet specified is invalid", func() {
+		app.Action = func(ctx *cli.Context) error {
+			_, err := InitConfig(ctx, kexec.New(), nil)
+			Expect(err).To(MatchError("invalid gateway v6 join subnet specified, subnet: 192.168.0.0/16: error: <nil>"))
+			return nil
+		}
+		cliArgs := []string{
+			app.Name,
+			"-gateway-v6-join-subnet=192.168.0.0/16",
+		}
+		err := app.Run(cliArgs)
+		Expect(err).NotTo(HaveOccurred())
+	})
 	It("overrides config file and defaults with CLI options (multi-master)", func() {
 		kubeconfigFile, err := createTempFile("kubeconfig")
 		Expect(err).NotTo(HaveOccurred())

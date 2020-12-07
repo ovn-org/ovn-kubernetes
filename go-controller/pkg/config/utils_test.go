@@ -132,9 +132,10 @@ func TestParseClusterSubnetEntries(t *testing.T) {
 
 func Test_checkForOverlap(t *testing.T) {
 	tests := []struct {
-		name        string
-		cidrList    []*net.IPNet
-		shouldError bool
+		name               string
+		cidrList           []*net.IPNet
+		joinSubnetCIDRList []*net.IPNet
+		shouldError        bool
 	}{
 		{
 			name:        "empty cidrList",
@@ -178,41 +179,48 @@ func Test_checkForOverlap(t *testing.T) {
 		},
 
 		{
-			name:        "ipnet entry equal to V4 joinSubnet value",
-			cidrList:    ovntest.MustParseIPNets("100.64.0.0/16"),
-			shouldError: true,
+			name:               "ipnet entry equal to V4 joinSubnet value",
+			cidrList:           ovntest.MustParseIPNets("100.64.0.0/16"),
+			joinSubnetCIDRList: ovntest.MustParseIPNets("100.64.0.0/16", "fd98::/64"),
+			shouldError:        true,
 		},
 		{
-			name:        "ipnet entry equal to V6 joinSubnet value",
-			cidrList:    ovntest.MustParseIPNets("fd98::/64"),
-			shouldError: true,
+			name:               "ipnet entry equal to V6 joinSubnet value",
+			cidrList:           ovntest.MustParseIPNets("fd90::/48"),
+			joinSubnetCIDRList: ovntest.MustParseIPNets("100.64.0.0/16", "fd90::/48"),
+			shouldError:        true,
 		},
 		{
-			name:        "ipnet entry overlapping with V4 joinSubnet value",
-			cidrList:    ovntest.MustParseIPNets("100.64.128.0/17"),
-			shouldError: true,
+			name:               "ipnet entry overlapping with V4 joinSubnet value",
+			cidrList:           ovntest.MustParseIPNets("100.63.128.0/17"),
+			joinSubnetCIDRList: ovntest.MustParseIPNets("100.63.0.0/16", "fd98::/64"),
+			shouldError:        true,
 		},
 		{
-			name:        "ipnet entry overlapping with V6 joinSubnet value",
-			cidrList:    ovntest.MustParseIPNets("fd98::/68"),
-			shouldError: true,
+			name:               "ipnet entry overlapping with V6 joinSubnet value",
+			cidrList:           ovntest.MustParseIPNets("fd99::/68"),
+			joinSubnetCIDRList: ovntest.MustParseIPNets("100.64.0.0/16", "fd99::/64"),
+			shouldError:        true,
 		},
 		{
-			name:        "ipnet entry encompassing the V4 joinSubnet value",
-			cidrList:    ovntest.MustParseIPNets("100.0.0.0/8"),
-			shouldError: true,
+			name:               "ipnet entry encompassing the V4 joinSubnet value",
+			cidrList:           ovntest.MustParseIPNets("100.0.0.0/8"),
+			joinSubnetCIDRList: ovntest.MustParseIPNets("100.64.0.0/16", "fd98::/64"),
+			shouldError:        true,
 		},
 		{
-			name:        "ipnet entry encompassing the V6 joinSubnet value",
-			cidrList:    ovntest.MustParseIPNets("fd98::/63"),
-			shouldError: true,
+			name:               "ipnet entry encompassing the V6 joinSubnet value",
+			cidrList:           ovntest.MustParseIPNets("fd98::/63"),
+			joinSubnetCIDRList: ovntest.MustParseIPNets("100.64.0.0/16", "fd98::/64"),
+			shouldError:        true,
 		},
 	}
 
 	for _, tc := range tests {
 		allSubnets := newConfigSubnets()
-		allSubnets.appendConst(configSubnetJoin, V4JoinSubnet)
-		allSubnets.appendConst(configSubnetJoin, V6JoinSubnet)
+		for _, joinSubnet := range tc.joinSubnetCIDRList {
+			allSubnets.append(configSubnetJoin, joinSubnet)
+		}
 		for _, subnet := range tc.cidrList {
 			allSubnets.append(configSubnetCluster, subnet)
 		}
