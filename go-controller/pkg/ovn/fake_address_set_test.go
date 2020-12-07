@@ -229,6 +229,11 @@ func (as *fakeAddressSets) AddIPs(ips []net.IP) error {
 	return nil
 }
 
+func (as *fakeAddressSets) SetIPs(ips []net.IP) error {
+	// NOOP
+	return nil
+}
+
 func (as *fakeAddressSets) DeleteIPs(ips []net.IP) error {
 	var err error
 	as.Lock()

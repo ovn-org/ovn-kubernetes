@@ -34,8 +34,8 @@ db_part_of_cluster() {
   echo "Found ${pod} ip: $init_ip"
   init_ip=$(bracketify $init_ip)
   target=$(ovn-${db}ctl --timeout=5 --db=${transport}:${init_ip}:${port} ${ovndb_ctl_ssl_opts} \
-               --data=bare --no-headings --columns=target list connection)
-  if [[ "${target}" != "p${transport}:${port}${ovn_raft_conn_ip_url_suffix}" ]]; then
+               --data=bare --no-headings --columns=target list connection 2>&1)
+  if [[ "x${target}" != "xp${transport}:${port}${ovn_raft_conn_ip_url_suffix}" ]]; then
     echo "Unable to check correct target ${target} "
     return 1
   fi
@@ -88,6 +88,14 @@ check_ovnkube_db_ep() {
 check_and_apply_ovnkube_db_ep() {
   local port=${1}
 
+  # return if ovn db service endpoint already exists
+  result=$(kubectl --server=${K8S_APISERVER} --token=${k8s_token} --certificate-authority=${K8S_CACERT} \
+      get ep -n ${ovn_kubernetes_namespace} ovnkube-db 2>&1)
+  test $? -eq 0 && return
+  if ! echo ${result} | grep -q "NotFound"; then
+      echo "Failed to find ovnkube-db endpoint: ${result}, Exiting..."
+      exit 12
+  fi
   # Get IPs of all ovnkube-db PODs
   ips=()
   for ((i = 0; i < ${replicas}; i++)); do
@@ -105,13 +113,6 @@ check_and_apply_ovnkube_db_ep() {
     # pod IP responds to the `ovsdb-client list-dbs` call before we set the endpoint. If they don't, retry several
     # times and then give up.
 
-    # Get the current set of ovnkube-db endpoints, if any
-    IFS=" " read -a old_ips <<<"$(kubectl --server=${K8S_APISERVER} --token=${k8s_token} --certificate-authority=${K8S_CACERT} \
-      get ep -n ${ovn_kubernetes_namespace} ovnkube-db -o=jsonpath='{range .subsets[0].addresses[*]}{.ip}{" "}')"
-    if [[ ${#old_ips[@]} -ne 0 ]]; then
-      return
-    fi
-
     for ip in ${ips[@]}; do
       wait_for_event attempts=10 check_ovnkube_db_ep ${ip} ${port}
     done
@@ -122,6 +123,23 @@ check_and_apply_ovnkube_db_ep() {
     echo "Exiting...."
     exit 10
   fi
+}
+
+change_election_timer_wait() {
+  local db=${1}
+  local election_timer=${2}
+  local result=""
+
+  while true; do
+    result=$(ovs-appctl -t ${OVN_RUNDIR}/ovn${db}_db.ctl cluster/change-election-timer ${database} ${election_timer} 2>&1)
+    test $? -eq 0 && break
+    echo "ovs-appctl: $result"
+    if ! echo $result|grep -q "change pending"; then
+      echo "Failed to set election timer ${election_timer}. Exiting..."
+      exit 11
+    fi
+    sleep 1
+  done
 }
 
 # election timer can only be at most doubled each time, and it can only be set on the leader
@@ -140,21 +158,13 @@ set_election_timer() {
   fi
 
   while [[ ${current_election_timer} != ${election_timer} ]]; do
-    max_electinon_timer=$((${current_election_timer} * 2))
-    if [[ ${election_timer} -le ${max_electinon_timer} ]]; then
-      ovs-appctl -t ${OVN_RUNDIR}/ovn${db}_db.ctl cluster/change-election-timer ${database} ${election_timer}
-      if [[ $? != 0 ]]; then
-        echo "Failed to set election timer ${election_timer}. Exiting..."
-        exit 11
-      fi
+    max_election_timer=$((${current_election_timer} * 2))
+    if [[ ${election_timer} -le ${max_election_timer} ]]; then
+      change_election_timer_wait $db $election_timer
       return 0
     else
-      ovs-appctl -t ${OVN_RUNDIR}/ovn${db}_db.ctl cluster/change-election-timer ${database} ${max_electinon_timer}
-      if [[ $? != 0 ]]; then
-        echo "Failed to set election timer ${max_election_timer}. Exiting..."
-        exit 11
-      fi
-      current_election_timer=${max_electinon_timer}
+      change_election_timer_wait $db $max_election_timer
+      current_election_timer=${max_election_timer}
     fi
   done
   return 0
@@ -273,7 +283,6 @@ ovsdb-raft() {
     ovn_raft_conn_ip_url_suffix=":[::]"
   fi
 
-  initial_raft_create=true
   if [[ "${initialize}" == "true" ]]; then
     # check to see if a cluster already exists. If it does, just join it.
     counter=0
@@ -289,7 +298,6 @@ ovsdb-raft() {
 
     if ${cluster_found}; then
       echo "Cluster already exists for DB: ${db}"
-      initial_raft_create=false
       run_as_ovs_user_if_needed \
       ${OVNCTL_PATH} run_${db}_ovsdb --no-monitor \
       --db-${db}-cluster-local-addr=$(bracketify ${ovn_db_host}) --db-${db}-cluster-remote-addr=${init_ip} \
@@ -310,6 +318,7 @@ ovsdb-raft() {
         --ovn-${db}-log="${ovn_loglevel_db}" &
       else
         echo "Cluster does not exist for DB: ${db}, waiting for ovnkube-db-0 pod to create it"
+        # all non pod-0 pods will be blocked here till connection is set
         wait_for_event cluster_exists ${db} ${port}
         run_as_ovs_user_if_needed \
         ${OVNCTL_PATH} run_${db}_ovsdb --no-monitor \
@@ -348,15 +357,22 @@ ovsdb-raft() {
   echo "=============== ${db}-ovsdb-raft ========== RUNNING"
 
   if [[ "${POD_NAME}" == "ovnkube-db-0" ]]; then
-    if ${initial_raft_create}; then
-      # set the election timer value before other servers join the cluster and it can
-      # only be set on the leader so we must do this in ovnkube-db-0 when it is still
-      # a single-node cluster
+    # post raft create work has to be done only once and in ovnkube-db-0 while it is still
+    # a single-node cluster, additional protection against the case when pod-0 isn't a leader
+    # is needed in the cases of sudden pod-0 initialization logic restarts
+    current_raft_role=$(ovs-appctl -t ${OVN_RUNDIR}/ovn${db}_db.ctl cluster/status ${database} 2>&1 | grep "^Role")
+    if [[ -z "${current_raft_role}" ]]; then
+      echo "Failed to get current raft role value. Exiting..."
+      exit 11
+    fi
+    if echo $current_raft_role | grep -q -i leader; then
+      # set the election timer value before other servers join the cluster
       set_election_timer ${db} ${election_timer}
       if [[ ${db} == "nb" ]]; then
         set_northd_probe_interval
       fi
       # set the connection and disable inactivity probe, this deletes the old connection if any
+      # this will unblock pod-1 and pod-2 waiters
       set_connection ${db} ${port}
     fi
   fi

@@ -2,7 +2,7 @@ package ovn
 
 import (
 	"github.com/urfave/cli/v2"
-	"k8s.io/klog"
+	"k8s.io/klog/v2"
 
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
 	ovntest "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/testing"

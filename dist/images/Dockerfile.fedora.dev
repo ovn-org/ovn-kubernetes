@@ -23,7 +23,7 @@
 # this image in any production environment.
 #
 
-FROM fedora:31
+FROM fedora:32
 
 USER root
 
@@ -38,7 +38,7 @@ ARG OVS_BRANCH=master
 #Install tools that is required for building ovs/ovn
 
 RUN dnf upgrade -y && dnf install --best --refresh -y --setopt=tsflags=nodocs \
-	PyYAML bind-utils procps-ng openssl numactl-libs firewalld-filesystem \
+	python3-pyyaml bind-utils procps-ng openssl numactl-libs firewalld-filesystem \
         libpcap hostname kubernetes-client python3-openvswitch python3-pyOpenSSL  \
         iptables iproute iputils strace socat\
         "kernel-devel-uname-r == $KERNEL_VERSION" \

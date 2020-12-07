@@ -107,8 +107,7 @@ func TestParseSubnetAnnotation(t *testing.T) {
 				ObjectMeta: metav1.ObjectMeta{
 					Name: "testNode",
 					Annotations: map[string]string{
-						"k8s.ovn.org/node-subnets":      "{\"default\":\"10.244.0.0/24\"}",
-						"k8s.ovn.org/node-join-subnets": "{\"default\":\"100.64.0.0/29\"}",
+						"k8s.ovn.org/node-subnets": "{\"default\":\"10.244.0.0/24\"}",
 					},
 				},
 			},
@@ -120,8 +119,7 @@ func TestParseSubnetAnnotation(t *testing.T) {
 				ObjectMeta: metav1.ObjectMeta{
 					Name: "testNode",
 					Annotations: map[string]string{
-						"k8s.ovn.org/node-subnets":      "{\"default\":\"10.244.0.0/24\"}",
-						"k8s.ovn.org/node-join-subnets": "{\"default\":\"100.64.0.0/29\"}",
+						"k8s.ovn.org/node-subnets": "{\"default\":\"10.244.0.0/24\"}",
 					},
 				},
 			},
@@ -133,8 +131,7 @@ func TestParseSubnetAnnotation(t *testing.T) {
 				ObjectMeta: metav1.ObjectMeta{
 					Name: "testNode",
 					Annotations: map[string]string{
-						"k8s.ovn.org/node-subnets":      "{\"default\": [\"10.244.0.0/24\", \"fd02:0:0:2::2895/64\"]}",
-						"k8s.ovn.org/node-join-subnets": "{\"default\": [\"100.64.0.0/29\", \"fd99::10/125\"]}",
+						"k8s.ovn.org/node-subnets": "{\"default\": [\"10.244.0.0/24\", \"fd02:0:0:2::2895/64\"]}",
 					},
 				},
 			},
@@ -147,8 +144,7 @@ func TestParseSubnetAnnotation(t *testing.T) {
 				ObjectMeta: metav1.ObjectMeta{
 					Name: "testNode",
 					Annotations: map[string]string{
-						"k8s.ovn.org/node-subnets":      "{\"default\": [\"10.244.0.0/24\", \"\"fd02:0:0:2::2895/64\"]}", //added the extra \" in front of fd02: to cause json.Unmarshal error
-						"k8s.ovn.org/node-join-subnets": "{\"default\": [\"100.64.0.0/29\", \"fd99::10/125\"]}",
+						"k8s.ovn.org/node-subnets": "{\"default\": [\"10.244.0.0/24\", \"\"fd02:0:0:2::2895/64\"]}", //added the extra \" in front of fd02: to cause json.Unmarshal error
 					},
 				},
 			},
@@ -161,8 +157,7 @@ func TestParseSubnetAnnotation(t *testing.T) {
 				ObjectMeta: metav1.ObjectMeta{
 					Name: "testNode",
 					Annotations: map[string]string{
-						"k8s.ovn.org/node-subnets":      "{}",
-						"k8s.ovn.org/node-join-subnets": "{\"default\": [\"100.64.0.0/29\", \"fd99::10/125\"]}",
+						"k8s.ovn.org/node-subnets": "{}",
 					},
 				},
 			},
@@ -277,8 +272,7 @@ func TestParseNodeHostSubnetAnnotation(t *testing.T) {
 				ObjectMeta: metav1.ObjectMeta{
 					Name: "testNode",
 					Annotations: map[string]string{
-						"k8s.ovn.org/node-subnets":      "{\"default\":\"10.244.0.0/24\"}",
-						"k8s.ovn.org/node-join-subnets": "{\"default\":\"100.64.0.0/29\"}",
+						"k8s.ovn.org/node-subnets": "{\"default\":\"10.244.0.0/24\"}",
 					},
 				},
 			},
@@ -287,100 +281,6 @@ func TestParseNodeHostSubnetAnnotation(t *testing.T) {
 	for i, tc := range tests {
 		t.Run(fmt.Sprintf("%d:%s", i, tc.desc), func(t *testing.T) {
 			res, err := ParseNodeHostSubnetAnnotation(&tc.inpNode)
-			t.Log(res, err)
-			if tc.errExp {
-				assert.NotNil(t, err)
-			} else {
-				assert.NotNil(t, res)
-			}
-		})
-	}
-}
-
-func TestCreateNodeJoinSubnetAnnotation(t *testing.T) {
-	tests := []struct {
-		desc            string
-		inpDefSubnetIps []*net.IPNet
-		outExp          map[string]interface{}
-		errExp          bool
-	}{
-		{
-			desc:            "success path, valid default subnets",
-			inpDefSubnetIps: ovntest.MustParseIPNets("192.168.1.12/24"),
-			outExp: map[string]interface{}{
-				"k8s.ovn.org/node-join-subnets": "{\"default\":\"192.168.1.12/24\"}",
-			},
-		},
-		{
-			desc: "success path, inpDefSubnetIps is nil",
-			outExp: map[string]interface{}{
-				"k8s.ovn.org/node-join-subnets": "{\"default\":[]}",
-			},
-		},
-	}
-	for i, tc := range tests {
-		t.Run(fmt.Sprintf("%d:%s", i, tc.desc), func(t *testing.T) {
-			res, err := CreateNodeJoinSubnetAnnotation(tc.inpDefSubnetIps)
-			t.Log(res, err)
-			if tc.errExp {
-				assert.NotNil(t, err)
-			} else {
-				assert.True(t, reflect.DeepEqual(res, tc.outExp))
-			}
-		})
-	}
-}
-
-func TestSetNodeJoinSubnetAnnotation(t *testing.T) {
-	fakeClient := fake.NewSimpleClientset(&v1.NodeList{})
-	k := &kube.Kube{KClient: fakeClient}
-	testAnnotator := kube.NewNodeAnnotator(k, &v1.Node{})
-
-	tests := []struct {
-		desc             string
-		inpNodeAnnotator kube.Annotator
-		inpDefSubnetIps  []*net.IPNet
-		errExp           bool
-	}{
-		{
-			desc:             "tests function coverage, success path",
-			inpNodeAnnotator: testAnnotator,
-			inpDefSubnetIps:  ovntest.MustParseIPNets("192.168.1.12/24"),
-		},
-	}
-	for i, tc := range tests {
-		t.Run(fmt.Sprintf("%d:%s", i, tc.desc), func(t *testing.T) {
-			err := SetNodeJoinSubnetAnnotation(tc.inpNodeAnnotator, tc.inpDefSubnetIps)
-			t.Log(err)
-			if tc.errExp {
-				assert.NotNil(t, err)
-			}
-		})
-	}
-}
-
-func TestParseNodeJoinSubnetAnnotation(t *testing.T) {
-	tests := []struct {
-		desc    string
-		inpNode v1.Node
-		errExp  bool
-	}{
-		{
-			desc: "tests function coverage, success path",
-			inpNode: v1.Node{
-				ObjectMeta: metav1.ObjectMeta{
-					Name: "testNode",
-					Annotations: map[string]string{
-						"k8s.ovn.org/node-subnets":      "{\"default\":\"10.244.0.0/24\"}",
-						"k8s.ovn.org/node-join-subnets": "{\"default\":\"100.64.0.0/29\"}",
-					},
-				},
-			},
-		},
-	}
-	for i, tc := range tests {
-		t.Run(fmt.Sprintf("%d:%s", i, tc.desc), func(t *testing.T) {
-			res, err := ParseNodeJoinSubnetAnnotation(&tc.inpNode)
 			t.Log(res, err)
 			if tc.errExp {
 				assert.NotNil(t, err)

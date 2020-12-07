@@ -4,7 +4,7 @@ import (
 	"fmt"
 
 	goovn "github.com/ebay/go-ovn"
-	"k8s.io/klog"
+	"k8s.io/klog/v2"
 )
 
 const (
@@ -18,6 +18,8 @@ const (
 
 // Get logical switch port by name
 func (mock *MockOVNClient) LSPGet(lsp string) (*goovn.LogicalSwitchPort, error) {
+	mock.mutex.Lock()
+	defer mock.mutex.Unlock()
 	var lspCache MockObjectCacheByName
 	var ok bool
 	if lspCache, ok = mock.cache[LogicalSwitchPortType]; !ok {

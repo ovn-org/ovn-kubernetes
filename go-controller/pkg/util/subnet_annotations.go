@@ -19,10 +19,6 @@ import (
 //       {
 //         "default": "10.130.0.0/23"
 //       }
-//     k8s.ovn.org/node-join-subnets: |
-//       {
-//         "default": "100.64.2.0/29"
-//       }
 //     k8s.ovn.org/node-local-nat-ip: |
 //       {
 //         "default": ["169.254.16.21", "fd99::10:21"]
@@ -38,16 +34,10 @@ import (
 //       {
 //         "default": ["10.130.0.0/23", "fd01:0:0:2::/64"]
 //       }
-//     k8s.ovn.org/node-join-subnets: |
-//       {
-//         "default": ["100.64.2.0/29", "fd99::10/125"]
-//       }
 
 const (
 	// ovnNodeSubnets is the constant string representing the node subnets annotation key
 	ovnNodeSubnets = "k8s.ovn.org/node-subnets"
-	// ovnNodeJoinSubnets is the constant string representing the node's join switch subnets annotation key
-	ovnNodeJoinSubnets = "k8s.ovn.org/node-join-subnets"
 	// ovnNodeLocalNatIP is the constant string representing the node management port's NAT IP
 	// used in the case of the shared gateway mode
 	ovnNodeLocalNatIP = "k8s.ovn.org/node-local-nat-ip"
@@ -143,24 +133,6 @@ func DeleteNodeHostSubnetAnnotation(nodeAnnotator kube.Annotator) {
 // on a node and returns the "default" host subnet.
 func ParseNodeHostSubnetAnnotation(node *kapi.Node) ([]*net.IPNet, error) {
 	return parseSubnetAnnotation(node, ovnNodeSubnets)
-}
-
-// CreateNodeJoinSubnetAnnotation creates a "k8s.ovn.org/node-join-subnets" annotation,
-// with a single "default" network, suitable for passing to kube.SetAnnotationsOnNode
-func CreateNodeJoinSubnetAnnotation(defaultSubnets []*net.IPNet) (map[string]interface{}, error) {
-	return createSubnetAnnotation(ovnNodeJoinSubnets, defaultSubnets)
-}
-
-// SetNodeJoinSubnetAnnotation sets a "k8s.ovn.org/node-join-subnets" annotation
-// using a kube.Annotator
-func SetNodeJoinSubnetAnnotation(nodeAnnotator kube.Annotator, defaultSubnets []*net.IPNet) error {
-	return setSubnetAnnotation(nodeAnnotator, ovnNodeJoinSubnets, defaultSubnets)
-}
-
-// ParseNodeJoinSubnetAnnotation parses the "k8s.ovn.org/node-join-subnets" annotation on
-// a node and returns the "default" join subnet.
-func ParseNodeJoinSubnetAnnotation(node *kapi.Node) ([]*net.IPNet, error) {
-	return parseSubnetAnnotation(node, ovnNodeJoinSubnets)
 }
 
 // CreateNodeLocalNatAnnotation creates a "k8s.ovn.org/node-local-nat-ip" annotation,

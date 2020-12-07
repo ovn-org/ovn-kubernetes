@@ -12,7 +12,7 @@ import (
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/vishvananda/netlink"
-	"k8s.io/klog"
+	"k8s.io/klog/v2"
 )
 
 var (
@@ -226,7 +226,7 @@ var metricOvsTcPolicy = prometheus.NewGauge(prometheus.GaugeOpts{
 var metricInterafceDriverName = prometheus.NewGaugeVec(prometheus.GaugeOpts{
 	Namespace: MetricOvsNamespace,
 	Subsystem: MetricOvsSubsystemVswitchd,
-	Name:      "interafce_driver_name",
+	Name:      "interface_driver_name",
 	Help: "A metric with a constant '1' value labeled by driver name that " +
 		"specifies the name of the device driver controlling the network interface"},
 	[]string{

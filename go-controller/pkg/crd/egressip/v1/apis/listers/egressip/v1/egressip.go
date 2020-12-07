@@ -26,10 +26,13 @@ import (
 )
 
 // EgressIPLister helps list EgressIPs.
+// All objects returned here must be treated as read-only.
 type EgressIPLister interface {
 	// List lists all EgressIPs in the indexer.
+	// Objects returned here must be treated as read-only.
 	List(selector labels.Selector) (ret []*v1.EgressIP, err error)
 	// Get retrieves the EgressIP from the index for a given name.
+	// Objects returned here must be treated as read-only.
 	Get(name string) (*v1.EgressIP, error)
 	EgressIPListerExpansion
 }

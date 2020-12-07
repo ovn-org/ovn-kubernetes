@@ -75,4 +75,16 @@ d9af11aa-37c3-4ea9-8ba3-a74843cc0f47
 		Expect(uuids[0]).To(Equal(`""`))
 		Expect(uuids[1]).To(Equal(`""`))
 	})
+
+	It("returns unquoted value if the elements themselves are quoted from ovsGet", func() {
+		fexec.AddFakeCmd(&ovntest.ExpectedCmd{
+			Cmd: "ovs-vsctl --timeout=30 --if-exists get Interface blah external-ids:iface-id",
+			Output: `"1234"
+`,
+		})
+
+		ifaceID, err := ovsGet("Interface", "blah", "external-ids", "iface-id")
+		Expect(err).NotTo(HaveOccurred())
+		Expect(ifaceID).To(Equal(`1234`))
+	})
 })
