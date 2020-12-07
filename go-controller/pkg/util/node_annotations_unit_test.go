@@ -188,22 +188,22 @@ func TestSetL3GatewayConfig(t *testing.T) {
 		inpNodeAnnotator       kube.Annotator
 		inputL3GwCfg           L3GatewayConfig
 		errExpected            bool
-		onRetArgsAnnotatorList []onCallReturnArgs
+		onRetArgsAnnotatorList []ovntest.TestifyMockHelper
 	}{
 		{
 			desc:             "success: empty L3GatewayConfig applied should pass",
 			inpNodeAnnotator: mockAnnotator,
 			inputL3GwCfg:     L3GatewayConfig{},
-			onRetArgsAnnotatorList: []onCallReturnArgs{
-				{"Set", []string{"string", "interface{}"}, []interface{}{nil}},
+			onRetArgsAnnotatorList: []ovntest.TestifyMockHelper{
+				{OnCallMethodName: "Set", OnCallMethodArgType: []string{"string", "interface{}"}, RetArgList: []interface{}{nil}},
 			},
 		},
 		{
 			desc:             "test error path when setting gateway annotation",
 			inpNodeAnnotator: mockAnnotator,
 			inputL3GwCfg:     L3GatewayConfig{},
-			onRetArgsAnnotatorList: []onCallReturnArgs{
-				{"Set", []string{"string", "interface{}"}, []interface{}{fmt.Errorf("mock error")}},
+			onRetArgsAnnotatorList: []ovntest.TestifyMockHelper{
+				{OnCallMethodName: "Set", OnCallMethodArgType: []string{"string", "interface{}"}, RetArgList: []interface{}{fmt.Errorf("mock error")}},
 			},
 		},
 		{
@@ -212,9 +212,9 @@ func TestSetL3GatewayConfig(t *testing.T) {
 			inputL3GwCfg: L3GatewayConfig{
 				ChassisID: " ",
 			},
-			onRetArgsAnnotatorList: []onCallReturnArgs{
-				{"Set", []string{"string", "interface{}"}, []interface{}{nil}},
-				{"Set", []string{"string", "interface{}"}, []interface{}{nil}},
+			onRetArgsAnnotatorList: []ovntest.TestifyMockHelper{
+				{OnCallMethodName: "Set", OnCallMethodArgType: []string{"string", "interface{}"}, RetArgList: []interface{}{nil}},
+				{OnCallMethodName: "Set", OnCallMethodArgType: []string{"string", "interface{}"}, RetArgList: []interface{}{nil}},
 			},
 		},
 		{
@@ -223,21 +223,21 @@ func TestSetL3GatewayConfig(t *testing.T) {
 			inputL3GwCfg: L3GatewayConfig{
 				ChassisID: "testid",
 			},
-			onRetArgsAnnotatorList: []onCallReturnArgs{
-				{"Set", []string{"string", "interface{}"}, []interface{}{nil}},
-				{"Set", []string{"string", "interface{}"}, []interface{}{fmt.Errorf("mock error")}},
+			onRetArgsAnnotatorList: []ovntest.TestifyMockHelper{
+				{OnCallMethodName: "Set", OnCallMethodArgType: []string{"string", "interface{}"}, RetArgList: []interface{}{nil}},
+				{OnCallMethodName: "Set", OnCallMethodArgType: []string{"string", "interface{}"}, RetArgList: []interface{}{fmt.Errorf("mock error")}},
 			},
 		},
 	}
 	for i, tc := range tests {
 		t.Run(fmt.Sprintf("%d:%s", i, tc.desc), func(t *testing.T) {
 			for _, item := range tc.onRetArgsAnnotatorList {
-				call := mockAnnotator.On(item.onCallMethodName)
-				for range item.onCallMethodArgType {
+				call := mockAnnotator.On(item.OnCallMethodName)
+				for range item.OnCallMethodArgType {
 					call.Arguments = append(call.Arguments, mock.Anything)
 				}
 
-				for _, e := range item.retArgList {
+				for _, e := range item.RetArgList {
 					call.ReturnArguments = append(call.ReturnArguments, e)
 				}
 				call.Once()

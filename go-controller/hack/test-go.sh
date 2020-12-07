@@ -22,26 +22,30 @@ function testrun {
     local otherargs="${@:3} "
     local args="-mod vendor"
     local ginkgoargs=
-
+    # enable go race detector
+    if [ ! -z "${RACE:-}" ]; then
+        args="-race "
+    fi
     if [[ "$USER" != root && " ${root_pkgs[@]} " =~ " $pkg " ]]; then
         testfile=$(mktemp --tmpdir ovn-test.XXXXXXXX)
         echo "sudo required for ${pkg}, compiling test to ${testfile}"
-        go test -covermode set -c "${pkg}" -o "${testfile}"
-        go_test="sudo ${testfile}"
+        if [[ ! -z "${RACE:-}" && "${pkg}" != "github.com/ovn-org/ovn-kubernetes/go-controller/hybrid-overlay/pkg/controller" ]]; then
+            go test -race -covermode atomic -c "${pkg}" -o "${testfile}"
+        else
+            go test -covermode set -c "${pkg}" -o "${testfile}"
+        fi
         args=""
+        go_test="sudo ${testfile}"
     fi
-
+    # set gomaxprocs to 1 in CI, because actions are run in containers and we don't know what cpu
+    # limits are being imposed
+    if [ -n "${CI}" ]; then
+        args="${args}-test.cpu 1 "
+    fi
     if [[ -n "$gingko_focus" ]]; then
         local ginkgoargs=${ginkgo_focus:-}
     fi
     local path=${pkg#github.com/ovn-org/ovn-kubernetes/go-controller}
-    # enable go race detector
-    if [ ! -z "${RACE:-}" ]; then
-    # FIXME race detector fails with hybrid-overlay tests
-        if [[ "${pkg}" != github.com/ovn-org/ovn-kubernetes/go-controller/hybrid-overlay/pkg/controller ]]; then
-            args="-race "
-        fi
-    fi
     # coverage is incompatible with the race detector
     if [ ! -z "${COVERALLS:-}" ]; then
         args="-test.coverprofile=${idx}.coverprofile "

@@ -11,7 +11,6 @@ import (
 	netlink_mocks "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/testing/mocks/github.com/vishvananda/netlink"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util/mocks"
 	"github.com/stretchr/testify/assert"
-	"github.com/stretchr/testify/mock"
 	"github.com/vishvananda/netlink"
 )
 
@@ -51,47 +50,38 @@ func TestLinkSetUp(t *testing.T) {
 		desc                     string
 		input                    string
 		errExp                   bool
-		onRetArgsNetLinkLibOpers []onCallReturnArgs
+		onRetArgsNetLinkLibOpers []ovntest.TestifyMockHelper
 	}{
 		{
 			desc:   "fails to look up link",
 			input:  "invalidIfaceName",
 			errExp: true,
-			onRetArgsNetLinkLibOpers: []onCallReturnArgs{
-				{"LinkByName", []string{"string"}, []interface{}{nil, fmt.Errorf("mock error")}},
+			onRetArgsNetLinkLibOpers: []ovntest.TestifyMockHelper{
+				{OnCallMethodName: "LinkByName", OnCallMethodArgType: []string{"string"}, RetArgList: []interface{}{nil, fmt.Errorf("mock error")}},
 			},
 		},
 		{
 			desc:   "fails to set the link",
 			input:  "testIfaceName",
 			errExp: true,
-			onRetArgsNetLinkLibOpers: []onCallReturnArgs{
-				{"LinkByName", []string{"string"}, []interface{}{mockLink, nil}},
-				{"LinkSetUp", []string{"*mocks.Link"}, []interface{}{fmt.Errorf("mock error")}},
+			onRetArgsNetLinkLibOpers: []ovntest.TestifyMockHelper{
+				{OnCallMethodName: "LinkByName", OnCallMethodArgType: []string{"string"}, RetArgList: []interface{}{mockLink, nil}},
+				{OnCallMethodName: "LinkSetUp", OnCallMethodArgType: []string{"*mocks.Link"}, RetArgList: []interface{}{fmt.Errorf("mock error")}},
 			},
 		},
 		{
-			desc:  "sets up the link successfully",
-			input: "testIfaceName",
-			onRetArgsNetLinkLibOpers: []onCallReturnArgs{
-				{"LinkByName", []string{"string"}, []interface{}{mockLink, nil}},
-				{"LinkSetUp", []string{"*mocks.Link"}, []interface{}{nil}},
+			desc:   "sets up the link successfully",
+			input:  "testIfaceName",
+			errExp: false,
+			onRetArgsNetLinkLibOpers: []ovntest.TestifyMockHelper{
+				{OnCallMethodName: "LinkByName", OnCallMethodArgType: []string{"string"}, RetArgList: []interface{}{mockLink, nil}},
+				{OnCallMethodName: "LinkSetUp", OnCallMethodArgType: []string{"*mocks.Link"}, RetArgList: []interface{}{nil}},
 			},
 		},
 	}
 	for i, tc := range tests {
 		t.Run(fmt.Sprintf("%d:%s", i, tc.desc), func(t *testing.T) {
-
-			for _, item := range tc.onRetArgsNetLinkLibOpers {
-				call := mockNetLinkOps.On(item.onCallMethodName)
-				for _, arg := range item.onCallMethodArgType {
-					call.Arguments = append(call.Arguments, mock.AnythingOfType(arg))
-				}
-				for _, ret := range item.retArgList {
-					call.ReturnArguments = append(call.ReturnArguments, ret)
-				}
-				call.Once()
-			}
+			ovntest.ProcessMockFnList(&mockNetLinkOps.Mock, tc.onRetArgsNetLinkLibOpers)
 			res, err := LinkSetUp(tc.input)
 			t.Log(res, err)
 			if tc.errExp {
@@ -114,29 +104,29 @@ func TestLinkAddrFlush(t *testing.T) {
 		desc                     string
 		input                    netlink.Link
 		errExp                   bool
-		onRetArgsNetLinkLibOpers []onCallReturnArgs
-		onRetArgsLinkIfaceOpers  []onCallReturnArgs
+		onRetArgsNetLinkLibOpers []ovntest.TestifyMockHelper
+		onRetArgsLinkIfaceOpers  []ovntest.TestifyMockHelper
 	}{
 		{
 			desc:   "fail to list addresses for link",
 			input:  mockLink,
 			errExp: true,
-			onRetArgsNetLinkLibOpers: []onCallReturnArgs{
-				{"AddrList", []string{"*mocks.Link", "int"}, []interface{}{nil, fmt.Errorf("mock error")}},
+			onRetArgsNetLinkLibOpers: []ovntest.TestifyMockHelper{
+				{OnCallMethodName: "AddrList", OnCallMethodArgType: []string{"*mocks.Link", "int"}, RetArgList: []interface{}{nil, fmt.Errorf("mock error")}},
 			},
-			onRetArgsLinkIfaceOpers: []onCallReturnArgs{
-				{"Attrs", []string{}, []interface{}{&netlink.LinkAttrs{Name: "testIfaceName"}}},
+			onRetArgsLinkIfaceOpers: []ovntest.TestifyMockHelper{
+				{OnCallMethodName: "Attrs", OnCallMethodArgType: []string{}, RetArgList: []interface{}{&netlink.LinkAttrs{Name: "testIfaceName"}}},
 			},
 		},
 		{
 			desc:   "fail to delete addresses on link",
 			input:  mockLink,
 			errExp: true,
-			onRetArgsNetLinkLibOpers: []onCallReturnArgs{
+			onRetArgsNetLinkLibOpers: []ovntest.TestifyMockHelper{
 				{
-					"AddrList",
-					[]string{"*mocks.Link", "int"},
-					[]interface{}{
+					OnCallMethodName:    "AddrList",
+					OnCallMethodArgType: []string{"*mocks.Link", "int"},
+					RetArgList: []interface{}{
 						[]netlink.Addr{
 							{
 								IPNet: ovntest.MustParseIPNet("192.168.1.15/24"),
@@ -145,20 +135,20 @@ func TestLinkAddrFlush(t *testing.T) {
 						nil,
 					},
 				},
-				{"AddrDel", []string{"*mocks.Link", "*netlink.Addr"}, []interface{}{fmt.Errorf("mock error")}},
+				{OnCallMethodName: "AddrDel", OnCallMethodArgType: []string{"*mocks.Link", "*netlink.Addr"}, RetArgList: []interface{}{fmt.Errorf("mock error")}},
 			},
-			onRetArgsLinkIfaceOpers: []onCallReturnArgs{
-				{"Attrs", []string{}, []interface{}{&netlink.LinkAttrs{Name: "testIfaceName"}}},
+			onRetArgsLinkIfaceOpers: []ovntest.TestifyMockHelper{
+				{OnCallMethodName: "Attrs", OnCallMethodArgType: []string{}, RetArgList: []interface{}{&netlink.LinkAttrs{Name: "testIfaceName"}}},
 			},
 		},
 		{
 			desc:  "Link address flushed successfully",
 			input: mockLink,
-			onRetArgsNetLinkLibOpers: []onCallReturnArgs{
+			onRetArgsNetLinkLibOpers: []ovntest.TestifyMockHelper{
 				{
-					"AddrList",
-					[]string{"*mocks.Link", "int"},
-					[]interface{}{
+					OnCallMethodName:    "AddrList",
+					OnCallMethodArgType: []string{"*mocks.Link", "int"},
+					RetArgList: []interface{}{
 						[]netlink.Addr{
 							{
 								IPNet: ovntest.MustParseIPNet("192.168.1.15/24"),
@@ -167,17 +157,17 @@ func TestLinkAddrFlush(t *testing.T) {
 						nil,
 					},
 				},
-				{"AddrDel", []string{"*mocks.Link", "*netlink.Addr"}, []interface{}{nil}},
+				{OnCallMethodName: "AddrDel", OnCallMethodArgType: []string{"*mocks.Link", "*netlink.Addr"}, RetArgList: []interface{}{nil}},
 			},
 		},
 		{
 			desc:  "IPv6 link-local address is not flushed",
 			input: mockLink,
-			onRetArgsNetLinkLibOpers: []onCallReturnArgs{
+			onRetArgsNetLinkLibOpers: []ovntest.TestifyMockHelper{
 				{
-					"AddrList",
-					[]string{"*mocks.Link", "int"},
-					[]interface{}{
+					OnCallMethodName:    "AddrList",
+					OnCallMethodArgType: []string{"*mocks.Link", "int"},
+					RetArgList: []interface{}{
 						[]netlink.Addr{
 							{
 								IPNet: ovntest.MustParseIPNet("fe80::1234/64"),
@@ -191,28 +181,8 @@ func TestLinkAddrFlush(t *testing.T) {
 	}
 	for i, tc := range tests {
 		t.Run(fmt.Sprintf("%d:%s", i, tc.desc), func(t *testing.T) {
-
-			for _, item := range tc.onRetArgsNetLinkLibOpers {
-				call := mockNetLinkOps.On(item.onCallMethodName)
-				for _, arg := range item.onCallMethodArgType {
-					call.Arguments = append(call.Arguments, mock.AnythingOfType(arg))
-				}
-				for _, ret := range item.retArgList {
-					call.ReturnArguments = append(call.ReturnArguments, ret)
-				}
-				call.Once()
-			}
-
-			for _, item := range tc.onRetArgsLinkIfaceOpers {
-				call := mockLink.On(item.onCallMethodName)
-				for _, arg := range item.onCallMethodArgType {
-					call.Arguments = append(call.Arguments, mock.AnythingOfType(arg))
-				}
-				for _, ret := range item.retArgList {
-					call.ReturnArguments = append(call.ReturnArguments, ret)
-				}
-				call.Once()
-			}
+			ovntest.ProcessMockFnList(&mockNetLinkOps.Mock, tc.onRetArgsNetLinkLibOpers)
+			ovntest.ProcessMockFnList(&mockLink.Mock, tc.onRetArgsLinkIfaceOpers)
 			err := LinkAddrFlush(tc.input)
 			t.Log(err)
 			if tc.errExp {
@@ -237,30 +207,30 @@ func TestLinkAddrExist(t *testing.T) {
 		inputLink                netlink.Link
 		inputAddrToMatch         *net.IPNet
 		errExp                   bool
-		onRetArgsNetLinkLibOpers []onCallReturnArgs
-		onRetArgsLinkIfaceOpers  []onCallReturnArgs
+		onRetArgsNetLinkLibOpers []ovntest.TestifyMockHelper
+		onRetArgsLinkIfaceOpers  []ovntest.TestifyMockHelper
 	}{
 		{
 			desc:             "AddrList call returns error for given link",
 			inputLink:        mockLink,
 			inputAddrToMatch: ovntest.MustParseIPNet("192.168.1.15/24"),
 			errExp:           true,
-			onRetArgsNetLinkLibOpers: []onCallReturnArgs{
-				{"AddrList", []string{"*mocks.Link", "int"}, []interface{}{nil, fmt.Errorf("mock error")}},
+			onRetArgsNetLinkLibOpers: []ovntest.TestifyMockHelper{
+				{OnCallMethodName: "AddrList", OnCallMethodArgType: []string{"*mocks.Link", "int"}, RetArgList: []interface{}{nil, fmt.Errorf("mock error")}},
 			},
-			onRetArgsLinkIfaceOpers: []onCallReturnArgs{
-				{"Attrs", []string{}, []interface{}{&netlink.LinkAttrs{Name: "testIfaceName"}}},
+			onRetArgsLinkIfaceOpers: []ovntest.TestifyMockHelper{
+				{OnCallMethodName: "Attrs", OnCallMethodArgType: []string{}, RetArgList: []interface{}{&netlink.LinkAttrs{Name: "testIfaceName"}}},
 			},
 		},
 		{
 			desc:             "Given address is present on the link",
 			inputLink:        mockLink,
 			inputAddrToMatch: ovntest.MustParseIPNet("192.168.1.15/24"),
-			onRetArgsNetLinkLibOpers: []onCallReturnArgs{
+			onRetArgsNetLinkLibOpers: []ovntest.TestifyMockHelper{
 				{
-					"AddrList",
-					[]string{"*mocks.Link", "int"},
-					[]interface{}{
+					OnCallMethodName:    "AddrList",
+					OnCallMethodArgType: []string{"*mocks.Link", "int"},
+					RetArgList: []interface{}{
 						[]netlink.Addr{
 							{
 								IPNet: ovntest.MustParseIPNet("192.168.1.15/24"),
@@ -275,8 +245,8 @@ func TestLinkAddrExist(t *testing.T) {
 			desc:             "Given address is NOT present on the link",
 			inputLink:        mockLink,
 			inputAddrToMatch: ovntest.MustParseIPNet("192.168.1.15/24"),
-			onRetArgsNetLinkLibOpers: []onCallReturnArgs{
-				{"AddrList", []string{"*mocks.Link", "int"}, []interface{}{nil, nil}},
+			onRetArgsNetLinkLibOpers: []ovntest.TestifyMockHelper{
+				{OnCallMethodName: "AddrList", OnCallMethodArgType: []string{"*mocks.Link", "int"}, RetArgList: []interface{}{nil, nil}},
 			},
 		},
 	}
@@ -284,27 +254,8 @@ func TestLinkAddrExist(t *testing.T) {
 	for i, tc := range tests {
 		t.Run(fmt.Sprintf("%d:%s", i, tc.desc), func(t *testing.T) {
 
-			for _, item := range tc.onRetArgsNetLinkLibOpers {
-				call := mockNetLinkOps.On(item.onCallMethodName)
-				for _, arg := range item.onCallMethodArgType {
-					call.Arguments = append(call.Arguments, mock.AnythingOfType(arg))
-				}
-				for _, ret := range item.retArgList {
-					call.ReturnArguments = append(call.ReturnArguments, ret)
-				}
-				call.Once()
-			}
-
-			for _, item := range tc.onRetArgsLinkIfaceOpers {
-				call := mockLink.On(item.onCallMethodName)
-				for _, arg := range item.onCallMethodArgType {
-					call.Arguments = append(call.Arguments, mock.AnythingOfType(arg))
-				}
-				for _, ret := range item.retArgList {
-					call.ReturnArguments = append(call.ReturnArguments, ret)
-				}
-				call.Once()
-			}
+			ovntest.ProcessMockFnList(&mockNetLinkOps.Mock, tc.onRetArgsNetLinkLibOpers)
+			ovntest.ProcessMockFnList(&mockLink.Mock, tc.onRetArgsLinkIfaceOpers)
 			flag, err := LinkAddrExist(tc.inputLink, tc.inputAddrToMatch)
 			t.Log(flag, err)
 			if tc.errExp {
@@ -329,19 +280,19 @@ func TestLinkAddrAdd(t *testing.T) {
 		inputLink                netlink.Link
 		inputNewAddr             *net.IPNet
 		errExp                   bool
-		onRetArgsNetLinkLibOpers []onCallReturnArgs
-		onRetArgsLinkIfaceOpers  []onCallReturnArgs
+		onRetArgsNetLinkLibOpers []ovntest.TestifyMockHelper
+		onRetArgsLinkIfaceOpers  []ovntest.TestifyMockHelper
 	}{
 		{
 			desc:         "setting <nil> address on link errors out",
 			inputLink:    mockLink,
 			inputNewAddr: nil,
 			errExp:       true,
-			onRetArgsNetLinkLibOpers: []onCallReturnArgs{
-				{"AddrAdd", []string{"*mocks.Link", "*netlink.Addr"}, []interface{}{fmt.Errorf("mock error")}},
+			onRetArgsNetLinkLibOpers: []ovntest.TestifyMockHelper{
+				{OnCallMethodName: "AddrAdd", OnCallMethodArgType: []string{"*mocks.Link", "*netlink.Addr"}, RetArgList: []interface{}{fmt.Errorf("mock error")}},
 			},
-			onRetArgsLinkIfaceOpers: []onCallReturnArgs{
-				{"Attrs", []string{}, []interface{}{&netlink.LinkAttrs{Name: "testIfaceName"}}},
+			onRetArgsLinkIfaceOpers: []ovntest.TestifyMockHelper{
+				{OnCallMethodName: "Attrs", OnCallMethodArgType: []string{}, RetArgList: []interface{}{&netlink.LinkAttrs{Name: "testIfaceName"}}},
 			},
 		},
 		{
@@ -349,46 +300,27 @@ func TestLinkAddrAdd(t *testing.T) {
 			inputLink:    mockLink,
 			inputNewAddr: ovntest.MustParseIPNet("192.168.1.15/24"),
 			errExp:       true,
-			onRetArgsNetLinkLibOpers: []onCallReturnArgs{
-				{"AddrAdd", []string{"*mocks.Link", "*netlink.Addr"}, []interface{}{fmt.Errorf("mock error")}},
+			onRetArgsNetLinkLibOpers: []ovntest.TestifyMockHelper{
+				{OnCallMethodName: "AddrAdd", OnCallMethodArgType: []string{"*mocks.Link", "*netlink.Addr"}, RetArgList: []interface{}{fmt.Errorf("mock error")}},
 			},
-			onRetArgsLinkIfaceOpers: []onCallReturnArgs{
-				{"Attrs", []string{}, []interface{}{&netlink.LinkAttrs{Name: "testIfaceName"}}},
+			onRetArgsLinkIfaceOpers: []ovntest.TestifyMockHelper{
+				{OnCallMethodName: "Attrs", OnCallMethodArgType: []string{}, RetArgList: []interface{}{&netlink.LinkAttrs{Name: "testIfaceName"}}},
 			},
 		},
 		{
 			desc:         "setting new address on link succeeds",
 			inputLink:    mockLink,
 			inputNewAddr: ovntest.MustParseIPNet("192.168.1.15/24"),
-			onRetArgsNetLinkLibOpers: []onCallReturnArgs{
-				{"AddrAdd", []string{"*mocks.Link", "*netlink.Addr"}, []interface{}{nil}},
+			onRetArgsNetLinkLibOpers: []ovntest.TestifyMockHelper{
+				{OnCallMethodName: "AddrAdd", OnCallMethodArgType: []string{"*mocks.Link", "*netlink.Addr"}, RetArgList: []interface{}{nil}},
 			},
 		},
 	}
 	for i, tc := range tests {
 		t.Run(fmt.Sprintf("%d:%s", i, tc.desc), func(t *testing.T) {
 
-			for _, item := range tc.onRetArgsNetLinkLibOpers {
-				call := mockNetLinkOps.On(item.onCallMethodName)
-				for _, arg := range item.onCallMethodArgType {
-					call.Arguments = append(call.Arguments, mock.AnythingOfType(arg))
-				}
-				for _, ret := range item.retArgList {
-					call.ReturnArguments = append(call.ReturnArguments, ret)
-				}
-				call.Once()
-			}
-
-			for _, item := range tc.onRetArgsLinkIfaceOpers {
-				call := mockLink.On(item.onCallMethodName)
-				for _, arg := range item.onCallMethodArgType {
-					call.Arguments = append(call.Arguments, mock.AnythingOfType(arg))
-				}
-				for _, ret := range item.retArgList {
-					call.ReturnArguments = append(call.ReturnArguments, ret)
-				}
-				call.Once()
-			}
+			ovntest.ProcessMockFnList(&mockNetLinkOps.Mock, tc.onRetArgsNetLinkLibOpers)
+			ovntest.ProcessMockFnList(&mockLink.Mock, tc.onRetArgsLinkIfaceOpers)
 			err := LinkAddrAdd(tc.inputLink, tc.inputNewAddr)
 			t.Log(err)
 			if tc.errExp {
@@ -413,26 +345,26 @@ func TestLinkRoutesDel(t *testing.T) {
 		inputLink                netlink.Link
 		inputSubnets             []*net.IPNet
 		errExp                   bool
-		onRetArgsNetLinkLibOpers []onCallReturnArgs
-		onRetArgsLinkIfaceOpers  []onCallReturnArgs
+		onRetArgsNetLinkLibOpers []ovntest.TestifyMockHelper
+		onRetArgsLinkIfaceOpers  []ovntest.TestifyMockHelper
 	}{
 		{
 			desc:      "fails to get routes for link",
 			inputLink: mockLink,
 			errExp:    true,
-			onRetArgsNetLinkLibOpers: []onCallReturnArgs{
-				{"RouteList", []string{"*mocks.Link", "int"}, []interface{}{[]netlink.Route{}, fmt.Errorf("mock error")}},
+			onRetArgsNetLinkLibOpers: []ovntest.TestifyMockHelper{
+				{OnCallMethodName: "RouteList", OnCallMethodArgType: []string{"*mocks.Link", "int"}, RetArgList: []interface{}{[]netlink.Route{}, fmt.Errorf("mock error")}},
 			},
-			onRetArgsLinkIfaceOpers: []onCallReturnArgs{
-				{"Attrs", []string{}, []interface{}{&netlink.LinkAttrs{Name: "testIfaceName"}}},
+			onRetArgsLinkIfaceOpers: []ovntest.TestifyMockHelper{
+				{OnCallMethodName: "Attrs", OnCallMethodArgType: []string{}, RetArgList: []interface{}{&netlink.LinkAttrs{Name: "testIfaceName"}}},
 			},
 		},
 		{
 			desc:         "subnet input is nil and error returned is nil",
 			inputLink:    mockLink,
 			inputSubnets: nil,
-			onRetArgsNetLinkLibOpers: []onCallReturnArgs{
-				{"RouteList", []string{"*mocks.Link", "int"}, []interface{}{[]netlink.Route{}, nil}},
+			onRetArgsNetLinkLibOpers: []ovntest.TestifyMockHelper{
+				{OnCallMethodName: "RouteList", OnCallMethodArgType: []string{"*mocks.Link", "int"}, RetArgList: []interface{}{[]netlink.Route{}, nil}},
 			},
 		},
 		{
@@ -440,11 +372,11 @@ func TestLinkRoutesDel(t *testing.T) {
 			inputLink:    mockLink,
 			inputSubnets: ovntest.MustParseIPNets("10.18.20.0/24", "192.168.1.0/24"),
 			errExp:       true,
-			onRetArgsNetLinkLibOpers: []onCallReturnArgs{
+			onRetArgsNetLinkLibOpers: []ovntest.TestifyMockHelper{
 				{
-					"RouteList",
-					[]string{"*mocks.Link", "int"},
-					[]interface{}{
+					OnCallMethodName:    "RouteList",
+					OnCallMethodArgType: []string{"*mocks.Link", "int"},
+					RetArgList: []interface{}{
 						[]netlink.Route{
 							{Dst: ovntest.MustParseIPNet("192.168.1.0/24")},
 						},
@@ -452,22 +384,22 @@ func TestLinkRoutesDel(t *testing.T) {
 					},
 				},
 				{
-					"RouteDel", []string{"*netlink.Route"}, []interface{}{fmt.Errorf("mock error")},
+					OnCallMethodName: "RouteDel", OnCallMethodArgType: []string{"*netlink.Route"}, RetArgList: []interface{}{fmt.Errorf("mock error")},
 				},
 			},
-			onRetArgsLinkIfaceOpers: []onCallReturnArgs{
-				{"Attrs", []string{}, []interface{}{&netlink.LinkAttrs{Name: "testIfaceName"}}},
+			onRetArgsLinkIfaceOpers: []ovntest.TestifyMockHelper{
+				{OnCallMethodName: "Attrs", OnCallMethodArgType: []string{}, RetArgList: []interface{}{&netlink.LinkAttrs{Name: "testIfaceName"}}},
 			},
 		},
 		{
 			desc:         "route delete succeeds",
 			inputLink:    mockLink,
 			inputSubnets: ovntest.MustParseIPNets("10.18.20.0/24", "192.168.1.0/24"),
-			onRetArgsNetLinkLibOpers: []onCallReturnArgs{
+			onRetArgsNetLinkLibOpers: []ovntest.TestifyMockHelper{
 				{
-					"RouteList",
-					[]string{"*mocks.Link", "int"},
-					[]interface{}{
+					OnCallMethodName:    "RouteList",
+					OnCallMethodArgType: []string{"*mocks.Link", "int"},
+					RetArgList: []interface{}{
 						[]netlink.Route{
 							{Dst: ovntest.MustParseIPNet("192.168.1.0/24")},
 						},
@@ -475,7 +407,7 @@ func TestLinkRoutesDel(t *testing.T) {
 					},
 				},
 				{
-					"RouteDel", []string{"*netlink.Route"}, []interface{}{nil},
+					OnCallMethodName: "RouteDel", OnCallMethodArgType: []string{"*netlink.Route"}, RetArgList: []interface{}{nil},
 				},
 			},
 		},
@@ -483,27 +415,8 @@ func TestLinkRoutesDel(t *testing.T) {
 	for i, tc := range tests {
 		t.Run(fmt.Sprintf("%d:%s", i, tc.desc), func(t *testing.T) {
 
-			for _, item := range tc.onRetArgsNetLinkLibOpers {
-				call := mockNetLinkOps.On(item.onCallMethodName)
-				for _, arg := range item.onCallMethodArgType {
-					call.Arguments = append(call.Arguments, mock.AnythingOfType(arg))
-				}
-				for _, ret := range item.retArgList {
-					call.ReturnArguments = append(call.ReturnArguments, ret)
-				}
-				call.Once()
-			}
-
-			for _, item := range tc.onRetArgsLinkIfaceOpers {
-				call := mockLink.On(item.onCallMethodName)
-				for _, arg := range item.onCallMethodArgType {
-					call.Arguments = append(call.Arguments, mock.AnythingOfType(arg))
-				}
-				for _, ret := range item.retArgList {
-					call.ReturnArguments = append(call.ReturnArguments, ret)
-				}
-				call.Once()
-			}
+			ovntest.ProcessMockFnList(&mockNetLinkOps.Mock, tc.onRetArgsNetLinkLibOpers)
+			ovntest.ProcessMockFnList(&mockLink.Mock, tc.onRetArgsLinkIfaceOpers)
 			err := LinkRoutesDel(tc.inputLink, tc.inputSubnets)
 			t.Log(err)
 			if tc.errExp {
@@ -529,8 +442,8 @@ func TestLinkRoutesAdd(t *testing.T) {
 		inputGwIP                net.IP
 		inputSubnets             []*net.IPNet
 		errExp                   bool
-		onRetArgsNetLinkLibOpers []onCallReturnArgs
-		onRetArgsLinkIfaceOpers  []onCallReturnArgs
+		onRetArgsNetLinkLibOpers []ovntest.TestifyMockHelper
+		onRetArgsLinkIfaceOpers  []ovntest.TestifyMockHelper
 	}{
 		{
 			desc:         "Route add fails",
@@ -538,11 +451,11 @@ func TestLinkRoutesAdd(t *testing.T) {
 			inputGwIP:    ovntest.MustParseIP("192.168.0.1"),
 			inputSubnets: ovntest.MustParseIPNets("10.18.20.0/24", "192.168.0.0/24"),
 			errExp:       true,
-			onRetArgsNetLinkLibOpers: []onCallReturnArgs{
-				{"RouteAdd", []string{"*netlink.Route"}, []interface{}{fmt.Errorf("mock error")}},
+			onRetArgsNetLinkLibOpers: []ovntest.TestifyMockHelper{
+				{OnCallMethodName: "RouteAdd", OnCallMethodArgType: []string{"*netlink.Route"}, RetArgList: []interface{}{fmt.Errorf("mock error")}},
 			},
-			onRetArgsLinkIfaceOpers: []onCallReturnArgs{
-				{"Attrs", []string{}, []interface{}{&netlink.LinkAttrs{Name: "testIfaceName", Index: 1}}},
+			onRetArgsLinkIfaceOpers: []ovntest.TestifyMockHelper{
+				{OnCallMethodName: "Attrs", OnCallMethodArgType: []string{}, RetArgList: []interface{}{&netlink.LinkAttrs{Name: "testIfaceName", Index: 1}}},
 			},
 		},
 		{
@@ -550,11 +463,11 @@ func TestLinkRoutesAdd(t *testing.T) {
 			inputLink:    mockLink,
 			inputGwIP:    ovntest.MustParseIP("192.168.0.1"),
 			inputSubnets: ovntest.MustParseIPNets("192.168.0.0/24"),
-			onRetArgsNetLinkLibOpers: []onCallReturnArgs{
-				{"RouteAdd", []string{"*netlink.Route"}, []interface{}{nil}},
+			onRetArgsNetLinkLibOpers: []ovntest.TestifyMockHelper{
+				{OnCallMethodName: "RouteAdd", OnCallMethodArgType: []string{"*netlink.Route"}, RetArgList: []interface{}{nil}},
 			},
-			onRetArgsLinkIfaceOpers: []onCallReturnArgs{
-				{"Attrs", []string{}, []interface{}{&netlink.LinkAttrs{Name: "testIfaceName", Index: 1}}},
+			onRetArgsLinkIfaceOpers: []ovntest.TestifyMockHelper{
+				{OnCallMethodName: "Attrs", OnCallMethodArgType: []string{}, RetArgList: []interface{}{&netlink.LinkAttrs{Name: "testIfaceName", Index: 1}}},
 			},
 		},
 		{
@@ -564,27 +477,8 @@ func TestLinkRoutesAdd(t *testing.T) {
 	for i, tc := range tests {
 		t.Run(fmt.Sprintf("%d:%s", i, tc.desc), func(t *testing.T) {
 
-			for _, item := range tc.onRetArgsNetLinkLibOpers {
-				call := mockNetLinkOps.On(item.onCallMethodName)
-				for _, arg := range item.onCallMethodArgType {
-					call.Arguments = append(call.Arguments, mock.AnythingOfType(arg))
-				}
-				for _, ret := range item.retArgList {
-					call.ReturnArguments = append(call.ReturnArguments, ret)
-				}
-				call.Once()
-			}
-
-			for _, item := range tc.onRetArgsLinkIfaceOpers {
-				call := mockLink.On(item.onCallMethodName)
-				for _, arg := range item.onCallMethodArgType {
-					call.Arguments = append(call.Arguments, mock.AnythingOfType(arg))
-				}
-				for _, ret := range item.retArgList {
-					call.ReturnArguments = append(call.ReturnArguments, ret)
-				}
-				call.Once()
-			}
+			ovntest.ProcessMockFnList(&mockNetLinkOps.Mock, tc.onRetArgsNetLinkLibOpers)
+			ovntest.ProcessMockFnList(&mockLink.Mock, tc.onRetArgsLinkIfaceOpers)
 
 			err := LinkRoutesAdd(tc.inputLink, tc.inputGwIP, tc.inputSubnets)
 			t.Log(err)
@@ -612,8 +506,8 @@ func TestLinkRouteExists(t *testing.T) {
 		inputSubnet              *net.IPNet
 		errExp                   bool
 		outBoolFlag              bool
-		onRetArgsNetLinkLibOpers []onCallReturnArgs
-		onRetArgsLinkIfaceOpers  []onCallReturnArgs
+		onRetArgsNetLinkLibOpers []ovntest.TestifyMockHelper
+		onRetArgsLinkIfaceOpers  []ovntest.TestifyMockHelper
 	}{
 		{
 			desc:        "tests code path when RouteListFiltered() returns error",
@@ -622,11 +516,11 @@ func TestLinkRouteExists(t *testing.T) {
 			inputSubnet: ovntest.MustParseIPNet("192.168.0.0/24"),
 			errExp:      true,
 			outBoolFlag: false,
-			onRetArgsNetLinkLibOpers: []onCallReturnArgs{
-				{"RouteListFiltered", []string{"int", "*netlink.Route", "uint64"}, []interface{}{[]netlink.Route{}, fmt.Errorf("mock error")}},
+			onRetArgsNetLinkLibOpers: []ovntest.TestifyMockHelper{
+				{OnCallMethodName: "RouteListFiltered", OnCallMethodArgType: []string{"int", "*netlink.Route", "uint64"}, RetArgList: []interface{}{[]netlink.Route{}, fmt.Errorf("mock error")}},
 			},
-			onRetArgsLinkIfaceOpers: []onCallReturnArgs{
-				{"Attrs", []string{}, []interface{}{&netlink.LinkAttrs{Name: "testIfaceName", Index: 1}}},
+			onRetArgsLinkIfaceOpers: []ovntest.TestifyMockHelper{
+				{OnCallMethodName: "Attrs", OnCallMethodArgType: []string{}, RetArgList: []interface{}{&netlink.LinkAttrs{Name: "testIfaceName", Index: 1}}},
 			},
 		},
 		{
@@ -635,22 +529,22 @@ func TestLinkRouteExists(t *testing.T) {
 			inputGwIP:   ovntest.MustParseIP("192.168.0.1"),
 			inputSubnet: ovntest.MustParseIPNet("192.168.0.0/24"),
 			outBoolFlag: false,
-			onRetArgsNetLinkLibOpers: []onCallReturnArgs{
-				{"RouteListFiltered", []string{"int", "*netlink.Route", "uint64"}, []interface{}{[]netlink.Route{}, nil}},
+			onRetArgsNetLinkLibOpers: []ovntest.TestifyMockHelper{
+				{OnCallMethodName: "RouteListFiltered", OnCallMethodArgType: []string{"int", "*netlink.Route", "uint64"}, RetArgList: []interface{}{[]netlink.Route{}, nil}},
 			},
-			onRetArgsLinkIfaceOpers: []onCallReturnArgs{
-				{"Attrs", []string{}, []interface{}{&netlink.LinkAttrs{Name: "testIfaceName", Index: 1}}},
+			onRetArgsLinkIfaceOpers: []ovntest.TestifyMockHelper{
+				{OnCallMethodName: "Attrs", OnCallMethodArgType: []string{}, RetArgList: []interface{}{&netlink.LinkAttrs{Name: "testIfaceName", Index: 1}}},
 			},
 		},
 		{
 			desc:        "gateway IP input is nil",
 			inputLink:   mockLink,
 			inputSubnet: ovntest.MustParseIPNet("192.168.0.0/24"),
-			onRetArgsNetLinkLibOpers: []onCallReturnArgs{
-				{"RouteListFiltered", []string{"int", "*netlink.Route", "uint64"}, []interface{}{[]netlink.Route{}, nil}},
+			onRetArgsNetLinkLibOpers: []ovntest.TestifyMockHelper{
+				{OnCallMethodName: "RouteListFiltered", OnCallMethodArgType: []string{"int", "*netlink.Route", "uint64"}, RetArgList: []interface{}{[]netlink.Route{}, nil}},
 			},
-			onRetArgsLinkIfaceOpers: []onCallReturnArgs{
-				{"Attrs", []string{}, []interface{}{&netlink.LinkAttrs{Name: "testIfaceName", Index: 1}}},
+			onRetArgsLinkIfaceOpers: []ovntest.TestifyMockHelper{
+				{OnCallMethodName: "Attrs", OnCallMethodArgType: []string{}, RetArgList: []interface{}{&netlink.LinkAttrs{Name: "testIfaceName", Index: 1}}},
 			},
 		},
 		{
@@ -658,13 +552,13 @@ func TestLinkRouteExists(t *testing.T) {
 			inputLink:   mockLink,
 			inputGwIP:   ovntest.MustParseIP("192.168.0.1"),
 			inputSubnet: ovntest.MustParseIPNet("192.168.0.0/24"),
-			onRetArgsNetLinkLibOpers: []onCallReturnArgs{
-				{"RouteListFiltered", []string{"int", "*netlink.Route", "uint64"}, []interface{}{[]netlink.Route{
+			onRetArgsNetLinkLibOpers: []ovntest.TestifyMockHelper{
+				{OnCallMethodName: "RouteListFiltered", OnCallMethodArgType: []string{"int", "*netlink.Route", "uint64"}, RetArgList: []interface{}{[]netlink.Route{
 					{Gw: ovntest.MustParseIP("192.168.1.1")},
 				}, nil}},
 			},
-			onRetArgsLinkIfaceOpers: []onCallReturnArgs{
-				{"Attrs", []string{}, []interface{}{&netlink.LinkAttrs{Name: "testIfaceName", Index: 1}}},
+			onRetArgsLinkIfaceOpers: []ovntest.TestifyMockHelper{
+				{OnCallMethodName: "Attrs", OnCallMethodArgType: []string{}, RetArgList: []interface{}{&netlink.LinkAttrs{Name: "testIfaceName", Index: 1}}},
 			},
 		},
 		{
@@ -673,40 +567,21 @@ func TestLinkRouteExists(t *testing.T) {
 			inputGwIP:   ovntest.MustParseIP("192.168.0.1"),
 			inputSubnet: ovntest.MustParseIPNet("192.168.0.0/24"),
 			outBoolFlag: true,
-			onRetArgsNetLinkLibOpers: []onCallReturnArgs{
-				{"RouteListFiltered", []string{"int", "*netlink.Route", "uint64"}, []interface{}{[]netlink.Route{
+			onRetArgsNetLinkLibOpers: []ovntest.TestifyMockHelper{
+				{OnCallMethodName: "RouteListFiltered", OnCallMethodArgType: []string{"int", "*netlink.Route", "uint64"}, RetArgList: []interface{}{[]netlink.Route{
 					{Gw: ovntest.MustParseIP("192.168.0.1")},
 				}, nil}},
 			},
-			onRetArgsLinkIfaceOpers: []onCallReturnArgs{
-				{"Attrs", []string{}, []interface{}{&netlink.LinkAttrs{Name: "testIfaceName", Index: 1}}},
+			onRetArgsLinkIfaceOpers: []ovntest.TestifyMockHelper{
+				{OnCallMethodName: "Attrs", OnCallMethodArgType: []string{}, RetArgList: []interface{}{&netlink.LinkAttrs{Name: "testIfaceName", Index: 1}}},
 			},
 		},
 	}
 	for i, tc := range tests {
 		t.Run(fmt.Sprintf("%d:%s", i, tc.desc), func(t *testing.T) {
 
-			for _, item := range tc.onRetArgsNetLinkLibOpers {
-				call := mockNetLinkOps.On(item.onCallMethodName)
-				for _, arg := range item.onCallMethodArgType {
-					call.Arguments = append(call.Arguments, mock.AnythingOfType(arg))
-				}
-				for _, ret := range item.retArgList {
-					call.ReturnArguments = append(call.ReturnArguments, ret)
-				}
-				call.Once()
-			}
-
-			for _, item := range tc.onRetArgsLinkIfaceOpers {
-				call := mockLink.On(item.onCallMethodName)
-				for _, arg := range item.onCallMethodArgType {
-					call.Arguments = append(call.Arguments, mock.AnythingOfType(arg))
-				}
-				for _, ret := range item.retArgList {
-					call.ReturnArguments = append(call.ReturnArguments, ret)
-				}
-				call.Once()
-			}
+			ovntest.ProcessMockFnList(&mockNetLinkOps.Mock, tc.onRetArgsNetLinkLibOpers)
+			ovntest.ProcessMockFnList(&mockLink.Mock, tc.onRetArgsLinkIfaceOpers)
 
 			flag, err := LinkRouteExists(tc.inputLink, tc.inputGwIP, tc.inputSubnet)
 			t.Log(flag, err)
@@ -735,56 +610,37 @@ func TestLinkNeighAdd(t *testing.T) {
 		inputNeigIP              net.IP
 		inputMacAddr             net.HardwareAddr
 		errExp                   bool
-		onRetArgsNetLinkLibOpers []onCallReturnArgs
-		onRetArgsLinkIfaceOpers  []onCallReturnArgs
+		onRetArgsNetLinkLibOpers []ovntest.TestifyMockHelper
+		onRetArgsLinkIfaceOpers  []ovntest.TestifyMockHelper
 	}{
 		// NOTE: since, we dont validate function arguments in the function body, a nil value passed for neighIP and neighMac is sufficient
 		{
 			desc:      "test code path where adding neighbor returns an error",
 			inputLink: mockLink,
 			errExp:    true,
-			onRetArgsNetLinkLibOpers: []onCallReturnArgs{
-				{"NeighAdd", []string{"*netlink.Neigh"}, []interface{}{fmt.Errorf("mock error")}},
+			onRetArgsNetLinkLibOpers: []ovntest.TestifyMockHelper{
+				{OnCallMethodName: "NeighAdd", OnCallMethodArgType: []string{"*netlink.Neigh"}, RetArgList: []interface{}{fmt.Errorf("mock error")}},
 			},
-			onRetArgsLinkIfaceOpers: []onCallReturnArgs{
-				{"Attrs", []string{}, []interface{}{&netlink.LinkAttrs{Name: "testIfaceName", Index: 1}}},
+			onRetArgsLinkIfaceOpers: []ovntest.TestifyMockHelper{
+				{OnCallMethodName: "Attrs", OnCallMethodArgType: []string{}, RetArgList: []interface{}{&netlink.LinkAttrs{Name: "testIfaceName", Index: 1}}},
 			},
 		},
 		{
 			desc:      "test code path where adding neighbor returns success",
 			inputLink: mockLink,
-			onRetArgsNetLinkLibOpers: []onCallReturnArgs{
-				{"NeighAdd", []string{"*netlink.Neigh"}, []interface{}{nil}},
+			onRetArgsNetLinkLibOpers: []ovntest.TestifyMockHelper{
+				{OnCallMethodName: "NeighAdd", OnCallMethodArgType: []string{"*netlink.Neigh"}, RetArgList: []interface{}{nil}},
 			},
-			onRetArgsLinkIfaceOpers: []onCallReturnArgs{
-				{"Attrs", []string{}, []interface{}{&netlink.LinkAttrs{Name: "testIfaceName", Index: 1}}},
+			onRetArgsLinkIfaceOpers: []ovntest.TestifyMockHelper{
+				{OnCallMethodName: "Attrs", OnCallMethodArgType: []string{}, RetArgList: []interface{}{&netlink.LinkAttrs{Name: "testIfaceName", Index: 1}}},
 			},
 		},
 	}
 	for i, tc := range tests {
 		t.Run(fmt.Sprintf("%d:%s", i, tc.desc), func(t *testing.T) {
 
-			for _, item := range tc.onRetArgsNetLinkLibOpers {
-				call := mockNetLinkOps.On(item.onCallMethodName)
-				for _, arg := range item.onCallMethodArgType {
-					call.Arguments = append(call.Arguments, mock.AnythingOfType(arg))
-				}
-				for _, ret := range item.retArgList {
-					call.ReturnArguments = append(call.ReturnArguments, ret)
-				}
-				call.Once()
-			}
-
-			for _, item := range tc.onRetArgsLinkIfaceOpers {
-				call := mockLink.On(item.onCallMethodName)
-				for _, arg := range item.onCallMethodArgType {
-					call.Arguments = append(call.Arguments, mock.AnythingOfType(arg))
-				}
-				for _, ret := range item.retArgList {
-					call.ReturnArguments = append(call.ReturnArguments, ret)
-				}
-				call.Once()
-			}
+			ovntest.ProcessMockFnList(&mockNetLinkOps.Mock, tc.onRetArgsNetLinkLibOpers)
+			ovntest.ProcessMockFnList(&mockLink.Mock, tc.onRetArgsLinkIfaceOpers)
 
 			err := LinkNeighAdd(tc.inputLink, tc.inputNeigIP, tc.inputMacAddr)
 			t.Log(err)
@@ -811,31 +667,31 @@ func TestLinkNeighExists(t *testing.T) {
 		inputMacAddr             net.HardwareAddr
 		errExp                   bool
 		outBoolFlag              bool
-		onRetArgsNetLinkLibOpers []onCallReturnArgs
-		onRetArgsLinkIfaceOpers  []onCallReturnArgs
+		onRetArgsNetLinkLibOpers []ovntest.TestifyMockHelper
+		onRetArgsLinkIfaceOpers  []ovntest.TestifyMockHelper
 	}{
 		{
 			desc:        "test path when NeighList() returns error",
 			inputLink:   mockLink,
 			errExp:      true,
 			outBoolFlag: false,
-			onRetArgsNetLinkLibOpers: []onCallReturnArgs{
-				{"NeighList", []string{"int", "int"}, []interface{}{[]netlink.Neigh{}, fmt.Errorf("mock error")}},
+			onRetArgsNetLinkLibOpers: []ovntest.TestifyMockHelper{
+				{OnCallMethodName: "NeighList", OnCallMethodArgType: []string{"int", "int"}, RetArgList: []interface{}{[]netlink.Neigh{}, fmt.Errorf("mock error")}},
 			},
-			onRetArgsLinkIfaceOpers: []onCallReturnArgs{
-				{"Attrs", []string{}, []interface{}{&netlink.LinkAttrs{Name: "testIfaceName", Index: 1}}},
-				{"Attrs", []string{}, []interface{}{&netlink.LinkAttrs{Name: "testIfaceName", Index: 1}}},
+			onRetArgsLinkIfaceOpers: []ovntest.TestifyMockHelper{
+				{OnCallMethodName: "Attrs", OnCallMethodArgType: []string{}, RetArgList: []interface{}{&netlink.LinkAttrs{Name: "testIfaceName", Index: 1}}},
+				{OnCallMethodName: "Attrs", OnCallMethodArgType: []string{}, RetArgList: []interface{}{&netlink.LinkAttrs{Name: "testIfaceName", Index: 1}}},
 			},
 		},
 		{
 			desc:        "test path when NeighList() returns empty list and no error",
 			inputLink:   mockLink,
 			outBoolFlag: false,
-			onRetArgsNetLinkLibOpers: []onCallReturnArgs{
-				{"NeighList", []string{"int", "int"}, []interface{}{[]netlink.Neigh{}, nil}},
+			onRetArgsNetLinkLibOpers: []ovntest.TestifyMockHelper{
+				{OnCallMethodName: "NeighList", OnCallMethodArgType: []string{"int", "int"}, RetArgList: []interface{}{[]netlink.Neigh{}, nil}},
 			},
-			onRetArgsLinkIfaceOpers: []onCallReturnArgs{
-				{"Attrs", []string{}, []interface{}{&netlink.LinkAttrs{Name: "testIfaceName", Index: 1}}},
+			onRetArgsLinkIfaceOpers: []ovntest.TestifyMockHelper{
+				{OnCallMethodName: "Attrs", OnCallMethodArgType: []string{}, RetArgList: []interface{}{&netlink.LinkAttrs{Name: "testIfaceName", Index: 1}}},
 			},
 		},
 		{
@@ -844,9 +700,9 @@ func TestLinkNeighExists(t *testing.T) {
 			inputNeigIP:  ovntest.MustParseIP("192.169.1.12"),
 			inputMacAddr: ovntest.MustParseMAC("0A:58:FD:98:00:01"),
 			outBoolFlag:  true,
-			onRetArgsNetLinkLibOpers: []onCallReturnArgs{
-				{"NeighList", []string{"int", "int"},
-					[]interface{}{
+			onRetArgsNetLinkLibOpers: []ovntest.TestifyMockHelper{
+				{OnCallMethodName: "NeighList", OnCallMethodArgType: []string{"int", "int"},
+					RetArgList: []interface{}{
 						[]netlink.Neigh{
 							{IP: ovntest.MustParseIP("192.169.1.12"), HardwareAddr: ovntest.MustParseMAC("0A:58:FD:98:00:01"), State: netlink.NUD_PERMANENT},
 						},
@@ -854,8 +710,8 @@ func TestLinkNeighExists(t *testing.T) {
 					},
 				},
 			},
-			onRetArgsLinkIfaceOpers: []onCallReturnArgs{
-				{"Attrs", []string{}, []interface{}{&netlink.LinkAttrs{Name: "testIfaceName", Index: 1}}},
+			onRetArgsLinkIfaceOpers: []ovntest.TestifyMockHelper{
+				{OnCallMethodName: "Attrs", OnCallMethodArgType: []string{}, RetArgList: []interface{}{&netlink.LinkAttrs{Name: "testIfaceName", Index: 1}}},
 			},
 		},
 		{
@@ -863,9 +719,9 @@ func TestLinkNeighExists(t *testing.T) {
 			inputLink:    mockLink,
 			inputNeigIP:  ovntest.MustParseIP("192.169.1.15"),
 			inputMacAddr: ovntest.MustParseMAC("0A:58:FD:98:00:01"),
-			onRetArgsNetLinkLibOpers: []onCallReturnArgs{
-				{"NeighList", []string{"int", "int"},
-					[]interface{}{
+			onRetArgsNetLinkLibOpers: []ovntest.TestifyMockHelper{
+				{OnCallMethodName: "NeighList", OnCallMethodArgType: []string{"int", "int"},
+					RetArgList: []interface{}{
 						[]netlink.Neigh{
 							{IP: ovntest.MustParseIP("192.169.1.12"), HardwareAddr: ovntest.MustParseMAC("0A:58:FD:98:00:01"), State: netlink.NUD_PERMANENT},
 						},
@@ -873,35 +729,16 @@ func TestLinkNeighExists(t *testing.T) {
 					},
 				},
 			},
-			onRetArgsLinkIfaceOpers: []onCallReturnArgs{
-				{"Attrs", []string{}, []interface{}{&netlink.LinkAttrs{Name: "testIfaceName", Index: 1}}},
+			onRetArgsLinkIfaceOpers: []ovntest.TestifyMockHelper{
+				{OnCallMethodName: "Attrs", OnCallMethodArgType: []string{}, RetArgList: []interface{}{&netlink.LinkAttrs{Name: "testIfaceName", Index: 1}}},
 			},
 		},
 	}
 	for i, tc := range tests {
 		t.Run(fmt.Sprintf("%d:%s", i, tc.desc), func(t *testing.T) {
 
-			for _, item := range tc.onRetArgsNetLinkLibOpers {
-				call := mockNetLinkOps.On(item.onCallMethodName)
-				for _, arg := range item.onCallMethodArgType {
-					call.Arguments = append(call.Arguments, mock.AnythingOfType(arg))
-				}
-				for _, ret := range item.retArgList {
-					call.ReturnArguments = append(call.ReturnArguments, ret)
-				}
-				call.Once()
-			}
-
-			for _, item := range tc.onRetArgsLinkIfaceOpers {
-				call := mockLink.On(item.onCallMethodName)
-				for _, arg := range item.onCallMethodArgType {
-					call.Arguments = append(call.Arguments, mock.AnythingOfType(arg))
-				}
-				for _, ret := range item.retArgList {
-					call.ReturnArguments = append(call.ReturnArguments, ret)
-				}
-				call.Once()
-			}
+			ovntest.ProcessMockFnList(&mockNetLinkOps.Mock, tc.onRetArgsNetLinkLibOpers)
+			ovntest.ProcessMockFnList(&mockLink.Mock, tc.onRetArgsLinkIfaceOpers)
 
 			flag, err := LinkNeighExists(tc.inputLink, tc.inputNeigIP, tc.inputMacAddr)
 			t.Log(flag, err)
@@ -931,7 +768,7 @@ func TestDeleteConntrack(t *testing.T) {
 		inputIPStr               string
 		inputPort                int32
 		inputProtocol            kapi.Protocol
-		onRetArgsNetLinkLibOpers []onCallReturnArgs
+		onRetArgsNetLinkLibOpers []ovntest.TestifyMockHelper
 	}{
 		{
 			desc:       "Invalid IP address code input",
@@ -941,31 +778,31 @@ func TestDeleteConntrack(t *testing.T) {
 		{
 			desc:       "Valid IPv4 address input",
 			inputIPStr: "192.168.1.14",
-			onRetArgsNetLinkLibOpers: []onCallReturnArgs{
-				{"ConntrackDeleteFilter", []string{"netlink.ConntrackTableType", "netlink.InetFamily", "*netlink.ConntrackFilter"}, []interface{}{uint(1), nil}},
+			onRetArgsNetLinkLibOpers: []ovntest.TestifyMockHelper{
+				{OnCallMethodName: "ConntrackDeleteFilter", OnCallMethodArgType: []string{"netlink.ConntrackTableType", "netlink.InetFamily", "*netlink.ConntrackFilter"}, RetArgList: []interface{}{uint(1), nil}},
 			},
 		},
 		{
 			desc:       "Valid IPv6 address input",
 			inputIPStr: "fffb::1",
-			onRetArgsNetLinkLibOpers: []onCallReturnArgs{
-				{"ConntrackDeleteFilter", []string{"netlink.ConntrackTableType", "netlink.InetFamily", "*netlink.ConntrackFilter"}, []interface{}{uint(1), nil}},
+			onRetArgsNetLinkLibOpers: []ovntest.TestifyMockHelper{
+				{OnCallMethodName: "ConntrackDeleteFilter", OnCallMethodArgType: []string{"netlink.ConntrackTableType", "netlink.InetFamily", "*netlink.ConntrackFilter"}, RetArgList: []interface{}{uint(1), nil}},
 			},
 		},
 		{
 			desc:          "Valid IPv4 address input with UDP protocol",
 			inputIPStr:    "192.168.1.14",
 			inputProtocol: kapi.ProtocolUDP,
-			onRetArgsNetLinkLibOpers: []onCallReturnArgs{
-				{"ConntrackDeleteFilter", []string{"netlink.ConntrackTableType", "netlink.InetFamily", "*netlink.ConntrackFilter"}, []interface{}{uint(1), nil}},
+			onRetArgsNetLinkLibOpers: []ovntest.TestifyMockHelper{
+				{OnCallMethodName: "ConntrackDeleteFilter", OnCallMethodArgType: []string{"netlink.ConntrackTableType", "netlink.InetFamily", "*netlink.ConntrackFilter"}, RetArgList: []interface{}{uint(1), nil}},
 			},
 		},
 		{
 			desc:          "Valid IPv4 address input with SCTP protocol",
 			inputIPStr:    "192.168.1.14",
 			inputProtocol: kapi.ProtocolSCTP,
-			onRetArgsNetLinkLibOpers: []onCallReturnArgs{
-				{"ConntrackDeleteFilter", []string{"netlink.ConntrackTableType", "netlink.InetFamily", "*netlink.ConntrackFilter"}, []interface{}{uint(1), nil}},
+			onRetArgsNetLinkLibOpers: []ovntest.TestifyMockHelper{
+				{OnCallMethodName: "ConntrackDeleteFilter", OnCallMethodArgType: []string{"netlink.ConntrackTableType", "netlink.InetFamily", "*netlink.ConntrackFilter"}, RetArgList: []interface{}{uint(1), nil}},
 			},
 		},
 		{
@@ -982,23 +819,15 @@ func TestDeleteConntrack(t *testing.T) {
 			inputIPStr:    "fffb::1",
 			inputProtocol: kapi.ProtocolSCTP,
 			inputPort:     9999,
-			onRetArgsNetLinkLibOpers: []onCallReturnArgs{
-				{"ConntrackDeleteFilter", []string{"netlink.ConntrackTableType", "netlink.InetFamily", "*netlink.ConntrackFilter"}, []interface{}{uint(1), nil}},
+			onRetArgsNetLinkLibOpers: []ovntest.TestifyMockHelper{
+				{OnCallMethodName: "ConntrackDeleteFilter", OnCallMethodArgType: []string{"netlink.ConntrackTableType", "netlink.InetFamily", "*netlink.ConntrackFilter"}, RetArgList: []interface{}{uint(1), nil}},
 			},
 		},
 	}
 	for i, tc := range tests {
 		t.Run(fmt.Sprintf("%d:%s", i, tc.desc), func(t *testing.T) {
-			for _, item := range tc.onRetArgsNetLinkLibOpers {
-				call := mockNetLinkOps.On(item.onCallMethodName)
-				for _, arg := range item.onCallMethodArgType {
-					call.Arguments = append(call.Arguments, mock.AnythingOfType(arg))
-				}
-				for _, ret := range item.retArgList {
-					call.ReturnArguments = append(call.ReturnArguments, ret)
-				}
-				call.Once()
-			}
+			ovntest.ProcessMockFnList(&mockNetLinkOps.Mock, tc.onRetArgsNetLinkLibOpers)
+
 			err := DeleteConntrack(tc.inputIPStr, tc.inputPort, tc.inputProtocol)
 			if tc.errExp {
 				assert.Error(t, err)

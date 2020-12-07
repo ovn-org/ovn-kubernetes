@@ -8,7 +8,7 @@ import (
 	"github.com/prometheus/client_golang/prometheus"
 	"k8s.io/apimachinery/pkg/util/wait"
 	"k8s.io/client-go/kubernetes"
-	"k8s.io/klog"
+	"k8s.io/klog/v2"
 )
 
 var (
@@ -26,9 +26,9 @@ func getOvnNorthdVersionInfo() {
 	// ovn-northd 20.06.0.86f64fc1
 	// Open vSwitch Library 2.13.0.f945b5c5
 	for _, line := range strings.Split(stdout, "\n") {
-		if strings.HasPrefix("ovn-northd ", line) {
+		if strings.HasPrefix(line, "ovn-northd ") {
 			ovnNorthdVersion = strings.Fields(line)[1]
-		} else if strings.HasPrefix("Open vSwitch Library ", line) {
+		} else if strings.HasPrefix(line, "Open vSwitch Library ") {
 			ovnNorthdOvsLibVersion = strings.Fields(line)[3]
 		}
 	}

@@ -32,9 +32,6 @@ Services.+session affinity
 # TO BE IMPLEMENTED: https://github.com/ovn-org/ovn-kubernetes/issues/1116
 EndpointSlices
 
-# TO BE IMPLEMENTED: https://github.com/ovn-org/ovn-kubernetes/issues/1664
-should be able to preserve UDP traffic when server pod cycles for a NodePort service
-
 # NOT IMPLEMENTED; SEE DISCUSSION IN https://github.com/ovn-org/ovn-kubernetes/pull/1225
 named port.+\[Feature:NetworkPolicy\]
 

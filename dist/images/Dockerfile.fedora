@@ -9,7 +9,7 @@
 # are built locally and included in the image (instead of the rpm)
 #
 
-FROM fedora:31
+FROM fedora:32
 
 USER root
 
@@ -17,7 +17,7 @@ ENV PYTHONDONTWRITEBYTECODE yes
 
 # install needed rpms - openvswitch must be 2.10.4 or higher
 RUN INSTALL_PKGS=" \
-	PyYAML bind-utils procps-ng openssl numactl-libs firewalld-filesystem \
+	python3-pyyaml bind-utils procps-ng openssl numactl-libs firewalld-filesystem \
 	libpcap hostname kubernetes-client \
         ovn ovn-central ovn-host python3-openvswitch python3-pyOpenSSL \
 	iptables iproute iputils strace socat \
@@ -25,10 +25,7 @@ RUN INSTALL_PKGS=" \
 	dnf install --best --refresh -y --setopt=tsflags=nodocs $INSTALL_PKGS && \
 	dnf clean all && rm -rf /var/cache/dnf/*
 
-# ensure we pick up ovn-20.09.0-1.fc31 for ovn-northd MLD fixes.
-# This should have no effect in the future once the RPM has propagated
-# to all stable mirrors and can be removed
-RUN dnf install -y --enablerepo=updates-testing --best --advisory=FEDORA-2020-cc142bbddb "ovn >= 20.09.0-1" || exit 1
+RUN dnf install -y --enablerepo=updates-testing --best --advisory=FEDORA-2020-fa92b9d524 "ovn >= 20.09.0-2" || exit 1
 
 RUN mkdir -p /var/run/openvswitch
 

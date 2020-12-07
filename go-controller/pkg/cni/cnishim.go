@@ -10,7 +10,7 @@ import (
 	"flag"
 	"fmt"
 	"io/ioutil"
-	"k8s.io/klog"
+	"k8s.io/klog/v2"
 	"net"
 	"net/http"
 	"os"
@@ -139,16 +139,18 @@ func (p *Plugin) CmdAdd(args *skel.CmdArgs) error {
 	}()
 
 	// read the config stdin args to obtain cniVersion
-	conf, err := config.ReadCNIConfig(args.StdinData)
-	if err != nil {
-		return fmt.Errorf("invalid stdin args")
+	conf, errC := config.ReadCNIConfig(args.StdinData)
+	if errC != nil {
+		err = fmt.Errorf("invalid stdin args %v", errC)
+		return err
 	}
 	setupLogging(conf)
 
 	req := newCNIRequest(args)
 
-	body, err := p.doCNI("http://dummy/", req)
-	if err != nil {
+	body, errB := p.doCNI("http://dummy/", req)
+	if errB != nil {
+		err = errB
 		klog.Error(err.Error())
 		return err
 	}

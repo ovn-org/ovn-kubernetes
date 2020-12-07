@@ -18,7 +18,7 @@ import (
 	"github.com/urfave/cli/v2"
 	gcfg "gopkg.in/gcfg.v1"
 	lumberjack "gopkg.in/natefinch/lumberjack.v2"
-	"k8s.io/klog"
+	"k8s.io/klog/v2"
 
 	kexec "k8s.io/utils/exec"
 	utilnet "k8s.io/utils/net"
@@ -95,9 +95,7 @@ var (
 	}
 
 	// OVNKubernetesFeatureConfig holds OVN-Kubernetes feature enhancement config file parameters and command-line overrides
-	OVNKubernetesFeature = OVNKubernetesFeatureConfig{
-		EnableEgressIP: true,
-	}
+	OVNKubernetesFeature OVNKubernetesFeatureConfig
 
 	// OvnNorth holds northbound OVN database client and server authentication and location details
 	OvnNorth OvnAuthConfig
@@ -373,6 +371,7 @@ func init() {
 func PrepareTestConfig() {
 	Default = savedDefault
 	Logging = savedLogging
+	Logging.Level = 5
 	CNI = savedCNI
 	OVNKubernetesFeature = savedOVNKubernetesFeature
 	Kubernetes = savedKubernetes

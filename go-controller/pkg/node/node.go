@@ -24,20 +24,21 @@ import (
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/tools/cache"
 	"k8s.io/client-go/tools/record"
-	"k8s.io/klog"
+	"k8s.io/klog/v2"
 )
 
 // OvnNode is the object holder for utilities meant for node management
 type OvnNode struct {
 	name         string
 	Kube         kube.Interface
-	watchFactory *factory.WatchFactory
+	watchFactory factory.NodeWatchFactory
 	stopChan     chan struct{}
 	recorder     record.EventRecorder
+	gateway      Gateway
 }
 
 // NewNode creates a new controller for node management
-func NewNode(kubeClient kubernetes.Interface, wf *factory.WatchFactory, name string, stopChan chan struct{}, eventRecorder record.EventRecorder) *OvnNode {
+func NewNode(kubeClient kubernetes.Interface, wf factory.NodeWatchFactory, name string, stopChan chan struct{}, eventRecorder record.EventRecorder) *OvnNode {
 	return &OvnNode{
 		name:         name,
 		Kube:         &kube.Kube{KClient: kubeClient},
@@ -208,13 +209,14 @@ func (n *OvnNode) Start(wg *sync.WaitGroup) error {
 	nodeAnnotator := kube.NewNodeAnnotator(n.Kube, node)
 	waiter := newStartupWaiter()
 
-	// Initialize gateway resources on the node
-	if err := n.initGateway(subnets, nodeAnnotator, waiter); err != nil {
+	// Initialize management port resources on the node
+	mgmtPortConfig, err := createManagementPort(n.name, subnets, nodeAnnotator, waiter)
+	if err != nil {
 		return err
 	}
 
-	// Initialize management port resources on the node
-	if err := n.createManagementPort(subnets, nodeAnnotator, waiter); err != nil {
+	// Initialize gateway resources on the node
+	if err := n.initGateway(subnets, nodeAnnotator, waiter, mgmtPortConfig); err != nil {
 		return err
 	}
 
@@ -228,15 +230,15 @@ func (n *OvnNode) Start(wg *sync.WaitGroup) error {
 	if err := waiter.Wait(); err != nil {
 		return err
 	}
+	go n.gateway.Run(n.stopChan, wg)
 	klog.Infof("Gateway and management port readiness took %v", time.Since(start))
 
 	if config.HybridOverlay.Enabled {
-		factory := n.watchFactory.GetFactory()
 		nodeController, err := honode.NewNode(
 			n.Kube,
 			n.name,
-			factory.Core().V1().Nodes().Informer(),
-			factory.Core().V1().Pods().Informer(),
+			n.watchFactory.NodeInformer(),
+			n.watchFactory.LocalPodInformer(),
 			informer.NewDefaultEventHandler,
 		)
 		if err != nil {
@@ -256,6 +258,9 @@ func (n *OvnNode) Start(wg *sync.WaitGroup) error {
 	// start health check to ensure there are no stale OVS internal ports
 	go checkForStaleOVSInterfaces(n.stopChan)
 
+	// start management port health check
+	go checkManagementPortHealth(mgmtPortConfig, n.stopChan)
+
 	confFile := filepath.Join(config.CNI.ConfDir, config.CNIConfFileName)
 	_, err = os.Stat(confFile)
 	if os.IsNotExist(err) {
@@ -265,14 +270,9 @@ func (n *OvnNode) Start(wg *sync.WaitGroup) error {
 		}
 	}
 
-	kclient, ok := n.Kube.(*kube.Kube)
-	if !ok {
-		return fmt.Errorf("cannot get kubeclient for starting CNI server")
-	}
 	n.WatchEndpoints()
 
-	// start the cni server
-	cniServer := cni.NewCNIServer("", kclient.KClient)
+	cniServer := cni.NewCNIServer("", n.watchFactory)
 	err = cniServer.Start(cni.HandleCNIRequest)
 
 	return err

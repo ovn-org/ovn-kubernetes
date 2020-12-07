@@ -281,6 +281,39 @@ var _ = Describe("OVN Address Set operations", func() {
 			err := app.Run([]string{app.Name})
 			Expect(err).NotTo(HaveOccurred())
 		})
+		It("sets an already set addressSet", func() {
+			app.Action = func(ctx *cli.Context) error {
+				const addr1 string = "1.2.3.4"
+				const addr2 string = "2.3.4.5"
+				const addr3 string = "7.8.9.10"
+
+				_, err := config.InitConfig(ctx, fexec, nil)
+				Expect(err).NotTo(HaveOccurred())
+
+				fexec.AddFakeCmdsNoOutputNoError([]string{
+					"ovn-nbctl --timeout=15 --data=bare --no-heading --columns=_uuid find address_set name=a16990491322166530807",
+				})
+				fexec.AddFakeCmd(&ovntest.ExpectedCmd{
+					Cmd:    `ovn-nbctl --timeout=15 create address_set name=a16990491322166530807 external-ids:name=foobar_v4 addresses="` + addr1 + `"`,
+					Output: fakeUUID,
+				})
+				fexec.AddFakeCmdsNoOutputNoError([]string{
+					`ovn-nbctl --timeout=15 set address_set ` + fakeUUID + ` addresses="` + addr2 + `" ` + `"` + addr3 + `"`,
+				})
+
+				as, err := asFactory.NewAddressSet("foobar", []net.IP{net.ParseIP(addr1)})
+				Expect(err).NotTo(HaveOccurred())
+
+				err = as.SetIPs([]net.IP{net.ParseIP(addr2), net.ParseIP(addr3)})
+				Expect(err).NotTo(HaveOccurred())
+
+				Expect(fexec.CalledMatchesExpected()).To(BeTrue(), fexec.ErrorDesc)
+				return nil
+			}
+
+			err := app.Run([]string{app.Name})
+			Expect(err).NotTo(HaveOccurred())
+		})
 	})
 
 	Context("Dual stack : when creating an address set object", func() {

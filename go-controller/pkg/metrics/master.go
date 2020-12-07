@@ -12,7 +12,7 @@ import (
 	"github.com/prometheus/client_golang/prometheus"
 
 	kapi "k8s.io/api/core/v1"
-	"k8s.io/klog"
+	"k8s.io/klog/v2"
 )
 
 // metricE2ETimestamp is a timestamp value we have persisted to nbdb. We will
@@ -108,8 +108,8 @@ func RegisterMasterMetrics(nbClient, sbClient goovn.Client) {
 			}
 			return 0
 		}
-		prometheus.MustRegister(prometheus.NewCounterFunc(
-			prometheus.CounterOpts{
+		prometheus.MustRegister(prometheus.NewGaugeFunc(
+			prometheus.GaugeOpts{
 				Namespace: MetricOvnkubeNamespace,
 				Subsystem: MetricOvnkubeSubsystemMaster,
 				Name:      "sb_e2e_timestamp",
