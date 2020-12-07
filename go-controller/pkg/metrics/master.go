@@ -83,6 +83,34 @@ var MetricMasterLeader = prometheus.NewGauge(prometheus.GaugeOpts{
 	Help:      "Identifies whether the instance of ovnkube-master is a leader(1) or not(0).",
 })
 
+var metricV4HostSubnetCount = prometheus.NewGauge(prometheus.GaugeOpts{
+	Namespace: MetricOvnkubeNamespace,
+	Subsystem: MetricOvnkubeSubsystemMaster,
+	Name:      "num_v4_host_subnets",
+	Help:      "The total number of v4 host subnets possible",
+})
+
+var metricV6HostSubnetCount = prometheus.NewGauge(prometheus.GaugeOpts{
+	Namespace: MetricOvnkubeNamespace,
+	Subsystem: MetricOvnkubeSubsystemMaster,
+	Name:      "num_v6_host_subnets",
+	Help:      "The total number of v6 host subnets possible",
+})
+
+var metricV4AllocatedHostSubnetCount = prometheus.NewGauge(prometheus.GaugeOpts{
+	Namespace: MetricOvnkubeNamespace,
+	Subsystem: MetricOvnkubeSubsystemMaster,
+	Name:      "allocated_v4_host_subnets",
+	Help:      "The total number of v4 host subnets currently allocated",
+})
+
+var metricV6AllocatedHostSubnetCount = prometheus.NewGauge(prometheus.GaugeOpts{
+	Namespace: MetricOvnkubeNamespace,
+	Subsystem: MetricOvnkubeSubsystemMaster,
+	Name:      "allocated_v6_host_subnets",
+	Help:      "The total number of v6 host subnets currently allocated",
+})
+
 var registerMasterMetricsOnce sync.Once
 var startE2ETimeStampUpdaterOnce sync.Once
 
@@ -148,6 +176,10 @@ func RegisterMasterMetrics(nbClient, sbClient goovn.Client) {
 			},
 			func() float64 { return 1 },
 		))
+		prometheus.MustRegister(metricV4HostSubnetCount)
+		prometheus.MustRegister(metricV6HostSubnetCount)
+		prometheus.MustRegister(metricV4AllocatedHostSubnetCount)
+		prometheus.MustRegister(metricV6AllocatedHostSubnetCount)
 	})
 }
 
@@ -203,4 +235,17 @@ func RecordPodCreated(pod *kapi.Pod) {
 		metricPodCreationLatency.Observe(creationLatency)
 		return
 	}
+}
+
+// RecordSubnetUsage records the number of subnets allocated for nodes
+func RecordSubnetUsage(v4SubnetsAllocated, v6SubnetsAllocated float64) {
+	metricV4AllocatedHostSubnetCount.Set(v4SubnetsAllocated)
+	metricV6AllocatedHostSubnetCount.Set(v6SubnetsAllocated)
+}
+
+// RecordSubnetCount records the number of available subnets per configuration
+// for ovn-kubernetes
+func RecordSubnetCount(v4SubnetCount, v6SubnetCount float64) {
+	metricV4HostSubnetCount.Set(v4SubnetCount)
+	metricV6HostSubnetCount.Set(v6SubnetCount)
 }
