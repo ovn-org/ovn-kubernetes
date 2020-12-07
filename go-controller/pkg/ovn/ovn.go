@@ -122,7 +122,8 @@ type Controller struct {
 
 	// For TCP, UDP, and SCTP type traffic, cache OVN load-balancers used for the
 	// cluster's east-west traffic.
-	loadbalancerClusterCache map[kapi.Protocol]string
+	loadbalancerClusterCache      map[kapi.Protocol]string
+	loadbalancerClusterCacheMutex sync.Mutex
 
 	// A cache of all logical switches seen by the watcher and their subnets
 	lsManager *logicalSwitchManager
