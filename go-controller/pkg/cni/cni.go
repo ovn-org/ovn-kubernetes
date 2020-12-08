@@ -116,6 +116,11 @@ func (pr *PodRequest) cmdDel() ([]byte, error) {
 	return []byte{}, nil
 }
 
+func (pr *PodRequest) cmdCheck() ([]byte, error) {
+	// TODO add implementation
+	return []byte{}, nil
+}
+
 // HandleCNIRequest is the callback for all the requests
 // coming to the cniserver after being procesed into PodRequest objects
 // Argument '*PodRequest' encapsulates all the necessary information
@@ -131,6 +136,8 @@ func HandleCNIRequest(request *PodRequest, podLister corev1listers.PodLister) ([
 		result, err = request.cmdAdd(podLister)
 	case CNIDel:
 		result, err = request.cmdDel()
+	case CNICheck:
+		result, err = request.cmdCheck()
 	default:
 	}
 	klog.Infof("%s %s finished CNI request %+v, result %q, err %v", request, request.Command, request, string(result), err)
