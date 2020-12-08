@@ -116,8 +116,56 @@ func (pr *PodRequest) cmdDel() ([]byte, error) {
 	return []byte{}, nil
 }
 
-func (pr *PodRequest) cmdCheck() ([]byte, error) {
-	// TODO add implementation
+func (pr *PodRequest) cmdCheck(podLister corev1listers.PodLister) ([]byte, error) {
+	namespace := pr.PodNamespace
+	podName := pr.PodName
+	if namespace == "" || podName == "" {
+		return nil, fmt.Errorf("required CNI variable missing")
+	}
+
+	// Get the IP address and MAC address of the pod
+	annotations, err := getPodAnnotations(pr.ctx, podLister, pr.PodNamespace, pr.PodName)
+	if err != nil {
+		return nil, err
+	}
+
+	ingress, egress, err := extractPodBandwidthResources(annotations)
+	if err != nil {
+		return nil, fmt.Errorf("failed to parse bandwidth request: %v", err)
+	}
+
+	if pr.CNIConf.PrevResult != nil {
+		result, err := current.NewResultFromResult(pr.CNIConf.PrevResult)
+		if err != nil {
+			return nil, fmt.Errorf("could not convert result to current version: %v", err)
+		}
+		hostIfaceName := ""
+		for _, interf := range result.Interfaces {
+			if len(interf.Sandbox) == 0 {
+				hostIfaceName = interf.Name
+				break
+			}
+		}
+		if len(hostIfaceName) == 0 {
+			return nil, fmt.Errorf("could not find host interface in the prevResult: %v", result)
+		}
+		ifaceID := fmt.Sprintf("%s_%s", namespace, podName)
+		for _, ip := range result.IPs {
+			if err = waitForPodFlows(pr.ctx, result.Interfaces[*ip.Interface].Mac, []*net.IPNet{&ip.Address}, hostIfaceName, ifaceID); err != nil {
+				return nil, fmt.Errorf("error while checkoing on flows for pod: %s ip: %v, error: %v", ifaceID, ip, err)
+			}
+		}
+		ingressBPS, egressBPS, err := getPodBandwidth(hostIfaceName)
+		if err != nil {
+			return nil, err
+		}
+		if ingress != ingressBPS {
+			return nil, fmt.Errorf("defined ingress bandwidth restriction %d is not equals to the set one %d", ingress, ingressBPS)
+		}
+		if egress != egressBPS {
+			return nil, fmt.Errorf("defined egress bandwidth restriction %d is not equals to the set one %d", egress, egressBPS)
+		}
+	}
 	return []byte{}, nil
 }
 
@@ -137,7 +185,7 @@ func HandleCNIRequest(request *PodRequest, podLister corev1listers.PodLister) ([
 	case CNIDel:
 		result, err = request.cmdDel()
 	case CNICheck:
-		result, err = request.cmdCheck()
+		result, err = request.cmdCheck(podLister)
 	default:
 	}
 	klog.Infof("%s %s finished CNI request %+v, result %q, err %v", request, request.Command, request, string(result), err)

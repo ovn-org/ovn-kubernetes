@@ -16,9 +16,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/factory"
-	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
-
+	cnitypes "github.com/containernetworking/cni/pkg/types"
+	cni020 "github.com/containernetworking/cni/pkg/types/020"
 	v1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
@@ -26,8 +25,8 @@ import (
 	corev1listers "k8s.io/client-go/listers/core/v1"
 	utiltesting "k8s.io/client-go/util/testing"
 
-	cnitypes "github.com/containernetworking/cni/pkg/types"
-	cni020 "github.com/containernetworking/cni/pkg/types/020"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/factory"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
 )
 
 func clientDoCNI(t *testing.T, client *http.Client, req *Request) ([]byte, int) {
@@ -55,9 +54,7 @@ var expectedResult cnitypes.Result
 func serverHandleCNI(request *PodRequest, podLister corev1listers.PodLister) ([]byte, error) {
 	if request.Command == CNIAdd {
 		return json.Marshal(&expectedResult)
-	} else if request.Command == CNIDel {
-		return nil, nil
-	} else if request.Command == CNIUpdate {
+	} else if request.Command == CNIDel || request.Command == CNIUpdate || request.Command == CNICheck {
 		return nil, nil
 	}
 	return nil, fmt.Errorf("unhandled CNI command %v", request.Command)
@@ -68,11 +65,12 @@ func makeCNIArgs(namespace, name string) string {
 }
 
 const (
-	sandboxID string = "adsfadsfasfdasdfasf"
-	namespace string = "awesome-namespace"
-	name      string = "awesome-name"
-	cniConfig string = "{\"cniVersion\": \"0.1.0\",\"name\": \"ovnkube\",\"type\": \"ovnkube\"}"
-	nodeName  string = "mynode"
+	sandboxID    string = "adsfadsfasfdasdfasf"
+	namespace    string = "awesome-namespace"
+	name         string = "awesome-name"
+	cniConfig    string = "{\"cniVersion\": \"0.1.0\",\"name\": \"ovnkube\",\"type\": \"ovnkube\"}"
+	cniConfig_40 string = "{\"cniVersion\": \"0.4.0\",\"name\": \"ovnkube\",\"type\": \"ovnkube\"}"
+	nodeName     string = "mynode"
 )
 
 func TestCNIServer(t *testing.T) {
@@ -160,6 +158,20 @@ func TestCNIServer(t *testing.T) {
 					"CNI_ARGS":        makeCNIArgs(namespace, name),
 				},
 				Config: []byte(cniConfig),
+			},
+			result: nil,
+		},
+		// Normal CHECK request
+		{
+			name: "CHECK",
+			request: &Request{
+				Env: map[string]string{
+					"CNI_COMMAND":     string(CNICheck),
+					"CNI_CONTAINERID": sandboxID,
+					"CNI_NETNS":       "/path/to/something",
+					"CNI_ARGS":        makeCNIArgs(namespace, name),
+				},
+				Config: []byte(cniConfig_40),
 			},
 			result: nil,
 		},
