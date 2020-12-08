@@ -29,12 +29,6 @@ const DefaultEncapPort = 6081
 
 const DefaultAPIServer = "http://localhost:8443"
 
-// IP address range from which subnet is allocated for per-node join switch
-const (
-	V4JoinSubnet = "100.64.0.0/16"
-	V6JoinSubnet = "fd98::/48"
-)
-
 // Default IANA-assigned UDP port number for VXLAN
 const DefaultVXLANPort = 4789
 
@@ -104,7 +98,10 @@ var (
 	OvnSouth OvnAuthConfig
 
 	// Gateway holds node gateway-related parsed config file parameters and command-line overrides
-	Gateway GatewayConfig
+	Gateway = GatewayConfig{
+		V4JoinSubnet: "100.64.0.0/16",
+		V6JoinSubnet: "fd98::/64",
+	}
 
 	// MasterHA holds master HA related config options.
 	MasterHA = MasterHAConfig{
@@ -246,6 +243,10 @@ type GatewayConfig struct {
 	NodeportEnable bool `gcfg:"nodeport"`
 	// DisableSNATMultipleGws sets whether to disable SNAT of egress traffic in namespaces annotated with routing-external-gws
 	DisableSNATMultipleGWs bool `gcfg:"disable-snat-multiple-gws"`
+	// V4JoinSubnet to be used in the cluster
+	V4JoinSubnet string `gcfg:"v4-join-subnet"`
+	// V6JoinSubnet to be used in the cluster
+	V6JoinSubnet string `gcfg:"v6-join-subnet"`
 }
 
 // OvnAuthConfig holds client authentication and location details for
@@ -809,7 +810,18 @@ var OVNGatewayFlags = []cli.Flag{
 		Usage:       "Disable SNAT for egress traffic with multiple gateways.",
 		Destination: &cliConfig.Gateway.DisableSNATMultipleGWs,
 	},
-
+	&cli.StringFlag{
+		Name:        "gateway-v4-join-subnet",
+		Usage:       "The v4 join subnet used for assigning join switch IPv4 addresses",
+		Destination: &cliConfig.Gateway.V4JoinSubnet,
+		Value:       Gateway.V4JoinSubnet,
+	},
+	&cli.StringFlag{
+		Name:        "gateway-v6-join-subnet",
+		Usage:       "The v6 join subnet used for assigning join switch IPv6 addresses",
+		Destination: &cliConfig.Gateway.V6JoinSubnet,
+		Value:       Gateway.V6JoinSubnet,
+	},
 	// Deprecated CLI options
 	&cli.BoolFlag{
 		Name:        "init-gateways",
@@ -1060,7 +1072,7 @@ func buildKubernetesConfig(exec kexec.Interface, cli, file *config, saPath strin
 	return nil
 }
 
-func buildGatewayConfig(ctx *cli.Context, cli, file *config) error {
+func buildGatewayConfig(ctx *cli.Context, cli, file *config, allSubnets *configSubnets) error {
 	// Copy config file values over default values
 	if err := overrideFields(&Gateway, &file.Gateway, &savedGateway); err != nil {
 		return err
@@ -1108,6 +1120,21 @@ func buildGatewayConfig(ctx *cli.Context, cli, file *config) error {
 	if Gateway.Mode != GatewayModeShared && Gateway.VLANID != 0 {
 		return fmt.Errorf("gateway VLAN ID option: %d is supported only in shared gateway mode", Gateway.VLANID)
 	}
+
+	// Validate v4 and v6 join subnets
+	v4IP, v4JoinCIDR, err := net.ParseCIDR(Gateway.V4JoinSubnet)
+	if err != nil || utilnet.IsIPv6(v4IP) {
+		return fmt.Errorf("invalid gateway v4 join subnet specified, subnet: %s: error: %v", Gateway.V4JoinSubnet, err)
+	}
+
+	v6IP, v6JoinCIDR, err := net.ParseCIDR(Gateway.V6JoinSubnet)
+	if err != nil || !utilnet.IsIPv6(v6IP) {
+		return fmt.Errorf("invalid gateway v6 join subnet specified, subnet: %s: error: %v", Gateway.V6JoinSubnet, err)
+	}
+
+	allSubnets.append(configSubnetJoin, v4JoinCIDR)
+	allSubnets.append(configSubnetJoin, v6JoinCIDR)
+
 	return nil
 }
 
@@ -1256,8 +1283,6 @@ func initConfigWithPath(ctx *cli.Context, exec kexec.Interface, saPath string, d
 	}
 
 	allSubnets := newConfigSubnets()
-	allSubnets.appendConst(configSubnetJoin, V4JoinSubnet)
-	allSubnets.appendConst(configSubnetJoin, V6JoinSubnet)
 
 	configFile, configFileIsDefault = getConfigFilePath(ctx)
 
@@ -1336,7 +1361,7 @@ func initConfigWithPath(ctx *cli.Context, exec kexec.Interface, saPath string, d
 		return "", err
 	}
 
-	if err = buildGatewayConfig(ctx, &cliConfig, &cfg); err != nil {
+	if err = buildGatewayConfig(ctx, &cliConfig, &cfg, allSubnets); err != nil {
 		return "", err
 	}
 
