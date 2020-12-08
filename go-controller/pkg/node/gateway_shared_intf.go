@@ -42,11 +42,7 @@ func (npw *nodePortWatcher) AddService(service *kapi.Service) {
 	for _, svcPort := range service.Spec.Ports {
 		protocol := strings.ToLower(string(svcPort.Protocol))
 		protocol6 := protocol + "6"
-		if util.ServiceTypeHasNodePort(service) {
-			if err := util.ValidatePort(svcPort.Protocol, svcPort.NodePort); err != nil {
-				klog.Errorf("Skipping service add for svc: %s, err: %v", svcPort.Name, err)
-				continue
-			}
+		if svcPort.NodePort > 0 {
 			if config.IPv4Mode {
 				_, stderr, err := util.RunOVSOfctl("add-flow", npw.gwBridge,
 					fmt.Sprintf("priority=100, in_port=%s, %s, tp_dst=%d, actions=%s",
@@ -148,11 +144,7 @@ func (npw *nodePortWatcher) DeleteService(service *kapi.Service) {
 	for _, svcPort := range service.Spec.Ports {
 		protocol := strings.ToLower(string(svcPort.Protocol))
 		protocol6 := protocol + "6"
-		if util.ServiceTypeHasNodePort(service) {
-			if err := util.ValidatePort(svcPort.Protocol, svcPort.NodePort); err != nil {
-				klog.Errorf("Skipping service delete, for svc: %s, err: %v", svcPort.Name, err)
-				continue
-			}
+		if svcPort.NodePort > 0 {
 			if config.IPv4Mode {
 				_, stderr, err := util.RunOVSOfctl("del-flows", npw.gwBridge,
 					fmt.Sprintf("in_port=%s, %s, tp_dst=%d",
@@ -229,20 +221,12 @@ func (npw *nodePortWatcher) SyncServices(services []interface{}) {
 		}
 
 		for _, svcPort := range service.Spec.Ports {
-			if util.ServiceTypeHasNodePort(service) {
-				if err := util.ValidatePort(svcPort.Protocol, svcPort.NodePort); err != nil {
-					klog.Errorf("syncServices error for service port %s: %v", svcPort.Name, err)
-					continue
-				}
+			if svcPort.NodePort > 0 {
 				protocol := strings.ToLower(string(svcPort.Protocol))
 				nodePortKey := fmt.Sprintf("%s_%d", protocol, svcPort.NodePort)
 				ports[nodePortKey] = ""
 			}
 			for _, externalIP := range service.Spec.ExternalIPs {
-				if err := util.ValidatePort(svcPort.Protocol, svcPort.Port); err != nil {
-					klog.Errorf("syncServices error for service port %s: %v", svcPort.Name, err)
-					continue
-				}
 				protocol := strings.ToLower(string(svcPort.Protocol))
 				externalPortKey := fmt.Sprintf("%s_%d", protocol, svcPort.Port)
 				ports[externalPortKey] = externalIP
