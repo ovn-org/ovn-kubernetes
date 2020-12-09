@@ -5,6 +5,7 @@ import (
 	"net"
 	"sync"
 
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/factory"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
 	kapi "k8s.io/api/core/v1"
@@ -48,6 +49,9 @@ const (
 	toLport   = "to-lport"
 	fromLport = "from-lport"
 	noneMatch = "None"
+	// IPv6 multicast traffic destined to dynamic groups must have the "T" bit
+	// set to 1: https://tools.ietf.org/html/rfc3307#section-4.3
+	ipv6DynamicMulticastMatch = "(ip6.dst[120..127] == 0xff && ip6.dst[116] == 1)"
 	// Default deny acl rule priority
 	defaultDenyPriority = "1000"
 	// Default allow acl rule priority
@@ -239,11 +243,54 @@ func (oc *Controller) createDefaultDenyPortGroup(policyType knet.PolicyType) err
 	return nil
 }
 
+func getACLMatchAF(ipv4Match, ipv6Match string) string {
+	if config.IPv4Mode && config.IPv6Mode {
+		return "(" + ipv4Match + " || " + ipv6Match + ")"
+	} else if config.IPv4Mode {
+		return ipv4Match
+	} else {
+		return ipv6Match
+	}
+}
+
+// Creates the match string used for ACLs matching on multicast traffic.
+func getMulticastACLMatch() string {
+	return "(ip4.mcast || mldv1 || mldv2 || " + ipv6DynamicMulticastMatch + ")"
+}
+
+func getMulticastACLIgrMatchV4(addrSetName string) string {
+	return "ip4.src == $" + addrSetName + " && ip4.mcast"
+}
+
+func getMulticastACLIgrMatchV6(addrSetName string) string {
+	return "ip6.src == $" + addrSetName + " && " + ipv6DynamicMulticastMatch
+}
+
 // Creates the match string used for ACLs allowing incoming multicast into a
 // namespace, that is, from IPs that are in the namespace's address set.
-func getMulticastACLMatch(nsInfo *namespaceInfo) string {
-	ipv4HashedAS, _ := nsInfo.addressSet.GetASHashNames()
-	return "ip4.src == $" + ipv4HashedAS + " && ip4.mcast"
+func getMulticastACLIgrMatch(nsInfo *namespaceInfo) string {
+	var ipv4Match, ipv6Match string
+	addrSetNameV4, addrSetNameV6 := nsInfo.addressSet.GetASHashNames()
+	if config.IPv4Mode {
+		ipv4Match = getMulticastACLIgrMatchV4(addrSetNameV4)
+	}
+	if config.IPv6Mode {
+		ipv6Match = getMulticastACLIgrMatchV6(addrSetNameV6)
+	}
+	return getACLMatchAF(ipv4Match, ipv6Match)
+}
+
+// Creates the match string used for ACLs allowing outgoing multicast from a
+// namespace.
+func getMulticastACLEgrMatch() string {
+	var ipv4Match, ipv6Match string
+	if config.IPv4Mode {
+		ipv4Match = "ip4.mcast"
+	}
+	if config.IPv6Mode {
+		ipv6Match = "(mldv1 || mldv2 || " + ipv6DynamicMulticastMatch + ")"
+	}
+	return getACLMatchAF(ipv4Match, ipv6Match)
 }
 
 // Creates a policy to allow multicast traffic within 'ns':
@@ -260,7 +307,8 @@ func (oc *Controller) createMulticastAllowPolicy(ns string, nsInfo *namespaceInf
 	}
 
 	portGroupName := hashedPortGroup(ns)
-	match := getACLMatch(portGroupName, "ip4.mcast", knet.PolicyTypeEgress)
+	match := getACLMatch(portGroupName, getMulticastACLEgrMatch(),
+		knet.PolicyTypeEgress)
 	err = addACLPortGroup(nsInfo.portGroupUUID, fromLport,
 		defaultMcastAllowPriority, match, "allow", knet.PolicyTypeEgress)
 	if err != nil {
@@ -268,7 +316,8 @@ func (oc *Controller) createMulticastAllowPolicy(ns string, nsInfo *namespaceInf
 			ns, err)
 	}
 
-	match = getACLMatch(portGroupName, getMulticastACLMatch(nsInfo), knet.PolicyTypeIngress)
+	match = getACLMatch(portGroupName, getMulticastACLIgrMatch(nsInfo),
+		knet.PolicyTypeIngress)
 	err = addACLPortGroup(nsInfo.portGroupUUID, toLport,
 		defaultMcastAllowPriority, match, "allow", knet.PolicyTypeIngress)
 	if err != nil {
@@ -295,16 +344,15 @@ func (oc *Controller) createMulticastAllowPolicy(ns string, nsInfo *namespaceInf
 
 func deleteMulticastACLs(ns, portGroupHash string, nsInfo *namespaceInfo) error {
 	err := deleteACLPortGroup(portGroupHash, fromLport,
-		defaultMcastAllowPriority, "ip4.mcast", "allow",
+		defaultMcastAllowPriority, getMulticastACLEgrMatch(), "allow",
 		knet.PolicyTypeEgress)
 	if err != nil {
 		return fmt.Errorf("failed to delete allow egress multicast ACL for %s (%v)",
 			ns, err)
 	}
 
-	err = deleteACLPortGroup(portGroupHash, toLport,
-		defaultMcastAllowPriority, getMulticastACLMatch(nsInfo), "allow",
-		knet.PolicyTypeIngress)
+	err = deleteACLPortGroup(portGroupHash, toLport, defaultMcastAllowPriority,
+		getMulticastACLIgrMatch(nsInfo), "allow", knet.PolicyTypeIngress)
 	if err != nil {
 		return fmt.Errorf("failed to delete allow ingress multicast ACL for %s (%v)",
 			ns, err)
@@ -336,7 +384,7 @@ func (oc *Controller) createDefaultDenyMulticastPolicy() error {
 	// By default deny any egress multicast traffic from any pod. This drops
 	// IP multicast membership reports therefore denying any multicast traffic
 	// to be forwarded to pods.
-	match := "match=\"ip4.mcast\""
+	match := "match=\"" + getMulticastACLMatch() + "\""
 	err := addACLPortGroup(oc.clusterPortGroupUUID, fromLport,
 		defaultMcastDenyPriority, match, "drop", knet.PolicyTypeEgress)
 	if err != nil {
@@ -361,14 +409,15 @@ func (oc *Controller) createDefaultDenyMulticastPolicy() error {
 // - one ACL allowing multicast traffic to cluster router ports.
 // Caller must hold the namespace's namespaceInfo object lock.
 func (oc *Controller) createDefaultAllowMulticastPolicy() error {
-	match := getACLMatch(clusterRtrPortGroupName, "ip4.mcast", knet.PolicyTypeEgress)
+	mcastMatch := getMulticastACLMatch()
+	match := getACLMatch(clusterRtrPortGroupName, mcastMatch, knet.PolicyTypeEgress)
 	err := addACLPortGroup(oc.clusterRtrPortGroupUUID, fromLport,
 		defaultRoutedMcastAllowPriority, match, "allow", knet.PolicyTypeEgress)
 	if err != nil {
 		return fmt.Errorf("failed to create default deny multicast egress ACL: %v", err)
 	}
 
-	match = getACLMatch(clusterRtrPortGroupName, "ip4.mcast", knet.PolicyTypeIngress)
+	match = getACLMatch(clusterRtrPortGroupName, mcastMatch, knet.PolicyTypeIngress)
 	err = addACLPortGroup(oc.clusterRtrPortGroupUUID, toLport,
 		defaultRoutedMcastAllowPriority, match, "allow", knet.PolicyTypeIngress)
 	if err != nil {
