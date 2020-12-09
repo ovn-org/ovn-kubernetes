@@ -46,6 +46,7 @@ import (
 const (
 	egressfirewallCRD                string        = "egressfirewalls.k8s.ovn.org"
 	clusterPortGroupName             string        = "clusterPortGroup"
+	clusterRtrPortGroupName          string        = "clusterRtrPortGroup"
 	egressFirewallDNSDefaultDuration time.Duration = 30 * time.Minute
 )
 
@@ -147,6 +148,10 @@ type Controller struct {
 
 	// Port group for all cluster logical switch ports
 	clusterPortGroupUUID string
+
+	// Port group for all node logical switch ports connected to the cluster
+	// logical router
+	clusterRtrPortGroupUUID string
 
 	// Port group for ingress deny rule
 	portGroupIngressDeny string
