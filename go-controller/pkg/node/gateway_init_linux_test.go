@@ -11,11 +11,9 @@ import (
 	"syscall"
 
 	"github.com/urfave/cli/v2"
-	kapi "k8s.io/api/core/v1"
 	v1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/client-go/kubernetes/fake"
-	"k8s.io/client-go/tools/cache"
 
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/factory"
@@ -35,24 +33,6 @@ import (
 	. "github.com/onsi/ginkgo"
 	. "github.com/onsi/gomega"
 )
-
-func startGateway(gw Gateway, wf factory.NodeWatchFactory) {
-	wf.AddServiceHandler(cache.ResourceEventHandlerFuncs{
-		AddFunc: func(obj interface{}) {
-			svc := obj.(*kapi.Service)
-			gw.AddService(svc)
-		},
-		UpdateFunc: func(old, new interface{}) {
-			oldSvc := old.(*kapi.Service)
-			newSvc := new.(*kapi.Service)
-			gw.UpdateService(oldSvc, newSvc)
-		},
-		DeleteFunc: func(obj interface{}) {
-			svc := obj.(*kapi.Service)
-			gw.DeleteService(svc)
-		},
-	}, gw.SyncServices)
-}
 
 func setupNodeAccessBridgeTest(fexec *ovntest.FakeExec, nodeName, brLocalnetMAC, mtu string) {
 	gwPortMac := util.IPAddrToHWAddr(net.ParseIP(types.V4NodeLocalNATSubnetNextHop)).String()
@@ -234,9 +214,8 @@ cookie=0x0, duration=8366.597s, table=1, n_packets=10641, n_bytes=10370087, prio
 			gatewayNextHops, gatewayIntf, err := getGatewayNextHops()
 			sharedGw, err := newSharedGateway(nodeName, ovntest.MustParseIPNets(nodeSubnet), gatewayNextHops, gatewayIntf, nodeAnnotator)
 			Expect(err).NotTo(HaveOccurred())
-			err = sharedGw.Init()
+			err = sharedGw.Init(wf)
 			Expect(err).NotTo(HaveOccurred())
-			startGateway(sharedGw, wf)
 			// check if IP addresses have been assigned to localnetGatewayNextHopPort interface
 			link, err := netlink.LinkByName(localnetGatewayNextHopPort)
 			Expect(err).NotTo(HaveOccurred())

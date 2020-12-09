@@ -5,8 +5,6 @@ import (
 	"net"
 	"strings"
 
-	kapi "k8s.io/api/core/v1"
-	"k8s.io/client-go/tools/cache"
 	"k8s.io/klog/v2"
 	utilnet "k8s.io/utils/net"
 
@@ -208,50 +206,18 @@ func (n *OvnNode) initGateway(subnets []*net.IPNet, nodeAnnotator kube.Annotator
 	gw.loadBalancerHealthChecker = loadBalancerHealthChecker
 	gw.portClaimWatcher = portClaimWatcher
 
+	initGw := func() error {
+		return gw.Init(n.watchFactory)
+	}
 	// Wait for gateway resources to be created by the master if DisableSNATMultipleGWs is not set,
 	// as that option does not add default SNAT rules on the GR and the gatewayReady function checks
 	// those default NAT rules are present
 	if !config.Gateway.DisableSNATMultipleGWs && config.Gateway.Mode != config.GatewayModeLocal {
-		waiter.AddWait(gatewayReady, gw.Init)
+		waiter.AddWait(gatewayReady, initGw)
 	} else {
-		waiter.AddWait(func() (bool, error) { return true, nil }, gw.Init)
+		waiter.AddWait(func() (bool, error) { return true, nil }, initGw)
 	}
-
 	n.gateway = gw
-	n.watchFactory.AddServiceHandler(cache.ResourceEventHandlerFuncs{
-		AddFunc: func(obj interface{}) {
-			svc := obj.(*kapi.Service)
-			n.gateway.AddService(svc)
-		},
-		UpdateFunc: func(old, new interface{}) {
-			oldSvc := old.(*kapi.Service)
-			newSvc := new.(*kapi.Service)
-			n.gateway.UpdateService(oldSvc, newSvc)
-		},
-		DeleteFunc: func(obj interface{}) {
-			svc := obj.(*kapi.Service)
-			n.gateway.DeleteService(svc)
-		},
-	}, n.gateway.SyncServices)
-	if err != nil {
-		return err
-	}
-
-	n.watchFactory.AddEndpointsHandler(cache.ResourceEventHandlerFuncs{
-		AddFunc: func(obj interface{}) {
-			ep := obj.(*kapi.Endpoints)
-			n.gateway.AddEndpoints(ep)
-		},
-		UpdateFunc: func(old, new interface{}) {
-			oldEp := old.(*kapi.Endpoints)
-			newEp := new.(*kapi.Endpoints)
-			n.gateway.UpdateEndpoints(oldEp, newEp)
-		},
-		DeleteFunc: func(obj interface{}) {
-			ep := obj.(*kapi.Endpoints)
-			n.gateway.DeleteEndpoints(ep)
-		},
-	}, nil)
 	return err
 }
 
