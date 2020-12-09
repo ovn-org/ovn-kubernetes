@@ -125,7 +125,7 @@ func shareGatewayInterfaceTest(app *cli.App, testNS ns.NetNS,
 			Output: systemID,
 		})
 		fexec.AddFakeCmd(&ovntest.ExpectedCmd{
-			Cmd:    "ovs-vsctl --timeout=15 wait-until Interface patch-breth0_node1-to-br-int ofport>0 -- get Interface patch-breth0_node1-to-br-int ofport",
+			Cmd:    "ovs-vsctl --timeout=15 get Interface patch-breth0_node1-to-br-int ofport",
 			Output: "5",
 		})
 		fexec.AddFakeCmd(&ovntest.ExpectedCmd{

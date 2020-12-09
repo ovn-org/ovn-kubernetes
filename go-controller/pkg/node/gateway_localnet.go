@@ -57,6 +57,10 @@ func newLocalGateway(nodeName string, hostSubnets []*net.IPNet, gwNextHops []net
 		return nil, err
 	}
 
+	// the name of the patch port created by ovn-controller is of the form
+	// patch-<logical_port_name_of_localnet_port>-to-br-int
+	patchPort := "patch-" + bridgeName + "_" + nodeName + "-to-br-int"
+
 	if config.Gateway.NodeportEnable {
 		localAddrSet, err := getLocalAddrs()
 		if err != nil {
@@ -72,10 +76,14 @@ func newLocalGateway(nodeName string, hostSubnets []*net.IPNet, gwNextHops []net
 		gw.localPortWatcher = newLocalPortWatcher(gatewayIfAddrs, recorder, localAddrSet)
 	}
 
+	gw.readyFunc = func() (bool, error) {
+		return gatewayReady(patchPort)
+	}
+
 	gw.initFunc = func() error {
 		klog.Info("Creating Local Gateway Openflow Manager")
 		var err error
-		gw.openflowManager, err = newLocalGatewayOpenflowManager(nodeName, macAddress.String(), bridgeName, uplinkName)
+		gw.openflowManager, err = newLocalGatewayOpenflowManager(patchPort, macAddress.String(), bridgeName, uplinkName)
 		return err
 	}
 
@@ -418,15 +426,10 @@ func getLoadBalancerIPTRules(svc *kapi.Service, svcPort kapi.ServicePort, gatewa
 // -- to also connection track the outbound north-south traffic through l3 gateway so that
 //    the return traffic can be steered back to OVN logical topology
 // -- to also handle unDNAT return traffic back out of the host
-func newLocalGatewayOpenflowManager(nodeName, macAddress, gwBridge, gwIntf string) (*openflowManager, error) {
-	// the name of the patch port created by ovn-controller is of the form
-	// patch-<logical_port_name_of_localnet_port>-to-br-int
-	localnetLpName := gwBridge + "_" + nodeName
-	patchPort := "patch-" + localnetLpName + "-to-br-int"
+func newLocalGatewayOpenflowManager(patchPort, macAddress, gwBridge, gwIntf string) (*openflowManager, error) {
 	// Get ofport of patchPort, but before that make sure ovn-controller created
 	// one for us (waits for about ovsCommandTimeout seconds)
-	ofportPatch, stderr, err := util.RunOVSVsctl("wait-until", "Interface", patchPort, "ofport>0",
-		"--", "get", "Interface", patchPort, "ofport")
+	ofportPatch, stderr, err := util.RunOVSVsctl("get", "Interface", patchPort, "ofport")
 	if err != nil {
 		return nil, fmt.Errorf("failed while waiting on patch port %q to be created by ovn-controller and "+
 			"while getting ofport. stderr: %q, error: %v", patchPort, stderr, err)

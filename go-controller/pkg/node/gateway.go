@@ -37,6 +37,7 @@ type gateway struct {
 	localPortWatcher informer.ServiceEventHandler
 	openflowManager  *openflowManager
 	initFunc         func() error
+	readyFunc        func() (bool, error)
 }
 
 func (g *gateway) AddService(svc *kapi.Service) {
@@ -231,4 +232,14 @@ func gatewayInitInternal(nodeName, gwIntf string, subnets []*net.IPNet, gwNextHo
 		VLANID:         &config.Gateway.VLANID,
 	})
 	return bridgeName, uplinkName, macAddress, ips, err
+}
+
+func gatewayReady(patchPort string) (bool, error) {
+	// Get ofport of patchPort
+	ofportPatch, _, err := util.RunOVSVsctl("--if-exists", "get", "interface", patchPort, "ofport")
+	if err != nil || len(ofportPatch) == 0 {
+		return false, nil
+	}
+	klog.Info("Gateway is ready")
+	return true, nil
 }

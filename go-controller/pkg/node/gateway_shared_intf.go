@@ -332,15 +332,9 @@ func (npw *nodePortWatcher) SyncServices(services []interface{}) {
 // -- to also connection track the outbound north-south traffic through l3 gateway so that
 //    the return traffic can be steered back to OVN logical topology
 // -- to also handle unDNAT return traffic back out of the host
-func newSharedGatewayOpenFlowManager(nodeName, macAddress, gwBridge, gwIntf string) (*openflowManager, error) {
-	// the name of the patch port created by ovn-controller is of the form
-	// patch-<logical_port_name_of_localnet_port>-to-br-int
-	localnetLpName := gwBridge + "_" + nodeName
-	patchPort := "patch-" + localnetLpName + "-to-br-int"
-	// Get ofport of patchPort, but before that make sure ovn-controller created
-	// one for us (waits for about ovsCommandTimeout seconds)
-	ofportPatch, stderr, err := util.RunOVSVsctl("wait-until", "Interface", patchPort, "ofport>0",
-		"--", "get", "Interface", patchPort, "ofport")
+func newSharedGatewayOpenFlowManager(patchPort, macAddress, gwBridge, gwIntf string) (*openflowManager, error) {
+	// Get ofport of patchPort
+	ofportPatch, stderr, err := util.RunOVSVsctl("get", "Interface", patchPort, "ofport")
 	if err != nil {
 		return nil, fmt.Errorf("failed while waiting on patch port %q to be created by ovn-controller and "+
 			"while getting ofport. stderr: %q, error: %v", patchPort, stderr, err)
@@ -507,20 +501,28 @@ func newSharedGateway(nodeName string, subnets []*net.IPNet, gwNextHops []net.IP
 		return nil, err
 	}
 
+	// the name of the patch port created by ovn-controller is of the form
+	// patch-<logical_port_name_of_localnet_port>-to-br-int
+	patchPort := "patch-" + bridgeName + "_" + nodeName + "-to-br-int"
+
+	gw.readyFunc = func() (bool, error) {
+		return gatewayReady(patchPort)
+	}
+
 	gw.initFunc = func() error {
 		// Program cluster.GatewayIntf to let non-pod traffic to go to host
 		// stack
 		klog.Info("Creating Shared Gateway Openflow Manager")
 		var err error
 
-		gw.openflowManager, err = newSharedGatewayOpenFlowManager(nodeName, macAddress.String(), bridgeName, uplinkName)
+		gw.openflowManager, err = newSharedGatewayOpenFlowManager(patchPort, macAddress.String(), bridgeName, uplinkName)
 		if err != nil {
 			return err
 		}
 
 		if config.Gateway.NodeportEnable {
 			klog.Info("Creating Shared Gateway Node Port Watcher")
-			gw.nodePortWatcher, err = newNodePortWatcher(nodeName, bridgeName, uplinkName, ips[0])
+			gw.nodePortWatcher, err = newNodePortWatcher(patchPort, bridgeName, uplinkName, ips[0])
 			if err != nil {
 				return err
 			}
@@ -532,10 +534,7 @@ func newSharedGateway(nodeName string, subnets []*net.IPNet, gwNextHops []net.IP
 	return gw, nil
 }
 
-func newNodePortWatcher(nodeName, gwBridge, gwIntf string, nodeIP *net.IPNet) (*nodePortWatcher, error) {
-	// the name of the patch port created by ovn-controller is of the form
-	// patch-<logical_port_name_of_localnet_port>-to-br-int
-	patchPort := "patch-" + gwBridge + "_" + nodeName + "-to-br-int"
+func newNodePortWatcher(patchPort, gwBridge, gwIntf string, nodeIP *net.IPNet) (*nodePortWatcher, error) {
 	// Get ofport of patchPort
 	ofportPatch, stderr, err := util.RunOVSVsctl("--if-exists", "get",
 		"interface", patchPort, "ofport")
