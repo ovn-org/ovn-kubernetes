@@ -297,10 +297,6 @@ func (oc *Controller) StartClusterMaster(masterNodeName string) error {
 				"Disabling Multicast Support")
 			oc.multicastSupport = false
 		}
-		if !config.IPv4Mode {
-			klog.Warningf("Multicast support enabled, but can not be used with single-stack IPv6. Disabling Multicast Support")
-			oc.multicastSupport = false
-		}
 	}
 
 	if err := oc.SetupMaster(masterNodeName); err != nil {
@@ -676,12 +672,14 @@ func (oc *Controller) ensureNodeLogicalNetwork(nodeName string, hostSubnets []*n
 		"--", "set", "logical_switch", nodeName,
 	}
 
-	var v4Gateway net.IP
+	var v4Gateway, v6Gateway net.IP
 	for _, hostSubnet := range hostSubnets {
 		gwIfAddr := util.GetNodeGatewayIfAddr(hostSubnet)
 		lrpArgs = append(lrpArgs, gwIfAddr.String())
 
 		if utilnet.IsIPv6CIDR(hostSubnet) {
+			v6Gateway = gwIfAddr.IP
+
 			lsArgs = append(lsArgs,
 				"other-config:ipv6_prefix="+hostSubnet.IP.String(),
 			)
@@ -715,7 +713,7 @@ func (oc *Controller) ensureNodeLogicalNetwork(nodeName string, hostSubnets []*n
 		return err
 	}
 
-	// If supported, enable IGMP snooping and querier on the node.
+	// If supported, enable IGMP/MLD snooping and querier on the node.
 	if oc.multicastSupport {
 		stdout, stderr, err = util.RunOVNNbctl("set", "logical_switch",
 			nodeName, "other-config:mcast_snoop=\"true\"")
@@ -725,27 +723,40 @@ func (oc *Controller) ensureNodeLogicalNetwork(nodeName string, hostSubnets []*n
 			return err
 		}
 
-		// Configure querier only if we have an IPv4 address, otherwise
-		// disable querier.
-		if v4Gateway != nil {
-			stdout, stderr, err = util.RunOVNNbctl("set", "logical_switch",
-				nodeName, "other-config:mcast_querier=\"true\"",
-				"other-config:mcast_eth_src=\""+nodeLRPMAC.String()+"\"",
-				"other-config:mcast_ip4_src=\""+v4Gateway.String()+"\"")
-			if err != nil {
-				klog.Errorf("Failed to enable IGMP Querier on logical switch %v, stdout: %q, stderr: %q, error: %v",
-					nodeName, stdout, stderr, err)
-				return err
+		// Configure IGMP/MLD querier if the gateway IP address is known.
+		// Otherwise disable it.
+		if v4Gateway != nil || v6Gateway != nil {
+			if v4Gateway != nil {
+				stdout, stderr, err = util.RunOVNNbctl("set", "logical_switch",
+					nodeName, "other-config:mcast_querier=\"true\"",
+					"other-config:mcast_eth_src=\""+nodeLRPMAC.String()+"\"",
+					"other-config:mcast_ip4_src=\""+v4Gateway.String()+"\"")
+				if err != nil {
+					klog.Errorf("Failed to enable IGMP Querier on logical switch %v, stdout: %q, stderr: %q, error: %v",
+						nodeName, stdout, stderr, err)
+					return err
+				}
+			}
+			if v6Gateway != nil {
+				stdout, stderr, err = util.RunOVNNbctl("set", "logical_switch",
+					nodeName, "other-config:mcast_querier=\"true\"",
+					"other-config:mcast_eth_src=\""+nodeLRPMAC.String()+"\"",
+					"other-config:mcast_ip6_src=\""+v6Gateway.String()+"\"")
+				if err != nil {
+					klog.Errorf("Failed to enable MLD Querier on logical switch %v, stdout: %q, stderr: %q, error: %v",
+						nodeName, stdout, stderr, err)
+					return err
+				}
 			}
 		} else {
 			stdout, stderr, err = util.RunOVNNbctl("set", "logical_switch",
 				nodeName, "other-config:mcast_querier=\"false\"")
 			if err != nil {
-				klog.Errorf("Failed to disable IGMP Querier on logical switch %v, stdout: %q, stderr: %q, error: %v",
+				klog.Errorf("Failed to disable IGMP/MLD Querier on logical switch %v, stdout: %q, stderr: %q, error: %v",
 					nodeName, stdout, stderr, err)
 				return err
 			}
-			klog.Infof("Disabled IGMP Querier on logical switch %v (No IPv4 Source IP available)",
+			klog.Infof("Disabled IGMP/MLD Querier on logical switch %v (No IPv4/IPv6 Source IP available)",
 				nodeName)
 		}
 	}
