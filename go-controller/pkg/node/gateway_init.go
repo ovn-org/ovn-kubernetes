@@ -212,9 +212,7 @@ func (n *OvnNode) initGateway(subnets []*net.IPNet, nodeAnnotator kube.Annotator
 	// as that option does not add default SNAT rules on the GR and the gatewayReady function checks
 	// those default NAT rules are present
 	if !config.Gateway.DisableSNATMultipleGWs && config.Gateway.Mode != config.GatewayModeLocal {
-		waiter.AddWait(gatewayReady, gw.Init)
-	} else {
-		waiter.AddWait(func() (bool, error) { return true, nil }, gw.Init)
+		waiter.AddWait(gatewayReady, func() error { return nil })
 	}
 
 	n.gateway = gw

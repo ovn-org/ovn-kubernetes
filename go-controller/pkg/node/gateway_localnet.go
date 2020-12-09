@@ -72,11 +72,10 @@ func newLocalGateway(nodeName string, hostSubnets []*net.IPNet, gwNextHops []net
 		gw.localPortWatcher = newLocalPortWatcher(gatewayIfAddrs, recorder, localAddrSet)
 	}
 
-	gw.initFunc = func() error {
-		klog.Info("Creating Local Gateway Openflow Manager")
-		var err error
-		gw.openflowManager, err = newLocalGatewayOpenflowManager(nodeName, macAddress.String(), bridgeName, uplinkName)
-		return err
+	klog.Info("Creating Local Gateway Openflow Manager")
+	gw.openflowManager, err = newLocalGatewayOpenflowManager(nodeName, macAddress.String(), bridgeName, uplinkName)
+	if err != nil {
+		return nil, err
 	}
 
 	return gw, nil

@@ -234,8 +234,6 @@ cookie=0x0, duration=8366.597s, table=1, n_packets=10641, n_bytes=10370087, prio
 			gatewayNextHops, gatewayIntf, err := getGatewayNextHops()
 			sharedGw, err := newSharedGateway(nodeName, ovntest.MustParseIPNets(nodeSubnet), gatewayNextHops, gatewayIntf, nodeAnnotator)
 			Expect(err).NotTo(HaveOccurred())
-			err = sharedGw.Init()
-			Expect(err).NotTo(HaveOccurred())
 			startGateway(sharedGw, wf)
 			// check if IP addresses have been assigned to localnetGatewayNextHopPort interface
 			link, err := netlink.LinkByName(localnetGatewayNextHopPort)

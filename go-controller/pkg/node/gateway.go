@@ -9,7 +9,8 @@ import (
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/informer"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/kube"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
-	util "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
+
 	kapi "k8s.io/api/core/v1"
 	"k8s.io/klog/v2"
 )
@@ -20,7 +21,6 @@ import (
 // are kept in sync
 type Gateway interface {
 	informer.ServiceAndEndpointsEventHandler
-	Init() error
 	Run(<-chan struct{}, *sync.WaitGroup)
 }
 
@@ -34,7 +34,6 @@ type gateway struct {
 	// localPortWatcher is used in Local GW mode to handle iptables rules and routes for services
 	localPortWatcher informer.ServiceEventHandler
 	openflowManager  *openflowManager
-	initFunc         func() error
 }
 
 func (g *gateway) AddService(svc *kapi.Service) {
@@ -113,10 +112,6 @@ func (g *gateway) DeleteEndpoints(ep *kapi.Endpoints) {
 	if g.loadBalancerHealthChecker != nil {
 		g.loadBalancerHealthChecker.AddEndpoints(ep)
 	}
-}
-
-func (g *gateway) Init() error {
-	return g.initFunc()
 }
 
 func (g *gateway) Run(stopChan <-chan struct{}, wg *sync.WaitGroup) {

@@ -507,25 +507,18 @@ func newSharedGateway(nodeName string, subnets []*net.IPNet, gwNextHops []net.IP
 		return nil, err
 	}
 
-	gw.initFunc = func() error {
-		// Program cluster.GatewayIntf to let non-pod traffic to go to host
-		// stack
-		klog.Info("Creating Shared Gateway Openflow Manager")
-		var err error
+	klog.Info("Creating Shared Gateway Openflow Manager")
+	gw.openflowManager, err = newSharedGatewayOpenFlowManager(nodeName, macAddress.String(), bridgeName, uplinkName)
+	if err != nil {
+		return nil, err
+	}
 
-		gw.openflowManager, err = newSharedGatewayOpenFlowManager(nodeName, macAddress.String(), bridgeName, uplinkName)
+	if config.Gateway.NodeportEnable {
+		klog.Info("Creating Shared Gateway Node Port Watcher")
+		gw.nodePortWatcher, err = newNodePortWatcher(nodeName, bridgeName, uplinkName, ips[0])
 		if err != nil {
-			return err
+			return nil, err
 		}
-
-		if config.Gateway.NodeportEnable {
-			klog.Info("Creating Shared Gateway Node Port Watcher")
-			gw.nodePortWatcher, err = newNodePortWatcher(nodeName, bridgeName, uplinkName, ips[0])
-			if err != nil {
-				return err
-			}
-		}
-		return nil
 	}
 
 	klog.Info("Shared Gateway Creation Complete")
