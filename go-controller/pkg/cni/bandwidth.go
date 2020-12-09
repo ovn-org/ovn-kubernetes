@@ -2,6 +2,8 @@ package cni
 
 import (
 	"fmt"
+	"strconv"
+	"strings"
 )
 
 func clearPodBandwidth(sandboxID string) error {
@@ -61,4 +63,35 @@ func setPodBandwidth(sandboxID, ifname string, ingressBPS, egressBPS int64) erro
 	}
 
 	return nil
+}
+
+// Returns bandwidth restrictions (ingress and egress in bits/sec) that were set on the port.
+// If none restrictions were set, the function returns -1 for ingress and 0 (the OVS default value) for egress
+func getPodBandwidth(ifname string) (ingressBPS, egressBPS int64, err error) {
+	// note pod ingress == OVS egress and vice versa
+	ingressBPS = int64(-1)
+	egressBPS = int64(-1)
+	var out string
+
+	// ingressBPS
+	qos_id, err := ovsGet("port", ifname, "qos", "")
+	if err == nil && len(qos_id) > 0 {
+		out, err = ovsGet("qos", qos_id, "other_config", "max-rate")
+		if err == nil && len(out) > 0 {
+			out = strings.ReplaceAll(out, "\"", "")
+			ingressBPS, err = strconv.ParseInt(out, 10, 64)
+		}
+	}
+	if err != nil {
+		return ingressBPS, egressBPS, err
+	}
+	// egressBPS
+	out, err = ovsGet("interface", ifname, "ingress_policing_rate", "")
+	if err == nil && len(out) > 0 {
+		egressBPS, err = strconv.ParseInt(out, 10, 64)
+		if err == nil {
+			egressBPS *= 1000
+		}
+	}
+	return ingressBPS, egressBPS, err
 }
