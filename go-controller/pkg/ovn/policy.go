@@ -56,6 +56,8 @@ const (
 	defaultMcastDenyPriority = "1011"
 	// Default multicast allow acl rule priority
 	defaultMcastAllowPriority = "1012"
+	// Default routed multicast allow acl rule priority
+	defaultRoutedMcastAllowPriority = "1013"
 )
 
 func (oc *Controller) syncNetworkPolicies(networkPolicies []interface{}) {
@@ -350,6 +352,27 @@ func (oc *Controller) createDefaultDenyMulticastPolicy() error {
 	// Remove old multicastDefaultDeny port group now that all ports
 	// have been added to the clusterPortGroup by WatchPods()
 	deletePortGroup("mcastPortGroupDeny")
+	return nil
+}
+
+// Creates a global default allow multicast policy:
+// - one ACL allowing multicast traffic from cluster router ports
+// - one ACL allowing multicast traffic to cluster router ports.
+// Caller must hold the namespace's namespaceInfo object lock.
+func (oc *Controller) createDefaultAllowMulticastPolicy() error {
+	match := getACLMatch(clusterRtrPortGroupName, "ip4.mcast", knet.PolicyTypeEgress)
+	err := addACLPortGroup(oc.clusterRtrPortGroupUUID, fromLport,
+		defaultRoutedMcastAllowPriority, match, "allow", knet.PolicyTypeEgress)
+	if err != nil {
+		return fmt.Errorf("failed to create default deny multicast egress ACL: %v", err)
+	}
+
+	match = getACLMatch(clusterRtrPortGroupName, "ip4.mcast", knet.PolicyTypeIngress)
+	err = addACLPortGroup(oc.clusterRtrPortGroupUUID, toLport,
+		defaultRoutedMcastAllowPriority, match, "allow", knet.PolicyTypeIngress)
+	if err != nil {
+		return fmt.Errorf("failed to create default deny multicast ingress ACL: %v", err)
+	}
 	return nil
 }
 

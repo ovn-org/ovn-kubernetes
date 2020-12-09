@@ -360,6 +360,15 @@ func (oc *Controller) SetupMaster(masterNodeName string) error {
 		return err
 	}
 
+	// Create a cluster-wide port group with all node-to-cluster router
+	// logical switch ports.  Currently the only user is multicast but it might
+	// be used for other features in the future.
+	oc.clusterRtrPortGroupUUID, err = createPortGroup(clusterRtrPortGroupName, clusterRtrPortGroupName)
+	if err != nil {
+		klog.Errorf("Failed to create cluster port group: %v", err)
+		return err
+	}
+
 	// If supported, enable IGMP relay on the router to forward multicast
 	// traffic between nodes.
 	if oc.multicastSupport {
@@ -374,6 +383,13 @@ func (oc *Controller) SetupMaster(masterNodeName string) error {
 		// Drop IP multicast globally. Multicast is allowed only if explicitly
 		// enabled in a namespace.
 		if err := oc.createDefaultDenyMulticastPolicy(); err != nil {
+			klog.Errorf("Failed to create default deny multicast policy, error: %v", err)
+			return err
+		}
+
+		// Allow IP multicast from node switch to cluster router and from
+		// cluster router to node switch.
+		if err := oc.createDefaultAllowMulticastPolicy(); err != nil {
 			klog.Errorf("Failed to create default deny multicast policy, error: %v", err)
 			return err
 		}
@@ -735,10 +751,18 @@ func (oc *Controller) ensureNodeLogicalNetwork(nodeName string, hostSubnets []*n
 	}
 
 	// Connect the switch to the router.
-	_, err = addNodeLogicalSwitchPort(nodeName, types.SwitchToRouterPrefix+nodeName,
+	nodeSwToRtrUUID, err := addNodeLogicalSwitchPort(nodeName, types.SwitchToRouterPrefix+nodeName,
 		"router", nodeLRPMAC.String(), "router-port="+types.RouterToSwitchPrefix+nodeName)
 	if err != nil {
 		klog.Errorf("Failed to add logical port to switch, stdout: %q, stderr: %q, error: %v", stdout, stderr, err)
+		return err
+	}
+
+	if err = addToPortGroup(clusterRtrPortGroupName, &lpInfo{
+		uuid: nodeSwToRtrUUID,
+		name: types.SwitchToRouterPrefix + nodeName,
+	}); err != nil {
+		klog.Errorf(err.Error())
 		return err
 	}
 
