@@ -147,8 +147,10 @@ jobs:
         target:
           - shard: shard-conformance
             hybrid-overlay: false
+            multicast-enable: false
           - shard: control-plane
             hybrid-overlay: true
+            multicast-enable: true
         ha:
          - enabled: "true"
            name: "HA"
@@ -193,7 +195,11 @@ jobs:
          - {"ipfamily": {"ip": ipv6}, "ha": {"enabled": "false"}, "gateway-mode": shared}
          - {"ipfamily": {"ip": dualstack}, "ha": {"enabled": "true"}, "gateway-mode": shared}
          - {"ipfamily": {"ip": dualstack}, "ha": {"enabled": "false"}}
-    needs: [build, k8s]
+         # IPv6 multicast is supported but tests fail due to old iperf version
+         # in agnhost images. Disable them for now.
+         - {"ipfamily": {"ip": dualstack}, "target": {"shard": {"multicast-enable": "true"}}}
+         - {"ipfamily": {"ip": ipv6}, "target": {"shard": {"multicast-enable": "true"}}}
+    needs: [build]
     env:
       JOB_NAME: "${{ matrix.target.shard }}-${{ matrix.ha.name }}-${{ matrix.gateway-mode }}-${{ matrix.ipfamily.name }}"
       OVN_HA: "${{ matrix.ha.enabled }}"
@@ -201,6 +207,7 @@ jobs:
       KIND_IPV6_SUPPORT: "${{ matrix.ipfamily.ipv6 }}"
       OVN_HYBRID_OVERLAY_ENABLE: "${{ matrix.target.hybrid-overlay }}"
       OVN_GATEWAY_MODE: "${{ matrix.gateway-mode }}"
+      OVN_MULTICAST_ENABLE:  "${{ matrix.target.multicast-enable }}"
     steps:
 
     - name: Free up disk space
