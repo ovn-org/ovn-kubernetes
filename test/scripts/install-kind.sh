@@ -9,8 +9,8 @@ sudo mv ./kubectl /usr/local/bin/kubectl
 
 # Install latest e2e test binary
 # The e2e binaries are built from https://github.com/aojea/kubernetes-e2e-binaries
-# Current e2e binary versions is latest 1.19 tag v1.19.4
-curl -LO https://github.com/aojea/kubernetes-e2e-binaries/releases/download/d360454c/e2e.test
+# Current e2e binary versions is kuberntes 1.20 with fix for IPv6 network plicies #96856
+curl -LO https://github.com/aojea/kubernetes-e2e-binaries/releases/download/a20aeb8e/e2e.test
 chmod +x ./e2e.test
 sudo mv ./e2e.test /usr/local/bin/e2e.test
 
