@@ -36,6 +36,12 @@ GCE
 # Clean up SCTP tests https://github.com/kubernetes/kubernetes/issues/96717
 \[Feature:SCTP\]
 
+# https://github.com/ovn-org/ovn-kubernetes/issues/1907
+service.kubernetes.io/headless
+
+# TO BE FIXED BY https://github.com/kubernetes/kubernetes/pull/95351
+should resolve connection reset issue #74839
+
 # ???
 \[Feature:NoSNAT\]
 Services.+(ESIPP|cleanup finalizer)
