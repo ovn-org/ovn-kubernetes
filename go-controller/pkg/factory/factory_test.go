@@ -333,7 +333,7 @@ var _ = Describe("Watch Factory Operations", func() {
 			Expect(err).NotTo(HaveOccurred())
 			err = wf.InitializeEgressFirewallWatchFactory()
 			Expect(err).NotTo(HaveOccurred())
-			h := wf.addHandler(objType, namespace, sel,
+			h := wf.addHandler(objType, namespace, sel, nil,
 				cache.ResourceEventHandlerFuncs{},
 				func(objs []interface{}) {
 					defer GinkgoRecover()
@@ -409,7 +409,7 @@ var _ = Describe("Watch Factory Operations", func() {
 			err = wf.InitializeEgressFirewallWatchFactory()
 			Expect(err).NotTo(HaveOccurred())
 			var addCalls int32
-			h := wf.addHandler(objType, "", nil,
+			h := wf.addHandler(objType, "", nil, nil,
 				cache.ResourceEventHandlerFuncs{
 					AddFunc: func(obj interface{}) {
 						atomic.AddInt32(&addCalls, 1)
@@ -487,7 +487,7 @@ var _ = Describe("Watch Factory Operations", func() {
 
 	addFilteredHandler := func(wf *WatchFactory, objType reflect.Type, namespace string, sel labels.Selector, funcs cache.ResourceEventHandlerFuncs) (*Handler, *handlerCalls) {
 		calls := handlerCalls{}
-		h := wf.addHandler(objType, namespace, sel, cache.ResourceEventHandlerFuncs{
+		h := wf.addHandler(objType, namespace, sel, nil, cache.ResourceEventHandlerFuncs{
 			AddFunc: func(obj interface{}) {
 				defer GinkgoRecover()
 				atomic.AddInt32(&calls.added, 1)
