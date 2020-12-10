@@ -201,6 +201,10 @@ spec:
           value: "{{ ovn_hybrid_overlay_net_cidr }}"
         - name: OVN_DISABLE_SNAT_MULTIPLE_GWS
           value: "{{ ovn_disable_snat_multiple_gws }}"
+        - name: OVN_V4_JOIN_SUBNET
+          value: "{{ ovn_v4_join_subnet }}"
+        - name: OVN_V6_JOIN_SUBNET
+          value: "{{ ovn_v6_join_subnet }}"
         - name: OVN_SSL_ENABLE
           value: "{{ ovn_ssl_en }}"
         - name: OVN_REMOTE_PROBE_INTERVAL

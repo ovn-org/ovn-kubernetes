@@ -115,16 +115,6 @@ func (cs *configSubnets) append(subnetType configSubnetType, subnet *net.IPNet) 
 	}
 }
 
-// appendConst adds a single subnet to cs; it will panic if subnetStr is not a valid CIDR
-// string
-func (cs *configSubnets) appendConst(subnetType configSubnetType, subnetStr string) {
-	_, subnet, err := net.ParseCIDR(subnetStr)
-	if err != nil {
-		panic(fmt.Sprintf("could not parse constant value %q: %v", subnetStr, err))
-	}
-	cs.append(subnetType, subnet)
-}
-
 // checkForOverlaps checks if any of the subnets in cs overlap
 func (cs *configSubnets) checkForOverlaps() error {
 	for i, si := range cs.subnets {

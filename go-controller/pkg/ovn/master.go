@@ -251,11 +251,14 @@ func (oc *Controller) StartClusterMaster(masterNodeName string) error {
 		return err
 	}
 
+	var v4HostSubnetCount, v6HostSubnetCount float64
+
 	for _, clusterEntry := range config.Default.ClusterSubnets {
 		err := oc.masterSubnetAllocator.AddNetworkRange(clusterEntry.CIDR, clusterEntry.HostSubnetLength)
 		if err != nil {
 			return err
 		}
+		util.CalculateHostSubnetsForClusterEntry(clusterEntry, &v4HostSubnetCount, &v6HostSubnetCount)
 	}
 	for _, node := range existingNodes.Items {
 		hostSubnets, _ := util.ParseNodeHostSubnetAnnotation(&node)
@@ -264,6 +267,7 @@ func (oc *Controller) StartClusterMaster(masterNodeName string) error {
 			if err != nil {
 				utilruntime.HandleError(err)
 			}
+			util.UpdateUsedHostSubnetsCount(hostSubnet, &oc.v4HostSubnetsUsed, &oc.v6HostSubnetsUsed, true)
 		}
 		nodeLocalNatIPs, _ := util.ParseNodeLocalNatIPAnnotation(&node)
 		for _, nodeLocalNatIP := range nodeLocalNatIPs {
@@ -278,6 +282,10 @@ func (oc *Controller) StartClusterMaster(masterNodeName string) error {
 			}
 		}
 	}
+
+	// update metrics for host subnets
+	metrics.RecordSubnetCount(v4HostSubnetCount, v6HostSubnetCount)
+	metrics.RecordSubnetUsage(oc.v4HostSubnetsUsed, oc.v6HostSubnetsUsed)
 
 	if _, _, err := util.RunOVNNbctl("--columns=_uuid", "list", "port_group"); err != nil {
 		klog.Fatal("OVN version too old; does not support port groups")
@@ -824,6 +832,14 @@ func (oc *Controller) addNode(node *kapi.Node) ([]*net.IPNet, error) {
 		return nil, err
 	}
 
+	// If node annotation succeeds, update the used subnet count
+	for _, hostSubnet := range hostSubnets {
+		util.UpdateUsedHostSubnetsCount(hostSubnet,
+			&oc.v4HostSubnetsUsed,
+			&oc.v6HostSubnetsUsed, true)
+	}
+	metrics.RecordSubnetUsage(oc.v4HostSubnetsUsed, oc.v6HostSubnetsUsed)
+
 	return hostSubnets, nil
 }
 
@@ -858,8 +874,13 @@ func (oc *Controller) deleteNode(nodeName string, hostSubnets []*net.IPNet,
 	for _, hostSubnet := range hostSubnets {
 		if err := oc.deleteNodeHostSubnet(nodeName, hostSubnet); err != nil {
 			klog.Errorf("Error deleting node %s HostSubnet %v: %v", nodeName, hostSubnet, err)
+		} else {
+			util.UpdateUsedHostSubnetsCount(hostSubnet, &oc.v4HostSubnetsUsed, &oc.v6HostSubnetsUsed, false)
 		}
 	}
+	// update metrics
+	metrics.RecordSubnetUsage(oc.v4HostSubnetsUsed, oc.v6HostSubnetsUsed)
+
 	for _, nodeLocalNatIP := range nodeLocalNatIPs {
 		var err error
 		if utilnet.IsIPv6(nodeLocalNatIP) {

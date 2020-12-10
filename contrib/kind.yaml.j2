@@ -21,9 +21,6 @@ kubeadmConfigPatches:
   kind: ClusterConfiguration
   metadata:
     name: config
-  etcd:
-    local:
-      dataDir: "/tmp/lib/etcd"
   apiServer:
     extraArgs:
       "v": "{{ cluster_log_level }}"
