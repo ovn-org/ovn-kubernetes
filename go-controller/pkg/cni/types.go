@@ -39,6 +39,9 @@ const CNIUpdate command = "UPDATE"
 // CNIDel is the command representing delete operation on a pod that is to be torn down
 const CNIDel command = "DEL"
 
+// CNICheck is the command representing check operation on a pod
+const CNICheck command = "CHECK"
+
 // Request sent to the Server by the OVN CNI plugin
 type Request struct {
 	// CNI environment variables, like CNI_COMMAND and CNI_NETNS
