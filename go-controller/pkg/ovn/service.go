@@ -9,6 +9,7 @@ import (
 	"strings"
 
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/gateway"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
 
 	kapi "k8s.io/api/core/v1"
@@ -511,4 +512,84 @@ func (ovn *Controller) deleteService(service *kapi.Service) {
 func svcQualifiesForReject(service *kapi.Service) bool {
 	_, ok := service.Annotations[OvnServiceIdledAt]
 	return !(config.Kubernetes.OVNEmptyLbEvents && ok)
+}
+
+// SVC can be of types 1. clusterIP, 2. NodePort, 3. LoadBalancer,
+// or 4.ExternalName
+// In this scenario we only care about the first 3 since ExternalName
+// means the entities backing the service are external to the cluster
+// and OVN-K dosn't manage them
+func getSvcVips(service *kapi.Service) ([]net.IP, error) {
+	//For now lets just add all possible VIPs to AS
+	ips := make([]net.IP, 0)
+
+	if util.ServiceTypeHasNodePort(service) {
+
+		gatewayRouters, _, err := gateway.GetOvnGateways()
+		if err != nil {
+			return nil, err
+		}
+
+		for _, gatewayRouter := range gatewayRouters {
+
+			//VIPs would be the physical IPS of the GRs(IPs of the node) in this case
+			physicalIPs, err := gateway.GetGatewayPhysicalIPs(gatewayRouter)
+			if err != nil {
+				klog.Errorf("Gateway router %s does not have physical ips (%v)", gatewayRouter, err)
+				continue
+			}
+
+			for _, physicalIP := range physicalIPs {
+				ip := net.ParseIP(physicalIP)
+				if ip == nil {
+					klog.Warningf("Failed to parse pod IP %q", physicalIP)
+					continue
+				}
+				ips = append(ips, ip)
+
+			}
+		}
+	}
+	//If service is type ClusterIP VIP will always be that IP
+	//Ingress IP's need to be added as well if there are any
+	if util.ServiceTypeHasClusterIP(service) {
+
+		//Cluster IP
+		if util.IsClusterIPSet(service) {
+			ip := net.ParseIP(service.Spec.ClusterIP)
+			if ip == nil {
+				klog.Warningf("Failed to parse pod IP %q", service.Spec.ClusterIP)
+			}
+			ips = append(ips, ip)
+		} else {
+			klog.V(5).Infof("Service has no clusterIP set")
+		}
+		//ingress IPs If there's any
+		for _, ing := range service.Status.LoadBalancer.Ingress {
+			ip := net.ParseIP(ing.IP)
+			if ip == nil {
+				klog.Warningf("Failed to parse pod IP %q", ing)
+				continue
+			}
+			ips = append(ips, ip)
+		}
+		//External IPs for the service If there's any
+		if len(service.Spec.ExternalIPs) > 0 {
+			for _, extIP := range service.Spec.ExternalIPs {
+				ip := net.ParseIP(extIP)
+				if ip == nil {
+					klog.Warningf("Failed to parse pod IP %q", extIP)
+					continue
+				}
+				ips = append(ips, ip)
+			}
+		}
+	}
+
+	if len(ips) == 0 {
+		klog.V(5).Infof("Service has no VIPs")
+		return nil, nil
+	}
+
+	return ips, nil
 }

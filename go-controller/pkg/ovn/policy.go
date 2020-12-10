@@ -24,6 +24,7 @@ type namespacePolicy struct {
 	egressPolicies  []*gressPolicy
 	podHandlerList  []*factory.Handler
 	nsHandlerList   []*factory.Handler
+	svcHandlerList  []*factory.Handler
 	localPods       map[string]*lpInfo //pods effected by this policy
 	portGroupUUID   string             //uuid for OVN port_group
 	portGroupName   string
@@ -39,6 +40,7 @@ func NewNamespacePolicy(policy *knet.NetworkPolicy) *namespacePolicy {
 		egressPolicies:  make([]*gressPolicy, 0),
 		podHandlerList:  make([]*factory.Handler, 0),
 		nsHandlerList:   make([]*factory.Handler, 0),
+		svcHandlerList:  make([]*factory.Handler, 0),
 		localPods:       make(map[string]*lpInfo),
 	}
 	return np
@@ -766,6 +768,24 @@ func (oc *Controller) destroyNamespacePolicy(np *namespacePolicy) {
 	}
 }
 
+// handlePeerServiceSelectorAddUpdate adds the VIP of a service that selects
+// pods that are selected by the Network Policy
+func (oc *Controller) handlePeerServiceSelectorAddUpdate(gp *gressPolicy, obj interface{}) {
+	service := obj.(*kapi.Service)
+	if err := gp.addPeerSvcVip(service); err != nil {
+		klog.Errorf(err.Error())
+	}
+}
+
+// handlerPeerPodServiceDelete removes the VIP of a service that selects
+// pods that are selected by the Network Policy
+func (oc *Controller) handlePeerServiceSelectorDelete(gp *gressPolicy, obj interface{}) {
+	service := obj.(*kapi.Service)
+	if err := gp.deletePeerSvcVip(service); err != nil {
+		klog.Errorf(err.Error())
+	}
+}
+
 // handlePeerPodSelectorAddUpdate adds the IP address of a pod that has been
 // selected as a peer by a NetworkPolicy's ingress/egress section to that
 // ingress/egress address set
@@ -805,7 +825,25 @@ func (oc *Controller) handlePeerPodSelector(
 				oc.handlePeerPodSelectorAddUpdate(gp, newObj)
 			},
 		}, nil)
+
 	np.podHandlerList = append(np.podHandlerList, h)
+
+	h2 := oc.watchFactory.AddFilteredServiceHandler(policy.Namespace, sel,
+		cache.ResourceEventHandlerFuncs{
+			AddFunc: func(obj interface{}) {
+				// Service is matched so add VIP to addressSet
+				oc.handlePeerServiceSelectorAddUpdate(gp, obj)
+			},
+			DeleteFunc: func(obj interface{}) {
+				// If SVC that has matched pods are deleted remove VIP
+				oc.handlePeerServiceSelectorDelete(gp, obj)
+			},
+			UpdateFunc: func(oldObj, newObj interface{}) {
+				// If SVC Is updated make sure ame pods are still matched
+				oc.handlePeerServiceSelectorAddUpdate(gp, newObj)
+			},
+		}, nil)
+	np.svcHandlerList = append(np.svcHandlerList, h2)
 }
 
 func (oc *Controller) handlePeerNamespaceAndPodSelector(
@@ -907,5 +945,8 @@ func (oc *Controller) shutdownHandlers(np *namespacePolicy) {
 	}
 	for _, handler := range np.nsHandlerList {
 		oc.watchFactory.RemoveNamespaceHandler(handler)
+	}
+	for _, handler := range np.svcHandlerList {
+		oc.watchFactory.RemoveServiceHandler(handler)
 	}
 }

@@ -95,6 +95,36 @@ func (gp *gressPolicy) ensurePeerAddressSet(factory AddressSetFactory) error {
 	return nil
 }
 
+func (gp *gressPolicy) addPeerSvcVip(service *v1.Service) error {
+	if gp.peerAddressSet == nil {
+		return fmt.Errorf("peer AddressSet is nil, cannot add peer Service: %s for gressPolicy: %s",
+			service.ObjectMeta.Name, gp.policyName)
+	}
+
+	ips, err := getSvcVips(service)
+	if err != nil {
+		return err
+	}
+
+	klog.V(5).Infof("Adding VIPs to gressPolicy's Address Set")
+	return gp.peerAddressSet.AddIPs(ips)
+}
+
+func (gp *gressPolicy) deletePeerSvcVip(service *v1.Service) error {
+	if gp.peerAddressSet == nil {
+		return fmt.Errorf("peer AddressSet is nil, cannot add peer Service: %s for gressPolicy: %s",
+			service.ObjectMeta.Name, gp.policyName)
+	}
+
+	ips, err := getSvcVips(service)
+	if err != nil {
+		return err
+	}
+
+	klog.V(5).Infof("Adding VIPs to gressPolicy's Address Set")
+	return gp.peerAddressSet.DeleteIPs(ips)
+}
+
 func (gp *gressPolicy) addPeerPod(pod *v1.Pod) error {
 	if gp.peerAddressSet == nil {
 		return fmt.Errorf("peer AddressSet is nil, cannot add peer pod: %s for gressPolicy: %s",
