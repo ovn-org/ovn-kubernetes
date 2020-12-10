@@ -25,8 +25,6 @@ RUN INSTALL_PKGS=" \
 	dnf install --best --refresh -y --setopt=tsflags=nodocs $INSTALL_PKGS && \
 	dnf clean all && rm -rf /var/cache/dnf/*
 
-RUN dnf install -y --enablerepo=updates-testing --best --advisory=FEDORA-2020-fa92b9d524 "ovn >= 20.09.0-2" || exit 1
-
 RUN mkdir -p /var/run/openvswitch
 
 # Built in ../../go_controller, then the binaries are copied here.
