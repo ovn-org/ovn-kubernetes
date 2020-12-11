@@ -1,9 +1,9 @@
 package node
 
 import (
-	"fmt"
 	"os"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/kube/healthcheck"
@@ -128,29 +128,55 @@ type openflowManager struct {
 	patchIntf   string
 	ofportPhys  string
 	ofportPatch string
-	nFlows      int
+	// flow cache, use map instead of array for readability when debugging
+	flowCache map[string][]string
+	flowMutex sync.Mutex
+	// channel to indicate we need to update flows immediately
+	flowChan chan struct{}
+}
+
+func (c *openflowManager) updateFlowCacheEntry(key string, flows []string) {
+	c.flowMutex.Lock()
+	defer c.flowMutex.Unlock()
+	c.flowCache[key] = flows
+}
+
+func (c *openflowManager) deleteFlowsByKey(key string) {
+	c.flowMutex.Lock()
+	defer c.flowMutex.Unlock()
+	delete(c.flowCache, key)
+}
+
+func (c *openflowManager) requestFlowSync() {
+	select {
+	case c.flowChan <- struct{}{}:
+		klog.V(5).Infof("Gateway OpenFlow sync requested")
+	default:
+		klog.V(5).Infof("Gateway OpenFlow sync already requested")
+	}
+}
+
+func (c *openflowManager) syncFlows() {
+	c.flowMutex.Lock()
+	defer c.flowMutex.Unlock()
+
+	flows := []string{}
+	for _, entry := range c.flowCache {
+		flows = append(flows, entry...)
+	}
+
+	_, _, err := util.ReplaceOFFlows(c.gwBridge, flows)
+	if err != nil {
+		klog.Errorf("Failed to add flows, error: %v, flows: %s", err, c.flowCache)
+	}
 }
 
 // checkDefaultOpenFlow checks for the existence of default OpenFlow rules and
 // exits if the output is not as expected
 func (c *openflowManager) Run(stopChan <-chan struct{}) {
-	flowCount := fmt.Sprintf("flow_count=%d", c.nFlows)
 	for {
 		select {
 		case <-time.After(15 * time.Second):
-			out, _, err := util.RunOVSOfctl("dump-aggregate", c.gwBridge,
-				fmt.Sprintf("cookie=%s/-1", defaultOpenFlowCookie))
-			if err != nil {
-				klog.Errorf("Failed to dump aggregate statistics of the default OpenFlow rules: %v", err)
-				continue
-			}
-
-			if !strings.Contains(out, flowCount) {
-				klog.Errorf("Fatal error: unexpected default OpenFlows count, expect %d output: %v\n",
-					c.nFlows, out)
-				os.Exit(1)
-			}
-
 			// it could be that the ovn-controller recreated the patch between the host OVS bridge and
 			// the integration bridge, as a result the ofport number changed for that patch interface
 			curOfportPatch, stderr, err := util.RunOVSVsctl("--if-exists", "get", "Interface", c.patchIntf, "ofport")
@@ -176,6 +202,10 @@ func (c *openflowManager) Run(stopChan <-chan struct{}) {
 					c.physIntf, c.ofportPhys, curOfportPhys)
 				os.Exit(1)
 			}
+
+			c.syncFlows()
+		case <-c.flowChan:
+			c.syncFlows()
 		case <-stopChan:
 			return
 		}
