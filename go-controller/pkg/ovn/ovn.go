@@ -573,11 +573,12 @@ func (oc *Controller) iterateRetryPods() {
 			podDesc := fmt.Sprintf("[%s/%s/%s]", pod.UID, pod.Namespace, pod.Name)
 			klog.Infof("%s retry pod setup", podDesc)
 
-			if oc.ensurePod(nil, pod) {
+			ok, g := oc.ensurePod(nil, pod)
+			if ok {
 				klog.Infof("%s pod setup successful", podDesc)
 				delete(oc.retryPods, uid)
 			} else {
-				klog.Infof("%s setup retry failed; will try again later", podDesc)
+				klog.Infof("%s setup retry failed; will try again later: %s", podDesc, g)
 				oc.retryPods[uid] = retryEntry{pod, time.Now()}
 			}
 		}
@@ -609,10 +610,10 @@ func exGatewayAnnotationsChanged(oldPod, newPod *kapi.Pod) bool {
 
 // ensurePod tries to set up a pod. It returns success or failure; failure
 // indicates the pod should be retried later.
-func (oc *Controller) ensurePod(oldPod, pod *kapi.Pod) bool {
+func (oc *Controller) ensurePod(oldPod, pod *kapi.Pod) (bool, string) {
 	// Try unscheduled pods later
 	if !podScheduled(pod) {
-		return false
+		return false, "not scheduled"
 	}
 
 	// host network pod is able to serve as external gw for other pods
@@ -625,18 +626,18 @@ func (oc *Controller) ensurePod(oldPod, pod *kapi.Pod) bool {
 		}
 		if err := oc.addPodExternalGW(pod); err != nil {
 			klog.Errorf(err.Error())
-			return false
+			return false, fmt.Sprintf("add gw failed: %v", err)
 		}
-		return true
+		return true, ""
 	}
 
 	if err := oc.addLogicalPort(pod); err != nil {
 		klog.Errorf(err.Error())
 		oc.recordPodEvent(err, pod)
-		return false
+		return false, fmt.Sprintf("add port failed: %v", err)
 	}
 
-	return true
+	return true, ""
 }
 
 // WatchPods starts the watching of Pod resource and calls back the appropriate handler logic
@@ -650,7 +651,9 @@ func (oc *Controller) WatchPods() {
 	oc.watchFactory.AddPodHandler(cache.ResourceEventHandlerFuncs{
 		AddFunc: func(obj interface{}) {
 			pod := obj.(*kapi.Pod)
-			if !oc.ensurePod(nil, pod) {
+			ok, g := oc.ensurePod(nil, pod)
+			if !ok {
+				klog.Errorf("#### [%s/%s/%s] add failed: %s", pod.UID, pod.Namespace, pod.Name, g)
 				oc.addRetryPod(pod)
 			}
 		},
@@ -658,7 +661,9 @@ func (oc *Controller) WatchPods() {
 			oldPod := old.(*kapi.Pod)
 			pod := newer.(*kapi.Pod)
 			if oc.checkAndDeleteRetryPod(pod.UID) {
-				if !oc.ensurePod(oldPod, pod) {
+				ok, g := oc.ensurePod(oldPod, pod)
+				if !ok {
+					klog.Errorf("#### [%s/%s/%s] update failed: %s", pod.UID, pod.Namespace, pod.Name, g)
 					// add back the failed pod
 					oc.addRetryPod(pod)
 					return
