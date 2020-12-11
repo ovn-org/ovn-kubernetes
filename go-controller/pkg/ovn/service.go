@@ -515,23 +515,20 @@ func svcQualifiesForReject(service *kapi.Service) bool {
 }
 
 // SVC can be of types 1. clusterIP, 2. NodePort, 3. LoadBalancer,
-// or 4.ExternalName
-// In this scenario we only care about the first 3 since ExternalName
-// means the entities backing the service are external to the cluster
-// and OVN-K dosn't manage them
+// or 4.ExternalName In this scenario we only care about the
+// first 3 since ExternalName means the entities backing the
+// service are external to the cluster and OVN-K dosn't manage them
 func getSvcVips(service *kapi.Service) ([]net.IP, error) {
-	//For now lets just add all possible VIPs to AS
 	ips := make([]net.IP, 0)
+	klog.V(5).Infof("Service %s Matches same Pods as a network Policy, finding peer VIPs")
 
 	if util.ServiceTypeHasNodePort(service) {
-
+		klog.V(5).Infof("Service %s is of type kapi.ServiceTypeNodePort || kapi.ServiceTypeLoadBalancer")
 		gatewayRouters, _, err := gateway.GetOvnGateways()
 		if err != nil {
 			return nil, err
 		}
-
 		for _, gatewayRouter := range gatewayRouters {
-
 			//VIPs would be the physical IPS of the GRs(IPs of the node) in this case
 			physicalIPs, err := gateway.GetGatewayPhysicalIPs(gatewayRouter)
 			if err != nil {
@@ -546,20 +543,19 @@ func getSvcVips(service *kapi.Service) ([]net.IP, error) {
 					continue
 				}
 				ips = append(ips, ip)
-
 			}
 		}
 	}
-	//If service is type ClusterIP VIP will always be that IP
+	//If service is type ClusterIP, VIP will always be that IP
 	//Ingress IP's need to be added as well if there are any
 	if util.ServiceTypeHasClusterIP(service) {
-
-		//Cluster IP
+		klog.V(5).Infof("Service %s is of type kapi.ServiceTypeClusterIP || kapi.ServiceTypeNodePort || kapi.ServiceTypeLoadBalancer")
 		if util.IsClusterIPSet(service) {
 			ip := net.ParseIP(service.Spec.ClusterIP)
 			if ip == nil {
 				klog.Warningf("Failed to parse pod IP %q", service.Spec.ClusterIP)
 			}
+			klog.V(5).Infof("Adding Cluster IP to VIP set")
 			ips = append(ips, ip)
 		} else {
 			klog.V(5).Infof("Service has no clusterIP set")
@@ -571,6 +567,7 @@ func getSvcVips(service *kapi.Service) ([]net.IP, error) {
 				klog.Warningf("Failed to parse pod IP %q", ing)
 				continue
 			}
+			klog.V(5).Infof("Adding ingress IPs to VIP set")
 			ips = append(ips, ip)
 		}
 		//External IPs for the service If there's any
@@ -581,15 +578,14 @@ func getSvcVips(service *kapi.Service) ([]net.IP, error) {
 					klog.Warningf("Failed to parse pod IP %q", extIP)
 					continue
 				}
+				klog.V(5).Infof("Adding external IPs to VIP set")
 				ips = append(ips, ip)
 			}
 		}
 	}
-
 	if len(ips) == 0 {
 		klog.V(5).Infof("Service has no VIPs")
 		return nil, nil
 	}
-
 	return ips, nil
 }

@@ -832,6 +832,7 @@ func (oc *Controller) handlePeerPodSelector(
 		cache.ResourceEventHandlerFuncs{
 			AddFunc: func(obj interface{}) {
 				// Service is matched so add VIP to addressSet
+				klog.V(5).Infof("A Service matches the same Pods as the policy %s", policy.Name)
 				oc.handlePeerServiceSelectorAddUpdate(gp, obj)
 			},
 			DeleteFunc: func(obj interface{}) {
@@ -839,7 +840,7 @@ func (oc *Controller) handlePeerPodSelector(
 				oc.handlePeerServiceSelectorDelete(gp, obj)
 			},
 			UpdateFunc: func(oldObj, newObj interface{}) {
-				// If SVC Is updated make sure ame pods are still matched
+				// If SVC Is updated make sure same pods are still matched
 				oc.handlePeerServiceSelectorAddUpdate(gp, newObj)
 			},
 		}, nil)
