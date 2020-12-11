@@ -37,7 +37,7 @@ ARG ovnver=20.09.0-21.el8fdn
 
 RUN INSTALL_PKGS=" \
 	openssl python3-pyOpenSSL firewalld-filesystem \
-	libpcap iproute strace \
+	libpcap iproute iproute-tc strace \
 	containernetworking-plugins \
 	tcpdump iputils \
 	libreswan \
