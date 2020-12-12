@@ -232,6 +232,9 @@ func (npw *nodePortWatcher) SyncServices(services []interface{}) {
 				ports[externalPortKey] = externalIP
 			}
 			for _, ing := range service.Status.LoadBalancer.Ingress {
+				if ing.IP == "" {
+					continue
+				}
 				ingIP := net.ParseIP(ing.IP)
 				if ingIP == nil {
 					klog.Errorf("Failed to parse ingress IP: %s", ing.IP)

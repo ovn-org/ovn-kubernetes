@@ -32,6 +32,7 @@ import (
 	"k8s.io/apimachinery/pkg/labels"
 	"k8s.io/apimachinery/pkg/selection"
 	"k8s.io/apimachinery/pkg/types"
+	utilwait "k8s.io/apimachinery/pkg/util/wait"
 	"k8s.io/client-go/informers"
 	clientset "k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/kubernetes/scheme"
@@ -197,6 +198,15 @@ type Controller struct {
 
 	// v6HostSubnetsUsed keeps track of number of v6 subnets currently assigned to nodes
 	v6HostSubnetsUsed float64
+
+	// Map of pods that need to be retried, and the timestamp of when they last failed
+	retryPods     map[types.UID]retryEntry
+	retryPodsLock sync.Mutex
+}
+
+type retryEntry struct {
+	pod       *kapi.Pod
+	timeStamp time.Time
 }
 
 const (
@@ -266,6 +276,7 @@ func NewOvnController(ovnClient *util.OVNClientset, wf *factory.WatchFactory,
 		serviceLBMap:             make(map[string]map[string]*loadBalancerConf),
 		serviceLBLock:            sync.Mutex{},
 		joinSwIPManager:          nil,
+		retryPods:                make(map[types.UID]retryEntry),
 		recorder:                 recorder,
 		ovnNBClient:              ovnNBClient,
 		ovnSBClient:              ovnSBClient,
@@ -549,66 +560,117 @@ func (oc *Controller) recordPodEvent(addErr error, pod *kapi.Pod) {
 	}
 }
 
+// iterateRetryPods checks if any outstanding pods have been waiting for 60 seconds of last known failure
+// then tries to re-add them if so
+func (oc *Controller) iterateRetryPods() {
+	oc.retryPodsLock.Lock()
+	defer oc.retryPodsLock.Unlock()
+	now := time.Now()
+	for uid, podEntry := range oc.retryPods {
+		pod := podEntry.pod
+		podTimer := podEntry.timeStamp.Add(time.Minute)
+		if now.After(podTimer) {
+			podDesc := fmt.Sprintf("[%s/%s/%s]", pod.UID, pod.Namespace, pod.Name)
+			klog.Infof("%s retry pod setup", podDesc)
+
+			if oc.ensurePod(nil, pod, true) {
+				klog.Infof("%s pod setup successful", podDesc)
+				delete(oc.retryPods, uid)
+			} else {
+				klog.Infof("%s setup retry failed; will try again later", podDesc)
+				oc.retryPods[uid] = retryEntry{pod, time.Now()}
+			}
+		}
+	}
+}
+
+// checkAndDeleteRetryPod deletes a specific entry from the map, if it existed, returns true
+func (oc *Controller) checkAndDeleteRetryPod(uid types.UID) bool {
+	oc.retryPodsLock.Lock()
+	defer oc.retryPodsLock.Unlock()
+	if _, ok := oc.retryPods[uid]; ok {
+		delete(oc.retryPods, uid)
+		return true
+	}
+	return false
+}
+
+// addRetryPod tracks a failed pod to retry later
+func (oc *Controller) addRetryPod(pod *kapi.Pod) {
+	oc.retryPodsLock.Lock()
+	defer oc.retryPodsLock.Unlock()
+	oc.retryPods[pod.UID] = retryEntry{pod, time.Now()}
+}
+
+func exGatewayAnnotationsChanged(oldPod, newPod *kapi.Pod) bool {
+	return oldPod.Annotations[routingNamespaceAnnotation] != newPod.Annotations[routingNamespaceAnnotation] ||
+		oldPod.Annotations[routingNetworkAnnotation] != newPod.Annotations[routingNetworkAnnotation]
+}
+
+// ensurePod tries to set up a pod. It returns success or failure; failure
+// indicates the pod should be retried later.
+func (oc *Controller) ensurePod(oldPod, pod *kapi.Pod, addPort bool) bool {
+	// Try unscheduled pods later
+	if !podScheduled(pod) {
+		return false
+	}
+
+	if util.PodWantsNetwork(pod) && addPort {
+		if err := oc.addLogicalPort(pod); err != nil {
+			klog.Errorf(err.Error())
+			oc.recordPodEvent(err, pod)
+			return false
+		}
+	} else {
+		if oldPod != nil && exGatewayAnnotationsChanged(oldPod, pod) {
+			// No matter if a pod is ovn networked, or host networked, we still need to check for exgw
+			// annotations. If the pod is ovn networked and is in update reschedule, addLogicalPort will take
+			// care of updating the exgw updates
+			oc.deletePodExternalGW(oldPod)
+		}
+		if err := oc.addPodExternalGW(pod); err != nil {
+			klog.Errorf(err.Error())
+			oc.recordPodEvent(err, pod)
+			return false
+		}
+	}
+
+	return true
+}
+
 // WatchPods starts the watching of Pod resource and calls back the appropriate handler logic
 func (oc *Controller) WatchPods() {
-	var retryPods sync.Map
+	go func() {
+		// track the retryPods map and every 30 seconds check if any pods need to be retried
+		utilwait.Until(oc.iterateRetryPods, 30*time.Second, oc.stopChan)
+	}()
 
 	start := time.Now()
 	oc.watchFactory.AddPodHandler(cache.ResourceEventHandlerFuncs{
 		AddFunc: func(obj interface{}) {
 			pod := obj.(*kapi.Pod)
-			if !util.PodWantsNetwork(pod) {
-				// host network pod is able to serve as external gw for other pods
-				if err := oc.addPodExternalGW(pod); err != nil {
-					klog.Errorf(err.Error())
-				}
-				return
-			}
-			if podScheduled(pod) {
-				if err := oc.addLogicalPort(pod); err != nil {
-					klog.Errorf(err.Error())
-					oc.recordPodEvent(err, pod)
-					retryPods.Store(pod.UID, true)
-				}
-			} else {
-				// Handle unscheduled pods later in UpdateFunc
-				retryPods.Store(pod.UID, true)
+			if !oc.ensurePod(nil, pod, true) {
+				oc.addRetryPod(pod)
 			}
 		},
 		UpdateFunc: func(old, newer interface{}) {
 			oldPod := old.(*kapi.Pod)
 			pod := newer.(*kapi.Pod)
-
-			_, retry := retryPods.Load(pod.UID)
-			if podScheduled(pod) && retry && util.PodWantsNetwork(pod) {
-				if err := oc.addLogicalPort(pod); err != nil {
-					klog.Errorf(err.Error())
-					oc.recordPodEvent(err, pod)
-				} else {
-					retryPods.Delete(pod.UID)
-				}
-			} else {
-				// No matter if a pod is ovn networked, or host networked, we still need to check for exgw
-				// annotations. If the pod is ovn networked and is in update reschedule, addLogicalPort will take
-				// care of updating the exgw updates
-				if oldPod.Annotations[routingNamespaceAnnotation] != pod.Annotations[routingNamespaceAnnotation] ||
-					oldPod.Annotations[routingNetworkAnnotation] != pod.Annotations[routingNetworkAnnotation] {
-					oc.deletePodExternalGW(oldPod)
-					if err := oc.addPodExternalGW(pod); err != nil {
-						klog.Errorf(err.Error())
-					}
-				}
+			if !oc.ensurePod(oldPod, pod, oc.checkAndDeleteRetryPod(pod.UID)) {
+				// add back the failed pod
+				oc.addRetryPod(pod)
+				return
 			}
 		},
 		DeleteFunc: func(obj interface{}) {
 			pod := obj.(*kapi.Pod)
+			oc.checkAndDeleteRetryPod(pod.UID)
 			if !util.PodWantsNetwork(pod) {
 				oc.deletePodExternalGW(pod)
 				return
 			}
 			// deleteLogicalPort will take care of removing exgw for ovn networked pods
 			oc.deleteLogicalPort(pod)
-			retryPods.Delete(pod.UID)
 		},
 	}, oc.syncPods)
 	klog.Infof("Bootstrapping existing pods and cleaning stale pods took %v", time.Since(start))
