@@ -7,16 +7,18 @@ curl -LO https://storage.googleapis.com/kubernetes-release/release/$(curl -s htt
 chmod +x ./kubectl
 sudo mv ./kubectl /usr/local/bin/kubectl
 
-# Install latest e2e test binary
-# The e2e binaries are built from https://github.com/aojea/kubernetes-e2e-binaries
-# Current e2e binary versions is kuberntes 1.20 with fix for IPv6 network plicies #96856
-curl -LO https://github.com/aojea/kubernetes-e2e-binaries/releases/download/a20aeb8e/e2e.test
-chmod +x ./e2e.test
+# Install e2e test binary and ginkgo
+# The e2e binaries are published upstream so the ecosystem can consume then directly
+# xref https://github.com/kubernetes/enhancements/blob/master/keps/sig-testing/20190118-breaking-apart-the-kubernetes-test-tarball.md
+# Current e2e binary version for CI is kubernetes 1.20 with the fix for IPv6 network policies #96856
+# We can always get the latest version published from the URL dl.k8s.io/ci/latest.txt
+# curl -L dl.k8s.io/ci/latest.txt
+# v1.21.0-alpha.0.341+46d481b4556e33
+curl -LO https://dl.k8s.io/ci/v1.21.0-alpha.0.341+46d481b4556e33/kubernetes-test-linux-amd64.tar.gz
+tar xvzf kubernetes-test-linux-amd64.tar.gz --strip-components=3 kubernetes/test/bin/ginkgo kubernetes/test/bin/e2e.test
 sudo mv ./e2e.test /usr/local/bin/e2e.test
-
-# Install ginkgo
-go get github.com/onsi/ginkgo/ginkgo
-go get github.com/onsi/gomega/...
+sudo mv ./ginkgo /usr/local/bin/ginkgo
+rm kubernetes-test-linux-amd64.tar.gz
 
 # Install kind (dual-stack is not released upstream so we have to use our own version)
 if [ "$KIND_IPV4_SUPPORT" == true ] && [ "$KIND_IPV6_SUPPORT" == true ]; then
