@@ -53,4 +53,9 @@ const (
 
 	V4JoinSubnetCIDR = "100.64.0.0/16"
 	V6JoinSubnetCIDR = "fd98::/64"
+
+	// Gateway Node Types
+	NodeTypeFull = "full"
+	NodeTypeBluefield = "bluefield"
+	NodeTypeHostOnly = "host-only"
 )

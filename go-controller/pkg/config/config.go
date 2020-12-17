@@ -3,6 +3,7 @@ package config
 import (
 	"flag"
 	"fmt"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
 	"io/ioutil"
 	"net"
 	"net/url"
@@ -104,7 +105,9 @@ var (
 	OvnSouth OvnAuthConfig
 
 	// Gateway holds node gateway-related parsed config file parameters and command-line overrides
-	Gateway GatewayConfig
+	Gateway = GatewayConfig{
+		NodeType: types.NodeTypeFull,
+	}
 
 	// MasterHA holds master HA related config options.
 	MasterHA = MasterHAConfig{
@@ -246,6 +249,8 @@ type GatewayConfig struct {
 	NodeportEnable bool `gcfg:"nodeport"`
 	// DisableSNATMultipleGws sets whether to disable SNAT of egress traffic in namespaces annotated with routing-external-gws
 	DisableSNATMultipleGWs bool `gcfg:"disable-snat-multiple-gws"`
+	// NodeType determines which type of node to determine which gateway initialization is needed
+	NodeType string `gcfg:"node-type"`
 }
 
 // OvnAuthConfig holds client authentication and location details for
@@ -812,7 +817,12 @@ var OVNGatewayFlags = []cli.Flag{
 		Usage:       "Disable SNAT for egress traffic with multiple gateways.",
 		Destination: &cliConfig.Gateway.DisableSNATMultipleGWs,
 	},
-
+	&cli.StringFlag{
+		Name:        "gateway-node-type",
+		Usage:       "The type of gateway config needed for this node: bluefield, host-only, full (default)",
+		Destination: &cliConfig.Gateway.NodeType,
+		Value:       Gateway.NodeType,
+	},
 	// Deprecated CLI options
 	&cli.BoolFlag{
 		Name:        "init-gateways",
