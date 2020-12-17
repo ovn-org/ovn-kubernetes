@@ -1,6 +1,7 @@
 package util
 
 import (
+	"context"
 	"fmt"
 	"testing"
 
@@ -9,6 +10,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	v1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	clientsetfake "k8s.io/client-go/kubernetes/fake"
 )
 
 func TestNewClientset(t *testing.T) {
@@ -334,4 +336,89 @@ func TestGetPodNetSelAnnotation(t *testing.T) {
 			}
 		})
 	}
+}
+
+func Test_GetNodePrimaryIP(t *testing.T) {
+	cases := []struct {
+		name     string
+		nodeInfo *v1.Node
+		hostname string
+		address  string
+		wantErr  bool
+	}{
+		{
+			name:     "non existent Node",
+			nodeInfo: makeNodeWithAddresses("", "", ""),
+			hostname: "nonexist",
+			address:  "",
+			wantErr:  true,
+		},
+
+		{
+			name:     "Node with internal and external address",
+			nodeInfo: makeNodeWithAddresses("fakeHost", "192.168.1.1", "90.90.90.90"),
+			hostname: "fakeHost",
+			address:  "192.168.1.1",
+		},
+		{
+			name:     "Node with internal and external address IPV6",
+			nodeInfo: makeNodeWithAddresses("fakeHost", "fd00:1234::1", "2001:db8::2"),
+			hostname: "fakeHost",
+			address:  "fd00:1234::1",
+		},
+		{
+			name:     "Node with only IPv4 ExternalIP set",
+			nodeInfo: makeNodeWithAddresses("fakeHost", "", "90.90.90.90"),
+			hostname: "fakeHost",
+			address:  "90.90.90.90",
+		},
+
+		{
+			name:     "Node with only IPv6 ExternalIP set",
+			nodeInfo: makeNodeWithAddresses("fakeHost", "", "2001:db8::2"),
+			hostname: "fakeHost",
+			address:  "2001:db8::2",
+		},
+	}
+	for _, c := range cases {
+		client := clientsetfake.NewSimpleClientset(c.nodeInfo)
+		node, _ := client.CoreV1().Nodes().Get(context.TODO(), c.hostname, metav1.GetOptions{})
+		ip, err := GetNodePrimaryIP(node)
+		if err != nil != c.wantErr {
+			t.Errorf("Case[%s] Expected error %v got %v", c.name, c.wantErr, err)
+		}
+		if ip != c.address {
+			t.Errorf("Case[%s] Expected IP %q got %q", c.name, c.address, ip)
+		}
+	}
+}
+
+// makeNodeWithAddresses return a node object with the specified parameters
+func makeNodeWithAddresses(name, internal, external string) *v1.Node {
+	if name == "" {
+		return &v1.Node{}
+	}
+
+	node := &v1.Node{
+		ObjectMeta: metav1.ObjectMeta{
+			Name: name,
+		},
+		Status: v1.NodeStatus{
+			Addresses: []v1.NodeAddress{},
+		},
+	}
+
+	if internal != "" {
+		node.Status.Addresses = append(node.Status.Addresses,
+			v1.NodeAddress{Type: v1.NodeInternalIP, Address: internal},
+		)
+	}
+
+	if external != "" {
+		node.Status.Addresses = append(node.Status.Addresses,
+			v1.NodeAddress{Type: v1.NodeExternalIP, Address: external},
+		)
+	}
+
+	return node
 }
