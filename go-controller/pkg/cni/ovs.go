@@ -6,6 +6,7 @@ import (
 	"fmt"
 	utilnet "k8s.io/utils/net"
 	"net"
+	"strconv"
 	"strings"
 	"time"
 
@@ -111,6 +112,7 @@ func ofctlExec(args ...string) (string, error) {
 	return stdoutStr, nil
 }
 
+// isIfaceIDSet checks to see if the interface has its external id set, which indicates if it is active
 func isIfaceIDSet(ifaceName, ifaceID string) error {
 	// ensure the OVS interface is still active. It may have been cleared by a subsequent CNI ADD
 	// and if so, there's no need to keep checking for flows
@@ -124,7 +126,21 @@ func isIfaceIDSet(ifaceName, ifaceID string) error {
 	return nil
 }
 
-func doPodFlowsExist(mac string, ifAddrs []*net.IPNet) bool {
+// getIfaceOFPort returns the of port number for an interface
+func getIfaceOFPort(ifaceName string) (int, error) {
+	port, err := ovsGet("Interface", ifaceName, "ofport", "")
+	if err == nil && port == "" {
+		return -1, fmt.Errorf("cannot find OpenFlow port for OVS interface: %s, error: %v ", ifaceName, err)
+	}
+
+	iPort, err := strconv.Atoi(port)
+	if err != nil {
+		return -1, fmt.Errorf("unable to parse OpenFlow port %s, error: %v", port, err)
+	}
+	return iPort, nil
+}
+
+func doPodFlowsExist(mac string, ifAddrs []*net.IPNet, ofPort int) bool {
 	// Function checks for OpenFlow flows to know the pod is ready
 	// TODO(trozet): in the future use a more stable mechanism provided by OVN:
 	// https://bugzilla.redhat.com/show_bug.cgi?id=1839102
@@ -135,11 +151,15 @@ func doPodFlowsExist(mac string, ifAddrs []*net.IPNet) bool {
 		tables []int
 	}
 
-	// Query the flows by mac address for in_port_security
+	// Query the flows by mac address for in_port_security and OF port
 	queries := []query{
 		{
 			match:  "dl_src=" + mac,
 			tables: []int{9},
+		},
+		{
+			match:  fmt.Sprintf("in_port=%d", ofPort),
+			tables: []int{0},
 		},
 	}
 	for _, ifAddr := range ifAddrs {
@@ -178,7 +198,7 @@ func doPodFlowsExist(mac string, ifAddrs []*net.IPNet) bool {
 	return true
 }
 
-func waitForPodFlows(ctx context.Context, mac string, ifAddrs []*net.IPNet, ifaceName, ifaceID string) error {
+func waitForPodFlows(ctx context.Context, mac string, ifAddrs []*net.IPNet, ifaceName, ifaceID string, ofPort int) error {
 	timeout := time.After(20 * time.Second)
 	for {
 		select {
@@ -190,7 +210,7 @@ func waitForPodFlows(ctx context.Context, mac string, ifAddrs []*net.IPNet, ifac
 			if err := isIfaceIDSet(ifaceName, ifaceID); err != nil {
 				return err
 			}
-			if doPodFlowsExist(mac, ifAddrs) {
+			if doPodFlowsExist(mac, ifAddrs, ofPort) {
 				// success
 				return nil
 			}

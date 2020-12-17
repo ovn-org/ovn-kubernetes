@@ -150,8 +150,12 @@ func (pr *PodRequest) cmdCheck(podLister corev1listers.PodLister) ([]byte, error
 			return nil, fmt.Errorf("could not find host interface in the prevResult: %v", result)
 		}
 		ifaceID := fmt.Sprintf("%s_%s", namespace, podName)
+		ofPort, err := getIfaceOFPort(hostIfaceName)
+		if err != nil {
+			return nil, err
+		}
 		for _, ip := range result.IPs {
-			if err = waitForPodFlows(pr.ctx, result.Interfaces[*ip.Interface].Mac, []*net.IPNet{&ip.Address}, hostIfaceName, ifaceID); err != nil {
+			if err = waitForPodFlows(pr.ctx, result.Interfaces[*ip.Interface].Mac, []*net.IPNet{&ip.Address}, hostIfaceName, ifaceID, ofPort); err != nil {
 				return nil, fmt.Errorf("error while checkoing on flows for pod: %s ip: %v, error: %v", ifaceID, ip, err)
 			}
 		}
