@@ -2,6 +2,7 @@ package node
 
 import (
 	"fmt"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
 	"io/ioutil"
 	"net"
 	"os"
@@ -214,6 +215,7 @@ func (n *OvnNode) Start(wg *sync.WaitGroup) error {
 	nodeAnnotator := kube.NewNodeAnnotator(n.Kube, node)
 	waiter := newStartupWaiter()
 
+	// TROZET not sure if what we need to do here for the mgmt port with bluefield, need to look into this
 	// Initialize management port resources on the node
 	mgmtPortConfig, err := createManagementPort(n.name, subnets, nodeAnnotator, waiter)
 	if err != nil {
@@ -262,11 +264,15 @@ func (n *OvnNode) Start(wg *sync.WaitGroup) error {
 		klog.Errorf("Reset of initial klog \"loglevel\" failed, err: %v", err)
 	}
 
-	// start health check to ensure there are no stale OVS internal ports
-	go checkForStaleOVSInterfaces(n.stopChan)
-
-	// start management port health check
-	go checkManagementPortHealth(mgmtPortConfig, n.stopChan)
+	if config.Gateway.NodeType != types.NodeTypeHostOnly {
+		// start health check to ensure there are no stale OVS internal ports
+		go checkForStaleOVSInterfaces(n.stopChan)
+	}
+	// TROZET look into this
+	if config.Gateway.NodeType != types.NodeTypeBluefield {
+		// start management port health check
+		go checkManagementPortHealth(mgmtPortConfig, n.stopChan)
+	}
 
 	confFile := filepath.Join(config.CNI.ConfDir, config.CNIConfFileName)
 	_, err = os.Stat(confFile)

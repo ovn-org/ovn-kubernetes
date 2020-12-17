@@ -24,6 +24,12 @@ const (
 	defaultOpenFlowCookie = "0xdeff105"
 )
 
+// hostNodePortWatcher manages iptables rules
+// to ensure that services using NodePorts are accessible
+type hostNodePortWatcher struct {
+	nodeIP      *net.IPNet
+}
+
 // nodePortWatcher manages OpenfLow and iptables rules
 // to ensure that services using NodePorts are accessible
 type nodePortWatcher struct {
@@ -31,6 +37,26 @@ type nodePortWatcher struct {
 	ofportPatch string
 	gwBridge    string
 	nodeIP      *net.IPNet
+}
+
+func (hnpw *hostNodePortWatcher) AddService(service *kapi.Service) {
+	addSharedGatewayIptRules(service, hnpw.nodeIP)
+}
+
+func (hnpw *hostNodePortWatcher) UpdateService(new, old *kapi.Service) {
+	if reflect.DeepEqual(new.Spec, old.Spec) {
+		return
+	}
+	hnpw.DeleteService(old)
+	hnpw.AddService(new)
+}
+
+func (hnpw *hostNodePortWatcher) DeleteService(service *kapi.Service) {
+	delSharedGatewayIptRules(service, hnpw.nodeIP)
+}
+
+func (hnpw *hostNodePortWatcher) SyncServices(services []interface{}) {
+	syncSharedGatewayIptRules(services, hnpw.nodeIP)
 }
 
 func (npw *nodePortWatcher) AddService(service *kapi.Service) {
@@ -136,7 +162,9 @@ func (npw *nodePortWatcher) AddService(service *kapi.Service) {
 		}
 	}
 
-	addSharedGatewayIptRules(service, npw.nodeIP)
+	if config.Gateway.NodeType == types.NodeTypeFull {
+		addSharedGatewayIptRules(service, npw.nodeIP)
+	}
 }
 
 func (npw *nodePortWatcher) UpdateService(new, old *kapi.Service) {
@@ -221,7 +249,9 @@ func (npw *nodePortWatcher) DeleteService(service *kapi.Service) {
 		}
 	}
 
-	delSharedGatewayIptRules(service, npw.nodeIP)
+	if config.Gateway.NodeType == types.NodeTypeFull {
+		delSharedGatewayIptRules(service, npw.nodeIP)
+	}
 }
 
 func (npw *nodePortWatcher) SyncServices(services []interface{}) {
@@ -274,7 +304,9 @@ func (npw *nodePortWatcher) SyncServices(services []interface{}) {
 		}
 	}
 
-	syncSharedGatewayIptRules(services, npw.nodeIP)
+	if config.Gateway.NodeType == types.NodeTypeFull {
+		syncSharedGatewayIptRules(services, npw.nodeIP)
+	}
 
 	stdout, stderr, err := util.RunOVSOfctl("dump-flows",
 		npw.gwBridge)
@@ -511,31 +543,46 @@ func newSharedGatewayOpenFlowManager(nodeName, macAddress, gwBridge, gwIntf stri
 }
 
 func newSharedGateway(nodeName string, subnets []*net.IPNet, gwNextHops []net.IP, gwIntf string, nodeAnnotator kube.Annotator) (*gateway, error) {
+	var bridgeName, uplinkName string
+	var macAddress net.HardwareAddr
+	var ips []*net.IPNet
+	var err error
+
 	klog.Info("Creating new shared gateway")
 	gw := &gateway{}
 
-	bridgeName, uplinkName, macAddress, ips, err := gatewayInitInternal(
-		nodeName, gwIntf, subnets, gwNextHops, nodeAnnotator)
-	if err != nil {
-		return nil, err
+	if config.Gateway.NodeType != types.NodeTypeHostOnly {
+		bridgeName, uplinkName, macAddress, ips, err = gatewayInitInternal(
+			nodeName, gwIntf, subnets, gwNextHops, nodeAnnotator)
+		if err != nil {
+			return nil, err
+		}
 	}
-
 	gw.initFunc = func() error {
 		// Program cluster.GatewayIntf to let non-pod traffic to go to host
 		// stack
 		klog.Info("Creating Shared Gateway Openflow Manager")
 		var err error
-
-		gw.openflowManager, err = newSharedGatewayOpenFlowManager(nodeName, macAddress.String(), bridgeName, uplinkName)
-		if err != nil {
-			return err
-		}
-
-		if config.Gateway.NodeportEnable {
-			klog.Info("Creating Shared Gateway Node Port Watcher")
-			gw.nodePortWatcher, err = newNodePortWatcher(nodeName, bridgeName, uplinkName, ips[0])
+		if config.Gateway.NodeType != types.NodeTypeHostOnly {
+			gw.openflowManager, err = newSharedGatewayOpenFlowManager(nodeName, macAddress.String(), bridgeName, uplinkName)
 			if err != nil {
 				return err
+			}
+		}
+		if config.Gateway.NodeportEnable {
+			if config.Gateway.NodeType == types.NodeTypeFull || config.Gateway.NodeType == types.NodeTypeBluefield {
+				klog.Info("Creating Shared Gateway Node Port Watcher")
+				gw.nodePortWatcher, err = newNodePortWatcher(nodeName, bridgeName, uplinkName, ips[0])
+				if err != nil {
+					return err
+				}
+			} else {
+				// host-only node port watcher
+				klog.Infof("Creating Host-Only Shared Gateway Node Port Watcher")
+				gw.nodePortWatcher, err = newHostNodePortWatcher(ips[0])
+				if err != nil {
+					return err
+				}
 			}
 		}
 		return nil
@@ -543,6 +590,16 @@ func newSharedGateway(nodeName string, subnets []*net.IPNet, gwNextHops []net.IP
 
 	klog.Info("Shared Gateway Creation Complete")
 	return gw, nil
+}
+
+func newHostNodePortWatcher(nodeIP *net.IPNet) (*hostNodePortWatcher, error) {
+	if err := initSharedGatewayIPTables(); err != nil {
+		return nil, err
+	}
+	hnpw := &hostNodePortWatcher{
+		nodeIP:      nodeIP,
+	}
+	return hnpw, nil
 }
 
 func newNodePortWatcher(nodeName, gwBridge, gwIntf string, nodeIP *net.IPNet) (*nodePortWatcher, error) {
@@ -565,13 +622,15 @@ func newNodePortWatcher(nodeName, gwBridge, gwIntf string, nodeIP *net.IPNet) (*
 			gwIntf, stderr, err)
 	}
 
-	// In the shared gateway mode, the NodePort service is handled by the OpenFlow flows configured
-	// on the OVS bridge in the host. These flows act only on the packets coming in from outside
-	// of the node. If someone on the node is trying to access the NodePort service, those packets
-	// will not be processed by the OpenFlow flows, so we need to add iptable rules that DNATs the
-	// NodePortIP:NodePort to ClusterServiceIP:Port.
-	if err := initSharedGatewayIPTables(); err != nil {
-		return nil, err
+	if config.Gateway.NodeType == types.NodeTypeFull {
+		// In the shared gateway mode, the NodePort service is handled by the OpenFlow flows configured
+		// on the OVS bridge in the host. These flows act only on the packets coming in from outside
+		// of the node. If someone on the node is trying to access the NodePort service, those packets
+		// will not be processed by the OpenFlow flows, so we need to add iptable rules that DNATs the
+		// NodePortIP:NodePort to ClusterServiceIP:Port.
+		if err := initSharedGatewayIPTables(); err != nil {
+			return nil, err
+		}
 	}
 
 	npw := &nodePortWatcher{

@@ -168,7 +168,9 @@ func (n *OvnNode) initGateway(subnets []*net.IPNet, nodeAnnotator kube.Annotator
 	var portClaimWatcher *portClaimWatcher
 
 	if config.Gateway.NodeportEnable {
-		loadBalancerHealthChecker = newLoadBalancerHealthChecker(n.name)
+		if config.Gateway.NodeType != types.NodeTypeBluefield {
+			loadBalancerHealthChecker = newLoadBalancerHealthChecker(n.name)
+		}
 		portClaimWatcher, err = newPortClaimWatcher(n.recorder)
 		if err != nil {
 			return err
@@ -211,10 +213,12 @@ func (n *OvnNode) initGateway(subnets []*net.IPNet, nodeAnnotator kube.Annotator
 	// Wait for gateway resources to be created by the master if DisableSNATMultipleGWs is not set,
 	// as that option does not add default SNAT rules on the GR and the gatewayReady function checks
 	// those default NAT rules are present
-	if !config.Gateway.DisableSNATMultipleGWs && config.Gateway.Mode != config.GatewayModeLocal {
-		waiter.AddWait(gatewayReady, gw.Init)
-	} else {
-		waiter.AddWait(func() (bool, error) { return true, nil }, gw.Init)
+	if config.Gateway.NodeType != types.NodeTypeHostOnly {
+		if !config.Gateway.DisableSNATMultipleGWs && config.Gateway.Mode != config.GatewayModeLocal {
+			waiter.AddWait(gatewayReady, gw.Init)
+		} else {
+			waiter.AddWait(func() (bool, error) { return true, nil }, gw.Init)
+		}
 	}
 
 	n.gateway = gw
