@@ -2,27 +2,14 @@ package ovn
 
 import (
 	"fmt"
-	"hash/fnv"
-	"strconv"
 
 	util "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
 	"k8s.io/klog/v2"
 )
 
-// hash the provided input to make it a valid addressSet or portGroup name.
-func hashForOVN(s string) string {
-	h := fnv.New64a()
-	_, err := h.Write([]byte(s))
-	if err != nil {
-		klog.Errorf("Failed to hash %s", s)
-	}
-	hashString := strconv.FormatUint(h.Sum64(), 10)
-	return fmt.Sprintf("a%s", hashString)
-}
-
 // hash the provided input to make it a valid portGroup name.
 func hashedPortGroup(s string) string {
-	return hashForOVN(s)
+	return util.HashForOVN(s)
 }
 
 func createPortGroup(name string, hashName string) (string, error) {

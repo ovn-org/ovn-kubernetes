@@ -20,9 +20,7 @@ import (
 
 var _ = Describe("OVN Egress Gateway Operations", func() {
 	const (
-		namespaceName    = "namespace1"
-		v4AddressSetName = namespaceName + ipv4AddressSetSuffix
-		v6AddressSetName = namespaceName + ipv6AddressSetSuffix
+		namespaceName = "namespace1"
 	)
 	var (
 		app     *cli.App

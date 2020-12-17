@@ -6,6 +6,7 @@ import (
 	"sync"
 	"time"
 
+	addressset "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/address_set"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
 
 	utilruntime "k8s.io/apimachinery/pkg/util/runtime"
@@ -20,7 +21,7 @@ type EgressDNS struct {
 	// this map holds dnsNames to the dnsEntries
 	dnsEntries map[string]*dnsEntry
 	// allows for the creation of addresssets
-	addressSetFactory AddressSetFactory
+	addressSetFactory addressset.AddressSetFactory
 
 	// Report change when Add operation is done
 	added          chan string
@@ -35,10 +36,10 @@ type dnsEntry struct {
 	// NOTE: used for testing
 	dnsResolves []net.IP
 	// the addressSet that contains the current IPs
-	dnsAddressSet AddressSet
+	dnsAddressSet addressset.AddressSet
 }
 
-func NewEgressDNS(addressSetFactory AddressSetFactory, controllerStop <-chan struct{}) (*EgressDNS, error) {
+func NewEgressDNS(addressSetFactory addressset.AddressSetFactory, controllerStop <-chan struct{}) (*EgressDNS, error) {
 	dnsInfo, err := util.NewDNS("/etc/resolv.conf")
 	if err != nil {
 		return nil, err
@@ -57,7 +58,7 @@ func NewEgressDNS(addressSetFactory AddressSetFactory, controllerStop <-chan str
 	return egressDNS, nil
 }
 
-func (e *EgressDNS) Add(namespace, dnsName string) (AddressSet, error) {
+func (e *EgressDNS) Add(namespace, dnsName string) (addressset.AddressSet, error) {
 	e.lock.Lock()
 	defer e.lock.Unlock()
 
@@ -179,17 +180,4 @@ func (e *EgressDNS) Shutdown() {
 
 func (e *EgressDNS) signalAdded(dnsName string) {
 	e.added <- dnsName
-}
-
-// function only used for testing
-// TODO when address_set gets moved to its own package remove this function and move
-// egress_firewall_dns_test into the same package as egressfirewall_dns
-func (e *EgressDNS) GetDNSEntry(dnsName string) (map[string]struct{}, []net.IP, AddressSet) {
-	e.lock.Lock()
-	defer e.lock.Unlock()
-	if dnsEntry, exists := e.dnsEntries[dnsName]; exists {
-		return dnsEntry.namespaces, dnsEntry.dnsResolves, dnsEntry.dnsAddressSet
-	}
-
-	return nil, nil, nil
 }

@@ -240,7 +240,8 @@ func (oc *Controller) createDefaultDenyPortGroup(policyType knet.PolicyType) err
 // Creates the match string used for ACLs allowing incoming multicast into a
 // namespace, that is, from IPs that are in the namespace's address set.
 func getMulticastACLMatch(nsInfo *namespaceInfo) string {
-	return "ip4.src == $" + nsInfo.addressSet.GetIPv4HashName() + " && ip4.mcast"
+	ipv4HashedAS, _ := nsInfo.addressSet.GetASHashNames()
+	return "ip4.src == $" + ipv4HashedAS + " && ip4.mcast"
 }
 
 // Creates a policy to allow multicast traffic within 'ns':
