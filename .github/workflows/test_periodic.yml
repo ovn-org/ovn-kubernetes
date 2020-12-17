@@ -79,35 +79,6 @@ jobs:
       run: |
         sudo curl -Lo /usr/local/bin/kind https://github.com/aojea/kind/releases/download/dualstack/kind
         sudo chmod +x /usr/local/bin/kind
-
-    - name: Clone Kubernetes
-      run: |
-        set -x
-        rm -rf $GOPATH/src/k8s.io/kubernetes
-        git clone --single-branch --branch $K8S_VERSION https://github.com/kubernetes/kubernetes.git $GOPATH/src/k8s.io/kubernetes/
-        cd $GOPATH/src/k8s.io/kubernetes
-        source hack/lib/version.sh
-        kube::version::get_version_vars
-        echo "KUBE_GIT_VERSION=$KUBE_GIT_VERSION" >> $GITHUB_ENV
-        
-    - name: Cache Kubernetes
-      id: cache-k8s
-      uses: actions/cache@v2
-      with:
-        path: ${{ env.GOPATH }}/src/k8s.io/kubernetes
-        key: k8s-go-master-${{ env.KUBE_GIT_VERSION }}
-        restore-keys: |
-          k8s-go-master
-
-    - name: Build and install Kubernetes
-      if: steps.cache-k8s.outputs.cache-hit != 'true'
-      run: |
-        set -x
-        pushd $GOPATH/src/k8s.io/kubernetes/
-          make WHAT="test/e2e/e2e.test vendor/github.com/onsi/ginkgo/ginkgo cmd/kubectl"
-          /usr/local/bin/kind build node-image --image=kindest/node:master
-          docker save kindest/node:master > _output/kind-image.tar
-        popd
         
   e2e-dual:
     if: github.repository == 'ovn-org/ovn-kubernetes' || github.event_name == 'workflow_dispatch'
@@ -161,29 +132,11 @@ jobs:
     - name: Load docker image
       run: |
         docker load --input image.tar
-
-    - name: Restore Kubernetes from cache
-      id: cache-k8s
-      uses: actions/cache@v2
-      with:
-        path: "${{ env.GOPATH }}/src/k8s.io/kubernetes"
-        key: k8s-go-master
-
-    - name: Copy k8s artifacts
-      run: |
-        pushd $GOPATH/src/k8s.io/kubernetes/
-          docker load --input ./_output/kind-image.tar
-          sudo cp ./_output/local/go/bin/kubectl /usr/local/bin/kubectl
-          sudo cp ./_output/local/go/bin/e2e.test /usr/local/bin/e2e.test
-        popd
         
     - name: kind setup
       run: |
         export OVN_IMAGE="ovn-daemonset-f:dev"
-        # Run KIND
-        pushd ./contrib
-          ./kind.sh
-        popd
+        make -C test install-kind
 
     - name: Run Tests
       run: |

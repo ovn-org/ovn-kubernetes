@@ -4,11 +4,6 @@ set -ex
 
 SHARD=$1
 
-pushd $GOPATH/src/k8s.io/kubernetes/
-export KUBECONFIG=${HOME}/admin.conf
-export MASTER_NAME=${KIND_CLUSTER_NAME}-control-plane
-export NODE_NAMES=${MASTER_NAME}
-
 groomTestList() {
 	echo $(echo "${1}" | sed -e '/^\($\|#\)/d' -e 's/ /\\s/g' | tr '\n' '|' | sed -e 's/|$//')
 }
@@ -37,6 +32,15 @@ named port.+\[Feature:NetworkPolicy\]
 
 # TO BE FIXED BY https://github.com/kubernetes/kubernetes/pull/93119
 GCE
+
+# Clean up SCTP tests https://github.com/kubernetes/kubernetes/issues/96717
+\[Feature:SCTP\]
+
+# https://github.com/ovn-org/ovn-kubernetes/issues/1907
+service.kubernetes.io/headless
+
+# TO BE FIXED BY https://github.com/kubernetes/kubernetes/pull/95351
+should resolve connection reset issue #74839
 
 # ???
 \[Feature:NoSNAT\]
@@ -126,10 +130,16 @@ export KUBE_CONTAINER_RUNTIME_NAME=containerd
 # FIXME we should not tolerate flakes
 # but until then, we retry the test in the same job
 # to stop PR retriggers for totally broken code
-export GINKGO_TOLERATE_FLAKES='y'
-export FLAKE_ATTEMPTS=2
-NUM_NODES=2
-./hack/ginkgo-e2e.sh \
-'--provider=skeleton' "--num-nodes=${NUM_NODES}" \
-"--ginkgo.focus=${FOCUS}" "--ginkgo.skip=${SKIPPED_TESTS}" \
-"--report-dir=${E2E_REPORT_DIR}" '--disable-log-dump=true'
+export FLAKE_ATTEMPTS=3
+export NUM_NODES=20
+ginkgo --nodes=${NUM_NODES} \
+	--focus=${FOCUS} \
+	--skip=${SKIPPED_TESTS} \
+	--flakeAttempts=${FLAKE_ATTEMPTS} \
+	/usr/local/bin/e2e.test \
+	-- \
+	--kubeconfig=${HOME}/admin.conf \
+	--provider=local \
+	--dump-logs-on-failure=false \
+	--report-dir=${E2E_REPORT_DIR}	\
+	--disable-log-dump=true
