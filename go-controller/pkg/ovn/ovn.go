@@ -344,7 +344,6 @@ func (oc *Controller) Run(wg *sync.WaitGroup) error {
 			oc.client,
 			informerFactory.Core().V1().Services(),
 			informerFactory.Discovery().V1beta1().EndpointSlices(),
-			oc.clusterPortGroupUUID,
 		)
 		informerFactory.Start(oc.stopChan)
 		wg.Add(1)

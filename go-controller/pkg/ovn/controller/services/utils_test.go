@@ -267,10 +267,6 @@ func Test_deleteVIPsFromOVN(t *testing.T) {
 						Output: "",
 					},
 					{
-						Cmd:    `ovn-nbctl --timeout=15 --data=bare --no-heading --columns=_uuid find acl name=a08ea426-2288-11eb-a30b-a8a1590cda29-10.0.0.1\:80`,
-						Output: "",
-					},
-					{
 						Cmd:    `ovn-nbctl --timeout=15 --data=bare --no-heading --columns=name find logical_router options:chassis!=null`,
 						Output: "",
 					},
@@ -295,7 +291,7 @@ func Test_deleteVIPsFromOVN(t *testing.T) {
 			if err != nil {
 				t.Errorf("fexec error: %v", err)
 			}
-			if err := deleteVIPsFromOVN(tt.args.vips, st, tt.args.svc.Name, tt.args.svc.Namespace, clusterPortGroupUUID); (err != nil) != tt.wantErr {
+			if err := deleteVIPsFromOVN(tt.args.vips, st, tt.args.svc.Name, tt.args.svc.Namespace); (err != nil) != tt.wantErr {
 				t.Errorf("deleteVIPsFromOVN() error = %v, wantErr %v", err, tt.wantErr)
 			}
 

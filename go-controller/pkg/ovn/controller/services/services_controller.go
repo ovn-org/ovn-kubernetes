@@ -5,7 +5,6 @@ import (
 	"time"
 
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/metrics"
-	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/acl"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/gateway"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/loadbalancer"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
@@ -49,7 +48,6 @@ const (
 func NewController(client clientset.Interface,
 	serviceInformer coreinformers.ServiceInformer,
 	endpointSliceInformer discoveryinformers.EndpointSliceInformer,
-	clusterPortGroupUUID string,
 ) *Controller {
 	klog.V(4).Info("Creating event broadcaster")
 	broadcaster := record.NewBroadcaster()
@@ -60,11 +58,10 @@ func NewController(client clientset.Interface,
 	st := newServiceTracker()
 
 	c := &Controller{
-		client:               client,
-		serviceTracker:       st,
-		queue:                workqueue.NewNamedRateLimitingQueue(workqueue.DefaultControllerRateLimiter(), controllerName),
-		workerLoopPeriod:     time.Second,
-		clusterPortGroupUUID: clusterPortGroupUUID,
+		client:           client,
+		serviceTracker:   st,
+		queue:            workqueue.NewNamedRateLimitingQueue(workqueue.DefaultControllerRateLimiter(), controllerName),
+		workerLoopPeriod: time.Second,
 	}
 
 	// services
@@ -131,9 +128,6 @@ type Controller struct {
 
 	// repair contains a controller that keeps in sync OVN and Kubernetes services
 	repair *Repair
-
-	// clusterPortGroupUUID contains the UUID of the port groups used for the services rejects ACLs
-	clusterPortGroupUUID string
 }
 
 // Run will not return until stopCh is closed. workers determines how many
@@ -246,7 +240,7 @@ func (c *Controller) syncServices(key string) error {
 	// - the Service was deleted from the cache (doesn't exist in Kubernetes anymore)
 	// - the Service mutated to a new service Type that we don't handle (ExternalName, Headless)
 	if err != nil || !util.ServiceTypeHasClusterIP(service) || !util.IsClusterIPSet(service) {
-		err = deleteVIPsFromOVN(vipsTracked, c.serviceTracker, name, namespace, c.clusterPortGroupUUID)
+		err = deleteVIPsFromOVN(vipsTracked, c.serviceTracker, name, namespace)
 		if err != nil {
 			c.eventRecorder.Eventf(service, v1.EventTypeWarning, "FailedToDeleteOVNLoadBalancer",
 				"Error trying to delete the OVN LoadBalancer for Service %s/%s: %v", name, namespace, err)
@@ -302,34 +296,10 @@ func (c *Controller) syncServices(key string) error {
 			// mark the vip as processed
 			vipsTracked = vipsTracked.Delete(virtualIPKey(vip, svcPort.Protocol))
 
-			// handle reject ACLs for services without endpoints
-			// eventually we have to remove this because it will
-			// be implemented by OVN
-			// https://github.com/ovn-org/ovn-kubernetes/pull/1887
-			rejectACLName := loadbalancer.GenerateACLNameForOVNCommand(lbID, ip, svcPort.Port)
-			aclID, err := acl.GetACLByName(rejectACLName)
-			if err != nil {
-				klog.Errorf("Error trying to get ACL for Service %s/%s: %v", name, namespace, err)
-			}
-			// if there is no ACL and there are no endpoints we add a new ACL
-			// if there is an ACL and we have endpoints we have to remove the ACL
-			// if there is no ACL and we have endpoints we don´t need to do anything
-			if len(eps) == 0 && len(aclID) == 0 {
+			// reject ACLs are handled by OVN
+			if len(eps) == 0 {
 				klog.V(4).Infof("Service %s/%s without endpoints", name, namespace)
-				_, err = acl.AddRejectACLToPortGroup(c.clusterPortGroupUUID, rejectACLName, ip, int(svcPort.Port), svcPort.Protocol)
-				if err != nil {
-					klog.Errorf("Error trying to add ACL for Service %s/%s: %v", name, namespace, err)
-				}
-			} else if len(eps) > 0 && len(aclID) > 0 {
-				// remove acl
-				err = acl.RemoveACLFromPortGroup(aclID, c.clusterPortGroupUUID)
-				if err != nil {
-					klog.Errorf("Error trying to remove ACL for Service %s/%s: %v", name, namespace, err)
-				}
-			} else {
-				klog.Infof("ACL: %s already created for Service : %s/%s", aclID, namespace, name)
 			}
-			// end of reject ACL code for Service IP
 
 			// Node Port
 			if svcPort.NodePort != 0 {
@@ -438,7 +408,7 @@ func (c *Controller) syncServices(key string) error {
 
 	// at this point we have processed all vips we've found in the service
 	// so the remaining ones that we had in the vipsTracked variable should be deleted
-	err = deleteVIPsFromOVN(vipsTracked, c.serviceTracker, name, namespace, c.clusterPortGroupUUID)
+	err = deleteVIPsFromOVN(vipsTracked, c.serviceTracker, name, namespace)
 	if err != nil {
 		c.eventRecorder.Eventf(service, v1.EventTypeWarning, "FailedToDeleteOVNLoadBalancer",
 			"Error trying to delete the OVN LoadBalancer for Service %s/%s: %v", name, namespace, err)
