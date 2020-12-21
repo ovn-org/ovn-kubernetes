@@ -1,12 +1,13 @@
 package util
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
-	"strconv"
 	"strings"
 
 	kapi "k8s.io/api/core/v1"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/kubernetes/scheme"
 	typedcorev1 "k8s.io/client-go/kubernetes/typed/core/v1"
@@ -241,7 +242,7 @@ func EventRecorder(kubeClient kubernetes.Interface) record.EventRecorder {
 }
 
 // UseEndpointSlices if the EndpointSlice API is available
-// and if the kubernetes versions supports DualStack (Kubernetes >= 1.20)
+// and the Services support multiple ClusterIPs
 func UseEndpointSlices(kubeClient kubernetes.Interface) bool {
 	endpointSlicesEnabled := false
 	if _, err := kubeClient.Discovery().ServerResourcesForGroupVersion(discovery.SchemeGroupVersion.String()); err == nil {
@@ -249,13 +250,12 @@ func UseEndpointSlices(kubeClient kubernetes.Interface) bool {
 		klog.V(2).Infof("Kubernetes Endpoint Slices enabled on the cluster: %s", discovery.SchemeGroupVersion.String())
 		endpointSlicesEnabled = true
 	}
-	// We only use Slices if > 1.19 since we only need them for Dual Stack
-	sv, _ := kubeClient.Discovery().ServerVersion()
-	major, _ := strconv.Atoi(sv.Major)
-	minor, _ := strconv.Atoi(sv.Minor)
-	klog.Infof("Kubernetes running with version %d.%d", major, minor)
-	if major <= 1 && minor < 20 || !endpointSlicesEnabled {
+	// We only use Slices if Services have multiple ClusterIPs
+	// Get the ClusterIP of the kubernetes service created in the default namespace
+	svc, err := kubeClient.CoreV1().Services(metav1.NamespaceDefault).Get(context.TODO(), "kubernetes", metav1.GetOptions{})
+	if err != nil {
 		return false
 	}
-	return true
+
+	return endpointSlicesEnabled && (len(svc.Spec.ClusterIPs) > 0)
 }
