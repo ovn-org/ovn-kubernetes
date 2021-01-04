@@ -783,13 +783,13 @@ func (oc *Controller) WatchCRD() {
 					klog.Errorf("Error Creating EgressFirewallWatchFactory: %v", err)
 					return
 				}
-				oc.egressFirewallHandler = oc.WatchEgressFirewall()
 
 				oc.egressFirewallDNS, err = NewEgressDNS(oc.addressSetFactory, oc.stopChan)
 				oc.egressFirewallDNS.Run(egressFirewallDNSDefaultDuration)
 				if err != nil {
 					klog.Errorf("Error Creating EgressFirewallDNS: %v", err)
 				}
+				oc.egressFirewallHandler = oc.WatchEgressFirewall()
 			}
 		},
 		UpdateFunc: func(old, newer interface{}) {
