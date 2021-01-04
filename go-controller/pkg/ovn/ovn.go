@@ -75,6 +75,8 @@ type namespaceInfo struct {
 
 	// addressSet is an address set object that holds the IP addresses
 	// of all pods in the namespace.
+
+	//this is to create a test commit
 	addressSet addressset.AddressSet
 
 	// map from NetworkPolicy name to namespacePolicy. You must hold the
