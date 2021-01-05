@@ -56,6 +56,7 @@ func newLocalGateway(nodeName string, hostSubnets []*net.IPNet, gwNextHops []net
 	// For SDN->OVN migration, see https://github.com/openshift/ovn-kubernetes/pull/281
 	if gwIntf == "none" {
 		var err error
+		gw.readyFunc = func() (bool, error) { return true, nil }
 		gw.initFunc, err = initSharedGatewayNoBridge(nodeName, hostSubnets, gwNextHops, nodeAnnotator)
 		if err != nil {
 			return nil, err
