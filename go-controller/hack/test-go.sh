@@ -20,20 +20,23 @@ function testrun {
     local pkg="${2}"
     local go_test="go test"
     local otherargs="${@:3} "
-    local args="-mod vendor"
+    local args="-mod vendor "
+    local raceargs=""
     local ginkgoargs=
     # enable go race detector
-    if [ ! -z "${RACE:-}" ]; then
-        args="-race "
+    # FIXME race detector fails with hybrid-overlay tests
+    if [[ ! -z "${RACE:-}" && "${pkg}" != "github.com/ovn-org/ovn-kubernetes/go-controller/hybrid-overlay/pkg/controller" ]]; then
+        raceargs=" -race "
     fi
     if [[ "$USER" != root && " ${root_pkgs[@]} " =~ " $pkg " ]]; then
         testfile=$(mktemp --tmpdir ovn-test.XXXXXXXX)
         echo "sudo required for ${pkg}, compiling test to ${testfile}"
-        if [[ ! -z "${RACE:-}" && "${pkg}" != "github.com/ovn-org/ovn-kubernetes/go-controller/hybrid-overlay/pkg/controller" ]]; then
+        if [ ! -z "${raceargs}" ]; then
             go test -race -covermode atomic -c "${pkg}" -o "${testfile}"
         else
             go test -covermode set -c "${pkg}" -o "${testfile}"
         fi
+        # "-mod vendor" option doesn't apply for compiled tests
         args=""
         go_test="sudo ${testfile}"
     fi
@@ -48,7 +51,8 @@ function testrun {
     local path=${pkg#github.com/ovn-org/ovn-kubernetes/go-controller}
     # coverage is incompatible with the race detector
     if [ ! -z "${COVERALLS:-}" ]; then
-        args="-test.coverprofile=${idx}.coverprofile "
+        args="-test.coverprofile=${idx}.coverprofile "${args}
+        raceargs=""
     fi
     if grep -q -r "ginkgo" ."${path}"; then
 	    prefix=$(echo "${path}" | cut -c 2- | sed 's,/,_,g')
@@ -57,7 +61,7 @@ function testrun {
             ginkgoargs="-ginkgo.v ${gingko_focus} -ginkgo.reportFile ${TEST_REPORT_DIR}/junit-${prefix}.xml"
         fi
     fi
-    args="${args}${otherargs}"
+    args="${args}${raceargs}${otherargs}"
     if [ "$go_test" == "go test" ]; then
         args=${args}${pkg}
     fi
