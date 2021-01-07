@@ -215,6 +215,7 @@ func RegisterMasterMetrics(nbClient, sbClient goovn.Client) {
 		prometheus.MustRegister(metricV6HostSubnetCount)
 		prometheus.MustRegister(metricV4AllocatedHostSubnetCount)
 		prometheus.MustRegister(metricV6AllocatedHostSubnetCount)
+		registerWorkqueueMetrics(MetricOvnkubeNamespace, MetricOvnkubeSubsystemMaster)
 	})
 }
 
