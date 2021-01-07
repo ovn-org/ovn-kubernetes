@@ -62,6 +62,13 @@ func NewMaster(kube kube.Interface,
 			}
 			return m.DeleteNode(node)
 		},
+		func(old, new interface{}) error {
+			node, ok := new.(*kapi.Node)
+			if !ok {
+				return fmt.Errorf("object is not a node")
+			}
+			return m.AddNode(node)
+		},
 		informer.ReceiveAllUpdates,
 	)
 

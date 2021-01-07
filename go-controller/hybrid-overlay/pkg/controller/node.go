@@ -96,6 +96,13 @@ func NewNode(
 			}
 			return n.controller.DeleteNode(node)
 		},
+		func(old, new interface{}) error {
+			newNode, ok := new.(*kapi.Node)
+			if !ok {
+				return fmt.Errorf("object is not a node")
+			}
+			return n.controller.AddNode(newNode)
+		},
 		nodeChanged,
 	)
 	n.podEventHandler = eventHandlerCreateFunction("pod", podInformer,
@@ -118,6 +125,13 @@ func NewNode(
 				return nil
 			}
 			return n.controller.DeletePod(pod)
+		},
+		func(old, new interface{}) error {
+			pod, ok := new.(*kapi.Pod)
+			if !ok {
+				return fmt.Errorf("object is not a pod")
+			}
+			return n.controller.AddPod(pod)
 		},
 		podChanged,
 	)

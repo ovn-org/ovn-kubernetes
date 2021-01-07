@@ -74,6 +74,7 @@ var _ = Describe("Informer Event Handler Tests", func() {
 	It("processes an add event", func() {
 		adds := int32(0)
 		deletes := int32(0)
+		updates := int32(0)
 
 		k := fake.NewSimpleClientset(
 			&v1.Namespace{
@@ -97,6 +98,10 @@ var _ = Describe("Informer Event Handler Tests", func() {
 			},
 			func(obj interface{}) error {
 				atomic.AddInt32(&deletes, 1)
+				return nil
+			},
+			func(old, new interface{}) error {
+				atomic.AddInt32(&updates, 1)
 				return nil
 			},
 			ReceiveAllUpdates,
@@ -136,6 +141,7 @@ var _ = Describe("Informer Event Handler Tests", func() {
 	It("do not processes an add event if the pod is set for deletion", func() {
 		adds := int32(0)
 		deletes := int32(0)
+		updates := int32(0)
 
 		k := fake.NewSimpleClientset(
 			&v1.Namespace{
@@ -159,6 +165,10 @@ var _ = Describe("Informer Event Handler Tests", func() {
 			},
 			func(obj interface{}) error {
 				atomic.AddInt32(&deletes, 1)
+				return nil
+			},
+			func(old, new interface{}) error {
+				atomic.AddInt32(&updates, 1)
 				return nil
 			},
 			ReceiveAllUpdates,
@@ -201,6 +211,7 @@ var _ = Describe("Informer Event Handler Tests", func() {
 	It("adds existing pod and processes an update event", func() {
 		adds := int32(0)
 		deletes := int32(0)
+		updates := int32(0)
 
 		pod := newPod("foo", namespace)
 		k := fake.NewSimpleClientset(
@@ -228,6 +239,10 @@ var _ = Describe("Informer Event Handler Tests", func() {
 			},
 			func(obj interface{}) error {
 				atomic.AddInt32(&deletes, 1)
+				return nil
+			},
+			func(old, new interface{}) error {
+				atomic.AddInt32(&updates, 1)
 				return nil
 			},
 			ReceiveAllUpdates,
@@ -272,13 +287,16 @@ var _ = Describe("Informer Event Handler Tests", func() {
 
 		// no deletes
 		Consistently(func() int32 { return atomic.LoadInt32(&deletes) }).Should(Equal(int32(0)), "deletes")
-		// two updates, initial add from cache + update event
-		Eventually(func() int32 { return atomic.LoadInt32(&adds) }).Should(Equal(int32(2)), "adds")
+		// one add
+		Eventually(func() int32 { return atomic.LoadInt32(&adds) }).Should(Equal(int32(1)), "adds")
+		// one update
+		Eventually(func() int32 { return atomic.LoadInt32(&updates) }).Should(Equal(int32(1)), "updates")
 	})
 
 	It("adds existing pod and do not processes an update event if it was set for deletion", func() {
 		adds := int32(0)
 		deletes := int32(0)
+		updates := int32(9)
 
 		pod := newPod("foo", namespace)
 		k := fake.NewSimpleClientset(
@@ -306,6 +324,10 @@ var _ = Describe("Informer Event Handler Tests", func() {
 			},
 			func(obj interface{}) error {
 				atomic.AddInt32(&deletes, 1)
+				return nil
+			},
+			func(old, new interface{}) error {
+				atomic.AddInt32(&updates, 1)
 				return nil
 			},
 			ReceiveAllUpdates,
@@ -350,6 +372,7 @@ var _ = Describe("Informer Event Handler Tests", func() {
 	It("adds existing pod and processes a delete event", func() {
 		adds := int32(0)
 		deletes := int32(0)
+		updates := int32(0)
 
 		k := fake.NewSimpleClientset(
 			[]runtime.Object{
@@ -376,6 +399,10 @@ var _ = Describe("Informer Event Handler Tests", func() {
 			},
 			func(obj interface{}) error {
 				atomic.AddInt32(&deletes, 1)
+				return nil
+			},
+			func(old, new interface{}) error {
+				atomic.AddInt32(&updates, 1)
 				return nil
 			},
 			ReceiveAllUpdates,
@@ -416,6 +443,7 @@ var _ = Describe("Informer Event Handler Tests", func() {
 	It("ignores updates using DiscardAllUpdates", func() {
 		adds := int32(0)
 		deletes := int32(0)
+		updates := int32(0)
 
 		pod := newPod("foo", namespace)
 		k := fake.NewSimpleClientset(
@@ -443,6 +471,10 @@ var _ = Describe("Informer Event Handler Tests", func() {
 			},
 			func(obj interface{}) error {
 				atomic.AddInt32(&deletes, 1)
+				return nil
+			},
+			func(old, new interface{}) error {
+				atomic.AddInt32(&updates, 1)
 				return nil
 			},
 			DiscardAllUpdates,
@@ -504,7 +536,7 @@ var _ = Describe("Event Handler Internals", func() {
 
 		obj := newPod("bar", "foo")
 
-		e.enqueue(obj)
+		e.enqueue(addEvent, obj)
 
 		Expect(e.workqueue.Len()).To(Equal(1))
 	})
@@ -528,7 +560,7 @@ var _ = Describe("Event Handler Internals", func() {
 
 		obj := newPod("bar", "foo")
 
-		e.enqueueDelete(obj)
+		e.enqueue(deleteEvent, obj)
 
 		Expect(e.workqueue.Len()).To(Equal(1))
 
@@ -559,7 +591,7 @@ var _ = Describe("Event Handler Internals", func() {
 		now := metav1.Now()
 		obj.SetDeletionTimestamp(&now)
 
-		e.enqueue(obj)
+		e.enqueue(updateEvent, obj)
 
 		Expect(e.workqueue.Len()).To(Equal(0))
 	})
