@@ -319,13 +319,10 @@ func (oc *Controller) Run(wg *sync.WaitGroup) error {
 
 	oc.WatchPods()
 
-	// Services are handled differently depending on the Kubernetes API versions
-	// and the OVN configuration.
-	// We use a level triggered controller to handle services if k8s > 1.19,
-	// using endpoint slices instead endpoints if OVN is configured for dual stack.
-	if util.UseEndpointSlices(oc.client) && config.IPv4Mode && config.IPv6Mode {
-		// Services are handled differently depending on the Kubernetes API versions
-		klog.Infof("Dual Stack enabled: using EndpointSlices instead of Endpoints in k8s versions > 1.19")
+	// We use a level triggered controller to handle services if the cluster
+	// is using endpoint slices and it supports dual stack services.
+	if util.UseEndpointSlices(oc.client) {
+		klog.Infof("Starting OVN Service Controller: Using Endpoint Slices")
 		// Create our own informers to start compartamentalizing the code
 		// filter server side the things we don't care about
 		noProxyName, err := labels.NewRequirement("service.kubernetes.io/service-proxy-name", selection.DoesNotExist, nil)
