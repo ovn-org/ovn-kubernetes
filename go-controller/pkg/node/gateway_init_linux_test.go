@@ -473,12 +473,12 @@ func expectedIPTablesRules(gatewayIP string) map[string]util.FakeTable {
 
 	// OCP HACK: Block MCS Access. https://github.com/openshift/ovn-kubernetes/pull/170
 	table["filter"]["FORWARD"] = append(table["filter"]["FORWARD"],
-		"-p tcp -m tcp --dport 22624 -j REJECT",
-		"-p tcp -m tcp --dport 22623 -j REJECT",
+		"-p tcp -m tcp --dport 22624 --syn -j REJECT",
+		"-p tcp -m tcp --dport 22623 --syn -j REJECT",
 	)
 	table["filter"]["OUTPUT"] = append(table["filter"]["OUTPUT"],
-		"-p tcp -m tcp --dport 22624 -j REJECT",
-		"-p tcp -m tcp --dport 22623 -j REJECT",
+		"-p tcp -m tcp --dport 22624 --syn -j REJECT",
+		"-p tcp -m tcp --dport 22623 --syn -j REJECT",
 	)
 	// END OCP HACK
 
