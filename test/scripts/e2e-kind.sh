@@ -21,6 +21,9 @@ should have ipv4 and ipv6 internal node ip
 kube-proxy
 should set TCP CLOSE_WAIT timeout
 
+# LoadBalancer tests require Cloud Provider Integration
+GCE|LB.health.check|LoadBalancer|Loadbalancer|load.balancer|ESIPP
+
 # TO BE IMPLEMENTED: https://github.com/ovn-org/ovn-kubernetes/issues/819
 Services.+session affinity
 
@@ -29,9 +32,6 @@ EndpointSlices
 
 # NOT IMPLEMENTED; SEE DISCUSSION IN https://github.com/ovn-org/ovn-kubernetes/pull/1225
 named port.+\[Feature:NetworkPolicy\]
-
-# TO BE FIXED BY https://github.com/kubernetes/kubernetes/pull/93119
-GCE
 
 # Clean up SCTP tests https://github.com/kubernetes/kubernetes/issues/96717
 \[Feature:SCTP\]
@@ -50,6 +50,7 @@ ClusterDns \[Feature:Example\]
 should set default value on new IngressClass
 # RACE CONDITION IN TEST, SEE https://github.com/kubernetes/kubernetes/pull/90254
 should prevent Ingress creation if more than 1 IngressClass marked as default
+Disruptive
 "
 
 IPV4_ONLY_TESTS="
