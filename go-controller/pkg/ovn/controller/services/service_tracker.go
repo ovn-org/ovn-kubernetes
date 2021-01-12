@@ -122,20 +122,6 @@ func (st *serviceTracker) getService(name, namespace string) sets.String {
 	return sets.NewString()
 }
 
-// getServiceVipsMap return a set with all the service VIPs in the format IP:Port/Protocol
-func (st *serviceTracker) getServiceVipsMap() sets.String {
-	st.Lock()
-	defer st.Unlock()
-
-	result := sets.NewString()
-	for _, vips := range st.virtualIPByService {
-		for key := range vips {
-			result.Insert(key)
-		}
-	}
-	return result
-}
-
 // updateKubernetesService adds or updates the tracker from a Kubernetes service
 // added for testing purposes
 func (st *serviceTracker) updateKubernetesService(service *v1.Service) {
