@@ -137,7 +137,7 @@ func (s service) addCmds(fexec *ovntest.FakeExec, service v1.Service) {
 			fmt.Sprintf("ovn-nbctl --timeout=15 --data=bare --no-heading --columns=_uuid find acl name=%s-%s\\:%v",
 				k8sTCPLoadBalancerIP, service.Spec.ClusterIP, port.Port),
 			fmt.Sprintf("ovn-nbctl --timeout=15 --id=@reject-acl create acl direction=from-lport priority=1000 match=\"ip4.dst==%s && tcp "+
-				"&& tcp.dst==%v\" action=reject name=%s-%s\\:%v -- add port_group %s acls @reject-acl", service.Spec.ClusterIP, port.Port,
+				"&& tcp.dst==%v\" action=reject log=false severity=info meter=acl-logging name=%s-%s\\:%v -- add port_group %s acls @reject-acl", service.Spec.ClusterIP, port.Port,
 				k8sTCPLoadBalancerIP, service.Spec.ClusterIP, port.Port, ovnClusterPortGroupUUID),
 		})
 	}

@@ -38,7 +38,8 @@ const (
 	OvnNodeAnnotationRetryInterval = 100 * time.Millisecond
 	OvnNodeAnnotationRetryTimeout  = 1 * time.Second
 	OvnSingleJoinSwitchTopoVersion = 1
-	OvnCurrentTopologyVersion      = OvnSingleJoinSwitchTopoVersion
+	OvnNamespacedDenyPGTopoVersion = 2
+	OvnCurrentTopologyVersion      = OvnNamespacedDenyPGTopoVersion
 )
 
 type ovnkubeMasterLeaderMetrics struct{}
@@ -124,6 +125,13 @@ func (oc *Controller) Start(nodeName string, wg *sync.WaitGroup) error {
 	return nil
 }
 
+// cleanup obsolete *gressDefaultDeny port groups
+func (oc *Controller) upgradeToNamespacedDenyPGOVNTopology(existingNodeList *kapi.NodeList) error {
+	deletePortGroup("ingressDefaultDeny")
+	deletePortGroup("egressDefaultDeny")
+	return nil
+}
+
 // delete obsoleted logical OVN entities that are specific for Multiple join switches OVN topology. Also cleanup
 // OVN entities for deleted nodes (similar to syncNodes() but for obsoleted Multiple join switches OVN topology)
 func (oc *Controller) upgradeToSingleSwitchOVNTopology(existingNodeList *kapi.NodeList) error {
@@ -206,9 +214,12 @@ func (oc *Controller) upgradeOVNTopology(existingNodes *kapi.NodeList) error {
 
 	// If current DB version is greater than OvnSingleJoinSwitchTopoVersion, no need to upgrade to single switch topology
 	if ver < OvnSingleJoinSwitchTopoVersion {
-		return oc.upgradeToSingleSwitchOVNTopology(existingNodes)
+		err = oc.upgradeToSingleSwitchOVNTopology(existingNodes)
 	}
-	return nil
+	if err == nil && ver < OvnNamespacedDenyPGTopoVersion {
+		err = oc.upgradeToNamespacedDenyPGOVNTopology(existingNodes)
+	}
+	return err
 }
 
 // StartClusterMaster runs a subnet IPAM and a controller that watches arrival/departure
@@ -296,6 +307,14 @@ func (oc *Controller) StartClusterMaster(masterNodeName string) error {
 			klog.Warningf("Multicast support enabled, however version of OVN in use does not support IGMP Group. " +
 				"Disabling Multicast Support")
 			oc.multicastSupport = false
+		}
+	}
+
+	if uuid, _, err := util.RunOVNNbctl("--data=bare", "--columns=_uuid", "find", "meter", "name="+types.OvnACLLoggingMeter); err == nil && uuid == "" {
+		dropRate := strconv.Itoa(config.Logging.ACLLoggingRateLimit)
+		if _, _, err := util.RunOVNNbctl("meter-add", types.OvnACLLoggingMeter, "drop", dropRate, "pktps"); err != nil {
+			klog.Warningf("ACL logging support enabled, however acl-logging meter could not be created. Disabling ACL logging support")
+			oc.aclLoggingEnabled = false
 		}
 	}
 

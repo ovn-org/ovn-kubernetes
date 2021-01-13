@@ -474,6 +474,7 @@ var _ = Describe("Config Operations", func() {
 			Expect(Default.ConntrackZone).To(Equal(64321))
 			Expect(Logging.File).To(Equal("/var/log/ovnkube.log"))
 			Expect(Logging.Level).To(Equal(5))
+			Expect(Logging.ACLLoggingRateLimit).To(Equal(20))
 			Expect(CNI.ConfDir).To(Equal("/etc/cni/net.d22"))
 			Expect(CNI.Plugin).To(Equal("ovn-k8s-cni-overlay22"))
 			Expect(Kubernetes.Kubeconfig).To(Equal(kubeconfigFile))
@@ -540,6 +541,7 @@ var _ = Describe("Config Operations", func() {
 			Expect(Default.ConntrackZone).To(Equal(5555))
 			Expect(Logging.File).To(Equal("/some/logfile"))
 			Expect(Logging.Level).To(Equal(3))
+			Expect(Logging.ACLLoggingRateLimit).To(Equal(30))
 			Expect(CNI.ConfDir).To(Equal("/some/cni/dir"))
 			Expect(CNI.Plugin).To(Equal("a-plugin"))
 			Expect(Kubernetes.Kubeconfig).To(Equal(kubeconfigFile))
@@ -584,6 +586,7 @@ var _ = Describe("Config Operations", func() {
 			"-conntrack-zone=5555",
 			"-loglevel=3",
 			"-logfile=/some/logfile",
+			"-acl-logging-rate-limit=30",
 			"-cni-conf-dir=/some/cni/dir",
 			"-cni-plugin=a-plugin",
 			"-cluster-subnets=10.130.0.0/15/24",
