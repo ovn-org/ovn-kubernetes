@@ -106,6 +106,9 @@ func (oc *Controller) addGWRoutesForNamespace(namespace string, gws []net.IP, ns
 		gr := "GR_" + pod.Spec.NodeName
 		for _, gw := range gws {
 			for _, podIP := range pod.Status.PodIPs {
+				if utilnet.IsIPv6(gw) != utilnet.IsIPv6String(podIP.IP) {
+					continue
+				}
 				mask := GetIPFullMask(podIP.IP)
 				_, stderr, err := util.RunOVNNbctl("--", "--may-exist", "--policy=src-ip", "--ecmp-symmetric-reply",
 					"lr-route-add", gr, podIP.IP+mask, gw.String())
@@ -198,6 +201,9 @@ func (oc *Controller) deleteGWRoutesForNamespace(nsInfo *namespaceInfo) {
 	// TODO(trozet): batch all of these with ebay bindings
 	for podIP, gwToGr := range nsInfo.podExternalRoutes {
 		for gw, gr := range gwToGr {
+			if utilnet.IsIPv6String(gw) != utilnet.IsIPv6String(podIP) {
+				continue
+			}
 			mask := GetIPFullMask(podIP)
 			node := strings.TrimPrefix(gr, "GR_")
 			if err := oc.delHybridRoutePolicyForPod(net.ParseIP(podIP), node); err != nil {
@@ -322,6 +328,9 @@ func (oc *Controller) addPerPodGRSNAT(pod *kapi.Pod, podIfAddrs []*net.IPNet) er
 		gwIP := gwIPNet.IP.String()
 		for _, podIPNet := range podIfAddrs {
 			podIP := podIPNet.IP.String()
+			if utilnet.IsIPv6String(gwIP) != utilnet.IsIPv6String(podIP) {
+				continue
+			}
 			mask := GetIPFullMask(podIP)
 			// may-exist works only if the the nat rule being added has everything the same i.e.,
 			// the type, the router name, external IP and the logical IP must match
