@@ -305,15 +305,18 @@ func (c *Controller) syncServices(key string) error {
 				klog.Errorf("Error trying to get ACL for Service %s/%s: %v", name, namespace, err)
 			}
 			// if there is no ACL and there is no endpoints we add a new ACL
-			// if there is an ACL and we have endpoints we have to remove the ACL
-			// if there is no ACL and we have endpoints we don´t need to do anything
 			if len(eps) == 0 && len(aclID) == 0 {
 				klog.V(4).Infof("Service %s/%s without endpoints", name, namespace)
-				_, err = acl.AddRejectACLToPortGroup(c.clusterPortGroupUUID, rejectACLName, ip, int(svcPort.Port), svcPort.Protocol)
+				aclID, err = acl.AddRejectACLToPortGroup(c.clusterPortGroupUUID, rejectACLName, ip, int(svcPort.Port), svcPort.Protocol)
 				if err != nil {
 					klog.Errorf("Error trying to add ACL for Service %s/%s: %v", name, namespace, err)
 				}
-			} else if len(aclID) > 0 {
+				klog.Infof("Service Reject ACL created for ClusterIP service: %s, namespace: %s, via: "+
+					"%s:%s:%d, ACL UUID: %s", service.Name, service.Namespace, svcPort.Protocol,
+					service.Spec.ClusterIP, svcPort.Port, aclID)
+			}
+			// if there is an ACL and we have endpoints we have to remove the ACL
+			if len(eps) > 0 && len(aclID) > 0 {
 				// remove acl
 				err = acl.RemoveACLFromPortGroup(aclID, c.clusterPortGroupUUID)
 				if err != nil {
