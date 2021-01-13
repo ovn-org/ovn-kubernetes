@@ -297,10 +297,6 @@ func (oc *Controller) StartClusterMaster(masterNodeName string) error {
 				"Disabling Multicast Support")
 			oc.multicastSupport = false
 		}
-		if !config.IPv4Mode {
-			klog.Warningf("Multicast support enabled, but can not be used with single-stack IPv6. Disabling Multicast Support")
-			oc.multicastSupport = false
-		}
 	}
 
 	if err := oc.SetupMaster(masterNodeName); err != nil {
@@ -360,6 +356,15 @@ func (oc *Controller) SetupMaster(masterNodeName string) error {
 		return err
 	}
 
+	// Create a cluster-wide port group with all node-to-cluster router
+	// logical switch ports.  Currently the only user is multicast but it might
+	// be used for other features in the future.
+	oc.clusterRtrPortGroupUUID, err = createPortGroup(clusterRtrPortGroupName, clusterRtrPortGroupName)
+	if err != nil {
+		klog.Errorf("Failed to create cluster port group: %v", err)
+		return err
+	}
+
 	// If supported, enable IGMP relay on the router to forward multicast
 	// traffic between nodes.
 	if oc.multicastSupport {
@@ -374,6 +379,13 @@ func (oc *Controller) SetupMaster(masterNodeName string) error {
 		// Drop IP multicast globally. Multicast is allowed only if explicitly
 		// enabled in a namespace.
 		if err := oc.createDefaultDenyMulticastPolicy(); err != nil {
+			klog.Errorf("Failed to create default deny multicast policy, error: %v", err)
+			return err
+		}
+
+		// Allow IP multicast from node switch to cluster router and from
+		// cluster router to node switch.
+		if err := oc.createDefaultAllowMulticastPolicy(); err != nil {
 			klog.Errorf("Failed to create default deny multicast policy, error: %v", err)
 			return err
 		}
@@ -471,6 +483,31 @@ func (oc *Controller) SetupMaster(masterNodeName string) error {
 	return nil
 }
 
+func addNodeLogicalSwitchPort(logicalSwitch, portName, portType, addresses, options string) (string, error) {
+	stdout, stderr, err := util.RunOVNNbctl("--", "--may-exist", "lsp-add", logicalSwitch, portName,
+		"--", "lsp-set-type", portName, portType,
+		"--", "lsp-set-options", portName, options,
+		"--", "lsp-set-addresses", portName, addresses)
+	if err != nil {
+		klog.Errorf("Failed to add logical port %s to switch %s, stdout: %q, stderr: %q, error: %v", portName, logicalSwitch, stdout, stderr, err)
+		return "", err
+	}
+
+	// UUID must be retrieved separately from the lsp-add transaction since
+	// (as of OVN 2.12) a bogus UUID is returned if they are part of the same
+	// transaction.
+	uuid, stderr, err := util.RunOVNNbctl("get", "logical_switch_port", portName, "_uuid")
+	if err != nil {
+		klog.Errorf("Error getting UUID for logical port %s "+
+			"stdout: %q, stderr: %q (%v)", portName, uuid, stderr, err)
+		return "", err
+	}
+	if uuid == "" {
+		return uuid, fmt.Errorf("invalid logical port %s uuid", portName)
+	}
+	return uuid, nil
+}
+
 func (oc *Controller) syncNodeManagementPort(node *kapi.Node, hostSubnets []*net.IPNet) error {
 	macAddress, err := util.ParseNodeManagementPortMACAddress(node)
 	if err != nil {
@@ -512,26 +549,9 @@ func (oc *Controller) syncNodeManagementPort(node *kapi.Node, hostSubnets []*net
 
 	// Create this node's management logical port on the node switch
 	portName := types.K8sPrefix + node.Name
-	stdout, stderr, err := util.RunOVNNbctl(
-		"--", "--may-exist", "lsp-add", node.Name, portName,
-		"--", "lsp-set-addresses", portName, addresses)
+	uuid, err := addNodeLogicalSwitchPort(node.Name, portName, "", addresses, "")
 	if err != nil {
-		klog.Errorf("Failed to add logical port to switch, stdout: %q, stderr: %q, error: %v",
-			stdout, stderr, err)
 		return err
-	}
-
-	// UUID must be retrieved separately from the lsp-add transaction since
-	// (as of OVN 2.12) a bogus UUID is returned if they are part of the same
-	// transaction.
-	uuid, stderr, err := util.RunOVNNbctl("get", "logical_switch_port", portName, "_uuid")
-	if err != nil {
-		klog.Errorf("Error getting UUID for logical port %s "+
-			"stdout: %q, stderr: %q (%v)", portName, uuid, stderr, err)
-		return err
-	}
-	if uuid == "" {
-		return fmt.Errorf("invalid logical port %s uuid %q", portName, uuid)
 	}
 
 	if err := addToPortGroup(clusterPortGroupName, &lpInfo{
@@ -640,12 +660,14 @@ func (oc *Controller) ensureNodeLogicalNetwork(nodeName string, hostSubnets []*n
 		"--", "set", "logical_switch", nodeName,
 	}
 
-	var v4Gateway net.IP
+	var v4Gateway, v6Gateway net.IP
 	for _, hostSubnet := range hostSubnets {
 		gwIfAddr := util.GetNodeGatewayIfAddr(hostSubnet)
 		lrpArgs = append(lrpArgs, gwIfAddr.String())
 
 		if utilnet.IsIPv6CIDR(hostSubnet) {
+			v6Gateway = gwIfAddr.IP
+
 			lsArgs = append(lsArgs,
 				"other-config:ipv6_prefix="+hostSubnet.IP.String(),
 			)
@@ -679,7 +701,7 @@ func (oc *Controller) ensureNodeLogicalNetwork(nodeName string, hostSubnets []*n
 		return err
 	}
 
-	// If supported, enable IGMP snooping and querier on the node.
+	// If supported, enable IGMP/MLD snooping and querier on the node.
 	if oc.multicastSupport {
 		stdout, stderr, err = util.RunOVNNbctl("set", "logical_switch",
 			nodeName, "other-config:mcast_snoop=\"true\"")
@@ -689,37 +711,57 @@ func (oc *Controller) ensureNodeLogicalNetwork(nodeName string, hostSubnets []*n
 			return err
 		}
 
-		// Configure querier only if we have an IPv4 address, otherwise
-		// disable querier.
-		if v4Gateway != nil {
-			stdout, stderr, err = util.RunOVNNbctl("set", "logical_switch",
-				nodeName, "other-config:mcast_querier=\"true\"",
-				"other-config:mcast_eth_src=\""+nodeLRPMAC.String()+"\"",
-				"other-config:mcast_ip4_src=\""+v4Gateway.String()+"\"")
-			if err != nil {
-				klog.Errorf("Failed to enable IGMP Querier on logical switch %v, stdout: %q, stderr: %q, error: %v",
-					nodeName, stdout, stderr, err)
-				return err
+		// Configure IGMP/MLD querier if the gateway IP address is known.
+		// Otherwise disable it.
+		if v4Gateway != nil || v6Gateway != nil {
+			if v4Gateway != nil {
+				stdout, stderr, err = util.RunOVNNbctl("set", "logical_switch",
+					nodeName, "other-config:mcast_querier=\"true\"",
+					"other-config:mcast_eth_src=\""+nodeLRPMAC.String()+"\"",
+					"other-config:mcast_ip4_src=\""+v4Gateway.String()+"\"")
+				if err != nil {
+					klog.Errorf("Failed to enable IGMP Querier on logical switch %v, stdout: %q, stderr: %q, error: %v",
+						nodeName, stdout, stderr, err)
+					return err
+				}
+			}
+			if v6Gateway != nil {
+				stdout, stderr, err = util.RunOVNNbctl("set", "logical_switch",
+					nodeName, "other-config:mcast_querier=\"true\"",
+					"other-config:mcast_eth_src=\""+nodeLRPMAC.String()+"\"",
+					"other-config:mcast_ip6_src=\""+v6Gateway.String()+"\"")
+				if err != nil {
+					klog.Errorf("Failed to enable MLD Querier on logical switch %v, stdout: %q, stderr: %q, error: %v",
+						nodeName, stdout, stderr, err)
+					return err
+				}
 			}
 		} else {
 			stdout, stderr, err = util.RunOVNNbctl("set", "logical_switch",
 				nodeName, "other-config:mcast_querier=\"false\"")
 			if err != nil {
-				klog.Errorf("Failed to disable IGMP Querier on logical switch %v, stdout: %q, stderr: %q, error: %v",
+				klog.Errorf("Failed to disable IGMP/MLD Querier on logical switch %v, stdout: %q, stderr: %q, error: %v",
 					nodeName, stdout, stderr, err)
 				return err
 			}
-			klog.Infof("Disabled IGMP Querier on logical switch %v (No IPv4 Source IP available)",
+			klog.Infof("Disabled IGMP/MLD Querier on logical switch %v (No IPv4/IPv6 Source IP available)",
 				nodeName)
 		}
 	}
 
 	// Connect the switch to the router.
-	stdout, stderr, err = util.RunOVNNbctl("--", "--may-exist", "lsp-add", nodeName, types.SwitchToRouterPrefix+nodeName,
-		"--", "set", "logical_switch_port", types.SwitchToRouterPrefix+nodeName, "type=router",
-		"options:router-port="+types.RouterToSwitchPrefix+nodeName, "addresses="+"\""+nodeLRPMAC.String()+"\"")
+	nodeSwToRtrUUID, err := addNodeLogicalSwitchPort(nodeName, types.SwitchToRouterPrefix+nodeName,
+		"router", nodeLRPMAC.String(), "router-port="+types.RouterToSwitchPrefix+nodeName)
 	if err != nil {
 		klog.Errorf("Failed to add logical port to switch, stdout: %q, stderr: %q, error: %v", stdout, stderr, err)
+		return err
+	}
+
+	if err = addToPortGroup(clusterRtrPortGroupName, &lpInfo{
+		uuid: nodeSwToRtrUUID,
+		name: types.SwitchToRouterPrefix + nodeName,
+	}); err != nil {
+		klog.Errorf(err.Error())
 		return err
 	}
 
