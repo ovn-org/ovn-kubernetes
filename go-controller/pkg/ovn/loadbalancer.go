@@ -193,7 +193,7 @@ func generateACLNameForOVNCommand(lb string, sourceIP string, sourcePort int32) 
 	return strings.ReplaceAll(generateACLName(lb, sourceIP, sourcePort), ":", "\\:")
 }
 
-func (ovn *Controller) createLoadBalancerRejectACL(lb, sourceIP string, sourcePort int32, proto kapi.Protocol) (string, error) {
+func (ovn *Controller) createLoadBalancerRejectACL(lb, sourceIP string, sourcePort int32, proto kapi.Protocol, aclLogging string) (string, error) {
 	applyToPortGroup := false
 	ovn.serviceLBLock.Lock()
 	defer ovn.serviceLBLock.Unlock()
@@ -268,6 +268,8 @@ func (ovn *Controller) createLoadBalancerRejectACL(lb, sourceIP string, sourcePo
 	aclMatch = fmt.Sprintf("match=\"%s.dst==%s && %s && %s.dst==%d\"", l3Prefix, sourceIP,
 		strings.ToLower(string(proto)), strings.ToLower(string(proto)), sourcePort)
 	cmd := []string{"--id=@reject-acl", "create", "acl", "direction=from-lport", "priority=1000", aclMatch, "action=reject",
+		fmt.Sprintf("log=%t", aclLogging != ""), fmt.Sprintf("severity=%s", getACLLoggingSeverity(aclLogging)),
+		fmt.Sprintf("meter=%s", types.OvnACLLoggingMeter),
 		fmt.Sprintf("name=%s", aclName)}
 	if applyToPortGroup {
 		cmd = append(cmd, "--", "add", "port_group", ovn.clusterPortGroupUUID, "acls", "@reject-acl")

@@ -354,7 +354,9 @@ func (ovn *Controller) createService(service *kapi.Service) error {
 							return err
 						}
 					} else if svcQualifiesForReject(service) {
-						aclUUID, err := ovn.createLoadBalancerRejectACL(loadBalancer, physicalIP, port, svcPort.Protocol)
+						aclDenyLogging := ovn.GetNetworkPolicyACLLogging(service.Namespace).Deny
+						aclUUID, err := ovn.createLoadBalancerRejectACL(loadBalancer, physicalIP, port,
+							svcPort.Protocol, aclDenyLogging)
 						if err != nil {
 							return fmt.Errorf("failed to create service ACL: %v", err)
 						}
@@ -385,8 +387,9 @@ func (ovn *Controller) createService(service *kapi.Service) error {
 						return err
 					}
 				} else {
+					aclDenyLogging := ovn.GetNetworkPolicyACLLogging(service.Namespace).Deny
 					aclUUID, err := ovn.createLoadBalancerRejectACL(loadBalancer, service.Spec.ClusterIP,
-						svcPort.Port, svcPort.Protocol)
+						svcPort.Port, svcPort.Protocol, aclDenyLogging)
 					if err != nil {
 						return fmt.Errorf("failed to create service ACL: %v", err)
 					}
@@ -404,7 +407,7 @@ func (ovn *Controller) createService(service *kapi.Service) error {
 								klog.Errorf("Gateway router %s does not have load balancer (%v)", gateway, err)
 								continue
 							}
-							aclUUID, err := ovn.createLoadBalancerRejectACL(loadBalancer, ing.IP, svcPort.Port, svcPort.Protocol)
+							aclUUID, err := ovn.createLoadBalancerRejectACL(loadBalancer, ing.IP, svcPort.Port, svcPort.Protocol, aclDenyLogging)
 							if err != nil {
 								klog.Errorf("Failed to create reject ACL for Ingress IP: %s, load balancer: %s, error: %v",
 									ing.IP, loadBalancer, err)
@@ -428,7 +431,9 @@ func (ovn *Controller) createService(service *kapi.Service) error {
 							if _, hasEps := ovn.getServiceLBInfo(loadBalancer, vip); hasEps {
 								klog.V(5).Infof("Load Balancer already configured for %s, %s", loadBalancer, vip)
 							} else {
-								aclUUID, err := ovn.createLoadBalancerRejectACL(loadBalancer, extIP, svcPort.Port, svcPort.Protocol)
+								aclDenyLogging := ovn.GetNetworkPolicyACLLogging(service.Namespace).Deny
+								aclUUID, err := ovn.createLoadBalancerRejectACL(loadBalancer, extIP, svcPort.Port,
+									svcPort.Protocol, aclDenyLogging)
 								if err != nil {
 									return fmt.Errorf("failed to create service ACL for external IP")
 								}

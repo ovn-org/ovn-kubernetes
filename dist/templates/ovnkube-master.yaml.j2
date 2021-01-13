@@ -256,6 +256,8 @@ spec:
           value: "{{ ovn_gateway_mode }}"
         - name: OVN_MULTICAST_ENABLE
           value: "{{ ovn_multicast_enable }}"
+        - name: OVN_ACL_LOGGING_RATE_LIMIT
+          value: "{{ ovn_acl_logging_rate_limit }}"
       # end of container
 
       volumes:

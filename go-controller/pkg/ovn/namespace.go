@@ -21,6 +21,8 @@ const (
 	routingExternalGWsAnnotation = "k8s.ovn.org/routing-external-gws"
 	routingNamespaceAnnotation   = "k8s.ovn.org/routing-namespaces"
 	routingNetworkAnnotation     = "k8s.ovn.org/routing-network"
+	// Annotation for enabling ACL logging to controller's log file
+	aclLoggingAnnotation = "k8s.ovn.org/acl-logging"
 )
 
 func (oc *Controller) syncNamespaces(namespaces []interface{}) {
@@ -196,6 +198,14 @@ func (oc *Controller) AddNamespace(ns *kapi.Namespace) {
 			klog.Errorf(err.Error())
 		}
 	}
+	annotation = ns.Annotations[aclLoggingAnnotation]
+	if annotation != "" {
+		if oc.aclLoggingCanEnable(annotation, nsInfo) {
+			klog.Infof("Namespace %s: ACL logging is set to deny=%s allow=%s", ns.Name, nsInfo.aclLogging.Deny, nsInfo.aclLogging.Allow)
+		} else {
+			klog.Warningf("Namespace %s: ACL logging is not enabled due to malformed annotation", ns.Name)
+		}
+	}
 	nsInfo.addressSet, err = oc.createNamespaceAddrSetAllPods(ns.Name)
 	if err != nil {
 		klog.Errorf(err.Error())
@@ -271,6 +281,19 @@ func (oc *Controller) updateNamespace(old, newer *kapi.Namespace) {
 			}
 		}
 	}
+	annotation = newer.Annotations[aclLoggingAnnotation]
+	oldAnnotation = old.Annotations[aclLoggingAnnotation]
+	// support for ACL logging update, if new annotation is empty, make sure we propagate new setting
+	if annotation != oldAnnotation && (oc.aclLoggingCanEnable(annotation, nsInfo) || annotation == "") &&
+		len(nsInfo.networkPolicies) > 0 {
+		// deny rules are all one per namespace
+		if err := oc.setACLDenyLogging(old.Name, nsInfo, nsInfo.aclLogging.Deny); err != nil {
+			klog.Warningf(err.Error())
+		} else {
+			klog.Infof("Namespace %s: ACL logging setting updated to deny=%s allow=%s",
+				old.Name, nsInfo.aclLogging.Deny, nsInfo.aclLogging.Allow)
+		}
+	}
 	oc.multicastUpdateNamespace(newer, nsInfo)
 }
 
@@ -286,7 +309,7 @@ func (oc *Controller) deleteNamespace(ns *kapi.Namespace) {
 	klog.V(5).Infof("Deleting Namespace's NetworkPolicy entities")
 	for _, np := range nsInfo.networkPolicies {
 		delete(nsInfo.networkPolicies, np.name)
-		oc.destroyNamespacePolicy(np)
+		oc.destroyNetworkPolicy(np, nsInfo)
 	}
 	oc.deleteGWRoutesForNamespace(nsInfo)
 	oc.multicastDeleteNamespace(ns, nsInfo)
@@ -344,7 +367,7 @@ func (oc *Controller) createNamespaceLocked(ns string) *namespaceInfo {
 	defer oc.namespacesMutex.Unlock()
 
 	nsInfo := &namespaceInfo{
-		networkPolicies:       make(map[string]*namespacePolicy),
+		networkPolicies:       make(map[string]*networkPolicy),
 		podExternalRoutes:     make(map[string]map[string]string),
 		multicastEnabled:      false,
 		routingExternalPodGWs: make(map[string][]net.IP),

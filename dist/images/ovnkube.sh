@@ -58,6 +58,7 @@ fi
 # OVNKUBE_LOGFILE_MAXSIZE - log file max size in MB(default 100 MB)
 # OVNKUBE_LOGFILE_MAXBACKUPS - log file max backups (default 5)
 # OVNKUBE_LOGFILE_MAXAGE - log file max age in days (default 5 days)
+# OVN_ACL_LOGGING_RATE_LIMIT - specify default ACL logging rate limit in messages per second (default: 20)
 # OVN_NB_PORT - ovn north db port (default 6641)
 # OVN_SB_PORT - ovn south db port (default 6642)
 # OVN_NB_RAFT_PORT - ovn north db raft port (default 6643)
@@ -188,6 +189,7 @@ ovn_remote_probe_interval=${OVN_REMOTE_PROBE_INTERVAL:-100000}
 ovn_multicast_enable=${OVN_MULTICAST_ENABLE:-}
 #OVN_EGRESSIP_ENABLE - enable egress IP for ovn-kubernetes
 ovn_egressip_enable=${OVN_EGRESSIP_ENABLE:-false}
+ovn_acl_logging_rate_limit=${OVN_ACL_LOGGING_RATE_LIMIT:-"20"}
 
 # Determine the ovn rundir.
 if [[ -f /usr/bin/ovn-appctl ]]; then
@@ -861,6 +863,11 @@ ovn-master() {
       "
   }
 
+  ovn_acl_logging_rate_limit_flag=
+  if [[ -n ${ovn_acl_logging_rate_limit} ]]; then
+      ovn_acl_logging_rate_limit_flag="--acl-logging-rate-limit ${ovn_acl_logging_rate_limit}"
+  fi
+
   multicast_enabled_flag=
   if [[ ${ovn_multicast_enable} == "true" ]]; then
       multicast_enabled_flag="--enable-multicast"
@@ -893,6 +900,7 @@ ovn-master() {
     --logfile /var/log/ovn-kubernetes/ovnkube-master.log \
     ${ovn_master_ssl_opts} \
     ${multicast_enabled_flag} \
+    ${ovn_acl_logging_rate_limit_flag} \
     ${egressip_enabled_flag} \
     --metrics-bind-address ${ovnkube_master_metrics_bind_address} &
   echo "=============== ovn-master ========== running"
