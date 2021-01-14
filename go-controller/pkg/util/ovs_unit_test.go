@@ -698,18 +698,15 @@ func TestSetExecWithoutOVS(t *testing.T) {
 		desc        string
 		expectedErr error
 		onRetArgs   *ovntest.TestifyMockHelper
-		fnCallTimes int
 	}{
 		{
 			desc:        "positive, ip and arping path found",
 			expectedErr: nil,
-			fnCallTimes: 2,
 			onRetArgs:   &ovntest.TestifyMockHelper{OnCallMethodName: "LookPath", OnCallMethodArgType: []string{"string"}, RetArgList: []interface{}{"ip", nil, "arping", nil}, CallTimes: 2},
 		},
 		{
 			desc:        "negative, ip path not found",
 			expectedErr: fmt.Errorf(`exec: \"ip:\" executable file not found in $PATH`),
-			fnCallTimes: 1,
 			onRetArgs:   &ovntest.TestifyMockHelper{OnCallMethodName: "LookPath", OnCallMethodArgType: []string{"string"}, RetArgList: []interface{}{"", fmt.Errorf(`exec: \"ip:\" executable file not found in $PATH`), "arping", nil}},
 		},
 	}
