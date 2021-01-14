@@ -153,17 +153,6 @@ func shareGatewayInterfaceTest(app *cli.App, testNS ns.NetNS,
 			Cmd:    "ovs-vsctl --timeout=15 --if-exists get interface eth0 ofport",
 			Output: "7",
 		})
-		// syncServices()
-		fexec.AddFakeCmd(&ovntest.ExpectedCmd{
-			Cmd: "ovs-ofctl dump-flows breth0",
-			Output: `cookie=0x0, duration=8366.605s, table=0, n_packets=0, n_bytes=0, priority=100,ip,in_port="patch-breth0_no" actions=ct(commit,zone=64000),output:eth0
-cookie=0x0, duration=8366.603s, table=0, n_packets=10642, n_bytes=10370438, priority=50,ip,in_port=eth0 actions=ct(table=1,zone=64000)
-cookie=0x0, duration=8366.705s, table=0, n_packets=11549, n_bytes=1746901, priority=0 actions=FLOOD
-cookie=0x0, duration=8366.602s, table=1, n_packets=0, n_bytes=0, priority=100,ct_state=+est+trk actions=output:"patch-breth0_no"
-cookie=0x0, duration=8366.600s, table=1, n_packets=0, n_bytes=0, priority=100,ct_state=+rel+trk actions=output:"patch-breth0_no"
-cookie=0x0, duration=8366.597s, table=1, n_packets=10641, n_bytes=10370087, priority=0 actions=LOCAL
-`,
-		})
 
 		err := util.SetExec(fexec)
 		Expect(err).NotTo(HaveOccurred())
@@ -214,7 +203,7 @@ cookie=0x0, duration=8366.597s, table=1, n_packets=10641, n_bytes=10370087, prio
 			gatewayNextHops, gatewayIntf, err := getGatewayNextHops()
 			sharedGw, err := newSharedGateway(nodeName, ovntest.MustParseIPNets(nodeSubnet), gatewayNextHops, gatewayIntf, nodeAnnotator)
 			Expect(err).NotTo(HaveOccurred())
-			err = sharedGw.Init(wf)
+			err = sharedGw.Init()
 			Expect(err).NotTo(HaveOccurred())
 			// check if IP addresses have been assigned to localnetGatewayNextHopPort interface
 			link, err := netlink.LinkByName(localnetGatewayNextHopPort)

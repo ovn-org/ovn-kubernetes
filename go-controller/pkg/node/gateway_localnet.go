@@ -119,14 +119,11 @@ func newLocalPortWatcher(gatewayIfAddrs []*net.IPNet, recorder record.EventRecor
 	}
 }
 
-func (l *localPortWatcher) AddService(svc *kapi.Service) {
-	err := l.addService(svc)
-	if err != nil {
-		klog.Errorf("Error in adding service: %v", err)
-	}
+func (l *localPortWatcher) AddService(svc *kapi.Service) error {
+	return l.addService(svc)
 }
 
-func (l *localPortWatcher) UpdateService(old, new *kapi.Service) {
+func (l *localPortWatcher) UpdateService(old, new *kapi.Service) error {
 	if reflect.DeepEqual(new.Spec.Ports, old.Spec.Ports) &&
 		reflect.DeepEqual(new.Spec.ExternalIPs, old.Spec.ExternalIPs) &&
 		reflect.DeepEqual(new.Spec.ClusterIP, old.Spec.ClusterIP) &&
@@ -135,23 +132,16 @@ func (l *localPortWatcher) UpdateService(old, new *kapi.Service) {
 		reflect.DeepEqual(new.Status.LoadBalancer.Ingress, old.Status.LoadBalancer.Ingress) {
 		klog.V(5).Infof("Skipping service update for: %s as change does not apply to any of .Spec.Ports, "+
 			".Spec.ExternalIP, .Spec.ClusterIP, .Spec.Type, .Status.LoadBalancer.Ingress", new.Name)
-		return
+		return nil
 	}
-	err := l.deleteService(old)
-	if err != nil {
-		klog.Errorf("Error in deleting service - %v", err)
+	if err := l.deleteService(old); err != nil {
+		return err
 	}
-	err = l.addService(new)
-	if err != nil {
-		klog.Errorf("Error in modifying service: %v", err)
-	}
+	return l.addService(new)
 }
 
-func (l *localPortWatcher) DeleteService(svc *kapi.Service) {
-	err := l.deleteService(svc)
-	if err != nil {
-		klog.Errorf("Error in deleting service - %v", err)
-	}
+func (l *localPortWatcher) DeleteService(svc *kapi.Service) error {
+	return l.deleteService(svc)
 }
 
 func getLocalAddrs() (map[string]net.IPNet, error) {

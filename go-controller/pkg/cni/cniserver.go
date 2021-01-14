@@ -12,11 +12,9 @@ import (
 	"github.com/gorilla/mux"
 	kapi "k8s.io/api/core/v1"
 	corev1listers "k8s.io/client-go/listers/core/v1"
-	"k8s.io/client-go/tools/cache"
 	"k8s.io/klog/v2"
 
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
-	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/factory"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/metrics"
 )
 
@@ -46,7 +44,7 @@ import (
 // started.
 
 // NewCNIServer creates and returns a new Server object which will listen on a socket in the given path
-func NewCNIServer(rundir string, factory factory.NodeWatchFactory) *Server {
+func NewCNIServer(rundir string, podLister corev1listers.PodLister) *Server {
 	if len(rundir) == 0 {
 		rundir = serverRunDir
 	}
@@ -57,7 +55,7 @@ func NewCNIServer(rundir string, factory factory.NodeWatchFactory) *Server {
 			Handler: router,
 		},
 		rundir:             rundir,
-		podLister:          corev1listers.NewPodLister(factory.LocalPodInformer().GetIndexer()),
+		podLister:          podLister,
 		runningSandboxAdds: make(map[string]*PodRequest),
 	}
 	router.NotFoundHandler = http.HandlerFunc(http.NotFound)
@@ -76,19 +74,12 @@ func NewCNIServer(rundir string, factory factory.NodeWatchFactory) *Server {
 		}
 	}).Methods("POST")
 
-	factory.AddPodHandler(cache.ResourceEventHandlerFuncs{
-		DeleteFunc: func(obj interface{}) {
-			pod := obj.(*kapi.Pod)
-			s.cancelOldestPodAdd(pod)
-		},
-	}, nil)
-
 	return s
 }
 
-// cancelOldestPodAdd requests that the earliest outstanding add operation for a given
-// pod should be canceled.
-func (s *Server) cancelOldestPodAdd(pod *kapi.Pod) {
+// HandlePodDelete requests that the earliest outstanding add operation for a given
+// pod should be canceled
+func (s *Server) HandlePodDelete(pod *kapi.Pod) {
 	s.runningSandboxAddsLock.Lock()
 	defer s.runningSandboxAddsLock.Unlock()
 

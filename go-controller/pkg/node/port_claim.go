@@ -139,17 +139,19 @@ func newPortClaimWatcher(recorder record.EventRecorder) (*portClaimWatcher, erro
 	}, nil
 }
 
-func (p *portClaimWatcher) AddService(svc *kapi.Service) {
+func (p *portClaimWatcher) AddService(svc *kapi.Service) error {
 	if errors := handleService(svc, p.port.open); len(errors) > 0 {
 		for _, err := range errors {
 			klog.Errorf("Error claiming port for service: %s/%s: %v", svc.Namespace, svc.Name, err)
 		}
+		return fmt.Errorf("errors encoutered adding service %s", svc.Name)
 	}
+	return nil
 }
 
-func (p *portClaimWatcher) UpdateService(old, new *kapi.Service) {
+func (p *portClaimWatcher) UpdateService(old, new *kapi.Service) error {
 	if reflect.DeepEqual(old.Spec.ExternalIPs, new.Spec.ExternalIPs) && reflect.DeepEqual(old.Spec.Ports, new.Spec.Ports) {
-		return
+		return nil
 	}
 	errors := []error{}
 	errors = append(errors, handleService(old, p.port.close)...)
@@ -159,17 +161,17 @@ func (p *portClaimWatcher) UpdateService(old, new *kapi.Service) {
 			klog.Errorf("Error updating port claim for service: %s/%s: %v", old.Namespace, old.Name, err)
 		}
 	}
+	return fmt.Errorf("error encoutered updating service %s", new.Name)
 }
 
-func (p *portClaimWatcher) DeleteService(svc *kapi.Service) {
+func (p *portClaimWatcher) DeleteService(svc *kapi.Service) error {
 	if errors := handleService(svc, p.port.close); len(errors) > 0 {
 		for _, err := range errors {
 			klog.Errorf("Error removing port claim for service: %s/%s: %v", svc.Namespace, svc.Name, err)
 		}
 	}
+	return fmt.Errorf("error encoutered deleting service %s", svc.Name)
 }
-
-func (p *portClaimWatcher) SyncServices(objs []interface{}) {}
 
 func handleService(svc *kapi.Service, handler handler) []error {
 	errors := []error{}

@@ -33,50 +33,52 @@ func newLoadBalancerHealthChecker(nodeName string) *loadBalancerHealthChecker {
 	}
 }
 
-func (l *loadBalancerHealthChecker) AddService(svc *kapi.Service) {
+func (l *loadBalancerHealthChecker) AddService(svc *kapi.Service) error {
 	if svc.Spec.HealthCheckNodePort != 0 {
 		name := ktypes.NamespacedName{Namespace: svc.Namespace, Name: svc.Name}
 		l.services[name] = uint16(svc.Spec.HealthCheckNodePort)
-		_ = l.server.SyncServices(l.services)
+		return l.server.SyncServices(l.services)
 	}
+	return nil
 }
 
-func (l *loadBalancerHealthChecker) UpdateService(old, new *kapi.Service) {
+func (l *loadBalancerHealthChecker) UpdateService(old, new *kapi.Service) error {
 	// HealthCheckNodePort can't be changed on update
+	return nil
 }
 
-func (l *loadBalancerHealthChecker) DeleteService(svc *kapi.Service) {
+func (l *loadBalancerHealthChecker) DeleteService(svc *kapi.Service) error {
 	if svc.Spec.HealthCheckNodePort != 0 {
 		name := ktypes.NamespacedName{Namespace: svc.Namespace, Name: svc.Name}
 		delete(l.services, name)
 		delete(l.endpoints, name)
-		_ = l.server.SyncServices(l.services)
+		return l.server.SyncServices(l.services)
 	}
+	return nil
 }
 
-func (l *loadBalancerHealthChecker) SyncServices(svcs []interface{}) {}
-
-func (l *loadBalancerHealthChecker) AddEndpoints(ep *kapi.Endpoints) {
+func (l *loadBalancerHealthChecker) AddEndpoints(ep *kapi.Endpoints) error {
 	name := ktypes.NamespacedName{Namespace: ep.Namespace, Name: ep.Name}
 	if _, exists := l.services[name]; exists {
 		l.endpoints[name] = countLocalEndpoints(ep, l.nodeName)
-		_ = l.server.SyncEndpoints(l.endpoints)
+		return l.server.SyncEndpoints(l.endpoints)
 	}
+	return nil
 }
 
-func (l *loadBalancerHealthChecker) UpdateEndpoints(old, new *kapi.Endpoints) {
+func (l *loadBalancerHealthChecker) UpdateEndpoints(old, new *kapi.Endpoints) error {
 	name := ktypes.NamespacedName{Namespace: new.Namespace, Name: new.Name}
 	if _, exists := l.services[name]; exists {
 		l.endpoints[name] = countLocalEndpoints(new, l.nodeName)
-		_ = l.server.SyncEndpoints(l.endpoints)
+		return l.server.SyncEndpoints(l.endpoints)
 	}
-
+	return nil
 }
 
-func (l *loadBalancerHealthChecker) DeleteEndpoints(ep *kapi.Endpoints) {
+func (l *loadBalancerHealthChecker) DeleteEndpoints(ep *kapi.Endpoints) error {
 	name := ktypes.NamespacedName{Namespace: ep.Namespace, Name: ep.Name}
 	delete(l.endpoints, name)
-	_ = l.server.SyncEndpoints(l.endpoints)
+	return l.server.SyncEndpoints(l.endpoints)
 }
 
 func countLocalEndpoints(ep *kapi.Endpoints, nodeName string) int {
@@ -94,7 +96,7 @@ func countLocalEndpoints(ep *kapi.Endpoints, nodeName string) int {
 }
 
 // check for OVS internal ports without any ofport assigned, they are stale ports that must be deleted
-func checkForStaleOVSInterfaces(stopChan chan struct{}) {
+func checkForStaleOVSInterfaces(stopChan <-chan struct{}) {
 	for {
 		select {
 		case <-time.After(60 * time.Second):

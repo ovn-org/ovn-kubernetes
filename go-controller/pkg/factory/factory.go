@@ -566,6 +566,14 @@ func (wf *WatchFactory) NamespaceInformer() cache.SharedIndexInformer {
 	return wf.informers[namespaceType].inf
 }
 
+func (wf *WatchFactory) EndpointsInformer() cache.SharedIndexInformer {
+	return wf.informers[endpointsType].inf
+}
+
+func (wf *WatchFactory) ServiceInformer() cache.SharedIndexInformer {
+	return wf.informers[serviceType].inf
+}
+
 // noHeadlessServiceSelector is a LabelSelector added to the watch for
 // Endpoints (and, eventually, EndpointSlices) that excludes endpoints
 // for headless services.

@@ -6,6 +6,7 @@ import (
 	. "github.com/onsi/gomega"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/factory"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/informer"
 	ovntest "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/testing"
 	util "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
 	"github.com/urfave/cli/v2"
@@ -74,6 +75,15 @@ func (o *FakeOVNNode) init() {
 	o.watcher, err = factory.NewNodeWatchFactory(o.fakeClient, fakeNodeName)
 	Expect(err).NotTo(HaveOccurred())
 
-	o.node = NewNode(o.fakeClient.KubeClient, o.watcher, fakeNodeName, o.stopChan, o.recorder)
-	o.node.Start(o.wg)
+	o.node = NewNode(
+		o.fakeClient.KubeClient,
+		fakeNodeName,
+		o.recorder,
+		o.watcher.ServiceInformer(),
+		o.watcher.EndpointsInformer(),
+		o.watcher.NodeInformer(),
+		o.watcher.LocalPodInformer(),
+		informer.NewTestEventHandler,
+	)
+	o.node.Start(o.stopChan, o.wg)
 }

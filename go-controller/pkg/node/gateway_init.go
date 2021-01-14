@@ -210,7 +210,7 @@ func (n *OvnNode) initGateway(subnets []*net.IPNet, nodeAnnotator kube.Annotator
 	gw.portClaimWatcher = portClaimWatcher
 
 	initGw := func() error {
-		return gw.Init(n.watchFactory)
+		return gw.Init()
 	}
 
 	waiter.AddWait(gw.readyFunc, initGw)

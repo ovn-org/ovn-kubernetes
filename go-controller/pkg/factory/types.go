@@ -41,6 +41,8 @@ type NodeWatchFactory interface {
 
 	NodeInformer() cache.SharedIndexInformer
 	LocalPodInformer() cache.SharedIndexInformer
+	ServiceInformer() cache.SharedIndexInformer
+	EndpointsInformer() cache.SharedIndexInformer
 }
 
 type Shutdownable interface {

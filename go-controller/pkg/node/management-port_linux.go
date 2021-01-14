@@ -300,7 +300,7 @@ func DelMgtPortIptRules() {
 // 1. route entries to cluster CIDR and service CIDR through management port
 // 2. ARP entry for the node subnet's gateway ip
 // 3. IPtables chain and rule for SNATing packets entering the logical topology
-func checkManagementPortHealth(cfg *managementPortConfig, stopChan chan struct{}) {
+func checkManagementPortHealth(cfg *managementPortConfig, stopChan <-chan struct{}) {
 	for {
 		select {
 		case <-time.After(30 * time.Second):

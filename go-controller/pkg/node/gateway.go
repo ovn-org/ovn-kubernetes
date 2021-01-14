@@ -6,13 +6,11 @@ import (
 	"sync"
 
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
-	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/factory"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/informer"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/kube"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
 	util "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
 	kapi "k8s.io/api/core/v1"
-	"k8s.io/client-go/tools/cache"
 	"k8s.io/klog/v2"
 )
 
@@ -22,7 +20,7 @@ import (
 // are kept in sync
 type Gateway interface {
 	informer.ServiceAndEndpointsEventHandler
-	Init(factory.NodeWatchFactory) error
+	Init() error
 	Run(<-chan struct{}, *sync.WaitGroup)
 }
 
@@ -40,121 +38,116 @@ type gateway struct {
 	readyFunc        func() (bool, error)
 }
 
-func (g *gateway) AddService(svc *kapi.Service) {
+func (g *gateway) AddService(svc *kapi.Service) error {
+	var err error
 	if g.portClaimWatcher != nil {
-		g.portClaimWatcher.AddService(svc)
+		err = g.portClaimWatcher.AddService(svc)
+		if err != nil {
+			klog.Error(err)
+		}
 	}
 	if g.loadBalancerHealthChecker != nil {
-		g.loadBalancerHealthChecker.AddService(svc)
+		err = g.loadBalancerHealthChecker.AddService(svc)
+		if err != nil {
+			klog.Error(err)
+		}
 	}
 	if g.nodePortWatcher != nil {
-		g.nodePortWatcher.AddService(svc)
+		err = g.nodePortWatcher.AddService(svc)
+		if err != nil {
+			klog.Error(err)
+		}
 	}
 	if g.localPortWatcher != nil {
-		g.localPortWatcher.AddService(svc)
+		err = g.localPortWatcher.AddService(svc)
+		if err != nil {
+			klog.Error(err)
+		}
 	}
+	return err
 }
 
-func (g *gateway) UpdateService(old, new *kapi.Service) {
+func (g *gateway) UpdateService(old, new *kapi.Service) error {
+	var err error
 	if g.portClaimWatcher != nil {
-		g.portClaimWatcher.UpdateService(old, new)
+		err = g.portClaimWatcher.UpdateService(old, new)
+		if err != nil {
+			klog.Error(err)
+		}
 	}
 	if g.loadBalancerHealthChecker != nil {
-		g.loadBalancerHealthChecker.UpdateService(old, new)
+		err = g.loadBalancerHealthChecker.UpdateService(old, new)
+		if err != nil {
+			klog.Error(err)
+		}
 	}
 	if g.nodePortWatcher != nil {
-		g.nodePortWatcher.UpdateService(old, new)
+		err = g.nodePortWatcher.UpdateService(old, new)
+		if err != nil {
+			klog.Error(err)
+		}
 	}
 	if g.localPortWatcher != nil {
-		g.localPortWatcher.UpdateService(old, new)
+		err = g.localPortWatcher.UpdateService(old, new)
+		if err != nil {
+			klog.Error(err)
+		}
 	}
+	return err
 }
 
-func (g *gateway) DeleteService(svc *kapi.Service) {
+func (g *gateway) DeleteService(svc *kapi.Service) error {
+	var err error
 	if g.portClaimWatcher != nil {
-		g.portClaimWatcher.DeleteService(svc)
+		err = g.portClaimWatcher.DeleteService(svc)
+		if err != nil {
+			klog.Error(err)
+		}
 	}
 	if g.loadBalancerHealthChecker != nil {
-		g.loadBalancerHealthChecker.DeleteService(svc)
+		err = g.loadBalancerHealthChecker.DeleteService(svc)
+		if err != nil {
+			klog.Error(err)
+		}
 	}
 	if g.nodePortWatcher != nil {
-		g.nodePortWatcher.DeleteService(svc)
+		err = g.nodePortWatcher.DeleteService(svc)
+		if err != nil {
+			klog.Error(err)
+		}
 	}
 	if g.localPortWatcher != nil {
-		g.localPortWatcher.DeleteService(svc)
+		err = g.localPortWatcher.DeleteService(svc)
+		if err != nil {
+			klog.Error(err)
+		}
 	}
+	return err
 }
 
-func (g *gateway) SyncServices(objs []interface{}) {
-	if g.portClaimWatcher != nil {
-		g.portClaimWatcher.SyncServices(objs)
-	}
+func (g *gateway) AddEndpoints(ep *kapi.Endpoints) error {
 	if g.loadBalancerHealthChecker != nil {
-		g.loadBalancerHealthChecker.SyncServices(objs)
+		return g.loadBalancerHealthChecker.AddEndpoints(ep)
 	}
-	if g.nodePortWatcher != nil {
-		g.nodePortWatcher.SyncServices(objs)
-	}
-	if g.localPortWatcher != nil {
-		g.localPortWatcher.SyncServices(objs)
-	}
-}
-
-func (g *gateway) AddEndpoints(ep *kapi.Endpoints) {
-	if g.loadBalancerHealthChecker != nil {
-		g.loadBalancerHealthChecker.AddEndpoints(ep)
-	}
-}
-
-func (g *gateway) UpdateEndpoints(old, new *kapi.Endpoints) {
-	if g.loadBalancerHealthChecker != nil {
-		g.loadBalancerHealthChecker.UpdateEndpoints(old, new)
-	}
-}
-
-func (g *gateway) DeleteEndpoints(ep *kapi.Endpoints) {
-	if g.loadBalancerHealthChecker != nil {
-		g.loadBalancerHealthChecker.DeleteEndpoints(ep)
-	}
-}
-
-func (g *gateway) Init(wf factory.NodeWatchFactory) error {
-	err := g.initFunc()
-	if err != nil {
-		return err
-	}
-	wf.AddServiceHandler(cache.ResourceEventHandlerFuncs{
-		AddFunc: func(obj interface{}) {
-			svc := obj.(*kapi.Service)
-			g.AddService(svc)
-		},
-		UpdateFunc: func(old, new interface{}) {
-			oldSvc := old.(*kapi.Service)
-			newSvc := new.(*kapi.Service)
-			g.UpdateService(oldSvc, newSvc)
-		},
-		DeleteFunc: func(obj interface{}) {
-			svc := obj.(*kapi.Service)
-			g.DeleteService(svc)
-		},
-	}, g.SyncServices)
-
-	wf.AddEndpointsHandler(cache.ResourceEventHandlerFuncs{
-		AddFunc: func(obj interface{}) {
-			ep := obj.(*kapi.Endpoints)
-			g.AddEndpoints(ep)
-		},
-		UpdateFunc: func(old, new interface{}) {
-			oldEp := old.(*kapi.Endpoints)
-			newEp := new.(*kapi.Endpoints)
-			g.UpdateEndpoints(oldEp, newEp)
-		},
-		DeleteFunc: func(obj interface{}) {
-			ep := obj.(*kapi.Endpoints)
-			g.DeleteEndpoints(ep)
-		},
-	}, nil)
 	return nil
+}
+
+func (g *gateway) UpdateEndpoints(old, new *kapi.Endpoints) error {
+	if g.loadBalancerHealthChecker != nil {
+		return g.loadBalancerHealthChecker.UpdateEndpoints(old, new)
+	}
+	return nil
+}
+
+func (g *gateway) DeleteEndpoints(ep *kapi.Endpoints) error {
+	if g.loadBalancerHealthChecker != nil {
+		return g.loadBalancerHealthChecker.DeleteEndpoints(ep)
+	}
+	return nil
+}
+
+func (g *gateway) Init() error {
+	return g.initFunc()
 }
 
 func (g *gateway) Run(stopChan <-chan struct{}, wg *sync.WaitGroup) {

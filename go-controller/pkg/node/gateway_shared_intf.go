@@ -34,10 +34,10 @@ type nodePortWatcher struct {
 }
 
 // AddService handles configuring shared gateway bridge flows to steer External IP, Node Port, Ingress LB traffic into OVN
-func (npw *nodePortWatcher) AddService(service *kapi.Service) {
+func (npw *nodePortWatcher) AddService(service *kapi.Service) error {
 	// don't process headless service or services that doesn't have NodePorts or ExternalIPs
 	if !util.ServiceTypeHasClusterIP(service) || !util.IsClusterIPSet(service) {
-		return
+		return nil
 	}
 	for _, svcPort := range service.Spec.Ports {
 		protocol := strings.ToLower(string(svcPort.Protocol))
@@ -118,11 +118,11 @@ func (npw *nodePortWatcher) AddService(service *kapi.Service) {
 			}
 		}
 	}
-
 	addSharedGatewayIptRules(service, npw.nodeIP)
+	return nil
 }
 
-func (npw *nodePortWatcher) UpdateService(old, new *kapi.Service) {
+func (npw *nodePortWatcher) UpdateService(old, new *kapi.Service) error {
 	if reflect.DeepEqual(new.Spec.Ports, old.Spec.Ports) &&
 		reflect.DeepEqual(new.Spec.ExternalIPs, old.Spec.ExternalIPs) &&
 		reflect.DeepEqual(new.Spec.ClusterIP, old.Spec.ClusterIP) &&
@@ -130,16 +130,18 @@ func (npw *nodePortWatcher) UpdateService(old, new *kapi.Service) {
 		reflect.DeepEqual(new.Status.LoadBalancer.Ingress, old.Status.LoadBalancer.Ingress) {
 		klog.V(5).Infof("Skipping service update for: %s as change does not apply to any of .Spec.Ports, "+
 			".Spec.ExternalIP, .Spec.ClusterIP, .Spec.Type, .Status.LoadBalancer.Ingress", new.Name)
-		return
+		return nil
 	}
-	npw.DeleteService(old)
-	npw.AddService(new)
+	if err := npw.DeleteService(old); err != nil {
+		return err
+	}
+	return npw.AddService(new)
 }
 
-func (npw *nodePortWatcher) DeleteService(service *kapi.Service) {
+func (npw *nodePortWatcher) DeleteService(service *kapi.Service) error {
 	// don't process headless service
 	if !util.ServiceTypeHasClusterIP(service) || !util.IsClusterIPSet(service) {
-		return
+		return nil
 	}
 	for _, svcPort := range service.Spec.Ports {
 		protocol := strings.ToLower(string(svcPort.Protocol))
@@ -207,6 +209,7 @@ func (npw *nodePortWatcher) DeleteService(service *kapi.Service) {
 	}
 
 	delSharedGatewayIptRules(service, npw.nodeIP)
+	return nil
 }
 
 func (npw *nodePortWatcher) SyncServices(services []interface{}) {

@@ -23,9 +23,11 @@ import (
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/client-go/kubernetes/fake"
 	corev1listers "k8s.io/client-go/listers/core/v1"
+	"k8s.io/client-go/tools/cache"
 	utiltesting "k8s.io/client-go/util/testing"
 
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/factory"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/informer"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
 )
 
@@ -88,7 +90,8 @@ func TestCNIServer(t *testing.T) {
 		t.Fatalf("failed to create watch factory: %v", err)
 	}
 
-	s := NewCNIServer(tmpDir, wf)
+	podLister := corev1listers.NewPodLister(wf.LocalPodInformer().GetIndexer())
+	s := NewCNIServer(tmpDir, podLister)
 	if err := s.Start(serverHandleCNI); err != nil {
 		t.Fatalf("error starting CNI server: %v", err)
 	}
@@ -282,8 +285,21 @@ func TestCNIServerCancelAdd(t *testing.T) {
 	}
 
 	started := make(chan bool)
+	podLister := corev1listers.NewPodLister(wf.LocalPodInformer().GetIndexer())
+	s := NewCNIServer(tmpDir, podLister)
 
-	s := NewCNIServer(tmpDir, wf)
+	wf.AddPodHandler(
+		cache.ResourceEventHandlerFuncs{
+			AddFunc:    nil,
+			UpdateFunc: nil,
+			DeleteFunc: func(obj interface{}) {
+				pod, _ := informer.PodFromObject(obj)
+				s.HandlePodDelete(pod)
+			},
+		},
+		nil,
+	)
+
 	if err := s.Start(func(request *PodRequest, podLister corev1listers.PodLister) ([]byte, error) {
 		// Let the testcase know it can now delete the pod
 		close(started)

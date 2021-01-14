@@ -23,6 +23,7 @@ import (
 
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/factory"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/informer"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/metrics"
 	ovnnode "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/node"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn"
@@ -272,8 +273,16 @@ func runOvnKube(ctx *cli.Context) error {
 		// register ovnkube node specific prometheus metrics exported by the node
 		metrics.RegisterNodeMetrics()
 		start := time.Now()
-		n := ovnnode.NewNode(ovnClientset.KubeClient, nodeWatchFactory, node, stopChan, util.EventRecorder(ovnClientset.KubeClient))
-		if err := n.Start(wg); err != nil {
+		n := ovnnode.NewNode(
+			ovnClientset.KubeClient,
+			node, util.EventRecorder(ovnClientset.KubeClient),
+			nodeWatchFactory.ServiceInformer(),
+			nodeWatchFactory.EndpointsInformer(),
+			nodeWatchFactory.NodeInformer(),
+			nodeWatchFactory.LocalPodInformer(),
+			informer.NewDefaultEventHandler,
+		)
+		if err := n.Start(stopChan, wg); err != nil {
 			return err
 		}
 		end := time.Since(start)

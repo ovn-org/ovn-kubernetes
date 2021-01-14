@@ -14,15 +14,16 @@ import (
 	honode "github.com/ovn-org/ovn-kubernetes/go-controller/hybrid-overlay/pkg/controller"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/cni"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
-	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/factory"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/informer"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/kube"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
 
 	kapi "k8s.io/api/core/v1"
 	apiequality "k8s.io/apimachinery/pkg/api/equality"
+	utilruntime "k8s.io/apimachinery/pkg/util/runtime"
 	"k8s.io/apimachinery/pkg/util/wait"
 	"k8s.io/client-go/kubernetes"
+	corev1listers "k8s.io/client-go/listers/core/v1"
 	"k8s.io/client-go/tools/cache"
 	"k8s.io/client-go/tools/record"
 	"k8s.io/klog/v2"
@@ -30,23 +31,123 @@ import (
 
 // OvnNode is the object holder for utilities meant for node management
 type OvnNode struct {
-	name         string
-	Kube         kube.Interface
-	watchFactory factory.NodeWatchFactory
-	stopChan     chan struct{}
-	recorder     record.EventRecorder
-	gateway      Gateway
+	name                  string
+	Kube                  kube.Interface
+	serviceEventHandler   informer.EventHandler
+	endpointsEventHandler informer.EventHandler
+	podEventHandler       informer.EventHandler
+	hoNodeController      *honode.Node
+	cniServer             *cni.Server
+	recorder              record.EventRecorder
+	gateway               Gateway
 }
 
 // NewNode creates a new controller for node management
-func NewNode(kubeClient kubernetes.Interface, wf factory.NodeWatchFactory, name string, stopChan chan struct{}, eventRecorder record.EventRecorder) *OvnNode {
-	return &OvnNode{
-		name:         name,
-		Kube:         &kube.Kube{KClient: kubeClient},
-		watchFactory: wf,
-		stopChan:     stopChan,
-		recorder:     eventRecorder,
+func NewNode(
+	kubeClient kubernetes.Interface,
+	name string,
+	eventRecorder record.EventRecorder,
+	serviceInformer cache.SharedIndexInformer,
+	endpointsInformer cache.SharedIndexInformer,
+	nodeInformer cache.SharedIndexInformer,
+	podInformer cache.SharedIndexInformer,
+	eventHandlerCreateFunction informer.EventHandlerCreateFunction,
+) *OvnNode {
+	o := &OvnNode{
+		name:     name,
+		Kube:     &kube.Kube{KClient: kubeClient},
+		recorder: eventRecorder,
+		gateway:  nil,
 	}
+	if config.HybridOverlay.Enabled {
+		var err error
+		o.hoNodeController, err = honode.NewNode(
+			o.Kube,
+			name,
+			nodeInformer,
+			podInformer,
+			informer.NewDefaultEventHandler,
+		)
+		if err != nil {
+			utilruntime.HandleError(err)
+		}
+	}
+	o.endpointsEventHandler = eventHandlerCreateFunction("endpoint", endpointsInformer,
+		func(obj interface{}) error {
+			ep, err := informer.EndpointsFromObject(obj)
+			if err != nil {
+				return err
+			}
+			return o.gateway.AddEndpoints(ep)
+		},
+		func(obj interface{}) error {
+			ep, err := informer.EndpointsFromObject(obj)
+			if err != nil {
+				return err
+			}
+			if err := o.gateway.DeleteEndpoints(ep); err != nil {
+				return err
+			}
+			return deleteEndpointsConntrack(ep)
+		},
+		func(old, new interface{}) error {
+			oldEp, err := informer.EndpointsFromObject(old)
+			if err != nil {
+				return err
+			}
+			newEp, err := informer.EndpointsFromObject(new)
+			if err != nil {
+				return err
+			}
+			if err := o.gateway.UpdateEndpoints(oldEp, newEp); err != nil {
+				return err
+			}
+			return updateEndpointsConntrack(oldEp, newEp)
+		},
+		informer.ReceiveAllUpdates,
+	)
+	o.serviceEventHandler = eventHandlerCreateFunction("service", serviceInformer,
+		func(obj interface{}) error {
+			svc, err := informer.ServiceFromObject(obj)
+			if err != nil {
+				return err
+			}
+			return o.gateway.AddService(svc)
+		},
+		func(obj interface{}) error {
+			svc, err := informer.ServiceFromObject(obj)
+			if err != nil {
+				return err
+			}
+			return o.gateway.DeleteService(svc)
+		},
+		func(old, new interface{}) error {
+			oldSvc, err := informer.ServiceFromObject(old)
+			if err != nil {
+				return err
+			}
+			newSvc, err := informer.ServiceFromObject(new)
+			if err != nil {
+				return err
+			}
+			return o.gateway.UpdateService(oldSvc, newSvc)
+		},
+		informer.ReceiveAllUpdates,
+	)
+	o.podEventHandler = eventHandlerCreateFunction("pod", podInformer,
+		func(obj interface{}) error { return nil },
+		func(obj interface{}) error {
+			pod, err := informer.PodFromObject(obj)
+			if err != nil {
+				return err
+			}
+			o.cniServer.HandlePodDelete(pod)
+			return nil
+		},
+		func(old, new interface{}) error { return nil },
+		informer.DiscardAllUpdates,
+	)
+	return o
 }
 
 func setupOVNNode(node *kapi.Node) error {
@@ -158,7 +259,7 @@ func isOVNControllerReady(name string) (bool, error) {
 
 // Start learns the subnets assigned to it by the master controller
 // and calls the SetupNode script which establishes the logical switch
-func (n *OvnNode) Start(wg *sync.WaitGroup) error {
+func (n *OvnNode) Start(stopChan <-chan struct{}, wg *sync.WaitGroup) error {
 	var err error
 	var node *kapi.Node
 	var subnets []*net.IPNet
@@ -231,24 +332,34 @@ func (n *OvnNode) Start(wg *sync.WaitGroup) error {
 	if err := waiter.Wait(); err != nil {
 		return err
 	}
-	go n.gateway.Run(n.stopChan, wg)
+
+	klog.Info("Starting Hybrid Overlay Node workers")
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		err := n.serviceEventHandler.Run(informer.DefaultInformerThreadiness, stopChan)
+		if err != nil {
+			klog.Error(err)
+		}
+	}()
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		err := n.endpointsEventHandler.Run(informer.DefaultInformerThreadiness, stopChan)
+		if err != nil {
+			klog.Error(err)
+		}
+	}()
+
+	go n.gateway.Run(stopChan, wg)
+
 	klog.Infof("Gateway and management port readiness took %v", time.Since(start))
 
 	if config.HybridOverlay.Enabled {
-		nodeController, err := honode.NewNode(
-			n.Kube,
-			n.name,
-			n.watchFactory.NodeInformer(),
-			n.watchFactory.LocalPodInformer(),
-			informer.NewDefaultEventHandler,
-		)
-		if err != nil {
-			return err
-		}
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			nodeController.Run(n.stopChan)
+			n.hoNodeController.Run(stopChan)
 		}()
 	}
 
@@ -257,10 +368,12 @@ func (n *OvnNode) Start(wg *sync.WaitGroup) error {
 	}
 
 	// start health check to ensure there are no stale OVS internal ports
-	go checkForStaleOVSInterfaces(n.stopChan)
+	wg.Add(1)
+	go checkForStaleOVSInterfaces(stopChan)
 
 	// start management port health check
-	go checkManagementPortHealth(mgmtPortConfig, n.stopChan)
+	wg.Add(1)
+	go checkManagementPortHealth(mgmtPortConfig, stopChan)
 
 	confFile := filepath.Join(config.CNI.ConfDir, config.CNIConfFileName)
 	_, err = os.Stat(confFile)
@@ -271,43 +384,36 @@ func (n *OvnNode) Start(wg *sync.WaitGroup) error {
 		}
 	}
 
-	n.WatchEndpoints()
-
-	cniServer := cni.NewCNIServer("", n.watchFactory)
+	podLister := corev1listers.NewPodLister(n.podEventHandler.GetIndexer())
+	cniServer := cni.NewCNIServer("", podLister)
 	err = cniServer.Start(cni.HandleCNIRequest)
 
 	return err
 }
 
-func (n *OvnNode) WatchEndpoints() {
-	n.watchFactory.AddEndpointsHandler(cache.ResourceEventHandlerFuncs{
-		UpdateFunc: func(old, new interface{}) {
-			epNew := new.(*kapi.Endpoints)
-			epOld := old.(*kapi.Endpoints)
-			if apiequality.Semantic.DeepEqual(epNew.Subsets, epOld.Subsets) {
-				return
+func updateEndpointsConntrack(epOld, epNew *kapi.Endpoints) error {
+	if apiequality.Semantic.DeepEqual(epNew.Subsets, epOld.Subsets) {
+		return nil
+	}
+	newEpAddressMap := buildEndpointAddressMap(epNew.Subsets)
+	for item := range buildEndpointAddressMap(epOld.Subsets) {
+		if _, ok := newEpAddressMap[item]; !ok {
+			err := deleteConntrack(item.ip, item.port, item.protocol)
+			if err != nil {
+				klog.Errorf("Failed to delete conntrack entry for %s: %v", item.ip, err)
 			}
-			newEpAddressMap := buildEndpointAddressMap(epNew.Subsets)
-			for item := range buildEndpointAddressMap(epOld.Subsets) {
-				if _, ok := newEpAddressMap[item]; !ok {
-					err := deleteConntrack(item.ip, item.port, item.protocol)
-					if err != nil {
-						klog.Errorf("Failed to delete conntrack entry for %s: %v", item.ip, err)
-					}
-				}
-			}
-		},
-		DeleteFunc: func(obj interface{}) {
-			ep := obj.(*kapi.Endpoints)
-			for item := range buildEndpointAddressMap(ep.Subsets) {
-				err := deleteConntrack(item.ip, item.port, item.protocol)
-				if err != nil {
-					klog.Errorf("Failed to delete conntrack entry for %s: %v", item.ip, err)
-				}
+		}
+	}
+	return nil
+}
 
-			}
-		},
-	}, nil)
+func deleteEndpointsConntrack(ep *kapi.Endpoints) error {
+	for item := range buildEndpointAddressMap(ep.Subsets) {
+		if err := deleteConntrack(item.ip, item.port, item.protocol); err != nil {
+			klog.Errorf("Failed to delete conntrack entry for %s: %v", item.ip, err)
+		}
+	}
+	return nil
 }
 
 type epAddressItem struct {
