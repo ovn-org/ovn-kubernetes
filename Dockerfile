@@ -41,6 +41,7 @@ RUN INSTALL_PKGS=" \
 	containernetworking-plugins \
 	tcpdump iputils \
 	libreswan \
+	ethtool conntrack-tools \
 	" && \
 	yum install -y --setopt=tsflags=nodocs --setopt=skip_missing_names_on_install=False $INSTALL_PKGS && \
 	yum install -y --setopt=tsflags=nodocs --setopt=skip_missing_names_on_install=False "openvswitch2.13 == $ovsver" "openvswitch2.13-devel == $ovsver" "python3-openvswitch2.13 == $ovsver" "openvswitch2.13-ipsec == $ovsver" && \
@@ -85,7 +86,7 @@ LABEL io.k8s.display-name="ovn kubernetes" \
       io.k8s.description="This is a component of OpenShift Container Platform that provides an overlay network using ovn." \
       summary="This is a component of OpenShift Container Platform that provides an overlay network using ovn." \
       io.openshift.tags="openshift" \
-      maintainer="Phil Cameron <pcameron@redhat.com>"
+      maintainer="Tim Rozet <trozet@redhat.com>"
 
 WORKDIR /root
 ENTRYPOINT /root/ovnkube.sh
