@@ -1,11 +1,51 @@
-package e2e_test
+package e2e
 
 import (
 	"encoding/json"
 	"fmt"
-	utilnet "k8s.io/utils/net"
 	"net"
+
+	v1 "k8s.io/api/core/v1"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	clientset "k8s.io/client-go/kubernetes"
+	"k8s.io/kubernetes/test/e2e/framework"
+	utilnet "k8s.io/utils/net"
 )
+
+const agnhostImage = "k8s.gcr.io/e2e-test-images/agnhost:2.21"
+
+// newAgnhostPod returns a pod that uses the agnhost image. The image's binary supports various subcommands
+// that behave the same, no matter the underlying OS.
+func newAgnhostPod(name string, command ...string) *v1.Pod {
+	return &v1.Pod{
+		ObjectMeta: metav1.ObjectMeta{
+			Name: name,
+		},
+		Spec: v1.PodSpec{
+			Containers: []v1.Container{
+				{
+					Name:    name,
+					Image:   agnhostImage,
+					Command: command,
+				},
+			},
+			RestartPolicy: v1.RestartPolicyNever,
+		},
+	}
+}
+
+// IsIPv6Cluster returns true if the kubernetes default service is IPv6
+func IsIPv6Cluster(c clientset.Interface) bool {
+	// Get the ClusterIP of the kubernetes service created in the default namespace
+	svc, err := c.CoreV1().Services(metav1.NamespaceDefault).Get("kubernetes", metav1.GetOptions{})
+	if err != nil {
+		framework.Failf("Failed to get kubernetes service ClusterIP: %v", err)
+	}
+	if utilnet.IsIPv6String(svc.Spec.ClusterIP) {
+		return true
+	}
+	return false
+}
 
 // PodAnnotation describes the assigned network details for a single pod network. (The
 // actual annotation may include the equivalent of multiple PodAnnotations.)

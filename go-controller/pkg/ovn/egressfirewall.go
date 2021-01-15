@@ -125,7 +125,8 @@ func (oc *Controller) addEgressFirewall(egressFirewall *egressfirewallapi.Egress
 		return fmt.Errorf("unable to add egress firewall policy, namespace: %s has no address set", egressFirewall.Namespace)
 	}
 
-	err = oc.addLogicalRouterPolicyToClusterRouter(nsInfo.addressSet.GetIPv4HashName(), nsInfo.addressSet.GetIPv6HashName(), egressFirewall.Namespace, egressFirewallStartPriorityInt)
+	ipv4HashedAS, ipv6HashedAS := nsInfo.addressSet.GetASHashNames()
+	err = oc.addLogicalRouterPolicyToClusterRouter(ipv4HashedAS, ipv6HashedAS, egressFirewall.Namespace, egressFirewallStartPriorityInt)
 	if err != nil {
 		return err
 	}
@@ -146,7 +147,8 @@ func (oc *Controller) updateEgressFirewall(oldEgressFirewall, newEgressFirewall 
 		return fmt.Errorf("cannot update egressfirewall in %s:%v", newEgressFirewall.Namespace, err)
 	}
 
-	match := generateMatch(addressSet.GetIPv4HashName(), addressSet.GetIPv6HashName(), []matchTarget{
+	ipv4ASHashName, ipv6ASHashName := addressSet.GetASHashNames()
+	match := generateMatch(ipv4ASHashName, ipv6ASHashName, []matchTarget{
 		{matchKindV4CIDR, "0.0.0.0/0"},
 		{matchKindV6CIDR, "::/0"},
 	},
@@ -244,11 +246,12 @@ func (oc *Controller) addLogicalRouterPolicyToClusterRouter(hashedAddressSetName
 			if err != nil {
 				return fmt.Errorf("error with EgressFirewallDNS - %v", err)
 			}
-			if dnsNameAddressSets.GetIPv4HashName() != "" {
-				matchTargets = append(matchTargets, matchTarget{matchKindV4AddressSet, dnsNameAddressSets.GetIPv4HashName()})
+			dnsNameIPv4ASHashName, dnsNameIPv6ASHashName := dnsNameAddressSets.GetASHashNames()
+			if dnsNameIPv4ASHashName != "" {
+				matchTargets = append(matchTargets, matchTarget{matchKindV4AddressSet, dnsNameIPv4ASHashName})
 			}
-			if dnsNameAddressSets.GetIPv6HashName() != "" {
-				matchTargets = append(matchTargets, matchTarget{matchKindV6AddressSet, dnsNameAddressSets.GetIPv6HashName()})
+			if dnsNameIPv6ASHashName != "" {
+				matchTargets = append(matchTargets, matchTarget{matchKindV6AddressSet, dnsNameIPv6ASHashName})
 			}
 		}
 		match := generateMatch(hashedAddressSetNameIPv4, hashedAddressSetNameIPv6, matchTargets, rule.ports)

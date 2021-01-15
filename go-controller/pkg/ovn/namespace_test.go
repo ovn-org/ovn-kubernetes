@@ -50,9 +50,7 @@ func newNamespace(namespace string) *v1.Namespace {
 
 var _ = Describe("OVN Namespace Operations", func() {
 	const (
-		namespaceName    = "namespace1"
-		v4AddressSetName = namespaceName + ipv4AddressSetSuffix
-		v6AddressSetName = namespaceName + ipv6AddressSetSuffix
+		namespaceName = "namespace1"
 	)
 	var (
 		app     *cli.App
@@ -110,8 +108,7 @@ var _ = Describe("OVN Namespace Operations", func() {
 				_, err := fakeOvn.fakeClient.KubeClient.CoreV1().Namespaces().Get(context.TODO(), namespaceT.Name, metav1.GetOptions{})
 				Expect(err).NotTo(HaveOccurred())
 
-				fakeOvn.asf.ExpectAddressSetWithIPs(v4AddressSetName, []string{tP.podIP})
-				fakeOvn.asf.ExpectNoAddressSet(v6AddressSetName)
+				fakeOvn.asf.ExpectAddressSetWithIPs(namespaceName, []string{tP.podIP})
 
 				return nil
 			}
@@ -132,8 +129,7 @@ var _ = Describe("OVN Namespace Operations", func() {
 				_, err := fakeOvn.fakeClient.KubeClient.CoreV1().Namespaces().Get(context.TODO(), namespaceName, metav1.GetOptions{})
 				Expect(err).NotTo(HaveOccurred())
 
-				fakeOvn.asf.ExpectEmptyAddressSet(v4AddressSetName)
-				fakeOvn.asf.ExpectNoAddressSet(v6AddressSetName)
+				fakeOvn.asf.ExpectEmptyAddressSet(namespaceName)
 
 				return nil
 			}
@@ -152,12 +148,11 @@ var _ = Describe("OVN Namespace Operations", func() {
 					},
 				})
 				fakeOvn.controller.WatchNamespaces()
-				fakeOvn.asf.ExpectEmptyAddressSet(v4AddressSetName)
-				fakeOvn.asf.ExpectNoAddressSet(v6AddressSetName)
+				fakeOvn.asf.ExpectEmptyAddressSet(namespaceName)
 
 				err := fakeOvn.fakeClient.KubeClient.CoreV1().Namespaces().Delete(context.TODO(), namespaceName, *metav1.NewDeleteOptions(1))
 				Expect(err).NotTo(HaveOccurred())
-				fakeOvn.asf.EventuallyExpectNoAddressSet(v4AddressSetName)
+				fakeOvn.asf.EventuallyExpectNoAddressSet(namespaceName)
 				return nil
 			}
 
