@@ -82,8 +82,8 @@ type namespaceInfo struct {
 	// the policy itself.
 	networkPolicies map[string]*namespacePolicy
 
-	// defines the namespaces egressFirewallPolicy
-	egressFirewallPolicy *egressFirewall
+	// defines the namespaces egressFirewall
+	egressFirewall *egressFirewall
 
 	// routingExternalGWs is a slice of net.IP containing the values parsed from
 	// annotation k8s.ovn.org/routing-external-gws
