@@ -3,8 +3,6 @@ package kube
 import (
 	"context"
 	"encoding/json"
-	"fmt"
-
 	"k8s.io/klog/v2"
 
 	egressfirewall "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/egressfirewall/v1"
@@ -136,10 +134,8 @@ func (k *Kube) UpdateEgressFirewall(egressfirewall *egressfirewall.EgressFirewal
 // UpdateEgressIP updates the EgressIP with the provided EgressIP data
 func (k *Kube) UpdateEgressIP(eIP *egressipv1.EgressIP) error {
 	klog.Infof("Updating status on EgressIP %s", eIP.Name)
-	if _, err := k.EIPClient.K8sV1().EgressIPs().Update(context.TODO(), eIP, metav1.UpdateOptions{}); err != nil {
-		return fmt.Errorf("error in updating status on EgressIP %s: %v", eIP.Name, err)
-	}
-	return nil
+	_, err := k.EIPClient.K8sV1().EgressIPs().Update(context.TODO(), eIP, metav1.UpdateOptions{})
+	return err
 }
 
 // UpdateNodeStatus takes the node object and sets the provided update status
