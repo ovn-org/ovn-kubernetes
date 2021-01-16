@@ -865,6 +865,7 @@ var _ = Describe("OVN test basic functions", func() {
 		for _, tc := range testcases {
 			_, cidr, _ := net.ParseCIDR(tc.internalCIDR)
 			config.Default.ClusterSubnets = []config.CIDRNetworkEntry{{CIDR: cidr}}
+			config.Gateway.Mode = config.GatewayModeShared
 			matchExpression := generateMatch(tc.ipv4source, tc.ipv6source, tc.destinations, tc.ports)
 			Expect(tc.output).To(Equal(matchExpression))
 		}
