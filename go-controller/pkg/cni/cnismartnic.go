@@ -6,13 +6,15 @@ package cni
 
 import (
 	"fmt"
-	"github.com/Mellanox/sriovnet"
+
 	"github.com/containernetworking/cni/pkg/skel"
 	"github.com/containernetworking/cni/pkg/types"
-	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
-	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/kube"
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/tools/clientcmd"
+
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/kube"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
 )
 
 // Plugin is the structure to hold the endpoint information and the corresponding
@@ -46,11 +48,11 @@ func (bp *SmartNicPlugin) CmdAdd(args *skel.CmdArgs) error {
 	pciAddress := podReq.CNIConf.DeviceID
 
 	// 2. Get the PF index and VF index
-	pfPciAddress, err := GetPfPciFromVfPci(pciAddress)
+	pfPciAddress, err := util.GetSriovnetOps().GetPfPciFromVfPci(pciAddress)
 	if err != nil {
 		return err
 	}
-	vfindex, err := sriovnet.GetVfIndexByPciAddress(pciAddress)
+	vfindex, err := util.GetSriovnetOps().GetVfIndexByPciAddress(pciAddress)
 	if err != nil {
 		return err
 	}

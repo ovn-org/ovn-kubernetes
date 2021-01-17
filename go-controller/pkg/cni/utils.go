@@ -2,11 +2,8 @@ package cni
 
 import (
 	"fmt"
-	"os"
-	"path/filepath"
 	"time"
 
-	"github.com/Mellanox/sriovnet"
 	"k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/util/wait"
 	"k8s.io/klog"
@@ -67,14 +64,4 @@ func PodAnnotation2PodInfo(podAnnotationMap map[string]string) (*PodInterfaceInf
 		IsSmartNic:    true,
 	}
 	return podInterfaceInfo, nil
-}
-
-//Move to sriovnet
-func GetPfPciFromVfPci(vfPciAddress string) (string, error) {
-	pfPath := filepath.Join(sriovnet.PciSysDir, vfPciAddress, "physfn")
-	pciDevDir, err := os.Readlink(pfPath)
-	if len(pciDevDir) <= 3 {
-		return "", fmt.Errorf("could not find PCI Address")
-	}
-	return pciDevDir[3:], err
 }

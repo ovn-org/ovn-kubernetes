@@ -3,7 +3,7 @@
 package cni
 
 import (
-        "fmt"
+	"fmt"
 	"io/ioutil"
 	"net"
 	"os"
@@ -11,15 +11,13 @@ import (
 	"strconv"
 	"strings"
 
-	"k8s.io/klog"
-
-	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
-
-	"github.com/Mellanox/sriovnet"
 	"github.com/containernetworking/cni/pkg/types/current"
 	"github.com/containernetworking/plugins/pkg/ip"
 	"github.com/containernetworking/plugins/pkg/ns"
 	"github.com/vishvananda/netlink"
+	"k8s.io/klog"
+
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
 )
 
 type CNIPluginLibOps interface {
@@ -37,33 +35,6 @@ func (defaultCNIPluginLibOps) AddRoute(ipn *net.IPNet, gw net.IP, dev netlink.Li
 
 func (defaultCNIPluginLibOps) SetupVeth(contVethName string, mtu int, hostNS ns.NetNS) (net.Interface, net.Interface, error) {
 	return ip.SetupVeth(contVethName, mtu, hostNS)
-}
-
-type SriovNetLibOps interface {
-	GetNetDevicesFromPci(pciAddress string) ([]string, error)
-	GetUplinkRepresentor(vfPciAddress string) (string, error)
-	GetVfIndexByPciAddress(vfPciAddress string) (int, error)
-	GetVfRepresentor(uplink string, vfIndex int) (string, error)
-}
-
-type defaultSRIOVLibOps struct{}
-
-var sriovLibOps SriovNetLibOps = &defaultSRIOVLibOps{}
-
-func (defaultSRIOVLibOps) GetNetDevicesFromPci(pciAddress string) ([]string, error) {
-	return sriovnet.GetNetDevicesFromPci(pciAddress)
-}
-
-func (defaultSRIOVLibOps) GetUplinkRepresentor(vfPciAddress string) (string, error) {
-	return sriovnet.GetUplinkRepresentor(vfPciAddress)
-}
-
-func (defaultSRIOVLibOps) GetVfIndexByPciAddress(vfPciAddress string) (int, error) {
-	return sriovnet.GetVfIndexByPciAddress(vfPciAddress)
-}
-
-func (defaultSRIOVLibOps) GetVfRepresentor(uplink string, vfIndex int) (string, error) {
-	return sriovnet.GetVfRepresentor(uplink, vfIndex)
 }
 
 func renameLink(curName, newName string) error {
@@ -207,7 +178,7 @@ func setupSriovInterface(netns ns.NetNS, containerID, ifName string, ifInfo *Pod
 	contIface := &current.Interface{}
 
 	// 1. get VF netdevice from PCI
-	vfNetdevices, err := sriovLibOps.GetNetDevicesFromPci(pciAddrs)
+	vfNetdevices, err := util.GetSriovnetOps().GetNetDevicesFromPci(pciAddrs)
 	if err != nil {
 		return nil, nil, err
 
@@ -220,18 +191,18 @@ func setupSriovInterface(netns ns.NetNS, containerID, ifName string, ifInfo *Pod
 	vfNetdevice := vfNetdevices[0]
 
 	// 2. get VF index from PCI
-	vfIndex, err := sriovLibOps.GetVfIndexByPciAddress(pciAddrs)
+	vfIndex, err := util.GetSriovnetOps().GetVfIndexByPciAddress(pciAddrs)
 	if err != nil {
 		return nil, nil, err
 	}
 	if !ifInfo.IsSmartNic {
 		// 3. get Uplink netdevice
-		uplink, err := sriovLibOps.GetUplinkRepresentor(pciAddrs)
+		uplink, err := util.GetSriovnetOps().GetUplinkRepresentor(pciAddrs)
 		if err != nil {
 			return nil, nil, err
 		}
 		// 4. lookup representor
-		rep, err := sriovLibOps.GetVfRepresentor(uplink, vfIndex)
+		rep, err := util.GetSriovnetOps().GetVfRepresentor(uplink, vfIndex)
 		if err != nil {
 			return nil, nil, err
 		}
