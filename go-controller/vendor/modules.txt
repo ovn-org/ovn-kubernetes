@@ -1,5 +1,6 @@
-# github.com/Mellanox/sriovnet v0.0.0-20190516174650-73402dc8fcaa
+# github.com/Mellanox/sriovnet v1.0.2-0.20210112115703-ecc40df73c7c
 github.com/Mellanox/sriovnet
+github.com/Mellanox/sriovnet/pkg/utils/filesystem
 # github.com/Microsoft/go-winio v0.4.15-0.20190919025122-fc70bd9a86b5
 github.com/Microsoft/go-winio
 github.com/Microsoft/go-winio/pkg/guid
@@ -172,25 +173,23 @@ github.com/prometheus/procfs/internal/util
 github.com/russross/blackfriday/v2
 # github.com/safchain/ethtool v0.0.0-20190326074333-42ed695e3de8
 github.com/safchain/ethtool
-# github.com/satori/go.uuid v0.0.0-20181028125025-b2ce2384e17b
-github.com/satori/go.uuid
 # github.com/shurcooL/sanitized_anchor_name v1.0.0
 github.com/shurcooL/sanitized_anchor_name
 # github.com/sirupsen/logrus v1.4.2
 github.com/sirupsen/logrus
-# github.com/spf13/afero v1.2.2
+# github.com/spf13/afero v1.4.1
 github.com/spf13/afero
 github.com/spf13/afero/mem
 # github.com/spf13/pflag v1.0.5
 github.com/spf13/pflag
 # github.com/stretchr/objx v0.2.0
 github.com/stretchr/objx
-# github.com/stretchr/testify v1.4.0
+# github.com/stretchr/testify v1.5.1
 github.com/stretchr/testify/assert
 github.com/stretchr/testify/mock
 # github.com/urfave/cli/v2 v2.2.0
 github.com/urfave/cli/v2
-# github.com/vishvananda/netlink v0.0.0-20200625175047-bca67dfc8220
+# github.com/vishvananda/netlink v1.1.0 => github.com/vishvananda/netlink v0.0.0-20200625175047-bca67dfc8220
 github.com/vishvananda/netlink
 github.com/vishvananda/netlink/nl
 # github.com/vishvananda/netns v0.0.0-20191106174202-0a2b9b5464df

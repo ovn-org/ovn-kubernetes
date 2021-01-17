@@ -40,10 +40,9 @@ func getMaxVfCount(pfNetdevName string) (int, error) {
 	maxVfs, err := maxDevFile.ReadInt()
 	if err != nil {
 		return 0, err
-	} else {
-		log.Println("max_vfs = ", maxVfs)
-		return maxVfs, nil
 	}
+	log.Println("max_vfs = ", maxVfs)
+	return maxVfs, nil
 }
 
 func setMaxVfCount(pfNetdevName string, maxVfs int) error {
@@ -66,26 +65,24 @@ func getCurrentVfCount(pfNetdevName string) (int, error) {
 	curVfs, err := maxDevFile.ReadInt()
 	if err != nil {
 		return 0, err
-	} else {
-		log.Println("cur_vfs = ", curVfs)
-		return curVfs, nil
 	}
+	log.Println("cur_vfs = ", curVfs)
+	return curVfs, nil
 }
 
 func vfNetdevNameFromParent(pfNetdevName string, vfIndex int) string {
-
 	devDirName := netDevDeviceDir(pfNetdevName)
 	vfNetdev, _ := lsFilesWithPrefix(fmt.Sprintf("%s/%s%v/net", devDirName,
 		netDevVfDevicePrefix, vfIndex), "", false)
-	if len(vfNetdev) <= 0 {
+	if len(vfNetdev) == 0 {
 		return ""
-	} else {
-		return vfNetdev[0]
 	}
+	return vfNetdev[0]
 }
 
 func readPCIsymbolicLink(symbolicLink string) (string, error) {
 	pciDevDir, err := os.Readlink(symbolicLink)
+	//nolint:gomnd
 	if len(pciDevDir) <= 3 {
 		return "", fmt.Errorf("could not find PCI Address")
 	}
@@ -110,11 +107,9 @@ func getPCIFromDeviceName(netdevName string) (string, error) {
 		err = fmt.Errorf("%v for netdevice %s", err, netdevName)
 	}
 	return pciAddress, err
-
 }
 
 func GetVfPciDevList(pfNetdevName string) ([]string, error) {
-	var vfDirList []string
 	var i int
 	devDirName := netDevDeviceDir(pfNetdevName)
 
@@ -125,6 +120,7 @@ func GetVfPciDevList(pfNetdevName string) ([]string, error) {
 	}
 
 	i = 0
+	vfDirList := make([]string, 0, len(virtFnDirs))
 	for _, vfDir := range virtFnDirs {
 		vfDirList = append(vfDirList, vfDir)
 		i++

@@ -2,16 +2,25 @@ package sriovnet
 
 import (
 	"fmt"
-	"github.com/satori/go.uuid"
-	"github.com/vishvananda/netlink"
-	"io/ioutil"
 	"log"
 	"net"
 	"os"
+	"path"
 	"path/filepath"
 	"regexp"
 	"strconv"
 	"strings"
+
+	"github.com/google/uuid"
+	"github.com/vishvananda/netlink"
+
+	utilfs "github.com/Mellanox/sriovnet/pkg/utils/filesystem"
+)
+
+const (
+	// Used locally
+	etherEncapType = "ether"
+	ibEncapType    = "infiniband"
 )
 
 var virtFnRe = regexp.MustCompile(`virtfn(\d+)`)
@@ -40,23 +49,19 @@ func SetPFLinkUp(pfNetdevName string) error {
 }
 
 func IsSriovSupported(netdevName string) bool {
-
 	maxvfs, err := getMaxVfCount(netdevName)
 	if maxvfs == 0 || err != nil {
 		return false
-	} else {
-		return true
 	}
+	return true
 }
 
 func IsSriovEnabled(netdevName string) bool {
-
 	curvfs, err := getCurrentVfCount(netdevName)
 	if curvfs == 0 || err != nil {
 		return false
-	} else {
-		return true
 	}
+	return true
 }
 
 func EnableSriov(pfNetdevName string) error {
@@ -103,7 +108,6 @@ func DisableSriov(pfNetdevName string) error {
 }
 
 func GetPfNetdevHandle(pfNetdevName string) (*PfNetdevHandle, error) {
-
 	pfLinkHandle, err := netlink.LinkByName(pfNetdevName)
 	if err != nil {
 		return nil, err
@@ -169,7 +173,6 @@ func BindVf(handle *PfNetdevHandle, vf *VfObj) error {
 }
 
 func GetVfDefaultMacAddr(vfNetdevName string) (string, error) {
-
 	ethHandle, err1 := netlink.LinkByName(vfNetdevName)
 	if err1 != nil {
 		return "", err1
@@ -180,7 +183,6 @@ func GetVfDefaultMacAddr(vfNetdevName string) (string, error) {
 }
 
 func SetVfDefaultMacAddress(handle *PfNetdevHandle, vf *VfObj) error {
-
 	netdevName := vfNetdevNameFromParent(handle.PfNetdevName, vf.Index)
 	ethHandle, err1 := netlink.LinkByName(netdevName)
 	if err1 != nil {
@@ -194,12 +196,12 @@ func SetVfVlan(handle *PfNetdevHandle, vf *VfObj, vlan int) error {
 	return netlink.LinkSetVfVlan(handle.pfLinkHandle, vf.Index, vlan)
 }
 
-func setVfNodeGuid(handle *PfNetdevHandle, vf *VfObj, guid []byte) error {
+func setVfNodeGUID(handle *PfNetdevHandle, vf *VfObj, guid []byte) error {
 	var err error
 
-	nodeGuidHwAddr := net.HardwareAddr(guid)
+	nodeGUIDHwAddr := net.HardwareAddr(guid)
 
-	err = ibSetNodeGuid(handle.PfNetdevName, vf.Index, nodeGuidHwAddr)
+	err = ibSetNodeGUID(handle.PfNetdevName, vf.Index, nodeGUIDHwAddr)
 	if err == nil {
 		return nil
 	}
@@ -207,12 +209,12 @@ func setVfNodeGuid(handle *PfNetdevHandle, vf *VfObj, guid []byte) error {
 	return err
 }
 
-func setVfPortGuid(handle *PfNetdevHandle, vf *VfObj, guid []byte) error {
+func setVfPortGUID(handle *PfNetdevHandle, vf *VfObj, guid []byte) error {
 	var err error
 
-	portGuidHwAddr := net.HardwareAddr(guid)
+	portGUIDHwAddr := net.HardwareAddr(guid)
 
-	err = ibSetPortGuid(handle.PfNetdevName, vf.Index, portGuidHwAddr)
+	err = ibSetPortGUID(handle.PfNetdevName, vf.Index, portGUIDHwAddr)
 	if err == nil {
 		return nil
 	}
@@ -221,33 +223,31 @@ func setVfPortGuid(handle *PfNetdevHandle, vf *VfObj, guid []byte) error {
 }
 
 func SetVfDefaultGUID(handle *PfNetdevHandle, vf *VfObj) error {
-
-	uuid, err := uuid.NewV4()
+	randUUID, err := uuid.NewRandom()
 	if err != nil {
 		return err
 	}
-	guid := uuid[0:8]
+	guid := randUUID[0:8]
 	guid[7] = byte(vf.Index)
 
-	err = setVfNodeGuid(handle, vf, guid)
+	err = setVfNodeGUID(handle, vf, guid)
 	if err != nil {
 		return err
 	}
 
-	err = setVfPortGuid(handle, vf, guid)
+	err = setVfPortGUID(handle, vf, guid)
 	return err
 }
 
 func SetVfPrivileged(handle *PfNetdevHandle, vf *VfObj, privileged bool) error {
-
 	var spoofChk bool
 	var trusted bool
 
 	ethAttr := handle.pfLinkHandle.Attrs()
-	if ethAttr.EncapType != "ether" {
+	if ethAttr.EncapType != etherEncapType {
 		return nil
 	}
-	//Only ether type is supported
+	// Only ether type is supported
 	if privileged {
 		spoofChk = false
 		trusted = true
@@ -270,9 +270,9 @@ func setDefaultHwAddr(handle *PfNetdevHandle, vf *VfObj) error {
 	var err error
 
 	ethAttr := handle.pfLinkHandle.Attrs()
-	if ethAttr.EncapType == "ether" {
+	if ethAttr.EncapType == etherEncapType {
 		err = SetVfDefaultMacAddress(handle, vf)
-	} else if ethAttr.EncapType == "infiniband" {
+	} else if ethAttr.EncapType == ibEncapType {
 		err = SetVfDefaultGUID(handle, vf)
 	}
 	return err
@@ -280,7 +280,7 @@ func setDefaultHwAddr(handle *PfNetdevHandle, vf *VfObj) error {
 
 func setPortAdminState(handle *PfNetdevHandle, vf *VfObj) error {
 	ethAttr := handle.pfLinkHandle.Attrs()
-	if ethAttr.EncapType == "infiniband" {
+	if ethAttr.EncapType == ibEncapType {
 		state, err2 := ibGetPortAdminState(handle.PfNetdevName, vf.Index)
 		// Ignore the error where this file is not available
 		if err2 != nil {
@@ -289,7 +289,7 @@ func setPortAdminState(handle *PfNetdevHandle, vf *VfObj) error {
 		log.Printf("Admin state = %v", state)
 		err2 = ibSetPortAdminState(handle.PfNetdevName, vf.Index, ibSriovPortAdminStateFollow)
 		if err2 != nil {
-			//If file exist, we must be able to write
+			// If file exist, we must be able to write
 			log.Printf("Admin state setting error = %v", err2)
 			return err2
 		}
@@ -321,19 +321,22 @@ func ConfigVfs(handle *PfNetdevHandle, privileged bool) error {
 		return err
 	}
 	for _, vf := range handle.List {
-		if vf.Bound {
-			err = UnbindVf(handle, vf)
-			if err != nil {
-				log.Printf("Fail to unbind err=%v\n", err)
-				break
-			}
-			err = BindVf(handle, vf)
-			if err != nil {
-				log.Printf("Fail to bind err=%v\n", err)
-				break
-			}
-			log.Printf("vf = %v unbind/bind completed", vf)
+		if !vf.Bound {
+			continue
 		}
+
+		err = UnbindVf(handle, vf)
+		if err != nil {
+			log.Printf("Fail to unbind err=%v\n", err)
+			break
+		}
+
+		err = BindVf(handle, vf)
+		if err != nil {
+			log.Printf("Fail to bind err=%v\n", err)
+			break
+		}
+		log.Printf("vf = %v unbind/bind completed", vf)
 	}
 	return nil
 }
@@ -347,7 +350,7 @@ func AllocateVf(handle *PfNetdevHandle) (*VfObj, error) {
 		log.Printf("Allocated vf = %v\n", *vf)
 		return vf, nil
 	}
-	return nil, fmt.Errorf("All Vfs for %v are allocated.", handle.PfNetdevName)
+	return nil, fmt.Errorf("all Vfs for %v are allocated", handle.PfNetdevName)
 }
 
 func AllocateVfByMacAddress(handle *PfNetdevHandle, vfMacAddress string) (*VfObj, error) {
@@ -365,7 +368,7 @@ func AllocateVfByMacAddress(handle *PfNetdevHandle, vfMacAddress string) (*VfObj
 		log.Printf("Allocated vf by mac = %v\n", *vf)
 		return vf, nil
 	}
-	return nil, fmt.Errorf("All Vfs for %v are allocated for mac address %v.",
+	return nil, fmt.Errorf("all Vfs for %v are allocated for mac address %v",
 		handle.PfNetdevName, vfMacAddress)
 }
 
@@ -418,19 +421,35 @@ func GetVfIndexByPciAddress(vfPciAddress string) (int, error) {
 // GetNetDevicesFromPci gets a PCI address (e.g '0000:03:00.1') and
 // returns the correlate list of netdevices
 func GetNetDevicesFromPci(pciAddress string) ([]string, error) {
-	var netDevices []string
 	pciDir := filepath.Join(PciSysDir, pciAddress, "net")
-	_, err := os.Lstat(pciDir)
+	_, err := utilfs.Fs.Stat(pciDir)
 	if err != nil {
-		return netDevices, fmt.Errorf("cannot get a network device with pci address %v %v", pciAddress, err)
+		return nil, fmt.Errorf("cannot get a network device with pci address %v %v", pciAddress, err)
 	}
 
-	netDevicesFiles, err := ioutil.ReadDir(pciDir)
+	netDevicesFiles, err := utilfs.Fs.ReadDir(pciDir)
 	if err != nil {
-		return netDevices, fmt.Errorf("failed to get network device name in %v %v", pciDir, err)
+		return nil, fmt.Errorf("failed to get network device name in %v %v", pciDir, err)
 	}
+
+	netDevices := make([]string, 0, len(netDevicesFiles))
 	for _, netDeviceFile := range netDevicesFiles {
 		netDevices = append(netDevices, strings.TrimSpace(netDeviceFile.Name()))
-    }
+	}
 	return netDevices, nil
+}
+
+// GetPfPciFromVfPci retrieves the parent PF PCI address of the provided VF PCI address in D:B:D.f format
+func GetPfPciFromVfPci(vfPciAddress string) (string, error) {
+	pfPath := filepath.Join(PciSysDir, vfPciAddress, "physfn")
+	pciDevDir, err := utilfs.Fs.Readlink(pfPath)
+	if err != nil {
+		return "", fmt.Errorf("failed to read physfn link, provided address may not be a VF. %v", err)
+	}
+
+	pf := path.Base(pciDevDir)
+	if pf == "" {
+		return pf, fmt.Errorf("could not find PF PCI Address")
+	}
+	return pf, err
 }

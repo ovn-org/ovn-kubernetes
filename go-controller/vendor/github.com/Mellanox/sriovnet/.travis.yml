@@ -5,20 +5,12 @@ language: go
 dist: xenial
 
 go:
-  - 1.11.x
+  - 1.13.x
 
-
-install:
-  - go get github.com/vishvananda/netlink
-  - go get github.com/satori/go.uuid
-
-# Anything in before_script that returns a nonzero exit code will flunk the
-# build and immediately stop. It's sorta like having set -e enabled in bash.
-# Make sure golangci-lint is vendored.
 before_script:
-  - go get -u github.com/golangci/golangci-lint/cmd/golangci-lint
-
-go_import_path: github.com/Mellaonx/sriovnet
+  - go get -u github.com/mattn/goveralls
 
 script:
-  - golangci-lint run       # run a bunch of code checkers/linters in parallel
+  - make lint 
+  - make test-coverage
+  - goveralls -coverprofile=sriovnet.cover -service=travis-ci

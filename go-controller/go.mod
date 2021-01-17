@@ -3,7 +3,7 @@ module github.com/ovn-org/ovn-kubernetes/go-controller
 go 1.13
 
 require (
-	github.com/Mellanox/sriovnet v0.0.0-20190516174650-73402dc8fcaa
+	github.com/Mellanox/sriovnet v1.0.2-0.20210112115703-ecc40df73c7c
 	github.com/Microsoft/hcsshim v0.8.10-0.20200606013352-27a858bf1651
 	github.com/bhendo/go-powershell v0.0.0-20190719160123-219e7fb4e41e
 	github.com/cenk/hub v1.0.1 // indirect
@@ -25,13 +25,11 @@ require (
 	github.com/onsi/gomega v1.8.1
 	github.com/pkg/errors v0.9.1
 	github.com/prometheus/client_golang v1.2.1
-	github.com/satori/go.uuid v0.0.0-20181028125025-b2ce2384e17b // indirect
-	github.com/spf13/afero v1.2.2
-	github.com/stretchr/testify v1.4.0
+	github.com/spf13/afero v1.4.1
+	github.com/stretchr/testify v1.5.1
 	github.com/urfave/cli/v2 v2.2.0
-	github.com/vishvananda/netlink v0.0.0-20200625175047-bca67dfc8220
+	github.com/vishvananda/netlink v1.1.0
 	golang.org/x/sys v0.0.0-20200323222414-85ca7c5b95cd
-	golang.org/x/text v0.3.3 // indirect
 	golang.org/x/time v0.0.0-20191024005414-555d28b269f0 // indirect
 	gopkg.in/fsnotify/fsnotify.v1 v1.4.7
 	gopkg.in/gcfg.v1 v1.2.3
@@ -45,4 +43,7 @@ require (
 	k8s.io/utils v0.0.0-20201015054608-420da100c033
 )
 
-replace github.com/ebay/go-ovn v0.1.0 => github.com/ebay/go-ovn v0.1.1-0.20200810162212-30abed5fb968
+replace (
+	github.com/ebay/go-ovn v0.1.0 => github.com/ebay/go-ovn v0.1.1-0.20200810162212-30abed5fb968
+	github.com/vishvananda/netlink v1.1.0 => github.com/vishvananda/netlink v0.0.0-20200625175047-bca67dfc8220
+)
