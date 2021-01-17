@@ -68,10 +68,26 @@ func (bp *SmartNicPlugin) CmdAdd(args *skel.CmdArgs) error {
 	}
 	kube := &kube.Kube{KClient: clientset}
 
-	// 4. Set smart-nic pod annotation of PF index and VF index
-	smartNicAnnotation := fmt.Sprintf("pf=%s;vf=%d", pfPciAddress, vfindex)
-	err = kube.SetAnnotationsOnPod(podReq.PodNamespace, podReq.PodName, map[string]string{
-		SmartNicConnectionDetails: smartNicAnnotation, "sandbox": podReq.SandboxID})
+	// 4. Set smart-nic connection-details pod annotation
+	var domain, bus, dev, fn int
+	if parsed, err := fmt.Sscanf(
+		pfPciAddress, "%04x:%02x:%02x.%d", &domain, &bus, &dev, &fn); err != nil || parsed != 4 {
+		return fmt.Errorf("failed to parse PF PCI address %s. Unexpected format", pfPciAddress)
+	}
+
+	smartNicConnDetails := util.SmartNICConnectionDetails{
+		PfId:      fmt.Sprint(fn),
+		VfId:      fmt.Sprint(vfindex),
+		SandboxId: podReq.SandboxID,
+	}
+
+	smartNicAnnotation, err := smartNicConnDetails.AsAnnotation()
+	if err != nil {
+		// we should not get here
+		return fmt.Errorf("failed to generate %s annotation for pod. %v", util.SmartNicConnectionDetailsAnnot, err)
+	}
+
+	err = kube.SetAnnotationsOnPod(podReq.PodNamespace, podReq.PodName, smartNicAnnotation)
 	if err != nil {
 		return err
 	}
@@ -81,9 +97,9 @@ func (bp *SmartNicPlugin) CmdAdd(args *skel.CmdArgs) error {
 	if err != nil {
 		return err
 	}
-	podInterfaceInfo, err := PodAnnotation2PodInfo(annotations) 
+	podInterfaceInfo, err := PodAnnotation2PodInfo(annotations)
 	if err != nil {
-		return fmt.Errorf("failed to convert pod annotation to podInterfaceInfo", err)
+		return fmt.Errorf("failed to convert pod annotation to podInterfaceInfo. %v", err)
 	}
 
 	// 6. Move VF to pod namespace

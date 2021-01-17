@@ -7,13 +7,11 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
-	"regexp"
 	"strconv"
 	"strings"
 	"sync"
 	"time"
 
-	"github.com/vishvananda/netlink"
 	kapi "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/util/wait"
 	"k8s.io/client-go/kubernetes"
@@ -448,51 +446,80 @@ func (n *OvnNode) watchSmartNicPods() {
 	}, nil)
 }
 
-// @TODO fix the method to lookup rep
 // getVfRepName returns the VF's representor of the VF assigned to the pod
 func (n *OvnNode) getVfRepName(pod *kapi.Pod) (string, error) {
-	smartNicDetails, ok := pod.Annotations[cni.SmartNicConnectionDetails]
-	if !ok {
-		return "", fmt.Errorf("smart-nic annotation \"%s\" not found", cni.SmartNicConnectionDetails)
+	smartNicCD := util.SmartNICConnectionDetails{}
+	if err := smartNicCD.FromPodAnnotation(pod); err != nil {
+		return "", fmt.Errorf("failed to get smart-nic annotation. %v", err)
 	}
-
-	pfPciAddress := regexp.MustCompile(`pf=(\d+:\d+:\d+\.\d)`).FindStringSubmatch(smartNicDetails)[1]
-	pfIndex := string(pfPciAddress[len(pfPciAddress)-1])
-	vfIndex := regexp.MustCompile(`vf=(\d+)`).FindStringSubmatch(smartNicDetails)[1]
-
-	// The represontor name can be pf<pfIndex>vf<vfIndex> or c0pf<pfIndex>vf<vfIndex>
-	vfRepName := fmt.Sprintf("pf%svf%s", pfIndex, vfIndex)
-	if _, err := netlink.LinkByName(vfRepName); err == nil {
-		return vfRepName, nil
-	}
-
-	vfRepName = "c0" + vfRepName
-	if _, err := netlink.LinkByName(vfRepName); err == nil {
-		return vfRepName, nil
-	}
-
-	return "", fmt.Errorf("no represontor found for %s", smartNicDetails)
+	return util.GetSriovnetOps().GetVfRepresentorSmartNIC(smartNicCD.PfId, smartNicCD.VfId)
 }
 
 // addRepPort adds the representor of the VF to the ovs bridge
 func (n *OvnNode) addRepPort(pod *kapi.Pod, vfRepName string, ifInfo *cni.PodInterfaceInfo) error {
 	klog.Infof("addRepPort: %s", vfRepName)
 	sandboxID := pod.Annotations["sandbox"]
-	// TODO(Adrianc): Set link up for VF representor
+
 	err := cni.ConfigureOVS(pod.Namespace, pod.Name, vfRepName, ifInfo, sandboxID)
 	if err != nil {
 		return err
 	}
 	klog.Infof("Port %s added to bridge br-int", vfRepName)
-	// @TODO fix connection-status
-	err = n.Kube.SetAnnotationsOnPod(pod.Namespace, pod.Name, map[string]string{
-		cni.SmartNicConnetionStatus: "True"})
-	return err
+
+	link, err := util.GetNetLinkOps().LinkByName(vfRepName)
+	if err != nil {
+		// Note(adrianc): we are lenient with cleanup in this method as pod is going to be retried anyway.
+		_ = n.delRepPort(vfRepName)
+		return fmt.Errorf("failed to get link device for interface %s", vfRepName)
+	}
+
+	klog.Infof("addRepPort: set link mtu %s", vfRepName)
+	if err = util.GetNetLinkOps().LinkSetMTU(link, ifInfo.MTU); err != nil {
+		_ = n.delRepPort(vfRepName)
+		return fmt.Errorf("failed to setup representor port. failed to set MTU for interface %s", vfRepName)
+	}
+
+	klog.Infof("addRepPort: set link up for %s", vfRepName)
+	if err = util.GetNetLinkOps().LinkSetUp(link); err != nil {
+		_ = n.delRepPort(vfRepName)
+		return fmt.Errorf("failed to setup representor port. failed to set link up for interface %s", vfRepName)
+	}
+
+	// Update connection-status annotation
+	connStatus := util.SmartNICConnectionStatus{Status: util.SmartNicConnectionStatusReady, Reason: ""}
+	podAnnotator := kube.NewPodAnnotator(n.Kube, pod)
+	err = connStatus.SetPodAnnotation(podAnnotator)
+	if err != nil {
+		// we should not get here
+		_ = util.GetNetLinkOps().LinkSetDown(link)
+		_ = n.delRepPort(vfRepName)
+		return fmt.Errorf("failed to setup representor port. failed to set pod annotations. %v", err)
+	}
+
+	err = podAnnotator.Run()
+	if err != nil {
+		// cleanup
+		_ = util.GetNetLinkOps().LinkSetDown(link)
+		_ = n.delRepPort(vfRepName)
+		return fmt.Errorf("failed to setup representor port. failed to set pod annotations. %v", err)
+	}
+	return nil
 }
 
 // delRepPort delete the representor of the VF from the ovs bridge
 func (n *OvnNode) delRepPort(vfRepName string) error {
 	klog.Infof("delRepPort: %s", vfRepName)
+	// Set link down for representor port
+	link, err := util.GetNetLinkOps().LinkByName(vfRepName)
+	if err != nil {
+		klog.Warningf("Failed to get link device for representor port %s. %v", vfRepName, err)
+	} else {
+		if linkDownErr := util.GetNetLinkOps().LinkSetDown(link); linkDownErr != nil {
+			klog.Warningf("Failed to set link down for representor port %s. %v", vfRepName, linkDownErr)
+		}
+	}
+	klog.Infof("Port %s link state set to \"down\"", vfRepName)
+	// remove from br-int
 	return wait.PollImmediate(500*time.Millisecond, 60*time.Second, func() (bool, error) {
 		_, _, err := util.RunOVSVsctl("--if-exists", "del-port", "br-int", vfRepName)
 		if err != nil {
