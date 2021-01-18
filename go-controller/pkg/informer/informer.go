@@ -88,7 +88,7 @@ func NewDefaultEventHandler(
 		name:           name,
 		informer:       informer,
 		deletedIndexer: cache.NewIndexer(cache.DeletionHandlingMetaNamespaceKeyFunc, cache.Indexers{}),
-		workqueue:      workqueue.NewRateLimitingQueue(workqueue.DefaultControllerRateLimiter()),
+		workqueue:      workqueue.NewNamedRateLimitingQueue(workqueue.DefaultControllerRateLimiter(), name),
 		add:            addFunc,
 		delete:         deleteFunc,
 		updateFilter:   updateFilterFunc,
