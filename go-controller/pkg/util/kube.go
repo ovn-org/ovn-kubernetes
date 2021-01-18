@@ -164,6 +164,9 @@ func ServiceTypeHasNodePort(service *kapi.Service) bool {
 
 // GetNodePrimaryIP extracts the primary IP address from the node status in the  API
 func GetNodePrimaryIP(node *kapi.Node) (string, error) {
+	if node == nil {
+		return "", fmt.Errorf("invalid node object")
+	}
 	for _, addr := range node.Status.Addresses {
 		if addr.Type == kapi.NodeInternalIP {
 			return addr.Address, nil
