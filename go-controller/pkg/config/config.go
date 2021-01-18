@@ -22,6 +22,8 @@ import (
 
 	kexec "k8s.io/utils/exec"
 	utilnet "k8s.io/utils/net"
+
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
 )
 
 // DefaultEncapPort number used if not supplied
@@ -132,6 +134,11 @@ var (
 
 	// IPv6Mode captures whether we are using IPv6 for OVN logical topology. (ie, single-stack IPv6 or dual-stack)
 	IPv6Mode bool
+
+	// OvnKubeNode holds ovnkube-node parsed config file parameters and command-line overrides
+	OvnKubeNode = OvnKubeNodeConfig{
+		Mode: types.NodeModeFull,
+	}
 )
 
 const (
@@ -288,6 +295,11 @@ type HybridOverlayConfig struct {
 	VXLANPort uint `gcfg:"hybrid-overlay-vxlan-port"`
 }
 
+// OvnKubeNodeConfig holds ovnkube-node configurations
+type OvnKubeNodeConfig struct {
+	Mode string `gcfg:"mode"`
+}
+
 // OvnDBScheme describes the OVN database connection transport method
 type OvnDBScheme string
 
@@ -312,6 +324,7 @@ type config struct {
 	Gateway              GatewayConfig
 	MasterHA             MasterHAConfig
 	HybridOverlay        HybridOverlayConfig
+	OvnKubeNode          OvnKubeNodeConfig
 }
 
 var (
@@ -325,6 +338,7 @@ var (
 	savedGateway              GatewayConfig
 	savedMasterHA             MasterHAConfig
 	savedHybridOverlay        HybridOverlayConfig
+	savedOvnKubeNode          OvnKubeNodeConfig
 	// legacy service-cluster-ip-range CLI option
 	serviceClusterIPRange string
 	// legacy cluster-subnet CLI option
@@ -347,6 +361,7 @@ func init() {
 	savedGateway = Gateway
 	savedMasterHA = MasterHA
 	savedHybridOverlay = HybridOverlay
+	savedOvnKubeNode = OvnKubeNode
 	cli.VersionPrinter = func(c *cli.Context) {
 		fmt.Printf("Version: %s\n", Version)
 		fmt.Printf("Git commit: %s\n", Commit)
@@ -364,6 +379,7 @@ func init() {
 	Flags = append(Flags, OVNGatewayFlags...)
 	Flags = append(Flags, MasterHAFlags...)
 	Flags = append(Flags, HybridOverlayFlags...)
+	Flags = append(Flags, OvnKubeNodeFlags...)
 }
 
 // PrepareTestConfig restores default config values. Used by testcases to
@@ -379,6 +395,7 @@ func PrepareTestConfig() {
 	Gateway = savedGateway
 	MasterHA = savedMasterHA
 	HybridOverlay = savedHybridOverlay
+	OvnKubeNode = savedOvnKubeNode
 
 	// Don't pick up defaults from the environment
 	os.Unsetenv("KUBECONFIG")
@@ -582,10 +599,6 @@ var CommonFlags = []cli.Flag{
 		Usage:       "Maximum number of days to retain old log files",
 		Destination: &cliConfig.Logging.LogFileMaxAge,
 		Value:       Logging.LogFileMaxAge,
-	},
-	&cli.BoolFlag{
-		Name:  "smart-nic",
-		Usage: "Setup a smart nic node",
 	},
 }
 
@@ -871,6 +884,16 @@ var HybridOverlayFlags = []cli.Flag{
 		Value:       HybridOverlay.VXLANPort,
 		Usage:       "The UDP port used by the VXLAN protocol for hybrid networks.",
 		Destination: &cliConfig.HybridOverlay.VXLANPort,
+	},
+}
+
+// OvnKubeNodeFlags captures ovnkube-node specific configurations
+var OvnKubeNodeFlags = []cli.Flag{
+	&cli.StringFlag{
+		Name:        "ovnkube-node-mode",
+		Usage:       "ovnkube-node operating mode full(default), smart-nic, smart-nic-host",
+		Value:       types.NodeModeFull,
+		Destination: &OvnKubeNode.Mode,
 	},
 }
 
@@ -1373,6 +1396,10 @@ func initConfigWithPath(ctx *cli.Context, exec kexec.Interface, saPath string, d
 		return "", err
 	}
 
+	if err = buildOvnKubeNodeConfig(ctx, &cliConfig, &cfg); err != nil {
+		return "", err
+	}
+
 	klog.V(5).Infof("Default config: %+v", Default)
 	klog.V(5).Infof("Logging config: %+v", Logging)
 	klog.V(5).Infof("CNI config: %+v", CNI)
@@ -1381,6 +1408,7 @@ func initConfigWithPath(ctx *cli.Context, exec kexec.Interface, saPath string, d
 	klog.V(5).Infof("OVN North config: %+v", OvnNorth)
 	klog.V(5).Infof("OVN South config: %+v", OvnSouth)
 	klog.V(5).Infof("Hybrid Overlay config: %+v", HybridOverlay)
+	klog.V(5).Infof("Ovnkube Node config: %+v", OvnKubeNode)
 
 	return retConfigFile, nil
 }
@@ -1605,4 +1633,35 @@ func UpdateOVNNodeAuth(masterIP []string, southboundDBPort, northboundDBPort str
 	klog.V(5).Infof("Update OVN node auth with new master ip: %s", masterIP)
 	OvnNorth.updateIP(masterIP, northboundDBPort)
 	OvnSouth.updateIP(masterIP, southboundDBPort)
+}
+
+// buildOvnKubeNodeConfig updates OvnKubeNode config from cli and config file
+func buildOvnKubeNodeConfig(ctx *cli.Context, cli, file *config) error {
+	// Copy config file values over default values
+	if err := overrideFields(&OvnKubeNode, &file.OvnKubeNode, &savedOvnKubeNode); err != nil {
+		return err
+	}
+	cli.OvnKubeNode.Mode = ctx.String("ovnkube-node-mode")
+
+	// And CLI overrides over config file and default values
+	if err := overrideFields(&OvnKubeNode, &cli.OvnKubeNode, &savedOvnKubeNode); err != nil {
+		return err
+	}
+
+	// TODO(adrianc): According to provided ovnkube-node-mode we should propagate appropriate configuration to gateway and
+	// others
+
+	// validate ovnkube-node-mode
+	found := false
+	supportedModes := []string{types.NodeModeFull, types.NodeModeSmartNIC, types.NodeModeSmartNICHost}
+	for _, m := range supportedModes {
+		if OvnKubeNode.Mode == m {
+			found = true
+			break
+		}
+	}
+	if !found {
+		return fmt.Errorf("Unexpected ovnkube-node-mode: %s. supported modes: %v", OvnKubeNode.Mode, supportedModes)
+	}
+	return nil
 }

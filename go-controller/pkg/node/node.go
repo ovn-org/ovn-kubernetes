@@ -2,6 +2,7 @@ package node
 
 import (
 	"fmt"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
 	"io/ioutil"
 	"net"
 	"os"
@@ -36,18 +37,16 @@ type OvnNode struct {
 	stopChan     chan struct{}
 	recorder     record.EventRecorder
 	gateway      Gateway
-	isSmartNIC   bool
 }
 
 // NewNode creates a new controller for node management
-func NewNode(kubeClient kubernetes.Interface, wf factory.NodeWatchFactory, name string, stopChan chan struct{}, eventRecorder record.EventRecorder, isSmartNIC bool) *OvnNode {
+func NewNode(kubeClient kubernetes.Interface, wf factory.NodeWatchFactory, name string, stopChan chan struct{}, eventRecorder record.EventRecorder) *OvnNode {
 	return &OvnNode{
 		name:         name,
 		Kube:         &kube.Kube{KClient: kubeClient},
 		watchFactory: wf,
 		stopChan:     stopChan,
 		recorder:     eventRecorder,
-		isSmartNIC:   isSmartNIC,
 	}
 }
 
@@ -281,7 +280,7 @@ func (n *OvnNode) Start(wg *sync.WaitGroup) error {
 	}
 	n.WatchEndpoints()
 
-	if n.isSmartNIC {
+	if config.OvnKubeNode.Mode == types.NodeModeSmartNIC {
 		n.watchSmartNicPods()
 	} else {
 		// start the cni server

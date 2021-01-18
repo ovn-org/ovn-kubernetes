@@ -66,6 +66,7 @@ func getFlagsByCategory() map[string][]cli.Flag {
 	m["OVN Southbound DB Options"] = config.OvnSBFlags
 	m["OVN Gateway Options"] = config.OVNGatewayFlags
 	m["Master HA Options"] = config.MasterHAFlags
+	m["OVN Kube Node flags"] = config.OvnKubeNodeFlags
 
 	return m
 }
@@ -269,7 +270,6 @@ func runOvnKube(ctx *cli.Context) error {
 		if config.Kubernetes.Token == "" {
 			return fmt.Errorf("cannot initialize node without service account 'token'. Please provide one with --k8s-token argument")
 		}
-		isSmartNIC := ctx.Bool("smart-nic")
 		// register ovnkube node specific prometheus metrics exported by the node
 		metrics.RegisterNodeMetrics()
 		start := time.Now()

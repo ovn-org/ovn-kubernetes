@@ -53,4 +53,10 @@ const (
 
 	V4JoinSubnetCIDR = "100.64.0.0/16"
 	V6JoinSubnetCIDR = "fd98::/64"
+
+	// OVNKube-Node Node types
+	NodeModeFull = "full"
+	NodeModeSmartNIC = "smart-nic"
+	NodeModeSmartNICHost = "smart-nic-host"
+
 )
