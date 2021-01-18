@@ -1286,6 +1286,7 @@ spec:
 		if err != nil {
 			framework.Failf("Error trying to get the pod IP address %v", err)
 		}
+		time.Sleep(5 * time.Second)
 		// Verify the remote host/port as explicitly allowed by the firewall policy is reachable
 		ginkgo.By(fmt.Sprintf("Verifying connectivity to an explicitly allowed host %s is permitted as defined by the external firewall policy", exFWPermitTcpDnsDest))
 		_, err = framework.RunKubectl("exec", srcPodName, frameworkNsFlag, testContainerFlag, "--", "nc", "-vz", "-w", testTimeout, exFWPermitTcpDnsDest, "53")
