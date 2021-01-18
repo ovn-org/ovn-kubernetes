@@ -782,6 +782,204 @@ spec:
 	})
 })
 
+// Validate the egress IP works with egress firewall by creating two httpd
+// containers on the kind networking (effectively seen as "outside" the cluster)
+// and curl them from a pod in the cluster which matches the egress IP stanza.
+// The IP allowed by the egress firewall rule should work, the other not.
+
+/* This test does the following:
+0. Add the "k8s.ovn.org/egress-assignable" label to one nodes
+1. Create an EgressIP object with one egress IP defined
+2. Create an EgressFirewall object with one allow rule and one "block-all" rule defined
+3. Create pod matching both egress firewall and egress IP
+4. Check connectivity to the one blocked and verify that it fails
+5. Check connectivity to the one allowed and verify it has the egress IP
+*/
+var _ = ginkgo.Describe("e2e egress IP + egress firewall validation", func() {
+	const (
+		testName           string = "egress"
+		allowedNodeName    string = "allowed-node"
+		deniedNodeName     string = "denied-node"
+		egressIPYaml       string = "egressip.yaml"
+		egressFirewallYaml string = "egressfirewall.yaml"
+		waitInterval              = 3 * time.Second
+	)
+
+	type node struct {
+		name   string
+		nodeIP string
+	}
+
+	var (
+		egressNode, podNode, allowedTargetNode, deniedTargetNode node
+	)
+
+	f := framework.NewDefaultFramework(testName)
+
+	// Determine what mode the CI is running in and get relevant endpoint information for the tests
+	ginkgo.BeforeEach(func() {
+		nodes, err := e2enode.GetBoundedReadySchedulableNodes(f.ClientSet, 2)
+		framework.ExpectNoError(err)
+		if len(nodes.Items) < 2 {
+			framework.Failf("Test requires >= 2 Ready nodes, but there are only %v nodes", len(nodes.Items))
+		}
+		ips := e2enode.CollectAddresses(nodes, v1.NodeInternalIP)
+		egressNode = node{
+			name:   nodes.Items[1].Name,
+			nodeIP: ips[1],
+		}
+		podNode = node{
+			name:   nodes.Items[0].Name,
+			nodeIP: ips[0],
+		}
+		allowedTargetNode = node{
+			name: allowedNodeName,
+		}
+		allowedTargetNode.nodeIP = createClusterExternalContainer(allowedTargetNode.name, "docker.io/httpd", []string{"--network", ciNetworkName, "-P"})
+		deniedTargetNode = node{
+			name: deniedNodeName,
+		}
+		deniedTargetNode.nodeIP = createClusterExternalContainer(deniedTargetNode.name, "docker.io/httpd", []string{"--network", ciNetworkName, "-P"})
+	})
+
+	ginkgo.AfterEach(func() {
+		deleteClusterExternalContainer(allowedTargetNode.name)
+		deleteClusterExternalContainer(deniedTargetNode.name)
+	})
+
+	ginkgo.It("Should validate the egress IP functionality against remote hosts with egress firewall applied", func() {
+		podHTTPPort := "8080"
+		podName := "e2e-egressip-pod"
+		podEgressLabel := map[string]string{
+			"wants": "egress",
+		}
+		command := []string{"/agnhost", "netexec", fmt.Sprintf("--http-port=%s", podHTTPPort)}
+		frameworkNsFlag := fmt.Sprintf("--namespace=%s", f.Namespace.Name)
+
+		ginkgo.By("0. Add the \"k8s.ovn.org/egress-assignable\" label to one nodes")
+		framework.AddOrUpdateLabelOnNode(f.ClientSet, egressNode.name, "k8s.ovn.org/egress-assignable", "dummy")
+
+		podNamespace := f.Namespace
+		podNamespace.Labels = map[string]string{
+			"name": f.Namespace.Name,
+		}
+		updateNamespace(f, podNamespace)
+
+		ginkgo.By("1. Create an EgressIP object with one egress IP defined")
+		dupIP := func(ip net.IP) net.IP {
+			dup := make(net.IP, len(ip))
+			copy(dup, ip)
+			return dup
+		}
+		// Assign the egress IP without conflicting with any node IP,
+		// the kind subnet is /16 or /64 so the following should be fine.
+		egressNodeIP := net.ParseIP(egressNode.nodeIP)
+		egressIP := dupIP(egressNodeIP)
+		egressIP[len(egressIP)-2]++
+
+		var egressIPConfig = fmt.Sprintf(`apiVersion: k8s.ovn.org/v1
+kind: EgressIP
+metadata:
+    name: egressip
+spec:
+    egressIPs:
+    - ` + egressIP.String() + `
+    podSelector:
+        matchLabels:
+            wants: egress
+    namespaceSelector:
+        matchLabels:
+            name: ` + f.Namespace.Name + `
+`)
+
+		if err := ioutil.WriteFile(egressIPYaml, []byte(egressIPConfig), 0644); err != nil {
+			framework.Failf("Unable to write CRD config to disk: %v", err)
+		}
+
+		defer func() {
+			if err := os.Remove(egressIPYaml); err != nil {
+				framework.Logf("Unable to remove the CRD config from disk: %v", err)
+			}
+		}()
+
+		framework.RunKubectlOrDie("apply", "-f", egressIPYaml)
+
+		ginkgo.By("2. Create an EgressFirewall object with one allow rule and one \"block-all\" rule defined")
+
+		var egressFirewallConfig = fmt.Sprintf(`apiVersion: k8s.ovn.org/v1
+kind: EgressFirewall
+metadata:
+  name: default
+  namespace: ` + f.Namespace.Name + ` 
+spec:
+  egress:
+  - type: Allow
+    to:
+      cidrSelector: ` + allowedTargetNode.nodeIP + `/32
+  - type: Deny
+    to:
+      cidrSelector: 0.0.0.0/0
+`)
+
+		if err := ioutil.WriteFile(egressFirewallYaml, []byte(egressFirewallConfig), 0644); err != nil {
+			framework.Failf("Unable to write CRD config to disk: %v", err)
+		}
+
+		defer func() {
+			if err := os.Remove(egressFirewallYaml); err != nil {
+				framework.Logf("Unable to remove the CRD config from disk: %v", err)
+			}
+		}()
+
+		framework.RunKubectlOrDie("apply", "-f", egressFirewallYaml)
+		time.Sleep(waitInterval)
+
+		ginkgo.By("3. Create pod matching both egress firewall and egress IP")
+		createGenericPodWithLabel(f, podName, podNode.name, f.Namespace.Name, command, podEgressLabel)
+
+		wait.PollImmediate(retryInterval, retryTimeout, func() (bool, error) {
+			kubectlOut := getPodAddress(podName, f.Namespace.Name)
+			srcIP := net.ParseIP(kubectlOut)
+			return srcIP != nil, nil
+		})
+
+		targetExternalContainerAndTest := func(targetNode node, expectSuccess bool, verifyIP string) {
+			_, err := framework.RunKubectl("exec", podName, frameworkNsFlag, "--", "curl", "--connect-timeout", "1", net.JoinHostPort(targetNode.nodeIP, "80"))
+			if err != nil && !expectSuccess {
+				// curl should timeout with a string containing this error, and this should be the case if egress firewall was correctly applied
+				if !strings.Contains(err.Error(), "Connection timed out") {
+					framework.Failf("the test expected netserver container to not be able to connect, but it did with another error, err : %v", err)
+				}
+			}
+			targetNodeLogs, err := runCommand("docker", "logs", targetNode.name)
+			if err != nil {
+				framework.Failf("failed to inspect logs in test container: %v", err)
+			}
+			targetNodeLogs = strings.TrimSuffix(targetNodeLogs, "\n")
+			logLines := strings.Split(targetNodeLogs, "\n")
+			lastLine := logLines[len(logLines)-1]
+			var found bool
+			if strings.Contains(lastLine, verifyIP) {
+				found = true
+			}
+			if !found && expectSuccess {
+				framework.Failf("the test external container did not have any trace of the IP: %s being logged, last logs: %s", verifyIP, logLines[len(logLines)-1])
+			}
+			if !expectSuccess && found {
+				framework.Failf("the test external container did have a trace of the IP: %s being logged, it should not have, last logs: %s", verifyIP, logLines[len(logLines)-1])
+			}
+		}
+		ginkgo.By("4. Check connectivity to the one blocked and verify that it fails")
+		targetExternalContainerAndTest(deniedTargetNode, false, egressIP.String())
+
+		ginkgo.By("5. Check connectivity to the one allowed and verify it has the egress IP")
+		targetExternalContainerAndTest(allowedTargetNode, true, egressIP.String())
+
+		ginkgo.By("Removing the node label off of the egress node")
+		framework.RemoveLabelOffNode(f.ClientSet, egressNode.name, "k8s.ovn.org/egress-assignable")
+	})
+})
+
 // Validate pods can reach a network running in a container's looback address via
 // an external gateway running on eth0 of the container without any tunnel encap.
 // Next, the test updates the namespace annotation to point to a second container,
