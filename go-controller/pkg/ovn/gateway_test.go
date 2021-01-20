@@ -98,9 +98,8 @@ node4 chassis=912d592c-904c-40cd-9ef1-c2e5b49a33dd lb_force_snat_ip=100.64.0.4`,
 		})
 		fexec.AddFakeCmdsNoOutputNoError([]string{
 			"ovn-nbctl --timeout=15 set logical_router GR_test-node load_balancer=" + tcpLBUUID + "," + udpLBUUID,
-			"ovn-nbctl --timeout=15 get logical_switch test-node load_balancer",
-			"ovn-nbctl --timeout=15 ls-lb-add test-node " + tcpLBUUID,
-			"ovn-nbctl --timeout=15 ls-lb-add test-node " + udpLBUUID,
+			"ovn-nbctl --timeout=15 --may-exist lr-lb-add ovn_cluster_router " + tcpLBUUID,
+			"ovn-nbctl --timeout=15 --may-exist lr-lb-add ovn_cluster_router " + udpLBUUID,
 		})
 
 		fexec.AddFakeCmdsNoOutputNoError([]string{
@@ -171,9 +170,8 @@ node4 chassis=912d592c-904c-40cd-9ef1-c2e5b49a33dd lb_force_snat_ip=100.64.0.4`,
 		})
 		fexec.AddFakeCmdsNoOutputNoError([]string{
 			"ovn-nbctl --timeout=15 set logical_router GR_test-node load_balancer=" + tcpLBUUID + "," + udpLBUUID,
-			"ovn-nbctl --timeout=15 get logical_switch test-node load_balancer",
-			"ovn-nbctl --timeout=15 ls-lb-add test-node " + tcpLBUUID,
-			"ovn-nbctl --timeout=15 ls-lb-add test-node " + udpLBUUID,
+			"ovn-nbctl --timeout=15 --may-exist lr-lb-add ovn_cluster_router " + tcpLBUUID,
+			"ovn-nbctl --timeout=15 --may-exist lr-lb-add ovn_cluster_router " + udpLBUUID,
 		})
 
 		fexec.AddFakeCmdsNoOutputNoError([]string{
@@ -243,9 +241,8 @@ node4 chassis=912d592c-904c-40cd-9ef1-c2e5b49a33dd lb_force_snat_ip=100.64.0.4`,
 		})
 		fexec.AddFakeCmdsNoOutputNoError([]string{
 			"ovn-nbctl --timeout=15 set logical_router GR_test-node load_balancer=" + tcpLBUUID + "," + udpLBUUID,
-			"ovn-nbctl --timeout=15 get logical_switch test-node load_balancer",
-			"ovn-nbctl --timeout=15 ls-lb-add test-node " + tcpLBUUID,
-			"ovn-nbctl --timeout=15 ls-lb-add test-node " + udpLBUUID,
+			"ovn-nbctl --timeout=15 --may-exist lr-lb-add ovn_cluster_router " + tcpLBUUID,
+			"ovn-nbctl --timeout=15 --may-exist lr-lb-add ovn_cluster_router " + udpLBUUID,
 		})
 
 		fexec.AddFakeCmdsNoOutputNoError([]string{

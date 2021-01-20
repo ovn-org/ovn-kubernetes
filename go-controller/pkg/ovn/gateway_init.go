@@ -171,20 +171,13 @@ func gatewayInit(nodeName string, clusterIPSubnet []*net.IPNet, hostSubnets []*n
 					gatewayRouter, stdout, stderr, err)
 			}
 		}
-		// Also add north-south load-balancers to local switches for pod -> nodePort traffic
-		stdout, stderr, err = util.RunOVNNbctl("get", "logical_switch", nodeName, "load_balancer")
-		if err != nil {
-			return fmt.Errorf("failed to get load-balancers on the node switch %s, stdout: %q, "+
-				"stderr: %q, error: %v", nodeName, stdout, stderr, err)
-		}
+		// Also add north-south load-balancers to ovn_cluster_router for pod -> nodePort traffic
 		for _, proto := range enabledProtos {
-			if !strings.Contains(stdout, protoLBMap[proto]) {
-				stdout, stderr, err = util.RunOVNNbctl("ls-lb-add", nodeName, protoLBMap[proto])
-				if err != nil {
-					return fmt.Errorf("failed to add north-south load-balancer %s to the "+
-						"node switch %s, stdout: %q, stderr: %q, error: %v",
-						protoLBMap[proto], nodeName, stdout, stderr, err)
-				}
+			stdout, stderr, err = util.RunOVNNbctl("--may-exist", "lr-lb-add", types.OVNClusterRouter, protoLBMap[proto])
+			if err != nil {
+				return fmt.Errorf("failed to add north-south load-balancer %s to the "+
+					"distributed router %s, stdout: %q, stderr: %q, error: %v",
+					protoLBMap[proto], types.OVNClusterRouter, stdout, stderr, err)
 			}
 		}
 	}
