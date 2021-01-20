@@ -13,11 +13,11 @@ import (
 
 	v1 "k8s.io/api/core/v1"
 
-	. "github.com/onsi/ginkgo"
-	. "github.com/onsi/gomega"
+	"github.com/onsi/ginkgo"
+	"github.com/onsi/gomega"
 )
 
-var _ = Describe("OVN Egress Gateway Operations", func() {
+var _ = ginkgo.Describe("OVN Egress Gateway Operations", func() {
 	const (
 		namespaceName = "namespace1"
 	)
@@ -27,7 +27,7 @@ var _ = Describe("OVN Egress Gateway Operations", func() {
 		fExec   *ovntest.FakeExec
 	)
 
-	BeforeEach(func() {
+	ginkgo.BeforeEach(func() {
 		// Restore global default values before each testcase
 		config.PrepareTestConfig()
 
@@ -39,13 +39,13 @@ var _ = Describe("OVN Egress Gateway Operations", func() {
 		fakeOvn = NewFakeOVN(fExec)
 	})
 
-	AfterEach(func() {
+	ginkgo.AfterEach(func() {
 		fakeOvn.shutdown()
 	})
 
-	Context("on setting namespace gateway annotations", func() {
+	ginkgo.Context("on setting namespace gateway annotations", func() {
 
-		It("reconciles an new pod with namespace single exgw annotation already set", func() {
+		ginkgo.It("reconciles an new pod with namespace single exgw annotation already set", func() {
 			app.Action = func(ctx *cli.Context) error {
 
 				namespaceT := *newNamespace("namespace1")
@@ -82,16 +82,16 @@ var _ = Describe("OVN Egress Gateway Operations", func() {
 				fakeOvn.controller.WatchNamespaces()
 				fakeOvn.controller.WatchPods()
 
-				Eventually(func() string { return getPodAnnotations(fakeOvn.fakeClient.KubeClient, t.namespace, t.podName) }, 2).Should(MatchJSON(`{"default": {"ip_addresses":["` + t.podIP + `/24"], "mac_address":"` + t.podMAC + `", "gateway_ips": ["` + t.nodeGWIP + `"], "ip_address":"` + t.podIP + `/24", "gateway_ip": "` + t.nodeGWIP + `"}}`))
-				Eventually(fExec.CalledMatchesExpected).Should(BeTrue(), fExec.ErrorDesc)
+				gomega.Eventually(func() string { return getPodAnnotations(fakeOvn.fakeClient.KubeClient, t.namespace, t.podName) }, 2).Should(gomega.MatchJSON(`{"default": {"ip_addresses":["` + t.podIP + `/24"], "mac_address":"` + t.podMAC + `", "gateway_ips": ["` + t.nodeGWIP + `"], "ip_address":"` + t.podIP + `/24", "gateway_ip": "` + t.nodeGWIP + `"}}`))
+				gomega.Eventually(fExec.CalledMatchesExpected).Should(gomega.BeTrue(), fExec.ErrorDesc)
 				return nil
 			}
 
 			err := app.Run([]string{app.Name})
-			Expect(err).NotTo(HaveOccurred())
+			gomega.Expect(err).NotTo(gomega.HaveOccurred())
 		})
 
-		It("reconciles an new pod with namespace double exgw annotation already set", func() {
+		ginkgo.It("reconciles an new pod with namespace double exgw annotation already set", func() {
 			app.Action = func(ctx *cli.Context) error {
 
 				namespaceT := *newNamespace("namespace1")
@@ -132,16 +132,16 @@ var _ = Describe("OVN Egress Gateway Operations", func() {
 				fakeOvn.controller.WatchNamespaces()
 				fakeOvn.controller.WatchPods()
 
-				Eventually(func() string { return getPodAnnotations(fakeOvn.fakeClient.KubeClient, t.namespace, t.podName) }, 2).Should(MatchJSON(`{"default": {"ip_addresses":["` + t.podIP + `/24"], "mac_address":"` + t.podMAC + `", "gateway_ips": ["` + t.nodeGWIP + `"], "ip_address":"` + t.podIP + `/24", "gateway_ip": "` + t.nodeGWIP + `"}}`))
-				Eventually(fExec.CalledMatchesExpected).Should(BeTrue(), fExec.ErrorDesc)
+				gomega.Eventually(func() string { return getPodAnnotations(fakeOvn.fakeClient.KubeClient, t.namespace, t.podName) }, 2).Should(gomega.MatchJSON(`{"default": {"ip_addresses":["` + t.podIP + `/24"], "mac_address":"` + t.podMAC + `", "gateway_ips": ["` + t.nodeGWIP + `"], "ip_address":"` + t.podIP + `/24", "gateway_ip": "` + t.nodeGWIP + `"}}`))
+				gomega.Eventually(fExec.CalledMatchesExpected).Should(gomega.BeTrue(), fExec.ErrorDesc)
 				return nil
 			}
 
 			err := app.Run([]string{app.Name})
-			Expect(err).NotTo(HaveOccurred())
+			gomega.Expect(err).NotTo(gomega.HaveOccurred())
 		})
 
-		It("reconciles deleting a pod with namespace double exgw annotation already set", func() {
+		ginkgo.It("reconciles deleting a pod with namespace double exgw annotation already set", func() {
 			app.Action = func(ctx *cli.Context) error {
 
 				namespaceT := *newNamespace("namespace1")
@@ -182,8 +182,8 @@ var _ = Describe("OVN Egress Gateway Operations", func() {
 				fakeOvn.controller.WatchNamespaces()
 				fakeOvn.controller.WatchPods()
 
-				Eventually(func() string { return getPodAnnotations(fakeOvn.fakeClient.KubeClient, t.namespace, t.podName) }, 2).Should(MatchJSON(`{"default": {"ip_addresses":["` + t.podIP + `/24"], "mac_address":"` + t.podMAC + `", "gateway_ips": ["` + t.nodeGWIP + `"], "ip_address":"` + t.podIP + `/24", "gateway_ip": "` + t.nodeGWIP + `"}}`))
-				Eventually(fExec.CalledMatchesExpected).Should(BeTrue(), fExec.ErrorDesc)
+				gomega.Eventually(func() string { return getPodAnnotations(fakeOvn.fakeClient.KubeClient, t.namespace, t.podName) }, 2).Should(gomega.MatchJSON(`{"default": {"ip_addresses":["` + t.podIP + `/24"], "mac_address":"` + t.podMAC + `", "gateway_ips": ["` + t.nodeGWIP + `"], "ip_address":"` + t.podIP + `/24", "gateway_ip": "` + t.nodeGWIP + `"}}`))
+				gomega.Eventually(fExec.CalledMatchesExpected).Should(gomega.BeTrue(), fExec.ErrorDesc)
 
 				fExec.AddFakeCmd(&ovntest.ExpectedCmd{
 					Cmd:    "ovn-nbctl --timeout=15 -- --if-exists --policy=src-ip lr-route-del GR_node1 10.128.1.3/32 9.0.0.1",
@@ -194,16 +194,16 @@ var _ = Describe("OVN Egress Gateway Operations", func() {
 					Output: "\n",
 				})
 				err := fakeOvn.fakeClient.KubeClient.CoreV1().Pods(t.namespace).Delete(context.TODO(), t.podName, *metav1.NewDeleteOptions(0))
-				Expect(err).NotTo(HaveOccurred())
-				Eventually(fExec.CalledMatchesExpected).Should(BeTrue(), fExec.ErrorDesc)
+				gomega.Expect(err).NotTo(gomega.HaveOccurred())
+				gomega.Eventually(fExec.CalledMatchesExpected).Should(gomega.BeTrue(), fExec.ErrorDesc)
 				return nil
 			}
 
 			err := app.Run([]string{app.Name})
-			Expect(err).NotTo(HaveOccurred())
+			gomega.Expect(err).NotTo(gomega.HaveOccurred())
 		})
 
-		It("reconciles deleting a exgw namespace with active pod", func() {
+		ginkgo.It("reconciles deleting a exgw namespace with active pod", func() {
 			app.Action = func(ctx *cli.Context) error {
 
 				namespaceT := *newNamespace("namespace1")
@@ -244,8 +244,8 @@ var _ = Describe("OVN Egress Gateway Operations", func() {
 				fakeOvn.controller.WatchNamespaces()
 				fakeOvn.controller.WatchPods()
 
-				Eventually(func() string { return getPodAnnotations(fakeOvn.fakeClient.KubeClient, t.namespace, t.podName) }, 2).Should(MatchJSON(`{"default": {"ip_addresses":["` + t.podIP + `/24"], "mac_address":"` + t.podMAC + `", "gateway_ips": ["` + t.nodeGWIP + `"], "ip_address":"` + t.podIP + `/24", "gateway_ip": "` + t.nodeGWIP + `"}}`))
-				Eventually(fExec.CalledMatchesExpected).Should(BeTrue(), fExec.ErrorDesc)
+				gomega.Eventually(func() string { return getPodAnnotations(fakeOvn.fakeClient.KubeClient, t.namespace, t.podName) }, 2).Should(gomega.MatchJSON(`{"default": {"ip_addresses":["` + t.podIP + `/24"], "mac_address":"` + t.podMAC + `", "gateway_ips": ["` + t.nodeGWIP + `"], "ip_address":"` + t.podIP + `/24", "gateway_ip": "` + t.nodeGWIP + `"}}`))
+				gomega.Eventually(fExec.CalledMatchesExpected).Should(gomega.BeTrue(), fExec.ErrorDesc)
 
 				// delete the namespace
 				fExec.AddFakeCmd(&ovntest.ExpectedCmd{
@@ -258,17 +258,17 @@ var _ = Describe("OVN Egress Gateway Operations", func() {
 				})
 
 				err := fakeOvn.fakeClient.KubeClient.CoreV1().Namespaces().Delete(context.TODO(), t.namespace, *metav1.NewDeleteOptions(0))
-				Expect(err).NotTo(HaveOccurred())
-				Eventually(fExec.CalledMatchesExpected).Should(BeTrue(), fExec.ErrorDesc)
+				gomega.Expect(err).NotTo(gomega.HaveOccurred())
+				gomega.Eventually(fExec.CalledMatchesExpected).Should(gomega.BeTrue(), fExec.ErrorDesc)
 				return nil
 			}
 
 			err := app.Run([]string{app.Name})
-			Expect(err).NotTo(HaveOccurred())
+			gomega.Expect(err).NotTo(gomega.HaveOccurred())
 		})
 	})
-	Context("on setting pod gateway annotations", func() {
-		It("reconciles a host networked pod acting as a exgw for another namespace for new pod", func() {
+	ginkgo.Context("on setting pod gateway annotations", func() {
+		ginkgo.It("reconciles a host networked pod acting as a exgw for another namespace for new pod", func() {
 			app.Action = func(ctx *cli.Context) error {
 
 				namespaceT := *newNamespace("namespace1")
@@ -307,17 +307,17 @@ var _ = Describe("OVN Egress Gateway Operations", func() {
 					Output: "\n",
 				})
 				_, err := fakeOvn.fakeClient.KubeClient.CoreV1().Pods(t.namespace).Create(context.TODO(), newPod(t.namespace, t.podName, t.nodeName, t.podIP), metav1.CreateOptions{})
-				Expect(err).NotTo(HaveOccurred())
-				Eventually(func() string { return getPodAnnotations(fakeOvn.fakeClient.KubeClient, t.namespace, t.podName) }, 2).Should(MatchJSON(`{"default": {"ip_addresses":["` + t.podIP + `/24"], "mac_address":"` + t.podMAC + `", "gateway_ips": ["` + t.nodeGWIP + `"], "ip_address":"` + t.podIP + `/24", "gateway_ip": "` + t.nodeGWIP + `"}}`))
-				Eventually(fExec.CalledMatchesExpected).Should(BeTrue(), fExec.ErrorDesc)
+				gomega.Expect(err).NotTo(gomega.HaveOccurred())
+				gomega.Eventually(func() string { return getPodAnnotations(fakeOvn.fakeClient.KubeClient, t.namespace, t.podName) }, 2).Should(gomega.MatchJSON(`{"default": {"ip_addresses":["` + t.podIP + `/24"], "mac_address":"` + t.podMAC + `", "gateway_ips": ["` + t.nodeGWIP + `"], "ip_address":"` + t.podIP + `/24", "gateway_ip": "` + t.nodeGWIP + `"}}`))
+				gomega.Eventually(fExec.CalledMatchesExpected).Should(gomega.BeTrue(), fExec.ErrorDesc)
 				return nil
 			}
 
 			err := app.Run([]string{app.Name})
-			Expect(err).NotTo(HaveOccurred())
+			gomega.Expect(err).NotTo(gomega.HaveOccurred())
 		})
 
-		It("reconciles a host networked pod acting as a exgw for another namespace for existing pod", func() {
+		ginkgo.It("reconciles a host networked pod acting as a exgw for another namespace for existing pod", func() {
 			app.Action = func(ctx *cli.Context) error {
 
 				namespaceT := *newNamespace("namespace1")
@@ -351,27 +351,27 @@ var _ = Describe("OVN Egress Gateway Operations", func() {
 				t.populateLogicalSwitchCache(fakeOvn)
 				fakeOvn.controller.WatchNamespaces()
 				fakeOvn.controller.WatchPods()
-				Eventually(fExec.CalledMatchesExpected).Should(BeTrue(), fExec.ErrorDesc)
+				gomega.Eventually(fExec.CalledMatchesExpected).Should(gomega.BeTrue(), fExec.ErrorDesc)
 				fExec.AddFakeCmd(&ovntest.ExpectedCmd{
 					Cmd:    "ovn-nbctl --timeout=15 -- --may-exist --policy=src-ip --ecmp-symmetric-reply lr-route-add GR_node1 10.128.1.3/32 9.0.0.1",
 					Output: "\n",
 				})
 				_, err := fakeOvn.fakeClient.KubeClient.CoreV1().Pods(namespaceX.Name).Create(context.TODO(), &gwPod, metav1.CreateOptions{})
-				Expect(err).NotTo(HaveOccurred())
-				Eventually(fExec.CalledMatchesExpected).Should(BeTrue(), fExec.ErrorDesc)
+				gomega.Expect(err).NotTo(gomega.HaveOccurred())
+				gomega.Eventually(fExec.CalledMatchesExpected).Should(gomega.BeTrue(), fExec.ErrorDesc)
 				return nil
 			}
 
 			err := app.Run([]string{app.Name})
-			Expect(err).NotTo(HaveOccurred())
+			gomega.Expect(err).NotTo(gomega.HaveOccurred())
 		})
 
-		It("reconciles a multus networked pod acting as a exgw for another namespace for new pod", func() {
+		ginkgo.It("reconciles a multus networked pod acting as a exgw for another namespace for new pod", func() {
 			app.Action = func(ctx *cli.Context) error {
 				ns := nettypes.NetworkStatus{Name: "dummy", IPs: []string{"11.0.0.1"}}
 				networkStatuses := []nettypes.NetworkStatus{ns}
 				nsEncoded, err := json.Marshal(networkStatuses)
-				Expect(err).NotTo(HaveOccurred())
+				gomega.Expect(err).NotTo(gomega.HaveOccurred())
 
 				namespaceT := *newNamespace("namespace1")
 				namespaceX := *newNamespace("namespace2")
@@ -413,17 +413,17 @@ var _ = Describe("OVN Egress Gateway Operations", func() {
 					Output: "\n",
 				})
 				_, err = fakeOvn.fakeClient.KubeClient.CoreV1().Pods(t.namespace).Create(context.TODO(), newPod(t.namespace, t.podName, t.nodeName, t.podIP), metav1.CreateOptions{})
-				Expect(err).NotTo(HaveOccurred())
-				Eventually(func() string { return getPodAnnotations(fakeOvn.fakeClient.KubeClient, t.namespace, t.podName) }, 2).Should(MatchJSON(`{"default": {"ip_addresses":["` + t.podIP + `/24"], "mac_address":"` + t.podMAC + `", "gateway_ips": ["` + t.nodeGWIP + `"], "ip_address":"` + t.podIP + `/24", "gateway_ip": "` + t.nodeGWIP + `"}}`))
-				Eventually(fExec.CalledMatchesExpected).Should(BeTrue(), fExec.ErrorDesc)
+				gomega.Expect(err).NotTo(gomega.HaveOccurred())
+				gomega.Eventually(func() string { return getPodAnnotations(fakeOvn.fakeClient.KubeClient, t.namespace, t.podName) }, 2).Should(gomega.MatchJSON(`{"default": {"ip_addresses":["` + t.podIP + `/24"], "mac_address":"` + t.podMAC + `", "gateway_ips": ["` + t.nodeGWIP + `"], "ip_address":"` + t.podIP + `/24", "gateway_ip": "` + t.nodeGWIP + `"}}`))
+				gomega.Eventually(fExec.CalledMatchesExpected).Should(gomega.BeTrue(), fExec.ErrorDesc)
 				return nil
 			}
 
 			err := app.Run([]string{app.Name})
-			Expect(err).NotTo(HaveOccurred())
+			gomega.Expect(err).NotTo(gomega.HaveOccurred())
 		})
 
-		It("reconciles deleting a host networked pod acting as a exgw for another namespace for existing pod", func() {
+		ginkgo.It("reconciles deleting a host networked pod acting as a exgw for another namespace for existing pod", func() {
 			app.Action = func(ctx *cli.Context) error {
 
 				namespaceT := *newNamespace("namespace1")
@@ -457,27 +457,27 @@ var _ = Describe("OVN Egress Gateway Operations", func() {
 				t.populateLogicalSwitchCache(fakeOvn)
 				fakeOvn.controller.WatchNamespaces()
 				fakeOvn.controller.WatchPods()
-				Eventually(fExec.CalledMatchesExpected).Should(BeTrue(), fExec.ErrorDesc)
+				gomega.Eventually(fExec.CalledMatchesExpected).Should(gomega.BeTrue(), fExec.ErrorDesc)
 				fExec.AddFakeCmd(&ovntest.ExpectedCmd{
 					Cmd:    "ovn-nbctl --timeout=15 -- --may-exist --policy=src-ip --ecmp-symmetric-reply lr-route-add GR_node1 10.128.1.3/32 9.0.0.1",
 					Output: "\n",
 				})
 				_, err := fakeOvn.fakeClient.KubeClient.CoreV1().Pods(namespaceX.Name).Create(context.TODO(), &gwPod, metav1.CreateOptions{})
-				Expect(err).NotTo(HaveOccurred())
-				Eventually(fExec.CalledMatchesExpected).Should(BeTrue(), fExec.ErrorDesc)
+				gomega.Expect(err).NotTo(gomega.HaveOccurred())
+				gomega.Eventually(fExec.CalledMatchesExpected).Should(gomega.BeTrue(), fExec.ErrorDesc)
 				// delete the GW
 				fExec.AddFakeCmd(&ovntest.ExpectedCmd{
 					Cmd:    "ovn-nbctl --timeout=15 -- --if-exists --policy=src-ip lr-route-del GR_node1 10.128.1.3/32 9.0.0.1",
 					Output: "\n",
 				})
 				err = fakeOvn.fakeClient.KubeClient.CoreV1().Pods(namespaceX.Name).Delete(context.TODO(), gwPod.Name, *metav1.NewDeleteOptions(0))
-				Expect(err).NotTo(HaveOccurred())
-				Eventually(fExec.CalledMatchesExpected).Should(BeTrue(), fExec.ErrorDesc)
+				gomega.Expect(err).NotTo(gomega.HaveOccurred())
+				gomega.Eventually(fExec.CalledMatchesExpected).Should(gomega.BeTrue(), fExec.ErrorDesc)
 				return nil
 			}
 
 			err := app.Run([]string{app.Name})
-			Expect(err).NotTo(HaveOccurred())
+			gomega.Expect(err).NotTo(gomega.HaveOccurred())
 		})
 	})
 })
