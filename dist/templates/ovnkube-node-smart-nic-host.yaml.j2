@@ -1,12 +1,12 @@
 ---
-# ovnkube-node
+# ovnkube-node in smart-nic-host mode
 # daemonset version 3
 # starts node daemons for ovn, each in a separate container
-# it is run on all nodes
+# it is run on all nodes with nvidia.com/smart-nic label
 kind: DaemonSet
 apiVersion: apps/v1
 metadata:
-  name: ovnkube-node
+  name: ovnkube-node-smart-nic-host
   # namespace set up by install
   namespace: ovn-kubernetes
   annotations:
@@ -15,14 +15,14 @@ metadata:
 spec:
   selector:
     matchLabels:
-      app: ovnkube-node
+      app: ovnkube-node-smart-nic-host
   updateStrategy:
     type: RollingUpdate
   template:
     metadata:
       labels:
-        app: ovnkube-node
-        name: ovnkube-node
+        app: ovnkube-node-smart-nic-host
+        name: ovnkube-node-smart-nic-host
         component: network
         type: infra
         kubernetes.io/os: "linux"
@@ -31,66 +31,11 @@ spec:
     spec:
       # Requires fairly broad permissions - ability to read all services and network functions as well
       # as all pods.
+      # TODO: give minimal permissions to ovnkube-node
       serviceAccountName: ovn
       hostNetwork: true
       {{ "hostPID: true" if ovn_unprivileged_mode=="no" }}
       containers:
-
-      - name: ovn-controller
-        image: "{{ ovn_image | default('docker.io/ovnkube/ovn-daemonset:latest') }}"
-        imagePullPolicy: "{{ ovn_image_pull_policy | default('IfNotPresent') }}"
-
-        command: ["/root/ovnkube.sh", "ovn-controller"]
-
-        securityContext:
-          runAsUser: 0
-          capabilities:
-            add: ["SYS_NICE"]
-
-        terminationMessagePolicy: FallbackToLogsOnError
-        volumeMounts:
-        - mountPath: /var/run/dbus/
-          name: host-var-run-dbus
-          readOnly: true
-        - mountPath: /var/log/openvswitch/
-          name: host-var-log-ovs
-        - mountPath: /var/log/ovn/
-          name: host-var-log-ovs
-        - mountPath: /var/run/openvswitch/
-          name: host-var-run-ovs
-        - mountPath: /var/run/ovn/
-          name: host-var-run-ovs
-        - mountPath: /ovn-cert
-          name: host-ovn-cert
-          readOnly: true
-
-        resources:
-          requests:
-            cpu: 100m
-            memory: 300Mi
-        env:
-        - name: OVN_DAEMONSET_VERSION
-          value: "3"
-        - name: OVN_LOG_CONTROLLER
-          value: "{{ ovn_loglevel_controller }}"
-        - name: K8S_APISERVER
-          valueFrom:
-            configMapKeyRef:
-              name: ovn-config
-              key: k8s_apiserver
-        - name: OVN_KUBERNETES_NAMESPACE
-          valueFrom:
-            fieldRef:
-              fieldPath: metadata.namespace
-        - name: OVN_SSL_ENABLE
-          value: "{{ ovn_ssl_en }}"
-
-        readinessProbe:
-          exec:
-            command: ["/usr/bin/ovn-kube-util", "readiness-probe", "-t", "ovn-controller"]
-          initialDelaySeconds: 30
-          timeoutSeconds: 30
-          periodSeconds: 60
 
       - name: ovnkube-node
         image: "{{ ovn_image | default('docker.io/ovnkube/ovn-daemonset:latest') }}"
@@ -98,7 +43,7 @@ spec:
 
         command: ["/root/ovnkube.sh", "ovn-node"]
 
-        securityContext:
+        securityContext:ovn_remote_probe_interval
           runAsUser: 0
           {% if ovn_unprivileged_mode=="no" -%}
           privileged: true
@@ -119,10 +64,6 @@ spec:
           readOnly: true
         - mountPath: /var/log/ovn-kubernetes/
           name: host-var-log-ovnkube
-        - mountPath: /var/run/openvswitch/
-          name: host-var-run-ovs
-        - mountPath: /var/run/ovn/
-          name: host-var-run-ovs
         # We mount our socket here
         - mountPath: /var/run/ovn-kubernetes
           name: host-var-run-ovn-kubernetes
@@ -131,15 +72,6 @@ spec:
           name: host-opt-cni-bin
         - mountPath: /etc/cni/net.d
           name: host-etc-cni-netd
-        - mountPath: /ovn-cert
-          name: host-ovn-cert
-          readOnly: true
-        - mountPath: /etc/openvswitch/
-          name: host-var-lib-ovs
-          readOnly: true
-        - mountPath: /etc/ovn/
-          name: host-var-lib-ovs
-          readOnly: true
         {% if kind is defined and kind -%}
         - mountPath: /var/run/netns
           name: host-netns
@@ -209,6 +141,8 @@ spec:
           value: "{{ ovn_multicast_enable }}"
         - name: OVN_UNPRIVILEGED_MODE
           value: "{{ ovn_unprivileged_mode }}"
+       - name: OVNKUBE_NODE_MODE
+         value: smart-nic-host
 
         lifecycle:
           preStop:
@@ -221,67 +155,16 @@ spec:
           timeoutSeconds: 30
           periodSeconds: 60
 
-        # ovs-metrics-exporter - v3
-      - name: ovs-metrics-exporter
-        image: "{{ ovn_image | default('docker.io/ovnkube/ovn-daemonset:latest') }}"
-        imagePullPolicy: "{{ ovn_image_pull_policy | default('IfNotPresent') }}"
-
-        command: ["/root/ovnkube.sh", "ovs-metrics"]
-
-        securityContext:
-          runAsUser: 0
-          capabilities:
-            add: ["NET_ADMIN"]
-
-        terminationMessagePolicy: FallbackToLogsOnError
-        volumeMounts:
-        - mountPath: /var/run/dbus/
-          name: host-var-run-dbus
-          readOnly: true
-        - mountPath: /var/log/openvswitch/
-          name: host-var-log-ovs
-        - mountPath: /var/run/openvswitch/
-          name: host-var-run-ovs
-          readOnly: true
-
-        resources:
-          requests:
-            cpu: 100m
-            memory: 300Mi
-        env:
-        - name: OVN_DAEMONSET_VERSION
-          value: "3"
-        - name: K8S_NODE_IP
-          valueFrom:
-            fieldRef:
-              fieldPath: status.hostIP
-        # end of container
-
       nodeSelector:
         kubernetes.io/os: "linux"
-      affinity:
-        nodeAffinity:
-          requiredDuringSchedulingIgnoredDuringExecution:
-            nodeSelectorTerms:
-            - matchExpressions:
-              - key: nvidia.com/smart-nic
-                operator: DoesNotExist
+        nvidia.com/smart-nic
       volumes:
       - name: host-var-run-dbus
         hostPath:
           path: /var/run/dbus
-      - name: host-var-log-ovs
-        hostPath:
-          path: /var/log/openvswitch
       - name: host-var-log-ovnkube
         hostPath:
           path: /var/log/ovn-kubernetes
-      - name: host-run-ovs
-        hostPath:
-          path: /run/openvswitch
-      - name: host-var-run-ovs
-        hostPath:
-          path: /var/run/openvswitch
       - name: host-var-run-ovn-kubernetes
         hostPath:
           path: /var/run/ovn-kubernetes
@@ -291,16 +174,9 @@ spec:
       - name: host-etc-cni-netd
         hostPath:
           path: /etc/cni/net.d
-      - name: host-ovn-cert
-        hostPath:
-          path: /etc/ovn
-          type: DirectoryOrCreate
       - name: host-slash
         hostPath:
           path: /
-      - name: host-var-lib-ovs
-        hostPath:
-          path: /var/lib/openvswitch
       {% if kind is defined and kind -%}
       - name: host-netns
         hostPath:

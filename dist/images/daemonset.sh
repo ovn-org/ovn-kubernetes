@@ -247,6 +247,28 @@ ovn_image=${image} \
   ovn_remote_probe_interval=${ovn_remote_probe_interval} \
   j2 ../templates/ovnkube-node.yaml.j2 -o ../yaml/ovnkube-node.yaml
 
+# ovnkube node for smart-nic-host nic daemonset
+# TODO: we probably dont need all of these when running on smart-nic host
+ovn_image=${image} \
+  ovn_image_pull_policy=${image_pull_policy} \
+  kind=${KIND} \
+  ovn_unprivileged_mode=${ovn_unprivileged_mode} \
+  ovn_gateway_mode=${ovn_gateway_mode} \
+  ovn_gateway_opts=${ovn_gateway_opts} \
+  ovnkube_node_loglevel=${node_loglevel} \
+  ovn_loglevel_controller=${ovn_loglevel_controller} \
+  ovnkube_logfile_maxsize=${ovnkube_logfile_maxsize} \
+  ovnkube_logfile_maxbackups=${ovnkube_logfile_maxbackups} \
+  ovnkube_logfile_maxage=${ovnkube_logfile_maxage} \
+  ovn_hybrid_overlay_net_cidr=${ovn_hybrid_overlay_net_cidr} \
+  ovn_hybrid_overlay_enable=${ovn_hybrid_overlay_enable} \
+  ovn_disable_snat_multiple_gws=${ovn_disable_snat_multiple_gws} \
+  ovn_multicast_enable=${ovn_multicast_enable} \
+  ovn_egress_ip_enable=${ovn_egress_ip_enable} \
+  ovn_ssl_en=${ovn_ssl_en} \
+  ovn_remote_probe_interval=${ovn_remote_probe_interval} \
+  j2 ../templates/ovnkube-node-smart-nic-host.yaml.j2 -o ../yaml/ovnkube-node-smart-nic-host.yaml
+
 ovn_image=${image} \
   ovn_image_pull_policy=${image_pull_policy} \
   ovnkube_master_loglevel=${master_loglevel} \
@@ -296,11 +318,6 @@ ovn_image=${image} \
   ovn_image_pull_policy=${image_pull_policy} \
   ovn_unprivileged_mode=${ovn_unprivileged_mode} \
   j2 ../templates/ovs-node.yaml.j2 -o ../yaml/ovs-node.yaml
-
-# smart nic nic daemonset
-ovn_image=${image} \
-  ovn_image_pull_policy=${image_pull_policy} \
-  j2 ../templates/ovnkube-smart-nic-cni.yaml.j2 -o ../yaml/ovnkube-smart-nic-cni.yaml
 
 # ovn-setup.yaml
 net_cidr=${OVN_NET_CIDR:-"10.128.0.0/14/23"}
