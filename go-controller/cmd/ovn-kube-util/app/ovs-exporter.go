@@ -1,12 +1,8 @@
 package app
 
 import (
-	"k8s.io/klog/v2"
-	"net/http"
-
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/metrics"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
-	"github.com/prometheus/client_golang/prometheus/promhttp"
 	"github.com/urfave/cli/v2"
 	kexec "k8s.io/utils/exec"
 )
@@ -37,16 +33,16 @@ var OvsExporterCommand = cli.Command{
 			return err
 		}
 
-		mux := http.NewServeMux()
-		mux.Handle("/metrics", promhttp.Handler())
+		stopChan := make(chan struct{})
 
 		// register ovs metrics that will be served off of /metrics path
-		metrics.RegisterOvsMetrics(metricsScrapeInterval)
+		metrics.RegisterOvsMetrics(metricsScrapeInterval, stopChan)
+		// start the prometheus server to serve OVS Metrics (default port: 9310)
+		metrics.StartOVSMetricsServer(bindAddress)
 
-		err := http.ListenAndServe(bindAddress, mux)
-		if err != nil {
-			klog.Exitf("Starting metrics server failed: %v", err)
-		}
+		// run until cancelled
+		<-ctx.Context.Done()
+		close(stopChan)
 		return nil
 	},
 }
