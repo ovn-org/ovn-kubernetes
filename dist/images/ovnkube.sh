@@ -29,7 +29,6 @@ fi
 #    display        Displays log files
 #    display_env    Displays environment variables
 #    ovn_debug      Displays ovn/ovs configuration and flows
-#    smart-nic-cni  Add smart nic cni to host
 
 # NOTE: The script/image must be compatible with the daemonset.
 # This script supports version 3 daemonsets
@@ -1120,42 +1119,6 @@ ovs-metrics() {
   exit 1
 }
 
-# Add smart nic cni to host
-smart-nic-cni() {
-  TLS_CFG="certificate-authority-data: $(cat $K8S_CACERT | base64 | tr -d '\n')"
-  SMART_NIC_KUBECONFIG_DIR=/etc/cni/net.d/smart_nic.d
-  SMART_NIC_KUBECONFIG=$SMART_NIC_KUBECONFIG_DIR/smart_nic.kubeconfig
-
-  mkdir -p $SMART_NIC_KUBECONFIG_DIR
-
-    cat > $SMART_NIC_KUBECONFIG <<EOF
-# Kubeconfig file for Smart NIC CNI plugin.
-apiVersion: v1
-kind: Config
-clusters:
-- name: local
-  cluster:
-    server: ${KUBERNETES_SERVICE_PROTOCOL:-https}://[${KUBERNETES_SERVICE_HOST}]:${KUBERNETES_SERVICE_PORT}
-    $TLS_CFG
-users:
-- name: smat-nic-cni
-  user:
-    token: "${k8s_token}"
-contexts:
-- name: smat-nic-cni-context
-  context:
-    cluster: local
-    user: smat-nic-cni
-current-context: smat-nic-cni-context
-EOF
-
-  echo "=============== smart-nic-cni"
-  cp -f /usr/libexec/cni/ovn-k8s-cni-smart-nic /opt/cni/bin/ovn-k8s-cni-smart-nic
-  echo "{\"cniVersion\":\"0.4.0\",\"name\":\"ovn-kubernetes\",\"type\":\"ovn-k8s-cni-smart-nic\", \"kubeconfig\":\"$SMART_NIC_KUBECONFIG\", \"ipam\":{},\"dns\":{}}" > \
-    /etc/cni/net.d/10-ovn-k8s-cni-smart-nic.conf
-  sleep infinity
-}
-
 echo "================== ovnkube.sh --- version: ${ovnkube_version} ================"
 
 echo " ==================== command: ${cmd}"
@@ -1233,9 +1196,6 @@ case ${cmd} in
   ;;
 "ovs-metrics")
   ovs-metrics
-  ;;
-"smart-nic-cni")
-  smart-nic-cni
   ;;
 *)
   echo "invalid command ${cmd}"
