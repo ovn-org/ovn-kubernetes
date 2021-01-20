@@ -44,6 +44,7 @@ usage()
     echo "-ha | --ha-enabled                Enable high availability. DEFAULT: HA Disabled."
     echo "-ho | --hybrid-enabled            Enable hybrid overlay. DEFAULT: Disabled."
     echo "-ds | --disable-snat-multiple-gws Disable SNAT for multiple gws. DEFAULT: Disabled."
+    echo "-el | --ovn-empty-lb-events       Enable empty-lb-events generation for LB without backends. DEFAULT: Disabled"
     echo "-ii | --install-ingress           Flag to install Ingress Components."
     echo "                                  DEFAULT: Don't install ingress components."
     echo "-n4 | --no-ipv4                   Disable IPv4. DEFAULT: IPv4 Enabled."
@@ -81,6 +82,8 @@ parse_args()
             -ho | --hybrid-enabled )            OVN_HYBRID_OVERLAY_ENABLE=true
                                                 ;;
             -ds | --disable-snat-multiple-gws ) OVN_DISABLE_SNAT_MULTIPLE_GWS=true
+                                                ;;
+            -el | --ovn-empty-lb-events )       OVN_EMPTY_LB_EVENTS=true
                                                 ;;
             -kt | --keep-taint )                KIND_REMOVE_TAINT=false
                                                 ;;
@@ -137,6 +140,7 @@ print_params()
      echo "OVN_GATEWAY_MODE = $OVN_GATEWAY_MODE"
      echo "OVN_HYBRID_OVERLAY_ENABLE = $OVN_HYBRID_OVERLAY_ENABLE"
      echo "OVN_DISABLE_SNAT_MULTIPLE_GWS = $OVN_DISABLE_SNAT_MULTIPLE_GWS"
+     echo "OVN_EMPTY_LB_EVENTS = $OVN_EMPTY_LB_EVENTS"
      echo "OVN_MULTICAST_ENABLE = $OVN_MULTICAST_ENABLE"
      echo "OVN_IMAGE = $OVN_IMAGE"
      echo ""
@@ -161,6 +165,7 @@ KIND_IPV4_SUPPORT=${KIND_IPV4_SUPPORT:-true}
 KIND_IPV6_SUPPORT=${KIND_IPV6_SUPPORT:-false}
 OVN_HYBRID_OVERLAY_ENABLE=${OVN_HYBRID_OVERLAY_ENABLE:-false}
 OVN_DISABLE_SNAT_MULTIPLE_GWS=${OVN_DISABLE_SNAT_MULTIPLE_GWS:-false}
+OVN_EMPTY_LB_EVENTS=${OVN_EMPTY_LB_EVENTS:-false}
 OVN_MULTICAST_ENABLE=${OVN_MULTICAST_ENABLE:-false}
 KIND_ALLOW_SYSTEM_WRITES=${KIND_ALLOW_SYSTEM_WRITES:-false}
 OVN_IMAGE=${OVN_IMAGE:-local}
@@ -347,6 +352,7 @@ pushd ../dist/images
   --gateway-mode=${OVN_GATEWAY_MODE} \
   --hybrid-enabled=${OVN_HYBRID_OVERLAY_ENABLE} \
   --disable-snat-multiple-gws=${OVN_DISABLE_SNAT_MULTIPLE_GWS} \
+  --ovn-empty-lb-events=${OVN_EMPTY_LB_EVENTS} \
   --multicast-enabled=${OVN_MULTICAST_ENABLE} \
   --k8s-apiserver=${API_URL} \
   --ovn-master-count=${KIND_NUM_MASTER} \
