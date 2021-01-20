@@ -284,8 +284,11 @@ func (n *OvnNode) Start(wg *sync.WaitGroup) error {
 		n.watchSmartNicPods()
 	} else {
 		// start the cni server
-		cniServer := cni.NewCNIServer("", kclient.KClient)
-		err = cniServer.Start(cni.HandleCNIRequest)
+		var cniServer *cni.Server
+		cniServer, err = cni.NewCNIServer("", kclient.KClient, config.OvnKubeNode.Mode)
+		if err == nil {
+			err = cniServer.Start(cni.HandleCNIRequest)
+		}
 	}
 
 	return err
@@ -507,6 +510,7 @@ func (n *OvnNode) addRepPort(pod *kapi.Pod, vfRepName string, ifInfo *cni.PodInt
 
 // delRepPort delete the representor of the VF from the ovs bridge
 func (n *OvnNode) delRepPort(vfRepName string) error {
+	//TODO(adrianc): handle: clearPodBandwidth(pr.SandboxID), pr.deletePodConntrack()
 	klog.Infof("delRepPort: %s", vfRepName)
 	// Set link down for representor port
 	link, err := util.GetNetLinkOps().LinkByName(vfRepName)

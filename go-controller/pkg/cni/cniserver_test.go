@@ -21,6 +21,8 @@ import (
 
 	cnitypes "github.com/containernetworking/cni/pkg/types"
 	cni020 "github.com/containernetworking/cni/pkg/types/020"
+
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
 )
 
 func clientDoCNI(t *testing.T, client *http.Client, req *Request) ([]byte, int) {
@@ -64,7 +66,11 @@ func TestCNIServer(t *testing.T) {
 	defer os.RemoveAll(tmpDir)
 	socketPath := filepath.Join(tmpDir, serverSocketName)
 	fakeClient := fake.NewSimpleClientset()
-	s := NewCNIServer(tmpDir, fakeClient)
+	s, err := NewCNIServer(tmpDir, fakeClient, types.NodeModeFull)
+	if err != nil {
+		t.Fatalf("error starting CNI server: %v", err)
+	}
+
 	if err := s.Start(serverHandleCNI); err != nil {
 		t.Fatalf("error starting CNI server: %v", err)
 	}

@@ -1661,7 +1661,7 @@ func buildOvnKubeNodeConfig(ctx *cli.Context, cli, file *config) error {
 		}
 	}
 	if !found {
-		return fmt.Errorf("Unexpected ovnkube-node-mode: %s. supported modes: %v", OvnKubeNode.Mode, supportedModes)
+		return fmt.Errorf("unexpected ovnkube-node-mode: %s. supported modes: %v", OvnKubeNode.Mode, supportedModes)
 	}
 	return nil
 }

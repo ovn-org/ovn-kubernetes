@@ -3,6 +3,7 @@ package cni
 import (
 	"encoding/json"
 	"fmt"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
 	"io/ioutil"
 	"net/http"
 	"strings"
@@ -41,7 +42,11 @@ import (
 // started.
 
 // NewCNIServer creates and returns a new Server object which will listen on a socket in the given path
-func NewCNIServer(rundir string, kclient kubernetes.Interface) *Server {
+func NewCNIServer(rundir string, kclient kubernetes.Interface, mode string) (*Server, error) {
+	if mode == types.NodeModeSmartNIC {
+		return nil, fmt.Errorf("unsupported CNI server mode: %s", mode)
+	}
+
 	if len(rundir) == 0 {
 		rundir = serverRunDir
 	}
@@ -53,11 +58,12 @@ func NewCNIServer(rundir string, kclient kubernetes.Interface) *Server {
 		},
 		rundir:  rundir,
 		kclient: kclient,
+		mode:    mode,
 	}
 	router.NotFoundHandler = http.HandlerFunc(http.NotFound)
 	router.HandleFunc("/", s.handleCNIRequest).Methods("POST")
 	router.HandleFunc("/metrics", s.handleCNIMetrics).Methods("POST")
-	return s
+	return s, nil
 }
 
 // Split the "CNI_ARGS" environment variable's value into a map.  CNI_ARGS
@@ -142,6 +148,10 @@ func (s *Server) handleCNIRequest(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		http.Error(w, fmt.Sprintf("%v", err), http.StatusBadRequest)
 		return
+	}
+
+	if s.mode == types.NodeModeSmartNICHost {
+		req.IsSmartNIC = true
 	}
 
 	klog.Infof("Waiting for %s result for pod %s/%s", req.Command, req.PodNamespace, req.PodName)

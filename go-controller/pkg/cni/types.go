@@ -75,6 +75,8 @@ type PodRequest struct {
 	IfName string
 	// CNI conf obtained from stdin conf
 	CNIConf *types.NetConf
+	// Interface to pod is a Smart-NIC interface
+	IsSmartNIC bool
 }
 
 type cniRequestFunc func(request *PodRequest, kclient kubernetes.Interface) ([]byte, error)
@@ -86,4 +88,5 @@ type Server struct {
 	requestFunc cniRequestFunc
 	rundir      string
 	kclient     kubernetes.Interface
+	mode        string
 }

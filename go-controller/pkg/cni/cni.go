@@ -71,7 +71,17 @@ func (pr *PodRequest) cmdAdd(kclient kubernetes.Interface) ([]byte, error) {
 
 	kubecli := &kube.Kube{KClient: kclient}
 
-	annotations, err := GetPodAnnotationsWithBackoff(kubecli, namespace, podName, false)
+	if pr.IsSmartNIC {
+		// Add Smart-NIC connection-details annotation so ovnkube-node running on smart-NIC
+		// performs the needed network plumbing.
+		if err := pr.addSmartNICConnectionDetailsAnnot(kubecli); err != nil {
+			return nil, err
+		}
+	}
+
+	// get POD annotation to check that pod interface was configured in OVN and in case of SMART-NIC
+	// the vf is configured and ready on the smart-nic side
+	annotations, err := GetPodAnnotationsWithBackoff(kubecli, namespace, podName, pr.IsSmartNIC)
 	if err != nil {
 		return nil, fmt.Errorf("failed to get pod annotation: %v", err)
 	}
@@ -90,6 +100,7 @@ func (pr *PodRequest) cmdAdd(kclient kubernetes.Interface) ([]byte, error) {
 		MTU:           config.Default.MTU,
 		Ingress:       ingress,
 		Egress:        egress,
+		IsSmartNic:    pr.IsSmartNIC,
 	}
 	response := &Response{}
 	if !config.UnprivilegedMode {
@@ -110,6 +121,11 @@ func (pr *PodRequest) cmdAdd(kclient kubernetes.Interface) ([]byte, error) {
 }
 
 func (pr *PodRequest) cmdDel() ([]byte, error) {
+	if pr.IsSmartNIC {
+		// nothing to do
+		return []byte{}, nil
+	}
+
 	if err := pr.PlatformSpecificCleanup(); err != nil {
 		return nil, err
 	}
