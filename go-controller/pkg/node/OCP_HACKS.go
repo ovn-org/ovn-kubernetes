@@ -15,30 +15,27 @@ import (
 
 // Block MCS Access. https://github.com/openshift/ovn-kubernetes/pull/170
 func generateBlockMCSRules(rules *[]iptRule, protocol iptables.Protocol) {
-	*rules = append(*rules, iptRule{
-		table:    "filter",
-		chain:    "FORWARD",
-		args:     []string{"-p", "tcp", "-m", "tcp", "--dport", "22623", "-j", "REJECT"},
-		protocol: protocol,
-	})
-	*rules = append(*rules, iptRule{
-		table:    "filter",
-		chain:    "FORWARD",
-		args:     []string{"-p", "tcp", "-m", "tcp", "--dport", "22624", "-j", "REJECT"},
-		protocol: protocol,
-	})
-	*rules = append(*rules, iptRule{
-		table:    "filter",
-		chain:    "OUTPUT",
-		args:     []string{"-p", "tcp", "-m", "tcp", "--dport", "22623", "-j", "REJECT"},
-		protocol: protocol,
-	})
-	*rules = append(*rules, iptRule{
-		table:    "filter",
-		chain:    "OUTPUT",
-		args:     []string{"-p", "tcp", "-m", "tcp", "--dport", "22624", "-j", "REJECT"},
-		protocol: protocol,
-	})
+	var delRules []iptRule
+
+	for _, chain := range []string{"FORWARD", "OUTPUT"} {
+		for _, port := range []string{"22623", "22624"} {
+			*rules = append(*rules, iptRule{
+				table:    "filter",
+				chain:    chain,
+				args:     []string{"-p", "tcp", "-m", "tcp", "--dport", port, "--syn", "-j", "REJECT"},
+				protocol: protocol,
+			})
+			// Delete the old "--syn"-less rules on upgrade
+			delRules = append(delRules, iptRule{
+				table:    "filter",
+				chain:    chain,
+				args:     []string{"-p", "tcp", "-m", "tcp", "--dport", port, "-j", "REJECT"},
+				protocol: protocol,
+			})
+		}
+	}
+
+	delIptRules(delRules)
 }
 
 // initSharedGatewayNoBridge is used in order to run local gateway mode without moving the NIC to an ovs bridge
