@@ -1,8 +1,10 @@
 package metrics
 
 import (
+	"errors"
 	"fmt"
 	"os"
+	"os/exec"
 	"strconv"
 	"strings"
 	"time"
@@ -390,7 +392,18 @@ func RegisterOvnDBMetrics(clientset kubernetes.Interface, k8sNodeName string) {
 	_, _, err = util.RunOVSDBTool("db-is-standalone", "/etc/openvswitch/ovnsb_db.db")
 	if err == nil {
 		dbIsClustered = false
+	} else {
+		var ee *exec.ExitError
+		if errors.As(err, &ee) {
+			klog.Infof("Exit code for the db-is-standalone: %v", ee.ExitCode())
+			if ee.ExitCode() != 2 {
+				klog.Warningf("Can't determine if the db is clustered/stand-alone during metrics initialization")
+				//for purposes of metrics registration treat this as db-is-standalone.
+				dbIsClustered = false
+			}
+		}
 	}
+
 	if dbIsClustered {
 		ovnRegistry.MustRegister(metricDBClusterCID)
 		ovnRegistry.MustRegister(metricDBClusterSID)
