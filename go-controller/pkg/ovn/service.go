@@ -3,10 +3,11 @@ package ovn
 import (
 	"encoding/json"
 	"fmt"
-	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
 	"net"
 	"reflect"
 	"strings"
+
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
 
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/gateway"
@@ -290,14 +291,17 @@ func (ovn *Controller) createService(service *kapi.Service) error {
 	// eventough the endpoint exists.
 	// NOTE: we can also end up in a situation where a service matching no pods is created. Such a service still has an endpoint, but with no subsets.
 	// make sure to treat that service as an ACL reject.
+	epAnnotations := map[string]string{}
 	ep, err := ovn.watchFactory.GetEndpoint(service.Namespace, service.Name)
-	if err == nil {
-		if len(ep.Subsets) > 0 {
-			klog.V(5).Infof("service: %s has endpoint, will create load balancer VIPs", service.Name)
-		} else {
-			klog.V(5).Infof("service: %s has empty endpoint", service.Name)
-			ep = nil
-		}
+	if err != nil {
+		klog.V(5).Infof("service: %s error getting endpoint", service.Name)
+		ep = nil
+	} else if len(ep.Subsets) == 0 {
+		klog.V(5).Infof("service: %s without endpoints", service.Name)
+		ep = nil
+	} else {
+		klog.V(5).Infof("service: %s has endpoint, will create load balancer VIPs", service.Name)
+		epAnnotations = ep.Annotations
 	}
 
 	for _, svcPort := range service.Spec.Ports {
@@ -353,7 +357,7 @@ func (ovn *Controller) createService(service *kapi.Service) error {
 						if err := ovn.AddEndpoints(ep); err != nil {
 							return err
 						}
-					} else if svcQualifiesForReject(service) {
+					} else if svcQualifiesForReject(epAnnotations) {
 						aclDenyLogging := ovn.GetNetworkPolicyACLLogging(service.Namespace).Deny
 						aclUUID, err := ovn.createLoadBalancerRejectACL(loadBalancer, physicalIP, port,
 							svcPort.Protocol, aclDenyLogging)
@@ -373,7 +377,7 @@ func (ovn *Controller) createService(service *kapi.Service) error {
 				klog.Errorf("Failed to get load balancer for %s (%v)", svcPort.Protocol, err)
 				break
 			}
-			if svcQualifiesForReject(service) {
+			if svcQualifiesForReject(epAnnotations) {
 				gateways, _, err := ovn.getOvnGateways()
 				if err != nil {
 					return err
@@ -511,11 +515,11 @@ func (ovn *Controller) deleteService(service *kapi.Service) {
 }
 
 // svcQualifiesForReject determines if a service should have a reject ACL on it when it has no endpoints
-// The reject ACL is only applied to terminate incoming connections immediately when idling is not used
-// or OVNEmptyLbEvents are not enabled. When idilng or empty LB events are enabled, we want to ensure we
-// receive these packets and not reject them.
-func svcQualifiesForReject(service *kapi.Service) bool {
-	_, ok := service.Annotations[OvnServiceIdledAt]
+// The reject ACL is only applied to terminate incoming connections immediately when idling is not used, i.e.
+// the endpoints doesn´t have idling annotations, or OVNEmptyLbEvents are not enabled.
+// When idling or empty LB events are enabled, we want to ensure we receive these packets and not reject them.
+func svcQualifiesForReject(annotations map[string]string) bool {
+	_, ok := annotations[OvnServiceIdledAt]
 	return !(config.Kubernetes.OVNEmptyLbEvents && ok)
 }
 

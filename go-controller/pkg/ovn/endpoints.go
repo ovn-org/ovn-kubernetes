@@ -191,6 +191,10 @@ func (ovn *Controller) deleteEndpoints(ep *kapi.Endpoints) error {
 	if !util.IsClusterIPSet(svc) {
 		return nil
 	}
+	epAnnotations := map[string]string{}
+	if len(ep.Annotations) > 0 {
+		epAnnotations = ep.Annotations
+	}
 	gateways, _, err := ovn.getOvnGateways()
 	if err != nil {
 		klog.Error(err)
@@ -203,7 +207,7 @@ func (ovn *Controller) deleteEndpoints(ep *kapi.Endpoints) error {
 			continue
 		}
 		// Cluster IP service
-		ovn.clearVIPsAddRejectACL(svc, lb, svc.Spec.ClusterIP, svcPort.Port, svcPort.Protocol)
+		ovn.clearVIPsAddRejectACL(svc, epAnnotations, lb, svc.Spec.ClusterIP, svcPort.Port, svcPort.Protocol)
 
 		for _, gateway := range gateways {
 			loadBalancer, err := ovn.getGatewayLoadBalancer(gateway, svcPort.Protocol)
@@ -216,7 +220,7 @@ func (ovn *Controller) deleteEndpoints(ep *kapi.Endpoints) error {
 				if ing.IP == "" {
 					continue
 				}
-				ovn.clearVIPsAddRejectACL(svc, loadBalancer, ing.IP, svcPort.Port, svcPort.Protocol)
+				ovn.clearVIPsAddRejectACL(svc, epAnnotations, loadBalancer, ing.IP, svcPort.Port, svcPort.Protocol)
 			}
 			// Node Port services
 			if util.ServiceTypeHasNodePort(svc) {
@@ -226,21 +230,21 @@ func (ovn *Controller) deleteEndpoints(ep *kapi.Endpoints) error {
 					continue
 				}
 				for _, physicalIP := range physicalIPs {
-					ovn.clearVIPsAddRejectACL(svc, loadBalancer, physicalIP, svcPort.NodePort, svcPort.Protocol)
+					ovn.clearVIPsAddRejectACL(svc, epAnnotations, loadBalancer, physicalIP, svcPort.NodePort, svcPort.Protocol)
 				}
 			}
 			// External IP services
 			for _, extIP := range svc.Spec.ExternalIPs {
-				ovn.clearVIPsAddRejectACL(svc, loadBalancer, extIP, svcPort.Port, svcPort.Protocol)
+				ovn.clearVIPsAddRejectACL(svc, epAnnotations, loadBalancer, extIP, svcPort.Port, svcPort.Protocol)
 			}
 		}
 	}
 	return nil
 }
 
-func (ovn *Controller) clearVIPsAddRejectACL(svc *kapi.Service, lb, ip string, port int32, proto kapi.Protocol) {
+func (ovn *Controller) clearVIPsAddRejectACL(svc *kapi.Service, annotations map[string]string, lb, ip string, port int32, proto kapi.Protocol) {
 	aclLogging := ovn.GetNetworkPolicyACLLogging(svc.Namespace).Deny
-	if svcQualifiesForReject(svc) {
+	if svcQualifiesForReject(annotations) {
 		aclUUID, err := ovn.createLoadBalancerRejectACL(lb, ip, port, proto, aclLogging)
 		if err != nil {
 			klog.Errorf("Failed to create reject ACL for VIP: %s:%d, load balancer: %s, error: %v",
