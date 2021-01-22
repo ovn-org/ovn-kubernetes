@@ -8,32 +8,36 @@ import (
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/metrics"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/gateway"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/loadbalancer"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
 
 	v1 "k8s.io/api/core/v1"
+	"k8s.io/apimachinery/pkg/labels"
+	"k8s.io/apimachinery/pkg/util/sets"
 	"k8s.io/apimachinery/pkg/util/wait"
 
+	corelisters "k8s.io/client-go/listers/core/v1"
 	"k8s.io/client-go/util/retry"
 	"k8s.io/klog/v2"
 )
 
 // Repair is a controller loop that can work as in one-shot or periodic mode
 // it checks the OVN Load Balancers and delete the ones that doesn't exist in
-// the Kubernetes serviceTracker.
+// the Kubernetes Service Informer cache.
 // Based on:
 // https://raw.githubusercontent.com/kubernetes/kubernetes/release-1.19/pkg/registry/core/service/ipallocator/controller/repair.go
 type Repair struct {
 	interval time.Duration
 	// serviceTracker tracks services and maps them to OVN LoadBalancers
-	serviceTracker *serviceTracker
+	serviceLister corelisters.ServiceLister
 }
 
 // NewRepair creates a controller that periodically ensures that there is no stale data in OVN
 func NewRepair(interval time.Duration,
-	serviceTracker *serviceTracker,
+	serviceLister corelisters.ServiceLister,
 ) *Repair {
 	return &Repair{
-		interval:       interval,
-		serviceTracker: serviceTracker,
+		interval:      interval,
+		serviceLister: serviceLister,
 	}
 }
 
@@ -88,11 +92,24 @@ func (r *Repair) runOnce() error {
 	}
 
 	// Get Kubernetes Service state
-	svcVIPsProtocolMap := r.serviceTracker.getServiceVipsMap()
+	svcVIPsProtocolMap := sets.NewString()
+	services, err := r.serviceLister.List(labels.Everything())
+	if err != nil {
+		return errors.Wrapf(err, "Failed to list Services from the cache")
+	}
+	for _, svc := range services {
+		for _, ip := range svc.Spec.ClusterIPs {
+			for _, svcPort := range svc.Spec.Ports {
+				vip := util.JoinHostPortInt32(ip, svcPort.Port)
+				key := virtualIPKey(vip, svcPort.Protocol)
+				svcVIPsProtocolMap.Insert(key)
+			}
+		}
+	}
 
 	// Reconcile with OVN state
 	// Obtain all the VIPs present in the OVN LoadBalancers
-	// and delete the ones that are not present in the service tracker
+	// and delete the ones that are not present in Kubernetes
 	for _, p := range protocols {
 		for _, lb := range ovnLBCache[p] {
 			vips, err := loadbalancer.GetLoadBalancerVIPs(lb)

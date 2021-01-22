@@ -6,6 +6,12 @@ import (
 	ovntest "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/testing"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
 	v1 "k8s.io/api/core/v1"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/util/intstr"
+
+	"k8s.io/client-go/informers"
+	coreinformers "k8s.io/client-go/informers/core/v1"
+	"k8s.io/client-go/kubernetes/fake"
 )
 
 const (
@@ -17,12 +23,19 @@ const (
 	grSctpLBUUID string = "0ac92874-2f32-11eb-8ca0-a8a1590cda29"
 )
 
+func newServiceInformer() coreinformers.ServiceInformer {
+	client := fake.NewSimpleClientset()
+	informerFactory := informers.NewSharedInformerFactory(client, 0)
+	return informerFactory.Core().V1().Services()
+}
+
 func TestRepair_Empty(t *testing.T) {
-	st := newServiceTracker()
+	serviceInformer := newServiceInformer()
 	r := &Repair{
-		interval:       0,
-		serviceTracker: st,
-	} // Expected OVN commands
+		interval:      0,
+		serviceLister: serviceInformer.Lister(),
+	}
+	// Expected OVN commands
 	fexec := ovntest.NewFakeExec()
 	initializeClusterIPLBs(fexec)
 	// OVN is empty
@@ -62,11 +75,11 @@ func TestRepair_Empty(t *testing.T) {
 }
 
 func TestRepair_OVNStaleData(t *testing.T) {
-	st := newServiceTracker()
+	serviceInformer := newServiceInformer()
 	r := &Repair{
-		interval:       0,
-		serviceTracker: st,
-	} // Expected OVN commands
+		interval:      0,
+		serviceLister: serviceInformer.Lister(),
+	}
 	fexec := ovntest.NewLooseCompareFakeExec()
 	initializeClusterIPLBs(fexec)
 	// There are remaining OVN LB that doesn't exist in Kubernetes
@@ -119,17 +132,19 @@ func TestRepair_OVNStaleData(t *testing.T) {
 }
 
 func TestRepair_OVNSynced(t *testing.T) {
-	st := newServiceTracker()
+	// Initialize informer cache
+	serviceInformer := newServiceInformer()
+	serviceStore := serviceInformer.Informer().GetStore()
+	serviceStore.Add(createService("svc1", "10.96.0.10", 80))
+	serviceStore.Add(createService("svc2", "fd00:10:96::1", 80))
+
 	r := &Repair{
-		interval:       0,
-		serviceTracker: st,
+		interval:      0,
+		serviceLister: serviceInformer.Lister(),
 	}
 	// Expected OVN commands
 	fexec := ovntest.NewLooseCompareFakeExec()
 	initializeClusterIPLBs(fexec)
-
-	st.updateService("svcname", "nsname", "10.96.0.10:80", v1.ProtocolTCP)
-	st.updateService("svcname", "nsname", "[fd00:10:96::1]:80", v1.ProtocolTCP)
 
 	// OVN database is in Sync no operation expected
 	fexec.AddFakeCmd(&ovntest.ExpectedCmd{
@@ -168,16 +183,18 @@ func TestRepair_OVNSynced(t *testing.T) {
 }
 
 func TestRepair_OVNMissingService(t *testing.T) {
-	st := newServiceTracker()
+	// Initialize informer cache
+	serviceInformer := newServiceInformer()
+	serviceStore := serviceInformer.Informer().GetStore()
+	serviceStore.Add(createService("svc1", "10.96.0.10", 80))
+	serviceStore.Add(createService("svc2", "fd00:10:96::1", 80))
+
 	r := &Repair{
-		interval:       0,
-		serviceTracker: st,
-	} // Expected OVN commands
+		interval:      0,
+		serviceLister: serviceInformer.Lister(),
+	}
 	fexec := ovntest.NewFakeExec()
 	initializeClusterIPLBs(fexec)
-
-	r.serviceTracker.updateService("svcname", "nsname", "10.96.0.10:80", v1.ProtocolTCP)
-	r.serviceTracker.updateService("svcname", "nsname", "[fd00:10:96::1]:80", v1.ProtocolTCP)
 
 	// OVN database is in Sync no operation expected
 	fexec.AddFakeCmd(&ovntest.ExpectedCmd{
@@ -246,4 +263,21 @@ func initializeClusterIPLBs(fexec *ovntest.FakeExec) {
 		Cmd:    "ovn-nbctl --timeout=15 --data=bare --no-heading --columns=_uuid find load_balancer external_ids:UDP_lb_gateway_router=gateway1",
 		Output: grUdpLBUUID,
 	})
+}
+
+func createService(name, ip string, port int) *v1.Service {
+	return &v1.Service{
+		ObjectMeta: metav1.ObjectMeta{Name: name, Namespace: "nsname"},
+		Spec: v1.ServiceSpec{
+			Type:       v1.ServiceTypeClusterIP,
+			ClusterIP:  ip,
+			ClusterIPs: []string{ip},
+			Selector:   map[string]string{"foo": "bar"},
+			Ports: []v1.ServicePort{{
+				Port:       int32(port),
+				Protocol:   v1.ProtocolTCP,
+				TargetPort: intstr.FromInt(3456),
+			}},
+		},
+	}
 }

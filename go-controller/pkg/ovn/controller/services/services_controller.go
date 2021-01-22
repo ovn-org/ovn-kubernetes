@@ -92,7 +92,7 @@ func NewController(client clientset.Interface,
 	c.eventRecorder = recorder
 
 	// repair controller
-	c.repair = NewRepair(0, st)
+	c.repair = NewRepair(0, serviceInformer.Lister())
 
 	return c
 }
@@ -145,22 +145,26 @@ func (c *Controller) Run(workers int, stopCh <-chan struct{}) error {
 	klog.Infof("Starting controller %s", controllerName)
 	defer klog.Infof("Shutting down controller %s", controllerName)
 
-	// Wait for the caches to be synced before starting workers
+	// Wait for the caches to be synced
 	klog.Info("Waiting for informer caches to sync")
 	if !cache.WaitForNamedCacheSync(controllerName, stopCh, c.servicesSynced, c.endpointSlicesSynced) {
 		return fmt.Errorf("error syncing cache")
 	}
 
+	// Run the repair controller only once
+	// it keeps in sync Kubernetes and OVN
+	// and handles removal of stale data on upgrades
+	klog.Info("Remove stale OVN services")
+	if err := c.repair.RunOnce(); err != nil {
+		klog.Errorf("Error repairing services: %v")
+	}
+
+	// Start the workers after the repair loop to avoid races
 	klog.Info("Starting workers")
 	for i := 0; i < workers; i++ {
 		go wait.Until(c.worker, c.workerLoopPeriod, stopCh)
 	}
 
-	// Run only once the repair controller to keep in sync Kubernetes and OVN
-	klog.Info("Remove stale OVN services")
-	if err := c.repair.RunOnce(); err != nil {
-		klog.Errorf("Error repairing services: %v")
-	}
 	<-stopCh
 	return nil
 }
