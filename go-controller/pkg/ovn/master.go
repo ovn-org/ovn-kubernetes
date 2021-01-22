@@ -416,6 +416,17 @@ func (oc *Controller) SetupMaster(masterNodeName string) error {
 		}
 	}
 
+	// Create load balancers
+
+	// If we enable idling we have to set the option before creating the loadbalancers
+	if config.Kubernetes.OVNEmptyLbEvents {
+		_, _, err := util.RunOVNNbctl("set", "nb_global", ".", "options:controller_event=true")
+		if err != nil {
+			klog.Error("Unable to enable controller events. Unidling not possible")
+			return err
+		}
+	}
+
 	// Create 3 load-balancers for east-west traffic for UDP, TCP, SCTP
 	oc.TCPLoadBalancerUUID, stderr, err = util.RunOVNNbctl("--data=bare", "--no-heading", "--columns=_uuid", "find", "load_balancer", "external_ids:k8s-cluster-lb-tcp=yes")
 	if err != nil {

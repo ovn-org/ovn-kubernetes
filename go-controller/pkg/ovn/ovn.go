@@ -413,12 +413,6 @@ func (oc *Controller) syncPeriodic() {
 func (oc *Controller) ovnControllerEventChecker() {
 	ticker := time.NewTicker(5 * time.Second)
 
-	_, _, err := util.RunOVNNbctl("set", "nb_global", ".", "options:controller_event=true")
-	if err != nil {
-		klog.Error("Unable to enable controller events. Unidling not possible")
-		return
-	}
-
 	for {
 		select {
 		case <-ticker.C:
