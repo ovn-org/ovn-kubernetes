@@ -62,6 +62,18 @@ func DeleteLoadBalancerVIP(loadBalancer, vip string) error {
 	return nil
 }
 
+// CreateLoadBalancer creates a loadbalancer for the specified protocl
+func CreateLoadBalancer(protocol kapi.Protocol) error {
+	id := fmt.Sprintf("external_ids:k8s-cluster-lb-%s=yes", strings.ToLower(string(protocol)))
+	proto := fmt.Sprintf("protocol=%s", strings.ToLower(string(protocol)))
+	_, stderr, err := util.RunOVNNbctl("--", "create", "load_balancer", id, proto)
+	if err != nil {
+		klog.Errorf("Failed to create tcp load balancer, stderr: %q, error: %v", stderr, err)
+		return err
+	}
+	return nil
+}
+
 // UpdateLoadBalancer updates the VIP for sourceIP:sourcePort to point to targets (an
 // array of IP:port strings)
 func UpdateLoadBalancer(lb, vip string, targets []string) error {

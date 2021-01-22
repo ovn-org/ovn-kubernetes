@@ -12,6 +12,7 @@ import (
 	"time"
 
 	kapi "k8s.io/api/core/v1"
+	v1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	utilruntime "k8s.io/apimachinery/pkg/util/runtime"
 	utilwait "k8s.io/apimachinery/pkg/util/wait"
@@ -27,8 +28,10 @@ import (
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/informer"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/metrics"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/ipallocator"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/loadbalancer"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
+	"github.com/pkg/errors"
 )
 
 const (
@@ -427,44 +430,24 @@ func (oc *Controller) SetupMaster(masterNodeName string) error {
 		}
 	}
 
-	// Create 3 load-balancers for east-west traffic for UDP, TCP, SCTP
-	oc.TCPLoadBalancerUUID, stderr, err = util.RunOVNNbctl("--data=bare", "--no-heading", "--columns=_uuid", "find", "load_balancer", "external_ids:k8s-cluster-lb-tcp=yes")
-	if err != nil {
-		klog.Errorf("Failed to get tcp load balancer, stderr: %q, error: %v", stderr, err)
-		return err
+	// We have 3 load-balancers per protocol to implement the East-west traffic	//
+	// Create load-balancers for east-west traffic for each protocol UDP, TCP, SCTP
+	protocols := []v1.Protocol{v1.ProtocolTCP, v1.ProtocolUDP}
+	if oc.SCTPSupport {
+		protocols = append(protocols, v1.ProtocolSCTP)
 	}
-
-	if oc.TCPLoadBalancerUUID == "" {
-		oc.TCPLoadBalancerUUID, stderr, err = util.RunOVNNbctl("--", "create", "load_balancer", "external_ids:k8s-cluster-lb-tcp=yes", "protocol=tcp")
+	for _, p := range protocols {
+		lbUUID, err := loadbalancer.GetOVNKubeLoadBalancer(p)
 		if err != nil {
-			klog.Errorf("Failed to create tcp load balancer, stdout: %q, stderr: %q, error: %v", stdout, stderr, err)
-			return err
+			return errors.Wrapf(err, "Failed to get OVN load balancer for protocol %s", p)
 		}
-	}
+		// create the load balancer if it doesn't exist yet
+		if lbUUID == "" {
+			err := loadbalancer.CreateLoadBalancer(p)
+			if err != nil {
+				return errors.Wrapf(err, "Failed to create OVN load balancer for protocol %s", p)
+			}
 
-	oc.UDPLoadBalancerUUID, stderr, err = util.RunOVNNbctl("--data=bare", "--no-heading", "--columns=_uuid", "find", "load_balancer", "external_ids:k8s-cluster-lb-udp=yes")
-	if err != nil {
-		klog.Errorf("Failed to get udp load balancer, stderr: %q, error: %v", stderr, err)
-		return err
-	}
-	if oc.UDPLoadBalancerUUID == "" {
-		oc.UDPLoadBalancerUUID, stderr, err = util.RunOVNNbctl("--", "create", "load_balancer", "external_ids:k8s-cluster-lb-udp=yes", "protocol=udp")
-		if err != nil {
-			klog.Errorf("Failed to create udp load balancer, stdout: %q, stderr: %q, error: %v", stdout, stderr, err)
-			return err
-		}
-	}
-
-	oc.SCTPLoadBalancerUUID, stderr, err = util.RunOVNNbctl("--data=bare", "--no-heading", "--columns=_uuid", "find", "load_balancer", "external_ids:k8s-cluster-lb-sctp=yes")
-	if err != nil {
-		klog.Errorf("Failed to get sctp load balancer, stderr: %q, error: %v", stderr, err)
-		return err
-	}
-	if oc.SCTPLoadBalancerUUID == "" && oc.SCTPSupport {
-		oc.SCTPLoadBalancerUUID, stderr, err = util.RunOVNNbctl("--", "create", "load_balancer", "external_ids:k8s-cluster-lb-sctp=yes", "protocol=sctp")
-		if err != nil {
-			klog.Errorf("Failed to create sctp load balancer, stdout: %q, stderr: %q, error: %v", stdout, stderr, err)
-			return err
 		}
 	}
 
@@ -801,35 +784,29 @@ func (oc *Controller) ensureNodeLogicalNetwork(nodeName string, hostSubnets []*n
 		return err
 	}
 
-	// Add our cluster TCP and UDP load balancers to the node switch
-	if oc.TCPLoadBalancerUUID == "" {
-		return fmt.Errorf("TCP cluster load balancer not created")
-	}
-	stdout, stderr, err = util.RunOVNNbctl("set", "logical_switch", nodeName, "load_balancer="+oc.TCPLoadBalancerUUID)
-	if err != nil {
-		klog.Errorf("Failed to set logical switch %v's load balancer, stdout: %q, stderr: %q, error: %v", nodeName, stdout, stderr, err)
-		return err
-	}
-
-	if oc.UDPLoadBalancerUUID == "" {
-		return fmt.Errorf("UDP cluster load balancer not created")
-	}
-	stdout, stderr, err = util.RunOVNNbctl("add", "logical_switch", nodeName, "load_balancer", oc.UDPLoadBalancerUUID)
-	if err != nil {
-		klog.Errorf("Failed to add logical switch %v's load balancer, stdout: %q, stderr: %q, error: %v", nodeName, stdout, stderr, err)
-		return err
-	}
-
+	// Add our cluster load balancers per protocol to the node switch
+	protocols := []v1.Protocol{v1.ProtocolTCP, v1.ProtocolUDP}
 	if oc.SCTPSupport {
-		if oc.SCTPLoadBalancerUUID == "" {
-			return fmt.Errorf("SCTP cluster load balancer not created")
-		}
-		stdout, stderr, err = util.RunOVNNbctl("add", "logical_switch", nodeName, "load_balancer", oc.SCTPLoadBalancerUUID)
+		protocols = append(protocols, v1.ProtocolSCTP)
+	}
+	for i, p := range protocols {
+		lbUUID, err := loadbalancer.GetOVNKubeLoadBalancer(p)
 		if err != nil {
-			klog.Errorf("Failed to add logical switch %v's load balancer, stdout: %q, stderr: %q, error: %v", nodeName, stdout, stderr, err)
+			return errors.Wrapf(err, "Failed to get OVN load balancer for protocol %s", p)
+		}
+		// First loadbalancer overwrites the loadbalancer field
+		// next loadbalancers are appended
+		if i == 0 {
+			stdout, stderr, err = util.RunOVNNbctl("set", "logical_switch", nodeName, "load_balancer="+lbUUID)
+		} else {
+			stdout, stderr, err = util.RunOVNNbctl("add", "logical_switch", nodeName, "load_balancer", lbUUID)
+		}
+		if err != nil {
+			klog.Errorf("Failed to set logical switch %v's load balancer, stdout: %q, stderr: %q, error: %v", nodeName, stdout, stderr, err)
 			return err
 		}
 	}
+
 	// Add the node to the logical switch cache
 	return oc.lsManager.AddNode(nodeName, hostSubnets)
 }

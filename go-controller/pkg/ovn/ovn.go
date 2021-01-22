@@ -134,10 +134,7 @@ type Controller struct {
 
 	hoMaster *hocontroller.MasterController
 
-	TCPLoadBalancerUUID  string
-	UDPLoadBalancerUUID  string
-	SCTPLoadBalancerUUID string
-	SCTPSupport          bool
+	SCTPSupport bool
 
 	// For TCP, UDP, and SCTP type traffic, cache OVN load-balancers used for the
 	// cluster's east-west traffic.
