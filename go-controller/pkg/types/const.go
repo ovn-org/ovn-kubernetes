@@ -36,6 +36,10 @@ const (
 
 	NodeLocalSwitch = "node_local_switch"
 
+	// ACL directions
+	DirectionToLPort   = "to-lport"
+	DirectionFromLPort = "from-lport"
+
 	// priority of logical router policies on the OVNClusterRouter
 	EgressFirewallStartPriority           = "10000"
 	MinimumReservedEgressFirewallPriority = "2000"

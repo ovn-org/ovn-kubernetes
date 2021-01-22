@@ -323,7 +323,7 @@ func (gp *gressPolicy) localPodAddACL(portGroupName, portGroupUUID string, aclLo
 // addACLAllow adds an ACL with a given match to the given Port Group
 func (gp *gressPolicy) addACLAllow(match, l4Match, portGroupUUID string, ipBlockCidr bool, aclLogging string) error {
 	var direction, action string
-	direction = toLport
+	direction = types.DirectionToLPort
 	action = "allow-related"
 
 	uuid, stderr, err := util.RunOVNNbctl("--data=bare", "--no-heading",

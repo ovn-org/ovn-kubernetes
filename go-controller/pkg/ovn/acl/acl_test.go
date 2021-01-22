@@ -6,6 +6,7 @@ import (
 	"testing"
 
 	ovntest "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/testing"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
 	v1 "k8s.io/api/core/v1"
 )
@@ -213,7 +214,7 @@ func TestAddRejectACLToLogicalSwitch(t *testing.T) {
 			sourcePort:    80,
 			proto:         v1.ProtocolTCP,
 			ovnCmd: ovntest.ExpectedCmd{
-				Cmd:    `ovn-nbctl --timeout=15 --id=@reject-acl create acl direction=from-lport priority=1000 match="ip4.dst==192.168.2.2 && tcp && tcp.dst==80" action=reject name=myacl -- add logical_switch 545dc436-387e-11eb-9f38-a8a1590cda29 acls @reject-acl`,
+				Cmd:    `ovn-nbctl --timeout=15 --id=@reject-acl create acl direction=` + types.DirectionFromLPort + ` priority=1000 match="ip4.dst==192.168.2.2 && tcp && tcp.dst==80" action=reject name=myacl -- add logical_switch 545dc436-387e-11eb-9f38-a8a1590cda29 acls @reject-acl`,
 				Output: "97347886-387e-11eb-9fdf-a8a1590cda29",
 			},
 			want:    "97347886-387e-11eb-9fdf-a8a1590cda29",
@@ -227,7 +228,7 @@ func TestAddRejectACLToLogicalSwitch(t *testing.T) {
 			sourcePort:    80,
 			proto:         v1.ProtocolTCP,
 			ovnCmd: ovntest.ExpectedCmd{
-				Cmd:    `ovn-nbctl --timeout=15 --id=@reject-acl create acl direction=from-lport priority=1000 match="ip6.dst==2001:db2:1:2::23 && tcp && tcp.dst==80" action=reject name=myacl -- add logical_switch 545dc436-387e-11eb-9f38-a8a1590cda29 acls @reject-acl`,
+				Cmd:    `ovn-nbctl --timeout=15 --id=@reject-acl create acl direction=` + types.DirectionFromLPort + ` priority=1000 match="ip6.dst==2001:db2:1:2::23 && tcp && tcp.dst==80" action=reject name=myacl -- add logical_switch 545dc436-387e-11eb-9f38-a8a1590cda29 acls @reject-acl`,
 				Output: "97347886-387e-11eb-9fdf-a8a1590cda29",
 			},
 			want:    "97347886-387e-11eb-9fdf-a8a1590cda29",
@@ -275,7 +276,7 @@ func TestAddRejectACLToPortGroup(t *testing.T) {
 			sourcePort: 80,
 			proto:      v1.ProtocolTCP,
 			ovnCmd: ovntest.ExpectedCmd{
-				Cmd:    `ovn-nbctl --timeout=15 --id=@reject-acl create acl direction=from-lport priority=1000 match="ip4.dst==192.168.2.2 && tcp && tcp.dst==80" action=reject name=myacl -- add port_group 545dc436-387e-11eb-9f38-a8a1590cda29 acls @reject-acl`,
+				Cmd:    `ovn-nbctl --timeout=15 --id=@reject-acl create acl direction=` + types.DirectionFromLPort + ` priority=1000 match="ip4.dst==192.168.2.2 && tcp && tcp.dst==80" action=reject name=myacl -- add port_group 545dc436-387e-11eb-9f38-a8a1590cda29 acls @reject-acl`,
 				Output: "97347886-387e-11eb-9fdf-a8a1590cda29",
 			},
 			want:    "97347886-387e-11eb-9fdf-a8a1590cda29",
@@ -289,7 +290,7 @@ func TestAddRejectACLToPortGroup(t *testing.T) {
 			sourcePort: 80,
 			proto:      v1.ProtocolTCP,
 			ovnCmd: ovntest.ExpectedCmd{
-				Cmd:    `ovn-nbctl --timeout=15 --id=@reject-acl create acl direction=from-lport priority=1000 match="ip6.dst==2001:db2:1:2::23 && tcp && tcp.dst==80" action=reject name=myacl -- add port_group 545dc436-387e-11eb-9f38-a8a1590cda29 acls @reject-acl`,
+				Cmd:    `ovn-nbctl --timeout=15 --id=@reject-acl create acl direction=` + types.DirectionFromLPort + ` priority=1000 match="ip6.dst==2001:db2:1:2::23 && tcp && tcp.dst==80" action=reject name=myacl -- add port_group 545dc436-387e-11eb-9f38-a8a1590cda29 acls @reject-acl`,
 				Output: "97347886-387e-11eb-9fdf-a8a1590cda29",
 			},
 			want:    "97347886-387e-11eb-9fdf-a8a1590cda29",

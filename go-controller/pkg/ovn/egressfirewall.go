@@ -274,7 +274,7 @@ func (oc *Controller) createEgressFirewallRules(priority int, match, action, ext
 		if uuids == "" {
 			_, stderr, err := util.RunOVNNbctl("--id=@acl", "create", "acl",
 				fmt.Sprintf("priority=%d", priority),
-				fmt.Sprintf("direction=%s", fromLport), match, "action="+action,
+				fmt.Sprintf("direction=%s", types.DirectionFromLPort), match, "action="+action,
 				fmt.Sprintf("external-ids:egressFirewall=%s", externalID),
 				"--", "add", "logical_switch", logicalSwitch,
 				"acls", "@acl")
