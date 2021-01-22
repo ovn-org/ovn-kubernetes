@@ -425,6 +425,15 @@ func (oc *Controller) setNodeEgressReachable(nodeName string, isReachable bool) 
 
 func (oc *Controller) addEgressNode(egressNode *kapi.Node) error {
 	klog.V(5).Infof("Egress node: %s about to be initialized", egressNode.Name)
+	if stdout, stderr, err := util.RunOVNNbctl(
+		"set",
+		"logical_switch_port",
+		types.EXTSwitchToGWRouterPrefix+types.GWRouterPrefix+egressNode.Name,
+		"options:nat-addresses=router",
+	); err != nil {
+		klog.Errorf("Unable to configure GARP on external logical switch port for egress node: %s, "+
+			"this will result in packet drops during egress IP re-assignment, stdout: %s, stderr: %s, err: %v", egressNode.Name, stdout, stderr, err)
+	}
 	oc.eIPC.assignmentRetry.Range(func(key, value interface{}) bool {
 		eIPName := key.(string)
 		klog.V(5).Infof("Re-assignment for EgressIP: %s attempted by new node: %s", eIPName, egressNode.Name)
@@ -453,6 +462,15 @@ func (oc *Controller) addEgressNode(egressNode *kapi.Node) error {
 
 func (oc *Controller) deleteEgressNode(egressNode *kapi.Node) error {
 	klog.V(5).Infof("Egress node: %s about to be removed", egressNode.Name)
+	if stdout, stderr, err := util.RunOVNNbctl(
+		"remove",
+		"logical_switch_port",
+		types.EXTSwitchToGWRouterPrefix+types.GWRouterPrefix+egressNode.Name,
+		"options",
+		"nat-addresses=router",
+	); err != nil {
+		klog.Errorf("Unable to remove GARP configuration on external logical switch port for egress node: %s, stdout: %s, stderr: %s, err: %v", egressNode.Name, stdout, stderr, err)
+	}
 	egressIPs, err := oc.kube.GetEgressIPs()
 	if err != nil {
 		return fmt.Errorf("unable to list egressIPs, err: %v", err)
