@@ -345,7 +345,7 @@ func (gp *gressPolicy) addACLAllow(match, l4Match, portGroupUUID string, ipBlock
 	}
 
 	_, stderr, err = util.RunOVNNbctl("--id=@acl", "create",
-		"acl", fmt.Sprintf("priority=%s", defaultAllowPriority),
+		"acl", fmt.Sprintf("priority=%s", types.DefaultAllowPriority),
 		fmt.Sprintf("direction=%s", direction), match,
 		fmt.Sprintf("action=%s", action),
 		fmt.Sprintf("log=%t", aclLogging != ""),

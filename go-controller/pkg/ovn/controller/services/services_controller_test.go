@@ -129,7 +129,7 @@ func TestSyncServices(t *testing.T) {
 					Output: "",
 				},
 				{
-					Cmd:    `ovn-nbctl --timeout=15 --id=@reject-acl create acl direction=` + types.DirectionFromLPort + ` priority=1000 match="ip4.dst==192.168.1.1 && tcp && tcp.dst==80" action=reject name=a08ea426-2288-11eb-a30b-a8a1590cda29-192.168.1.1\:80 -- add port_group 58a1ef18-3649-11eb-bd94-a8a1590cda29 acls @reject-acl`,
+					Cmd:    `ovn-nbctl --timeout=15 --id=@reject-acl create acl direction=` + types.DirectionFromLPort + ` priority=` + types.DefaultDenyPriority + ` match="ip4.dst==192.168.1.1 && tcp && tcp.dst==80" action=reject name=a08ea426-2288-11eb-a30b-a8a1590cda29-192.168.1.1\:80 -- add port_group 58a1ef18-3649-11eb-bd94-a8a1590cda29 acls @reject-acl`,
 					Output: "",
 				},
 			},
@@ -172,7 +172,7 @@ func TestSyncServices(t *testing.T) {
 					Output: "",
 				},
 				{
-					Cmd:    `ovn-nbctl --timeout=15 --id=@reject-acl create acl direction=` + types.DirectionFromLPort + ` priority=1000 match="ip4.dst==192.168.1.1 && tcp && tcp.dst==80" action=reject name=a08ea426-2288-11eb-a30b-a8a1590cda29-192.168.1.1\:80 -- add port_group 58a1ef18-3649-11eb-bd94-a8a1590cda29 acls @reject-acl`,
+					Cmd:    `ovn-nbctl --timeout=15 --id=@reject-acl create acl direction=` + types.DirectionFromLPort + ` priority=` + types.DefaultDenyPriority + ` match="ip4.dst==192.168.1.1 && tcp && tcp.dst==80" action=reject name=a08ea426-2288-11eb-a30b-a8a1590cda29-192.168.1.1\:80 -- add port_group 58a1ef18-3649-11eb-bd94-a8a1590cda29 acls @reject-acl`,
 					Output: "",
 				},
 				{
@@ -193,7 +193,7 @@ func TestSyncServices(t *testing.T) {
 					Output: logicalSwitch1,
 				},
 				{
-					Cmd:    `ovn-nbctl --timeout=15 --id=@reject-acl create acl direction=` + types.DirectionFromLPort + ` priority=1000 match="ip4.dst==192.168.1.1 && tcp && tcp.dst==80" action=reject name=a08ea426-2288-11eb-a30b-a8a1590cda29-192.168.1.1\:80 -- add logical_switch 17bde5e8-3652-11eb-b53b-a8a1590cda29 acls @reject-acl`,
+					Cmd:    `ovn-nbctl --timeout=15 --id=@reject-acl create acl direction=` + types.DirectionFromLPort + ` priority=` + types.DefaultDenyPriority + ` match="ip4.dst==192.168.1.1 && tcp && tcp.dst==80" action=reject name=a08ea426-2288-11eb-a30b-a8a1590cda29-192.168.1.1\:80 -- add logical_switch 17bde5e8-3652-11eb-b53b-a8a1590cda29 acls @reject-acl`,
 					Output: "",
 				},
 			},
@@ -533,7 +533,7 @@ func TestServiceCreateReject(t *testing.T) {
 	})
 	// Create ACL
 	fexec.AddFakeCmd(&ovntest.ExpectedCmd{
-		Cmd:    `ovn-nbctl --timeout=15 --id=@reject-acl create acl direction=from-lport priority=1000 match="ip4.dst==192.168.1.1 && tcp && tcp.dst==80" action=reject name=a08ea426-2288-11eb-a30b-a8a1590cda29-192.168.1.1\:80 -- add port_group 58a1ef18-3649-11eb-bd94-a8a1590cda29 acls @reject-acl`,
+		Cmd:    `ovn-nbctl --timeout=15 --id=@reject-acl create acl direction=from-lport priority=` + types.DefaultDenyPriority + ` match="ip4.dst==192.168.1.1 && tcp && tcp.dst==80" action=reject name=a08ea426-2288-11eb-a30b-a8a1590cda29-192.168.1.1\:80 -- add port_group 58a1ef18-3649-11eb-bd94-a8a1590cda29 acls @reject-acl`,
 		Output: "",
 	})
 	fexec.AddFakeCmd(&ovntest.ExpectedCmd{

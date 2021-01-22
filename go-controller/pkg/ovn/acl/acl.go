@@ -100,7 +100,7 @@ func AddRejectACLToPortGroup(clusterPortGroupUUID, aclName, sourceIP string, sou
 
 	aclMatch := fmt.Sprintf("match=\"%s.dst==%s && %s && %s.dst==%d\"", l3Prefix, sourceIP,
 		strings.ToLower(string(proto)), strings.ToLower(string(proto)), sourcePort)
-	cmd := []string{"--id=@reject-acl", "create", "acl", "direction=" + types.DirectionFromLPort, "priority=1000", aclMatch, "action=reject",
+	cmd := []string{"--id=@reject-acl", "create", "acl", "direction=" + types.DirectionFromLPort, "priority=" + types.DefaultDenyPriority, aclMatch, "action=reject",
 		fmt.Sprintf("name=%s", aclName), "--", "add", "port_group", clusterPortGroupUUID, "acls", "@reject-acl"}
 	aclUUID, stderr, err := util.RunOVNNbctl(cmd...)
 	if err != nil {
@@ -118,7 +118,7 @@ func AddRejectACLToLogicalSwitch(logicalSwitch, aclName, sourceIP string, source
 
 	aclMatch := fmt.Sprintf("match=\"%s.dst==%s && %s && %s.dst==%d\"", l3Prefix, sourceIP,
 		strings.ToLower(string(proto)), strings.ToLower(string(proto)), sourcePort)
-	cmd := []string{"--id=@reject-acl", "create", "acl", "direction=" + types.DirectionFromLPort, "priority=1000", aclMatch, "action=reject",
+	cmd := []string{"--id=@reject-acl", "create", "acl", "direction=" + types.DirectionFromLPort, "priority=" + types.DefaultDenyPriority, aclMatch, "action=reject",
 		fmt.Sprintf("name=%s", aclName), "--", "add", "logical_switch", logicalSwitch, "acls", "@reject-acl"}
 
 	aclUUID, stderr, err := util.RunOVNNbctl(cmd...)
