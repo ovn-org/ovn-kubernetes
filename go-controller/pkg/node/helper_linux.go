@@ -5,12 +5,13 @@ package node
 import (
 	"fmt"
 	"net"
-	"syscall"
 
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
+	"github.com/pkg/errors"
 	"github.com/vishvananda/netlink"
 	kapi "k8s.io/api/core/v1"
+	"k8s.io/klog/v2"
 	utilnet "k8s.io/utils/net"
 )
 
@@ -21,44 +22,77 @@ func getDefaultGatewayInterfaceDetails() (string, []net.IP, error) {
 	var intfName string
 	var gatewayIPs []net.IP
 
-	needIPv4 := config.IPv4Mode
-	needIPv6 := config.IPv6Mode
-	routes, err := netlink.RouteList(nil, syscall.AF_UNSPEC)
-	if err != nil {
-		return "", nil, fmt.Errorf("failed to get routing table in node")
+	if config.IPv4Mode {
+		intfIPv4Name, gw, err := getDefaultGatewayInterfaceByFamily(netlink.FAMILY_V4)
+		if err != nil {
+			return "", gatewayIPs, err
+		}
+		intfName = intfIPv4Name
+		gatewayIPs = append(gatewayIPs, gw)
 	}
 
-	for _, route := range routes {
-		if route.Dst == nil && route.Gw != nil && route.LinkIndex > 0 {
-			intfLink, err := netlink.LinkByIndex(route.LinkIndex)
-			if err != nil {
-				continue
-			}
-			if utilnet.IsIPv6(route.Gw) {
-				if !needIPv6 {
-					continue
-				}
-				needIPv6 = false
-			} else {
-				if !needIPv4 {
-					continue
-				}
-				needIPv4 = false
-			}
-
-			if intfName == "" {
-				intfName = intfLink.Attrs().Name
-			} else if intfName != intfLink.Attrs().Name {
-				return "", nil, fmt.Errorf("multiple gateway interfaces detected: %s %s", intfName, intfLink.Attrs().Name)
-			}
-			gatewayIPs = append(gatewayIPs, route.Gw)
+	if config.IPv6Mode {
+		intfIPv6Name, gw, err := getDefaultGatewayInterfaceByFamily(netlink.FAMILY_V6)
+		if err != nil {
+			return "", gatewayIPs, err
 		}
+		// validate that both IP Families use the same interface for the gateway
+		if intfName == "" {
+			intfName = intfIPv6Name
+		} else if intfName != intfIPv6Name {
+			return "", nil, fmt.Errorf("multiple gateway interfaces detected: %s %s", intfName, intfIPv6Name)
+		}
+		gatewayIPs = append(gatewayIPs, gw)
 	}
 
 	if len(gatewayIPs) == 0 {
 		return "", nil, fmt.Errorf("failed to get default gateway interface")
 	}
 	return intfName, gatewayIPs, nil
+}
+
+func getDefaultGatewayInterfaceByFamily(family int) (string, net.IP, error) {
+	// filter the default route to obtain the gateway
+	filter := &netlink.Route{Dst: nil}
+	routes, err := netlink.RouteListFiltered(family, filter, netlink.RT_FILTER_DST)
+	if err != nil {
+		return "", nil, errors.Wrapf(err, "failed to get routing table in node")
+	}
+	// use the first valid default gateway
+	for _, r := range routes {
+		// no multipath
+		if len(r.MultiPath) == 0 {
+			intfLink, err := netlink.LinkByIndex(r.LinkIndex)
+			if err != nil {
+				klog.Warningf("Failed to get interface link for route %v : %v", r, err)
+				continue
+			}
+			if r.Gw == nil {
+				klog.Warningf("Failed to get gateway for route %v : %v", r, err)
+				continue
+			}
+			klog.Infof("Found default gateway interface %s %s", intfLink.Attrs().Name, r.Gw.String())
+			return intfLink.Attrs().Name, r.Gw, nil
+		}
+
+		// multipath, use the first valid entry
+		// TODO: revisit for full multipath support
+		// xref: https://github.com/vishvananda/netlink/blob/6ffafa9fc19b848776f4fd608c4ad09509aaacb4/route.go#L137-L145
+		for _, nh := range r.MultiPath {
+			intfLink, err := netlink.LinkByIndex(nh.LinkIndex)
+			if err != nil {
+				klog.Warningf("Failed to get interface link for route %v : %v", nh, err)
+				continue
+			}
+			if nh.Gw == nil {
+				klog.Warningf("Failed to get gateway for multipath route %v : %v", nh, err)
+				continue
+			}
+			klog.Infof("Found default gateway interface %s %s", intfLink.Attrs().Name, nh.Gw.String())
+			return intfLink.Attrs().Name, nh.Gw, nil
+		}
+	}
+	return "", net.IP{}, fmt.Errorf("failed to get default gateway interface")
 }
 
 func getDefaultIfAddr(defaultGatewayIntf string) (*net.IPNet, *net.IPNet, error) {
