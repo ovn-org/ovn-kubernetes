@@ -138,12 +138,12 @@ func (oc *Controller) deletePodExternalGW(pod *kapi.Pod) {
 	klog.Infof("Deleting routes for external gateway pod: %s, for namespace(s) %s", pod.Name,
 		podRoutingNamespaceAnno)
 	for _, namespace := range strings.Split(podRoutingNamespaceAnno, ",") {
-		oc.deletePodGWRoutesForNamespace(pod.Name, namespace, pod.Spec.NodeName)
+		oc.deletePodGWRoutesForNamespace(pod.Name, namespace)
 	}
 }
 
 // deletePodGwRoutesForNamespace handles deleting all routes in a namespace for a specific pod GW
-func (oc *Controller) deletePodGWRoutesForNamespace(pod, namespace, node string) {
+func (oc *Controller) deletePodGWRoutesForNamespace(pod, namespace string) {
 	nsInfo := oc.getNamespaceLocked(namespace)
 	if nsInfo == nil {
 		return
@@ -168,11 +168,7 @@ func (oc *Controller) deletePodGWRoutesForNamespace(pod, namespace, node string)
 				continue
 			}
 			mask := GetIPFullMask(podIP)
-			// TODO (trozet): use the go bindings here and batch commands
-			if err := oc.delHybridRoutePolicyForPod(net.ParseIP(podIP), node); err != nil {
-				klog.Error(err)
-			}
-
+			node := strings.TrimPrefix(gr, "GR_")
 			_, stderr, err := util.RunOVNNbctl("--", "--if-exists", "--policy=src-ip",
 				"lr-route-del", gr, podIP+mask, gwIP.String())
 			if err != nil {
@@ -185,6 +181,12 @@ func (oc *Controller) deletePodGWRoutesForNamespace(pod, namespace, node string)
 				// clean up if there are no more routes for this podIP
 				if entry := nsInfo.podExternalRoutes[podIP]; len(entry) == 0 {
 					delete(nsInfo.podExternalRoutes, podIP)
+					// TODO (trozet): use the go bindings here and batch commands
+					// delete the ovn_cluster_router policy if the pod has no more exgws to revert back to normal
+					// default gw behavior
+					if err := oc.delHybridRoutePolicyForPod(net.ParseIP(podIP), node); err != nil {
+						klog.Error(err)
+					}
 				}
 			}
 		}
