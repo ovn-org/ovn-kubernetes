@@ -28,20 +28,20 @@ endif
 	# This is the default in the ovnkube*.yaml files
 	# docker login -u ovnkube docker.io/ovnkube
 	# docker push docker.io/ovnkube/ovn-daemonset-u:latest
-	./daemonset.sh --image=docker.io/ovnkube/ovn-daemonset-u:latest
+	./daemonset.sh --image=docker.io/ovnkube/ovn-daemonset-u:latest $(OVN_CONF)
 
 centos: bld
 	docker build -t ovn-daemonset .
 	docker tag ovn-daemonset docker.io/ovnkube/ovn-daemonset:latest
 	# docker login -u ovnkube docker.io/ovnkube
 	# docker push docker.io/ovnkube/ovn-daemonset:latest
-	./daemonset.sh --image=docker.io/ovnkube/ovn-daemonset:latest
+	./daemonset.sh --image=docker.io/ovnkube/ovn-daemonset:latest $(OVN_CONF)
 
 fedora: bld
 	docker build -t ovn-kube-f -f Dockerfile.fedora .
 	# docker login -u ovnkube docker.io/ovnkube
 	# docker push docker.io/ovnkube/ovn-daemonset-f:latest
-	./daemonset.sh --image=docker.io/ovnkube/ovn-daemonset-f:latest
+	./daemonset.sh --image=docker.io/ovnkube/ovn-daemonset-f:latest $(OVN_CONF)
 
 fedora-dev: bld
 	# To build (OVN Datapath)  with specific kernel version, please override KERNEL_VERSION.

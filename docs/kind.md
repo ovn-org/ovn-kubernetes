@@ -40,6 +40,24 @@ $ pushd dist/images
 $ make fedora
 $ popd
 ```
+If you want to specify logging levels for OVN components, set them to the `OVN_CONF` environment variable, before 
+running the ``` make fedora``` command
+
+For example:
+```
+export OVN_CONF="--master-loglevel='5' \
+--node-loglevel='5' \
+--dbchecker-loglevel='5' \
+--ovn-loglevel-northd='-vconsole:info -vfile:info' \
+--ovn-loglevel-nb='-vconsole:info -vfile:info' \
+--ovn-loglevel-sb='-vconsole:info -vfile:info' \
+--ovn-loglevel-controller='-vconsole:info' \
+--ovn-loglevel-nbctld='-vconsole:info' "
+```
+Notes:
+* The above values are the default values.
+* Put attention on the quotes.
+ 
 
 Launch the KIND Deployment.
 
