@@ -187,7 +187,7 @@ ovn_multicast_enable=${OVN_MULTICAST_ENABLE:-}
 ovn_egressip_enable=${OVN_EGRESSIP_ENABLE:-false}
 
 # OVNKUBE_NODE_MODE - is the mode which ovnkube node operates
-ovnkube_node_mode=${OVNKUBE_NODE_MODE:-}
+ovnkube_node_mode=${OVNKUBE_NODE_MODE:-"full"}
 # OVN_ENCAP_IP - encap IP to be used for OVN traffic on the node
 ovn_encap_ip=${OVN_ENCAP_IP:-}
 
@@ -484,6 +484,8 @@ display_env() {
   echo K8S_APISERVER ${K8S_APISERVER}
   echo OVNKUBE_LOGLEVEL ${ovnkube_loglevel}
   echo OVN_DAEMONSET_VERSION ${ovn_daemonset_version}
+  echo OVNKUBE_NODE_MODE ${ovnkube_node_mode}
+  echo OVN_ENCAP_IP ${ovn_encap_ip}
   echo ovnkube.sh version ${ovnkube_version}
 }
 
@@ -933,16 +935,20 @@ ovn-node() {
   check_ovn_daemonset_version "3"
   rm -f ${OVN_RUNDIR}/ovnkube.pid
 
-  echo "=============== ovn-node - (wait for ovs)"
-  wait_for_event ovs_ready
+  if [[ ${ovnkube_node_mode} != "smart-nic-host" ]]; then
+    echo "=============== ovn-node - (wait for ovs)"
+    wait_for_event ovs_ready
+  fi
 
   echo "=============== ovn-node - (wait for ready_to_start_node)"
   wait_for_event ready_to_start_node
 
   echo "ovn_nbdb ${ovn_nbdb}   ovn_sbdb ${ovn_sbdb}  ovn_nbdb_conn ${ovn_nbdb_conn}"
 
-  echo "=============== ovn-node - (ovn-node  wait for ovn-controller.pid)"
-  wait_for_event process_ready ovn-controller
+  if [[ ${ovnkube_node_mode} != "smart-nic-host" ]]; then
+    echo "=============== ovn-node - (ovn-node  wait for ovn-controller.pid)"
+    wait_for_event process_ready ovn-controller
+  fi
 
   hybrid_overlay_flags=
   if [[ ${ovn_hybrid_overlay_enable} == "true" ]]; then
@@ -989,6 +995,7 @@ ovn-node() {
         echo "ovn encap IP must be provided if \"ovnkube-node-mode\" set to \"smart-nic\". Exiting..."
         exit 1
       fi
+    fi
   fi
 
   local ovn_node_ssl_opts=""

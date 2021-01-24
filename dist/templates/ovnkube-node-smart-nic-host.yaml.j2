@@ -43,7 +43,7 @@ spec:
 
         command: ["/root/ovnkube.sh", "ovn-node"]
 
-        securityContext:ovn_remote_probe_interval
+        securityContext:
           runAsUser: 0
           {% if ovn_unprivileged_mode=="no" -%}
           privileged: true
@@ -141,8 +141,8 @@ spec:
           value: "{{ ovn_multicast_enable }}"
         - name: OVN_UNPRIVILEGED_MODE
           value: "{{ ovn_unprivileged_mode }}"
-       - name: OVNKUBE_NODE_MODE
-         value: smart-nic-host
+        - name: OVNKUBE_NODE_MODE
+          value: "smart-nic-host"
 
         lifecycle:
           preStop:
@@ -157,7 +157,7 @@ spec:
 
       nodeSelector:
         kubernetes.io/os: "linux"
-        nvidia.com/smart-nic
+        nvidia.com/smart-nic: ""
       volumes:
       - name: host-var-run-dbus
         hostPath:

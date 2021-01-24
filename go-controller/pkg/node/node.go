@@ -473,9 +473,12 @@ func (n *OvnNode) getVfRepName(pod *kapi.Pod) (string, error) {
 // addRepPort adds the representor of the VF to the ovs bridge
 func (n *OvnNode) addRepPort(pod *kapi.Pod, vfRepName string, ifInfo *cni.PodInterfaceInfo) error {
 	klog.Infof("addRepPort: %s", vfRepName)
-	sandboxID := pod.Annotations["sandbox"]
+	smartNicCD := util.SmartNICConnectionDetails{}
+	if err := smartNicCD.FromPodAnnotation(pod); err != nil {
+		return fmt.Errorf("failed to get smart-nic annotation. %v", err)
+	}
 
-	err := cni.ConfigureOVS(pod.Namespace, pod.Name, vfRepName, ifInfo, sandboxID)
+	err := cni.ConfigureOVS(pod.Namespace, pod.Name, vfRepName, ifInfo, smartNicCD.SandboxId)
 	if err != nil {
 		return err
 	}

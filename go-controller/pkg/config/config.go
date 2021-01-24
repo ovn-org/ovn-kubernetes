@@ -450,6 +450,7 @@ func overrideFields(dst, src, defaults interface{}) error {
 		if dv.IsValid() && reflect.DeepEqual(dv.Interface(), srcField.Interface()) {
 			continue
 		}
+		klog.Infof("setting field: %+v with value %+v, orig dst: %+v, src %+v", structField.Name, srcField, dstField, srcField)
 		dstField.Set(srcField)
 	}
 	if !handled {
@@ -892,8 +893,8 @@ var OvnKubeNodeFlags = []cli.Flag{
 	&cli.StringFlag{
 		Name:        "ovnkube-node-mode",
 		Usage:       "ovnkube-node operating mode full(default), smart-nic, smart-nic-host",
-		Value:       types.NodeModeFull,
-		Destination: &OvnKubeNode.Mode,
+		Value:       OvnKubeNode.Mode,
+		Destination: &cliConfig.OvnKubeNode.Mode,
 	},
 }
 
@@ -913,6 +914,7 @@ func GetFlags(customFlags []cli.Flag) []cli.Flag {
 	flags = append(flags, OVNGatewayFlags...)
 	flags = append(flags, MasterHAFlags...)
 	flags = append(flags, HybridOverlayFlags...)
+	flags = append(flags, OvnKubeNodeFlags...)
 	flags = append(flags, customFlags...)
 	return flags
 }
@@ -1279,6 +1281,7 @@ func initConfigWithPath(ctx *cli.Context, exec kexec.Interface, saPath string, d
 		Gateway:              savedGateway,
 		MasterHA:             savedMasterHA,
 		HybridOverlay:        savedHybridOverlay,
+		OvnKubeNode:          savedOvnKubeNode,
 	}
 
 	allSubnets := newConfigSubnets()
@@ -1641,15 +1644,15 @@ func buildOvnKubeNodeConfig(ctx *cli.Context, cli, file *config) error {
 	if err := overrideFields(&OvnKubeNode, &file.OvnKubeNode, &savedOvnKubeNode); err != nil {
 		return err
 	}
-	cli.OvnKubeNode.Mode = ctx.String("ovnkube-node-mode")
+	//cli.OvnKubeNode.Mode = ctx.String("ovnkube-node-mode")
 
 	// And CLI overrides over config file and default values
 	if err := overrideFields(&OvnKubeNode, &cli.OvnKubeNode, &savedOvnKubeNode); err != nil {
 		return err
 	}
 
-	// TODO(adrianc): According to provided ovnkube-node-mode we should propagate appropriate configuration to gateway and
-	// others
+	// TODO(adrianc): According to provided ovnkube-node-mode we should propagate appropriate configuration to gateway
+	// and others
 
 	// validate ovnkube-node-mode
 	found := false
