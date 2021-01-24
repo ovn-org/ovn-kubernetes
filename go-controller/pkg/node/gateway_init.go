@@ -206,9 +206,16 @@ func (n *OvnNode) initGateway(subnets []*net.IPNet, nodeAnnotator kube.Annotator
 	if err != nil {
 		return err
 	}
-	gw.loadBalancerHealthChecker = loadBalancerHealthChecker
-	gw.portClaimWatcher = portClaimWatcher
-
+	// a golang interface has two values <type, value>. an interface is nil if both type and
+	// value is nil. so, you cannot directly set the value to an interface and later check if
+	// value was nil by comparing the interface to nil. this is because if the value is `nil`,
+	// then the interface will still hold the type of the value being set.
+	if loadBalancerHealthChecker != nil {
+		gw.loadBalancerHealthChecker = loadBalancerHealthChecker
+	}
+	if portClaimWatcher != nil {
+		gw.portClaimWatcher = portClaimWatcher
+	}
 	initGw := func() error {
 		return gw.Init(n.watchFactory)
 	}
