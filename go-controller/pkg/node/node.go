@@ -163,6 +163,9 @@ func (n *OvnNode) Start(wg *sync.WaitGroup) error {
 	var err error
 	var node *kapi.Node
 	var subnets []*net.IPNet
+	var mgmtPortConfig *managementPortConfig
+
+	klog.Infof("OVN Kube Node initialization, Mode: %s", config.OvnKubeNode.Mode)
 
 	// Setting debug log level during node bring up to expose bring up process.
 	// Log level is returned to configured value when bring up is complete.
@@ -171,18 +174,21 @@ func (n *OvnNode) Start(wg *sync.WaitGroup) error {
 		klog.Errorf("Setting klog \"loglevel\" to 5 failed, err: %v", err)
 	}
 
-	for _, auth := range []config.OvnAuthConfig{config.OvnNorth, config.OvnSouth} {
-		if err := auth.SetDBAuth(); err != nil {
-			return err
-		}
-	}
-
 	if node, err = n.Kube.GetNode(n.name); err != nil {
 		return fmt.Errorf("error retrieving node %s: %v", n.name, err)
 	}
-	err = setupOVNNode(node)
-	if err != nil {
-		return err
+
+	if config.OvnKubeNode.Mode != types.NodeModeSmartNICHost {
+		for _, auth := range []config.OvnAuthConfig{config.OvnNorth, config.OvnSouth} {
+			if err := auth.SetDBAuth(); err != nil {
+				return err
+			}
+		}
+
+		err = setupOVNNode(node)
+		if err != nil {
+			return err
+		}
 	}
 
 	// First wait for the node logical switch to be created by the Master, timeout is 300s.
@@ -202,42 +208,45 @@ func (n *OvnNode) Start(wg *sync.WaitGroup) error {
 		return fmt.Errorf("timed out waiting for node's: %q logical switch: %v", n.name, err)
 	}
 
-	klog.Infof("Node %s ready for ovn initialization with subnet %s", n.name, util.JoinIPNets(subnets, ","))
+	if config.OvnKubeNode.Mode != types.NodeModeSmartNICHost {
+		klog.Infof("Node %s ready for ovn initialization with subnet %s", n.name, util.JoinIPNets(subnets, ","))
 
-	if _, err = isOVNControllerReady(n.name); err != nil {
-		return err
+		if _, err = isOVNControllerReady(n.name); err != nil {
+			return err
+		}
+
+		nodeAnnotator := kube.NewNodeAnnotator(n.Kube, node)
+		waiter := newStartupWaiter()
+
+		// Initialize management port resources on the node
+		mgmtPortConfig, err = createManagementPort(n.name, subnets, nodeAnnotator, waiter)
+		if err != nil {
+			return err
+		}
+
+		// Initialize gateway resources on the node
+		if err := n.initGateway(subnets, nodeAnnotator, waiter, mgmtPortConfig); err != nil {
+			return err
+		}
+
+		wg.Add(1)
+		go n.gateway.Run(n.stopChan)
+
+		if err := nodeAnnotator.Run(); err != nil {
+			return fmt.Errorf("failed to set node %s annotations: %v", n.name, err)
+		}
+
+		// Wait for management port and gateway resources to be created by the master
+		klog.Infof("Waiting for gateway and management port readiness...")
+		start := time.Now()
+		if err := waiter.Wait(); err != nil {
+			return err
+		}
+		klog.Infof("Gateway and management port readiness took %v", time.Since(start))
 	}
-
-	nodeAnnotator := kube.NewNodeAnnotator(n.Kube, node)
-	waiter := newStartupWaiter()
-
-	// Initialize management port resources on the node
-	mgmtPortConfig, err := createManagementPort(n.name, subnets, nodeAnnotator, waiter)
-	if err != nil {
-		return err
-	}
-
-	// Initialize gateway resources on the node
-	if err := n.initGateway(subnets, nodeAnnotator, waiter, mgmtPortConfig); err != nil {
-		return err
-	}
-
-	wg.Add(1)
-	go n.gateway.Run(n.stopChan)
-
-	if err := nodeAnnotator.Run(); err != nil {
-		return fmt.Errorf("failed to set node %s annotations: %v", n.name, err)
-	}
-
-	// Wait for management port and gateway resources to be created by the master
-	klog.Infof("Waiting for gateway and management port readiness...")
-	start := time.Now()
-	if err := waiter.Wait(); err != nil {
-		return err
-	}
-	klog.Infof("Gateway and management port readiness took %v", time.Since(start))
 
 	if config.HybridOverlay.Enabled {
+		// Not supported with Smart-NIC, enforced in config
 		nodeController, err := honode.NewNode(
 			n.Kube,
 			n.name,
@@ -259,31 +268,35 @@ func (n *OvnNode) Start(wg *sync.WaitGroup) error {
 		klog.Errorf("Reset of initial klog \"loglevel\" failed, err: %v", err)
 	}
 
-	// start health check to ensure there are no stale OVS internal ports
-	go checkForStaleOVSInterfaces(n.stopChan)
+	if config.OvnKubeNode.Mode != types.NodeModeSmartNICHost {
+		// start health check to ensure there are no stale OVS internal ports
+		go checkForStaleOVSInterfaces(n.stopChan)
 
-	// start management port health check
-	go checkManagementPortHealth(mgmtPortConfig, n.stopChan)
+		// start management port health check
+		go checkManagementPortHealth(mgmtPortConfig, n.stopChan)
 
-	confFile := filepath.Join(config.CNI.ConfDir, config.CNIConfFileName)
-	_, err = os.Stat(confFile)
-	if os.IsNotExist(err) {
-		err = config.WriteCNIConfig()
-		if err != nil {
-			return err
+		n.WatchEndpoints()
+	}
+
+	if config.OvnKubeNode.Mode != types.NodeModeSmartNIC {
+		confFile := filepath.Join(config.CNI.ConfDir, config.CNIConfFileName)
+		_, err = os.Stat(confFile)
+		if os.IsNotExist(err) {
+			err = config.WriteCNIConfig()
+			if err != nil {
+				return err
+			}
 		}
 	}
-
-	kclient, ok := n.Kube.(*kube.Kube)
-	if !ok {
-		return fmt.Errorf("cannot get kubeclient for starting CNI server")
-	}
-	n.WatchEndpoints()
 
 	if config.OvnKubeNode.Mode == types.NodeModeSmartNIC {
 		n.watchSmartNicPods()
 	} else {
 		// start the cni server
+		kclient, ok := n.Kube.(*kube.Kube)
+		if !ok {
+			return fmt.Errorf("cannot get kubeclient for starting CNI server")
+		}
 		var cniServer *cni.Server
 		cniServer, err = cni.NewCNIServer("", kclient.KClient, config.OvnKubeNode.Mode)
 		if err == nil {

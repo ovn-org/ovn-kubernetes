@@ -1663,5 +1663,10 @@ func buildOvnKubeNodeConfig(ctx *cli.Context, cli, file *config) error {
 	if !found {
 		return fmt.Errorf("unexpected ovnkube-node-mode: %s. supported modes: %v", OvnKubeNode.Mode, supportedModes)
 	}
+
+	// ovnkube-node-mode smart-nic/smart-nic-host does not support hybrid overlay
+	if OvnKubeNode.Mode != types.NodeModeFull && HybridOverlay.Enabled {
+		return fmt.Errorf("Hybrid Overlay is not supported with ovnkube-node mode %s", OvnKubeNode.Mode)
+	}
 	return nil
 }
