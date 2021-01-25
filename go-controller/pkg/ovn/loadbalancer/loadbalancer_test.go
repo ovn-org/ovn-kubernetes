@@ -361,7 +361,7 @@ func TestCreateLoadBalancer(t *testing.T) {
 			if err != nil {
 				t.Errorf("fexec error: %v", err)
 			}
-			if err := CreateLoadBalancer(tt.protocol, tt.idkey); (err != nil) != tt.wantErr {
+			if err := createLoadBalancer(tt.protocol, tt.idkey); (err != nil) != tt.wantErr {
 				t.Errorf("CreateLoadBalancer() error = %v, wantErr %v", err, tt.wantErr)
 			}
 		})

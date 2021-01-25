@@ -7,6 +7,7 @@ import (
 
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
+	"github.com/pkg/errors"
 
 	kapi "k8s.io/api/core/v1"
 	"k8s.io/klog/v2"
@@ -40,6 +41,41 @@ func GetOVNKubeLoadBalancer(protocol kapi.Protocol, idkey string) (string, error
 	return out, nil
 }
 
+// createLoadBalancer creates a loadbalancer for the specified protocol
+// all loadbalancers but idling ones reject packets for vips without endpoints by default
+func createLoadBalancer(protocol kapi.Protocol, idkey string) error {
+	id := fmt.Sprintf("external_ids:%s-%s=yes", idkey, strings.ToLower(string(protocol)))
+	proto := fmt.Sprintf("protocol=%s", strings.ToLower(string(protocol)))
+	reject := true
+	if idkey == OvnLoadBalancerIdlingIds {
+		reject = false
+	}
+	options := fmt.Sprintf("options:reject=%t", reject)
+	_, stderr, err := util.RunOVNNbctl("--", "create", "load_balancer", id, proto, options)
+	if err != nil {
+		klog.Errorf("Failed to create %s load balancer, stderr: %q, error: %v", protocol, stderr, err)
+		return err
+	}
+	return nil
+}
+
+// CreateLoadBalancer creates the loadbalancer if it doesn´t exist to avoid
+// consumers to create duplicate loadbalancers with the same name and externalID
+func CreateLoadBalancer(protocol kapi.Protocol, idkey string) error {
+	lbUUID, err := GetOVNKubeLoadBalancer(protocol, idkey)
+	if err != nil && err.Error() != "no load balancer found in the database" {
+		return errors.Wrapf(err, "Failed to get OVN load balancer for protocol %s", protocol)
+	}
+	// create the load balancer if it doesn't exist yet
+	if lbUUID == "" {
+		err := createLoadBalancer(protocol, idkey)
+		if err != nil {
+			return errors.Wrapf(err, "Failed to create OVN load balancer for protocol %s", protocol)
+		}
+	}
+	return nil
+}
+
 // GetLoadBalancerVIPs returns a map whose keys are VIPs (IP:port) on loadBalancer
 func GetLoadBalancerVIPs(loadBalancer string) (map[string]string, error) {
 	var vips map[string]string
@@ -71,24 +107,6 @@ func DeleteLoadBalancerVIP(loadBalancer, vip string) error {
 		return fmt.Errorf("error in deleting load balancer vip %s for %s"+
 			"stdout: %q, stderr: %q, error: %v",
 			vip, loadBalancer, stdout, stderr, err)
-	}
-	return nil
-}
-
-// CreateLoadBalancer creates a loadbalancer for the specified protocol
-// all loadbalancers but idling ones reject packets for vips without endpoints by default
-func CreateLoadBalancer(protocol kapi.Protocol, idkey string) error {
-	id := fmt.Sprintf("external_ids:%s-%s=yes", idkey, strings.ToLower(string(protocol)))
-	proto := fmt.Sprintf("protocol=%s", strings.ToLower(string(protocol)))
-	reject := true
-	if idkey == OvnLoadBalancerIdlingIds {
-		reject = false
-	}
-	options := fmt.Sprintf("options:reject=%t", reject)
-	_, stderr, err := util.RunOVNNbctl("--", "create", "load_balancer", id, proto, options)
-	if err != nil {
-		klog.Errorf("Failed to create %s load balancer, stderr: %q, error: %v", protocol, stderr, err)
-		return err
 	}
 	return nil
 }

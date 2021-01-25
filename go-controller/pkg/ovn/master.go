@@ -421,33 +421,31 @@ func (oc *Controller) SetupMaster(masterNodeName string) error {
 
 	// Create load balancers
 
+	// We have 3 load-balancers per protocol to implement the East-west traffic	//
+	protocols := []v1.Protocol{v1.ProtocolTCP, v1.ProtocolUDP}
+	if oc.SCTPSupport {
+		protocols = append(protocols, v1.ProtocolSCTP)
+	}
+	// Create load-balancers for east-west traffic for each protocol UDP, TCP, SCTP
+	// and for Idling services if empty-lb-backends is enabled
+	lbExternalIds := []string{loadbalancer.OvnLoadBalancerClusterIds}
 	// If we enable idling we have to set the option before creating the loadbalancers
+	// and create the new set of loadbalancers.
 	if config.Kubernetes.OVNEmptyLbEvents {
 		_, _, err := util.RunOVNNbctl("set", "nb_global", ".", "options:controller_event=true")
 		if err != nil {
 			klog.Error("Unable to enable controller events. Unidling not possible")
 			return err
 		}
+		lbExternalIds = append(lbExternalIds, loadbalancer.OvnLoadBalancerIdlingIds)
 	}
-
-	// We have 3 load-balancers per protocol to implement the East-west traffic	//
-	// Create load-balancers for east-west traffic for each protocol UDP, TCP, SCTP
-	protocols := []v1.Protocol{v1.ProtocolTCP, v1.ProtocolUDP}
-	if oc.SCTPSupport {
-		protocols = append(protocols, v1.ProtocolSCTP)
-	}
-	for _, p := range protocols {
-		lbUUID, err := loadbalancer.GetOVNKubeLoadBalancer(p, loadbalancer.OvnLoadBalancerClusterIds)
-		if err != nil {
-			return errors.Wrapf(err, "Failed to get OVN load balancer for protocol %s", p)
-		}
-		// create the load balancer if it doesn't exist yet
-		if lbUUID == "" {
-			err := loadbalancer.CreateLoadBalancer(p, loadbalancer.OvnLoadBalancerClusterIds)
+	// Create the LoadBalancers if they don´t exist
+	for _, lbExternalID := range lbExternalIds {
+		for _, p := range protocols {
+			err := loadbalancer.CreateLoadBalancer(p, lbExternalID)
 			if err != nil {
 				return errors.Wrapf(err, "Failed to create OVN load balancer for protocol %s", p)
 			}
-
 		}
 	}
 
