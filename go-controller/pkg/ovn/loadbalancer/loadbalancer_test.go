@@ -324,3 +324,46 @@ func TestGetGRLogicalSwitchForLoadBalancer(t *testing.T) {
 		})
 	}
 }
+
+func TestCreateLoadBalancer(t *testing.T) {
+	tests := []struct {
+		name     string
+		protocol kapi.Protocol
+		idkey    string
+		ovnCmd   ovntest.ExpectedCmd
+		wantErr  bool
+	}{
+		{
+			name:     "normal loadbalancer",
+			protocol: kapi.ProtocolTCP,
+			idkey:    OvnLoadBalancerClusterIds,
+			ovnCmd: ovntest.ExpectedCmd{
+				Cmd:    `ovn-nbctl --timeout=15 -- create load_balancer external_ids:k8s-cluster-lb-tcp=yes protocol=tcp options:reject=true`,
+				Output: "",
+			},
+			wantErr: false,
+		},
+		{
+			name:     "idling loadbalancer",
+			protocol: kapi.ProtocolUDP,
+			idkey:    OvnLoadBalancerIdlingIds,
+			ovnCmd: ovntest.ExpectedCmd{
+				Cmd:    `ovn-nbctl --timeout=15 -- create load_balancer external_ids:k8s-idling-lb-udp=yes protocol=udp options:reject=false`,
+				Output: "",
+			},
+			wantErr: false,
+		}}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			fexec := ovntest.NewLooseCompareFakeExec()
+			fexec.AddFakeCmd(&tt.ovnCmd)
+			err := util.SetExec(fexec)
+			if err != nil {
+				t.Errorf("fexec error: %v", err)
+			}
+			if err := CreateLoadBalancer(tt.protocol, tt.idkey); (err != nil) != tt.wantErr {
+				t.Errorf("CreateLoadBalancer() error = %v, wantErr %v", err, tt.wantErr)
+			}
+		})
+	}
+}

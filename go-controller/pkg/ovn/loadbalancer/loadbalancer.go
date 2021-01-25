@@ -17,8 +17,13 @@ import (
 
 const (
 	// OvnLoadBalancerClusterIds represent the OVN loadbalancers
-	// used for ClusterIP East-West traffic
+	// used for ClusterIP East-West traffic.
+	// Default behaviour to reject traffic for VIPs without backends
 	OvnLoadBalancerClusterIds = "k8s-cluster-lb"
+	// OvnLoadBalancerIdlingIds represent the OVN loadbalancers
+	// used for services that has been idled.
+	// Default behaviour to send an event and drop the packet for VIPs without backends
+	OvnLoadBalancerIdlingIds = "k8s-idling-lb"
 )
 
 // GetOVNKubeLoadBalancer returns the LoadBalancer matching the protocol and ids prefix
@@ -70,13 +75,19 @@ func DeleteLoadBalancerVIP(loadBalancer, vip string) error {
 	return nil
 }
 
-// CreateLoadBalancer creates a loadbalancer for the specified protocl
+// CreateLoadBalancer creates a loadbalancer for the specified protocol
+// all loadbalancers but idling ones reject packets for vips without endpoints by default
 func CreateLoadBalancer(protocol kapi.Protocol, idkey string) error {
 	id := fmt.Sprintf("external_ids:%s-%s=yes", idkey, strings.ToLower(string(protocol)))
 	proto := fmt.Sprintf("protocol=%s", strings.ToLower(string(protocol)))
-	_, stderr, err := util.RunOVNNbctl("--", "create", "load_balancer", id, proto)
+	reject := true
+	if idkey == OvnLoadBalancerIdlingIds {
+		reject = false
+	}
+	options := fmt.Sprintf("options:reject=%t", reject)
+	_, stderr, err := util.RunOVNNbctl("--", "create", "load_balancer", id, proto, options)
 	if err != nil {
-		klog.Errorf("Failed to create tcp load balancer, stderr: %q, error: %v", stderr, err)
+		klog.Errorf("Failed to create %s load balancer, stderr: %q, error: %v", protocol, stderr, err)
 		return err
 	}
 	return nil
