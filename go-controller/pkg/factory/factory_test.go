@@ -842,7 +842,7 @@ var _ = Describe("Watch Factory Operations", func() {
 
 		<-done
 		// Updates are async and may take a bit longer to finish
-		Eventually(c.getUpdated, 10).Should(Equal(len(testNodes)))
+		Eventually(c.getUpdated, 15).Should(Equal(len(testNodes)))
 		for _, ot := range testNodes {
 			ot.mu.Lock()
 			Expect(ot.updated).To(Equal(1), "missing update for node %s", ot.node.Name)
@@ -924,7 +924,7 @@ var _ = Describe("Watch Factory Operations", func() {
 		Expect(c.getAdded()).To(Equal(len(testNamespaces)))
 
 		// Updates are async and may take a bit longer to finish
-		Eventually(c.getUpdated, 10).Should(Equal(len(testNamespaces)))
+		Eventually(c.getUpdated, 15).Should(Equal(len(testNamespaces)))
 		for _, ot := range testNamespaces {
 			ot.mu.Lock()
 			Expect(ot.updated).To(Equal(1), "missing update for namespace %s", ot.namespace.Name)
