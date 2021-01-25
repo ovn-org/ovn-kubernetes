@@ -12,10 +12,18 @@ import (
 	"k8s.io/klog/v2"
 )
 
-// GetOVNKubeLoadBalancer returns the LoadBalancer matching the protocol
-// in the OVN database using the external_ids = k8s-cluster-lb-${protocol}
-func GetOVNKubeLoadBalancer(protocol kapi.Protocol) (string, error) {
-	id := fmt.Sprintf("external_ids:k8s-cluster-lb-%s=yes", strings.ToLower(string(protocol)))
+// OVN loadbalancers set the external_ids field to:
+// external_ids = ${prefix}-${protocol}
+
+const (
+	// OvnLoadBalancerClusterIds represent the OVN loadbalancers
+	// used for ClusterIP East-West traffic
+	OvnLoadBalancerClusterIds = "k8s-cluster-lb"
+)
+
+// GetOVNKubeLoadBalancer returns the LoadBalancer matching the protocol and ids prefix
+func GetOVNKubeLoadBalancer(protocol kapi.Protocol, idkey string) (string, error) {
+	id := fmt.Sprintf("external_ids:%s-%s=yes", idkey, strings.ToLower(string(protocol)))
 	out, _, err := util.RunOVNNbctl("--data=bare", "--no-heading", "--columns=_uuid",
 		"find", "load_balancer", id)
 	if err != nil {
@@ -63,8 +71,8 @@ func DeleteLoadBalancerVIP(loadBalancer, vip string) error {
 }
 
 // CreateLoadBalancer creates a loadbalancer for the specified protocl
-func CreateLoadBalancer(protocol kapi.Protocol) error {
-	id := fmt.Sprintf("external_ids:k8s-cluster-lb-%s=yes", strings.ToLower(string(protocol)))
+func CreateLoadBalancer(protocol kapi.Protocol, idkey string) error {
+	id := fmt.Sprintf("external_ids:%s-%s=yes", idkey, strings.ToLower(string(protocol)))
 	proto := fmt.Sprintf("protocol=%s", strings.ToLower(string(protocol)))
 	_, stderr, err := util.RunOVNNbctl("--", "create", "load_balancer", id, proto)
 	if err != nil {

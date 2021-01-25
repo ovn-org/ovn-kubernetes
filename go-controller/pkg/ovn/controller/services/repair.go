@@ -70,7 +70,7 @@ func (r *Repair) runOnce() error {
 	protocols := []v1.Protocol{v1.ProtocolSCTP, v1.ProtocolTCP, v1.ProtocolUDP}
 	// ClusterIP OVN load balancers
 	for _, p := range protocols {
-		lbUUID, err := loadbalancer.GetOVNKubeLoadBalancer(p)
+		lbUUID, err := loadbalancer.GetOVNKubeLoadBalancer(p, loadbalancer.OvnLoadBalancerClusterIds)
 		if err != nil {
 			return errors.Wrapf(err, "Failed to get OVN load balancer for protocol %s", p)
 		}

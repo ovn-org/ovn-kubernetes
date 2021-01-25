@@ -271,7 +271,7 @@ func (c *Controller) syncServices(key string) error {
 		}
 		for _, svcPort := range service.Spec.Ports {
 			// ClusterIP
-			lbID, err := loadbalancer.GetOVNKubeLoadBalancer(svcPort.Protocol)
+			lbID, err := loadbalancer.GetOVNKubeLoadBalancer(svcPort.Protocol, loadbalancer.OvnLoadBalancerClusterIds)
 			if err != nil {
 				c.eventRecorder.Eventf(service, v1.EventTypeWarning, "FailedToGetOVNLoadBalancer",
 					"Error trying to obtain the OVN LoadBalancer for Service %s/%s: %v", name, namespace, err)

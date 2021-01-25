@@ -437,13 +437,13 @@ func (oc *Controller) SetupMaster(masterNodeName string) error {
 		protocols = append(protocols, v1.ProtocolSCTP)
 	}
 	for _, p := range protocols {
-		lbUUID, err := loadbalancer.GetOVNKubeLoadBalancer(p)
+		lbUUID, err := loadbalancer.GetOVNKubeLoadBalancer(p, loadbalancer.OvnLoadBalancerClusterIds)
 		if err != nil {
 			return errors.Wrapf(err, "Failed to get OVN load balancer for protocol %s", p)
 		}
 		// create the load balancer if it doesn't exist yet
 		if lbUUID == "" {
-			err := loadbalancer.CreateLoadBalancer(p)
+			err := loadbalancer.CreateLoadBalancer(p, loadbalancer.OvnLoadBalancerClusterIds)
 			if err != nil {
 				return errors.Wrapf(err, "Failed to create OVN load balancer for protocol %s", p)
 			}
@@ -790,7 +790,7 @@ func (oc *Controller) ensureNodeLogicalNetwork(nodeName string, hostSubnets []*n
 		protocols = append(protocols, v1.ProtocolSCTP)
 	}
 	for i, p := range protocols {
-		lbUUID, err := loadbalancer.GetOVNKubeLoadBalancer(p)
+		lbUUID, err := loadbalancer.GetOVNKubeLoadBalancer(p, loadbalancer.OvnLoadBalancerClusterIds)
 		if err != nil {
 			return errors.Wrapf(err, "Failed to get OVN load balancer for protocol %s", p)
 		}

@@ -81,7 +81,7 @@ func deleteVIPsFromOVN(vips sets.String, st *serviceTracker, name, namespace str
 		// the VIP is stored with the format IP:Port/Protocol
 		vip, proto := splitVirtualIPKey(vipKey)
 		// ClusterIP use a global load balancer per protocol
-		lbID, err := loadbalancer.GetOVNKubeLoadBalancer(proto)
+		lbID, err := loadbalancer.GetOVNKubeLoadBalancer(proto, loadbalancer.OvnLoadBalancerClusterIds)
 		if err != nil {
 			klog.Errorf("Error getting OVN LoadBalancer for protocol %s", proto)
 			return err

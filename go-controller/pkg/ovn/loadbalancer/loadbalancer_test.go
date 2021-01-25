@@ -48,7 +48,7 @@ func TestGetOVNKubeLoadBalancer(t *testing.T) {
 				t.Errorf("fexec error: %v", err)
 			}
 
-			got, err := GetOVNKubeLoadBalancer(tt.protocol)
+			got, err := GetOVNKubeLoadBalancer(tt.protocol, OvnLoadBalancerClusterIds)
 			if (err != nil) != tt.wantErr {
 				t.Errorf("GetOVNKubeLoadBalancer() error = %v, wantErr %v", err, tt.wantErr)
 				return
