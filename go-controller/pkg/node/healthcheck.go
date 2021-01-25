@@ -165,9 +165,9 @@ func (c *openflowManager) syncFlows() {
 		flows = append(flows, entry...)
 	}
 
-	_, _, err := util.ReplaceOFFlows(c.gwBridge, flows)
+	_, stderr, err := util.ReplaceOFFlows(c.gwBridge, flows)
 	if err != nil {
-		klog.Errorf("Failed to add flows, error: %v, flows: %s", err, c.flowCache)
+		klog.Errorf("Failed to add flows, error: %v, stderr, %s, flows: %s", err, stderr, c.flowCache)
 	}
 }
 
