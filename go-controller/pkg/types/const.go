@@ -52,6 +52,9 @@ const (
 	V4NodeLocalNATSubnetNextHop    = "169.254.0.1"
 	V4NodeLocalDistributedGWPortIP = "169.254.0.2"
 
+	V4HostMasqueradeIP = "169.254.169.2"
+	V6HostMasqueradeIP = "fd69::2"
+
 	// OpenFlow and Networking constants
 	RouteAdvertisementICMPType    = 134
 	NeighborAdvertisementICMPType = 136
