@@ -1168,6 +1168,9 @@ var _ = ginkgo.Describe("Gateway Init Operations", func() {
 				fmt.Sprintf("ovn-nbctl --timeout=15 --columns _uuid --format=csv --no-headings find nat external_ip=\"%s\" type=snat logical_ip=\"%s\"", gatewayRouterIP, clusterCIDR),
 				"ovn-nbctl --timeout=15 --if-exists lr-nat-del " + gwRouter + " snat " + clusterCIDR,
 				"ovn-nbctl --timeout=15 lr-nat-add " + gwRouter + " snat " + gatewayRouterIP + " " + clusterCIDR,
+				"ovn-nbctl --timeout=15 --may-exist lr-lb-add " + gwRouter + " " + tcpLBUUID,
+				"ovn-nbctl --timeout=15 --may-exist lr-lb-add " + gwRouter + " " + udpLBUUID,
+				"ovn-nbctl --timeout=15 --may-exist lr-lb-add " + gwRouter + " " + sctpLBUUID,
 			})
 
 			addPBRandNATRules(fexec, nodeName, nodeSubnet, gatewayRouterIP, nodeMgmtPortIP, nodeMgmtPortMAC)
@@ -1204,6 +1207,9 @@ var _ = ginkgo.Describe("Gateway Init Operations", func() {
 				fmt.Sprintf("ovn-nbctl --timeout=15 --columns _uuid --format=csv --no-headings find nat external_ip=\"%s\" type=snat logical_ip=\"%s\"", gatewayRouterIP, clusterCIDR),
 				"ovn-nbctl --timeout=15 --if-exists lr-nat-del " + gwRouter + " snat " + clusterCIDR,
 				"ovn-nbctl --timeout=15 lr-nat-add " + gwRouter + " snat " + gatewayRouterIP + " " + clusterCIDR,
+				"ovn-nbctl --timeout=15 --may-exist lr-lb-add " + gwRouter + " " + tcpLBUUID,
+				"ovn-nbctl --timeout=15 --may-exist lr-lb-add " + gwRouter + " " + udpLBUUID,
+				"ovn-nbctl --timeout=15 --may-exist lr-lb-add " + gwRouter + " " + sctpLBUUID,
 			})
 
 			addPBRandNATRules(fexec, nodeName, nodeSubnet, gatewayRouterIP, nodeMgmtPortIP, nodeMgmtPortMAC)

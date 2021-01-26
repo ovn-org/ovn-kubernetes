@@ -6,6 +6,7 @@ import (
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
 	ovntest "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/testing"
 	"net"
+	"reflect"
 	"testing"
 
 	mock_k8s_io_utils_exec "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/testing/mocks/k8s.io/utils/exec"
@@ -236,6 +237,66 @@ func TestUpdateNodeSwitchExcludeIPs(t *testing.T) {
 			}
 			mockExecRunner.AssertExpectations(t)
 			mockKexecIface.AssertExpectations(t)
+		})
+	}
+}
+
+func TestUpdateIPsSlice(t *testing.T) {
+	var tests = []struct {
+		name              string
+		s, oldIPs, newIPs []string
+		want              []string
+	}{
+		{
+			"Tests no matching IPs to remove",
+			[]string{"192.168.1.1", "10.0.0.1", "127.0.0.2"},
+			[]string{"1.1.1.1"},
+			[]string{"9.9.9.9", "fe99::1"},
+			[]string{"192.168.1.1", "10.0.0.1", "127.0.0.2"},
+		},
+		{
+			"Tests some matching IPs to replace",
+			[]string{"192.168.1.1", "10.0.0.1", "127.0.0.2"},
+			[]string{"10.0.0.1"},
+			[]string{"9.9.9.9", "fe99::1"},
+			[]string{"192.168.1.1", "9.9.9.9", "127.0.0.2"},
+		},
+		{
+			"Tests matching IPv6 to replace",
+			[]string{"fed9::5", "ab13::1e15", "3dfd::99ac"},
+			[]string{"3dfd::99ac"},
+			[]string{"9.9.9.9", "fe99::1"},
+			[]string{"fed9::5", "ab13::1e15", "fe99::1"},
+		},
+		{
+			"Tests match but nothing to replace with",
+			[]string{"fed9::5", "ab13::1e15", "3dfd::99ac"},
+			[]string{"3dfd::99ac"},
+			[]string{"9.9.9.9"},
+			[]string{"fed9::5", "ab13::1e15", "3dfd::99ac"},
+		},
+		{
+			"Tests with no newIPs",
+			[]string{"fed9::5", "ab13::1e15", "3dfd::99ac"},
+			[]string{"3dfd::99ac"},
+			[]string{},
+			[]string{"fed9::5", "ab13::1e15", "3dfd::99ac"},
+		},
+		{
+			"Tests with no newIPs or oldIPs",
+			[]string{"fed9::5", "ab13::1e15", "3dfd::99ac"},
+			[]string{},
+			[]string{},
+			[]string{"fed9::5", "ab13::1e15", "3dfd::99ac"},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			ans := UpdateIPsSlice(tt.s, tt.oldIPs, tt.newIPs)
+			if !reflect.DeepEqual(ans, tt.want) {
+				t.Errorf("got %v, want %v", ans, tt.want)
+			}
 		})
 	}
 }

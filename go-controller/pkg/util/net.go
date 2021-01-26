@@ -235,8 +235,8 @@ func IPFamilyName(isIPv6 bool) string {
 	}
 }
 
-// MatchIPFamily loops through the array of net.IP and returns the
-// first entry in the list in the same IP Family, based on input flag isIPv6.
+// MatchIPFamily loops through the array of net.IP and returns a
+// slice of addresses in the same IP Family, based on input flag isIPv6.
 func MatchIPFamily(isIPv6 bool, ips []net.IP) ([]net.IP, error) {
 	var ipAddrs []net.IP
 	for _, ip := range ips {
@@ -270,4 +270,19 @@ func MatchIPStringFamily(isIPv6 bool, ipStrings []string) (string, error) {
 		}
 	}
 	return "", fmt.Errorf("no %s string available", IPFamilyName(isIPv6))
+}
+
+// MatchAllIPStringFamily loops through the array of string and returns a
+// of addresses in the same IP Family, based on input flag isIPv6.
+func MatchAllIPStringFamily(isIPv6 bool, ipStrings []string) ([]string, error) {
+	var ipAddrs []string
+	for _, ipString := range ipStrings {
+		if utilnet.IsIPv6String(ipString) == isIPv6 {
+			ipAddrs = append(ipAddrs, ipString)
+		}
+	}
+	if len(ipAddrs) > 0 {
+		return ipAddrs, nil
+	}
+	return nil, fmt.Errorf("no %s IPs available", IPFamilyName(isIPv6))
 }
