@@ -6,6 +6,8 @@ import (
 	"net"
 	"strings"
 
+	"github.com/pkg/errors"
+
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
 
@@ -22,17 +24,11 @@ func (ovn *Controller) getLoadBalancer(protocol kapi.Protocol) (string, error) {
 	var out string
 	var err error
 	if protocol == kapi.ProtocolTCP {
-		out, _, err = util.RunOVNNbctl("--data=bare",
-			"--no-heading", "--columns=_uuid", "find", "load_balancer",
-			"external_ids:k8s-cluster-lb-tcp=yes")
+		out, _, err = util.FindOVNLoadBalancer(types.ClusterLBTCP, "yes")
 	} else if protocol == kapi.ProtocolUDP {
-		out, _, err = util.RunOVNNbctl("--data=bare", "--no-heading",
-			"--columns=_uuid", "find", "load_balancer",
-			"external_ids:k8s-cluster-lb-udp=yes")
+		out, _, err = util.FindOVNLoadBalancer(types.ClusterLBUDP, "yes")
 	} else if protocol == kapi.ProtocolSCTP {
-		out, _, err = util.RunOVNNbctl("--data=bare", "--no-heading",
-			"--columns=_uuid", "find", "load_balancer",
-			"external_ids:k8s-cluster-lb-sctp=yes")
+		out, _, err = util.FindOVNLoadBalancer(types.ClusterLBSCTP, "yes")
 	}
 	if err != nil {
 		return "", err
@@ -42,6 +38,48 @@ func (ovn *Controller) getLoadBalancer(protocol kapi.Protocol) (string, error) {
 	}
 	ovn.loadbalancerClusterCache[protocol] = out
 	return out, nil
+}
+
+func (ovn *Controller) getWorkerLoadBalancer(node string, protocol kapi.Protocol) (string, error) {
+	var out string
+	var err error
+	if protocol == kapi.ProtocolTCP {
+		out, _, err = util.FindOVNLoadBalancer(types.WorkerLBTCP, node)
+	} else if protocol == kapi.ProtocolUDP {
+		out, _, err = util.FindOVNLoadBalancer(types.WorkerLBUDP, node)
+	} else if protocol == kapi.ProtocolSCTP {
+		out, _, err = util.FindOVNLoadBalancer(types.WorkerLBSCTP, node)
+	}
+	if err != nil {
+		return "", err
+	}
+	if out == "" {
+		return "", fmt.Errorf("no %s load balancer found in the database for worker %s", protocol, node)
+	}
+
+	return out, nil
+}
+
+// GetWorkerLoadBalancers find TCP, SCTP, UDP load-balancers from gateway router.
+func GetWorkerLoadBalancers(node string) (string, string, string, error) {
+	lbTCP, stderr, err := util.FindOVNLoadBalancer(types.WorkerLBTCP, node)
+	if err != nil {
+		return "", "", "", errors.Wrapf(err, "failed to get gateway router %q TCP "+
+			"load balancer, stderr: %q", node, stderr)
+	}
+
+	lbUDP, stderr, err := util.FindOVNLoadBalancer(types.WorkerLBUDP, node)
+	if err != nil {
+		return "", "", "", errors.Wrapf(err, "failed to get gateway router %q UDP "+
+			"load balancer, stderr: %q", node, stderr)
+	}
+
+	lbSCTP, stderr, err := util.FindOVNLoadBalancer(types.WorkerLBSCTP, node)
+	if err != nil {
+		return "", "", "", errors.Wrapf(err, "failed to get gateway router %q SCTP "+
+			"load balancer, stderr: %q", node, stderr)
+	}
+	return lbTCP, lbUDP, lbSCTP, nil
 }
 
 // getLoadBalancerVIPs returns a map whose keys are VIPs (IP:port) on loadBalancer

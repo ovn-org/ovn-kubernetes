@@ -3,6 +3,7 @@ package ovn
 import (
 	"fmt"
 	"net"
+	"strings"
 
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/gateway"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
@@ -38,7 +39,7 @@ func (ovn *Controller) createGatewayVIPs(protocol kapi.Protocol, sourcePort int3
 	}
 
 	for _, gatewayRouter := range gatewayRouters {
-		loadBalancer, err := ovn.getGatewayLoadBalancer(gatewayRouter, protocol)
+		gatewayLB, err := ovn.getGatewayLoadBalancer(gatewayRouter, protocol)
 		if err != nil {
 			klog.Errorf("Gateway router %s does not have load balancer (%v)",
 				gatewayRouter, err)
@@ -51,9 +52,21 @@ func (ovn *Controller) createGatewayVIPs(protocol kapi.Protocol, sourcePort int3
 		}
 		// With the physical_ip:sourcePort as the VIP, add an entry in
 		// 'load_balancer'.
-		err = ovn.createLoadBalancerVIPs(loadBalancer, physicalIPs, sourcePort, targetIPs, targetPort)
+		err = ovn.createLoadBalancerVIPs(gatewayLB, physicalIPs, sourcePort, targetIPs, targetPort)
 		if err != nil {
-			klog.Errorf("Failed to create VIP in load balancer %s - %v", loadBalancer, err)
+			klog.Errorf("Failed to create VIP in load balancer %s - %v", gatewayLB, err)
+			continue
+		}
+
+		workerNode := strings.TrimPrefix(gatewayRouter, "GR_")
+		workerLB, err := ovn.getWorkerLoadBalancer(workerNode, protocol)
+		if err != nil {
+			klog.Errorf("Worker switch %s does not have load balancer (%v)", workerNode, err)
+			continue
+		}
+		err = ovn.createLoadBalancerVIPs(workerLB, physicalIPs, sourcePort, targetIPs, targetPort)
+		if err != nil {
+			klog.Errorf("Failed to create VIP in load balancer %s - %v", workerLB, err)
 			continue
 		}
 	}
