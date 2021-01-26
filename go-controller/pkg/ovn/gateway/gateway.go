@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
 	"github.com/pkg/errors"
 
@@ -68,25 +69,19 @@ func GetGatewayLoadBalancer(gatewayRouter string, protocol kapi.Protocol) (strin
 
 // GetGatewayLoadBalancers find TCP, SCTP, UDP load-balancers from gateway router.
 func GetGatewayLoadBalancers(gatewayRouter string) (string, string, string, error) {
-	lbTCP, stderr, err := util.RunOVNNbctl("--data=bare", "--no-heading",
-		"--columns=_uuid", "find", "load_balancer",
-		"external_ids:TCP_lb_gateway_router="+gatewayRouter)
+	lbTCP, stderr, err := util.FindOVNLoadBalancer(types.GatewayLBTCP, gatewayRouter)
 	if err != nil {
 		return "", "", "", errors.Wrapf(err, "failed to get gateway router %q TCP "+
 			"load balancer, stderr: %q", gatewayRouter, stderr)
 	}
 
-	lbUDP, stderr, err := util.RunOVNNbctl("--data=bare", "--no-heading",
-		"--columns=_uuid", "find", "load_balancer",
-		"external_ids:UDP_lb_gateway_router="+gatewayRouter)
+	lbUDP, stderr, err := util.FindOVNLoadBalancer(types.GatewayLBUDP, gatewayRouter)
 	if err != nil {
 		return "", "", "", errors.Wrapf(err, "failed to get gateway router %q UDP "+
 			"load balancer, stderr: %q", gatewayRouter, stderr)
 	}
 
-	lbSCTP, stderr, err := util.RunOVNNbctl("--data=bare", "--no-heading",
-		"--columns=_uuid", "find", "load_balancer",
-		"external_ids:SCTP_lb_gateway_router="+gatewayRouter)
+	lbSCTP, stderr, err := util.FindOVNLoadBalancer(types.GatewayLBSCTP, gatewayRouter)
 	if err != nil {
 		return "", "", "", errors.Wrapf(err, "failed to get gateway router %q SCTP "+
 			"load balancer, stderr: %q", gatewayRouter, stderr)

@@ -140,6 +140,15 @@ func gatewayInit(nodeName string, clusterIPSubnet []*net.IPNet, hostSubnets []*n
 			kapi.ProtocolUDP:  k8sNSLbUDP,
 			kapi.ProtocolSCTP: k8sNSLbSCTP,
 		}
+		workerK8sNSLbTCP, workerK8sNSLbUDP, workerK8sNSLbSCTP, err := GetWorkerLoadBalancers(nodeName)
+		workerProtoLBMap := map[kapi.Protocol]string{
+			kapi.ProtocolTCP:  workerK8sNSLbTCP,
+			kapi.ProtocolUDP:  workerK8sNSLbUDP,
+			kapi.ProtocolSCTP: workerK8sNSLbSCTP,
+		}
+		if err != nil {
+			return err
+		}
 		enabledProtos := []kapi.Protocol{kapi.ProtocolTCP, kapi.ProtocolUDP}
 		if sctpSupport {
 			enabledProtos = append(enabledProtos, kapi.ProtocolSCTP)
@@ -153,6 +162,16 @@ func gatewayInit(nodeName string, clusterIPSubnet []*net.IPNet, hostSubnets []*n
 				if err != nil {
 					return fmt.Errorf("failed to create load balancer for gateway router %s for protocol %s: "+
 						"stderr: %q, error: %v", gatewayRouter, proto, stderr, err)
+				}
+			}
+			if workerProtoLBMap[proto] == "" {
+				workerProtoLBMap[proto], stderr, err = util.RunOVNNbctl("--", "create",
+					"load_balancer",
+					fmt.Sprintf("external_ids:k8s-worker-lb-%s=%s", strings.ToLower(string(proto)), nodeName),
+					fmt.Sprintf("protocol=%s", strings.ToLower(string(proto))))
+				if err != nil {
+					return fmt.Errorf("failed to create load balancer for worker node %s for protocol %s: "+
+						"stderr: %q, error: %v", nodeName, proto, stderr, err)
 				}
 			}
 		}
@@ -171,19 +190,32 @@ func gatewayInit(nodeName string, clusterIPSubnet []*net.IPNet, hostSubnets []*n
 					gatewayRouter, stdout, stderr, err)
 			}
 		}
-		// Also add north-south load-balancers to local switches for pod -> nodePort traffic
+		// Ensure north-south load-balancers are not on local switches for pod -> nodePort traffic
+		// For upgrade path REMOVEME later
 		stdout, stderr, err = util.RunOVNNbctl("get", "logical_switch", nodeName, "load_balancer")
 		if err != nil {
 			return fmt.Errorf("failed to get load-balancers on the node switch %s, stdout: %q, "+
 				"stderr: %q, error: %v", nodeName, stdout, stderr, err)
 		}
 		for _, proto := range enabledProtos {
-			if !strings.Contains(stdout, protoLBMap[proto]) {
-				stdout, stderr, err = util.RunOVNNbctl("ls-lb-add", nodeName, protoLBMap[proto])
+			if strings.Contains(stdout, protoLBMap[proto]) {
+				_, stderr, err = util.RunOVNNbctl("ls-lb-del", nodeName, protoLBMap[proto])
 				if err != nil {
-					return fmt.Errorf("failed to add north-south load-balancer %s to the "+
-						"node switch %s, stdout: %q, stderr: %q, error: %v",
-						protoLBMap[proto], nodeName, stdout, stderr, err)
+					return fmt.Errorf("failed to remove north-south load-balancer %s to the "+
+						"node switch %s, stderr: %q, error: %v",
+						protoLBMap[proto], nodeName, stderr, err)
+				}
+			}
+		}
+
+		// Add per worker switch specific load-balancers
+		for _, proto := range enabledProtos {
+			if !strings.Contains(stdout, workerProtoLBMap[proto]) {
+				_, stderr, err = util.RunOVNNbctl("ls-lb-add", nodeName, workerProtoLBMap[proto])
+				if err != nil {
+					return fmt.Errorf("failed to add worker load-balancer %s to the "+
+						"node switch %s, stderr: %q, error: %v",
+						workerProtoLBMap[proto], nodeName, stderr, err)
 				}
 			}
 		}
