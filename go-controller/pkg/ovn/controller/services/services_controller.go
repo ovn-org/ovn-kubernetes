@@ -287,6 +287,7 @@ func (c *Controller) syncServices(key string) error {
 			// ,that has the reject option for backends without endpoints, to the idling loadbalancer, that
 			// generates an event to kick of the unidling process in the openshift controller manager.
 			// We always update the loadbalancer with the current VIP and Endpoints.
+			var lbError error
 			if svcNeedsIdling(service.Annotations) {
 				lbIdleID, err := loadbalancer.GetOVNKubeLoadBalancer(svcPort.Protocol, loadbalancer.OvnLoadBalancerIdlingIds)
 				if err != nil {
@@ -295,17 +296,17 @@ func (c *Controller) syncServices(key string) error {
 				// If there are endpoints we need to use the "normal" loadbalancer
 				// otherwise we need to use the idling loadbalancer
 				if len(eps) > 0 {
-					err = loadbalancer.MigrateLoadBalancerVIP(lbIdleID, lbID, vip, eps)
+					lbError = loadbalancer.MigrateLoadBalancerVIP(lbIdleID, lbID, vip, eps)
 				} else {
-					err = loadbalancer.MigrateLoadBalancerVIP(lbID, lbIdleID, vip, eps)
+					lbError = loadbalancer.MigrateLoadBalancerVIP(lbID, lbIdleID, vip, eps)
 				}
 			} else {
-				err = loadbalancer.UpdateLoadBalancer(lbID, vip, eps)
+				lbError = loadbalancer.UpdateLoadBalancer(lbID, vip, eps)
 			}
-			if err != nil {
+			if lbError != nil {
 				c.eventRecorder.Eventf(service, v1.EventTypeWarning, "FailedToUpdateOVNLoadBalancer",
-					"Error trying to update OVN LoadBalancer for Service %s/%s: %v", name, namespace, err)
-				return err
+					"Error trying to update OVN LoadBalancer for Service %s/%s: %v", name, namespace, lbError)
+				return lbError
 			}
 			// update the tracker with the VIP
 			c.serviceTracker.updateService(name, namespace, vip, svcPort.Protocol)
@@ -361,14 +362,14 @@ func (c *Controller) syncServices(key string) error {
 							// If there are endpoints we need to use the "normal" loadbalancer
 							// otherwise we need to use the idling loadbalancer
 							if len(eps) > 0 {
-								err = loadbalancer.MigrateLoadBalancerVIP(lbIdleID, lbID, vip, eps)
+								lbError = loadbalancer.MigrateLoadBalancerVIP(lbIdleID, lbID, vip, eps)
 							} else {
-								err = loadbalancer.MigrateLoadBalancerVIP(lbID, lbIdleID, vip, eps)
+								lbError = loadbalancer.MigrateLoadBalancerVIP(lbID, lbIdleID, vip, eps)
 							}
 						} else {
-							err = loadbalancer.UpdateLoadBalancer(lbID, vip, eps)
+							lbError = loadbalancer.UpdateLoadBalancer(lbID, vip, eps)
 						}
-						if err != nil {
+						if lbError != nil {
 							c.eventRecorder.Eventf(service, v1.EventTypeWarning, "FailedToUpdateOVNLoadBalancer",
 								"Error trying to update OVN LoadBalancer for Service %s/%s: %v", name, namespace, err)
 							return err
