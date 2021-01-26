@@ -90,8 +90,34 @@ func (e endpoints) addCmds(fexec *ovntest.FakeExec, service v1.Service, endpoint
 		Cmd:    "ovn-nbctl --timeout=15 --data=bare --no-heading --columns=_uuid find load_balancer external_ids:k8s-cluster-lb-tcp=yes",
 		Output: k8sTCPLoadBalancerIP,
 	})
+	fexec.AddFakeCmd(&ovntest.ExpectedCmd{
+		Cmd:    "ovn-nbctl --timeout=15 --data=bare --no-heading --columns=name find logical_router options:chassis!=null",
+		Output: FakeGRs,
+	})
+	for idx, gatewayR := range strings.Fields(FakeGRs) {
+		fexec.AddFakeCmd(&ovntest.ExpectedCmd{
+			Cmd:    "ovn-nbctl --timeout=15 --data=bare --no-heading --columns=_uuid find load_balancer external_ids:" + ovntypes.GatewayLBTCP + "=" + gatewayR,
+			Output: fmt.Sprintf("load_balancer_%d", idx),
+		})
+		fexec.AddFakeCmd(&ovntest.ExpectedCmd{
+			Cmd:    "ovn-nbctl --timeout=15 get logical_router " + gatewayR + " external_ids:physical_ips",
+			Output: "254.254.254.254",
+		})
+		fexec.AddFakeCmdsNoOutputNoError([]string{
+			fmt.Sprintf("ovn-nbctl --timeout=15 set load_balancer load_balancer_%d vips:\"%s:%v\"=\"%s:%v\"", idx, service.Spec.ClusterIP, service.Spec.Ports[0].Port, endpoint.Subsets[0].Addresses[0].IP, endpoint.Subsets[0].Ports[0].Port),
+		})
+		workerIdx := idx + 100
+		fexec.AddFakeCmd(&ovntest.ExpectedCmd{
+			Cmd:    "ovn-nbctl --timeout=15 --data=bare --no-heading --columns=_uuid find load_balancer external_ids:" + ovntypes.WorkerLBTCP + "=" + strings.TrimPrefix(gatewayR, "GR_"),
+			Output: fmt.Sprintf("load_balancer_%d", workerIdx),
+		})
+		fexec.AddFakeCmdsNoOutputNoError([]string{
+			fmt.Sprintf("ovn-nbctl --timeout=15 set load_balancer load_balancer_%d vips:\"%s:%v\"=\"%s:%v\"", workerIdx, service.Spec.ClusterIP, service.Spec.Ports[0].Port, endpoint.Subsets[0].Addresses[0].IP, endpoint.Subsets[0].Ports[0].Port),
+		})
+	}
 	fexec.AddFakeCmdsNoOutputNoError([]string{
-		fmt.Sprintf("ovn-nbctl --timeout=15 set load_balancer %s vips:\"%s:%v\"=\"%s:%v\"", k8sTCPLoadBalancerIP, service.Spec.ClusterIP, service.Spec.Ports[0].Port, endpoint.Subsets[0].Addresses[0].IP, endpoint.Subsets[0].Ports[0].Port),
+		fmt.Sprintf("ovn-nbctl --timeout=15 --if-exists remove load_balancer %s vips \"%s:%v\"", k8sTCPLoadBalancerIP, service.Spec.ClusterIP, service.Spec.Ports[0].Port),
+		fmt.Sprintf("ovn-nbctl --timeout=15 --data=bare --no-heading --columns=_uuid find acl name=%s-%s\\:%v", k8sTCPLoadBalancerIP, service.Spec.ClusterIP, service.Spec.Ports[0].Port),
 	})
 }
 
@@ -104,6 +130,10 @@ func (e endpoints) addExternalIPCmds(fexec *ovntest.FakeExec, loadBalancerIPs []
 		fexec.AddFakeCmd(&ovntest.ExpectedCmd{
 			Cmd:    "ovn-nbctl --timeout=15 --data=bare --no-heading --columns=_uuid find load_balancer external_ids:" + ovntypes.GatewayLBTCP + "=" + gatewayR,
 			Output: fmt.Sprintf("load_balancer_%d", idx),
+		})
+		fexec.AddFakeCmd(&ovntest.ExpectedCmd{
+			Cmd:    "ovn-nbctl --timeout=15 get logical_router " + gatewayR + " external_ids:physical_ips",
+			Output: "254.254.254.254",
 		})
 		for _, loadBalancerIP := range loadBalancerIPs {
 			fexec.AddFakeCmdsNoOutputNoError([]string{
@@ -140,10 +170,20 @@ func (e endpoints) delCmds(fexec *ovntest.FakeExec, service v1.Service, isNodePo
 					Cmd:    "ovn-nbctl --timeout=15 --data=bare --no-heading --columns=_uuid find load_balancer external_ids:" + ovntypes.GatewayLBTCP + "=" + gatewayR,
 					Output: fmt.Sprintf("load_balancer_%d", idx),
 				})
+				fexec.AddFakeCmdsNoOutputNoError([]string{
+					fmt.Sprintf("ovn-nbctl --timeout=15 --data=bare --no-heading --columns=_uuid find logical_switch load_balancer{>=}load_balancer_%d", idx),
+					fmt.Sprintf("ovn-nbctl --timeout=15 --data=bare --no-heading --columns=name find logical_router load_balancer{>=}load_balancer_%d", idx),
+					fmt.Sprintf("ovn-nbctl --timeout=15 set load_balancer load_balancer_%d vips:\"%s:%v\"=\"\"", idx, service.Spec.ClusterIP, sPort.Port),
+				})
 				workerIdx := idx + 100
 				fexec.AddFakeCmd(&ovntest.ExpectedCmd{
 					Cmd:    "ovn-nbctl --timeout=15 --data=bare --no-heading --columns=_uuid find load_balancer external_ids:" + ovntypes.WorkerLBTCP + "=" + strings.TrimPrefix(gatewayR, "GR_"),
 					Output: fmt.Sprintf("load_balancer_%d", workerIdx),
+				})
+				fexec.AddFakeCmdsNoOutputNoError([]string{
+					fmt.Sprintf("ovn-nbctl --timeout=15 --data=bare --no-heading --columns=_uuid find logical_switch load_balancer{>=}load_balancer_%d", workerIdx),
+					fmt.Sprintf("ovn-nbctl --timeout=15 --data=bare --no-heading --columns=name find logical_router load_balancer{>=}load_balancer_%d", workerIdx),
+					fmt.Sprintf("ovn-nbctl --timeout=15 set load_balancer load_balancer_%d vips:\"%s:%v\"=\"\"", workerIdx, service.Spec.ClusterIP, sPort.Port),
 				})
 				if isNodePort {
 					fexec.AddFakeCmd(&ovntest.ExpectedCmd{
@@ -173,7 +213,7 @@ var _ = ginkgo.Describe("OVN Namespace Operations", func() {
 	ginkgo.BeforeEach(func() {
 		// Restore global default values before each testcase
 		config.PrepareTestConfig()
-
+		config.Gateway.Mode = config.GatewayModeShared
 		app = cli.NewApp()
 		app.Name = "test"
 		app.Flags = config.Flags

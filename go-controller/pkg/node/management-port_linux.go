@@ -53,9 +53,11 @@ func newManagementPortIPFamilyConfig(hostSubnet *net.IPNet, isIPv6 bool) (*manag
 			cfg.allSubnets = append(cfg.allSubnets, subnet.CIDR)
 		}
 	}
-	for _, subnet := range config.Kubernetes.ServiceCIDRs {
-		if utilnet.IsIPv6CIDR(subnet) == isIPv6 {
-			cfg.allSubnets = append(cfg.allSubnets, subnet)
+	if config.Gateway.Mode != config.GatewayModeShared {
+		for _, subnet := range config.Kubernetes.ServiceCIDRs {
+			if utilnet.IsIPv6CIDR(subnet) == isIPv6 {
+				cfg.allSubnets = append(cfg.allSubnets, subnet)
+			}
 		}
 	}
 

@@ -609,6 +609,21 @@ func (oc *Controller) syncGatewayLogicalNetwork(node *kapi.Node, l3GatewayConfig
 		return fmt.Errorf("failed to init shared interface gateway: %v", err)
 	}
 
+	// Add cluster load balancers to GR for Host -> Cluster IP Service traffic
+	if config.Gateway.Mode != config.GatewayModeLocal {
+		clusterLBs := []string{oc.TCPLoadBalancerUUID, oc.UDPLoadBalancerUUID}
+		if oc.SCTPSupport {
+			clusterLBs = append(clusterLBs, oc.SCTPLoadBalancerUUID)
+		}
+		for _, clusterLB := range clusterLBs {
+			_, stderr, err := util.RunOVNNbctl("--may-exist", "lr-lb-add", "GR_"+node.Name, clusterLB)
+			if err != nil {
+				return fmt.Errorf("unable to add cluster LB: %s to GR_%s, stderr: %q, error: %v",
+					clusterLB, node.Name, stderr, err)
+			}
+		}
+	}
+
 	// in the case of shared gateway mode, we need to setup
 	// 1. two policy based routes to steer traffic to the k8s node IP
 	// 	  - from the management port via the node_local_switch's localnet port

@@ -212,8 +212,8 @@ func IPFamilyName(isIPv6 bool) string {
 	}
 }
 
-// MatchIPFamily loops through the array of net.IP and returns the
-// first entry in the list in the same IP Family, based on input flag isIPv6.
+// MatchIPFamily loops through the array of net.IP and returns a
+// slice of addresses in the same IP Family, based on input flag isIPv6.
 func MatchIPFamily(isIPv6 bool, ips []net.IP) ([]net.IP, error) {
 	var ipAddrs []net.IP
 	for _, ip := range ips {
