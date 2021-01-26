@@ -100,7 +100,7 @@ func deleteVIPsFromOVN(vips sets.String, st *serviceTracker, name, namespace str
 		}
 		// Configure the NodePort in each Node Gateway Router
 		for _, gatewayRouter := range gatewayRouters {
-			lbID, err := gateway.GetGatewayLoadBalancer(gatewayRouter, proto)
+			lbID, err := gateway.GetGatewayLoadBalancer(gatewayRouter, proto, gateway.OvnGatewayLoadBalancerIds)
 			if err != nil {
 				klog.Warningf("Service Sync: Gateway router %s does not have load balancer (%v)",
 					gatewayRouter, err)

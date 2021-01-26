@@ -21,7 +21,7 @@ func (ovn *Controller) getGatewayPhysicalIPs(gatewayRouter string) ([]string, er
 }
 
 func (ovn *Controller) getGatewayLoadBalancer(gatewayRouter string, protocol kapi.Protocol) (string, error) {
-	return gateway.GetGatewayLoadBalancer(gatewayRouter, protocol)
+	return gateway.GetGatewayLoadBalancer(gatewayRouter, protocol, gateway.OvnGatewayLoadBalancerIds)
 }
 
 // getGatewayLoadBalancers find TCP, SCTP, UDP load-balancers from gateway router.

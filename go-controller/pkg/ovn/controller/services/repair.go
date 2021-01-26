@@ -83,7 +83,7 @@ func (r *Repair) runOnce() error {
 	}
 	for _, p := range protocols {
 		for _, gatewayRouter := range gatewayRouters {
-			lbUUID, err := gateway.GetGatewayLoadBalancer(gatewayRouter, p)
+			lbUUID, err := gateway.GetGatewayLoadBalancer(gatewayRouter, p, gateway.OvnGatewayLoadBalancerIds)
 			if err != nil {
 				return errors.Wrapf(err, "Failed to get OVN GR load balancer for protocol %s", p)
 			}

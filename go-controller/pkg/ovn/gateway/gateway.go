@@ -11,10 +11,13 @@ import (
 )
 
 const (
-	// OvnLoadBalancerIdlingIds represent the OVN loadbalancers
-	// used for services that has been idled.
-	// Default behaviour to send an event and drop the packet for VIPs without backends
+	// OvnGatewayLoadBalancerIds represent the OVN loadbalancers used for NodePorts
+	// Default behaviour to reject traffic for VIPs without backends
 	OvnGatewayLoadBalancerIds = "lb_gateway_router"
+
+	// OvnGatewayIdlingIds represent the OVN loadbalancers used for NodePorts
+	// Default behaviour to send an event and drop the packet for VIPs without backends
+	OvnGatewayIdlingIds = "lb_gateway_idling"
 )
 
 // GetOvnGateways return all created gateways.
@@ -57,9 +60,30 @@ func GetGatewayPhysicalIPs(gatewayRouter string) ([]string, error) {
 	return []string{physicalIP}, nil
 }
 
+// CreateGatewayLoadBalancer creates a  gateway load balancer
+func CreateGatewayLoadBalancer(gatewayRouter string, protocol kapi.Protocol, idkey string) (string, error) {
+	externalIDKey := fmt.Sprintf("%s_%s", string(protocol), idkey)
+	reject := true
+	if idkey == OvnGatewayIdlingIds {
+		reject = false
+	}
+	options := fmt.Sprintf("options:reject=%t", reject)
+	loadBalancer, stderr, err := util.RunOVNNbctl("--", "create",
+		"load_balancer",
+		fmt.Sprintf("external_ids:%s=%s", externalIDKey, gatewayRouter),
+		fmt.Sprintf("protocol=%s", strings.ToLower(string(protocol))),
+		options,
+	)
+	if err != nil {
+		return "", errors.Wrapf(err, "error creating loadbalancer for protocol %s: %v", protocol, stderr)
+	}
+
+	return loadBalancer, nil
+}
+
 // GetGatewayLoadBalancer return the gateway load balancer
-func GetGatewayLoadBalancer(gatewayRouter string, protocol kapi.Protocol) (string, error) {
-	externalIDKey := fmt.Sprintf("%s_%s", string(protocol), OvnGatewayLoadBalancerIds)
+func GetGatewayLoadBalancer(gatewayRouter string, protocol kapi.Protocol, idkey string) (string, error) {
+	externalIDKey := fmt.Sprintf("%s_%s", string(protocol), idkey)
 	loadBalancer, _, err := util.RunOVNNbctl("--data=bare", "--no-heading",
 		"--columns=_uuid", "find", "load_balancer",
 		"external_ids:"+externalIDKey+"="+
@@ -78,7 +102,7 @@ func GetGatewayLoadBalancers(gatewayRouter string) (string, string, string, erro
 	protoLBMap := map[kapi.Protocol]string{}
 	enabledProtos := []kapi.Protocol{kapi.ProtocolTCP, kapi.ProtocolUDP, kapi.ProtocolSCTP}
 	for _, protocol := range enabledProtos {
-		lbID, err := GetGatewayLoadBalancer(gatewayRouter, protocol)
+		lbID, err := GetGatewayLoadBalancer(gatewayRouter, protocol, OvnGatewayLoadBalancerIds)
 		if err != nil && err.Error() != "load balancer item in OVN DB is an empty string" {
 			return "", "", "", err
 		}

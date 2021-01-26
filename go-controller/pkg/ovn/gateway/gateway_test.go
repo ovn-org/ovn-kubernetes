@@ -6,6 +6,7 @@ import (
 
 	ovntest "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/testing"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
+	kapi "k8s.io/api/core/v1"
 )
 
 func TestGetOvnGateways(t *testing.T) {
@@ -146,6 +147,50 @@ func TestGetGatewayPhysicalIPs(t *testing.T) {
 			}
 			if !reflect.DeepEqual(got, tt.want) {
 				t.Errorf("GetGatewayPhysicalIPs() got = %v, want %v", got, tt.want)
+			}
+		})
+	}
+}
+
+func TestCreateGatewayLoadBalancer(t *testing.T) {
+	tests := []struct {
+		name          string
+		gatewayRouter string
+		protocol      kapi.Protocol
+		idkey         string
+		ovnCmd        ovntest.ExpectedCmd
+		want          string
+		wantErr       bool
+	}{
+		{
+			name:          "create TCP loadbalancer gateway",
+			gatewayRouter: "GR_node3",
+			protocol:      kapi.ProtocolTCP,
+			idkey:         OvnGatewayLoadBalancerIds,
+			ovnCmd: ovntest.ExpectedCmd{
+				Cmd:    "ovn-nbctl --timeout=15 -- create load_balancer external_ids:TCP_lb_gateway_router=GR_node3 protocol=tcp options:reject=true",
+				Output: "97f15346-5fea-11eb-968f-a8a1590cda29",
+			},
+			want:    "97f15346-5fea-11eb-968f-a8a1590cda29",
+			wantErr: false,
+		},
+		// TODO: Add test cases.
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			fexec := ovntest.NewFakeExec()
+			fexec.AddFakeCmd(&tt.ovnCmd)
+			err := util.SetExec(fexec)
+			if err != nil {
+				t.Errorf("fexec error: %v", err)
+			}
+			got, err := CreateGatewayLoadBalancer(tt.gatewayRouter, tt.protocol, tt.idkey)
+			if (err != nil) != tt.wantErr {
+				t.Errorf("CreateGatewayLoadBalancer() error = %v, wantErr %v", err, tt.wantErr)
+				return
+			}
+			if got != tt.want {
+				t.Errorf("CreateGatewayLoadBalancer() = %v, want %v", got, tt.want)
 			}
 		})
 	}
