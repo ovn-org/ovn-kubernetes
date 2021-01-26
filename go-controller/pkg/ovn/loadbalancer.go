@@ -185,23 +185,33 @@ func (ovn *Controller) getLogicalSwitchesForLoadBalancer(lb string) ([]string, e
 	return nil, nil
 }
 
-// getGRLogicalSwitchForLoadBalancer returns the external switch name if the load balancer is on a GR
-func (ovn *Controller) getGRLogicalSwitchForLoadBalancer(lb string) (string, error) {
+// getGRLogicalSwitchesForLoadBalancer returns the external switch name if the load balancer is on a GR
+func (ovn *Controller) getGRLogicalSwitchesForLoadBalancer(lb string) ([]string, error) {
 	out, _, err := util.RunOVNNbctl("--data=bare", "--no-heading",
 		"--columns=name", "find", "logical_router", fmt.Sprintf("load_balancer{>=}%s", lb))
 	if err != nil {
-		return "", err
+		return nil, err
 	}
 	if len(out) == 0 {
-		return "", nil
+		return nil, nil
 	}
 
-	// if this is a GR we know the corresponding external switch, otherwise this is an unhandled case
-	if strings.HasPrefix(out, types.GWRouterPrefix) {
-		routerName := strings.TrimPrefix(out, types.GWRouterPrefix)
-		return types.ExternalSwitchPrefix + routerName, nil
+	var switches []string
+	entries := strings.Split(out, "\n")
+	for _, entry := range entries {
+		if len(entry) == 0 {
+			continue
+		}
+		// if this is a GR we know the corresponding external switch, otherwise this is an unhandled case
+		if strings.HasPrefix(out, types.GWRouterPrefix) {
+			routerName := strings.TrimPrefix(entry, types.GWRouterPrefix)
+			switches = append(switches, types.ExternalSwitchPrefix+routerName)
+		}
 	}
-	return "", fmt.Errorf("router detected with load balancer that is not a GR")
+	if len(switches) == 0 {
+		return nil, fmt.Errorf("router detected with load balancer that is not a GR")
+	}
+	return switches, nil
 }
 
 // TODO: Add unittest for function.
@@ -248,12 +258,12 @@ func (ovn *Controller) createLoadBalancerRejectACL(lb, sourceIP string, sourcePo
 	}
 
 	// check if the load balancer is on a GR, if so we need to get the external switches
-	gwRouterExtSwitch, err := ovn.getGRLogicalSwitchForLoadBalancer(lb)
+	gwRouterExtSwitches, err := ovn.getGRLogicalSwitchesForLoadBalancer(lb)
 	if err != nil {
 		return "", fmt.Errorf("unable to query logical switches for GR with load balancer: %s, error: %v", lb, err)
 	}
 
-	if len(switches) == 0 && gwRouterExtSwitch == "" {
+	if len(switches) == 0 && len(gwRouterExtSwitches) == 0 {
 		return "", fmt.Errorf("load balancer %s does not apply to any switches in the cluster. Will not create "+
 			"Reject ACL", lb)
 	}
@@ -283,8 +293,8 @@ func (ovn *Controller) createLoadBalancerRejectACL(lb, sourceIP string, sourcePo
 		if applyToPortGroup {
 			cmd = append(cmd, "--", "add", "port_group", ovn.clusterPortGroupUUID, "acls", aclUUID)
 		}
-		if len(gwRouterExtSwitch) > 0 {
-			cmd = append(cmd, "--", "add", "logical_switch", gwRouterExtSwitch, "acls", aclUUID)
+		for _, extSwitch := range gwRouterExtSwitches {
+			cmd = append(cmd, "--", "add", "logical_switch", extSwitch, "acls", aclUUID)
 		}
 		if len(cmd) > 0 {
 			_, _, err = util.RunOVNNbctl(cmd...)
@@ -312,8 +322,8 @@ func (ovn *Controller) createLoadBalancerRejectACL(lb, sourceIP string, sourcePo
 	if applyToPortGroup {
 		cmd = append(cmd, "--", "add", "port_group", ovn.clusterPortGroupUUID, "acls", "@reject-acl")
 	}
-	if len(gwRouterExtSwitch) > 0 {
-		cmd = append(cmd, "--", "add", "logical_switch", gwRouterExtSwitch, "acls", "@reject-acl")
+	for _, extSwitch := range gwRouterExtSwitches {
+		cmd = append(cmd, "--", "add", "logical_switch", extSwitch, "acls", "@reject-acl")
 	}
 	aclUUID, stderr, err = util.RunOVNNbctl(cmd...)
 	if err != nil {
@@ -356,11 +366,11 @@ func (ovn *Controller) deleteLoadBalancerRejectACL(lb, vip string) {
 		return
 	}
 	// check if the load balancer is on a GR, if so we need to get the join/external switches
-	gwRouterSwitch, err := ovn.getGRLogicalSwitchForLoadBalancer(lb)
+	gwRouterSwitches, err := ovn.getGRLogicalSwitchesForLoadBalancer(lb)
 	if err != nil {
 		klog.Errorf("Unable to query logical switches for GR with load balancer: %s, error: %v", lb, err)
 	} else {
-		ovn.removeACLFromNodeSwitches([]string{gwRouterSwitch}, aclUUID)
+		ovn.removeACLFromNodeSwitches(gwRouterSwitches, aclUUID)
 	}
 	ovn.removeACLFromPortGroup(lb, aclUUID)
 	ovn.removeServiceACL(lb, vip)

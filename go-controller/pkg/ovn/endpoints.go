@@ -2,6 +2,8 @@ package ovn
 
 import (
 	"fmt"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
+	"net"
 	"strings"
 
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
@@ -44,7 +46,7 @@ func (ovn *Controller) getLbEndpoints(ep *kapi.Endpoints) map[kapi.Protocol]map[
 }
 
 // AddEndpoints adds endpoints and creates corresponding resources in OVN
-func (ovn *Controller) AddEndpoints(ep *kapi.Endpoints) error {
+func (ovn *Controller) AddEndpoints(ep *kapi.Endpoints, addClusterLBs bool) error {
 	klog.Infof("Adding endpoints: %s for namespace: %s", ep.Name, ep.Namespace)
 	// get service
 	// TODO: cache the service
@@ -74,11 +76,12 @@ func (ovn *Controller) AddEndpoints(ep *kapi.Endpoints) error {
 			continue
 		}
 		if util.ServiceTypeHasNodePort(svc) {
-			if err := ovn.createGatewayVIPs(svcPort.Protocol, svcPort.NodePort, lbEps.IPs, lbEps.Port); err != nil {
+			if err := ovn.createPerNodeVIPs(nil, svcPort.Protocol, svcPort.NodePort, lbEps.IPs, lbEps.Port); err != nil {
 				klog.Errorf("Error in creating Node Port for svc %s, node port: %d - %v\n", svc.Name, svcPort.NodePort, err)
 				continue
 			}
 		}
+
 		if util.ServiceTypeHasClusterIP(svc) {
 			var loadBalancer string
 			loadBalancer, err = ovn.getLoadBalancer(svcPort.Protocol)
@@ -86,35 +89,33 @@ func (ovn *Controller) AddEndpoints(ep *kapi.Endpoints) error {
 				klog.Errorf("Failed to get load balancer for %s (%v)", svcPort.Protocol, err)
 				continue
 			}
-			if err = ovn.createLoadBalancerVIPs(loadBalancer, []string{svc.Spec.ClusterIP}, svcPort.Port, lbEps.IPs, lbEps.Port); err != nil {
-				klog.Errorf("Error in creating Cluster IP for svc %s, target port: %d - %v\n", svc.Name, lbEps.Port, err)
-				continue
+
+			// If any of the lbEps contain the a host IP we add to worker/GR LB separately, and not to cluster LB
+			if hasHostEndpoints(lbEps.IPs) && config.Gateway.Mode == config.GatewayModeShared {
+				if err := ovn.createPerNodeVIPs([]string{svc.Spec.ClusterIP}, svcPort.Protocol, svcPort.Port, lbEps.IPs, lbEps.Port); err != nil {
+					klog.Errorf("Error in creating Cluster IP for svc %s, target port: %d - %v\n", svc.Name, lbEps.Port, err)
+					continue
+				}
+				// Need to ensure that if vip exists on cluster LB we remove it
+				// This can happen if endpoints originally had cluster only ips but now have host ips
+				vip := util.JoinHostPortInt32(svc.Spec.ClusterIP, svcPort.Port)
+				if err := ovn.deleteLoadBalancerVIP(loadBalancer, vip); err != nil {
+					klog.Error(err)
+				}
+			} else if addClusterLBs {
+				if err = ovn.createLoadBalancerVIPs(loadBalancer, []string{svc.Spec.ClusterIP}, svcPort.Port, lbEps.IPs, lbEps.Port); err != nil {
+					klog.Errorf("Error in creating Cluster IP for svc %s, target port: %d - %v\n", svc.Name, lbEps.Port, err)
+					continue
+				}
+				// Need to ensure if this vip exists in the worker LBs that we remove it
+				// This can happen if the endpoints originally had host eps but now have cluster only ips
+				ovn.deleteNodeVIPs([]string{svc.Spec.ClusterIP}, svcPort.Protocol, svcPort.Port)
 			}
 			vip := util.JoinHostPortInt32(svc.Spec.ClusterIP, svcPort.Port)
 			ovn.AddServiceVIPToName(vip, svcPort.Protocol, svc.Namespace, svc.Name)
 			if len(svc.Spec.ExternalIPs) > 0 {
-				gateways, _, err := ovn.getOvnGateways()
-				if err != nil {
-					return err
-				}
-				for _, gateway := range gateways {
-					gatewayLB, err := ovn.getGatewayLoadBalancer(gateway, svcPort.Protocol)
-					if err != nil {
-						klog.Errorf("Gateway router %s does not have load balancer (%v)", gateway, err)
-						continue
-					}
-					if err = ovn.createLoadBalancerVIPs(gatewayLB, svc.Spec.ExternalIPs, svcPort.Port, lbEps.IPs, lbEps.Port); err != nil {
-						klog.Errorf("Error in creating ExternalIP for svc %s, target port: %d - %v\n", svc.Name, lbEps.Port, err)
-					}
-					workerNode := strings.TrimPrefix(gateway, "GR_")
-					workerLB, err := ovn.getWorkerLoadBalancer(workerNode, svcPort.Protocol)
-					if err != nil {
-						klog.Errorf("Worker switch %s does not have load balancer (%v)", workerNode, err)
-						continue
-					}
-					if err = ovn.createLoadBalancerVIPs(workerLB, svc.Spec.ExternalIPs, svcPort.Port, lbEps.IPs, lbEps.Port); err != nil {
-						klog.Errorf("Error in creating ExternalIP for svc %s, target port: %d - %v\n", svc.Name, lbEps.Port, err)
-					}
+				if err := ovn.createPerNodeVIPs(svc.Spec.ExternalIPs, svcPort.Protocol, svcPort.Port, lbEps.IPs, lbEps.Port); err != nil {
+					klog.Errorf("Error in creating ExternalIP for svc %s, target port: %d - %v\n", svc.Name, lbEps.Port, err)
 				}
 			}
 			// Cloud load balancers: directly load balance that traffic from pods
@@ -123,24 +124,8 @@ func (ovn *Controller) AddEndpoints(ep *kapi.Endpoints) error {
 				if ing.IP == "" {
 					continue
 				}
-				gateways, _, err := ovn.getOvnGateways()
-				if err != nil {
-					return err
-				}
-				for _, gateway := range gateways {
-					gatewayLB, err := ovn.getGatewayLoadBalancer(gateway, svcPort.Protocol)
-					if err != nil {
-						klog.Errorf("Gateway router %s does not have load balancer (%v)", gateway, err)
-						continue
-					}
-					if err = ovn.createLoadBalancerVIPs(gatewayLB, []string{ing.IP}, svcPort.Port, lbEps.IPs, lbEps.Port); err != nil {
-						klog.Errorf("Error in creating Ingress LB IP for svc %s, target port: %d - %v\n", svc.Name, lbEps.Port, err)
-					}
-					workerNode := strings.TrimPrefix(gateway, "GR_")
-					workerLB, _ := ovn.getWorkerLoadBalancer(workerNode, svcPort.Protocol)
-					if err = ovn.createLoadBalancerVIPs(workerLB, []string{ing.IP}, svcPort.Port, lbEps.IPs, lbEps.Port); err != nil {
-						klog.Errorf("Error in creating Ingress LB IP for svc %s, target port: %d - %v\n", svc.Name, lbEps.Port, err)
-					}
+				if err := ovn.createPerNodeVIPs([]string{ing.IP}, svcPort.Protocol, svcPort.Port, lbEps.IPs, lbEps.Port); err != nil {
+					klog.Errorf("Error in creating Ingress LB IP for svc %s, target port: %d - %v\n", svc.Name, lbEps.Port, err)
 				}
 			}
 		}
@@ -165,35 +150,11 @@ func (ovn *Controller) handleNodePortLB(node *kapi.Node) error {
 			continue
 		}
 		for _, ep := range endpoints {
-			svc, err := ovn.watchFactory.GetService(ep.Namespace, ep.Name)
-			if err != nil {
-				continue
+			if err := ovn.AddEndpoints(ep, false); err != nil {
+				return fmt.Errorf("unable to handle adding endpoints for new node: %s, error: %v",
+					node.Name, err)
 			}
-			if !util.ServiceTypeHasNodePort(svc) {
-				continue
-			}
-			protoPortMap := ovn.getLbEndpoints(ep)
-			for _, svcPort := range svc.Spec.Ports {
-				lbEps, isFound := protoPortMap[svcPort.Protocol][svcPort.Name]
-				if !isFound {
-					continue
-				}
-				k8sNSLb, _ := ovn.getGatewayLoadBalancer(gatewayRouter, svcPort.Protocol)
-				if k8sNSLb == "" {
-					return fmt.Errorf("%s load balancer for node %q does not yet exist", svcPort.Protocol, node.Name)
-				}
-				err = ovn.createLoadBalancerVIPs(k8sNSLb, physicalIPs, svcPort.NodePort, lbEps.IPs, lbEps.Port)
-				if err != nil {
-					klog.Errorf("Failed to create VIP in load balancer %s - %v", k8sNSLb, err)
-					continue
-				}
-				workerLB, _ := ovn.getWorkerLoadBalancer(node.Name, svcPort.Protocol)
-				err = ovn.createLoadBalancerVIPs(workerLB, physicalIPs, svcPort.NodePort, lbEps.IPs, lbEps.Port)
-				if err != nil {
-					klog.Errorf("Failed to create VIP in load balancer %s - %v", workerLB, err)
-					continue
-				}
-			}
+
 		}
 	}
 	return nil
@@ -216,6 +177,7 @@ func (ovn *Controller) deleteEndpoints(ep *kapi.Endpoints) error {
 	if err != nil {
 		klog.Error(err)
 	}
+
 	for _, svcPort := range svc.Spec.Ports {
 		clusterLB, err := ovn.getLoadBalancer(svcPort.Protocol)
 		if err != nil {
@@ -231,12 +193,20 @@ func (ovn *Controller) deleteEndpoints(ep *kapi.Endpoints) error {
 				klog.Errorf("Gateway router %s does not have load balancer (%v)", gateway, err)
 				continue
 			}
+			// ClusterIP may be on gateway or worker LBs, so need to remove here as well
+			if config.Gateway.Mode == config.GatewayModeShared {
+				ovn.clearVIPsAddRejectACL(svc, gatewayLB, svc.Spec.ClusterIP, svcPort.Port, svcPort.Protocol)
+			}
 			workerNode := strings.TrimPrefix(gateway, "GR_")
 			workerLB, err := ovn.getWorkerLoadBalancer(workerNode, svcPort.Protocol)
 			if err != nil {
 				klog.Errorf("Worker switch %s does not have load balancer (%v)", workerNode, err)
 				continue
 			}
+			if config.Gateway.Mode == config.GatewayModeShared {
+				ovn.clearVIPsAddRejectACL(svc, workerLB, svc.Spec.ClusterIP, svcPort.Port, svcPort.Protocol)
+			}
+
 			// Cloud load balancers: directly reject traffic from pods
 			for _, ing := range svc.Status.LoadBalancer.Ingress {
 				if ing.IP == "" {
@@ -282,4 +252,21 @@ func (ovn *Controller) clearVIPsAddRejectACL(svc *kapi.Service, lb, ip string, p
 	if err != nil {
 		klog.Errorf("Error in clearing endpoints for lb %s: %v", lb, err)
 	}
+}
+
+// hasHostEndpoints determines if a slice of endpoints contains a host networked pod
+func hasHostEndpoints(endpointIPs []string) bool {
+	for _, endpointIP := range endpointIPs {
+		found := false
+		for _, clusterNet := range config.Default.ClusterSubnets {
+			if clusterNet.CIDR.Contains(net.ParseIP(endpointIP)) {
+				found = true
+				break
+			}
+		}
+		if !found {
+			return true
+		}
+	}
+	return false
 }

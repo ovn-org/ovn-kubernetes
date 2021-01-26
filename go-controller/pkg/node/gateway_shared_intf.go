@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"hash/fnv"
 	"net"
+	"os"
 	"reflect"
 	"strings"
 	"sync"
@@ -441,6 +442,31 @@ func newSharedGateway(nodeName string, subnets []*net.IPNet, gwNextHops []net.IP
 	// the name of the patch port created by ovn-controller is of the form
 	// patch-<logical_port_name_of_localnet_port>-to-br-int
 	patchPort := "patch-" + bridgeName + "_" + nodeName + "-to-br-int"
+
+	// add service route to bridge
+	bridgeLink, err := util.LinkSetUp(bridgeName)
+	if err != nil {
+		return nil, fmt.Errorf("unable to find shared gw bridge interface: %s", bridgeName)
+	}
+	for _, subnet := range config.Kubernetes.ServiceCIDRs {
+		nextHops, err := util.MatchIPFamily(utilnet.IsIPv6CIDR(subnet), gwNextHops)
+		if err != nil {
+			klog.Warningf("Unable to find valid next hop for Service CIDR: %s, available next hops: %v",
+				subnet, gwNextHops)
+		}
+
+		// TODO(trozet): see if we need to consider upgrade here...there may be an old route pointing to mp0
+		if exists, err := util.LinkRouteExists(bridgeLink, nextHops[0], subnet); err == nil && !exists {
+			err = util.LinkRoutesAdd(bridgeLink, nextHops[0], []*net.IPNet{subnet})
+			if err != nil {
+				if os.IsExist(err) {
+					klog.V(5).Infof("Ignoring error %s from 'route add %s via %s' - already added via IPv6 RA?",
+						err.Error(), subnet, nextHops[0])
+					continue
+				}
+			}
+		}
+	}
 
 	gw.readyFunc = func() (bool, error) {
 		return gatewayReady(patchPort)

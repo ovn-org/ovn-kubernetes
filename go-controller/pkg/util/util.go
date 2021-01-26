@@ -188,3 +188,30 @@ func HashForOVN(s string) string {
 	return fmt.Sprintf("a%s", hashString)
 
 }
+
+// UpdateIPsSlice will search for values of v in the slice and update it with n values of same IP family
+func UpdateIPsSlice(s, oldIPs, newIPs []string) []string {
+	n := make([]string, len(s))
+	copy(n, s)
+	for i, entry := range s {
+		for _, oldIP := range oldIPs {
+			if entry == oldIP {
+				for _, newIP := range newIPs {
+					if utilnet.IsIPv6(net.ParseIP(oldIP)) {
+						if utilnet.IsIPv6(net.ParseIP(newIP)) {
+							n[i] = newIP
+							break
+						}
+					} else {
+						if !utilnet.IsIPv6(net.ParseIP(newIP)) {
+							n[i] = newIP
+							break
+						}
+					}
+				}
+				break
+			}
+		}
+	}
+	return n
+}
