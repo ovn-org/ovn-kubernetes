@@ -149,7 +149,9 @@ func gatewayInit(nodeName string, clusterIPSubnet []*net.IPNet, hostSubnets []*n
 				protoLBMap[proto], stderr, err = util.RunOVNNbctl("--", "create",
 					"load_balancer",
 					fmt.Sprintf("external_ids:%s_lb_gateway_router=%s", proto, gatewayRouter),
-					fmt.Sprintf("protocol=%s", strings.ToLower(string(proto))))
+					fmt.Sprintf("protocol=%s", strings.ToLower(string(proto))),
+					"options:reject=true",
+				)
 				if err != nil {
 					return fmt.Errorf("failed to create load balancer for gateway router %s for protocol %s: "+
 						"stderr: %q, error: %v", gatewayRouter, proto, stderr, err)
