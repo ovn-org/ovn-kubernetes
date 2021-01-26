@@ -1,6 +1,7 @@
 package services
 
 import (
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/gateway"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/loadbalancer"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
@@ -117,4 +118,15 @@ func deleteVIPsFromOVN(vips sets.String, st *serviceTracker, name, namespace str
 		st.deleteServiceVIP(name, namespace, vip, proto)
 	}
 	return nil
+}
+
+const OvnServiceIdledAt = "k8s.ovn.org/idled-at"
+
+// When idling or empty LB events are enabled, we want to ensure we receive these packets and not reject them.
+func svcNeedsIdling(annotations map[string]string) bool {
+	if !config.Kubernetes.OVNEmptyLbEvents {
+		return false
+	}
+	_, ok := annotations[OvnServiceIdledAt]
+	return ok
 }

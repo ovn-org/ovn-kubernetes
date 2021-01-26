@@ -283,13 +283,29 @@ func (c *Controller) syncServices(key string) error {
 			// get the endpoints associated to the vip
 			eps := getLbEndpoints(endpointSlices, svcPort, family)
 			// Reconcile OVN, update the load balancer with current endpoints
-			if c.needsOVNLBUpdate(eps, service) {
-				if err := loadbalancer.UpdateLoadBalancer(lbID, vip, eps); err != nil {
-					c.eventRecorder.Eventf(service, v1.EventTypeWarning, "FailedToUpdateOVNLoadBalancer",
-						"Error trying to update OVN LoadBalancer for Service %s/%s: %v", name, namespace, err)
+			// If idling enabled and there is no endpoints, we need to move the VIP from the main loadbalancer
+			// ,that has the reject option for backends without endpoints, to the idling loadbalancer, that
+			// generates an event to kick of the unidling process in the openshift controller manager.
+			// We always update the loadbalancer with the current VIP and Endpoints.
+			if svcNeedsIdling(service.Annotations) {
+				lbIdleID, err := loadbalancer.GetOVNKubeLoadBalancer(svcPort.Protocol, loadbalancer.OvnLoadBalancerIdlingIds)
+				if err != nil {
 					return err
 				}
-				c.serviceTracker.setHasEndpoints(name, namespace)
+				// If there are endpoints we need to use the "normal" loadbalancer
+				// otherwise we need to use the idling loadbalancer
+				if len(eps) > 0 {
+					err = loadbalancer.MigrateLoadBalancerVIP(lbIdleID, lbID, vip, eps)
+				} else {
+					err = loadbalancer.MigrateLoadBalancerVIP(lbID, lbIdleID, vip, eps)
+				}
+			} else {
+				err = loadbalancer.UpdateLoadBalancer(lbID, vip, eps)
+			}
+			if err != nil {
+				c.eventRecorder.Eventf(service, v1.EventTypeWarning, "FailedToUpdateOVNLoadBalancer",
+					"Error trying to update OVN LoadBalancer for Service %s/%s: %v", name, namespace, err)
+				return err
 			}
 			// update the tracker with the VIP
 			c.serviceTracker.updateService(name, namespace, vip, svcPort.Protocol)

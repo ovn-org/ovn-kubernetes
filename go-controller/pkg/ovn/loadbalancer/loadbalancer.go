@@ -125,6 +125,18 @@ func UpdateLoadBalancer(lb, vip string, targets []string) error {
 	return nil
 }
 
+// MigrateLoadBalancerVIP migrates a VIP from one loadbalancer to other
+// regarding if the VIP exists or no in the original loadbalancer it always
+// updates the destination loadbalancer.
+func MigrateLoadBalancerVIP(lbOrig, lbDest, vip string, targets []string) error {
+	// deleting must not fail if the vip doesn´t exist
+	err := DeleteLoadBalancerVIP(lbOrig, vip)
+	if err != nil {
+		return err
+	}
+	return UpdateLoadBalancer(lbDest, vip, targets)
+}
+
 // GetLogicalSwitchesForLoadBalancer get the switches associated to a LoadBalancer
 func GetLogicalSwitchesForLoadBalancer(lb string) ([]string, error) {
 	out, _, err := util.RunOVNNbctl("--data=bare", "--no-heading",

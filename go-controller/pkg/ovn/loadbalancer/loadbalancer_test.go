@@ -367,3 +367,53 @@ func TestCreateLoadBalancer(t *testing.T) {
 		})
 	}
 }
+
+func TestMigrateLoadBalancerVIP(t *testing.T) {
+	lb1 := "a08ea426-2288-11eb-a30b-a8a1590cda29"
+	lb2 := "42b2591a-5fd2-11eb-a593-a8a1590cda29"
+	tests := []struct {
+		name    string
+		lbOrig  string
+		lbDest  string
+		vip     string
+		targets []string
+		ovnCmd  []ovntest.ExpectedCmd
+		wantErr bool
+	}{
+		{
+			name:    "normal loadbalancer",
+			lbOrig:  lb1,
+			lbDest:  lb2,
+			vip:     "10.96.0.10:53",
+			targets: []string{"192.168.10.10"},
+			ovnCmd: []ovntest.ExpectedCmd{
+				{
+					Cmd:    "ovn-nbctl --timeout=15 --if-exists remove load_balancer " + lb1 + " vips \"10.96.0.10:53\"",
+					Output: "",
+				},
+				{
+					Cmd:    "ovn-nbctl --timeout=15 set load_balancer " + lb2 + ` vips:"10.96.0.10:53"="192.168.10.10"`,
+					Output: "",
+				},
+			},
+			wantErr: false,
+		},
+		// TODO: Add test cases.
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			fexec := ovntest.NewFakeExec()
+			for _, cmd := range tt.ovnCmd {
+				cmd := cmd
+				fexec.AddFakeCmd(&cmd)
+			}
+			err := util.SetExec(fexec)
+			if err != nil {
+				t.Errorf("fexec error: %v", err)
+			}
+			if err := MigrateLoadBalancerVIP(tt.lbOrig, tt.lbDest, tt.vip, tt.targets); (err != nil) != tt.wantErr {
+				t.Errorf("MigrateLoadBalancerVIP() error = %v, wantErr %v", err, tt.wantErr)
+			}
+		})
+	}
+}
