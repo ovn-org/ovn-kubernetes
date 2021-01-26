@@ -22,17 +22,11 @@ func (ovn *Controller) getLoadBalancer(protocol kapi.Protocol) (string, error) {
 	var out string
 	var err error
 	if protocol == kapi.ProtocolTCP {
-		out, _, err = util.RunOVNNbctl("--data=bare",
-			"--no-heading", "--columns=_uuid", "find", "load_balancer",
-			"external_ids:k8s-cluster-lb-tcp=yes")
+		out, _, err = util.FindOVNLoadBalancer(types.ClusterLBTCP, "yes")
 	} else if protocol == kapi.ProtocolUDP {
-		out, _, err = util.RunOVNNbctl("--data=bare", "--no-heading",
-			"--columns=_uuid", "find", "load_balancer",
-			"external_ids:k8s-cluster-lb-udp=yes")
+		out, _, err = util.FindOVNLoadBalancer(types.ClusterLBUDP, "yes")
 	} else if protocol == kapi.ProtocolSCTP {
-		out, _, err = util.RunOVNNbctl("--data=bare", "--no-heading",
-			"--columns=_uuid", "find", "load_balancer",
-			"external_ids:k8s-cluster-lb-sctp=yes")
+		out, _, err = util.FindOVNLoadBalancer(types.ClusterLBSCTP, "yes")
 	}
 	if err != nil {
 		return "", err
