@@ -1,6 +1,8 @@
 package services
 
 import (
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
+	"net"
 	"testing"
 
 	ovntest "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/testing"
@@ -24,6 +26,7 @@ const (
 )
 
 var alwaysReady = func() bool { return true }
+var FakeGRs = "GR_1 GR_2"
 
 type serviceController struct {
 	*Controller
@@ -77,6 +80,10 @@ func TestSyncServices(t *testing.T) {
 				{
 					Cmd:    "ovn-nbctl --timeout=15 --data=bare --no-heading --columns=_uuid find load_balancer external_ids:k8s-cluster-lb-tcp=yes",
 					Output: loadbalancerTCP,
+				},
+				{
+					Cmd:    "ovn-nbctl --timeout=15 --data=bare --no-heading --columns=name find logical_router options:chassis!=null",
+					Output: FakeGRs,
 				},
 				{
 					Cmd:    `ovn-nbctl --timeout=15 --data=bare --no-heading --columns=_uuid find acl name=a08ea426-2288-11eb-a30b-a8a1590cda29-192.168.1.1\:80`,
@@ -172,6 +179,10 @@ func TestSyncServices(t *testing.T) {
 					Output: gatewayRouter1,
 				},
 				{
+					Cmd:    `ovn-nbctl --timeout=15 get logical_router 2e290f10-3652-11eb-839b-a8a1590cda29 external_ids:physical_ips`,
+					Output: "5.5.5.5",
+				},
+				{
 					Cmd:    `ovn-nbctl --timeout=15 --data=bare --no-heading --columns=_uuid find load_balancer external_ids:TCP_lb_gateway_router=` + gatewayRouter1,
 					Output: "",
 				},
@@ -237,6 +248,22 @@ func TestSyncServices(t *testing.T) {
 					Output: "",
 				},
 				{
+					Cmd:    "ovn-nbctl --timeout=15 --data=bare --no-heading --columns=name find logical_router options:chassis!=null",
+					Output: FakeGRs,
+				},
+				{
+					Cmd:    `ovn-nbctl --timeout=15 --data=bare --no-heading --columns=_uuid find load_balancer external_ids:TCP_lb_gateway_router=GR_1`,
+					Output: "load_balancer_1",
+				},
+				{
+					Cmd:    `ovn-nbctl --timeout=15 --if-exists remove load_balancer load_balancer_1 vips "192.168.1.1:80"`,
+					Output: "",
+				},
+				{
+					Cmd:    `ovn-nbctl --timeout=15 --data=bare --no-heading --columns=_uuid find load_balancer external_ids:TCP_lb_gateway_router=GR_2`,
+					Output: "",
+				},
+				{
 					Cmd:    `ovn-nbctl --timeout=15 --data=bare --no-heading --columns=_uuid find acl name=a08ea426-2288-11eb-a30b-a8a1590cda29-192.168.1.1\:80`,
 					Output: "",
 				},
@@ -293,6 +320,22 @@ func TestSyncServices(t *testing.T) {
 					Output: "",
 				},
 				{
+					Cmd:    "ovn-nbctl --timeout=15 --data=bare --no-heading --columns=name find logical_router options:chassis!=null",
+					Output: FakeGRs,
+				},
+				{
+					Cmd:    `ovn-nbctl --timeout=15 --data=bare --no-heading --columns=_uuid find load_balancer external_ids:TCP_lb_gateway_router=GR_1`,
+					Output: "load_balancer_1",
+				},
+				{
+					Cmd:    `ovn-nbctl --timeout=15 --if-exists remove load_balancer load_balancer_1 vips "192.168.1.1:80"`,
+					Output: "",
+				},
+				{
+					Cmd:    `ovn-nbctl --timeout=15 --data=bare --no-heading --columns=_uuid find load_balancer external_ids:TCP_lb_gateway_router=GR_2`,
+					Output: "",
+				},
+				{
 					Cmd:    `ovn-nbctl --timeout=15 --data=bare --no-heading --columns=_uuid find acl name=a08ea426-2288-11eb-a30b-a8a1590cda29-192.168.1.1\:80`,
 					Output: "",
 				},
@@ -340,6 +383,22 @@ func TestUpdateServicePorts(t *testing.T) {
 		Output: "",
 	})
 	fexec.AddFakeCmd(&ovntest.ExpectedCmd{
+		Cmd:    "ovn-nbctl --timeout=15 --data=bare --no-heading --columns=name find logical_router options:chassis!=null",
+		Output: FakeGRs,
+	})
+	fexec.AddFakeCmd(&ovntest.ExpectedCmd{
+		Cmd:    `ovn-nbctl --timeout=15 --data=bare --no-heading --columns=_uuid find load_balancer external_ids:TCP_lb_gateway_router=GR_1`,
+		Output: "load_balancer_1",
+	})
+	fexec.AddFakeCmd(&ovntest.ExpectedCmd{
+		Cmd:    `ovn-nbctl --timeout=15 --if-exists remove load_balancer load_balancer_1 vips "192.168.1.1:80"`,
+		Output: "",
+	})
+	fexec.AddFakeCmd(&ovntest.ExpectedCmd{
+		Cmd:    `ovn-nbctl --timeout=15 --data=bare --no-heading --columns=_uuid find load_balancer external_ids:TCP_lb_gateway_router=GR_2`,
+		Output: "",
+	})
+	fexec.AddFakeCmd(&ovntest.ExpectedCmd{
 		Cmd:    `ovn-nbctl --timeout=15 --data=bare --no-heading --columns=_uuid find acl name=a08ea426-2288-11eb-a30b-a8a1590cda29-192.168.1.1\:80`,
 		Output: "",
 	})
@@ -350,6 +409,22 @@ func TestUpdateServicePorts(t *testing.T) {
 	// Add a new loadbalancer with the new Service Port 8888
 	fexec.AddFakeCmd(&ovntest.ExpectedCmd{
 		Cmd:    `ovn-nbctl --timeout=15 set load_balancer a08ea426-2288-11eb-a30b-a8a1590cda29 vips:"192.168.1.1:8888"="10.0.0.2:3456"`,
+		Output: "",
+	})
+	fexec.AddFakeCmd(&ovntest.ExpectedCmd{
+		Cmd:    "ovn-nbctl --timeout=15 --data=bare --no-heading --columns=name find logical_router options:chassis!=null",
+		Output: FakeGRs,
+	})
+	fexec.AddFakeCmd(&ovntest.ExpectedCmd{
+		Cmd:    `ovn-nbctl --timeout=15 --data=bare --no-heading --columns=_uuid find load_balancer external_ids:TCP_lb_gateway_router=GR_1`,
+		Output: "load_balancer_1",
+	})
+	fexec.AddFakeCmd(&ovntest.ExpectedCmd{
+		Cmd:    `ovn-nbctl --timeout=15 --if-exists remove load_balancer load_balancer_1 vips "192.168.1.1:8888"`,
+		Output: "",
+	})
+	fexec.AddFakeCmd(&ovntest.ExpectedCmd{
+		Cmd:    `ovn-nbctl --timeout=15 --data=bare --no-heading --columns=_uuid find load_balancer external_ids:TCP_lb_gateway_router=GR_2`,
 		Output: "",
 	})
 	fexec.AddFakeCmd(&ovntest.ExpectedCmd{
@@ -469,6 +544,22 @@ func TestServiceCreateReject(t *testing.T) {
 		Cmd:    `ovn-nbctl --timeout=15 set load_balancer a08ea426-2288-11eb-a30b-a8a1590cda29 vips:"192.168.1.1:80"="10.0.0.2:3456"`,
 		Output: loadbalancerTCP,
 	})
+	fexec.AddFakeCmd(&ovntest.ExpectedCmd{
+		Cmd:    "ovn-nbctl --timeout=15 --data=bare --no-heading --columns=name find logical_router options:chassis!=null",
+		Output: FakeGRs,
+	})
+	fexec.AddFakeCmd(&ovntest.ExpectedCmd{
+		Cmd:    `ovn-nbctl --timeout=15 --data=bare --no-heading --columns=_uuid find load_balancer external_ids:TCP_lb_gateway_router=GR_1`,
+		Output: "load_balancer_1",
+	})
+	fexec.AddFakeCmd(&ovntest.ExpectedCmd{
+		Cmd:    `ovn-nbctl --timeout=15 --if-exists remove load_balancer load_balancer_1 vips "192.168.1.1:80"`,
+		Output: "",
+	})
+	fexec.AddFakeCmd(&ovntest.ExpectedCmd{
+		Cmd:    `ovn-nbctl --timeout=15 --data=bare --no-heading --columns=_uuid find load_balancer external_ids:TCP_lb_gateway_router=GR_2`,
+		Output: "",
+	})
 	// Find existing ACL
 	fexec.AddFakeCmd(&ovntest.ExpectedCmd{
 		Cmd:    `ovn-nbctl --timeout=15 --data=bare --no-heading --columns=_uuid find acl name=a08ea426-2288-11eb-a30b-a8a1590cda29-192.168.1.1\:80`,
@@ -532,6 +623,198 @@ func TestServiceCreateReject(t *testing.T) {
 
 	// Now add endpoints and ensure ACL is removed and LB VIP gets created
 	controller.endpointSliceStore.Add(slice)
+	controller.syncServices(ns + "/" + serviceName)
+}
+
+// A service can mutate its ports, we need to be sure we don´t left dangling ports
+func TestUpdateServiceEndpointsToHost(t *testing.T) {
+	// Expected OVN commands
+	fexec := ovntest.NewFakeExec()
+	fexec.AddFakeCmd(&ovntest.ExpectedCmd{
+		Cmd:    "ovn-nbctl --timeout=15 --data=bare --no-heading --columns=_uuid find load_balancer external_ids:k8s-cluster-lb-tcp=yes",
+		Output: loadbalancerTCP,
+	})
+	// Add a new loadbalancer with the Service Port 80
+	fexec.AddFakeCmd(&ovntest.ExpectedCmd{
+		Cmd:    `ovn-nbctl --timeout=15 set load_balancer a08ea426-2288-11eb-a30b-a8a1590cda29 vips:"192.168.1.1:80"="10.128.0.2:3456"`,
+		Output: "",
+	})
+	fexec.AddFakeCmd(&ovntest.ExpectedCmd{
+		Cmd:    "ovn-nbctl --timeout=15 --data=bare --no-heading --columns=name find logical_router options:chassis!=null",
+		Output: FakeGRs,
+	})
+	fexec.AddFakeCmd(&ovntest.ExpectedCmd{
+		Cmd:    `ovn-nbctl --timeout=15 --data=bare --no-heading --columns=_uuid find load_balancer external_ids:TCP_lb_gateway_router=GR_1`,
+		Output: "load_balancer_1",
+	})
+	fexec.AddFakeCmd(&ovntest.ExpectedCmd{
+		Cmd:    `ovn-nbctl --timeout=15 --data=bare --no-heading --columns=_uuid find load_balancer external_ids:k8s-worker-lb-tcp=1`,
+		Output: "load_balancer_worker_1",
+	})
+	fexec.AddFakeCmd(&ovntest.ExpectedCmd{
+		Cmd:    `ovn-nbctl --timeout=15 --if-exists remove load_balancer load_balancer_1 vips "192.168.1.1:80"`,
+		Output: "",
+	})
+	fexec.AddFakeCmd(&ovntest.ExpectedCmd{
+		Cmd:    `ovn-nbctl --timeout=15 --if-exists remove load_balancer load_balancer_worker_1 vips "192.168.1.1:80"`,
+		Output: "",
+	})
+	fexec.AddFakeCmd(&ovntest.ExpectedCmd{
+		Cmd:    `ovn-nbctl --timeout=15 --data=bare --no-heading --columns=_uuid find load_balancer external_ids:TCP_lb_gateway_router=GR_2`,
+		Output: "load_balancer_2",
+	})
+	fexec.AddFakeCmd(&ovntest.ExpectedCmd{
+		Cmd:    `ovn-nbctl --timeout=15 --data=bare --no-heading --columns=_uuid find load_balancer external_ids:k8s-worker-lb-tcp=2`,
+		Output: "load_balancer_worker_2",
+	})
+	fexec.AddFakeCmd(&ovntest.ExpectedCmd{
+		Cmd:    `ovn-nbctl --timeout=15 --if-exists remove load_balancer load_balancer_2 vips "192.168.1.1:80"`,
+		Output: "",
+	})
+	fexec.AddFakeCmd(&ovntest.ExpectedCmd{
+		Cmd:    `ovn-nbctl --timeout=15 --if-exists remove load_balancer load_balancer_worker_2 vips "192.168.1.1:80"`,
+		Output: "",
+	})
+	fexec.AddFakeCmd(&ovntest.ExpectedCmd{
+		Cmd:    `ovn-nbctl --timeout=15 --data=bare --no-heading --columns=_uuid find acl name=a08ea426-2288-11eb-a30b-a8a1590cda29-192.168.1.1\:80`,
+		Output: "",
+	})
+	fexec.AddFakeCmd(&ovntest.ExpectedCmd{
+		Cmd:    "ovn-nbctl --timeout=15 --data=bare --no-heading --columns=_uuid find load_balancer external_ids:k8s-cluster-lb-tcp=yes",
+		Output: loadbalancerTCP,
+	})
+	// Update endpoints to have host endpoint in shared gw mode
+	fexec.AddFakeCmd(&ovntest.ExpectedCmd{
+		Cmd:    "ovn-nbctl --timeout=15 --data=bare --no-heading --columns=name find logical_router options:chassis!=null",
+		Output: FakeGRs,
+	})
+	fexec.AddFakeCmd(&ovntest.ExpectedCmd{
+		Cmd:    `ovn-nbctl --timeout=15 --data=bare --no-heading --columns=_uuid find load_balancer external_ids:TCP_lb_gateway_router=GR_1`,
+		Output: "load_balancer_1",
+	})
+	fexec.AddFakeCmd(&ovntest.ExpectedCmd{
+		Cmd:    `ovn-nbctl --timeout=15 get logical_router GR_1 external_ids:physical_ips`,
+		Output: "2.2.2.2",
+	})
+	// endpoint is self node IP, so need to use special masquerade endpoint
+	fexec.AddFakeCmd(&ovntest.ExpectedCmd{
+		Cmd:    `ovn-nbctl --timeout=15 set load_balancer load_balancer_1 vips:"192.168.1.1:80"="169.254.169.2:3456"`,
+		Output: "",
+	})
+	fexec.AddFakeCmd(&ovntest.ExpectedCmd{
+		Cmd:    `ovn-nbctl --timeout=15 --data=bare --no-heading --columns=_uuid find load_balancer external_ids:k8s-worker-lb-tcp=1`,
+		Output: "load_balancer_worker_1",
+	})
+	// use regular backend on the worker switch LB
+	fexec.AddFakeCmd(&ovntest.ExpectedCmd{
+		Cmd:    `ovn-nbctl --timeout=15 set load_balancer load_balancer_worker_1 vips:"192.168.1.1:80"="2.2.2.2:3456"`,
+		Output: "",
+	})
+	fexec.AddFakeCmd(&ovntest.ExpectedCmd{
+		Cmd:    `ovn-nbctl --timeout=15 --data=bare --no-heading --columns=_uuid find load_balancer external_ids:TCP_lb_gateway_router=GR_2`,
+		Output: "load_balancer_2",
+	})
+	fexec.AddFakeCmd(&ovntest.ExpectedCmd{
+		Cmd:    `ovn-nbctl --timeout=15 get logical_router GR_2 external_ids:physical_ips`,
+		Output: "2.2.2.3",
+	})
+	// adding to second node will not use special masquerade
+	fexec.AddFakeCmd(&ovntest.ExpectedCmd{
+		Cmd:    `ovn-nbctl --timeout=15 set load_balancer load_balancer_2 vips:"192.168.1.1:80"="2.2.2.2:3456"`,
+		Output: "",
+	})
+	fexec.AddFakeCmd(&ovntest.ExpectedCmd{
+		Cmd:    `ovn-nbctl --timeout=15 --data=bare --no-heading --columns=_uuid find load_balancer external_ids:k8s-worker-lb-tcp=2`,
+		Output: "load_balancer_worker_2",
+	})
+	// and regular endpoint IP on the 2nd worker switch
+	fexec.AddFakeCmd(&ovntest.ExpectedCmd{
+		Cmd:    `ovn-nbctl --timeout=15 set load_balancer load_balancer_worker_2 vips:"192.168.1.1:80"="2.2.2.2:3456"`,
+		Output: "",
+	})
+	// Ensure the VIP entry is removed on the cluster wide TCP load balancer
+	fexec.AddFakeCmd(&ovntest.ExpectedCmd{
+		Cmd:    `ovn-nbctl --timeout=15 --if-exists remove load_balancer a08ea426-2288-11eb-a30b-a8a1590cda29 vips "192.168.1.1:80"`,
+		Output: "",
+	})
+	fexec.AddFakeCmd(&ovntest.ExpectedCmd{
+		Cmd:    `ovn-nbctl --timeout=15 --data=bare --no-heading --columns=_uuid find acl name=a08ea426-2288-11eb-a30b-a8a1590cda29-192.168.1.1\:80`,
+		Output: "",
+	})
+
+	err := util.SetExec(fexec)
+	if err != nil {
+		t.Errorf("fexec error: %v", err)
+	}
+
+	ns := "testns"
+	serviceName := "foo"
+	slice := &discovery.EndpointSlice{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      serviceName + "ab23",
+			Namespace: ns,
+			Labels:    map[string]string{discovery.LabelServiceName: serviceName},
+		},
+		Ports: []discovery.EndpointPort{
+			{
+				Name:     utilpointer.StringPtr("tcp-example"),
+				Protocol: protoPtr(v1.ProtocolTCP),
+				Port:     utilpointer.Int32Ptr(int32(3456)),
+			},
+		},
+		AddressType: discovery.AddressTypeIPv4,
+		Endpoints: []discovery.Endpoint{
+			{
+				Conditions: discovery.EndpointConditions{
+					Ready: utilpointer.BoolPtr(true),
+				},
+				Addresses: []string{"10.128.0.2"},
+				Topology:  map[string]string{"kubernetes.io/hostname": "node-1"},
+			},
+		},
+	}
+	service := &v1.Service{
+		ObjectMeta: metav1.ObjectMeta{Name: serviceName, Namespace: ns},
+		Spec: v1.ServiceSpec{
+			Type:       v1.ServiceTypeClusterIP,
+			ClusterIP:  "192.168.1.1",
+			ClusterIPs: []string{"192.168.1.1"},
+			Selector:   map[string]string{"foo": "bar"},
+			Ports: []v1.ServicePort{{
+				Port:       80,
+				Protocol:   v1.ProtocolTCP,
+				TargetPort: intstr.FromInt(3456),
+			}},
+		},
+	}
+	oldClusterSubnet := config.Default.ClusterSubnets
+	oldGwMode := config.Gateway.Mode
+	defer func() {
+		config.Gateway.Mode = oldGwMode
+		config.Default.ClusterSubnets = oldClusterSubnet
+	}()
+	_, cidr, _ := net.ParseCIDR("10.128.0.0/24")
+	config.Default.ClusterSubnets = []config.CIDRNetworkEntry{{cidr, 26}}
+	config.Gateway.Mode = config.GatewayModeShared
+	controller := newController()
+	// Process the first service
+	controller.endpointSliceStore.Add(slice)
+	controller.serviceStore.Add(service)
+	controller.syncServices(ns + "/" + serviceName)
+
+	// Update endpoints with host network pod
+	epsNew := slice.DeepCopy()
+	epsNew.Endpoints = []discovery.Endpoint{
+		{
+			Conditions: discovery.EndpointConditions{
+				Ready: utilpointer.BoolPtr(true),
+			},
+			Addresses: []string{"2.2.2.2"},
+			Topology:  map[string]string{"kubernetes.io/hostname": "node-1"},
+		}}
+	controller.endpointSliceStore.Delete(slice)
+	controller.endpointSliceStore.Add(epsNew)
+	// sync service
 	controller.syncServices(ns + "/" + serviceName)
 }
 
