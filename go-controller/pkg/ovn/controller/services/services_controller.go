@@ -2,6 +2,7 @@ package services
 
 import (
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/metrics"
@@ -339,11 +340,17 @@ func (c *Controller) syncServices(key string) error {
 				}
 				// Configure the NodePort in each Node Gateway Router
 				for _, gatewayRouter := range gatewayRouters {
-					lbID, err := gateway.GetGatewayLoadBalancer(gatewayRouter, svcPort.Protocol)
+					gatewayLB, err := gateway.GetGatewayLoadBalancer(gatewayRouter, svcPort.Protocol)
 					if err != nil {
 						klog.Warningf("Service Sync: Gateway router %s does not have load balancer (%v)",
 							gatewayRouter, err)
 						// TODO: why continue? should we error and requeue and retry?
+						continue
+					}
+					workerNode := strings.TrimPrefix(gatewayRouter, "GR_")
+					workerLB, err := loadbalancer.GetWorkerLoadBalancer(workerNode, svcPort.Protocol)
+					if err != nil {
+						klog.Errorf("Worker switch %s does not have load balancer (%v)", workerNode, err)
 						continue
 					}
 					physicalIPs, err := gateway.GetGatewayPhysicalIPs(gatewayRouter)
@@ -362,14 +369,16 @@ func (c *Controller) syncServices(key string) error {
 						// VIP = NodeExternalIP:NodePort
 						vip := util.JoinHostPortInt32(physicalIP, svcPort.NodePort)
 						if c.needsOVNLBUpdate(eps, service) {
-							klog.V(4).Infof("Updating NodePort service %s/%s with VIP %s %s",
-								name, namespace, vip, svcPort.Protocol)
-							// Reconcile OVN, update the load balancer with current endpoints
-							if err := loadbalancer.UpdateLoadBalancer(lbID, vip, eps); err != nil {
-								c.eventRecorder.Eventf(service, v1.EventTypeWarning, "FailedToUpdateOVNLoadBalancer",
-									"Error trying to update OVN LoadBalancer for Service %s/%s: %v",
-									name, namespace, err)
-								return err
+							for _, lb := range []string{gatewayLB, workerLB} {
+								klog.V(4).Infof("Updating NodePort service %s/%s with VIP %s %s",
+									name, namespace, vip, svcPort.Protocol)
+								// Reconcile OVN, update the load balancer with current endpoints
+								if err := loadbalancer.UpdateLoadBalancer(lb, vip, eps); err != nil {
+									c.eventRecorder.Eventf(service, v1.EventTypeWarning, "FailedToUpdateOVNLoadBalancer",
+										"Error trying to update OVN LoadBalancer for Service %s/%s: %v",
+										name, namespace, err)
+									return err
+								}
 							}
 							c.serviceTracker.setHasEndpoints(name, namespace)
 						}
@@ -409,21 +418,30 @@ func (c *Controller) syncServices(key string) error {
 						continue
 					}
 					for _, gatewayRouter := range gatewayRouters {
-						lbID, err := gateway.GetGatewayLoadBalancer(gatewayRouter, svcPort.Protocol)
+						gatewayLB, err := gateway.GetGatewayLoadBalancer(gatewayRouter, svcPort.Protocol)
 						if err != nil {
 							klog.Warningf("Service Sync: Gateway router %s does not have load balancer (%v)",
 								gatewayRouter, err)
 							// TODO: why continue? should we error and requeue and retry?
 							continue
 						}
+						workerNode := strings.TrimPrefix(gatewayRouter, "GR_")
+						workerLB, err := loadbalancer.GetWorkerLoadBalancer(workerNode, svcPort.Protocol)
+						if err != nil {
+							klog.Errorf("Worker switch %s does not have load balancer (%v)", workerNode, err)
+							continue
+						}
 						vip := util.JoinHostPortInt32(extIP, svcPort.Port)
 						if c.needsOVNLBUpdate(eps, service) {
-							// Reconcile OVN
-							klog.V(4).Infof("Updating ExternalIP service %s/%s with VIP %s %s", name, namespace, vip, svcPort.Protocol)
-							if err := loadbalancer.UpdateLoadBalancer(lbID, vip, eps); err != nil {
-								c.eventRecorder.Eventf(service, v1.EventTypeWarning, "FailedToUpdateOVNLoadBalancer",
-									"Error trying to update OVN LoadBalancer for Service %s/%s: %v", name, namespace, err)
-								return err
+							for _, lb := range []string{gatewayLB, workerLB} {
+								// Reconcile OVN
+								klog.V(4).Infof("Updating ExternalIP service %s/%s with VIP %s %s",
+									name, namespace, vip, svcPort.Protocol)
+								if err := loadbalancer.UpdateLoadBalancer(lb, vip, eps); err != nil {
+									c.eventRecorder.Eventf(service, v1.EventTypeWarning, "FailedToUpdateOVNLoadBalancer",
+										"Error trying to update OVN LoadBalancer for Service %s/%s: %v", name, namespace, err)
+									return err
+								}
 							}
 							c.serviceTracker.setHasEndpoints(name, namespace)
 						}

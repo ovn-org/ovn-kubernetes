@@ -766,3 +766,14 @@ func DetectSCTPSupport() (bool, error) {
 	}
 	return false, nil
 }
+
+// Finds any OVN Load Balancer based on external ID and value
+func FindOVNLoadBalancer(externalID, externalValue string) (string, string, error) {
+	out, stderr, err := RunOVNNbctl("--data=bare",
+		"--no-heading", "--columns=_uuid", "find", "load_balancer",
+		"external_ids:"+externalID+"="+externalValue)
+	if err != nil {
+		return "", stderr, err
+	}
+	return out, "", nil
+}

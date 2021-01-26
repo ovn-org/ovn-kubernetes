@@ -129,18 +129,26 @@ func deleteVIPsFromOVN(vips sets.String, st *serviceTracker, name, namespace, cl
 		}
 		// Configure the NodePort in each Node Gateway Router
 		for _, gatewayRouter := range gatewayRouters {
-			lbID, err := gateway.GetGatewayLoadBalancer(gatewayRouter, proto)
+			gatewayLB, err := gateway.GetGatewayLoadBalancer(gatewayRouter, proto)
 			if err != nil {
 				klog.Warningf("Service Sync: Gateway router %s does not have load balancer (%v)",
 					gatewayRouter, err)
 				// TODO: why continue? should we error and requeue and retry?
 				continue
 			}
+			workerNode := strings.TrimPrefix(gatewayRouter, "GR_")
+			workerLB, err := loadbalancer.GetWorkerLoadBalancer(workerNode, proto)
+			if err != nil {
+				klog.Errorf("Worker switch %s does not have load balancer (%v)", workerNode, err)
+				continue
+			}
 			// Delete the Service VIP from OVN
 			klog.Infof("Deleting service %s on namespace %s from OVN", name, namespace)
-			if err := loadbalancer.DeleteLoadBalancerVIP(lbID, vip); err != nil {
-				klog.Errorf("Error deleting VIP %s on OVN LoadBalancer %s", vip, lbID)
-				return err
+			for _, lb := range []string{gatewayLB, workerLB} {
+				if err := loadbalancer.DeleteLoadBalancerVIP(lb, vip); err != nil {
+					klog.Errorf("Error deleting VIP %s on OVN LoadBalancer %s", vip, lbID)
+					return err
+				}
 			}
 		}
 		// Delete the Service VIP from the Service Tracker
