@@ -184,7 +184,7 @@ func TestCreateGatewayLoadBalancer(t *testing.T) {
 			if err != nil {
 				t.Errorf("fexec error: %v", err)
 			}
-			got, err := CreateGatewayLoadBalancer(tt.gatewayRouter, tt.protocol, tt.idkey)
+			got, err := createGatewayLoadBalancer(tt.gatewayRouter, tt.protocol, tt.idkey)
 			if (err != nil) != tt.wantErr {
 				t.Errorf("CreateGatewayLoadBalancer() error = %v, wantErr %v", err, tt.wantErr)
 				return

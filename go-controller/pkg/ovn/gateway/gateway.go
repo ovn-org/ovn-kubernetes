@@ -60,8 +60,8 @@ func GetGatewayPhysicalIPs(gatewayRouter string) ([]string, error) {
 	return []string{physicalIP}, nil
 }
 
-// CreateGatewayLoadBalancer creates a  gateway load balancer
-func CreateGatewayLoadBalancer(gatewayRouter string, protocol kapi.Protocol, idkey string) (string, error) {
+// createGatewayLoadBalancer creates a  gateway load balancer
+func createGatewayLoadBalancer(gatewayRouter string, protocol kapi.Protocol, idkey string) (string, error) {
 	externalIDKey := fmt.Sprintf("%s_%s", string(protocol), idkey)
 	reject := true
 	if idkey == OvnGatewayIdlingIds {
@@ -79,6 +79,24 @@ func CreateGatewayLoadBalancer(gatewayRouter string, protocol kapi.Protocol, idk
 	}
 
 	return loadBalancer, nil
+}
+
+// CreateGatewayLoadBalancer creates a gateway load balancer if it doesn´t exist and returns its uuid
+func CreateGatewayLoadBalancer(gatewayRouter string, protocol kapi.Protocol, idkey string) (string, error) {
+	var lbUUID string
+	lbUUID, err := GetGatewayLoadBalancer(gatewayRouter, protocol, idkey)
+	if err != nil && err.Error() != "load balancer item in OVN DB is an empty string" {
+		return "", err
+	}
+	// create the load balancer if it doesn't exist yet
+	if lbUUID == "" {
+		lbUUID, err = createGatewayLoadBalancer(gatewayRouter, protocol, idkey)
+		if err != nil {
+			return "", errors.Wrapf(err, "Failed to create OVN load balancer for protocol %s", protocol)
+		}
+	}
+
+	return lbUUID, nil
 }
 
 // GetGatewayLoadBalancer return the gateway load balancer
