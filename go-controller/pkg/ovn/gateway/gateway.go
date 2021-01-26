@@ -11,7 +11,9 @@ import (
 )
 
 const (
-	// OvnGatewayLoadBalancerIds represent the OVN loadbalancers used on nodes
+	// OvnLoadBalancerIdlingIds represent the OVN loadbalancers
+	// used for services that has been idled.
+	// Default behaviour to send an event and drop the packet for VIPs without backends
 	OvnGatewayLoadBalancerIds = "lb_gateway_router"
 )
 
