@@ -264,7 +264,6 @@ type OvnAuthConfig struct {
 	Scheme         OvnDBScheme
 
 	northbound bool
-	externalID string // ovn-nb or ovn-remote
 
 	exec kexec.Interface
 }
@@ -1482,11 +1481,9 @@ func buildOvnAuth(exec kexec.Interface, northbound bool, cliAuth, confAuth *OvnA
 	var direction string
 	var defaultAuth *OvnAuthConfig
 	if northbound {
-		auth.externalID = "ovn-nb"
 		direction = "nb"
 		defaultAuth = &savedOvnNorth
 	} else {
-		auth.externalID = "ovn-remote"
 		direction = "sb"
 		defaultAuth = &savedOvnSouth
 	}
@@ -1616,9 +1613,13 @@ func (a *OvnAuthConfig) SetDBAuth() error {
 		}
 	}
 
-	if err := setOVSExternalID(a.exec, a.externalID, "\""+a.GetURL()+"\""); err != nil {
-		return err
+	if !a.northbound {
+		// store the Southbound Database address in an external id - "external_ids:ovn-remote"
+		if err := setOVSExternalID(a.exec, "ovn-remote", "\""+a.GetURL()+"\""); err != nil {
+			return err
+		}
 	}
+
 	return nil
 }
 

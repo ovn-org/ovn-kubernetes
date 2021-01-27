@@ -1131,7 +1131,6 @@ mode=shared
 			fexec := ovntest.NewFakeExec()
 			fexec.AddFakeCmdsNoOutputNoError([]string{
 				"ovn-nbctl --db=" + nbURL + " --timeout=5 --private-key=" + keyFile + " --certificate=" + certFile + " --bootstrap-ca-cert=" + caFile + " list nb_global",
-				"ovs-vsctl --timeout=15 set Open_vSwitch . external_ids:ovn-nb=\"" + nbURL + "\"",
 			})
 
 			cliConfig := &OvnAuthConfig{
@@ -1150,7 +1149,6 @@ mode=shared
 			Expect(a.Address).To(Equal(nbURL))
 			Expect(a.CertCommonName).To(Equal(nbDummyCommonName))
 			Expect(a.northbound).To(BeTrue())
-			Expect(a.externalID).To(Equal("ovn-nb"))
 
 			Expect(a.GetURL()).To(Equal(nbURL))
 			err = a.SetDBAuth()
@@ -1183,7 +1181,6 @@ mode=shared
 			Expect(a.Address).To(Equal(sbURL))
 			Expect(a.CertCommonName).To(Equal(sbDummyCommonName))
 			Expect(a.northbound).To(BeFalse())
-			Expect(a.externalID).To(Equal("ovn-remote"))
 
 			Expect(a.GetURL()).To(Equal(sbURL))
 			err = a.SetDBAuth()
@@ -1192,49 +1189,25 @@ mode=shared
 		})
 
 		const (
-			nbURLLegacy    string = "tcp://1.2.3.4:6641"
-			nbURLConverted string = "tcp:1.2.3.4:6641"
 			sbURLLegacy    string = "tcp://1.2.3.4:6642"
 			sbURLConverted string = "tcp:1.2.3.4:6642"
 		)
 
-		It("configures client northbound TCP legacy address correctly", func() {
-			fexec := ovntest.NewFakeExec()
-			fexec.AddFakeCmdsNoOutputNoError([]string{
-				"ovs-vsctl --timeout=15 set Open_vSwitch . external_ids:ovn-nb=\"" + nbURLConverted + "\"",
-			})
-
-			cliConfig := &OvnAuthConfig{Address: nbURLLegacy}
-			a, err := buildOvnAuth(fexec, true, cliConfig, &OvnAuthConfig{}, true)
-			Expect(err).NotTo(HaveOccurred())
-			Expect(a.Scheme).To(Equal(OvnDBSchemeTCP))
-			// Config should convert :// to : in addresses
-			Expect(a.Address).To(Equal(nbURLConverted))
-			Expect(a.northbound).To(BeTrue())
-			Expect(a.externalID).To(Equal("ovn-nb"))
-
-			Expect(a.GetURL()).To(Equal(nbURLConverted))
-			err = a.SetDBAuth()
-			Expect(err).NotTo(HaveOccurred())
-			Expect(fexec.CalledMatchesExpected()).To(BeTrue(), fexec.ErrorDesc)
-		})
-
 		It("configures client southbound TCP legacy address correctly", func() {
 			fexec := ovntest.NewFakeExec()
 			fexec.AddFakeCmdsNoOutputNoError([]string{
-				"ovs-vsctl --timeout=15 set Open_vSwitch . external_ids:ovn-nb=\"" + nbURLConverted + "\"",
+				"ovs-vsctl --timeout=15 set Open_vSwitch . external_ids:ovn-remote=\"" + sbURLConverted + "\"",
 			})
 
-			cliConfig := &OvnAuthConfig{Address: nbURLLegacy}
-			a, err := buildOvnAuth(fexec, true, cliConfig, &OvnAuthConfig{}, true)
+			cliConfig := &OvnAuthConfig{Address: sbURLLegacy}
+			a, err := buildOvnAuth(fexec, false, cliConfig, &OvnAuthConfig{}, true)
 			Expect(err).NotTo(HaveOccurred())
 			Expect(a.Scheme).To(Equal(OvnDBSchemeTCP))
 			// Config should convert :// to : in addresses
-			Expect(a.Address).To(Equal(nbURLConverted))
-			Expect(a.northbound).To(BeTrue())
-			Expect(a.externalID).To(Equal("ovn-nb"))
+			Expect(a.Address).To(Equal(sbURLConverted))
+			Expect(a.northbound).To(BeFalse())
 
-			Expect(a.GetURL()).To(Equal(nbURLConverted))
+			Expect(a.GetURL()).To(Equal(sbURLConverted))
 			err = a.SetDBAuth()
 			Expect(err).NotTo(HaveOccurred())
 			Expect(fexec.CalledMatchesExpected()).To(BeTrue(), fexec.ErrorDesc)
