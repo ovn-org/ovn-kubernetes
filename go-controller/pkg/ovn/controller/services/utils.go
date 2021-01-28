@@ -81,31 +81,19 @@ func deleteVIPsFromOVN(vips sets.String, st *serviceTracker, name, namespace str
 	for vipKey := range vips {
 		// the VIP is stored with the format IP:Port/Protocol
 		vip, proto := splitVirtualIPKey(vipKey)
-		// ClusterIP use a global load balancer per protocol
-		lbID, err := loadbalancer.GetOVNKubeLoadBalancer(proto, loadbalancer.OvnLoadBalancerClusterIds)
-		if err != nil {
-			klog.Errorf("Error getting OVN LoadBalancer for protocol %s", proto)
-			return err
+
+		// If we enable idling we have to delete the VIP from the idling loadbalancers
+		lbExternalIds := []string{loadbalancer.OvnLoadBalancerClusterIds}
+		if config.Kubernetes.OVNEmptyLbEvents {
+			lbExternalIds = append(lbExternalIds, loadbalancer.OvnLoadBalancerIdlingIds)
 		}
-		// Delete the Service VIP from OVN
-		klog.Infof("Deleting service %s on namespace %s from OVN", name, namespace)
-		if err := loadbalancer.DeleteLoadBalancerVIP(lbID, vip); err != nil {
-			klog.Errorf("Error deleting VIP %s on OVN LoadBalancer %s", vip, lbID)
-			return err
-		}
-		// NodePort and ExternalIPs use loadbalancers in each node
-		gatewayRouters, _, err := gateway.GetOvnGateways()
-		if err != nil {
-			return errors.Wrapf(err, "failed to retrieve OVN gateway routers")
-		}
-		// Configure the NodePort in each Node Gateway Router
-		for _, gatewayRouter := range gatewayRouters {
-			lbID, err := gateway.GetGatewayLoadBalancer(gatewayRouter, proto, gateway.OvnGatewayLoadBalancerIds)
+		// Delete the VIPs on the ClusterIP loadbalancers
+		for _, lbExternalID := range lbExternalIds {
+			// ClusterIP use a global load balancer per protocol
+			lbID, err := loadbalancer.GetOVNKubeLoadBalancer(proto, lbExternalID)
 			if err != nil {
-				klog.Warningf("Service Sync: Gateway router %s does not have load balancer (%v)",
-					gatewayRouter, err)
-				// TODO: why continue? should we error and requeue and retry?
-				continue
+				klog.Errorf("Error getting OVN LoadBalancer for protocol %s", proto)
+				return err
 			}
 			// Delete the Service VIP from OVN
 			klog.Infof("Deleting service %s on namespace %s from OVN", name, namespace)
@@ -114,6 +102,38 @@ func deleteVIPsFromOVN(vips sets.String, st *serviceTracker, name, namespace str
 				return err
 			}
 		}
+
+		// NodePort and ExternalIPs use loadbalancers in each node
+		gatewayRouters, _, err := gateway.GetOvnGateways()
+		if err != nil {
+			return errors.Wrapf(err, "failed to retrieve OVN gateway routers")
+		}
+
+		// If we enable idling we have to delete the VIP from the idling loadbalancers
+		gwExternalIds := []string{gateway.OvnGatewayLoadBalancerIds}
+		if config.Kubernetes.OVNEmptyLbEvents {
+			gwExternalIds = append(gwExternalIds, gateway.OvnGatewayIdlingIds)
+		}
+		// Delete the VIPs on the NodePort loadbalancers
+		for _, gwExternalID := range gwExternalIds {
+			// Configure the NodePort in each Node Gateway Router
+			for _, gatewayRouter := range gatewayRouters {
+				lbID, err := gateway.GetGatewayLoadBalancer(gatewayRouter, proto, gwExternalID)
+				if err != nil {
+					klog.Warningf("Service Sync: Gateway router %s does not have load balancer (%v)",
+						gatewayRouter, err)
+					// TODO: why continue? should we error and requeue and retry?
+					continue
+				}
+				// Delete the Service VIP from OVN
+				klog.Infof("Deleting service %s on namespace %s from OVN", name, namespace)
+				if err := loadbalancer.DeleteLoadBalancerVIP(lbID, vip); err != nil {
+					klog.Errorf("Error deleting VIP %s on OVN LoadBalancer %s", vip, lbID)
+					return err
+				}
+			}
+		}
+
 		// Delete the Service VIP from the Service Tracker
 		st.deleteServiceVIP(name, namespace, vip, proto)
 	}
