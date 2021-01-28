@@ -26,7 +26,7 @@ function testrun {
     if [ ! -z "${RACE:-}" ]; then
         args="-race "
     fi
-    if [[ "$USER" != root && " ${root_pkgs[@]} " =~ " $pkg " ]]; then
+    if [[ "$USER" != root && " ${root_pkgs[@]} " =~ " $pkg " && -z "${DOCKER_TEST:-}" ]]; then
         testfile=$(mktemp --tmpdir ovn-test.XXXXXXXX)
         echo "sudo required for ${pkg}, compiling test to ${testfile}"
         if [[ ! -z "${RACE:-}" && "${pkg}" != "github.com/ovn-org/ovn-kubernetes/go-controller/hybrid-overlay/pkg/controller" ]]; then
