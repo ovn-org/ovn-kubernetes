@@ -233,23 +233,24 @@ func (oc *Controller) upgradeOVNTopology(existingNodes *kapi.NodeList) error {
 func (oc *Controller) StartClusterMaster(masterNodeName string) error {
 	// The gateway router need to be connected to the distributed router via a per-node join switch.
 	// We need a subnet allocator that allocates subnet for this per-node join switch.
-	if config.IPv4Mode {
-		// initialize the subnet required for DNAT and SNAT ip for the shared gateway mode
-		_, nodeLocalNatSubnetCIDR, _ := net.ParseCIDR(types.V4NodeLocalNATSubnet)
-		oc.nodeLocalNatIPv4Allocator, _ = ipallocator.NewCIDRRange(nodeLocalNatSubnetCIDR)
-		// set aside the first two IPs for the nextHop on the host and for distributed gateway port
-		_ = oc.nodeLocalNatIPv4Allocator.Allocate(net.ParseIP(types.V4NodeLocalNATSubnetNextHop))
-		_ = oc.nodeLocalNatIPv4Allocator.Allocate(net.ParseIP(types.V4NodeLocalDistributedGWPortIP))
+	if config.Gateway.Mode == config.GatewayModeLocal {
+		if config.IPv4Mode {
+			// initialize the subnet required for DNAT and SNAT ip for the shared gateway mode
+			_, nodeLocalNatSubnetCIDR, _ := net.ParseCIDR(types.V4NodeLocalNATSubnet)
+			oc.nodeLocalNatIPv4Allocator, _ = ipallocator.NewCIDRRange(nodeLocalNatSubnetCIDR)
+			// set aside the first two IPs for the nextHop on the host and for distributed gateway port
+			_ = oc.nodeLocalNatIPv4Allocator.Allocate(net.ParseIP(types.V4NodeLocalNATSubnetNextHop))
+			_ = oc.nodeLocalNatIPv4Allocator.Allocate(net.ParseIP(types.V4NodeLocalDistributedGWPortIP))
+		}
+		if config.IPv6Mode {
+			// initialize the subnet required for DNAT and SNAT ip for the shared gateway mode
+			_, nodeLocalNatSubnetCIDR, _ := net.ParseCIDR(types.V6NodeLocalNATSubnet)
+			oc.nodeLocalNatIPv6Allocator, _ = ipallocator.NewCIDRRange(nodeLocalNatSubnetCIDR)
+			// set aside the first two IPs for the nextHop on the host and for distributed gateway port
+			_ = oc.nodeLocalNatIPv6Allocator.Allocate(net.ParseIP(types.V6NodeLocalNATSubnetNextHop))
+			_ = oc.nodeLocalNatIPv6Allocator.Allocate(net.ParseIP(types.V6NodeLocalDistributedGWPortIP))
+		}
 	}
-	if config.IPv6Mode {
-		// initialize the subnet required for DNAT and SNAT ip for the shared gateway mode
-		_, nodeLocalNatSubnetCIDR, _ := net.ParseCIDR(types.V6NodeLocalNATSubnet)
-		oc.nodeLocalNatIPv6Allocator, _ = ipallocator.NewCIDRRange(nodeLocalNatSubnetCIDR)
-		// set aside the first two IPs for the nextHop on the host and for distributed gateway port
-		_ = oc.nodeLocalNatIPv6Allocator.Allocate(net.ParseIP(types.V6NodeLocalNATSubnetNextHop))
-		_ = oc.nodeLocalNatIPv6Allocator.Allocate(net.ParseIP(types.V6NodeLocalDistributedGWPortIP))
-	}
-
 	existingNodes, err := oc.kube.GetNodes()
 	if err != nil {
 		klog.Errorf("Error in fetching nodes: %v", err)
@@ -353,8 +354,10 @@ func (oc *Controller) SetupMaster(masterNodeName string) error {
 		return err
 	}
 
-	if err := addDistributedGWPort(); err != nil {
-		return err
+	if config.Gateway.Mode == config.GatewayModeLocal {
+		if err := addDistributedGWPort(); err != nil {
+			return err
+		}
 	}
 
 	// Determine SCTP support
@@ -647,8 +650,10 @@ func (oc *Controller) syncGatewayLogicalNetwork(node *kapi.Node, l3GatewayConfig
 			return err
 		}
 
-		if err := oc.addNodeLocalNatEntries(node, mpMAC.String(), hostIfAddr); err != nil {
-			return err
+		if config.Gateway.Mode == config.GatewayModeLocal {
+			if err := oc.addNodeLocalNatEntries(node, mpMAC.String(), hostIfAddr); err != nil {
+				return err
+			}
 		}
 	}
 

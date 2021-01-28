@@ -212,9 +212,11 @@ func gatewayInitInternal(nodeName, gwIntf string, subnets []*net.IPNet, gwNextHo
 		return bridgeName, uplinkName, nil, nil, fmt.Errorf("failed to set up shared interface gateway: %v", err)
 	}
 
-	err = setupLocalNodeAccessBridge(nodeName, subnets)
-	if err != nil {
-		return bridgeName, uplinkName, nil, nil, err
+	if config.Gateway.Mode == config.GatewayModeLocal {
+		err = setupLocalNodeAccessBridge(nodeName, subnets)
+		if err != nil {
+			return bridgeName, uplinkName, nil, nil, err
+		}
 	}
 	chassisID, err := util.GetNodeChassisID()
 	if err != nil {
