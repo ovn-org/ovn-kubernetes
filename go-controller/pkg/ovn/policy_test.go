@@ -1471,6 +1471,7 @@ var _ = ginkgo.Describe("OVN NetworkPolicy Low-Level Operations", func() {
 	var (
 		fExec     *ovntest.FakeExec
 		asFactory *addressset.FakeAddressSetFactory
+		fakeOvn *FakeOVN
 	)
 
 	ginkgo.BeforeEach(func() {
@@ -1483,6 +1484,11 @@ var _ = ginkgo.Describe("OVN NetworkPolicy Low-Level Operations", func() {
 		asFactory = addressset.NewFakeAddressSetFactory()
 		config.IPv4Mode = true
 		config.IPv6Mode = false
+		fakeOvn = NewFakeOVN(fExec)
+	})
+
+	ginkgo.AfterEach(func() {
+		fakeOvn.shutdown()
 	})
 
 	ginkgo.It("computes match strings from address sets correctly", func() {
@@ -1513,70 +1519,70 @@ var _ = ginkgo.Describe("OVN NetworkPolicy Low-Level Operations", func() {
 		six := fmt.Sprintf("testing.policy.ingress.6")
 
 		cur := addExpectedGressCmds(fExec, gp, pgName, []string{asName}, []string{asName, one})
-		gp.addNamespaceAddressSet(one, pgName)
+		gp.addNamespaceAddressSet(fakeOvn.controller.ovnNBClient, one, pgName)
 		gomega.Expect(fExec.CalledMatchesExpected()).To(gomega.BeTrue(), fExec.ErrorDesc)
 
 		cur = addExpectedGressCmds(fExec, gp, pgName, cur, []string{asName, one, two})
-		gp.addNamespaceAddressSet(two, pgName)
+		gp.addNamespaceAddressSet(fakeOvn.controller.ovnNBClient, two, pgName)
 		gomega.Expect(fExec.CalledMatchesExpected()).To(gomega.BeTrue(), fExec.ErrorDesc)
 
 		// address sets should be alphabetized
 		cur = addExpectedGressCmds(fExec, gp, pgName, cur, []string{asName, one, two, three})
-		gp.addNamespaceAddressSet(three, pgName)
+		gp.addNamespaceAddressSet(fakeOvn.controller.ovnNBClient, three, pgName)
 		gomega.Expect(fExec.CalledMatchesExpected()).To(gomega.BeTrue(), fExec.ErrorDesc)
 
 		// re-adding an existing set is a no-op
-		gp.addNamespaceAddressSet(one, pgName)
+		gp.addNamespaceAddressSet(fakeOvn.controller.ovnNBClient, one, pgName)
 		gomega.Expect(fExec.CalledMatchesExpected()).To(gomega.BeTrue(), fExec.ErrorDesc)
 
 		cur = addExpectedGressCmds(fExec, gp, pgName, cur, []string{asName, one, two, three, four})
-		gp.addNamespaceAddressSet(four, pgName)
+		gp.addNamespaceAddressSet(fakeOvn.controller.ovnNBClient, four, pgName)
 		gomega.Expect(fExec.CalledMatchesExpected()).To(gomega.BeTrue(), fExec.ErrorDesc)
 
 		// now delete a set
 		cur = addExpectedGressCmds(fExec, gp, pgName, cur, []string{asName, two, three, four})
-		gp.delNamespaceAddressSet(one, pgName)
+		gp.delNamespaceAddressSet(fakeOvn.controller.ovnNBClient, one, pgName)
 		gomega.Expect(fExec.CalledMatchesExpected()).To(gomega.BeTrue(), fExec.ErrorDesc)
 
 		// deleting again is a no-op
-		gp.delNamespaceAddressSet(one, pgName)
+		gp.delNamespaceAddressSet(fakeOvn.controller.ovnNBClient, one, pgName)
 		gomega.Expect(fExec.CalledMatchesExpected()).To(gomega.BeTrue(), fExec.ErrorDesc)
 
 		// add and delete some more...
 		cur = addExpectedGressCmds(fExec, gp, pgName, cur, []string{asName, two, three, four, five})
-		gp.addNamespaceAddressSet(five, pgName)
+		gp.addNamespaceAddressSet(fakeOvn.controller.ovnNBClient, five, pgName)
 		gomega.Expect(fExec.CalledMatchesExpected()).To(gomega.BeTrue(), fExec.ErrorDesc)
 
 		cur = addExpectedGressCmds(fExec, gp, pgName, cur, []string{asName, two, four, five})
-		gp.delNamespaceAddressSet(three, pgName)
+		gp.delNamespaceAddressSet(fakeOvn.controller.ovnNBClient, three, pgName)
 		gomega.Expect(fExec.CalledMatchesExpected()).To(gomega.BeTrue(), fExec.ErrorDesc)
 
 		// deleting again is no-op
-		gp.delNamespaceAddressSet(one, pgName)
+		gp.delNamespaceAddressSet(fakeOvn.controller.ovnNBClient, one, pgName)
 		gomega.Expect(fExec.CalledMatchesExpected()).To(gomega.BeTrue(), fExec.ErrorDesc)
 
 		cur = addExpectedGressCmds(fExec, gp, pgName, cur, []string{asName, two, four, five, six})
-		gp.addNamespaceAddressSet(six, pgName)
+		gp.addNamespaceAddressSet(fakeOvn.controller.ovnNBClient, six, pgName)
 		gomega.Expect(fExec.CalledMatchesExpected()).To(gomega.BeTrue(), fExec.ErrorDesc)
 
 		cur = addExpectedGressCmds(fExec, gp, pgName, cur, []string{asName, four, five, six})
-		gp.delNamespaceAddressSet(two, pgName)
+		gp.delNamespaceAddressSet(fakeOvn.controller.ovnNBClient, two, pgName)
 		gomega.Expect(fExec.CalledMatchesExpected()).To(gomega.BeTrue(), fExec.ErrorDesc)
 
 		cur = addExpectedGressCmds(fExec, gp, pgName, cur, []string{asName, four, six})
-		gp.delNamespaceAddressSet(five, pgName)
+		gp.delNamespaceAddressSet(fakeOvn.controller.ovnNBClient, five, pgName)
 		gomega.Expect(fExec.CalledMatchesExpected()).To(gomega.BeTrue(), fExec.ErrorDesc)
 
 		cur = addExpectedGressCmds(fExec, gp, pgName, cur, []string{asName, four})
-		gp.delNamespaceAddressSet(six, pgName)
+		gp.delNamespaceAddressSet(fakeOvn.controller.ovnNBClient, six, pgName)
 		gomega.Expect(fExec.CalledMatchesExpected()).To(gomega.BeTrue(), fExec.ErrorDesc)
 
 		cur = addExpectedGressCmds(fExec, gp, pgName, cur, []string{asName})
-		gp.delNamespaceAddressSet(four, pgName)
+		gp.delNamespaceAddressSet(fakeOvn.controller.ovnNBClient, four, pgName)
 		gomega.Expect(fExec.CalledMatchesExpected()).To(gomega.BeTrue(), fExec.ErrorDesc)
 
 		// deleting again is no-op
-		gp.delNamespaceAddressSet(four, pgName)
+		gp.delNamespaceAddressSet(fakeOvn.controller.ovnNBClient, four, pgName)
 		gomega.Expect(fExec.CalledMatchesExpected()).To(gomega.BeTrue(), fExec.ErrorDesc)
 	})
 })

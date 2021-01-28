@@ -63,6 +63,16 @@ func (mock *MockOVNClient) ACLAddEntity(entityType goovn.EntityType, entity, dir
 	return nil, fmt.Errorf("method %s is not implemented yet", functionName())
 }
 
+// Set (change) match criteria for ACL
+func (mock *MockOVNClient) ACLSetMatchEntity(entityType goovn.EntityType, entity, direct, oldMatch, newMatch string, priority int) (*goovn.OvnCommand, error) {
+	return nil, fmt.Errorf("method %s is not implemented yet", functionName())
+}
+
+// Set (change) logging for ACL
+func (mock *MockOVNClient) ACLSetLoggingEntity(entityType goovn.EntityType, entity, direct, match string, priority int, newLogflag bool, newMeter, newSeverity string) (*goovn.OvnCommand, error) {
+	return nil, fmt.Errorf("method %s is not implemented yet", functionName())
+}
+
 // Delete acl from entity (PORT_GROUP or LOGICAL_SWITCH)
 func (mock *MockOVNClient) ACLDelEntity(entityType goovn.EntityType, entity, direct, match string, priority int, external_ids map[string]string) (*goovn.OvnCommand, error) {
 	return nil, fmt.Errorf("method %s is not implemented yet", functionName())

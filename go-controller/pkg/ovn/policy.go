@@ -816,7 +816,7 @@ func (oc *Controller) addNetworkPolicy(policy *knet.NetworkPolicy) {
 				podSelector:       fromJSON.PodSelector,
 			})
 		}
-		ingress.localPodAddACL(np.portGroupName, np.portGroupUUID, nsInfo.aclLogging.Allow)
+		ingress.localPodAddACL(oc.ovnNBClient, np.portGroupName, np.portGroupUUID, nsInfo.aclLogging.Allow)
 		np.ingressPolicies = append(np.ingressPolicies, ingress)
 	}
 
@@ -852,7 +852,7 @@ func (oc *Controller) addNetworkPolicy(policy *knet.NetworkPolicy) {
 				podSelector:       toJSON.PodSelector,
 			})
 		}
-		egress.localPodAddACL(np.portGroupName, np.portGroupUUID, nsInfo.aclLogging.Allow)
+		egress.localPodAddACL(oc.ovnNBClient, np.portGroupName, np.portGroupUUID, nsInfo.aclLogging.Allow)
 		np.egressPolicies = append(np.egressPolicies, egress)
 	}
 	np.Unlock()
@@ -1124,7 +1124,7 @@ func (oc *Controller) handlePeerNamespaceSelector(
 				np.Lock()
 				defer np.Unlock()
 				if !np.deleted {
-					gress.addNamespaceAddressSet(namespace.Name, np.portGroupName)
+					gress.addNamespaceAddressSet(oc.ovnNBClient, namespace.Name, np.portGroupName)
 				}
 			},
 			DeleteFunc: func(obj interface{}) {
@@ -1132,7 +1132,7 @@ func (oc *Controller) handlePeerNamespaceSelector(
 				np.Lock()
 				defer np.Unlock()
 				if !np.deleted {
-					gress.delNamespaceAddressSet(namespace.Name, np.portGroupName)
+					gress.delNamespaceAddressSet(oc.ovnNBClient, namespace.Name, np.portGroupName)
 				}
 			},
 			UpdateFunc: func(oldObj, newObj interface{}) {
