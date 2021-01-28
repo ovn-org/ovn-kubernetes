@@ -523,19 +523,19 @@ func addPolicyBasedRoutes(nodeName, mgmtPortIP string, hostIfAddr *net.IPNet) er
 		}
 	}
 
-	// policy to allow host -> service -> hairpin back to host
-	matchStr = fmt.Sprintf("%s.src == %s && %s.dst == %s /* %s */",
-		l3Prefix, mgmtPortIP, l3Prefix, hostIfAddr.IP.String(), nodeName)
-	_, stderr, err = util.RunOVNNbctl("lr-policy-add", types.OVNClusterRouter, types.MGMTPortPolicyPriority, matchStr,
-		"reroute", natSubnetNextHop)
-	if err != nil {
-		if !strings.Contains(stderr, "already existed") {
-			return fmt.Errorf("failed to add policy route '%s' for host %q on %s "+
-				"stderr: %s, error: %v", matchStr, nodeName, types.OVNClusterRouter, stderr, err)
-		}
-	}
-
 	if config.Gateway.Mode == config.GatewayModeLocal {
+		// policy to allow host -> service -> hairpin back to host
+		matchStr = fmt.Sprintf("%s.src == %s && %s.dst == %s /* %s */",
+			l3Prefix, mgmtPortIP, l3Prefix, hostIfAddr.IP.String(), nodeName)
+		_, stderr, err = util.RunOVNNbctl("lr-policy-add", types.OVNClusterRouter, types.MGMTPortPolicyPriority, matchStr,
+			"reroute", natSubnetNextHop)
+		if err != nil {
+			if !strings.Contains(stderr, "already existed") {
+				return fmt.Errorf("failed to add policy route '%s' for host %q on %s "+
+					"stderr: %s, error: %v", matchStr, nodeName, types.OVNClusterRouter, stderr, err)
+			}
+		}
+
 		var matchDst string
 		// Local gw mode needs to use DGP to do hostA -> service -> hostB
 		var clusterL3Prefix string
