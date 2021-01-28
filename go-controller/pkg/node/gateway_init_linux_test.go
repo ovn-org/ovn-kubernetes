@@ -73,7 +73,6 @@ func shareGatewayInterfaceTest(app *cli.App, testNS ns.NetNS,
 			brLocalnetMAC string = "11:22:33:44:55:66"
 		)
 
-		brNextHopCIDR := fmt.Sprintf("%s/%d", brNextHopIp, types.V4NodeLocalNATSubnetPrefix)
 		fexec := ovntest.NewLooseCompareFakeExec()
 		fexec.AddFakeCmd(&ovntest.ExpectedCmd{
 			Cmd: "ovs-vsctl --timeout=15 -- port-to-br eth0",
@@ -117,8 +116,6 @@ func shareGatewayInterfaceTest(app *cli.App, testNS ns.NetNS,
 		fexec.AddFakeCmdsNoOutputNoError([]string{
 			"ovs-vsctl --timeout=15 set Open_vSwitch . external_ids:ovn-bridge-mappings=" + types.PhysicalNetworkName + ":breth0",
 		})
-
-		setupNodeAccessBridgeTest(fexec, nodeName, brLocalnetMAC, mtu)
 
 		fexec.AddFakeCmd(&ovntest.ExpectedCmd{
 			Cmd:    "ovs-vsctl --timeout=15 --if-exists get Open_vSwitch . external_ids:system-id",
@@ -197,21 +194,6 @@ func shareGatewayInterfaceTest(app *cli.App, testNS ns.NetNS,
 			Expect(err).NotTo(HaveOccurred())
 			err = sharedGw.Init(wf)
 			Expect(err).NotTo(HaveOccurred())
-			// check if IP addresses have been assigned to localnetGatewayNextHopPort interface
-			link, err := netlink.LinkByName(localnetGatewayNextHopPort)
-			Expect(err).NotTo(HaveOccurred())
-			addresses, err := netlink.AddrList(link, syscall.AF_INET)
-			Expect(err).NotTo(HaveOccurred())
-			var foundAddr bool
-			expectedAddress, err := netlink.ParseAddr(brNextHopCIDR)
-			Expect(err).NotTo(HaveOccurred())
-			for _, a := range addresses {
-				if a.IP.Equal(expectedAddress.IP) && bytes.Equal(a.Mask, expectedAddress.Mask) {
-					foundAddr = true
-					break
-				}
-			}
-			Expect(foundAddr).To(BeTrue())
 
 			err = nodeAnnotator.Run()
 			Expect(err).NotTo(HaveOccurred())
