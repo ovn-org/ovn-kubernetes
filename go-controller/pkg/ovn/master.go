@@ -261,21 +261,23 @@ func (oc *Controller) StartClusterMaster(masterNodeName string) error {
 	klog.Infof("Starting cluster master")
 	// The gateway router need to be connected to the distributed router via a per-node join switch.
 	// We need a subnet allocator that allocates subnet for this per-node join switch.
-	if config.IPv4Mode {
-		// initialize the subnet required for DNAT and SNAT ip for the shared gateway mode
-		_, nodeLocalNatSubnetCIDR, _ := net.ParseCIDR(types.V4NodeLocalNATSubnet)
-		oc.nodeLocalNatIPv4Allocator, _ = ipallocator.NewCIDRRange(nodeLocalNatSubnetCIDR)
-		// set aside the first two IPs for the nextHop on the host and for distributed gateway port
-		_ = oc.nodeLocalNatIPv4Allocator.Allocate(net.ParseIP(types.V4NodeLocalNATSubnetNextHop))
-		_ = oc.nodeLocalNatIPv4Allocator.Allocate(net.ParseIP(types.V4NodeLocalDistributedGWPortIP))
-	}
-	if config.IPv6Mode {
-		// initialize the subnet required for DNAT and SNAT ip for the shared gateway mode
-		_, nodeLocalNatSubnetCIDR, _ := net.ParseCIDR(types.V6NodeLocalNATSubnet)
-		oc.nodeLocalNatIPv6Allocator, _ = ipallocator.NewCIDRRange(nodeLocalNatSubnetCIDR)
-		// set aside the first two IPs for the nextHop on the host and for distributed gateway port
-		_ = oc.nodeLocalNatIPv6Allocator.Allocate(net.ParseIP(types.V6NodeLocalNATSubnetNextHop))
-		_ = oc.nodeLocalNatIPv6Allocator.Allocate(net.ParseIP(types.V6NodeLocalDistributedGWPortIP))
+	if config.Gateway.Mode == config.GatewayModeLocal {
+		if config.IPv4Mode {
+			// initialize the subnet required for DNAT and SNAT ip for the shared gateway mode
+			_, nodeLocalNatSubnetCIDR, _ := net.ParseCIDR(types.V4NodeLocalNATSubnet)
+			oc.nodeLocalNatIPv4Allocator, _ = ipallocator.NewCIDRRange(nodeLocalNatSubnetCIDR)
+			// set aside the first two IPs for the nextHop on the host and for distributed gateway port
+			_ = oc.nodeLocalNatIPv4Allocator.Allocate(net.ParseIP(types.V4NodeLocalNATSubnetNextHop))
+			_ = oc.nodeLocalNatIPv4Allocator.Allocate(net.ParseIP(types.V4NodeLocalDistributedGWPortIP))
+		}
+		if config.IPv6Mode {
+			// initialize the subnet required for DNAT and SNAT ip for the shared gateway mode
+			_, nodeLocalNatSubnetCIDR, _ := net.ParseCIDR(types.V6NodeLocalNATSubnet)
+			oc.nodeLocalNatIPv6Allocator, _ = ipallocator.NewCIDRRange(nodeLocalNatSubnetCIDR)
+			// set aside the first two IPs for the nextHop on the host and for distributed gateway port
+			_ = oc.nodeLocalNatIPv6Allocator.Allocate(net.ParseIP(types.V6NodeLocalNATSubnetNextHop))
+			_ = oc.nodeLocalNatIPv6Allocator.Allocate(net.ParseIP(types.V6NodeLocalDistributedGWPortIP))
+		}
 	}
 
 	// Enable logical datapath groups for OVN 20.12 and later
@@ -315,17 +317,19 @@ func (oc *Controller) StartClusterMaster(masterNodeName string) error {
 			}
 			util.UpdateUsedHostSubnetsCount(hostSubnet, &oc.v4HostSubnetsUsed, &oc.v6HostSubnetsUsed, true)
 		}
-		nodeLocalNatIPs, _ := util.ParseNodeLocalNatIPAnnotation(&node)
-		klog.V(5).Infof("Node %s contains local NAT IPs: %v", node.Name, nodeLocalNatIPs)
-		for _, nodeLocalNatIP := range nodeLocalNatIPs {
-			var err error
-			if utilnet.IsIPv6(nodeLocalNatIP) {
-				err = oc.nodeLocalNatIPv6Allocator.Allocate(nodeLocalNatIP)
-			} else {
-				err = oc.nodeLocalNatIPv4Allocator.Allocate(nodeLocalNatIP)
-			}
-			if err != nil {
-				utilruntime.HandleError(err)
+		if config.Gateway.Mode == config.GatewayModeLocal {
+			nodeLocalNatIPs, _ := util.ParseNodeLocalNatIPAnnotation(&node)
+			klog.V(5).Infof("Node %s contains local NAT IPs: %v", node.Name, nodeLocalNatIPs)
+			for _, nodeLocalNatIP := range nodeLocalNatIPs {
+				var err error
+				if utilnet.IsIPv6(nodeLocalNatIP) {
+					err = oc.nodeLocalNatIPv6Allocator.Allocate(nodeLocalNatIP)
+				} else {
+					err = oc.nodeLocalNatIPv4Allocator.Allocate(nodeLocalNatIP)
+				}
+				if err != nil {
+					utilruntime.HandleError(err)
+				}
 			}
 		}
 	}
@@ -389,8 +393,10 @@ func (oc *Controller) SetupMaster(masterNodeName string) error {
 		return err
 	}
 
-	if err := addDistributedGWPort(); err != nil {
-		return err
+	if config.Gateway.Mode == config.GatewayModeLocal {
+		if err := addDistributedGWPort(); err != nil {
+			return err
+		}
 	}
 
 	// Determine SCTP support
@@ -694,8 +700,10 @@ func (oc *Controller) syncGatewayLogicalNetwork(node *kapi.Node, l3GatewayConfig
 			return err
 		}
 
-		if err := oc.addNodeLocalNatEntries(node, mpMAC.String(), hostIfAddr); err != nil {
-			return err
+		if config.Gateway.Mode == config.GatewayModeLocal {
+			if err := oc.addNodeLocalNatEntries(node, mpMAC.String(), hostIfAddr); err != nil {
+				return err
+			}
 		}
 	}
 
@@ -1093,15 +1101,17 @@ func (oc *Controller) deleteNode(nodeName string, hostSubnets []*net.IPNet, node
 	// update metrics
 	metrics.RecordSubnetUsage(oc.v4HostSubnetsUsed, oc.v6HostSubnetsUsed)
 
-	for _, nodeLocalNatIP := range nodeLocalNatIPs {
-		var err error
-		if utilnet.IsIPv6(nodeLocalNatIP) {
-			err = oc.nodeLocalNatIPv6Allocator.Release(nodeLocalNatIP)
-		} else {
-			err = oc.nodeLocalNatIPv4Allocator.Release(nodeLocalNatIP)
-		}
-		if err != nil {
-			klog.Errorf("Error deleting node %s's node local NAT IP %s from %v: %v", nodeName, nodeLocalNatIP, nodeLocalNatIPs, err)
+	if config.Gateway.Mode == config.GatewayModeLocal {
+		for _, nodeLocalNatIP := range nodeLocalNatIPs {
+			var err error
+			if utilnet.IsIPv6(nodeLocalNatIP) {
+				err = oc.nodeLocalNatIPv6Allocator.Release(nodeLocalNatIP)
+			} else {
+				err = oc.nodeLocalNatIPv4Allocator.Release(nodeLocalNatIP)
+			}
+			if err != nil {
+				klog.Errorf("Error deleting node %s's node local NAT IP %s from %v: %v", nodeName, nodeLocalNatIP, nodeLocalNatIPs, err)
+			}
 		}
 	}
 
