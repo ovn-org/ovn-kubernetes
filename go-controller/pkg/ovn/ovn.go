@@ -10,6 +10,7 @@ import (
 	"time"
 
 	goovn "github.com/ebay/go-ovn"
+	nettypes "github.com/k8snetworkplumbingwg/network-attachment-definition-client/pkg/apis/k8s.cni.cncf.io/v1"
 	hocontroller "github.com/ovn-org/ovn-kubernetes/go-controller/hybrid-overlay/pkg/controller"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
 	egressipv1 "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/egressip/v1"
@@ -517,6 +518,10 @@ func exGatewayAnnotationsChanged(oldPod, newPod *kapi.Pod) bool {
 		oldPod.Annotations[routingNetworkAnnotation] != newPod.Annotations[routingNetworkAnnotation]
 }
 
+func networkStatusAnnotationsChanged(oldPod, newPod *kapi.Pod) bool {
+	return oldPod.Annotations[nettypes.NetworkStatusAnnot] != newPod.Annotations[nettypes.NetworkStatusAnnot]
+}
+
 // ensurePod tries to set up a pod. It returns success or failure; failure
 // indicates the pod should be retried later.
 func (oc *Controller) ensurePod(oldPod, pod *kapi.Pod, addPort bool) bool {
@@ -532,7 +537,7 @@ func (oc *Controller) ensurePod(oldPod, pod *kapi.Pod, addPort bool) bool {
 			return false
 		}
 	} else {
-		if oldPod != nil && exGatewayAnnotationsChanged(oldPod, pod) {
+		if oldPod != nil && (exGatewayAnnotationsChanged(oldPod, pod) || networkStatusAnnotationsChanged(oldPod, pod)) {
 			// No matter if a pod is ovn networked, or host networked, we still need to check for exgw
 			// annotations. If the pod is ovn networked and is in update reschedule, addLogicalPort will take
 			// care of updating the exgw updates
