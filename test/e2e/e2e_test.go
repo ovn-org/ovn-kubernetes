@@ -22,14 +22,6 @@ import (
 	e2epod "k8s.io/kubernetes/test/e2e/framework/pod"
 )
 
-const (
-	vxlanPort            = "4789" // IANA assigned VXLAN UDP port - rfc7348
-	podNetworkAnnotation = "k8s.ovn.org/pod-networks"
-	retryInterval        = 1 * time.Second  // polling interval timer
-	retryTimeout         = 40 * time.Second // polling timeout
-	ciNetworkName        = "kind"
-)
-
 func checkContinuousConnectivity(f *framework.Framework, nodeName, podName, host string, port, timeout int, podChan chan *v1.Pod, errChan chan error) {
 	contName := fmt.Sprintf("%s-container", podName)
 
