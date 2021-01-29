@@ -7,6 +7,7 @@ import (
 	"io/ioutil"
 	"net/http"
 	"strings"
+	"sync/atomic"
 	"time"
 
 	"github.com/gorilla/mux"
@@ -46,17 +47,24 @@ import (
 // started.
 
 // NewCNIServer creates and returns a new Server object which will listen on a socket in the given path
-func NewCNIServer(rundir string, factory factory.NodeWatchFactory) *Server {
+func NewCNIServer(rundir string, useOVSExternalIDs bool, factory factory.NodeWatchFactory) *Server {
 	if len(rundir) == 0 {
 		rundir = serverRunDir
 	}
 	router := mux.NewRouter()
+
+	// we use atomic lib to store port binding mode state, so use int32 to represent bool
+	var ovnPortBinding int32
+	if useOVSExternalIDs {
+		ovnPortBinding = 1
+	}
 
 	s := &Server{
 		Server: http.Server{
 			Handler: router,
 		},
 		rundir:             rundir,
+		useOVSExternalIDs:  ovnPortBinding,
 		podLister:          corev1listers.NewPodLister(factory.LocalPodInformer().GetIndexer()),
 		runningSandboxAdds: make(map[string]*PodRequest),
 	}
@@ -228,7 +236,11 @@ func (s *Server) handleCNIRequest(r *http.Request) ([]byte, error) {
 	}
 	defer s.finishSandboxRequest(req)
 
-	result, err := s.requestFunc(req, s.podLister)
+	useOVSExternalIDs := false
+	if atomic.LoadInt32(&s.useOVSExternalIDs) > 0 {
+		useOVSExternalIDs = true
+	}
+	result, err := s.requestFunc(req, s.podLister, useOVSExternalIDs)
 	if err != nil {
 		// Prefix error with request information for easier debugging
 		return nil, fmt.Errorf("%s %v", req, err)
@@ -252,4 +264,9 @@ func (s *Server) handleCNIMetrics(w http.ResponseWriter, r *http.Request) {
 	if _, err := w.Write([]byte{}); err != nil {
 		klog.Warningf("Error writing %s HTTP response for metrics post", err)
 	}
+}
+
+func (s *Server) EnableOVNPortUpSupport() {
+	atomic.StoreInt32(&s.useOVSExternalIDs, 1)
+	klog.Info("OVN Port Binding support now enabled in CNI Server")
 }
