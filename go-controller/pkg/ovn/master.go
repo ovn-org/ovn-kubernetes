@@ -787,21 +787,30 @@ func (oc *Controller) ensureNodeLogicalNetwork(nodeName string, hostSubnets []*n
 	if oc.SCTPSupport {
 		protocols = append(protocols, v1.ProtocolSCTP)
 	}
-	for i, p := range protocols {
-		lbUUID, err := loadbalancer.GetOVNKubeLoadBalancer(p, loadbalancer.OvnLoadBalancerClusterIds)
-		if err != nil {
-			return errors.Wrapf(err, "Failed to get OVN load balancer for protocol %s", p)
-		}
-		// First loadbalancer overwrites the loadbalancer field
-		// next loadbalancers are appended
-		if i == 0 {
-			stdout, stderr, err = util.RunOVNNbctl("set", "logical_switch", nodeName, "load_balancer="+lbUUID)
-		} else {
-			stdout, stderr, err = util.RunOVNNbctl("add", "logical_switch", nodeName, "load_balancer", lbUUID)
-		}
-		if err != nil {
-			klog.Errorf("Failed to set logical switch %v's load balancer, stdout: %q, stderr: %q, error: %v", nodeName, stdout, stderr, err)
-			return err
+	// Create load-balancers for east-west traffic for each protocol UDP, TCP, SCTP
+	// and for Idling services if empty-lb-backends is enabled
+	lbExternalIds := []string{loadbalancer.OvnLoadBalancerClusterIds}
+	if config.Kubernetes.OVNEmptyLbEvents {
+		lbExternalIds = append(lbExternalIds, loadbalancer.OvnLoadBalancerIdlingIds)
+	}
+	// Create the LoadBalancers if they don´t exist
+	for i, lbExternalID := range lbExternalIds {
+		for j, p := range protocols {
+			lbUUID, err := loadbalancer.GetOVNKubeLoadBalancer(p, lbExternalID)
+			if err != nil {
+				return errors.Wrapf(err, "Failed to get OVN load balancer for protocol %s", p)
+			}
+			// First loadbalancer overwrites the loadbalancer field
+			// next loadbalancers are appended
+			if i == 0 && j == 0 {
+				stdout, stderr, err = util.RunOVNNbctl("set", "logical_switch", nodeName, "load_balancer="+lbUUID)
+			} else {
+				stdout, stderr, err = util.RunOVNNbctl("add", "logical_switch", nodeName, "load_balancer", lbUUID)
+			}
+			if err != nil {
+				klog.Errorf("Failed to set logical switch %v's load balancer, stdout: %q, stderr: %q, error: %v", nodeName, stdout, stderr, err)
+				return err
+			}
 		}
 	}
 
