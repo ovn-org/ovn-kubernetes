@@ -18,6 +18,7 @@ import (
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/kube"
 	addressset "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/address_set"
 	svccontroller "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/controller/services"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/controller/unidling"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/ipallocator"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/subnetallocator"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
@@ -49,15 +50,6 @@ const (
 	clusterRtrPortGroupName          string        = "clusterRtrPortGroup"
 	egressFirewallDNSDefaultDuration time.Duration = 30 * time.Minute
 )
-
-// ServiceVIPKey is used for looking up service namespace information for a
-// particular load balancer
-type ServiceVIPKey struct {
-	// Load balancer VIP in the form "ip:port"
-	vip string
-	// Protocol used by the load balancer
-	protocol kapi.Protocol
-}
 
 // loadBalancerConf contains the OVN based config for a LB
 type loadBalancerConf struct {
@@ -188,11 +180,6 @@ type Controller struct {
 	// Is ACL logging enabled while configuring meters?
 	aclLoggingEnabled bool
 
-	// Map of load balancers to service namespace
-	serviceVIPToName map[ServiceVIPKey]types.NamespacedName
-
-	serviceVIPToNameLock sync.Mutex
-
 	// Map of load balancers, each containing a map of VIP to OVN LB Config
 	serviceLBMap map[string]map[string]*loadBalancerConf
 
@@ -290,8 +277,6 @@ func NewOvnController(ovnClient *util.OVNClientset, wf *factory.WatchFactory,
 		loadbalancerClusterCache: make(map[kapi.Protocol]string),
 		multicastSupport:         config.EnableMulticast,
 		aclLoggingEnabled:        true,
-		serviceVIPToName:         make(map[ServiceVIPKey]types.NamespacedName),
-		serviceVIPToNameLock:     sync.Mutex{},
 		serviceLBMap:             make(map[string]map[string]*loadBalancerConf),
 		serviceLBLock:            sync.Mutex{},
 		joinSwIPManager:          nil,
@@ -378,7 +363,16 @@ func (oc *Controller) Run(wg *sync.WaitGroup) error {
 	klog.Infof("Completing all the Watchers took %v", time.Since(start))
 
 	if config.Kubernetes.OVNEmptyLbEvents {
-		go oc.ovnControllerEventChecker()
+		klog.Infof("Starting unidling controller")
+		unidlingController := unidling.NewController(
+			oc.recorder,
+			oc.watchFactory.ServiceInformer(),
+		)
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			unidlingController.Run(oc.stopChan)
+		}()
 	}
 
 	if oc.hoMaster != nil {
@@ -408,45 +402,6 @@ func (oc *Controller) syncPeriodic() {
 			}
 		}
 	}()
-}
-
-func (oc *Controller) ovnControllerEventChecker() {
-	ticker := time.NewTicker(5 * time.Second)
-
-	for {
-		select {
-		case <-ticker.C:
-			out, _, err := util.RunOVNSbctl("--format=json", "list", "controller_event")
-			if err != nil {
-				continue
-			}
-
-			events, err := extractEmptyLBBackendsEvents([]byte(out))
-			if err != nil || len(events) == 0 {
-				continue
-			}
-
-			for _, event := range events {
-				_, _, err := util.RunOVNSbctl("destroy", "controller_event", event.uuid)
-				if err != nil {
-					// Don't unidle until we are able to remove the controller event
-					klog.Errorf("Unable to remove controller event %s", event.uuid)
-					continue
-				}
-				if serviceName, ok := oc.GetServiceVIPToName(event.vip, event.protocol); ok {
-					serviceRef := kapi.ObjectReference{
-						Kind:      "Service",
-						Namespace: serviceName.Namespace,
-						Name:      serviceName.Name,
-					}
-					klog.V(5).Infof("Sending a NeedPods event for service %s in namespace %s.", serviceName.Name, serviceName.Namespace)
-					oc.recorder.Eventf(&serviceRef, kapi.EventTypeNormal, "NeedPods", "The service %s needs pods", serviceName.Name)
-				}
-			}
-		case <-oc.stopChan:
-			return
-		}
-	}
 }
 
 func podScheduled(pod *kapi.Pod) bool {
@@ -1052,21 +1007,6 @@ func (oc *Controller) WatchNodes() {
 		},
 	}, oc.syncNodes)
 	klog.Infof("Bootstrapping existing nodes and cleaning stale nodes took %v", time.Since(start))
-}
-
-// AddServiceVIPToName associates a k8s service name with a load balancer VIP
-func (oc *Controller) AddServiceVIPToName(vip string, protocol kapi.Protocol, namespace, name string) {
-	oc.serviceVIPToNameLock.Lock()
-	defer oc.serviceVIPToNameLock.Unlock()
-	oc.serviceVIPToName[ServiceVIPKey{vip, protocol}] = types.NamespacedName{Namespace: namespace, Name: name}
-}
-
-// GetServiceVIPToName retrieves the associated k8s service name for a load balancer VIP
-func (oc *Controller) GetServiceVIPToName(vip string, protocol kapi.Protocol) (types.NamespacedName, bool) {
-	oc.serviceVIPToNameLock.Lock()
-	defer oc.serviceVIPToNameLock.Unlock()
-	namespace, ok := oc.serviceVIPToName[ServiceVIPKey{vip, protocol}]
-	return namespace, ok
 }
 
 // GetNetworkPolicyACLLogging retrieves ACL deny policy logging setting for the Namespace
