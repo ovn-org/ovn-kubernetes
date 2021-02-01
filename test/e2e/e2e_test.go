@@ -297,7 +297,7 @@ func createPod(f *framework.Framework, podName, nodeSelector, namespace string, 
 	if err != nil {
 		framework.Logf("Warning: Failed to get logs from pod %q: %v", pod.Name, err)
 	}
-	err = e2epod.WaitForPodNotPending(f.ClientSet, podName, namespace)
+	err = e2epod.WaitForPodNotPending(f.ClientSet, namespace, podName)
 	if err != nil {
 		logs, logErr := e2epod.GetPodLogs(f.ClientSet, namespace, pod.Name, contName)
 		if logErr != nil {
