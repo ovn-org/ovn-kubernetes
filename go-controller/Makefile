@@ -11,16 +11,14 @@ TEST_REPORT_DIR?=$(CURDIR)/_artifacts
 export TEST_REPORT_DIR
 GO_DOCKER_IMG = quay.io/giantswarm/golang:1.15.7
 # CONTAINER_RUNNABLE determines if the tests can be run inside a container. It checks to see if
-# podman/docker is installed on the system and also confirms that it is not running in a CI environment by checking
-# that the GITHUB_ACTIONS environment variable is not set. NOTE: Running tests in a container inside of a CI environment
-# fails some of the tests needing mount options inspite of starting the container with the right linux capabilities.
+# podman/docker is installed on the system.
 PODMAN ?= $(shell podman -v > /dev/null 2>&1; echo $$?)
 ifeq ($(PODMAN), 0)
 CONTAINER_RUNTIME=podman
 else
 CONTAINER_RUNTIME=docker
 endif
-CONTAINER_RUNNABLE ?= $(shell $(CONTAINER_RUNTIME) -v > /dev/null 2>&1 && ! printenv GITHUB_ACTIONS > /dev/null 2>&1; echo $$?)
+CONTAINER_RUNNABLE ?= $(shell $(CONTAINER_RUNTIME) -v > /dev/null 2>&1; echo $$?)
 
 .PHONY: all build check test
 
@@ -41,7 +39,7 @@ windows:
 # tests in a container. Refer: https://www.projectatomic.io/blog/2016/03/dwalsh_selinux_containers/ for additional context
 check test:
 ifeq ($(CONTAINER_RUNNABLE), 0)
-	$(CONTAINER_RUNTIME) run --security-opt label=disable --cap-add=NET_ADMIN --cap-add=SYS_ADMIN -v $(shell dirname $(PWD)):/go/src/github.com/ovn-org/ovn-kubernetes -w /go/src/github.com/ovn-org/ovn-kubernetes/go-controller $(GO_DOCKER_IMG) sh -c "RACE=1 DOCKER_TEST=1 hack/test-go.sh ${PKGS}"
+	$(CONTAINER_RUNTIME) run --security-opt label=disable --cap-add=NET_ADMIN --cap-add=SYS_ADMIN -v $(shell dirname $(PWD)):/go/src/github.com/ovn-org/ovn-kubernetes -w /go/src/github.com/ovn-org/ovn-kubernetes/go-controller -e COVERALLS=${COVERALLS} $(GO_DOCKER_IMG) sh -c "RACE=1 DOCKER_TEST=1 COVERALLS=${COVERALLS} hack/test-go.sh ${PKGS}"
 else
 	RACE=1 hack/test-go.sh ${PKGS}
 endif
@@ -65,7 +63,11 @@ install.tools:
 	curl -sfL https://install.goreleaser.com/github.com/golangci/golangci-lint.sh | bash -s -- -b ${GOPATH}/bin
 
 lint:
-	@GOPATH=${GOPATH} ./hack/lint.sh
+ifeq ($(CONTAINER_RUNNABLE), 0)
+	@GOPATH=${GOPATH} ./hack/lint.sh $(CONTAINER_RUNTIME)
+else
+	echo "linter can only be run within a container since it needs a specific golangci-lint version"
+endif
 
 gofmt:
 ifeq ($(CONTAINER_RUNNABLE), 0)
