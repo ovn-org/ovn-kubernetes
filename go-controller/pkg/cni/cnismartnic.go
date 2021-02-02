@@ -30,8 +30,11 @@ func (pr *PodRequest) addSmartNICConnectionDetailsAnnot(kube kube.Interface) err
 
 	// 4. Set smart-nic connection-details pod annotation
 	var domain, bus, dev, fn int
-	if parsed, err := fmt.Sscanf(
-		pfPciAddress, "%04x:%02x:%02x.%d", &domain, &bus, &dev, &fn); err != nil || parsed != 4 {
+	parsed, err := fmt.Sscanf(pfPciAddress, "%04x:%02x:%02x.%d", &domain, &bus, &dev, &fn)
+	if err != nil {
+		return fmt.Errorf("error trying to parse PF PCI address %s: %v", pfPciAddress, err)
+	}
+	if parsed != 4 {
 		return fmt.Errorf("failed to parse PF PCI address %s. Unexpected format", pfPciAddress)
 	}
 
