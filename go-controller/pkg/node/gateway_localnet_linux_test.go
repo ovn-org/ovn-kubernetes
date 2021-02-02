@@ -26,7 +26,7 @@ const (
 
 func getFakeLocalAddrs() map[string]net.IPNet {
 	localAddrSet := make(map[string]net.IPNet)
-	for _, network := range []string{"127.0.0.1/32", "10.10.10.1/24"} {
+	for _, network := range []string{"127.0.0.1/32", "10.10.10.1/24", "fd00:96:1::1/64"} {
 		ip, ipNet, err := net.ParseCIDR(network)
 		Expect(err).NotTo(HaveOccurred())
 		localAddrSet[ip.String()] = *ipNet
@@ -506,6 +506,68 @@ var _ = Describe("Node Operations", func() {
 						},
 					},
 				}
+				f6 := iptV6.(*util.FakeIPTables)
+				err = f6.MatchState(expectedTables6)
+				Expect(err).NotTo(HaveOccurred())
+
+				return nil
+			}
+			err := app.Run([]string{app.Name})
+			Expect(err).NotTo(HaveOccurred())
+		})
+
+		It("inits iptables rules for ExternalIP with DualStack", func() {
+			app.Action = func(ctx *cli.Context) error {
+
+				externalIPv4 := "10.10.10.1"
+				externalIPv6 := "fd00:96:1::1"
+				clusterIPv4 := "10.129.0.2"
+				clusterIPv6 := "fd00:10:96::10"
+				fNPW.gatewayIPv6 = v6localnetGatewayIP
+
+				service := *newService("service1", "namespace1", clusterIPv4,
+					[]v1.ServicePort{
+						{
+							Port:     8032,
+							Protocol: v1.ProtocolTCP,
+						},
+					},
+					v1.ServiceTypeClusterIP,
+					[]string{externalIPv4, externalIPv6},
+				)
+				service.Spec.ClusterIPs = []string{clusterIPv4, clusterIPv6}
+				fNPW.addService(&service)
+
+				expectedTables4 := map[string]util.FakeTable{
+					"filter": {
+						"OVN-KUBE-EXTERNALIP": []string{
+							fmt.Sprintf("-p %s -d %s --dport %v -j ACCEPT", service.Spec.Ports[0].Protocol, externalIPv4, service.Spec.Ports[0].Port),
+						},
+					},
+					"nat": {
+						"OVN-KUBE-EXTERNALIP": []string{
+							fmt.Sprintf("-p %s -d %s --dport %v -j DNAT --to-destination %s:%v", service.Spec.Ports[0].Protocol, externalIPv4, service.Spec.Ports[0].Port, clusterIPv4, service.Spec.Ports[0].Port),
+						},
+					},
+				}
+
+				f4 := iptV4.(*util.FakeIPTables)
+				err := f4.MatchState(expectedTables4)
+				Expect(err).NotTo(HaveOccurred())
+
+				expectedTables6 := map[string]util.FakeTable{
+					"filter": {
+						"OVN-KUBE-EXTERNALIP": []string{
+							fmt.Sprintf("-p %s -d %s --dport %v -j ACCEPT", service.Spec.Ports[0].Protocol, externalIPv6, service.Spec.Ports[0].Port),
+						},
+					},
+					"nat": {
+						"OVN-KUBE-EXTERNALIP": []string{
+							fmt.Sprintf("-p %s -d %s --dport %v -j DNAT --to-destination [%s]:%v", service.Spec.Ports[0].Protocol, externalIPv6, service.Spec.Ports[0].Port, clusterIPv6, service.Spec.Ports[0].Port),
+						},
+					},
+				}
+
 				f6 := iptV6.(*util.FakeIPTables)
 				err = f6.MatchState(expectedTables6)
 				Expect(err).NotTo(HaveOccurred())

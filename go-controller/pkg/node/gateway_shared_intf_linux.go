@@ -99,14 +99,14 @@ func setupLocalNodeAccessBridge(nodeName string, subnets []*net.IPNet) error {
 }
 
 func addSharedGatewayIptRules(service *kapi.Service) {
-	rules := getGatewayIPTRules(service, "")
+	rules := getGatewayIPTRules(service, nil)
 	if err := addIptRules(rules); err != nil {
 		klog.Errorf("Failed to add iptables rules for service %s/%s: %v", service.Namespace, service.Name, err)
 	}
 }
 
 func delSharedGatewayIptRules(service *kapi.Service) {
-	rules := getGatewayIPTRules(service, "")
+	rules := getGatewayIPTRules(service, nil)
 	if err := delIptRules(rules); err != nil {
 		klog.Errorf("Failed to delete iptables rules for service %s/%s: %v", service.Namespace, service.Name, err)
 	}
@@ -120,7 +120,7 @@ func syncSharedGatewayIptRules(services []interface{}) {
 			klog.Errorf("Spurious object in syncSharedGatewayIptRules: %v", service)
 			continue
 		}
-		keepIPTRules = append(keepIPTRules, getGatewayIPTRules(svc, "")...)
+		keepIPTRules = append(keepIPTRules, getGatewayIPTRules(svc, nil)...)
 	}
 	for _, chain := range []string{iptableNodePortChain, iptableExternalIPChain} {
 		recreateIPTRules("nat", chain, keepIPTRules)

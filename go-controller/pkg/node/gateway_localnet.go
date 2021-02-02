@@ -212,14 +212,10 @@ func (l *localPortWatcher) addService(svc *kapi.Service) error {
 				}
 			}
 			for _, externalIP := range svc.Spec.ExternalIPs {
-
 				if utilnet.IsIPv6String(externalIP) != isIPv6Service {
-					klog.Warningf("Invalid ExternalIP %s for Service %s/%s with ClusterIP %s",
-						externalIP, svc.Namespace, svc.Name, ip)
 					continue
 				}
 				if _, exists := l.localAddrSet[externalIP]; exists {
-
 					iptRules = append(iptRules, getExternalIPTRules(port, externalIP, ip)...)
 					klog.V(5).Infof("Will add iptables rule for ExternalIP: %s", externalIP)
 				} else if l.networkHasAddress(net.ParseIP(externalIP)) {
@@ -341,16 +337,8 @@ func (l *localPortWatcher) SyncServices(serviceInterface []interface{}) {
 			klog.Errorf("Spurious object in syncServices: %v", serviceInterface)
 			continue
 		}
-		for _, ip := range util.GetClusterIPs(svc) {
-			gatewayIP := l.gatewayIPv4
-			if utilnet.IsIPv6String(ip) {
-				gatewayIP = l.gatewayIPv6
-			}
-			if gatewayIP != "" {
-				keepIPTRules = append(keepIPTRules, getGatewayIPTRules(svc, gatewayIP)...)
-			}
-			keepRoutes = append(keepRoutes, svc.Spec.ExternalIPs...)
-		}
+		keepIPTRules = append(keepIPTRules, getGatewayIPTRules(svc, []string{l.gatewayIPv4, l.gatewayIPv6})...)
+		keepRoutes = append(keepRoutes, svc.Spec.ExternalIPs...)
 	}
 	for _, chain := range []string{iptableNodePortChain, iptableExternalIPChain} {
 		recreateIPTRules("nat", chain, keepIPTRules)

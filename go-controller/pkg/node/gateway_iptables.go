@@ -318,8 +318,9 @@ func recreateIPTRules(table, chain string, keepIPTRules []iptRule) {
 // only incoming traffic on that IP will be accepted for NodePort rules; otherwise incoming traffic on the NodePort
 // on all IPs will be accepted. If gatewayIP is "", then NodePort traffic will be DNAT'ed to the service port on
 // the service's ClusterIP. Otherwise, it will be DNAT'ed to the NodePort on the gatewayIP.
-func getGatewayIPTRules(service *kapi.Service, gatewayIP string) []iptRule {
+func getGatewayIPTRules(service *kapi.Service, gatewayIPs []string) []iptRule {
 	rules := make([]iptRule, 0)
+	clusterIPs := util.GetClusterIPs(service)
 	for _, svcPort := range service.Spec.Ports {
 		if util.ServiceTypeHasNodePort(service) {
 			err := util.ValidatePort(svcPort.Protocol, svcPort.NodePort)
@@ -332,10 +333,14 @@ func getGatewayIPTRules(service *kapi.Service, gatewayIP string) []iptRule {
 				klog.Errorf("Skipping service: %s, invalid service port %v", svcPort.Name, err)
 				continue
 			}
-			if gatewayIP == "" {
-				rules = append(rules, getNodePortIPTRules(svcPort, service.Spec.ClusterIP, svcPort.Port)...)
+			if gatewayIPs == nil {
+				for _, clusterIP := range clusterIPs {
+					rules = append(rules, getNodePortIPTRules(svcPort, clusterIP, svcPort.Port)...)
+				}
 			} else {
-				rules = append(rules, getNodePortIPTRules(svcPort, gatewayIP, svcPort.NodePort)...)
+				for _, gatewayIP := range gatewayIPs {
+					rules = append(rules, getNodePortIPTRules(svcPort, gatewayIP, svcPort.Port)...)
+				}
 			}
 		}
 		for _, externalIP := range service.Spec.ExternalIPs {
@@ -344,7 +349,9 @@ func getGatewayIPTRules(service *kapi.Service, gatewayIP string) []iptRule {
 				klog.Errorf("Skipping service: %s, invalid service port %v", svcPort.Name, err)
 				continue
 			}
-			rules = append(rules, getExternalIPTRules(svcPort, externalIP, service.Spec.ClusterIP)...)
+			if clusterIP, err := util.MatchIPStringFamily(utilnet.IsIPv6String(externalIP), clusterIPs); err == nil {
+				rules = append(rules, getExternalIPTRules(svcPort, externalIP, clusterIP)...)
+			}
 		}
 	}
 	return rules
