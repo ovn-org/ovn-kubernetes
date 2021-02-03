@@ -1,0 +1,11 @@
+docker run --pid host --network host --user=0 --name ovn-node -dit --cap-add=NET_ADMIN --cap-add=SYS_ADMIN \
+  --cap-add=SYS_PTRACE -v /:/host:ro  -v /var/run/dbus:/var/run/dbus:ro -v $K8S_CACERT:$K8S_CACERT \
+  -v /var/log/ovn-kubernetes:/var/log/ovn-kubernetes  -v /var/run/openvswitch:/var/run/openvswitch/ \
+  -v /var/run/openvswitch:/var/run/ovn/ -v /var/run/ovn-kubernetes:/var/run/ovn-kubernetes \
+  -v /etc/ovn:/ovn-cert:ro -v /var/lib/openvswitch:/etc/openvswitch:ro -v /var/lib/openvswitch:/etc/ovn:ro \
+  -e OVN_DAEMONSET_VERSION=3 -e OVN_LOG_CONTROLLER="-vconsole:info" \
+  -e OVN_NET_CIDR=$OVN_NET_CIDR -e OVN_SVC_CIDR=$OVN_SVC_CIDR -e K8S_NODE=$K8S_NODE  \
+  -e OVN_GATEWAY_MODE="shared" -e  OVN_REMOTE_PROBE_INTERVAL=100000 -e K8S_APISERVER=$K8S_APISERVER \
+  -e OVN_KUBERNETES_NAMESPACE=ovn-kubernetes -e OVN_SSL_ENABLE=no -e OVNKUBE_NODE_MODE="smart-nic" \
+  -e OVN_ENCAP_IP=$SMART_NIC_IP -e K8S_TOKEN=$K8S_TOKEN -e K8S_CACERT=$K8S_CACERT \
+  -e OVN_GATEWAY_OPTS="$OVN_GATEWAY_OPTS" --entrypoint=/root/ovnkube.sh ovn-daemonset:latest "ovn-node"
