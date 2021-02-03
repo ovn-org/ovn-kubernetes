@@ -13,6 +13,7 @@ require (
 	github.com/coreos/go-iptables v0.4.5
 	github.com/ebay/go-ovn v0.1.0
 	github.com/ebay/libovsdb v0.2.1-0.20200719163122-3332afaeb27c
+	github.com/gogo/protobuf v1.3.2 // indirect
 	github.com/gorilla/mux v1.8.0
 	github.com/hashicorp/golang-lru v0.5.3 // indirect
 	github.com/imdario/mergo v0.3.8 // indirect
@@ -44,6 +45,7 @@ require (
 
 replace (
 	github.com/ebay/go-ovn v0.1.0 => github.com/ebay/go-ovn v0.1.1-0.20200810162212-30abed5fb968
+	github.com/gogo/protobuf => github.com/gogo/protobuf v1.3.2
 	k8s.io/api => k8s.io/api v0.20.0
 	k8s.io/apiextensions-apiserver => k8s.io/apiextensions-apiserver v0.20.0
 	k8s.io/apimachinery => k8s.io/apimachinery v0.20.0
