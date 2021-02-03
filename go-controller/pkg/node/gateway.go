@@ -222,7 +222,7 @@ func gatewayInitInternal(nodeName, gwIntf string, subnets []*net.IPNet, gwNextHo
 	}
 
 	err = util.SetL3GatewayConfig(nodeAnnotator, &util.L3GatewayConfig{
-		Mode:           config.GatewayModeShared,
+		Mode:           config.Gateway.Mode,
 		ChassisID:      chassisID,
 		InterfaceID:    ifaceID,
 		MACAddress:     macAddress,
