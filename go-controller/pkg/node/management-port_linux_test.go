@@ -203,7 +203,6 @@ func testManagementPort(ctx *cli.Context, fexec *ovntest.FakeExec, testNS ns.Net
 
 	for _, cfg := range configs {
 		expectedTables := map[string]util.FakeTable{
-			"filter": {},
 			"nat": {
 				"POSTROUTING": []string{
 					"-o " + mgtPort + " -j OVN-KUBE-SNAT-MGMTPORT",

@@ -36,8 +36,7 @@ func getFakeLocalAddrs() map[string]net.IPNet {
 
 func initFakeNodePortWatcher(fakeOvnNode *FakeOVNNode, iptV4, iptV6 util.IPTablesHelper) *localPortWatcher {
 	initIPTable := map[string]util.FakeTable{
-		"filter": {},
-		"nat":    {},
+		"nat": {},
 	}
 
 	f4 := iptV4.(*util.FakeIPTables)
@@ -145,14 +144,6 @@ var _ = Describe("Node Operations", func() {
 				startLocalPortWatcher(fNPW, fakeOvnNode.watcher)
 
 				expectedTables := map[string]util.FakeTable{
-					"filter": {
-						"FORWARD": []string{
-							"-j OVN-KUBE-EXTERNALIP",
-							"-j OVN-KUBE-NODEPORT",
-						},
-						"OVN-KUBE-NODEPORT":   []string{},
-						"OVN-KUBE-EXTERNALIP": []string{},
-					},
 					"nat": {
 						"PREROUTING": []string{
 							"-j OVN-KUBE-EXTERNALIP",
@@ -171,8 +162,7 @@ var _ = Describe("Node Operations", func() {
 				Expect(err).NotTo(HaveOccurred())
 
 				expectedTables = map[string]util.FakeTable{
-					"filter": {},
-					"nat":    {},
+					"nat": {},
 				}
 				f6 := iptV6.(*util.FakeIPTables)
 				err = f6.MatchState(expectedTables)
@@ -234,12 +224,6 @@ var _ = Describe("Node Operations", func() {
 				addIptRules(fakeRules)
 
 				expectedTables := map[string]util.FakeTable{
-					"filter": {
-						"OVN-KUBE-EXTERNALIP": []string{
-							fmt.Sprintf("-p UDP -d 10.10.10.10 --dport 27000 -j ACCEPT"),
-							fmt.Sprintf("-p %s -d %s --dport %v -j ACCEPT", service.Spec.Ports[0].Protocol, externalIP, service.Spec.Ports[0].Port),
-						},
-					},
 					"nat": {
 						"OVN-KUBE-EXTERNALIP": []string{
 							fmt.Sprintf("-p UDP -d 10.10.10.10 --dport 27000 -j DNAT --to-destination 172.32.0.12:27000"),
@@ -263,16 +247,6 @@ var _ = Describe("Node Operations", func() {
 				Expect(fakeOvnNode.fakeExec.CalledMatchesExpected()).To(BeTrue(), fExec.ErrorDesc)
 
 				expectedTables = map[string]util.FakeTable{
-					"filter": {
-						"FORWARD": []string{
-							"-j OVN-KUBE-EXTERNALIP",
-							"-j OVN-KUBE-NODEPORT",
-						},
-						"OVN-KUBE-NODEPORT": []string{},
-						"OVN-KUBE-EXTERNALIP": []string{
-							fmt.Sprintf("-p %s -d %s --dport %v -j ACCEPT", service.Spec.Ports[0].Protocol, externalIP, service.Spec.Ports[0].Port),
-						},
-					},
 					"nat": {
 						"PREROUTING": []string{
 							"-j OVN-KUBE-EXTERNALIP",
@@ -324,8 +298,7 @@ var _ = Describe("Node Operations", func() {
 				fNPW.addService(&service)
 
 				expectedTables := map[string]util.FakeTable{
-					"filter": {},
-					"nat":    {},
+					"nat": {},
 				}
 
 				f4 := iptV4.(*util.FakeIPTables)
@@ -360,8 +333,7 @@ var _ = Describe("Node Operations", func() {
 				fNPW.addService(&service)
 
 				expectedTables := map[string]util.FakeTable{
-					"filter": {},
-					"nat":    {},
+					"nat": {},
 				}
 
 				f4 := iptV4.(*util.FakeIPTables)
@@ -396,11 +368,6 @@ var _ = Describe("Node Operations", func() {
 				fNPW.addService(&service)
 
 				expectedTables := map[string]util.FakeTable{
-					"filter": {
-						"OVN-KUBE-EXTERNALIP": []string{
-							fmt.Sprintf("-p %s -d %s --dport %v -j ACCEPT", service.Spec.Ports[0].Protocol, externalIP, service.Spec.Ports[0].Port),
-						},
-					},
 					"nat": {
 						"OVN-KUBE-EXTERNALIP": []string{
 							fmt.Sprintf("-p %s -d %s --dport %v -j DNAT --to-destination %s:%v", service.Spec.Ports[0].Protocol, externalIP, service.Spec.Ports[0].Port, service.Spec.ClusterIP, service.Spec.Ports[0].Port),
@@ -436,11 +403,6 @@ var _ = Describe("Node Operations", func() {
 				fNPW.addService(&service)
 
 				expectedTables := map[string]util.FakeTable{
-					"filter": {
-						"OVN-KUBE-NODEPORT": []string{
-							fmt.Sprintf("-p %s -m addrtype --dst-type LOCAL --dport %v -j ACCEPT", service.Spec.Ports[0].Protocol, service.Spec.Ports[0].NodePort),
-						},
-					},
 					"nat": {
 						"OVN-KUBE-NODEPORT": []string{
 							fmt.Sprintf("-p %s -m addrtype --dst-type LOCAL --dport %v -j DNAT --to-destination %s:%v", service.Spec.Ports[0].Protocol, service.Spec.Ports[0].NodePort, service.Spec.ClusterIP, service.Spec.Ports[0].Port),
@@ -478,11 +440,6 @@ var _ = Describe("Node Operations", func() {
 				fNPW.addService(&service)
 
 				expectedTables4 := map[string]util.FakeTable{
-					"filter": {
-						"OVN-KUBE-NODEPORT": []string{
-							fmt.Sprintf("-p %s -m addrtype --dst-type LOCAL --dport %v -j ACCEPT", service.Spec.Ports[0].Protocol, service.Spec.Ports[0].NodePort),
-						},
-					},
 					"nat": {
 						"OVN-KUBE-NODEPORT": []string{
 							fmt.Sprintf("-p %s -m addrtype --dst-type LOCAL --dport %v -j DNAT --to-destination %s:%v", service.Spec.Ports[0].Protocol, service.Spec.Ports[0].NodePort, service.Spec.ClusterIPs[0], service.Spec.Ports[0].Port),
@@ -495,11 +452,6 @@ var _ = Describe("Node Operations", func() {
 				Expect(err).NotTo(HaveOccurred())
 
 				expectedTables6 := map[string]util.FakeTable{
-					"filter": {
-						"OVN-KUBE-NODEPORT": []string{
-							fmt.Sprintf("-p %s -m addrtype --dst-type LOCAL --dport %v -j ACCEPT", service.Spec.Ports[0].Protocol, service.Spec.Ports[0].NodePort),
-						},
-					},
 					"nat": {
 						"OVN-KUBE-NODEPORT": []string{
 							fmt.Sprintf("-p %s -m addrtype --dst-type LOCAL --dport %v -j DNAT --to-destination [%s]:%v", service.Spec.Ports[0].Protocol, service.Spec.Ports[0].NodePort, service.Spec.ClusterIPs[1], service.Spec.Ports[0].Port),
@@ -539,11 +491,6 @@ var _ = Describe("Node Operations", func() {
 				fNPW.addService(&service)
 
 				expectedTables4 := map[string]util.FakeTable{
-					"filter": {
-						"OVN-KUBE-EXTERNALIP": []string{
-							fmt.Sprintf("-p %s -d %s --dport %v -j ACCEPT", service.Spec.Ports[0].Protocol, externalIPv4, service.Spec.Ports[0].Port),
-						},
-					},
 					"nat": {
 						"OVN-KUBE-EXTERNALIP": []string{
 							fmt.Sprintf("-p %s -d %s --dport %v -j DNAT --to-destination %s:%v", service.Spec.Ports[0].Protocol, externalIPv4, service.Spec.Ports[0].Port, clusterIPv4, service.Spec.Ports[0].Port),
@@ -556,11 +503,6 @@ var _ = Describe("Node Operations", func() {
 				Expect(err).NotTo(HaveOccurred())
 
 				expectedTables6 := map[string]util.FakeTable{
-					"filter": {
-						"OVN-KUBE-EXTERNALIP": []string{
-							fmt.Sprintf("-p %s -d %s --dport %v -j ACCEPT", service.Spec.Ports[0].Protocol, externalIPv6, service.Spec.Ports[0].Port),
-						},
-					},
 					"nat": {
 						"OVN-KUBE-EXTERNALIP": []string{
 							fmt.Sprintf("-p %s -d %s --dport %v -j DNAT --to-destination [%s]:%v", service.Spec.Ports[0].Protocol, externalIPv6, service.Spec.Ports[0].Port, clusterIPv6, service.Spec.Ports[0].Port),
@@ -602,8 +544,7 @@ var _ = Describe("Node Operations", func() {
 				fNPW.deleteService(&service)
 
 				expectedTables := map[string]util.FakeTable{
-					"filter": {},
-					"nat":    {},
+					"nat": {},
 				}
 
 				f4 := iptV4.(*util.FakeIPTables)
@@ -638,8 +579,7 @@ var _ = Describe("Node Operations", func() {
 				fNPW.deleteService(&service)
 
 				expectedTables := map[string]util.FakeTable{
-					"filter": {},
-					"nat":    {},
+					"nat": {},
 				}
 
 				f4 := iptV4.(*util.FakeIPTables)
@@ -674,8 +614,7 @@ var _ = Describe("Node Operations", func() {
 				fNPW.deleteService(&service)
 
 				expectedTables := map[string]util.FakeTable{
-					"filter": {},
-					"nat":    {},
+					"nat": {},
 				}
 
 				f4 := iptV4.(*util.FakeIPTables)
@@ -710,8 +649,7 @@ var _ = Describe("Node Operations", func() {
 				fNPW.deleteService(&service)
 
 				expectedTables := map[string]util.FakeTable{
-					"filter": {},
-					"nat":    {},
+					"nat": {},
 				}
 
 				f4 := iptV4.(*util.FakeIPTables)
@@ -749,11 +687,6 @@ var _ = Describe("Node Operations", func() {
 				fNPW.addService(&service)
 
 				expectedTables := map[string]util.FakeTable{
-					"filter": {
-						"OVN-KUBE-EXTERNALIP": []string{
-							fmt.Sprintf("-p %s -d %s --dport %v -j ACCEPT", service.Spec.Ports[0].Protocol, externalIP, service.Spec.Ports[0].Port),
-						},
-					},
 					"nat": {
 						"OVN-KUBE-EXTERNALIP": []string{
 							fmt.Sprintf("-p %s -d %s --dport %v -j DNAT --to-destination %s:%v", service.Spec.Ports[0].Protocol, externalIP, service.Spec.Ports[0].Port, service.Spec.ClusterIP, service.Spec.Ports[0].Port),
@@ -768,9 +701,6 @@ var _ = Describe("Node Operations", func() {
 				fNPW.deleteService(&service)
 
 				expectedTables = map[string]util.FakeTable{
-					"filter": {
-						"OVN-KUBE-EXTERNALIP": []string{},
-					},
 					"nat": {
 						"OVN-KUBE-EXTERNALIP": []string{},
 					},
@@ -804,11 +734,6 @@ var _ = Describe("Node Operations", func() {
 				fNPW.addService(&service)
 
 				expectedTables := map[string]util.FakeTable{
-					"filter": {
-						"OVN-KUBE-NODEPORT": []string{
-							fmt.Sprintf("-p %s -m addrtype --dst-type LOCAL --dport %v -j ACCEPT", service.Spec.Ports[0].Protocol, nodePort),
-						},
-					},
 					"nat": {
 						"OVN-KUBE-NODEPORT": []string{
 							fmt.Sprintf("-p %s -m addrtype --dst-type LOCAL --dport %v -j DNAT --to-destination %s:%v", service.Spec.Ports[0].Protocol, nodePort, service.Spec.ClusterIP, service.Spec.Ports[0].Port),
@@ -823,9 +748,6 @@ var _ = Describe("Node Operations", func() {
 				fNPW.deleteService(&service)
 
 				expectedTables = map[string]util.FakeTable{
-					"filter": {
-						"OVN-KUBE-NODEPORT": []string{},
-					},
 					"nat": {
 						"OVN-KUBE-NODEPORT": []string{},
 					},

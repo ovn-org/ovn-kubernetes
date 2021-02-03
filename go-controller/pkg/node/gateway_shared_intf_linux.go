@@ -124,6 +124,5 @@ func syncSharedGatewayIptRules(services []interface{}) {
 	}
 	for _, chain := range []string{iptableNodePortChain, iptableExternalIPChain} {
 		recreateIPTRules("nat", chain, keepIPTRules)
-		recreateIPTRules("filter", chain, keepIPTRules)
 	}
 }
