@@ -3,6 +3,7 @@
 package cni
 
 import (
+	"context"
 	"fmt"
 	"io/ioutil"
 	"net"
@@ -15,7 +16,6 @@ import (
 
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
 
-	"github.com/Mellanox/sriovnet"
 	"github.com/containernetworking/cni/pkg/types/current"
 	"github.com/containernetworking/plugins/pkg/ip"
 	"github.com/containernetworking/plugins/pkg/ns"
@@ -37,33 +37,6 @@ func (defaultCNIPluginLibOps) AddRoute(ipn *net.IPNet, gw net.IP, dev netlink.Li
 
 func (defaultCNIPluginLibOps) SetupVeth(contVethName string, mtu int, hostNS ns.NetNS) (net.Interface, net.Interface, error) {
 	return ip.SetupVeth(contVethName, mtu, hostNS)
-}
-
-type SriovNetLibOps interface {
-	GetNetDevicesFromPci(pciAddress string) ([]string, error)
-	GetUplinkRepresentor(vfPciAddress string) (string, error)
-	GetVfIndexByPciAddress(vfPciAddress string) (int, error)
-	GetVfRepresentor(uplink string, vfIndex int) (string, error)
-}
-
-type defaultSRIOVLibOps struct{}
-
-var sriovLibOps SriovNetLibOps = &defaultSRIOVLibOps{}
-
-func (defaultSRIOVLibOps) GetNetDevicesFromPci(pciAddress string) ([]string, error) {
-	return sriovnet.GetNetDevicesFromPci(pciAddress)
-}
-
-func (defaultSRIOVLibOps) GetUplinkRepresentor(vfPciAddress string) (string, error) {
-	return sriovnet.GetUplinkRepresentor(vfPciAddress)
-}
-
-func (defaultSRIOVLibOps) GetVfIndexByPciAddress(vfPciAddress string) (int, error) {
-	return sriovnet.GetVfIndexByPciAddress(vfPciAddress)
-}
-
-func (defaultSRIOVLibOps) GetVfRepresentor(uplink string, vfIndex int) (string, error) {
-	return sriovnet.GetVfRepresentor(uplink, vfIndex)
 }
 
 func renameLink(curName, newName string) error {
@@ -186,7 +159,7 @@ func setupSriovInterface(netns ns.NetNS, containerID, ifName string, ifInfo *Pod
 	contIface := &current.Interface{}
 
 	// 1. get VF netdevice from PCI
-	vfNetdevices, err := sriovLibOps.GetNetDevicesFromPci(pciAddrs)
+	vfNetdevices, err := util.GetSriovnetOps().GetNetDevicesFromPci(pciAddrs)
 	if err != nil {
 		return nil, nil, err
 
@@ -198,39 +171,41 @@ func setupSriovInterface(netns ns.NetNS, containerID, ifName string, ifInfo *Pod
 	}
 	vfNetdevice := vfNetdevices[0]
 
-	// 2. get Uplink netdevice
-	uplink, err := sriovLibOps.GetUplinkRepresentor(pciAddrs)
-	if err != nil {
-		return nil, nil, err
-	}
+	if !ifInfo.IsSmartNic {
+		// 2. get Uplink netdevice
+		uplink, err := util.GetSriovnetOps().GetUplinkRepresentor(pciAddrs)
+		if err != nil {
+			return nil, nil, err
+		}
 
-	// 3. get VF index from PCI
-	vfIndex, err := sriovLibOps.GetVfIndexByPciAddress(pciAddrs)
-	if err != nil {
-		return nil, nil, err
-	}
+		// 3. get VF index from PCI
+		vfIndex, err := util.GetSriovnetOps().GetVfIndexByPciAddress(pciAddrs)
+		if err != nil {
+			return nil, nil, err
+		}
 
-	// 4. lookup representor
-	rep, err := sriovLibOps.GetVfRepresentor(uplink, vfIndex)
-	if err != nil {
-		return nil, nil, err
-	}
-	oldHostRepName := rep
+		// 4. lookup representor
+		rep, err := util.GetSriovnetOps().GetVfRepresentor(uplink, vfIndex)
+		if err != nil {
+			return nil, nil, err
+		}
+		oldHostRepName := rep
 
-	// 5. rename the host VF representor
-	hostIface.Name = containerID[:15]
-	if err = renameLink(oldHostRepName, hostIface.Name); err != nil {
-		return nil, nil, fmt.Errorf("failed to rename %s to %s: %v", oldHostRepName, hostIface.Name, err)
-	}
-	link, err := util.GetNetLinkOps().LinkByName(hostIface.Name)
-	if err != nil {
-		return nil, nil, err
-	}
-	hostIface.Mac = link.Attrs().HardwareAddr.String()
+		// 5. rename the host VF representor
+		hostIface.Name = containerID[:15]
+		if err = renameLink(oldHostRepName, hostIface.Name); err != nil {
+			return nil, nil, fmt.Errorf("failed to rename %s to %s: %v", oldHostRepName, hostIface.Name, err)
+		}
+		link, err := util.GetNetLinkOps().LinkByName(hostIface.Name)
+		if err != nil {
+			return nil, nil, err
+		}
+		hostIface.Mac = link.Attrs().HardwareAddr.String()
 
-	// 6. set MTU on VF representor
-	if err = util.GetNetLinkOps().LinkSetMTU(link, ifInfo.MTU); err != nil {
-		return nil, nil, fmt.Errorf("failed to set MTU on %s: %v", hostIface.Name, err)
+		// 6. set MTU on VF representor
+		if err = util.GetNetLinkOps().LinkSetMTU(link, ifInfo.MTU); err != nil {
+			return nil, nil, fmt.Errorf("failed to set MTU on %s: %v", hostIface.Name, err)
+		}
 	}
 
 	// 7. Move VF to Container namespace
@@ -245,7 +220,7 @@ func setupSriovInterface(netns ns.NetNS, containerID, ifName string, ifInfo *Pod
 		if err != nil {
 			return err
 		}
-		link, err = util.GetNetLinkOps().LinkByName(contIface.Name)
+		link, err := util.GetNetLinkOps().LinkByName(contIface.Name)
 		if err != nil {
 			return err
 		}
@@ -275,6 +250,73 @@ func setupSriovInterface(netns ns.NetNS, containerID, ifName string, ifInfo *Pod
 	return hostIface, contIface, nil
 }
 
+// ConfigureOVS performs OVS configurations in order to set up Pod networking
+func ConfigureOVS(ctx context.Context, namespace string, podName string, hostIfaceName string,
+	ifInfo *PodInterfaceInfo, sandboxID string) error {
+	klog.Infof("ConfigureOVS: namespace: %s, podName: %s", namespace, podName)
+	ifaceID := fmt.Sprintf("%s_%s", namespace, podName)
+
+	// Find and remove any existing OVS port with this iface-id. Pods can
+	// have multiple sandboxes if some are waiting for garbage collection,
+	// but only the latest one should have the iface-id set.
+	uuids, _ := ovsFind("Interface", "_uuid", "external-ids:iface-id="+ifaceID)
+	for _, uuid := range uuids {
+		if out, err := ovsExec("remove", "Interface", uuid, "external-ids", "iface-id"); err != nil {
+			klog.Warningf("Failed to clear stale OVS port %q iface-id %q: %v\n  %q", uuid, ifaceID, err, out)
+		}
+	}
+	ipStrs := make([]string, len(ifInfo.IPs))
+	for i, ip := range ifInfo.IPs {
+		ipStrs[i] = ip.String()
+	}
+	// Add the new sandbox's OVS port
+	ovsArgs := []string{
+		"add-port", "br-int", hostIfaceName, "--", "set",
+		"interface", hostIfaceName,
+		fmt.Sprintf("external_ids:attached_mac=%s", ifInfo.MAC),
+		fmt.Sprintf("external_ids:iface-id=%s", ifaceID),
+		fmt.Sprintf("external_ids:ip_addresses=%s", strings.Join(ipStrs, ",")),
+		fmt.Sprintf("external_ids:sandbox=%s", sandboxID),
+	}
+
+	if out, err := ovsExec(ovsArgs...); err != nil {
+		return fmt.Errorf("failure in plugging pod interface: %v\n  %q", err, out)
+	}
+
+	if err := clearPodBandwidth(sandboxID); err != nil {
+		return err
+	}
+
+	if ifInfo.Ingress > 0 || ifInfo.Egress > 0 {
+		l, err := netlink.LinkByName(hostIfaceName)
+		if err != nil {
+			return fmt.Errorf("failed to find host veth interface %s: %v", hostIfaceName, err)
+		}
+		err = netlink.LinkSetTxQLen(l, 1000)
+		if err != nil {
+			return fmt.Errorf("failed to set host veth txqlen: %v", err)
+		}
+
+		if err := setPodBandwidth(sandboxID, hostIfaceName, ifInfo.Ingress, ifInfo.Egress); err != nil {
+			return err
+		}
+	}
+
+	ofPort, err := getIfaceOFPort(hostIfaceName)
+	if err != nil {
+		return err
+	}
+
+	if err = waitForPodInterface(ctx, ifInfo.MAC.String(), ifInfo.IPs, hostIfaceName, ifaceID, ofPort, ifInfo.CheckExtIDs); err != nil {
+		if ifInfo.CheckExtIDs {
+			return fmt.Errorf("error while waiting on OVS.Interface.external-ids:ovn-installed for pod: %v", err)
+		} else {
+			return fmt.Errorf("error while waiting on flows for pod: %v", err)
+		}
+	}
+	return nil
+}
+
 // ConfigureInterface sets up the container interface
 func (pr *PodRequest) ConfigureInterface(namespace string, podName string, ifInfo *PodInterfaceInfo) ([]*current.Interface, error) {
 	netns, err := ns.GetNS(pr.Netns)
@@ -289,8 +331,11 @@ func (pr *PodRequest) ConfigureInterface(namespace string, podName string, ifInf
 	if pr.CNIConf.DeviceID != "" {
 		// SR-IOV Case
 		hostIface, contIface, err = setupSriovInterface(netns, pr.SandboxID, pr.IfName, ifInfo, pr.CNIConf.DeviceID)
-
 	} else {
+		if pr.IsSmartNIC {
+			return nil, fmt.Errorf("unexpected configuration, pod request on smart-nic host. " +
+				"device ID must be provided")
+		}
 		// General case
 		hostIface, contIface, err = setupInterface(netns, pr.SandboxID, pr.IfName, ifInfo)
 	}
@@ -298,52 +343,9 @@ func (pr *PodRequest) ConfigureInterface(namespace string, podName string, ifInf
 		return nil, err
 	}
 
-	ifaceID := fmt.Sprintf("%s_%s", namespace, podName)
-
-	// Find and remove any existing OVS port with this iface-id. Pods can
-	// have multiple sandboxes if some are waiting for garbage collection,
-	// but only the latest one should have the iface-id set.
-	uuids, _ := ovsFind("Interface", "_uuid", "external-ids:iface-id="+ifaceID)
-	for _, uuid := range uuids {
-		if out, err := ovsExec("remove", "Interface", uuid, "external-ids", "iface-id"); err != nil {
-			klog.Warningf("Failed to clear stale OVS port %q iface-id %q: %v\n  %q", uuid, ifaceID, err, out)
-		}
-	}
-
-	ipStrs := make([]string, len(ifInfo.IPs))
-	for i, ip := range ifInfo.IPs {
-		ipStrs[i] = ip.String()
-	}
-
-	// Add the new sandbox's OVS port
-	ovsArgs := []string{
-		"add-port", "br-int", hostIface.Name, "--", "set",
-		"interface", hostIface.Name,
-		fmt.Sprintf("external_ids:attached_mac=%s", ifInfo.MAC),
-		fmt.Sprintf("external_ids:iface-id=%s", ifaceID),
-		fmt.Sprintf("external_ids:ip_addresses=%s", strings.Join(ipStrs, ",")),
-		fmt.Sprintf("external_ids:sandbox=%s", pr.SandboxID),
-	}
-
-	if out, err := ovsExec(ovsArgs...); err != nil {
-		return nil, fmt.Errorf("failure in plugging pod interface: %v\n  %q", err, out)
-	}
-
-	if err := clearPodBandwidth(pr.SandboxID); err != nil {
-		return nil, err
-	}
-
-	if ifInfo.Ingress > 0 || ifInfo.Egress > 0 {
-		l, err := netlink.LinkByName(hostIface.Name)
+	if !ifInfo.IsSmartNic {
+		err = ConfigureOVS(pr.ctx, namespace, podName, hostIface.Name, ifInfo, pr.SandboxID)
 		if err != nil {
-			return nil, fmt.Errorf("failed to find host veth interface %s: %v", hostIface.Name, err)
-		}
-		err = netlink.LinkSetTxQLen(l, 1000)
-		if err != nil {
-			return nil, fmt.Errorf("failed to set host veth txqlen: %v", err)
-		}
-
-		if err := setPodBandwidth(pr.SandboxID, hostIface.Name, ifInfo.Ingress, ifInfo.Egress); err != nil {
 			return nil, err
 		}
 	}
@@ -370,19 +372,6 @@ func (pr *PodRequest) ConfigureInterface(namespace string, podName string, ifInf
 	})
 	if err != nil {
 		klog.Warningf("Failed to settle addresses: %q", err)
-	}
-
-	ofPort, err := getIfaceOFPort(hostIface.Name)
-	if err != nil {
-		return nil, err
-	}
-
-	if err = waitForPodInterface(pr.ctx, ifInfo.MAC.String(), ifInfo.IPs, hostIface.Name, ifaceID, ofPort, ifInfo.CheckExtIDs); err != nil {
-		if ifInfo.CheckExtIDs {
-			return nil, fmt.Errorf("error while waiting on OVS.Interface.external-ids:ovn-installed for pod: %v", err)
-		} else {
-			return nil, fmt.Errorf("error while waiting on flows for pod: %v", err)
-		}
 	}
 
 	return []*current.Interface{hostIface, contIface}, nil
