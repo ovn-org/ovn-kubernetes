@@ -132,6 +132,8 @@ export KUBE_CONTAINER_RUNTIME_NAME=containerd
 # to stop PR retriggers for totally broken code
 export FLAKE_ATTEMPTS=3
 export NUM_NODES=20
+# Kind clusters are three node clusters
+export NUM_WORKER_NODES=3
 ginkgo --nodes=${NUM_NODES} \
 	--focus=${FOCUS} \
 	--skip=${SKIPPED_TESTS} \
@@ -142,4 +144,5 @@ ginkgo --nodes=${NUM_NODES} \
 	--provider=local \
 	--dump-logs-on-failure=false \
 	--report-dir=${E2E_REPORT_DIR}	\
-	--disable-log-dump=true
+	--disable-log-dump=true \
+	--num-nodes=${NUM_WORKER_NODES}
