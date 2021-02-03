@@ -24,6 +24,7 @@ import (
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/metrics"
 	ovnnode "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/node"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
 
 	kexec "k8s.io/utils/exec"
@@ -64,6 +65,7 @@ func getFlagsByCategory() map[string][]cli.Flag {
 	m["OVN Southbound DB Options"] = config.OvnSBFlags
 	m["OVN Gateway Options"] = config.OVNGatewayFlags
 	m["Master HA Options"] = config.MasterHAFlags
+	m["OVN Kube Node flags"] = config.OvnKubeNodeFlags
 
 	return m
 }
@@ -279,7 +281,8 @@ func runOvnKube(ctx *cli.Context) error {
 	}
 
 	// start the prometheus server to serve OVN Metrics (default port: 9476)
-	if config.Kubernetes.OVNMetricsBindAddress != "" {
+	// Note: for ovnkube node mode smart-nic-host no ovn metrics is required as ovn is not running on the node.
+	if config.OvnKubeNode.Mode != types.NodeModeSmartNICHost && config.Kubernetes.OVNMetricsBindAddress != "" {
 		metrics.RegisterOvnMetrics(ovnClientset.KubeClient, node)
 		metrics.StartOVNMetricsServer(config.Kubernetes.OVNMetricsBindAddress)
 	}
