@@ -9,8 +9,14 @@ groomTestList() {
 }
 
 SKIPPED_TESTS="
+# New Network Policy tests cause CI to time out
+Netpol
+
+# OVN doesn´t implement HostPort, CRIO does
+HostPort
+
 # PERFORMANCE TESTS: NOT WANTED FOR CI
-Networking IPerf IPv[46]
+Networking IPerf
 \[Feature:PerformanceDNS\]
 
 # FEATURES NOT AVAILABLE IN OUR CI ENVIRONMENT
