@@ -1,17 +1,25 @@
 reviewers:
-  - JacobTanenbaum
-  - pecameron
-  - squeed
-  - dcbw
-  - rajatchopra
-  - shettyg
-  - aserdean
+  - alexanderConstantinescu
   - alinbalutoiu
+  - aserdean
+  - astoycos
+  - danielmellado
+  - dcbw
+  - fedepaol
   - girishmg
-approvers:
+  - JacobTanenbaum
+  - jluhrsen
+  - pecameron
   - rajatchopra
+  - squeed
+  - trozet
   - shettyg
+  - vpickard
+approvers:
+  - aserdean
   - dcbw
   - girishmg
-  - aserdean
+  - rajatchopra
   - russellb
+  - shettyg
+  - trozet
