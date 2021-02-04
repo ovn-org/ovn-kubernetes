@@ -47,7 +47,7 @@ func (odbi *ovndb) asUpdateImp(name string, addrs []string, external_ids map[str
 	condition := libovsdb.NewCondition("name", "==", name)
 	updateOp := libovsdb.Operation{
 		Op:    opUpdate,
-		Table: tableAddressSet,
+		Table: TableAddressSet,
 		Row:   row,
 		Where: []interface{}{condition},
 	}
@@ -60,7 +60,7 @@ func (odbi *ovndb) asAddImp(name string, addrs []string, external_ids map[string
 	row["name"] = name
 	//should support the -is-exist flag here.
 
-	if uuid := odbi.getRowUUID(tableAddressSet, row); len(uuid) > 0 {
+	if uuid := odbi.getRowUUID(TableAddressSet, row); len(uuid) > 0 {
 		return nil, ErrorExist
 	}
 
@@ -78,7 +78,7 @@ func (odbi *ovndb) asAddImp(name string, addrs []string, external_ids map[string
 	row["addresses"] = addresses
 	insertOp := libovsdb.Operation{
 		Op:    opInsert,
-		Table: tableAddressSet,
+		Table: TableAddressSet,
 		Row:   row,
 	}
 	operations := []libovsdb.Operation{insertOp}
@@ -104,7 +104,7 @@ func (odbi *ovndb) asDelImp(name string) (*OvnCommand, error) {
 	condition := libovsdb.NewCondition("name", "==", name)
 	deleteOp := libovsdb.Operation{
 		Op:    opDelete,
-		Table: tableAddressSet,
+		Table: TableAddressSet,
 		Where: []interface{}{condition},
 	}
 	operations := []libovsdb.Operation{deleteOp}
@@ -113,16 +113,15 @@ func (odbi *ovndb) asDelImp(name string) (*OvnCommand, error) {
 
 // Get all addressset
 func (odbi *ovndb) asListImp() ([]*AddressSet, error) {
-	var listAS []*AddressSet
-
 	odbi.cachemutex.RLock()
 	defer odbi.cachemutex.RUnlock()
 
-	cacheAddressSet, ok := odbi.cache[tableAddressSet]
+	cacheAddressSet, ok := odbi.cache[TableAddressSet]
 	if !ok {
 		return nil, ErrorSchema
 	}
 
+	listAS := make([]*AddressSet, 0, len(cacheAddressSet))
 	for uuid, drows := range cacheAddressSet {
 		ta := &AddressSet{
 			UUID:       uuid,

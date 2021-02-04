@@ -36,8 +36,10 @@ const (
 	LSP                  = "TEST_LSP"
 	LSP_SECOND           = "TEST_LSP_SECOND "
 	ADDR                 = "36:46:56:76:86:96 127.0.0.1"
+	ADDR2                = "36:46:56:76:86:97 192.168.1.10"
 	MATCH                = "outport == \"96d44061-1823-428b-a7ce-f473d10eb3d0\" && ip && ip.dst == 10.97.183.61"
 	MATCH_SECOND         = "outport == \"96d44061-1823-428b-a7ce-f473d10eb3d0\" && ip && ip.dst == 10.97.183.62"
+	MATCH3               = "ip && ip.dst == 10.97.183.64"
 	defaultClientCACert  = "/etc/openvswitch/client_ca_cert.pem"
 	defaultClientPrivKey = "/etc/openvswitch/ovnnb-privkey.pem"
 	SKIP_TLS_VERIFY      = true
@@ -46,12 +48,68 @@ const (
 	FAKENOCHASSIS        = "fakenochassis"
 	FAKENOSWITCH         = "fakenoswitch"
 	FAKENOROUTER         = "fakenorouter"
+	PG_TEST_PG1          = "TestPortGroup1"
+	PG_TEST_PG2          = "TestPortGroup2"
+	PG_TEST_LS1          = "TestLogicalSwitch"
+	PG_TEST_LSP1         = "TestLogicalSwitchPort1"
+	PG_TEST_LSP2         = "TestLogicalSwitchPort2"
+	PG_TEST_LSP3         = "TestLogicalSwitchPort3"
+	PG_TEST_LSP4         = "TestLogicalSwitchPort4"
+	PG_TEST_KEY_1        = "mac_addr"
+	PG_TEST_ID_1         = "00:01:02:03:04:05"
+	PG_TEST_KEY_2        = "ip_addr"
+	PG_TEST_ID_2         = "169.254.1.1"
+	PG_TEST_KEY_3        = "foo1"
+	PG_TEST_ID_3         = "bar1"
 )
 
 var (
 	ovn_db     string
 	ovn_socket string
 )
+
+type signal struct{}
+
+func (s signal) OnLogicalSwitchCreate(ls *LogicalSwitch) {}
+func (s signal) OnLogicalSwitchDelete(ls *LogicalSwitch) {}
+
+func (s signal) OnLogicalPortCreate(lp *LogicalSwitchPort) {}
+func (s signal) OnLogicalPortDelete(lp *LogicalSwitchPort) {}
+
+func (s signal) OnLogicalRouterCreate(lr *LogicalRouter) {}
+func (s signal) OnLogicalRouterDelete(lr *LogicalRouter) {}
+
+func (s signal) OnLogicalRouterPortCreate(lrp *LogicalRouterPort) {}
+func (s signal) OnLogicalRouterPortDelete(lrp *LogicalRouterPort) {}
+
+func (s signal) OnLogicalRouterStaticRouteCreate(lrsr *LogicalRouterStaticRoute) {}
+func (s signal) OnLogicalRouterStaticRouteDelete(lrsr *LogicalRouterStaticRoute) {}
+
+func (s signal) OnACLCreate(acl *ACL) {}
+func (s signal) OnACLDelete(acl *ACL) {}
+
+func (s signal) OnDHCPOptionsCreate(dhcp *DHCPOptions) {}
+func (s signal) OnDHCPOptionsDelete(dhcp *DHCPOptions) {}
+
+func (s signal) OnQoSCreate(qos *QoS) {}
+func (s signal) OnQoSDelete(qos *QoS) {}
+
+func (s signal) OnLoadBalancerCreate(ls *LoadBalancer) {}
+func (s signal) OnLoadBalancerDelete(ls *LoadBalancer) {}
+
+func (s signal) OnMeterCreate(meter *Meter) {}
+func (s signal) OnMeterDelete(meter *Meter) {}
+
+func (s signal) OnMeterBandCreate(band *MeterBand) {}
+func (s signal) OnMeterBandDelete(band *MeterBand) {}
+
+// Create/delete chassis from south bound db
+func (s signal) OnChassisCreate(ch *Chassis) {}
+func (s signal) OnChassisDelete(ch *Chassis) {}
+
+// Create/delete encap from south bound db
+func (s signal) OnEncapCreate(ch *Encap) {}
+func (s signal) OnEncapDelete(ch *Encap) {}
 
 func buildOvnDbConfig(db string) *Config {
 	cfg := &Config{}
@@ -114,6 +172,9 @@ func buildOvnDbConfig(db string) *Config {
 			cfg.Addr = fmt.Sprintf("%s:%s:%d", strs[0], strs[1], port)
 		}
 	}
+
+	cfg.SignalCB = signal{}
+
 	return cfg
 }
 

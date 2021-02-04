@@ -61,12 +61,12 @@ func (odbi *ovndb) chassisAddImp(name string, hostname string, etype []string, i
 		encap_ids = append(encap_ids, encap_id)
 		row["ip"] = ip
 		row["type"] = et
-		if uuid := odbi.getRowUUID(tableEncap, row); len(uuid) > 0 {
+		if uuid := odbi.getRowUUID(TableEncap, row); len(uuid) > 0 {
 			return nil, ErrorExist
 		}
 		insertEncapOp := libovsdb.Operation{
 			Op:       opInsert,
-			Table:    tableEncap,
+			Table:    TableEncap,
 			Row:      row,
 			UUIDName: enCapUUID,
 		}
@@ -101,7 +101,7 @@ func (odbi *ovndb) chassisAddImp(name string, hostname string, etype []string, i
 	}
 	insertChassisOp := libovsdb.Operation{
 		Op:       opInsert,
-		Table:    tableChassis,
+		Table:    TableChassis,
 		Row:      rowChassis,
 		UUIDName: ChassisUUID,
 	}
@@ -116,7 +116,7 @@ func (odbi *ovndb) chassisDelImp(name string) (*OvnCommand, error) {
 	condition := libovsdb.NewCondition("name", "==", name)
 	deleteOp := libovsdb.Operation{
 		Op:    opDelete,
-		Table: tableChassis,
+		Table: TableChassis,
 		Where: []interface{}{condition},
 	}
 	operations = append(operations, deleteOp)
@@ -124,17 +124,16 @@ func (odbi *ovndb) chassisDelImp(name string) (*OvnCommand, error) {
 }
 
 func (odbi *ovndb) chassisListImp() ([]*Chassis, error) {
-	var listChassis []*Chassis
-
 	odbi.cachemutex.RLock()
 	defer odbi.cachemutex.RUnlock()
 
-	cacheChassis, ok := odbi.cache[tableChassis]
+	cacheChassis, ok := odbi.cache[TableChassis]
 
 	if !ok {
 		return nil, ErrorSchema
 	}
 
+	listChassis := make([]*Chassis, 0, len(cacheChassis))
 	for uuid := range cacheChassis {
 		ch, err := odbi.rowToChassis(uuid)
 		if err != nil {
@@ -151,7 +150,7 @@ func (odbi *ovndb) chassisGetImp(chassis string) ([]*Chassis, error) {
 	odbi.cachemutex.RLock()
 	defer odbi.cachemutex.RUnlock()
 
-	cacheChassis, ok := odbi.cache[tableChassis]
+	cacheChassis, ok := odbi.cache[TableChassis]
 
 	if !ok {
 		return nil, ErrorSchema
@@ -177,7 +176,7 @@ func (odbi *ovndb) chassisGetImp(chassis string) ([]*Chassis, error) {
 
 func (odbi *ovndb) rowToChassis(uuid string) (*Chassis, error) {
 
-	cacheChassis, ok := odbi.cache[tableChassis][uuid]
+	cacheChassis, ok := odbi.cache[TableChassis][uuid]
 	if !ok {
 		return nil, fmt.Errorf("Chassis with uuid%s not found", uuid)
 	}
@@ -191,16 +190,16 @@ func (odbi *ovndb) rowToChassis(uuid string) (*Chassis, error) {
 
 	if tz, ok := cacheChassis.Fields["transport_zones"]; ok {
 		switch tz.(type) {
-		case libovsdb.UUID:
-			ch.TransportZones = []string{tz.(libovsdb.UUID).GoUUID}
+		case string:
+			ch.TransportZones = []string{tz.(string)}
 		case libovsdb.OvsSet:
 			ch.TransportZones = odbi.ConvertGoSetToStringArray(tz.(libovsdb.OvsSet))
 		}
 	}
 	if vtep, ok := cacheChassis.Fields["vtep_logical_switches"]; ok {
 		switch vtep.(type) {
-		case libovsdb.UUID:
-			ch.VtepLogicalSwitches = []string{vtep.(libovsdb.UUID).GoUUID}
+		case string:
+			ch.VtepLogicalSwitches = []string{vtep.(string)}
 		case libovsdb.OvsSet:
 			ch.VtepLogicalSwitches = odbi.ConvertGoSetToStringArray(vtep.(libovsdb.OvsSet))
 		}

@@ -59,7 +59,7 @@ github.com/davecgh/go-spew/spew
 # github.com/docker/spdystream v0.0.0-20160310174837-449fdfce4d96
 github.com/docker/spdystream
 github.com/docker/spdystream/spdy
-# github.com/ebay/go-ovn v0.1.0 => github.com/ebay/go-ovn v0.1.1-0.20200810162212-30abed5fb968
+# github.com/ebay/go-ovn v0.1.1-0.20210203103701-8bb6a085d599
 github.com/ebay/go-ovn
 # github.com/ebay/libovsdb v0.2.1-0.20200719163122-3332afaeb27c
 github.com/ebay/libovsdb
@@ -67,7 +67,7 @@ github.com/ebay/libovsdb
 github.com/evanphx/json-patch
 # github.com/go-logr/logr v0.2.0
 github.com/go-logr/logr
-# github.com/gogo/protobuf v1.3.2
+# github.com/gogo/protobuf v1.3.2 => github.com/gogo/protobuf v1.3.2
 github.com/gogo/protobuf/gogoproto
 github.com/gogo/protobuf/proto
 github.com/gogo/protobuf/protoc-gen-gogo/descriptor

@@ -26,7 +26,7 @@ import (
 )
 
 const (
-	commitTransactionText = "commiting transaction"
+	commitTransactionText = "committing transaction"
 )
 
 var (
@@ -38,6 +38,10 @@ var (
 	ErrorNotFound = errors.New("object not found")
 	// ErrorExist used when object already exists in ovnnb
 	ErrorExist = errors.New("object exist")
+	// ErrorNoChanges used when function called, but no changes
+	ErrorNoChanges = errors.New("no changes requested")
+	// ErrorDuplicateName used when multiple rows are found when searching by name
+	ErrorDuplicateName = errors.New("duplicate name")
 )
 
 // OVNRow ovn nb/sb row
@@ -65,18 +69,16 @@ func (odbi *ovndb) getRowUUIDs(table string, row OVNRow) []string {
 			continue
 		}
 
-		found := false
+		isEqual := true
 		for field, value := range row {
 			if v, ok := drows.Fields[field]; ok {
-				if v == value {
-					found = true
-				} else {
-					found = false
+				if v != value {
+					isEqual = false
 					break
 				}
 			}
 		}
-		if found {
+		if isEqual {
 			uuids = append(uuids, uuid)
 		}
 	}
@@ -233,47 +235,47 @@ func (odbi *ovndb) populateCache(updates libovsdb.TableUpdates) {
 
 				if odbi.signalCB != nil {
 					switch table {
-					case tableLogicalRouter:
+					case TableLogicalRouter:
 						lr := odbi.rowToLogicalRouter(uuid)
 						odbi.signalCB.OnLogicalRouterCreate(lr)
-					case tableLogicalRouterPort:
+					case TableLogicalRouterPort:
 						lrp := odbi.rowToLogicalRouterPort(uuid)
 						odbi.signalCB.OnLogicalRouterPortCreate(lrp)
-					case tableLogicalRouterStaticRoute:
+					case TableLogicalRouterStaticRoute:
 						lrsr := odbi.rowToLogicalRouterStaticRoute(uuid)
 						odbi.signalCB.OnLogicalRouterStaticRouteCreate(lrsr)
-					case tableLogicalSwitch:
+					case TableLogicalSwitch:
 						ls := odbi.rowToLogicalSwitch(uuid)
 						odbi.signalCB.OnLogicalSwitchCreate(ls)
-					case tableLogicalSwitchPort:
+					case TableLogicalSwitchPort:
 						lp, err := odbi.rowToLogicalPort(uuid)
 						if err == nil {
 							odbi.signalCB.OnLogicalPortCreate(lp)
 						}
-					case tableACL:
+					case TableACL:
 						acl := odbi.rowToACL(uuid)
 						odbi.signalCB.OnACLCreate(acl)
-					case tableDHCPOptions:
+					case TableDHCPOptions:
 						dhcp := odbi.rowToDHCPOptions(uuid)
 						odbi.signalCB.OnDHCPOptionsCreate(dhcp)
-					case tableQoS:
+					case TableQoS:
 						qos := odbi.rowToQoS(uuid)
 						odbi.signalCB.OnQoSCreate(qos)
-					case tableLoadBalancer:
+					case TableLoadBalancer:
 						lb, _ := odbi.rowToLB(uuid)
 						odbi.signalCB.OnLoadBalancerCreate(lb)
-					case tableMeter:
+					case TableMeter:
 						meter := odbi.rowToMeter(uuid)
-						odbi.signalCB.onMeterCreate(meter)
-					case tableMeterBand:
+						odbi.signalCB.OnMeterCreate(meter)
+					case TableMeterBand:
 						band, _ := odbi.rowToMeterBand(uuid)
-						odbi.signalCB.onMeterBandCreate(band)
-					case tableChassis:
+						odbi.signalCB.OnMeterBandCreate(band)
+					case TableChassis:
 						chassis, _ := odbi.rowToChassis(uuid)
-						odbi.signalCB.onChassisCreate(chassis)
-					case tableEncap:
+						odbi.signalCB.OnChassisCreate(chassis)
+					case TableEncap:
 						encap, _ := odbi.rowToEncap(uuid)
-						odbi.signalCB.onEncapCreate(encap)
+						odbi.signalCB.OnEncapCreate(encap)
 					}
 				}
 			} else {
@@ -282,47 +284,47 @@ func (odbi *ovndb) populateCache(updates libovsdb.TableUpdates) {
 				if odbi.signalCB != nil {
 					defer func(table, uuid string) {
 						switch table {
-						case tableLogicalRouter:
+						case TableLogicalRouter:
 							lr := odbi.rowToLogicalRouter(uuid)
 							odbi.signalCB.OnLogicalRouterDelete(lr)
-						case tableLogicalRouterPort:
+						case TableLogicalRouterPort:
 							lrp := odbi.rowToLogicalRouterPort(uuid)
 							odbi.signalCB.OnLogicalRouterPortDelete(lrp)
-						case tableLogicalRouterStaticRoute:
+						case TableLogicalRouterStaticRoute:
 							lrsr := odbi.rowToLogicalRouterStaticRoute(uuid)
 							odbi.signalCB.OnLogicalRouterStaticRouteDelete(lrsr)
-						case tableLogicalSwitch:
+						case TableLogicalSwitch:
 							ls := odbi.rowToLogicalSwitch(uuid)
 							odbi.signalCB.OnLogicalSwitchDelete(ls)
-						case tableLogicalSwitchPort:
+						case TableLogicalSwitchPort:
 							lp, err := odbi.rowToLogicalPort(uuid)
 							if err == nil {
 								odbi.signalCB.OnLogicalPortDelete(lp)
 							}
-						case tableACL:
+						case TableACL:
 							acl := odbi.rowToACL(uuid)
 							odbi.signalCB.OnACLDelete(acl)
-						case tableDHCPOptions:
+						case TableDHCPOptions:
 							dhcp := odbi.rowToDHCPOptions(uuid)
 							odbi.signalCB.OnDHCPOptionsDelete(dhcp)
-						case tableQoS:
+						case TableQoS:
 							qos := odbi.rowToQoS(uuid)
 							odbi.signalCB.OnQoSDelete(qos)
-						case tableLoadBalancer:
+						case TableLoadBalancer:
 							lb, _ := odbi.rowToLB(uuid)
 							odbi.signalCB.OnLoadBalancerDelete(lb)
-						case tableMeter:
+						case TableMeter:
 							meter := odbi.rowToMeter(uuid)
-							odbi.signalCB.onMeterDelete(meter)
-						case tableMeterBand:
+							odbi.signalCB.OnMeterDelete(meter)
+						case TableMeterBand:
 							band, _ := odbi.rowToMeterBand(uuid)
-							odbi.signalCB.onMeterBandDelete(band)
-						case tableChassis:
+							odbi.signalCB.OnMeterBandDelete(band)
+						case TableChassis:
 							chassis, _ := odbi.rowToChassis(uuid)
-							odbi.signalCB.onChassisDelete(chassis)
-						case tableEncap:
+							odbi.signalCB.OnChassisDelete(chassis)
+						case TableEncap:
 							encap, _ := odbi.rowToEncap(uuid)
-							odbi.signalCB.onEncapDelete(encap)
+							odbi.signalCB.OnEncapDelete(encap)
 						}
 					}(table, uuid)
 				}
@@ -334,12 +336,31 @@ func (odbi *ovndb) populateCache(updates libovsdb.TableUpdates) {
 func (odbi *ovndb) ConvertGoSetToStringArray(oset libovsdb.OvsSet) []string {
 	var ret = []string{}
 	for _, s := range oset.GoSet {
-		value, ok := s.(string)
-		if ok {
+		switch s.(type) {
+		case string:
+			value := s.(string)
 			ret = append(ret, value)
+		case libovsdb.UUID:
+			uuid := s.(libovsdb.UUID)
+			ret = append(ret, uuid.GoUUID)
 		}
 	}
 	return ret
+}
+
+func (odbi *ovndb) optionalStringFieldToPointer(fieldValue interface{}) *string {
+	switch fieldValue.(type) {
+	case string:
+		temp := fieldValue.(string)
+		return &temp
+	case libovsdb.OvsSet:
+		temp := odbi.ConvertGoSetToStringArray(fieldValue.(libovsdb.OvsSet))
+		if len(temp) > 0 {
+			return &temp[0]
+		}
+		return nil
+	}
+	return nil
 }
 
 func stringToGoUUID(uuid string) libovsdb.UUID {
