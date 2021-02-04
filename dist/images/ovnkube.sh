@@ -1032,7 +1032,6 @@ ovn-node() {
     --mtu=${mtu} \
     ${OVN_ENCAP_IP} \
     --loglevel=${ovnkube_loglevel} \
-    --loglevel=${ovnkube_loglevel} \
     --logfile-maxsize=${ovnkube_logfile_maxsize} \
     --logfile-maxbackups=${ovnkube_logfile_maxbackups} \
     --logfile-maxage=${ovnkube_logfile_maxage} \
