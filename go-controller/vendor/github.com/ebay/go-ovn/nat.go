@@ -32,7 +32,7 @@ type NAT struct {
 }
 
 func (odbi *ovndb) rowToNat(uuid string) *NAT {
-	cacheNAT, ok := odbi.cache[tableNAT][uuid]
+	cacheNAT, ok := odbi.cache[TableNAT][uuid]
 	if !ok {
 		return nil
 	}
@@ -89,7 +89,7 @@ func (odbi *ovndb) lrNatAddImp(lr string, ntype string, externalIp string, logic
 		return nil, ErrorOption
 	}
 
-	if uuid := odbi.getRowUUID(tableNAT, row); len(uuid) > 0 {
+	if uuid := odbi.getRowUUID(TableNAT, row); len(uuid) > 0 {
 		return nil, ErrorExist
 	}
 
@@ -117,7 +117,7 @@ func (odbi *ovndb) lrNatAddImp(lr string, ntype string, externalIp string, logic
 
 	insertOp := libovsdb.Operation{
 		Op:       opInsert,
-		Table:    tableNAT,
+		Table:    TableNAT,
 		Row:      row,
 		UUIDName: nameUUID,
 	}
@@ -132,7 +132,7 @@ func (odbi *ovndb) lrNatAddImp(lr string, ntype string, externalIp string, logic
 	condition := libovsdb.NewCondition("name", "==", lr)
 	mutateOp := libovsdb.Operation{
 		Op:        opMutate,
-		Table:     tableLogicalRouter,
+		Table:     TableLogicalRouter,
 		Mutations: []interface{}{mutation},
 		Where:     []interface{}{condition},
 	}
@@ -174,7 +174,7 @@ func (odbi *ovndb) lrNatDelImp(lr string, ntype string, ip ...string) (*OvnComma
 		return nil, ErrorOption
 	}
 
-	lrNatUUID := odbi.getRowUUIDs(tableNAT, row)
+	lrNatUUID := odbi.getRowUUIDs(TableNAT, row)
 	if len(lrNatUUID) == 0 {
 		return nil, ErrorNotFound
 	}
@@ -208,7 +208,7 @@ func (odbi *ovndb) lrNatDelImp(lr string, ntype string, ip ...string) (*OvnComma
 		return nil, err
 	}
 
-	lrNatUUID = odbi.getRowUUIDs(tableNAT, row)
+	lrNatUUID = odbi.getRowUUIDs(TableNAT, row)
 	if len(lrNatUUID) == 0 {
 		return nil, ErrorNotFound
 	}
@@ -219,7 +219,7 @@ func (odbi *ovndb) lrNatDelImp(lr string, ntype string, ip ...string) (*OvnComma
 	mucondition := libovsdb.NewCondition("name", "==", lr)
 	mutateOp := libovsdb.Operation{
 		Op:        opMutate,
-		Table:     tableLogicalRouter,
+		Table:     TableLogicalRouter,
 		Mutations: []interface{}{mutation},
 		Where:     []interface{}{mucondition},
 	}

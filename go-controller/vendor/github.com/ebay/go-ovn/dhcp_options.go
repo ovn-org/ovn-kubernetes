@@ -29,7 +29,7 @@ type DHCPOptions struct {
 }
 
 func (odbi *ovndb) rowToDHCPOptions(uuid string) *DHCPOptions {
-	cacheDHCPOptions, ok := odbi.cache[tableDHCPOptions][uuid]
+	cacheDHCPOptions, ok := odbi.cache[TableDHCPOptions][uuid]
 	if !ok {
 		return nil
 	}
@@ -83,7 +83,7 @@ func (odbi *ovndb) dhcpOptionsAddImp(cidr string, options map[string]string, ext
 
 	insertOp := libovsdb.Operation{
 		Op:       opInsert,
-		Table:    tableDHCPOptions,
+		Table:    TableDHCPOptions,
 		Row:      row,
 		UUIDName: namedUUID,
 	}
@@ -95,7 +95,7 @@ func (odbi *ovndb) dhcpOptionsAddImp(cidr string, options map[string]string, ext
 func (odbi *ovndb) dhcpOptionsSetImp(uuid string, options map[string]string, external_ids map[string]string) (*OvnCommand, error) {
 	row := make(OVNRow)
 
-	_, ok := odbi.cache[tableDHCPOptions][uuid]
+	_, ok := odbi.cache[TableDHCPOptions][uuid]
 	if !ok {
 		return nil, ErrorNotFound
 	}
@@ -122,7 +122,7 @@ func (odbi *ovndb) dhcpOptionsSetImp(uuid string, options map[string]string, ext
 
 	mutateOp := libovsdb.Operation{
 		Op:    opUpdate,
-		Table: tableDHCPOptions,
+		Table: TableDHCPOptions,
 		Row:   row,
 		Where: []interface{}{condition},
 	}
@@ -135,7 +135,7 @@ func (odbi *ovndb) dhcpOptionsDelImp(uuid string) (*OvnCommand, error) {
 	condition := libovsdb.NewCondition("_uuid", "==", stringToGoUUID(uuid))
 	deleteOp := libovsdb.Operation{
 		Op:    opDelete,
-		Table: tableDHCPOptions,
+		Table: TableDHCPOptions,
 		Where: []interface{}{condition},
 	}
 	operations := []libovsdb.Operation{deleteOp}
@@ -144,16 +144,15 @@ func (odbi *ovndb) dhcpOptionsDelImp(uuid string) (*OvnCommand, error) {
 
 // List all dhcp options
 func (odbi *ovndb) dhcpOptionsListImp() ([]*DHCPOptions, error) {
-	var listDHCP []*DHCPOptions
-
 	odbi.cachemutex.RLock()
 	defer odbi.cachemutex.RUnlock()
 
-	cacheDHCPOptions, ok := odbi.cache[tableDHCPOptions]
+	cacheDHCPOptions, ok := odbi.cache[TableDHCPOptions]
 	if !ok {
 		return nil, ErrorSchema
 	}
 
+	listDHCP := make([]*DHCPOptions, 0, len(cacheDHCPOptions))
 	for uuid := range cacheDHCPOptions {
 		listDHCP = append(listDHCP, odbi.rowToDHCPOptions(uuid))
 	}

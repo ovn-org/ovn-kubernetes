@@ -26,20 +26,20 @@ type NBGlobalTableRow struct {
 }
 
 func (odbi *ovndb) nbGlobalAddImp(options map[string]string) (*OvnCommand, error) {
-	return odbi.addGlobalTableRowImp(options, tableNBGlobal)
+	return odbi.addGlobalTableRowImp(options, TableNBGlobal)
 }
 
 func (odbi *ovndb) nbGlobalDelImp() (*OvnCommand, error) {
-	return odbi.delGlobalTableRowImp(tableNBGlobal)
+	return odbi.delGlobalTableRowImp(TableNBGlobal)
 }
 
 // ovsdb-client -v transact '["Open_vSwitch", {"op" : "update", "table" : "NB_Global", "where": [["_uuid", "==", ["uuid", "587c6ee2-93f9-4bd8-9794-f4a983d139a4"]]],
 // "row":{ "options" : [ "map", [[ "bar", "baz"],["engine_test", "engine-foo"]]],}}]'
 
 func (odbi *ovndb) nbGlobalSetOptionsImp(options map[string]string) (*OvnCommand, error) {
-	return odbi.globalSetOptionsImp(options, tableNBGlobal)
+	return odbi.globalSetOptionsImp(options, TableNBGlobal)
 }
 
 func (odbi *ovndb) nbGlobalGetOptionsImp() (map[string]string, error) {
-	return odbi.globalGetOptionsImp(tableNBGlobal)
+	return odbi.globalGetOptionsImp(TableNBGlobal)
 }
