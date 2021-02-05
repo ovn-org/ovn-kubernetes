@@ -4,10 +4,13 @@ import (
 	"crypto/tls"
 	"crypto/x509"
 	"fmt"
+	"reflect"
+
 	"io/ioutil"
 
 	goovn "github.com/ebay/go-ovn"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
+	"gopkg.in/fsnotify/fsnotify.v1"
 	"k8s.io/klog/v2"
 )
 
@@ -93,8 +96,61 @@ func initGoOvnSslClient(certFile, privKeyFile, caCertFile, address, db, serverNa
 	if err != nil {
 		return nil, fmt.Errorf("error creating SSL OVNDBClient for database %s at address %s: %s", db, address, err)
 	}
+	if err = updateSslKeyPair(db, certFile, privKeyFile, tlsConfig, ovndbclient); err != nil {
+		return nil, fmt.Errorf("error watching SSL OVNDBClient for database %s cert/key files: %s", db, err)
+	}
+
 	klog.Infof("Created OVNDB SSL client for db: %s", db)
 	return ovndbclient, nil
+}
+
+// Watch TLS key/cert files, and update the ovndb tlsConfig Certificate.
+// Call ovndbclient.Close() will disconnect underlying rpc2client connection.
+// With ovndbclient initalized with reconnect flag, rcp2client will reconnct with new tlsConfig Certificate.
+func updateSslKeyPair(ovndb, certFile, privKeyFile string, tlsConfig *tls.Config, ovndbclient goovn.Client) error {
+
+	watcher, err := fsnotify.NewWatcher()
+	if err != nil {
+		return err
+	}
+
+	go func() {
+		for {
+			select {
+			case event, ok := <-watcher.Events:
+				if ok && event.Op&(fsnotify.Write|fsnotify.Remove) != 0 {
+					cert, err := tls.LoadX509KeyPair(certFile, privKeyFile)
+					if err != nil {
+						klog.Infof("Cannot load new cert with cert %s key %s err %s", certFile, privKeyFile, err)
+						continue
+					}
+					if reflect.DeepEqual(tlsConfig.Certificates, []tls.Certificate{cert}) {
+						klog.Infof("TLS update already finished")
+						continue
+					}
+					tlsConfig.Certificates = []tls.Certificate{cert}
+					err = ovndbclient.Close()
+					if err != nil {
+						klog.Errorf("Cannot close %s connection: %s", ovndb, err)
+						continue
+					}
+					klog.Infof("TLS connection to %s force reconnected with new tlsconfig", ovndb)
+				}
+			case err, ok := <-watcher.Errors:
+				if ok {
+					klog.Errorf("Error watching for changes: %s", err)
+				}
+			}
+		}
+	}()
+
+	if err := watcher.Add(certFile); err != nil {
+		return err
+	}
+	if err := watcher.Add(privKeyFile); err != nil {
+		return err
+	}
+	return nil
 }
 
 func initGoOvnTcpClient(address, db string) (goovn.Client, error) {
