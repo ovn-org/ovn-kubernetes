@@ -130,7 +130,7 @@ export KUBE_CONTAINER_RUNTIME_NAME=containerd
 # FIXME we should not tolerate flakes
 # but until then, we retry the test in the same job
 # to stop PR retriggers for totally broken code
-export FLAKE_ATTEMPTS=3
+export FLAKE_ATTEMPTS=5
 export NUM_NODES=20
 # Kind clusters are three node clusters
 export NUM_WORKER_NODES=3
