@@ -9,9 +9,10 @@ import (
 	"strings"
 	"syscall"
 
-	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
 	"github.com/vishvananda/netlink"
 	"k8s.io/klog/v2"
+	utilsysctl "k8s.io/kubernetes/pkg/util/sysctl"
+	utilnet "k8s.io/utils/net"
 )
 
 const (
@@ -72,20 +73,36 @@ func GetNicName(brName string) (string, error) {
 }
 
 func saveIPAddress(oldLink, newLink netlink.Link, addrs []netlink.Addr) error {
-	for i := range addrs {
-		addr := addrs[i]
+	sysctl := utilsysctl.New()
+	ipv6Disable, err := sysctl.GetSysctl(fmt.Sprintf("net/ipv6/conf/%s/disable_ipv6", newLink.Attrs().Name))
+	if err != nil {
+		klog.Errorf("Error obtaining IPv6 status of interface %s : %v", newLink.Attrs().Name, err)
+		// be conservative, assume IPv6 is disabled if we can't read it.
+		ipv6Disable = 1
+	}
 
+	for _, addr := range addrs {
 		if addr.IP.IsGlobalUnicast() {
 			// Remove from oldLink
 			if err := netLinkOps.AddrDel(oldLink, &addr); err != nil {
-				klog.Errorf("Remove addr from %q failed: %v", oldLink.Attrs().Name, err)
+				klog.Errorf("Remove addr %v from %q failed: %v", addr, oldLink.Attrs().Name, err)
 				return err
+			}
+
+			// The interface must have IPv6 enable in order to configure an IPv6 address or it will fail.
+			if ipv6Disable != 0 && utilnet.IsIPv6(addr.IP) {
+				err := sysctl.SetSysctl(fmt.Sprintf("net/ipv6/conf/%s/disable_ipv6", newLink.Attrs().Name), 0)
+				if err != nil {
+					klog.Errorf("Errors setting IPv6 status of interface %s : %v", newLink.Attrs().Name, err)
+					return err
+				}
+				ipv6Disable = 0
 			}
 
 			// Add to newLink
 			addr.Label = newLink.Attrs().Name
 			if err := netLinkOps.AddrAdd(newLink, &addr); err != nil {
-				klog.Errorf("Add addr to newLink %q failed: %v", addr.Label, err)
+				klog.Errorf("Add addr to newLink %v failed: %v", addr, err)
 				return err
 			}
 			klog.Infof("Successfully saved addr %q to newLink %q", addr.String(), addr.Label)
@@ -106,7 +123,7 @@ func delAddRoute(oldLink, newLink netlink.Link, route netlink.Route) error {
 	// Add route to newLink
 	route.LinkIndex = newLink.Attrs().Index
 	if err := netLinkOps.RouteAdd(&route); err != nil && !os.IsExist(err) {
-		klog.Errorf("Add route to newLink %q failed: %v", newLink.Attrs().Name, err)
+		klog.Errorf("Add route %v to newLink %q failed: %v", route, newLink.Attrs().Name, err)
 		return err
 	}
 
@@ -115,28 +132,30 @@ func delAddRoute(oldLink, newLink netlink.Link, route netlink.Route) error {
 }
 
 func saveRoute(oldLink, newLink netlink.Link, routes []netlink.Route) error {
-	for i := range routes {
-		route := routes[i]
-
-		// Handle routes for default gateway later.  This is a special case for
-		// GCE where we have /32 IP addresses and we can't add the default
-		// gateway before the route to the gateway.
-		if route.Dst == nil && route.Gw != nil && route.LinkIndex > 0 {
-			continue
-		} else if route.Dst != nil && !route.Dst.IP.IsGlobalUnicast() {
+	// Handle routes for default gateway later.  This is a special case for
+	// GCE where we have /32 IP addresses and we can't add the default
+	// gateway before the route to the gateway.
+	for _, route := range routes {
+		if route.Dst == nil {
 			continue
 		}
-
-		err := delAddRoute(oldLink, newLink, route)
-		if err != nil {
-			return err
+		// only consider routes for /32 or /128 IP addresses
+		ones, len := route.Dst.Mask.Size()
+		if (ones == 32 && len == 32) ||
+			(ones == 128 && len == 128) {
+			// if this is needed for the gateway we fail later
+			// otherwise just log the error
+			err := delAddRoute(oldLink, newLink, route)
+			if err != nil {
+				klog.Errorf("Skipping route %v: %v", route, err)
+			}
 		}
 	}
 
-	// Now add the default gateway (if any) via this interface.
-	for i := range routes {
-		route := routes[i]
-		if route.Dst == nil && route.Gw != nil && route.LinkIndex > 0 {
+	for _, route := range routes {
+		// Get the default gateways or multipath routes
+		if (route.Dst == nil && route.Gw != nil && route.LinkIndex > 0) ||
+			(route.Dst == nil && len(route.MultiPath) > 0) {
 			// Remove route from 'oldLink' and move it to 'newLink'
 			err := delAddRoute(oldLink, newLink, route)
 			if err != nil {
@@ -144,7 +163,6 @@ func saveRoute(oldLink, newLink netlink.Link, routes []netlink.Route) error {
 			}
 		}
 	}
-
 	return nil
 }
 
@@ -224,10 +242,6 @@ func NicToBridge(iface string) (string, error) {
 
 	// Get ip addresses and routes before any real operations.
 	family := syscall.AF_UNSPEC
-	// FIXME: Should move all interfaces over, but in IPv4 only, breaks.
-	if config.IPv4Mode && !config.IPv6Mode {
-		family = syscall.AF_INET
-	}
 	addrs, err := netLinkOps.AddrList(ifaceLink, family)
 	if err != nil {
 		return "", err
@@ -266,10 +280,6 @@ func BridgeToNic(bridge string) error {
 
 	// Get ip addresses and routes before any real operations.
 	family := syscall.AF_UNSPEC
-	// FIXME: Should move all interfaces over, but in IPv4 only, breaks.
-	if config.IPv4Mode && !config.IPv6Mode {
-		family = syscall.AF_INET
-	}
 	addrs, err := netLinkOps.AddrList(bridgeLink, family)
 	if err != nil {
 		return err

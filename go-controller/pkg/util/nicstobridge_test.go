@@ -183,6 +183,10 @@ func TestSaveIPAddress(t *testing.T) {
 			onRetArgsNetLinkLibOpers: []ovntest.TestifyMockHelper{
 				{OnCallMethodName: "LinkSetUp", OnCallMethodArgType: []string{"*mocks.Link"}, RetArgList: []interface{}{nil}},
 			},
+			onRetArgsLinkIfaceOpers: []ovntest.TestifyMockHelper{
+				{OnCallMethodName: "Attrs", OnCallMethodArgType: []string{}, RetArgList: []interface{}{&netlink.LinkAttrs{Name: "testIfaceName"}}},
+				{OnCallMethodName: "Attrs", OnCallMethodArgType: []string{}, RetArgList: []interface{}{&netlink.LinkAttrs{Name: "testIfaceName"}}},
+			},
 		},
 		{
 			desc:       "deleting address from old link errors out",
@@ -194,6 +198,8 @@ func TestSaveIPAddress(t *testing.T) {
 				{OnCallMethodName: "AddrDel", OnCallMethodArgType: []string{"*mocks.Link", "*netlink.Addr"}, RetArgList: []interface{}{fmt.Errorf("mock error")}},
 			},
 			onRetArgsLinkIfaceOpers: []ovntest.TestifyMockHelper{
+				{OnCallMethodName: "Attrs", OnCallMethodArgType: []string{}, RetArgList: []interface{}{&netlink.LinkAttrs{Name: "testIfaceName"}}},
+				{OnCallMethodName: "Attrs", OnCallMethodArgType: []string{}, RetArgList: []interface{}{&netlink.LinkAttrs{Name: "testIfaceName"}}},
 				{OnCallMethodName: "Attrs", OnCallMethodArgType: []string{}, RetArgList: []interface{}{&netlink.LinkAttrs{Name: "testIfaceName"}}},
 			},
 		},
@@ -209,6 +215,8 @@ func TestSaveIPAddress(t *testing.T) {
 			},
 			onRetArgsLinkIfaceOpers: []ovntest.TestifyMockHelper{
 				{OnCallMethodName: "Attrs", OnCallMethodArgType: []string{}, RetArgList: []interface{}{&netlink.LinkAttrs{Name: "testIfaceName"}}},
+				{OnCallMethodName: "Attrs", OnCallMethodArgType: []string{}, RetArgList: []interface{}{&netlink.LinkAttrs{Name: "testIfaceName"}}},
+				{OnCallMethodName: "Attrs", OnCallMethodArgType: []string{}, RetArgList: []interface{}{&netlink.LinkAttrs{Name: "testIfaceName"}}},
 			},
 		},
 		{
@@ -222,6 +230,8 @@ func TestSaveIPAddress(t *testing.T) {
 				{OnCallMethodName: "LinkSetUp", OnCallMethodArgType: []string{"*mocks.Link"}, RetArgList: []interface{}{nil}},
 			},
 			onRetArgsLinkIfaceOpers: []ovntest.TestifyMockHelper{
+				{OnCallMethodName: "Attrs", OnCallMethodArgType: []string{}, RetArgList: []interface{}{&netlink.LinkAttrs{Name: "testIfaceName"}}},
+				{OnCallMethodName: "Attrs", OnCallMethodArgType: []string{}, RetArgList: []interface{}{&netlink.LinkAttrs{Name: "testIfaceName"}}},
 				{OnCallMethodName: "Attrs", OnCallMethodArgType: []string{}, RetArgList: []interface{}{&netlink.LinkAttrs{Name: "testIfaceName"}}},
 			},
 		},
@@ -505,6 +515,8 @@ func TestNicToBridge(t *testing.T) {
 			},
 			onRetArgsLinkIfaceOpers: []ovntest.TestifyMockHelper{
 				{OnCallMethodName: "Attrs", OnCallMethodArgType: []string{}, RetArgList: []interface{}{&netlink.LinkAttrs{Name: "testIfaceName"}}},
+				{OnCallMethodName: "Attrs", OnCallMethodArgType: []string{}, RetArgList: []interface{}{&netlink.LinkAttrs{Name: "testIfaceName"}}},
+				{OnCallMethodName: "Attrs", OnCallMethodArgType: []string{}, RetArgList: []interface{}{&netlink.LinkAttrs{Name: "testIfaceName"}}},
 			},
 		},
 		{
@@ -523,6 +535,8 @@ func TestNicToBridge(t *testing.T) {
 			onRetArgsLinkIfaceOpers: []ovntest.TestifyMockHelper{
 				{OnCallMethodName: "Attrs", OnCallMethodArgType: []string{}, RetArgList: []interface{}{&netlink.LinkAttrs{Name: "testIfaceName"}}},
 				{OnCallMethodName: "Attrs", OnCallMethodArgType: []string{}, RetArgList: []interface{}{&netlink.LinkAttrs{Name: "testIfaceName"}}},
+				{OnCallMethodName: "Attrs", OnCallMethodArgType: []string{}, RetArgList: []interface{}{&netlink.LinkAttrs{Name: "testIfaceName"}}},
+				{OnCallMethodName: "Attrs", OnCallMethodArgType: []string{}, RetArgList: []interface{}{&netlink.LinkAttrs{Name: "testIfaceName"}}},
 			},
 		},
 		{
@@ -539,6 +553,8 @@ func TestNicToBridge(t *testing.T) {
 				{OnCallMethodName: "RouteAdd", OnCallMethodArgType: []string{"*netlink.Route"}, RetArgList: []interface{}{nil}},
 			},
 			onRetArgsLinkIfaceOpers: []ovntest.TestifyMockHelper{
+				{OnCallMethodName: "Attrs", OnCallMethodArgType: []string{}, RetArgList: []interface{}{&netlink.LinkAttrs{Name: "testIfaceName"}}},
+				{OnCallMethodName: "Attrs", OnCallMethodArgType: []string{}, RetArgList: []interface{}{&netlink.LinkAttrs{Name: "testIfaceName"}}},
 				{OnCallMethodName: "Attrs", OnCallMethodArgType: []string{}, RetArgList: []interface{}{&netlink.LinkAttrs{Name: "testIfaceName"}}},
 				{OnCallMethodName: "Attrs", OnCallMethodArgType: []string{}, RetArgList: []interface{}{&netlink.LinkAttrs{Name: "testIfaceName"}}},
 			},
@@ -707,6 +723,8 @@ func TestBridgeToNic(t *testing.T) {
 				{OnCallMethodName: "LinkSetUp", OnCallMethodArgType: []string{"*mocks.Link"}, RetArgList: []interface{}{fmt.Errorf("mock error")}},
 			},
 			onRetArgsLinkIfaceOpers: []ovntest.TestifyMockHelper{
+				{OnCallMethodName: "Attrs", OnCallMethodArgType: []string{}, RetArgList: []interface{}{&netlink.LinkAttrs{Name: "testIfaceName"}}},
+				{OnCallMethodName: "Attrs", OnCallMethodArgType: []string{}, RetArgList: []interface{}{&netlink.LinkAttrs{Name: "testIfaceName"}}},
 				// Below row entry is for mocking the `if err = saveIPAddress(bridgeLink, ifaceLink, addrs); err != nil` code path
 				{OnCallMethodName: "Attrs", OnCallMethodArgType: []string{}, RetArgList: []interface{}{&netlink.LinkAttrs{Name: "testIfaceName"}}},
 			},
@@ -746,6 +764,8 @@ func TestBridgeToNic(t *testing.T) {
 				{OnCallMethodName: "RouteAdd", OnCallMethodArgType: []string{"*netlink.Route"}, RetArgList: []interface{}{fmt.Errorf("mock error")}},
 			},
 			onRetArgsLinkIfaceOpers: []ovntest.TestifyMockHelper{
+				{OnCallMethodName: "Attrs", OnCallMethodArgType: []string{}, RetArgList: []interface{}{&netlink.LinkAttrs{Name: "testIfaceName"}}},
+				{OnCallMethodName: "Attrs", OnCallMethodArgType: []string{}, RetArgList: []interface{}{&netlink.LinkAttrs{Name: "testIfaceName"}}},
 				// Below row entry is for mocking the `if err = saveIPAddress(bridgeLink, ifaceLink, addrs); err != nil` code path
 				{OnCallMethodName: "Attrs", OnCallMethodArgType: []string{}, RetArgList: []interface{}{&netlink.LinkAttrs{Name: "testIfaceName"}}},
 				// Below two row entries are for mocking the `if err = saveRoute(bridgeLink, ifaceLink, routes); err != nil` code path.
@@ -793,6 +813,8 @@ func TestBridgeToNic(t *testing.T) {
 				{OnCallMethodName: "RouteAdd", OnCallMethodArgType: []string{"*netlink.Route"}, RetArgList: []interface{}{nil}},
 			},
 			onRetArgsLinkIfaceOpers: []ovntest.TestifyMockHelper{
+				{OnCallMethodName: "Attrs", OnCallMethodArgType: []string{}, RetArgList: []interface{}{&netlink.LinkAttrs{Name: "testIfaceName"}}},
+				{OnCallMethodName: "Attrs", OnCallMethodArgType: []string{}, RetArgList: []interface{}{&netlink.LinkAttrs{Name: "testIfaceName"}}},
 				// Below row entry is for mocking the `if err = saveIPAddress(bridgeLink, ifaceLink, addrs); err != nil` code path
 				{OnCallMethodName: "Attrs", OnCallMethodArgType: []string{}, RetArgList: []interface{}{&netlink.LinkAttrs{Name: "testIfaceName"}}},
 				// Below entry is for mocking the `if err = saveRoute(bridgeLink, ifaceLink, routes); err != nil` code path.
@@ -846,6 +868,8 @@ func TestBridgeToNic(t *testing.T) {
 				{OnCallMethodName: "RouteAdd", OnCallMethodArgType: []string{"*netlink.Route"}, RetArgList: []interface{}{nil}},
 			},
 			onRetArgsLinkIfaceOpers: []ovntest.TestifyMockHelper{
+				{OnCallMethodName: "Attrs", OnCallMethodArgType: []string{}, RetArgList: []interface{}{&netlink.LinkAttrs{Name: "testIfaceName"}}},
+				{OnCallMethodName: "Attrs", OnCallMethodArgType: []string{}, RetArgList: []interface{}{&netlink.LinkAttrs{Name: "testIfaceName"}}},
 				// Below row entry is for mocking the `if err = saveIPAddress(bridgeLink, ifaceLink, addrs); err != nil` code path
 				{OnCallMethodName: "Attrs", OnCallMethodArgType: []string{}, RetArgList: []interface{}{&netlink.LinkAttrs{Name: "testIfaceName"}}},
 				// Below two row entries are for mocking the `if err = saveRoute(bridgeLink, ifaceLink, routes); err != nil` code path.
@@ -899,6 +923,8 @@ func TestBridgeToNic(t *testing.T) {
 				{OnCallMethodName: "RouteAdd", OnCallMethodArgType: []string{"*netlink.Route"}, RetArgList: []interface{}{nil}},
 			},
 			onRetArgsLinkIfaceOpers: []ovntest.TestifyMockHelper{
+				{OnCallMethodName: "Attrs", OnCallMethodArgType: []string{}, RetArgList: []interface{}{&netlink.LinkAttrs{Name: "testIfaceName"}}},
+				{OnCallMethodName: "Attrs", OnCallMethodArgType: []string{}, RetArgList: []interface{}{&netlink.LinkAttrs{Name: "testIfaceName"}}},
 				// Below row entry is for mocking the `if err = saveIPAddress(bridgeLink, ifaceLink, addrs); err != nil` code path
 				{OnCallMethodName: "Attrs", OnCallMethodArgType: []string{}, RetArgList: []interface{}{&netlink.LinkAttrs{Name: "testIfaceName"}}},
 				// Below two row entries are for mocking the `if err = saveRoute(bridgeLink, ifaceLink, routes); err != nil` code path.
@@ -956,6 +982,8 @@ func TestBridgeToNic(t *testing.T) {
 				{OnCallMethodName: "RouteAdd", OnCallMethodArgType: []string{"*netlink.Route"}, RetArgList: []interface{}{nil}},
 			},
 			onRetArgsLinkIfaceOpers: []ovntest.TestifyMockHelper{
+				{OnCallMethodName: "Attrs", OnCallMethodArgType: []string{}, RetArgList: []interface{}{&netlink.LinkAttrs{Name: "testIfaceName"}}},
+				{OnCallMethodName: "Attrs", OnCallMethodArgType: []string{}, RetArgList: []interface{}{&netlink.LinkAttrs{Name: "testIfaceName"}}},
 				// Below row entry is for mocking the `if err = saveIPAddress(bridgeLink, ifaceLink, addrs); err != nil` code path
 				{OnCallMethodName: "Attrs", OnCallMethodArgType: []string{}, RetArgList: []interface{}{&netlink.LinkAttrs{Name: "testIfaceName"}}},
 				// Below two row entries are for mocking the `if err = saveRoute(bridgeLink, ifaceLink, routes); err != nil` code path.
@@ -1017,6 +1045,8 @@ func TestBridgeToNic(t *testing.T) {
 				{OnCallMethodName: "RouteAdd", OnCallMethodArgType: []string{"*netlink.Route"}, RetArgList: []interface{}{nil}},
 			},
 			onRetArgsLinkIfaceOpers: []ovntest.TestifyMockHelper{
+				{OnCallMethodName: "Attrs", OnCallMethodArgType: []string{}, RetArgList: []interface{}{&netlink.LinkAttrs{Name: "testIfaceName"}}},
+				{OnCallMethodName: "Attrs", OnCallMethodArgType: []string{}, RetArgList: []interface{}{&netlink.LinkAttrs{Name: "testIfaceName"}}},
 				// Below row entry is for mocking the `if err = saveIPAddress(bridgeLink, ifaceLink, addrs); err != nil` code path
 				{OnCallMethodName: "Attrs", OnCallMethodArgType: []string{}, RetArgList: []interface{}{&netlink.LinkAttrs{Name: "testIfaceName"}}},
 				// Below two row entries are for mocking the `if err = saveRoute(bridgeLink, ifaceLink, routes); err != nil` code path.
@@ -1078,6 +1108,8 @@ func TestBridgeToNic(t *testing.T) {
 				{OnCallMethodName: "RouteAdd", OnCallMethodArgType: []string{"*netlink.Route"}, RetArgList: []interface{}{nil}},
 			},
 			onRetArgsLinkIfaceOpers: []ovntest.TestifyMockHelper{
+				{OnCallMethodName: "Attrs", OnCallMethodArgType: []string{}, RetArgList: []interface{}{&netlink.LinkAttrs{Name: "testIfaceName"}}},
+				{OnCallMethodName: "Attrs", OnCallMethodArgType: []string{}, RetArgList: []interface{}{&netlink.LinkAttrs{Name: "testIfaceName"}}},
 				// Below row entry is for mocking the `if err = saveIPAddress(bridgeLink, ifaceLink, addrs); err != nil` code path
 				{OnCallMethodName: "Attrs", OnCallMethodArgType: []string{}, RetArgList: []interface{}{&netlink.LinkAttrs{Name: "testIfaceName"}}},
 				// Below two row entries are for mocking the `if err = saveRoute(bridgeLink, ifaceLink, routes); err != nil` code path.
@@ -1138,6 +1170,8 @@ func TestBridgeToNic(t *testing.T) {
 				{OnCallMethodName: "RouteAdd", OnCallMethodArgType: []string{"*netlink.Route"}, RetArgList: []interface{}{nil}},
 			},
 			onRetArgsLinkIfaceOpers: []ovntest.TestifyMockHelper{
+				{OnCallMethodName: "Attrs", OnCallMethodArgType: []string{}, RetArgList: []interface{}{&netlink.LinkAttrs{Name: "testIfaceName"}}},
+				{OnCallMethodName: "Attrs", OnCallMethodArgType: []string{}, RetArgList: []interface{}{&netlink.LinkAttrs{Name: "testIfaceName"}}},
 				// Below row entry is for mocking the `if err = saveIPAddress(bridgeLink, ifaceLink, addrs); err != nil` code path
 				{OnCallMethodName: "Attrs", OnCallMethodArgType: []string{}, RetArgList: []interface{}{&netlink.LinkAttrs{Name: "testIfaceName"}}},
 				// Below two row entries are for mocking the `if err = saveRoute(bridgeLink, ifaceLink, routes); err != nil` code path.
