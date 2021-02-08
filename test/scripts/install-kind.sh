@@ -13,8 +13,8 @@ sudo mv ./kubectl /usr/local/bin/kubectl
 # Current e2e binary version for CI is kubernetes 1.20 with the fix for IPv6 network policies #96856
 # We can always get the latest version published from the URL dl.k8s.io/ci/latest.txt
 # curl -L dl.k8s.io/ci/latest.txt
-# v1.21.0-alpha.2.248+074a5177209c36
-curl -LO https://dl.k8s.io/ci/v1.21.0-alpha.2.248+074a5177209c36/kubernetes-test-linux-amd64.tar.gz
+# v1.21.0-alpha.2.370+f266f60da9dadf
+curl -LO https://dl.k8s.io/ci/v1.21.0-alpha.2.370+f266f60da9dadf/kubernetes-test-linux-amd64.tar.gz
 tar xvzf kubernetes-test-linux-amd64.tar.gz --strip-components=3 kubernetes/test/bin/ginkgo kubernetes/test/bin/e2e.test
 sudo mv ./e2e.test /usr/local/bin/e2e.test
 sudo mv ./ginkgo /usr/local/bin/ginkgo
