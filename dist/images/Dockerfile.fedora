@@ -25,6 +25,10 @@ RUN INSTALL_PKGS=" \
 	dnf install --best --refresh -y --setopt=tsflags=nodocs $INSTALL_PKGS && \
 	dnf clean all && rm -rf /var/cache/dnf/*
 
+COPY ovn-20.12.0-14scratch.fc33.x86_64.rpm ovn-central-20.12.0-14scratch.fc33.x86_64.rpm  ovn-host-20.12.0-14scratch.fc33.x86_64.rpm ovn-vtep-20.12.0-14scratch.fc33.x86_64.rpm /root/
+
+RUN rpm -Uhv --force --nodeps /root/ovn*.rpm 
+
 RUN mkdir -p /var/run/openvswitch
 
 # Built in ../../go_controller, then the binaries are copied here.
