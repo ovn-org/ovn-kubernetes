@@ -20,7 +20,7 @@ env:
 jobs:
   build:
     name: Build
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-20.04
     steps:
     - name: Set up Go
       uses: actions/setup-go@v1
@@ -103,7 +103,7 @@ jobs:
   e2e:
     name: e2e
     if: github.event_name != 'schedule'
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-20.04
     timeout-minutes: 60
     strategy:
       fail-fast: false
@@ -252,7 +252,7 @@ jobs:
   e2e-periodic:
     name: e2e-periodic
     if: github.event_name == 'schedule'
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-20.04
     timeout-minutes: 60
     strategy:
       fail-fast: false
