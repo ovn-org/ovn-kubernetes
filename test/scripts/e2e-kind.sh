@@ -12,6 +12,9 @@ SKIPPED_TESTS="
 # New Network Policy tests cause CI to time out
 Netpol
 
+# Network Policy legacy tests are flake
+NetworkPolicy
+
 # OVN doesn´t implement HostPort, CRIO does
 HostPort
 
