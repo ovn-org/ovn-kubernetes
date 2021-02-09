@@ -7,6 +7,7 @@ import (
 	"net"
 	"strings"
 
+	"github.com/pkg/errors"
 	v1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/util/intstr"
@@ -309,4 +310,20 @@ func getNodeAddresses(node *v1.Node) (string, string) {
 		}
 	}
 	return ipv4Res, ipv6Res
+}
+
+// This sets up a listener that replies with the hostname, both on tcp and on udp
+func setupHostnameServers(container, address string, udpPort, tcpPort int) error {
+	cmd := []string{"docker", "exec", container, "bash", "-c", fmt.Sprintf("while true; do echo $(hostname) | nc -l -u %s %d | exit; done &", address, udpPort)}
+	_, err := runCommand(cmd...)
+	if err != nil {
+		return errors.Wrapf(err, "failed to setup udp listener on %s %s", address, container)
+	}
+
+	cmd = []string{"docker", "exec", container, "bash", "-c", fmt.Sprintf("while true; do echo $(hostname) | nc -l %s %d | exit; done &", address, tcpPort)}
+	_, err = runCommand(cmd...)
+	if err != nil {
+		return errors.Wrapf(err, "failed to setup tcp listener on %s %s", address, container)
+	}
+	return nil
 }
