@@ -9,7 +9,7 @@
 # are built in this Dockerfile and included in the image (instead of the rpm)
 #
 
-FROM registry.ci.openshift.org/ocp/builder:rhel-8-golang-1.15-openshift-4.7 AS builder
+FROM registry.ci.openshift.org/ocp/builder:rhel-8-golang-1.15-openshift-4.8 AS builder
 
 WORKDIR /go/src/github.com/openshift/ovn-kubernetes
 COPY . .
@@ -18,9 +18,9 @@ COPY . .
 RUN cd go-controller; CGO_ENABLED=0 make
 RUN cd go-controller; CGO_ENABLED=0 make windows
 
-FROM registry.ci.openshift.org/ocp/4.7:cli AS cli
+FROM registry.ci.openshift.org/ocp/4.8:cli AS cli
 
-FROM registry.ci.openshift.org/ocp/4.7:base
+FROM registry.ci.openshift.org/ocp/4.8:base
 
 USER root
 
