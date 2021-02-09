@@ -26,6 +26,7 @@ import (
 	"k8s.io/client-go/tools/cache"
 	"k8s.io/client-go/tools/record"
 	"k8s.io/klog/v2"
+	utilsysctl "k8s.io/kubernetes/pkg/util/sysctl"
 )
 
 // OvnNode is the object holder for utilities meant for node management
@@ -99,6 +100,33 @@ func setupOVNNode(node *kapi.Node) error {
 		if errSet != nil {
 			return fmt.Errorf("error setting OVS encap-port: %v\n  %q", errSet, stderr)
 		}
+	}
+
+	// if IPv6 is enabled ensure IPv6 is enabled in the system
+	if config.IPv6Mode {
+		err := ensureSysctl("net/ipv6/conf/all/forwarding", 1)
+		if err != nil {
+			return err
+		}
+		err = ensureSysctl("net/ipv6/conf/all/disable_ipv6", 0)
+		if err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func ensureSysctl(name string, newVal int) error {
+	sysctl := utilsysctl.New()
+	oldVal, err := sysctl.GetSysctl(name)
+	if err != nil {
+		return err
+	}
+	if oldVal != newVal {
+		if err := sysctl.SetSysctl(name, newVal); err != nil {
+			return fmt.Errorf("can't set sysctl %s to %d: %v", name, newVal, err)
+		}
+		klog.V(1).Infof("Changed sysctl %q: %d -> %d", name, oldVal, newVal)
 	}
 	return nil
 }
