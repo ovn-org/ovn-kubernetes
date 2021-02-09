@@ -4,7 +4,6 @@ go 1.13
 
 require (
 	github.com/Mellanox/sriovnet v1.0.1
-	github.com/Microsoft/go-winio v0.4.15 // indirect
 	github.com/Microsoft/hcsshim v0.8.10-0.20200715222032-5eafd1556990
 	github.com/bhendo/go-powershell v0.0.0-20190719160123-219e7fb4e41e
 	github.com/cenk/hub v1.0.1 // indirect
@@ -40,6 +39,7 @@ require (
 	k8s.io/client-go v0.20.0
 	k8s.io/klog v0.0.0-20181102134211-b9b56d5dfc92
 	k8s.io/klog/v2 v2.4.0
+	k8s.io/kubernetes v1.20.0
 	k8s.io/utils v0.0.0-20201110183641-67b214c5f920
 )
 
@@ -66,7 +66,7 @@ replace (
 	k8s.io/kube-scheduler => k8s.io/kube-scheduler v0.20.0
 	k8s.io/kubectl => k8s.io/kubectl v0.20.0
 	k8s.io/kubelet => k8s.io/kubelet v0.20.0
-	k8s.io/kubernetes => k8s.io/kubernetes v1.20.0-beta.2
+	k8s.io/kubernetes => k8s.io/kubernetes v1.20.0
 	k8s.io/legacy-cloud-providers => k8s.io/legacy-cloud-providers v0.20.0
 	k8s.io/metrics => k8s.io/metrics v0.20.0
 	k8s.io/mount-utils => k8s.io/mount-utils v0.20.0
