@@ -351,7 +351,7 @@ func (gp *gressPolicy) addACLAllow(match, l4Match, portGroupUUID string, ipBlock
 		fmt.Sprintf("log=%t", aclLogging != ""),
 		fmt.Sprintf("severity=%s", getACLLoggingSeverity(aclLogging)),
 		fmt.Sprintf("meter=%s", types.OvnACLLoggingMeter),
-		fmt.Sprintf("name=%s", gp.policyNamespace),
+		fmt.Sprintf("name=%.63s", gp.policyName),
 		fmt.Sprintf("external-ids:l4Match=\"%s\"", l4Match),
 		fmt.Sprintf("external-ids:ipblock_cidr=%t", ipBlockCidr),
 		fmt.Sprintf("external-ids:namespace=%s", gp.policyNamespace),
