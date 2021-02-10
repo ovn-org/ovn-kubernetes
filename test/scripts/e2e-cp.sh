@@ -11,6 +11,9 @@ if [ "$KIND_IPV4_SUPPORT" == true ] && [ "$KIND_IPV6_SUPPORT" == true ]; then
     # No support for these features in dual-stack yet
     SKIPPED_TESTS="hybrid.overlay|external.gateway"
 fi
+if [ "$OVN_GATEWAY_MODE" != "shared" ]; then    # TODO Remove this together with the Hostnetwork endpoints once upstream tests are fixed
+    SKIPPED_TESTS="Hostnetwork.endpoints|$SKIPPED_TESTS"
+fi
 
 # setting these is required to make RuntimeClass tests work ... :/
 export KUBE_CONTAINER_RUNTIME=remote
