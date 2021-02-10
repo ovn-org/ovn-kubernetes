@@ -45,6 +45,9 @@ should resolve connection reset issue #74839
 # Broken in shared gw mode
 service endpoints using hostNetwork
 
+# Admission hook flakes
+AdmissionWebhook
+
 # ???
 \[Feature:NoSNAT\]
 Services.+(ESIPP|cleanup finalizer)
