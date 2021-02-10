@@ -214,9 +214,11 @@ func (oc *Controller) upgradeOVNTopology(existingNodes *kapi.NodeList) error {
 
 	// If current DB version is greater than OvnSingleJoinSwitchTopoVersion, no need to upgrade to single switch topology
 	if ver < OvnSingleJoinSwitchTopoVersion {
+		klog.Infof("Upgrading to Single Switch OVN Topology")
 		err = oc.upgradeToSingleSwitchOVNTopology(existingNodes)
 	}
 	if err == nil && ver < OvnNamespacedDenyPGTopoVersion {
+		klog.Infof("Upgrading to Namespace Deny PortGroup OVN Topology")
 		err = oc.upgradeToNamespacedDenyPGOVNTopology(existingNodes)
 	}
 	return err
@@ -231,6 +233,7 @@ func (oc *Controller) upgradeOVNTopology(existingNodes *kapi.NodeList) error {
 // TODO: Verify that the cluster was not already called with a different global subnet
 //  If true, then either quit or perform a complete reconfiguration of the cluster (recreate switches/routers with new subnet values)
 func (oc *Controller) StartClusterMaster(masterNodeName string) error {
+	klog.Infof("Starting cluster master")
 	// The gateway router need to be connected to the distributed router via a per-node join switch.
 	// We need a subnet allocator that allocates subnet for this per-node join switch.
 	if config.IPv4Mode {
@@ -255,24 +258,26 @@ func (oc *Controller) StartClusterMaster(masterNodeName string) error {
 		klog.Errorf("Error in fetching nodes: %v", err)
 		return err
 	}
-
+	klog.V(5).Infof("existing number of nodes: %d", len(existingNodes.Items))
 	err = oc.upgradeOVNTopology(existingNodes)
 	if err != nil {
 		klog.Errorf("Failed to upgrade OVN topology to version %d: %v", OvnCurrentTopologyVersion, err)
 		return err
 	}
 
+	klog.Infof("Allocating subnets")
 	var v4HostSubnetCount, v6HostSubnetCount float64
-
 	for _, clusterEntry := range config.Default.ClusterSubnets {
 		err := oc.masterSubnetAllocator.AddNetworkRange(clusterEntry.CIDR, clusterEntry.HostSubnetLength)
 		if err != nil {
 			return err
 		}
+		klog.V(5).Infof("Added network range %s to the allocator", clusterEntry.CIDR)
 		util.CalculateHostSubnetsForClusterEntry(clusterEntry, &v4HostSubnetCount, &v6HostSubnetCount)
 	}
 	for _, node := range existingNodes.Items {
 		hostSubnets, _ := util.ParseNodeHostSubnetAnnotation(&node)
+		klog.V(5).Infof("Node %s contains subnets: %v", node.Name, hostSubnets)
 		for _, hostSubnet := range hostSubnets {
 			err := oc.masterSubnetAllocator.MarkAllocatedNetwork(hostSubnet)
 			if err != nil {
@@ -281,6 +286,7 @@ func (oc *Controller) StartClusterMaster(masterNodeName string) error {
 			util.UpdateUsedHostSubnetsCount(hostSubnet, &oc.v4HostSubnetsUsed, &oc.v6HostSubnetsUsed, true)
 		}
 		nodeLocalNatIPs, _ := util.ParseNodeLocalNatIPAnnotation(&node)
+		klog.V(5).Infof("Node %s contains local NAT IPs: %v", node.Name, nodeLocalNatIPs)
 		for _, nodeLocalNatIP := range nodeLocalNatIPs {
 			var err error
 			if utilnet.IsIPv6(nodeLocalNatIP) {
