@@ -7,14 +7,10 @@ dist: xenial
 go:
   - 1.13.x
 
-# Anything in before_script that returns a nonzero exit code will flunk the
-# build and immediately stop. It's sorta like having set -e enabled in bash.
-# Make sure golangci-lint is vendored.
 before_script:
-  - go get -u github.com/golangci/golangci-lint/cmd/golangci-lint
-  - go get github.com/mattn/goveralls
+  - go get -u github.com/mattn/goveralls
 
 script:
-  - golangci-lint run       # run a bunch of code checkers/linters in parallel
-  - go test -v -covermode=count -coverprofile=coverage.out
-  - goveralls -coverprofile=coverage.out -service=travis-ci
+  - make lint 
+  - make test-coverage
+  - goveralls -coverprofile=sriovnet.cover -service=travis-ci
