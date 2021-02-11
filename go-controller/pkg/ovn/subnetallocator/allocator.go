@@ -55,35 +55,57 @@ func (sna *SubnetAllocator) MarkAllocatedNetwork(subnet *net.IPNet) error {
 	return fmt.Errorf("network %s does not belong to any known range", subnet.String())
 }
 
-func maybeAllocateOneNetwork(ranges []*subnetAllocatorRange, networks []*net.IPNet) ([]*net.IPNet, error) {
-	if len(ranges) == 0 {
-		return networks, nil
+// AllocateNetworks tries to allocate networks in all the ranges available
+func (sna *SubnetAllocator) AllocateNetworks() ([]*net.IPNet, error) {
+	var networks []*net.IPNet
+	var err error
+	ipv4network, err := sna.AllocateIPv4Network()
+	if err != nil {
+		return nil, err
 	}
-	for _, snr := range ranges {
+	if ipv4network != nil {
+		networks = append(networks, ipv4network)
+	}
+	ipv6network, err := sna.AllocateIPv6Network()
+	if err != nil {
+		return nil, err
+	}
+	if ipv6network != nil {
+		networks = append(networks, ipv6network)
+	}
+	return networks, nil
+}
+
+// AllocateIPv4Network tries to allocate an IPv4 network if there are ranges available
+func (sna *SubnetAllocator) AllocateIPv4Network() (*net.IPNet, error) {
+	sna.Lock()
+	defer sna.Unlock()
+	if len(sna.v4ranges) == 0 {
+		return nil, nil
+	}
+	for _, snr := range sna.v4ranges {
 		sn := snr.allocateNetwork()
 		if sn != nil {
-			networks = append(networks, sn)
-			return networks, nil
+			return sn, nil
 		}
 	}
 	return nil, ErrSubnetAllocatorFull
 }
 
-func (sna *SubnetAllocator) AllocateNetworks() ([]*net.IPNet, error) {
+// AllocateIPv6Network tries to allocate an IPv6 network if there are ranges available
+func (sna *SubnetAllocator) AllocateIPv6Network() (*net.IPNet, error) {
 	sna.Lock()
 	defer sna.Unlock()
-
-	var networks []*net.IPNet
-	var err error
-	networks, err = maybeAllocateOneNetwork(sna.v4ranges, networks)
-	if err != nil {
-		return nil, err
+	if len(sna.v6ranges) == 0 {
+		return nil, nil
 	}
-	networks, err = maybeAllocateOneNetwork(sna.v6ranges, networks)
-	if err != nil {
-		return nil, err
+	for _, snr := range sna.v6ranges {
+		sn := snr.allocateNetwork()
+		if sn != nil {
+			return sn, nil
+		}
 	}
-	return networks, nil
+	return nil, ErrSubnetAllocatorFull
 }
 
 func (sna *SubnetAllocator) ReleaseNetwork(subnet *net.IPNet) error {
