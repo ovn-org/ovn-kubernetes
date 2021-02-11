@@ -359,6 +359,19 @@ fi
 kind create cluster --name ${KIND_CLUSTER_NAME} --kubeconfig ${KUBECONFIG} --image kindest/node:${K8S_VERSION} --config=${KIND_CONFIG_LCL}
 cat ${KUBECONFIG}
 
+# Docker disables IPv6 globally inside containers except in the eth0 interface.
+# Kind enables IPv6 globally the containers ONLY for dual-stack and IPv6 deployments.
+# Ovnkube-node tries to move all global addresses from the gateway interface to the
+# bridge interface it creates. This breaks on KIND with IPv4 only deployments, because the new
+# internal bridge has IPv6 disable and can't move the IPv6 from the eth0 interface.
+# We can enable IPv6 always in the container, since the docker setup with IPv4 only
+# is not very common. 
+KIND_NODES=$(kind get nodes --name ${KIND_CLUSTER_NAME})
+for n in $KIND_NODES; do
+  docker exec $n sysctl net.ipv6.conf.all.disable_ipv6=0
+  docker exec $n sysctl net.ipv6.conf.all.forwarding=1
+done
+
 if [ "${GITHUB_ACTIONS:-false}" == "true" ]; then
   # Patch CoreDNS to work in Github CI
   # 1. Github CI doesn´t offer IPv6 connectivity, so CoreDNS should be configured
