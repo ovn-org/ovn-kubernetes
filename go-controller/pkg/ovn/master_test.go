@@ -778,8 +778,9 @@ func addPBRandNATRules(fexec *ovntest.FakeExec, nodeName, nodeSubnet, nodeIP, mg
 		"ovn-nbctl --timeout=15 lr-policy-add " + types.OVNClusterRouter + " " + types.MGMTPortPolicyPriority + " " + matchStr2 + " reroute " + types.V4NodeLocalNATSubnetNextHop,
 	})
 	fexec.AddFakeCmdsNoOutputNoError([]string{
-		"ovn-nbctl --timeout=15 --if-exists lr-nat-del " + types.OVNClusterRouter + " dnat_and_snat " +
-			externalIP + " -- lr-nat-add " + types.OVNClusterRouter + " dnat_and_snat " +
+		"ovn-nbctl --timeout=15 --if-exists lr-nat-del " + types.OVNClusterRouter + " dnat_and_snat " + externalIP})
+	fexec.AddFakeCmdsNoOutputNoError([]string{
+		"ovn-nbctl --timeout=15 lr-nat-add " + types.OVNClusterRouter + " dnat_and_snat " +
 			externalIP + " " + mgmtPortIP + " " + types.K8sPrefix + nodeName + " " + mgmtPortMAC,
 	})
 }

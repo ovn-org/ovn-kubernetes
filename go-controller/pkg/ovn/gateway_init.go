@@ -589,8 +589,12 @@ func (oc *Controller) addNodeLocalNatEntries(node *kapi.Node, mgmtPortMAC string
 
 	mgmtPortName := types.K8sPrefix + node.Name
 	stdout, stderr, err := util.RunOVNNbctl("--if-exists", "lr-nat-del", types.OVNClusterRouter,
-		"dnat_and_snat", externalIP.String(), "--",
-		"lr-nat-add", types.OVNClusterRouter, "dnat_and_snat",
+		"dnat_and_snat", externalIP.String())
+	if err != nil {
+		return fmt.Errorf("failed to delete dnat_and_snat entry for the management port on node %s, "+
+			"stdout: %s, stderr: %q, error: %v", node.Name, stdout, stderr, err)
+	}
+	stdout, stderr, err = util.RunOVNNbctl("lr-nat-add", types.OVNClusterRouter, "dnat_and_snat",
 		externalIP.String(), mgmtPortIfAddr.IP.String(), mgmtPortName, mgmtPortMAC)
 	if err != nil {
 		return fmt.Errorf("failed to add dnat_and_snat entry for the management port on node %s, "+
