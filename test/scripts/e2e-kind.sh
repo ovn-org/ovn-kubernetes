@@ -9,9 +9,10 @@ groomTestList() {
 }
 
 SKIPPED_TESTS="
-# PERFORMANCE TESTS: NOT WANTED FOR CI
+# PERFORMANCE AND DISRUPTIVE TESTS: NOT WANTED FOR CI
 Networking IPerf IPv[46]
 \[Feature:PerformanceDNS\]
+Disruptive
 
 # FEATURES NOT AVAILABLE IN OUR CI ENVIRONMENT
 \[Feature:Federation\]
