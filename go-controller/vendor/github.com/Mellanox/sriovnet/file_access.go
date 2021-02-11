@@ -102,7 +102,7 @@ func (attrib *fileObject) WriteInt(value int) (err error) {
 	return attrib.Write(strconv.Itoa(value))
 }
 
-func lsFilesWithPrefix(dir string, filePrefix string, ignoreDir bool) ([]string, error) {
+func lsFilesWithPrefix(dir, filePrefix string, ignoreDir bool) ([]string, error) {
 	var desiredFiles []string
 
 	f, err := os.Open(dir)
