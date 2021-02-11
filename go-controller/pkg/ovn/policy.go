@@ -4,8 +4,10 @@ import (
 	"fmt"
 	"net"
 	"reflect"
+	"strconv"
 	"sync"
 
+	goovn "github.com/ebay/go-ovn"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/factory"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
@@ -114,17 +116,26 @@ func (oc *Controller) syncNetworkPolicies(networkPolicies []interface{}) {
 	}
 }
 
-func addAllowACLFromNode(logicalSwitch string, mgmtPortIP net.IP) error {
+func addAllowACLFromNode(logicalSwitch string, mgmtPortIP net.IP, ovnNBClient goovn.Client) error {
 	ipFamily := "ip4"
 	if utilnet.IsIPv6(mgmtPortIP) {
 		ipFamily = "ip6"
 	}
 	match := fmt.Sprintf("%s.src==%s", ipFamily, mgmtPortIP.String())
-	_, stderr, err := util.RunOVNNbctl("--may-exist", "acl-add", logicalSwitch,
-		"to-lport", defaultAllowPriority, match, "allow-related")
-	if err != nil {
-		return fmt.Errorf("failed to create the node acl for "+
-			"logical_switch=%s, stderr: %q (%v)", logicalSwitch, stderr, err)
+
+	priority, _ := strconv.Atoi(defaultAllowPriority)
+	aclcmd, err := ovnNBClient.ACLAdd(logicalSwitch, "to-lport", match, "allow-related", priority, nil, false, "", "")
+
+	// NOTE: goovn.ErrorExist is returned if the ACL already exists, in such a case ignore that error.
+	// Additional Context-> Per Tim Rozet's review comments, there could be scenarios where ovnkube restarts, in which
+	// case, it would use kubernetes events to reconstruct ACLs and there is a possibility that some of the ACLs may
+	// already be present in the NBDB.
+	if err == nil {
+		if err = ovnNBClient.Execute(aclcmd); err != nil {
+			return fmt.Errorf("failed to create the node acl for logical_switch: %s, %v", logicalSwitch, err)
+		}
+	} else if err != goovn.ErrorExist {
+		return fmt.Errorf("ACLAdd() error when creating node acl for logical switch: %s, %v", logicalSwitch, err)
 	}
 
 	return nil

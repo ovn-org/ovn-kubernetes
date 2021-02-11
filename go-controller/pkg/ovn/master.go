@@ -546,7 +546,7 @@ func (oc *Controller) syncNodeManagementPort(node *kapi.Node, hostSubnets []*net
 		mgmtIfAddr := util.GetNodeManagementIfAddr(hostSubnet)
 		addresses += " " + mgmtIfAddr.IP.String()
 
-		if err := addAllowACLFromNode(node.Name, mgmtIfAddr.IP); err != nil {
+		if err := addAllowACLFromNode(node.Name, mgmtIfAddr.IP, oc.ovnNBClient); err != nil {
 			return err
 		}
 
