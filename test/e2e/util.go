@@ -1,6 +1,7 @@
 package e2e
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"net"
@@ -11,8 +12,6 @@ import (
 	"k8s.io/kubernetes/test/e2e/framework"
 	utilnet "k8s.io/utils/net"
 )
-
-const agnhostImage = "k8s.gcr.io/e2e-test-images/agnhost:2.21"
 
 // newAgnhostPod returns a pod that uses the agnhost image. The image's binary supports various subcommands
 // that behave the same, no matter the underlying OS.
@@ -37,7 +36,7 @@ func newAgnhostPod(name string, command ...string) *v1.Pod {
 // IsIPv6Cluster returns true if the kubernetes default service is IPv6
 func IsIPv6Cluster(c clientset.Interface) bool {
 	// Get the ClusterIP of the kubernetes service created in the default namespace
-	svc, err := c.CoreV1().Services(metav1.NamespaceDefault).Get("kubernetes", metav1.GetOptions{})
+	svc, err := c.CoreV1().Services(metav1.NamespaceDefault).Get(context.Background(), "kubernetes", metav1.GetOptions{})
 	if err != nil {
 		framework.Failf("Failed to get kubernetes service ClusterIP: %v", err)
 	}
