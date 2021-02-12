@@ -494,5 +494,7 @@ if ! kubectl wait -n kube-system --for=condition=ready pods --all --timeout=300s
   exit 1
 fi
 
+docker exec -it ovn-worker ip route
+
 echo "Pods are all up, allowing things settle for 30 seconds..."
 sleep 30
