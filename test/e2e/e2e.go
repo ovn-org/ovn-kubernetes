@@ -512,9 +512,11 @@ var _ = ginkgo.Describe("test e2e inter-node connectivity between worker nodes",
 11. Check that the status is of length one
 12. Check connectivity from the remaining pod to an external "node" and verify that the IP is one of the egress IPs.
 13. Remove the node label off the last egress node
-14. Check connectivity from the remaining pod to an external "node" and verify that the IP is the node IP.
-15. Re-add the label to one of the egress nodes
-16. Check connectivity from the remaining pod to an external "node" and verify that the IP is one of the egress IPs.
+14. Check that the status is of length zero
+15. Check connectivity from the remaining pod to an external "node" and verify that the IP is the node IP.
+16. Re-add the label to one of the egress nodes
+17. Check that the status is of length one
+18. Check connectivity from the remaining pod to an external "node" and verify that the IP is one of the egress IPs.
 */
 var _ = ginkgo.Describe("e2e egress IP validation", func() {
 	const (
@@ -566,6 +568,9 @@ var _ = ginkgo.Describe("e2e egress IP validation", func() {
 	})
 
 	ginkgo.AfterEach(func() {
+		framework.RunKubectlOrDie("default", "delete", "eip", svcname)
+		framework.RunKubectlOrDie("default", "label", "node", egress1Node.name, "k8s.ovn.org/egress-assignable-")
+		framework.RunKubectlOrDie("default", "label", "node", egress2Node.name, "k8s.ovn.org/egress-assignable-")
 		deleteClusterExternalContainer(targetNode.name)
 	})
 
@@ -606,7 +611,7 @@ var _ = ginkgo.Describe("e2e egress IP validation", func() {
 		var egressIPConfig = fmt.Sprintf(`apiVersion: k8s.ovn.org/v1
 kind: EgressIP
 metadata:
-    name: egressip
+    name: ` + svcname + `
 spec:
     egressIPs:
     - ` + egressIP1.String() + `
@@ -627,8 +632,8 @@ spec:
 			}
 		}()
 
-		framework.Logf("Applying the EgressIP configuration")
-		framework.RunKubectlOrDie("default", "apply", "-f", egressIPYaml)
+		framework.Logf("Create the EgressIP configuration")
+		framework.RunKubectlOrDie("default", "create", "-f", egressIPYaml)
 
 		targetExternalContainerAndTest := func(verifyIPType, podName string, verifyIPs []string) wait.ConditionFunc {
 			return func() (bool, error) {
@@ -669,30 +674,37 @@ spec:
 				framework.Logf("Error: failed to get the EgressIP object, err: %v", err)
 				return internalStatuses
 			}
+			nodeStdout = strings.Trim(nodeStdout, "'")
 			for _, n := range strings.Split(nodeStdout, " ") {
-				internalStatuses = append(internalStatuses, status{
-					node: n,
-				})
+				if n != "" {
+					internalStatuses = append(internalStatuses, status{
+						node: n,
+					})
+				}
 			}
 			egressIPStdout = strings.Trim(egressIPStdout, "'")
 			for i, e := range strings.Split(egressIPStdout, " ") {
-				internalStatuses[i].egressIP = e
+				if e != "" && len(internalStatuses) > i {
+					internalStatuses[i].egressIP = e
+				}
 			}
 			return internalStatuses
 		}
 
-		ginkgo.By("Checking that the status is of length two and both are assigned to different nodes")
-		var statuses []status
-		err := wait.PollImmediate(retryInterval, retryTimeout, func() (bool, error) {
-			statuses = testStatus()
-			if len(statuses) != 2 {
-				return false, nil
+		verifyEgressIPStatusLengthEquals := func(statusLength int) {
+			var statuses []status
+			err := wait.PollImmediate(retryInterval, retryTimeout, func() (bool, error) {
+				statuses = testStatus()
+				return len(statuses) == statusLength, nil
+			})
+			if err != nil {
+				framework.Failf("Error: expected to have %v egress IP assignment, got: %v", statusLength, len(statuses))
 			}
-			return true, nil
-		})
-		if err != nil {
-			framework.Failf("Error: failed to get Egress IP status")
 		}
+
+		ginkgo.By("Checking that the status is of length two and both are assigned to different nodes")
+		verifyEgressIPStatusLengthEquals(2)
+		statuses := testStatus()
 		if eIP := net.ParseIP(statuses[0].egressIP); eIP == nil {
 			framework.Failf("Error: expected to have the first egress IP, got something else: %s", statuses[0].egressIP)
 		}
@@ -707,7 +719,7 @@ spec:
 		createGenericPodWithLabel(f, pod1Name, pod1Node.name, f.Namespace.Name, command, podEgressLabel)
 		createGenericPodWithLabel(f, pod2Name, pod2Node.name, f.Namespace.Name, command, podEgressLabel)
 
-		err = wait.PollImmediate(retryInterval, retryTimeout, func() (bool, error) {
+		err := wait.PollImmediate(retryInterval, retryTimeout, func() (bool, error) {
 			for _, podName := range []string{pod1Name, pod2Name} {
 				kubectlOut := getPodAddress(podName, f.Namespace.Name)
 				srcIP := net.ParseIP(kubectlOut)
@@ -780,16 +792,8 @@ spec:
 		framework.RemoveLabelOffNode(f.ClientSet, egress1Node.name, "k8s.ovn.org/egress-assignable")
 
 		ginkgo.By("Checking that the status is of length one")
-		err = wait.PollImmediate(retryInterval, retryTimeout, func() (bool, error) {
-			statuses = testStatus()
-			if len(statuses) != 1 {
-				return false, nil
-			}
-			return true, nil
-		})
-		if err != nil {
-			framework.Failf("Error: expected to have 1 egress IP assignment, got: %v", len(statuses))
-		}
+		verifyEgressIPStatusLengthEquals(1)
+
 		ginkgo.By("Checking connectivity from the remaining pod to an external node and verify that the IP is the remaining egress IP.")
 		err = wait.PollImmediate(retryInterval, retryTimeout, targetExternalContainerAndTest("egress", pod1Name, []string{statuses[0].egressIP}))
 		framework.ExpectNoError(err, "failed to verify that egress IP has been used")
@@ -797,12 +801,18 @@ spec:
 		ginkgo.By("Removing the node label off the last egress node")
 		framework.RemoveLabelOffNode(f.ClientSet, egress2Node.name, "k8s.ovn.org/egress-assignable")
 
+		ginkgo.By("Checking that the status is of length zero")
+		verifyEgressIPStatusLengthEquals(0)
+
 		ginkgo.By("Checking connectivity from the remaining pod to an external node and verify that the IP is the node IP..")
 		err = wait.PollImmediate(retryInterval, retryTimeout, targetExternalContainerAndTest("egress", pod1Name, []string{pod1Node.nodeIP}))
 		framework.ExpectNoError(err, "failed to verify that egress IP has been used")
 
 		ginkgo.By("Re-adding the label to the node")
 		framework.AddOrUpdateLabelOnNode(f.ClientSet, egress2Node.name, "k8s.ovn.org/egress-assignable", "dummy")
+
+		ginkgo.By("Checking that the status is of length one")
+		verifyEgressIPStatusLengthEquals(1)
 
 		ginkgo.By("Checking connectivity from the remaining pod to an external node and verify that the IP is one of the egress IPs.")
 		err = wait.PollImmediate(retryInterval, retryTimeout, targetExternalContainerAndTest("egress", pod1Name, []string{egressIP1.String(), egressIP2.String()}))
