@@ -10,6 +10,11 @@ import (
 	kapi "k8s.io/api/core/v1"
 )
 
+const (
+	// OvnGatewayLoadBalancerIds represent the OVN loadbalancers used on nodes
+	OvnGatewayLoadBalancerIds = "lb_gateway_router"
+)
+
 // GetOvnGateways return all created gateways.
 func GetOvnGateways() ([]string, string, error) {
 	out, stderr, err := util.RunOVNNbctl("--data=bare", "--no-heading",
@@ -52,7 +57,7 @@ func GetGatewayPhysicalIPs(gatewayRouter string) ([]string, error) {
 
 // GetGatewayLoadBalancer return the gateway load balancer
 func GetGatewayLoadBalancer(gatewayRouter string, protocol kapi.Protocol) (string, error) {
-	externalIDKey := string(protocol) + "_lb_gateway_router"
+	externalIDKey := fmt.Sprintf("%s_%s", string(protocol), OvnGatewayLoadBalancerIds)
 	loadBalancer, _, err := util.RunOVNNbctl("--data=bare", "--no-heading",
 		"--columns=_uuid", "find", "load_balancer",
 		"external_ids:"+externalIDKey+"="+
@@ -68,28 +73,15 @@ func GetGatewayLoadBalancer(gatewayRouter string, protocol kapi.Protocol) (strin
 
 // GetGatewayLoadBalancers find TCP, SCTP, UDP load-balancers from gateway router.
 func GetGatewayLoadBalancers(gatewayRouter string) (string, string, string, error) {
-	lbTCP, stderr, err := util.RunOVNNbctl("--data=bare", "--no-heading",
-		"--columns=_uuid", "find", "load_balancer",
-		"external_ids:TCP_lb_gateway_router="+gatewayRouter)
-	if err != nil {
-		return "", "", "", errors.Wrapf(err, "failed to get gateway router %q TCP "+
-			"load balancer, stderr: %q", gatewayRouter, stderr)
+	protoLBMap := map[kapi.Protocol]string{}
+	enabledProtos := []kapi.Protocol{kapi.ProtocolTCP, kapi.ProtocolUDP, kapi.ProtocolSCTP}
+	for _, protocol := range enabledProtos {
+		lbID, err := GetGatewayLoadBalancer(gatewayRouter, protocol)
+		if err != nil && err.Error() != "load balancer item in OVN DB is an empty string" {
+			return "", "", "", err
+		}
+		protoLBMap[protocol] = lbID
 	}
 
-	lbUDP, stderr, err := util.RunOVNNbctl("--data=bare", "--no-heading",
-		"--columns=_uuid", "find", "load_balancer",
-		"external_ids:UDP_lb_gateway_router="+gatewayRouter)
-	if err != nil {
-		return "", "", "", errors.Wrapf(err, "failed to get gateway router %q UDP "+
-			"load balancer, stderr: %q", gatewayRouter, stderr)
-	}
-
-	lbSCTP, stderr, err := util.RunOVNNbctl("--data=bare", "--no-heading",
-		"--columns=_uuid", "find", "load_balancer",
-		"external_ids:SCTP_lb_gateway_router="+gatewayRouter)
-	if err != nil {
-		return "", "", "", errors.Wrapf(err, "failed to get gateway router %q SCTP "+
-			"load balancer, stderr: %q", gatewayRouter, stderr)
-	}
-	return lbTCP, lbUDP, lbSCTP, nil
+	return protoLBMap[kapi.ProtocolTCP], protoLBMap[kapi.ProtocolUDP], protoLBMap[kapi.ProtocolSCTP], nil
 }
