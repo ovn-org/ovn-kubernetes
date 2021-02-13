@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"hash/fnv"
 	"net"
+	"os"
 	"reflect"
 	"strings"
 	"sync"
@@ -449,6 +450,32 @@ func newSharedGateway(nodeName string, subnets []*net.IPNet, gwNextHops []net.IP
 	// the name of the patch port created by ovn-controller is of the form
 	// patch-<logical_port_name_of_localnet_port>-to-br-int
 	patchPort := "patch-" + bridgeName + "_" + nodeName + "-to-br-int"
+
+	// add masquerade subnet route to avoid zeroconf routes
+	if config.IPv4Mode {
+		bridgeLink, err := util.LinkSetUp(bridgeName)
+		if err != nil {
+			return nil, fmt.Errorf("unable to find shared gw bridge interface: %s", bridgeName)
+		}
+		v4nextHops, err := util.MatchIPFamily(false, gwNextHops)
+		if err != nil {
+			return nil, fmt.Errorf("no valid ipv4 next hop exists: %v", err)
+		}
+		_, masqIPNet, _ := net.ParseCIDR(types.V4MasqueradeSubnet)
+		if exists, err := util.LinkRouteExists(bridgeLink, v4nextHops[0], masqIPNet); err == nil && !exists {
+			err = util.LinkRoutesAdd(bridgeLink, v4nextHops[0], []*net.IPNet{masqIPNet})
+			if err != nil {
+				if os.IsExist(err) {
+					klog.V(5).Infof("Ignoring error %s from 'route add %s via %s'",
+						err.Error(), masqIPNet, v4nextHops[0])
+				} else {
+					return nil, fmt.Errorf("unable to add OVN masquerade route to host, error: %v", err)
+				}
+			}
+		} else if err != nil {
+			return nil, fmt.Errorf("failed to check if route exists for masquerade subnet, error: %v", err)
+		}
+	}
 
 	gw.readyFunc = func() (bool, error) {
 		return gatewayReady(patchPort)
