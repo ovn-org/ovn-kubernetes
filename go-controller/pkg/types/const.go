@@ -52,6 +52,7 @@ const (
 	V4NodeLocalNATSubnetNextHop    = "169.254.0.1"
 	V4NodeLocalDistributedGWPortIP = "169.254.0.2"
 
+	V4MasqueradeSubnet = "169.254.169.0/30"
 	V4HostMasqueradeIP = "169.254.169.2"
 	V6HostMasqueradeIP = "fd69::2"
 	V4OVNMasqueradeIP  = "169.254.169.1"

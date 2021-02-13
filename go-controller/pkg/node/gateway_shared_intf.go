@@ -466,6 +466,26 @@ func newSharedGateway(nodeName string, subnets []*net.IPNet, gwNextHops []net.IP
 		}
 	}
 
+	// add masquerade subnet route to avoid zeroconf routes
+	if config.IPv4Mode {
+		v4nextHops, err := util.MatchIPFamily(false, gwNextHops)
+		if err != nil {
+			return nil, fmt.Errorf("no valid ipv4 next hop exists: %v", err)
+		}
+		_, masqIPNet, _ := net.ParseCIDR(types.V4MasqueradeSubnet)
+		if exists, err := util.LinkRouteExists(bridgeLink, v4nextHops[0], masqIPNet); err == nil && !exists {
+			err = util.LinkRoutesAdd(bridgeLink, v4nextHops[0], []*net.IPNet{masqIPNet})
+			if err != nil {
+				if os.IsExist(err) {
+					klog.V(5).Infof("Ignoring error %s from 'route add %s via %s'",
+						err.Error(), masqIPNet, v4nextHops[0])
+				} else {
+					return nil, fmt.Errorf("unable to add OVN masquerade route to host, error: %v", err)
+				}
+			}
+		}
+	}
+
 	gw.readyFunc = func() (bool, error) {
 		return gatewayReady(patchPort)
 	}
