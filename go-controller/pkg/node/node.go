@@ -465,10 +465,15 @@ func (n *OvnNode) Start(wg *sync.WaitGroup) error {
 
 	if config.OvnKubeNode.Mode != types.NodeModeSmartNICHost {
 		// start health check to ensure there are no stale OVS internal ports
-		go checkForStaleOVSInterfaces(n.stopChan, n.name, n.watchFactory.(*factory.WatchFactory))
+		go util.RunPeriodicallyUntilStop(func() {
+			checkForStaleOVSInterfaces(n.name, n.watchFactory.(*factory.WatchFactory))
+		}, time.Minute, n.stopChan)
 
 		// start management port health check
-		go checkManagementPortHealth(mgmtPortConfig, n.stopChan)
+		go util.RunPeriodicallyUntilStop(func() {
+			checkManagementPortHealth(mgmtPortConfig)
+		}, 30*time.Second, n.stopChan)
+
 		n.WatchEndpoints()
 	}
 
