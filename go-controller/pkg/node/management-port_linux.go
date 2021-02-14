@@ -7,7 +7,7 @@ import (
 	"net"
 	"os"
 	"strings"
-	
+
 	"github.com/coreos/go-iptables/iptables"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
