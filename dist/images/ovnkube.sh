@@ -71,6 +71,7 @@ fi
 # OVN_EGRESSFIREWALL_ENABLE - enable egressFirewall for ovn-kubernetes
 # OVN_UNPRIVILEGED_MODE - execute CNI ovs/netns commands from host (default no)
 # OVNKUBE_NODE_MODE - ovnkube node mode of operation, one of: full, smart-nic, smart-nic-host (default: full)
+# OVNKUBE_NODE_MGMT_PORT_NETDEV - ovnkube node management port netdev. valid when ovnkube node mode is: smart-nic, smart-nic-host
 # OVN_ENCAP_IP - encap IP to be used for OVN traffic on the node. mandatory in case ovnkube-node-mode=="smart-nic"
 # OVN_HOST_NETWORK_NAMESPACE - namespace to classify host network traffic for applying network policies
 
@@ -205,6 +206,8 @@ ovn_ipfix_targets=${OVN_IPFIX_TARGETS:-}
 
 # OVNKUBE_NODE_MODE - is the mode which ovnkube node operates
 ovnkube_node_mode=${OVNKUBE_NODE_MODE:-"full"}
+# OVNKUBE_NODE_mgmt_PORT_NETDEV - is the net device to be used for management port
+ovnkube_node_mgmt_port_netdev=${OVNKUBE_NODE_MGMT_PORT_NETDEV:-}
 # OVN_ENCAP_IP - encap IP to be used for OVN traffic on the node
 ovn_encap_ip=${OVN_ENCAP_IP:-}
 
@@ -1081,6 +1084,11 @@ ovn-node() {
     fi
   fi
 
+  ovnkube_node_mgmt_port_netdev_flag=
+  if [[ ${ovnkube_node_mgmt_port_netdev} != "" ]]; then
+    ovnkube_node_mgmt_port_netdev_flag="--ovnkube-node-mgmt-port-netdev=${ovnkube_node_mgmt_port_netdev}"
+  fi
+
   local ovn_node_ssl_opts=""
   if [[ ${ovnkube_node_mode} != "smart-nic-host" ]]; then
       [[ "yes" == ${OVN_SSL_ENABLE} ]] && {
@@ -1134,7 +1142,8 @@ ovn-node() {
     --metrics-bind-address ${ovnkube_node_metrics_bind_address} \
      ${ovnkube_node_mode_flag} \
     ${egress_interface} \
-    --host-network-namespace ${ovn_host_network_namespace} &
+    --host-network-namespace ${ovn_host_network_namespace} \
+     ${ovnkube_node_mgmt_port_netdev_flag} &
 
   wait_for_event attempts=3 process_ready ovnkube
   if [[ ${ovnkube_node_mode} != "smart-nic" ]]; then
