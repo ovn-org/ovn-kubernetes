@@ -53,7 +53,7 @@ function testrun {
     fi
     if grep -q -r "ginkgo" ."${path}"; then
 	    prefix=$(echo "${path}" | cut -c 2- | sed 's,/,_,g')
-        ginkgoargs="-ginkgo.v -ginkgo.reportFile ${TEST_REPORT_DIR}/junit-${prefix}.xml"
+        ginkgoargs="-ginkgo.v -ginkgo.reportFile ${TEST_REPORT_DIR}/junit-${prefix}.xml -ginkgo.flakeAttempts=3"
         if [[ -n "$gingko_focus" ]]; then
             ginkgoargs="-ginkgo.v ${gingko_focus} -ginkgo.reportFile ${TEST_REPORT_DIR}/junit-${prefix}.xml"
         fi
