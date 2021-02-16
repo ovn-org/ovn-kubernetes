@@ -3,7 +3,6 @@ package util
 import (
 	"encoding/json"
 	"fmt"
-	"strconv"
 	"strings"
 
 	kapi "k8s.io/api/core/v1"
@@ -243,22 +242,11 @@ func EventRecorder(kubeClient kubernetes.Interface) record.EventRecorder {
 	return recorder
 }
 
-// UseEndpointSlices if the EndpointSlice API is available
-// and if the kubernetes versions supports DualStack (Kubernetes >= 1.20)
+// UseEndpointSlices detect if Endpoints Slices are enabled in the cluster
 func UseEndpointSlices(kubeClient kubernetes.Interface) bool {
-	endpointSlicesEnabled := false
 	if _, err := kubeClient.Discovery().ServerResourcesForGroupVersion(discovery.SchemeGroupVersion.String()); err == nil {
-		// The EndpointSlice API is enabled check if is running in a supported version
 		klog.V(2).Infof("Kubernetes Endpoint Slices enabled on the cluster: %s", discovery.SchemeGroupVersion.String())
-		endpointSlicesEnabled = true
+		return true
 	}
-	// We only use Slices if > 1.19 since we only need them for Dual Stack
-	sv, _ := kubeClient.Discovery().ServerVersion()
-	major, _ := strconv.Atoi(sv.Major)
-	minor, _ := strconv.Atoi(sv.Minor)
-	klog.Infof("Kubernetes running with version %d.%d", major, minor)
-	if major <= 1 && minor < 20 || !endpointSlicesEnabled {
-		return false
-	}
-	return true
+	return false
 }
