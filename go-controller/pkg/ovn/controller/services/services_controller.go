@@ -289,10 +289,13 @@ func (c *Controller) syncServices(key string) error {
 			// get the endpoints associated to the vip
 			eps := getLbEndpoints(endpointSlices, svcPort, family)
 			// Reconcile OVN, update the load balancer with current endpoints
-			if err := loadbalancer.UpdateLoadBalancer(lbID, vip, eps); err != nil {
-				c.eventRecorder.Eventf(service, v1.EventTypeWarning, "FailedToUpdateOVNLoadBalancer",
-					"Error trying to update OVN LoadBalancer for Service %s/%s: %v", name, namespace, err)
-				return err
+			if c.needsOVNLBUpdate(eps, service) {
+				if err := loadbalancer.UpdateLoadBalancer(lbID, vip, eps); err != nil {
+					c.eventRecorder.Eventf(service, v1.EventTypeWarning, "FailedToUpdateOVNLoadBalancer",
+						"Error trying to update OVN LoadBalancer for Service %s/%s: %v", name, namespace, err)
+					return err
+				}
+				c.serviceTracker.setHasEndpoints(name, namespace)
 			}
 			// update the tracker with the VIP
 			c.serviceTracker.updateService(name, namespace, vip, svcPort.Protocol)
@@ -308,7 +311,7 @@ func (c *Controller) syncServices(key string) error {
 			if err != nil {
 				klog.Errorf("Error trying to get ACL for Service %s/%s: %v", name, namespace, err)
 			}
-			// if there is no ACL and there is no endpoints we add a new ACL
+			// if there is no ACL and there are no endpoints we add a new ACL
 			// if there is an ACL and we have endpoints we have to remove the ACL
 			// if there is no ACL and we have endpoints we don´t need to do anything
 			if len(eps) == 0 && len(aclID) == 0 {
@@ -317,14 +320,16 @@ func (c *Controller) syncServices(key string) error {
 				if err != nil {
 					klog.Errorf("Error trying to add ACL for Service %s/%s: %v", name, namespace, err)
 				}
-			} else if len(aclID) > 0 {
+			} else if len(eps) > 0 && len(aclID) > 0 {
 				// remove acl
 				err = acl.RemoveACLFromPortGroup(aclID, c.clusterPortGroupUUID)
 				if err != nil {
 					klog.Errorf("Error trying to remove ACL for Service %s/%s: %v", name, namespace, err)
 				}
+			} else {
+				klog.Infof("ACL: %s already created for Service : %s/%s", aclID, namespace, name)
 			}
-			// end of reject ACL code
+			// end of reject ACL code for Service IP
 
 			// Node Port
 			if svcPort.NodePort != 0 {
@@ -356,12 +361,17 @@ func (c *Controller) syncServices(key string) error {
 						}
 						// VIP = NodeExternalIP:NodePort
 						vip := util.JoinHostPortInt32(physicalIP, svcPort.NodePort)
-						klog.V(4).Infof("Updating NodePort service %s/%s with VIP %s %s", name, namespace, vip, svcPort.Protocol)
-						// Reconcile OVN, update the load balancer with current endpoints
-						if err := loadbalancer.UpdateLoadBalancer(lbID, vip, eps); err != nil {
-							c.eventRecorder.Eventf(service, v1.EventTypeWarning, "FailedToUpdateOVNLoadBalancer",
-								"Error trying to update OVN LoadBalancer for Service %s/%s: %v", name, namespace, err)
-							return err
+						if c.needsOVNLBUpdate(eps, service) {
+							klog.V(4).Infof("Updating NodePort service %s/%s with VIP %s %s",
+								name, namespace, vip, svcPort.Protocol)
+							// Reconcile OVN, update the load balancer with current endpoints
+							if err := loadbalancer.UpdateLoadBalancer(lbID, vip, eps); err != nil {
+								c.eventRecorder.Eventf(service, v1.EventTypeWarning, "FailedToUpdateOVNLoadBalancer",
+									"Error trying to update OVN LoadBalancer for Service %s/%s: %v",
+									name, namespace, err)
+								return err
+							}
+							c.serviceTracker.setHasEndpoints(name, namespace)
 						}
 						c.serviceTracker.updateService(name, namespace, vip, svcPort.Protocol)
 						// mark the vip as processed
@@ -407,12 +417,15 @@ func (c *Controller) syncServices(key string) error {
 							continue
 						}
 						vip := util.JoinHostPortInt32(extIP, svcPort.Port)
-						// Reconcile OVN
-						klog.V(4).Infof("Updating ExternalIP service %s/%s with VIP %s %s", name, namespace, vip, svcPort.Protocol)
-						if err := loadbalancer.UpdateLoadBalancer(lbID, vip, eps); err != nil {
-							c.eventRecorder.Eventf(service, v1.EventTypeWarning, "FailedToUpdateOVNLoadBalancer",
-								"Error trying to update OVN LoadBalancer for Service %s/%s: %v", name, namespace, err)
-							return err
+						if c.needsOVNLBUpdate(eps, service) {
+							// Reconcile OVN
+							klog.V(4).Infof("Updating ExternalIP service %s/%s with VIP %s %s", name, namespace, vip, svcPort.Protocol)
+							if err := loadbalancer.UpdateLoadBalancer(lbID, vip, eps); err != nil {
+								c.eventRecorder.Eventf(service, v1.EventTypeWarning, "FailedToUpdateOVNLoadBalancer",
+									"Error trying to update OVN LoadBalancer for Service %s/%s: %v", name, namespace, err)
+								return err
+							}
+							c.serviceTracker.setHasEndpoints(name, namespace)
 						}
 						c.serviceTracker.updateService(name, namespace, vip, svcPort.Protocol)
 						// mark the vip as processed
@@ -544,4 +557,17 @@ func serviceControllerKey(endpointSlice *discovery.EndpointSlice) (string, error
 		return "", fmt.Errorf("endpointSlice missing %s label", discovery.LabelServiceName)
 	}
 	return fmt.Sprintf("%s/%s", endpointSlice.Namespace, serviceName), nil
+}
+
+// needsOVNLBUpdate determines if we actually need to update OVN LB or not
+// If we have no endpoints, and does not exist in service tracker, then this is the first time we are seeing
+// this service get created. Therefore we skip adding VIP to LB so that service reject will work
+// FIXME (trozet): this is to mimic current legacy controller behavior where service reject works
+// when a service is created with no endpoints, but stops working if endpoints are added and removed
+// https://github.com/ovn-org/ovn-kubernetes/issues/2045 will to track the future fix
+func (c *Controller) needsOVNLBUpdate(eps []string, service *v1.Service) bool {
+	if len(eps) > 0 || c.serviceTracker.everHadEndpoints(service.Name, service.Namespace) {
+		return true
+	}
+	return false
 }

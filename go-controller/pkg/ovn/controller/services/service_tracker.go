@@ -30,12 +30,14 @@ func splitVirtualIPKey(key string) (string, v1.Protocol) {
 type serviceTracker struct {
 	sync.Mutex
 	virtualIPByService map[string]sets.String
+	hadEndpoints       map[string]bool
 }
 
 // newServiceTracker creates and initializes a new serviceTracker.
 func newServiceTracker() *serviceTracker {
 	return &serviceTracker{
 		virtualIPByService: map[string]sets.String{},
+		hadEndpoints:       map[string]bool{},
 	}
 }
 
@@ -49,7 +51,7 @@ func (st *serviceTracker) updateService(name, namespace, virtualIP string, proto
 
 	// check if the service already exists and create a new entry if it does not
 	vips, ok := st.virtualIPByService[serviceNN]
-	if !ok {
+	if !ok || vips == nil {
 		klog.V(5).Infof("Created service %s VIP %s %s on Service Tracker", serviceNN, virtualIP, proto)
 		st.virtualIPByService[serviceNN] = sets.NewString(key)
 		return
@@ -66,6 +68,7 @@ func (st *serviceTracker) deleteService(name, namespace string) {
 
 	serviceNN := serviceTrackerKey(name, namespace)
 	delete(st.virtualIPByService, serviceNN)
+	delete(st.hadEndpoints, serviceNN)
 	klog.V(5).Infof("Deleted service %s from Service Tracker", serviceNN)
 }
 
@@ -90,6 +93,25 @@ func (st *serviceTracker) hasService(name, namespace string) bool {
 
 	serviceNN := serviceTrackerKey(name, namespace)
 	_, ok := st.virtualIPByService[serviceNN]
+	return ok
+}
+
+// setHasEndpoints indicates that the service has had endpoints before
+func (st *serviceTracker) setHasEndpoints(name, namespace string) {
+	st.Lock()
+	defer st.Unlock()
+
+	serviceNN := serviceTrackerKey(name, namespace)
+	st.hadEndpoints[serviceNN] = true
+}
+
+// everHadEndpoints return true if the service has ever had any endpoints
+func (st *serviceTracker) everHadEndpoints(name, namespace string) bool {
+	st.Lock()
+	defer st.Unlock()
+
+	serviceNN := serviceTrackerKey(name, namespace)
+	_, ok := st.hadEndpoints[serviceNN]
 	return ok
 }
 
