@@ -182,6 +182,10 @@ func runOvnKubeDBChecker(ctx *cli.Context) error {
 		return err
 	}
 
+	if err = ovndbmanager.EnableDBMemTrimming(); err != nil {
+		return err
+	}
+
 	stopChan := make(chan struct{})
 	ovndbmanager.RunDBChecker(
 		&kube.Kube{

@@ -2,6 +2,7 @@ package ovndbmanager
 
 import (
 	"errors"
+	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -269,4 +270,27 @@ func resetRaftDB(db string) {
 		}
 		klog.Infof("Stopped %s db after backing up the db: %s", dbName, backupFile)
 	}
+}
+
+// EnableDBMemTrimming enables memory trimming on DB compaction for NBDB and SBDB. Every 10 minutes the DBs are compacted
+// and excess memory on the heap is freed. By enabling memory trimming, the freed memory will be returned back to the OS
+func EnableDBMemTrimming() error {
+	out, stderr, err := util.RunOVNNBAppCtl("list-commands")
+	if err != nil {
+		return fmt.Errorf("unable to list supported commands for ovn-appctl, stderr: %s, error: %v", stderr, err)
+	}
+	if !strings.Contains(out, "memory-trim-on-compaction") {
+		klog.Warning("memory-trim-on-compaction unsupported in this version of OVN. OVN DBs may experience high " +
+			"memory growth")
+		return nil
+	}
+	_, stderr, err = util.RunOVNNBAppCtl("ovsdb-server/memory-trim-on-compaction", "on")
+	if err != nil {
+		return fmt.Errorf("unable to turn on memory trimming for NB DB, stderr: %s, error: %v", stderr, err)
+	}
+	_, stderr, err = util.RunOVNSBAppCtl("ovsdb-server/memory-trim-on-compaction", "on")
+	if err != nil {
+		return fmt.Errorf("unable to turn on memory trimming for SB DB, stderr: %s, error: %v", stderr, err)
+	}
+	return nil
 }
