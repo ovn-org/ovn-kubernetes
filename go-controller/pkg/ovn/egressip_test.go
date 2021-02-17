@@ -133,6 +133,14 @@ var _ = ginkgo.Describe("OVN master EgressIP Operations", func() {
 		}
 	}
 
+	nodeSwitch := func() string {
+		statuses := getEgressIPStatus(egressIPName)
+		if len(statuses) != 1 {
+			return ""
+		}
+		return statuses[0].Node
+	}
+
 	ginkgo.BeforeEach(func() {
 		// Restore global default values before each testcase
 		config.PrepareTestConfig()
@@ -264,11 +272,6 @@ var _ = ginkgo.Describe("OVN master EgressIP Operations", func() {
 				gomega.Expect(err).NotTo(gomega.HaveOccurred())
 				_, err = fakeOvn.fakeClient.KubeClient.CoreV1().Nodes().Update(context.TODO(), &node2, metav1.UpdateOptions{})
 				gomega.Expect(err).NotTo(gomega.HaveOccurred())
-
-				nodeSwitch := func() string {
-					statuses = getEgressIPStatus(egressIPName)
-					return statuses[0].Node
-				}
 
 				gomega.Eventually(getEgressIPStatusLen(egressIPName)).Should(gomega.Equal(1))
 				gomega.Eventually(nodeSwitch).Should(gomega.Equal(node2.Name))
@@ -407,11 +410,6 @@ var _ = ginkgo.Describe("OVN master EgressIP Operations", func() {
 				gomega.Expect(err).NotTo(gomega.HaveOccurred())
 				_, err = fakeOvn.fakeClient.KubeClient.CoreV1().Nodes().Update(context.TODO(), &node2, metav1.UpdateOptions{})
 				gomega.Expect(err).NotTo(gomega.HaveOccurred())
-
-				nodeSwitch := func() string {
-					statuses = getEgressIPStatus(egressIPName)
-					return statuses[0].Node
-				}
 
 				gomega.Eventually(getEgressIPStatusLen(egressIPName)).Should(gomega.Equal(1))
 				gomega.Eventually(nodeSwitch).Should(gomega.Equal(node2.Name))
