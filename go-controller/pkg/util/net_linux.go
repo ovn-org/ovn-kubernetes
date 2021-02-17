@@ -189,14 +189,23 @@ func LinkAddrAdd(link netlink.Link, address *net.IPNet) error {
 }
 
 // LinkRoutesDel deletes all the routes for the given subnets via the link
+// if subnets is empty, then all routes will be removed for a link
 func LinkRoutesDel(link netlink.Link, subnets []*net.IPNet) error {
 	routes, err := netLinkOps.RouteList(link, netlink.FAMILY_ALL)
 	if err != nil {
 		return fmt.Errorf("failed to get all the routes for link %s: %v",
 			link.Attrs().Name, err)
 	}
-	for _, subnet := range subnets {
-		for _, route := range routes {
+	for _, route := range routes {
+		if len(subnets) == 0 {
+			err = netLinkOps.RouteDel(&route)
+			if err != nil {
+				return fmt.Errorf("failed to delete route '%s via %s' for link %s : %v\n",
+					route.Dst.String(), route.Gw.String(), link.Attrs().Name, err)
+			}
+			continue
+		}
+		for _, subnet := range subnets {
 			if route.Dst.String() == subnet.String() {
 				err = netLinkOps.RouteDel(&route)
 				if err != nil {

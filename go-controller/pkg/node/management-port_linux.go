@@ -136,19 +136,16 @@ func tearDownManagementPortConfig(mpcfg *managementPortConfig) error {
 		return err
 	}
 
+	if err := util.LinkRoutesDel(mpcfg.link, nil); err != nil {
+		return err
+	}
 	if mpcfg.ipv4 != nil {
-		if err := util.LinkRoutesDel(mpcfg.link, mpcfg.ipv4.allSubnets); err != nil {
-			return err
-		}
 		if err := mpcfg.ipv4.ipt.ClearChain("nat", iptableMgmPortChain); err != nil {
 			return fmt.Errorf("could not clear the iptables chain for management port: %v", err)
 		}
 	}
 
 	if mpcfg.ipv6 != nil {
-		if err := util.LinkRoutesDel(mpcfg.link, mpcfg.ipv6.allSubnets); err != nil {
-			return err
-		}
 		if err := mpcfg.ipv6.ipt.ClearChain("nat", iptableMgmPortChain); err != nil {
 			return fmt.Errorf("could not clear the iptables chain for management port: %v", err)
 		}
