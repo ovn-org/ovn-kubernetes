@@ -219,7 +219,6 @@ func (oc *Controller) updateEgressIPWithRetry(eIP *egressipv1.EgressIP) error {
 func (oc *Controller) addNamespaceEgressIP(eIP *egressipv1.EgressIP, namespace *kapi.Namespace) error {
 	oc.eIPC.podHandlerMutex.Lock()
 	defer oc.eIPC.podHandlerMutex.Unlock()
-
 	sel, err := metav1.LabelSelectorAsSelector(&eIP.Spec.PodSelector)
 	if err != nil {
 		return fmt.Errorf("invalid podSelector on EgressIP %s: %v", eIP.Name, err)
@@ -299,7 +298,7 @@ func (oc *Controller) assignEgressIPs(eIP *egressipv1.EgressIP) error {
 	}()
 	assignableNodes, existingAllocations := oc.getSortedEgressData()
 	if len(assignableNodes) == 0 {
-		oc.eIPC.assignmentRetry.Store(eIP.Name, true)
+		oc.eIPC.assignmentRetry[eIP.Name] = true
 		eIPRef := kapi.ObjectReference{
 			Kind: "EgressIP",
 			Name: eIP.Name,
@@ -355,7 +354,7 @@ func (oc *Controller) assignEgressIPs(eIP *egressipv1.EgressIP) error {
 		}
 	}
 	if len(assignments) == 0 {
-		oc.eIPC.assignmentRetry.Store(eIP.Name, true)
+		oc.eIPC.assignmentRetry[eIP.Name] = true
 		eIPRef := kapi.ObjectReference{
 			Kind: "EgressIP",
 			Name: eIP.Name,
@@ -364,7 +363,7 @@ func (oc *Controller) assignEgressIPs(eIP *egressipv1.EgressIP) error {
 		return fmt.Errorf("no matching host found")
 	}
 	if len(assignments) < len(eIP.Spec.EgressIPs) {
-		oc.eIPC.assignmentRetry.Store(eIP.Name, true)
+		oc.eIPC.assignmentRetry[eIP.Name] = true
 		eIPRef := kapi.ObjectReference{
 			Kind: "EgressIP",
 			Name: eIP.Name,
@@ -438,29 +437,29 @@ func (oc *Controller) addEgressNode(egressNode *kapi.Node) error {
 		klog.Errorf("Unable to configure GARP on external logical switch port for egress node: %s, "+
 			"this will result in packet drops during egress IP re-assignment, stdout: %s, stderr: %s, err: %v", egressNode.Name, stdout, stderr, err)
 	}
-	oc.eIPC.assignmentRetry.Range(func(key, value interface{}) bool {
-		eIPName := key.(string)
+	oc.eIPC.assignmentRetryMutex.Lock()
+	defer oc.eIPC.assignmentRetryMutex.Unlock()
+	for eIPName := range oc.eIPC.assignmentRetry {
 		klog.V(5).Infof("Re-assignment for EgressIP: %s attempted by new node: %s", eIPName, egressNode.Name)
 		eIP, err := oc.kube.GetEgressIP(eIPName)
 		if errors.IsNotFound(err) {
 			klog.Errorf("Re-assignment for EgressIP: EgressIP: %s not found in the api-server, err: %v", eIPName, err)
-			oc.eIPC.assignmentRetry.Delete(eIP.Name)
-			return true
+			delete(oc.eIPC.assignmentRetry, eIP.Name)
+			continue
 		}
 		if err != nil {
 			klog.Errorf("Re-assignment for EgressIP: unable to retrieve EgressIP: %s from the api-server, err: %v", eIPName, err)
-			return true
+			continue
 		}
 		newEIP, err := oc.reassignEgressIP(eIP)
 		if err != nil {
 			klog.Errorf("Re-assignment for EgressIP: %s failed, err: %v", eIP.Name, err)
-			return true
+			continue
 		}
 		if len(newEIP.Spec.EgressIPs) == len(newEIP.Status.Items) {
-			oc.eIPC.assignmentRetry.Delete(eIP.Name)
+			delete(oc.eIPC.assignmentRetry, eIP.Name)
 		}
-		return true
-	})
+	}
 	return nil
 }
 
@@ -600,8 +599,11 @@ type egressIPController struct {
 	// Cache of gateway join router IPs, usefull since these should not change often
 	gatewayIPCache sync.Map
 
+	// Mutex used for syncing the map retrying EgressIP objects
+	assignmentRetryMutex *sync.Mutex
+
 	// Cache used for retrying EgressIP objects which were created before any node existed.
-	assignmentRetry sync.Map
+	assignmentRetry map[string]bool
 
 	// Mutex used for syncing the egressIP namespace handlers
 	namespaceHandlerMutex *sync.Mutex
