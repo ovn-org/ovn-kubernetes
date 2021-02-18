@@ -201,6 +201,27 @@ func nodePortServiceSpecFrom(svcName string, httpPort, updPort, clusterHTTPPort,
 	return res
 }
 
+func externalIPServiceSpecFrom(svcName string, httpPort, updPort, clusterHTTPPort, clusterUDPPort int, selector map[string]string, externalIps []string) *v1.Service {
+	preferDual := v1.IPFamilyPolicyPreferDualStack
+
+	res := &v1.Service{
+		ObjectMeta: metav1.ObjectMeta{
+			Name: svcName,
+		},
+		Spec: v1.ServiceSpec{
+			Ports: []v1.ServicePort{
+				{Port: int32(clusterHTTPPort), Name: "http", Protocol: v1.ProtocolTCP, TargetPort: intstr.FromInt(httpPort)},
+				{Port: int32(clusterUDPPort), Name: "udp", Protocol: v1.ProtocolUDP, TargetPort: intstr.FromInt(updPort)},
+			},
+			Selector:       selector,
+			IPFamilyPolicy: &preferDual,
+			ExternalIPs:    externalIps,
+		},
+	}
+
+	return res
+}
+
 // leverages a container running the netexec command to send a "hostname" request to a target running
 // netexec on the given target host / protocol / port
 func pokeEndpointHostname(clientContainer, protocol, targetHost string, targetPort int32) string {
@@ -250,4 +271,14 @@ func nodePortsFromService(service *v1.Service) (int32, int32) {
 		}
 	}
 	return resTCP, resUDP
+}
+
+// addressIsIP tells wether the given address is an
+// address or a hostname
+func addressIsIP(address v1.NodeAddress) bool {
+	addr := net.ParseIP(address.Address)
+	if addr == nil {
+		return false
+	}
+	return true
 }
