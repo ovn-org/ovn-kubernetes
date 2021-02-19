@@ -997,10 +997,7 @@ func (oc *Controller) WatchNodes() {
 
 			nodeSubnets, _ := util.ParseNodeHostSubnetAnnotation(node)
 			dnatSnatIPs, _ := util.ParseNodeLocalNatIPAnnotation(node)
-			err := oc.deleteNode(node.Name, nodeSubnets, dnatSnatIPs)
-			if err != nil {
-				klog.Error(err)
-			}
+			oc.deleteNode(node.Name, nodeSubnets, dnatSnatIPs)
 			oc.lsManager.DeleteNode(node.Name)
 			addNodeFailed.Delete(node.Name)
 			mgmtPortFailed.Delete(node.Name)
