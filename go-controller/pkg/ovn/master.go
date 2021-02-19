@@ -917,8 +917,7 @@ func (oc *Controller) deleteNodeLogicalNetwork(nodeName string) error {
 	return nil
 }
 
-func (oc *Controller) deleteNode(nodeName string, hostSubnets []*net.IPNet,
-	nodeLocalNatIPs []net.IP) error {
+func (oc *Controller) deleteNode(nodeName string, hostSubnets []*net.IPNet, nodeLocalNatIPs []net.IP) {
 	// Clean up as much as we can but don't hard error
 	for _, hostSubnet := range hostSubnets {
 		if err := oc.deleteNodeHostSubnet(nodeName, hostSubnet); err != nil {
@@ -947,18 +946,16 @@ func (oc *Controller) deleteNode(nodeName string, hostSubnets []*net.IPNet,
 	}
 
 	if err := gatewayCleanup(nodeName); err != nil {
-		return fmt.Errorf("failed to clean up node %s gateway: (%v)", nodeName, err)
+		klog.Errorf("Failed to clean up node %s gateway: (%v)", nodeName, err)
 	}
 
 	if err := oc.joinSwIPManager.releaseJoinLRPIPs(nodeName); err != nil {
-		return err
+		klog.Errorf("Failed to clean up GR LRP IPs for node %s: %v", nodeName, err)
 	}
 
 	if err := oc.deleteNodeChassis(nodeName); err != nil {
-		return err
+		klog.Errorf("Failed to remove the chassis associated with node %s in the OVN SB Chassis table", nodeName, err)
 	}
-
-	return nil
 }
 
 // OVN uses an overlay and doesn't need GCE Routes, we need to
@@ -1144,9 +1141,7 @@ func (oc *Controller) syncNodes(nodes []interface{}) {
 			continue
 		}
 
-		if err := oc.deleteNode(nodeName, subnets, nil); err != nil {
-			klog.Error(err)
-		}
+		oc.deleteNode(nodeName, subnets, nil)
 		//remove the node from the chassis map so we don't delete it twice
 		delete(chassisMap, nodeName)
 	}
