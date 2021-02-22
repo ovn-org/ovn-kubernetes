@@ -2,7 +2,7 @@ package ovn
 
 import (
 	goovn "github.com/ebay/go-ovn"
-	. "github.com/onsi/gomega"
+	"github.com/onsi/gomega"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/factory"
 	addressset "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/address_set"
@@ -44,7 +44,7 @@ type FakeOVN struct {
 
 func NewFakeOVN(fexec *ovntest.FakeExec) *FakeOVN {
 	err := util.SetExec(fexec)
-	Expect(err).NotTo(HaveOccurred())
+	gomega.Expect(err).NotTo(gomega.HaveOccurred())
 	return &FakeOVN{
 		fakeExec:     fexec,
 		asf:          addressset.NewFakeAddressSetFactory(),
@@ -66,7 +66,7 @@ func (o *FakeOVN) start(ctx *cli.Context, objects ...runtime.Object) {
 		}
 	}
 	_, err := config.InitConfig(ctx, o.fakeExec, nil)
-	Expect(err).NotTo(HaveOccurred())
+	gomega.Expect(err).NotTo(gomega.HaveOccurred())
 	o.fakeClient = &util.OVNClientset{
 		KubeClient:           fake.NewSimpleClientset(v1Objects...),
 		EgressIPClient:       egressipfake.NewSimpleClientset(egressIPObjects...),
@@ -86,9 +86,9 @@ func (o *FakeOVN) shutdown() {
 	o.watcher.ShutdownEgressFirewallWatchFactory()
 	o.watcher.Shutdown()
 	err := o.controller.ovnNBClient.Close()
-	Expect(err).NotTo(HaveOccurred())
+	gomega.Expect(err).NotTo(gomega.HaveOccurred())
 	err = o.controller.ovnSBClient.Close()
-	Expect(err).NotTo(HaveOccurred())
+	gomega.Expect(err).NotTo(gomega.HaveOccurred())
 }
 
 func (o *FakeOVN) init() {
@@ -96,7 +96,7 @@ func (o *FakeOVN) init() {
 	o.stopChan = make(chan struct{})
 	o.watcher, err = factory.NewMasterWatchFactory(o.fakeClient)
 	o.watcher.InitializeEgressFirewallWatchFactory()
-	Expect(err).NotTo(HaveOccurred())
+	gomega.Expect(err).NotTo(gomega.HaveOccurred())
 	o.ovnNBClient = ovntest.NewMockOVNClient(goovn.DBNB)
 	o.ovnSBClient = ovntest.NewMockOVNClient(goovn.DBSB)
 	o.controller = NewOvnController(o.fakeClient, o.watcher,

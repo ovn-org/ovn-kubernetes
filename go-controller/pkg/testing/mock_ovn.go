@@ -15,6 +15,7 @@ const (
 	LogicalSwitchType     string = "Logical_Switch"
 	LogicalSwitchPortType string = "Logical_Switch_Port"
 	ChassisType           string = "Chassis"
+	ACLType               string = "ACL"
 )
 
 const (
@@ -120,7 +121,7 @@ func (mock *MockOVNClient) ExecuteMockCommand(e *MockExecution) error {
 		delete(cache, e.objName)
 	case OpUpdate:
 		if cache, ok = mock.cache[e.table]; !ok {
-			return fmt.Errorf("command to delete entry from %s when cache doesn't exist", e.table)
+			return fmt.Errorf("command to update entry from %s when cache doesn't exist", e.table)
 		}
 		if err := mock.updateCache(e.table, e.objName, e.objUpdate, cache); err != nil {
 			return err

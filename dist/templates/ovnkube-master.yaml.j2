@@ -244,6 +244,8 @@ spec:
           value: "{{ ovn_hybrid_overlay_net_cidr }}"
         - name: OVN_DISABLE_SNAT_MULTIPLE_GWS
           value: "{{ ovn_disable_snat_multiple_gws }}"
+        - name: OVN_EMPTY_LB_EVENTS
+          value: "{{ ovn_empty_lb_events }}"
         - name: OVN_V4_JOIN_SUBNET
           value: "{{ ovn_v4_join_subnet }}"
         - name: OVN_V6_JOIN_SUBNET
@@ -254,6 +256,8 @@ spec:
           value: "{{ ovn_gateway_mode }}"
         - name: OVN_MULTICAST_ENABLE
           value: "{{ ovn_multicast_enable }}"
+        - name: OVN_ACL_LOGGING_RATE_LIMIT
+          value: "{{ ovn_acl_logging_rate_limit }}"
       # end of container
 
       volumes:

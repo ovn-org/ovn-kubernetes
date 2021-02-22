@@ -7,8 +7,8 @@ import (
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
 	ovntest "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/testing"
 
-	. "github.com/onsi/ginkgo"
-	. "github.com/onsi/gomega"
+	"github.com/onsi/ginkgo"
+	"github.com/onsi/gomega"
 )
 
 type testNodeSubnetData struct {
@@ -16,14 +16,14 @@ type testNodeSubnetData struct {
 	subnets  []string //IP subnets in string format e.g. 10.1.1.0/24
 }
 
-var _ = Describe("OVN Logical Switch Manager operations", func() {
+var _ = ginkgo.Describe("OVN Logical Switch Manager operations", func() {
 	var (
 		app       *cli.App
 		fexec     *ovntest.FakeExec
 		lsManager *logicalSwitchManager
 	)
 
-	BeforeEach(func() {
+	ginkgo.BeforeEach(func() {
 		// Restore global default values before each testcase
 		config.PrepareTestConfig()
 
@@ -33,11 +33,11 @@ var _ = Describe("OVN Logical Switch Manager operations", func() {
 		lsManager = newLogicalSwitchManager()
 	})
 
-	Context("when adding node", func() {
-		It("creates IPAM for each subnet and reserves IPs correctly", func() {
+	ginkgo.Context("when adding node", func() {
+		ginkgo.It("creates IPAM for each subnet and reserves IPs correctly", func() {
 			app.Action = func(ctx *cli.Context) error {
 				_, err := config.InitConfig(ctx, fexec, nil)
-				Expect(err).NotTo(HaveOccurred())
+				gomega.Expect(err).NotTo(gomega.HaveOccurred())
 
 				testNode := testNodeSubnetData{
 					nodeName: "testNode1",
@@ -50,12 +50,12 @@ var _ = Describe("OVN Logical Switch Manager operations", func() {
 				expectedIPs := []string{"10.1.1.3", "2000::3"}
 
 				err = lsManager.AddNode(testNode.nodeName, ovntest.MustParseIPNets(testNode.subnets...))
-				Expect(err).NotTo(HaveOccurred())
+				gomega.Expect(err).NotTo(gomega.HaveOccurred())
 
 				ips, err := lsManager.AllocateNextIPs(testNode.nodeName)
-				Expect(err).NotTo(HaveOccurred())
+				gomega.Expect(err).NotTo(gomega.HaveOccurred())
 				for i, ip := range ips {
-					Expect(ip.IP.String()).To(Equal(expectedIPs[i]))
+					gomega.Expect(ip.IP.String()).To(gomega.Equal(expectedIPs[i]))
 				}
 
 				// run the test for hybrid overlay enabled case
@@ -69,43 +69,43 @@ var _ = Describe("OVN Logical Switch Manager operations", func() {
 				config.HybridOverlay.Enabled = true
 				expectedIPs = []string{"10.1.1.4", "2000::4"}
 				err = lsManager.AddNode(testHONode.nodeName, ovntest.MustParseIPNets(testNode.subnets...))
-				Expect(err).NotTo(HaveOccurred())
+				gomega.Expect(err).NotTo(gomega.HaveOccurred())
 
 				ips, err = lsManager.AllocateNextIPs(testHONode.nodeName)
-				Expect(err).NotTo(HaveOccurred())
+				gomega.Expect(err).NotTo(gomega.HaveOccurred())
 				for i, ip := range ips {
-					Expect(ip.IP.String()).To(Equal(expectedIPs[i]))
+					gomega.Expect(ip.IP.String()).To(gomega.Equal(expectedIPs[i]))
 				}
 
 				return nil
 			}
 			err := app.Run([]string{app.Name})
-			Expect(err).NotTo(HaveOccurred())
+			gomega.Expect(err).NotTo(gomega.HaveOccurred())
 		})
 
-		It("manages no host subnet nodes correctly", func() {
+		ginkgo.It("manages no host subnet nodes correctly", func() {
 			app.Action = func(ctx *cli.Context) error {
 				_, err := config.InitConfig(ctx, fexec, nil)
-				Expect(err).NotTo(HaveOccurred())
+				gomega.Expect(err).NotTo(gomega.HaveOccurred())
 				testNode := testNodeSubnetData{
 					nodeName: "testNode1",
 					subnets:  []string{},
 				}
 
 				err = lsManager.AddNode(testNode.nodeName, ovntest.MustParseIPNets(testNode.subnets...))
-				Expect(err).NotTo(HaveOccurred())
+				gomega.Expect(err).NotTo(gomega.HaveOccurred())
 				noHostSubnet := lsManager.IsNonHostSubnetSwitch(testNode.nodeName)
-				Expect(noHostSubnet).To(BeTrue())
+				gomega.Expect(noHostSubnet).To(gomega.BeTrue())
 				return nil
 			}
 			err := app.Run([]string{app.Name})
-			Expect(err).NotTo(HaveOccurred())
+			gomega.Expect(err).NotTo(gomega.HaveOccurred())
 		})
 
-		It("handles updates to the host subnets correctly", func() {
+		ginkgo.It("handles updates to the host subnets correctly", func() {
 			app.Action = func(ctx *cli.Context) error {
 				_, err := config.InitConfig(ctx, fexec, nil)
-				Expect(err).NotTo(HaveOccurred())
+				gomega.Expect(err).NotTo(gomega.HaveOccurred())
 				testNode := testNodeSubnetData{
 					nodeName: "testNode1",
 					subnets: []string{
@@ -117,35 +117,35 @@ var _ = Describe("OVN Logical Switch Manager operations", func() {
 				expectedIPs := []string{"10.1.1.3", "2000::3"}
 
 				err = lsManager.AddNode(testNode.nodeName, ovntest.MustParseIPNets(testNode.subnets...))
-				Expect(err).NotTo(HaveOccurred())
+				gomega.Expect(err).NotTo(gomega.HaveOccurred())
 
 				ips, err := lsManager.AllocateNextIPs(testNode.nodeName)
 				for i, ip := range ips {
-					Expect(ip.IP.String()).To(Equal(expectedIPs[i]))
+					gomega.Expect(ip.IP.String()).To(gomega.Equal(expectedIPs[i]))
 				}
 				testNode.subnets = []string{"10.1.2.0/24"}
 				expectedIPs = []string{"10.1.2.3"}
 				err = lsManager.AddNode(testNode.nodeName, ovntest.MustParseIPNets(testNode.subnets...))
-				Expect(err).NotTo(HaveOccurred())
+				gomega.Expect(err).NotTo(gomega.HaveOccurred())
 
 				ips, err = lsManager.AllocateNextIPs(testNode.nodeName)
-				Expect(err).NotTo(HaveOccurred())
+				gomega.Expect(err).NotTo(gomega.HaveOccurred())
 				for i, ip := range ips {
-					Expect(ip.IP.String()).To(Equal(expectedIPs[i]))
+					gomega.Expect(ip.IP.String()).To(gomega.Equal(expectedIPs[i]))
 				}
 				return nil
 			}
 			err := app.Run([]string{app.Name})
-			Expect(err).NotTo(HaveOccurred())
+			gomega.Expect(err).NotTo(gomega.HaveOccurred())
 		})
 
 	})
 
-	Context("when allocating IP addresses", func() {
-		It("IPAM for each subnet allocates IPs contiguously", func() {
+	ginkgo.Context("when allocating IP addresses", func() {
+		ginkgo.It("IPAM for each subnet allocates IPs contiguously", func() {
 			app.Action = func(ctx *cli.Context) error {
 				_, err := config.InitConfig(ctx, fexec, nil)
-				Expect(err).NotTo(HaveOccurred())
+				gomega.Expect(err).NotTo(gomega.HaveOccurred())
 				testNode := testNodeSubnetData{
 					nodeName: "testNode1",
 					subnets: []string{
@@ -160,24 +160,24 @@ var _ = Describe("OVN Logical Switch Manager operations", func() {
 				}
 
 				err = lsManager.AddNode(testNode.nodeName, ovntest.MustParseIPNets(testNode.subnets...))
-				Expect(err).NotTo(HaveOccurred())
+				gomega.Expect(err).NotTo(gomega.HaveOccurred())
 				for _, expectedIPs := range expectedIPAllocations {
 					ips, err := lsManager.AllocateNextIPs(testNode.nodeName)
-					Expect(err).NotTo(HaveOccurred())
+					gomega.Expect(err).NotTo(gomega.HaveOccurred())
 					for i, ip := range ips {
-						Expect(ip.IP.String()).To(Equal(expectedIPs[i]))
+						gomega.Expect(ip.IP.String()).To(gomega.Equal(expectedIPs[i]))
 					}
 				}
 				return nil
 			}
 			err := app.Run([]string{app.Name})
-			Expect(err).NotTo(HaveOccurred())
+			gomega.Expect(err).NotTo(gomega.HaveOccurred())
 		})
 
-		It("IPAM allocates, releases, and reallocates IPs correctly", func() {
+		ginkgo.It("IPAM allocates, releases, and reallocates IPs correctly", func() {
 			app.Action = func(ctx *cli.Context) error {
 				_, err := config.InitConfig(ctx, fexec, nil)
-				Expect(err).NotTo(HaveOccurred())
+				gomega.Expect(err).NotTo(gomega.HaveOccurred())
 				testNode := testNodeSubnetData{
 					nodeName: "testNode1",
 					subnets: []string{
@@ -191,28 +191,28 @@ var _ = Describe("OVN Logical Switch Manager operations", func() {
 				}
 
 				err = lsManager.AddNode(testNode.nodeName, ovntest.MustParseIPNets(testNode.subnets...))
-				Expect(err).NotTo(HaveOccurred())
+				gomega.Expect(err).NotTo(gomega.HaveOccurred())
 				for _, expectedIPs := range expectedIPAllocations {
 					ips, err := lsManager.AllocateNextIPs(testNode.nodeName)
-					Expect(err).NotTo(HaveOccurred())
+					gomega.Expect(err).NotTo(gomega.HaveOccurred())
 					for i, ip := range ips {
-						Expect(ip.IP.String()).To(Equal(expectedIPs[i]))
+						gomega.Expect(ip.IP.String()).To(gomega.Equal(expectedIPs[i]))
 					}
 					err = lsManager.ReleaseIPs(testNode.nodeName, ips)
-					Expect(err).NotTo(HaveOccurred())
+					gomega.Expect(err).NotTo(gomega.HaveOccurred())
 					err = lsManager.AllocateIPs(testNode.nodeName, ips)
-					Expect(err).NotTo(HaveOccurred())
+					gomega.Expect(err).NotTo(gomega.HaveOccurred())
 				}
 				return nil
 			}
 			err := app.Run([]string{app.Name})
-			Expect(err).NotTo(HaveOccurred())
+			gomega.Expect(err).NotTo(gomega.HaveOccurred())
 		})
 
-		It("releases IPs for other host subnet nodes when any host subnets allocation fails", func() {
+		ginkgo.It("releases IPs for other host subnet nodes when any host subnets allocation fails", func() {
 			app.Action = func(ctx *cli.Context) error {
 				_, err := config.InitConfig(ctx, fexec, nil)
-				Expect(err).NotTo(HaveOccurred())
+				gomega.Expect(err).NotTo(gomega.HaveOccurred())
 				testNode := testNodeSubnetData{
 					nodeName: "testNode1",
 					subnets: []string{
@@ -228,29 +228,29 @@ var _ = Describe("OVN Logical Switch Manager operations", func() {
 				}
 
 				err = lsManager.AddNode(testNode.nodeName, ovntest.MustParseIPNets(testNode.subnets...))
-				Expect(err).NotTo(HaveOccurred())
+				gomega.Expect(err).NotTo(gomega.HaveOccurred())
 				// exhaust valid ips in second subnet
 				for _, expectedIPs := range expectedIPAllocations {
 					ips, err := lsManager.AllocateNextIPs(testNode.nodeName)
-					Expect(err).NotTo(HaveOccurred())
+					gomega.Expect(err).NotTo(gomega.HaveOccurred())
 					for i, ip := range ips {
-						Expect(ip.IP.String()).To(Equal(expectedIPs[i]))
+						gomega.Expect(ip.IP.String()).To(gomega.Equal(expectedIPs[i]))
 					}
 				}
 				// now try one more allocation and expect it to fail
 				ips, err := lsManager.AllocateNextIPs(testNode.nodeName)
-				Expect(err).To(HaveOccurred())
-				Expect(len(ips)).To(Equal(0))
+				gomega.Expect(err).To(gomega.HaveOccurred())
+				gomega.Expect(len(ips)).To(gomega.Equal(0))
 				return nil
 			}
 			err := app.Run([]string{app.Name})
-			Expect(err).NotTo(HaveOccurred())
+			gomega.Expect(err).NotTo(gomega.HaveOccurred())
 		})
 
-		It("fails correctly when trying to block a previously allocated IP", func() {
+		ginkgo.It("fails correctly when trying to block a previously allocated IP", func() {
 			app.Action = func(ctx *cli.Context) error {
 				_, err := config.InitConfig(ctx, fexec, nil)
-				Expect(err).NotTo(HaveOccurred())
+				gomega.Expect(err).NotTo(gomega.HaveOccurred())
 				testNode := testNodeSubnetData{
 					nodeName: "testNode1",
 					subnets: []string{
@@ -265,14 +265,14 @@ var _ = Describe("OVN Logical Switch Manager operations", func() {
 				}
 				allocatedIPNets := ovntest.MustParseIPNets(allocatedIPs...)
 				err = lsManager.AddNode(testNode.nodeName, ovntest.MustParseIPNets(testNode.subnets...))
-				Expect(err).NotTo(HaveOccurred())
+				gomega.Expect(err).NotTo(gomega.HaveOccurred())
 				err = lsManager.AllocateIPs(testNode.nodeName, allocatedIPNets)
 				klog.Errorf("error: %v", err)
-				Expect(err).To(HaveOccurred())
+				gomega.Expect(err).To(gomega.HaveOccurred())
 				return nil
 			}
 			err := app.Run([]string{app.Name})
-			Expect(err).NotTo(HaveOccurred())
+			gomega.Expect(err).NotTo(gomega.HaveOccurred())
 		})
 
 	})

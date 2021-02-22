@@ -24,7 +24,7 @@ type MeterBand struct {
 }
 
 func (odbi *ovndb) rowToMeter(uuid string) *Meter {
-	cacheMeter, ok := odbi.cache[tableMeter][uuid]
+	cacheMeter, ok := odbi.cache[TableMeter][uuid]
 	if !ok {
 		return nil
 	}
@@ -39,7 +39,7 @@ func (odbi *ovndb) rowToMeter(uuid string) *Meter {
 }
 
 func (odbi *ovndb) rowToMeterBand(uuid string) (*MeterBand, error) {
-	cacheMeterBand, ok := odbi.cache[tableMeterBand][uuid]
+	cacheMeterBand, ok := odbi.cache[TableMeterBand][uuid]
 	if !ok {
 		return nil, ErrorNotFound
 	}
@@ -78,7 +78,7 @@ func (odbi *ovndb) meterAddImp(name, action string, rate int, unit string, exter
 	mRow := make(OVNRow)
 
 	mRow["name"] = name
-	if uuid := odbi.getRowUUID(tableMeter, mRow); len(uuid) > 0 {
+	if uuid := odbi.getRowUUID(TableMeter, mRow); len(uuid) > 0 {
 		return nil, ErrorExist
 	}
 
@@ -118,14 +118,14 @@ func (odbi *ovndb) meterAddImp(name, action string, rate int, unit string, exter
 
 	mbInsterOp := libovsdb.Operation{
 		Op:       opInsert,
-		Table:    tableMeterBand,
+		Table:    TableMeterBand,
 		Row:      mbRow,
 		UUIDName: MeterBandUUID,
 	}
 
 	mInsertOp := libovsdb.Operation{
 		Op:       opInsert,
-		Table:    tableMeter,
+		Table:    TableMeter,
 		Row:      mRow,
 		UUIDName: MeterUUID,
 	}
@@ -144,8 +144,8 @@ func (odbi *ovndb) meterDelImp(name ...string) (*OvnCommand, error) {
 
 	switch len(name) {
 	case 0:
-		for uuid := range odbi.cache[tableMeter] {
-			name := odbi.cache[tableMeter][uuid].Fields["name"].(string)
+		for uuid := range odbi.cache[TableMeter] {
+			name := odbi.cache[TableMeter][uuid].Fields["name"].(string)
 			operations, err = odbi.singleMeterDel(name, operations)
 			if err != nil {
 				return nil, err
@@ -169,11 +169,11 @@ func (odbi *ovndb) meterDelImp(name ...string) (*OvnCommand, error) {
 func (odbi *ovndb) meterListImp() ([]*Meter, error) {
 	odbi.cachemutex.RLock()
 	defer odbi.cachemutex.RUnlock()
-	var ListMeter []*Meter
-	cacheMeter, ok := odbi.cache[tableMeter]
+	cacheMeter, ok := odbi.cache[TableMeter]
 	if !ok {
 		return nil, ErrorNotFound
 	}
+	ListMeter := make([]*Meter, 0, len(cacheMeter))
 	for uuid := range cacheMeter {
 		ListMeter = append(ListMeter, odbi.rowToMeter(uuid))
 	}
@@ -184,11 +184,11 @@ func (odbi *ovndb) meterListImp() ([]*Meter, error) {
 func (odbi *ovndb) meterBandsListImp() ([]*MeterBand, error) {
 	odbi.cachemutex.RLock()
 	defer odbi.cachemutex.RUnlock()
-	var ListMeterBands []*MeterBand
-	cacheMeterBands, ok := odbi.cache[tableMeterBand]
+	cacheMeterBands, ok := odbi.cache[TableMeterBand]
 	if !ok {
 		return nil, ErrorNotFound
 	}
+	ListMeterBands := make([]*MeterBand, 0, len(cacheMeterBands))
 	for uuid := range cacheMeterBands {
 		meterBand, err := odbi.rowToMeterBand(uuid)
 		if err != nil {
@@ -204,7 +204,7 @@ func (odbi *ovndb) meterFind(name string) bool {
 	defer odbi.cachemutex.RUnlock()
 	row := make(OVNRow)
 	row["name"] = name
-	meterUUID := odbi.getRowUUID(tableMeter, row)
+	meterUUID := odbi.getRowUUID(TableMeter, row)
 	if len(meterUUID) == 0 {
 		return false
 	}
@@ -215,22 +215,22 @@ func (odbi *ovndb) singleMeterDel(name string, operations []libovsdb.Operation) 
 	meterName := name
 	row := make(OVNRow)
 	row["name"] = meterName
-	meterUUID := odbi.getRowUUID(tableMeter, row)
+	meterUUID := odbi.getRowUUID(TableMeter, row)
 	if len(meterUUID) == 0 {
 		return nil, ErrorNotFound
 	}
-	bands := odbi.cache[tableMeter][meterUUID].Fields["bands"].(libovsdb.UUID)
+	bands := odbi.cache[TableMeter][meterUUID].Fields["bands"].(libovsdb.UUID)
 	mCondition := libovsdb.NewCondition("name", "==", meterName)
 	mDeleteOp := libovsdb.Operation{
 		Op:    opDelete,
-		Table: tableMeter,
+		Table: TableMeter,
 		Where: []interface{}{mCondition},
 	}
 
 	bCondition := libovsdb.NewCondition("_uuid", "==", bands)
 	bDeleteOp := libovsdb.Operation{
 		Op:    opDelete,
-		Table: tableMeterBand,
+		Table: TableMeterBand,
 		Where: []interface{}{bCondition},
 	}
 	operations = append(operations, bDeleteOp)

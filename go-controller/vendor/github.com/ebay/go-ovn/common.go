@@ -30,54 +30,54 @@ const (
 )
 
 const (
-	tableNBGlobal                 string = "NB_Global"
-	tableLogicalSwitch            string = "Logical_Switch"
-	tableLogicalSwitchPort        string = "Logical_Switch_Port"
-	tableAddressSet               string = "Address_Set"
-	tablePortGroup                string = "Port_Group"
-	tableLoadBalancer             string = "Load_Balancer"
-	tableACL                      string = "ACL"
-	tableLogicalRouter            string = "Logical_Router"
-	tableQoS                      string = "QoS"
-	tableMeter                    string = "Meter"
-	tableMeterBand                string = "Meter_Band"
-	tableLogicalRouterPort        string = "Logical_Router_Port"
-	tableLogicalRouterStaticRoute string = "Logical_Router_Static_Route"
-	tableNAT                      string = "NAT"
-	tableDHCPOptions              string = "DHCP_Options"
-	tableConnection               string = "Connection"
-	tableDNS                      string = "DNS"
-	tableSSL                      string = "SSL"
-	tableGatewayChassis           string = "Gateway_Chassis"
-	tableChassis                  string = "Chassis"
-	tableEncap                    string = "Encap"
-	tableSBGlobal                 string = "SB_Global"
+	TableNBGlobal                 string = "NB_Global"
+	TableLogicalSwitch            string = "Logical_Switch"
+	TableLogicalSwitchPort        string = "Logical_Switch_Port"
+	TableAddressSet               string = "Address_Set"
+	TablePortGroup                string = "Port_Group"
+	TableLoadBalancer             string = "Load_Balancer"
+	TableACL                      string = "ACL"
+	TableLogicalRouter            string = "Logical_Router"
+	TableQoS                      string = "QoS"
+	TableMeter                    string = "Meter"
+	TableMeterBand                string = "Meter_Band"
+	TableLogicalRouterPort        string = "Logical_Router_Port"
+	TableLogicalRouterStaticRoute string = "Logical_Router_Static_Route"
+	TableNAT                      string = "NAT"
+	TableDHCPOptions              string = "DHCP_Options"
+	TableConnection               string = "Connection"
+	TableDNS                      string = "DNS"
+	TableSSL                      string = "SSL"
+	TableGatewayChassis           string = "Gateway_Chassis"
+	TableChassis                  string = "Chassis"
+	TableEncap                    string = "Encap"
+	TableSBGlobal                 string = "SB_Global"
 )
 
 var NBTablesOrder = []string{
-	tableNBGlobal,
-	tableAddressSet,
-	tableACL,
-	tableDHCPOptions,
-	tableLoadBalancer,
-	tableQoS,
-	tableMeter,
-	tableMeterBand,
-	tableLogicalRouterPort,
-	tableLogicalRouterStaticRoute,
-	tableLogicalSwitchPort,
-	tableNAT,
-	tableConnection,
-	tableDNS,
-	tableSSL,
-	tableGatewayChassis,
-	tablePortGroup,
-	tableLogicalSwitch,
-	tableLogicalRouter,
+	TableNBGlobal,
+	TableAddressSet,
+	TableACL,
+	TableDHCPOptions,
+	TableLoadBalancer,
+	TableQoS,
+	TableMeter,
+	TableMeterBand,
+	TableLogicalRouterPort,
+	TableLogicalRouterStaticRoute,
+	TableLogicalSwitchPort,
+	TableNAT,
+	TableConnection,
+	TableDNS,
+	TableSSL,
+	TableGatewayChassis,
+	TablePortGroup,
+	TableLogicalSwitch,
+	TableLogicalRouter,
 }
 
 var SBTablesOrder = []string{
-	tableChassis,
-	tableEncap,
-	tableSBGlobal,
+	TableChassis,
+	TableEncap,
+	TableSBGlobal,
 }

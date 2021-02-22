@@ -67,12 +67,13 @@ var (
 
 	// Logging holds logging-related parsed config file parameters and command-line overrides
 	Logging = LoggingConfig{
-		File:              "", // do not log to a file by default
-		CNIFile:           "",
-		Level:             4,
-		LogFileMaxSize:    100, // Size in Megabytes
-		LogFileMaxBackups: 5,
-		LogFileMaxAge:     5, //days
+		File:                "", // do not log to a file by default
+		CNIFile:             "",
+		Level:               4,
+		LogFileMaxSize:      100, // Size in Megabytes
+		LogFileMaxBackups:   5,
+		LogFileMaxAge:       5, //days
+		ACLLoggingRateLimit: 20,
 	}
 
 	// CNI holds CNI-related parsed config file parameters and command-line overrides
@@ -183,6 +184,8 @@ type LoggingConfig struct {
 	LogFileMaxBackups int `gcfg:"logfile-maxbackups"`
 	// LogFileMaxAge represents the maximum number of days to retain old log files
 	LogFileMaxAge int `gcfg:"logfile-maxage"`
+	// Logging rate-limiting meter
+	ACLLoggingRateLimit int `gcfg:"acl-logging-rate-limit"`
 }
 
 // CNIConfig holds CNI-related parsed config file parameters and command-line overrides
@@ -261,7 +264,6 @@ type OvnAuthConfig struct {
 	Scheme         OvnDBScheme
 
 	northbound bool
-	externalID string // ovn-nb or ovn-remote
 
 	exec kexec.Interface
 }
@@ -584,6 +586,12 @@ var CommonFlags = []cli.Flag{
 		Usage:       "Maximum number of days to retain old log files",
 		Destination: &cliConfig.Logging.LogFileMaxAge,
 		Value:       Logging.LogFileMaxAge,
+	},
+	&cli.IntFlag{
+		Name:        "acl-logging-rate-limit",
+		Usage:       "The largest number of messages per second that gets logged before drop (default 20)",
+		Destination: &cliConfig.Logging.ACLLoggingRateLimit,
+		Value:       20,
 	},
 }
 
@@ -1473,11 +1481,9 @@ func buildOvnAuth(exec kexec.Interface, northbound bool, cliAuth, confAuth *OvnA
 	var direction string
 	var defaultAuth *OvnAuthConfig
 	if northbound {
-		auth.externalID = "ovn-nb"
 		direction = "nb"
 		defaultAuth = &savedOvnNorth
 	} else {
-		auth.externalID = "ovn-remote"
 		direction = "sb"
 		defaultAuth = &savedOvnSouth
 	}
@@ -1607,9 +1613,13 @@ func (a *OvnAuthConfig) SetDBAuth() error {
 		}
 	}
 
-	if err := setOVSExternalID(a.exec, a.externalID, "\""+a.GetURL()+"\""); err != nil {
-		return err
+	if !a.northbound {
+		// store the Southbound Database address in an external id - "external_ids:ovn-remote"
+		if err := setOVSExternalID(a.exec, "ovn-remote", "\""+a.GetURL()+"\""); err != nil {
+			return err
+		}
 	}
+
 	return nil
 }
 

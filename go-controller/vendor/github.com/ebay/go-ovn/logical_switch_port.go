@@ -45,13 +45,13 @@ func (odbi *ovndb) lspAddImp(lsw, lsp string) (*OvnCommand, error) {
 	row := make(OVNRow)
 	row["name"] = lsp
 
-	if uuid := odbi.getRowUUID(tableLogicalSwitchPort, row); len(uuid) > 0 {
+	if uuid := odbi.getRowUUID(TableLogicalSwitchPort, row); len(uuid) > 0 {
 		return nil, ErrorExist
 	}
 
 	insertOp := libovsdb.Operation{
 		Op:       opInsert,
-		Table:    tableLogicalSwitchPort,
+		Table:    TableLogicalSwitchPort,
 		Row:      row,
 		UUIDName: namedUUID,
 	}
@@ -67,7 +67,7 @@ func (odbi *ovndb) lspAddImp(lsw, lsp string) (*OvnCommand, error) {
 
 	mutateOp := libovsdb.Operation{
 		Op:        opMutate,
-		Table:     tableLogicalSwitch,
+		Table:     TableLogicalSwitch,
 		Mutations: []interface{}{mutation},
 		Where:     []interface{}{condition},
 	}
@@ -79,7 +79,7 @@ func (odbi *ovndb) lspDelImp(lsp string) (*OvnCommand, error) {
 	row := make(OVNRow)
 	row["name"] = lsp
 
-	lspUUID := odbi.getRowUUID(tableLogicalSwitchPort, row)
+	lspUUID := odbi.getRowUUID(TableLogicalSwitchPort, row)
 	if len(lspUUID) == 0 {
 		return nil, ErrorNotFound
 	}
@@ -88,7 +88,7 @@ func (odbi *ovndb) lspDelImp(lsp string) (*OvnCommand, error) {
 	condition := libovsdb.NewCondition("name", "==", lsp)
 	deleteOp := libovsdb.Operation{
 		Op:    opDelete,
-		Table: tableLogicalSwitchPort,
+		Table: TableLogicalSwitchPort,
 		Where: []interface{}{condition},
 	}
 	mutateSet, err := libovsdb.NewOvsSet(mutateUUID)
@@ -96,7 +96,7 @@ func (odbi *ovndb) lspDelImp(lsp string) (*OvnCommand, error) {
 		return nil, err
 	}
 	mutation := libovsdb.NewMutation("ports", opDelete, mutateSet)
-	ucondition, err := odbi.getRowUUIDContainsUUID(tableLogicalSwitch, "ports", lspUUID)
+	ucondition, err := odbi.getRowUUIDContainsUUID(TableLogicalSwitch, "ports", lspUUID)
 	if err != nil {
 		return nil, err
 	}
@@ -105,7 +105,7 @@ func (odbi *ovndb) lspDelImp(lsp string) (*OvnCommand, error) {
 	// simple mutate operation
 	mutateOp := libovsdb.Operation{
 		Op:        opMutate,
-		Table:     tableLogicalSwitch,
+		Table:     TableLogicalSwitch,
 		Mutations: []interface{}{mutation},
 		Where:     []interface{}{mucondition},
 	}
@@ -123,7 +123,7 @@ func (odbi *ovndb) lspSetAddressImp(lsp string, addr ...string) (*OvnCommand, er
 	condition := libovsdb.NewCondition("name", "==", lsp)
 	updateOp := libovsdb.Operation{
 		Op:    opUpdate,
-		Table: tableLogicalSwitchPort,
+		Table: TableLogicalSwitchPort,
 		Row:   row,
 		Where: []interface{}{condition},
 	}
@@ -141,7 +141,7 @@ func (odbi *ovndb) lspSetPortSecurityImp(lsp string, security ...string) (*OvnCo
 	condition := libovsdb.NewCondition("name", "==", lsp)
 	updateOp := libovsdb.Operation{
 		Op:    opUpdate,
-		Table: tableLogicalSwitchPort,
+		Table: TableLogicalSwitchPort,
 		Row:   row,
 		Where: []interface{}{condition},
 	}
@@ -155,7 +155,7 @@ func (odbi *ovndb) lspSetDHCPv4OptionsImp(lsp string, uuid string) (*OvnCommand,
 	condition := libovsdb.NewCondition("name", "==", lsp)
 	updateOp := libovsdb.Operation{
 		Op:    opUpdate,
-		Table: tableLogicalSwitchPort,
+		Table: TableLogicalSwitchPort,
 		Row:   row,
 		Where: []interface{}{condition},
 	}
@@ -176,7 +176,7 @@ func (odbi *ovndb) lspSetDHCPv6OptionsImp(lsp string, options string) (*OvnComma
 	condition := libovsdb.NewCondition("name", "==", lsp)
 	mutateOp := libovsdb.Operation{
 		Op:        opMutate,
-		Table:     tableLogicalSwitchPort,
+		Table:     TableLogicalSwitchPort,
 		Mutations: []interface{}{mutation},
 		Where:     []interface{}{condition},
 	}
@@ -214,7 +214,7 @@ func (odbi *ovndb) lspSetOptionsImp(lsp string, options map[string]string) (*Ovn
 	// simple mutate operation
 	updateOp := libovsdb.Operation{
 		Op:    opUpdate,
-		Table: tableLogicalSwitchPort,
+		Table: TableLogicalSwitchPort,
 		Row:   row,
 		Where: []interface{}{condition},
 	}
@@ -249,7 +249,7 @@ func (odbi *ovndb) lspSetDynamicAddressesImp(lsp string, address string) (*OvnCo
 	condition := libovsdb.NewCondition("name", "==", lsp)
 	updateOp := libovsdb.Operation{
 		Op:    opUpdate,
-		Table: tableLogicalSwitchPort,
+		Table: TableLogicalSwitchPort,
 		Row:   row,
 		Where: []interface{}{condition},
 	}
@@ -287,7 +287,7 @@ func (odbi *ovndb) lspSetExternalIdsImp(lsp string, external_ids map[string]stri
 	// simple mutate operation
 	updateOp := libovsdb.Operation{
 		Op:    opUpdate,
-		Table: tableLogicalSwitchPort,
+		Table: TableLogicalSwitchPort,
 		Row:   row,
 		Where: []interface{}{condition},
 	}
@@ -315,12 +315,12 @@ func (odbi *ovndb) lspGetExternalIdsImp(lsp string) (map[string]string, error) {
 func (odbi *ovndb) rowToLogicalPort(uuid string) (*LogicalSwitchPort, error) {
 	lp := &LogicalSwitchPort{
 		UUID:       uuid,
-		Name:       odbi.cache[tableLogicalSwitchPort][uuid].Fields["name"].(string),
-		Type:       odbi.cache[tableLogicalSwitchPort][uuid].Fields["type"].(string),
-		ExternalID: odbi.cache[tableLogicalSwitchPort][uuid].Fields["external_ids"].(libovsdb.OvsMap).GoMap,
+		Name:       odbi.cache[TableLogicalSwitchPort][uuid].Fields["name"].(string),
+		Type:       odbi.cache[TableLogicalSwitchPort][uuid].Fields["type"].(string),
+		ExternalID: odbi.cache[TableLogicalSwitchPort][uuid].Fields["external_ids"].(libovsdb.OvsMap).GoMap,
 	}
 
-	if dhcpv4, ok := odbi.cache[tableLogicalSwitchPort][uuid].Fields["dhcpv4_options"]; ok {
+	if dhcpv4, ok := odbi.cache[TableLogicalSwitchPort][uuid].Fields["dhcpv4_options"]; ok {
 		switch dhcpv4.(type) {
 		case libovsdb.UUID:
 			lp.DHCPv4Options = dhcpv4.(libovsdb.UUID).GoUUID
@@ -328,7 +328,7 @@ func (odbi *ovndb) rowToLogicalPort(uuid string) (*LogicalSwitchPort, error) {
 		default:
 		}
 	}
-	if dhcpv6, ok := odbi.cache[tableLogicalSwitchPort][uuid].Fields["dhcpv6_options"]; ok {
+	if dhcpv6, ok := odbi.cache[TableLogicalSwitchPort][uuid].Fields["dhcpv6_options"]; ok {
 		switch dhcpv6.(type) {
 		case libovsdb.UUID:
 			lp.DHCPv6Options = dhcpv6.(libovsdb.UUID).GoUUID
@@ -337,7 +337,7 @@ func (odbi *ovndb) rowToLogicalPort(uuid string) (*LogicalSwitchPort, error) {
 		}
 	}
 
-	if addr, ok := odbi.cache[tableLogicalSwitchPort][uuid].Fields["addresses"]; ok {
+	if addr, ok := odbi.cache[TableLogicalSwitchPort][uuid].Fields["addresses"]; ok {
 		switch addr.(type) {
 		case string:
 			lp.Addresses = []string{addr.(string)}
@@ -348,7 +348,7 @@ func (odbi *ovndb) rowToLogicalPort(uuid string) (*LogicalSwitchPort, error) {
 		}
 	}
 
-	if portsecurity, ok := odbi.cache[tableLogicalSwitchPort][uuid].Fields["port_security"]; ok {
+	if portsecurity, ok := odbi.cache[TableLogicalSwitchPort][uuid].Fields["port_security"]; ok {
 		switch portsecurity.(type) {
 		case string:
 			lp.PortSecurity = []string{portsecurity.(string)}
@@ -359,11 +359,11 @@ func (odbi *ovndb) rowToLogicalPort(uuid string) (*LogicalSwitchPort, error) {
 		}
 	}
 
-	if options, ok := odbi.cache[tableLogicalSwitchPort][uuid].Fields["options"]; ok {
+	if options, ok := odbi.cache[TableLogicalSwitchPort][uuid].Fields["options"]; ok {
 		lp.Options = options.(libovsdb.OvsMap).GoMap
 	}
 
-	if dynamicAddresses, ok := odbi.cache[tableLogicalSwitchPort][uuid].Fields["dynamic_addresses"]; ok {
+	if dynamicAddresses, ok := odbi.cache[TableLogicalSwitchPort][uuid].Fields["dynamic_addresses"]; ok {
 		switch dynamicAddresses.(type) {
 		case string:
 			lp.DynamicAddresses = dynamicAddresses.(string)
@@ -382,7 +382,7 @@ func (odbi *ovndb) lspGetImp(lsp string) (*LogicalSwitchPort, error) {
 	odbi.cachemutex.RLock()
 	defer odbi.cachemutex.RUnlock()
 
-	cacheLogicalSwitchPort, ok := odbi.cache[tableLogicalSwitchPort]
+	cacheLogicalSwitchPort, ok := odbi.cache[TableLogicalSwitchPort]
 	if !ok {
 		return nil, ErrorSchema
 	}
@@ -397,16 +397,13 @@ func (odbi *ovndb) lspGetImp(lsp string) (*LogicalSwitchPort, error) {
 
 // Get all lport by lswitch
 func (odbi *ovndb) lspListImp(lsw string) ([]*LogicalSwitchPort, error) {
-	var listLSP []*LogicalSwitchPort
-
 	odbi.cachemutex.RLock()
 	defer odbi.cachemutex.RUnlock()
 
-	cacheLogicalSwitch, ok := odbi.cache[tableLogicalSwitch]
+	cacheLogicalSwitch, ok := odbi.cache[TableLogicalSwitch]
 	if !ok {
 		return nil, ErrorSchema
 	}
-	var lsFound bool
 	for _, drows := range cacheLogicalSwitch {
 		if rlsw, ok := drows.Fields["name"].(string); ok && rlsw == lsw {
 			ports := drows.Fields["ports"]
@@ -414,6 +411,7 @@ func (odbi *ovndb) lspListImp(lsw string) ([]*LogicalSwitchPort, error) {
 				switch ports.(type) {
 				case libovsdb.OvsSet:
 					if ps, ok := ports.(libovsdb.OvsSet); ok {
+						listLSP := make([]*LogicalSwitchPort, 0, len(ps.GoSet))
 						for _, p := range ps.GoSet {
 							if vp, ok := p.(libovsdb.UUID); ok {
 								tp, err := odbi.rowToLogicalPort(vp.GoUUID)
@@ -423,6 +421,7 @@ func (odbi *ovndb) lspListImp(lsw string) ([]*LogicalSwitchPort, error) {
 								listLSP = append(listLSP, tp)
 							}
 						}
+						return listLSP, nil
 					} else {
 						return nil, fmt.Errorf("type libovsdb.OvsSet casting failed")
 					}
@@ -432,7 +431,7 @@ func (odbi *ovndb) lspListImp(lsw string) ([]*LogicalSwitchPort, error) {
 						if err != nil {
 							return nil, fmt.Errorf("Failed to get logical port: %s", err)
 						}
-						listLSP = append(listLSP, tp)
+						return []*LogicalSwitchPort{tp}, nil
 					} else {
 						return nil, fmt.Errorf("type libovsdb.UUID casting failed")
 					}
@@ -440,12 +439,8 @@ func (odbi *ovndb) lspListImp(lsw string) ([]*LogicalSwitchPort, error) {
 					return nil, fmt.Errorf("Unsupported type found in ovsdb rows")
 				}
 			}
-			lsFound = true
-			break
+			return []*LogicalSwitchPort{}, nil
 		}
 	}
-	if !lsFound {
-		return nil, ErrorNotFound
-	}
-	return listLSP, nil
+	return nil, ErrorNotFound
 }

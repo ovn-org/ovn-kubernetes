@@ -474,6 +474,7 @@ var _ = Describe("Config Operations", func() {
 			Expect(Default.ConntrackZone).To(Equal(64321))
 			Expect(Logging.File).To(Equal("/var/log/ovnkube.log"))
 			Expect(Logging.Level).To(Equal(5))
+			Expect(Logging.ACLLoggingRateLimit).To(Equal(20))
 			Expect(CNI.ConfDir).To(Equal("/etc/cni/net.d22"))
 			Expect(CNI.Plugin).To(Equal("ovn-k8s-cni-overlay22"))
 			Expect(Kubernetes.Kubeconfig).To(Equal(kubeconfigFile))
@@ -540,6 +541,7 @@ var _ = Describe("Config Operations", func() {
 			Expect(Default.ConntrackZone).To(Equal(5555))
 			Expect(Logging.File).To(Equal("/some/logfile"))
 			Expect(Logging.Level).To(Equal(3))
+			Expect(Logging.ACLLoggingRateLimit).To(Equal(30))
 			Expect(CNI.ConfDir).To(Equal("/some/cni/dir"))
 			Expect(CNI.Plugin).To(Equal("a-plugin"))
 			Expect(Kubernetes.Kubeconfig).To(Equal(kubeconfigFile))
@@ -584,6 +586,7 @@ var _ = Describe("Config Operations", func() {
 			"-conntrack-zone=5555",
 			"-loglevel=3",
 			"-logfile=/some/logfile",
+			"-acl-logging-rate-limit=30",
 			"-cni-conf-dir=/some/cni/dir",
 			"-cni-plugin=a-plugin",
 			"-cluster-subnets=10.130.0.0/15/24",
@@ -1128,7 +1131,6 @@ mode=shared
 			fexec := ovntest.NewFakeExec()
 			fexec.AddFakeCmdsNoOutputNoError([]string{
 				"ovn-nbctl --db=" + nbURL + " --timeout=5 --private-key=" + keyFile + " --certificate=" + certFile + " --bootstrap-ca-cert=" + caFile + " list nb_global",
-				"ovs-vsctl --timeout=15 set Open_vSwitch . external_ids:ovn-nb=\"" + nbURL + "\"",
 			})
 
 			cliConfig := &OvnAuthConfig{
@@ -1147,7 +1149,6 @@ mode=shared
 			Expect(a.Address).To(Equal(nbURL))
 			Expect(a.CertCommonName).To(Equal(nbDummyCommonName))
 			Expect(a.northbound).To(BeTrue())
-			Expect(a.externalID).To(Equal("ovn-nb"))
 
 			Expect(a.GetURL()).To(Equal(nbURL))
 			err = a.SetDBAuth()
@@ -1180,7 +1181,6 @@ mode=shared
 			Expect(a.Address).To(Equal(sbURL))
 			Expect(a.CertCommonName).To(Equal(sbDummyCommonName))
 			Expect(a.northbound).To(BeFalse())
-			Expect(a.externalID).To(Equal("ovn-remote"))
 
 			Expect(a.GetURL()).To(Equal(sbURL))
 			err = a.SetDBAuth()
@@ -1189,49 +1189,25 @@ mode=shared
 		})
 
 		const (
-			nbURLLegacy    string = "tcp://1.2.3.4:6641"
-			nbURLConverted string = "tcp:1.2.3.4:6641"
 			sbURLLegacy    string = "tcp://1.2.3.4:6642"
 			sbURLConverted string = "tcp:1.2.3.4:6642"
 		)
 
-		It("configures client northbound TCP legacy address correctly", func() {
-			fexec := ovntest.NewFakeExec()
-			fexec.AddFakeCmdsNoOutputNoError([]string{
-				"ovs-vsctl --timeout=15 set Open_vSwitch . external_ids:ovn-nb=\"" + nbURLConverted + "\"",
-			})
-
-			cliConfig := &OvnAuthConfig{Address: nbURLLegacy}
-			a, err := buildOvnAuth(fexec, true, cliConfig, &OvnAuthConfig{}, true)
-			Expect(err).NotTo(HaveOccurred())
-			Expect(a.Scheme).To(Equal(OvnDBSchemeTCP))
-			// Config should convert :// to : in addresses
-			Expect(a.Address).To(Equal(nbURLConverted))
-			Expect(a.northbound).To(BeTrue())
-			Expect(a.externalID).To(Equal("ovn-nb"))
-
-			Expect(a.GetURL()).To(Equal(nbURLConverted))
-			err = a.SetDBAuth()
-			Expect(err).NotTo(HaveOccurred())
-			Expect(fexec.CalledMatchesExpected()).To(BeTrue(), fexec.ErrorDesc)
-		})
-
 		It("configures client southbound TCP legacy address correctly", func() {
 			fexec := ovntest.NewFakeExec()
 			fexec.AddFakeCmdsNoOutputNoError([]string{
-				"ovs-vsctl --timeout=15 set Open_vSwitch . external_ids:ovn-nb=\"" + nbURLConverted + "\"",
+				"ovs-vsctl --timeout=15 set Open_vSwitch . external_ids:ovn-remote=\"" + sbURLConverted + "\"",
 			})
 
-			cliConfig := &OvnAuthConfig{Address: nbURLLegacy}
-			a, err := buildOvnAuth(fexec, true, cliConfig, &OvnAuthConfig{}, true)
+			cliConfig := &OvnAuthConfig{Address: sbURLLegacy}
+			a, err := buildOvnAuth(fexec, false, cliConfig, &OvnAuthConfig{}, true)
 			Expect(err).NotTo(HaveOccurred())
 			Expect(a.Scheme).To(Equal(OvnDBSchemeTCP))
 			// Config should convert :// to : in addresses
-			Expect(a.Address).To(Equal(nbURLConverted))
-			Expect(a.northbound).To(BeTrue())
-			Expect(a.externalID).To(Equal("ovn-nb"))
+			Expect(a.Address).To(Equal(sbURLConverted))
+			Expect(a.northbound).To(BeFalse())
 
-			Expect(a.GetURL()).To(Equal(nbURLConverted))
+			Expect(a.GetURL()).To(Equal(sbURLConverted))
 			err = a.SetDBAuth()
 			Expect(err).NotTo(HaveOccurred())
 			Expect(fexec.CalledMatchesExpected()).To(BeTrue(), fexec.ErrorDesc)
