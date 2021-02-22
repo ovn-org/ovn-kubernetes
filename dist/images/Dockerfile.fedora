@@ -27,6 +27,9 @@ RUN INSTALL_PKGS=" \
 
 RUN mkdir -p /var/run/openvswitch
 
+# REMOVEME once https://bugzilla.redhat.com/show_bug.cgi?id=1931599 is fixed
+RUN dnf downgrade -y ovn
+
 # Built in ../../go_controller, then the binaries are copied here.
 # put things where they are in the pkg
 RUN mkdir -p /usr/libexec/cni/
