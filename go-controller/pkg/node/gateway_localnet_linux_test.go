@@ -438,12 +438,12 @@ var _ = Describe("Node Operations", func() {
 				expectedTables := map[string]util.FakeTable{
 					"filter": {
 						"OVN-KUBE-NODEPORT": []string{
-							fmt.Sprintf("-p %s --dport %v -j ACCEPT", service.Spec.Ports[0].Protocol, service.Spec.Ports[0].NodePort),
+							fmt.Sprintf("-p %s -m addrtype --dst-type LOCAL --dport %v -j ACCEPT", service.Spec.Ports[0].Protocol, service.Spec.Ports[0].NodePort),
 						},
 					},
 					"nat": {
 						"OVN-KUBE-NODEPORT": []string{
-							fmt.Sprintf("-p %s --dport %v -j DNAT --to-destination %s:%v", service.Spec.Ports[0].Protocol, service.Spec.Ports[0].NodePort, service.Spec.ClusterIP, service.Spec.Ports[0].Port),
+							fmt.Sprintf("-p %s -m addrtype --dst-type LOCAL --dport %v -j DNAT --to-destination %s:%v", service.Spec.Ports[0].Protocol, service.Spec.Ports[0].NodePort, service.Spec.ClusterIP, service.Spec.Ports[0].Port),
 						},
 					},
 				}
@@ -480,12 +480,12 @@ var _ = Describe("Node Operations", func() {
 				expectedTables4 := map[string]util.FakeTable{
 					"filter": {
 						"OVN-KUBE-NODEPORT": []string{
-							fmt.Sprintf("-p %s --dport %v -j ACCEPT", service.Spec.Ports[0].Protocol, service.Spec.Ports[0].NodePort),
+							fmt.Sprintf("-p %s -m addrtype --dst-type LOCAL --dport %v -j ACCEPT", service.Spec.Ports[0].Protocol, service.Spec.Ports[0].NodePort),
 						},
 					},
 					"nat": {
 						"OVN-KUBE-NODEPORT": []string{
-							fmt.Sprintf("-p %s --dport %v -j DNAT --to-destination %s:%v", service.Spec.Ports[0].Protocol, service.Spec.Ports[0].NodePort, service.Spec.ClusterIPs[0], service.Spec.Ports[0].Port),
+							fmt.Sprintf("-p %s -m addrtype --dst-type LOCAL --dport %v -j DNAT --to-destination %s:%v", service.Spec.Ports[0].Protocol, service.Spec.Ports[0].NodePort, service.Spec.ClusterIPs[0], service.Spec.Ports[0].Port),
 						},
 					},
 				}
@@ -497,12 +497,12 @@ var _ = Describe("Node Operations", func() {
 				expectedTables6 := map[string]util.FakeTable{
 					"filter": {
 						"OVN-KUBE-NODEPORT": []string{
-							fmt.Sprintf("-p %s --dport %v -j ACCEPT", service.Spec.Ports[0].Protocol, service.Spec.Ports[0].NodePort),
+							fmt.Sprintf("-p %s -m addrtype --dst-type LOCAL --dport %v -j ACCEPT", service.Spec.Ports[0].Protocol, service.Spec.Ports[0].NodePort),
 						},
 					},
 					"nat": {
 						"OVN-KUBE-NODEPORT": []string{
-							fmt.Sprintf("-p %s --dport %v -j DNAT --to-destination [%s]:%v", service.Spec.Ports[0].Protocol, service.Spec.Ports[0].NodePort, service.Spec.ClusterIPs[1], service.Spec.Ports[0].Port),
+							fmt.Sprintf("-p %s -m addrtype --dst-type LOCAL --dport %v -j DNAT --to-destination [%s]:%v", service.Spec.Ports[0].Protocol, service.Spec.Ports[0].NodePort, service.Spec.ClusterIPs[1], service.Spec.Ports[0].Port),
 						},
 					},
 				}
@@ -744,12 +744,12 @@ var _ = Describe("Node Operations", func() {
 				expectedTables := map[string]util.FakeTable{
 					"filter": {
 						"OVN-KUBE-NODEPORT": []string{
-							fmt.Sprintf("-p %s --dport %v -j ACCEPT", service.Spec.Ports[0].Protocol, nodePort),
+							fmt.Sprintf("-p %s -m addrtype --dst-type LOCAL --dport %v -j ACCEPT", service.Spec.Ports[0].Protocol, nodePort),
 						},
 					},
 					"nat": {
 						"OVN-KUBE-NODEPORT": []string{
-							fmt.Sprintf("-p %s --dport %v -j DNAT --to-destination %s:%v", service.Spec.Ports[0].Protocol, nodePort, service.Spec.ClusterIP, service.Spec.Ports[0].Port),
+							fmt.Sprintf("-p %s -m addrtype --dst-type LOCAL --dport %v -j DNAT --to-destination %s:%v", service.Spec.Ports[0].Protocol, nodePort, service.Spec.ClusterIP, service.Spec.Ports[0].Port),
 						},
 					},
 				}

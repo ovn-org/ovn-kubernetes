@@ -30,7 +30,6 @@ type nodePortWatcher struct {
 	ofportPhys  string
 	ofportPatch string
 	gwBridge    string
-	nodeIP      *net.IPNet
 	ofm         *openflowManager
 }
 
@@ -135,7 +134,7 @@ func (npw *nodePortWatcher) AddService(service *kapi.Service) {
 	}
 	npw.updateServiceFlowCache(service, true)
 	npw.ofm.requestFlowSync()
-	addSharedGatewayIptRules(service, npw.nodeIP)
+	addSharedGatewayIptRules(service)
 }
 
 func (npw *nodePortWatcher) UpdateService(old, new *kapi.Service) {
@@ -151,13 +150,13 @@ func (npw *nodePortWatcher) UpdateService(old, new *kapi.Service) {
 	needFlowSync := false
 	if util.ServiceTypeHasClusterIP(old) && util.IsClusterIPSet(old) {
 		npw.updateServiceFlowCache(old, false)
-		delSharedGatewayIptRules(old, npw.nodeIP)
+		delSharedGatewayIptRules(old)
 		needFlowSync = true
 	}
 
 	if util.ServiceTypeHasClusterIP(new) && util.IsClusterIPSet(new) {
 		npw.updateServiceFlowCache(new, true)
-		addSharedGatewayIptRules(new, npw.nodeIP)
+		addSharedGatewayIptRules(new)
 		needFlowSync = true
 	}
 
@@ -173,7 +172,7 @@ func (npw *nodePortWatcher) DeleteService(service *kapi.Service) {
 	}
 	npw.updateServiceFlowCache(service, false)
 	npw.ofm.requestFlowSync()
-	delSharedGatewayIptRules(service, npw.nodeIP)
+	delSharedGatewayIptRules(service)
 }
 
 func (npw *nodePortWatcher) SyncServices(services []interface{}) {
@@ -188,7 +187,7 @@ func (npw *nodePortWatcher) SyncServices(services []interface{}) {
 	}
 
 	npw.ofm.requestFlowSync()
-	syncSharedGatewayIptRules(services, npw.nodeIP)
+	syncSharedGatewayIptRules(services)
 }
 
 // since we share the host's k8s node IP, add OpenFlow flows
@@ -314,7 +313,7 @@ func newSharedGateway(nodeName string, subnets []*net.IPNet, gwNextHops []net.IP
 	klog.Info("Creating new shared gateway")
 	gw := &gateway{}
 
-	bridgeName, uplinkName, macAddress, ips, err := gatewayInitInternal(
+	bridgeName, uplinkName, macAddress, _, err := gatewayInitInternal(
 		nodeName, gwIntf, subnets, gwNextHops, nodeAnnotator)
 	if err != nil {
 		return nil, err
@@ -341,7 +340,7 @@ func newSharedGateway(nodeName string, subnets []*net.IPNet, gwNextHops []net.IP
 
 		if config.Gateway.NodeportEnable {
 			klog.Info("Creating Shared Gateway Node Port Watcher")
-			gw.nodePortWatcher, err = newNodePortWatcher(patchPort, bridgeName, uplinkName, ips[0], gw.openflowManager)
+			gw.nodePortWatcher, err = newNodePortWatcher(patchPort, bridgeName, uplinkName, gw.openflowManager)
 			if err != nil {
 				return err
 			}
@@ -356,7 +355,7 @@ func newSharedGateway(nodeName string, subnets []*net.IPNet, gwNextHops []net.IP
 	return gw, nil
 }
 
-func newNodePortWatcher(patchPort, gwBridge, gwIntf string, nodeIP *net.IPNet, ofm *openflowManager) (*nodePortWatcher, error) {
+func newNodePortWatcher(patchPort, gwBridge, gwIntf string, ofm *openflowManager) (*nodePortWatcher, error) {
 	// Get ofport of patchPort
 	ofportPatch, stderr, err := util.RunOVSVsctl("--if-exists", "get",
 		"interface", patchPort, "ofport")
@@ -386,7 +385,6 @@ func newNodePortWatcher(patchPort, gwBridge, gwIntf string, nodeIP *net.IPNet, o
 		ofportPhys:  ofportPhys,
 		ofportPatch: ofportPatch,
 		gwBridge:    gwBridge,
-		nodeIP:      nodeIP,
 		ofm:         ofm,
 	}
 	return npw, nil
