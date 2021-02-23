@@ -1,4 +1,4 @@
-package ovn_test
+package ovn
 
 import (
 	"fmt"
@@ -14,7 +14,6 @@ import (
 	mock "github.com/stretchr/testify/mock"
 
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
-	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
 
 	"github.com/miekg/dns"
@@ -57,7 +56,7 @@ func TestNewEgressDNS(t *testing.T) {
 				}
 				call.Once()
 			}
-			_, err := ovn.NewEgressDNS(testOvnAddFtry, testCh)
+			_, err := NewEgressDNS(testOvnAddFtry, testCh)
 			//t.Log(res, err)
 			if tc.errExp {
 				assert.Error(t, err)
@@ -234,7 +233,7 @@ func TestAdd(t *testing.T) {
 				}
 				call.Once()
 			}
-			res, err := ovn.NewEgressDNS(mockAddressSetFactoryOps, testCh)
+			res, err := NewEgressDNS(mockAddressSetFactoryOps, testCh)
 
 			t.Log(res, err)
 			addResult, err := res.Add("addNamespace", test1DNSName)
@@ -244,7 +243,7 @@ func TestAdd(t *testing.T) {
 				res.Run(tc.syncTime)
 				assert.Nil(t, err)
 				for stay, timeout := true, time.After(10*time.Second); stay; {
-					_, dnsResolves, _ := res.GetDNSEntry(tc.dnsName)
+					_, dnsResolves, _ := res.getDNSEntry(tc.dnsName)
 					if dnsResolves != nil {
 						break
 					}
@@ -259,7 +258,7 @@ func TestAdd(t *testing.T) {
 			}
 			if tc.testingUpdateOnQueryTime {
 				for stay, timeout := true, time.After(10*time.Second); stay; {
-					_, dnsResolves, _ := res.GetDNSEntry(tc.dnsName)
+					_, dnsResolves, _ := res.getDNSEntry(tc.dnsName)
 					if dnsResolves != nil {
 						if len(dnsResolves) == 1 && dnsResolves[0].String() == test1IPv4Update {
 							break
@@ -370,7 +369,7 @@ func TestDelete(t *testing.T) {
 				}
 				call.Once()
 			}
-			res, err := ovn.NewEgressDNS(mockAddressSetFactoryOps, testCh)
+			res, err := NewEgressDNS(mockAddressSetFactoryOps, testCh)
 
 			t.Log(res, err)
 			addResult, err := res.Add("addNamespace", test1DNSName)
@@ -380,7 +379,7 @@ func TestDelete(t *testing.T) {
 				res.Run(tc.syncTime)
 				assert.Nil(t, err)
 				for stay, timeout := true, time.After(10*time.Second); stay; {
-					_, dnsResolves, _ := res.GetDNSEntry(tc.dnsName)
+					_, dnsResolves, _ := res.getDNSEntry(tc.dnsName)
 					if dnsResolves != nil {
 						break
 					}
@@ -393,10 +392,10 @@ func TestDelete(t *testing.T) {
 
 				}
 			}
-			_, dnsResolves, _ := res.GetDNSEntry(tc.dnsName)
+			_, dnsResolves, _ := res.getDNSEntry(tc.dnsName)
 			res.Delete("addNamespace")
 			for stay, timeout := true, time.After(10*time.Second); stay; {
-				_, dnsResolves, _ = res.GetDNSEntry(tc.dnsName)
+				_, dnsResolves, _ = res.getDNSEntry(tc.dnsName)
 				if dnsResolves == nil {
 					break
 				}
@@ -417,4 +416,14 @@ func TestDelete(t *testing.T) {
 			mockAddressSetOps.AssertExpectations(t)
 		})
 	}
+}
+
+func (e *EgressDNS) getDNSEntry(dnsName string) (map[string]struct{}, []net.IP, addressset.AddressSet) {
+	e.lock.Lock()
+	defer e.lock.Unlock()
+	if dnsEntry, exists := e.dnsEntries[dnsName]; exists {
+		return dnsEntry.namespaces, dnsEntry.dnsResolves, dnsEntry.dnsAddressSet
+	}
+
+	return nil, nil, nil
 }

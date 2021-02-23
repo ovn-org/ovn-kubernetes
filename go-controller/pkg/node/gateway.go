@@ -114,7 +114,7 @@ func (g *gateway) UpdateEndpoints(old, new *kapi.Endpoints) {
 
 func (g *gateway) DeleteEndpoints(ep *kapi.Endpoints) {
 	if g.loadBalancerHealthChecker != nil {
-		g.loadBalancerHealthChecker.AddEndpoints(ep)
+		g.loadBalancerHealthChecker.DeleteEndpoints(ep)
 	}
 }
 

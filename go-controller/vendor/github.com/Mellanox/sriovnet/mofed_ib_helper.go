@@ -15,7 +15,8 @@ const (
 )
 
 func ibGetPortAdminState(pfNetdevName string, vfIndex int) (string, error) {
-	path := filepath.Join(NetSysDir, pfNetdevName, pcidevPrefix, ibSriovCfgDir, strconv.Itoa(vfIndex), ibSriovPortAdminFile)
+	path := filepath.Join(
+		NetSysDir, pfNetdevName, pcidevPrefix, ibSriovCfgDir, strconv.Itoa(vfIndex), ibSriovPortAdminFile)
 	adminStateFile := fileObject{
 		Path: path,
 	}
@@ -28,7 +29,8 @@ func ibGetPortAdminState(pfNetdevName string, vfIndex int) (string, error) {
 }
 
 func ibSetPortAdminState(pfNetdevName string, vfIndex int, newState string) error {
-	path := filepath.Join(NetSysDir, pfNetdevName, pcidevPrefix, ibSriovCfgDir, strconv.Itoa(vfIndex), ibSriovPortAdminFile)
+	path := filepath.Join(
+		NetSysDir, pfNetdevName, pcidevPrefix, ibSriovCfgDir, strconv.Itoa(vfIndex), ibSriovPortAdminFile)
 	adminStateFile := fileObject{
 		Path: path,
 	}
@@ -36,20 +38,20 @@ func ibSetPortAdminState(pfNetdevName string, vfIndex int, newState string) erro
 	return adminStateFile.Write(newState)
 }
 
-func ibSetNodeGuid(pfNetdevName string, vfIndex int, guid net.HardwareAddr) error {
+func ibSetNodeGUID(pfNetdevName string, vfIndex int, guid net.HardwareAddr) error {
 	path := filepath.Join(NetSysDir, pfNetdevName, pcidevPrefix, ibSriovCfgDir, strconv.Itoa(vfIndex), ibSriovNodeFile)
-	nodeGuidFile := fileObject{
+	nodeGUIDFile := fileObject{
 		Path: path,
 	}
-	kernelGuidFormat := guid.String()
-	return nodeGuidFile.Write(kernelGuidFormat)
+	kernelGUIDFormat := guid.String()
+	return nodeGUIDFile.Write(kernelGUIDFormat)
 }
 
-func ibSetPortGuid(pfNetdevName string, vfIndex int, guid net.HardwareAddr) error {
+func ibSetPortGUID(pfNetdevName string, vfIndex int, guid net.HardwareAddr) error {
 	path := filepath.Join(NetSysDir, pfNetdevName, pcidevPrefix, ibSriovCfgDir, strconv.Itoa(vfIndex), ibSriovPortFile)
-	portGuidFile := fileObject{
+	portGUIDFile := fileObject{
 		Path: path,
 	}
-	kernelGuidFormat := guid.String()
-	return portGuidFile.Write(kernelGuidFormat)
+	kernelGUIDFormat := guid.String()
+	return portGUIDFile.Write(kernelGUIDFormat)
 }

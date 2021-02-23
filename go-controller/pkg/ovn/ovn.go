@@ -3,7 +3,6 @@ package ovn
 import (
 	"bytes"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"net"
 	"reflect"
@@ -11,6 +10,7 @@ import (
 	"time"
 
 	goovn "github.com/ebay/go-ovn"
+	nettypes "github.com/k8snetworkplumbingwg/network-attachment-definition-client/pkg/apis/k8s.cni.cncf.io/v1"
 	hocontroller "github.com/ovn-org/ovn-kubernetes/go-controller/hybrid-overlay/pkg/controller"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
 	egressipv1 "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/egressip/v1"
@@ -67,6 +67,12 @@ type loadBalancerConf struct {
 	rejectACL string
 }
 
+// ACL logging severity levels
+type ACLLoggingLevels struct {
+	Allow string `json:"allow,omitempty"`
+	Deny  string `json:"deny,omitempty"`
+}
+
 // namespaceInfo contains information related to a Namespace. Use oc.getNamespaceLocked()
 // or oc.waitForNamespaceLocked() to get a locked namespaceInfo for a Namespace, and call
 // nsInfo.Unlock() on it when you are done with it. (No code outside of the code that
@@ -78,11 +84,11 @@ type namespaceInfo struct {
 	// of all pods in the namespace.
 	addressSet addressset.AddressSet
 
-	// map from NetworkPolicy name to namespacePolicy. You must hold the
+	// map from NetworkPolicy name to networkPolicy. You must hold the
 	// namespaceInfo's mutex to add/delete/lookup policies, but must hold the
-	// namespacePolicy's mutex (and not necessarily the namespaceInfo's) to work with
+	// networkPolicy's mutex (and not necessarily the namespaceInfo's) to work with
 	// the policy itself.
-	networkPolicies map[string]*namespacePolicy
+	networkPolicies map[string]*networkPolicy
 
 	// defines the namespaces egressFirewallPolicy
 	egressFirewallPolicy *egressFirewall
@@ -103,6 +109,13 @@ type namespaceInfo struct {
 	portGroupUUID string
 
 	multicastEnabled bool
+
+	// If not empty, then it has to be set to a logging a severity level, e.g. "notice", "alert", etc
+	aclLogging ACLLoggingLevels
+
+	// Per-namespace port group default deny UUIDs
+	portGroupIngressDenyUUID string // Port group for ingress deny rule
+	portGroupEgressDenyUUID  string // Port group for egress deny rule
 }
 
 // Controller structure is the object which holds the controls for starting
@@ -153,12 +166,6 @@ type Controller struct {
 	// logical router
 	clusterRtrPortGroupUUID string
 
-	// Port group for ingress deny rule
-	portGroupIngressDeny string
-
-	// Port group for egress deny rule
-	portGroupEgressDeny string
-
 	// For each logical port, the number of network policies that want
 	// to add a ingress deny rule.
 	lspIngressDenyCache map[string]int
@@ -177,6 +184,9 @@ type Controller struct {
 	eIPC egressIPController
 
 	egressFirewallDNS *EgressDNS
+
+	// Is ACL logging enabled while configuring meters?
+	aclLoggingEnabled bool
 
 	// Map of load balancers to service namespace
 	serviceVIPToName map[ServiceVIPKey]types.NamespacedName
@@ -277,6 +287,7 @@ func NewOvnController(ovnClient *util.OVNClientset, wf *factory.WatchFactory,
 		},
 		loadbalancerClusterCache: make(map[kapi.Protocol]string),
 		multicastSupport:         config.EnableMulticast,
+		aclLoggingEnabled:        true,
 		serviceVIPToName:         make(map[ServiceVIPKey]types.NamespacedName),
 		serviceVIPToNameLock:     sync.Mutex{},
 		serviceLBMap:             make(map[string]map[string]*loadBalancerConf),
@@ -380,112 +391,6 @@ func (oc *Controller) Run(wg *sync.WaitGroup) error {
 	}
 
 	return nil
-}
-
-type eventRecord struct {
-	Data     [][]interface{} `json:"Data"`
-	Headings []string        `json:"Headings"`
-}
-
-type emptyLBBackendEvent struct {
-	vip      string
-	protocol kapi.Protocol
-	uuid     string
-}
-
-func extractEmptyLBBackendsEvents(out []byte) ([]emptyLBBackendEvent, error) {
-	events := make([]emptyLBBackendEvent, 0, 4)
-
-	var f eventRecord
-	err := json.Unmarshal(out, &f)
-	if err != nil {
-		return events, err
-	}
-	if len(f.Data) == 0 {
-		return events, nil
-	}
-
-	var eventInfoIndex int
-	var eventTypeIndex int
-	var uuidIndex int
-	for idx, val := range f.Headings {
-		switch val {
-		case "event_info":
-			eventInfoIndex = idx
-		case "event_type":
-			eventTypeIndex = idx
-		case "_uuid":
-			uuidIndex = idx
-		}
-	}
-
-	for _, val := range f.Data {
-		if len(val) <= eventTypeIndex {
-			return events, errors.New("Mismatched Data and Headings in controller event")
-		}
-		if val[eventTypeIndex] != "empty_lb_backends" {
-			continue
-		}
-
-		uuidArray, ok := val[uuidIndex].([]interface{})
-		if !ok {
-			return events, errors.New("Unexpected '_uuid' data in controller event")
-		}
-		if len(uuidArray) < 2 {
-			return events, errors.New("Malformed UUID presented in controller event")
-		}
-		uuid, ok := uuidArray[1].(string)
-		if !ok {
-			return events, errors.New("Failed to parse UUID in controller event")
-		}
-
-		// Unpack the data. There's probably a better way to do this.
-		info, ok := val[eventInfoIndex].([]interface{})
-		if !ok {
-			return events, errors.New("Unexpected 'event_info' data in controller event")
-		}
-		if len(info) < 2 {
-			return events, errors.New("Malformed event_info in controller event")
-		}
-		eventMap, ok := info[1].([]interface{})
-		if !ok {
-			return events, errors.New("'event_info' data is not the expected type")
-		}
-
-		var vip string
-		var protocol kapi.Protocol
-		for _, x := range eventMap {
-			tuple, ok := x.([]interface{})
-			if !ok {
-				return events, errors.New("event map item failed to parse")
-			}
-			if len(tuple) < 2 {
-				return events, errors.New("event map contains malformed data")
-			}
-			switch tuple[0] {
-			case "vip":
-				vip, ok = tuple[1].(string)
-				if !ok {
-					return events, errors.New("Failed to parse vip in controller event")
-				}
-			case "protocol":
-				prot, ok := tuple[1].(string)
-				if !ok {
-					return events, errors.New("Failed to parse protocol in controller event")
-				}
-				if prot == "udp" {
-					protocol = kapi.ProtocolUDP
-				} else if prot == "sctp" {
-					protocol = kapi.ProtocolSCTP
-				} else {
-					protocol = kapi.ProtocolTCP
-				}
-			}
-		}
-		events = append(events, emptyLBBackendEvent{vip, protocol, uuid})
-	}
-
-	return events, nil
 }
 
 // syncPeriodic adds a goroutine that periodically does some work
@@ -613,6 +518,10 @@ func exGatewayAnnotationsChanged(oldPod, newPod *kapi.Pod) bool {
 		oldPod.Annotations[routingNetworkAnnotation] != newPod.Annotations[routingNetworkAnnotation]
 }
 
+func networkStatusAnnotationsChanged(oldPod, newPod *kapi.Pod) bool {
+	return oldPod.Annotations[nettypes.NetworkStatusAnnot] != newPod.Annotations[nettypes.NetworkStatusAnnot]
+}
+
 // ensurePod tries to set up a pod. It returns success or failure; failure
 // indicates the pod should be retried later.
 func (oc *Controller) ensurePod(oldPod, pod *kapi.Pod, addPort bool) bool {
@@ -628,7 +537,7 @@ func (oc *Controller) ensurePod(oldPod, pod *kapi.Pod, addPort bool) bool {
 			return false
 		}
 	} else {
-		if oldPod != nil && exGatewayAnnotationsChanged(oldPod, pod) {
+		if oldPod != nil && (exGatewayAnnotationsChanged(oldPod, pod) || networkStatusAnnotationsChanged(oldPod, pod)) {
 			// No matter if a pod is ovn networked, or host networked, we still need to check for exgw
 			// annotations. If the pod is ovn networked and is in update reschedule, addLogicalPort will take
 			// care of updating the exgw updates
@@ -1161,6 +1070,45 @@ func (oc *Controller) GetServiceVIPToName(vip string, protocol kapi.Protocol) (t
 	defer oc.serviceVIPToNameLock.Unlock()
 	namespace, ok := oc.serviceVIPToName[ServiceVIPKey{vip, protocol}]
 	return namespace, ok
+}
+
+// GetNetworkPolicyACLLogging retrieves ACL deny policy logging setting for the Namespace
+func (oc *Controller) GetNetworkPolicyACLLogging(ns string) *ACLLoggingLevels {
+	nsInfo := oc.getNamespaceLocked(ns)
+	if nsInfo == nil {
+		return &ACLLoggingLevels{
+			Allow: "",
+			Deny:  "",
+		}
+	}
+	defer nsInfo.Unlock()
+	return &nsInfo.aclLogging
+}
+
+// Verify if controller can support ACL logging and validate annotation
+func (oc *Controller) aclLoggingCanEnable(annotation string, nsInfo *namespaceInfo) bool {
+	if !oc.aclLoggingEnabled || annotation == "" {
+		nsInfo.aclLogging.Deny = ""
+		nsInfo.aclLogging.Allow = ""
+		return false
+	}
+	var aclLevels ACLLoggingLevels
+	err := json.Unmarshal([]byte(annotation), &aclLevels)
+	if err != nil {
+		return false
+	}
+	okCnt := 0
+	for _, s := range []string{"alert", "warning", "notice", "info", "debug"} {
+		if aclLevels.Deny != "" && s == aclLevels.Deny {
+			nsInfo.aclLogging.Deny = aclLevels.Deny
+			okCnt++
+		}
+		if aclLevels.Allow != "" && s == aclLevels.Allow {
+			nsInfo.aclLogging.Allow = aclLevels.Allow
+			okCnt++
+		}
+	}
+	return okCnt > 0
 }
 
 // setServiceLBToACL associates an empty load balancer with its associated ACL reject rule

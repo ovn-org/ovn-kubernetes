@@ -1,6 +1,8 @@
+//nolint:gomnd
 package filesystem
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
 	"time"
@@ -13,9 +15,31 @@ type fakeFs struct {
 	a afero.Afero
 }
 
-// NewFakeFs returns a fake Filesystem that exists in-memory, useful for unit tests
-func NewFakeFs() Filesystem {
-	return &fakeFs{a: afero.Afero{Fs: afero.NewMemMapFs()}}
+// NewFakeFs returns a fake Filesystem that exists at fakeFsRoot as its base path, useful for unit tests.
+// Returns: Filesystem interface, teardown method (cleanup of provided root path) and error.
+// teardown method should be called at the end of each test to ensure environment is left clean.
+func NewFakeFs(fakeFsRoot string) (Filesystem, func(), error) {
+	_, err := os.Stat(fakeFsRoot)
+	// if fakeFsRoot dir exists remove it.
+	if err == nil {
+		err = os.RemoveAll(fakeFsRoot)
+		if err != nil {
+			return nil, nil, fmt.Errorf("failed to cleanup fake root dir %s. %s", fakeFsRoot, err)
+		}
+	} else if !os.IsNotExist(err) {
+		return nil, nil, fmt.Errorf("failed to lstat fake root dir %s. %s", fakeFsRoot, err)
+	}
+
+	// create fakeFsRoot dir
+	if err = os.MkdirAll(fakeFsRoot, os.FileMode(0755)); err != nil {
+		return nil, nil, fmt.Errorf("failed to create fake root dir: %s. %s", fakeFsRoot, err)
+	}
+
+	return &fakeFs{a: afero.Afero{Fs: afero.NewBasePathFs(afero.NewOsFs(), fakeFsRoot)}},
+		func() {
+			os.RemoveAll(fakeFsRoot)
+		},
+		nil
 }
 
 // Stat via afero.Fs.Stat
@@ -43,7 +67,7 @@ func (fs *fakeFs) MkdirAll(path string, perm os.FileMode) error {
 }
 
 // Chtimes via afero.Fs.Chtimes
-func (fs *fakeFs) Chtimes(name string, atime time.Time, mtime time.Time) error {
+func (fs *fakeFs) Chtimes(name string, atime, mtime time.Time) error {
 	return fs.a.Fs.Chtimes(name, atime, mtime)
 }
 
@@ -84,6 +108,16 @@ func (fs *fakeFs) RemoveAll(path string) error {
 // Remove via afero.Remove
 func (fs *fakeFs) Remove(name string) error {
 	return fs.a.Remove(name)
+}
+
+// Readlink via afero.ReadlinkIfPossible
+func (fs *fakeFs) Readlink(name string) (string, error) {
+	return fs.a.Fs.(afero.Symlinker).ReadlinkIfPossible(name)
+}
+
+// Symlink via afero.FS.(Symlinker).SymlinkIfPossible
+func (fs *fakeFs) Symlink(oldname, newname string) error {
+	return fs.a.Fs.(afero.Symlinker).SymlinkIfPossible(oldname, newname)
 }
 
 // fakeFile implements File; for use with fakeFs

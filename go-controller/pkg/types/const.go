@@ -55,4 +55,6 @@ const (
 	// OpenFlow and Networking constants
 	RouteAdvertisementICMPType    = 134
 	NeighborAdvertisementICMPType = 136
+
+	OvnACLLoggingMeter = "acl-logging"
 )

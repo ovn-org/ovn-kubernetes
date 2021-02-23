@@ -485,7 +485,7 @@ func RunOVNNbctl(args ...string) (string, string, error) {
 }
 
 // RunOVNSbctlUnix runs command via ovn-sbctl, with ovn-sbctl using the unix
-// domain sockets to connect to the ovsdb-server backing the OVN NB database.
+// domain sockets to connect to the ovsdb-server backing the OVN SB database.
 func RunOVNSbctlUnix(args ...string) (string, string, error) {
 	cmdArgs := []string{fmt.Sprintf("--timeout=%d", ovsCommandTimeout)}
 	cmdArgs = append(cmdArgs, args...)

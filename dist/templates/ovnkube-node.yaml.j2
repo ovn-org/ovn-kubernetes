@@ -214,10 +214,6 @@ spec:
         - name: OVN_UNPRIVILEGED_MODE
           value: "{{ ovn_unprivileged_mode }}"
 
-        lifecycle:
-          preStop:
-            exec:
-              command: ["/root/ovnkube.sh", "cleanup-ovn-node"]
         readinessProbe:
           exec:
             command: ["/usr/bin/ovn-kube-util", "readiness-probe", "-t", "ovnkube-node"]

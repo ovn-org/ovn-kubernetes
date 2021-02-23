@@ -18,6 +18,8 @@ type Filesystem interface {
 	Chtimes(name string, atime time.Time, mtime time.Time) error
 	RemoveAll(path string) error
 	Remove(name string) error
+	Readlink(name string) (string, error)
+	Symlink(oldname, newname string) error
 
 	// from "io/ioutil"
 	ReadFile(filename string) ([]byte, error)

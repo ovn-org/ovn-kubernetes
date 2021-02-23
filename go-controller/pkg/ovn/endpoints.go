@@ -244,8 +244,9 @@ func (ovn *Controller) deleteEndpoints(ep *kapi.Endpoints) error {
 }
 
 func (ovn *Controller) clearVIPsAddRejectACL(svc *kapi.Service, lb, ip string, port int32, proto kapi.Protocol) {
+	aclLogging := ovn.GetNetworkPolicyACLLogging(svc.Namespace).Deny
 	if svcQualifiesForReject(svc) {
-		aclUUID, err := ovn.createLoadBalancerRejectACL(lb, ip, port, proto)
+		aclUUID, err := ovn.createLoadBalancerRejectACL(lb, ip, port, proto, aclLogging)
 		if err != nil {
 			klog.Errorf("Failed to create reject ACL for VIP: %s:%d, load balancer: %s, error: %v",
 				ip, port, lb, err)

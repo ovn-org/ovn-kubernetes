@@ -35,7 +35,7 @@ func (DefaultFs) MkdirAll(path string, perm os.FileMode) error {
 }
 
 // Chtimes via os.Chtimes
-func (DefaultFs) Chtimes(name string, atime time.Time, mtime time.Time) error {
+func (DefaultFs) Chtimes(name string, atime, mtime time.Time) error {
 	return os.Chtimes(name, atime, mtime)
 }
 
@@ -47,6 +47,16 @@ func (DefaultFs) RemoveAll(path string) error {
 // Remove via os.RemoveAll
 func (DefaultFs) Remove(name string) error {
 	return os.Remove(name)
+}
+
+// Readlink via os.Readlink
+func (DefaultFs) Readlink(name string) (string, error) {
+	return os.Readlink(name)
+}
+
+// Symlink via os.Symlink
+func (DefaultFs) Symlink(oldname, newname string) error {
+	return os.Symlink(oldname, newname)
 }
 
 // ReadFile via ioutil.ReadFile

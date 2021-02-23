@@ -4,14 +4,15 @@ import (
 	"context"
 	"fmt"
 
-	. "github.com/onsi/ginkgo"
-	. "github.com/onsi/gomega"
+	"github.com/onsi/ginkgo"
+	"github.com/onsi/gomega"
 	"net"
 
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
 	egressfirewallapi "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/egressfirewall/v1"
 	addressset "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/address_set"
 	ovntest "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/testing"
+	t "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
 	"github.com/urfave/cli/v2"
 
 	v1 "k8s.io/api/core/v1"
@@ -38,16 +39,17 @@ func newEgressFirewallObject(name, namespace string, egressRules []egressfirewal
 	}
 }
 
-var _ = Describe("OVN EgressFirewall Operations", func() {
+var _ = ginkgo.Describe("OVN EgressFirewall Operations for local gateway mode", func() {
 	var (
 		app     *cli.App
 		fakeOVN *FakeOVN
 		fExec   *ovntest.FakeExec
 	)
 
-	BeforeEach(func() {
+	ginkgo.BeforeEach(func() {
 		// Restore global default values before each 99999e
 		config.PrepareTestConfig()
+		config.Gateway.Mode = config.GatewayModeLocal
 
 		app = cli.NewApp()
 		app.Name = "test"
@@ -58,12 +60,12 @@ var _ = Describe("OVN EgressFirewall Operations", func() {
 
 	})
 
-	AfterEach(func() {
+	ginkgo.AfterEach(func() {
 		fakeOVN.shutdown()
 	})
 
-	Context("on startup", func() {
-		It("reconciles an existing egressFirewall with IPv4 CIDR", func() {
+	ginkgo.Context("on startup", func() {
+		ginkgo.It("reconciles an existing egressFirewall with IPv4 CIDR", func() {
 			app.Action = func(ctx *cli.Context) error {
 				const (
 					node1Name string = "node1"
@@ -108,18 +110,18 @@ var _ = Describe("OVN EgressFirewall Operations", func() {
 				fakeOVN.controller.WatchEgressFirewall()
 
 				_, err := fakeOVN.fakeClient.EgressFirewallClient.K8sV1().EgressFirewalls(egressFirewall.Namespace).Get(context.TODO(), egressFirewall.Name, metav1.GetOptions{})
-				Expect(err).NotTo(HaveOccurred())
+				gomega.Expect(err).NotTo(gomega.HaveOccurred())
 
-				Eventually(fExec.CalledMatchesExpected).Should(BeTrue(), fExec.ErrorDesc)
+				gomega.Eventually(fExec.CalledMatchesExpected).Should(gomega.BeTrue(), fExec.ErrorDesc)
 
 				return nil
 			}
 
 			err := app.Run([]string{app.Name})
-			Expect(err).NotTo(HaveOccurred())
+			gomega.Expect(err).NotTo(gomega.HaveOccurred())
 
 		})
-		It("reconciles an existing egressFirewall with IPv6 CIDR", func() {
+		ginkgo.It("reconciles an existing egressFirewall with IPv6 CIDR", func() {
 			app.Action = func(ctx *cli.Context) error {
 				const (
 					node1Name string = "node1"
@@ -163,20 +165,20 @@ var _ = Describe("OVN EgressFirewall Operations", func() {
 				fakeOVN.controller.WatchEgressFirewall()
 
 				_, err := fakeOVN.fakeClient.EgressFirewallClient.K8sV1().EgressFirewalls(egressFirewall.Namespace).Get(context.TODO(), egressFirewall.Name, metav1.GetOptions{})
-				Expect(err).NotTo(HaveOccurred())
+				gomega.Expect(err).NotTo(gomega.HaveOccurred())
 
-				Eventually(fExec.CalledMatchesExpected).Should(BeTrue(), fExec.ErrorDesc)
+				gomega.Eventually(fExec.CalledMatchesExpected).Should(gomega.BeTrue(), fExec.ErrorDesc)
 
 				return nil
 			}
 
 			err := app.Run([]string{app.Name})
-			Expect(err).NotTo(HaveOccurred())
+			gomega.Expect(err).NotTo(gomega.HaveOccurred())
 
 		})
 	})
-	Context("during execution", func() {
-		It("correctly creates an egressfirewall denying traffic udp traffic on port 100", func() {
+	ginkgo.Context("during execution", func() {
+		ginkgo.It("correctly creates an egressfirewall denying traffic udp traffic on port 100", func() {
 			app.Action = func(ctx *cli.Context) error {
 				const (
 					node1Name string = "node1"
@@ -223,18 +225,18 @@ var _ = Describe("OVN EgressFirewall Operations", func() {
 
 				fakeOVN.controller.WatchNamespaces()
 				_, err := fakeOVN.fakeClient.EgressFirewallClient.K8sV1().EgressFirewalls(egressFirewall.Namespace).Get(context.TODO(), egressFirewall.Name, metav1.GetOptions{})
-				Expect(err).NotTo(HaveOccurred())
+				gomega.Expect(err).NotTo(gomega.HaveOccurred())
 
 				fakeOVN.controller.WatchEgressFirewall()
 
-				Eventually(fExec.CalledMatchesExpected).Should(BeTrue(), fExec.ErrorDesc)
+				gomega.Eventually(fExec.CalledMatchesExpected).Should(gomega.BeTrue(), fExec.ErrorDesc)
 
 				return nil
 			}
 			err := app.Run([]string{app.Name})
-			Expect(err).NotTo(HaveOccurred())
+			gomega.Expect(err).NotTo(gomega.HaveOccurred())
 		})
-		It("correctly deletes an egressfirewall", func() {
+		ginkgo.It("correctly deletes an egressfirewall", func() {
 			app.Action = func(ctx *cli.Context) error {
 				const (
 					node1Name string = "node1"
@@ -291,17 +293,17 @@ var _ = Describe("OVN EgressFirewall Operations", func() {
 				fakeOVN.controller.WatchEgressFirewall()
 
 				err := fakeOVN.fakeClient.EgressFirewallClient.K8sV1().EgressFirewalls(egressFirewall.Namespace).Delete(context.TODO(), egressFirewall.Name, *metav1.NewDeleteOptions(0))
-				Expect(err).NotTo(HaveOccurred())
+				gomega.Expect(err).NotTo(gomega.HaveOccurred())
 
-				Eventually(fExec.CalledMatchesExpected).Should(BeTrue(), fExec.ErrorDesc)
+				gomega.Eventually(fExec.CalledMatchesExpected).Should(gomega.BeTrue(), fExec.ErrorDesc)
 
 				return nil
 			}
 
 			err := app.Run([]string{app.Name})
-			Expect(err).NotTo(HaveOccurred())
+			gomega.Expect(err).NotTo(gomega.HaveOccurred())
 		})
-		It("correctly updates an egressfirewall", func() {
+		ginkgo.It("correctly updates an egressfirewall", func() {
 			app.Action = func(ctx *cli.Context) error {
 				const (
 					node1Name string = "node1"
@@ -366,17 +368,17 @@ var _ = Describe("OVN EgressFirewall Operations", func() {
 				fakeOVN.controller.WatchEgressFirewall()
 
 				_, err := fakeOVN.fakeClient.EgressFirewallClient.K8sV1().EgressFirewalls(egressFirewall.Namespace).Get(context.TODO(), egressFirewall.Name, metav1.GetOptions{})
-				Expect(err).NotTo(HaveOccurred())
+				gomega.Expect(err).NotTo(gomega.HaveOccurred())
 				_, err = fakeOVN.fakeClient.EgressFirewallClient.K8sV1().EgressFirewalls(egressFirewall1.Namespace).Update(context.TODO(), egressFirewall1, metav1.UpdateOptions{})
-				Expect(err).NotTo(HaveOccurred())
+				gomega.Expect(err).NotTo(gomega.HaveOccurred())
 
-				Eventually(fExec.CalledMatchesExpected).Should(BeTrue(), fExec.ErrorDesc)
+				gomega.Eventually(fExec.CalledMatchesExpected).Should(gomega.BeTrue(), fExec.ErrorDesc)
 
 				return nil
 			}
 
 			err := app.Run([]string{app.Name})
-			Expect(err).NotTo(HaveOccurred())
+			gomega.Expect(err).NotTo(gomega.HaveOccurred())
 
 		})
 
@@ -384,9 +386,369 @@ var _ = Describe("OVN EgressFirewall Operations", func() {
 
 })
 
-var _ = Describe("OVN test basic functions", func() {
+var _ = ginkgo.Describe("OVN EgressFirewall Operations for shared gateway mode", func() {
+	var (
+		app     *cli.App
+		fakeOVN *FakeOVN
+		fExec   *ovntest.FakeExec
+	)
 
-	It("computes correct L4Match", func() {
+	ginkgo.BeforeEach(func() {
+		// Restore global default values before each 99999e
+		config.PrepareTestConfig()
+		config.Gateway.Mode = config.GatewayModeShared
+
+		app = cli.NewApp()
+		app.Name = "test"
+		app.Flags = config.Flags
+
+		fExec = ovntest.NewLooseCompareFakeExec()
+		fakeOVN = NewFakeOVN(fExec)
+
+	})
+
+	ginkgo.AfterEach(func() {
+		fakeOVN.shutdown()
+	})
+
+	ginkgo.Context("on startup", func() {
+		ginkgo.It("reconciles an existing egressFirewall with IPv4 CIDR", func() {
+			app.Action = func(ctx *cli.Context) error {
+				const (
+					node1Name string = "node1"
+				)
+				fExec.AddFakeCmdsNoOutputNoError([]string{
+					"ovn-nbctl --timeout=15 --data=bare --no-heading --columns=_uuid find ACL match=\"(ip4.dst == 1.2.3.4/23) && ip4.src == $a10481622940199974102 && inport == \\\"" + t.JoinSwitchToGWRouterPrefix + t.OVNClusterRouter + "\\\"\" action=allow external-ids:egressFirewall=namespace1",
+					"ovn-nbctl --timeout=15 --id=@acl create acl priority=9999 direction=from-lport match=\"(ip4.dst == 1.2.3.4/23) && ip4.src == $a10481622940199974102 && inport == \\\"" + t.JoinSwitchToGWRouterPrefix + t.OVNClusterRouter + "\\\"\" action=allow external-ids:egressFirewall=namespace1 -- add logical_switch join acls @acl",
+				})
+
+				namespace1 := *newNamespace("namespace1")
+				egressFirewall := newEgressFirewallObject("default", namespace1.Name, []egressfirewallapi.EgressFirewallRule{
+					{
+						Type: "Allow",
+						To: egressfirewallapi.EgressFirewallDestination{
+							CIDRSelector: "1.2.3.4/23",
+						},
+					},
+				})
+
+				fakeOVN.start(ctx,
+					&egressfirewallapi.EgressFirewallList{
+						Items: []egressfirewallapi.EgressFirewall{
+							*egressFirewall,
+						},
+					},
+					&v1.NamespaceList{
+						Items: []v1.Namespace{
+							namespace1,
+						},
+					},
+					&v1.NodeList{
+						Items: []v1.Node{
+							{
+								Status: v1.NodeStatus{
+									Phase: v1.NodeRunning,
+								},
+								ObjectMeta: newObjectMeta(node1Name, ""),
+							},
+						},
+					})
+
+				fakeOVN.controller.WatchNamespaces()
+				fakeOVN.controller.WatchEgressFirewall()
+
+				_, err := fakeOVN.fakeClient.EgressFirewallClient.K8sV1().EgressFirewalls(egressFirewall.Namespace).Get(context.TODO(), egressFirewall.Name, metav1.GetOptions{})
+				gomega.Expect(err).NotTo(gomega.HaveOccurred())
+
+				gomega.Eventually(fExec.CalledMatchesExpected).Should(gomega.BeTrue(), fExec.ErrorDesc)
+
+				return nil
+			}
+
+			err := app.Run([]string{app.Name})
+			gomega.Expect(err).NotTo(gomega.HaveOccurred())
+
+		})
+		ginkgo.It("reconciles an existing egressFirewall with IPv6 CIDR", func() {
+			app.Action = func(ctx *cli.Context) error {
+				const (
+					node1Name string = "node1"
+				)
+				fExec.AddFakeCmdsNoOutputNoError([]string{
+					"ovn-nbctl --timeout=15 --data=bare --no-heading --columns=_uuid find ACL match=\"(ip6.dst == 2002::1234:abcd:ffff:c0a8:101/64) && (ip4.src == $a10481622940199974102 || ip6.src == $a10481620741176717680) && inport == \\\"" + t.JoinSwitchToGWRouterPrefix + t.OVNClusterRouter + "\\\"\" action=allow external-ids:egressFirewall=namespace1",
+					"ovn-nbctl --timeout=15 --id=@acl create acl priority=9999 direction=from-lport match=\"(ip6.dst == 2002::1234:abcd:ffff:c0a8:101/64) && (ip4.src == $a10481622940199974102 || ip6.src == $a10481620741176717680) && inport == \\\"" + t.JoinSwitchToGWRouterPrefix + t.OVNClusterRouter + "\\\"\" action=allow external-ids:egressFirewall=namespace1 -- add logical_switch join acls @acl",
+				})
+
+				namespace1 := *newNamespace("namespace1")
+				egressFirewall := newEgressFirewallObject("default", namespace1.Name, []egressfirewallapi.EgressFirewallRule{
+					{
+						Type: "Allow",
+						To: egressfirewallapi.EgressFirewallDestination{
+							CIDRSelector: "2002::1234:abcd:ffff:c0a8:101/64",
+						},
+					},
+				})
+
+				fakeOVN.start(ctx,
+					&egressfirewallapi.EgressFirewallList{
+						Items: []egressfirewallapi.EgressFirewall{
+							*egressFirewall,
+						},
+					},
+					&v1.NamespaceList{
+						Items: []v1.Namespace{
+							namespace1,
+						},
+					}, &v1.NodeList{
+						Items: []v1.Node{
+							{
+								Status: v1.NodeStatus{
+									Phase: v1.NodeRunning,
+								},
+								ObjectMeta: newObjectMeta(node1Name, ""),
+							},
+						},
+					})
+				config.IPv6Mode = true
+				fakeOVN.controller.WatchNamespaces()
+				fakeOVN.controller.WatchEgressFirewall()
+
+				_, err := fakeOVN.fakeClient.EgressFirewallClient.K8sV1().EgressFirewalls(egressFirewall.Namespace).Get(context.TODO(), egressFirewall.Name, metav1.GetOptions{})
+				gomega.Expect(err).NotTo(gomega.HaveOccurred())
+
+				gomega.Eventually(fExec.CalledMatchesExpected).Should(gomega.BeTrue(), fExec.ErrorDesc)
+
+				return nil
+			}
+
+			err := app.Run([]string{app.Name})
+			gomega.Expect(err).NotTo(gomega.HaveOccurred())
+
+		})
+	})
+	ginkgo.Context("during execution", func() {
+		ginkgo.It("correctly creates an egressfirewall denying traffic udp traffic on port 100", func() {
+			app.Action = func(ctx *cli.Context) error {
+				const (
+					node1Name string = "node1"
+				)
+				fExec.AddFakeCmdsNoOutputNoError([]string{
+					"ovn-nbctl --timeout=15 --data=bare --no-heading --columns=_uuid find ACL match=\"(ip4.dst == 1.2.3.4/23) && ip4.src == $a10481622940199974102 && ((udp && ( udp.dst == 100 ))) && inport == \\\"" + t.JoinSwitchToGWRouterPrefix + t.OVNClusterRouter + "\\\"\" action=drop external-ids:egressFirewall=namespace1",
+					"ovn-nbctl --timeout=15 --id=@acl create acl priority=9999 direction=from-lport match=\"(ip4.dst == 1.2.3.4/23) && ip4.src == $a10481622940199974102 && ((udp && ( udp.dst == 100 ))) && inport == \\\"" + t.JoinSwitchToGWRouterPrefix + t.OVNClusterRouter + "\\\"\" action=drop external-ids:egressFirewall=namespace1 -- add logical_switch join acls @acl",
+				})
+				namespace1 := *newNamespace("namespace1")
+				egressFirewall := newEgressFirewallObject("default", namespace1.Name, []egressfirewallapi.EgressFirewallRule{
+					{
+						Type: "Deny",
+						Ports: []egressfirewallapi.EgressFirewallPort{
+							{
+								Protocol: "UDP",
+								Port:     100,
+							},
+						},
+						To: egressfirewallapi.EgressFirewallDestination{
+							CIDRSelector: "1.2.3.4/23",
+						},
+					},
+				})
+				fakeOVN.start(ctx,
+					&egressfirewallapi.EgressFirewallList{
+						Items: []egressfirewallapi.EgressFirewall{
+							*egressFirewall,
+						},
+					},
+					&v1.NamespaceList{
+						Items: []v1.Namespace{
+							namespace1,
+						},
+					},
+					&v1.NodeList{
+						Items: []v1.Node{
+							{
+								Status: v1.NodeStatus{
+									Phase: v1.NodeRunning,
+								},
+								ObjectMeta: newObjectMeta(node1Name, ""),
+							},
+						},
+					})
+
+				fakeOVN.controller.WatchNamespaces()
+				_, err := fakeOVN.fakeClient.EgressFirewallClient.K8sV1().EgressFirewalls(egressFirewall.Namespace).Get(context.TODO(), egressFirewall.Name, metav1.GetOptions{})
+				gomega.Expect(err).NotTo(gomega.HaveOccurred())
+
+				fakeOVN.controller.WatchEgressFirewall()
+
+				gomega.Eventually(fExec.CalledMatchesExpected).Should(gomega.BeTrue(), fExec.ErrorDesc)
+
+				return nil
+			}
+			err := app.Run([]string{app.Name})
+			gomega.Expect(err).NotTo(gomega.HaveOccurred())
+		})
+		ginkgo.It("correctly deletes an egressfirewall", func() {
+			app.Action = func(ctx *cli.Context) error {
+				const (
+					node1Name string = "node1"
+				)
+				fExec.AddFakeCmdsNoOutputNoError([]string{
+					"ovn-nbctl --timeout=15 --data=bare --no-heading --columns=_uuid find ACL match=\"(ip4.dst == 1.2.3.5/23) && " +
+						"ip4.src == $a10481622940199974102 && ((tcp && ( tcp.dst == 100 ))) && inport == \\\"" + t.JoinSwitchToGWRouterPrefix + t.OVNClusterRouter + "\\\"\" action=allow external-ids:egressFirewall=namespace1",
+					"ovn-nbctl --timeout=15 --id=@acl create acl priority=9999 direction=from-lport match=\"(ip4.dst == 1.2.3.5/23) && " +
+						"ip4.src == $a10481622940199974102 && ((tcp && ( tcp.dst == 100 ))) && inport == \\\"" + t.JoinSwitchToGWRouterPrefix + t.OVNClusterRouter + "\\\"\" action=allow external-ids:egressFirewall=namespace1 -- add logical_switch join acls @acl",
+				})
+				fExec.AddFakeCmd(&ovntest.ExpectedCmd{
+					Cmd:    "ovn-nbctl --timeout=15 --data=bare --no-heading --columns=_uuid find ACL external-ids:egressFirewall=namespace1",
+					Output: fmt.Sprintf("%s", fakeUUID),
+				})
+				fExec.AddFakeCmdsNoOutputNoError([]string{
+					"ovn-nbctl --timeout=15 remove logical_switch join acls " + fmt.Sprintf("%s", fakeUUID),
+				})
+				namespace1 := *newNamespace("namespace1")
+				egressFirewall := newEgressFirewallObject("default", namespace1.Name, []egressfirewallapi.EgressFirewallRule{
+					{
+						Type: "Allow",
+						Ports: []egressfirewallapi.EgressFirewallPort{
+							{
+								Protocol: "TCP",
+								Port:     100,
+							},
+						},
+						To: egressfirewallapi.EgressFirewallDestination{
+							CIDRSelector: "1.2.3.5/23",
+						},
+					},
+				})
+
+				fakeOVN.start(ctx,
+					&egressfirewallapi.EgressFirewallList{
+						Items: []egressfirewallapi.EgressFirewall{
+							*egressFirewall,
+						},
+					},
+					&v1.NamespaceList{
+						Items: []v1.Namespace{
+							namespace1,
+						},
+					},
+					&v1.NodeList{
+						Items: []v1.Node{
+							{
+								Status: v1.NodeStatus{
+									Phase: v1.NodeRunning,
+								},
+								ObjectMeta: newObjectMeta(node1Name, ""),
+							},
+						},
+					})
+
+				fakeOVN.controller.WatchNamespaces()
+				fakeOVN.controller.WatchEgressFirewall()
+
+				err := fakeOVN.fakeClient.EgressFirewallClient.K8sV1().EgressFirewalls(egressFirewall.Namespace).Delete(context.TODO(), egressFirewall.Name, *metav1.NewDeleteOptions(0))
+				gomega.Expect(err).NotTo(gomega.HaveOccurred())
+
+				gomega.Eventually(fExec.CalledMatchesExpected).Should(gomega.BeTrue(), fExec.ErrorDesc)
+
+				return nil
+			}
+
+			err := app.Run([]string{app.Name})
+			gomega.Expect(err).NotTo(gomega.HaveOccurred())
+		})
+		ginkgo.It("correctly updates an egressfirewall", func() {
+			app.Action = func(ctx *cli.Context) error {
+				const (
+					node1Name string = "node1"
+				)
+				fExec.AddFakeCmdsNoOutputNoError([]string{
+					"ovn-nbctl --timeout=15 --data=bare --no-heading --columns=_uuid find ACL match=\"(ip4.dst == 1.2.3.4/23) && ip4.src == $a10481622940199974102 && inport == \\\"" + t.JoinSwitchToGWRouterPrefix + t.OVNClusterRouter + "\\\"\" action=allow external-ids:egressFirewall=namespace1",
+					"ovn-nbctl --timeout=15 --id=@acl create acl priority=9999 direction=from-lport match=\"(ip4.dst == 1.2.3.4/23) && ip4.src == $a10481622940199974102 && inport == \\\"" + t.JoinSwitchToGWRouterPrefix + t.OVNClusterRouter + "\\\"\" action=allow external-ids:egressFirewall=namespace1 -- add logical_switch join acls @acl",
+					"ovn-nbctl --timeout=15 --data=bare --no-heading --columns=_uuid find ACL match=\"(ip4.dst == 0.0.0.0/0 || ip6.dst == ::/0) && ip4.src == $a10481622940199974102 && inport == \\\"" + t.JoinSwitchToGWRouterPrefix + t.OVNClusterRouter + "\\\"\" action=drop external-ids:egressFirewall=namespace1-blockAll",
+					"ovn-nbctl --timeout=15 --id=@acl create acl priority=10000 direction=from-lport match=\"(ip4.dst == 0.0.0.0/0 || ip6.dst == ::/0) && ip4.src == $a10481622940199974102 && inport == \\\"" + t.JoinSwitchToGWRouterPrefix + t.OVNClusterRouter + "\\\"\" action=drop external-ids:egressFirewall=namespace1-blockAll -- add logical_switch join acls @acl",
+				})
+				fExec.AddFakeCmd(&ovntest.ExpectedCmd{
+					Cmd:    "ovn-nbctl --timeout=15 --data=bare --no-heading --columns=_uuid find ACL external-ids:egressFirewall=namespace1",
+					Output: fmt.Sprintf("%s", fakeUUID),
+				})
+				fExec.AddFakeCmdsNoOutputNoError([]string{
+					"ovn-nbctl --timeout=15 remove logical_switch join acls " + fmt.Sprintf("%s", fakeUUID),
+					"ovn-nbctl --timeout=15 --data=bare --no-heading --columns=_uuid find ACL match=\"(ip4.dst == 1.2.3.4/23) && ip4.src == $a10481622940199974102 && inport == \\\"" + t.JoinSwitchToGWRouterPrefix + t.OVNClusterRouter + "\\\"\" action=drop external-ids:egressFirewall=namespace1",
+					"ovn-nbctl --timeout=15 --id=@acl create acl priority=9999 direction=from-lport match=\"(ip4.dst == 1.2.3.4/23) && ip4.src == $a10481622940199974102 && inport == \\\"" + t.JoinSwitchToGWRouterPrefix + t.OVNClusterRouter + "\\\"\" action=drop external-ids:egressFirewall=namespace1 -- add logical_switch join acls @acl",
+				})
+				fExec.AddFakeCmd(&ovntest.ExpectedCmd{
+					Cmd:    "ovn-nbctl --timeout=15 --data=bare --no-heading --columns=_uuid find ACL external-ids:egressFirewall=namespace1-blockAll",
+					Output: fmt.Sprintf("%s", fakeUUID),
+				})
+				fExec.AddFakeCmdsNoOutputNoError([]string{
+					"ovn-nbctl --timeout=15 remove logical_switch join acls " + fmt.Sprintf("%s", fakeUUID),
+				})
+
+				namespace1 := *newNamespace("namespace1")
+				egressFirewall := newEgressFirewallObject("default", namespace1.Name, []egressfirewallapi.EgressFirewallRule{
+					{
+						Type: "Allow",
+						To: egressfirewallapi.EgressFirewallDestination{
+							CIDRSelector: "1.2.3.4/23",
+						},
+					},
+				})
+				egressFirewall1 := newEgressFirewallObject("default", namespace1.Name, []egressfirewallapi.EgressFirewallRule{
+					{
+						Type: "Deny",
+						To: egressfirewallapi.EgressFirewallDestination{
+							CIDRSelector: "1.2.3.4/23",
+						},
+					},
+				})
+
+				fakeOVN.start(ctx,
+					&egressfirewallapi.EgressFirewallList{
+						Items: []egressfirewallapi.EgressFirewall{
+							*egressFirewall,
+						},
+					},
+					&v1.NamespaceList{
+						Items: []v1.Namespace{
+							namespace1,
+						},
+					},
+					&v1.NodeList{
+						Items: []v1.Node{
+							{
+								Status: v1.NodeStatus{
+									Phase: v1.NodeRunning,
+								},
+								ObjectMeta: newObjectMeta(node1Name, ""),
+							},
+						},
+					})
+
+				fakeOVN.controller.WatchNamespaces()
+				fakeOVN.controller.WatchEgressFirewall()
+
+				_, err := fakeOVN.fakeClient.EgressFirewallClient.K8sV1().EgressFirewalls(egressFirewall.Namespace).Get(context.TODO(), egressFirewall.Name, metav1.GetOptions{})
+				gomega.Expect(err).NotTo(gomega.HaveOccurred())
+				_, err = fakeOVN.fakeClient.EgressFirewallClient.K8sV1().EgressFirewalls(egressFirewall1.Namespace).Update(context.TODO(), egressFirewall1, metav1.UpdateOptions{})
+				gomega.Expect(err).NotTo(gomega.HaveOccurred())
+
+				gomega.Eventually(fExec.CalledMatchesExpected).Should(gomega.BeTrue(), fExec.ErrorDesc)
+
+				return nil
+			}
+
+			err := app.Run([]string{app.Name})
+			gomega.Expect(err).NotTo(gomega.HaveOccurred())
+
+		})
+
+	})
+
+})
+
+var _ = ginkgo.Describe("OVN test basic functions", func() {
+
+	ginkgo.It("computes correct L4Match", func() {
 		type testcase struct {
 			ports         []egressfirewallapi.EgressFirewallPort
 			expectedMatch string
@@ -437,10 +799,10 @@ var _ = Describe("OVN test basic functions", func() {
 		}
 		for _, test := range testcases {
 			l4Match := egressGetL4Match(test.ports)
-			Expect(test.expectedMatch).To(Equal(l4Match))
+			gomega.Expect(test.expectedMatch).To(gomega.Equal(l4Match))
 		}
 	})
-	It("computes correct match function", func() {
+	ginkgo.It("computes correct match function", func() {
 		type testcase struct {
 			internalCIDR string
 			ipv4source   string
@@ -456,7 +818,7 @@ var _ = Describe("OVN test basic functions", func() {
 				ipv6source:   "",
 				destinations: []matchTarget{{matchKindV4CIDR, "1.2.3.4/32"}},
 				ports:        nil,
-				output:       `match="(ip4.dst == 1.2.3.4/32) && ip4.src == $testv4 && ip4.dst != 10.128.0.0/14"`,
+				output:       `match="(ip4.dst == 1.2.3.4/32) && ip4.src == $testv4 && inport == \"` + t.JoinSwitchToGWRouterPrefix + t.OVNClusterRouter + `\""`,
 			},
 			{
 				internalCIDR: "10.128.0.0/14",
@@ -464,7 +826,7 @@ var _ = Describe("OVN test basic functions", func() {
 				ipv6source:   "testv6",
 				destinations: []matchTarget{{matchKindV4CIDR, "1.2.3.4/32"}},
 				ports:        nil,
-				output:       `match="(ip4.dst == 1.2.3.4/32) && (ip4.src == $testv4 || ip6.src == $testv6) && ip4.dst != 10.128.0.0/14"`,
+				output:       `match="(ip4.dst == 1.2.3.4/32) && (ip4.src == $testv4 || ip6.src == $testv6) && inport == \"` + t.JoinSwitchToGWRouterPrefix + t.OVNClusterRouter + `\""`,
 			},
 			{
 				internalCIDR: "10.128.0.0/14",
@@ -472,7 +834,7 @@ var _ = Describe("OVN test basic functions", func() {
 				ipv6source:   "testv6",
 				destinations: []matchTarget{{matchKindV4AddressSet, "destv4"}, {matchKindV6AddressSet, "destv6"}},
 				ports:        nil,
-				output:       `match="(ip4.dst == $destv4 || ip6.dst == $destv6) && (ip4.src == $testv4 || ip6.src == $testv6) && ip4.dst != 10.128.0.0/14"`,
+				output:       `match="(ip4.dst == $destv4 || ip6.dst == $destv6) && (ip4.src == $testv4 || ip6.src == $testv6) && inport == \"` + t.JoinSwitchToGWRouterPrefix + t.OVNClusterRouter + `\""`,
 			},
 			{
 				internalCIDR: "10.128.0.0/14",
@@ -480,7 +842,7 @@ var _ = Describe("OVN test basic functions", func() {
 				ipv6source:   "",
 				destinations: []matchTarget{{matchKindV4AddressSet, "destv4"}, {matchKindV6AddressSet, ""}},
 				ports:        nil,
-				output:       `match="(ip4.dst == $destv4) && ip4.src == $testv4 && ip4.dst != 10.128.0.0/14"`,
+				output:       `match="(ip4.dst == $destv4) && ip4.src == $testv4 && inport == \"` + t.JoinSwitchToGWRouterPrefix + t.OVNClusterRouter + `\""`,
 			},
 			{
 				internalCIDR: "10.128.0.0/14",
@@ -488,7 +850,7 @@ var _ = Describe("OVN test basic functions", func() {
 				ipv6source:   "testv6",
 				destinations: []matchTarget{{matchKindV6CIDR, "2001::/64"}},
 				ports:        nil,
-				output:       `match="(ip6.dst == 2001::/64) && (ip4.src == $testv4 || ip6.src == $testv6) && ip4.dst != 10.128.0.0/14"`,
+				output:       `match="(ip6.dst == 2001::/64) && (ip4.src == $testv4 || ip6.src == $testv6) && inport == \"` + t.JoinSwitchToGWRouterPrefix + t.OVNClusterRouter + `\""`,
 			},
 			{
 				internalCIDR: "2002:0:0:1234::/64",
@@ -496,18 +858,19 @@ var _ = Describe("OVN test basic functions", func() {
 				ipv6source:   "testv6",
 				destinations: []matchTarget{{matchKindV6AddressSet, "destv6"}},
 				ports:        nil,
-				output:       `match="(ip6.dst == $destv6) && ip6.src == $testv6 && ip6.dst != 2002:0:0:1234::/64"`,
+				output:       `match="(ip6.dst == $destv6) && ip6.src == $testv6 && inport == \"` + t.JoinSwitchToGWRouterPrefix + t.OVNClusterRouter + `\""`,
 			},
 		}
 
 		for _, tc := range testcases {
 			_, cidr, _ := net.ParseCIDR(tc.internalCIDR)
 			config.Default.ClusterSubnets = []config.CIDRNetworkEntry{{CIDR: cidr}}
+			config.Gateway.Mode = config.GatewayModeShared
 			matchExpression := generateMatch(tc.ipv4source, tc.ipv6source, tc.destinations, tc.ports)
-			Expect(tc.output).To(Equal(matchExpression))
+			gomega.Expect(tc.output).To(gomega.Equal(matchExpression))
 		}
 	})
-	It("correctly parses egressFirewallRules", func() {
+	ginkgo.It("correctly parses egressFirewallRules", func() {
 		type testcase struct {
 			egressFirewallRule egressfirewallapi.EgressFirewallRule
 			id                 int
@@ -556,11 +919,11 @@ var _ = Describe("OVN test basic functions", func() {
 		for _, tc := range testcases {
 			output, err := newEgressFirewallRule(tc.egressFirewallRule, tc.id)
 			if tc.err == true {
-				Expect(err).To(HaveOccurred())
-				Expect(tc.errOutput).To(Equal(err.Error()))
+				gomega.Expect(err).To(gomega.HaveOccurred())
+				gomega.Expect(tc.errOutput).To(gomega.Equal(err.Error()))
 			} else {
-				Expect(err).NotTo(HaveOccurred())
-				Expect(tc.output).To(Equal(*output))
+				gomega.Expect(err).NotTo(gomega.HaveOccurred())
+				gomega.Expect(tc.output).To(gomega.Equal(*output))
 			}
 		}
 	})

@@ -207,9 +207,13 @@ func (oc *Controller) isAnyClusterNodeIP(ip net.IP) *egressNode {
 }
 
 func (oc *Controller) updateEgressIPWithRetry(eIP *egressipv1.EgressIP) error {
-	return retry.RetryOnConflict(retry.DefaultRetry, func() error {
+	retryErr := retry.RetryOnConflict(retry.DefaultRetry, func() error {
 		return oc.kube.UpdateEgressIP(eIP)
 	})
+	if retryErr != nil {
+		return fmt.Errorf("error in updating status on EgressIP %s: %v", eIP.Name, retryErr)
+	}
+	return nil
 }
 
 func (oc *Controller) addNamespaceEgressIP(eIP *egressipv1.EgressIP, namespace *kapi.Namespace) error {

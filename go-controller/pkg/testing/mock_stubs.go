@@ -57,13 +57,23 @@ func (mock *MockOVNClient) LSLBList(ls string) ([]*goovn.LoadBalancer, error) {
 	return nil, fmt.Errorf("method %s is not implemented yet", functionName())
 }
 
-// Add ACL
-func (mock *MockOVNClient) ACLAdd(ls, direct, match, action string, priority int, external_ids map[string]string, logflag bool, meter string, severity string) (*goovn.OvnCommand, error) {
+// Add ACL to entity (PORT_GROUP or LOGICAL_SWITCH)
+func (mock *MockOVNClient) ACLAddEntity(entityType goovn.EntityType, entity, direct, match, action string, priority int, external_ids map[string]string, logflag bool, meter string, severity string) (*goovn.OvnCommand, error) {
+	return nil, fmt.Errorf("method %s is not implemented yet", functionName())
+}
+
+// Delete acl from entity (PORT_GROUP or LOGICAL_SWITCH)
+func (mock *MockOVNClient) ACLDelEntity(entityType goovn.EntityType, entity, direct, match string, priority int, external_ids map[string]string) (*goovn.OvnCommand, error) {
 	return nil, fmt.Errorf("method %s is not implemented yet", functionName())
 }
 
 // Delete acl
 func (mock *MockOVNClient) ACLDel(ls, direct, match string, priority int, external_ids map[string]string) (*goovn.OvnCommand, error) {
+	return nil, fmt.Errorf("method %s is not implemented yet", functionName())
+}
+
+// Get all acl by entity
+func (mock *MockOVNClient) ACLListEntity(entityType goovn.EntityType, entity string) ([]*goovn.ACL, error) {
 	return nil, fmt.Errorf("method %s is not implemented yet", functionName())
 }
 
@@ -133,12 +143,12 @@ func (mock *MockOVNClient) LRPList(lr string) ([]*goovn.LogicalRouterPort, error
 }
 
 // Add LRSR with given ip_prefix on given lr
-func (mock *MockOVNClient) LRSRAdd(lr string, ip_prefix string, nexthop string, output_port []string, policy []string, external_ids map[string]string) (*goovn.OvnCommand, error) {
+func (mock *MockOVNClient) LRSRAdd(lr string, ip_prefix string, nexthop string, output_port *string, policy *string, external_ids map[string]string) (*goovn.OvnCommand, error) {
 	return nil, fmt.Errorf("method %s is not implemented yet", functionName())
 }
 
-// Delete LRSR with given ip_prefix on given lr
-func (mock *MockOVNClient) LRSRDel(lr string, ip_prefix string, nexthop, policy, outputPort *string) (*goovn.OvnCommand, error) {
+// Delete LRSR with given ip_prefix, nexthop, outputPort and policy on given lr
+func (mock *MockOVNClient) LRSRDel(lr string, prefix string, nexthop, outputPort, policy *string) (*goovn.OvnCommand, error) {
 	return nil, fmt.Errorf("method %s is not implemented yet", functionName())
 }
 
@@ -184,6 +194,11 @@ func (mock *MockOVNClient) LBDel(name string) (*goovn.OvnCommand, error) {
 
 // Update existing LB
 func (mock *MockOVNClient) LBUpdate(name string, vipPort string, protocol string, addrs []string) (*goovn.OvnCommand, error) {
+	return nil, fmt.Errorf("method %s is not implemented yet", functionName())
+}
+
+// Set selection fields for LB session affinity
+func (mock *MockOVNClient) LBSetSelectionFields(name string, selectionFields string) (*goovn.OvnCommand, error) {
 	return nil, fmt.Errorf("method %s is not implemented yet", functionName())
 }
 
@@ -290,5 +305,35 @@ func (mock *MockOVNClient) SBGlobalSetOptions(options map[string]string) (*goovn
 
 // Get SB_Global table options
 func (mock *MockOVNClient) SBGlobalGetOptions() (map[string]string, error) {
+	return nil, fmt.Errorf("method %s is not implemented yet", functionName())
+}
+
+// Creates a new port group in the Port_Group table named "group" with optional "ports"  and "external_ids".
+func (mock *MockOVNClient) PortGroupAdd(group string, ports []string, external_ids map[string]string) (*goovn.OvnCommand, error) {
+	return nil, fmt.Errorf("method %s is not implemented yet", functionName())
+}
+
+// Sets "ports" and/or "external_ids" on the port group named "group". It is an error if group does not exist.
+func (mock *MockOVNClient) PortGroupUpdate(group string, ports []string, external_ids map[string]string) (*goovn.OvnCommand, error) {
+	return nil, fmt.Errorf("method %s is not implemented yet", functionName())
+}
+
+// Add port to port group.
+func (mock *MockOVNClient) PortGroupAddPort(group string, port string) (*goovn.OvnCommand, error) {
+	return nil, fmt.Errorf("method %s is not implemented yet", functionName())
+}
+
+// Remove port from port group.
+func (mock *MockOVNClient) PortGroupRemovePort(group string, port string) (*goovn.OvnCommand, error) {
+	return nil, fmt.Errorf("method %s is not implemented yet", functionName())
+}
+
+// Deletes port group "group". It is an error if "group" does not exist.
+func (mock *MockOVNClient) PortGroupDel(group string) (*goovn.OvnCommand, error) {
+	return nil, fmt.Errorf("method %s is not implemented yet", functionName())
+}
+
+// Get PortGroup data structure if it exists
+func (mock *MockOVNClient) PortGroupGet(group string) (*goovn.PortGroup, error) {
 	return nil, fmt.Errorf("method %s is not implemented yet", functionName())
 }

@@ -8,19 +8,19 @@ import (
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
 
-	. "github.com/onsi/ginkgo"
-	. "github.com/onsi/gomega"
+	"github.com/onsi/ginkgo"
+	"github.com/onsi/gomega"
 )
 
-var _ = Describe("Gateway Init Operations", func() {
-	BeforeEach(func() {
+var _ = ginkgo.Describe("Gateway Init Operations", func() {
+	ginkgo.BeforeEach(func() {
 		// Restore global default values before each testcase
 		config.PrepareTestConfig()
 		// TODO make contexts here for shared gw mode and local gw mode, right now this only tests shared gw
 		config.Gateway.Mode = config.GatewayModeShared
 	})
 
-	It("correctly sorts gateway routers", func() {
+	ginkgo.It("correctly sorts gateway routers", func() {
 		fexec := ovntest.NewFakeExec()
 		fexec.AddFakeCmd(&ovntest.ExpectedCmd{
 			Cmd: "ovn-nbctl --timeout=15 --data=bare --format=table --no-heading --columns=name,options find logical_router options:lb_force_snat_ip!=-",
@@ -31,10 +31,10 @@ node4 chassis=912d592c-904c-40cd-9ef1-c2e5b49a33dd lb_force_snat_ip=100.64.0.4`,
 		})
 
 		err := util.SetExec(fexec)
-		Expect(err).NotTo(HaveOccurred())
+		gomega.Expect(err).NotTo(gomega.HaveOccurred())
 	})
 
-	It("ignores malformatted gateway router entires", func() {
+	ginkgo.It("ignores malformatted gateway router entires", func() {
 		fexec := ovntest.NewFakeExec()
 		fexec.AddFakeCmd(&ovntest.ExpectedCmd{
 			Cmd: "ovn-nbctl --timeout=15 --data=bare --format=table --no-heading --columns=name,options find logical_router options:lb_force_snat_ip!=-",
@@ -45,10 +45,10 @@ node4 chassis=912d592c-904c-40cd-9ef1-c2e5b49a33dd lb_force_snat_ip=100.64.0.4`,
 		})
 
 		err := util.SetExec(fexec)
-		Expect(err).NotTo(HaveOccurred())
+		gomega.Expect(err).NotTo(gomega.HaveOccurred())
 	})
 
-	It("creates an IPv4 gateway in OVN", func() {
+	ginkgo.It("creates an IPv4 gateway in OVN", func() {
 		clusterIPSubnets := ovntest.MustParseIPNets("10.128.0.0/14")
 		hostSubnets := ovntest.MustParseIPNets("10.130.0.0/23")
 		joinLRPIPs := ovntest.MustParseIPNets("100.64.0.3/16")
@@ -67,7 +67,7 @@ node4 chassis=912d592c-904c-40cd-9ef1-c2e5b49a33dd lb_force_snat_ip=100.64.0.4`,
 
 		fexec := ovntest.NewFakeExec()
 		err := util.SetExec(fexec)
-		Expect(err).NotTo(HaveOccurred())
+		gomega.Expect(err).NotTo(gomega.HaveOccurred())
 
 		fexec.AddFakeCmdsNoOutputNoError([]string{
 			"ovn-nbctl --timeout=15 -- --may-exist lr-add GR_test-node -- set logical_router GR_test-node options:chassis=SYSTEM-ID external_ids:physical_ip=169.254.33.2 external_ids:physical_ips=169.254.33.2",
@@ -115,11 +115,11 @@ node4 chassis=912d592c-904c-40cd-9ef1-c2e5b49a33dd lb_force_snat_ip=100.64.0.4`,
 		})
 
 		err = gatewayInit(nodeName, clusterIPSubnets, hostSubnets, l3GatewayConfig, sctpSupport, joinLRPIPs, defLRPIPs)
-		Expect(err).NotTo(HaveOccurred())
-		Expect(fexec.CalledMatchesExpected()).To(BeTrue())
+		gomega.Expect(err).NotTo(gomega.HaveOccurred())
+		gomega.Expect(fexec.CalledMatchesExpected()).To(gomega.BeTrue())
 	})
 
-	It("creates an IPv6 gateway in OVN", func() {
+	ginkgo.It("creates an IPv6 gateway in OVN", func() {
 		clusterIPSubnets := ovntest.MustParseIPNets("fd01::/48")
 		hostSubnets := ovntest.MustParseIPNets("fd01:0:0:2::/64")
 		joinLRPIPs := ovntest.MustParseIPNets("fd98::3/64")
@@ -138,7 +138,7 @@ node4 chassis=912d592c-904c-40cd-9ef1-c2e5b49a33dd lb_force_snat_ip=100.64.0.4`,
 
 		fexec := ovntest.NewFakeExec()
 		err := util.SetExec(fexec)
-		Expect(err).NotTo(HaveOccurred())
+		gomega.Expect(err).NotTo(gomega.HaveOccurred())
 
 		// 0a:58:ee:33:fc:1a generated from util.IPAddrToHWAddr(net.ParseIP("fd98::1")).String()
 		// 0a:58:5f:8a:48:8c generated from util.IPAddrToHWAddr(net.ParseIP("fd98::2")).String()
@@ -188,11 +188,11 @@ node4 chassis=912d592c-904c-40cd-9ef1-c2e5b49a33dd lb_force_snat_ip=100.64.0.4`,
 		})
 
 		err = gatewayInit(nodeName, clusterIPSubnets, hostSubnets, l3GatewayConfig, sctpSupport, joinLRPIPs, defLRPIPs)
-		Expect(err).NotTo(HaveOccurred())
-		Expect(fexec.CalledMatchesExpected()).To(BeTrue())
+		gomega.Expect(err).NotTo(gomega.HaveOccurred())
+		gomega.Expect(fexec.CalledMatchesExpected()).To(gomega.BeTrue())
 	})
 
-	It("creates a dual-stack gateway in OVN", func() {
+	ginkgo.It("creates a dual-stack gateway in OVN", func() {
 		clusterIPSubnets := ovntest.MustParseIPNets("10.128.0.0/14", "fd01::/48")
 		hostSubnets := ovntest.MustParseIPNets("10.130.0.0/23", "fd01:0:0:2::/64")
 		joinLRPIPs := ovntest.MustParseIPNets("100.64.0.3/16", "fd98::3/64")
@@ -211,7 +211,7 @@ node4 chassis=912d592c-904c-40cd-9ef1-c2e5b49a33dd lb_force_snat_ip=100.64.0.4`,
 
 		fexec := ovntest.NewFakeExec()
 		err := util.SetExec(fexec)
-		Expect(err).NotTo(HaveOccurred())
+		gomega.Expect(err).NotTo(gomega.HaveOccurred())
 
 		fexec.AddFakeCmdsNoOutputNoError([]string{
 			"ovn-nbctl --timeout=15 -- --may-exist lr-add GR_test-node -- set logical_router GR_test-node options:chassis=SYSTEM-ID external_ids:physical_ip=169.254.33.2 external_ids:physical_ips=169.254.33.2,fd99::2",
@@ -264,11 +264,11 @@ node4 chassis=912d592c-904c-40cd-9ef1-c2e5b49a33dd lb_force_snat_ip=100.64.0.4`,
 		})
 
 		err = gatewayInit(nodeName, clusterIPSubnets, hostSubnets, l3GatewayConfig, sctpSupport, joinLRPIPs, defLRPIPs)
-		Expect(err).NotTo(HaveOccurred())
-		Expect(fexec.CalledMatchesExpected()).To(BeTrue())
+		gomega.Expect(err).NotTo(gomega.HaveOccurred())
+		gomega.Expect(fexec.CalledMatchesExpected()).To(gomega.BeTrue())
 	})
 
-	It("cleans up a single-stack gateway in OVN", func() {
+	ginkgo.It("cleans up a single-stack gateway in OVN", func() {
 		nodeName := "test-node"
 		hostSubnet := ovntest.MustParseIPNet("10.130.0.0/23")
 		const (
@@ -278,7 +278,7 @@ node4 chassis=912d592c-904c-40cd-9ef1-c2e5b49a33dd lb_force_snat_ip=100.64.0.4`,
 
 		fexec := ovntest.NewFakeExec()
 		err := util.SetExec(fexec)
-		Expect(err).NotTo(HaveOccurred())
+		gomega.Expect(err).NotTo(gomega.HaveOccurred())
 
 		fexec.AddFakeCmd(&ovntest.ExpectedCmd{
 			Cmd:    "ovn-nbctl --timeout=15 --if-exist get logical_router_port rtoj-GR_test-node networks",
@@ -315,11 +315,11 @@ node4 chassis=912d592c-904c-40cd-9ef1-c2e5b49a33dd lb_force_snat_ip=100.64.0.4`,
 		cleanupPBRandNATRules(fexec, nodeName, []*net.IPNet{hostSubnet})
 
 		err = gatewayCleanup(nodeName)
-		Expect(err).NotTo(HaveOccurred())
-		Expect(fexec.CalledMatchesExpected()).To(BeTrue())
+		gomega.Expect(err).NotTo(gomega.HaveOccurred())
+		gomega.Expect(fexec.CalledMatchesExpected()).To(gomega.BeTrue())
 	})
 
-	It("cleans up a dual-stack gateway in OVN", func() {
+	ginkgo.It("cleans up a dual-stack gateway in OVN", func() {
 		nodeName := "test-node"
 		hostSubnets := ovntest.MustParseIPNets("10.130.0.0/23", "fd01:0:0:2::/64")
 		const (
@@ -332,7 +332,7 @@ node4 chassis=912d592c-904c-40cd-9ef1-c2e5b49a33dd lb_force_snat_ip=100.64.0.4`,
 
 		fexec := ovntest.NewFakeExec()
 		err := util.SetExec(fexec)
-		Expect(err).NotTo(HaveOccurred())
+		gomega.Expect(err).NotTo(gomega.HaveOccurred())
 
 		fexec.AddFakeCmd(&ovntest.ExpectedCmd{
 			Cmd:    "ovn-nbctl --timeout=15 --if-exist get logical_router_port rtoj-GR_test-node networks",
@@ -377,7 +377,7 @@ node4 chassis=912d592c-904c-40cd-9ef1-c2e5b49a33dd lb_force_snat_ip=100.64.0.4`,
 		cleanupPBRandNATRules(fexec, nodeName, hostSubnets)
 
 		err = gatewayCleanup(nodeName)
-		Expect(err).NotTo(HaveOccurred())
-		Expect(fexec.CalledMatchesExpected()).To(BeTrue())
+		gomega.Expect(err).NotTo(gomega.HaveOccurred())
+		gomega.Expect(fexec.CalledMatchesExpected()).To(gomega.BeTrue())
 	})
 })

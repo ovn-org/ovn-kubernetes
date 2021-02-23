@@ -13,8 +13,8 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
 
-	. "github.com/onsi/ginkgo"
-	. "github.com/onsi/gomega"
+	"github.com/onsi/ginkgo"
+	"github.com/onsi/gomega"
 )
 
 func newNamespaceMeta(namespace string, additionalLabels map[string]string) metav1.ObjectMeta {
@@ -48,7 +48,7 @@ func newNamespace(namespace string) *v1.Namespace {
 	}
 }
 
-var _ = Describe("OVN Namespace Operations", func() {
+var _ = ginkgo.Describe("OVN Namespace Operations", func() {
 	const (
 		namespaceName = "namespace1"
 	)
@@ -57,7 +57,7 @@ var _ = Describe("OVN Namespace Operations", func() {
 		fakeOvn *FakeOVN
 	)
 
-	BeforeEach(func() {
+	ginkgo.BeforeEach(func() {
 		// Restore global default values before each testcase
 		config.PrepareTestConfig()
 
@@ -68,13 +68,13 @@ var _ = Describe("OVN Namespace Operations", func() {
 		fakeOvn = NewFakeOVN(ovntest.NewFakeExec())
 	})
 
-	AfterEach(func() {
+	ginkgo.AfterEach(func() {
 		fakeOvn.shutdown()
 	})
 
-	Context("on startup", func() {
+	ginkgo.Context("on startup", func() {
 
-		It("reconciles an existing namespace with pods", func() {
+		ginkgo.It("reconciles an existing namespace with pods", func() {
 			app.Action = func(ctx *cli.Context) error {
 				namespaceT := *newNamespace(namespaceName)
 				tP := newTPod(
@@ -106,7 +106,7 @@ var _ = Describe("OVN Namespace Operations", func() {
 				fakeOvn.controller.WatchNamespaces()
 
 				_, err := fakeOvn.fakeClient.KubeClient.CoreV1().Namespaces().Get(context.TODO(), namespaceT.Name, metav1.GetOptions{})
-				Expect(err).NotTo(HaveOccurred())
+				gomega.Expect(err).NotTo(gomega.HaveOccurred())
 
 				fakeOvn.asf.ExpectAddressSetWithIPs(namespaceName, []string{tP.podIP})
 
@@ -114,10 +114,10 @@ var _ = Describe("OVN Namespace Operations", func() {
 			}
 
 			err := app.Run([]string{app.Name})
-			Expect(err).NotTo(HaveOccurred())
+			gomega.Expect(err).NotTo(gomega.HaveOccurred())
 		})
 
-		It("creates an empty address set for the namespace without pods", func() {
+		ginkgo.It("creates an empty address set for the namespace without pods", func() {
 			app.Action = func(ctx *cli.Context) error {
 				fakeOvn.start(ctx, &v1.NamespaceList{
 					Items: []v1.Namespace{
@@ -127,7 +127,7 @@ var _ = Describe("OVN Namespace Operations", func() {
 				fakeOvn.controller.WatchNamespaces()
 
 				_, err := fakeOvn.fakeClient.KubeClient.CoreV1().Namespaces().Get(context.TODO(), namespaceName, metav1.GetOptions{})
-				Expect(err).NotTo(HaveOccurred())
+				gomega.Expect(err).NotTo(gomega.HaveOccurred())
 
 				fakeOvn.asf.ExpectEmptyAddressSet(namespaceName)
 
@@ -135,12 +135,12 @@ var _ = Describe("OVN Namespace Operations", func() {
 			}
 
 			err := app.Run([]string{app.Name})
-			Expect(err).NotTo(HaveOccurred())
+			gomega.Expect(err).NotTo(gomega.HaveOccurred())
 		})
 	})
 
-	Context("during execution", func() {
-		It("deletes an empty namespace's resources", func() {
+	ginkgo.Context("during execution", func() {
+		ginkgo.It("deletes an empty namespace's resources", func() {
 			app.Action = func(ctx *cli.Context) error {
 				fakeOvn.start(ctx, &v1.NamespaceList{
 					Items: []v1.Namespace{
@@ -151,13 +151,13 @@ var _ = Describe("OVN Namespace Operations", func() {
 				fakeOvn.asf.ExpectEmptyAddressSet(namespaceName)
 
 				err := fakeOvn.fakeClient.KubeClient.CoreV1().Namespaces().Delete(context.TODO(), namespaceName, *metav1.NewDeleteOptions(1))
-				Expect(err).NotTo(HaveOccurred())
+				gomega.Expect(err).NotTo(gomega.HaveOccurred())
 				fakeOvn.asf.EventuallyExpectNoAddressSet(namespaceName)
 				return nil
 			}
 
 			err := app.Run([]string{app.Name})
-			Expect(err).NotTo(HaveOccurred())
+			gomega.Expect(err).NotTo(gomega.HaveOccurred())
 		})
 	})
 })

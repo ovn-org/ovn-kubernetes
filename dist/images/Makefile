@@ -17,6 +17,9 @@ DOCKERFILE_ARCH =
 ifeq ($(ARCH),arm64)
         DOCKERFILE_ARCH=.arm64
 endif
+KERNEL_VERSION ?= `uname -r`
+OVS_BRANCH ?= master
+OVN_BRANCH ?= master
 
 # The image of ovnkube/ovn-daemonset-u should be multi-arched before using it on arm64
 ubuntu: bld
@@ -47,7 +50,10 @@ fedora-dev: bld
 	# To build (OVN Datapath)  with specific kernel version, please override KERNEL_VERSION.
 	# By default it will build with the host machine's kernel version.
 
-	docker build --build-arg KERNEL_VERSION=`uname -r` -t ovn-kube-f-dev -f Dockerfile.fedora.dev .
+	docker build --build-arg KERNEL_VERSION=$(KERNEL_VERSION) \
+		     --build-arg OVS_BRANCH=$(OVS_BRANCH) \
+		     --build-arg OVN_BRANCH=$(OVN_BRANCH) \
+		     -t ovn-kube-f-dev -f Dockerfile.fedora.dev .
 	# docker login -u ovnkube docker.io/ovnkube
 	# docker push docker.io/ovnkube/ovn-daemonset-f:latest
 	./daemonset.sh --image=docker.io/ovnkube/ovn-daemonset-f:latest \

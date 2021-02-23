@@ -1,6 +1,7 @@
 package e2e
 
 import (
+	"context"
 	"fmt"
 	"time"
 
@@ -12,6 +13,7 @@ import (
 	"k8s.io/kubernetes/test/e2e/framework"
 	e2enode "k8s.io/kubernetes/test/e2e/framework/node"
 	e2epod "k8s.io/kubernetes/test/e2e/framework/pod"
+	e2eskipper "k8s.io/kubernetes/test/e2e/framework/skipper"
 )
 
 const (
@@ -42,7 +44,7 @@ var _ = ginkgo.Describe("Multicast", func() {
 		nodes, err := e2enode.GetBoundedReadySchedulableNodes(cs, 2)
 		framework.ExpectNoError(err)
 		if len(nodes.Items) < 2 {
-			framework.Skipf(
+			e2eskipper.Skipf(
 				"Test requires >= 2 Ready nodes, but there are only %v nodes",
 				len(nodes.Items))
 		}
@@ -60,13 +62,13 @@ var _ = ginkgo.Describe("Multicast", func() {
 		}
 
 		// annotate namespace to enable multicast
-		namespace, err := fr.ClientSet.CoreV1().Namespaces().Get(ns, metav1.GetOptions{})
+		namespace, err := fr.ClientSet.CoreV1().Namespaces().Get(context.Background(), ns, metav1.GetOptions{})
 		framework.ExpectNoError(err, "Error getting Namespace %v: %v", fr.Namespace.Name, err)
 		if namespace.ObjectMeta.Annotations == nil {
 			namespace.ObjectMeta.Annotations = map[string]string{}
 		}
 		namespace.ObjectMeta.Annotations["k8s.ovn.org/multicast-enabled"] = "true"
-		_, err = fr.ClientSet.CoreV1().Namespaces().Update(namespace)
+		_, err = fr.ClientSet.CoreV1().Namespaces().Update(context.Background(), namespace, metav1.UpdateOptions{})
 		framework.ExpectNoError(err, "Error updating Namespace %v: %v", ns, err)
 	})
 

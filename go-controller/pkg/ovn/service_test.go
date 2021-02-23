@@ -4,8 +4,8 @@ import (
 	"context"
 	"fmt"
 
-	. "github.com/onsi/ginkgo"
-	. "github.com/onsi/gomega"
+	"github.com/onsi/ginkgo"
+	"github.com/onsi/gomega"
 
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
 	ovntest "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/testing"
@@ -137,7 +137,7 @@ func (s service) addCmds(fexec *ovntest.FakeExec, service v1.Service) {
 			fmt.Sprintf("ovn-nbctl --timeout=15 --data=bare --no-heading --columns=_uuid find acl name=%s-%s\\:%v",
 				k8sTCPLoadBalancerIP, service.Spec.ClusterIP, port.Port),
 			fmt.Sprintf("ovn-nbctl --timeout=15 --id=@reject-acl create acl direction=from-lport priority=1000 match=\"ip4.dst==%s && tcp "+
-				"&& tcp.dst==%v\" action=reject name=%s-%s\\:%v -- add port_group %s acls @reject-acl", service.Spec.ClusterIP, port.Port,
+				"&& tcp.dst==%v\" action=reject log=false severity=info meter=acl-logging name=%s-%s\\:%v -- add port_group %s acls @reject-acl", service.Spec.ClusterIP, port.Port,
 				k8sTCPLoadBalancerIP, service.Spec.ClusterIP, port.Port, ovnClusterPortGroupUUID),
 		})
 	}
@@ -153,14 +153,14 @@ func (s service) delCmds(fexec *ovntest.FakeExec, service v1.Service) {
 	}
 }
 
-var _ = Describe("OVN Namespace Operations", func() {
+var _ = ginkgo.Describe("OVN Namespace Operations", func() {
 	var (
 		app     *cli.App
 		fakeOvn *FakeOVN
 		fExec   *ovntest.FakeExec
 	)
 
-	BeforeEach(func() {
+	ginkgo.BeforeEach(func() {
 		// Restore global default values before each testcase
 		config.PrepareTestConfig()
 
@@ -172,13 +172,13 @@ var _ = Describe("OVN Namespace Operations", func() {
 		fakeOvn = NewFakeOVN(fExec)
 	})
 
-	AfterEach(func() {
+	ginkgo.AfterEach(func() {
 		fakeOvn.shutdown()
 	})
 
-	Context("on startup", func() {
+	ginkgo.Context("on startup", func() {
 
-		It("reconciles an existing service", func() {
+		ginkgo.It("reconciles an existing service", func() {
 			app.Action = func(ctx *cli.Context) error {
 
 				test := service{}
@@ -207,17 +207,17 @@ var _ = Describe("OVN Namespace Operations", func() {
 				fakeOvn.controller.WatchServices()
 
 				_, err := fakeOvn.fakeClient.KubeClient.CoreV1().Services(service.Namespace).Get(context.TODO(), service.Name, metav1.GetOptions{})
-				Expect(err).NotTo(HaveOccurred())
-				Expect(fExec.CalledMatchesExpected()).To(BeTrue(), fExec.ErrorDesc)
+				gomega.Expect(err).NotTo(gomega.HaveOccurred())
+				gomega.Expect(fExec.CalledMatchesExpected()).To(gomega.BeTrue(), fExec.ErrorDesc)
 
 				return nil
 			}
 
 			err := app.Run([]string{app.Name})
-			Expect(err).NotTo(HaveOccurred())
+			gomega.Expect(err).NotTo(gomega.HaveOccurred())
 		})
 
-		It("reconciles a deleted service", func() {
+		ginkgo.It("reconciles a deleted service", func() {
 			app.Action = func(ctx *cli.Context) error {
 
 				test := service{}
@@ -246,23 +246,23 @@ var _ = Describe("OVN Namespace Operations", func() {
 				fakeOvn.controller.WatchServices()
 
 				_, err := fakeOvn.fakeClient.KubeClient.CoreV1().Services(service.Namespace).Get(context.TODO(), service.Name, metav1.GetOptions{})
-				Expect(err).NotTo(HaveOccurred())
-				Expect(fExec.CalledMatchesExpected()).To(BeTrue(), fExec.ErrorDesc)
+				gomega.Expect(err).NotTo(gomega.HaveOccurred())
+				gomega.Expect(fExec.CalledMatchesExpected()).To(gomega.BeTrue(), fExec.ErrorDesc)
 
 				test.delCmds(fExec, service)
 				err = fakeOvn.fakeClient.KubeClient.CoreV1().Services(service.Namespace).Delete(context.TODO(), service.Name, *metav1.NewDeleteOptions(0))
-				Expect(err).NotTo(HaveOccurred())
-				Eventually(fExec.CalledMatchesExpected).Should(BeTrue(), fExec.ErrorDesc)
+				gomega.Expect(err).NotTo(gomega.HaveOccurred())
+				gomega.Eventually(fExec.CalledMatchesExpected).Should(gomega.BeTrue(), fExec.ErrorDesc)
 
 				s, err := fakeOvn.fakeClient.KubeClient.CoreV1().Services(service.Namespace).Get(context.TODO(), service.Name, metav1.GetOptions{})
-				Expect(err).To(HaveOccurred())
-				Expect(s).To(BeNil())
+				gomega.Expect(err).To(gomega.HaveOccurred())
+				gomega.Expect(s).To(gomega.BeNil())
 
 				return nil
 			}
 
 			err := app.Run([]string{app.Name})
-			Expect(err).NotTo(HaveOccurred())
+			gomega.Expect(err).NotTo(gomega.HaveOccurred())
 		})
 	})
 })
