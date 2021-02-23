@@ -122,6 +122,12 @@ var _ = ginkgo.Describe("OVN master EgressIP Operations", func() {
 		return tmp.Status.Items
 	}
 
+	getEgressIPReassignmentCount := func() int {
+		fakeOvn.controller.eIPC.assignmentRetryMutex.Lock()
+		defer fakeOvn.controller.eIPC.assignmentRetryMutex.Unlock()
+		return len(fakeOvn.controller.eIPC.assignmentRetry)
+	}
+
 	isEgressAssignableNode := func(nodeName string) func() bool {
 		return func() bool {
 			fakeOvn.controller.eIPC.allocatorMutex.Lock()
@@ -1382,16 +1388,7 @@ var _ = ginkgo.Describe("OVN master EgressIP Operations", func() {
 				gomega.Expect(fakeOvn.controller.eIPC.allocator[node.Name].v4Subnet).To(gomega.Equal(ipv4Sub))
 				gomega.Expect(fakeOvn.controller.eIPC.allocator[node.Name].v6Subnet).To(gomega.Equal(ipv6Sub))
 
-				getCacheCount := func() int {
-					cacheCount := 0
-					fakeOvn.controller.eIPC.assignmentRetry.Range(func(key, value interface{}) bool {
-						cacheCount++
-						return true
-					})
-					return cacheCount
-				}
-
-				gomega.Eventually(getCacheCount).Should(gomega.Equal(0))
+				gomega.Eventually(getEgressIPReassignmentCount).Should(gomega.Equal(0))
 				return nil
 			}
 
@@ -1562,16 +1559,7 @@ var _ = ginkgo.Describe("OVN master EgressIP Operations", func() {
 				gomega.Eventually(getEgressIPAllocatorSizeSafely).Should(gomega.Equal(2))
 				gomega.Eventually(getEgressIPStatusLen(egressIPName)).Should(gomega.Equal(1))
 
-				getCacheCount := func() int {
-					cacheCount := 0
-					fakeOvn.controller.eIPC.assignmentRetry.Range(func(key, value interface{}) bool {
-						cacheCount++
-						return true
-					})
-					return cacheCount
-				}
-
-				gomega.Eventually(getCacheCount).Should(gomega.Equal(1))
+				gomega.Eventually(getEgressIPReassignmentCount).Should(gomega.Equal(1))
 
 				recordedEvent := <-fakeOvn.fakeRecorder.Events
 				gomega.Expect(recordedEvent).To(gomega.ContainSubstring("Not all egress IPs for EgressIP: %s could be assigned, please tag more nodes", eIP.Name))
@@ -1692,16 +1680,7 @@ var _ = ginkgo.Describe("OVN master EgressIP Operations", func() {
 				gomega.Eventually(getEgressIPStatusLen(egressIPName)).Should(gomega.Equal(0))
 				gomega.Eventually(isEgressAssignableNode(node1.Name)).Should(gomega.BeTrue())
 
-				calculateCacheCount := func() int {
-					cacheCount := 0
-					fakeOvn.controller.eIPC.assignmentRetry.Range(func(key, value interface{}) bool {
-						cacheCount++
-						return true
-					})
-					return cacheCount
-				}
-
-				gomega.Eventually(calculateCacheCount).Should(gomega.Equal(1))
+				gomega.Eventually(getEgressIPReassignmentCount).Should(gomega.Equal(1))
 
 				node2.Labels = map[string]string{
 					"k8s.ovn.org/egress-assignable": "",
@@ -1720,7 +1699,7 @@ var _ = ginkgo.Describe("OVN master EgressIP Operations", func() {
 				statuses := getEgressIPStatus(egressIPName)
 				gomega.Expect(statuses[0].Node).To(gomega.Equal(node2.Name))
 				gomega.Expect(statuses[0].EgressIP).To(gomega.Equal(egressIP))
-				gomega.Eventually(calculateCacheCount).Should(gomega.Equal(0))
+				gomega.Eventually(getEgressIPReassignmentCount).Should(gomega.Equal(0))
 				return nil
 			}
 
@@ -1819,16 +1798,7 @@ var _ = ginkgo.Describe("OVN master EgressIP Operations", func() {
 				gomega.Expect(statuses[0].Node).To(gomega.Equal(node1.Name))
 				gomega.Expect(statuses[0].EgressIP).To(gomega.Equal(egressIP1))
 
-				getCacheCount := func() int {
-					cacheCount := 0
-					fakeOvn.controller.eIPC.assignmentRetry.Range(func(key, value interface{}) bool {
-						cacheCount++
-						return true
-					})
-					return cacheCount
-				}
-
-				gomega.Eventually(getCacheCount).Should(gomega.Equal(1))
+				gomega.Eventually(getEgressIPReassignmentCount).Should(gomega.Equal(1))
 
 				node2.Labels = map[string]string{
 					"k8s.ovn.org/egress-assignable": "",
@@ -1844,7 +1814,7 @@ var _ = ginkgo.Describe("OVN master EgressIP Operations", func() {
 				gomega.Expect(err).NotTo(gomega.HaveOccurred())
 
 				gomega.Eventually(getEgressIPStatusLen(egressIPName)).Should(gomega.Equal(2))
-				gomega.Eventually(getCacheCount).Should(gomega.Equal(0))
+				gomega.Eventually(getEgressIPReassignmentCount).Should(gomega.Equal(0))
 
 				return nil
 			}
