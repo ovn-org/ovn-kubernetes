@@ -475,7 +475,7 @@ var _ = ginkgo.Describe("OVN Address Set operations", func() {
 	})
 
 	ginkgo.Context("Dual Stack : when manipulating IPs in an address set object", func() {
-		ginkgo.It("adds  IP to an empty dual stack address set", func() {
+		ginkgo.It("adds IP to an empty dual stack address set", func() {
 			app.Action = func(ctx *cli.Context) error {
 				const addr1 string = "1.2.3.4"
 				const addr2 string = "2001:db8::1"
@@ -498,12 +498,12 @@ var _ = ginkgo.Describe("OVN Address Set operations", func() {
 					Cmd:    "ovn-nbctl --timeout=15 create address_set name=a16990493521189787229 external-ids:name=foobar_v6",
 					Output: fakeUUIDv6,
 				})
-				fexec.AddFakeCmdsNoOutputNoError([]string{
-					`ovn-nbctl --timeout=15 add address_set ` + fakeUUID + ` addresses "` + addr1 + `"`,
-				})
 
 				fexec.AddFakeCmdsNoOutputNoError([]string{
 					`ovn-nbctl --timeout=15 add address_set ` + fakeUUIDv6 + ` addresses "` + addr2 + `"`,
+				})
+				fexec.AddFakeCmdsNoOutputNoError([]string{
+					`ovn-nbctl --timeout=15 add address_set ` + fakeUUID + ` addresses "` + addr1 + `"`,
 				})
 
 				as, err := asFactory.NewAddressSet("foobar", nil)
@@ -549,10 +549,10 @@ var _ = ginkgo.Describe("OVN Address Set operations", func() {
 				})
 
 				fexec.AddFakeCmdsNoOutputNoError([]string{
-					`ovn-nbctl --timeout=15 remove address_set ` + fakeUUID + ` addresses "` + addr1 + `"`,
+					`ovn-nbctl --timeout=15 remove address_set ` + fakeUUIDv6 + ` addresses "` + addr2 + `"`,
 				})
 				fexec.AddFakeCmdsNoOutputNoError([]string{
-					`ovn-nbctl --timeout=15 remove address_set ` + fakeUUIDv6 + ` addresses "` + addr2 + `"`,
+					`ovn-nbctl --timeout=15 remove address_set ` + fakeUUID + ` addresses "` + addr1 + `"`,
 				})
 
 				as, err := asFactory.NewAddressSet("foobar", []net.IP{net.ParseIP(addr1), net.ParseIP(addr2)})
