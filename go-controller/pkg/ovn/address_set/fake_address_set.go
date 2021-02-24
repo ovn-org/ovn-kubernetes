@@ -143,7 +143,9 @@ func (f *FakeAddressSetFactory) EventuallyExpectEmptyAddressSet(name string) {
 	name4, _ := MakeAddressSetName(name)
 	gomega.Eventually(func() bool {
 		as := f.getAddressSet(name4)
-		gomega.Expect(as).NotTo(gomega.BeNil())
+		if as == nil {
+			return false
+		}
 		defer as.Unlock()
 		return len(as.ips) == 0
 	}).Should(gomega.BeTrue())
