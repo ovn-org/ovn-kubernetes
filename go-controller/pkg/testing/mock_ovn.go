@@ -168,6 +168,8 @@ func (mock *MockOVNClient) updateCache(table string, objName string, update Upda
 	switch table {
 	case LogicalSwitchPortType:
 		return mock.updateLSPCache(objName, update, mockCache)
+	case LogicalSwitchType:
+		return mock.updateLSCache(objName, update, mockCache)
 	default:
 		return fmt.Errorf("mock cache updates for %s are not implemented yet", table)
 	}
