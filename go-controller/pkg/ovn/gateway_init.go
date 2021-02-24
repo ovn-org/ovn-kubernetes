@@ -339,36 +339,64 @@ func gatewayInit(nodeName string, clusterIPSubnet []*net.IPNet, hostSubnets []*n
 	return nil
 }
 
+// This DistributedGWPort guarantees to always have both IPv4 and IPv6 regardless of dual-stack
 func addDistributedGWPort() error {
 	masterChassisID, err := util.GetNodeChassisID()
 	if err != nil {
 		return fmt.Errorf("failed to get master's chassis ID error: %v", err)
 	}
 
-	var dgpMac string
-	var nbctlArgs []string
-	// add a distributed gateway port to the distributed router
+	// the distributed gateway port is always dual-stack and uses the IPv4 address to generate its mac
 	dgpName := types.RouterToSwitchPrefix + types.NodeLocalSwitch
-	if config.IPv4Mode {
-		dgpMac = util.IPAddrToHWAddr(net.ParseIP(types.V4NodeLocalDistributedGWPortIP)).String()
-	} else {
-		dgpMac = util.IPAddrToHWAddr(net.ParseIP(types.V6NodeLocalDistributedGWPortIP)).String()
+	dgpMac := util.IPAddrToHWAddr(net.ParseIP(types.V4NodeLocalDistributedGWPortIP)).String()
+	dgpNetworkV4 := fmt.Sprintf("%s/%d", types.V4NodeLocalDistributedGWPortIP, types.V4NodeLocalNATSubnetPrefix)
+	dgpNetworkV6 := fmt.Sprintf("%s/%d", types.V6NodeLocalDistributedGWPortIP, types.V6NodeLocalNATSubnetPrefix)
+
+	// check if there is already a distributed gateway port
+	dgpUUID, stderr, err := util.RunOVNNbctl("--data=bare", "--no-heading",
+		"--columns=_uuid", "find", "logical_router_port", "name="+dgpName)
+	if err != nil {
+		return fmt.Errorf("error executing find logical_router_port for distributed GW port, stderr: %q, %+v", stderr, err)
 	}
-	nbctlArgs = append(nbctlArgs,
-		"--may-exist", "lrp-add", types.OVNClusterRouter, dgpName, dgpMac,
-	)
-	if config.IPv4Mode && config.IPv6Mode {
-		nbctlArgs = append(nbctlArgs,
-			fmt.Sprintf("%s/%d", types.V4NodeLocalDistributedGWPortIP, types.V4NodeLocalNATSubnetPrefix),
-			fmt.Sprintf("%s/%d", types.V6NodeLocalDistributedGWPortIP, types.V6NodeLocalNATSubnetPrefix),
-		)
-	} else if config.IPv4Mode {
-		nbctlArgs = append(nbctlArgs,
-			fmt.Sprintf("%s/%d", types.V4NodeLocalDistributedGWPortIP, types.V4NodeLocalNATSubnetPrefix),
-		)
-	} else if config.IPv6Mode {
-		nbctlArgs = append(nbctlArgs,
-			fmt.Sprintf("%s/%d", types.V6NodeLocalDistributedGWPortIP, types.V6NodeLocalNATSubnetPrefix),
+
+	// if the port exists convert it to dual-stack if needed
+	// otherwise create a new dual-stack port
+	var nbctlArgs []string
+	if len(dgpUUID) > 0 {
+		klog.V(5).Infof("Distributed GW port already exists with uuid %s", dgpUUID)
+		// update the mac address if necessary
+		currentMac, _, err := util.RunOVNNbctl("--data=bare", "--no-heading",
+			"get", "logical_router_port", dgpUUID, "mac")
+		if err != nil {
+			return err
+		}
+		if currentMac != dgpMac {
+			_, _, err := util.RunOVNNbctl("--data=bare", "--no-heading",
+				"set", "logical_router_port", dgpUUID, "mac=\""+dgpMac+"\"")
+			if err != nil {
+				return err
+			}
+			klog.V(5).Infof("Updated mac address of distributed GW port from %s to %s", currentMac, dgpMac)
+		}
+		// update the port networks if necessary
+		currentNetworks, _, err := util.RunOVNNbctl("--data=bare", "--no-heading",
+			"get", "logical_router_port", dgpUUID, "networks")
+		if err != nil {
+			return err
+		}
+		// only consider converting from single to dual-stack
+		if len(strings.Split(currentNetworks, ",")) != 2 {
+			_, _, err := util.RunOVNNbctl("--data=bare", "--no-heading",
+				"set", "logical_router_port", dgpUUID, "networks=\""+dgpNetworkV4+"\",\""+dgpNetworkV6+"\"")
+			if err != nil {
+				return err
+			}
+			klog.V(5).Infof("Updated network addresses of distributed GW port from %s to %s,%s",
+				currentNetworks, dgpNetworkV4, dgpNetworkV6)
+		}
+	} else {
+		nbctlArgs = append(nbctlArgs, "lrp-add",
+			types.OVNClusterRouter, dgpName, dgpMac, dgpNetworkV4, dgpNetworkV6,
 		)
 	}
 	// set gateway chassis (the current master node) for distributed gateway port)
@@ -412,16 +440,8 @@ func addDistributedGWPort() error {
 	var dnatSnatNextHopMac string
 	// Only used for Error Strings
 	var nodeLocalNatSubnetNextHop string
-	if config.IPv4Mode && config.IPv6Mode {
-		dnatSnatNextHopMac = util.IPAddrToHWAddr(net.ParseIP(types.V4NodeLocalNATSubnetNextHop)).String()
-		nodeLocalNatSubnetNextHop = types.V4NodeLocalNATSubnetNextHop + " " + types.V6NodeLocalNATSubnetNextHop
-	} else if config.IPv4Mode {
-		dnatSnatNextHopMac = util.IPAddrToHWAddr(net.ParseIP(types.V4NodeLocalNATSubnetNextHop)).String()
-		nodeLocalNatSubnetNextHop = types.V4NodeLocalNATSubnetNextHop
-	} else if config.IPv6Mode {
-		dnatSnatNextHopMac = util.IPAddrToHWAddr(net.ParseIP(types.V6NodeLocalNATSubnetNextHop)).String()
-		nodeLocalNatSubnetNextHop = types.V6NodeLocalNATSubnetNextHop
-	}
+	dnatSnatNextHopMac = util.IPAddrToHWAddr(net.ParseIP(types.V4NodeLocalNATSubnetNextHop)).String()
+	nodeLocalNatSubnetNextHop = types.V4NodeLocalNATSubnetNextHop + " " + types.V6NodeLocalNATSubnetNextHop
 	stdout, stderr, err = util.RunOVNSbctl("--data=bare", "--no-heading", "--columns=_uuid", "find", "MAC_Binding",
 		"logical_port="+dgpName, fmt.Sprintf(`mac="%s"`, dnatSnatNextHopMac))
 	if err != nil {
@@ -447,21 +467,17 @@ func addDistributedGWPort() error {
 			"stdout: %q, stderr: %q, error: %v", types.OVNClusterRouter, datapath, stderr, err)
 	}
 
-	if config.IPv4Mode {
-		_, stderr, err = util.RunOVNSbctl("create", "mac_binding", "datapath="+datapath, "ip="+types.V4NodeLocalNATSubnetNextHop,
-			"logical_port="+dgpName, fmt.Sprintf(`mac="%s"`, dnatSnatNextHopMac))
-		if err != nil {
-			return fmt.Errorf("failed to create a MAC_Binding entry of (%s, %s) for distributed router port %s "+
-				"stderr: %q, error: %v", types.V4NodeLocalNATSubnetNextHop, dnatSnatNextHopMac, dgpName, stderr, err)
-		}
+	_, stderr, err = util.RunOVNSbctl("create", "mac_binding", "datapath="+datapath, "ip="+types.V4NodeLocalNATSubnetNextHop,
+		"logical_port="+dgpName, fmt.Sprintf(`mac="%s"`, dnatSnatNextHopMac))
+	if err != nil {
+		return fmt.Errorf("failed to create a MAC_Binding entry of (%s, %s) for distributed router port %s "+
+			"stderr: %q, error: %v", types.V4NodeLocalNATSubnetNextHop, dnatSnatNextHopMac, dgpName, stderr, err)
 	}
-	if config.IPv6Mode {
-		_, stderr, err = util.RunOVNSbctl("create", "mac_binding", "datapath="+datapath, fmt.Sprintf(`ip="%s"`, types.V6NodeLocalNATSubnetNextHop),
-			"logical_port="+dgpName, fmt.Sprintf(`mac="%s"`, dnatSnatNextHopMac))
-		if err != nil {
-			return fmt.Errorf("failed to create a MAC_Binding entry of (%s, %s) for distributed router port %s "+
-				"stderr: %q, error: %v", types.V6NodeLocalNATSubnetNextHop, dnatSnatNextHopMac, dgpName, stderr, err)
-		}
+	_, stderr, err = util.RunOVNSbctl("create", "mac_binding", "datapath="+datapath, fmt.Sprintf(`ip="%s"`, types.V6NodeLocalNATSubnetNextHop),
+		"logical_port="+dgpName, fmt.Sprintf(`mac="%s"`, dnatSnatNextHopMac))
+	if err != nil {
+		return fmt.Errorf("failed to create a MAC_Binding entry of (%s, %s) for distributed router port %s "+
+			"stderr: %q, error: %v", types.V6NodeLocalNATSubnetNextHop, dnatSnatNextHopMac, dgpName, stderr, err)
 	}
 	return nil
 }
@@ -573,8 +589,12 @@ func (oc *Controller) addNodeLocalNatEntries(node *kapi.Node, mgmtPortMAC string
 
 	mgmtPortName := types.K8sPrefix + node.Name
 	stdout, stderr, err := util.RunOVNNbctl("--if-exists", "lr-nat-del", types.OVNClusterRouter,
-		"dnat_and_snat", externalIP.String(), "--",
-		"lr-nat-add", types.OVNClusterRouter, "dnat_and_snat",
+		"dnat_and_snat", externalIP.String())
+	if err != nil {
+		return fmt.Errorf("failed to delete dnat_and_snat entry for the management port on node %s, "+
+			"stdout: %s, stderr: %q, error: %v", node.Name, stdout, stderr, err)
+	}
+	stdout, stderr, err = util.RunOVNNbctl("lr-nat-add", types.OVNClusterRouter, "dnat_and_snat",
 		externalIP.String(), mgmtPortIfAddr.IP.String(), mgmtPortName, mgmtPortMAC)
 	if err != nil {
 		return fmt.Errorf("failed to add dnat_and_snat entry for the management port on node %s, "+

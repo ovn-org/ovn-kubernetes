@@ -924,6 +924,9 @@ func (oc *Controller) destroyNetworkPolicy(np *networkPolicy, nsInfo *namespaceI
 // ingress/egress address set
 func (oc *Controller) handlePeerPodSelectorAddUpdate(gp *gressPolicy, obj interface{}) {
 	pod := obj.(*kapi.Pod)
+	if pod.Spec.NodeName == "" {
+		return
+	}
 	if err := gp.addPeerPod(pod); err != nil {
 		klog.Errorf(err.Error())
 	}
@@ -934,6 +937,9 @@ func (oc *Controller) handlePeerPodSelectorAddUpdate(gp *gressPolicy, obj interf
 // ingress/egress address set
 func (oc *Controller) handlePeerPodSelectorDelete(gp *gressPolicy, obj interface{}) {
 	pod := obj.(*kapi.Pod)
+	if pod.Spec.NodeName == "" {
+		return
+	}
 	if err := gp.deletePeerPod(pod); err != nil {
 		klog.Errorf(err.Error())
 	}

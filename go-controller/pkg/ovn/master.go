@@ -214,9 +214,11 @@ func (oc *Controller) upgradeOVNTopology(existingNodes *kapi.NodeList) error {
 
 	// If current DB version is greater than OvnSingleJoinSwitchTopoVersion, no need to upgrade to single switch topology
 	if ver < OvnSingleJoinSwitchTopoVersion {
+		klog.Infof("Upgrading to Single Switch OVN Topology")
 		err = oc.upgradeToSingleSwitchOVNTopology(existingNodes)
 	}
 	if err == nil && ver < OvnNamespacedDenyPGTopoVersion {
+		klog.Infof("Upgrading to Namespace Deny PortGroup OVN Topology")
 		err = oc.upgradeToNamespacedDenyPGOVNTopology(existingNodes)
 	}
 	return err
@@ -231,6 +233,7 @@ func (oc *Controller) upgradeOVNTopology(existingNodes *kapi.NodeList) error {
 // TODO: Verify that the cluster was not already called with a different global subnet
 //  If true, then either quit or perform a complete reconfiguration of the cluster (recreate switches/routers with new subnet values)
 func (oc *Controller) StartClusterMaster(masterNodeName string) error {
+	klog.Infof("Starting cluster master")
 	// The gateway router need to be connected to the distributed router via a per-node join switch.
 	// We need a subnet allocator that allocates subnet for this per-node join switch.
 	if config.IPv4Mode {
@@ -255,24 +258,26 @@ func (oc *Controller) StartClusterMaster(masterNodeName string) error {
 		klog.Errorf("Error in fetching nodes: %v", err)
 		return err
 	}
-
+	klog.V(5).Infof("Existing number of nodes: %d", len(existingNodes.Items))
 	err = oc.upgradeOVNTopology(existingNodes)
 	if err != nil {
 		klog.Errorf("Failed to upgrade OVN topology to version %d: %v", OvnCurrentTopologyVersion, err)
 		return err
 	}
 
+	klog.Infof("Allocating subnets")
 	var v4HostSubnetCount, v6HostSubnetCount float64
-
 	for _, clusterEntry := range config.Default.ClusterSubnets {
 		err := oc.masterSubnetAllocator.AddNetworkRange(clusterEntry.CIDR, clusterEntry.HostSubnetLength)
 		if err != nil {
 			return err
 		}
+		klog.V(5).Infof("Added network range %s to the allocator", clusterEntry.CIDR)
 		util.CalculateHostSubnetsForClusterEntry(clusterEntry, &v4HostSubnetCount, &v6HostSubnetCount)
 	}
 	for _, node := range existingNodes.Items {
 		hostSubnets, _ := util.ParseNodeHostSubnetAnnotation(&node)
+		klog.V(5).Infof("Node %s contains subnets: %v", node.Name, hostSubnets)
 		for _, hostSubnet := range hostSubnets {
 			err := oc.masterSubnetAllocator.MarkAllocatedNetwork(hostSubnet)
 			if err != nil {
@@ -281,6 +286,7 @@ func (oc *Controller) StartClusterMaster(masterNodeName string) error {
 			util.UpdateUsedHostSubnetsCount(hostSubnet, &oc.v4HostSubnetsUsed, &oc.v6HostSubnetsUsed, true)
 		}
 		nodeLocalNatIPs, _ := util.ParseNodeLocalNatIPAnnotation(&node)
+		klog.V(5).Infof("Node %s contains local NAT IPs: %v", node.Name, nodeLocalNatIPs)
 		for _, nodeLocalNatIP := range nodeLocalNatIPs {
 			var err error
 			if utilnet.IsIPv6(nodeLocalNatIP) {
@@ -854,31 +860,133 @@ func (oc *Controller) addNodeAnnotations(node *kapi.Node, hostSubnets []*net.IPN
 	return nil
 }
 
+func (oc *Controller) allocateNodeSubnets(node *kapi.Node) ([]*net.IPNet, []*net.IPNet, error) {
+	hostSubnets, err := util.ParseNodeHostSubnetAnnotation(node)
+	if err != nil {
+		// Log the error and try to allocate new subnets
+		klog.Infof("Failed to get node %s host subnets annotations: %v", node.Name, err)
+	}
+	allocatedSubnets := []*net.IPNet{}
+
+	// OVN can work in single-stack or dual-stack only.
+	currentHostSubnets := len(hostSubnets)
+	expectedHostSubnets := 1
+	// if dual-stack mode we expect one subnet per each IP family
+	if config.IPv4Mode && config.IPv6Mode {
+		expectedHostSubnets = 2
+	}
+
+	// node already has the expected subnets annotated
+	// assume IP families match, i.e. no IPv6 config and node annotation IPv4
+	if expectedHostSubnets == currentHostSubnets {
+		klog.Infof("Allocated Subnets %v on Node %s", hostSubnets, node.Name)
+		return hostSubnets, allocatedSubnets, nil
+	}
+
+	// Node doesn't have the expected subnets annotated
+	// it may happen it has more subnets assigned that configured in OVN
+	// like in a dual-stack to single-stack conversion
+	// or that it needs to allocate new subnet because it is a new node
+	// or has been converted from single-stack to dual-stack
+	klog.Infof("Expected %d subnets on node %s, found %d: %v",
+		expectedHostSubnets, node.Name, currentHostSubnets, hostSubnets)
+	// release unexpected subnets
+	// filter in place slice
+	// https://github.com/golang/go/wiki/SliceTricks#filter-in-place
+	foundIPv4 := false
+	foundIPv6 := false
+	n := 0
+	for _, subnet := range hostSubnets {
+		// if the subnet is not going to be reused release it
+		if config.IPv4Mode && utilnet.IsIPv4CIDR(subnet) && !foundIPv4 {
+			klog.V(5).Infof("Valid IPv4 allocated subnet %v on node %s", subnet, node.Name)
+			hostSubnets[n] = subnet
+			n++
+			foundIPv4 = true
+			continue
+		}
+		if config.IPv6Mode && utilnet.IsIPv6CIDR(subnet) && !foundIPv6 {
+			klog.V(5).Infof("Valid IPv6 allocated subnet %v on node %s", subnet, node.Name)
+			hostSubnets[n] = subnet
+			n++
+			foundIPv6 = true
+			continue
+		}
+		// this subnet is no longer needed
+		klog.V(5).Infof("Releasing subnet %v on node %s", subnet, node.Name)
+		err = oc.masterSubnetAllocator.ReleaseNetwork(subnet)
+		if err != nil {
+			klog.Warningf("Error releasing subnet %v on node %s", subnet, node.Name)
+		}
+	}
+	// recreate hostSubnets with the valid subnets
+	hostSubnets = hostSubnets[:n]
+	// allocate new subnets if needed
+	if config.IPv4Mode && !foundIPv4 {
+		allocatedHostSubnet, err := oc.masterSubnetAllocator.AllocateIPv4Network()
+		if err != nil {
+			return nil, nil, fmt.Errorf("error allocating network for node %s: %v", node.Name, err)
+		}
+		// the allocator returns nil if it can't provide a subnet
+		// we should filter them out or they will be appended to the slice
+		if allocatedHostSubnet != nil {
+			klog.V(5).Infof("Allocating subnet %v on node %s", allocatedHostSubnet, node.Name)
+			allocatedSubnets = append(allocatedSubnets, allocatedHostSubnet)
+			// Release the allocation on error
+			defer func() {
+				if err != nil {
+					klog.Warningf("Releasing subnet %v on node %s: %v", allocatedHostSubnet, node.Name, err)
+					errR := oc.masterSubnetAllocator.ReleaseNetwork(allocatedHostSubnet)
+					if errR != nil {
+						klog.Warningf("Error releasing subnet %v on node %s", allocatedHostSubnet, node.Name)
+					}
+				}
+			}()
+		}
+	}
+	if config.IPv6Mode && !foundIPv6 {
+		allocatedHostSubnet, err := oc.masterSubnetAllocator.AllocateIPv6Network()
+		if err != nil {
+			return nil, nil, fmt.Errorf("error allocating network for node %s: %v", node.Name, err)
+		}
+		// the allocator returns nil if it can't provide a subnet
+		// we should filter them out or they will be appended to the slice
+		if allocatedHostSubnet != nil {
+			klog.V(5).Infof("Allocating subnet %v on node %s", allocatedHostSubnet, node.Name)
+			allocatedSubnets = append(allocatedSubnets, allocatedHostSubnet)
+		}
+	}
+	// check if we were able to allocate the new subnets require
+	// this can only happen if OVN is not configured correctly
+	// so it will require a reconfiguration and restart.
+	wantedSubnets := expectedHostSubnets - currentHostSubnets
+	if wantedSubnets > 0 && len(allocatedSubnets) != wantedSubnets {
+		return nil, nil, fmt.Errorf("error allocating networks for node %s: %d subnets expected only new %d subnets allocated",
+			node.Name, expectedHostSubnets, len(allocatedSubnets))
+	}
+	hostSubnets = append(hostSubnets, allocatedSubnets...)
+	klog.Infof("Allocated Subnets %v on Node %s", hostSubnets, node.Name)
+	return hostSubnets, allocatedSubnets, nil
+}
+
 func (oc *Controller) addNode(node *kapi.Node) ([]*net.IPNet, error) {
 	oc.clearInitialNodeNetworkUnavailableCondition(node, nil)
-
-	hostSubnets, _ := util.ParseNodeHostSubnetAnnotation(node)
-	if hostSubnets != nil {
-		// Node already has subnet assigned; ensure its logical network is set up
-		return hostSubnets, oc.ensureNodeLogicalNetwork(node.Name, hostSubnets)
-	}
-
-	// Node doesn't have a subnet assigned; reserve a new one for it
-	hostSubnets, err := oc.masterSubnetAllocator.AllocateNetworks()
+	hostSubnets, allocatedSubnets, err := oc.allocateNodeSubnets(node)
 	if err != nil {
-		return nil, fmt.Errorf("error allocating network for node %s: %v", node.Name, err)
+		return nil, err
 	}
-	klog.Infof("Allocated node %s HostSubnet %s", node.Name, util.JoinIPNets(hostSubnets, ","))
-
+	// Release the allocation on error
 	defer func() {
-		// Release the allocation on error
 		if err != nil {
-			for _, hostSubnet := range hostSubnets {
-				_ = oc.masterSubnetAllocator.ReleaseNetwork(hostSubnet)
+			for _, allocatedSubnet := range allocatedSubnets {
+				klog.Warningf("Releasing subnet %v on node %s: %v", allocatedSubnet, node.Name, err)
+				errR := oc.masterSubnetAllocator.ReleaseNetwork(allocatedSubnet)
+				if errR != nil {
+					klog.Warningf("Error releasing subnet %v on node %s", allocatedSubnet, node.Name)
+				}
 			}
 		}
 	}()
-
 	// Ensure that the node's logical network has been created
 	err = oc.ensureNodeLogicalNetwork(node.Name, hostSubnets)
 	if err != nil {

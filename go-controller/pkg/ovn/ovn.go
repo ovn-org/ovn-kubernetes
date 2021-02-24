@@ -278,6 +278,8 @@ func NewOvnController(ovnClient *util.OVNClientset, wf *factory.WatchFactory,
 		lspEgressDenyCache:        make(map[string]int),
 		lspMutex:                  &sync.Mutex{},
 		eIPC: egressIPController{
+			assignmentRetryMutex:  &sync.Mutex{},
+			assignmentRetry:       make(map[string]bool),
 			namespaceHandlerMutex: &sync.Mutex{},
 			namespaceHandlerCache: make(map[string]factory.Handler),
 			podHandlerMutex:       &sync.Mutex{},
@@ -862,9 +864,11 @@ func (oc *Controller) WatchEgressIP() {
 	oc.watchFactory.AddEgressIPHandler(cache.ResourceEventHandlerFuncs{
 		AddFunc: func(obj interface{}) {
 			eIP := obj.(*egressipv1.EgressIP).DeepCopy()
+			oc.eIPC.assignmentRetryMutex.Lock()
 			if err := oc.addEgressIP(eIP); err != nil {
 				klog.Error(err)
 			}
+			oc.eIPC.assignmentRetryMutex.Unlock()
 			if err := oc.updateEgressIPWithRetry(eIP); err != nil {
 				klog.Error(err)
 			}
@@ -879,9 +883,11 @@ func (oc *Controller) WatchEgressIP() {
 				newEIP.Status = egressipv1.EgressIPStatus{
 					Items: []egressipv1.EgressIPStatusItem{},
 				}
+				oc.eIPC.assignmentRetryMutex.Lock()
 				if err := oc.addEgressIP(newEIP); err != nil {
 					klog.Error(err)
 				}
+				oc.eIPC.assignmentRetryMutex.Unlock()
 				if err := oc.updateEgressIPWithRetry(newEIP); err != nil {
 					klog.Error(err)
 				}
