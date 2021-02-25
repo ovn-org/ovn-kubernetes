@@ -11,7 +11,7 @@ require (
 	github.com/containernetworking/cni v0.8.0
 	github.com/containernetworking/plugins v0.8.7
 	github.com/coreos/go-iptables v0.4.5
-	github.com/ebay/go-ovn v0.1.1-0.20210203103701-8bb6a085d599
+	github.com/ebay/go-ovn v0.1.1-0.20210225191205-f6ee8f3f087c
 	github.com/ebay/libovsdb v0.2.1-0.20200719163122-3332afaeb27c
 	github.com/gogo/protobuf v1.3.2 // indirect
 	github.com/gorilla/mux v1.8.0

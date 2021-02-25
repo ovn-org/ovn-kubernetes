@@ -138,8 +138,8 @@ github.com/docopt/docopt-go v0.0.0-20180111231733-ee0de3bc6815/go.mod h1:WwZ+bS3
 github.com/dustin/go-humanize v0.0.0-20171111073723-bb3d318650d4/go.mod h1:HtrtbFcZ19U5GC7JDqmcUSB87Iq5E25KnS6fMYU6eOk=
 github.com/dustin/go-humanize v1.0.0 h1:VSnTsYCnlFHaM2/igO1h6X3HA71jcobQuxemgkq4zYo=
 github.com/dustin/go-humanize v1.0.0/go.mod h1:HtrtbFcZ19U5GC7JDqmcUSB87Iq5E25KnS6fMYU6eOk=
-github.com/ebay/go-ovn v0.1.1-0.20210203103701-8bb6a085d599 h1:TYkU7tQrZLjljJwD8FOM5zqPXPFomunresF2qjfTVgs=
-github.com/ebay/go-ovn v0.1.1-0.20210203103701-8bb6a085d599/go.mod h1:Du3Zt/R+DqyqtY5aNTd2gB9bg/igI1RR4fUj6AjmkjI=
+github.com/ebay/go-ovn v0.1.1-0.20210225191205-f6ee8f3f087c h1:ZhauuMfb01gW+x/QwV4vRQnBn8b5BX10r2fvC2FhvFs=
+github.com/ebay/go-ovn v0.1.1-0.20210225191205-f6ee8f3f087c/go.mod h1:Du3Zt/R+DqyqtY5aNTd2gB9bg/igI1RR4fUj6AjmkjI=
 github.com/ebay/libovsdb v0.0.0-20190718202342-e49b8c4e1142/go.mod h1:TPIbkgdnu8IfDA510pGDS3zYGmnvrPttnge3uhBQf/0=
 github.com/ebay/libovsdb v0.2.1-0.20200719163122-3332afaeb27c h1:YSECgIEwf07ycYVwVM8KXCgkpXajecPqRyAuyFELZxA=
 github.com/ebay/libovsdb v0.2.1-0.20200719163122-3332afaeb27c/go.mod h1:ZW5Fi5OPYcMy3EI20lW62TKBMHSlaDPlTqC3Gm4ev9Q=
