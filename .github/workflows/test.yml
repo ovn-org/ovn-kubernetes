@@ -141,7 +141,6 @@ jobs:
         exclude:
          # Not currently supported but needs to be.
          - {"ipfamily": {"ip": dualstack}, "target": {"shard": control-plane}}
-         - {"ipfamily": {"ip": ipv6}, "target": {"shard": control-plane}}
          # Limit matrix combinations for CI. DISABLED items added to exclude list:
          #   DISABLED  v4  ha     local
          #   ENABLED   v4  ha     shared
