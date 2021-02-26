@@ -1122,23 +1122,36 @@ func (oc *Controller) clearInitialNodeNetworkUnavailableCondition(origNode, newN
 }
 
 // delete chassis of the given nodeName/chassisName map
+// from chassis & chassis_private table
 func deleteChassis(ovnSBClient goovn.Client, chassisMap map[string]string) {
 	cmds := make([]*goovn.OvnCommand, 0, len(chassisMap))
 	for chassisHostname, chassisName := range chassisMap {
 		if chassisName != "" {
 			klog.Infof("Deleting stale chassis %s (%s)", chassisHostname, chassisName)
-			cmd, err := ovnSBClient.ChassisDel(chassisName)
+			chassisDelCmd, err := ovnSBClient.ChassisDel(chassisName)
 			if err != nil {
 				klog.Errorf("Unable to create the ChassisDel command for chassis: %s from the sbdb", chassisName)
 			} else {
-				cmds = append(cmds, cmd)
+				cmds = append(cmds, chassisDelCmd)
+			}
+			// check for chassis_private table in schema and
+			// if present, delete corresponding chassis row in chassis_private table
+			sbDbSchema := ovnSBClient.GetSchema()
+			if _, ok := sbDbSchema.Tables[goovn.TableChassisPrivate]; ok {
+				chassisPrivateDelCmd, err := ovnSBClient.ChassisPrivateDel(chassisName)
+				if err != nil {
+					klog.Errorf("Unable to create the ChassisPrivateDel command for chassis: %s from the sbdb", chassisName)
+				} else {
+					cmds = append(cmds, chassisPrivateDelCmd)
+				}
 			}
 		}
 	}
 
 	if len(cmds) != 0 {
 		if err := ovnSBClient.Execute(cmds...); err != nil {
-			klog.Errorf("Failed to delete chassis for node/chassis map %v: error: %v", chassisMap, err)
+			klog.Errorf("Failed to delete chassis row from chassis & chassis_private table "+
+				"for node/chassis map %v: error: %v", chassisMap, err)
 		}
 	}
 }
@@ -1276,12 +1289,24 @@ func (oc *Controller) deleteNodeChassis(nodeName string) error {
 			klog.Warningf("Chassis name is empty for node: %s", nodeName)
 			continue
 		}
-		cmd, err := oc.ovnSBClient.ChassisDel(chassis.Name)
+		chDeleteCmd, err := oc.ovnSBClient.ChassisDel(chassis.Name)
 		if err != nil {
 			return fmt.Errorf("unable to create the ChassisDel command for chassis: %s", chassis.Name)
+		} else {
+			cmds = append(cmds, chDeleteCmd)
+		}
+		// check for chassis_private table in db-schema and
+		// if present, delete corresponding chassis row from chassis_private table
+		sbDbSchema := oc.ovnSBClient.GetSchema()
+		if _, ok := sbDbSchema.Tables[goovn.TableChassisPrivate]; ok {
+			chPrivateDeleteCmd, err := oc.ovnSBClient.ChassisPrivateDel(chassis.Name)
+			if err != nil {
+				return fmt.Errorf("unable to create the ChassisPrivateDel command for chassis: %s", chassis.Name)
+			} else {
+				cmds = append(cmds, chPrivateDeleteCmd)
+			}
 		}
 		chNames = append(chNames, chassis.Name)
-		cmds = append(cmds, cmd)
 	}
 
 	if len(cmds) == 0 {
@@ -1289,8 +1314,8 @@ func (oc *Controller) deleteNodeChassis(nodeName string) error {
 	}
 
 	if err = oc.ovnSBClient.Execute(cmds...); err != nil {
-		return fmt.Errorf("failed to delete chassis %q for node %s: error: %v",
-			strings.Join(chNames, ","), nodeName, err)
+		return fmt.Errorf("failed to delete chassis row %q from chassis & chassis_private table "+
+			"for node %s: error: %v", strings.Join(chNames, ","), nodeName, err)
 	}
 	return nil
 }

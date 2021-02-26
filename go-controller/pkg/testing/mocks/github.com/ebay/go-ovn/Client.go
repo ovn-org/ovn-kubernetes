@@ -4,6 +4,8 @@ package mocks
 
 import (
 	goovn "github.com/ebay/go-ovn"
+	libovsdb "github.com/ebay/libovsdb"
+
 	mock "github.com/stretchr/testify/mock"
 )
 
@@ -357,6 +359,75 @@ func (_m *Client) ChassisList() ([]*goovn.Chassis, error) {
 	return r0, r1
 }
 
+// ChassisPrivateDel provides a mock function with given fields: chName
+func (_m *Client) ChassisPrivateDel(chName string) (*goovn.OvnCommand, error) {
+	ret := _m.Called(chName)
+
+	var r0 *goovn.OvnCommand
+	if rf, ok := ret.Get(0).(func(string) *goovn.OvnCommand); ok {
+		r0 = rf(chName)
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).(*goovn.OvnCommand)
+		}
+	}
+
+	var r1 error
+	if rf, ok := ret.Get(1).(func(string) error); ok {
+		r1 = rf(chName)
+	} else {
+		r1 = ret.Error(1)
+	}
+
+	return r0, r1
+}
+
+// ChassisPrivateGet provides a mock function with given fields: chName
+func (_m *Client) ChassisPrivateGet(chName string) ([]*goovn.ChassisPrivate, error) {
+	ret := _m.Called(chName)
+
+	var r0 []*goovn.ChassisPrivate
+	if rf, ok := ret.Get(0).(func(string) []*goovn.ChassisPrivate); ok {
+		r0 = rf(chName)
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).([]*goovn.ChassisPrivate)
+		}
+	}
+
+	var r1 error
+	if rf, ok := ret.Get(1).(func(string) error); ok {
+		r1 = rf(chName)
+	} else {
+		r1 = ret.Error(1)
+	}
+
+	return r0, r1
+}
+
+// ChassisPrivateList provides a mock function with given fields:
+func (_m *Client) ChassisPrivateList() ([]*goovn.ChassisPrivate, error) {
+	ret := _m.Called()
+
+	var r0 []*goovn.ChassisPrivate
+	if rf, ok := ret.Get(0).(func() []*goovn.ChassisPrivate); ok {
+		r0 = rf()
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).([]*goovn.ChassisPrivate)
+		}
+	}
+
+	var r1 error
+	if rf, ok := ret.Get(1).(func() error); ok {
+		r1 = rf()
+	} else {
+		r1 = ret.Error(1)
+	}
+
+	return r0, r1
+}
+
 // Close provides a mock function with given fields:
 func (_m *Client) Close() error {
 	ret := _m.Called()
@@ -524,6 +595,20 @@ func (_m *Client) Execute(cmds ...*goovn.OvnCommand) error {
 		r0 = rf(cmds...)
 	} else {
 		r0 = ret.Error(0)
+	}
+
+	return r0
+}
+
+// GetSchema provides a mock function with given fields:
+func (_m *Client) GetSchema() libovsdb.DatabaseSchema {
+	ret := _m.Called()
+
+	var r0 libovsdb.DatabaseSchema
+	if rf, ok := ret.Get(0).(func() libovsdb.DatabaseSchema); ok {
+		r0 = rf()
+	} else {
+		r0 = ret.Get(0).(libovsdb.DatabaseSchema)
 	}
 
 	return r0

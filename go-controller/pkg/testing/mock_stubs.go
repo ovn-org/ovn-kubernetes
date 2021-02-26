@@ -4,6 +4,7 @@ import (
 	"fmt"
 
 	goovn "github.com/ebay/go-ovn"
+	libovsdb "github.com/ebay/libovsdb"
 )
 
 // TODO: implement mock methods as we keep adding unit-tests
@@ -288,6 +289,16 @@ func (mock *MockOVNClient) EncapList(chname string) ([]*goovn.Encap, error) {
 	return nil, fmt.Errorf("method %s is not implemented yet", functionName())
 }
 
+// List Chassis rows in chassis_private table
+func (mock *MockOVNClient) ChassisPrivateList() ([]*goovn.ChassisPrivate, error) {
+	return nil, fmt.Errorf("method %s is not implemented yet", functionName())
+}
+
+// Get Chassis row in chassis_private table by given name
+func (mock *MockOVNClient) ChassisPrivateGet(chName string) ([]*goovn.ChassisPrivate, error) {
+	return nil, fmt.Errorf("method %s is not implemented yet", functionName())
+}
+
 // Set NB_Global table options
 func (mock *MockOVNClient) NBGlobalSetOptions(options map[string]string) (*goovn.OvnCommand, error) {
 	return nil, fmt.Errorf("method %s is not implemented yet", functionName())
@@ -336,4 +347,10 @@ func (mock *MockOVNClient) PortGroupDel(group string) (*goovn.OvnCommand, error)
 // Get PortGroup data structure if it exists
 func (mock *MockOVNClient) PortGroupGet(group string) (*goovn.PortGroup, error) {
 	return nil, fmt.Errorf("method %s is not implemented yet", functionName())
+}
+
+// Get ovn-db schema
+func (mock *MockOVNClient) GetSchema() libovsdb.DatabaseSchema {
+	var dbSchema libovsdb.DatabaseSchema
+	return dbSchema
 }
