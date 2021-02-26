@@ -2,24 +2,11 @@
 
 ## Installing OVS and OVN from packages
 
-For testing and POCs, we maintain OVS and OVN packages in a AWS VM.
-(For production, it is recommended that you build your own OVS packages.)
-To install packages from there, you can run:
-
-```
-sudo apt-get install apt-transport-https
-echo "deb http://3.19.28.122/openvswitch/stable /" |  sudo tee /etc/apt/sources.list.d/openvswitch.list
-wget -O - http://3.19.28.122/openvswitch/keyFile |  sudo apt-key add -
-sudo apt-get update
-```
-
 To install OVS bits on all nodes, run:
 
 ```
-sudo apt-get build-dep dkms
 sudo apt-get install python-six openssl -y
 
-sudo apt-get install openvswitch-datapath-dkms -y
 sudo apt-get install openvswitch-switch openvswitch-common -y
 ```
 
