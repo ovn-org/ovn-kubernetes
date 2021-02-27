@@ -151,7 +151,7 @@ set_election_timer() {
   echo "setting election timer for ${database} to ${election_timer} ms"
 
   current_election_timer=$(ovs-appctl -t ${OVN_RUNDIR}/ovn${db}_db.ctl cluster/status ${database} |
-    grep "Election" | sed "s/.*:[[:space:]]//")
+    grep "Election timer" | sed "s/.*:[[:space:]]//")
   if [[ -z "${current_election_timer}" ]]; then
     echo "Failed to get current election timer value. Exiting..."
     exit 11
