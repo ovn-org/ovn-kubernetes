@@ -328,11 +328,11 @@ func getMulticastACLMatch() string {
 }
 
 func getMulticastACLIgrMatchV4(addrSetName string) string {
-	return "ip4.src == $" + addrSetName + " && ip4.mcast"
+	return "(ip4.src == $" + addrSetName + " && ip4.mcast)"
 }
 
 func getMulticastACLIgrMatchV6(addrSetName string) string {
-	return "ip6.src == $" + addrSetName + " && " + ipv6DynamicMulticastMatch
+	return "(ip6.src == $" + addrSetName + " && " + ipv6DynamicMulticastMatch + ")"
 }
 
 // Creates the match string used for ACLs allowing incoming multicast into a
@@ -483,14 +483,14 @@ func (oc *Controller) createDefaultAllowMulticastPolicy() error {
 	err := addACLPortGroup("", oc.clusterRtrPortGroupUUID, fromLport,
 		defaultRoutedMcastAllowPriority, match, "allow", knet.PolicyTypeEgress, "")
 	if err != nil {
-		return fmt.Errorf("failed to create default deny multicast egress ACL: %v", err)
+		return fmt.Errorf("failed to create default allow multicast egress ACL: %v", err)
 	}
 
 	match = getACLMatch(clusterRtrPortGroupName, mcastMatch, knet.PolicyTypeIngress)
 	err = addACLPortGroup("", oc.clusterRtrPortGroupUUID, toLport,
 		defaultRoutedMcastAllowPriority, match, "allow", knet.PolicyTypeIngress, "")
 	if err != nil {
-		return fmt.Errorf("failed to create default deny multicast ingress ACL: %v", err)
+		return fmt.Errorf("failed to create default allow multicast ingress ACL: %v", err)
 	}
 	return nil
 }
