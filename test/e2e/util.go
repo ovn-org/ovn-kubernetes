@@ -282,3 +282,31 @@ func addressIsIP(address v1.NodeAddress) bool {
 	}
 	return true
 }
+
+// Returns pod's ipv4 and ipv6 addresses IN ORDER
+func getPodAddresses(pod *v1.Pod) (string, string) {
+	var ipv4Res, ipv6Res string
+	for _, a := range pod.Status.PodIPs {
+		if utilnet.IsIPv4String(a.IP) {
+			ipv4Res = a.IP
+		}
+		if utilnet.IsIPv6String(a.IP) {
+			ipv6Res = a.IP
+		}
+	}
+	return ipv4Res, ipv6Res
+}
+
+// Returns nodes's ipv4 and ipv6 addresses IN ORDER
+func getNodeAddresses(node *v1.Node) (string, string) {
+	var ipv4Res, ipv6Res string
+	for _, a := range node.Status.Addresses {
+		if utilnet.IsIPv4String(a.Address) {
+			ipv4Res = a.Address
+		}
+		if utilnet.IsIPv6String(a.Address) {
+			ipv6Res = a.Address
+		}
+	}
+	return ipv4Res, ipv6Res
+}
