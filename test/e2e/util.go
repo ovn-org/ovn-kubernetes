@@ -7,14 +7,11 @@ import (
 	"net"
 	"strings"
 
-	"github.com/onsi/ginkgo"
-	"github.com/pkg/errors"
 	v1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/util/intstr"
 	clientset "k8s.io/client-go/kubernetes"
 	"k8s.io/kubernetes/test/e2e/framework"
-	e2enode "k8s.io/kubernetes/test/e2e/framework/node"
 	utilnet "k8s.io/utils/net"
 )
 
@@ -312,113 +309,4 @@ func getNodeAddresses(node *v1.Node) (string, string) {
 		}
 	}
 	return ipv4Res, ipv6Res
-}
-
-// This sets up a listener that replies with the hostname, both on tcp and on udp
-func setupHostnameServers(container, address string, udpPort, tcpPort int) error {
-	cmd := []string{"docker", "exec", container, "bash", "-c", fmt.Sprintf("while true; do echo $(hostname) | nc -l -u %s %d | exit; done &", address, udpPort)}
-	_, err := runCommand(cmd...)
-	if err != nil {
-		return errors.Wrapf(err, "failed to setup udp listener on %s %s", address, container)
-	}
-
-	cmd = []string{"docker", "exec", container, "bash", "-c", fmt.Sprintf("while true; do echo $(hostname) | nc -l %s %d | exit; done &", address, tcpPort)}
-	_, err = runCommand(cmd...)
-	if err != nil {
-		return errors.Wrapf(err, "failed to setup tcp listener on %s %s", address, container)
-	}
-	return nil
-}
-
-// gatewayTestIPs collects all the addresses required for a external gateway
-// test.
-type gatewayTestIPs struct {
-	gatewayIPs [2]string
-	srcPodIP   string
-	nodeIP     string
-	targetIPs  []string
-}
-
-// setupGatewayContainers sets up external containers, adds routes to the nodes, sets up listeners.
-// All its needed for namespace / pod gateway tests.
-func setupGatewayContainers(f *framework.Framework, gwContainer1, gwContainer2, srcPodName string, updPort, tcpPort, numOfIPs int) (gatewayTestIPs, gatewayTestIPs) {
-	testIPv6 := false
-	addressesv4 := gatewayTestIPs{targetIPs: make([]string, 0)}
-	addressesv6 := gatewayTestIPs{targetIPs: make([]string, 0)}
-	// retrieve worker node names
-	nodes, err := e2enode.GetBoundedReadySchedulableNodes(f.ClientSet, 3)
-	framework.ExpectNoError(err)
-	if len(nodes.Items) < 3 {
-		framework.Failf(
-			"Test requires >= 3 Ready nodes, but there are only %v nodes",
-			len(nodes.Items))
-	}
-
-	ginkgo.By("Creating the gateway containers for the icmp test")
-	addressesv4.gatewayIPs[0] = createClusterExternalContainer(gwContainer1, "centos/tools", []string{"-itd", "--privileged", "--network", ciNetworkName}, []string{})
-	addressesv4.gatewayIPs[1] = createClusterExternalContainer(gwContainer2, "centos/tools", []string{"-itd", "--privileged", "--network", ciNetworkName}, []string{})
-	addressesv6.gatewayIPs[0] = ipv6AddressForContainer(gwContainer1)
-	addressesv6.gatewayIPs[1] = ipv6AddressForContainer(gwContainer2)
-
-	// Set up the destination ips to reach via the gw
-	for lastOctet := 1; lastOctet <= numOfIPs; lastOctet++ {
-		destIP := fmt.Sprintf("10.249.10.%d", lastOctet)
-		addressesv4.targetIPs = append(addressesv4.targetIPs, destIP)
-	}
-	for lastGroup := 1; lastGroup <= numOfIPs; lastGroup++ {
-		destIP := fmt.Sprintf("fc00:f853:ccd:e794::%d", lastGroup)
-		addressesv6.targetIPs = append(addressesv6.targetIPs, destIP)
-	}
-	framework.Logf("target ips are %v", addressesv4.targetIPs)
-	framework.Logf("target ipsv6 are %v", addressesv6.targetIPs)
-
-	node := nodes.Items[0]
-	addressesv4.nodeIP, addressesv6.nodeIP = getNodeAddresses(&node)
-	framework.Logf("the pod side node is %s and the source node ip is %s - %s", node.Name, addressesv4.nodeIP, addressesv6.nodeIP)
-
-	ginkgo.By("Creating the source pod to reach the destination ips from")
-	clientPod := createGenericPod(f, srcPodName, node.Name, f.Namespace.Name, []string{"bash", "-c", "sleep 20000"})
-	addressesv4.srcPodIP, addressesv6.srcPodIP = getPodAddresses(clientPod)
-	framework.Logf("the pod source pod ip(s) are %s - %s", addressesv4.srcPodIP, addressesv6.srcPodIP)
-
-	if addressesv6.srcPodIP != "" && addressesv6.nodeIP != "" {
-		testIPv6 = true
-	}
-
-	// The target ips are addresses added to the lo of each container.
-	// By setting the gateway annotation and using them as destination, we verify that
-	// the routing is able to reach the containers.
-	// A route back to the src pod must be set in order for the ping reply to work.
-	for _, containerName := range []string{gwContainer1, gwContainer2} {
-
-		ginkgo.By(fmt.Sprintf("Setting up the destination ips to %s", containerName))
-		for _, address := range addressesv4.targetIPs {
-			_, err = runCommand("docker", "exec", containerName, "ip", "address", "add", address+"/32", "dev", "lo")
-			framework.ExpectNoError(err, "failed to add the loopback ip to dev lo on the test container %s", containerName)
-		}
-
-		ginkgo.By(fmt.Sprintf("Adding a route from %s to the src pod", containerName))
-		_, err = runCommand("docker", "exec", containerName, "ip", "route", "add", addressesv4.srcPodIP, "via", addressesv4.nodeIP)
-		framework.ExpectNoError(err, "failed to add the pod host route on the test container %s", containerName)
-
-		ginkgo.By("Setting up the listeners on the gateway")
-		err = setupHostnameServers(containerName, addressesv4.targetIPs[0], updPort, tcpPort)
-		framework.ExpectNoError(err, "failed to setup listeners to container (ipv4)", containerName)
-
-		if testIPv6 {
-			ginkgo.By(fmt.Sprintf("Setting up the destination ips to %s (ipv6)", containerName))
-			for _, address := range addressesv6.targetIPs {
-				_, err = runCommand("docker", "exec", containerName, "ip", "address", "add", address+"/128", "dev", "lo")
-				framework.ExpectNoError(err, "ipv6: failed to add the loopback ip to dev lo on the test container %s", containerName)
-			}
-			ginkgo.By(fmt.Sprintf("Adding a route from %s to the src pod (ipv6)", containerName))
-			_, err = runCommand("docker", "exec", containerName, "ip", "-6", "route", "add", addressesv6.srcPodIP, "via", addressesv6.nodeIP)
-			framework.ExpectNoError(err, "ipv6: failed to add the pod host route on the test container %s", containerName)
-
-			ginkgo.By("Setting up the listeners on the gateway (v6)")
-			err = setupHostnameServers(containerName, addressesv6.targetIPs[0], updPort, tcpPort)
-			framework.ExpectNoError(err, "failed to setup listeners to container (ipv4)", containerName)
-		}
-	}
-	return addressesv4, addressesv6
 }
