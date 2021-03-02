@@ -735,7 +735,7 @@ func (e *egressIPController) createEgressReroutePolicy(podIps []net.IP, status e
 				"action=reroute",
 				fmt.Sprintf("match=\"%s\"", filterOption),
 				fmt.Sprintf("priority=%v", types.EgressIPReroutePriority),
-				fmt.Sprintf("nexthop=%s", gatewayRouterIP),
+				fmt.Sprintf("nexthop=\"%s\"", gatewayRouterIP),
 				fmt.Sprintf("external_ids:name=%s", egressIPName),
 				"--",
 				"add",
@@ -796,7 +796,7 @@ func findReroutePolicyIDs(filterOption, egressIPName string, gatewayRouterIP net
 		fmt.Sprintf("match=\"%s\"", filterOption),
 		fmt.Sprintf("priority=%v", types.EgressIPReroutePriority),
 		fmt.Sprintf("external_ids:name=%s", egressIPName),
-		fmt.Sprintf("nexthop=%s", gatewayRouterIP),
+		fmt.Sprintf("nexthop=\"%s\"", gatewayRouterIP),
 	)
 	if err != nil {
 		return nil, fmt.Errorf("unable to find logical router policy for EgressIP: %s, stderr: %s, err: %v", egressIPName, stderr, err)
@@ -992,8 +992,8 @@ func createNATRule(podIPs []net.IP, status egressipv1.EgressIPStatusItem, egress
 					"nat",
 					"type=snat",
 					fmt.Sprintf("logical_port=k8s-%s", status.Node),
-					fmt.Sprintf("external_ip=%s", status.EgressIP),
-					fmt.Sprintf("logical_ip=%s", podIP),
+					fmt.Sprintf("external_ip=\"%s\"", status.EgressIP),
+					fmt.Sprintf("logical_ip=\"%s\"", podIP),
 					fmt.Sprintf("external_ids:name=%s", egressIPName),
 					"--",
 					"add",
@@ -1044,8 +1044,8 @@ func findNatIDs(egressIPName, podIP, egressIP string) ([]string, error) {
 		"find",
 		"nat",
 		fmt.Sprintf("external_ids:name=%s", egressIPName),
-		fmt.Sprintf("logical_ip=%s", podIP),
-		fmt.Sprintf("external_ip=%s", egressIP),
+		fmt.Sprintf("logical_ip=\"%s\"", podIP),
+		fmt.Sprintf("external_ip=\"%s\"", egressIP),
 	)
 	if err != nil {
 		return nil, fmt.Errorf("unable to find nat ID, stderr: %s, err: %v", stderr, err)
