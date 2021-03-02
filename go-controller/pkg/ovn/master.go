@@ -224,6 +224,31 @@ func (oc *Controller) upgradeOVNTopology(existingNodes *kapi.NodeList) error {
 	return err
 }
 
+// enableOVNLogicalDataPathGroups sets an OVN flag to enable logical datapath
+// groups on OVN 20.12 and later. The option is ignored if OVN doesn't
+// understand it. Logical datapath groups reduce the size of the southbound
+// database in large clusters. ovn-controllers should be upgraded to a version
+// that supports them before the option is turned on by the master.
+func (oc *Controller) enableOVNLogicalDatapathGroups() error {
+	options, err := oc.ovnNBClient.NBGlobalGetOptions()
+	if err != nil {
+		klog.Errorf("Failed to get NB global options: %v", err)
+		return err
+	}
+	options["use_logical_dp_groups"] = "true"
+	cmd, err := oc.ovnNBClient.NBGlobalSetOptions(options)
+	if err != nil {
+		klog.Errorf("Failed to set NB global option to enable logical datapath groups: %v", err)
+		return err
+	}
+	if err := cmd.Execute(); err != nil {
+		klog.Errorf("Failed to enable logical datapath groups: %v", err)
+		return err
+	}
+
+	return nil
+}
+
 // StartClusterMaster runs a subnet IPAM and a controller that watches arrival/departure
 // of nodes in the cluster
 // On an addition to the cluster (node create), a new subnet is created for it that will translate
@@ -251,6 +276,11 @@ func (oc *Controller) StartClusterMaster(masterNodeName string) error {
 		// set aside the first two IPs for the nextHop on the host and for distributed gateway port
 		_ = oc.nodeLocalNatIPv6Allocator.Allocate(net.ParseIP(types.V6NodeLocalNATSubnetNextHop))
 		_ = oc.nodeLocalNatIPv6Allocator.Allocate(net.ParseIP(types.V6NodeLocalDistributedGWPortIP))
+	}
+
+	// Enable logical datapath groups for OVN 20.12 and later
+	if err := oc.enableOVNLogicalDatapathGroups(); err != nil {
+		return err
 	}
 
 	existingNodes, err := oc.kube.GetNodes()
