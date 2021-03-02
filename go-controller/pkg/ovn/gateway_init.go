@@ -74,7 +74,7 @@ func gatewayInit(nodeName string, clusterIPSubnet []*net.IPNet, hostSubnets []*n
 		// heading to the logical space with the Gateway router's IP so that
 		// return traffic comes back to the same gateway router.
 		stdout, stderr, err = util.RunOVNNbctl("set", "logical_router",
-			gatewayRouter, "options:lb_force_snat_ip="+util.JoinIPs(gwLRPIPs, " "))
+			gatewayRouter, "options:lb_force_snat_ip=router_ip")
 		if err != nil {
 			return fmt.Errorf("failed to set logical router %s's lb_force_snat_ip option, "+
 				"stdout: %q, stderr: %q, error: %v", gatewayRouter, stdout, stderr, err)

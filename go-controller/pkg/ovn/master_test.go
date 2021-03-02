@@ -1147,7 +1147,7 @@ var _ = ginkgo.Describe("Gateway Init Operations", func() {
 				"ovn-nbctl --timeout=15 -- --if-exists lrp-del " + types.GWRouterToJoinSwitchPrefix + gwRouter + " -- lrp-add " + gwRouter + " " + types.GWRouterToJoinSwitchPrefix + gwRouter + " " + lrpMAC + " " + lrpIP + "/16" + " " + lrpIPv6 + "/64",
 			})
 			fexec.AddFakeCmdsNoOutputNoError([]string{
-				"ovn-nbctl --timeout=15 set logical_router " + gwRouter + " options:lb_force_snat_ip=" + lrpIP + " " + lrpIPv6,
+				"ovn-nbctl --timeout=15 set logical_router " + gwRouter + " options:lb_force_snat_ip=router_ip",
 				"ovn-nbctl --timeout=15 set logical_router " + gwRouter + " options:snat-ct-zone=0",
 				"ovn-nbctl --timeout=15 set logical_router " + gwRouter + " options:always_learn_from_arp_request=false",
 				"ovn-nbctl --timeout=15 set logical_router " + gwRouter + " options:dynamic_neigh_routers=true",
@@ -1183,7 +1183,7 @@ var _ = ginkgo.Describe("Gateway Init Operations", func() {
 			})
 
 			fexec.AddFakeCmdsNoOutputNoError([]string{
-				"ovn-nbctl --timeout=15 set logical_router " + gwRouter + " options:lb_force_snat_ip=" + lrpIP + " " + lrpIPv6,
+				"ovn-nbctl --timeout=15 set logical_router " + gwRouter + " options:lb_force_snat_ip=router_ip",
 				"ovn-nbctl --timeout=15 set logical_router " + gwRouter + " options:snat-ct-zone=0",
 				"ovn-nbctl --timeout=15 set logical_router " + gwRouter + " options:always_learn_from_arp_request=false",
 				"ovn-nbctl --timeout=15 set logical_router " + gwRouter + " options:dynamic_neigh_routers=true",
