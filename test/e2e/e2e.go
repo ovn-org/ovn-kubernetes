@@ -1535,7 +1535,7 @@ var _ = ginkgo.Describe("e2e multiple ecmp external gateway validation", func() 
 
 	// This test runs a listener on the external container, returning the host name both on tcp and udp.
 	// The src pod tries to hit the remote address until both the containers are hit.
-	ginkgotable.FDescribeTable("Should validate connectivity to multiple external gateways for a UDP / TCP scenario", func(addresses *ipFamilyTestAddresses, protocol string, destPort int) {
+	ginkgotable.DescribeTable("Should validate connectivity to multiple external gateways for a UDP / TCP scenario", func(addresses *ipFamilyTestAddresses, protocol string, destPort int) {
 		if addresses.srcPodIP == "" || addresses.nodeIP == "" {
 			skipper.Skipf("Skipping as pod ip / node ip are not set pod ip %s node ip %s", addresses.srcPodIP, addresses.nodeIP)
 		}
