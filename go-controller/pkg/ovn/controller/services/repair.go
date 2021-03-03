@@ -32,9 +32,7 @@ type Repair struct {
 }
 
 // NewRepair creates a controller that periodically ensures that there is no stale data in OVN
-func NewRepair(interval time.Duration,
-	serviceLister corelisters.ServiceLister,
-) *Repair {
+func NewRepair(interval time.Duration, serviceLister corelisters.ServiceLister) *Repair {
 	return &Repair{
 		interval:      interval,
 		serviceLister: serviceLister,
@@ -79,15 +77,19 @@ func (r *Repair) runOnce() error {
 	// NodePort, ExternalIPs and Ingress OVN load balancers
 	gatewayRouters, _, err := gateway.GetOvnGateways()
 	if err != nil {
-		return errors.Wrapf(err, "Failed to get gateway router")
-	}
-	for _, p := range protocols {
-		for _, gatewayRouter := range gatewayRouters {
-			lbUUID, err := gateway.GetGatewayLoadBalancer(gatewayRouter, p)
-			if err != nil {
-				return errors.Wrapf(err, "Failed to get OVN GR load balancer for protocol %s", p)
+		klog.V(4).Infof("Failed to get gateway routers due to (%v). Skipping repairing OVN GR Load balancers", err)
+	} else {
+		for _, p := range protocols {
+			for _, gatewayRouter := range gatewayRouters {
+				lbUUID, err := gateway.GetGatewayLoadBalancer(gatewayRouter, p)
+				if err != nil {
+					if err != gateway.OVNGatewayLBIsEmpty {
+						klog.V(5).Infof("Failed to get OVN GR load balancer for protocol %s, err: %v", p, err)
+					}
+					continue
+				}
+				ovnLBCache[p] = append(ovnLBCache[p], lbUUID)
 			}
-			ovnLBCache[p] = append(ovnLBCache[p], lbUUID)
 		}
 	}
 
@@ -114,15 +116,16 @@ func (r *Repair) runOnce() error {
 		for _, lb := range ovnLBCache[p] {
 			vips, err := loadbalancer.GetLoadBalancerVIPs(lb)
 			if err != nil {
-				return errors.Wrapf(err, "Failed to get load balancer vips for %s", ovnLBCache[p])
+				klog.V(4).Infof("Failed to get vips for %s load balancer %s, err: %v", p, lb, err)
+				continue
 			}
 			for vip := range vips {
 				key := virtualIPKey(vip, p)
 				// Virtual IP and protocol doesn't belong to a Kubernetes service
 				if !svcVIPsProtocolMap.Has(key) {
-					klog.Infof("Deleting non-existing Kubernetes vip %s from OVN load balancer %s", vip, ovnLBCache[p])
+					klog.Infof("Deleting non-existing Kubernetes vip %s from OVN %s load balancer %s", vip, p, lb)
 					if err := loadbalancer.DeleteLoadBalancerVIP(lb, vip); err != nil {
-						return errors.Wrapf(err, "Failed to delete load balancer vips %s for %s", vip, ovnLBCache[p])
+						klog.V(4).Infof("Failed to delete %s load balancer vips %s for %s, err: %v", p, vip, lb, err)
 					}
 				}
 			}
