@@ -98,21 +98,21 @@ func setupLocalNodeAccessBridge(nodeName string, subnets []*net.IPNet) error {
 	return nil
 }
 
-func addSharedGatewayIptRules(service *kapi.Service, nodeIP *net.IPNet) {
-	rules := getGatewayIPTRules(service, "", nodeIP)
+func addSharedGatewayIptRules(service *kapi.Service) {
+	rules := getGatewayIPTRules(service, nil)
 	if err := addIptRules(rules); err != nil {
 		klog.Errorf("Failed to add iptables rules for service %s/%s: %v", service.Namespace, service.Name, err)
 	}
 }
 
-func delSharedGatewayIptRules(service *kapi.Service, nodeIP *net.IPNet) {
-	rules := getGatewayIPTRules(service, "", nodeIP)
+func delSharedGatewayIptRules(service *kapi.Service) {
+	rules := getGatewayIPTRules(service, nil)
 	if err := delIptRules(rules); err != nil {
 		klog.Errorf("Failed to delete iptables rules for service %s/%s: %v", service.Namespace, service.Name, err)
 	}
 }
 
-func syncSharedGatewayIptRules(services []interface{}, nodeIP *net.IPNet) {
+func syncSharedGatewayIptRules(services []interface{}) {
 	keepIPTRules := []iptRule{}
 	for _, service := range services {
 		svc, ok := service.(*kapi.Service)
@@ -120,10 +120,9 @@ func syncSharedGatewayIptRules(services []interface{}, nodeIP *net.IPNet) {
 			klog.Errorf("Spurious object in syncSharedGatewayIptRules: %v", service)
 			continue
 		}
-		keepIPTRules = append(keepIPTRules, getGatewayIPTRules(svc, "", nodeIP)...)
+		keepIPTRules = append(keepIPTRules, getGatewayIPTRules(svc, nil)...)
 	}
 	for _, chain := range []string{iptableNodePortChain, iptableExternalIPChain} {
 		recreateIPTRules("nat", chain, keepIPTRules)
-		recreateIPTRules("filter", chain, keepIPTRules)
 	}
 }

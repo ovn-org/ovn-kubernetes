@@ -11,17 +11,7 @@ Open vSwitch kernel module from the Open vSwitch repository to get all the
 features OVN needs (and any possible bug fixes) for any kernel.
 
 To install Open vSwitch kernel module from Open vSwitch repo manually, please
-read [INSTALL.rst].  For a quick start on Ubuntu,  you can install
-the kernel module package by:
-
-```
-sudo apt-get install apt-transport-https
-echo "deb http://3.19.28.122/openvswitch/stable /" |  sudo tee /etc/apt/sources.list.d/openvswitch.list
-wget -O - http://3.19.28.122/openvswitch/keyFile |  sudo apt-key add -
-sudo apt-get update
-sudo apt-get build-dep dkms
-sudo apt-get install openvswitch-datapath-dkms -y
-```
+read [INSTALL.rst](https://docs.openvswitch.org/en/latest/intro/install/). 
 
 ## Run DaemonSet and Deployment
 

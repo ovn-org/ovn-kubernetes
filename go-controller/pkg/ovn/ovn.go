@@ -1016,7 +1016,7 @@ func (oc *Controller) WatchNodes() {
 			}
 
 			_, failed = mgmtPortFailed.Load(node.Name)
-			if failed || macAddressChanged(oldNode, node) {
+			if failed || macAddressChanged(oldNode, node) || nodeSubnetChanged(oldNode, node) {
 				err := oc.syncNodeManagementPort(node, hostSubnets)
 				if err != nil {
 					if !util.IsAnnotationNotSetError(err) {
@@ -1198,6 +1198,12 @@ func macAddressChanged(oldNode, node *kapi.Node) bool {
 	oldMacAddress, _ := util.ParseNodeManagementPortMACAddress(oldNode)
 	macAddress, _ := util.ParseNodeManagementPortMACAddress(node)
 	return !bytes.Equal(oldMacAddress, macAddress)
+}
+
+func nodeSubnetChanged(oldNode, node *kapi.Node) bool {
+	oldSubnets, _ := util.ParseNodeHostSubnetAnnotation(oldNode)
+	newSubnets, _ := util.ParseNodeHostSubnetAnnotation(node)
+	return !reflect.DeepEqual(oldSubnets, newSubnets)
 }
 
 // noHostSubnet() compares the no-hostsubenet-nodes flag with node labels to see if the node is manageing its
