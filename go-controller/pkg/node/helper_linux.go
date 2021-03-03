@@ -12,7 +12,6 @@ import (
 	"github.com/vishvananda/netlink"
 	kapi "k8s.io/api/core/v1"
 	"k8s.io/klog/v2"
-	utilnet "k8s.io/utils/net"
 )
 
 // getDefaultGatewayInterfaceDetails returns the interface name on
@@ -93,28 +92,6 @@ func getDefaultGatewayInterfaceByFamily(family int) (string, net.IP, error) {
 		}
 	}
 	return "", net.IP{}, fmt.Errorf("failed to get default gateway interface")
-}
-
-func getDefaultIfAddr(defaultGatewayIntf string) (*net.IPNet, *net.IPNet, error) {
-	var v4IfAddr, v6IfAddr *net.IPNet
-	primaryLink, err := netlink.LinkByName(defaultGatewayIntf)
-	if err != nil {
-		return nil, nil, fmt.Errorf("error: unable to get link for default interface: %s, err: %v", defaultGatewayIntf, err)
-	}
-	addrs, err := netlink.AddrList(primaryLink, netlink.FAMILY_ALL)
-	if err != nil {
-		return nil, nil, fmt.Errorf("error: unable to list addresses for default interface, err: %v", err)
-	}
-	for _, addr := range addrs {
-		if addr.IP.IsGlobalUnicast() {
-			if utilnet.IsIPv6(addr.IP) {
-				v6IfAddr = addr.IPNet
-			} else {
-				v4IfAddr = addr.IPNet
-			}
-		}
-	}
-	return v4IfAddr, v6IfAddr, nil
 }
 
 func getIntfName(gatewayIntf string) (string, error) {

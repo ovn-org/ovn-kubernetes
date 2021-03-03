@@ -237,3 +237,14 @@ func MatchIPNetFamily(isIPv6 bool, ipnets []*net.IPNet) (*net.IPNet, error) {
 	}
 	return nil, fmt.Errorf("no %s value available", IPFamilyName(isIPv6))
 }
+
+// MatchIPStringFamily loops through the array of string and returns the
+// first entry in the list in the same IP Family, based on input flag isIPv6.
+func MatchIPStringFamily(isIPv6 bool, ipStrings []string) (string, error) {
+	for _, ipString := range ipStrings {
+		if utilnet.IsIPv6String(ipString) == isIPv6 {
+			return ipString, nil
+		}
+	}
+	return "", fmt.Errorf("no %s string available", IPFamilyName(isIPv6))
+}
