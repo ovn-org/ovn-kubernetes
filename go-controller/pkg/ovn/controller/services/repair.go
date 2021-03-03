@@ -98,7 +98,7 @@ func (r *Repair) runOnce() error {
 		return errors.Wrapf(err, "Failed to list Services from the cache")
 	}
 	for _, svc := range services {
-		for _, ip := range svc.Spec.ClusterIPs {
+		for _, ip := range util.GetClusterIPs(svc) {
 			for _, svcPort := range svc.Spec.Ports {
 				vip := util.JoinHostPortInt32(ip, svcPort.Port)
 				key := virtualIPKey(vip, svcPort.Protocol)

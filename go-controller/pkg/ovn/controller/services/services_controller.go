@@ -270,7 +270,7 @@ func (c *Controller) syncServices(key string) error {
 		return err
 	}
 	// Iterate over the ClusterIPs and Ports fields to create the corresponding OVN loadbalancers
-	for _, ip := range service.Spec.ClusterIPs {
+	for _, ip := range util.GetClusterIPs(service) {
 		family := v1.IPv4Protocol
 		if utilnet.IsIPv6String(ip) {
 			family = v1.IPv6Protocol
