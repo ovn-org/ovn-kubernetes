@@ -284,6 +284,18 @@ func newSharedGatewayOpenFlowManager(patchPort, macAddress, gwBridge, gwIntf str
 				fmt.Sprintf("cookie=%s, priority=14, table=1,icmp6,icmpv6_type=%d actions=FLOOD",
 					defaultOpenFlowCookie, icmpType))
 		}
+
+		// We send BFD traffic both on the host and in ovn
+		dftFlows = append(dftFlows,
+			fmt.Sprintf("cookie=%s, priority=13, table=1, in_port=%s, udp6, tp_dst=3784, actions=output:%s,output:LOCAL",
+				defaultOpenFlowCookie, ofportPhys, ofportPatch))
+	}
+
+	if config.IPv4Mode {
+		// We send BFD traffic both on the host and in ovn
+		dftFlows = append(dftFlows,
+			fmt.Sprintf("cookie=%s, priority=13, table=1, in_port=%s, udp, tp_dst=3784, actions=output:%s,output:LOCAL",
+				defaultOpenFlowCookie, ofportPhys, ofportPatch))
 	}
 
 	// table 1, all other connections do normal processing
