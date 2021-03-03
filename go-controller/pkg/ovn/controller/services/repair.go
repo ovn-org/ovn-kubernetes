@@ -13,10 +13,7 @@ import (
 	v1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/labels"
 	"k8s.io/apimachinery/pkg/util/sets"
-	"k8s.io/apimachinery/pkg/util/wait"
-
 	corelisters "k8s.io/client-go/listers/core/v1"
-	"k8s.io/client-go/util/retry"
 	"k8s.io/klog/v2"
 )
 
@@ -39,20 +36,6 @@ func NewRepair(interval time.Duration,
 		interval:      interval,
 		serviceLister: serviceLister,
 	}
-}
-
-// RunUntil starts the controller until the provided ch is closed.
-func (r *Repair) RunUntil(stopCh <-chan struct{}) {
-	wait.Until(func() {
-		if err := r.RunOnce(); err != nil {
-			klog.Errorf("Error repairing services: %v")
-		}
-	}, r.interval, stopCh)
-}
-
-// RunOnce verifies the state of Services and OVN LBs and returns an error if an unrecoverable problem occurs.
-func (r *Repair) RunOnce() error {
-	return retry.RetryOnConflict(retry.DefaultBackoff, r.runOnce)
 }
 
 // runOnce verifies the state of the cluster OVN LB VIP allocations and returns an error if an unrecoverable problem occurs.
