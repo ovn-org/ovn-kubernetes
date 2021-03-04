@@ -735,7 +735,7 @@ func (oc *Controller) WatchEgressFirewall() *factory.Handler {
 				klog.Error(deleteErrors)
 			}
 		},
-	}, nil)
+	}, oc.syncEgressFirewall)
 }
 
 // WatchEgressNodes starts the watching of egress assignable nodes and calls

@@ -76,6 +76,106 @@ func newEgressFirewallRule(rawEgressFirewallRule egressfirewallapi.EgressFirewal
 	return efr, nil
 }
 
+// This function is used to sync egress firewall setup. It does three "cleanups"
+
+// - 	Cleanup the old implementation (using LRP) in local GW mode -> new implementation (using ACLs) local GW mode
+//  	For this it just deletes all LRP setup done for egress firewall
+
+// -	Cleanup the new local GW mode implementation (using ACLs on the node switch) -> shared GW mode implementation (using ACLs on the join switch)
+//  	For this it just deletes all ACL setup done for egress firewall on the node switches
+
+// -	Cleanup the old implementation (using LRP) in local GW mode -> shared GW mode implementation (using ACLs on the join switch)
+//  	For this it just deletes all LRP setup done for egress firewall
+
+// NOTE: Utilize the fact that we know that all egress firewall related setup must have a priority: types.MinimumReservedEgressFirewallPriority <= priority <= types.EgressFirewallStartPriority
+func (oc *Controller) syncEgressFirewall(egressFirwalls []interface{}) {
+	if config.Gateway.Mode == config.GatewayModeShared {
+		// Mode is shared gateway mode, make sure to delete all ACLs on the node switches
+		egressFirewallACLIDs, stderr, err := util.RunOVNNbctl(
+			"--data=bare",
+			"--no-heading",
+			"--columns=_uuid",
+			"--format=table",
+			"find",
+			"acl",
+			fmt.Sprintf("priority<=%s", types.EgressFirewallStartPriority),
+			fmt.Sprintf("priority>=%s", types.MinimumReservedEgressFirewallPriority),
+		)
+		if err != nil {
+			klog.Errorf("Unable to list egress firewall logical router policies, cannot cleanup old stale data, stderr: %s, err: %v", stderr, err)
+			return
+		}
+		if egressFirewallACLIDs != "" {
+			nodes, err := oc.watchFactory.GetNodes()
+			if err != nil {
+				klog.Errorf("Unable to cleanup egress firewall ACLs remaining from local gateway mode, cannot list nodes, err: %v", err)
+				return
+			}
+			logicalSwitches := []string{}
+			for _, node := range nodes {
+				logicalSwitches = append(logicalSwitches, node.Name)
+			}
+			for _, logicalSwitch := range logicalSwitches {
+				switchACLs, stderr, err := util.RunOVNNbctl(
+					"--data=bare",
+					"--no-heading",
+					"--columns=acls",
+					"list",
+					"logical_switch",
+					logicalSwitch,
+				)
+				if err != nil {
+					klog.Errorf("Unable to remove egress firewall acl, cannot list ACLs on switch: %s, stderr: %s, err: %v", logicalSwitch, stderr, err)
+				}
+				for _, egressFirewallACLID := range strings.Split(egressFirewallACLIDs, "\n") {
+					if strings.Contains(switchACLs, egressFirewallACLID) {
+						_, stderr, err := util.RunOVNNbctl(
+							"remove",
+							"logical_switch",
+							logicalSwitch,
+							"acls",
+							egressFirewallACLID,
+						)
+						if err != nil {
+							klog.Errorf("Unable to remove egress firewall acl: %s on %s, cannot cleanup old stale data, stderr: %s, err: %v", egressFirewallACLID, logicalSwitch, stderr, err)
+						}
+					}
+				}
+			}
+		}
+	}
+	// In any gateway mode, make sure to delete all LRPs on ovn_cluster_router.
+	// This covers old local GW mode -> shared GW and old local GW mode -> new local GW mode
+	egressFirewallPolicyIDs, stderr, err := util.RunOVNNbctl(
+		"--data=bare",
+		"--no-heading",
+		"--columns=_uuid",
+		"--format=table",
+		"find",
+		"logical_router_policy",
+		fmt.Sprintf("priority<=%s", types.EgressFirewallStartPriority),
+		fmt.Sprintf("priority>=%s", types.MinimumReservedEgressFirewallPriority),
+	)
+	if err != nil {
+		klog.Errorf("Unable to list egress firewall logical router policies, cannot cleanup old stale data, stderr: %s, err: %v", stderr, err)
+		return
+	}
+	if egressFirewallPolicyIDs != "" {
+		for _, egressFirewallPolicyID := range strings.Split(egressFirewallPolicyIDs, "\n") {
+			_, stderr, err := util.RunOVNNbctl(
+				"remove",
+				"logical_router",
+				types.OVNClusterRouter,
+				"policies",
+				egressFirewallPolicyID,
+			)
+			if err != nil {
+				klog.Errorf("Unable to remove egress firewall policy: %s on %s, cannot cleanup old stale data, stderr: %s, err: %v", egressFirewallPolicyID, types.OVNClusterRouter, stderr, err)
+			}
+		}
+	}
+}
+
 func (oc *Controller) addEgressFirewall(egressFirewall *egressfirewallapi.EgressFirewall) error {
 	klog.Infof("Adding egressFirewall %s in namespace %s", egressFirewall.Name, egressFirewall.Namespace)
 	nsInfo, err := oc.waitForNamespaceLocked(egressFirewall.Namespace)
