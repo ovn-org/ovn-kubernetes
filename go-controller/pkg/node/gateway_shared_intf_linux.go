@@ -39,12 +39,7 @@ func setupLocalNodeAccessBridge(nodeName string, subnets []*net.IPNet) error {
 		return err
 	}
 
-	var macAddress string
-	if config.IPv4Mode {
-		macAddress = util.IPAddrToHWAddr(net.ParseIP(types.V4NodeLocalNATSubnetNextHop)).String()
-	} else {
-		macAddress = util.IPAddrToHWAddr(net.ParseIP(types.V6NodeLocalNATSubnetNextHop)).String()
-	}
+	macAddress := util.IPAddrToHWAddr(net.ParseIP(types.V4NodeLocalNATSubnetNextHop)).String()
 
 	_, stderr, err = util.RunOVSVsctl(
 		"--may-exist", "add-port", localBridgeName, localnetGatewayNextHopPort,
