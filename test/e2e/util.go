@@ -6,10 +6,14 @@ import (
 	"fmt"
 	"net"
 	"strings"
+	"time"
 
+	"github.com/onsi/gomega"
 	v1 "k8s.io/api/core/v1"
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/util/intstr"
+	"k8s.io/client-go/kubernetes"
 	clientset "k8s.io/client-go/kubernetes"
 	"k8s.io/kubernetes/test/e2e/framework"
 	utilnet "k8s.io/utils/net"
@@ -309,4 +313,16 @@ func getNodeAddresses(node *v1.Node) (string, string) {
 		}
 	}
 	return ipv4Res, ipv6Res
+}
+
+// deletePodSyncNS deletes a pod and wait for its deletion.
+// accept the namespace as a parameter.
+func deletePodSyncNS(clientSet kubernetes.Interface, namespace, podName string) {
+	err := clientSet.CoreV1().Pods(namespace).Delete(context.Background(), podName, metav1.DeleteOptions{})
+	framework.ExpectNoError(err, "Failed to get delete the pod in the default namespace", podName)
+
+	gomega.Eventually(func() bool {
+		_, err := clientSet.CoreV1().Pods(namespace).Get(context.Background(), podName, metav1.GetOptions{})
+		return apierrors.IsNotFound(err)
+	}, 3*time.Minute, 5*time.Second).Should(gomega.BeTrue(), "Pod was not being deleted")
 }
