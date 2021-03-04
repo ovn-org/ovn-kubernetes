@@ -15,6 +15,12 @@ const (
 	OvnGatewayLoadBalancerIds = "lb_gateway_router"
 )
 
+var (
+	// It is perfectly normal to have OVN GW routers to not to have LB rules. This happens
+	// when NodePort is disabled for that node.
+	OVNGatewayLBIsEmpty = errors.New("load balancer item in OVN DB is an empty string")
+)
+
 // GetOvnGateways return all created gateways.
 func GetOvnGateways() ([]string, string, error) {
 	out, stderr, err := util.RunOVNNbctl("--data=bare", "--no-heading",
@@ -66,7 +72,7 @@ func GetGatewayLoadBalancer(gatewayRouter string, protocol kapi.Protocol) (strin
 		return "", err
 	}
 	if loadBalancer == "" {
-		return "", fmt.Errorf("load balancer item in OVN DB is an empty string")
+		return "", OVNGatewayLBIsEmpty
 	}
 	return loadBalancer, nil
 }
@@ -77,7 +83,7 @@ func GetGatewayLoadBalancers(gatewayRouter string) (string, string, string, erro
 	enabledProtos := []kapi.Protocol{kapi.ProtocolTCP, kapi.ProtocolUDP, kapi.ProtocolSCTP}
 	for _, protocol := range enabledProtos {
 		lbID, err := GetGatewayLoadBalancer(gatewayRouter, protocol)
-		if err != nil && err.Error() != "load balancer item in OVN DB is an empty string" {
+		if err != nil && err != OVNGatewayLBIsEmpty {
 			return "", "", "", err
 		}
 		protoLBMap[protocol] = lbID

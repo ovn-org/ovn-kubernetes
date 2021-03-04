@@ -89,8 +89,6 @@ func (ovn *Controller) AddEndpoints(ep *kapi.Endpoints) error {
 				klog.Errorf("Error in creating Cluster IP for svc %s, target port: %d - %v\n", svc.Name, lbEps.Port, err)
 				continue
 			}
-			vip := util.JoinHostPortInt32(svc.Spec.ClusterIP, svcPort.Port)
-			ovn.AddServiceVIPToName(vip, svcPort.Protocol, svc.Namespace, svc.Name)
 			if len(svc.Spec.ExternalIPs) > 0 {
 				gateways, _, err := ovn.getOvnGateways()
 				if err != nil {

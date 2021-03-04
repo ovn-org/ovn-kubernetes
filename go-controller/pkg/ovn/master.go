@@ -446,6 +446,17 @@ func (oc *Controller) SetupMaster(masterNodeName string) error {
 		}
 	}
 
+	// Create load balancers
+
+	// If we enable idling we have to set the option before creating the loadbalancers
+	if config.Kubernetes.OVNEmptyLbEvents {
+		_, _, err := util.RunOVNNbctl("set", "nb_global", ".", "options:controller_event=true")
+		if err != nil {
+			klog.Error("Unable to enable controller events. Unidling not possible")
+			return err
+		}
+	}
+
 	// Create 3 load-balancers for east-west traffic for UDP, TCP, SCTP
 	oc.TCPLoadBalancerUUID, stderr, err = util.RunOVNNbctl("--data=bare", "--no-heading", "--columns=_uuid", "find", "load_balancer", "external_ids:k8s-cluster-lb-tcp=yes")
 	if err != nil {
@@ -796,7 +807,7 @@ func (oc *Controller) ensureNodeLogicalNetwork(nodeName string, hostSubnets []*n
 				stdout, stderr, err = util.RunOVNNbctl("set", "logical_switch",
 					nodeName, "other-config:mcast_querier=\"true\"",
 					"other-config:mcast_eth_src=\""+nodeLRPMAC.String()+"\"",
-					"other-config:mcast_ip6_src=\""+v6Gateway.String()+"\"")
+					"other-config:mcast_ip6_src=\""+util.HWAddrToIPv6LLA(nodeLRPMAC).String()+"\"")
 				if err != nil {
 					klog.Errorf("Failed to enable MLD Querier on logical switch %v, stdout: %q, stderr: %q, error: %v",
 						nodeName, stdout, stderr, err)

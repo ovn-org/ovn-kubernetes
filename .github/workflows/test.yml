@@ -112,9 +112,11 @@ jobs:
           - shard: shard-conformance
             hybrid-overlay: false
             multicast-enable: false
+            emptylb-enable: false
           - shard: control-plane
             hybrid-overlay: true
             multicast-enable: true
+            emptylb-enable: true
         ha:
          - enabled: "true"
            name: "HA"
@@ -172,6 +174,7 @@ jobs:
       OVN_HYBRID_OVERLAY_ENABLE: "${{ matrix.target.hybrid-overlay }}"
       OVN_GATEWAY_MODE: "${{ matrix.gateway-mode }}"
       OVN_MULTICAST_ENABLE:  "${{ matrix.target.multicast-enable }}"
+      OVN_EMPTY_LB_EVENTS: "${{ matrix.target.emptylb-enable }}"
     steps:
 
     - name: Free up disk space
