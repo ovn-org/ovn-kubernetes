@@ -996,6 +996,11 @@ func (oc *Controller) WatchNodes() {
 				}
 			}
 
+			if nodeChassisChanged(oldNode, node) {
+				// delete stale chassis in SBDB if any
+				oc.deleteStaleNodeChassis(node)
+			}
+
 			oc.clearInitialNodeNetworkUnavailableCondition(oldNode, node)
 
 			_, failed = gatewaysFailed.Load(node.Name)
@@ -1131,6 +1136,12 @@ func nodeSubnetChanged(oldNode, node *kapi.Node) bool {
 	oldSubnets, _ := util.ParseNodeHostSubnetAnnotation(oldNode)
 	newSubnets, _ := util.ParseNodeHostSubnetAnnotation(node)
 	return !reflect.DeepEqual(oldSubnets, newSubnets)
+}
+
+func nodeChassisChanged(oldNode, node *kapi.Node) bool {
+	oldChassis, _ := util.ParseNodeChassisIDAnnotation(oldNode)
+	newChassis, _ := util.ParseNodeChassisIDAnnotation(node)
+	return oldChassis != newChassis
 }
 
 // noHostSubnet() compares the no-hostsubenet-nodes flag with node labels to see if the node is manageing its
