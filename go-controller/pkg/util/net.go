@@ -166,6 +166,29 @@ func IPAddrToHWAddr(ip net.IP) net.HardwareAddr {
 	return net.HardwareAddr{0x0A, 0x58, hash[0], hash[1], hash[2], hash[3]}
 }
 
+// HWAddrToIPv6LLA generates the IPv6 link local address from the given hwaddr,
+// with prefix 'fe80:/64'.
+func HWAddrToIPv6LLA(hwaddr net.HardwareAddr) net.IP {
+	return net.IP{
+		0xfe,
+		0x80,
+		0x00,
+		0x00,
+		0x00,
+		0x00,
+		0x00,
+		0x00,
+		(hwaddr[0] ^ 0x02),
+		hwaddr[1],
+		hwaddr[2],
+		0xff,
+		0xfe,
+		hwaddr[3],
+		hwaddr[4],
+		hwaddr[5],
+	}
+}
+
 // JoinIPs joins the string forms of an array of net.IP, as with strings.Join
 func JoinIPs(ips []net.IP, sep string) string {
 	b := &strings.Builder{}

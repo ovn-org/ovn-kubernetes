@@ -795,7 +795,7 @@ func (oc *Controller) ensureNodeLogicalNetwork(nodeName string, hostSubnets []*n
 				stdout, stderr, err = util.RunOVNNbctl("set", "logical_switch",
 					nodeName, "other-config:mcast_querier=\"true\"",
 					"other-config:mcast_eth_src=\""+nodeLRPMAC.String()+"\"",
-					"other-config:mcast_ip6_src=\""+v6Gateway.String()+"\"")
+					"other-config:mcast_ip6_src=\""+util.HWAddrToIPv6LLA(nodeLRPMAC).String()+"\"")
 				if err != nil {
 					klog.Errorf("Failed to enable MLD Querier on logical switch %v, stdout: %q, stderr: %q, error: %v",
 						nodeName, stdout, stderr, err)

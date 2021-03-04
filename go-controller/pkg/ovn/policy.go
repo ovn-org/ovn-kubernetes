@@ -327,12 +327,16 @@ func getMulticastACLMatch() string {
 	return "(ip4.mcast || mldv1 || mldv2 || " + ipv6DynamicMulticastMatch + ")"
 }
 
+// Allow IGMP traffic (e.g., IGMP queries) and namespace multicast traffic
+// towards pods.
 func getMulticastACLIgrMatchV4(addrSetName string) string {
-	return "(ip4.src == $" + addrSetName + " && ip4.mcast)"
+	return "(igmp || (ip4.src == $" + addrSetName + " && ip4.mcast))"
 }
 
+// Allow MLD traffic (e.g., MLD queries) and namespace multicast traffic
+// towards pods.
 func getMulticastACLIgrMatchV6(addrSetName string) string {
-	return "(ip6.src == $" + addrSetName + " && " + ipv6DynamicMulticastMatch + ")"
+	return "(mldv1 || mldv2 || (ip6.src == $" + addrSetName + " && " + ipv6DynamicMulticastMatch + "))"
 }
 
 // Creates the match string used for ACLs allowing incoming multicast into a
