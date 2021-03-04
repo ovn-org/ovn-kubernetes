@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/google/go-cmp/cmp"
@@ -139,15 +140,20 @@ var _ = ginkgo.Describe("e2e non-vxlan external gateway through a gateway pod", 
 			g.Go(func() error { return checkPingOnContainer(gwContainer1) })
 			g.Go(func() error { return checkPingOnContainer(gwContainer2) })
 
+			pingSync := sync.WaitGroup{}
 			// Verify the external gateway loopback address running on the external container is reachable and
 			// that traffic from the source ping pod is proxied through the pod in the default namespace
 			ginkgo.By("Verifying connectivity via the gateway namespace to the remote addresses")
 			for _, t := range addresses.targetIPs {
+				pingSync.Add(1)
 				go func(target string) {
+					defer ginkgo.GinkgoRecover()
+					defer pingSync.Done()
 					_, err := framework.RunKubectl(f.Namespace.Name, "exec", srcPingPodName, testContainerFlag, "--", "ping", "-c", testTimeout, target)
 					framework.ExpectNoError(err, "Failed to ping the remote gateway network from pod", target, srcPingPodName)
 				}(t)
 			}
+			pingSync.Wait()
 			err := g.Wait()
 			framework.ExpectNoError(err, "failed to reach the mock gateway(s)")
 		},
@@ -293,18 +299,22 @@ var _ = ginkgo.Describe("e2e multiple external gateway validation", func() {
 		g.Go(func() error { return checkPingOnContainer(gwContainer1) })
 		g.Go(func() error { return checkPingOnContainer(gwContainer2) })
 
+		pingSync := sync.WaitGroup{}
+
 		// spawn a goroutine to asynchronously (to speed up the test)
 		// to ping the gateway loopbacks on both containers via ECMP.
 		for _, address := range addresses.targetIPs {
+			pingSync.Add(1)
 			go func(target string) {
 				defer ginkgo.GinkgoRecover()
+				defer pingSync.Done()
 				_, err := framework.RunKubectl(f.Namespace.Name, "exec", srcPodName, testContainerFlag, "--", "ping", "-c", testTimeout, target)
 				if err != nil {
 					framework.Logf("error generating a ping from the test pod %s: %v", srcPodName, err)
 				}
 			}(address)
 		}
-
+		pingSync.Wait()
 		err := g.Wait()
 		framework.ExpectNoError(err, "failed to reach the mock gateway(s)")
 	}, ginkgotable.Entry("IPV4", &addressesv4, "icmp"),
