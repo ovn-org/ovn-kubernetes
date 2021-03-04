@@ -1009,6 +1009,9 @@ func (oc *Controller) addNode(node *kapi.Node) ([]*net.IPNet, error) {
 		return nil, err
 	}
 
+	// delete stale chassis in SBDB if any
+	oc.deleteStaleNodeChassis(node)
+
 	// If node annotation succeeds, update the used subnet count
 	for _, hostSubnet := range hostSubnets {
 		util.UpdateUsedHostSubnetsCount(hostSubnet,
@@ -1018,6 +1021,45 @@ func (oc *Controller) addNode(node *kapi.Node) ([]*net.IPNet, error) {
 	metrics.RecordSubnetUsage(oc.v4HostSubnetsUsed, oc.v6HostSubnetsUsed)
 
 	return hostSubnets, nil
+}
+
+// check if any existing chassis entries in the SBDB mismatches with node's chassisID annotation
+func (oc *Controller) checkNodeChassisMismatch(node *kapi.Node) (bool, error) {
+	chassisID, err := util.ParseNodeChassisIDAnnotation(node)
+	if err != nil {
+		return false, nil
+	}
+
+	chassisList, err := oc.ovnSBClient.ChassisGet(node.Name)
+	if err != nil {
+		return false, fmt.Errorf("failed to get chassis list for node %s: error: %v", node.Name, err)
+	}
+
+	if len(chassisList) == 0 {
+		return false, nil
+	}
+
+	for _, chassis := range chassisList {
+		if chassis.Name == chassisID {
+			return false, nil
+		}
+	}
+	return true, nil
+}
+
+// delete stale chassis in SBDB if system-id of the specific node has changed.
+func (oc *Controller) deleteStaleNodeChassis(node *kapi.Node) {
+	mismatch, err := oc.checkNodeChassisMismatch(node)
+	if err != nil {
+		klog.Errorf("Failed to check if there is any stale chassis for node %s in SBDB: %v", node.Name, err)
+	} else if mismatch {
+		klog.V(5).Infof("Node %s is now with a new chassis ID, delete its stale chassis in SBDB", node.Name)
+		if err = oc.deleteNodeChassis(node.Name); err != nil {
+			oc.recorder.Eventf(node, kapi.EventTypeWarning, "ErrorMismatchChassis",
+				"Node %s is now with a new chassis ID. Its stale chassis entry is still in the SBDB",
+				node.Name)
+		}
+	}
 }
 
 func (oc *Controller) deleteNodeHostSubnet(nodeName string, subnet *net.IPNet) error {
@@ -1327,7 +1369,7 @@ func (oc *Controller) deleteNodeChassis(nodeName string) error {
 	}
 
 	if len(cmds) == 0 {
-		return fmt.Errorf("failed to find chassis for node %s", nodeName)
+		return nil
 	}
 
 	if err = oc.ovnSBClient.Execute(cmds...); err != nil {

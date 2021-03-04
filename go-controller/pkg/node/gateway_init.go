@@ -198,13 +198,19 @@ func (n *OvnNode) initGateway(subnets []*net.IPNet, nodeAnnotator kube.Annotator
 		klog.Info("Preparing Shared Gateway")
 		gw, err = newSharedGateway(n.name, subnets, gatewayNextHops, gatewayIntf, nodeAnnotator)
 	case config.GatewayModeDisabled:
+		var chassisID string
 		klog.Info("Gateway Mode is disabled")
 		gw = &gateway{
 			initFunc:  func() error { return nil },
 			readyFunc: func() (bool, error) { return true, nil },
 		}
+		chassisID, err = util.GetNodeChassisID()
+		if err != nil {
+			return err
+		}
 		err = util.SetL3GatewayConfig(nodeAnnotator, &util.L3GatewayConfig{
-			Mode: config.GatewayModeDisabled,
+			Mode:      config.GatewayModeDisabled,
+			ChassisID: chassisID,
 		})
 	}
 	if err != nil {

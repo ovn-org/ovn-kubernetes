@@ -225,6 +225,16 @@ func ParseNodeL3GatewayAnnotation(node *kapi.Node) (*L3GatewayConfig, error) {
 	return cfg, nil
 }
 
+// ParseNodeChassisIDAnnotation returns the node's ovnNodeChassisID annotation
+func ParseNodeChassisIDAnnotation(node *kapi.Node) (string, error) {
+	chassisID, ok := node.Annotations[ovnNodeChassisID]
+	if !ok {
+		return "", fmt.Errorf("%s annotation not found for node %s", ovnNodeChassisID, node.Name)
+	}
+
+	return chassisID, nil
+}
+
 func SetNodeManagementPortMACAddress(nodeAnnotator kube.Annotator, macAddress net.HardwareAddr) error {
 	return nodeAnnotator.Set(ovnNodeManagementPortMacAddress, macAddress.String())
 }
