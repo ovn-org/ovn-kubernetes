@@ -155,7 +155,7 @@ func (c *Controller) Run(workers int, stopCh <-chan struct{}) error {
 	// it keeps in sync Kubernetes and OVN
 	// and handles removal of stale data on upgrades
 	klog.Info("Remove stale OVN services")
-	if err := c.repair.RunOnce(); err != nil {
+	if err := c.repair.runOnce(); err != nil {
 		klog.Errorf("Error repairing services: %v")
 	}
 
