@@ -507,5 +507,18 @@ if ! kubectl wait -n kube-system --for=condition=ready pods --all --timeout=300s
   exit 1
 fi
 
+# Clean up any leftover kube-proxy iptables rules that handle services
+KIND_NODES=$(kind get nodes --name ${KIND_CLUSTER_NAME})
+for n in $KIND_NODES; do
+  if [ "$KIND_IPV4_SUPPORT" == true ]; then
+    docker exec $n iptables -F KUBE-SERVICES
+    docker exec $n iptables -F KUBE-SERVICES -t nat
+  fi
+  if [ "$KIND_IPV6_SUPPORT" == true ]; then
+    docker exec $n ip6tables -F KUBE-SERVICES
+    docker exec $n ip6tables -F KUBE-SERVICES -t nat
+  fi
+done
+
 echo "Pods are all up, allowing things settle for 30 seconds..."
 sleep 30

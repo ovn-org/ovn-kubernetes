@@ -178,11 +178,15 @@ func (n *OvnNode) initGateway(subnets []*net.IPNet, nodeAnnotator kube.Annotator
 		return err
 	}
 
-	v4IfAddr, v6IfAddr, err := getDefaultIfAddr(gatewayIntf)
-	if err == nil {
-		if err := util.SetNodePrimaryIfAddr(nodeAnnotator, v4IfAddr, v6IfAddr); err != nil {
-			klog.Errorf("Unable to set primary IP net label on node, err: %v", err)
-		}
+	ifAddrs, err := getNetworkInterfaceIPAddresses(gatewayIntf)
+	if err != nil {
+		return err
+	}
+
+	v4IfAddr, _ := util.MatchIPNetFamily(false, ifAddrs)
+	v6IfAddr, _ := util.MatchIPNetFamily(true, ifAddrs)
+	if err := util.SetNodePrimaryIfAddr(nodeAnnotator, v4IfAddr, v6IfAddr); err != nil {
+		klog.Errorf("Unable to set primary IP net label on node, err: %v", err)
 	}
 
 	var gw *gateway

@@ -327,12 +327,16 @@ func getMulticastACLMatch() string {
 	return "(ip4.mcast || mldv1 || mldv2 || " + ipv6DynamicMulticastMatch + ")"
 }
 
+// Allow IGMP traffic (e.g., IGMP queries) and namespace multicast traffic
+// towards pods.
 func getMulticastACLIgrMatchV4(addrSetName string) string {
-	return "ip4.src == $" + addrSetName + " && ip4.mcast"
+	return "(igmp || (ip4.src == $" + addrSetName + " && ip4.mcast))"
 }
 
+// Allow MLD traffic (e.g., MLD queries) and namespace multicast traffic
+// towards pods.
 func getMulticastACLIgrMatchV6(addrSetName string) string {
-	return "ip6.src == $" + addrSetName + " && " + ipv6DynamicMulticastMatch
+	return "(mldv1 || mldv2 || (ip6.src == $" + addrSetName + " && " + ipv6DynamicMulticastMatch + "))"
 }
 
 // Creates the match string used for ACLs allowing incoming multicast into a
@@ -483,14 +487,14 @@ func (oc *Controller) createDefaultAllowMulticastPolicy() error {
 	err := addACLPortGroup("", oc.clusterRtrPortGroupUUID, fromLport,
 		defaultRoutedMcastAllowPriority, match, "allow", knet.PolicyTypeEgress, "")
 	if err != nil {
-		return fmt.Errorf("failed to create default deny multicast egress ACL: %v", err)
+		return fmt.Errorf("failed to create default allow multicast egress ACL: %v", err)
 	}
 
 	match = getACLMatch(clusterRtrPortGroupName, mcastMatch, knet.PolicyTypeIngress)
 	err = addACLPortGroup("", oc.clusterRtrPortGroupUUID, toLport,
 		defaultRoutedMcastAllowPriority, match, "allow", knet.PolicyTypeIngress, "")
 	if err != nil {
-		return fmt.Errorf("failed to create default deny multicast ingress ACL: %v", err)
+		return fmt.Errorf("failed to create default allow multicast ingress ACL: %v", err)
 	}
 	return nil
 }
@@ -924,6 +928,9 @@ func (oc *Controller) destroyNetworkPolicy(np *networkPolicy, nsInfo *namespaceI
 // ingress/egress address set
 func (oc *Controller) handlePeerPodSelectorAddUpdate(gp *gressPolicy, obj interface{}) {
 	pod := obj.(*kapi.Pod)
+	if pod.Spec.NodeName == "" {
+		return
+	}
 	if err := gp.addPeerPod(pod); err != nil {
 		klog.Errorf(err.Error())
 	}
@@ -934,6 +941,9 @@ func (oc *Controller) handlePeerPodSelectorAddUpdate(gp *gressPolicy, obj interf
 // ingress/egress address set
 func (oc *Controller) handlePeerPodSelectorDelete(gp *gressPolicy, obj interface{}) {
 	pod := obj.(*kapi.Pod)
+	if pod.Spec.NodeName == "" {
+		return
+	}
 	if err := gp.deletePeerPod(pod); err != nil {
 		klog.Errorf(err.Error())
 	}

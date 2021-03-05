@@ -216,7 +216,7 @@ func (l *localPortWatcher) addService(svc *kapi.Service) error {
 
 			if port.NodePort > 0 {
 				if gatewayIP != "" {
-					iptRules = append(iptRules, getNodePortIPTRules(port, nil, ip, port.Port)...)
+					iptRules = append(iptRules, getNodePortIPTRules(port, ip, port.Port)...)
 					klog.V(5).Infof("Will add iptables rule for NodePort: %v and "+
 						"protocol: %v", port.NodePort, port.Protocol)
 				} else {
@@ -225,14 +225,10 @@ func (l *localPortWatcher) addService(svc *kapi.Service) error {
 				}
 			}
 			for _, externalIP := range svc.Spec.ExternalIPs {
-
 				if utilnet.IsIPv6String(externalIP) != isIPv6Service {
-					klog.Warningf("Invalid ExternalIP %s for Service %s/%s with ClusterIP %s",
-						externalIP, svc.Namespace, svc.Name, ip)
 					continue
 				}
 				if _, exists := l.localAddrSet[externalIP]; exists {
-
 					iptRules = append(iptRules, getExternalIPTRules(port, externalIP, ip)...)
 					klog.V(5).Infof("Will add iptables rule for ExternalIP: %s", externalIP)
 				} else if l.networkHasAddress(net.ParseIP(externalIP)) {
@@ -284,7 +280,7 @@ func (l *localPortWatcher) deleteService(svc *kapi.Service) error {
 			iptRules = append(iptRules, getLoadBalancerIPTRules(svc, port, ip, port.Port)...)
 			if port.NodePort > 0 {
 				if gatewayIP != "" {
-					iptRules = append(iptRules, getNodePortIPTRules(port, nil, ip, port.Port)...)
+					iptRules = append(iptRules, getNodePortIPTRules(port, ip, port.Port)...)
 					klog.V(5).Infof("Will delete iptables rule for NodePort: %v and "+
 						"protocol: %v", port.NodePort, port.Protocol)
 				}
@@ -354,20 +350,11 @@ func (l *localPortWatcher) SyncServices(serviceInterface []interface{}) {
 			klog.Errorf("Spurious object in syncServices: %v", serviceInterface)
 			continue
 		}
-		for _, ip := range util.GetClusterIPs(svc) {
-			gatewayIP := l.gatewayIPv4
-			if utilnet.IsIPv6String(ip) {
-				gatewayIP = l.gatewayIPv6
-			}
-			if gatewayIP != "" {
-				keepIPTRules = append(keepIPTRules, getGatewayIPTRules(svc, gatewayIP, nil)...)
-			}
-			keepRoutes = append(keepRoutes, svc.Spec.ExternalIPs...)
-		}
+		keepIPTRules = append(keepIPTRules, getGatewayIPTRules(svc, []string{l.gatewayIPv4, l.gatewayIPv6})...)
+		keepRoutes = append(keepRoutes, svc.Spec.ExternalIPs...)
 	}
 	for _, chain := range []string{iptableNodePortChain, iptableExternalIPChain} {
 		recreateIPTRules("nat", chain, keepIPTRules)
-		recreateIPTRules("filter", chain, keepIPTRules)
 	}
 	removeStaleRoutes(keepRoutes)
 }
@@ -420,15 +407,6 @@ func getLoadBalancerIPTRules(svc *kapi.Service, svcPort kapi.ServicePort, gatewa
 				"-d", ing.IP,
 				"-p", string(svcPort.Protocol), "--dport", ingPort,
 				"-j", "DNAT", "--to-destination", util.JoinHostPortInt32(gatewayIP, targetPort),
-			},
-		})
-		rules = append(rules, iptRule{
-			table: "filter",
-			chain: iptableNodePortChain,
-			args: []string{
-				"-d", ing.IP,
-				"-p", string(svcPort.Protocol), "--dport", ingPort,
-				"-j", "ACCEPT",
 			},
 		})
 	}

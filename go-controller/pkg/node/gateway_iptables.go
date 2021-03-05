@@ -10,6 +10,7 @@ import (
 	"github.com/coreos/go-iptables/iptables"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
+	"github.com/pkg/errors"
 	kapi "k8s.io/api/core/v1"
 	"k8s.io/klog/v2"
 	utilnet "k8s.io/utils/net"
@@ -39,6 +40,7 @@ type iptRule struct {
 }
 
 func addIptRules(rules []iptRule) error {
+	var addErrors error
 	for _, r := range rules {
 		klog.V(5).Infof("Adding rule in table: %s, chain: %s with args: \"%s\" for protocol: %v ", r.table, r.chain, strings.Join(r.args, " "), r.protocol)
 		ipt, _ := util.GetIPTablesHelper(r.protocol)
@@ -50,24 +52,27 @@ func addIptRules(rules []iptRule) error {
 			err = ipt.Insert(r.table, r.chain, 1, r.args...)
 		}
 		if err != nil {
-			return fmt.Errorf("failed to add iptables %s/%s rule %q: %v",
+			addErrors = errors.Wrapf(addErrors, "failed to add iptables %s/%s rule %q: %v",
 				r.table, r.chain, strings.Join(r.args, " "), err)
 		}
 	}
-	return nil
+	return addErrors
 }
 
 func delIptRules(rules []iptRule) error {
+	var delErrors error
 	for _, r := range rules {
 		klog.V(5).Infof("Deleting rule in table: %s, chain: %s with args: \"%s\" for protocol: %v ", r.table, r.chain, strings.Join(r.args, " "), r.protocol)
 		ipt, _ := util.GetIPTablesHelper(r.protocol)
-		err := ipt.Delete(r.table, r.chain, r.args...)
-		if err != nil {
-			return fmt.Errorf("failed to delete iptables %s/%s rule %q: %v",
-				r.table, r.chain, strings.Join(r.args, " "), err)
+		if exists, err := ipt.Exists(r.table, r.chain, r.args...); err == nil && exists {
+			err := ipt.Delete(r.table, r.chain, r.args...)
+			if err != nil {
+				delErrors = errors.Wrapf(delErrors, "failed to delete iptables %s/%s rule %q: %v",
+					r.table, r.chain, strings.Join(r.args, " "), err)
+			}
 		}
 	}
-	return nil
+	return delErrors
 }
 
 func getSharedGatewayInitRules(chain string, proto iptables.Protocol) []iptRule {
@@ -75,24 +80,6 @@ func getSharedGatewayInitRules(chain string, proto iptables.Protocol) []iptRule 
 		{
 			table:    "nat",
 			chain:    "OUTPUT",
-			args:     []string{"-j", chain},
-			protocol: proto,
-		},
-		{
-			table:    "nat",
-			chain:    "PREROUTING",
-			args:     []string{"-j", chain},
-			protocol: proto,
-		},
-		{
-			table:    "filter",
-			chain:    "OUTPUT",
-			args:     []string{"-j", chain},
-			protocol: proto,
-		},
-		{
-			table:    "filter",
-			chain:    "FORWARD",
 			args:     []string{"-j", chain},
 			protocol: proto,
 		},
@@ -113,6 +100,11 @@ func getLocalGatewayInitRules(chain string, proto iptables.Protocol) []iptRule {
 			args:     []string{"-j", chain},
 			protocol: proto,
 		},
+	}
+}
+
+func getLegacyLocalGatewayInitRules(chain string, proto iptables.Protocol) []iptRule {
+	return []iptRule{
 		{
 			table:    "filter",
 			chain:    "FORWARD",
@@ -122,40 +114,43 @@ func getLocalGatewayInitRules(chain string, proto iptables.Protocol) []iptRule {
 	}
 }
 
-func getNodePortIPTRules(svcPort kapi.ServicePort, nodeIP *net.IPNet, targetIP string, targetPort int32) []iptRule {
+func getLegacySharedGatewayInitRules(chain string, proto iptables.Protocol) []iptRule {
+	return []iptRule{
+		{
+			table:    "nat",
+			chain:    "PREROUTING",
+			args:     []string{"-j", chain},
+			protocol: proto,
+		},
+		{
+			table:    "filter",
+			chain:    "OUTPUT",
+			args:     []string{"-j", chain},
+			protocol: proto,
+		},
+		{
+			table:    "filter",
+			chain:    "FORWARD",
+			args:     []string{"-j", chain},
+			protocol: proto,
+		},
+	}
+}
+
+func getNodePortIPTRules(svcPort kapi.ServicePort, targetIP string, targetPort int32) []iptRule {
 	var protocol iptables.Protocol
 	if utilnet.IsIPv6String(targetIP) {
 		protocol = iptables.ProtocolIPv6
 	} else {
 		protocol = iptables.ProtocolIPv4
 	}
-	var natArgs, filterArgs []string
-	if nodeIP != nil {
-		natArgs = []string{
-			"-p", string(svcPort.Protocol),
-			"-d", nodeIP.IP.String(),
-			"--dport", fmt.Sprintf("%d", svcPort.NodePort),
-			"-j", "DNAT",
-			"--to-destination", util.JoinHostPortInt32(targetIP, targetPort),
-		}
-		filterArgs = []string{
-			"-p", string(svcPort.Protocol),
-			"-d", nodeIP.IP.String(),
-			"--dport", fmt.Sprintf("%d", svcPort.NodePort),
-			"-j", "ACCEPT",
-		}
-	} else {
-		natArgs = []string{
-			"-p", string(svcPort.Protocol),
-			"--dport", fmt.Sprintf("%d", svcPort.NodePort),
-			"-j", "DNAT",
-			"--to-destination", util.JoinHostPortInt32(targetIP, targetPort),
-		}
-		filterArgs = []string{
-			"-p", string(svcPort.Protocol),
-			"--dport", fmt.Sprintf("%d", svcPort.NodePort),
-			"-j", "ACCEPT",
-		}
+	natArgs := []string{
+		"-p", string(svcPort.Protocol),
+		"-m", "addrtype",
+		"--dst-type", "LOCAL",
+		"--dport", fmt.Sprintf("%d", svcPort.NodePort),
+		"-j", "DNAT",
+		"--to-destination", util.JoinHostPortInt32(targetIP, targetPort),
 	}
 
 	return []iptRule{
@@ -163,12 +158,6 @@ func getNodePortIPTRules(svcPort kapi.ServicePort, nodeIP *net.IPNet, targetIP s
 			table:    "nat",
 			chain:    iptableNodePortChain,
 			args:     natArgs,
-			protocol: protocol,
-		},
-		{
-			table:    "filter",
-			chain:    iptableNodePortChain,
-			args:     filterArgs,
 			protocol: protocol,
 		},
 	}
@@ -191,17 +180,6 @@ func getExternalIPTRules(svcPort kapi.ServicePort, externalIP, dstIP string) []i
 				"--dport", fmt.Sprintf("%v", svcPort.Port),
 				"-j", "DNAT",
 				"--to-destination", util.JoinHostPortInt32(dstIP, svcPort.Port),
-			},
-			protocol: protocol,
-		},
-		{
-			table: "filter",
-			chain: iptableExternalIPChain,
-			args: []string{
-				"-p", string(svcPort.Protocol),
-				"-d", externalIP,
-				"--dport", fmt.Sprintf("%v", svcPort.Port),
-				"-j", "ACCEPT",
 			},
 			protocol: protocol,
 		},
@@ -267,7 +245,7 @@ func initLocalGatewayNATRules(ifname string, cidr *net.IPNet) error {
 	return addIptRules(getLocalGatewayNATRules(ifname, cidr))
 }
 
-func initGatewayIPTables(genGatewayChainRules func(chain string, proto iptables.Protocol) []iptRule) error {
+func handleGatewayIPTables(iptCallback func(rules []iptRule) error, genGatewayChainRules func(chain string, proto iptables.Protocol) []iptRule) error {
 	rules := make([]iptRule, 0)
 	for _, chain := range []string{iptableNodePortChain, iptableExternalIPChain} {
 		for _, proto := range clusterIPTablesProtocols() {
@@ -278,27 +256,30 @@ func initGatewayIPTables(genGatewayChainRules func(chain string, proto iptables.
 			if err := ipt.NewChain("nat", chain); err != nil {
 				klog.V(5).Infof("Chain: \"%s\" in table: \"%s\" already exists, skipping creation", "nat", chain)
 			}
-			if err := ipt.NewChain("filter", chain); err != nil {
-				klog.V(5).Infof("Chain: \"%s\" in table: \"%s\" already exists, skipping creation", "filter", chain)
-			}
 			rules = append(rules, genGatewayChainRules(chain, proto)...)
 		}
 	}
-	if err := addIptRules(rules); err != nil {
-		return fmt.Errorf("failed to add iptables rules %v: %v", rules, err)
+	if err := iptCallback(rules); err != nil {
+		return fmt.Errorf("failed to handle iptables rules %v: %v", rules, err)
 	}
 	return nil
 }
 
 func initSharedGatewayIPTables() error {
-	if err := initGatewayIPTables(getSharedGatewayInitRules); err != nil {
+	if err := handleGatewayIPTables(addIptRules, getSharedGatewayInitRules); err != nil {
+		return err
+	}
+	if err := handleGatewayIPTables(delIptRules, getLegacySharedGatewayInitRules); err != nil {
 		return err
 	}
 	return nil
 }
 
 func initLocalGatewayIPTables() error {
-	if err := initGatewayIPTables(getLocalGatewayInitRules); err != nil {
+	if err := handleGatewayIPTables(addIptRules, getLocalGatewayInitRules); err != nil {
+		return err
+	}
+	if err := handleGatewayIPTables(delIptRules, getLegacyLocalGatewayInitRules); err != nil {
 		return err
 	}
 	return nil
@@ -313,9 +294,7 @@ func cleanupSharedGatewayIPTChains() {
 				return
 			}
 			_ = ipt.ClearChain("nat", chain)
-			_ = ipt.ClearChain("filter", chain)
 			_ = ipt.DeleteChain("nat", chain)
-			_ = ipt.DeleteChain("filter", chain)
 		}
 	}
 }
@@ -336,8 +315,9 @@ func recreateIPTRules(table, chain string, keepIPTRules []iptRule) {
 // only incoming traffic on that IP will be accepted for NodePort rules; otherwise incoming traffic on the NodePort
 // on all IPs will be accepted. If gatewayIP is "", then NodePort traffic will be DNAT'ed to the service port on
 // the service's ClusterIP. Otherwise, it will be DNAT'ed to the NodePort on the gatewayIP.
-func getGatewayIPTRules(service *kapi.Service, gatewayIP string, nodeIP *net.IPNet) []iptRule {
+func getGatewayIPTRules(service *kapi.Service, gatewayIPs []string) []iptRule {
 	rules := make([]iptRule, 0)
+	clusterIPs := util.GetClusterIPs(service)
 	for _, svcPort := range service.Spec.Ports {
 		if util.ServiceTypeHasNodePort(service) {
 			err := util.ValidatePort(svcPort.Protocol, svcPort.NodePort)
@@ -350,10 +330,14 @@ func getGatewayIPTRules(service *kapi.Service, gatewayIP string, nodeIP *net.IPN
 				klog.Errorf("Skipping service: %s, invalid service port %v", svcPort.Name, err)
 				continue
 			}
-			if gatewayIP == "" {
-				rules = append(rules, getNodePortIPTRules(svcPort, nodeIP, service.Spec.ClusterIP, svcPort.Port)...)
+			if gatewayIPs == nil {
+				for _, clusterIP := range clusterIPs {
+					rules = append(rules, getNodePortIPTRules(svcPort, clusterIP, svcPort.Port)...)
+				}
 			} else {
-				rules = append(rules, getNodePortIPTRules(svcPort, nodeIP, gatewayIP, svcPort.NodePort)...)
+				for _, gatewayIP := range gatewayIPs {
+					rules = append(rules, getNodePortIPTRules(svcPort, gatewayIP, svcPort.Port)...)
+				}
 			}
 		}
 		for _, externalIP := range service.Spec.ExternalIPs {
@@ -362,7 +346,9 @@ func getGatewayIPTRules(service *kapi.Service, gatewayIP string, nodeIP *net.IPN
 				klog.Errorf("Skipping service: %s, invalid service port %v", svcPort.Name, err)
 				continue
 			}
-			rules = append(rules, getExternalIPTRules(svcPort, externalIP, service.Spec.ClusterIP)...)
+			if clusterIP, err := util.MatchIPStringFamily(utilnet.IsIPv6String(externalIP), clusterIPs); err == nil {
+				rules = append(rules, getExternalIPTRules(svcPort, externalIP, clusterIP)...)
+			}
 		}
 	}
 	return rules

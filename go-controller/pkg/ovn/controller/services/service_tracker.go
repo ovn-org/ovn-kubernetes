@@ -147,7 +147,7 @@ func (st *serviceTracker) getService(name, namespace string) sets.String {
 // updateKubernetesService adds or updates the tracker from a Kubernetes service
 // added for testing purposes
 func (st *serviceTracker) updateKubernetesService(service *v1.Service) {
-	for _, ip := range service.Spec.ClusterIPs {
+	for _, ip := range util.GetClusterIPs(service) {
 		for _, svcPort := range service.Spec.Ports {
 			vip := util.JoinHostPortInt32(ip, svcPort.Port)
 			st.updateService(service.Name, service.Namespace, vip, svcPort.Protocol)

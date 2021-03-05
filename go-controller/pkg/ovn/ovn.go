@@ -18,6 +18,7 @@ import (
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/kube"
 	addressset "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/address_set"
 	svccontroller "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/controller/services"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/controller/unidling"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/ipallocator"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/subnetallocator"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
@@ -49,15 +50,6 @@ const (
 	clusterRtrPortGroupName          string        = "clusterRtrPortGroup"
 	egressFirewallDNSDefaultDuration time.Duration = 30 * time.Minute
 )
-
-// ServiceVIPKey is used for looking up service namespace information for a
-// particular load balancer
-type ServiceVIPKey struct {
-	// Load balancer VIP in the form "ip:port"
-	vip string
-	// Protocol used by the load balancer
-	protocol kapi.Protocol
-}
 
 // loadBalancerConf contains the OVN based config for a LB
 type loadBalancerConf struct {
@@ -188,11 +180,6 @@ type Controller struct {
 	// Is ACL logging enabled while configuring meters?
 	aclLoggingEnabled bool
 
-	// Map of load balancers to service namespace
-	serviceVIPToName map[ServiceVIPKey]types.NamespacedName
-
-	serviceVIPToNameLock sync.Mutex
-
 	// Map of load balancers, each containing a map of VIP to OVN LB Config
 	serviceLBMap map[string]map[string]*loadBalancerConf
 
@@ -278,6 +265,8 @@ func NewOvnController(ovnClient *util.OVNClientset, wf *factory.WatchFactory,
 		lspEgressDenyCache:        make(map[string]int),
 		lspMutex:                  &sync.Mutex{},
 		eIPC: egressIPController{
+			assignmentRetryMutex:  &sync.Mutex{},
+			assignmentRetry:       make(map[string]bool),
 			namespaceHandlerMutex: &sync.Mutex{},
 			namespaceHandlerCache: make(map[string]factory.Handler),
 			podHandlerMutex:       &sync.Mutex{},
@@ -288,8 +277,6 @@ func NewOvnController(ovnClient *util.OVNClientset, wf *factory.WatchFactory,
 		loadbalancerClusterCache: make(map[kapi.Protocol]string),
 		multicastSupport:         config.EnableMulticast,
 		aclLoggingEnabled:        true,
-		serviceVIPToName:         make(map[ServiceVIPKey]types.NamespacedName),
-		serviceVIPToNameLock:     sync.Mutex{},
 		serviceLBMap:             make(map[string]map[string]*loadBalancerConf),
 		serviceLBLock:            sync.Mutex{},
 		joinSwIPManager:          nil,
@@ -317,13 +304,10 @@ func (oc *Controller) Run(wg *sync.WaitGroup) error {
 
 	oc.WatchPods()
 
-	// Services are handled differently depending on the Kubernetes API versions
-	// and the OVN configuration.
-	// We use a level triggered controller to handle services if k8s > 1.19,
-	// using endpoint slices instead endpoints if OVN is configured for dual stack.
-	if util.UseEndpointSlices(oc.client) && config.IPv4Mode && config.IPv6Mode {
-		// Services are handled differently depending on the Kubernetes API versions
-		klog.Infof("Dual Stack enabled: using EndpointSlices instead of Endpoints in k8s versions > 1.19")
+	// We use a level triggered controller to handle services if the cluster
+	// has endpoint slices enabled.
+	if util.UseEndpointSlices(oc.client) {
+		klog.Infof("Starting OVN Service Controller: Using Endpoint Slices")
 		// Create our own informers to start compartamentalizing the code
 		// filter server side the things we don't care about
 		noProxyName, err := labels.NewRequirement("service.kubernetes.io/service-proxy-name", selection.DoesNotExist, nil)
@@ -379,7 +363,16 @@ func (oc *Controller) Run(wg *sync.WaitGroup) error {
 	klog.Infof("Completing all the Watchers took %v", time.Since(start))
 
 	if config.Kubernetes.OVNEmptyLbEvents {
-		go oc.ovnControllerEventChecker()
+		klog.Infof("Starting unidling controller")
+		unidlingController := unidling.NewController(
+			oc.recorder,
+			oc.watchFactory.ServiceInformer(),
+		)
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			unidlingController.Run(oc.stopChan)
+		}()
 	}
 
 	if oc.hoMaster != nil {
@@ -409,51 +402,6 @@ func (oc *Controller) syncPeriodic() {
 			}
 		}
 	}()
-}
-
-func (oc *Controller) ovnControllerEventChecker() {
-	ticker := time.NewTicker(5 * time.Second)
-
-	_, _, err := util.RunOVNNbctl("set", "nb_global", ".", "options:controller_event=true")
-	if err != nil {
-		klog.Error("Unable to enable controller events. Unidling not possible")
-		return
-	}
-
-	for {
-		select {
-		case <-ticker.C:
-			out, _, err := util.RunOVNSbctl("--format=json", "list", "controller_event")
-			if err != nil {
-				continue
-			}
-
-			events, err := extractEmptyLBBackendsEvents([]byte(out))
-			if err != nil || len(events) == 0 {
-				continue
-			}
-
-			for _, event := range events {
-				_, _, err := util.RunOVNSbctl("destroy", "controller_event", event.uuid)
-				if err != nil {
-					// Don't unidle until we are able to remove the controller event
-					klog.Errorf("Unable to remove controller event %s", event.uuid)
-					continue
-				}
-				if serviceName, ok := oc.GetServiceVIPToName(event.vip, event.protocol); ok {
-					serviceRef := kapi.ObjectReference{
-						Kind:      "Service",
-						Namespace: serviceName.Namespace,
-						Name:      serviceName.Name,
-					}
-					klog.V(5).Infof("Sending a NeedPods event for service %s in namespace %s.", serviceName.Name, serviceName.Namespace)
-					oc.recorder.Eventf(&serviceRef, kapi.EventTypeNormal, "NeedPods", "The service %s needs pods", serviceName.Name)
-				}
-			}
-		case <-oc.stopChan:
-			return
-		}
-	}
 }
 
 func podScheduled(pod *kapi.Pod) bool {
@@ -862,9 +810,11 @@ func (oc *Controller) WatchEgressIP() {
 	oc.watchFactory.AddEgressIPHandler(cache.ResourceEventHandlerFuncs{
 		AddFunc: func(obj interface{}) {
 			eIP := obj.(*egressipv1.EgressIP).DeepCopy()
+			oc.eIPC.assignmentRetryMutex.Lock()
 			if err := oc.addEgressIP(eIP); err != nil {
 				klog.Error(err)
 			}
+			oc.eIPC.assignmentRetryMutex.Unlock()
 			if err := oc.updateEgressIPWithRetry(eIP); err != nil {
 				klog.Error(err)
 			}
@@ -879,9 +829,11 @@ func (oc *Controller) WatchEgressIP() {
 				newEIP.Status = egressipv1.EgressIPStatus{
 					Items: []egressipv1.EgressIPStatusItem{},
 				}
+				oc.eIPC.assignmentRetryMutex.Lock()
 				if err := oc.addEgressIP(newEIP); err != nil {
 					klog.Error(err)
 				}
+				oc.eIPC.assignmentRetryMutex.Unlock()
 				if err := oc.updateEgressIPWithRetry(newEIP); err != nil {
 					klog.Error(err)
 				}
@@ -1010,7 +962,7 @@ func (oc *Controller) WatchNodes() {
 			}
 
 			_, failed = mgmtPortFailed.Load(node.Name)
-			if failed || macAddressChanged(oldNode, node) {
+			if failed || macAddressChanged(oldNode, node) || nodeSubnetChanged(oldNode, node) {
 				err := oc.syncNodeManagementPort(node, hostSubnets)
 				if err != nil {
 					if !util.IsAnnotationNotSetError(err) {
@@ -1055,21 +1007,6 @@ func (oc *Controller) WatchNodes() {
 		},
 	}, oc.syncNodes)
 	klog.Infof("Bootstrapping existing nodes and cleaning stale nodes took %v", time.Since(start))
-}
-
-// AddServiceVIPToName associates a k8s service name with a load balancer VIP
-func (oc *Controller) AddServiceVIPToName(vip string, protocol kapi.Protocol, namespace, name string) {
-	oc.serviceVIPToNameLock.Lock()
-	defer oc.serviceVIPToNameLock.Unlock()
-	oc.serviceVIPToName[ServiceVIPKey{vip, protocol}] = types.NamespacedName{Namespace: namespace, Name: name}
-}
-
-// GetServiceVIPToName retrieves the associated k8s service name for a load balancer VIP
-func (oc *Controller) GetServiceVIPToName(vip string, protocol kapi.Protocol) (types.NamespacedName, bool) {
-	oc.serviceVIPToNameLock.Lock()
-	defer oc.serviceVIPToNameLock.Unlock()
-	namespace, ok := oc.serviceVIPToName[ServiceVIPKey{vip, protocol}]
-	return namespace, ok
 }
 
 // GetNetworkPolicyACLLogging retrieves ACL deny policy logging setting for the Namespace
@@ -1192,6 +1129,12 @@ func macAddressChanged(oldNode, node *kapi.Node) bool {
 	oldMacAddress, _ := util.ParseNodeManagementPortMACAddress(oldNode)
 	macAddress, _ := util.ParseNodeManagementPortMACAddress(node)
 	return !bytes.Equal(oldMacAddress, macAddress)
+}
+
+func nodeSubnetChanged(oldNode, node *kapi.Node) bool {
+	oldSubnets, _ := util.ParseNodeHostSubnetAnnotation(oldNode)
+	newSubnets, _ := util.ParseNodeHostSubnetAnnotation(node)
+	return !reflect.DeepEqual(oldSubnets, newSubnets)
 }
 
 // noHostSubnet() compares the no-hostsubenet-nodes flag with node labels to see if the node is manageing its

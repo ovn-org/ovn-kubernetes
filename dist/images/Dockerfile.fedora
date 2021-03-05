@@ -15,17 +15,22 @@ USER root
 
 ENV PYTHONDONTWRITEBYTECODE yes
 
+ARG ovnver=ovn-20.12.0-24.fc33
+
 # install needed rpms - openvswitch must be 2.10.4 or higher
 RUN INSTALL_PKGS=" \
 	python3-pyyaml bind-utils procps-ng openssl numactl-libs firewalld-filesystem \
 	libpcap hostname kubernetes-client \
         ovn ovn-central ovn-host python3-openvswitch python3-pyOpenSSL \
-	iptables iproute iputils strace socat \
+	iptables iproute iputils strace socat koji \
         " && \
 	dnf install --best --refresh -y --setopt=tsflags=nodocs $INSTALL_PKGS && \
 	dnf clean all && rm -rf /var/cache/dnf/*
 
 RUN mkdir -p /var/run/openvswitch
+
+RUN koji download-build $ovnver --arch=x86_64
+RUN rpm -Uhv --nodeps --force *.rpm
 
 # Built in ../../go_controller, then the binaries are copied here.
 # put things where they are in the pkg

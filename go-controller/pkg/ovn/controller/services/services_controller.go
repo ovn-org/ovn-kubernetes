@@ -155,7 +155,7 @@ func (c *Controller) Run(workers int, stopCh <-chan struct{}) error {
 	// it keeps in sync Kubernetes and OVN
 	// and handles removal of stale data on upgrades
 	klog.Info("Remove stale OVN services")
-	if err := c.repair.RunOnce(); err != nil {
+	if err := c.repair.runOnce(); err != nil {
 		klog.Errorf("Error repairing services: %v")
 	}
 
@@ -270,7 +270,7 @@ func (c *Controller) syncServices(key string) error {
 		return err
 	}
 	// Iterate over the ClusterIPs and Ports fields to create the corresponding OVN loadbalancers
-	for _, ip := range service.Spec.ClusterIPs {
+	for _, ip := range util.GetClusterIPs(service) {
 		family := v1.IPv4Protocol
 		if utilnet.IsIPv6String(ip) {
 			family = v1.IPv6Protocol
