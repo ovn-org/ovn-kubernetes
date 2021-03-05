@@ -171,6 +171,7 @@ var _ = ginkgo.Describe("e2e non-vxlan external gateway through a gateway pod", 
 				res, err := runCommand("docker", "exec", c, "hostname")
 				framework.ExpectNoError(err, "failed to run hostname on", c)
 				hostname := strings.TrimSuffix(res, "\n")
+				framework.Logf("Hostname for %s is %s", c, hostname)
 				expectedHostNames[hostname] = struct{}{}
 			}
 			framework.Logf("Expected hostnames are %v", expectedHostNames)
@@ -342,6 +343,7 @@ var _ = ginkgo.Describe("e2e multiple external gateway validation", func() {
 			res, err := runCommand("docker", "exec", c, "hostname")
 			framework.ExpectNoError(err, "failed to run hostname on", c)
 			hostname := strings.TrimSuffix(res, "\n")
+			framework.Logf("Hostname for %s is %s", c, hostname)
 			expectedHostNames[hostname] = struct{}{}
 		}
 		framework.Logf("Expected hostnames are %v", expectedHostNames)
