@@ -148,7 +148,7 @@ func deleteVIPsFromOVN(vips sets.String, st *serviceTracker, name, namespace, cl
 				// TODO: why continue? should we error and requeue and retry?
 				continue
 			}
-			workerNode := strings.TrimPrefix(gatewayRouter, "GR_")
+			workerNode := util.GetWorkerFromGatewayRouter(gatewayRouter)
 			workerLB, err := loadbalancer.GetWorkerLoadBalancer(workerNode, proto)
 			if err != nil {
 				klog.Errorf("Worker switch %s does not have load balancer (%v)", workerNode, err)
@@ -258,7 +258,7 @@ func createPerNodePhysicalVIPs(isIPv6 bool, protocol v1.Protocol, sourcePort int
 		}
 
 		if config.Gateway.Mode == config.GatewayModeShared {
-			workerNode := strings.TrimPrefix(gatewayRouter, "GR_")
+			workerNode := util.GetWorkerFromGatewayRouter(gatewayRouter)
 			workerLB, err := loadbalancer.GetWorkerLoadBalancer(workerNode, protocol)
 			if err != nil {
 				klog.Errorf("Worker switch %s does not have load balancer (%v)", workerNode, err)
@@ -301,7 +301,7 @@ func deleteNodeVIPs(svcIPs []string, protocol v1.Protocol, sourcePort int32) err
 		}
 		loadBalancers = append(loadBalancers, gatewayLB)
 		if config.Gateway.Mode == config.GatewayModeShared {
-			workerNode := strings.TrimPrefix(gatewayRouter, "GR_")
+			workerNode := util.GetWorkerFromGatewayRouter(gatewayRouter)
 			workerLB, err := loadbalancer.GetWorkerLoadBalancer(workerNode, protocol)
 			if err != nil {
 				klog.Errorf("Worker switch %s does not have load balancer (%v)", workerNode, err)

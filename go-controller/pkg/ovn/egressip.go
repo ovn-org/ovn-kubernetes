@@ -995,7 +995,7 @@ func createNATRule(podIPs []net.IP, status egressipv1.EgressIPStatusItem, egress
 					"--",
 					"add",
 					"logical_router",
-					fmt.Sprintf("GR_%s", status.Node),
+					util.GetGatewayRouterFromNode(status.Node),
 					"nat",
 					"@nat",
 				)
@@ -1019,7 +1019,7 @@ func deleteNATRule(podIPs []net.IP, status egressipv1.EgressIPStatusItem, egress
 				_, stderr, err := util.RunOVNNbctl(
 					"remove",
 					"logical_router",
-					fmt.Sprintf("GR_%s", status.Node),
+					util.GetGatewayRouterFromNode(status.Node),
 					"nat",
 					natID,
 				)

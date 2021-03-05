@@ -4,11 +4,9 @@ import (
 	"fmt"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/loadbalancer"
-	"net"
-	"strings"
-
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
+	"net"
 
 	kapi "k8s.io/api/core/v1"
 	"k8s.io/klog/v2"
@@ -196,7 +194,7 @@ func (ovn *Controller) deleteEndpoints(ep *kapi.Endpoints) error {
 			if config.Gateway.Mode == config.GatewayModeShared {
 				ovn.clearVIPsAddRejectACL(svc, gatewayLB, svc.Spec.ClusterIP, svcPort.Port, svcPort.Protocol)
 			}
-			workerNode := strings.TrimPrefix(gateway, "GR_")
+			workerNode := util.GetWorkerFromGatewayRouter(gateway)
 			workerLB, err := loadbalancer.GetWorkerLoadBalancer(workerNode, svcPort.Protocol)
 			if err != nil {
 				klog.Errorf("Worker switch %s does not have load balancer (%v)", workerNode, err)

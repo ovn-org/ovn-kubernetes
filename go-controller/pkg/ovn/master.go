@@ -668,11 +668,12 @@ func (oc *Controller) syncGatewayLogicalNetwork(node *kapi.Node, l3GatewayConfig
 		if oc.SCTPSupport {
 			clusterLBs = append(clusterLBs, oc.SCTPLoadBalancerUUID)
 		}
+		gr := util.GetGatewayRouterFromNode(node.Name)
 		for _, clusterLB := range clusterLBs {
-			_, stderr, err := util.RunOVNNbctl("--may-exist", "lr-lb-add", "GR_"+node.Name, clusterLB)
+			_, stderr, err := util.RunOVNNbctl("--may-exist", "lr-lb-add", gr, clusterLB)
 			if err != nil {
-				return fmt.Errorf("unable to add cluster LB: %s to GR_%s, stderr: %q, error: %v",
-					clusterLB, node.Name, stderr, err)
+				return fmt.Errorf("unable to add cluster LB: %s to %s, stderr: %q, error: %v",
+					clusterLB, gr, stderr, err)
 			}
 		}
 	}
@@ -711,7 +712,7 @@ func (oc *Controller) syncGatewayLogicalNetwork(node *kapi.Node, l3GatewayConfig
 		err = oc.handleNodePortLB(node)
 	} else {
 		// nodePort disabled, delete gateway load balancers for this node.
-		gatewayRouter := "GR_" + node.Name
+		gatewayRouter := util.GetGatewayRouterFromNode(node.Name)
 		for _, proto := range []kapi.Protocol{kapi.ProtocolTCP, kapi.ProtocolUDP, kapi.ProtocolSCTP} {
 			lbUUID, _ := oc.getGatewayLoadBalancer(gatewayRouter, proto)
 			if lbUUID != "" {

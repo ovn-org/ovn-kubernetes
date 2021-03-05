@@ -2,12 +2,11 @@ package ovn
 
 import (
 	"fmt"
-	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/loadbalancer"
 	"net"
-	"strings"
 
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/gateway"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/loadbalancer"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
 
@@ -71,7 +70,7 @@ func (ovn *Controller) createPerNodeVIPs(svcIPs []string, protocol kapi.Protocol
 		}
 
 		if config.Gateway.Mode == config.GatewayModeShared {
-			workerNode := strings.TrimPrefix(gatewayRouter, "GR_")
+			workerNode := util.GetWorkerFromGatewayRouter(gatewayRouter)
 			workerLB, err := loadbalancer.GetWorkerLoadBalancer(workerNode, protocol)
 			if err != nil {
 				klog.Errorf("Worker switch %s does not have load balancer (%v)", workerNode, err)
@@ -114,7 +113,7 @@ func (ovn *Controller) deleteNodeVIPs(svcIPs []string, protocol kapi.Protocol, s
 		}
 		loadBalancers = append(loadBalancers, gatewayLB)
 		if config.Gateway.Mode == config.GatewayModeShared {
-			workerNode := strings.TrimPrefix(gatewayRouter, "GR_")
+			workerNode := util.GetWorkerFromGatewayRouter(gatewayRouter)
 			workerLB, err := loadbalancer.GetWorkerLoadBalancer(workerNode, protocol)
 			if err != nil {
 				klog.Errorf("Worker switch %s does not have load balancer (%v)", workerNode, err)
