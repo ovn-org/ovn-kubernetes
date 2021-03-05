@@ -812,10 +812,10 @@ func (oc *Controller) WatchEgressIP() {
 		AddFunc: func(obj interface{}) {
 			eIP := obj.(*egressipv1.EgressIP).DeepCopy()
 			oc.eIPC.assignmentRetryMutex.Lock()
+			defer oc.eIPC.assignmentRetryMutex.Unlock()
 			if err := oc.addEgressIP(eIP); err != nil {
 				klog.Error(err)
 			}
-			oc.eIPC.assignmentRetryMutex.Unlock()
 			if err := oc.updateEgressIPWithRetry(eIP); err != nil {
 				klog.Error(err)
 			}
@@ -831,10 +831,10 @@ func (oc *Controller) WatchEgressIP() {
 					Items: []egressipv1.EgressIPStatusItem{},
 				}
 				oc.eIPC.assignmentRetryMutex.Lock()
+				defer oc.eIPC.assignmentRetryMutex.Unlock()
 				if err := oc.addEgressIP(newEIP); err != nil {
 					klog.Error(err)
 				}
-				oc.eIPC.assignmentRetryMutex.Unlock()
 				if err := oc.updateEgressIPWithRetry(newEIP); err != nil {
 					klog.Error(err)
 				}
