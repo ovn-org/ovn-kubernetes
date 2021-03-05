@@ -117,7 +117,7 @@ func (oc *Controller) addGWRoutesForNamespace(namespace string, egress gatewayIn
 	}
 	// TODO (trozet): use the go bindings here and batch commands
 	for _, pod := range existingPods {
-		gr := "GR_" + pod.Spec.NodeName
+		gr := util.GetGatewayRouterFromNode(pod.Spec.NodeName)
 		for _, gw := range egress.gws {
 			for _, podIP := range pod.Status.PodIPs {
 				if utilnet.IsIPv6(gw) != utilnet.IsIPv6String(podIP.IP) {
@@ -190,7 +190,7 @@ func (oc *Controller) deletePodGWRoutesForNamespace(pod, namespace string) {
 				continue
 			}
 			mask := GetIPFullMask(podIP)
-			node := strings.TrimPrefix(gr, "GR_")
+			node := util.GetWorkerFromGatewayRouter(gr)
 			_, stderr, err := util.RunOVNNbctl("--if-exists", "--policy=src-ip",
 				"lr-route-del", gr, podIP+mask, gwIP.String())
 			if err != nil {
@@ -230,7 +230,7 @@ func (oc *Controller) deleteGWRoutesForNamespace(nsInfo *namespaceInfo) {
 				continue
 			}
 			mask := GetIPFullMask(podIP)
-			node := strings.TrimPrefix(gr, "GR_")
+			node := util.GetWorkerFromGatewayRouter(gr)
 			if err := oc.delHybridRoutePolicyForPod(net.ParseIP(podIP), node); err != nil {
 				klog.Error(err)
 			}
@@ -264,7 +264,7 @@ func (oc *Controller) deleteGWRoutesForPod(namespace string, podIPNets []*net.IP
 			}
 			mask := GetIPFullMask(pod)
 			for gw, gr := range gwToGr {
-				node := strings.TrimPrefix(gr, "GR_")
+				node := util.GetWorkerFromGatewayRouter(gr)
 				if err := oc.delHybridRoutePolicyForPod(podIPNet.IP, node); err != nil {
 					klog.Error(err)
 				}
@@ -288,7 +288,7 @@ func (oc *Controller) addGWRoutesForPod(gateways []gatewayInfo, podIfAddrs []*ne
 		return err
 	}
 	defer nsInfo.Unlock()
-	gr := "GR_" + node
+	gr := util.GetGatewayRouterFromNode(node)
 	for _, podIPNet := range podIfAddrs {
 		for _, gateway := range gateways {
 			routesAdded := 0
@@ -335,7 +335,7 @@ func (oc *Controller) addGWRoutesForPod(gateways []gatewayInfo, podIfAddrs []*ne
 // deletePerPodGRSNAT removes per pod SNAT rules that are applied to the GR where the pod resides if
 // there are no gateways
 func (oc *Controller) deletePerPodGRSNAT(node string, podIPNets []*net.IPNet) {
-	gr := "GR_" + node
+	gr := util.GetGatewayRouterFromNode(node)
 	for _, podIPNet := range podIPNets {
 		podIP := podIPNet.IP.String()
 		stdout, stderr, err := util.RunOVNNbctl("--if-exists", "lr-nat-del",

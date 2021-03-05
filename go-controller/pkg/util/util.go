@@ -34,6 +34,16 @@ func GetLegacyK8sMgmtIntfName(nodeName string) string {
 	return types.K8sPrefix + nodeName
 }
 
+// GetWorkerFromGatewayRouter determines a node's corresponding worker switch name from a gateway router name
+func GetWorkerFromGatewayRouter(gr string) string {
+	return strings.TrimPrefix(gr, types.GWRouterPrefix)
+}
+
+// GetGatewayRouterFromNode determines a node's corresponding gateway router name
+func GetGatewayRouterFromNode(node string) string {
+	return types.GWRouterPrefix + node
+}
+
 // GetNodeChassisID returns the machine's OVN chassis ID
 func GetNodeChassisID() (string, error) {
 	chassisID, stderr, err := RunOVSVsctl("--if-exists", "get",
