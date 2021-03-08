@@ -197,6 +197,9 @@ func LinkRoutesDel(link netlink.Link, subnets []*net.IPNet) error {
 	}
 	for _, subnet := range subnets {
 		for _, route := range routes {
+			if route.Dst == nil {
+				continue
+			}
 			if route.Dst.String() == subnet.String() {
 				err = netLinkOps.RouteDel(&route)
 				if err != nil {
