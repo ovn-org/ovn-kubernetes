@@ -2,6 +2,10 @@ package ovn
 
 import (
 	"context"
+	"sync"
+
+	"k8s.io/klog/v2"
+
 	"github.com/onsi/gomega"
 	libovsdbclient "github.com/ovn-org/libovsdb/client"
 	egressfirewall "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/egressfirewall/v1"
@@ -42,6 +46,7 @@ type FakeOVN struct {
 	nbClient     libovsdbclient.Client
 	sbClient     libovsdbclient.Client
 	dbSetup      libovsdbtest.TestSetup
+	podWg        *sync.WaitGroup
 	nbsbCleanup  *libovsdbtest.Cleanup
 }
 
@@ -49,6 +54,7 @@ func NewFakeOVN() *FakeOVN {
 	return &FakeOVN{
 		asf:          addressset.NewFakeAddressSetFactory(),
 		fakeRecorder: record.NewFakeRecorder(10),
+		podWg:        &sync.WaitGroup{},
 	}
 }
 
@@ -82,10 +88,24 @@ func (o *FakeOVN) startWithDBSetup(dbSetup libovsdbtest.TestSetup, objects ...ru
 	o.start(objects...)
 }
 
+func (o *FakeOVN) InitAndRunPodController() {
+	klog.Warningf("#### [%p] INIT POD", o)
+	o.controller.initPodController(o.watcher.PodInformer())
+	o.podWg.Add(1)
+	go func() {
+		defer o.podWg.Done()
+		o.controller.runPodController(10, o.stopChan)
+	}()
+}
+
 func (o *FakeOVN) shutdown() {
+	// Stop everything that uses libovsdb clients first
 	o.watcher.Shutdown()
 	close(o.stopChan)
+	o.podWg.Wait()
 	o.nbsbCleanup.Cleanup()
+
+	klog.Warningf("#### [%p] SHUTDOWN", o)
 }
 
 func (o *FakeOVN) init() {

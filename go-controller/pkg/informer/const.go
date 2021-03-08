@@ -16,5 +16,5 @@ const (
 	// to service an informer event queue
 	DefaultInformerThreadiness = 1
 	// MaxRetries is the maximum number of times we'll retry an item on the queue
-	MaxRetries = 3
+	MaxRetries = 15
 )

@@ -197,7 +197,7 @@ func (oc *Controller) addPodExternalGWForNamespace(namespace string, pod *kapi.P
 			pod.Namespace, pod.Name, namespace, err)
 	}
 
-	nsInfo.routingExternalPodGWs[makePodGWKey(pod)] = egress
+	nsInfo.routingExternalPodGWs[makePodGWKey(pod.Namespace, pod.Name)] = egress
 	nsUnlock()
 
 	klog.Infof("Adding routes for external gateway pod: %s, next hops: %q, namespace: %s, bfd-enabled: %t",
@@ -346,25 +346,25 @@ func (oc *Controller) deleteLogicalRouterStaticRoute(podIP, mask, gw, gr string)
 
 // deletePodExternalGW detects if a given pod is acting as an external GW and removes all routes in all namespaces
 // associated with that pod
-func (oc *Controller) deletePodExternalGW(pod *kapi.Pod) {
-	podRoutingNamespaceAnno := pod.Annotations[routingNamespaceAnnotation]
+func (oc *Controller) deletePodExternalGW(pe *podCacheEntry) {
+	podRoutingNamespaceAnno := pe.Annotations[routingNamespaceAnnotation]
 	if podRoutingNamespaceAnno == "" {
 		return
 	}
-	klog.Infof("Deleting routes for external gateway pod: %s, for namespace(s) %s", pod.Name,
+	klog.Infof("Deleting routes for external gateway pod: %s, for namespace(s) %s", pe.Name,
 		podRoutingNamespaceAnno)
 	for _, namespace := range strings.Split(podRoutingNamespaceAnno, ",") {
-		oc.deletePodGWRoutesForNamespace(pod, namespace)
+		oc.deletePodGWRoutesForNamespace(pe.Namespace, pe.Name, namespace)
 	}
 }
 
 // deletePodGwRoutesForNamespace handles deleting all routes in a namespace for a specific pod GW
-func (oc *Controller) deletePodGWRoutesForNamespace(pod *kapi.Pod, namespace string) {
+func (oc *Controller) deletePodGWRoutesForNamespace(podNamespace, podName, namespace string) {
 	nsInfo, nsUnlock := oc.getNamespaceLocked(namespace, false)
 	if nsInfo == nil {
 		return
 	}
-	podGWKey := makePodGWKey(pod)
+	podGWKey := makePodGWKey(podNamespace, podName)
 	// check if any gateways were stored for this pod
 	foundGws, ok := nsInfo.routingExternalPodGWs[podGWKey]
 	delete(nsInfo.routingExternalPodGWs, podGWKey)
@@ -372,7 +372,7 @@ func (oc *Controller) deletePodGWRoutesForNamespace(pod *kapi.Pod, namespace str
 
 	if !ok || len(foundGws.gws) == 0 {
 		klog.Infof("No gateways found to remove for annotated gateway pod: %s on namespace: %s",
-			pod, namespace)
+			podGWKey, namespace)
 		return
 	}
 
@@ -400,10 +400,10 @@ func (oc *Controller) deletePodGWRoutesForNamespace(pod *kapi.Pod, namespace str
 
 					if err := oc.deleteLogicalRouterStaticRoute(podIP, mask, gwIP.String(), gr); err != nil {
 						klog.Errorf("Unable to delete pod %s route to GR %s, GW: %s, err:%v",
-							pod, gr, gwIP.String(), err)
+							podGWKey, gr, gwIP.String(), err)
 						klog.Error(err)
 					} else {
-						klog.V(5).Infof("ECMP route deleted for pod: %s, on gr: %s, to gw: %s", pod,
+						klog.V(5).Infof("ECMP route deleted for pod: %s, on gr: %s, to gw: %s", podGWKey,
 							gr, gwIP.String())
 
 						delete(routeInfo.podExternalRoutes[podIP], gwIP.String())
@@ -1269,6 +1269,6 @@ func (oc *Controller) buildOVNECMPCache() map[string][]*ovnRoute {
 	return ovnRouteCache
 }
 
-func makePodGWKey(pod *kapi.Pod) string {
-	return fmt.Sprintf("%s_%s", pod.Namespace, pod.Name)
+func makePodGWKey(namespace, name string) string {
+	return fmt.Sprintf("%s_%s", namespace, name)
 }

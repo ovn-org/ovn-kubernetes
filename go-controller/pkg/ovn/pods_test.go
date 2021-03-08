@@ -7,6 +7,7 @@ import (
 	"net"
 	"time"
 
+	"github.com/google/uuid"
 	"github.com/urfave/cli/v2"
 
 	ovstypes "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
@@ -161,7 +162,7 @@ func getLogicalSwitchUUID(client libovsdbclient.Client, name string) string {
 
 }
 
-func getExpectedDataPodsAndSwitches(pods []testPod, nodes []string) []libovsdbtest.TestData {
+func getExpectedDataPodsAndSwitches(pods []testPod, lsws []*lswRef) []libovsdbtest.TestData {
 	nodeslsps := make(map[string][]string)
 	var logicalSwitchPorts []*nbdb.LogicalSwitchPort
 	for _, pod := range pods {
@@ -194,11 +195,11 @@ func getExpectedDataPodsAndSwitches(pods []testPod, nodes []string) []libovsdbte
 
 	}
 	var logicalSwitches []*nbdb.LogicalSwitch
-	for _, node := range nodes {
+	for _, lsw := range lsws {
 		logicalSwitches = append(logicalSwitches, &nbdb.LogicalSwitch{
-			UUID:  libovsdbops.BuildNamedUUID(),
-			Name:  node,
-			Ports: nodeslsps[node],
+			UUID:  lsw.uuid,
+			Name:  lsw.name,
+			Ports: nodeslsps[lsw.name],
 		})
 	}
 	data := []libovsdbtest.TestData{}
@@ -210,6 +211,76 @@ func getExpectedDataPodsAndSwitches(pods []testPod, nodes []string) []libovsdbte
 	}
 
 	return data
+}
+
+func addPodToTestData(db libovsdbtest.TestSetup, t *testPod, options map[string]string) libovsdbtest.TestSetup {
+	if len(options) == 0 {
+		options = map[string]string{
+			"requested-chassis": t.nodeName,
+			"iface-id-ver":      t.podName,
+		}
+	}
+	db.NBData = append(db.NBData,
+		&nbdb.LogicalSwitchPort{
+			UUID:      t.portUUID,
+			Name:      util.GetLogicalPortName(t.namespace, t.podName),
+			Addresses: []string{t.podMAC, t.podIP},
+			ExternalIDs: map[string]string{
+				"pod":       "true",
+				"namespace": t.namespace,
+			},
+			Options:      options,
+			PortSecurity: []string{t.podMAC, t.podIP},
+		},
+	)
+
+	// Add the port to the switch
+	switchFound := false
+	for _, e := range db.NBData {
+		lsw, ok := e.(*nbdb.LogicalSwitch)
+		if !ok || lsw.Name != t.nodeName {
+			continue
+		}
+		switchFound = true
+		found := false
+		for _, p := range lsw.Ports {
+			if p == t.portUUID {
+				found = true
+				break
+			}
+		}
+		if !found {
+			lsw.Ports = append(lsw.Ports, t.portUUID)
+		}
+		break
+	}
+	gomega.Expect(switchFound).To(gomega.BeTrue())
+
+	return db
+}
+
+type lswRef struct {
+	uuid string
+	name string
+}
+
+func findLSWRefs(db libovsdbtest.TestSetup, names ...string) []*lswRef {
+	refs := make([]*lswRef, 0, len(names))
+	for _, name := range names {
+		ref := &lswRef{name: name}
+		for _, e := range db.NBData {
+			if lsw, ok := e.(*nbdb.LogicalSwitch); ok {
+				ginkgo.GinkgoT().Logf("##### lsw %s %s", lsw.Name, lsw.UUID)
+				if lsw.Name == name {
+					ref.uuid = lsw.UUID
+					break
+				}
+			}
+		}
+		gomega.Expect(ref.uuid).NotTo(gomega.BeEmpty())
+		refs = append(refs, ref)
+	}
+	return refs
 }
 
 var _ = ginkgo.Describe("OVN Pod Operations", func() {
@@ -231,11 +302,11 @@ var _ = ginkgo.Describe("OVN Pod Operations", func() {
 		initialDB = libovsdbtest.TestSetup{
 			NBData: []libovsdbtest.TestData{
 				&nbdb.LogicalSwitch{
+					UUID: uuid.NewString(),
 					Name: "node1",
 				},
 			},
 		}
-
 	})
 
 	ginkgo.AfterEach(func() {
@@ -271,6 +342,9 @@ var _ = ginkgo.Describe("OVN Pod Operations", func() {
 							*newPod(t.namespace, t.podName, t.nodeName, t.podIP),
 						},
 					},
+					&v1.NodeList{
+						Items: []v1.Node{{ObjectMeta: newObjectMeta(t.nodeName, "")}},
+					},
 				)
 
 				ctext, cancel := context.WithTimeout(context.Background(), ovstypes.OVSDBTimeout)
@@ -285,7 +359,7 @@ var _ = ginkgo.Describe("OVN Pod Operations", func() {
 				gomega.Expect(len(lsl)).To(gomega.Equal(1))
 
 				fakeOvn.controller.WatchNamespaces()
-				fakeOvn.controller.WatchPods()
+				fakeOvn.InitAndRunPodController()
 
 				pod, err := fakeOvn.fakeClient.KubeClient.CoreV1().Pods(t.namespace).Get(context.TODO(), t.podName, metav1.GetOptions{})
 				gomega.Expect(err).NotTo(gomega.HaveOccurred())
@@ -305,7 +379,8 @@ var _ = ginkgo.Describe("OVN Pod Operations", func() {
 				gomega.Eventually(func() string {
 					return getPodAnnotations(fakeOvn.fakeClient.KubeClient, t.namespace, t.podName)
 				}, 2).Should(gomega.MatchJSON(t.getAnnotationsJson()))
-				gomega.Eventually(fakeOvn.nbClient).Should(libovsdbtest.HaveData(getExpectedDataPodsAndSwitches([]testPod{t}, []string{"node1"})))
+				expectData := getExpectedDataPodsAndSwitches([]testPod{t}, findLSWRefs(initialDB, "node1"))
+				gomega.Eventually(fakeOvn.nbClient).Should(libovsdbtest.HaveData(expectData))
 
 				return nil
 			}
@@ -337,11 +412,14 @@ var _ = ginkgo.Describe("OVN Pod Operations", func() {
 					&v1.PodList{
 						Items: []v1.Pod{},
 					},
+					&v1.NodeList{
+						Items: []v1.Node{{ObjectMeta: newObjectMeta(t.nodeName, "")}},
+					},
 				)
 
 				t.populateLogicalSwitchCache(fakeOvn, getLogicalSwitchUUID(fakeOvn.controller.nbClient, "node1"))
 				fakeOvn.controller.WatchNamespaces()
-				fakeOvn.controller.WatchPods()
+				fakeOvn.InitAndRunPodController()
 
 				pod, _ := fakeOvn.fakeClient.KubeClient.CoreV1().Pods(t.namespace).Get(context.TODO(), t.podName, metav1.GetOptions{})
 				gomega.Expect(pod).To(gomega.BeNil())
@@ -354,73 +432,8 @@ var _ = ginkgo.Describe("OVN Pod Operations", func() {
 					return getPodAnnotations(fakeOvn.fakeClient.KubeClient, t.namespace, t.podName)
 				}, 2).Should(gomega.MatchJSON(t.getAnnotationsJson()))
 
-				gomega.Eventually(fakeOvn.nbClient).Should(libovsdbtest.HaveData(getExpectedDataPodsAndSwitches([]testPod{t}, []string{"node1"})))
-				return nil
-			}
-
-			err := app.Run([]string{app.Name})
-			gomega.Expect(err).NotTo(gomega.HaveOccurred())
-		})
-
-		ginkgo.It("retryPod cache operations while adding a new pod", func() {
-			app.Action = func(ctx *cli.Context) error {
-				config.Gateway.DisableSNATMultipleGWs = true
-				namespaceT := *newNamespace("namespace1")
-				t := newTPod(
-					"node1",
-					"10.128.1.0/24",
-					"10.128.1.2",
-					"10.128.1.1",
-					"myPod",
-					"10.128.1.3",
-					"0a:58:0a:80:01:03",
-					namespaceT.Name,
-				)
-
-				fakeOvn.startWithDBSetup(initialDB,
-					&v1.NamespaceList{
-						Items: []v1.Namespace{
-							namespaceT,
-						},
-					},
-					&v1.PodList{
-						Items: []v1.Pod{},
-					},
-				)
-
-				t.populateLogicalSwitchCache(fakeOvn, getLogicalSwitchUUID(fakeOvn.controller.nbClient, "node1"))
-				fakeOvn.controller.WatchNamespaces()
-				fakeOvn.controller.WatchPods()
-
-				pod, _ := fakeOvn.fakeClient.KubeClient.CoreV1().Pods(t.namespace).Get(context.TODO(), t.podName, metav1.GetOptions{})
-				gomega.Expect(pod).To(gomega.BeNil())
-
-				podObj := &v1.Pod{
-					Spec: v1.PodSpec{NodeName: "node1"},
-					ObjectMeta: metav1.ObjectMeta{
-						Name:      t.podName,
-						Namespace: namespaceT.Name,
-						UID:       types.UID("123"),
-					},
-				}
-				success := fakeOvn.controller.ensurePod(nil, podObj, true) // this fails since pod doesn't exist to set annotations
-				gomega.Expect(success).To(gomega.BeFalse())
-
-				gomega.Expect(len(fakeOvn.controller.retryPods)).To(gomega.Equal(0))
-				fakeOvn.controller.addRetryPods([]v1.Pod{*podObj})
-				gomega.Expect(len(fakeOvn.controller.retryPods)).To(gomega.Equal(1))
-				gomega.Expect(fakeOvn.controller.retryPods["123"]).ToNot(gomega.BeNil())
-				gomega.Expect(fakeOvn.controller.retryPods["123"].ignore).To(gomega.BeFalse())
-				gomega.Expect(fakeOvn.controller.retryPods["123"].pod.UID).To(gomega.Equal(podObj.UID))
-
-				fakeOvn.controller.checkAndSkipRetryPod(podObj.UID)
-				gomega.Expect(fakeOvn.controller.retryPods["123"].ignore).To(gomega.BeTrue())
-
-				fakeOvn.controller.unSkipRetryPod(podObj)
-				gomega.Expect(fakeOvn.controller.retryPods["123"].ignore).To(gomega.BeFalse())
-
-				fakeOvn.controller.checkAndDeleteRetryPod(podObj.UID)
-				gomega.Expect(fakeOvn.controller.retryPods["123"]).To(gomega.BeNil())
+				expectData := getExpectedDataPodsAndSwitches([]testPod{t}, findLSWRefs(initialDB, "node1"))
+				gomega.Eventually(fakeOvn.nbClient).Should(libovsdbtest.HaveData(expectData))
 				return nil
 			}
 
@@ -455,24 +468,24 @@ var _ = ginkgo.Describe("OVN Pod Operations", func() {
 							*newPod(t.namespace, t.podName, t.nodeName, t.podIP),
 						},
 					},
+					&v1.NodeList{
+						Items: []v1.Node{{ObjectMeta: newObjectMeta(t.nodeName, "")}},
+					},
 				)
 				t.populateLogicalSwitchCache(fakeOvn, getLogicalSwitchUUID(fakeOvn.controller.nbClient, "node1"))
 
 				fakeOvn.controller.WatchNamespaces()
-				fakeOvn.controller.WatchPods()
+				fakeOvn.InitAndRunPodController()
 
 				gomega.Eventually(func() string {
 					return getPodAnnotations(fakeOvn.fakeClient.KubeClient, t.namespace, t.podName)
 				}, 2).Should(gomega.MatchJSON(t.getAnnotationsJson()))
 
-				err := fakeOvn.fakeClient.KubeClient.CoreV1().Pods(t.namespace).Delete(context.TODO(), t.podName, *metav1.NewDeleteOptions(0))
+				err := fakeOvn.fakeClient.KubeClient.CoreV1().Pods(t.namespace).Delete(context.TODO(), t.podName, metav1.DeleteOptions{})
 				gomega.Expect(err).NotTo(gomega.HaveOccurred())
 
-				pod, err := fakeOvn.fakeClient.KubeClient.CoreV1().Pods(t.namespace).Get(context.TODO(), t.podName, metav1.GetOptions{})
-				gomega.Expect(err).To(gomega.HaveOccurred())
-				gomega.Expect(pod).To(gomega.BeNil())
-
-				gomega.Eventually(fakeOvn.nbClient).Should(libovsdbtest.HaveData(getExpectedDataPodsAndSwitches([]testPod{t}, []string{"node1"})))
+				expectData := getExpectedDataPodsAndSwitches([]testPod{t}, findLSWRefs(initialDB, "node1"))
+				gomega.Eventually(fakeOvn.nbClient).Should(libovsdbtest.HaveData(expectData))
 				return nil
 			}
 
@@ -511,7 +524,8 @@ var _ = ginkgo.Describe("OVN Pod Operations", func() {
 				t.populateLogicalSwitchCache(fakeOvn, getLogicalSwitchUUID(fakeOvn.controller.nbClient, "node1"))
 
 				fakeOvn.controller.WatchNamespaces()
-				fakeOvn.controller.WatchPods()
+				fakeOvn.InitAndRunPodController()
+
 				// allow pod retry from update annotation to fail
 				time.Sleep(2 * time.Second)
 
@@ -530,7 +544,9 @@ var _ = ginkgo.Describe("OVN Pod Operations", func() {
 				gomega.Eventually(func() string {
 					return getPodAnnotations(fakeOvn.fakeClient.KubeClient, t.namespace, t.podName)
 				}, 2).Should(gomega.MatchJSON(t.getAnnotationsJson()))
-				gomega.Eventually(fakeOvn.nbClient).Should(libovsdbtest.HaveData(getExpectedDataPodsAndSwitches([]testPod{t}, []string{"node1"})))
+
+				expectData := getExpectedDataPodsAndSwitches([]testPod{t}, findLSWRefs(initialDB, "node1"))
+				gomega.Eventually(fakeOvn.nbClient).Should(libovsdbtest.HaveData(expectData))
 				return nil
 			}
 
@@ -557,7 +573,7 @@ var _ = ginkgo.Describe("OVN Pod Operations", func() {
 				fakeOvn.startWithDBSetup(initialDB)
 				t.populateLogicalSwitchCache(fakeOvn, getLogicalSwitchUUID(fakeOvn.controller.nbClient, "node1"))
 				fakeOvn.controller.WatchNamespaces()
-				fakeOvn.controller.WatchPods()
+				fakeOvn.InitAndRunPodController()
 
 				// Add pod before namespace; pod will be annotated
 				// but namespace address set will not exist
@@ -568,8 +584,8 @@ var _ = ginkgo.Describe("OVN Pod Operations", func() {
 				// Add Pod logical port should succeed even without namespace
 				gomega.Expect(getPodAnnotations(fakeOvn.fakeClient.KubeClient, t.namespace, t.podName)).Should(gomega.MatchJSON(podJSON))
 
-				gomega.Eventually(fakeOvn.nbClient).Should(libovsdbtest.HaveData(getExpectedDataPodsAndSwitches([]testPod{t}, []string{"node1"})))
-
+				expectData := getExpectedDataPodsAndSwitches([]testPod{t}, findLSWRefs(initialDB, "node1"))
+				gomega.Eventually(fakeOvn.nbClient).Should(libovsdbtest.HaveData(expectData))
 				return nil
 			}
 
@@ -582,7 +598,6 @@ var _ = ginkgo.Describe("OVN Pod Operations", func() {
 
 		ginkgo.It("reconciles a new pod", func() {
 			app.Action = func(ctx *cli.Context) error {
-
 				namespaceT := *newNamespace("namespace1")
 				t := newTPod(
 					"node1",
@@ -595,6 +610,7 @@ var _ = ginkgo.Describe("OVN Pod Operations", func() {
 					namespaceT.Name,
 				)
 
+				initialDB = addPodToTestData(initialDB, &t, nil)
 				fakeOvn.startWithDBSetup(initialDB,
 					&v1.NamespaceList{
 						Items: []v1.Namespace{
@@ -606,6 +622,9 @@ var _ = ginkgo.Describe("OVN Pod Operations", func() {
 							*newPod(t.namespace, t.podName, t.nodeName, t.podIP),
 						},
 					},
+					&v1.NodeList{
+						Items: []v1.Node{{ObjectMeta: newObjectMeta(t.nodeName, "")}},
+					},
 				)
 				t.populateLogicalSwitchCache(fakeOvn, getLogicalSwitchUUID(fakeOvn.controller.nbClient, "node1"))
 				// pod exists, networks annotations don't
@@ -616,14 +635,15 @@ var _ = ginkgo.Describe("OVN Pod Operations", func() {
 				gomega.Expect(ok).To(gomega.BeFalse())
 
 				fakeOvn.controller.WatchNamespaces()
-				fakeOvn.controller.WatchPods()
+				fakeOvn.InitAndRunPodController()
+
 				// check that after start networks annotations and nbdb will be updated
 				gomega.Eventually(func() string {
 					return getPodAnnotations(fakeOvn.fakeClient.KubeClient, t.namespace, t.podName)
 				}, 2).Should(gomega.MatchJSON(t.getAnnotationsJson()))
 
-				gomega.Eventually(fakeOvn.nbClient).Should(
-					libovsdbtest.HaveData(getExpectedDataPodsAndSwitches([]testPod{t}, []string{"node1"})))
+				expectData := getExpectedDataPodsAndSwitches([]testPod{t}, findLSWRefs(initialDB, t.nodeName))
+				gomega.Eventually(fakeOvn.nbClient).Should(libovsdbtest.HaveData(expectData))
 				return nil
 			}
 
@@ -665,11 +685,12 @@ var _ = ginkgo.Describe("OVN Pod Operations", func() {
 				gomega.Expect(annotations).To(gomega.MatchJSON(t.getAnnotationsJson()))
 
 				fakeOvn.controller.WatchNamespaces()
-				fakeOvn.controller.WatchPods()
+				fakeOvn.InitAndRunPodController()
 
 				// check nbdb data is added
-				gomega.Eventually(fakeOvn.nbClient).Should(
-					libovsdbtest.HaveData(getExpectedDataPodsAndSwitches([]testPod{t}, []string{"node1"})))
+				expectData := getExpectedDataPodsAndSwitches([]testPod{t}, findLSWRefs(initialDB, "node1"))
+				gomega.Eventually(fakeOvn.nbClient).Should(libovsdbtest.HaveData(expectData))
+
 				// check that the pod annotations are preserved
 				// makes sense only when handling is finished, therefore check after nbdb is updated
 				annotations = getPodAnnotations(fakeOvn.fakeClient.KubeClient, t.namespace, t.podName)
@@ -685,6 +706,14 @@ var _ = ginkgo.Describe("OVN Pod Operations", func() {
 		ginkgo.It("reconciles an existing pod with an existing logical switch port", func() {
 			app.Action = func(ctx *cli.Context) error {
 				namespaceT := *newNamespace("namespace1")
+
+				initialDB.NBData = append(initialDB.NBData,
+					&nbdb.LogicalSwitch{
+						UUID: uuid.NewString(),
+						Name: "node2",
+					},
+				)
+
 				// use 2 pods for different test options
 				t1 := newTPod(
 					"node1",
@@ -696,6 +725,14 @@ var _ = ginkgo.Describe("OVN Pod Operations", func() {
 					"0a:58:0a:80:01:03",
 					namespaceT.Name,
 				)
+				t1.portUUID = uuid.NewString()
+				initialDB = addPodToTestData(initialDB, &t1, map[string]string{
+					// check requested-chassis will be updated to correct t1.nodeName value
+					"requested-chassis": t1.nodeName,
+					// check old value for iface-id-ver will be updated to pod.UID
+					"iface-id-ver": "wrong_value",
+				})
+
 				t2 := newTPod(
 					"node2",
 					"10.128.2.0/24",
@@ -706,51 +743,12 @@ var _ = ginkgo.Describe("OVN Pod Operations", func() {
 					"0a:58:0a:80:02:03",
 					namespaceT.Name,
 				)
-
-				initialDB = libovsdbtest.TestSetup{
-					NBData: []libovsdbtest.TestData{
-						&nbdb.LogicalSwitch{
-							Name:  "node1",
-							Ports: []string{t1.portUUID},
-						},
-						&nbdb.LogicalSwitch{
-							Name:  "node2",
-							Ports: []string{t2.portUUID},
-						},
-						&nbdb.LogicalSwitchPort{
-							UUID:      t1.portUUID,
-							Name:      util.GetLogicalPortName(t1.namespace, t1.podName),
-							Addresses: []string{t1.podMAC, t1.podIP},
-							ExternalIDs: map[string]string{
-								"pod":       "true",
-								"namespace": t1.namespace,
-							},
-							Options: map[string]string{
-								// check requested-chassis will be updated to correct t1.nodeName value
-								"requested-chassis": t2.nodeName,
-								// check old value for iface-id-ver will be updated to pod.UID
-								"iface-id-ver": "wrong_value",
-							},
-							PortSecurity: []string{t1.podMAC, t1.podIP},
-						},
-						&nbdb.LogicalSwitchPort{
-							UUID:      t2.portUUID,
-							Name:      util.GetLogicalPortName(t2.namespace, t2.podName),
-							Addresses: []string{t2.podMAC, t2.podIP},
-							ExternalIDs: map[string]string{
-								"pod":       "true",
-								"namespace": t2.namespace,
-							},
-							Options: map[string]string{
-								"requested-chassis": t2.nodeName,
-								//"iface-id-ver": is empty to check that it won't be set on update
-							},
-							PortSecurity: []string{t2.podMAC, t2.podIP},
-						},
-					},
-				}
-				// update TestPod to check nbdb lsp later
+				t2.portUUID = uuid.NewString()
 				t2.noIfaceIdVer = true
+				initialDB = addPodToTestData(initialDB, &t2, map[string]string{
+					"requested-chassis": t2.nodeName,
+					//"iface-id-ver": is empty to check that it won't be set on update
+				})
 
 				pod1 := newPod(t1.namespace, t1.podName, t1.nodeName, t1.podIP)
 				setPodAnnotations(pod1, t1)
@@ -774,11 +772,11 @@ var _ = ginkgo.Describe("OVN Pod Operations", func() {
 				// pod annotations and lsp exist now
 
 				fakeOvn.controller.WatchNamespaces()
-				fakeOvn.controller.WatchPods()
+				fakeOvn.InitAndRunPodController()
 
 				// check db values are updated to correlate with test pods settings
-				gomega.Eventually(fakeOvn.nbClient).Should(
-					libovsdbtest.HaveData(getExpectedDataPodsAndSwitches([]testPod{t1, t2}, []string{"node1", "node2"})))
+				expectData := getExpectedDataPodsAndSwitches([]testPod{t1, t2}, findLSWRefs(initialDB, "node1", "node2"))
+				gomega.Eventually(fakeOvn.nbClient).Should(libovsdbtest.HaveData(expectData))
 				// check annotations are preserved
 				// makes sense only when handling is finished, therefore check after nbdb is updated
 				annotations := getPodAnnotations(fakeOvn.fakeClient.KubeClient, t1.namespace, t1.podName)

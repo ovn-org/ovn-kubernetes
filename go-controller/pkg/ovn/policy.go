@@ -679,7 +679,7 @@ func (oc *Controller) processLocalPodSelectorSetPods(policy *knet.NetworkPolicy,
 		// 24ms is chosen because gomega.Eventually default timeout is 50ms
 		// libovsdb transactions take less than 50ms usually as well so pod create
 		// should be done within a couple iterations
-		retryErr := wait.PollImmediate(24*time.Millisecond, 1*time.Second, func() (bool, error) {
+		retryErr := wait.PollImmediate(24*time.Millisecond, 10*time.Second, func() (bool, error) {
 			var err error
 
 			// Retry if getting pod LSP from the cache fails
@@ -750,10 +750,15 @@ func (oc *Controller) processLocalPodSelectorDelPods(np *networkPolicy,
 		}
 
 		logicalPort := util.GetLogicalPortName(pod.Namespace, pod.Name)
-		portInfo, err := oc.logicalPortCache.get(logicalPort)
-		if err != nil {
-			klog.Errorf(err.Error())
-			return
+
+		var portInfo *lpInfo
+		if err := wait.PollImmediate(30*time.Millisecond, 10*time.Second, func() (bool, error) {
+			portInfo, _ = oc.logicalPortCache.get(logicalPort)
+			return portInfo != nil, nil
+		}); err != nil {
+			// pod is not yet handled
+			// no big deal, we'll get the update when it is.
+			continue
 		}
 
 		// If we never saw this pod, short-circuit

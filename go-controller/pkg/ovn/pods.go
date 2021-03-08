@@ -4,7 +4,10 @@ import (
 	"context"
 	"fmt"
 	"net"
+	"sync"
 	"time"
+
+	nettypes "github.com/k8snetworkplumbingwg/network-attachment-definition-client/pkg/apis/k8s.cni.cncf.io/v1"
 
 	ovntypes "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
 
@@ -13,8 +16,14 @@ import (
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/ipallocator"
 	util "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
 	kapi "k8s.io/api/core/v1"
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
+	"k8s.io/apimachinery/pkg/labels"
 	ktypes "k8s.io/apimachinery/pkg/types"
+	utilruntime "k8s.io/apimachinery/pkg/util/runtime"
 	"k8s.io/apimachinery/pkg/util/wait"
+	informers "k8s.io/client-go/informers/core/v1"
+	"k8s.io/client-go/tools/cache"
+	"k8s.io/client-go/util/workqueue"
 	"k8s.io/klog/v2"
 	utilnet "k8s.io/utils/net"
 
@@ -25,29 +34,217 @@ import (
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/nbdb"
 )
 
-func (oc *Controller) syncPods(pods []interface{}) {
-	oc.syncWithRetry("syncPods", func() error { return oc.syncPodsRetriable(pods) })
+type podCacheEntry struct {
+	UID         ktypes.UID
+	Namespace   string
+	Name        string
+	Annotations map[string]string
+	HostNetwork bool
+	NodeName    string
 }
 
-// This function implements the main body of work of syncPods.
-// Upon failure, it may be invoked multiple times in order to avoid a pod restart.
-func (oc *Controller) syncPodsRetriable(pods []interface{}) error {
+const (
+	maxPodRetries = 10
+)
+
+// ensurePod tries to set up a pod. It returns success or failure; failure
+// indicates the pod should be retried later.
+func (oc *Controller) ensurePod(key string, pod *kapi.Pod) error {
+	// Try unscheduled pods later
+	if !util.PodScheduled(pod) {
+		klog.V(5).Infof("Pod %s not scheduled; trying again later", pod.Name)
+		return nil
+	}
+
+	tmp, ok := oc.podsCache.Load(key)
+	if ok {
+		pe := tmp.(*podCacheEntry)
+		if exGatewayAnnotationsChanged(pe, pod) || networkStatusAnnotationsChanged(pe, pod) {
+			oc.deletePodExternalGW(pe)
+		}
+	}
+
+	oc.cachePod(key, pod)
+	if util.PodWantsNetwork(pod) {
+		if err := oc.addLogicalPort(pod); err != nil {
+			oc.recordPodEvent(err, pod)
+			return err
+		}
+	} else {
+		if err := oc.addPodExternalGW(pod); err != nil {
+			oc.recordPodEvent(err, pod)
+			return err
+		}
+	}
+	return nil
+}
+
+func (oc *Controller) cachePod(key string, pod *kapi.Pod) {
+	oc.podsCache.Store(key, &podCacheEntry{
+		UID:         pod.UID,
+		Namespace:   pod.Namespace,
+		Name:        pod.Name,
+		Annotations: pod.Annotations,
+		HostNetwork: pod.Spec.HostNetwork,
+		NodeName:    pod.Spec.NodeName,
+	})
+}
+
+// initPodController initializes the Pod controller and *must* be called before
+// runPodController
+func (oc *Controller) initPodController(pods informers.PodInformer) {
+	oc.pods = pods.Lister()
+	oc.podsSynced = pods.Informer().HasSynced
+	oc.podsQueue = workqueue.NewNamedRateLimitingQueue(
+		workqueue.NewItemFastSlowRateLimiter(1*time.Second, 5*time.Second, 5),
+		"pods",
+	)
+
+	pods.Informer().AddEventHandler(cache.ResourceEventHandlerFuncs{
+		AddFunc: func(obj interface{}) {
+			key, err := cache.MetaNamespaceKeyFunc(obj)
+			if err == nil {
+				oc.podsQueue.Add(key)
+			}
+		},
+		UpdateFunc: func(old, new interface{}) {
+			key, err := cache.MetaNamespaceKeyFunc(new)
+			if err == nil {
+				oc.podsQueue.Add(key)
+			}
+		},
+		DeleteFunc: func(obj interface{}) {
+			key, err := cache.MetaNamespaceKeyFunc(obj)
+			if err == nil {
+				oc.podsQueue.Add(key)
+			}
+		},
+	})
+}
+
+func (oc *Controller) runPodController(threadiness int, stopCh <-chan struct{}) {
+	// don't let panics crash the process
+	defer utilruntime.HandleCrash()
+
+	klog.Infof("Starting Pod Controller")
+
+	// wait for your caches to fill before starting your work
+	if !cache.WaitForCacheSync(stopCh, oc.podsSynced) {
+		return
+	}
+
+	// run the repair controller
+	klog.Infof("Repairing Pods")
+	oc.repairPods()
+
+	// start up your worker threads based on threadiness.  Some controllers
+	// have multiple kinds of workers
+	wg := &sync.WaitGroup{}
+	for i := 0; i < threadiness; i++ {
+		wg.Add(1)
+		// runWorker will loop until "something bad" happens.  The .Until will
+		// then rekick the worker after one second
+		go func() {
+			defer wg.Done()
+			wait.Until(func() {
+				oc.runPodWorker(wg)
+			}, time.Second, stopCh)
+		}()
+	}
+
+	// wait until we're told to stop
+	<-stopCh
+
+	klog.Infof("Shutting down Pod controller")
+	// make sure the work queue is shutdown which will trigger workers to end
+	oc.podsQueue.ShutDown()
+	// wait for workers to finish
+	wg.Wait()
+}
+
+func (oc *Controller) runPodWorker(wg *sync.WaitGroup) {
+	// hot loop until we're told to stop.  processNextWorkItem will
+	// automatically wait until there's work available, so we don't worry
+	// about secondary waits
+	for oc.processNextPodWorkItem(wg) {
+	}
+}
+
+// processNextPodWorkItem deals with one key off the queue.  It returns false
+// when it's time to quit.
+func (oc *Controller) processNextPodWorkItem(wg *sync.WaitGroup) bool {
+	wg.Add(1)
+	defer wg.Done()
+	// pull the next work item from queue.  It should be a key we use to lookup
+	// something in a cache
+	key, quit := oc.podsQueue.Get()
+	if quit {
+		return false
+	}
+	// you always have to indicate to the queue that you've completed a piece of
+	// work
+	defer oc.podsQueue.Done(key)
+
+	// do your work on the key.  This method will contains your "do stuff" logic
+	err := oc.syncPodHandler(key.(string))
+	if err == nil {
+		// if you had no error, tell the queue to stop tracking history for your
+		// key. This will reset things like failure counts for per-item rate
+		// limiting
+		oc.podsQueue.Forget(key)
+		return true
+	}
+
+	// there was a failure so be sure to report it.  This method allows for
+	// pluggable error handling which can be used for things like
+	// cluster-monitoring
+	utilruntime.HandleError(fmt.Errorf("%v failed with : %v", key, err))
+
+	// since we failed, we should requeue the item to work on later.
+	// but only if we've not exceeded max retries. This method
+	// will add a backoff to avoid hotlooping on particular items
+	// (they're probably still not going to work right away) and overall
+	// controller protection (everything I've done is broken, this controller
+	// needs to calm down or it can starve other useful work) cases.
+	if oc.podsQueue.NumRequeues(key) < maxPodRetries {
+		oc.podsQueue.AddRateLimited(key)
+		return true
+	}
+
+	// if we've exceeded MaxRetries, remove the item from the queue
+	oc.podsQueue.Forget(key)
+
+	return true
+}
+
+func (oc *Controller) repairPods() {
 	var allOps []ovsdb.Operation
 	// get the list of logical switch ports (equivalent to pods)
 	expectedLogicalPorts := make(map[string]bool)
-	for _, podInterface := range pods {
-		pod, ok := podInterface.(*kapi.Pod)
-		if !ok {
-			return fmt.Errorf("spurious object in syncPods: %v", podInterface)
-		}
-		annotations, err := util.UnmarshalPodAnnotation(pod.Annotations)
+	klog.Infof("Getting pod list")
+	pods, err := oc.pods.List(labels.Everything())
+	// as the this is called after the cache has synced we shouldn't hit this
+	if err != nil {
+		klog.Error(err)
+		utilruntime.HandleError(err)
+	}
+	for _, pod := range pods {
+		annotations, err := util.UnmarshalPodAnnotation(pod.GetAnnotations())
 		if util.PodScheduled(pod) && util.PodWantsNetwork(pod) && err == nil {
 			logicalPort := util.GetLogicalPortName(pod.Namespace, pod.Name)
 			expectedLogicalPorts[logicalPort] = true
-			if err = oc.waitForNodeLogicalSwitchInCache(pod.Spec.NodeName); err != nil {
-				return fmt.Errorf("failed to wait for node %s to be added to cache. IP allocation may fail!",
+
+			// Wait for the node logical switch to be created by the ClusterController.
+			// The node switch will be created when the node's logical network infrastructure
+			// is created by the node watch.
+			if err := wait.PollImmediate(30*time.Millisecond, 30*time.Second, func() (bool, error) {
+				subnets := oc.lsManager.GetSwitchSubnets(pod.Spec.NodeName)
+				return len(subnets) > 0, nil
+			}); err != nil {
+				klog.Errorf("Timed out waiting for node %s to be added to cache. IP allocation may fail!",
 					pod.Spec.NodeName)
 			}
+
 			if err = oc.lsManager.AllocateIPs(pod.Spec.NodeName, annotations.IPs); err != nil {
 				if err == ipallocator.ErrAllocated {
 					// already allocated: log an error but not stop syncPod from continuing
@@ -55,7 +252,7 @@ func (oc *Controller) syncPodsRetriable(pods []interface{}) error {
 						util.JoinIPNetIPs(annotations.IPs, " "), logicalPort,
 						pod.Spec.NodeName)
 				} else {
-					return fmt.Errorf("Couldn't allocate IPs: %s for pod: %s on node: %s"+
+					klog.Errorf("Couldn't allocate IPs: %s for pod: %s on node: %s"+
 						" error: %v", util.JoinIPNetIPs(annotations.IPs, " "), logicalPort,
 						pod.Spec.NodeName, err)
 				}
@@ -68,9 +265,9 @@ func (oc *Controller) syncPodsRetriable(pods []interface{}) error {
 	lspList := []nbdb.LogicalSwitchPort{}
 	ctx, cancel := context.WithTimeout(context.Background(), ovntypes.OVSDBTimeout)
 	defer cancel()
-	err := oc.nbClient.List(ctx, &lspList)
-	if err != nil {
-		return fmt.Errorf("cannot sync pods, cannot retrieve list of logical switch ports (%+v)", err)
+	if err := oc.nbClient.List(ctx, &lspList); err != nil {
+		klog.Errorf("Cannot sync pods, cannot retrieve list of logical switch ports: %v", err)
+		return
 	}
 	for _, lsp := range lspList {
 		portCache[lsp.UUID] = lsp
@@ -78,7 +275,8 @@ func (oc *Controller) syncPodsRetriable(pods []interface{}) error {
 	// get all the nodes from the watchFactory
 	nodes, err := oc.watchFactory.GetNodes()
 	if err != nil {
-		return fmt.Errorf("failed to get nodes: %v", err)
+		klog.Errorf("Failed to get nodes: %v", err)
+		return
 	}
 	for _, n := range nodes {
 		stalePorts := []string{}
@@ -89,7 +287,8 @@ func (oc *Controller) syncPodsRetriable(pods []interface{}) error {
 
 			// Not in cache: Try getting the logical switch from ovn database (slower method)
 			if ls, err = libovsdbops.FindSwitchByName(oc.nbClient, n.Name); err != nil {
-				return fmt.Errorf("can't find switch for node %s: %v", n.Name, err)
+				klog.Errorf("Can't find switch for node %s: %v", n.Name, err)
+				continue
 			}
 		} else {
 			ctx, cancel := context.WithTimeout(context.Background(), ovntypes.OVSDBTimeout)
@@ -97,7 +296,8 @@ func (oc *Controller) syncPodsRetriable(pods []interface{}) error {
 
 			ls.UUID = lsUUID
 			if err := oc.nbClient.Get(ctx, ls); err != nil {
-				return fmt.Errorf("error getting logical switch for node %s (UUID: %s) from ovn database (%v)", n.Name, ls.UUID, err)
+				klog.Errorf("Error getting logical switch for node %s (UUID: %s) from ovn database: %v", n.Name, ls.UUID, err)
+				continue
 			}
 		}
 		for _, port := range ls.Ports {
@@ -114,65 +314,113 @@ func (oc *Controller) syncPodsRetriable(pods []interface{}) error {
 				Value:   stalePorts,
 			})
 			if err != nil {
-				return fmt.Errorf("could not generate ops to delete stale ports from logical switch %s (%+v)", n.Name, err)
+				klog.Errorf("Could not generate ops to delete stale ports from logical switch %s: %v", n.Name, err)
+				continue
 			}
 			allOps = append(allOps, ops...)
 		}
 	}
 	_, err = libovsdbops.TransactAndCheck(oc.nbClient, allOps)
 	if err != nil {
-		return fmt.Errorf("could not remove stale logicalPorts from switches (%+v)", err)
+		klog.Errorf("Could not remove stale logicalPorts from switches: %v", err)
+		return
 	}
+}
+
+func (oc *Controller) deletePod(key string) error {
+	pe, ok := oc.podsCache.Load(key)
+	if !ok {
+		klog.Warningf("Pod %s not found in pod cache on delete; may not have been scheduled", key)
+		return nil
+	}
+	if err := oc.deleteLogicalPort(pe.(*podCacheEntry)); err != nil {
+		return err
+	}
+	oc.podsCache.Delete(key)
 	return nil
 }
 
-func (oc *Controller) deleteLogicalPort(pod *kapi.Pod) {
-	oc.deletePodExternalGW(pod)
-	if pod.Spec.HostNetwork {
-		return
+// sync pod handler brings the pod resource in sync
+func (oc *Controller) syncPodHandler(key string) error {
+	klog.Infof("Syncing %s", key)
+	namespace, name, err := cache.SplitMetaNamespaceKey(key)
+	if err != nil {
+		return err
 	}
-	if !util.PodScheduled(pod) {
-		return
+	pod, err := oc.pods.Pods(namespace).Get(name)
+	if err != nil && !apierrors.IsNotFound(err) {
+		// Very unlikely to see any error other than "not found" since
+		// wer're pulling from the informer cache, but just try again
+		return err
 	}
 
-	podDesc := pod.Namespace + "/" + pod.Name
+	// Delete the pod if it was not found (already gone) or if it had a
+	// deletion timestamp set (deleted but not yet finalized); if so
+	if apierrors.IsNotFound(err) {
+		return oc.deletePod(key)
+	}
+
+	// If the pod was deleted and re-added quickly; delete and re-add the port
+	pe, ok := oc.podsCache.Load(key)
+	if ok {
+		cachedPod := pe.(*podCacheEntry)
+		if cachedPod.UID != pod.UID {
+			if err := oc.deletePod(key); err != nil {
+				return err
+			}
+		}
+	}
+
+	// this wasn't a delete, so we run ensurePod
+	if err := oc.ensurePod(key, pod); err != nil {
+		return err
+	}
+
+	return nil
+}
+
+func (oc *Controller) deleteLogicalPort(pe *podCacheEntry) error {
+	oc.deletePodExternalGW(pe)
+	if pe.HostNetwork {
+		return nil
+	}
+
+	podDesc := pe.Namespace + "/" + pe.Name
 	klog.Infof("Deleting pod: %s", podDesc)
 
-	logicalPort := util.GetLogicalPortName(pod.Namespace, pod.Name)
+	logicalPort := util.GetLogicalPortName(pe.Namespace, pe.Name)
 	portInfo, err := oc.logicalPortCache.get(logicalPort)
 	if err != nil {
 		klog.Errorf(err.Error())
+
 		// If ovnkube-master restarts, it is also possible the Pod's logical switch port
 		// is not re-added into the cache. Delete logical switch port anyway.
-		ops, err := oc.ovnNBLSPDel(logicalPort, pod.Spec.NodeName, "")
+		ops, err := oc.ovnNBLSPDel(logicalPort, pe.NodeName, "")
 		if err != nil {
 			klog.Errorf(err.Error())
 		} else {
-			_, err = libovsdbops.TransactAndCheck(oc.nbClient, ops)
-			if err != nil {
+			if _, err := libovsdbops.TransactAndCheck(oc.nbClient, ops); err != nil {
 				klog.Errorf("Cannot delete logical switch port %s, %v", logicalPort, err)
 			}
 		}
 
 		// Even if the port is not in the cache, IPs annotated in the Pod annotation may already be allocated,
 		// need to release them to avoid leakage.
-		annotation, err := util.UnmarshalPodAnnotation(pod.Annotations)
-		if err == nil {
-			podIfAddrs := annotation.IPs
-			_ = oc.lsManager.ReleaseIPs(pod.Spec.NodeName, podIfAddrs)
+		if annotation, err := util.UnmarshalPodAnnotation(pe.Annotations); err == nil {
+			_ = oc.lsManager.ReleaseIPs(pe.NodeName, annotation.IPs)
 		}
-		return
+		return nil
 	}
 
 	// FIXME: if any of these steps fails we need to stop and try again later...
 	var allOps, ops []ovsdb.Operation
-	if ops, err = oc.deletePodFromNamespace(pod.Namespace, portInfo); err != nil {
+	if ops, err = oc.deletePodFromNamespace(pe.Namespace, portInfo); err != nil {
 		klog.Errorf(err.Error())
 	} else {
 		allOps = append(allOps, ops...)
 	}
 
-	ops, err = oc.ovnNBLSPDel(logicalPort, pod.Spec.NodeName, portInfo.uuid)
+	ops, err = oc.ovnNBLSPDel(logicalPort, pe.NodeName, portInfo.uuid)
 	if err != nil {
 		klog.Errorf(err.Error())
 	} else {
@@ -185,49 +433,18 @@ func (oc *Controller) deleteLogicalPort(pod *kapi.Pod) {
 	}
 
 	if err := oc.lsManager.ReleaseIPs(portInfo.logicalSwitch, portInfo.ips); err != nil {
-		klog.Errorf(err.Error())
+		return err
 	}
 
 	if config.Gateway.DisableSNATMultipleGWs {
-		if err := deletePerPodGRSNAT(oc.nbClient, pod.Spec.NodeName, []*net.IPNet{}, portInfo.ips); err != nil {
+		if err := deletePerPodGRSNAT(oc.nbClient, pe.NodeName, []*net.IPNet{}, portInfo.ips); err != nil {
 			klog.Errorf(err.Error())
 		}
 	}
-	podNsName := ktypes.NamespacedName{Namespace: pod.Namespace, Name: pod.Name}
+	podNsName := ktypes.NamespacedName{Namespace: pe.Namespace, Name: pe.Name}
 	oc.deleteGWRoutesForPod(podNsName, portInfo.ips)
 
 	oc.logicalPortCache.remove(logicalPort)
-}
-
-func (oc *Controller) waitForNodeLogicalSwitch(nodeName string) (*nbdb.LogicalSwitch, error) {
-	// Wait for the node logical switch to be created by the ClusterController and be present
-	// in libovsdb's cache. The node switch will be created when the node's logical network infrastructure
-	// is created by the node watch
-	ls := &nbdb.LogicalSwitch{Name: nodeName}
-	if err := wait.PollImmediate(30*time.Millisecond, 30*time.Second, func() (bool, error) {
-		if lsUUID, ok := oc.lsManager.GetUUID(nodeName); !ok {
-			return false, fmt.Errorf("error getting logical switch for node %s: %s", nodeName, "switch not in logical switch cache")
-		} else {
-			ls.UUID = lsUUID
-			return true, nil
-		}
-	}); err != nil {
-		return nil, fmt.Errorf("timed out waiting for logical switch in logical switch cache %q subnet: %v", nodeName, err)
-	}
-	return ls, nil
-}
-
-func (oc *Controller) waitForNodeLogicalSwitchInCache(nodeName string) error {
-	// Wait for the node logical switch to be created by the ClusterController.
-	// The node switch will be created when the node's logical network infrastructure
-	// is created by the node watch.
-	var subnets []*net.IPNet
-	if err := wait.PollImmediate(30*time.Millisecond, 30*time.Second, func() (bool, error) {
-		subnets = oc.lsManager.GetSwitchSubnets(nodeName)
-		return subnets != nil, nil
-	}); err != nil {
-		return fmt.Errorf("timed out waiting for logical switch %q subnet: %v", nodeName, err)
-	}
 	return nil
 }
 
@@ -308,9 +525,17 @@ func (oc *Controller) addRoutesGatewayIP(pod *kapi.Pod, podAnnotation *util.PodA
 }
 
 func (oc *Controller) addLogicalPort(pod *kapi.Pod) (err error) {
-	// If a node does node have an assigned hostsubnet don't wait for the logical switch to appear
-	if oc.lsManager.IsNonHostSubnetSwitch(pod.Spec.NodeName) {
-		return nil
+	logicalSwitch := pod.Spec.NodeName
+	nodeSubnets := oc.lsManager.GetSwitchSubnets(logicalSwitch)
+	if len(nodeSubnets) == 0 {
+		// Was either a non-host-subnet node (eg, hybrid overlay) or
+		// the node's switch wasn't set up yet. Try later.
+		return fmt.Errorf("node switch had no assigned OVN subnets; trying again later")
+	}
+
+	lsUUID, ok := oc.lsManager.GetUUID(logicalSwitch)
+	if !ok {
+		return fmt.Errorf("[%s/%s] logical switch %q doesn't exist; trying again later", pod.Namespace, pod.Name, logicalSwitch)
 	}
 
 	// Keep track of how long syncs take.
@@ -318,12 +543,6 @@ func (oc *Controller) addLogicalPort(pod *kapi.Pod) (err error) {
 	defer func() {
 		klog.Infof("[%s/%s] addLogicalPort took %v", pod.Namespace, pod.Name, time.Since(start))
 	}()
-
-	logicalSwitch := pod.Spec.NodeName
-	ls, err := oc.waitForNodeLogicalSwitch(logicalSwitch)
-	if err != nil {
-		return err
-	}
 
 	portName := util.GetLogicalPortName(pod.Namespace, pod.Name)
 	klog.Infof("[%s/%s] creating logical port for pod on switch %s", pod.Namespace, pod.Name, logicalSwitch)
@@ -338,6 +557,7 @@ func (oc *Controller) addLogicalPort(pod *kapi.Pod) (err error) {
 
 	ctx, cancel := context.WithTimeout(context.Background(), ovntypes.OVSDBTimeout)
 	defer cancel()
+
 	// Check if the pod's logical switch port already exists. If it
 	// does don't re-add the port to OVN as this will change its
 	// UUID and and the port cache, address sets, and port groups
@@ -409,9 +629,8 @@ func (oc *Controller) addLogicalPort(pod *kapi.Pod) (err error) {
 		if err = oc.lsManager.AllocateIPs(logicalSwitch, podIfAddrs); err != nil && err != ipallocator.ErrAllocated {
 			return fmt.Errorf("unable to ensure IPs allocated for already annotated pod: %s, IPs: %s, error: %v",
 				pod.Name, util.JoinIPNetIPs(podIfAddrs, " "), err)
-		} else {
-			needsIP = false
 		}
+		needsIP = false
 	}
 
 	if needsIP {
@@ -460,11 +679,6 @@ func (oc *Controller) addLogicalPort(pod *kapi.Pod) (err error) {
 		podAnnotation := util.PodAnnotation{
 			IPs: podIfAddrs,
 			MAC: podMac,
-		}
-		var nodeSubnets []*net.IPNet
-		if nodeSubnets = oc.lsManager.GetSwitchSubnets(logicalSwitch); nodeSubnets == nil {
-			return fmt.Errorf("cannot retrieve subnet for assigning gateway routes for pod %s, node: %s",
-				pod.Name, logicalSwitch)
 		}
 		err = oc.addRoutesGatewayIP(pod, &podAnnotation, nodeSubnets)
 		if err != nil {
@@ -565,6 +779,7 @@ func (oc *Controller) addLogicalPort(pod *kapi.Pod) (err error) {
 		allOps = append(allOps, ops...)
 
 		//add the logical switch port to the logical switch
+		ls := &nbdb.LogicalSwitch{UUID: lsUUID}
 		ops, err = oc.nbClient.Where(ls).Mutate(ls, model.Mutation{
 			Field:   &ls.Ports,
 			Mutator: ovsdb.MutateOperationInsert,
@@ -683,7 +898,11 @@ func (oc *Controller) ovnNBLSPDel(logicalPort, logicalSwitch, lspUUID string) ([
 		ctx, cancel := context.WithTimeout(context.Background(), ovntypes.OVSDBTimeout)
 		defer cancel()
 		if err := oc.nbClient.Get(ctx, lsp); err != nil {
-			return nil, fmt.Errorf("cannot delete logical switch port %s failed retrieving the object %v", logicalPort, err)
+			if err != libovsdbclient.ErrNotFound {
+				return nil, fmt.Errorf("cannot delete logical switch port %s failed retrieving the object %v", logicalPort, err)
+			}
+			// Ignore error and return success if the port is already deleted
+			return nil, nil
 		}
 	}
 
@@ -705,4 +924,14 @@ func (oc *Controller) ovnNBLSPDel(logicalPort, logicalSwitch, lspUUID string) ([
 	allOps = append(allOps, ops...)
 
 	return allOps, nil
+}
+
+func exGatewayAnnotationsChanged(oldPod *podCacheEntry, newPod *kapi.Pod) bool {
+	return oldPod.Annotations[routingNamespaceAnnotation] != newPod.Annotations[routingNamespaceAnnotation] ||
+		oldPod.Annotations[routingNetworkAnnotation] != newPod.Annotations[routingNetworkAnnotation] ||
+		oldPod.Annotations[bfdAnnotation] != newPod.Annotations[bfdAnnotation]
+}
+
+func networkStatusAnnotationsChanged(oldPod *podCacheEntry, newPod *kapi.Pod) bool {
+	return oldPod.Annotations[nettypes.NetworkStatusAnnot] != newPod.Annotations[nettypes.NetworkStatusAnnot]
 }
