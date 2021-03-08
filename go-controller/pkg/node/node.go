@@ -17,19 +17,28 @@ import (
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/factory"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/informer"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/kube"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/node/controllers/upgrade"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
 
 	kapi "k8s.io/api/core/v1"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/labels"
+	"k8s.io/apimachinery/pkg/selection"
 	"k8s.io/apimachinery/pkg/util/wait"
+	"k8s.io/client-go/informers"
 	"k8s.io/client-go/kubernetes"
+	clientset "k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/tools/cache"
 	"k8s.io/client-go/tools/record"
 	"k8s.io/klog/v2"
+	utilnet "k8s.io/utils/net"
 )
 
 // OvnNode is the object holder for utilities meant for node management
 type OvnNode struct {
 	name         string
+	client       clientset.Interface
 	Kube         kube.Interface
 	watchFactory factory.NodeWatchFactory
 	stopChan     chan struct{}
@@ -41,6 +50,7 @@ type OvnNode struct {
 func NewNode(kubeClient kubernetes.Interface, wf factory.NodeWatchFactory, name string, stopChan chan struct{}, eventRecorder record.EventRecorder) *OvnNode {
 	return &OvnNode{
 		name:         name,
+		client:       kubeClient,
 		Kube:         &kube.Kube{KClient: kubeClient},
 		watchFactory: wf,
 		stopChan:     stopChan,
@@ -233,6 +243,69 @@ func (n *OvnNode) Start(wg *sync.WaitGroup) error {
 	go n.gateway.Run(n.stopChan, wg)
 	klog.Infof("Gateway and management port readiness took %v", time.Since(start))
 
+	// Upgrade for Node. If we upgrade workers before masters, then we need to keep service routing via
+	// mgmt port until masters have been updated and modified OVN config. Run a goroutine to handle this case
+	if config.GatewayModeShared == config.Gateway.Mode {
+		// note this will change in the future to control-plane:
+		// https://github.com/kubernetes/kubernetes/pull/95382
+		masterNode, err := labels.NewRequirement("node-role.kubernetes.io/master", selection.Exists, nil)
+		if err != nil {
+			return err
+		}
+
+		labelSelector := labels.NewSelector()
+		labelSelector = labelSelector.Add(*masterNode)
+
+		informerFactory := informers.NewSharedInformerFactoryWithOptions(n.client, 0,
+			informers.WithTweakListOptions(func(options *metav1.ListOptions) {
+				options.LabelSelector = labelSelector.String()
+			}))
+
+		upgradeController := upgrade.NewController(n.Kube, informerFactory.Core().V1().Nodes())
+		initialTopoVersion := upgradeController.GetInitialTopoVersion()
+		bridgeName := n.gateway.GetGatewayBridgeIface()
+		if initialTopoVersion >= types.OvnHostToSvcOFTopoVersion {
+			// We dont need to run any goroutine, can just configure route for svc towards shared gw bridge
+			// Have to have the route to bridge for multi-NIC mode, where the default gateway may go to a non-OVS interface
+			if err := configureSvcRouteViaBridge(bridgeName); err != nil {
+				return err
+			}
+		} else {
+			klog.Info("System may be upgrading, falling back to to legacy K8S Service via mp0")
+			// add back legacy route for service via mp0
+			link, err := util.LinkSetUp(types.K8sMgmtIntfName)
+			if err != nil {
+				return fmt.Errorf("unable to get link for %s, error: %v", types.K8sMgmtIntfName, err)
+			}
+			var gwIP net.IP
+			for _, subnet := range config.Kubernetes.ServiceCIDRs {
+				if utilnet.IsIPv4CIDR(subnet) {
+					gwIP = mgmtPortConfig.ipv4.gwIP
+				} else {
+					gwIP = mgmtPortConfig.ipv6.gwIP
+				}
+				err := util.LinkRoutesAdd(link, gwIP, []*net.IPNet{subnet})
+				if err != nil && !os.IsExist(err) {
+					return fmt.Errorf("unable to add legacy route for services via mp0, error: %v", err)
+				}
+			}
+			// need to run upgrade controller
+			informerStop := make(chan struct{})
+			informerFactory.Start(informerStop)
+			go func() {
+				if err := upgradeController.Run(n.stopChan, informerStop); err != nil {
+					klog.Fatalf("Error while running upgrade controller: %v", err)
+				}
+				// upgrade complete now see what needs upgrading
+				if initialTopoVersion < types.OvnHostToSvcOFTopoVersion {
+					if err := upgradeServiceRoute(bridgeName); err != nil {
+						klog.Fatalf("Failed to upgrade service route for node, error: %v", err)
+					}
+				}
+			}()
+		}
+	}
+
 	if config.HybridOverlay.Enabled {
 		nodeController, err := honode.NewNode(
 			n.Kube,
@@ -330,4 +403,48 @@ func buildEndpointAddressMap(epSubsets []kapi.EndpointSubset) map[epAddressItem]
 	}
 
 	return epMap
+}
+
+func configureSvcRouteViaBridge(bridge string) error {
+	gwIPs, _, err := getGatewayNextHops()
+	if err != nil {
+		return fmt.Errorf("unable to get the gateway next hops, error: %v", err)
+	}
+	link, err := util.LinkSetUp(bridge)
+	if err != nil {
+		return fmt.Errorf("unable to get link for %s, error: %v", bridge, err)
+	}
+	for _, subnet := range config.Kubernetes.ServiceCIDRs {
+		gwIP, err := util.MatchIPFamily(utilnet.IsIPv6CIDR(subnet), gwIPs)
+		if err != nil {
+			return fmt.Errorf("unable to find gateway IP for subnet: %v, found IPs: %v", subnet, gwIPs)
+		}
+		err = util.LinkRoutesAdd(link, gwIP[0], []*net.IPNet{subnet})
+		if err != nil && !os.IsExist(err) {
+			return fmt.Errorf("unable to add route for service via shared gw bridge, error: %v", err)
+		}
+	}
+	return nil
+}
+
+func upgradeServiceRoute(bridgeName string) error {
+	klog.Info("Updating K8S Service route")
+	// Flush old routes
+	link, err := util.LinkSetUp(types.K8sMgmtIntfName)
+	if err != nil {
+		return fmt.Errorf("unable to get link: %s, error: %v", types.K8sMgmtIntfName, err)
+	}
+	if err := util.LinkRoutesDel(link, config.Kubernetes.ServiceCIDRs); err != nil {
+		return fmt.Errorf("unable to delete routes on upgrade, error: %v", err)
+	}
+	// add route via OVS bridge
+	if err := configureSvcRouteViaBridge(bridgeName); err != nil {
+		return fmt.Errorf("unable to add svc route via OVS bridge interface, error: %v", err)
+	}
+	klog.Info("Successfully updated Kubernetes service route towards OVS")
+	// Clean up gw0 and local ovs bridge as best effort
+	if err := deleteLocalNodeAccessBridge(); err != nil {
+		klog.Warningf("Error while removing Local Node Access Bridge, error: %v", err)
+	}
+	return nil
 }

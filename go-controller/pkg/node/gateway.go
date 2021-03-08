@@ -24,6 +24,7 @@ type Gateway interface {
 	informer.ServiceAndEndpointsEventHandler
 	Init(factory.NodeWatchFactory) error
 	Run(<-chan struct{}, *sync.WaitGroup)
+	GetGatewayBridgeIface() string
 }
 
 type gateway struct {
@@ -244,4 +245,8 @@ func gatewayReady(patchPort string) (bool, error) {
 	}
 	klog.Info("Gateway is ready")
 	return true, nil
+}
+
+func (g *gateway) GetGatewayBridgeIface() string {
+	return g.openflowManager.gwBridge
 }

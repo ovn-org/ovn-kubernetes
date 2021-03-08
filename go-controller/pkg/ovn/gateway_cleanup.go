@@ -75,11 +75,11 @@ func gatewayCleanup(nodeName string) error {
 
 	// We don't know the gateway mode as this is running in the master, try to delete the additional local
 	// gateway for the shared gateway mode. it will be no op if this is done for other gateway modes.
-	delPbrAndNatRules(nodeName)
+	delPbrAndNatRules(nodeName, nil)
 	return nil
 }
 
-func delPbrAndNatRules(nodeName string) {
+func delPbrAndNatRules(nodeName string, lrpTypes []string) {
 	// delete the dnat_and_snat entry that we added for the management port IP
 	// Note: we don't need to delete any MAC bindings that are dynamically learned from OVN SB DB
 	// because there will be none since this NAT is only for outbound traffic and not for inbound
@@ -100,7 +100,7 @@ func delPbrAndNatRules(nodeName string) {
 	}
 
 	// delete all logical router policies on ovn_cluster_router
-	removeLRP(nodeName, nil)
+	removeLRPolicies(nodeName, lrpTypes)
 }
 
 func staticRouteCleanup(nextHops []net.IP) {
@@ -239,13 +239,13 @@ func multiJoinSwitchGatewayCleanup(nodeName string, upgradeOnly bool) error {
 
 	// We don't know the gateway mode as this is running in the master, try to delete the additional local
 	// gateway for the shared gateway mode. it will be no op if this is done for other gateway modes.
-	delPbrAndNatRules(nodeName)
+	delPbrAndNatRules(nodeName, nil)
 	return nil
 }
 
 // remove Logical Router Policy on ovn_cluster_router for a specific node.
 // Specify priorities to only delete specific types
-func removeLRP(nodeName string, priorities []string) {
+func removeLRPolicies(nodeName string, priorities []string) {
 	if len(priorities) == 0 {
 		priorities = []string{types.InterNodePolicyPriority, types.NodeSubnetPolicyPriority, types.MGMTPortPolicyPriority}
 	}
@@ -289,4 +289,39 @@ func removeLRP(nodeName string, priorities []string) {
 			}
 		}
 	}
+}
+
+// removes DGP, snat_and_dnat entries, and LRPs
+func cleanupDGP(nodes *kapi.NodeList) error {
+	// remove dnat_snat entries as well as LRPs
+	for _, node := range nodes.Items {
+		delPbrAndNatRules(node.Name, []string{types.InterNodePolicyPriority, types.MGMTPortPolicyPriority})
+	}
+	// remove SBDB MAC bindings for DGP
+	for _, ip := range []string{types.V4NodeLocalNATSubnetNextHop, types.V6NodeLocalNATSubnetNextHop} {
+		uuid, stderr, err := util.RunOVNSbctl("--columns=_uuid", "--no-headings", "find", "mac_binding",
+			fmt.Sprintf(`ip="%s"`, ip))
+		if err != nil {
+			return fmt.Errorf("unable to get DGP MAC binding, err: %v, stderr: %s", err, stderr)
+		}
+		if len(uuid) > 0 {
+			_, stderr, err = util.RunOVNSbctl("destroy", "mac_binding", uuid)
+			if err != nil {
+				return fmt.Errorf("unable to remove mac_binding for DGP, err: %v, stderr: %s", err, stderr)
+			}
+		}
+	}
+	// remove node local switch
+	_, stderr, err := util.RunOVNNbctl("--if-exists", "ls-del", types.NodeLocalSwitch)
+	if err != nil {
+		return fmt.Errorf("unable to remove node local switch, err: %v, stderr: %s", err, stderr)
+	}
+	dgpName := types.RouterToSwitchPrefix + types.NodeLocalSwitch
+
+	// remove lrp on ovn_cluster_router. Will also remove gateway chassis.
+	_, stderr, err = util.RunOVNNbctl("--if-exists", "lrp-del", dgpName)
+	if err != nil {
+		return fmt.Errorf("unable to delete DGP LRP, error: %v, stderr: %s", err, stderr)
+	}
+	return nil
 }

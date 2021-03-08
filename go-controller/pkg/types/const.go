@@ -13,6 +13,9 @@ const (
 	// access to local service
 	LocalNetworkName = "locnet"
 
+	// Local Bridge used for DGP access
+	LocalBridgeName = "br-local"
+
 	// types.OVNClusterRouter is the name of the distributed router
 	OVNClusterRouter = "ovn_cluster_router"
 	OVNJoinSwitch    = "join"
@@ -77,4 +80,14 @@ const (
 	GatewayLBTCP   = "TCP_lb_gateway_router"
 	GatewayLBUDP   = "UDP_lb_gateway_router"
 	GatewayLBSCTP  = "SCTP_lb_gateway_router"
+
+	// OVN-K8S Topology Versions
+	OvnSingleJoinSwitchTopoVersion = 1
+	OvnNamespacedDenyPGTopoVersion = 2
+	OvnHostToSvcOFTopoVersion      = 3
+	OvnCurrentTopologyVersion      = OvnHostToSvcOFTopoVersion
+
+	// OVN-K8S annotation constants
+	OvnK8sPrefix   = "k8s.ovn.org"
+	OvnK8sTopoAnno = OvnK8sPrefix + "/" + "topology-version"
 )
