@@ -458,6 +458,7 @@ kind load docker-image ${OVN_IMAGE} --name ${KIND_CLUSTER_NAME}
 pushd ../dist/yaml
 run_kubectl apply -f k8s.ovn.org_egressfirewalls.yaml
 run_kubectl apply -f k8s.ovn.org_egressips.yaml
+run_kubectl apply -f k8s.ovn.org_dnsobjects.yaml
 run_kubectl apply -f ovn-setup.yaml
 MASTER_NODES=$(kind get nodes --name ${KIND_CLUSTER_NAME} | sort | head -n ${KIND_NUM_MASTER})
 # We want OVN HA not Kubernetes HA

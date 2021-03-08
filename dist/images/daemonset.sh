@@ -345,5 +345,6 @@ net_cidr=${net_cidr} svc_cidr=${svc_cidr} \
 cp ../templates/ovnkube-monitor.yaml.j2 ../yaml/ovnkube-monitor.yaml
 cp ../templates/k8s.ovn.org_egressfirewalls.yaml.j2 ../yaml/k8s.ovn.org_egressfirewalls.yaml
 cp ../templates/k8s.ovn.org_egressips.yaml.j2 ../yaml/k8s.ovn.org_egressips.yaml
+cp ../templates/k8s.ovn.org_dnsobjects.yaml.j2 ../yaml/k8s.ovn.org_dnsobjects.yaml
 
 exit 0
