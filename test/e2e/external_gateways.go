@@ -11,7 +11,7 @@ import (
 	"github.com/onsi/ginkgo"
 	ginkgotable "github.com/onsi/ginkgo/extensions/table"
 	"github.com/onsi/gomega"
-	"golang.org/x/sync/errgroup"
+	v1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/client-go/kubernetes"
@@ -69,10 +69,12 @@ var _ = ginkgo.Describe("e2e non-vxlan external gateway through a gateway pod", 
 				len(nodes.Items))
 		}
 
-		addressesv4, addressesv6 = setupGatewayContainers(f, gwContainer1, gwContainer2, srcPingPodName, externalUDPPort, externalTCPPort, ecmpRetry)
+		addressesv4, addressesv6 = setupGatewayContainers(f, nodes, gwContainer1, gwContainer2, srcPingPodName, externalUDPPort, externalTCPPort, ecmpRetry)
 
-		createGenericPod(f, gatewayPodName1, nodes.Items[0].Name, defaultNamespace, sleepCommand)
-		createGenericPod(f, gatewayPodName2, nodes.Items[1].Name, defaultNamespace, sleepCommand)
+		_, err = createGenericPod(f, gatewayPodName1, nodes.Items[0].Name, defaultNamespace, sleepCommand)
+		framework.ExpectNoError(err)
+		_, err = createGenericPod(f, gatewayPodName2, nodes.Items[1].Name, defaultNamespace, sleepCommand)
+		framework.ExpectNoError(err)
 
 		for i, gwPod := range []string{gatewayPodName1, gatewayPodName2} {
 			networkIPs := fmt.Sprintf("\"%s\"", addressesv4.gatewayIPs[i])
@@ -125,18 +127,19 @@ var _ = ginkgo.Describe("e2e non-vxlan external gateway through a gateway pod", 
 				skipper.Skipf("Skipping as pod ip / node ip are not set pod ip %s node ip %s", addresses.srcPodIP, addresses.nodeIP)
 			}
 
-			g := errgroup.Group{}
+			tcpDumpSync := sync.WaitGroup{}
 			checkPingOnContainer := func(container string) error {
+				defer ginkgo.GinkgoRecover()
+				defer tcpDumpSync.Done()
 				_, err := runCommand("docker", "exec", container, "timeout", "60", "tcpdump", "-c", "1", icmpCommand)
-				if err != nil {
-					return err
-				}
+				framework.ExpectNoError(err, "Failed to detect icmp messages on ", container, srcPingPodName)
 				framework.Logf("ICMP packet successfully detected on gateway %s", container)
 				return nil
 			}
 
-			g.Go(func() error { return checkPingOnContainer(gwContainer1) })
-			g.Go(func() error { return checkPingOnContainer(gwContainer2) })
+			tcpDumpSync.Add(2)
+			go checkPingOnContainer(gwContainer1)
+			go checkPingOnContainer(gwContainer2)
 
 			pingSync := sync.WaitGroup{}
 			// Verify the external gateway loopback address running on the external container is reachable and
@@ -152,8 +155,7 @@ var _ = ginkgo.Describe("e2e non-vxlan external gateway through a gateway pod", 
 				}(t)
 			}
 			pingSync.Wait()
-			err := g.Wait()
-			framework.ExpectNoError(err, "failed to reach the mock gateway(s)")
+			tcpDumpSync.Wait()
 		},
 		ginkgotable.Entry("ipv4", &addressesv4, "icmp"),
 		ginkgotable.Entry("ipv6", &addressesv6, "icmp6"))
@@ -237,7 +239,15 @@ var _ = ginkgo.Describe("e2e multiple external gateway validation", func() {
 	var addressesv4, addressesv6 gatewayTestIPs
 
 	ginkgo.BeforeEach(func() {
-		addressesv4, addressesv6 = setupGatewayContainers(f, gwContainer1, gwContainer2, srcPodName, externalUDPPort, externalTCPPort, ecmpRetry)
+		// retrieve worker node names
+		nodes, err := e2enode.GetBoundedReadySchedulableNodes(f.ClientSet, 3)
+		framework.ExpectNoError(err)
+		if len(nodes.Items) < 3 {
+			framework.Failf(
+				"Test requires >= 3 Ready nodes, but there are only %v nodes",
+				len(nodes.Items))
+		}
+		addressesv4, addressesv6 = setupGatewayContainers(f, nodes, gwContainer1, gwContainer2, srcPodName, externalUDPPort, externalTCPPort, ecmpRetry)
 
 		// remove the routing external annotation
 		annotateArgs := []string{
@@ -282,18 +292,20 @@ var _ = ginkgo.Describe("e2e multiple external gateway validation", func() {
 		// test if a packet to the loopback is not received within the timer interval.
 		// If an ICMP packet is never detected, return the error via the specified chanel.
 
-		g := errgroup.Group{}
+		tcpDumpSync := sync.WaitGroup{}
+
 		checkPingOnContainer := func(container string) error {
-			_, err := runCommand("docker", "exec", container, "timeout", testTimeout, "tcpdump", "-c", "1", icmpToDump)
-			if err != nil {
-				return err
-			}
+			defer ginkgo.GinkgoRecover()
+			defer tcpDumpSync.Done()
+			_, err := runCommand("docker", "exec", container, "timeout", "60", "tcpdump", "-c", "1", icmpToDump)
+			framework.ExpectNoError(err, "Failed to detect icmp messages on ", container, srcPodName)
 			framework.Logf("ICMP packet successfully detected on gateway %s", container)
 			return nil
 		}
 
-		g.Go(func() error { return checkPingOnContainer(gwContainer1) })
-		g.Go(func() error { return checkPingOnContainer(gwContainer2) })
+		tcpDumpSync.Add(2)
+		go checkPingOnContainer(gwContainer1)
+		go checkPingOnContainer(gwContainer2)
 
 		pingSync := sync.WaitGroup{}
 
@@ -311,8 +323,7 @@ var _ = ginkgo.Describe("e2e multiple external gateway validation", func() {
 			}(address)
 		}
 		pingSync.Wait()
-		err := g.Wait()
-		framework.ExpectNoError(err, "failed to reach the mock gateway(s)")
+		tcpDumpSync.Wait()
 	}, ginkgotable.Entry("IPV4", &addressesv4, "icmp"),
 		ginkgotable.Entry("IPV6", &addressesv6, "icmp6"))
 
@@ -382,17 +393,9 @@ var _ = ginkgo.Describe("e2e multiple external gateway validation", func() {
 
 // setupGatewayContainers sets up external containers, adds routes to the nodes, sets up listeners.
 // All its needed for namespace / pod gateway tests.
-func setupGatewayContainers(f *framework.Framework, gwContainer1, gwContainer2, srcPodName string, updPort, tcpPort, numOfIPs int) (gatewayTestIPs, gatewayTestIPs) {
+func setupGatewayContainers(f *framework.Framework, nodes *v1.NodeList, gwContainer1, gwContainer2, srcPodName string, updPort, tcpPort, numOfIPs int) (gatewayTestIPs, gatewayTestIPs) {
 	addressesv4 := gatewayTestIPs{targetIPs: make([]string, 0)}
 	addressesv6 := gatewayTestIPs{targetIPs: make([]string, 0)}
-	// retrieve worker node names
-	nodes, err := e2enode.GetBoundedReadySchedulableNodes(f.ClientSet, 3)
-	framework.ExpectNoError(err)
-	if len(nodes.Items) < 3 {
-		framework.Failf(
-			"Test requires >= 3 Ready nodes, but there are only %v nodes",
-			len(nodes.Items))
-	}
 
 	ginkgo.By("Creating the gateway containers for the icmp test")
 	addressesv4.gatewayIPs[0], addressesv6.gatewayIPs[0] = createClusterExternalContainer(gwContainer1, "centos/tools", []string{"-itd", "--privileged", "--network", ciNetworkName}, []string{})
