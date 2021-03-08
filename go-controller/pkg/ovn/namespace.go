@@ -2,11 +2,11 @@ package ovn
 
 import (
 	"fmt"
-	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
 	"net"
 	"strings"
 	"time"
 
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
 	addressset "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/address_set"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
 
@@ -21,6 +21,7 @@ const (
 	routingExternalGWsAnnotation = "k8s.ovn.org/routing-external-gws"
 	routingNamespaceAnnotation   = "k8s.ovn.org/routing-namespaces"
 	routingNetworkAnnotation     = "k8s.ovn.org/routing-network"
+	bfdAnnotation                = "k8s.ovn.org/bfd-enabled"
 	// Annotation for enabling ACL logging to controller's log file
 	aclLoggingAnnotation = "k8s.ovn.org/acl-logging"
 )
@@ -191,14 +192,17 @@ func (oc *Controller) AddNamespace(ns *kapi.Namespace) {
 	defer nsInfo.Unlock()
 
 	var err error
-	annotation := ns.Annotations[routingExternalGWsAnnotation]
-	if annotation != "" {
-		nsInfo.routingExternalGWs, err = parseRoutingExternalGWAnnotation(annotation)
+	if annotation, ok := ns.Annotations[routingExternalGWsAnnotation]; ok {
+		nsInfo.routingExternalGWs.gws, err = parseRoutingExternalGWAnnotation(annotation)
 		if err != nil {
 			klog.Errorf(err.Error())
 		}
+		if _, ok := ns.Annotations[bfdAnnotation]; ok {
+			nsInfo.routingExternalGWs.bfdEnabled = true
+		}
 	}
-	annotation = ns.Annotations[aclLoggingAnnotation]
+
+	annotation := ns.Annotations[aclLoggingAnnotation]
 	if annotation != "" {
 		if oc.aclLoggingCanEnable(annotation, nsInfo) {
 			klog.Infof("Namespace %s: ACL logging is set to deny=%s allow=%s", ns.Name, nsInfo.aclLogging.Deny, nsInfo.aclLogging.Allow)
@@ -229,13 +233,15 @@ func (oc *Controller) updateNamespace(old, newer *kapi.Namespace) {
 	}
 	defer nsInfo.Unlock()
 
-	var annotation, oldAnnotation string
-	annotation = newer.Annotations[routingExternalGWsAnnotation]
-	oldAnnotation = old.Annotations[routingExternalGWsAnnotation]
-	if annotation != oldAnnotation {
+	gwAnnotation := newer.Annotations[routingExternalGWsAnnotation]
+	oldGWAnnotation := old.Annotations[routingExternalGWsAnnotation]
+	_, newBFDEnabled := newer.Annotations[bfdAnnotation]
+	_, oldBFDEnabled := old.Annotations[bfdAnnotation]
+
+	if gwAnnotation != oldGWAnnotation || newBFDEnabled != oldBFDEnabled {
 		// if old gw annotation was empty, new one must not be empty, so we should remove any per pod SNAT
-		if oldAnnotation == "" {
-			if config.Gateway.DisableSNATMultipleGWs && (len(nsInfo.routingExternalGWs) != 0 || len(nsInfo.routingExternalPodGWs) != 0) {
+		if oldGWAnnotation == "" {
+			if config.Gateway.DisableSNATMultipleGWs && (len(nsInfo.routingExternalGWs.gws) != 0 || len(nsInfo.routingExternalPodGWs) != 0) {
 				existingPods, err := oc.watchFactory.GetPods(old.Name)
 				if err != nil {
 					klog.Errorf("Failed to get all the pods (%v)", err)
@@ -253,18 +259,18 @@ func (oc *Controller) updateNamespace(old, newer *kapi.Namespace) {
 		} else {
 			oc.deleteGWRoutesForNamespace(nsInfo)
 		}
-		exGateways, err := parseRoutingExternalGWAnnotation(annotation)
+		exGateways, err := parseRoutingExternalGWAnnotation(gwAnnotation)
 		if err != nil {
 			klog.Error(err.Error())
 		} else {
-			err = oc.addExternalGWsForNamespace(exGateways, nsInfo, old.Name)
+			err = oc.addExternalGWsForNamespace(gatewayInfo{gws: exGateways, bfdEnabled: newBFDEnabled}, nsInfo, old.Name)
 			if err != nil {
 				klog.Error(err.Error())
 			}
 		}
 		// if new annotation is empty, exgws were removed, may need to add SNAT per pod
 		// check if there are any pod gateways serving this namespace as well
-		if annotation == "" && len(nsInfo.routingExternalPodGWs) == 0 && config.Gateway.DisableSNATMultipleGWs {
+		if gwAnnotation == "" && len(nsInfo.routingExternalPodGWs) == 0 && config.Gateway.DisableSNATMultipleGWs {
 			existingPods, err := oc.watchFactory.GetPods(old.Name)
 			if err != nil {
 				klog.Errorf("Failed to get all the pods (%v)", err)
@@ -281,10 +287,10 @@ func (oc *Controller) updateNamespace(old, newer *kapi.Namespace) {
 			}
 		}
 	}
-	annotation = newer.Annotations[aclLoggingAnnotation]
-	oldAnnotation = old.Annotations[aclLoggingAnnotation]
+	aclAnnotation := newer.Annotations[aclLoggingAnnotation]
+	oldACLAnnotation := old.Annotations[aclLoggingAnnotation]
 	// support for ACL logging update, if new annotation is empty, make sure we propagate new setting
-	if annotation != oldAnnotation && (oc.aclLoggingCanEnable(annotation, nsInfo) || annotation == "") &&
+	if aclAnnotation != oldACLAnnotation && (oc.aclLoggingCanEnable(aclAnnotation, nsInfo) || aclAnnotation == "") &&
 		len(nsInfo.networkPolicies) > 0 {
 		// deny rules are all one per namespace
 		if err := oc.setACLDenyLogging(old.Name, nsInfo, nsInfo.aclLogging.Deny); err != nil {
@@ -370,7 +376,7 @@ func (oc *Controller) createNamespaceLocked(ns string) *namespaceInfo {
 		networkPolicies:       make(map[string]*networkPolicy),
 		podExternalRoutes:     make(map[string]map[string]string),
 		multicastEnabled:      false,
-		routingExternalPodGWs: make(map[string][]net.IP),
+		routingExternalPodGWs: make(map[string]gatewayInfo),
 	}
 	nsInfo.Lock()
 	oc.namespaces[ns] = nsInfo

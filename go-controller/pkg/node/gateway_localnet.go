@@ -495,6 +495,18 @@ func newLocalGatewayOpenflowManager(patchPort, macAddress, gwBridge, gwIntf stri
 				fmt.Sprintf("cookie=%s, priority=14, table=1,icmp6,icmpv6_type=%d actions=FLOOD",
 					defaultOpenFlowCookie, icmpType))
 		}
+
+		// We send BFD traffic both on the host and in ovn
+		dftFlows = append(dftFlows,
+			fmt.Sprintf("cookie=%s, priority=13, table=1, in_port=%s, udp6, tp_dst=3784, actions=output:%s,output:LOCAL",
+				defaultOpenFlowCookie, ofportPhys, ofportPatch))
+	}
+
+	if config.IPv4Mode {
+		// We send BFD traffic both on the host and in ovn
+		dftFlows = append(dftFlows,
+			fmt.Sprintf("cookie=%s, priority=13, table=1, in_port=%s, udp, tp_dst=3784, actions=output:%s,output:LOCAL",
+				defaultOpenFlowCookie, ofportPhys, ofportPatch))
 	}
 
 	// table 1, we check to see if this dest mac is the shared mac, if so send to host
