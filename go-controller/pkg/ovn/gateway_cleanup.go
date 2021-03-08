@@ -99,38 +99,8 @@ func delPbrAndNatRules(nodeName string) {
 		}
 	}
 
-	// find the pbr rules associated with the node and delete them
-	matches, stderr, err := util.RunOVNNbctl("--data=bare", "--no-heading", "--columns=match",
-		"find", "logical_router_policy")
-	if err != nil {
-		klog.Errorf("Failed to fetch the policy route for the node subnet "+
-			"stdout: %s, stderr: %s, error: %v", matches, stderr, err)
-		matches = ""
-	}
-	// matches inport for a policy, must use ending quote to substring match to avoid matching other nodes accidentally
-	// i.e. rtos-ovn-worker would match rtos-ovn-worker2
-	nodeSubnetMatchSubStr := fmt.Sprintf("%s%s\"", types.RouterToSwitchPrefix, nodeName)
-	// for inter node, match the comment in the policy, and include extra space to avoid accidental submatch
-	interNodeMatchSubStr := fmt.Sprintf("%s%s ", types.InterPrefix, nodeName)
-	// mgmt port policy matches node name in comment, use extra spaces to avoid accidental match of other nodes
-	mgmtPortPolicyMatchSubStr := fmt.Sprintf(" %s ", nodeName)
-	for _, match := range strings.Split(matches, "\n\n") {
-		var priority string
-		if strings.Contains(match, nodeSubnetMatchSubStr) {
-			priority = types.NodeSubnetPolicyPriority
-		} else if strings.Contains(match, interNodeMatchSubStr) {
-			priority = types.InterNodePolicyPriority
-		} else if strings.Contains(match, mgmtPortPolicyMatchSubStr) {
-			priority = types.MGMTPortPolicyPriority
-		} else {
-			continue
-		}
-		_, stderr, err = util.RunOVNNbctl("lr-policy-del", types.OVNClusterRouter, priority, match)
-		if err != nil {
-			klog.Errorf("Failed to remove the policy routes (%s, %s) associated with the node %s: stderr: %s, error: %v",
-				priority, match, nodeName, stderr, err)
-		}
-	}
+	// delete all logical router policies on ovn_cluster_router
+	removeLRP(nodeName, nil)
 }
 
 func staticRouteCleanup(nextHops []net.IP) {
@@ -271,4 +241,52 @@ func multiJoinSwitchGatewayCleanup(nodeName string, upgradeOnly bool) error {
 	// gateway for the shared gateway mode. it will be no op if this is done for other gateway modes.
 	delPbrAndNatRules(nodeName)
 	return nil
+}
+
+// remove Logical Router Policy on ovn_cluster_router for a specific node.
+// Specify priorities to only delete specific types
+func removeLRP(nodeName string, priorities []string) {
+	if len(priorities) == 0 {
+		priorities = []string{types.InterNodePolicyPriority, types.NodeSubnetPolicyPriority, types.MGMTPortPolicyPriority}
+	}
+
+	// find the pbr rules associated with the node and delete them
+	matches, stderr, err := util.RunOVNNbctl("--data=bare", "--no-heading", "--columns=match",
+		"find", "logical_router_policy")
+	if err != nil {
+		klog.Errorf("Failed to fetch the policy route for the node subnet "+
+			"stdout: %s, stderr: %s, error: %v", matches, stderr, err)
+		matches = ""
+	}
+
+	// matches inport for a policy, must use ending quote to substring match to avoid matching other nodes accidentally
+	// i.e. rtos-ovn-worker would match rtos-ovn-worker2
+	nodeSubnetMatchSubStr := fmt.Sprintf("%s%s\"", types.RouterToSwitchPrefix, nodeName)
+	// for inter node, match the comment in the policy, and include extra space to avoid accidental submatch
+	interNodeMatchSubStr := fmt.Sprintf("%s%s ", types.InterPrefix, nodeName)
+	// mgmt port policy matches node name in comment, use extra spaces to avoid accidental match of other nodes
+	mgmtPortPolicyMatchSubStr := fmt.Sprintf(" %s ", nodeName)
+	for _, match := range strings.Split(matches, "\n\n") {
+		var priority string
+		if strings.Contains(match, nodeSubnetMatchSubStr) {
+			priority = types.NodeSubnetPolicyPriority
+		} else if strings.Contains(match, interNodeMatchSubStr) {
+			priority = types.InterNodePolicyPriority
+		} else if strings.Contains(match, mgmtPortPolicyMatchSubStr) {
+			priority = types.MGMTPortPolicyPriority
+		} else {
+			continue
+		}
+
+		for _, pri := range priorities {
+			if pri == priority {
+				_, stderr, err = util.RunOVNNbctl("lr-policy-del", types.OVNClusterRouter, priority, match)
+				if err != nil {
+					klog.Errorf("Failed to remove the policy routes (%s, %s) associated with the node %s: stderr: %s, error: %v",
+						priority, match, nodeName, stderr, err)
+				}
+				break
+			}
+		}
+	}
 }
