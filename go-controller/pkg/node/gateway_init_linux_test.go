@@ -26,6 +26,7 @@ import (
 	"github.com/containernetworking/plugins/pkg/testutils"
 	"github.com/vishvananda/netlink"
 
+	dnsobjectfake "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/dnsobject/v1/apis/clientset/versioned/fake"
 	egressfirewallfake "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/egressfirewall/v1/apis/clientset/versioned/fake"
 	egressipfake "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/egressip/v1/apis/clientset/versioned/fake"
 	apiextensionsfake "k8s.io/apiextensions-apiserver/pkg/client/clientset/clientset/fake"
@@ -161,11 +162,13 @@ func shareGatewayInterfaceTest(app *cli.App, testNS ns.NetNS,
 		})
 		egressFirewallFakeClient := &egressfirewallfake.Clientset{}
 		crdFakeClient := &apiextensionsfake.Clientset{}
+		dnsObjectFakeClient := &dnsobjectfake.Clientset{}
 		egressIPFakeClient := &egressipfake.Clientset{}
 		fakeClient := &util.OVNClientset{
 			KubeClient:           kubeFakeClient,
 			EgressIPClient:       egressIPFakeClient,
 			EgressFirewallClient: egressFirewallFakeClient,
+			DNSObjectClient:      dnsObjectFakeClient,
 			APIExtensionsClient:  crdFakeClient,
 		}
 
@@ -178,7 +181,7 @@ func shareGatewayInterfaceTest(app *cli.App, testNS ns.NetNS,
 			wf.Shutdown()
 		}()
 
-		k := &kube.Kube{fakeClient.KubeClient, egressIPFakeClient, egressFirewallFakeClient}
+		k := &kube.Kube{fakeClient.KubeClient, egressIPFakeClient, egressFirewallFakeClient, dnsObjectFakeClient}
 
 		iptV4, iptV6 := util.SetFakeIPTablesHelpers()
 

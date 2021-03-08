@@ -25,6 +25,8 @@ import (
 	dnsobjectclientset "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/dnsobject/v1/apis/clientset/versioned"
 	dnsobjectscheme "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/dnsobject/v1/apis/clientset/versioned/scheme"
 	dnsobjectinformerfactory "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/dnsobject/v1/apis/informers/externalversions"
+	dnsobjectlister "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/dnsobject/v1/apis/listers/dnsobject/v1"
+
 	apiextensionslister "k8s.io/apiextensions-apiserver/pkg/client/listers/apiextensions/v1"
 
 	kapi "k8s.io/api/core/v1"
@@ -199,12 +201,13 @@ func NewMasterWatchFactory(ovnClientset *util.OVNClientset) (*WatchFactory, erro
 // informers to save memory + bandwidth. It is to be used by the node-only process.
 func NewNodeWatchFactory(ovnClientset *util.OVNClientset, nodeName string) (*WatchFactory, error) {
 	wf := &WatchFactory{
-		iFactory:    informerfactory.NewSharedInformerFactory(ovnClientset.KubeClient, resyncInterval),
-		eipFactory:  egressipinformerfactory.NewSharedInformerFactory(ovnClientset.EgressIPClient, resyncInterval),
-		efClientset: ovnClientset.EgressFirewallClient,
-		crdFactory:  apiextensionsinformerfactory.NewSharedInformerFactory(ovnClientset.APIExtensionsClient, resyncInterval),
-		informers:   make(map[reflect.Type]*informer),
-		stopChan:    make(chan struct{}),
+		iFactory:           informerfactory.NewSharedInformerFactory(ovnClientset.KubeClient, resyncInterval),
+		eipFactory:         egressipinformerfactory.NewSharedInformerFactory(ovnClientset.EgressIPClient, resyncInterval),
+		efClientset:        ovnClientset.EgressFirewallClient,
+		crdFactory:         apiextensionsinformerfactory.NewSharedInformerFactory(ovnClientset.APIExtensionsClient, resyncInterval),
+		dnsObjectClientset: ovnClientset.DNSObjectClient,
+		informers:          make(map[reflect.Type]*informer),
+		stopChan:           make(chan struct{}),
 	}
 	// For Services and Endpoints, pre-populate the shared Informer with one that
 	// has a label selector excluding headless services.
@@ -239,6 +242,17 @@ func NewNodeWatchFactory(ovnClientset *util.OVNClientset, nodeName string) (*Wat
 	})
 
 	var err error
+	err = apiextensionsapi.AddToScheme(apiextensionsscheme.Scheme)
+	if err != nil {
+		return nil, err
+	}
+	if err != nil {
+		return nil, err
+	}
+	wf.informers[crdType], err = newInformer(crdType, wf.crdFactory.Apiextensions().V1().CustomResourceDefinitions().Informer())
+	if err != nil {
+		return nil, err
+	}
 	wf.informers[podType], err = newQueuedInformer(podType, wf.iFactory.Core().V1().Pods().Informer(), wf.stopChan)
 	if err != nil {
 		return nil, err
@@ -259,6 +273,12 @@ func NewNodeWatchFactory(ovnClientset *util.OVNClientset, nodeName string) (*Wat
 
 	wf.iFactory.Start(wf.stopChan)
 	for oType, synced := range wf.iFactory.WaitForCacheSync(wf.stopChan) {
+		if !synced {
+			return nil, fmt.Errorf("error in syncing cache for %v informer", oType)
+		}
+	}
+	wf.crdFactory.Start(wf.stopChan)
+	for oType, synced := range wf.crdFactory.WaitForCacheSync(wf.stopChan) {
 		if !synced {
 			return nil, fmt.Errorf("error in syncing cache for %v informer", oType)
 		}
@@ -591,6 +611,11 @@ func (wf *WatchFactory) GetNamespaces() ([]*kapi.Namespace, error) {
 func (wf *WatchFactory) GetCRDS() ([]*apiextensionsapi.CustomResourceDefinition, error) {
 	crdLister := wf.informers[crdType].lister.(apiextensionslister.CustomResourceDefinitionLister)
 	return crdLister.List(labels.Everything())
+}
+
+func (wf *WatchFactory) GetDNSObject(name string) (*dnsobjectapi.DNSObject, error) {
+	dnsObjectLister := wf.informers[dnsObjectType].lister.(dnsobjectlister.DNSObjectLister)
+	return dnsObjectLister.Get(name)
 }
 
 func (wf *WatchFactory) NodeInformer() cache.SharedIndexInformer {
